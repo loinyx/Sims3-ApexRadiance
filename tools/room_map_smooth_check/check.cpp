@@ -8,12 +8,14 @@
 //    slots, arbitrary swizzle; else the game's shader stays, as at run time); the copy differs from the game's only by the
 //    read (one texld fewer, the B-spline block, the defs, ps_2_x for ps_2_0).
 // 3. The vertex shaders paired with them: RoomMapUvScale finds their room map uv scale (1/4096 walls, 1/32767 floors, or a
-//    constant read at the draw).
+//    constant read at the draw); every vs_3_0 floor one writes the lot position the arch copies read from TEXCOORD4.
 // 4. Native D3D9 pixels: a synthetic shader of the pattern, patched, over a texture of two 7-row bands (a wall atlas at
 //    n = 2): every pixel equals the CPU B-spline with the rows clamped to the pixel's band within 3 LSB, and as one block
 //    (floors) the B-spline with the rows clamped to the texture.
 // 5. Optional capture folders (searched recursively): every distinct pixel shader .bin goes through 1-2.
 // 6. The dither offset: within [-0.5, 0.5], mean about 0 over a map, the same at the same texel.
+// 7. The arch copies' neighbour cube: which game shaders take it, all created natively, and in native pixels the neighbour's cube
+//    on the arch's line, the room's own from the reach on (ArchCubeCheck).
 #define NOMINMAX
 #include <windows.h>
 #include <d3d9.h>
@@ -149,6 +151,7 @@ struct Gpu {
     IDirect3DDevice9* dev = nullptr;
     IDirect3DSurface9 *target = nullptr, *readback = nullptr;
     D3DCAPS9 caps{};
+    float lotSpan = 64.0f, atlasU = -1.0f;
     Gpu() {
         window = CreateWindowExW(0, L"STATIC", L"Apex room map check", WS_OVERLAPPED, 0, 0, 64, 64, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
         api = Direct3DCreate9(D3D_SDK_VERSION);
@@ -193,11 +196,13 @@ struct Gpu {
     // a full-screen quad, TEXCOORD1 = (0, 0) top left .. (1, 1) bottom right (pixel x reads uv (x + 0.5) / 64)
     std::vector<DWORD> Render(IDirect3DPixelShader9* ps) {
         struct Vertex {
-            float x, y, z, rhw, u0, v0, u1, v1;
+            float x, y, z, rhw, u0, v0, u1, v1, u2, v2, u3, v3, u4, v4;
         };
-        const Vertex q[4] = {{-0.5f, -0.5f, 0, 1, 0, 0, 0, 0}, {63.5f, -0.5f, 0, 1, 1, 0, 1, 0}, {-0.5f, 63.5f, 0, 1, 0, 1, 0, 1}, {63.5f, 63.5f, 0, 1, 1, 1, 1, 1}};
+        const float Ox = 1.0f / 1024.0f, Oy = 1.0f / 512.0f, L = lotSpan / 64.0f, A = atlasU, B = atlasU >= 0 ? 0.03f : 0.0f;
+        const float U0 = A >= 0 ? A : 0, U1 = A >= 0 ? A : 1, V0 = A >= 0 ? B : 0, V1 = A >= 0 ? B : 1;
+        const Vertex q[4] = {{-0.5f, -0.5f, 0, 1, 0, 0, U0, V0, 0, 0, 0, 0, Ox, Oy}, {63.5f, -0.5f, 0, 1, 1, 0, U1, V0, 0, 0, 0, 0, L + Ox, Oy}, {-0.5f, 63.5f, 0, 1, 0, 1, U0, V1, 0, 0, 0, 0, Ox, L + Oy}, {63.5f, 63.5f, 0, 1, 1, 1, U1, V1, 0, 0, 0, 0, L + Ox, L + Oy}};
         dev->SetVertexShader(nullptr);
-        dev->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX2);
+        dev->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX5);
         dev->SetPixelShader(ps);
         dev->BeginScene();
         Check(SUCCEEDED(dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, q, sizeof(Vertex))), "test quad draw");
@@ -225,9 +230,32 @@ std::vector<DWORD> Compile(const char* src, const char* profile) {
 }
 
 struct PatchStats {
-    int matched = 0, patched = 0, disasmOk = 0, created = 0, capsRefused = 0, texldOk = 0, combined = 0, combinedCreated = 0, arch = 0, archCreated = 0, walls = 0, wallsCreated = 0;
+    int matched = 0, patched = 0, disasmOk = 0, created = 0, capsRefused = 0, texldOk = 0, combined = 0, combinedCreated = 0, arch = 0, archCreated = 0, walls = 0, wallsCreated = 0, archCube = 0, archCubeKept = 0, archMaxTemps = 0;
 };
+// A copy with the neighbour's cube: the second cube sampler, read once, before the room's own (whose coordinate may be its destination)
+void CheckArchCube(const std::vector<DWORD>& t, const ShaderPatches::RoomMapPatch& p, PatchStats& st) {
+    st.archMaxTemps = std::max(st.archMaxTemps, p.temps);
+    const std::string d = Disasm(t);
+    if (p.nbCubeSampler < 0) {
+        st.archCubeKept += CountOf(d, "dcl_cube") > 0;
+        return;
+    }
+    st.archCube++;
+    const std::string nb = ", s" + std::to_string(p.nbCubeSampler), own = ", s" + std::to_string(p.cubeSampler);
+    Check(p.cubeSampler >= 0 && p.temps <= 32 && p.nbCubeSampler < 16, "the arch copy's cube samplers and temps");
+    Check(CountOf(d, ("dcl_cube s" + std::to_string(p.nbCubeSampler)).c_str()) == 1 && CountOf(d, nb.c_str()) == 1, "the neighbour's cube: declared a cube, read once");
+    Check(d.find(nb) < d.find(own), "the neighbour's cube is read before the room's own");
+}
 // one match: patch it and check the copy
+// An arch copy: one dcl_texcoord4, of the whole register, and the block's first mad reads it
+bool ReadsLotInput(const std::vector<DWORD>& t) {
+    const std::string d = Disasm(t), dcl = "dcl_texcoord4 ";
+    const size_t at = d.find(dcl);
+    if (at == std::string::npos || d.find(dcl, at + 1) != std::string::npos) return false;
+    const size_t from = at + dcl.size(), end = d.find_first_of(" .\r\n", from);
+    return end != std::string::npos && d[end] != '.' && d.find(".xy, " + d.substr(from, end - from) + ".xyxy, c") != std::string::npos;
+}
+
 void CheckPatch(const std::vector<DWORD>& code, Gpu& gpu, PatchStats& st, const char* where) {
     std::vector<DWORD> t = code;
     ShaderPatches::RoomMapPatch p;
@@ -262,15 +290,18 @@ void CheckPatch(const std::vector<DWORD>& code, Gpu& gpu, PatchStats& st, const 
             Check(made, "native D3D9 creates the combined copy");
         }
     }
-    // (arch_ambient) the copy with the neighbours' ambient near arches, alone and with the basis maps: native too (ps_3_0)
+    // (arch_ambient) the copy with the neighbours' ambient near arches, alone and with the basis maps: native too (ps_3_0),
+    // TEXCOORD4 declared once, whole, and read for the lot position
     if (code[0] == 0xFFFF0300 && gpu.dev) {
         std::vector<DWORD> a = code;
         ShaderPatches::RoomMapPatch ap;
         if (ShaderPatches::PatchRoomMapSmooth(a, ap, true) && ap.archConst >= 0) {
             st.arch++;
+            Check(ReadsLotInput(a), "the arch copy reads the lot position from one whole TEXCOORD4");
             const bool made = gpu.AcceptsPs(a);
             st.archCreated += made;
             Check(made, "native D3D9 creates the copy with the arch ambient");
+            CheckArchCube(a, ap, st);
         }
         int bs[4];
         if (ShaderPatches::BasisSamplers(code, bs)) {
@@ -279,9 +310,23 @@ void CheckPatch(const std::vector<DWORD>& code, Gpu& gpu, PatchStats& st, const 
             ShaderPatches::RoomMapPatch rp;
             if (ShaderPatches::PatchBasisSmooth(both, bp, {.preserveShadows = true}) && ShaderPatches::PatchRoomMapSmooth(both, rp, true) && rp.archConst >= 0) {
                 st.arch++;
+                Check(ReadsLotInput(both), "the combined arch copy reads the lot position from one whole TEXCOORD4");
                 const bool made = gpu.AcceptsPs(both);
                 st.archCreated += made;
                 Check(made, "native D3D9 creates the combined copy with the arch ambient");
+                CheckArchCube(both, rp, st);
+            }
+            // and with the wall mask (lot_light_bridge's "aw" copy: its mask sampler comes first)
+            std::vector<DWORD> aw = code;
+            ShaderPatches::BasisSmoothPatch wp;
+            ShaderPatches::RoomMapPatch wr;
+            if (ShaderPatches::PatchBasisSmooth(aw, wp, {.preserveShadows = true, .wallMask = true}) && ShaderPatches::PatchRoomMapSmooth(aw, wr, true) && wr.archConst >= 0) {
+                st.arch++;
+                Check(ReadsLotInput(aw) && wr.nbCubeSampler != wp.maskSampler, "the arch copy with the walls: lot position read, samplers apart");
+                const bool made = gpu.AcceptsPs(aw);
+                st.archCreated += made;
+                Check(made, "native D3D9 creates the combined copy with the walls and the arch ambient");
+                CheckArchCube(aw, wr, st);
             }
         }
     }
@@ -938,13 +983,16 @@ void PixelCheck(Gpu& gpu) {
     Release(ps);
 }
 
-// The arch ambient (arch_ambient): a floor map of 64 x 64 texels = 16 x 16 m, black with full ambient weight, the room's
-// ambient 0.1 grey, an arch on the line x = 8 m whose room's ambient is 0.2 more red: the GPU adds alpha x 0.2 x w(d) to red,
-// w the CPU's ArchAmbient::Weight, and nothing to green and blue
-void ArchPixelCheck(Gpu& gpu) {
+// The arch ambient (arch_ambient): a floor map of 64 x 64 texels, black with full ambient weight, the room's ambient 0.1 grey, an
+// arch on the line x = 8 m whose room's ambient is 0.2 more red: the GPU adds alpha x 0.2 x w(d) to red, w the CPU's
+// ArchAmbient::Weight, and nothing to green and blue. lotM: the metres the quad's TEXCOORD4 spans, whatever the map's uv reads:
+// 16 at the game's 4 texels a metre, 64 for a 1024 map at 16 texels a metre (n = 8, s = 2: 1024 / 16). declared: the game's
+// shader already has TEXCOORD4.xy (many floors do), so the copy widens that input and adds none
+void ArchPixelCheck(Gpu& gpu, float lotM, float reach = ArchAmbient::kReach, bool declared = false) {
     if (!gpu.dev) return;
     // the game's pattern in ps_3_0 (the HLSL compiler writes that mad straight to oC0): assembled
-    const char* asmSrc = "ps_3_0\ndcl_texcoord1 v0.xy\ndcl_2d s0\ntexld r0, v0, s0\nmad r0.xyz, r0.w, c0, r0\nmov oC0, r0\n";
+    const char* asmSrc = declared ? "ps_3_0\ndcl_texcoord1 v0.xy\ndcl_texcoord4 v1.xy\ndcl_2d s0\ntexld r0, v0, s0\nmad r0.xyz, r0.w, c0, r0\nmov oC0, r0\n"
+                                  : "ps_3_0\ndcl_texcoord1 v0.xy\ndcl_2d s0\ntexld r0, v0, s0\nmad r0.xyz, r0.w, c0, r0\nmov oC0, r0\n";
     std::vector<DWORD> code;
     {
         using Assemble = HRESULT(WINAPI*)(LPCVOID, SIZE_T, LPCSTR, const D3D_SHADER_MACRO*, ID3DInclude*, UINT, ID3DBlob**, ID3DBlob**);
@@ -967,6 +1015,7 @@ void ArchPixelCheck(Gpu& gpu) {
         return;
     }
     IDirect3DPixelShader9* ps = nullptr;
+    Check(ReadsLotInput(t), "the synthetic arch copy reads the lot position from one whole TEXCOORD4");
     Check(SUCCEEDED(gpu.dev->CreatePixelShader(t.data(), &ps)), "the arch copy is created");
     IDirect3DTexture9* tex = nullptr;
     gpu.dev->CreateTexture(64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex, nullptr);
@@ -990,34 +1039,174 @@ void ArchPixelCheck(Gpu& gpu) {
     gpu.dev->SetPixelShaderConstantF(0, amb, 1);
     gpu.dev->SetPixelShaderConstantF(p.sizeConst, size, 1);
     gpu.dev->SetPixelShaderConstantF(p.bandConst, band, 1);
-    float arch[2 * ShaderPatches::kArchCells * 4] = {};
+    float arch[ShaderPatches::kArchRows * 4] = {};
+    gpu.lotSpan = lotM;
+    const auto scale = [&] { float* s = arch + 2 * ShaderPatches::kArchCells * 4; s[0] = s[1] = 64.0f, s[2] = -1.0f / 16.0f, s[3] = -1.0f / 8.0f, arch[(2 * ShaderPatches::kArchCells + 1) * 4] = 1.0f / reach; };
+    scale();
     // the arch from (8, 2) to (8, 14): seg (a.x, a.z, e.x, e.z), D (0.2, 0, 0, 1 / |e|^2)
     arch[0] = 8.0f, arch[1] = 2.0f, arch[2] = 0.0f, arch[3] = 12.0f;
     arch[4] = 0.2f, arch[5] = 0.0f, arch[6] = 0.0f, arch[7] = 1.0f / 144.0f;
-    gpu.dev->SetPixelShaderConstantF(static_cast<UINT>(p.archConst), arch, 2 * ShaderPatches::kArchCells);
+    gpu.dev->SetPixelShaderConstantF(static_cast<UINT>(p.archConst), arch, ShaderPatches::kArchRows);
     const std::vector<DWORD> px = gpu.Render(ps);
     int worst = 0, gb = 0;
     for (int y = 0; y < 64; y++)
         for (int x = 0; x < 64; x++) {
-            const float lx = (x + 0.5f) / 64.0f * 16.0f, lz = (y + 0.5f) / 64.0f * 16.0f;
-            const float w = ArchAmbient::Weight(ArchAmbient::SegDist(lx, lz, 8.0f, 2.0f, 8.0f, 14.0f));
+            const float lx = (x + 0.5f) / 64.0f * lotM, lz = (y + 0.5f) / 64.0f * lotM;
+            const float w = ArchAmbient::Weight(ArchAmbient::SegDist(lx, lz, 8.0f, 2.0f, 8.0f, 14.0f), reach);
             const float ref = (0.1f + 0.2f * w) * 255.0f;
             const DWORD v = px[static_cast<size_t>(y) * 64 + x];
             worst = std::max(worst, static_cast<int>(std::lround(std::fabs(static_cast<float>((v >> 16) & 0xFF) - ref))));
             gb = std::max({gb, std::abs(static_cast<int>((v >> 8) & 0xFF) - 26), std::abs(static_cast<int>(v & 0xFF) - 26)});
         }
-    std::printf("  arch ambient pixel check: red against the CPU law %d LSB, green and blue off the room's own %d LSB\n", worst, gb);
+    std::printf("  arch ambient pixel check (reach %.2f m): red against the CPU law %d LSB, green and blue off the room's own %d LSB\n", reach, worst, gb);
     Check(worst <= 2, "GPU arch ambient = CPU law (2 LSB)");
     Check(gb <= 1, "only the channel the neighbour has more of is raised");
     // nothing passed (all D = 0): the room's own ambient alone
     std::fill(std::begin(arch), std::end(arch), 0.0f);
-    gpu.dev->SetPixelShaderConstantF(static_cast<UINT>(p.archConst), arch, 2 * ShaderPatches::kArchCells);
+    scale();
+    gpu.dev->SetPixelShaderConstantF(static_cast<UINT>(p.archConst), arch, ShaderPatches::kArchRows);
     const std::vector<DWORD> none = gpu.Render(ps);
     int off = 0;
     for (DWORD v : none) off = std::max({off, std::abs(static_cast<int>((v >> 16) & 0xFF) - 26), std::abs(static_cast<int>((v >> 8) & 0xFF) - 26)});
     Check(off <= 1, "no arch passed: the room's own ambient, unchanged");
     gpu.dev->SetTexture(p.sampler, nullptr);
     Release(tex);
+    Release(ps);
+}
+
+std::vector<DWORD> AssemblePs(const char* src) {
+    using Assemble = HRESULT(WINAPI*)(LPCVOID, SIZE_T, LPCSTR, const D3D_SHADER_MACRO*, ID3DInclude*, UINT, ID3DBlob**, ID3DBlob**);
+    std::vector<DWORD> code;
+    const auto lib = LoadLibraryW(L"d3dcompiler_47.dll");
+    const auto assemble = lib ? reinterpret_cast<Assemble>(GetProcAddress(lib, "D3DAssemble")) : nullptr;
+    ID3DBlob *blob = nullptr, *err = nullptr;
+    if (assemble && SUCCEEDED(assemble(src, std::strlen(src), nullptr, nullptr, nullptr, 0, &blob, &err)) && blob) {
+        code.resize(blob->GetBufferSize() / 4);
+        std::memcpy(code.data(), blob->GetBufferPointer(), blob->GetBufferSize());
+    }
+    Release(blob);
+    Release(err);
+    if (lib) FreeLibrary(lib);
+    return code;
+}
+
+// The neighbour's reflection (ArchAmbient::CubeAt): the game's pattern with a cube read that overwrites its own direction, and the
+// reflection added after the map, a map with no light and no ambient, so the pixels show the cube term alone. An arch on the line
+// through pixel column 31's centres: there the pixels read the neighbour's cube, which is what the room beyond the arch shows with
+// no rows of its own; from the reach on the room's own. The two cubes are solid, red higher in the neighbour's, green in the room's.
+void ArchCubeCheck(Gpu& gpu) {
+    if (!gpu.dev) return;
+    const auto shader = [](const char* reads) {
+        return std::string("ps_3_0\ndef c1, 0, 1, 0, 0\ndcl_texcoord1 v0.xy\ndcl_2d s0\ndcl_cube s1\nmov r1, c1\n") + reads + "mad r0.xyz, r0.w, c0, r0\nadd r0.xyz, r0, r1\nmov oC0, r0\n";
+    };
+    // a shader that cannot take it keeps the arch copy without it: the cube read after the map, or two of them
+    const std::string late = shader("texld r0, v0, s0\ntexld r1, r1, s1\n"), twice = shader("texld r2, r1, s1\ntexld r1, r1, s1\nadd r1, r1, r2\ntexld r0, v0, s0\n");
+    for (const std::string* src : {&late, &twice}) {
+        std::vector<DWORD> t = AssemblePs(src->c_str());
+        ShaderPatches::RoomMapPatch k;
+        Check(!t.empty() && ShaderPatches::PatchRoomMapSmooth(t, k, true) && k.archConst >= 0 && k.nbCubeSampler < 0 && k.cubeSampler < 0, "no cube read the copy can follow: today's arch copy");
+        Check(gpu.AcceptsPs(t), "today's arch copy of such a shader is created");
+    }
+    std::vector<DWORD> t = AssemblePs(shader("texld r1, r1, s1\ntexld r0, v0, s0\n").c_str());
+    ShaderPatches::RoomMapPatch p;
+    if (t.empty() || !ShaderPatches::PatchRoomMapSmooth(t, p, true) || p.nbCubeSampler < 0 || p.cubeSampler != 1) {
+        Check(false, "the synthetic cube shader is patched with the neighbour's cube");
+        return;
+    }
+    IDirect3DPixelShader9* ps = nullptr;
+    Check(SUCCEEDED(gpu.dev->CreatePixelShader(t.data(), &ps)), "the cube arch copy is created");
+    IDirect3DTexture9* map = nullptr;
+    IDirect3DCubeTexture9 *own = nullptr, *nb = nullptr;
+    gpu.dev->CreateTexture(64, 64, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &map, nullptr);
+    const int ownC[3] = {60, 200, 20}, nbC[3] = {220, 40, 20};
+    const auto solid = [&](IDirect3DCubeTexture9*& c, const int rgb[3]) {
+        gpu.dev->CreateCubeTexture(4, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &c, nullptr);
+        if (!c) return;
+        for (int f = 0; f < 6; f++) {
+            D3DLOCKED_RECT lr{};
+            if (FAILED(c->LockRect(static_cast<D3DCUBEMAP_FACES>(f), 0, &lr, nullptr, 0))) continue;
+            for (int y = 0; y < 4; y++)
+                for (int x = 0; x < 4; x++) reinterpret_cast<DWORD*>(static_cast<char*>(lr.pBits) + y * lr.Pitch)[x] = 0xFF000000u | rgb[0] << 16 | rgb[1] << 8 | rgb[2];
+            c->UnlockRect(static_cast<D3DCUBEMAP_FACES>(f), 0);
+        }
+    };
+    solid(own, ownC);
+    solid(nb, nbC);
+    if (!ps || !map || !own || !nb) {
+        Check(false, "the cube test's resources");
+        Release(ps), Release(map), Release(own), Release(nb);
+        return;
+    }
+    D3DLOCKED_RECT lr{};
+    if (SUCCEEDED(map->LockRect(0, &lr, nullptr, 0))) {
+        for (int y = 0; y < 64; y++) std::memset(static_cast<char*>(lr.pBits) + y * lr.Pitch, 0, 256);
+        map->UnlockRect(0);
+    }
+    gpu.dev->SetTexture(p.sampler, map);
+    gpu.dev->SetTexture(static_cast<DWORD>(p.cubeSampler), own);
+    const float zero[4] = {}, size[4] = {64, 64, 1.0f / 64, 1.0f / 64}, band[4] = {1.0f / 65536, 65536, 0.5f, 65535};
+    gpu.dev->SetPixelShaderConstantF(0, zero, 1);
+    gpu.dev->SetPixelShaderConstantF(p.sizeConst, size, 1);
+    gpu.dev->SetPixelShaderConstantF(p.bandConst, band, 1);
+    const float lotM = 16.0f, reach = 3.25f, lineX = 31.5f / 64.0f * lotM;
+    const auto scene = [&](int cell, bool flag, IDirect3DCubeTexture9* bound) {
+        float arch[ShaderPatches::kArchRows * 4] = {};
+        float* const s = arch + 2 * ShaderPatches::kArchCells * 4;
+        s[0] = s[1] = 64.0f, s[2] = -1.0f / 16.0f, s[3] = -1.0f / 8.0f;
+        float* const seg = arch + cell * 8;
+        seg[0] = lineX, seg[1] = 2.0f, seg[2] = 0.0f, seg[3] = 12.0f, seg[7] = 1.0f / 144.0f;
+        arch[(2 * ShaderPatches::kArchCells + 1) * 4 + cell] = 1.0f / reach;
+        arch[(2 * ShaderPatches::kArchCells + 3) * 4 + cell] = flag ? 1.0f : 0.0f;
+        gpu.dev->SetPixelShaderConstantF(static_cast<UINT>(p.archConst), arch, ShaderPatches::kArchRows);
+        gpu.dev->SetTexture(static_cast<DWORD>(p.nbCubeSampler), bound);
+        gpu.lotSpan = lotM;
+        return gpu.Render(ps);
+    };
+    const auto channels = [](DWORD v, int c[3]) { c[0] = (v >> 16) & 0xFF, c[1] = (v >> 8) & 0xFF, c[2] = v & 0xFF; };
+    for (const int cell : {0, 4}) { // (the first flag row's first lane, its second row's)
+        const std::vector<DWORD> px = scene(cell, true, nb);
+        int law = 0, line = 0, past = 0, lineN = 0, pastN = 0, worstStep = 0;
+        for (int y = 0; y < 64; y++)
+            for (int x = 0; x < 64; x++) {
+                const float lx = (x + 0.5f) / 64.0f * lotM, lz = (y + 0.5f) / 64.0f * lotM, d = ArchAmbient::SegDist(lx, lz, lineX, 2.0f, lineX, 14.0f);
+                const float w = ArchAmbient::Weight(d, reach);
+                int c[3];
+                channels(px[static_cast<size_t>(y) * 64 + x], c);
+                for (int k = 0; k < 3; k++) {
+                    law = std::max(law, static_cast<int>(std::lround(std::fabs(c[k] - ArchAmbient::CubeAt(static_cast<float>(ownC[k]), static_cast<float>(nbC[k]), w)))));
+                    if (d < 1e-3f) line = std::max(line, std::abs(c[k] - nbC[k]));
+                    if (d >= reach) past = std::max(past, std::abs(c[k] - ownC[k]));
+                    if (x < 63) { // (the steepest step between two pixels 25 cm apart: 1.5 / reach a metre, 18.5 of the 160 between the two cubes)
+                        int e[3];
+                        channels(px[static_cast<size_t>(y) * 64 + x + 1], e);
+                        worstStep = std::max(worstStep, std::abs(c[k] - e[k]));
+                    }
+                }
+                lineN += d < 1e-3f, pastN += d >= reach;
+            }
+        std::printf("  arch cube pixel check (cell %d, reach %.2f m): law %d LSB; on the line (%d px) off the neighbour's %d LSB; past the reach (%d px) off the room's own %d LSB; steepest step a pixel %d of %d\n",
+                    cell, reach, law, lineN, line, pastN, past, worstStep, nbC[0] - ownC[0]);
+        Check(lineN >= 32 && pastN >= 256, "the cube test covers the line and past the reach");
+        Check(law <= 2, "GPU neighbour's cube = CPU law (2 LSB)");
+        Check(line <= 1, "d = 0: the neighbour's cube, so no step with the room beyond the arch");
+        Check(past == 0, "past the reach: the room's own cube, exactly");
+        Check(worstStep <= 20, "no line inside the blend");
+    }
+    // the cells of another neighbour (flag 0), and no cube to take (the room's own bound): the room's own everywhere
+    int off = 0;
+    for (const auto& px : {scene(0, false, nb), scene(0, true, own)})
+        for (DWORD v : px) {
+            int c[3];
+            channels(v, c);
+            off = std::max({off, std::abs(c[0] - ownC[0]), std::abs(c[1] - ownC[1]), std::abs(c[2] - ownC[2])});
+        }
+    Check(off == 0, "a cell without the flag, or the room's own cube bound: the room's own, exactly");
+    gpu.dev->SetTexture(p.sampler, nullptr);
+    gpu.dev->SetTexture(static_cast<DWORD>(p.cubeSampler), nullptr);
+    gpu.dev->SetTexture(static_cast<DWORD>(p.nbCubeSampler), nullptr);
+    Release(map);
+    Release(own);
+    Release(nb);
     Release(ps);
 }
 
@@ -1086,7 +1275,8 @@ int main(int argc, char** argv) {
     std::printf("Precomp: %d pixel shaders, %d match (%d patched, %d disassemble, %d with the taps and bound reads, %d created natively, %d left to the game by the caps)\n", total, st.matched,
                 st.patched, st.disasmOk, st.texldOk, st.created, st.capsRefused);
     std::printf("  with the basis maps too: %d (both reads in one copy, %d created natively)\n", st.combined, st.combinedCreated);
-    std::printf("  with the arch ambient (ps_3_0): %d copies, %d created natively\n", st.arch, st.archCreated);
+    std::printf("  with the arch ambient (ps_3_0): %d copies, %d created natively, %d with the neighbour's cube (%d more with a cube kept as they were, %d with none), at most %d temps\n", st.arch, st.archCreated, st.archCube, st.archCubeKept, st.arch - st.archCube - st.archCubeKept, st.archMaxTemps);
+    Check(st.archCube > 0, "the game's arch copies take the neighbour's cube");
     Check(st.arch > 0 && st.arch == st.archCreated, "every copy with the arch ambient is created natively");
     std::printf("  with the walls (floors, basis_wall_filter): %d copies of %d patched, %d created natively\n", st.walls, st.patched, st.wallsCreated);
     Check(st.walls > 0 && st.walls == st.wallsCreated, "every walls copy made is created natively");
@@ -1123,7 +1313,7 @@ int main(int argc, char** argv) {
     std::set<uint32_t> vss;
     for (uint32_t ps : matchedPs)
         for (uint32_t vs : vsOf[ps]) vss.insert(vs);
-    int wall = 0, floor = 0, runtime = 0, other = 0, none = 0;
+    int wall = 0, floor = 0, runtime = 0, other = 0, none = 0, lotVs = 0;
     for (uint32_t vs : vss) {
         if (vs == 0 || vs > blobs.size() || !blobs[vs - 1].vs) continue;
         ShaderPatches::RoomMapUv uv;
@@ -1133,11 +1323,22 @@ int main(int argc, char** argv) {
         }
         if (!uv.defined) runtime++;
         else if (std::fabs(uv.value * 4096.0f - 1.0f) < 1e-3f) wall++;
-        else if (std::fabs(uv.value * 32767.0f - 1.0f) < 1e-3f) floor++;
-        else other++;
+        else if (std::fabs(uv.value * 32767.0f - 1.0f) < 1e-3f) {
+            floor++;
+            // the row ArchRowsForImpl sets (64, 64, -1/16, -1/8) undoes this: TEXCOORD4 = position / 128 + (1/1024, 1/512), position = 2 x lot metres
+            if (blobs[vs - 1].code[0] != 0xFFFE0300) continue;
+            const std::string d = Disasm(blobs[vs - 1].code), dcl = "dcl_texcoord4 ";
+            const size_t at = d.find(dcl), end = at == std::string::npos ? at : d.find('.', at);
+            const bool ok = end != std::string::npos && d.find("mad " + d.substr(at + dcl.size(), end - at - dcl.size()) + ".xy, v0, ") != std::string::npos &&
+                            d.find("0.0078125, 0.0009765625, 0.001953125") != std::string::npos;
+            lotVs += ok;
+            Check(ok, "a vs_3_0 floor shader writes the lot position to TEXCOORD4.xy");
+        } else other++;
     }
     std::printf("Paired vertex shaders: %zu; uv scale 1/4096 (walls) %d, 1/32767 (floors) %d, set at the draw %d, other %d, not found %d\n", vss.size(), wall, floor,
                 runtime, other, none);
+    std::printf("  vs_3_0 floor shaders with the lot position in TEXCOORD4: %d\n", lotVs);
+    Check(lotVs > 0, "the vs_3_0 floor shaders write the lot position the arch copies read");
     Check(wall > 0 && floor > 0, "wall and floor vertex shaders are told apart by their uv scale");
     Check(other == 0, "no paired vertex shader has another defined uv scale");
     // 4: pixels
@@ -1147,7 +1348,17 @@ int main(int argc, char** argv) {
     SidePixelCheck(gpu);
     WallPixelCheck(gpu);
     ReadWallsPixelCheck(gpu);
-    ArchPixelCheck(gpu);
+    ArchPixelCheck(gpu, 16.0f);
+    ArchPixelCheck(gpu, 64.0f);
+    ArchPixelCheck(gpu, 64.0f, 3.25f);
+    std::puts("  TEXCOORD4 already declared by the game's shader:");
+    ArchPixelCheck(gpu, 64.0f, 3.25f, true);
+    gpu.atlasU = 0.75f; std::puts("  uv held in the split atlas (0.75, 0.03):");
+    ArchPixelCheck(gpu, 64.0f, 3.25f);
+    ArchPixelCheck(gpu, 16.0f);
+    ArchPixelCheck(gpu, 64.0f, 3.25f, true);
+    gpu.atlasU = -1.0f;
+    ArchCubeCheck(gpu);
     // 5: captures
     std::set<std::vector<DWORD>> seen;
     int capPs = 0, capMatched = 0;

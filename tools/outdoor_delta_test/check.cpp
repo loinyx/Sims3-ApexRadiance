@@ -10,15 +10,20 @@
 #include <cstdio>
 #include <cstring>
 #include <random>
+#include <set>
+#include <tuple>
 #include <vector>
 #include <xmmintrin.h>
 #include "features/outdoor_delta_model.h"
 #include "features/rt_lamp_model.h"
+#include "features/gpu_lamp_law.h"
 #include "features/room_lamp_move.h"
 #include "features/open_rooms_above.h"
 #include "features/rt_lamp_proxy.h"
 #include "features/rt_lamp_blockers.h"
+#include "features/object_legs.h"
 #include "features/phys_lamp_pick.h"
+#include "features/terrain_lighting_policy.h"
 #include <string>
 // The dither offset of 2.12.4's Smooth light maps (RoomMapDither::Offset, interleaved gradient noise): 2.12.3 + RT has no
 // map dither (its relight passes 0), but the compose shader keeps the input, so the harness still checks it
@@ -508,7 +513,7 @@ void BasisChecks() {
     Check(BasisPartNow(std::nanf(""), 1, dark, out) && out[0] == 0.0f && !BasisPartNow(std::nanf(""), 1, step, out), "directional maps: an unknown share is refused only where the step is lit");
 }
 // Physical indoor lamps, stage 5 (OutdoorDelta BasisDuePhys): each law lamp's directional part is its room row x its physical
-// share (PhysLampPick::BasisShare: the proxy's visibility x the game's 3D test, dropped under K_DROP) x the game's step; the base
+// share (the proxy's visibility, PhysLampPick::BasisShare, x here the game's 3D test, dropped under K_DROP) x the game's step; the base
 // holds only the lights without a law. A room with a wall at x = 4 (lamp A behind it for x > 4) and a table top at y = 1
 // under lamp B (listed twice, norm scale 0.8); lamp C has no law (in the base). Packed against the game's own fill with those
 // shares; then the write rule: only texels still holding the expected value take the new one
@@ -549,11 +554,12 @@ void BasisPhysChecks() {
         std::copy(base, base + 16, acc);
         std::vector<BasisLight> fill = ls; // (the game's fill with the physical shares)
         for (int j = 0; j < 2; j++) {
-            float step[16] = {}, part[16], vis = 0.0f, t3d = 0.0f;
+            float step[16] = {}, part[16];
             int unknown = 0;
             GameStep(p, ls[j], step);
-            PhysLampPick::BasisShare(mesh, ls[j].pos, 0.15f, p, tests, ls[j].pos, p, stamp, mark, vis, t3d, &unknown);
-            BasisPartPhys(rows[j], vis, t3d, K_DROP, step, part);
+            const float vis = PhysLampPick::BasisShare(mesh, ls[j].pos, 0.15f, p, stamp, mark);
+            const float t3d = vis > 0.0f ? RoomLightTests::occlude(tests, {ls[j].pos[0], ls[j].pos[1], ls[j].pos[2]}, {p[0], p[1], p[2]}, &unknown) : 1.0f;
+            BasisPartPhys(rows[j], vis * t3d, K_DROP, step, part);
             for (int i = 0; i < 16; i++) acc[i] += part[i];
             const float share = vis * t3d < K_DROP ? 0.0f : vis * t3d;
             fill[j].share = (j == 1 ? 0.8f : 1.0f) * share;
@@ -580,18 +586,18 @@ void BasisPhysChecks() {
     Check(wallDark > n / 4 && tableDark > 0 && darkRight == dark, "physical directional maps: the wall and the table top leave their samples without the lamp");
     float step[16], part[16];
     std::fill(step, step + 16, 0.25f);
-    BasisPartPhys(1.0f, 1.0f, 0.5f * K_DROP, K_DROP, step, part);
+    BasisPartPhys(1.0f, 0.5f * K_DROP, K_DROP, step, part);
     const bool dropped = std::all_of(part, part + 16, [](float v) { return v == 0.0f; });
-    BasisPartPhys(3.0f, 0.5f, 0.5f, K_DROP, step, part);
+    BasisPartPhys(3.0f, 0.25f, K_DROP, step, part);
     Check(dropped && part[0] == 3.0f * 0.25f * 0.25f, "physical directional maps: a share under the game's drop adds nothing, else row x share x step");
     { // a still lamp takes the game's levels (its kept pass), a moved one the physical part x the scale learnt while still
         float st[32], acc[32] = {}, acc2[32] = {};
         std::fill(st, st + 32, 0.25f);
-        const float pass[2] = {0.8f, 0.6f}, vis[2] = {0.5f, 0.5f}, t3d[2] = {1.0f, 1.0f};
+        const float pass[2] = {0.8f, 0.6f}, vis[2] = {0.5f, 0.5f};
         double game = 0.0, phys = 0.0;
-        BasisLampAdd(true, pass, 1, 1.0f, vis, t3d, K_DROP, st, 2, 1.0f, acc, game, phys);
+        BasisLampAdd(true, pass, 1, 1.0f, vis, K_DROP, st, 2, 1.0f, acc, game, phys);
         const float scale = static_cast<float>(game / phys);
-        BasisLampAdd(false, nullptr, 1, 1.0f, vis, t3d, K_DROP, st, 2, scale, acc2, game, phys);
+        BasisLampAdd(false, nullptr, 1, 1.0f, vis, K_DROP, st, 2, scale, acc2, game, phys);
         Check(acc[0] == 0.8f * 0.25f && acc[16] == 0.6f * 0.25f && std::fabs(scale - 1.4f) < 1e-5f && std::fabs(acc2[0] - 0.5f * 0.25f * scale) < 1e-6f,
               "physical directional maps: a still lamp writes the game's levels, a moved one the physical part at the game's scale");
     }
@@ -599,21 +605,19 @@ void BasisPhysChecks() {
         std::vector<float> P(static_cast<size_t>(n) * 3);
         for (float& v : P) v = U(rng) * 8.0f;
         for (int s = 0; s < n; s++) P[s * 3 + 1] = 0.5f;
-        const auto pw = [&](size_t i) { return &P[i * 3]; };
         PhysLampPick::ShareCache c;
-        std::vector<float> vis, t3d, fv, ft;
+        std::vector<float> vis, fv;
         bool same = true;
         size_t traced[4] = {};
         float L[3] = {ls[0].pos[0], ls[0].pos[1], ls[0].pos[2]};
         for (int round = 0; round < 4; round++) {
             if (round == 2) L[0] += 0.5f; // (moved)
             const auto lit = [&](size_t i) { return round == 3 ? i % 3 != 0 : true; }; // (a value edit darkens some steps)
-            int unknown = 0;
-            traced[round] = PhysLampPick::BasisSharesCached(c, round != 0, n, lit, mesh, L, 0.15f, P.data(), tests, L, pw, stamp, mark, vis, t3d, &unknown);
-            fv.assign(n, 0.0f), ft.assign(n, 0.0f);
+            traced[round] = PhysLampPick::BasisSharesCached(c, round != 0, n, lit, mesh, L, 0.15f, P.data(), stamp, mark, vis);
+            fv.assign(n, 0.0f);
             for (int i = 0; i < n; i++)
-                if (lit(i)) PhysLampPick::BasisShare(mesh, L, 0.15f, &P[i * 3], tests, L, &P[i * 3], stamp, mark, fv[i], ft[i], &unknown);
-            same = same && std::memcmp(vis.data(), fv.data(), n * sizeof(float)) == 0 && std::memcmp(t3d.data(), ft.data(), n * sizeof(float)) == 0;
+                if (lit(i)) fv[i] = PhysLampPick::BasisShare(mesh, L, 0.15f, &P[i * 3], stamp, mark);
+            same = same && std::memcmp(vis.data(), fv.data(), n * sizeof(float)) == 0;
         }
         Check(same && traced[0] == static_cast<size_t>(n) && traced[1] == 0 && traced[2] == static_cast<size_t>(n) && traced[3] == 0,
               "physical directional maps: a lamp's kept shares equal its shares traced afresh; only a moved lamp is traced again");
@@ -625,7 +629,7 @@ void BasisPhysChecks() {
     for (int round = 0; round < 2; round++)
         for (size_t i = 0; i < tex.size(); i++) {
             const uint32_t w = want[i] ^ static_cast<uint32_t>(round); // (the second write another value)
-            if (BasisWrite(tex[i], w, expect[i])) expect[i] = w, took++;
+            if (BasisWrite(tex[i], w, expect[i], game[i])) expect[i] = w, took++;
             else kept++;
         }
     bool rule = true;
@@ -641,11 +645,20 @@ void BasisPhysChecks() {
     CarryBasis(last.data(), game.data(), game2.data(), last.size());
     bool carried = true;
     for (size_t i = 0; i < tex2.size(); i++) {
-        carried = carried && BasisWrite(tex2[i], last[i], game2[i]) == (i % 11 != 0);
+        carried = carried && BasisWrite(tex2[i], last[i], game2[i], game2[i]) == (i % 11 != 0);
         const bool apex = i % 7 != 0 && (want[i] ^ 1u) != game[i]; // (a write of the solve's own value changed nothing)
         carried = carried && tex2[i] == (i % 11 == 0 ? game2[i] ^ 0x00040404u : apex ? want[i] ^ 1u : game2[i]);
     }
     Check(carried, "physical directional maps: a kept solve's texels take Apex's last write again, never a texel Apex did not write or another solve wrote since");
+    // a sibling room's solve copies the working set back: the texel holds this room's own solve value again, not Apex's last write
+    {
+        uint32_t t = 0x00303030u;
+        const uint32_t own = 0x00303030u, lastW = 0x00505050u;
+        const bool back = BasisWrite(t, lastW, 0x00404040u, own) && t == lastW;
+        uint32_t other = 0x00313131u;
+        Check(back && !BasisWrite(other, lastW, 0x00404040u, own) && other == 0x00313131u,
+              "physical directional maps: a texel a sibling's solve put back to the room's own solve value is written again, another solve's value is not");
+    }
 }
 
 // ---- Rooms open to the story above (features/open_rooms_above.h) ----
@@ -818,6 +831,40 @@ int OpenQuadsOf(const StoryCells& below, const StoryCells& b, int room) {
     int n = 0;
     for (int i = 0; i < 40 * 30; i++) n += below.room[i] == room && !(b.floor[i] == '#' || b.floor[i] == 'F' || b.floor[i] == '*') ? 4 : 0;
     return n;
+}
+// The ramp terms of texels a lamp saturated, filled from the map's well-split texels (GpuLampLaw::FitSplit / IndoorSplitOrFill)
+void SplitFillChecks() {
+    const float k = 1.0f, amb[3] = {0.21f, 0.18f, 0.15f};
+    const auto rampAt = [](float y) { return 0.6f + 0.27f * y; };
+    std::vector<std::array<float, 5>> good;
+    for (int i = 0; i < 40; i++) {
+        const float y = 0.1f * static_cast<float>(i % 20), x[3] = {0.05f, 0.05f, 0.04f}, r = rampAt(y), ra[3] = {r * amb[0], r * amb[1], r * amb[2]};
+        float p[4], gotRa[3], got = 0.0f;
+        GpuLampLaw::IndoorTexel(x, ra, r, k, p);
+        if (GpuLampLaw::IndoorSplit(x, p, k, gotRa, got)) good.push_back({y, got, gotRa[0], gotRa[1], gotRa[2]});
+    }
+    const GpuLampLaw::SplitFill fill = GpuLampLaw::FitSplit(good);
+    // a saturated texel (weight 0 at its solve's sum): the split fails, the fill gives the true terms
+    const float hot[3] = {3.0f, 3.0f, 3.0f}, y = 0.55f, r = rampAt(y), ra[3] = {r * amb[0], r * amb[1], r * amb[2]};
+    float p[4], outRa[3], out = 0.0f, splitRa[3], split = 0.0f;
+    GpuLampLaw::IndoorTexel(hot, ra, r, k, p);
+    const bool failed = !GpuLampLaw::IndoorSplit(hot, p, k, splitRa, split);
+    const bool filled = GpuLampLaw::IndoorSplitOrFill(hot, p, k, y, fill, outRa, out);
+    bool near = std::fabs(out - r) < 1e-3f;
+    for (int q = 0; q < 3; q++) near = near && std::fabs(outRa[q] - ra[q]) < 1e-3f;
+    // its solve's own texel is unchanged: weight 0 there
+    float again[4];
+    GpuLampLaw::IndoorTexel(hot, outRa, out, k, again);
+    bool same = true;
+    for (int q = 0; q < 4; q++) same = same && std::fabs(again[q] - p[q]) < 1e-5f;
+    // a texel that splits keeps its own read-back
+    const float dim[3] = {0.1f, 0.08f, 0.07f};
+    GpuLampLaw::IndoorTexel(dim, ra, r, k, p);
+    float a2[3], r2 = 0.0f;
+    const bool own = GpuLampLaw::IndoorSplitOrFill(dim, p, k, y, fill, a2, r2) && std::fabs(r2 - r) < 1e-4f;
+    std::printf("  saturated texels' ramp filled: fit %s, ramp %.4f (true %.4f)\n", fill.ok ? "ok" : "none", out, r);
+    Check(fill.ok && failed && filled && near && same && own,
+          "physical kept maps: a texel the solve's lamps saturated takes the map's fitted ramp and ambient, its solve's texel unchanged");
 }
 void OpenAboveChecks() {
     const StoryCells s1 = ReadStory(kLotC49C[0]), s2 = ReadStory(kLotC49C[1]), s3 = ReadStory(kLotC49C[2]);
@@ -1545,7 +1592,9 @@ void PhysPickChecks() {
         r[2].drawn = false;
         Check(EditRefusal(r, at) != nullptr && at == 2, "physical edit: a room 0 not drawn physically refuses it");
         r = rooms, r[3].kept = r[3].drawn = false;
-        Check(EditRefusal(r, at) != nullptr && at == 3, "physical edit: a room with no kept physical solve refuses it (even one not listing the lamp)");
+        Check(EditRefusal(r, at) == nullptr, "physical edit: a room with no kept physical solve not listing the lamp does not refuse it");
+        r[3].lists = true;
+        Check(EditRefusal(r, at) != nullptr && at == 3, "physical edit: a room listing the lamp with no kept physical solve refuses it");
         r = rooms, r[1].drawn = false;
         Check(EditRefusal(r, at) != nullptr && at == 1, "physical edit: a kept solve not drawn refuses it");
         r = rooms, r[1].baked = true;
@@ -1566,8 +1615,313 @@ void PhysPickChecks() {
         Check(EditRefusal({}, at) != nullptr, "physical edit: no story found refuses it");
     }
 }
+// (sun_lamp_level) The lamp terms' level through a dawn and a dusk: the sky's level turns in half a second of frame time at any clock, the
+// sun's part of the game's curve moves with the clock. The sun's height from the 05/11 log's snapshots (-21.9 at 4.443 h, -6.9 at 5.508 h)
+void DawnChecks() {
+    using namespace TerrainLightingPolicy;
+    constexpr float kPi = 3.14159265f, kPerHour = 15.0f / 1.065f, kClockPerSec = 0.015f, kStep = kClockPerSec / 60.0f; // (a 60 fps frame, the log's clock)
+    Check(SunLampTerm(1.0f) == 0.0f && SunLampTerm(-0.04f) == 0.0f && SunLampTerm(-1.0f) == 1.0f && SunLampTerm(std::nanf("")) == 0.0f, "lamp level: no sun term by day or unreadable");
+    const auto sine = [&](float deg) { return std::sin(deg * kPi / 180.0f); };
+    Check(std::fabs(SunLampTerm(sine(-6.9f)) - 0.40f) < 0.01f, "lamp level: 0.40 at the capture's -6.9 degrees (manmade 0.551 with M about 0.25)");
+    for (const bool dusk : {false, true})
+        for (const float turnAt : {-13.0f, -7.0f, -3.0f}) { // (the sky's turn: -7 at the log's dawn, the rest unknown, so tried)
+            float worstOld = 0.0f, worstNew = 0.0f, prevOld = -1.0f, prevNew = -1.0f, darker = 0.0f, level = dusk ? 0.0f : 1.0f, lamp = level, lag = 0.0f;
+            bool day = true, night = true;
+            for (float t = 0.0f; t < 4.0f; t += kStep) {
+                const float deg = dusk ? 10.0f - t * kPerHour : -30.0f + t * kPerHour;
+                const float rate = (1.0f / 0.6f) * (kStep / kClockPerSec); // (the level's move in a frame)
+                if (dusk ? deg <= turnAt : deg >= turnAt) level = dusk ? std::min(1.0f, level + rate) : std::max(0.0f, level - rate);
+                const float want = LampLevel(level, sine(deg));
+                lamp = LampLevelStep(lamp, want, 1.0f / 60.0f);
+                lag = std::max(lag, std::fabs(lamp - want));
+                const float oldDay = LampDay(level), newDay = LampDay(lamp);
+                if (prevOld >= 0.0f) worstOld = std::max(worstOld, std::fabs(oldDay - prevOld)), worstNew = std::max(worstNew, std::fabs(newDay - prevNew));
+                prevOld = oldDay, prevNew = newDay;
+                darker += oldDay - newDay > 1e-6f ? 1.0f / 60.0f : 0.0f;
+                if (deg > (dusk ? 5.0f : 2.0f)) day = day && newDay == kLampDayFloor;
+                if (deg < -20.0f) night = night && newDay == 1.0f;
+            }
+            std::printf("  %s, sky turning at %.0f deg: largest lamp step in a frame %.4f, with the sun %.4f; at most %.2f of level behind\n", dusk ? "dusk" : "dawn", turnAt, worstOld, worstNew, lag);
+            Check(dusk || darker == 0.0f, "lamp level: a dawn never darker than the sky's level alone");
+            Check(!dusk || darker <= kLampFadeSeconds, "lamp level: a dusk stays behind the sky's turn for the fade's seconds alone");
+            Check(day && night, "lamp level: 3% in daylight and 1 in the dark, as before");
+            Check(worstNew < 0.25f * worstOld, "lamp level: fades where the sky's level alone snaps");
+        }
+}
+// (chair_arm_caps, live_object_tables) DrawnBlockers, Bound and LiveMoves
+void SeatChecks() {
+    using namespace RoomLightTests;
+    const auto quad = [](V A, V N, V U, V W, float hu, float hw) {
+        Blocker k{};
+        k.vt = kQuadVt;
+        const auto put = [&](int off, V p) { k.f[off / 4] = p.x, k.f[off / 4 + 1] = p.y, k.f[off / 4 + 2] = p.z; };
+        put(0x70, A), put(0x80, A), put(0x90, N), put(0xA0, U), put(0xB0, W);
+        k.f[0xD0 / 4] = k.f[0xD8 / 4] = hu, k.f[0xD4 / 4] = k.f[0xDC / 4] = hw;
+        return k;
+    };
+    // a box-type armchair: seat and back as one slant, a back sheet, two arm sheets at the box's full height (record 10 of the 19-37-16 scene)
+    const float s = 0.7071068f;
+    const auto seat = [&](float armTop) {
+        RoomLightTests::Record r;
+        r.c = {0, 0.4f, 0}, r.r2 = 1.0f;
+        r.b.push_back(quad({0, 0.4f, 0}, {0, s, s}, {1, 0, 0}, {0, s, -s}, 0.45f, 0.5f));
+        r.b.push_back(quad({0, 0.4f, -0.4f}, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}, 0.45f, 0.4f));
+        for (const float x : {-0.45f, 0.45f}) r.b.push_back(quad({x, armTop * 0.5f, 0}, {1, 0, 0}, {0, 0, 1}, {0, 1, 0}, 0.4f, armTop * 0.5f));
+        return r;
+    };
+    std::vector<RoomLightTests::Record> box{seat(0.8f)};
+    RtLampGpu::DrawnBlockers(box);
+    const Blocker& cap = box[0].b.back();
+    Check(box[0].b.size() == 5 && cap.f[0xF0 / 4] == kCapMark && cap.v(0x90).y == 1.0f, "seat: a box-type chair takes a cap");
+    Check(std::fabs(box[0].b[2].f[0xD4 / 4] - 0.2f) < 1e-6f && std::fabs(box[0].b[2].f[0x70 / 4 + 1] - 0.2f) < 1e-6f && std::fabs(cap.f[0x70 / 4 + 1] - 0.4f) < 1e-6f,
+          "seat: its arms half as tall on the same base, the cap at their top");
+    Check(std::fabs(cap.f[0x70 / 4]) < 1e-6f && std::fabs(cap.f[0x70 / 4 + 2]) < 1e-6f && cap.f[0xD0 / 4] == 0.45f && cap.f[0xD4 / 4] == 0.4f, "seat: the cap over the box: the seat's width, the arms' depth");
+    const float over[3] = {0.0f, 0.9f, 0.0f};
+    Check(!StandsOn(cap, over) && !StandsOn(box[0], over), "seat: nothing stands on a cap");
+    {
+        RoomLightTests::Room raw, drawn;
+        raw.rec = {seat(0.8f)}, drawn.rec = box;
+        RtLampGpu::BlockerTable tr, td;
+        const int hr = tr.Append(raw), hd = td.Append(drawn);
+        const int firstBlocker = static_cast<int>(td.rows[static_cast<size_t>(td.rows[static_cast<size_t>(hd)].v[0]) + 1].v[0]);
+        Check(!td.StandsOn(hd, 0, over) && td.BlockerAt(firstBlocker + 4 * RtLampGpu::BlockerTable::kBlockerRows).f[0xF0 / 4] == kCapMark, "seat: the table keeps the cap's mark");
+        // a lamp edge-on to the slant, its light through an arm's top: that sheet alone drew a streak past the shadow, the short arm and the cap do not
+        const V lamp{-1.02f, 3.2f, -2.4f}, far{0.9f, 0.0f, 0.8f};
+        const float streak = tr.Occlude(hr, lamp, far), gone = td.Occlude(hd, lamp, far);
+        std::printf("  seat: light along an arm 3 m past the chair %.2f, with the cap %.2f\n", streak, gone);
+        Check(streak < 0.3f && gone > 0.75f, "seat: the streak past the shadow is gone");
+        Check(td.Occlude(hd, {0, 2.5f, 0}, {0, 0, 0}) < 0.05f, "seat: a lamp over it still has its shadow under it");
+    }
+    // left alone: a model with stepped arms, a record with no back, one with two slants, a table's top
+    {
+        std::vector<RoomLightTests::Record> others{seat(0.5f), seat(0.8f), seat(0.8f), RoomLightTests::Record{{0, 0, 0}, 1.0f, {quad({0, 0.7f, 0}, {0, 1, 0}, {1, 0, 0}, {0, 0, 1}, 0.5f, 0.5f)}}};
+        others[1].b.erase(others[1].b.begin() + 1);
+        others[2].b.push_back(others[2].b[0]);
+        const std::vector<RoomLightTests::Record> before = others;
+        RtLampGpu::DrawnBlockers(others);
+        bool same = true;
+        for (size_t i = 0; i < others.size(); i++) same = same && RecordKey(others[i]) == RecordKey(before[i]);
+        Check(same, "seat: stepped arms, no back, two slants and a table top are left alone");
+    }
+    Check(PhysLampPick::RetryMs(0) == 5000u && PhysLampPick::RetryMs(1) == 10000u && PhysLampPick::RetryMs(6) == 320000u && PhysLampPick::RetryMs(1000) == 320000u, "retry: a failed map again from 5 s to 5 min, never given up");
+    // Bound: the game's sphere (a rectangle and a disc)
+    {
+        RoomLightTests::Record r;
+        r.b.push_back(quad({1, 2, 3}, {0, 1, 0}, {1, 0, 0}, {0, 0, 1}, 0.5f, 0.25f));
+        Blocker d{};
+        d.vt = kDiscVt;
+        d.f[0x20 / 4] = 3.0f, d.f[0x20 / 4 + 1] = 1.0f, d.f[0x20 / 4 + 2] = 3.0f, d.f[0x70 / 4] = 0.25f;
+        r.b.push_back(d);
+        Bound(r);
+        Check(std::fabs(r.c.x - 2.0f) < 1e-6f && std::fabs(r.c.y - 1.5f) < 1e-6f && std::fabs(r.c.z - 3.0f) < 1e-6f && std::fabs(r.r2 - (1.5f * 1.5f + 0.25f + 0.25f)) < 1e-5f,
+              "bound: the box of a rectangle's corners and a disc's circle, its middle and half diagonal");
+    }
+    // LiveMoves: the game's blockers as a table of addresses
+    {
+        RoomLightTests::Record a = seat(0.8f), b = seat(0.8f);
+        for (Blocker& k : b.b) k.f[0x70 / 4] += 5.0f, k.f[0x80 / 4] += 5.0f;
+        Bound(a), Bound(b);
+        std::vector<Blocker> mem;
+        std::vector<RoomLightTests::Record> kept{a, b};
+        for (RoomLightTests::Record& r : kept)
+            for (const Blocker& k : r.b) r.at.push_back(mem.size() + 1), mem.push_back(k);
+        bool readable = true;
+        const auto read = [&](uintptr_t at, Blocker& k) {
+            if (!readable) return false;
+            k = mem[at - 1];
+            return true;
+        };
+        std::vector<LiveMove> m;
+        Check(LiveMoves(kept, read, m) == 0 && m.empty(), "live table: nothing moved, no key");
+        // the first chair moved 1.5 m and turned a quarter: every field the setter writes
+        const auto turned = [](Blocker k) {
+            for (const int off : {0x70, 0x80}) {
+                const float x = k.f[off / 4], z = k.f[off / 4 + 2];
+                k.f[off / 4] = z + 1.5f, k.f[off / 4 + 2] = -x;
+            }
+            for (const int off : {0x90, 0xA0, 0xB0}) {
+                const float x = k.f[off / 4], z = k.f[off / 4 + 2];
+                k.f[off / 4] = z, k.f[off / 4 + 2] = -x;
+            }
+            return k;
+        };
+        for (size_t i = 0; i < a.b.size(); i++) mem[i] = turned(a.b[i]);
+        const uint64_t key = LiveMoves(kept, read, m);
+        Check(key != 0 && m.size() == 1 && m[0].rec == 0, "live table: the moved record alone");
+        std::vector<RoomLightTests::Record> live = kept;
+        live[0].b = m[0].b, Bound(live[0]);
+        m.clear();
+        Check(LiveMoves(kept, read, m) == key, "live table: the same place, the same key");
+        RoomLightTests::Record want = a;
+        for (Blocker& k : want.b) k = turned(k);
+        Bound(want);
+        RoomLightTests::Room lr, wr;
+        lr.rec = {live[0]}, wr.rec = {want};
+        RtLampGpu::BlockerTable lt, wt;
+        lt.Append(lr), wt.Append(wr);
+        Check(lt.rows.size() == wt.rows.size() && std::memcmp(lt.rows.data(), wt.rows.data(), lt.rows.size() * sizeof lt.rows[0]) == 0, "live table: the same rows as a table read at the new place");
+        // an object gone: its memory unreadable, or another's
+        m.clear(), readable = false;
+        Check(LiveMoves(kept, read, m) == 0, "live table: unreadable blockers keep their old copy");
+        readable = true;
+        for (size_t i = 0; i < a.b.size(); i++) mem[i] = a.b[i], mem[i].vt = 0x1234;
+        m.clear();
+        Check(LiveMoves(kept, read, m) == 0, "live table: another vtable there is not a move");
+        // a kind RecordKey hashes whole: its raw bytes are not a move
+        RoomLightTests::Record odd = seat(0.8f);
+        odd.b[0].vt = 0x77;
+        odd.at = {1, 2, 3, 4};
+        std::vector<Blocker> oddMem(odd.b.begin(), odd.b.end());
+        oddMem[0].f[1] += 1.0f;
+        m.clear();
+        Check(LiveMoves(std::vector<RoomLightTests::Record>{odd}, [&](uintptr_t at, Blocker& k) { k = oddMem[at - 1]; return true; }, m) == 0, "live table: an unknown kind's bytes are not a move");
+    }
+    // LiveDue: a table dragged with its lamp, 60 frames a second at 6 m/s (23-38-26 recording of 05/11): the table's disc, the lamp 0.57 m over it
+    {
+        RoomLightTests::Record t;
+        Blocker top{};
+        top.vt = kDiscVt, top.f[0x24 / 4] = 0.77f, top.f[0x44 / 4] = 1.0f, top.f[0x70 / 4] = 0.1277f;
+        t.b = {top}, t.at = {1}, Bound(t);
+        const std::vector<RoomLightTests::Record> kept{t};
+        // (the table and the lamp each move or stay, up to frame `stop`: the drop)
+        const auto run = [&](bool perFrame, bool table, bool lampMoves, int stop, int& noFill, float& worst, int& flips) {
+            Blocker mem = top;
+            uint32_t gen = 0, seen = 0, readGen = 0, readStep = 0, reads = 0;
+            uint64_t key = 0;
+            float held = 0.0f;
+            RoomLightTests::Room room;
+            room.rec = kept;
+            RtLampGpu::BlockerTable drawn;
+            int header = drawn.Append(room), at = -1000;
+            noFill = 0, worst = 0.0f, flips = 0;
+            bool filled = true;
+            for (int frame = 0; frame < 60; frame++) {
+                const int ms = frame * 1000 / 60;
+                const float x = 0.1f * static_cast<float>(std::min(frame, stop - 1) + 1);
+                if (frame < stop) gen++; // (the game's move)
+                if (table) mem.f[0x20 / 4] = x;
+                if (seen != gen && ms - at >= 100) seen = gen, at = ms; // (LiveGen)
+                for (int map = 0; map < 4; map++) { // (a round's maps)
+                    if (!(perFrame ? LiveDue(seen, readGen, gen, readStep, key) : seen != readGen)) continue;
+                    std::vector<LiveMove> m;
+                    key = LiveMoves(kept, [&](uintptr_t, Blocker& k) { k = mem; return true; }, m);
+                    readGen = seen, readStep = gen, reads++;
+                    room.rec = kept;
+                    if (!m.empty()) room.rec[0].b = m[0].b, Bound(room.rec[0]);
+                    drawn = {}, header = drawn.Append(room), held = room.rec[0].b[0].f[0x20 / 4];
+                }
+                const float lamp[3] = {lampMoves ? x : 0.0f, 1.34f, 0.0f};
+                const bool fill = drawn.FillOf(header, lamp) != 0.0f;
+                noFill += !fill, flips += fill != filled, filled = fill;
+                worst = std::max(worst, mem.f[0x20 / 4] - held);
+            }
+            return reads;
+        };
+        int noFill = 0, flips = 0;
+        float lag = 0.0f;
+        const uint32_t paced = run(false, true, true, 60, noFill, lag, flips);
+        Check(paced < 12 && noFill > 0 && lag > 0.25f && flips > 2, "live table: paced alone, a table falls behind its lamp and the fill flips off and on");
+        const uint32_t every = run(true, true, true, 60, noFill, lag, flips);
+        Check(every == 60 && noFill == 0 && lag == 0.0f && flips == 0, "live table: a moved record is read once a frame, on its lamp's place, the fill never off");
+        const uint32_t dropped = run(true, true, true, 30, noFill, lag, flips);
+        Check(dropped == 31 && noFill == 0 && lag == 0.0f && flips == 0, "live table: at the drop the reads stop (a last paced one, the same key), the record on its last place, the fill on");
+        const uint32_t alone = run(true, false, true, 60, noFill, lag, flips);
+        Check(alone < 12 && flips == 1 && noFill > 0, "live table: a lamp dragged off its still table stays paced, its fill goes off once");
+        run(true, true, false, 60, noFill, lag, flips);
+        Check(flips == 1 && lag == 0.0f, "live table: a table dragged from under its still lamp follows each frame, the fill goes off once");
+        Check(!LiveDue(5, 5, 9, 8, 0) && LiveDue(6, 5, 8, 8, 0) && LiveDue(5, 5, 9, 8, 7) && !LiveDue(5, 5, 8, 8, 7), "live table: a room with nothing moved waits for the paced read");
+    }
+}
+// BlockerTable::Join, the panes and ToneSoft (cross_room_shadows, glass_share, tone_soft)
+void AcrossRoomsChecks() {
+    using namespace RoomLightTests;
+    const auto plate = [](float x, float z) { // a table top 1 m wide at (x, 0.75, z)
+        Blocker k{};
+        k.vt = kQuadVt;
+        const float A[3] = {x, 0.75f, z}, N[3] = {0, 1, 0}, U[3] = {1, 0, 0}, W[3] = {0, 0, 1};
+        for (int c = 0; c < 3; c++) k.f[0x70 / 4 + c] = k.f[0x80 / 4 + c] = A[c], k.f[0x90 / 4 + c] = N[c], k.f[0xA0 / 4 + c] = U[c], k.f[0xB0 / 4 + c] = W[c], k.f[0xE0 / 4 + c] = 7.0f, k.f[0xF0 / 4 + c] = -3.0f;
+        k.f[0xD0 / 4] = k.f[0xD4 / 4] = k.f[0xD8 / 4] = k.f[0xDC / 4] = 0.5f;
+        RoomLightTests::Record r{{x, 0.75f, z}, 4.0f, {k}};
+        r.shape = static_cast<uintptr_t>(x);
+        return r;
+    };
+    RoomLightTests::Room own, next;
+    own.rec.push_back(plate(2.0f, 2.0f)), own.rec.push_back(plate(4.0f, 2.0f));
+    next.rec.push_back(plate(2.0f, 8.0f));
+    RtLampGpu::BlockerTable a, b;
+    const int ha = a.Append(own), hb = b.Append(next);
+    RtLampGpu::BlockerTable j = RtLampGpu::BlockerTable::Join({&a, ha}, {{&b, hb}});
+    const V lamp1{2.0f, 2.5f, 2.0f}, floor1{2.0f, 0.0f, 2.0f}, lamp2{2.0f, 2.5f, 8.0f}, floor2{2.0f, 0.0f, 8.0f}, clear{9.0f, 0.0f, 9.0f};
+    bool same = true;
+    for (const V& l : {lamp1, lamp2})
+        for (const V& p : {floor1, floor2, clear}) same = same && j.Occlude(0, l, p) == a.Occlude(ha, l, p);
+    Check(same, "join: row 0 walks exactly the room's own records, a ceiling lamp's shadows bit for bit");
+    Check(j.Occlude(0, lamp2, floor2) == 1.0f && j.Occlude(1, lamp2, floor2) < 0.05f, "join: row 1 also meets the next room's table");
+    Check(j.Occlude(1, lamp1, floor1) == a.Occlude(ha, lamp1, floor1), "join: row 1 keeps the room's own records");
+    Check(j.ShapeOf(1, 2) == 2 && j.ShapeOf(0, 1) == 4, "join: each record keeps its shape, own first");
+    const float standing[3] = {2.0f, 0.85f, 8.0f};
+    Check(j.FillOf(0, standing) == 0.0f && j.FillOf(1, standing) == RtLampGpu::kFurnitureFill, "join: a lamp on the next room's table keeps its fill from row 1");
+    j.Offset(0, 2, 1.0f, 0.0f);
+    Check(j.Occlude(1, lamp2, floor2) > 0.99f, "join: a carried record moves");
+    RtLampGpu::BlockerTable empty = RtLampGpu::BlockerTable::Join({nullptr, -1}, {});
+    Check(empty.rows.size() == 2 && empty.Occlude(0, lamp1, floor1) == 1.0f, "join: a room with no records walks none");
+    // panes
+    const std::vector<RtLampProxy::Pane> panes = {{0, 5, 1, 5, 0.5f, 2.0f}, {1, 5, 2, 5, 0.5f, 2.0f}, {0, 3, 2, 3, 0, 2.5f}};
+    const float la[3] = {1.0f, 1.0f, 7.0f}, one[3] = {0.5f, 1.0f, 4.0f}, two[3] = {0.5f, 1.0f, 1.0f}, seam[3] = {1.0f, 1.0f, 4.0f}, over[3] = {0.5f, 3.0f, 4.1f}, side[3] = {6.0f, 1.0f, 4.0f};
+    Check(RtLampProxy::PaneCount(panes, la, one) == 1 && RtLampProxy::PaneCount(panes, la, two) == 2, "panes: one a span crossed");
+    Check(RtLampProxy::PaneCount(panes, la, seam) == 1, "panes: two spans side by side count once at their seam");
+    Check(RtLampProxy::PaneCount(panes, la, over) == 0 && RtLampProxy::PaneCount(panes, la, side) == 0, "panes: over the head or past the span, none");
+    Check(std::fabs(RtLampProxy::PaneShare(panes, la, two) - WallOpenings::kWindowPass * WallOpenings::kWindowPass) < 1e-6f, "panes: the share is the pass per pane");
+    RtLampProxy::Lot lot;
+    lot.stories.resize(1);
+    RtLampProxy::Edge e;
+    e.x0 = 2, e.z0 = 2, e.x1 = 2, e.z1 = 3, e.base = 1, e.open = true, e.glazed = 1, e.o.u0 = 0.25f, e.o.u1 = 0.75f, e.o.sill = 0.5f;
+    e.o.head[2] = 2.4f;
+    lot.stories[0].edges = {e};
+    e.glazed = 0;
+    lot.stories[0].edges.push_back(e);
+    std::vector<RtLampProxy::Pane> got;
+    RtLampProxy::PanesOf(lot, got);
+    Check(got.size() == 1 && got[0].z0 == 2.25f && got[0].z1 == 2.75f && got[0].y0 == 1.5f && got[0].y1 == 3.4f, "panes: a glazed opening's span, sill and head; an arch gives none");
+    // the tone: no step, and the game's curve past the knee
+    bool rising = true, sameFar = true;
+    float last = 0.0f;
+    for (int i = 1; i < 4000; i++) {
+        const float m = static_cast<float>(i) * 2.5e-5f, x[3] = {m, m, m};
+        float c[3];
+        GpuLampLaw::ToneSoft(x, c);
+        rising = rising && c[1] > last;
+        last = c[1];
+    }
+    for (const float m : {0.03f, 0.2f, 1.0f}) {
+        const float x[3] = {m, m, m};
+        float c[3], g[3];
+        GpuLampLaw::ToneSoft(x, c), GpuLampLaw::Tone(x, g);
+        sameFar = sameFar && std::fabs(c[1] - g[1]) < 1e-6f;
+    }
+    const float faint[3] = {0.003f, 0.003f, 0.003f};
+    float c[3];
+    GpuLampLaw::ToneSoft(faint, c);
+    Check(rising, "tone: more light never shows darker");
+    Check(sameFar && c[1] == 0.003f, "tone: the game's curve past 0.02, x under 0.004");
+}
 void BlockerTableChecks() {
     using namespace RoomLightTests;
+    {
+        GpuLampLaw::Lamp tube{};
+        const float up[3] = {0.0f, 1.0f, 0.0f}, down[3] = {0.0f, -1.0f, 0.0f}, side[3] = {1.0f, 0.0f, 0.0f};
+        float y = 2.0f;
+        GpuLampLaw::TubeShape(tube, up, 1.0f);
+        Check(GpuLampLaw::TubeStep(tube, y) == 0.25f && y == 2.125f, "tube tests: an upright tube steps up from its low end");
+        y = 2.0f;
+        GpuLampLaw::TubeShape(tube, down, 1.0f);
+        Check(GpuLampLaw::TubeStep(tube, y) == 0.25f && y == 1.125f, "tube tests: a tube pointing down steps from its other end");
+        y = 2.0f;
+        GpuLampLaw::TubeShape(tube, side, 1.0f);
+        Check(GpuLampLaw::TubeStep(tube, y) == 0.0f && y == 2.0f, "tube tests: a level tube keeps the game's one point");
+        GpuLampLaw::Lamp lamp{};
+        Check(GpuLampLaw::TubeStep(lamp, y) == 0.0f, "tube tests: a lamp keeps the game's one point");
+    }
     std::mt19937 rng(20261102);
     std::uniform_real_distribution<float> U(-1.0f, 1.0f), P(0.0f, 1.0f);
     const auto unit = [&]() {
@@ -1714,6 +2068,78 @@ void BlockerTableChecks() {
                       live.Occlude(h, lamp, V{1.0f, 0.0f, 0.1f}) < 0.01f,
                   "table drag: the solve's table carried by its lamp's move shades as the table read at its new place; none left at the old one");
         }
+        // (legs, Record::posts) a 0.75 m square top, its sphere the game's (it leaves out the corners of the band), four legs
+        {
+            const auto legged = [&](float x, bool legs) {
+                RoomLightTests::Room room;
+                RoomLightTests::Record rc;
+                rc.c = {x, 0.75f, 0.0f}, rc.r2 = 0.726f * 0.726f;
+                RoomLightTests::Blocker k{};
+                k.vt = RoomLightTests::kQuadVt;
+                put(k, 0x70, V{x, 0.75f, 0.0f}), put(k, 0x90, V{0.0f, 1.0f, 0.0f}), put(k, 0xA0, V{1.0f, 0.0f, 0.0f}), put(k, 0xB0, V{0.0f, 0.0f, 1.0f});
+                for (int i = 0; i < 4; i++) k.f[0xD0 / 4 + i] = 0.376f;
+                rc.b.push_back(k);
+                if (legs)
+                    for (const float sx : {-0.335f, 0.335f})
+                        for (const float sz : {-0.335f, 0.335f}) rc.posts.push_back({{x + sx, 0.03f, sz}, {x + sx, 0.7f, sz}, 0.02f});
+                room.rec.push_back(rc);
+                return room;
+            };
+            RtLampGpu::BlockerTable t, plain, at3;
+            const RoomLightTests::Room room = legged(0.0f, true);
+            const int h = t.Append(room), hp = plain.Append(legged(0.0f, false)), h3 = at3.Append(legged(3.0f, true));
+            const auto& row = t.rows[static_cast<size_t>(t.rows[static_cast<size_t>(h)].v[0]) + 1];
+            const int firstPost = static_cast<int>(row.v[0]) + RtLampGpu::BlockerTable::kBlockerRows;
+            const RoomLightTests::Blocker back = t.BlockerAt(firstPost);
+            const RoomLightTests::Post& p0 = room.rec[0].posts[0];
+            Check(static_cast<int>(row.v[1]) == 5 && back.vt == RoomLightTests::kPostVt && back.v(0x20).y == p0.a.y && back.v(0x30).x == p0.b.x && back.f[0x70 / 4] == p0.r,
+                  "legs: a post's rows give back its ends and radius after the record's blockers");
+            // a lamp past kPostGateM over the legs' top: every texel as the top alone, bit for bit, past the game's sphere too. A ceiling lamp under
+            // it: every texel no leg's streak reaches the same, bit for bit, and a texel a streak reaches only darker, by a soft share
+            bool high = true, ceiling = true;
+            int culled = 0, streaked = 0, clear = 0;
+            for (const V lamp : {V{0.0f, 3.8f, 0.0f}, V{1.2f, 3.75f, 0.8f}, V{0.0f, 2.6f, 0.0f}, V{1.2f, 2.3f, 0.8f}})
+                for (float x = -2.5f; x <= 2.5f; x += 0.05f)
+                    for (float z = -2.5f; z <= 2.5f; z += 0.05f)
+                        for (const float edge : {0.0f, 0.1f}) {
+                            const float a = t.Occlude(h, lamp, V{x, 0.0f, z}, edge, 0.15f), b = plain.Occlude(hp, lamp, V{x, 0.0f, z}, edge, 0.15f);
+                            float legs = 1.0f;
+                            for (int i = 0; i < 4; i++) legs *= RtLampGpu::PostT(t.BlockerAt(firstPost + i * RtLampGpu::BlockerTable::kBlockerRows), lamp, V{x, 0.0f, z}, 0.15f);
+                            if (lamp.y > 0.7f + RtLampGpu::kPostGateM) high = high && a == b;
+                            else ceiling = ceiling && (legs == 1.0f ? a == b : a <= b && legs > 0.5f);
+                            culled += a == 1.0f, streaked += legs < 1.0f, clear += legs == 1.0f;
+                        }
+            Check(high && culled > 0, "legs: a lamp past the gate's shadow of a legged table is the top's alone, bit for bit");
+            Check(ceiling && streaked > 0 && clear > streaked, "legs: a ceiling lamp's top and bands stay bit for bit where no streak reaches, and a streak only darkens, softly");
+            // a lamp beside the table at 1.3 m: the floor past the near leg, on the line from the lamp through its middle, takes a streak; off it none
+            const V side{-1.0f, 1.3f, 0.0f}, past{-1.0f + 0.665f * 1.3f / 0.95f, 0.0f, 0.335f * 1.3f / 0.95f}, off{-0.5f, 0.0f, 1.5f};
+            const float streak = t.Occlude(h, side, past, 0.0f, 0.15f), bare = plain.Occlude(hp, side, past, 0.0f, 0.15f);
+            Check(streak < bare - 0.05f && streak > 0.3f * bare && t.Occlude(h, side, off, 0.0f, 0.15f) == plain.Occlude(hp, side, off, 0.0f, 0.15f),
+                  "legs: a lamp beside the table casts a soft streak past a leg and none off it");
+            // a lamp on the top keeps its fill, a lamp over a post alone stands on nothing
+            const float onTop[3] = {0.0f, 1.2f, 0.0f}, offTop[3] = {0.335f, 0.5f, 0.335f};
+            Check(t.FillOf(h, onTop) == RtLampGpu::kFurnitureFill && t.FillOf(h, offTop) == 0.0f && !RoomLightTests::StandsOn(back, onTop),
+                  "legs: a post is no top: stands on and the furniture fill read the blockers alone");
+            // (Offset) the legs go with a dragged table
+            RtLampGpu::BlockerTable moved = t;
+            moved.Offset(h, 0, 3.0f, 0.0f);
+            bool same = true;
+            const V side3{2.0f, 1.3f, 0.0f};
+            for (float x = 1.0f; x <= 6.0f; x += 0.05f)
+                for (float z = -1.5f; z <= 1.5f; z += 0.1f) same = same && std::fabs(moved.Occlude(h, side3, V{x, 0.0f, z}, 0.0f, 0.15f) - at3.Occlude(h3, side3, V{x, 0.0f, z}, 0.0f, 0.15f)) < 1e-3f;
+            Check(same, "legs: a carried table's legs shade as the table read at its new place");
+            // the baked table: sorted for its search; a model's capsules through a matrix turned a quarter about y and moved
+            bool sorted = true;
+            for (size_t i = 1; i < std::size(ObjectLegs::kModels); i++) sorted = sorted && ObjectLegs::kModels[i - 1].lite < ObjectLegs::kModels[i].lite;
+            const ObjectLegs::Model& first = ObjectLegs::kModels[0];
+            const ObjectLegs::Capsule& c0 = ObjectLegs::kCapsules[first.first];
+            const float m[16] = {0, 0, -1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 10, 2, 20, 1};
+            std::vector<RoomLightTests::Post> placed;
+            ObjectLegs::Place(first, m, placed);
+            Check(sorted && ObjectLegs::Baked(first.lite) == &first && !ObjectLegs::Baked(first.lite + 1) && static_cast<int>(placed.size()) == first.count &&
+                      std::fabs(placed[0].a.x - (10.0f + c0.z0 * 1e-3f)) < 1e-4f && std::fabs(placed[0].a.y - (2.0f + c0.y0 * 1e-3f)) < 1e-4f && std::fabs(placed[0].a.z - (20.0f - c0.x0 * 1e-3f)) < 1e-4f,
+                  "legs: the baked table finds its models and places their capsules as the blockers' matrix does");
+        }
         // (true-size edges, Params::edgeR) a 0.8 m square table top at 0.75 m under a lamp at 1.33 m: its floor shadow ends where the
         // top's edge projects (0.4 x 1.33 / 0.58 = 0.92 m), soft over the lamp ball's width there; the game's band shades to ~1.7 m
         {
@@ -1733,10 +2159,39 @@ void BlockerTableChecks() {
                         out = t.Occlude(hs, top, V{1.3f, 0.0f, 0.0f}, r), game = t.Occlude(hs, top, V{1.3f, 0.0f, 0.0f});
             Check(in < 0.01f && std::fabs(edge - 0.5f) < 0.1f && out > 0.999f && game < 0.9f,
                   "true-size edges: a square table's floor shadow ends at its top's projected edge, half shaded there; the game's band shades past it");
+            // (the S edge: flat at both its ends, no crease in the floor; half shaded at the edge itself)
+            Check(RtLampGpu::EdgeOp(0.5f, 0.5f, 0.1f) == 0.5f && RtLampGpu::EdgeOp(0.399f, 0.5f, 0.1f) == 1.0f && RtLampGpu::EdgeOp(0.601f, 0.5f, 0.1f) == 0.0f &&
+                      RtLampGpu::EdgeOp(0.41f, 0.5f, 0.1f) - RtLampGpu::EdgeOp(0.42f, 0.5f, 0.1f) < RtLampGpu::EdgeOp(0.49f, 0.5f, 0.1f) - RtLampGpu::EdgeOp(0.5f, 0.5f, 0.1f),
+                  "true-size edges: an S from shaded to lit, flat at its ends");
+            // (the fill's glow: more towards the shadow's edge than at its middle, nothing in the light)
+            Check(t.OccludeFill(hs, top, V{0.5f, 0.0f, 0.0f}, r) < t.OccludeFill(hs, top, V{0.8f, 0.0f, 0.0f}, r) && t.OccludeFill(hs, top, V{1.3f, 0.0f, 0.0f}, r) > 0.999f,
+                  "furniture fill: its glow rises from the shadow's middle to its edge");
             const V onFloor{0.95f, 0.0f, 0.0f}; // (a disc of the same table as the offset test's: its edge at its radius, soft as the ball)
             Check(live.Occlude(h, lamp, V{1.0f, 0.0f, 0.1f}, r) < 0.01f && live.Occlude(h, lamp, V{2.5f, 0.0f, 0.1f}, r) == 1.0f &&
                       t.Occlude(hs, top, onFloor, 0.0f) == t.Occlude(hs, top, onFloor),
                   "true-size edges: a disc table shades under it and not far off; edgeR 0 is the game's test");
+            // (sphere_cut_fade) a sphere of 0.3 m around that top: the band, 0.75 m wide, stops at a step on the game's test and fades with
+            // FadeCut; the shadow's core, true-size edges and a Join keep what they had, and posts enlarging the record's sphere move nothing
+            RoomLightTests::Room cut = sq;
+            cut.rec[0].r2 = 0.09f;
+            RoomLightTests::Room posted = cut;
+            posted.rec[0].posts.push_back({{-2.0f, 0.0f, 0.0f}, {-2.0f, 0.7f, 0.0f}, 0.03f});
+            RtLampGpu::BlockerTable step, fade, fadePosted;
+            const int hc = step.Append(cut), hf = fade.Append(cut), hp = fadePosted.Append(posted);
+            fade.FadeCut(hf), fadePosted.FadeCut(hp);
+            const RtLampGpu::BlockerTable join = RtLampGpu::BlockerTable::Join({&fade, hf}, {});
+            float stepJump = 0.0f, fadeJump = 0.0f;
+            bool same = true;
+            for (float x = 0.0f; x < 3.0f; x += 0.01f) {
+                const V a{x, 0.0f, 0.0f}, b{x + 0.01f, 0.0f, 0.0f};
+                stepJump = std::max(stepJump, std::fabs(step.Occlude(hc, top, a) - step.Occlude(hc, top, b)));
+                fadeJump = std::max(fadeJump, std::fabs(fade.Occlude(hf, top, a) - fade.Occlude(hf, top, b)));
+                same = same && step.Occlude(hc, top, a, r) == fade.Occlude(hf, top, a, r) && join.Occlude(0, top, a) == fade.Occlude(hf, top, a) &&
+                       join.Occlude(1, top, a) == fade.Occlude(hf, top, a) && fadePosted.Occlude(hp, top, a) == fade.Occlude(hf, top, a);
+            }
+            std::printf("sphere fade: largest jump on 1 cm of floor %.3f with the step, %.3f with the fade\n", stepJump, fadeJump);
+            Check(stepJump > 0.2f && fadeJump < 0.08f && same && step.Occlude(hc, top, V{0.3f, 0.0f, 0.0f}) == fade.Occlude(hf, top, V{0.3f, 0.0f, 0.0f}),
+                  "sphere fade: the band's end is a fade, its core, true-size edges, a Join and posts unchanged");
         }
     }
     RtLampGpu::BlockerTable wide;
@@ -1766,6 +2221,45 @@ void BlockerTableChecks() {
         ok = ok && BlockerTable::TexHeight(0, 0) == 1 && BlockerTable::TexHeight(1, 0) == 1 && BlockerTable::TexHeight(w, 0) == 1 &&
              BlockerTable::TexHeight(w + 1, 0) == 2 && BlockerTable::TexHeight(5, 3) == 3 && BlockerTable::TexHeight(3 * w + 1, 3) == 4;
         Check(ok, "blocker table: its texture is 4096 wide and grows only in height");
+    }
+}
+
+// Reflections after lamp edits: the turns of a drag, and what a drop still owes
+void ReflectionChecks() {
+    using Key = std::tuple<uintptr_t, int, int>;
+    using OutdoorDeltaModel::ReflectionPick;
+    const std::set<Key> rooms = {{1, 1, 2}, {1, 1, 3}, {1, 1, 8}};
+    std::set<Key> owed = rooms;
+    size_t next = 0;
+    bool ownLast = false;
+    Check(ReflectionPick(owed, next, ownLast, false, 50, 500, 1, 3) == owed.end(), "reflections: no turn between a drag's steps");
+    Check(ReflectionPick(owed, next, ownLast, true, 0, 99, 1, 3) == owed.end(), "reflections: no turn within 100 ms of the last");
+    std::set<int> seen;
+    for (int i = 0; i < 3; i++) {
+        owed = rooms; // (every step owes them all again)
+        seen.insert(std::get<2>(*ReflectionPick(owed, next, ownLast, true, 0, 100, 1, 3)));
+    }
+    Check(seen.size() == 3, "reflections: a drag's steps turn through the rooms, not only the lamp's");
+    owed = rooms;
+    Check(std::get<2>(*ReflectionPick(owed, next, ownLast, false, 120, 100, 1, 3)) == 3, "reflections: after the last edit the lamp's room first");
+    Check(ReflectionPick(owed, next, ownLast, false, 119, 100, 1, 3) == owed.end(), "reflections: the rest waits for 120 ms");
+    int drained = 0;
+    for (; drained < 4 && !owed.empty(); drained++) owed.erase(ReflectionPick(owed, next, ownLast, false, 500, 100, 1, 0));
+    Check(drained == 3, "reflections: a lamp in no room: all are still taken, once each");
+    std::set<Key> none;
+    Check(ReflectionPick(none, next, ownLast, true, 500, 500, 1, 3) == none.end(), "reflections: nothing owed");
+    // Edits at any pace (a slider's come 120-220 ms apart: only the silence after each gives a turn): no room goes without
+    for (const uint32_t gap : {90u, 105u, 135u, 150u, 200u, 240u, 300u, 700u}) {
+        int turns[9] = {};
+        uint32_t turn = 0u - 1000u;
+        owed.clear();
+        for (uint32_t t = 0; t < 9000; t += 15) {
+            const bool step = t % gap < 15;
+            if (step) owed = rooms;
+            const auto it = ReflectionPick(owed, next, ownLast, step, t % gap, t - turn, 1, 3);
+            if (it != owed.end()) turns[std::get<2>(*it)]++, owed.erase(it), turn = t;
+        }
+        Check(turns[2] >= 5 && turns[3] >= 5 && turns[8] >= 5, "reflections: every room keeps its turns at any pace of edits");
     }
 }
 
@@ -2127,10 +2621,15 @@ int main() {
     AreaChecks();
     BasisChecks();
     BasisPhysChecks();
+    SplitFillChecks();
     OpenAboveChecks();
     ProxyOpenTopsChecks();
     BlockerTableChecks();
+    AcrossRoomsChecks();
+    DawnChecks();
+    SeatChecks();
     PhysPickChecks();
+    ReflectionChecks();
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

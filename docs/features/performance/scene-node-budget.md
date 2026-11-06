@@ -8,7 +8,7 @@ placed at once as soon as the camera stops.
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier; on by default since 2.5.5. Growing budget past the longest wait and the flat node registry: Released in 2.7.0. Mandatory effect and fur updates: Released in 2.15.4 |
+| Availability | Released in 2.1.0 or earlier; on by default since 2.5.5. Growing budget past the longest wait and the flat node registry: Released in 2.7.0. Mandatory effect and fur updates: Released in 2.15.4. Released in 3.0.0: a model whose current LOD has fewer parts than it last counted updates past the budget. |
 | Default | On |
 | Menu | System > Performance > Camera and lighting > *Spread new objects over frames* |
 | Configuration | `[patches.SceneNodeBudget]` in `ApexRadiance.toml` |
@@ -33,8 +33,9 @@ Apex Radiance wraps BeginFrame's CALL of the drain:
    the whole backlog being drained in one frame.
 3. **Never defer draw state.** Past the budget the copy still updates, in the game's order, the nodes whose draw in the
    same frame reads state that only their update refreshes: the Swarm effect renderer (its update rebuilds the bucket
-   draw lists after effects are removed) and fur models (their update refills the LOD slot an LOD unload emptied). Both
-   are few per frame, so the budget still applies to ordinary nodes.
+   draw lists after effects are removed), fur models (their update refills the LOD slot an LOD unload emptied) and any
+   model whose current LOD has fewer parts than its last update counted (the draw would read past the LOD's part array;
+   issue #56). All are few per frame, so the budget still applies to ordinary nodes.
 4. **Guard every node left queued.** Hooks on the node destructor, AddNode and the scene holder teardown make sure a node
    held for later can never be freed or queued twice while it is still linked.
 

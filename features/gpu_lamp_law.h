@@ -14,7 +14,9 @@
 // lights (types 9 and 10, Area below).
 #include "fast_math.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <vector>
 
 namespace GpuLampLaw {
 
@@ -74,6 +76,16 @@ inline bool IsTube(const Lamp& L) { return Kind(L) == 1; }
 inline void TubeShape(Lamp& L, const float s[3], float len) {
     for (int i = 0; i < 3; i++) L.axis[i] = s[i], L.spill[i] = 0.0f;
     L.sc1 = len * len, L.off1 = 0.0f, L.sc2 = kTube, L.off2 = 0.0f;
+}
+// A vertical tube's 3D test points (T3dPS): the game tests from its low end only, under a table's top, so a floor lamp beside a table
+// cast no shadow of it (05/11). lowY moved to the first point, returns the step; 0: any other lamp, the game's one point at +0x120
+constexpr int kTubeTests = 4;
+inline float TubeStep(const Lamp& L, float& lowY) {
+    const float d = (L.axis[2] * L.axis[2] + L.axis[1] * L.axis[1]) + L.axis[0] * L.axis[0];
+    if (!IsTube(L) || L.axis[1] * L.axis[1] <= 0.98f * d) return 0.0f;
+    const float s = std::fabs(L.axis[1]) / kTubeTests;
+    lowY += std::min(L.axis[1], 0.0f) + 0.5f * s;
+    return s;
 }
 inline void AreaShape(Lamp& L, const float u[3], const float v[3], const float nrm[3], float e0, float e1, bool disc) {
     for (int i = 0; i < 3; i++) L.axis[i] = u[i], L.spill[i] = v[i];
@@ -184,11 +196,6 @@ inline float Visibility(const float reached[3], const float law[3]) {
     return std::isfinite(v) ? std::min(v, kMaxVis) : 0.0f;
 }
 
-// An outdoor (raw) texel without the GPU lamps: the game stores min(sum, 1) per channel (FUN_006a31d0, rooms with +0x18
-// set); the solve's sum minus what the GPU lamps added, at least 0
-inline void RawWithout(const float sum[3], const float gpu[3], float out[3]) {
-    for (int c = 0; c < 3; c++) out[c] = std::clamp(sum[c] - gpu[c], 0.0f, 1.0f);
-}
 
 // ---- An indoor texel (a room with +0x18 clear; FUN_006a31d0, read 13/10 and replayed by room_bounce_model.h) ----
 // x = the room's normalisation (+0x160) x the sum; c = x tanh(m / 2) / m for the mean m >= 0.01 (0x0069EC40), else x;
@@ -204,11 +211,21 @@ inline void Tone(const float x[3], float c[3]) {
     const float f = static_cast<float>((2.0 / (std::exp(-static_cast<double>(m)) + 1.0) - 1.0) / static_cast<double>(m));
     for (int i = 0; i < 3; i++) c[i] = x[i] * f;
 }
+// (physical rooms; tone_soft) Tone with its step at mean 0.01 spread over 0.004 .. 0.02: the game's curve halves a texel's light there, so
+// a brighter texel showed darker than its neighbour (G 8 beside G 4 on a kitchen floor, 05/11) and a gradient drew a contour. The same
+// curve past 0.02; a faint texel keeps x. Monotonic in the light (tools/rt_lamps_test)
+inline void ToneSoft(const float x[3], float c[3]) {
+    const float m = std::max((x[2] * 0.33333334f + x[1] * 0.33333334f) + x[0] * 0.33333334f, 1e-6f);
+    const float s = std::clamp((m - 0.004f) / (0.02f - 0.004f), 0.0f, 1.0f), a = s * s * (3.0f - 2.0f * s);
+    const float f = 1.0f + ((2.0f / (std::exp(-m) + 1.0f) - 1.0f) / m - 1.0f) * a;
+    for (int i = 0; i < 3; i++) c[i] = x[i] * f;
+}
 inline float Weight(const float c[3], float k) { return 1.0f - Sat(k * ((c[2] + c[1]) + c[0])); }
-// The texel (colour, alpha; before the pack's clamp) from x, ramp x ambient and ramp
-inline void IndoorTexel(const float x[3], const float rampAmb[3], float ramp, float k, float out[4]) {
+// The texel (colour, alpha; before the pack's clamp) from x, ramp x ambient and ramp (soft: ToneSoft, a physical room's compose)
+inline void IndoorTexel(const float x[3], const float rampAmb[3], float ramp, float k, float out[4], bool soft = false) {
     float c[3];
-    Tone(x, c);
+    if (soft) ToneSoft(x, c);
+    else Tone(x, c);
     const float w = Weight(c, k);
     for (int i = 0; i < 3; i++) out[i] = c[i] + w * rampAmb[i];
     out[3] = w * ramp;
@@ -228,6 +245,53 @@ inline bool IndoorSplit(const float x[3], const float p[4], float k, float rampA
     }
     ramp = p[3] / w;
     return std::isfinite(ramp) && std::isfinite(rampAmb[0]) && std::isfinite(rampAmb[1]) && std::isfinite(rampAmb[2]);
+}
+// The ramp terms of a map's texels whose split failed only because the solve's lamps saturated them (weight 0: the game's texel
+// holds no ambient, so none can be read back). Kept as 0 they lit nothing once the lamp moved away: the old light pool showed
+// as a dark, texel-edged patch until the room's next solve (0.67-0.72x, 23:07 videos and the recorded scenes of 03/11). The
+// ramp (FUN_006ab210) depends on the height alone and the ambient is the pass's, so they are taken from the map's texels that
+// split well: a least-squares line of ramp in y (within their range), times their median ambient-to-ramp ratio. A filled
+// texel's weight is 0 at its solve's sum, so the solve's own light is unchanged
+struct SplitFill {
+    bool ok = false;
+    float a = 0.0f, b = 0.0f, lo = 0.0f, hi = 0.0f, ratio[3] = {};
+    float Ramp(float y) const { return std::clamp(a + b * y, lo, hi); }
+};
+// good: (y, ramp, rampAmb r, g, b) of texels whose split worked with a weight of at least 0.2
+inline SplitFill FitSplit(std::vector<std::array<float, 5>> good) {
+    SplitFill f;
+    if (good.size() < 4) return f;
+    double n = 0, sy = 0, sr = 0, syy = 0, syr = 0;
+    f.lo = f.hi = good[0][1];
+    for (const auto& g : good) n++, sy += g[0], sr += g[1], syy += g[0] * g[0], syr += g[0] * g[1], f.lo = std::min(f.lo, g[1]), f.hi = std::max(f.hi, g[1]);
+    const double var = syy / n - (sy / n) * (sy / n);
+    f.b = var > 1e-6 ? static_cast<float>((syr / n - (sy / n) * (sr / n)) / var) : 0.0f;
+    f.a = static_cast<float>(sr / n - f.b * (sy / n));
+    std::erase_if(good, [](const std::array<float, 5>& g) { return !(g[1] > 1e-3f); });
+    if (good.empty()) return f;
+    for (int q = 0; q < 3; q++) {
+        std::nth_element(good.begin(), good.begin() + good.size() / 2, good.end(),
+                         [q](const std::array<float, 5>& x, const std::array<float, 5>& y) { return x[2 + q] / x[1] < y[2 + q] / y[1]; });
+        f.ratio[q] = good[good.size() / 2][2 + q] / good[good.size() / 2][1];
+    }
+    f.ok = std::isfinite(f.a) && std::isfinite(f.b) && std::isfinite(f.ratio[0]) && std::isfinite(f.ratio[1]) && std::isfinite(f.ratio[2]);
+    return f;
+}
+// IndoorSplit, with a fill for a texel the solve's lamps saturated (weight 0, p otherwise the game's tail)
+inline bool IndoorSplitOrFill(const float x[3], const float p[4], float k, float y, const SplitFill& fill, float rampAmb[3], float& ramp) {
+    if (IndoorSplit(x, p, k, rampAmb, ramp)) return true;
+    float c[3];
+    Tone(x, c);
+    // (the game's tail at weight 0: its colour the toned sum, its alpha 0; any other p is a texel this model does not describe)
+    bool tail = fill.ok && !(Weight(c, k) > 1e-4f) && std::isfinite(p[3]) && p[3] >= 0.0f && p[3] <= 1e-4f;
+    for (int q = 0; q < 3 && tail; q++) tail = std::isfinite(p[q]) && std::fabs(p[q] - c[q]) <= 1e-4f + 1e-4f * std::fabs(c[q]);
+    if (!tail) {
+        rampAmb[0] = rampAmb[1] = rampAmb[2] = ramp = 0.0f;
+        return false;
+    }
+    ramp = fill.Ramp(y);
+    for (int q = 0; q < 3; q++) rampAmb[q] = ramp * fill.ratio[q];
+    return true;
 }
 
 } // namespace GpuLampLaw

@@ -12,5 +12,7 @@ bool Install(std::string& error); // checks and hooks the two writers (no texel 
 void Uninstall();
 void Set(bool on, float strength); // render thread, every frame; strength 0..1
 void SetNightLevel(float level);   // render thread, every frame
+long Writes();                     // the cube writes so far, by day too
+void NoteArmed(const void* probe); // any thread: Apex just made this probe due (the reflection line of its next capture says so)
 std::string Status();
 }

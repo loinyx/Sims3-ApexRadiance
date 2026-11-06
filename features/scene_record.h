@@ -25,7 +25,7 @@
 namespace SceneRecord {
 
 constexpr uint32_t kMagic = 0x53585041u; // "APXS"
-constexpr uint32_t kVersion = 1;
+constexpr uint32_t kVersion = 2; // (2: Edge::glazed written; a version 1 file holds whatever its padding held there)
 struct FileHead {
     uint32_t magic = kMagic, version = kVersion;
     uint32_t edgeSize = sizeof(RtLampProxy::Edge), lawSize = sizeof(GpuLampLaw::Lamp);
@@ -121,7 +121,7 @@ inline bool Read(std::FILE* f, Scene& s, std::string& why) {
     In in{f};
     FileHead h{}, want{};
     in.Get(h);
-    if (!in.ok || h.magic != kMagic || h.version != kVersion) return why = "not a scene recording of this version", false;
+    if (!in.ok || h.magic != kMagic || h.version < 1 || h.version > kVersion) return why = "not a scene recording of this version", false;
     if (h.edgeSize != want.edgeSize || h.lawSize != want.lawSize) return why = "recorded with another layout", false;
     char kind = 0;
     while (std::fread(&kind, 1, 1, f) == 1) {
@@ -133,6 +133,8 @@ inline bool Read(std::FILE* f, Scene& s, std::string& why) {
                 RtLampProxy::Story st;
                 in.Get(st.story), in.Get(st.w), in.Get(st.h), in.Get(st.plane);
                 in.GetVec(st.edges), in.GetVec(st.floorY), in.GetVec(st.roofed), in.GetVec(st.ceil), in.GetVec(st.placed), in.GetVec(st.removed), in.GetVec(st.room);
+                if (h.version < 2)
+                    for (RtLampProxy::Edge& e : st.edges) e.glazed = 0;
                 lot.stories.push_back(std::move(st));
             }
             if (!in.ok) break;
@@ -158,7 +160,8 @@ inline bool Read(std::FILE* f, Scene& s, std::string& why) {
 // ---- the comparison (shared by the tool and its checks) ----
 // The GPU's term of one lamp at one texel (AccPhysPS): vis = the cube shadow's share, t3d = the raw 3D test (1 untested), fill =
 // the lamp's furniture fill floor (RtLampGpu::FurnitureFill; 0: the game's own term, which Compare scores)
-inline void GpuTerm(const Lamp& L, const RoomHead& h, const Texel& t, float vis, float t3d, bool useReach, float out[3], float fill = 0.0f) {
+// pane: the glass share (RtLampProxy::PaneShare; 1 none), after the soft cut as AccPhys takes it
+inline void GpuTerm(const Lamp& L, const RoomHead& h, const Texel& t, float vis, float t3d, bool useReach, float out[3], float fill = 0.0f, float pane = 1.0f) {
     const bool wall = std::fabs(t.n[1]) < 0.5f;
     float law[3];
     GpuLampLaw::Eval(L.law, t.p, t.n, h.reachOn && L.reach && wall && useReach ? 1.0f : 0.0f, law);
@@ -175,7 +178,7 @@ inline void GpuTerm(const Lamp& L, const RoomHead& h, const Texel& t, float vis,
         const float x = (cs - h.thr) / h.thr;
         k = x * x * (3.0f - 2.0f * x);
     }
-    for (int q = 0; q < 3; q++) out[q] = L.row * c[q] * k;
+    for (int q = 0; q < 3; q++) out[q] = L.row * c[q] * k * pane;
 }
 inline float MaxDiff(const float a[3], const float b[3]) {
     return std::max({std::fabs(a[0] - b[0]), std::fabs(a[1] - b[1]), std::fabs(a[2] - b[2])});
@@ -219,6 +222,8 @@ inline void Compare(const Room& r, const RtLampProxy::Mesh* mesh, const RtLampPr
     RtLampGpu::BlockerTable blk;
     blk.rows = r.blk;
     const bool haveBlk = r.h.blkHeader >= 0.0f && !r.blk.empty();
+    std::vector<RtLampProxy::Pane> panes;
+    if (lot) RtLampProxy::PanesOf(*lot, panes);
     std::vector<uint32_t> stamp;
     uint32_t mark = 0;
     std::vector<float> game(r.texels.size() * 3);
@@ -237,22 +242,23 @@ inline void Compare(const Room& r, const RtLampProxy::Mesh* mesh, const RtLampPr
             GpuTerm(L, r.h, t, 1.0f, 1.0f, true, lawOnly);
             const float* g = &game[i * 3];
             if (g[0] + g[1] + g[2] <= 0.0f && lawOnly[0] + lawOnly[1] + lawOnly[2] <= 0.0f) continue;
-            float vis = 1.0f;
+            float vis = 1.0f, pane = 1.0f;
             if (mesh && lot) {
                 float Pl[3];
                 RtLampProxy::ToLot(*lot, t.p, Pl);
+                pane = RtLampProxy::PaneShare(panes, Ll, Pl); // (the texel's true point)
                 RtLampProxy::IntoRoom(*lot, r.h.story, r.h.id, Pl); // (as the GPU's shadow lookup: gpu_room_lamps.cpp)
                 vis = RtLampProxy::Visibility(*mesh, Ll, r.h.radius, Pl, visSamples, &stamp, &mark);
             }
             const float t3d = haveBlk && t.tested && vis > 0.0f
-                                  ? blk.Occlude(static_cast<int>(r.h.blkHeader), {L.law.pos[0], L.law.pos[1], L.law.pos[2]}, {t.p[0], t.p[1], t.p[2]})
+                                  ? blk.Occlude(static_cast<int>(r.h.blkHeader), {L.law.pos[0], L.law.pos[1], L.law.pos[2]}, {t.p[0], t.p[1], t.p[2]}, 0.0f, r.h.radius)
                                   : 1.0f;
             s.filled += t.tested && fill > 0.0f && t3d < 1.0f;
             float gpu[3], noT3d[3], noVis[3], noReach[3];
-            GpuTerm(L, r.h, t, vis, t3d, true, gpu);
-            GpuTerm(L, r.h, t, vis, 1.0f, true, noT3d);
-            GpuTerm(L, r.h, t, 1.0f, t3d, true, noVis);
-            GpuTerm(L, r.h, t, vis, t3d, false, noReach);
+            GpuTerm(L, r.h, t, vis, t3d, true, gpu, 0.0f, pane);
+            GpuTerm(L, r.h, t, vis, 1.0f, true, noT3d, 0.0f, pane);
+            GpuTerm(L, r.h, t, 1.0f, t3d, true, noVis, 0.0f, pane);
+            GpuTerm(L, r.h, t, vis, t3d, false, noReach, 0.0f, pane);
             const int tag = TagOf(g, gpu, noT3d, noVis, noReach, lawOnly);
             s.n++, s.within += tag == kOk, s.tags[tag]++, s.mapN[t.map & 3]++, s.mapWithin[t.map & 3] += tag == kOk;
             if (const float d = MaxDiff(g, gpu); d > s.worst) s.worst = d, s.worstTexel = static_cast<uint32_t>(i), s.worstLight = L.light;

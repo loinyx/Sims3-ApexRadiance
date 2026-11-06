@@ -1,6 +1,6 @@
 # Room lamp probe
 
-A developer measurement taken before indoor lamps are drawn on the GPU: each solve of a room of the active lot other than
+A developer measurement of indoor lamps against the GPU's law: each solve of a room of the active lot other than
 room 0 is captured as [Quick outdoor lamp edits](outdoor-lamp-delta.md) captures room 0, and each lot lamp's part of every
 texel is compared with the law [Real-time outdoor lamps](rt-outdoor-lamps.md) draws that lamp with. Nothing is drawn, kept
 or written.
@@ -9,7 +9,7 @@ or written.
 
 | | |
 |---|---|
-| Availability | Developer build only, not released |
+| Availability | Developer mode only |
 | Default | Off |
 | Menu | Developer > Compare lighting paths > Compare indoor lamps with GPU (with Lamp lighting: Instant) |
 | Configuration | `roomLampProbe` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |

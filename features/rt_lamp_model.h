@@ -113,7 +113,7 @@ inline float ComposeBase(float base, float world, bool inner) { return !std::isf
 // ambScale (physical indoor lamps, S8; null: 1): the ramp x ambient read back times the room's ambient now over the one its solve
 // left (AmbScale), so a pass's ambient follows Rooms at Night without a solve; exactly 1 when the ambient is unchanged
 inline bool KeptTexel(const float R[3], const float S[3], const float p[4], float norm, float k, bool roofed, float alphaMin, float dither, float out[4],
-                      const float* ambScale = nullptr) {
+                      const float* ambScale = nullptr, bool toneSoft = false) {
     bool split = true;
     if (roofed) {
         float xs[3], x[3], rampAmb[3] = {}, ramp = 0.0f;
@@ -122,7 +122,7 @@ inline bool KeptTexel(const float R[3], const float S[3], const float p[4], floa
         if (!split) rampAmb[0] = rampAmb[1] = rampAmb[2] = ramp = 0.0f;
         if (ambScale)
             for (int i = 0; i < 3; i++) rampAmb[i] *= ambScale[i];
-        GpuLampLaw::IndoorTexel(x, rampAmb, ramp, k, out);
+        GpuLampLaw::IndoorTexel(x, rampAmb, ramp, k, out, toneSoft);
         for (int i = 0; i < 4; i++) out[i] = std::isfinite(out[i]) ? std::clamp(out[i], 0.0f, 1.0f) : 0.0f;
         if (out[3] < alphaMin) out[3] = alphaMin;
     } else

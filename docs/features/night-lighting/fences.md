@@ -83,7 +83,7 @@ This page covers the `vs_3_0` instanced structure family.
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Fences and stairs catch light | `cercasComLuzDoChao` | bool | on | | Ground light on fences, railings, posts and stairs, and on snow lying on objects and stair tops ([snow.md](snow.md)) |
-| Fence brightness | `forcaNasCercas` | float | 75% | 25 to 200% | Multiplies the atlas term and the per-pixel lamps; 100% = the same light as the ground. With *Realistic lamp reach* on, the per-pixel lamps take the outdoor walls' native lamp scale (not the walls' *Brightness*) and this value (with *Seamless light brightness*) is a trim over its 75% default. Shown when the switch is on |
+| Fence brightness | `forcaNasCercas` | float | 100% | 25 to 200% | Multiplies the atlas term and the per-pixel lamps; 100% = the same light as the ground. With *Realistic lamp reach* on, the per-pixel lamps take the outdoor walls' native lamp scale (not the walls' *Brightness*) and this value (with *Seamless light brightness*) is a trim over its 75% default. Shown when the switch is on |
 
 Both apply live (`LotLightBridge::SetFenceGroundLight`, every frame). The Game fixes section disables these rows unless
 *Street lamps light lots* and *Smooth ground light* (Lighting > Game fixes) are both on (the atlas exists only with both) and offers

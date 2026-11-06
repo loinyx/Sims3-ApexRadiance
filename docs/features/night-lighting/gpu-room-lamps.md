@@ -1,6 +1,6 @@
 # GPU room lamps
 
-A developer option, the first stages of drawing indoor lamps on the GPU: each solve of a room of the active lot other than
+Indoor lamps drawn on the GPU, part of Lamp lighting: Instant (GPU): each solve of a room of the active lot other than
 room 0 is kept, split into the light the GPU will not draw and, per texel and lot lamp, the share of the lamp's law that
 Apex's tests and the game's tests let through, with the room's tail (tone, ambient, dither, pack, wall blur, tile-edge
 copies). The kept rooms are drawn on the GPU over Real-time outdoor lamps' copy of each story map with the lot lamps as they
@@ -12,10 +12,10 @@ probe](gpu-room-lamps-probe.md) on too, each kept solve is recomposed on the CPU
 
 | | |
 |---|---|
-| Availability | Developer build only, not released |
-| Default | Off |
-| Menu | Developer > Compare lighting paths > Keep indoor lamps for GPU (with Lamp lighting: Instant) |
-| Configuration | `gpuRoomLampsCapture` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
+| Availability | Released in 3.0.0, on Steam 1.67.2 with Lamp lighting: Instant (GPU); other game builds keep the game's room solves (see Limitations) |
+| Default | On, physical model, sharper floors; with Classic, on another game build, or when Quick outdoor lamp edits cannot run on the game build, the game's room solves |
+| Menu | No switch of its own (System > Performance > Lamp lighting); its comparison: Developer > Compare lighting paths > Keep indoor lamps for GPU |
+| Configuration | `gpuRoomLamps` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml`, read only in developer mode. An older config with `gpuRoomLampsCapture = false` takes the new model and floor defaults once; with it on, its saved values stay |
 | Source | [`features/outdoor_delta.cpp`](../../../features/outdoor_delta.cpp) (`KeepEnd`, `KeptSelfCheck`, `KeepFinals`, `KeptFinalCheck`, `BuildKeptMap`, `RoomFinalized`), [`features/rt_lamp_model.h`](../../../features/rt_lamp_model.h) (`KeptAdd`, `KeptTexel`), [`features/gpu_room_lamps.cpp`](../../../features/gpu_room_lamps.cpp), [`features/rt_lamp_gpu.cpp`](../../../features/rt_lamp_gpu.cpp) (`RelightKept`), [`shaders/rt_lamps_hlsl.h`](../../../shaders/rt_lamps_hlsl.h) (`AccKeptPS`, `ComposeKeptPS`, `CopyAtPS`, `BlockKeptPS`), [`features/room_map_dither.cpp`](../../../features/room_map_dither.cpp) (the pack input), [`features/level_light_share.cpp`](../../../features/level_light_share.cpp) (`LightEvalHook`, `FinalizeHook`, `LotRooms`), [`features/lamp_mark_filter.cpp`](../../../features/lamp_mark_filter.cpp) (`MarkDecideImpl`), [`features/room_lamp_move.h`](../../../features/room_lamp_move.h) and [`features/room_light_tests.h`](../../../features/room_light_tests.h) (lamp moves), [`features/outdoor_delta_model.h`](../../../features/outdoor_delta_model.h) (`BasisPass`, `BasisPartNow`, `BasisPackInput`: directional maps) |
 
 ## The problem
@@ -277,8 +277,8 @@ lamp's position, not on its colour or intensity.
    the registry) every kept room > 0 whose directional samples the lamp's reach meets now, or whose last write drew it (before
    any: its capture listed it), gets the parts of every lit lamp of the active lot with a law whose reach meets its samples,
    picked as its maps pick them: row (mult x norm scale) x share x the game's step `FUN_0069f280` called now, share =
-   `RtLampProxy::Visibility` over the open-top proxy (16 rays, Shadow softness) x `RoomLightTests::occlude` over the room's 3D
-   records, dropped under 0.01 (`PhysLampPick::BasisShare`, `OutdoorDeltaModel::BasisPartPhys`); its base holds only the lights
+   `RtLampProxy::Visibility` over the open-top proxy (16 rays, Shadow softness), with no 3D test (the game's step takes no room,
+   so its directional maps hold no furniture shadow), dropped under 0.01 (`PhysLampPick::BasisShare`, `OutdoorDeltaModel::BasisPartPhys`); its base holds only the lights
    without a law (`BuildBasis` puts a listed light no light map texel evaluated in the base by `LawOfLight`, as `KeepEnd`'s
    `baked`). Steps on the light tree thread, shares on a worker, the write with stage 4's rules; a room written so is written
    again after its next kept solve (the settle's too). The occluder mark of a lamp's object (0x006C7939) is dropped for a
@@ -361,7 +361,7 @@ lamp's position, not on its colour or intensity.
    `tools/scene_replay` replays every recorded solve through the current GPU term against the game's parts, and
    `tools/apex_health.py` sums up a log; the game warns (`[Health]`) when over 10% of the physical edits in 10 s are
    refused. See [dev-tools-scene-replay.md](../../validation/dev-tools-scene-replay.md).
-30. Sharper floors (03/11, developer, off by default): a class-2 floor map holds 4 texels a metre, so the light of a lamp
+30. Sharper floors (03/11, on by default): a class-2 floor map holds 4 texels a metre, so the light of a lamp
    through a door or a window reached the floor beyond in 25 cm steps (the shadow tile, about 2 cm a texel at 3 m, is not the
    limit). With *Sharper floor light* on, `BuildKeptMap` adds each physical floor texel's 4 sub-texels: phys points at their
    own places on the floor (`PhysLampPick::SubTexelPos`: a step toward a same-plane neighbour the solve wrote, never across a
@@ -379,28 +379,102 @@ lamp's position, not on its colour or intensity.
    composes them into a third render target and copies their places over the sharper map. A map with more than 16384 such
    texels, or room 0 with kept (Replica) parts, keeps the upsampled copy. Cost: 3 points of 80 B per sub-texel (15 MB of
    DEFAULT buffers at the cap) and room 0's floor sums again at 4 times its points in a floor map's relight.
+   A whole room-0 tile beside a diagonal wall keeps its texels in the split tiles' atlas, while outdoor floors read the map by position, so a deck showed
+   those tiles with no lamp light, in steps along the wall ([room-light-maps](../../engine/room-light-maps.md)). `PrepareJob` adds a copy of such a
+   tile's texels at its place in the tile columns (`PhysLampPick::AddFloorGridTwins`, 64 points a tile at class 2 and only with no kept (Replica) parts).
+   A map with no relit copy keeps the steps, and a half tile's room-0 triangle still reads the other half's texels. Offline only, unverified in game.
 31. Physical model, 03/11 fixes:
    - Furniture fill: the game's point-light test leaves the floor under a lamp's own table near black (14:35 capture). A lamp
      standing on a top of its room's records (`BlockerTable::FillOf`, `RoomLightTests::StandsOn`; not a dropped one) keeps
-     at least 15% of its light under furniture (`RtLampGpu::FurnitureFill` = fill + (1 - fill) x T3D, the room table's column
+     at least 10% of its light under furniture, more towards the shadow's edge (`kFurnitureFill`, `kFillGlow`) (`RtLampGpu::FurnitureFill` = fill + (1 - fill) x T3D, the room table's column
      w, in `AccPhysPS` and `AccPhysXPS`); every other lamp keeps the game's 3D test, so the soft furniture shadows of ceiling
-     lamps are unchanged. 15% is an estimate (floor albedo about 0.3 x about half the sky open under a table), unverified
+     lamps are unchanged. The fill is an estimate (floor albedo about 0.3 x about half the sky open under a table), unverified
      in game. The directional maps keep the game's dark (`BasisPartPhys`). `scene_replay` and `[GpuOracle]` score the game's
      term and report the share of texels the fill lifts apart.
    - Street lamps on upper walls: room 0's export keeps the parts of lamps of no lot or another lot (unreadable lots left
      out) apart from the base (`Room0Export::Texel::worldBase`), and `PrepareJob` takes them off the base of an upper wall of
      a double-height room (bit 8, `RtLampModel::ComposeBase`); every other texel keeps its base.
+32. Lighter drag rounds (05/11, offline only): a kept map's phys points are `RtLampGpu::PhysPoints`, four A32B32G32R32F textures in
+   the sum's layout (64 bytes a point against 80 in a vertex buffer), and the passes draw them as dense quads (`AccPhysInPS`,
+   `T3dDensePS`): a point fills a 2 x 2 pixel quad of the GPU with one live pixel. `UploadKept` refuses a layout with a hole.
+   `T3dDensePS` takes one lamp a pass into its channel (the fetched position exceeds ps_3_0's temporaries inside `T3dPS`'s lamp
+   loop) and walks the records only where `AccPhys` will read the result, by the same law test with the threshold 1% lower.
+   Room 0 stays on points: its texels sit at sparse places of the map. `rt_lamps_test` `PhysKeptCheck` compares the quads with
+   one point per texel bit for bit (furniture fills, tubes, shifted lookups and two batches). Scratch benchmark, RTX 4070
+   Ti SUPER, the 05/11 capture's shape (47 maps, 436,140 points, 3 lamps): a round 10.9 to 7.5 ms, 0 sums different. The small
+   maps' draws are bound by the longest texel's walk, not by their pixels: the same points in one map take 1.9 ms.
+33. Table legs (physical model): the furniture records hold a table's top alone, so its feet cast nothing. `ObjectLegs`
+   ([`object_legs.h`](../../../features/object_legs.h), table [`object_legs_data.inc`](../../../features/object_legs_data.inc)) bakes
+   205 capsules for 36 of the game's table models from their meshes (`tools/object_legs_table`), each a soft streak in the 3D test
+   (`PostT`). A lamp up to `kPostHighM` (1.5 m) over a leg's top casts the full streak. Above that the streak fades on a smoothstep,
+   gone at `kPostGateM` (3.0 m), and its floor edge widens by up to `kPostHighW` (0.125 m), inside `kPostReach`: under a ceiling lamp
+   a leg adds a faint soft foot to the furniture's soft shadow, never a hard streak. Custom content keeps the top alone.
+34. Stairs in the shadow tiles (physical model): the occluders hold walls, roofs and slabs only. `StairSet`
+   ([`stair_set.h`](../../../features/stair_set.h)) keeps, from the opaque instanced draws the mesh collector reads, the triangles
+   over or beside a floor hole, between the hole's story and the one below, at most 4,096 a lot, in lot space until the lot's
+   geometry changes. The set reaches the GPU tiles alone: the CPU occluders never hold it and no room goes to its solve for it.
+
+### Objects moved in a drag
+
+An object's shadow used to change only at the room's solve, and that solve waits for the drag to end, so the shadow stayed behind for the
+whole drag plus about 0.48 s. The game's move writes each blocker's fields in place, so the addresses a solve read keep following the object.
+At most every 100 ms after an object move or occluder mark, `LiveTests` in `outdoor_delta.cpp` compares those blockers with the kept records.
+A room that already has a moved record is read in every frame an object moved (`RoomLightTests::LiveDue`), once a frame, in the round that
+reads the lamps. At 100 ms a table dragged with its lamp stood up to 0.9 m behind the lamp, its floor shadow swung by 2.3 times that, and its
+fill went off whenever the lamp left the old top. If a record changed, the room gets a new table with the record's sphere made again (`RoomLightTests::Bound`) and its legs placed again.
+The room's maps are then relit, as for a step of a lamp drag. The room's next solve replaces the table. Switch: `live_object_tables`.
+
+- A record read live has no shape in the table, so the carry of a table dragged with its lamp leaves it alone and nothing moves twice.
+- The carry stays until a capture shows the move hook fires on every drag step in Live mode too. In the Build mode drag of 05/11 it fired about
+  3.7 times a step (124 moves a second, 33 steps a second) and the carry moved nothing; read the `[LiveTable]` lines of a minute of Live mode.
+- A table dragged with no lamp moving now relights its room and the rooms joined to it at each step, not 10 times a second. UNVERIFIED in the game.
+- Room 0, the directional maps, a new object and an object dragged into another room still wait for the solve.
+
+### Box-type seats
+
+The LITE of a box-type chair or sofa holds its arms as zero-thickness sheets at the box's full height. Seen nearly edge-on, the sheets' band
+draws a thin streak far past the shadow. `DrawnBlockers` in `rt_lamp_blockers.h` gives the GPU's copy of exactly that shape short arms and a
+level cap. The records as read stay what the directional maps and the comparisons use. Switch: `chair_arm_caps`.
+
+This trades agreement with the game for a shape closer to the mesh, so the `physical vs the game's last solve` lines read lower on these
+records. `kArmHeight` is tuned and unverified in game.
+
+### The end of a furniture band
+
+The game drops a record the moment the line leaves its sphere. Past a chair's top the 0.35 m band still has about 0.45 of its opacity there, so
+the shadow stopped at a step along the sphere's silhouette, a crisp round arc on the floor. `CutFade` in `rt_lamp_blockers.h` and the shader's
+`BlockerT` fade the band over the sphere's last 0.12 m (`kCutFadeM`, read from the table's header row). Posts and true-size edges keep the game's
+test. The end stays a soft taper, it does not become square. Offline on the 23-40-21 records, the step falls from 0.80 to 0.16 and a ceiling lamp's
+shadow core stays: 8.3% of the floor moves by more than 0.05, mean T 0.370 to 0.393. The `physical vs the game's last solve` lines read lower in that
+zone, and a scene file recorded before this keeps the step when replayed. Switch: `sphere_cut_fade`. UNVERIFIED in game.
+
+### Long sessions
+
+No failure stops the GPU's light for good. Each case below used to last until a solve, a lot change or a device reset, and now tries again on a timer:
+
+| Failure | Next try |
+|---|---|
+| A map failed to draw or upload (`RetryLater`, `PhysLampPick::RetryMs`) | Made again from its kept solve after 5 s, doubling up to 320 s; a new kept solve starts the count again |
+| A shader object could not be made 5 times in a row (`g_makeFails`) | Once a minute |
+| Room 0 sent to its solve `kSolveAsks` (3) times with no kept solve or occluders | Once a minute (`kSolveRetryMs`) |
+| The lot's kept parts overflowed the memory budget (`g_budgetOut`) | Clears when the kept bytes fall under 80% of the budget |
+
+`kMaxWatch` in `rt_outdoor_lamps.cpp` holds 128 maps, in a two-word dirty mask, so a round of 87 maps leaves none unwatched.
 
 ## Settings
 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
-| Keep indoor lamps for GPU | `gpuRoomLampsCapture` | bool | off | | Developer only, with Lamp lighting: Instant. Keeps each room solve of the active lot and draws its lamps on the GPU; colour, intensity and switch edits of lamps drawn in every room listing them solve no room at once (the directional maps objects read are written again at the end of the room update) (their rooms are solved 2 s after the last edit); with the probe on, logs the self-checks |
-| Indoor lamp model | `roomLampModel` | enum | replica | replica, physical | Developer only, shown with Keep indoor lamps for GPU on. Replica: everything above. Physical: see 16 to 25; rooms > 0 and room 0 drawn from the lot lamps' laws by reach; value, switch and move edits and new lamps solve no room (a switch, an intensity change, a move into another room or a new lamp settles its rooms 2 s later; a move into room 0 and a deleted lamp take the game's solves). A change drops the kept rooms and sends the active lot's rooms to their solve |
-| Sharper floor light | `roomLampSharpFloors` | bool | off | | Developer only, shown with the physical model. Floor maps drawn at twice their size (30); a change drops the kept rooms and sends the active lot's rooms to their solve |
+| Keep indoor lamps for GPU | `gpuRoomLamps` | bool | on | | The switch is developer only, with Lamp lighting: Instant; players always have it on. Keeps each room solve of the active lot and draws its lamps on the GPU; colour, intensity and switch edits of lamps drawn in every room listing them solve no room at once (the directional maps objects read are written again at the end of the room update) (their rooms are solved 2 s after the last edit); with the probe on, logs the self-checks |
+| Indoor lamp model | `roomLampModel` | enum | physical | replica, physical | The choice is developer only, shown with Keep indoor lamps for GPU on. Replica: everything above. Physical: see 16 to 25; rooms > 0 and room 0 drawn from the lot lamps' laws by reach; value, switch and move edits and new lamps solve no room (a switch, an intensity change, a move into another room or a new lamp settles its rooms 2 s later; a move into room 0 and a deleted lamp take the game's solves). A change drops the kept rooms and sends the active lot's rooms to their solve |
+| Sharper floor light | `roomLampSharpFloors` | bool | on | | The switch is developer only, shown with the physical model. Floor maps drawn at twice their size (30); a change drops the kept rooms and sends the active lot's rooms to their solve |
+| True-size furniture shadows | `roomLampTrueShadows` | bool | off | | Developer only, shown with the physical model. Off keeps the game's soft band, the soft furniture shadows of ceiling lamps |
 
 ## Limitations
 
+- Table legs cast nothing from a lamp 3 m or more over their tops, and only a faint foot past 1.5 m; both heights and the streak's
+  strength are unverified in game.
+- Steam 1.67.2 only: the 3D blockers' vtables and the test constants (`room_light_tests.h`) are fixed Steam addresses, and the physical path reads and writes room and probe fields at Steam's offsets. On another build every 3D blocker would be left out of the GPU's table, so the capture stays off there: Instant draws the outdoor lamps and the game solves the rooms. Those builds need the vtables and constants found by signature first.
 - A is a share of the law's r + g + b: where the law's hue differs from the game's evaluation, the recomposed channels
   differ slightly.
 - B is unknown where the game never tested the lamp (its colour faded or was dropped before the wall test); it is kept as 0,
@@ -412,8 +486,8 @@ lamp's position, not on its colour or intensity.
 - The tail needs Smooth light maps' pack thunk (`RoomMapDither`): without it the room is kept without its tail
   (`final self-check: not run (...)`).
 - A roofed texel whose ambient weight is 0 at the solve (bright texels: k x the toned sum >= 1) gives no ramp back: it is
-  rebuilt without the ambient term, exact while it stays that bright; a lamp edit that darkens it would need the ramp from
-  `FUN_006ab210` (not kept yet).
+  filled from the map's well-split texels (`GpuLampLaw::FitSplit`, `IndoorSplitOrFill`; about 1.0 of truth in the offline model,
+  not checked against game pixels). `KeptTexel` and `KeptFinalCheck`'s noSplit count still use the plain split.
 - A roofless room's alpha (the floor mask, the exit light) and the rows lit beyond a class-2 wall block's edges are kept as
   the solve left them, not recomposed from the lamps.
 - A kept texel a tile-edge copy of a texel no capture holds overwrote keeps the game's value; a class-2 wall texel in no
@@ -471,6 +545,11 @@ lamp's position, not on its colour or intensity.
   leaves the maps to the settle. Not checked in game yet.
 - The sum is added with post-pixel-shader blending into an A32B32G32R32F target; a device without it draws nothing (logged).
 - Each part is a 80-byte point in a DEFAULT vertex buffer (estimated, not measured: 0.5 to 6 MB of video memory a room).
+- Glass is charged on kept rooms only: room 0's physical draw has no pane pass, so an indoor lamp through a window lights the outside
+  at full strength. If the game charges that pass (read in its code, not measured), the outside is up to 31% brighter than its solve.
+- `GpuRoomLamps::PhysPasses` does not fall back to fewer tile rows when growing the atlas fails: that room shows the game's map until a
+  retry works. Reachable only when video memory runs out.
+- `T3dDensePS` walks every pane of the lot for each texel and lamp; its cost on a big lot is not measured.
 
 ## Technical reference
 
@@ -669,5 +748,6 @@ lamp's position, not on its colour or intensity.
 
 ## See also
 
+- [Validation](../../validation/night-lighting-gpu-room-lamps.md), [history](../../history/night-lighting-gpu-room-lamps.md)
 - [Room lamp probe](gpu-room-lamps-probe.md), [Real-time outdoor lamps](rt-outdoor-lamps.md), [Quick outdoor lamp edits](outdoor-lamp-delta.md)
 - [engine/room-light-maps.md](../../engine/room-light-maps.md)

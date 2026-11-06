@@ -13,6 +13,8 @@ Path(sys.argv[1]).with_name('widgets_recorded.cpp').write_text(
            .replace('bool BeginAdvanced(const char* id,', 'bool RecordedBeginAdvanced(const char* id,', 1), encoding='utf-8')
 recorder = Path('features/recorder.cpp').read_text(encoding='utf-8')
 Path(sys.argv[1]).with_name('recorder_under_test.inc').write_text(recorder[recorder.index('namespace Recorder {'):], encoding='utf-8')
+Path(sys.argv[1]).with_name('recorder_limits_under_test.inc').write_text(
+    recorder[recorder.index('constexpr DWORD kMaxMs'):recorder.index('bool g_on = false')], encoding='utf-8')
 gate_start = source.index('std::atomic<bool> g_menuAvailable')
 Path(sys.argv[1]).with_name('startup_gate_under_test.inc').write_text(source[gate_start:source.index('bool BannerNeeded()', gate_start)], encoding='utf-8')
 

@@ -12,8 +12,6 @@ void OnPresent(float nightLevel);
 // Many lamps switched by the player within a moment ("all the lights" of a lot): kMassSwitches or more user switches
 // within kMassWindowMs, held for kMassHoldMs after the last one. Any thread.
 bool MassSwitchActive();
-// Grows by one at each new burst of switches
-long MassEventId();
 // Any player's switch, one lamp is enough (switched where it is; not a light switching itself, not at dusk or dawn), held
 // for kMassHoldMs after the last one; its event id grows at each new one (a room takes the quick pass once per event).
 // Any thread.
@@ -23,9 +21,6 @@ long SwitchEventId();
 unsigned long SwitchEventStart();
 // GetTickCount of the latest player switch (bit 0 set; 0 = none yet)
 unsigned long SwitchLastTick();
-// How many player switches so far (grows by one at each): SolvedSince compares solve starts with it, as a solve begun in the
-// same GetTickCount step as the switch (10-16 ms) is one a tick cannot tell before from after
-unsigned long SwitchSerial();
 // 12/10, lamp edits all at once (AtriumHold): GetTickCount of the latest player edit (switch, value, move or drag step, a
 // lamp into another story, a lamp added or removed; bit 0 set, 0 = none; never at dusk or dawn), and how many edits so far
 // (RoomLightQueue stamps the solve starts with it, LevelLightShare the urgent marks). Any thread.
@@ -45,6 +40,11 @@ bool HandledLately(uintptr_t light, unsigned long withinMs);
 bool FurnitureMovedWith(float x, float z);
 // Any thread: the object whose first occluder shape is `shape` (a 3D record's first blocker) moved lately (PhysLampPick::ShapeMoved)
 bool ShapeMoved(uintptr_t shape);
+// The same within `ms` (a table already carried in its room's solve keeps following its lamp between its object's marks, which
+// came 0.6-2 s apart in a drag: between them the carry froze and the table's shadow stayed behind, 03/11 23:26 capture). The
+// callers bound it by the current drag (GpuRoomLamps::PhysDragMs): a lamp picked up alone after the table's drop leaves it
+bool ShapeMovedWithin(uintptr_t shape, unsigned long ms);
+constexpr unsigned long kCarryStickMs = 2000;
 // The calling thread's room marks from lamp entry updates are kept back from BeginDeferMarks to the matching
 // EndDeferMarks, then made as the game makes them (replay) or, for the marks of `entry`, dropped (its update changed
 // nothing the rooms read: LevelLightShare's window activation recheck); marks of other entries always go through. Nests;

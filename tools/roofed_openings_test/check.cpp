@@ -1,7 +1,7 @@
 // Outdoor light through openings: the production story grid walk, the roofed rooms' doors and the door visibility test
 // (extracted by run.ps1) on synthetic grids. A colonnade-like roofed room 4 x 4 m with an arch two cells wide on its -z
 // wall, room 0 all around. Then the outside walls' copy (FillWallPatches, SegPass): the arch, a window and a half wall in a
-// copied wall, the ground shade through a door (ground_lamp_shadow.h) and an arch's curve from a mask (ShapeFromAlpha).
+// copied wall, the ground shade through a door (ground_lamp_shadow.h) and an arch's curve from a mask (BakedMask).
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -27,6 +27,7 @@
 #include "features/cut_close_hold.h"
 #include "features/gpu_lamp_law.h"
 using DWORD = unsigned long;
+constexpr uint64_t kOvalMask = 0xB1A6D819077551B7ull, kArchEnd = 0xC2F2066D42A76352ull, kThreeCellMiddle = 0x03EBF4F1E3F162E4ull;
 struct Xform {
     float r[4][4];
 };
@@ -202,23 +203,12 @@ void WallCopyChecks() {
         Check(whole.Result()[static_cast<size_t>(5.6f * 4.0f) * 32 + 10] < 60, "the shade with a whole wall: dark behind the door (as before)");
     }
 
-    // an arch's curve from its cutout mask (no mask is read in game yet): a round head, 32 x 64 alpha over 1 cell
-    // and 3 m, cut below 128; the head 2.4 m at the middle, lower toward the jambs
+    // a round head from the baked table: an arch's end cell, u 0.11 .. 1, sill 0, head 2.34 at its jamb rising to 2.79
     {
-        const int W = 32, H = 64;
-        std::vector<uint8_t> a(static_cast<size_t>(W) * H, 255);
-        for (int col = 3; col < 29; col++) {
-            const float x = (static_cast<float>(col) + 0.5f) / W - 0.5f; // -0.4 .. 0.4 m
-            const float head = 1.9f + std::sqrt(std::max(0.0f, 0.41f * 0.41f - x * x)) * 1.2f; // m over the base
-            for (int r = 0; r < H; r++) {
-                const float y = 3.0f * (1.0f - (static_cast<float>(r) + 0.5f) / H);
-                if (y < head) a[static_cast<size_t>(r) * W + col] = 0;
-            }
-        }
         WallOpenings::MaskShape m;
-        Check(WallOpenings::ShapeFromAlpha(a.data(), W, H, 1, 0, 3.0f, 128, m), "the mask has a hole");
-        Check(std::fabs(m.u0 - 3.0f / 32.0f) < 1e-3f && std::fabs(m.u1 - 29.0f / 32.0f) < 1e-3f && m.sill < 0.05f, "its span and sill");
-        Check(m.head[2] > 2.3f && m.head[0] < m.head[2] - 0.3f && m.head[4] < m.head[2] - 0.3f, "its head is a curve: high in the middle, low at the jambs");
+        Check(WallOpenings::BakedMask(kArchEnd, false, m), "the table holds the mask");
+        Check(std::fabs(m.u0 - 0.11f) < 0.01f && m.u1 == 1.0f && m.sill == 0.0f, "its span and sill");
+        Check(m.head[4] > 2.75f && m.head[0] < m.head[4] - 0.4f, "its head is a curve: low at the jamb, high at the crown");
         Builder sb(12, 12);
         sb.g.xf = Identity();
         const int32_t idx = sb.Wall(true, 3, 4);
@@ -227,10 +217,10 @@ void WallCopyChecks() {
         StoryWallCopy cs;
         cs.segs.push_back(WallSeg{3.0f, 4.0f, 4.0f, 4.0f, 0.0f, 3.0f});
         FillWallPatches(sb.g, cs);
-        const float corner = SegShare(cs, 0, 3.13f, 2.25f, 3.0f, 3.13f, 2.25f, 6.0f), middle = SegShare(cs, 0, 3.5f, 2.25f, 3.0f, 3.5f, 2.25f, 6.0f);
+        const float corner = SegShare(cs, 0, 3.13f, 2.6f, 3.0f, 3.13f, 2.6f, 6.0f), middle = SegShare(cs, 0, 3.8f, 2.6f, 3.0f, 3.8f, 2.6f, 6.0f);
         Check(middle >= 0.99f && corner == 0.0f, "through the arch's curve: lit under its crown, blocked in its corner at the same height");
         GridWhy gwy{};
-        const float A[3] = {3.5f, 2.25f, 3.0f}, B[3] = {3.5f, 2.25f, 6.0f}, C[3] = {3.13f, 2.25f, 3.0f}, D[3] = {3.13f, 2.25f, 6.0f};
+        const float A[3] = {3.8f, 2.6f, 3.0f}, B[3] = {3.8f, 2.6f, 6.0f}, C[3] = {3.13f, 2.6f, 3.0f}, D[3] = {3.13f, 2.6f, 6.0f};
         Check(GridPassImpl(sb.g, A, B, gwy) >= 0.99f && GridPassImpl(sb.g, C, D, gwy) == 0.0f, "the room solves' grid walk takes the same curve");
     }
 }
@@ -268,6 +258,40 @@ struct DoorRule {
         return c.opened;
     }
 };
+// The baked masks: lookup, the mirror by orientation, and the jambs that stay between two masks side by side
+void BakedMaskChecks() {
+    using namespace WallOpenings;
+    bool sorted = true;
+    for (size_t i = 1; i < std::size(kMasks); i++) sorted = sorted && kMasks[i - 1].instance < kMasks[i].instance;
+    Check(sorted, "the mask table is sorted");
+    for (const MaskEntry& e : kMasks) sorted = sorted && e.shape < std::size(kMaskShapes);
+    Check(sorted, "each mask names a shape");
+    MaskShape m, r;
+    Check(!BakedMask(0x1234ull, false, m), "a mask not in the table (custom content) keeps its kind's shape");
+    Check(BakedMask(kArchEnd, false, m) && BakedMask(kArchEnd, true, r), "the arch's end cell is in the table");
+    Check(m.u0 > 0.05f && m.u1 == 1.0f && r.u0 == 0.0f && std::fabs(r.u1 - (1.0f - m.u0)) < 1e-6f && r.head[0] == m.head[4] && r.head[4] == m.head[0] && r.sill == m.sill, "a mask running back is mirrored");
+    Check(!MaskRunsBack(0) && !MaskRunsBack(1) && MaskRunsBack(2) && MaskRunsBack(3) && MaskRunsBack(4) && MaskRunsBack(5) && !MaskRunsBack(6) && !MaskRunsBack(7), "orientations 2 to 5 run back");
+    const auto placed = [](uint64_t mask5, uint64_t mask6) {
+        auto d = std::make_unique<DoorRule>(kCutWindow, kCutWindow, false);
+        d->b.g.openings.clear(), d->b.g.cutsOnWall = 0;
+        for (GridEdge& e : d->b.g.edges) e.open = 0;
+        d->cuts[0].second.tgi[0] = static_cast<uint32_t>(mask5), d->cuts[0].second.tgi[1] = static_cast<uint32_t>(mask5 >> 32);
+        d->cuts[1].second.tgi[0] = static_cast<uint32_t>(mask6), d->cuts[1].second.tgi[1] = static_cast<uint32_t>(mask6 >> 32);
+        PlaceGridOpenings(d->b.g, d->cuts, false, {}, [](const CutRec& rec, GridOpening& o) {
+            MaskShape s;
+            if (!BakedMask(static_cast<uint64_t>(rec.tgi[1]) << 32 | rec.tgi[0], MaskRunsBack(rec.orient), s)) return;
+            o.sill = s.sill, o.u0 = s.u0, o.u1 = s.u1, o.shaped = 1;
+            for (int k = 0; k < kProfile; k++) o.head[k] = s.head[k];
+        });
+        return d;
+    };
+    const auto twoOvals = placed(kOvalMask, kOvalMask);
+    Check(twoOvals->b.g.openings[0].u1 < 0.8f && twoOvals->b.g.openings[1].u0 > 0.2f, "two masked windows side by side keep the wall between them");
+    const auto wide = placed(kThreeCellMiddle, kThreeCellMiddle);
+    Check(wide->b.g.openings[0].u1 == 1.0f && wide->b.g.openings[1].u0 == 0.0f, "cells of one wide hole stay joined");
+    const auto plain = placed(0, 0);
+    Check(plain->b.g.openings[0].shaped == 0 && plain->b.g.openings[0].u1 == 1.0f, "unmasked neighbours lose the jamb as before");
+}
 // A window cut on a diagonal wall opens that diagonal (03/11: it opened the edge along x at its low corner instead), and two
 // windows side by side along the diagonal lose their shared jamb
 void DiagonalCutChecks() {
@@ -1735,6 +1759,7 @@ void CameraTurnChecks() {
 }
 
 int main() {
+    BakedMaskChecks();
     RoofedSendChecks();
     CameraTurnChecks();
     ClosedWindowChecks();

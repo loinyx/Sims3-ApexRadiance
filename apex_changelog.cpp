@@ -6,6 +6,43 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k300Added[] = {
+    "Night Lights: on Steam, Instant (GPU) draws indoor lamps and their shadows too",
+    "Night Lights: indoor lamp edits show at once on every story",
+    "Night Lights: table legs and stairs cast shadows from indoor lamps",
+    "Night Lights: new option Light bounces between rooms, on by default",
+    nullptr};
+constexpr const char* k300Improved[] = {
+    "Night Lights: furniture, metal and stairs follow a dragged indoor lamp without blinking",
+    "Night Lights: a lamp on a table takes the table's shadow with it",
+    "Night Lights: lamp light on floors through doors and arches has no steps",
+    "Night Lights: lamp light passes through diagonal walls and the real shape of each opening",
+    "Night Lights: double-height rooms light the upper half of their walls",
+    "Night Lights: furniture takes up to twice the lamp light at night",
+    "Night Lights: lamp shadows keep their soft edge at door frames",
+    "Night Lights: curtains and furniture along walls take smooth room light",
+    "Night Lights: furniture shadows run on through arches into the next room",
+    "Night Lights: floors change tone smoothly through arches between rooms",
+    "Night Lights: lamp light loses strength at each pane of glass",
+    "Night Lights: outdoor lamps fade slowly at dawn and dusk",
+    "Night Lights: a moved object's shadow follows it during the drag",
+    "Night Lights: sofa and chair arms no longer cast thin streaks",
+    "Night Lights: glossy indoor furniture takes smooth room light",
+    "Recording: up to 60 seconds, and the stop key waits 8 seconds for the light to settle",
+    "Settings: a new default look for lighting and effects, and your own values stay",
+    nullptr};
+constexpr const char* k300Fixed[] = {
+    "Night Lights: GPU lamps recover by themselves after a failure in long sessions",
+    "Night Lights: a table's shadow no longer flickers during a drag",
+    "Night Lights: floors and decks beside diagonal walls and arches show no dark diamonds",
+    "Night Lights: furniture shadows end in a soft fade, with no round edge",
+    "Night Lights: street lamps and sconces reach the game's brightness up close",
+    "Banding Fix: sharpening no longer coarsens the grain in shadows",
+    "Performance: a light map scan no longer raises hundreds of errors a second",
+    "Performance: a model that changes detail no longer risks a crash when drawn",
+    "Household photos keep the hair colour of blond Sims",
+    nullptr};
+
 constexpr const char* k2184Improved[] = {
     "Night Lights: wall and fence shadows on the ground follow a dragged lamp at once",
     nullptr};
@@ -479,6 +516,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"3.0.0", "2026-11-05", k300Added, k300Improved, k300Fixed},
     {"2.18.4", "2026-10-31", nullptr, k2184Improved, k2184Fixed},
     {"2.18.3", "2026-10-30", nullptr, nullptr, k2183Fixed},
     {"2.18.2", "2026-10-29", k2182Added, k2182Improved, k2182Fixed},

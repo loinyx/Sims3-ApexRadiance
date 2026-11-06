@@ -3,6 +3,8 @@
 #include "tester_toggles.h"
 #include "level_light_share.h"
 #include "lamp_mark_filter.h"
+#include "gpu_room_lamps.h"
+#include "outdoor_delta.h"
 #include "apex_log.h"
 #include <windows.h>
 #include <algorithm>
@@ -20,8 +22,8 @@ namespace DragLite {
 thread_local Why t_why = Why::None;
 
 namespace {
-std::atomic<DWORD> g_lastStep{0}; // GetTickCount | 1 of the latest lamp step
-std::atomic<DWORD> g_runFrom{0};  // GetTickCount | 1 of the first step of the current run (steps less than kReleaseMs apart)
+std::atomic<DWORD> g_lastStep{0}; // GetTickCount, never 0 of the latest lamp step
+std::atomic<DWORD> g_runFrom{0};  // GetTickCount, never 0 of the first step of the current run (steps less than kReleaseMs apart)
 std::atomic<bool> g_classic{true}; // Lamp lighting is Classic in effect (SetClassicLighting)
 // Classic, relight only after release: the rooms held during the current drag (g_solveMx), the drag's log line after it
 std::unordered_set<const void*> g_heldRooms;
@@ -37,7 +39,7 @@ std::set<std::tuple<uintptr_t, int, int>> g_rooms; // (tracker, story, id): a se
 std::atomic<long> g_deferredSends{0}, g_repicksHeld{0}, g_dragSolves{0};
 long g_drags = 0, g_totalResent = 0, g_totalHeld = 0; // render thread (the totals of every drag so far)
 bool g_wasEngaged = false;
-std::atomic<DWORD> g_settleFrom{0}; // GetTickCount | 1 when the last drag ended
+std::atomic<DWORD> g_settleFrom{0}; // GetTickCount, never 0 when the last drag ended
 std::string g_last = "no drag yet";
 
 // The room solves begun lately (render / light tree thread, under g_solveMx): the re-pick throttle
@@ -59,7 +61,7 @@ int g_runFrames = 0;
 } // namespace
 
 namespace {
-std::atomic<DWORD> g_lastMove{0};     // GetTickCount | 1 of the latest move step (StepKind::Move)
+std::atomic<DWORD> g_lastMove{0};     // GetTickCount, never 0 of the latest move step (StepKind::Move)
 std::atomic<DWORD> g_lastGameMove{0}; // ... of a lamp the game solves
 std::atomic<bool> g_ownWaiting{false}; // fastOwnRelight: the lamps' own rooms of the current edit still wait (render thread)
 bool Within(const std::atomic<DWORD>& at, unsigned long ms) {
@@ -69,9 +71,9 @@ bool Within(const std::atomic<DWORD>& at, unsigned long ms) {
 bool FastOwn() { return TesterToggles::fastOwnRelight.load(std::memory_order_relaxed); }
 
 // Let go (dragLetGo): the mouse button that held a lamp move, polled once a frame on the render thread
-std::atomic<DWORD> g_letGoAt{0};          // GetTickCount | 1: the button released after a move made while it was down
-DWORD g_buttonDownAt = 0;                 // render thread: the button went down (GetTickCount | 1; 0 = up)
-std::atomic<DWORD> g_releaseAt{0};        // the latest drag's end (GetTickCount | 1)
+std::atomic<DWORD> g_letGoAt{0};          // GetTickCount, never 0: the button released after a move made while it was down
+DWORD g_buttonDownAt = 0;                 // render thread: the button went down (GetTickCount, never 0; 0 = up)
+std::atomic<DWORD> g_releaseAt{0};        // the latest drag's end (GetTickCount, never 0)
 std::atomic<bool> g_releaseLetGo{false};  // ... seen as let go (else the still time)
 std::atomic<DWORD> g_releaseStepGap{0};   // ... ms between its last move step and its end
 bool LetGoOn() { return TesterToggles::dragLetGo.load(std::memory_order_relaxed); }
@@ -89,7 +91,7 @@ void PollButton() {
     // (GetAsyncKeyState reads the physical buttons: the primary one is the right one when they are swapped)
     const int vk = GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON;
     const bool down = GameInFront() && (GetAsyncKeyState(vk) & 0x8000) != 0;
-    const DWORD now = GetTickCount() | 1;
+    const DWORD now = std::max<DWORD>(GetTickCount(), 1);
     if (down) {
         if (!g_buttonDownAt) g_buttonDownAt = now;
         return;
@@ -115,7 +117,7 @@ unsigned long LastReleaseTick() { return g_releaseAt.load(std::memory_order_rela
 bool LastReleaseLetGo() { return g_releaseLetGo.load(std::memory_order_relaxed); }
 
 void NoteLampStep(const char*, StepKind kind, bool gameSolved) {
-    const DWORD now = GetTickCount() | 1;
+    const DWORD now = std::max<DWORD>(GetTickCount(), 1);
     const DWORD last = g_lastStep.exchange(now, std::memory_order_relaxed);
     if (!last || now - last >= kReleaseMs) g_runFrom.store(now, std::memory_order_relaxed);
     if (kind != StepKind::Move) return;
@@ -178,7 +180,7 @@ float SolveCapMs() {
 }
 
 void NoteSolveStarted(const void* room) {
-    const DWORD now = GetTickCount() | 1;
+    const DWORD now = std::max<DWORD>(GetTickCount(), 1);
     g_lastSolveAt.store(now, std::memory_order_relaxed);
     if (Engaged()) g_dragSolves.fetch_add(1, std::memory_order_relaxed);
     else if (g_tracking.load(std::memory_order_relaxed)) g_trackSolves.fetch_add(1, std::memory_order_relaxed);
@@ -190,6 +192,36 @@ void NoteSolveStarted(const void* room) {
         }
     g_started[g_startedPos] = Started{room, now};
     g_startedPos = (g_startedPos + 1) % static_cast<int>(std::size(g_started));
+}
+
+// (the GPU drag hold's 10 s log) picks held and let through, solves begun in a GPU-drawn room during such a drag (none expected)
+std::atomic<long> g_gpuHeld{0}, g_gpuPassed{0}, g_gpuLeaks{0}, g_gpuLeaksHeld{0};
+std::atomic<const void*> g_gpuLeakRoom{nullptr};
+std::atomic<const void*> g_gpuHeldRing[16]{}; // (the log) rooms the hold gave priority 0 lately: a solve of one began anyway
+std::atomic<unsigned> g_gpuHeldPos{0};
+DWORD g_gpuLogAt = 0;
+// some map of it drawn by the GPU, or its kept solve physical and drawn (a fresh keep counts for its first second). A room whose
+// copy was dropped is not held: its solve is the one that lets the edits be taken again (PhysLampPick::EditRefusal)
+bool GpuDrawnRoom(const void* room) { return GpuRoomLamps::DrawnAny(room, 0) || OutdoorDelta::PhysDrawnRoom(room); }
+bool HoldGpuDrawn(const void* room) {
+    if (!room || !GpuRoomLamps::PhysMoveRecent(kStillMs)) return false;
+    if (!GpuDrawnRoom(room)) {
+        g_gpuPassed.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+    g_gpuHeld.fetch_add(1, std::memory_order_relaxed);
+    g_gpuHeldRing[g_gpuHeldPos.fetch_add(1, std::memory_order_relaxed) % 16].store(room, std::memory_order_relaxed);
+    return true;
+}
+
+void NoteGpuDragSolve(const void* room) {
+    if (!room || !GpuRoomLamps::PhysMoveRecent(kStillMs) || !GpuDrawnRoom(room)) return;
+    g_gpuLeaks.fetch_add(1, std::memory_order_relaxed), g_gpuLeakRoom.store(room, std::memory_order_relaxed);
+    for (const auto& r : g_gpuHeldRing)
+        if (r.load(std::memory_order_relaxed) == room) {
+            g_gpuLeaksHeld.fetch_add(1, std::memory_order_relaxed);
+            break;
+        }
 }
 
 bool HoldRepick(const void* room) {
@@ -310,6 +342,14 @@ void OnPresent() {
         }
         g_prevFrame = now;
     }
+    if (const DWORD now = GetTickCount(); now - g_gpuLogAt >= 10000) {
+        g_gpuLogAt = now;
+        const long held = g_gpuHeld.exchange(0), passed = g_gpuPassed.exchange(0), leaks = g_gpuLeaks.exchange(0), leaksHeld = g_gpuLeaksHeld.exchange(0);
+        if (held || leaks)
+            LOG_INFO(std::format("[DragLite] GPU drag hold over 10 s: {} picks of GPU-drawn rooms held, {} picks of other rooms let through; {} solves began "
+                                 "in a GPU-drawn room during the drag ({} of them in a room held at a pick lately; last room {:08X})",
+                                 held, passed, leaks, leaksHeld, reinterpret_cast<uintptr_t>(g_gpuLeakRoom.load(std::memory_order_relaxed))));
+    }
     PollButton();
     if (Engaged()) {
         g_wasEngaged = true;
@@ -344,9 +384,9 @@ void OnPresent() {
     }
     if (!g_wasEngaged && due.empty()) return;
     if (g_wasEngaged) {
-        g_settleFrom.store(GetTickCount() | 1, std::memory_order_relaxed);
+        g_settleFrom.store(std::max<DWORD>(GetTickCount(), 1), std::memory_order_relaxed);
         {
-            const DWORD now = GetTickCount() | 1, move = g_lastMove.load(std::memory_order_relaxed);
+            const DWORD now = std::max<DWORD>(GetTickCount(), 1), move = g_lastMove.load(std::memory_order_relaxed);
             g_releaseAt.store(now, std::memory_order_relaxed);
             g_releaseLetGo.store(LetGo(), std::memory_order_relaxed);
             g_releaseStepGap.store(move ? now - move : 0, std::memory_order_relaxed);

@@ -10,6 +10,10 @@
 #include "rt_lamp_model.h"
 #include "phys_lamp_pick.h"
 #include "lamp_mark_filter.h"
+#include "drag_lite.h"
+#include "arch_ambient.h"
+#include "dev_switches.h"
+#include "unlit_rooms.h"
 #include "apex_log.h"
 #include <windows.h>
 #include <algorithm>
@@ -58,6 +62,20 @@ struct Entry {
     std::vector<std::array<float, 3>> world;
     std::shared_ptr<const RtLampGpu::BlockerTable> blockers; // (its kept room's, shared by the room's maps)
     float blkHeader = -1.0f;
+    // (cross_room_shadows, glass_share; DrawnTable) its kept room's own table, the key of what was joined to it, row 1 counts other rooms'
+    // records too, and the table's glazed spans
+    std::shared_ptr<const RtLampGpu::BlockerTable> blkOwn;
+    float ownHeader = -1.0f;
+    uint64_t tblKey = 0;
+    uint64_t liveKey = 0; // (KeptRef::live as its blkOwn holds it)
+    DWORD retryAt = 0;    // (not ok, RetryLater) made again from its kept solve at this tick (0: never, nothing of it to draw)
+    bool crossHead = false;
+    float paneFirst = 0.0f, paneCount = 0.0f;
+    // (the arches it holds as of archGen; room_bounce: their rows now)
+    uint32_t archGen = 0;
+    std::vector<LevelLightShare::ArchSpan> arches;
+    int bounceN = 0;
+    float bounceRows[2 * ArchAmbient::kBounceRows][4] = {}, bounceHue[4] = {};
     // (a table dragged with its lamp) the table before the records' offsets, the copy drawn with them, and their hash (0: none)
     std::shared_ptr<const RtLampGpu::BlockerTable> blkBase, blkOut;
     uint64_t offHash = 0;
@@ -140,6 +158,18 @@ bool ReadAmbient(const void* room, float* c) {
         return false;
     }
 }
+// (room_bounce) a room's normalisation (+0x160), 1 unread
+float ReadNorm(const void* room) {
+    __try {
+        const float v = *reinterpret_cast<const float*>(static_cast<const BYTE*>(room) + 0x160);
+        return std::isfinite(v) && v > 0.0f ? v : 1.0f;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 1.0f;
+    }
+}
+// The lot's glazed spans as of its generation (Sig; render thread)
+std::vector<RtLampProxy::Pane> g_panes;
+uint32_t g_panesGen = 0;
 
 // The kept solves drawn: room -> (its version, the maps drawn with it); read by the light tree thread (Drawn)
 std::mutex g_drawnMx;
@@ -176,9 +206,11 @@ struct PhysEdit {
     uint32_t frame = 0, lastFrame = 0;
     int steps = 0, maps = 0;
     std::vector<std::tuple<const void*, int, int>> relit;
+    bool relitSince = false; // a map relit since its latest step
 };
 std::vector<PhysEdit> g_physEdits; // (under g_editMx)
-std::atomic<DWORD> g_physMoveAt{0};
+std::atomic<DWORD> g_physMoveAt{0}, g_physDragAt{0}; // (the latest move taken, and the first of its drag)
+std::atomic<uintptr_t> g_physMoveLight{0};
 // (stage 4) the active lot's registered lights this round (OutdoorDelta::LotLamps) and where each is (light -> index)
 std::vector<OutdoorDelta::LotLamp> g_lot;
 std::unordered_map<uintptr_t, size_t> g_lotAt;
@@ -205,6 +237,12 @@ void Drop(Entry& e, const void* room, bool rekept = false) {
     e.gpu.Release();
     e.ok = false;
     Undrawn(room, e.m, rekept);
+}
+std::map<std::tuple<const void*, int, int>, std::pair<uint32_t, int>> g_retries; // (room, cls, m) -> (version, tries)
+void RetryLater(Entry& e, const void* room) {
+    auto& [version, tries] = g_retries[{room, e.cls, e.m}];
+    if (version != e.version) version = e.version, tries = 0;
+    e.retryAt = std::max<DWORD>(GetTickCount() + PhysLampPick::RetryMs(tries++), 1);
 }
 void Mix(uint64_t& h, const void* p, size_t n) {
     const auto* b = static_cast<const unsigned char*>(p);
@@ -336,6 +374,53 @@ void LogEdits() {
 
 } // namespace
 
+namespace {
+// (cross_room_shadows, glass_share) The table an entry draws from: its room's own records, those of the rooms an arch joins to it
+// (BlockerTable::Join; their kept solves as they are now, one hop, roofed rooms) and the lot's glazed spans. Made again when a joined
+// room is solved, a record of it or of this room moved (KeptRef::live: each frame of a drag) or the lot changes, shared by the room's maps. A
+// table carried with its lamp stays carried (e.carried, Sig).
+// shortcut: with live_object_tables off, a neighbour's table dragged with its lamp is joined from its solve's place until that room's next solve
+void DrawnTable(Entry& e, const void* room, int cls) {
+    const bool cross = DevSwitches::CrossRoomShadows(), glass = DevSwitches::GlassShare();
+    if (!cross && !glass) return;
+    uint64_t key = 1469598103934665603ull;
+    if (glass) Mix(key, &g_panesGen, sizeof g_panesGen);
+    Mix(key, &e.liveKey, sizeof e.liveKey);
+    std::vector<const OutdoorDelta::KeptRef*> rooms;
+    if (cross)
+        for (const LevelLightShare::ArchSpan& a : e.arches) {
+            const auto r = std::find_if(g_refs.begin(), g_refs.end(), [&](const OutdoorDelta::KeptRef& k) { return k.room == a.nb; });
+            if (r == g_refs.end() || std::find(rooms.begin(), rooms.end(), &*r) != rooms.end()) continue;
+            rooms.push_back(&*r);
+            Mix(key, &r->room, sizeof r->room), Mix(key, &r->version, sizeof r->version), Mix(key, &r->live, sizeof r->live);
+        }
+    if (key == e.tblKey) return;
+    e.tblKey = key;
+    std::shared_ptr<const RtLampGpu::BlockerTable> t;
+    for (int k = 0; k < 4 && !t; k++)
+        if (const auto s = g_entries.find(std::make_tuple(room, cls, k)); s != g_entries.end() && &s->second != &e && s->second.tblKey == key && s->second.blkOwn == e.blkOwn && s->second.blkBase)
+            t = s->second.blkBase, e.crossHead = s->second.crossHead, e.paneFirst = s->second.paneFirst, e.paneCount = s->second.paneCount;
+    if (!t) try {
+        std::vector<std::shared_ptr<const RtLampGpu::BlockerTable>> hold;
+        std::vector<RtLampGpu::BlockerTable::Part> parts;
+        for (const OutdoorDelta::KeptRef* r : rooms) {
+            std::shared_ptr<const RtLampGpu::BlockerTable> b;
+            int header = -1;
+            if (OutdoorDelta::KeptBlockers(r->room, cls, r->version, b, header)) parts.push_back({b.get(), header}), hold.push_back(std::move(b));
+        }
+        auto j = std::make_shared<RtLampGpu::BlockerTable>(RtLampGpu::BlockerTable::Join({e.blkOwn.get(), static_cast<int>(e.ownHeader)}, parts));
+        e.crossHead = j->rows[1].v[1] > j->rows[0].v[1];
+        e.paneCount = glass ? static_cast<float>(g_panes.size()) : 0.0f;
+        e.paneFirst = glass ? static_cast<float>(j->AppendPanes(g_panes)) : 0.0f;
+        t = std::move(j);
+    } catch (...) {
+        e.tblKey = 0;
+        return;
+    }
+    e.blockers = e.blkBase = std::move(t), e.blkHeader = 0.0f, e.blkOut.reset(), e.offHash = 0;
+}
+} // namespace
+
 uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
     if (!OutdoorDelta::RoomLampCapture()) {
         if (!g_entries.empty()) ReleaseAll();
@@ -346,6 +431,14 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
     OutdoorDelta::SolveUnkept();
     LogEdits();
     OutdoorDelta::KeptRooms(mgr, cls, g_refs);
+    {
+        uint32_t lotGen = 0;
+        const std::shared_ptr<const RtLampProxy::Lot> lot = RtOutdoorLamps::KeptLot(lotGen);
+        if (lotGen != g_panesGen) {
+            g_panes.clear(), g_panesGen = lotGen;
+            if (lot) RtLampProxy::PanesOf(*lot, g_panes);
+        }
+    }
     // this map's entries whose kept solve went or was kept again
     for (auto it = g_entries.begin(); it != g_entries.end();) {
         Entry& e = it->second;
@@ -356,7 +449,9 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
             Drop(e, room, !gone);
             if (e.physical && gone) OutdoorDelta::SolveTouched(room); // (no kept solve of it any more: its game's map, which a lamp edit taken may lack)
             it = g_entries.erase(it);
-        } else
+        } else if (here && !e.ok && e.retryAt && static_cast<int32_t>(GetTickCount() - e.retryAt) >= 0)
+            it = g_entries.erase(it);
+        else
             ++it;
     }
     uint64_t sig = 1469598103934665603ull;
@@ -391,6 +486,7 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                         LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {}: physical: the lot's space could not be read (left as the game's)", d.story, r.id, cls,
                                              kMapName[m]));
                     OutdoorDelta::SolveTouched(r.room);
+                    RetryLater(e, r.room);
                 } else if (RtLampGpu::Engine::UploadKept(dev, d, e.gpu)) {
                     for (const auto* v : {&d.texels, &d.copies, &d.restores})
                         for (const RtLampGpu::TexelVertex& t : *v) e.writes.push_back(static_cast<uint32_t>(t.y) << 16 | static_cast<uint32_t>(t.x));
@@ -401,6 +497,7 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                     e.physReach = std::move(d.physReach);
                     e.blockers = std::move(d.blockers);
                     e.blkHeader = d.blkHeader;
+                    e.blkOwn = e.blockers, e.ownHeader = e.blkHeader;
                     e.ok = true;
                     e.lamps = std::move(d.lamps);
                     e.colourOnly = std::move(d.colourOnly);
@@ -423,6 +520,7 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                     if (LogAllowed())
                         LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {}: its buffers could not be made (left as the game's)", d.story, r.id, cls, kMapName[m]));
                     if (d.physical) OutdoorDelta::SolveTouched(r.room);
+                    RetryLater(e, r.room);
                 }
             }
         }
@@ -445,10 +543,19 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
             // moves the record. The offset stays where the drag left it until the next solve reads the room again. Identity, not
             // place: in a table drag the one entry that moves lies by the lamp's head (03/11 recordings 11:47 to 15:25, all table
             // drags); UNVERIFIED that its shape is the record's (PhysLampPick::ShapeMoved; the [CarryTable] line names both)
-            if (e.blockers != e.blkOut) e.blkBase = e.blockers, e.blkOut.reset(), e.carried.clear(), e.offHash = 0; // (a solve's table)
+            if (const uint32_t ag = LevelLightShare::ArchGen(); ag != e.archGen) e.archGen = ag, LevelLightShare::ArchSpansOf(r.room, e.arches);
+            if (r.live != e.liveKey) { // (an object of the room moved: the records as it stands, ahead of its solve)
+                e.liveKey = r.live;
+                std::shared_ptr<const RtLampGpu::BlockerTable> t;
+                int header = -1;
+                if (OutdoorDelta::KeptBlockers(r.room, cls, r.version, t, header)) e.blkOwn = e.blockers = std::move(t), e.ownHeader = e.blkHeader = static_cast<float>(header);
+            }
+            DrawnTable(e, r.room, cls);
+            if (e.blockers != e.blkOut && e.blockers != e.blkBase) e.blkBase = e.blockers, e.blkOut.reset(), e.carried.clear(), e.offHash = 0; // (a solve's table)
             if (e.blkBase && e.blkHeader >= 0.0f) {
                 const RtLampGpu::BlockerTable& t = *e.blkBase;
-                const int header = static_cast<int>(e.blkHeader), recs = static_cast<int>(t.rows[static_cast<size_t>(header)].v[1]);
+                // (the joined rooms' records too: a lamp on a table of the next room, its table's copy here carried with it)
+                const int header = static_cast<int>(e.blkHeader), recs = static_cast<int>(t.rows[static_cast<size_t>(header) + (e.crossHead ? 1 : 0)].v[1]);
                 std::vector<std::array<float, 3>>& off = e.carried;
                 for (const auto& rl : e.roomLamps) {
                     if (rl.colourOnly) continue;
@@ -467,7 +574,8 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                     for (int i = 0; i < recs; i++) {
                         const bool on = t.StandsOn(header, i, rl.pos);
                         const uintptr_t s = on ? t.ShapeOf(header, i) : 0;
-                        const int k = PhysLampPick::CarryOf(on, on && LampMarkFilter::ShapeMoved(s));
+                        const bool before = std::any_of(off.begin(), off.end(), [&](const std::array<float, 3>& c) { return c[0] == static_cast<float>(i); });
+                        const int k = PhysLampPick::CarryOf(on, on && (LampMarkFilter::ShapeMoved(s) || (before && LampMarkFilter::ShapeMovedWithin(s, std::min(LampMarkFilter::kCarryStickMs, PhysDragMs())))));
                         if (!k) continue;
                         rec = i, kind = k, shape = s;
                         if (k == 1) {
@@ -491,6 +599,8 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                                                                      kind == 2 ? "carried, its object moved" : "left in place, its object did not move")));
                     }
                 }
+                // (a record read live stands where its object does: no shape, LiveTests. Carried too it would move twice)
+                std::erase_if(off, [&](const std::array<float, 3>& c) { return !t.ShapeOf(header, static_cast<int>(c[0])); });
                 uint64_t oh = 0;
                 if (!off.empty()) oh = 1469598103934665603ull, Mix(oh, off.data(), off.size() * sizeof off[0]);
                 if (oh != e.offHash) {
@@ -515,17 +625,45 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                         }
                 }
             }
-            Mix(sig, &e.version, sizeof e.version), Mix(sig, &gen, sizeof gen), Mix(sig, &e.offHash, sizeof e.offHash);
+            Mix(sig, &e.version, sizeof e.version), Mix(sig, &gen, sizeof gen), Mix(sig, &e.offHash, sizeof e.offHash), Mix(sig, &e.tblKey, sizeof e.tblKey), Mix(sig, &e.liveKey, sizeof e.liveKey);
             any = true;
             // (S8) the ceiling pass's ambient follows the room's now: Rooms at Night's sliders and the lamp edits taken, no solve
             const auto ambient = [&] {
                 float now[3];
-                if (ReadAmbient(r.room, now)) RtLampModel::AmbScale(e.ambSolve, now, e.ambScale);
+                const bool haveNow = ReadAmbient(r.room, now);
+                if (haveNow) RtLampModel::AmbScale(e.ambSolve, now, e.ambScale);
                 Mix(sig, e.ambScale, sizeof e.ambScale);
+                // (room_bounce) the neighbours' lamp shares now, in steps of 1/1024 (a quarter of a map level): a drag moves them with no solve,
+                // and a room not listing the lamp relights only when a step is crossed
+                e.bounceN = 0;
+                if (DevSwitches::RoomBounce() && !e.outdoorRoom) {
+                    ArchAmbient::BounceRow b[ArchAmbient::kBounceRows];
+                    int n = 0;
+                    for (const LevelLightShare::ArchSpan& a : e.arches) {
+                        float s[3];
+                        if (n == ArchAmbient::kBounceRows || !UnlitRooms::LampAmbient(a.nb, s)) continue;
+                        const float scale = e.norm / ReadNorm(a.nb);
+                        b[n] = {a.ax, a.az, a.bx, a.bz, a.y0, a.y1, {}};
+                        for (int c = 0; c < 3; c++) b[n].e[c] = std::round(s[c] * scale * 1024.0f) / 1024.0f;
+                        // (the blend's reach, in steps of 1/8 m for the same reason as the shares)
+                        float nb[3];
+                        if (haveNow && ReadAmbient(a.nb, nb)) {
+                            float reach = ArchAmbient::Reach(std::hypot(a.bx - a.ax, a.bz - a.az), now, nb);
+                            for (const LevelLightShare::ArchSpan& o : e.arches)
+                                if (o.nbId != a.nbId) reach = ArchAmbient::HeldReach(reach, a.ax, a.az, a.bx, a.bz, o.ax, o.az, o.bx, o.bz);
+                            if (reach > ArchAmbient::kReach && LevelLightShare::ArchAmbientShared(r.room, now)) reach = ArchAmbient::kReach;
+                            b[n].reach = std::round(reach * 8.0f) / 8.0f;
+                        }
+                        n++;
+                    }
+                    e.bounceN = ArchAmbient::BounceConsts(b, n, e.bounceRows, e.bounceHue);
+                    if (e.bounceN) Mix(sig, e.bounceRows, sizeof e.bounceRows), Mix(sig, e.bounceHue, sizeof e.bounceHue);
+                }
                 // (what its draw reads beside the round's rules: its kept solve, the occluders, its lamps' laws and rows, the ambient)
                 uint64_t k = 1469598103934665603ull;
                 Mix(k, &e.version, sizeof e.version), Mix(k, &gen, sizeof gen), Mix(k, &e.offHash, sizeof e.offHash), Mix(k, &e.physSig, sizeof e.physSig),
-                    Mix(k, e.ambScale, sizeof e.ambScale);
+                    Mix(k, e.ambScale, sizeof e.ambScale), Mix(k, &e.tblKey, sizeof e.tblKey), Mix(k, &e.liveKey, sizeof e.liveKey), Mix(k, &e.bounceN, sizeof e.bounceN);
+                if (e.bounceN) Mix(k, e.bounceRows, sizeof e.bounceRows), Mix(k, e.bounceHue, sizeof e.bounceHue);
                 e.drawKey = k;
             };
             const uint64_t lotNow = LotRoundSig(e.lot);
@@ -648,13 +786,18 @@ bool RelightPhys(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, Entry& e, const 
     const int n = static_cast<int>(lamps.size());
     if (!eng.SetBlockers(dev, e.blockers, err)) return false;
     RtLampGpu::Params p = base;
-    p.thr = e.thr, p.mask = false, p.maskAllGpu = false, p.keptX = false, p.physX = false, p.debugLamp = -1, p.shadowAtMask = true;
+    p.thr = e.thr, p.mask = false, p.maskAllGpu = false, p.keptX = false, p.physX = false, p.debugLamp = -1;
+    p.toneSoft = DevSwitches::ToneSoft(), p.paneFirst = e.paneFirst, p.paneCount = e.paneCount, p.bounceN = e.bounceN;
+    if (e.bounceN) std::memcpy(p.bounceRows, e.bounceRows, sizeof p.bounceRows), std::memcpy(p.bounceHue, e.bounceHue, sizeof p.bounceHue);
     return PhysPasses(dev, eng, lights.data(), lamps.data(), n, base.farDist, err, [&](int g0, int gn, const int* tiles, bool last) {
         std::vector<RtLampGpu::Engine::PhysRoom> room(1);
         room[0].header = e.blkHeader;
         for (int i = 0; i < gn; i++) {
-            room[0].lamp.push_back({lamps[g0 + i].mult, reach[g0 + i], 0.0f});
-            room[0].fill.push_back(e.blockers ? e.blockers->FillOf(static_cast<int>(e.blkHeader), world[g0 + i].data()) : 0.0f);
+            // (a lamp of another room: the joined rooms' records too; the table's z = 2, T3dDensePS. Its own room's lamps walk their own)
+            const auto at = g_lotAt.find(lights[g0 + i]);
+            const bool cross = e.crossHead && at != g_lotAt.end() && (g_lot[at->second].home != e.id || g_lot[at->second].story != e.story);
+            room[0].lamp.push_back({lamps[g0 + i].mult, reach[g0 + i], cross ? 2.0f : 0.0f});
+            room[0].fill.push_back(e.blockers ? e.blockers->FillOf(static_cast<int>(e.blkHeader) + (cross ? 1 : 0), world[g0 + i].data()) : 0.0f);
         }
         if (hiOut)
             return eng.RelightKeptPhysHi(dev, e.gpu, lamps.data() + g0, tiles, reinterpret_cast<const float (*)[3]>(world.data() + g0), gn, room, p, hiOut, 2 * w, 2 * h, err,
@@ -747,6 +890,7 @@ bool ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
                 else OutdoorDelta::SolveTouched(room);
             }
             Drop(e, room);
+            RetryLater(e, room);
             if (partial) return false; // (its places may hold part of this draw: the full draw puts the game's map back under it)
             drewAll = false;
             continue;
@@ -765,6 +909,7 @@ bool ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
                         if (std::find(pe.relit.begin(), pe.relit.end(), key) == pe.relit.end() && pe.relit.size() < 256) pe.relit.push_back(key);
                         QueryPerformanceCounter(&pe.lastAt);
                         pe.lastFrame = g_frame.load(std::memory_order_relaxed);
+                        pe.relitSince = true;
                     }
                 e.editHits.clear();
             }
@@ -778,7 +923,8 @@ bool ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
             d.second |= 1u << m;
             g_drawnAny[room] |= 1u << m;
         }
-        if (!e.checked && !e.expect.empty() && OutdoorDelta::RoomProbe()) { // (a move's copy has none: no read-back stall)
+        // (a move's copy has none: no read-back stall; nor during a drag, its first relight after the drag checks it)
+        if (!e.checked && !e.expect.empty() && OutdoorDelta::RoomProbe() && !PhysMoveRecent(DragLite::kStillMs)) {
             e.checked = true;
             SelfCheck(dev, e, out, w, h);
         }
@@ -802,7 +948,7 @@ bool ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
 int ComposeHi(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DTexture9* copy, int w, int h,
               IDirect3DTexture9* over, bool redrawAll, IDirect3DTexture9* hi, const RtLampGpu::Params& p) {
     std::string err;
-    const auto mine = [&](const Entry& e) { return e.ok && e.physical && e.mgr == mgr && e.cls == cls && e.m == m && e.gpu.physHi && e.drawnKey; };
+    const auto mine = [&](const Entry& e) { return e.ok && e.physical && e.mgr == mgr && e.cls == cls && e.m == m && e.gpu.physHi.t[0] && e.drawnKey; };
     // each room drawn into the copy since its sub-texels were: drawn again into the overlay (all of them after a full relight)
     for (auto& [key, e] : g_entries) {
         if (!mine(e)) continue;
@@ -831,6 +977,7 @@ void ReleaseAll() {
     for (auto& [key, e] : g_entries) e.gpu.Release();
     g_entries.clear();
     g_copies.clear();
+    g_retries.clear();
     g_bytes = 0;
     std::lock_guard<std::mutex> lk(g_drawnMx);
     g_drawn.clear(), g_drawnAny.clear();
@@ -838,6 +985,7 @@ void ReleaseAll() {
 
 void BeginFrame() {
     g_frame.fetch_add(1, std::memory_order_relaxed);
+    OutdoorDelta::LiveFrame();
     // (physical, stage 4) the round's lot lamps, its relights' cost, and the edits whose maps are all relit (none relit in the last
     // 2 rounds, at least one relit; or none in 2 s: logged as such)
     g_costWorst = std::max(g_costWorst, g_costRound), g_costMs += g_costRound, g_costRound = 0.0;
@@ -856,7 +1004,7 @@ void BeginFrame() {
             const bool waiting = std::any_of(g_entries.begin(), g_entries.end(), [&](const auto& kv) {
                 return kv.second.ok && std::find(kv.second.editHits.begin(), kv.second.editHits.end(), it->light) != kv.second.editHits.end();
             });
-            const bool shown = !it->relit.empty() && !waiting && frame - it->lastFrame >= 2;
+            const bool shown = !it->relit.empty() && !waiting && frame - it->lastFrame >= 2 && (it->relitSince || GetTickCount() - it->tick > 2000);
             if (shown || (!waiting && it->relit.empty() && GetTickCount() - it->tick > 2000) || GetTickCount() - it->tick > kEditWaitMs) {
                 done.push_back(std::move(*it));
                 it = g_physEdits.erase(it);
@@ -923,7 +1071,13 @@ void NoteEdit(uintptr_t light, const char* kind, const std::vector<const void*>&
 }
 
 void NotePhysEdit(uintptr_t light, const char* kind) {
-    if (std::strcmp(kind, "move") == 0) g_physMoveAt.store(GetTickCount() | 1, std::memory_order_relaxed);
+    if (std::strcmp(kind, "move") == 0) {
+        // (a stamp never ahead of GetTickCount: "| 1" put an even tick's stamp 1 ms in the future for the rest of that ~16 ms tick,
+        // every "within ms" read wrapped to false and held rooms were picked mid-drag, 6-14 solves per 10 s, 03/11 captures)
+        const DWORD now = std::max<DWORD>(GetTickCount(), 1), was = g_physMoveAt.exchange(now, std::memory_order_relaxed);
+        if (!was || now - was >= 300) g_physDragAt.store(now, std::memory_order_relaxed);
+        g_physMoveLight.store(light, std::memory_order_relaxed);
+    }
     std::lock_guard<std::mutex> lk(g_editMx);
     auto it = std::find_if(g_physEdits.begin(), g_physEdits.end(), [&](const PhysEdit& pe) { return pe.light == light; });
     if (it == g_physEdits.end()) {
@@ -935,6 +1089,13 @@ void NotePhysEdit(uintptr_t light, const char* kind) {
     QueryPerformanceCounter(&it->at);
     it->tick = GetTickCount();
     it->frame = g_frame.load(std::memory_order_relaxed);
+    // (the latest step's relight is timed from it: "-8.8 ms (frames +4294967295)"; a relight drawn before its mark came stays)
+    it->lastAt = it->at, it->lastFrame = it->frame, it->relitSince = false;
+}
+uintptr_t PhysDragLight(unsigned long ms) { return PhysMoveRecent(ms) ? g_physMoveLight.load(std::memory_order_relaxed) : 0; }
+unsigned long PhysDragMs() {
+    const DWORD at = g_physDragAt.load(std::memory_order_relaxed);
+    return at && PhysMoveRecent(300) ? GetTickCount() - at : 0;
 }
 bool PhysMoveRecent(unsigned long ms) {
     const DWORD at = g_physMoveAt.load(std::memory_order_relaxed);

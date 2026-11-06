@@ -51,6 +51,7 @@ bool RoomProbe();
 // budget. With the probe on too, each kept solve is recomposed from what was kept and compared with the solve (the log)
 void SetRoomLampCapture(bool on);
 bool RoomLampCapture();
+bool KeptClearDue(); // the kept rooms wait for the next solve's start to go (SolveStart runs for it while the delta is off too)
 // (physical indoor lamps, stage 1) the kept rooms' model: replica (per-lamp parts, as above) or physical (the base without
 // every lot lamp with a GPU law, the tail, samples, batches and the room's 3D test records; no parts, no room-0 kept lamps).
 // A change drops the kept rooms; the caller sends the lot to its solves. Physical rooms > 0 are drawn from their lamps (stage 3b,
@@ -76,9 +77,13 @@ struct KeptRef {
     const void* room;
     int id;
     uint32_t version;
+    uint64_t live = 0; // (live_object_tables) what its objects moved to since its solve, KeptBlockers' table then (0: where it read them)
 };
+void LiveFrame(); // (render thread) a frame's round begins (live_object_tables)
 void KeptRooms(uintptr_t mgr, int cls, std::vector<KeptRef>& out);
 bool BuildKeptMap(const void* room, int cls, uint32_t version, int m, RtLampGpu::KeptMapData& out, std::string& why);
+// (render thread) that kept solve's furniture records as its objects stand now (KeptRef::live; BlockerTable::Join); false: none read, or no longer kept
+bool KeptBlockers(const void* room, int cls, uint32_t version, std::shared_ptr<const RtLampGpu::BlockerTable>& t, int& header);
 // Any thread (LevelLightShare's FinalizeHook, after the game's finalize): the room's texels in its maps were written again, so
 // its kept solves no longer hold them (a solve kept on the light tree thread is kept again right after). gather: the light tree
 // thread. (physical) A solve off it keeps nothing: the room's kept physical copy is drawn on while the room's geometry is the
@@ -129,6 +134,8 @@ bool TakesLampEditPhys(uintptr_t tl, uintptr_t light, const char* kind, bool set
 // (light tree thread) whether every story 0 .. 7 of the active lot (tracker) draws `light` from its law now, as
 // TakesLampEditPhys finds it (RtOutdoorLamps::AfterRoomUpdate: an outdoor lamp's edit then sends no room that takes it)
 bool PhysCoversLamp(uintptr_t tracker, uintptr_t light);
+// (any thread) the room's kept solve is physical and every map of it is drawn by the GPU (as PhysCoverWhy finds it)
+bool PhysDrawnRoom(const void* room);
 // GPU room lamps stage 2b (LampMarkFilter's lamp entry update, light tree thread): a value or switch edit of `light` (wasOn,
 // on: before and after) that every room of its lot listing it draws on the GPU (a room > 0: its kept solve of the class it
 // shows, every texel drawn, the lamp not in its base; a room 0: Real-time outdoor lamps draws it). True: the edit marks no
@@ -213,9 +220,6 @@ int ProbeTotalLine(const std::string& body);
 void OnWallTest(bool passed, float t);
 // The room lamp probe: the game's own wall test inside it, before Apex's overrides (from = the point the ray starts at)
 void OnWallTestRaw(const float* from, bool ok, float t);
-// The floor mask's fused copy took `light`'s no-wall-test colour: its sum before and after
-void OnFuse(uintptr_t light, const float* before, const float* after);
-void DropFused(); // the fused copy is not used (the copy is solved apart): the parts it gave go
 // The floor mask of the sample: masked = an outdoor floor texel of a story >= 1; gated = more than 2 m over its lot base
 // (the share of lamps under its plane applies); visLum / allLum = the luminance of its two copies
 void Mask(bool masked, bool gated, float visLum, float allLum);
@@ -247,7 +251,6 @@ bool SceneBegin(const std::filesystem::path& temp);
 long SceneEnd(const std::filesystem::path& to);
 
 // ---- a changed light alone (LevelLightShare::ReplayBatch, light tree thread) ----
-bool Replaying();
 void ReplaySample(const void* sample, const float* out, bool masked, float visLum, float allLum);
 
 // ---- Real-time outdoor lamps (rt_outdoor_lamps.h; any thread) ----

@@ -51,6 +51,7 @@ void Policies() {
     for(int n=1;n<=1000;++n)Check(LampDay(n/1000.f)>=LampDay((n-1)/1000.f),"daytime curve monotonic");
     for(int n=0;n<=100;++n)for(int g=0;g<=80;++g){
         const float night=n/100.f,gain=g/10.f,effective=SurfaceLampGain(night,gain);
+        Check(FurnitureLampGain(night)==1.f+(kFurnitureLampGain-1.f)*night&&FurnitureLampGain(0)==1.f&&FurnitureLampGain(1)==kFurnitureLampGain&&FurnitureLampGain(-1)==1.f&&FurnitureLampGain(2)==kFurnitureLampGain,"furniture gain: 1 by day, g at night, weighted by the night level");
         Check(std::isfinite(effective)&&effective>=0,"surface gain finite and nonnegative");
         Check(effective<=gain&&effective>=gain*kLampDayFloor*.999999f,"surface gain stays within daytime and saved nighttime bounds");
         if(n==0)Check(effective==gain*kLampDayFloor,"daytime surfaces take the 3% floor of their night strength");

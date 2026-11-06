@@ -80,7 +80,6 @@ float NightNow() { return g_drawDark ? 1.0f : std::fmin(std::fmax(g_night, 0.0f)
 // The same linear brightness controls room ambient and furniture's background light.
 float FurnitureShareNow() { return RoomAmbientPolicy::BackgroundShare(g_light, NightNow()); }
 float FurnitureTintNow() { return 1.0f + (g_blue - 1.0f) * NightNow(); }
-bool g_relightDue = false;
 // The colours rooms may hold for each of the two slots: the game's and those Apex set (newest last)
 std::vector<Vec4> g_known[2];
 Vec4 g_target[2];                  // what rooms should hold now (Apex's colours when on, the game's when off)
@@ -227,6 +226,14 @@ void NoteBase(BYTE* room, const float* r, int slot, const float* ce, int which) 
     std::memcpy(rec.res[which], r, sizeof rec.res[which]);
     rec.has[which] = true;
     rec.discardOnQueue = false; // a fresh native result must survive an older queue acknowledgement
+}
+bool ReadRoomAmbient(const void* room, float* c) {
+    __try {
+        std::memcpy(c, static_cast<const BYTE*>(room) + 0x110, 3 * sizeof(float));
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
 }
 // (S8) the base a probe run of the ambient step added last on this thread (RetakeAmbient keeps it as the room's): slot, C
 thread_local int t_probeSlot = -1;
@@ -512,6 +519,19 @@ void Unpatch() {
 
 namespace UnlitRooms {
 
+bool LampAmbient(const void* room, float out[3]) {
+    float a[3];
+    uintptr_t mgr = 0;
+    int id = 0;
+    if (!ReadRoomAmbient(room, a) || !RoomKey(static_cast<const BYTE*>(room), mgr, id)) return false;
+    std::lock_guard<std::mutex> lk(g_baseMx);
+    const auto it = g_baseRooms.find(reinterpret_cast<uintptr_t>(room));
+    if (it == g_baseRooms.end() || !it->second.has[0] || it->second.mgr != mgr || it->second.id != id) return false;
+    if (Same(a, g_target[it->second.slot].v)) return false; // (an unlit room holds the colour unscaled, its record of a lamp since gone)
+    for (int k = 0; k < 3; k++) out[k] = std::fmax(a[k] - it->second.ce[k], 0.0f);
+    return true;
+}
+
 bool Install(std::string& error) {
     if (g_ready) return true;
     using GameAddr::Id;
@@ -745,7 +765,7 @@ bool RetakeAmbient(unsigned char* room, float& norm, const char*& why) {
     BaseRec& rec = it->second;
     if (rec.discardOnQueue) return why = "sent to its solve by Rooms at Night", false;
     if (!ReadPair(room, cur, state)) return why = "not read", false;
-    if (RoomAmbientPolicy::SolverOwnsAmbient(state)) return why = "being solved", false;
+    if (RoomAmbientPolicy::AmbientStepRunning(state)) return why = "being solved", false;
     if (!Near(cur[0], rec.res[0], 1e-5f) || !Near(cur[1], rec.res[1], 1e-5f))
         return why = "its ambient is not the one its solve gave it (an atrium's colour or a stairwell's share)", false;
     float own[4], second[4];
@@ -756,7 +776,7 @@ bool RetakeAmbient(unsigned char* room, float& norm, const char*& why) {
     // probe's window is put back by the probe's restore, as before; its next solve gives it again)
     float after[2][4];
     int stateAfter = 0;
-    if (!ReadPair(room, after, stateAfter) || stateAfter != state || RoomAmbientPolicy::SolverOwnsAmbient(stateAfter) || !Near(after[0], cur[0], 0.0f) ||
+    if (!ReadPair(room, after, stateAfter) || stateAfter != state || !Near(after[0], cur[0], 0.0f) ||
         !Near(after[1], cur[1], 0.0f))
         return why = "being solved", false;
     if (!WritePair(room, own, second)) return why = "not written", false;

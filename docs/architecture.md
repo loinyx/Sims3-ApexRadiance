@@ -661,6 +661,10 @@ The localized folder name is resolved from the game executable's string table, w
      `[patches.*]` tables, keeping only registered keys). NightTerrainRelight's object and fence strengths
      (`forcaNosObjetos`, `forcaLuzPorPixelNosObjetos`, `forcaNasCercas`) are reset to 0.57 / 1.0 / 1.0.
   3. Else (or S3SS already dropped the tables): defaults, logged.
+- **New lighting defaults** (`apex_lighting_defaults.h`, right after that migration, once: `[meta] lighting_defaults`; the log line
+  `[Config] New lighting defaults taken: ...` lists the keys): in `[patches.NightTerrainRelight]`, a brightness key still at its old
+  default takes the new one (a config before 2.18, with `brilhoNoChao` and `forcaDasLampadasDoLote` at theirs, takes the new `luzNoChao`); the three lamp colour keys move only together; any other value is a choice and stays. A new config is only
+  stamped. Checked by `tools/settings_migration_test`.
 - Tables no longer read (features removed): `[qol.hdr]` (except the Picture fallback), `[patches.SmoothStreaming]`,
   `[patches.GcScheduler]`, `[patches.FrameBudget]`. Ambient Occlusion uses `[patches.AmbientOcclusion]` again.
 - **S3SS.toml** is read-only, with one exception: the explicit Rooms at Night compatibility action

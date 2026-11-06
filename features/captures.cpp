@@ -212,6 +212,7 @@ struct ShotJob {
     int skipPresents = 0;
 };
 std::vector<ShotJob> g_shots; // render-thread requests; report shots and standalone player photos
+std::filesystem::path g_shotTaken; // ScreenshotNow: its Finish takes no other
 bool g_shotHooks = false;
 std::atomic<bool> g_shotsOn{true};
 std::atomic<bool> g_gameUiHidden{false};
@@ -515,7 +516,7 @@ void EndSession() {
     if (s.empty() || Saving()) return;
     const bool logOk = CopyIfThere(Dir() / L"ApexRadiance_LOG.txt", s / L"ApexRadiance_LOG.txt");
     const bool configOk = CopyIfThere(Dir() / L"ApexRadiance.toml", s / L"ApexRadiance.toml");
-    const bool crashOk = CopyIfThere(Dir() / L"ApexRadiance_Crash.txt", s / L"ApexRadiance_Crash.txt");
+    const bool crashOk = RecentCrash().empty() || CopyIfThere(Dir() / L"ApexRadiance_Crash.txt", s / L"ApexRadiance_Crash.txt");
     std::ostringstream about;
     {
         about << std::format("{} {} - a capture session with {} captures, on {}.\n\n", APEX_PRODUCT_NAME, APEX_VERSION_STRING, items.size(), GetGameVersionName());
@@ -678,7 +679,7 @@ void Finish(const std::filesystem::path& folder, const std::string& what, Captur
     }
     const bool logOk = CopyIfThere(Dir() / L"ApexRadiance_LOG.txt", folder / L"ApexRadiance_LOG.txt");
     const bool configOk = CopyIfThere(Dir() / L"ApexRadiance.toml", folder / L"ApexRadiance.toml");
-    const bool crashOk = CopyIfThere(Dir() / L"ApexRadiance_Crash.txt", folder / L"ApexRadiance_Crash.txt");
+    const bool crashOk = RecentCrash().empty() || CopyIfThere(Dir() / L"ApexRadiance_Crash.txt", folder / L"ApexRadiance_Crash.txt");
     SYSTEMTIME t;
     GetLocalTime(&t);
     std::ostringstream about;
@@ -694,7 +695,8 @@ void Finish(const std::filesystem::path& folder, const std::string& what, Captur
     WriteText(folder / L"About this capture.txt", about.str());
     if (!description.empty() || !title.empty()) WriteText(folder / L"User notes.txt", DescriptionText(title, description));
     // A failed text write is recoverable without measuring or recording the problem again.
-    if (!retry) QueueShot(folder);
+    if (folder == g_shotTaken) g_shotTaken.clear();
+    else if (!retry) QueueShot(folder);
     {
         std::lock_guard<std::mutex> lk(g_lock);
         g_copyFailed = !logOk || !configOk || !crashOk;
@@ -752,6 +754,11 @@ void RetrySave() {
         Notify(I18n::Tr("Saving the capture and screenshot..."), 6, NoteKind::Saving);
     }
     { std::lock_guard<std::mutex> lk(g_lock); UpdateResultLocked(); }
+}
+
+void ScreenshotNow(const std::filesystem::path& folder) {
+    QueueShot(folder);
+    g_shotTaken = folder;
 }
 
 void SetScreenshots(bool on) { g_shotsOn = on; }

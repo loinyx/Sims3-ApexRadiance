@@ -132,6 +132,8 @@
     <ClCompile Include="features\wall_heights.cpp" />
     <ClCompile Include="features\light_diag.cpp" />
     <ClCompile Include="features\recorder.cpp" />
+    <ClCompile Include="features\capture_video.cpp" />
+    <ClCompile Include="features\capture_burst.cpp" />
     <ClCompile Include="features\screen_watch.cpp" />
     <ClCompile Include="hotkeys.cpp" />
     <ClCompile Include="features\light_probe.cpp" />
@@ -149,6 +151,7 @@
     <ClCompile Include="features\unlit_rooms.cpp" />
     <ClCompile Include="features\probe_neutral.cpp" />
     <ClCompile Include="features\lamp_mark_filter.cpp" />
+    <ClCompile Include="features\object_legs.cpp" />
     <ClCompile Include="features\light_detail.cpp" />
     <ClCompile Include="features\room_light_queue.cpp" />
     <ClCompile Include="features\drag_lite.cpp" />
@@ -236,6 +239,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="apex_config.h" />
+    <ClInclude Include="apex_lighting_defaults.h" />
     <ClInclude Include="apex_presets.h" />
     <ClInclude Include="apex_changelog.h" />
     <ClInclude Include="apex_gui.h" />
@@ -313,6 +317,9 @@
     <ClInclude Include="features\bloom_alpha_probe.h" />
     <ClInclude Include="features\atrium_hold.h" />
     <ClInclude Include="features\screen_watch.h" />
+    <ClInclude Include="features\capture_video.h" />
+    <ClInclude Include="features\capture_burst.h" />
+    <ClInclude Include="features\frame_classes.h" />
     <ClInclude Include="features\lot_lod_streaming.h" />
     <ClInclude Include="features\lot_detail_range.h" />
     <ClInclude Include="features\lot_object_throttle.h" />
@@ -322,6 +329,7 @@
     <ClInclude Include="features\unlit_rooms.h" />
     <ClInclude Include="features\probe_neutral.h" />
     <ClInclude Include="features\lamp_mark_filter.h" />
+    <ClInclude Include="features\object_legs.h" />
     <ClInclude Include="features\light_detail.h" />
     <ClInclude Include="features\room_light_queue.h" />
     <ClInclude Include="features\lot_lighting_motion.h" />

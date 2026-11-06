@@ -13,6 +13,8 @@
 #include <map>
 #include <set>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 #include "gpu_lamp_law.h"
@@ -118,37 +120,38 @@ inline void CarryMissing(const std::vector<Lamp>& before, std::vector<Lamp>& now
 }
 
 // (stage 5) a lamp's physical share at a directional sample, as the room's maps take it: the open-top proxy's visibility of the
-// lamp ball (radius R) from the sample (lot space: Ll, Pl; 16 rays, the stamp as RtLampProxy::Visibility takes it) x the game's
-// 3D test over the room's records from the lamp to the sample (world space: Lw, Pw); a blocker of another vtable counts as 1
-// in *unknown (as the GPU's blocker table leaves it out). OutdoorDeltaModel::BasisPartPhys applies the game's drop
-inline void BasisShare(const RtLampProxy::Mesh& mesh, const float Ll[3], float R, const float Pl[3], const RoomLightTests::Room& tests, const float Lw[3],
-                       const float Pw[3], std::vector<uint32_t>& stamp, uint32_t& mark, float& vis, float& t3d, int* unknown) {
-    vis = RtLampProxy::Visibility(mesh, Ll, R, Pl, 16, &stamp, &mark);
-    t3d = vis > 0.0f ? RoomLightTests::occlude(tests, {Lw[0], Lw[1], Lw[2]}, {Pw[0], Pw[1], Pw[2]}, unknown) : 1.0f;
+// lamp ball (radius R) from the sample (lot space: Ll, Pl; 16 rays, the stamp as RtLampProxy::Visibility takes it). No 3D test:
+// the game's step takes no room, so its directional maps hold no furniture shadow (BasisLampAdd). OutdoorDeltaModel::BasisPartPhys
+// applies the game's drop
+inline float BasisShare(const RtLampProxy::Mesh& mesh, const float Ll[3], float R, const float Pl[3], std::vector<uint32_t>& stamp, uint32_t& mark) {
+    return RtLampProxy::Visibility(mesh, Ll, R, Pl, 16, &stamp, &mark);
 }
 // A lamp's BasisShare over a room's samples, kept between the directional maps' writes: a sample's share depends only on the
 // lamp's position, the room's samples and records and the proxy (`same`: the same kept room, proxy and radius), so a lamp that
 // did not move reuses it and only a moved or edited lamp is traced again (an edit 2 lamps of ~200, the 21:18 log of 02/11:
-// ~520 ms for every lamp). Writes vis / t3d as BasisShare over every lit sample (0 elsewhere); returns the samples traced
+// ~520 ms for every lamp). Writes vis as BasisShare over every lit sample (0 elsewhere); returns the samples traced. panes (null: none): the
+// lot's glazed spans, c.pane then holds each lit sample's glass share
 struct ShareCache {
-    float Ll[3] = {}, Lw[3] = {};
-    std::vector<float> vis, t3d;
+    float Ll[3] = {};
+    std::vector<float> vis, pane; // (pane: RtLampProxy::PaneShare, with panes)
     std::vector<uint8_t> done;
 };
-template <class Lit, class PwAt>
+template <class Lit>
 inline size_t BasisSharesCached(ShareCache& c, bool same, size_t n, Lit&& lit, const RtLampProxy::Mesh& mesh, const float Ll[3], float R, const float* Pl,
-                                const RoomLightTests::Room& tests, const float Lw[3], PwAt&& pw, std::vector<uint32_t>& stamp, uint32_t& mark, std::vector<float>& vis,
-                                std::vector<float>& t3d, int* unknown) {
-    if (!same || c.done.size() != n || std::memcmp(c.Ll, Ll, sizeof c.Ll) || std::memcmp(c.Lw, Lw, sizeof c.Lw)) {
-        std::memcpy(c.Ll, Ll, sizeof c.Ll), std::memcpy(c.Lw, Lw, sizeof c.Lw);
-        c.vis.assign(n, 0.0f), c.t3d.assign(n, 0.0f), c.done.assign(n, 0);
+                                std::vector<uint32_t>& stamp, uint32_t& mark, std::vector<float>& vis, const std::vector<RtLampProxy::Pane>* panes = nullptr) {
+    if (!same || c.done.size() != n || std::memcmp(c.Ll, Ll, sizeof c.Ll)) {
+        std::memcpy(c.Ll, Ll, sizeof c.Ll);
+        c.vis.assign(n, 0.0f), c.pane.assign(n, 1.0f), c.done.assign(n, 0);
     }
     size_t traced = 0;
-    vis.assign(n, 0.0f), t3d.assign(n, 0.0f);
+    vis.assign(n, 0.0f);
     for (size_t i = 0; i < n; i++) {
         if (!lit(i)) continue;
-        if (!c.done[i]) BasisShare(mesh, Ll, R, &Pl[i * 3], tests, Lw, pw(i), stamp, mark, c.vis[i], c.t3d[i], unknown), c.done[i] = 1, traced++;
-        vis[i] = c.vis[i], t3d[i] = c.t3d[i];
+        if (!c.done[i]) {
+            c.vis[i] = BasisShare(mesh, Ll, R, &Pl[i * 3], stamp, mark), c.done[i] = 1, traced++;
+            if (panes) c.pane[i] = RtLampProxy::PaneShare(*panes, Ll, &Pl[i * 3]);
+        }
+        vis[i] = c.vis[i];
     }
     return traced;
 }
@@ -168,7 +171,8 @@ struct RoomFact {
 // refused); a moved piece of furniture changes its record's blockers. A differing key sends the room to a solve (the edit is
 // still taken: its blocker table is the old one until then)
 inline uint64_t BlockersKey(const uint64_t parts[3]) { return parts[0] ? parts[2] | 1 : 0; }
-// Null when every story 0 .. 7 draws the lamp from its law now (the edit marks no room); else why not, `at` the room
+// Null when every story 0 .. 7 draws the lamp from its law now, or lacks none of it (a room with no kept solve not listing it): the
+// edit marks no room; else why not, `at` the room
 inline const char* EditRefusal(const std::vector<RoomFact>& rooms, int& at) {
     bool any = false;
     for (at = 0; at < static_cast<int>(rooms.size()); at++) {
@@ -182,6 +186,9 @@ inline const char* EditRefusal(const std::vector<RoomFact>& rooms, int& at) {
             if (!f.drawn) return "its room 0 is not drawn physically on every story";
             continue;
         }
+        // (a room not listing the lamp: its map holds none of its light, nothing to go stale. Story 0 room 13, unsolved after a load and
+        // lit by nothing, refused every edit of the first drag: the furniture held 1.9 s, 04/11)
+        if (!f.kept && !f.lists) continue;
         if (!f.kept) return "no kept physical solve of the class it shows";
         if (!f.drawn) return "a map of its kept solve not drawn on the GPU";
         if (f.baked) return "its kept solve has the lamp in its base";
@@ -319,6 +326,9 @@ inline int ListLen(const uintptr_t* b, const uintptr_t* e, int max) {
     return e < b || e - b > max ? -1 : static_cast<int>(e - b);
 }
 
+// (GpuRoomLamps) a map that could not be drawn is made again from its kept solve after this, its `tries` th time: 5 s up to 5 min. Only a new
+// solve brought it back, and a room with no lamp edit is sent to none: one failed buffer or target ended its GPU draw for the session
+inline uint32_t RetryMs(int tries) { return 5000u << std::clamp(tries, 0, 6); }
 // (GpuRoomLamps::ComposeOver's partial relight) no place (y << 16 | x) within w x h is written by two of the sets: a set drawn
 // again alone then leaves the map as drawing them all would (a place past the map is never written: the viewport cuts it)
 inline bool WritesDisjoint(int w, int h, const std::vector<const std::vector<uint32_t>*>& sets) {
@@ -386,6 +396,40 @@ inline float SubTexels(const float* s, int x, int y, At&& at, float out[4][3]) {
         if (d2[i] > 1.5625f * nearest) nb[i] = nullptr; // (1.25 squared)
     for (int q = 0; q < 4; q++) SubTexelPos(s, nb, (q & 1) ? 0.25f : -0.25f, (q >> 1) ? 0.25f : -0.25f, out[q]);
     return SubTexelFootprint(s, nb, 0.25f);
+}
+// Outdoor floors read the room map at lot position x n (their VS: uv = position / 64, never the mesh's texel origin), but a whole tile
+// beside a diagonal wall keeps its texels in the split tiles' atlas (FUN_006a4fa0 sends it there): its place in the tile columns holds
+// only the game's 2-texel border fill, never relit, and a hole past it at 8 texels a tile (no lamp light in steps along the wall).
+// Adds a copy of each such tile's texels at those places; lotOf(texel, out[3]) gives its lot position. A half tile's block has its
+// texels by the wall pushed off the lattice, so it never counts n x n: its place in the columns is the other half's. Returns the copies
+template <class Texel, class LotOf>
+inline size_t AddFloorGridTwins(std::vector<Texel>& texels, int map, int n, int w, int h, LotOf&& lotOf) {
+    struct Twin {
+        size_t i;
+        int x, y;
+    };
+    const auto key = [](int x, int y) { return static_cast<uint32_t>(y) << 16 | static_cast<uint32_t>(x); };
+    std::unordered_set<uint32_t> own;
+    std::unordered_map<uint32_t, std::vector<Twin>> tiles;
+    for (size_t i = 0; i < texels.size(); i++) {
+        const Texel& t = texels[i];
+        if (t.map != map) continue;
+        float p[3];
+        lotOf(t, p);
+        const float fx = p[0] * static_cast<float>(n), fz = p[2] * static_cast<float>(n), cx = std::floor(fx), cz = std::floor(fz);
+        const int x = static_cast<int>(cx), y = static_cast<int>(cz);
+        if (x == t.x && y == t.y) own.insert(key(x, y));
+        else if (x >= 0 && y >= 0 && x < w && y < h && std::fabs(fx - cx - 0.5f) < 0.05f && std::fabs(fz - cz - 0.5f) < 0.05f) tiles[key(x / n, y / n)].push_back({i, x, y});
+    }
+    const size_t before = texels.size();
+    for (const auto& [tile, twins] : tiles) {
+        if (twins.size() != static_cast<size_t>(n) * n || std::any_of(twins.begin(), twins.end(), [&](const Twin& c) { return own.count(key(c.x, c.y)) != 0; })) continue;
+        for (const Twin& c : twins) {
+            texels.push_back(texels[c.i]);
+            texels.back().x = static_cast<uint16_t>(c.x), texels.back().y = static_cast<uint16_t>(c.y);
+        }
+    }
+    return texels.size() - before;
 }
 
 } // namespace PhysLampPick

@@ -28,6 +28,7 @@
 #include <utility>
 #include <vector>
 #include "open_rooms_above.h"
+#include "wall_openings.h"
 
 namespace RtLampProxy {
 
@@ -46,6 +47,7 @@ struct Edge {
     float foot = 0, base = 0;
     float topL = 3, topM = 3, topR = 3;
     bool open = false;
+    uint8_t glazed = 0; // (the padding after open: the layout scenes hold) its opening passes light through glass (PaneCount)
     Opening o;
 };
 struct Story {
@@ -72,6 +74,37 @@ inline void ToLot(const Lot& l, const float w[3], float out[3]) {
 inline void DirToLot(const Lot& l, const float w[3], float out[3]) {
     for (int k = 0; k < 3; k++) out[k] = w[0] * l.worldToLot[0][k] + w[1] * l.worldToLot[1][k] + w[2] * l.worldToLot[2][k];
 }
+// A glazed opening as the GPU's table holds it (BlockerTable::AppendPanes): its span in lot space, its sill and head
+struct Pane {
+    float x0, z0, x1, z1, y0, y1;
+};
+inline void PanesOf(const Lot& lot, std::vector<Pane>& out) {
+    out.clear();
+    for (const Story& s : lot.stories)
+        for (const Edge& e : s.edges) {
+            if (!e.open || !e.glazed) continue;
+            const float dx = e.x1 - e.x0, dz = e.z1 - e.z0;
+            out.push_back({e.x0 + e.o.u0 * dx, e.z0 + e.o.u0 * dz, e.x0 + e.o.u1 * dx, e.z0 + e.o.u1 * dz, e.base + e.o.sill, e.base + *std::max_element(e.o.head, e.o.head + kProfile)});
+        }
+}
+// The panes the segment a -> b crosses (T3dDensePS PaneCount, its operations). The game charges a pane's pass for each: 50 wall texels
+// behind two panes read 0.585 of the GPU's light, 05/11. Half open along a span: two windows side by side on one line count once
+inline int PaneCount(const std::vector<Pane>& panes, const float a[3], const float b[3]) {
+    int n = 0;
+    const float dx = b[0] - a[0], dz = b[2] - a[2];
+    for (const Pane& p : panes) {
+        const float ex = p.x1 - p.x0, ez = p.z1 - p.z0, ox = p.x0 - a[0], oz = p.z0 - a[2];
+        const float den = dx * ez - dz * ex;
+        const float t = (ox * ez - oz * ex) / den, u = (ox * dz - oz * dx) / den;
+        const float y = a[1] + t * (b[1] - a[1]);
+        n += t > 0.0f && t < 1.0f && u >= 0.0f && u < 1.0f && y >= p.y0 && y <= p.y1;
+    }
+    return n;
+}
+// That share of the light, taken after the soft cut (cut after it, the faint light past two panes went black: 771 lit kitchen floor texels
+// fell to 595, 05/11)
+inline float PaneShare(const std::vector<Pane>& panes, const float a[3], const float b[3]) { return std::pow(WallOpenings::kWindowPass, static_cast<float>(PaneCount(panes, a, b))); }
+
 // A room's texel the game samples just past its own diagonal wall (a half tile's texel, its centre over the wall line; the game's
 // tests light it, the shadow mesh's wall shaded it: a dark band along the room's diagonal walls, 1:8 of the scene of 03/11) is
 // taken for the shadow test kInset inside the nearest quadrant of its room in the same tile (lot space, P's height kept). False:

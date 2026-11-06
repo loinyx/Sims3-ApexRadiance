@@ -4,10 +4,12 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+struct IDirect3DBaseTexture9;
 namespace LotLightBridge {
 void SetEnabled(bool on);
 void SetObjectShadowFix(bool on);
-void SetNightLevel(float level); // lightMgr+0xF0, 0 = day, 1 = night (2.15.1: the sky's smooth night, NightLevel::Read)
+void SetNightLevel(float level); // the lamp terms' level, 0 = day, 1 = night (the sky's smooth night and the sun: TerrainLightingPolicy::LampLevel)
+void SetSkyLevel(float level);   // the sky's own level (NightLevel::Read): what follows the daylight and not the lamps
 void SetRigNightLevel(float level); // the light manager's level in its steps (the rigs' reach law, ObjectReachLawScale)
 void SetRoofFix(bool on, float strength);
 void OnPresent();                  // render thread, every frame (refreshes the nearby lamp list for roofs)
@@ -111,6 +113,19 @@ void SetFenceGroundLight(bool on, float strength);
 // Development: paint lamp-lit draws no fix claimed in magenta; record them for ApexRadiance_Censo.txt (3 frames).
 void SetFalseColor(bool on);
 bool FalseColor();
+// Developer mode (capture_burst.h), render thread: the next frame, from this Present to the next, is a view. It changes only
+// draws on a target of the screen's size w x h with a full viewport, so never what the game keeps from a frame: a light probe
+// renders into a cube's faces (probe_neutral.h) and rooms into their maps, and those stay as the game draws them.
+//  Classes: after each depth-tested draw, a redraw in its class's flat colour (frame_classes.h) where the draw left its depth
+//  (ZFUNC = EQUAL, so a cut-out's holes stay out; what writes no depth, like glass, is left as it is).
+//  WhiteAlbedo: colour textures replaced by white for the draw (see WhitenTextures), the fixes running as they do.
+enum class FrameView { None, Classes, WhiteAlbedo };
+void SetFrameView(FrameView view, unsigned w, unsigned h);
+struct FrameViewResult {
+    long drawn = 0, left = 0;                 // draws the view changed, and those it left as they are
+    std::vector<IDirect3DBaseTexture9*> maps; // Classes: the light maps bound, each with a reference for the caller
+};
+FrameViewResult TakeFrameView(); // ends the view
 void RequestCensus();
 std::string CensusStatus();
 // Development: read-only 3-frame capture of Apex lighting claims by day/twilight/night plus known/possible bloom-mask families.

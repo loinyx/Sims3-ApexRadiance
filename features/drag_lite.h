@@ -89,7 +89,7 @@ bool StepWithin(unsigned long ms);
 // dragLetGo: the button that held the latest lamp move was released and no move followed after kPlaceGraceMs: the drag is
 // over now (ClassicHolding, Engaged and LevelLightShare::LampDragging end at once). Any thread
 bool LetGo();
-// The latest drag's end (GetTickCount | 1, 0 = none) and how it was seen (true: let go; false: the still time). Render thread
+// The latest drag's end (GetTickCount, never 0, 0 = none) and how it was seen (true: let go; false: the still time). Render thread
 // writes it at the end of a drag (OnPresent); the edit hold's log reads it
 unsigned long LastReleaseTick();
 bool LastReleaseLetGo();
@@ -114,6 +114,13 @@ float SolveCapMs();
 // its state, its invalidations and its gathers, and is picked once the gap or the drag ends)
 void NoteSolveStarted(const void* room);
 bool HoldRepick(const void* room);
+// (physical) while the GPU takes a lamp's drag (a taken move within kStillMs) no room it draws is picked: from whatever mark (the
+// lamp object's occluder, the walk's own rooms, a geometry resend) a solve gathered the lamp 100-500 ms behind and its maps
+// showed between the GPU's: furniture and stairs flickered, the table's shadow trailed (03/11 17:43 capture: 200 kept solves in
+// a 40 s drag, 2695 maps the game wrote over the GPU's). Each keeps its state and marks and is solved once the lamp is still
+bool HoldGpuDrawn(const void* room);
+// (any thread, a room solve's start) counts a solve begun in a room the GPU draws during its drag: the hold's log
+void NoteGpuDragSolve(const void* room);
 
 // Why a room is being sent (QueueRoom reads it)
 extern thread_local Why t_why;

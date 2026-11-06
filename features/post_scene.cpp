@@ -16,6 +16,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <map>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -60,6 +61,7 @@ bool SceneDepthReady(IDirect3DDevice9* dev) {
 // 07/10, players' Runtime Error: an effect that throws is caught (the game's draw or EndScene goes on), noted, and skipped
 // from then on; the others keep running
 HookGuard::OffList<16> g_failedEffects;
+std::map<int, long> g_ran; // TakeRan
 void RunEffects(IDirect3DDevice9* dev, bool depthOk) {
 #ifdef APEX_F10_STUDY
     if (F10Study::active) {
@@ -92,6 +94,7 @@ void RunEffects(IDirect3DDevice9* dev, bool depthOk) {
         if (g_failedEffects.Has(fn)) return;
         try {
             e.second(dev);
+            g_ran[e.first]++;
 #ifdef APEX_F10_STUDY
             F10Study::Sample(dev, "after-order-" + std::to_string(e.first));
 #endif
@@ -416,6 +419,8 @@ void WantCamera(bool on) {
     else if (g_cameraWanted.fetch_sub(1) <= 0) g_cameraWanted.store(0);
     SyncHooks();
 }
+
+std::map<int, long> TakeRan() { return std::exchange(g_ran, {}); }
 
 float CameraNear() { return g_near; }
 

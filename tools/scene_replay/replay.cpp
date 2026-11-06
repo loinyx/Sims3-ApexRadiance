@@ -128,19 +128,22 @@ static void Detail(const Room& r, const RtLampProxy::Mesh* mesh, const RtLampPro
         blk.rows = r.blk;
         float Ll[3] = {L.law.pos[0], L.law.pos[1], L.law.pos[2]};
         if (lot) RtLampProxy::ToLot(*lot, L.law.pos, Ll);
+        std::vector<RtLampProxy::Pane> panes;
+        if (lot) RtLampProxy::PanesOf(*lot, panes);
         for (uint32_t i = 0; i < r.texels.size(); i++) {
             const Texel& t = r.texels[i];
-            float vis = 1.0f;
+            float vis = 1.0f, pane = 1.0f;
             if (mesh && lot) {
                 float Pl[3];
                 RtLampProxy::ToLot(*lot, t.p, Pl);
+                pane = RtLampProxy::PaneShare(panes, Ll, Pl);
                 RtLampProxy::IntoRoom(*lot, r.h.story, r.h.id, Pl);
                 vis = RtLampProxy::Visibility(*mesh, Ll, r.h.radius, Pl, samples);
             }
-            const float t3d = r.h.blkHeader >= 0.0f && !r.blk.empty() && t.tested ? blk.Occlude(static_cast<int>(r.h.blkHeader), {L.law.pos[0], L.law.pos[1], L.law.pos[2]}, {t.p[0], t.p[1], t.p[2]}) : 1.0f;
+            const float t3d = r.h.blkHeader >= 0.0f && !r.blk.empty() && t.tested ? blk.Occlude(static_cast<int>(r.h.blkHeader), {L.law.pos[0], L.law.pos[1], L.law.pos[2]}, {t.p[0], t.p[1], t.p[2]}, 0.0f, r.h.radius) : 1.0f;
             Miss m{0.0f, i, {}, {}, vis, t3d};
             std::memcpy(m.g, &game[i * 3], sizeof m.g);
-            GpuTerm(L, r.h, t, vis, t3d, true, m.gpu);
+            GpuTerm(L, r.h, t, vis, t3d, true, m.gpu, 0.0f, pane);
             m.d = MaxDiff(m.g, m.gpu);
             if (m.d > kWithin) miss.push_back(m);
         }

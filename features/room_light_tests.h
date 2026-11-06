@@ -54,11 +54,17 @@ inline bool SetConst(uint32_t at, float v) {
 inline constexpr uint32_t kConstAt[] = {0x00F98964, 0x00F98A58, 0x00FAA210, 0x00FB2F6C, 0x00FECE18, 0x00FF31AC, 0x0106B4B4,
                                         0x0106D6CC, 0x0107A538, 0x011D0240, 0x00F9A5AC, 0x00FF307C, 0x01158A50};
 inline constexpr uint32_t kQuadVt = 0x00FF3118, kDiscVt = 0x00FF3C24; // the blockers the 3D test knows
+inline constexpr uint32_t kPostVt = 2; // (no game vtable) a table's leg of the GPU's copy: RtLampGpu::BlockerTable
 
 struct Blocker {
     uint32_t vt;
     float f[64];
     V v(int off) const { return {f[off / 4], f[off / 4 + 1], f[off / 4 + 2]}; }
+};
+// A table's leg as a capsule, in the record's space (features/object_legs.h). Only the GPU's blocker table reads it
+struct Post {
+    V a, b;
+    float r;
 };
 struct Record {
     V c;
@@ -71,7 +77,33 @@ struct Record {
     // (a copy only: a table dragged with its lamp ahead of its solve) the record drawn moved by (off[0], 0, off[1]): `c` moved
     // with it, its blockers tested on the segment moved back (occlude; RtLampGpu::BlockerTable::Offset)
     float off[2] = {0.0f, 0.0f};
+    std::vector<Post> posts; // its object's legs (RtLampGpu::BlockerTable::Append); the game's tests here ignore them
+    std::vector<uintptr_t> at; // its blockers' addresses in the game, as read: the object's move writes them in place (OutdoorDelta's live tables)
 };
+// A record's sphere as the gather makes it (0x0069E455..0x0069E4DB): the box of its blockers' bounds, its middle and half diagonal. A
+// rectangle's bound is its first plane's corners (0x0069B1D0), a disc's its first circle along x and z (not read in the bytes: all 252
+// records of the 19-37-16 scene of 05/11, 24 with discs, come out within 1 cm of the game's centre and radius)
+inline void Bound(Record& rc) {
+    float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
+    const auto add = [&](V p) {
+        const float c[3] = {p.x, p.y, p.z};
+        for (int i = 0; i < 3; i++) lo[i] = std::min(lo[i], c[i]), hi[i] = std::max(hi[i], c[i]);
+    };
+    for (const Blocker& k : rc.b)
+        if (k.vt == kQuadVt) {
+            const V A = k.v(0x70), U = k.v(0xA0), W = k.v(0xB0);
+            const float h0 = k.f[0xD0 / 4], h1 = k.f[0xD4 / 4];
+            for (const float su : {-h0, h0})
+                for (const float sw : {-h1, h1}) add({A.x + su * U.x + sw * W.x, A.y + su * U.y + sw * W.y, A.z + su * U.z + sw * W.z});
+        } else if (k.vt == kDiscVt) {
+            const V A = k.v(0x20);
+            const float r = std::sqrt(std::max(k.f[0x70 / 4], 0.0f));
+            add({A.x - r, A.y, A.z - r}), add({A.x + r, A.y, A.z + r});
+        }
+    if (hi[0] < lo[0]) return;
+    const V h = {(hi[0] - lo[0]) * 0.5f, (hi[1] - lo[1]) * 0.5f, (hi[2] - lo[2]) * 0.5f};
+    rc.c = {lo[0] + h.x, lo[1] + h.y, lo[2] + h.z}, rc.r2 = dot(h, h);
+}
 // The fields of a record the tests read, as one key: its centre and squared radii, each blocker's vtable, two-plane flag and the
 // fields its transmission reads (RoomGeoKey's blockers part). Never the raw bytes: they hold the game's own state (the gather
 // AddRefs each shape) and the vectors' addresses
@@ -100,14 +132,46 @@ inline uint64_t RecordKey(const Record& rc) {
     }
     return h;
 }
+// (OutdoorDelta's live tables) the kept records whose blockers now read otherwise. read(address, blocker): the blocker there, false when
+// it cannot be read; an old copy stands for one unreadable, of another vtable (its memory is someone else's now) or of a kind RecordKey
+// hashes whole (its raw bytes change with no move). Returns their key, 0: none moved
+struct LiveMove {
+    size_t rec;
+    std::vector<Blocker> b;
+};
+template <typename Read> uint64_t LiveMoves(const std::vector<Record>& kept, Read&& read, std::vector<LiveMove>& moved) {
+    Record now;
+    uint64_t h = 1469598103934665603ull;
+    for (size_t i = 0; i < kept.size(); i++) {
+        const Record& kr = kept[i];
+        if (kr.at.size() != kr.b.size()) continue;
+        now.c = kr.c, now.r2 = kr.r2, now.cull2 = kr.cull2, now.b = kr.b;
+        for (size_t j = 0; j < kr.b.size(); j++) {
+            Blocker t;
+            if (read(kr.at[j], t) && t.vt == kr.b[j].vt && (t.vt == kQuadVt || t.vt == kDiscVt)) now.b[j] = t;
+        }
+        const uint64_t rk = RecordKey(now);
+        if (rk == RecordKey(kr)) continue;
+        const uint64_t both[2] = {rk, i};
+        for (size_t b = 0; b < sizeof both; b++) h = (h ^ reinterpret_cast<const uint8_t*>(both)[b]) * 1099511628211ull;
+        moved.push_back({i, now.b});
+    }
+    return moved.empty() ? 0 : h | 1;
+}
+// When a kept room's blockers are read again: a read of all rooms is paced (gen, 100 ms), a room with a record off its solve's place follows every
+// frame an object moved (step). At 100 ms a table dragged with its lamp stood up to 0.9 m behind the lamp, its floor shadow swung by 2.3 times
+// that (the lamp's height over the floor against over the top), and its fill flipped off past the top's edge (23-38-26 recording of 05/11)
+inline bool LiveDue(uint32_t gen, uint32_t readGen, uint32_t step, uint32_t readStep, uint64_t key) { return gen != readGen || (key && step != readStep); }
 // A lamp at `lamp` standing on the blocker: a level top (a disc or rectangle facing up or down: a table's, not a sofa's back), the
 // lamp over it inside its edge and at most kOnTopM above it (a ceiling lamp or sconce over the furniture stands higher). Not the
 // record's sphere: the sofa's (r 1.69 m, three upright quads) held the table lamp 1.2 m off it, and its shadow was carried along
 // (03/11 13:56 scene). UNVERIFIED: kOnTopM against taller table lamps (this one's head is 0.57 m over its top) and low chandeliers
 constexpr float kOnTopM = 1.0f;
+// (a drawn copy only: RtLampGpu::DrawnBlockers) +0xF0 x of a seat's cap. A one-plane rectangle never reads it, BlockerAt gives it back
+constexpr float kCapMark = -9999.5f;
 inline bool StandsOn(const Blocker& k, const float lamp[3]) {
     const bool disc = k.vt == kDiscVt;
-    if (!disc && k.vt != kQuadVt) return false;
+    if ((!disc && k.vt != kQuadVt) || (!disc && k.f[0xF0 / 4] == kCapMark)) return false; // (nothing stands on a cap: it fills no shadow, carries no record)
     const V c = k.v(disc ? 0x20 : 0x70), d{lamp[0] - c.x, lamp[1] - c.y, lamp[2] - c.z};
     if (std::fabs(k.v(disc ? 0x40 : 0x90).y) < 0.95f || !(d.y > 0.0f && d.y < kOnTopM)) return false;
     if (disc) return d.x * d.x + d.z * d.z < k.f[0x70 / 4];

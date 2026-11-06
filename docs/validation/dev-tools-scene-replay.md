@@ -20,7 +20,7 @@ The file is saved as `Lighting scene.apexscene` in the capture's folder (format:
 solve also logs a `[GpuOracle]` line: the share of lamp texels within 2/255 of the game's part by surface, the worst
 texel and the most frequent likely cause. That line leaves out the cube shadow, which only the offline replay traces.
 
-The recording runs for the Recorder's 20 s. A room solve the game has not finished by then is not in the file.
+The recording runs for the Recorder's 60 s. A room solve the game has not finished by then is not in the file.
 
 ## Replaying
 
@@ -60,7 +60,7 @@ when more than 10% of the physical edits in 10 s went to the game's solves, with
 ## Open checks
 
 - UNVERIFIED until the first scene is recorded: that the recorded parts are each lamp's own share of the solve as the
-  GPU term models it, the file size of a full recording, and how many rooms the game solves within the 20 s.
+  GPU term models it, the file size of a full recording, and how many rooms the game solves within the 60 s.
 - The cube shadow's CPU reference uses 16 samples by default (`--samples`); its agreement with the GPU's shadow map is
   checked by `tools/rt_lamps_test`, not here.
 - The physical model differs from the game by design where light passes openings, so `opening` misses there are expected.

@@ -37,6 +37,7 @@
 #include "shader_patches.h"
 #include "mesh_occlusion.h"
 #include "mesh_budget_policy.h"
+#include "stair_set.h"
 #include "dev_switches.h"
 #include "foliage_canopy.h"
 #include "foliage_vertex_lamps.h"
@@ -60,6 +61,7 @@
 #include "rig_tracker.h"
 #include "room_light_queue.h"
 #include "object_light_bridge.h"
+#include "frame_classes.h"
 #include "lamp_mark_filter.h"
 #include "atrium_hold.h"
 #include "recorder.h"
@@ -70,6 +72,8 @@
 #include "shader_cache.h"
 #include "frame_profiler.h"
 #include "drag_lite.h"
+#include "gpu_room_lamps.h"
+#include "outdoor_delta.h"
 #include "tester_toggles.h"
 #include "perf_toggles.h"
 #include "build_flavor.h"
@@ -398,6 +402,9 @@ std::atomic<float> g_night{0.0f};
 // (2.15.1) the light manager's level in its steps of 0.2: the rigs' reach law (ObjectReachLawScale) re-gathers every rig when
 // its scale moves, so it keeps the game's five steps at dusk instead of following smooth dusk (about 70 re-gathers)
 std::atomic<float> g_rigNight{0.0f};
+// the sky's level, for what follows the daylight: g_night, the lamp terms', stays up after the sky turned at dawn, and the moon-shadow
+// shaders or the terrain's daylight range on it would take that much of the day's sun away
+std::atomic<float> g_skyNight{0.0f};
 
 // ---- Lamp brightness on the ground ("Ground brightness", "Roads and sidewalks"): the game's lamp scale cK.x of a light
 // map term (lamp light only: the terrain map rgb, the lot map, max(map, atlas) of floors and roads) times the gain for
@@ -1672,6 +1679,7 @@ unsigned g_solidReplaced=0,g_solidRejected=0;
 DWORD g_solidNextScan=0;
 bool g_solidScanning=false;
 bool g_solidSteadyCleared=false; // (steady_indoor_light) the set was dropped since the switch went on (PumpSolidMeshes)
+uint32_t g_solidStairGen=0;      // the stair set the groups were read for (StairSet::generation)
 std::vector<MeshOcclusion::Triangle> g_solidLastPublished; // occlusion_relight: the last set published (PumpSolidMeshes)
 // Dev switch draw_reads_nowait: a buffer the GPU still uses is not waited for inside the draw hook; the read is retried on
 // a later scan frame, and after three busy answers it waits as before (every group is still read, so the result is the same).
@@ -1734,10 +1742,12 @@ void NoteSolidMeshImpl(IDirect3DDevice9* dev,D3DPRIMITIVETYPE type,INT baseVerte
     const DWORD now=GetTickCount();
     auto found=g_solidGroups.find(key);
     if(found!=g_solidGroups.end()){found->second.seen=now;if(now-found->second.read<5000)return;}
-    // Rejected meshes also yield the next frame's read slot to later draws.
-    if(auto attempt=g_solidAttempts.find(key);attempt!=g_solidAttempts.end()&&now-attempt->second<5000)return;
+    // Rejected meshes also yield the next frame's read slot to later draws. (steady_indoor_light: only the stair set reads, each group once)
+    const bool stairsOnly=DevSwitches::SteadyIndoorLight();
+    if(auto attempt=g_solidAttempts.find(key);attempt!=g_solidAttempts.end()&&(stairsOnly||now-attempt->second<5000))return;
     if(!g_solidReadBudget)return;--g_solidReadBudget;
     if(g_solidAttempts.size()>=512&&!g_solidAttempts.contains(key)){
+        if(stairsOnly){StairSet::wanted.store(false,std::memory_order_relaxed);return;} // shortcut: past 512 groups a lot's other draws are not read for stairs, and the scan frames stop; raise the limit if the log shows it reached
         auto oldest=g_solidAttempts.begin();
         for(auto it=g_solidAttempts.begin();it!=g_solidAttempts.end();++it)if(now-it->second>now-oldest->second)oldest=it;
         g_solidAttempts.erase(oldest);
@@ -1799,6 +1809,7 @@ void NoteSolidMeshImpl(IDirect3DDevice9* dev,D3DPRIMITIVETYPE type,INT baseVerte
             triangles.push_back({points[index[0]],points[index[1]],points[index[2]]});
         }
     }
+    if(stairsOnly){StairSet::g_set.Add(triangles,now);return;}
     uint64_t geometry=1469598103934665603ull;
     if(nowait)geometry=SolidGeometryHash(triangles.data(),triangles.size()*sizeof(triangles[0]));
     else{const auto* bytes=reinterpret_cast<const BYTE*>(triangles.data());
@@ -1854,22 +1865,24 @@ void PumpSolidMeshes(){
     const auto reset=MeshOcclusion::reset.load(std::memory_order_acquire);
     if(reset!=g_solidReset){g_solidGroups.clear();g_solidGeometry.clear();g_solidAttempts.clear();g_solidBusy.clear();g_solidPs.clear();g_solidTriangles=0;g_solidDirty=0;g_solidReset=reset;g_solidNextScan=0;g_solidScanning=false;g_solidReplaced=g_solidRejected=0;}
     // (steady_indoor_light) No indoor pass reads the mesh set (MeshOcclusion::Blocked) and no publish relights: nothing is
-    // read in the draw hooks (budget 0: NoteSolidMeshImpl returns at once) and nothing is published. On the switch the set is
-    // dropped once (the reset above clears the groups on the next pump); switched off again, discovery starts over.
-    if(DevSwitches::SteadyIndoorLight()){
-        g_solidReadBudget=0;g_solidScanning=false;
+    // published, and the draw hooks read only for the stair set (StairSet::wanted: a lot with floor holes under the physical
+    // lamps; else budget 0: NoteSolidMeshImpl returns at once). On the switch the set is dropped once (the reset above clears
+    // the groups on the next pump); switched off again, discovery starts over.
+    const bool steady=DevSwitches::SteadyIndoorLight();
+    if(steady){
         if(!g_solidSteadyCleared){
             MeshOcclusion::Reset();
             g_solidLastPublished.clear();g_solidLastPublished.shrink_to_fit();
             g_solidSteadyCleared=true;
         }
-        return;
-    }
-    g_solidSteadyCleared=false;
+        if(const auto stairs=StairSet::generation.load(std::memory_order_relaxed);stairs!=g_solidStairGen){g_solidStairGen=stairs;g_solidAttempts.clear();g_solidBusy.clear();g_solidNextScan=0;g_solidScanning=false;}
+        if(!StairSet::wanted.load(std::memory_order_relaxed)){g_solidReadBudget=0;g_solidScanning=false;return;}
+    }else g_solidSteadyCleared=false;
     // Once every visible group is cached, discovery need not query device state on every frame.
     if(g_solidScanning)g_solidNextScan=now+(g_solidReadBudget==1?100:25);
     g_solidReadBudget=!g_solidNextScan||static_cast<int32_t>(now-g_solidNextScan)>=0?1:0;
     g_solidScanning=g_solidReadBudget!=0;
+    if(steady)return;
     bool retired=false;
     for(auto it=g_solidGroups.begin();it!=g_solidGroups.end();)if(now-it->second.seen>300000){g_solidTriangles-=it->second.triangles.size();it=g_solidGroups.erase(it);g_solidDirty=now|1;retired=true;}else ++it;
     if(retired)std::erase_if(g_solidGeometry,[](const auto& p){return !g_solidGroups.contains(p.second);});
@@ -2320,7 +2333,7 @@ void ShadeTick() {
         g_shadeLastPatches = static_cast<int>(t.patches.size());
         if (t.walls.empty() && t.crowns.empty()) t.lamps.clear(), t.others.clear(), t.live = 0; // nothing shades: 255 everywhere at once
         t.lot = want.lot, t.key = want.key, t.w = want.w, t.h = want.h;
-        t.sent = GetTickCount() | 1;
+        t.sent = std::max<DWORD>(GetTickCount(), 1);
         g_shadeWorker.Submit(std::move(t));
         g_lotsInFlight++;
     }
@@ -4752,7 +4765,6 @@ std::atomic<int> g_snowDrawn{0};
 // The patch itself: ShaderPatches::PatchLotTerrainMax (shader_patches.cpp, checked offline by tools/floor_shade_check)
 using ShaderPatches::PatchLotTerrainMax;
 constexpr DWORD kMaskConst = ShaderPatches::kLotMaskConst;
-bool PatchSnowBytecode(std::vector<DWORD>& t) { return PatchLotTerrainMax(t, 11, 12); }
 
 // The cut variant (kSnowLotCutPs, the ground under a rug): its last sampler is s12, the terrain light goes in s13
 IDirect3DPixelShader9* g_snowCutPs = nullptr;
@@ -5019,6 +5031,7 @@ constexpr float kPixelLampTrimUnit = 0.75f; // the default of the per-pixel lamp
 std::atomic<bool> g_objPixel{true};
 std::atomic<float> g_objPixelStrength{1.0f};
 std::atomic<bool> g_objPixelLamps{true};          // outdoor rig objects: world lamps per pixel instead of the rig lamps
+bool g_offScreenTarget = false; // render target 0 is not the size of the back buffer (a photo or a reflection, not the screen)
 std::atomic<float> g_objPixelLampStrength{1.0f};
 // Windows take outdoor light (experimental, off by default): see DrawWindowOutdoor
 std::atomic<bool> g_windowOutdoor{true};
@@ -5036,6 +5049,13 @@ std::vector<DWORD> ShaderCode(IDirect3DPixelShader9* ps) {
     return t;
 }
 
+// A shader's name across sessions, as in ShadersRecusados
+uint32_t ShaderHash(const std::vector<DWORD>& t) {
+    uint32_t h = 2166136261u;
+    for (DWORD d : t) h = (h ^ d) * 16777619u;
+    return h;
+}
+
 // Development build: keeps the bytecode of every shader pair a fix refused, in Apex Radiance\ShadersRecusados, so it can be
 // studied offline (the log only has the shader's address, which changes between sessions).
 void SaveRefused(const char* what, const std::vector<DWORD>& ps) {
@@ -5046,11 +5066,6 @@ void SaveRefused(const char* what, const std::vector<DWORD>& ps) {
         // Named by content (the address changes every session), written once, at most 300 files per session.
         static int written = 0;
         if (written >= 300) return;
-        auto hash = [](const std::vector<DWORD>& t) {
-            uint32_t h = 2166136261u;
-            for (DWORD d : t) h = (h ^ d) * 16777619u;
-            return h;
-        };
         const std::filesystem::path dir = std::filesystem::path(ApexPaths::ApexDirectory()) / L"ShadersRecusados";
         const auto save = [&](const std::string& name, const std::vector<DWORD>& data) {
             if (std::filesystem::exists(dir / name)) return;
@@ -5058,12 +5073,12 @@ void SaveRefused(const char* what, const std::vector<DWORD>& ps) {
             std::ofstream(dir / name, std::ios::binary).write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size() * 4));
             written++;
         };
-        const uint32_t psHash = hash(ps);
+        const uint32_t psHash = ShaderHash(ps);
         save(std::format("{}_PS_{:08X}.bin", tag, psHash), ps);
         UINT size = 0;
         if (g_curVs && SUCCEEDED(g_curVs->GetFunction(nullptr, &size)) && size >= 8 && size <= 65536) {
             std::vector<DWORD> vs(size / 4);
-            if (SUCCEEDED(g_curVs->GetFunction(vs.data(), &size))) save(std::format("{}_PS_{:08X}_VS_{:08X}.bin", tag, psHash, hash(vs)), vs);
+            if (SUCCEEDED(g_curVs->GetFunction(vs.data(), &size))) save(std::format("{}_PS_{:08X}_VS_{:08X}.bin", tag, psHash, ShaderHash(vs)), vs);
         }
     } catch (...) {
     }
@@ -5104,8 +5119,8 @@ PatchedPs& PatchedFor(IDirect3DDevice9* dev, std::unordered_map<IDirect3DPixelSh
                 LOG_WARNING(std::format("[LotLightBridge] {}: shader {:08X} refused by D3D ({:08X}){}", what, reinterpret_cast<uintptr_t>(g_curPs), static_cast<uint32_t>(hr),
                                         variant ? ", the first copy draws it" : ""));
             else
-                LOG_INFO(std::format("[LotLightBridge] {}: shader {:08X} does not have the expected pattern, {}", what, reinterpret_cast<uintptr_t>(g_curPs),
-                                     variant ? "the first copy draws it" : "left as the game draws it"));
+                LOG_INFO(std::format("[LotLightBridge] {}: shader {:08X} (PS_{:08X}) does not have the expected pattern, {}", what, reinterpret_cast<uintptr_t>(g_curPs),
+                                     ShaderHash(original), variant ? "the first copy draws it" : "left as the game draws it"));
             if (!original.empty() && !variant) SaveRefused(what, original);
         }
     }
@@ -5146,7 +5161,7 @@ template <typename DrawFn> bool DrawRoad(IDirect3DDevice9* dev, DrawFn draw) {
     float oldW[4] = {};
     const bool wet = p.road.reflectConst >= 0;
     if (wet) dev->GetPixelShaderConstantF(p.road.reflectConst, oldW, 1);
-    const float sky[4] = {1.0f - g_night.load(std::memory_order_relaxed), 0, 0, 0};
+    const float sky[4] = {1.0f - g_skyNight.load(std::memory_order_relaxed), 0, 0, 0};
     IDirect3DPixelShader9* original = g_curPs;
     g_inOwnCall = true;
     {
@@ -6119,7 +6134,7 @@ void NoteCrown(const FoliageInstance& f) {
     if (g_crowns.size() >= kMaxCrowns) return;
     CrownSeen c;
     c.e = {f.centre[0], f.centre[1], f.centre[2], f.rx, f.ry, f.rx, 1.0f, 0.0f, Canopy::LadFor(2.0f * f.ry)};
-    c.first = GetTickCount() | 1;
+    c.first = std::max<DWORD>(GetTickCount(), 1);
     g_crowns.push_back(c);
     g_crownCount.store(static_cast<long>(g_crowns.size()), std::memory_order_relaxed);
 }
@@ -6235,7 +6250,7 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
     }
     // c[B .. B+81], then the colours that replace c54..c80 for the draw
     if (perVertex) out.assign((82 + 27) * 4, 0.0f);
-    const DWORD now = GetTickCount() | 1;
+    const DWORD now = std::max<DWORD>(GetTickCount(), 1);
     // too many instances (grass and flowers are instances too): the ones not drawn for 3 s go, never the ones in view (a
     // cleared map made every crown in view pick again in the same frame)
     if (g_foliageInstances.size() > 16384) {
@@ -6510,6 +6525,9 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
             lamps[0][0] = 1.0f; // no directionless ground light on vertical faces
         }
     }
+    // A household photo lights its Sim with the rig alone, far from any lamp: zeroing it halved blond hair (the draws on the
+    // object rig shaders). A reflection with lamps near keeps the per-pixel lamps.
+    if (zeroRig && nLamps == 0 && g_offScreenTarget) return false;
     // (12/10, F7 18-38-41: a window frame on story 2 stands 2.5 m above the only lamp head around, a red post's; how much of
     // its red came through this term rather than the per-pixel lamps is UNVERIFIED) The ground light (the atlas) is the
     // light lying on the ground, at no height: an object standing above every lamp head around takes none of it, fading over
@@ -6697,6 +6715,32 @@ struct WallMaskBind {
         SetTex(dev, s, old);
         if (old) old->Release();
         for (int i = 0; i < kCount; i++) dev->SetSamplerState(s, kStates[i], st[i]);
+    }
+};
+
+// (arch_ambient) The neighbour's reflection cube for one draw of an arch copy (ShaderPatches::RoomMapPatch nbCubeSampler), filtered as
+// the room's own cube is (a mip chain, read linear): with none, the room's own, whose difference is 0. Only states that differ change
+struct NbCubeBind {
+    static constexpr int kCount = 10;
+    static constexpr D3DSAMPLERSTATETYPE kStates[kCount] = {D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV, D3DSAMP_ADDRESSW, D3DSAMP_SRGBTEXTURE, D3DSAMP_MIPMAPLODBIAS, D3DSAMP_MAXMIPLEVEL, D3DSAMP_MAXANISOTROPY};
+    IDirect3DDevice9* dev;
+    DWORD s;
+    IDirect3DBaseTexture9* old = nullptr;
+    DWORD st[kCount] = {}, want[kCount] = {};
+    NbCubeBind(IDirect3DDevice9* d, const ShaderPatches::RoomMapPatch& p, IDirect3DBaseTexture9* cube) : dev(d), s(static_cast<DWORD>(p.nbCubeSampler)) {
+        D3D9Hooks::GetBoundTexture(dev, s, &old);
+        SetTex(dev, s, cube ? cube : D3D9Hooks::BoundTexture(dev, static_cast<DWORD>(p.cubeSampler)));
+        for (int i = 0; i < kCount; i++) {
+            dev->GetSamplerState(s, kStates[i], &st[i]);
+            dev->GetSamplerState(static_cast<DWORD>(p.cubeSampler), kStates[i], &want[i]);
+            if (want[i] != st[i]) dev->SetSamplerState(s, kStates[i], want[i]);
+        }
+    }
+    ~NbCubeBind() {
+        SetTex(dev, s, old);
+        if (old) old->Release();
+        for (int i = 0; i < kCount; i++)
+            if (want[i] != st[i]) dev->SetSamplerState(s, kStates[i], st[i]);
     }
 };
 
@@ -7117,28 +7161,36 @@ bool RoomMapConsts(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& p, 
 // arches and its neighbours' ambient, on floor maps only (one block: S = 65536). Returns how many cells hold something; 0 for
 // the wall atlas and a room with no arch, whose zero rows change nothing (the copy without the block then draws, pixel for
 // pixel the same, without the block's ~106 ALU per pixel). basisTex: one of the draw's directional maps, 0 = none bound.
-constexpr UINT kArchRows = 2 * ShaderPatches::kArchCells;
+// nbCube: the neighbour's reflection cube for DrawWithRoomMap, null = none.
+// The last row turns the floor VS's TEXCOORD4 into lot metres: position x 64, less the VS's offset (ArchAmbientCode).
+constexpr UINT kArchRows = ShaderPatches::kArchRows;
 std::atomic<long> g_archCopyDraws{0}, g_archPlainDraws{0};
 // (development builds) the draw cost log's timed draws (DrawCostSampled): their arch rows' own time
 int64_t g_archRowsTicks = 0;
 uint32_t g_archRowsCalls = 0;
-int ArchRowsForImpl(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& room, const float band[4], uintptr_t basisTex, float* rows);
-int ArchRowsFor(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& room, const float band[4], uintptr_t basisTex, float* rows) {
-    if (kPublicBuild || !g_drawCostTimed) return ArchRowsForImpl(dev, room, band, basisTex, rows);
+int ArchRowsForImpl(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& room, const float band[4], uintptr_t basisTex, float* rows, IDirect3DBaseTexture9*& nbCube);
+int ArchRowsFor(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& room, const float band[4], uintptr_t basisTex, float* rows, IDirect3DBaseTexture9*& nbCube) {
+    if (kPublicBuild || !g_drawCostTimed) return ArchRowsForImpl(dev, room, band, basisTex, rows, nbCube);
     LARGE_INTEGER a, b;
     QueryPerformanceCounter(&a);
-    const int n = ArchRowsForImpl(dev, room, band, basisTex, rows);
+    const int n = ArchRowsForImpl(dev, room, band, basisTex, rows, nbCube);
     QueryPerformanceCounter(&b);
     g_archRowsTicks += b.QuadPart - a.QuadPart, g_archRowsCalls++;
     return n;
 }
-int ArchRowsForImpl(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& room, const float band[4], uintptr_t basisTex, float* rows) {
+int ArchRowsForImpl(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& room, const float band[4], uintptr_t basisTex, float* rows, IDirect3DBaseTexture9*& nbCube) {
     if (room.archConst < 0 || room.ambConst < 0 || !(band[1] > 60000.0f)) return 0;
     float own[4] = {};
     if (FAILED(dev->GetPixelShaderConstantF(static_cast<UINT>(room.ambConst), own, 1))) return 0;
     // the room light map (its identity only): its story tells rooms with the same ambient apart
-    const uintptr_t mapTex = reinterpret_cast<uintptr_t>(RtOutdoorLamps::GameMapOf(D3D9Hooks::BoundTexture(dev, room.sampler))); // (a relit copy: its game map)
-    return LevelLightShare::ArchAmbientConsts(own, mapTex, basisTex, rows, static_cast<int>(ShaderPatches::kArchCells));
+    IDirect3DBaseTexture9* const map = D3D9Hooks::BoundTexture(dev, room.sampler);
+    if (!map) return 0;
+    void* cube = nullptr;
+    const int cells = LevelLightShare::ArchAmbientConsts(own, reinterpret_cast<uintptr_t>(RtOutdoorLamps::GameMapOf(map)), basisTex, rows, static_cast<int>(ShaderPatches::kArchCells), &cube); // (a relit copy: its game map)
+    nbCube = static_cast<IDirect3DBaseTexture9*>(static_cast<IDirect3DCubeTexture9*>(cube));
+    float* const scale = rows + 2 * ShaderPatches::kArchCells * 4;
+    scale[0] = scale[1] = 64.0f, scale[2] = -1.0f / 16.0f, scale[3] = -1.0f / 8.0f;
+    return cells;
 }
 // (arch_ambient) The arch copy of a room-map copy just made: none where it has no arch block (ps_2_x, no ambient constant),
 // since it would draw exactly as the copy without it
@@ -7149,9 +7201,9 @@ PatchedPs* ArchCopyOrNull(PatchedPs& a) {
     }
     return a.ps ? &a : nullptr;
 }
-// rows: the arch rows (kArchRows) for a copy with the arch block, nullptr for a copy without it
+// rows: the arch rows (kArchRows) for a copy with the arch block, nullptr for a copy without it; nbCube: ArchRowsFor's
 template <typename DrawFn> void DrawWithRoomMap(IDirect3DDevice9* dev, IDirect3DPixelShader9* copy, const ShaderPatches::RoomMapPatch& p, const float size[4],
-                                                const float band[4], const float* rows, DrawFn draw) {
+                                                const float band[4], const float* rows, IDirect3DBaseTexture9* nbCube, DrawFn draw) {
     float oldArch[kArchRows * 4] = {};
     const ShaderConstantPair::Block constants(p.sizeConst, p.bandConst,
                                              [dev](UINT reg, float* values, UINT count) { return SUCCEEDED(dev->GetPixelShaderConstantF(reg, values, count)); });
@@ -7164,9 +7216,12 @@ template <typename DrawFn> void DrawWithRoomMap(IDirect3DDevice9* dev, IDirect3D
     g_inOwnCall = true;
     constants.Apply(size, band, setConstants);
     if (arch) SetPsConst(dev, static_cast<UINT>(p.archConst), rows, kArchRows);
+    std::optional<NbCubeBind> cube;
+    if (arch && p.nbCubeSampler >= 0) cube.emplace(dev, p, nbCube);
     SetPs(dev, copy);
     draw();
     SetPs(dev, original);
+    cube.reset();
     if (arch) SetPsConst(dev, static_cast<UINT>(p.archConst), oldArch, kArchRows);
     constants.Restore(setConstants);
     g_inOwnCall = false;
@@ -7191,7 +7246,7 @@ template <typename DrawFn> bool DrawRoomMapWalls(IDirect3DDevice9* dev, DWORD ma
     {
         const WallMaskBind bind(dev, static_cast<DWORD>(p.room.maskSampler), mask);
         g_inOwnCall = false;
-        DrawWithRoomMap(dev, p.ps, p.room, size, band, nullptr, draw);
+        DrawWithRoomMap(dev, p.ps, p.room, size, band, nullptr, nullptr, draw);
         g_inOwnCall = true; // (the bind's restore, at its end of scope)
     }
     SetPsConst(dev, static_cast<UINT>(p.room.maskConst), old, 1);
@@ -7214,9 +7269,10 @@ template <typename DrawFn> bool DrawRoomMapSmooth(IDirect3DDevice9* dev, DrawFn 
     bool wall = false;
     if (!RoomMapConsts(dev, plainOk ? p.room : a->room, size, band, wall)) return false;
     float rows[kArchRows * 4] = {};
-    const int cells = a ? ArchRowsFor(dev, a->room, band, 0, rows) : 0;
-    if (a && (cells > 0 || !plainOk)) DrawWithRoomMap(dev, a->ps, a->room, size, band, rows, draw);
-    else if (wall || !DrawRoomMapWalls(dev, p.room.sampler, size, band, draw)) DrawWithRoomMap(dev, p.ps, p.room, size, band, nullptr, draw);
+    IDirect3DBaseTexture9* nbCube = nullptr;
+    const int cells = a ? ArchRowsFor(dev, a->room, band, 0, rows, nbCube) : 0;
+    if (a && (cells > 0 || !plainOk)) DrawWithRoomMap(dev, a->ps, a->room, size, band, rows, nbCube, draw);
+    else if (wall || !DrawRoomMapWalls(dev, p.room.sampler, size, band, draw)) DrawWithRoomMap(dev, p.ps, p.room, size, band, nullptr, nullptr, draw);
     ApexUtil::CountOne(wall ? g_roomWallDrawn : g_roomFloorDrawn);
     return true;
 }
@@ -7288,7 +7344,8 @@ template <typename DrawFn> bool DrawBasisSmooth(IDirect3DDevice9* dev, DrawFn dr
         if (bmap) bmap->Release();
         if (ok) {
             float rows[kArchRows * 4] = {};
-            const int cells = qa ? ArchRowsFor(dev, qa->room, band, basisTex, rows) : 0;
+            IDirect3DBaseTexture9* nbCube = nullptr;
+            const int cells = qa ? ArchRowsFor(dev, qa->room, band, basisTex, rows, nbCube) : 0;
             const bool useArch = qa && (cells > 0 || !plainOk);
             const PatchedPs& q = useArch ? *qa : qp;
             dev->GetPixelShaderConstantF(q.smooth.sizeConst, oldB, 1);
@@ -7299,11 +7356,11 @@ template <typename DrawFn> bool DrawBasisSmooth(IDirect3DDevice9* dev, DrawFn dr
                 g_inOwnCall = true;
                 const WallMaskBind bind(dev, static_cast<DWORD>(q.smooth.maskSampler), wallMask);
                 g_inOwnCall = false;
-                DrawWithRoomMap(dev, q.ps, q.room, rsize, band, useArch ? rows : nullptr, draw);
+                DrawWithRoomMap(dev, q.ps, q.room, rsize, band, useArch ? rows : nullptr, nbCube, draw);
                 g_inOwnCall = true; // (the bind's restore, at its end of scope)
                 g_wallMaskDraws.fetch_add(1, std::memory_order_relaxed);
             } else
-                DrawWithRoomMap(dev, q.ps, q.room, rsize, band, useArch ? rows : nullptr, draw);
+                DrawWithRoomMap(dev, q.ps, q.room, rsize, band, useArch ? rows : nullptr, nbCube, draw);
             g_inOwnCall = false;
             g_inOwnCall = true;
             SetPsConst(dev, q.smooth.sizeConst, oldB, 1);
@@ -7591,7 +7648,8 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
     // the basis light holds per pixel (so a lamp never counts twice and its light stays smooth across the object). The
     // vertex lights are zeroed as before: the game moves overflow lamps there, and the basis maps hold those too.
     float rig[8][4] = {}, unlit[4][4] = {}, oldUnlit[4][4] = {}, oldVl[4][4] = {}, oldS[4] = {};
-    const float zero[4][4] = {}, strength[4] = {1.0f, 0, 0, 0};
+    // shortcut: stairs and window copies keep strength 1, raise them if a stair looks dark beside furniture
+    const float zero[4][4] = {}, strength[4] = {TerrainLightingPolicy::FurnitureLampGain(g_night.load(std::memory_order_relaxed)), 0, 0, 0};
     if (SUCCEEDED(dev->GetPixelShaderConstantF(0, &rig[0][0], 8)))
         for (int k = 0; k < 4; k++)
             if (UnlitRooms::IsUnlitLight(rig[4 + k], rig[k])) std::memcpy(unlit[k], rig[4 + k], sizeof unlit[k]);
@@ -8048,7 +8106,7 @@ IDirect3DVertexShader9* FoliageVertexVsFor(IDirect3DDevice9* dev, IDirect3DVerte
 }
 
 template <typename DrawFn> bool DrawLeafShadow(IDirect3DDevice9* dev, DrawFn draw) {
-    const float night = g_night.load(std::memory_order_relaxed);
+    const float night = g_skyNight.load(std::memory_order_relaxed);
     if (!g_objectFix.load(std::memory_order_relaxed) || night <= 0.01f) return false;
     PatchedPs& p = PatchedFor(dev, g_leafPs, "Foliage (moon shadow)", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchLeafShadow(t, pp.nightConst); });
     if (!p.ps) return false;
@@ -8114,7 +8172,7 @@ template <typename DrawFn> bool DrawRoofSnow(IDirect3DDevice9* dev, DrawFn draw)
 
 // Draws an outdoor object with the moon-shadow-free shader (c3.x = night level), then restores the game state.
 template <typename DrawFn> bool DrawObjectRig(IDirect3DDevice9* dev, DrawFn draw) {
-    const float night = g_night.load(std::memory_order_relaxed);
+    const float night = g_skyNight.load(std::memory_order_relaxed);
     if (!g_objectFix.load(std::memory_order_relaxed) || night <= 0.01f) return false;
     EnsureObjectReplacement(dev);
     if (!g_objectPs) return false;
@@ -8622,13 +8680,13 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice
                 // game's, B-spline smoothed). Then the lamps' light on the ground is at its faintest and rain clouds dim the sun;
                 // at full night, as before, the lamp pools changed from blocky to smooth in one step at the end of dusk. (No
                 // wall shade: no sampler for it)
-                nightSmooth = smooth && g_night.load(std::memory_order_relaxed) > 0.0f;
+                nightSmooth = smooth && g_skyNight.load(std::memory_order_relaxed) > 0.0f;
                 if (!nightSmooth) smooth = nullptr;
                 shade = nullptr;
             }
         }
         const float gain = GroundGain();
-        const float dayWeight = 1.0f - g_night.load(std::memory_order_relaxed);
+        const float dayWeight = 1.0f - g_skyNight.load(std::memory_order_relaxed);
         PatchedPs* daylight = nullptr;
         if ((smooth || shade) && !nightSmooth && !multi && dayWeight > 0.0f) {
             daylight = &PatchedFor(dev, g_terrainDayPs, "Terrain daylight range", [s](std::vector<DWORD>& t, PatchedPs& p) {
@@ -8966,8 +9024,8 @@ int FurnitureFloorMap(IDirect3DDevice9* dev) {
         // a room light map is an A8R8G8B8 map with power-of-two sides (the game's floor maps): the object's other textures
         // (DXT colour and normal maps) are never looked up as one
         D3DSURFACE_DESC d{};
-        if (FAILED(static_cast<IDirect3DTexture9*>(t)->GetLevelDesc(0, &d)) || d.Format != D3DFMT_A8R8G8B8 || !d.Width || !d.Height || (d.Width & (d.Width - 1)) ||
-            (d.Height & (d.Height - 1)))
+        auto* const g = static_cast<IDirect3DTexture9*>(const_cast<void*>(RtOutdoorLamps::GameMapOf(t))); // (a relit copy, a 16-bit sharper one too: its game map's format)
+        if (FAILED(g->GetLevelDesc(0, &d)) || d.Format != D3DFMT_A8R8G8B8 || !d.Width || !d.Height || (d.Width & (d.Width - 1)) || (d.Height & (d.Height - 1)))
             return false;
         float size[4], k[4];
         return MapSizeThisFrame(t, size) && FloorWallMaskTexture(dev, t, size, k) != nullptr;
@@ -9096,6 +9154,37 @@ char SlotKind(const float* colour, const float* dir) {
     if (colour[3] > 1e-6f) return 'F';
     return UnlitRooms::IsUnlitLight(colour, dir) ? 'N' : 'L';
 }
+// (developer mode) A rig's LightDirections +0x10 and LightColors +0x50: the rows c0..c7 hold for a shader with a rig chain (POD only, SEH)
+bool ReadRigLights(uintptr_t rig, float out[8][4]) {
+    __try {
+        std::memcpy(out, reinterpret_cast<const void*>(rig + 0x10), sizeof(float) * 32);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+bool ReadLightHead(uintptr_t light, float out[3]) { // POD only (SEH)
+    __try {
+        std::memcpy(out, reinterpret_cast<const void*>(light + 0x120), sizeof(float) * 3);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+// (developer mode) The size of the part's rig box, and "lamp part" when a listed light stands in it: furniture and the lamp's
+// own parts draw alike. Only a hint: a large rig can hold a lamp that is not part of it
+std::string RigBoxText(uintptr_t rig) {
+    constexpr float kMargin = 0.05f; // a lamp's head can sit on its model's box
+    float centre[3], half[3], head[3];
+    if (!rig || !ObjectLightBridge::RigBox(rig, centre, half)) return {};
+    const bool lamp = std::any_of(g_enumLights.begin(), g_enumLights.end(), [&](uintptr_t light) {
+        if (!ReadLightHead(light, head)) return false;
+        for (int i = 0; i < 3; i++)
+            if (ApexMath::Fabs(head[i] - centre[i]) > half[i] + kMargin) return false;
+        return true;
+    });
+    return std::format(" | box {:.2f} x {:.2f} x {:.2f} m{}", half[0] * 2.0f, half[1] * 2.0f, half[2] * 2.0f, lamp ? " | lamp part" : "");
+}
 void TraceFurniture(IDirect3DDevice9* dev, const float (*rigIn)[4], bool rigChain, int path, bool dark, bool active, float tint, float cubeGame, float cubeDrawn) {
     const uintptr_t rigPtr = RigTracker::CurrentRig();
     float w[3][4] = {}, rig[8][4] = {}, vlc[4][4] = {};
@@ -9120,6 +9209,11 @@ void TraceFurniture(IDirect3DDevice9* dev, const float (*rigIn)[4], bool rigChai
         state = TraceHash(state, v);
     for (int k = 0; k < 4; k++)
         for (int c = 0; c < 4; c++) state = TraceHash(state, TraceQ(rig[4 + k][c]));
+    // (path B and parts with no rig chain: their constants are not the rig's lights, the rig itself is)
+    float own[8][4];
+    const bool haveOwn = !kPublicBuild && rigPtr && (path == 2 || !rigChain) && ReadRigLights(rigPtr, own);
+    for (int k = 0; k < 4 && haveOwn; k++)
+        for (int c = 0; c < 3; c++) state = TraceHash(state, TraceQ(own[4 + k][c]));
     if (path == 1) {
         state = TraceHash(state, static_cast<int64_t>(g_traceA.lightMap));
         state = TraceHash(state, static_cast<int64_t>(g_traceA.basis0));
@@ -9154,6 +9248,11 @@ void TraceFurniture(IDirect3DDevice9* dev, const float (*rigIn)[4], bool rigChai
                                    path == 1 ? "A" : path == 2 ? "B" : "game", dark ? 1 : 0, active ? 1 : 0, rigText, vlSum, cubeGame, cubeDrawn, tint);
     if (path == 1)
         text += std::format(" | A: light map {:08X}, directional map {:08X}, read scale ({:.2f}, {:.2f})", g_traceA.lightMap, g_traceA.basis0, g_traceA.scaleX, g_traceA.scaleY);
+    if (haveOwn) {
+        text += " | rig own";
+        for (int k = 0; k < 4; k++) text += std::format(" {}({:.3f} {:.3f} {:.3f})", SlotKind(own[4 + k], own[k]), own[4 + k][0], own[4 + k][1], own[4 + k][2]);
+    }
+    if (!kPublicBuild) text += RigBoxText(rigPtr);
     Recorder::Note(text);
 }
 
@@ -9236,6 +9335,20 @@ bool RoomShowsOldLightCached(const void* room) {
     if (fresh) it->second = AtriumHold::RoomShowsOldLight(room);
     return it->second;
 }
+// (physical) a room the GPU draws shows every lamp at once, drag or not, so its furniture must too: a part waiting for that room's
+// solve kept its old light for seconds, also after the drop while the solves ran ("63 object parts ... 4000 ms after the edit",
+// 04/11). Per room and frame
+std::unordered_map<const void*, bool> g_rigRoomGpu;
+uint32_t g_rigRoomGpuFrame = 0;
+bool RoomGpuDragCached(const void* room) {
+    if (g_rigRoomGpuFrame != g_roomMapFrame) {
+        g_rigRoomGpu.clear();
+        g_rigRoomGpuFrame = g_roomMapFrame;
+    }
+    const auto [it, fresh] = g_rigRoomGpu.try_emplace(room, false);
+    if (fresh) it->second = OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical() && (GpuRoomLamps::DrawnAny(room, 0) || OutdoorDelta::PhysDrawnRoom(room));
+    return it->second;
+}
 uint64_t RigHash(const float (*rig)[4]) {
     uint64_t h = 1469598103934665603ull;
     const auto* b = reinterpret_cast<const unsigned char*>(rig);
@@ -9271,6 +9384,7 @@ void HoldRig(IDirect3DDevice9* dev, float (*rig)[4], RigHeld& h) {
     bool wait = false;
     if (withRoom) {
         const void* room = episode ? ObjectLightBridge::RigRoom(rp) : nullptr;
+        if (room && RoomGpuDragCached(room)) room = nullptr; // (no wait and no grace: its light is the GPU's, shown now)
         wait = room && (AtriumHold::AllAtOnce() ? RoomShowsOldLightCached(room) : RoomLightQueue::AwaitingSwitchLight(room));
         // The game updates a rig at once, while its room is marked only when LevelLightShare sends it (about 140 ms after the
         // edit): for kRigMarkGraceMs from the episode's start, while a lamp edit is pending, a part waits as if its room
@@ -9816,8 +9930,194 @@ template <typename DrawFn> D3D9Hooks::HookAction DrawCostSampled(IDirect3DDevice
     return r;
 }
 
+// ---- The frame views of a capture burst (development build, LotLightBridge::SetFrameView): one frame each ----
+LotLightBridge::FrameView g_frameView = LotLightBridge::FrameView::None;
+UINT g_viewW = 0, g_viewH = 0;
+LotLightBridge::FrameViewResult g_viewResult;
+IDirect3DPixelShader9* g_classPs[FrameClasses::kCount][2] = {}; // ps_2_0, ps_3_0
+IDirect3DTexture9* g_whiteTex = nullptr;
+std::unordered_map<IDirect3DPixelShader9*, uint16_t> g_psCubes; // the samplers a shader declares as cubes
+
+bool ScreenTarget(IDirect3DDevice9* dev) {
+    IDirect3DSurface9* rt = nullptr;
+    D3DSURFACE_DESC d{};
+    D3DVIEWPORT9 vp{};
+    if (FAILED(dev->GetRenderTarget(0, &rt)) || !rt) return false;
+    rt->GetDesc(&d);
+    rt->Release();
+    return d.Width == g_viewW && d.Height == g_viewH && SUCCEEDED(dev->GetViewport(&vp)) && vp.X == 0 && vp.Y == 0 && vp.Width == g_viewW && vp.Height == g_viewH;
+}
+
+// A 64 px cube is bound where the shader declares a cube: the reflection probe's specular cube (two draws of a capture; the
+// 32 px cube next to it is something else). It says the surface reads that cube, not that it is metal
+bool ReadsCube(IDirect3DDevice9* dev) {
+    auto [it, fresh] = g_psCubes.try_emplace(g_curPs, uint16_t{0});
+    if (fresh) {
+        const std::vector<DWORD> t = ShaderCode(g_curPs);
+        for (size_t k = 0; k + 2 < t.size(); k++)
+            // dcl: the texture type in bits 27-30 of its next token (cube = 3), the sampler register after it
+            if ((t[k] & 0xFFFF) == 0x001F && ((t[k + 1] >> 27) & 0xF) == 3 && (((t[k + 2] >> 28) & 7) | (((t[k + 2] >> 11) & 3) << 3)) == 10 && (t[k + 2] & 0x7FF) < 16)
+                it->second |= static_cast<uint16_t>(1u << (t[k + 2] & 0x7FF));
+    }
+    for (DWORD s = 0; s < 16; s++) {
+        if (!(it->second & (1u << s))) continue;
+        IDirect3DBaseTexture9* b = nullptr;
+        if (FAILED(dev->GetTexture(s, &b)) || !b) continue;
+        D3DSURFACE_DESC d{};
+        const bool cube = b->GetType() == D3DRTYPE_CUBETEXTURE && SUCCEEDED(static_cast<IDirect3DCubeTexture9*>(b)->GetLevelDesc(0, &d)) && d.Width == 64;
+        b->Release();
+        if (cube) return true;
+    }
+    return false;
+}
+
+int DrawClass(IDirect3DDevice9* dev) {
+    if (ReadsCube(dev)) return FrameClasses::kReadsCube;
+    switch (g_curClass) {
+    case PsClass::ObjectRig: return FrameClasses::kObject;
+    case PsClass::LotLight: case PsClass::LotLightSnow: case PsClass::LotLightSnowCut: case PsClass::LotLightMelt: return FrameClasses::kLotSurface;
+    case PsClass::Roof: case PsClass::RoofSnow: return FrameClasses::kRoof;
+    case PsClass::WallGain: return FrameClasses::kWall;
+    case PsClass::FloorAtlas: return FrameClasses::kFloor;
+    case PsClass::Lake: case PsClass::Sea: case PsClass::LakeWeather: return FrameClasses::kWater;
+    case PsClass::WorldCandidate: case PsClass::WorldMultiLight: case PsClass::WorldCompact: return FrameClasses::kTerrain;
+    default: return FrameClasses::kOther;
+    }
+}
+
+// (the colour lives in the shader: no constant of the game is touched)
+IDirect3DPixelShader9* ClassPs(IDirect3DDevice9* dev, int cls) {
+    const int v = PsIs3(g_curPs) ? 1 : 0;
+    IDirect3DPixelShader9*& ps = g_classPs[cls][v];
+    if (ps) return ps;
+    const FrameClasses::Class& c = FrameClasses::kClasses[cls];
+    const DWORD code[] = {v ? 0xFFFF0300u : 0xFFFF0200u, 0x05000051u, 0xA00F0000u, std::bit_cast<DWORD>(c.r / 255.0f), std::bit_cast<DWORD>(c.g / 255.0f),
+                          std::bit_cast<DWORD>(c.b / 255.0f), 0x3F800000u, // def c0, r, g, b, 1
+                          0x02000001u, 0x800F0800u, 0xA0E40000u,             // mov oC0, c0
+                          0x0000FFFFu};
+    if (FAILED(dev->CreatePixelShader(code, &ps))) ps = nullptr;
+    return ps;
+}
+
+// Light maps by the rule read from the captures, on a depth-tested draw: a render target of another size than the screen, a
+// single-level 32-bit map of at least 128 px (under that: the 64 px tables), a 256 px DXT5 terrain map. Unverified beyond them
+void NoteMaps(IDirect3DDevice9* dev) {
+    constexpr size_t kMaxListed = 512;
+    auto& maps = g_viewResult.maps;
+    for (DWORD s = 0; s < 16 && maps.size() < kMaxListed; s++) {
+        IDirect3DBaseTexture9* b = nullptr;
+        if (FAILED(dev->GetTexture(s, &b)) || !b) continue;
+        D3DSURFACE_DESC d{};
+        const bool flat = b->GetType() == D3DRTYPE_TEXTURE && SUCCEEDED(static_cast<IDirect3DTexture9*>(b)->GetLevelDesc(0, &d));
+        const bool target = d.Pool == D3DPOOL_DEFAULT && (d.Usage & D3DUSAGE_RENDERTARGET) && (d.Width != g_viewW || d.Height != g_viewH);
+        const bool baked = d.Pool != D3DPOOL_DEFAULT && d.Format == D3DFMT_A8R8G8B8 && b->GetLevelCount() == 1 && d.Width >= 128 && d.Height >= 128;
+        const bool terrain = d.Format == D3DFMT_DXT5 && d.Width == 256 && d.Height == 256 && b->GetLevelCount() <= 5;
+        if (flat && (target || baked || terrain) && std::find(maps.begin(), maps.end(), b) == maps.end()) maps.push_back(b); // (its reference goes with it)
+        else b->Release();
+    }
+}
+
+// Colour textures to white for one draw, back when this ends. The textures: DXT with mips of at least 128 px, what albedo is in
+// the captures. Left alone: cubes, render targets, 32-bit maps and tables, terrain maps. There is no way to tell a colour texture
+// by its sampler (these shaders carry no names and their order differs): a specular or normal map of that shape goes white too.
+// A cut-out or blended draw keeps its textures: white has an alpha of 1 and would fill its holes.
+// (Two levels: the census' light map rule takes single-level 32-bit textures, and the fixes must not take this one for a map.)
+struct WhitenTextures {
+    IDirect3DDevice9* dev;
+    IDirect3DBaseTexture9* saved[16] = {};
+    bool any = false;
+    explicit WhitenTextures(IDirect3DDevice9* d) : dev(d) {
+        DWORD blend = 0, atest = 0;
+        dev->GetRenderState(D3DRS_ALPHABLENDENABLE, &blend);
+        dev->GetRenderState(D3DRS_ALPHATESTENABLE, &atest);
+        if (blend || atest) return;
+        if (!g_whiteTex) {
+            if (FAILED(dev->CreateTexture(2, 2, 2, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &g_whiteTex, nullptr))) return;
+            for (UINT level = 0; level < 2; level++) {
+                D3DLOCKED_RECT lr{};
+                if (FAILED(g_whiteTex->LockRect(level, &lr, nullptr, 0))) continue;
+                for (UINT y = 0; y < 2u >> level; y++) std::memset(static_cast<BYTE*>(lr.pBits) + y * lr.Pitch, 0xFF, 8 >> level);
+                g_whiteTex->UnlockRect(level);
+            }
+        }
+        for (DWORD s = 0; s < 16; s++) {
+            IDirect3DBaseTexture9* b = nullptr;
+            if (FAILED(dev->GetTexture(s, &b)) || !b) continue;
+            D3DSURFACE_DESC d{};
+            const bool colour = b->GetType() == D3DRTYPE_TEXTURE && SUCCEEDED(static_cast<IDirect3DTexture9*>(b)->GetLevelDesc(0, &d)) && d.Pool != D3DPOOL_DEFAULT &&
+                                (d.Format == D3DFMT_DXT1 || d.Format == D3DFMT_DXT3 || d.Format == D3DFMT_DXT5) && d.Width >= 128 && d.Height >= 128 && b->GetLevelCount() > 1 &&
+                                !(d.Format == D3DFMT_DXT5 && d.Width == 256 && d.Height == 256 && b->GetLevelCount() <= 5);
+            if (!colour) {
+                b->Release();
+                continue;
+            }
+            saved[s] = b;
+            SetTex(dev, s, g_whiteTex);
+            any = true;
+        }
+    }
+    ~WhitenTextures() {
+        for (DWORD s = 0; s < 16; s++)
+            if (saved[s]) {
+                SetTex(dev, s, saved[s]);
+                saved[s]->Release();
+            }
+    }
+};
+
+template <typename DrawFn> D3D9Hooks::HookAction OnDrawView(IDirect3DDevice9* dev, DrawFn draw) {
+    using LotLightBridge::FrameView;
+    DWORD z = 0, write = 0;
+    dev->GetRenderState(D3DRS_ZENABLE, &z);
+    dev->GetRenderState(D3DRS_COLORWRITEENABLE, &write);
+    if (!z || !(write & 7) || !g_curPs || !ScreenTarget(dev)) {
+        g_viewResult.left++;
+        return OnDrawTracked(dev, draw);
+    }
+    const auto drawn = [&] { // the draw as it is, also when no fix claimed it
+        if (OnDrawTracked(dev, draw) != D3D9Hooks::HookAction::Continue) return;
+        g_inOwnCall = true;
+        draw();
+        g_inOwnCall = false;
+    };
+    if (g_frameView == FrameView::WhiteAlbedo) {
+        const WhitenTextures white(dev);
+        drawn();
+        g_viewResult.drawn += white.any ? 1 : 0;
+        g_viewResult.left += white.any ? 0 : 1;
+        return D3D9Hooks::HookAction::Skip;
+    }
+    const int cls = DrawClass(dev);
+    NoteMaps(dev);
+    drawn();
+    IDirect3DPixelShader9* flat = ClassPs(dev, cls);
+    if (!flat) return D3D9Hooks::HookAction::Skip;
+    DWORD zFunc = 0, zWrite = 0, blend = 0, atest = 0;
+    dev->GetRenderState(D3DRS_ZFUNC, &zFunc);
+    dev->GetRenderState(D3DRS_ZWRITEENABLE, &zWrite);
+    dev->GetRenderState(D3DRS_ALPHABLENDENABLE, &blend);
+    dev->GetRenderState(D3DRS_ALPHATESTENABLE, &atest);
+    dev->SetRenderState(D3DRS_ZFUNC, D3DCMP_EQUAL);
+    dev->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
+    dev->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+    dev->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+    IDirect3DPixelShader9* original = g_curPs;
+    g_inOwnCall = true;
+    SetPs(dev, flat);
+    draw();
+    SetPs(dev, original);
+    g_inOwnCall = false;
+    dev->SetRenderState(D3DRS_ZFUNC, zFunc);
+    dev->SetRenderState(D3DRS_ZWRITEENABLE, zWrite);
+    dev->SetRenderState(D3DRS_ALPHABLENDENABLE, blend);
+    dev->SetRenderState(D3DRS_ALPHATESTENABLE, atest);
+    g_viewResult.drawn++;
+    return D3D9Hooks::HookAction::Skip;
+}
+
 template <typename DrawFn> D3D9Hooks::HookAction OnDraw(IDirect3DDevice9* dev, DrawFn draw) {
     if (kPublicBuild || g_inOwnCall) return OnDrawTracked(dev, draw);
+    if (g_frameView != LotLightBridge::FrameView::None) return OnDrawView(dev, draw);
     const bool fc = g_falseColor.load(std::memory_order_relaxed);
     const bool census = g_censusFrames.load(std::memory_order_relaxed) > 0;
     const bool lightingBloom = g_lightingBloomFrames.load(std::memory_order_relaxed) > 0;
@@ -10151,6 +10451,17 @@ void UpdateHooks() {
     const bool on = !g_hookFailed && (g_enabled.load() || g_objectFix.load() || g_roofFix.load() || g_waterFix.load() || g_wallEnabled.load());
     if (on && !g_hooksRegistered) {
         g_stateUnknown = true;
+        D3D9Hooks::RegisterSetRenderTarget(kHookName, [](D3D9Hooks::DeviceContext& ctx, DWORD index, IDirect3DSurface9* rt) {
+            if (index != 0 || !rt) return D3D9Hooks::HookAction::Continue;
+            IDirect3DSurface9* bb = nullptr;
+            D3DSURFACE_DESC target{}, screen{};
+            if (SUCCEEDED(ctx.device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb) {
+                g_offScreenTarget = SUCCEEDED(rt->GetDesc(&target)) && SUCCEEDED(bb->GetDesc(&screen)) &&
+                                    (target.Width != screen.Width || target.Height != screen.Height);
+                bb->Release();
+            }
+            return D3D9Hooks::HookAction::Continue;
+        });
         D3D9Hooks::RegisterSetPixelShader(kHookName, [](D3D9Hooks::DeviceContext&, IDirect3DPixelShader9* ps) {
             if (!g_inOwnCall && !g_hookFailed) try {
                     TrackPs(ps);
@@ -10243,8 +10554,27 @@ void SetObjectShadowFix(bool on) {
     UpdateHooks();
 }
 
-void SetNightLevel(float level) { g_night = level < 0 ? 0.0f : (level > 1 ? 1.0f : level); }
+// The Counters' side of the furniture gain (no patched shader there): CounterLightingConfig.y, written into the game's vector, which
+// its bind 0x006A7700 copies for each lot draw. Only after the game set it (flag bit 2, 0x006A7904 writes it once). gain 0: as the game set it.
+// UNVERIFIED in game: that the Counters shader reads this copy (the lot's +0x288 picks it; the log's line gives the value written)
+float g_counterY = 0.0f; // the game's value, read once
+void SetCounterGain(float gain) {
+    const uintptr_t clc = GameAddr::Get(GameAddr::Id::CounterConfig), flags = GameAddr::Get(GameAddr::Id::CounterConfigFlags);
+    if (!clc || !flags || !(*reinterpret_cast<const DWORD*>(flags) & 2)) return;
+    float* y = reinterpret_cast<float*>(clc + 4);
+    if (g_counterY == 0.0f) {
+        g_counterY = *y;
+        LOG_INFO(std::format("[LotLightBridge] Counters' directional light: CounterLightingConfig.y {:.3f}, x{:.2f} at full night", g_counterY, TerrainLightingPolicy::FurnitureLampGain(1.0f)));
+    }
+    *y = gain > 0.0f ? g_counterY * gain : g_counterY;
+}
+
+void SetNightLevel(float level) {
+    g_night = level < 0 ? 0.0f : (level > 1 ? 1.0f : level);
+    SetCounterGain(g_indoorSmooth.load(std::memory_order_relaxed) ? TerrainLightingPolicy::FurnitureLampGain(g_night.load(std::memory_order_relaxed)) : 0.0f);
+}
 void SetRigNightLevel(float level) { g_rigNight = level < 0 ? 0.0f : (level > 1 ? 1.0f : level); }
+void SetSkyLevel(float level) { g_skyNight = level < 0 ? 0.0f : (level > 1 ? 1.0f : level); }
 
 void SetRoofFix(bool on, float strength) {
     g_roofStrength = strength;
@@ -10425,6 +10755,17 @@ std::string WaterStatus() {
     return std::format("water: {} | draws with reflection: {}", g_waterFix.load() ? (g_waterPs ? "active" : "waiting") : "off", g_waterDrawn.load());
 }
 
+void SetFrameView(FrameView view, unsigned w, unsigned h) {
+    g_frameView = view;
+    g_viewW = w;
+    g_viewH = h;
+    g_viewResult = {};
+    g_psCubes.clear();
+}
+FrameViewResult TakeFrameView() {
+    g_frameView = FrameView::None;
+    return std::exchange(g_viewResult, {});
+}
 void SetFalseColor(bool on) { g_falseColor = on; }
 bool FalseColor() { return g_falseColor.load(); }
 
@@ -10983,6 +11324,7 @@ std::string ObjectStatus() {
 }
 
 void Shutdown(bool keepChunkMaps) {
+    SetCounterGain(0.0f);
     MeshOcclusion::Reset();
     g_solidGroups.clear();g_solidGeometry.clear();g_solidAttempts.clear();g_solidBusy.clear();g_solidPs.clear();g_solidTriangles=0;g_solidDirty=0;g_solidNotes=0;g_solidNextScan=0;g_solidScanning=false;
     g_keepChunks = keepChunkMaps;
@@ -11115,6 +11457,17 @@ void Shutdown(bool keepChunkMaps) {
             m = nullptr;
         }
     g_magentaTried = false;
+    for (auto& pair : g_classPs)
+        for (auto*& ps : pair)
+            if (ps) {
+                ps->Release();
+                ps = nullptr;
+            }
+    if (g_whiteTex) {
+        g_whiteTex->Release();
+        g_whiteTex = nullptr;
+    }
+    g_frameView = LotLightBridge::FrameView::None;
     g_psIs3.clear();
     g_census.clear();
     g_falseColor = false;

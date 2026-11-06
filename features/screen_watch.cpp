@@ -3,9 +3,13 @@
 #include "recorder.h"
 #include "render_callbacks.h"
 #include "overlay.h"
+#include "post_scene.h"
+#include "capture_video.h"
+#include "apex_paths.h"
 #include "apex_log.h"
 #include <windows.h>
 #include <algorithm>
+#include <filesystem>
 #include <format>
 
 namespace {
@@ -15,18 +19,24 @@ constexpr float kRows[ScreenWatch::kColumn] = {-0.075f, -0.0375f, -0.0185f, -0.0
 // the grid's columns and rows as shares of the screen (above the game's bottom bar)
 constexpr float kGridXAt[ScreenWatch::kGridX] = {0.10f, 0.26f, 0.42f, 0.58f, 0.74f, 0.90f};
 constexpr float kGridYAt[ScreenWatch::kGridY] = {0.18f, 0.38f, 0.58f, 0.78f};
-constexpr int kRing = 4;             // copies in flight (read back once the GPU has done them)
+constexpr int kRing = 8;             // copies in flight: two waits of a few frames each (Collect)
 constexpr size_t kMaxSamples = 12000; // 60 s at 200 fps
 
+enum Stage { kFree, kCopied, kReading };
 struct Slot {
     IDirect3DSurface9* rt = nullptr;
+    IDirect3DSurface9* sys = nullptr;
     IDirect3DQuery9* done = nullptr;
     DWORD tick = 0;
-    bool pending = false;
+    Stage stage = kFree;
+    int points = 0, videoFrame = -1;
+    float frameMs = 0.0f;
+    bool mirrored = false;
 };
 Slot g_ring[kRing];
 int g_next = 0, g_oldest = 0;
-IDirect3DSurface9* g_sys = nullptr;
+LARGE_INTEGER g_lastPresent{}; // for the frame times
+float g_worstMs = 0.0f;        // the longest frame since the last sample
 bool g_watching = false, g_failed = false, g_resetHooked = false, g_centre = false;
 bool g_copied = false; // this frame's pixels were copied before the overlay (EndScene)
 int g_x[ScreenWatch::kPoints] = {}, g_y[ScreenWatch::kPoints] = {}, g_w = 0, g_h = 0;
@@ -36,11 +46,11 @@ void Free() {
     for (Slot& s : g_ring) {
         if (s.done) s.done->Release();
         if (s.rt) s.rt->Release();
+        if (s.sys) s.sys->Release();
         s = Slot{};
     }
-    if (g_sys) g_sys->Release();
-    g_sys = nullptr;
     g_next = g_oldest = 0;
+    CaptureVideo::Release();
 }
 void PreReset(IDirect3DDevice9*) {
     Free();
@@ -61,6 +71,14 @@ bool MousePixel(IDirect3DDevice9* dev, const D3DSURFACE_DESC& bd, POINT& pixel) 
     return true;
 }
 
+// The pixel under the mouse; the screen's centre (true) when the mouse is elsewhere, or on the menu (the recording was started
+// from it)
+bool AimedPixel(IDirect3DDevice9* dev, const D3DSURFACE_DESC& bd, POINT& pixel) {
+    const bool centre = Overlay::MouseOverMenu() || !MousePixel(dev, bd, pixel);
+    if (centre) pixel = POINT{static_cast<LONG>(bd.Width / 2), static_cast<LONG>(bd.Height / 2)};
+    return centre;
+}
+
 bool Begin(IDirect3DDevice9* dev) {
     IDirect3DSurface9* bb = nullptr;
     if (FAILED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || !bb) return false;
@@ -70,10 +88,8 @@ bool Begin(IDirect3DDevice9* dev) {
     if (bd.Format != D3DFMT_X8R8G8B8 && bd.Format != D3DFMT_A8R8G8B8) return false;
     g_w = static_cast<int>(bd.Width);
     g_h = static_cast<int>(bd.Height);
-    POINT pixel{static_cast<LONG>(bd.Width / 2), static_cast<LONG>(bd.Height / 2)};
-    // the screen's centre when the mouse is elsewhere, or on the menu (the recording was started from it)
-    g_centre = Overlay::MouseOverMenu() || !MousePixel(dev, bd, pixel);
-    if (g_centre) pixel = POINT{static_cast<LONG>(bd.Width / 2), static_cast<LONG>(bd.Height / 2)};
+    POINT pixel{};
+    g_centre = AimedPixel(dev, bd, pixel);
     for (int i = 0; i < ScreenWatch::kColumn; i++) {
         g_x[i] = pixel.x;
         g_y[i] = std::clamp<int>(pixel.y + static_cast<int>(kRows[i] * static_cast<float>(bd.Height)), 0, g_h - 1);
@@ -87,14 +103,12 @@ bool Begin(IDirect3DDevice9* dev) {
     GroundProfile::WatchBegin(pixel, g_w, g_h);
     for (Slot& s : g_ring)
         if (FAILED(dev->CreateRenderTarget(ScreenWatch::kPoints, 1, bd.Format, D3DMULTISAMPLE_NONE, 0, FALSE, &s.rt, nullptr)) ||
+            FAILED(dev->CreateOffscreenPlainSurface(ScreenWatch::kPoints, 1, bd.Format, D3DPOOL_SYSTEMMEM, &s.sys, nullptr)) ||
             FAILED(dev->CreateQuery(D3DQUERYTYPE_EVENT, &s.done))) {
             Free();
             return false;
         }
-    if (FAILED(dev->CreateOffscreenPlainSurface(ScreenWatch::kPoints, 1, bd.Format, D3DPOOL_SYSTEMMEM, &g_sys, nullptr))) {
-        Free();
-        return false;
-    }
+    if (!kPublicBuild) CaptureVideo::Begin(dev, bd, std::filesystem::path(ApexPaths::ApexDirectory()) / L"Video.tmp");
     if (!g_resetHooked) {
         RenderCallbacks::Add(RenderCallbacks::preReset, PreReset);
         g_resetHooked = true;
@@ -102,39 +116,55 @@ bool Begin(IDirect3DDevice9* dev) {
     return true;
 }
 
-// The oldest copies the GPU has done: read back without waiting
+// The copies the GPU has done, without waiting: a slot is read in a later frame than its copy to system memory was asked
+// (that copy and the lock back to back wait for the GPU, every frame)
 void Collect(IDirect3DDevice9* dev) {
-    while (g_ring[g_oldest].pending) {
+    while (g_ring[g_oldest].stage == kReading) {
         Slot& s = g_ring[g_oldest];
-        if (s.done->GetData(nullptr, 0, 0) != S_OK) return; // not done yet (no flush asked)
+        if (s.done->GetData(nullptr, 0, 0) != S_OK) break; // not done yet (no flush asked)
         D3DLOCKED_RECT lr{};
-        if (SUCCEEDED(dev->GetRenderTargetData(s.rt, g_sys)) && SUCCEEDED(g_sys->LockRect(&lr, nullptr, D3DLOCK_READONLY))) {
+        if (SUCCEEDED(s.sys->LockRect(&lr, nullptr, D3DLOCK_READONLY))) {
             ScreenWatch::Sample sample{};
             sample.tick = s.tick;
+            sample.frameMs = s.frameMs;
+            sample.videoFrame = s.videoFrame;
+            sample.mirrored = s.mirrored;
+            sample.ground = s.points > ScreenWatch::kGrid;
             const DWORD* px = static_cast<const DWORD*>(lr.pBits);
-            for (int i = 0; i < ScreenWatch::kPoints; i++) {
+            for (int i = 0; i < s.points; i++) {
                 sample.rgb[i][0] = static_cast<unsigned char>((px[i] >> 16) & 0xFF);
                 sample.rgb[i][1] = static_cast<unsigned char>((px[i] >> 8) & 0xFF);
                 sample.rgb[i][2] = static_cast<unsigned char>(px[i] & 0xFF);
             }
-            g_sys->UnlockRect();
+            s.sys->UnlockRect();
             if (g_samples.size() < kMaxSamples) g_samples.push_back(sample);
         }
-        s.pending = false;
+        s.stage = kFree;
         g_oldest = (g_oldest + 1) % kRing;
+    }
+    for (int k = 0; k < kRing; k++) {
+        Slot& s = g_ring[(g_oldest + k) % kRing];
+        if (s.stage == kReading) continue;
+        if (s.stage != kCopied || s.done->GetData(nullptr, 0, 0) != S_OK) break;
+        if (FAILED(dev->GetRenderTargetData(s.rt, s.sys))) {
+            g_failed = true;
+            return;
+        }
+        s.done->Issue(D3DISSUE_END);
+        s.stage = kReading;
     }
 }
 
 // This frame's pixels into the next free slot (skipped when every slot is still in flight)
-void Copy(IDirect3DDevice9* dev) {
+void Copy(IDirect3DDevice9* dev, int videoFrame) {
     Slot& s = g_ring[g_next];
-    if (s.pending) return;
+    if (s.stage != kFree) return;
     IDirect3DSurface9* bb = nullptr;
     if (FAILED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || !bb) return;
-    if (!GroundProfile::WatchPoints(g_x + ScreenWatch::kGrid, g_y + ScreenWatch::kGrid))
-        std::fill(g_x + ScreenWatch::kGrid, g_x + ScreenWatch::kPoints, 0), std::fill(g_y + ScreenWatch::kGrid, g_y + ScreenWatch::kPoints, 0);
+    // (no lamp or camera yet: the ground points have nothing to read)
+    const int points = GroundProfile::WatchPoints(g_x + ScreenWatch::kGrid, g_y + ScreenWatch::kGrid) ? ScreenWatch::kPoints : ScreenWatch::kGrid;
     bool ok = true;
-    for (int i = 0; i < ScreenWatch::kPoints && ok; i++) {
+    for (int i = 0; i < points && ok; i++) {
         const RECT src{g_x[i], g_y[i], g_x[i] + 1, g_y[i] + 1}, dst{i, 0, i + 1, 1};
         ok = SUCCEEDED(dev->StretchRect(bb, &src, s.rt, &dst, D3DTEXF_NONE));
     }
@@ -145,15 +175,21 @@ void Copy(IDirect3DDevice9* dev) {
     }
     s.done->Issue(D3DISSUE_END);
     s.tick = GetTickCount();
-    s.pending = true;
+    s.stage = kCopied;
+    s.points = points;
+    s.videoFrame = videoFrame;
+    s.frameMs = g_worstMs;
+    g_worstMs = 0.0f;
+    float vp[4][4];
+    s.mirrored = PostScene::RecentCameraViewProj(vp) && vp[1][1] < 0.0f;
     g_next = (g_next + 1) % kRing;
 }
 
 // The end of the game's frame, right before the Apex overlay (menu, notices) is drawn on it: the frame as the game made it
 void BeforeOverlay(IDirect3DDevice9* dev) {
-    if (!g_watching || g_failed || g_copied || !dev || !g_sys) return;
+    if (!g_watching || g_failed || g_copied || !dev) return;
     g_copied = true;
-    Copy(dev);
+    Copy(dev, CaptureVideo::Grab(dev));
 }
 
 } // namespace
@@ -168,6 +204,8 @@ void OnPresent(IDirect3DDevice9* dev) {
         g_failed = !dev || !Begin(dev);
         g_watching = true;
         g_copied = false;
+        g_lastPresent = {};
+        g_worstMs = 0.0f;
         if (g_failed) LOG_WARNING("[ScreenWatch] The screen pixels cannot be read on this device: the recording has none");
         else RenderCallbacks::Add(RenderCallbacks::filteredSceneBeforeOverlay, BeforeOverlay);
         return;
@@ -180,9 +218,15 @@ void OnPresent(IDirect3DDevice9* dev) {
         Free();
         return;
     }
-    if (!g_watching || g_failed || !dev || !g_sys) return;
+    if (!g_watching || g_failed || !dev) return;
+    LARGE_INTEGER now, freq;
+    QueryPerformanceCounter(&now);
+    QueryPerformanceFrequency(&freq);
+    if (g_lastPresent.QuadPart) g_worstMs = std::max(g_worstMs, static_cast<float>((now.QuadPart - g_lastPresent.QuadPart) * 1000.0 / freq.QuadPart));
+    g_lastPresent = now;
     Collect(dev);
-    if (!g_copied) Copy(dev); // no EndScene this frame reached the overlay: the frame as presented
+    CaptureVideo::Pump(dev);
+    if (!g_copied && !g_failed) Copy(dev, CaptureVideo::Grab(dev)); // no EndScene this frame reached the overlay: the frame as presented
     g_copied = false;
 }
 
@@ -193,6 +237,15 @@ int Width() { return g_w; }
 int Height() { return g_h; }
 bool ColumnAtCentre() { return g_centre; }
 bool Watching() { return g_watching && !g_failed; }
+bool MouseOrCentre(IDirect3DDevice9* dev, POINT& pixel) {
+    IDirect3DSurface9* bb = nullptr;
+    D3DSURFACE_DESC bd{};
+    if (SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb) {
+        bb->GetDesc(&bd);
+        bb->Release();
+    }
+    return AimedPixel(dev, bd, pixel);
+}
 void Release() { Free(); }
 
 } // namespace ScreenWatch

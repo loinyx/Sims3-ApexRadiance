@@ -254,3 +254,14 @@ as the floor solve does. (2) and (3) `PatchRoomMapReadWalls` on the window copy'
 floor reads. Offline: the three captured copies patched and created by Direct3D 9; `tools/room_map_smooth_check` 1674
 checks, 0 failures (the object read: +0 green through a wall, was +49; the doorway the game's read within 0 LSB);
 `tools/basis_shadow_check` 262 checks, 0 failures. Not yet checked in game.
+
+### 2026-11-05: refused shaders
+
+**Context:** the logs listed refused shaders by address only, so they could not be tied to saved files.
+
+**Findings:** in the Scene dither, "could not carry the position" came from a vertex shader writing the free TEXCOORDk itself, a dead write.
+13 of 25 refused indoor shaders had their diffuse chain interleaved or used `dp3_sat`. The rest have nothing to hook: 168 outdoor objects, 12
+vertex-lit indoor shaders, 13 moon shadows with no fade, the terrain daylight patch pinned to one shader, and 8 window shaders not studied.
+
+**Outcome:** both shapes are accepted and the refusal line carries the `PS_<hash>`. Adding ground light to the outdoor families is a new look,
+so it waits for a capture. How many of the remaining shaders are drawn in play is unknown: the earlier log lines have no hashes.

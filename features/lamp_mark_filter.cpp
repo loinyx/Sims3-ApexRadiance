@@ -40,6 +40,7 @@
 #include "drag_lite.h"
 #include "dev_switches.h"
 #include "entry_chain.h"
+#include "object_legs.h"
 #include "phys_lamp_pick.h"
 #include <windows.h>
 #include <algorithm>
@@ -161,7 +162,7 @@ bool NoteSwitch(uintptr_t light, DWORD tick) {
     }
     if (distinct < kMassSwitches) return GetTickCount() - g_massLast.load(std::memory_order_relaxed) <= kMassHoldMs && g_massLast.load() != 0;
     if (tick - g_massLast.load(std::memory_order_relaxed) > kMassHoldMs) g_massEvents.fetch_add(1, std::memory_order_relaxed);
-    g_massLast.store(tick | 1, std::memory_order_relaxed);
+    g_massLast.store(std::max<DWORD>(tick, 1), std::memory_order_relaxed);
     return true;
 }
 // Any switch of the player's (the quick pass for one lamp too): a lamp switched on or off where it is, not a
@@ -178,7 +179,7 @@ void NoteUserSwitch(DWORD tick) {
         g_switchStart.store(tick, std::memory_order_relaxed);
         g_switchEvents.fetch_add(1, std::memory_order_relaxed);
     }
-    g_switchLast.store(tick | 1, std::memory_order_relaxed);
+    g_switchLast.store(std::max<DWORD>(tick, 1), std::memory_order_relaxed);
     g_switchSerial.fetch_add(1, std::memory_order_relaxed);
 }
 // The night level at the last Present (-1 = no world): while dusk or dawn switches every lamp, switches are not lamp edits
@@ -194,7 +195,7 @@ void NoteEditNow(DWORD tick) {
     const float night = g_nightLevel.load(std::memory_order_relaxed);
     if (night < 0.0f || (night > 0.02f && night < 0.98f)) return; // no world, or dusk / dawn switching every lamp
     g_editSerial.fetch_add(1, std::memory_order_relaxed);
-    g_editLast.store(tick | 1, std::memory_order_release); // after the serial: a reader of the tick sees its serial
+    g_editLast.store(std::max<DWORD>(tick, 1), std::memory_order_release); // after the serial: a reader of the tick sees its serial
     g_editEvents.fetch_add(1, std::memory_order_relaxed);
 }
 
@@ -271,10 +272,10 @@ void NoteHandledLight(uintptr_t light) {
     HandledLight& h = g_handledLights[g_handledLightNext.fetch_add(1, std::memory_order_relaxed) % std::size(g_handledLights)];
     h.at.store(0, std::memory_order_relaxed);
     h.light.store(light, std::memory_order_relaxed);
-    h.at.store(GetTickCount() | 1, std::memory_order_release);
+    h.at.store(std::max<DWORD>(GetTickCount(), 1), std::memory_order_release);
 }
 void NoteHandledEdit(uintptr_t tl, const float pos[3]) {
-    const DWORD now = GetTickCount() | 1;
+    const DWORD now = std::max<DWORD>(GetTickCount(), 1);
     std::lock_guard<std::mutex> lk(g_mx);
     HandledEdit& h = g_handled[g_handledNext];
     g_handledNext = (g_handledNext + 1) % static_cast<int>(std::size(g_handled));
@@ -456,12 +457,13 @@ bool OccDecideImpl(uintptr_t tl, int room, uintptr_t entry) {
     const bool capture = OutdoorDelta::RoomLampCapture();
     float x = 0.0f, z = 0.0f;
     const bool read = capture && OccluderPoint(entry, x, z) && OccToWorld(tl, x, z);
+    uint64_t id = 0;
+    uintptr_t shape = 0;
+    OccluderObject(entry, id, shape);
+    ObjectLegs::NoteShape(id, shape); // (each entry's update comes here, its first one too: 0x006C78E0 has no other path)
     if (capture) {
         float was[2] = {};
         bool had = false;
-        uint64_t id = 0;
-        uintptr_t shape = 0;
-        OccluderObject(entry, id, shape);
         t_occPt[0] = x, t_occPt[1] = z, t_occPt[2] = 0.0f;
         t_occObj[0] = static_cast<uintptr_t>(id), t_occObj[1] = static_cast<uintptr_t>(id >> 32), t_occObj[2] = shape;
         if (read) {
@@ -793,7 +795,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
             switchedOn = on && !was.on && !moved && was.room == room;
             if (selfSwitching && switchedOn && tick - was.lastAuto > 5000) {
                 autoSelf = true;
-                was.lastAuto = tick | 1;
+                was.lastAuto = std::max<DWORD>(tick, 1);
             }
             if (was.on != on && !selfSwitching && !moved && was.room == room) NoteUserSwitch(tick); // the room queue's quick pass
             if (!selfSwitching) g_lampEvents.fetch_add(1, std::memory_order_relaxed);
@@ -1075,6 +1077,7 @@ bool Install(std::string& why) {
         g_removeOn = EntryChain::Install(EntryChain::Site::LightObjectRemove, EntryChain::Layer::LampMarkFilter, reinterpret_cast<void*>(&RemovalHook), &err);
         if (!g_removeOn) LOG_WARNING("[LampMarkFilter] The object removal is not followed (a deleted lamp leaves the GPU's lamps within 250 ms): " + err);
     }
+    ObjectLegs::Install();
     g_installed = true;
     LOG_INFO(std::format("[LampMarkFilter] Installed: a lamp marks its rooms changed only when it changed{}", g_flagsCounted ? " (message counters on)" : ""));
     return true;
@@ -1083,6 +1086,7 @@ bool Install(std::string& why) {
 void Uninstall() {
     if (!g_installed) return;
     if (g_removeOn) EntryChain::Remove(EntryChain::Site::LightObjectRemove, EntryChain::Layer::LampMarkFilter), g_removeOn = false;
+    ObjectLegs::Uninstall();
     MemPatch::RestoreAll(g_patches);
     g_patches.clear();
     FlushInstructionCache(GetCurrentProcess(), nullptr, 0);
@@ -1126,7 +1130,7 @@ void OnPresent(float nightLevel) {
                 g_lotSkippedDusk.fetch_add(1, std::memory_order_relaxed);
                 continue;
             }
-            d.last = now | 1;
+            d.last = std::max<DWORD>(now, 1);
             Run r{tracker, d.changed, d.switchOnly, d.allRooms || (d.lampCount == 0 && d.switchCount == 0), d.relocated, d.lampCount, {}, d.switchCount, {}};
             std::copy(d.lamps, d.lamps + d.lampCount, r.lamps);
             std::copy(d.switched, d.switched + d.switchCount, r.switched);
@@ -1152,11 +1156,9 @@ void OnPresent(float nightLevel) {
         // RelightLot watches completion and retains its own bounded fallback.
     }
 }
-long MassEventId() { return g_massEvents.load(std::memory_order_relaxed); }
 long SwitchEventId() { return g_switchEvents.load(std::memory_order_relaxed); }
 unsigned long SwitchEventStart() { return g_switchStart.load(std::memory_order_relaxed); }
 unsigned long SwitchLastTick() { return g_switchLast.load(std::memory_order_relaxed); }
-unsigned long SwitchSerial() { return g_switchSerial.load(std::memory_order_relaxed); }
 bool LotRefreshDueSoon(unsigned long withinMs) {
     if (!g_installed) return false;
     const DWORD now = GetTickCount();
@@ -1194,6 +1196,10 @@ long DeferredMarksDropped() { return g_deferredDropped.load(std::memory_order_re
 bool FurnitureMovedWith(float x, float z) {
     std::lock_guard<std::mutex> lk(g_mx);
     return PhysLampPick::FurnitureMovedWith(g_occMoves, static_cast<int>(std::size(g_occMoves)), x, z, GetTickCount(), kFurnitureMoveMs, kFurnitureNearM);
+}
+bool ShapeMovedWithin(uintptr_t shape, unsigned long ms) {
+    std::lock_guard<std::mutex> lk(g_mx);
+    return PhysLampPick::ShapeMoved(g_occMoves, static_cast<int>(std::size(g_occMoves)), shape, GetTickCount(), ms);
 }
 bool ShapeMoved(uintptr_t shape) {
     std::lock_guard<std::mutex> lk(g_mx);

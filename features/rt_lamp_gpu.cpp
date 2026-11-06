@@ -57,24 +57,28 @@ const char* EntryOf(ShaderId id) {
                                                      "BlurRowPS", "BlurColPS", "BlockPS",   "AccFastPS",    "AccRlgPS",     "AccRlgFastPS",
                                                      "ComposeRlgPS", "AccKeptPS", "ComposeKeptPS", "CopyAtPS", "BlockKeptPS",
                                                      "AccKept0PS", "AccKept0XPS", "ComposeK0PS", "AccPhysPS", "AccPhysFastPS", "T3dPS", "AccPhysXPS",
-                                                     "AccPhysInPS", "AccPhysInFastPS"};
+                                                     "AccPhysInPS", "AccPhysInFastPS", "T3dDensePS"};
     return id >= 0 && id < kShaderCount ? kNames[id] : "";
 }
 bool IsVertex(ShaderId id) { return id == kShadowVs || id == kTexelVs; }
-bool IsPhysical(ShaderId id) { return id == kAccPhysPs || id == kAccPhysFastPs || id == kT3dPs || id == kAccPhysXPs || id == kAccPhysInPs || id == kAccPhysInFastPs; }
+bool IsPhysical(ShaderId id) { return id == kAccPhysPs || id == kAccPhysFastPs || id == kT3dPs || id == kAccPhysXPs || id == kAccPhysInPs || id == kAccPhysInFastPs || id == kT3dDensePs; }
 
-void FaceTexel(const float d[3], int face, int& f, int& x, int& y) {
-    const float ax = std::fabs(d[0]), ay = std::fabs(d[1]), az = std::fabs(d[2]);
-    if (ax >= ay && ax >= az) f = d[0] > 0 ? 0 : 1;
-    else if (ay >= az) f = d[1] > 0 ? 2 : 3;
-    else f = d[2] > 0 ? 4 : 5;
-    const auto dot = [&](const float* a) { return a[0] * d[0] + a[1] * d[1] + a[2] * d[2]; };
-    const float z = dot(kFaces[f][2]);
-    const float u = dot(kFaces[f][0]) / z * 0.5f + 0.5f, v = -dot(kFaces[f][1]) / z * 0.5f + 0.5f;
-    const float F = static_cast<float>(face);
-    x = std::clamp(static_cast<int>(std::floor(u * F + 0.5f)), 0, face - 1);
-    y = std::clamp(static_cast<int>(std::floor(v * F + 0.5f)), 0, face - 1);
+D3DFORMAT SharperFormat(IDirect3DDevice9* dev) {
+    IDirect3D9* d3d = nullptr;
+    if (FAILED(dev->GetDirect3D(&d3d)) || !d3d) return D3DFMT_A8R8G8B8;
+    D3DDEVICE_CREATION_PARAMETERS cp{};
+    D3DDISPLAYMODE mode{};
+    const bool ok = SUCCEEDED(dev->GetCreationParameters(&cp)) && SUCCEEDED(d3d->GetAdapterDisplayMode(cp.AdapterOrdinal, &mode)) &&
+                    d3d->CheckDeviceFormat(cp.AdapterOrdinal, cp.DeviceType, mode.Format, D3DUSAGE_RENDERTARGET | D3DUSAGE_QUERY_FILTER, D3DRTYPE_TEXTURE, D3DFMT_A16B16G16R16F) == D3D_OK;
+    d3d->Release();
+    return ok ? D3DFMT_A16B16G16R16F : D3DFMT_A8R8G8B8;
 }
+// c101.y: the target takes the texel as it is (Packed)
+float FloatTarget(IDirect3DTexture9* t) {
+    D3DSURFACE_DESC d{};
+    return t && SUCCEEDED(t->GetLevelDesc(0, &d)) && d.Format == D3DFMT_A16B16G16R16F ? 1.0f : 0.0f;
+}
+
 
 bool Engine::Init(IDirect3DDevice9* dev, void* const* shaders, int face, std::string& err) {
     ReleaseAll();
@@ -492,7 +496,7 @@ bool Engine::Accumulate(IDirect3DDevice9* dev, const Map& m, const RtLampModel::
     c[97][0] = p.radius, c[97][1] = static_cast<float>(face_), c[97][2] = 1.0f / static_cast<float>(6 * face_), c[97][3] = 1.0f / static_cast<float>(kAtlasLamps * face_);
     c[98][0] = p.aa, c[98][1] = p.normalOffset, c[98][2] = p.biasM, c[98][3] = p.biasTexels;
     c[99][0] = 1.0f / p.farDist, c[99][1] = p.farDist, c[99][2] = 1.0f / static_cast<float>(scratchW_), c[99][3] = 1.0f / static_cast<float>(scratchH_);
-    c[100][0] = first ? 1.0f : 0.0f, c[100][1] = p.mask ? 1.0f : 0.0f, c[100][2] = p.nearBlocker, c[100][3] = static_cast<float>(p.debugLamp);
+    c[100][0] = first ? 1.0f : 0.0f, c[100][1] = p.mask ? 1.0f : 0.0f, c[100][3] = static_cast<float>(p.debugLamp);
     c_.SetPsConst(dev, 0, &c[0][0], 101);
     std::memcpy(accC_, c, sizeof accC_);
     c_.SetTexture(dev, 0, atlas_);
@@ -624,7 +628,7 @@ bool Engine::ComposeImpl(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTextu
         float c[100][4] = {};
         c[99][2] = 1.0f / static_cast<float>(scratchW_), c[99][3] = 1.0f / static_cast<float>(scratchH_);
         c_.SetPsConst(dev, 99, c[99], 1);
-        const float flags[4] = {p.maskAllGpu ? 1.0f : 0.0f, 0, 0, 0};
+        const float flags[4] = {p.maskAllGpu ? 1.0f : 0.0f, FloatTarget(out), 0, 0};
         c_.SetPsConst(dev, 101, flags, 1);
     }
     const bool keptX = psId == kComposePs && p.keptX;
@@ -876,16 +880,16 @@ bool Engine::SetBlockers(IDirect3DDevice9* dev, const std::shared_ptr<const Bloc
 }
 bool Engine::AccumulateRlg(IDirect3DDevice9* dev, const Map& m, const RtLampModel::Lamp* lamps, const int* tiles, int n, const Params& p, bool first, std::string& err,
                            bool phys, const float (*t3From)[3], bool physX) {
-    if (!ready_ || !m.vb || !m.count || m.w <= 0 || m.h <= 0) {
+    if (!ready_ || (!m.pts && (!m.vb || !m.count)) || m.w <= 0 || m.h <= 0) {
         err = "nothing to relight";
         return false;
     }
-    if (!tiles_ || !table_ || (phys && (!blk_ || !t3From))) {
+    if (!tiles_ || !table_ || (phys && (!blk_ || (!t3From && n > 0)))) {
         err = "the kept shadow atlas, the room table or the blocker table is missing";
         return false;
     }
     if (!EnsureScratch(dev, m.w, m.h, err)) return false;
-    if (!m.dyn && !EnsureZeros(dev, m.count)) {
+    if (!m.pts && !m.dyn && !EnsureZeros(dev, m.count)) {
         err = "the zero stream could not be created";
         return false;
     }
@@ -919,7 +923,7 @@ bool Engine::AccumulateRlg(IDirect3DDevice9* dev, const Map& m, const RtLampMode
     c[97][0] = p.radius, c[97][1] = static_cast<float>(face_), c[97][2] = 1.0f / static_cast<float>(6 * face_), c[97][3] = 1.0f / static_cast<float>(tileRows_ * face_);
     c[98][0] = p.aa, c[98][1] = p.normalOffset, c[98][2] = p.biasM, c[98][3] = p.biasTexels;
     c[99][0] = 1.0f / p.farDist, c[99][1] = p.farDist, c[99][2] = 1.0f / static_cast<float>(scratchW_), c[99][3] = 1.0f / static_cast<float>(scratchH_);
-    c[100][0] = first ? 1.0f : 0.0f, c[100][1] = p.mask ? 1.0f : 0.0f, c[100][2] = p.nearBlocker, c[100][3] = -1.0f;
+    c[100][0] = first ? 1.0f : 0.0f, c[100][1] = p.mask ? 1.0f : 0.0f, c[100][3] = -1.0f;
     c[102][0] = 1.0f / static_cast<float>(kTableCols), c[102][1] = 1.0f / static_cast<float>(tableRows_);
     c_.SetPsConst(dev, 0, &c[0][0], 103);
     c_.SetTexture(dev, 0, tiles_);
@@ -928,21 +932,48 @@ bool Engine::AccumulateRlg(IDirect3DDevice9* dev, const Map& m, const RtLampMode
     PointSampler(dev, 0);
     PointSampler(dev, 1);
     PointSampler(dev, 2);
+    float k[5][4] = {{static_cast<float>(blkW_), 1.0f / static_cast<float>(blkW_), 1.0f / static_cast<float>(blkH_), p.edgeR}};
     if (phys) {
-        float k[5][4] = {{static_cast<float>(blkW_), 1.0f / static_cast<float>(blkW_), 1.0f / static_cast<float>(blkH_), p.edgeR}};
-        for (int i = 0; i < n; i++) std::memcpy(k[1 + i], t3From[i], 3 * sizeof(float));
+        for (int i = 0; i < n; i++) std::memcpy(k[1 + i], t3From[i], 3 * sizeof(float)), k[1 + i][3] = GpuLampLaw::TubeStep(lamps[i].law, k[1 + i][1]);
         c_.SetPsConst(dev, 103, &k[0][0], 5);
+        const float gl[4] = {p.paneFirst, p.paneCount, 0.0f, std::log2(WallOpenings::kWindowPass)};
+        c_.SetPsConst(dev, 111, gl, 1);
+        const float bn[4] = {static_cast<float>(p.bounceN), 0.0f, 0.0f, 0.0f};
+        if (p.bounceN) c_.SetPsConst(dev, 112, &p.bounceRows[0][0], 12);
+        c_.SetPsConst(dev, 124, bn, 1);
         c_.SetTexture(dev, 4, blk_);
         PointSampler(dev, 4);
     }
-    dev->SetVertexDeclaration(texelDecl_);
-    dev->SetStreamSource(0, m.vb, 0, sizeof(TexelVertex));
-    dev->SetStreamSource(1, m.dyn ? m.dyn : zeros_, 0, sizeof(TexelDyn));
-    TexelTarget(dev, m.w, m.h);
     HRESULT hr = S_OK;
+    if (m.pts) {
+        for (int i = 0; i < 4; i++) c_.SetTexture(dev, 6 + i, m.pts->t[i]), PointSampler(dev, 6 + i);
+        c_.SetVertexShader(dev, nullptr);
+    } else {
+        dev->SetVertexDeclaration(texelDecl_);
+        dev->SetStreamSource(0, m.vb, 0, sizeof(TexelVertex));
+        dev->SetStreamSource(1, m.dyn ? m.dyn : zeros_, 0, sizeof(TexelDyn));
+        TexelTarget(dev, m.w, m.h);
+    }
     if (phys) { // the batch's 3D tests first (T3dPS), then the lamps over them
-        c_.SetPixelShader(dev, ps_[kT3dPs]);
-        hr = c_.DrawPrimitive(dev, D3DPT_POINTLIST, 0, m.count);
+        if (m.pts) {
+            dev->Clear(0, nullptr, D3DCLEAR_TARGET, 0xFFFFFFFF, 1.0f, 0); // (the lamps past the batch, as T3dPS leaves them)
+            c_.SetPixelShader(dev, ps_[kT3dDensePs]);
+            float q[4] = {1.0f / static_cast<float>(m.pts->w), 1.0f / static_cast<float>(m.pts->h), 0.0f, 0.0f};
+            c_.SetPsConst(dev, 109, q, 1); // (a batch of no lamp reads its points too: AccPhysInPS)
+            for (int i = 0; i < n; i++) {
+                q[2] = static_cast<float>(i);
+                c_.SetPsConst(dev, 109, q, 1);
+                c_.SetPsConst(dev, 110, k[1 + i], 1);
+                const float lot[4] = {lamps[i].law.pos[0], lamps[i].law.pos[1], lamps[i].law.pos[2], 0.0f};
+                c_.SetPsConst(dev, 126, lot, 1);
+                dev->SetRenderState(D3DRS_COLORWRITEENABLE, 1u << i);
+                Blocks(dev, m);
+            }
+            dev->SetRenderState(D3DRS_COLORWRITEENABLE, 0xF);
+        } else {
+            c_.SetPixelShader(dev, ps_[kT3dPs]);
+            hr = c_.DrawPrimitive(dev, D3DPT_POINTLIST, 0, m.count);
+        }
         IDirect3DSurface9* s = Surf(acc_[dst]);
         if (!s || FAILED(c_.SetRenderTarget(dev, 0, s))) hr = E_FAIL;
         if (s) s->Release();
@@ -951,8 +982,9 @@ bool Engine::AccumulateRlg(IDirect3DDevice9* dev, const Map& m, const RtLampMode
         c_.SetTexture(dev, 5, t3_);
         PointSampler(dev, 5);
     }
-    c_.SetPixelShader(dev, ps_[phys ? (p.shadowAtMask ? (p.fast ? kAccPhysInFastPs : kAccPhysInPs) : (p.fast ? kAccPhysFastPs : kAccPhysPs)) : (p.fast ? kAccRlgFastPs : kAccRlgPs)]);
-    if (SUCCEEDED(hr)) hr = c_.DrawPrimitive(dev, D3DPT_POINTLIST, 0, m.count);
+    c_.SetPixelShader(dev, ps_[phys ? (m.pts ? (p.fast ? kAccPhysInFastPs : kAccPhysInPs) : (p.fast ? kAccPhysFastPs : kAccPhysPs)) : (p.fast ? kAccRlgFastPs : kAccRlgPs)]);
+    if (m.pts) Blocks(dev, m);
+    else if (SUCCEEDED(hr)) hr = c_.DrawPrimitive(dev, D3DPT_POINTLIST, 0, m.count);
     if (SUCCEEDED(hr) && phys && physX) { // (room 0) the batch's floor mask and exit light added into the second sum
         IDirect3DSurface9* s = x_ ? Surf(x_) : nullptr;
         if (!s || FAILED(c_.SetRenderTarget(dev, 0, s))) hr = E_FAIL;
@@ -973,6 +1005,8 @@ bool Engine::AccumulateRlg(IDirect3DDevice9* dev, const Map& m, const RtLampMode
     c_.SetTexture(dev, 1, nullptr);
     c_.SetTexture(dev, 2, nullptr);
     if (phys) c_.SetTexture(dev, 4, nullptr), c_.SetTexture(dev, 5, nullptr);
+    if (m.pts)
+        for (int i = 0; i < 4; i++) c_.SetTexture(dev, 6 + i, nullptr);
     dev->SetStreamSource(1, nullptr, 0, 0);
     c_.SetVertexShader(dev, nullptr);
     stats_.accDraws++;
@@ -1087,12 +1121,56 @@ bool Engine::ReadFloat4(IDirect3DDevice9* dev, IDirect3DTexture9* t, int w, int 
 }
 
 // ---- GPU room lamps ----
+void PhysPoints::Release() {
+    for (auto*& x : t) Rel(x);
+    w = h = 0;
+    rects.clear();
+}
 void KeptMapGpu::Release() {
-    for (IDirect3DVertexBuffer9** v : {&parts, &texels, &walls, &copies, &restores, &phys, &physHi, &texelsHi, &placesHi}) Rel(*v);
+    for (IDirect3DVertexBuffer9** v : {&parts, &texels, &walls, &copies, &restores, &texelsHi, &placesHi}) Rel(*v);
     Rel(layout);
-    nTexels = nWalls = nCopies = nRestores = nPhys = nPhysHi = nTexelsHi = nPlacesHi = 0;
+    phys.Release(), physHi.Release();
+    nTexels = nWalls = nCopies = nRestores = nTexelsHi = nPlacesHi = 0;
     bytes = 0;
 }
+namespace {
+// v's points into g (w x h): false when one falls outside, or a place is left empty or filled twice (a quad draws every place of a rect)
+bool MakePhysPoints(IDirect3DDevice9* dev, const std::vector<TexelVertex>& v, int w, int h, PhysPoints& g) {
+    if (v.empty()) return true;
+    if (w <= 0 || h <= 0) return false;
+    std::vector<int> rowW(static_cast<size_t>(h), 0);
+    for (const TexelVertex& t : v) {
+        const int x = static_cast<int>(t.x), y = static_cast<int>(t.y);
+        if (x < 0 || y < 0 || x >= w || y >= h) return false;
+        rowW[y] = std::max(rowW[y], x + 1);
+    }
+    size_t filled = 0;
+    for (int y = 0; y < h; y++) {
+        filled += rowW[y];
+        if (rowW[y] && (g.rects.empty() || g.rects.back().x1 != rowW[y] - 1)) g.rects.push_back({0, y, rowW[y] - 1, y});
+        else if (rowW[y]) g.rects.back().y1 = y;
+    }
+    if (filled != v.size()) return false;
+    IDirect3DTexture9* sys = nullptr;
+    if (FAILED(dev->CreateTexture(w, h, 1, 0, D3DFMT_A32B32G32R32F, D3DPOOL_SYSTEMMEM, &sys, nullptr)) || !sys) return false;
+    bool ok = true;
+    for (int i = 0; ok && i < 4; i++) {
+        D3DLOCKED_RECT lr{};
+        ok = SUCCEEDED(sys->LockRect(0, &lr, nullptr, 0)) && lr.pBits;
+        if (ok) {
+            for (const TexelVertex& t : v) {
+                const float* src = i == 0 ? t.p : i == 1 ? t.n : i == 2 ? t.mask : t.base;
+                std::memcpy(static_cast<BYTE*>(lr.pBits) + static_cast<size_t>(lr.Pitch) * static_cast<int>(t.y) + static_cast<size_t>(t.x) * 16, src, 16);
+            }
+            sys->UnlockRect(0);
+        }
+        ok = ok && SUCCEEDED(dev->CreateTexture(w, h, 1, 0, D3DFMT_A32B32G32R32F, D3DPOOL_DEFAULT, &g.t[i], nullptr)) && g.t[i] && SUCCEEDED(dev->UpdateTexture(sys, g.t[i]));
+    }
+    sys->Release();
+    g.w = w, g.h = h;
+    return ok;
+}
+} // namespace
 bool Engine::UploadKept(IDirect3DDevice9* dev, const KeptMapData& d, KeptMapGpu& g) {
     g.Release();
     g.w = d.w, g.h = d.h, g.accW = d.accW, g.accH = d.accH, g.layoutW = d.layoutW, g.layoutH = d.layoutH, g.blur = d.blur;
@@ -1104,8 +1182,9 @@ bool Engine::UploadKept(IDirect3DDevice9* dev, const KeptMapData& d, KeptMapGpu&
     };
     UINT parts = 0;
     bool ok = vb(d.parts, g.parts, parts) && vb(d.texels, g.texels, g.nTexels) && vb(d.wallTexels, g.walls, g.nWalls) && vb(d.copies, g.copies, g.nCopies) &&
-              vb(d.restores, g.restores, g.nRestores) && vb(d.phys, g.phys, g.nPhys) && vb(d.physHi, g.physHi, g.nPhysHi) &&
-              vb(d.texelsHi, g.texelsHi, g.nTexelsHi) && vb(d.placesHi, g.placesHi, g.nPlacesHi);
+              vb(d.restores, g.restores, g.nRestores) && vb(d.texelsHi, g.texelsHi, g.nTexelsHi) && vb(d.placesHi, g.placesHi, g.nPlacesHi) &&
+              MakePhysPoints(dev, d.phys, d.accW, d.accH, g.phys) && MakePhysPoints(dev, d.physHi, 2 * d.accW, 2 * d.accH, g.physHi);
+    g.bytes += (static_cast<size_t>(g.phys.w) * g.phys.h + static_cast<size_t>(g.physHi.w) * g.physHi.h) * 64;
     if (ok && !d.layout.empty()) {
         ok = d.layout.size() == static_cast<size_t>(d.layoutW) * d.layoutH && MakePreblur(dev, d.layoutW, d.layoutH, d.layout.data(), &g.layout, true);
         g.bytes += d.layout.size() * 4;
@@ -1191,7 +1270,7 @@ bool Engine::AddKeptParts(IDirect3DDevice9* dev, IDirect3DVertexBuffer9* vb, con
 bool Engine::KeptReady(IDirect3DDevice9* dev, const KeptMapGpu& k, int w, int h, std::string& err) {
     if (!ready_ || w <= 0 || h <= 0 || w > k.w || h > k.h || (k.blur && (w != k.w || h != k.h)) || k.accW <= 0 || k.accH <= 0) return err = "nothing to relight", false;
     if (!EnsureScratch(dev, std::max(k.accW, k.layoutW), std::max(k.accH, k.layoutH), err)) return false;
-    UINT most = std::max({k.nTexels, k.nWalls, k.nCopies, k.nRestores, k.nPhys});
+    UINT most = std::max({k.nTexels, k.nWalls, k.nCopies, k.nRestores});
     for (const auto& r : k.ranges) most = std::max(most, r.first + r.second);
     if (!EnsureZeros(dev, most)) return err = "the zero stream could not be created", false;
     return true;
@@ -1221,28 +1300,29 @@ bool Engine::RelightKeptPhys(IDirect3DDevice9* dev, const KeptMapGpu& k, const R
     if (rooms.empty()) return err = "no room table", false;
     // 1. the sum: every lamp at the phys points
     Map m;
-    m.w = k.accW, m.h = k.accH, m.vb = k.phys, m.count = k.nPhys;
+    m.w = k.accW, m.h = k.accH;
+    if (k.phys.t[0]) m.pts = &k.phys, m.blocks = k.phys.rects;
     if (!PhysSum(dev, m, lamps, tiles, world, n, rooms, p, first, err, false)) return false;
-    return !compose || ComposeKept(dev, k, game, out, w, h, err, amb);
+    return !compose || ComposeKept(dev, k, game, out, w, h, err, amb, &p);
 }
 // (sharper floors) RelightKeptPhys over k's sub-texels, composed into a 2w x 2h map (rt_lamp_gpu.h)
 bool Engine::RelightKeptPhysHi(IDirect3DDevice9* dev, const KeptMapGpu& k, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n,
                                const std::vector<PhysRoom>& rooms, const Params& p, IDirect3DTexture9* out, int w2, int h2, std::string& err, bool first, bool compose,
                                const float* amb) {
-    if (!out || !k.physHi || !k.texelsHi) return err = "no sub-texels", false;
+    if (!out || !k.physHi.t[0] || !k.texelsHi) return err = "no sub-texels", false;
     if (!PhysReady()) return err = "the physical shaders are missing (not in the shader cache, no compiler)", false;
     if (!ready_ || w2 <= 0 || h2 <= 0 || k.accW <= 0 || k.accH <= 0) return err = "nothing to relight", false;
     if (!tiles_ || !blk_) return err = "the kept shadow atlas or the blocker table is missing", false;
     if (rooms.empty()) return err = "no room table", false;
     if (!EnsureScratch(dev, 2 * k.accW, 2 * k.accH, err)) return false;
-    if (!EnsureZeros(dev, std::max(k.nPhysHi, k.nTexelsHi))) return err = "the zero stream could not be created", false;
+    if (!EnsureZeros(dev, k.nTexelsHi)) return err = "the zero stream could not be created", false;
     Map m;
-    m.w = 2 * k.accW, m.h = 2 * k.accH, m.vb = k.physHi, m.count = k.nPhysHi;
+    m.w = 2 * k.accW, m.h = 2 * k.accH, m.pts = &k.physHi, m.blocks = k.physHi.rects;
     if (!PhysSum(dev, m, lamps, tiles, world, n, rooms, p, first, err, false)) return false;
     if (!compose) return true;
     KeptMapGpu v; // (a view of k's sub-texels for ComposeKept's step 2; not released)
     v.texels = k.texelsHi, v.nTexels = k.nTexelsHi;
-    return ComposeKept(dev, v, nullptr, out, w2, h2, err, amb);
+    return ComposeKept(dev, v, nullptr, out, w2, h2, err, amb, &p);
 }
 bool Engine::Upsample(IDirect3DDevice9* dev, IDirect3DTexture9* src, IDirect3DTexture9* dst, int w2, int h2, std::string& err) {
     if (!ready_ || !src || !dst || w2 <= 0 || h2 <= 0) return err = "nothing to upsample", false;
@@ -1286,7 +1366,8 @@ bool Engine::CopyPlaces(IDirect3DDevice9* dev, const KeptMapGpu& k, IDirect3DTex
 bool Engine::PhysSum(IDirect3DDevice9* dev, const Map& m, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n,
                      const std::vector<PhysRoom>& rooms, const Params& p, bool first, std::string& err, bool x) {
     std::vector<float> table(rooms.size() * kTableCols * 4);
-    for (int b = 0; m.vb && b < n; b += kPhysBatch) {
+    // (a kept map with bounce and no lamp, a lampless room beside a lit one: one batch of none, or its sum would hold no bounce)
+    for (int b = 0; (m.vb || m.pts) && (b < n || (b == 0 && first && p.bounceN)); b += kPhysBatch) {
         const int nb = std::min(kPhysBatch, n - b);
         std::fill(table.begin(), table.end(), 0.0f);
         for (size_t r = 0; r < rooms.size(); r++) {
@@ -1333,7 +1414,7 @@ bool Engine::AccumulatePhys(IDirect3DDevice9* dev, const Map& m, const RtLampMod
     return PhysSum(dev, m, lamps, tiles, world, n, std::vector<PhysRoom>{room}, p, first, err, true);
 }
 // Steps 2 to 4 of RelightKept over the current sum
-bool Engine::ComposeKept(IDirect3DDevice9* dev, const KeptMapGpu& k, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err, const float* amb) {
+bool Engine::ComposeKept(IDirect3DDevice9* dev, const KeptMapGpu& k, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err, const float* amb, const Params* phys) {
     c_.SetDepthStencil(dev, nullptr);
     PassStates(dev);
     PointSampler(dev, 0);
@@ -1359,8 +1440,12 @@ bool Engine::ComposeKept(IDirect3DDevice9* dev, const KeptMapGpu& k, IDirect3DBa
     // 2. the texels into the map
     const float d99[4] = {0, 0, 1.0f / static_cast<float>(scratchW_), 1.0f / static_cast<float>(scratchH_)};
     c_.SetPsConst(dev, 99, d99, 1);
-    const float g108[4] = {amb ? amb[0] : 1.0f, amb ? amb[1] : 1.0f, amb ? amb[2] : 1.0f, 0.0f};
+    const float g108[4] = {amb ? amb[0] : 1.0f, amb ? amb[1] : 1.0f, amb ? amb[2] : 1.0f, phys && phys->toneSoft ? 1.0f : 0.0f};
     c_.SetPsConst(dev, 108, g108, 1);
+    const float none[4] = {};
+    c_.SetPsConst(dev, 125, phys && phys->bounceN ? phys->bounceHue : none, 1);
+    const float flags[4] = {0, FloatTarget(out), 0, 0};
+    c_.SetPsConst(dev, 101, flags, 1);
     if (k.texels) {
         if (!Target(dev, out, w, h)) return fail("the relit map could not be targeted");
         c_.SetTexture(dev, 1, sum);

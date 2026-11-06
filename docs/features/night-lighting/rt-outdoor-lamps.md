@@ -12,7 +12,7 @@ that cannot run it, none of it runs.
 
 | | |
 |---|---|
-| Availability | Released in 2.13.0 (Performance > Lamp lighting > Instant (GPU)). Repeated game writes relit at most every 0.5 s and lamps on the ground drawn from 40 cm: Released in 2.15.1. Baked lamp records without padding (the frame rate of 2.15.1 while moving the camera): Released in 2.15.2. Shaders from the shader cache: Released in 2.15.3. Light past 1 on the lot ground, outdoor floors and outside walls (the outdoor scale): Released in 2.16.0. Kept solves that account for every light: Released in 2.16.1. Released in 2.18.0: a lamp drawn on every story at once, floor maps smaller than their solve relit, walls relit first, each lamp counted once on floors. Released in 2.18.2: the active lot's lamp posts drawn on the four lots next to it. Released in 2.18.3: no lots next to it while the active lot has no lamp post. |
+| Availability | Released in 2.13.0 (Performance > Lamp lighting > Instant (GPU)). Repeated game writes relit at most every 0.5 s and lamps on the ground drawn from 40 cm: Released in 2.15.1. Baked lamp records without padding (the frame rate of 2.15.1 while moving the camera): Released in 2.15.2. Shaders from the shader cache: Released in 2.15.3. Light past 1 on the lot ground, outdoor floors and outside walls (the outdoor scale): Released in 2.16.0. Kept solves that account for every light: Released in 2.16.1. Released in 2.18.0: a lamp drawn on every story at once, floor maps smaller than their solve relit, walls relit first, each lamp counted once on floors. Released in 2.18.2: the active lot's lamp posts drawn on the four lots next to it. Released in 2.18.3: no lots next to it while the active lot has no lamp post. Released in 3.0.0: the shadow search walks the rim of the ball's cone, the penumbra at door jambs is whole, a street-class lamp's cap carries its street factor, and lamps follow the sun at dawn and dusk. |
 | Default | On (Lamp lighting: Instant (GPU); a saved `lampLightingMode` keeps its choice) |
 | Menu | System > Performance > Lamp lighting > Lamp updates: Instant (GPU) |
 | Configuration | `lampLightingMode = "instant"` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -49,7 +49,9 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    the grass, sidewalks and roads beside them. A room's own map can be smaller than the class's working map the solve
    wrote ([engine/room-light-maps.md](../../engine/room-light-maps.md)): its texels are relit at their place and those
    past it fall outside the viewport. A larger own map is not relit, and a blurred wall atlas must have the exact size.
-3. **Shadows.** The lot's occluders are read from its story grids on the light tree thread
+3. **Shadows.** `Shadow()` finds blockers by walking the rim of the ball's cone at depth steps of one ratio, so a far blocker
+   is found as well as a near one, and a step counts only where the segment crosses a surface, so the penumbra stays whole at
+   door jambs. The physical indoor passes share this function. The lot's occluders are read from its story grids on the light tree thread
    (`LevelLightShare::ExportLotProxy`): walls from 0.1 m below their foot to their top with their door and window holes,
    roofed quadrants at the ceiling (stopped at the floor of the story above), placed floors of upper stories as 0.2 m
    slabs. Each lamp gets a cube shadow map (6 × 256² faces). The shadow is the share of the lamp's 0.15 m ball the texel
@@ -121,6 +123,16 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    story's lamps of the bake, with the active lot's posts in the bake added as their gather took them before. A story the
    GPU cannot relight (a map refused, no kept solve after its three sends) takes the posts in its own gather again until
    the lot leaves the set.
+
+### Lamps at dawn and dusk
+
+Apex's lamp terms take `TerrainLightingPolicy::LampLevel`: the sky's smooth night, or the sun's part of the game's own lamp curve when that is
+higher. The sky's level moves by frame time, so at dawn it fell from 1 to 0 in under 0.6 s and outdoor lamp light went to its daytime 3% at
+once. The sun's part follows the clock from 13.9 to 2.3 degrees under the horizon. The level then moves at most its full range in 8 s of real
+time (`LampLevelStep`), because the sky can still turn while the sun's part stands at 0.4. Switch: `sun_lamp_level`.
+
+The moon-shadow shaders, the wet roads' sky and the terrain's daylight range keep the sky's own level (`SetSkyLevel`). By day nothing changes.
+The object rigs and tree lamps still follow the light manager's steps, and the ground bake still turns at the old moment.
 
 ## Settings
 

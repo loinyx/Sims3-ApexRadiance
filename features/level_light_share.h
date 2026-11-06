@@ -68,7 +68,6 @@ bool RealisticOpeningsActive();
 // under its own roof; a room with no known opening takes none. Relights every room when changed. Active = on and installed,
 // the openings noted.
 void SetOutdoorThroughOpenings(bool on);
-bool OutdoorThroughOpeningsActive();
 // Their brightness: the lamps of room 0 a roofed room takes through its openings keep the scale of the outdoor surfaces
 // (floors and the directional maps: Ground brightness x Lot lamp brightness while the lot pass applies them; walls: the
 // walls' Brightness while walls are lit) over the room's normalisation (opening_lamp_balance.h). Night values: the daytime
@@ -80,7 +79,6 @@ void SetOpeningLampBalance(float groundBrightness, float lotLampBrightness, bool
 // openings follows it (the story grids, the roofed rooms' doors, the outside walls' copies, room 0's wall test). A change
 // sends again only the stories with such a cut noted.
 void SetDoorsBlockLight(bool on);
-bool DoorsBlockLightActive();
 // Indoor light through openings (option "luzInternaPelasAberturas", default on in the 2.12.4 development branch): a lit lamp
 // of a roofed room shines through its arches, windows (and doors while doors do not block light) onto room 0 and the
 // roofless rooms of its story (outside walls, outdoor floors, lot ground; room 0 of the story below for a house on a
@@ -88,7 +86,6 @@ bool DoorsBlockLightActive();
 // story through the openings' holes. One opening only. Relights every room when changed. Active = on and installed, the
 // openings noted.
 void SetIndoorThroughOpenings(bool on);
-bool IndoorThroughOpeningsActive();
 // (2.15.3) Indoor light adds to the ground (option "luzInternaSomaNoChao", default on, needs indoor light through openings
 // and walls blocking light on floors): the floor texels of story 0's room 0 keep in their alpha the luminance E (at most
 // 254/255) of the light the roofed rooms' lamps put there through their openings; the lot pass and the story-0 floors add
@@ -165,8 +162,6 @@ float LampVisibilityShared(const float lamp[3], const float point[3], float near
 // patches (optional): the walls' patches (their lower cells and openings, wall_openings.h), each wall's p0 / pn into it;
 // without it every wall is whole
 uint32_t OutsideWallsIn(float x0, float z0, float x1, float z1, std::vector<GroundShadow::Wall>& out, std::vector<WallOpenings::Patch>* patches = nullptr);
-uint32_t SlabCopyGen();     // the slab copy's generation (any thread)
-uint32_t OutsideWallsGen(); // the outside walls' copy generation (any thread; OutsideWallsIn returns the one it read)
 bool ObjectWallsOn();   // "Buildings block lamp light on trees and objects" is on and installed (any thread)
 // "Walls shade lamp light near the ground" (option "paredesSombreiamOChao", default on; 14/10, was part of the option above):
 // the lot ground shade (LotLightBridge) from the same copy of the outside walls. Any thread.
@@ -181,11 +176,25 @@ bool OnWallLine(const float point[3], float dirX, float dirZ, float maxDist);
 std::string WallNotesOnRay(const float origin[3], const float dir[3], float* hitOut = nullptr);
 // (development builds, arch_ambient) A floor draw of a room whose ambient colour is `own` (the draw's constant): its arches into
 // other roofed rooms, one row pair each (ShaderPatches::PatchRoomMapSmooth archAmb): (a.x, a.z, e.x, e.z) in lot metres and
-// (the neighbour's ambient over own, 0 where lower; 1 / |e|^2). Returns how many were written (at most maxCells); 0 when the
+// (the neighbour's ambient over own, 0 where lower; 1 / |e|^2), at row 2 maxCells + 1 on each one's 1 / reach, four a row, and at row 2 maxCells + 3 on 1 for the cells of the neighbour
+// whose reflection cube the draw takes, four a row: *nbCube, the IDirect3DCubeTexture9 of the arch's room with the largest D, null when none has one. Returns how many were written (at most maxCells); 0 when the
 // room is not known. mapTex = the room light map the draw binds, basisTex = one of its directional maps (0 = none bound): they
 // name the draw's story, and only rooms of that story give their arches (together when they share the ambient); with no story
 // known, only matches all on one story of one lot do. Render thread.
-int ArchAmbientConsts(const float own[3], uintptr_t mapTex, uintptr_t basisTex, float* rows, int maxCells);
+int ArchAmbientConsts(const float own[3], uintptr_t mapTex, uintptr_t basisTex, float* rows, int maxCells, void** nbCube);
+// Which room holds a light probe now, among the rooms with arches or known to have none: false when not found
+bool RoomOfProbe(uintptr_t probe, int* story, int* id);
+// (the kept rooms' relight) a roofed room's arches into other roofed rooms of its story: one span each (lot space), out empty when none.
+// ArchGen moves when any room's arches change
+struct ArchSpan {
+    float ax, az, bx, bz, y0, y1;
+    const void* nb;
+    int nbId;
+};
+uint32_t ArchGen();
+void ArchSpansOf(const void* room, std::vector<ArchSpan>& out);
+// (arch_reach) Whether another roofed room of its story holds the ambient `own`: a floor draw cannot tell those rooms apart, so its blend keeps kReach
+bool ArchAmbientShared(const void* room, const float own[3]);
 std::string ArchAmbientStatus();
 // (development builds, basis_wall_filter) The wall mask (64 x 64 A8R8G8B8, the directional maps' layout: r -x, g +x, b -z, a +z
 // walled) of the story whose directional maps include the D3D texture basisTex (render thread). gen = the mask's version;
@@ -461,6 +470,9 @@ bool RoomMapsFree();
 // FUN_0069f280 (pos, light, acc16) called alone on the light tree thread (false elsewhere, or when not installed)
 uintptr_t BasisSamplesVec();
 bool BasisStep(const float* pos, uintptr_t light, float* acc16);
+// The light's whole part of a sample of the room as the room's solve would add it now, Apex's tests included (BasisLightHook's
+// body: the walls, openings and floors of its story at the lamp's place now), outside a solve. Light tree thread; false elsewhere
+bool BasisPartNow(void* room, const float* pos, uintptr_t light, float* acc16);
 bool LockRoomMaps(void* room);
 bool FinishRoomMaps(void* room);
 // The lot's occluders from its story grids (every wall with its openings, the roofed quadrants, each story's placed floors),

@@ -31,6 +31,8 @@ int main() {
     check(!NeedsAmbientSolve(1, true), "direct retint needs no solve");
     for (int state = 0; state <= 5; ++state)
         check(SolverOwnsAmbient(state) == (state >= 1 && state <= 3), "solver ownership");
+    for (int state = 0; state <= 5; ++state)
+        check(AmbientStepRunning(state) == (state == 3), "a marked or gathered room's ambient retaken");
     check(RebuildRoomList(false, false, false, true, false), "same lot new story manager invalidates cache");
     check(RebuildRoomList(false, false, true, false, false), "lot switch invalidates cache");
     check(!RebuildRoomList(false, false, false, false, false), "stable rooms keep cache");

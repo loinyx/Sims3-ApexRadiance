@@ -5,6 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [3.0.0](3.0.0.md): indoor lights run on the GPU with Instant (GPU), table leg and stair shadows, steady table shadows in a drag, soft shadow ends, shadows and light continuous through arches, glass, a slow fade at dawn, lamp light through diagonal walls and real opening shapes, double-height rooms, new lighting defaults, 60 s recordings.
 - [2.18.4](2.18.4.md): the walls' shade on the ground built on the GPU, a dragged lamp's shadows every frame with no flash at the let go, plant crowns no longer darkening a lamp beside them.
 - [2.18.3](2.18.3.md): a hotfix: lamp light on sidewalks, lot-edge grass and lot ground no longer changes with the camera; objects light up without delay between lots; a wall's shadow continues past a lot's edge.
 - [2.18.2](2.18.2.md): lamp posts light neighbouring lots, relit on the GPU with Instant; no light on stair tops from lamps behind a wall.

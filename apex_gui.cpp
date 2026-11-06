@@ -100,7 +100,6 @@ ImVec2 g_windowMin{}, g_windowMax{}; // the menu window's rectangle (last frame)
 std::atomic<bool> g_keysOverMenu{false}; // Alt / B are the menu's (Client::CaptureKey, window thread)
 std::atomic<bool> g_menuTextInput{false}; // bare screenshot letters must remain typeable in menu text fields
 float g_alpha = 1.0f;             // the menu's opacity (peek, slider drag fade)
-bool g_waitingForKey = false;     // Settings > Menu: waiting for a new menu key (Esc cancels it, not the menu)
 bool g_holdCompare = false;       // the hold-to-compare button is held this frame
 int g_recRow = -1;                // Shortcuts: the row whose key is being recorded (-1 = none)
 void ShortcutsContent();
@@ -149,8 +148,6 @@ constexpr const char* kPictureDescription = "Fine-tune how the world looks: brig
                                             "and LUT files. Menus and text keep their normal look. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx";
 constexpr const char* kShoreDescription = "Ponds and lakes mirror the trees, houses and lamps along their shore, on top of the game's sky reflection. "
                                           "Needs Night Lights, plus Depth Blur or Ambient Occlusion, with the game's own Edge Smoothing off. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx";
-constexpr const char* kProfilerDescription = "Measures every frame and breaks down each hitch. Writes ApexRadiance_Hitches.txt. Development build only. Part of "
-                                             APEX_PRODUCT_NAME ". Credits: @loinyx";
 
 constexpr const char* kNightLighting = "NightTerrainRelight";
 constexpr const char* kUpperFloors = "SplitLevelGroundLight";
@@ -252,7 +249,7 @@ bool NightLightsReady(const char* what) {
 // ---- Water Reflections (the shore reflection of Night Lights' lake pass, reflexoNoLago) ----
 
 float g_lastShore = 1.0f; // strength restored when the switch goes back on
-constexpr float kShoreDefault = 1.56f; // reflexoNoLago's registered default
+constexpr float kShoreDefault = 1.0f; // reflexoNoLago's registered default
 
 bool ShoreOn() { return NightLighting::ShoreReflection() > 0.0f; }
 
@@ -983,8 +980,6 @@ bool GameAaBlocksEffects() {
         (active(kNightLighting) && NightLighting::ShoreReflection() > 0.0f);
 }
 
-// S3SS.toml's saved room colour (read-only; S3SSDetect re-reads the file at most every 3 s)
-bool S3SSRoomColourSaved(bool recheck = false) { return S3SSDetect::SavedRoomAmbientOverride(recheck).has_value(); }
 
 // The Attention page and its sidebar entry exist only while one of its items applies
 bool HasAttentionItems() { return GameAaBlocksEffects() || g_oldStandalone.load(); }
@@ -1050,8 +1045,8 @@ bool FeatureSwitchRow(const char* patchName, const char* label, const char* text
 // Lamp lighting (first card): how lamp edits reach the lot's light. The mode is Night Lighting's (lampLightingMode)
 constexpr const char* kLampLightingDescription =
     "How lot lamps update when you switch, recolor or move one. Classic: the game recalculates the rooms' light after each edit, "
-    "with all of Apex's corrections. Instant (GPU): your graphics card draws the lot's outdoor lamps and their shadows, so every "
-    "floor updates within a frame or two; indoor lamps use the game's calculation. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx";
+    "with all of Apex's corrections. Instant (GPU): your graphics card draws the lot's lamps and their shadows, indoors and out, "
+    "so every floor updates within a frame or two. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx";
 
 void LampLightingCard() {
     ImGui::PushID("PerformanceLampLighting");
@@ -1065,7 +1060,7 @@ void LampLightingCard() {
         static const char* const kModes[] = {"Classic", "Instant (GPU)"};
         // (the search reads the label and description: there it names both modes)
         const char* description = ApexUi::FilterActive() ? "Classic or Instant (GPU): how lot lamps relight after you edit one"
-                                  : mode == kInstant     ? "Your graphics card updates outdoor lamp light instantly; moving lamps may dip FPS a little"
+                                  : mode == kInstant     ? "Your graphics card updates lamp light instantly; moving lamps may dip FPS a little"
                                                          : "Easier on the graphics card; light updates once you let go of a lamp";
         // Instant (GPU) is the default (14/10; a saved lampLightingMode keeps its choice). Instant cannot be chosen on a device
         // that cannot run it (it stays selectable back to Classic if it was chosen before, or by default; the note says why)
@@ -1915,53 +1910,6 @@ void DeveloperPage() {
 
 // ---- System > Settings ----
 
-// Waiting for a new menu key: the first key pressed (with the modifiers held at that moment) becomes the chord.
-void MenuKeyRow() {
-    constexpr const char* kLabel = "Menu key";
-    constexpr const char* kText = "Opens and closes this menu";
-    ApexConfig::UiSettings ui = ApexConfig::GetUi();
-    const float gap = ImGui::GetStyle().ItemSpacing.x;
-    if (!g_waitingForKey) {
-        const std::string key = ApexConfig::KeyChordText(ui.toggle);
-        if (!ApexUi::BeginControlRow(kLabel, kText, ImGui::CalcTextSize(key.c_str()).x + gap + ApexUi::ButtonWidth("Change##MenuKey", false))) return;
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted(key.c_str());
-        ImGui::SameLine();
-        if (ApexUi::TextButton("Change##MenuKey", "Any key, with Ctrl, Shift or Alt if you like; Insert alone is taken by another mod's menu")) g_waitingForKey = true;
-        ApexUi::EndControlRow();
-        return;
-    }
-    const char* prompt = I18n::Tr("Press a key (Esc cancels)");
-    if (ApexUi::BeginControlRow(kLabel, kText, ImGui::CalcTextSize(prompt).x)) {
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextColored(Col(VioletTheme::kWarning), "%s", prompt);
-        ApexUi::EndControlRow();
-    }
-    if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) {
-        g_waitingForKey = false;
-        return;
-    }
-    for (UINT vk = 0x08; vk <= 0xFE; vk++) {
-        switch (vk) {
-        case VK_SHIFT: case VK_CONTROL: case VK_MENU: case VK_LSHIFT: case VK_RSHIFT: case VK_LCONTROL: case VK_RCONTROL: case VK_LMENU: case VK_RMENU:
-        case VK_LWIN: case VK_RWIN: case VK_ESCAPE: case VK_RETURN: case VK_SPACE: case VK_TAB: case VK_CAPITAL: case VK_NUMLOCK:
-        case VK_LBUTTON: case VK_RBUTTON: case VK_MBUTTON: case VK_XBUTTON1: case VK_XBUTTON2:
-            continue;
-        default: break;
-        }
-        if (!(GetAsyncKeyState(static_cast<int>(vk)) & 0x8000)) continue;
-        ui.toggle.vk = vk;
-        ui.toggle.ctrl = (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
-        ui.toggle.shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-        ui.toggle.alt = (GetAsyncKeyState(VK_MENU) & 0x8000) != 0;
-        if (vk == VK_INSERT && !ui.toggle.ctrl && !ui.toggle.shift && !ui.toggle.alt) continue; // S3SS's own key
-        ui.keyChosen = true;
-        ApexConfig::SetUi(ui);
-        g_waitingForKey = false;
-        LOG_INFO("[Menu] Menu key set to " + ApexConfig::KeyChordText(ui.toggle));
-        break;
-    }
-}
 
 // Fixed steps instead of a slider: a slider would move under the mouse while the text it resizes grows
 void TextSizeRow() {
@@ -3619,8 +3567,6 @@ void DrawPage() {
     }
 }
 
-// Height of the footer (the hairline and one row that fits the collapse button)
-float StatusBarHeight() { return 30.0f * ApexUi::Unit(); }
 
 // The newest What's new version; the version button shows a dot until the player opens it once
 bool ChangelogUnseen() {
@@ -4211,7 +4157,7 @@ void MainWindow() {
     if (g_menuFocused && !peek) {
         // Esc: clears the search, then closes the menu (never while a field is being
         // edited or the menu key is being chosen)
-        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !g_waitingForKey && g_recRow < 0 && !ImGui::IsAnyItemActive() && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId)) {
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && g_recRow < 0 && !ImGui::IsAnyItemActive() && !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId)) {
             if (g_search[0]) g_search[0] = '\0';
             else closeRequested = true;
         }
@@ -5133,7 +5079,7 @@ bool CaptureNote(bool drawAllowed = true) {
     bool dot = false;
     if (LightProbe::Aiming()) {
         text = I18n::Trf("Click the problem to capture it, or press {}. Esc cancels", CaptureKey(Hotkeys::Action::Probe));
-    } else if (secs >= 0) {
+    } else if (secs >= 0 && !Recorder::Settling()) {
         text = I18n::Trf("Recording {} s \xC2\xB7 press {} to stop", secs, ApexConfig::KeyChordText(Hotkeys::Key(Hotkeys::Action::Recorder)));
         dot = true;
     } else if (note.visible) {

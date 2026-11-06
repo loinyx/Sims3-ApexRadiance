@@ -17,16 +17,19 @@
 #include "rt_outdoor_lamps.h"
 #include "terrain_bake_rule.h"
 #include "rt_lamp_gpu.h"
+#include "drag_lite.h"
 #include "gpu_room_lamps.h"
 #include "platform.h"
 #include "rt_lamp_model.h"
 #include "rt_lamp_proxy.h"
+#include "stair_set.h"
 #include "rt_lamps_hlsl.h"
 #include "shader_cache.h"
 #include "outdoor_delta.h"
 #include "outdoor_delta_model.h"
 #include "phys_lamp_pick.h"
 #include "level_light_share.h"
+#include "light_detail.h"
 #include "lot_light_bridge.h"
 #include "lamp_reach.h"
 #include "penumbra.h"
@@ -64,11 +67,12 @@ namespace {
 
 constexpr int kSetIdx[4] = {3, 0, 1, 2}; // the record's maps (wall, floor, ceiling, objects) in a texture set
 constexpr const char* kMapName[4] = {"wall atlas", "floor map", "ceiling map", "object map"};
-constexpr int kMaxWatch = 64;            // maps watched for writes (8 stories x 4 maps x 2 classes)
+constexpr int kMaxWatch = 128;           // maps watched for writes (8 stories x 4 maps x 2 classes, the lots next to it from the upper half: a round relit 87 maps on 05/11, and a map past the cap went unwatched)
 constexpr float kFar = 64.0f;            // m: the shadow maps' range
 constexpr DWORD kSolveAskMs = 10000;     // a room 0 with no kept solve is sent to its solve at most this often
 constexpr DWORD kCoverFreshMs = 3000;    // a lot's coverage counts this long after the last check
 constexpr int kSolveAsks = 3;            // a room 0 is sent to its solve for a kept solve at most this often in a row
+constexpr DWORD kSolveRetryMs = 60000;   // then this seldom: a run of refused sends left the story on the game's maps until the lot changed
 constexpr DWORD kDragQuietMs = 300;      // a GPU lamp that changed this recently is being dragged (or edited again and again)
 constexpr DWORD kHoldQuietMs = 1500;     // the rooms that take room 0's lamps are sent this long after a story's last move
                                          // (a Build mode drag moves in grid steps with pauses of up to about a second)
@@ -127,8 +131,8 @@ const ShaderCache::Id kRtLampShaderIds[RtLampGpu::kShaderCount] = {
     AddRtLampShader(0), AddRtLampShader(1), AddRtLampShader(2), AddRtLampShader(3), AddRtLampShader(4), AddRtLampShader(5), AddRtLampShader(6),
     AddRtLampShader(7), AddRtLampShader(8), AddRtLampShader(9), AddRtLampShader(10), AddRtLampShader(11), AddRtLampShader(12), AddRtLampShader(13),
     AddRtLampShader(14), AddRtLampShader(15), AddRtLampShader(16), AddRtLampShader(17), AddRtLampShader(18), AddRtLampShader(19), AddRtLampShader(20),
-    AddRtLampShader(21), AddRtLampShader(22), AddRtLampShader(23), AddRtLampShader(24), AddRtLampShader(25)};
-static_assert(RtLampGpu::kShaderCount == 26, "kRtLampShaderIds lists every RtLampGpu::ShaderId");
+    AddRtLampShader(21), AddRtLampShader(22), AddRtLampShader(23), AddRtLampShader(24), AddRtLampShader(25), AddRtLampShader(26)};
+static_assert(RtLampGpu::kShaderCount == 27, "kRtLampShaderIds lists every RtLampGpu::ShaderId");
 void CompileAll() {
     for (int i = 0; i < RtLampGpu::kShaderCount; i++) {
         std::string err;
@@ -398,7 +402,7 @@ inline void Mix(uint64_t& h, const void* p, size_t n) {
 
 // ---- writes noted from any thread ----
 std::atomic<void*> g_watchTex[kMaxWatch];
-std::atomic<uint64_t> g_watchDirty{0};
+std::atomic<uint64_t> g_watchDirty[kMaxWatch / 64] = {};
 std::mutex g_noteMx;
 std::vector<std::pair<uintptr_t, int>> g_solvedNotes; // (story manager, class) of rooms whose solve ended (under g_noteMx)
 
@@ -584,6 +588,7 @@ std::unordered_map<uintptr_t, LampNow> g_lampNow;
 bool RestartSolveTerminal(const Ask& ask, int state, bool budgetOut) {
     return (state == 4 || state == 5) && (budgetOut || (ask.count >= kSolveAsks && ask.logged));
 }
+bool AskDue(const Ask& ask, DWORD now) { return !ask.at || now - ask.at > (ask.count < kSolveAsks ? kSolveAskMs : kSolveRetryMs); }
 bool g_restartGpuPending = false, g_restartGpuFallback = false;
 std::unordered_map<const void*, Ask> g_askedSolve; // room -> its sends to its solve for a kept solve
 std::unordered_map<const IDirect3DBaseTexture9*, Slot*> g_swap; // the game's map -> its slot (the SetTexture swap; render thread)
@@ -631,6 +636,7 @@ RtLampProxy::Mesh g_mesh;
 uint32_t g_meshGen = 0;
 std::shared_ptr<const Proxy> g_openUsed; // (physical indoor lamps) the proxy whose open-top build is the kept atlas's occluders
 std::atomic<uint32_t> g_openGen{0};      // its generation (0: none uploaded)
+std::atomic<uint32_t> g_stairUploads{0}; // uploads made for a grown stair set (KeptMeshGen)
 std::vector<std::pair<int, int>> g_openRooms; // (render thread) the uploaded open-top build's openRooms (RoomOpenAbove)
 DWORD g_openFailAt = 0;                  // (its last upload failed then)
 uint64_t g_atlasKey = 0;
@@ -642,7 +648,7 @@ IDirect3DDevice9* g_dev = nullptr; // the game's device (render thread)
 int g_ps3 = -1; // the device runs shader model 3 (1), not (0), not read yet (-1) (render thread)
 int g_mrt = -1; // the device draws into two render targets at once (the outdoor scale), not (0), not read yet (-1)
 DWORD g_makeFailAt = 0; // (render thread) the shader objects' last failed making
-int g_makeFails = 0;     // and how many in a row (5: given up until the next device reset)
+int g_makeFails = 0;     // and how many in a row (5: tried once a minute from then on; it stopped for the session, and only a device reset brought it back)
 IDirect3DQuery9 *g_qDisjoint = nullptr, *g_qFreq = nullptr, *g_qBegin = nullptr, *g_qEnd = nullptr;
 bool g_qPending = false;
 long g_logs = 0;
@@ -800,7 +806,7 @@ void DropAll(IDirect3DDevice9* dev, const char* why, bool requeue = true) {
     const size_t n = g_slots.size();
     for (auto& s : g_slots) ReleaseSlot(*s);
     g_slots.clear();
-    g_watchDirty.store(0);
+    for (auto& d : g_watchDirty) d.store(0);
     g_atlasKey = 0;
     {
         std::lock_guard<std::mutex> lk(g_coverMx);
@@ -988,6 +994,10 @@ void PrepareJob(Job& j) {
     }
     j.version = ex.version, j.thr = ex.thr, j.dither = ex.dither;
     j.kept = std::move(ex.kept), j.drawn = std::move(ex.drawn);
+    // shortcut: kept (Replica) parts name the solve's texels, so such a map keeps the steps along diagonal walls; give the copies parts if it matters
+    if (ex.cls == 2 && ex.mapUsed[1] && ex.kept0.empty())
+        PhysLampPick::AddFloorGridTwins(ex.texels, 1, LightDetail::Active() ? 8 : 4, static_cast<int>(ex.mapW[1]), static_cast<int>(ex.mapH[1]),
+                                        [&](const OutdoorDelta::Room0Export::Texel& t, float out[3]) { ToLot(j.space, t.pos, out); });
     for (int m = 0; m < 4; m++) {
         Prepared& p = j.maps[m];
         p.used = ex.mapUsed[m];
@@ -1077,6 +1087,7 @@ void PrepareJob(Job& j) {
                     const float sx = static_cast<float>(2 * x + (q & 1)), sy = static_cast<float>(2 * y + (q >> 1));
                     RtLampGpu::TexelVertex c = h.v, ph = h.q, pl{};
                     c.x = ph.x = pl.x = sx, c.y = ph.y = pl.y = sy, pl.w = 1.0f;
+                    if (c.base[3] != 0.0f) c.base[3] = RoomMapDither::Offset(static_cast<unsigned>(sx), static_cast<unsigned>(sy)) / 255.0f; // (each sub-texel its own: OutdoorDelta's `sub`; a 16-bit target takes none, Packed)
                     std::memcpy(c.p, lot[q], sizeof lot[q]), std::memcpy(ph.p, lot[q], sizeof lot[q]), std::memcpy(ph.base, world[q], sizeof world[q]);
                     ph.mask[3] = foot;
                     pl.mask[0] = sx, pl.mask[1] = sy;
@@ -1303,9 +1314,6 @@ void FillBake(const LampRead& r, bool coneSpill, RtLampModel::BakeLamp& b) {
     b.colour *= r.areaShare;
     b.liftable = TerrainBakeRule::Liftable(r.f.lot != 0, r.f.type) ? 1u : 0u;
 }
-struct BakeLampW {
-    RtLampModel::BakeLamp b; // world space (the gate is measured in world y against the lot base)
-};
 
 } // namespace
 
@@ -1343,7 +1351,11 @@ bool LotXform(uintptr_t mgr, float out[16]) {
         if (!std::isfinite(out[i])) return false;
     return true;
 }
-uint32_t KeptMeshGen() { return g_openGen.load(std::memory_order_relaxed); }
+// (a stair upload changes what the tiles hold and not the lot, so KeptLot keeps g_openGen; proxy generations stay under 2^20)
+uint32_t KeptMeshGen() {
+    const uint32_t gen = g_openGen.load(std::memory_order_relaxed);
+    return gen ? gen ^ g_stairUploads.load(std::memory_order_relaxed) << 20 : 0;
+}
 bool RoomOpenAbove(int story, int room) { return std::binary_search(g_openRooms.begin(), g_openRooms.end(), std::make_pair(story, room)); }
 std::shared_ptr<const RtLampProxy::Lot> KeptLot(uint32_t& gen) {
     gen = g_openGen.load(std::memory_order_relaxed);
@@ -1525,7 +1537,7 @@ void Frame(IDirect3DDevice9* dev) {
     }
     if (cs == 1) return off("its shaders are being compiled");
     if (cs == 3) return off("its shaders do not compile: " + g_compiled.error);
-    if (!g_eng && g_makeFails && GetTickCount() - g_makeFailAt < 5000) return off("its shader objects are made again shortly");
+    if (!g_eng && g_makeFails && GetTickCount() - g_makeFailAt < (g_makeFails < 5 ? 5000u : 60000u)) return off("its shader objects are made again shortly");
     if (!g_eng) {
         void* made[RtLampGpu::kShaderCount] = {};
         bool ok = true;
@@ -1542,12 +1554,13 @@ void Frame(IDirect3DDevice9* dev) {
             if (made[i]) static_cast<IUnknown*>(made[i])->Release(); // (the engine holds its own reference)
         if (!ok) { // (the objects, not the code: made again 5 s later, up to 5 times; a device reset may have been under way)
             const std::string why = err.empty() ? "a shader object could not be made" : err;
-            if (++g_makeFails >= 5) g_compiled.state.store(3), g_compiled.error = why;
+            g_makeFails++;
             g_makeFailAt = GetTickCount();
-            return off("its shaders could not be made (tried " + std::to_string(g_makeFails) + " of 5 times): " + why);
+            return off("its shaders could not be made (tried " + std::to_string(g_makeFails) + " times, again in a moment): " + why);
         }
         g_eng = std::move(eng);
-        g_openUsed.reset(), g_openGen.store(0), g_openFailAt = 0; // (a new engine: no kept atlas occluders yet)
+        g_makeFails = 0;
+        g_openUsed.reset(), g_openGen.store(0), g_openFailAt = 0, StairSet::g_set.Clear(); // (a new engine: no kept atlas occluders yet)
         LOG_INFO("[RtOutdoorLamps] Shaders made: cube shadow maps 6 x 256^2 per lamp, 16 lamps an atlas");
     }
     // the active lot
@@ -1591,13 +1604,13 @@ void Frame(IDirect3DDevice9* dev) {
         for (int S = 0; S <= 7; S++)
             if (const void* room = LevelLightShare::Room0Of(tracker, S)) {
                 Ask& a = g_askedSolve[room];
-                if (a.count < kSolveAsks && (!a.at || GetTickCount() - a.at > kSolveAskMs)) {
-                    a.at = GetTickCount() | 1;
+                if (AskDue(a, GetTickCount())) {
+                    a.at = std::max<DWORD>(GetTickCount(), 1);
                     a.count++;
                     LevelLightShare::QueueRoomAgain(room);
                 } else if (a.count >= kSolveAsks && !a.logged) {
                     a.logged = true;
-                    LOG_INFO(std::format("[RtOutdoorLamps] Story {} room 0 sent to its solve {} times with no occluders read: no more sends (idle until the lot's next room update)", S, kSolveAsks));
+                    LOG_INFO(std::format("[RtOutdoorLamps] Story {} room 0 sent to its solve {} times with no occluders read: once a minute from now, or the lot's next room update", S, kSolveAsks));
                 }
                 RoomNow current;
                 if (ReadRoomNow(static_cast<const BYTE*>(room), current) && RestartSolveTerminal(a, current.state, false)) {
@@ -1628,17 +1641,34 @@ void Frame(IDirect3DDevice9* dev) {
     }
     // (physical indoor lamps) the kept shadow tiles' occluders: the same lot with open tops over rooms open to above
     // (an upload that failed is tried again 5 s later)
-    if (OutdoorDelta::RoomLampPhysical() && proxy != g_openUsed && (!g_openFailAt || GetTickCount() - g_openFailAt >= 5000)) {
+    const DWORD stairNow = GetTickCount();
+    if (!OutdoorDelta::RoomLampPhysical()) {
+        if (StairSet::g_set.Gen()) StairSet::g_set.Clear();
+    } else if (StairSet::g_set.Gen() != proxy->gen)
+        StairSet::g_set.Begin(proxy->lot, proxy->gen);
+    // (a grown stair set: the tiles' occluders again, not while a lamp is dragged; a redraw of the tiles, no room goes to its solve)
+    const bool stairsDue = proxy == g_openUsed && StairSet::g_set.Due(stairNow) && !(g_lampChangedAt && stairNow - g_lampChangedAt < kDragQuietMs);
+    if (OutdoorDelta::RoomLampPhysical() && (proxy != g_openUsed || stairsDue) && (!g_openFailAt || GetTickCount() - g_openFailAt >= 5000)) {
         RtLampProxy::Mesh open;
         RtLampProxy::Build(proxy->lot, open, true);
+        StairSet::g_set.AppendTo(open);
         std::string err;
         const bool up = g_eng->SetProxy(dev, open, err, true);
-        g_openUsed = up ? proxy : nullptr, g_openFailAt = up ? 0 : GetTickCount() | 1;
+        g_openUsed = up ? proxy : nullptr, g_openFailAt = up ? 0 : std::max<DWORD>(GetTickCount(), 1);
         g_openGen.store(up ? proxy->gen : 0);
         if (up) g_openRooms = std::move(open.openRooms);
-        LOG_INFO(up ? std::format("[RtOutdoorLamps] Physical indoor lamps' occluders: {} triangles with open tops ({} quadrants opened), generation {}", open.tris.size(),
-                                 open.openTops, proxy->gen)
+        if (up && stairsDue) StairSet::g_set.Uploaded(stairNow), g_stairUploads.fetch_add(1, std::memory_order_relaxed);
+        LOG_INFO(up ? std::format("[RtOutdoorLamps] Physical indoor lamps' occluders: {} triangles with open tops ({} quadrants opened, {} stair triangles), generation {}", open.tris.size(),
+                                 open.openTops, StairSet::g_set.Tris(), proxy->gen)
                     : "[RtOutdoorLamps] Physical indoor lamps' occluders could not be uploaded: " + err);
+    }
+    // (what the collector found: whether a stair reaches this set is known only in game)
+    static DWORD s_at = 0;
+    static uint32_t s_groups = 0;
+    if (StairSet::g_set.Groups() != s_groups && stairNow - s_at >= 30000) {
+        s_at = stairNow, s_groups = StairSet::g_set.Groups();
+        LOG_INFO(std::format("[RtOutdoorLamps] Stair set: {} groups read, {} triangles seen, {} kept by the floor holes{}, {} uploads", s_groups, StairSet::g_set.Seen(),
+                             StairSet::g_set.Tris(), StairSet::g_set.Full() ? " (full)" : "", StairSet::g_set.Uploads()));
     }
     // the rules every relit texel follows (a change relights every map)
     const GameConsts gc = ReadConsts();
@@ -1668,6 +1698,9 @@ void Frame(IDirect3DDevice9* dev) {
                                      "could not be kept is no longer sent to its solve (the kept stories stay); its lamp edits go through the game's solve",
                                      static_cast<double>(OutdoorDelta::KeptBytes()) / (1 << 20)));
             g_budgetOut = true;
+        } else if (g_budgetOut && OutdoorDelta::KeptBytes() < OutdoorDelta::PinnedBudgetBytes() / 100 * 80) { // (parts given back since: its stories may keep a solve again)
+            g_budgetOut = false;
+            LOG_INFO("[RtOutdoorLamps] The active lot's kept room-0 parts fit the memory budget again");
         }
     }
     std::vector<std::string> waiting;
@@ -1708,15 +1741,16 @@ void Frame(IDirect3DDevice9* dev) {
             // idle: sent to its solve, which keeps its parts (a few times; never while the lot's parts overflow the budget, which
             // would drop another story's parts in turn)
             Ask& a = g_askedSolve[room];
-            if ((rn.state == 4 || rn.state == 5) && !g_budgetOut && a.count < kSolveAsks && (!a.at || GetTickCount() - a.at > kSolveAskMs)) {
-                a.at = GetTickCount() | 1;
+            if ((rn.state == 4 || rn.state == 5) && !g_budgetOut && AskDue(a, GetTickCount())) {
+                a.at = std::max<DWORD>(GetTickCount(), 1);
                 a.count++;
                 const bool sent = LevelLightShare::QueueRoomAgain(room);
-                LOG_INFO(std::format("[RtOutdoorLamps] {} room 0 shows class {} with no kept solve: {} ({} of {})", who(), cls,
-                                     sent ? "sent to its solve" : "could not be sent to its solve", a.count, kSolveAsks));
+                if (a.count <= kSolveAsks)
+                    LOG_INFO(std::format("[RtOutdoorLamps] {} room 0 shows class {} with no kept solve: {} ({} of {})", who(), cls,
+                                         sent ? "sent to its solve" : "could not be sent to its solve", a.count, kSolveAsks));
             } else if ((a.count >= kSolveAsks || g_budgetOut) && !a.logged) {
                 a.logged = true;
-                LOG_INFO(std::format("[RtOutdoorLamps] {} room 0 class {}: no kept solve and no more sends to its solve ({}); its maps stay the game's and lamp "
+                LOG_INFO(std::format("[RtOutdoorLamps] {} room 0 class {}: no kept solve and sends to its solve only once a minute now ({}); its maps stay the game's and lamp "
                                      "edits go through the game's solve until it keeps one",
                                      who(), cls, g_budgetOut ? "the lot's kept parts overflow the memory budget" : std::format("sent {} times", kSolveAsks)));
             }
@@ -1897,7 +1931,8 @@ void Frame(IDirect3DDevice9* dev) {
     QueryPerformanceCounter(&tp1);
     double slotsMs = Ms(tp0, tp1); // (and the lots next to it, below)
     // writes noted since the last frame (each map keeps its own until it is relit)
-    const uint64_t dirtyBits = g_watchDirty.exchange(0);
+    uint64_t dirtyBits[kMaxWatch / 64];
+    for (int i = 0; i < kMaxWatch / 64; i++) dirtyBits[i] = g_watchDirty[i].exchange(0);
     std::vector<std::pair<uintptr_t, int>> solved;
     {
         std::lock_guard<std::mutex> lk(g_noteMx);
@@ -2046,7 +2081,7 @@ void Frame(IDirect3DDevice9* dev) {
                 NbBake& nk = g_nbBake[rn.mgr];
                 const uint32_t kept = rn.shown >= 0 && rn.shown <= 2 ? OutdoorDelta::RecordVersion(room, rn.shown) : 0;
                 if (!nk.at || kept != nk.kept || allSig != nk.lampSig || GetTickCount() - nk.at >= 1000) {
-                    nk.at = GetTickCount() | 1, nk.kept = kept, nk.lampSig = allSig;
+                    nk.at = std::max<DWORD>(GetTickCount(), 1), nk.kept = kept, nk.lampSig = allSig;
                     std::vector<RtLampModel::BakeLamp> bk;
                     std::vector<uintptr_t> bl;
                     const int n = ReadList(room, list, 1024);
@@ -2268,7 +2303,13 @@ void Frame(IDirect3DDevice9* dev) {
         }
     }
     // (physical indoor lamps, stage 4: an indoor lamp moved without a solve is a drag too: fast taps, one exact pass once still)
-    const bool dragging = (g_lampChangedAt && nowTick - g_lampChangedAt < kDragQuietMs) || GpuRoomLamps::PhysMoveRecent(kDragQuietMs);
+    // (physical) a drag the GPU takes stays a drag until the lamp is still (DragLite::kStillMs, as its rooms' solves): each pause of
+    // 300 ms drew every touched map exact and the next step fast again, the furniture shadows' softness flipping (677 exact
+    // relights in 10 s of a drag, 03/11)
+    const bool dragging = (g_lampChangedAt && nowTick - g_lampChangedAt < kDragQuietMs) || GpuRoomLamps::PhysMoveRecent(DragLite::kStillMs);
+    // fewer shadow taps while dragged, but not for a drag the GPU takes: the fast taps'
+    // harder shadows were the light the drag showed, the exact ones at the release another (users saw the drop "flicker")
+    const bool fast = dragging && !GpuRoomLamps::PhysMoveRecent(DragLite::kStillMs);
     LARGE_INTEGER tp2{};
     QueryPerformanceCounter(&tp2);
     const double lampsMs = Ms(tp1, tp2) - Ms(tn0, tn1); // (the lots next to it count in slotsMs)
@@ -2300,7 +2341,8 @@ void Frame(IDirect3DDevice9* dev) {
     std::string failNote;
     // while a lamp is dragged the maps are relit at every move with the cheaper shadows, as the ground outside the lot is
     // (a relight start every 200 ms left the lot's floors and walls up to that far behind the ground beside them; a relight
-    // is 0.3-1.1 ms of CPU and under 1 ms of GPU in a recording); every frame's work stops past kFrameCpuMs or kFrameWork
+    // is 0.3-1.1 ms of CPU and under 1 ms of GPU in a recording of outdoor lamps; a drag the GPU takes draws every kept map, over
+    // 400,000 points and 29 ms of GPU a round on a 13-room lot before its dense quads, 05/11); every frame's work stops past kFrameCpuMs or kFrameWork
     // (the maps left are relit the next frames)
     double work = 0, maskMs = 0, drawMs = 0;
     double maskJobsMs = 0, maskShareMs = 0, maskLockMs = 0, maskFillMs = 0; // (the floor mask's parts)
@@ -2541,19 +2583,19 @@ void Frame(IDirect3DDevice9* dev) {
             maskJobsMs += Ms(jt0, jt1);
         }
         if (!s.masked.empty() && !s.underExact && !dragging && !s.uJob) startUnderJob();
-        const bool wrote = s.watch >= 0 && (dirtyBits >> s.watch & 1);
+        const bool wrote = s.watch >= 0 && (dirtyBits[s.watch / 64] >> (s.watch % 64) & 1);
         bool solvedHere = false;
         for (const auto& [mgr, cls] : solved)
             if ((s.mgr ? s.mgr : rns[s.story].mgr) == mgr && cls == s.cls) solvedHere = true;
         if (solvedHere) s.pendingWrite = true;
         if (wrote) s.pendingWrite = true;
         const bool exactUnder = s.underDirty;
-        const bool dirty = !s.relit || !s.copy || sig != s.sig || paramsChanged || (s.fast && !dragging) || s.pendingWrite || s.underDirty;
+        const bool dirty = !s.relit || !s.copy || sig != s.sig || paramsChanged || (s.fast && !fast) || s.pendingWrite || s.underDirty;
         if (!dirty) continue;
         // (2.15.1) the game writing the map again and again (a lot that stays loading: 105 writes in 10 s, each relight
         // 45 ms of floor mask with 28 lamps): a relight made only for a game write waits kGameWriteGapMs after the last one; a
         // single write after a rest is relit at once, as before
-        const bool onlyWrite = s.relit && s.copy && sig == s.sig && !paramsChanged && !(s.fast && !dragging) && !s.underDirty;
+        const bool onlyWrite = s.relit && s.copy && sig == s.sig && !paramsChanged && !(s.fast && !fast) && !s.underDirty;
         if (onlyWrite && GetTickCount64() - s.relitTick < kGameWriteGapMs) {
             // (it keeps its last copy and stays dirty until its turn; not counted in `left`: a lot whose game keeps writing
             // would keep the round open, and with it the drag throttle off)
@@ -2683,7 +2725,7 @@ void Frame(IDirect3DDevice9* dev) {
         }
         RtLampGpu::Params p;
         p.thr = s.thr, p.fade = fade, p.reachOn = reachOn, p.mask = !s.masked.empty(), p.radius = radius, p.aa = Penumbra::g_on.load(std::memory_order_relaxed) ? LevelLightShare::MapHalfTexelOf(s.room) : 0.0f, p.farDist = kFar;
-        p.fast = dragging;
+        p.fast = fast;
         p.maskAllGpu = maskGpu;
         p.edgeR = edgeR;
         std::string err;
@@ -2703,7 +2745,9 @@ void Frame(IDirect3DDevice9* dev) {
                        RtLampGpu::Engine::PhysRoom room;
                        room.header = s.pHeader;
                        room.lamp.assign(prow.begin() + f, prow.begin() + f + c);
-                       for (int i = 0; i < c; i++) room.fill.push_back(s.pBlk ? s.pBlk->FillOf(static_cast<int>(s.pHeader), pw[f + i].data()) : 0.0f);
+                       for (int i = 0; i < c; i++) {
+                           room.fill.push_back(s.pBlk ? s.pBlk->FillOf(static_cast<int>(s.pHeader), pw[f + i].data()) : 0.0f);
+                       }
                        return g_eng->AccumulatePhys(dev, pm, pl.data() + f, tiles, reinterpret_cast<const float (*)[3]>(pw.data() + f), c, room, p, f == 0, e);
                    });
         };
@@ -2758,7 +2802,7 @@ void Frame(IDirect3DDevice9* dev) {
         uint64_t partKey = 0;
         if (roomsOnly) {
             partKey = 1469598103934665603ull;
-            const float pf[] = {p.thr, p.radius, p.aa, p.normalOffset, p.biasM, p.biasTexels, p.nearBlocker, p.farDist, p.edgeR};
+            const float pf[] = {p.thr, p.radius, p.aa, p.normalOffset, p.biasM, p.biasTexels, p.farDist, p.edgeR};
             const bool pb[] = {p.fade, p.reachOn, p.mask, p.fast, p.maskAllGpu, p.keptX, p.physX};
             Mix(partKey, pf, sizeof pf), Mix(partKey, pb, sizeof pb), Mix(partKey, &p.debugLamp, sizeof p.debugLamp), Mix(partKey, &s.copy, sizeof s.copy);
             Mix(partKey, &s.game, sizeof s.game), Mix(partKey, &s.map.w, sizeof s.map.w), Mix(partKey, &s.map.h, sizeof s.map.h), Mix(partKey, &s.version, sizeof s.version);
@@ -2780,18 +2824,23 @@ void Frame(IDirect3DDevice9* dev) {
             const auto make = [&](IDirect3DTexture9*& t) {
                 if (t) return true;
                 fresh = true;
-                if (SUCCEEDED(dev->CreateTexture(w2, h2, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &t, nullptr)) && t) return true;
+                for (const D3DFORMAT f : {RtLampGpu::SharperFormat(dev), D3DFMT_A8R8G8B8}) // (out of memory for 16 bits: the 8-bit target, its dither and pack)
+                    if (SUCCEEDED(dev->CreateTexture(w2, h2, 1, D3DUSAGE_RENDERTARGET, f, D3DPOOL_DEFAULT, &t, nullptr)) && t) return true;
                 t = nullptr;
                 return false;
             };
             if (make(s.hi) && make(s.hiOver)) {
-                if (fresh)
-                    LOG_INFO(std::format("[RtOutdoorLamps] Story {} floor map: sharper copy {}x{} ({:.1f} MB with its overlay)", s.story, w2, h2,
-                                         2.0 * w2 * h2 * 4 / (1024.0 * 1024.0)));
+                if (fresh) {
+                    D3DSURFACE_DESC hd{};
+                    s.hi->GetLevelDesc(0, &hd);
+                    const bool wide = hd.Format == D3DFMT_A16B16G16R16F;
+                    LOG_INFO(std::format("[RtOutdoorLamps] Story {} floor map: sharper copy {}x{} {} ({:.1f} MB with its overlay)", s.story, w2, h2, wide ? "16-bit float" : "8-bit",
+                                         2.0 * w2 * h2 * (wide ? 8 : 4) / (1024.0 * 1024.0)));
+                }
                 // (the overlay holds the rooms' own sub-texels, never the game's map: drawn in full again only when the rules
                 // RelightPhys reads change, not on every full relight of the copy)
                 uint64_t hiRules = 1469598103934665603ull;
-                const float hf[] = {p.radius, p.aa, p.normalOffset, p.biasM, p.biasTexels, p.nearBlocker, p.farDist, p.edgeR};
+                const float hf[] = {p.radius, p.aa, p.normalOffset, p.biasM, p.biasTexels, p.farDist, p.edgeR};
                 const bool hb[] = {p.fade, p.reachOn, p.fast};
                 Mix(hiRules, hf, sizeof hf), Mix(hiRules, hb, sizeof hb);
                 const int rooms = GpuRoomLamps::ComposeHi(dev, *g_eng, rns[s.story].mgr, s.cls, s.m, s.copy, s.map.w, s.map.h, s.hiOver, fresh || s.hiRules != hiRules, s.hi, p);
@@ -2830,13 +2879,13 @@ void Frame(IDirect3DDevice9* dev) {
             if (s.paramsSig != params) g_why.params++;
             if (s.meshGen != g_meshGen) g_why.occluders++;
             if (s.pendingWrite) g_why.gameWrite++;
-            if ((s.fast && !dragging) || exactUnder) g_why.exact++;
+            if ((s.fast && !fast) || exactUnder) g_why.exact++;
         }
         s.lampsSig = lampsSig, s.paramsSig = params, s.meshGen = g_meshGen, s.relitVersion = s.version;
         s.roomsRelit = roomsSig;
         s.relit = true;
         s.sig = sig;
-        s.fast = dragging;
+        s.fast = fast;
         s.pendingWrite = false;
         s.relitTick = GetTickCount64();
         relit++;
@@ -2945,7 +2994,7 @@ void Frame(IDirect3DDevice9* dev) {
                                                "buffer lock {:.2f}, buffer fill {:.2f}), shadows {:.2f}, draws {:.2f} ms; {} frame{}{}{}",
                                                g_ph.slots, g_ph.lamps, g_ph.mask, g_ph.maskJobs, g_ph.maskShare, g_ph.maskLock, g_ph.maskFill,
                                                g_ph.shadows, g_ph.draw - g_ph.shadows, g_roundFrames,
-                                               g_roundFrames == 1 ? "" : "s", dragging ? ", dragged (cheaper shadows)" : "",
+                                               g_roundFrames == 1 ? "" : "s", fast ? ", dragged (cheaper shadows)" : dragging ? ", dragged" : "",
                                                g_roundNb ? std::format("; {} of the maps on the lots next to it", g_roundNb) : std::string());
         // the lamp edits this relight shows
         std::vector<EditNote> shown;
@@ -2982,7 +3031,7 @@ void OnPresent(IDirect3DDevice9* dev) {
         DropAll(dev, "lighting restart", false); // the paced restart owns room scheduling
         g_on.store(false);
         g_proxyUsed.reset();
-        g_openUsed.reset(), g_openGen.store(0), g_openFailAt = 0;
+        g_openUsed.reset(), g_openGen.store(0), g_openFailAt = 0, StairSet::g_set.Clear();
         {
             std::lock_guard<std::mutex> lock(g_proxyMx);
             g_proxyEpoch.fetch_add(1, std::memory_order_relaxed);
@@ -3035,7 +3084,7 @@ void OnWorldChanged() {
     PublishNeighbours(0, {}, false);
     DropAll(g_dev, "the world changed");
     g_proxyUsed.reset();
-    g_openUsed.reset(), g_openGen.store(0), g_openFailAt = 0;
+    g_openUsed.reset(), g_openGen.store(0), g_openFailAt = 0, StairSet::g_set.Clear();
     {
         std::lock_guard<std::mutex> lk(g_proxyMx);
         g_proxyEpoch.fetch_add(1, std::memory_order_relaxed);
@@ -3210,7 +3259,7 @@ void NoteLampEdit(uintptr_t tl, uintptr_t light, int kind, bool settle) {
         if (g_edits.size() < 256) g_edits.push_back(e);
         if (story >= 0 && story <= 7) { // (light tree thread; cleared by the render thread)
             SendDue& d = g_sendDue[{tracker, story}];
-            d.at = GetTickCount() | 1;
+            d.at = std::max<DWORD>(GetTickCount(), 1);
             d.moved = d.moved || kind != 0;
             d.settle = d.settle || settle;
             if (std::find(d.lamps.begin(), d.lamps.end(), light) == d.lamps.end() && d.lamps.size() < 64) d.lamps.push_back(light);
@@ -3297,7 +3346,7 @@ void NoteMapsWritten(const void* room) {
 void NoteUnlock(const void* texture) {
     if (!g_watch.load(std::memory_order_relaxed) || !texture) return;
     for (int i = 0; i < kMaxWatch; i++)
-        if (g_watchTex[i].load(std::memory_order_relaxed) == texture) g_watchDirty.fetch_or(1ull << i, std::memory_order_relaxed);
+        if (g_watchTex[i].load(std::memory_order_relaxed) == texture) g_watchDirty[i / 64].fetch_or(1ull << (i % 64), std::memory_order_relaxed);
 }
 IDirect3DTexture9* ScaleOf(const void* texture) {
     if (!texture || !g_on.load(std::memory_order_relaxed)) return nullptr;

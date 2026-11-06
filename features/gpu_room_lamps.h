@@ -65,6 +65,8 @@ bool Drawn(const void* room, uint32_t version, unsigned maps);
 // its room kept again, at any version. A physical relight draws every lamp from its law, so a solve kept again but not relit yet
 // shows the lamp next frame
 bool DrawnAny(const void* room, unsigned maps);
+// Any thread: how long the GPU has been taking the current drag (ms since its first move after 300 ms without one; 0: none)
+unsigned long PhysDragMs();
 // Any thread: a lamp edit the GPU took (kind "value", "switch on" or "switch off": a literal), logged once every one of its
 // rooms was relit after it
 void NoteEdit(uintptr_t light, const char* kind, const std::vector<const void*>& rooms, const std::string& stories);
@@ -82,6 +84,9 @@ bool ShowsEdit(uintptr_t mgr, int cls, int m);
 void NotePhysEdit(uintptr_t light, const char* kind);
 // Any thread: a physical move taken within the last ms (Real-time outdoor lamps draws its maps with the drag's taps meanwhile)
 bool PhysMoveRecent(unsigned long ms);
+// Render thread: a lamp standing on furniture (a furniture fill), and the last few of them (world positions): Ambient Occlusion's feet
+// Any thread: the lamp of a move taken within ms (0: none), the one being dragged
+uintptr_t PhysDragLight(unsigned long ms);
 // Render thread: the physical relights since the last call (maps, CPU ms, the largest round's CPU ms; OutdoorDelta's 10 s summary)
 void TakeRelightCost(int& maps, double& ms, double& worst);
 

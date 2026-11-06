@@ -17,6 +17,20 @@ inline float LampDay(float night) {
     const float s = night * night * (3.0f - 2.0f * night);
     return kLampDayFloor + (1.0f - kLampDayFloor) * s;
 }
+// The sun's part of the game's own lamp curve: sky+0x784 = M + (1 - M) x this (FUN_00C130B0, sunSine = sky+0x6B4): 1 with the sun 13.9
+// degrees under the horizon, 0 at 2.3. The manmade light itself is no measure: M, about 0.25, stays all day
+inline float SunLampTerm(float sunSine) { return std::isfinite(sunSine) ? std::clamp(-5.0f * sunSine - 0.2f, 0.0f, 1.0f) : 0.0f; }
+// The level Apex's lamp terms take (switch sun_lamp_level). The sky's smooth night moves by frame time, not by clock: at dawn it fell
+// from 1 to 0 in under 0.6 s with the sun 7 degrees down, and the lamps on the deck went to their 3% at once (live log of 05/11).
+// Level alone in daylight, so by day the 3% stands
+inline float LampLevel(float level, float sunSine) { return std::max(level, SunLampTerm(sunSine)); }
+// The level then takes this long for its full range: the sky can still turn with the sun term at 0.4, and 1 to 0.4 in half a second is a
+// snap of its own. In real time, so a clock stopped by Build mode cannot leave it halfway. Visual tuning, not a measured time
+inline constexpr float kLampFadeSeconds = 8.0f;
+inline float LampLevelStep(float was, float want, float seconds) {
+    const float d = seconds / kLampFadeSeconds;
+    return std::clamp(want, was - d, was + d);
+}
 // The lamp term of the ground (terrain, lot pass) before full night: gain x LampDay(n), 0 for invalid input
 inline float GroundLampTotal(float night, float gain) {
     if (!std::isfinite(night) || !std::isfinite(gain) || gain < 0) return 0;
@@ -27,6 +41,16 @@ inline float SurfaceLampGain(float night, float gain) {
     if (!std::isfinite(night) || !std::isfinite(gain) || night < 0 || gain < 0) return gain;
     if (night >= 1.0f) return gain;
     return gain * LampDay(night);
+}
+// The lamp light of furniture indoors, at its draw (DrawIndoorObject's strength, the Counters' CLC.y): the directional maps hold the
+// rig's colour, about 0.35 of the room law the floor and walls show (0x0069F280 reads light vfunc+0x10), so a cabinet face beside a
+// lit wall read a fifth of it. One gain, not in the maps: they clamp at 1 (22 of 40 kitchen tiles would clip) and Sims read them.
+// Weighted by the night level: by day these maps also hold the sun through the windows. UNVERIFIED in game: g = 2 (estimate from the
+// rebuilt kitchen maps; cabinet albedo unknown, A/B 2.0 against 2.9)
+inline constexpr float kFurnitureLampGain = 2.0f;
+inline float FurnitureLampGain(float night) {
+    if (!std::isfinite(night) || night <= 0.0f) return 1.0f;
+    return 1.0f + (kFurnitureLampGain - 1.0f) * std::min(night, 1.0f);
 }
 // ExteriorWall cK.x scales only baked lamp RGB. At full night the previous native x gain, bit exact; before it the wall
 // takes gain x LampDay(n) in place of the game's own daytime factor (0 by day on the captured variant, F7 10:28:03).

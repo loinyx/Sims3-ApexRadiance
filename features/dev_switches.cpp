@@ -53,10 +53,18 @@ void Load() {
     roomFill.store(get("room_fill"));
     lotBuildShare.store(get("lot_build_share"));
     openRoomsAbove.store(get("open_rooms_above"));
+    crossRoomShadows.store(get("cross_room_shadows"));
+    toneSoft.store(get("tone_soft"));
+    glassShare.store(get("glass_share"));
+    roomBounce.store(get("room_bounce"));
+    sunLampLevel.store(get("sun_lamp_level"));
+    chairArmCaps.store(get("chair_arm_caps"));
+    sphereCutFade.store(get("sphere_cut_fade"));
+    liveObjectTables.store(get("live_object_tables"));
     const auto on = [](const std::atomic<bool>& b) { return b.load() ? "on" : "off"; };
     LOG_INFO(std::format("[DevBuild] Switches ([dev_build] in ApexRadiance.toml): measurements {}, draw_reads_nowait {}, occlusion_relight {}, "
-                         "room_drain_budget {}, allocator_trim {}, allocator_top_down {}, foliage_vertex_lamps {}, canopy_ground_shadow {}, foliage_sun_shadow {}, auto_light_priority {}, lamp_visibility_memo {}, daylight_log {}, indoor_lamp_walls {}, arch_ambient {}, basis_wall_filter {}, hard_wall_tops {}, stair_height_light {}, steady_indoor_light {}, inner_norm_settle {}, soft_opening_edges {}, stair_room_fill {}, opening_bounce {}, stair_floor_tone {}, stair_story_blend {}, no_opening_band {}, stairwell_bounce {}, borrowed_light_adapt {}, soft_slab_edges {}, room_fill {}, lot_build_share {}, open_rooms_above {}",
-                         on(measurements), on(drawReadsNoWait), on(occlusionRelight), on(roomDrainBudget), on(allocatorTrim), on(allocatorTopDown), on(foliageVertexLamps), on(canopyGroundShadow), on(foliageSunShadow), on(autoLightPriority), on(lampVisibilityMemo), on(daylightLog), on(indoorLampWalls), on(archAmbient), on(basisWallFilter), on(hardWallTops), on(stairHeightLight), on(steadyIndoorLight), on(innerNormSettle), on(softOpeningEdges), on(stairRoomFill), on(openingBounce), on(stairFloorTone), on(stairStoryBlend), on(noOpeningBand), on(stairwellBounce), on(borrowedLightAdapt), on(softSlabEdges), on(roomFill), on(lotBuildShare), on(openRoomsAbove)));
+                         "room_drain_budget {}, allocator_trim {}, allocator_top_down {}, foliage_vertex_lamps {}, canopy_ground_shadow {}, foliage_sun_shadow {}, auto_light_priority {}, lamp_visibility_memo {}, daylight_log {}, indoor_lamp_walls {}, arch_ambient {}, basis_wall_filter {}, hard_wall_tops {}, stair_height_light {}, steady_indoor_light {}, inner_norm_settle {}, soft_opening_edges {}, stair_room_fill {}, opening_bounce {}, stair_floor_tone {}, stair_story_blend {}, no_opening_band {}, stairwell_bounce {}, borrowed_light_adapt {}, soft_slab_edges {}, room_fill {}, lot_build_share {}, open_rooms_above {}, cross_room_shadows {}, tone_soft {}, glass_share {}, room_bounce {}, sun_lamp_level {}, chair_arm_caps {}, sphere_cut_fade {}, live_object_tables {}",
+                         on(measurements), on(drawReadsNoWait), on(occlusionRelight), on(roomDrainBudget), on(allocatorTrim), on(allocatorTopDown), on(foliageVertexLamps), on(canopyGroundShadow), on(foliageSunShadow), on(autoLightPriority), on(lampVisibilityMemo), on(daylightLog), on(indoorLampWalls), on(archAmbient), on(basisWallFilter), on(hardWallTops), on(stairHeightLight), on(steadyIndoorLight), on(innerNormSettle), on(softOpeningEdges), on(stairRoomFill), on(openingBounce), on(stairFloorTone), on(stairStoryBlend), on(noOpeningBand), on(stairwellBounce), on(borrowedLightAdapt), on(softSlabEdges), on(roomFill), on(lotBuildShare), on(openRoomsAbove), on(crossRoomShadows), on(toneSoft), on(glassShare), on(roomBounce), on(sunLampLevel), on(chairArmCaps), on(sphereCutFade), on(liveObjectTables)));
 }
 
 } // namespace DevSwitches

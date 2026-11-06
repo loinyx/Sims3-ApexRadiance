@@ -16,11 +16,12 @@ struct Holder {uint8_t pad[24];uint32_t count;uint8_t pad2[4];Link head;};
 static_assert(offsetof(Node,link)==0x18&&offsetof(Node,owner)==0x30&&offsetof(Holder,head)==0x20);
 constexpr uint32_t kLinkOff=0x18,kOwnerOff=0x30,kListOff=0x20,kCounterOff=0x18,kUpdateSlot=0x48,kMinNodes=8,kCountCap=1u<<20;
 constexpr bool kPublicBuild=PUBLIC_VARIANT!=0;
+constexpr uint32_t kModelPartCount=0x19C,kModelLodSlot=0x218,kLodPartCount=0x44;
 struct Counter {uint64_t value=0;void Add(uint64_t n=1){value+=n;}};
 Counter c_drawState,c_repaired,c_foreignOwner;
 std::atomic<bool>g_stopped=false,g_loggedRepair=false;
 std::atomic<uint32_t>g_deferredCount=0;
-uintptr_t g_deadVtable=0,g_swarmVtable=0,g_furVtable=0;
+uintptr_t g_deadVtable=0,g_swarmVtable=0,g_furVtable=0,g_modelVtables[5]={};
 std::vector<std::pair<Link*,void*>>g_deferred;
 struct RegGuard{RegGuard(){} ~RegGuard(){}};
 namespace HookGuard{template<class F>void Try(const char*,F f){f();}}
@@ -42,7 +43,7 @@ void __fastcall Spatial(void*,void*,void*){}
 using FnUpdate=void(__fastcall*)(void*,void*);
 auto g_bounds=&Bounds;auto g_spatial=&Spatial;
 #include "production.h"
-std::array<uintptr_t,32>ordinary{},swarm{},fur{};
+std::array<uintptr_t,32>ordinary{},swarm{},fur{},model{};
 void push(Link*h,Node*n){n->link={h,h->prev};h->prev->next=&n->link;h->prev=&n->link;}
 void remove(Node*n){auto*l=&n->link;l->prev->next=l->next;l->next->prev=l->prev;l->next=l->prev=nullptr;}
 int checks=0;
@@ -76,8 +77,20 @@ void callbackCases(){
  uint32_t left;BudgetedDrain((uint8_t*)&h,8,1000,&left);std::vector<int>expect;for(int i=15;i>=0;i--)expect.push_back(i);check(queue(h)==expect);check(g_stopped);check(left==16);failedNode=-1;
  }
 }
+// A model waits unless its current LOD has fewer parts than it last counted; only then would the draw read past the array.
+void modelCases(){
+ struct Lod{uint8_t pad[0x44];uint32_t parts;}shorter{},same{},longer{};shorter.parts=2;same.parts=5;longer.parts=9;
+ struct Case{uintptr_t slot;uintptr_t*vt;bool updated;}cases[]={{(uintptr_t)&shorter,model.data(),true},{(uintptr_t)&same,model.data(),false},{(uintptr_t)&longer,model.data(),false},
+  {0,model.data(),false},{(uintptr_t)&shorter|1,model.data(),false},{(uintptr_t)&shorter,ordinary.data(),false}};
+ for(auto&c:cases){
+ Holder h{};h.head={&h.head,&h.head};struct Big{Node n;uint8_t rest[0x300];};std::vector<Big>n(24);seen.clear();g_deferred.clear();g_stopped=false;allocationFails=false;failedNode=-1;
+ for(int i=0;i<24;i++){n[i].n.id=i;n[i].n.owner=&h;n[i].n.vt=(uintptr_t)(i==3?c.vt:ordinary.data());push(&h.head,&n[i].n);}
+ auto*b=(uint8_t*)&n[3].n;*(uint32_t*)(b+kModelPartCount)=6;*(uintptr_t*)(b+kModelLodSlot)=c.slot;
+ uint32_t left;BudgetedDrain((uint8_t*)&h,8,1000,&left);check((std::find(seen.begin(),seen.end(),3)!=seen.end())==c.updated);check(left==(c.updated?15u:16u));
+ }
+}
 void emptyCase(){Holder h{};h.head={&h.head,&h.head};g_deferred.clear();allocationFails=false;uint32_t left=99;check(BudgetedDrain((uint8_t*)&h,8,0,&left)==0);check(left==0);check(LinkConsistent(&h.head));}
-int main(){ordinary[kUpdateSlot/4]=swarm[kUpdateSlot/4]=fur[kUpdateSlot/4]=(uintptr_t)&Update;g_swarmVtable=(uintptr_t)swarm.data();g_furVtable=(uintptr_t)fur.data();
+int main(){ordinary[kUpdateSlot/4]=swarm[kUpdateSlot/4]=fur[kUpdateSlot/4]=model[kUpdateSlot/4]=(uintptr_t)&Update;g_swarmVtable=(uintptr_t)swarm.data();g_furVtable=(uintptr_t)fur.data();g_modelVtables[0]=(uintptr_t)model.data();
  for(uint32_t mask=0;mask<65536;mask++)run(mask);
- emptyCase();run(0,true);run(0xffff,true);run(0x5555,true);run(0xaaaa,false,true);callbackCases();std::printf("%d checks passed, public=%d\n",checks,PUBLIC_VARIANT);
+ emptyCase();run(0,true);run(0xffff,true);run(0x5555,true);run(0xaaaa,false,true);callbackCases();modelCases();std::printf("%d checks passed, public=%d\n",checks,PUBLIC_VARIANT);
 }

@@ -2550,9 +2550,10 @@ void __fastcall RoomSolveStartHook(BYTE* room) {
     ++t_bounceSolve;
     if (room && DevSwitches::RoomSolveCauses()) RoomSolveCauses::SolveStart(reinterpret_cast<uintptr_t>(room)); // (its texels come after state 0)
     if (room && ThreadId() == g_gatherThread.load(std::memory_order_relaxed)) DragLite::NoteSolveStarted(room); // (the re-pick throttle while a lamp is dragged)
+    if (room) DragLite::NoteGpuDragSolve(room);
     if (room) LoadTiming::NoteRoomSolveStart(); // atomics only
     // Quick outdoor lamp edits (Instant only): a room 0 solve's parts are kept from here (light tree thread)
-    if (room && OutdoorDelta::Enabled() && ThreadId() == g_gatherThread.load(std::memory_order_relaxed))
+    if (room && (OutdoorDelta::Enabled() || OutdoorDelta::KeptClearDue()) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed))
         HookGuard::Run("OutdoorDelta solve start", [room] { OutdoorDelta::SolveStart(room); });
     // 07/10, players' Runtime Error: each of Apex's steps after the game's state 0 is caught on its own (HookGuard), then off
     // lamp switches all at once wait for solves begun after the switch
@@ -2862,22 +2863,6 @@ uint32_t BlurPassesFor(const BYTE* room) {
 // from the story floors (20e03ce, 70d6238) were right on some stories and wrong on others.
 std::atomic<long> g_foundationPieces{0}; // pieces moved to their drawn foot
 std::atomic<bool> g_foundationWallsOn{false}; // the option (SetFoundationWalls): off = the game's heights, as before 06/10
-float MeasuredDrop(uintptr_t wall, int cls, uintptr_t batch) {
-    WallNote w;
-    if (!ReadWallPiece(wall, cls, batch, w)) return 0.0f;
-    if (!w.outdoor) return 0.0f; // indoor walls start at their floor (the survey: 0); they stay as the game lays them out
-    // the whole wall, not only this piece: a long wall has vertices at its ends and openings only (F7: the middle
-    // pieces found none and kept their base)
-    const float ax = w.cx, az = w.cz, bx = w.cx + w.dx, bz = w.cz + w.dz;
-    if (!ApexMath::IsFinite(ax) || !ApexMath::IsFinite(az) || !ApexMath::IsFinite(bx) || !ApexMath::IsFinite(bz) || w.dx * w.dx + w.dz * w.dz < 1e-4f) return 0.0f;
-    const float ext = 0.1f;
-    float foot = 0.0f;
-    if (WallHeights::DrawnFoot(ax, az, bx, bz, ext, w.oy, foot)) {
-        const float drop = foot - w.oy;
-        return ApexMath::IsFinite(drop) && ApexMath::Fabs(drop) > 0.1f && ApexMath::Fabs(drop) < 3.2f ? drop : 0.0f;
-    }
-    return 0.0f;
-}
 void DropWallSamples(uintptr_t batch, float dy) {
     __try {
         const uintptr_t b = *reinterpret_cast<const uintptr_t*>(batch), e = *reinterpret_cast<const uintptr_t*>(batch + 4);
@@ -4030,7 +4015,7 @@ bool ReadGridStamp(uintptr_t mgr, int w, int h, uintptr_t& tiles, uint64_t& sig,
     }
 }
 // The grid edge a face found in tile (ix, iz) lies on, from its own line (the start sits 0.05 m inside the face's cell from
-// the edge, ReadWallBase; across the tile for a diagonal), and the cell of its run that holds the tile; flip = the run goes
+// the edge; across the tile for a diagonal), and the cell of its run that holds the tile; flip = the run goes
 // toward -x (-z for a run along z): the face's left / right heights are then the edge's high / low end. False = not on
 // this tile's edges.
 bool FaceEdge(const StoryGrid& g, const GridWallRead& f, int ix, int iz, int& kind, size_t& index, int& cell, bool& flip) {
@@ -4058,7 +4043,7 @@ bool SlotMatches(int slot, int kind, size_t index, const StoryGrid& g, int ix, i
     if (kind == 1) return slot == (index % static_cast<size_t>(g.w + 1) == static_cast<size_t>(ix) + 1 ? 2 : 3);
     return slot >= 4;
 }
-void OpeningDefaults(uint8_t kind, GridOpening& o) { // while no mask is read (MaskShapeFor): m over the edge's base
+void OpeningDefaults(uint8_t kind, GridOpening& o) { // a cut with no baked mask (MaskShapeFor): m over the edge's base
     o.kind = kind;
     o.shaped = 0;
     float head = 2.25f;
@@ -4228,11 +4213,13 @@ uint64_t GlazedSig(const std::unordered_set<uint32_t>& keys) {
 }
 // The noted cuts of a story on its grid's walls (BuildStoryGrid; the test harness calls it on synthetic grids): each cut on a
 // wall edge counted by kind; an open one becomes the edge's opening with its kind's defaults (then shape(rec, o): its mask's
-// shape when one was read), a closed one leaves the wall whole. A side whose next cell along the same line holds an open
-// cut has no jamb (a wide window, a double arch); a closed door beside a window keeps the window's jamb. A glazed cut
+// shape when the table holds it), a closed one leaves the wall whole. A side whose next cell along the same line holds an open
+// cut has no jamb (a wide window, a double arch), unless its mask keeps real wall there (two windows side by side); a closed
+// door beside a window keeps the window's jamb. A glazed cut
 // (GlazedCuts: a door with glass) is open while doors block light, with its own kind's defaults (sill 0 for a door).
 // (2.15.3) A window not shaped by its mask takes the shape of its panes when it has one (panes: WindowPanes; shaped 2), and a
 // window, or a door open only for its glass, passes WallOpenings::kWindowPass of the light.
+constexpr float kMaskJamb = 0.05f; // of the cell: less wall than this beside a mask's hole is its rounding, not a jamb
 template <class Shape>
 void PlaceGridOpenings(StoryGrid& g, const std::vector<std::pair<uint32_t, CutRec>>& cuts, bool doorsBlock, const std::unordered_set<uint32_t>& glazed, Shape&& shape,
                        const PaneShapes* panes = nullptr) {
@@ -4280,41 +4267,23 @@ void PlaceGridOpenings(StoryGrid& g, const std::vector<std::pair<uint32_t, CutRe
             }
         o.glass = rec.kind == kCutWindow || !CutOpensForLamps(rec.kind, doorsBlock) ? WallOpenings::kWindowPass : 1.0f; // (open here: a window, or a glazed door)
         const int sz = diag ? z1 - z0 : 0; // (a diagonal's neighbours along its line)
-        if (alongZ ? openKeys.count(EdgeKey(x0, z0 - 1, x0, z0)) : openKeys.count(EdgeKey(x0 - 1, z0 - sz, x0, z0))) o.u0 = 0.0f;
-        if (alongZ ? openKeys.count(EdgeKey(x0, z1, x0, z1 + 1)) : openKeys.count(EdgeKey(x1, z1, x1 + 1, z1 + sz))) o.u1 = 1.0f;
+        const bool maskJamb0 = o.shaped == 1 && o.u0 >= kMaskJamb, maskJamb1 = o.shaped == 1 && o.u1 <= 1.0f - kMaskJamb;
+        if (!maskJamb0 && (alongZ ? openKeys.count(EdgeKey(x0, z0 - 1, x0, z0)) : openKeys.count(EdgeKey(x0 - 1, z0 - sz, x0, z0)))) o.u0 = 0.0f;
+        if (!maskJamb1 && (alongZ ? openKeys.count(EdgeKey(x0, z1, x0, z1 + 1)) : openKeys.count(EdgeKey(x1, z1, x1 + 1, z1 + sz)))) o.u1 = 1.0f;
         g.edges[static_cast<size_t>(idx)].open = static_cast<uint16_t>(g.openings.size() + 1);
         g.openings.push_back(o);
         g.cutsOnWall++;
     }
 }
-// Opening shapes from the cutout masks: the cut post's mask TGI (CutRec::tgi) -> its hole, per piece. Nothing fills this
-// cache yet: no read path for a resource's bytes exists in the codebase (wall_openings.h, ShapeFromAlpha), so every door and
-// arch keeps its kind's defaults (a window takes its panes' shape, WindowPanes); a reader would store each mask's shape here
-// (any thread) and the grids built after it take it.
-struct MaskKey {
-    uint32_t tgi[4];
-    uint8_t piece, count;
-    bool operator==(const MaskKey& o) const { return std::memcmp(tgi, o.tgi, sizeof tgi) == 0 && piece == o.piece && count == o.count; }
-};
-struct MaskKeyHash {
-    size_t operator()(const MaskKey& k) const { return (static_cast<size_t>(k.tgi[0]) * 31u + k.tgi[1]) * 31u + k.tgi[2] * 7u + k.piece * 131u + k.count; }
-};
-std::mutex g_maskShapeMx;
-std::unordered_map<MaskKey, WallOpenings::MaskShape, MaskKeyHash> g_maskShapes;
+// Opening shapes from the cutout masks: the cut post's mask TGI (CutRec::tgi, one mask per cell) -> its hole in the baked table
+// (WallOpenings::BakedMask)
 std::atomic<long> g_maskShaped{0}, g_maskDefaults{0};
-// The opening's shape from its mask when one was read (the cell's piece of a multi-cell mask: piece / 2 of count / 2, the
-// payload's +0x29 and +0x2A counting both faces; unverified), else false (its kind's defaults stay)
+// The opening's shape from its mask when the table holds it, else false (its kind's defaults stay)
 bool MaskShapeFor(const CutRec& rec, GridOpening& o) {
-    const MaskKey key{{rec.tgi[0], rec.tgi[1], rec.tgi[2], rec.tgi[3]}, rec.piece, rec.count};
     WallOpenings::MaskShape m;
-    {
-        std::lock_guard<std::mutex> lk(g_maskShapeMx);
-        const auto it = g_maskShapes.find(key);
-        if (it == g_maskShapes.end()) {
-            g_maskDefaults.fetch_add(1, std::memory_order_relaxed);
-            return false;
-        }
-        m = it->second;
+    if (rec.tgi[2] != WallOpenings::kMaskType || !WallOpenings::BakedMask(static_cast<uint64_t>(rec.tgi[1]) << 32 | rec.tgi[0], WallOpenings::MaskRunsBack(rec.orient), m)) {
+        g_maskDefaults.fetch_add(1, std::memory_order_relaxed);
+        return false;
     }
     o.sill = m.sill, o.u0 = m.u0, o.u1 = m.u1;
     for (int k = 0; k < WallOpenings::kProfile; k++) o.head[k] = m.head[k];
@@ -4653,7 +4622,7 @@ std::shared_ptr<const StoryGrid> BuildStoryGrid(uintptr_t mgr, int story, int w,
     }
     if (doorGlass) GlazedCuts(*g, cuts, glassLights, glazed);
     if (windows) WindowPanes(*g, cuts, glassLights, panes);
-    PlaceGridOpenings(*g, cuts, doorsBlock, glazed, [](const CutRec& rec, GridOpening& o) { MaskShapeFor(rec, o); }, &panes); // (its mask's shape when one was read; none yet)
+    PlaceGridOpenings(*g, cuts, doorsBlock, glazed, [](const CutRec& rec, GridOpening& o) { MaskShapeFor(rec, o); }, &panes);
     g->leftOutSig = windows ? GlazedSig(UnlitWindows(*g, glassLights)) : 0;
     g_paneSized.fetch_add(g->paneSized, std::memory_order_relaxed);
     g_paneDefault.fetch_add(static_cast<long>(g->windowCuts.size()) - g->paneSized, std::memory_order_relaxed);
@@ -6458,12 +6427,14 @@ struct ArchRec {
         uintptr_t nb;
         int nbId;
         uintptr_t nbMgr = 0; // the neighbour's story manager when it is another story's (an opening in the floor), 0 = this one
+        float y0 = 0.0f, y1 = 0.0f; // its sill and head (lot height; room_bounce)
     };
     std::vector<Arch> arches;
     mutable ArchAmbient::FrameRead ambRead; // its own ambient this present frame (ArchAmbientConsts, under g_archMx)
 };
 std::mutex g_archMx;
 std::unordered_map<uintptr_t, ArchRec> g_archRooms; // under g_archMx
+std::unordered_map<uintptr_t, ArchRec> g_archPlain; // the roofed rooms with no arch, read only to tell who shares an ambient (ArchTwin); under g_archMx
 std::atomic<uint32_t> g_archGen{1};
 // The last draws no room was found for (F8 and the recorder's status): their ambient and the closest room ambient (under g_archMx)
 struct ArchMiss {
@@ -6483,6 +6454,31 @@ bool ReadRoomAmbient(uintptr_t room, uintptr_t mgr, int id, float* amb) {
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         g_archFaults.fetch_add(1, std::memory_order_relaxed); // (the status's "reads failed": a fault costs far more than a read)
         return false;
+    }
+}
+// POD (SEH): a room's probe, 0 = none (room+0x154 its LightProbeProxy, +8 the probe of the pool it holds, 0x006B02D0)
+uintptr_t RoomProbe(uintptr_t room) {
+    __try {
+        const uintptr_t proxy = *reinterpret_cast<const uintptr_t*>(room + 0x154);
+        return proxy ? *reinterpret_cast<const uintptr_t*>(proxy + 8) : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_archFaults.fetch_add(1, std::memory_order_relaxed);
+        return 0;
+    }
+}
+// POD (SEH): the reflection cube a room's floors bind (0x006AD3DC: its probe once ready, +0x2C95; 0x006B42C0: +0x2C5C), the
+// IDirect3DCubeTexture9, null without one (the room then draws with the game's default cube, not read here). The draw hands it to the
+// device outside any SEH, and the room can be one of a lot gone (ReadRoomAmbient reads freed memory as still that room): GetType here
+void* RoomSpecCube(uintptr_t room) {
+    const uintptr_t probe = RoomProbe(room);
+    if (!probe) return nullptr;
+    __try {
+        const uintptr_t tex = *reinterpret_cast<const uint8_t*>(probe + 0x2C95) ? *reinterpret_cast<const uintptr_t*>(probe + 0x2C5C) : 0;
+        IDirect3DCubeTexture9* const cube = tex && *reinterpret_cast<const uint32_t*>(tex + 0x2C) == 1 ? *reinterpret_cast<IDirect3DCubeTexture9* const*>(tex + 0x30) : nullptr; // (1 = cube; probe_neutral.cpp)
+        return cube && cube->GetType() == D3DRTYPE_CUBETEXTURE ? cube : nullptr;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_archFaults.fetch_add(1, std::memory_order_relaxed);
+        return nullptr;
     }
 }
 // (development builds, opening_bounce) The edges of the openings in a room's own floor (a stairwell): tiles of room `id` with no
@@ -6544,7 +6540,7 @@ void NoteArchRoom(BYTE* room, uintptr_t mgr, uintptr_t tracker, int story, int i
             const uintptr_t nb = reinterpret_cast<uintptr_t>(RoomByIdCached(reinterpret_cast<void*>(mgr), d.from));
             if (!nb) continue;
             const float dx = d.d.bx - d.d.ax, dz = d.d.bz - d.d.az;
-            rec.arches.push_back(ArchRec::Arch{d.d.ax + o.u0 * dx, d.d.az + o.u0 * dz, d.d.ax + o.u1 * dx, d.d.az + o.u1 * dz, nb, d.from, 0});
+            rec.arches.push_back(ArchRec::Arch{d.d.ax + o.u0 * dx, d.d.az + o.u0 * dz, d.d.ax + o.u1 * dx, d.d.az + o.u1 * dz, nb, d.from, 0, e.base + o.sill, e.base + OpeningHead(o, 0.5f * (o.u0 + o.u1))});
         }
     // (opening_bounce) the edges of the openings in its own floor, with the room below each. Off with no_opening_band (F8
     // and an image of the landing): the lamp below stands 0.8 m under this floor, so this floor's top face never sees
@@ -6564,8 +6560,13 @@ void NoteArchRoom(BYTE* room, uintptr_t mgr, uintptr_t tracker, int story, int i
             g_archRooms.erase(it);
             g_archGen.fetch_add(1, std::memory_order_relaxed);
         }
+        if (DevSwitches::ArchAmbient() && id > 0 && !room[0x18]) {
+            ArchRec& plain = g_archPlain[key];
+            plain.mgr = mgr, plain.tracker = tracker, plain.id = id, plain.story = story;
+        } else g_archPlain.erase(key);
         return;
     }
+    g_archPlain.erase(key);
     rec.mgr = mgr, rec.tracker = tracker, rec.id = id, rec.story = story;
     if (g) rec.xf = g->xf;
     if (!kPublicBuild && g_archLogged.fetch_add(1, std::memory_order_relaxed) < 200) {
@@ -6847,6 +6848,7 @@ void ClearRoofedState() { // MaybeClearRooms (a new world): light tree thread
 void ClearArchRooms() {
     std::lock_guard<std::mutex> lk(g_archMx);
     g_archRooms.clear();
+    g_archPlain.clear();
     g_archMissNext = 0;
     g_archGen.fetch_add(1, std::memory_order_relaxed);
 }
@@ -6951,6 +6953,7 @@ void PruneDeadStoryCachesImpl() {
         const size_t arches = LivenessPrune::PruneByLivenessIf(
             g_archRooms, [&lots](uintptr_t, const ArchRec& rec) { return !rec.tracker || lots.Contains(rec.tracker); }, g_archMisses);
         if (arches) g_archGen.fetch_add(1, std::memory_order_relaxed);
+        std::erase_if(g_archPlain, [&lots](const auto& kv) { return kv.second.tracker && !lots.Contains(kv.second.tracker); });
     }
     const size_t rooms = LivenessPrune::PruneByLivenessIf(
         g_rooms, [&lots](uintptr_t, const RoomInfo& info) { return !info.tracker || lots.Contains(info.tracker); }, g_roomMisses);
@@ -6966,7 +6969,7 @@ void PruneDeadStoryCaches(bool world) {
     static DWORD s_at = 0; // light tree thread
     const DWORD now = GetTickCount();
     if (!world && (!g_liveSweeps.load(std::memory_order_relaxed) || (s_at && now - s_at < kLiveSweepMs))) return;
-    s_at = now | 1;
+    s_at = std::max<DWORD>(now, 1);
     HookGuard::Run("LevelLightShare story cache prune", [] { PruneDeadStoryCachesImpl(); });
 }
 // A rebuilt lot (BeforeRoomUpdate, light tree thread): its old managers that it no longer holds on any story -4..7 leave the
@@ -8092,7 +8095,7 @@ void AuditTakers(uintptr_t tracker, DWORD now) {
                 t.backoffUntil = (now + 10000) | 1;
                 g_auditGaveUp.fetch_add(1, std::memory_order_relaxed);
             } else {
-                t.sentAt = now | 1;
+                t.sentAt = std::max<DWORD>(now, 1);
                 send.push_back({{t.level, t.id}, which});
             }
         }
@@ -8471,7 +8474,7 @@ void BeforeRoomUpdate(BYTE* tl) {
             bool fire = static_cast<int32_t>(now - lot.settleAt) >= 0;
             if (!fire && now - lot.armedAt >= kSettleMin) {
                 if (LotBusy(tracker, lot.watch)) lot.quietSince = 0;
-                else if (!lot.quietSince) lot.quietSince = now | 1;
+                else if (!lot.quietSince) lot.quietSince = std::max<DWORD>(now, 1);
                 else fire = now - lot.quietSince >= kSettleQuiet;
             }
             if (fire) {
@@ -9347,7 +9350,9 @@ bool ReadDayRoomKey(BYTE* room, DayRoomKey& key) {
 }
 std::atomic<uint32_t> g_dayGen{1}; // bumped when the world changes (OnWorldChanged): the last-noted shortcut starts again
 uint32_t g_dayLastGen = 0;
+thread_local bool t_basisPreview = false; // (BasisPartNow) a directional part read outside a solve: no solve's factor to note
 void NoteDayRoom(BYTE* room, float scale) { // light tree thread
+    if (t_basisPreview) return;
     const uint32_t gen = g_dayGen.load(std::memory_order_relaxed);
     if (room == g_dayLastRoom && scale == g_dayLastScale && gen == g_dayLastGen) return;
     g_dayLastRoom = room;
@@ -10272,49 +10277,6 @@ uintptr_t kWallBaseSite = 0; // 0x006AB32C (GameAddr WallBaseSite)
 const BYTE kWallBaseBytes[] = {0x84, 0xC0, 0x74, 0x07, 0xF3, 0x0F, 0x10, 0x45, 0x10, 0xEB, 0x12}; // test al,al; je +7; movss xmm0,[ebp+10h]; jmp +0x12
 bool g_wallBaseReady = false;
 std::atomic<long> g_wallBaseRaised{0}, g_wallBaseKept{0}, g_wallBaseLogged{0};
-struct WallBaseRead {
-    int story = -99;
-    float lotBase = 0; // mgr +0xD4 (world)
-    float house = 0, own = 0;      // the floor (+0x78, lot space) across the wall's edge (the house side) and of its own cell
-    bool haveHouse = false, haveOwn = false, houseIsRoom = false; // houseIsRoom: that tile holds an indoor room
-    int hx = 0, hz = 0;
-};
-// The tile across the wall's edge, from its orientation (FUN_006ab280's switch on the 4th argument, table 0x006ABCE8):
-// 0: along x at the cell's -z edge (origin z + 0.05), 1: along x at +z (z + 0.95), 2: along z at +x (x + 0.95), 3: along
-// z at -x (x + 0.05); 4..7: the diagonals, inside the cell. The middle of a run of `len` cells.
-bool ReadWallBase(const BYTE* wall, int x, int z, int len, int orient, WallBaseRead& r) { // POD only (SEH)
-    __try {
-        const BYTE* room = *reinterpret_cast<BYTE* const*>(wall);
-        if (!room) return false;
-        const uintptr_t mgr = *reinterpret_cast<const uintptr_t*>(room);
-        if (!mgr) return false;
-        r.story = *reinterpret_cast<const int*>(mgr + 0x88);
-        r.lotBase = *reinterpret_cast<const float*>(mgr + 0xD4);
-        const int cx = x + *reinterpret_cast<const int*>(room + 0x1C), cz = z + *reinterpret_cast<const int*>(room + 0x24);
-        const int mid = len > 1 && len < 64 ? (len - 1) / 2 : 0;
-        int ox = cx, oz = cz, hx = cx, hz = cz;
-        switch (orient) {
-            case 0: ox += mid, hx = ox, hz = cz - 1; break;
-            case 1: ox += mid, hx = ox, hz = cz + 1; break;
-            case 2: oz += mid, hz = oz, hx = cx + 1; break;
-            case 3: oz += mid, hz = oz, hx = cx - 1; break;
-            default: break; // a diagonal (not changed: see OutdoorWallBase)
-        }
-        r.hx = hx, r.hz = hz;
-        if (const uintptr_t t = LightTile(mgr, ox, oz)) {
-            const float v = *reinterpret_cast<const float*>(t + 0x78);
-            if (ApexMath::IsFinite(v)) r.own = v, r.haveOwn = true;
-        }
-        if (const uintptr_t t = LightTile(mgr, hx, hz)) {
-            const float v = *reinterpret_cast<const float*>(t + 0x78);
-            if (ApexMath::IsFinite(v)) r.house = v, r.haveHouse = true;
-            for (int q = 0; q < 4; q++) r.houseIsRoom = r.houseIsRoom || TileRoom(t, q) > 0;
-        }
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
-}
 extern "C" float __cdecl OutdoorWallBase(const BYTE* wall, int x, int z, float nominal, int len, int orient) {
     (void)x, (void)z, (void)len;
     float base = nominal;
@@ -10842,7 +10804,7 @@ void SweepDeadSnaps() {
     if (!g_liveSweeps.load(std::memory_order_relaxed)) return;
     const DWORD now = GetTickCount();
     if (g_liveSweepAt && now - g_liveSweepAt < kLiveSweepMs) return;
-    g_liveSweepAt = now | 1;
+    g_liveSweepAt = std::max<DWORD>(now, 1);
     HookGuard::Run("LevelLightShare copy prune", [] { SweepDeadSnapsImpl(); });
 }
 // A rebuilt lot (BeforeRoomUpdate): the copies of its old managers that it no longer holds on any story go at once
@@ -11592,6 +11554,18 @@ bool BasisStepTry(const float* pos, void* light, float* acc) { // POD (SEH)
         return false;
     }
 }
+// (BasisPartNow) outside a solve, as BasisStepTry: a light or room freed meanwhile faults here, not in the frame
+bool BasisPartTry(BYTE* room, const float* p, void* light, float* a) { // POD (SEH)
+    const SolveCtx prev = g_ctx;
+    __try {
+        BasisLightBody(room, p, light, a);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_ctx = prev;
+        g_faults.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+}
 bool BasisStepImpl(const float* pos, uintptr_t light, float* acc16) {
     if (!g_basisGuardReady.load(std::memory_order_relaxed) || !light || ThreadId() != g_gatherThread.load(std::memory_order_relaxed)) return false;
     alignas(16) float p[4], a[16] = {};
@@ -11922,10 +11896,6 @@ float WallPass(uintptr_t tracker, int roomLevel, int home, int homeRoom, void* l
 const Cross* FindCross(const RoomInfo& info, uintptr_t light) {
     auto it = std::lower_bound(info.cross.begin(), info.cross.end(), Cross{light});
     return it == info.cross.end() || it->light != light ? nullptr : &*it;
-}
-int HomeFloor(const RoomInfo& info, uintptr_t light) {
-    const Cross* c = FindCross(info, light);
-    return c ? c->floor : -1;
 }
 
 bool ActiveLot(uintptr_t mgr) {
@@ -15767,7 +15737,7 @@ void OnPresent() {
                     break;
                 }
             if (active && active != s_active && g_worldLiveAt.load(std::memory_order_relaxed)) {
-                g_lotEnteredAt.store(now | 1, std::memory_order_relaxed);
+                g_lotEnteredAt.store(std::max<DWORD>(now, 1), std::memory_order_relaxed);
                 g_lotEntries.fetch_add(1, std::memory_order_relaxed);
                 LOG_INFO(std::format("[LevelLightShare] Lot {:08X} entered: its rooms solve at the settle budget for {} s", active, kSettleAfterEntryMs / 1000));
             }
@@ -15805,7 +15775,9 @@ void OnPresent() {
     // Lamp drags (drag_lite.h): the sends left out go once the lamp is still; the re-pick throttle's priority call
     HookGuard::Run("DragLite flush", [] { DragLite::OnPresent(); });
     // (the classic hold of a drag uses the same priority call: drag_lite.h)
-    if (TesterToggles::dragRepickThrottle.load(std::memory_order_relaxed) || DragLite::ClassicReleaseOn()) RoomLightQueue::EnsureDragThrottle();
+    if (TesterToggles::dragRepickThrottle.load(std::memory_order_relaxed) || DragLite::ClassicReleaseOn() ||
+        (OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical())) // (and the GPU drag hold: DragLite::HoldGpuDrawn)
+        RoomLightQueue::EnsureDragThrottle();
     SweepDayRooms();
     if (const uintptr_t fm = g_focusRelightMgr.exchange(0)) { // an F7 focused the recording: its lot lights again now
         uintptr_t trackers[256];
@@ -15896,7 +15868,7 @@ void OnPresent() {
             else
                 ++it; // no lighting manager yet (the lot is still loading): again after the next wait
         }
-        if (!g_dirtyLevels.empty()) g_floorTick = GetTickCount() | 1;
+        if (!g_dirtyLevels.empty()) g_floorTick = std::max<DWORD>(GetTickCount(), 1);
         if (!g_dirtyMgrs.empty()) {
             g_dirtyReady = true;
             g_floorRefreshes.fetch_add(1, std::memory_order_relaxed);
@@ -16033,7 +16005,7 @@ bool LoadedRoomsBusy() {
 }
 void OnWorldLive() {
     g_roomRefsAt = 0; // require a fresh enumeration after the load screen before an early refresh
-    g_worldLiveAt.store(GetTickCount() | 1, std::memory_order_relaxed);
+    g_worldLiveAt.store(std::max<DWORD>(GetTickCount(), 1), std::memory_order_relaxed);
     g_liveSweeps.store(true, std::memory_order_relaxed); // the liveness sweeps of the copies and caches start
     g_indoorGen.fetch_add(1);
     if (!kPublicBuild) LOG_INFO("[LevelLightShare] " APEX_VERSION_STRING ": World live, the rooms near stair openings of every lot gather once more");
@@ -16470,7 +16442,7 @@ void PublishVisSnapImpl() {
         g_visSnap = std::move(s);
     }
     g_visSnapBuilds.fetch_add(1, std::memory_order_relaxed);
-    g_visRigRefreshAt = GetTickCount() | 1; // the rigs gather again once the copy is quiet (below)
+    g_visRigRefreshAt = std::max<DWORD>(GetTickCount(), 1); // the rigs gather again once the copy is quiet (below)
 }
 void PublishVisSnap() {
     HookGuard::Run("LevelLightShare visibility copy", [] { PublishVisSnapImpl(); });
@@ -16602,8 +16574,6 @@ uint32_t OutsideWallsIn(float x0, float z0, float x1, float z1, std::vector<Grou
         }
     return g_grid.gen;
 }
-uint32_t SlabCopyGen() { return g_floorSnapGen.load(std::memory_order_relaxed); }
-uint32_t OutsideWallsGen() { return g_wallSnapGen.load(std::memory_order_relaxed); }
 bool ObjectWallsOn() { return g_objectWallsOn.load(std::memory_order_relaxed) && g_installed.load(std::memory_order_relaxed); }
 bool GroundShadeOn() { return g_groundShadeOn.load(std::memory_order_relaxed) && g_installed.load(std::memory_order_relaxed); }
 void SetGroundShade(bool on) { g_groundShadeOn.store(on, std::memory_order_relaxed); }
@@ -16928,7 +16898,6 @@ void SetOutdoorThroughOpenings(bool on) {
         RelightAllRooms(on ? "Outdoor light through openings on" : "Outdoor light through openings off");
     ObjectLightBridge::RequestRigRefresh();
 }
-bool OutdoorThroughOpeningsActive() { return RoofedOpeningsOn(); }
 
 void SetOpeningLampBalance(float groundBrightness, float lotLampBrightness, bool groundOn, float wallBrightness, bool wallsOn) {
     const OpeningLampBalance::Scales now = OpeningLampBalance::From(groundBrightness, lotLampBrightness, groundOn, wallBrightness, wallsOn);
@@ -16987,7 +16956,6 @@ void SetIndoorThroughOpenings(bool on) {
         RelightAllRooms(on ? "Indoor light through openings on" : "Indoor light through openings off");
     ObjectLightBridge::RequestRigRefresh();
 }
-bool IndoorThroughOpeningsActive() { return InnerOpeningsOn(); }
 
 // (2.15.3) Indoor light adds to the ground: story 0's room 0 is solved again (its texels' alpha carries the exit light)
 void SetIndoorLightOnGround(bool on) {
@@ -17038,7 +17006,6 @@ void SetDoorsBlockLight(bool on) {
     g_doorRuleStories.fetch_add(stories, std::memory_order_relaxed);
     LOG_INFO(std::format("[Openings] Doors block light {}: {} stories with doors noted are sent again", on ? "on" : "off", stories));
 }
-bool DoorsBlockLightActive() { return g_doorsBlockOn.load(std::memory_order_relaxed); }
 
 namespace {
 struct OpenLampHead {
@@ -17596,6 +17563,16 @@ bool StackedWithEdit(const void* room) {
 
 uintptr_t BasisSamplesVec() { return BasisSamplesVecImpl(); }
 bool BasisStep(const float* pos, uintptr_t light, float* acc16) { return pos && acc16 && BasisStepImpl(pos, light, acc16); }
+bool BasisPartNow(void* room, const float* pos, uintptr_t light, float* acc16) {
+    if (!room || !pos || !acc16 || !light || !g_basisGuardReady.load(std::memory_order_relaxed) || ThreadId() != g_gatherThread.load(std::memory_order_relaxed)) return false;
+    alignas(16) float p[4], a[16] = {};
+    std::memcpy(p, pos, sizeof p);
+    t_basisPreview = true;
+    const bool ok = BasisPartTry(static_cast<BYTE*>(room), p, reinterpret_cast<void*>(light), a);
+    t_basisPreview = false;
+    if (ok) std::memcpy(acc16, a, sizeof a);
+    return ok;
+}
 float CrossLampReach(const void* room, const void* light, const float* point) {
     if (!room || !light || !point) return -1.0f;
     return CrossLampReachImpl(static_cast<BYTE*>(const_cast<void*>(room)), const_cast<void*>(light), point);
@@ -17773,7 +17750,7 @@ void NoteLampEditing(bool continuous, uintptr_t tracker) {
     }
     // (a move of the lamp is also noted as a move by LampMarkFilter; this mark may be a colour or intensity change)
     if (continuous) DragLite::NoteLampStep("lamp mark", DragLite::StepKind::Value);
-    const DWORD now = GetTickCount() | 1;
+    const DWORD now = std::max<DWORD>(GetTickCount(), 1);
     g_lampEditAt.store(now, std::memory_order_relaxed); // AuditTakers waits for the edit's own sends
     if (continuous) g_continuousEditAt.store(now, std::memory_order_relaxed);
 }
@@ -18169,9 +18146,10 @@ std::string WallMaskStatus() {
                        g_wallMaskBuilt.load(), g_wallMaskFound.load(), g_wallMaskMissed.load(), g_ambMapReads.load(), g_ambMapFails.load(), g_storyBlendDraws.load(), g_storyBlendNone.load(),
                        g_floorMaskFound.load(), g_floorMaskMissed.load(), g_floorMaskLayout.load());
 }
-// POD (SEH): whether the D3D texture tex is one of the story manager's room light maps (its sets at +0x16C + class x 64, four
-// maps each; 0x006A7700 binds the floor's from there, as the directional maps from +0x220: the wrapper's texture at +0x30
-// while +0x2C is 0)
+// POD (SEH): whether the D3D texture tex is one of the story manager's room light maps (its three sets at +0x16C + class x 64,
+// four maps each, as the teardown 0x006A805A frees them; 0x006A7700 binds the floor's from there, as the directional maps
+// from +0x220: the wrapper's texture at +0x30 while +0x2C is 0). A fourth class would read the room hash: +0x238 is its
+// count, not a wrapper (issue #55: an access violation on every manager that did not hold the map).
 struct StoryMapSlot {
     uintptr_t address = 0, wrapper = 0;
 };
@@ -18186,7 +18164,7 @@ bool StoryMapSlotMatches(const StoryMapSlot& slot, uintptr_t tex) {
 bool StoryMapsInclude(uintptr_t mgr, uintptr_t tex, StoryMapSlot& slot) {
     slot = {};
     __try {
-        for (int c = 0; c < 4; c++)
+        for (int c = 0; c < 3; c++)
             for (int i = 0; i < 4; i++) {
                 const uintptr_t address = mgr + 0x16C + c * 64 + 4 * i;
                 const uintptr_t w = *reinterpret_cast<const uintptr_t*>(address);
@@ -18204,6 +18182,17 @@ bool StoryMapsInclude(uintptr_t mgr, uintptr_t tex, StoryMapSlot& slot) {
 // rooms were solved again and the arch's step came back on the floor, a straight line on the arch's wall line, the two
 // floors' ambients apart again; exact float equality is what the match asked for)
 bool SameAmbient(const float* a, const float* b) { return ArchAmbient::Same(a, b); }
+// (arch_reach, under g_archMx) Another room of self's story holding `own`, with arches or without: its floor draw takes self's blend too, through
+// the wall between them, so that blend stays at kReach. shortcut: any such room counts, however far from the arch; upgrade with the rooms' bounds
+bool ArchTwin(const ArchRec& self, const float own[3]) {
+    const uint32_t frame = g_presentFrame.load(std::memory_order_relaxed);
+    const auto holds = [&](const std::pair<const uintptr_t, ArchRec>& kv) {
+        const ArchRec& rec = kv.second;
+        float a[3];
+        return &rec != &self && rec.mgr == self.mgr && ArchAmbient::ReadOnce(rec.ambRead, frame, [&](float* to) { return ReadRoomAmbient(kv.first, rec.mgr, rec.id, to); }, a) && SameAmbient(a, own);
+    };
+    return std::any_of(g_archRooms.begin(), g_archRooms.end(), holds) || std::any_of(g_archPlain.begin(), g_archPlain.end(), holds);
+}
 // (basis_wall_filter) The floor maps' wall mask (LevelLightShare.h). The class-2 layout (light_detail.cpp): a tile's texels
 // start at (tile x n, tile z n) from the lot's origin, n = 4 (8 with Light detail High); the map is n x the lot's tiles
 // rounded up to a power of two, twice as wide where the split tiles' atlas follows. Other classes (1 or 2 texels a tile)
@@ -18252,12 +18241,45 @@ bool FloorWallMaskFor(uintptr_t floorTex, int w, int h, uint32_t knownGen, uint3
     return true;
 }
 
+uint32_t ArchGen() { return g_archGen.load(std::memory_order_relaxed); }
+void ArchSpansOf(const void* room, std::vector<ArchSpan>& out) {
+    out.clear();
+    std::lock_guard<std::mutex> lk(g_archMx);
+    const auto it = g_archRooms.find(reinterpret_cast<uintptr_t>(room));
+    if (it == g_archRooms.end()) return;
+    for (const ArchRec::Arch& a : it->second.arches) {
+        if (a.nbMgr || a.nbId <= 0) continue;
+        const auto s = std::find_if(out.begin(), out.end(), [&](const ArchSpan& s) { // (a span's 1 m cells on one line, into the same room: joined)
+            return s.nbId == a.nbId && ApexMath::Fabs(s.bx - a.ax) < 0.1f && ApexMath::Fabs(s.bz - a.az) < 0.1f && (a.ax == a.bx) == (s.ax == s.bx);
+        });
+        if (s != out.end()) s->bx = a.bx, s->bz = a.bz, s->y1 = std::max(s->y1, a.y1);
+        else out.push_back(ArchSpan{a.ax, a.az, a.bx, a.bz, a.y0, a.y1, reinterpret_cast<const void*>(a.nb), a.nbId});
+    }
+}
+bool ArchAmbientShared(const void* room, const float own[3]) {
+    std::lock_guard<std::mutex> lk(g_archMx);
+    const auto it = g_archRooms.find(reinterpret_cast<uintptr_t>(room));
+    return it != g_archRooms.end() && ArchTwin(it->second, own);
+}
 std::atomic<long> g_archUnion{0};
 // (the draw's story: found by its room map's set, +0x16C, UNVERIFIED; or by its directional maps, +0x220, confirmed by the wall
 // masks; off-story: the draw matched by value only rooms of another story or lot, which give nothing; spread: no story known
 // and the matches on more than one story or lot, which give nothing)
 std::atomic<long> g_archByMap{0}, g_archByBasis{0}, g_archOffStory{0}, g_archSpread{0};
-int ArchAmbientConsts(const float own[3], uintptr_t mapTex, uintptr_t basisTex, float* rows, int maxCells) {
+bool RoomOfProbe(uintptr_t probe, int* story, int* id) {
+    std::lock_guard<std::mutex> lk(g_archMx);
+    for (const auto* rooms : {&g_archRooms, &g_archPlain})
+        for (const auto& [key, rec] : *rooms) {
+            float amb[3];
+            if (ReadRoomAmbient(key, rec.mgr, rec.id, amb) && RoomProbe(key) == probe) { // (the read: still that room)
+                *story = rec.story, *id = rec.id;
+                return true;
+            }
+        }
+    return false;
+}
+int ArchAmbientConsts(const float own[3], uintptr_t mapTex, uintptr_t basisTex, float* rows, int maxCells, void** nbCube) {
+    *nbCube = nullptr;
     if (!DevSwitches::ArchAmbient() || maxCells <= 0) return 0;
     // the draw's story by its directional maps (the wall masks' stories; looked up before g_archMx, never both held)
     const uintptr_t byBasisMask = StoryOfBasisTex(basisTex);
@@ -18282,6 +18304,8 @@ int ArchAmbientConsts(const float own[3], uintptr_t mapTex, uintptr_t basisTex, 
     // story. Rooms with no lamp of their own can hold the very same ambient (a recording: the stair room took another room's
     // after the camera's story changed, and the arch's step came back): every such room of that story gives its arches (each
     // one's share lies within 1.5 m of its own arch). A room of another story or lot never does (ArchAmbient::Select).
+    // shortcut: a draw finds its room by ambient alone, so a room holding the very ambient of a room with an arch takes that arch's
+    // blend too, through a wall if its floor lies within 1.5 m of it; upgrade by a room test in the draw if it shows in game
     static std::vector<const ArchRec*> matched; // (render thread, under g_archMx: kept for their capacity)
     static std::vector<ArchAmbient::Candidate> cand;
     matched.clear(), cand.clear();
@@ -18399,7 +18423,11 @@ int ArchAmbientConsts(const float own[3], uintptr_t mapTex, uintptr_t basisTex, 
         }
         segsIn = &segs;
     }
-    int n = 0;
+    int n = 0, twin = -1;
+    // shortcut: one neighbour's cube a draw (the largest D), so a room with arches into two rooms keeps its line on the other; a second cube sampler if a room shows it
+    // shortcut: rows go by ambient, so a room with the brighter ambient and the dimmer cube keeps a line (it gets no rows and draws the wall-mask copy); ambient and cube order agreed in the 2 frames measured
+    float* const flags = rows + (2 * maxCells + 3) * 4;
+    ArchAmbient::CubePick cube;
     for (const Seg& s : *segsIn) {
         if (n >= maxCells) break;
         float nb[3];
@@ -18410,8 +18438,22 @@ int ArchAmbientConsts(const float own[3], uintptr_t mapTex, uintptr_t basisTex, 
         float* r = rows + n * 8;
         r[0] = s.ax, r[1] = s.az, r[2] = ex, r[3] = ez;
         r[4] = d[0], r[5] = d[1], r[6] = d[2], r[7] = 1.0f / l2;
+        // (arch_reach) a floor opening's edges keep kReach, a blend ends at the room's next arch, and rooms sharing an ambient keep kReach too
+        // (ArchTwin). The kept rooms' bounce takes the same reach (GpuRoomLamps)
+        float reach = ArchAmbient::kReach;
+        if (!s.nbMgr) {
+            reach = ArchAmbient::Reach(ApexMath::Sqrt(l2), own, nb);
+            for (const Seg& o : *segsIn)
+                if (!o.nbMgr && o.nbId > 0 && o.nbId != s.nbId) reach = ArchAmbient::HeldReach(reach, s.ax, s.az, s.bx, s.bz, o.ax, o.az, o.bx, o.bz);
+            if (reach > ArchAmbient::kReach && twin < 0) twin = ArchTwin(*matched[0], own) ? 1 : 0;
+            if (twin == 1) reach = ArchAmbient::kReach;
+        }
+        rows[(2 * maxCells + 1) * 4 + n] = 1.0f / reach;
+        // (a floor opening's edge meets no floor of the room below: no line to take away)
+        if (!s.nbMgr) ArchAmbient::TakeCube(cube, s.nb, d[0] + d[1] + d[2], flags, n, RoomSpecCube);
         n++;
     }
+    *nbCube = cube.tex;
     if (n) g_archDraws.fetch_add(1, std::memory_order_relaxed);
     return n;
 }
@@ -18851,6 +18893,7 @@ void GridEdgeTo(const StoryGrid& g, int32_t idx, float x0, float z0, float x1, f
     if (e.open && e.open - 1u < g.openings.size()) {
         const GridOpening& op = g.openings[e.open - 1u];
         o.open = true;
+        o.glazed = op.glass < 1.0f;
         o.o.u0 = op.u0, o.o.u1 = op.u1, o.o.sill = op.sill;
         for (int k = 0; k < RtLampProxy::kProfile && k < WallOpenings::kProfile; k++) o.o.head[k] = op.head[k];
     }
@@ -19304,7 +19347,7 @@ int SendRoom0DependentsTail(uintptr_t tracker, unsigned storyMask, const std::ve
     if (!g_installed.load(std::memory_order_relaxed) || !g_indoorReady || ThreadId() != g_gatherThread.load(std::memory_order_relaxed)) return 0;
     return HookGuard::Run("GPU edit tail sends", 0, [=] { return SendRoom0DependentsTry(tracker, storyMask, true, edited); });
 }
-void NoteGpuEdit() { g_gpuEditAt.store(GetTickCount() | 1, std::memory_order_relaxed); }
+void NoteGpuEdit() { g_gpuEditAt.store(std::max<DWORD>(GetTickCount(), 1), std::memory_order_relaxed); }
 bool RoomMapsFree() { return CheckMapSteps() && RoomMapsFreeTry(); }
 bool LockRoomMaps(void* room) { return room && CheckMapSteps() && LockRoomMapsTry(room); }
 bool FinishRoomMaps(void* room) { return room && CheckMapSteps() && FinishRoomMapsTry(room); }
@@ -19640,10 +19683,6 @@ void MeasureRenderMemoryImpl() {
     {
         std::lock_guard<std::mutex> lk(g_deferredMx);
         add(Vec(g_deferred), g_deferred.size());
-    }
-    {
-        std::lock_guard<std::mutex> lk(g_maskShapeMx);
-        add(Hash(g_maskShapes), g_maskShapes.size());
     }
     // the render thread's own
     add(Hash(g_rigWait, [](const auto& kv) { return Vec(kv.second.rooms); }) + Vec(g_roomRefs) + Vec(g_roomRefTrackers) + Vec(g_roomRefManagers) + Hash(g_staleSent) +

@@ -1,4 +1,5 @@
 #pragma once
+#include <map>
 #include <string>
 // Shared trigger for effects that work on the finished 3D scene, before the game draws any UI: normally the first
 // backbuffer draw with ZENABLE = FALSE after at least 4 depth-tested draws. If hidden game UI means that boundary never
@@ -19,7 +20,7 @@
 
 namespace PostScene {
 using Effect = void (*)(IDirect3DDevice9*);
-enum Order : int { kAmbientOcclusion = 10, kEdgeSmoothing = 20, kDepthBlur = 30, kPicture = 40 };
+enum Order : int { kAmbientOcclusion = 10, kEdgeSmoothing = 20, kDepthBlur = 30, kPicture = 40, kRecording = 50 };
 // registers the draw hooks with the first effect. needsDepth = false: an effect that also runs when the scene was drawn with
 // another depth-stencil than the shared INTZ one (Picture: Color needs the depth only for Emphasize, see SceneDepthValid)
 void Add(int order, Effect fn, bool needsDepth = true);
@@ -28,6 +29,8 @@ void Remove(Effect fn);         // and unregisters them with the last one
 bool SceneDepthValid();
 // The camera, read from the scene draws' vertex constants while an effect asks for it (reference counted)
 void WantCamera(bool on);
+// How many times each effect ran since the last call, by order (render thread; a recording's [ran] lines)
+std::map<int, long> TakeRan();
 // The camera's near plane of the current frame (metres). Device depth d = A - near * A / z (A = 1.00008 measured, far
 // plane ~3 km); near changes with the camera's zoom and height (0.2 .. 0.3). 0 until a frame was seen.
 float CameraNear();

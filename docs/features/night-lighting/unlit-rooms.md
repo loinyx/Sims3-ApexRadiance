@@ -203,7 +203,7 @@ N, moved at once N)*.
   differs from 1, the draw uses a copy from `ShaderPatches::PatchCubeTint`: after the cube read weighted by `c.w`,
   `dp3 Tmp.x, cube, cL` (cL = Rec. 709 weights), `lrp cube.xyz, cT.x, cube, Tmp.x`, `mul cube.xyz, cube, cT.yzww`, with
   cT and cL above the shader's own constants. Every constant is restored after the draw.
-- **Apex's indoor-object shader** (`PatchIndoorBasis`, path A): the rig diffuse chain's c4..c7 point at four new constants
+- **Apex's indoor-object shader** (`PatchIndoorBasis`, path A; the chain is four adjacent steps, or for glossy furniture steps followed by their data, with a `dp3_sat` before each or the specular chain between them): the rig diffuse chain's c4..c7 point at four new constants
   (`diffuseConst` = cS+7..cS+10), filled by `DrawIndoorObject` with the rig's unlit-room lights (lamp slots 0), and the
   chain ends with `mad D, Acc, cStr.x, D`. Furniture there is lit by the turned unlit-room lights plus the basis light
   (lamps per pixel); the specular chain keeps c4..c7 and the vertex lights stay zeroed (overflow lamps are in the basis
