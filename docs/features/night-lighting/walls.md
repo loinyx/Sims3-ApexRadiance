@@ -53,6 +53,68 @@ Three Night Lighting parts act on walls.
    same uv read again from a spare sampler, `x 2^(3 r)`), so a wall beside a strong lamp shows the light past 1 as the
    ground below it does ([rt-outdoor-lamps](rt-outdoor-lamps.md)). The bloom pass keeps the game's shader; the 31
    ps_2_x variants keep the cut at 1.
+
+   Walls and floors under the roof of a room open to the story above (a double-height room under a closed roof: on the
+   upper story that space has no floor, so it is room 0 and the game draws its walls and floors as outside ones) took the
+   moon and the night sky's ambient cube and reflection, a lavender band over the room's lamp colour (F8 2026-11-09, lot
+   C49C: the attic over the red room and its floored part beside it). With physical indoor lamps:
+   - **Which texels** (`RtLampProxy::InsideOf` / `InsideAt`): the upper story's floorless quadrants over a room open to it,
+     spread to its room-0 quadrants reached within a tile or across a tile side with no wall of that story, over a roofed
+     room of the story below only (never a yard). A wall texel takes the quadrant it faces, a floor texel the one under it.
+     No roof is read: a floored attic no room opens into keeps the outside response.
+   - **The texel, walls** (`RtLampProxy::TopMatch`, `ComposePS` / `ComposeK0PS` `IndoorRatio`, bit 16): each texel is matched
+     once per layout to the top-row texel of its room's wall map below (nearest in plan, facing the same way;
+     `OutdoorDelta::IndoorTopOf`, in the class the room shows: its maps' layout differs per class, 1, 2, 4 texels a tile), kept in a UV map (`A16B16G16R16`, the attic map's size: u, v of the room's texel, slot / 3, 1;
+     `RtOutdoorLamps` `InRoomsNow`, built again when a room's map size changes). The relit map's outdoor scale holds in `.z` the GPU
+     lamps' fall-off up the wall, `IndoorRatio` (`shaders/rt_lamps_hlsl.h`): lum(base + the lamps here) / lum(base + the lamps
+     at the floor line, the lowest matched texel of its column). The base is the matched top-row texel's light the GPU lamps do
+     not draw (daylight, baked lights, bounce; `TopTexel::rgb`, carried in the texel's base and, as the room's kept solves change, read
+     from a base map: `RtOutdoorLamps` `InBaseNow`, `ComposePS` `InBase`), so the ratio shapes only the lamps'
+     part: exactly 1 at the floor line, 1 by day with no lamp light and wherever the texel is not darker, and never under the
+     plain base's share (16-17-55: the lamps' ratio alone took the attic's daylight to near black at the top; `rt_lamps_test`
+     RatioCheck covers night, day and no lamp). The map itself keeps light there (the matched texel carried at the prepare,
+     composed as bit 8), so the game's shader, the bloom pass, the class-2 wall blur and a draw whose rooms are not read see light. The draw reads the room's own map in the
+     same frame as the room's own draw (the relit copy when shown, as the `SetTexture` swap gives it), so the attic cannot show
+     another solve than its room: a prepare carrying the room's light lagged it (the tone above the floor line changed after day
+     and night switches and matched again only after a load).
+   - **In step with the room, every frame**: a new kept solve of the room in the class matched rewrites the base map
+     (A16B16G16R16F, the attic map's size: each marked texel's matched top-row light, a floor texel the top row's mean) in
+     the frame it is kept and relights the attic; no prepare (one lagged the ratio and the floors 100-500 ms per room solve:
+     66 "older kept solve" lines in the 17:11 session). A prepare runs only when the room shows another class than the one
+     matched. A frame whose rooms cannot all be read keeps the last binding of the same layout (`RtLampProxy::PickIndoor`;
+     a frame of the carried texels between two of the room's own was a flicker); the UV map is built anew only when its
+     texels or the rooms' map sizes change, into a new texture swapped in once filled, and a prepare of the same texels
+     keeps it. Between relights the game's map draws with its last relight's ratios (`IndoorRoomsOf` `ratio`), not x 1. A
+     10 s log line counts those frames: rooms read now, the binding kept and why, none, copy and game map switches,
+     another class shown, frames waiting for a prepare.
+   - **The texel, floors** (`IndoorOf`, bit 8): composed as the wall texel of the room it continues (`GpuLampLaw::IndoorTexel`,
+     ambient left to the draw) from that room's top-row mean (normalisation x its kept base), from the base map as above: 24 of the 72
+     outdoor floor copies have no samplers left for the rooms' maps. A room never kept leaves a texel its own solve.
+   - **The draw, at every hour**: the relit map's outdoor scale marks those texels (`.y`), and the outside walls' and outdoor
+     floors' copies (`PatchWallScale`, `PatchBakedAtlasPs`) take on them the InteriorWall's light, `map + map alpha x the
+     room's ambient` (+0x110 of the room it continues, read every frame; a matched wall texel: the room's own map texel at
+     s9 + 1 + slot, point sampled, `R + R.a x` that slot's ambient, `x max(ratio, c.z)`, c.z = 1 when the game's own map is
+     bound), with no lamp scale (by day `c3.x` is 0), no moon,
+     no ambient cube, the sky reflection `x 0.117` (InteriorWall's hemisphere tint, 11-05-47 capture), and the albedo
+     without the game's wall shade strip (`s6`, x 0.5 along the foot of each story's wall, which InteriorWall has not: the
+     attic read half of the wall below at the floor line, captures 13-04-54 / 56: 175 vs 72 red). Nor the outside's atmosphere at the end, `lrp rO, rW.s, rHaze, rLit` (the haze colour `c9`, dark blue at night, by the vertex's scattering weight), which InteriorWall has not: an indoor texel takes `rLit` (weight 1); its ambient fog (`c10` by `v1.x`) is not added. By day the copy is bound
+     with no outdoor scale, so the outside texels draw as the game's. Gated by the night level the attic had the outside
+     light at hours the room below was lit (13-05-53: 5.65 h, lamps on, sky night 0). While a map's relit copy is not shown
+     the game's map is drawn with the marks of its last relight (`RtOutdoorLamps::IndoorFlagsOf`).
+   - **Proof**: `tools/wall_indoor_check` (the 27 ps_3_0 ExteriorWall shaders, the outdoor floor copies, the captured
+     shaders: unmarked texels, and marked ones by day, bit for bit as before; marked ones at night the indoor light; a matched
+     wall texel over load, day, night, day with another room map, ambient, slot and bound map in each: the room's texel lit as
+     InteriorWall lights it, through the whole copy bit for bit, 27 of 27 and 9 of 9 captured), `tools/rt_lamps_test`
+     (`RatioCheck`: 1 at the floor line, falling off above with a lamp at the foot, 1 with none; `InBaseCheck`: wall and floor
+     texels composed from the base map equal those composed with that base, others bit for bit; `AtticBindCheck`: the UV map,
+     the binding kept through unread frames and dropped for a new layout, the base map's halves; `wall_indoor_check` also
+     draws the game's map with its last relight's ratio),
+     `tools/rt_lamps_test` (the compose: other texels bit for bit, marked ones within 1/255 of `IndoorTexel`, lamps off the
+     room's whole ambient weight), `tools/outdoor_delta_test`
+     (the space over lot C49C's maps and story 3's walls). Light captures 2026-11-09 11-05-45 (attic, `ExteriorWall`, moon
+     `c0` 0, cube `c5.x` 1) and 11-05-47 (the room below, InteriorWall copy).
+   - Not matched: the game's wall shade strip, a moon term some variants add after the lamp `mad`; the ps_2_x variants,
+     the non-physical modes and texels of a fifth room in one map keep the outside response. Unverified in game.
 3. **A lamp on a wall lights that wall.** A sconce a few centimetres in front of its wall reaches the wall above it at
    5 to 10 degrees (N.l 0.1 to 0.15), and the wall stayed dark beside a perpendicular wall lit head on. On a wall texel
    (|n.y| < 0.5) with the lamp in front of its plane within 0.4 m, N.l is at least `0.5 x (1 - plane / 0.4)`, the light

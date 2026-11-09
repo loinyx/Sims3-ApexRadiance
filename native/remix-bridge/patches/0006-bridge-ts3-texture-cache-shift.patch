@@ -1,0 +1,80 @@
+0006: client.ts3TextureCacheShift (internal 0012, TS3 only, opt-in, off): Texture_CacheSizeBytes 0x619DB0 counts a MANAGED texture's pixels as bytes >> N. Patched in memory only when all 29 bytes match TS3W 1.67.
+
+Applies after 0001-0005 on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only).
+
+diff --git a/bridge/src/client/client_options.h b/bridge/src/client/client_options.h
+index a84ccd7..10eafd1 100644
+--- a/bridge/src/client/client_options.h
++++ b/bridge/src/client/client_options.h
+@@ -83,6 +83,14 @@ namespace ClientOptions {
+     return sec;
+   }
+ 
++  // The Sims 3 (TS3W.exe 1.67) only: the ResourceCache counts a MANAGED texture's pixel bytes >> this (0 = off, as the game).
++  // Under the bridge those pixels live in the server, so counting them in full makes the cache drop every unused texture at
++  // once and load it again seconds later.
++  inline uint32_t getTs3TextureCacheShift() {
++    static const uint32_t shift = bridge_util::Config::getOption<uint32_t>("client.ts3TextureCacheShift", 0);
++    return shift;
++  }
++
+   // If set, the space for data for dynamic buffer updates will be preallocated on data channel
+   // and redundant copy will be avioded. However, because D3D applications are not obliged
+   // to write the entire locked region this optimization is NOT considered safe and may
+diff --git a/bridge/src/client/d3d9_lss.cpp b/bridge/src/client/d3d9_lss.cpp
+index ec9d51d..b7b478f 100644
+--- a/bridge/src/client/d3d9_lss.cpp
++++ b/bridge/src/client/d3d9_lss.cpp
+@@ -614,6 +614,44 @@ HRESULT LssDirect3DCreate9Ex(UINT SDKVersion, IDirect3D9Ex** ppDeviceEx) {
+   return S_OK;
+ }
+ 
++// TS3W.exe 1.67 (no ASLR): Texture_CacheSizeBytes 0x619DB0 = test [ecx+0x18],0x102; mov eax,0x34; je ret; add ecx,-8;
++// call Texture_EstimateBytes; add eax,0x34; ret. The patch shifts the pixel bytes right before the add, in the int3 padding.
++static void applyTs3TextureCachePatch() {
++  static bool done = false;
++  if (done) {
++    return;
++  }
++  done = true;
++  const uint32_t shift = ClientOptions::getTs3TextureCacheShift();
++  if (shift == 0) {
++    return;
++  }
++  if (shift > 8 || uintptr_t(GetModuleHandleW(nullptr)) != 0x400000) {
++    Logger::warn(format_string("[Ts3TexCache] not applied: shift %u (max 8) or the exe is not at 0x400000", shift));
++    return;
++  }
++  static const uint8_t want[29] = { 0xF7, 0x41, 0x18, 0x02, 0x01, 0x00, 0x00, 0xB8, 0x34, 0x00, 0x00, 0x00, 0x74, 0x0B, 0x83,
++                                    0xC1, 0xF8, 0xE8, 0xEA, 0xFC, 0xFF, 0xFF, 0x83, 0xC0, 0x34, 0xC3, 0xCC, 0xCC, 0xCC };
++  uint8_t* const p = reinterpret_cast<uint8_t*>(0x619DB0);
++  MEMORY_BASIC_INFORMATION mbi = {};
++  if (!VirtualQuery(p, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT ||
++      uintptr_t(mbi.BaseAddress) + mbi.RegionSize < uintptr_t(p) + sizeof(want) || memcmp(p, want, sizeof(want)) != 0) {
++    Logger::warn("[Ts3TexCache] not applied: the code at 0x619DB0 is not TS3W 1.67's Texture_CacheSizeBytes (another patch?)");
++    return;
++  }
++  DWORD old = 0;
++  if (!VirtualProtect(p, sizeof(want), PAGE_EXECUTE_READWRITE, &old)) {
++    Logger::warn("[Ts3TexCache] not applied: VirtualProtect failed");
++    return;
++  }
++  const uint8_t tail[7] = { 0xC1, 0xE8, uint8_t(shift), 0x83, 0xC0, 0x34, 0xC3 };  // shr eax,N; add eax,0x34; ret
++  memcpy(p + 0x16, tail, sizeof(tail));
++  p[0x0D] = 0x0E;  // the je now lands on the new ret at 0x619DCC
++  VirtualProtect(p, sizeof(want), old, &old);
++  FlushInstructionCache(GetCurrentProcess(), p, sizeof(want));
++  Logger::info(format_string("[Ts3TexCache] Texture_CacheSizeBytes 0x619DB0 patched: MANAGED texture pixel bytes count >> %u", shift));
++}
++
+ IDirect3D9* LssDirect3DCreate9(UINT SDKVersion) {
+   if (!shouldAttachToCurrentProcess()) {
+     return orig_Direct3DCreate9(SDKVersion);
+@@ -625,6 +663,7 @@ IDirect3D9* LssDirect3DCreate9(UINT SDKVersion) {
+   // A game may override client's exception handler when it was setup early.
+   // Attempt to restore the exeption handler.
+   SetupExceptionHandler();
++  applyTs3TextureCachePatch();
+ 
+   auto retval = new Direct3D9Ex_LSS((IDirect3D9*) nullptr);
+   InitServer();

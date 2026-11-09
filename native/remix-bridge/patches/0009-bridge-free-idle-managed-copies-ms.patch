@@ -1,0 +1,74 @@
+0009: client.freeIdleManagedCopiesMs (internal 0015, off): fix 1's idle threshold in milliseconds, pass every N/2 ms.
+
+Applies after 0001-0008 on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only).
+
+diff --git a/bridge/src/client/client_options.h b/bridge/src/client/client_options.h
+index 81de2ce..7633fd4 100644
+--- a/bridge/src/client/client_options.h
++++ b/bridge/src/client/client_options.h
+@@ -95,6 +95,12 @@ namespace ClientOptions {
+   // it (0 = off, as the game: dropped at the next trim and often loaded again seconds later).
+   // Frees the client's copy of a static vertex or index buffer not locked for this many seconds (0 = off, as upstream: every
+   // buffer keeps a full copy in the game process for its whole life). The next lock fetches the bytes back from the server.
++  // client.freeIdleManagedCopiesSec's threshold in milliseconds (0 = use the seconds); needs that option on.
++  inline uint32_t getFreeIdleManagedCopiesMs() {
++    static const uint32_t ms = bridge_util::Config::getOption<uint32_t>("client.freeIdleManagedCopiesMs", 0);
++    return ms;
++  }
++
+   inline uint32_t getFreeIdleBufferCopiesSec() {
+     static const uint32_t sec = bridge_util::Config::getOption<uint32_t>("client.freeIdleBufferCopiesSec", 0);
+     return sec;
+diff --git a/bridge/src/client/d3d9_device.cpp b/bridge/src/client/d3d9_device.cpp
+index 488f3f4..1441038 100644
+--- a/bridge/src/client/d3d9_device.cpp
++++ b/bridge/src/client/d3d9_device.cpp
+@@ -538,7 +538,8 @@ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::Present(CONST RECT* pSourceRect, CONS
+ 
+   if (const uint32_t idleSec = ClientOptions::getFreeIdleManagedCopiesSec()) {
+     BRIDGE_DEVICE_LOCKGUARD();
+-    Direct3DSurface9_LSS::freeIdleManagedCopies(idleSec);
++    const uint32_t idleMs = ClientOptions::getFreeIdleManagedCopiesMs();
++    Direct3DSurface9_LSS::freeIdleManagedCopies(idleMs ? idleMs : idleSec * 1000);
+   }
+   if (const uint32_t idleSec = ClientOptions::getFreeIdleBufferCopiesSec()) {
+     BRIDGE_DEVICE_LOCKGUARD();
+diff --git a/bridge/src/client/d3d9_surface.cpp b/bridge/src/client/d3d9_surface.cpp
+index 36cd024..eb6d015 100644
+--- a/bridge/src/client/d3d9_surface.cpp
++++ b/bridge/src/client/d3d9_surface.cpp
+@@ -77,17 +77,17 @@ void Direct3DSurface9_LSS::releaseCopy() {
+   m_shadow.reset();
+ }
+ 
+-void Direct3DSurface9_LSS::freeIdleManagedCopies(uint32_t idleSec) {
++void Direct3DSurface9_LSS::freeIdleManagedCopies(uint32_t idleMs) {
+   static uint64_t s_lastPassMs = 0;
+   const uint64_t nowMs = GetTickCount64();
+-  if (nowMs - s_lastPassMs < 1000) {
++  if (nowMs - s_lastPassMs < std::min<uint64_t>(1000, std::max<uint64_t>(100, idleMs / 2))) {
+     return;
+   }
+   s_lastPassMs = nowMs;
+   std::lock_guard<std::mutex> lock(s_managedCopiesLock);
+   for (auto it = s_managedCopies.begin(); it != s_managedCopies.end();) {
+     Direct3DSurface9_LSS* const s = *it;
+-    if (s->m_shadow && s->m_lockInfoQueue.empty() && nowMs - s->m_lastLockMs >= uint64_t(idleSec) * 1000) {
++    if (s->m_shadow && s->m_lockInfoQueue.empty() && nowMs - s->m_lastLockMs >= idleMs) {
+       s->releaseCopy();
+       s->m_copyFreed = true;
+       bridge_util::perf::g_pool[16] += bridge_util::calcTotalSizeOfRect(s->m_desc.Width, s->m_desc.Height, s->m_desc.Format);
+diff --git a/bridge/src/client/d3d9_surface.h b/bridge/src/client/d3d9_surface.h
+index 8e80fce..8b003d1 100644
+--- a/bridge/src/client/d3d9_surface.h
++++ b/bridge/src/client/d3d9_surface.h
+@@ -79,7 +79,8 @@ class Direct3DSurface9_LSS: public Direct3DResource9_LSS<IDirect3DSurface9> {
+ 
+ public:
+   // Frees the copies of MANAGED surfaces not locked for idleSec seconds; at most once a second. Call under the device lock.
+-  static void freeIdleManagedCopies(uint32_t idleSec);
++  // idleMs: the pass runs every idleMs / 2 (100-1000 ms).
++  static void freeIdleManagedCopies(uint32_t idleMs);
+   uint8_t m_texSite = 0xFF;  // perf diag: creation site of the texture that owns this level (set when the level is wrapped)
+ 
+ private:

@@ -547,8 +547,6 @@ time log and the light diag's globals.
 
 Still Steam-only, by design:
 
-- [GPU room lamps](../features/night-lighting/gpu-room-lamps.md): the 3D blockers' vtables and the test constants are fixed Steam
-  addresses, so the capture stays off on other builds, whose rooms keep the game's solves.
 - Exact byte checks that pin Steam's rel32s or register allocation (`kBatchPushesSteam`, the `call edx` before
   LightEvalReturn, the finalize's call offsets, the light detail origin call's target): other builds check what the patch
   needs instead.
@@ -560,6 +558,33 @@ IndoorBaseSite (`esi` = the wall, `[ebp+10h]`), the cutout capture (`kCutProduct
 dither pack thunk (`ebp` / `edi` at the call) assume Steam's frame. Their signatures pin the surrounding bytes, not the
 caller's frame. The struct offsets of room maps and texture sets are assumed as everywhere else.
 
+### GPU room lamps addresses
+
+Until 3.0.0 the GPU room lamps capture was gated by `GameAddr::IsFixed()`. Its 3D blocker vtables and the 13 constants the
+game's room light tests read are now ids; `OutdoorDelta::RoomTestsFound` needs all of them and logs once per session
+(`[GpuRoomLamps] The game's room light tests found on <version>: ...` or `[GpuRoomLamps] Rooms keep the game's solves:
+Not available on <version>: missing ...`). Offline check over `TS3W.exe` (2026-11-09, a Python copy of the table's rules;
+`sigcheck.pl` not run): all 16 resolve to the Steam value. From the plain EA `.rdata` (code encrypted), the vtables with the same
+slot layout and spacing as Steam's are 0x0103E658 and 0x0103F154 (every slot shifted by about +0x14D0): expected EA values,
+unverified until a run.
+
+| Steam VA | What | Id | Signature / kind | Steam matches |
+|---|---|---|---|---|
+| 0x0069D000 | soft rectangle blocker constructor | BlockerQuadCtor | `68 00 01 00 00 E8 ?? ?? ?? ?? 83 C4 18 85 C0 0F 84 ?? ?? ?? ?? 8B C8 E8 ?? ?? ?? ?? 8B F0 85 F6 0F 84` call at +23 | 1 |
+| 0x00FF3118 | its vtable | BlockerQuadVt | InRange(BlockerQuadCtor, 0x16) `87 0A C7 00 ?? ?? ?? ?? C3` dword at +4 | 1 |
+| 0x00FF3C24 | soft disc blocker vtable | BlockerDiscVt | `8B CE E8 ?? ?? ?? ?? 57 8B CE C7 06 ?? ?? ?? ?? E8 ?? ?? ?? ?? 8D 47 0C 50 8B CE E8` dword at +12<br>alt: `57 8B CE C7 06 ?? ?? ?? ?? E8 ?? ?? ?? ?? 8D 47 0C 50 8B CE E8` +5 | 1 / 1 |
+| 0x00F98964 | 0.0 | TestZero | `F3 0F 10 43 10 0F 2E 05 ?? ?? ?? ?? 9F F6 C4 44 0F 8B ?? ?? 00 00 0F 28 83` +8 | 2 (same value) |
+| 0x00F98A58 | 2.0 | TestTwo | `75 1D F3 0F 10 35 ?? ?? ?? ?? 83 C8 02 0F C6 F6 00 A3` +6 | 1 |
+| 0x00FAA210 / 0x0107A538 | -1.0 / 1.0 | TestNeg1 / TestOne | `F3 0F 10 0D ?? ?? ?? ?? 0F C6 C9 00 0F 28 C2 F3 0F 10 15 ?? ?? ?? ?? 0F 59 C8 0F 5F C8` +4 / +19 | 1 |
+| 0x00FB2F6C | 4.0 | TestFour | `75 1D F3 0F 10 2D ?? ?? ?? ?? 83 C8 02 0F C6 ED 00 A3` +6 | 1 |
+| 0x00FECE18 | 0.0625 | TestDiscEdge | `8B D9 75 1D F3 0F 10 35 ?? ?? ?? ?? 83 C8 01 0F C6 F6 00 A3` +8 | 1 |
+| 0x0106B4B4 | 0.15 | TestQuadEdge | `8B D9 75 1D F3 0F 10 3D ?? ?? ?? ?? 83 C8 01 0F C6 FF 00 A3` +8 | 1 |
+| 0x00FF31AC / 0x00F9A5AC | 0.01 / 0.5 | TestStop / TestHalf | `EB 5E F3 0F 10 0D ?? ?? ?? ?? 0F 2F C1 76 39 F3 0F 10 15 ?? ?? ?? ??` +6 / +19 | 1 |
+| 0x0106D6CC | 0.01 | TestDrop | `F3 0F 59 00 F3 0F 10 0D ?? ?? ?? ?? 0F 2F C8` +8 | 2 (same value) |
+| 0x011D0240 | parallel cut (float[4], set at start) | TestEps | `0F 5F C8 F3 0F 11 4C 24 ?? 0F 28 0D ?? ?? ?? ?? F3 0F 11 4C 24` +12 | 2 (same value) |
+| 0x00FF307C | 0.5 | TestPenumbra | `CC F3 0F 10 4C 24 04 D9 E8 F3 0F 10 05 ?? ?? ?? ?? F3 0F 5C C8 F3 0F 11 4C 24 04 81 64 24 04 FF FF FF 7F` +13 | 1 |
+| 0x01158A50 | 1.0 | TestWallY | `0F 58 D3 F3 0F 10 1D ?? ?? ?? ?? 0F 29 74 24 10 F3 0F 11 5C 24 14` +7 | 1 |
+
 ### What the first EA log must show
 
 - `[Addr] Not found on EA 1.69.47.024017 (N of 327): ...`: the ids whose signature failed. For each, the attempt lines
@@ -567,6 +592,9 @@ caller's frame. The struct offsets of room maps and texture sets are assumed as 
 - `[LevelLightShare]` lines: "Walls block light on floors: ready", "Outside walls on foundations: ready", "Walls taller than
   a story: ready", "Openings of walls ...: noted from now on", no "The room solve's map lock and finalize steps differ".
 - `[LightDetail]`, `[RoomMapDither] On: ...`, `[LampMarkFilter] Installed ...` without "Not available" or "differs".
+- `[GpuRoomLamps] The game's room light tests found on EA 1.69.47...: furniture blockers 0x0103e658 / 0x0103f154, 13 constants`
+  (the vtables expected from `.rdata`); then `[GpuRoomLamps] Capture on` and `Model physical` with Instant, and no
+  `a 3D blocker of a kind the copy does not know` in the room lines.
 - Real-time outdoor lamps: its status no longer says "Not available"; any `Not available on EA 1.69.47...: missing ...`
   names the ids to fix.
 

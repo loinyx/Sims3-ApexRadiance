@@ -1,0 +1,48 @@
+From 02356a71d34232d1243f39a0e70117dc8306dfd5 Mon Sep 17 00:00:00 2001
+From: alexvixell35-stack
+ <317427166+alexvixell35-stack@users.noreply.github.com>
+Date: Sat, 7 Nov 2026 11:45:39 +0000
+Subject: [PATCH 1/2] bridge: return D3DERR_NOTFOUND from GetRenderTarget and
+ GetDepthStencilSurface on an empty slot
+
+d3d9 returns D3DERR_NOTFOUND when no render target is bound at the index or no
+depth-stencil is set. The client returned S_OK with *pp = NULL. Games that check
+only the HRESULT then dereference NULL: The Sims 3's Device_Clear (0x60F270 in
+TS3W 1.67.2) calls GetDepthStencilSurface, tests hr < 0 and reads the surface's
+vtable, which crashed a few minutes into a world (ACCESS_VIOLATION reading 0x0).
+Possibly the same crash as rtx-remix#1028.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_013zSeZ5K232kJ4umUgcGJR2
+---
+ bridge/src/client/d3d9_device.cpp | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/bridge/src/client/d3d9_device.cpp b/bridge/src/client/d3d9_device.cpp
+index 0757928..0feb06d 100644
+--- a/bridge/src/client/d3d9_device.cpp
++++ b/bridge/src/client/d3d9_device.cpp
+@@ -1049,8 +1049,8 @@ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::GetRenderTarget(DWORD RenderTargetInd
+     }
+     WAIT_FOR_OPTIONAL_SERVER_RESPONSE("GetRenderTarget()", D3DERR_INVALIDCALL, currentUID);
+   }
+-  
+-  return S_OK;
++  // d3d9 returns D3DERR_NOTFOUND for an empty slot; games check only the HRESULT (TS3 Device_Clear 0x60F270 crashed on S_OK + NULL)
++  return D3DERR_NOTFOUND;
+ }
+ 
+ template<bool EnableSync>
+@@ -1100,6 +1100,9 @@ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::GetDepthStencilSurface(IDirect3DSurfa
+         currentUID = c.get_uid();
+         c.send_data(pLssDepthStencil->getId());
+       }
++    } else {
++      // d3d9 returns D3DERR_NOTFOUND when no depth-stencil is set; TS3 Device_Clear 0x60F270 checks only the HRESULT and crashed on S_OK + NULL
++      return D3DERR_NOTFOUND;
+     }
+   }
+   WAIT_FOR_OPTIONAL_SERVER_RESPONSE("GetDepthStencilSurface()", D3DERR_INVALIDCALL, currentUID);
+-- 
+2.56.0.windows.3
+

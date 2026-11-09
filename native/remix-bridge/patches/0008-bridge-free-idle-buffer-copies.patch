@@ -1,0 +1,372 @@
+0008: client.freeIdleBufferCopiesSec (internal 0014): free the client's copy of a static vertex / index buffer (64 KB to 4 MB) not locked for N s; the next lock fetches it back (Lock with ReturnData), checked by a CRC32C.
+
+Applies after 0001-0007 on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only).
+
+diff --git a/bridge/src/client/client_options.h b/bridge/src/client/client_options.h
+index ddb0a1a..81de2ce 100644
+--- a/bridge/src/client/client_options.h
++++ b/bridge/src/client/client_options.h
+@@ -93,6 +93,13 @@ namespace ClientOptions {
+ 
+   // The Sims 3 (TS3W.exe 1.67) only: the ResourceCache keeps an unreferenced texture this many seconds before its trim may drop
+   // it (0 = off, as the game: dropped at the next trim and often loaded again seconds later).
++  // Frees the client's copy of a static vertex or index buffer not locked for this many seconds (0 = off, as upstream: every
++  // buffer keeps a full copy in the game process for its whole life). The next lock fetches the bytes back from the server.
++  inline uint32_t getFreeIdleBufferCopiesSec() {
++    static const uint32_t sec = bridge_util::Config::getOption<uint32_t>("client.freeIdleBufferCopiesSec", 0);
++    return sec;
++  }
++
+   inline uint32_t getTs3TextureKeepAliveSec() {
+     static const uint32_t sec = bridge_util::Config::getOption<uint32_t>("client.ts3TextureKeepAliveSec", 0);
+     return sec;
+diff --git a/bridge/src/client/d3d9_device.cpp b/bridge/src/client/d3d9_device.cpp
+index a8fcf23..488f3f4 100644
+--- a/bridge/src/client/d3d9_device.cpp
++++ b/bridge/src/client/d3d9_device.cpp
+@@ -540,6 +540,11 @@ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::Present(CONST RECT* pSourceRect, CONS
+     BRIDGE_DEVICE_LOCKGUARD();
+     Direct3DSurface9_LSS::freeIdleManagedCopies(idleSec);
+   }
++  if (const uint32_t idleSec = ClientOptions::getFreeIdleBufferCopiesSec()) {
++    BRIDGE_DEVICE_LOCKGUARD();
++    Direct3DVertexBuffer9_LSS::freeIdleCopies(idleSec);
++    Direct3DIndexBuffer9_LSS::freeIdleCopies(idleSec);
++  }
+ 
+   return m_pSwapchain->Present(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion, 0);
+ }
+diff --git a/bridge/src/client/lockable_buffer.h b/bridge/src/client/lockable_buffer.h
+index 5223d17..1ab8867 100644
+--- a/bridge/src/client/lockable_buffer.h
++++ b/bridge/src/client/lockable_buffer.h
+@@ -29,6 +29,9 @@
+ 
+ #include <d3d9.h>
+ #include <queue>
++#include <mutex>
++#include <unordered_set>
++#include <nmmintrin.h>
+ 
+ template <typename T>
+ class LockableBuffer: public Direct3DResource9_LSS<T> {
+@@ -53,7 +56,95 @@ class LockableBuffer: public Direct3DResource9_LSS<T> {
+   std::queue<LockInfo> m_lockInfos;
+ 
+   const bool m_bUseSharedHeap = false;
+-  std::unique_ptr<uint8_t[]> m_shadow;
++  // With client.freeIdleBufferCopiesSec on, static copies of 64 KB and more come from VirtualAlloc, so freeing one gives its address
++  // space back to the 32-bit game.
++  struct CopyFree {
++    bool virtualAlloc = false;
++    void operator()(uint8_t* p) const {
++      if (virtualAlloc) {
++        VirtualFree(p, 0, MEM_RELEASE);
++      } else {
++        delete[] p;
++      }
++    }
++  };
++  std::unique_ptr<uint8_t[], CopyFree> m_shadow;
++
++  // client.freeIdleBufferCopiesSec: static buffers with a copy that were unlocked at least once, the time of their last lock or
++  // unlock, whether the copy was freed (the next lock fetches it) and its CRC32C then. Lock order: the device lock, then s_idleLock.
++  static constexpr size_t kMaxFreeBytes = size_t(4) << 20;
++  uint64_t m_lastLockMs = 0;
++  bool m_copyFreed = false;
++  bool m_inIdleSet = false;
++  uint32_t m_freedCrc = 0;
++  inline static std::mutex s_idleLock;
++  inline static std::unordered_set<LockableBuffer*> s_idle;
++
++  bool freesIdleCopy() const {
++    return !(m_desc.Usage & D3DUSAGE_DYNAMIC) && ClientOptions::getFreeIdleBufferCopiesSec() != 0;
++  }
++
++  static uint32_t crcOf(const uint8_t* p, size_t n) {
++    uint32_t c = 0xFFFFFFFFu;
++    size_t i = 0;
++    for (; i + 4 <= n; i += 4) {
++      uint32_t v;
++      memcpy(&v, p + i, 4);
++      c = _mm_crc32_u32(c, v);
++    }
++    for (; i < n; ++i) {
++      c = _mm_crc32_u8(c, p[i]);
++    }
++    return c;
++  }
++
++  // Counters of a copy that goes away (destructor, idle free); the caller frees or keeps the memory.
++  void noteCopyGone() {
++    g_totalBufferShadow -= m_desc.Size;
++    bridge_util::perf::g_shadow[1] -= m_desc.Size;
++    if (!(m_desc.Usage & D3DUSAGE_DYNAMIC)) {
++      bridge_util::perf::g_pool[25] -= m_desc.Size;
++    }
++  }
++
++  // The server answers a Lock with the ReturnData flag with hresult, then the whole buffer as one blob.
++  void fetchCopy() {
++    LARGE_INTEGER t0, t1, f;
++    QueryPerformanceCounter(&t0);
++    UID uid = 0;
++    {
++      ClientMessage c(LockCmd, getId(), Commands::FlagBits::ReturnData);
++      uid = c.get_uid();
++    }
++    if (Result::Success != DeviceBridge::waitForCommand(Commands::Bridge_Response, GlobalOptions::getAckTimeout(), nullptr, true, uid)) {
++      Logger::err(format_string("[LockableBuffer] fetching the freed copy of %s buffer [%p] failed: no response from server",
++                                bIsVertexBuffer ? "vertex" : "index", this));
++      bridge_util::perf::g_pool[24]++;
++      return;
++    }
++    const HRESULT hr = (HRESULT) DeviceBridge::get_data();
++    bool ok = false;
++    size_t pulled = 0;
++    if (SUCCEEDED(hr)) {
++      void* pData = nullptr;
++      pulled = DeviceBridge::get_data(&pData);
++      memcpy(m_shadow.get(), pData, std::min<size_t>(pulled, m_desc.Size));
++      ok = pulled >= m_desc.Size && crcOf(m_shadow.get(), m_desc.Size) == m_freedCrc;
++    }
++    DeviceBridge::consumeResponse();
++    if (!ok) {
++      const int64_t n = ++bridge_util::perf::g_pool[24];
++      if (n <= 20) {
++        Logger::err(format_string("[LockableBuffer] fetched copy of %s buffer [%p] differs from the freed one: hr 0x%08x, %zu of %u "
++                                  "bytes; mismatch %lld, only the first 20 are logged", bIsVertexBuffer ? "vertex" : "index", this,
++                                  hr, pulled, m_desc.Size, n));
++      }
++    }
++    QueryPerformanceCounter(&t1);
++    QueryPerformanceFrequency(&f);
++    bridge_util::perf::g_pool[21]++;
++    bridge_util::perf::g_pool[22] += (t1.QuadPart - t0.QuadPart) * 1000000 / f.QuadPart;
++  }
+   inline static size_t g_totalBufferShadow = 0;
+ 
+ public:
+@@ -73,9 +164,17 @@ private:
+   }
+ 
+   void initShadowMem() {
+-    m_shadow = std::make_unique<uint8_t[]>(m_desc.Size);
++    uint8_t* p = nullptr;
++    if (m_desc.Size >= 65536 && freesIdleCopy()) {
++      p = static_cast<uint8_t*>(VirtualAlloc(nullptr, m_desc.Size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));  // zeroed
++    }
++    m_shadow.get_deleter().virtualAlloc = p != nullptr;  // m_shadow is empty here, so no old block is freed the wrong way
++    m_shadow.reset(p ? p : new uint8_t[m_desc.Size]());
+     g_totalBufferShadow += m_desc.Size;
+     bridge_util::perf::g_shadow[1] += m_desc.Size;
++    if (!(m_desc.Usage & D3DUSAGE_DYNAMIC)) {
++      bridge_util::perf::g_pool[25] += m_desc.Size;
++    }
+     Logger::trace(format_string("Allocated a shadow for dynamic %s buffer [%p] "
+                                 "(size: %zd, total shadow size: %zd)",
+                                 bIsVertexBuffer ? "vertex" : "index",
+@@ -100,20 +199,55 @@ protected:
+   }
+ 
+   ~LockableBuffer() {
++    // first: once erased, a running freeIdleCopies() pass (which holds the lock while it walks) cannot reach this buffer
++    if (freesIdleCopy()) {
++      std::lock_guard<std::mutex> lock(s_idleLock);
++      s_idle.erase(this);
++    }
+     if (m_bUseSharedHeap) {
+       if (m_bufferId != SharedHeap::kInvalidId) {
+         SharedHeap::deallocate(m_bufferId);
+       }
+     } else if (m_shadow) {
+-      g_totalBufferShadow -= m_desc.Size;
+-      bridge_util::perf::g_shadow[1] -= m_desc.Size;
++      noteCopyGone();
+       Logger::trace(format_string("Released shadow of dynamic %s buffer [%p] "
+                                   "(size: %zd, total shadow size: %zd)",
+                                   bIsVertexBuffer ? "vertex" : "index",
+                                   this, m_desc.Size, g_totalBufferShadow));
++    } else if (m_copyFreed) {
++      bridge_util::perf::g_pool[20] -= m_desc.Size;
++    }
++  }
++
++public:
++  // Frees the copies of static buffers not locked for idleSec seconds; at most once a second. Call under the device lock.
++  static void freeIdleCopies(uint32_t idleSec) {
++    static uint64_t s_lastPassMs = 0;
++    const uint64_t nowMs = GetTickCount64();
++    if (nowMs - s_lastPassMs < 1000) {
++      return;
++    }
++    s_lastPassMs = nowMs;
++    std::lock_guard<std::mutex> lock(s_idleLock);
++    for (auto it = s_idle.begin(); it != s_idle.end();) {
++      LockableBuffer* const b = *it;
++      if (b->m_shadow && b->m_lockInfos.empty() && nowMs - b->m_lastLockMs >= uint64_t(idleSec) * 1000) {
++        b->m_freedCrc = crcOf(b->m_shadow.get(), b->m_desc.Size);
++        b->noteCopyGone();
++        b->m_shadow.reset();
++        b->m_copyFreed = true;
++        b->m_inIdleSet = false;
++        bridge_util::perf::g_pool[20] += b->m_desc.Size;
++        bridge_util::perf::g_pool[23]++;
++        it = s_idle.erase(it);
++      } else {
++        ++it;
++      }
+     }
+   }
+ 
++protected:
++
+   HRESULT lock(const UINT offset, const UINT size, void** ppbData, const DWORD flags) {
+     if (ppbData == nullptr) {
+       return D3DERR_INVALIDCALL;
+@@ -152,6 +286,15 @@ protected:
+       *ppbData = SharedHeap::getBuf(m_bufferId) + offset;
+       m_lockInfos.push({ offset, size, nullptr, flags, checkPtr, m_bufferId, discardedBufferId });
+     } else {
++      if (m_copyFreed) {
++        initShadowMem();
++        fetchCopy();
++        m_copyFreed = false;
++        bridge_util::perf::g_pool[20] -= m_desc.Size;
++      }
++      if (freesIdleCopy()) {
++        m_lastLockMs = GetTickCount64();
++      }
+       *ppbData = m_shadow.get() + offset;
+ 
+       if (m_optimizedLock) {
+@@ -186,6 +329,14 @@ protected:
+     }
+     const auto lockInfo = m_lockInfos.front();
+     m_lockInfos.pop();
++    if (m_shadow && freesIdleCopy()) {
++      m_lastLockMs = GetTickCount64();
++      if (!m_inIdleSet && m_desc.Size <= kMaxFreeBytes) {
++        std::lock_guard<std::mutex> lock(s_idleLock);
++        s_idle.insert(this);
++        m_inIdleSet = true;
++      }
++    }
+ 
+     // Earlier uploads retain their own snapshots, so the discarded buffer can be retired here.
+     if (lockInfo.discardedBufferId != SharedHeap::kInvalidId) {
+diff --git a/bridge/src/server/main.cpp b/bridge/src/server/main.cpp
+index de287f1..fb6c57f 100644
+--- a/bridge/src/server/main.cpp
++++ b/bridge/src/server/main.cpp
+@@ -225,6 +225,27 @@ D3DPRESENT_PARAMETERS getPresParamFromRaw(const uint32_t* rawPresentationParamet
+   return presParam;
+ }
+ 
++// client.freeIdleBufferCopiesSec: the client freed its copy of this buffer and fetches it back (hresult, then the whole buffer).
++template<typename T>
++static void ReturnBufferDataToClient(T* const pBuffer, const UINT currentUID) {
++  ServerMessage c(Commands::Bridge_Response, currentUID);
++  std::conditional_t<std::is_same_v<T, IDirect3DVertexBuffer9>, D3DVERTEXBUFFER_DESC, D3DINDEXBUFFER_DESC> desc = {};
++  HRESULT hresult = pBuffer != nullptr ? pBuffer->GetDesc(&desc) : E_FAIL;
++  void* pData = nullptr;
++  if (SUCCEEDED(hresult)) {
++    hresult = pBuffer->Lock(0, 0, &pData, D3DLOCK_READONLY);
++  }
++  c.send_data(hresult);
++  if (FAILED(hresult)) {
++    return;
++  }
++  if (auto* const blobPacketPtr = c.begin_data_blob(desc.Size)) {
++    memcpy(blobPacketPtr, pData, desc.Size);
++    c.end_data_blob();
++  }
++  pBuffer->Unlock();
++}
++
+ HRESULT ReturnSurfaceDataToClient(IDirect3DSurface9* pReturnSurfaceData, HRESULT hresult, UINT currentUID) {
+   // We send the HRESULT response back to the client even in case of failure
+   ServerMessage c(Commands::Bridge_Response, currentUID);
+@@ -2416,6 +2437,10 @@ void ProcessDeviceCommandQueue() {
+       {
+         // This is a no-op right now because we're doing all the logic on Unlock
+         GET_HND(pHandle);
++        if (rpcHeader.flags & Commands::FlagBits::ReturnData) {
++          ReturnBufferDataToClient((IDirect3DVertexBuffer9*) gpD3DResources[pHandle], currentUID);
++          break;
++        }
+         void* data = nullptr;
+         DeviceBridge::get_data(&data);
+         break;
+@@ -2512,6 +2537,10 @@ void ProcessDeviceCommandQueue() {
+       {
+         // This is a no-op right now because we're doing all the logic on Unlock
+         GET_HND(pHandle);
++        if (rpcHeader.flags & Commands::FlagBits::ReturnData) {
++          ReturnBufferDataToClient((IDirect3DIndexBuffer9*) gpD3DResources[pHandle], currentUID);
++          break;
++        }
+         void* data = nullptr;
+         DeviceBridge::get_data(&data);
+         break;
+diff --git a/bridge/src/util/util_commands.h b/bridge/src/util/util_commands.h
+index 6fff0ea..0cd4d6e 100644
+--- a/bridge/src/util/util_commands.h
++++ b/bridge/src/util/util_commands.h
+@@ -878,6 +878,7 @@ namespace Commands {
+     DataIsReserved   = 0b00000010,  // Data was already reserved in data queue and only its
+                                     // offset is transferred
+     AsyncResult      = 0b00000100,  // The result goes to a shared slot instead of a response
++    ReturnData       = 0b00001000,  // Buffer Lock: the server answers with the buffer's bytes (client.freeIdleBufferCopiesSec)
+   };
+ 
+   inline bool IsAsyncResult(Flags flags) {
+diff --git a/bridge/src/util/util_perfcounters.cpp b/bridge/src/util/util_perfcounters.cpp
+index 02503ff..33b11d3 100644
+--- a/bridge/src/util/util_perfcounters.cpp
++++ b/bridge/src/util/util_perfcounters.cpp
+@@ -207,7 +207,7 @@ namespace bridge_util {
+         g_shadow[3].store(0, std::memory_order_relaxed);
+         g_shadow[4].store(0, std::memory_order_relaxed);
+         g_shadow[5].store(0, std::memory_order_relaxed);
+-        for (int i : { 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 17, 18, 19 }) {
++        for (int i : { 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 17, 18, 19, 21, 22, 23 }) {
+           g_pool[i].store(0, std::memory_order_relaxed);
+         }
+         s_presentWaits.store(0, std::memory_order_relaxed);
+@@ -327,6 +327,10 @@ namespace bridge_util {
+            << " manAgainMB=" << double(g_pool[15].load(std::memory_order_relaxed)) / 1048576.0
+            << " freedMB=" << double(g_pool[16].load(std::memory_order_relaxed)) / 1048576.0 << " freed=" << g_pool[19].load(std::memory_order_relaxed)
+            << " fetches=" << g_pool[17].load(std::memory_order_relaxed) << " fetchUs=" << g_pool[18].load(std::memory_order_relaxed)
++           << " staticBufMB=" << double(g_pool[25].load(std::memory_order_relaxed)) / 1048576.0
++           << " bufFreedMB=" << double(g_pool[20].load(std::memory_order_relaxed)) / 1048576.0 << " bufFreed=" << g_pool[23].load(std::memory_order_relaxed)
++           << " bufFetches=" << g_pool[21].load(std::memory_order_relaxed) << " bufFetchUs=" << g_pool[22].load(std::memory_order_relaxed)
++           << " bufMismatch=" << g_pool[24].load(std::memory_order_relaxed)
+ #if defined(REMIX_BRIDGE_CLIENT)
+            << " sendUsPerFrame="
+ #else
+@@ -1077,7 +1081,7 @@ namespace bridge_util {
+     }
+ 
+     std::atomic<int64_t> g_shadow[6];
+-    std::atomic<int64_t> g_pool[20];
++    std::atomic<int64_t> g_pool[26];
+ 
+     void noteReadback(const uintptr_t (&stack)[3], uint32_t w, uint32_t h, uint32_t fmt, int64_t us) {
+       s_diagReadbackUs.fetch_add(uint64_t(std::max<int64_t>(us, 0)), std::memory_order_relaxed);
+diff --git a/bridge/src/util/util_perfcounters.h b/bridge/src/util/util_perfcounters.h
+index da40e19..1679e72 100644
+--- a/bridge/src/util/util_perfcounters.h
++++ b/bridge/src/util/util_perfcounters.h
+@@ -84,7 +84,10 @@ namespace bridge_util {
+     // surface copy bytes now of MANAGED surfaces locked once since the copy was made [14], locked again [15];
+     // client.freeIdleManagedCopiesSec: bytes of MANAGED copies freed now [16]; per interval: fetches back from the server [17], their
+     // microseconds [18], copies freed [19]
+-    extern std::atomic<int64_t> g_pool[20];
++    // client.freeIdleBufferCopiesSec: bytes of static buffer copies freed now [20]; per interval: fetches back [21], their
++    // microseconds [22], copies freed [23]; fetches whose bytes differ from the freed copy, whole run [24]; static buffer copy
++    // bytes now [25]
++    extern std::atomic<int64_t> g_pool[26];
+     inline int poolIdx(uint32_t pool) { return pool < 4 ? int(pool) : 0; }
+     // GetRenderTargetData (client): who asked (the caller's first three return addresses), the destination size and format, how long
+     void noteReadback(const uintptr_t (&stack)[3], uint32_t w, uint32_t h, uint32_t fmt, int64_t us);

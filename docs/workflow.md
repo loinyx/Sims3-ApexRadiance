@@ -228,6 +228,7 @@ failure; CI runs `Smoke` and `Lighting`.
 | `tools/stairwell_bounce_test/` | Second bounce through a stairwell opening, room fill, borrowed-light normalisation, slab edge penumbra (`features/stairwell_bounce.h`, `features/penumbra.h`, `run.ps1`) |
 | `tools/temporal_check/` | Temporal jitter refusal and reprojection for Edge Smoothing |
 | `tools/terrain_lighting_test/` | Terrain lighting policies, shader patches, sampler guard, queue, resources, lamp state, dispatch, world pool, indoor stories, lot UV, ground scale (`run.ps1` and `run_*.ps1`) |
+| `tools/wall_indoor_check/` | Outside walls' and outdoor floors' indoor texels (`PatchWallScale`, `PatchBakedAtlasPs`): every ps_3_0 ExteriorWall shader, the outdoor floor copies and captured ps_3_0 shaders on a native device, unmarked pixels bit for bit as before, marked ones the map alone (`run.ps1 -Precomp <Shaders_Win32.precomp> [-Captures <folder>]`) |
 | `tools/water_lamp_check/` | Water lamp shader equivalence and highlights |
 | `tools/world_lamp_test/` | World lamp eligibility policy |
 

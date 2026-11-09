@@ -1,0 +1,153 @@
+From b1b1aeafeaf5d20b8bf2b7aefbffc53127881c94 Mon Sep 17 00:00:00 2001
+From: alexvixell35-stack
+ <317427166+alexvixell35-stack@users.noreply.github.com>
+Date: Sat, 7 Nov 2026 11:45:39 +0000
+Subject: [PATCH 2/2] bridge: count client-side copies of locked surfaces and
+ buffers in BridgePerf
+
+Logs, every perfLogIntervalFrames: MB held in client copies of locked surfaces
+and buffers, READONLY locks, non-DISCARD relocks of a surface that already has
+its copy, and locks of static buffers. Measures what freeing those copies after
+upload would save in a 32-bit client and what it would cost in server fetches.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_013zSeZ5K232kJ4umUgcGJR2
+---
+ bridge/src/client/d3d9_surface.cpp    |  8 ++++++++
+ bridge/src/client/lockable_buffer.h   |  9 +++++++++
+ bridge/src/util/util_perfcounters.cpp | 12 ++++++++++++
+ bridge/src/util/util_perfcounters.h   |  4 ++++
+ 4 files changed, 33 insertions(+)
+
+diff --git a/bridge/src/client/d3d9_surface.cpp b/bridge/src/client/d3d9_surface.cpp
+index 31fa05b..bf5624f 100644
+--- a/bridge/src/client/d3d9_surface.cpp
++++ b/bridge/src/client/d3d9_surface.cpp
+@@ -51,6 +51,7 @@ Direct3DSurface9_LSS::~Direct3DSurface9_LSS() {
+       bridge_util::calcTotalSizeOfRect(m_desc.Width, m_desc.Height, m_desc.Format);
+ 
+     g_totalSurfaceShadow -= surfaceSize;
++    bridge_util::perf::g_shadow[0] -= surfaceSize;
+     Logger::trace(format_string("Releasing shadow of surface [%p] "
+                                 "(size: %zd, total surface shadow size: %zd)",
+                                 this, surfaceSize, g_totalSurfaceShadow));
+@@ -123,6 +124,9 @@ HRESULT Direct3DSurface9_LSS::GetDesc(D3DSURFACE_DESC* pDesc) {
+ 
+ HRESULT Direct3DSurface9_LSS::LockRect(D3DLOCKED_RECT* pLockedRect, CONST RECT* pRect, DWORD Flags) {
+   LogFunctionCall();
++  if (Flags & D3DLOCK_READONLY) {
++    bridge_util::perf::g_shadow[2]++;
++  }
+   // Store locked rect pointer locally so we can copy the data on unlock
+   {
+     BRIDGE_PARENT_DEVICE_LOCKGUARD();
+@@ -220,9 +224,13 @@ bool Direct3DSurface9_LSS::lock(D3DLOCKED_RECT& lockedRect, const RECT* pRect, c
+     lockedRect.pBits = getBufPtr(lockedRect.Pitch, rect);
+     m_lockInfoQueue.push({ lockedRect, rect, flags, m_bufferId, discardBufId });
+   } else {
++    if (m_shadow && !(flags & D3DLOCK_DISCARD)) {
++      bridge_util::perf::g_shadow[4]++;
++    }
+     if (!m_shadow) {
+       m_shadow.reset(new uint8_t[surfaceSize]);
+       g_totalSurfaceShadow += surfaceSize;
++      bridge_util::perf::g_shadow[0] += surfaceSize;
+       Logger::trace(format_string("Allocated a shadow for surface [%p] "
+                                   "(size: %zd, total surface shadow size: %zd)",
+                                   this, surfaceSize, g_totalSurfaceShadow));
+diff --git a/bridge/src/client/lockable_buffer.h b/bridge/src/client/lockable_buffer.h
+index ca6022e..fef509e 100644
+--- a/bridge/src/client/lockable_buffer.h
++++ b/bridge/src/client/lockable_buffer.h
+@@ -23,6 +23,7 @@
+ 
+ #include "util_bridgecommand.h"
+ #include "util_sharedheap.h"
++#include "util_perfcounters.h"
+ 
+ #include "d3d9_util.h"
+ 
+@@ -74,6 +75,7 @@ private:
+   void initShadowMem() {
+     m_shadow = std::make_unique<uint8_t[]>(m_desc.Size);
+     g_totalBufferShadow += m_desc.Size;
++    bridge_util::perf::g_shadow[1] += m_desc.Size;
+     Logger::trace(format_string("Allocated a shadow for dynamic %s buffer [%p] "
+                                 "(size: %zd, total shadow size: %zd)",
+                                 bIsVertexBuffer ? "vertex" : "index",
+@@ -104,6 +106,7 @@ protected:
+       }
+     } else if (m_shadow) {
+       g_totalBufferShadow -= m_desc.Size;
++      bridge_util::perf::g_shadow[1] -= m_desc.Size;
+       Logger::trace(format_string("Released shadow of dynamic %s buffer [%p] "
+                                   "(size: %zd, total shadow size: %zd)",
+                                   bIsVertexBuffer ? "vertex" : "index",
+@@ -115,6 +118,12 @@ protected:
+     if (ppbData == nullptr) {
+       return D3DERR_INVALIDCALL;
+     }
++    if (flags & D3DLOCK_READONLY) {
++      bridge_util::perf::g_shadow[3]++;
++    }
++    if (!(m_desc.Usage & D3DUSAGE_DYNAMIC)) {
++      bridge_util::perf::g_shadow[5]++;
++    }
+ 
+     uint32_t* checkPtr = nullptr;
+ 
+diff --git a/bridge/src/util/util_perfcounters.cpp b/bridge/src/util/util_perfcounters.cpp
+index 9cfc4fb..ec88026 100644
+--- a/bridge/src/util/util_perfcounters.cpp
++++ b/bridge/src/util/util_perfcounters.cpp
+@@ -190,6 +190,10 @@ namespace bridge_util {
+         s_dataWords.store(0, std::memory_order_relaxed);
+         s_cmdTicks.store(0, std::memory_order_relaxed);
+         s_uploadBytes.store(0, std::memory_order_relaxed);
++        g_shadow[2].store(0, std::memory_order_relaxed);
++        g_shadow[3].store(0, std::memory_order_relaxed);
++        g_shadow[4].store(0, std::memory_order_relaxed);
++        g_shadow[5].store(0, std::memory_order_relaxed);
+         s_presentWaits.store(0, std::memory_order_relaxed);
+         s_presentWaitTicks.store(0, std::memory_order_relaxed);
+         for (size_t i = 0; i < size_t(QueryPath::Count); ++i) {
+@@ -287,6 +291,12 @@ namespace bridge_util {
+         }
+         ss << ") dataKBPerFrame=" << double(s_dataWords.load(std::memory_order_relaxed)) * 4.0 / 1024.0 * perFrame
+            << " uploadKBPerFrame=" << double(s_uploadBytes.load(std::memory_order_relaxed)) / 1024.0 * perFrame
++           << " shadowMB surf=" << double(g_shadow[0].load(std::memory_order_relaxed)) / 1048576.0
++           << " buf=" << double(g_shadow[1].load(std::memory_order_relaxed)) / 1048576.0
++           << " readOnlyLocks surf=" << g_shadow[2].load(std::memory_order_relaxed)
++           << " buf=" << g_shadow[3].load(std::memory_order_relaxed)
++           << " surfRelocks=" << g_shadow[4].load(std::memory_order_relaxed)
++           << " staticBufLocks=" << g_shadow[5].load(std::memory_order_relaxed)
+ #if defined(REMIX_BRIDGE_CLIENT)
+            << " sendUsPerFrame="
+ #else
+@@ -413,6 +423,8 @@ namespace bridge_util {
+       }
+     }
+ 
++    std::atomic<int64_t> g_shadow[6];
++
+     void noteUpload(uint64_t bytes) {
+       s_uploadBytes.fetch_add(bytes, std::memory_order_relaxed);
+     }
+diff --git a/bridge/src/util/util_perfcounters.h b/bridge/src/util/util_perfcounters.h
+index 52b160c..fd6181e 100644
+--- a/bridge/src/util/util_perfcounters.h
++++ b/bridge/src/util/util_perfcounters.h
+@@ -76,6 +76,10 @@ namespace bridge_util {
+ 
+     void noteUpload(uint64_t bytes);
+ 
++    // Client-side copies of locked surfaces [0] and buffers [1] (bytes now); per interval: READONLY locks [2] surfaces, [3] buffers,
++    // [4] non-DISCARD relocks of a surface that already has its copy (a read-modify-write needs that copy), [5] locks of static buffers
++    extern std::atomic<int64_t> g_shadow[6];
++
+     // Failures of create calls whose result the client did not wait for are always reported.
+     void noteAsyncCreateFailure(uint16_t command, long hresult);
+ 
+-- 
+2.56.0.windows.3
+

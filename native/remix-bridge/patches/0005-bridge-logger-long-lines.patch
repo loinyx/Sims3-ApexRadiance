@@ -1,0 +1,28 @@
+0005: Logger fix (internal 0011): Logger::emitLine copied each line into a static 4096-byte buffer with sprintf_s, so a line of 4 KB or more ended the game with 0xC0000409. Lines are now written straight from the string.
+
+Applies after 0001-0004 on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only).
+
+diff --git a/bridge/src/util/log/log.cpp b/bridge/src/util/log/log.cpp
+index e3722e6..caa06ec 100644
+--- a/bridge/src/util/log/log.cpp
++++ b/bridge/src/util/log/log.cpp
+@@ -185,13 +185,15 @@ namespace bridge_util {
+   void Logger::emitLine(const LogLevel level, const std::string& line) {
+     if (level >= m_level) {
+ #ifdef REMIX_BRIDGE_CLIENT
+-      static char c_line[4096];
+-      int len = sprintf_s(c_line, "%s\n", line.c_str());
++      // was a static 4096-byte buffer filled by sprintf_s: a longer line hit the CRT invalid-parameter handler, which fast-fails
++      // the game (0xC0000409)
++      const std::string out = line + "\n";
+ #ifdef _DEBUG
+-      OutputDebugStringA(c_line);
++      OutputDebugStringA(out.c_str());
+ #endif
+       if (m_hFile != INVALID_HANDLE_VALUE) {
+-        WriteFile(m_hFile, c_line, len, NULL, NULL);
++        DWORD written = 0;
++        WriteFile(m_hFile, out.data(), DWORD(out.size()), &written, NULL);
+       }
+ #else
+       if (m_fileStream.is_open()) {

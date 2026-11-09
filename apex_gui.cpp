@@ -269,6 +269,7 @@ void SetShore(bool on) {
 constexpr const char* kRecommendText = APEX_PRODUCT_NAME " works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame "
                                        "rate limiter, fewer stutters and many extra game settings.";
 constexpr const char* kDxvkText = "Runs the game on Vulkan: fewer stutters, and " APEX_PRODUCT_NAME " is made and tested with it.";
+constexpr const char* kBridgeText = "Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds.";
 constexpr const char* kS3PPText = "With Sims 3 Modernization installed, Short Wait Spin and Thread Stack Diet can freeze your Sims for minutes.";
 constexpr const wchar_t* kS3SSReleasesUrl = L"https://github.com/sims3fiend/Sims3SettingsSetter/releases";
 constexpr const wchar_t* kDxvkReleasesUrl = L"https://github.com/doitsujin/dxvk/releases";
@@ -288,9 +289,10 @@ bool DxvkLoaded() {
     const HMODULE m = GetModuleHandleW(L"d3d9.dll");
     if (!m) return false; // not loaded yet: ask again later
     cached = 0;
-    if (Platform::DxvkD3D9()) {
+    // (the RTX Remix bridge renders through DXVK in its server process: nothing to recommend)
+    if (Platform::DxvkD3D9() || Platform::RemixBridge()) {
         cached = 1;
-        LOG_INFO("[Menu] d3d9.dll: DXVK (by its export)");
+        LOG_INFO(Platform::DxvkD3D9() ? "[Menu] d3d9.dll: DXVK (by its export)" : "[Menu] d3d9.dll: RTX Remix bridge (DXVK in another process)");
         return true;
     }
     wchar_t path[MAX_PATH] = {}, windows[MAX_PATH] = {};
@@ -310,6 +312,9 @@ bool DxvkMissing() { return g_startup.load() != Startup::Loading && !Platform::U
 // stays in place of the buttons until the game restarts
 bool S3PPShown() { return S3PPSettings::Recommended() || S3PPSettings::Get().turnedOff; }
 bool AnythingRecommended() { return S3SSMissing() || DxvkMissing() || S3PPShown(); }
+// The RTX Remix bridge (a separate download of the release): offered in Settings > Compatibility only, with no start note,
+// while DXVK runs inside the game's 32-bit process
+bool BridgeSuggested() { return g_startup.load() != Startup::Loading && !Platform::UnderWine() && DxvkLoaded() && !Platform::RemixBridge(); }
 
 // Opens a page in the default browser, on a short-lived thread (ShellExecute can take a moment and wants COM on its
 // thread; the render thread must not wait for it).
@@ -3011,6 +3016,7 @@ void CompatibilityTab() {
         const bool dxvk = DxvkLoaded();
         InfoRow("DXVK", dxvk ? "Installed" : Platform::UnderWine() ? "Not in use (WineD3D)" : "Not installed", dxvk ? IconId::CircleCheck : IconId::Info,
                 dxvk ? VioletTheme::kAccent : VioletTheme::kTextMuted);
+        if (Platform::RemixBridge()) InfoRow("RTX Remix bridge", "Installed", IconId::CircleCheck, VioletTheme::kAccent);
         // other performance mods: a row only when installed (Apex does not suggest them)
         const S3PPSettings::State& s3pp = S3PPSettings::Get();
         if (s3pp.ts3native) InfoRow("Sims 3 Modernization", "Installed", IconId::CircleCheck, VioletTheme::kAccent);
@@ -3032,6 +3038,15 @@ void CompatibilityTab() {
         if (AnythingRecommended()) { // shown even after the Overview card and the start note were dismissed
             ApexUi::CardGroup("Recommended");
             RecommendedItems();
+        }
+        if (BridgeSuggested()) {
+            ApexUi::CardGroup("Optional");
+            ImGui::TextUnformatted("RTX Remix bridge");
+            ApexUi::MutedText(kBridgeText);
+            if (ApexUi::IconTextButton("Download##Bridge", IconId::Download, "Opens the Apex Radiance releases page on GitHub, where the bridge is a separate download",
+                                       ButtonKind::Primary))
+                OpenPage(kApexReleasesUrl);
+            ApexUi::Gap(ApexUi::kSpace2);
         }
         if (ApexUi::BeginAdvanced("Details##Compatibility", "Details")) {
             ApexUi::MutedText(("Sims3SettingsSetter: " + S3SSDetect::Summary()).c_str());
@@ -3058,6 +3073,7 @@ void AboutTab() {
         CreditLine("Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.");
         CreditLine("Scene update safety: contribution by @rodneypantonial.");
         CreditLine("Thanks to @boringbones for testing every build.");
+        CreditLine("RTX Remix bridge: NVIDIA (MIT), ported to The Sims 3 by dalexlol and alexvixell35-stack in sims3-modernization; DXVK by Philip Rebohle (zlib).");
         CreditLine("Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC).");
     }
     ApexUi::EndCard();

@@ -219,9 +219,16 @@ lamp's position, not on its colour or intensity.
    own source room, any story; `LevelLightShare::InnerNormScaleOf`), else the same-story lookup above. The realistic reach
    share applies where the solve applies it (`LevelLightShare::ReachAppliesIn`: a roofless room's lamps except a double-height
    room's below, or a room-0 lamp through a roofed room's openings), on wall texels with the reach on. A map with more lamps
-   than the atlas holds is drawn in passes over one sum (`RelightKeptPhys(..., first, compose)`; at most 64 lamps). The
-   atlas grows 4 rows at a time with the most lamps a map has drawn (3.1 MB a row, G16R16F + D24X8; 50 MB at 16) instead of
-   16 rows at once. Each relight round logs per story, when it changes, `Story S physical: every map drawn (...)` or `not
+   than the atlas holds is drawn in passes of 16 over one sum (`RelightKeptPhys(..., first, compose)`; at most 64 lamps). The
+   kept atlas holds a tile (one lamp's 6 faces) per distinct lot lamp drawn while it exists, grown 4 tiles at a time, up to 120
+   (`PhysTiles::kTiles`): 3.1 MB a tile (6 x 256 x 256, G16R16F + D24X8), 75 MB at 24, 377 MB at 120. Tiles are packed in
+   columns of up to 32 (8192 texels; a 15360-texel column moved one sum of 2720 by a bit, 8192 is bit for bit), then side by side
+   (120: 4 columns of 30, 6144 x 7680), within the device's texture size up to 8192 x 8192 (160 tiles at face 256; a 4096 device:
+   32). The shader takes a lamp's tile as its row and its column's first face (`misc.x`, `misc.z` of c80..c95); no other register
+   or sampler. Past the tiles, a lamp takes, in order, its own old tile, an empty one, else the one whose lamp the last relight round
+   drew again latest (64 slices a round per lamp, `PhysTiles::Atlas::Next`): the excess cycles instead of every lamp. Bench (132 maps
+   all drawn again at each step of a drag): 120 lamps 1 cube a step (534 with the 32-tile atlas), 130 lamps 17.3 cubes a step (725
+   with the 32-tile atlas, 61 least recently used over 120). Each relight round logs per story, when it changes, `Story S physical: every map drawn (...)` or `not
    covered (K of N maps not drawn: why)`. Room 0 is still drawn from its solve. `rt_lamps_test` 59 checks (passes of 3
    lamps over a 3-row atlas give the one pass's map texel for texel).
 21. Physical model, stage 3b, part 3 (02/11): room 0 of the active lot is physical too. A room 0 solve kept under the physical
@@ -448,6 +455,75 @@ test. The end stays a soft taper, it does not become square. Offline on the 23-4
 shadow core stays: 8.3% of the floor moves by more than 0.05, mean T 0.370 to 0.393. The `physical vs the game's last solve` lines read lower in that
 zone, and a scene file recorded before this keeps the step when replayed. Switch: `sphere_cut_fade`. UNVERIFIED in game.
 
+### Day and night switch
+
+A quick switch between day and night (the night level from one end to the other within 3 s) used to show each room's old
+solve until the game solved it again: the last room's first solve landed 4.2 to 8.3 s after the switch (recording
+16-17-45, lot CF2DEA20). Window lights (types 7 and 8) have no GPU law, so the day light stays in a kept room's base.
+
+- **The cache** (`PhaseCache` in `outdoor_delta_model.h`, `g_phaseKept`): per room and end, the last physical kept solve of
+  that end: begun and kept while the level was at it or moving to it (from the level leaving the other end, so the switch's own
+  solves begun in its fade count; 17-11-35: every departure cached 0 rooms when a solve had to begin at the end), with no
+  departure between, drawn whole (`editable`), whose ambient
+  pair (+0x110, +0x120) is the one its solve's ambient step gave it with Rooms at Night's base. It is taken at the solve's
+  keep and again as the level leaves the end (each room's kept solve of that stay, `PhaseDeparture`). The mode change (window
+  lights, types 7 and 8, switch about 0.3 s before the level moves, 14-05-00) is dated by the first window light mark of the
+  burst before the departure (`LampMarkFilter::WindowBurstStart`, marks under 1.5 s apart, within 3 s before it; else 1 s before
+  the departure): a solve begun at or after it is not cached, and is dropped if it was. The level's ends come from the render
+  thread (`NoteNightLevel`, from `SweepDayRooms`). A lot change and turning the capture off clear it; it shares memory with the
+  kept rooms, and its other end's bytes give way to any kept solve at the 192 MB budget.
+- **Sends**: as the level leaves an end, the rooms with no cached solve of the other end are sent to their solve at once (the
+  class the room shows first; the room queue spreads them at its budget). Such a room whose solve began in the fade (the sky
+  between the ends) is sent once more, so that end's cache takes it at the next departure. In the 16-54-11 session 5 of the 13
+  rooms were never solved again after the load and showed the load's light all along.
+- **The swap** (`PhaseSwitchDue`, light tree thread, four rooms per room update while no solve holds the working maps): once
+  the level is half way through a quick fade (+0.3 s; else at the arrival within 3 s; a fade turned back switches back), each kept room of the active lot takes its candidate back when its kept solve began before the switch, it is not
+  being solved, its story, id and class are the same, no player's lamp edit came since (`EditLastTick`, never dusk or dawn),
+  `RoomGeoKey` (walls, doors, 3D blockers) is the candidate's, the texels, samples and lamps are the same, every light of the
+  candidate with a law is now as kept (place, shape, colour, strength: a lamp switching with the hour back as it was holds; one
+  not yet is tried again every 250 ms while the switch is open), and its directional maps can follow. Its ambient pair is
+  written as `RetakeAmbient` writes (`UnlitRooms::RestoreAmbient`, refused when the room no longer holds its base record or
+  Rooms at Night's colour changed); the same kept object goes back in `g_kept` (its old version: the maps' entries are made
+  again and relit first as a changed signature); the directional texels holding what the room showed take the candidate's own
+  values (`WritePhysCarry`), then the physical redo. Snap, no blend. The game's solves still run and replace the candidate at
+  their `KeepEnd`.
+- **Log**: 10 s after each quick switch, `Day/night switch to night|day: N rooms; swapped from the cache S (last +x s); waited,
+  solved by the game W (last +y s; A sent by Apex at the switch's start); not solved within 10 s M; last room +z s; K swapped
+  rooms solved again since; why solved: <reason> xN; why not solved: <reason> xN`, and at each departure `Day/night cache: the
+  level left day|night: C of N rooms cached for it (F new), D dropped (...), R rooms with no cached ... solve sent to their
+  solve; not cached: story S room R (why), ...` (not physical, no tail kept, not drawn whole, its ambient is not its solve's,
+  begun heading the other end, the level left an end during its solve, solved in an earlier stay, begun after the mode
+  change, no kept solve).
+- **The first switch** (no cache; 17-18-28, departure +0 s): the game solves one room at a time at the lot's budget; small rooms
+  ended +0.66 to +1.92 s, the tall story 1 room 2 (47,681 texels) took 1.8 s a solve and was solved three times in a row
+  (+10.27 s), each time sent while it was being solved and solved again in full after; story 2 rooms 5, 6 and 12 waited
+  behind it (+10.7 to +14.9 s). A stacked room whose group colour changed is no longer sent while it is being solved
+  (`BeforeRoomUpdate`): after that solve its colour is applied without a solve when its maps allow (`ApplyIdleAmbient`).
+  Where the 15.5 s went: the last room ended +15.53 s; 8.2 s of it were repeat solves (room 2's second, from the
+  normalisation settle: the window lights moved its normalisation from 1.000 to 0.120, room 3's to 0.518 and room 8's to 0.728,
+  so each was held and solved again in full; room 2's third and room 8's third, from the unlit-rooms retint of a stacked
+  ambient changed after the base, which came out the same), and from +6 s the steady pacing held the played lot at about
+  3 ms of solving a frame (the game's per-class solve time rose 0.7 s in 3.9 s for room 2's third solve). The game's own window
+  marks (three bursts, -0.25, +0.36 and +1.03 s) threw away or redid story 2 room 7 and room 8's first solve. Not the LOD
+  class (every solve was class 2) nor Build mode.
+- **The switch's solve window** (`RoomAmbientPolicy::DayNightWindow`, `LevelLightShare::DayNightSwitching`, fed by
+  `SweepDayRooms`): from the level leaving an end while it reaches one within 3 s, then 10 s more. Meanwhile the lot being
+  played gets 25 ms of room solving a frame with the camera still (unpaced; at least 6 ms moving) and the queue's drain 8 ms
+  (33 ms at most); a room whose normalisation moved since its samples read it runs the game's ambient step again inside the
+  same solve (`SettleNormInPlace`: the step, its sampler copy +0x650, the stacked rooms' merge, at most 3 times), so it
+  is not solved again in full; the unlit-rooms retint sends no room to a solve until the window closes. Log 10 s after each
+  switch: `[RoomLightQueue] Day/night switch solves (t s): N rooms of the played lot, the last ended +x s; solves begun B,
+  ended E (thrown away, solved again); the game's solving C ms; story S room R: first began, last ended, solves, ms on screen,
+  ms of the game's solving`; the solve journal's `H` now names who held the room. Replay (`room_ambient_test`): the 17-18-28
+  first switch with each room solved once at the window's budget ends at +2.14 s (room 2 at +1.35 s; before +15.53 s and
+  +10.01 s). UNVERIFIED in game: the gain, the frame rate during the window, and that the ambient step run again gives the
+  look the second full solve gave (it reads the same normalisation; rooms solved in between are not seen again).
+- **Proof**: `outdoor_delta_test` `PhaseCacheChecks`: the clock, the mode change, the fill, each validity fact, and the
+  16-54-11 session's six switches replayed with its rooms' solves (the first after the load sends all 13; the second swaps 8
+  and sends the 5 rooms solved in the load's fade; from the third all 13 are swapped; a lamp not as kept leaves its rooms
+  waiting with that reason); the swap restores the same object and the directional texels bit for bit. UNVERIFIED in game:
+  the gain, the mode change's date from the window marks, and that a twilight solve landing after a swap shows no step.
+
 ### Long sessions
 
 No failure stops the GPU's light for good. Each case below used to last until a solve, a lot change or a device reset, and now tries again on a timer:
@@ -474,7 +550,7 @@ No failure stops the GPU's light for good. Each case below used to last until a 
 
 - Table legs cast nothing from a lamp 3 m or more over their tops, and only a faint foot past 1.5 m; both heights and the streak's
   strength are unverified in game.
-- Steam 1.67.2 only: the 3D blockers' vtables and the test constants (`room_light_tests.h`) are fixed Steam addresses, and the physical path reads and writes room and probe fields at Steam's offsets. On another build every 3D blocker would be left out of the GPU's table, so the capture stays off there: Instant draws the outdoor lamps and the game solves the rooms. Those builds need the vtables and constants found by signature first.
+- Other builds: the 3D blockers' vtables and the test constants (`room_light_tests.h`) are GameAddr ids (`BlockerQuadVt`, `BlockerDiscVt`, `TestZero`..`TestWallY`, [game versions](../../engine/game-versions.md#gpu-room-lamps-addresses)). The capture runs once all of them are found; otherwise `[GpuRoomLamps] Rooms keep the game's solves: Not available on <version>: missing ...` is logged and the game solves the rooms. A game blocker's vtable is renamed to the Steam value when it is read, so the copies, dumps and replays keep Steam's names. UNVERIFIED on EA 1.69.47: the room and probe field offsets the physical path reads are assumed to be Steam's.
 - A is a share of the law's r + g + b: where the law's hue differs from the game's evaluation, the recomposed channels
   differ slightly.
 - B is unknown where the game never tested the lamp (its colour faded or was dropped before the wall test); it is kept as 0,

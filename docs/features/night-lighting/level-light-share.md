@@ -142,7 +142,8 @@ patch.
   `SolveLampDay(night level)`: 0.03 by day, 1 at night, `LampDay(level)` at twilight, in the wrapped light evaluation
   (`RoofedDay`, before every other test) and in the directional maps (`BasisLightHook`; at night the game's own
   accumulation runs unchanged). Indoor lamps are untouched. Each roofed room an outdoor lamp lit is noted with the factor
-  of its solve; once the night level has stayed at day or at night for 2 s, the rooms noted with another factor are sent
+  of its solve; once the night level has reached day or night (the same frame: 2 s until 2026-11-09, which made a second
+  wave of solves 2.5 s after a build-mode switch), the rooms noted with another factor are sent
   to gather again once (`SweepDayRooms`, log `Daytime curve: N roofed rooms ... gather again`). Status: *daytime curve
   in roofed rooms*.
 
@@ -597,13 +598,16 @@ and the walls cut off hard at the story line while their lower half was red.
 - **Which rooms** (`OpenAbove::Classify`, [`open_rooms_above.h`](../../../features/open_rooms_above.h)): a roofed room of
   story S - 1 (roofless rooms' lamps are outdoor lamps already) with no floor placed on story S over at least half of its
   quadrants (`PlacedFloorAt`), and at least three quarters of its outline (tile edges to another room) carrying a wall of
-  story S or leading into another such room. A room that keeps its ceiling has the bare key only along its walls and
+  story S or leading into another such room, or (as the physical model's open tops) with a wall of story S of its own on
+  its outline (tile sides and diagonals), one with no floor placed on either side: a double-height room under a sloped roof has walls of story S
+  only along its gables (F8 2026-11-09, lot C49C: its attic walls over the red room 5 took no red). A room that keeps its ceiling has the bare key only along its walls and
   around the floor's edge, so the rule is per room: the 2026-09-29 rejection of the bare key as a per-quadrant opening
   stands, and `RemovedFloorKey`, `ReadOpenings` and the F8 *openings* count are unchanged. The wall rule leaves out a
   single-storey room under its roof: with no walls on story S along its eaves and no roof known to the lighting, its lamps
   would light the walls of story S beside it above the roof line.
-- **Gather** (`ShareRoomZeroFromBelow`, after the outdoor share's record of room 0): the lamps of those rooms (the game's
-  checks of `FUN_006c7820`, a wrapped class, at most 64) go into room 0's list, each recorded first in its `cross` (not
+- **Gather** (`ShareRoomZeroFromBelow`, after the outdoor share's record of room 0): the lamps of those rooms (not their
+  window lights, types 7 and 8: `OpenAbove::SharedFromBelow`; the game's checks of `FUN_006c7820`, a wrapped class, at
+  most 64) go into room 0's list, each recorded first in its `cross` (not
   outdoor) with the rooms in `openBelow`. `NoteDeps` sends room 0 when a lamp of those rooms changes, and room 0 joins the
   rooms near openings that gather again (`NoteIndoorRoom`).
 - **Per point** (`IndoorShadow`, `IndoorPassImpl`): the ray must cross story S's floor plane in a quadrant of such a
@@ -613,6 +617,13 @@ and the walls cut off hard at the story line while their lower half was red.
   (`indoor_lamp_walls`) applies. The lamp is scaled by its room's normalisation (room 0 has none, as for
   *Indoor light through openings*) and takes no *Realistic lamp reach*. Rows of a ghost solve under story S's plane over
   an open top are not slab rows.
+- **Window lights stay below** (2026-11-09, 14-06-26 Light capture, lot C49C story 3 at 9:16): a window light sits in its
+  wall's plane at the window's top, so the attic wall points just over it (lifted 12 cm off the floor line) took it from
+  a few centimetres: soft warm spots over every door and window of the room below, by day only (the indoor texels'
+  largest sum 21.8 by day, 0 at night), and story 3's room-0 list held 36 lights by day instead of 17 (19 window lights
+  from rooms 5, 6 and 7), which made its full solve at the switch to day the longest of the lot. The room's daylight
+  reaches those texels through its own walls' top row (RtOutdoorLamps' carry), as every other share leaves window lights
+  out.
 - **Diagnostics:** the log line `[LevelLightShare] Story S room 0 takes N lamps of story S - 1 through M floorless
   quadrants over rooms open to above: ids` (once per change) and the same line in the F8 lot rows.
 - Developer switch `open_rooms_above` (shipped on). Offline: `tools/outdoor_delta_test` classifies the captured F8 maps
