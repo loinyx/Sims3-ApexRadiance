@@ -2,6 +2,7 @@
 // Bytecode edits of the game's shaders for the "Night Remake" patch (see shader_patches.cpp). Pure functions on
 // the D3D9 token stream, so they can be tested outside the game with captured shaders.
 #include <windows.h>
+#include <string>
 #include <vector>
 
 namespace ShaderPatches {
@@ -94,6 +95,10 @@ struct FloorPatch {
     // to spare); the draw then binds nothing more
     int outScaleSampler = -1;
     int outScaleConst = -1;
+    // (with the outdoor scale) its .y = 1 at night (outScaleConst.y): an indoor texel, as PatchWallScale's indoor light, the
+    // ambient and the reflection's scale at indoorConst
+    bool indoor = false, spec = false, strip = false, haze = false;
+    int indoorConst = -1;
     // PatchFloor: the map and its lamp scale found but no sampler left for the atlas (16 in use): the copy is the game's bytes
     // and the draw only sets the lamp scale (scaleConst), so the floor still takes the ground's gain
     bool gainOnly = false;
@@ -125,11 +130,27 @@ bool PatchSnowFloor(std::vector<DWORD>& t, int texcoord, FloorPatch& out, const 
 bool PatchBakedAtlasPs(std::vector<DWORD>& t, int texcoord, FloorPatch& out, bool groundShade = true, bool exitLight = false);
 // The outdoor scale on the outside walls (ExteriorWall: "texld rA, vK, sM" whose next rgb reader is "mad rB.xyz, rA, cK.x,
 // rC", before any flow control, ps_3_0): right after the texld, texld rT, vK, sQ; mul rT.x, rT.x, cQ.x; exp rT.x, rT.x;
-// mul rA.xyz, rA, rT.x (cQ.x = 0: the wall as before). sampler = Q, constReg = cQ, mapSampler = M.
+// mul rA.xyz, rA, rT.x (cQ.x = 0: the wall as before); after the mad, cmp rB.xyz, -rT.y, rB, rA (indoor). sampler = Q,
+// constReg = cQ, mapSampler = M.
+// indoor: at night (constReg.y the night level) the scale's .y turns the mad's result into the InteriorWall's light, map + map
+// alpha x ambConst.xyz (a wall of a space a room of the story below continues into: no moon, no ambient cube), and (spec) the
+// sky cube's reflection x ambConst.w; false when the mad writes its own map register or no registers are free (the copy is then
+// the outdoor scale alone)
 struct WallScalePatch {
-    DWORD sampler = 0, constReg = 0, mapSampler = 0;
+    DWORD sampler = 0, constReg = 0, mapSampler = 0, ambConst = 0;
+    bool indoor = false;
+    bool spec = false;
+    bool strip = false; // (indoor) the wall shade strip taken off the albedo too (InteriorWall has none)
+    bool haze = false;  // (indoor) the outside's atmosphere at the end left out too (weight 1)
+    // (indoor) marked texels take their room's own map (IndoorPick rooms): the UV map at roomSampler, the rooms' maps at
+    // roomSampler + 1 .. + 4, their ambients at roomConst .. + 3, constReg.z = 1 when the bound scale holds no fall-off ratio (its .z). -1: none
+    int roomSampler = -1, roomConst = -1;
 };
 bool PatchWallScale(std::vector<DWORD>& t, WallScalePatch& out);
+// (Light capture) a copy of a ps_3_0 / ps_2_x pixel shader whose colour output is one value at the pixel: its k-th texld's result
+// (saved right after it), then its inputs (v#, t#) in declaration order; its own colour writes go to a spare temp. what names it.
+// False past the last one, for another version, or with no temps to spare
+bool ProbeCopy(const std::vector<DWORD>& t, int k, std::vector<DWORD>& out, std::string& what);
 
 // Winter foliage with a shadow map: "lrp rD.w, t5.x, cK.y, rS.w" is the moon shadow that also darkens lamp light.
 // After it: rD.w = lerp(rD.w, 1, cN.x), cN.x = night level.

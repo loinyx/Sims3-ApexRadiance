@@ -2922,10 +2922,11 @@ class NightTerrainRelightPatch : public ApexPatch {
                         LOG_INFO(std::format("[RoomLampProbe] {} rooms of the active lot sent to their solve", sent));
                     }
                 }
-                // GPU room lamps: Instant running with all its parts, on Steam 1.67.2 only: the blockers' vtables and the test constants
-                // (room_light_tests.h) are that build's, and on another one every furniture shadow would be left out of the rooms the GPU
-                // draws. Physical only with the capture on: in Classic nothing of it runs (the stair set, the lamp edits taken)
-                const bool keep = OutdoorDelta::Enabled() && g_gpuRoomLampsCapture && GameAddr::IsFixed();
+                // GPU room lamps: Instant running with all its parts, and the blockers' vtables and the test constants (room_light_tests.h)
+                // found on this build (GameAddr; without them every furniture shadow would be left out of the rooms the GPU draws).
+                // Physical only with the capture on: in Classic nothing of it runs (the stair set, the lamp edits taken)
+                const bool tests = OutdoorDelta::RoomTestsFound(); // (first: its log line on every build)
+                const bool keep = OutdoorDelta::Enabled() && g_gpuRoomLampsCapture && tests;
                 const bool physical = keep && g_roomLampModel == 1;
                 const bool sharp = physical && g_roomLampSharpFloors;
                 const bool modelChanged = keep && (physical != OutdoorDelta::RoomLampPhysical() || sharp != OutdoorDelta::HiFloors());

@@ -109,6 +109,7 @@ std::unordered_map<uintptr_t, uintptr_t> g_lampStory; // light -> tree level (un
 // Since 05/10 the rooms that take an edited lamp are sent at once by the edit itself (LevelLightShare, "Lamp edits first"),
 // so this is the safety net: rooms gathered after the change keep their solve, and for lamps that only moved (same room, on
 // or off as before) only the rooms whose list holds them are sent.
+constexpr DWORD kWindowGapMs = 1500; // window light marks this far apart are two bursts (WindowBurstStart)
 constexpr float kMoveMin = 0.10f; // m: animated lamps wobble less
 constexpr DWORD kSelfWindow = 10000; // ms
 constexpr int kSelfMax = 3;          // more switches on or off than this within kSelfWindow: a light switching itself, left out
@@ -189,6 +190,7 @@ std::atomic<float>& NightLevelRef() { return g_nightLevel; }
 // starts or extends the edit hold. The serial grows by one at each: the room solves are stamped with it (RoomLightQueue
 // NoteSolveStart), so a room counts as solved for an edit only by a solve begun after it, even in the same tick step.
 std::atomic<DWORD> g_editLast{0};
+std::atomic<DWORD> g_windowLast{0}, g_windowBurst{0}; // (WindowBurstStart) the last window light mark, the first of its burst
 std::atomic<unsigned long> g_editSerial{0};
 std::atomic<long> g_editEvents{0};
 void NoteEditNow(DWORD tick) {
@@ -357,6 +359,9 @@ constexpr DWORD kFurnitureMoveMs = 600; constexpr float kFurnitureNearM = 1.0f;
 thread_local bool t_onFurniture = false; // (OccDecideImpl) the occluder moved with a lamp standing on furniture: its mark solves the room
 bool OwnObjectEditTaken(uintptr_t tl, float x, float z, bool hadPoint, const float occWas[2]) {
     const bool physical = OutdoorDelta::RoomLampPhysical();
+    // (physical) TakesLampEditPhys refuses every lamp of a lot that is not the active one: no scan of its lamps for each occluder
+    // mark (a neighbour's 60 objects updated at 6:00 each scanned every lamp of its story)
+    if (physical && TrackerOf(tl) != RtOutdoorLamps::ActiveTracker()) return false;
     const float occNow[2] = {x, z};
     struct Pending { uintptr_t light; bool wasOn, moved; int room; float x, z; };
     Pending pend[8];
@@ -568,6 +573,8 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
     }
     if (type == 7 || type == 8) { // window lights: the long path, they follow the sky
         g_windows.fetch_add(1, std::memory_order_relaxed);
+        const DWORD now = GetTickCount() | 1, last = g_windowLast.exchange(now, std::memory_order_relaxed);
+        if (!last || now - last > kWindowGapMs) g_windowBurst.store(now, std::memory_order_relaxed);
         return true;
     }
     // Real-time outdoor lamps (Lamp lighting: Instant only, rt_outdoor_lamps.h): an outdoor lamp the GPU draws on every story of
@@ -731,6 +738,10 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
     // `user` = a value a player or a Sim sets (colour, intensity, on / off), sent to the other stories at once; `pure` = the
     // same room, on or off as before (a move or a value change): a solve in progress keeps going, the mark is held;
     // `stayed` = the same room (switched too): the lamp is registered there, its rooms gather at once
+    // A lamp of a lot that is not being played (a neighbour's street lamps switching at 6:00, 100 in 3 frames) is no player's
+    // edit: its marks go through at the game's pace, as at dusk. Taken as edits they started a lamp drag, the edit hold and
+    // the quick pass for the whole world (frames of 150 ms at 6:00, recording of 09/11). The lot's safety net (LotDue) stays
+    const bool played = LevelLightShare::PlayedLotOfTl(tl) || TrackerOf(tl) == RtOutdoorLamps::ActiveTracker();
     bool same = false, edit = false, user = false, pure = false, stayed = false;
     bool autoSelf = false, switchedOn = false; // a light switching itself on (no edit); switched on in place (dusk below)
     {
@@ -780,7 +791,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
         same = was.sig == h;
         const float dx = pos[0] - was.pos[0], dy = pos[1] - was.pos[1], dz = pos[2] - was.pos[2];
         const bool moved = dx * dx + dy * dy + dz * dz > kMoveMin * kMoveMin; // NaN: not a move
-        if (moved) DragLite::NoteLampStep("lamp entry: moved", DragLite::StepKind::Move, gameMove()); // (a lamp drag, drag_lite.h)
+        if (moved && played) DragLite::NoteLampStep("lamp entry: moved", DragLite::StepKind::Move, gameMove()); // (a lamp drag, drag_lite.h)
         stayed = was.room == room;
         pure = was.on == on && stayed;
         if (was.on != on || moved || was.room != room) { // the player sees this: its lot lights again (OnPresent)
@@ -790,14 +801,14 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
             }
             // a light that switches itself on and off (a flickering TV or effect light): not the player (a drag only moves: never left out)
             // ... unless several different lights switch together: the player's "all the lights", however often (NoteSwitch)
-            const bool burst = was.on != on && NoteSwitch(light, tick);
+            const bool burst = played && was.on != on && NoteSwitch(light, tick);
             const bool selfSwitching = was.on != on && ++was.events > kSelfMax && !burst;
             switchedOn = on && !was.on && !moved && was.room == room;
             if (selfSwitching && switchedOn && tick - was.lastAuto > 5000) {
                 autoSelf = true;
                 was.lastAuto = std::max<DWORD>(tick, 1);
             }
-            if (was.on != on && !selfSwitching && !moved && was.room == room) NoteUserSwitch(tick); // the room queue's quick pass
+            if (played && was.on != on && !selfSwitching && !moved && was.room == room) NoteUserSwitch(tick); // the room queue's quick pass
             if (!selfSwitching) g_lampEvents.fetch_add(1, std::memory_order_relaxed);
             if (!selfSwitching) Recorder::NoteLampEdit(tl, on, was.on == on); // the recording's light update summary
             edit = edit || !selfSwitching;
@@ -835,8 +846,9 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
             was.room = room;
         }
         // the steps of a drag between its 10 cm events are the same edit (an animated lamp never moves 10 cm: never one)
+        if (!played) edit = false;
         if (edit) was.editUntil = (tick + kEditHoldMs) | 1;
-        else if (!same && was.editUntil && static_cast<int32_t>(tick - was.editUntil) < 0) {
+        else if (played && !same && was.editUntil && static_cast<int32_t>(tick - was.editUntil) < 0) {
             edit = true;
             DragLite::NoteLampStep("lamp entry: a step of the same edit", DragLite::StepKind::Move, gameMove());
         }
@@ -1141,7 +1153,9 @@ void OnPresent(float nightLevel) {
     // only moved, and lamps that only moved send only the rooms holding them; a lamp moved into another room or story sends
     // every room again: a gather made while the game was still registering it missed it (F8)
     // (lamps switched where they are: only the rooms they can reach, LevelLightShare::RelightLampSwitch)
+    bool playedRun = false;
     for (const Run& r : run) {
+        playedRun = playedRun || LevelLightShare::PlayedTracker(r.tracker);
         const int sent = !r.allRooms && r.switchCount > 0
                              ? LevelLightShare::RelightLampSwitch(r.tracker, r.relocated ? "a lamp moved into another room" : r.lampCount ? "a lamp switched or moved" : "a lamp switched", r.relocated ? 0 : r.changed,
                                                                   r.switched, r.switchCount, r.lamps, r.lampCount)
@@ -1151,7 +1165,9 @@ void OnPresent(float nightLevel) {
                                                            r.relocated ? 0 : r.changed, r.allRooms ? nullptr : r.lamps, r.allRooms ? 0 : r.lampCount, true);
         if (sent >= 0) g_lotRefreshes.fetch_add(1, std::memory_order_relaxed);
     }
-    if (!run.empty()) {
+    // (another lot's rigs: once its rooms are solved, LevelLightShare's g_rigWait; this world-wide regather at once was for the
+    // player's edits, and a neighbour's lamps at 6:00 regathered every rig of the world)
+    if (playedRun) {
         ObjectLightBridge::RequestRigRefresh();
         // RelightLot watches completion and retains its own bounded fallback.
     }
@@ -1168,6 +1184,7 @@ bool LotRefreshDueSoon(unsigned long withinMs) {
     });
 }
 unsigned long EditLastTick() { return g_editLast.load(std::memory_order_acquire); }
+unsigned long WindowBurstStart() { return g_windowBurst.load(std::memory_order_relaxed); }
 unsigned long EditSerial() { return g_editSerial.load(std::memory_order_relaxed); }
 void NoteEdit() { NoteEditNow(GetTickCount()); }
 bool SwitchActive() {

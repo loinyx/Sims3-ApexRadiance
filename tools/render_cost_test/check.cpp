@@ -17,8 +17,9 @@ __declspec(noinline) void EvalBefore(const Lamp& L, const float p[3], const floa
     const float d2 = std::max(l[0] * l[0] + l[1] * l[1] + l[2] * l[2], 1e-4f);
     const float inv = 1.0f / std::sqrt(d2);
     for (float& v : l) v *= inv;
-    const float ndl = MountedNdl(Sat(n[0] * l[0] + n[1] * l[1] + n[2] * l[2]), plane, n[1]);
-    const float f = std::min(ndl * (inv * inv) * L.W, L.cmax);
+    // (bebea476: the sconce's raise after the Cmax cut, MountScale)
+    const float ndl = Sat(n[0] * l[0] + n[1] * l[1] + n[2] * l[2]);
+    const float f = std::min(ndl * (inv * inv) * L.W, L.cmax) * MountScale(ndl, plane, n[1]);
     const float al = L.axis[0] * l[0] + L.axis[1] * l[1] + L.axis[2] * l[2];
     const float t1 = (al + L.off1) * -L.sc1, t2 = (al - L.off2) * L.sc2;
     const float tsel = t1 > 0.0f ? t1 : t2;

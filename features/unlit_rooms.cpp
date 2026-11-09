@@ -449,6 +449,13 @@ void RetintQueueResult(unsigned char* room, bool queued, void*) {
     }
 }
 bool Retint(bool rest) {
+    // a quick day/night switch: no room is sent to a solve meanwhile (retried once the switch's solves are over). 17-18-28: story 1
+    // room 2 (47,681 texels) and room 8 were each solved once more for a stacked ambient changed after the base, 3.9 s and 0.9 s
+    // with the switch's other rooms waiting behind them, and came out with the same ambient
+    if (rest && LevelLightShare::DayNightSwitching()) {
+        rest = false;
+        g_retryRetint = true;
+    }
     VisitCtx ctx{rest, g_on && g_patched && g_baseReady, 1.0f, 0, 0};
     __try {
         if (g_scalePtr) ctx.scale = *reinterpret_cast<const float*>(g_scalePtr);
@@ -783,6 +790,43 @@ bool RetakeAmbient(unsigned char* room, float& norm, const char*& why) {
     std::memcpy(rec.res[0], own, sizeof own), std::memcpy(rec.res[1], second, sizeof second);
     std::memcpy(rec.ce, t_probeCe, sizeof t_probeCe);
     rec.slot = t_probeSlot;
+    return true;
+}
+bool SolveBase(const unsigned char* room, const float (*pair)[4], float* ce, float* own, bool& shared) {
+    if (!g_patched || !g_on || !g_baseReady) return false;
+    std::lock_guard<std::mutex> lk(g_baseMx);
+    const auto it = g_baseRooms.find(reinterpret_cast<uintptr_t>(room));
+    uintptr_t mgr = 0;
+    int id = 0;
+    if (it == g_baseRooms.end() || !RoomKey(room, mgr, id) || it->second.mgr != mgr || it->second.id != id || !it->second.has[0] || !it->second.has[1]) return false;
+    const BaseRec& rec = it->second;
+    if (!Near(pair[1], rec.res[1], 1e-5f)) return false;
+    shared = !Near(pair[0], rec.res[0], 1e-5f);
+    std::memcpy(ce, rec.ce, sizeof rec.ce);
+    std::memcpy(own, rec.res[0], sizeof rec.res[0]);
+    return true;
+}
+bool RestoreAmbient(unsigned char* room, const float (*pair)[4], const float* own, const float* ce, const char*& why, const float* shown, const float* shownOwn,
+                    float (*was)[4], float* wasOwn) {
+    if (!g_patched || !g_on || !g_baseReady) return why = "Rooms at Night is off", false;
+    std::lock_guard<std::mutex> lk(g_baseMx); // (MoveBase on the render thread sees the pair and its record together)
+    const auto it = g_baseRooms.find(reinterpret_cast<uintptr_t>(room));
+    uintptr_t mgr = 0;
+    int id = 0, state = 0;
+    float cur[2][4];
+    if (it == g_baseRooms.end() || !RoomKey(room, mgr, id) || it->second.mgr != mgr || it->second.id != id || !it->second.has[0] || !it->second.has[1])
+        return why = "no base noted at its solve", false;
+    BaseRec& rec = it->second;
+    if (rec.discardOnQueue) return why = "sent to its solve by Rooms at Night", false;
+    if (!ReadPair(room, cur, state)) return why = "not read", false;
+    if (RoomAmbientPolicy::AmbientStepRunning(state)) return why = "being solved", false;
+    if (!RoomAmbientPolicy::SwapHolds(cur, rec.res, shown, shownOwn))
+        return why = "its ambient is not the one its kept solve showed (an atrium's colour, or changed since)", false;
+    if (!Near(ce, rec.ce, 1e-7f)) return why = "Rooms at Night's colour changed since its cached solve", false;
+    if (!WritePair(room, pair[0], pair[1])) return why = "not written", false;
+    if (was) std::memcpy(was, cur, sizeof cur);
+    if (wasOwn) std::memcpy(wasOwn, rec.res[0], sizeof rec.res[0]);
+    std::memcpy(rec.res[0], own, sizeof rec.res[0]), std::memcpy(rec.res[1], pair[1], sizeof rec.res[1]);
     return true;
 }
 // The directions of the three [NoLight] lights (normalised CustomLightRigging.ini directions; PS c0 / c3 / c2 of every

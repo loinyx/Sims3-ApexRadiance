@@ -45,6 +45,11 @@ void PureChecks() {
     Expect(!L::Substitutes(true, 0, nullptr, nullptr), "no back buffer known");
     Expect(L::NeedsResolve(true, &bb, &other, &bb) && L::NeedsResolve(true, &other, &bb, &bb), "copy from or to the back buffer resolves");
     Expect(!L::NeedsResolve(true, &other, nullptr, &bb) && !L::NeedsResolve(false, &bb, nullptr, &bb), "other copies and resolved frames do not");
+    // issue 59: an unused target is never drawn over the back buffer; the back-buffer alias only when the objects differ
+    Expect(L::ResolveDraws(true) && !L::ResolveDraws(false), "the resolve draws only a target the scene went into");
+    Expect(L::BackBufferAlias(&bb, &bb) == nullptr, "one back-buffer object (D3D9, DXVK): no alias");
+    Expect(L::BackBufferAlias(&other, &bb) == &other, "two objects (Remix bridge): render target 0 is the alias");
+    Expect(L::BackBufferAlias<int>(nullptr, &bb) == nullptr && L::BackBufferAlias<int>(&other, nullptr) == nullptr, "nothing read: no alias");
 
     // exact 8-bit levels pass unchanged, whatever the noise
     bool exact = true;
@@ -97,6 +102,15 @@ void NativeChecks() {
         std::printf("SKIP: no D3D9 HAL device, native resolve not checked\n");
         if (d3d) d3d->Release();
         return;
+    }
+    {
+        // issue 59: Apex's GetBackBuffer detour stays off where render target 0 and the back buffer are one object
+        IDirect3DSurface9 *rt0 = nullptr, *bb = nullptr;
+        dev->GetRenderTarget(0, &rt0);
+        dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb);
+        Expect(rt0 && L::BackBufferAlias(rt0, bb) == nullptr, "this d3d9: render target 0 is the back buffer object (no alias)");
+        if (rt0) rt0->Release();
+        if (bb) bb->Release();
     }
     D3DDISPLAYMODE mode{};
     d3d->GetAdapterDisplayMode(0, &mode);

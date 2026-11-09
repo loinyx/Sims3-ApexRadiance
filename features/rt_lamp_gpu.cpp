@@ -87,6 +87,7 @@ bool Engine::Init(IDirect3DDevice9* dev, void* const* shaders, int face, std::st
         return false;
     }
     face_ = std::clamp(face, 64, 256);
+    tileMaxH_ = tileMaxW_ = 0; // (in tiles of this face size)
     vs_ = static_cast<IDirect3DVertexShader9*>(shaders[kShadowVs]);
     for (int i = 0; i < kShaderCount; i++) {
         if (IsVertex(static_cast<ShaderId>(i))) continue;
@@ -146,6 +147,8 @@ void Engine::ReleaseDefault() {
     Rel(x_);
     xW_ = xH_ = 0;
     Rel(saved_); // (a state block is a device object: made again after a reset)
+    for (KeptTex& k : keptCopies_) Rel(k.t);
+    keptCopies_.clear();
 }
 void Engine::ReleaseAll() {
     ReleaseDefault();
@@ -175,7 +178,7 @@ size_t Engine::DefaultBytes() const {
     if (acc_[0]) b += static_cast<size_t>(scratchW_) * scratchH_ * 16 * 2;
     if (scratch_[0]) b += static_cast<size_t>(scratchW_) * scratchH_ * 4 * 5;
     b += static_cast<size_t>(blkW_) * blkH_ * 16 + static_cast<size_t>(t3W_) * t3H_ * 16 + static_cast<size_t>(xW_) * xH_ * 16;
-    if (tiles_) b += static_cast<size_t>(6 * face_) * tileRows_ * face_ * ((tilesFmt_ == D3DFMT_G32R32F ? 8 : 4) + 4); // the kept atlas + D24X8
+    if (tiles_) b += static_cast<size_t>(6 * face_) * tileCols_ * tilePer_ * face_ * ((tilesFmt_ == D3DFMT_G32R32F ? 8 : 4) + 4); // the kept atlas + D24X8
     return b;
 }
 
@@ -628,12 +631,21 @@ bool Engine::ComposeImpl(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTextu
         float c[100][4] = {};
         c[99][2] = 1.0f / static_cast<float>(scratchW_), c[99][3] = 1.0f / static_cast<float>(scratchH_);
         c_.SetPsConst(dev, 99, c[99], 1);
-        const float flags[4] = {p.maskAllGpu ? 1.0f : 0.0f, FloatTarget(out), 0, 0};
+        const float flags[4] = {p.maskAllGpu ? 1.0f : 0.0f, FloatTarget(out), psId == kComposePs ? p.inK : 0.0f, p.inSoft ? 1.0f : 0.0f};
         c_.SetPsConst(dev, 101, flags, 1);
+        if (psId == kComposePs && p.inK > 0.0f) c_.SetPsConst(dev, 104, &p.inFit[0][0], 4);
     }
     const bool keptX = psId == kComposePs && p.keptX;
     c_.SetPixelShader(dev, ps_[keptX ? kComposeK0Ps : psId]);
     c_.SetTexture(dev, 1, acc_[accCur_]);
+    // (bit 8) the rooms' bases now, point sampled at the texel (InBase); none: gIB.z 0, the vertices' bases
+    D3DSURFACE_DESC ibd{};
+    const bool inBase = psId == kComposePs && p.inBase && SUCCEEDED(p.inBase->GetLevelDesc(0, &ibd));
+    {
+        const float ib[4] = {inBase ? 1.0f / static_cast<float>(ibd.Width) : 0.0f, inBase ? 1.0f / static_cast<float>(ibd.Height) : 0.0f, inBase ? 1.0f : 0.0f, 0.0f};
+        c_.SetPsConst(dev, 127, ib, 1);
+    }
+    if (inBase) c_.SetTexture(dev, 10, p.inBase), PointSampler(dev, 10);
     if (keptX) {
         if (p.physX && !x_) return err = "no physical second sum", false;
         c_.SetTexture(dev, 3, p.physX ? x_ : acc_[1 - accCur_]);
@@ -667,6 +679,7 @@ bool Engine::ComposeImpl(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTextu
     c_.SetTexture(dev, 1, nullptr);
     c_.SetTexture(dev, 2, nullptr);
     if (keptX) c_.SetTexture(dev, 3, nullptr);
+    if (inBase) c_.SetTexture(dev, 10, nullptr);
     c_.SetVertexShader(dev, nullptr);
     stats_.composeDraws++;
     if (FAILED(hr)) {
@@ -726,29 +739,66 @@ bool Engine::ComposeImpl(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTextu
 }
 
 // ---- GPU lamps for every room ----
-bool Engine::EnsureTiles(IDirect3DDevice9* dev, int rows, std::string& err) {
-    rows = std::clamp(rows, 1, 64);
-    if (tiles_ && tilesDepth_ && tileRows_ == rows) return true;
-    Rel(tiles_);
+bool Engine::EnsureTiles(IDirect3DDevice9* dev, int rows, std::string& err, bool* kept) {
+    if (kept) *kept = false;
+    if (!tileMaxH_) { // (the tiles the device's texture height and width take, once)
+        D3DCAPS9 caps{};
+        const int face = std::max(face_, 1);
+        const bool got = SUCCEEDED(dev->GetDeviceCaps(&caps));
+        // (8192 at most: a 15360-texel column rasterized one shadow texel differently, one sum of 2720 off; up to 8192 bit for bit)
+        tileMaxH_ = std::max(1, std::min(8192, got ? static_cast<int>(caps.MaxTextureHeight) : 4096) / face);
+        tileMaxW_ = std::max(1, std::min(8192, got ? static_cast<int>(caps.MaxTextureWidth) : 4096) / (6 * face));
+    }
+    rows = std::clamp(rows, 1, std::min(128, tileMaxH_ * tileMaxW_));
+    // (an atlas the device could not make, low video memory: a smaller one, not the same size failing every frame with no lamps)
+    if (tileFailRows_) rows = std::min(rows, std::max(1, tileFailRows_ * 3 / 4));
+    if (tiles_ && tilesDepth_ && tileRows_ == rows) return kept && (*kept = true), true;
+    // (grown: the old atlas's tiles copied into the new one, each to its place there, so no lamp's shadow is rendered again; a tile
+    // copied holds the texels its render left, which a render in another place gives bit for bit: rt_lamps_test)
+    IDirect3DTexture9* old = rows > tileRows_ && tilesDepth_ ? tiles_ : nullptr;
+    const int oldRows = tileRows_, oldPer = tilePer_;
+    const D3DFORMAT oldFmt = tilesFmt_;
+    if (!old) Rel(tiles_);
+    tiles_ = nullptr;
     Rel(tilesDepth_);
     tileRows_ = 0;
-    const UINT w = static_cast<UINT>(6 * face_), h = static_cast<UINT>(rows * face_);
+    const int cols = (rows + tileMaxH_ - 1) / tileMaxH_, per = (rows + cols - 1) / cols; // (as square as the columns let it be)
+    const UINT w = static_cast<UINT>(6 * face_ * cols), h = static_cast<UINT>(per * face_);
     tilesFmt_ = D3DFMT_G16R16F;
     if (FAILED(dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_G16R16F, D3DPOOL_DEFAULT, &tiles_, nullptr)) || !tiles_) {
         tiles_ = nullptr;
         tilesFmt_ = D3DFMT_G32R32F;
         if (FAILED(dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_G32R32F, D3DPOOL_DEFAULT, &tiles_, nullptr)) || !tiles_) {
             tiles_ = nullptr;
+            Rel(old);
+            tileFailRows_ = tileFailRows_ ? std::min(tileFailRows_, rows) : rows;
             err = std::format("the {}x{} kept shadow atlas could not be created", w, h);
             return false;
         }
     }
     if (FAILED(dev->CreateDepthStencilSurface(w, h, D3DFMT_D24X8, D3DMULTISAMPLE_NONE, 0, TRUE, &tilesDepth_, nullptr)) || !tilesDepth_) {
         Rel(tiles_);
+        Rel(old);
+        tileFailRows_ = tileFailRows_ ? std::min(tileFailRows_, rows) : rows;
         err = std::format("the {}x{} D24X8 depth of the kept shadow atlas could not be created", w, h);
         return false;
     }
-    tileRows_ = rows;
+    tileRows_ = rows, tilePer_ = per, tileCols_ = cols;
+    if (old) {
+        IDirect3DSurface9 *from = Surf(old), *to = Surf(tiles_);
+        bool ok = from && to && oldFmt == tilesFmt_;
+        for (int t = 0; ok && t < oldRows; t++) {
+            int fc = 0, tr = 0;
+            TileAt(t, fc, tr);
+            const LONG f = face_, ox = static_cast<LONG>(t / oldPer * 6 * f), oy = static_cast<LONG>(t % oldPer * f);
+            const RECT src{ox, oy, ox + 6 * f, oy + f}, dst{fc * f, tr * f, (fc + 6) * f, (tr + 1) * f};
+            ok = SUCCEEDED(dev->StretchRect(from, &src, to, &dst, D3DTEXF_NONE));
+        }
+        if (from) from->Release();
+        if (to) to->Release();
+        Rel(old);
+        if (kept) *kept = ok;
+    }
     return true;
 }
 bool Engine::RenderShadowTile(IDirect3DDevice9* dev, const float pos[3], int tile, float farDist, std::string& err) {
@@ -769,8 +819,10 @@ bool Engine::RenderShadowTileRanges(IDirect3DDevice9* dev, const float pos[3], i
     for (DWORD i = 1; i < 4; i++) c_.SetRenderTarget(dev, i, nullptr);
     c_.SetDepthStencil(dev, tilesDepth_);
     PassStates(dev);
-    // the tile's row: cleared to "nothing in the way" (Clear honours the viewport)
-    const D3DVIEWPORT9 row{0, static_cast<DWORD>(tile * face_), static_cast<DWORD>(6 * face_), static_cast<DWORD>(face_), 0.0f, 1.0f};
+    // the tile: cleared to "nothing in the way" (Clear honours the viewport)
+    int fc = 0, tr = 0;
+    TileAt(tile, fc, tr);
+    const D3DVIEWPORT9 row{static_cast<DWORD>(fc * face_), static_cast<DWORD>(tr * face_), static_cast<DWORD>(6 * face_), static_cast<DWORD>(face_), 0.0f, 1.0f};
     c_.SetViewport(dev, &row);
     dev->Clear(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, 0xFFFFFFFF, 1.0f, 0);
     // (the tiles' own occluders once set: physical indoor lamps' proxy with open tops, none when it is empty; else the outdoor one)
@@ -793,7 +845,7 @@ bool Engine::RenderShadowTileRanges(IDirect3DDevice9* dev, const float pos[3], i
             float rows[3][4];
             for (int r = 0; r < 3; r++) rows[r][0] = kFaces[f][r][0], rows[r][1] = kFaces[f][r][1], rows[r][2] = kFaces[f][r][2], rows[r][3] = 0.0f;
             c_.SetVsConst(dev, 0, &rows[0][0], 3);
-            const D3DVIEWPORT9 vp{static_cast<DWORD>(f * face_), static_cast<DWORD>(tile * face_), static_cast<DWORD>(face_), static_cast<DWORD>(face_), 0.0f, 1.0f};
+            const D3DVIEWPORT9 vp{static_cast<DWORD>((fc + f) * face_), static_cast<DWORD>(tr * face_), static_cast<DWORD>(face_), static_cast<DWORD>(face_), 0.0f, 1.0f};
             c_.SetViewport(dev, &vp);
             for (const auto& [first, count] : ranges) {
                 if (!count || first >= tris) continue;
@@ -916,11 +968,13 @@ bool Engine::AccumulateRlg(IDirect3DDevice9* dev, const Map& m, const RtLampMode
         float rows[5][4];
         GpuLampLaw::Rows(lamps[i].law, rows);
         for (int r = 0; r < 5; r++) std::memcpy(c[r * 16 + i], rows[r], sizeof rows[r]);
-        c[80 + i][0] = static_cast<float>(tiles[i]);
+        int fc = 0, tr = 0;
+        TileAt(tiles[i], fc, tr);
+        c[80 + i][0] = static_cast<float>(tr), c[80 + i][2] = static_cast<float>(fc); // (its row, its column's first face: Stored)
         c[80 + i][1] = lamps[i].mult;
     }
     c[96][0] = static_cast<float>(n), c[96][1] = p.thr, c[96][2] = p.fade ? 1.0f : 0.0f, c[96][3] = p.reachOn ? 1.0f : 0.0f;
-    c[97][0] = p.radius, c[97][1] = static_cast<float>(face_), c[97][2] = 1.0f / static_cast<float>(6 * face_), c[97][3] = 1.0f / static_cast<float>(tileRows_ * face_);
+    c[97][0] = p.radius, c[97][1] = static_cast<float>(face_), c[97][2] = 1.0f / static_cast<float>(6 * face_ * tileCols_), c[97][3] = 1.0f / static_cast<float>(tilePer_ * face_);
     c[98][0] = p.aa, c[98][1] = p.normalOffset, c[98][2] = p.biasM, c[98][3] = p.biasTexels;
     c[99][0] = 1.0f / p.farDist, c[99][1] = p.farDist, c[99][2] = 1.0f / static_cast<float>(scratchW_), c[99][3] = 1.0f / static_cast<float>(scratchH_);
     c[100][0] = first ? 1.0f : 0.0f, c[100][1] = p.mask ? 1.0f : 0.0f, c[100][3] = -1.0f;
@@ -1094,6 +1148,46 @@ bool Engine::CopyTexture(IDirect3DDevice9* dev, IDirect3DBaseTexture9* src, IDir
     Quad(dev, w, h);
     c_.SetTexture(dev, 0, nullptr);
     return true;
+}
+
+IDirect3DTexture9* Engine::KeepCopy(IDirect3DDevice9* dev, IDirect3DTexture9* src, int w, int h, std::string& err) {
+    auto it = std::find_if(keptCopies_.begin(), keptCopies_.end(), [&](const KeptTex& k) { return k.w == w && k.h == h; });
+    if (it == keptCopies_.end()) {
+        KeptTex k{w, h, nullptr};
+        if (w <= 0 || h <= 0 || FAILED(dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &k.t, nullptr)) || !k.t)
+            return err = "the kept copy could not be made", nullptr;
+        keptCopies_.push_back(k);
+        it = keptCopies_.end() - 1;
+    }
+    return CopyTexture(dev, src, it->t, w, h, err) ? it->t : nullptr;
+}
+bool Engine::CopyRects(IDirect3DDevice9* dev, const std::vector<Block>& rects, IDirect3DTexture9* src, IDirect3DTexture9* out, int w, int h, std::string& err) {
+    if (rects.empty()) return true;
+    if (!ready_ || !src || !out || w <= 0 || h <= 0) return err = "nothing to copy", false;
+    c_.SetDepthStencil(dev, nullptr);
+    PassStates(dev);
+    PointSampler(dev, 0);
+    c_.SetVertexShader(dev, nullptr);
+    if (!Target(dev, out, w, h)) return err = "the copy could not be targeted", false;
+    c_.SetPixelShader(dev, ps_[kCopyPs]);
+    c_.SetTexture(dev, 0, src);
+    // (as Quad: a texel's centre samples (x + 0.5) / w, the texel itself with the point sampler)
+    std::vector<QuadV> v;
+    v.reserve(rects.size() * 6);
+    const float iw = 1.0f / static_cast<float>(w), ih = 1.0f / static_cast<float>(h);
+    for (const Block& b : rects) {
+        const float x0 = static_cast<float>(b.x0) - 0.5f, y0 = static_cast<float>(b.y0) - 0.5f, x1 = static_cast<float>(b.x1) + 0.5f, y1 = static_cast<float>(b.y1) + 0.5f;
+        const auto P = [&](float x, float y) { v.push_back(QuadV{x, y, 0, 1, (x + 0.5f) * iw, (y + 0.5f) * ih, {}}); };
+        P(x0, y0), P(x1, y0), P(x0, y1), P(x1, y0), P(x1, y1), P(x0, y1);
+    }
+    dev->SetFVF(kQuadFvf);
+    bool ok = true;
+    for (size_t at = 0; ok && at < v.size(); at += 3 * 60000) { // (DrawPrimitiveUP: at most 65535 primitives a call on some drivers)
+        const UINT tris = static_cast<UINT>(std::min<size_t>((v.size() - at) / 3, 60000));
+        ok = SUCCEEDED(dev->DrawPrimitiveUP(D3DPT_TRIANGLELIST, tris, v.data() + at, sizeof(QuadV)));
+    }
+    c_.SetTexture(dev, 0, nullptr);
+    return ok ? true : (err = "the rects' copy failed", false);
 }
 
 bool Engine::ReadFloat4(IDirect3DDevice9* dev, IDirect3DTexture9* t, int w, int h, std::vector<float>& out) {

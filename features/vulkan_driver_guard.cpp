@@ -3,6 +3,7 @@
 // Part of Apex Radiance. Credits: @loinyx
 #include "vulkan_driver_guard.h"
 #include "apex_log.h"
+#include "platform.h"
 #include <windows.h>
 #include <dxgi.h>
 #pragma comment(lib, "advapi32.lib")
@@ -65,6 +66,7 @@ std::vector<std::pair<std::wstring, std::wstring>> AmdLayerDisables() {
 }
 
 std::string Decide() {
+    if (Platform::RemixBridge()) return "left as it is: RTX Remix bridge (DXVK and the Vulkan loader run in another process)";
     if (GetModuleHandleW(L"vulkan-1.dll")) return "left as it is: the Vulkan loader was already loaded";
     for (const wchar_t* v : {L"VK_LOADER_DRIVERS_DISABLE", L"VK_LOADER_DRIVERS_SELECT", L"VK_DRIVER_FILES", L"VK_ICD_FILENAMES", L"VK_ADD_DRIVER_FILES"})
         if (EnvSet(v)) return "left as it is: a Vulkan driver variable is already set";

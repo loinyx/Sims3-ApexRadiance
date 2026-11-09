@@ -83,7 +83,8 @@ uintptr_t ScanRange(uintptr_t from, uintptr_t to, uintptr_t limit, const BYTE* b
 } // namespace
 
 bool ReadBytes(uintptr_t address, void* out, size_t count) {
-    if (!address || !out) return false;
+    // (issue #55) the first 64 KB are never mapped on Windows: a null base plus an offset fails here, not as a handled fault
+    if (address < 0x10000 || !out) return false;
     return GuardedCopy(out, reinterpret_cast<const void*>(address), count);
 }
 

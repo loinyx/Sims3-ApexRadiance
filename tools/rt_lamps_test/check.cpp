@@ -45,6 +45,7 @@
 #include "features/room_lamp_move.h"
 #include "features/rt_outdoor_lamps.h"
 #include "features/lamp_reach.h"
+#include "features/phys_tiles.h"
 // The dither offset of 2.12.4's Smooth light maps (RoomMapDither::Offset, interleaved gradient noise): 2.12.3 + RT has no
 // map dither (its relight passes 0), but the compose shader keeps the input, so the harness still checks it
 namespace RoomMapDither {
@@ -2534,6 +2535,342 @@ bool Room0KeptCheck() {
     return true;
 }
 
+// (ComposePS InBase; RtOutdoorLamps InBaseNow) a new kept solve of the room below reaches the attic in the frame it is kept: the
+// bit-16 wall texels (ratio and carried light) and the bit-8 floor texels composed with a stale vertex base and the room's base now
+// in the base map equal those composed with that base in the vertices (within the half's rounding: 1 level), texels not written in
+// the base map (alpha 0) and unmarked texels bit for bit as without it
+bool InBaseCheck() {
+    constexpr int w = 8, h = 16;
+    LampDef d;
+    d.pos[0] = 4.0f, d.pos[1] = 0.4f, d.pos[2] = 0.6f;
+    d.range = 40.0f;
+    const RtLampModel::Lamp lamp = ToLamp(d, 1.0f);
+    const float now[3] = {0.61f, 0.37f, 0.18f}, stale[3] = {0.3f, 0.2f, 0.1f};
+    std::vector<RtLampGpu::TexelVertex> lit, fresh, old;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            RtLampGpu::TexelVertex v{};
+            v.x = static_cast<float>(x), v.y = static_cast<float>(y), v.w = 1.0f;
+            v.p[0] = 2.5f + 0.5f * x, v.p[1] = 3.0f + 0.2f * (h - 1 - y), v.p[2] = 0.0f;
+            v.n[2] = 1.0f, v.n[3] = 0.5f;
+            for (int k = 0; k < 3; k++) v.base[k] = stale[k];
+            lit.push_back(v);
+            // columns: 0 unmarked, 1 a floor texel (bit 8), 2.. wall texels (bit 16); column 7 not written in the base map
+            if (x >= 1) v.p[3] = x == 1 ? 8.0f : 24.0f, v.mask[2] = 0.0f, v.mask[3] = v.p[1];
+            if (x >= 2) v.mask[0] = static_cast<float>(x), v.mask[1] = static_cast<float>(h - 1);
+            old.push_back(v);
+            if (x >= 1 && x < w - 1)
+                for (int k = 0; k < 3; k++) v.base[k] = now[k];
+            fresh.push_back(v);
+        }
+    RtLampGpu::Engine eng(RtLampGpu::PlainCalls());
+    std::string err;
+    RtLampProxy::Mesh empty;
+    if (!eng.Init(g_dev, g_shaders, 64, err) || !eng.SetProxy(g_dev, empty, err)) {
+        Check(false, "in-base engine: " + err);
+        return false;
+    }
+    RtLampGpu::Map mLit, mFresh, mOld;
+    mLit.w = mFresh.w = mOld.w = w, mLit.h = mFresh.h = mOld.h = h, mLit.count = mFresh.count = mOld.count = w * h;
+    IDirect3DTexture9 *out = nullptr, *outRef = nullptr, *scale = nullptr, *scaleRef = nullptr, *base = nullptr;
+    bool ok = RtLampGpu::Engine::MakeVb(g_dev, lit.data(), mLit.count, &mLit.vb) && RtLampGpu::Engine::MakeVb(g_dev, fresh.data(), mFresh.count, &mFresh.vb) &&
+              RtLampGpu::Engine::MakeVb(g_dev, old.data(), mOld.count, &mOld.vb);
+    for (IDirect3DTexture9** t : {&out, &outRef, &scale, &scaleRef})
+        ok = ok && SUCCEEDED(g_dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, t, nullptr));
+    ok = ok && SUCCEEDED(g_dev->CreateTexture(w, h, 1, 0, D3DFMT_A16B16G16R16F, D3DPOOL_MANAGED, &base, nullptr));
+    D3DLOCKED_RECT lr{};
+    if (ok && SUCCEEDED(base->LockRect(0, &lr, nullptr, 0))) {
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++) {
+                uint16_t* px = reinterpret_cast<uint16_t*>(static_cast<char*>(lr.pBits) + y * lr.Pitch) + x * 4;
+                const bool written = x >= 1 && x < w - 1;
+                const float v[4] = {now[0], now[1], now[2], written ? 1.0f : 0.0f};
+                for (int k = 0; k < 4; k++) px[k] = written || k < 3 ? RtLampProxy::Half(v[k]) : 0;
+            }
+        base->UnlockRect(0);
+    } else
+        ok = false;
+    std::vector<uint32_t> got, ref, k, kRef;
+    if (ok) {
+        RtLampGpu::Params p, pb;
+        pb.inBase = base;
+        g_dev->BeginScene();
+        if (eng.Begin(g_dev)) {
+            const float pos[1][3] = {{d.pos[0], d.pos[1], d.pos[2]}};
+            ok = eng.RenderShadows(g_dev, pos, 1, 64.0f, err) && eng.Accumulate(g_dev, mLit, &lamp, 1, p, true, err) &&
+                 eng.Compose(g_dev, mFresh, nullptr, outRef, p, err, scaleRef) && eng.Compose(g_dev, mOld, nullptr, out, pb, err, scale);
+            eng.End(g_dev);
+        } else
+            ok = false;
+        g_dev->EndScene();
+        ok = ok && RtLampGpu::Engine::ReadTexture(g_dev, out, w, h, got) && RtLampGpu::Engine::ReadTexture(g_dev, outRef, w, h, ref) &&
+             RtLampGpu::Engine::ReadTexture(g_dev, scale, w, h, k) && RtLampGpu::Engine::ReadTexture(g_dev, scaleRef, w, h, kRef);
+    }
+    long within = 0, exact = 0, n = 0;
+    const auto close = [](uint32_t a, uint32_t b) {
+        for (int s = 0; s < 32; s += 8)
+            if (std::abs(static_cast<int>(a >> s & 0xFF) - static_cast<int>(b >> s & 0xFF)) > 1) return false;
+        return true;
+    };
+    for (int y = 0; ok && y < h; y++)
+        for (int x = 0; x < w; x++) {
+            const size_t i = static_cast<size_t>(y * w + x);
+            n++;
+            if (x == 0 || x == w - 1) exact += got[i] == ref[i] && k[i] == kRef[i]; // (unmarked; not written: the vertex base, the same here)
+            else within += close(got[i], ref[i]) && close(k[i], kRef[i]);
+        }
+    for (IDirect3DTexture9* t : {out, outRef, scale, scaleRef, base})
+        if (t) t->Release();
+    for (IDirect3DVertexBuffer9* b : {mLit.vb, mFresh.vb, mOld.vb})
+        if (b) b->Release();
+    std::printf("  in-base: %ld of %d floor and wall texels as composed with the room's base now (1 level), %ld of %d others bit for bit\n", within, h * (w - 2), exact, h * 2);
+    Check(ok && within == h * (w - 2) && exact == h * 2, "the attic's base read from the room's kept solve now, in the compose: " + err);
+    return ok;
+}
+
+// (RtOutdoorLamps InRoomsNow / UploadSlot) the attic's binding of its rooms' maps: the UV map's texels (RtLampProxy::FillUv) point
+// at the matched room texel's centre with its slot, 0 elsewhere and past a room's map; a frame whose rooms are not all read keeps the
+// last binding of the same layout (never the carried texels for a frame), a new layout drops it until read; a prepare that matches
+// the same texels keeps the UV map (InUv equality)
+void AtticBindCheck() {
+    using RtLampProxy::InUv;
+    const std::vector<InUv> src = {{1, 2, 3, 4, 0}, {5, 0, 7, 1, 2}, {6, 6, 40, 0, 1}}; // (the third past its room's 32-wide map)
+    const uint32_t size[4] = {16u << 16 | 8u, 32u << 16 | 4u, 8u << 16 | 2u, 0};
+    constexpr uint32_t w = 8, h = 8;
+    std::vector<unsigned char> bits(w * h * 8 + 64, 0xAB);
+    const size_t pitch = w * 8 + 8; // (a row's padding stays as it was)
+    RtLampProxy::FillUv(src, size, w, h, pitch, bits.data());
+    const auto px = [&](uint32_t x, uint32_t y) { return reinterpret_cast<const uint16_t*>(bits.data() + y * pitch) + x * 4; };
+    long marked = 0, zero = 0, exact = 0;
+    for (uint32_t y = 0; y < h; y++)
+        for (uint32_t x = 0; x < w; x++) {
+            const uint16_t* p = px(x, y);
+            if (p[3] == 0xFFFF) {
+                marked++;
+                for (const InUv& e : src)
+                    if (e.x == x && e.y == y) {
+                        const uint32_t rw = size[e.slot] >> 16, rh = size[e.slot] & 0xFFFF;
+                        const double u = p[0] / 65535.0 * rw - 0.5, v = p[1] / 65535.0 * rh - 0.5, sl = p[2] / 65535.0 * 3.0;
+                        exact += std::fabs(u - e.rx) < 0.01 && std::fabs(v - e.ry) < 0.01 && std::fabs(sl - e.slot) < 1e-3;
+                    }
+            } else
+                zero += p[0] == 0 && p[1] == 0 && p[2] == 0 && p[3] == 0;
+        }
+    Check(marked == 2 && exact == 2 && zero == static_cast<long>(w * h) - 2 && bits[w * 8] == 0xAB, "attic UV map: matched texels at their room texel's centre and slot, the rest 0");
+    // the binding over frames: read, a room's map not read (kept), read, a new layout not read (none), read
+    using RtLampProxy::InPick;
+    bool have = false;
+    const struct { bool read, same; InPick want; } frames[] = {{true, true, InPick::Now}, {false, true, InPick::Kept}, {false, true, InPick::Kept},
+                                                              {true, true, InPick::Now}, {false, false, InPick::None}, {true, true, InPick::Now}};
+    long right = 0;
+    for (const auto& f : frames) {
+        const InPick p = RtLampProxy::PickIndoor(f.read, have, f.same);
+        right += p == f.want;
+        have = p != InPick::None;
+    }
+    Check(right == static_cast<long>(std::size(frames)) && RtLampProxy::PickIndoor(false, false, true) == InPick::None,
+          "attic binding: the last one kept through frames whose rooms are not read, dropped for a new layout");
+    std::vector<InUv> again = src, moved = src;
+    moved[1].rx++;
+    Check(again == src && !(moved == src), "attic re-prepare: the same matched texels keep the UV map, another match builds it again");
+    Check(RtLampProxy::Half(1.0f) == 0x3C00 && RtLampProxy::Half(0.5f) == 0x3800 && RtLampProxy::Half(0.1f) == 0x2E66 && RtLampProxy::Half(0.0f) == 0 &&
+              RtLampProxy::Half(-1.0f) == 0 && RtLampProxy::Half(1e6f) == 0x7BFF && RtLampProxy::Half(65504.0f) == 0x7BFF && RtLampProxy::Half(1e-6f) == 0x0011,
+          "the base map's halves (1, 0.5, 0.1, 0, below 0, past the range, a subnormal)");
+    std::printf("  attic binding: %ld of 2 UV texels exact, %ld of %d frames bound as expected\n", exact, right, static_cast<int>(std::size(frames)));
+}
+
+// (ComposePS / ComposeK0PS IndoorRatio; the attic drawn from its room's own map, ShaderPatches IndoorPick rooms): a marked texel
+// matched to its room's map (bit 16) keeps its light in the map, exactly as bit 8 composes it (every reader that does not take the
+// ratio sees light), and in the outdoor scale's .z the GPU lamps' fall-off up its wall, lum(base + lamps here) / lum(base + lamps at its lowest marked
+// texel (mask.xy): exactly 1 on that row (the floor line, so the draw shows the room's texel there bit for bit), within [0, 1] above,
+// 1 with no lamp; the scale's x, y and w as bit 8's. Others composed as before
+bool RatioCheck() {
+    constexpr int w = 8, h = 16;
+    LampDef d;
+    d.pos[0] = 4.0f, d.pos[1] = 0.4f, d.pos[2] = 0.6f; // (a lamp low in front of the wall: brightest at its foot)
+    d.range = 40.0f;
+    const RtLampModel::Lamp lamp = ToLamp(d, 1.0f);
+    std::vector<RtLampGpu::TexelVertex> lit, inner, marked, markedDay;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            RtLampGpu::TexelVertex v{};
+            v.x = static_cast<float>(x), v.y = static_cast<float>(y), v.w = 1.0f;
+            v.p[0] = 2.5f + 0.5f * x, v.p[1] = 3.0f + 0.2f * (h - 1 - y), v.p[2] = 0.0f; // (row h - 1 the lowest: the floor line)
+            v.n[2] = 1.0f, v.n[3] = 0.5f;
+            v.base[0] = 0.3f, v.base[1] = 0.2f, v.base[2] = 0.1f, v.base[3] = 2.0f / 255.0f;
+            lit.push_back(v);
+            const bool unmarked = x == 0; // (the first column: as before)
+            if (!unmarked) v.p[3] = 8.0f, v.mask[2] = 0.0f, v.mask[3] = v.p[1];
+            inner.push_back(v);
+            if (!unmarked) v.p[3] = 24.0f, v.mask[0] = static_cast<float>(x), v.mask[1] = static_cast<float>(h - 1);
+            marked.push_back(v);
+            for (int k = 0; k < 3; k++) v.base[k] *= 40.0f; // (by day: the matched top texel's daylight far above the lamp's light)
+            markedDay.push_back(v);
+        }
+    RtLampGpu::Engine eng(RtLampGpu::PlainCalls());
+    std::string err;
+    RtLampProxy::Mesh empty;
+    if (!eng.Init(g_dev, g_shaders, 64, err) || !eng.SetProxy(g_dev, empty, err)) {
+        Check(false, "ratio engine: " + err);
+        return false;
+    }
+    RtLampGpu::Map mLit, mInner, mMarked, mDay;
+    mLit.w = mInner.w = mMarked.w = mDay.w = w, mLit.h = mInner.h = mMarked.h = mDay.h = h, mLit.count = mInner.count = mMarked.count = mDay.count = w * h;
+    IDirect3DTexture9 *out = nullptr, *outRef = nullptr, *scale = nullptr, *scaleRef = nullptr, *outDay = nullptr, *scaleDay = nullptr;
+    bool ok = RtLampGpu::Engine::MakeVb(g_dev, lit.data(), mLit.count, &mLit.vb) && RtLampGpu::Engine::MakeVb(g_dev, inner.data(), mInner.count, &mInner.vb) &&
+              RtLampGpu::Engine::MakeVb(g_dev, marked.data(), mMarked.count, &mMarked.vb) && RtLampGpu::Engine::MakeVb(g_dev, markedDay.data(), mDay.count, &mDay.vb);
+    for (IDirect3DTexture9** t : {&out, &outRef, &scale, &scaleRef, &outDay, &scaleDay})
+        ok = ok && SUCCEEDED(g_dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, t, nullptr));
+    for (int lamps = 1; lamps >= 0 && ok; lamps--) {
+        RtLampGpu::Params p;
+        std::vector<uint32_t> got, ref, k, kRef, kDay;
+        g_dev->BeginScene();
+        if (eng.Begin(g_dev)) { // (the sum of the lit points, composed by the bit-8 and the bit-16 ones: the same sum at every texel)
+            const float pos[1][3] = {{d.pos[0], d.pos[1], d.pos[2]}};
+            ok = (!lamps || eng.RenderShadows(g_dev, pos, 1, 64.0f, err)) && eng.Accumulate(g_dev, mLit, lamps ? &lamp : nullptr, lamps, p, true, err) &&
+                 eng.Compose(g_dev, mInner, nullptr, outRef, p, err, scaleRef) && eng.Compose(g_dev, mMarked, nullptr, out, p, err, scale) &&
+                 eng.Compose(g_dev, mDay, nullptr, outDay, p, err, scaleDay);
+            eng.End(g_dev);
+        } else
+            ok = false;
+        g_dev->EndScene();
+        ok = ok && RtLampGpu::Engine::ReadTexture(g_dev, out, w, h, got) && RtLampGpu::Engine::ReadTexture(g_dev, outRef, w, h, ref) &&
+             RtLampGpu::Engine::ReadTexture(g_dev, scale, w, h, k) && RtLampGpu::Engine::ReadTexture(g_dev, scaleRef, w, h, kRef) &&
+             RtLampGpu::Engine::ReadTexture(g_dev, scaleDay, w, h, kDay);
+        if (!ok) break;
+        // (the ratio shapes the lamps' part only, lum(base + lamps here) / lum(base + lamps at the floor line): with daylight in the
+        // base far above the lamp's light it stays near 1 and never under the plain base's; with no lamp it is exactly 1)
+        long dayNear = 0, dayNotLower = 0, dayOne = 0;
+        for (int x = 1; x < w; x++)
+            for (int y = 0; y < h; y++) {
+                const size_t i = static_cast<size_t>(y * w + x);
+                const uint32_t zd = kDay[i] & 0xFF, zp = k[i] & 0xFF;
+                dayNear += zd >= 240, dayNotLower += zd >= zp, dayOne += zd == 255;
+            }
+        long same = 0, sameScale = 0, bottom = 0, mono = 0, below1 = 0;
+        const auto zOf = [&](int x, int y) { return k[static_cast<size_t>(y * w + x)] & 0xFF; };
+        for (int x = 0; x < w; x++)
+            for (int y = 0; y < h; y++) {
+                const size_t i = static_cast<size_t>(y * w + x);
+                same += got[i] == ref[i];
+                if (x == 0) {
+                    sameScale += k[i] == kRef[i];
+                    continue;
+                }
+                sameScale += (k[i] & 0xFFFFFF00u) == (kRef[i] & 0xFFFFFF00u) && (kRef[i] & 0x0000FF00u) == 0x0000FF00u;
+                if (y == h - 1) bottom += zOf(x, y) == 255;
+                below1 += zOf(x, y) < 255;
+                if (y + 1 < h) mono += zOf(x, y) <= zOf(x, y + 1);
+            }
+        const long walls = (w - 1) * h;
+        std::printf("  ratio (%s): %ld of %d texels' light as bit 8 composes it, %ld of %d scales as bit 8's but .z; %ld of %d floor-line ratios 1, "
+                    "%ld of %ld below 1, %ld of %ld not above the one under\n",
+                    lamps ? "a lamp at the wall's foot" : "no lamp", same, w * h, sameScale, w * h, bottom, w - 1, below1, walls, mono, walls - (w - 1));
+        std::printf("  ratio by day (%s): %ld of %d near 1 (>= 240/255), %ld not under the plain base's, %ld exactly 1\n", lamps ? "a lamp" : "no lamp",
+                    dayNear, (w - 1) * h, dayNotLower, dayOne);
+        Check(dayNotLower == (w - 1) * h && dayNear == (w - 1) * h, "ratio by day: the daylight in the base keeps the ratio near 1, never darker than with less base");
+        if (!lamps) Check(dayOne == (w - 1) * h, "ratio by day with no lamp light: exactly 1 (the attic is its room's top texel)");
+        Check(same == w * h, "ratio: the map keeps the texel's light, bit for bit as bit 8 composes it (unmarked texels as before)");
+        Check(sameScale == w * h && bottom == w - 1, "ratio: the scale as bit 8's (the indoor mark) but its .z, exactly 1 at the floor line");
+        if (lamps) Check(below1 == walls - (w - 1) && mono == walls - (w - 1), "ratio: a lamp at the wall's foot falls off up the wall, below 1 above the floor line");
+        else Check(below1 == 0, "ratio: no lamp, 1 everywhere");
+    }
+    for (IDirect3DVertexBuffer9* vb : {mLit.vb, mInner.vb, mMarked.vb, mDay.vb})
+        if (vb) vb->Release();
+    for (IDirect3DTexture9* t : {out, outRef, scale, scaleRef, outDay, scaleDay})
+        if (t) t->Release();
+    Check(ok, "ratio on the GPU: " + err);
+    return ok;
+}
+
+// ---------------------------------------------------------------- Room 0's texels of a space a room of the story below continues into
+// (ComposePS IndoorOf, Params::inK; the attic over lot C49C's red room, 09/11): a texel with bit 8 is composed as that room's wall
+// texel (GpuLampLaw::IndoorTexel with the ambient left to the draw: rgb toned, alpha 1 - sat(k x the toned sum) x its ramp at its
+// height), so with every lamp off its alpha carries the room's ambient weight, which the draw multiplies by the room's ambient as
+// InteriorWall does (not black); every other texel, and every texel with inK 0, is composed as before bit for bit
+bool Room0IndoorCheck() {
+    constexpr int w = 32, h = 16;
+    std::mt19937 rng(911);
+    std::uniform_real_distribution<float> U(0.0f, 1.0f);
+    std::vector<RtLampGpu::TexelVertex> verts;
+    const float fit[2][4] = {{0.55f, 0.006f, 0.6f, 0.95f}, {1.0f, 0.0f, 1.0f, 1.0f}};
+    const float k = 0.75f;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            RtLampGpu::TexelVertex v{};
+            v.x = static_cast<float>(x), v.y = static_cast<float>(y), v.w = 1.0f;
+            v.p[0] = U(rng) * 10.0f, v.p[1] = 5.0f + U(rng) * 3.0f, v.p[2] = U(rng) * 10.0f;
+            v.n[1] = 1.0f, v.n[3] = U(rng) < 0.5f ? 0.0f : U(rng);
+            const bool marked = x >= w / 2, off = y < 4; // (rows 0..3: every lamp off, the texel holds nothing)
+            for (int c = 0; c < 3; c++) v.base[c] = off ? 0.0f : U(rng) * (y < 8 ? 0.05f : 1.4f);
+            v.mask[0] = U(rng), v.mask[1] = U(rng);
+            if (marked) v.p[3] = 8.0f, v.mask[2] = static_cast<float>(x & 1), v.mask[3] = 60.0f + U(rng) * 9.0f;
+            verts.push_back(v);
+        }
+    RtLampGpu::Engine eng(RtLampGpu::PlainCalls());
+    std::string err;
+    RtLampProxy::Mesh empty;
+    if (!eng.Init(g_dev, g_shaders, 64, err) || !eng.SetProxy(g_dev, empty, err)) {
+        Check(false, "room-0 indoor texels engine: " + err);
+        return false;
+    }
+    RtLampGpu::Map m;
+    m.w = w, m.h = h, m.count = static_cast<UINT>(verts.size());
+    IDirect3DTexture9 *outOff = nullptr, *outOn = nullptr;
+    bool ok = RtLampGpu::Engine::MakeVb(g_dev, verts.data(), m.count, &m.vb) &&
+              SUCCEEDED(g_dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &outOff, nullptr)) &&
+              SUCCEEDED(g_dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &outOn, nullptr));
+    std::vector<uint32_t> gotOff, gotOn;
+    for (int soft = 0; soft < 2 && ok; soft++) {
+        RtLampGpu::Params pOff, pOn;
+        pOn.inK = k, pOn.inSoft = soft != 0;
+        for (int r = 0; r < 2; r++) std::memcpy(pOn.inFit[r], fit[r], sizeof fit[r]);
+        g_dev->BeginScene();
+        if (eng.Begin(g_dev)) {
+            ok = eng.Accumulate(g_dev, m, nullptr, 0, pOff, true, err) && eng.Compose(g_dev, m, nullptr, outOff, pOff, err) &&
+                 eng.Accumulate(g_dev, m, nullptr, 0, pOn, true, err) && eng.Compose(g_dev, m, nullptr, outOn, pOn, err);
+            eng.End(g_dev);
+        } else
+            ok = false;
+        g_dev->EndScene();
+        ok = ok && RtLampGpu::Engine::ReadTexture(g_dev, outOff, w, h, gotOff) && RtLampGpu::Engine::ReadTexture(g_dev, outOn, w, h, gotOn);
+        if (!ok) break;
+        long same = 0, within1 = 0, maxDiff = 0, dark = 0, offLit = 0;
+        for (int i = 0; i < w * h; i++) {
+            const RtLampGpu::TexelVertex& v = verts[static_cast<size_t>(i)];
+            if (v.p[3] < 8.0f) {
+                same += gotOff[i] == gotOn[i];
+                continue;
+            }
+            const int r = static_cast<int>(v.mask[2]);
+            const float ramp = std::clamp(fit[r][0] + fit[r][1] * v.mask[3], fit[r][2], fit[r][3]);
+            const float ra[3] = {};
+            float t[4], c[4];
+            GpuLampLaw::IndoorTexel(v.base, ra, ramp, k, t, soft != 0);
+            OutdoorDeltaModel::PackInput(t, t[3], c);
+            const uint32_t want = OutdoorDeltaModel::PackModel(c);
+            const int d = OutdoorDeltaModel::MaxLevelDiff(want, gotOn[i]);
+            within1 += d <= 1, maxDiff = std::max<long>(maxDiff, d);
+            if (v.base[0] + v.base[1] + v.base[2] == 0.0f) {
+                dark += (gotOff[i] & 0xFFFFFFu) == 0;
+                offLit += static_cast<long>(gotOn[i] >> 24) >= std::lround(ramp * 255.0f) - 1; // (alpha: the whole ramp, no lamp to take from it)
+            }
+        }
+        const long marked = w * h / 2, offN = (w / 2) * 4;
+        std::printf("  room-0 indoor texels (%s tone): %ld of %ld others as before; %ld of %ld marked within 1/255 of IndoorTexel (largest %ld/255); lamps off: %ld "
+                    "of %ld black as before, %ld hold the room's ambient weight\n",
+                    soft ? "soft" : "the game's", same, marked, within1, marked, maxDiff, dark, offN, offLit);
+        Check(same == marked, "room-0 indoor texels: every texel without bit 8 is composed as before, bit for bit");
+        Check(within1 == marked && maxDiff <= 1, "room-0 indoor texels: a marked texel is its room's wall texel (IndoorTexel) within 1/255");
+        Check(dark == offN && offLit == offN, "room-0 indoor texels: with every lamp off a marked texel holds its room's whole ambient weight for the draw");
+    }
+    if (m.vb) m.vb->Release();
+    if (outOff) outOff->Release();
+    if (outOn) outOn->Release();
+    Check(ok, "room-0 indoor texels on the GPU: " + err);
+    return ok;
+}
+
 // ---------------------------------------------------------------- 7. GPU room lamps: room 0's exit lamps and floor mask lamps
 // Room 0's kept lamps with floor mask parts and exit parts (AddKeptParts extra, ComposeK0PS): masked texels (their alpha from
 // the floor mask's two luminances, the kept lamps' shares x KeptWrapLum now), exit ground texels (ExitAlpha of the exit lamps'
@@ -3405,6 +3742,45 @@ bool PhysKeptCheck() {
         g_dev->EndScene();
         ok = ok && RtLampGpu::Engine::ReadTexture(g_dev, out, w, h, got);
         gpuMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+        if (ok) { // (GpuRoomLamps::ComposeOver's kept rooms) room 0's compose writing every texel again (another map under the room),
+                  // the room's places copied back from the copy before it: what a full draw over the new copy gives, bit for bit
+            std::vector<uint32_t> at;
+            for (const auto* v : {&dk.texels, &dk.copies, &dk.restores})
+                for (const RtLampGpu::TexelVertex& t : *v) at.push_back(static_cast<uint32_t>(t.y) << 16 | static_cast<uint32_t>(t.x));
+            for (const RtLampGpu::KeptBlockOut& b : dk.outs)
+                for (int y = b.y0; y <= b.y1; y++)
+                    for (int x = b.x0; x <= b.x1; x++) at.push_back(static_cast<uint32_t>(y) << 16 | static_cast<uint32_t>(x));
+            const std::vector<RtLampGpu::Block> runs = RtLampGpu::RunsOf(at);
+            std::vector<uint32_t> otherPx(static_cast<size_t>(w) * h);
+            std::mt19937 orng(77u + static_cast<unsigned>(m));
+            for (uint32_t& v : otherPx) v = static_cast<uint32_t>(orng());
+            IDirect3DTexture9 *other = nullptr, *full = nullptr;
+            RtLampGpu::Engine::MakePreblur(g_dev, w, h, otherPx.data(), &other);
+            g_dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &full, nullptr);
+            std::vector<uint32_t> a, b;
+            bool okK = other && full && !runs.empty();
+            g_dev->BeginScene();
+            if (okK && eng.Begin(g_dev)) {
+                IDirect3DTexture9* before = eng.KeepCopy(g_dev, out, w, h, err); // (out: the full draw over the game's map, `got`)
+                okK = before && eng.CopyTexture(g_dev, other, out, w, h, err) && eng.CopyRects(g_dev, runs, before, out, w, h, err) &&
+                      eng.CopyTexture(g_dev, other, full, w, h, err) &&
+                      eng.RelightKeptPhys(g_dev, g, lamps.data(), tiles.data(), reinterpret_cast<const float (*)[3]>(world.data()), nL, rooms, prm, game, full, w, h, err);
+                eng.End(g_dev);
+            } else
+                okK = false;
+            g_dev->EndScene();
+            okK = okK && RtLampGpu::Engine::ReadTexture(g_dev, out, w, h, a) && RtLampGpu::Engine::ReadTexture(g_dev, full, w, h, b);
+            long differ = 0, roomTexels = 0, fromOther = 0;
+            for (size_t i = 0; okK && i < a.size(); i++) differ += a[i] != b[i], fromOther += b[i] == otherPx[i];
+            for (const RtLampGpu::Block& r : runs) roomTexels += r.x1 - r.x0 + 1;
+            std::printf("  %s: room 0's compose under the room, the room's %zu runs (%ld texels) copied back against drawn again: %ld of %zu texels differ bit for bit "
+                        "(%ld left as the map under it)\n",
+                        m == 1 ? "floor" : "blurred wall atlas", runs.size(), roomTexels, differ, a.size(), fromOther);
+            Check(okK && differ == 0 && roomTexels > 0 && (fromOther > 0 || roomTexels == w * h), "physical: a room copied back from the copy before room 0's compose is not its draw: " + err);
+            if (other) other->Release();
+            if (full) full->Release();
+            ok = ok && okK;
+        }
         if (ok && m == 1) { // (tone_soft) the same map with ToneSoft: the compose against KeptTexel's
             RtLampGpu::Params soft = prm;
             soft.toneSoft = true;
@@ -3691,6 +4067,91 @@ bool PhysKeptCheck() {
         }
         std::printf("  dense quads against one point per texel: %ld of %u sums differ bit for bit (%ld lit)\n", differ, count, lit);
         Check(okD && differ == 0 && lit > 0, "physical: the dense quads' sum is not the points' bit for bit: " + err);
+        // The kept atlas grown past 16 rows (phys_tiles.h): each lamp's shadow in another row of a taller atlas, the same sum bit for bit
+        for (const int tall : {24, 32, 120}) {
+            std::vector<int> moved(nL);
+            std::vector<float> c;
+            g_dev->BeginScene();
+            bool okT = okD && ref.Begin(g_dev);
+            int got = 0;
+            if (okT) {
+                okT = ref.EnsureTiles(g_dev, tall, err);
+                got = ref.TileRows();
+                okT = okT && got >= nL;
+                // (spread over every column: the first lamp in the last tile, the others back to tile 0)
+                for (int l = 0; okT && l < nL; l++)
+                    moved[l] = got - 1 - (nL > 1 ? l * (got - 1) / (nL - 1) : 0), okT =ref.RenderShadowTile(g_dev, lamps[l].law.pos, moved[l], 64.0f, err);
+                ref.End(g_dev);
+            }
+            g_dev->EndScene();
+            for (int b0 = 0; okT && b0 < nL; b0 += kB) {
+                const int nb = std::min(kB, nL - b0);
+                std::fill(rows.begin(), rows.end(), 0.0f);
+                for (size_t r = 0; r < rooms.size(); r++) {
+                    float* row = &rows[r * RtLampGpu::Engine::kTableCols * 4];
+                    for (int i = 0; i < nb; i++) {
+                        for (int q = 0; q < 3; q++) row[i * 4 + q] = rooms[r].lamp[b0 + i][q];
+                        row[i * 4 + 3] = rooms[r].fill[b0 + i];
+                    }
+                    row[16 * 4] = rooms[r].header;
+                }
+                g_dev->BeginScene();
+                ref.Begin(g_dev);
+                okT = ref.SetTable(g_dev, rows.data(), static_cast<int>(rooms.size()), err) &&
+                      ref.AccumulateRlg(g_dev, dense, lamps.data() + b0, moved.data() + b0, nb, prm, b0 == 0, err, true, reinterpret_cast<const float (*)[3]>(world.data() + b0));
+                ref.End(g_dev);
+                g_dev->EndScene();
+            }
+            okT = okT && ref.ReadSum(g_dev, w, h, c);
+            long diffT = 0;
+            for (uint32_t i = 0; okT && i < count; i++) diffT += std::memcmp(&a[size_t(i) * 4], &c[size_t(i) * 4], 16) != 0;
+            int lastCol = 0, lastRow = 0;
+            if (got) ref.TileAt(got - 1, lastCol, lastRow);
+            std::printf("  kept atlas of %d tiles (asked %d; %d columns, the last tile in row %d), the lamps spread over its tiles against %d rows: %ld of %u sums differ bit for bit\n",
+                        got, tall, lastCol / 6 + 1, lastRow, nL, diffT, count);
+            Check(okT && diffT == 0, "physical: a taller kept atlas or other rows change the sum: " + err);
+        }
+        // The kept atlas grown with its tiles copied (EnsureTiles' kept; PhysPasses keeps every lamp's tile): rendered into 1 and 32 rows
+        // (one column), grown to 120 (4 columns: a tile past the first column's 30 moves to another column), drawn from the copies
+        // without a render; the same sum bit for bit
+        for (const int from : {std::max(nL, 1), 32}) {
+            std::vector<int> at(nL);
+            std::vector<float> c;
+            bool kept = false, keptSame = false;
+            g_dev->BeginScene();
+            bool okG = okD && ref.Begin(g_dev);
+            if (okG) {
+                okG = ref.EnsureTiles(g_dev, 1, err) && ref.EnsureTiles(g_dev, from, err) && ref.TileRows() == from; // (from 1: made again)
+                for (int l = 0; okG && l < nL; l++) at[l] = from - 1 - l, okG = ref.RenderShadowTile(g_dev, lamps[l].law.pos, at[l], 64.0f, err);
+                okG = okG && ref.EnsureTiles(g_dev, 120, err, &kept) && ref.TileRows() == 120 && ref.EnsureTiles(g_dev, 120, err, &keptSame);
+                ref.End(g_dev);
+            }
+            g_dev->EndScene();
+            for (int b0 = 0; okG && b0 < nL; b0 += kB) {
+                const int nb = std::min(kB, nL - b0);
+                std::fill(rows.begin(), rows.end(), 0.0f);
+                for (size_t r = 0; r < rooms.size(); r++) {
+                    float* row = &rows[r * RtLampGpu::Engine::kTableCols * 4];
+                    for (int i = 0; i < nb; i++) {
+                        for (int q = 0; q < 3; q++) row[i * 4 + q] = rooms[r].lamp[b0 + i][q];
+                        row[i * 4 + 3] = rooms[r].fill[b0 + i];
+                    }
+                    row[16 * 4] = rooms[r].header;
+                }
+                g_dev->BeginScene();
+                ref.Begin(g_dev);
+                okG = ref.SetTable(g_dev, rows.data(), static_cast<int>(rooms.size()), err) &&
+                      ref.AccumulateRlg(g_dev, dense, lamps.data() + b0, at.data() + b0, nb, prm, b0 == 0, err, true, reinterpret_cast<const float (*)[3]>(world.data() + b0));
+                ref.End(g_dev);
+                g_dev->EndScene();
+            }
+            okG = okG && ref.ReadSum(g_dev, w, h, c);
+            long diffG = 0;
+            for (uint32_t i = 0; okG && i < count; i++) diffG += std::memcmp(&a[size_t(i) * 4], &c[size_t(i) * 4], 16) != 0;
+            std::printf("  kept atlas grown from %d to 120 tiles with its tiles copied (kept %d), the lamps drawn from the copies: %ld of %u sums differ bit for bit\n", from,
+                        kept, diffG, count);
+            Check(okG && kept && keptSame && diffG == 0, "physical: an atlas grown with its tiles copied changes the sum: " + err);
+        }
         // The dense pass with another room's records, glass and the bounce (cross_room_shadows, glass_share, room_bounce): lamp 0 alone, a joined
         // table behind row 1, two glazed spans across the room; the T3 pack against the CPU, the sum with the glass against the sum
         // without it (the soft cut before the glass: no texel goes out), and the bounce of a batch of no lamp against BounceAt
@@ -4069,7 +4530,370 @@ static void StairSetChecks() {
     Check(!StairSet::wanted.load() && set.Tris() == 0 && set.Gen() == 0, "stair set: cleared with the lot");
 }
 
+long g_tileStep[2] = {}; // (TileDragBench: the lamps' cubes rendered a step, rows as before and rows for every lamp)
+// The kept shadow atlas while a lamp is dragged (GpuRoomLamps::PhysPasses's rows and passes, phys_tiles.h): a measured lot,
+// 21 lamps, room 0's maps on 3 stories drawing them all and 35 rooms' maps 3 to 9 each, every map drawn again at each step. The
+// rows as before (up to 16, with the most lamps a map draws) against rows for every lamp drawn
+void TileDragBench() {
+    std::printf("\n[kept shadow atlas] tiles rendered at each step of a lamp's drag, a lot of 21 lamps and 47 maps\n");
+    constexpr int kLamps = 21;
+    float pos[kLamps + 1][3] = {};
+    for (int l = 1; l <= kLamps; l++) pos[l][0] = static_cast<float>(l), pos[l][2] = static_cast<float>(l % 5);
+    std::vector<std::vector<uintptr_t>> maps;
+    for (int m = 0; m < 12; m++) {
+        maps.emplace_back();
+        for (int l = 1; l <= kLamps; l++) maps.back().push_back(l);
+    }
+    for (int m = 0; m < 35; m++) {
+        maps.emplace_back();
+        for (int j = 0, k = 3 + m % 7, s = (m * 5) % kLamps; j < k; j++) maps.back().push_back(1 + (s + j) % kLamps);
+    }
+    long sums[2] = {};
+    for (const bool grow : {false, true}) {
+        PhysTiles::Atlas at;
+        std::vector<uintptr_t> seen;
+        constexpr int kSteps = 20;
+        long renders = 0, first = 0, passes = 0;
+        for (int s = 0; s <= kSteps; s++) {
+            at.NewRound();
+            for (const auto& L : maps) {
+                const int n = static_cast<int>(L.size());
+                for (uintptr_t l : L)
+                    if (std::find(seen.begin(), seen.end(), l) == seen.end()) seen.push_back(l);
+                const int rows = PhysTiles::Want(at.rows, n, grow ? static_cast<int>(seen.size()) : 0, grow ? PhysTiles::kTiles : 16);
+                if (rows != at.rows) at = {}, at.rows = rows;
+                const int step = std::min(rows, PhysTiles::kPass);
+                for (int g0 = 0; g0 < n; g0 += step) {
+                    const int gn = std::min(step, n - g0);
+                    int row[PhysTiles::kPass];
+                    bool render[PhysTiles::kPass];
+                    at.Assign(gn, L.data() + g0, [&](int i) { return pos[L[g0 + i]]; }, 1u, row, render);
+                    renders += std::count(render, render + gn, true), passes++;
+                }
+            }
+            if (s == 0) first = renders;
+            pos[6][0] += 0.05f; // (lamp 6 dragged)
+        }
+        const double perStep = static_cast<double>(renders - first) / kSteps;
+        sums[grow] = static_cast<long>(perStep * 6.0);
+        std::printf("  %s: %d rows, %.1f shadow tiles a step (%.1f lamps' cubes), %ld at the first draw, %ld passes in all\n",
+                    grow ? "rows for every lamp drawn" : "rows as before (16 at most)", at.rows, perStep * 6.0, perStep, first * 6, passes);
+    }
+    Check(sums[1] == 6, "the kept atlas: a drag step renders more than the dragged lamp's 6 tiles");
+    Check(sums[0] > sums[1], "the kept atlas: the bench does not show the 16-row cycle");
+    g_tileStep[0] = sums[0] / 6, g_tileStep[1] = sums[1] / 6;
+}
+// The kept atlas's warm-up (GpuRoomLamps::PhysPasses): a lot's lamps first drawn map by map, so the atlas grows 4 tiles at a time.
+// Made again at each growth, every lamp drawn before is rendered again at its next map; grown with its tiles copied (EnsureTiles'
+// kept), each lamp's cube once. Both give each lamp of a pass its own tile holding its shadow now. Returns the cubes as {made again, kept}
+std::array<long, 2> TileWarmBench(int nLamps) {
+    std::vector<std::array<float, 3>> pos(nLamps + 1);
+    for (int l = 1; l <= nLamps; l++) pos[l] = {static_cast<float>(l % 17), static_cast<float>(l % 3), static_cast<float>(l / 17)};
+    std::vector<std::vector<uintptr_t>> maps; // (rooms of 3 to 9 lamps in lamp order, then a story's room 0 with them all)
+    for (int a = 1; a <= nLamps;) {
+        const int k = std::min(nLamps - a + 1, 3 + a % 7);
+        maps.emplace_back();
+        for (int j = 0; j < k; j++) maps.back().push_back(a + j);
+        a += k;
+        if (maps.size() % 6 == 0 || a > nLamps) {
+            maps.emplace_back();
+            for (int l = std::max(1, a - std::min(PhysTiles::kPass * 4, a - 1)); l < a; l++) maps.back().push_back(l);
+        }
+    }
+    std::array<long, 2> cubes{};
+    for (const bool keep : {false, true}) {
+        PhysTiles::Atlas at;
+        std::vector<uintptr_t> seen;
+        std::vector<uintptr_t> holds(PhysTiles::kTiles); // (what each tile holds: the lamp whose shadow was rendered or copied there)
+        for (const auto& L : maps) {
+            const int n = static_cast<int>(L.size());
+            for (uintptr_t l : L)
+                if (std::find(seen.begin(), seen.end(), l) == seen.end()) seen.push_back(l);
+            const int rows = PhysTiles::Want(at.rows, n, static_cast<int>(seen.size()));
+            if (rows != at.rows) {
+                if (keep && at.rows) at.rows = rows;
+                else at = {}, at.rows = rows, std::fill(holds.begin(), holds.end(), 0);
+            }
+            const int step = std::min(rows, PhysTiles::kPass);
+            for (int g0 = 0; g0 < n; g0 += step) {
+                const int gn = std::min(step, n - g0);
+                int row[PhysTiles::kPass];
+                bool render[PhysTiles::kPass];
+                at.Assign(gn, L.data() + g0, [&](int i) { return pos[L[g0 + i]].data(); }, 1u, row, render);
+                for (int i = 0; i < gn; i++) {
+                    if (render[i]) holds[row[i]] = L[g0 + i], cubes[keep]++;
+                    Check(holds[row[i]] == L[g0 + i], "the kept atlas's warm-up: a lamp drawn from a tile that does not hold its shadow");
+                    for (int j = 0; j < i; j++) Check(row[i] != row[j], "the kept atlas's warm-up: two lamps of a pass in one tile");
+                }
+            }
+        }
+    }
+    std::printf("  %d lamps, %zu maps first drawn: %ld cubes rendered with the atlas made again at each growth, %ld with its tiles kept\n", nLamps, maps.size(), cubes[0],
+                cubes[1]);
+    return cubes;
+}
+// The atlas as it was (phys_tiles.h before 120 tiles): least recently used, 32 tiles at most; for the bench below
+struct LruAtlas {
+    PhysTiles::Tile t[PhysTiles::kTiles];
+    uint32_t use = 0;
+    int rows = 0;
+    long Assign(int n, const uintptr_t* lights, const float (*pos)[3], int* row) { // (the renders)
+        bool taken[PhysTiles::kTiles] = {};
+        long renders = 0;
+        use++;
+        for (int i = 0; i < n; i++) {
+            row[i] = -1;
+            for (int r = 0; r < rows; r++)
+                if (!taken[r] && t[r].light == lights[i] && std::memcmp(t[r].pos, pos[i], 12) == 0) {
+                    row[i] = r, taken[r] = true;
+                    break;
+                }
+        }
+        for (int i = 0; i < n; i++) {
+            if (row[i] >= 0) continue;
+            int r = -1;
+            for (int c = 0; c < rows; c++)
+                if (!taken[c] && (r < 0 || t[c].used < t[r].used)) r = c;
+            t[r] = {}, t[r].light = lights[i], std::memcpy(t[r].pos, pos[i], 12);
+            row[i] = r, taken[r] = true, renders++;
+        }
+        for (int i = 0; i < n; i++) t[row[i]].used = use;
+        return renders;
+    }
+};
+// 120 and 130 lamps (3 stories: room 0's 4 maps a story draw its 40 or 44 lamps, 40 rooms a story 3 to 9 of them), every map drawn
+// again at each step of lamp 7's drag: the cubes rendered a step with the atlas as it was (least recently used, 32 tiles), least
+// recently used over 120 tiles, and Assign over 120 (the excess cycled). Returns Assign's cubes a step
+double BigLotBench(int nLamps) {
+    std::vector<std::array<float, 3>> pos(nLamps + 1);
+    for (int l = 1; l <= nLamps; l++) pos[l] = {static_cast<float>(l % 17), static_cast<float>(l % 3), static_cast<float>(l / 17)};
+    std::vector<std::vector<uintptr_t>> maps;
+    const int perStory = (nLamps + 2) / 3;
+    for (int st = 0; st < 3; st++) {
+        const int a = 1 + st * perStory, b = std::min(nLamps, a + perStory - 1);
+        for (int m = 0; m < 4; m++) {
+            maps.emplace_back();
+            for (int l = a; l <= b; l++) maps.back().push_back(l);
+        }
+        for (int m = 0; m < 40; m++) {
+            maps.emplace_back();
+            for (int j = 0, k = 3 + m % 7, s0 = (m * 7) % (b - a + 1); j < k; j++) maps.back().push_back(a + (s0 + j) % (b - a + 1));
+        }
+    }
+    constexpr int kSteps = 20;
+    double perStep[3] = {};
+    for (int mode = 0; mode < 3; mode++) {
+        LruAtlas lru;
+        PhysTiles::Atlas at;
+        std::vector<uintptr_t> seen;
+        long renders = 0, first = 0;
+        for (int s = 0; s <= kSteps; s++) {
+            at.NewRound();
+            for (const auto& L : maps) {
+                const int n = static_cast<int>(L.size());
+                for (uintptr_t l : L)
+                    if (std::find(seen.begin(), seen.end(), l) == seen.end()) seen.push_back(l);
+                const int rows = PhysTiles::Want(mode ? at.rows : lru.rows, n, static_cast<int>(seen.size()), mode ? PhysTiles::kTiles : 32);
+                if (mode == 0 && rows != lru.rows) lru = {}, lru.rows = rows;
+                if (mode && rows != at.rows) at = {}, at.rows = rows;
+                if (mode == 1) lru.rows = rows;
+                const int step = std::min(rows, PhysTiles::kPass);
+                for (int g0 = 0; g0 < n; g0 += step) {
+                    const int gn = std::min(step, n - g0);
+                    int row[PhysTiles::kPass];
+                    bool render[PhysTiles::kPass];
+                    float p[PhysTiles::kPass][3];
+                    for (int i = 0; i < gn; i++) std::memcpy(p[i], pos[L[g0 + i]].data(), 12);
+                    if (mode < 2) renders += lru.Assign(gn, L.data() + g0, p, row);
+                    else {
+                        at.Assign(gn, L.data() + g0, [&](int i) { return p[i]; }, 1u, row, render);
+                        renders += std::count(render, render + gn, true);
+                    }
+                    for (int i = 0; i < gn; i++) // (no lamp of a pass shares a tile)
+                        for (int j = 0; j < i; j++) Check(row[i] != row[j] && row[i] >= 0 && row[i] < rows, "the kept atlas: two lamps of a pass in one tile");
+                }
+            }
+            if (s == 1) first = renders; // (the first round grew the atlas story by story: the second draws it at its size)
+            pos[7][0] += 0.05f;
+        }
+        perStep[mode] = static_cast<double>(renders - first) / (kSteps - 1);
+        static const char* const kName[3] = {"as it was (LRU, 32 tiles)", "LRU over 120 tiles", "120 tiles, the excess cycled"};
+        std::printf("  %d lamps, %zu maps, %s: %.1f cubes a step (%.0f shadow tiles), %ld cubes in the first two\n", nLamps, maps.size(), kName[mode], perStep[mode],
+                    perStep[mode] * 6.0, first);
+    }
+    return perStep[2];
+}
+// The time of those renders (face 256, the lot's 5874 occluder triangles as two slabs of 1 m quads): CPU to submit, then to the
+// GPU's end (the fastest of 5)
+void TileDragTiming() {
+    RtLampProxy::Mesh mesh;
+    for (int q = 0; static_cast<int>(mesh.tris.size()) < 5874; q++) {
+        const float x = static_cast<float>(q % 40), z = static_cast<float>((q / 40) % 40), y = 3.0f + 3.0f * static_cast<float>(q / 1600);
+        mesh.tris.push_back({{{x, y, z}, {x + 1, y, z}, {x, y, z + 1}}}), mesh.tris.push_back({{{x + 1, y, z}, {x + 1, y, z + 1}, {x, y, z + 1}}});
+    }
+    RtLampGpu::Engine eng(RtLampGpu::PlainCalls());
+    std::string err;
+    bool ok = eng.Init(g_dev, g_shaders, 256, err) && eng.SetProxy(g_dev, mesh, err, true);
+    g_dev->BeginScene();
+    ok = ok && eng.Begin(g_dev);
+    ok = ok && eng.EnsureTiles(g_dev, 16, err);
+    if (ok) eng.End(g_dev);
+    g_dev->EndScene();
+    const auto flush = [] {
+        IDirect3DQuery9* q = nullptr;
+        if (FAILED(g_dev->CreateQuery(D3DQUERYTYPE_EVENT, &q)) || !q) return;
+        q->Issue(D3DISSUE_END);
+        while (q->GetData(nullptr, 0, D3DGETDATA_FLUSH) == S_FALSE) {
+        }
+        q->Release();
+    };
+    for (int k = 0; ok && k < 2; k++) {
+        double cpu = 1e9, all = 1e9;
+        for (int rep = 0; rep < 5; rep++) {
+            flush();
+            const auto t0 = std::chrono::steady_clock::now();
+            g_dev->BeginScene();
+            eng.Begin(g_dev);
+            for (long i = 0; ok && i < g_tileStep[k]; i++) {
+                const float p[3] = {static_cast<float>(i % 40), 1.5f, static_cast<float>((i * 7) % 40)};
+                ok = eng.RenderShadowTile(g_dev, p, static_cast<int>(i % 16), 64.0f, err);
+            }
+            eng.End(g_dev);
+            g_dev->EndScene();
+            const auto t1 = std::chrono::steady_clock::now();
+            flush();
+            const auto t2 = std::chrono::steady_clock::now();
+            cpu = std::min(cpu, std::chrono::duration<double, std::milli>(t1 - t0).count()), all = std::min(all, std::chrono::duration<double, std::milli>(t2 - t0).count());
+        }
+        std::printf("  %s: %ld cubes a step, %.2f ms CPU to submit, %.2f ms to the GPU's end\n", k ? "rows for every lamp drawn" : "rows as before", g_tileStep[k], cpu, all);
+    }
+    Check(ok, "the kept atlas's timing: " + err);
+}
+
+// A wall texel on a placed floor's plane (RtLampProxy::OffFloorLine): the GPU's Shadow() walk at the moved point against the reference's
+// Visibility there. Story 1's room (x 1..4, z 1..7, floor 1, ceiling 4) under story 2's placed floor at 4; the walls at x = 1 facing
+// +x: story 1's top row with a lamp of story 2 0.05 to 2.5 m over the plane, story 2's bottom row with a lamp of story 1 as far under it
+void FloorLineSweep() {
+    std::printf("\n[floor line] Shadow() at the point moved off a placed floor's plane against the reference, lamps 0.05 to 2.5 m off it\n");
+    RtLampProxy::Story lo, up;
+    lo.story = 1, up.story = 2, lo.w = up.w = lo.h = up.h = 8;
+    lo.floorY.assign(64, RtLampProxy::kNoFloor), lo.ceil.assign(64, RtLampProxy::kNoFloor), lo.roofed.assign(64, 0);
+    up.floorY.assign(64, RtLampProxy::kNoFloor), up.ceil.assign(64, RtLampProxy::kNoFloor), up.roofed.assign(64, 0), up.placed.assign(64, 0);
+    for (int z = 1; z < 7; z++)
+        for (int x = 1; x < 4; x++) lo.floorY[z * 8 + x] = 1.0f, lo.ceil[z * 8 + x] = 4.0f, lo.roofed[z * 8 + x] = 0xF, up.placed[z * 8 + x] = 0xF, up.floorY[z * 8 + x] = 4.0f;
+    RtLampProxy::Lot lot;
+    lot.stories = {lo, up};
+    RtLampProxy::Mesh mesh;
+    RtLampProxy::Build(lot, mesh, true);
+    const std::string src = std::string(kRtLampsHlsl) + "float4 FloorLinePS(TexelIn i) : COLOR0 { return Shadow(ReadLamp(0), i.mask.xyz, normalize(i.n.xyz), 24, 16, 16, 0.0).xxxx; }\n";
+    ID3DBlob *code = nullptr, *errs = nullptr;
+    IDirect3DPixelShader9* ps = nullptr;
+    bool ok = SUCCEEDED(D3DCompile(src.data(), src.size(), "rt_lamps", nullptr, nullptr, "FloorLinePS", "ps_3_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &code, &errs)) && code &&
+              SUCCEEDED(g_dev->CreatePixelShader(static_cast<const DWORD*>(code->GetBufferPointer()), &ps));
+    if (code) code->Release();
+    if (errs) errs->Release();
+    void* with[RtLampGpu::kShaderCount];
+    std::memcpy(with, g_shaders, sizeof with);
+    with[RtLampGpu::kAccRlgPs] = ps;
+    RtLampGpu::Engine eng(RtLampGpu::PlainCalls());
+    std::string err;
+    std::vector<float> cell(RtLampGpu::Engine::kTableCols * 4, 0.0f);
+    ok = ok && eng.Init(g_dev, with, 256, err) && eng.SetProxy(g_dev, RtLampProxy::Mesh{}, err) && eng.SetProxy(g_dev, mesh, err, true);
+    constexpr float kR = 0.15f;
+    long n = 0, leaks = 0, wasLit = 0, gpuWasLit = 0;
+    double sum = 0.0, worst = 0.0;
+    for (const int story : {1, 2}) {
+        std::vector<RtLampGpu::TexelVertex> verts;
+        std::vector<std::array<float, 3>> moved;
+        for (float z = 1.55f; z < 6.5f; z += 0.1f) {
+            RtLampGpu::TexelVertex v{};
+            v.x = static_cast<float>(verts.size() % 64), v.y = static_cast<float>(verts.size() / 64), v.w = 1.0f;
+            v.p[0] = v.mask[0] = 1.0f, v.p[1] = v.mask[1] = 4.0f, v.p[2] = v.mask[2] = z, v.n[0] = 1.0f;
+            const float N[3] = {1, 0, 0};
+            ok = ok && RtLampProxy::OffFloorLine(lot, story, v.mask, N);
+            verts.push_back(v), moved.push_back({v.mask[0], v.mask[1], v.mask[2]});
+        }
+        std::vector<RtLampGpu::TexelVertex> plane = verts; // (the same points looked up at the plane itself: the GPU before)
+        for (RtLampGpu::TexelVertex& v : plane) std::memcpy(v.mask, v.p, 3 * sizeof(float));
+        RtLampGpu::Map m, m0;
+        m.w = m0.w = 64, m.h = m0.h = static_cast<int>((verts.size() + 63) / 64), m.count = m0.count = static_cast<UINT>(verts.size());
+        ok = ok && RtLampGpu::Engine::MakeVb(g_dev, verts.data(), m.count, &m.vb) && RtLampGpu::Engine::MakeVb(g_dev, plane.data(), m0.count, &m0.vb);
+        long sn = 0, sLeak = 0;
+        double sWorst = 0.0;
+        for (const float h : {0.05f, 0.1f, 0.2f, 0.4f, 0.8f, 1.2f, 1.6f, 2.0f, 2.5f}) {
+            RtLampModel::Lamp L;
+            L.law.pos[0] = 2.5f, L.law.pos[1] = story == 1 ? 4.0f + h : 4.0f - h, L.law.pos[2] = 3.5f, L.law.W = 1.0f, L.law.cmax = 2.0f;
+            GpuLampLaw::NoCone(L.law);
+            RtLampGpu::Params p;
+            p.radius = kR, p.thr = 0.0f, p.aa = 0.0f;
+            std::vector<float> got, got0;
+            const int tile = 0;
+            g_dev->BeginScene();
+            if (ok && eng.Begin(g_dev)) {
+                ok = eng.EnsureTiles(g_dev, 1, err) && eng.RenderShadowTile(g_dev, L.law.pos, 0, 64.0f, err) && eng.SetTable(g_dev, cell.data(), 1, err) &&
+                     eng.AccumulateRlg(g_dev, m0, &L, &tile, 1, p, true, err);
+                eng.End(g_dev);
+            }
+            g_dev->EndScene();
+            ok = ok && eng.ReadSum(g_dev, m0.w, m0.h, got0);
+            g_dev->BeginScene();
+            if (ok && eng.Begin(g_dev)) {
+                ok = eng.AccumulateRlg(g_dev, m, &L, &tile, 1, p, true, err);
+                eng.End(g_dev);
+            }
+            g_dev->EndScene();
+            ok = ok && eng.ReadSum(g_dev, m.w, m.h, got);
+            for (size_t i = 0; ok && i < verts.size(); i++) {
+                const float ref = RtLampProxy::Visibility(mesh, L.law.pos, kR, moved[i].data()), gpu = got[i * 4];
+                const float at[3] = {verts[i].p[0], verts[i].p[1], verts[i].p[2]};
+                wasLit += RtLampProxy::Visibility(mesh, L.law.pos, kR, at) > 0.5f, gpuWasLit += got0[i * 4] > 0.5f;
+                const double d = std::fabs(gpu - ref);
+                sum += d, n++, sn++, worst = std::max(worst, d), sWorst = std::max(sWorst, d);
+                const bool leak = gpu > 0.05f;
+                leaks += leak, sLeak += leak;
+            }
+        }
+        if (m.vb) m.vb->Release();
+        if (m0.vb) m0.vb->Release();
+        std::printf("  story %d's %s row, a lamp of story %d: %ld points x lamps, GPU share past 0.05 at %ld, largest |GPU - reference| %.3f\n", story, story == 1 ? "top" : "bottom",
+                    story == 1 ? 2 : 1, sn, sLeak, sWorst);
+    }
+    std::printf("  in all %ld, mean |GPU - reference| %.4f, largest %.3f; at the plane itself (before) %ld lit by the reference, %ld by the GPU\n", n, n ? sum / n : 0.0, worst, wasLit, gpuWasLit);
+    if (ps) ps->Release();
+    Check(ok, "floor line sweep: " + err);
+    Check(ok && n > 0 && leaks == 0 && worst < 0.05, "floor line: the GPU's walk at the moved point leaks light through the slab or leaves the reference");
+}
+
 int main(int argc, char** argv) {
+    TileDragBench();
+    {
+        std::printf("\n[kept shadow atlas] 120 and 130 lamps\n");
+        const double c120 = BigLotBench(120), c130 = BigLotBench(130);
+        Check(c120 == 1.0, "the kept atlas: 120 lamps render more than the dragged lamp's cube a step");
+        Check(c130 <= 3.0 * (130 - 120 + 1), "the kept atlas: 130 lamps over 120 tiles render far more than the excess a step");
+    }
+    {
+        std::printf("\n[kept shadow atlas] warm-up: a lot's lamps first drawn\n");
+        for (const int nl : {40, 120}) {
+            const auto c = TileWarmBench(nl);
+            Check(c[1] == nl && c[0] > c[1], "the kept atlas's warm-up: a lamp rendered more than once while the atlas grows");
+        }
+    }
+    {
+        // (RtOutdoorLamps BuildProxy keeps the proxy and its generation for a lot read again the same: equality must see every field)
+        RtLampProxy::Lot a;
+        a.stories.resize(2);
+        a.stories[1].story = 1, a.stories[1].w = a.stories[1].h = 2, a.stories[1].edges.resize(3), a.stories[1].floorY.assign(4, 0.0f), a.stories[1].room.assign(16, 1);
+        RtLampProxy::Lot b = a;
+        bool all = a == b;
+        b.stories[1].edges[2].o.head[4] = 2.3f, all = all && !(a == b), b = a;
+        b.stories[1].edges[0].glazed = 1, all = all && !(a == b), b = a;
+        b.stories[1].room[15] = 2, all = all && !(a == b), b = a;
+        b.stories[1].plane = 1.0f, all = all && !(a == b), b = a;
+        b.worldToLot[3][1] = 0.5f, all = all && !(a == b), b = a;
+        b.stories[0].removed.push_back(1), all = all && !(a == b), b = a;
+        Check(all && a == b, "the occluders' lot: equality misses a field (a lot read again would keep a stale generation)");
+    }
     StairSetChecks();
     FloorGridTwinChecks();
     std::vector<std::string> worlds;
@@ -4095,11 +4919,17 @@ int main(int argc, char** argv) {
         return 1;
     }
     if (!MakeShaders()) return 1;
+    TileDragTiming();
+    FloorLineSweep();
     SplitCheck();
     RoomLampsCheck();
     KeptGpuCheck();
     KeptAmbientCheck();
     Room0KeptCheck();
+    Room0IndoorCheck();
+    RatioCheck();
+    AtticBindCheck();
+    InBaseCheck();
     Room0KeptXCheck();
     MaskAllAfterKeptCheck();
     PhysKeptCheck();

@@ -58,6 +58,8 @@ bool KeptClearDue(); // the kept rooms wait for the next solve's start to go (So
 // gpu_room_lamps.cpp); room 0 and lamp edits still take the game's path
 void SetRoomLampPhysical(bool on);
 bool RoomLampPhysical();
+// GPU room lamps' game addresses (GameAddr: the 3D blockers' vtables, the test constants) all found on this build; logs once which are missing
+bool RoomTestsFound();
 // (physical, sharper floors) the physical rooms' floor maps also drawn at twice their size (BuildKeptMap's sub-texels; the copy at
 // 2x in rt_outdoor_lamps.cpp). A change drops the kept rooms like a model change
 void SetHiFloors(bool on);
@@ -327,6 +329,29 @@ struct Room0Export {
     };
     std::vector<KeptLamp0> kept0;
 };
+// (physical, RtOutdoorLamps: a space a room of the story below continues into) the wall response of a kept roofed room of lot `lot`
+// at story `story`, id `id`: its tone's k and its ambient weight's ramp line in world y (a, b, lo, hi), fitted over its wall
+// texels as a saturated texel's are (GpuLampLaw::FitSplit; too few texels: ramp 1), and the kept solve's version (its newest
+// class). False: no such kept solve
+struct IndoorFit {
+    float k = 0.0f, fit[4] = {};
+    uint32_t version = 0;
+    // (the log only) its wall texels' light (normalisation x sum) in its top 0.5 m, their mean and count
+    float topMean[3] = {};
+    int topN = 0;
+};
+bool IndoorFitOf(uint64_t lot, int story, int id, IndoorFit& out);
+// That kept room's wall texels at the top of its walls: each with its world position and normal, its place in the room's wall
+// map (x, y) and the light its GPU lamps do not draw (its windows' daylight, the lights it keeps baked, the bounce: normalisation
+// x its kept base), the kept solve's version and its class. cls in: the class wanted (the one the room shows; -1 the newest), taken
+// when kept, else the newest; out: the class taken. False: no such kept solve
+struct TopTexel {
+    float pos[3], n[3], rgb[3];
+    uint16_t x, y;
+};
+bool IndoorTopOf(uint64_t lot, int story, int id, std::vector<TopTexel>& out, uint32_t& version, int& cls);
+// The version of that kept room's solve of class cls as IndoorTopOf takes it (0: none kept of that class); cheap, every frame
+uint32_t IndoorVersionOf(uint64_t lot, int story, int id, int cls);
 // 0 = nothing kept for that room and class; baseOnly: the kept solve is a lot next to the active one's (SetNeighbourLots)
 uint32_t RecordVersion(const void* room, int cls, bool* baseOnly = nullptr);
 // physical: every lot lamp with a GPU law (not drawn by Real-time outdoor lamps) leaves the base too (its sum, floor mask vis /
@@ -352,6 +377,8 @@ std::string LastDrop(int story, int cls);
 // ---- render thread ----
 void OnPresent();
 void OnWorldChanged();
+// Every frame: the game's night level (0 day, 1 night), for the instant day/night switch's clock (PhaseCache)
+void NoteNightLevel(float level);
 void InvalidateAll(const char* why); // options that change how rooms are lit (every room lights again)
 std::string Status();
 

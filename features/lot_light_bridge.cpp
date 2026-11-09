@@ -135,10 +135,10 @@ struct SamplerBind {
     DWORD st[6] = {};
     uint8_t changed = 0; // bit i: kStates[i] was set
     static constexpr D3DSAMPLERSTATETYPE kStates[6] = {D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV, D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_SRGBTEXTURE};
-    SamplerBind(IDirect3DDevice9* d, DWORD sampler, IDirect3DBaseTexture9* tex, DWORD mip = D3DTEXF_LINEAR) : dev(d), s(sampler) {
+    SamplerBind(IDirect3DDevice9* d, DWORD sampler, IDirect3DBaseTexture9* tex, DWORD mip = D3DTEXF_LINEAR, DWORD filter = D3DTEXF_LINEAR) : dev(d), s(sampler) {
         D3D9Hooks::GetBoundTexture(dev, s, &old);
         for (int i = 0; i < 6; i++) dev->GetSamplerState(s, kStates[i], &st[i]);
-        const DWORD v[6] = {D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP, D3DTEXF_LINEAR, D3DTEXF_LINEAR, mip, FALSE};
+        const DWORD v[6] = {D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP, filter, filter, mip, FALSE};
         if (old != tex) {
             SetTex(dev, s, tex);
             texSet = true;
@@ -157,6 +157,25 @@ struct SamplerBind {
     }
     SamplerBind(const SamplerBind&) = delete;
     SamplerBind& operator=(const SamplerBind&) = delete;
+};
+// (RtOutdoorLamps::IndoorRoomsOf) the outside walls' and floors' copies' rooms (ShaderPatches IndoorPick rooms): the UV map and
+// the rooms' own maps point sampled at sampler .. + 4, their ambients at reg .. + 3; restores them as they were
+struct IndoorRoomsBind {
+    IDirect3DDevice9* dev;
+    UINT reg;
+    float old[16] = {};
+    std::optional<SamplerBind> s[5];
+    IndoorRoomsBind(IDirect3DDevice9* d, int sampler, int r, const RtOutdoorLamps::IndoorRooms& in) : dev(d), reg(static_cast<UINT>(r)) {
+        dev->GetPixelShaderConstantF(reg, old, 4);
+        float amb[16];
+        for (int k = 0; k < 4; k++) std::memcpy(amb + 4 * k, in.amb[k], sizeof in.amb[k]);
+        SetPsConst(dev, reg, amb, 4);
+        s[0].emplace(dev, static_cast<DWORD>(sampler), in.uv, D3DTEXF_NONE, D3DTEXF_POINT);
+        for (int k = 0; k < 4; k++) s[k + 1].emplace(dev, static_cast<DWORD>(sampler + 1 + k), in.map[k], D3DTEXF_NONE, D3DTEXF_POINT);
+    }
+    ~IndoorRoomsBind() { SetPsConst(dev, reg, old, 4); }
+    IndoorRoomsBind(const IndoorRoomsBind&) = delete;
+    IndoorRoomsBind& operator=(const IndoorRoomsBind&) = delete;
 };
 
 //
@@ -7732,24 +7751,44 @@ template <typename DrawFn> bool DrawWallGain(IDirect3DDevice9* dev, DrawFn draw)
     // the outdoor scale of the relit wall atlas (RtOutdoorLamps::ScaleOf): the wall's lamp light past 1, as the ground beside
     // it shows it (a copy of the shader multiplies the atlas read by it; the bloom pass keeps the game's shader)
     IDirect3DTexture9* scale = nullptr;
+    bool marksOnly = false; // (the room's own map shown: the indoor marks of its last relight, no outdoor scale)
+    const void* scaleMapTex = nullptr; // (the bound map, compared only: IndoorRoomsOf)
     PatchedPs* sp = nullptr;
-    if (RtOutdoorLamps::Enabled() && g_night.load(std::memory_order_relaxed) > 0.0f) { // (by day lamps are off: the wall as before)
+    if (RtOutdoorLamps::Enabled()) {
         sp = &PatchedFor(dev, g_wallScalePs, "Outside wall (outdoor scale)", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchWallScale(t, pp.wall); });
         if (sp->ps) {
             IDirect3DBaseTexture9* map = nullptr;
             D3D9Hooks::GetBoundTexture(dev, sp->wall.mapSampler, &map);
-            scale = RtOutdoorLamps::ScaleOf(map);
+            // the outdoor scale at night (by day lamps are off: the wall as before); the indoor marks at every hour, by day with no
+            // outdoor scale (marksOnly: x 1, so the outside texels draw as the game's)
+            scale = g_night.load(std::memory_order_relaxed) > 0.0f ? RtOutdoorLamps::ScaleOf(map) : nullptr;
+            if (!scale && sp->wall.indoor) {
+                RtOutdoorLamps::IndoorRooms probe;
+                IDirect3DTexture9* const own = RtOutdoorLamps::ScaleOf(map);
+                scale = own && RtOutdoorLamps::IndoorRoomsOf(map, probe) ? own : RtOutdoorLamps::IndoorFlagsOf(map);
+                marksOnly = scale != nullptr;
+            }
+            scaleMapTex = map;
             if (map) map->Release();
         }
     }
     if (c[0] == old[0] && !scale) return false; // unchanged lamp scale: retain the native draw
-    float oldQ[4] = {};
+    float oldQ[4] = {}, oldAmb[4] = {};
     std::optional<SamplerBind> scaleMap;
+    std::optional<IndoorRoomsBind> roomsBind;
     const auto scaledPs = [&]() {
         if (!scale) return;
         dev->GetPixelShaderConstantF(sp->wall.constReg, oldQ, 1);
-        const float q[4] = {RtOutdoorLamps::kScaleLog2, 0.0f, 0.0f, 0.0f};
+        // (y: 1 the indoor texels take the room's light, at every hour as the room below does: the room's own map, read here in the
+        // same frame as its own draw, IndoorPick rooms; 0 without the rooms' maps; z: 1 the bound scale holds no fall-off ratio in its .z).
+        // Gated by the night level, the attic kept the outside light (no lamp, the sky) at hours the room below was lit
+        // (2026-11-09 13-05-53: 5.65 h, lamps on, sky night 0)
+        RtOutdoorLamps::IndoorRooms in;
+        const bool indoor = sp->wall.indoor && sp->wall.roomSampler >= 0 && RtOutdoorLamps::IndoorRoomsOf(scaleMapTex, in);
+        const float q[4] = {marksOnly ? 0.0f : RtOutdoorLamps::kScaleLog2, indoor ? 1.0f : 0.0f, in.ratio ? 0.0f : 1.0f, 0.0f};
         SetPsConst(dev, sp->wall.constReg, q, 1);
+        if (sp->wall.indoor) dev->GetPixelShaderConstantF(sp->wall.ambConst, oldAmb, 1), SetPsConst(dev, sp->wall.ambConst, in.amb[0], 1);
+        if (indoor) roomsBind.emplace(dev, sp->wall.roomSampler, sp->wall.roomConst, in);
         scaleMap.emplace(dev, sp->wall.sampler, scale, D3DTEXF_NONE);
         SetPs(dev, sp->ps);
     };
@@ -7757,7 +7796,9 @@ template <typename DrawFn> bool DrawWallGain(IDirect3DDevice9* dev, DrawFn draw)
         if (!scale) return;
         SetPs(dev, g_curPs);
         scaleMap.reset();
+        roomsBind.reset();
         SetPsConst(dev, sp->wall.constReg, oldQ, 1);
+        if (sp->wall.indoor) SetPsConst(dev, sp->wall.ambConst, oldAmb, 1);
     };
 
     DWORD colorMask = 0, blend = FALSE, zWrite = FALSE, stencilWriteMask = 0;
@@ -8019,14 +8060,19 @@ template <typename DrawFn> bool DrawFloorAtlas(IDirect3DDevice9* dev, DrawFn dra
         FloorShadeBind shade(dev, p.floor, fv.worldConst, 1.0f, exitOn && p.floor.exitLight);
         // the outdoor scale of the relit floor map (RtOutdoorLamps::ScaleOf; FloorPatch::outScaleSampler): x 1 without it
         IDirect3DTexture9* scale = nullptr;
-        float oldQ[4] = {};
+        float oldQ[4] = {}, oldFloorAmb[4] = {};
         if (p.floor.outScaleSampler >= 0) {
             IDirect3DBaseTexture9* map = nullptr;
             D3D9Hooks::GetBoundTexture(dev, p.floor.mapSampler, &map);
             scale = RtOutdoorLamps::ScaleOf(map);
+            const bool marksOnly = !scale && p.floor.indoor && (scale = RtOutdoorLamps::IndoorFlagsOf(map)) != nullptr; // (as DrawWallGain)
+            RtOutdoorLamps::IndoorRooms in;
+            const bool indoor = scale && p.floor.indoor && RtOutdoorLamps::IndoorRoomsOf(map, in) && RtOutdoorLamps::Enabled(); // (its texels carry their room's top row: amb[0])
             if (map) map->Release();
             dev->GetPixelShaderConstantF(static_cast<UINT>(p.floor.outScaleConst), oldQ, 1);
-            const float q[4] = {scale ? RtOutdoorLamps::kScaleLog2 : 0.0f, 0.0f, 0.0f, 0.0f};
+            const float q[4] = {scale && !marksOnly ? RtOutdoorLamps::kScaleLog2 : 0.0f, indoor ? 1.0f : 0.0f, 0.0f, 0.0f}; // (as DrawWallGain)
+            if (p.floor.indoorConst >= 0)
+                dev->GetPixelShaderConstantF(static_cast<UINT>(p.floor.indoorConst), oldFloorAmb, 1), SetPsConst(dev, static_cast<UINT>(p.floor.indoorConst), in.amb[0], 1);
             SetPsConst(dev, static_cast<UINT>(p.floor.outScaleConst), q, 1);
         }
         std::optional<SamplerBind> scaleMap;
@@ -8045,6 +8091,7 @@ template <typename DrawFn> bool DrawFloorAtlas(IDirect3DDevice9* dev, DrawFn dra
         SetPsConst(dev, p.floor.atlasConst, oldC, 1);
         SetPsConst(dev, static_cast<UINT>(p.floor.heightConst), oldH, 1);
         if (p.floor.outScaleSampler >= 0) SetPsConst(dev, static_cast<UINT>(p.floor.outScaleConst), oldQ, 1);
+        if (p.floor.outScaleSampler >= 0 && p.floor.indoorConst >= 0) SetPsConst(dev, static_cast<UINT>(p.floor.indoorConst), oldFloorAmb, 1);
     }
     g_inOwnCall = false;
     ApexUtil::CountOne(g_floorAtlasDrawn);

@@ -28,7 +28,7 @@ RoomAmbientCorrection CorrectRoomAmbientOverride() { ++g_testCorrectionCalls; re
 namespace Fixture {
 int checks = 0, failures = 0, attempts = 0, rigs = 0, warnings = 0;
 int writes = 0, failWrite = 0, applyGroups = 0;
-bool queueOk = true, stageUnlit = false, stageBase = false, holdsBase = false;
+bool queueOk = true, stageUnlit = false, stageBase = false, holdsBase = false, switching = false;
 std::vector<BYTE*> rooms;
 std::function<void(BYTE*)> beforeAck;
 std::array<DWORD, kSites> sites{};
@@ -76,7 +76,7 @@ void Reset(bool enabled = true, float brightness = 0.35f, float blue = 0.2f) {
     S3SSDetect::g_testCorrectionCalls = 0;
 #endif
     attempts = rigs = warnings = writes = failWrite = applyGroups = 0;
-    queueOk = true; stageUnlit = stageBase = holdsBase = false;
+    queueOk = true; stageUnlit = stageBase = holdsBase = switching = false;
     rooms.clear(); beforeAck = {};
     testTick = 1000;
     const float first[4] = {0.01f, 0.01f, 0.01f, 0};
@@ -164,6 +164,7 @@ bool ProbeRoomAmbient(unsigned char*, float*, float*, float&) { return false; } 
 bool HoldsAmbientBase(unsigned char*, const float*, const float*) { return Fixture::holdsBase; }
 bool StageUnlitAmbientChange(unsigned char*, const float*, bool& changed) { changed = Fixture::stageUnlit; return Fixture::stageUnlit; }
 void ApplyAmbientBaseChanges() { ++Fixture::applyGroups; }
+bool DayNightSwitching() { return Fixture::switching; }
 }
 
 static void BrightnessReferenceTests() {
@@ -263,6 +264,12 @@ static void RecoveryTests() {
     Retint(true);
     Check(attempts == 1, "changed lit ambient uses native recovery");
     Check(g_baseRooms.contains(reinterpret_cast<uintptr_t>(fresh.Ptr())), "queue acknowledgement retains a newly captured base");
+
+    Reset(); Room during(9, 1, true); SeedBase(during); rooms = {during.Ptr()};
+    during.Ambient()[0] += 0.2f; switching = true; Retint(true);
+    Check(attempts == 0 && g_retryRetint, "a day/night switch's solve window sends no room to a solve and keeps the retry armed");
+    switching = false; Retint(true);
+    Check(attempts == 1, "the deferred room is sent once the switch window closes");
 
     Reset(); Room replaced(6, 1, true); SeedBase(replaced);
     replaced.Field<int>(0xC) = 7; rooms = {replaced.Ptr()}; Retint(true);

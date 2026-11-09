@@ -7,6 +7,7 @@
 //                  Steam in Gaming Mode, also on some other Linux desktops) is kept as a hint only
 //   DXVK           the loaded d3d9.dll exports DXVK_RegisterAnnotation by ordinal 28257 (no name); Proton loads its DXVK
 //                  from the prefix's system folder, so the file's place says nothing
+//   RTX Remix      the bridge client d3d9.dll exports remixapi_InitializeLibrary (ordinal 39) and not ordinal 28257
 #include <string>
 
 namespace Platform {
@@ -26,6 +27,13 @@ inline bool SteamDeck() { return Get().steamDeck; }
 
 // Whether the game's d3d9.dll is DXVK (by its export); false while d3d9.dll is not loaded yet. Cached once loaded.
 bool DxvkD3D9();
+
+// Whether the game's d3d9.dll is the RTX Remix bridge client (it exports remixapi_InitializeLibrary and is not DXVK
+// itself): the game's calls go to a 64-bit server process that renders through DXVK. Formats and features are DXVK's;
+// DXVK's exports, its config, its memory and the Vulkan driver are not in this process, and every readback (a GPU
+// copy read on the CPU, a query's result) waits for a round trip to the server. DxvkD3D9() is false under it.
+// False while d3d9.dll is not loaded yet. Cached once loaded.
+bool RemixBridge();
 
 // One line for the log and bug reports: "Windows" or "Wine 9.0 on Linux ... (Steam Deck OLED)", with DXVK when seen
 std::string Summary();

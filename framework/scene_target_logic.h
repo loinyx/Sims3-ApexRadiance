@@ -33,6 +33,17 @@ inline bool NeedsResolve(bool substituting, const void* a, const void* b, const 
     return substituting && backBuffer && (a == backBuffer || b == backBuffer);
 }
 
+// The resolve draws the target only when this frame's scene went into it (it was bound). Otherwise the back buffer already
+// holds what the game drew, and drawing the target would cover it with an old or empty (black) scene (issue 59)
+inline bool ResolveDraws(bool targetUsed) { return targetUsed; }
+
+// Issue 59: a d3d9 wrapper (the RTX Remix bridge client) gives two objects for one back buffer, the device's implicit render
+// target (GetRenderTarget(0) right after CreateDevice / Reset, the one the game binds) and GetBackBuffer's surface. The
+// first stands for the back buffer when they differ; plain D3D9 and DXVK give one object (null: nothing changes)
+template <class T> T* BackBufferAlias(T* renderTarget0, T* backBuffer) {
+    return renderTarget0 && backBuffer && renderTarget0 != backBuffer ? renderTarget0 : nullptr;
+}
+
 // A 16-bit value that is exactly an 8-bit level (k * 257 / 65535) is within 1/257 level of no other 16-bit value: such pixels
 // (the UI, flat colours) pass unchanged
 constexpr float kExact = 0.5f / 257.0f;

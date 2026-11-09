@@ -92,4 +92,47 @@ inline bool NeedsAmbientSolve(int matchState, bool rest) { return rest && (match
 inline bool RebuildRoomList(bool empty, bool expired, bool lotsChanged, bool managersChanged, bool lazy) {
     return empty || expired || (!lazy && (lotsChanged || managersChanged));
 }
+// The instant day/night swap writes a cached solve's ambient over a room only while the room still shows what its base record
+// says (rec: +0x110 and +0x120 as its solve's ambient step gave them): its second colour as recorded, and its own colour either
+// as recorded or, in a room showing a stairwell's share over it, the colour its kept solve showed (shown, over the own colour
+// shownOwn; null: none known)
+inline bool SwapHolds(const float (*live)[4], const float (*rec)[4], const float* shown, const float* shownOwn, float tol = 1e-5f) {
+    const auto near4 = [tol](const float* a, const float* b) {
+        for (int k = 0; k < 4; k++)
+            if (!(a[k] - b[k] <= tol && b[k] - a[k] <= tol)) return false; // (a NaN fails)
+        return true;
+    };
+    if (!near4(live[1], rec[1])) return false;
+    return near4(live[0], rec[0]) || (shown && shownOwn && near4(live[0], shown) && near4(rec[0], shownOwn));
+}
+// A quick day/night switch's solve window: open from the night level leaving an end (0 day, 1 night) while it reaches an end
+// within kQuickMs, then kAfterMs more; a slow dusk (longer than kQuickMs at twilight) never opens it. Meanwhile the played
+// lot's rooms are solved at the raised budget (kLotMs a frame for the lot pass and kDrainMs for the queue's drain: 33 ms of
+// solving a frame at most) and nothing else sends them to a second solve. Fed every frame with the level (render thread).
+struct DayNightWindow {
+    static constexpr std::uint32_t kQuickMs = 3000, kAfterMs = 10000;
+    static constexpr float kLotMs = 25.0f, kDrainMs = 8.0f;
+    int end = -1;                 // the end the level was last at: 0 day, 1 night, -1 not known yet
+    bool away = false, arrived = false; // between the ends since leftAt / a quick fade reached an end at arrivedAt
+    std::uint32_t leftAt = 0, arrivedAt = 0;
+    std::uint32_t serial = 0;     // one per window opened
+    void Note(float level, std::uint32_t now) {
+        const int at = level > .99f ? 1 : level < .01f ? 0 : -1;
+        if (at >= 0) {
+            if (away && now - leftAt <= kQuickMs) arrived = true, arrivedAt = now; // (a fade turned back counts too: its rooms are solved again)
+            away = false;
+            end = at;
+            return;
+        }
+        if (end >= 0 && !away) { // the level left an end: a new window
+            away = true, leftAt = now;
+            arrived = false;
+            ++serial;
+        }
+    }
+    bool Open(std::uint32_t now) const {
+        if (away) return now - leftAt <= kQuickMs;
+        return arrived && now - arrivedAt < kAfterMs;
+    }
+};
 } // namespace RoomAmbientPolicy

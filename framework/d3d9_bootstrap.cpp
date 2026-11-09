@@ -9,10 +9,12 @@
 #include "render_callbacks.h"
 #include "s3ss_detect.h"
 #include "scene_target.h"
+#include "scene_target_logic.h"
 #include "picture.h"
 #include "captures.h"
 #include "vulkan_driver_guard.h"
 #include <detours/detours.h>
+#include <intrin.h>
 #include <atomic>
 #include <cstring>
 #include <format>
@@ -20,22 +22,30 @@
 #include <mutex>
 #include <string>
 
+EXTERN_C IMAGE_DOS_HEADER __ImageBase; // this module, for telling Apex's own calls apart
+
 namespace ApexD3D {
+
 namespace {
 
 using Direct3DCreate9_t = IDirect3D9*(WINAPI*)(UINT);
 using CreateDevice_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3D9*, UINT, D3DDEVTYPE, HWND, DWORD, D3DPRESENT_PARAMETERS*, IDirect3DDevice9**);
 using EndScene_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*);
 using Reset_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, D3DPRESENT_PARAMETERS*);
+using GetBackBuffer_t = HRESULT(STDMETHODCALLTYPE*)(IDirect3DDevice9*, UINT, UINT, D3DBACKBUFFER_TYPE, IDirect3DSurface9**);
 
 constexpr int kCreateDeviceSlot = 16; // IDirect3D9
 constexpr int kResetSlot = 16;        // IDirect3DDevice9
+constexpr int kGetBackBufferSlot = 18; // IDirect3DDevice9
 constexpr int kEndSceneSlot = 42;     // IDirect3DDevice9
 
 Direct3DCreate9_t o_create9 = nullptr;
 CreateDevice_t o_createDevice = nullptr;
 EndScene_t o_endScene = nullptr;
 Reset_t o_reset = nullptr;
+GetBackBuffer_t o_getBackBuffer = nullptr; // detoured only when the back buffer has an alias (issue 59)
+std::atomic<IDirect3DDevice9*> g_aliasDevice{nullptr};
+std::atomic<IDirect3DSurface9*> g_bbAlias{nullptr}; // identity; the device's implicit render target keeps it alive until Reset
 
 std::mutex g_installLock; // Detours transactions of this module, one at a time
 std::atomic<bool> g_create9Hooked{false};
@@ -144,14 +154,63 @@ HRESULT STDMETHODCALLTYPE Hooked_EndScene(IDirect3DDevice9* dev) {
     return hr;
 }
 
+// Issue 59 (RTX Remix bridge client): Apex's own GetBackBuffer calls get the surface the game binds as render target 0,
+// so the back-buffer identity checks of the scene target, PostScene and Picture hold. Calls from the game and other
+// mods keep the client's own answer (giving them render target 0 is what made the bridge's UI misbehave).
+bool CalledFromApex(void* ret) {
+    HMODULE mod = nullptr;
+    return GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, static_cast<LPCWSTR>(ret), &mod) &&
+           mod == reinterpret_cast<HMODULE>(&__ImageBase);
+}
+
+HRESULT STDMETHODCALLTYPE Hooked_GetBackBuffer(IDirect3DDevice9* dev, UINT chain, UINT index, D3DBACKBUFFER_TYPE type, IDirect3DSurface9** out) {
+    const HRESULT hr = o_getBackBuffer(dev, chain, index, type, out);
+    IDirect3DSurface9* alias = g_bbAlias.load();
+    if (SUCCEEDED(hr) && alias && chain == 0 && index == 0 && dev == g_aliasDevice.load() && out && *out && *out != alias &&
+        CalledFromApex(_ReturnAddress())) {
+        alias->AddRef();
+        (*out)->Release();
+        *out = alias;
+    }
+    return hr;
+}
+
+// After CreateDevice and every Reset, when render target 0 is still the device's own: plain D3D9 and DXVK give the same
+// object from GetBackBuffer and nothing happens; a wrapper that gives two gets the GetBackBuffer detour, once
+void NoteBackBufferAlias(IDirect3DDevice9* dev) {
+    IDirect3DSurface9 *rt = nullptr, *bb = nullptr;
+    if (FAILED(dev->GetRenderTarget(0, &rt))) rt = nullptr;
+    if (FAILED(o_getBackBuffer ? o_getBackBuffer(dev, 0, 0, D3DBACKBUFFER_TYPE_MONO, &bb) : dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb))) bb = nullptr;
+    IDirect3DSurface9* alias = SceneTargetLogic::BackBufferAlias(rt, bb);
+    if (rt) rt->Release();
+    if (bb) bb->Release();
+    if (!alias) return;
+    if (!o_getBackBuffer) {
+        o_getBackBuffer = reinterpret_cast<GetBackBuffer_t>((*reinterpret_cast<void***>(dev))[kGetBackBufferSlot]);
+        if (!Attach(reinterpret_cast<void**>(&o_getBackBuffer), reinterpret_cast<void*>(&Hooked_GetBackBuffer), "IDirect3DDevice9::GetBackBuffer")) {
+            o_getBackBuffer = nullptr;
+            LOG_ERROR("[D3D] Back buffer alias not unified: the scene effects and the 16-bit scene stay off (never drawn over the picture)");
+            return;
+        }
+        const HMODULE d3d9 = GetModuleHandleW(L"d3d9.dll");
+        LOG_INFO(std::format("[D3D] Back buffer alias: GetBackBuffer and render target 0 are two objects for one back buffer ({}); Apex's calls now get "
+                             "render target 0",
+                             d3d9 && GetProcAddress(d3d9, "remixapi_InitializeLibrary") ? "RTX Remix bridge client" : "d3d9 wrapper"));
+    }
+    g_aliasDevice.store(dev);
+    g_bbAlias.store(alias);
+}
+
 HRESULT STDMETHODCALLTYPE Hooked_Reset(IDirect3DDevice9* dev, D3DPRESENT_PARAMETERS* pp) {
     // 07/10, players' Runtime Error: each step around the game's Reset is caught on its own and runs again at the next
     // Reset (a release skipped for good would make every later Reset fail); the game's Reset always runs, once
     HookGuard::Try("Overlay before Reset", [] { Overlay::BeforeReset(); });
     RenderCallbacks::Fire(RenderCallbacks::preReset, dev);
     HookGuard::Try("Picture before Reset", [] { Picture::Get().BeforeReset(); });
+    if (dev == g_aliasDevice.load()) g_bbAlias.store(nullptr); // the Reset destroys it
     HRESULT hr = o_reset(dev, pp);
     if (SUCCEEDED(hr)) {
+        if (o_getBackBuffer) NoteBackBufferAlias(dev);
         LOG_INFO(std::format("[D3D] Device reset: {}x{}, {}", pp ? pp->BackBufferWidth : 0, pp ? pp->BackBufferHeight : 0,
                              pp && pp->Windowed ? "windowed" : "exclusive fullscreen"));
         RenderCallbacks::Fire(RenderCallbacks::postReset, dev);
@@ -174,6 +233,7 @@ void HookDevice(IDirect3DDevice9* dev) {
     const bool ok = Attach(reinterpret_cast<void**>(&o_endScene), reinterpret_cast<void*>(&Hooked_EndScene), "IDirect3DDevice9::EndScene") &&
                     Attach(reinterpret_cast<void**>(&o_reset), reinterpret_cast<void*>(&Hooked_Reset), "IDirect3DDevice9::Reset");
     if (!ok) LOG_ERROR("[D3D] EndScene/Reset not hooked: Apex cannot draw");
+    NoteBackBufferAlias(dev); // (render target 0 is the device's own until the game's first SetRenderTarget)
 }
 
 HRESULT STDMETHODCALLTYPE Hooked_CreateDevice(IDirect3D9* self, UINT adapter, D3DDEVTYPE type, HWND focus, DWORD flags, D3DPRESENT_PARAMETERS* pp, IDirect3DDevice9** out) {
@@ -290,6 +350,7 @@ void Shutdown() {
     DetourUpdateThread(GetCurrentThread());
     if (o_endScene && g_deviceHooked.load()) DetourDetach(reinterpret_cast<void**>(&o_endScene), reinterpret_cast<void*>(&Hooked_EndScene));
     if (o_reset && g_deviceHooked.load()) DetourDetach(reinterpret_cast<void**>(&o_reset), reinterpret_cast<void*>(&Hooked_Reset));
+    if (o_getBackBuffer) DetourDetach(reinterpret_cast<void**>(&o_getBackBuffer), reinterpret_cast<void*>(&Hooked_GetBackBuffer));
     if (o_createDevice && g_createDeviceHooked.load()) DetourDetach(reinterpret_cast<void**>(&o_createDevice), reinterpret_cast<void*>(&Hooked_CreateDevice));
     if (o_create9 && g_create9Hooked.load()) DetourDetach(reinterpret_cast<void**>(&o_create9), reinterpret_cast<void*>(&Hooked_Direct3DCreate9));
     DetourTransactionCommit();

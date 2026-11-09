@@ -311,4 +311,145 @@ template <class Owed> typename Owed::iterator ReflectionPick(Owed& owed, size_t&
     return std::next(owed.begin(), next++ % owed.size());
 }
 
+// ---- (physical) the instant day/night switch (gpu-room-lamps.md "Day and night switch") ----
+// Per room the last kept solve of one end of the night level is cached (at its keep, and each room's kept solve as the level
+// leaves that end); at a quick switch to that end it is put back at once, until the game's own solve of the room lands. A
+// solve's end is the one the level heads for: from the level leaving the other end (the window lights switched just before)
+// to it leaving this one, the fade included, so the solves of the switch itself (begun in its 0.6 s fade) are cached too.
+namespace PhaseCache {
+enum End : uint8_t { kDay = 0, kNight = 1, kTwilight = 2 };
+constexpr uint32_t kQuickMs = 3000; // an arrival this soon after leaving the other end is a quick switch; a slow dusk stays the game's
+// The mode change: window lights switch ~0.2-0.3 s before the night level moves (14-05-00: a room started with the night list,
+// the level still 0). Their marks' burst begun within kModeLeadMs before the departure dates it; without one (no burst seen, or
+// window marks all along) a solve started within kPurgeMs before the departure counts as after it
+constexpr uint32_t kModeLeadMs = 3000, kPurgeMs = 1000;
+inline uint32_t ModeChange(uint32_t leftAt, uint32_t burst) {
+    const int32_t lead = static_cast<int32_t>(leftAt - burst);
+    return burst && lead >= 0 && lead <= static_cast<int32_t>(kModeLeadMs) ? burst : leftAt - kPurgeMs;
+}
+// A solve started at or after the mode change may hold the other end's lists
+inline bool AfterMode(uint32_t start, uint32_t mode) { return static_cast<int32_t>(start - mode) >= 0; }
+// A player's lamp edit (EditLastTick: switch, value, move, a lamp added or removed; never dusk or dawn) this long before a
+// solve's start may predate its gather only: that solve does not count as after the edit
+constexpr uint32_t kEditMarginMs = 500;
+inline bool EditSince(uint32_t edit, uint32_t start) { return edit && static_cast<int32_t>(edit + kEditMarginMs - start) >= 0; }
+inline End EndOf(float level) { return level > .99f ? kNight : level < .01f ? kDay : kTwilight; } // (TerrainLightingPolicy::LevelPhase)
+// The level's ends as seen frame by frame (render thread; the light tree thread reads a copy). A quick switch opens once the
+// level is kQuickHalf of the way to the other end within kQuickMs of leaving its end (about half the 0.6 s fade: the rooms take
+// the new end with the outside, not after it), else on arriving there within kQuickMs; a slow dusk opens none. A fade turned
+// back to the end it left after a switch opened is a switch back to that end
+constexpr float kQuickHalf = 0.5f;
+struct Clock {
+    End at = kTwilight, lastLeft = kTwilight, target = kTwilight;
+    End heading = kTwilight; // the end the level is at or moves to (the other end from a departure; the end reached on arrival)
+    bool seen = false;
+    uint32_t departures = 0;              // every departure from an end
+    uint32_t leftN[2] = {}, leftAt[2] = {}; // per end: its departures, the tick of the last one
+    uint32_t switches = 0, switchFrom = 0;  // quick switches; the last one's departure tick (target: its end)
+    uint32_t switchDep = 0;                 // the departures count when the last switch opened
+    void Open(End e, uint32_t from) { switches++, target = e, switchFrom = from, switchDep = departures; }
+    void Observe(End e, uint32_t now, float level = -1.0f) {
+        if (seen && e == at) {
+            // (in the fade: open the switch once the level is half way, early enough after the departure)
+            if (e == kTwilight && level >= 0.0f && lastLeft != kTwilight && switchDep != departures &&
+                static_cast<int32_t>(now - leftAt[lastLeft]) <= static_cast<int32_t>(kQuickMs) &&
+                (heading == kNight ? level >= kQuickHalf : level <= 1.0f - kQuickHalf))
+                Open(heading, leftAt[lastLeft]);
+            return;
+        }
+        if (seen && at != kTwilight) departures++, leftN[at]++, leftAt[at] = now | 1, lastLeft = at, heading = at == kDay ? kNight : kDay;
+        if (e != kTwilight) heading = e; // (an arrival; back at the end left: heading it again)
+        if (seen && e != kTwilight && lastLeft != kTwilight) {
+            if (lastLeft != e && switchDep != departures && static_cast<int32_t>(now - leftAt[lastLeft]) <= static_cast<int32_t>(kQuickMs)) Open(e, leftAt[lastLeft]);
+            else if (lastLeft == e && switchDep == departures && target != e) Open(e, now | 1); // (turned back: its rooms back)
+        }
+        at = e, seen = true;
+    }
+};
+struct Stamp {
+    End at = kTwilight, heading = kTwilight;
+    uint32_t departures = 0, tick = 0;
+};
+inline Stamp StampOf(const Clock& c, uint32_t now) { return Stamp{c.at, c.heading, c.departures, now}; }
+// A solve of one end: begun and kept heading it, no departure between (a solve begun before the level left an end and kept
+// after is neither end's; one begun in an aborted fade and kept back at the end left is not either)
+inline bool Whole(const Stamp& start, const Stamp& kept) {
+    return start.heading != kTwilight && start.heading == kept.heading && start.departures == kept.departures;
+}
+// At the departure from e (the clock's departures then less one: `stay`), why a room's kept solve does not join e's cache (null:
+// it does): a solve of e in the stay just left, begun before the mode change
+inline const char* FillWhy(const Stamp& start, const Stamp& kept, End e, uint32_t stay, uint32_t mode) {
+    if (start.heading != e) return "begun heading the other end";
+    if (!Whole(start, kept)) return "the level left an end during its solve";
+    if (start.departures != stay) return "solved in an earlier stay";
+    if (AfterMode(start.tick, mode)) return "begun after the mode change";
+    return nullptr;
+}
+inline bool FillOk(const Stamp& start, const Stamp& kept, End e, uint32_t stay, uint32_t mode) { return !FillWhy(start, kept, e, stay, mode); }
+// Per room key the cache's two ends (P: a shared pointer to the kept solve)
+template <class P> struct Slots {
+    P at[2];
+    uint32_t keptAt[2] = {}, start[2] = {};
+};
+// At a departure from end e, its candidates started at or after the mode change go; all of them when departures were missed
+template <class Map> int PurgeDeparture(Map& m, End e, uint32_t mode, bool missed) {
+    int n = 0;
+    for (auto it = m.begin(); it != m.end();) {
+        auto& s = it->second;
+        if (s.at[e] && (missed || AfterMode(s.start[e], mode))) s.at[e] = {}, n++;
+        if (!s.at[0] && !s.at[1]) it = m.erase(it);
+        else ++it;
+    }
+    return n;
+}
+// What the swap of one room checks (the light tree thread reads them); why it waits for the game's solve, null: swapped
+struct Facts {
+    bool cand = false, cur = false;  // a cached solve of the switch's end; a kept solve now
+    uint32_t candStart = 0, curStart = 0, switchFrom = 0, lastEdit = 0;
+    bool solving = false, sameLot = false, sameGeo = false, sameTexels = false, sameLamps = false, lampsAsKept = false, basisOk = false;
+};
+constexpr const char* kLampState = "a lamp's state differs from its cached solve's";
+constexpr const char* kLanded = "its solve since the switch landed";
+constexpr const char* kSolving = "being solved";
+constexpr const char* kNoKept = "no kept solve now";
+constexpr uint32_t kLampWaitMs = 1000; // a lamp's state still not as cached this long after the departure: the room's solve is asked for
+inline const char* SwapWhy(const Facts& f) {
+    // (first: a room already solved for this end shows it, with or without a cached solve)
+    if (f.cur && static_cast<int32_t>(f.curStart - f.switchFrom) >= 0) return kLanded;
+    if (!f.cand) return "no cached solve of that end";
+    if (!f.cur) return kNoKept;
+    if (f.solving) return kSolving;
+    if (!f.sameLot) return "another lot";
+    if (EditSince(f.lastEdit, f.candStart)) return "a player's lamp edit since its cached solve";
+    if (!f.sameGeo) return "its walls, doors or 3D blockers changed";
+    if (!f.sameTexels) return "its texels changed";
+    if (!f.sameLamps) return "a lamp lit now that its cached solve does not list";
+    if (!f.lampsAsKept) return kLampState; // (tried again while the switch is open: lamps switching with the hour come a little later)
+    if (!f.basisOk) return "its directional maps cannot follow";
+    return nullptr;
+}
+// A room refused its swap shows the other end until a solve of it lands: whether Apex sends it to its solve now. Not while its
+// solve has landed or runs, nor with no kept solve (no room to name); a lamp's state is tried again first, and sent once
+// kLampWaitMs after the departure
+inline bool SendOnRefusal(const char* why, uint32_t sinceDeparture) {
+    if (!why || why == kLanded || why == kSolving || why == kNoKept) return false;
+    return why != kLampState || sinceDeparture >= kLampWaitMs;
+}
+// A lamp edit's settle sends each room of the lamp to one solve kSettleMs after the edit: not a room whose kept solve began
+// after the edit (it gathered the edit: light list, normalisation, bounce). kEditMarginMs as EditSince: a start that close
+// after the edit may predate its gather only
+inline bool SettleSolved(uint32_t edit, uint32_t keptStart) { return static_cast<int32_t>(keptStart - edit) > static_cast<int32_t>(kEditMarginMs); }
+// The swap: the cached solve takes the room's place as it was kept (the same object, no copy); the budget's bytes follow. The
+// solve it replaces is returned
+template <class Map, class P> P SwapIn(Map& kept, size_t& bytes, uint64_t key, const P& cand) {
+    P prev;
+    auto it = kept.find(key);
+    if (it == kept.end()) return prev;
+    prev = it->second;
+    bytes = bytes - std::min(bytes, prev->bytes) + cand->bytes;
+    it->second = cand;
+    return prev;
+}
+} // namespace PhaseCache
+
 } // namespace OutdoorDeltaModel

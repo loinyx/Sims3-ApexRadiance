@@ -248,6 +248,9 @@ inline void Compare(const Room& r, const RtLampProxy::Mesh* mesh, const RtLampPr
                 RtLampProxy::ToLot(*lot, t.p, Pl);
                 pane = RtLampProxy::PaneShare(panes, Ll, Pl); // (the texel's true point)
                 RtLampProxy::IntoRoom(*lot, r.h.story, r.h.id, Pl); // (as the GPU's shadow lookup: gpu_room_lamps.cpp)
+                float Nl[3];
+                RtLampProxy::DirToLot(*lot, t.n, Nl);
+                RtLampProxy::OffFloorLine(*lot, r.h.story, Pl, Nl);
                 vis = RtLampProxy::Visibility(*mesh, Ll, r.h.radius, Pl, visSamples, &stamp, &mark);
             }
             const float t3d = haveBlk && t.tested && vis > 0.0f

@@ -26,6 +26,9 @@ unsigned long SwitchLastTick();
 // (RoomLightQueue stamps the solve starts with it, LevelLightShare the urgent marks). Any thread.
 unsigned long EditLastTick();
 unsigned long EditSerial();
+// GetTickCount of the first window light mark (types 7, 8) of the latest burst, marks under 1.5 s apart (bit 0 set, 0 = none):
+// the mode change of a day/night switch comes before the night level moves (OutdoorDelta's day/night cache). Any thread.
+unsigned long WindowBurstStart();
 // A lot's safety-net refresh (OnPresent) is due within withinMs, or overdue: the edit hold waits for the rooms it sends
 // (12/10: a move's refresh comes 200 ms after it, after the hold's first check). Render thread.
 bool LotRefreshDueSoon(unsigned long withinMs);

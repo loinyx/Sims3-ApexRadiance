@@ -307,6 +307,10 @@ bool StackedWithEdit(const void* room);
 // The first seconds after the world went live, while the loaded lots' rooms correct themselves (LotLightingMotion and
 // RoomLightQueue give the room solves a larger share of the frame meanwhile)
 bool SettlingAfterLoad();
+// A quick day/night switch is solving (RoomAmbientPolicy::DayNightWindow, fed by the night level every frame): the played lot's
+// rooms take the raised solve budget and no second solve is sent to them meanwhile; serial: one per switch (0 = none yet). Any thread.
+bool DayNightSwitching();
+unsigned DayNightSwitchSerial();
 // Render thread: the room belongs to an atrium (a stacked-ambient group of 2 rooms or more)
 bool InAtrium(const void* room);
 // Light tree thread: the share (0..1) of a lamp of another story that reaches a point of an indoor room, tested as the room's
@@ -366,6 +370,11 @@ int ForEachRoom(bool (*visit)(unsigned char* room, void* ctx), void* ctx, int* q
 // Stage original room colours, then refresh connected groups after the complete traversal.
 bool StageAmbientBaseChange(unsigned char* room, const float* oldOwn, const float* newOwn, const float* oldSecond, const float* newSecond);
 bool HoldsAmbientBase(unsigned char* room, const float* own, const float* second);
+// (the instant day/night switch, light tree thread) true when the room's own ambient as the game computed it last (before any
+// share) is `own` and the room is no atrium member (its +0x110 is then that colour, or it with a stairwell's share); norm: its
+// normalisation then. SetAmbientOwn puts both back with a cached solve, for the neighbours' stairwell shares at their solves
+bool AmbientOwnIs(unsigned char* room, const float* own, float& norm);
+void SetAmbientOwn(unsigned char* room, const float* own, float norm);
 // Light tree thread (physical indoor lamps, S8): the game's ambient step (FUN_006a0f50, with Rooms at Night's base) run again on
 // an indoor room with lamps at its own threshold, its fields put back: the colours it gives +0x110 (own) and +0x120 (second),
 // 4 floats each, and the normalisation it computes. False: an outdoor room, no lamps listed, or not read
@@ -480,6 +489,10 @@ bool FinishRoomMaps(void* room);
 bool ExportLotProxy(uintptr_t tracker, RtLampProxy::Lot& out, std::string& why);
 // Any thread: the lots lit at the high quality (the active lot, Build mode: story manager +0x288); returns the count
 int ActiveLotTrackers(uintptr_t* out, int max);
+// Light tree thread or render thread: the lot of that story tree level is the one being played (PlayedLotMgr)
+bool PlayedLotOfTl(uintptr_t tl);
+// Render thread: the same for a lot by its tracker (its story 0 manager)
+bool PlayedTracker(uintptr_t tracker);
 // Any thread: the game still has this lot (its tracker is in the light manager's lot list)
 bool TrackerLive(uintptr_t tracker);
 // Any thread, in a live world: the story managers (stories -4..7) of every loaded lot. False while a world loads or when the

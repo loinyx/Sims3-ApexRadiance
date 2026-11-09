@@ -67,12 +67,25 @@ bool DxvkD3D9() {
     return dxvk;
 }
 
+bool RemixBridge() {
+    static std::atomic<int> cached{-1};
+    const int c = cached.load(std::memory_order_relaxed);
+    if (c >= 0) return c == 1;
+    const HMODULE m = GetModuleHandleW(L"d3d9.dll");
+    if (!m) return false; // not loaded yet: ask again later
+    // (a d3d9.dll that is DXVK itself, such as an in-process Remix runtime, is DXVK here, not the bridge)
+    const bool bridge = GetProcAddress(m, "remixapi_InitializeLibrary") != nullptr && !DxvkD3D9();
+    cached.store(bridge ? 1 : 0, std::memory_order_relaxed);
+    return bridge;
+}
+
 std::string Summary() {
     const Info& i = Get();
     std::string s = i.wine ? std::format("Wine {}{}{}", i.wineVersion, i.host.empty() ? "" : " on ", i.host) : "Windows";
     if (i.steamDeck) s += std::format(" (Steam Deck {})", i.deckModel);
     else if (i.deckHint) s += " (SteamDeck=1)";
-    if (GetModuleHandleW(L"d3d9.dll")) s += DxvkD3D9() ? ", d3d9: DXVK" : ", d3d9: not DXVK";
+    if (GetModuleHandleW(L"d3d9.dll"))
+        s += DxvkD3D9() ? ", d3d9: DXVK" : RemixBridge() ? ", d3d9: RTX Remix bridge (DXVK in another process)" : ", d3d9: not DXVK";
     return s;
 }
 

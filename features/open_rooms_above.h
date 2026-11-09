@@ -28,10 +28,14 @@ constexpr int kMaxId = 4096; // room ids at or above it are never open (the per-
 // B; a wall with a floor on its own side stands on the room's single-storey part, its outer face above that roof). A
 // double-height room under a sloped roof has those only along its gables (02/11, lot C49C: story 2's rooms 5 and 7 under
 // story 3); a single-storey wing has walls of B only where a floored room of B stands beside it (story 1's room 8: none of
-// its own, 5 beside floored rooms): it stays closed. shortcut: the roof's height is not read, so a room whose upper walls
-// all stand on its floored part (C49C's room 6) stays closed even if it is two storeys tall; read the roof to open it.
-template <class RoomAt, class Placed, class WallZ, class WallX>
-void Classify(int w, int h, RoomAt roomAt, Placed placed, WallZ wallZ, WallX wallX, std::vector<int>& open, bool ownWalls = false) {
+// its own, 5 beside floored rooms): it stays closed. Diagonal walls of B count (wallD): a room whose outline runs along
+// diagonals (C49C's room 6, a tall room) has its walls there. shortcut: the roof's height is not read, so a room whose upper walls
+// all stand on its floored part stays closed even if it is two storeys tall; read the roof to open it.
+// wallD(x, z, i): story B has the diagonal wall i of tile (x, z) (0: (x, z)-(x + 1, z + 1), 1: (x, z + 1)-(x + 1, z)): the edges
+// between a tile's own quadrants across it count as the outline's, as the tile sides do (13-50-15: lot C49C's room 6, a tall
+// room whose outline runs along diagonals, stayed closed with only the tile sides counted, its upper walls grey)
+template <class RoomAt, class Placed, class WallZ, class WallX, class WallD>
+void Classify(int w, int h, RoomAt roomAt, Placed placed, WallZ wallZ, WallX wallX, WallD wallD, std::vector<int>& open, bool ownWalls = false) {
     open.clear();
     if (w <= 0 || h <= 0) return;
     const auto room = [&](int x, int z, int q) {
@@ -71,10 +75,30 @@ void Classify(int w, int h, RoomAt roomAt, Placed placed, WallZ wallZ, WallX wal
         for (int x = 0; x < w; x++) edge(room(x, Z - 1, 2), room(x, Z, 0), wallZ(x, Z), floorAt(x, Z - 1, 2), floorAt(x, Z, 0));
     for (int z = 0; z < h; z++)
         for (int X = 0; X <= w; X++) edge(room(X - 1, z, 1), room(X, z, 3), wallX(X, z), floorAt(X - 1, z, 1), floorAt(X, z, 3));
+    // inside a tile: quadrant q and q + 1 meet on the half diagonal from the tile's corner q + 1 to its centre; diagonal 0 runs
+    // through corners 0 and 2 (it parts 1 | 2 and 3 | 0), diagonal 1 through corners 1 and 3 (it parts 0 | 1 and 2 | 3)
+    for (int z = 0; z < h; z++)
+        for (int x = 0; x < w; x++)
+            for (int q = 0; q < 4; q++) {
+                const int n = (q + 1) & 3;
+                edge(room(x, z, q), room(x, z, n), wallD(x, z, (q & 1) ? 0 : 1), floorAt(x, z, q), floorAt(x, z, n));
+            }
     for (int r = 1; r <= top; r++) {
         const size_t i = static_cast<size_t>(r);
         if (floorOpen(r) && edges[i] > 0 && (walled[i] * 4 >= edges[i] * 3 || (ownWalls && own[i] > 0))) open.push_back(r);
     }
 }
+// (no diagonal walls known)
+template <class RoomAt, class Placed, class WallZ, class WallX>
+void Classify(int w, int h, RoomAt roomAt, Placed placed, WallZ wallZ, WallX wallX, std::vector<int>& open, bool ownWalls = false) {
+    Classify(w, h, roomAt, placed, wallZ, wallX, [](int, int, int) { return false; }, open, ownWalls);
+}
+
+// The lights of the open rooms the room 0 above takes (ShareRoomZeroFromBelow): their lamps, not their window lights (types 7
+// and 8). A window light sits in its wall's plane at the window's top, so the points of the story above just over it (the
+// walls lifted off the floor line) took it at a few centimetres: daylight hot spots over every door and window of the room
+// below (14-06-26, lot C49C story 3: largest texel sum 21.8 by day, 0 at night), and a room-0 list of 36 lights by day
+// instead of 17. The room's daylight reaches those texels through its own walls' top row (RtOutdoorLamps' carry).
+inline bool SharedFromBelow(int lightType) { return lightType != 7 && lightType != 8; }
 
 } // namespace OpenAbove

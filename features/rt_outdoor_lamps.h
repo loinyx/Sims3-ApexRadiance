@@ -117,6 +117,23 @@ const void* GameMapOf(const void* texture);
 // its hue kept past 1, divided by its largest channel m; the scale texture holds log2(m) / kScaleLog2 (0: within 1), so a
 // draw that multiplies the copy's colour by 2^(kScaleLog2 x r) gets the sum back, up to 8 times. Texels of other rooms: 0.
 IDirect3DTexture9* ScaleOf(const void* texture);
+// A room's own map shown while its relit copy is not (the game wrote it again, a relight failed or is under way): the scale texture
+// of its last relight when that marked texels of a space a room of the story below continues into (.y = 1; read with no outdoor
+// scale: the draw sets the scale's constant to 0), so those walls and floors keep the indoor response with no sky between
+// relights; null otherwise
+IDirect3DTexture9* IndoorFlagsOf(const void* texture);
+// The draw's inputs for those texels (ShaderPatches IndoorPick rooms: WallScalePatch / FloorPatch roomSampler) on a map bound
+// to a draw: the UV map, each room's own wall map as the room's own draw reads it this frame (its relit copy when shown), its
+// ambient (+0x110, the InteriorWall's c4) with the sky reflection's scale in .w, and whether the scale bound with it holds the lamps'
+// fall-off ratios in .z (its relit copy's; the game's own map: none, x 1). False: not such a map, or a room's ambient or map not read
+struct IndoorRooms {
+    IDirect3DTexture9* uv = nullptr;
+    IDirect3DTexture9* map[4] = {};
+    float amb[4][4] = {};
+    bool ratio = false;
+};
+bool IndoorRoomsOf(const void* texture, IndoorRooms& out);
+constexpr float kIndoorReflection = 0.117f;
 constexpr float kScaleLog2 = 3.0f;
 
 // The menu: the last measured GPU time of a relight (ms), -1 while off or not measured

@@ -138,6 +138,9 @@ static void Detail(const Room& r, const RtLampProxy::Mesh* mesh, const RtLampPro
                 RtLampProxy::ToLot(*lot, t.p, Pl);
                 pane = RtLampProxy::PaneShare(panes, Ll, Pl);
                 RtLampProxy::IntoRoom(*lot, r.h.story, r.h.id, Pl);
+                float Nl[3];
+                RtLampProxy::DirToLot(*lot, t.n, Nl);
+                RtLampProxy::OffFloorLine(*lot, r.h.story, Pl, Nl);
                 vis = RtLampProxy::Visibility(*mesh, Ll, r.h.radius, Pl, samples);
             }
             const float t3d = r.h.blkHeader >= 0.0f && !r.blk.empty() && t.tested ? blk.Occlude(static_cast<int>(r.h.blkHeader), {L.law.pos[0], L.law.pos[1], L.law.pos[2]}, {t.p[0], t.p[1], t.p[2]}, 0.0f, r.h.radius) : 1.0f;
@@ -159,6 +162,9 @@ static void Detail(const Room& r, const RtLampProxy::Mesh* mesh, const RtLampPro
                 float Pl[3], tHit = 0.0f;
                 RtLampProxy::ToLot(*lot, t.p, Pl);
                 RtLampProxy::IntoRoom(*lot, r.h.story, r.h.id, Pl);
+                float Nl[3];
+                RtLampProxy::DirToLot(*lot, t.n, Nl);
+                RtLampProxy::OffFloorLine(*lot, r.h.story, Pl, Nl);
                 const int hit = RtLampProxy::FirstHit(*mesh, Ll, Pl, 0.01f, 0.01f, tHit);
                 if (hit >= 0) {
                     const RtLampProxy::Tri& tr = mesh->tris[static_cast<size_t>(hit)];

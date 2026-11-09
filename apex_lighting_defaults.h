@@ -10,7 +10,10 @@
 
 namespace ApexLightingDefaults {
 
-inline constexpr int64_t kRevision = 1;
+// 1: the lighting defaults of 3.0.0 (kept as a choice where a value was changed); 2: Lamp lighting goes to Instant for everyone,
+// Classic included (3.0.0 draws indoor lamps on the GPU there, and testers on Classic saw no instant indoor light)
+inline constexpr int64_t kRevision = 2;
+inline constexpr const char* kLampMode = "lampLightingMode";
 
 struct Move {
     const char* key;
@@ -36,11 +39,16 @@ inline bool AtOldDefault(const toml::table& t, const Move& m) {
 }
 inline bool AtOldOrNone(const toml::table& t, const Move& m) { return !t.contains(m.key) || AtOldDefault(t, m); }
 
-// Moves what is still at its old default in root's Night Lights table; returns the keys it moved.
-inline std::vector<std::string> Apply(toml::table& root) {
+// Moves what is still at its old default in root's Night Lights table, from the revision it was stamped with; returns the keys it moved.
+inline std::vector<std::string> Apply(toml::table& root, int64_t from = 0) {
     std::vector<std::string> moved;
     toml::table* t = root["patches"]["NightTerrainRelight"].as_table();
     if (!t) return moved;
+    if (from < 2 && t->contains(kLampMode) && (*t)[kLampMode].value_or(std::string()) != "instant") {
+        t->insert_or_assign(kLampMode, "instant");
+        moved.emplace_back(kLampMode);
+    }
+    if (from >= 1) return moved;
     const auto set = [&](const Move& m) {
         t->insert_or_assign(m.key, m.after);
         moved.emplace_back(m.key);

@@ -367,6 +367,23 @@ enum class Id : uint16_t {
     LampLeftMarkCall,   // 0x006C7CCA: FUN_006c7ba0's call of FUN_006c7160 for the room a lamp left (before LampMarkCall)
     EntryFlag,          // FUN_006c4cf0(objId): flags every light and occluder entry of an object
     EntryFlagCall0, EntryFlagCall1, EntryFlagCall2, EntryFlagCall3, EntryFlagCall4, // its 5 callers, by address (development build counters)
+    // GPU room lamps: the 3D blockers and the constants the game's room light tests read (features/room_light_tests.h kConstAt order)
+    BlockerQuadCtor,    // FUN_0069d000: the soft rectangle blocker's constructor (called from the object's lighting record builder at 0x006B1204)
+    BlockerQuadVt,      // vtable 0x00FF3118 it stores (vfunc+0x14 = FUN_0069bea0)
+    BlockerDiscVt,      // vtable 0x00FF3C24 of the soft disc blocker (vfunc+0x14 = FUN_0069c1a0), stored at 0x006B12B7
+    TestZero,           // float 0x00F98964 (0.0): the two-plane flag compare in FUN_0069bea0 / FUN_0069c1a0
+    TestTwo,            // float 0x00F98A58 (2.0): FUN_0069bea0's static
+    TestNeg1,           // float 0x00FAA210 (-1.0) in FUN_0069bea0
+    TestFour,           // float 0x00FB2F6C (4.0): FUN_0069c1a0's static
+    TestDiscEdge,       // float 0x00FECE18 (0.0625): FUN_0069c1a0's static
+    TestStop,           // float 0x00FF31AC (0.01): the early stop of FUN_0069d4c0
+    TestQuadEdge,       // float 0x0106B4B4 (0.15): FUN_0069bea0's static
+    TestDrop,           // float 0x0106D6CC (0.01): FUN_0069fc40's drop
+    TestOne,            // float 0x0107A538 (1.0) in FUN_0069bea0
+    TestEps,            // float[4] 0x011D0240: the parallel cut of FUN_0069b590 / FUN_0069b650 (set at start)
+    TestHalf,           // float 0x00F9A5AC (0.5) in FUN_0069d4c0
+    TestPenumbra,       // float 0x00FF307C (0.5) in FUN_0069a8c0
+    TestWallY,          // float 0x01158A50 (1.0): the wall height test of FUN_0069aa90
     Count
 };
 

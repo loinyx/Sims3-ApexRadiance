@@ -25,6 +25,7 @@ int main() {
     at(0x16C + 4) = reinterpret_cast<uintptr_t>(&cube);
     at(0x230) = 0xD73916FE; // what the reports read in the slots past the third class
     at(0x238) = 0xB;
+    at(0x16C + 8) = 0x2; // a small value in a real class slot: skipped without a read (2.18.4 report: ecx = 2)
     StoryMapSlot slot;
     int failed = 0;
     if (!StoryMapsInclude(m, 0x1234, slot) || slot.wrapper != reinterpret_cast<uintptr_t>(&own) || !StoryMapSlotMatches(slot, 0x1234)) failed++;

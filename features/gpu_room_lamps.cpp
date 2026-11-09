@@ -9,11 +9,13 @@
 #include "level_light_share.h"
 #include "rt_lamp_model.h"
 #include "phys_lamp_pick.h"
+#include "phys_tiles.h"
 #include "lamp_mark_filter.h"
 #include "drag_lite.h"
 #include "arch_ambient.h"
 #include "dev_switches.h"
 #include "unlit_rooms.h"
+#include "hook_guard.h"
 #include "apex_log.h"
 #include <windows.h>
 #include <algorithm>
@@ -25,6 +27,7 @@
 #include <format>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <tuple>
 #include <unordered_map>
@@ -103,6 +106,7 @@ struct Entry {
     // (physical, ComposeOver's partial relight) the places its compose writes in the map (y << 16 | x: texels, block rows, copies,
     // restores), what it is drawn from now (Sig) and what its last draw into the copy was drawn from
     std::vector<uint32_t> writes;
+    std::vector<RtLampGpu::Block> runs; // (ComposeOver's kept rooms) writes as runs of a row, made on first use
     uint64_t drawKey = 0, drawnKey = 0;
     // (sharper floors, ComposeHi) the draw its sub-texels in the overlay were last drawn from (0: none there)
     uint64_t hiKey = 0;
@@ -111,21 +115,19 @@ struct Entry {
 struct CopyState {
     uint64_t set = 0;
     bool disjoint = false, valid = false;
+    uint64_t rules = 0;                     // (KeptRules) what every room's draw read beside its own inputs, at the last full draw
+    const IDirect3DTexture9* out = nullptr; // the copy drawn into
 };
+uint32_t g_roomsKept = 0, g_roomsDrawn = 0; // (TakeTileCost) rooms of full draws taken from the copy before room 0's compose, drawn
 std::map<std::tuple<uintptr_t, int, int>, CopyState> g_copies; // (mgr, cls, m)
 // (physical indoor lamps) the kept shadow atlas: a tile per lamp, kept while the lamp stays put and the occluders are the same.
-// Its rows grow with the most lamps a map has drawn (4 at a time, up to kTiles: 6 x 256 x 256 x (G16R16F + D24X8) = 3.1 MB a
-// row, 50 MB at 16); a map with more lamps is drawn in several passes over the same sum, its tiles rendered again in turn
-constexpr int kTiles = 16;    // (6 x 256 by 16 x 256: within a 4096 texture limit)
+// Its tiles grow with the lamps the maps draw (phys_tiles.h: every lot lamp drawn while it exists, 4 at a time, up to
+// PhysTiles::kTiles = 120 in columns: 6 x 256 x 256 x (G16R16F + D24X8) = 3.1 MB a tile); a map with more than 16 lamps is drawn in
+// passes of 16 over the same sum. Past the tiles, the first filled stay and only the excess lamps are rendered again in turn
 constexpr int kMaxLamps = 64; // a map's lamps drawn at most (4 passes of 16 tiles: the frame's cost bounded)
-struct Tile {
-    uintptr_t light = 0;
-    float pos[3] = {};
-    uint32_t gen = 0, used = 0;
-};
-std::array<Tile, kTiles> g_tiles;
-uint32_t g_tileUse = 0;
-int g_tileRows = 0;
+PhysTiles::Atlas g_tiles;
+std::vector<uintptr_t> g_tileSeen; // (the lot lamps drawn since they exist: PhysTiles::Want; BeginFrame drops those gone)
+uint32_t g_tileGrowths[2] = {};    // (TileCost) the atlas grown with its tiles kept, made again with none
 // (physical indoor lamps) a relight round's maps per story: drawn, and why the others were not (logged when it changes, BeginFrame)
 struct Cover {
     int drawn = 0, failed = 0;
@@ -421,6 +423,80 @@ void DrawnTable(Entry& e, const void* room, int cls) {
 }
 } // namespace
 
+namespace {
+// A kept map's data (OutdoorDelta::BuildKeptMap) with its physical points in the lot's space (base keeps the world position;
+// mask.xyz = where the shadow is looked up: a texel past its room's diagonal wall inside the room, RtLampProxy::IntoRoom; a wall
+// texel on a floor's plane off it, OffFloorLine). The render thread or a worker: xf and lot are read by the render thread.
+// shortcut: the lot's room ids as this entry is built; a lot edit since leaves them until the entry is made again
+bool BuildData(const void* room, int cls, uint32_t version, int m, int id, bool xfOk, const float* xf, const std::shared_ptr<const RtLampProxy::Lot>& lot, RtLampGpu::KeptMapData& d,
+               bool& space) {
+    std::string why;
+    if (!OutdoorDelta::BuildKeptMap(room, cls, version, m, d, why)) return false; // (nothing of it in this map: an entry that draws nothing)
+    space = !d.physical || xfOk;
+    if (space && d.physical)
+        for (auto* pts : {&d.phys, &d.physHi})
+            for (RtLampGpu::TexelVertex& v : *pts) {
+                float p[3], n[3];
+                for (int k = 0; k < 3; k++)
+                    p[k] = v.base[0] * xf[k] + v.base[1] * xf[4 + k] + v.base[2] * xf[8 + k] + xf[12 + k], n[k] = v.n[0] * xf[k] + v.n[1] * xf[4 + k] + v.n[2] * xf[8 + k];
+                std::memcpy(v.p, p, sizeof p), std::memcpy(v.n, n, sizeof n), std::memcpy(v.mask, p, sizeof p);
+                if (lot) RtLampProxy::IntoRoom(*lot, d.story, id, v.mask), RtLampProxy::OffFloorLine(*lot, d.story, v.mask, n);
+            }
+    return true;
+}
+// A room solved again: its maps' data from a worker, while the entries of its last solve keep drawing. Built in Sig, the four
+// maps of a room of 47681 texels held the render thread 76 ms in one frame, and a day/night switch's first rooms 128 ms (the
+// hitch before the rooms' light changes, 2026-11-09)
+struct Prebuilt {
+    uint32_t version = 0;
+    bool built = false, space = false, threw = false;
+    float xf[16] = {};
+    double ms = 0.0;
+    RtLampGpu::KeptMapData d;
+    std::atomic<int> state{1}; // 2: ended
+};
+std::map<std::tuple<const void*, int, int>, std::shared_ptr<Prebuilt>> g_prebuilt; // (room, class, map); render thread
+constexpr int kPrebuilds = 4; // workers at a time
+constexpr double kUploadMs = 2.0; // a round takes prebuilt maps until their uploads took this long (its first always goes)
+double g_uploadRound = 0.0, g_uploadWorst = 0.0, g_prebuiltMs = 0.0; // (the 10 s line, BeginFrame)
+int g_prebuiltMaps = 0;
+std::atomic<int> g_prebuildsRunning{0}; // (a job replaced by a newer solve's still runs: counted until it ends)
+// True once this map's data of the room's solve now can be taken (or no worker could start: built here, as a first solve's)
+bool PrebuiltReady(const std::tuple<const void*, int, int>& key, uintptr_t mgr, const OutdoorDelta::KeptRef& r) {
+    const auto at = g_prebuilt.find(key);
+    if (at != g_prebuilt.end() && at->second->version == r.version) return at->second->state.load() == 2 && g_uploadRound < kUploadMs;
+    if (at != g_prebuilt.end() && at->second->state.load() == 2) g_prebuilt.erase(at); // (another solve's data, ended: not held)
+    if (g_prebuildsRunning.load() >= kPrebuilds) return false;
+    auto j = std::make_shared<Prebuilt>();
+    j->version = r.version;
+    const bool xfOk = RtOutdoorLamps::LotXform(mgr, j->xf);
+    uint32_t lotGen = 0;
+    const std::shared_ptr<const RtLampProxy::Lot> lot = RtOutdoorLamps::KeptLot(lotGen);
+    const void* const room = std::get<0>(key);
+    const int cls = std::get<1>(key), m = std::get<2>(key), id = r.id;
+    g_prebuildsRunning.fetch_add(1);
+    if (!HookGuard::StartDetached("GpuRoomLamps kept map", [j, room, cls, m, id, xfOk, lot] {
+            LARGE_INTEGER t0{}, t1{};
+            QueryPerformanceCounter(&t0);
+            try {
+                j->built = BuildData(room, cls, j->version, m, id, xfOk, j->xf, lot, j->d, j->space);
+            } catch (...) {
+                j->built = false, j->threw = true;
+            }
+            QueryPerformanceCounter(&t1);
+            j->ms = MsSince(t0, t1);
+            j->state.store(2);
+            g_prebuildsRunning.fetch_sub(1);
+        })) {
+        g_prebuildsRunning.fetch_sub(1);
+        g_prebuilt.erase(key);
+        return true;
+    }
+    g_prebuilt[key] = std::move(j);
+    return false;
+}
+} // namespace
+
 uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
     if (!OutdoorDelta::RoomLampCapture()) {
         if (!g_entries.empty()) ReleaseAll();
@@ -445,14 +521,24 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
         const void* room = std::get<0>(it->first);
         const bool here = e.mgr == mgr && e.cls == cls && e.m == m;
         if (here && std::none_of(g_refs.begin(), g_refs.end(), [&](const OutdoorDelta::KeptRef& r) { return r.room == room && r.version == e.version; })) {
-            const bool gone = std::none_of(g_refs.begin(), g_refs.end(), [&](const OutdoorDelta::KeptRef& r) { return r.room == room; });
+            const auto now = std::find_if(g_refs.begin(), g_refs.end(), [&](const OutdoorDelta::KeptRef& r) { return r.room == room; });
+            const bool gone = now == g_refs.end();
+            if (gone) g_prebuilt.erase(it->first);
+            else if (e.ok && !PrebuiltReady(it->first, mgr, *now)) { // (its last solve's entry draws meanwhile)
+                ++it;
+                continue;
+            }
             Drop(e, room, !gone);
             if (e.physical && gone) OutdoorDelta::SolveTouched(room); // (no kept solve of it any more: its game's map, which a lamp edit taken may lack)
             it = g_entries.erase(it);
         } else if (here && !e.ok && e.retryAt && static_cast<int32_t>(GetTickCount() - e.retryAt) >= 0)
             it = g_entries.erase(it);
-        else
+        else {
+            // (its solve is current again, a day/night switch turned back: another solve's data built meanwhile is not held)
+            if (here)
+                if (const auto p = g_prebuilt.find(it->first); p != g_prebuilt.end() && p->second->state.load() == 2) g_prebuilt.erase(p);
             ++it;
+        }
     }
     uint64_t sig = 1469598103934665603ull;
     bool any = false;
@@ -462,25 +548,22 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
         if (fresh) {
             e.mgr = mgr, e.cls = cls, e.m = m, e.version = r.version, e.id = r.id;
             RtLampGpu::KeptMapData d;
-            std::string why;
-            if (OutdoorDelta::BuildKeptMap(r.room, cls, r.version, m, d, why)) { // (else nothing of it in this map: an entry that draws nothing)
-                e.story = d.story, e.lot = d.lot, e.thr = d.thr, e.physical = d.physical;
-                const bool space = !d.physical || RtOutdoorLamps::LotXform(mgr, e.xf);
-                // (the points to the lot's space; base keeps the world position; mask.xyz = where the shadow is looked up: a texel past
-                // its room's diagonal wall inside the room, RtLampProxy::IntoRoom)
-                // shortcut: the lot's room ids as this entry is built; a lot edit since leaves them until the entry is made again
+            bool built = false, space = false, prebuilt = false;
+            // (a worker's build that threw, out of memory: built here as before)
+            if (const auto p = g_prebuilt.find(it->first); p != g_prebuilt.end() && p->second->version == r.version && p->second->state.load() == 2 && !p->second->threw) {
+                built = p->second->built, space = p->second->space, d = std::move(p->second->d), prebuilt = true;
+                std::memcpy(e.xf, p->second->xf, sizeof e.xf);
+                g_prebuiltMaps++, g_prebuiltMs += p->second->ms;
+                g_prebuilt.erase(p);
+            } else {
                 uint32_t lotGen = 0;
-                const std::shared_ptr<const RtLampProxy::Lot> lot = space && d.physical ? RtOutdoorLamps::KeptLot(lotGen) : nullptr;
-                if (space && d.physical)
-                    for (auto* pts : {&d.phys, &d.physHi})
-                        for (RtLampGpu::TexelVertex& v : *pts) {
-                            float p[3], n[3];
-                            for (int k = 0; k < 3; k++)
-                                p[k] = v.base[0] * e.xf[k] + v.base[1] * e.xf[4 + k] + v.base[2] * e.xf[8 + k] + e.xf[12 + k],
-                                n[k] = v.n[0] * e.xf[k] + v.n[1] * e.xf[4 + k] + v.n[2] * e.xf[8 + k];
-                            std::memcpy(v.p, p, sizeof p), std::memcpy(v.n, n, sizeof n), std::memcpy(v.mask, p, sizeof p);
-                            if (lot) RtLampProxy::IntoRoom(*lot, d.story, r.id, v.mask);
-                        }
+                const bool xfOk = RtOutdoorLamps::LotXform(mgr, e.xf);
+                built = BuildData(r.room, cls, r.version, m, r.id, xfOk, e.xf, RtOutdoorLamps::KeptLot(lotGen), d, space);
+            }
+            LARGE_INTEGER u0{}, u1{};
+            QueryPerformanceCounter(&u0);
+            if (built) {
+                e.story = d.story, e.lot = d.lot, e.thr = d.thr, e.physical = d.physical;
                 if (!space) {
                     if (LogAllowed())
                         LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {}: physical: the lot's space could not be read (left as the game's)", d.story, r.id, cls,
@@ -523,6 +606,8 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
                     RetryLater(e, r.room);
                 }
             }
+            QueryPerformanceCounter(&u1);
+            if (prebuilt) g_uploadRound += MsSince(u0, u1);
         }
         if (!e.ok) continue;
         int type = 0, reg = -1;
@@ -544,7 +629,7 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
             // place: in a table drag the one entry that moves lies by the lamp's head (03/11 recordings 11:47 to 15:25, all table
             // drags); UNVERIFIED that its shape is the record's (PhysLampPick::ShapeMoved; the [CarryTable] line names both)
             if (const uint32_t ag = LevelLightShare::ArchGen(); ag != e.archGen) e.archGen = ag, LevelLightShare::ArchSpansOf(r.room, e.arches);
-            if (r.live != e.liveKey) { // (an object of the room moved: the records as it stands, ahead of its solve)
+            if (r.live != e.liveKey && r.version == e.version) { // (an object of the room moved: the records as it stands, ahead of its solve)
                 e.liveKey = r.live;
                 std::shared_ptr<const RtLampGpu::BlockerTable> t;
                 int header = -1;
@@ -813,44 +898,48 @@ bool PhysPasses(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, const uintptr_t* 
     const uint32_t gen = RtOutdoorLamps::KeptMeshGen();
     if (!gen) return err = "physical: no occluders with open tops uploaded", false;
     if (n > kMaxLamps) return err = std::format("physical: {} lamps, at most {} are drawn", n, kMaxLamps), false;
-    const int rows = std::max(g_tileRows, std::min(kTiles, (std::max(n, 1) + 3) / 4 * 4));
-    if (eng.TileRows() != rows) g_tiles = {}; // (made again: no tile holds a shadow)
-    if (!eng.EnsureTiles(dev, rows, err)) return false;
-    g_tileRows = rows;
-    for (int g0 = 0; g0 == 0 || g0 < n; g0 += rows) { // (a pass per `rows` lamps; none: one pass, the sum 0)
-        const int gn = std::min(rows, n - g0);
-        std::vector<int> tiles(gn, -1);
-        std::array<bool, kTiles> taken{};
-        g_tileUse++;
-        for (int i = 0; i < gn; i++) // (a lamp's own tile when it holds its shadow now)
-            for (int t = 0; t < rows; t++)
-                if (const Tile& g = g_tiles[t]; !taken[t] && g.light == lights[g0 + i] && g.gen == gen && std::memcmp(g.pos, lamps[g0 + i].law.pos, sizeof g.pos) == 0) {
-                    tiles[i] = t, taken[t] = true;
-                    break;
-                }
-        for (int i = 0; i < gn; i++) {
-            if (tiles[i] >= 0) continue;
-            int t = -1; // the least recently used tile no lamp of this pass holds
-            for (int c = 0; c < rows; c++)
-                if (!taken[c] && (t < 0 || g_tiles[c].used < g_tiles[t].used)) t = c;
-            Tile& g = g_tiles[t];
-            g = Tile{};
-            if (!eng.RenderShadowTile(dev, lamps[g0 + i].law.pos, t, farDist, err)) return false;
-            g.light = lights[g0 + i], g.gen = gen;
-            std::memcpy(g.pos, lamps[g0 + i].law.pos, sizeof g.pos);
-            tiles[i] = t, taken[t] = true;
+    for (int i = 0; i < n; i++)
+        if (std::find(g_tileSeen.begin(), g_tileSeen.end(), lights[i]) == g_tileSeen.end()) g_tileSeen.push_back(lights[i]);
+    const int before = eng.TileRows();
+    bool kept = false;
+    if (!eng.EnsureTiles(dev, PhysTiles::Want(g_tiles.rows, n, static_cast<int>(g_tileSeen.size())), err, &kept)) return false;
+    const int rows = eng.TileRows();
+    // (grown with its tiles copied: each lamp's shadow kept at its index; made again: no tile holds a shadow)
+    if (rows != before || rows != g_tiles.rows) {
+        if (kept && before == g_tiles.rows && before > 0) g_tiles.rows = rows, g_tileGrowths[0]++;
+        else {
+            uint32_t why[PhysTiles::Atlas::kWhys];
+            std::memcpy(why, g_tiles.why, sizeof why);
+            g_tiles = {}, g_tiles.rows = rows, g_tileGrowths[1]++;
+            std::memcpy(g_tiles.why, why, sizeof why);
         }
-        for (int i = 0; i < gn; i++) g_tiles[tiles[i]].used = g_tileUse;
-        if (!pass(g0, gn, tiles.data(), g0 + rows >= n)) return false;
+    }
+    const int step = std::min(rows, PhysTiles::kPass);
+    for (int g0 = 0; g0 == 0 || g0 < n; g0 += step) { // (a pass per `step` lamps; none: one pass, the sum 0)
+        const int gn = std::min(step, n - g0);
+        int tiles[PhysTiles::kPass] = {};
+        bool render[PhysTiles::kPass] = {};
+        g_tiles.Assign(gn, lights + g0, [&](int i) { return lamps[g0 + i].law.pos; }, gen, tiles, render);
+        for (int i = 0; i < gn; i++)
+            if (render[i] && !eng.RenderShadowTile(dev, lamps[g0 + i].law.pos, tiles[i], farDist, err)) return g_tiles.t[tiles[i]] = {}, false;
+        if (!pass(g0, gn, tiles, g0 + step >= n)) return false;
     }
     return true;
 }
 
-bool ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h,
-                 const RtLampGpu::Params& p, bool partial) {
-    // the copy's entries now: a partial relight needs the set its last full draw had, all physical (drawKey) and no two writing
-    // the same place (a room's compose reads only its own sum and the game's map, never the copy: its places come out as a full
-    // draw over the game's copy would leave them)
+namespace {
+// What a physical room's draw reads beside its own inputs (drawKey): room 0's rules it takes (RelightPhys), the game's map, the size
+uint64_t KeptRules(const RtLampGpu::Params& p, const IDirect3DBaseTexture9* game, int w, int h) {
+    uint64_t k = 1469598103934665603ull;
+    const float f[] = {p.radius, p.aa, p.normalOffset, p.biasM, p.biasTexels, p.farDist, p.edgeR};
+    const bool b[] = {p.fade, p.reachOn, p.fast, DevSwitches::ToneSoft()};
+    Mix(k, f, sizeof f), Mix(k, b, sizeof b), Mix(k, &game, sizeof game), Mix(k, &w, sizeof w), Mix(k, &h, sizeof h);
+    return k;
+}
+// The copy's entries now: the set its last full draw had, all physical (drawKey) and no two writing the same place, with the same
+// rules into the same copy: then a room whose draw inputs did not change holds its last draw at its places (a room's compose reads
+// only its own sum and the game's map, never the copy: its places come out as a full draw over the game's copy would leave them)
+bool SameCopy(uintptr_t mgr, int cls, int m, const IDirect3DTexture9* out, uint64_t rules) {
     uint64_t set = 1469598103934665603ull;
     bool allPhys = true;
     for (const auto& [key, e] : g_entries)
@@ -859,12 +948,46 @@ bool ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
             Mix(set, &room, sizeof room), Mix(set, &e.version, sizeof e.version), Mix(set, &e.ok, sizeof e.ok);
             allPhys = allPhys && (!e.ok || e.physical);
         }
+    const auto it = g_copies.find({mgr, cls, m});
+    return it != g_copies.end() && it->second.valid && it->second.disjoint && it->second.set == set && allPhys && it->second.out == out &&
+           it->second.rules == rules;
+}
+// (a room holding an edit's lamp is drawn: its draw marks the edit shown there)
+bool Unchanged(const Entry& e) { return e.ok && e.physical && e.drawnKey && e.drawnKey == e.drawKey && e.editHits.empty(); }
+const std::vector<RtLampGpu::Block>& RunsOf(Entry& e) {
+    if (e.runs.empty() && !e.writes.empty()) e.runs = RtLampGpu::RunsOf(e.writes);
+    return e.runs;
+}
+} // namespace
+
+bool KeepsRooms(uintptr_t mgr, int cls, int m, const IDirect3DTexture9* out, const IDirect3DBaseTexture9* game, int w, int h, const RtLampGpu::Params& p) {
+    return SameCopy(mgr, cls, m, out, KeptRules(p, game, w, h)) && std::any_of(g_entries.begin(), g_entries.end(), [&](const auto& kv) {
+               return kv.second.mgr == mgr && kv.second.cls == cls && kv.second.m == m && Unchanged(kv.second);
+           });
+}
+
+bool ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h,
+                 const RtLampGpu::Params& p, bool partial, IDirect3DTexture9* before) {
+    // a partial relight: only the rooms whose draw inputs changed (SameCopy). A full draw with `before` (the copy as it was before
+    // room 0's compose wrote over it, the game's map not written since): an unchanged room's places copied back from it
+    const uint64_t rules = KeptRules(p, game, w, h);
+    const bool same = (partial || before) && SameCopy(mgr, cls, m, out, rules);
+    if (partial && !same) return false;
     CopyState& cs = g_copies[{mgr, cls, m}];
-    if (partial && !(cs.valid && cs.disjoint && cs.set == set && allPhys)) return false;
     bool drewAll = true;
     for (auto& [key, e] : g_entries) {
         if (!e.ok || e.mgr != mgr || e.cls != cls || e.m != m) continue;
         if (partial && e.drawnKey == e.drawKey) continue; // (its places hold its last draw, from the same inputs)
+        if (!partial && same && Unchanged(e)) {
+            std::string err;
+            if (eng.CopyRects(dev, RunsOf(e), before, out, w, h, err)) {
+                NoteCover(e.story, {});
+                g_roomsKept++;
+                continue;
+            }
+            if (LogAllowed())
+                LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {} {}: not taken from the copy, drawn ({})", e.story, e.id, e.cls, kMapName[m], err));
+        }
         const void* room = std::get<0>(key);
         // the room's own map holds the working map's top-left corner (smaller or as large; a blurred wall atlas exactly)
         if (w > e.gpu.w || h > e.gpu.h || (e.gpu.blur && (w != e.gpu.w || h != e.gpu.h))) {
@@ -895,6 +1018,7 @@ bool ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
             drewAll = false;
             continue;
         }
+        if (!partial) g_roomsDrawn++;
         if (e.physical) {
             NoteCover(e.story, {});
             LARGE_INTEGER c1{};
@@ -941,7 +1065,7 @@ bool ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, i
             if (e.ok) writes.push_back(&e.writes);
         }
     if (!cs.valid || cs.set != now) cs.disjoint = PhysLampPick::WritesDisjoint(w, h, writes);
-    cs.set = now, cs.valid = drewAll;
+    cs.set = now, cs.valid = drewAll, cs.rules = rules, cs.out = out;
     return true;
 }
 
@@ -973,11 +1097,12 @@ int ComposeHi(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int 
 
 void ReleaseAll() {
     g_tiles = {};
-    g_tileRows = 0;
+    g_tileSeen.clear();
     for (auto& [key, e] : g_entries) e.gpu.Release();
     g_entries.clear();
     g_copies.clear();
     g_retries.clear();
+    g_prebuilt.clear();
     g_bytes = 0;
     std::lock_guard<std::mutex> lk(g_drawnMx);
     g_drawn.clear(), g_drawnAny.clear();
@@ -989,11 +1114,21 @@ void BeginFrame() {
     // (physical, stage 4) the round's lot lamps, its relights' cost, and the edits whose maps are all relit (none relit in the last
     // 2 rounds, at least one relit; or none in 2 s: logged as such)
     g_costWorst = std::max(g_costWorst, g_costRound), g_costMs += g_costRound, g_costRound = 0.0;
+    g_uploadWorst = std::max(g_uploadWorst, g_uploadRound), g_uploadRound = 0.0;
+    static DWORD s_prebuiltAt = 0;
+    if (const DWORD tick = GetTickCount(); g_prebuiltMaps && tick - s_prebuiltAt >= 10000) {
+        if (LogAllowed())
+            LOG_INFO(std::format("[GpuRoomLamps] Rooms solved again: {} maps' data built on workers ({:.1f} ms there), their uploads' largest frame {:.2f} ms on the render thread",
+                                 g_prebuiltMaps, g_prebuiltMs, g_uploadWorst));
+        s_prebuiltAt = tick, g_prebuiltMaps = 0, g_prebuiltMs = g_uploadWorst = 0.0;
+    }
     g_lot.clear(), g_lotAt.clear(), g_lotGone.clear();
     if (OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical()) {
         OutdoorDelta::LotLamps(g_lot, &g_lotGone);
         for (size_t i = 0; i < g_lot.size(); i++) g_lotAt.emplace(g_lot[i].light, i);
     }
+    std::erase_if(g_tileSeen, [](uintptr_t l) { return !g_lotAt.count(l); });
+    g_tiles.NewRound();
     g_lotLaw.assign(g_lot.size(), LotLaw{});
     g_lotSigRead = false;
     std::vector<PhysEdit> done;
@@ -1104,6 +1239,15 @@ bool PhysMoveRecent(unsigned long ms) {
 void TakeRelightCost(int& maps, double& ms, double& worst) {
     maps = g_costMaps, ms = g_costMs, worst = g_costWorst;
     g_costMaps = 0, g_costMs = g_costWorst = 0.0;
+}
+std::string TakeTileCost() {
+    const auto& w = g_tiles.why;
+    std::string s = std::format("; lamps' shadow cubes rendered {} (moved {}, occluders changed {}, new or atlas made again {}, another lamp's tile taken {}), "
+                                "atlas of {} tiles grown {} times with its tiles kept, made again {} times; rooms in full draws of a map: {} drawn, {} unchanged "
+                                "taken from the copy",
+                                w[0] + w[1] + w[2] + w[3], w[0], w[1], w[2], w[3], g_tiles.rows, g_tileGrowths[0], g_tileGrowths[1], g_roomsDrawn, g_roomsKept);
+    std::fill(std::begin(g_tiles.why), std::end(g_tiles.why), 0u), g_tileGrowths[0] = g_tileGrowths[1] = 0, g_roomsDrawn = g_roomsKept = 0;
+    return s;
 }
 
 } // namespace GpuRoomLamps

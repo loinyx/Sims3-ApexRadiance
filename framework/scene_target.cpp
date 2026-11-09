@@ -39,6 +39,7 @@ IDirect3DSurface9* g_bb = nullptr; // identity only, read at every Present
 UINT g_w = 0, g_h = 0;
 bool g_armed = false;    // this frame substitutes until resolved
 bool g_resolved = false; // this frame's scene is in the back buffer
+bool g_used = false;     // this frame's scene went into the target (it was bound since the arm)
 bool g_inResolve = false;
 bool g_installed = false; // substitution callbacks set and the PostScene effect added
 State g_state = State::Off;
@@ -53,7 +54,9 @@ template <class T> void SafeRelease(T*& p) {
 bool Live() { return g_armed && !g_resolved; }
 
 IDirect3DSurface9* SubstituteRt(DWORD index, IDirect3DSurface9* requested) {
-    return SceneTargetLogic::Substitutes(Live(), index, requested, g_bb) ? g_surf : requested;
+    if (!SceneTargetLogic::Substitutes(Live(), index, requested, g_bb)) return requested;
+    g_used = true;
+    return g_surf;
 }
 IDirect3DSurface9* ReportRt(IDirect3DSurface9* actual) { return actual && actual == g_surf && g_bb ? g_bb : actual; }
 
@@ -77,6 +80,7 @@ constexpr DWORD kPassSampler[] = {D3DTEXF_POINT, D3DTEXF_POINT, D3DTEXF_NONE, D3
 void Resolve(IDirect3DDevice9* dev, Cause cause) {
     if (!Live() || g_inResolve || !dev || !g_ps || !g_tex) return;
     g_resolved = true; // first: from here a SetRenderTarget(back buffer) binds the back buffer
+    if (!SceneTargetLogic::ResolveDraws(g_used)) return;
     g_inResolve = true;
     LARGE_INTEGER t0{}, t1{}, freq{};
     QueryPerformanceCounter(&t0);
@@ -302,9 +306,10 @@ void ArmAtPresent(IDirect3DDevice9* dev) {
     }
     g_armed = true;
     g_resolved = false;
+    g_used = false;
     IDirect3DSurface9* rt = nullptr;
     if (SUCCEEDED(ExtraHooks::RawGetRenderTarget(dev, 0, &rt)) && rt) {
-        if (rt == g_bb) D3D9Hooks::CallOriginalSetRenderTarget(dev, 0, g_bb); // (substituted)
+        if (rt == g_bb) D3D9Hooks::CallOriginalSetRenderTarget(dev, 0, g_bb); // (substituted, g_used set there)
         rt->Release();
     }
 }

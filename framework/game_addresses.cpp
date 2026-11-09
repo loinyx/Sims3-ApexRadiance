@@ -377,6 +377,22 @@ constexpr Info kInfo[] = {
     {"EntryFlagCall2", 0x006B0BFA},
     {"EntryFlagCall3", 0x006B0C9A},
     {"EntryFlagCall4", 0x006B0D26},
+    {"BlockerQuadCtor", 0x0069D000},
+    {"BlockerQuadVt", 0x00FF3118},
+    {"BlockerDiscVt", 0x00FF3C24},
+    {"TestZero", 0x00F98964},
+    {"TestTwo", 0x00F98A58},
+    {"TestNeg1", 0x00FAA210},
+    {"TestFour", 0x00FB2F6C},
+    {"TestDiscEdge", 0x00FECE18},
+    {"TestStop", 0x00FF31AC},
+    {"TestQuadEdge", 0x0106B4B4},
+    {"TestDrop", 0x0106D6CC},
+    {"TestOne", 0x0107A538},
+    {"TestEps", 0x011D0240},
+    {"TestHalf", 0x00F9A5AC},
+    {"TestPenumbra", 0x00FF307C},
+    {"TestWallY", 0x01158A50},
 };
 static_assert(std::size(kInfo) == static_cast<size_t>(Id::Count), "kInfo must list every Id in order");
 
@@ -785,6 +801,24 @@ const Entry kTable[] = {
     {Id::LampLeftMarkCall, K::Sig, W::Text, None, 0, {{"3B 46 1C 74 09 8B 4E 14 50 E8", 9, M::At}, NOSIG}},
     {Id::EntryFlag, K::LowestOf2, W::Text, None, 0, {{"8B 44 24 08 8B 54 24 04 50 52 68 ?? ?? ?? ?? E8 ?? ?? ?? ?? C2 08 00", 0, M::At}, NOSIG}},
     {Id::EntryFlagCall0, K::CallersOf, W::Text, Id::EntryFlag, 5, {NOSIG, NOSIG}},
+    // ---- GPU room lamps: the 3D blockers' vtables (from their constructor / store) and the test constants (from the tests' own reads)
+    {Id::BlockerQuadCtor, K::Sig, W::Text, None, 0, {{"68 00 01 00 00 E8 ?? ?? ?? ?? 83 C4 18 85 C0 0F 84 ?? ?? ?? ?? 8B C8 E8 ?? ?? ?? ?? 8B F0 85 F6 0F 84", 23, M::Call}, NOSIG}},
+    {Id::BlockerQuadVt, K::InRange, W::Image, Id::BlockerQuadCtor, 0x16, {{"87 0A C7 00 ?? ?? ?? ?? C3", 4, M::Dword}, NOSIG}},
+    {Id::BlockerDiscVt, K::Sig, W::Image, None, 0, {{"8B CE E8 ?? ?? ?? ?? 57 8B CE C7 06 ?? ?? ?? ?? E8 ?? ?? ?? ?? 8D 47 0C 50 8B CE E8", 12, M::Dword},
+                                                    {"57 8B CE C7 06 ?? ?? ?? ?? E8 ?? ?? ?? ?? 8D 47 0C 50 8B CE E8", 5, M::Dword}}},
+    {Id::TestZero, K::Sig, W::Image, None, 0, {{"F3 0F 10 43 10 0F 2E 05 ?? ?? ?? ?? 9F F6 C4 44 0F 8B ?? ?? 00 00 0F 28 83", 8, M::Dword}, NOSIG}},
+    {Id::TestTwo, K::Sig, W::Image, None, 0, {{"75 1D F3 0F 10 35 ?? ?? ?? ?? 83 C8 02 0F C6 F6 00 A3", 6, M::Dword}, NOSIG}},
+    {Id::TestNeg1, K::Sig, W::Image, None, 0, {{"F3 0F 10 0D ?? ?? ?? ?? 0F C6 C9 00 0F 28 C2 F3 0F 10 15 ?? ?? ?? ?? 0F 59 C8 0F 5F C8", 4, M::Dword}, NOSIG}},
+    {Id::TestFour, K::Sig, W::Image, None, 0, {{"75 1D F3 0F 10 2D ?? ?? ?? ?? 83 C8 02 0F C6 ED 00 A3", 6, M::Dword}, NOSIG}},
+    {Id::TestDiscEdge, K::Sig, W::Image, None, 0, {{"8B D9 75 1D F3 0F 10 35 ?? ?? ?? ?? 83 C8 01 0F C6 F6 00 A3", 8, M::Dword}, NOSIG}},
+    {Id::TestStop, K::Sig, W::Image, None, 0, {{"EB 5E F3 0F 10 0D ?? ?? ?? ?? 0F 2F C1 76 39 F3 0F 10 15 ?? ?? ?? ??", 6, M::Dword}, NOSIG}},
+    {Id::TestQuadEdge, K::Sig, W::Image, None, 0, {{"8B D9 75 1D F3 0F 10 3D ?? ?? ?? ?? 83 C8 01 0F C6 FF 00 A3", 8, M::Dword}, NOSIG}},
+    {Id::TestDrop, K::Sig, W::Image, None, 0, {{"F3 0F 59 00 F3 0F 10 0D ?? ?? ?? ?? 0F 2F C8", 8, M::Dword}, NOSIG}},
+    {Id::TestOne, K::Sig, W::Image, None, 0, {{"F3 0F 10 0D ?? ?? ?? ?? 0F C6 C9 00 0F 28 C2 F3 0F 10 15 ?? ?? ?? ?? 0F 59 C8 0F 5F C8", 19, M::Dword}, NOSIG}},
+    {Id::TestEps, K::Sig, W::Image, None, 0, {{"0F 5F C8 F3 0F 11 4C 24 ?? 0F 28 0D ?? ?? ?? ?? F3 0F 11 4C 24", 12, M::Dword}, NOSIG}},
+    {Id::TestHalf, K::Sig, W::Image, None, 0, {{"EB 5E F3 0F 10 0D ?? ?? ?? ?? 0F 2F C1 76 39 F3 0F 10 15 ?? ?? ?? ??", 19, M::Dword}, NOSIG}},
+    {Id::TestPenumbra, K::Sig, W::Image, None, 0, {{"CC F3 0F 10 4C 24 04 D9 E8 F3 0F 10 05 ?? ?? ?? ?? F3 0F 5C C8 F3 0F 11 4C 24 04 81 64 24 04 FF FF FF 7F", 13, M::Dword}, NOSIG}},
+    {Id::TestWallY, K::Sig, W::Image, None, 0, {{"0F 58 D3 F3 0F 10 1D ?? ?? ?? ?? 0F 29 74 24 10 F3 0F 11 5C 24 14", 7, M::Dword}, NOSIG}},
 };
 // clang-format on
 #undef NOSIG

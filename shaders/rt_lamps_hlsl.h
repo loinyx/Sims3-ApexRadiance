@@ -56,7 +56,7 @@ float4 ShadowPS(float4 d : TEXCOORD0) : COLOR0 { return float4(length(d.xyz), d.
 )RAW"
 R"RAW(// ---------------------------------------------------------------- relight
 // c0..c95: 16 lamps, one array per row kind (indexed by the loop counter): (pos, W) (colour, cmax) (axis, sc1)
-// (off1, sc2, off2, r0^2) (spill, 1 / R^2) (tile, mult, 0, 0)
+// (off1, sc2, off2, r0^2) (spill, 1 / R^2) (tile row, mult, tile column's first face, 0)
 float4 gPos[16] : register(c0);
 float4 gCol[16] : register(c16);
 float4 gAxis[16] : register(c32);
@@ -173,16 +173,16 @@ float3 KeptLaw(float3 p, float3 n) {
     return gA.z > 0.5 ? gCol[0].rgb : L.off.y < -1.5 ? AreaLaw(L, p) : L.off.y < -0.5 ? TubeLaw(L, p, n) : Law(L, p, n, 0.0);
 }
 
-// The atlas along direction d from lamp tile k (m): x = the nearest surface's distance, y = how far its plane passes from the
+// The atlas along direction d from lamp tile k (k.x its row, k.y its column's first face; m): x = the nearest surface's distance, y = how far its plane passes from the
 // lamp; dc = the direction of that texel's centre (the receiver's own depth is taken along it, so a surface and its own
 // shadow texel agree to rounding)
-float2 Stored(float k, float3 d, out float3 dc) {
+float2 Stored(float2 k, float3 d, out float3 dc) {
     float f;
     const float3 v = Face(d, f);
     const float2 uv = float2(v.x / v.z * 0.5 + 0.5, -v.y / v.z * 0.5 + 0.5);
     const float F = gB.y;
     const float2 t = clamp(floor(uv * F + 0.5), 0, F - 1);
-    const float2 texel = float2(f * F, k * F) + t;
+    const float2 texel = float2((f + k.y) * F, k.x * F) + t;
     // the centre of texel t is at uv t / F (D3D9 samples a pixel at its integer coordinate): back to a direction
     const float2 c = float2(t.x / F * 2.0 - 1.0, 1.0 - t.y / F * 2.0);
     float3 w;
@@ -214,7 +214,7 @@ float Recv(float3 N, float3 dc, float planeD, float dr) {
 // the footprint's mean (the emitter widened by it as seen through the blockers), so a shadow edge sharper than the map's texel (a
 // door jamb's near the door) does not step from texel to texel
 float Shadow(LampRegs lamp, float3 P, float3 N, int kSearch, int kEmit, int kWalk, float fr) {
-    const float k = lamp.misc.x;
+    const float2 k = lamp.misc.xz;
     const float3 L = lamp.pos.xyz;
     const float R = gB.x;
     const float3 v0 = P - L;
@@ -386,14 +386,59 @@ float MaskAll(float3 P) {
     return all;
 }
 // COLOR1: the outdoor scale (rt_outdoor_lamps.h ScaleOf), the factor KeepHue took off the sum: log2(largest channel) / 3 in
-// 8 bits (1 to 8 times, 0.8 % a level), 0 within 1. Bound only on maps the draws multiply back (no wall blur)
+// 8 bits (1 to 8 times, 0.8 % a level), 0 within 1, in x, z and w. Bound only on maps the draws multiply back (no wall blur).
+// y = 1: a room-0 texel inside a room of the story below open to this one (bit 8, RtLampProxy::OverOpenBelow), which the
+// outside walls' copy (ShaderPatches::PatchWallScale) lights as an indoor wall; z of a bit-16 texel: its fall-off ratio (IndoorRatio)
 struct ComposeOut {
     float4 c : COLOR0;
     float4 k : COLOR1;
 };
+// (physical, room 0) a texel of the space a room of the story below continues into (bit 8, mask.z its slot, mask.w world y) as
+// that room's wall texel (gpu_lamp_law.h IndoorTexel with the pass's ambient left to the draw, as the game leaves a wall's):
+// rgb the toned sum, alpha 1 - sat(k x the toned sum) x the room's ramp at its height (GpuLampLaw::SplitFill line). The outside
+// walls' and floors' copies add alpha x that room's ambient at night (ShaderPatches::PatchWallScale), as InteriorWall adds
+// alpha x its ambient (c4 = +0x110). gF.z = k (0: off), gF.w = 1 ToneSoft; c104..c107 the slots' ramp lines (a, b, lo, hi)
+float4 gInFit[4] : register(c104);
+float4 IndoorOf(float3 S, float4 m) {
+    const float4 f = m.z < 0.5 ? gInFit[0] : m.z < 1.5 ? gInFit[1] : m.z < 2.5 ? gInFit[2] : gInFit[3];
+    const float3 x = max(float3(Fin(S.r), Fin(S.g), Fin(S.b)), 0.0);
+    const float mean = max((x.b * 0.33333334 + x.g * 0.33333334) + x.r * 0.33333334, 1e-6);
+    const float tanhOver = (2.0 / (exp(-mean) + 1.0) - 1.0) / mean;
+    const float3 t = x * (gF.w > 0.5 ? lerp(1.0, tanhOver, smoothstep(0.004, 0.02, mean)) : (mean >= 0.01 ? tanhOver : 1.0));
+    const float w = 1.0 - saturate(gF.z * ((t.b + t.g) + t.r));
+    return float4(t, w * clamp(f.x + f.y * m.w, f.z, f.w));
+}
+float4 ScaleOut(float sm, float flags) {
+    const float k = sm > 1.0 ? Rne(saturate(log2(sm) / 3.0) * 255.0) / 255.0 : 0.0;
+    return float4(k, flags >= 8.0 ? 1.0 : 0.0, k, k);
+}
+// (bit 16, with bit 8: a wall texel matched to a texel of its room's map, mask.xy the lowest marked texel of its column) the GPU
+// lamps' fall-off up the wall, lum(base + lamps here) / lum(base + lamps at the floor line) (1 there, where it is not darker and
+// where no lamp reaches it), in the outdoor scale's .z, which the outside walls' copy multiplies its room's texel by (ShaderPatches
+// IndoorPick rooms). base: the matched top-row texel's light the GPU lamps do not draw (its daylight, baked lights, bounce), so the
+// ratio shapes the lamps' part only: by day (no lamp light) it is exactly 1 and the attic is its room's top texel (16-17-55: the
+// lamps' ratio alone took the daylight to near black at the top). The map itself holds the texel's light as bit 8 composes it
+// (its room's matched top-row texel carried), so every other reader of the map (the game's own shader, the bloom pass, the
+// class-2 wall blur, a draw whose rooms are not read) sees light, never a ratio
+float IndoorRatio(float3 base, float3 acc, float2 bottom) {
+    const float b = Lum3(base + tex2Dlod(sAcc, float4((bottom + 0.5) * gD.zw, 0, 0)).rgb), h = Lum3(base + acc);
+    return b >= 1e-4 && h < b ? saturate(h / b) : 1.0;
+}
+// (bit 8) the light of a texel of a space a room of the story below continues into that the GPU lamps do not draw, as its room's
+// kept solve gives it now (RtOutdoorLamps InBaseNow: a wall texel its matched top-row texel's, a floor texel its room's top-row
+// mean; alpha 1 where written), else the vertex's base as the prepare carried it: a new kept solve of the room reaches the ratio
+// and the floors in the frame it is kept, never a prepare later. gIB = 1 / width, 1 / height of that map, z 1 when bound
+sampler2D sInBase : register(s10);
+float4 gIB : register(c127);
+float3 InBase(float3 b, float2 vpos, float flags) {
+    if (flags < 8.0 || gIB.z < 0.5) return b;
+    const float4 t = tex2Dlod(sInBase, float4((vpos + 0.5) * gIB.xy, 0, 0));
+    return t.a > 0.5 ? t.rgb : b;
+}
 ComposeOut ComposePS(TexelIn i, float2 vpos : VPOS) {
     const float4 acc = tex2Dlod(sAcc, float4((vpos + 0.5) * gD.zw, 0, 0));
-    const float3 S = i.base.rgb + acc.rgb;
+    const float3 base = InBase(i.base.rgb, vpos, i.p.w);
+    const float3 S = base + acc.rgb;
     float alpha = i.n.w;
     const float flags = i.p.w;
     if (fmod(flags, 2.0) >= 1.0) {
@@ -409,12 +454,17 @@ ComposeOut ComposePS(TexelIn i, float2 vpos : VPOS) {
     }
     // (outdoor_delta_model.h PackInput) the sum's hue kept past 1 (KeepHue), then cut at 1
     float3 s = max(float3(Fin(S.r), Fin(S.g), Fin(S.b)), 0.0);
+    if (flags >= 8.0 && gF.z > 0.0) {
+        const float4 in4 = IndoorOf(S, i.mask);
+        s = max(in4.rgb, 0.0), alpha = in4.a;
+    }
     const float sm = max(s.r, max(s.g, s.b));
     if (sm > 1.0) s /= sm;
     float4 c = float4(min(s, 1.0), min(max(Fin(alpha), 0.0), 1.0));
     ComposeOut o;
     o.c = Packed(c, i.base.w);
-    o.k = (sm > 1.0 ? Rne(saturate(log2(sm) / 3.0) * 255.0) / 255.0 : 0.0).xxxx;
+    o.k = ScaleOut(sm, flags);
+    if (flags >= 16.0) o.k.z = IndoorRatio(base, acc.rgb, i.mask.xy);
     return o;
 }
 
@@ -636,7 +686,8 @@ float4 AccKept0XPS(TexelIn i) : COLOR0 { return float4(i.mask.y != 0 ? KeptWrapL
 ComposeOut ComposeK0PS(TexelIn i, float2 vpos : VPOS) {
     const float4 acc = tex2Dlod(sAcc, float4((vpos + 0.5) * gD.zw, 0, 0));
     const float4 acc2 = tex2Dlod(sAcc2, float4((vpos + 0.5) * gD.zw, 0, 0));
-    const float3 S = i.base.rgb + acc.rgb;
+    const float3 base = InBase(i.base.rgb, vpos, i.p.w);
+    const float3 S = base + acc.rgb;
     float alpha = i.n.w;
     const float flags = i.p.w;
     if (fmod(flags, 2.0) >= 1.0) {
@@ -649,17 +700,22 @@ ComposeOut ComposeK0PS(TexelIn i, float2 vpos : VPOS) {
             if (under > a) a = under;
             alpha = a;
         }
-    } else if (i.mask.w > 0.5) {
+    } else if (i.mask.w > 0.5 && flags < 8.0) { // (bit 8: mask.zw are its room's slot and height)
         const float E = i.mask.z + acc2.y;
         alpha = (E > 0 && E == E && E < 1e30) ? min(E, 254.0 / 255.0) : 0.0;
     }
     float3 s = max(float3(Fin(S.r), Fin(S.g), Fin(S.b)), 0.0);
+    if (flags >= 8.0 && gF.z > 0.0) {
+        const float4 in4 = IndoorOf(S, i.mask);
+        s = max(in4.rgb, 0.0), alpha = in4.a;
+    }
     const float sm = max(s.r, max(s.g, s.b));
     if (sm > 1.0) s /= sm;
     float4 c = float4(min(s, 1.0), min(max(Fin(alpha), 0.0), 1.0));
     ComposeOut o;
     o.c = Packed(c, i.base.w);
-    o.k = (sm > 1.0 ? Rne(saturate(log2(sm) / 3.0) * 255.0) / 255.0 : 0.0).xxxx;
+    o.k = ScaleOut(sm, flags);
+    if (flags >= 16.0) o.k.z = IndoorRatio(base, acc.rgb, i.mask.xy);
     return o;
 }
 )RAW"

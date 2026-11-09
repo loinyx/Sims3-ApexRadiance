@@ -779,8 +779,13 @@ bool QueueRoom(uintptr_t tracker, int level, int id, bool defer = false, int urg
             g_deferred.push_back(DeferredRoom{tracker, level, id, GetTickCount(), valueOnly});
             g_deferredCount.fetch_add(1, std::memory_order_relaxed);
         }
-        if (Recorder::Verbose())
-            if (!known) NoteSolve(room, 'H');
+        if (Recorder::Verbose() && !known) { // (who held it: QueueRoom's callers, 3 deep, as for 'Q')
+            void* fr[3] = {};
+            const USHORT nf = CaptureStackBackTrace(1, 3, fr, nullptr);
+            uintptr_t chain[3] = {};
+            for (USHORT i = 0; i < nf; i++) chain[i] = reinterpret_cast<uintptr_t>(fr[i]);
+            NoteSolve(room, 'H', 0, chain);
+        }
         return true;
     }
     t_queueCaller = reinterpret_cast<uintptr_t>(_ReturnAddress());
@@ -1657,7 +1662,7 @@ std::unordered_map<DepKey, std::vector<std::pair<int, int>>, DepHash> g_deps;
 // (inner_norm_settle) rooms to send again: their solve ended with another normalisation than their samples used (NoteNormEnd)
 std::mutex g_normResendMx;
 std::vector<DepKey> g_normResend;
-std::atomic<long> g_normSettled{0}, g_normResent{0}, g_normResendCapped{0};
+std::atomic<long> g_normSettled{0}, g_normResent{0}, g_normResendCapped{0}, g_normInPlace{0};
 
 // The lamps of other stories that have lit a room, at any point of any of its solves since its story was built (05/10,
 // a recording, atrium house: every 10 cm of a dragged sconce re-solved 13 rooms of stories 0, 2 and 3, 5.9 s of
@@ -2484,6 +2489,19 @@ void QuickLikeRefinement(BYTE* room) {
     }
 }
 
+// The ambient step again and its sampler copy (SettleNormInPlace); false: an outdoor room, no light list or a fault
+bool RequoteForNorm(BYTE* room) {
+    __try {
+        const uintptr_t b = *reinterpret_cast<const uintptr_t*>(room + 0xC8), e = *reinterpret_cast<const uintptr_t*>(room + 0xCC);
+        if (room[0x18] || !kRoomAmbientFn || !b || e <= b) return false;
+        RequoteAmbient(room);
+        std::memcpy(room + 0x650, room + 0x110, 16);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        g_faults.fetch_add(1, std::memory_order_relaxed);
+        return false;
+    }
+}
 void MergeStackedAmbientSafe(BYTE* room) {
     __try {
         MergeStackedAmbient(room);
@@ -2509,7 +2527,7 @@ struct SolveNote {
     float norm, c4[3], wallBase;
     long moved, ghostWalls, odd;
     uintptr_t caller; // 'I' / 'F': the return address of the invalidate (who restarted the room); 'M' / 'L': the light; 'O' / 'o': the occluder entry
-    uintptr_t chain[3]; // 'Q': QueueRoom's callers; 'O' / 'o': the occluder's object id (low, high) and its first shape
+    uintptr_t chain[3]; // 'Q' / 'H': QueueRoom's callers; 'O' / 'o': the occluder's object id (low, high) and its first shape
     float pt[3];        // 'O' / 'o': the occluder's point (x, z) and how far it moved since its last mark
 };
 std::mutex g_journalMx;
@@ -2540,6 +2558,7 @@ using RoomSolveStart_t = void(__thiscall*)(void* room);
 void SyncHardWallTops(); // below (development builds, hard_wall_tops)
 float RoomNormOf(const BYTE* room); // below
 void NoteNormEnd(BYTE* room, float norm); // below (inner_norm_settle)
+int SettleNormInPlace(BYTE* room); // below (inner_norm_settle, a day/night switch)
 // (stairwell_bounce) Bumped at each room solve's start on the thread that runs it (a solve's texels run on that thread): the
 // bounce context (t_bounce, StairwellBounceAt) is built again for every solve, so a solve right after a lamp below was moved
 // or switched never reuses the light of its earlier state
@@ -2567,9 +2586,12 @@ void __fastcall RoomSolveStartHook(BYTE* room) {
         }
     }
     // (inner_norm_settle) +0x160 is final once state 0 and the stacked rooms' merge have run: the value this solve's texels take
-    if (room && DevSwitches::InnerNormSettle() && ThreadId() == g_gatherThread.load(std::memory_order_relaxed))
+    if (room && DevSwitches::InnerNormSettle() && ThreadId() == g_gatherThread.load(std::memory_order_relaxed)) {
+        if (AmbientActive() && LevelLightShare::DayNightSwitching())
+            HookGuard::Run("LevelLightShare normalisation settle in place", [room] { g_normInPlace.fetch_add(SettleNormInPlace(room), std::memory_order_relaxed); });
         if (const float norm = RoomNormOf(room); norm > 0.0f)
             HookGuard::Run("LevelLightShare normalisation settle", [room, norm] { NoteNormEnd(room, norm); });
+    }
     if (Recorder::Verbose())
         if (room) HookGuard::Run("LevelLightShare solve note (start)", [room] { NoteSolve(room, 'S'); });
 }
@@ -7663,7 +7685,7 @@ std::vector<std::pair<DWORD, std::string>> JournalLinesSince(DWORD fromTick) {
         else if (n.event == 'O' || n.event == 'o')
             s += std::format(" | occluder {:08X} (object {:08X}{:08X}, shape {:08X}) at ({:.2f} {:.2f}) moved {:.2f} m: {}", n.caller, n.chain[1], n.chain[0], n.chain[2], n.pt[0],
                              n.pt[1], n.pt[2], n.event == 'O' ? "its mark let through" : "its mark dropped");
-        else if (n.event == 'Q') {
+        else if (n.event == 'Q' || n.event == 'H') {
             s += " | from";
             for (const uintptr_t c : n.chain)
                 if (c) s += " " + RoomSolveCauses::CallerText(c);
@@ -7916,9 +7938,14 @@ void ShareRoomZeroFromBelow(BYTE* treeLevel, BYTE* room) {
             for (int& r : rooms)
                 if (r > 0 && std::find(roofless, roofless + nr, r) != roofless + nr) r = 0; // (a yard's lamps are outdoor lamps already)
             const auto at = [&](int x, int z, int q) { return (static_cast<size_t>(z) * w + x) * 4 + q; };
+            // ownWalls, as the physical open tops (RtLampProxy::OpenTops): a double-height room under a sloped roof has walls of
+            // story S only along its gables, so the 3/4 rule alone left its lamps out of this list while the occluders opened its
+            // top (09/11, lot C49C: story 3's attic walls over story 2's red room 5 got no red, F8 room 0 lists street lamps only)
             OpenAbove::Classify(
                 w, h, [&](int x, int z, int q) { return rooms[at(x, z, q)]; }, [&](int x, int z, int q) { return placed[at(x, z, q)] != 0; },
-                [&](int x, int Z) { return GridZL(*grid, x, Z) >= 0; }, [&](int X, int z) { return GridXL(*grid, X, z) >= 0; }, note.rooms);
+                [&](int x, int Z) { return GridZL(*grid, x, Z) >= 0; }, [&](int X, int z) { return GridXL(*grid, X, z) >= 0; },
+                [&](int x, int z, int i) { return grid->dg.size() == 2 * static_cast<size_t>(w) * h && grid->dg[2 * (static_cast<size_t>(z) * w + x) + i] >= 0; },
+                note.rooms, true);
             for (size_t i = 0; i < rooms.size(); i++)
                 note.quads += !placed[i] && std::binary_search(note.rooms.begin(), note.rooms.end(), rooms[i]) ? 1 : 0;
         }
@@ -7932,7 +7959,8 @@ void ShareRoomZeroFromBelow(BYTE* treeLevel, BYTE* room) {
         WalkRegistry(TreeLevel(tracker, S - 1), [&](uintptr_t entry) {
             const int home = *reinterpret_cast<const int*>(entry + 0x1C);
             const uintptr_t light = *reinterpret_cast<const uintptr_t*>(entry + 0x24);
-            if (n >= 64 || !light || !std::binary_search(note.rooms.begin(), note.rooms.end(), home) || !EvalWrapped(light) || !GameTakesLight(entry, light) ||
+            if (n >= 64 || !light || !std::binary_search(note.rooms.begin(), note.rooms.end(), home) ||
+                !OpenAbove::SharedFromBelow(*reinterpret_cast<const int*>(light + 0xB0)) || !EvalWrapped(light) || !GameTakesLight(entry, light) ||
                 InList(room, light) || std::find(taken, taken + n, light) != taken + n)
                 return;
             const Cross x{light, S - 1, home, levelS};
@@ -8381,6 +8409,10 @@ void BeforeRoomUpdate(BYTE* tl) {
                         continue;
                     }
                     if (AmbientMergeAhead(it->first)) { ++it; continue; } // its own state 0 merges with the target
+                    // (a member being solved: sent now it would be held and solved again in full once this solve ends, 1.8-3.9 s
+                    // for a tall room and three times in a row at a day/night switch, 17-18-28; after its solve the colour is
+                    // tried without a solve first, ApplyIdleAmbient above, and it is sent only if that fails)
+                    if (RoomSolving(it->first.tracker, it->first.level, it->first.room)) { ++it; continue; }
                     DWORD& last = g_ambQueuedAt[it->first];
                     if (RoomAmbientPolicy::AmbientUpdateDue(now, last)) {
                         send.push_back(it->first);
@@ -9294,7 +9326,7 @@ SolveCtx g_ctx;
 // night colour: the game has no daytime factor there, unlike the outdoor surfaces (whose draws take
 // TerrainLightingPolicy::LampDay). In those solves an outdoor lamp (a street lamp, or a lot lamp of room 0) takes
 // SolveLampDay(night level): 3% by day, 1 at night, its level at twilight. The maps are baked: a roofed room an outdoor lamp
-// lit is noted with the factor of that solve, and once the night level has settled at day or night for 2 s the rooms noted
+// lit is noted with the factor of that solve, and once the night level has reached day or night the rooms noted
 // with another factor are sent to gather again, once (no per-frame solve, no rig re-gather). Indoor lamps are untouched. ----
 std::atomic<float> g_roomLampDay{1.0f}; // SolveLampDay of the night level, set by OnPresent (render thread), read by the solves
 struct DayRoomKey {
@@ -11328,6 +11360,26 @@ void NoteNormEnd(BYTE* room, float norm) {
     n++;
     std::lock_guard<std::mutex> lk(g_normResendMx);
     if (g_normResend.size() < 1024) g_normResend.push_back(key);
+}
+// (a quick day/night switch) The same settle inside the solve: while the taking room's normalisation moved since its samples
+// read it (the window lights change the rooms' brightest samples: 17-18-28, story 1 room 2 went from 1.000 to 0.120, room 3
+// to 0.518, room 8 to 0.728), its ambient step is run again before the texel passes (as QuickLikeRefinement does: the game's
+// own step, its sampler copy +0x650, then the stacked rooms' merge), at most kNormResends times. Its samples then read the value
+// the resend's state 0 would have read, so NoteNormEnd finds it settled and the room is not held and solved again in full
+// (story 1 room 2, 47,681 texels: 1.8 s a solve in that recording). Gather thread, end of state 0. Returns the steps run again.
+int SettleNormInPlace(BYTE* room) {
+    int runs = 0;
+    for (; runs < kNormResends; runs++) {
+        const float norm = RoomNormOf(room);
+        const auto u = g_normUsed.find(room);
+        if (!(norm > 0.0f) || u == g_normUsed.end() || !(u->second.stamp == StampOf(room))) break; // (no lamp through an opening)
+        if (ApexMath::Fabs(u->second.norm - norm) <= 0.01f * std::max(norm, 1e-3f)) break;
+        g_normUsed.erase(u); // (the run below notes what its samples read)
+        t_normUsedRoom = nullptr;
+        if (!RequoteForNorm(room)) break;
+        MergeStackedAmbientSafe(room);
+    }
+    return runs;
 }
 // (development builds, borrowed_light_adapt) The eye adapts to a dark story lit from a stairwell. The game sets a room's
 // normalisation from the strongest of its lamps and samples (1/m when m < 1), and a room lit only by lamps of another story
@@ -14952,8 +15004,8 @@ std::string IndoorDiagText() {
         s += std::format("bounce through stairwell openings: rooms given a share of the other story room's ambient {}, solved with none to take {}\n", g_bounceRooms.load(), g_bounceNone.load());
     if (DevSwitches::InnerNormSettle())
         s += std::format("lamps through openings, the taking room's normalisation: solves that ended with the one their samples used {}, sent again "
-                         "with the new one {} (not sent: more than {} in 10 s {})\n",
-                         g_normSettled.load(), g_normResent.load(), kNormResends, g_normResendCapped.load());
+                         "with the new one {} (not sent: more than {} in 10 s {}; ambient steps run again inside the solve at a day/night switch {})\n",
+                         g_normSettled.load(), g_normResent.load(), kNormResends, g_normResendCapped.load(), g_normInPlace.load());
     uintptr_t trackers[256];
     const int lots = AllTrackers(trackers, 256);
     int shown = 0;
@@ -15157,6 +15209,24 @@ std::string OpeningsDiagText() {
 } // namespace
 
 namespace LevelLightShare {
+bool PlayedLotOfTl(uintptr_t tl) {
+    uintptr_t mgr = 0;
+    __try {
+        mgr = tl ? *reinterpret_cast<const uintptr_t*>(tl) : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        mgr = 0;
+    }
+    return mgr && PlayedLotMgr(mgr);
+}
+bool PlayedTracker(uintptr_t tracker) {
+    uintptr_t mgr = 0;
+    __try {
+        mgr = tracker ? StoryManager(tracker, 0) : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        mgr = 0;
+    }
+    return mgr && PlayedLotMgr(mgr);
+}
 // ---- lamp posts of other lots (see TakeCrossLotLamps) ----
 uint64_t __fastcall GatherLotId(const unsigned char* light) {
     uint64_t lot = 0;
@@ -15325,6 +15395,30 @@ bool HoldsAmbientBase(unsigned char* room, const float* ownColour, const float* 
     const auto applied = g_ambApplied.find(key);
     return own != g_ambOrig.end() && applied != g_ambApplied.end() && g_ambGroups.contains(key)
         && AmbientNear(own->second.c4, ownColour) && AmbientHeld(room, applied->second, second, false);
+}
+bool AmbientOwnIs(unsigned char* room, const float* own, float& norm) {
+    uintptr_t mgr = 0; int level = 0, id = 0;
+    if (!AmbientActive() || !AmbientIdentity(room, mgr, level, id)) return false;
+    const uintptr_t tracker = MgrTracker(mgr);
+    if (!tracker || SafeStoryManager(tracker, level) != mgr) return false;
+    std::lock_guard<std::mutex> lock(g_ambMx);
+    const DepKey key{tracker, level, id};
+    const auto it = g_ambOrig.find(key);
+    if (it == g_ambOrig.end() || g_ambGroups.contains(key) || !AmbientNear(it->second.c4, own)) return false;
+    norm = it->second.norm;
+    return true;
+}
+void SetAmbientOwn(unsigned char* room, const float* own, float norm) {
+    uintptr_t mgr = 0; int level = 0, id = 0;
+    if (!AmbientActive() || !AmbientIdentity(room, mgr, level, id)) return;
+    const uintptr_t tracker = MgrTracker(mgr);
+    if (!tracker || SafeStoryManager(tracker, level) != mgr) return;
+    std::lock_guard<std::mutex> lock(g_ambMx);
+    const DepKey key{tracker, level, id};
+    const auto it = g_ambOrig.find(key);
+    if (it == g_ambOrig.end() || g_ambGroups.contains(key)) return;
+    std::memcpy(it->second.c4, own, sizeof it->second.c4);
+    it->second.norm = norm;
 }
 bool StageUnlitAmbientChange(unsigned char* room, const float* target, bool& changed) {
     return StageAmbient(room, nullptr, target, nullptr, target, changed);
@@ -15625,9 +15719,11 @@ bool BasisFloorGuardReady() {
 
 int RelightLot(uintptr_t tracker, const char* why, unsigned long changedAt, const uintptr_t* lamps, int lampCount, bool editNet); // below
 // One daytime curve (render thread, every frame): the factor the solves give outdoor lamps in roofed rooms, and once the
-// night level has settled at day or night for kDaySettleMs, the roofed rooms noted with another factor gather again (once:
-// their next solve notes the settled factor). Nothing is sent at twilight.
-constexpr DWORD kDaySettleMs = 2000;
+// night level has reached day or night (kDaySettleMs after it), the roofed rooms noted with another factor gather again (once:
+// their next solve notes the settled factor). Nothing is sent at twilight. 0: sent the frame the level ends at day or night,
+// so they join the switch's own solves instead of a second wave 2 s later (14-05-00: the last room 5.4 s after the switch,
+// 2.5 s of it the wait; the level never comes back from an endpoint without crossing twilight, so nothing is sent twice)
+constexpr DWORD kDaySettleMs = 0;
 TerrainLightingPolicy::Phase g_dayPhase = TerrainLightingPolicy::Phase::Twilight;
 DWORD g_dayPhaseAt = 0;
 uint32_t g_daySweptSerial = 0;
@@ -15645,10 +15741,20 @@ bool ReadNightLevel(float& level) {
     }
     return NightLevel::Read(lightMgr, level); // the night level (0 day, 1 night), as LotLightBridge reads it
 }
+RoomAmbientPolicy::DayNightWindow g_dayNight; // render thread (SweepDayRooms)
+std::atomic<DWORD> g_dayNightUntil{0};        // GetTickCount the window stays open to (0: closed); any thread reads
+std::atomic<unsigned> g_dayNightSerial{0};
 void SweepDayRooms() {
     float level = 0.0f;
     if (!ReadNightLevel(level)) return;
     level = std::clamp(level, 0.0f, 1.0f);
+    OutdoorDelta::NoteNightLevel(level); // (the instant day/night switch's clock)
+    {
+        const DWORD now = GetTickCount();
+        g_dayNight.Note(level, now);
+        g_dayNightUntil.store(g_dayNight.Open(now) ? (now + 100) | 1 : 0, std::memory_order_relaxed); // (100 ms: the next frames read it)
+        g_dayNightSerial.store(g_dayNight.serial, std::memory_order_relaxed);
+    }
     const float scale = TerrainLightingPolicy::SolveLampDay(level);
     g_roomLampDay.store(scale, std::memory_order_relaxed);
     const auto phase = TerrainLightingPolicy::LevelPhase(level);
@@ -15903,6 +16009,8 @@ void OnWorldChanged() {
     g_dayGen.fetch_add(1, std::memory_order_relaxed);
     g_daySwept = false;
     g_dayWorldAt = GetTickCount();
+    g_dayNight = RoomAmbientPolicy::DayNightWindow{}; // (a load is not a switch: the level starts at its end)
+    g_dayNightUntil.store(0, std::memory_order_relaxed);
     {
         std::lock_guard<std::mutex> lock(g_structureMx);
         g_roomStructures.clear();
@@ -17526,6 +17634,11 @@ void NoteQuietMark(uintptr_t tl, int room, bool dusk) {
 }
 long QuietMarks() { return g_quietMarks.load(std::memory_order_relaxed); }
 
+bool DayNightSwitching() {
+    const DWORD until = g_dayNightUntil.load(std::memory_order_relaxed);
+    return until && static_cast<int32_t>(until - GetTickCount()) > 0;
+}
+unsigned DayNightSwitchSerial() { return g_dayNightSerial.load(std::memory_order_relaxed); }
 bool SettlingAfterLoad() {
     const DWORD live = g_worldLiveAt.load(std::memory_order_relaxed), entered = g_lotEnteredAt.load(std::memory_order_relaxed);
     const DWORD now = GetTickCount();
@@ -18168,7 +18281,8 @@ bool StoryMapsInclude(uintptr_t mgr, uintptr_t tex, StoryMapSlot& slot) {
             for (int i = 0; i < 4; i++) {
                 const uintptr_t address = mgr + 0x16C + c * 64 + 4 * i;
                 const uintptr_t w = *reinterpret_cast<const uintptr_t*>(address);
-                if (w && *reinterpret_cast<const uintptr_t*>(w + 0x2C) == 0 && *reinterpret_cast<const uintptr_t*>(w + 0x30) == tex) {
+                // (issue #55) a value in the first 64 KB, never mapped on Windows, is not a wrapper: skipped, not read under SEH
+                if (w >= 0x10000 && *reinterpret_cast<const uintptr_t*>(w + 0x2C) == 0 && *reinterpret_cast<const uintptr_t*>(w + 0x30) == tex) {
                     slot = {address, w};
                     return true;
                 }

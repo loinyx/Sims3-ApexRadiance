@@ -9,6 +9,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <map>
+#include <memory>
 #include <random>
 #include <set>
 #include <tuple>
@@ -890,6 +892,9 @@ void OpenAboveChecks() {
     std::vector<int> open;
     OpenAbove::Classify(6, 6, room, bare, [](int, int) { return true; }, [](int, int) { return true; }, open);
     Check(open == std::vector<int>{1, 2}, "open to above: rooms walled all round on the story above are open");
+    Check(OpenAbove::SharedFromBelow(3) && OpenAbove::SharedFromBelow(5) && OpenAbove::SharedFromBelow(6) && !OpenAbove::SharedFromBelow(7) &&
+              !OpenAbove::SharedFromBelow(8),
+          "open to above: the room 0 above takes the open rooms' lamps, not their window lights (types 7 and 8)");
     OpenAbove::Classify(6, 6, room, bare, [](int, int Z) { return Z == 1; }, [](int, int) { return false; }, open);
     Check(open.empty(), "open to above: a single-storey room under its roof (a wall above along one side only) stays closed");
     // walls round both, none between them: one space two rooms wide
@@ -898,6 +903,17 @@ void OpenAboveChecks() {
     // room 1 floored above but for a row along one wall (6 of its 9 tiles): it keeps its ceiling
     OpenAbove::Classify(6, 6, room, [](int x, int z, int) { return x <= 3 && z >= 2; }, [](int, int) { return true; }, [](int, int) { return true; }, open);
     Check(open == std::vector<int>{2}, "open to above: a room floored above but along one wall keeps its ceiling");
+    // a room on half a tile cut by a diagonal (its quadrants 2 and 3 of tile (1, 1), diagonal 0 parting them from 0 and 1), no floor
+    // over it and the story above's wall only along that diagonal (13-50-15: lot C49C's room 6 runs along diagonals): open with
+    // the diagonal counted as its own wall, closed when only the tile sides are read
+    {
+        const auto half = [](int x, int z, int q) { return x == 1 && z == 1 && (q == 2 || q == 3) ? 1 : 0; };
+        const auto none2 = [](int, int) { return false; };
+        OpenAbove::Classify(4, 4, half, bare, none2, none2, [](int x, int z, int i) { return x == 1 && z == 1 && i == 0; }, open, true);
+        const bool withDiag = open == std::vector<int>{1};
+        OpenAbove::Classify(4, 4, half, bare, none2, none2, open, true);
+        Check(withDiag && open.empty(), "open to above: a diagonal wall of the story above on the room's outline counts as its own wall");
+    }
 }
 
 // ---- A TubeLight's law (gpu_lamp_law.h Tube) against the game's code: 0x006BFA70 over 0x006BD100 as dumpbin gives them (Steam
@@ -1235,6 +1251,74 @@ void ProxyOpenTopsChecks() {
     }
 }
 
+// ---- The space rooms open to the story above continue into (RtLampProxy::InsideOf / InsideAt) over lot C49C's F8 maps and story
+// 3's real walls (the probe's grids of 02/11, as ProxyOpenTopsChecks): story 2's rooms 5 and 7 open under the sloped roof, and the
+// floored part of story 3 over room 12 beside them under the same roof (09/11: its walls and floor took the night sky) ----
+// The room texel a texel of the space over an open room shows (RtLampProxy::TopMatch): a wall the room's top-row texel facing
+// its way (not the nearer one behind the wall), a floor the nearest in plan; none without a top row
+void CarryChecks() {
+    struct Top {
+        float pos[3], n[3];
+    };
+    const std::vector<Top> top = {{{0, 3, 0}, {1, 0, 0}}, {{0.2f, 3, 0}, {-1, 0, 0}}, {{5, 3, 0}, {1, 0, 0}}};
+    const float p[3] = {0.1f, 5, 0}, p2[3] = {0.19f, 5, 0}, nx[3] = {1, 0, 0};
+    Check(RtLampProxy::TopMatch(top, p, nx, true) == &top[0] && RtLampProxy::TopMatch(top, p2, nx, true) == &top[0],
+          "match: a wall takes the room's top-row texel facing its way (not the nearer one behind the wall)");
+    Check(RtLampProxy::TopMatch(top, p2, nx, false) == &top[1], "match: a floor takes the nearest top-row texel in plan");
+    Check(!RtLampProxy::TopMatch(std::vector<Top>{}, p, nx, true), "match: no top row, no match (the texel keeps its own solve)");
+}
+void InsideChecks() {
+    const StoryCells s2 = ReadStory(kLotC49C[1]), s3 = ReadStory(kLotC49C[2]);
+    const size_t nt = 30 * 40;
+    RtLampProxy::Story a, b;
+    a.story = 2, b.story = 3, a.w = b.w = 30, a.h = b.h = 40;
+    a.roofed.assign(nt, 0), a.room.assign(4 * nt, 0), b.placed.assign(nt, 0);
+    for (size_t t = 0; t < nt; t++) {
+        if (s2.room[t] > 0) {
+            a.roofed[t] = 0xF;
+            for (int q = 0; q < 4; q++) a.room[4 * t + q] = s2.room[t];
+        }
+        const char f = s3.floor[t];
+        if (f == '#' || f == 'F' || f == '*') b.placed[t] = 0xF;
+    }
+    struct Run { int a, b, n; };
+    const auto edge = [&](float x0, float z0, float x1, float z1) {
+        RtLampProxy::Edge e;
+        e.x0 = x0, e.z0 = z0, e.x1 = x1, e.z1 = z1;
+        b.edges.push_back(e);
+    };
+    for (const Run& r : std::vector<Run>{{10, 10, 8}, {17, 11, 1}, {10, 21, 8}, {11, 33, 4}})
+        for (int i = 0; i < r.n; i++) edge(static_cast<float>(r.a + i), static_cast<float>(r.b), static_cast<float>(r.a + i + 1), static_cast<float>(r.b));
+    for (const Run& r : std::vector<Run>{{15, 21, 12}, {17, 10, 1}, {18, 10, 11}})
+        for (int i = 0; i < r.n; i++) edge(static_cast<float>(r.a), static_cast<float>(r.b + i), static_cast<float>(r.a), static_cast<float>(r.b + i + 1));
+    RtLampProxy::Inside in;
+    const bool built = RtLampProxy::InsideOf(a, b, {5, 7}, in);
+    int seeds = 0, spread = 0, over12 = 0, beyond = 0, yard = 0;
+    for (size_t t = 0; t < nt; t++)
+        for (int q = 0; q < 4; q++) {
+            const int r = built ? in.room[4 * t + q] : 0;
+            if (!r) continue;
+            const bool floored = b.placed[t] != 0;
+            (floored ? spread : seeds)++;
+            over12 += s2.room[t] == 12;
+            beyond += static_cast<int>(t % 30) >= 18 && s2.room[t] == 12;
+            yard += s2.room[t] == 0;
+        }
+    std::printf("inside, lot C49C story 3: %d quadrants over the open rooms, %d more on its floors beside them (%d over room 12, %d past story 3's wall at x 18), "
+                "%d over no roofed room\n", seeds, spread, over12, beyond, yard);
+    Check(built && seeds > 0 && over12 > 0 && beyond == 0 && yard == 0,
+          "inside: the attic over rooms 5 and 7 and its floored part over room 12 up to story 3's wall, never past a wall or over the yard");
+    // a wall face of story 3 at x 16 facing -x (into the open space over room 5) and +x (onto the floored part), and one at x 18 facing
+    // +x past that wall; a floor texel on the floored part
+    const float Pw[3] = {16.0f, 7.5f, 12.5f}, Nm[3] = {-1, 0, 0}, Np[3] = {1, 0, 0}, Pb[3] = {18.0f, 7.5f, 12.5f}, Pf[3] = {16.5f, 6.99f, 12.5f}, Nu[3] = {0, 1, 0};
+    std::vector<RtLampProxy::Inside> all{in};
+    Check(RtLampProxy::InsideAt(all, 3, Pw, Nm) == 5 && RtLampProxy::InsideAt(all, 3, Pw, Np) == 5 && RtLampProxy::InsideAt(all, 3, Pb, Np) == 0 &&
+              RtLampProxy::InsideAt(all, 3, Pf, Nu) == 5 && RtLampProxy::InsideAt(all, 2, Pw, Nm) == 0,
+          "inside: a wall facing into the space and the floor under it take room 5; a face past story 3's wall and another story none");
+    // nothing open: nothing inside
+    Check(!RtLampProxy::InsideOf(a, b, {}, in), "inside: no room open to above, no space");
+}
+
 // ---- The furniture blocker table (rt_lamp_blockers.h): the rows give back the game's blockers, and occlude from the rows is
 // RoomLightTests::occlude bit for bit ----
 // Physical indoor lamps, stage 4 (phys_lamp_pick.h): the lamps a kept map draws (reach over its box, never one counted twice),
@@ -1387,6 +1471,41 @@ void PhysPickChecks() {
         Check(moved && (q == 0 || q == 3) && out[1] == 1.0f && std::hypot(out[0] - 0.8f, out[2] - 0.3f) < 0.3f && !RtLampProxy::IntoRoom(lot, 1, 8, in) &&
                   !RtLampProxy::IntoRoom(lot, 1, 8, far) && !RtLampProxy::IntoRoom(lot, 2, 8, in),
               "physical shadow: a room's texel past its diagonal wall is looked up just inside the room; one inside, in a tile without the room or another story, is not moved");
+    }
+    { // a wall texel on a placed floor's plane is shadow-tested off it (RtLampProxy::OffFloorLine): story 1's room (x 1..4, z 1..7, floor 1,
+      // ceiling 4) under story 2's placed floor at 4 (a stair hole at tile (1, 5)); the wall at x = 1 facing +x
+        RtLampProxy::Story lo, up;
+        lo.story = 1, up.story = 2, lo.w = up.w = lo.h = up.h = 8;
+        const size_t nt = 64;
+        lo.floorY.assign(nt, RtLampProxy::kNoFloor), lo.ceil.assign(nt, RtLampProxy::kNoFloor), lo.roofed.assign(nt, 0);
+        up.floorY.assign(nt, RtLampProxy::kNoFloor), up.ceil.assign(nt, RtLampProxy::kNoFloor), up.roofed.assign(nt, 0), up.placed.assign(nt, 0);
+        for (int z = 1; z < 7; z++)
+            for (int x = 1; x < 4; x++) {
+                const size_t t = static_cast<size_t>(z) * 8 + x;
+                lo.floorY[t] = 1.0f, lo.ceil[t] = 4.0f, lo.roofed[t] = 0xF;
+                if (!(x == 1 && z == 5)) up.placed[t] = 0xF, up.floorY[t] = 4.0f;
+            }
+        RtLampProxy::Lot lot;
+        lot.stories = {lo, up};
+        RtLampProxy::Mesh mesh;
+        RtLampProxy::Build(lot, mesh, true);
+        const float N[3] = {1, 0, 0}, R = 0.1f;
+        const float above[3] = {2.5f, 4.3f, 2.5f}, ceilLamp[3] = {2.5f, 3.7f, 2.5f};
+        float top[3] = {1.0f, 4.0f, 2.5f}, bottom2[3] = {1.0f, 4.0f, 2.5f}, hole[3] = {1.0f, 4.0f, 5.5f}, row11[3] = {1.0f, 1.0f + 11.0f * 3.0f / 12.0f, 2.5f};
+        const float topRaw[3] = {top[0], top[1], top[2]}, row11Raw[3] = {row11[0], row11[1], row11[2]};
+        const float leak = RtLampProxy::Visibility(mesh, above, R, topRaw);
+        const bool mTop = RtLampProxy::OffFloorLine(lot, 1, top, N), mBottom = RtLampProxy::OffFloorLine(lot, 2, bottom2, N);
+        const bool mHole = RtLampProxy::OffFloorLine(lot, 1, hole, N), mRow11 = RtLampProxy::OffFloorLine(lot, 1, row11, N);
+        const float vAbove = RtLampProxy::Visibility(mesh, above, R, top), vCeil = RtLampProxy::Visibility(mesh, ceilLamp, R, top);
+        const float vBottom = RtLampProxy::Visibility(mesh, ceilLamp, R, bottom2);
+        std::printf("  off the floor line: story 1's top row %.2f m (story 2's lamp: share %.3f at the plane, %.3f moved; its own ceiling lamp %.3f), story 2's bottom row %.2f m "
+                    "(story 1's lamp %.3f); by the stair hole %s, row 11 %s\n",
+                    top[1], leak, vAbove, vCeil, bottom2[1], vBottom, mHole ? "moved" : "kept", mRow11 ? "moved" : "kept");
+        Check(mTop && std::fabs(top[1] - 3.88f) < 1e-4f && leak > 0.5f && vAbove < 0.01f, "off the floor line: the top row under a slab is dark to a lamp of the story above");
+        Check(vCeil > 0.99f, "off the floor line: the top row stays lit by its own room's ceiling lamp");
+        Check(!mHole && hole[1] == 4.0f, "off the floor line: next to a stair hole (no placed floor) the point does not move");
+        Check(!mRow11 && std::memcmp(row11, row11Raw, sizeof row11) == 0, "off the floor line: row 11, under the plane, does not move");
+        Check(mBottom && std::fabs(bottom2[1] - 4.12f) < 1e-4f && vBottom < 0.01f, "off the floor line: story 2's bottom row is dark to a lamp of story 1");
     }
     {
         uintptr_t v[4] = {};
@@ -2224,6 +2343,371 @@ void BlockerTableChecks() {
     }
 }
 
+// ---- (physical) the instant day/night switch: the cache rule (PhaseCache) over the 16-54-11 and 17-11-35 sessions' switches ----
+namespace PC = OutdoorDeltaModel::PhaseCache;
+struct PcRoom {
+    size_t bytes = 0;
+    int room = 0;
+    PC::Stamp start, kept;
+};
+// A session's night level (fades of 0.6 s from the departures of its log) and per room its kept ticks (each solve begun 250 ms
+// before), in ms from the session's minute
+struct Fade {
+    uint32_t at;
+    float from, to;
+};
+struct Session {
+    std::vector<Fade> fades;
+    std::vector<std::vector<uint32_t>> kept;
+    uint32_t end;
+};
+constexpr uint32_t kFadeMs = 600, kModeLead = 300; // (the window lights' mode change ~0.2-0.3 s before the level moves: 187-219 ms in 17-11-35's log)
+float SessionLevel(const Session& ss, uint32_t t) {
+    float level = 0.0f;
+    for (const Fade& f : ss.fades) {
+        if (t < f.at) break;
+        level = t >= f.at + kFadeMs ? f.to : f.from + (f.to - f.from) * static_cast<float>(t - f.at) / kFadeMs;
+    }
+    return level;
+}
+struct SwitchResult {
+    PC::End to;
+    int rooms = 0, swapped = 0, solved = 0, never = 0, reasoned = 0, sent = 0;
+    std::map<std::string, int> why;
+};
+// The light tree thread's part (PhaseSwitchDue, KeepEnd) driven by the session: the game's solves as its log kept them (each begun
+// 250 ms before), the rooms Apex sends at a departure solved from 0.9 s after it, 250 ms apart, in turn (and once more when that
+// solve began in the fade). lampsAsKept(room, t): whether the room's lamps are as its cached solve kept them at the swap
+// 16-54-11 (16:52:00 + ms): to night at the load (8.3-8.86 s), to day 65.88, to night 95.78, to day 102.47, to night 134.09, to
+// day 137.13; the 13 rooms of lot CF2DEA20, the first five kept only in the load's fade
+const Session kSession1654 = {
+    {{8300, 0.0f, 1.0f}, {65877, 1.0f, 0.0f}, {95778, 0.0f, 1.0f}, {102469, 1.0f, 0.0f}, {134086, 0.0f, 1.0f}, {137125, 1.0f, 0.0f}},
+    {
+        {8418}, {8454}, {8462}, {8492}, {8615}, // s3r10, s2r9, s2r11, s1r4, s0r13
+        {9312, 71806, 79400, 98868, 105284, 134010, 138491},                                                  // s2r7
+        {10287, 66743, 81552, 100524, 116894, 136498, 147951},                                                // s1r1
+        {10430, 70669, 78541, 81049, 82714, 83846, 90980, 97766, 98389, 104130, 143504, 147719},              // s1r2
+        {10552, 79621, 81417, 101115, 102057, 115548, 116675, 135791, 136346, 140721, 141440},                // s1r3
+        {10569, 79524, 81256, 100271, 101472, 114847, 116120, 135374, 136004, 140294, 141051},                // s1r8
+        {10769, 72255, 79226, 99121, 112759, 134302, 138939},                                                 // s2r6
+        {10859, 73499, 79111, 82977, 84236, 99668, 113899, 134843, 139652},                                   // s2r5
+        {10871, 73764, 81722, 99807, 114145, 135038, 139896},                                                 // s2r12
+    },
+    160000};
+// 17-11-35 (17:12:00 + ms): night from the load, to day 104.69, to night 119.10, to day 121.63, to night 153.69 (the departure
+// lines); the same 13 rooms, the first five solved first at the switch to day
+const Session kSession1711 = {
+    {{0, 1.0f, 1.0f}, {104687, 1.0f, 0.0f}, {119102, 0.0f, 1.0f}, {121628, 1.0f, 0.0f}, {153690, 0.0f, 1.0f}},
+    {
+        {104632, 104961, 119302, 122118, 153922},                                                                // s3r10
+        {104789, 120293, 122446, 127862, 154957},                                                                // s0r13
+        {105003, 119328, 122139, 153949},                                                                        // s2r9
+        {105011, 121354, 124108, 155717},                                                                        // s2r11
+        {105052, 121480, 124652, 155727},                                                                        // s1r4
+        {43024, 44536, 108560, 119257, 119962, 120785, 123151, 153637, 154454, 155244, 158132, 160614},          // s2r7
+        {44555, 114095, 120520, 127587, 155114, 158348, 162346},                                                 // s1r1
+        {44733, 116255, 117812, 127352, 158694, 162952},                                                         // s1r2
+        {44857, 109138, 119634, 123445, 153874, 158198, 160711},                                                 // s2r6
+        {44914, 110290, 121184, 124024, 155644, 158283, 160865},                                                 // s2r5
+        {44932, 111223, 112564, 113799, 124644, 125371, 161014, 161169},                                         // s1r8
+        {45000, 111855, 113168, 125021, 125713, 161342},                                                         // s1r3
+        {47776, 110573, 121346, 124100, 167057},                                                                 // s2r12
+    },
+    170000};
+template <class LampsAsKept> std::vector<SwitchResult> ReplaySession(const Session& ss, const LampsAsKept& lampsAsKept, int& filledTotal, int& droppedTotal) {
+    const std::vector<std::vector<uint32_t>>& kept = ss.kept;
+    const int n = static_cast<int>(kept.size());
+    std::multimap<uint32_t, int> solves; // kept tick -> room (begun 250 ms before)
+    for (int r = 0; r < n; r++)
+        for (const uint32_t t : kept[r]) solves.emplace(t, r);
+    std::map<uint64_t, PC::Slots<std::shared_ptr<const PcRoom>>> cache;
+    std::map<uint64_t, std::shared_ptr<const PcRoom>> now; // g_kept
+    std::map<int, PC::Stamp> running;
+    std::map<int, uint32_t> sentAt;
+    std::set<int> resent;
+    PC::Clock clk;
+    uint32_t seen[2] = {}, depSeen = 0, switchesSeen = 0, burst = 0;
+    std::vector<SwitchResult> out;
+    struct Open {
+        bool on = false;
+        uint32_t from = 0;
+        std::map<int, std::pair<bool, const char*>> shown; // room -> swapped, else its solve landed (why it was not swapped)
+        std::map<int, const char*> why;
+        std::set<int> sent;
+        size_t index = 0;
+    } open;
+    const auto close = [&]() {
+        if (!open.on) return;
+        SwitchResult& r = out[open.index];
+        for (int room = 0; room < n; room++) {
+            if (!now.count(room)) continue;
+            r.rooms++;
+            const auto s = open.shown.find(room);
+            const char* why = open.why.count(room) ? open.why[room] : nullptr;
+            if (s != open.shown.end() && s->second.first) r.swapped++;
+            else {
+                (s != open.shown.end() ? r.solved : r.never)++;
+                r.reasoned += why ? 1 : 0;
+                r.why[why ? why : "(none)"]++;
+            }
+            r.sent += open.sent.count(room) ? 1 : 0;
+        }
+        open.on = false;
+    };
+    for (uint32_t t = 0; t < ss.end; t += 16) {
+        for (const Fade& f : ss.fades)
+            if (f.at >= kModeLead && t <= f.at - kModeLead && f.at - kModeLead < t + 16) burst = (f.at - kModeLead) | 1;
+        clk.Observe(PC::EndOf(SessionLevel(ss, t)), t, SessionLevel(ss, t));
+        // the solves begun and kept in this frame
+        for (auto it = solves.begin(); it != solves.end() && it->first < t + 266;) {
+            const int room = it->second;
+            if (it->first - 250 >= t && it->first - 250 < t + 16) running[room] = PC::StampOf(clk, it->first - 250);
+            if (it->first >= t && it->first < t + 16) {
+                auto k = std::make_shared<PcRoom>();
+                k->room = room, k->bytes = 1000, k->start = running[room], k->kept = PC::StampOf(clk, it->first);
+                now[room] = k;
+                if (PC::Whole(k->start, k->kept)) {
+                    auto& slot = cache[room];
+                    slot.at[k->kept.heading] = k, slot.keptAt[k->kept.heading] = it->first, slot.start[k->kept.heading] = k->start.tick;
+                }
+                if (sentAt.count(room) && static_cast<int32_t>(k->start.tick - sentAt[room]) >= 0 && k->kept.at != PC::kTwilight && !PC::Whole(k->start, k->kept) &&
+                    resent.insert(room).second)
+                    solves.emplace(it->first + 300, room);
+                if (open.on && static_cast<int32_t>(k->start.tick - open.from) >= 0) open.shown.try_emplace(room, false, nullptr);
+                it = solves.erase(it);
+            } else
+                ++it;
+        }
+        // departures (PhaseDeparture)
+        for (int e = 0; e < 2; e++) {
+            if (clk.leftN[e] == seen[e]) continue;
+            const bool missed = clk.leftN[e] - seen[e] > 1 || clk.departures - depSeen > 1;
+            seen[e] = clk.leftN[e];
+            const uint32_t mode = PC::ModeChange(clk.leftAt[e], burst);
+            droppedTotal += PC::PurgeDeparture(cache, static_cast<PC::End>(e), mode, missed);
+            const PC::End o = e ? PC::kDay : PC::kNight;
+            sentAt.clear(), resent.clear();
+            int i = 0;
+            for (const auto& [room, k] : now) {
+                if (!missed && PC::FillOk(k->start, k->kept, static_cast<PC::End>(e), clk.departures - 1, mode)) {
+                    auto& slot = cache[room];
+                    if (slot.at[e] != k) slot.at[e] = k, slot.keptAt[e] = k->kept.tick, slot.start[e] = k->start.tick, filledTotal++;
+                }
+                if (!cache.count(room) || !cache[room].at[o]) sentAt[static_cast<int>(room)] = t, solves.emplace(t + 900 + 250 * i++, static_cast<int>(room));
+            }
+        }
+        depSeen = clk.departures;
+        // the arrival of a quick switch: every room tried (the swaps one per update land within frames: taken at once here)
+        if (clk.switches != switchesSeen) {
+            switchesSeen = clk.switches;
+            close();
+            open = Open{};
+            open.on = true, open.from = clk.switchFrom, open.index = out.size();
+            for (const auto& [room, at] : sentAt) open.sent.insert(room);
+            SwitchResult r;
+            r.to = clk.target;
+            out.push_back(r);
+            for (auto& [room, cur] : now) {
+                PC::Facts f;
+                const auto c = cache.find(room);
+                f.cand = c != cache.end() && c->second.at[clk.target];
+                f.cur = true, f.curStart = cur->start.tick, f.switchFrom = clk.switchFrom;
+                f.candStart = f.cand ? c->second.start[clk.target] : 0;
+                f.sameLot = f.sameGeo = f.sameTexels = f.sameLamps = f.basisOk = true;
+                f.lampsAsKept = lampsAsKept(static_cast<int>(room), t);
+                if (f.cand && c->second.at[clk.target] == cur) { // (as SwapRoom: the game's own solve when it began after the departure)
+                    const bool game = static_cast<int32_t>(cur->start.tick - clk.switchFrom) >= 0;
+                    open.shown.try_emplace(static_cast<int>(room), !game, nullptr);
+                    if (game) open.why[static_cast<int>(room)] = "its solve since the switch landed";
+                    continue;
+                }
+                if (const char* why = PC::SwapWhy(f)) open.why[static_cast<int>(room)] = why;
+                else cur = c->second.at[clk.target], open.shown.try_emplace(static_cast<int>(room), true, nullptr);
+            }
+        }
+        if (open.on && t - open.from >= 10000) close();
+    }
+    close();
+    return out;
+}
+void PhaseCacheChecks() {
+    // the clock: one departure per end left, a quick switch only on arriving at the other end within kQuickMs
+    {
+        PC::Clock c;
+        uint32_t t = 1000;
+        for (; t < 2000; t += 16) c.Observe(PC::kNight, t);
+        for (; t < 22000; t += 16) c.Observe(PC::EndOf(1.0f - static_cast<float>(t - 2000) / 20000.0f), t); // a slow dusk, 20 s
+        for (; t < 23000; t += 16) c.Observe(PC::kDay, t);
+        Check(c.departures == 1 && c.leftN[PC::kNight] == 1 && c.switches == 0, "day/night cache: a slow dusk is no quick switch (left to the game)");
+        PC::Clock j;
+        j.Observe(PC::kDay, 100), j.Observe(PC::kNight, 116);
+        Check(j.switches == 1 && j.target == PC::kNight && j.switchFrom == (116u | 1u), "day/night cache: a jump from day to night in one frame is a quick switch");
+        PC::Clock b;
+        b.Observe(PC::kDay, 100), b.Observe(PC::kTwilight, 116), b.Observe(PC::kDay, 400);
+        Check(b.switches == 0 && b.leftN[PC::kDay] == 1, "day/night cache: leaving day and coming back is no switch (but a departure)");
+        b.Observe(PC::kTwilight, 500), b.Observe(PC::kNight, 900), b.Observe(PC::kTwilight, 1000), b.Observe(PC::kNight, 1100);
+        Check(b.switches == 1, "day/night cache: night left and reached again after a switch is not a second switch");
+        PC::Clock h; // the 0.6 s fade: open half way, not again on arrival
+        h.Observe(PC::kNight, 1000, 1.0f);
+        uint32_t openedAt = 0;
+        for (uint32_t t = 1016; t <= 1600; t += 16) {
+            h.Observe(PC::EndOf(1.0f - static_cast<float>(t - 1000) / 600.0f), t, 1.0f - static_cast<float>(t - 1000) / 600.0f);
+            if (h.switches == 1 && !openedAt) openedAt = t;
+        }
+        h.Observe(PC::kDay, 1616, 0.0f);
+        Check(h.switches == 1 && h.target == PC::kDay && openedAt >= 1300 && openedAt <= 1320 && h.switchFrom == (1016u | 1u),
+              "day/night cache: a quick switch opens half way through the fade (+0.3 s), once");
+        PC::Clock tb; // turned back after it opened: a switch back to the end left
+        tb.Observe(PC::kDay, 100, 0.0f), tb.Observe(PC::kTwilight, 116, 0.2f), tb.Observe(PC::kTwilight, 300, 0.6f);
+        const uint32_t first = tb.switches;
+        tb.Observe(PC::kTwilight, 400, 0.3f), tb.Observe(PC::kDay, 500, 0.0f);
+        Check(first == 1 && tb.switches == 2 && tb.target == PC::kDay, "day/night cache: a fade turned back after its switch opened switches back");
+    }
+    // the mode change: the window marks' burst begun within 3 s before the departure, else 1 s before it
+    {
+        Check(PC::ModeChange(10000, 9700) == 9700 && PC::ModeChange(10000, 7000) == 7000, "day/night cache: the window marks' burst dates the mode change");
+        Check(PC::ModeChange(10000, 6000) == 9000 && PC::ModeChange(10000, 0) == 9000 && PC::ModeChange(10000, 10300) == 9000,
+              "day/night cache: no burst within 3 s before the departure (none, older, or after it): 1 s before it");
+        Check(PC::AfterMode(9700, 9700) && !PC::AfterMode(9699, 9700), "day/night cache: a solve begun at the mode change or later is the other end's");
+        const PC::Stamp s{PC::kNight, PC::kNight, 4, 5000}, k{PC::kNight, PC::kNight, 4, 5300};
+        Check(PC::FillOk(s, k, PC::kNight, 4, 9700), "day/night cache: a solve of night in the stay just left joins the night cache");
+        Check(PC::FillOk(PC::Stamp{PC::kTwilight, PC::kNight, 4, 4000}, k, PC::kNight, 4, 9700),
+              "day/night cache: a solve begun in the fade towards night (after the level left day) is night's");
+        const auto why = [](const char* w, const char* want) { return w && std::strcmp(w, want) == 0; };
+        Check(why(PC::FillWhy(s, k, PC::kDay, 4, 9700), "begun heading the other end") && why(PC::FillWhy(s, k, PC::kNight, 5, 9700), "solved in an earlier stay") &&
+                  why(PC::FillWhy(s, k, PC::kNight, 4, 5000), "begun after the mode change") &&
+                  why(PC::FillWhy(PC::Stamp{PC::kTwilight, PC::kDay, 4, 5000}, k, PC::kNight, 4, 9700), "begun heading the other end") &&
+                  why(PC::FillWhy(s, PC::Stamp{PC::kTwilight, PC::kDay, 5, 5300}, PC::kNight, 4, 9700), "the level left an end during its solve"),
+              "day/night cache: not the end left, another stay, begun after the mode change, begun in a fade to the other end or kept past a departure: not cached, with the reason");
+        PC::Clock ab; // (an aborted fade: heading back to the end it left)
+        ab.Observe(PC::kNight, 100), ab.Observe(PC::kTwilight, 200);
+        const PC::Stamp abStart = PC::StampOf(ab, 250);
+        ab.Observe(PC::kNight, 400);
+        Check(abStart.heading == PC::kDay && !PC::Whole(abStart, PC::StampOf(ab, 450)), "day/night cache: a solve begun in a fade the level turned back from is neither end's");
+        std::map<uint64_t, PC::Slots<std::shared_ptr<const PcRoom>>> m;
+        m[1].at[PC::kDay] = std::make_shared<PcRoom>(), m[1].start[PC::kDay] = 5000;
+        m[2].at[PC::kDay] = std::make_shared<PcRoom>(), m[2].start[PC::kDay] = 9750;
+        m[2].at[PC::kNight] = std::make_shared<PcRoom>(), m[2].start[PC::kNight] = 9800;
+        Check(PC::PurgeDeparture(m, PC::kDay, 9700, false) == 1 && m.count(1) && !m[2].at[PC::kDay] && m[2].at[PC::kNight],
+              "day/night cache: a departure drops only its end's candidates begun after the mode change");
+        Check(PC::PurgeDeparture(m, PC::kNight, 30000, true) == 1 && m.size() == 1 && m.count(1), "day/night cache: a missed departure drops every candidate of that end");
+    }
+    // the session: from its second switch on every room is swapped or waits with a reason; from the third every room is swapped
+    {
+        int filled = 0, dropped = 0;
+        std::vector<SwitchResult> r = ReplaySession(kSession1654, [](int, uint32_t) { return true; }, filled, dropped);
+        Check(r.size() == 6, "day/night cache: the session's six quick switches (the load's included)");
+        if (r.size() == 6) {
+            for (const SwitchResult& s : r)
+                std::printf("  session switch to %s: %d rooms, %d swapped, %d solved, %d not solved, %d sent by Apex;", s.to == PC::kNight ? "night" : "day", s.rooms, s.swapped,
+                            s.solved, s.never, s.sent),
+                    [&] {
+                        for (const auto& [w, k] : s.why) std::printf(" %s x%d;", w.c_str(), k);
+                        std::printf("\n");
+                    }();
+            Check(r[1].swapped == 0 && r[1].rooms == 13 && r[1].reasoned == 13 && r[1].sent == 13,
+                  "day/night cache: the first switch after the load waits for every room and sends them all at its start");
+            bool every = true;
+            for (size_t i = 2; i < r.size(); i++) every = every && r[i].swapped + r[i].reasoned == r[i].rooms && r[i].rooms == 13;
+            Check(every, "day/night cache: from the second switch on every room is swapped or has its reason");
+            Check(r[2].swapped == 9 && r[2].why["no cached solve of that end"] == 4 && r[2].sent == 4,
+                  "day/night cache: to night (2nd): 9 rooms solved at night since the load (its fade's included) swapped, 4 sent at its start");
+            Check(r[3].swapped == 13 && r[4].swapped == 13 && r[5].swapped == 13, "day/night cache: from the third switch on all 13 rooms are swapped");
+        }
+        Check(dropped == 0, "day/night cache: no solve begun before the mode change dropped (the 1 s rule dropped 2 at each departure from night)");
+        // lamps switched since (a dusk switch not yet back as kept): those rooms wait with that reason, the others swap
+        std::vector<SwitchResult> l = ReplaySession(kSession1654, [](int room, uint32_t t) { return !(room < 3 && t > 100000 && t < 110000); }, filled, dropped);
+        Check(l.size() == 6 && l[3].swapped == 10 && l[3].why[PC::kLampState] == 3, "day/night cache: a lamp not as its cached solve kept it: the room waits, with the reason");
+        // 17-11-35: the switch's own solves (begun in its fade, the five Apex sent among them) are cached for the next switch
+        std::vector<SwitchResult> q = ReplaySession(kSession1711, [](int, uint32_t) { return true; }, filled, dropped);
+        for (const SwitchResult& sw : q) {
+            std::printf("  17-11-35 switch to %s: %d rooms, %d swapped, %d solved, %d not solved, %d sent by Apex;", sw.to == PC::kNight ? "night" : "day", sw.rooms, sw.swapped,
+                        sw.solved, sw.never, sw.sent);
+            for (const auto& [w, k] : sw.why) std::printf(" %s x%d;", w.c_str(), k);
+            std::printf("|\n");
+        }
+        bool all = q.size() == 4;
+        for (size_t i = 1; i < q.size(); i++) all = all && q[i].swapped + q[i].reasoned == q[i].rooms && q[i].rooms == 13;
+        Check(all, "day/night cache: 17-11-35, from the second switch on every room is swapped or has its reason");
+        // (shown at once: swapped, or the game's own solve of the switch already landed by the arrival)
+        const auto atOnce = [&](size_t i) { return q[i].swapped + q[i].why["its solve since the switch landed"]; };
+        Check(q.size() == 4 && q[0].swapped == 0 && atOnce(1) == 9 && atOnce(2) == 12 && atOnce(3) == 13,
+              "day/night cache: 17-11-35, the fade's solves cached: 9, 12 and 13 of 13 rooms at once from the 2nd switch (the game's log: 0, 5 and 3 swapped)");
+    }
+    // validity: each fact alone sends the room to its solve; all of them: swapped
+    {
+        PC::Facts ok;
+        ok.cand = ok.cur = ok.sameLot = ok.sameGeo = ok.sameTexels = ok.sameLamps = ok.lampsAsKept = ok.basisOk = true;
+        ok.candStart = 2000, ok.curStart = 9000, ok.switchFrom = 17250, ok.lastEdit = 0;
+        Check(PC::SwapWhy(ok) == nullptr, "day/night cache: a valid candidate is swapped");
+        const auto one = [&](auto set, const char* want) {
+            PC::Facts f = ok;
+            set(f);
+            const char* w = PC::SwapWhy(f);
+            return w && std::strcmp(w, want) == 0;
+        };
+        Check(one([](PC::Facts& f) { f.cand = false; }, "no cached solve of that end"), "day/night cache: no candidate waits");
+        Check(one([](PC::Facts& f) { f.cur = false; }, "no kept solve now"), "day/night cache: a room not kept now waits");
+        Check(one([](PC::Facts& f) { f.curStart = 17300; }, "its solve since the switch landed"), "day/night cache: the game's solve begun after the departure stays");
+        Check(one([](PC::Facts& f) { f.solving = true; }, "being solved"), "day/night cache: a room being solved waits");
+        Check(one([](PC::Facts& f) { f.sameLot = false; }, "another lot"), "day/night cache: lot change invalidates");
+        Check(one([](PC::Facts& f) { f.lastEdit = 9000; }, "a player's lamp edit since its cached solve"), "day/night cache: a player's lamp edit since invalidates");
+        Check(one([](PC::Facts& f) { f.lastEdit = 1600; }, "a player's lamp edit since its cached solve"), "day/night cache: an edit just before its start (its gather) invalidates");
+        PC::Facts early = ok;
+        early.lastEdit = 1400;
+        Check(PC::SwapWhy(early) == nullptr, "day/night cache: an edit before the solve's gather keeps it");
+        Check(one([](PC::Facts& f) { f.sameGeo = false; }, "its walls, doors or 3D blockers changed"), "day/night cache: a wall, door or object edit invalidates");
+        Check(one([](PC::Facts& f) { f.sameTexels = false; }, "its texels changed"), "day/night cache: other texels invalidate");
+        Check(one([](PC::Facts& f) { f.sameLamps = false; }, "a lamp lit now that its cached solve does not list"), "day/night cache: a lamp lit now that the cached solve lacks invalidates");
+        Check(one([](PC::Facts& f) { f.lampsAsKept = false; }, PC::kLampState), "day/night cache: a lamp's state other than kept invalidates");
+        Check(one([](PC::Facts& f) { f.basisOk = false; }, "its directional maps cannot follow"), "day/night cache: directional maps that cannot follow invalidate");
+        PC::Facts w = ok; // (GetTickCount past 2^32)
+        w.candStart = 0xFFFFF000u, w.curStart = 0xFFFFFF00u, w.switchFrom = 0x00000100u, w.lastEdit = 0xFFFFE000u;
+        Check(PC::SwapWhy(w) == nullptr, "day/night cache: valid across the tick counter's wrap");
+        // round 5 (17:54:28): a room solved since the departure with no cached solve shows the end: its reason says so
+        Check(one([](PC::Facts& f) { f.cand = false, f.curStart = 17300; }, PC::kLanded), "day/night cache: solved since the departure counts as shown, cached or not");
+        // a refused room shows the other end until a solve lands: Apex asks for one, unless one landed or runs
+        PC::Facts edit = ok;
+        edit.lastEdit = 9000;
+        Check(PC::SendOnRefusal(PC::SwapWhy(edit), 100), "day/night cache: a room refused for a lamp edit is sent to its solve (17:54:28: 5 rooms showed night by day for 15 s)");
+        Check(!PC::SendOnRefusal(PC::kLanded, 100) && !PC::SendOnRefusal(PC::kSolving, 100) && !PC::SendOnRefusal(PC::kNoKept, 100) && !PC::SendOnRefusal(nullptr, 100),
+              "day/night cache: a swapped room, one solved since or being solved is not sent again");
+        Check(!PC::SendOnRefusal(PC::kLampState, PC::kLampWaitMs - 1) && PC::SendOnRefusal(PC::kLampState, PC::kLampWaitMs),
+              "day/night cache: a lamp's state is tried again first, then the room is sent");
+        // the departure sends what the swap would refuse for an edit (the same test, the cached solve's start)
+        Check(PC::EditSince(9000, 2000) && !PC::EditSince(1400, 2000) && !PC::EditSince(0, 2000), "day/night cache: a cached solve older than a lamp edit is sent at the departure");
+        // a lamp edit's settle (17:53:55.487: 8 rooms solved again 2 s after the 22 lamps of dusk, each solved since by the switch)
+        Check(PC::SettleSolved(53490, 53990 + 1) && PC::SettleSolved(53490, 55096), "settle: a room solved since the edit is left alone");
+        Check(!PC::SettleSolved(53490, 53490 + PC::kEditMarginMs) && !PC::SettleSolved(53490, 50000), "settle: a solve begun before the edit or at its gather is solved again");
+        Check(PC::SettleSolved(0xFFFFFF00u, 0x00000400u), "settle: across the tick counter's wrap");
+    }
+    // the swap: the cached object itself back in place (the same object, bit for bit), the bytes follow; the directional texels
+    // holding what the room showed take the cached solve's own values exactly, a texel another solve wrote stays
+    {
+        std::map<uint64_t, std::shared_ptr<const PcRoom>> m;
+        auto day = std::make_shared<PcRoom>(), night = std::make_shared<PcRoom>();
+        day->bytes = 3000, night->bytes = 5000;
+        m[7] = day;
+        size_t bytes = 3000 + 100;
+        const std::shared_ptr<const PcRoom> cand = night;
+        const auto prev = PC::SwapIn(m, bytes, 7, cand);
+        Check(prev == day && m[7] == cand && m[7].get() == night.get() && bytes == 5100, "day/night cache: the swap puts the cached solve itself back and moves the bytes");
+        Check(PC::SwapIn(m, bytes, 8, cand) == nullptr && bytes == 5100 && !m.count(8), "day/night cache: no swap into a room not kept");
+        std::mt19937 rng(17);
+        std::vector<uint32_t> shownGame(400), expect(400), candGame(400), texel(400);
+        for (size_t i = 0; i < 400; i++) shownGame[i] = rng(), candGame[i] = rng(), expect[i] = i % 3 ? shownGame[i] : rng(); // (a third: Apex's last write)
+        for (size_t i = 0; i < 400; i++) texel[i] = i % 17 == 0 ? 0xDEADBEEFu : expect[i];                                 // (a 17th: another solve's)
+        bool exact = true, left = true;
+        for (size_t i = 0; i < 400; i++) {
+            uint32_t v = texel[i];
+            const bool wrote = BasisWrite(v, candGame[i], expect[i], candGame[i]);
+            if (i % 17 == 0) left = left && !wrote && v == 0xDEADBEEFu;
+            else exact = exact && wrote && v == candGame[i];
+        }
+        Check(exact && left, "day/night cache: the directional texels take the cached solve's values bit for bit, another solve's are left");
+    }
+}
+
 // Reflections after lamp edits: the turns of a drag, and what a drop still owes
 void ReflectionChecks() {
     using Key = std::tuple<uintptr_t, int, int>;
@@ -2624,12 +3108,15 @@ int main() {
     SplitFillChecks();
     OpenAboveChecks();
     ProxyOpenTopsChecks();
+    CarryChecks();
+    InsideChecks();
     BlockerTableChecks();
     AcrossRoomsChecks();
     DawnChecks();
     SeatChecks();
     PhysPickChecks();
     ReflectionChecks();
+    PhaseCacheChecks();
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

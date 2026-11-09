@@ -39,8 +39,13 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m);
 // fade and drag taps). partial (a rooms-only copy kept from its last draw, the game's map and the rules unchanged): only the rooms
 // whose draw inputs changed are drawn again; false when that cannot give what a full draw would (the caller then copies the
 // game's map and draws in full)
+// before (a full draw; null: none): the copy as it was before room 0's compose wrote over it (Engine::KeepCopy), the game's map not
+// written since its last draw: each room whose draw inputs did not change is copied back from it (its places as its last draw left
+// them, which a draw gives bit for bit: rt_lamps_test) instead of drawn
 bool ComposeOver(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, uintptr_t mgr, int cls, int m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h,
-                 const RtLampGpu::Params& p, bool partial = false);
+                 const RtLampGpu::Params& p, bool partial = false, IDirect3DTexture9* before = nullptr);
+// Whether ComposeOver could take a room of that map from `before` (worth keeping the copy before room 0's compose)
+bool KeepsRooms(uintptr_t mgr, int cls, int m, const IDirect3DTexture9* out, const IDirect3DBaseTexture9* game, int w, int h, const RtLampGpu::Params& p);
 // (sharper floors, after ComposeOver into copy) hi (2w x 2h) = copy upsampled, each physical room's floor sub-texels over it from
 // over (2w x 2h, kept between relights: a room's sub-texels are drawn into it again when its draw changed, all of them when
 // redrawAll). The rooms over it; -1: hi is not complete (the caller shows the copy)
@@ -89,5 +94,7 @@ bool PhysMoveRecent(unsigned long ms);
 uintptr_t PhysDragLight(unsigned long ms);
 // Render thread: the physical relights since the last call (maps, CPU ms, the largest round's CPU ms; OutdoorDelta's 10 s summary)
 void TakeRelightCost(int& maps, double& ms, double& worst);
+// (the 10 s summary) the kept shadow atlas's renders by why and its growths since the last call, as "; ..."
+std::string TakeTileCost();
 
 } // namespace GpuRoomLamps

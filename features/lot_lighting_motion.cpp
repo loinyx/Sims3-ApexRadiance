@@ -66,6 +66,7 @@
 #include "lot_build_share.h"
 #include "level_light_share.h"
 #include "room_light_queue.h"
+#include "room_ambient_policy.h"
 #include "apex_log.h"
 #include "build_flavor.h"
 #include "d3d9_hooks.h"
@@ -324,7 +325,12 @@ float __fastcall Hook_LotLightBudget(void* mgr, void* edx) {
     // 30 and 10, which a lot's load waits on) dosed by the steady pacing (PaceSettle): the game's budget while the frames hold,
     // down to the moving budget when they run long (hitches while still were mostly the room solves: 25-50 ms frames). Not
     // during a lamp edit (its rooms keep the edit budgets), the settle window or a lamp switch's boost (their own budgets).
-    if (!moving && !boosted && !settling && (game == kPriorityMs || game == kOtherLotMs) && PerfToggles::SteadyRoomPacing.load(std::memory_order_relaxed) &&
+    // A quick day/night switch (LevelLightShare::DayNightSwitching, RoomAmbientPolicy::DayNightWindow): the lot being played gets
+    // the window's budget with the camera still, unpaced (17-18-28: the steady pacing held its rooms at about 3 ms a frame, the
+    // last room of the first switch ended 15.5 s after it); moving, at least kEditMovingMs
+    const bool switching = game >= kPriorityMs && game < kLeaveAloneMs && LevelLightShare::DayNightSwitching();
+    if (switching) out = std::max(out, moving ? std::min(game, kEditMovingMs) : RoomAmbientPolicy::DayNightWindow::kLotMs);
+    if (!moving && !boosted && !settling && !switching && (game == kPriorityMs || game == kOtherLotMs) && PerfToggles::SteadyRoomPacing.load(std::memory_order_relaxed) &&
         !LevelLightShare::LampEditPending() && !RoomLightQueue::CurrentRoomUrgent()) {
         const float floorMs = std::max(kMinMs, std::min(game, game * (static_cast<float>(g_budgetMs.load(std::memory_order_relaxed)) / kPriorityMs)));
         const float paced = floorMs + (game - floorMs) * g_steadyScale.load(std::memory_order_relaxed);

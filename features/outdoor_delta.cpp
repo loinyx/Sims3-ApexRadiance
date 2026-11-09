@@ -45,12 +45,14 @@
 #include "apex_log.h"
 #include "apex_paths.h"
 #include "game_addresses.h"
+#include "game_version.h"
 #include "hook_guard.h"
 #include "object_light_bridge.h"
 #include "dev_switches.h"
 #include "build_flavor.h"
 #include "apex_memory.h"
 #include <bit>
+#include <span>
 #include <windows.h>
 #include <d3d9.h>
 #include <algorithm>
@@ -82,6 +84,14 @@ constexpr const char* kMapName[4] = {"wall", "floor", "ceiling", "object"};
 uintptr_t BatchVec() { return GameAddr::Get(GameAddr::Id::BatchSamples); } // 0x01158AC8: the batch vector the solve's callers pass
 uintptr_t Slots() { return GameAddr::Get(GameAddr::Id::MapSlots); }        // 0x011D0460: the per-class room map slots
 uintptr_t Pack() { return GameAddr::Get(GameAddr::Id::TexelPack); }        // 0x0060CD10: the texel pack
+// A game blocker's vtable as the copies name it (room_light_tests.h: Steam's values, also in the probe dumps and replays); a
+// Steam value met on another build is some other kind there (1: unknown)
+uint32_t TestVt(uint32_t vt) {
+    static const uint32_t quad = static_cast<uint32_t>(GameAddr::Get(GameAddr::Id::BlockerQuadVt)), disc = static_cast<uint32_t>(GameAddr::Get(GameAddr::Id::BlockerDiscVt));
+    if (vt == quad) return RoomLightTests::kQuadVt;
+    if (vt == disc) return RoomLightTests::kDiscVt;
+    return vt == RoomLightTests::kQuadVt || vt == RoomLightTests::kDiscVt ? 1u : vt;
+}
 constexpr int kMaxChanged = 8;                    // more changed lights: solved in full
 // (14/10: 160 MB, 256 MB pinned; with the game's saves failing on a fragmented address space below 2 GB, the parts are
 // kept above 2 GB (HighAllocator) and within a lower budget)
@@ -135,6 +145,13 @@ constexpr long kSceneMaxBytes = 1L << 30; // shortcut: a recording stops growing
 std::unordered_map<const void*, DWORD> g_physSent; // (light tree thread) room -> when the settle or a resend sent it
 // (physical, stage 4; light tree thread) the kept copies RoomFinalized held for the finalized solve's KeepEnd: (key, version)
 std::vector<std::pair<uint64_t, uint32_t>> g_heldKept;
+// (physical) the instant day/night switch: the night level's ends as the render thread saw them (NoteNightLevel)
+std::mutex g_clockMx;
+PhaseCache::Clock g_clock;
+PhaseCache::Clock ClockNow() {
+    std::lock_guard<std::mutex> lk(g_clockMx);
+    return g_clock;
+}
 std::atomic<uint32_t> g_gen{1};
 std::atomic<uint32_t> g_version{1}; // Record::version's source
 std::atomic<const void*> g_deltaRoom{nullptr};
@@ -812,6 +829,8 @@ struct Capture {
     long killed = 0;    // kept texels a copy of a texel no capture holds overwrote
     float toneK = 0.0f; // the roofed tail's k ([0x011D0BA0])
     float amb[3] = {}, ambPass[3] = {}; // +0x110 and the pass's +0x650 at the solve's end (the log; the GPU's compose)
+    float ambPair[2][4] = {};           // (the day/night cache) +0x110 and +0x120 whole at the solve's end
+    PhaseCache::Stamp phaseStart;       // (the day/night cache) the night level's end as the solve started
     // (GPU room lamps stage 4, kept captures) the directional maps (FUN_006a09f0): per sample its texel and position; per light
     // of the list at each sample its part (the accumulator after it less before), the game's step called again there (summed
     // over its listings) and how often it was listed; at the solve's end the set [room+8] and the working set's texels
@@ -1488,6 +1507,20 @@ void SetRoomLampPhysical(bool on) {
                 : "[GpuRoomLamps] Model replica: kept rooms keep each lamp's parts");
 }
 bool RoomLampPhysical() { return g_physical.load(std::memory_order_relaxed); }
+bool RoomTestsFound() {
+    static int s_found = -1; // (render thread)
+    if (s_found < 0 && GameAddr::Resolved()) {
+        using GameAddr::Id;
+        std::string missing;
+        s_found = GameAddr::Have({Id::BlockerQuadCtor, Id::BlockerQuadVt, Id::BlockerDiscVt, Id::TestZero, Id::TestTwo, Id::TestNeg1, Id::TestFour, Id::TestDiscEdge,
+                                  Id::TestStop, Id::TestQuadEdge, Id::TestDrop, Id::TestOne, Id::TestEps, Id::TestHalf, Id::TestPenumbra, Id::TestWallY},
+                                 &missing);
+        if (s_found) LOG_INFO(std::format("[GpuRoomLamps] The game's room light tests found on {}: furniture blockers {:#010x} / {:#010x}, 13 constants", GetGameVersionName(),
+                                          GameAddr::Get(Id::BlockerQuadVt), GameAddr::Get(Id::BlockerDiscVt)));
+        else LOG_WARNING("[GpuRoomLamps] Rooms keep the game's solves: " + GameAddr::NotAvailable(missing));
+    }
+    return s_found > 0;
+}
 std::atomic<bool> g_hiFloors{false};
 void SetHiFloors(bool on) {
     if (g_hiFloors.exchange(on) == on) return;
@@ -1560,9 +1593,11 @@ void BasisDue();  // below (GPU room lamps stage 4: the directional maps of the 
 void RefreshLotLamps(); // below (physical indoor lamps: the active lot's registered lights for the render thread)
 void QueueBasisGone(uintptr_t light); // below (physical, stage 5: a lamp that left the lot's registry)
 void NoteUnkept(const void* room);     // below (SolveUnkept)
+void PhaseSwitchDue(); // below (the instant day/night switch: the cached solves put back after a quick switch)
 void AfterRoomUpdate(const void* tl) {
     SettleDue();
     RefreshLotLamps(); // (first: the physical directional maps pick the lamps from its snapshot, a new or moved lamp included)
+    HookGuard::Run("OutdoorDelta day/night switch", [] { PhaseSwitchDue(); }); // (before BasisDue: its directional carry is written there)
     BasisDue();
     if (g_dropPending.exchange(false)) g_pending.clear();
     if (g_pending.empty() || !tl) return;
@@ -1739,6 +1774,7 @@ void ProbeStart(unsigned char* room, const RoomRead& rr) {
     // parts of a lamp kept by an earlier solve still hold while it is the same (UNVERIFIED that a moved object always changes
     // its record's blockers)
     if (c.keep) r.geo = RoomGeoKey(room, r.geoParts, c.phys ? &c.tests : nullptr);
+    c.phaseStart = PhaseCache::StampOf(ClockNow(), GetTickCount());
     // (physical) its lamps' places read with those records: the kept place anchors the carries of a table dragged with its lamp,
     // and read at the end it was 0.2-0.5 m ahead of the records (one 78 ms solve, 03/11 17:43): the table's shadow trailed it
     c.startPos.clear();
@@ -2361,6 +2397,14 @@ struct KeptRoom {
     uint32_t basisW = 0, basisH = 0, basisId = 0;
     const char* basisWhy = nullptr;
     size_t bytes = 0;
+    // (the day/night cache) the night level's end as its solve started, and its ambient pair as its solve gave it with Rooms at
+    // Night's base (ambCe: that base's colour; ambOk: the room held it at the solve's end)
+    PhaseCache::Stamp start, keptStamp;
+    std::vector<KeptLamp> bakedLaws; // (the day/night cache) the baked lights with a law as kept: their state at the swap
+    // ambOwn: the record's own colour (ambPair[0], or what a stairwell's share was added to); ambLls: LevelLightShare held it as
+    // the room's own colour, with the normalisation ambNorm
+    float ambPair[2][4] = {}, ambCe[4] = {}, ambOwn[4] = {}, ambNorm = 0.0f;
+    bool ambOk = false, ambLls = false;
 };
 } // namespace
 // below (physical, stage 5: a room whose directional maps were written physically, kept again; prev: its last kept solve)
@@ -2375,6 +2419,136 @@ std::mutex g_keptMx;
 std::unordered_map<uint64_t, std::shared_ptr<const KeptRoom>> g_kept;
 std::atomic<uint32_t> g_keptVersion{0};
 size_t g_keptBytes = 0;
+// (under g_keptMx; the instant day/night switch) per kept room key the last physical solve kept wholly at each end of the night
+// level (PhaseCache): shared with g_kept while it is the room's kept solve; only the other end's are extra bytes
+std::unordered_map<uint64_t, PhaseCache::Slots<std::shared_ptr<const KeptRoom>>> g_phaseKept;
+size_t PhaseExtraBytes() {
+    size_t b = 0;
+    for (const auto& [key, s] : g_phaseKept) {
+        const auto it = g_kept.find(key);
+        for (const auto& p : s.at)
+            if (p && (it == g_kept.end() || it->second != p)) b += p->bytes;
+    }
+    return b;
+}
+// (light tree thread) the last quick switch: its rooms swapped from the cache, solved since or not, for its summary 10 s later
+struct PhaseSwitch {
+    uint32_t serial = 0;                         // the clock's quick switch it is
+    PhaseCache::End to = PhaseCache::kTwilight;  // its end
+    DWORD from = 0;                              // the level's departure from the other end
+    bool open = false;                           // its summary not written yet
+    std::vector<uint64_t> due;                   // rooms still to try (kSwapsPerUpdate per room update)
+    std::vector<std::pair<uint64_t, DWORD>> retry; // rooms tried again from then (a lamp's state not yet as kept)
+    std::set<uint64_t> rooms;                    // the active lot's kept physical rooms at the switch
+    std::map<uint64_t, std::pair<DWORD, bool>> shown; // room -> when it first showed the new end, swapped (else its solve)
+    std::set<uint64_t> solvedAfter;              // swapped rooms whose solve landed since
+    std::map<uint64_t, const char*> why;         // room -> why it was not swapped (its last try)
+    std::set<uint64_t> sent;                     // sent to their solve by Apex as the level left the other end
+};
+PhaseSwitch g_phaseSwitch;
+// (light tree thread) the rooms sent at the last departure (no cached solve of the other end), and those sent once more
+std::map<uint64_t, DWORD> g_phaseSent;
+std::set<uint64_t> g_phaseResent;
+// (KeepEnd) a solve of a room of the switch begun after its departure landed. A room Apex sent whose solve was not made wholly at
+// the end the level is at now (begun in the fade: the sky between the ends) is sent once more, so that end's cache can take it at
+// the next departure
+void NotePhaseLanded(uint64_t key, const KeptRoom& k) {
+    if (const auto ps = g_phaseSent.find(key); ps != g_phaseSent.end() && static_cast<int32_t>(k.start.tick - ps->second) >= 0 && k.keptStamp.at != PhaseCache::kTwilight &&
+                                                !PhaseCache::Whole(k.start, k.keptStamp) && g_phaseResent.insert(key).second)
+        LevelLightShare::QueueRoomId(RtOutdoorLamps::ActiveTracker(), k.story, k.id, -1);
+    PhaseSwitch& s = g_phaseSwitch;
+    if (!s.open || !s.rooms.count(key) || static_cast<int32_t>(k.start.tick - s.from) < 0) return;
+    const auto [it, fresh] = s.shown.try_emplace(key, k.keptAt, false);
+    if (!fresh && it->second.second) s.solvedAfter.insert(key);
+}
+} // namespace
+bool IndoorTopOf(uint64_t lot, int story, int id, std::vector<TopTexel>& out, uint32_t& version, int& cls) {
+    out.clear();
+    std::shared_ptr<const KeptRoom> best;
+    {
+        std::lock_guard<std::mutex> lk(g_keptMx);
+        // (the class asked for: the one the room shows, whose map its draw and the attic read; -1 or none kept of it: the newest
+        // class, IndoorFitOf's)
+        for (const auto& [key, k] : g_kept)
+            if (k->lot == lot && k->story == story && k->id == id && k->roofed && !k->tail.empty() &&
+                (!best || (k->cls == cls) > (best->cls == cls) || ((k->cls == cls) == (best->cls == cls) && k->cls > best->cls)))
+                best = k;
+    }
+    if (!best) return false;
+    const KeptRoom& k = *best;
+    version = k.version, cls = k.cls;
+    const size_t n = std::min({k.texels.size(), k.base.size() / 3, k.samples.size() / 0x30});
+    float topY = -1e30f;
+    for (size_t i = 0; i < n; i++)
+        if (k.texels[i].map == 0) topY = std::max(topY, reinterpret_cast<const float*>(k.samples.data() + i * 0x30)[1]);
+    for (size_t i = 0; i < n; i++) {
+        const float* smp = reinterpret_cast<const float*>(k.samples.data() + i * 0x30);
+        if (k.texels[i].map != 0 || smp[1] < topY - 0.2f) continue; // (its walls' top row: the wall rows end at base + 3)
+        const float norm = i < k.tail.size() ? k.tail[i].norm : k.norm;
+        TopTexel t{};
+        for (int q = 0; q < 3; q++) t.pos[q] = smp[q], t.n[q] = smp[4 + q], t.rgb[q] = std::max(0.0f, norm * k.base[i * 3 + q]);
+        t.x = k.texels[i].x, t.y = k.texels[i].y;
+        out.push_back(t);
+    }
+    return !out.empty();
+}
+uint32_t IndoorVersionOf(uint64_t lot, int story, int id, int cls) {
+    std::lock_guard<std::mutex> lk(g_keptMx);
+    for (const auto& [key, k] : g_kept)
+        if (k->lot == lot && k->story == story && k->id == id && k->cls == cls && k->roofed && !k->tail.empty()) return k->version;
+    return 0;
+}
+bool IndoorFitOf(uint64_t lot, int story, int id, IndoorFit& out) {
+    std::shared_ptr<const KeptRoom> best;
+    {
+        std::lock_guard<std::mutex> lk(g_keptMx);
+        for (const auto& [key, k] : g_kept)
+            if (k->lot == lot && k->story == story && k->id == id && k->roofed && !k->tail.empty() && (!best || k->cls > best->cls)) best = k;
+    }
+    if (!best) return false;
+    // (each kept solve once: a kept room never changes)
+    static std::mutex s_mx;
+    static std::unordered_map<const KeptRoom*, IndoorFit> s_fits;
+    {
+        std::lock_guard<std::mutex> lk(s_mx);
+        if (const auto it = s_fits.find(best.get()); it != s_fits.end() && it->second.version == best->version) return out = it->second, true;
+    }
+    const KeptRoom& k = *best;
+    std::vector<std::array<float, 5>> good;
+    const size_t n = std::min({k.texels.size(), k.tail.size(), k.samples.size() / 0x30});
+    float topY = -1e30f;
+    for (size_t i = 0; i < n; i++)
+        if (k.texels[i].map == 0) topY = std::max(topY, reinterpret_cast<const float*>(k.samples.data() + i * 0x30)[1]);
+    double top[3] = {};
+    int topN = 0;
+    for (size_t i = 0; i < n; i++) {
+        if (k.texels[i].map != 0) continue; // (the wall pass's ambient)
+        const KeptTail& tl = k.tail[i];
+        float xs[3], c[3], ra[3], r = 0.0f;
+        for (int q = 0; q < 3; q++) xs[q] = tl.norm * k.texels[i].t.S[q];
+        GpuLampLaw::Tone(xs, c);
+        const float* smp = reinterpret_cast<const float*>(k.samples.data() + i * 0x30);
+        if (smp[1] >= topY - 0.5f) {
+            for (int q = 0; q < 3; q++) top[q] += xs[q];
+            topN++;
+        }
+        if (GpuLampLaw::Weight(c, k.toneK) >= 0.2f && GpuLampLaw::IndoorSplit(xs, tl.p, k.toneK, ra, r)) good.push_back({smp[1], r, ra[0], ra[1], ra[2]});
+    }
+    const GpuLampLaw::SplitFill f = GpuLampLaw::FitSplit(std::move(good));
+    IndoorFit o;
+    o.k = k.toneK, o.version = k.version, o.topN = topN;
+    for (int q = 0; q < 3; q++) o.topMean[q] = topN ? static_cast<float>(top[q] / topN) : 0.0f;
+    if (f.ok) o.fit[0] = f.a, o.fit[1] = f.b, o.fit[2] = f.lo, o.fit[3] = f.hi;
+    else o.fit[0] = o.fit[2] = o.fit[3] = 1.0f;
+    {
+        std::lock_guard<std::mutex> lk(s_mx);
+        if (s_fits.size() > 64) s_fits.clear();
+        s_fits[best.get()] = o;
+    }
+    out = o;
+    return true;
+}
+namespace {
 // (under g_keptMx) the kept solves the last finalize that dropped any dropped (RoomFinalized): the room's next kept solve on the
 // light tree thread carries their switched-off lamps (CarryOff), then they go
 std::vector<std::shared_ptr<const KeptRoom>> g_finalized;
@@ -2433,7 +2607,9 @@ uint32_t LiveGen() {
 bool LiveTests(const KeptRoom& k, uint64_t was, RoomLightTests::Room& out, uint64_t& key) {
     std::vector<RoomLightTests::LiveMove> moved;
     key = RoomLightTests::LiveMoves(k.tests.rec, [](uintptr_t at, RoomLightTests::Blocker& b) {
-        return CopyBytes(&b.vt, reinterpret_cast<const void*>(at), 4) && CopyBytes(b.f, reinterpret_cast<const void*>(at), sizeof b.f);
+        const bool ok = CopyBytes(&b.vt, reinterpret_cast<const void*>(at), 4) && CopyBytes(b.f, reinterpret_cast<const void*>(at), sizeof b.f);
+        b.vt = TestVt(b.vt);
+        return ok;
     }, moved);
     if (!key || key == was) return false;
     out.rec = k.tests.rec;
@@ -2457,6 +2633,7 @@ size_t KeptBytes(const KeptRoom& k) {
 void ClearKept() {
     std::lock_guard<std::mutex> lk(g_keptMx);
     g_kept.clear();
+    g_phaseKept.clear();
     g_finalized.clear();
     g_keptBytes = 0;
     g_keptFull = false;
@@ -2754,6 +2931,7 @@ void KeepFinals(BYTE* room) {
     c.roofed = !rr.outdoor;
     if (c.roofed && !ReadToneK(c.toneK)) return void(c.tailWhy = "the roofed tail's k could not be read");
     CopyBytes(c.amb, room + 0x110, sizeof c.amb), CopyBytes(c.ambPass, room + 0x650, sizeof c.ambPass);
+    CopyBytes(c.ambPair, room + 0x110, sizeof c.ambPair); // (+0x110 and +0x120 are adjacent)
     try {
         std::unordered_map<uint64_t, uint32_t> last; // place -> its last write
         last.reserve(n);
@@ -3121,6 +3299,9 @@ void KeepEnd(const BYTE* room) {
         for (auto it = g_kept.begin(); it != g_kept.end();)
             if (it->second->lot != r.lot) g_keptBytes -= std::min(g_keptBytes, it->second->bytes), it = g_kept.erase(it);
             else ++it;
+        for (auto it = g_phaseKept.begin(); it != g_phaseKept.end();) // (the cache too: a lot change)
+            if ((it->second.at[0] && it->second.at[0]->lot != r.lot) || (it->second.at[1] && it->second.at[1]->lot != r.lot)) it = g_phaseKept.erase(it);
+            else ++it;
     }
     const size_t n = r.texels.size();
     auto k = std::make_shared<KeptRoom>();
@@ -3210,6 +3391,22 @@ void KeepEnd(const BYTE* room) {
     if (!k->physical) HookGuard::Run("OutdoorDelta carry switched-off lamps", [&] { CarryOff(*k, key); }); // (physical: no parts to carry)
     k->bytes = KeptBytes(*k);
     k->keptAt = GetTickCount();
+    k->start = c.phaseStart;
+    if (k->physical && !k->tailWhy) {
+        std::memcpy(k->ambPair, c.ambPair, sizeof k->ambPair);
+        bool shared = false;
+        k->ambOk = UnlitRooms::SolveBase(room, c.ambPair, k->ambCe, k->ambOwn, shared);
+        k->ambLls = k->ambOk && LevelLightShare::AmbientOwnIs(const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(room)), k->ambOwn, k->ambNorm);
+        // (another own colour than its solve's: cached only as a stairwell's share over it, which the swap puts back as shown)
+        if (shared) k->ambOk = k->ambLls;
+    }
+    // a candidate of the day/night cache: a physical solve drawn whole (every texel on the GPU), made wholly at one end
+    const PhaseCache::Stamp endStamp = PhaseCache::StampOf(ClockNow(), k->keptAt);
+    k->keptStamp = endStamp;
+    if (k->physical)
+        for (const uintptr_t light : k->baked)
+            if (KeptLamp kl; LawOfLight(light, k->lot, kl)) k->bakedLaws.push_back(kl); // (window lights have none)
+    const bool phaseCand = k->physical && k->editable && !k->tailWhy && k->ambOk && PhaseCache::Whole(k->start, endStamp);
     const auto mb = [](size_t b) { return static_cast<double>(b) / (1024.0 * 1024.0); };
     std::shared_ptr<const KeptRoom> kept, prev;
     size_t rooms = 0, total = 0;
@@ -3219,6 +3416,11 @@ void KeepEnd(const BYTE* room) {
         if (old != g_kept.end()) prev = old->second;
         const size_t oldBytes = old != g_kept.end() ? old->second->bytes : 0;
         const size_t after = g_keptBytes - std::min(g_keptBytes, oldBytes) + k->bytes;
+        // (the day/night cache's other end gives way to any kept solve: it only saves a wait)
+        if (!g_phaseKept.empty() && after + PhaseExtraBytes() > kMaxKeptBytes) {
+            if (KeptLog()) LOG_INFO(std::format("[GpuRoomLamps] Day/night cache dropped ({} rooms): the {:.0f} MB budget", g_phaseKept.size(), mb(kMaxKeptBytes)));
+            g_phaseKept.clear();
+        }
         if (after > kMaxKeptBytes) { // (the room's earlier kept solve, if any, goes: it no longer holds what its maps hold)
             if (old != g_kept.end()) g_keptBytes -= std::min(g_keptBytes, oldBytes), g_kept.erase(old);
             if (!g_keptFull && KeptLog())
@@ -3233,7 +3435,12 @@ void KeepEnd(const BYTE* room) {
         g_keptRefused.erase(key);
         kept = g_kept[key] = std::move(k);
         rooms = g_kept.size(), total = g_keptBytes;
+        if (phaseCand) {
+            auto& slot = g_phaseKept[key];
+            slot.at[endStamp.heading] = kept, slot.keptAt[endStamp.heading] = kept->keptAt, slot.start[endStamp.heading] = kept->start.tick;
+        }
     }
+    NotePhaseLanded(key, *kept);
     if (kept->physical) { // (no parts: nothing to recompose, so no self-check)
         NotePhysBasisKept(key, prev.get(), *kept);
         if (kept->basisSet) CarrySiblings(key, kept->basisSet);
@@ -3606,8 +3813,9 @@ void SolveEnd(unsigned char* room) {
         if (!r.wallsOk)
             for (TexelRec& t : r.texels)
                 if (t.map == 0) t.block = kBadBlock; // a delta that touches a wall texel solves in full
-        // texels two samples write (rewritten in the solve's order by a delta)
-        {
+        // texels two samples write (rewritten in the solve's order by a delta). A base-only record (a neighbour lot) never takes a
+        // delta nor a self-check: neither this nor the batches' spheres below, O(texels) on the light thread at each solve's end
+        if (!r.baseOnly) {
             std::unordered_map<uint64_t, uint32_t> seen;
             seen.reserve(r.texels.size());
             for (uint32_t i = 0; i < r.texels.size(); i++) {
@@ -3619,7 +3827,7 @@ void SolveEnd(unsigned char* room) {
             }
         }
         // each batch's bounding sphere (the reach test)
-        for (BatchRec& b : r.batches) {
+        for (BatchRec& b : r.baseOnly ? std::span<BatchRec>{} : std::span<BatchRec>{r.batches}) {
             double cx = 0, cy = 0, cz = 0;
             for (uint32_t i = 0; i < b.count; i++) {
                 const float* p = reinterpret_cast<const float*>(r.samples.data() + static_cast<size_t>(b.first + i) * 0x30);
@@ -4434,9 +4642,13 @@ void ReadTestConsts() {
     static bool s_done = false;
     if (s_done) return;
     s_done = true;
-    for (const uint32_t at : RoomLightTests::kConstAt) {
+    using GameAddr::Id;
+    constexpr Id kIds[] = {Id::TestZero, Id::TestTwo, Id::TestNeg1, Id::TestFour, Id::TestDiscEdge, Id::TestStop, Id::TestQuadEdge,
+                           Id::TestDrop, Id::TestOne, Id::TestEps, Id::TestHalf, Id::TestPenumbra, Id::TestWallY}; // (kConstAt's order)
+    static_assert(std::size(kIds) == std::size(RoomLightTests::kConstAt));
+    for (size_t i = 0; i < std::size(kIds); i++) {
         float v = 0.0f;
-        if (CopyBytes(&v, reinterpret_cast<const void*>(static_cast<uintptr_t>(at)), sizeof v)) RoomLightTests::SetConst(at, v);
+        if (const uintptr_t at = GameAddr::Get(kIds[i]); at && CopyBytes(&v, reinterpret_cast<const void*>(at), sizeof v)) RoomLightTests::SetConst(RoomLightTests::kConstAt[i], v);
     }
 }
 // The room's walls (+0x30..+0x34, 0x100 bytes each), its default 2D list (+0x78..+0x7C), its wall mode (+0x639) and its 3D
@@ -4475,6 +4687,7 @@ bool ReadRoomTests(const BYTE* room, RoomLightTests::Room& r, std::string& why, 
             if (!CopyBytes(&b, reinterpret_cast<const void*>(bl[0] + j * 4), 4) || !b || !CopyBytes(&k.vt, reinterpret_cast<const void*>(b), 4) ||
                 !CopyBytes(k.f, reinterpret_cast<const void*>(b), sizeof k.f))
                 return why = "a 3D blocker could not be read", false;
+            k.vt = TestVt(k.vt);
             if (!j) r.rec[i].shape = b;
             r.rec[i].at[j] = b;
             if (!anyBlocker && k.vt != RoomLightTests::kQuadVt && k.vt != RoomLightTests::kDiscVt) return why = std::format("a 3D blocker of a kind the copy does not know (vtable {:08X})", k.vt), false;
@@ -5542,6 +5755,261 @@ void BasisDuePhys() {
     StartPhysBasis(std::move(edits));
 }
 
+// ---- (physical) the instant day/night switch (gpu-room-lamps.md "Day and night switch"; light tree thread) ----
+// As the level leaves an end, each room's kept solve made wholly there before the mode change joins that end's cache, and the
+// rooms with no cached solve of the other end are sent to their solve at once. At the quick switch's arrival each room of the
+// active lot takes back its cached solve of the new end when it still holds: the same object put back in g_kept (the GPU draws
+// it as kept, its maps first as a changed signature), its ambient pair written as RetakeAmbient writes, its directional maps
+// rewritten from it (the carry, then the physical redo). Any doubt: the room waits for its solve. The game's solves still run
+// and take over at their KeepEnd.
+namespace {
+constexpr int kSwapsPerUpdate = 4; // (13 rooms in 4 room updates; each swap's maps are made again on the render thread, as a solve's keep)
+constexpr DWORD kSwitchLogMs = 10000, kRetryMs = 250;
+uint32_t g_leftSeen[2] = {}, g_departuresSeen = 0; // the clock's departures handled
+bool SameTexels(const KeptRoom& a, const KeptRoom& b) {
+    return a.texels.size() == b.texels.size() && a.samples.size() == b.samples.size() && std::equal(std::begin(a.mapW), std::end(a.mapW), std::begin(b.mapW)) &&
+           std::equal(std::begin(a.mapH), std::end(a.mapH), std::begin(b.mapH)) && std::memcmp(a.samples.data(), b.samples.data(), a.samples.size()) == 0 &&
+           std::equal(a.texels.begin(), a.texels.end(), b.texels.begin(), [](const TexelRec& p, const TexelRec& q) { return p.x == q.x && p.y == q.y && p.map == q.map; });
+}
+// Every lamp the room's solve shown now lists and the cached one does not is off now: the lists differ by end where lamps
+// switch with the hour (a switched-off lamp leaves the list at the gather); one lit now that the cached solve lacks: its solve
+bool ExtraLampsOff(const KeptRoom& cand, const KeptRoom& cur) {
+    for (const KeptLamp& l : cur.lamps) {
+        if (std::any_of(cand.lamps.begin(), cand.lamps.end(), [&](const KeptLamp& c) { return c.light == l.light; })) continue;
+        KeptLamp now;
+        if (LawOfLight(l.light, cand.lot, now) && now.law.W > 0.0f && (now.law.colour[0] > 0.0f || now.law.colour[1] > 0.0f || now.law.colour[2] > 0.0f)) return false;
+    }
+    return true;
+}
+// Every light of the cached solve with a law is now as it was kept: there, the same shape, colour (0 while off) and strength. A
+// dusk switch back as it was holds; any other lamp change sends the room to its solve
+bool LampsAsKept(const KeptRoom& k) {
+    const auto same = [&](const KeptLamp& kl) {
+        KeptLamp now;
+        if (!LawOfLight(kl.light, k.lot, now) || now.colourOnly != kl.colourOnly) return false;
+        if (kl.colourOnly ? now.geo != kl.geo : GpuLampLaw::Moved(now.law, kl.law, 1e-4f)) return false;
+        const auto eq = [](float a, float b) { return std::fabs(a - b) <= 1e-4f * std::max(1.0f, std::fabs(b)); };
+        return eq(now.law.W, kl.law.W) && eq(now.law.colour[0], kl.law.colour[0]) && eq(now.law.colour[1], kl.law.colour[1]) && eq(now.law.colour[2], kl.law.colour[2]);
+    };
+    return std::all_of(k.lamps.begin(), k.lamps.end(), same) && std::all_of(k.bakedLaws.begin(), k.bakedLaws.end(), same);
+}
+// One room of the switch: swapped (null), or why it waits for its solve
+const char* SwapRoom(uint64_t key, DWORD now) {
+    PhaseSwitch& sw = g_phaseSwitch;
+    // (a kept solve of a class the room does not show now draws nothing: neither swapped nor counted)
+    if (RoomRead now0; ReadRoom(reinterpret_cast<const BYTE*>(static_cast<uintptr_t>(key >> 2)), now0) && now0.cls != static_cast<int>(key & 3))
+        return sw.rooms.erase(key), "not the class it shows";
+    std::shared_ptr<const KeptRoom> cand, cur;
+    PhaseCache::Facts f;
+    f.switchFrom = sw.from;
+    {
+        std::lock_guard<std::mutex> lk(g_keptMx);
+        if (const auto s = g_phaseKept.find(key); s != g_phaseKept.end() && s->second.at[sw.to]) cand = s->second.at[sw.to], f.candStart = s->second.start[sw.to];
+        if (const auto it = g_kept.find(key); it != g_kept.end()) cur = it->second;
+        f.solving = std::any_of(g_heldKept.begin(), g_heldKept.end(), [&](const auto& h) { return h.first == key; });
+    }
+    if (cand && cand == cur) { // (still kept: nothing to put back; the game's own solve when it began after the departure)
+        const bool game = static_cast<int32_t>(cur->start.tick - sw.from) >= 0;
+        sw.shown.try_emplace(key, game ? cur->keptAt : now, !game);
+        return game ? "its solve since the switch landed" : nullptr;
+    }
+    f.cand = cand != nullptr, f.cur = cur != nullptr;
+    if (cur) f.curStart = cur->start.tick;
+    if (cand && cur) {
+        BYTE* room = reinterpret_cast<BYTE*>(cand->room);
+        RoomRead rr;
+        f.solving = f.solving || (g_cap.active && g_cap.room == room);
+        f.sameLot = cand->lot == cur->lot && cand->lot == ActiveLot() && ReadRoom(room, rr) && rr.story == cand->story && rr.id == cand->id && rr.cls == cand->cls;
+        f.lastEdit = static_cast<uint32_t>(LampMarkFilter::EditLastTick());
+        // (cheap first: the solves' keys, then the room read now)
+        f.sameGeo = cand->geo && cand->geo == cur->geo && cand->roomGeo == cur->roomGeo && f.sameLot && RoomGeoKey(room) == cand->geo;
+        f.sameTexels = SameTexels(*cand, *cur);
+        f.sameLamps = ExtraLampsOff(*cand, *cur);
+        f.lampsAsKept = LampsAsKept(*cand);
+        const auto bn = g_basisNow.find(key);
+        f.basisOk = (cand->basisWhy == kNoBasis && cur->basisWhy == kNoBasis) ||
+                    (!cand->basisWhy && !cur->basisWhy && cand->basisSet && cand->basisSet == cur->basisSet && RoomSet(cand->room) == cand->basisSet && SameBasisSamples(*cur, *cand) &&
+                     cand->basisGame.size() == cand->basis.size() * 4 && cur->basisGame.size() == cand->basisGame.size() &&
+                     (bn == g_basisNow.end() || (bn->second.id == cur->basisId && bn->second.expect.size() == cand->basisGame.size())));
+    }
+    if (const char* why = PhaseCache::SwapWhy(f)) {
+        if (why == PhaseCache::kLanded) sw.shown.try_emplace(key, cur->keptAt, false); // (solved before its turn here: shown, not "not solved")
+        return why;
+    }
+    BYTE* room = reinterpret_cast<BYTE*>(cand->room);
+    const char* why = nullptr;
+    float was[2][4], wasOwn[4];
+    if (!UnlitRooms::RestoreAmbient(room, cand->ambPair, cand->ambOwn, cand->ambCe, why, cur->ambOk ? cur->ambPair[0] : nullptr, cur->ambOk ? cur->ambOwn : nullptr, was,
+                                    wasOwn))
+        return why;
+    bool same = false;
+    {
+        std::lock_guard<std::mutex> lk(g_keptMx);
+        const auto it = g_kept.find(key);
+        if ((same = it != g_kept.end() && it->second == cur)) PhaseCache::SwapIn(g_kept, g_keptBytes, key, cand);
+    }
+    if (!same) { // (a finalize on another thread meanwhile: its ambient goes back)
+        UnlitRooms::RestoreAmbient(room, was, wasOwn, cand->ambCe, why, cand->ambPair[0], cand->ambOwn);
+        return PhaseCache::kLanded;
+    }
+    // (its neighbours' stairwell shares read this room's own colour at their solves: the cached solve's)
+    if (cand->ambLls) LevelLightShare::SetAmbientOwn(room, cand->ambOwn, cand->ambNorm);
+    // its directional maps: the texels holding what the room showed take the cached solve's own values (WritePhysCarry), and a
+    // room written physically is written again from it (the redo)
+    if (cand->basisWhy != kNoBasis) {
+        const auto bn = g_basisNow.find(key);
+        const bool phys = bn != g_basisNow.end() && bn->second.phys;
+        std::vector<uint32_t> expect = bn != g_basisNow.end() ? std::move(bn->second.expect) : cur->basisGame;
+        BasisNow& b = g_basisNow[key];
+        b = BasisNow{};
+        b.id = cand->basisId, b.phys = phys, b.expect = std::move(expect), b.carry = cand->basisGame;
+        if (phys) g_pbRedo.insert(key);
+    }
+    sw.shown.try_emplace(key, now, true);
+    return nullptr;
+}
+void LogPhaseSwitch(DWORD now) {
+    PhaseSwitch& s = g_phaseSwitch;
+    s.open = false;
+    int swapped = 0, solved = 0, solvedSent = 0, never = 0;
+    DWORD lastSwap = 0, lastSolve = 0;
+    std::map<std::string, int> whySolved, whyNever;
+    for (const uint64_t key : s.rooms) {
+        const auto w = s.why.find(key);
+        const char* why = w != s.why.end() ? w->second : "not tried within the summary's time";
+        const auto it = s.shown.find(key);
+        if (it == s.shown.end()) {
+            never++, whyNever[why]++;
+            continue;
+        }
+        const DWORD t = it->second.first - s.from;
+        if (it->second.second) swapped++, lastSwap = std::max(lastSwap, t);
+        else solved++, solvedSent += s.sent.count(key) ? 1 : 0, lastSolve = std::max(lastSolve, t), whySolved[why]++;
+    }
+    const auto list = [](const std::map<std::string, int>& m) {
+        std::string o;
+        for (const auto& [w, n] : m) o += std::format("{}{} x{}", o.empty() ? "" : ", ", w, n);
+        return o.empty() ? std::string("-") : o;
+    };
+    LOG_INFO(std::format("[GpuRoomLamps] Day/night switch to {}: {} rooms; swapped from the cache {} (last +{:.2f} s); waited, solved by the game {} (last +{:.2f} s; {} sent by "
+                         "Apex at the switch's start); not solved within {:.1f} s {}; last room +{:.2f} s; {} swapped rooms solved again since; why solved: {}; why not "
+                         "solved: {}",
+                         s.to == PhaseCache::kNight ? "night" : "day", s.rooms.size(), swapped, lastSwap / 1000.0, solved, lastSolve / 1000.0, solvedSent,
+                         (now - s.from) / 1000.0, never, std::max(lastSwap, lastSolve) / 1000.0, s.solvedAfter.size(), list(whySolved), list(whyNever)));
+}
+// The level left end e (mode: its mode change): e's late candidates go, each room's kept solve made wholly at e joins e's cache,
+// and the rooms with no cached solve of the other end are sent to their solve (the shown class first)
+void PhaseDeparture(PhaseCache::End e, uint32_t mode, bool missed, uint32_t stay, DWORD now) {
+    const PhaseCache::End o = e == PhaseCache::kDay ? PhaseCache::kNight : PhaseCache::kDay;
+    const uint64_t lot = ActiveLot();
+    int dropped = 0, filled = 0, cached = 0, rooms = 0;
+    std::vector<std::shared_ptr<const KeptRoom>> send;
+    std::string notCached; // (story S room R: why) for each shown room of the lot not in e's cache now
+    const auto note = [&](int story, int id, const char* why) { notCached += std::format("{}story {} room {} ({})", notCached.empty() ? "" : ", ", story, id, why); };
+    std::set<const void*> keptRooms;
+    {
+        std::lock_guard<std::mutex> lk(g_keptMx);
+        dropped = PhaseCache::PurgeDeparture(g_phaseKept, e, mode, missed);
+        for (const auto& [key, k] : g_kept) {
+            if (k->lot != lot) continue;
+            RoomRead rr;
+            if (!ReadRoom(reinterpret_cast<const BYTE*>(k->room), rr) || rr.cls != k->cls) continue; // (a class it does not show)
+            keptRooms.insert(reinterpret_cast<const void*>(k->room)), rooms++;
+            const char* why = missed                ? "a departure missed"
+                              : !k->physical        ? "not physical"
+                              : k->tailWhy          ? "no tail kept"
+                              : !k->editable        ? "not drawn whole (a class-2 wall left to the game's blur)"
+                              : !k->ambOk           ? "its ambient is not its solve's (an atrium's colour)"
+                                                    : PhaseCache::FillWhy(k->start, k->keptStamp, e, stay, mode);
+            auto& slot = g_phaseKept[key];
+            if (!why && slot.at[e] != k) slot.at[e] = k, slot.keptAt[e] = k->keptAt, slot.start[e] = k->start.tick, filled++;
+            if (slot.at[e]) cached++;
+            else note(k->story, k->id, why ? why : "?");
+            // (a cached solve of the other end older than a player's lamp edit is refused at the swap: its solve now)
+            if (k->physical && (!slot.at[o] || PhaseCache::EditSince(static_cast<uint32_t>(LampMarkFilter::EditLastTick()), slot.start[o]))) send.push_back(k);
+            if (!slot.at[0] && !slot.at[1]) g_phaseKept.erase(key);
+        }
+    }
+    // the lot's rooms with no kept solve at all (never kept, or dropped since)
+    std::vector<void*> all;
+    LevelLightShare::LotRooms(RtOutdoorLamps::ActiveTracker(), all);
+    for (void* room : all)
+        if (RoomRead rr; !keptRooms.count(room) && ReadRoom(static_cast<const BYTE*>(room), rr) && rr.id > 0 && rr.lot == lot) rooms++, note(rr.story, rr.id, "no kept solve");
+    g_phaseSent.clear(), g_phaseResent.clear();
+    // shortcut: the class the room shows stands for visible (class 2 first); the room queue spreads the solves at its budget
+    std::stable_sort(send.begin(), send.end(), [](const auto& a, const auto& b) { return a->cls > b->cls; });
+    int sent = 0;
+    const uintptr_t tracker = RtOutdoorLamps::ActiveTracker();
+    for (const auto& k : send)
+        if (LevelLightShare::QueueRoomId(tracker, k->story, k->id, -1)) sent++, g_phaseSent[KeyOf(reinterpret_cast<const void*>(k->room), k->cls)] = now;
+    if (rooms && KeptLog())
+        LOG_INFO(std::format("[GpuRoomLamps] Day/night cache: the level left {}: {} of {} rooms cached for it ({} new), {} dropped (begun at or after the mode change, {} ms "
+                             "before the departure), {} rooms with no cached {} solve sent to their solve; not cached: {}",
+                             e ? "night" : "day", cached, rooms, filled, dropped, static_cast<int32_t>(now - mode), sent, o ? "night" : "day",
+                             notCached.empty() ? std::string("-") : notCached));
+}
+} // namespace
+void PhaseSwitchDue() {
+    if (!g_capture.load(std::memory_order_relaxed) || !g_physical.load(std::memory_order_relaxed)) {
+        std::lock_guard<std::mutex> lk(g_keptMx);
+        g_phaseKept.clear();
+        return;
+    }
+    if (g_keptClear.load(std::memory_order_relaxed)) return; // (the old world's rooms: cleared at the next solve)
+    const PhaseCache::Clock clk = ClockNow();
+    const DWORD now = GetTickCount();
+    // the level left an end
+    for (int e = 0; e < 2; e++) {
+        if (clk.leftN[e] == g_leftSeen[e]) continue;
+        const bool missed = clk.leftN[e] - g_leftSeen[e] > 1 || clk.departures - g_departuresSeen > 1;
+        g_leftSeen[e] = clk.leftN[e];
+        PhaseDeparture(static_cast<PhaseCache::End>(e), PhaseCache::ModeChange(clk.leftAt[e], static_cast<uint32_t>(LampMarkFilter::WindowBurstStart())), missed,
+                       clk.departures - 1, now);
+    }
+    g_departuresSeen = clk.departures;
+    PhaseSwitch& s = g_phaseSwitch;
+    if (clk.switches != s.serial) { // a new quick switch: the active lot's kept physical rooms, in turn
+        if (s.open) LogPhaseSwitch(now);
+        s = PhaseSwitch{};
+        s.serial = clk.switches, s.to = clk.target, s.from = clk.switchFrom, s.open = true;
+        for (const auto& [key, at] : g_phaseSent) s.sent.insert(key);
+        const uint64_t lot = ActiveLot();
+        std::vector<std::shared_ptr<const KeptRoom>> ask; // (no cached solve of the end and not sent at the departure: a fade turned back)
+        {
+            std::lock_guard<std::mutex> lk(g_keptMx);
+            for (const auto& [key, k] : g_kept)
+                if (k->physical && k->lot == lot) {
+                    s.rooms.insert(key), s.due.push_back(key);
+                    const auto c = g_phaseKept.find(key);
+                    if ((c == g_phaseKept.end() || !c->second.at[s.to]) && !g_phaseSent.count(key)) ask.push_back(k);
+                }
+        }
+        for (const auto& k : ask)
+            if (LevelLightShare::QueueRoomId(RtOutdoorLamps::ActiveTracker(), k->story, k->id, -1)) s.sent.insert(KeyOf(reinterpret_cast<const void*>(k->room), k->cls));
+    }
+    for (auto it = s.retry.begin(); it != s.retry.end();) // (a lamp's state not yet as kept: again every kRetryMs while the switch is open)
+        if (now - it->second >= kRetryMs && !s.shown.count(it->first)) s.due.push_back(it->first), it = s.retry.erase(it);
+        else if (s.shown.count(it->first)) it = s.retry.erase(it);
+        else ++it;
+    // (only while no solve holds the working maps, as the directional writes; the rooms wait for the next update)
+    for (int n = 0; n < kSwapsPerUpdate && !s.due.empty() && LevelLightShare::RoomMapsFree();) {
+        const uint64_t key = s.due.back();
+        s.due.pop_back();
+        if (const char* why = SwapRoom(key, now)) {
+            if (!s.rooms.count(key)) continue;
+            s.why[key] = why;
+            if (why == PhaseCache::kLampState && s.open) s.retry.emplace_back(key, now);
+            // refused for good: it shows the other end until a solve lands, so its solve is asked for now (once)
+            if (RoomRead rr; PhaseCache::SendOnRefusal(why, now - s.from) && !s.sent.count(key) &&
+                             ReadRoom(reinterpret_cast<const BYTE*>(static_cast<uintptr_t>(key >> 2)), rr) &&
+                             LevelLightShare::QueueRoomId(RtOutdoorLamps::ActiveTracker(), rr.story, rr.id, -1))
+                s.sent.insert(key);
+        } else
+            n++;
+    }
+    if (s.open && now - s.from >= kSwitchLogMs) LogPhaseSwitch(now);
+}
+
 namespace {
 // (physical, stage 4) whether every story 0 .. 7 of the lot draws `light` from its law now (phys_lamp_pick.h EditRefusal): empty,
 // or why not. Also the rooms > 0 listing it (their (story, id) and directional maps), whether any room lists it and the room it
@@ -5612,7 +6080,8 @@ bool TakesLampEditPhys(uintptr_t tl, uintptr_t light, const char* kind, bool set
     const auto refuse = [&](const std::string& why) {
         if (dry) return false;
         c_physRefused.fetch_add(1, std::memory_order_relaxed);
-        if (KeptLog()) LOG_INFO(std::format("[GpuRoomLamps] physical {}: lamp {:08X} left to the room solves ({})", kind, light, why));
+        // (a lamp of another lot: counted only; at 6:00 a neighbour's 100 street lamps used up the log's line budget)
+        if (KeptLog() && why != "not a lamp of the active lot") LOG_INFO(std::format("[GpuRoomLamps] physical {}: lamp {:08X} left to the room solves ({})", kind, light, why));
         {
             std::string cls = why; // (the reason without the room it names)
             if (cls.rfind("story ", 0) == 0) cls = cls.substr(std::min(cls.size(), cls.find(": ") == std::string::npos ? 0 : cls.find(": ") + 2));
@@ -5908,12 +6377,23 @@ void SettleDue() {
             ++it;
             continue;
         }
-        int ok = 0, before = 0, refused = 0;
+        int ok = 0, before = 0, refused = 0, solved = 0;
         for (const auto& [story, id] : it->second.rooms) {
             const auto key = std::make_tuple(it->second.tracker, story, id);
             if (const auto s = sent.find(key); s != sent.end()) {
                 before++;
                 continue;
+            }
+            // (a solve begun after the edit gathered it: nothing left to settle; a day/night switch's solves, mostly)
+            if (const void* r = LevelLightShare::RoomOf(it->second.tracker, story, id)) {
+                std::lock_guard<std::mutex> lk(g_keptMx);
+                bool done = false;
+                for (int cls = 0; cls < 4 && !done; cls++)
+                    if (const auto k = g_kept.find(KeyOf(r, cls)); k != g_kept.end()) done = PhaseCache::SettleSolved(it->second.at, k->second->start.tick);
+                if (done) {
+                    solved++;
+                    continue;
+                }
             }
             const bool queued = LevelLightShare::QueueRoomId(it->second.tracker, story, id, -1);
             sent[key] = queued;
@@ -5922,7 +6402,8 @@ void SettleDue() {
             (queued ? ok : refused)++;
         }
         if (KeptLog())
-            LOG_INFO(std::format("[GpuRoomLamps] settle: lamp {:08X}, {} rooms sent to their solve {:.0f} s after its last edit{}{}", it->first, ok, kSettleMs / 1000.0,
+            LOG_INFO(std::format("[GpuRoomLamps] settle: lamp {:08X}, {} rooms sent to their solve {:.0f} s after its last edit{}{}{}", it->first, ok, kSettleMs / 1000.0,
+                                 solved ? std::format(", {} left alone (solved since the edit)", solved) : std::string(),
                                  before ? std::format(", {} sent for another lamp just before", before) : std::string(),
                                  refused ? std::format(", {} refused by the room queue (already waiting for their gather, or gone)", refused) : std::string()));
         it = g_settle.erase(it);
@@ -6353,8 +6834,9 @@ void OnPresent() {
         GpuRoomLamps::TakeRelightCost(maps, ms, worst);
         if (taken || refused)
             LOG_INFO(std::format("[GpuRoomLamps] physical lamp edits in the last 10 s: {} taken, {} left to the room solves; {} room solves of the lot within {} s of an edit "
-                                 "taken outside the settle, {} settle or resend solves; physical relights {} maps, {:.1f} ms CPU (largest frame {:.2f} ms)",
-                                 taken, refused, solves, kEditSolveMs / 1000, settles, maps, ms, worst));
+                                 "taken outside the settle, {} settle or resend solves; physical relights {} maps, {:.1f} ms CPU (largest frame {:.2f} ms){}",
+                                 taken, refused, solves, kEditSolveMs / 1000, settles, maps, ms, worst, GpuRoomLamps::TakeTileCost()));
+        else GpuRoomLamps::TakeTileCost();
         std::map<std::string, long> why;
         {
             std::lock_guard<std::mutex> lk(g_refuseMx);
@@ -6420,6 +6902,10 @@ void OnWorldChanged() {
     g_checkPending.clear();
     g_lotEdits.clear();
     g_otherStart.clear();
+}
+void NoteNightLevel(float level) {
+    std::lock_guard<std::mutex> lk(g_clockMx);
+    g_clock.Observe(PhaseCache::EndOf(level), GetTickCount(), level);
 }
 void InvalidateAll(const char* why) {
     (void)why;

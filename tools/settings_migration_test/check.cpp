@@ -62,6 +62,15 @@ int main(int argc, char** argv) {
         Check(Apply(root).empty(), "a second run moves nothing");
     }
     {
+        // revision 2: Classic goes to Instant for everyone, a config already on revision 1 too; nothing else moves then
+        toml::table root = toml::parse("[patches.NightTerrainRelight]\nlampLightingMode = \"classic\"\nforcaNasParedes = 0.30\n");
+        const auto moved = Apply(root, 1);
+        Check(moved.size() == 1 && (*Night(root))[kLampMode].value_or(std::string()) == "instant", "revision 2 forces Instant");
+        Check(Value(root, "forcaNasParedes") == 0.30, "revision 2 leaves the revision 1 keys alone");
+        toml::table none = toml::parse("[patches.NightTerrainRelight]\nforcaNasParedes = 0.30\n");
+        Check(Apply(none, 1).empty(), "a config with no saved mode is already on the default");
+    }
+    {
         toml::table root = toml::parse(kTuned);
         const toml::table before = root;
         Check(Apply(root).empty() && root == before, "tuned values stay");

@@ -229,9 +229,10 @@ void MoveLightingDefaults() {
     toml::table root;
     std::string err;
     if (!ParseFile(ApexPaths::ConfigFile(), root, &err)) return; // unreadable: nothing is written, the next start tries again
-    if (root["meta"]["lighting_defaults"].value_or(int64_t{0}) >= ApexLightingDefaults::kRevision) return;
+    const int64_t from = root["meta"]["lighting_defaults"].value_or(int64_t{0});
+    if (from >= ApexLightingDefaults::kRevision) return;
     std::string moved;
-    for (const std::string& key : ApexLightingDefaults::Apply(root)) moved += (moved.empty() ? "" : ", ") + key;
+    for (const std::string& key : ApexLightingDefaults::Apply(root, from)) moved += (moved.empty() ? "" : ", ") + key;
     if (!root["meta"].as_table()) root.insert_or_assign("meta", toml::table{});
     root["meta"].as_table()->insert_or_assign("lighting_defaults", ApexLightingDefaults::kRevision);
     if (!ApexUtil::WriteFileAtomic(ApexPaths::ConfigFile(), Serialize(root), &err)) LOG_ERROR("[Config] Lighting defaults not saved: " + err);

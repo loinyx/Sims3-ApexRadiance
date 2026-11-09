@@ -80,6 +80,7 @@ struct DrawRec {
     std::string instances; // instanced draws: the per-instance data (read while the draw is recorded)
     std::vector<std::array<float, 4>> verts; // the draw's vertex positions as stored (stream POSITION, raw), for the wall block (WallUnderPixel)
     WallMesh mesh;
+    std::string probes; // (a lit surface) the pixel shader's texld results and inputs at the pixel (ProbeValues)
     DWORD samples = 0;
     bool resolved = false;
 };
@@ -628,6 +629,89 @@ void ReadWallIndices(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, UINT prims, U
 }
 
 // ---- per-draw work ----
+// The current render target's pixel g_pixel as RGBA floats (1 x 1 copies of its format); the copy is kept in `keep` when asked
+bool ReadTargetPixel(IDirect3DDevice9* dev, IDirect3DSurface9* target, float out[4], IDirect3DSurface9** keep = nullptr) {
+    D3DSURFACE_DESC d{};
+    target->GetDesc(&d);
+    IDirect3DSurface9 *one = nullptr, *sys = nullptr;
+    bool ok = false;
+    RECT src{g_pixel.x, g_pixel.y, g_pixel.x + 1, g_pixel.y + 1};
+    if (SUCCEEDED(dev->CreateRenderTarget(1, 1, d.Format, D3DMULTISAMPLE_NONE, 0, FALSE, &one, nullptr)) &&
+        SUCCEEDED(dev->CreateOffscreenPlainSurface(1, 1, d.Format, D3DPOOL_SYSTEMMEM, &sys, nullptr)) && SUCCEEDED(dev->StretchRect(target, &src, one, nullptr, D3DTEXF_NONE)) &&
+        SUCCEEDED(dev->GetRenderTargetData(one, sys))) {
+        D3DLOCKED_RECT lr{};
+        if (SUCCEEDED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY))) {
+            ok = Texel(d.Format, static_cast<const BYTE*>(lr.pBits), out);
+            sys->UnlockRect();
+        }
+    }
+    if (sys) sys->Release();
+    if (keep && ok) *keep = one;
+    else if (one) one->Release();
+    return ok;
+}
+// (a draw with a room light map or its relit copy bound: a 2D A8R8G8B8 render target) every texld result and input of its
+// pixel shader (ps_3_0 or ps_2_x: the interior walls' smooth copies) at the pixel, each drawn by a copy that outputs it (ShaderPatches::ProbeCopy) with no depth test, into
+// the pixel only, read back and the pixel put back: what the shader read there, so its colour can be recomputed. In the
+// render target's format (8 bits: clamped to 0..1, 1/255 steps)
+constexpr int kMaxProbedDraws = 48;
+int g_probedDraws = 0;
+template <typename DrawFn> std::string ProbeValues(IDirect3DDevice9* dev, IDirect3DPixelShader9* ps, IDirect3DBaseTexture9* const tex[16], DrawFn draw) {
+    if (!ps || g_probedDraws >= kMaxProbedDraws) return {};
+    bool lit = false;
+    for (int s = 0; s < 16 && !lit; s++) {
+        IDirect3DTexture9* t2 = nullptr;
+        if (!tex[s] || FAILED(tex[s]->QueryInterface(__uuidof(IDirect3DTexture9), reinterpret_cast<void**>(&t2))) || !t2) continue;
+        D3DSURFACE_DESC d{};
+        lit = SUCCEEDED(t2->GetLevelDesc(0, &d)) && d.Format == D3DFMT_A8R8G8B8 && (d.Usage & D3DUSAGE_RENDERTARGET);
+        t2->Release();
+    }
+    UINT size = 0;
+    if (!lit || FAILED(ps->GetFunction(nullptr, &size)) || size < 8 || size > 65536) return {};
+    std::vector<DWORD> code(size / 4);
+    if (FAILED(ps->GetFunction(code.data(), &size)) || (code[0] != 0xFFFF0300 && code[0] != 0xFFFF0201 && code[0] != 0xFFFF0200)) return {};
+    IDirect3DSurface9* target = nullptr;
+    if (FAILED(dev->GetRenderTarget(0, &target)) || !target) return {};
+    g_probedDraws++;
+    float was[4];
+    IDirect3DSurface9* saved = nullptr;
+    std::string line;
+    if (ReadTargetPixel(dev, target, was, &saved)) {
+        const D3DRENDERSTATETYPE st[] = {D3DRS_ZENABLE, D3DRS_ZWRITEENABLE, D3DRS_ALPHABLENDENABLE, D3DRS_ALPHATESTENABLE, D3DRS_STENCILENABLE, D3DRS_COLORWRITEENABLE,
+                                         D3DRS_SCISSORTESTENABLE, D3DRS_SRGBWRITEENABLE, D3DRS_CULLMODE};
+        const DWORD want[] = {FALSE, FALSE, FALSE, FALSE, FALSE, 0xF, TRUE, FALSE, D3DCULL_NONE};
+        DWORD old[std::size(st)];
+        for (size_t i = 0; i < std::size(st); i++) dev->GetRenderState(st[i], &old[i]), dev->SetRenderState(st[i], want[i]);
+        RECT oldRect{}, px{g_pixel.x, g_pixel.y, g_pixel.x + 1, g_pixel.y + 1};
+        dev->GetScissorRect(&oldRect);
+        dev->SetScissorRect(&px);
+        for (int k = 0; k < 24; k++) {
+            std::vector<DWORD> copy;
+            std::string what;
+            if (!ShaderPatches::ProbeCopy(code, k, copy, what)) break;
+            IDirect3DPixelShader9* probe = nullptr;
+            if (FAILED(dev->CreatePixelShader(copy.data(), &probe)) || !probe) continue;
+            dev->StretchRect(saved, nullptr, target, &px, D3DTEXF_NONE); // (the pixel as it was: a killed pixel shows it)
+            dev->SetPixelShader(probe);
+            g_inProbeCall = true;
+            draw();
+            g_inProbeCall = false;
+            float v[4] = {-1, -1, -1, -1};
+            ReadTargetPixel(dev, target, v);
+            line += std::format("{}{} ({:.4f} {:.4f} {:.4f} {:.4f})", line.empty() ? "" : "; ", what, v[0], v[1], v[2], v[3]);
+            probe->Release();
+        }
+        dev->SetPixelShader(ps);
+        dev->StretchRect(saved, nullptr, target, &px, D3DTEXF_NONE); // (the pixel put back)
+        dev->SetScissorRect(&oldRect);
+        for (size_t i = 0; i < std::size(st); i++) dev->SetRenderState(st[i], old[i]);
+        line += std::format(" | the pixel before the draw ({:.4f} {:.4f} {:.4f} {:.4f})", was[0], was[1], was[2], was[3]);
+    }
+    if (saved) saved->Release();
+    target->Release();
+    return line;
+}
+
 template <typename DrawFn> D3D9Hooks::HookAction OnDraw(IDirect3DDevice9* dev, const char* kind, D3DPRIMITIVETYPE type, UINT prims, DrawFn draw, UINT firstVertex = 0, UINT vertexCount = 0,
                                                      UINT startIndex = 0, INT baseVertex = 0, UINT minVertex = 0) {
     if (g_inProbeCall) return D3D9Hooks::HookAction::Continue;
@@ -724,6 +808,16 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(IDirect3DDevice9* dev, c
                 dev->SetRenderState(D3DRS_COLORWRITEENABLE, cw0);
                 r.query = q;
             }
+            // probed only when the draw covers the pixel (its query answered now): the 48 probed draws are the pixel's, not
+            // the first lit draws of the frame
+            DWORD covered = 0;
+            if (q) {
+                const ULONGLONG until = GetTickCount64() + 50;
+                HRESULT hr;
+                while ((hr = q->GetData(&covered, sizeof(covered), D3DGETDATA_FLUSH)) == S_FALSE && GetTickCount64() < until) {}
+                if (hr != S_OK) covered = 1; // unknown: probed as before
+            }
+            if (!q || covered) r.probes = ProbeValues(dev, r.ps, r.tex, draw);
             g_draws.push_back(std::move(r)); // reserved at capture start: never reallocates, cannot throw
         }
     }
@@ -1052,6 +1146,7 @@ void FinishCapture(IDirect3DDevice9* dev) {
             out << std::format("   s{}: T{} {} filtro min/mag/mip={}/{}/{}\n", s, it->second, TexDesc(d.tex[s]), d.filt[s][0], d.filt[s][1], d.filt[s][2]);
         }
         out << "   mod: " << d.bridge << "\n";
+        if (!d.probes.empty()) out << "   values at the pixel (in the target's format, before the draw's own blend): " << d.probes << "\n";
         if (!d.instances.empty()) out << "   " << d.instances << "\n";
         if (!d.mesh.status.empty()) {
             out << "   wall mesh: " << d.mesh.status << "\n";
@@ -1157,6 +1252,7 @@ void FinishCapture(IDirect3DDevice9* dev) {
 
 // The next frame's draws over the pixel are recorded (back buffer pixels)
 void StartCapture(IDirect3DDevice9* dev, POINT pixel, const std::string& why) {
+    g_probedDraws = 0;
     IDirect3DSurface9* bb = nullptr;
     D3DSURFACE_DESC bd{};
     if (SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb) {

@@ -13,6 +13,7 @@
 //     BlockPS) into the output.
 // Every device call goes through DeviceCalls: the game passes Apex's CallOriginal* (its own hooks never see these draws).
 #include <d3d9.h>
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <memory>
@@ -73,6 +74,18 @@ static_assert(sizeof(TexelVertex) == 80 && sizeof(TexelDyn) == 16);
 struct Block {
     int x0, y0, x1, y1;
 };
+// Places (y << 16 | x, any order, repeats) as runs along their rows (one row each: y0 == y1)
+inline std::vector<Block> RunsOf(std::vector<uint32_t> at) {
+    std::sort(at.begin(), at.end());
+    at.erase(std::unique(at.begin(), at.end()), at.end());
+    std::vector<Block> runs;
+    for (const uint32_t a : at) {
+        const int x = static_cast<int>(a & 0xFFFFu), y = static_cast<int>(a >> 16);
+        if (!runs.empty() && runs.back().y0 == y && runs.back().x1 + 1 == x) runs.back().x1 = x;
+        else runs.push_back({x, y, x, y});
+    }
+    return runs;
+}
 
 struct Params {
     float thr = 2.0f * 3.0f / 255.0f;
@@ -97,6 +110,16 @@ struct Params {
     float paneFirst = 0.0f, paneCount = 0.0f;
     int bounceN = 0;
     float bounceRows[12][4] = {}, bounceHue[4] = {};
+    // (physical, room 0: ComposePS / ComposeK0PS) the texels of the space a room of the story below continues into (bit 8 with
+    // mask.z = its slot, mask.w = world y; RtLampProxy::InsideAt) composed as that room's wall texels are (GpuLampLaw::IndoorTexel,
+    // the ambient left to the draw): rgb toned, alpha the weight x its ramp. inK the tone's k (0: none), inSoft ToneSoft, per slot
+    // its ramp's line in world y (a, b, lo, hi; GpuLampLaw::SplitFill)
+    float inK = 0.0f;
+    bool inSoft = false;
+    float inFit[4][4] = {};
+    // (ComposePS / ComposeK0PS InBase) the bit-8 texels' light without the GPU lamps as their rooms' kept solves give it now, at the
+    // map's texels (A16B16G16R16F, alpha 1 where written; RtOutdoorLamps InBaseNow), or null: the vertices' bases
+    IDirect3DTexture9* inBase = nullptr;
 };
 
 // A kept map's phys points as textures (DEFAULT A32B32G32R32F, w x h) at their places in the sum's layout: t = p, n, mask, base of
@@ -243,8 +266,13 @@ class Engine {
 
     // ---- GPU lamps for every room (room_lamps_gpu.cpp): a shadow atlas of `rows` lamp tiles kept across relights (each
     // lamp keeps its tile while it stays put), per-room lamp tables, and the toned compose ----
-    bool EnsureTiles(IDirect3DDevice9* dev, int rows, std::string& err);
+    // (rows: tiles, at most 128 and what the device's texture size takes up to 8192 x 8192: 160 at face 256; TileRows() says what was made). Tiles are packed in
+    // columns of 6 faces: down a column up to the device's height, then the next column (tile t: column t / per, row t % per)
+    // (kept: every tile still holds what was rendered into it, at the same index; false when made again)
+    bool EnsureTiles(IDirect3DDevice9* dev, int rows, std::string& err, bool* kept = nullptr);
     int TileRows() const { return tileRows_; }
+    // tile -> its column (in faces: 6 per column) and row, as AccumulateRlg hands them to the shader (misc.z, misc.x)
+    void TileAt(int tile, int& faceCol, int& row) const { faceCol = tile / tilePer_ * 6, row = tile % tilePer_; }
     // One lamp's cube shadow map (lot space) into tile `tile` of the kept atlas
     bool RenderShadowTile(IDirect3DDevice9* dev, const float pos[3], int tile, float farDist, std::string& err);
     // The same from the proxy's triangle ranges [first, first + count) only (the object shapes that hold the lamp left out)
@@ -273,6 +301,11 @@ class Engine {
     static bool ReadTexture(IDirect3DDevice9* dev, IDirect3DTexture9* t, int w, int h, std::vector<uint32_t>& out);
     // A texture copied texel for texel into a render target of its size (between Begin and End)
     bool CopyTexture(IDirect3DDevice9* dev, IDirect3DBaseTexture9* src, IDirect3DTexture9* out, int w, int h, std::string& err);
+    // (GpuRoomLamps::ComposeOver's kept rooms) src (A8R8G8B8, w x h) copied texel for texel into this engine's scratch of that size
+    // (DEFAULT, one a size, made on first use), returned; null when it could not be made (between Begin and End)
+    IDirect3DTexture9* KeepCopy(IDirect3DDevice9* dev, IDirect3DTexture9* src, int w, int h, std::string& err);
+    // rects' texels of src copied texel for texel into out (both w x h; between Begin and End)
+    bool CopyRects(IDirect3DDevice9* dev, const std::vector<Block>& rects, IDirect3DTexture9* src, IDirect3DTexture9* out, int w, int h, std::string& err);
     // An A32B32G32R32F render target read back (4 floats per texel, r g b a); waits for the GPU
     static bool ReadFloat4(IDirect3DDevice9* dev, IDirect3DTexture9* t, int w, int h, std::vector<float>& out);
 
@@ -354,6 +387,11 @@ class Engine {
     IDirect3DVertexBuffer9* tileProxy_ = nullptr; // MANAGED (SetProxy tiles)
     size_t tileProxyTris_ = 0;
     bool tileProxySet_ = false; // (SetProxy tiles ran: an empty open-top build leaves no occluder, never the outdoor proxy)
+    struct KeptTex {
+        int w = 0, h = 0;
+        IDirect3DTexture9* t = nullptr;
+    };
+    std::vector<KeptTex> keptCopies_;         // (KeepCopy) DEFAULT A8R8G8B8, one a size
     IDirect3DTexture9* atlas_ = nullptr;      // G16R16F (or G32R32F) render target
     D3DFORMAT atlasFmt_ = D3DFMT_UNKNOWN;
     IDirect3DSurface9* atlasDepth_ = nullptr; // D24X8
@@ -363,10 +401,12 @@ class Engine {
     int accCur_ = 0;
     IDirect3DVertexBuffer9* zeros_ = nullptr;
     UINT zerosCount_ = 0;
-    IDirect3DTexture9* tiles_ = nullptr;      // the kept atlas (G16R16F or G32R32F), 6 faces x rows tiles
+    IDirect3DTexture9* tiles_ = nullptr;      // the kept atlas (G16R16F or G32R32F), tileCols_ x (6 faces) by tilePer_ tiles
     IDirect3DSurface9* tilesDepth_ = nullptr;
     D3DFORMAT tilesFmt_ = D3DFMT_UNKNOWN;
-    int tileRows_ = 0;
+    int tileRows_ = 0, tilePer_ = 1, tileCols_ = 1; // tiles made; rows per column, columns
+    int tileMaxH_ = 0, tileMaxW_ = 0;               // (the device's texture height and width in tiles; 0 until EnsureTiles asks)
+    int tileFailRows_ = 0;                          // the smallest atlas the device refused (0: none): later atlases stay under it
     IDirect3DTexture9* table_ = nullptr;      // DEFAULT A32B32G32R32F kTableCols x tableRows_
     IDirect3DTexture9* tableSys_ = nullptr;   // its SYSTEMMEM copy
     int tableRows_ = 0, tableCap_ = 0;
