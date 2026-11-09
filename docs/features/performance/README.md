@@ -129,7 +129,7 @@ one row, *Lamp updates*, has two modes:
 
 | Mode | Row description | What runs |
 |---|---|---|
-| *Instant (GPU)* (default) | "Your graphics card updates outdoor lamp light instantly; moving lamps may dip FPS a little" | [Real-time outdoor lamps](../night-lighting/rt-outdoor-lamps.md) draws the active lot's outdoor lamps and their shadows on the graphics card, on the kept parts of [Quick outdoor lamp edits](../night-lighting/outdoor-lamp-delta.md); indoor lamps use the game's calculation |
+| *Instant (GPU)* (default) | "Your graphics card updates lamp light instantly; moving lamps may dip FPS a little" | [Real-time outdoor lamps](../night-lighting/rt-outdoor-lamps.md) draws the active lot's outdoor lamps and their shadows on the graphics card, on the kept parts of [Quick outdoor lamp edits](../night-lighting/outdoor-lamp-delta.md); [GPU room lamps](../night-lighting/gpu-room-lamps.md) draws its indoor lamps |
 | *Classic* | "Easier on the graphics card; light updates once you let go of a lamp" | The game's room solves with every correction; a dragged lamp's rooms are solved once after the release ([lamp drags](../night-lighting/lamp-drags.md#classic-relight-only-after-release)) and an edit's stories change together ([Faster room lighting](room-light-queue.md#classic-show-all-floors-together)) |
 
 A warning note under the row says why Instant cannot run on the device (another game version than Steam 1.67.2, a

@@ -269,7 +269,8 @@ registered:
 - **Dispatch cost (developer build).** Every dispatch with callbacks is counted and one outermost dispatch in 16 is
   timed with the time stamp counter; every 10 s the Present hook logs `[D3D9Hooks] Dispatch cost over 10 s: N
   dispatches with callbacks a frame, X us each in the callbacks (sampled 1 in 16), about Y ms a frame; draws the
-  callbacks issued themselves: Z ms a frame in the driver`. The driver time of original draws a callback issues inside a
+  callbacks issued themselves: Z ms a frame in the driver | by method: ...`, the last part per chain (dispatches a frame,
+  sampled us each, ms a frame; the largest first). The driver time of original draws a callback issues inside a
   sampled dispatch (Night Lighting's re-issued draws, the Banding Fix's dithered re-issue, any `CallOriginalDraw*`) is
   measured apart and taken out of X, so X is the callbacks' own cost. Night Lighting's draw hook logs its own cost by
   fix the same way ([Night Lighting diagnostics](features/night-lighting/README.md#diagnostics)).
@@ -660,6 +661,10 @@ The localized folder name is resolved from the game executable's string table, w
      `[patches.*]` tables, keeping only registered keys). NightTerrainRelight's object and fence strengths
      (`forcaNosObjetos`, `forcaLuzPorPixelNosObjetos`, `forcaNasCercas`) are reset to 0.57 / 1.0 / 1.0.
   3. Else (or S3SS already dropped the tables): defaults, logged.
+- **New lighting defaults** (`apex_lighting_defaults.h`, right after that migration, once: `[meta] lighting_defaults`; the log line
+  `[Config] New lighting defaults taken: ...` lists the keys): in `[patches.NightTerrainRelight]`, a brightness key still at its old
+  default takes the new one (a config before 2.18, with `brilhoNoChao` and `forcaDasLampadasDoLote` at theirs, takes the new `luzNoChao`); the three lamp colour keys move only together; any other value is a choice and stays. A new config is only
+  stamped. Checked by `tools/settings_migration_test`.
 - Tables no longer read (features removed): `[qol.hdr]` (except the Picture fallback), `[patches.SmoothStreaming]`,
   `[patches.GcScheduler]`, `[patches.FrameBudget]`. Ambient Occlusion uses `[patches.AmbientOcclusion]` again.
 - **S3SS.toml** is read-only, with one exception: the explicit Rooms at Night compatibility action

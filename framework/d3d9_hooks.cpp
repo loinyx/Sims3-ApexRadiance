@@ -63,6 +63,20 @@ enum class Timing : uint8_t {
 enum OrigSlot : int { kOrigNone = -1, kOrigDIP, kOrigDP, kOrigSRT, kOrigSPS, kOrigSVS, kOrigSTex, kOrigCRT, kOrigSVP, kOrigCPS, kOrigCVS, kOrigPSC, kOrigVSC, kOrigSlots };
 thread_local uint32_t t_origCalls[kOrigSlots] = {};
 
+// Development build: one chain's part of the dispatch cost line (LogDispatchCost): its dispatches, and its outermost ones the
+// line timed (their cycles, and of them the driver's for draws its callbacks issued). Render thread mostly: plain increments.
+struct DispatchStats {
+    const char* method = nullptr;
+    uint32_t calls = 0, sampled = 0;
+    uint64_t cycles = 0, driver = 0;
+    uint32_t calls0 = 0, sampled0 = 0; // at the last line
+    uint64_t cycles0 = 0, driver0 = 0;
+};
+std::vector<DispatchStats*>& AllDispatchStats() {
+    static std::vector<DispatchStats*> all; // (every chain's, filled by their constructors)
+    return all;
+}
+
 // A chain's list is immutable once published: registering builds a new list and publishes it through an atomic pointer.
 // Every list published is kept until a safe point (Present on the render thread outside any dispatch, or Uninstall), so
 // a dispatch that read an older one (possibly the caller of Register, or the render thread's lock-free dispatch) keeps
@@ -80,11 +94,14 @@ template <typename Fn> struct Chain {
     std::atomic<size_t> count{0};             // lock-free "nothing registered" test for the hot paths
     std::vector<std::unique_ptr<List>> lists; // every list published, the last one current (guarded by g_lock)
     std::atomic<bool> offThreadLogged{false};
+    DispatchStats stats; // (development build)
 
     Chain(const char* m, bool lf, bool mt, Timing t, const char* suffix, int slot = kOrigNone, bool reissueDraws = false)
         : method(m), lockFree(lf), reissueFilter(reissueDraws), modTimed(mt), timing(t), timingSuffix(suffix), origSlot(slot) {
         lists.push_back(std::make_unique<List>());
         list.store(lists.back().get());
+        stats.method = m;
+        AllDispatchStats().push_back(&stats);
     }
 };
 
@@ -351,16 +368,22 @@ template <typename Fn, typename... Args> bool Run(Chain<Fn>& chain, IDirect3DDev
     uint64_t c0 = 0;
     if (!kPublicBuild) {
         timed = chain.timing == Timing::Always ? FrameProfiler::PresentHookTimingActive() : (chain.timing == Timing::Option && FrameProfiler::RegistryHookTimingActive());
+        chain.stats.calls++;
         if ((++g_dispatchCount & 15) == 0 && t_dispatchDepth == 1) c0 = __rdtsc(); // (outermost only: nested ones are inside it)
     }
     const bool reissue = chain.reissueFilter && t_reissue != 0 && PerfToggles::ReissueFilter.load(std::memory_order_relaxed);
     struct Sample {
         uint64_t c0;
         bool was;
+        DispatchStats* stats;
+        uint64_t driver0; // (the driver cycles before it: those its callbacks' draws add are its chain's driver time)
         ~Sample() {
-            if (c0) g_dispatchCycles += __rdtsc() - c0, g_dispatchSampled++, t_costSampled = was;
+            if (!c0) return;
+            const uint64_t dc = __rdtsc() - c0;
+            g_dispatchCycles += dc, g_dispatchSampled++, t_costSampled = was;
+            stats->cycles += dc, stats->sampled++, stats->driver += g_dispatchDriverCycles - driver0;
         }
-    } sample{c0, t_costSampled};
+    } sample{c0, t_costSampled, &chain.stats, g_dispatchDriverCycles};
     if (c0) t_costSampled = true;
     if (chain.lockFree) {
         if (ThreadId() == g_renderTid.load(std::memory_order_relaxed)) {
@@ -385,10 +408,14 @@ void LogDispatchCost() {
     static uint32_t s_frames = 0, s_count0 = 0;
     static uint64_t s_sampled0 = 0, s_cycles0 = 0, s_tsc0 = 0, s_driver0 = 0;
     static LARGE_INTEGER s_qpc0{};
+    const auto restart = [] {
+        for (DispatchStats* st : AllDispatchStats()) st->calls0 = st->calls, st->sampled0 = st->sampled, st->cycles0 = st->cycles, st->driver0 = st->driver;
+    };
     if (!s_tsc0) {
         s_tsc0 = __rdtsc();
         QueryPerformanceCounter(&s_qpc0);
         s_count0 = g_dispatchCount, s_sampled0 = g_dispatchSampled, s_cycles0 = g_dispatchCycles, s_driver0 = g_dispatchDriverCycles;
+        restart();
         return;
     }
     s_frames++;
@@ -405,10 +432,28 @@ void LogDispatchCost() {
     const double perCallUs = sampled && cyclesPerMs > 0.0 ? static_cast<double>(own) / static_cast<double>(sampled) / cyclesPerMs * 1000.0 : 0.0;
     const double driverUs = sampled && cyclesPerMs > 0.0 ? static_cast<double>(driver) / static_cast<double>(sampled) / cyclesPerMs * 1000.0 : 0.0;
     const double perFrame = s_frames ? static_cast<double>(calls) / s_frames : 0.0;
+    // (S6) by method, the largest first: which chain the dispatches and their cost are
+    struct Part {
+        const char* method;
+        double perFrame, us;
+    };
+    std::vector<Part> parts;
+    for (const DispatchStats* st : AllDispatchStats()) {
+        const uint32_t n = st->calls - st->calls0, k = st->sampled - st->sampled0;
+        if (!n || !s_frames) continue;
+        const uint64_t c = st->cycles - st->cycles0, d = st->driver - st->driver0;
+        parts.push_back({st->method, static_cast<double>(n) / s_frames, k && cyclesPerMs > 0.0 ? static_cast<double>(c > d ? c - d : 0) / k / cyclesPerMs * 1000.0 : -1.0});
+    }
+    std::sort(parts.begin(), parts.end(), [](const Part& a, const Part& b) { return a.perFrame * std::max(a.us, 0.0) > b.perFrame * std::max(b.us, 0.0); });
+    std::string by;
+    for (const Part& q : parts)
+        by += q.us < 0.0 ? std::format("{}{} {:.0f} a frame (none timed)", by.empty() ? "" : "; ", q.method, q.perFrame)
+                         : std::format("{}{} {:.0f} a frame, {:.3f} us each, {:.3f} ms", by.empty() ? "" : "; ", q.method, q.perFrame, q.us, q.perFrame * q.us / 1000.0);
     LOG_INFO(std::format("[D3D9Hooks] Dispatch cost over {:.0f} s: {:.0f} dispatches with callbacks a frame, {:.3f} us each in the callbacks (sampled 1 in 16), "
-                         "about {:.3f} ms a frame; draws the callbacks issued themselves: {:.3f} ms a frame in the driver",
-                         sec, perFrame, perCallUs, perFrame * perCallUs / 1000.0, perFrame * driverUs / 1000.0));
+                         "about {:.3f} ms a frame; draws the callbacks issued themselves: {:.3f} ms a frame in the driver | by method: {}",
+                         sec, perFrame, perCallUs, perFrame * perCallUs / 1000.0, perFrame * driverUs / 1000.0, by.empty() ? "none" : by));
     s_frames = 0, s_tsc0 = tsc, s_qpc0 = now, s_count0 = g_dispatchCount, s_sampled0 = g_dispatchSampled, s_cycles0 = g_dispatchCycles, s_driver0 = g_dispatchDriverCycles;
+    restart();
 }
 
 Chain<DrawIndexedPrimitiveHook> g_dip("DrawIndexedPrimitive", true, true, Timing::Option, nullptr, kOrigDIP, true);

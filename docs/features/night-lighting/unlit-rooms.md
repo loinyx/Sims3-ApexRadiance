@@ -179,6 +179,12 @@ N, moved at once N)*.
 - Disabling the option keeps a base record until its restoring solve can be requested; recovery runs while disabled if
   work remains.
 - Status: *changes applied N, rooms given the new colour at once N, rooms topped up from their lamps solved again N*.
+- Physical indoor lamps (developer, [gpu-room-lamps.md](gpu-room-lamps.md) 25): after a lamp edit taken without a solve,
+  the lit rooms of the edit run the game's ambient step again on the light tree thread (`RetakeAmbient`: in probe mode, the
+  base added by `BaseHook`, the fields put back and the new `+0x110` / `+0x120` written with the room's base record), so
+  switching the last lamp off or on changes the background at once; the GPU's kept ceilings scale their ambient by the
+  room's `+0x110` now, so the sliders reach them without a solve too. Rooms whose ambient another step changed after the
+  solve (an atrium, a stairwell's share) wait for the settle's solve.
 
 ### Furniture
 
@@ -197,7 +203,7 @@ N, moved at once N)*.
   differs from 1, the draw uses a copy from `ShaderPatches::PatchCubeTint`: after the cube read weighted by `c.w`,
   `dp3 Tmp.x, cube, cL` (cL = Rec. 709 weights), `lrp cube.xyz, cT.x, cube, Tmp.x`, `mul cube.xyz, cube, cT.yzww`, with
   cT and cL above the shader's own constants. Every constant is restored after the draw.
-- **Apex's indoor-object shader** (`PatchIndoorBasis`, path A): the rig diffuse chain's c4..c7 point at four new constants
+- **Apex's indoor-object shader** (`PatchIndoorBasis`, path A; the chain is four adjacent steps, or for glossy furniture steps followed by their data, with a `dp3_sat` before each or the specular chain between them): the rig diffuse chain's c4..c7 point at four new constants
   (`diffuseConst` = cS+7..cS+10), filled by `DrawIndoorObject` with the rig's unlit-room lights (lamp slots 0), and the
   chain ends with `mad D, Acc, cStr.x, D`. Furniture there is lit by the turned unlit-room lights plus the basis light
   (lamps per pixel); the specular chain keeps c4..c7 and the vertex lights stay zeroed (overflow lamps are in the basis

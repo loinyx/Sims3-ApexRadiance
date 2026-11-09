@@ -200,6 +200,7 @@ Follow the [build workflow](docs/workflow.md#1-build) for dependency paths, publ
 - Lot Streaming and the daytime bloom fixes: research and code by [idavidveiga](https://github.com/idavidveiga).
 - Edge Smoothing's FXAA mode follows FXAA 3.11 by Timothy Lottes (NVIDIA).
 - Thanks to @boringbones for testing every build.
+- The optional RTX Remix bridge download is [NVIDIA's RTX Remix bridge](https://github.com/NVIDIAGameWorks/dxvk-remix) (MIT), ported to The Sims 3 by dalexlol and alexvixell35-stack in sims3-modernization, with [DXVK](https://github.com/doitsujin/dxvk) by Philip Rebohle (zlib).
 - Third-party code: [Dear ImGui](https://github.com/ocornut/imgui) (MIT), [Microsoft Detours](https://github.com/microsoft/Detours) (MIT), [toml++](https://github.com/marzer/tomlplusplus) (MIT), [SMAA](https://github.com/iryoku/smaa) by Jorge Jimenez et al. (see `third_party/smaa/LICENSE.txt`), the texture sharpening after [AMD FidelityFX CAS](https://github.com/GPUOpen-Effects/FidelityFX-CAS) (MIT), [Lucide](https://lucide.dev) icons (ISC, see `third_party/lucide/LICENSE`).
 
 ### Contributors

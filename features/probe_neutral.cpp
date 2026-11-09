@@ -3,6 +3,8 @@
 #include "entry_chain.h"
 #include "game_addresses.h"
 #include "apex_log.h"
+#include "recorder.h"
+#include "level_light_share.h"
 #include <windows.h>
 #include <d3d9.h>
 #include <atomic>
@@ -10,6 +12,8 @@
 #include <format>
 #include <algorithm>
 #include <mutex>
+#include <unordered_map>
+#include <vector>
 
 namespace ProbeNeutral {
 namespace {
@@ -130,6 +134,55 @@ const char* ResultText(int r) {
     }
 }
 
+// (developer mode) Cubes up to this size keep their pixels for the capture
+constexpr uint32_t kStripSide = 128;
+
+// The mean colour of each face of the cube the writer just filled, level 0, as the scene reads it from now on, and with strip
+// (room for kStripSide) the faces side by side, B G R rows (POD only, SEH)
+bool FaceMeans(uint8_t* probe, uintptr_t single, uintptr_t buffered, float mean[6][3], uint32_t* size, uint8_t* strip) {
+    __try {
+        const uintptr_t field = *reinterpret_cast<const uint8_t*>(probe + kDoubleBuffered) ? buffered : single;
+        const uint8_t* tex = *reinterpret_cast<uint8_t* const*>(probe + field);
+        if (!tex || *reinterpret_cast<const uint32_t*>(tex + kTexKind) != 1) return false;
+        IDirect3DCubeTexture9* cube = *reinterpret_cast<IDirect3DCubeTexture9* const*>(tex + kTexD3D);
+        D3DSURFACE_DESC d;
+        if (!cube || cube->GetType() != D3DRTYPE_CUBETEXTURE || FAILED(cube->GetLevelDesc(0, &d)) || (d.Format != D3DFMT_A8R8G8B8 && d.Format != D3DFMT_X8R8G8B8)) return false;
+        *size = d.Width;
+        for (int f = 0; f < 6; f++) {
+            D3DLOCKED_RECT lr;
+            const D3DCUBEMAP_FACES face = static_cast<D3DCUBEMAP_FACES>(f);
+            if (FAILED(cube->LockRect(face, 0, &lr, nullptr, D3DLOCK_READONLY))) return false;
+            uint64_t sr = 0, sg = 0, sb = 0;
+            for (uint32_t y = 0; y < d.Height; y++) {
+                const uint32_t* p = reinterpret_cast<const uint32_t*>(static_cast<const uint8_t*>(lr.pBits) + static_cast<intptr_t>(y) * lr.Pitch);
+                for (uint32_t x = 0; x < d.Width; x++) sr += (p[x] >> 16) & 0xFF, sg += (p[x] >> 8) & 0xFF, sb += p[x] & 0xFF;
+                if (strip && d.Width <= kStripSide)
+                    for (uint32_t x = 0; x < d.Width; x++) {
+                        uint8_t* o = strip + (static_cast<size_t>(y) * d.Width * 6 + static_cast<size_t>(f) * d.Width + x) * 3;
+                        o[0] = p[x] & 0xFF, o[1] = (p[x] >> 8) & 0xFF, o[2] = (p[x] >> 16) & 0xFF;
+                    }
+            }
+            cube->UnlockRect(face, 0);
+            const float n = static_cast<float>(d.Width) * static_cast<float>(d.Height);
+            mean[f][0] = static_cast<float>(sr) / n, mean[f][1] = static_cast<float>(sg) / n, mean[f][2] = static_cast<float>(sb) / n;
+        }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// During a recording, by day too: the [cube] line of this probe
+void NoteCube(uint8_t* probe, uintptr_t single, uintptr_t buffered, const char* what) {
+    if (!Recorder::Active()) return;
+    float mean[6][3];
+    uint32_t size = 0;
+    std::vector<unsigned char> strip(kPublicBuild ? 0 : static_cast<size_t>(kStripSide) * kStripSide * 18);
+    if (!FaceMeans(probe, single, buffered, mean, &size, strip.empty() ? nullptr : strip.data())) return;
+    strip.resize(size <= kStripSide ? static_cast<size_t>(size) * size * 18 : 0);
+    Recorder::NoteCube(reinterpret_cast<uintptr_t>(probe), what, mean, size, std::move(strip));
+}
+
 void AfterWrite(uint8_t* probe, uintptr_t single, uintptr_t buffered, const char* what) {
     const int a = Amount256();
     if (a <= 0) {
@@ -165,12 +218,61 @@ void __fastcall DiffuseWriteHook(uint8_t* probe, void* edx) {
     reinterpret_cast<FnDiffuse>(EntryChain::Next(Site::ProbeDiffuseWrite, Layer::ProbeNeutral))(probe, edx);
     c_diff.fetch_add(1, std::memory_order_relaxed);
     AfterWrite(probe, kDiffuse, kDiffNew, "diffuse");
+    NoteCube(probe, kDiffuse, kDiffNew, "diffuse");
 }
+// Who took a capture. The game re-queues a probe when |clock - last| reaches its period (0x006B3100: +0x2B44 the clock, +0x2C6C
+// last, +0x2C70 the period), and 0x006B1CA0 moves last so that happens in 2 s, for a solve (0x69F5F0) and a probe the pool gives
+// to a room (0x006B04D5). Apex's ReflectionDue writes last too (NoteArmed). None of that leaves a mark on the probe, so this tells
+// them apart by what it sees: armed by Apex, in another room than at its last capture, a full period since it, or sooner.
+std::mutex g_armedMx;
+std::unordered_map<const void*, DWORD> g_armed; // under g_armedMx: the tick Apex made it due
+struct LastCapture {
+    float clock = 0.0f;
+    int story = -1, id = -1;
+};
+std::unordered_map<const uint8_t*, LastCapture> g_captures; // (the thread that writes the cubes)
+constexpr DWORD kArmedMs = 5000;
+void ReadClock(const uint8_t* probe, float* clock, float* every) {
+    __try {
+        *clock = *reinterpret_cast<const float*>(probe + 0x2B44), *every = *reinterpret_cast<const float*>(probe + 0x2C70);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+std::string CapturePath(const uint8_t* probe) {
+    const DWORD now = GetTickCount();
+    long armedAgo = -1;
+    {
+        std::lock_guard<std::mutex> lk(g_armedMx);
+        if (const auto it = g_armed.find(probe); it != g_armed.end()) {
+            if (now - it->second < kArmedMs) armedAgo = static_cast<long>(now - it->second);
+            g_armed.erase(it);
+        }
+    }
+    float clock = 0.0f, every = 0.0f;
+    ReadClock(probe, &clock, &every);
+    LastCapture cur{clock};
+    const bool known = LevelLightShare::RoomOfProbe(reinterpret_cast<uintptr_t>(probe), &cur.story, &cur.id);
+    const auto [last, first] = g_captures.try_emplace(probe, cur);
+    const LastCapture was = last->second;
+    last->second = cur;
+    const std::string room = known ? std::format("story {} room {}", cur.story, cur.id) : "a room not known";
+    const std::string gap = first ? "its first" : std::format("{:.1f} s since its last, period {:.0f} s", clock - was.clock, every);
+    if (armedAgo >= 0) return std::format("{}: Apex's lamp edit, made due {} ms ago ({})", room, armedAgo, gap);
+    if (first) return std::format("{}: the game ({})", room, gap);
+    if (was.id != cur.id || was.story != cur.story) return std::format("{}: the game's probe pool, from story {} room {} ({})", room, was.story, was.id, gap);
+    return std::format("{}: the game's {} ({})", room, clock - was.clock >= every - 1.0f ? "period" : "solve", gap);
+}
+
 // 0x006B4B10 thiscall(probe, rt), ret 4, al (one caller, 0x006B5667): false = nothing was written
 char __fastcall SpecularWriteHook(uint8_t* probe, void* edx, void* rt) {
     const char ok = reinterpret_cast<FnSpecular>(EntryChain::Next(Site::ProbeSpecularWrite, Layer::ProbeNeutral))(probe, edx, rt);
     c_spec.fetch_add(1, std::memory_order_relaxed);
-    if (ok) AfterWrite(probe, kSpecular, kSpecNew, "specular");
+    if (ok) AfterWrite(probe, kSpecular, kSpecNew, "specular"), NoteCube(probe, kSpecular, kSpecNew, "specular");
+    if (ok && Recorder::Verbose()) { // (a recording holds the log's lines too)
+        const std::string line = std::format("[ProbeNeutral] Reflection cube of probe {:#x} taken for {}", reinterpret_cast<uintptr_t>(probe), CapturePath(probe));
+        if (Recorder::Active()) Recorder::Note(line);
+        else LOG_INFO(line);
+    }
     return ok;
 }
 } // namespace
@@ -215,6 +317,13 @@ void Set(bool on, float strength) {
     g_strength.store(strength < 0.0f ? 0.0f : (strength > 1.0f ? 1.0f : strength), std::memory_order_relaxed);
 }
 void SetNightLevel(float level) { g_night.store(level, std::memory_order_relaxed); }
+long Writes() { return c_diff.load(std::memory_order_relaxed) + c_spec.load(std::memory_order_relaxed); }
+void NoteArmed(const void* probe) {
+    if (!Recorder::Verbose()) return;
+    std::lock_guard<std::mutex> lk(g_armedMx);
+    if (g_armed.size() > 64) g_armed.clear(); // (entries wait for a capture that may never come)
+    g_armed[probe] = GetTickCount();
+}
 
 std::string Status() {
     return std::format("probe writes diffuse {} / specular {}, made neutral {}, by day {}, failed {}, weight now {}%", c_diff.load(), c_spec.load(), c_done.load(), c_day.load(),

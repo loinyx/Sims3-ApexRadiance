@@ -1,6 +1,6 @@
 # Recorder (lighting recording)
 
-The recorder captures up to 20 seconds of lighting activity while the player reproduces a problem. Every line carries
+The recorder captures up to 60 seconds of lighting activity while the player reproduces a problem. Every line carries
 its clock time and the lines are sorted together: the log, the room light solves, status changes of the lighting
 modules, every indoor object (furniture) whose drawing changes, every indoor room whose light changes, and Light Probe
 captures. Players start it as **Record a few seconds** on the Report a problem page or with its shortcut; each
@@ -10,7 +10,7 @@ recording goes to its own capture folder, with a `Wall seams.csv` of the wall li
 
 | | |
 |---|---|
-| Availability | Released in 2.5.0 as a player capture (Report a problem). `Wall seams.csv`: Released in 2.6.0. Light update trace (screen pixels, room solve ends, lamp edits, per-edit summary): Released in 2.7.0 |
+| Availability | Released in 2.5.0 as a player capture (Report a problem). `Wall seams.csv`: Released in 2.6.0. Light update trace (screen pixels, room solve ends, lamp edits, per-edit summary): Released in 2.7.0. Released in 3.0.0: up to 60 seconds, the 8 s settle before saving, `[camera]`, `[effect]`, `[ran]`, `[cube]` and `[settle]` lines, frame times in the CSV, a crash file copied only when recent. |
 | Default | Idle; no switch |
 | Menu | System > Report a problem > Save a capture > Record a few seconds (Start / Stop) |
 | Configuration | No feature table. Shortcut `[ui] recorder_key` in `ApexRadiance.toml` (see [ui.md](../../ui.md#shortcuts)) |
@@ -51,8 +51,8 @@ While recording, the top notice reads "Recording N s · press <key> to stop" wit
 
 ## Limitations
 
-- At most 20 seconds per recording.
-- `[furniture]` and `[probe]` lines share a cap of 40,000; `[room]` lines have their own cap of 20,000. The file says
+- At most 60 seconds per recording.
+- `[furniture]` and `[probe]` lines share a cap of 40,000; `[room]` lines have their own cap of 60,000. The file says
   which one stopped.
 - `Wall seams.csv` keeps the latest 8,192 wall samples (a ring buffer); older samples of a long recording are dropped.
 - Status lines are checked every 100 ms; a change that reverts within that interval is not seen.
@@ -62,13 +62,15 @@ While recording, the top notice reads "Recording N s · press <key> to stop" wit
 ### Lifecycle
 
 `Recorder::OnPresent` runs every frame. Order of handling: a cancel request wins over everything (shortcut, Stop and the
-20-second deadline), then a stop request, then the toggle (shortcut or menu, consumed once), then the 100 ms status
-check and the deadline (`kMaxMs = 20000`, `kStatusEveryMs = 100`).
+60-second deadline), then a stop request, then the toggle (shortcut or menu, consumed once), then the 100 ms status
+check and the deadline (`kMaxMs = 60000`, `kStatusEveryMs = 100`).
 
 - **Start**: `LevelLightShare::BeginSeamRecording()`; records the log file size (to read only new lines later) and a
   copy of `ApexRadiance.toml`; `LotLightBridge::FurnitureTraceReset()` so every object is written again at its first
   draw; writes every indoor room once (`LevelLightShare::TraceRooms(true)`); first status check. Log
-  `[Recorder] Recording started (its shortcut again to stop; stops by itself after 20 s)`.
+  `[Recorder] Recording started (its shortcut again to stop; stops by itself after 60 s)`.
+- **Settle**: the first stop request, by key or Stop, waits `kSettleMs` (8 s) so the screenshot and the last lines show the settled
+  light, with the note "Saving the capture and screenshot..." in place of the red dot; a further press saves at once.
 - **Stop**: `LevelLightShare::EndSeamRecording(true)`, last status check, log `[Recorder] Recording stopped`; reads the
   log lines written since the start (lines with an `hh:mm:ss.mmm` clock), adds `LevelLightShare::JournalSince(start)`,
   stable-sorts all lines by clock, creates `Captures\<date time> Recording\`, writes `Recording.txt` and
@@ -183,7 +185,7 @@ discards samples from a previous recording.
 
 | File | Symbol | Role |
 |---|---|---|
-| `features/recorder.h/.cpp` | `Recorder::Active`, `Verbose`, `Note`, `NoteLampEdit`, `SecondsRecorded`, `RequestToggle`, `RequestStop`, `RequestCancel`, `JustSaved`, `OnPresent` | API |
+| `features/recorder.h/.cpp` | `Recorder::Active`, `Verbose`, `Note`, `NoteLampEdit`, `SecondsRecorded`, `RequestToggle`, `RequestStop`, `RequestCancel`, `OnPresent` | API |
 | | `Start`, `Stop`, `Status`, `FurnitureLine`, `CameraLine` (keeps `g_views`), `Clock` | Lifecycle and lines |
 | | `LightUpdates`, `TellPoint`, `PixelCsv`, `StoryShown` | Light updates summary, `Screen pixels.csv` |
 | `features/screen_watch.h/.cpp` | `ScreenWatch::OnPresent`, `Samples`, `PointX`, `PointY`, `Width`, `Height`, `ColumnAtCentre` | Screen pixels |

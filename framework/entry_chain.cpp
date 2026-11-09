@@ -73,6 +73,9 @@ const SiteInfo kSiteInfo[kSites] = {
     // (the two setters' first instructions: function entries reached through the SpeedTree vtable)
     {"tree level setter", GameAddr::Id::TreeSetLevel, {0x8B, 0x44, 0x24, 0x04, 0x56, 0x50}, 6},
     {"tree custom rig setter", GameAddr::Id::TreeSetCustomRig, {0x8B, 0x44, 0x24, 0x04, 0x56, 0x8B, 0xF1}, 7},
+    // no branch lands on 0x006B1431..0x006B1435 or 0x006B09C1..0x006B09C6 (scan of full.asm; one caller each, the manager's message handler)
+    {"light object attach", GameAddr::Id::LightObjectAttach, {0x55, 0x8B, 0xEC, 0x83, 0xE4, 0xF0}, 6},
+    {"light object move", GameAddr::Id::LightObjectMove, {0x83, 0xEC, 0x10, 0x8B, 0x44, 0x24, 0x14}, 7},
 };
 static_assert(sizeof(kSiteInfo) / sizeof(kSiteInfo[0]) == static_cast<size_t>(Site::Count), "kSiteInfo must list every Site in order");
 

@@ -2,6 +2,7 @@
 // Bytecode edits of the game's shaders for the "Night Remake" patch (see shader_patches.cpp). Pure functions on
 // the D3D9 token stream, so they can be tested outside the game with captured shaders.
 #include <windows.h>
+#include <string>
 #include <vector>
 
 namespace ShaderPatches {
@@ -94,6 +95,10 @@ struct FloorPatch {
     // to spare); the draw then binds nothing more
     int outScaleSampler = -1;
     int outScaleConst = -1;
+    // (with the outdoor scale) its .y = 1 at night (outScaleConst.y): an indoor texel, as PatchWallScale's indoor light, the
+    // ambient and the reflection's scale at indoorConst
+    bool indoor = false, spec = false, strip = false, haze = false;
+    int indoorConst = -1;
     // PatchFloor: the map and its lamp scale found but no sampler left for the atlas (16 in use): the copy is the game's bytes
     // and the draw only sets the lamp scale (scaleConst), so the floor still takes the ground's gain
     bool gainOnly = false;
@@ -125,11 +130,27 @@ bool PatchSnowFloor(std::vector<DWORD>& t, int texcoord, FloorPatch& out, const 
 bool PatchBakedAtlasPs(std::vector<DWORD>& t, int texcoord, FloorPatch& out, bool groundShade = true, bool exitLight = false);
 // The outdoor scale on the outside walls (ExteriorWall: "texld rA, vK, sM" whose next rgb reader is "mad rB.xyz, rA, cK.x,
 // rC", before any flow control, ps_3_0): right after the texld, texld rT, vK, sQ; mul rT.x, rT.x, cQ.x; exp rT.x, rT.x;
-// mul rA.xyz, rA, rT.x (cQ.x = 0: the wall as before). sampler = Q, constReg = cQ, mapSampler = M.
+// mul rA.xyz, rA, rT.x (cQ.x = 0: the wall as before); after the mad, cmp rB.xyz, -rT.y, rB, rA (indoor). sampler = Q,
+// constReg = cQ, mapSampler = M.
+// indoor: at night (constReg.y the night level) the scale's .y turns the mad's result into the InteriorWall's light, map + map
+// alpha x ambConst.xyz (a wall of a space a room of the story below continues into: no moon, no ambient cube), and (spec) the
+// sky cube's reflection x ambConst.w; false when the mad writes its own map register or no registers are free (the copy is then
+// the outdoor scale alone)
 struct WallScalePatch {
-    DWORD sampler = 0, constReg = 0, mapSampler = 0;
+    DWORD sampler = 0, constReg = 0, mapSampler = 0, ambConst = 0;
+    bool indoor = false;
+    bool spec = false;
+    bool strip = false; // (indoor) the wall shade strip taken off the albedo too (InteriorWall has none)
+    bool haze = false;  // (indoor) the outside's atmosphere at the end left out too (weight 1)
+    // (indoor) marked texels take their room's own map (IndoorPick rooms): the UV map at roomSampler, the rooms' maps at
+    // roomSampler + 1 .. + 4, their ambients at roomConst .. + 3, constReg.z = 1 when the bound scale holds no fall-off ratio (its .z). -1: none
+    int roomSampler = -1, roomConst = -1;
 };
 bool PatchWallScale(std::vector<DWORD>& t, WallScalePatch& out);
+// (Light capture) a copy of a ps_3_0 / ps_2_x pixel shader whose colour output is one value at the pixel: its k-th texld's result
+// (saved right after it), then its inputs (v#, t#) in declaration order; its own colour writes go to a spare temp. what names it.
+// False past the last one, for another version, or with no temps to spare
+bool ProbeCopy(const std::vector<DWORD>& t, int k, std::vector<DWORD>& out, std::string& what);
 
 // Winter foliage with a shadow map: "lrp rD.w, t5.x, cK.y, rS.w" is the moon shadow that also darkens lamp light.
 // After it: rD.w = lerp(rD.w, 1, cN.x), cN.x = night level.
@@ -247,6 +268,7 @@ struct IndoorBasisPatch {
                               // the cube is then multiplied by (1, 1, 1 = unchanged; MUST be set), -1 = no cube
     int uvUsage = -1, uvIndex = -1; // the semantic of the room light map uv input (-1: not a declared input)
     int diffuseConst = -1;    // set per draw: the 4 rig colours the diffuse chain reads instead of c4..c7 (lamps at 0)
+    int maskSampler = -1;     // wallMask: bind the story's wall mask here (as BasisSmoothPatch's), -1 = none
 };
 // The two VS constants whose dp4 with the position writes .x and .y of the output with that semantic (the room light map
 // uv: uv.x = dot(pos, cX), uv.y = dot(pos, cY)); false when the uv is not made that way
@@ -291,7 +313,9 @@ bool PatchBasisSmooth(std::vector<DWORD>& t, BasisSmoothPatch& out, const BasisS
 // Whether the vertex shader passes the world height in its TEXCOORD2.w ("mov oN.w, rX.y" after "mov oM.zw, rX.xyxz", oN the
 // TEXCOORD2 output): the stair VSs (22EA00C8, 23C16560)
 bool VsPassesWorldY(const std::vector<DWORD>& vs);
-bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& out, bool capToFloorMap = true);
+// wallMask: the smooth read never crosses a wall of the pixel's own texel (each tap of the B-spline clamped to that texel's
+// centre on a walled side, as if the texels beyond were its own), so an object against or in a wall takes its own side's light.
+bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& out, bool capToFloorMap = true, bool wallMask = false);
 // Smooth light maps (2.12.4): the room light map read of the room-lit pixel shaders. The pattern (docs/features/night-
 // lighting/room-map-smoothing.md; offline over every precomp pixel shader it matches InteriorFloor, InteriorWall and their
 // siblings that read the same room map, nothing else): a plain "texld rL, <TEXCOORD1>, sM" (t1 in ps_2_0, the v# declared
@@ -308,16 +332,20 @@ struct RoomMapPatch {
     int temps = 0; // temps the copy uses (r0 .. r(temps - 1))
     int slots = 0; // its instructions (no dcl, no def)
     bool ps2x = false;
-    int archConst = -1; // archAmb: kArchCells x 2 rows set per draw: (a.x, a.z, e.x, e.z), (D.rgb, 1 / |e|^2); -1 = none
+    int archConst = -1; // archAmb: kArchRows rows set per draw: kArchCells x 2 (a.x, a.z, e.x, e.z), (D.rgb, 1 / |e|^2), one (TEXCOORD4 to lot metres: scale .xy, offset .zw), then each cell's 1 / reach, four a row, then each cell's 1 when it takes the neighbour's cube, four a row; -1 = none
     int ambConst = -1;  // archAmb: the constant holding the room's ambient colour (cA)
+    int cubeSampler = -1;   // archAmb: the sampler of the shader's reflection cube, -1 = no neighbour's cube in this copy
+    int nbCubeSampler = -1; // archAmb: bind the neighbour's reflection cube here with cubeSampler's states; the room's own where it has none
     int maskSampler = -1; // wallMask: bind the story's wall mask here (point filter, clamp), -1 = none
     int maskConst = -1;   // wallMask: set per draw: (1 / texels per tile, the first texel column of the split tiles, on, 1 / 64)
 };
 bool IsRoomMapPs(const std::vector<DWORD>& t);
 // archAmb (development builds, arch_ambient): after the read, the share of the neighbours' ambient near the room's arches
-// (lot position from the floor map uv, 4 texels a metre; arch_ambient.h's law), from archConst; all D = 0: no change
+// (lot position from the floor VS's TEXCOORD4; arch_ambient.h's law), from archConst; all D = 0: no change. A shader with one
+// cube read ahead of the map read also takes the neighbour's cube there under the same weight (ArchAmbient::CubeAt), for the
+// reflection the floor adds after the map, which the ambient's share never reaches
 constexpr unsigned kArchCells = 6; // (6 since dev.31: the edges of a floor opening go with the arches, opening_bounce)
-constexpr float kArchReach = 1.5f; // = ArchAmbient::kReach
+constexpr unsigned kArchRows = 2 * kArchCells + 5;
 // wallMask (floor maps, basis_wall_filter): the read of the room's own texels also leaves out the texels of a tile beyond a
 // wall of the pixel's own tile (the story's wall mask, the directional maps' layout: r -x, g +x, b -z, a +z walled), so two
 // roofed rooms either side of a wall never mix while an arch or a doorway keeps its smooth read. maskConst.z = 0 turns it off.
@@ -411,8 +439,9 @@ DitherResult AddDither(std::vector<DWORD>& t, int* amountConst = nullptr);
 // temps: the grain does not fit in some ps_2_0). Refused: no free texture coordinate, temp or constant (32), subroutines.
 // The end writes oC0 once, fully.
 DitherResult AddDither2(std::vector<DWORD>& t, int* amountConst = nullptr, int* texcoordOut = nullptr);
-// vs_1_1 / vs_2_x: every write to oPos goes to a free temp, then oPos and oTk = that position. False when oTk is
-// already written, no free temp, subroutines, or another version (vs_3_0 pairs with ps_3_0 only).
+// vs_1_1 / vs_2_x: every write to oPos goes to a free temp, then oPos and oTk = that position, last (a game write to oTk
+// is dead with the pixel copy, which took k unused). False with no free temp, subroutines, or another version (vs_3_0
+// pairs with ps_3_0 only).
 bool AddScreenPosVs(std::vector<DWORD>& t, int texcoord);
 
 // AO receiver mask: paired shader copies preserve geometry/alpha rejection, writing clip z/w to colour.

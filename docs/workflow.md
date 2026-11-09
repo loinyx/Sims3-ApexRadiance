@@ -56,7 +56,7 @@ A development build (`/p:ApexStudyDefines=APEX_DEVELOPMENT_BUILD_FLAVOR`, which 
 start-up (`DevSwitches::Load`) and logs every value. A missing key reads as on (except `restart_settle`, which reads as off); Save keeps the table because it
 preserves tables it does not write. Each switch can be turned off to compare against the previous behaviour.
 
-In every other build the accessors return `kShipped` (true) for the 30 switches that change the game or free memory, and false for the
+In every other build the accessors return `kShipped` (true) for the 31 switches that change the game or free memory, and false for the
 4 diagnostics, the unfinished `foliage_sun_shadow` and `restart_settle` (not yet measured in game). A switch therefore never needs a menu option to ship; a shipped behaviour
 follows the setting named on its page.
 
@@ -98,6 +98,15 @@ follows the setting named on its page.
 | `soft_slab_edges` | Shipped | Penumbra of a 0.25 m lamp disc at a floor opening's edge | [stairwells.md](features/night-lighting/stairwells.md) |
 | `room_fill` | Shipped | Rooms lit only from another story take back their own reflected light | [stairwells.md](features/night-lighting/stairwells.md) |
 | `lot_build_share` | Shipped | The load stages of every streaming lot share one build budget per frame | [lot-streaming.md](features/performance/lot-streaming.md#shared-lot-build-time) |
+| `open_rooms_above` | Shipped | Room 0 of a story takes the lamps of the story below's double-height rooms (the upper half of their walls) | [level-light-share.md](features/night-lighting/level-light-share.md#double-height-rooms) |
+| `cross_room_shadows` | Shipped | A lamp of another room is also tested against the furniture of rooms joined by an arch; a room's own lamps are unchanged | [arches.md](features/night-lighting/arches.md) |
+| `tone_soft` | Shipped | Physical rooms take the tone curve without its step at mean 0.01 | [arches.md](features/night-lighting/arches.md) |
+| `glass_share` | Shipped | Light through glass loses the window's pass per pane, after the soft cut | [arches.md](features/night-lighting/arches.md) |
+| `room_bounce` | Shipped | A lit room's light through its arches, as a form factor of each opening | [arches.md](features/night-lighting/arches.md) |
+| `chair_arm_caps` | Shipped | The GPU's copy of a box-type chair or sofa's blockers takes short arms and a level cap: no thin streak past the seat's shadow | [gpu-room-lamps.md](features/night-lighting/gpu-room-lamps.md) |
+| `sphere_cut_fade` | Shipped | The game's record sphere ends a furniture band with a 0.12 m fade, not a step: no crisp round arc at a shadow's end | [gpu-room-lamps.md](features/night-lighting/gpu-room-lamps.md) |
+| `live_object_tables` | Shipped | A dragged object's shadow follows it in every frame instead of waiting for the room's solve | [gpu-room-lamps.md](features/night-lighting/gpu-room-lamps.md) |
+| `sun_lamp_level` | Shipped | Outdoor lamp light fades with the sun's height at dawn and dusk; off, it follows the sky's level, which snaps in half a second at dawn | [rt-outdoor-lamps.md](features/night-lighting/rt-outdoor-lamps.md) |
 
 
 ---
@@ -202,6 +211,8 @@ failure; CI runs `Smoke` and `Lighting`.
 | `tools/liveness_prune_test/` | Pruning of per-story caches by live story managers (`features/liveness_prune.h`, `run.ps1`) |
 | `tools/loading_gate_test/` | Loaded-world reader and the extracted start-notice and Depth Blur loading guards (`run.ps1`) |
 | `tools/lot_streaming_test/` | Lot Streaming: the shared lot build time decision and a replay of recorded lot loads, the detailed-lot hysteresis model, the Steam bytes (`run.ps1 [-CsvDir <folder>] [-Exe <TS3W.exe>]`) |
+| `tools/settings_migration_test/` | The one-time move to the new lighting defaults: old defaults move, choices stay, new values are the registered ones (`run.ps1`) |
+| `tools/shader_refusals_test/` | Shaders that used to be refused, on hand-built bytecode: a vertex shader writing its own TEXCOORDk, the indoor diffuse chain in its two glossy shapes (`run.ps1`) |
 | `tools/room_solve_causes_test/` | Room solve causes counters (camera state, callers, classes and rooms, full tables) and the restart settle rule (bursts, quiet, 1 s cap, table overflow) (`run.ps1`) |
 | `tools/memory_owners_test/` | Apex memory by owner: `operator new` counts, container estimates, Direct3D resources on a real device (`run.ps1`, native D3D9 and DXVK) |
 | `tools/mesh_occlusion_test/` | The mesh blockers' collector, BVH and replacement policy (`run.ps1 -OpaqueShader <ps.bin> -CutoutShader <ps.bin> -Standard` or `-Development`) |
@@ -217,6 +228,7 @@ failure; CI runs `Smoke` and `Lighting`.
 | `tools/stairwell_bounce_test/` | Second bounce through a stairwell opening, room fill, borrowed-light normalisation, slab edge penumbra (`features/stairwell_bounce.h`, `features/penumbra.h`, `run.ps1`) |
 | `tools/temporal_check/` | Temporal jitter refusal and reprojection for Edge Smoothing |
 | `tools/terrain_lighting_test/` | Terrain lighting policies, shader patches, sampler guard, queue, resources, lamp state, dispatch, world pool, indoor stories, lot UV, ground scale (`run.ps1` and `run_*.ps1`) |
+| `tools/wall_indoor_check/` | Outside walls' and outdoor floors' indoor texels (`PatchWallScale`, `PatchBakedAtlasPs`): every ps_3_0 ExteriorWall shader, the outdoor floor copies and captured ps_3_0 shaders on a native device, unmarked pixels bit for bit as before, marked ones the map alone (`run.ps1 -Precomp <Shaders_Win32.precomp> [-Captures <folder>]`) |
 | `tools/water_lamp_check/` | Water lamp shader equivalence and highlights |
 | `tools/world_lamp_test/` | World lamp eligibility policy |
 

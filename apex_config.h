@@ -1,6 +1,6 @@
 #pragma once
 // ApexRadiance.toml: Apex Radiance's own configuration, in Documents\...\Apex Radiance\ (never S3SS.toml).
-//   [meta]               version, the build that wrote it, the one-time migration from S3SS.toml
+//   [meta]               version, the build that wrote it, the one-time migration from S3SS.toml, lighting_defaults (apex_lighting_defaults.h)
 //   [ui]                 toggle_key, font_scale, shortcuts and screenshot capture settings, legacy welcome_done/key_chosen, start_profile_done, sidebar_collapsed, changelog_seen, profile_shortcuts
 //   [qol.picture]        Picture filters (same keys as the combined build)
 //   [qol.frame_profiler] Frame Profiler (development build)
@@ -87,6 +87,7 @@ void SetUi(const UiSettings& ui); // and saves (debounced)
 //  2. else the combined build's S3SS.toml: backed up to S3SS.toml.pre-split.bak (in the Apex Radiance folder), then
 //     only the settings the features of this build read are carried over (needs PatchManager::CreateAll() first);
 //  3. else defaults.
+// Then, on every start until [meta] lighting_defaults says done: the new lighting defaults, for keys still at the old ones.
 void EnsureMigrated();
 std::string MigrationNote(); // what the migration did, for the log and the Settings page (Status > Settings)
 

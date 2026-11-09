@@ -325,6 +325,8 @@ float __fastcall PriorityHook(BYTE* room) {
     // its state and its invalidations and is picked once the gap ends, so the scheduler and the drain re-solve the same rooms
     // at most every 400 ms instead of on every step of the drag
     if (room && p > 0.0f && DragLite::HoldRepick(room)) return 0.0f;
+    // (physical drag, drag_lite.h) before Prioritise, which raises a stranded room of another story from 0 to 1
+    if (room && HookGuard::Run("RoomLightQueue GPU drag hold", false, [room] { return DragLite::HoldGpuDrawn(room); })) return p > 0.0f ? 0.0f : p;
     // (development builds, restart_settle) a room restarted again and again while the lots settle is picked once its restarts
     // stop (restart_settle.h); a lamp edit's rooms are never held
     if (room && p > 0.0f && DevSwitches::RestartSettle() && LevelLightShare::LampUrgency(room) <= 1.0f &&
@@ -433,6 +435,93 @@ void NoteEditBurst(bool lampEdit) {
                          g_quickRooms.load(std::memory_order_relaxed) - g_burst.quick, ApexPart(g_burst.apexMs)));
 }
 
+// A quick day/night switch's solves (LevelLightShare::DayNightSwitching), to measure its pacing: per room of the played lot whose
+// solve began within 10 s of the switch, when its first solve began, how many began and ended (a solve begun and not ended was
+// thrown away by an invalidate), their time on screen and the game's solve time (SolveTimeByClass: the rise between a solve's
+// start and the next start, one room is solved at a time), logged once 10 s after the switch. Render thread.
+struct SwitchRoom {
+    int story = -1, id = -1, starts = 0, ends = 0;
+    DWORD first = 0, began = 0, lastEnd = 0;
+    float wallMs = 0.0f, cpuMs = 0.0f;
+};
+struct SwitchLog {
+    unsigned serial = 0;
+    DWORD start = 0;
+    bool open = false;
+    std::unordered_map<uintptr_t, SwitchRoom> rooms;
+    uintptr_t lastStarted = 0; // the room whose game solve time the next start books
+    float lastGame = 0.0f;
+};
+SwitchLog g_switch;
+bool RoomKeyOf(const BYTE* room, uintptr_t& mgr, int& story, int& id) {
+    __try {
+        mgr = *reinterpret_cast<const uintptr_t*>(room);
+        if (!mgr) return false;
+        story = *reinterpret_cast<const int*>(mgr + 0x88);
+        id = *reinterpret_cast<const int*>(room + 0xC);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+void SwitchLogWrite(DWORD now) {
+    g_switch.open = false;
+    std::vector<std::pair<uintptr_t, SwitchRoom>> rooms(g_switch.rooms.begin(), g_switch.rooms.end());
+    std::sort(rooms.begin(), rooms.end(), [](const auto& a, const auto& b) { return a.second.lastEnd < b.second.lastEnd; });
+    int began = 0, ended = 0, repeats = 0;
+    float cpu = 0.0f;
+    DWORD last = 0;
+    std::string per;
+    const auto at = [&](DWORD t) { return t ? static_cast<double>(t - g_switch.start) / 1000.0 : -1.0; };
+    for (const auto& [key, r] : rooms) {
+        began += r.starts, ended += r.ends, repeats += std::max(0, r.ends - 1);
+        cpu += r.cpuMs;
+        if (r.lastEnd && r.lastEnd - g_switch.start > last) last = r.lastEnd - g_switch.start;
+        per += std::format("; story {} room {}: first began +{:.2f} s, last ended {}, solves {} ({} ended), {:.0f} ms on screen, {:.0f} ms of the game's solving",
+                           r.story, r.id, at(r.first), r.lastEnd ? std::format("+{:.2f} s", at(r.lastEnd)) : std::string("not yet"), r.starts, r.ends, r.wallMs, r.cpuMs);
+    }
+    LOG_INFO(std::format("[RoomLightQueue] Day/night switch solves ({:.1f} s): {} rooms of the played lot, the last ended +{:.2f} s; solves begun {}, ended {} ({} thrown "
+                         "away, {} solved again after an ended solve); the game's solving {:.0f} ms{}",
+                         (now - g_switch.start) / 1000.0, rooms.size(), static_cast<double>(last) / 1000.0, began, ended, began - ended, repeats, cpu, per));
+    g_switch.rooms.clear();
+}
+void SwitchLogFrame() {
+    const unsigned serial = LevelLightShare::DayNightSwitchSerial();
+    const DWORD now = GetTickCount();
+    if (serial != g_switch.serial && LevelLightShare::DayNightSwitching()) {
+        if (g_switch.open) SwitchLogWrite(now); // (the next switch within its 10 s: its line is written short, not lost)
+        g_switch = SwitchLog{serial, now, true};
+        g_switch.lastGame = GameSolveMs();
+        return;
+    }
+    if (g_switch.open && now - g_switch.start >= 10000) SwitchLogWrite(now);
+}
+void SwitchLogStart(const BYTE* room) {
+    const float game = GameSolveMs();
+    if (const auto it = g_switch.rooms.find(g_switch.lastStarted); it != g_switch.rooms.end() && game >= g_switch.lastGame) it->second.cpuMs += game - g_switch.lastGame;
+    g_switch.lastGame = game;
+    g_switch.lastStarted = 0;
+    uintptr_t mgr = 0;
+    int story = -1, id = -1;
+    if (!g_switch.open || GetTickCount() - g_switch.start >= 10000 || !RoomKeyOf(room, mgr, story, id) || !PriorityLot(mgr)) return;
+    if (g_switch.rooms.size() >= 256 && !g_switch.rooms.contains(reinterpret_cast<uintptr_t>(room))) return;
+    SwitchRoom& r = g_switch.rooms[reinterpret_cast<uintptr_t>(room)];
+    r.story = story, r.id = id;
+    r.began = GetTickCount();
+    if (!r.first) r.first = r.began;
+    r.starts++;
+    g_switch.lastStarted = reinterpret_cast<uintptr_t>(room);
+}
+void SwitchLogEnd(const BYTE* room) {
+    const auto it = g_switch.rooms.find(reinterpret_cast<uintptr_t>(room));
+    if (it == g_switch.rooms.end() || !it->second.began) return;
+    const DWORD now = GetTickCount();
+    it->second.ends++;
+    it->second.lastEnd = now;
+    it->second.wallMs += static_cast<float>(now - it->second.began);
+    it->second.began = 0;
+}
+
 std::atomic<BYTE*> g_tree{nullptr}; // the light tree the scheduler runs on (SolveInProgress)
 int StateOf(const BYTE* room) {
     __try {
@@ -468,6 +557,7 @@ void Drain(BYTE* tree, BYTE* before) {
         const float budget = LotLightingMotion::DrainBudget(LotLightingMotion::SampleCameraMoving() ? 1.0f
                              : AtriumHold::EditHolding() && !LevelLightShare::LampDragging() ? 16.0f
                              : lampEdit ? (g_refining ? 4.0f : LevelLightShare::LampDragging() ? 6.0f : 12.0f)
+                             : LevelLightShare::DayNightSwitching() ? RoomAmbientPolicy::DayNightWindow::kDrainMs // (with the lot pass's 25 ms: 33 ms a frame)
                                         : LevelLightShare::SettlingAfterLoad() ? 4.0f + ((DevSwitches::RoomDrainBudget() ? 6.0f : 12.0f) - 4.0f) * LotLightingMotion::SettleScale()
                                                                                : LotLightingMotion::SteadyDrainMs(4.0f)); // (2.15.3) the steady pacing: 1 to 4 ms
         // room_drain_budget (numbered development builds): the stopwatch is only checked between game steps, and one step
@@ -515,7 +605,10 @@ void __fastcall PickHook(BYTE* tree) {
     const auto pick = reinterpret_cast<Pick_t>(kPick);
     BYTE* before = tree ? CurrentRoom(tree) : nullptr;
     g_editNow = g_prioOn && HookGuard::Run("RoomLightQueue edit check", false, [] { return LevelLightShare::LampEditPending(); }); // for the priority calls of this pick
-    if (tree && ThreadId() == g_renderThread.load(std::memory_order_relaxed)) LotLightingMotion::NoteDrainSpent(0.0f); // (a new frame: the drain books what it spends)
+    if (tree && ThreadId() == g_renderThread.load(std::memory_order_relaxed)) {
+        LotLightingMotion::NoteDrainSpent(0.0f); // (a new frame: the drain books what it spends)
+        HookGuard::Run("RoomLightQueue day/night switch log", [] { SwitchLogFrame(); });
+    }
     pick(tree);
     if (!g_drainOn || !tree || ThreadId() != g_renderThread.load(std::memory_order_relaxed)) return;
     HookGuard::Run("RoomLightQueue drain", [tree, before] { Drain(tree, before); });
@@ -732,6 +825,7 @@ void NoteSolveEnd(const void* room) {
     if (g_lastEnd.size() > 16384) g_lastEnd.clear();
     const DWORD now = GetTickCount();
     g_lastEnd[reinterpret_cast<uintptr_t>(room)] = now;
+    SwitchLogEnd(static_cast<const BYTE*>(room));
     if (g_lastSolved.size() > 16384) g_lastSolved.clear();
     const auto s = g_solveStart.find(reinterpret_cast<uintptr_t>(room));
     g_lastSolved[reinterpret_cast<uintptr_t>(room)] = s != g_solveStart.end() ? s->second : LampMarkFilter::EditSerial();
@@ -742,6 +836,7 @@ void NoteSolveStart(const void* room) {
     if (!room || ThreadId() != g_renderThread.load(std::memory_order_relaxed)) return;
     if (g_solveStart.size() > 16384) g_solveStart.clear();
     g_solveStart[reinterpret_cast<uintptr_t>(room)] = LampMarkFilter::EditSerial();
+    SwitchLogStart(static_cast<const BYTE*>(room));
 }
 bool CurrentRoomUrgent() {
     if (ThreadId() != g_renderThread.load(std::memory_order_relaxed)) return false;

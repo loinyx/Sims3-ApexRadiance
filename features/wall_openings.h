@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <iterator>
 #include <vector>
 #include "penumbra.h"
 
@@ -145,55 +146,38 @@ inline float CrossPass(const Patch* ps, int n, float segLen, float y0, float y1,
     return std::min(p0, p1);
 }
 
-// ---- Opening shapes from the cutout mask (no mask is read yet) ----
-// The game keeps each opening's exact shape in a mask texture (the cut post's TGI, type 0x00B2D882 per the disassembly notes)
-// that it draws the wall through. No path in this codebase reads a resource's bytes (the resource cache answers which
-// package holds a key and never opens one), and the record and stream layouts such a read needs are not verified, so doors
-// and arches keep their kind's defaults (windows take their panes', WindowPanes). ShapeFromAlpha is what a reader would hand
-// the mask to: from an alpha image (row 0 at the top, unverified) covering `cells` wall cells across and `heightM` metres up from the wall's base, the hole of cell
-// `piece` (alpha under `cutBelow` = cut, unverified polarity): its span in the cell (0..1), its sill and the head heights
-// across it (m over the base). False when the cell has no hole.
+// ---- Opening shapes from the cutout masks ----
+// The game keeps each opening's exact shape in a mask texture, one per wall cell (the cut post's TGI, type 0x00B2D882), that
+// it draws the wall through. tools/opening_mask_table reads them from the game's packages into the table below, so nothing is
+// read at run time. shortcut: custom content masks are not in the table and keep today's shape; a run time reader would add them.
 struct MaskShape {
     float u0 = 0, u1 = 1, sill = 0;
     float head[kProfile] = {};
 };
-inline bool ShapeFromAlpha(const uint8_t* alpha, int w, int h, int cells, int piece, float heightM, uint8_t cutBelow, MaskShape& out) {
-    if (!alpha || w <= 0 || h <= 0 || cells <= 0 || piece < 0 || piece >= cells || !(heightM > 0.0f)) return false;
-    const int c0 = piece * w / cells, c1 = (piece + 1) * w / cells; // the cell's columns [c0, c1)
-    if (c1 <= c0) return false;
-    // per column: the lowest and highest cut row (rows counted from the top)
-    int first = -1, last = -1;
-    std::vector<float> lo(static_cast<size_t>(c1 - c0), -1.0f), hi(static_cast<size_t>(c1 - c0), -1.0f);
-    for (int c = c0; c < c1; c++) {
-        int top = -1, bottom = -1;
-        for (int r = 0; r < h; r++)
-            if (alpha[static_cast<size_t>(r) * w + c] < cutBelow) {
-                if (top < 0) top = r;
-                bottom = r;
-            }
-        if (top < 0) continue;
-        if (first < 0) first = c;
-        last = c;
-        hi[static_cast<size_t>(c - c0)] = heightM * (1.0f - static_cast<float>(top) / static_cast<float>(h));        // the head over the base
-        lo[static_cast<size_t>(c - c0)] = heightM * (1.0f - static_cast<float>(bottom + 1) / static_cast<float>(h)); // the sill
-    }
-    if (first < 0) return false;
-    const float cw = static_cast<float>(c1 - c0);
-    out.u0 = static_cast<float>(first - c0) / cw;
-    out.u1 = static_cast<float>(last + 1 - c0) / cw;
-    float sill = 1e9f;
-    for (int c = first; c <= last; c++)
-        if (lo[static_cast<size_t>(c - c0)] >= 0.0f) sill = std::min(sill, lo[static_cast<size_t>(c - c0)]);
-    out.sill = sill;
-    for (int k = 0; k < kProfile; k++) { // the head at evenly spaced columns of the hole (the nearest cut column)
-        const float at = static_cast<float>(first) + (static_cast<float>(last - first)) * static_cast<float>(k) / static_cast<float>(kProfile - 1);
-        const int c = std::clamp(static_cast<int>(std::lround(at)), first, last);
-        float best = -1.0f;
-        for (int d = 0; d <= last - first && best < 0.0f; d++)
-            for (const int cc : {c - d, c + d})
-                if (best < 0.0f && cc >= first && cc <= last) best = hi[static_cast<size_t>(cc - c0)];
-        out.head[k] = best;
-    }
+struct MaskRow { // in 1/255: u0, u1 of the cell, sill and head of the mask's 3 m
+    uint8_t u0, u1, sill, head[kProfile];
+};
+struct MaskEntry { // sorted by instance
+    uint64_t instance;
+    uint16_t shape; // index in kMaskShapes
+};
+#include "opening_masks_table.inc"
+constexpr uint32_t kMaskType = 0x00B2D882;
+constexpr float kMaskHeightM = 3.0f;
+// A post's orientation 2, 3, 4 and 5 run from the high corner to the low one: the mask's u runs against EdgeKey's low-first edge
+// (read in 928 logged posts: orientation gives the direction of each cell's first post)
+inline bool MaskRunsBack(uint8_t orient) { return orient >= 2 && orient <= 5; }
+// The hole of a mask (instance = tgi[1]:tgi[0]) along a low-first edge; false when the table does not hold it
+inline bool BakedMask(uint64_t instance, bool runsBack, MaskShape& out) {
+    const MaskEntry* const end = std::end(kMasks);
+    const MaskEntry* const it = std::lower_bound(std::begin(kMasks), end, instance, [](const MaskEntry& e, uint64_t v) { return e.instance < v; });
+    if (it == end || it->instance != instance) return false;
+    const MaskRow& r = kMaskShapes[it->shape];
+    const float u0 = static_cast<float>(r.u0) / 255.0f, u1 = static_cast<float>(r.u1) / 255.0f;
+    out.u0 = runsBack ? 1.0f - u1 : u0;
+    out.u1 = runsBack ? 1.0f - u0 : u1;
+    out.sill = static_cast<float>(r.sill) * kMaskHeightM / 255.0f;
+    for (int k = 0; k < kProfile; k++) out.head[k] = static_cast<float>(r.head[runsBack ? kProfile - 1 - k : k]) * kMaskHeightM / 255.0f;
     return true;
 }
 

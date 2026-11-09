@@ -460,7 +460,7 @@ bool ReadOnlyAboveReliable(uintptr_t mgr, uint32_t index) {
         return false;
     }
     if (n == count && quiet && g_mutating.load(std::memory_order_acquire) == 0 && g_gen.load(std::memory_order_acquire) == gen)
-        l = RoLatch{mgr, begin, count, gen, GetTickCount() | 1};
+        l = RoLatch{mgr, begin, count, gen, std::max<DWORD>(GetTickCount(), 1)};
     return true;
 }
 

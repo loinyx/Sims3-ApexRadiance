@@ -1,0 +1,1058 @@
+0004: [BridgeDiag] lines (internal 0006-0010): client and server memory and live objects, frame-time outliers, surface upload repeats (full-data CRC32C), re-uploads after destroy, creation / destroy / lock sites named by the game's callers. Log only.
+
+Applies after 0001-0003 on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only).
+
+diff --git a/bridge/src/client/base.h b/bridge/src/client/base.h
+index 8e75d5f..f025ee4 100644
+--- a/bridge/src/client/base.h
++++ b/bridge/src/client/base.h
+@@ -24,6 +24,7 @@
+ 
+ #include "pch.h"
+ #include "log/log.h"
++#include "util_perfcounters.h"
+ 
+ #include <unknwn.h>
+ #include <sstream>
+@@ -323,9 +324,12 @@ class D3DBase: public T, public D3DRefCounted, private D3DRefCounted::RefCountTy
+   const D3D9ObjectType m_type;
+   const bool m_standalone;
+   const size_t m_id;
++  uint8_t m_site = 0xFF;      // perf diag: creation site index
++  uint32_t m_siteBytes = 0;  // perf diag: estimated bytes
+ 
+   void onConstruct() {
+     AddRef();
++    bridge_util::perf::noteObject(int(m_type), 1, m_site, m_siteBytes);
+ #ifdef _DEBUG
+     Logger::debug(format_string("%s object [%p/%p] created",
+                                 toD3D9ObjectTypeName<T>(), this, getId()));
+@@ -357,6 +361,7 @@ protected:
+     , m_type(toD3D9ObjectType<T>())
+     , m_standalone(true)
+     , m_id(D3dBaseIdFactory::getNextId()) {
++    m_site = bridge_util::perf::takeSite(m_siteBytes);
+     onConstruct();
+     }
+ 
+@@ -374,6 +379,7 @@ protected:
+   }
+ 
+   ~D3DBase() override {
++    bridge_util::perf::noteObject(int(m_type), -1, m_site, m_siteBytes);
+     gShadowMapMutex.lock();
+     gShadowMap.erase(m_id);
+     gShadowMapMutex.unlock();
+@@ -385,6 +391,10 @@ protected:
+ 
+ public:
+ 
++  uint8_t perfSite() const {  // perf diag: creation site index, 0xFF when none
++    return m_site;
++  }
++
+   D3D9ObjectType getType() {
+     return m_type;
+   }
+diff --git a/bridge/src/client/d3d9_cubetexture.cpp b/bridge/src/client/d3d9_cubetexture.cpp
+index 9de506f..67516ae 100644
+--- a/bridge/src/client/d3d9_cubetexture.cpp
++++ b/bridge/src/client/d3d9_cubetexture.cpp
+@@ -20,6 +20,7 @@
+  * DEALINGS IN THE SOFTWARE.
+  */
+ #include "pch.h"
++#include <intrin.h>
+ 
+ #include "d3d9_cubetexture.h"
+ #include "shadow_map.h"
+@@ -128,6 +129,7 @@ HRESULT Direct3DCubeTexture9_LSS::GetCubeMapSurface(D3DCUBEMAP_FACES FaceType, U
+     GetLevelDesc(Level, &desc);
+ 
+     pLssCubeMapSurface = trackWrapper(new Direct3DSurface9_LSS(m_pDevice, this, desc));
++    pLssCubeMapSurface->m_texSite = perfSite();
+     (*ppCubeMapSurface) = (IDirect3DSurface9*) pLssCubeMapSurface;
+ 
+     setChild(surfaceIndex, pLssCubeMapSurface);
+@@ -143,6 +145,7 @@ HRESULT Direct3DCubeTexture9_LSS::GetCubeMapSurface(D3DCUBEMAP_FACES FaceType, U
+ 
+ HRESULT Direct3DCubeTexture9_LSS::LockRect(D3DCUBEMAP_FACES FaceType, UINT Level, D3DLOCKED_RECT* pLockedRect, CONST RECT* pRect, DWORD Flags) {
+   LogFunctionCall();
++  bridge_util::perf::t_lockSite = uintptr_t(_ReturnAddress());
+ 
+   if (Level >= getDesc().Levels)
+     return D3DERR_INVALIDCALL;
+diff --git a/bridge/src/client/d3d9_device.cpp b/bridge/src/client/d3d9_device.cpp
+index 2978106..a8fcf23 100644
+--- a/bridge/src/client/d3d9_device.cpp
++++ b/bridge/src/client/d3d9_device.cpp
+@@ -605,6 +605,8 @@ template<bool EnableSync>
+ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::CreateTexture(UINT Width, UINT Height, UINT Levels, DWORD Usage, D3DFORMAT Format, D3DPOOL Pool, IDirect3DTexture9** ppTexture, HANDLE* pSharedHandle) {
+   ZoneScoped;
+   LogFunctionCall();
++  bridge_util::perf::setSite(_ReturnAddress(), uint64_t(bridge_util::calcTotalSizeOfRect(Width, Height, Format)) * (Levels == 1 ? 3 : 4) / 3);
++  bridge_util::perf::setSiteDesc(Width, Height, uint32_t(Format), Levels, Usage, uint32_t(Pool));
+ 
+   if (ppTexture == nullptr) {
+     return D3DERR_INVALIDCALL;
+@@ -633,6 +635,7 @@ template<bool EnableSync>
+ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::CreateVolumeTexture(UINT Width, UINT Height, UINT Depth, UINT Levels, DWORD Usage, D3DFORMAT Format, D3DPOOL Pool, IDirect3DVolumeTexture9** ppVolumeTexture, HANDLE* pSharedHandle) {
+   ZoneScoped;
+   LogFunctionCall();
++  bridge_util::perf::setSite(_ReturnAddress(), uint64_t(bridge_util::calcTotalSizeOfRect(Width, Height, Format)) * Depth * (Levels == 1 ? 7 : 8) / 7);
+ 
+   if (ppVolumeTexture == nullptr) {
+     return D3DERR_INVALIDCALL;
+@@ -661,6 +664,8 @@ template<bool EnableSync>
+ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::CreateCubeTexture(UINT EdgeLength, UINT Levels, DWORD Usage, D3DFORMAT Format, D3DPOOL Pool, IDirect3DCubeTexture9** ppCubeTexture, HANDLE* pSharedHandle) {
+   ZoneScoped;
+   LogFunctionCall();
++  bridge_util::perf::setSite(_ReturnAddress(), uint64_t(bridge_util::calcTotalSizeOfRect(EdgeLength, EdgeLength, Format)) * 6 * (Levels == 1 ? 3 : 4) / 3);
++  bridge_util::perf::setSiteDesc(EdgeLength, EdgeLength, uint32_t(Format), Levels, Usage, uint32_t(Pool));
+ 
+   if (ppCubeTexture == nullptr) {
+     return D3DERR_INVALIDCALL;
+@@ -689,6 +694,7 @@ template<bool EnableSync>
+ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::CreateVertexBuffer(UINT Length, DWORD Usage, DWORD FVF, D3DPOOL Pool, IDirect3DVertexBuffer9** ppVertexBuffer, HANDLE* pSharedHandle) {
+   ZoneScoped;
+   LogFunctionCall();
++  bridge_util::perf::setSite(_ReturnAddress(), Length);
+   if (Length == 0) {
+     return D3DERR_INVALIDCALL;
+   }
+@@ -715,6 +721,7 @@ template<bool EnableSync>
+ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::CreateIndexBuffer(UINT Length, DWORD Usage, D3DFORMAT Format, D3DPOOL Pool, IDirect3DIndexBuffer9** ppIndexBuffer, HANDLE* pSharedHandle) {
+   ZoneScoped;
+   LogFunctionCall();
++  bridge_util::perf::setSite(_ReturnAddress(), Length);
+ 
+   if (Length == 0) {
+     return D3DERR_INVALIDCALL;
+@@ -742,6 +749,7 @@ template<bool EnableSync>
+ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::CreateRenderTarget(UINT Width, UINT Height, D3DFORMAT Format, D3DMULTISAMPLE_TYPE MultiSample, DWORD MultisampleQuality, BOOL Lockable, IDirect3DSurface9** ppSurface, HANDLE* pSharedHandle) {
+   ZoneScoped;
+   LogFunctionCall();
++  bridge_util::perf::setSite(_ReturnAddress(), bridge_util::calcTotalSizeOfRect(Width, Height, Format));
+ 
+   if (ppSurface == nullptr || Width == 0 || Height == 0) {
+     return D3DERR_INVALIDCALL;
+@@ -777,6 +785,7 @@ template<bool EnableSync>
+ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::CreateDepthStencilSurface(UINT Width, UINT Height, D3DFORMAT Format, D3DMULTISAMPLE_TYPE MultiSample, DWORD MultisampleQuality, BOOL Discard, IDirect3DSurface9** ppSurface, HANDLE* pSharedHandle) {
+   ZoneScoped;
+   LogFunctionCall();
++  bridge_util::perf::setSite(_ReturnAddress(), bridge_util::calcTotalSizeOfRect(Width, Height, Format));
+ 
+   if (ppSurface == nullptr || Width == 0 || Height == 0) {
+     return D3DERR_INVALIDCALL;
+@@ -994,6 +1003,7 @@ template<bool EnableSync>
+ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::CreateOffscreenPlainSurface(UINT Width, UINT Height, D3DFORMAT Format, D3DPOOL Pool, IDirect3DSurface9** ppSurface, HANDLE* pSharedHandle) {
+   ZoneScoped;
+   LogFunctionCall();
++  bridge_util::perf::setSite(_ReturnAddress(), bridge_util::calcTotalSizeOfRect(Width, Height, Format));
+ 
+   if (ppSurface == nullptr) {
+     return D3DERR_INVALIDCALL;
+@@ -1829,6 +1839,7 @@ template<bool EnableSync>
+ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::CreateStateBlock(D3DSTATEBLOCKTYPE Type, IDirect3DStateBlock9** ppSB) {
+   ZoneScoped;
+   LogFunctionCall();
++  bridge_util::perf::setSite(_ReturnAddress(), 0);
+ 
+   if (ppSB == nullptr) {
+     return D3DERR_INVALIDCALL;
+@@ -2523,6 +2534,7 @@ template<bool EnableSync>
+ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::CreateVertexDeclaration(CONST D3DVERTEXELEMENT9* pVertexElements, IDirect3DVertexDeclaration9** ppDecl) {
+   ZoneScoped;
+   LogFunctionCall();
++  bridge_util::perf::setSite(_ReturnAddress(), 0);
+   if (pVertexElements == nullptr || ppDecl == nullptr) {
+     return D3DERR_INVALIDCALL;
+   }
+@@ -2640,6 +2652,7 @@ template<bool EnableSync>
+ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::CreateVertexShader(CONST DWORD* pFunction, IDirect3DVertexShader9** ppShader) {
+   ZoneScoped;
+   LogFunctionCall();
++  bridge_util::perf::setSite(_ReturnAddress(), 0);
+ 
+   if (ppShader == nullptr) {
+     return D3DERR_INVALIDCALL;
+@@ -3079,6 +3092,7 @@ template<bool EnableSync>
+ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::CreatePixelShader(CONST DWORD* pFunction, IDirect3DPixelShader9** ppShader) {
+   ZoneScoped;
+   LogFunctionCall();
++  bridge_util::perf::setSite(_ReturnAddress(), 0);
+  
+   if(ppShader == NULL)
+     return D3DERR_INVALIDCALL;
+@@ -3340,6 +3354,7 @@ template<bool EnableSync>
+ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::CreateQuery(D3DQUERYTYPE Type, IDirect3DQuery9** ppQuery) {
+   ZoneScoped;
+   LogFunctionCall();
++  bridge_util::perf::setSite(_ReturnAddress(), 0);
+   // MSDN: This parameter can be set to NULL to see if a query is supported. 
+   if (nullptr == ppQuery) {
+     return S_OK;
+diff --git a/bridge/src/client/d3d9_surface.cpp b/bridge/src/client/d3d9_surface.cpp
+index 0f3ba3f..36cd024 100644
+--- a/bridge/src/client/d3d9_surface.cpp
++++ b/bridge/src/client/d3d9_surface.cpp
+@@ -20,6 +20,7 @@
+  * DEALINGS IN THE SOFTWARE.
+  */
+ #include "pch.h"
++#include <intrin.h>
+ 
+ #include "d3d9_lss.h"
+ #include "d3d9_util.h"
+@@ -43,6 +44,9 @@ Direct3DSurface9_LSS::Direct3DSurface9_LSS(BaseDirect3DDevice9Ex_LSS* const pDev
+ }
+ 
+ Direct3DSurface9_LSS::~Direct3DSurface9_LSS() {
++  if (m_uploadKey) {
++    bridge_util::perf::noteSurfaceGone(m_uploadKey);
++  }
+   // first: once erased, a running freeIdleManagedCopies() pass (which holds the lock while it walks) cannot reach this surface
+   if (m_desc.Pool == D3DPOOL_MANAGED) {
+     std::lock_guard<std::mutex> lock(s_managedCopiesLock);
+@@ -68,6 +72,8 @@ void Direct3DSurface9_LSS::releaseCopy() {
+   if (m_desc.Pool == D3DPOOL_MANAGED) {
+     bridge_util::perf::g_pool[m_shadowLocks > 1 ? 15 : 14] -= surfaceSize;
+   }
++  bridge_util::perf::noteCopyFreed(m_copySite, surfaceSize);
++  m_copySite = 0xFF;
+   m_shadow.reset();
+ }
+ 
+@@ -109,13 +115,18 @@ void Direct3DSurface9_LSS::fetchCopy(size_t surfaceSize) {
+   }
+   const HRESULT hr = (HRESULT) DeviceBridge::get_data();
+   if (SUCCEEDED(hr)) {
+-    DeviceBridge::get_data();  // width
+-    DeviceBridge::get_data();  // height
+-    DeviceBridge::get_data();  // format
++    const uint32_t w = (uint32_t) DeviceBridge::get_data();
++    const uint32_t h = (uint32_t) DeviceBridge::get_data();
++    const uint32_t fmt = (uint32_t) DeviceBridge::get_data();
+     void* pData = nullptr;
+     const size_t pulled = DeviceBridge::get_data(&pData);
+-    if (pulled != surfaceSize) {
+-      Logger::err(format_string("[Direct3DSurface9_LSS] fetched %zu bytes for surface [%p], expected %zu", pulled, this, surfaceSize));
++    if (pulled < surfaceSize || pulled > ((surfaceSize + 7) & ~size_t(7))) {
++      static uint32_t s_mismatches = 0;
++      if (++s_mismatches <= 20) {
++        Logger::err(format_string("[Direct3DSurface9_LSS] fetched %zu bytes for surface [%p] (server %ux%u fmt %u, client %ux%u fmt %u), "
++                                  "expected %zu; mismatch %u, only the first 20 are logged", pulled, this, w, h, fmt, m_desc.Width,
++                                  m_desc.Height, uint32_t(m_desc.Format), surfaceSize, s_mismatches));
++      }
+     }
+     memcpy(m_shadow.get(), pData, std::min(pulled, surfaceSize));
+   } else {
+@@ -194,6 +205,9 @@ HRESULT Direct3DSurface9_LSS::GetDesc(D3DSURFACE_DESC* pDesc) {
+ 
+ HRESULT Direct3DSurface9_LSS::LockRect(D3DLOCKED_RECT* pLockedRect, CONST RECT* pRect, DWORD Flags) {
+   LogFunctionCall();
++  if (!bridge_util::perf::t_lockSite) {
++    bridge_util::perf::t_lockSite = uintptr_t(_ReturnAddress());
++  }
+   if (Flags & D3DLOCK_READONLY) {
+     bridge_util::perf::g_shadow[2]++;
+     bridge_util::perf::g_pool[4 + bridge_util::perf::poolIdx(m_desc.Pool)]++;
+@@ -278,6 +292,7 @@ HRESULT Direct3DSurface9_LSS::ReleaseDC(HDC hdc) {
+ }
+ 
+ bool Direct3DSurface9_LSS::lock(D3DLOCKED_RECT& lockedRect, const RECT* pRect, const DWORD& flags) {
++  struct LockSiteReset { ~LockSiteReset() { bridge_util::perf::t_lockSite = 0; } } lockSiteReset;
+   const RECT rect = resolveLockInfoRect(pRect, m_desc);
+   lockedRect.Pitch = bridge_util::calcRowSize(m_desc.Width, m_desc.Format);
+   const auto surfaceSize =
+@@ -303,6 +318,7 @@ bool Direct3DSurface9_LSS::lock(D3DLOCKED_RECT& lockedRect, const RECT* pRect, c
+       bridge_util::perf::g_pool[14] -= surfaceSize;
+       bridge_util::perf::g_pool[15] += surfaceSize;
+     }
++    const bool newCopy = !m_shadow;
+     if (!m_shadow) {
+       uint8_t* p = nullptr;
+       if (surfaceSize >= 65536 && ClientOptions::getFreeIdleManagedCopiesSec()) {
+@@ -333,6 +349,12 @@ bool Direct3DSurface9_LSS::lock(D3DLOCKED_RECT& lockedRect, const RECT* pRect, c
+                                   this, surfaceSize, g_totalSurfaceShadow));
+     }
+ 
++    if (bridge_util::perf::enabled()) {
++      const uint8_t site = bridge_util::perf::noteLock(bridge_util::perf::t_lockSite, newCopy, newCopy ? surfaceSize : 0);
++      if (newCopy) {
++        m_copySite = site;
++      }
++    }
+     m_lastLockMs = GetTickCount64();
+     const size_t byteOffset = bridge_util::calcImageByteOffset(lockedRect.Pitch, rect, m_desc.Format);
+ 
+@@ -382,6 +404,10 @@ HRESULT Direct3DSurface9_LSS::sendDataToServer(const LockInfo& lockInfo) const {
+     const auto [width, height] = getRectDimensions(lockInfo.rect);
+     bridge_util::perf::noteUpload(bridge_util::calcTotalSizeOfRect(width, height, m_desc.Format));
+     bridge_util::perf::g_pool[12] += bridge_util::calcTotalSizeOfRect(width, height, m_desc.Format);
++    m_uploadKey = bridge_util::perf::noteUploadData((const uint8_t*) lockInfo.lockedRect.pBits, lockInfo.lockedRect.Pitch,
++                                      bridge_util::calcStride((uint32_t) width, m_desc.Format) * bridge_util::getBytesFromFormat(m_desc.Format),
++                                      bridge_util::calcStride((uint32_t) height, m_desc.Format), uint32_t(width), uint32_t(height), uint32_t(m_desc.Format),
++                                      m_texSite != 0xFF ? m_texSite : perfSite());
+   }
+   if (m_bUseSharedHeap) {
+     const auto [width, height] = getRectDimensions(lockInfo.rect);
+diff --git a/bridge/src/client/d3d9_surface.h b/bridge/src/client/d3d9_surface.h
+index 367c2fb..8e80fce 100644
+--- a/bridge/src/client/d3d9_surface.h
++++ b/bridge/src/client/d3d9_surface.h
+@@ -70,6 +70,8 @@ class Direct3DSurface9_LSS: public Direct3DResource9_LSS<IDirect3DSurface9> {
+   // freed (then the next lock fetches it from the server). Lock order: the device lock, then s_managedCopiesLock.
+   uint64_t m_lastLockMs = 0;
+   bool m_copyFreed = false;
++  uint8_t m_copySite = 0xFF;  // perf diag: lock site that made the copy
++  mutable uint64_t m_uploadKey = 0;  // perf diag: content key of the last upload (set in the const sendDataToServer)
+   inline static std::mutex s_managedCopiesLock;
+   inline static std::unordered_set<Direct3DSurface9_LSS*> s_managedCopies;
+   void releaseCopy();
+@@ -78,6 +80,7 @@ class Direct3DSurface9_LSS: public Direct3DResource9_LSS<IDirect3DSurface9> {
+ public:
+   // Frees the copies of MANAGED surfaces not locked for idleSec seconds; at most once a second. Call under the device lock.
+   static void freeIdleManagedCopies(uint32_t idleSec);
++  uint8_t m_texSite = 0xFF;  // perf diag: creation site of the texture that owns this level (set when the level is wrapped)
+ 
+ private:
+ 
+diff --git a/bridge/src/client/d3d9_texture.cpp b/bridge/src/client/d3d9_texture.cpp
+index 3f4a64f..4e55c8e 100644
+--- a/bridge/src/client/d3d9_texture.cpp
++++ b/bridge/src/client/d3d9_texture.cpp
+@@ -20,6 +20,7 @@
+  * DEALINGS IN THE SOFTWARE.
+  */
+ #include "pch.h"
++#include <intrin.h>
+ 
+ #include "d3d9_texture.h"
+ 
+@@ -121,6 +122,7 @@ HRESULT Direct3DTexture9_LSS::GetSurfaceLevel(UINT Level, IDirect3DSurface9** pp
+   GetLevelDesc(Level, &desc);
+ 
+   Direct3DSurface9_LSS* pLssSurface = trackWrapper(new Direct3DSurface9_LSS(m_pDevice, this, desc));
++  pLssSurface->m_texSite = perfSite();
+   setChild(Level, pLssSurface);
+     
+   (*ppSurfaceLevel) = pLssSurface;
+@@ -137,6 +139,7 @@ HRESULT Direct3DTexture9_LSS::GetSurfaceLevel(UINT Level, IDirect3DSurface9** pp
+ 
+ HRESULT Direct3DTexture9_LSS::LockRect(UINT Level, D3DLOCKED_RECT* pLockedRect, CONST RECT* pRect, DWORD Flags) {
+   LogFunctionCall();
++  bridge_util::perf::t_lockSite = uintptr_t(_ReturnAddress());
+ 
+   if (Level >= getDesc().Levels)
+     return D3DERR_INVALIDCALL;
+diff --git a/bridge/src/server/main.cpp b/bridge/src/server/main.cpp
+index 0dc465d..de287f1 100644
+--- a/bridge/src/server/main.cpp
++++ b/bridge/src/server/main.cpp
+@@ -750,6 +750,8 @@ void ProcessDeviceCommandQueue() {
+           Logger::trace("Present semaphore released successfully.");
+ #endif
+         }
++        bridge_util::perf::noteHandles(int64_t(gpD3DResources.size()), int64_t(gpD3DVolumes.size() + gpD3DVertexDeclarations.size() +
++          gpD3DStateBlocks.size() + gpD3DVertexShaders.size() + gpD3DPixelShaders.size() + gpD3DQuery.size()));
+         DeviceBridge::perfOnFrame();
+         break;
+       }
+@@ -1810,6 +1812,8 @@ void ProcessDeviceCommandQueue() {
+           Logger::trace("Present semaphore released successfully.");
+ #endif
+         }
++        bridge_util::perf::noteHandles(int64_t(gpD3DResources.size()), int64_t(gpD3DVolumes.size() + gpD3DVertexDeclarations.size() +
++          gpD3DStateBlocks.size() + gpD3DVertexShaders.size() + gpD3DPixelShaders.size() + gpD3DQuery.size()));
+         DeviceBridge::perfOnFrame();
+         break;
+       }
+diff --git a/bridge/src/util/util_perfcounters.cpp b/bridge/src/util/util_perfcounters.cpp
+index ddb01c0..02503ff 100644
+--- a/bridge/src/util/util_perfcounters.cpp
++++ b/bridge/src/util/util_perfcounters.cpp
+@@ -29,6 +29,11 @@
+ 
+ #define WIN32_LEAN_AND_MEAN
+ #include <windows.h>
++#include <psapi.h>
++#include <nmmintrin.h>
++#include <cstring>
++#include <intrin.h>
++#include <unordered_map>
+ 
+ #include "util_perfcounters.h"
+ 
+@@ -401,6 +406,613 @@ namespace bridge_util {
+       }
+     }
+ 
++    // ---- Diagnostics ([BridgeDiag] lines, patch 0006). Logged after each BridgePerf line: process memory, live objects (client) or
++    // live handles (server), the worst frame of the interval, and on the client the game's creation and lock sites and repeat uploads.
++    namespace {
++      std::atomic<uint64_t> s_diagRespTicks;   // never reset, unlike the per-interval counters
++      std::atomic<uint64_t> s_diagReadbackUs;
++      constexpr int kTypes = 18;  // D3D9ObjectType (client/base.h), Invalid included
++      const char* const kTypeNames[kTypes] = { "Module", "Device", "StateBlock", "SwapChain", "Resource", "VertexDeclaration",
++        "VertexShader", "PixelShader", "BaseTexture", "Texture", "VolumeTexture", "CubeTexture", "VertexBuffer", "IndexBuffer", "Surface",
++        "Volume", "Query", "Invalid" };
++      std::atomic<int64_t> s_typeLive[kTypes];
++      std::atomic<int64_t> s_handles[2];
++
++      // shortcut: 128 sites per table, the last slot collects the rest; raise it if the overflow slot fills
++      constexpr uint32_t kMaxSites = 255;  // slot indexes are uint8_t, 0xFF = none
++      // a texture create or a surface destroy: the inner game frame and the first four TS3W frames outside the device range
++      struct Chain { uintptr_t inner; uintptr_t o[4]; uint32_t key; };
++      struct CreateSite {
++        uintptr_t ret; int type; int64_t live, liveBytes, created, released;
++        uintptr_t via, up, up2; uint32_t idx, w, h, fmt, levels, usage, pool;  // game caller's callers, hook in between, last desc
++        Chain chain;  // textures: the chain this site is keyed by (ret = chain.key)
++      };
++      struct SiteUp { int64_t bytes, repBytes, recreated, recreated1s; };  // per creation site, this interval (s_uploadLock)
++      SiteUp s_siteUp[kMaxSites];
++      // destroy sites (s_uploadLock): the game code whose Release destroyed a surface holding uploaded content
++      struct GoneSite { uintptr_t ret, up, up2; int64_t gone, recreated, recreated1s; Chain chain; };
++      GoneSite s_goneSites[kMaxSites];
++      uint32_t s_goneCount = 0;
++      CreateSite s_sites[kMaxSites];
++      uint32_t s_siteCount = 0;
++      std::mutex s_siteLock;
++      thread_local uintptr_t t_site = 0;
++      thread_local uint64_t t_siteBytes = 0;
++      thread_local uintptr_t t_siteVia = 0, t_siteUp = 0, t_siteUp2 = 0;
++      thread_local uint32_t t_desc[6] = {};
++      thread_local bool t_hasDesc = false;
++
++      uintptr_t s_exeBase = 0, s_exeEnd = 0;
++      bool inExe(uintptr_t a) {
++        if (!s_exeEnd) {
++          const uintptr_t base = uintptr_t(GetModuleHandleW(nullptr));
++          const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
++          const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
++          s_exeBase = base;
++          s_exeEnd = base + nt->OptionalHeader.SizeOfImage;
++        }
++        return a >= s_exeBase + 0x1000 && a < s_exeEnd;
++      }
++
++      // a return address follows a call: rel32 (E8), [disp32] or [reg+disp32] (FF /2 + 4), [reg+disp8] (FF 5x d8), reg or [reg]
++      bool isCallReturn(uintptr_t r) {
++        const uint8_t* b = reinterpret_cast<const uint8_t*>(r);
++        return b[-5] == 0xE8 || (b[-6] == 0xFF && (b[-5] & 0x38) == 0x10) || (b[-3] == 0xFF && (b[-2] & 0xF8) == 0x50) ||
++               (b[-2] == 0xFF && ((b[-1] & 0xF8) == 0xD0 || (b[-1] & 0xF8) == 0x10));
++      }
++
++      // shortcut: a stack scan, not an unwind (TS3W is FPO code), so a stale return address left in an unused stack slot can be
++      // taken for a caller; good enough to name the code that creates textures, confirm a site in the disassembly before relying on it
++      template<int N>
++      __declspec(noinline) int gameCallers(uintptr_t (&out)[N]) {
++        const uintptr_t* p = reinterpret_cast<const uintptr_t*>(_AddressOfReturnAddress());
++        const uintptr_t top = uintptr_t(reinterpret_cast<NT_TIB*>(NtCurrentTeb())->StackBase);
++        int n = 0;
++        for (int i = 0; i < 2048 && n < N && uintptr_t(p + i) + sizeof(uintptr_t) <= top; ++i) {
++          const uintptr_t v = p[i];
++          if (inExe(v) && isCallReturn(v)) {
++            out[n++] = v;
++          }
++        }
++        return n;
++      }
++
++      // TS3W's device wrapper, texture and DDS code (docs/40): every texture create and release passes through it
++      constexpr uintptr_t kDevLo = 0x60C000, kDevHi = 0x61B000;
++      Chain chainOf(const uintptr_t* c, int n, uintptr_t inner) {
++        Chain ch = {};
++        ch.inner = inner;
++        int i = 0;
++        while (i < n && c[i] >= kDevLo && c[i] < kDevHi) {
++          ++i;
++        }
++        for (int k = 0; k < 4 && i < n; ++k, ++i) {
++          ch.o[k] = c[i];
++        }
++        const uintptr_t parts[5] = { ch.inner, ch.o[0], ch.o[1], ch.o[2], ch.o[3] };
++        uint32_t h = 2166136261u;
++        for (const uintptr_t v : parts) {
++          h = (h ^ uint32_t(v)) * 16777619u;
++        }
++        ch.key = h | 0x80000000u;  // never 0, 1 or 2 (the special site values)
++        return ch;
++      }
++      thread_local Chain t_chain = {};
++
++      struct LockSite { uintptr_t ret; int64_t locks, newCopies, newBytes, liveCopyBytes; };
++      LockSite s_lockSites[kMaxSites];
++      uint32_t s_lockSiteCount = 0;
++      std::mutex s_lockSiteLock;
++
++      std::mutex s_uploadLock;
++      std::unordered_map<uint64_t, uint64_t> s_uploadSeen;  // fingerprint -> time of its last upload, ms
++      int64_t s_uploadsN = 0, s_uploadsBytes = 0, s_repeatsN = 0, s_repeatsBytes = 0;
++      constexpr uint64_t kRepeatWindowMs = 60000;
++      std::unordered_map<uint64_t, uint64_t> s_contentSeen;  // content key -> time of its last upload, ms
++      std::unordered_map<uint64_t, uint64_t> s_released;     // content key -> time its surface was destroyed, ms
++      int64_t s_fullRepeatsN = 0, s_fullRepeatsBytes = 0, s_sampledOnlyN = 0;
++      int64_t s_recreatedN = 0, s_recreatedBytes = 0, s_recreatedBucket[5] = {};
++      constexpr uint64_t kReleaseWindowMs = 300000;
++      constexpr uint64_t kBucketMs[4] = { 1000, 5000, 30000, 60000 };
++
++      struct DiagFrame {
++        int64_t lastT = 0;
++        uint64_t cmd = 0, resp = 0, present = 0, readback = 0;
++        double maxMs = 0, worstSend = 0, worstWait = 0, worstPresent = 0, worstReadback = 0;
++        uint32_t over50 = 0, over100 = 0, over250 = 0;
++      } s_df;
++      uint32_t s_diagLogs = 0;
++      constexpr uint32_t kAllSitesEvery = 30;  // every 30th log lists every site, the others the top ones
++
++      // slot for ret in a site table (caller holds its lock): an existing one, a new one, or the overflow slot
++      template<typename SiteT>
++      uint8_t slotFor(SiteT* table, uint32_t& count, uintptr_t ret) {
++        for (uint32_t i = 0; i < count; ++i) {
++          if (table[i].ret == ret) {
++            return uint8_t(i);
++          }
++        }
++        if (count < kMaxSites - 1) {
++          table[count] = {};
++          table[count].ret = ret;
++          return uint8_t(count++);
++        }
++        table[kMaxSites - 1].ret = 1;  // 0x00000001 in the log: sites beyond the table
++        return uint8_t(kMaxSites - 1);
++      }
++
++      void appendMem(std::ostringstream& ss) {
++        PROCESS_MEMORY_COUNTERS_EX pmc = {};
++        pmc.cb = sizeof(pmc);
++        if (K32GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&pmc), sizeof(pmc))) {
++          ss << " privMB=" << uint64_t(pmc.PrivateUsage) / 1048576 << " wsMB=" << uint64_t(pmc.WorkingSetSize) / 1048576;
++        }
++#ifndef _WIN64
++        // the address space walk: the game dies when no free block is big enough, so the largest one is the number that matters
++        uint64_t big = 0, total = 0;
++        uintptr_t a = 0x10000;
++        MEMORY_BASIC_INFORMATION mbi;
++        while (VirtualQuery(reinterpret_cast<void*>(a), &mbi, sizeof(mbi)) == sizeof(mbi)) {
++          if (mbi.State == MEM_FREE) {
++            big = std::max<uint64_t>(big, mbi.RegionSize);
++            total += mbi.RegionSize;
++          }
++          const uintptr_t next = uintptr_t(mbi.BaseAddress) + mbi.RegionSize;
++          if (next <= a) {
++            break;
++          }
++          a = next;
++        }
++        ss << " bigFreeMB=" << big / 1048576 << " freeMB=" << total / 1048576;
++#endif
++      }
++
++      void diagFrame(int64_t t) {
++        const uint64_t cmd = s_cmdTicks.load(std::memory_order_relaxed);
++        const uint64_t resp = s_diagRespTicks.load(std::memory_order_relaxed);
++        const uint64_t present = s_presentWaitTicks.load(std::memory_order_relaxed);
++        const uint64_t readback = s_diagReadbackUs.load(std::memory_order_relaxed);
++        DiagFrame& f = s_df;
++        if (f.lastT) {
++          const double ms = toUs(uint64_t(t - f.lastT)) / 1e3;
++          f.over50 += ms > 50.0 ? 1 : 0;
++          f.over100 += ms > 100.0 ? 1 : 0;
++          f.over250 += ms > 250.0 ? 1 : 0;
++          if (ms > f.maxMs) {
++            f.maxMs = ms;
++            // s_cmdTicks and s_presentWaitTicks restart at 0 each interval
++            f.worstSend = toUs(cmd >= f.cmd ? cmd - f.cmd : cmd) / 1e3;
++            f.worstWait = toUs(resp - f.resp) / 1e3;
++            f.worstPresent = toUs(present >= f.present ? present - f.present : present) / 1e3;
++            f.worstReadback = double(readback - f.readback) / 1e3;
++          }
++        }
++        f.lastT = t;
++        f.cmd = cmd;
++        f.resp = resp;
++        f.present = present;
++        f.readback = readback;
++      }
++
++      void diagLog() {
++        const bool all = s_diagLogs++ % kAllSitesEvery == 0;
++        {
++          std::ostringstream ss;
++          ss << "[BridgeDiag] " << kSide << " mem:";
++          appendMem(ss);
++#if defined(REMIX_BRIDGE_CLIENT)
++          int64_t n[kTypes];
++          ss << " | live objects:";
++          for (int i = 0; i < kTypes; ++i) {
++            n[i] = s_typeLive[i].load(std::memory_order_relaxed);
++            if (n[i]) {
++              ss << " " << kTypeNames[i] << "=" << n[i];
++            }
++          }
++          // grouped like the server's maps: gpD3DResources holds textures, buffers and surfaces
++          ss << " | resources=" << n[9] + n[10] + n[11] + n[12] + n[13] + n[14] << " other=" << n[15] + n[5] + n[2] + n[6] + n[7] + n[16];
++#else
++          ss << " | live handles: resources=" << s_handles[0].load(std::memory_order_relaxed)
++             << " other=" << s_handles[1].load(std::memory_order_relaxed);
++#endif
++          Logger::info(ss.str());
++        }
++        {
++          DiagFrame& f = s_df;
++          std::ostringstream ss;
++          ss << std::fixed << std::setprecision(1) << "[BridgeDiag] " << kSide << " frames: maxMs=" << f.maxMs << " over50ms=" << f.over50
++             << " over100ms=" << f.over100 << " over250ms=" << f.over250 << " | worst frame: "
++#if defined(REMIX_BRIDGE_CLIENT)
++             << "sendMs="
++#else
++             << "processMs="
++#endif
++             << f.worstSend << " responseWaitMs=" << f.worstWait << " presentWaitMs=" << f.worstPresent << " readbackMs=" << f.worstReadback;
++          Logger::info(ss.str());
++          f.maxMs = 0;
++          f.over50 = f.over100 = f.over250 = 0;
++        }
++#if defined(REMIX_BRIDGE_CLIENT)
++        {
++          std::ostringstream ss;
++          ss << std::fixed << std::setprecision(1);
++          std::lock_guard<std::mutex> lock(s_uploadLock);
++          const uint64_t now = GetTickCount64();
++          for (auto it = s_uploadSeen.begin(); it != s_uploadSeen.end();) {
++            it = now - it->second > kRepeatWindowMs ? s_uploadSeen.erase(it) : std::next(it);
++          }
++          for (auto it = s_contentSeen.begin(); it != s_contentSeen.end();) {
++            it = now - it->second > kRepeatWindowMs ? s_contentSeen.erase(it) : std::next(it);
++          }
++          for (auto it = s_released.begin(); it != s_released.end();) {
++            it = now - (it->second >> 8) > kReleaseWindowMs ? s_released.erase(it) : std::next(it);
++          }
++          ss << "[BridgeDiag] client surface uploads: n=" << s_uploadsN << " MB=" << double(s_uploadsBytes) / 1048576.0
++             << " repeats (same sampled fingerprint within 60 s): n=" << s_repeatsN << " MB=" << double(s_repeatsBytes) / 1048576.0
++             << " fingerprints=" << s_uploadSeen.size()
++             << " | full-data repeats within 60 s: n=" << s_fullRepeatsN << " MB=" << double(s_fullRepeatsBytes) / 1048576.0
++             << " sampledOnly=" << s_sampledOnlyN << " contents=" << s_contentSeen.size()
++             << " | re-uploaded after its surface was destroyed: n=" << s_recreatedN << " MB=" << double(s_recreatedBytes) / 1048576.0
++             << " after <1s/1-5s/5-30s/30-60s/60-300s=" << s_recreatedBucket[0] << "/" << s_recreatedBucket[1] << "/"
++             << s_recreatedBucket[2] << "/" << s_recreatedBucket[3] << "/" << s_recreatedBucket[4] << " released=" << s_released.size();
++          s_uploadsN = s_uploadsBytes = s_repeatsN = s_repeatsBytes = 0;
++          s_fullRepeatsN = s_fullRepeatsBytes = s_sampledOnlyN = s_recreatedN = s_recreatedBytes = 0;
++          for (int64_t& b : s_recreatedBucket) {
++            b = 0;
++          }
++          Logger::info(ss.str());
++        }
++        {
++          std::vector<CreateSite> v;
++          {
++            std::lock_guard<std::mutex> lock(s_siteLock);
++            v.assign(s_sites, s_sites + s_siteCount);
++            if (s_sites[kMaxSites - 1].ret) {
++              v.push_back(s_sites[kMaxSites - 1]);
++            }
++            for (CreateSite& s : s_sites) {
++              s.created = s.released = 0;
++            }
++          }
++          std::sort(v.begin(), v.end(), [](const CreateSite& a, const CreateSite& b) { return a.liveBytes > b.liveBytes; });
++          std::ostringstream ss;
++          ss << std::fixed << std::setprecision(1) << "[BridgeDiag] client create sites, " << (all ? "all" : "top 12 by MB")
++             << " (live n and MB, +created -released this interval):";
++          size_t shown = 0;
++          for (const CreateSite& s : v) {
++            if (!all && shown == 12) {
++              break;
++            }
++            ss << " " << format_string("0x%08x", unsigned(s.ret)) << " " << (s.type >= 0 && s.type < kTypes ? kTypeNames[s.type] : "?")
++               << " n=" << s.live << " MB=" << double(s.liveBytes) / 1048576.0 << " +" << s.created << " -" << s.released << ";";
++            ++shown;
++          }
++          Logger::info(ss.str());
++          SiteUp up[kMaxSites];
++          {
++            std::lock_guard<std::mutex> lock(s_uploadLock);
++            std::copy(s_siteUp, s_siteUp + kMaxSites, up);
++            std::fill(s_siteUp, s_siteUp + kMaxSites, SiteUp{});
++          }
++          std::sort(v.begin(), v.end(), [](const CreateSite& a, const CreateSite& b) { return a.created > b.created; });
++          std::ostringstream sd;
++          sd << std::fixed << std::setprecision(1) << "[BridgeDiag] client create site detail, " << (all ? "all" : "top 12 by created")
++             << " (textures: inner game frame<first four TS3W frames outside the device code, others: game caller<its callers, via hook; last desc WxH fmt levels usage pool; this interval: +created, upload MB, full-data"
++             << " repeat %, re-created after a destroy, of those within 1 s):";
++          shown = 0;
++          for (const CreateSite& s : v) {
++            if (!all && (shown == 12 || s.created == 0)) {
++              break;
++            }
++            const SiteUp& u = up[s.idx < kMaxSites ? s.idx : kMaxSites - 1];
++            if (s.chain.key) {
++              sd << " " << format_string("0x%08x<0x%08x<0x%08x<0x%08x<0x%08x via 0x%08x", unsigned(s.chain.inner), unsigned(s.chain.o[0]),
++                                         unsigned(s.chain.o[1]), unsigned(s.chain.o[2]), unsigned(s.chain.o[3]), unsigned(s.via)) << " ";
++            } else {
++              sd << " " << format_string("0x%08x<0x%08x<0x%08x via 0x%08x", unsigned(s.ret), unsigned(s.up), unsigned(s.up2), unsigned(s.via)) << " ";
++            }
++            sd
++               << (s.type >= 0 && s.type < kTypes ? kTypeNames[s.type] : "?") << " " << s.w << "x" << s.h << " fmt=" << s.fmt
++               << " L=" << s.levels << " u=" << format_string("0x%x", s.usage) << " p=" << s.pool << " +" << s.created
++               << " upMB=" << double(u.bytes) / 1048576.0 << " rep=" << (u.bytes ? 100.0 * double(u.repBytes) / double(u.bytes) : 0.0)
++               << "% recr=" << u.recreated << " recr1s=" << u.recreated1s << ";";
++            ++shown;
++          }
++          Logger::info(sd.str());
++          std::vector<GoneSite> g;
++          {
++            std::lock_guard<std::mutex> lock(s_uploadLock);
++            g.assign(s_goneSites, s_goneSites + s_goneCount);
++            if (s_goneSites[kMaxSites - 1].ret) {
++              g.push_back(s_goneSites[kMaxSites - 1]);
++            }
++            for (GoneSite& s : s_goneSites) {
++              s.gone = s.recreated = s.recreated1s = 0;
++            }
++          }
++          std::sort(g.begin(), g.end(), [](const GoneSite& a, const GoneSite& b) { return a.gone > b.gone; });
++          std::ostringstream sg;
++          sg << "[BridgeDiag] client destroy sites, " << (all ? "all" : "top 12 by destroyed")
++             << " (inner game frame<first four TS3W frames outside the device code; this interval: surfaces with uploaded content destroyed, contents"
++             << " uploaded again (counted when they come back, to the site that destroyed them), of those within 1 s):";
++          shown = 0;
++          for (const GoneSite& s : g) {
++            if (!all && (shown == 12 || (s.gone == 0 && s.recreated == 0))) {
++              break;
++            }
++            sg << " " << format_string("0x%08x<0x%08x<0x%08x<0x%08x<0x%08x", unsigned(s.chain.inner), unsigned(s.chain.o[0]),
++                                       unsigned(s.chain.o[1]), unsigned(s.chain.o[2]), unsigned(s.chain.o[3])) << " gone=" << s.gone
++               << " recr=" << s.recreated << " recr1s=" << s.recreated1s << ";";
++            ++shown;
++          }
++          Logger::info(sg.str());
++        }
++        {
++          std::vector<LockSite> v;
++          {
++            std::lock_guard<std::mutex> lock(s_lockSiteLock);
++            v.assign(s_lockSites, s_lockSites + s_lockSiteCount);
++            if (s_lockSites[kMaxSites - 1].ret) {
++              v.push_back(s_lockSites[kMaxSites - 1]);
++            }
++            for (LockSite& s : s_lockSites) {
++              s.locks = s.newCopies = s.newBytes = 0;
++            }
++          }
++          std::sort(v.begin(), v.end(), [](const LockSite& a, const LockSite& b) {
++            return a.locks != b.locks ? a.locks > b.locks : a.liveCopyBytes > b.liveCopyBytes;
++          });
++          std::ostringstream ss;
++          ss << std::fixed << std::setprecision(1) << "[BridgeDiag] client surface lock sites, " << (all ? "all" : "top 10 by locks")
++             << " (this interval: locks, new copies, their MB; MB of copies alive now):";
++          size_t shown = 0;
++          for (const LockSite& s : v) {
++            if (!all && shown == 10) {
++              break;
++            }
++            ss << " " << format_string("0x%08x", unsigned(s.ret)) << " locks=" << s.locks << " new=" << s.newCopies
++               << " newMB=" << double(s.newBytes) / 1048576.0 << " liveCopyMB=" << double(s.liveCopyBytes) / 1048576.0 << ";";
++            ++shown;
++          }
++          Logger::info(ss.str());
++        }
++#endif
++      }
++    }
++
++    thread_local uintptr_t t_lockSite = 0;
++
++    void setSite(void* ret, uint64_t bytes) {
++      t_site = uintptr_t(ret);
++      t_siteBytes = bytes;
++      t_siteVia = t_siteUp = t_siteUp2 = 0;
++      t_chain = {};
++      t_hasDesc = false;  // a failed create must not leave its desc to the next object
++      if (!enabled()) {
++        return;
++      }
++      uintptr_t c[3] = {};
++      gameCallers(c);
++      if (inExe(t_site)) {
++        const bool self = c[0] == t_site;
++        t_siteUp = self ? c[1] : c[0];
++        t_siteUp2 = self ? c[2] : c[1];
++      } else if (c[0]) {  // called through a hook: the game's caller is the site, the hook goes in via
++        t_siteVia = t_site;
++        t_site = c[0];
++        t_siteUp = c[1];
++        t_siteUp2 = c[2];
++      }
++    }
++
++    void setSiteDesc(uint32_t w, uint32_t h, uint32_t fmt, uint32_t levels, uint32_t usage, uint32_t pool) {
++      t_desc[0] = w;
++      t_desc[1] = h;
++      t_desc[2] = fmt;
++      t_desc[3] = levels;
++      t_desc[4] = usage;
++      t_desc[5] = pool;
++      t_hasDesc = true;
++      if (enabled() && t_site) {  // textures are keyed by their chain, so package loads split by who asked
++        uintptr_t c[8] = {};
++        const int n = gameCallers(c);
++        t_chain = chainOf(c, n, t_site);
++        t_site = t_chain.key;
++      }
++    }
++
++    uint8_t takeSite(uint32_t& bytes) {
++      const uintptr_t ret = t_site;
++      t_site = 0;
++      if (!ret || !enabled()) {
++        bytes = 0;
++        t_hasDesc = false;
++        return 0xFF;
++      }
++      bytes = uint32_t(std::min<uint64_t>(t_siteBytes, UINT32_MAX));
++      std::lock_guard<std::mutex> lock(s_siteLock);
++      const uint8_t i = slotFor(s_sites, s_siteCount, ret);
++      CreateSite& s = s_sites[i];
++      s.type = -1;  // set by the noteObject call that follows
++      s.idx = i;
++      s.via = t_siteVia;
++      s.up = t_siteUp;
++      s.up2 = t_siteUp2;
++      s.chain = t_hasDesc ? t_chain : Chain{};
++      if (t_hasDesc) {
++        s.w = t_desc[0];
++        s.h = t_desc[1];
++        s.fmt = t_desc[2];
++        s.levels = t_desc[3];
++        s.usage = t_desc[4];
++        s.pool = t_desc[5];
++      }
++      t_hasDesc = false;
++      return i;
++    }
++
++    void noteObject(int type, int delta, uint8_t site, uint32_t bytes) {
++      if (type >= 0 && type < kTypes) {
++        s_typeLive[type].fetch_add(delta, std::memory_order_relaxed);
++      }
++      if (site == 0xFF) {
++        return;
++      }
++      std::lock_guard<std::mutex> lock(s_siteLock);
++      CreateSite& s = s_sites[site];
++      if (delta > 0 && s.type < 0) {
++        s.type = type;
++      }
++      s.live += delta;
++      s.liveBytes += int64_t(delta) * int64_t(bytes);
++      (delta > 0 ? s.created : s.released)++;
++    }
++
++    uint8_t noteLock(uintptr_t site, bool newCopy, uint32_t bytes) {
++      std::lock_guard<std::mutex> lock(s_lockSiteLock);
++      const uint8_t i = slotFor(s_lockSites, s_lockSiteCount, site ? site : 2);  // 0x00000002: lock with no recorded caller
++      LockSite& s = s_lockSites[i];
++      s.locks++;
++      if (newCopy) {
++        s.newCopies++;
++        s.newBytes += bytes;
++        s.liveCopyBytes += bytes;
++      }
++      return i;
++    }
++
++    void noteCopyFreed(uint8_t site, uint32_t bytes) {
++      if (site == 0xFF) {
++        return;
++      }
++      std::lock_guard<std::mutex> lock(s_lockSiteLock);
++      s_lockSites[site].liveCopyBytes -= bytes;
++    }
++
++    uint64_t noteUploadData(const uint8_t* p, int pitch, uint32_t rowSize, uint32_t numRows, uint32_t w, uint32_t h, uint32_t fmt,
++                            uint8_t site) {
++      if (!p || !rowSize || !numRows) {
++        return 0;
++      }
++      // FNV-1a over the size, the format and 64 bytes of up to 16 rows spread over the image: cheap, and a repeat upload of the same
++      // texture matches; two different images that agree on every sampled byte also match (counted as a repeat)
++      uint64_t fp = 1469598103934665603ull;
++      const auto mix = [&fp](uint64_t v) {
++        for (int b = 0; b < 8; ++b) {
++          fp = (fp ^ ((v >> (8 * b)) & 0xFF)) * 1099511628211ull;
++        }
++      };
++      mix(w);
++      mix(h);
++      mix(fmt);
++      const uint32_t samples = std::min<uint32_t>(numRows, 16);
++      const uint32_t n = std::min<uint32_t>(rowSize, 64);
++      for (uint32_t i = 0; i < samples; ++i) {
++        const uint64_t row = samples > 1 ? uint64_t(i) * (numRows - 1) / (samples - 1) : 0;
++        const uint8_t* r = p + ptrdiff_t(row) * pitch;
++        for (uint32_t b = 0; b < n; ++b) {
++          fp = (fp ^ r[b]) * 1099511628211ull;
++        }
++      }
++      // CRC32C of every uploaded byte, four interleaved lanes (crc32 has a 3-cycle latency but issues once per cycle)
++      uint32_t c[4] = { 1, 2, 3, 4 };
++      for (uint32_t row = 0; row < numRows; ++row) {
++        const uint8_t* r = p + ptrdiff_t(row) * pitch;
++        uint32_t i = 0;
++        for (; i + 16 <= rowSize; i += 16) {
++          uint32_t v[4];
++          memcpy(v, r + i, 16);
++          c[0] = _mm_crc32_u32(c[0], v[0]);
++          c[1] = _mm_crc32_u32(c[1], v[1]);
++          c[2] = _mm_crc32_u32(c[2], v[2]);
++          c[3] = _mm_crc32_u32(c[3], v[3]);
++        }
++        for (; i < rowSize; ++i) {
++          c[0] = _mm_crc32_u8(c[0], r[i]);
++        }
++      }
++      const uint32_t crc = c[0] ^ ((c[1] << 8) | (c[1] >> 24)) ^ ((c[2] << 16) | (c[2] >> 16)) ^ ((c[3] << 24) | (c[3] >> 8));
++      const uint64_t key = (uint64_t(crc) << 32) | uint32_t(fp ^ (fp >> 32));  // a match needs the CRC and the sampled hash
++      const int64_t bytes = int64_t(rowSize) * int64_t(numRows);
++      const uint64_t now = GetTickCount64();
++      std::lock_guard<std::mutex> lock(s_uploadLock);
++      s_uploadsN++;
++      s_uploadsBytes += bytes;
++      if (site < kMaxSites) {
++        s_siteUp[site].bytes += bytes;
++      }
++      bool sampledRepeat = false;
++      {
++        const auto [it, inserted] = s_uploadSeen.try_emplace(fp, now);
++        if (!inserted) {
++          sampledRepeat = now - it->second <= kRepeatWindowMs;
++          it->second = now;
++        }
++      }
++      if (sampledRepeat) {
++        s_repeatsN++;
++        s_repeatsBytes += bytes;
++      }
++      bool fullRepeat = false;
++      {
++        const auto [it, inserted] = s_contentSeen.try_emplace(key, now);
++        if (!inserted) {
++          fullRepeat = now - it->second <= kRepeatWindowMs;
++          it->second = now;
++        }
++      }
++      if (fullRepeat) {
++        s_fullRepeatsN++;
++        s_fullRepeatsBytes += bytes;
++        if (site < kMaxSites) {
++          s_siteUp[site].repBytes += bytes;
++        }
++      } else if (sampledRepeat) {
++        s_sampledOnlyN++;
++      }
++      const auto gone = s_released.find(key);
++      if (gone != s_released.end()) {
++        const uint64_t dt = now - (gone->second >> 8);
++        const uint8_t gs = uint8_t(gone->second & 0xFF);
++        if (gs < s_goneCount || gs == kMaxSites - 1) {
++          s_goneSites[gs].recreated++;
++          s_goneSites[gs].recreated1s += dt < kBucketMs[0] ? 1 : 0;
++        }
++        int b = 0;
++        while (b < 4 && dt >= kBucketMs[b]) {
++          ++b;
++        }
++        s_recreatedBucket[b]++;
++        if (site < kMaxSites) {
++          s_siteUp[site].recreated++;
++          s_siteUp[site].recreated1s += b == 0 ? 1 : 0;
++        }
++        s_recreatedN++;
++        s_recreatedBytes += bytes;
++        s_released.erase(gone);
++      }
++      return key ? key : 1;
++    }
++
++    void noteSurfaceGone(uint64_t key) {
++      uintptr_t c[8] = {};
++      const int n = gameCallers(c);  // before the lock; Release runs the destructor synchronously, so the game's Release call is on the stack
++      const uint64_t now = GetTickCount64();
++      std::lock_guard<std::mutex> lock(s_uploadLock);
++      const Chain ch = chainOf(c, n, c[0]);
++      const uint8_t gs = slotFor(s_goneSites, s_goneCount, n ? uintptr_t(ch.key) : 2);  // 0x00000002: no game frame found
++      s_goneSites[gs].chain = ch;
++      s_goneSites[gs].up = c[1];
++      s_goneSites[gs].up2 = c[2];
++      s_goneSites[gs].gone++;
++      s_released[key] = (now << 8) | gs;
++    }
++
++    void noteHandles(int64_t resources, int64_t other) {
++      s_handles[0].store(resources, std::memory_order_relaxed);
++      s_handles[1].store(other, std::memory_order_relaxed);
++    }
++
+     void init(uint32_t intervalFrames) {
+       g_intervalFrames.store(intervalFrames, std::memory_order_relaxed);
+       if (intervalFrames) {
+@@ -445,6 +1057,7 @@ namespace bridge_util {
+       if (command < kMaxCommands) {
+         s_respWaitCount[command].fetch_add(1, std::memory_order_relaxed);
+         s_respWaitTicks[command].fetch_add(uint64_t(std::max<int64_t>(ticks, 0)), std::memory_order_relaxed);
++        s_diagRespTicks.fetch_add(uint64_t(std::max<int64_t>(ticks, 0)), std::memory_order_relaxed);
+       }
+     }
+ 
+@@ -467,6 +1080,7 @@ namespace bridge_util {
+     std::atomic<int64_t> g_pool[20];
+ 
+     void noteReadback(const uintptr_t (&stack)[3], uint32_t w, uint32_t h, uint32_t fmt, int64_t us) {
++      s_diagReadbackUs.fetch_add(uint64_t(std::max<int64_t>(us, 0)), std::memory_order_relaxed);
+       std::lock_guard<std::mutex> lock(s_readbackLock);
+       for (uint32_t i = 0; i < s_readbackCount; ++i) {
+         Readback& r = s_readbacks[i];
+@@ -510,10 +1124,12 @@ namespace bridge_util {
+         startInterval(writerFull, readerEmpty, t);
+         return;
+       }
++      diagFrame(t);
+       if (++s_frame.frames < interval) {
+         return;
+       }
+       logInterval(writerFull, readerEmpty, t);
++      diagLog();
+       startInterval(writerFull, readerEmpty, t);
+     }
+   }
+diff --git a/bridge/src/util/util_perfcounters.h b/bridge/src/util/util_perfcounters.h
+index f44110d..da40e19 100644
+--- a/bridge/src/util/util_perfcounters.h
++++ b/bridge/src/util/util_perfcounters.h
+@@ -89,6 +89,24 @@ namespace bridge_util {
+     // GetRenderTargetData (client): who asked (the caller's first three return addresses), the destination size and format, how long
+     void noteReadback(const uintptr_t (&stack)[3], uint32_t w, uint32_t h, uint32_t fmt, int64_t us);
+ 
++    // Diagnostics ([BridgeDiag] lines, one set per BridgePerf interval). Creation site: a device Create* call stores the game's
++    // return address and the object's estimated bytes; the next standalone object constructor on that thread takes them.
++    void setSite(void* ret, uint64_t bytes);
++    void setSiteDesc(uint32_t w, uint32_t h, uint32_t fmt, uint32_t levels, uint32_t usage, uint32_t pool);  // textures only
++    uint8_t takeSite(uint32_t& bytes);
++    void noteObject(int type, int delta, uint8_t site, uint32_t bytes);
++    // Lock site: the game's return address of the outermost LockRect (texture, cube texture or surface).
++    extern thread_local uintptr_t t_lockSite;
++    uint8_t noteLock(uintptr_t site, bool newCopy, uint32_t bytes);
++    void noteCopyFreed(uint8_t site, uint32_t bytes);
++    // Surface uploads: a sampled fingerprint and a full-data CRC find data the server got in the last 60 s; the returned content
++    // key goes to noteSurfaceGone when the surface is destroyed, so a later upload of the same content counts as a re-creation.
++    void noteSurfaceGone(uint64_t key);
++    uint64_t noteUploadData(const uint8_t* p, int pitch, uint32_t rowSize, uint32_t numRows, uint32_t w, uint32_t h, uint32_t fmt,
++                            uint8_t site);
++    // Server: live handles (textures, buffers, surfaces; everything else).
++    void noteHandles(int64_t resources, int64_t other);
++
+     // Failures of create calls whose result the client did not wait for are always reported.
+     void noteAsyncCreateFailure(uint16_t command, long hresult);
+ 

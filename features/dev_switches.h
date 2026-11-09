@@ -59,6 +59,17 @@
 //                         reflect: albedo x the mean light its texels took in its last solve (stairwell_bounce.h RoomFill)
 //   lot_build_share       the load stages of every streaming lot share one build budget per frame (lot_build_share.h); off = each
 //                         lot keeps its own 20 / 35 ms slice (6 ms while the camera moves)
+//   open_rooms_above      room 0 of a story takes the lamps of the story below's double-height rooms (no floor placed over them, their
+//                         walls built up): the upper half of their walls is lit (open_rooms_above.h, LevelLightShare ShareRoomZeroFromBelow)
+//   cross_room_shadows    a lamp of another room is tested against the furniture of the rooms joined to this one by an arch too, so its
+//                         furniture shadow runs on through the doorway (RtLampGpu::BlockerTable::Join); a room's own lamps as before
+//   tone_soft             physical rooms take the game's tone from a faint light on without its step at mean 0.01 (gpu_lamp_law.h ToneSoft)
+//   glass_share           light through glass loses WallOpenings::kWindowPass a pane, after the soft cut (RtLampProxy::PaneShare)
+//   room_bounce           the light a lit room sends through its arches, a form factor of each opening over the room's texels (arch_ambient.h)
+//   sun_lamp_level        the lamp terms keep the sun's part of the game's lamp curve: outdoor lamp light fades with the sun at dawn (terrain_lighting_policy.h LampLevel)
+//   chair_arm_caps        the GPU's copy of a box-type seat's blockers: short arms and a level cap, no streak past its shadow (rt_lamp_blockers.h DrawnBlockers)
+//   sphere_cut_fade       the game's record sphere ends a furniture band with a fade of RtLampGpu::kCutFadeM, not a step: no crisp round arc at a shadow's end
+//   live_object_tables    a kept room's blocker table follows its objects during a drag instead of waiting for the solve (outdoor_delta.cpp LiveTests)
 #include <atomic>
 
 namespace DevSwitches {
@@ -134,6 +145,15 @@ inline std::atomic<bool> borrowedLightAdapt{false};
 inline std::atomic<bool> softSlabEdges{false};
 inline std::atomic<bool> roomFill{false};
 inline std::atomic<bool> lotBuildShare{false};
+inline std::atomic<bool> openRoomsAbove{false};
+inline std::atomic<bool> crossRoomShadows{false};
+inline std::atomic<bool> toneSoft{false};
+inline std::atomic<bool> glassShare{false};
+inline std::atomic<bool> roomBounce{false};
+inline std::atomic<bool> sunLampLevel{false};
+inline std::atomic<bool> chairArmCaps{false};
+inline std::atomic<bool> sphereCutFade{false};
+inline std::atomic<bool> liveObjectTables{false};
 
 void Load(); // init thread, before the features start; logs the values
 
@@ -167,5 +187,16 @@ inline bool BorrowedLightAdapt() { return kCompiled ? borrowedLightAdapt.load(st
 inline bool SoftSlabEdges() { return kCompiled ? softSlabEdges.load(std::memory_order_relaxed) : kShipped; }
 inline bool RoomFill() { return kCompiled ? roomFill.load(std::memory_order_relaxed) : kShipped; }
 inline bool LotBuildShare() { return kCompiled ? lotBuildShare.load(std::memory_order_relaxed) : kShipped; }
+inline bool OpenRoomsAbove() { return kCompiled ? openRoomsAbove.load(std::memory_order_relaxed) : kShipped; }
+inline bool CrossRoomShadows() { return kCompiled ? crossRoomShadows.load(std::memory_order_relaxed) : kShipped; }
+inline bool ToneSoft() { return kCompiled ? toneSoft.load(std::memory_order_relaxed) : kShipped; }
+inline bool GlassShare() { return kCompiled ? glassShare.load(std::memory_order_relaxed) : kShipped; }
+// (with the menu's Light bounces between rooms, set every frame)
+inline std::atomic<bool> roomBounceOption{true};
+inline bool RoomBounce() { return roomBounceOption.load(std::memory_order_relaxed) && (kCompiled ? roomBounce.load(std::memory_order_relaxed) : kShipped); }
+inline bool SunLampLevel() { return kCompiled ? sunLampLevel.load(std::memory_order_relaxed) : kShipped; }
+inline bool ChairArmCaps() { return kCompiled ? chairArmCaps.load(std::memory_order_relaxed) : kShipped; }
+inline bool SphereCutFade() { return kCompiled ? sphereCutFade.load(std::memory_order_relaxed) : kShipped; }
+inline bool LiveObjectTables() { return kCompiled ? liveObjectTables.load(std::memory_order_relaxed) : kShipped; }
 
 } // namespace DevSwitches

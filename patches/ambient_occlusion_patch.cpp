@@ -25,6 +25,7 @@
 #include "patch_base.h"
 #include "apex_version.h"
 #include "apex_log.h"
+#include "capture_burst.h"
 #include "apex_util.h"
 #include "d3d9_bootstrap.h"
 #include "d3d9_hooks.h"
@@ -337,14 +338,14 @@ static_assert(kQualitySlices[0] == 4 && kQualitySlices[1] == 6 && kQualitySlices
               "kGtaoPsId lists the SLICES of kQualitySlices");
 
 struct Params {
-    float strength = 1.68f; // default tuned in the in-game configuration
-    float reach = 1.3f; // tuned default, scales the radii
-    float protect = 0.38f; // lamp-lit / bright pixels keep this share of their light
+    float strength = 1.5822f; // default tuned in the in-game configuration
+    float reach = 1.658f; // tuned default, scales the radii
+    float protect = 0.4647f; // lamp-lit / bright pixels keep this share of their light
     int quality = 2; // stored index into kQualitySlices (2 = High, 8 slices)
     bool inMapView = true; // the map view gets its own radii (else the shade fades out there, as it is far)
-    float distance = 351.0f;
+    float distance = 752.35f;
     // Sim Occlusion defaults (the same in the built-in profiles that have AO on)
-    float simStrength = 0.40f;
+    float simStrength = 0.2771f;
     bool simControls = true;
     float hairStrength = 0.0f;
     float simMaxShade = 0.11f;
@@ -1010,7 +1011,7 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
         {kContactK * s, kLargeKNear * s, kLargeKFar * s, kBlurTolerance},
         {kNearZ, 1.0f / (kFarZ - kNearZ), kIsoK, kIsoT},
         {0, 0, 0, 0},
-        {kDeadZone, 1.0f / (1.0f - kDeadZone), std::clamp(g.p.protect, 0.0f, 1.0f), g.showShade ? 1.0f : 0.0f},
+        {kDeadZone, 1.0f / (1.0f - kDeadZone), std::clamp(g.p.protect, 0.0f, 1.0f), g.showShade || CaptureBurst::ShadeAlone() ? 1.0f : 0.0f},
         {2.0f * tanX / W, -2.0f * tanY / H, -tanX, tanY},
         {std::cos(kPi / slices), std::sin(kPi / slices), 0, 0},
         {A, 1.0f / (nearZ * A), SceneDither::On() ? SceneDither::Strength() / 255.0f : 0.0f, SceneDither::GrainPhase()},
@@ -1080,7 +1081,7 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
 
 // PostScene effect (order kAmbientOcclusion): first, before edge smoothing, Depth Blur, bloom and the UI
 void AoEffect(IDirect3DDevice9* dev) {
-    if (!g.ready || (g.p.strength <= 0.0f && !g.showShade)) return;
+    if (!g.ready || (g.p.strength <= 0.0f && !g.showShade && !CaptureBurst::ShadeAlone())) return;
     if (!WorldSession::InWorld()) return; // main menu, load screens: never shaded
     IDirect3DTexture9* depth = DepthShare::Texture();
     if (!depth) return;
@@ -1116,6 +1117,7 @@ void AoEffect(IDirect3DDevice9* dev) {
         g.qBegin[qi]->Issue(D3DISSUE_END);
     }
     RunAo(dev, depth, bb, psGtao);
+    if (CaptureBurst::ShadeAlone()) CaptureBurst::ShadeDrawn();
     bb->Release();
     if (timed) {
         g.qEnd[qi]->Issue(D3DISSUE_END);

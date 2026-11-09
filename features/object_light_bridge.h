@@ -21,9 +21,14 @@ int RetintLamps(const std::vector<uintptr_t>& lights);
 // Object rigs gather their lights again at the next OnPresent (e.g. the moonlight changed)
 void RequestRigRefresh();
 bool RigRefreshPending(); // render thread: refresh request not yet dispatched
+// The room-mode rigs of that room (id 0: room 0) gather again at the next OnPresent: a lamp edit taken without its room's
+// solve (physical GPU room lamps). Any thread.
+void RegatherRigsOfRoom(uintptr_t tracker, int story, int id);
 std::string LampColourStatus();
 // The room a room-mode rig gathered its lights for (its last gather; null when not seen). Any thread.
 const void* RigRoom(uintptr_t rig);
+// A rig's box in the world: its centre and half extents; false when the rig is not readable. Any thread.
+bool RigBox(uintptr_t rig, float centre[3], float half[3]);
 // (F7) the outdoor lamps a room-mode rig took through its room's openings at its last gather, with their share and whether
 // the game kept them over its luminance cut; empty when none. Any thread.
 std::string RigOpeningNote(uintptr_t rig);

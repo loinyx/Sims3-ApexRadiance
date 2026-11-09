@@ -5,6 +5,9 @@
 #include <initializer_list>
 #include <array>
 #include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <iterator>
 
 int main() {
     using namespace RoomAmbientPolicy;
@@ -31,6 +34,8 @@ int main() {
     check(!NeedsAmbientSolve(1, true), "direct retint needs no solve");
     for (int state = 0; state <= 5; ++state)
         check(SolverOwnsAmbient(state) == (state >= 1 && state <= 3), "solver ownership");
+    for (int state = 0; state <= 5; ++state)
+        check(AmbientStepRunning(state) == (state == 3), "a marked or gathered room's ambient retaken");
     check(RebuildRoomList(false, false, false, true, false), "same lot new story manager invalidates cache");
     check(RebuildRoomList(false, false, true, false, false), "lot switch invalidates cache");
     check(!RebuildRoomList(false, false, false, false, false), "stable rooms keep cache");
@@ -125,6 +130,77 @@ int main() {
         float merged[4] = {};
         for (int room = 0; room < 4; ++room) AccumulateAmbient(merged, source, 1, 1, room + 1.0f);
         check(std::fabs(merged[0] / 10 - source[0]) < 1e-6f, "same map-scale group converges when on or off");
+    }
+    // A quick day/night switch's solve window (DayNightWindow): opens as the level leaves an end, stays open kAfterMs after a
+    // quick arrival, never opens for a slow dusk, opens again at the next switch (a new serial)
+    {
+        DayNightWindow w;
+        w.Note(1.0f, 1000);
+        check(!w.Open(1000) && w.serial == 0, "at night with no switch the window is closed");
+        w.Note(0.96f, 2000);
+        check(w.Open(2000) && w.serial == 1, "the level leaving night opens the window");
+        w.Note(0.0f, 2600);
+        check(w.Open(2600) && w.Open(12599) && !w.Open(12601), "a quick arrival keeps it open 10 s");
+        w.Note(0.4f, 20000);
+        check(w.Open(20000) && w.serial == 2, "the next departure opens a new window");
+        w.Note(0.5f, 23001);
+        check(!w.Open(23001), "a slow dusk (over 3 s between the ends) closes it");
+        w.Note(1.0f, 60000);
+        check(!w.Open(60000), "a slow dusk's arrival opens nothing");
+        w.Note(0.9f, 70000);
+        w.Note(1.0f, 70500);
+        check(w.Open(70500) && w.Open(80499), "a fade turned back counts as a switch");
+        DayNightWindow load;
+        load.Note(0.5f, 100);
+        check(!load.Open(100) && load.serial == 0, "a world loaded at twilight opens nothing until it reaches an end");
+        check(DayNightWindow::kLotMs + DayNightWindow::kDrainMs <= 33.0f, "at most 33 ms of solving a frame in the window");
+    }
+    // Replay of the first switch of the 17-18-28 recording (lot CF2DEA20, departure at 0): the played lot's solves in the
+    // game's order with the game's solve time of each (ms, its per-class total read every ~0.2 s). Before (measured): every
+    // repeat as it was (story 1 room 2 three times, room 3 twice, room 8 three times plus one thrown away) at the budget the
+    // steady pacing left, last end +15.53 s. After: the normalisation and retint resends gone (each room once, plus the repeats
+    // the game's window marks still cause: story 2 room 7 twice), at the window's 25 + 8 ms a frame over a 14 ms frame (73 fps
+    // before the switch).
+    {
+        struct Solve { const char* room; float ms; };
+        const Solve after[] = {{"s1r4", 37}, {"s3r10", 13}, {"s0r13", 28}, {"s2r7", 40}, {"s2r7", 80}, {"s1r1", 80}, {"s1r2", 668},
+                               {"s1r3", 119}, {"s2r12", 40}, {"s1r8", 100}, {"s2r5", 189}, {"s2r6", 100}};
+        const float frameMs = 14.0f, budget = DayNightWindow::kLotMs + DayNightWindow::kDrainMs;
+        float t = 0.0f, left = 0.0f, worst = 0.0f, bigEnd = 0.0f;
+        size_t next = 0;
+        while (next < std::size(after) || left > 0.0f) {
+            float spent = 0.0f;
+            while (spent < budget && (left > 0.0f || next < std::size(after))) {
+                if (left <= 0.0f) left = after[next++].ms;
+                const float step = std::min(left, budget - spent);
+                left -= step, spent += step;
+                if (left <= 0.0f && std::strcmp(after[next - 1].room, "s1r2") == 0) bigEnd = t + frameMs + spent;
+            }
+            worst = std::max(worst, spent);
+            t += frameMs + spent;
+        }
+        std::printf("replay 17-18-28 first switch: last room +%.2f s (measured before: +15.53 s), story 1 room 2 +%.2f s (before: +10.01 s, "
+                    "solved 3 times), at most %.0f ms of solving a frame\n", t / 1000.0f, bigEnd / 1000.0f, worst);
+        check(t < 3000.0f, "the replayed switch ends within 3 s");
+        check(worst <= 33.0f, "no replayed frame solves more than 33 ms");
+    }
+    // The day/night swap's ambient (SwapHolds): a stairwell room shows its own colour plus its neighbours' share, so the swap
+    // accepts the colour its kept solve showed over that solve's own colour, and nothing else
+    {
+        const float rec[2][4] = {{.20f, .21f, .22f, 1.0f}, {.10f, .11f, .12f, 1.0f}};
+        const float shared[4] = {.23f, .24f, .25f, 1.0f}, other[4] = {.30f, .30f, .30f, 1.0f};
+        float live[2][4];
+        std::memcpy(live, rec, sizeof rec);
+        check(SwapHolds(live, rec, nullptr, nullptr), "swap: a room holding its solve's pair is written");
+        std::memcpy(live[0], shared, sizeof shared);
+        check(!SwapHolds(live, rec, nullptr, nullptr), "swap: another own colour with no kept share is refused");
+        check(SwapHolds(live, rec, shared, rec[0]), "swap: a stairwell's share over its solve's own colour is written");
+        check(!SwapHolds(live, rec, shared, other), "swap: the share over another own colour than the record's is refused");
+        check(!SwapHolds(live, rec, other, rec[0]), "swap: a colour that is not the kept solve's share is refused");
+        live[1][0] += .01f;
+        check(!SwapHolds(live, rec, shared, rec[0]), "swap: a second colour not the record's is refused");
+        live[1][0] = NAN;
+        check(!SwapHolds(live, rec, shared, rec[0]), "swap: a NaN is refused");
     }
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

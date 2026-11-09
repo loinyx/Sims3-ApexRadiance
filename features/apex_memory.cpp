@@ -374,7 +374,7 @@ void Set(Slot* slot, uint64_t bytes, uint64_t items) {
     slot->bytes.store(bytes, std::memory_order_relaxed);
     slot->items.store(items, std::memory_order_relaxed);
     if (bytes > slot->peak.load(std::memory_order_relaxed)) slot->peak.store(bytes, std::memory_order_relaxed);
-    slot->at.store(GetTickCount() | 1, std::memory_order_relaxed);
+    slot->at.store(std::max<DWORD>(GetTickCount(), 1), std::memory_order_relaxed);
 }
 
 void NoteReleased(const char* what, uint64_t bytes) {

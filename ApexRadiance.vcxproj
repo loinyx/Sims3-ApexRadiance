@@ -125,12 +125,15 @@
     <ClCompile Include="features\frame_profiler.cpp" />
     <ClCompile Include="features\level_light_share.cpp" />
     <ClCompile Include="features\outdoor_delta.cpp" />
+    <ClCompile Include="features\gpu_room_lamps.cpp" />
     <ClCompile Include="features\rt_outdoor_lamps.cpp" />
     <ClCompile Include="features\rt_lamp_gpu.cpp" />
     <ClCompile Include="features\ground_shade_gpu.cpp" />
     <ClCompile Include="features\wall_heights.cpp" />
     <ClCompile Include="features\light_diag.cpp" />
     <ClCompile Include="features\recorder.cpp" />
+    <ClCompile Include="features\capture_video.cpp" />
+    <ClCompile Include="features\capture_burst.cpp" />
     <ClCompile Include="features\screen_watch.cpp" />
     <ClCompile Include="hotkeys.cpp" />
     <ClCompile Include="features\light_probe.cpp" />
@@ -148,6 +151,7 @@
     <ClCompile Include="features\unlit_rooms.cpp" />
     <ClCompile Include="features\probe_neutral.cpp" />
     <ClCompile Include="features\lamp_mark_filter.cpp" />
+    <ClCompile Include="features\object_legs.cpp" />
     <ClCompile Include="features\light_detail.cpp" />
     <ClCompile Include="features\room_light_queue.cpp" />
     <ClCompile Include="features\drag_lite.cpp" />
@@ -235,6 +239,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="apex_config.h" />
+    <ClInclude Include="apex_lighting_defaults.h" />
     <ClInclude Include="apex_presets.h" />
     <ClInclude Include="apex_changelog.h" />
     <ClInclude Include="apex_gui.h" />
@@ -275,15 +280,22 @@
     <ClInclude Include="features\level_light_share.h" />
     <ClInclude Include="features\outdoor_delta.h" />
     <ClInclude Include="features\outdoor_delta_model.h" />
+    <ClInclude Include="features\room_lamp_move.h" />
+    <ClInclude Include="features\room_light_tests.h" />
     <ClInclude Include="features\rt_outdoor_lamps.h" />
+    <ClInclude Include="features\gpu_room_lamps.h" />
     <ClInclude Include="features\rt_lamp_gpu.h" />
     <ClInclude Include="features\ground_shade_gpu.h" />
     <ClInclude Include="features\rt_lamp_model.h" />
     <ClInclude Include="features\rt_lamp_proxy.h" />
+    <ClInclude Include="features\rt_lamp_blockers.h" />
+    <ClInclude Include="features\phys_lamp_pick.h" />
+    <ClInclude Include="features\phys_tiles.h" />
     <ClInclude Include="features\gpu_lamp_law.h" />
     <ClInclude Include="framework\high_alloc.h" />
     <ClInclude Include="shaders\rt_lamps_hlsl.h" />
     <ClInclude Include="features\lamp_visibility.h" />
+    <ClInclude Include="features\open_rooms_above.h" />
     <ClInclude Include="features\wall_openings.h" />
     <ClInclude Include="features\inner_retry.h" />
     <ClInclude Include="features\cut_close_hold.h" />
@@ -306,6 +318,9 @@
     <ClInclude Include="features\bloom_alpha_probe.h" />
     <ClInclude Include="features\atrium_hold.h" />
     <ClInclude Include="features\screen_watch.h" />
+    <ClInclude Include="features\capture_video.h" />
+    <ClInclude Include="features\capture_burst.h" />
+    <ClInclude Include="features\frame_classes.h" />
     <ClInclude Include="features\lot_lod_streaming.h" />
     <ClInclude Include="features\lot_detail_range.h" />
     <ClInclude Include="features\lot_object_throttle.h" />
@@ -315,6 +330,7 @@
     <ClInclude Include="features\unlit_rooms.h" />
     <ClInclude Include="features\probe_neutral.h" />
     <ClInclude Include="features\lamp_mark_filter.h" />
+    <ClInclude Include="features\object_legs.h" />
     <ClInclude Include="features\light_detail.h" />
     <ClInclude Include="features\room_light_queue.h" />
     <ClInclude Include="features\lot_lighting_motion.h" />

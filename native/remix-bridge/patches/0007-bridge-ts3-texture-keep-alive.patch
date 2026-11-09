@@ -1,0 +1,199 @@
+0007: client.ts3TextureKeepAliveSec (internal 0013, TS3 only, opt-in, off): a filter for unforced ResourceCache_Trim 0x732E90 calls that keeps a texture entry until N s after Trim first saw it. Hook written only when the bytes match.
+
+Applies after 0001-0006 on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only).
+
+diff --git a/bridge/src/client/client_options.h b/bridge/src/client/client_options.h
+index 10eafd1..ddb0a1a 100644
+--- a/bridge/src/client/client_options.h
++++ b/bridge/src/client/client_options.h
+@@ -91,6 +91,13 @@ namespace ClientOptions {
+     return shift;
+   }
+ 
++  // The Sims 3 (TS3W.exe 1.67) only: the ResourceCache keeps an unreferenced texture this many seconds before its trim may drop
++  // it (0 = off, as the game: dropped at the next trim and often loaded again seconds later).
++  inline uint32_t getTs3TextureKeepAliveSec() {
++    static const uint32_t sec = bridge_util::Config::getOption<uint32_t>("client.ts3TextureKeepAliveSec", 0);
++    return sec;
++  }
++
+   // If set, the space for data for dynamic buffer updates will be preallocated on data channel
+   // and redundant copy will be avioded. However, because D3D applications are not obliged
+   // to write the entire locked region this optimization is NOT considered safe and may
+diff --git a/bridge/src/client/d3d9_lss.cpp b/bridge/src/client/d3d9_lss.cpp
+index b7b478f..a8f35ed 100644
+--- a/bridge/src/client/d3d9_lss.cpp
++++ b/bridge/src/client/d3d9_lss.cpp
+@@ -24,6 +24,8 @@
+ #include "version.h"
+ 
+ #include "d3d9_lss.h"
++#include <mutex>
++#include <unordered_map>
+ #include "d3d9_surface.h"
+ #include "d3d9_texture.h"
+ #include "d3d9_cubetexture.h"
+@@ -652,6 +654,155 @@ static void applyTs3TextureCachePatch() {
+   Logger::info(format_string("[Ts3TexCache] Texture_CacheSizeBytes 0x619DB0 patched: MANAGED texture pixel bytes count >> %u", shift));
+ }
+ 
++// TS3W.exe 1.67: ResourceCache_Trim 0x732E90 (thiscall: amount, filter, force) drops unreferenced resources oldest first while
++// held + flush > budget and flush >= CacheOverflowBudget. The in-use part of the cache alone is over the 200 MB budget, so every
++// texture that goes unreferenced is dropped at the next ResourceManager_Update and often loaded again seconds later (al309: ~1M
++// surfaces in 27 min, 86% loaded again). The filter keeps texture entries for client.ts3TextureKeepAliveSec seconds.
++namespace ts3keepalive {
++  struct Key {
++    uint32_t d[4];  // instance lo, instance hi, type, group (docs/39)
++    bool operator==(const Key& o) const {
++      return memcmp(d, o.d, sizeof(d)) == 0;
++    }
++  };
++  struct KeyHash {
++    size_t operator()(const Key& k) const {
++      return size_t(k.d[0] ^ (k.d[1] * 0x9E3779B1u) ^ (k.d[2] * 31u) ^ k.d[3]);
++    }
++  };
++  struct Seen {
++    uint64_t first, last;  // ms: first seen on the flush list this time, last seen there
++  };
++  std::unordered_map<Key, Seen, KeyHash> s_seen;
++  std::mutex s_lock;
++  uint64_t s_keepMs = 0, s_lastPurgeMs = 0, s_lastLogMs = 0;
++  uint64_t s_calls = 0, s_kept = 0, s_aged = 0, s_other = 0, s_ticks = 0;  // since the last log
++  int64_t s_freq = 1;
++
++  struct Filter {
++    virtual void unused() {}
++    virtual bool shouldEvict(const uint32_t* key);  // vtable slot 1, thiscall with one argument, as Trim calls it (0x732F73)
++  };
++
++  bool Filter::shouldEvict(const uint32_t* key) {
++    LARGE_INTEGER t0, t1;
++    QueryPerformanceCounter(&t0);
++    const uint64_t now = GetTickCount64();
++    std::lock_guard<std::mutex> lock(s_lock);
++    bool evict = true;
++    ++s_calls;
++    if (key[2] != 0x00B2D882u) {
++      ++s_other;
++    } else {
++      Key k;
++      memcpy(k.d, key, sizeof(k.d));
++      const auto [it, inserted] = s_seen.try_emplace(k, Seen { now, now });
++      if (!inserted && now - it->second.last > 1500) {
++        it->second.first = now;  // not seen for a while: it was used again (or trims did not reach it), the wait starts over
++      }
++      it->second.last = now;
++      if (now - it->second.first >= s_keepMs) {
++        s_seen.erase(it);
++        ++s_aged;
++      } else {
++        evict = false;
++        ++s_kept;
++      }
++    }
++    if (now - s_lastPurgeMs > 5000) {
++      for (auto it = s_seen.begin(); it != s_seen.end();) {
++        it = now - it->second.last > 30000 ? s_seen.erase(it) : std::next(it);
++      }
++      s_lastPurgeMs = now;
++    }
++    QueryPerformanceCounter(&t1);
++    s_ticks += uint64_t(t1.QuadPart - t0.QuadPart);
++    if (now - s_lastLogMs >= 30000) {
++      if (s_lastLogMs) {
++        Logger::info(format_string("[Ts3KeepAlive] last %.0f s: filter calls %llu, texture entries kept %llu times, aged out %llu, "
++                                   "other entries %llu, tracked %u, filter time %.1f ms", double(now - s_lastLogMs) / 1000.0,
++                                   s_calls, s_kept, s_aged, s_other, unsigned(s_seen.size()), double(s_ticks) * 1000.0 / double(s_freq)));
++      }
++      s_calls = s_kept = s_aged = s_other = s_ticks = 0;
++      s_lastLogMs = now;
++    }
++    return evict;
++  }
++
++  Filter g_filter;
++}
++
++static uintptr_t s_ts3FilterPtr = 0;
++static uintptr_t s_ts3TrimResume = 0x732E96;
++
++// Entry hook of ResourceCache_Trim: [esp+4] amount, [esp+8] filter, [esp+0xC] force (byte). No filter and not forced: ours.
++__declspec(naked) static void ts3TrimShim() {
++  __asm {
++    cmp dword ptr [esp + 8], 0
++    jne resume
++    cmp byte ptr [esp + 0xC], 0
++    jne resume
++    push eax
++    mov eax, s_ts3FilterPtr
++    mov dword ptr [esp + 0xC], eax
++    pop eax
++  resume:
++    sub esp, 0x248
++    jmp dword ptr [s_ts3TrimResume]
++  }
++}
++
++static void applyTs3TextureKeepAlivePatch() {
++  static bool done = false;
++  if (done) {
++    return;
++  }
++  done = true;
++  const uint32_t sec = ClientOptions::getTs3TextureKeepAliveSec();
++  if (sec == 0) {
++    return;
++  }
++  if (sec > 600 || uintptr_t(GetModuleHandleW(nullptr)) != 0x400000) {
++    Logger::warn(format_string("[Ts3KeepAlive] not applied: %u s (max 600) or the exe is not at 0x400000", sec));
++    return;
++  }
++  static const uint8_t want[8] = { 0x81, 0xEC, 0x48, 0x02, 0x00, 0x00, 0x53, 0x55 };  // sub esp,0x248; push ebx; push ebp
++  uint8_t* const p = reinterpret_cast<uint8_t*>(0x732E90);
++  MEMORY_BASIC_INFORMATION mbi = {};
++  if (!VirtualQuery(p, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT || memcmp(p, want, sizeof(want)) != 0) {
++    Logger::warn("[Ts3KeepAlive] not applied: the code at 0x732E90 is not TS3W 1.67's ResourceCache_Trim (another patch?)");
++    return;
++  }
++  LARGE_INTEGER f;
++  QueryPerformanceFrequency(&f);
++  ts3keepalive::s_freq = f.QuadPart ? f.QuadPart : 1;
++  ts3keepalive::s_keepMs = uint64_t(sec) * 1000;
++  s_ts3FilterPtr = uintptr_t(&ts3keepalive::g_filter);
++  uint8_t patch[8];
++  const int32_t rel = int32_t(uintptr_t(&ts3TrimShim) - (uintptr_t(p) + 5));
++  patch[0] = 0xE9;
++  memcpy(patch + 1, &rel, 4);
++  patch[5] = 0x90;
++  patch[6] = want[6];
++  patch[7] = want[7];
++  DWORD old = 0;
++  if (!VirtualProtect(p, sizeof(want), PAGE_EXECUTE_READWRITE, &old)) {
++    Logger::warn("[Ts3KeepAlive] not applied: VirtualProtect failed");
++    return;
++  }
++  LONG64 newBytes, oldBytes;
++  memcpy(&newBytes, patch, 8);
++  memcpy(&oldBytes, want, 8);
++  const LONG64 seen = InterlockedCompareExchange64(reinterpret_cast<volatile LONG64*>(p), newBytes, oldBytes);  // 0x732E90 is 16-aligned
++  VirtualProtect(p, sizeof(want), old, &old);
++  FlushInstructionCache(GetCurrentProcess(), p, sizeof(want));
++  if (seen != oldBytes) {
++    Logger::warn("[Ts3KeepAlive] not applied: ResourceCache_Trim changed while patching");
++    return;
++  }
++  Logger::info(format_string("[Ts3KeepAlive] ResourceCache_Trim 0x732E90 hooked: unreferenced textures kept %u s", sec));
++}
++
+ IDirect3D9* LssDirect3DCreate9(UINT SDKVersion) {
+   if (!shouldAttachToCurrentProcess()) {
+     return orig_Direct3DCreate9(SDKVersion);
+@@ -664,6 +815,7 @@ IDirect3D9* LssDirect3DCreate9(UINT SDKVersion) {
+   // Attempt to restore the exeption handler.
+   SetupExceptionHandler();
+   applyTs3TextureCachePatch();
++  applyTs3TextureKeepAlivePatch();
+ 
+   auto retval = new Direct3D9Ex_LSS((IDirect3D9*) nullptr);
+   InitServer();

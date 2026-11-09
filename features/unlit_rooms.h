@@ -13,6 +13,9 @@ void OnPresent(); // render thread: relights the rooms and objects a moment afte
 void OnWorldChanged(); // render thread: discard room/lot identities from the previous world
 void OnRoomsChanged(); // render thread: a loaded lot or story manager changed
 void OnRoomChanged(uintptr_t room); // render thread: structure changed; address is a cache key, never dereferenced
+// Any thread (room_bounce): the part of a room's ambient (+0x110) its lamps gave, its base taken out; false: no lit room of ours (a lampless
+// room holds the colour alone, and bounces nothing)
+bool LampAmbient(const void* room, float out[3]);
 // Any thread: the weight of the ambient cube on furniture drawn by Apex's indoor-object shader (lot_light_bridge): the
 // Brightness (blended by the night level) while on, 1 while off (their lamp light comes from the room maps, not this)
 float FurnitureAmbient();
@@ -39,9 +42,24 @@ void SetDrawDark(bool dark);
 void RigsAgainIn(unsigned ms);
 bool RigRefreshPending(); // render thread: scheduled room-object refresh not yet dispatched
 bool IsDarkRoomLight(const float* colour, const float* dir);
-// Light tree thread: on while LevelLightShare runs the game's ambient step on a room only to read its result (the room's
-// fields are put back after): the base is added as usual, but not remembered as what the room holds
-void SetAmbientProbe(bool on);
+// On while LevelLightShare runs the game's ambient step on a room only to read its result (the room's fields are put back
+// after): the base is added as usual, but not remembered as what the room holds. Per thread (a solve on another thread notes
+// its base meanwhile); returns the thread's previous value, which the probe puts back
+bool SetAmbientProbe(bool on);
+// Light tree thread (physical indoor lamps, S8): a lit indoor room's ambient (+0x110, +0x120) taken again from its lamps now by
+// the game's ambient step with Rooms at Night's base, without a solve; norm: the normalisation that step gives (the room keeps
+// its own until its solve). False (why): left as its solve set it
+bool RetakeAmbient(unsigned char* room, float& norm, const char*& why);
+// Light tree thread (the instant day/night switch, OutdoorDelta): true when the room holds pair's second colour (+0x120) as its
+// solve's ambient step gave it with Rooms at Night's base (its base record); ce: that base's colour; own: the record's own
+// colour (+0x110 as that step gave it); shared: pair's own colour is another one (LevelLightShare wrote a share over it)
+bool SolveBase(const unsigned char* room, const float (*pair)[4], float* ce, float* own, bool& shared);
+// The room's ambient put back to a cached solve's pair, written as RetakeAmbient writes it (+0x110, +0x120; the base record takes
+// own and the second colour): only while the room holds its record's values (RoomAmbientPolicy::SwapHolds; shown / shownOwn: the
+// own colour its kept solve showed and that solve's record), is not being solved and the base's colour is still ce. False (why):
+// unchanged. was / wasOwn (optional): the pair it showed and the record's own colour before
+bool RestoreAmbient(unsigned char* room, const float (*pair)[4], const float* own, const float* ce, const char*& why, const float* shown = nullptr,
+                    const float* shownOwn = nullptr, float (*was)[4] = nullptr, float* wasOwn = nullptr);
 std::string Status();
 std::string SettingsText(); // development tools (F6): the sliders now and what they give furniture
 }

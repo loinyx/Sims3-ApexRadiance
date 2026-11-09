@@ -17,7 +17,8 @@
 // CPU DXT1 / DXT5 encoders, by the resource lookup cache's write epochs (features/resource_cache.h) on the writable
 // package database's direct record write, and by the Frame Profiler and the object lookup index (features/object_index.h)
 // on the object-by-ID lookup, and by the scene node budget (features/scene_budget.h) on the scene node destructor, AddNode
-// and the holder teardown. Thread-safe (Install / Remove serialise on one mutex; Next is lock-free).
+// and the holder teardown, and by the room light queue and the lamp mark filter (features/lamp_mark_filter.h) on the light object
+// removal. Thread-safe (Install / Remove serialise on one mutex; Next is lock-free).
 #include <atomic>
 #include <cstdint>
 #include <string>
@@ -51,11 +52,13 @@ enum class Site : int {
     ProbeSpecularWrite,   // 0x006B4B10 thiscall(probe, rt), ret 4: its specular cube writer; prologue 81 EC F4 00 00 00 (sub esp,0F4h)
     TreeSetLevel,         // 0x0070D370 thiscall(cluster, level), ret 4: the SpeedTree cluster's level setter (vfunc +0x50); prologue 8B 44 24 04 56 50
     TreeSetCustomRig,     // 0x0070D800 thiscall(cluster, key, arg), ret 8: its custom light rig setter (vfunc +0x6C); prologue 8B 44 24 04 56 8B F1
+    LightObjectAttach,    // 0x006B1430 thiscall(idLo, idHi, ResourceKey*), ret 0xC: an object's lighting record from its LITE; prologue 55 8B EC 83 E4 F0 (as the DXT encoders)
+    LightObjectMove,      // 0x006B09C0 thiscall(idLo, idHi, float4x4*, a, b, c), ret 0x18: its lights and blockers to the object's matrix; prologue 83 EC 10 8B 44 24 14 (sub esp,10h; mov eax,[esp+14h])
     Count
 };
 // lower = outer. FastDxt: the DXT sites only; ResourceCache: the DpfWriteDirect site only; ObjectIndex: the ObjectById
 // site only; SceneBudget: the three scene node sites only (features/scene_budget.h).
-enum class Layer : int { FrameProfiler, FastDxt, ResourceCache, ObjectIndex, SceneBudget, LevelLightShare, FastCas, FastCrc, ScriptMath, ObjectIdMap, RoomLightQueue, LotObjectThrottle, ProbeNeutral, RenderObjectMap, TreeLightRig, Count };
+enum class Layer : int { FrameProfiler, FastDxt, ResourceCache, ObjectIndex, SceneBudget, LevelLightShare, FastCas, FastCrc, ScriptMath, ObjectIdMap, RoomLightQueue, LotObjectThrottle, ProbeNeutral, RenderObjectMap, TreeLightRig, LampMarkFilter, Count };
 
 // Installs `hook` as `layer` of `site` (true when installed, or already installed). error: why not.
 bool Install(Site site, Layer layer, void* hook, std::string* error);

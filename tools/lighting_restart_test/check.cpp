@@ -164,9 +164,11 @@ void Test() {
 }
 namespace Fallback {
 constexpr int kSolveAsks=3;
-struct Slot {bool used=true,built=true,ok=true,relit=true;};
+constexpr DWORD kSolveAskMs=10000,kSolveRetryMs=60000;
+struct Slot {bool used=true,built=true,ok=true,relit=true;uintptr_t mgr=0;};
 std::vector<std::unique_ptr<Slot>> g_slots;
 std::vector<int> g_jobs;
+bool ActiveJobs() { return !g_jobs.empty(); } // (the active lot's jobs: the test's jobs are all the active lot's)
 std::atomic<bool> g_option{true},g_watch{true},g_on{true};
 bool g_restartRequested=false,g_budgetOut=false,g_proxyUsed=true;
 struct Cover {bool full=true;} g_cover;
@@ -199,6 +201,8 @@ void Test() {
     Check(!RestartIncomplete() && RestartPending(),"a new attempt rearms pending work after fallback");
     Ask ask;ask.count=3;ask.logged=true;
     for(int state=0;state<6;state++)Check(RestartSolveTerminal(ask,state,false)==(state==4||state==5),"exhausted sends wait for a completed native solve");
+    ask.at=1000;Check(!AskDue(ask,ask.at+59000)&&AskDue(ask,ask.at+60001),"exhausted sends go on once a minute");
+    {Ask fresh;Check(AskDue(fresh,1),"a first send goes at once");fresh.at=1000,fresh.count=1;Check(!AskDue(fresh,9000)&&AskDue(fresh,11001),"the first sends 10 s apart");}
     ask.logged=false;Check(!RestartSolveTerminal(ask,4,false),"the final dispatched request is not terminal yet");
     ask.count=0;Check(RestartSolveTerminal(ask,4,true),"memory budget uses the native completed solve as fallback");
     Check(!RestartSolveTerminal(ask,0,true),"memory budget does not finish a native solve early");

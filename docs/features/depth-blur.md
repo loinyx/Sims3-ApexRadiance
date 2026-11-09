@@ -11,7 +11,7 @@ Color's *Emphasize* and Water Reflections read.
 | | |
 |---|---|
 | Availability | Released in 2.1.0 or earlier (present in the first version in this repository). Loaded-world and loading-window guard: Released in 2.6.0. The shared world gate (the world drawn) and the frozen-screen pause: Released in 2.7.0. The full-resolution colour copy shared with the other screen passes: Released in 2.15.3 |
-| Default | On for new configurations; Fixed focus |
+| Default | On for new configurations; Auto focus |
 | Menu | Image > Depth Blur; Overview > Image > Depth Blur |
 | Configuration | `[patches.DepthBlur]` in `ApexRadiance.toml` |
 | Source | [`patches/depth_blur_patch.cpp`](../../patches/depth_blur_patch.cpp), [`features/post_scene.cpp`](../../features/post_scene.cpp), [`features/world_session.h`](../../features/world_session.h), [`features/map_view.cpp`](../../features/map_view.cpp), [`framework/d3d9_extra_hooks.cpp`](../../framework/d3d9_extra_hooks.cpp) |
@@ -46,12 +46,12 @@ with a per-pixel radius that grows with distance from the focus, and blended bac
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Depth Blur (card switch) | `enabled` | bool | on | | Turns the effect on |
-| Focus | `focoAuto` | bool | Fixed (`false`) | Auto, Fixed | Auto keeps what the camera looks at sharp; Fixed starts the blur at a set distance. Auto falls back to Fixed when no 1x1 float render target exists |
+| Focus | `focoAuto` | bool | Auto (`true`) | Auto, Fixed | Auto keeps what the camera looks at sharp; Fixed starts the blur at a set distance. Auto falls back to Fixed when no 1x1 float render target exists |
 | Blur amount | `quantidade` | float | 100% | 0 to 100% | Largest blur radius = amount x 1% of the screen height (21.6 px at 2160p, 10.8 px at 1080p at 100%). 0% does no GPU work |
 | Sharp area (Auto) | `areaNitida` | enum | Large (2) | Small, Medium, Large | Blur starts at S and is full at T times the focus distance: (1.5, 4), (2, 6), (3, 10) |
-| Distance (Fixed) | `distancia` | float | 0.318 | Near 0.25, Medium 0.349, Far 0.45 | Start of the ramp on the Fixed curve. The default matches none of the three steps |
-| Fine-tune distance (Fixed) | `distancia` | float | 64% (0.318) | 0 to 100% (stored 0 to 0.5) | The same key as Distance, as a slider |
-| Transition (Fixed) | `transicao` | float | 58% (0.288) | 2 to 100% (stored 0.01 to 0.5) | Ramp length after the start; lower gives a sharper line |
+| Distance (Fixed) | `distancia` | float | 0.348 | Near 0.25, Medium 0.349, Far 0.45 | Start of the ramp on the Fixed curve. The default is the Medium step, within rounding |
+| Fine-tune distance (Fixed) | `distancia` | float | 70% (0.348) | 0 to 100% (stored 0 to 0.5) | The same key as Distance, as a slider |
+| Transition (Fixed) | `transicao` | float | 12% (0.061) | 2 to 100% (stored 0.01 to 0.5) | Ramp length after the start; lower gives a sharper line |
 | Sharp in map view | `offInMapView` | bool | on | | Fades the blur out over 0.3 s while the map view is open |
 | Advanced > Strength | `forca` | float | 100% | 0 to 100% | Multiplies the blur amount everywhere (both modes) |
 | How the blur looks > Quality | `qualidade` | enum | Medium (1) | Low, Medium, High, Ultra | Gather taps per side: 4, 6, 8, 12 (9, 13, 17, 25 per axis) |
@@ -313,7 +313,7 @@ pixels) with `R = amount x 1% of the screen height / 2`, so the look is the same
 
 Fixed distance in metres (near 0.25, F = 1000; the same setting moves about 20% with near 0.2 or 0.3, that is, with
 zoom): `z = near * (1 + lin * (F - 1)) / (1 - lin)`. Near 0.25 is about 84 m, Medium 0.349 about 134 m, Far 0.45 about
-205 m. The default start 0.318 is about 117 m, with full blur at 0.606 (about 385 m).
+205 m. A start of 0.318 is about 117 m, with full blur at 0.606 (about 385 m).
 
 ### Prep (`PrepPS`, one half-res texel per 2x2 block)
 

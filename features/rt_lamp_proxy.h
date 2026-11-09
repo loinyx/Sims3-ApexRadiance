@@ -25,7 +25,10 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <utility>
 #include <vector>
+#include "open_rooms_above.h"
+#include "wall_openings.h"
 
 namespace RtLampProxy {
 
@@ -38,13 +41,16 @@ struct Opening {
     float u0 = 0.0f, u1 = 1.0f; // along the edge from its low end
     float sill = 0.0f;          // m over the edge's base
     float head[kProfile] = {2.2f, 2.2f, 2.2f, 2.2f, 2.2f};
+    bool operator==(const Opening&) const = default;
 };
 struct Edge {
     float x0 = 0, z0 = 0, x1 = 0, z1 = 0; // lot space: its low end, its high end
     float foot = 0, base = 0;
     float topL = 3, topM = 3, topR = 3;
     bool open = false;
+    uint8_t glazed = 0; // (the padding after open: the layout scenes hold) its opening passes light through glass (PaneCount)
     Opening o;
+    bool operator==(const Edge&) const = default;
 };
 struct Story {
     int story = 0;
@@ -53,12 +59,16 @@ struct Story {
     std::vector<float> floorY;   // per tile (iz * w + ix), kNoFloor = none
     std::vector<uint8_t> roofed; // per tile: bit q = quadrant q under a roof or a ceiling
     std::vector<float> ceil;     // per tile: the roof's height (floor + 3)
-    std::vector<uint8_t> placed; // per tile: bit q = quadrant q holds a placed floor (stories 1 and up)
+    std::vector<uint8_t> placed; // per tile: bit q = quadrant q holds a placed floor (stories 1 and up; empty = not read)
+    std::vector<uint8_t> removed; // per tile: bit q = quadrant q's floor was removed, an opening (RemovedFloorKey; as placed)
+    std::vector<int32_t> room;   // per tile, 4: the quadrants' room ids (empty = not known; Build's open tops)
     float plane = kNoFloor;      // the story's lowest floor (a placed quadrant with no tile floor stands at it)
+    bool operator==(const Story&) const = default; // (RtOutdoorLamps BuildProxy: a lot read again the same keeps its generation)
 };
 struct Lot {
     float worldToLot[4][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}}; // rows (mgr+0xE0): lot = world x rows
     std::vector<Story> stories;
+    bool operator==(const Lot&) const = default;
 };
 
 inline void ToLot(const Lot& l, const float w[3], float out[3]) {
@@ -68,7 +78,84 @@ inline void ToLot(const Lot& l, const float w[3], float out[3]) {
 inline void DirToLot(const Lot& l, const float w[3], float out[3]) {
     for (int k = 0; k < 3; k++) out[k] = w[0] * l.worldToLot[0][k] + w[1] * l.worldToLot[1][k] + w[2] * l.worldToLot[2][k];
 }
+// A glazed opening as the GPU's table holds it (BlockerTable::AppendPanes): its span in lot space, its sill and head
+struct Pane {
+    float x0, z0, x1, z1, y0, y1;
+};
+inline void PanesOf(const Lot& lot, std::vector<Pane>& out) {
+    out.clear();
+    for (const Story& s : lot.stories)
+        for (const Edge& e : s.edges) {
+            if (!e.open || !e.glazed) continue;
+            const float dx = e.x1 - e.x0, dz = e.z1 - e.z0;
+            out.push_back({e.x0 + e.o.u0 * dx, e.z0 + e.o.u0 * dz, e.x0 + e.o.u1 * dx, e.z0 + e.o.u1 * dz, e.base + e.o.sill, e.base + *std::max_element(e.o.head, e.o.head + kProfile)});
+        }
+}
+// The panes the segment a -> b crosses (T3dDensePS PaneCount, its operations). The game charges a pane's pass for each: 50 wall texels
+// behind two panes read 0.585 of the GPU's light, 05/11. Half open along a span: two windows side by side on one line count once
+inline int PaneCount(const std::vector<Pane>& panes, const float a[3], const float b[3]) {
+    int n = 0;
+    const float dx = b[0] - a[0], dz = b[2] - a[2];
+    for (const Pane& p : panes) {
+        const float ex = p.x1 - p.x0, ez = p.z1 - p.z0, ox = p.x0 - a[0], oz = p.z0 - a[2];
+        const float den = dx * ez - dz * ex;
+        const float t = (ox * ez - oz * ex) / den, u = (ox * dz - oz * dx) / den;
+        const float y = a[1] + t * (b[1] - a[1]);
+        n += t > 0.0f && t < 1.0f && u >= 0.0f && u < 1.0f && y >= p.y0 && y <= p.y1;
+    }
+    return n;
+}
+// That share of the light, taken after the soft cut (cut after it, the faint light past two panes went black: 771 lit kitchen floor texels
+// fell to 595, 05/11)
+inline float PaneShare(const std::vector<Pane>& panes, const float a[3], const float b[3]) { return std::pow(WallOpenings::kWindowPass, static_cast<float>(PaneCount(panes, a, b))); }
 
+// A room's texel the game samples just past its own diagonal wall (a half tile's texel, its centre over the wall line; the game's
+// tests light it, the shadow mesh's wall shaded it: a dark band along the room's diagonal walls, 1:8 of the scene of 03/11) is
+// taken for the shadow test kInset inside the nearest quadrant of its room in the same tile (lot space, P's height kept). False:
+// it lies in its room, its tile holds no quadrant of the room, the ids are not known, or it is over kNear from that quadrant
+inline bool IntoRoom(const Lot& lot, int story, int id, float P[3]) {
+    constexpr float kInset = 0.03f, kNear = 0.5f;
+    const Story* s = nullptr;
+    for (const Story& st : lot.stories)
+        if (st.story == story) s = &st;
+    if (!s || id <= 0) return false;
+    const float fx0 = std::floor(P[0]), fz0 = std::floor(P[2]);
+    const int ix = static_cast<int>(fx0), iz = static_cast<int>(fz0);
+    if (ix < 0 || iz < 0 || ix >= s->w || iz >= s->h || s->room.size() != 4 * static_cast<size_t>(s->w) * s->h) return false;
+    const int32_t* q = &s->room[4 * (static_cast<size_t>(iz) * s->w + ix)];
+    const float fx = P[0] - fx0, fz = P[2] - fz0;
+    const int at = std::fabs(fx - 0.5f) <= std::fabs(fz - 0.5f) ? (fz > 0.5f ? 2 : 0) : (fx > 0.5f ? 1 : 3); // (LampVis::Quadrant)
+    if (q[at] == id) return false;
+    const float corners[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}}; // quadrant k: corners k, k + 1 and the centre (QuadrantCorners)
+    float best = kNear * kNear, bx = 0, bz = 0;
+    for (int k = 0; k < 4; k++) {
+        if (q[k] != id) continue;
+        const float t[3][2] = {{corners[k][0], corners[k][1]}, {corners[(k + 1) & 3][0], corners[(k + 1) & 3][1]}, {0.5f, 0.5f}};
+        const float cx = (t[0][0] + t[1][0] + t[2][0]) / 3.0f, cz = (t[0][1] + t[1][1] + t[2][1]) / 3.0f;
+        for (int e = 0; e < 3; e++) { // the nearest point of each side (P is outside the triangle)
+            const float* a = t[e];
+            const float* b = t[(e + 1) % 3];
+            const float dx = b[0] - a[0], dz = b[1] - a[1];
+            const float u = std::clamp(((fx - a[0]) * dx + (fz - a[1]) * dz) / (dx * dx + dz * dz), 0.0f, 1.0f);
+            const float nx = a[0] + u * dx, nz = a[1] + u * dz;
+            const float d2 = (fx - nx) * (fx - nx) + (fz - nz) * (fz - nz);
+            if (d2 < best) {
+                const float ix2 = cx - nx, iz2 = cz - nz, il = std::sqrt(ix2 * ix2 + iz2 * iz2);
+                best = d2, bx = nx + ix2 / il * kInset, bz = nz + iz2 / il * kInset;
+            }
+        }
+    }
+    if (!(best < kNear * kNear)) return false;
+    P[0] = fx0 + bx, P[2] = fz0 + bz;
+    return true;
+}
+
+// The space the rooms of story `story` - 1 open to `story` continue into on that story, per quadrant (tile * 4 + q): the open
+// room's id, 0 none (InsideOf)
+struct Inside {
+    int story = 0, w = 0, h = 0;
+    std::vector<int32_t> room;
+};
 struct Tri {
     float v[3][3];
 };
@@ -76,6 +163,9 @@ struct Mesh {
     std::vector<Tri> tris;
     float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
     int walls = 0, wallTris = 0, openings = 0, roofTris = 0, slabTris = 0;
+    int openTops = 0; // roofed quadrants left without their ceiling (Build ceilingsOpen: OpenTops)
+    std::vector<std::pair<int, int>> openRooms; // (story, room) rooms open to the story above by OpenTops' room rule, sorted
+    std::vector<Inside> inside;          // (ceilingsOpen) per story with such a room below: the space they continue into (InsideOf)
     // the uniform grid over x / z (1 m cells) the reference walks
     int gx0 = 0, gz0 = 0, gw = 0, gh = 0;
     std::vector<uint32_t> cellStart, cellTris; // CSR: cell c holds cellTris[cellStart[c] .. cellStart[c + 1])
@@ -129,8 +219,8 @@ inline float OpeningHead(const Opening& o, float u) {
 }
 // One wall with its opening as a hole. The top is piecewise linear through u = 0, 0.5, 1 and the head through its profile:
 // every span is cut at those knots so each quad is exact.
-inline void AddWall(Mesh& m, const Edge& e) {
-    const float foot = e.foot - kFootExt;
+inline void AddWall(Mesh& m, const Edge& e, float footExt = kFootExt) {
+    const float foot = e.foot - footExt;
     std::vector<float> knots = {0.0f, 0.5f, 1.0f};
     if (e.open) {
         const float u0 = std::clamp(e.o.u0, 0.0f, 1.0f), u1 = std::clamp(e.o.u1, 0.0f, 1.0f);
@@ -177,6 +267,124 @@ inline bool PlacedQ(const Story& s, int ix, int iz, int q) {
     if (ix < 0 || iz < 0 || ix >= s.w || iz >= s.h) return false;
     const size_t t = static_cast<size_t>(iz) * s.w + ix;
     return t < s.placed.size() && ((s.placed[t] >> q) & 1u);
+}
+// A wall texel on a placed floor's plane (the game lights row k of a wall at k x 3 / (N - 1) m: its top row on the slab of the story
+// above, its bottom row on its own floor) is never blocked by that slab for a lamp just over it: light leaked through the floor into
+// the top row of the walls below. Such a point (lot space P, normal N; |N.y| < 0.5) is shadow-tested kOff off the plane on its own
+// story's side (over its own floor, under the floor above), in the tile kStep along N (its room's side). The light law keeps P
+inline bool OffFloorLine(const Lot& lot, int story, float P[3], const float N[3]) {
+    constexpr float kLine = 0.02f, kOff = 0.12f, kStep = 0.25f;
+    if (std::fabs(N[1]) >= 0.5f) return false;
+    const float x = P[0] + N[0] * kStep, z = P[2] + N[2] * kStep, fx = std::floor(x), fz = std::floor(z);
+    const int ix = static_cast<int>(fx), iz = static_cast<int>(fz);
+    const int q = std::fabs(x - fx - 0.5f) <= std::fabs(z - fz - 0.5f) ? (z - fz > 0.5f ? 2 : 0) : (x - fx > 0.5f ? 1 : 3); // (LampVis::Quadrant)
+    for (const Story& s : lot.stories) {
+        if (s.story != story && s.story != story + 1) continue;
+        if (!PlacedQ(s, ix, iz, q)) continue;
+        const float y = FloorOf(s, ix, iz);
+        if (!(std::fabs(P[1] - y) < kLine)) continue;
+        P[1] = s.story == story ? y + kOff : y - kOff;
+        return true;
+    }
+    return false;
+}
+// A room-0 texel of `story` (lot space P, normal N) facing into a room of the story below that the open-top build opened to this
+// story (Mesh::openRooms, sorted): one space two stories tall, so the texel is that room's wall, not an outdoor one (03/11, lot C49C:
+// the upper half of a double-height room's walls took the street lamps through the windows as room 0, the lower half not). Its
+// quadrant is taken kStep along the normal; no floor may be placed there on this story
+inline bool OverOpenBelow(const Lot& lot, const std::vector<std::pair<int, int>>& openRooms, int story, const float P[3], const float N[3]) {
+    constexpr float kStep = 0.25f;
+    const Story *below = nullptr, *here = nullptr;
+    for (const Story& s : lot.stories) {
+        if (s.story == story - 1) below = &s;
+        if (s.story == story) here = &s;
+    }
+    if (!below || !here || openRooms.empty() || below->room.size() != 4 * static_cast<size_t>(below->w) * below->h) return false;
+    const float x = P[0] + N[0] * kStep, z = P[2] + N[2] * kStep, fx0 = std::floor(x), fz0 = std::floor(z);
+    const int ix = static_cast<int>(fx0), iz = static_cast<int>(fz0);
+    if (!(ix >= 0 && iz >= 0 && ix < below->w && iz < below->h)) return false;
+    const float fx = x - fx0, fz = z - fz0;
+    const int q = std::fabs(fx - 0.5f) <= std::fabs(fz - 0.5f) ? (fz > 0.5f ? 2 : 0) : (fx > 0.5f ? 1 : 3); // (LampVis::Quadrant)
+    const int id = below->room[4 * (static_cast<size_t>(iz) * below->w + ix) + q];
+    return id > 0 && std::binary_search(openRooms.begin(), openRooms.end(), std::make_pair(story - 1, id)) && !PlacedQ(*here, ix, iz, q);
+}
+// A story's walls on tile sides: wz[Z * w + x] for (x, Z)-(x + 1, Z), wx[z * (w + 1) + X] for (X, z)-(X, z + 1)
+// and its diagonal walls, dg[2 * (z * w + x) + i] (i 0: (x, z)-(x + 1, z + 1), 1: (x, z + 1)-(x + 1, z); StoryGrid::dg)
+inline void WallSides(const Story& s, std::vector<uint8_t>& wz, std::vector<uint8_t>& wx, std::vector<uint8_t>* dg = nullptr) {
+    const int w = s.w, h = s.h;
+    wz.assign(static_cast<size_t>(h + 1) * w, 0), wx.assign(static_cast<size_t>(w + 1) * h, 0);
+    if (dg) dg->assign(2 * static_cast<size_t>(w) * h, 0);
+    for (const Edge& e : s.edges) {
+        const int x0 = static_cast<int>(std::lround(e.x0)), z0 = static_cast<int>(std::lround(e.z0));
+        const int x1 = static_cast<int>(std::lround(e.x1)), z1 = static_cast<int>(std::lround(e.z1));
+        const int xl = std::min(x0, x1), zl = std::min(z0, z1);
+        if (z0 == z1 && std::abs(x1 - x0) == 1 && z0 >= 0 && z0 <= h && xl >= 0 && xl < w) wz[static_cast<size_t>(z0) * w + xl] = 1;
+        if (x0 == x1 && std::abs(z1 - z0) == 1 && x0 >= 0 && x0 <= w && zl >= 0 && zl < h) wx[static_cast<size_t>(zl) * (w + 1) + x0] = 1;
+        if (dg && std::abs(x1 - x0) == 1 && std::abs(z1 - z0) == 1 && xl >= 0 && zl >= 0 && xl < w && zl < h)
+            (*dg)[2 * (static_cast<size_t>(zl) * w + xl) + ((x1 - x0) * (z1 - z0) > 0 ? 0 : 1)] = 1;
+    }
+}
+// The space under the roof that rooms of story B - 1 open to story B (OpenTops' room rule, `open`) continue into on B (09/11, lot
+// C49C: the attic over story 2's rooms 5 and 7 and its floored part over room 12 under the same roof, whose walls and floor
+// took the night sky). Seeds: B's floorless quadrants over an open room; from them, B's room-0 quadrants reached within a tile
+// or across a tile side with no wall of B, over a roofed room of B - 1 only (the house: a yard or a deck beside it is never
+// reached). Each quadrant takes the id of the open room it was reached from. False: ids, walls or floors not read.
+// shortcut: no roof is read, so a floored attic no room opens into stays outside, and a terrace beside an open top with no wall
+// between them would be taken as inside; read the lot's roof pieces to know where the roof closes the space.
+inline bool InsideOf(const Story& below, const Story& here, const std::vector<int>& open, Inside& out) {
+    const int w = below.w, h = below.h;
+    const size_t nt = static_cast<size_t>(w) * h;
+    out = Inside{};
+    if (w <= 0 || h <= 0 || here.w != w || here.h != h || below.room.size() != 4 * nt || below.roofed.size() != nt || here.placed.size() != nt || open.empty())
+        return false;
+    out.story = here.story, out.w = w, out.h = h;
+    out.room.assign(4 * nt, 0);
+    std::vector<uint8_t> wz, wx, dg;
+    WallSides(here, wz, wx, &dg);
+    const auto at = [&](int x, int z) { return static_cast<size_t>(z) * w + x; };
+    const auto under = [&](int x, int z, int q) { return ((below.roofed[at(x, z)] >> q) & 1u) ? below.room[4 * at(x, z) + q] : 0; };
+    const auto mayEnter = [&](int x, int z, int q) {
+        return x >= 0 && z >= 0 && x < w && z < h && under(x, z, q) > 0 && (here.room.size() != 4 * nt || here.room[4 * at(x, z) + q] == 0);
+    };
+    std::vector<size_t> todo;
+    for (int z = 0; z < h; z++)
+        for (int x = 0; x < w; x++)
+            for (int q = 0; q < 4; q++)
+                if (const int r = under(x, z, q); r > 0 && std::binary_search(open.begin(), open.end(), r) && !PlacedQ(here, x, z, q) && mayEnter(x, z, q))
+                    out.room[4 * at(x, z) + q] = r, todo.push_back(4 * at(x, z) + q);
+    while (!todo.empty()) {
+        const size_t i = todo.back();
+        todo.pop_back();
+        const int q = static_cast<int>(i & 3), x = static_cast<int>((i / 4) % w), z = static_cast<int>((i / 4) / w), r = out.room[i];
+        const auto spread = [&](int nx, int nz, int nq) {
+            if (!mayEnter(nx, nz, nq)) return;
+            int32_t& o = out.room[4 * at(nx, nz) + nq];
+            if (!o) o = r, todo.push_back(4 * at(nx, nz) + nq);
+        };
+        // (inside the tile: q and q + 1 meet at corner q + 1, on diagonal 0 for odd q, 1 for even q: Classify's)
+        if (!dg[2 * at(x, z) + ((q & 1) ? 0 : 1)]) spread(x, z, (q + 1) & 3);
+        if (!dg[2 * at(x, z) + (((q + 3) & 1) ? 0 : 1)]) spread(x, z, (q + 3) & 3);
+        if (q == 0 && !wz[static_cast<size_t>(z) * w + x]) spread(x, z - 1, 2);
+        if (q == 2 && !wz[static_cast<size_t>(z + 1) * w + x]) spread(x, z + 1, 0);
+        if (q == 3 && !wx[static_cast<size_t>(z) * (w + 1) + x]) spread(x - 1, z, 1);
+        if (q == 1 && !wx[static_cast<size_t>(z) * (w + 1) + x + 1]) spread(x + 1, z, 3);
+    }
+    return true;
+}
+// The open room a room-0 texel of `story` (lot space P, normal N) lies in the space of (InsideOf), 0 none: its quadrant taken kStep
+// along the normal (a wall's face: the side it faces; a floor: under the texel)
+inline int InsideAt(const std::vector<Inside>& in, int story, const float P[3], const float N[3]) {
+    constexpr float kStep = 0.25f;
+    const Inside* s = nullptr;
+    for (const Inside& i : in)
+        if (i.story == story) s = &i;
+    if (!s) return 0;
+    const float x = P[0] + N[0] * kStep, z = P[2] + N[2] * kStep, fx0 = std::floor(x), fz0 = std::floor(z);
+    const int ix = static_cast<int>(fx0), iz = static_cast<int>(fz0);
+    if (!(ix >= 0 && iz >= 0 && ix < s->w && iz < s->h)) return 0;
+    const float fx = x - fx0, fz = z - fz0;
+    const int q = std::fabs(fx - 0.5f) <= std::fabs(fz - 0.5f) ? (fz > 0.5f ? 2 : 0) : (fx > 0.5f ? 1 : 3); // (LampVis::Quadrant)
+    return s->room[4 * (static_cast<size_t>(iz) * s->w + ix) + q];
 }
 inline void AddSlabSide(Mesh& m, const float a[3], const float b[3], float top, float bottom) {
     const float p0[3] = {a[0], bottom, a[2]}, p1[3] = {b[0], bottom, b[2]}, p2[3] = {b[0], top, b[2]}, p3[3] = {a[0], top, a[2]};
@@ -336,7 +544,48 @@ inline void CeilingsUnderAbove(const Story& s, const Story* above, std::vector<f
         if (lowered) ++*lowered;
     }
 }
-// ceilingsOpen: no slab over a roofed quadrant of the story below (GPU lamps for every room, which lights ceilings)
+// A roofed room of story s open to the story above (OpenAbove::Classify, the rule room 0 takes the lamps below by: no floor
+// placed over half of it, its walls going up through that story) is one space two stories tall: its roofed quadrants with no
+// floor placed over them lose their ceiling at floor + 3 m (02/11, lot C49C: story 2's rooms 5, 6 and 7 under story 3 cut
+// their lamps' light at the story line), here with ownWalls: also a room under a sloped roof with a wall of its own on B. Room
+// ids or placed floors not read: nothing opens. A roofed quadrant under a removed floor of the story above (the game's opening
+// between stories, ReadOpenings) loses its ceiling too (02/11, lot C49C: story 1's ceiling at 3.99 m closed story 2's
+// 40-quadrant floor hole, so a lamp above it lit story 1 only through a small spot).
+// Returns the quadrants opened.
+inline int OpenUnderRemoved(Story& s, const Story& above) {
+    int opened = 0;
+    for (size_t t = 0; t < s.roofed.size() && t < above.removed.size(); t++)
+        for (int q = 0; q < 4; q++)
+            if (((s.roofed[t] & above.removed[t]) >> q) & 1u) s.roofed[t] &= static_cast<uint8_t>(~(1u << q)), opened++;
+    return opened;
+}
+inline int OpenTops(Story& s, const Story& above, std::vector<int>* rooms = nullptr) { // (rooms: the room rule's open rooms)
+    const int w = s.w, h = s.h;
+    const size_t nt = static_cast<size_t>(w) * h;
+    if (w <= 0 || h <= 0 || above.w != w || above.h != h || s.roofed.size() != nt) return 0;
+    if (s.room.size() != 4 * nt || above.placed.size() != nt) return OpenUnderRemoved(s, above);
+    std::vector<uint8_t> wz, wx, dg; // the story above's walls on tile sides and diagonals
+    WallSides(above, wz, wx, &dg);
+    const auto at = [&](int x, int z) { return static_cast<size_t>(z) * w + x; };
+    // (a roofless room's lamps are outdoor lamps already: room 0 for the rule, as ShareRoomZeroFromBelow)
+    const auto roomAt = [&](int x, int z, int q) { return ((s.roofed[at(x, z)] >> q) & 1u) ? s.room[4 * at(x, z) + q] : 0; };
+    std::vector<int> open;
+    OpenAbove::Classify(
+        w, h, roomAt, [&](int x, int z, int q) { return PlacedQ(above, x, z, q); }, [&](int x, int Z) { return wz[static_cast<size_t>(Z) * w + x] != 0; },
+        [&](int X, int z) { return wx[static_cast<size_t>(z) * (w + 1) + X] != 0; }, [&](int x, int z, int i) { return dg[2 * at(x, z) + i] != 0; }, open, true);
+    if (rooms) *rooms = open;
+    int opened = 0;
+    for (int z = 0; z < h && !open.empty(); z++)
+        for (int x = 0; x < w; x++)
+            for (int q = 0; q < 4; q++)
+                if (!PlacedQ(above, x, z, q) && std::binary_search(open.begin(), open.end(), roomAt(x, z, q))) {
+                    s.roofed[at(x, z)] &= static_cast<uint8_t>(~(1u << q));
+                    opened++;
+                }
+    return opened + OpenUnderRemoved(s, above); // (after the rule: a hole's quadrants still count as their room's)
+}
+// ceilingsOpen (GPU lamps for every room, which light ceilings): no slab over a roofed quadrant of the story below, and no
+// ceiling over a room open to the story above (OpenTops)
 inline void Build(const Lot& lot, Mesh& m, bool ceilingsOpen = false) {
     m = Mesh{};
     // (each story's ceilings taken down to the floor of the story above where it is lower: see CeilingsUnderAbove)
@@ -348,11 +597,20 @@ inline void Build(const Lot& lot, Mesh& m, bool ceilingsOpen = false) {
             if (a.story == s.story + 1) above = &a;
         fixed.push_back(s);
         CeilingsUnderAbove(s, above, fixed.back().ceil);
+        if (ceilingsOpen && above) {
+            std::vector<int> rooms;
+            m.openTops += OpenTops(fixed.back(), *above, &rooms);
+            for (int r : rooms) m.openRooms.emplace_back(s.story, r);
+            if (Inside in; InsideOf(s, *above, rooms, in)) m.inside.push_back(std::move(in)); // (s: its roofed quadrants before OpenTops)
+        }
     }
+    std::sort(m.openRooms.begin(), m.openRooms.end());
     for (const Story& s : fixed) {
         m.curStory = static_cast<int8_t>(std::clamp(s.story, -8, 8));
         m.curKind = Mesh::kWall;
-        for (const Edge& e : s.edges) AddWall(m, e);
+        // (open tops: an upper story's wall stops at its foot; reaching under it, it shaded the ceiling of the story below past
+        // the wall's line, which the game lights: the scene of 03/11, ceiling rows at a story's floor line)
+        for (const Edge& e : s.edges) AddWall(m, e, ceilingsOpen && s.story > 0 ? 0.0f : kFootExt);
         m.curKind = Mesh::kRoof;
         AddRoofs(m, s);
         m.curKind = Mesh::kSlab;
@@ -492,6 +750,61 @@ inline float Visibility(const Mesh& m, const float L[3], float R, const float P[
     }
     if (!emit) return Clear(m, L, P, 0.01f, 0.01f, stamp, next()) ? 1.0f : 0.0f;
     return static_cast<float>(clear) / static_cast<float>(emit);
+}
+
+// The texel of the room it continues that a texel of that space shows (RtOutdoorLamps PrepareJob, drawn from the room's own map
+// in the same frame: ShaderPatches IndoorPick rooms): the room's top-row texel nearest in plan, a wall's facing the same way
+// (else the nearest). Top: pos[3], n[3]. Null: no top row
+template <class Top> const Top* TopMatch(const std::vector<Top>& top, const float pos[3], const float nrm[3], bool wall) {
+    const Top* best = nullptr;
+    float bestD = 1e30f;
+    const float nl = std::max(1e-6f, std::sqrt(nrm[0] * nrm[0] + nrm[1] * nrm[1] + nrm[2] * nrm[2]));
+    for (const Top& c : top) {
+        const float dx = c.pos[0] - pos[0], dz = c.pos[2] - pos[2];
+        const float facing = (c.n[0] * nrm[0] + c.n[1] * nrm[1] + c.n[2] * nrm[2]) / nl;
+        const float d = dx * dx + dz * dz + (!wall || facing > 0.7f ? 0.0f : 1e4f);
+        if (d < bestD) bestD = d, best = &c;
+    }
+    return best;
+}
+
+// (RtOutdoorLamps) a room-0 texel matched to a texel of the wall map of the room of the story below it continues: x, y its texel,
+// rx, ry the room's, slot its room's (Job::inRooms)
+struct InUv {
+    uint16_t x, y, rx, ry;
+    int slot;
+    bool operator==(const InUv&) const = default;
+};
+// The UV map's texels (A16B16G16R16, w x h, rows `pitch` bytes apart): (u, v) of the room's texel centre, slot / 3, 1 on matched
+// texels, 0 elsewhere; size[r] = the room's map w << 16 | h. A texel past this map or its room's stays 0 (never read)
+inline void FillUv(const std::vector<InUv>& src, const uint32_t size[4], uint32_t w, uint32_t h, size_t pitch, unsigned char* bits) {
+    for (uint32_t y = 0; y < h; y++) std::fill_n(bits + static_cast<size_t>(y) * pitch, static_cast<size_t>(w) * 8, static_cast<unsigned char>(0));
+    for (const InUv& e : src) {
+        const uint32_t rw = size[e.slot & 3] >> 16, rh = size[e.slot & 3] & 0xFFFF;
+        if (e.x >= w || e.y >= h || e.rx >= rw || e.ry >= rh) continue;
+        uint16_t* px = reinterpret_cast<uint16_t*>(bits + static_cast<size_t>(e.y) * pitch) + static_cast<size_t>(e.x) * 4;
+        px[0] = static_cast<uint16_t>(std::lround((e.rx + 0.5) / rw * 65535.0)), px[1] = static_cast<uint16_t>(std::lround((e.ry + 0.5) / rh * 65535.0));
+        px[2] = static_cast<uint16_t>(std::lround((e.slot & 3) * 65535.0 / 3.0)), px[3] = 0xFFFF;
+    }
+}
+// IEEE half of a light value (>= 0; past the half's range: its largest)
+inline uint16_t Half(float f) {
+    if (!(f > 0.0f)) return 0;
+    if (f >= 65504.0f) return 0x7BFF;
+    int e = 0;
+    const float m = std::frexp(f, &e); // f = m x 2^e, m in [0.5, 1)
+    if (e < -13) return static_cast<uint16_t>(std::lround(std::ldexp(f, 24))); // (subnormal)
+    uint32_t mant = static_cast<uint32_t>(std::lround((m * 2.0f - 1.0f) * 1024.0f));
+    int exp = e - 1 + 15;
+    if (mant == 1024) mant = 0, exp++;
+    return exp >= 31 ? 0x7BFF : static_cast<uint16_t>(exp << 10 | mant);
+}
+// What a marked map's draw binds this frame (RtOutdoorLamps InRoomsNow): the rooms read now when every one was read, else the last
+// binding kept while it is of the same layout (its UV map's texels and rooms' map sizes), else none. A frame that drops to the
+// carried texels and back showed as a flicker; a binding of another layout would point at the wrong texels
+enum class InPick { Now, Kept, None };
+inline InPick PickIndoor(bool readNow, bool haveKept, bool keptSameLayout) {
+    return readNow ? InPick::Now : haveKept && keptSameLayout ? InPick::Kept : InPick::None;
 }
 
 } // namespace RtLampProxy

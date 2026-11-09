@@ -4,6 +4,7 @@
 #include "ground_lamp_shadow.h"
 #include "liveness_prune.h"
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -67,7 +68,6 @@ bool RealisticOpeningsActive();
 // under its own roof; a room with no known opening takes none. Relights every room when changed. Active = on and installed,
 // the openings noted.
 void SetOutdoorThroughOpenings(bool on);
-bool OutdoorThroughOpeningsActive();
 // Their brightness: the lamps of room 0 a roofed room takes through its openings keep the scale of the outdoor surfaces
 // (floors and the directional maps: Ground brightness x Lot lamp brightness while the lot pass applies them; walls: the
 // walls' Brightness while walls are lit) over the room's normalisation (opening_lamp_balance.h). Night values: the daytime
@@ -79,7 +79,6 @@ void SetOpeningLampBalance(float groundBrightness, float lotLampBrightness, bool
 // openings follows it (the story grids, the roofed rooms' doors, the outside walls' copies, room 0's wall test). A change
 // sends again only the stories with such a cut noted.
 void SetDoorsBlockLight(bool on);
-bool DoorsBlockLightActive();
 // Indoor light through openings (option "luzInternaPelasAberturas", default on in the 2.12.4 development branch): a lit lamp
 // of a roofed room shines through its arches, windows (and doors while doors do not block light) onto room 0 and the
 // roofless rooms of its story (outside walls, outdoor floors, lot ground; room 0 of the story below for a house on a
@@ -87,7 +86,6 @@ bool DoorsBlockLightActive();
 // story through the openings' holes. One opening only. Relights every room when changed. Active = on and installed, the
 // openings noted.
 void SetIndoorThroughOpenings(bool on);
-bool IndoorThroughOpeningsActive();
 // (2.15.3) Indoor light adds to the ground (option "luzInternaSomaNoChao", default on, needs indoor light through openings
 // and walls blocking light on floors): the floor texels of story 0's room 0 keep in their alpha the luminance E (at most
 // 254/255) of the light the roofed rooms' lamps put there through their openings; the lot pass and the story-0 floors add
@@ -164,8 +162,6 @@ float LampVisibilityShared(const float lamp[3], const float point[3], float near
 // patches (optional): the walls' patches (their lower cells and openings, wall_openings.h), each wall's p0 / pn into it;
 // without it every wall is whole
 uint32_t OutsideWallsIn(float x0, float z0, float x1, float z1, std::vector<GroundShadow::Wall>& out, std::vector<WallOpenings::Patch>* patches = nullptr);
-uint32_t SlabCopyGen();     // the slab copy's generation (any thread)
-uint32_t OutsideWallsGen(); // the outside walls' copy generation (any thread; OutsideWallsIn returns the one it read)
 bool ObjectWallsOn();   // "Buildings block lamp light on trees and objects" is on and installed (any thread)
 // "Walls shade lamp light near the ground" (option "paredesSombreiamOChao", default on; 14/10, was part of the option above):
 // the lot ground shade (LotLightBridge) from the same copy of the outside walls. Any thread.
@@ -180,16 +176,33 @@ bool OnWallLine(const float point[3], float dirX, float dirZ, float maxDist);
 std::string WallNotesOnRay(const float origin[3], const float dir[3], float* hitOut = nullptr);
 // (development builds, arch_ambient) A floor draw of a room whose ambient colour is `own` (the draw's constant): its arches into
 // other roofed rooms, one row pair each (ShaderPatches::PatchRoomMapSmooth archAmb): (a.x, a.z, e.x, e.z) in lot metres and
-// (the neighbour's ambient over own, 0 where lower; 1 / |e|^2). Returns how many were written (at most maxCells); 0 when the
+// (the neighbour's ambient over own, 0 where lower; 1 / |e|^2), at row 2 maxCells + 1 on each one's 1 / reach, four a row, and at row 2 maxCells + 3 on 1 for the cells of the neighbour
+// whose reflection cube the draw takes, four a row: *nbCube, the IDirect3DCubeTexture9 of the arch's room with the largest D, null when none has one. Returns how many were written (at most maxCells); 0 when the
 // room is not known. mapTex = the room light map the draw binds, basisTex = one of its directional maps (0 = none bound): they
 // name the draw's story, and only rooms of that story give their arches (together when they share the ambient); with no story
 // known, only matches all on one story of one lot do. Render thread.
-int ArchAmbientConsts(const float own[3], uintptr_t mapTex, uintptr_t basisTex, float* rows, int maxCells);
+int ArchAmbientConsts(const float own[3], uintptr_t mapTex, uintptr_t basisTex, float* rows, int maxCells, void** nbCube);
+// Which room holds a light probe now, among the rooms with arches or known to have none: false when not found
+bool RoomOfProbe(uintptr_t probe, int* story, int* id);
+// (the kept rooms' relight) a roofed room's arches into other roofed rooms of its story: one span each (lot space), out empty when none.
+// ArchGen moves when any room's arches change
+struct ArchSpan {
+    float ax, az, bx, bz, y0, y1;
+    const void* nb;
+    int nbId;
+};
+uint32_t ArchGen();
+void ArchSpansOf(const void* room, std::vector<ArchSpan>& out);
+// (arch_reach) Whether another roofed room of its story holds the ambient `own`: a floor draw cannot tell those rooms apart, so its blend keeps kReach
+bool ArchAmbientShared(const void* room, const float own[3]);
 std::string ArchAmbientStatus();
 // (development builds, basis_wall_filter) The wall mask (64 x 64 A8R8G8B8, the directional maps' layout: r -x, g +x, b -z, a +z
 // walled) of the story whose directional maps include the D3D texture basisTex (render thread). gen = the mask's version;
 // px (16384 bytes) is written when it differs from knownGen. False: no mask known for that story.
 bool WallMaskFor(uintptr_t basisTex, uint32_t knownGen, uint32_t& gen, uint8_t* px);
+// (basis_wall_filter) Whether a side of a tile with an opening light passes (a door or window not closed to lamps) lies within
+// tol tiles of the point (u, v), in the same mask's tiles; true when no mask is known for that story. Render thread.
+bool OpeningNear(uintptr_t basisTex, float u, float v, float tol);
 // (basis_wall_filter) The same mask for a floor or ceiling map (D3D texture floorTex, w x h texels) of a story's room maps, when
 // its layout is the class-2 one: perTile texels per tile from the lot's origin (4, 8 with Light detail High), the lot's
 // width x perTile rounded up to a power of two, and the split tiles' atlas from splitU (that width, when the map is twice it).
@@ -294,6 +307,10 @@ bool StackedWithEdit(const void* room);
 // The first seconds after the world went live, while the loaded lots' rooms correct themselves (LotLightingMotion and
 // RoomLightQueue give the room solves a larger share of the frame meanwhile)
 bool SettlingAfterLoad();
+// A quick day/night switch is solving (RoomAmbientPolicy::DayNightWindow, fed by the night level every frame): the played lot's
+// rooms take the raised solve budget and no second solve is sent to them meanwhile; serial: one per switch (0 = none yet). Any thread.
+bool DayNightSwitching();
+unsigned DayNightSwitchSerial();
 // Render thread: the room belongs to an atrium (a stacked-ambient group of 2 rooms or more)
 bool InAtrium(const void* room);
 // Light tree thread: the share (0..1) of a lamp of another story that reaches a point of an indoor room, tested as the room's
@@ -353,6 +370,15 @@ int ForEachRoom(bool (*visit)(unsigned char* room, void* ctx), void* ctx, int* q
 // Stage original room colours, then refresh connected groups after the complete traversal.
 bool StageAmbientBaseChange(unsigned char* room, const float* oldOwn, const float* newOwn, const float* oldSecond, const float* newSecond);
 bool HoldsAmbientBase(unsigned char* room, const float* own, const float* second);
+// (the instant day/night switch, light tree thread) true when the room's own ambient as the game computed it last (before any
+// share) is `own` and the room is no atrium member (its +0x110 is then that colour, or it with a stairwell's share); norm: its
+// normalisation then. SetAmbientOwn puts both back with a cached solve, for the neighbours' stairwell shares at their solves
+bool AmbientOwnIs(unsigned char* room, const float* own, float& norm);
+void SetAmbientOwn(unsigned char* room, const float* own, float norm);
+// Light tree thread (physical indoor lamps, S8): the game's ambient step (FUN_006a0f50, with Rooms at Night's base) run again on
+// an indoor room with lamps at its own threshold, its fields put back: the colours it gives +0x110 (own) and +0x120 (second),
+// 4 floats each, and the normalisation it computes. False: an outdoor room, no lamps listed, or not read
+bool ProbeRoomAmbient(unsigned char* room, float* own, float* second, float& norm);
 bool StageUnlitAmbientChange(unsigned char* room, const float* target, bool& changed);
 void ApplyAmbientBaseChanges();
 // Development build: the solve journal's notes since fromTick (GetTickCount), with their ticks (the recorder)
@@ -384,6 +410,10 @@ bool ReplayBatch(unsigned char* room, const unsigned char* samples, int count, c
 float UnderFloorShareAt(const unsigned char* room, const float* sample);
 std::string FirstUnwrappedLight(const unsigned char* room); // the first light of the room's list whose evaluation is not wrapped (the log)
 bool ListAllWrapped(const unsigned char* room);             // every light of the room's list has its evaluation wrapped
+// Development build / a recording: a room mark the lamp mark filter let through ('M' a lamp's, 'L' the room a lamp left), or an
+// occluder's ('O' let through, 'o' dropped; pt: its point x, z and how far it moved), in the solve journal (what: light / entry)
+void JournalMark(uintptr_t treeLevel, int roomId, char event, uintptr_t what, const float* pt = nullptr, const uintptr_t* obj = nullptr);
+bool IsReplayList(const void* begin);                       // a room's list points at an outdoor delta replay's one-lamp list now (light tree thread): not the room's
 // The geometry the room's solve depends on, as one key: every story's grid stamp, cut cells, the wall tops and floor edits,
 // and each story's room 0 walls, wall blocks and 3D blockers; 0 when unreadable. Any thread.
 uint64_t LotGeometryKey(const void* room);
@@ -393,6 +423,42 @@ uint64_t PhysicsKey();
 bool QueueRoomAgain(const void* room);
 // Room 0 of a story of a lot (tracker), null when none; any thread
 void* Room0Of(uintptr_t tracker, int story);
+// (the room lamp probe) room `id` of a story of a lot, null when none; any thread
+void* RoomOf(uintptr_t tracker, int story, int id);
+// Every room of a lot (stories -4 to 7: room 0 and the rooms its lighting tiles name), any thread
+void LotRooms(uintptr_t tracker, std::vector<void*>& out);
+// (physical indoor lamps; light tree thread) every light registered on stories 0 .. 7 of a lot (each story's registry, as the
+// game's gather walks it): the light, its story and the room it is registered in (0 outdoors). False when a registry could not
+// be read (out holds what was)
+struct RegisteredLight {
+    uintptr_t light = 0;
+    int story = 0, home = 0;
+};
+bool RegisteredLights(uintptr_t tracker, std::vector<RegisteredLight>& out);
+// (GPU room lamps, a lamp moved; the light tree thread) Apex's path for `light` at lp in `room`'s solve, when a copy can redo it
+// (room_lamp_move.h): 1 a plain lamp in a room with a record (the threshold early-out runs), 0 a plain lamp in a room without one;
+// -1 (why) an outdoor lamp, one of the record's inner, opening or cross lamps, a roofless room, or a lamp under the room's
+// story floor
+int MovePath(const void* room, uintptr_t light, const float* lp, const char*& why);
+// (GPU room lamps stage 3b) room 0's path of a lamp it takes through an opening of its own story (InnerShadow), copied for the
+// move worker (room_lamp_move.h Part0At): its story's grids (InnerPass's), the map's half texel, soft_opening_edges, the norm
+// scale (InnerNormScale, read now), Realistic lamp reach and the lamp's range x intensity (ReachShare)
+struct Room0Path {
+    std::shared_ptr<const void> g0, g1; // (StoryGrid, immutable once built)
+    float aa = 0.0f, normK = 1.0f, reachW = 0.0f;
+    bool spread = false, reach = false;
+};
+// (physical indoor lamps) Light tree thread, the room's solve: the norm scale InnerShadow gives `light` there (InnerNormScaleAt
+// from the record's innerSrc, any story; nothing noted), 0 when the record does not take it from another room; and whether
+// the solve gives it the realistic reach share on the room's wall texels (a roofless room's lamp not of a double-height room
+// below, or a room-0 lamp through a roofed room's openings; the reach option itself not read)
+float InnerNormScaleOf(const void* room, uintptr_t light);
+bool ReachAppliesIn(const void* room, uintptr_t light);
+// Light tree thread: false (why) when room 0 takes the lamp another way (not a lamp of its record's inner list, one of the
+// story above, no record, steady_indoor_light off)
+bool Room0MovePath(const void* room0, uintptr_t light, Room0Path& out, const char*& why);
+// Any thread: InnerPass of a lamp at lampW to pointW from the copy
+float Room0PassAt(const Room0Path& p, const float* lampW, const float* pointW);
 // Room 0 of a story sent to its solve (urgent, whatever its kept parts say)
 bool QueueRoom0(uintptr_t tracker, int story);
 // After a room update: room 0 of story L changed by a lamp edit the delta took (its mark dropped); the rooms that take its
@@ -408,6 +474,14 @@ void NoteGpuEdit();
 // class's working maps locked (0x011D0508); the room's lock step 0x0069FA40; the class-2 edge copies, the unlock
 // 0x0069E950(1) with the copy back and the room's lighting message 0x006A08E0
 bool RoomMapsFree();
+// (GPU room lamps stage 4) the directional maps' samples vector FUN_006a09f0 reads ([0x01158AC8, 0x01158ACC) on Steam 1.67.2,
+// read from its `mov eax, [vec]` at the hooked call - 0x86), 0 when the directional hook is not installed; and the game's step
+// FUN_0069f280 (pos, light, acc16) called alone on the light tree thread (false elsewhere, or when not installed)
+uintptr_t BasisSamplesVec();
+bool BasisStep(const float* pos, uintptr_t light, float* acc16);
+// The light's whole part of a sample of the room as the room's solve would add it now, Apex's tests included (BasisLightHook's
+// body: the walls, openings and floors of its story at the lamp's place now), outside a solve. Light tree thread; false elsewhere
+bool BasisPartNow(void* room, const float* pos, uintptr_t light, float* acc16);
 bool LockRoomMaps(void* room);
 bool FinishRoomMaps(void* room);
 // The lot's occluders from its story grids (every wall with its openings, the roofed quadrants, each story's placed floors),
@@ -415,6 +489,10 @@ bool FinishRoomMaps(void* room);
 bool ExportLotProxy(uintptr_t tracker, RtLampProxy::Lot& out, std::string& why);
 // Any thread: the lots lit at the high quality (the active lot, Build mode: story manager +0x288); returns the count
 int ActiveLotTrackers(uintptr_t* out, int max);
+// Light tree thread or render thread: the lot of that story tree level is the one being played (PlayedLotMgr)
+bool PlayedLotOfTl(uintptr_t tl);
+// Render thread: the same for a lot by its tracker (its story 0 manager)
+bool PlayedTracker(uintptr_t tracker);
 // Any thread: the game still has this lot (its tracker is in the light manager's lot list)
 bool TrackerLive(uintptr_t tracker);
 // Any thread, in a live world: the story managers (stories -4..7) of every loaded lot. False while a world loads or when the

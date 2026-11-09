@@ -17,8 +17,12 @@
 // So the call at 0x006C7CD6 goes through MarkThunk: the lamp's values (Signature) are compared with the last time it marked
 // its rooms (per story tree level and light); the same values keep the rooms' solve (the mark is dropped), anything else
 // marks as before. First sight, window lights (types 7 and 8: the long path, they follow the sky) and anything unreadable
-// always mark. Left as they are: the mark of the room a lamp left (0x006C7CCA), the occluder entries (0x006C7939: objects
-// that fade or hide block light differently, their rooms must be solved again), room creation and object removal marks.
+// always mark. Left as they are: the occluder entries (0x006C7939: objects that fade or hide block light differently, their
+// rooms must be solved again), room creation (0x006C5806, FUN_006c57b0: a room built again) and object removal marks
+// (0x006C75A1 in FUN_006c7550, run by FUN_006c7610 for an object's light and occluder entries).
+// Physical indoor lamps (stage 4): the mark of the room a lamp left (0x006C7CCA, right before 0x006C7CD6 in the same
+// function: "cmp eax,[esi+1Ch]; je; mov ecx,[esi+14h]; push eax; call", eax = the room it was registered in) goes through
+// LeftThunk: held until the new room's mark, made then unless OutdoorDelta takes the move into another room.
 #include "lamp_mark_filter.h"
 #include "lot_light_bridge.h"
 #include "game_addresses.h"
@@ -28,14 +32,19 @@
 #include "build_flavor.h"
 #include "level_light_share.h"
 #include "rt_outdoor_lamps.h"
+#include "outdoor_delta.h"
 #include "recorder.h"
 #include "object_light_bridge.h"
 #include "unlit_rooms.h"
 #include "room_ambient_policy.h"
 #include "drag_lite.h"
 #include "dev_switches.h"
+#include "entry_chain.h"
+#include "object_legs.h"
+#include "phys_lamp_pick.h"
 #include <windows.h>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdint>
@@ -84,6 +93,7 @@ struct LampState {
     float editable[5] = {}; // base RGB, intensity, enabled; excludes animated fade
     DWORD editUntil = 0;    // an edit (move, switch, colour) is going on until then: its next changes are part of it
     DWORD lastAuto = 0;     // (auto_light_priority) its latest quiet mark: at most one every 5 s
+    uintptr_t entry = 0;    // its light entry at its last update (GPU room lamps: OwnObjectEditTaken)
 };
 std::atomic<long> g_autoSelfOn{0}, g_autoDuskOn{0}; // automatic switch-ons left out of the lamp edits (counters)
 constexpr DWORD kEditHoldMs = 2000;
@@ -99,6 +109,7 @@ std::unordered_map<uintptr_t, uintptr_t> g_lampStory; // light -> tree level (un
 // Since 05/10 the rooms that take an edited lamp are sent at once by the edit itself (LevelLightShare, "Lamp edits first"),
 // so this is the safety net: rooms gathered after the change keep their solve, and for lamps that only moved (same room, on
 // or off as before) only the rooms whose list holds them are sent.
+constexpr DWORD kWindowGapMs = 1500; // window light marks this far apart are two bursts (WindowBurstStart)
 constexpr float kMoveMin = 0.10f; // m: animated lamps wobble less
 constexpr DWORD kSelfWindow = 10000; // ms
 constexpr int kSelfMax = 3;          // more switches on or off than this within kSelfWindow: a light switching itself, left out
@@ -152,7 +163,7 @@ bool NoteSwitch(uintptr_t light, DWORD tick) {
     }
     if (distinct < kMassSwitches) return GetTickCount() - g_massLast.load(std::memory_order_relaxed) <= kMassHoldMs && g_massLast.load() != 0;
     if (tick - g_massLast.load(std::memory_order_relaxed) > kMassHoldMs) g_massEvents.fetch_add(1, std::memory_order_relaxed);
-    g_massLast.store(tick | 1, std::memory_order_relaxed);
+    g_massLast.store(std::max<DWORD>(tick, 1), std::memory_order_relaxed);
     return true;
 }
 // Any switch of the player's (the quick pass for one lamp too): a lamp switched on or off where it is, not a
@@ -169,7 +180,7 @@ void NoteUserSwitch(DWORD tick) {
         g_switchStart.store(tick, std::memory_order_relaxed);
         g_switchEvents.fetch_add(1, std::memory_order_relaxed);
     }
-    g_switchLast.store(tick | 1, std::memory_order_relaxed);
+    g_switchLast.store(std::max<DWORD>(tick, 1), std::memory_order_relaxed);
     g_switchSerial.fetch_add(1, std::memory_order_relaxed);
 }
 // The night level at the last Present (-1 = no world): while dusk or dawn switches every lamp, switches are not lamp edits
@@ -179,13 +190,14 @@ std::atomic<float>& NightLevelRef() { return g_nightLevel; }
 // starts or extends the edit hold. The serial grows by one at each: the room solves are stamped with it (RoomLightQueue
 // NoteSolveStart), so a room counts as solved for an edit only by a solve begun after it, even in the same tick step.
 std::atomic<DWORD> g_editLast{0};
+std::atomic<DWORD> g_windowLast{0}, g_windowBurst{0}; // (WindowBurstStart) the last window light mark, the first of its burst
 std::atomic<unsigned long> g_editSerial{0};
 std::atomic<long> g_editEvents{0};
 void NoteEditNow(DWORD tick) {
     const float night = g_nightLevel.load(std::memory_order_relaxed);
     if (night < 0.0f || (night > 0.02f && night < 0.98f)) return; // no world, or dusk / dawn switching every lamp
     g_editSerial.fetch_add(1, std::memory_order_relaxed);
-    g_editLast.store(tick | 1, std::memory_order_release); // after the serial: a reader of the tick sees its serial
+    g_editLast.store(std::max<DWORD>(tick, 1), std::memory_order_release); // after the serial: a reader of the tick sees its serial
     g_editEvents.fetch_add(1, std::memory_order_relaxed);
 }
 
@@ -236,6 +248,9 @@ bool Signature(uintptr_t entry, uintptr_t light, int room, uint64_t& h, int& typ
 // Lamp lighting is Classic no edit is GPU-handled: every occluder mark goes through as the game makes it.
 // UNVERIFIED that every lamp object has an occluder entry: the counters tell.
 uintptr_t kOccMarkCall = 0x006C7939; // GameAddr OccMarkCall
+uintptr_t kLeftMarkCall = 0x006C7CCA; // GameAddr LampLeftMarkCall
+bool g_leftInstalled = false;
+std::atomic<long> g_leftDropped{0}, g_leftMade{0}, g_physFirst{0}, g_intoRoom0{0};
 constexpr float kOwnObjectM = 1.5f;
 constexpr DWORD kOwnObjectMs = 600;
 struct HandledEdit {
@@ -259,10 +274,10 @@ void NoteHandledLight(uintptr_t light) {
     HandledLight& h = g_handledLights[g_handledLightNext.fetch_add(1, std::memory_order_relaxed) % std::size(g_handledLights)];
     h.at.store(0, std::memory_order_relaxed);
     h.light.store(light, std::memory_order_relaxed);
-    h.at.store(GetTickCount() | 1, std::memory_order_release);
+    h.at.store(std::max<DWORD>(GetTickCount(), 1), std::memory_order_release);
 }
 void NoteHandledEdit(uintptr_t tl, const float pos[3]) {
-    const DWORD now = GetTickCount() | 1;
+    const DWORD now = std::max<DWORD>(GetTickCount(), 1);
     std::lock_guard<std::mutex> lk(g_mx);
     HandledEdit& h = g_handled[g_handledNext];
     g_handledNext = (g_handledNext + 1) % static_cast<int>(std::size(g_handled));
@@ -281,15 +296,207 @@ bool OccluderPoint(uintptr_t entry, float& x, float& z) { // POD (SEH)
         return false;
     }
 }
+// An occluder entry's object (FUN_006c6090 makes the entry: +0x08 its 64-bit id, the tl+0xD4 map's key; +0x20 its lighting
+// record, whose shapes +0x40..+0x44 the room's 3D gather 0x0069E3F0 pushes into the object's record: shape = the first). POD (SEH)
+void OccluderObject(uintptr_t entry, uint64_t& id, uintptr_t& shape) {
+    __try {
+        id = *reinterpret_cast<const uint64_t*>(entry + 0x08);
+        const uintptr_t info = *reinterpret_cast<const uintptr_t*>(entry + 0x20);
+        const uintptr_t* b = info ? *reinterpret_cast<uintptr_t* const*>(info + 0x40) : nullptr;
+        shape = b && b != *reinterpret_cast<uintptr_t* const*>(info + 0x44) ? *b : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        id = 0, shape = 0;
+    }
+}
+// GPU room lamps (developer): FUN_006c7250 updates the occluder entries (tl+0xD4, the NewOccluder entries flagged with the
+// light entries by FUN_006c4cf0) before the light entries (tl+0x90; dumpbin 2026-11-02), so a lamp's switch or value edit
+// marks the room under its object here before LampMarkFilter takes the edit itself; the game then gathers that room and the
+// changed-room walk sends the rooms of other stories taking its lamps (a switch off taken at 11:55:20: story 2 room 5 and
+// story 1 room 2 solved before the settle, their kept solves replaced). True: the occluder point is within kOwnObjectM of
+// such a lamp on story tl whose values differ from its last update, did not move, and whose edit OutdoorDelta would take now
+// (TakesLampEdit dry). A value edit it then refuses still marks the lamp's room through the lamp entry update.
+// UNVERIFIED in game: that the message handler changes what Signature reads before this update (the object record's
+// +0x90 bits, the enable bit), and that the occluder point is the lamp's own object.
+// Physical indoor lamps (stage 5): a lamp object carries no 3D blocker of the rooms' records (the room lamp probe's dumps of
+// 02/11: of 235 lamps listed by 77 rooms with 3D records, 231 lie outside every record's sphere; the other 4 sit on or beside
+// furniture whose record holds them, none a record of the lamp's own), so its occluder mark only sends its room to a solve. A
+// physical move (into another room too) and a new lamp whose edit OutdoorDelta takes drop it as well: a new lamp is a light
+// of the story's registry with no update seen yet (UNVERIFIED that it is registered when its object's occluder updates; the
+// counters tell).
+uintptr_t TrackerOf(uintptr_t tl); // below
+bool NewLampAt(uintptr_t light, float x, float z) { // POD (SEH): a lamp class whose light is within kOwnObjectM of (x, z)
+    __try {
+        const int type = *reinterpret_cast<const int*>(light + 0xB0);
+        const float* p = reinterpret_cast<const float*>(light + 0x120);
+        const float dx = p[0] - x, dz = p[2] - z;
+        return ((type >= 3 && type <= 6) || type == 11) && dx * dx + dz * dz <= kOwnObjectM * kOwnObjectM;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+int StoryOfTl(uintptr_t tl) { // POD (SEH)
+    __try {
+        return *reinterpret_cast<const int*>(tl + 0x1A0);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return -99;
+    }
+}
+std::atomic<long> g_occPhysMove{0}, g_occPhysNew{0};
+// An occluder is the lamp's own object only with evidence: its point lies by the lamp's head and moved as the head did since both
+// were last seen (PhysLampPick::OwnObjectStep; an object moved near a lamp with an edit going on, or near an animated lamp,
+// keeps its mark), and a new lamp is one absent from the lot's registry snapshot (PhysLampPick::NewLampEvidence; an old lamp
+// whose entry never updated is not new). Each occluder entry's last point (OccDecideImpl).
+// UNVERIFIED: that a lamp object's point lies within kOwnNearM of its light's head (a lamp further off keeps its mark: a solve)
+constexpr float kOwnStepM = 0.05f, kOwnNearM = 0.5f;
+struct OccPoint {
+    float x, z;
+    uint64_t id;
+};
+std::unordered_map<uintptr_t, OccPoint> g_occPoint; // (under g_mx) occluder entry -> its point (x, z) and object at its last mark
+PhysLampPick::OccMove g_occMoves[32]; // (under g_mx) the latest occluder moves, a ring (FurnitureMovedWith)
+int g_occMoveAt = 0;
+constexpr DWORD kFurnitureMoveMs = 600; constexpr float kFurnitureNearM = 1.0f;
+thread_local bool t_onFurniture = false; // (OccDecideImpl) the occluder moved with a lamp standing on furniture: its mark solves the room
+bool OwnObjectEditTaken(uintptr_t tl, float x, float z, bool hadPoint, const float occWas[2]) {
+    const bool physical = OutdoorDelta::RoomLampPhysical();
+    // (physical) TakesLampEditPhys refuses every lamp of a lot that is not the active one: no scan of its lamps for each occluder
+    // mark (a neighbour's 60 objects updated at 6:00 each scanned every lamp of its story)
+    if (physical && TrackerOf(tl) != RtOutdoorLamps::ActiveTracker()) return false;
+    const float occNow[2] = {x, z};
+    struct Pending { uintptr_t light; bool wasOn, moved; int room; float x, z; };
+    Pending pend[8];
+    int np = 0;
+    {
+        std::lock_guard<std::mutex> lk(g_mx);
+        const DWORD tick = GetTickCount();
+        for (const auto& [key, was] : g_sig) {
+            if (key.tl != tl || !was.entry || np >= static_cast<int>(std::size(pend))) continue;
+            const float dx = was.pos[0] - x, dz = was.pos[2] - z;
+            const bool wasClose = dx * dx + dz * dz <= kOwnObjectM * kOwnObjectM;
+            if (!wasClose && !physical) continue;
+            uint64_t h = 0;
+            int type = 0;
+            bool on = false;
+            float pos[3] = {}, editable[5] = {};
+            if (!Signature(was.entry, key.light, was.room, h, type, on, pos, editable) || h == was.sig || !((type >= 3 && type <= 6) || type == 11)) continue;
+            if (!PhysLampPick::OwnObjectStep(hadPoint, occWas, occNow, was.pos, pos, kOwnStepM, kOwnNearM)) continue;
+            const float mx = pos[0] - was.pos[0], my = pos[1] - was.pos[1], mz = pos[2] - was.pos[2];
+            const float m2 = mx * mx + my * my + mz * mz;
+            if (physical) { // (its object moved with it: its point near where the lamp was or is now; an edit MarkDecideImpl takes)
+                const float nx = pos[0] - x, nz = pos[2] - z;
+                if (!wasClose && nx * nx + nz * nz > kOwnObjectM * kOwnObjectM) continue;
+                const bool editing = was.editUntil && static_cast<int32_t>(tick - was.editUntil) < 0;
+                const bool valueChanged = std::memcmp(was.editable, editable, sizeof editable) != 0 || was.on != on;
+                if (PhysLampPick::EditKind(false, m2, kMoveMin, valueChanged, true, editing, true) < 0) continue; // (h differs: above)
+            } else if (m2 > kMoveMin * kMoveMin)
+                continue;
+            pend[np++] = Pending{key.light, was.on, m2 > 1e-6f, was.room, pos[0], pos[2]};
+        }
+    }
+    for (int i = 0; i < np; i++) { // (its lit bit is rewritten only by its own update: an edit of a lamp off is taken as a switch on)
+        // (a lamp on a table: its mark solves the room, which reads the table's records again where it was dragged with it)
+        if (physical && pend[i].moved && LampMarkFilter::FurnitureMovedWith(pend[i].x, pend[i].z) &&
+            OutdoorDelta::StandsOnFurniture(TrackerOf(tl), StoryOfTl(tl), pend[i].room, pend[i].light)) {
+            t_onFurniture = true;
+            continue;
+        }
+        if (physical ? OutdoorDelta::TakesLampEditPhys(tl, pend[i].light, pend[i].moved ? "move" : "value", false, true)
+                     : OutdoorDelta::TakesLampEdit(tl, pend[i].light, pend[i].wasOn, !pend[i].wasOn, false, true)) {
+            if (pend[i].moved) g_occPhysMove.fetch_add(1, std::memory_order_relaxed);
+            return true;
+        }
+    }
+    if (!physical || np) return false;
+    std::vector<LevelLightShare::RegisteredLight> reg;
+    const int story = StoryOfTl(tl);
+    const uintptr_t tracker = TrackerOf(tl);
+    if (!LevelLightShare::RegisteredLights(tracker, reg)) return false;
+    for (const LevelLightShare::RegisteredLight& r : reg) {
+        if (r.story != story || !NewLampAt(r.light, x, z)) continue;
+        bool seen = false, known = false;
+        {
+            std::lock_guard<std::mutex> lk(g_mx);
+            seen = g_sig.count(Key{tl, r.light}) != 0;
+        }
+        const bool inSnapshot = !seen && OutdoorDelta::InLotLamps(tracker, r.light, known);
+        if (!PhysLampPick::NewLampEvidence(seen, known, inSnapshot)) continue;
+        if (OutdoorDelta::TakesLampEditPhys(tl, r.light, "new", false, true)) {
+            g_occPhysNew.fetch_add(1, std::memory_order_relaxed);
+            return true;
+        }
+    }
+    return false;
+}
+// (physical indoor lamps) an object out of a story's light maps (0x006C7610, the object removal whose marks 0x006C75A1 makes):
+// the lot's lamp snapshot is read again after the next room update, not up to 250 ms later, so the GPU stops drawing a deleted
+// lamp, whose light may be freed. UNVERIFIED that the registry no longer holds it by then (else the 250 ms read takes it)
+bool g_removeOn = false;
+void __fastcall RemovalHook(uint8_t* level, void* edx, uint32_t idLo, uint32_t idHi) {
+    using Fn = void(__fastcall*)(uint8_t*, void*, uint32_t, uint32_t);
+    reinterpret_cast<Fn>(EntryChain::Next(EntryChain::Site::LightObjectRemove, EntryChain::Layer::LampMarkFilter))(level, edx, idLo, idHi);
+    OutdoorDelta::NoteLightObjectRemoved();
+}
+// An occluder's point is in its lot's space (the moving occluder at (20.00 24.10) under a lamp at (849.07 1233.74) in the world,
+// the recording of 03/11), the lamps' positions in the world's: taken to the world (the lot's rows, mgr+0xE0, a lot turning about
+// y only) before the own-object tests compare them. Until then they never matched: each occluder mark of a dragged lamp's object
+// solved its room (121 in that recording) and the solves' maps showed between the GPU's
+uintptr_t ManagerOf(uintptr_t tl) { // POD (SEH)
+    __try {
+        return tl ? *reinterpret_cast<const uintptr_t*>(tl) : 0; // (tl+0: its story's manager)
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+bool OccToWorld(uintptr_t tl, float& x, float& z) {
+    float xf[16];
+    if (!RtOutdoorLamps::LotXform(ManagerOf(tl), xf)) return false;
+    const float lx = x - xf[12], lz = z - xf[14]; // (the rows' inverse: their transpose; y's terms are 0 for a lot turning about y)
+    x = lx * xf[0] + lz * xf[2], z = lx * xf[8] + lz * xf[10];
+    return std::isfinite(x) && std::isfinite(z);
+}
 // true = mark the room (the game's call)
+thread_local float t_occPt[3] = {}; // (OccDecide's journal) the occluder's point and its move since its last mark
+thread_local uintptr_t t_occObj[3] = {}; // (OccDecide's journal) its object's id (low, high) and first shape
 bool OccDecideImpl(uintptr_t tl, int room, uintptr_t entry) {
+    t_onFurniture = false;
+    const bool capture = OutdoorDelta::RoomLampCapture();
+    float x = 0.0f, z = 0.0f;
+    const bool read = capture && OccluderPoint(entry, x, z) && OccToWorld(tl, x, z);
+    uint64_t id = 0;
+    uintptr_t shape = 0;
+    OccluderObject(entry, id, shape);
+    ObjectLegs::NoteShape(id, shape); // (each entry's update comes here, its first one too: 0x006C78E0 has no other path)
+    if (capture) {
+        float was[2] = {};
+        bool had = false;
+        t_occPt[0] = x, t_occPt[1] = z, t_occPt[2] = 0.0f;
+        t_occObj[0] = static_cast<uintptr_t>(id), t_occObj[1] = static_cast<uintptr_t>(id >> 32), t_occObj[2] = shape;
+        if (read) {
+            std::lock_guard<std::mutex> lk(g_mx);
+            if (g_occPoint.size() > 65536) g_occPoint.clear();
+            const auto [it, fresh] = g_occPoint.try_emplace(entry, OccPoint{x, z, id});
+            // (an entry made again at a freed one's address holds another object id: no move for the carry. 03/11 14:36: 148 entries
+            // made again at once read as moves of 1 to 229 m. `had` stays the address's, as before: its far jump keeps its mark)
+            had = !fresh;
+            was[0] = it->second.x, was[1] = it->second.z;
+            const bool sameObject = had && it->second.id == id;
+            it->second = {x, z, id};
+            if (sameObject) t_occPt[2] = std::sqrt((x - was[0]) * (x - was[0]) + (z - was[1]) * (z - was[1]));
+            if (t_occPt[2] > 0.01f) g_occMoves[g_occMoveAt++ % std::size(g_occMoves)] = {entry, GetTickCount(), x, z, shape};
+        }
+        if (read && OwnObjectEditTaken(tl, x, z, had, was)) {
+            const long n = g_occDropped.fetch_add(1, std::memory_order_relaxed) + 1;
+            if (n <= 3 || (n & (n - 1)) == 0)
+                LOG_INFO(std::format("[LampMarkFilter] Occluder mark of room {} dropped: the object of a lamp whose edit the GPU room lamps take ({} so far)", room, n));
+            return false;
+        }
+    }
     const DWORD last = g_handledAt.load(std::memory_order_relaxed);
     if (!last) return true; // (no GPU-handled edit yet: always while Classic)
     g_occMarks.fetch_add(1, std::memory_order_relaxed);
     const DWORD now = GetTickCount();
     if (now - last > kOwnObjectMs || !g_on.load(std::memory_order_relaxed)) return true;
-    float x = 0.0f, z = 0.0f;
-    if (!OccluderPoint(entry, x, z)) return true;
+    if (t_onFurniture || !(capture ? read : OccluderPoint(entry, x, z) && OccToWorld(tl, x, z))) return true;
     bool own = false;
     {
         std::lock_guard<std::mutex> lk(g_mx);
@@ -306,8 +513,12 @@ bool OccDecideImpl(uintptr_t tl, int room, uintptr_t entry) {
     return false;
 }
 bool __cdecl OccDecide(uintptr_t tl, int room, uintptr_t entry) {
-    if (!g_handledAt.load(std::memory_order_relaxed)) return true; // (Classic: the game's mark, nothing else)
-    return HookGuard::Run("LampMarkFilter occluder mark", true, [=] { return OccDecideImpl(tl, room, entry); });
+    if (!g_handledAt.load(std::memory_order_relaxed) && !OutdoorDelta::RoomLampCapture()) return true; // (Classic: the game's mark, nothing else)
+    t_occPt[0] = t_occPt[1] = t_occPt[2] = 0.0f;
+    t_occObj[0] = t_occObj[1] = t_occObj[2] = 0;
+    const bool mark = HookGuard::Run("LampMarkFilter occluder mark", true, [=] { return OccDecideImpl(tl, room, entry); });
+    if (Recorder::Verbose() && OutdoorDelta::RoomLampPhysical()) LevelLightShare::JournalMark(tl, room, mark ? 'O' : 'o', entry, t_occPt, t_occObj);
+    return mark;
 }
 
 // The lot of a story tree level (tl+4: its tracker, as level_light_share reads it); 0 when unreadable
@@ -317,6 +528,11 @@ uintptr_t TrackerOf(uintptr_t tl) {
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return 0;
     }
+}
+// An edit taken without its room's solve: the game gathers a room-mode rig again only when that room's light update reaches
+// it, so the furniture of the lamp's room (and of the room it left) would keep its old rig light until a solve
+void NoteRigRoom(uintptr_t tl, int room) {
+    if (const uintptr_t tracker = TrackerOf(tl)) ObjectLightBridge::RegatherRigsOfRoom(tracker, StoryOfTl(tl), room);
 }
 
 // Marks deferred by BeginDeferMarks on this thread (LevelLightShare's window activation recheck): kept back, then made as
@@ -329,6 +545,13 @@ struct DeferredMark {
 };
 thread_local std::vector<DeferredMark> t_deferred;
 std::atomic<long> g_deferredDropped{0}, g_deferredReplayed{0};
+// (physical) the mark of the room a lamp left, held by LeftDecide until the same update's mark of its new room (MarkDecide)
+struct LeftMark {
+    uintptr_t tl = 0, light = 0;
+    int room = 0;
+};
+thread_local LeftMark t_left;
+thread_local bool t_leftTaken = false; // MarkDecideImpl took that lamp's move into another room
 
 // true = mark the room (the game's call), false = keep its solve
 bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
@@ -350,6 +573,8 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
     }
     if (type == 7 || type == 8) { // window lights: the long path, they follow the sky
         g_windows.fetch_add(1, std::memory_order_relaxed);
+        const DWORD now = GetTickCount() | 1, last = g_windowLast.exchange(now, std::memory_order_relaxed);
+        if (!last || now - last > kWindowGapMs) g_windowBurst.store(now, std::memory_order_relaxed);
         return true;
     }
     // Real-time outdoor lamps (Lamp lighting: Instant only, rt_outdoor_lamps.h): an outdoor lamp the GPU draws on every story of
@@ -366,13 +591,15 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
     }
     if (!rtSwitchOn && RtOutdoorLamps::Watching() && RtOutdoorLamps::HandlesLamp(tl, light, room)) {
         int kind = -1;
-        bool known = false, playerEdit = false;
+        bool known = false, playerEdit = false, rtSettle = false;
         {
             std::lock_guard<std::mutex> lk(g_mx);
             const auto it = g_sig.find(Key{tl, light});
             if (it != g_sig.end()) {
                 known = true;
                 LampState& was = it->second;
+                was.entry = entry;
+                rtSettle = was.on != on || was.editable[3] != editable[3]; // (a switch or an intensity change)
                 const float dx = pos[0] - was.pos[0], dy = pos[1] - was.pos[1], dz = pos[2] - was.pos[2];
                 const bool moved = dx * dx + dy * dy + dz * dz > kMoveMin * kMoveMin;
                 const bool valueChanged = std::memcmp(was.editable, editable, sizeof editable) != 0 || was.on != on;
@@ -392,12 +619,117 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
             if (kind == 2) return true; // into another room: the game's mark of that room
             if (kind >= 0) {
                 if (kind == 1) g_editRefresh.store(true, std::memory_order_relaxed); // the per-pixel object lamps read the list again
-                RtOutdoorLamps::NoteLampEdit(tl, light, kind);
+                RtOutdoorLamps::NoteLampEdit(tl, light, kind, rtSettle);
                 NoteHandledLight(light);
                 if (playerEdit) LevelLightShare::NoteGpuEdit();
                 if (kind == 1) NoteHandledEdit(tl, pos); // (only a move carries the lamp's object along)
+                NoteRigRoom(tl, room);
             }
             g_kept.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+    }
+    // GPU room lamps (developer, gpu_room_lamps.h): a value or a switch of a lamp that every room listing it draws on the GPU
+    // (its kept solve drawn, room 0s by Real-time outdoor lamps; OutdoorDelta::TakesLampEdit) marks no room either. A move within
+    // its room is taken when every room listing it is a kept room whose parts a copy of its tests can redo (the move worker,
+    // OutdoorDelta); a move into another room and any other lamp take the game's path below
+    if (OutdoorDelta::RoomLampCapture()) {
+        bool known = false, wasOn = false, playerEdit = false, settle = false;
+        int kind = -1;
+        {
+            std::lock_guard<std::mutex> lk(g_mx);
+            if (const auto it = g_sig.find(Key{tl, light}); it != g_sig.end()) {
+                const LampState& was = it->second;
+                const float dx = pos[0] - was.pos[0], dy = pos[1] - was.pos[1], dz = pos[2] - was.pos[2];
+                const bool valueChanged = std::memcmp(was.editable, editable, sizeof editable) != 0 || was.on != on;
+                // (physical: a drag step under kMoveMin is a move too while the drag goes on, the GPU draws the lamp where it is; an
+                // animated lamp's wobble takes the game's path below)
+                const bool editing = was.editUntil && static_cast<int32_t>(GetTickCount() - was.editUntil) < 0;
+                kind = PhysLampPick::EditKind(was.room != room, dx * dx + dy * dy + dz * dz, kMoveMin, valueChanged, OutdoorDelta::RoomLampPhysical(), editing,
+                                              was.sig != h);
+                known = true, wasOn = was.on;
+                playerEdit = std::memcmp(was.editable, editable, sizeof editable) != 0;
+                settle = was.on != on || was.editable[3] != editable[3]; // (physical: a switch or an intensity change)
+            }
+        }
+        // (physical indoor lamps, stage 4: every story draws the lot's lamps from their laws by reach, so any room's maps show it;
+        // only a switch or an intensity change settles its rooms, OutdoorDelta::TakesLampEditPhys. A move into another room settles
+        // the rooms listing it and its new room: their normalisation and ambient took it where it was. Into room 0 it stays the
+        // game's: Real-time outdoor lamps draws room 0's lamps from room 0's light list, which only its gather fills)
+        const bool physical = OutdoorDelta::RoomLampPhysical();
+        const char* physKind = kind == 2 ? "move to another room" : kind == 1 ? "move" : wasOn == on ? "value" : on ? "switch on" : "switch off";
+        if (known && kind == 2 && physical && room == 0) {
+            const long n = g_intoRoom0.fetch_add(1, std::memory_order_relaxed) + 1;
+            if (n <= 3 || (n & (n - 1)) == 0)
+                LOG_INFO(std::format("[LampMarkFilter] physical move to another room: lamp {:08X} left to the room solves (into room 0: Real-time outdoor lamps draws it "
+                                     "once room 0 gathers it; {} so far)",
+                                     light, n));
+        } else if (known && (kind == 0 || kind == 1 || (kind == 2 && physical)) &&
+                   (physical ? OutdoorDelta::TakesLampEditPhys(tl, light, physKind, settle || kind == 2) : OutdoorDelta::TakesLampEdit(tl, light, wasOn, on, kind == 1))) {
+            int leftRoom = -1;
+            {
+                std::lock_guard<std::mutex> lk(g_mx);
+                if (const auto it = g_sig.find(Key{tl, light}); it != g_sig.end()) {
+                    LampState& was = it->second;
+                    if (was.room != room) leftRoom = was.room;
+                    was.entry = entry;
+                    if (kind >= 1) std::memcpy(was.pos, pos, sizeof was.pos);
+                    std::memcpy(was.editable, editable, sizeof editable);
+                    was.on = on;
+                    was.room = room;
+                    was.sig = h;
+                    was.editUntil = physical && kind >= 1 ? (GetTickCount() + kEditHoldMs) | 1 : 0; // (physical: a drag's next steps)
+                }
+            }
+            if (kind == 2) t_leftTaken = true; // (MarkDecide drops the mark of the room it left)
+            NoteHandledLight(light);
+            if (playerEdit || kind >= 1) LevelLightShare::NoteGpuEdit();
+            // (a value or a switch taken too: no solve follows it now, so the per-pixel object lamps read the list in its frame, not
+            // at their 20-frame refresh)
+            g_editRefresh.store(true, std::memory_order_relaxed);
+            if (kind >= 1) NoteHandledEdit(tl, pos); // (as Real-time outdoor lamps' move above)
+            NoteRigRoom(tl, room);
+            if (leftRoom >= 0) NoteRigRoom(tl, leftRoom);
+            g_kept.fetch_add(1, std::memory_order_relaxed);
+            return false;
+        }
+    }
+    // (physical, stage 4) a lamp first seen: new, or moved in from another story of the lot. Every story draws it from its law once
+    // the registry snapshot holds it, so its first mark is taken as an edit when every story is covered (only a new lamp no room
+    // lists settles its room); its object's occluder mark was dropped too (OwnObjectEditTaken: a lamp object carries no 3D blocker).
+    // Into room 0 (as a move above), or not covered: the game's path below
+    if (OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical() && room > 0 && ((type >= 3 && type <= 6) || type == 11)) {
+        bool fresh = false, relocated = false;
+        {
+            std::lock_guard<std::mutex> lk(g_mx);
+            if (g_sig.find(Key{tl, light}) == g_sig.end()) {
+                fresh = true;
+                const auto s = g_lampStory.find(light);
+                const uintptr_t tracker = TrackerOf(tl);
+                relocated = s != g_lampStory.end() && s->second != tl && tracker && TrackerOf(s->second) == tracker;
+            }
+        }
+        const char* firstKind = relocated ? "move to another story" : "new";
+        if (fresh && OutdoorDelta::TakesLampEditPhys(tl, light, firstKind, on, true) && OutdoorDelta::TakesLampEditPhys(tl, light, firstKind, on)) {
+            {
+                std::lock_guard<std::mutex> lk(g_mx);
+                if (g_sig.size() > 65536) g_sig.clear();
+                LampState st{h, on, {pos[0], pos[1], pos[2]}, room, 0, 0};
+                std::memcpy(st.editable, editable, sizeof editable);
+                st.entry = entry;
+                g_sig.insert_or_assign(Key{tl, light}, st);
+                if (g_lampStory.size() > 65536) g_lampStory.clear();
+                g_lampStory[light] = tl;
+            }
+            g_first.fetch_add(1, std::memory_order_relaxed);
+            g_physFirst.fetch_add(1, std::memory_order_relaxed);
+            NoteRigRoom(tl, room);
+            g_editRefresh.store(true, std::memory_order_relaxed);
+            // (a new light entry starts in room 0, entry+0x1C = 0 in its constructor at 0x006C8061: its first update also marks room
+            // 0 as the room it left, which MarkDecide drops with this mark)
+            t_leftTaken = true;
+            NoteHandledLight(light);
+            if (relocated) LevelLightShare::NoteGpuEdit();
             return false;
         }
     }
@@ -406,6 +738,10 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
     // `user` = a value a player or a Sim sets (colour, intensity, on / off), sent to the other stories at once; `pure` = the
     // same room, on or off as before (a move or a value change): a solve in progress keeps going, the mark is held;
     // `stayed` = the same room (switched too): the lamp is registered there, its rooms gather at once
+    // A lamp of a lot that is not being played (a neighbour's street lamps switching at 6:00, 100 in 3 frames) is no player's
+    // edit: its marks go through at the game's pace, as at dusk. Taken as edits they started a lamp drag, the edit hold and
+    // the quick pass for the whole world (frames of 150 ms at 6:00, recording of 09/11). The lot's safety net (LotDue) stays
+    const bool played = LevelLightShare::PlayedLotOfTl(tl) || TrackerOf(tl) == RtOutdoorLamps::ActiveTracker();
     bool same = false, edit = false, user = false, pure = false, stayed = false;
     bool autoSelf = false, switchedOn = false; // a light switching itself on (no edit); switched on in place (dusk below)
     {
@@ -416,6 +752,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
         const bool lamp = (type >= 3 && type <= 6) || type == 11;
         if (fresh) {
             std::memcpy(it->second.editable, editable, sizeof editable);
+            it->second.entry = entry;
             if (lamp) g_editRefresh.store(true, std::memory_order_relaxed);
             g_first.fetch_add(1, std::memory_order_relaxed);
             if (lamp) { // moved in from another story of the same lot: every room of the lot again, none kept
@@ -441,7 +778,10 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
             return true;
         }
         LampState& was = it->second;
+        was.entry = entry;
         const DWORD tick = GetTickCount();
+        // (a step of a drag the GPU takes, refused or not, is no game move: it would re-arm the Classic hold until the release)
+        const auto gameMove = [light] { return !(OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical() && LampMarkFilter::HandledLately(light, 1500)); };
         if (std::memcmp(was.editable, editable, sizeof editable) != 0) {
             std::memcpy(was.editable, editable, sizeof editable);
             g_editRefresh.store(true, std::memory_order_relaxed);
@@ -451,7 +791,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
         same = was.sig == h;
         const float dx = pos[0] - was.pos[0], dy = pos[1] - was.pos[1], dz = pos[2] - was.pos[2];
         const bool moved = dx * dx + dy * dy + dz * dz > kMoveMin * kMoveMin; // NaN: not a move
-        if (moved) DragLite::NoteLampStep("lamp entry: moved"); // (a lamp drag, drag_lite.h)
+        if (moved && played) DragLite::NoteLampStep("lamp entry: moved", DragLite::StepKind::Move, gameMove()); // (a lamp drag, drag_lite.h)
         stayed = was.room == room;
         pure = was.on == on && stayed;
         if (was.on != on || moved || was.room != room) { // the player sees this: its lot lights again (OnPresent)
@@ -461,14 +801,14 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
             }
             // a light that switches itself on and off (a flickering TV or effect light): not the player (a drag only moves: never left out)
             // ... unless several different lights switch together: the player's "all the lights", however often (NoteSwitch)
-            const bool burst = was.on != on && NoteSwitch(light, tick);
+            const bool burst = played && was.on != on && NoteSwitch(light, tick);
             const bool selfSwitching = was.on != on && ++was.events > kSelfMax && !burst;
             switchedOn = on && !was.on && !moved && was.room == room;
             if (selfSwitching && switchedOn && tick - was.lastAuto > 5000) {
                 autoSelf = true;
-                was.lastAuto = tick | 1;
+                was.lastAuto = std::max<DWORD>(tick, 1);
             }
-            if (was.on != on && !selfSwitching && !moved && was.room == room) NoteUserSwitch(tick); // the room queue's quick pass
+            if (played && was.on != on && !selfSwitching && !moved && was.room == room) NoteUserSwitch(tick); // the room queue's quick pass
             if (!selfSwitching) g_lampEvents.fetch_add(1, std::memory_order_relaxed);
             if (!selfSwitching) Recorder::NoteLampEdit(tl, on, was.on == on); // the recording's light update summary
             edit = edit || !selfSwitching;
@@ -506,10 +846,11 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
             was.room = room;
         }
         // the steps of a drag between its 10 cm events are the same edit (an animated lamp never moves 10 cm: never one)
+        if (!played) edit = false;
         if (edit) was.editUntil = (tick + kEditHoldMs) | 1;
-        else if (!same && was.editUntil && static_cast<int32_t>(tick - was.editUntil) < 0) {
+        else if (played && !same && was.editUntil && static_cast<int32_t>(tick - was.editUntil) < 0) {
             edit = true;
-            DragLite::NoteLampStep("lamp entry: a step of the same edit");
+            DragLite::NoteLampStep("lamp entry: a step of the same edit", DragLite::StepKind::Move, gameMove());
         }
         was.sig = h;
     }
@@ -535,7 +876,10 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
                                  g_autoSelfOn.load(), g_autoDuskOn.load(), LevelLightShare::QuietMarks()));
     }
     if (same) {
-        if (!g_on.load(std::memory_order_relaxed)) { // off: every mark goes through (the values are still followed)
+        // off: every mark goes through (the values are still followed), but not a lamp the physical mode's GPU took lately (its drag),
+        // whose solve finishes mid-drag over the GPU's maps (16:25 recording of 03/11: 36 such marks of the dragged lamp's rooms)
+        if (PhysLampPick::MarkUnchanged(g_on.load(std::memory_order_relaxed),
+                                        OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical() && LampMarkFilter::HandledLately(light, 1500))) {
             g_off.fetch_add(1, std::memory_order_relaxed);
             return true;
         }
@@ -566,7 +910,28 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
 // 07/10, players' Runtime Error: MarkDecideImpl allocates (its maps) inside the game's lamp code. A C++ exception is caught, the
 // room is marked as the game would mark it (true), and the filter stays off from then on (HookGuard).
 bool __cdecl MarkDecide(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
-    return HookGuard::Run("LampMarkFilter room mark", true, [=] { return MarkDecideImpl(tl, room, entry, light); });
+    t_leftTaken = false;
+    const bool mark = HookGuard::Run("LampMarkFilter room mark", true, [=] { return MarkDecideImpl(tl, room, entry, light); });
+    if (mark && Recorder::Verbose() && OutdoorDelta::RoomLampPhysical()) LevelLightShare::JournalMark(tl, room, 'M', light);
+    if (t_left.light) { // (physical) the room the lamp left: dropped when its move was taken, else the game's mark now
+        const LeftMark left = t_left;
+        t_left = LeftMark{};
+        if (t_leftTaken && left.light == light && left.tl == tl) g_leftDropped.fetch_add(1, std::memory_order_relaxed);
+        else {
+            reinterpret_cast<void(__thiscall*)(void*, int)>(g_markTarget)(reinterpret_cast<void*>(left.tl), left.room);
+            g_leftMade.fetch_add(1, std::memory_order_relaxed);
+            if (Recorder::Verbose()) LevelLightShare::JournalMark(left.tl, left.room, 'L', light);
+        }
+    }
+    t_leftTaken = false;
+    return mark;
+}
+// At 0x006C7CCA (physical indoor lamps): the room the lamp left is held for MarkDecide, which runs next in the same update
+// (0x006C7CD6). true = the game's mark now (not the physical model, or marks deferred on this thread)
+bool __cdecl LeftDecide(uintptr_t tl, int room, uintptr_t, uintptr_t light) {
+    if (t_deferMarks || !light || !OutdoorDelta::RoomLampCapture() || !OutdoorDelta::RoomLampPhysical()) return true;
+    t_left = LeftMark{tl, light, room};
+    return false;
 }
 
 // At the call: ecx = the tree level, [esp+4] = the room, esi = the entry, edi = the light (the game's registers, kept
@@ -579,6 +944,25 @@ __declspec(naked) void MarkThunk() {
         push dword ptr [esp + 16]
         push ecx
         call MarkDecide
+        add esp, 16
+        pop ecx
+        test al, al
+        jz keep
+        jmp dword ptr [g_markTarget]
+    keep:
+        ret 4
+    }
+}
+
+// At 0x006C7CCA: the same registers as MarkThunk's ([esp+4] = the room the lamp left)
+__declspec(naked) void LeftThunk() {
+    __asm {
+        push ecx
+        push edi
+        push esi
+        push dword ptr [esp + 16]
+        push ecx
+        call LeftDecide
         add esp, 16
         pop ecx
         test al, al
@@ -668,6 +1052,19 @@ bool Install(std::string& why) {
     } else {
         LOG_WARNING("[LampMarkFilter] The occluder mark: " + GameAddr::NotAvailable("OccMarkCall") + "; a GPU-drawn lamp's own object still marks its room when it moves");
     }
+    // (physical indoor lamps) the mark of the room a lamp left (GameAddr LampLeftMarkCall; checked byte by byte, and 12 bytes
+    // before the lamp's mark, which MarkThunk takes): without it a move into another room marks the room it left
+    g_leftInstalled = false;
+    kLeftMarkCall = GameAddr::Get(GameAddr::Id::LampLeftMarkCall);
+    if (kLeftMarkCall) {
+        const BYTE leftArg[] = {0x3B, 0x46, 0x1C, 0x74, 0x09, 0x8B, 0x4E, 0x14, 0x50};
+        if (kMarkCall - kLeftMarkCall == 12 && std::memcmp(reinterpret_cast<const void*>(kLeftMarkCall - sizeof leftArg), leftArg, sizeof leftArg) == 0 &&
+            CallsTarget(kLeftMarkCall, kMark))
+            g_leftInstalled = Redirect(kLeftMarkCall, kMark, reinterpret_cast<const void*>(&LeftThunk));
+        if (!g_leftInstalled) LOG_WARNING(std::format("[LampMarkFilter] The mark of the room a lamp left ({:#010x}) differs: a lamp moved into another room marks it", kLeftMarkCall));
+    } else {
+        LOG_WARNING("[LampMarkFilter] The mark of the room a lamp left: " + GameAddr::NotAvailable("LampLeftMarkCall") + "; a lamp moved into another room marks it");
+    }
     g_flagsCounted = false;
     if (!kPublicBuild) { // which messages flag the entries (the floor switch's trigger): all five or none
         using GameAddr::Id;
@@ -687,6 +1084,12 @@ bool Install(std::string& why) {
         g_flagsCounted = all;
     }
     FlushInstructionCache(GetCurrentProcess(), nullptr, 0);
+    if (GameAddr::Have({GameAddr::Id::LightObjectRemove})) {
+        std::string err;
+        g_removeOn = EntryChain::Install(EntryChain::Site::LightObjectRemove, EntryChain::Layer::LampMarkFilter, reinterpret_cast<void*>(&RemovalHook), &err);
+        if (!g_removeOn) LOG_WARNING("[LampMarkFilter] The object removal is not followed (a deleted lamp leaves the GPU's lamps within 250 ms): " + err);
+    }
+    ObjectLegs::Install();
     g_installed = true;
     LOG_INFO(std::format("[LampMarkFilter] Installed: a lamp marks its rooms changed only when it changed{}", g_flagsCounted ? " (message counters on)" : ""));
     return true;
@@ -694,12 +1097,15 @@ bool Install(std::string& why) {
 
 void Uninstall() {
     if (!g_installed) return;
+    if (g_removeOn) EntryChain::Remove(EntryChain::Site::LightObjectRemove, EntryChain::Layer::LampMarkFilter), g_removeOn = false;
+    ObjectLegs::Uninstall();
     MemPatch::RestoreAll(g_patches);
     g_patches.clear();
     FlushInstructionCache(GetCurrentProcess(), nullptr, 0);
     g_installed = false;
     std::lock_guard<std::mutex> lk(g_mx);
     g_sig.clear(); // lamps freed while it was out would leave stale keys
+    g_occPoint.clear();
     g_lampStory.clear();
     g_lotDue.clear();
     g_editRefresh.store(false, std::memory_order_relaxed);
@@ -736,7 +1142,7 @@ void OnPresent(float nightLevel) {
                 g_lotSkippedDusk.fetch_add(1, std::memory_order_relaxed);
                 continue;
             }
-            d.last = now | 1;
+            d.last = std::max<DWORD>(now, 1);
             Run r{tracker, d.changed, d.switchOnly, d.allRooms || (d.lampCount == 0 && d.switchCount == 0), d.relocated, d.lampCount, {}, d.switchCount, {}};
             std::copy(d.lamps, d.lamps + d.lampCount, r.lamps);
             std::copy(d.switched, d.switched + d.switchCount, r.switched);
@@ -747,7 +1153,9 @@ void OnPresent(float nightLevel) {
     // only moved, and lamps that only moved send only the rooms holding them; a lamp moved into another room or story sends
     // every room again: a gather made while the game was still registering it missed it (F8)
     // (lamps switched where they are: only the rooms they can reach, LevelLightShare::RelightLampSwitch)
+    bool playedRun = false;
     for (const Run& r : run) {
+        playedRun = playedRun || LevelLightShare::PlayedTracker(r.tracker);
         const int sent = !r.allRooms && r.switchCount > 0
                              ? LevelLightShare::RelightLampSwitch(r.tracker, r.relocated ? "a lamp moved into another room" : r.lampCount ? "a lamp switched or moved" : "a lamp switched", r.relocated ? 0 : r.changed,
                                                                   r.switched, r.switchCount, r.lamps, r.lampCount)
@@ -757,16 +1165,16 @@ void OnPresent(float nightLevel) {
                                                            r.relocated ? 0 : r.changed, r.allRooms ? nullptr : r.lamps, r.allRooms ? 0 : r.lampCount, true);
         if (sent >= 0) g_lotRefreshes.fetch_add(1, std::memory_order_relaxed);
     }
-    if (!run.empty()) {
+    // (another lot's rigs: once its rooms are solved, LevelLightShare's g_rigWait; this world-wide regather at once was for the
+    // player's edits, and a neighbour's lamps at 6:00 regathered every rig of the world)
+    if (playedRun) {
         ObjectLightBridge::RequestRigRefresh();
         // RelightLot watches completion and retains its own bounded fallback.
     }
 }
-long MassEventId() { return g_massEvents.load(std::memory_order_relaxed); }
 long SwitchEventId() { return g_switchEvents.load(std::memory_order_relaxed); }
 unsigned long SwitchEventStart() { return g_switchStart.load(std::memory_order_relaxed); }
 unsigned long SwitchLastTick() { return g_switchLast.load(std::memory_order_relaxed); }
-unsigned long SwitchSerial() { return g_switchSerial.load(std::memory_order_relaxed); }
 bool LotRefreshDueSoon(unsigned long withinMs) {
     if (!g_installed) return false;
     const DWORD now = GetTickCount();
@@ -776,6 +1184,7 @@ bool LotRefreshDueSoon(unsigned long withinMs) {
     });
 }
 unsigned long EditLastTick() { return g_editLast.load(std::memory_order_acquire); }
+unsigned long WindowBurstStart() { return g_windowBurst.load(std::memory_order_relaxed); }
 unsigned long EditSerial() { return g_editSerial.load(std::memory_order_relaxed); }
 void NoteEdit() { NoteEditNow(GetTickCount()); }
 bool SwitchActive() {
@@ -801,6 +1210,18 @@ void EndDeferMarks(bool replay, uintptr_t entry) {
     t_deferred.clear();
 }
 long DeferredMarksDropped() { return g_deferredDropped.load(std::memory_order_relaxed); }
+bool FurnitureMovedWith(float x, float z) {
+    std::lock_guard<std::mutex> lk(g_mx);
+    return PhysLampPick::FurnitureMovedWith(g_occMoves, static_cast<int>(std::size(g_occMoves)), x, z, GetTickCount(), kFurnitureMoveMs, kFurnitureNearM);
+}
+bool ShapeMovedWithin(uintptr_t shape, unsigned long ms) {
+    std::lock_guard<std::mutex> lk(g_mx);
+    return PhysLampPick::ShapeMoved(g_occMoves, static_cast<int>(std::size(g_occMoves)), shape, GetTickCount(), ms);
+}
+bool ShapeMoved(uintptr_t shape) {
+    std::lock_guard<std::mutex> lk(g_mx);
+    return PhysLampPick::ShapeMoved(g_occMoves, static_cast<int>(std::size(g_occMoves)), shape, GetTickCount(), kFurnitureMoveMs);
+}
 bool HandledLately(uintptr_t light, unsigned long withinMs) {
     if (!light) return false;
     const DWORD now = GetTickCount();
@@ -817,7 +1238,10 @@ std::string Status() {
                                 "while off {}, held while their room was solved {}",
                                 g_on.load() ? "on" : "off", g_kept.load(), g_first.load(), g_changed.load(), g_windows.load(), g_unread.load(), g_off.load(), g_held.load());
     s += std::format(" | lamps switched or moved {}, lots lit again {} (skipped at dusk or dawn {})", g_lampEvents.load(), g_lotRefreshes.load(), g_lotSkippedDusk.load());
-    if (g_occInstalled) s += std::format(" | occluder marks seen after a GPU edit {}, dropped as a GPU-drawn lamp's own object {}", g_occMarks.load(), g_occDropped.load());
+    if (g_leftInstalled)
+        s += std::format(" | physical: rooms a lamp left not marked {}, marked {}; moves into room 0 left to the solves {}; first sights taken {}", g_leftDropped.load(),
+                         g_leftMade.load(), g_intoRoom0.load(), g_physFirst.load());
+    if (g_occInstalled) s += std::format(" | occluder marks seen after a GPU edit {}, dropped as a GPU-drawn lamp's own object {} (physical: moves {}, new lamps {})", g_occMarks.load(), g_occDropped.load(), g_occPhysMove.load(), g_occPhysNew.load());
     if (g_flagsCounted) {
         s += " | light entries flagged by message:";
         for (int i = 0; i < 5; i++) s += std::format(" {} {}", kFlagNames[i], static_cast<long>(g_flagCount[i]));

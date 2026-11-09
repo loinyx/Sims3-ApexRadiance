@@ -241,7 +241,8 @@ bool ApplyAtStartup(int level) {
 }
 
 void CheckLayout(const void* room) {
-    if (!room || g_layoutChecked.load(std::memory_order_relaxed)) return;
+    // (issue #55) no table address (Light detail off, or not found): reading it read address 8, a handled fault every solve
+    if (!room || !kTexelsPerTile || g_layoutChecked.load(std::memory_order_relaxed)) return;
     DWORD n = 0;
     if (!MemPatch::ReadBytes(kTexelsPerTile + 2 * sizeof(DWORD), &n, sizeof n) || n == 0 || n > 64) return;
     LayoutCount c;

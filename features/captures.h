@@ -4,7 +4,7 @@
 //
 // Every capture gets its own folder Documents\...\Apex Radiance\Captures\<YYYY-MM-DD HH-MM-SS> <kind>\ (never reused: a
 // second capture in the same second gets " (2)"), and when it is done the folder also gets a copy of ApexRadiance_LOG.txt,
-// ApexRadiance.toml, ApexRadiance_Crash.txt when there is one, and "About this capture.txt" (what it is, the version, how
+// ApexRadiance.toml, ApexRadiance_Crash.txt when RecentCrash finds one, and "About this capture.txt" (what it is, the version, how
 // to send it). Capture folders are never reused; the oldest are removed automatically only past the size / count limits
 // (Prune, [ui] capture_max_mb / capture_max_folders); menu removal is reversible. Each start and
 // completion shows a centered note on screen (Notify, drawn by the menu module).
@@ -55,6 +55,8 @@ void RetrySave(); // text and metadata retained; a failed screenshot is taken ag
 void SetScreenshots(bool on);
 bool Screenshots();
 bool ScreenshotPending(); // render thread: a screenshot is taken at the next Present (the capture notes are not drawn)
+// Render thread: the folder's Screenshot.png from the next frame, before its Finish (which then takes none)
+void ScreenshotNow(const std::filesystem::path& folder);
 // Captures the finished back buffer (all Apex passes included) into Screenshots, optionally hiding the game's F10 UI for one frame.
 bool RequestPlayerScreenshot(bool hideGameUi);
 void ObserveGameUiKey(WPARAM vk, bool repeat); // call for game-window key-down messages to track the F10 visibility toggle

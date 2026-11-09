@@ -16,6 +16,7 @@
 #include "memory_patch.h"
 #include "imgui.h"
 #include <windows.h>
+#include <algorithm>
 #include <atomic>
 #include <cstdio>
 #include <cstring>
@@ -163,7 +164,7 @@ bool LetReserveGo() {
     if (!g_reserve) return false;
     if (!VirtualFree(g_reserve, 0, MEM_RELEASE)) return false;
     g_reserve = nullptr;
-    g_releasedAt = GetTickCount() | 1;
+    g_releasedAt = std::max<DWORD>(GetTickCount(), 1);
     g_lets.fetch_add(1, std::memory_order_relaxed);
     return true;
 }

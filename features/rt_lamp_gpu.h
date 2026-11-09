@@ -13,9 +13,13 @@
 //     BlockPS) into the output.
 // Every device call goes through DeviceCalls: the game passes Apex's CallOriginal* (its own hooks never see these draws).
 #include <d3d9.h>
+#include <algorithm>
+#include <array>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
+#include "rt_lamp_blockers.h"
 #include "rt_lamp_model.h"
 #include "rt_lamp_proxy.h"
 
@@ -40,9 +44,18 @@ struct DeviceCalls {
 DeviceCalls PlainCalls(); // the device's own methods (the harness)
 
 // The shader objects (made by the caller: the game from its shader cache, the harness with D3DCompile)
-enum ShaderId { kShadowVs, kTexelVs, kShadowPs, kAccPs, kComposePs, kCopyPs, kBlurRowPs, kBlurColPs, kBlockPs, kAccFastPs, kAccRlgPs, kAccRlgFastPs, kComposeRlgPs, kShaderCount };
+enum ShaderId {
+    kShadowVs, kTexelVs, kShadowPs, kAccPs, kComposePs, kCopyPs, kBlurRowPs, kBlurColPs, kBlockPs, kAccFastPs, kAccRlgPs, kAccRlgFastPs, kComposeRlgPs,
+    kAccKeptPs, kComposeKeptPs, kCopyAtPs, kBlockKeptPs, kAccKept0Ps, kAccKept0XPs, kComposeK0Ps, kAccPhysPs, kAccPhysFastPs, kT3dPs, kAccPhysXPs,
+    kAccPhysInPs, kAccPhysInFastPs, kT3dDensePs, kShaderCount
+};
 const char* EntryOf(ShaderId id);
 bool IsVertex(ShaderId id);
+// The physical indoor lamps' shaders: optional (Init without them; RelightKeptPhys then refuses and the game's map stays)
+bool IsPhysical(ShaderId id);
+// The sharper floors' targets: A16B16G16R16F, drawn and filtered by this device, else A8R8G8B8. Compose and ComposeKept read the
+// format off their target: a float one takes the texel with no dither and no pack (Packed), any other as the game's pack
+D3DFORMAT SharperFormat(IDirect3DDevice9* dev);
 
 #pragma pack(push, 1)
 struct TexelVertex {
@@ -61,30 +74,153 @@ static_assert(sizeof(TexelVertex) == 80 && sizeof(TexelDyn) == 16);
 struct Block {
     int x0, y0, x1, y1;
 };
+// Places (y << 16 | x, any order, repeats) as runs along their rows (one row each: y0 == y1)
+inline std::vector<Block> RunsOf(std::vector<uint32_t> at) {
+    std::sort(at.begin(), at.end());
+    at.erase(std::unique(at.begin(), at.end()), at.end());
+    std::vector<Block> runs;
+    for (const uint32_t a : at) {
+        const int x = static_cast<int>(a & 0xFFFFu), y = static_cast<int>(a >> 16);
+        if (!runs.empty() && runs.back().y0 == y && runs.back().x1 + 1 == x) runs.back().x1 = x;
+        else runs.push_back({x, y, x, y});
+    }
+    return runs;
+}
 
 struct Params {
     float thr = 2.0f * 3.0f / 255.0f;
     bool fade = true, reachOn = true, mask = false;
     float radius = 0.15f;      // the lamp ball (Shadow softness)
+    float edgeR = 0.0f;        // (physical) furniture blockers' edges: 0 the game's band, > 0 true size, a lamp ball this wide (BlockerTable::Occlude)
     float aa = 0.0f;           // the map's half texel at the receiver (m; 0.75 texel)
     float normalOffset = 0.5f; // shadow texels (at the face centre)
     float biasM = 0.02f, biasTexels = 0.3f;
-    float nearBlocker = 0.3f;  // m: the nearest blocker the penumbra search considers
     float farDist = 64.0f;
     bool fast = false;         // AccFastPS: fewer shadow taps (a lamp being dragged)
     bool maskAllGpu = false;   // Compose: the floor mask's "all" of the GPU lamps from the last Accumulate's lamps (its only batch), not dyn.x
+    // Compose (GPU room lamps): room 0's kept lamps were added with their floor mask and exit parts (AddKeptParts, extra): ComposeK0PS
+    // with the second sum (texels: mask.z = the exit lamps' light left in the base, mask.w = 1 an exit ground texel)
+    bool keptX = false;
+    // (physical indoor lamps, room 0) with keptX: the second sum is AccumulatePhys's (its floor mask "all" / "vis" and exit light)
+    bool physX = false;
     int debugLamp = -1;        // >= 0: AccPS writes that lamp's shadow share (r) and law luminance (g), -1 when it adds nothing
+    // (physical, kept maps) the compose takes GpuLampLaw::ToneSoft; the table's glazed spans (BlockerTable::AppendPanes: first row, count);
+    // the arches' bounce (ArchAmbient::BounceConsts: rows, their count, the hue the compose takes)
+    bool toneSoft = false;
+    float paneFirst = 0.0f, paneCount = 0.0f;
+    int bounceN = 0;
+    float bounceRows[12][4] = {}, bounceHue[4] = {};
+    // (physical, room 0: ComposePS / ComposeK0PS) the texels of the space a room of the story below continues into (bit 8 with
+    // mask.z = its slot, mask.w = world y; RtLampProxy::InsideAt) composed as that room's wall texels are (GpuLampLaw::IndoorTexel,
+    // the ambient left to the draw): rgb toned, alpha the weight x its ramp. inK the tone's k (0: none), inSoft ToneSoft, per slot
+    // its ramp's line in world y (a, b, lo, hi; GpuLampLaw::SplitFill)
+    float inK = 0.0f;
+    bool inSoft = false;
+    float inFit[4][4] = {};
+    // (ComposePS / ComposeK0PS InBase) the bit-8 texels' light without the GPU lamps as their rooms' kept solves give it now, at the
+    // map's texels (A16B16G16R16F, alpha 1 where written; RtOutdoorLamps InBaseNow), or null: the vertices' bases
+    IDirect3DTexture9* inBase = nullptr;
+};
+
+// A kept map's phys points as textures (DEFAULT A32B32G32R32F, w x h) at their places in the sum's layout: t = p, n, mask, base of
+// TexelVertex; rects = the places they fill (Engine::UploadKept refuses a hole), which the physical passes draw as quads
+struct PhysPoints {
+    IDirect3DTexture9* t[4] = {};
+    int w = 0, h = 0;
+    std::vector<Block> rects;
+    void Release();
 };
 
 struct Map {
     int w = 0, h = 0;
     IDirect3DVertexBuffer9* vb = nullptr;  // TexelVertex x count
+    const PhysPoints* pts = nullptr;       // (physical) instead of vb: AccPhysInPS and T3dDensePS, the shadow looked up at mask.xyz
     IDirect3DVertexBuffer9* dyn = nullptr; // TexelDyn x count, or null (zeros)
     UINT count = 0;
     bool blur = false;                    // a class-2 wall atlas: composed before the blur, then blurred
     UINT passes = 0;
     std::vector<Block> blocks;
     IDirect3DTexture9* preblur = nullptr; // DEFAULT, w x h: the blocks' texels before the blur as the solve left them
+};
+
+// ---- GPU room lamps (developer, gpu_room_lamps.cpp): one kept room solve's texels of one map (OutdoorDelta::BuildKeptMap) ----
+// Every point is a TexelVertex at its target texel (t.xy):
+//   parts (AccKeptPS, into the sum's layout: the map's kept texel j at (j % accW, j / accW)): p = (sample position, bits: 1
+//   the early-out, 4 the soft light cut), n = (sample normal, mult), base = (A, B, thrScale, 0); grouped by lamp (ranges)
+//   texels / wallTexels (ComposeKeptPS, into the map / the class-2 wall layout): p = (base rgb, dither), n = (ramp x ambient,
+//   ramp; a roofless texel: its alpha), base = (norm, k, the alpha floor, roofed 0/1), mask.xy = its place in the sum's layout
+//   copies (ComposeKeptPS, into the map): a tile-edge copy, its source texel's compose point at the copy's place
+//   restores (CopyAtPS, into the map): mask.xy = the place itself in the game's map (a copy of a texel no capture holds)
+//   phys (physical indoor lamps, AccPhysPS, into the sum's layout): one per kept texel at its place there, p = (lot position,
+//   bits + 16 x room slot; bits: 1 masked, 2 gated, 4 an exit ground texel, 8 its batch ran the 3D test), n = (lot normal, 0),
+//   base = (world position: the game's 3D test, 0), mask = (where the shadow is looked up, a sharper floor's footprint); uploaded as PhysPoints
+struct KeptBlockOut {
+    int x0, y0, x1, y1; // the block in the map
+    int lx, ly0, ly1;   // its rows in the layout (x0 at lx)
+    bool above, below;  // the rows lit beyond that edge are in the layout
+};
+struct KeptMapData {
+    int story = 0, id = 0, cls = 0, m = 0;
+    bool blur = false; // a class-2 wall atlas: drawn only into a map of the working map's exact size
+    uint64_t lot = 0;
+    float thr = 0.0f;
+    int w = 0, h = 0, accW = 0, accH = 0;
+    std::vector<TexelVertex> parts, texels, wallTexels, copies, restores, phys;
+    std::vector<uintptr_t> lamps;               // the lamp of each range of parts
+    std::vector<char> colourOnly;               // its law is its colour alone (a TubeLight without a segment)
+    std::vector<std::pair<UINT, UINT>> ranges;  // first, count
+    int layoutW = 0, layoutH = 0;
+    std::vector<uint32_t> layout;               // the class-2 blocks before the blur with their rows beyond, layoutW x layoutH
+    std::vector<Block> extRects;                // each block with its rows beyond, in the layout
+    std::vector<KeptBlockOut> outs;
+    UINT passes = 0;
+    std::vector<std::pair<uint32_t, uint32_t>> expect; // (y << 16 | x, the texel the game left there) for the self-check
+    // every lamp of the room's kept solve the GPU draws, with its position then, or (its colour alone) the signature of what its
+    // share reads, and its law then: one changed since (moved, a tube's intensity) is drawn with that law (its parts' own)
+    struct RoomLamp {
+        uintptr_t light;
+        float pos[3];
+        uint64_t geo;
+        bool colourOnly;
+        GpuLampLaw::Lamp law;
+    };
+    std::vector<RoomLamp> roomLamps;
+    // (physical indoor lamps) phys points instead of parts; `lamps` = every lamp of the solve with a law, physMult = its mult x norm
+    // scale there; the room's furniture blockers (its records' header row, blkHeader)
+    bool physical = false;
+    std::vector<float> physMult;
+    std::vector<char> physReach; // per lamp: 1 the realistic reach share applies on the room's wall texels
+    std::shared_ptr<const BlockerTable> blockers; // (the kept room's own, one for its maps)
+    float blkHeader = -1.0f;
+    // (physical, stage 4: the lot's lamps drawn by reach, phys_lamp_pick.h) per lamp of `lamps` the room it was registered in;
+    // the lights in the solve's base (never drawn); the room's normalisation and roofless flag (a fresh lamp's row); the map's
+    // texels' world box (min xyz, max xyz)
+    std::vector<int> physHome;
+    std::vector<uintptr_t> physBaked;
+    float physNorm = 1.0f;
+    bool physOutdoor = false;
+    float physBox[6] = {1e30f, 1e30f, 1e30f, -1e30f, -1e30f, -1e30f};
+    float physAmb[3] = {}; // (S8) a roofed room's +0x110 at its solve's end (RtLampModel::AmbScale; 0: the ambient is not followed)
+    // (physical, sharper floors: OutdoorDelta::HiFloors) the floor map at twice its size: 4 phys points per kept texel at its sub-texel
+    // places (PhysLampPick::SubTexelPos) into a 2 accW x 2 accH sum; texelsHi = the compose points (texels and tile-edge copies) of
+    // each sub-texel into the 2w x 2h map; placesHi = one point per such sub-texel (mask.xy = its own place: CopyAtPS)
+    std::vector<TexelVertex> physHi, texelsHi, placesHi;
+};
+struct KeptMapGpu { // DEFAULT pool (made again after a device reset)
+    int w = 0, h = 0, accW = 0, accH = 0, layoutW = 0, layoutH = 0;
+    IDirect3DVertexBuffer9 *parts = nullptr, *texels = nullptr, *walls = nullptr, *copies = nullptr, *restores = nullptr;
+    UINT nTexels = 0, nWalls = 0, nCopies = 0, nRestores = 0;
+    PhysPoints phys, physHi; // (physHi: sharper floors, KeptMapData)
+    IDirect3DVertexBuffer9 *texelsHi = nullptr, *placesHi = nullptr;
+    UINT nTexelsHi = 0, nPlacesHi = 0;
+    std::vector<std::pair<UINT, UINT>> ranges;
+    IDirect3DTexture9* layout = nullptr;
+    std::vector<Block> extRects;
+    std::vector<KeptBlockOut> outs;
+    UINT passes = 0;
+    bool blur = false;
+    size_t bytes = 0;
+    void Release();
 };
 
 struct Stats {
@@ -103,8 +239,9 @@ class Engine {
     D3DFORMAT AtlasFormat() const { return atlasFmt_; }
     int Face() const { return face_; }
 
-    // The proxy (lot space); false when it has no triangle
-    bool SetProxy(IDirect3DDevice9* dev, const RtLampProxy::Mesh& mesh, std::string& err);
+    // The proxy (lot space); false when it has no triangle. tiles: the kept atlas's own occluders instead (physical indoor lamps:
+    // RtLampProxy::Build with open tops); RenderShadowTile* use them once set (an empty set: no occluder), else the proxy
+    bool SetProxy(IDirect3DDevice9* dev, const RtLampProxy::Mesh& mesh, std::string& err, bool tiles = false);
     size_t ProxyTris() const { return proxyTris_; }
     // Lamps 0 .. n - 1 (n <= kAtlasLamps; lot space) into the atlas tiles
     bool RenderShadows(IDirect3DDevice9* dev, const float (*pos)[3], int n, float farDist, std::string& err);
@@ -123,13 +260,19 @@ class Engine {
     // second target of the texels' draw (a blurred atlas: through a scratch map; the scale is not blurred)
     bool Compose(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, const Params& p, std::string& err,
                  IDirect3DTexture9* scale = nullptr);
-    // The harness: the current sum (w x h float4, row major)
+    // The harness: the current sum (w x h float4, row major); the last physical batch's 3D tests (lamp i in channel i)
     bool ReadSum(IDirect3DDevice9* dev, int w, int h, std::vector<float>& out);
+    bool ReadT3(IDirect3DDevice9* dev, int w, int h, std::vector<float>& out);
 
     // ---- GPU lamps for every room (room_lamps_gpu.cpp): a shadow atlas of `rows` lamp tiles kept across relights (each
     // lamp keeps its tile while it stays put), per-room lamp tables, and the toned compose ----
-    bool EnsureTiles(IDirect3DDevice9* dev, int rows, std::string& err);
+    // (rows: tiles, at most 128 and what the device's texture size takes up to 8192 x 8192: 160 at face 256; TileRows() says what was made). Tiles are packed in
+    // columns of 6 faces: down a column up to the device's height, then the next column (tile t: column t / per, row t % per)
+    // (kept: every tile still holds what was rendered into it, at the same index; false when made again)
+    bool EnsureTiles(IDirect3DDevice9* dev, int rows, std::string& err, bool* kept = nullptr);
     int TileRows() const { return tileRows_; }
+    // tile -> its column (in faces: 6 per column) and row, as AccumulateRlg hands them to the shader (misc.z, misc.x)
+    void TileAt(int tile, int& faceCol, int& row) const { faceCol = tile / tilePer_ * 6, row = tile % tilePer_; }
     // One lamp's cube shadow map (lot space) into tile `tile` of the kept atlas
     bool RenderShadowTile(IDirect3DDevice9* dev, const float pos[3], int tile, float farDist, std::string& err);
     // The same from the proxy's triangle ranges [first, first + count) only (the object shapes that hold the lamp left out)
@@ -138,7 +281,16 @@ class Engine {
     static constexpr int kTableCols = 18;
     bool SetTable(IDirect3DDevice9* dev, const float* rgba, int rows, std::string& err);
     // One batch of lamps (lamps[i]'s shadow in tile tiles[i]) added to the map's sum, each texel taking its room's row
-    bool AccumulateRlg(IDirect3DDevice9* dev, const Map& m, const RtLampModel::Lamp* lamps, const int* tiles, int n, const Params& p, bool first, std::string& err);
+    // (phys: at most kPhysBatch lamps over phys points, their 3D tests first (T3dPS from t3From[i], a vertical tube from 4 heights, the lamp's +0x120 in world
+    // space, over the blocker table of SetBlockers), then AccPhysPS)
+    static constexpr int kPhysBatch = 4;
+    bool AccumulateRlg(IDirect3DDevice9* dev, const Map& m, const RtLampModel::Lamp* lamps, const int* tiles, int n, const Params& p, bool first, std::string& err,
+                       bool phys = false, const float (*t3From)[3] = nullptr, bool physX = false);
+    // Physical indoor lamps: the receiving rooms' furniture blockers (rt_lamp_blockers.h) into a DEFAULT A32B32G32R32F texture
+    // (written from a SYSTEMMEM copy) that AccPhysPS reads; kMaxWidth wide, made again only for a taller table. The shared form
+    // holds the table and uploads nothing while the same one is bound
+    bool SetBlockers(IDirect3DDevice9* dev, const BlockerTable& t, std::string& err);
+    bool SetBlockers(IDirect3DDevice9* dev, const std::shared_ptr<const BlockerTable>& t, std::string& err);
     // The map composed into out (raw and toned texels; the class-2 wall blur as Compose)
     bool ComposeRlg(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, const Params& p, std::string& err);
     // A map's sum kept between relights (A32B32G32R32F, w x h): the next AccumulateRlg(first = false) adds to `from`; the sum
@@ -149,8 +301,57 @@ class Engine {
     static bool ReadTexture(IDirect3DDevice9* dev, IDirect3DTexture9* t, int w, int h, std::vector<uint32_t>& out);
     // A texture copied texel for texel into a render target of its size (between Begin and End)
     bool CopyTexture(IDirect3DDevice9* dev, IDirect3DBaseTexture9* src, IDirect3DTexture9* out, int w, int h, std::string& err);
+    // (GpuRoomLamps::ComposeOver's kept rooms) src (A8R8G8B8, w x h) copied texel for texel into this engine's scratch of that size
+    // (DEFAULT, one a size, made on first use), returned; null when it could not be made (between Begin and End)
+    IDirect3DTexture9* KeepCopy(IDirect3DDevice9* dev, IDirect3DTexture9* src, int w, int h, std::string& err);
+    // rects' texels of src copied texel for texel into out (both w x h; between Begin and End)
+    bool CopyRects(IDirect3DDevice9* dev, const std::vector<Block>& rects, IDirect3DTexture9* src, IDirect3DTexture9* out, int w, int h, std::string& err);
     // An A32B32G32R32F render target read back (4 floats per texel, r g b a); waits for the GPU
     static bool ReadFloat4(IDirect3DDevice9* dev, IDirect3DTexture9* t, int w, int h, std::vector<float>& out);
+
+    // ---- GPU room lamps: a kept room solve drawn over a map (between Begin and End) ----
+    static bool UploadKept(IDirect3DDevice9* dev, const KeptMapData& d, KeptMapGpu& g);
+    // laws / lawOk: per range of parts (0: no law, adds nothing; 1 the GPU's law; 2 the lamp's colour alone, rt_lamp_model.h
+    // KeptAdd's law = that colour); game: the game's own map (the restores' source)
+    // Room 0's kept lamps (Real-time outdoor lamps, between its Accumulate and Compose): their parts (TexelVertex as `parts`
+    // above, at their texels' places in a w x h map) added into the current sum; laws / lawOk per range (lawOk 2: the colour alone).
+    // extra: their floor mask parts (mask.x, mask.y) and exit lamps' parts (mask.z) too: AccKept0PS, and AccKept0XPS into the
+    // other sum ("all", the exit light) that Compose with Params::keptX reads
+    bool AddKeptParts(IDirect3DDevice9* dev, IDirect3DVertexBuffer9* vb, const std::vector<std::pair<UINT, UINT>>& ranges, const GpuLampLaw::Lamp* laws,
+                      const char* lawOk, float thr, int w, int h, std::string& err, bool extra = false);
+    // out: w x h, the room's own map (at most the working map's size: its top-left corner; a blurred wall atlas exactly)
+    // amb (null: 1): ComposeKeptPS's gAmb, the scale of the ramp x ambient (RtLampModel::AmbScale; physical rooms only)
+    bool RelightKept(IDirect3DDevice9* dev, const KeptMapGpu& k, const GpuLampLaw::Lamp* laws, const char* lawOk, float thr, IDirect3DBaseTexture9* game,
+                     IDirect3DTexture9* out, int w, int h, std::string& err, const float* amb = nullptr);
+    // Physical indoor lamps: RelightKept with the sum from the map's phys points instead of its parts: every lamp (lamps[i].law in
+    // lot space, its shadow in tile tiles[i] of EnsureTiles, its 3D test from world[i]; .mult unused) in batches of kPhysBatch (AccumulateRlg phys), each texel taking
+    // the row of its room slot: rooms[slot].header = its records in the blocker table (SetBlockers; < 0 none), rooms[slot].lamp[i]
+    // = (mult, 0 not lit there; 1 the reach share applies; 1 an exit lamp: room 0's exit ground alpha, AccumulatePhys). Then RelightKept's compose, blur, copies and restores. More lamps than
+    // the atlas holds go in several calls over the same k: first = false adds to the sum so far, compose = false stops after it
+    struct PhysRoom {
+        float header = -1.0f;
+        std::vector<std::array<float, 3>> lamp;
+        std::vector<float> fill; // lamp i's furniture fill floor (RtLampGpu::FurnitureFill, BlockerTable::FillOf; none: 0)
+    };
+    bool RelightKeptPhys(IDirect3DDevice9* dev, const KeptMapGpu& k, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n,
+                         const std::vector<PhysRoom>& rooms, const Params& p, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err,
+                         bool first = true, bool compose = true, const float* amb = nullptr);
+    // (sharper floors) RelightKeptPhys over k's sub-texels (physHi into a 2 accW x 2 accH sum) composed into out, a 2w x 2h map
+    // (texelsHi; no restore, wall or blur: a floor map has none drawn this way)
+    bool RelightKeptPhysHi(IDirect3DDevice9* dev, const KeptMapGpu& k, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n,
+                           const std::vector<PhysRoom>& rooms, const Params& p, IDirect3DTexture9* out, int w2, int h2, std::string& err, bool first, bool compose,
+                           const float* amb);
+    // (sharper floors) src's bilinear upsample into dst (w2 x h2); k's sub-texels' places (placesHi) copied from over into dst
+    bool Upsample(IDirect3DDevice9* dev, IDirect3DTexture9* src, IDirect3DTexture9* dst, int w2, int h2, std::string& err);
+    bool CopyPlaces(IDirect3DDevice9* dev, const KeptMapGpu& k, IDirect3DTexture9* over, IDirect3DTexture9* dst, int w2, int h2, std::string& err);
+    // Physical indoor lamps over room 0 (Real-time outdoor lamps' map m, before its Accumulate, which then takes first = false):
+    // the lamps added to the sum as RelightKeptPhys adds them (m's points as phys points: one per place of the map), and into the
+    // second sum (cleared when first; AccPhysXPS) the floor mask's "all" and "vis" of masked texels and the exit lamps' light of
+    // exit ground texels, which Compose with Params::keptX and physX reads. Several calls over one sum: first = false
+    bool AccumulatePhys(IDirect3DDevice9* dev, const Map& m, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n, const PhysRoom& room,
+                        const Params& p, bool first, std::string& err);
+    // Every physical shader was made (room 0's AccPhysXPS too)
+    bool PhysReady() const { return ps_[kAccPhysPs] && ps_[kAccPhysFastPs] && ps_[kT3dPs] && ps_[kAccPhysXPs] && ps_[kAccPhysInPs] && ps_[kAccPhysInFastPs] && ps_[kT3dDensePs]; }
 
     // The state of the device around a series of passes (render targets, depth, every state a state block holds)
     bool Begin(IDirect3DDevice9* dev); // false: no state block could be made, nothing was changed (End is not called)
@@ -167,6 +368,12 @@ class Engine {
     void Quad(IDirect3DDevice9* dev, int w, int h, float u1 = 1.0f, float v1 = 1.0f);
     void TexelTarget(IDirect3DDevice9* dev, int w, int h);
     void Blocks(IDirect3DDevice9* dev, const Map& m);
+    bool KeptReady(IDirect3DDevice9* dev, const KeptMapGpu& k, int w, int h, std::string& err);
+    bool ComposeKept(IDirect3DDevice9* dev, const KeptMapGpu& k, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, int w, int h, std::string& err, const float* amb, const Params* phys = nullptr);
+    bool PhysSum(IDirect3DDevice9* dev, const Map& m, const RtLampModel::Lamp* lamps, const int* tiles, const float (*world)[3], int n, const std::vector<PhysRoom>& rooms,
+                 const Params& p, bool first, std::string& err, bool x);
+    bool DrawKeptParts(IDirect3DDevice9* dev, IDirect3DVertexBuffer9* vb, const std::vector<std::pair<UINT, UINT>>& ranges, const GpuLampLaw::Lamp* laws,
+                       const char* lawOk, float thr, int w, int h, ShaderId ps = kAccKeptPs);
 
     DeviceCalls c_;
     bool ready_ = false;
@@ -177,6 +384,14 @@ class Engine {
     IDirect3DVertexDeclaration9* shadowDecl_ = nullptr;
     IDirect3DVertexBuffer9* proxy_ = nullptr; // MANAGED
     size_t proxyTris_ = 0;
+    IDirect3DVertexBuffer9* tileProxy_ = nullptr; // MANAGED (SetProxy tiles)
+    size_t tileProxyTris_ = 0;
+    bool tileProxySet_ = false; // (SetProxy tiles ran: an empty open-top build leaves no occluder, never the outdoor proxy)
+    struct KeptTex {
+        int w = 0, h = 0;
+        IDirect3DTexture9* t = nullptr;
+    };
+    std::vector<KeptTex> keptCopies_;         // (KeepCopy) DEFAULT A8R8G8B8, one a size
     IDirect3DTexture9* atlas_ = nullptr;      // G16R16F (or G32R32F) render target
     D3DFORMAT atlasFmt_ = D3DFMT_UNKNOWN;
     IDirect3DSurface9* atlasDepth_ = nullptr; // D24X8
@@ -186,13 +401,26 @@ class Engine {
     int accCur_ = 0;
     IDirect3DVertexBuffer9* zeros_ = nullptr;
     UINT zerosCount_ = 0;
-    IDirect3DTexture9* tiles_ = nullptr;      // the kept atlas (G16R16F or G32R32F), 6 faces x rows tiles
+    IDirect3DTexture9* tiles_ = nullptr;      // the kept atlas (G16R16F or G32R32F), tileCols_ x (6 faces) by tilePer_ tiles
     IDirect3DSurface9* tilesDepth_ = nullptr;
     D3DFORMAT tilesFmt_ = D3DFMT_UNKNOWN;
-    int tileRows_ = 0;
+    int tileRows_ = 0, tilePer_ = 1, tileCols_ = 1; // tiles made; rows per column, columns
+    int tileMaxH_ = 0, tileMaxW_ = 0;               // (the device's texture height and width in tiles; 0 until EnsureTiles asks)
+    int tileFailRows_ = 0;                          // the smallest atlas the device refused (0: none): later atlases stay under it
     IDirect3DTexture9* table_ = nullptr;      // DEFAULT A32B32G32R32F kTableCols x tableRows_
     IDirect3DTexture9* tableSys_ = nullptr;   // its SYSTEMMEM copy
     int tableRows_ = 0, tableCap_ = 0;
+    IDirect3DTexture9* blk_ = nullptr;        // the blocker table (DEFAULT A32B32G32R32F blkW_ x blkH_)
+    IDirect3DTexture9* blkSys_ = nullptr;     // its SYSTEMMEM copy (the same size)
+    int blkW_ = 0, blkH_ = 0;
+    std::shared_ptr<const BlockerTable> blkBound_; // the table blk_ holds (the shared SetBlockers; null: unknown)
+    IDirect3DTexture9* t3_ = nullptr;         // a physical batch's 3D tests (DEFAULT A32B32G32R32F, the sums' size)
+    int t3W_ = 0, t3H_ = 0;
+    IDirect3DTexture9* x_ = nullptr;          // room 0's physical second sum (DEFAULT A32B32G32R32F, the sums' size; AccumulatePhys)
+    float accC_[97][4] = {};                  // the last Accumulate's lamp constants c0..c96 (Compose's MaskAll reads them after AddKeptParts)
+    int xW_ = 0, xH_ = 0;
+    bool ReadSumOf(IDirect3DDevice9* dev, IDirect3DTexture9* t, int w, int h, std::vector<float>& out);
+    int blendOk_ = -1; // the device adds into an A32B32G32R32F target (RelightKept; -1 not asked yet)
     bool ComposeImpl(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, const Params& p, ShaderId ps, std::string& err,
                      IDirect3DTexture9* scale = nullptr);
     IDirect3DStateBlock9* saved_ = nullptr;
@@ -203,7 +431,5 @@ class Engine {
 
 // The cube faces (right, up, forward): the same table as the HLSL
 extern const float kFaces[6][3][3];
-// The lamp's direction d (lot space) to its atlas texel (face, x, y) as AccPS reads it (the harness)
-void FaceTexel(const float d[3], int face, int& f, int& x, int& y);
 
 } // namespace RtLampGpu

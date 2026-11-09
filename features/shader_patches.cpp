@@ -1229,6 +1229,141 @@ bool PatchSnowFloor(std::vector<DWORD>& t, int texcoord, FloorPatch& out, const 
     return PatchSnowFloorImpl(t, texcoord, out, worldY, false);
 }
 
+// An outside surface's indoor texels (the outdoor scale's .y = 1: a wall or floor of a space a room of the story below continues
+// into, rt_lamps_hlsl.h ComposePS), at night: after its lamp mad "mad rB.xyz, rL, cK.x, rC" (rC the moon and the ambient cube)
+// the light becomes the InteriorWall's, map + map alpha x the room's ambient (cA.xyz, +0x110 of the room it continues; the
+// compose put that room's weight in the alpha), and the sky cube's reflection, added where the light meets the albedo
+// ("mad rD.xyz, rX, rB, rS"), is scaled by cA.w (InteriorWall's hemisphere tint) - both by n = flag x night (night: a source the
+// draw sets to the night level), blended in by lrp; tex: the map's texld. n = 0 (unmarked, or by day) keeps every result bit for bit (cmp takes it
+// as is): by day the map holds no daylight, which the game lights these surfaces by (2026-11-09 11-42-45: the floored attic
+// black at noon). alphaOk: rL.w still the map's alpha at the mad (else read again). N, T2, T3: free temps. indoor: the
+// light's part went in (not when the mad writes rL); spec: the reflection's too.
+// rooms (sU >= 0: samplers sU .. sU + 4 and constants cR .. cR + 4 free; dclAt the place of the sampler declarations): a marked
+// texel matched to a texel of its room's wall map (RtOutdoorLamps: the UV map at sU, point sampled at the map's uv = (u, v, slot
+// / 3, 1)) takes that room's map as the room's own draw sees it this frame (slot r at sU + 1 + r, point), lit as InteriorWall
+// lights it, R + R.w x the slot's ambient (cR + r), times the lamps' fall-off up the wall the relit map's outdoor scale holds
+// there (ratio: its .z, 1 at the floor line) floored at ratioFloor (1: the map holds no ratio). Walls only (PatchWallScale). Unmatched texels
+// (UV .w = 0) as without rooms
+static void IndoorPick(std::vector<DWORD>& t, const std::vector<Ins>& all, size_t mad, size_t tex, size_t firstFlow, DWORD flag, DWORD night, DWORD cA, bool alphaOk,
+                       DWORD N, DWORD T2, DWORD T3, DWORD T4, DWORD T5, std::vector<Edit>& edits, bool& indoor, bool& spec, bool& strip, bool& haze,
+                       int sU = -1, DWORD cR = 0, DWORD ratioFloor = 0, size_t dclAt = 0, bool* rooms = nullptr, DWORD ratio = 0) {
+    constexpr DWORD kCmp = 0x58, kNeg = 0x01000000u;
+    const Ins& m = all[mad];
+    const DWORD B = Num(t[m.at + 1]), L = Num(t[m.at + 2]);
+    indoor = spec = strip = haze = false;
+    if (rooms) *rooms = false;
+    if (B == L || B == N || B == T2 || B == T3 || B == T4 || B == T5) return;
+    std::vector<DWORD> light = {Op(kMul, 3), Dst(kTemp, N, 0x1), flag, night};
+    if (alphaOk) light.insert(light.end(), {Op(kMad, 4), Dst(kTemp, T2, 0x7), Src(kTemp, L, kSwzW), Src(kConst, cA), Src(kTemp, L)});
+    else // (the map's alpha read again at its uv)
+        light.insert(light.end(), {Op(kTexld, 3), Dst(kTemp, T2), t[all[tex].at + 2], t[all[tex].at + 3],
+                                   Op(kMad, 4), Dst(kTemp, T2, 0x7), Src(kTemp, T2, kSwzW), Src(kConst, cA), Src(kTemp, L)});
+    if (sU >= 0 && sU + 4 <= 15 && rooms && ratio) {
+        constexpr DWORD kZ = 0xAA;
+        const DWORD U = static_cast<DWORD>(sU);
+        for (DWORD k = 0; k < 5; k++) edits.push_back({dclAt, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, U + k)}});
+        edits.push_back({dclAt, {Op(kDef, 5), Dst(kConst, cR + 4), F(0.0f), F(-1.0f / 6.0f), F(-0.5f), F(-5.0f / 6.0f)}});
+        light.insert(light.end(), {Op(kTexld, 3), Dst(kTemp, T3), t[all[tex].at + 2], Src(kSampler, U),                 // (u, v, slot / 3, matched)
+                                   Op(kAdd, 3), Dst(kTemp, N, 0xE), Src(kTemp, T3, kZ), Src(kConst, cR + 4),             // slot >= 1, 2, 3 in N.yzw
+                                   Op(kTexld, 3), Dst(kTemp, T4), Src(kTemp, T3), Src(kSampler, U + 1)});
+        for (DWORD r = 1; r < 4; r++)
+            light.insert(light.end(), {Op(kTexld, 3), Dst(kTemp, T5), Src(kTemp, T3), Src(kSampler, U + 1 + r),
+                                       Op(kCmp, 4), Dst(kTemp, T4), Src(kTemp, N, 0x55 * r), Src(kTemp, T5), Src(kTemp, T4)});
+        light.insert(light.end(), {Op(kMov, 2), Dst(kTemp, T5, 0x7), Src(kConst, cR)});
+        for (DWORD r = 1; r < 4; r++)
+            light.insert(light.end(), {Op(kCmp, 4), Dst(kTemp, T5, 0x7), Src(kTemp, N, 0x55 * r), Src(kConst, cR + r), Src(kTemp, T5)});
+        light.insert(light.end(), {Op(kMad, 4), Dst(kTemp, T5, 0x7), Src(kTemp, T4, kSwzW), Src(kTemp, T5), Src(kTemp, T4), // the room's light
+                                   Op(kMax, 3), Dst(kTemp, T4, 0x1), ratio, ratioFloor,
+                                   Op(kMul, 3), Dst(kTemp, T5, 0x7), Src(kTemp, T5), Src(kTemp, T4, kSwzX),
+                                   Op(kCmp, 4), Dst(kTemp, T2, 0x7), Src(kTemp, T3, kSwzW) | kNeg, Src(kTemp, T2), Src(kTemp, T5)});
+        *rooms = true;
+    }
+    light.insert(light.end(), {Op(kLrp, 4), Dst(kTemp, T2, 0x7), Src(kTemp, N, kSwzX), Src(kTemp, T2), Src(kTemp, B),
+                               Op(kCmp, 4), t[m.at + 1], Src(kTemp, N, kSwzX) | kNeg, Src(kTemp, B), Src(kTemp, T2)});
+    edits.push_back({End(m), std::move(light)});
+    indoor = true;
+    for (size_t j = mad + 1; j < firstFlow; j++) {
+        const Ins& y = all[j];
+        bool reads = false;
+        for (size_t k = 2; k <= y.len; k++) reads |= IsReg(t[y.at + k], kTemp, B);
+        if (!reads) continue;
+        const DWORD r0 = t[y.at + 2], r1 = t[y.at + 3], rs = y.len >= 4 ? t[y.at + 4] : 0;
+        const bool plainB = (IsReg(r0, kTemp, B) && Swz(r0) == kSwzXYZW && !(r0 & 0x0F000000u)) != (IsReg(r1, kTemp, B) && Swz(r1) == kSwzXYZW && !(r1 & 0x0F000000u));
+        if (y.op == kMad && y.len == 4 && Type(t[y.at + 1]) == kTemp && WMask(t[y.at + 1]) == 0x7 && plainB && Type(rs) == kTemp && Num(rs) != B && Num(rs) != N) {
+            edits.push_back({y.at, {Op(kMul, 3), Dst(kTemp, T3, 0x7), rs, Src(kConst, cA, kSwzW),
+                                    Op(kLrp, 4), Dst(kTemp, T3, 0x7), Src(kTemp, N, kSwzX), Src(kTemp, T3), rs,
+                                    Op(kCmp, 4), Dst(kTemp, T3, 0x7), Src(kTemp, N, kSwzX) | kNeg, rs, Src(kTemp, T3)}});
+            t[y.at + 4] = Src(kTemp, T3);
+            spec = true;
+            // The albedo the light meets, X = "mul X.xyz, S.w, A" with S.w the game's wall shade strip (s6 at TEXCOORD1.zw:
+            // 0.5 + 0.5 x its texel, x 0.5 along the foot of each story's wall), which InteriorWall has not: on an indoor texel
+            // the albedo without it (X / S.w), else the floor line between the room's wall and the attic's showed the attic at half
+            // (light captures 2026-11-09 13-04-54 / 56: 175 below, 72 above, the same light)
+            const size_t xi = IsReg(r0, kTemp, B) ? 3 : 2;
+            const DWORD X = t[y.at + xi];
+            if (Type(X) == kTemp && Swz(X) == kSwzXYZW && !(X & 0x0F000000u) && Num(X) != B && Num(X) != N && Num(X) != T3) {
+                size_t w = all.size();
+                for (size_t i = j; i-- > mad + 1;)
+                    if (all[i].len > 0 && (t[all[i].at + 1] & 0x80000000u) && all[i].op != kDcl && all[i].op != kDef && IsReg(t[all[i].at + 1], kTemp, Num(X))) {
+                        w = i;
+                        break;
+                    }
+                if (w < all.size() && all[w].op == kMul && all[w].len == 3 && WMask(t[all[w].at + 1]) == 0x7) {
+                    const DWORD a = t[all[w].at + 2], b = t[all[w].at + 3];
+                    const bool aS = Type(a) == kTemp && Swz(a) == kSwzW && !(a & 0x0F000000u), bS = Type(b) == kTemp && Swz(b) == kSwzW && !(b & 0x0F000000u);
+                    const DWORD S = aS != bS ? (aS ? a : b) : 0;
+                    bool kept = S != 0 && Num(S) != Num(X);
+                    for (size_t i = w + 1; i < j && kept; i++) // (S.w unwritten up to the albedo's reader)
+                        if (all[i].len > 0 && (t[all[i].at + 1] & 0x80000000u) && all[i].op != kDcl && all[i].op != kDef && IsReg(t[all[i].at + 1], kTemp, Num(S)) &&
+                            (WMask(t[all[i].at + 1]) & 0x8))
+                            kept = false;
+                    if (kept) {
+                        constexpr DWORD kRcp = 0x06;
+                        edits.push_back({y.at, {Op(kRcp, 2), Dst(kTemp, T4, 0x8), S,
+                                                Op(kMul, 3), Dst(kTemp, T4, 0x7), X, Src(kTemp, T4, kSwzW),
+                                                Op(kLrp, 4), Dst(kTemp, T4, 0x7), Src(kTemp, N, kSwzX), Src(kTemp, T4), X,
+                                                Op(kCmp, 4), Dst(kTemp, T4, 0x7), Src(kTemp, N, kSwzX) | kNeg, X, Src(kTemp, T4)}});
+                        t[y.at + xi] = Src(kTemp, T4);
+                        strip = true;
+                    }
+                }
+            }
+            // The outside's atmosphere at the end, "lrp rO.xyz, rW.s, rH, rD" (rD this mad's result, rH the haze colour, rW.s its
+            // weight: lrp gives rW x rH + (1 - rW) x rD, so 0 is no haze), which InteriorWall has not (its fog is c10 by v1.x): an
+            // indoor texel takes rD, weight rW x (1 - N) (forcing 1 showed the haze colour alone: attic black, 2026-11-09 13-41-43)
+            const DWORD D = Num(t[y.at + 1]);
+            for (size_t k = j + 1; k < firstFlow; k++) {
+                const Ins& z = all[k];
+                bool readsD = false;
+                for (size_t q = 2; q <= z.len; q++) readsD |= IsReg(t[z.at + q], kTemp, D);
+                if (!readsD) {
+                    if (z.len > 0 && (t[z.at + 1] & 0x80000000u) && z.op != kDcl && z.op != kDef && IsReg(t[z.at + 1], kTemp, D)) break; // (rewritten)
+                    continue;
+                }
+                const DWORD w = t[z.at + 2], d = z.len == 4 ? t[z.at + 4] : 0;
+                const DWORD sw = Swz(w);
+                if (z.op == kLrp && z.len == 4 && Type(t[z.at + 1]) == kTemp && (WMask(t[z.at + 1]) & 0x7) == 0x7 && IsReg(d, kTemp, D) && Swz(d) == kSwzXYZW &&
+                    !(d & 0x0F000000u) && (Type(w) == kTemp || Type(w) == kInput) && !(w & 0x0F000000u) && (sw == 0x00 || sw == 0x55 || sw == 0xAA || sw == 0xFF) &&
+                    !IsReg(t[z.at + 3], kTemp, D)) {
+                    edits.push_back({z.at, {Op(kMad, 4), Dst(kTemp, T5, 0x1), w, Src(kTemp, N, kSwzX) | kNeg, w,
+                                            Op(kCmp, 4), Dst(kTemp, T5, 0x1), Src(kTemp, N, kSwzX) | kNeg, w, Src(kTemp, T5, kSwzX)}});
+                    t[z.at + 2] = Src(kTemp, T5, kSwzX);
+                    haze = true;
+                }
+                break;
+            }
+        }
+        return;
+    }
+}
+// rL.w unwritten between the map's texld (tex) and the lamp mad (mad)
+static bool AlphaKept(const std::vector<DWORD>& t, const std::vector<Ins>& all, size_t tex, size_t mad) {
+    const DWORD L = Num(t[all[tex].at + 1]);
+    if (!(WMask(t[all[tex].at + 1]) & 0x8)) return false;
+    for (size_t i = tex + 1; i < mad; i++)
+        if (all[i].len > 0 && (t[all[i].at + 1] & 0x80000000u) && IsReg(t[all[i].at + 1], kTemp, L) && (WMask(t[all[i].at + 1]) & 0x8)) return false;
+    return true;
+}
 // Surfaces lit only by a baked light map (summer outdoor floors, ExteriorFloors technique; census 25/09): the single
 // "texld rL, vK, sM" (2D sampler, input coordinate) whose next rgb reader is "mad rX.xyz, rL, cK.x, rY", before any
 // flow control. Inserts max(rL, atlas) there, the atlas read at TEXCOORD7.xy = world xz (PatchObjectLampVs exports it).
@@ -1343,15 +1478,25 @@ bool PatchBakedAtlasPsImpl(std::vector<DWORD>& t, int texcoord, FloorPatch& out,
         constexpr DWORD kExp = 0x0E;
         const DWORD Q = E + 2, cQ = cH + 6;
         if (Q <= 15 && cQ < 224) {
-            const std::vector<DWORD> scale = {Op(kTexld, 3), Dst(kTemp, T), t[all[tex].at + 2], Src(kSampler, Q),
+            // (the indoor marks: the scale's .y kept in rF.x, T being taken again by the atlas and the shade below)
+            const DWORD F = static_cast<DWORD>(u.maxTemp + 5);
+            const bool marks = F + 6 < 32 && cQ + 1 < 224;
+            std::vector<DWORD> scale = {Op(kTexld, 3), Dst(kTemp, T), t[all[tex].at + 2], Src(kSampler, Q),
                                               Op(kMul, 3), Dst(kTemp, T, 0x1), Src(kTemp, T, kSwzX), Src(kConst, cQ, kSwzX),
                                               Op(kExp, 2), Dst(kTemp, T, 0x1), Src(kTemp, T, kSwzX),
                                               Op(kMul, 3), Dst(kTemp, L, 0x7), Src(kTemp, L), Src(kTemp, T, kSwzX)};
+            if (marks) scale.insert(scale.begin() + 4, {Op(kMov, 2), Dst(kTemp, F, 0x1), Src(kTemp, T, kSwzY)});
             code.insert(code.begin(), scale.begin(), scale.end());
             edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, Q)}});
             out.outScaleSampler = static_cast<int>(Q);
             out.outScaleConst = static_cast<int>(cQ);
             out.mapSampler = Num(t[all[tex].at + 3]);
+            if (marks) {
+                out.indoorConst = static_cast<int>(cQ + 1);
+                IndoorPick(t, all, static_cast<size_t>(mad), static_cast<size_t>(tex), firstFlow, Src(kTemp, F, kSwzX), Src(kConst, cQ, kSwzY), cQ + 1,
+                           out.maskAlpha && !out.exitLight, F + 1,
+                           F + 2, F + 3, F + 4, F + 5, edits, out.indoor, out.spec, out.strip, out.haze);
+            }
         }
     }
     edits.push_back({all[mad].at, std::move(code)});
@@ -1374,7 +1519,7 @@ bool PatchWallScale(std::vector<DWORD>& t, WallScalePatch& out) {
     std::vector<int> is2d(16, 0);
     for (const Ins& x : all)
         if (x.op == kDcl && Type(t[x.at + 2]) == kSampler && Num(t[x.at + 2]) < 16) is2d[Num(t[x.at + 2])] = ((t[x.at + 1] >> 27) & 0xF) == 2;
-    int tex = -1, found = 0;
+    int tex = -1, mad = -1, found = 0;
     for (size_t i = 0; i < firstFlow; i++) {
         const Ins& x = all[i];
         if (x.op != kTexld || Type(t[x.at + 1]) != kTemp || Type(t[x.at + 2]) != kInput || Type(t[x.at + 3]) != kSampler || !is2d[Num(t[x.at + 3]) & 15]) continue;
@@ -1387,6 +1532,7 @@ bool PatchWallScale(std::vector<DWORD>& t, WallScalePatch& out) {
                 if (y.op == kMad && Type(t[y.at + 1]) == kTemp && WMask(t[y.at + 1]) == 0x7 && IsReg(t[y.at + 2], kTemp, A) && Swz(t[y.at + 2]) == kSwzXYZW &&
                     Type(t[y.at + 3]) == kConst && Swz(t[y.at + 3]) == kSwzX && Type(t[y.at + 4]) == kTemp) {
                     tex = static_cast<int>(i);
+                    mad = static_cast<int>(j);
                     found++;
                 }
                 break;
@@ -1402,7 +1548,18 @@ bool PatchWallScale(std::vector<DWORD>& t, WallScalePatch& out) {
                                Op(kMul, 3), Dst(kTemp, T, 0x1), Src(kTemp, T, kSwzX), Src(kConst, cQ, kSwzX),
                                Op(kExp, 2), Dst(kTemp, T, 0x1), Src(kTemp, T, kSwzX),
                                Op(kMul, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kTemp, T, kSwzX)};
-    Apply(t, {{u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, Q)}}, {End(x), std::move(code)}});
+    std::vector<Edit> edits = {{u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, Q)}}, {End(x), std::move(code)}};
+    // (the indoor light: cQ.y the night level, cQ + 1 the room's ambient and the reflection's scale)
+    if (u.maxTemp + 6 < 32 && u.maxConst + 2 < 224) {
+        out.ambConst = cQ + 1;
+        const bool roomsFit = Q + 5 <= 15 && cQ + 6 < 224;
+        bool rooms = false;
+        IndoorPick(t, all, static_cast<size_t>(mad), static_cast<size_t>(tex), firstFlow, Src(kTemp, T, kSwzY), Src(kConst, cQ, kSwzY), cQ + 1,
+                   AlphaKept(t, all, static_cast<size_t>(tex), static_cast<size_t>(mad)), T + 1, T + 2, T + 3, T + 4, T + 5, edits, out.indoor, out.spec, out.strip,
+                   out.haze, roomsFit ? static_cast<int>(Q + 1) : -1, cQ + 2, Src(kConst, cQ, 0xAA), u.afterLastSamplerDcl, &rooms, Src(kTemp, T, 0xAA));
+        if (rooms) out.roomSampler = static_cast<int>(Q + 1), out.roomConst = static_cast<int>(cQ + 2);
+    }
+    Apply(t, std::move(edits));
     return true;
 }
 // (2.15.3) exitLight (with groundShade): as PatchFloor
@@ -3081,12 +3238,15 @@ bool AnalyzeRigPs(const std::vector<DWORD>& t, RigPsInfo& out) {
     return out.rigLights || out.cubeWeightConst >= 0;
 }
 
-bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& out, bool capToFloorMap) {
+bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& out, bool capToFloorMap, bool wallMask) {
+    out.maskSampler = -1;
     if (t.empty() || t[0] != 0xFFFF0300) return false;
     const auto ins = Parse(t);
     if (ins.empty()) return false;
     const Usage u = Scan(t, ins);
-    if (u.maxTemp + 14 >= 32 || u.maxConst + 12 >= 224 || u.maxSampler < 0 || u.maxSampler + 4 > 15 || !u.afterLastSamplerDcl) return false;
+    if (u.maxTemp + (wallMask ? 16 : 14) >= 32 || u.maxConst + (wallMask ? 13 : 12) >= 224 || u.maxSampler < 0 || u.maxSampler + (wallMask ? 5 : 4) > 15 ||
+        !u.afterLastSamplerDcl)
+        return false;
     int nrm = -1, lm = -1;
     for (size_t i = 0; i < ins.size(); i++) {
         const Ins& x = ins[i];
@@ -3112,7 +3272,15 @@ bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& 
     if (nrm < 0 || lm < 0) return false;
     // the diffuse chain: 4 mul/mad into one dest reading c4..c7, multiplier written by a saturated mov (sat N.L)
     int chainEnd = -1;
+    int chain[4] = {};
     DWORD D = 0;
+    const auto satWritten = [&](size_t before, DWORD reg, DWORD mask, bool dp3) { // the multiplier's last writer: a saturated mov, or dp3 (sat N.L)
+        for (int k = static_cast<int>(before) - 1; k >= 0; k--) {
+            const Ins& z = ins[static_cast<size_t>(k)];
+            if (z.len >= 1 && IsReg(t[z.at + 1], kTemp, reg) && (WMask(t[z.at + 1]) & mask)) return (z.op == kMov || (dp3 && z.op == kDp3)) && (t[z.at + 1] & 0x00100000u) != 0;
+        }
+        return false;
+    };
     for (size_t i = 0; i + 3 < ins.size() && chainEnd < 0; i++) {
         bool ok = true;
         DWORD dst = 0, src = 0;
@@ -3137,17 +3305,36 @@ bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& 
             dst = Num(d);
             seen |= 1 << (Num(c) - 4);
         }
-        if (!ok || seen != 0xF) continue;
-        for (int k = static_cast<int>(i) - 1; k >= 0; k--) {
-            const Ins& z = ins[static_cast<size_t>(k)];
-            if (z.len >= 1 && IsReg(t[z.at + 1], kTemp, src)) {
-                if (z.op == kMov && (t[z.at + 1] & 0x00100000u)) {
-                    chainEnd = static_cast<int>(i + 3);
-                    D = dst;
-                }
+        if (!ok || seen != 0xF || !satWritten(i, src, 0xF, false)) continue;
+        chainEnd = static_cast<int>(i + 3);
+        D = dst;
+        for (int k = 0; k < 4; k++) chain[k] = static_cast<int>(i) + k;
+    }
+    // The saved refusals of glossy furniture: the specular chain interleaved with this one (PS_2B16EE0F), or a dp3_sat into another
+    // register before each step (PS_25F66827). The same four steps, followed by their data; nothing else writes the accumulator's rgb
+    const auto lightStep = [&](const Ins& y, size_t at, DWORD op, int seen) {
+        const DWORD c = t[y.at + 3];
+        return y.op == op && Type(t[y.at + 1]) == kTemp && (WMask(t[y.at + 1]) & 0x7) == 0x7 && Type(t[y.at + 2]) == kTemp && Type(c) == kConst && Num(c) >= 4 && Num(c) <= 7 &&
+               !(seen & (1 << (Num(c) - 4))) && satWritten(at, Num(t[y.at + 2]), 1u << (Swz(t[y.at + 2]) & 3), true);
+    };
+    for (size_t i = 0; i < ins.size() && chainEnd < 0; i++) {
+        if (ins[i].len != 3 || !lightStep(ins[i], i, kMul, 0)) continue;
+        DWORD dst = Num(t[ins[i].at + 1]);
+        int seen = 1 << (Num(t[ins[i].at + 3]) - 4), steps = 1, found[4] = {static_cast<int>(i)};
+        for (size_t j = i + 1; j < ins.size() && steps < 4; j++) {
+            const Ins& y = ins[j];
+            if (y.len == 4 && lightStep(y, j, kMad, seen) && IsReg(t[y.at + 4], kTemp, dst)) {
+                seen |= 1 << (Num(t[y.at + 3]) - 4);
+                dst = Num(t[y.at + 1]);
+                found[steps++] = static_cast<int>(j);
+            } else if (y.len >= 1 && y.op != kDcl && y.op != kDef && IsReg(t[y.at + 1], kTemp, dst) && (WMask(t[y.at + 1]) & 0x7)) {
                 break;
             }
         }
+        if (steps != 4) continue;
+        chainEnd = found[3];
+        D = dst;
+        std::copy(found, found + 4, chain);
     }
     // the basis light is computed right after the nrm (the normal register is reused later, e.g. as the cube lookup)
     // into registers above the shader's own; the chain's result is replaced by it
@@ -3197,7 +3384,7 @@ bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& 
     // whole diffuse by the basis light left unlit furniture with the grey cube only, so the Blue tint had nothing to act on.
     const DWORD cU = cS + 7;
     out.diffuseConst = static_cast<int>(cU);
-    for (int k = chainEnd - 3; k <= chainEnd; k++) {
+    for (int k : chain) {
         DWORD& c = t[ins[static_cast<size_t>(k)].at + 3];
         c = (c & ~0x7FFu) | (cU + (Num(c) - 4));
     }
@@ -3207,9 +3394,35 @@ bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& 
                          Op(kDef, 5), Dst(kConst, cD), F(0.8944f), F(0.4472f), F(-0.8944f), F(0.0f),
                          Op(kDef, 5), Dst(kConst, cS + 11), F(kBasisCap), F(0.0f), F(0.0f), F(0.0f)}});
     std::vector<DWORD> dcl;
-    for (DWORD s = 0; s < 4; s++) dcl.insert(dcl.end(), {Op(kDcl, 2), 0x90000000u, Dst(kSampler, E + s)});
+    for (DWORD s = 0; s < (wallMask ? 5u : 4u); s++) dcl.insert(dcl.end(), {Op(kDcl, 2), 0x90000000u, Dst(kSampler, E + s)});
     edits.push_back({u.afterLastSamplerDcl, dcl});
-    std::vector<DWORD> body = BicubicSetup(uvT, uvN, cS, cK, cH, T);
+    // (wallMask) O.xy = the centre of the pixel's own texel (in texels), M = its walls (r -x, g +x, b -z, a +z: the maps' layout);
+    // before the taps become uvs, each tap coordinate is kept on the texel's side of a wall it has: the B-spline reads the
+    // texel's own value where the texels beyond the wall were (no light from the next room; smooth up to the wall). A tap two
+    // texels off stays as it was (its weight is at most 1/48 there). cW = (1e4, 0, 0, 0)
+    std::vector<DWORD> walls, clampTaps;
+    if (wallMask) {
+        const DWORD O = T + 14, M = T + 15, cW = cS + 12, A = T + 3, B = T + 4;
+        out.maskSampler = static_cast<int>(E + 4);
+        edits.push_back({1, {Op(kDef, 5), Dst(kConst, cW), F(1e4f), F(0.0f), F(0.0f), F(0.0f)}});
+        walls = {Op(kMul, 3), Dst(kTemp, O, 0x3), Src(uvT, uvN), Src(kConst, cS, Sw(0, 1, 0, 1)), // texels
+                 Op(kFrc, 2), Dst(kTemp, M, 0x3), Src(kTemp, O),
+                 Op(kAdd, 3), Dst(kTemp, O, 0x3), Src(kTemp, O), Neg(Src(kTemp, M)),
+                 Op(kAdd, 3), Dst(kTemp, O, 0x3), Src(kTemp, O), Src(kConst, cK, Sw(2, 2, 2, 2)), // its centre (+0.5)
+                 Op(kMul, 3), Dst(kTemp, M, 0x3), Src(kTemp, O), Src(kConst, cS, Sw(2, 3, 2, 3)),
+                 Op(kMov, 2), Dst(kTemp, M, 0xC), Src(kConst, cK, Sw(3, 3, 3, 3)),
+                 Op(kTexld, 3), Dst(kTemp, M), Src(kTemp, M), Src(kSampler, E + 4)};
+        clampTaps = {// A.xy = the lowest tap coordinate (the centre where walled on the - side, else far below), A.zw = the highest
+                     Op(kMad, 4), Dst(kTemp, A, 0x3), Src(kTemp, M, Sw(0, 2, 0, 2)), Src(kConst, cW, Sw(0, 0, 0, 0)), Src(kTemp, O, Sw(0, 1, 0, 1)),
+                     Op(kAdd, 3), Dst(kTemp, A, 0x3), Src(kTemp, A), Neg(Src(kConst, cW, Sw(0, 0, 0, 0))),
+                     Op(kMad, 4), Dst(kTemp, A, 0xC), Neg(Src(kTemp, M, Sw(1, 3, 1, 3))), Src(kConst, cW, Sw(0, 0, 0, 0)), Src(kTemp, O, Sw(0, 1, 0, 1)),
+                     Op(kAdd, 3), Dst(kTemp, A, 0xC), Src(kTemp, A), Src(kConst, cW, Sw(0, 0, 0, 0)),
+                     Op(kMax, 3), Dst(kTemp, B, 0xF), Src(kTemp, B), Src(kTemp, A, Sw(0, 1, 0, 1)),
+                     Op(kMin, 3), Dst(kTemp, B, 0xF), Src(kTemp, B), Src(kTemp, A, Sw(2, 3, 2, 3))};
+    }
+    std::vector<DWORD> body = walls;
+    const std::vector<DWORD> setup = BicubicSetup(uvT, uvN, cS, cK, cH, T, clampTaps);
+    body.insert(body.end(), setup.begin(), setup.end());
     // weights from the world normal: +X, -X, +Z, -Z, as the basis-reading shaders compute them
     body.insert(body.end(), {
         Op(kDp2add, 4), Dst(kTemp, Wn, 0x1, true), Src(kTemp, N, Sw(0, 1, 0, 1)), Src(kConst, cD, Sw(0, 1, 0, 1)), Src(kConst, cD, Sw(3, 3, 3, 3)),
@@ -3240,7 +3453,11 @@ bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& 
                              Op(kMin, 3), Dst(kTemp, Acc, 0x7), Src(kTemp, Acc), Src(kTemp, Tmp)});
     edits.push_back({End(ins[static_cast<size_t>(nrm)]), body});
     // diffuse = the unlit-room lights (above) + the basis light x strength (lamps per pixel), as walls take lamp + base
-    edits.push_back({End(ins[static_cast<size_t>(chainEnd)]), {Op(kMad, 4), Dst(kTemp, D, 0x7), Src(kTemp, Acc), Src(kConst, cStr, Sw(0, 0, 0, 0)), Src(kTemp, D)}});
+    // (the strength lifts dim furniture to the floor's light, never past 1: x2 burnt a table under its own lamp white, with a bloom, 05/11)
+    edits.push_back({End(ins[static_cast<size_t>(chainEnd)]), {Op(kMul, 3), Dst(kTemp, Tmp, 0x7), Src(kTemp, Acc), Src(kConst, cStr, Sw(0, 0, 0, 0)),
+                                                               Op(kMax, 3), Dst(kTemp, Acc, 0x7), Src(kTemp, Acc), Src(kConst, cK, Sw(3, 3, 3, 3)),
+                                                               Op(kMin, 3), Dst(kTemp, Acc, 0x7), Src(kTemp, Acc), Src(kTemp, Tmp),
+                                                               Op(kAdd, 3), Dst(kTemp, D, 0x7), Src(kTemp, Acc), Src(kTemp, D)}});
     if (cubeTex >= 0) { // the cube's colour towards its grey by tintConst.x: lrp(t, cube, luma(cube)), then x tintConst.yzw (the room's colour)
         const DWORD cT = cS + 5, cL = cS + 6, C = Num(t[ins[static_cast<size_t>(cubeTex)].at + 1]);
         out.tintConst = static_cast<int>(cT);
@@ -3326,6 +3543,28 @@ bool FindRoomMapRead(const std::vector<DWORD>& t, const std::vector<Ins>& ins, R
     }
     return found == 1;
 }
+// (arch_ambient) The shader's reflection read: the only read of a cube sampler, a plain texld to a temp's rgb, ahead of the room
+// map read and of any flow control. -1: none, or one the neighbour's cube cannot follow
+int FindCubeRead(const std::vector<DWORD>& t, const std::vector<Ins>& ins, const RoomMapRead& r) {
+    DWORD cubes = 0;
+    for (const Ins& x : ins)
+        if (x.op == kDcl && x.len == 2 && Type(t[x.at + 2]) == kSampler && ((t[x.at + 1] >> 27) & 0xF) == 3) cubes |= 1u << Num(t[x.at + 2]);
+    int at = -1;
+    for (size_t i = 0; i < ins.size(); i++) {
+        const Ins& x = ins[i];
+        if (x.op == kDcl || x.op == kDef || x.op == kDefI || x.op == kDefB) continue;
+        for (size_t k = 1; k <= x.len; k++) {
+            if (Type(t[x.at + k]) != kSampler || !((cubes >> Num(t[x.at + k])) & 1)) continue;
+            if (at >= 0) return -1;
+            at = static_cast<int>(i);
+        }
+        if (at < 0 && IsFlow(x.op)) return -1;
+    }
+    if (at < 0 || at >= r.texld) return -1;
+    const Ins& x = ins[static_cast<size_t>(at)];
+    const DWORD d = t[x.at + 1];
+    return x.op == kTexld && x.len == 3 && !((t[x.at] >> 16) & 0xFF) && Type(d) == kTemp && (WMask(d) & 0x7) == 0x7 && !(d & 0x00D00000u) ? at : -1;
+}
 } // namespace
 
 bool VsPassesWorldY(const std::vector<DWORD>& vs) {
@@ -3356,20 +3595,24 @@ bool IsRoomMapPs(const std::vector<DWORD>& t) {
 
 // Room ambient through arches (development builds, arch_ambient; arch_ambient.h has the same law on the CPU, for the
 // tests). After the room map read rL (alpha = the ambient weight the shader multiplies the room's ambient cA by): the
-// pixel's lot position from the map uv (floor maps: 4 texels a metre, p = uv x size / 4), and for each of kArchCells arch
+// pixel's lot position from the floor VS's TEXCOORD4 (lot / 64 + (1/1024, 1/512), in every floor pair: p = in x cScale.xy + cScale.zw,
+// ArchRowsForImpl; the map uv is no position, on a split tile it holds an atlas address 20 m off), and for each of kArchCells arch
 // cells the draw passes, seg = (a.x, a.z, e.x, e.z) (e = b - a) and D = (the neighbour's ambient over cA, 0 where lower;
-// 1 / |e|^2): w = 1 - smoothstep(dist(p, segment) / kReach), add = max over the cells of D w, rL.xyz += rL.w add. Unused
-// cells hold D = 0. Temps: the three given (free after the read). cP = (3, -2, 1, 0.25), cQ = (1e-8, 1 / kReach, 0, 0).
-std::vector<DWORD> ArchAmbientCode(DWORD uvType, DWORD uvNum, DWORD cS, DWORD cP, DWORD cQ, DWORD cArch, DWORD L, DWORD Pp, DWORD Q, DWORD Acc) {
+// 1 / |e|^2): w = 1 - smoothstep(dist(p, segment) / reach), add = max over the cells of D w in Acc.xyz (the caller then does
+// rL.xyz += rL.w add). Unused cells hold D = 0. Temps: the three given. cP = (3, -2, 1, 0), cQ = (1e-8, 0, 0, 0), cReach: each
+// cell's 1 / reach (ArchAmbient::Reach), four a row. cFlag >= 0: Acc.w = max of w x each cell's flag, four a row (the weight of
+// the neighbour's cube; an unused cell has w = 1, its flag 0). It reads only the position and constants, so it can run ahead of the map read.
+std::vector<DWORD> ArchAmbientCode(DWORD uvType, DWORD uvNum, DWORD cScale, DWORD cReach, DWORD cP, DWORD cQ, DWORD cArch, DWORD Pp, DWORD Q, DWORD Acc, int cFlag) {
     constexpr DWORD kRsq = 0x07;
     const DWORD X = Sw(0, 0, 0, 0), Y = Sw(1, 1, 1, 1), Z = Sw(2, 2, 2, 2), W = Sw(3, 3, 3, 3);
     std::vector<DWORD> v = {
-        Op(kMul, 3), Dst(kTemp, Pp, 0x3), Src(uvType, uvNum), Src(kConst, cS, Sw(0, 1, 0, 1)), // texels
-        Op(kMul, 3), Dst(kTemp, Pp, 0x3), Src(kTemp, Pp), Src(kConst, cP, W),                  // metres (lot)
-        Op(kMov, 2), Dst(kTemp, Acc, 0x7), Src(kConst, cQ, Z),                                  // 0
+        Op(kMad, 4), Dst(kTemp, Pp, 0x3), Src(uvType, uvNum, Sw(0, 1, 0, 1)), Src(kConst, cScale, Sw(0, 1, 0, 1)), Src(kConst, cScale, Sw(2, 3, 2, 3)), // metres (lot)
+        Op(kMov, 2), Dst(kTemp, Acc), Src(kConst, cQ, Z),                                       // 0
     };
     for (DWORD i = 0; i < kArchCells; i++) {
         const DWORD cSeg = cArch + 2 * i, cD = cSeg + 1;
+        const int lane = static_cast<int>(i % 4);
+        const DWORD R = Sw(lane, lane, lane, lane);
         const std::vector<DWORD> cell = {
             Op(kAdd, 3), Dst(kTemp, Q, 0x3), Src(kTemp, Pp), Neg(Src(kConst, cSeg, Sw(0, 1, 0, 1))),   // p - a
             Op(kMul, 3), Dst(kTemp, Q, 0x4), Src(kTemp, Q, X), Src(kConst, cSeg, Z),
@@ -3381,7 +3624,7 @@ std::vector<DWORD> ArchAmbientCode(DWORD uvType, DWORD uvNum, DWORD cS, DWORD cP
             Op(kMax, 3), Dst(kTemp, Q, 0x4), Src(kTemp, Q, Z), Src(kConst, cQ, X),
             Op(kRsq, 2), Dst(kTemp, Q, 0x8), Src(kTemp, Q, Z),
             Op(kMul, 3), Dst(kTemp, Q, 0x4), Src(kTemp, Q, Z), Src(kTemp, Q, W),                           // dist
-            Op(kMul, 3), Dst(kTemp, Q, 0x4, true), Src(kTemp, Q, Z), Src(kConst, cQ, Y),                   // s = sat(dist / reach)
+            Op(kMul, 3), Dst(kTemp, Q, 0x4, true), Src(kTemp, Q, Z), Src(kConst, cReach + i / 4, R),       // s = sat(dist / reach)
             Op(kMad, 4), Dst(kTemp, Q, 0x8), Src(kTemp, Q, Z), Src(kConst, cP, Y), Src(kConst, cP, X),      // 3 - 2 s
             Op(kMul, 3), Dst(kTemp, Q, 0x8), Src(kTemp, Q, W), Src(kTemp, Q, Z),
             Op(kMul, 3), Dst(kTemp, Q, 0x8), Src(kTemp, Q, W), Src(kTemp, Q, Z),                           // s^2 (3 - 2 s)
@@ -3390,8 +3633,9 @@ std::vector<DWORD> ArchAmbientCode(DWORD uvType, DWORD uvNum, DWORD cS, DWORD cP
             Op(kMax, 3), Dst(kTemp, Acc, 0x7), Src(kTemp, Acc), Src(kTemp, Q),
         };
         v.insert(v.end(), cell.begin(), cell.end());
+        if (cFlag >= 0) v.insert(v.end(), {Op(kMul, 3), Dst(kTemp, Q, 0x8), Src(kTemp, Q, W), Src(kConst, static_cast<DWORD>(cFlag) + i / 4, R),
+                                           Op(kMax, 3), Dst(kTemp, Acc, 0x8), Src(kTemp, Acc, W), Src(kTemp, Q, W)});
     }
-    v.insert(v.end(), {Op(kMad, 4), Dst(kTemp, L, 0x7), Src(kTemp, L, W), Src(kTemp, Acc), Src(kTemp, L)});
     return v;
 }
 
@@ -3547,6 +3791,16 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb, 
                                  Op(kRcp, 2), Dst(kTemp, A, 0x1), Src(kTemp, A, X),
                                  Op(kMul, 3), Dst(kTemp, Acc), Src(kTemp, Acc), Src(kTemp, A, X),
                                  Op(kCmp, 4), Dst(kTemp, r.L), Neg(Src(kTemp, A, W)), Src(kTemp, Acc), Src(kTemp, r.L)}); // the own side's read
+        // the split tiles' atlas (u >= cM.y: a diagonal wall's half tiles in short rotated strips, 03/11): the 4 x 4 taps reach other
+        // half tiles' strips (light far from the pixel, the diamonds along a diagonal wall); there the game's bilinear read
+        if (wallMask)
+            body.insert(body.end(), {
+            Op(kMul, 3), Dst(kTemp, Fr, 0x1), Src(r.uvType, r.uvNum, X), Src(kConst, cS, X),
+            Op(kAdd, 3), Dst(kTemp, Fr, 0x1), Src(kTemp, Fr, X), Neg(Src(kConst, cM, Y)),
+            Op(kCmp, 4), Dst(kTemp, Fr, 0x1), Src(kTemp, Fr, X), Src(kConst, cG, Z), Src(kConst, cG, W),
+            Op(kTexld, 3), Dst(kTemp, R), Src(r.uvType, r.uvNum), Src(kSampler, r.S),
+            Op(kAdd, 3), Dst(kTemp, R), Src(kTemp, R), Neg(Src(kTemp, r.L)),
+            Op(kMad, 4), Dst(kTemp, r.L), Src(kTemp, Fr, X), Src(kTemp, R), Src(kTemp, r.L)});
     }
     // (development builds, arch_ambient) the neighbours' ambient near the room's arches, right after the read (ps_3_0 only;
     // a copy that cannot hold it is made without it)
@@ -3558,25 +3812,54 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb, 
         out.maskSampler = static_cast<int>(sMask);
         out.maskConst = static_cast<int>(cM);
     }
-    if (archAmb && ps3 && r.ambConst >= 0 && u.maxConst + 8 + maskConsts + 2 * static_cast<int>(kArchCells) < constLimit) {
+    std::vector<Edit> lotDcl, cubeEdits; // (arch) TEXCOORD4: the floor VS's position / 64, wherever in the map the uv reads
+    DWORD lotIn = 0;
+    int extraTemps = 0;
+    if (archAmb && ps3 && r.ambConst >= 0 && u.maxConst + 8 + maskConsts + static_cast<int>(kArchRows) < constLimit && InputFor(t, ins, 4, lotDcl, lotIn)) {
         const DWORD cP = cS + 6 + maskConsts, cQ = cS + 7 + maskConsts, cArch = cS + 8 + maskConsts;
-        const std::vector<DWORD> code = ArchAmbientCode(r.uvType, r.uvNum, cS, cP, cQ, cArch, r.L, T, T + 1, T + 2);
-        body.insert(body.end(), code.begin(), code.end());
-        defs.insert(defs.end(), {Op(kDef, 5), Dst(kConst, cP), F(3.0f), F(-2.0f), F(1.0f), F(0.25f),
-                                 Op(kDef, 5), Dst(kConst, cQ), F(1e-8f), F(1.0f / kArchReach), F(0.0f), F(0.0f)});
+        // The neighbour's reflection. The floor adds its reflection after the map, outside the ambient's share: the two rooms' cubes
+        // met in a line on the arch (F7: top face 0.405 in the lit room, 0.016 in the dark one). cube' = lerp(cube, neighbour's, w):
+        // the neighbour's at d = 0, the room's own from the reach on. Its texld comes first, since the game's read can overwrite its
+        // direction ("texld r0, r0, s0"), so the weight runs ahead of it, in a temp of its own that outlives the map read's body.
+        // A shader that cannot take it keeps the copy without it.
+        // shortcut: a lerp, so a texel of the room's own cube brighter than the neighbour's darkens inside the blend; max(own, nb) would keep a line there. Upgrade if a room shows it
+        const DWORD base = wallMask ? 16 : 14, sNb = sMask + (wallMask ? 1 : 0);
+        const int cubeAt = FindCubeRead(t, ins, r);
+        const bool cube = cubeAt >= 0 && T + base < 32 && sNb < 16 && u.afterLastSamplerDcl;
+        const DWORD Acc = cube ? T + base : T + 2, Q = T + 1;
+        const std::vector<DWORD> code = ArchAmbientCode(kInput, lotIn, cArch + 2 * kArchCells, cArch + 2 * kArchCells + 1, cP, cQ, cArch, T, Q, Acc, cube ? static_cast<int>(cArch + 2 * kArchCells + 3) : -1);
+        if (!cube) body.insert(body.end(), code.begin(), code.end());
+        body.insert(body.end(), {Op(kMad, 4), Dst(kTemp, r.L, 0x7), Src(kTemp, r.L, W), Src(kTemp, Acc), Src(kTemp, r.L)});
+        if (cube) {
+            const Ins& c = ins[static_cast<size_t>(cubeAt)];
+            const DWORD C = Num(t[c.at + 1]);
+            std::vector<DWORD> before = code;
+            before.insert(before.end(), {Op(kTexld, 3), Dst(kTemp, Q), t[c.at + 2], Src(kSampler, sNb)});
+            cubeEdits = {{End(c), {Op(kAdd, 3), Dst(kTemp, Q, 0x7), Src(kTemp, Q), Neg(Src(kTemp, C)),
+                                   Op(kMad, 4), Dst(kTemp, C, 0x7), Src(kTemp, Q), Src(kTemp, Acc, W), Src(kTemp, C)}},
+                         {c.at, std::move(before)}};
+            extraTemps = 1;
+            out.cubeSampler = static_cast<int>(Num(t[c.at + 3]));
+            out.nbCubeSampler = static_cast<int>(sNb);
+            lotDcl.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x98000000u, Dst(kSampler, sNb)}}); // (a cube sampler)
+        }
+        defs.insert(defs.end(), {Op(kDef, 5), Dst(kConst, cP), F(3.0f), F(-2.0f), F(1.0f), F(0.0f),
+                                 Op(kDef, 5), Dst(kConst, cQ), F(1e-8f), F(0.0f), F(0.0f), F(0.0f)});
         out.archConst = static_cast<int>(cArch);
         out.ambConst = r.ambConst;
     }
     const Ins x = ins[static_cast<size_t>(r.texld)];
     t.erase(t.begin() + static_cast<ptrdiff_t>(x.at), t.begin() + static_cast<ptrdiff_t>(End(x))); // the game's read goes
     std::vector<Edit> edits = {{1, defs}, {x.at, body}};
+    edits.insert(edits.end(), cubeEdits.begin(), cubeEdits.end()); // (after the body, before the dcls: at one place the later edit lands first)
+    edits.insert(edits.end(), lotDcl.begin(), lotDcl.end());
     if (wallMask) edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, sMask)}}); // (lands before the body)
     Apply(t, std::move(edits));
     if (!ps3) t[0] = 0xFFFF0201; // ps_2_x: more temps and instruction slots than ps_2_0, arbitrary swizzles
     out.sampler = r.S;
     out.sizeConst = cS;
     out.bandConst = cR;
-    out.temps = static_cast<int>(T + (wallMask ? 16 : 14));
+    out.temps = static_cast<int>(T + (wallMask ? 16 : 14)) + extraTemps;
     ins = Parse(t);
     for (const Ins& y : ins) out.slots += y.op != kDcl && y.op != kDef && y.op != kDefI && y.op != kDefB ? 1 : 0;
     out.ps2x = !ps3;
@@ -4173,7 +4456,6 @@ bool AddScreenPosVs(std::vector<DWORD>& t, int texcoord) {
         for (size_t k = 1; k <= x.len; k++) {
             const DWORD r = t[x.at + k];
             if (!(r & 0x80000000u)) continue;
-            if (Type(r) == kOutput && Num(r) == kT) return false; // that oT is the game's
             if (Type(r) == kRastOut && Num(r) == 0) writes.push_back(x.at + k);
         }
     }
@@ -4182,6 +4464,7 @@ bool AddScreenPosVs(std::vector<DWORD>& t, int texcoord) {
     if (u.maxTemp + 1 >= 12) return false;
     const DWORD P = static_cast<DWORD>(u.maxTemp + 1);
     for (size_t at : writes) t[at] = (t[at] & ~kRegBits) | (Reg(kTemp, P) & kRegBits); // oPos -> rP
+    // (a write of the game's to oTk is dead: the pixel copy took k as a coordinate its shader does not read; this one comes last)
     Apply(t, {{t.size() - 1, {Op(kMov, 2), Dst(kRastOut, 0), Src(kTemp, P), Op(kMov, 2), Dst(kOutput, kT), Src(kTemp, P)}}});
     return true;
 }
@@ -4402,5 +4685,45 @@ bool PatchLotTerrainEdges(std::vector<DWORD>& t, bool exit) {
     }
     Apply(t, std::move(edits));
     return true;
+}
+// (Light capture) shader_patches.h
+bool ProbeCopy(const std::vector<DWORD>& t, int k, std::vector<DWORD>& out, std::string& what) {
+    if (t.size() < 2 || (t[0] != 0xFFFF0300 && t[0] != 0xFFFF0201 && t[0] != 0xFFFF0200) || t.back() != 0x0000FFFF || k < 0) return false;
+    const auto all = Parse(t);
+    if (all.empty()) return false;
+    const Usage u = Scan(t, all);
+    const DWORD S = static_cast<DWORD>(u.maxTemp + 1), Z = S + 1;
+    if (Z >= (t[0] == 0xFFFF0300 ? 32u : t[0] == 0xFFFF0201 ? 22u : 12u)) return false;
+    // its own writes of the colour go to rZ, so the one written last is the probe's (ps_2: one write of oC0 at most)
+    const auto redirect = [&](std::vector<DWORD>& c) {
+        for (const Ins& x : all)
+            if (x.op != kDcl && x.op != kDef && x.len >= 1 && IsReg(c[x.at + 1], kColorOut, 0)) c[x.at + 1] = Dst(kTemp, Z, WMask(c[x.at + 1]));
+    };
+    int n = 0;
+    for (const Ins& x : all) {
+        if (x.op != kTexld || x.len < 3 || Type(t[x.at + 1]) != kTemp || n++ != k) continue;
+        out = t;
+        redirect(out);
+        what = "texld s" + std::to_string(Num(t[x.at + 3])) + " -> r" + std::to_string(Num(t[x.at + 1]));
+        Apply(out, {{End(x), {Op(kMov, 2), Dst(kTemp, S), Src(kTemp, Num(t[x.at + 1]))}},
+                    {t.size() - 1, {Op(kMov, 2), Dst(kColorOut, 0), Src(kTemp, S)}}});
+        return true;
+    }
+    for (const Ins& x : all) {
+        const DWORD ty = Type(t[x.at + 2]);
+        if (x.op != kDcl || (ty != kInput && ty != kTexture) || n++ != k) continue;
+        out = t;
+        redirect(out);
+        what = (ty == kInput ? "v" : "t") + std::to_string(Num(t[x.at + 2]));
+        // (only its declared components read, in swizzles ps_2_0 takes: its first one replicated, then the declared ones by mask)
+        const DWORD m = WMask(t[x.at + 2]) ? WMask(t[x.at + 2]) : 0xF;
+        DWORD first = 0;
+        while (first < 3 && !(m & (1u << first))) first++;
+        const DWORD reg = Num(t[x.at + 2]);
+        Apply(out, {{t.size() - 1, {Op(kMov, 2), Dst(kTemp, S), Src(ty, reg, first * 0x55u), Op(kMov, 2), Dst(kTemp, S, m), Src(ty, reg),
+                                    Op(kMov, 2), Dst(kColorOut, 0), Src(kTemp, S)}}});
+        return true;
+    }
+    return false;
 }
 } // namespace ShaderPatches

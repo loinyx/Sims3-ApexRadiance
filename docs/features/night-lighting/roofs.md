@@ -41,7 +41,7 @@ the lamps on the game's snowy albedo.
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Lamps light roofs | `telhadosComLuz` | bool | on | | Lamp light on summer and snowy roofs, and the softer 16-tap roof shadow |
-| Brightness (ROOFS) | `forcaNosTelhados` | float | 45% | 5 to 200% | Lamp strength on roofs (PS `c52.x`); shown when the switch is on |
+| Brightness (ROOFS) | `forcaNosTelhados` | float | 60% | 5 to 200% | Lamp strength on roofs (PS `c52.x`); shown when the switch is on |
 
 Both apply live every frame (`LotLightBridge::SetRoofFix`). The Lighting balance styles set `forcaNosTelhados` to 40.5%
 (Subtle), 45% (Soft) or 60% (Natural). Roof lamps work without *Street lamps light lots*: the roof branches run before

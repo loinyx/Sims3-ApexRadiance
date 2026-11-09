@@ -9,8 +9,8 @@ menu stay perfectly sharp. Two methods are offered: **FXAA** (recommended, light
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier (present in the first version in this repository). The wait for the drawn world (never on the main menu or load screens): Released in 2.7.0. The full-resolution colour copy shared with the other screen passes: Released in 2.15.3 |
-| Default | On for new configurations; method SMAA, quality High |
+| Availability | Released in 2.1.0 or earlier (present in the first version in this repository). The wait for the drawn world (never on the main menu or load screens): Released in 2.7.0. The full-resolution colour copy shared with the other screen passes: Released in 2.15.3. Released in 3.0.0: sharpening fades out on flat areas. |
+| Default | On for new configurations; method FXAA, quality Balanced |
 | Menu | Image > Edge Smoothing; Overview > Image > Edge Smoothing |
 | Configuration | `[patches.EdgeSmoothing]` in `ApexRadiance.toml` |
 | Source | [`patches/edge_smoothing_patch.cpp`](../../patches/edge_smoothing_patch.cpp), [`third_party/smaa/`](../../third_party/smaa/) |
@@ -46,11 +46,11 @@ Each frame:
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Edge Smoothing (card switch) | `enabled` | bool | on | | Turns the effect on |
-| Method | `metodo` | enum | SMAA (1) | FXAA (0) *recommended*, SMAA (1) | FXAA is lighter and a little blurrier; SMAA keeps textures sharper |
+| Method | `metodo` | enum | FXAA (0) | FXAA (0) *recommended*, SMAA (1) | FXAA is lighter and a little blurrier; SMAA keeps textures sharper |
 | Quality (SMAA) | `qualidadeSmaa` | enum | High (2) | Low, Medium, High, Ultra, Extreme | Reference SMAA presets plus Extreme (table below). Shown with SMAA |
 | Quality (FXAA) | `qualidade` | enum | Balanced (1) | Fast, Balanced, High, Extreme | Edge search length. Shown with FXAA |
-| Softness (FXAA) | `suavidade` | float | 50% | 0 to 100% | Sub-pixel smoothing of thin lines; higher softens textures. Shown with FXAA |
-| Sensitivity (FXAA) | `sensibilidade` | float | 77% (stored 0.125) | 0 to 100% (stored 0.333 to 0.063) | Edge contrast threshold; the menu shows `(0.333 - v) / (0.333 - 0.063)`, so higher catches fainter edges. Shown with FXAA |
+| Softness (FXAA) | `suavidade` | float | 100% | 0 to 100% | Sub-pixel smoothing of thin lines; higher softens textures. Shown with FXAA |
+| Sensitivity (FXAA) | `sensibilidade` | float | 100% (stored 0.063) | 0 to 100% (stored 0.333 to 0.063) | Edge contrast threshold; the menu shows `(0.333 - v) / (0.333 - 0.063)`, so higher catches fainter edges. Shown with FXAA |
 | Edges from depth | `depthEdges` | bool | on | | Also smooths object outlines found in the scene depth; textures keep the normal threshold |
 | Sharpen textures | `sharpen` | float | 0% | 0 to 100% | Contrast-adaptive sharpening of unsmoothed pixels. Independent of Color > Sharpness |
 | Developer > Show smoothed pixels in red | `debugView` | bool | off | | Tints every pixel the smoothing changed 60% red (developer mode only) |
@@ -203,7 +203,8 @@ edge-end search with the level's step sizes, one final bilinear read.
 **Sharpening** (both methods; after AMD FidelityFX CAS, MIT): 4 neighbours,
 `amp = sqrt(saturate(min(mn, 1 - mx) / mx))`, `w = -amp / lerp(8, 5, amount)`,
 `c' = saturate((c + (n + s + w + e) w) / (1 + 4w))`. Applied only where SMAA computed no blend weight around the pixel
-or FXAA took its early exit.
+or FXAA took its early exit. The result fades in with `smoothstep(3/255, 8/255, range)` of the neighbourhood's largest
+channel range, so flat areas keep the Banding Fix grain as it is: at full strength CAS multiplied that grain about 5 times.
 
 **Debug view.** FXAA tints every pixel that did not take the early exit; SMAA tints pixels with non-zero blend weights.
 Developer mode only.

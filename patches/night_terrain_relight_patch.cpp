@@ -38,6 +38,7 @@
 #include "hotkeys.h"
 #include "light_probe.h"
 #include "screen_watch.h"
+#include "capture_burst.h"
 #include "lot_light_bridge.h"
 #include "terrain_bake_rule.h"
 #include "night_level.h"
@@ -45,6 +46,7 @@
 #include "lightmap_smooth.h"
 #include "terrain_chunk_relight.h"
 #include "terrain_lighting_policy.h"
+#include "dev_switches.h"
 #include "world_session.h"
 #include "render_callbacks.h"
 #include "object_light_bridge.h"
@@ -189,7 +191,7 @@ bool g_streetLampsLit = true;
 bool g_relightLots = true;
 bool g_bridge = true;
 bool g_objLamps = true;
-float g_objStrength = 0.75f;
+float g_objStrength = 1.0f;
 bool g_objAll = true;
 bool g_smoothMaps = true;
 bool g_smoothMapsGpu = true; // developer A/B: smoothing on the GPU (default) or on the CPU worker (dev-only setting)
@@ -199,8 +201,13 @@ bool g_softLotEdges = true; // lot grass feathers to the terrain light within 3 
 constexpr int kLampClassic = 0, kLampInstant = 1;
 int g_lampMode = kLampInstant; // (14/10: Instant by default; a saved lampLightingMode keeps its choice)
 bool g_outdoorDeltaCheck = false; // the delta's self-check (developer)
+bool g_roomLampProbe = false;     // the room lamp probe against the GPU's law (developer)
+bool g_gpuRoomLampsCapture = true; // GPU room lamps: the active lot's room solves kept for the GPU (with Lamp lighting: Instant; its switch is developer only)
+int g_roomLampModel = 1;            // (physical indoor lamps) 0 replica, 1 physical: what the kept rooms keep (OutdoorDelta::SetRoomLampPhysical; its choice is developer only)
+bool g_roomLampSharpFloors = true;  // (physical indoor lamps) the rooms' floor maps drawn at twice their size (OutdoorDelta::SetHiFloors; its switch is developer only)
+bool g_roomLampTrueShadows = false;  // (physical indoor lamps) furniture shadows of true size (OutdoorDelta::SetTrueFurnitureEdges; developer)
 float g_sidewalkClear = 0.5f;
-float g_lampTint = 1.0f;
+float g_lampTint = 0.2496f;
 bool g_fenceGround = true;
 bool g_levelShare = true;
 bool g_indoorShare = true;       // indoor lamps light the story above or below through stair openings (LevelLightShare::SetIndoor)
@@ -210,6 +217,7 @@ bool g_allFloors = true;        // every floor of the active lot in full lightin
 bool g_floorWalls = true;       // walls block lamp light on outdoor floors (LevelLightShare::SetFloorWalls)
 bool g_realisticOpenings = kRealisticOpeningsDefault; // (08/10, experimental) walled yards lit only through doors, windows and over walls (LevelLightShare::SetRealisticOpenings)
 bool g_outdoorOpenings = true; // (2.12.4) roofed rooms take room 0's lamps through their doors, windows and arches (LevelLightShare::SetOutdoorThroughOpenings)
+bool g_roomBounce = true;       // a lit room lights the rooms joined to it by an arch (DevSwitches::RoomBounce)
 bool g_doorsBlock = true;       // (2.12.4) doors and gates stay closed for lamp light; arches and windows open (LevelLightShare::SetDoorsBlockLight)
 bool g_indoorOpenings = true;   // (2.12.4) lit rooms shine out through their openings and into the next room (LevelLightShare::SetIndoorThroughOpenings)
 bool g_indoorGround = true;     // (2.15.3) that light adds to the outdoor light on story 0's ground (LevelLightShare::SetIndoorLightOnGround)
@@ -223,34 +231,34 @@ float g_unlitLight = 0.20f;      // how much of the game's unlit-room light stay
 float g_unlitBlue = 0.0f;        // how much of its blue tint (0 = grey)
 bool g_objPixel = true;
 bool g_objPixelLights = true;          // outdoor rig objects: world lamps per pixel (seamless modular pieces)
-float g_objPixelLightStrength = 0.75f;
+float g_objPixelLightStrength = 1.0f;
 bool g_windowOutdoor = true;           // (on by default) windows lit by the room take outdoor light on their outer side (LotLightBridge::SetWindowOutdoor)
 bool g_neutralProbe = true;            // (07/10) at night the game's sky light keeps its brightness, loses the lamps' colour (ProbeNeutral)
 float g_neutralProbeStrength = 1.0f;
-float g_fenceGroundStrength = 0.75f;
+float g_fenceGroundStrength = 1.0f;
 bool g_walls = true;         // outdoor walls receive baked lamp light by day and night; off keeps the native draw
-float g_wallStrength = 0.30f; // multiplier of baked wall lamp RGB, independent of the enabled state
+float g_wallStrength = 0.56f; // multiplier of baked wall lamp RGB, independent of the enabled state
 // (12/10) "Light behind balconies" (luzSobSacadas, forcaSobSacadas) is gone: a placed floor blocks a lamp below it
 // (LevelLightShare, lamp_visibility.h). Old configs, profiles and presets that still hold the keys load as before: only the
 // registered settings are read (ApexPatch::LoadFromToml), so the two keys are skipped.
 bool g_realisticReach = true;     // (12/10) lamp light on outdoor walls fades with distance like on the ground (LevelLightShare::SetRealisticReach)
 bool g_roofs = true;
-float g_roofStrengthSetting = 0.45f;
+float g_roofStrengthSetting = 0.6f;
 bool g_water = true;
 bool g_waterFilter = true, g_waterColorCompression = true;
 float g_waterStrengthSetting = 0.4f;
-float g_waterReflSetting = 1.56f; // the tuned default
+float g_waterReflSetting = 1.0f; // the tuned default
 // Ground light: one control for lamp light on every ground (grass, roads, sidewalks, lots, patios, floors, snow), applied
 // live in the ground shaders (LotLightBridge::SetGroundBrightness). Every lamp enters the terrain bake and the lot's own
 // map at its full colour (the bake gains stay 1), so the ground looks the same on both sides of a lot border. 1 = the
 // Soft balance of the four controls it replaces (ground 75% x lamps 80%); MigrateGround reads them from old configs.
-float g_groundLight = 1.0f;
+float g_groundLight = 0.8966f;
 constexpr float kGroundSoft = 0.6f;
 float GroundGain() { return kGroundSoft * g_groundLight; }
 float g_moonlight = 0.0f;     // the moon's light at night
 bool g_edgePad = true;          // pad the room light maps' edges (RoomMapPadding): no dark side on things along walls
-bool g_lotTintOwn = false;      // lot lamps have their own colour
-float g_lotLampTint = 1.0f;     // their colour (0 = pink, 1 = warm white)
+bool g_lotTintOwn = true;      // lot lamps have their own colour
+float g_lotLampTint = 0.0f;     // their colour (0 = pink, 1 = warm white)
 bool g_allLotsHQ = false;
 bool g_lotPassNoTerrainMap = true;
 // Developer toggles (29/09, not yet tested in game; the public build never registers them: always off there):
@@ -271,7 +279,6 @@ std::vector<BYTE> kLotPassContext; // F3 0F 10 05 <kLotPassConst> F3 0F 11 44 24
 uintptr_t kLotPassConst = 0;       // 0x0107A538: the float the pass stores at [esp+18h]
 uintptr_t kLotPassNullBind = 0;    // 0x00C7F8B7
 std::vector<BYTE> kLotPassNullBindBytes; // A1 <texture global> 6A 00 6A 00 (Steam: 80 CE 1E 01 = 0x011ECE80)
-std::atomic<int> g_lotPassRedirects{0};
 
 __declspec(naked) void LotPassStub() {
     __asm {
@@ -1022,6 +1029,9 @@ std::atomic<int> g_lotLampsBaked{0};
 std::atomic<int> g_lotLampsSkippedOff{0};
 float g_level = 0.0f;
 float g_levelStep = 0.0f; // (2.15.1) +0xF0 as the game steps it (g_level is the sky's smooth night)
+float g_lampLevel = 0.0f; // g_level for the lamp terms: TerrainLightingPolicy::LampLevel, LampLevelStep
+bool g_lampLevelSet = false;
+Clock::time_point g_lampLevelAt{};
 std::atomic<float> g_menuLevel{-1.0f}; // g_level for the menu's status pill; -1 = no world loaded or the feature is off
 int g_counter38 = 0;
 int g_counter3C = 0;
@@ -1797,6 +1807,7 @@ void OnPresent() {
         g_liftObj = 0; // the world's sky is gone: nothing to put back
         g_liftWritten = -1.0f;
         NightLevel::ResetGates(); // the next world's sun times start fresh
+        g_lampLevelSet = false;
         return;
     }
     DaylightProbe::OnPresent(s.lightMgr); // development builds only (daylight_log): logs the sky state, changes nothing
@@ -1808,6 +1819,15 @@ void OnPresent() {
     {
         float f0 = 0.0f; // the light manager's level in its steps (smooth dusk is s.level)
         g_levelStep = NightLevel::ReadF0(s.lightMgr, f0) && std::isfinite(f0) ? std::clamp(f0, 0.0f, 1.0f) : s.level;
+    }
+    {
+        float sine = 0.0f;
+        const float want = DevSwitches::SunLampLevel() && NightLevel::ReadSunSine(s.lightMgr, sine) ? TerrainLightingPolicy::LampLevel(s.level, sine) : s.level;
+        const float seconds = std::chrono::duration<float>(now - g_lampLevelAt).count();
+        g_lampLevelAt = now;
+        // (a world's first frame, or one after a stall: a load or the game paused is no fade)
+        g_lampLevel = g_lampLevelSet && seconds < 0.5f ? TerrainLightingPolicy::LampLevelStep(g_lampLevel, want, seconds) : want;
+        g_lampLevelSet = true;
     }
     g_menuLevel.store(s.level);
     {
@@ -2271,25 +2291,6 @@ void PumpLightingRestart() {
 constexpr const char* kReloadBadge = "Reload save";
 constexpr const char* kReloadTip = "This change shows after you load a save again";
 
-// Colour of the lamp colour slider at t (0 = pink ... 1 = warm white), from the real tint math of
-// ObjectLightBridge::TintStockColour (features/object_light_bridge.cpp): the stock pink base colour (1, 0.75, 0.79)
-// blended towards warm white (1, 0.80, 0.62) scaled to the pink's luminance. The game's values are light colours, shown
-// here as they are (an approximation of how they look on screen).
-ImU32 LampColourAt(float t) {
-    t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
-    const float pink[3] = {1.0f, 0.75f, 0.79f};
-    const float lumPink = 0.2126f * pink[0] + 0.7152f * pink[1] + 0.0722f * pink[2];
-    const float lumWarm = 0.2126f + 0.7152f * 0.80f + 0.0722f * 0.62f;
-    const float k = pink[0] * lumPink / lumWarm;
-    const float warm[3] = {k, 0.80f * k, 0.62f * k};
-    int c[3];
-    for (int i = 0; i < 3; i++) {
-        const float v = pink[i] + (warm[i] - pink[i]) * t;
-        c[i] = static_cast<int>(v * 255.0f + 0.5f);
-        c[i] = c[i] < 0 ? 0 : (c[i] > 255 ? 255 : c[i]);
-    }
-    return IM_COL32(c[0], c[1], c[2], 255);
-}
 
 std::vector<BYTE> CallPatch(uintptr_t site, size_t prefixLen, const std::vector<BYTE>& prefix, void* target, size_t totalLen) {
     std::vector<BYTE> b(prefix.begin(), prefix.end());
@@ -2404,7 +2405,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         RegisterBoolSetting(&g_objLamps, "postesNosObjetos", true,
             S3SS_TR("Postes e luminarias iluminam cercas, arbustos e objetos de fora como iluminam o chao.",
                     "Lamps light nearby fences, bushes and outdoor objects the way they light the ground."));
-        RegisterFloatSetting(&g_objStrength, "forcaNosObjetos", SettingWidget::Slider, 0.75f, 0.25f, 3.0f,
+        RegisterFloatSetting(&g_objStrength, "forcaNosObjetos", SettingWidget::Slider, 1.0f, 0.25f, 3.0f,
             S3SS_TR("Forca da luz dos postes nos objetos.", "How strongly lamps light objects."));
         RegisterBoolSetting(&g_objAll, "lampadasEmTodosObjetos", true,
             S3SS_TR("Tambem escadas, grades, colunas e outros objetos que o jogo deixa sem luz de lampada (vale ao carregar o mundo).",
@@ -2420,12 +2421,33 @@ class NightTerrainRelightPatch : public ApexPatch {
         // outdoor lamp edits (the default since 14/10); Classic = the game's room solves (with the drag and floor holds of lamp-drags.md)
         RegisterNamedEnumSetting(&g_lampMode, "lampLightingMode", kLampInstant,
             "How lot lamps update when one is switched, recoloured or moved: classic (the game's room solves with every correction) "
-            "or instant (the active lot's outdoor lamps drawn on the GPU with shadows into every story's outside light maps).",
+            "or instant (the active lot's lamps, indoors and out, drawn on the GPU with shadows into every story's light maps).",
             {"classic", "instant"});
         if (!kPublicBuild) // developer only
             RegisterBoolSetting(&g_outdoorDeltaCheck, "outdoorLampDeltaCheck", false,
                 "Developer: each room 0 brought up to date by an outdoor lamp edit is solved in full once more a moment later, and the log "
                 "gives the largest texel difference between the two.");
+        if (!kPublicBuild) // developer only
+            RegisterBoolSetting(&g_roomLampProbe, "roomLampProbe", false,
+                "Developer: each solve of the active lot's rooms other than room 0 is compared with the law the GPU would draw its lamps with "
+                "(no shadow), and the log gives per room and lamp how they differ. Nothing is drawn.");
+        if (!kPublicBuild) // developer only
+            RegisterBoolSetting(&g_gpuRoomLampsCapture, "gpuRoomLamps", true,
+                "Developer: off compares with the game's solves. Each solve of the active lot's rooms other than room 0 is kept for the GPU (the light without the lot's lamps, and each "
+                "lamp's share per texel), within a memory budget. With roomLampProbe on too, each kept solve is recomposed and compared. The kept solves' maps are drawn on the GPU.");
+        if (!kPublicBuild) // developer only
+            RegisterNamedEnumSetting(&g_roomLampModel, "roomLampModel", 1,
+                "Developer, with gpuRoomLamps and Lamp lighting instant: replica keeps each lamp's share per texel as the room's solve gave it; "
+                "physical keeps the light without the lot's lamps and the room's tests, for the GPU to draw each lamp with its shadows. A change sends the active lot's rooms to their solve.",
+                {"replica", "physical"});
+        if (!kPublicBuild) // developer only
+            RegisterBoolSetting(&g_roomLampSharpFloors, "roomLampSharpFloors", true,
+                "Developer, with the physical model: the kept rooms' floor maps are drawn at twice their size, each sub-texel lit from the "
+                "lamps at its own place, so light through doors and windows has no 25 cm steps (2 render targets at twice a floor map's size per story).");
+        if (!kPublicBuild) // developer only
+            RegisterBoolSetting(&g_roomLampTrueShadows, "roomLampTrueShadows", false,
+                "Developer, with the physical model: the furniture's light blockers keep their real size, their edges as soft as the lamp seen past them "
+                "(off: the game's band, 0.15 m inside to 0.35 m outside each blocker at any distance, a small table's shadow a blob 2-3 times its size).");
         if (!kPublicBuild) // developer A/B only; the public build always has soft lot edges
             RegisterBoolSetting(&g_softLotEdges, "bordaSuaveLote", true,
                 "Developer: within 3 m of a lot edge, lot grass fades its lamp light to the ground light the world grass shows "
@@ -2433,18 +2455,18 @@ class NightTerrainRelightPatch : public ApexPatch {
         RegisterFloatSetting(&g_sidewalkClear, "calcadaComNevePisada", SettingWidget::Slider, 0.5f, 0.0f, 1.0f,
             S3SS_TR("Na neve, quanto do concreto das calcadas aparece por baixo da neve (0 = igual ao jogo, tudo coberto).",
                     "In snow, how much of the sidewalk concrete shows through (0 = like the game, fully covered)."));
-        RegisterFloatSetting(&g_lampTint, "luzDasLampadasNatural", SettingWidget::Slider, 1.0f, 0.0f, 1.0f,
+        RegisterFloatSetting(&g_lampTint, "luzDasLampadasNatural", SettingWidget::Slider, 0.2496f, 0.0f, 1.0f,
             S3SS_TR("Cor das lampadas de fabrica: 0 = rosada como no jogo, 1 = branco quente (vale ao carregar o save).",
                     "Color of stock lamps: 0 = pink like the game, 1 = warm white (applies when a save loads)."));
         RegisterBoolSetting(&g_fenceGround, "cercasComLuzDoChao", true,
             S3SS_TR("Cercas, grades, postes de cerca e escadas recebem a luz das lampadas do chao em volta (o jogo quase nunca manda lampada para elas).",
                     "Fences, railings, fence posts and stairs get the lamp light of the ground around them."));
-        RegisterFloatSetting(&g_fenceGroundStrength, "forcaNasCercas", SettingWidget::Slider, 0.75f, 0.25f, 2.0f,
+        RegisterFloatSetting(&g_fenceGroundStrength, "forcaNasCercas", SettingWidget::Slider, 1.0f, 0.25f, 2.0f,
             S3SS_TR("Forca da luz do chao nas cercas, grades e escadas.", "How strongly fences, railings, stairs and the snow on them are lit."));
         RegisterBoolSetting(&g_walls, "paredesComLuz", true,
             S3SS_TR("As paredes externas recebem a luz das lampadas com a forca escolhida (desligado = como o jogo).",
                     "Outside walls get lamp light at the chosen brightness (off = the game's own dim wall light)."));
-        RegisterFloatSetting(&g_wallStrength, "forcaNasParedes", SettingWidget::Slider, 0.30f, 0.25f, 4.0f,
+        RegisterFloatSetting(&g_wallStrength, "forcaNasParedes", SettingWidget::Slider, 0.56f, 0.25f, 4.0f,
             S3SS_TR("Intensidade da luz das lampadas nas paredes externas, durante o dia e a noite.",
                     "Intensity of lamp light on outside walls, by day and night."));
         RegisterBoolSetting(&g_realisticReach, "alcanceRealistaDasLampadas", true,
@@ -2468,6 +2490,9 @@ class NightTerrainRelightPatch : public ApexPatch {
             "A yard, light well or deck without a roof closed by walls takes the light of its story's outdoor lamps only through its doors, "
             "windows and arches, at their height, or over walls lower than the lamp; one closed all round stays dark (needs \"Walls block light on floors\"; "
             "relights every room when changed).");
+        RegisterBoolSetting(&g_roomBounce, "luzRefletidaEntreComodos", true,
+            "The light a lit room sends through its arches into the rooms joined to it (a form factor of each arch over the room's texels), in physical rooms; "
+            "the kept rooms relight when changed.");
         RegisterBoolSetting(&g_doorsBlock, "portasBloqueiamLuz", true,
             "Doors and gates count as closed for lamp light, as the game keeps them closed except while they open; arches, windows and "
             "doors with glass (through the glass) and open passages let it through. Applies to light through doors and windows and to outdoor light through openings; "
@@ -2512,14 +2537,14 @@ class NightTerrainRelightPatch : public ApexPatch {
         RegisterBoolSetting(&g_objPixelLights, "luzPorPixelNosObjetos", true,
             S3SS_TR("Objetos de fora (balcoes, pecas modulares, portas) recebem as lampadas calculadas em cada ponto, iguais para todas as pecas: sem emendas de cor entre pecas vizinhas.",
                     "Outdoor objects (counters, modular pieces, doors) get lamp light computed at every point, the same for every piece: no colour seams between neighbouring pieces."));
-        RegisterFloatSetting(&g_objPixelLightStrength, "forcaLuzPorPixelNosObjetos", SettingWidget::Slider, 0.75f, 0.25f, 3.0f,
+        RegisterFloatSetting(&g_objPixelLightStrength, "forcaLuzPorPixelNosObjetos", SettingWidget::Slider, 1.0f, 0.25f, 3.0f,
             S3SS_TR("Forca das lampadas calculadas por ponto nos objetos de fora.", "Strength of the per-point lamp light on outdoor objects."));
         RegisterBoolSetting(&g_windowOutdoor, "janelasLuzDeFora", true,
             "The outer side of a window lit by the room takes the outdoor ground light and lamps (a window turned inward no longer goes black outside).");
         RegisterBoolSetting(&g_roofs, "telhadosComLuz", true,
             S3SS_TR("Telhados recebem a luz das lampadas e postes proximos (sombra mais suave tambem).",
                     "Roofs receive light from nearby lamps (with softer shadows)."));
-        RegisterFloatSetting(&g_roofStrengthSetting, "forcaNosTelhados", SettingWidget::Slider, 0.45f, 0.05f, 2.0f,
+        RegisterFloatSetting(&g_roofStrengthSetting, "forcaNosTelhados", SettingWidget::Slider, 0.6f, 0.05f, 2.0f,
             S3SS_TR("Forca da luz das lampadas nos telhados.", "How strongly lamps light roofs."));
         RegisterBoolSetting(&g_unlitOn, "comodosEscurosSemLuz", true,
             "Rooms with every lamp off keep only a little light (set below) instead of the game's blue glow.");
@@ -2533,18 +2558,18 @@ class NightTerrainRelightPatch : public ApexPatch {
             S3SS_TR("A agua dos lagos reflete as lampadas e postes proximos a noite.", "Ponds glow and reflect nearby lamps at night."));
         RegisterFloatSetting(&g_waterStrengthSetting, "brilhoNaAgua", SettingWidget::Slider, 0.4f, 0.1f, 0.4f,
             S3SS_TR("Brilho do reflexo das lampadas na agua.", "Brightness of lamp reflections on water."));
-        RegisterFloatSetting(&g_waterReflSetting, "reflexoNoLago", SettingWidget::Slider, 1.56f, 0.0f, 3.0f,
+        RegisterFloatSetting(&g_waterReflSetting, "reflexoNoLago", SettingWidget::Slider, 1.0f, 0.0f, 3.0f,
             S3SS_TR("Forca do reflexo da margem (arvores, casas, postes) na agua dos lagos.",
                     "Strength of the shore reflection (trees, houses, lamps) on ponds (needs Depth Blur)."));
-        RegisterFloatSetting(&g_groundLight, "luzNoChao", SettingWidget::Slider, 1.0f, 0.25f, 3.0f,
+        RegisterFloatSetting(&g_groundLight, "luzNoChao", SettingWidget::Slider, 0.8966f, 0.25f, 3.0f,
             "How bright lamp light is on every ground: grass, roads, sidewalks, lots, outdoor floors and snow (1 = the default).");
         RegisterFloatSetting(&g_moonlight, "luar", SettingWidget::Slider, 0.0f, 0.0f, 2.0f,
             "How strong the moonlight is at night (1 = the game; 0 = no moonlight, only lamps and the sky's glow).");
         RegisterBoolSetting(&g_edgePad, "bordasDosMapasDeLuz", true,
             "Stairs, curtains and furniture indoors get smooth light from the game's room light maps: no dark side along outer walls, no steps between neighbouring objects.");
-        RegisterBoolSetting(&g_lotTintOwn, "corPropriaNoLote", false,
+        RegisterBoolSetting(&g_lotTintOwn, "corPropriaNoLote", true,
             "Lot lamps get their own color (off = the same color as street lamps).");
-        RegisterFloatSetting(&g_lotLampTint, "corDasLampadasDoLote", SettingWidget::Slider, 1.0f, 0.0f, 1.0f,
+        RegisterFloatSetting(&g_lotLampTint, "corDasLampadasDoLote", SettingWidget::Slider, 0.0f, 0.0f, 1.0f,
             "Color of stock lot lamps when they have their own: 0 = pink like the game, 1 = warm white.");
         RegisterBoolSetting(&g_autoDusk, "automaticoAoAnoitecer", true,
             S3SS_TR("Quando anoitece, manda o jogo refazer a luz do terreno com os postes acesos (o mesmo que acontece ao mover um poste no modo construcao).",
@@ -2792,6 +2817,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             HookGuard::Run("Night Lighting frame update", [] { OnPresent(); });
             HookGuard::Run("Light Probe frame update", [&ctx] { LightProbe::OnPresent(ctx.device); }); // the light capture (F7): the draws painting the pixel under the mouse
             HookGuard::Run("Screen watch frame update", [&ctx] { ScreenWatch::OnPresent(ctx.device); }); // the recording's screen pixels (light update trace)
+            HookGuard::Run("Capture burst frame update", [&ctx] { CaptureBurst::OnPresent(ctx.device); }); // (developer mode) the frames after a recording
             ObjectLightBridge::SetStrength(g_objStrength);
             ObjectLightBridge::SetAllObjects(g_objAll);
             HookGuard::Run("ObjectLightBridge frame update", [] { ObjectLightBridge::OnPresent(); });
@@ -2805,6 +2831,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             if (!MenuSliderHeld()) // (applied once the slider is let go: a change relights every room)
                 LevelLightShare::SetOpeningLampBalance(GroundGain(), 1.0f, g_bridge, g_wallStrength, g_walls);
             LevelLightShare::SetDoorsBlockLight(g_doorsBlock);
+            DevSwitches::roomBounceOption.store(g_roomBounce, std::memory_order_relaxed);
             LevelLightShare::SetIndoorThroughOpenings(g_indoorOpenings);
             LevelLightShare::SetIndoorLightOnGround(g_indoorGround);
             if (!MenuSliderHeld()) LevelLightShare::SetShadowSoftness(g_shadowSoftness); // (applied once the slider is let go)
@@ -2846,7 +2873,8 @@ class NightTerrainRelightPatch : public ApexPatch {
                 } else g_autoRefreshAt.store((tick + 200) | 1);
             }
             HookGuard::Run("LevelLightShare frame update", [] { LevelLightShare::OnPresent(); });
-            LotLightBridge::SetNightLevel(g_level);
+            LotLightBridge::SetNightLevel(g_lampLevel);
+            LotLightBridge::SetSkyLevel(g_level);
             LotLightBridge::SetRigNightLevel(g_levelStep); // the rigs' reach law keeps the game's steps (one re-gather per step)
             ProbeNeutral::SetNightLevel(g_level);
             ProbeNeutral::Set(g_neutralProbe, g_neutralProbeStrength);
@@ -2884,6 +2912,37 @@ class NightTerrainRelightPatch : public ApexPatch {
                 s_appliedMode = instant ? 1 : 0;
                 HookGuard::Run("RtOutdoorLamps frame update", [&ctx] { RtOutdoorLamps::OnPresent(ctx.device); });
                 OutdoorDelta::SetSelfCheck(rtOn && kDevToolsBuild && !kPublicBuild && g_outdoorDeltaCheck);
+                if (const bool probe = rtOn && kDevToolsBuild && !kPublicBuild && g_roomLampProbe; probe != OutdoorDelta::RoomProbe()) {
+                    OutdoorDelta::SetRoomProbe(probe);
+                    if (probe) { // every room of the active lot is solved once, so each solve is probed
+                        uintptr_t trackers[4];
+                        const int n = LevelLightShare::ActiveLotTrackers(trackers, 4);
+                        int sent = 0;
+                        for (int i = 0; i < n; i++) sent += std::max(0, LevelLightShare::RelightLot(trackers[i], "room lamp probe"));
+                        LOG_INFO(std::format("[RoomLampProbe] {} rooms of the active lot sent to their solve", sent));
+                    }
+                }
+                // GPU room lamps: Instant running with all its parts, and the blockers' vtables and the test constants (room_light_tests.h)
+                // found on this build (GameAddr; without them every furniture shadow would be left out of the rooms the GPU draws).
+                // Physical only with the capture on: in Classic nothing of it runs (the stair set, the lamp edits taken)
+                const bool tests = OutdoorDelta::RoomTestsFound(); // (first: its log line on every build)
+                const bool keep = OutdoorDelta::Enabled() && g_gpuRoomLampsCapture && tests;
+                const bool physical = keep && g_roomLampModel == 1;
+                const bool sharp = physical && g_roomLampSharpFloors;
+                const bool modelChanged = keep && (physical != OutdoorDelta::RoomLampPhysical() || sharp != OutdoorDelta::HiFloors());
+                OutdoorDelta::SetRoomLampPhysical(physical); // (before the capture: a solve kept next takes it)
+                OutdoorDelta::SetHiFloors(sharp);
+                OutdoorDelta::SetTrueFurnitureEdges(g_roomLampTrueShadows);
+                if (keep != OutdoorDelta::RoomLampCapture() || modelChanged) {
+                    OutdoorDelta::SetRoomLampCapture(keep);
+                    if (keep) { // every room of the active lot is solved once, so each solve is kept (a model change: kept again)
+                        uintptr_t trackers[4];
+                        const int n = LevelLightShare::ActiveLotTrackers(trackers, 4);
+                        int sent = 0;
+                        for (int i = 0; i < n; i++) sent += std::max(0, LevelLightShare::RelightLot(trackers[i], "GPU room lamps capture"));
+                        LOG_INFO(std::format("[GpuRoomLamps] {} rooms of the active lot sent to their solve", sent));
+                    }
+                }
                 if (rtOn || OutdoorDelta::Enabled()) HookGuard::Run("OutdoorDelta frame update", [] { OutdoorDelta::OnPresent(); });
             }
             LightmapSmooth::SetEnabled(g_smoothMaps);
@@ -2970,6 +3029,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         LotLightBridge::Shutdown(reinstalling);
         if (!reinstalling) LightmapSmooth::Clear();
         OutdoorDelta::SetEnabled(false);
+        if (!reinstalling) OutdoorDelta::SetRoomLampCapture(false); // (nothing kept follows the game while off: switched on again, every room is solved and kept anew)
         RtOutdoorLamps::SetEnabled(false); // (its EndScene pass drops the relit maps at the next frame)
         ObjectLightBridge::UninstallLampColour();
         ObjectLightBridge::Uninstall();
@@ -3094,9 +3154,19 @@ class NightTerrainRelightPatch : public ApexPatch {
         const double ground = table["brilhoNoChao"].value_or(0.75), lot = table["forcaDasLampadasDoLote"].value_or(0.8);
         g_groundLight = std::clamp(static_cast<float>(ground * lot / kGroundSoft), 0.25f, 3.0f);
     }
+    // A developer config saved while GPU room lamps were an off-by-default test (gpuRoomLampsCapture = false, the key now gpuRoomLamps):
+    // the model and floor rows under that switch were hidden, so what it saved for them is the old default, not a choice. Saved with the
+    // switch on, everything keeps its value. Players never saved these keys
+    static void MigrateRoomLamps(const toml::table& table) {
+        if (table.contains("gpuRoomLamps") || table["gpuRoomLampsCapture"].value_or(true)) return;
+        g_roomLampModel = 1;
+        g_roomLampSharpFloors = true;
+    }
     bool LoadFromToml(const toml::table& table) override {
         MigrateGround(table); // before the base: it may install, which applies the ground light
-        return ApexPatch::LoadFromToml(table);
+        const bool loaded = ApexPatch::LoadFromToml(table);
+        MigrateRoomLamps(table); // after the base: it reads the saved model and floors
+        return loaded;
     }
 
     void ApplyTableLive(const toml::table& table) override {
@@ -3107,6 +3177,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         MigrateGround(table);
         if (g_groundLight != groundBefore) NotifySettingChanged();
         ApexPatch::ApplyTableLive(table);
+        MigrateRoomLamps(table);
         if (wasEnabled && isEnabled.load()) ApplyLive(bridgeBefore, objBefore, shareBefore, objPixelBefore);
         if (wasEnabled && isEnabled.load() && lastSettingChange.load() != changedBefore) RequestAutoRefresh(); // a profile, look or undo
     }
@@ -3123,6 +3194,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_realisticOpenings = kRealisticOpeningsDefault;
         g_outdoorOpenings = true;
         g_doorsBlock = true;
+        g_roomBounce = true;
         g_indoorOpenings = true;
         g_indoorGround = true;
         g_shadowSoftness = 0.15f;
@@ -3141,30 +3213,35 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_softLotEdges = true;
         g_lampMode = kLampInstant;
         g_outdoorDeltaCheck = false;
-        g_lampTint = 1.0f;
-        g_lotTintOwn = false;
-        g_lotLampTint = 1.0f;
+        g_roomLampProbe = false;
+        g_gpuRoomLampsCapture = true;
+        g_roomLampModel = 1;
+        g_roomLampSharpFloors = true;
+        g_roomLampTrueShadows = false;
+        g_lampTint = 0.2496f;
+        g_lotTintOwn = true;
+        g_lotLampTint = 0.0f;
         g_edgePad = true;
-        g_groundLight = 1.0f;
+        g_groundLight = 0.8966f;
         g_moonlight = 0.0f;
         g_objLamps = true;
-        g_objStrength = 0.75f;
+        g_objStrength = 1.0f;
         g_objAll = true;
         g_objPixel = true;
         g_objPixelLights = true;
-        g_objPixelLightStrength = 0.75f;
+        g_objPixelLightStrength = 1.0f;
         g_windowOutdoor = true;
         g_fenceGround = true;
-        g_fenceGroundStrength = 0.75f;
+        g_fenceGroundStrength = 1.0f;
         g_walls = true;
-        g_wallStrength = 0.30f;
+        g_wallStrength = 0.56f;
         g_realisticReach = true;
         g_roofs = true;
-        g_roofStrengthSetting = 0.45f;
+        g_roofStrengthSetting = 0.6f;
         g_water = true;
         g_waterFilter = g_waterColorCompression = true;
         g_waterStrengthSetting = 0.4f;
-        g_waterReflSetting = 1.56f;
+        g_waterReflSetting = 1.0f;
         g_sidewalkClear = 0.5f;
         g_delaySec = 2.0f;
         g_streetLampsLit = true;
@@ -3200,8 +3277,8 @@ class NightTerrainRelightPatch : public ApexPatch {
     // controls' product (ground x lot lamps) over Soft's 0.6.
     static constexpr LightStyle kStyles[] = {
         {{0.81f, 0.675f, 0.675f, 0.675f, 0.27f, 0.405f}}, // Subtle (walls 27%, Soft 30% scaled; the others keep the ratio)
-        {{1.0f, 0.75f, 0.75f, 0.75f, 0.30f, 0.45f}},      // Soft reference (the defaults; walls 30%)
-        {{1.67f, 1.0f, 1.0f, 1.0f, 0.56f, 0.6f}},         // Natural (walls 56%)
+        {{1.0f, 0.75f, 0.75f, 0.75f, 0.30f, 0.45f}},      // Soft reference (walls 30%)
+        {{0.8966f, 1.0f, 1.0f, 1.0f, 0.56f, 0.6f}},       // Natural (the defaults; walls 56%)
     };
     static float* StyleValue(int i) {
         float* const v[] = {&g_groundLight, &g_objStrength, &g_objPixelLightStrength, &g_fenceGroundStrength, &g_wallStrength, &g_roofStrengthSetting};
@@ -3520,6 +3597,7 @@ class NightTerrainRelightPatch : public ApexPatch {
                 ImGui::BeginDisabled(!g_outdoorOpenings && !g_indoorOpenings && !(g_realisticOpenings && g_floorWalls)); // it shapes the options above
                 changed |= ApexUi::SwitchRow("Doors block light", &g_doorsBlock, "Closed doors stop lamp light; windows, arches and glass doors let it through", true);
                 ImGui::EndDisabled();
+                changed |= ApexUi::SwitchRow("Light bounces between rooms", &g_roomBounce, "A lit room softly lights the next room through an arch", true);
                 return changed;
             });
             ImGui::EndDisabled();
@@ -3669,6 +3747,24 @@ class NightTerrainRelightPatch : public ApexPatch {
         if (g_lampMode == kLampInstant && ApexUi::SwitchRow("Check quick lamp edits", &g_outdoorDeltaCheck,
                                                             "Solves those floors in full again later and logs the largest texel difference", false))
             NotifySettingChanged();
+        if (g_lampMode == kLampInstant && ApexUi::SwitchRow("Compare indoor lamps with GPU", &g_roomLampProbe,
+                                                            "Logs how each lamp's light in the active lot's rooms differs from what the GPU would draw", false))
+            NotifySettingChanged();
+        if (g_lampMode == kLampInstant && ApexUi::SwitchRow("Keep indoor lamps for GPU", &g_gpuRoomLampsCapture,
+                                                            "Keeps the active lot's room solves and draws their lamps on the GPU; logs self-checks with the comparison on", true))
+            NotifySettingChanged();
+        if (g_lampMode == kLampInstant && g_gpuRoomLampsCapture) {
+            static const char* const kModels[] = {"Replica", "Physical"};
+            if (ApexUi::SegmentedRow("Indoor lamp model", "Replica: each solve's lamp shares. Physical: lamps with shadows",
+                                     "##RoomLampModel", &g_roomLampModel, kModels, 2, nullptr, nullptr, 1))
+                NotifySettingChanged();
+            if (g_roomLampModel == 1 && ApexUi::SwitchRow("Sharper floor light", &g_roomLampSharpFloors,
+                                                          "Floors drawn at twice the detail: light through doors and windows without steps", true))
+                NotifySettingChanged();
+            if (g_roomLampModel == 1 && ApexUi::SwitchRow("True-size furniture shadows", &g_roomLampTrueShadows,
+                                                          "Furniture shadows of their real size, soft as the lamp. Off: the game's larger, rounder shadows", false))
+                NotifySettingChanged();
+        }
         if (ApexUi::Checkbox("Smooth the ground light maps on the GPU (A/B: off = CPU worker)", &g_smoothMapsGpu)) NotifySettingChanged();
         ImGui::SameLine();
         if (ApexUi::TextButton("Compare GPU vs CPU (one chunk)")) LightmapSmooth::RequestCompare();
