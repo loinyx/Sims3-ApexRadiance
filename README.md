@@ -158,11 +158,29 @@ The main settings file is `ApexRadiance.toml`. Saved presets remain in `Profiles
 
 **Upgrading from an older combined build?** Remove the old combined ASI or `S3SSApex.asi` from `Game\Bin`. Keep the official standalone `Sims3SettingsSetter.asi` if you use it. Apex imports recognised legacy settings on its first start.
 
+### Optional: RTX Remix bridge (64-bit renderer)
+
+The bridge moves the game's renderer (DXVK) out of the 32-bit game into its own 64-bit process, so the game keeps about
+600 MB more free memory for long sessions and big worlds. The picture is the same as with DXVK. It needs Apex Radiance
+3.0.0 or later, which detects it on its own (**Settings → Compatibility** shows *RTX Remix bridge: Installed*).
+
+1. Close the game.
+2. Download `Apex-Radiance-RTX-Remix-bridge.zip` from the [latest release](https://github.com/loinyx/Sims3-ApexRadiance/releases/latest).
+3. If `Game\Bin` already has a `d3d9.dll` (for example DXVK), move it to a backup folder.
+4. Unzip the package into `Game\Bin`, keeping the `.trex` folder: Bin then holds `d3d9.dll`, `bridge.conf`, `dxvk.conf` and
+   `.trex\` (`NvRemixBridge.exe`, `d3d9vk_x64.dll`, `bridge.conf`).
+5. EA app (`TS3.exe`) only: in both `bridge.conf` files, change `client.targetProcess = TS3W.exe` to
+   `client.targetProcess = TS3.exe`.
+
+To remove it, close the game, delete `d3d9.dll`, `bridge.conf`, `dxvk.conf` and the `.trex` folder from Bin, and put your
+old `d3d9.dll` back. The bridge writes its logs to `rtx-remix\logs`; attach them with Apex Radiance's log to a bug report.
+
 ## Compatibility
 
 - **Sims3SettingsSetter:** works alongside Apex. Apex detects its active Split-Level Lighting Fix and avoids applying the same fix twice.
 - **Sims 3 Performance Patch:** can run alongside Apex; the mods target different game operations.
 - **DXVK:** supported, though results can vary between graphics backends. If you report a visual issue, let us know which backend you use.
+- **RTX Remix bridge:** supported from 3.0.0 (see *Optional: RTX Remix bridge* above). Sims3SettingsSetter's borderless window does not apply under it.
 
 Bounded compression storage and save preparation release eligible idle buffers while protecting pending writes.
 These safeguards do not guarantee prevention of Error 12 or a particular FPS improvement.
