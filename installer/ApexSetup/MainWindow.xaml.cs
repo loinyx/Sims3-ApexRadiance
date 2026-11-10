@@ -97,7 +97,7 @@ public sealed partial class MainWindow : Window
         Badge = g.Version + " · " + g.Exe,
     };
 
-    string? Latest(string c) => _latest.GetValueOrDefault(Repo[c])?.Version;
+    string? Latest(string c) => Repo.TryGetValue(c, out var repo) ? _latest.GetValueOrDefault(repo)?.Version : null;
 
     // The installed version: Setup's own record, else the latest release's when the file is identical to it (GitHub's SHA-256
     // digest), else "" (installed, version unknown), or null when absent.
@@ -122,8 +122,8 @@ public sealed partial class MainWindow : Window
             ? rel!.Version : "";
     }
 
-    // installed and older than the latest release (or of unknown version: it may be older)
-    bool NeedsUpdate(string c) => Known(c) is { } v && (v.Length == 0 || Newer(Latest(c), v));
+    // installed and known to be older than the latest release; a copy of unknown version stays as it is (Repair copies it again)
+    bool NeedsUpdate(string c) => Known(c) is { Length: > 0 } v && Newer(Latest(c), v);
 
     static bool Newer(string? latest, string? installed)
     {
@@ -307,6 +307,7 @@ public sealed partial class MainWindow : Window
         AddInstalled("Sims3SettingsSetter", Known(Components.S3ss), Components.S3ss);
         AddInstalled("Sims 3 Modernization", Known(Components.Modernization), Components.Modernization);
         AddInstalled("MonoPatcher", Known(Components.MonoPatcher), Components.MonoPatcher);
+        if (S3ppPresent) AddInstalled("Sims 3 Performance Patch", "", Components.S3pp);
         // the other community mods Setup recognises (installed by hand; links to their official pages)
         foreach (var k in KnownMods.Found(_game!.Bin, Scan.DocumentsFor(_game)))
         {
@@ -340,7 +341,7 @@ public sealed partial class MainWindow : Window
             var fix = new Button { Content = T("Fix all now"), Style = (Style)Application.Current.Resources["AccentButtonStyle"], IsEnabled = !_running };
             fix.Click += async (_, _) =>
             {
-                await Guarded(() => { if (Games.IsRunning()) throw new InvalidOperationException("Close The Sims 3 first."); foreach (var x in Compat.Check(_game!, Scan.Run(_game!)).Where(x => x.CanFix)) x.Fix!(); }, T("Fixed."));
+                await Guarded(() => { Engine.CheckWritable(); foreach (var x in Compat.Check(_game!, Scan.Run(_game!)).Where(x => x.CanFix)) x.Fix!(); }, T("Fixed."));
             };
             ProblemList.Children.Add(fix);
         }

@@ -20,7 +20,8 @@ only what differs from the player's choice.
   GitHub's SHA-256 digest when the release has one. Without the GitHub API (60 calls an hour per address), the release
   page is read instead.
 - Installed components show switched on; switching one off removes it. A file is copied only when it is missing or older
-  than the latest release (a file without a version is compared by its SHA-256 with the release's).
+  than the latest release (a file without a version is compared by its SHA-256 with the release's; one Setup cannot
+  date stays as it is, and Repair copies it again).
 - Every file Setup replaces is moved to `Game\Bin\Apex Radiance backup` (with `.bak` appended, so no loader reads it);
   `setup.json` there records what Setup installed. Repair or remove restores them. Uninstall everything removes Apex
   Radiance and what Setup installed; mods installed by hand stay.
@@ -60,6 +61,8 @@ The Documents folder is found the way Apex finds it (the localized name in the e
 dotnet run --project installer/ApexSetup.Tests
 dotnet publish installer/ApexSetup -c Release -o installer/publish
 ```
+
+`APEX_SETUP_DRY_RUN=1` shows what Setup finds and would change on a real game while writing nothing.
 
 The tests run the engine on a fake `Game\Bin` and Documents folder in `%TEMP%` with local files (no network, no game).
 For a manual run against a fake game: start the exe with the game folder as its argument and `APEX_SETUP_DOCUMENTS` set

@@ -183,6 +183,13 @@ public static class Engine
     static readonly HashSet<string> Updates = new(StringComparer.OrdinalIgnoreCase)
         { "ApexRadiance.asi", "Sims3SettingsSetter.asi", "ts3native.asi", "ts3native.ini", "ts3fixes.package", "Sims3Performance.asi", "MonoPatcher.asi" };
 
+    // APEX_SETUP_DRY_RUN=1: Setup shows what it finds and plans but writes nothing (a check on a player's real game)
+    public static void CheckWritable()
+    {
+        if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1") throw new InvalidOperationException("Dry run: Setup changes nothing.");
+        if (Games.IsRunning()) throw new InvalidOperationException("Close The Sims 3 first.");
+    }
+
     public static string OptionsIni(string docs) => Path.Combine(docs, "Options.ini");
 
     // The loader goes in when there is none, or when the only one is d3d9.dll and the bridge takes that name.
@@ -193,7 +200,7 @@ public static class Engine
     {
         docs ??= Scan.DocumentsFor(g);
         p?.Report(new(0, "Checking that the game is closed"));
-        if (Games.IsRunning()) throw new InvalidOperationException("Close The Sims 3 first.");
+        CheckWritable();
         var s = Scan.Run(g, docs);
         var m = s.Manifest;
         var list = Components.All.Reverse().Where(components.Contains).ToList(); // loader first, bridge last
@@ -229,7 +236,7 @@ public static class Engine
     public static void Remove(Game g, string c, string? docs = null)
     {
         docs ??= Scan.DocumentsFor(g);
-        if (Games.IsRunning()) throw new InvalidOperationException("Close The Sims 3 first.");
+        CheckWritable();
         var m = Manifest.Load(g.Bin);
         var layerBefore = Scan.Run(g, docs).Layer;
         // hand-installed files first, so a backup restored below is never taken for one
