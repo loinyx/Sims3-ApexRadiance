@@ -13,6 +13,7 @@ only what differs from the player's choice.
 | Sims3SettingsSetter | `sims3fiend/Sims3SettingsSetter` | `Game\Bin` |
 | Sims 3 Modernization | `rodneypantonial/sims3-modernization` (Steam or EA zip by edition) | `ts3native` in `Game\Bin`, `ts3fixes.package` in `Mods\Packages` |
 | MonoPatcher | `LazyDuchess/MonoPatcher` (its bundled loader is left out) | `MonoPatcher.asi` in `Game\Bin`, its package in `Mods\Packages\MonoPatcher` |
+| Sims 3 Performance Patch | Nexus Mods only (needs the player's account): Setup opens its page, watches the Downloads folder and installs the `.zip` (or a chosen `.asi`) when the download finishes | `Game\Bin` |
 | Ultimate ASI Loader, only when no loader is found | `ThirteenAG/Ultimate-ASI-Loader` (`dinput8.dll` as `wininet.dll`) | `Game\Bin` |
 
 - Every file is downloaded at install time from the author's own GitHub release (never re-hosted) and checked against
@@ -48,7 +49,7 @@ run at the end of every install, or with *Fix all now* on the game page.
 | `ts3native` built for the other edition | Reported; turning Sims 3 Modernization on installs the right one |
 | A Steam build of simler90 or XCAS on the EA app (or the reverse), NRaas ErrorTrap on the EA app, simler90 next to StoryProgression, MonoPatcher without the VC++ x86 runtime | Reported with a link |
 
-Mods published outside GitHub (Sims 3 Performance Patch, Smooth Patch, NRaas, simler90, and others of sims3-modernization's
+Other mods published outside GitHub (Smooth Patch, NRaas, simler90, and others of sims3-modernization's
 community list) are recognised and listed with a link to their official page (`KnownMods.cs`), never downloaded.
 
 The Documents folder is found the way Apex finds it (the localized name in the exe's string table).

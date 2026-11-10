@@ -275,6 +275,43 @@
                                                   AutomationProperties.Name="MonoPatcher" />
                                 </Grid>
                             </Border>
+                            <Border Style="{StaticResource ApexCard}">
+                                <StackPanel Spacing="10">
+                                    <Grid ColumnSpacing="14">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
+                                            <FontIcon Glyph="&#xEC4A;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
+                                        </Border>
+                                        <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                            <TextBlock Text="Sims 3 Performance Patch" Style="{StaticResource ApexStrong}" />
+                                            <TextBlock Text="Performance patches for the game's code. Published on Nexus Mods only, which needs a free account: Setup opens its page, and when your download finishes it finds the file in Downloads and installs it." Style="{StaticResource ApexMuted}" />
+                                        </StackPanel>
+                                        <Border Grid.Column="2" Style="{StaticResource ApexPill}">
+                                            <TextBlock x:Name="S3ppPill" Tag="dyn" FontSize="11" Foreground="{StaticResource ApexMutedBrush}" />
+                                        </Border>
+                                        <ToggleSwitch x:Name="S3ppToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnToggle"
+                                                      AutomationProperties.Name="Sims 3 Performance Patch" />
+                                    </Grid>
+                                    <StackPanel x:Name="S3ppGet" Orientation="Horizontal" Spacing="8" Margin="50,0,0,0">
+                                        <Button Style="{StaticResource AccentButtonStyle}" Click="OnS3ppDownload">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <FontIcon Glyph="&#xE896;" FontSize="14" />
+                                                <TextBlock Text="Download on Nexus Mods" />
+                                            </StackPanel>
+                                        </Button>
+                                        <Button Content="Choose the downloaded file" Click="OnS3ppPick" />
+                                    </StackPanel>
+                                    <StackPanel x:Name="S3ppWait" Orientation="Horizontal" Spacing="10" Margin="50,0,0,0" Visibility="Collapsed">
+                                        <ProgressRing Width="16" Height="16" IsActive="True" />
+                                        <TextBlock x:Name="S3ppWaitText" Tag="dyn" Style="{StaticResource ApexMuted}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
                             <StackPanel Orientation="Horizontal" Spacing="10" Margin="4,2,0,0">
                                 <FontIcon x:Name="LoaderPlanIcon" FontSize="14" />
                                 <TextBlock x:Name="LoaderPlan" Tag="dyn" Style="{StaticResource ApexMuted}" VerticalAlignment="Center" />

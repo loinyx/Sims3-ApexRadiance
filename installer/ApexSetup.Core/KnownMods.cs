@@ -9,7 +9,6 @@ public static class KnownMods
 {
     public static readonly KnownMod[] All =
     {
-        new("Sims 3 Performance Patch", true, new[] { "Sims3Performance.asi" }, null),
         new("Smooth Patch (ASI)", true, new[] { "TS3Patch.asi" }, "https://modthesims.info/d/658759/smooth-patch-2-1.html"),
         new("Smooth Patch", false, new[] { "ld_SmoothPatch*.package" }, "https://modthesims.info/d/658759/smooth-patch-2-1.html"),
         new("NRaas ErrorTrap", false, new[] { "NRaas_ErrorTrap*.package" }, "https://www.nraas.net/community/ErrorTrap"),

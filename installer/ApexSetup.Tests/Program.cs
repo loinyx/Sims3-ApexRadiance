@@ -98,7 +98,23 @@ try
     Check(!File.Exists(B("TS3Patch.asi")), "Smooth Patch ASI next to S3SS moved away");
     Check(KnownMods.Found(bin, docs).Any(m => m.Name.StartsWith("simler90")), "simler90 detected as a known mod");
 
-    // 9. uninstall everything
+    // 9. Sims 3 Performance Patch from the player's download (a zip), next to ts3native: its two thread patches are set to 0
+    var dl = Path.Combine(root, "Downloads");
+    Directory.CreateDirectory(Path.Combine(dl, "s3pp", "Sims3PerformancePatch"));
+    File.WriteAllText(Path.Combine(dl, "s3pp", "Sims3PerformancePatch", "Sims3Performance.asi"), "s3pp");
+    File.WriteAllText(Path.Combine(dl, "s3pp", "Sims3PerformancePatch", "Sims3Performance.ini"), "[Patches]\r\nShortWaitSpin=1\r\nThreadStackDiet=1\r\n");
+    var zip = Path.Combine(dl, "Sims 3 Performance Patch-235-1-1.zip");
+    System.IO.Compression.ZipFile.CreateFromDirectory(Path.Combine(dl, "s3pp"), zip);
+    Check(GitHubSource.S3ppFiles(zip) is not null, "S3PP found inside the downloaded zip");
+    File.WriteAllText(B("ts3native.asi"), "ts3native");
+    var s3ppSrc = new MixedSource(src, zip);
+    await Engine.InstallAsync(g, new[] { Components.S3pp }, s3ppSrc, null, docs);
+    Check(File.Exists(B("Sims3Performance.asi")) && Read(B("Sims3Performance.ini")).Contains("ShortWaitSpin=0") && Read(B("Sims3Performance.ini")).Contains("ThreadStackDiet=0"),
+          "S3PP installed with its clash with Sims 3 Modernization fixed");
+    Engine.Remove(g, Components.S3pp, docs);
+    Check(!File.Exists(B("Sims3Performance.asi")) && !File.Exists(B("Sims3Performance.ini")), "S3PP removed");
+
+    // 10. uninstall everything
     Engine.RemoveAll(g, docs);
     var left = Directory.EnumerateFiles(bin, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(bin, f)).OrderBy(x => x).ToList();
     Check(!left.Contains("ApexRadiance.asi") && !left.Contains("Sims3SettingsSetter.asi") && !left.Contains("ts3native.asi") && !left.Contains("wininet.dll"),
@@ -112,6 +128,15 @@ finally { Directory.Delete(root, true); }
 
 Console.WriteLine(failures == 0 ? "ALL PASSED" : failures + " FAILED");
 return failures == 0 ? 0 : 1;
+
+// the fake GitHub files, plus the S3PP archive the way GitHubSource takes it
+sealed class MixedSource : ISource
+{
+    readonly ISource _inner; readonly string _zip;
+    public MixedSource(ISource inner, string zip) { _inner = inner; _zip = zip; }
+    public Task<(List<(string Src, string Dest)> Files, string Version)> FetchAsync(string c, Game g, string docs, CancellationToken ct) =>
+        c == Components.S3pp ? new GitHubSource { S3ppArchive = _zip }.FetchAsync(c, g, docs, ct) : _inner.FetchAsync(c, g, docs, ct);
+}
 
 sealed class FakeSource : ISource
 {

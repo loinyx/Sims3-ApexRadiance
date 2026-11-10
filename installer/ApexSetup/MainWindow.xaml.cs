@@ -398,6 +398,7 @@ public sealed partial class MainWindow : Window
         S3ssToggle.IsOn = true;
         ModToggle.IsOn = s.Modernization;
         MonoToggle.IsOn = s.MonoPatcher;
+        S3ppToggle.IsOn = true;
     }
 
     void OnToggle(object sender, RoutedEventArgs e) => RefreshComponents();
@@ -471,6 +472,11 @@ public sealed partial class MainWindow : Window
         S3ssPill.Text = Pill(Known(Components.S3ss), Latest(Components.S3ss), false);
         ModPill.Text = Pill(Known(Components.Modernization), Latest(Components.Modernization), s.Ts3NativeWrongBuild);
         MonoPill.Text = Pill(Known(Components.MonoPatcher), Latest(Components.MonoPatcher), false);
+        S3ppPill.Text = S3ppPresent ? T("Installed") : _s3ppArchive is not null ? T("Ready to install") : T("Not installed");
+        S3ppToggle.Visibility = S3ppPresent ? Visibility.Visible : Visibility.Collapsed;
+        S3ppGet.Visibility = !S3ppPresent && _s3ppArchive is null && _s3ppWatch is null ? Visibility.Visible : Visibility.Collapsed;
+        S3ppWait.Visibility = _s3ppWatch is not null ? Visibility.Visible : Visibility.Collapsed;
+        S3ppWaitText.Text = T("Waiting for your download in {0}…", DownloadsFolder());
         ModToggle.IsEnabled = g.ModernizationSupported;
         if (!g.ModernizationSupported) ModToggle.IsOn = false;
         ModDesc.Text = g.ModernizationSupported
@@ -524,15 +530,80 @@ public sealed partial class MainWindow : Window
         }
         Optional(Components.S3ss, S3ssToggle.IsOn, s.S3ss, NeedsUpdate(Components.S3ss));
         Optional(Components.MonoPatcher, MonoToggle.IsOn, s.MonoPatcher, NeedsUpdate(Components.MonoPatcher));
+        // Sims 3 Performance Patch: installed from the player's own download only
+        if (S3ppPresent && !S3ppToggle.IsOn) del.Add(Components.S3pp);
+        if (!S3ppPresent && _s3ppArchive is not null) add.Add(Components.S3pp);
         Optional(Components.Modernization, ModToggle.IsOn && g.ModernizationSupported, s.Modernization, s.Ts3NativeWrongBuild || NeedsUpdate(Components.Modernization));
         if (Engine.NeedsLoader(s, _renderer != cur && _renderer is RDxvk or RBridge)) add.Add(Components.Loader);
         return (add, del);
     }
 
+    // ---------- Sims 3 Performance Patch: the player downloads it on Nexus Mods, Setup picks the file up ----------
+
+    const string S3ppPage = "https://www.nexusmods.com/thesims3/mods/235";
+    string? _s3ppArchive;
+    FileSystemWatcher? _s3ppWatch;
+    bool S3ppPresent => _game is { } g && File.Exists(System.IO.Path.Combine(g.Bin, "Sims3Performance.asi"));
+
+    static string DownloadsFolder() =>
+        Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders")
+            ?.GetValue("{374DE290-123F-4565-9164-39C4925E467B}") as string
+        ?? System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+
+    void OnS3ppDownload(object sender, RoutedEventArgs e)
+    {
+        // through Explorer, so the browser opens as the player, not with Setup's administrator rights
+        Process.Start(new ProcessStartInfo("explorer.exe", S3ppPage) { UseShellExecute = true });
+        _s3ppWatch?.Dispose();
+        _s3ppWatch = new FileSystemWatcher(DownloadsFolder()) { IncludeSubdirectories = false, EnableRaisingEvents = true };
+        FileSystemEventHandler seen = (_, a) => _ = TakeS3ppAsync(a.FullPath);
+        _s3ppWatch.Created += seen;
+        _s3ppWatch.Renamed += (_, a) => _ = TakeS3ppAsync(a.FullPath);
+        RefreshComponents();
+    }
+
+    async void OnS3ppPick(object sender, RoutedEventArgs e)
+    {
+        var picker = new Microsoft.Windows.Storage.Pickers.FileOpenPicker(AppWindow.Id);
+        picker.FileTypeFilter.Add(".zip");
+        picker.FileTypeFilter.Add(".asi");
+        var res = await picker.PickSingleFileAsync();
+        if (res is not null) await TakeS3ppAsync(res.Path, fromPicker: true);
+    }
+
+    // a finished download (browsers write a temporary name, then rename it) that holds Sims3Performance.asi
+    async Task TakeS3ppAsync(string path, bool fromPicker = false)
+    {
+        var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+        if (ext is not (".zip" or ".asi")) return;
+        for (int i = 0; i < 20; i++) // wait until the browser has closed the file
+        {
+            try { using (File.Open(path, FileMode.Open, FileAccess.Read, FileShare.None)) break; }
+            catch (IOException) { await Task.Delay(500); }
+        }
+        var found = await Task.Run(() => GitHubSource.S3ppFiles(path));
+        DispatcherQueue.TryEnqueue(async () =>
+        {
+            if (found is null)
+            {
+                if (fromPicker || ext == ".zip" && System.IO.Path.GetFileName(path).Contains("Performance", StringComparison.OrdinalIgnoreCase))
+                    await Message(T("Not the Performance Patch"), T("{0} has no Sims3Performance.asi. If the download is a .7z or .rar, extract it and choose Sims3Performance.asi.", System.IO.Path.GetFileName(path)));
+                return;
+            }
+            _s3ppWatch?.Dispose();
+            _s3ppWatch = null;
+            _s3ppArchive = path;
+            Activate(); // back in front of the browser
+            if (_game is not null && !_running && !_busy) await InstallAsync(new List<string> { Components.S3pp });
+            else RefreshComponents();
+        });
+    }
+
     static string Name(string c) => c switch
     {
         Components.Apex => "Apex Radiance", Components.Bridge => "RTX Remix bridge", Components.Loader => "Ultimate ASI Loader",
-        Components.Dxvk => "DXVK", Components.S3ss => "Sims3SettingsSetter", Components.MonoPatcher => "MonoPatcher", _ => "Sims 3 Modernization",
+        Components.Dxvk => "DXVK", Components.S3ss => "Sims3SettingsSetter", Components.MonoPatcher => "MonoPatcher",
+        Components.S3pp => "Sims 3 Performance Patch", _ => "Sims 3 Modernization",
     };
 
     // ---------- install ----------
@@ -566,7 +637,7 @@ public sealed partial class MainWindow : Window
             await Task.Run(async () =>
             {
                 foreach (var c in dels) Engine.Remove(g, c);
-                await Engine.InstallAsync(g, order, new GitHubSource(), progress);
+                await Engine.InstallAsync(g, order, new GitHubSource { S3ppArchive = _s3ppArchive }, progress);
             });
             _lastInstall = order;
             _busy = false;
@@ -642,6 +713,7 @@ public sealed partial class MainWindow : Window
             ManageRow("DXVK", m.Files.Any(f => f.Component == Components.Dxvk && f.Backup is not null)
                 ? T("Puts your previous d3d9.dll back.")
                 : T("The game goes back to its own Direct3D 9 and may reset its graphics options once."), T("Remove"), () => RemoveAsync(Components.Dxvk));
+        if (S3ppPresent) ManageRow("Sims 3 Performance Patch", T("Removes Sims3Performance.asi and its .ini."), T("Remove"), () => RemoveAsync(Components.S3pp));
         if (s.MonoPatcher) ManageRow("MonoPatcher", T("Removes MonoPatcher.asi and its package."), T("Remove"), () => RemoveAsync(Components.MonoPatcher));
         if (s.S3ss) ManageRow("Sims3SettingsSetter", T("Removes Sims3SettingsSetter.asi."), T("Remove"), () => RemoveAsync(Components.S3ss));
         if (s.Modernization) ManageRow("Sims 3 Modernization", T("Removes ts3native and ts3fixes.package."), T("Remove"), () => RemoveAsync(Components.Modernization));

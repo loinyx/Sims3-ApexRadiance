@@ -5,9 +5,9 @@ namespace ApexSetup;
 
 public static class Components
 {
-    public const string Apex = "apex", Bridge = "bridge", Dxvk = "dxvk", Loader = "loader", S3ss = "s3ss", Modernization = "modernization", MonoPatcher = "monopatcher";
+    public const string Apex = "apex", Bridge = "bridge", Dxvk = "dxvk", Loader = "loader", S3ss = "s3ss", Modernization = "modernization", MonoPatcher = "monopatcher", S3pp = "s3pp";
     // removal order: what depends on the loader goes first (installs run in the reverse order)
-    public static readonly string[] All = { Bridge, Dxvk, Modernization, MonoPatcher, S3ss, Apex, Loader };
+    public static readonly string[] All = { Bridge, Dxvk, Modernization, MonoPatcher, S3pp, S3ss, Apex, Loader };
 }
 
 public sealed class ManifestFile
@@ -51,6 +51,10 @@ public interface ISource
 
 public sealed class GitHubSource : ISource
 {
+    // Sims 3 Performance Patch is published on Nexus Mods only, which needs the player's own account: the player
+    // downloads it there and Setup takes the archive from here
+    public string? S3ppArchive { get; init; }
+
     readonly string _tmp = Path.Combine(Path.GetTempPath(), "ApexRadianceSetup", Guid.NewGuid().ToString("N"));
 
     public async Task<(List<(string, string)>, string)> FetchAsync(string c, Game g, string docs, CancellationToken ct)
@@ -79,6 +83,14 @@ public sealed class GitHubSource : ISource
                 var tgz = await Releases.DownloadAsync(r.Find(n => n.StartsWith("dxvk-") && n.EndsWith(".tar.gz") && !n.Contains("native")), _tmp, ct);
                 files.Add((Releases.ExtractFromTarGz(tgz, "x32/d3d9.dll"), Path.Combine(bin, "d3d9.dll")));
                 return (files, r.Version);
+            }
+            case Components.S3pp:
+            {
+                if (S3ppArchive is null) throw new InvalidOperationException("Download Sims 3 Performance Patch from Nexus Mods first.");
+                var (asi, ini) = S3ppFiles(S3ppArchive) ?? throw new InvalidDataException("This file has no Sims3Performance.asi.");
+                files.Add((asi, Path.Combine(bin, "Sims3Performance.asi")));
+                if (ini is not null) files.Add((ini, Path.Combine(bin, "Sims3Performance.ini")));
+                return (files, "Nexus Mods");
             }
             case Components.MonoPatcher:
             {
@@ -118,6 +130,31 @@ public sealed class GitHubSource : ISource
         throw new ArgumentException(c);
     }
 
+    // Sims3Performance.asi (and its .ini) from a .zip the player downloaded, or from the .asi itself
+    public static (string Asi, string? Ini)? S3ppFiles(string path)
+    {
+        string dir;
+        if (path.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+        {
+            try { dir = Releases.Unzip(CopyToTemp(path)); }
+            catch (InvalidDataException) { return null; }
+        }
+        else dir = Path.GetDirectoryName(path)!;
+        var asi = Directory.EnumerateFiles(dir, "Sims3Performance.asi", SearchOption.AllDirectories).FirstOrDefault();
+        if (asi is null) return null;
+        var ini = Path.Combine(Path.GetDirectoryName(asi)!, "Sims3Performance.ini");
+        return (asi, File.Exists(ini) ? ini : null);
+    }
+
+    static string CopyToTemp(string file)
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "ApexRadianceSetup", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var copy = Path.Combine(dir, Path.GetFileName(file));
+        File.Copy(file, copy);
+        return copy;
+    }
+
     public static void AddTree(List<(string, string)> files, string dir, string dest)
     {
         foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
@@ -137,13 +174,14 @@ public static class Engine
         [Components.Dxvk] = new[] { "d3d9.dll" },
         [Components.S3ss] = new[] { "Sims3SettingsSetter.asi" },
         [Components.MonoPatcher] = new[] { "MonoPatcher.asi" },
+        [Components.S3pp] = new[] { "Sims3Performance.asi", "Sims3Performance.ini" },
         [Components.Modernization] = new[] { "ts3native.asi", "ts3native.ini" },
         [Components.Loader] = Array.Empty<string>(),
     };
 
     // An older copy of these is an update, not a foreign file: replaced without a backup.
     static readonly HashSet<string> Updates = new(StringComparer.OrdinalIgnoreCase)
-        { "ApexRadiance.asi", "Sims3SettingsSetter.asi", "ts3native.asi", "ts3native.ini", "ts3fixes.package" };
+        { "ApexRadiance.asi", "Sims3SettingsSetter.asi", "ts3native.asi", "ts3native.ini", "ts3fixes.package", "Sims3Performance.asi", "MonoPatcher.asi" };
 
     public static string OptionsIni(string docs) => Path.Combine(docs, "Options.ini");
 

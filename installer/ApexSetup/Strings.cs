@@ -259,6 +259,15 @@ public static class Strings
         ["Smooth Patch's TS3Patch.asi patches the same game code as Sims3SettingsSetter's Smooth Patch. Setup moves it to the backup folder (S3SS does the same job)."] = "O TS3Patch.asi do Smooth Patch altera o mesmo código do jogo que o Smooth Patch do Sims3SettingsSetter. O instalador o move para a pasta de cópias (o S3SS faz o mesmo trabalho).",
         ["simler90's Gameplay Core Mod and NRaas StoryProgression replace the same game code. Keep one of them."] = "O Gameplay Core Mod do simler90 e o NRaas StoryProgression substituem o mesmo código do jogo. Deixe só um deles.",
         ["MonoPatcher needs the Microsoft Visual C++ Redistributable (x86); it is not installed."] = "O MonoPatcher precisa do Microsoft Visual C++ Redistributable (x86), que não está instalado.",
+        ["Performance patches for the game's code. Published on Nexus Mods only, which needs a free account: Setup opens its page, and when your download finishes it finds the file in Downloads and installs it."] = "Patches de desempenho para o código do jogo. Publicado só no Nexus Mods, que pede uma conta grátis: o instalador abre a página e, quando o download termina, encontra o arquivo em Downloads e o instala.",
+        ["Download on Nexus Mods"] = "Baixar no Nexus Mods",
+        ["Choose the downloaded file"] = "Escolher o arquivo baixado",
+        ["Ready to install"] = "Pronto para instalar",
+        ["Waiting for your download in {0}…"] = "Aguardando o seu download em {0}…",
+        ["Not the Performance Patch"] = "Não é o Performance Patch",
+        ["{0} has no Sims3Performance.asi. If the download is a .7z or .rar, extract it and choose Sims3Performance.asi."] = "{0} não tem o Sims3Performance.asi. Se o download for .7z ou .rar, extraia e escolha o Sims3Performance.asi.",
+        ["Removes Sims3Performance.asi and its .ini."] = "Remove o Sims3Performance.asi e o .ini dele.",
+        ["Download Sims 3 Performance Patch from Nexus Mods first."] = "Baixe o Sims 3 Performance Patch no Nexus Mods primeiro.",
         // about and dialogs
         ["Apex Radiance by loinyx. The RTX Remix bridge is NVIDIA's, ported to The Sims 3 by dalexlol and alexvixell35-stack. Sims3SettingsSetter is by sims3fiend, Sims 3 Modernization by rodneypantonial and Ultimate ASI Loader by ThirteenAG: Setup downloads them from their own GitHub releases."] =
             "Apex Radiance por loinyx. O RTX Remix bridge é da NVIDIA, portado para The Sims 3 por dalexlol e alexvixell35-stack. O Sims3SettingsSetter é de sims3fiend, o Sims 3 Modernization de rodneypantonial e o Ultimate ASI Loader de ThirteenAG: o instalador os baixa das releases deles no GitHub.",
