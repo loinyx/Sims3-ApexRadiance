@@ -359,7 +359,9 @@ static void SliderAndLifecycleTests() {
     Room litNew(18, 1, true); litNew.Field<int>(0xF0) = 2; litNew.SetAmbient(none, none);
     Room openNew(19); openNew.Field<int>(0xF0) = 1; openNew.SetAmbient(none, none); openNew.Field<BYTE>(0x18) = 1;
     rooms = {solving.Ptr(), litNew.Ptr(), openNew.Ptr()}; Retint(false);
-    Check(Equal(solving.Ambient(), none) && Equal(litNew.Ambient(), none) && Equal(openNew.Ambient(), none), "seed skips solving, lit and roofless rooms");
+    Check(Equal(solving.Ambient(), none) && Equal(openNew.Ambient(), none), "seed skips solving and roofless rooms");
+    // a cleared room with lamps waits at the unlit colour (its solve never ends under it), not black
+    Check(Equal(litNew.Ambient(), g_target[1].v) && Equal(litNew.Ambient(1), g_target[1].v), "cleared lit room is seeded");
 
     Reset(); Room exterior(0), roofless(15); roofless.Field<BYTE>(0x18) = 1;
     rooms = {exterior.Ptr(), roofless.Ptr()}; Retint(true);

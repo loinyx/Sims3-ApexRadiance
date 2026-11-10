@@ -89,6 +89,11 @@ inline bool WindowRecheckDue(std::uint32_t now, std::uint32_t armed, unsigned pa
     return pass < 3 && static_cast<std::uint32_t>(now - armed) >= (pass == 0 ? 0u : pass == 1 ? 2000u : 6000u);
 }
 inline float MoveBackground(float own, float oldBase, float newBase) { return own + newBase - oldBase; }
+// the same for a room floored at the empty-room colour (UnlitRooms AddBase): on the floor it follows the new floor, above it it
+// moves as MoveBackground and never goes under the new floor
+inline float MoveBackgroundFloored(float own, float oldBase, float newBase, float oldFloor, float newFloor) {
+    return std::fabs(own - oldFloor) <= 1e-5f ? newFloor : std::fmax(own + newBase - oldBase, newFloor);
+}
 inline void AccumulateAmbient(float* total, const float* own, float ownNorm, float groupNorm, float area) {
     const float scale = ownNorm > 1e-6f ? groupNorm / ownNorm : 1.0f;
     for (int k = 0; k < 4; k++) total[k] += own[k] * (k < 3 ? scale : 1.0f) * area;
@@ -105,12 +110,13 @@ inline bool SolverOwnsAmbient(int state) { return state >= 1 && state <= 3; }
 // The solve's ambient step runs in state 3 only; a room marked (1) or gathered (2) keeps its last ambient until then, so a
 // lamp edit's retake may still write it (a dragged lamp's rooms wait in 1-2 for the whole drag: their fill froze, 03/11)
 inline bool AmbientStepRunning(int state) { return state == 3; }
-// A roofed room with no lamps whose ambient was never written (both colours exactly 0: new, or solved while roofless,
-// which skips the ambient step) draws its walls black: marked (1) or gathered (2) until its solve, solved (4, 5) until the
-// next one. It takes what that step writes for an empty list (the unlit colour). Not 3: the step itself runs then.
-inline bool UnlitSeedDue(int state, bool lamps, const float* amb, const float* amb2, const float* target) {
+// A roofed room whose ambient was never written or was cleared (both colours exactly 0: new, solved while roofless, which
+// skips the ambient step, or invalidated by the game) draws its walls black: marked (1) or gathered (2) until its solve,
+// solved (4, 5) until the next one. It takes what that step writes for an empty list (the unlit colour), with lamps too: a
+// solved roofed room never ends under it (UnlitRooms AddBase's floor), so it is a lower bound. Not 3: the step runs then.
+inline bool UnlitSeedDue(int state, const float* amb, const float* amb2, const float* target) {
     const auto zero = [](const float* v) { return v[0] == 0.0f && v[1] == 0.0f && v[2] == 0.0f; };
-    return (state == 1 || state == 2 || state == 4 || state == 5) && !lamps && zero(amb) && zero(amb2) && !zero(target);
+    return (state == 1 || state == 2 || state == 4 || state == 5) && zero(amb) && zero(amb2) && !zero(target);
 }
 inline bool AmbientUpdateDue(std::uint32_t now, std::uint32_t last) {
     return !last || static_cast<std::uint32_t>(now - last) >= 3000;

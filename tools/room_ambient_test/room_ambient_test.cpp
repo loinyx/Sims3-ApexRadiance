@@ -39,12 +39,17 @@ int main() {
         check(AmbientStepRunning(state) == (state == 3), "a marked or gathered room's ambient retaken");
     {
         const float zero[4] = {}, seen[4] = {0.049f, 0.049f, 0.049f, 0}, unlit[4] = {0.15f, 0.15f, 0.3f, 0};
-        check(UnlitSeedDue(1, false, zero, zero, unlit) && UnlitSeedDue(2, false, zero, zero, unlit), "seed: a marked or gathered never-lit room");
-        check(UnlitSeedDue(4, false, zero, zero, unlit) && UnlitSeedDue(5, false, zero, zero, unlit), "seed: a solved room left at 0");
-        for (int state : {0, 3}) check(!UnlitSeedDue(state, false, zero, zero, unlit), "seed: not idle or while the ambient step runs");
-        check(!UnlitSeedDue(2, true, zero, zero, unlit), "seed: not a room with lamps");
-        check(!UnlitSeedDue(2, false, seen, zero, unlit) && !UnlitSeedDue(2, false, zero, seen, unlit), "seed: not a room with an ambient");
-        check(!UnlitSeedDue(2, false, zero, zero, zero), "seed: not a zero target");
+        check(UnlitSeedDue(1, zero, zero, unlit) && UnlitSeedDue(2, zero, zero, unlit), "seed: a marked or gathered never-lit room");
+        check(UnlitSeedDue(4, zero, zero, unlit) && UnlitSeedDue(5, zero, zero, unlit), "seed: a solved room left at 0");
+        for (int state : {0, 3}) check(!UnlitSeedDue(state, zero, zero, unlit), "seed: not idle or while the ambient step runs");
+        check(!UnlitSeedDue(2, seen, zero, unlit) && !UnlitSeedDue(2, zero, seen, unlit), "seed: not a room with an ambient");
+        check(!UnlitSeedDue(2, zero, zero, zero), "seed: not a zero target");
+    }
+    {
+        // a room floored at the empty-room colour follows the new floor; above it, it moves as MoveBackground, never under the floor
+        check(std::fabs(MoveBackgroundFloored(0.049f, 0.019f, 0.030f, 0.049f, 0.080f) - 0.080f) < 1e-6f, "floored room follows the new floor");
+        check(std::fabs(MoveBackgroundFloored(0.30f, 0.019f, 0.030f, 0.049f, 0.080f) - MoveBackground(0.30f, 0.019f, 0.030f)) < 1e-6f, "lit room moves as before");
+        check(MoveBackgroundFloored(0.06f, 0.030f, 0.010f, 0.049f, 0.040f) >= 0.040f, "never under the new floor");
     }
     check(RebuildRoomList(false, false, false, true, false), "same lot new story manager invalidates cache");
     check(RebuildRoomList(false, false, true, false, false), "lot switch invalidates cache");

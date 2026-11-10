@@ -189,7 +189,10 @@ bool AddBase(BYTE* room, float* r, int& slot, float* ce) {
         for (int k = 0; k < 4; k++) ce[k] = g_colour[slot].v[k] * s;
         const float sumC = ce[0] + ce[1] + ce[2], sumR = r[0] + r[1] + r[2];
         if (!std::isfinite(sumR) || !(sumC > 0.0f) || sumC >= 0.999f) return false;
-        if (Near(r, ce, 1e-6f)) return true; // no lamp light: the colour alone, as before
+        if (Near(r, ce, 1e-6f)) { // no lamp light: the colour alone, at least as bright as an empty room (below)
+            for (int k = 0; k < 3; k++) r[k] = std::fmax(r[k], g_colour[slot].v[k]);
+            return true;
+        }
         float t = 0.0f;                      // the shortfall the game added
         if (sumR < sumC) {
             const float sumL = (sumR - sumC * sumC) / (1.0f - sumC);
@@ -197,8 +200,10 @@ bool AddBase(BYTE* room, float* r, int& slot, float* ce) {
         }
         for (int k = 0; k < 4; k++) r[k] += (1.0f - t) * ce[k]; // lamp' + C
         // never darker than a room with no lamp: a room whose listed lamps are all blocked (or give almost nothing) came out
-        // at about a third of the unlit colour (a snapshot: 0.0068 against 0.0193 in the empty room beside it)
-        for (int k = 0; k < 3; k++) r[k] = std::fmax(r[k], ce[k]);
+        // at about a third of the unlit colour (a snapshot: 0.0068 against 0.0193 in the empty room beside it). The floor is
+        // the unscaled colour FUN_006a0f50 writes for an empty list: the scaled one left such rooms near black by day (lot
+        // 58EF0580, 0.019 against 0.049, 2026-11-10)
+        for (int k = 0; k < 3; k++) r[k] = std::fmax(r[k], g_colour[slot].v[k]);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -275,7 +280,9 @@ int MoveBase(BYTE* room, BaseRec& rec, const VisitCtx& ctx) {
         if (rec.has[0] && rec.has[1] && !Near(ce, rec.ce, 1e-7f)) {
             float next[2][4];
             for (int w = 0; w < 2; w++)
-                for (int k = 0; k < 4; k++) next[w][k] = RoomAmbientPolicy::MoveBackground(rec.res[w][k], rec.ce[k], ce[k]);
+                for (int k = 0; k < 4; k++)
+                    next[w][k] = k < 3 && ctx.scale > 1e-6f ? RoomAmbientPolicy::MoveBackgroundFloored(rec.res[w][k], rec.ce[k], ce[k], rec.ce[k] / ctx.scale, g_target[rec.slot].v[k])
+                                                            : RoomAmbientPolicy::MoveBackground(rec.res[w][k], rec.ce[k], ce[k]);
             if (LevelLightShare::StageAmbientBaseChange(room, rec.res[0], next[0], rec.res[1], next[1])) {
                 std::memcpy(rec.res, next, sizeof next);
                 std::memcpy(rec.ce, ce, sizeof ce);
@@ -288,7 +295,9 @@ int MoveBase(BYTE* room, BaseRec& rec, const VisitCtx& ctx) {
         if (Near(ce, rec.ce, 1e-7f)) return 0;
         for (int w = 0; w < 2; w++) {
             if (!rec.has[w]) continue;
-            for (int k = 0; k < 4; k++) rec.res[w][k] += ce[k] - rec.ce[k];
+            for (int k = 0; k < 4; k++)
+                rec.res[w][k] = k < 3 && ctx.scale > 1e-6f ? RoomAmbientPolicy::MoveBackgroundFloored(rec.res[w][k], rec.ce[k], ce[k], rec.ce[k] / ctx.scale, g_target[rec.slot].v[k])
+                                                           : RoomAmbientPolicy::MoveBackground(rec.res[w][k], rec.ce[k], ce[k]);
             std::memcpy(at[w], rec.res[w], sizeof rec.res[w]);
         }
         std::memcpy(rec.ce, ce, sizeof ce);
@@ -355,7 +364,7 @@ bool RetintUnlit(unsigned char* room, int& state, int slot) {
         float* amb2 = reinterpret_cast<float*>(room + 0x120);
         const uintptr_t b = *reinterpret_cast<const uintptr_t*>(room + 0xC8), e = *reinterpret_cast<const uintptr_t*>(room + 0xCC);
         const bool roofless = *reinterpret_cast<const BYTE*>(room + 0x18) != 0;
-        if (!roofless && slot >= 0 && RoomAmbientPolicy::UnlitSeedDue(solve, e > b, amb, amb2, g_target[slot].v)) {
+        if (!roofless && slot >= 0 && RoomAmbientPolicy::UnlitSeedDue(solve, amb, amb2, g_target[slot].v)) {
             std::memcpy(amb, g_target[slot].v, sizeof g_target[slot].v);
             std::memcpy(amb2, g_target[slot].v, sizeof g_target[slot].v);
             state = 3; // seeded
