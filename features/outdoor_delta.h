@@ -82,6 +82,8 @@ struct KeptRef {
     uint64_t live = 0; // (live_object_tables) what its objects moved to since its solve, KeptBlockers' table then (0: where it read them)
 };
 void LiveFrame(); // (render thread) a frame's round begins (live_object_tables)
+// (any thread) an object of that kept room (not room 0) moved in its live table within ms, in a run of moves begun less than maxRun ms ago
+bool LiveMovedWithin(const void* room, unsigned long ms, unsigned long maxRun);
 void KeptRooms(uintptr_t mgr, int cls, std::vector<KeptRef>& out);
 bool BuildKeptMap(const void* room, int cls, uint32_t version, int m, RtLampGpu::KeptMapData& out, std::string& why);
 // (render thread) that kept solve's furniture records as its objects stand now (KeptRef::live; BlockerTable::Join); false: none read, or no longer kept

@@ -2584,6 +2584,22 @@ struct LiveTable {
     int header = -1;
 };
 std::unordered_map<uint64_t, LiveTable> g_live; // (render thread) by KeyOf
+// (live_object_tables) when a kept room's live table last changed, and when that run of changes began (gaps under kLiveRunGapMs join
+// a run): an object dragged in a room the GPU draws holds its solve as a dragged lamp does (DragLite::HoldGpuDrawn)
+struct LiveRun {
+    DWORD first = 0, last = 0;
+};
+constexpr DWORD kLiveRunGapMs = 750;
+std::mutex g_liveRunMx;
+std::unordered_map<const void*, LiveRun> g_liveRuns; // (under g_liveRunMx) by room
+void NoteLiveMove(const void* room) {
+    const DWORD now = GetTickCount();
+    std::lock_guard<std::mutex> lk(g_liveRunMx);
+    if (g_liveRuns.size() > 512) g_liveRuns.clear();
+    LiveRun& r = g_liveRuns[room];
+    if (!r.last || now - r.last >= kLiveRunGapMs) r.first = now;
+    r.last = now;
+}
 // ObjectLegs::Gen at most every kLiveMs (0: nothing to read); a line a second of what moved it, for the capture that decides on the carry
 uint32_t LiveGen() {
     static uint32_t s_seen = 0, s_logHook = 0;
@@ -6420,6 +6436,12 @@ void SettleDue() {
     }
 }
 void LiveFrame() { g_liveStep = ObjectLegs::Gen(); }
+bool LiveMovedWithin(const void* room, unsigned long ms, unsigned long maxRun) {
+    const DWORD now = GetTickCount();
+    std::lock_guard<std::mutex> lk(g_liveRunMx);
+    const auto it = g_liveRuns.find(room);
+    return it != g_liveRuns.end() && now - it->second.last < ms && now - it->second.first < maxRun;
+}
 void KeptRooms(uintptr_t mgr, int cls, std::vector<KeptRef>& out) {
     out.clear();
     const uint32_t gen = LiveGen(), step = g_liveStep;
@@ -6452,6 +6474,8 @@ void KeptRooms(uintptr_t mgr, int cls, std::vector<KeptRef>& out) {
             now = 0; // (no memory: its solve's table)
         }
         if (!now) l.blk.reset(), l.header = -1;
+        // (room 0's table waits for its solve: holding its solve would keep the old shadow for the whole drag)
+        if (now != was && k->id != 0) NoteLiveMove(reinterpret_cast<const void*>(k->room));
         l.version = k->version, l.gen = gen, l.step = step, l.key = now;
         for (KeptRef& r : out)
             if (r.room == reinterpret_cast<const void*>(k->room)) r.live = now;
