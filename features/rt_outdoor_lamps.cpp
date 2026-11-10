@@ -1995,7 +1995,12 @@ void Frame(IDirect3DDevice9* dev) {
             // idle: sent to its solve, which keeps its parts (a few times; never while the lot's parts overflow the budget, which
             // would drop another story's parts in turn)
             Ask& a = g_askedSolve[room];
-            if ((rn.state == 4 || rn.state == 5) && !g_budgetOut && AskDue(a, GetTickCount())) {
+            // a room too large to keep stays too large at every solve: asking again only costs the game a full room-0 solve
+            // (about 18 s on a big lot), and a lot photographed for its thumbnail waits for every solve (New Game never ended)
+            // (LastDrop is per story, not per room: only once this room was sent at least once and came back with that reason)
+            const bool tooLarge = a.count >= 1 && OutdoorDelta::LastDrop(S, cls).find("too large to keep") != std::string::npos;
+            if (tooLarge && a.count < kSolveAsks) a.count = kSolveAsks;
+            if ((rn.state == 4 || rn.state == 5) && !g_budgetOut && !tooLarge && AskDue(a, GetTickCount())) {
                 a.at = std::max<DWORD>(GetTickCount(), 1);
                 a.count++;
                 const bool sent = LevelLightShare::QueueRoomAgain(room);
@@ -2004,9 +2009,10 @@ void Frame(IDirect3DDevice9* dev) {
                                          sent ? "sent to its solve" : "could not be sent to its solve", a.count, kSolveAsks));
             } else if ((a.count >= kSolveAsks || g_budgetOut) && !a.logged) {
                 a.logged = true;
-                LOG_INFO(std::format("[RtOutdoorLamps] {} room 0 class {}: no kept solve and sends to its solve only once a minute now ({}); its maps stay the game's and lamp "
+                LOG_INFO(std::format("[RtOutdoorLamps] {} room 0 class {}: no kept solve and {} ({}); its maps stay the game's and lamp "
                                      "edits go through the game's solve until it keeps one",
-                                     who(), cls, g_budgetOut ? "the lot's kept parts overflow the memory budget" : std::format("sent {} times", kSolveAsks)));
+                                     who(), cls, tooLarge ? "not sent to its solve again" : "sends to its solve only once a minute now",
+                                     tooLarge ? "too large to keep" : g_budgetOut ? "the lot's kept parts overflow the memory budget" : std::format("sent {} times", kSolveAsks)));
             }
             // (a lot next to it: its last copies stand in only while a solve renews its kept solve; idle with none, e.g. dropped
             // by the memory budget, it gathers the posts again once its sends are spent)
