@@ -118,6 +118,30 @@ patches in order and builds x86 and x64 with meson; `package.ps1` makes the zip.
 | 0010 | Render target 0 is back buffer 0: the client made render target 0 a separate place-holder, so `GetRenderTarget(0)` and `GetBackBuffer(0, 0)` returned two objects (Apex's scene detection, which compares them, saw no scene and the window stayed black). Apex 3.0.0 also handles the old client (`framework/d3d9_bootstrap.cpp`) |
 | 0011 | Render target 0 resets the viewport: `SetRenderTarget(0)` reset the viewport and scissor rect on the server but not in the client's copy, so `GetViewport` / `GetScissorRect` returned the previous target's. Light-map smoothing saves and restores them in the middle of a frame and put the stale viewport back: the sea lost its reflection for one frame now and then. Unverified in game that it is the whole cause |
 
+### Diagnostics
+
+- Every capture folder (Report, Recording, Light capture, Lighting snapshot, session) also gets the bridge and DXVK
+  logs present in `Game\Bin`: `rtx-remix\logs\bridge32.log`, `rtx-remix\logs\bridge64.log`,
+  `NvRemixBridge_d3d9.log` (the server's DXVK) and `TS3W_d3d9.log` (DXVK in-process). A log over 8 MB keeps its last
+  8 MB. They are copied on a background thread; `About this capture.txt` lists them with their size and last write
+  time (`CopyBridgeLogs`, `features/captures.cpp`).
+- **No-scene frame trace** (`features/no_scene_trace.cpp`): armed with every recording under the bridge (and in the
+  development build). For frames whose back buffer gets fewer than 4 depth-tested draws (loading screens, the save
+  screen), up to 300 per recording, `Recording.txt` ends with a `[no-scene]` section: per frame the state at its start,
+  then each `SetRenderTarget(0)`, `SetViewport`, `StretchRect` or `ColorFill` into the back buffer, back-buffer
+  `Clear` and back-buffer draw with the viewport, scissor, FVF or vertex declaration (with its position element,
+  `POSITIONT` or `POSITION`), shaders and, for `DrawPrimitiveUP` / `DrawIndexedPrimitiveUP`, the first vertex and the
+  x / y / 4th-float range of all vertices. The values are those set through Apex's detours (`D3D9Hooks::Trace`; FVF,
+  declaration and scissor through `ExtraHooks::EnsureTraceHooks`), not the client's `Get*` answers, which can be stale
+  (patch 0011). Each Apex pass that reads the vertex input and viewport back to restore them reports through
+  `NoSceneTrace::Saved`; *STALE* marks a declaration read back although the last call was `SetFVF`, *STALE vp* a
+  viewport read back that differs from the one set last (the restore then puts old state back). Calls from another
+  thread or device are counted per frame, not traced. Reading it: STALE hits with an XYZRHW quad drawn through a
+  `POSITION` declaration point to the stale declaration; STALE vp hits to the stale viewport; clean state with no draw,
+  `Clear` or copy covering the quarter (and no untraced calls) to undefined `DISCARD` content. It changes no call.
+  State blocks, `Reset` and `UpdateSurface` are not followed. Written for the black top-right quarter seen on loading
+  screens under the bridge; cause unverified.
+
 ### Game addresses (Steam 1.67.2)
 
 | Address | What |

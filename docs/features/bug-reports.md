@@ -134,6 +134,8 @@ Root: `Documents\Electronic Arts\The Sims 3\Apex Radiance\Captures\`.
 - `Finish` copies `ApexRadiance_LOG.txt`, `ApexRadiance.toml` and `ApexRadiance_Crash.txt` when present, writes
   `About this capture.txt` (version, game build, time, what it is, how to zip and send it) and `User notes.txt` when a
   title or description exists, then shows the saved notice. A session gets the same copies when it ends.
+- `CopyBridgeLogs` adds the RTX Remix bridge and DXVK logs found in `Game\Bin` (the last 8 MB of each, on a background
+  thread) and lists them in the about file ([RTX Remix bridge](rtx-remix-bridge.md#diagnostics)).
 - Nothing is overwritten. `Prune` keeps `Captures\` within `[ui] capture_max_mb` and `capture_max_folders` on a
   background thread, at game start and after every capture (including its screenshot and texture dumps). It counts
   only direct children named `YYYY-MM-DD HH-MM-SS <kind>`, removes the oldest first, never removes the open session or a
@@ -182,7 +184,7 @@ priority are in [ui.md](../ui.md#startup-and-notices).
 
 | File | Symbol | Role |
 |---|---|---|
-| `features/captures.h/.cpp` | `Root`, `NewFolder`, `Finish`, `WriteText`, `SaveReport`, `RecentCrash` | Folders and completion |
+| `features/captures.h/.cpp` | `Root`, `NewFolder`, `Finish`, `WriteText`, `SaveReport`, `RecentCrash`, `CopyBridgeLogs` | Folders and completion |
 | | `BeginSession`, `EndSession`, `SessionActive`, `SessionItems`, `SessionFolder` | Sessions |
 | | `List`, `Open`, `OpenFolder`, `Delete`, `DeleteAll`, `Prune` | Library and automatic cleanup |
 | | `ReadDescription`, `SaveFolderDescription`, `LastSave`, `RetrySave` | Notes and receipts |

@@ -115,6 +115,7 @@
     <ClCompile Include="features\render_object_map.cpp" />
     <ClCompile Include="features\tree_light_rig.cpp" />
     <ClCompile Include="features\captures.cpp" />
+    <ClCompile Include="features\no_scene_trace.cpp" />
     <ClCompile Include="features\vulkan_driver_guard.cpp" />
     <ClCompile Include="features\address_space.cpp" />
     <ClCompile Include="features\room_solve_causes.cpp" />
@@ -269,6 +270,7 @@
     <ClInclude Include="features\render_object_map.h" />
     <ClInclude Include="features\tree_light_rig.h" />
     <ClInclude Include="features\captures.h" />
+    <ClInclude Include="features\no_scene_trace.h" />
     <ClInclude Include="features\vulkan_driver_guard.h" />
     <ClInclude Include="features\address_space.h" />
     <ClInclude Include="features\room_solve_causes.h" />

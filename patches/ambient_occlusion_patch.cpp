@@ -48,6 +48,7 @@
 #include "sim_receiver_ids.h"
 #include "sim_occlusion.h"
 #include "perf_toggles.h"
+#include "no_scene_trace.h"
 #include <unordered_map>
 #include <atomic>
 #include <d3d9.h>
@@ -774,6 +775,7 @@ struct SavedState {
         ok &= SUCCEEDED(dev->GetVertexShader(&vs));
         ok &= SUCCEEDED(dev->GetVertexDeclaration(&decl));
         ok &= SUCCEEDED(dev->GetFVF(&fvf));
+        NoSceneTrace::Saved("ambient_occlusion_patch.cpp Capture", decl, fvf);
         ok &= SUCCEEDED(dev->GetStreamSource(0, &stream0, &stream0Offset, &stream0Stride));
         for (DWORD s = 0; s < kSamplers; s++) {
             ok &= SUCCEEDED(dev->GetTexture(s, &tex[s]));

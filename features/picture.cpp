@@ -40,6 +40,7 @@
 #include "ui/widgets.h"
 #include "apex_paths.h"
 #include "apex_util.h"
+#include "no_scene_trace.h"
 #include <wincodec.h>
 #include <shellapi.h>
 #include <thread>
@@ -903,6 +904,7 @@ void CopyDepth(IDirect3DDevice9* dev) {
     dev->GetVertexShader(&vs);
     dev->GetVertexDeclaration(&decl);
     dev->GetFVF(&fvf);
+    NoSceneTrace::Saved("picture.cpp CopyDepth", decl, fvf);
     dev->GetTexture(0, &tex0);
     dev->GetStreamSource(0, &stream, &streamOffset, &streamStride);
     RECT oldScissor{};
@@ -1764,6 +1766,7 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
     dev->GetVertexShader(&oldVs);
     dev->GetVertexDeclaration(&oldDecl);
     dev->GetFVF(&oldFvf);
+    NoSceneTrace::Saved("picture.cpp colour pass", oldDecl, oldFvf);
     dev->GetStreamSource(0, &oldStream, &oldOffset, &oldStride);
     dev->GetPixelShaderConstantF(0, oldConst, kConsts);
     dev->GetViewport(&oldVp);

@@ -40,6 +40,7 @@
 #include "third_party/smaa/AreaTex.h"
 #include "third_party/smaa/SearchTex.h"
 #include "third_party/smaa/smaa_hlsl.h"
+#include "no_scene_trace.h"
 
 #pragma comment(lib, "d3dcompiler.lib")
 
@@ -637,6 +638,7 @@ bool RunDepthPass(IDirect3DDevice9* dev) {
     dev->GetVertexShader(&oldVs);
     dev->GetVertexDeclaration(&oldDecl);
     dev->GetFVF(&oldFvf);
+    NoSceneTrace::Saved("edge_smoothing_patch.cpp RunDepthPass", oldDecl, oldFvf);
     dev->GetStreamSource(0, &oldStream, &oldOffset, &oldStride);
     dev->GetTexture(0, &oldTex);
     for (int i = 0; i < kRS; i++) dev->GetRenderState(kRenderStates[i], &rs[i]);
@@ -752,6 +754,7 @@ void RunFxaa(IDirect3DDevice9* dev, bool useDepth) {
     dev->GetVertexShader(&oldVs);
     dev->GetVertexDeclaration(&oldDecl);
     dev->GetFVF(&oldFvf);
+    NoSceneTrace::Saved("edge_smoothing_patch.cpp RunFxaa", oldDecl, oldFvf);
     dev->GetStreamSource(0, &oldStream, &oldOffset, &oldStride);
     dev->GetTexture(0, &oldTex);
     for (int i = 0; i < kRS; i++) dev->GetRenderState(kRenderStates[i], &rs[i]);
@@ -862,6 +865,7 @@ void RunSmaa(IDirect3DDevice9* dev, bool useDepth, const float subsample[4]) {
     dev->GetVertexShader(&oldVs);
     dev->GetVertexDeclaration(&oldDecl);
     dev->GetFVF(&oldFvf);
+    NoSceneTrace::Saved("edge_smoothing_patch.cpp RunSmaa", oldDecl, oldFvf);
     dev->GetStreamSource(0, &oldStream, &oldOffset, &oldStride);
     for (DWORD s = 0; s < kSamplers; s++) {
         dev->GetTexture(s, &oldTex[s]);

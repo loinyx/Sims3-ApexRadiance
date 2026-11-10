@@ -48,4 +48,8 @@ bool EnsureTargetHooks(IDirect3DDevice9* device);
 void SetTargetSubstitution(SurfaceAccess access, TargetReport report);
 HRESULT RawGetRenderTarget(IDirect3DDevice9* device, DWORD index, IDirect3DSurface9** surface);
 
+// The diagnostic trace's own detours (SetScissorRect, SetVertexDeclaration, SetFVF; D3D9Hooks::Trace), installed with
+// EnsureInstalled's on the first call and kept; until a trace is set they only cost an atomic load.
+bool EnsureTraceHooks(IDirect3DDevice9* device);
+
 } // namespace ExtraHooks

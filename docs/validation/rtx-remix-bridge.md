@@ -129,6 +129,10 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
 3. Switch Apex's window mode between Window, Borderless and Fullscreen, and change the resolution. **Expected:** each
    applies, no freeze.
 4. EA app: the same with `client.targetProcess = TS3.exe`.
+5. Start a recording, start a new save or add a lot so a loading screen shows, then stop. **Expected:** the recording
+   folder holds `bridge32.log` and `bridge64.log` (and the DXVK log when present), listed in `About this capture.txt`;
+   `Recording.txt` ends with a `No-scene frame trace` section with `[no-scene]` frames and a line per Apex pass that
+   saved the vertex input.
 
 ## Confirmed in game
 
@@ -146,3 +150,6 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
 - The EA app build under the bridge on this machine.
 - Sims3SettingsSetter's uncompressed lot and Sim textures under the bridge (reported to stutter).
 - Which losable resource stays alive at a Reset.
+- The black top-right quarter on loading screens (3840 x 2160, Borderless, S3SS loaded): the no-scene frame trace and the
+  copied bridge logs (3.1.1) are built to tell a stale viewport, a stale vertex declaration and undefined `DISCARD`
+  content apart; not yet run in game.
