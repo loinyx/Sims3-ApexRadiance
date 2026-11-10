@@ -14229,6 +14229,7 @@ bool SettlingAfterWorldLoad() {
 std::atomic<DWORD> g_lotEnteredAt{0};
 std::atomic<long> g_lotEntries{0};
 constexpr DWORD kSettleAfterEntryMs = 10000;
+constexpr DWORD kSettleWhileWaitingMs = 30000; // and while the played lot's visible rooms wait for their class (SettlingAfterLoad)
 void RequeueAllRooms(const char* why) {
     const DragLite::WhyScope liteWhy(DragLite::Why::RelightAll);
     uintptr_t trackers[256];
@@ -17988,7 +17989,11 @@ unsigned DayNightSwitchSerial() { return g_dayNightSerial.load(std::memory_order
 bool SettlingAfterLoad() {
     const DWORD live = g_worldLiveAt.load(std::memory_order_relaxed), entered = g_lotEnteredAt.load(std::memory_order_relaxed);
     const DWORD now = GetTickCount();
-    return (live && now - live < kSettleAfterLoadMs) || (entered && now - entered < kSettleAfterEntryMs);
+    if ((live && now - live < kSettleAfterLoadMs) || (entered && now - entered < kSettleAfterEntryMs)) return true;
+    // the entry budget lasts while the played lot's visible rooms still show their quick pass, up to 30 s (lot entry
+    // recording 10/11: the last visible room took 49.6 s, its refinement all at the steady 1-4 ms after the 10 s window)
+    const DWORD waiting = RoomLightQueue::PlayedRoomWaitingAt();
+    return entered && now - entered < kSettleWhileWaitingMs && waiting && now - waiting < 1000;
 }
 
 // The other members of a room's atrium group (false: not in one)

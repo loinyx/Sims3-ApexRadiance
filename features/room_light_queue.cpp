@@ -142,6 +142,16 @@ bool Stranded(const BYTE* room) {
     }
 }
 
+// A room waiting for (2) or in (3) a solve at a better class (+0xF4) than the maps it shows (+0x100): still on its quick pass
+bool ShowsBelowItsSolve(const BYTE* room) {
+    __try {
+        const int state = *reinterpret_cast<const int*>(room + 0xF0);
+        return (state == 2 || state == 3) && *reinterpret_cast<const int*>(room + 0xF4) > *reinterpret_cast<const int*>(room + 0x100);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 // Quick pass (see SetQuickPass): a lamp edit's room waiting (state 2) at a class above 0 after a player's lamp switch goes to
 // class 0, the state the game's own invalidate gives a room (part 3 keeps the class instead); "no middle step" then takes
 // it straight to its class after that solve. Render thread (the scheduler).
@@ -282,9 +292,15 @@ bool OnPlayedLot(const BYTE* room) {
         return false;
     }
 }
-// An edit's room on another lot than the played one: its urgency at most this (see Prioritise)
-constexpr float kOffLotUrgency = 1000.0f;
+// An edit's room on another lot than the played one: its urgency at most this (see Prioritise). 10, not 1000: class 0 has
+// 100x the game's priority of class 2, so a neighbour's class-0 edit room at x1000 outranked the played lot's waiting
+// class-2 rooms on the camera's story (x4000) and below it (x2000); at x10 it stays under both (lot entry recording
+// 10/11: a neighbour's room 0 took 2.65 s ahead of 16 rooms still on their quick pass)
+constexpr float kOffLotUrgency = 10.0f;
 std::atomic<long> g_prioOffLotCapped{0};
+// When a room of the played lot on or below the camera's story was last seen waiting for a better class than it shows
+// (Prioritise; LevelLightShare::SettlingAfterLoad keeps the entry budget while it is recent)
+std::atomic<DWORD> g_playedWaitingAt{0};
 
 // The priority Apex gives a room the game scored p (PriorityHook)
 float Prioritise(BYTE* room, float p) {
@@ -307,7 +323,9 @@ float Prioritise(BYTE* room, float p) {
         g_prioOffLotCapped.fetch_add(1, std::memory_order_relaxed);
         return p * std::min(urgency, kOffLotUrgency);
     }
-    return p * Factor(room) * urgency;
+    const float factor = Factor(room);
+    if (factor >= 2000.0f && ShowsBelowItsSolve(room)) g_playedWaitingAt.store(GetTickCount(), std::memory_order_relaxed);
+    return p * factor * urgency;
 }
 
 // 07/10, players' Runtime Error: Apex's parts around the game's priority call are caught on their own (HookGuard); on a C++
@@ -681,6 +699,8 @@ void RestoreAll() {
 } // namespace
 
 namespace RoomLightQueue {
+
+unsigned long PlayedRoomWaitingAt() { return g_playedWaitingAt.load(std::memory_order_relaxed); }
 
 bool PlayedLot(uintptr_t mgr, bool* known) {
     *known = kSomGet && kPrioLot && g_prioLotOk.load(std::memory_order_relaxed);
