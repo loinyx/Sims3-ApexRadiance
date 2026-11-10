@@ -35,7 +35,7 @@ public sealed partial class MainWindow : Window
 
     static readonly Dictionary<string, string> Repo = new()
     {
-        [Components.Apex] = Releases.Apex, [Components.Bridge] = Releases.Apex, [Components.Loader] = Releases.AsiLoader,
+        [Components.Apex] = Releases.Apex, [Components.Bridge] = Releases.Apex, [Components.Loader] = Releases.AsiLoader, [Components.Dxvk] = Releases.Dxvk, [Components.MonoPatcher] = Releases.MonoPatcher,
         [Components.S3ss] = Releases.S3ss, [Components.Modernization] = Releases.Modernization,
     };
 
@@ -45,8 +45,9 @@ public sealed partial class MainWindow : Window
         _screens = new UIElement[] { ScreenWelcome, ScreenGame, ScreenComponents, ScreenInstall, ScreenDone, ScreenManage, ScreenAbout };
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(DragArea);
-        var scale = GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0;
-        AppWindow.Resize(new SizeInt32((int)(980 * scale), (int)(680 * scale)));
+        void Size(double scale) => AppWindow.Resize(new SizeInt32((int)(980 * scale), (int)(680 * scale)));
+        Size(GetDpiForWindow(WinRT.Interop.WindowNative.GetWindowHandle(this)) / 96.0);
+        ((FrameworkElement)Content).Loaded += (_, _) => Size(Content.XamlRoot.RasterizationScale); // the monitor's real scale
         if (AppWindow.Presenter is OverlappedPresenter p) { p.IsResizable = false; p.IsMaximizable = false; }
         var ico = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "apex.ico");
         if (File.Exists(ico)) AppWindow.SetIcon(ico);
@@ -97,6 +98,32 @@ public sealed partial class MainWindow : Window
     };
 
     string? Latest(string c) => _latest.GetValueOrDefault(Repo[c])?.Version;
+
+    // The installed version: Setup's own record, else the latest release's when the file is identical to it (GitHub's SHA-256
+    // digest), else "" (installed, version unknown), or null when absent.
+    string? Known(string c)
+    {
+        if (_state is not { } s || _game is not { } g) return null;
+        var (present, file, asset) = c switch
+        {
+            Components.S3ss => (s.S3ss, System.IO.Path.Combine(g.Bin, "Sims3SettingsSetter.asi"), "Sims3SettingsSetter.asi"),
+            Components.Modernization => (s.Modernization, System.IO.Path.Combine(Scan.Packages(Scan.DocumentsFor(g)), "ts3fixes.package"), "ts3fixes.package"),
+            Components.Bridge => (s.Layer == Layer.Bridge, "", ""),
+            Components.Dxvk => (s.Layer == Layer.Dxvk, "", ""),
+            Components.MonoPatcher => (s.MonoPatcher, "", ""),
+            _ => (s.ApexVersion is not null, "", ""),
+        };
+        if (!present) return null;
+        if (c == Components.Apex) return s.ApexVersion == "?" ? "" : s.ApexVersion;
+        if (s.Installed(c) is { } v) return v;
+        var rel = _latest.GetValueOrDefault(Repo[c]);
+        var digest = rel?.Assets.FirstOrDefault(a => a.Name == asset)?.Sha256;
+        return digest is not null && File.Exists(file) && Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(file))).Equals(digest, StringComparison.OrdinalIgnoreCase)
+            ? rel!.Version : "";
+    }
+
+    // installed and older than the latest release (or of unknown version: it may be older)
+    bool NeedsUpdate(string c) => Known(c) is { } v && (v.Length == 0 || Newer(Latest(c), v));
 
     static bool Newer(string? latest, string? installed)
     {
@@ -154,7 +181,7 @@ public sealed partial class MainWindow : Window
         {
             case Welcome: Show(GameStep); break;
             case GameStep: if (CanLeaveGame()) Show(ComponentsStep); break;
-            case ComponentsStep: await InstallAsync(Selected()); break;
+            case ComponentsStep: { var (add, del) = Plan(); await InstallAsync(add, del); break; }
             case DoneStep: Close(); break;
         }
     }
@@ -163,18 +190,28 @@ public sealed partial class MainWindow : Window
     {
         BackButton.Visibility = _step is GameStep or ComponentsStep ? Visibility.Visible : Visibility.Collapsed;
         NextButton.Visibility = _step is Welcome or GameStep or ComponentsStep or DoneStep ? Visibility.Visible : Visibility.Collapsed;
-        NextText.Text = _step switch { Welcome => T("Get started"), ComponentsStep => T("Install"), DoneStep => T("Finish"), _ => T("Next") };
+        var (wa, wd) = _step == ComponentsStep ? Plan() : (new List<string>(), new List<string>());
+        var work = wa.Concat(wd).ToList();
+        var fixes = _step == ComponentsStep && _game is not null && _state is not null && Compat.Check(_game, _state).Any(x => x.CanFix);
+        NextText.Text = _step switch
+        {
+            Welcome => T("Get started"),
+            ComponentsStep => work.Count == 0 && fixes ? T("Fix settings") : _state?.ApexVersion is null ? T("Install") : T("Apply"),
+            DoneStep => T("Finish"),
+            _ => T("Next"),
+        };
         NextButton.IsEnabled = _step switch
         {
             GameStep => CanLeaveGame(),
-            ComponentsStep => !_offline && !_running && _game is not null,
+            ComponentsStep => !_running && _game is not null && (work.Count > 0 ? !_offline : fixes),
             _ => true,
         };
         FooterNote.Text = _step switch
         {
             GameStep when _running => T("Close The Sims 3 to continue."),
-            ComponentsStep when _offline => T("Setup needs the internet to download the files."),
-            ComponentsStep => T("Nothing changes until you click Install."),
+            ComponentsStep when work.Count == 0 && !fixes => T("Everything is installed and up to date."),
+            ComponentsStep when _offline && work.Count > 0 => T("Setup needs the internet to download the files."),
+            ComponentsStep => T("Setup changes only what differs from your game now: {0}.", string.Join(", ", wa.Select(Name).Concat(wd.Select(c => T("remove {0}", Name(c)))))),
             _ => "",
         };
     }
@@ -199,9 +236,28 @@ public sealed partial class MainWindow : Window
         var inst = _game is null ? null : _state?.ApexVersion;
         if (_offline)
             SetInfo(WelcomeInfo, InfoBarSeverity.Error, T("Setup can't reach GitHub"), T("Check your internet connection, then try again."), T("Try again"), async () => await LoadReleasesAsync());
-        else if (Newer(latest, inst))
-            SetInfo(WelcomeInfo, InfoBarSeverity.Informational, T("Update available"), T("Apex Radiance {0} is installed; {1} is out.", inst!, latest!));
+        else if (Updates() is { Count: > 0 } ups && _game is { } g)
+        {
+            // checked at every start: the player learns about a new release here, without visiting GitHub
+            var lines = ups.Select(c => T("{0} {1} → {2}", Name(c), Known(c) is { Length: > 0 } v ? v : "?", Latest(c)!));
+            SetInfo(WelcomeInfo, InfoBarSeverity.Informational, T("Updates available"),
+                T("{0} in The Sims 3 · {1}.", string.Join(", ", lines), g.Label), T("Update now"),
+                async () => { if (!_running) await InstallAsync(ups); });
+        }
         else WelcomeInfo.IsOpen = false;
+    }
+
+    // installed components with a newer release (only those: nothing new is added from the welcome page)
+    List<string> Updates()
+    {
+        var l = new List<string>();
+        if (_state is not { } s || _game is null) return l;
+        if (s.ApexVersion is { } a && (a == "?" || Newer(Latest(Components.Apex), a))) l.Add(Components.Apex);
+        if (s.Layer == Layer.Bridge && s.Installed(Components.Bridge) is { } b && Newer(Latest(Components.Bridge), b)) l.Add(Components.Bridge);
+        if (s.Layer == Layer.Dxvk && s.Installed(Components.Dxvk) is { } d && Newer(Latest(Components.Dxvk), d)) l.Add(Components.Dxvk);
+        foreach (var c in new[] { Components.S3ss, Components.Modernization, Components.MonoPatcher })
+            if (Known(c) is { Length: > 0 } v && Newer(Latest(c), v)) l.Add(c);
+        return l;
     }
 
     static void SetInfo(InfoBar bar, InfoBarSeverity sev, string title, string msg, string? action = null, Action? onAction = null)
@@ -246,20 +302,50 @@ public sealed partial class MainWindow : Window
         LayerChip.Text = T("Graphics: {0}", LayerName(s.Layer));
 
         InstalledList.Children.Clear();
-        AddInstalled("Apex Radiance", s.ApexVersion == "?" ? "" : s.ApexVersion, Components.Apex);
-        AddInstalled("RTX Remix bridge", s.Layer == Layer.Bridge ? s.Installed(Components.Bridge) ?? "" : null, Components.Bridge);
-        AddInstalled("Sims3SettingsSetter", s.S3ss ? s.Installed(Components.S3ss) ?? "" : null, Components.S3ss);
-        AddInstalled("Sims 3 Modernization", s.Modernization ? s.Installed(Components.Modernization) ?? "" : null, Components.Modernization);
+        AddInstalled("Apex Radiance", Known(Components.Apex), Components.Apex);
+        AddInstalled("RTX Remix bridge", Known(Components.Bridge), Components.Bridge);
+        AddInstalled("Sims3SettingsSetter", Known(Components.S3ss), Components.S3ss);
+        AddInstalled("Sims 3 Modernization", Known(Components.Modernization), Components.Modernization);
+        AddInstalled("MonoPatcher", Known(Components.MonoPatcher), Components.MonoPatcher);
+        // the other community mods Setup recognises (installed by hand; links to their official pages)
+        foreach (var k in KnownMods.Found(_game!.Bin, Scan.DocumentsFor(_game)))
+        {
+            var row = new Grid();
+            row.ColumnDefinitions.Add(new ColumnDefinition());
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.Children.Add(new TextBlock { Text = k.Name, FontSize = 13 });
+            UIElement right = k.Url is null
+                ? new TextBlock { Text = T("Installed"), FontSize = 12, Foreground = (Brush)Application.Current.Resources["ApexSuccessBrush"] }
+                : new HyperlinkButton { Content = T("Installed · official page"), NavigateUri = new Uri(k.Url), Padding = new Thickness(0), FontSize = 12 };
+            Grid.SetColumn((FrameworkElement)right, 1);
+            row.Children.Add(right);
+            InstalledList.Children.Add(row);
+        }
 
         ProblemList.Children.Clear();
-        foreach (var p in s.Problems)
+        var found = Compat.Check(_game!, s);
+        foreach (var x in found)
         {
-            var parts = p.Split('|');
-            ProblemList.Children.Add(new InfoBar { IsOpen = true, IsClosable = false, Severity = InfoBarSeverity.Warning, Message = T(parts[0], parts.Skip(1).ToArray()) });
+            var bar = new InfoBar
+            {
+                IsOpen = true, IsClosable = false, Message = T(x.Text, x.Args),
+                Severity = x.Severity switch { Severity.Error => InfoBarSeverity.Error, Severity.Warning => InfoBarSeverity.Warning, _ => InfoBarSeverity.Informational },
+                Title = x.CanFix ? T("Setup fixes this") : "",
+            };
+            if (x.Link is { } link) bar.ActionButton = new HyperlinkButton { Content = T("Read more"), NavigateUri = new Uri(link) };
+            ProblemList.Children.Add(bar);
         }
-        if (s.Ts3NativeWrongBuild)
-            ProblemList.Children.Add(new InfoBar { IsOpen = true, IsClosable = false, Severity = InfoBarSeverity.Warning,
-                Message = T("ts3native.log says the installed Sims 3 Modernization is the build for the other edition. Setup installs the right one when you turn it on.") });
+        if (found.Any(x => x.CanFix))
+        {
+            var fix = new Button { Content = T("Fix all now"), Style = (Style)Application.Current.Resources["AccentButtonStyle"], IsEnabled = !_running };
+            fix.Click += async (_, _) =>
+            {
+                await Guarded(() => { if (Games.IsRunning()) throw new InvalidOperationException("Close The Sims 3 first."); foreach (var x in Compat.Check(_game!, Scan.Run(_game!)).Where(x => x.CanFix)) x.Fix!(); }, T("Fixed."));
+            };
+            ProblemList.Children.Add(fix);
+        }
+        else if (found.Count == 0)
+            ProblemList.Children.Add(new TextBlock { Text = T("No incompatible settings found."), FontSize = 12, Foreground = (Brush)Application.Current.Resources["ApexSuccessBrush"] });
     }
 
     void Chip(FontIcon icon, TextBlock text, bool ok, string label)
@@ -296,16 +382,58 @@ public sealed partial class MainWindow : Window
 
     // ---------- components ----------
 
+    // the renderer choice: DXVK (Apex recommends it), the RTX Remix bridge, the game's own Direct3D 9, or another d3d9.dll kept as it is
+    const string RDxvk = "dxvk", RBridge = "bridge", RNative = "native", RKeep = "keep";
+    string _renderer = RDxvk;
+
+    static string RendererOf(State s) => s.Layer switch { Layer.Dxvk => RDxvk, Layer.Bridge => RBridge, Layer.Native => RNative, _ => RKeep };
+
     void SetDefaults()
     {
-        if (_state is not { } s || _defaultsFor == _game) return;
+        // after the release check: the defaults compare with the latest versions
+        if (_state is not { } s || _defaultsFor == _game || (_latest.Count == 0 && !_offline)) return;
         _defaultsFor = _game;
-        BridgeToggle.IsOn = s.Layer == Layer.Bridge;
-        S3ssToggle.IsOn = s.S3ss && Newer(Latest(Components.S3ss), s.Installed(Components.S3ss));
-        ModToggle.IsOn = s.Modernization && (s.Ts3NativeWrongBuild || Newer(Latest(Components.Modernization), s.Installed(Components.Modernization)));
+        // what is installed stays on; what Apex recommends (DXVK, Sims3SettingsSetter) is on when missing
+        _renderer = s.Layer == Layer.Native ? RDxvk : RendererOf(s);
+        S3ssToggle.IsOn = true;
+        ModToggle.IsOn = s.Modernization;
+        MonoToggle.IsOn = s.MonoPatcher;
     }
 
     void OnToggle(object sender, RoutedEventArgs e) => RefreshComponents();
+
+    void OnRenderer(object sender, SelectionChangedEventArgs e)
+    {
+        if (_fillingRenderer || RendererChoice.SelectedIndex < 0) return;
+        _renderer = _rendererTags[RendererChoice.SelectedIndex];
+        RefreshComponents();
+    }
+    bool _fillingRenderer;
+
+    readonly List<string> _rendererTags = new();
+    void FillRenderer(State s)
+    {
+        var tags = new List<string> { RDxvk, RBridge, RNative };
+        if (s.Layer == Layer.Other) tags.Add(RKeep);
+        var titles = tags.Select(t => t switch
+        {
+            RDxvk => T("DXVK (recommended)"),
+            RBridge => T("RTX Remix bridge (64-bit, about 600 MB more free memory)"),
+            RNative => T("The game's own Direct3D 9"),
+            _ => T("Keep my d3d9.dll"),
+        }).ToList();
+        _fillingRenderer = true;
+        if (!RendererChoice.Items.Cast<object>().Select(o => o as string).SequenceEqual(titles))
+        {
+            RendererChoice.Items.Clear();
+            foreach (var t in titles) RendererChoice.Items.Add(t);
+            _rendererTags.Clear();
+            _rendererTags.AddRange(tags);
+        }
+        var want = _rendererTags.IndexOf(_renderer);
+        if (RendererChoice.SelectedIndex != want) RendererChoice.SelectedIndex = want;
+        _fillingRenderer = false;
+    }
 
     void RefreshComponents()
     {
@@ -315,74 +443,113 @@ public sealed partial class MainWindow : Window
         ApexDesc.Text = s.ApexVersion is null ? T("Installs {0} into Game\\Bin.", latest)
             : s.ApexVersion == "?" ? T("Replaces the installed copy with {0}. Your settings stay.", latest)
             : Newer(latest, s.ApexVersion) ? T("Updates {0} to {1}. Your settings stay.", s.ApexVersion, latest)
-            : T("{0} is installed and up to date. Setup copies it again.", s.ApexVersion);
+            : T("{0} is installed and up to date: nothing to change.", s.ApexVersion);
 
-        BridgeName.Text = T("RTX Remix bridge · optional");
-        BridgeDetail.Visibility = BridgeToggle.IsOn ? Visibility.Visible : Visibility.Collapsed;
-        BridgeDetail.Text = (s.Layer switch
+        FillRenderer(s);
+        var cur = RendererOf(s);
+        var changed = _renderer != cur;
+        BridgeName.Text = T("Renderer · now {0}", LayerName(s.Layer));
+        BridgeDetail.Text = (_renderer switch
         {
-            Layer.Bridge => T("Installed: Setup updates it."),
-            Layer.Native => T("Adds d3d9.dll to Game\\Bin; Remove takes it out again."),
-            _ => T("Replaces your d3d9.dll ({0}); Setup keeps it and puts it back when you remove the bridge.", LayerName(s.Layer)),
-        }) + " " + T("Set for {0}. Needs a Vulkan graphics card, like DXVK.", g.Exe);
+            RDxvk => T("Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it. From DXVK's GitHub release."),
+            RBridge => T("DXVK in its own 64-bit process: the game keeps about 600 MB more free memory. Set for {0}; needs a Vulkan graphics card.", g.Exe),
+            RNative => T("Windows' Direct3D 9. Apex Radiance works with it, but it is made and tested with DXVK."),
+            _ => T("Your d3d9.dll stays as it is."),
+        }) + (changed && s.Layer != Layer.Native ? " " + T("Setup keeps your current d3d9.dll and puts it back if you remove the new one.") : "");
 
-        if (BridgeToggle.IsOn && s.Layer is Layer.Native or Layer.Other)
-            SetInfo(GraphicsInfo, InfoBarSeverity.Warning, T("Graphics options will reset once"),
-                T("The game resets its graphics options when it sees a different graphics card. The bridge reports a GeForce GTX 580, like DXVK; your game now uses {0}. Setup keeps a copy of Options.ini and puts it back if you remove the bridge.", LayerName(s.Layer)));
-        else if (BridgeToggle.IsOn && s.Layer == Layer.Dxvk)
+        // the game resets its graphics options when the card it sees changes: DXVK's TS3W profile and the bridge report a
+        // GeForce GTX 580; the game's own D3D9 the real card (DXVK on TS3.exe: unverified, so treated as a change)
+        string Card(string r) => r switch { RBridge => "580", RDxvk when g.Exe == "TS3W.exe" => "580", RNative => "real", _ => "?" };
+        if (changed && (Card(_renderer) != Card(cur) || Card(cur) == "?"))
+            SetInfo(GraphicsInfo, InfoBarSeverity.Warning, T("Graphics options may reset once"),
+                T("The game resets its graphics options when the graphics card it sees changes, and {0} reports a different one than {1}. Setup keeps a copy of Options.ini and puts it back if you go back.", RendererName(_renderer), LayerName(s.Layer)));
+        else if (changed)
             SetInfo(GraphicsInfo, InfoBarSeverity.Informational, T("Your graphics options stay"),
                 T("DXVK and the bridge both report a GeForce GTX 580, so the game keeps its settings."));
         else GraphicsInfo.IsOpen = false;
 
-        S3ssPill.Text = Pill(s.S3ss, s.Installed(Components.S3ss), Latest(Components.S3ss), false);
-        ModPill.Text = Pill(s.Modernization, s.Installed(Components.Modernization), Latest(Components.Modernization), s.Ts3NativeWrongBuild);
+        S3ssPill.Text = Pill(Known(Components.S3ss), Latest(Components.S3ss), false);
+        ModPill.Text = Pill(Known(Components.Modernization), Latest(Components.Modernization), s.Ts3NativeWrongBuild);
+        MonoPill.Text = Pill(Known(Components.MonoPatcher), Latest(Components.MonoPatcher), false);
         ModToggle.IsEnabled = g.ModernizationSupported;
         if (!g.ModernizationSupported) ModToggle.IsOn = false;
         ModDesc.Text = g.ModernizationSupported
             ? T("Stutter, route and crash fixes by rodneypantonial: ts3native in Game\\Bin and ts3fixes.package in Mods\\Packages, from its GitHub release.")
             : T("Not available for this game version: it supports Steam 1.67.2 and EA app 1.69.47.");
 
-        bool need = Engine.NeedsLoader(s, BridgeToggle.IsOn);
+        bool need = Engine.NeedsLoader(s, changed && _renderer is RDxvk or RBridge);
         LoaderPlanIcon.Glyph = need ? "" : "";
         LoaderPlanIcon.Foreground = (Brush)Application.Current.Resources[need ? "ApexAccentBrush" : "ApexSuccessBrush"];
         LoaderPlan.Text = !need ? T("ASI loader found: {0}.", s.Loader!)
-            : s.LoaderIsD3d9 ? T("Your ASI loader is d3d9.dll, which the bridge replaces: Setup adds Ultimate ASI Loader as wininet.dll.")
+            : s.LoaderIsD3d9 ? T("Your ASI loader is d3d9.dll, which the new renderer replaces: Setup adds Ultimate ASI Loader as wininet.dll.")
             : T("No ASI loader found: Setup adds Ultimate ASI Loader as wininet.dll, from its GitHub release.");
         UpdateFooter();
     }
 
-    string Pill(bool present, string? version, string? latest, bool wrong) =>
-        wrong ? T("Wrong build") : !present ? T("Not installed") : version is null ? T("Installed")
+    string RendererName(string r) => r switch
+    {
+        RDxvk => "DXVK", RBridge => "RTX Remix bridge", RNative => T("the game's own Direct3D 9"), _ => T("another d3d9.dll"),
+    };
+
+    string Pill(string? version, string? latest, bool wrong) =>
+        wrong ? T("Wrong build") : version is null ? T("Not installed") : version.Length == 0 ? T("Installed")
         : Newer(latest, version) ? T("Update {0}", latest!) : T("Up to date");
 
-    List<string> Selected()
+    // What Apply does: the components to install or update, and the ones to remove. Only what differs from the game as it is.
+    (List<string> Install, List<string> Remove) Plan()
     {
-        var l = new List<string> { Components.Apex };
-        if (BridgeToggle.IsOn) l.Add(Components.Bridge);
-        if (S3ssToggle.IsOn) l.Add(Components.S3ss);
-        if (ModToggle.IsOn && ModToggle.IsEnabled) l.Add(Components.Modernization);
-        if (_state is { } s && Engine.NeedsLoader(s, BridgeToggle.IsOn)) l.Add(Components.Loader);
-        return l;
+        var add = new List<string>();
+        var del = new List<string>();
+        if (_state is not { } s || _game is not { } g) return (add, del);
+        if (s.ApexVersion is null || s.ApexVersion == "?" || Newer(Latest(Components.Apex), s.ApexVersion)) add.Add(Components.Apex);
+
+        var cur = RendererOf(s);
+        if (_renderer == cur)
+        {
+            if (cur == RBridge && NeedsUpdate(Components.Bridge)) add.Add(Components.Bridge);
+            if (cur == RDxvk && s.Installed(Components.Dxvk) is { } v && Newer(Latest(Components.Dxvk), v)) add.Add(Components.Dxvk);
+        }
+        else
+        {
+            if (cur == RBridge) del.Add(Components.Bridge);
+            if (cur == RDxvk) del.Add(Components.Dxvk);
+            if (_renderer == RBridge) add.Add(Components.Bridge);
+            if (_renderer == RDxvk) add.Add(Components.Dxvk);
+        }
+
+        void Optional(string c, bool on, bool present, bool update)
+        {
+            if (on && (!present || update)) add.Add(c);
+            if (!on && present) del.Add(c);
+        }
+        Optional(Components.S3ss, S3ssToggle.IsOn, s.S3ss, NeedsUpdate(Components.S3ss));
+        Optional(Components.MonoPatcher, MonoToggle.IsOn, s.MonoPatcher, NeedsUpdate(Components.MonoPatcher));
+        Optional(Components.Modernization, ModToggle.IsOn && g.ModernizationSupported, s.Modernization, s.Ts3NativeWrongBuild || NeedsUpdate(Components.Modernization));
+        if (Engine.NeedsLoader(s, _renderer != cur && _renderer is RDxvk or RBridge)) add.Add(Components.Loader);
+        return (add, del);
     }
 
     static string Name(string c) => c switch
     {
         Components.Apex => "Apex Radiance", Components.Bridge => "RTX Remix bridge", Components.Loader => "Ultimate ASI Loader",
-        Components.S3ss => "Sims3SettingsSetter", _ => "Sims 3 Modernization",
+        Components.Dxvk => "DXVK", Components.S3ss => "Sims3SettingsSetter", Components.MonoPatcher => "MonoPatcher", _ => "Sims 3 Modernization",
     };
 
     // ---------- install ----------
 
-    async Task InstallAsync(List<string> comps)
+    async Task InstallAsync(List<string> comps, List<string>? remove = null)
     {
         if (_game is not { } g || _busy) return;
         _busy = true;
+        remove ??= new List<string>();
+        var dels = Components.All.Where(remove.Contains).ToList();
         var order = Components.All.Reverse().Where(comps.Contains).ToList(); // the engine's order
-        InstallTitle.Text = T("Installing");
+        InstallTitle.Text = T("Applying changes");
         Show(InstallStep);
         TaskList.Children.Clear();
         InstallBar.Value = 0;
-        var rows = order.Select(c => AddTask(Name(c))).ToList();
+        var rows = dels.Select(c => AddTask(T("Remove {0}", Name(c)))).Concat(order.Select(c => AddTask(Name(c)))).ToList();
+        rows.Add(AddTask(T("Fix incompatible settings")));
         void Mark(int active)
         {
             for (int i = 0; i < rows.Count; i++)
@@ -392,11 +559,15 @@ public sealed partial class MainWindow : Window
         var progress = new Progress<Progress>(p =>
         {
             InstallBar.Value = p.Fraction;
-            Mark(p.Arg is null ? (p.Fraction >= 1 ? rows.Count : 0) : order.IndexOf(p.Arg));
+            Mark(p.Arg is null ? (p.Fraction >= 1 ? rows.Count : p.Fraction > 0.9 ? rows.Count - 1 : dels.Count) : dels.Count + order.IndexOf(p.Arg));
         });
         try
         {
-            await Task.Run(() => Engine.InstallAsync(g, order, new GitHubSource(), progress));
+            await Task.Run(async () =>
+            {
+                foreach (var c in dels) Engine.Remove(g, c);
+                await Engine.InstallAsync(g, order, new GitHubSource(), progress);
+            });
             _lastInstall = order;
             _busy = false;
             Show(DoneStep);
@@ -467,6 +638,11 @@ public sealed partial class MainWindow : Window
                 : T("Setup has no copy of your previous d3d9.dll: the game goes back to its own Direct3D 9 and resets its graphics options once.");
             ManageRow(T("RTX Remix bridge"), desc, T("Remove"), () => RemoveAsync(Components.Bridge));
         }
+        if (s.Layer == Layer.Dxvk)
+            ManageRow("DXVK", m.Files.Any(f => f.Component == Components.Dxvk && f.Backup is not null)
+                ? T("Puts your previous d3d9.dll back.")
+                : T("The game goes back to its own Direct3D 9 and may reset its graphics options once."), T("Remove"), () => RemoveAsync(Components.Dxvk));
+        if (s.MonoPatcher) ManageRow("MonoPatcher", T("Removes MonoPatcher.asi and its package."), T("Remove"), () => RemoveAsync(Components.MonoPatcher));
         if (s.S3ss) ManageRow("Sims3SettingsSetter", T("Removes Sims3SettingsSetter.asi."), T("Remove"), () => RemoveAsync(Components.S3ss));
         if (s.Modernization) ManageRow("Sims 3 Modernization", T("Removes ts3native and ts3fixes.package."), T("Remove"), () => RemoveAsync(Components.Modernization));
         if (m.Versions.ContainsKey(Components.Loader)) ManageRow("Ultimate ASI Loader", T("Setup added it as wininet.dll. Without a loader no .asi mod loads."), T("Remove"), () => RemoveAsync(Components.Loader));
@@ -509,9 +685,11 @@ public sealed partial class MainWindow : Window
         if (_state is not { } s) return Task.CompletedTask;
         var l = new List<string> { Components.Apex };
         if (s.Layer == Layer.Bridge) l.Add(Components.Bridge);
+        if (s.Layer == Layer.Dxvk && s.Installed(Components.Dxvk) is not null) l.Add(Components.Dxvk);
         if (s.S3ss) l.Add(Components.S3ss);
+        if (s.MonoPatcher) l.Add(Components.MonoPatcher);
         if (s.Modernization && _game!.ModernizationSupported) l.Add(Components.Modernization);
-        if (Engine.NeedsLoader(s, s.Layer == Layer.Bridge)) l.Add(Components.Loader);
+        if (Engine.NeedsLoader(s, false)) l.Add(Components.Loader);
         return InstallAsync(l);
     }
 
@@ -539,6 +717,7 @@ public sealed partial class MainWindow : Window
         ("Ultimate ASI Loader", "MIT", "Ultimate-ASI-Loader-LICENSE.txt", "https://github.com/ThirteenAG/Ultimate-ASI-Loader"),
         ("Sims3SettingsSetter", "", null, "https://github.com/sims3fiend/Sims3SettingsSetter"),
         ("Sims 3 Modernization", "MIT", null, "https://github.com/rodneypantonial/sims3-modernization"),
+        ("MonoPatcher", "", null, "https://github.com/LazyDuchess/MonoPatcher"),
     };
 
     void RefreshAbout()

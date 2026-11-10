@@ -10,6 +10,7 @@ Directory.CreateDirectory(docs);
 File.WriteAllText(Path.Combine(bin, "TS3.exe"), "exe");
 var g = new Game(Path.Combine(root, "The Sims 3"), bin, "TS3.exe", Edition.EA, "1.69.47");
 var src = new FakeSource(payload);
+Games.IsRunning = () => false; // the fake game never runs
 int failures = 0;
 void Check(bool ok, string what) { Console.WriteLine((ok ? "ok   " : "FAIL ") + what); if (!ok) failures++; }
 string B(string rel) => Path.Combine(bin, rel);
@@ -51,7 +52,12 @@ try
     File.WriteAllText(B("ApexRadiance.asi"), "apex 3.0.0");
     var m0 = Manifest.Load(bin); m0.Files.RemoveAll(f => f.Component == Components.Apex); m0.Save(); // as if copied by hand
     File.WriteAllText(B("S3SSApex.asi"), "old");
-    Check(Scan.Run(g, docs).Problems.Count == 1, "leftover combined build reported");
+    Directory.CreateDirectory(Path.Combine(docs, "Mods", "Packages"));
+    File.WriteAllText(Path.Combine(docs, "Mods", "Packages", "simler90GameplayCoreMod-UPDATE242-Steam.package"), "pkg");
+    var found = Compat.Check(g, Scan.Run(g, docs), docs);
+    Check(found.Any(x => x.Args.Contains("S3SSApex.asi") && x.CanFix), "leftover combined build reported with a fix");
+    Check(found.Any(x => x.Text.Contains("Resource.cfg") && x.CanFix), "missing Resource.cfg reported with a fix");
+    Check(found.Any(x => x.Text.Contains("other edition of the game")), "Steam build of a script mod on the EA app reported");
     await Engine.InstallAsync(g, new[] { Components.Apex, Components.S3ss, Components.Modernization }, src, null, docs);
     Check(Read(B("ApexRadiance.asi")) == "apex 3.1.1" && !File.Exists(Path.Combine(Manifest.DirOf(bin), "ApexRadiance.asi.bak")), "update replaces Apex without a backup");
     Check(!File.Exists(B("S3SSApex.asi")), "leftover combined build moved away");
@@ -63,13 +69,43 @@ try
     File.WriteAllText(B("ts3native.log"), "SKIP all: host is not TS3W.exe at 0x400000");
     Check(Scan.Run(g, docs).Ts3NativeWrongBuild, "wrong ts3native build detected");
 
-    // 6. uninstall everything
+    // 6. switch the renderer: bridge -> DXVK (as the UI's Apply does: remove, then install), then DXVK -> the game's own D3D9
+    Engine.Remove(g, Components.Bridge, docs); // nothing installed by Setup: a no-op
+    File.Delete(B("d3d9.dll"));
+    File.WriteAllText(Path.Combine(docs, "Options.ini"), "gpu=real");
+    await Engine.InstallAsync(g, new[] { Components.Bridge }, src, null, docs);
+    Engine.Remove(g, Components.Bridge, docs);
+    await Engine.InstallAsync(g, new[] { Components.Dxvk }, src, null, docs);
+    Check(Scan.Run(g, docs).Layer == Layer.Dxvk && Scan.Run(g, docs).Installed(Components.Dxvk) == "3.1.1", "bridge replaced by DXVK");
+    File.WriteAllText(Path.Combine(docs, "Options.ini"), "gpu=gtx580 defaults");
+    Engine.Remove(g, Components.Dxvk, docs);
+    Check(!File.Exists(B("d3d9.dll")) && Read(Path.Combine(docs, "Options.ini")) == "gpu=real", "DXVK removed, Options.ini copy restored");
+    File.WriteAllText(B("d3d9.dll"), "... DXVK v2.7 ..."); // back to the user's own DXVK for the last step
+
+    // 7. compatibility fixes keep every other byte
+    var ini = "[Patches]\r\nShortWaitSpin = 2 ; note\r\nThreadStackDiet=1\r\n[Tuning]\r\nShortWaitSpinUs = 50\r\n";
+    Check(Compat.Set(ini, "Patches", new[] { "ShortWaitSpin", "ThreadStackDiet" }, v => v != "0", "0")
+          == "[Patches]\r\nShortWaitSpin = 0 ; note\r\nThreadStackDiet=0\r\n[Tuning]\r\nShortWaitSpinUs = 50\r\n", "Sims3Performance.ini rewrite keeps comments and [Tuning]");
+    var toml = "[patches.UncompressedLotTexturesPatch]\nenabled = true\nonlyForLOD0 = true\n[patches.Other]\nenabled = true\n";
+    Check(Compat.Set(toml, "patches.UncompressedLotTexturesPatch", new[] { "enabled" }, v => v == "true", "false")
+          == "[patches.UncompressedLotTexturesPatch]\nenabled = false\nonlyForLOD0 = true\n[patches.Other]\nenabled = true\n", "S3SS.toml rewrite touches only its section");
+
+    // 8. MonoPatcher in, then out; Smooth Patch's ASI next to S3SS is moved away
+    await Engine.InstallAsync(g, new[] { Components.MonoPatcher }, src, null, docs);
+    Check(Scan.Run(g, docs).MonoPatcher && File.Exists(Path.Combine(Scan.Packages(docs), "MonoPatcher", "ld_MonoPatcher.package")), "MonoPatcher installed");
+    File.WriteAllText(B("TS3Patch.asi"), "smooth");
+    await Engine.InstallAsync(g, Array.Empty<string>(), src, null, docs); // nothing to copy: only the fixes run
+    Check(!File.Exists(B("TS3Patch.asi")), "Smooth Patch ASI next to S3SS moved away");
+    Check(KnownMods.Found(bin, docs).Any(m => m.Name.StartsWith("simler90")), "simler90 detected as a known mod");
+
+    // 9. uninstall everything
     Engine.RemoveAll(g, docs);
     var left = Directory.EnumerateFiles(bin, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(bin, f)).OrderBy(x => x).ToList();
     Check(!left.Contains("ApexRadiance.asi") && !left.Contains("Sims3SettingsSetter.asi") && !left.Contains("ts3native.asi") && !left.Contains("wininet.dll"),
           "uninstall removes everything Setup added (left: " + string.Join(", ", left) + ")");
     Check(Read(B("d3d9.dll")) == "... DXVK v2.7 ...", "user's DXVK untouched by uninstall");
     Check(!File.Exists(Path.Combine(Scan.Packages(docs), "ts3fixes.package")), "ts3fixes.package removed");
+    Check(!File.Exists(B("MonoPatcher.asi")) && !File.Exists(Path.Combine(Scan.Packages(docs), "MonoPatcher", "ld_MonoPatcher.package")), "MonoPatcher removed");
 }
 catch (Exception e) { Console.WriteLine("FAIL exception: " + e); failures++; }
 finally { Directory.Delete(root, true); }
@@ -92,7 +128,13 @@ sealed class FakeSource : ISource
         {
             Components.Apex => new() { (Make("ApexRadiance.asi", "apex 3.1.1"), Path.Combine(b, "ApexRadiance.asi")) },
             Components.Loader => new() { (Make("dinput8.dll", "loader"), Path.Combine(b, "wininet.dll")) },
+            Components.Dxvk => new() { (Make(@"dxvk\d3d9.dll", "DXVK 3.1.1 d3d9"), Path.Combine(b, "d3d9.dll")) },
             Components.S3ss => new() { (Make("Sims3SettingsSetter.asi", "s3ss"), Path.Combine(b, "Sims3SettingsSetter.asi")) },
+            Components.MonoPatcher => new()
+            {
+                (Make(@"mp\MonoPatcher.asi", "mp"), Path.Combine(b, "MonoPatcher.asi")),
+                (Make(@"mp\ld_MonoPatcher.package", "mp"), Path.Combine(Scan.Packages(docs), "MonoPatcher", "ld_MonoPatcher.package")),
+            },
             Components.Modernization => new()
             {
                 (Make(@"m\ts3native.asi", "ts3native"), Path.Combine(b, "ts3native.asi")),

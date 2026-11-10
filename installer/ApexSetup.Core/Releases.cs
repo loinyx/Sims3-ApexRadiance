@@ -20,6 +20,8 @@ public static class Releases
     public const string S3ss = "sims3fiend/Sims3SettingsSetter";
     public const string Modernization = "rodneypantonial/sims3-modernization";
     public const string AsiLoader = "ThirteenAG/Ultimate-ASI-Loader";
+    public const string Dxvk = "doitsujin/dxvk";
+    public const string MonoPatcher = "LazyDuchess/MonoPatcher";
 
     static readonly HttpClient Http = MakeClient();
 
@@ -31,6 +33,32 @@ public static class Releases
     }
 
     public static async Task<Release> LatestAsync(string repo, CancellationToken ct = default)
+    {
+        try { return await FromApiAsync(repo, ct); }
+        catch (HttpRequestException) { return await FromPageAsync(repo, ct); } // the API allows 60 calls an hour per address
+    }
+
+    // The release page: /releases/latest redirects to the tag; expanded_assets lists each file with its SHA-256.
+    static async Task<Release> FromPageAsync(string repo, CancellationToken ct)
+    {
+        using var latest = await Http.GetAsync($"https://github.com/{repo}/releases/latest", ct);
+        latest.EnsureSuccessStatusCode();
+        var tag = Uri.UnescapeDataString(latest.RequestMessage!.RequestUri!.AbsolutePath.Split("/releases/tag/")[1]);
+        var html = await Http.GetStringAsync($"https://github.com/{repo}/releases/expanded_assets/{Uri.EscapeDataString(tag)}", ct);
+        var assets = new List<Asset>();
+        foreach (var item in html.Split("<li"))
+        {
+            var href = System.Text.RegularExpressions.Regex.Match(item, $@"href=""(/{System.Text.RegularExpressions.Regex.Escape(repo)}/releases/download/[^""]+)""");
+            if (!href.Success) continue;
+            var sha = System.Text.RegularExpressions.Regex.Match(item, "sha256:([0-9a-f]{64})");
+            var url = "https://github.com" + System.Net.WebUtility.HtmlDecode(href.Groups[1].Value);
+            assets.Add(new Asset(Uri.UnescapeDataString(url[(url.LastIndexOf('/') + 1)..]), url, sha.Success ? sha.Groups[1].Value : null));
+        }
+        if (assets.Count == 0) throw new HttpRequestException($"{repo}: no release files found");
+        return new Release(repo, tag, assets);
+    }
+
+    static async Task<Release> FromApiAsync(string repo, CancellationToken ct)
     {
         using var doc = JsonDocument.Parse(await Http.GetStringAsync($"https://api.github.com/repos/{repo}/releases/latest", ct));
         var root = doc.RootElement;
@@ -52,6 +80,24 @@ public static class Releases
         if (a.Sha256 is { } want && !Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(file))).Equals(want, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException($"{a.Name}: download is damaged (checksum mismatch)");
         return file;
+    }
+
+    // one file out of a .tar.gz (DXVK's release format), e.g. "x32/d3d9.dll" under its top folder
+    public static string ExtractFromTarGz(string tgz, string inner)
+    {
+        using var gz = new GZipStream(File.OpenRead(tgz), CompressionMode.Decompress);
+        using var tar = new System.Formats.Tar.TarReader(gz);
+        while (tar.GetNextEntry() is { } e)
+            if (e.Name.Replace('\\', '/').EndsWith("/" + inner, StringComparison.OrdinalIgnoreCase) && e.DataStream is { } data)
+            {
+                var dir = tgz + ".d";
+                Directory.CreateDirectory(dir);
+                var file = Path.Combine(dir, Path.GetFileName(inner));
+                using var f = File.Create(file);
+                data.CopyTo(f);
+                return file;
+            }
+        throw new InvalidDataException($"{Path.GetFileName(tgz)}: {inner} not found");
     }
 
     public static string Unzip(string zip)

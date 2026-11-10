@@ -197,11 +197,10 @@
                                         </Border>
                                         <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                             <TextBlock x:Name="BridgeName" Tag="dyn" Style="{StaticResource ApexStrong}" />
-                                            <TextBlock Text="Runs the renderer in its own 64-bit process: about 600 MB more free memory for long sessions and big worlds. Same picture as DXVK." Style="{StaticResource ApexMuted}" />
+                                            <TextBlock Text="How the game draws. DXVK and the bridge need a Vulkan graphics card." Style="{StaticResource ApexMuted}" />
                                         </StackPanel>
-                                        <ToggleSwitch x:Name="BridgeToggle" Grid.Column="2" OnContent="" OffContent="" MinWidth="0" Toggled="OnToggle"
-                                                      AutomationProperties.Name="RTX Remix bridge" />
                                     </Grid>
+                                    <RadioButtons x:Name="RendererChoice" Tag="dyn" Margin="50,0,0,0" SelectionChanged="OnRenderer" />
                                     <TextBlock x:Name="BridgeDetail" Tag="dyn" Style="{StaticResource ApexMuted}" Foreground="{StaticResource ApexSoftTextBrush}" Margin="50,0,0,0" />
                                 </StackPanel>
                             </Border>
@@ -251,6 +250,29 @@
                                     </Border>
                                     <ToggleSwitch x:Name="ModToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnToggle"
                                                   AutomationProperties.Name="Sims 3 Modernization" />
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource ApexCard}">
+                                <Grid ColumnSpacing="14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
+                                        <FontIcon Glyph="&#xE943;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="MonoPatcher" Style="{StaticResource ApexStrong}" />
+                                        <TextBlock Text="Lets script mods patch the game's code, by LazyDuchess; several community fixes need it. Downloaded from its GitHub release." Style="{StaticResource ApexMuted}" />
+                                        <HyperlinkButton Content="Official page" NavigateUri="https://github.com/LazyDuchess/MonoPatcher" Padding="0" FontSize="12" />
+                                    </StackPanel>
+                                    <Border Grid.Column="2" Style="{StaticResource ApexPill}">
+                                        <TextBlock x:Name="MonoPill" Tag="dyn" FontSize="11" Foreground="{StaticResource ApexMutedBrush}" />
+                                    </Border>
+                                    <ToggleSwitch x:Name="MonoToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnToggle"
+                                                  AutomationProperties.Name="MonoPatcher" />
                                 </Grid>
                             </Border>
                             <StackPanel Orientation="Horizontal" Spacing="10" Margin="4,2,0,0">

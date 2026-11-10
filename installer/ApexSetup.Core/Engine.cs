@@ -5,9 +5,9 @@ namespace ApexSetup;
 
 public static class Components
 {
-    public const string Apex = "apex", Bridge = "bridge", Loader = "loader", S3ss = "s3ss", Modernization = "modernization";
-    // removal order: what depends on the loader goes first
-    public static readonly string[] All = { Bridge, Modernization, S3ss, Apex, Loader };
+    public const string Apex = "apex", Bridge = "bridge", Dxvk = "dxvk", Loader = "loader", S3ss = "s3ss", Modernization = "modernization", MonoPatcher = "monopatcher";
+    // removal order: what depends on the loader goes first (installs run in the reverse order)
+    public static readonly string[] All = { Bridge, Dxvk, Modernization, MonoPatcher, S3ss, Apex, Loader };
 }
 
 public sealed class ManifestFile
@@ -72,6 +72,26 @@ public sealed class GitHubSource : ISource
                 AddTree(files, dir, bin);
                 return (files, r.Version);
             }
+            case Components.Dxvk:
+            {
+                // the 32-bit d3d9.dll of the official release (Apex recommends DXVK: Settings > Compatibility)
+                var r = await Releases.LatestAsync(Releases.Dxvk, ct);
+                var tgz = await Releases.DownloadAsync(r.Find(n => n.StartsWith("dxvk-") && n.EndsWith(".tar.gz") && !n.Contains("native")), _tmp, ct);
+                files.Add((Releases.ExtractFromTarGz(tgz, "x32/d3d9.dll"), Path.Combine(bin, "d3d9.dll")));
+                return (files, r.Version);
+            }
+            case Components.MonoPatcher:
+            {
+                // its zip also carries a wininet.dll loader: left out, Setup handles the loader (sims3-modernization's fixes.json)
+                var r = await Releases.LatestAsync(Releases.MonoPatcher, ct);
+                var dir = Releases.Unzip(await Releases.DownloadAsync(r.Find(n => n.EndsWith(".zip")), _tmp, ct));
+                foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
+                    if (Path.GetFileName(f).Equals("MonoPatcher.asi", StringComparison.OrdinalIgnoreCase)) files.Add((f, Path.Combine(bin, "MonoPatcher.asi")));
+                    else if (f.EndsWith(".package", StringComparison.OrdinalIgnoreCase))
+                        files.Add((f, Path.Combine(Scan.Packages(docs), "MonoPatcher", Path.GetFileName(f))));
+                if (!files.Any(x => x.Item2.EndsWith("MonoPatcher.asi"))) throw new InvalidDataException("MonoPatcher: MonoPatcher.asi not in the release");
+                return (files, r.Version);
+            }
             case Components.Loader:
             {
                 var r = await Releases.LatestAsync(Releases.AsiLoader, ct);
@@ -114,7 +134,9 @@ public static class Engine
     {
         [Components.Apex] = new[] { "ApexRadiance.asi" },
         [Components.Bridge] = new[] { "d3d9.dll", "bridge.conf", "dxvk.conf", @".trex\bridge.conf", @".trex\NvRemixBridge.exe", @".trex\d3d9vk_x64.dll", "Apex Radiance RTX Remix bridge.txt" },
+        [Components.Dxvk] = new[] { "d3d9.dll" },
         [Components.S3ss] = new[] { "Sims3SettingsSetter.asi" },
+        [Components.MonoPatcher] = new[] { "MonoPatcher.asi" },
         [Components.Modernization] = new[] { "ts3native.asi", "ts3native.ini" },
         [Components.Loader] = Array.Empty<string>(),
     };
@@ -126,12 +148,12 @@ public static class Engine
     public static string OptionsIni(string docs) => Path.Combine(docs, "Options.ini");
 
     // The loader goes in when there is none, or when the only one is d3d9.dll and the bridge takes that name.
-    public static bool NeedsLoader(State s, bool bridge) => s.Loader is null || (bridge && s.LoaderIsD3d9);
+    public static bool NeedsLoader(State s, bool replacesD3d9) => s.Loader is null || (replacesD3d9 && s.LoaderIsD3d9);
 
     public static async Task InstallAsync(Game g, IReadOnlyCollection<string> components, ISource src, IProgress<Progress>? p = null,
                                           string? docs = null, CancellationToken ct = default)
     {
-        docs ??= Scan.Documents;
+        docs ??= Scan.DocumentsFor(g);
         p?.Report(new(0, "Checking that the game is closed"));
         if (Games.IsRunning()) throw new InvalidOperationException("Close The Sims 3 first.");
         var s = Scan.Run(g, docs);
@@ -144,7 +166,7 @@ public static class Engine
             var (files, version) = await src.FetchAsync(c, g, docs, ct);
             p?.Report(new((i + 0.5) / list.Count, "Copying {0}", c));
 
-            if (c == Components.Bridge && s.Layer is Layer.Native or Layer.Other && m.OptionsBackup is null && File.Exists(OptionsIni(docs)))
+            if (c is Components.Bridge or Components.Dxvk && s.Layer is Layer.Native or Layer.Other && m.OptionsBackup is null && File.Exists(OptionsIni(docs)))
             {
                 m.OptionsBackup = Path.Combine(Manifest.DirOf(g.Bin), "Options.ini.bak");
                 Directory.CreateDirectory(Manifest.DirOf(g.Bin));
@@ -160,12 +182,15 @@ public static class Engine
             m.Save(); // after each component, so a failure later keeps what is done removable
             i++;
         }
+        // the install leaves nothing known broken (checks after the copies: the bridge, Sims3Performance and S3SS rules depend on them)
+        p?.Report(new(0.98, "Fixing incompatible settings"));
+        foreach (var fix in Compat.Check(g, Scan.Run(g, docs), docs).Where(x => x.CanFix)) fix.Fix!();
         p?.Report(new(1, "Done"));
     }
 
     public static void Remove(Game g, string c, string? docs = null)
     {
-        docs ??= Scan.Documents;
+        docs ??= Scan.DocumentsFor(g);
         if (Games.IsRunning()) throw new InvalidOperationException("Close The Sims 3 first.");
         var m = Manifest.Load(g.Bin);
         var layerBefore = Scan.Run(g, docs).Layer;
@@ -173,7 +198,8 @@ public static class Engine
         foreach (var rel in Known[c])
         {
             var p = Path.Combine(g.Bin, rel);
-            if (rel == "d3d9.dll" && layerBefore != Layer.Bridge) continue; // only the bridge's own d3d9.dll
+            // only the d3d9.dll of the layer being removed
+            if (rel == "d3d9.dll" && layerBefore != (c == Components.Dxvk ? Layer.Dxvk : Layer.Bridge)) continue;
             if (File.Exists(p) && !m.Files.Any(f => Same(f.Path, p))) File.Delete(p);
         }
         foreach (var f in m.Files.Where(f => f.Component == c).ToList())
@@ -182,12 +208,14 @@ public static class Engine
             if (f.Backup is not null && File.Exists(f.Backup)) File.Move(f.Backup, f.Path, true);
             m.Files.Remove(f);
         }
+        if (c == Components.MonoPatcher && Directory.Exists(Path.Combine(Scan.Packages(docs), "MonoPatcher")))
+            foreach (var f in Directory.EnumerateFiles(Path.Combine(Scan.Packages(docs), "MonoPatcher"), "ld_MonoPatcher*.package")) File.Delete(f);
         if (c == Components.Modernization)
         {
             var pkg = Path.Combine(Scan.Packages(docs), "ts3fixes.package");
             if (File.Exists(pkg)) File.Delete(pkg);
         }
-        if (c == Components.Bridge)
+        if (c is Components.Bridge or Components.Dxvk)
         {
             foreach (var d in new[] { Path.Combine(g.Bin, ".trex"), Path.Combine(g.Bin, "licenses") })
                 if (Directory.Exists(d) && !Directory.EnumerateFileSystemEntries(d).Any()) Directory.Delete(d);
@@ -200,15 +228,16 @@ public static class Engine
         m.Versions.Remove(c);
         m.Save();
         // the restored d3d9.dll is a loader again: the one Setup added for the bridge would load every mod twice
-        if (c == Components.Bridge && m.Versions.ContainsKey(Components.Loader) && Scan.Run(g, docs).LoaderIsD3d9)
+        if (c is Components.Bridge or Components.Dxvk && m.Versions.ContainsKey(Components.Loader) && Scan.Run(g, docs).LoaderIsD3d9)
             Remove(g, Components.Loader, docs);
     }
 
     public static void RemoveAll(Game g, string? docs = null)
     {
+        // Apex, and what Setup installed; mods the player installed by hand stay (Repair or remove has a row for each)
         var s = Scan.Run(g, docs);
         foreach (var c in Components.All)
-            if (c != Components.Loader || s.Manifest.Versions.ContainsKey(c)) Remove(g, c, docs);
+            if (c == Components.Apex || s.Manifest.Versions.ContainsKey(c)) Remove(g, c, docs);
     }
 
     static void Place(Manifest m, string c, string from, string to)
@@ -247,7 +276,7 @@ public static class Engine
     }
 
     // sims3-modernization's player guide: Mods\Resource.cfg, created only when missing (kept on removal: other mods use it)
-    static void EnsureResourceCfg(string docs)
+    public static void EnsureResourceCfg(string docs)
     {
         var cfg = Path.Combine(docs, "Mods", "Resource.cfg");
         if (File.Exists(cfg)) return;

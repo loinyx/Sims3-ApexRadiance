@@ -79,7 +79,9 @@ public static class Games
         return r.ReadUInt32();
     }
 
-    public static bool IsRunning() =>
+    // replaced by the offline tests, which may run while the player has the game open
+    public static Func<bool> IsRunning = DefaultIsRunning;
+    static bool DefaultIsRunning() =>
         Process.GetProcessesByName("TS3W").Length + Process.GetProcessesByName("TS3").Length > 0;
 
     static IEnumerable<string> SteamLibraries()

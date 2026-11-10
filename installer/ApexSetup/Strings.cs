@@ -193,6 +193,72 @@ public static class Strings
             "O instalador remove o Apex Radiance e tudo o que instalou neste jogo, e devolve cada arquivo que substituiu. As suas configurações em Documentos ficam.",
         ["Everything Setup installed was removed."] = "Tudo o que o instalador instalou foi removido.",
 
+        // compatibility checks (ApexSetup.Core/Compat.cs)
+        ["Setup fixes this"] = "O instalador corrige isto",
+        ["Read more"] = "Saiba mais",
+        ["Fix all now"] = "Corrigir tudo agora",
+        ["Fixed."] = "Corrigido.",
+        ["No incompatible settings found."] = "Nenhuma configuração incompatível encontrada.",
+        ["{0} in Game\\Bin loads a second copy of Apex Radiance."] = "{0} em Game\\Bin carrega uma segunda cópia do Apex Radiance.",
+        ["Two ASI loaders ({0}) load every mod twice. Keep one: remove all but {1}."] = "Dois ASI loaders ({0}) carregam cada mod duas vezes. Fica só um: o instalador deixa o {1}.",
+        ["Sims 3 Modernization's ts3native is the build for the other edition and does nothing. Turn it on in Components to install the right one."] =
+            "O ts3native do Sims 3 Modernization é a versão da outra edição e não faz nada. Ligue-o em Componentes para instalar a certa.",
+        ["Mods has {0} .package files but no Resource.cfg, so the game loads none of them."] =
+            "A pasta Mods tem {0} arquivos .package mas nenhum Resource.cfg, então o jogo não carrega nenhum.",
+        ["{0} is the build for the other edition of the game; it makes the game show \"unofficial game modification\". Use the {1} build."] =
+            "{0} é a versão para a outra edição do jogo; ela faz o jogo mostrar \"unofficial game modification\". Use a versão {1}.",
+        ["NRaas ErrorTrap has no build known to work on EA app 1.69.47."] = "O NRaas ErrorTrap não tem versão conhecida que funcione no EA app 1.69.47.",
+        ["{0} overrides game code Sims 3 Modernization also patches (not tested together)."] =
+            "{0} substitui código do jogo que o Sims 3 Modernization também altera (não testados juntos).",
+        ["{0} is an old build with Apex inside; while it is in Game\\Bin, Apex Radiance stays off. Setup moves it to the backup folder (install the official Sims3SettingsSetter in its place if you used it)."] =
+            "{0} é uma versão antiga com o Apex embutido; enquanto estiver em Game\\Bin, o Apex Radiance fica desligado. O instalador a move para a pasta de cópias (instale o Sims3SettingsSetter oficial no lugar, se você o usava).",
+        ["Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. Setup sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup)."] =
+            "O ShortWaitSpin e o ThreadStackDiet do Sims3Performance conflitam com o Sims 3 Modernization. O instalador põe os dois em 0 (fica uma cópia em Sims3Performance.ini.apex-backup).",
+        ["Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. Setup turns them off (a copy is kept as S3SS.toml.apex-backup)."] =
+            "As texturas não comprimidas do Sims3SettingsSetter travam sob o RTX Remix bridge. O instalador as desliga (fica uma cópia em S3SS.toml.apex-backup).",
+        ["{0} sets client.targetProcess = {1}, but this game is {2}: the bridge does not start."] =
+            "{0} define client.targetProcess = {1}, mas este jogo é o {2}: o bridge não inicia.",
+        ["dxvk.conf lacks {0}: without them the game resets its graphics options or freezes on a resolution change under the bridge."] =
+            "Falta {0} no dxvk.conf: sem isso o jogo redefine as opções gráficas ou congela ao trocar de resolução sob o bridge.",
+
+        ["Fix settings"] = "Corrigir configurações",
+        ["Everything is installed and up to date."] = "Tudo está instalado e atualizado.",
+        ["Setup changes only what is listed. Nothing changes until you click Install."] = "O instalador muda só o que está listado. Nada muda até você clicar em Instalar.",
+        ["{0} is installed and up to date: nothing to change."] = "A {0} está instalada e atualizada: nada a mudar.",
+        ["Installed and kept as it is. Turn on to copy the latest files again."] = "Instalado e mantido como está. Ligue para copiar de novo os arquivos mais recentes.",
+        ["Installed: Setup copies the latest files."] = "Instalado: o instalador copia os arquivos mais recentes.",
+        ["DXVK (recommended)"] = "DXVK (recomendado)",
+        ["RTX Remix bridge (64-bit, about 600 MB more free memory)"] = "RTX Remix bridge (64 bits, uns 600 MB a mais de memória livre)",
+        ["The game's own Direct3D 9"] = "O Direct3D 9 do próprio jogo",
+        ["Keep my d3d9.dll"] = "Manter a minha d3d9.dll",
+        ["Renderer · now {0}"] = "Renderizador · hoje {0}",
+        ["How the game draws. DXVK and the bridge need a Vulkan graphics card."] = "Como o jogo desenha. O DXVK e o bridge precisam de uma placa de vídeo com Vulkan.",
+        ["Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it. From DXVK's GitHub release."] = "Roda o jogo em Vulkan: menos travadas, e o Apex Radiance é feito e testado com ele. Da release do DXVK no GitHub.",
+        ["DXVK in its own 64-bit process: the game keeps about 600 MB more free memory. Set for {0}; needs a Vulkan graphics card."] = "O DXVK num processo próprio de 64 bits: o jogo fica com uns 600 MB a mais de memória livre. Configurado para o {0}; precisa de uma placa de vídeo com Vulkan.",
+        ["Windows' Direct3D 9. Apex Radiance works with it, but it is made and tested with DXVK."] = "O Direct3D 9 do Windows. O Apex Radiance funciona com ele, mas é feito e testado com o DXVK.",
+        ["Your d3d9.dll stays as it is."] = "A sua d3d9.dll fica como está.",
+        ["Setup keeps your current d3d9.dll and puts it back if you remove the new one."] = "O instalador guarda a sua d3d9.dll atual e a devolve se você remover a nova.",
+        ["Graphics options may reset once"] = "As opções gráficas podem ser redefinidas uma vez",
+        ["The game resets its graphics options when the graphics card it sees changes, and {0} reports a different one than {1}. Setup keeps a copy of Options.ini and puts it back if you go back."] = "O jogo redefine as opções gráficas quando a placa de vídeo que ele vê muda, e {0} informa uma diferente de {1}. O instalador guarda uma cópia do Options.ini e a devolve se você voltar atrás.",
+        ["Your ASI loader is d3d9.dll, which the new renderer replaces: Setup adds Ultimate ASI Loader as wininet.dll."] = "O seu ASI loader é a d3d9.dll, que o novo renderizador substitui: o instalador adiciona o Ultimate ASI Loader como wininet.dll.",
+        ["Apply"] = "Aplicar",
+        ["Setup changes only what differs from your game now: {0}."] = "O instalador muda só o que difere do seu jogo hoje: {0}.",
+        ["remove {0}"] = "remover {0}",
+        ["Applying changes"] = "Aplicando as mudanças",
+        ["Remove {0}"] = "Remover {0}",
+        ["Fix incompatible settings"] = "Corrigir configurações incompatíveis",
+        ["Puts your previous d3d9.dll back."] = "Devolve a sua d3d9.dll anterior.",
+        ["The game goes back to its own Direct3D 9 and may reset its graphics options once."] = "O jogo volta ao próprio Direct3D 9 e pode redefinir as opções gráficas uma vez.",
+        ["Updates available"] = "Atualizações disponíveis",
+        ["Update now"] = "Atualizar agora",
+        ["{0} in The Sims 3 · {1}."] = "{0} no The Sims 3 · {1}.",
+        ["{0} {1} → {2}"] = "{0} {1} → {2}",
+        ["Lets script mods patch the game's code, by LazyDuchess; several community fixes need it. Downloaded from its GitHub release."] = "Permite que mods de script alterem o código do jogo, por LazyDuchess; várias correções da comunidade precisam dele. Baixado da release dele no GitHub.",
+        ["Installed · official page"] = "Instalado · página oficial",
+        ["Removes MonoPatcher.asi and its package."] = "Remove o MonoPatcher.asi e o pacote dele.",
+        ["Smooth Patch's TS3Patch.asi patches the same game code as Sims3SettingsSetter's Smooth Patch. Setup moves it to the backup folder (S3SS does the same job)."] = "O TS3Patch.asi do Smooth Patch altera o mesmo código do jogo que o Smooth Patch do Sims3SettingsSetter. O instalador o move para a pasta de cópias (o S3SS faz o mesmo trabalho).",
+        ["simler90's Gameplay Core Mod and NRaas StoryProgression replace the same game code. Keep one of them."] = "O Gameplay Core Mod do simler90 e o NRaas StoryProgression substituem o mesmo código do jogo. Deixe só um deles.",
+        ["MonoPatcher needs the Microsoft Visual C++ Redistributable (x86); it is not installed."] = "O MonoPatcher precisa do Microsoft Visual C++ Redistributable (x86), que não está instalado.",
         // about and dialogs
         ["Apex Radiance by loinyx. The RTX Remix bridge is NVIDIA's, ported to The Sims 3 by dalexlol and alexvixell35-stack. Sims3SettingsSetter is by sims3fiend, Sims 3 Modernization by rodneypantonial and Ultimate ASI Loader by ThirteenAG: Setup downloads them from their own GitHub releases."] =
             "Apex Radiance por loinyx. O RTX Remix bridge é da NVIDIA, portado para The Sims 3 por dalexlol e alexvixell35-stack. O Sims3SettingsSetter é de sims3fiend, o Sims 3 Modernization de rodneypantonial e o Ultimate ASI Loader de ThirteenAG: o instalador os baixa das releases deles no GitHub.",
