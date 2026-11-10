@@ -352,7 +352,8 @@ int SlotOfRoom(const unsigned char* room) {
 // share + the base) came within the tolerance of a colour set during the drag: rooms of 20 and 29 lamps (lot E4606BD0)
 // were taken for unlit ones, lost their lamps' share and followed the unlit colour from then on (+0x120 left behind). A
 // room with lamps is moved by MoveBase or solved again once the change rests.
-bool RetintUnlit(unsigned char* room, int& state, int slot) {
+// solved: the room's last solved ambient pair (+0x110, +0x120; BaseRec.res), or null when none is known
+bool RetintUnlit(unsigned char* room, int& state, int slot, const float (*solved)[4] = nullptr) {
     __try {
         if (*reinterpret_cast<const int*>(room + 0xC) <= 0 || *reinterpret_cast<const BYTE*>(room + 0x18)) {
             state = -1;
@@ -367,6 +368,12 @@ bool RetintUnlit(unsigned char* room, int& state, int slot) {
         if (!roofless && slot >= 0 && RoomAmbientPolicy::UnlitSeedDue(solve, amb, amb2, g_target[slot].v)) {
             std::memcpy(amb, g_target[slot].v, sizeof g_target[slot].v);
             std::memcpy(amb2, g_target[slot].v, sizeof g_target[slot].v);
+            // (10/11) a room the game cleared after a solve waits at the ambient that solve wrote (its maps on screen still
+            // show that light), never below the unlit colour: by day a window-lit room's +0x120 is up to 13x the unlit
+            // colour, so the seed alone left its walls and floors dark until the queue reached it. Its own solve writes the
+            // final values over these (state 3), so the end result is the same.
+            if (solved && (solve == 1 || solve == 2)) // (waiting for its solve; a solved room keeps the seed as before)
+                for (int k = 0; k < 3; k++) amb[k] = std::fmax(amb[k], solved[0][k]), amb2[k] = std::fmax(amb2[k], solved[1][k]);
             state = 3; // seeded
             return true;
         }
@@ -419,7 +426,19 @@ bool RequestRetintSolve(unsigned char* room, bool rest) {
 bool VisitRoom(unsigned char* room, void* p) {
     auto& ctx = *static_cast<VisitCtx*>(p);
     int state = 0;
-    if (RetintUnlit(room, state, SlotOfRoom(room))) {
+    float solved[2][4] = {};
+    bool hasSolved = false;
+    uintptr_t mgr = 0;
+    int id = 0;
+    if (RoomKey(room, mgr, id)) {
+        std::lock_guard<std::mutex> lk(g_baseMx);
+        const auto it = g_baseRooms.find(reinterpret_cast<uintptr_t>(room));
+        if (it != g_baseRooms.end() && it->second.mgr == mgr && it->second.id == id && it->second.has[0] && it->second.has[1]) {
+            std::memcpy(solved, it->second.res, sizeof solved);
+            hasSolved = true;
+        }
+    }
+    if (RetintUnlit(room, state, SlotOfRoom(room), hasSolved ? solved : nullptr)) {
         ctx.retinted += state == 1;
         if (state == 3 && g_seeded++ < 50)
             LOG_INFO(std::format("[UnlitRooms] Room {} of lot {:08X}: no ambient yet while it waits for its solve, given the unlit colour",
