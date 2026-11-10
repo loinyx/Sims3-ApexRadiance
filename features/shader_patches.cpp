@@ -3238,8 +3238,9 @@ bool AnalyzeRigPs(const std::vector<DWORD>& t, RigPsInfo& out) {
     return out.rigLights || out.cubeWeightConst >= 0;
 }
 
-bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& out, bool capToFloorMap, bool wallMask) {
+bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& out, bool capToFloorMap, bool wallMask, bool side) {
     out.maskSampler = -1;
+    out.sideConst = -1;
     if (t.empty() || t[0] != 0xFFFF0300) return false;
     const auto ins = Parse(t);
     if (ins.empty()) return false;
@@ -3340,11 +3341,11 @@ bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& 
     // into registers above the shader's own; the chain's result is replaced by it
     if (chainEnd < 0 || chainEnd <= nrm) return false;
     const DWORD N = Num(t[ins[static_cast<size_t>(nrm)].at + 1]);
-    const DWORD uvT = Type(t[ins[static_cast<size_t>(lm)].at + 2]), uvN = Num(t[ins[static_cast<size_t>(lm)].at + 2]);
+    const DWORD uvT0 = Type(t[ins[static_cast<size_t>(lm)].at + 2]), uvN0 = Num(t[ins[static_cast<size_t>(lm)].at + 2]);
     out.uvUsage = out.uvIndex = -1;
-    if (uvT == kInput)
+    if (uvT0 == kInput)
         for (const Ins& x : ins)
-            if (x.op == kDcl && x.len == 2 && IsReg(t[x.at + 2], kInput, uvN)) {
+            if (x.op == kDcl && x.len == 2 && IsReg(t[x.at + 2], kInput, uvN0)) {
                 out.uvUsage = static_cast<int>(t[x.at + 1] & 0x1F);
                 out.uvIndex = static_cast<int>((t[x.at + 1] >> 16) & 0xF);
             }
@@ -3353,6 +3354,18 @@ bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& 
     out.sizeConst = cS;
     const DWORD E = static_cast<DWORD>(u.maxSampler + 1);
     out.firstSampler = E;
+    // (side) the reads' uv moved along the world normal: U = uv + N.x x cN.xy + N.z x cN.zw (cN = 0: the same uv), in a temp
+    // and a constant above the ones taken below; left out when the shader has no room for them
+    DWORD uvT = uvT0, uvN = uvN0;
+    std::vector<DWORD> sideUv;
+    if (side && wallMask && u.maxTemp + 17 < 32 && u.maxConst + 14 < 224) {
+        const DWORD U = T + 16, cN = cS + 13;
+        out.sideConst = static_cast<int>(cN);
+        sideUv = {Op(kMov, 2), Dst(kTemp, U), Src(uvT0, uvN0),
+                  Op(kMad, 4), Dst(kTemp, U, 0x3), Src(kTemp, N, Sw(0, 0, 0, 0)), Src(kConst, cN, Sw(0, 1, 0, 1)), Src(kTemp, U),
+                  Op(kMad, 4), Dst(kTemp, U, 0x3), Src(kTemp, N, Sw(2, 2, 2, 2)), Src(kConst, cN, Sw(2, 3, 2, 3)), Src(kTemp, U)};
+        uvT = kTemp, uvN = U;
+    }
     int cubeTex = -1; // the index of that cube read (Rooms at Night tints its colour: tintConst)
     // The ambient cube's weight (Rooms at Night scales it per draw): the first cube read whose result is multiplied by a
     // constant's .w ("texld_pp r1, r1, s0 ... mad_pp r6.xyz, r1, c12.w, r2" in the captured shaders)
@@ -3420,7 +3433,8 @@ bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& 
                      Op(kMax, 3), Dst(kTemp, B, 0xF), Src(kTemp, B), Src(kTemp, A, Sw(0, 1, 0, 1)),
                      Op(kMin, 3), Dst(kTemp, B, 0xF), Src(kTemp, B), Src(kTemp, A, Sw(2, 3, 2, 3))};
     }
-    std::vector<DWORD> body = walls;
+    std::vector<DWORD> body = sideUv;
+    body.insert(body.end(), walls.begin(), walls.end());
     const std::vector<DWORD> setup = BicubicSetup(uvT, uvN, cS, cK, cH, T, clampTaps);
     body.insert(body.end(), setup.begin(), setup.end());
     // weights from the world normal: +X, -X, +Z, -Z, as the basis-reading shaders compute them
@@ -3448,7 +3462,7 @@ bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& 
     const DWORD cG = cS + 11;
     // The 2D map includes furniture shadows at floor height. It must not cap elevated objects when
     // the directional-map solver already checks cross-story floors. Retain the old path as fallback.
-    if (capToFloorMap) body.insert(body.end(), {Op(kTexld, 3), Dst(kTemp, Tmp), uvT == kInput ? Src(kInput, uvN) : Src(kTexture, uvN), Src(kSampler, lmSampler),
+    if (capToFloorMap) body.insert(body.end(), {Op(kTexld, 3), Dst(kTemp, Tmp), Src(uvT, uvN), Src(kSampler, lmSampler),
                              Op(kMul, 3), Dst(kTemp, Tmp, 0x7), Src(kTemp, Tmp), Src(kConst, cG, Sw(0, 0, 0, 0)),
                              Op(kMin, 3), Dst(kTemp, Acc, 0x7), Src(kTemp, Acc), Src(kTemp, Tmp)});
     edits.push_back({End(ins[static_cast<size_t>(nrm)]), body});

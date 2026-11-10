@@ -7658,6 +7658,7 @@ bool IndoorBasisScale(IDirect3DDevice9* dev, const ShaderPatches::IndoorBasisPat
 
 std::atomic<long> g_doorsKept{0}, g_doorsNoWorld{0}; // indoor smooth light: objects set in a wall left to the game's rig / no world triple
 std::atomic<long> g_indoorWallsSmooth{0}; // objects against a wall drawn smooth through the wall mask (the rig before)
+std::atomic<long> g_doorsPerSide{0};      // objects set in a wall drawn smooth with each face reading its own side (shader side read)
 std::atomic<bool> g_doorsLogged{false}, g_doorsNoWorldLogged{false};
 // An object set in a wall (DrawIndoorObject): unscaled, turned about y only, and its tile's centre (origin + (X - Z) / 2) on an
 // outside wall's line (1), or on a tile edge of the room map along one axis (2; uv rows 3..4 after the world triple, 0..1 over
@@ -7736,7 +7737,7 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
     if (wallMask) {
         pick = &PatchedFor(dev, g_indoorPs[shaderVariant + 16], "Indoor object (smooth room light, walls)",
                            [lmS, capToFloorMap](std::vector<DWORD>& t, PatchedPs& pp) {
-                               return ShaderPatches::PatchIndoorBasis(t, static_cast<DWORD>(lmS), pp.indoor, capToFloorMap, true);
+                               return ShaderPatches::PatchIndoorBasis(t, static_cast<DWORD>(lmS), pp.indoor, capToFloorMap, true, true);
                            }, true);
         if (!pick->ps || pick->indoor.maskSampler < 0) pick = nullptr, wallMask = nullptr;
     }
@@ -7764,9 +7765,25 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
     // The game's rig (one room, the camera's side) lights it, as before Apex. With the wall mask the read keeps to the pixel's
     // side of every wall, so only an object at an opening light passes through stays on the rig (on an outside wall's line it
     // does not: the texels outside the house add nothing to the smooth read)
+    // (10/11) A door between two rooms: each face reads the light kSideM in front of it, in the room it looks into (the
+    // shader's side read), so the two faces can differ. F7 captures 19-52-26 and 19-54-59..19-55-05: a glazed door on the rig
+    // drew near black beside its sconce-lit wall (the rig evaluates its lamps at the door's centre, in the wall: edge-on, N.L ~ 0),
+    // and the doors read smooth at the wall line took the far room's light on both faces. At 0.75 m the B-spline's taps
+    // across the door's own wall line weigh about 7% where the edge is open (glass) and 0 where the wall mask closes it.
+    float side[4] = {};
     if (const int wk = g_curVsInfo->patched.worldK; wk >= 0) {
         float wm[5][4], uv[2] = {};
         int inWall = SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(wk), &wm[0][0], 5)) ? SetInWall(wm, size[0], size[1], uv) : 0;
+        if (inWall == 2 && wallMask && p.indoor.sideConst >= 0 && g_curVsInfo->lmRow[0] >= 0 && g_curVsInfo->lmRow[1] >= 0) {
+            float rx[4], ry[4];
+            if (SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(g_curVsInfo->lmRow[0]), rx, 1)) &&
+                SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(g_curVsInfo->lmRow[1]), ry, 1))) {
+                constexpr float kSideM = 0.75f; // as the windows' outdoor read (DrawWindowOutdoor)
+                side[0] = kSideM * rx[0], side[1] = kSideM * ry[0], side[2] = kSideM * rx[2], side[3] = kSideM * ry[2];
+                inWall = 0;
+                ApexUtil::CountOne(g_doorsPerSide);
+            }
+        }
         if (inWall && wallMask && (inWall == 1 || !LevelLightShare::OpeningNear(maskKey, uv[0], uv[1], 0.12f))) {
             inWall = 0;
             ApexUtil::CountOne(g_indoorWallsSmooth);
@@ -7792,7 +7809,8 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
     dev->GetPixelShaderConstantF(p.indoor.strengthConst, oldS, 1);
     dev->GetPixelShaderConstantF(p.indoor.sizeConst, oldSize, 1);
     if (p.indoor.diffuseConst >= 0) dev->GetPixelShaderConstantF(static_cast<UINT>(p.indoor.diffuseConst), &oldUnlit[0][0], 4);
-    float oldTint[4] = {};
+    float oldTint[4] = {}, oldSide[4] = {};
+    if (p.indoor.sideConst >= 0) dev->GetPixelShaderConstantF(static_cast<UINT>(p.indoor.sideConst), oldSide, 1);
     float cubeColour[3];
     UnlitRooms::FurnitureCubeColour(cubeColour);
     // Rooms at Night: the ambient cube towards grey, then x the room's colour (always set: (1, 1, 1, 1) = as it is)
@@ -7809,6 +7827,7 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
         SetPsConst(dev, p.indoor.sizeConst, size, 1);
         if (p.indoor.diffuseConst >= 0) SetPsConst(dev, static_cast<UINT>(p.indoor.diffuseConst), &unlit[0][0], 4);
         if (p.indoor.tintConst >= 0) SetPsConst(dev, static_cast<UINT>(p.indoor.tintConst), tint, 1);
+        if (p.indoor.sideConst >= 0) SetPsConst(dev, static_cast<UINT>(p.indoor.sideConst), side, 1); // 0: not set in a wall, read where it is
         if (vl >= 0) {
             dev->GetVertexShaderConstantF(static_cast<UINT>(vl), &oldVl[0][0], 4);
             SetVsConst(dev, static_cast<UINT>(vl), &zero[0][0], 4);
@@ -7821,6 +7840,7 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
         SetPsConst(dev, p.indoor.sizeConst, oldSize, 1);
         if (p.indoor.diffuseConst >= 0) SetPsConst(dev, static_cast<UINT>(p.indoor.diffuseConst), &oldUnlit[0][0], 4);
         if (p.indoor.tintConst >= 0) SetPsConst(dev, static_cast<UINT>(p.indoor.tintConst), oldTint, 1);
+        if (p.indoor.sideConst >= 0) SetPsConst(dev, static_cast<UINT>(p.indoor.sideConst), oldSide, 1);
     }
     g_traceA = TraceA{lightMapPtr, reinterpret_cast<uintptr_t>(basis[0]), size[0], size[1]};
     g_inOwnCall = false;
@@ -10834,16 +10854,16 @@ std::string IndoorWhyText() {
     if (!g_indoorWhyFrames) return "\n==== INDOOR OBJECT LIGHT ====\n(not measured yet: the draw cost window is 10 s)\n";
     const double f = static_cast<double>(g_indoorWhyFrames);
     return std::format("\n==== INDOOR OBJECT LIGHT (object draws a frame over the last {} frames) ====\n"
-                       "smooth room light {:.1f} (against a wall, through the wall mask: {} draws in all)\n"
+                       "smooth room light {:.1f} (against a wall, through the wall mask: {} draws in all; set in a wall, each face its own side: {})\n"
                        "on the game's rig: no rig {:.1f}, outdoor rig {:.1f}, smooth off or no shader info {:.1f}, ps_2_x {:.1f}, no room map with known "
                        "directional maps {:.1f}, patch or scale failed {:.1f}, set in a wall {:.1f}\n",
-                       g_indoorWhyFrames, w[6] / f, g_indoorWallsSmooth.load(), w[7] / f, w[0] / f, w[1] / f, w[2] / f, w[3] / f, w[4] / f, w[5] / f);
+                       g_indoorWhyFrames, w[6] / f, g_indoorWallsSmooth.load(), g_doorsPerSide.load(), w[7] / f, w[0] / f, w[1] / f, w[2] / f, w[3] / f, w[4] / f, w[5] / f);
 }
 
 std::string IndoorSmoothStatus() {
-    return std::format("{} | smooth stairs / instanced draws: {} | indoor objects: {} (map scale from the vertex shader {}, from the map size {}; against a wall, through the wall mask {})",
+    return std::format("{} | smooth stairs / instanced draws: {} | indoor objects: {} (map scale from the vertex shader {}, from the map size {}; against a wall, through the wall mask {}; doors, each face its own side {})",
                        g_indoorSmooth.load() ? "on" : "off", g_basisSmoothDrawn.load(), g_indoorDrawn.load(), g_indoorUvFromVs.load(), g_indoorUvFallback.load(),
-                       g_indoorWallsSmooth.load());
+                       g_indoorWallsSmooth.load(), g_doorsPerSide.load());
 }
 
 void SetGroundBrightness(float ground, float roads, float lotLamps) {

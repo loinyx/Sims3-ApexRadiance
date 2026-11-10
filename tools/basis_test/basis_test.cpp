@@ -1,7 +1,8 @@
 // Offline check of the smooth room light patches (ShaderPatches::PatchBasisSmooth / PatchIndoorBasis) on captured game
 // shaders: prints whether each patch applies, and the disassembly of the result (d3dcompiler_47 validates the tokens).
 // Read-only: writes nothing, console output only.
-// Usage: basis_test <ps.bin> [lmSampler [mask]]   (lmSampler given = PatchIndoorBasis, else PatchBasisSmooth; mask = its wallMask copy)
+// Usage: basis_test <ps.bin> [lmSampler [mask|side]]   (lmSampler given = PatchIndoorBasis, else PatchBasisSmooth; mask = its
+// wallMask copy, side = the wallMask copy with the side read)
 #include "features/shader_patches.h"
 #include <d3dcompiler.h>
 #include <cstdio>
@@ -34,11 +35,11 @@ int main(int argc, char** argv) {
     bool ok;
     if (argc >= 3) {
         ShaderPatches::IndoorBasisPatch p;
-        const bool mask = argc >= 4 && std::strcmp(argv[3], "mask") == 0;
-        ok = ShaderPatches::PatchIndoorBasis(t, static_cast<DWORD>(std::atoi(argv[2])), p, true, mask);
-        ok = ok && (!mask || p.maskSampler == static_cast<int>(p.firstSampler) + 4);
-        std::printf("PatchIndoorBasis%s: %s (basis samplers s%lu..s%lu, strength c%lu, wall mask s%d)\n", mask ? " (wall mask)" : "", ok ? "applied" : "not applied",
-                    p.firstSampler, p.firstSampler + 3, p.strengthConst, p.maskSampler);
+        const bool side = argc >= 4 && std::strcmp(argv[3], "side") == 0, mask = side || (argc >= 4 && std::strcmp(argv[3], "mask") == 0);
+        ok = ShaderPatches::PatchIndoorBasis(t, static_cast<DWORD>(std::atoi(argv[2])), p, true, mask, side);
+        ok = ok && (!mask || p.maskSampler == static_cast<int>(p.firstSampler) + 4) && (!side || p.sideConst >= 0);
+        std::printf("PatchIndoorBasis%s: %s (basis samplers s%lu..s%lu, strength c%lu, wall mask s%d, side c%d)\n", side ? " (wall mask, side)" : mask ? " (wall mask)" : "",
+                    ok ? "applied" : "not applied", p.firstSampler, p.firstSampler + 3, p.strengthConst, p.maskSampler, p.sideConst);
     } else {
         ShaderPatches::BasisSmoothPatch bp;
         ok = ShaderPatches::PatchBasisSmooth(t, bp);

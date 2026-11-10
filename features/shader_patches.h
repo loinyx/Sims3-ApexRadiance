@@ -269,6 +269,7 @@ struct IndoorBasisPatch {
     int uvUsage = -1, uvIndex = -1; // the semantic of the room light map uv input (-1: not a declared input)
     int diffuseConst = -1;    // set per draw: the 4 rig colours the diffuse chain reads instead of c4..c7 (lamps at 0)
     int maskSampler = -1;     // wallMask: bind the story's wall mask here (as BasisSmoothPatch's), -1 = none
+    int sideConst = -1;       // side: set per draw: the basis read moves by N.x x .xy + N.z x .zw in uv (0 = where it was), -1 = none
 };
 // The two VS constants whose dp4 with the position writes .x and .y of the output with that semantic (the room light map
 // uv: uv.x = dot(pos, cX), uv.y = dot(pos, cY)); false when the uv is not made that way
@@ -315,7 +316,10 @@ bool PatchBasisSmooth(std::vector<DWORD>& t, BasisSmoothPatch& out, const BasisS
 bool VsPassesWorldY(const std::vector<DWORD>& vs);
 // wallMask: the smooth read never crosses a wall of the pixel's own texel (each tap of the B-spline clamped to that texel's
 // centre on a walled side, as if the texels beyond were its own), so an object against or in a wall takes its own side's light.
-bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& out, bool capToFloorMap = true, bool wallMask = false);
+// side (with wallMask): every read of the light (the basis maps, the wall mask, the room light map cap) moves along the
+// pixel's world normal by sideConst (set per draw; 0 for an object not set in a wall), so each face of a door reads the
+// room it looks into. Left out (sideConst -1) when the shader has no room for its temp and constant.
+bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& out, bool capToFloorMap = true, bool wallMask = false, bool side = false);
 // Smooth light maps (2.12.4): the room light map read of the room-lit pixel shaders. The pattern (docs/features/night-
 // lighting/room-map-smoothing.md; offline over every precomp pixel shader it matches InteriorFloor, InteriorWall and their
 // siblings that read the same room map, nothing else): a plain "texld rL, <TEXCOORD1>, sM" (t1 in ps_2_0, the v# declared
