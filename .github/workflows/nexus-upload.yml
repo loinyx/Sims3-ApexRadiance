@@ -53,7 +53,7 @@ jobs:
           # the file's description on the Nexus page (at most 255 characters): the notes' main headline, where the full
           # list is, how to install; the headline is shortened when it would not fit
           HEAD=$(grep -m1 '^## ' notes.md | sed -e 's/^## //' -e 's/[*`]//g' || true)
-          TAIL=" Full list: Changelogs tab. Install: copy ApexRadiance.asi into The Sims 3 > Game > Bin."
+          TAIL=" Full list: Changelogs tab. Install: copy ApexRadiance.asi into The Sims 3 > Game > Bin. More free memory: the optional RTX Remix bridge file."
           START="Apex Radiance ${TAG#v}: "
           ROOM=$(( 255 - ${#START} - ${#TAIL} - 1 ))
           [ ${#HEAD} -le $ROOM ] || HEAD="${HEAD:0:$((ROOM - 3))}..."
@@ -108,5 +108,5 @@ jobs:
           filename: bridge/Apex-Radiance-RTX-Remix-bridge.zip
           version: ${{ env.VERSION }}
           display_name: Apex Radiance RTX Remix bridge ${{ env.VERSION }}
-          description: Optional. Runs Apex Radiance with NVIDIA RTX Remix; install steps are in "Apex Radiance RTX Remix bridge.txt" inside.
+          description: "Optional, gives the game about 600 MB more free memory. Install: close the game, back up any d3d9.dll in Game > Bin, unzip this into Bin keeping the .trex folder. EA app: set TS3.exe in both bridge.conf files. Details in the .txt inside."
           archive_existing_version: true
