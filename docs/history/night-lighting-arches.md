@@ -178,3 +178,16 @@ SEH, as `ProbeNeutral` does. The choice of the room moved to `ArchAmbient::TakeC
 capture line named story 0 for them.
 
 **Outcome:** the arch copy reads the neighbour's cube under the arch's weight; numbers are on the [validation page](../validation/night-lighting-arches.md). Not seen in game.
+
+### 2026-11-11: a game object read as the neighbour's cube
+
+**Context:** a crash report from 3.1.0: an access violation in `ArchAmbientConsts` shortly after the active lot changed, with
+smooth light maps on.
+
+**Findings:** a segment kept a neighbour room of a lot that was gone, and its memory, reused by a live game object, passed the
+`mgr` and `id` check. `RoomSpecCube` followed it to that object and called its vtable slot 10 as `GetType`; on Steam 1.67 that
+slot is a plain `ret` that leaves `this` on the stack, so `RoomSpecCube` returned with ESP 4 bytes low and corrupt
+callee-saved registers. SEH does not catch the skew: the fault comes one frame up.
+
+**Outcome:** `RoomSpecCube` refuses an object whose vtable lies in the game executable before the virtual call. Segments that
+keep a neighbour of an unloaded lot remain. Built only; not seen in game.

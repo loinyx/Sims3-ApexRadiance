@@ -6488,6 +6488,13 @@ uintptr_t RoomProbe(uintptr_t room) {
         return 0;
     }
 }
+// an address inside the game executable's image (its code, data and vtables)
+bool InGameImage(uintptr_t a) {
+    static BYTE* base = nullptr;
+    static size_t size = 0;
+    static const bool known = MemPatch::GetModuleInfo(GetModuleHandleW(nullptr), &base, &size);
+    return known && a - reinterpret_cast<uintptr_t>(base) < size;
+}
 // POD (SEH): the reflection cube a room's floors bind (0x006AD3DC: its probe once ready, +0x2C95; 0x006B42C0: +0x2C5C), the
 // IDirect3DCubeTexture9, null without one (the room then draws with the game's default cube, not read here). The draw hands it to the
 // device outside any SEH, and the room can be one of a lot gone (ReadRoomAmbient reads freed memory as still that room): GetType here
@@ -6497,7 +6504,12 @@ void* RoomSpecCube(uintptr_t room) {
     __try {
         const uintptr_t tex = *reinterpret_cast<const uint8_t*>(probe + 0x2C95) ? *reinterpret_cast<const uintptr_t*>(probe + 0x2C5C) : 0;
         IDirect3DCubeTexture9* const cube = tex && *reinterpret_cast<const uint32_t*>(tex + 0x2C) == 1 ? *reinterpret_cast<IDirect3DCubeTexture9* const*>(tex + 0x30) : nullptr; // (1 = cube; probe_neutral.cpp)
-        return cube && cube->GetType() == D3DRTYPE_CUBETEXTURE ? cube : nullptr;
+        // A freed room can hold a live game object here: its vtable lies in TS3W.exe and slot 10 (0x00620D60 on Steam 1.67, a plain
+        // ret) leaves `this` on the stack, so this frame returns with ESP 4 bytes low and corrupt callee-saved registers. A D3D9 cube's
+        // vtable never lies in the game image, so such an object is refused before the virtual call; SEH does not catch the skew
+        const uintptr_t vtbl = cube ? *reinterpret_cast<const uintptr_t*>(cube) : 0;
+        if (!vtbl || InGameImage(vtbl)) return nullptr;
+        return cube->GetType() == D3DRTYPE_CUBETEXTURE ? cube : nullptr;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         g_archFaults.fetch_add(1, std::memory_order_relaxed);
         return nullptr;
