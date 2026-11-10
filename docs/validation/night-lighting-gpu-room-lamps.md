@@ -26,6 +26,7 @@ Rows marked *tree* ran on `1f76e83` with the 3.0.0 working tree; the release com
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-10 | release tree | `rt_lamps_test`, `room_ambient_test` (with `unlit_rooms_recovery_test`), after the rows beyond follow their edge (`GhostKeptPS`) | 680,409 checks, 0 failures (the class-2 kept atlas: the GPU against `FollowGhosts` + `BlurBlock`, largest difference 0/255); 153 + 1,345 checks, 0 failures (7 `FollowGhosts` checks) | MSVC x86; native D3D9 |
 | 2026-11-09 | release tree | `outdoor_delta_test`, `room_ambient_test` (with `unlit_rooms_recovery_test`), `rt_lamps_test`, `room_solve_causes_test`, `settings_migration_test`, `scene_target_test`, `story_maps_test`, `render_cost_test` | 287, 134 + 1,343, 680,409 checks and every other suite pass with 0 failures; the 17:18 switch replay: last room +2.14 s (+15.53 s before) | MSVC x86 |
 | 2026-11-09 | release tree | `i18n_check`, `public_text_check.py` | 2,497 keys in all 21 languages; no public text finding | MSVC x86 |
 | 2026-11-09 | release tree | in game, Steam 1.67.2 under the RTX Remix bridge | confirmed in game: the day/night switch and the 6:00 lamp switch of a neighbouring lot without the earlier pauses; not measured after the fix | DXVK x64 (bridge) |
@@ -89,6 +90,13 @@ in the 2026-11-04 recording), the stain under a moved lamp gone, rigs at their f
 
 - No run of a public build; none of the last review's fixes (non-Steam builds, Classic, Night Lights off, world change) in game.
 - Shader cache: regenerated from the release objects, checked on native D3D9 only.
+- Rows beyond a kept atrium wall (`GhostKeptPS`, 3.1.1): not seen in game. Enter a lot with an atrium at night, take F8 within
+  3 s of its lamps coming on: no dark band under the floor line. The shader text changed, so every `rt_lamps` shader (all 28,
+  not only `GhostKeptPS`) misses the cache built into the ASI and compiles at start; under Wine / Proton one the builtin
+  compiler refuses turns the GPU lamps off. Regenerating `resources/ApexRadiance_ShaderCache.bin` (release step 0) blocks the
+  release. The lower story's dark windows of the same captures (2026-11-10) are not fixed: no capture recorded their rigs, and
+  stage 5 wrote no directional map for the switch-ons at 10:01:49.6 (its reach test, `StartPhysBasis`, met no kept room's samples; such
+  edits now log `reach no directional sample of the N kept rooms`), until room 19's kept solve wrote them at 10:01:54.7.
 - None of the last jobs in game: dawn and dusk, object moves, sofa arms, long-session retries, new defaults on a real update.
 - The relight cost of live tables and of `T3dDensePS` on big lots; whether the move hook fires at every drag step, which decides if the
   carry can go. The dawn fade rests on `sky+0x6B4` read from three snapshots.

@@ -653,6 +653,14 @@ float4 BlockKeptPS(float2 pix : TEXCOORD0, float4 rect : TEXCOORD1) : COLOR0 {
     const bool edge = (p.y <= rect.x + 0.5 && rect.z < 0.5) || (p.y >= rect.y - 0.5 && rect.w < 0.5);
     return edge ? tex2Dlod(sSrc2, float4(uv, 0, 0)) : tex2Dlod(sSrc, float4(uv, 0, 0));
 }
+// GhostKeptPS   a row lit beyond a block's edge in the layout follows its edge texel (outdoor_delta_model.h FollowGhosts): sSrc
+//               the layout with the walls composed, sSrc2 the layout as the solve left it, tc1.x = the edge row
+float4 GhostKeptPS(float2 pix : TEXCOORD0, float4 rect : TEXCOORD1) : COLOR0 {
+    const float2 p = floor(pix), e = float2(p.x, rect.x);
+    const float4 then = floor(tex2Dlod(sSrc2, float4((e + 0.5) * gM.xy, 0, 0)) * 255.0 + 0.5);
+    const float4 g = floor(tex2Dlod(sSrc2, float4((p + 0.5) * gM.xy, 0, 0)) * 255.0 + 0.5);
+    return clamp(g + Byte(e) - then, 0.0, 255.0) / 255.0;
+}
 )RAW"
 R"RAW(// ---------------------------------------------------------------- GPU room lamps: room 0's kept lamps (rt_outdoor_lamps.cpp)
 // Real-time outdoor lamps' passes with room 0's kept lamps of the floor mask or exits (rt_lamp_model.h KeptWrapLum, ExitAlpha,

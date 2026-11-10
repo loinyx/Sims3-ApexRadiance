@@ -57,7 +57,7 @@ const char* EntryOf(ShaderId id) {
                                                      "BlurRowPS", "BlurColPS", "BlockPS",   "AccFastPS",    "AccRlgPS",     "AccRlgFastPS",
                                                      "ComposeRlgPS", "AccKeptPS", "ComposeKeptPS", "CopyAtPS", "BlockKeptPS",
                                                      "AccKept0PS", "AccKept0XPS", "ComposeK0PS", "AccPhysPS", "AccPhysFastPS", "T3dPS", "AccPhysXPS",
-                                                     "AccPhysInPS", "AccPhysInFastPS", "T3dDensePS"};
+                                                     "AccPhysInPS", "AccPhysInFastPS", "T3dDensePS", "GhostKeptPS"};
     return id >= 0 && id < kShaderCount ? kNames[id] : "";
 }
 bool IsVertex(ShaderId id) { return id == kShadowVs || id == kTexelVs; }
@@ -1564,6 +1564,36 @@ bool Engine::ComposeKept(IDirect3DDevice9* dev, const KeptMapGpu& k, IDirect3DBa
         ext.blocks = k.extRects;
         const float inv[4] = {1.0f / static_cast<float>(scratchW_), 1.0f / static_cast<float>(scratchH_), 0, 0};
         c_.SetPsConst(dev, 0, inv, 1);
+        // the rows lit beyond the blocks' edges follow their edge texels (GhostKeptPS): the solve's layout in scratch 1, the
+        // composed one copied to scratch 2, the rows drawn into scratch 0 (an atrium story relit with other lamps)
+        std::vector<QuadV> gv;
+        for (const KeptBlockOut& b : k.outs)
+            for (const int side : {0, 1}) {
+                if (!(side ? b.below : b.above)) continue;
+                const float edge = static_cast<float>(side ? b.ly1 : b.ly0), y0 = side ? edge + 0.5f : edge - 2.5f, y1 = y0 + 2.0f;
+                const float x0 = static_cast<float>(b.lx) - 0.5f, x1 = static_cast<float>(b.lx + b.x1 - b.x0) + 0.5f;
+                const auto P = [&](float x, float y) { gv.push_back(QuadV{x, y, 0, 1, x + 0.5f, y + 0.5f, {edge, 0, 0, 0}}); };
+                P(x0, y0), P(x1, y0), P(x0, y1), P(x1, y0), P(x1, y1), P(x0, y1);
+            }
+        if (!gv.empty()) {
+            const float u1 = static_cast<float>(k.layoutW) / static_cast<float>(scratchW_), v1 = static_cast<float>(k.layoutH) / static_cast<float>(scratchH_);
+            c_.SetPixelShader(dev, ps_[kCopyPs]);
+            if (!Target(dev, scratch_[1], k.layoutW, k.layoutH)) return fail("the wall layout could not be targeted");
+            c_.SetTexture(dev, 0, k.layout);
+            Quad(dev, k.layoutW, k.layoutH);
+            if (!Target(dev, scratch_[2], k.layoutW, k.layoutH)) return fail("the wall layout could not be targeted");
+            c_.SetTexture(dev, 0, scratch_[0]);
+            Quad(dev, k.layoutW, k.layoutH, u1, v1);
+            if (!Target(dev, scratch_[0], k.layoutW, k.layoutH)) return fail("the wall layout could not be targeted");
+            c_.SetPixelShader(dev, ps_[kGhostKeptPs]);
+            c_.SetTexture(dev, 0, scratch_[2]);
+            c_.SetTexture(dev, 1, scratch_[1]);
+            dev->SetFVF(kQuadFvf);
+            for (size_t at = 0; at < gv.size(); at += 3 * 60000)
+                dev->DrawPrimitiveUP(D3DPT_TRIANGLELIST, static_cast<UINT>(std::min<size_t>((gv.size() - at) / 3, 60000)), gv.data() + at, sizeof(QuadV));
+            c_.SetTexture(dev, 0, nullptr);
+            c_.SetTexture(dev, 1, nullptr);
+        }
         const auto pass = [&](IDirect3DTexture9* src, IDirect3DTexture9* dst, ShaderId ps) {
             if (!Target(dev, dst, k.layoutW, k.layoutH)) return false;
             c_.SetPixelShader(dev, ps_[ps]);

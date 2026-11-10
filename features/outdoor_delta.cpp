@@ -3000,6 +3000,7 @@ void KeptFinalCheck(const KeptRoom& k, const std::vector<float>& sum, const LARG
                 if (b.above) std::copy_n(k.preblur.begin() + b.ghostOff, static_cast<size_t>(w) * 2, ext.begin());
                 std::copy(blk.begin(), blk.end(), ext.begin() + static_cast<size_t>(top) * w);
                 if (b.below) std::copy_n(k.preblur.begin() + b.ghostOff + static_cast<size_t>(w) * 2, static_cast<size_t>(w) * 2, ext.begin() + static_cast<size_t>(top + rows) * w);
+                FollowGhosts(ext.data(), &k.preblur[b.off], w, rows, b.above, b.below);
                 BlurBlock(ext.data(), blk.data(), w, rows, b.above, b.below, k.passes);
                 for (int y = 0; y < rows; y++)
                     for (int x = 0; x < w; x++)
@@ -5207,6 +5208,7 @@ struct PhysBasisJob {
     uint32_t gen = 0;
     float radius = 0.0f;
     double workerMs = 0.0, partMs = 0.0; // (partMs: the moved lamps' parts on the light tree thread)
+    size_t basisRooms = 0;               // the physical kept rooms with directional maps the edits were tested against
     std::map<uint64_t, std::pair<long, long>> wroteNow; // the rooms written as the job started (no lamp of theirs needs the worker)
     std::map<uint64_t, const char*> failedNow;
     DWORD doneTick = 0;
@@ -5439,6 +5441,7 @@ void StartPhysBasis(std::map<uintptr_t, BasisEdit>&& edits) {
     for (const auto& [key, kp] : kept) {
         const KeptRoom& k = *kp;
         if (k.basisWhy == kNoBasis) continue;
+        job->basisRooms++;
         PhysBasisRoom r;
         r.ref = BasisRoomRef{key, k.story, k.id}, r.k = kp, r.redo = redo.count(key) > 0;
         const size_t n = k.basis.size();
@@ -5701,6 +5704,8 @@ void LogPhysBasis(const PhysBasisJob& job, const std::map<uint64_t, std::pair<lo
     const std::string worker = std::format("; {:.2f} ms of lamps' parts, {} rooms written at once", job.partMs, job.wroteNow.size()) +
                                (job.rooms.empty() ? std::string()
                                                   : std::format("; {} lamps' shares in {} rooms in {:.1f} ms on a worker ({} of {} samples traced, the others kept)", lamps, job.rooms.size(), job.workerMs, traced, lit));
+    int unmet = 0; // (edits whose lamp lit no kept room's directional samples: no write, and no line of their own)
+    const char* unmetKind = "";
     for (const auto& [light, e] : job.edits) {
         int done = 0;
         long w = 0, l = 0;
@@ -5710,12 +5715,17 @@ void LogPhysBasis(const PhysBasisJob& job, const std::map<uint64_t, std::pair<lo
             else if (const auto fw = failed.find(r.key); fw != failed.end())
                 why += std::format("{}story {} room {}: {}", why.empty() ? "" : ", ", r.story, r.id, fw->second);
         }
-        if (e.rooms.empty()) continue;
+        if (e.rooms.empty()) {
+            unmet++, unmetKind = e.kind;
+            continue;
+        }
         LOG_INFO(std::format("[GpuRoomLamps] physical {}: lamp {:08X} directional maps written in {} of {} rooms {:.1f} ms after the edit ({} texels{}{}){}", e.kind, light,
                              done, e.rooms.size(), 1000.0 * static_cast<double>(t1.QuadPart - e.at.QuadPart) / static_cast<double>(f.QuadPart), w,
                              l ? std::format(", {} left as another solve wrote them", l) : std::string(), worker,
                              why.empty() ? std::string() : std::format("; not written: {} (they follow its rooms' solves)", why)));
     }
+    if (unmet)
+        LOG_INFO(std::format("[GpuRoomLamps] physical {}: {} lamp edits reach no directional sample of the {} kept rooms with directional maps: none written", unmetKind, unmet, job.basisRooms));
     if (redo)
         LOG_INFO(std::format("[GpuRoomLamps] physical: directional maps written again in {} of {} rooms after their kept solve{}", redone, redo, worker));
 }

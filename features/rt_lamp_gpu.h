@@ -47,7 +47,7 @@ DeviceCalls PlainCalls(); // the device's own methods (the harness)
 enum ShaderId {
     kShadowVs, kTexelVs, kShadowPs, kAccPs, kComposePs, kCopyPs, kBlurRowPs, kBlurColPs, kBlockPs, kAccFastPs, kAccRlgPs, kAccRlgFastPs, kComposeRlgPs,
     kAccKeptPs, kComposeKeptPs, kCopyAtPs, kBlockKeptPs, kAccKept0Ps, kAccKept0XPs, kComposeK0Ps, kAccPhysPs, kAccPhysFastPs, kT3dPs, kAccPhysXPs,
-    kAccPhysInPs, kAccPhysInFastPs, kT3dDensePs, kShaderCount
+    kAccPhysInPs, kAccPhysInFastPs, kT3dDensePs, kGhostKeptPs, kShaderCount
 };
 const char* EntryOf(ShaderId id);
 bool IsVertex(ShaderId id);

@@ -669,6 +669,12 @@ line (next to a sconce 1.2 m under the line: 0.86 against 0.46 at class 2).
   reset at piece 0). `BlurWalls` then blurs every class-2 block with the game's algorithm with those rows around it and
   writes it back, so the walls below and above blur across the line as one wall. Room 0 is left out: outside walls of
   stories under the camera are lit at class 0 (no blur), so the wall above must end on the exact light at the line.
+- A kept room relit on the GPU without a solve ([gpu-room-lamps.md](gpu-room-lamps.md)) has only its own texels lit with the
+  lamps of now; its rows beyond were lit by its solve. Since 3.1.1 each row beyond takes the change the relight made to its
+  column's edge texel, per byte and clamped (`OutdoorDeltaModel::FollowGhosts`, `GhostKeptPS`, and the same in
+  `KeptFinalCheck`); an edge texel left as it was leaves them unchanged. Before, after the lamps of a lot came on at night
+  with an atrium's lower story still to be solved, that story's top rows blurred against its lamps-off rows: a dark band
+  about one texel tall under the floor line (F8 captures of 2026-11-10, 10:01:53, gone at 10:02:05 once the room was solved).
 - The horizontal offset (samples at `(i + 0.5) * run/cols`, drawn texel centre to texel centre) is left alone: samples on
   a wall's very end sit on the next wall's line, where the 2D wall test is ambiguous.
 

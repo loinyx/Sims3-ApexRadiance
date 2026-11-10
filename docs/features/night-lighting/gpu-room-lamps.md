@@ -16,7 +16,7 @@ probe](gpu-room-lamps-probe.md) on too, each kept solve is recomposed on the CPU
 | Default | On, physical model, sharper floors; with Classic, on another game build, or when Quick outdoor lamp edits cannot run on the game build, the game's room solves |
 | Menu | No switch of its own (System > Performance > Lamp lighting); its comparison: Developer > Compare lighting paths > Keep indoor lamps for GPU |
 | Configuration | `gpuRoomLamps` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml`, read only in developer mode. An older config with `gpuRoomLampsCapture = false` takes the new model and floor defaults once; with it on, its saved values stay |
-| Source | [`features/outdoor_delta.cpp`](../../../features/outdoor_delta.cpp) (`KeepEnd`, `KeptSelfCheck`, `KeepFinals`, `KeptFinalCheck`, `BuildKeptMap`, `RoomFinalized`), [`features/rt_lamp_model.h`](../../../features/rt_lamp_model.h) (`KeptAdd`, `KeptTexel`), [`features/gpu_room_lamps.cpp`](../../../features/gpu_room_lamps.cpp), [`features/rt_lamp_gpu.cpp`](../../../features/rt_lamp_gpu.cpp) (`RelightKept`), [`shaders/rt_lamps_hlsl.h`](../../../shaders/rt_lamps_hlsl.h) (`AccKeptPS`, `ComposeKeptPS`, `CopyAtPS`, `BlockKeptPS`), [`features/room_map_dither.cpp`](../../../features/room_map_dither.cpp) (the pack input), [`features/level_light_share.cpp`](../../../features/level_light_share.cpp) (`LightEvalHook`, `FinalizeHook`, `LotRooms`), [`features/lamp_mark_filter.cpp`](../../../features/lamp_mark_filter.cpp) (`MarkDecideImpl`), [`features/room_lamp_move.h`](../../../features/room_lamp_move.h) and [`features/room_light_tests.h`](../../../features/room_light_tests.h) (lamp moves), [`features/outdoor_delta_model.h`](../../../features/outdoor_delta_model.h) (`BasisPass`, `BasisPartNow`, `BasisPackInput`: directional maps) |
+| Source | [`features/outdoor_delta.cpp`](../../../features/outdoor_delta.cpp) (`KeepEnd`, `KeptSelfCheck`, `KeepFinals`, `KeptFinalCheck`, `BuildKeptMap`, `RoomFinalized`), [`features/rt_lamp_model.h`](../../../features/rt_lamp_model.h) (`KeptAdd`, `KeptTexel`), [`features/gpu_room_lamps.cpp`](../../../features/gpu_room_lamps.cpp), [`features/rt_lamp_gpu.cpp`](../../../features/rt_lamp_gpu.cpp) (`RelightKept`), [`shaders/rt_lamps_hlsl.h`](../../../shaders/rt_lamps_hlsl.h) (`AccKeptPS`, `ComposeKeptPS`, `CopyAtPS`, `BlockKeptPS`, `GhostKeptPS`), [`features/room_map_dither.cpp`](../../../features/room_map_dither.cpp) (the pack input), [`features/level_light_share.cpp`](../../../features/level_light_share.cpp) (`LightEvalHook`, `FinalizeHook`, `LotRooms`), [`features/lamp_mark_filter.cpp`](../../../features/lamp_mark_filter.cpp) (`MarkDecideImpl`), [`features/room_lamp_move.h`](../../../features/room_lamp_move.h) and [`features/room_light_tests.h`](../../../features/room_light_tests.h) (lamp moves), [`features/outdoor_delta_model.h`](../../../features/outdoor_delta_model.h) (`BasisPass`, `BasisPartNow`, `BasisPackInput`: directional maps) |
 
 ## The problem
 
@@ -669,7 +669,8 @@ No failure stops the GPU's light for good. Each case below used to last until a 
   parts grouped by lamp in the sum's layout (texel j of the map at `(j % 1024, j / 1024)`), one compose point per place's last
   write (ramp x ambient and ramp from `IndoorSplit` on the CPU), the class-2 blocks with their rows beyond packed in shelves
   of a layout as wide as the atlas, the copies (to places kept or not) and the restores. `Engine::RelightKept`: `AccKeptPS`
-  per lamp (blend one, one), `ComposeKeptPS` into the map or the layout, `BlurRowPS` / `BlurColPS` over the layout's blocks,
+  per lamp (blend one, one), `ComposeKeptPS` into the map or the layout, `GhostKeptPS` over the rows beyond (below),
+  `BlurRowPS` / `BlurColPS` over the layout's blocks,
   `BlockKeptPS` back into the map, the copies with `ComposeKeptPS` (the source texel at the copy's place), the restores with
   `CopyAtPS` from the game's map; the map targets take the room's own map size. Buffers are DEFAULT and dropped at a device
   reset (made again on use). `LevelLightShare`'s `FinalizeHook` calls `OutdoorDelta::RoomFinalized` after the game's
@@ -795,7 +796,7 @@ No failure stops the GPU's light for good. Each case below used to last until a 
   an edit, weight-0 texels, the alpha floor, a roofless texel's hue and alpha). `tools/rt_lamps_test` draws a synthetic kept
   room on a floor (copies, restores; its own map 48x40 under a 64x64 working map, copies from past the corner) and a class-2
   wall atlas (three blocks, rows beyond above, below, both, none) with the production passes on a Direct3D 9 device and
-  compares every texel of the own map with `KeptAdd` + `KeptTexel` + the pack + `BlurBlock`, one of its lamps a light with its
+  compares every texel of the own map with `KeptAdd` + `KeptTexel` + the pack + `FollowGhosts` + `BlurBlock`, one of its lamps a light with its
   colour alone, one a TubeLight and one a RectangleAreaLight; a wall atlas of another size and a map larger than the working map are refused. Room 0: two kept lamps (one
   its colour alone) added by `AddKeptParts` between `Accumulate` and `ComposePS`, against `KeptAdd` + `PackInput` + the pack.
   Room 0's exit and floor mask lamps (`Room0KeptXCheck`): masked, exit ground and plain texels, two exit lamps with floor mask

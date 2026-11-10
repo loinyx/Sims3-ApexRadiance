@@ -1,5 +1,6 @@
 // Offline, read-only checks of the policy used by the room updater.
 #include "features/room_ambient_policy.h"
+#include "features/outdoor_delta_model.h"
 #include <cstdio>
 #include <limits>
 #include <initializer_list>
@@ -215,6 +216,36 @@ int main() {
         check(!SwapHolds(live, rec, shared, rec[0]), "swap: a second colour not the record's is refused");
         live[1][0] = NAN;
         check(!SwapHolds(live, rec, shared, rec[0]), "swap: a NaN is refused");
+    }
+    // A kept atrium wall relit without a solve (FollowGhosts, GhostKeptPS): the rows lit beyond its edges follow the change of
+    // their edge texel, so the blur across the floor line does not pull the relit edge back to the solve's light
+    {
+        using OutdoorDeltaModel::FollowGhosts;
+        const uint32_t unlit = 0x10202020u, lit = 0x10A0B0C0u, ghostDark = 0x10181818u;
+        // ext: 2 rows above, 2 block rows, 2 rows below, 2 columns
+        uint32_t ext[12] = {ghostDark, ghostDark, ghostDark, ghostDark, lit, unlit, unlit, lit, ghostDark, ghostDark, ghostDark, ghostDark};
+        const uint32_t solved[4] = {unlit, unlit, unlit, unlit};
+        uint32_t same[12], sameBefore[12];
+        std::memcpy(same, ext, sizeof ext);
+        same[4] = unlit, same[7] = unlit;
+        std::memcpy(sameBefore, same, sizeof same);
+        FollowGhosts(same, solved, 2, 2, true, true);
+        check(std::equal(std::begin(same), std::end(same), std::begin(sameBefore)), "ghosts: an unchanged relight leaves the rows beyond as the solve lit them");
+        FollowGhosts(ext, solved, 2, 2, true, true);
+        check(ext[0] == 0x1098A8B8u && ext[2] == 0x1098A8B8u, "ghosts: the rows above follow their relit edge texel");
+        check(ext[1] == ghostDark && ext[3] == ghostDark, "ghosts: a column whose edge kept its light keeps its rows above");
+        check(ext[9] == 0x1098A8B8u && ext[11] == 0x1098A8B8u && ext[8] == ghostDark, "ghosts: the rows below follow the bottom edge");
+        uint32_t clampHi[3] = {0xF0F0F0F0u, 0xF0F0F0F0u, 0xFF000000u};
+        const uint32_t from[1] = {0x00000000u};
+        FollowGhosts(clampHi, from, 1, 1, true, false);
+        check(clampHi[0] == 0xFFF0F0F0u && clampHi[1] == 0xFFF0F0F0u, "ghosts: a byte past 255 is clamped");
+        uint32_t clampLo[3] = {0x00000000u, 0x00000005u, 0x00000005u};
+        const uint32_t fromLit[1] = {0x00000020u};
+        FollowGhosts(clampLo, fromLit, 1, 1, false, true);
+        check(clampLo[1] == 0u && clampLo[2] == 0u, "ghosts: a byte under 0 is clamped");
+        uint32_t none[2] = {lit, unlit};
+        FollowGhosts(none, solved, 2, 1, false, false);
+        check(none[0] == lit && none[1] == unlit, "ghosts: a block with no rows beyond is left alone");
     }
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
