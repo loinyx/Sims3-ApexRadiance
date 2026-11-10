@@ -1003,6 +1003,24 @@ bool SeenBefore(const SeenLamp& a, const SeenLamp& b) { return a.light != b.ligh
 // them (a stale entry is rejected by RoomStillSame and replaced at its room's next gather).
 void MeasureGatherMemory(); // development builds (memory_owners): at the end of the file
 void MeasureRenderMemory(); // (the same, render thread: OnPresent)
+// ---- Fast lot pictures (setup_lot_policy.h): a lot the game lights only for its picture gathers without light sharing ----
+// t_captureGather: this gather is of such a lot (OutdoorGather); OpeningsOn, RoofedOpeningsOn, InnerOpeningsOn and the indoor
+// share then read off, so their existing off paths run. g_captureLots: the lots gathered or updated so, until their capture
+// ends (EndLotCapture clears Apex's per-room state of that lot then). g_captureRooms: the rooms whose last gather was gated, so
+// their solve takes the same off path (CapturedRoom). g_captureResolve: lots whose gate ended while still at the high quality
+// (no game re-solve follows): every room of theirs is sent again on the render thread (ProbeLotCapture). All under
+// g_captureLotsMx: gathers also run off the light tree thread (the lot impostor's synchronous solve)
+thread_local bool t_captureGather = false;
+struct CaptureNote {
+    uintptr_t tracker = 0;
+    DWORD since = 0;
+    int rooms = 0;
+};
+std::mutex g_captureLotsMx;
+std::unordered_map<uint64_t, CaptureNote> g_captureLots;
+std::unordered_set<uintptr_t> g_captureRooms;
+std::vector<uintptr_t> g_captureResolve;
+uint64_t CaptureGated(uintptr_t tracker); // below: the lot id when the gate is on for that lot, else 0
 void ClearRoomMeasures();  // below: the per-room measures of the normalisation hook (g_roomTook, g_roomWalls, g_normEnd, g_normUsed)
 void PruneDeadStoryCaches(bool world); // below: the story grid caches and room records of lots no longer loaded
 void MaybeClearRooms() {
@@ -1012,6 +1030,10 @@ void MaybeClearRooms() {
     if (world) {
         ClearYardCaches();   // light through doors and windows: the story grids and room outlines of the old world
         ClearRoomMeasures(); // their rooms are gone; an address reused by a room of the new world starts with no measure
+        std::lock_guard<std::mutex> lk(g_captureLotsMx);
+        g_captureLots.clear();
+        g_captureRooms.clear();
+        g_captureResolve.clear();
     }
     PruneDeadStoryCaches(world); // every kLiveSweepMs, and at a new world
     if (!world && g_rooms.size() <= 8192) return;
@@ -5090,6 +5112,7 @@ int RequeueInnerDoors(uintptr_t tracker, int S);      // below (indoor light thr
 bool InnerOpeningsOn();                               // below
 void RefreshStoryWallPatches(uintptr_t mgr);          // below (the outside walls' copy)
 void DrainWarmStories() {
+    if (t_captureGather) return; // (the options read off here: the next gather drains them)
     std::vector<std::pair<uintptr_t, int>> due;
     {
         std::lock_guard<std::mutex> lk(g_warmMx);
@@ -5105,6 +5128,7 @@ void DrainWarmStories() {
             const uintptr_t mgr = SafeStoryManager(tracker, story);
             WarmOpeningGrid(mgr);
             if (mgr) RefreshStoryWallPatches(mgr); // the outside walls' copy for objects and the ground (its openings)
+            if (CaptureGated(tracker)) continue; // (a lot lit only for its picture: its rooms solve again when the capture ends)
             if (roofed) RequeueRoofedDoors(tracker, story); // outdoor light through openings: the roofed rooms whose doors changed
             if (inner) RequeueInnerDoors(tracker, story);   // indoor light through openings: the rooms whose openings into roofed rooms changed
         }
@@ -7712,7 +7736,7 @@ void ShareIndoorLights(BYTE* treeLevel, BYTE* room) {
         ++g_roomsGen;
     }
     if (id > 0) BeginTaker(key); // what it took (and the boosts that came with it) is taken again below, or not
-    if (id <= 0 || !g_indoorReady || !g_indoorOn.load(std::memory_order_relaxed)) return;
+    if (id <= 0 || !g_indoorReady || !g_indoorOn.load(std::memory_order_relaxed) || t_captureGather) return;
     const uintptr_t rmgr = *reinterpret_cast<const uintptr_t*>(room);
     if (!rmgr) return;
     const int S = *reinterpret_cast<const int*>(rmgr + 0x88);
@@ -7934,7 +7958,7 @@ void ShareRoomZeroFromBelow(BYTE* treeLevel, BYTE* room) {
     std::shared_ptr<const StoryGrid> grid;
     std::vector<int> rooms;
     std::vector<uint8_t> placed;
-    if (g_indoorOn.load(std::memory_order_relaxed) && DevSwitches::OpenRoomsAbove() && mgrBelow && levelS && LevelManager(levelS) == rmgr &&
+    if (g_indoorOn.load(std::memory_order_relaxed) && !t_captureGather && DevSwitches::OpenRoomsAbove() && mgrBelow && levelS && LevelManager(levelS) == rmgr &&
         ReadGridSize(mgrBelow, w, h) && w > 0 && h > 0 && w <= 1024 && h <= 1024 && (grid = info.grid[0] ? info.grid[0] : EnsureStoryGrid(rmgr)) && grid->w == w && grid->h == h) {
         rooms.assign(static_cast<size_t>(w) * h * 4, 0);
         placed.assign(rooms.size(), 1);
@@ -8392,6 +8416,73 @@ void DropReplacedManagers(uintptr_t tracker, const uintptr_t (&before)[8], const
     DropDeadSnaps(gone, n);
     if (ThreadId() == g_gatherThread.load(std::memory_order_relaxed)) DropDeadStoryGrids(gone, n); // (that thread's caches)
 }
+bool LotOfMgr(uintptr_t mgr, uint64_t* lot, int* quality); // below (the lot capture test)
+int ForgetRoomMeasures(const uintptr_t* mgrs, int n, uintptr_t tracker); // below (with ClearRoomMeasures)
+void NoteCapture(uint64_t lot, uintptr_t tracker, bool room) { // any thread
+    std::lock_guard<std::mutex> lk(g_captureLotsMx);
+    CaptureNote& c = g_captureLots[lot];
+    if (!c.since) c.since = std::max<DWORD>(GetTickCount(), 1);
+    c.tracker = tracker;
+    c.rooms += room ? 1 : 0;
+}
+// The room's last gather was gated or not (its solve, which can last several frames, takes the same path: CapturedRoom)
+void NoteCaptureRoom(const BYTE* room, bool gated) { // any thread
+    std::lock_guard<std::mutex> lk(g_captureLotsMx);
+    if (!gated) {
+        if (!g_captureRooms.empty()) g_captureRooms.erase(reinterpret_cast<uintptr_t>(room));
+        return;
+    }
+    if (g_captureRooms.size() > 16384) g_captureRooms.clear();
+    g_captureRooms.insert(reinterpret_cast<uintptr_t>(room));
+}
+// Per sample (ownYard): looked up once per room and solve (t_bounceSolve counts this thread's solves)
+bool CapturedRoom(const BYTE* room) {
+    thread_local const BYTE* s_room = nullptr;
+    thread_local uint32_t s_solve = 0;
+    thread_local bool s_gated = false;
+    if (room != s_room || s_solve != t_bounceSolve) {
+        s_room = room, s_solve = t_bounceSolve;
+        std::lock_guard<std::mutex> lk(g_captureLotsMx);
+        s_gated = !g_captureRooms.empty() && g_captureRooms.count(reinterpret_cast<uintptr_t>(room)) != 0;
+    }
+    return s_gated;
+}
+// A lot no longer gated after its capture (BeforeRoomUpdate, light tree thread). When its quality went back to low, the game
+// solves every room of each story again (0x006A5EF0 -> 0x006A5C90(1)); when the gate ended at the high quality (the world's
+// active lot or the priority lot was set late), no such solve follows, so every room of the lot is sent again (g_captureResolve).
+// Apex's per-room state of the gated solves goes: OutdoorDelta's kept parts and the per-room measures. LotState stays: it was
+// not advanced while gated, so the loading triggers missed meanwhile fire at the lot's next update (as before this gate).
+// (Real-time outdoor lamps keeps no relit map of such a lot: LotCapture.)
+void EndLotCapture(uintptr_t tracker) {
+    if (!tracker || ThreadId() != g_gatherThread.load(std::memory_order_relaxed)) return; // (the next update on that thread)
+    {
+        std::lock_guard<std::mutex> lk(g_captureLotsMx);
+        if (g_captureLots.empty()) return;
+    }
+    uint64_t lot = 0;
+    int quality = 0;
+    const uintptr_t mgr0 = SafeStoryManager(tracker, 0);
+    if (!mgr0 || !LotOfMgr(mgr0, &lot, &quality)) return;
+    CaptureNote note;
+    {
+        std::lock_guard<std::mutex> lk(g_captureLotsMx);
+        const auto it = g_captureLots.find(lot);
+        if (it == g_captureLots.end()) return;
+        note = it->second;
+        g_captureLots.erase(it);
+        if (quality) g_captureResolve.push_back(tracker);
+    }
+    uintptr_t mgrs[12];
+    int n = 0;
+    for (int s = -4; s <= 7; s++)
+        if (const uintptr_t m = SafeStoryManager(tracker, s)) mgrs[n++] = m;
+    const int kept = OutdoorDelta::ForgetLot(mgrs, n);
+    const int measures = ForgetRoomMeasures(mgrs, n, tracker);
+    LOG_INFO(std::format("[SetupLot] Lot {:016X}: lot capture over after {} ms, {} room gathers skipped light sharing; {} kept room parts and {} "
+                         "room measures cleared{}",
+                         lot, GetTickCount() - note.since, note.rooms, kept, measures,
+                         quality ? "; the gate ended at the high quality: every room is sent again" : ""));
+}
 void BeforeRoomUpdate(BYTE* tl) {
     const uintptr_t mgr = *reinterpret_cast<const uintptr_t*>(tl);
     if (!mgr) return;
@@ -8399,6 +8490,9 @@ void BeforeRoomUpdate(BYTE* tl) {
     const int L = *reinterpret_cast<const int*>(tl + 0x1A0);
     if (L < 0 || L > 7 || !tracker || TreeLevel(tracker, L) != reinterpret_cast<uintptr_t>(tl)) return;
     if (L == 0) { // once per lot and update
+        // a lot lit only for its picture: none of Apex's sends (its rooms solve again when the capture ends, EndLotCapture)
+        if (const uint64_t capture = CaptureGated(tracker)) return NoteCapture(capture, tracker, false);
+        EndLotCapture(tracker);
         // stacked rooms whose normalisation or ambient ramp changed in another member's solve (MergeStackedAmbient)
         std::vector<DepKey> send;
         {
@@ -9316,7 +9410,7 @@ bool SendRoomZero(uintptr_t tracker, int story) {
     }
 }
 
-// ---- the lot capture test (step 1, log only): its inputs, also read on each gather; ProbeLotCapture logs them ----
+// ---- the lot capture test (fast lot pictures): its inputs, read on each gather and by ProbeLotCapture ----
 uint64_t WorldActiveLotId(int* ok) {
     // the world's active lot getter 0x00C5FB00 (mov eax,[ecx+170h]; mov edx,[ecx+174h]; ret) of Steam 1.67.2, checked once
     static std::atomic<int> s_getter{-1}; // (render and gather threads: both compute the same answer)
@@ -9351,17 +9445,24 @@ bool CaptureGate(uintptr_t mgr, int quality, uint64_t lot, uint64_t world, int g
     *priority = !known || played;
     return SetupLotPolicy::Gate(allHigh, getterOk != 0, quality, lot, world, *priority);
 }
-// Gathers the test would have gated, per lot id, at the point where step 2 gates (OutdoorGather): a short misdetection
-// between two 250 ms samples shows here
-std::mutex g_captureMx;
-std::unordered_map<uint64_t, int> g_captureGathers;
-void NoteGatherCapture(uintptr_t mgr) { // gather thread
+// The lot id when the game lights this story manager's lot only for its picture (the test), else 0
+uint64_t CaptureLotOfMgr(uintptr_t mgr) {
     uint64_t lot = 0;
     int quality = 0, getterOk = 0;
-    if (!mgr || !LotOfMgr(mgr, &lot, &quality) || !quality) return;
+    if (!mgr || !LotOfMgr(mgr, &lot, &quality) || !quality) return 0;
     const uint64_t world = WorldActiveLotId(&getterOk);
     bool priority = false;
-    if (!CaptureGate(mgr, quality, lot, world, getterOk, g_allLotsHigh.load(std::memory_order_relaxed), &priority)) return;
+    return CaptureGate(mgr, quality, lot, world, getterOk, g_allLotsHigh.load(std::memory_order_relaxed), &priority) ? lot : 0;
+}
+// fastLotPictures ([patches.NightTerrainRelight], TOML only, default on): such a lot gathers and updates without light sharing
+std::atomic<bool> g_fastLotPictures{true};
+uint64_t CaptureGated(uintptr_t tracker) {
+    return g_fastLotPictures.load(std::memory_order_relaxed) && tracker ? CaptureLotOfMgr(SafeStoryManager(tracker, 0)) : 0;
+}
+// Gathers of such lots, per lot id, at the gate (OutdoorGather): a short misdetection between two 250 ms samples shows here
+std::mutex g_captureMx;
+std::unordered_map<uint64_t, int> g_captureGathers;
+void NoteGatherCapture(uint64_t lot) { // gather thread
     std::lock_guard<std::mutex> lk(g_captureMx);
     g_captureGathers[lot]++;
 }
@@ -9376,15 +9477,22 @@ void __fastcall OutdoorGather(BYTE* treeLevel, void*, BYTE* room) {
         if (const int n = DropDisabledLotLights(room)) g_disabledDropped.fetch_add(n, std::memory_order_relaxed);
         if (me && g_xlotSafe.load(std::memory_order_relaxed)) TakeCrossLotLamps(treeLevel, room, me);
         NoteRoomStructure(room);
+        const uintptr_t tracker = *reinterpret_cast<const uintptr_t*>(treeLevel + 4);
+        const uint64_t capture = CaptureLotOfMgr(*reinterpret_cast<const uintptr_t*>(room)); // (room+0: its story manager)
+        if (capture) NoteGatherCapture(capture);
+        t_captureGather = capture && g_fastLotPictures.load(std::memory_order_relaxed);
+        if (t_captureGather) NoteCapture(capture, tracker, true);
+        NoteCaptureRoom(room, t_captureGather); // (the capture's end: BeforeRoomUpdate, EndLotCapture)
         ShareOutdoorLights(treeLevel, room);
         ShareIndoorLights(treeLevel, room);
         ShareRoomZeroFromBelow(treeLevel, room); // (room 0) after the outdoor share's record (RecordRoom), which it adds to
         ShareRooflessLights(treeLevel, room); // after the indoor share, which starts the room's record again
         ShareRoofedOpenings(treeLevel, room); // (roofed rooms) after it too: it adds to the indoor share's record
         ShareInnerLamps(treeLevel, room);     // (every room) last: it adds to every record above
-        NoteGatherCapture(*reinterpret_cast<const uintptr_t*>(room)); // (room+0: its story manager)
+        t_captureGather = false;
         NoteGatherStamp(room, started);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
+        t_captureGather = false;
         g_faults.fetch_add(1, std::memory_order_relaxed);
     }
 }
@@ -10382,7 +10490,7 @@ __declspec(naked) void OutdoorAlphaThunk() {
 // wrapped light evaluation (the per-point test), the room update hooks (the sends) and GameWallTest (the game's test skipped)
 std::atomic<bool> g_openingsOn{false};
 bool OpeningsOn() {
-    return g_openingsOn.load(std::memory_order_relaxed) && g_installed.load(std::memory_order_relaxed) && g_indoorReady && g_enterReady && g_floorMaskReady &&
+    return !t_captureGather && g_openingsOn.load(std::memory_order_relaxed) && g_installed.load(std::memory_order_relaxed) && g_indoorReady && g_enterReady && g_floorMaskReady &&
            g_floorWallsOn.load(std::memory_order_relaxed) && g_evalClasses.load(std::memory_order_relaxed) > 0;
 }
 // Outdoor light through openings (option "luzDeForaPelasAberturas", ShareRoofedOpenings): the room update hooks (the gather
@@ -10390,12 +10498,12 @@ bool OpeningsOn() {
 // openings (without them no door is known and nothing is taken). Roofed rooms have no floor mask: "Walls block light on
 // floors" is not needed.
 bool RoofedOpeningsOn() {
-    return g_roofedOpenOn.load(std::memory_order_relaxed) && g_installed.load(std::memory_order_relaxed) && g_indoorReady && g_enterReady && g_cutReady &&
+    return !t_captureGather && g_roofedOpenOn.load(std::memory_order_relaxed) && g_installed.load(std::memory_order_relaxed) && g_indoorReady && g_enterReady && g_cutReady &&
            g_evalClasses.load(std::memory_order_relaxed) > 0;
 }
 // Indoor light through openings (option "luzInternaPelasAberturas", ShareInnerLamps): the same parts
 bool InnerOpeningsOn() {
-    return g_innerOpenOn.load(std::memory_order_relaxed) && g_installed.load(std::memory_order_relaxed) && g_indoorReady && g_enterReady && g_cutReady &&
+    return !t_captureGather && g_innerOpenOn.load(std::memory_order_relaxed) && g_installed.load(std::memory_order_relaxed) && g_indoorReady && g_enterReady && g_cutReady &&
            g_evalClasses.load(std::memory_order_relaxed) > 0;
 }
 
@@ -11278,7 +11386,8 @@ float* SolvePointBatchImpl(BYTE* room, float* out, void* list2D, void* list3D, v
     // With "Light through doors and windows" a roofless room with an id takes the outdoor lamps of its story that reach it in
     // its own list, tested through its openings and over its walls (GatherSameStory, YardShadow): its floor takes that list
     // only and none of the ground light map, which knows no walls
-    const bool ownYard = masked && *reinterpret_cast<const int*>(room + 0xC) > 0 && OpeningsOn();
+    // (a room gathered for a lot picture has no yard list: CapturedRoom, fast lot pictures)
+    const bool ownYard = masked && *reinterpret_cast<const int*>(room + 0xC) > 0 && OpeningsOn() && !CapturedRoom(room);
     BYTE* room0 = !masked ? nullptr : ownYard ? room : MaskedFloorRoom0(room);
     if (!room0) {
         if (t_odSample) OutdoorDelta::Tap(0, out);
@@ -11525,6 +11634,14 @@ float RoomTookSolveStart(const BYTE* room) { // allocates: HookGuard
     if (t[0] > 0.0f) t[1] = t[0]; // (else keep the one before)
     t[0] = 0.0f;
     return t[1];
+}
+int ForgetRoomMeasures(const uintptr_t* mgrs, int n, uintptr_t tracker) { // EndLotCapture: gather thread
+    const auto of = [&](const auto& kv) { return std::find(mgrs, mgrs + n, kv.second.stamp.mgr) != mgrs + n; };
+    const size_t gone = std::erase_if(g_roomTook, of) + std::erase_if(g_roomWalls, of) + std::erase_if(g_normEnd, of) + std::erase_if(g_normUsed, of);
+    t_normUsedRoom = nullptr;
+    std::lock_guard<std::mutex> lk(g_normResendMx);
+    std::erase_if(g_normResend, [&](const DepKey& k) { return k.tracker == tracker; });
+    return static_cast<int>(gone);
 }
 void ClearRoomMeasures() { // MaybeClearRooms (a new world): gather thread
     g_roomTook.clear();
@@ -14521,7 +14638,7 @@ void RequeueCutStories() {
             if (mgrIds[t] == lot) hit = t;
         for (size_t t = 0; t < nl && hit == nl; t++)
             if (ownerId(t) == lot) hit = t;
-        if (hit == nl) continue;
+        if (hit == nl || CaptureGated(trackers[hit])) continue; // (a lot lit only for its picture: re-solved when the capture ends)
         if (yards) queued += QueueRooflessOf(trackers[hit], story);
         if (std::find(zero.begin(), zero.end(), std::make_pair(lot, story)) != zero.end() && story >= 0 && story <= 7)
             queued += QueueRoomSafe(trackers[hit], story, 0) ? 1 : 0; // room 0's wall test through its openings (doors switched)
@@ -15976,11 +16093,28 @@ void SweepDayRooms() {
 namespace {
 void PublishVisSnap(); // below, with LampVisibilityShared
 
-// ---- the lot capture test, step 1 (setup_lot_policy.h): logs its inputs, gates nothing ----
-// During a New Game the game lights about 11 lots at the high quality only to take their pictures. A later step will
-// skip light sharing on such lots and re-solve them in full; this step only checks the test in the game: each time a lot
-// gets the high quality, and each time its decision changes, one [SetupLot] line.
+// ---- the lot capture test (setup_lot_policy.h): logs its decisions; the gates read it live (CaptureGated) ----
+// During a New Game the game lights about 11 lots at the high quality only to take their pictures; such a lot skips light
+// sharing (OutdoorGather, BeforeRoomUpdate, EndLotCapture). Each time a lot gets the high quality, and each time its
+// decision changes, one [SetupLot] line.
 void ProbeLotCapture(const uintptr_t* trackers, int n) { // render thread, every 250 ms
+    { // lots whose gate ended at the high quality (EndLotCapture): every room of theirs again, with light sharing
+        std::vector<uintptr_t> resolve;
+        {
+            std::lock_guard<std::mutex> lk(g_captureLotsMx);
+            resolve.swap(g_captureResolve);
+        }
+        if (!resolve.empty()) {
+            uintptr_t all[256];
+            const int lots = AllTrackers(all, 256);
+            for (const uintptr_t tracker : resolve) {
+                if (std::find(all, all + std::max(lots, 0), tracker) == all + std::max(lots, 0)) continue; // (unloaded since)
+                int queued = 0;
+                for (int level = -4; level <= 7; level++) queued += RequeueStory(tracker, level);
+                LOG_INFO(std::format("[SetupLot] Tracker {:08X}: lot capture ended at the high quality, {} rooms sent again", tracker, queued));
+            }
+        }
+    }
     static std::unordered_map<uint64_t, bool> s_gated; // lot id -> the test's last decision, while the lot has the high quality
     static bool s_offLogged = false;
     int getterOk = 0;
@@ -15993,7 +16127,8 @@ void ProbeLotCapture(const uintptr_t* trackers, int n) { // render thread, every
             gathers.swap(g_captureGathers);
         }
         for (const auto& [lot, rooms] : gathers)
-            LOG_INFO(std::format("[SetupLot] (log only) Lot {:016X}: {} room gathers would have skipped light sharing (world active lot {:016X})", lot, rooms, world));
+            LOG_INFO(std::format("[SetupLot] Lot {:016X}: {} room gathers {} light sharing (world active lot {:016X})", lot, rooms,
+                                 g_fastLotPictures.load(std::memory_order_relaxed) ? "skipped" : "would have skipped (fastLotPictures off)", world));
     }
     if ((!getterOk || allHigh) && !s_offLogged) {
         s_offLogged = true;
@@ -16010,14 +16145,14 @@ void ProbeLotCapture(const uintptr_t* trackers, int n) { // render thread, every
         now[lot] = gate;
         const auto was = s_gated.find(lot);
         if (was == s_gated.end() || was->second != gate)
-            LOG_INFO(std::format("[SetupLot] (log only) Lot {:016X} tracker {:08X}: quality {}, world active lot {:016X}, priority {}: {}", lot,
+            LOG_INFO(std::format("[SetupLot] Lot {:016X} tracker {:08X}: quality {}, world active lot {:016X}, priority {}: {}", lot,
                                  trackers[i], quality, world, priority ? 1 : 0, gate ? "lot capture" : "not gated"));
         if (was != s_gated.end() && SetupLotPolicy::ResolveDue(lot, was->second, lot, gate))
-            LOG_INFO(std::format("[SetupLot] (log only) Lot {:016X}: lot capture ended, a full re-solve would be sent", lot));
+            LOG_INFO(std::format("[SetupLot] Lot {:016X}: lot capture ended", lot));
     }
     for (const auto& [lot, gated] : s_gated)
         if (!now.count(lot) && SetupLotPolicy::ResolveDue(lot, gated, lot, false))
-            LOG_INFO(std::format("[SetupLot] (log only) Lot {:016X}: left the high quality after a lot capture, a full re-solve would be sent", lot));
+            LOG_INFO(std::format("[SetupLot] Lot {:016X}: left the high quality after a lot capture", lot));
     s_gated.swap(now);
 }
 } // namespace
@@ -17477,6 +17612,8 @@ void SetAllFloors(bool on) {
     if (g_allFloors.exchange(on) != on && g_lodReady) RelightAllRooms(on ? "Every floor in full detail on" : "Every floor in full detail off");
 }
 void SetAllLotsHighQuality(bool on) { g_allLotsHigh.store(on, std::memory_order_relaxed); }
+void SetFastLotPictures(bool on) { g_fastLotPictures.store(on, std::memory_order_relaxed); }
+bool LotCapture(uintptr_t tracker) { return CaptureGated(tracker) != 0; }
 
 void SetWallAlign(bool on) {
     if (g_alignOn.exchange(on) != on && g_alignReady) g_alignRequeue = true; // every room lights its walls again

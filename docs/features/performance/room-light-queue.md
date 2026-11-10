@@ -295,9 +295,9 @@ In [`features/level_light_share.cpp`](../../../features/level_light_share.cpp):
 - The per-point hooks return at once for a light the game is about to drop (colour sum under room+0x63C, the game's own
   sums in the same order).
 - Night Lighting does not relight every lot 3 s after a world loads at night (the game has just solved them).
-- New Game's lot pictures: light sharing still runs on every lot the game lights only for its picture. A log-only test
-  of those lots ([level-light-share.md](../night-lighting/level-light-share.md), Lot capture test) comes first; nothing
-  is skipped yet.
+- New Game's lot pictures: a lot the game lights only for its picture skips light sharing and Apex's sends, and its
+  per-room state is cleared when the picture is taken ([level-light-share.md](../night-lighting/level-light-share.md), Fast lot
+  pictures; `fastLotPictures`).
 
 ### Measuring who sends rooms to the solve
 

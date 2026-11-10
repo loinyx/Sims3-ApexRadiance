@@ -1819,8 +1819,10 @@ void Frame(IDirect3DDevice9* dev) {
     }
     // the active lot
     uintptr_t trackers[4];
-    const int nt = LevelLightShare::ActiveLotTrackers(trackers, 4);
-    if (nt <= 0) return off("no active lot (no lot lit at the high quality)");
+    const int lit = LevelLightShare::ActiveLotTrackers(trackers, 4);
+    // (a lot lit only for its picture is not the active lot: no relit map is made for it, LevelLightShare::LotCapture)
+    const int nt = static_cast<int>(std::remove_if(trackers, trackers + std::max(lit, 0), LevelLightShare::LotCapture) - trackers);
+    if (nt <= 0) return off(lit > 0 ? "a lot capture (the lot is lit only for its picture)" : "no active lot (no lot lit at the high quality)");
     // (the active lot stays the one already active while it is still lit at the high quality: the list's order changes as
     // the camera moves, and each switch dropped and rebuilt every relit map)
     uintptr_t tracker = trackers[0];

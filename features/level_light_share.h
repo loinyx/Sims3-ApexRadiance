@@ -54,6 +54,11 @@ void SetWallAlign(bool on);
 void SetAllFloors(bool on);
 // "High quality on every lot" is on (night_terrain_relight): SetAllFloors then applies to the priority lot only
 void SetAllLotsHighQuality(bool on);
+// Fast lot pictures (TOML fastLotPictures, default on): a lot the game lights only for its picture (New Game's household
+// setup, Edit Town) gathers without light sharing; Apex's caches of it go when its capture ends (setup_lot_policy.h)
+void SetFastLotPictures(bool on);
+// Any thread: that lot is such a lot now and the switch is on
+bool LotCapture(uintptr_t tracker);
 // Walls block lamp light on outdoor floors (open rooms, decks): the floor map's alpha carries the blocked share of the
 // outdoor lamps (relights every room when it changes); Active = installed, the game code matched and on
 void SetFloorWalls(bool on);

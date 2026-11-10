@@ -6921,6 +6921,19 @@ void InvalidateAll(const char* why) {
     (void)why;
     g_gen.fetch_add(1, std::memory_order_relaxed);
 }
+int ForgetLot(const uintptr_t* mgrs, int n) {
+    std::lock_guard<std::recursive_mutex> lk(g_mx);
+    int gone = 0;
+    for (auto it = g_records.begin(); it != g_records.end();)
+        if (std::find(mgrs, mgrs + n, it->second->mgr) != mgrs + n) {
+            g_bytes.fetch_sub(std::min(g_bytes.load(), it->second->bytes));
+            it = g_records.erase(it);
+            ++gone;
+        } else
+            ++it;
+    c_records.store(static_cast<long>(g_records.size()));
+    return gone;
+}
 
 std::string LastDrop(int story, int cls) {
     if (story < 0 || story >= 8 || cls < 0 || cls >= 3) return {};

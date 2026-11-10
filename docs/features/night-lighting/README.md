@@ -158,6 +158,7 @@ Lighting > "Individual options (for tests)" (developer mode) or the TOML file.
 | Developer: Smooth the ground light maps on the GPU (A/B) | `mapaDeLuzSuavizadoNaGpu` | bool | on | | Developer only; off = CPU worker path |
 | Developer: Relight only nearby terrain | `relightNearbyChunks` | bool | off | | Developer only; automatic lamp changes also take the local relight |
 | Developer: Paced terrain sweep | `relightPacedSweep` | bool | on | | Developer only (registration); the default is active in normal mode too |
+| (no menu row) | `fastLotPictures` | bool | on | | TOML only: lots lit only for their picture skip light sharing ([level-light-share.md](level-light-share.md), Fast lot pictures) |
 
 Notes:
 

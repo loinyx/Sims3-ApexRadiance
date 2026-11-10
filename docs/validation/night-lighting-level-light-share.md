@@ -230,15 +230,17 @@ topology mutation inside a point is not reproduced. This release does not promis
 
 ## Open checks
 
-- Lot capture test, log only (3.1.1, not yet tested in game). Load a save: **expected** one `[SetupLot] (log only)` line
-  for the played lot, reading `not gated`, with its id equal to the world active lot or priority 1, and no `room gathers
-  would have skipped light sharing` line for it. Start a New Game: **expected** `lot capture` and `room gathers would have
-  skipped light sharing` for each lot photographed during setup (world active lot 0 or another lot, priority 0), then
-  `lot capture ended` or `left the high quality after a lot capture`; the household's lot reads `not gated` once picked.
+- Fast lot pictures (3.1.1, not yet tested in game). Load a save: **expected** one `[SetupLot]` line for the played lot,
+  reading `not gated`, with its id equal to the world active lot or priority 1, and no `room gathers skipped light
+  sharing` or `lot capture over` line for it. Start a New Game: **expected** `lot capture` and `room gathers skipped light
+  sharing` for each lot photographed during setup (world active lot 0 or another lot, priority 0), then one `lot capture
+  over after N ms` per lot; the household's lot reads `not gated` once picked. Compare the time from the first to the last
+  `Active lot tracker` line with `fastLotPictures = false` on the same world (~110 s before).
   Also, in normal play: pan the camera onto a neighbour's lot and onto a community lot without travelling; open Edit Town
   and select a non-active lot; travel to a community lot and back; open the save-file household picker. **Expected:** no
-  `lot capture` and no `room gathers would have skipped` line in any of these. Lighting and timing are unchanged by this
-  step. Any of those lines for a lot played or viewed in normal play stops the next step.
+  `lot capture` and no `room gathers skipped` line in any of these. Any of those lines for a lot played or viewed in
+  normal play is a failure: set `fastLotPictures = false`. After picking the household, a screenshot at the same camera
+  after 10 s matches a `fastLotPictures = false` run.
 
 - Loading triggers of rooms near openings collected per lot (3.1.1, not yet tested in game): with *Light between
   stories* on, start New Game and time Play to the game opening, against the same world with the build before. With a

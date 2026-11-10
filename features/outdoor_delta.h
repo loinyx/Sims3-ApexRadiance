@@ -380,6 +380,9 @@ void OnWorldChanged();
 // Every frame: the game's night level (0 day, 1 night), for the instant day/night switch's clock (PhaseCache)
 void NoteNightLevel(float level);
 void InvalidateAll(const char* why); // options that change how rooms are lit (every room lights again)
+// (light tree thread) the kept parts of the rooms of these story managers go (a lot's capture for its picture ended);
+// returns how many
+int ForgetLot(const uintptr_t* mgrs, int n);
 std::string Status();
 
 } // namespace OutdoorDelta

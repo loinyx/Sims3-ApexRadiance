@@ -1277,22 +1277,47 @@ every room, rigs; the terrain keeps the load's own rebuild) once the room list i
 for 250 ms, polled every 200 ms from 500 ms after world-live, and at the latest after 8 s (`AfterLoadRefreshReady`). The
 room enumeration is expired at world-live. A setting change pending at that moment takes over.
 
-### Lot capture test (step 1, log only)
+### Fast lot pictures (lot capture test)
 
-During a New Game the game lights about 11 lots at the high quality, one after another, only to take their pictures,
-and light sharing makes each of those solves heavier. A later step may skip light sharing on such lots and re-solve them
-in full when they are played or viewed. This step only checks the test while the game runs and changes no lighting.
+During a New Game the game lights about 11 lots at the high quality, one after another, only to take their pictures
+(the ThumbnailManager forces lot quality +0x4D and waits for every solve of the lot), and light sharing makes each of
+those solves heavier. Such a lot now skips light sharing (`fastLotPictures`, TOML only, default on); off, the test only
+logs.
 
 `ProbeLotCapture` (every 250 ms, from `OnPresent`) applies `SetupLotPolicy::Gate` (`features/setup_lot_policy.h`) to
 each lot at the high quality: the lot is a lot capture when its story manager has the high quality (+0x288), its id
 (+0x90/+0x94) is not the world's active lot (WorldManager +0x170/+0x174, the getter 0x00C5FB00, whose bytes are
 checked once), the game does not mark it as its priority lot, and *High quality on every lot* is off. It writes one
-`[SetupLot] (log only)` line when a lot gets the high quality or its decision changes, and one when a lot capture ends.
+`[SetupLot]` line when a lot gets the high quality or its decision changes, and one when a lot capture ends.
 The priority lot comes from `RoomLightQueue::PlayedLot` (bytes checked, fault-guarded; unknown counts as priority). The
-same test also runs on each room gather in `OutdoorGather`, where step 2 would gate: the number of gathers it would have
+same test also runs on each room gather in `OutdoorGather`, where it gates: the number of gathers it
 gated is logged per lot every 250 ms, so a short misdetection between two samples still shows.
 Unverified while the game runs: that the played lot's id matches the world's active id. `tools/setup_lot_test` checks
 the decision offline.
+
+What a gated lot skips (the test evaluated live, per lot):
+- Gather (`OutdoorGather`, latched per room): `OpeningsOn`, `RoofedOpeningsOn`, `InnerOpeningsOn` and the indoor share
+  (`ShareIndoorLights`, `ShareRoomZeroFromBelow`) read off, so the options' existing off paths run. The outdoor share
+  between stories stays. `DrainWarmStories` is not drained inside such a gather.
+- Sends: the lot's whole `BeforeRoomUpdate` block (loading triggers, settle round, stacked ambient and normalisation
+  resends, audits), its door sends in `DrainWarmStories` and its sends in `RequeueCutStories`.
+- Real-time outdoor lamps: such a lot is not the active lot, so no relit map is made for it.
+
+The solve itself is not gated, except that a roofless room gathered without its yard list does not take the yard path
+(`ownYard`, `CapturedRoom`: the rooms whose last gather was gated), so the pictures keep the ground light map on patios.
+When a lot's updates are no longer gated (its quality dropped, or it became the played lot), `EndLotCapture` (light tree
+thread, first `BeforeRoomUpdate` of that lot) clears Apex's per-room state of the gated solves: OutdoorDelta's kept parts
+of its story managers (`OutdoorDelta::ForgetLot`) and the per-room measures (`g_roomTook`, `g_roomWalls`, `g_normEnd`,
+`g_normUsed`, its `g_normResend`). The lot's `LotState` stays: it was not advanced while gated, so the loading triggers
+missed meanwhile fire at the lot's next update, as they did before the gate, and nothing runs twice. The game itself
+solves every room of a story again when its quality drops (0x006A5EF0 -> 0x006A5C90(1), from the disassembly, not traced
+in game). When the gate ends while the lot still has the high quality (the world's active lot or the priority lot was
+set late, a load or a camera return), no such game solve follows: every room of the lot is sent again from the render
+thread (`ProbeLotCapture`, `RequeueStory` on stories -4..7), so a misdetected lot recovers its full lighting. Logs:
+`[SetupLot] Lot X: lot capture over after N ms, R room gathers skipped light sharing; ...` and, for the high-quality
+case, `[SetupLot] Tracker T: lot capture ended at the high quality, N rooms sent again`. The pictures taken during the
+capture show the lighting without light sharing.
+Needs *Faster room lighting* (the priority lot check): when it cannot answer, no lot is gated.
 
 ### Wall seam recording
 

@@ -268,6 +268,7 @@ bool g_lotPassNoTerrainMap = true;
 //    camera first (the world-load rebuild and the button stay full rebuilds).
 bool g_localRelight = false;
 bool g_pacedSweep = true; // test007: gradual external terrain updates, validated in game
+bool g_fastLotPictures = true; // TOML only (no menu row): lots lit only for their picture skip light sharing (LevelLightShare::LotCapture)
 
 // FUN_00c7f750(chunk, lot, out) builds the per-chunk light/fog pass. For the LOT pass (lot=1, [ebp+0Ch]) it binds the
 // rebuilt terrain lightmap chunk+0xD8 when it exists; that texture has no street-lamp light inside lot footprints, so
@@ -2596,6 +2597,9 @@ class NightTerrainRelightPatch : public ApexPatch {
         RegisterBoolSetting(&g_relightLots, "recalcularLotesAoAnoitecer", true,
             S3SS_TR("Depois de refazer o terreno a noite, recalcula a luz de todos os lotes como quando um poste e movido no modo construcao.",
                     "After the dusk terrain rebuild, re-solve the light of every lot."));
+        RegisterBoolSetting(&g_fastLotPictures, "fastLotPictures", true,
+                            "Lots the game lights only to take their picture (New Game household setup, Edit Town) are lit without light sharing, "
+                            "and lit in full again when that picture is taken.");
         if (!kPublicBuild) { // Developer controls only; public uses the approved paced sweep default without exposing diagnostic toggles.
             RegisterBoolSetting(&g_localRelight, "relightNearbyChunks", false,
                 "Developer: a lamp change re-renders only the terrain chunks under the changed lamps, one per frame through the game's own "
@@ -2829,6 +2833,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             LevelLightShare::SetWallAlign(g_wallAlign);
             LevelLightShare::SetAllFloors(g_allFloors);
             LevelLightShare::SetAllLotsHighQuality(g_allLotsHQ);
+            LevelLightShare::SetFastLotPictures(g_fastLotPictures);
             LevelLightShare::SetFloorWalls(g_floorWalls);
             LevelLightShare::SetRealisticOpenings(g_realisticOpenings);
             LevelLightShare::SetOutdoorThroughOpenings(g_outdoorOpenings);
@@ -3255,6 +3260,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_relightLots = true;
         g_localRelight = false;
         g_pacedSweep = true;
+        g_fastLotPictures = true;
     }
 
     // ---- menu (see night_lighting.h): the Night Lights page draws these pieces card by card ----

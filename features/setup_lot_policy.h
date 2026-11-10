@@ -6,7 +6,7 @@
 // (WorldManager +0x170/+0x174, read by the getter 0x00C5FB00) and not the game's priority lot. The played lot never
 // qualifies: its id is the world's active id, or the game marks it as the priority lot.
 // Unverified while the game runs: that the story manager's lot id (+0x90/+0x94) and the world's active id agree on the
-// played lot. Step 1 only logs this decision; nothing is gated on it.
+// played lot. Such a lot skips light sharing (level_light_share.cpp, fastLotPictures).
 #include <cstdint>
 
 namespace SetupLotPolicy {
