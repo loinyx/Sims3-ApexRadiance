@@ -116,6 +116,7 @@ patches in order and builds x86 and x64 with meson; `package.ps1` makes the zip.
 | 0008 | `client.freeIdleBufferCopiesSec`: frees idle static buffer copies, checked by a CRC32C on each fetch |
 | 0009 | `freeIdleManagedCopiesMs` (off): a finer threshold for patch 0003 |
 | 0010 | Render target 0 is back buffer 0: the client made render target 0 a separate place-holder, so `GetRenderTarget(0)` and `GetBackBuffer(0, 0)` returned two objects (Apex's scene detection, which compares them, saw no scene and the window stayed black). Apex 3.0.0 also handles the old client (`framework/d3d9_bootstrap.cpp`) |
+| 0011 | Render target 0 resets the viewport: `SetRenderTarget(0)` reset the viewport and scissor rect on the server but not in the client's copy, so `GetViewport` / `GetScissorRect` returned the previous target's. Light-map smoothing saves and restores them in the middle of a frame and put the stale viewport back: the sea lost its reflection for one frame now and then. Unverified in game that it is the whole cause |
 
 ### Game addresses (Steam 1.67.2)
 

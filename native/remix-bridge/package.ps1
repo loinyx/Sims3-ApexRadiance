@@ -47,6 +47,13 @@ Set-Content -NoNewline -Encoding utf8 (Join-Path $pkg 'Apex Radiance RTX Remix b
 $zip = Join-Path $out 'Apex-Radiance-RTX-Remix-bridge.zip'
 if (Test-Path $zip) { Remove-Item $zip }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-[IO.Compression.ZipFile]::CreateFromDirectory($pkg, $zip) # (forward-slash entries, .trex included once)
+# entries named with '/' (Windows PowerShell 5.1's CreateFromDirectory writes a backslash, which some unzippers keep in the name)
+$archive = [IO.Compression.ZipFile]::Open($zip, 'Create')
+try {
+    foreach ($f in Get-ChildItem -Recurse -File -Force $pkg) {
+        $name = $f.FullName.Substring($pkg.Length + 1).Replace([char]92, [char]47)
+        [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive, $f.FullName, $name, 'Optimal') | Out-Null
+    }
+} finally { $archive.Dispose() }
 "package: $pkg"
 "zip: $zip ($((Get-Item $zip).Length) bytes)"
