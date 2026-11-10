@@ -8987,6 +8987,7 @@ bool DepWaitsFor(uintptr_t tracker) {
 
 bool SettlingAfterWorldLoad(); // below
 bool WorldLiveSeen(); // below: the world went live (OnWorldLive) since the load
+DWORD LotEnteredTick(); // (g_lotEnteredAt, below)
 void AfterChangedWalk(BYTE* tl) {
     if (!*reinterpret_cast<const uintptr_t*>(tl)) return;
     const uintptr_t tracker = *reinterpret_cast<const uintptr_t*>(tl + 4);
@@ -9193,6 +9194,8 @@ void AfterChangedWalk(BYTE* tl) {
     static DWORD s_playedAt = 0;
     const DWORD walkTick = GetTickCount();
     if (played && tracker != s_playedTracker) s_playedTracker = tracker, s_playedAt = walkTick;
+    // (10/11) the camera back on the played lot ("entered" again: its LOD re-adds the lamps it dropped) is no edit either
+    if (const DWORD entered = LotEnteredTick(); entered && walkTick - entered < 2000) s_playedAt = std::max(s_playedAt, entered);
     const bool gameEdit = lampAddedOrRemoved && played && WorldLiveSeen() && !SettlingAfterWorldLoad() && !gpuTail && walkTick - s_playedAt >= 2000;
     const bool editWalk = noted > 0 || gameEdit;
     if (gameEdit && !own.empty()) LampMarkFilter::NoteEdit();
@@ -14248,6 +14251,7 @@ bool SettlingAfterWorldLoad() {
 // The same after the camera enters a lot (OnPresent): its rooms are solved within about 10 s at the settle budget (a logged
 // entry took 10-17 s at the 4 ms one, 1 ms while the camera moved)
 std::atomic<DWORD> g_lotEnteredAt{0};
+DWORD LotEnteredTick() { return g_lotEnteredAt.load(std::memory_order_relaxed); }
 std::atomic<long> g_lotEntries{0};
 constexpr DWORD kSettleAfterEntryMs = 10000;
 constexpr DWORD kSettleWhileWaitingMs = 30000; // and while the played lot's visible rooms wait for their class (SettlingAfterLoad)
@@ -18011,7 +18015,7 @@ bool SettlingAfterLoad() {
     const DWORD live = g_worldLiveAt.load(std::memory_order_relaxed), entered = g_lotEnteredAt.load(std::memory_order_relaxed);
     const DWORD now = GetTickCount();
     if ((live && now - live < kSettleAfterLoadMs) || (entered && now - entered < kSettleAfterEntryMs)) return true;
-    // the entry budget lasts while the played lot's visible rooms still show their quick pass, up to 30 s (lot entry
+    // the entry budget lasts while the played lot's visible rooms still wait for their solve, up to 30 s (lot entry
     // recording 10/11: the last visible room took 49.6 s, its refinement all at the steady 1-4 ms after the 10 s window)
     const DWORD waiting = RoomLightQueue::PlayedRoomWaitingAt();
     return entered && now - entered < kSettleWhileWaitingMs && waiting && now - waiting < 1000;

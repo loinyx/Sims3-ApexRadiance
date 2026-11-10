@@ -142,11 +142,12 @@ bool Stranded(const BYTE* room) {
     }
 }
 
-// A room waiting for (2) or in (3) a solve at a better class (+0xF4) than the maps it shows (+0x100): still on its quick pass
-bool ShowsBelowItsSolve(const BYTE* room) {
+// A room waiting for (2) or in (3) its solve, whatever class it shows (10/11: only the rooms on their quick pass kept the entry
+// budget, so it ended while 6 rooms of the played lot still waited and the rest ran at about a quarter of the speed)
+bool WaitsForSolve(const BYTE* room) {
     __try {
         const int state = *reinterpret_cast<const int*>(room + 0xF0);
-        return (state == 2 || state == 3) && *reinterpret_cast<const int*>(room + 0xF4) > *reinterpret_cast<const int*>(room + 0x100);
+        return state == 2 || state == 3;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
@@ -324,7 +325,7 @@ float Prioritise(BYTE* room, float p) {
         return p * std::min(urgency, kOffLotUrgency);
     }
     const float factor = Factor(room);
-    if (factor >= 2000.0f && ShowsBelowItsSolve(room)) g_playedWaitingAt.store(GetTickCount(), std::memory_order_relaxed);
+    if (factor >= 2000.0f && WaitsForSolve(room)) g_playedWaitingAt.store(GetTickCount(), std::memory_order_relaxed);
     return p * factor * urgency;
 }
 
