@@ -414,6 +414,7 @@ Clock::time_point g_lotRelightAt{};
 // 1 s, so it never runs during the loading screen with the night level still at 0 (lamps off).
 Clock::time_point g_worldAt{}, g_liveAt{}, g_levelRefAt{};
 bool g_live = false;
+Clock::time_point g_drawnSince{}; // scene depth writes seen since (live gate); cleared at each world change
 LightingRestartPolicy::Run g_restart;
 bool g_restartRequested = false;
 bool g_restartUnavailable = false;
@@ -1876,7 +1877,10 @@ void OnPresent() {
             }
             g_sessionSeenActive = true;
         } else if (g_sessionSeenActive) { // never at start-up: only after a world was active
-            if (!g_sessionInactiveSince) g_sessionInactiveSince = tick;
+            if (!g_sessionInactiveSince) {
+                g_sessionInactiveSince = tick;
+                LoadTiming::NoteWorldLeft();
+            }
             else if (tick - g_sessionInactiveSince >= 2000) g_sessionRearm = true;
         }
     }
@@ -1917,6 +1921,7 @@ void OnPresent() {
         g_worldAt = now;
         LoadTiming::NoteWorldChange();
         g_live = false;
+        g_drawnSince = {};
         g_restart.Cancel();
         g_restartRequested = false;
         g_loadSettled.store(false);
@@ -1940,7 +1945,16 @@ void OnPresent() {
         // With the bridge on, its terrain draws are the signal: a load screen longer than 30 s (29/09: 54 s) must not count
         // as live, or the load rebuild runs during it at night level 0 (lamps off in the bake). 120 s covers a bridge that
         // could not start.
-        if (LotLightBridge::ChunkCount() > 0) signal = "world terrain drawn";
+        // 10/11: terrain chunks were seen 10.6 s before the first scene frame (the load screen showed 0 depth writes): the
+        // after-load work ran on a stale night level and was thrown away. Live also needs depth-writing scene draws held
+        // for 500 ms (not WorldSession::InWorld: it waits for this live signal). No draw counting (no post-scene effect
+        // on, or shaders still precompiling: PostScene counts nothing then): as before, terrain chunks alone.
+        const int writes = (std::max)(PostScene::DepthWritesThisFrame(), PostScene::DepthWritesLastFrame());
+        if (!PostScene::Counting() || !ShaderCache::PrecompileComplete() || writes > 0) {
+            if (g_drawnSince == Clock::time_point{}) g_drawnSince = now;
+        } else g_drawnSince = {};
+        const bool sceneDrawn = g_drawnSince != Clock::time_point{} && now - g_drawnSince >= std::chrono::milliseconds(500);
+        if (LotLightBridge::ChunkCount() > 0 && sceneDrawn) signal = "world terrain drawn";
         // 30/09: the fallback also needs a loaded lot (a session that sat 2 minutes at the main menu went "live" there: the
         // start note showed and the after-load refresh ran on 0 lots before the save was even loaded)
         else if (now - g_worldAt >= (g_bridge ? kLiveFallback * 4 : kLiveFallback) && LevelLightShare::LoadedLots() > 0)

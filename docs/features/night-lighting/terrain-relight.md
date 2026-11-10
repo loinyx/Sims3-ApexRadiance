@@ -183,7 +183,10 @@ terrain rebuild of the lamp's chunks (placing or moving a lamp rebuilds them).
    and relit-lamp memory cleared; `ChunkRelight::OnWorldChanged`; `LotLightBridge::OnWorldChanged` (chunk maps, smoothed
    maps, atlas, lamp pool), `LevelLightShare::OnWorldChanged`, `UnlitRooms::OnWorldChanged`; log `World loaded (...)`;
    load rebuild pending.
-3. **World live**: the bridge recorded a world terrain chunk draw (`ChunkCount() > 0`), or, with no draw, a fallback after
+3. **World live**: the bridge recorded a world terrain chunk draw (`ChunkCount() > 0`) and the scene has drawn
+   depth-writing draws for 500 ms (`PostScene` counts; timer cleared at each world change; always true while no post-scene effect counts draws
+   or shaders are still precompiling; not
+   `WorldSession::InWorld`, which waits for this signal), or, with no draw, a fallback after
    30 s (120 s when the bridge is on) once at least one lot is loaded. Then `GameAddr::CheckWorldStructs`,
    `LevelLightShare::OnWorldLive`, `RequestRefreshAfterLoad` (polls from 500 ms, at most 8 s).
 4. **Rebuild consumed** (previous c38 >= 0, now -1): log `Terrain rebuilt (<reason>|by the game itself; ...)`,
