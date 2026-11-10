@@ -6483,6 +6483,16 @@ void KeptRooms(uintptr_t mgr, int cls, std::vector<KeptRef>& out) {
 }
 // What the GPU draws of map m of a kept room (render thread; the kept room is never changed once kept, so it is read without
 // the lock): rt_lamp_gpu.h KeptMapData
+bool KeptAt(uint64_t lot, int story, int id, int cls, KeptRef& out) {
+    std::lock_guard<std::mutex> lk(g_keptMx);
+    for (const auto& [key, k] : g_kept)
+        if (k->lot == lot && k->story == story && k->id == id && k->cls == cls && !k->tailWhy && k->tail.size() == k->texels.size()) {
+            out = KeptRef{reinterpret_cast<const void*>(k->room), k->id, k->version};
+            if (const auto l = g_live.find(key); l != g_live.end() && l->second.version == k->version) out.live = l->second.key;
+            return true;
+        }
+    return false;
+}
 bool KeptBlockers(const void* room, int cls, uint32_t version, std::shared_ptr<const RtLampGpu::BlockerTable>& t, int& header) {
     std::lock_guard<std::mutex> lk(g_keptMx);
     const auto it = g_kept.find(KeyOf(room, cls));

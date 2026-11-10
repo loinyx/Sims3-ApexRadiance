@@ -257,29 +257,40 @@ struct BlockerTable {
         int Recs() const { return t && header >= 0 ? static_cast<int>(t->rows[static_cast<size_t>(header)].v[1]) : 0; }
         float Fade() const { return t && header >= 0 ? t->rows[static_cast<size_t>(header)].v[3] : 0.0f; }
     };
-    static BlockerTable Join(const Part& own, const std::vector<Part>& others) {
+    // (10/11, cross-story furniture shadows) homes: up to 2 rooms of other stories whose lamps light this room (a lamp of story 2
+    // reaching story 1's wall top through a stairwell). Each room tested only its own story's furniture, so a dresser's shadow on the
+    // upper wall stopped dead at the floor line (F7 20-39-31..38). Row 2 + i counts own's and the arch rooms' records plus home i's:
+    // the records are laid out [homes[0]][own][others][homes[1]], so each row's are contiguous. With no homes the table is as before.
+    static BlockerTable Join(const Part& own, const std::vector<Part>& others, const std::vector<Part>& homes = {}) {
         BlockerTable o;
+        const size_t H = 2 + std::min<size_t>(homes.size(), 2);
+        const int nA = homes.size() > 0 ? homes[0].Recs() : 0, nB = homes.size() > 1 ? homes[1].Recs() : 0;
         int total = own.Recs();
         float fade = own.Fade();
         for (const Part& p : others) total += p.Recs(), fade = std::max(fade, p.Fade());
-        o.rows.push_back({{2.0f, static_cast<float>(own.Recs()), 0.0f, fade}});
-        o.rows.push_back({{2.0f, static_cast<float>(total), 0.0f, fade}});
-        o.rows.resize(2 + 2 * static_cast<size_t>(total));
+        const float first = static_cast<float>(H + 2 * static_cast<size_t>(nA)), fadeAll = std::max({fade, nA ? homes[0].Fade() : 0.0f, nB ? homes[1].Fade() : 0.0f});
+        o.rows.push_back({{first, static_cast<float>(own.Recs()), static_cast<float>(nA), fade}});
+        o.rows.push_back({{first, static_cast<float>(total), static_cast<float>(nA), fade}});
+        if (H > 2) o.rows.push_back({{static_cast<float>(H), static_cast<float>(nA + total), 0.0f, fadeAll}});
+        if (H > 3) o.rows.push_back({{first, static_cast<float>(total + nB), static_cast<float>(nA), fadeAll}});
+        o.rows.resize(H + 2 * static_cast<size_t>(nA + total + nB));
         int at = 0;
         const auto add = [&](const Part& p) {
             for (int r = 0; r < p.Recs(); r++, at++) {
                 const size_t first = static_cast<size_t>(p.t->rows[static_cast<size_t>(p.header)].v[0]) + 2 * static_cast<size_t>(r);
                 Row ix = p.t->rows[first + 1];
                 const size_t from = static_cast<size_t>(ix.v[0]), n = static_cast<size_t>(ix.v[1]) * kBlockerRows;
-                o.rows[2 + 2 * static_cast<size_t>(at)] = p.t->rows[first];
+                o.rows[H + 2 * static_cast<size_t>(at)] = p.t->rows[first];
                 ix.v[0] = static_cast<float>(o.rows.size());
-                o.rows[3 + 2 * static_cast<size_t>(at)] = ix;
+                o.rows[H + 1 + 2 * static_cast<size_t>(at)] = ix;
                 o.rows.insert(o.rows.end(), p.t->rows.begin() + static_cast<std::ptrdiff_t>(from), p.t->rows.begin() + static_cast<std::ptrdiff_t>(from + n));
                 o.shapes.push_back(p.t->ShapeOf(p.header, r));
             }
         };
+        if (nA) add(homes[0]);
         add(own);
         for (const Part& p : others) add(p);
+        if (nB) add(homes[1]);
         return o;
     }
     // (glass_share) the lot's glazed spans after the rooms, 2 rows each (T3dDensePS PaneCount): their first row

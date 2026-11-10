@@ -950,7 +950,7 @@ float4 T3dDensePS(float2 vpos : VPOS) : COLOR0 {
             [branch] if (l == (int)gQ.z) {
                 const float4 r = TableAt(l, slot);
                 const float3 law = LawAt(ReadLamp(l), p.xyz, N, wallReach0 * r.y);
-                used = r.x != 0 && (law.b + law.g) + law.r >= gA.y * 0.99, fill = r.w > 0, cross = r.z > 1.5 ? 1.0 : 0.0;
+                used = r.x != 0 && (law.b + law.g) + law.r >= gA.y * 0.99, fill = r.w > 0, cross = r.z > 1.5 ? r.z - 1.0 : 0.0; // (z 2: row 1, arch rooms; 3, 4: rows 2, 3, a story's room joined)
             }
         }
     }
