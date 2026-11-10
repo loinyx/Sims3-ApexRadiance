@@ -25,6 +25,7 @@ It must:
 | [`tools/room_structure_test/run.ps1`](../../tools/room_structure_test/run.ps1) (`check.cpp`) | Extracts `NoteRoomStructure`: a new room schedules a refresh, LOD or repeated gathers do not, roof and wall changes do, repeated changes coalesce | `run.ps1` | MSVC x86 |
 | [`tools/roofed_openings_test/run.ps1`](../../tools/roofed_openings_test/run.ps1) (`check.cpp`) | Extracts the story grid, its ray walk (`GridPassImpl`) and the roofed rooms' doors (`RoofedDoors`, `DoorSig`, `DoorSeen`) and runs them on synthetic grids: a roofed room with a two-cell arch, a lamp in front sees it, one behind or beside does not; the lit floor patch through the arch is bounded by the jambs with no seam between the cells; a ray over the wall's top meets the room's roof; a closed room has no door and stays dark; a window's sill; an arch into another roofed room is no door, into a roofless room it is; the signature follows the doors | `run.ps1` | MSVC x86 |
 | [`tools/room_ambient_test`](../../tools/room_ambient_test/README.md) (`room_ambient_test.cpp`) | Room ambient and scheduling policy (`room_ambient_policy.h`): group deadlines, first dispatch, overdue updates, tick wrap, opening send collection (600 ms / 1.5 s) and skip serial, window recheck timing (0 / 2 s / 6 s, bounded, wrap), lamp refresh delay (120 / 200 ms), safety-net gap (2 s / 500 ms), edit urgency (8 s cap) and edit hold decision, gather ordering, floor priority, structure and floor-edit timing | `run.ps1` | MSVC x86 |
+| `tools/setup_lot_test/` (`check.cpp`) | The lot capture test (`setup_lot_policy.h`): the played lot, a priority lot (also with a world active id of 0 or stale), *High quality on every lot*, an unexpected getter and the low quality are never gated; a lot capture is gated, also with no world active lot; one re-solve per gated to not gated change, never carried to another lot id | `run.ps1` | MSVC x86 |
 | `tools/mesh_occlusion_test/` | The retired mesh blockers' collector, BVH and replacement policy, in the standard and development configurations | `run.ps1 -OpaqueShader <ps.bin> -CutoutShader <ps.bin> -Standard` or `-Development` | MSVC x86, two captured pixel shaders |
 | `tools/liveness_prune_test/` | `liveness_prune.h`: an entry survives one miss and is erased after two sweeps in a row without its key; key 0 is never live | `run.ps1` | MSVC x86 |
 | [`tools/basis_test/basis_test.cpp`](../../tools/basis_test/basis_test.cpp) | `PatchBasisSmooth` / `PatchIndoorBasis` on a captured pixel shader, disassembled with d3dcompiler_47 | `basis_test <ps.bin> [lmSampler]` | d3dcompiler_47, a captured shader |
@@ -228,6 +229,16 @@ topology mutation inside a point is not reproduced. This release does not promis
   post about 0.6 s late (session `21-03-29`: its room 0s solved in full 563 ms after the edit).
 
 ## Open checks
+
+- Lot capture test, log only (3.1.1, not yet tested in game). Load a save: **expected** one `[SetupLot] (log only)` line
+  for the played lot, reading `not gated`, with its id equal to the world active lot or priority 1, and no `room gathers
+  would have skipped light sharing` line for it. Start a New Game: **expected** `lot capture` and `room gathers would have
+  skipped light sharing` for each lot photographed during setup (world active lot 0 or another lot, priority 0), then
+  `lot capture ended` or `left the high quality after a lot capture`; the household's lot reads `not gated` once picked.
+  Also, in normal play: pan the camera onto a neighbour's lot and onto a community lot without travelling; open Edit Town
+  and select a non-active lot; travel to a community lot and back; open the save-file household picker. **Expected:** no
+  `lot capture` and no `room gathers would have skipped` line in any of these. Lighting and timing are unchanged by this
+  step. Any of those lines for a lot played or viewed in normal play stops the next step.
 
 - Loading triggers of rooms near openings collected per lot (3.1.1, not yet tested in game): with *Light between
   stories* on, start New Game and time Play to the game opening, against the same world with the build before. With a

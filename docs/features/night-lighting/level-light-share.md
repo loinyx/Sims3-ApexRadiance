@@ -1277,6 +1277,23 @@ every room, rigs; the terrain keeps the load's own rebuild) once the room list i
 for 250 ms, polled every 200 ms from 500 ms after world-live, and at the latest after 8 s (`AfterLoadRefreshReady`). The
 room enumeration is expired at world-live. A setting change pending at that moment takes over.
 
+### Lot capture test (step 1, log only)
+
+During a New Game the game lights about 11 lots at the high quality, one after another, only to take their pictures,
+and light sharing makes each of those solves heavier. A later step may skip light sharing on such lots and re-solve them
+in full when they are played or viewed. This step only checks the test while the game runs and changes no lighting.
+
+`ProbeLotCapture` (every 250 ms, from `OnPresent`) applies `SetupLotPolicy::Gate` (`features/setup_lot_policy.h`) to
+each lot at the high quality: the lot is a lot capture when its story manager has the high quality (+0x288), its id
+(+0x90/+0x94) is not the world's active lot (WorldManager +0x170/+0x174, the getter 0x00C5FB00, whose bytes are
+checked once), the game does not mark it as its priority lot, and *High quality on every lot* is off. It writes one
+`[SetupLot] (log only)` line when a lot gets the high quality or its decision changes, and one when a lot capture ends.
+The priority lot comes from `RoomLightQueue::PlayedLot` (bytes checked, fault-guarded; unknown counts as priority). The
+same test also runs on each room gather in `OutdoorGather`, where step 2 would gate: the number of gathers it would have
+gated is logged per lot every 250 ms, so a short misdetection between two samples still shows.
+Unverified while the game runs: that the played lot's id matches the world's active id. `tools/setup_lot_test` checks
+the decision offline.
+
 ### Wall seam recording
 
 Starting a recording (Developer > Recorder) arms `BeginSeamRecording`; saving writes `Wall seams.csv` to the recording

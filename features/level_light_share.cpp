@@ -122,6 +122,7 @@
 #include "opening_lamp_balance.h"
 #include "gpu_lamp_law.h"
 #include "tester_toggles.h"
+#include "setup_lot_policy.h"
 #include "drag_lite.h"
 #include "room_solve_causes.h"
 #include "restart_settle.h"
@@ -9315,6 +9316,55 @@ bool SendRoomZero(uintptr_t tracker, int story) {
     }
 }
 
+// ---- the lot capture test (step 1, log only): its inputs, also read on each gather; ProbeLotCapture logs them ----
+uint64_t WorldActiveLotId(int* ok) {
+    // the world's active lot getter 0x00C5FB00 (mov eax,[ecx+170h]; mov edx,[ecx+174h]; ret) of Steam 1.67.2, checked once
+    static std::atomic<int> s_getter{-1}; // (render and gather threads: both compute the same answer)
+    if (s_getter.load(std::memory_order_relaxed) < 0) {
+        static const BYTE kGetter[13] = {0x8B, 0x81, 0x70, 0x01, 0x00, 0x00, 0x8B, 0x91, 0x74, 0x01, 0x00, 0x00, 0xC3};
+        BYTE got[sizeof kGetter] = {};
+        s_getter.store(GameAddr::Get(GameAddr::Id::WorldManagerPtr) && MemPatch::ReadBytes(0x00C5FB00, got, sizeof got) &&
+                       std::memcmp(got, kGetter, sizeof got) == 0, std::memory_order_relaxed);
+    }
+    *ok = s_getter.load(std::memory_order_relaxed);
+    if (!*ok) return 0;
+    __try {
+        const uintptr_t wm = *reinterpret_cast<const uintptr_t*>(GameAddr::Get(GameAddr::Id::WorldManagerPtr));
+        return wm ? static_cast<uint64_t>(*reinterpret_cast<const uint32_t*>(wm + 0x174)) << 32 | *reinterpret_cast<const uint32_t*>(wm + 0x170) : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+bool LotOfMgr(uintptr_t mgr, uint64_t* lot, int* quality) {
+    __try {
+        *lot = static_cast<uint64_t>(*reinterpret_cast<const uint32_t*>(mgr + 0x94)) << 32 | *reinterpret_cast<const uint32_t*>(mgr + 0x90);
+        *quality = *reinterpret_cast<const BYTE*>(mgr + 0x288);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+// The game's priority lot through the checked helper (bytes verified, SEH-guarded); unknown counts as priority: not gated.
+bool CaptureGate(uintptr_t mgr, int quality, uint64_t lot, uint64_t world, int getterOk, bool allHigh, bool* priority) {
+    bool known = false;
+    const bool played = RoomLightQueue::PlayedLot(mgr, &known);
+    *priority = !known || played;
+    return SetupLotPolicy::Gate(allHigh, getterOk != 0, quality, lot, world, *priority);
+}
+// Gathers the test would have gated, per lot id, at the point where step 2 gates (OutdoorGather): a short misdetection
+// between two 250 ms samples shows here
+std::mutex g_captureMx;
+std::unordered_map<uint64_t, int> g_captureGathers;
+void NoteGatherCapture(uintptr_t mgr) { // gather thread
+    uint64_t lot = 0;
+    int quality = 0, getterOk = 0;
+    if (!mgr || !LotOfMgr(mgr, &lot, &quality) || !quality) return;
+    const uint64_t world = WorldActiveLotId(&getterOk);
+    bool priority = false;
+    if (!CaptureGate(mgr, quality, lot, world, getterOk, g_allLotsHigh.load(std::memory_order_relaxed), &priority)) return;
+    std::lock_guard<std::mutex> lk(g_captureMx);
+    g_captureGathers[lot]++;
+}
 void __fastcall OutdoorGather(BYTE* treeLevel, void*, BYTE* room) {
     const DWORD started = GetTickCount();
     const uint64_t me = g_installed.load(std::memory_order_relaxed) && room ? RoomZeroLot(room, &t_gatherStory) : 0; // (GatherLotId)
@@ -9332,6 +9382,7 @@ void __fastcall OutdoorGather(BYTE* treeLevel, void*, BYTE* room) {
         ShareRooflessLights(treeLevel, room); // after the indoor share, which starts the room's record again
         ShareRoofedOpenings(treeLevel, room); // (roofed rooms) after it too: it adds to the indoor share's record
         ShareInnerLamps(treeLevel, room);     // (every room) last: it adds to every record above
+        NoteGatherCapture(*reinterpret_cast<const uintptr_t*>(room)); // (room+0: its story manager)
         NoteGatherStamp(room, started);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         g_faults.fetch_add(1, std::memory_order_relaxed);
@@ -15924,6 +15975,51 @@ void SweepDayRooms() {
 
 namespace {
 void PublishVisSnap(); // below, with LampVisibilityShared
+
+// ---- the lot capture test, step 1 (setup_lot_policy.h): logs its inputs, gates nothing ----
+// During a New Game the game lights about 11 lots at the high quality only to take their pictures. A later step will
+// skip light sharing on such lots and re-solve them in full; this step only checks the test in the game: each time a lot
+// gets the high quality, and each time its decision changes, one [SetupLot] line.
+void ProbeLotCapture(const uintptr_t* trackers, int n) { // render thread, every 250 ms
+    static std::unordered_map<uint64_t, bool> s_gated; // lot id -> the test's last decision, while the lot has the high quality
+    static bool s_offLogged = false;
+    int getterOk = 0;
+    const uint64_t world = WorldActiveLotId(&getterOk);
+    const bool allHigh = g_allLotsHigh.load(std::memory_order_relaxed);
+    {
+        std::unordered_map<uint64_t, int> gathers;
+        {
+            std::lock_guard<std::mutex> lk(g_captureMx);
+            gathers.swap(g_captureGathers);
+        }
+        for (const auto& [lot, rooms] : gathers)
+            LOG_INFO(std::format("[SetupLot] (log only) Lot {:016X}: {} room gathers would have skipped light sharing (world active lot {:016X})", lot, rooms, world));
+    }
+    if ((!getterOk || allHigh) && !s_offLogged) {
+        s_offLogged = true;
+        LOG_INFO(std::format("[SetupLot] gate off: {}", !getterOk ? "the world's active lot getter is not the expected code" : "high quality on every lot"));
+    }
+    std::unordered_map<uint64_t, bool> now;
+    for (int i = 0; i < n; i++) {
+        const uintptr_t mgr = SafeStoryManager(trackers[i], 0);
+        uint64_t lot = 0;
+        int quality = 0;
+        if (!mgr || !LotOfMgr(mgr, &lot, &quality) || now.count(lot)) continue;
+        bool priority = false;
+        const bool gate = CaptureGate(mgr, quality, lot, world, getterOk, allHigh, &priority);
+        now[lot] = gate;
+        const auto was = s_gated.find(lot);
+        if (was == s_gated.end() || was->second != gate)
+            LOG_INFO(std::format("[SetupLot] (log only) Lot {:016X} tracker {:08X}: quality {}, world active lot {:016X}, priority {}: {}", lot,
+                                 trackers[i], quality, world, priority ? 1 : 0, gate ? "lot capture" : "not gated"));
+        if (was != s_gated.end() && SetupLotPolicy::ResolveDue(lot, was->second, lot, gate))
+            LOG_INFO(std::format("[SetupLot] (log only) Lot {:016X}: lot capture ended, a full re-solve would be sent", lot));
+    }
+    for (const auto& [lot, gated] : s_gated)
+        if (!now.count(lot) && SetupLotPolicy::ResolveDue(lot, gated, lot, false))
+            LOG_INFO(std::format("[SetupLot] (log only) Lot {:016X}: left the high quality after a lot capture, a full re-solve would be sent", lot));
+    s_gated.swap(now);
+}
 } // namespace
 void OnPresent() {
     if (DevSwitches::kCompiled) MeasureRenderMemory(); // development builds (memory_owners): this file's containers, every 10 s
@@ -15948,6 +16044,7 @@ void OnPresent() {
             uintptr_t trackers[4] = {};
             // the played lot among the high-quality ones (every detailed lot is one with high quality on every lot)
             const int na = ActiveLotTrackers(trackers, 4);
+            ProbeLotCapture(trackers, na);
             uintptr_t active = na > 0 ? trackers[0] : 0;
             for (int i = 0; i < na; i++)
                 if (const uintptr_t g = StoryManager(trackers[i], 0); g && PlayedLotMgr(g)) {
