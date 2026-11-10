@@ -154,6 +154,10 @@ bool LogAllowed() { return g_lines.fetch_add(1, std::memory_order_relaxed) < 200
 // (S8) a room's ambient now (+0x110, which Rooms at Night moves and a lamp edit taken takes again: OutdoorDelta's AmbientDue)
 bool ReadAmbient(const void* room, float* c) {
     __try {
+        // only a solved room (state +0xF0 4 or 5): a solve zeroes +0x110 until its ambient step, and following that 0 drew a
+        // room with no lamps (its texels all ramp x ambient) pure black; the previous scale stays meanwhile
+        const int state = *reinterpret_cast<const int*>(static_cast<const BYTE*>(room) + 0xF0);
+        if (state != 4 && state != 5) return false;
         std::memcpy(c, static_cast<const BYTE*>(room) + 0x110, 3 * sizeof(float));
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
