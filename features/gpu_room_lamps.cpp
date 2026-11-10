@@ -448,7 +448,7 @@ bool BuildData(const void* room, int cls, uint32_t version, int m, int id, bool 
             }
     return true;
 }
-// A room solved again: its maps' data from a worker, while the entries of its last solve keep drawing. Built in Sig, the four
+// A room solved (again or for the first time in a class): its maps' data from a worker, while the entries of its last solve keep drawing. Built in Sig, the four
 // maps of a room of 47681 texels held the render thread 76 ms in one frame, and a day/night switch's first rooms 128 ms (the
 // hitch before the rooms' light changes, 2026-11-09)
 struct Prebuilt {
@@ -547,7 +547,11 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
     uint64_t sig = 1469598103934665603ull;
     bool any = false;
     for (const OutdoorDelta::KeptRef& r : g_refs) {
-        const auto [it, fresh] = g_entries.try_emplace(std::make_tuple(r.room, cls, m));
+        const auto key = std::make_tuple(r.room, cls, m);
+        // a room's first kept solve in this class: its data from a worker too (built here it held the render thread 160-208 ms
+        // in one frame while the camera moved, 2026-11-10); its texels keep the game's map, as before that solve, until it is ready
+        if (!g_entries.count(key) && !PrebuiltReady(key, mgr, r)) continue;
+        const auto [it, fresh] = g_entries.try_emplace(key);
         Entry& e = it->second;
         if (fresh) {
             e.mgr = mgr, e.cls = cls, e.m = m, e.version = r.version, e.id = r.id;

@@ -648,7 +648,7 @@ int g_coverLogged = -1;          // the coverage last logged (0 incomplete, 1 ev
 double g_frameMsSum = 0;         // Frame's own CPU time a frame (status: its running average)
 long g_frameCount = 0;
 struct Phases {
-    double slots = 0, lamps = 0, mask = 0, draw = 0, shadows = 0, over = 0; // (over: of draw, the kept rooms' ComposeOver)
+    double slots = 0, lamps = 0, mask = 0, draw = 0, shadows = 0, over = 0, rooms = 0; // (over: of draw, the kept rooms' ComposeOver; rooms: GpuRoomLamps::Sig)
     double maskJobs = 0, maskShare = 0, maskLock = 0, maskFill = 0; // the floor mask's parts (render thread)
 };
 bool g_roundOpen = false;        // a relight spread over frames is under way
@@ -2631,8 +2631,12 @@ void Frame(IDirect3DDevice9* dev) {
     GpuRoomLamps::BeginFrame();
     g_lampNow.clear();
     std::unordered_map<const Slot*, uint64_t> roomsSigs;
+    LARGE_INTEGER tr0{}, tr1{};
+    QueryPerformanceCounter(&tr0);
     for (const auto& sp : g_slots)
         if (!sp->mgr && sp->built) roomsSigs[sp.get()] = GpuRoomLamps::Sig(dev, rns[sp->story].mgr, sp->cls, sp->m);
+    QueryPerformanceCounter(&tr1);
+    const double roomsMs = Ms(tr0, tr1);
     std::unordered_set<const Slot*> edited;
     for (const auto& sp : g_slots) {
         const auto it = roomsSigs.find(sp.get());
@@ -3318,7 +3322,7 @@ void Frame(IDirect3DDevice9* dev) {
         }
         g_roundCpuMs += ms + slotsMs + lampsMs;
         g_roundMaps += relit, g_roundFrames++, g_roundTiles += tiles, g_roundNb += nbRelit;
-        g_ph.slots += slotsMs, g_ph.lamps += lampsMs, g_ph.mask += maskMs, g_ph.draw += drawMs, g_ph.over += overMs;
+        g_ph.slots += slotsMs, g_ph.lamps += lampsMs, g_ph.mask += maskMs, g_ph.draw += drawMs, g_ph.over += overMs, g_ph.rooms += roomsMs;
         g_ph.maskJobs += maskJobsMs, g_ph.maskShare += maskShareMs, g_ph.maskLock += maskLockMs, g_ph.maskFill += maskFillMs;
         for (int S : storyList)
             if (std::find(g_roundStories.begin(), g_roundStories.end(), S) == g_roundStories.end()) g_roundStories.push_back(S);
@@ -3336,10 +3340,10 @@ void Frame(IDirect3DDevice9* dev) {
         const std::string gpu = g_lastGpuMs.load() >= 0.0f ? std::format("{:.2f}", g_lastGpuMs.load()) : std::string("-");
         const std::string phases = std::format("phases: maps read {:.2f}, lamps read {:.2f}, floor mask {:.2f} (worker jobs started and taken {:.2f}, share here {:.2f}, "
                                                "buffer lock {:.2f}, buffer fill {:.2f}), shadows {:.2f}, draws {:.2f} (of them the kept rooms over room 0 {:.2f}), "
-                                               "the maps' checks and the rest {:.2f} ms; {} frame{}{}{}",
+                                               "the kept rooms' checks {:.2f}, the maps' checks and the rest {:.2f} ms; {} frame{}{}{}",
                                                g_ph.slots, g_ph.lamps, g_ph.mask, g_ph.maskJobs, g_ph.maskShare, g_ph.maskLock, g_ph.maskFill,
-                                               g_ph.shadows, g_ph.draw - g_ph.shadows, g_ph.over,
-                                               std::max(0.0, g_roundCpuMs - g_ph.slots - g_ph.lamps - g_ph.mask - g_ph.draw), g_roundFrames,
+                                               g_ph.shadows, g_ph.draw - g_ph.shadows, g_ph.over, g_ph.rooms,
+                                               std::max(0.0, g_roundCpuMs - g_ph.slots - g_ph.lamps - g_ph.mask - g_ph.draw - g_ph.rooms), g_roundFrames,
                                                g_roundFrames == 1 ? "" : "s", fast ? ", dragged (cheaper shadows)" : dragging ? ", dragged" : "",
                                                g_roundNb ? std::format("; {} of the maps on the lots next to it", g_roundNb) : std::string());
         // the lamp edits this relight shows
