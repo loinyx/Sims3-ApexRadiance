@@ -51,6 +51,10 @@ struct NoteKeyHash {
 std::unordered_map<NoteKey, uint32_t, NoteKeyHash> g_noted; // -> frame its draw was last looked at (keys never dereferenced)
 int g_sets = 0, g_changes = 0;
 long g_released = 0;
+// (lot load) frame of the last indoor-object draw whose room light map had no known set (BasisFor miss): the next frames
+// look again at once, so a kept solve's new map reaches path A in a frame, not after kCheckEvery frames on the game's shader
+uint32_t g_missAt = 0;
+std::unordered_map<IDirect3DTexture9*, uint32_t> g_missSeen; // missed map -> frame it last re-armed a look (never dereferenced)
 
 constexpr uint32_t kCheckEvery = 30;  // frames between two looks at the draws of one set and shader
 constexpr uint32_t kSweepEvery = 300; // frames between two checks for sets the game has let go of
@@ -133,7 +137,8 @@ void NoteDraw(IDirect3DDevice9* dev, IDirect3DPixelShader9* ps) {
         const NoteKey nk{key, ps};
         if (!g_lastNoted || !(g_lastNotedKey == nk)) g_lastNoted = &g_noted[nk], g_lastNotedKey = nk;
         uint32_t& last = *g_lastNoted;
-        if (last && g_frame - last < kCheckEvery) return;
+        // one look per frame right after a miss, else every kCheckEvery frames
+        if (last && g_frame - last < (g_frame - g_missAt < 2 ? 1u : kCheckEvery)) return;
         last = g_frame;
     }
     // the basis maps at the shader's 4 basis samplers; the room light map = the one other room-map-like texture bound
@@ -187,6 +192,7 @@ void NoteDraw(IDirect3DDevice9* dev, IDirect3DPixelShader9* ps) {
 void OnPresent() {
     g_frame++;
     if (g_noted.size() > 4096) g_noted.clear(), g_lastNoted = nullptr; // keys of textures long gone (never dereferenced)
+    if (g_missSeen.size() > 4096) g_missSeen.clear();
     if (g_frame % kSweepEvery) return;
     // one basis set is shared by a story's light maps (floor and objects): Apex holds one reference per entry naming it
     std::unordered_map<IDirect3DTexture9*, ULONG> ours;
@@ -210,8 +216,17 @@ void OnPresent() {
 
 bool BasisFor(IDirect3DTexture9* lightMap, IDirect3DTexture9* out[4]) {
     if (!g_enabled) return false;
-    const auto it = g_basisOf.find(static_cast<IDirect3DTexture9*>(const_cast<void*>(RtOutdoorLamps::GameMapOf(lightMap))));
-    if (it == g_basisOf.end()) return false;
+    auto* const map = static_cast<IDirect3DTexture9*>(const_cast<void*>(RtOutdoorLamps::GameMapOf(lightMap)));
+    const auto it = g_basisOf.find(map);
+    if (it == g_basisOf.end()) {
+        // only a room-map-like texture is a miss (the caller tries every sampler), and one that keeps missing (a lot without
+        // directional maps) re-arms the looks no more often than kCheckEvery
+        if (RoomMapLike(map)) {
+            auto [seen, fresh] = g_missSeen.try_emplace(map, g_frame);
+            if (fresh || g_frame - seen->second >= kCheckEvery) seen->second = g_missAt = g_frame;
+        }
+        return false;
+    }
     it->second.lastSeen = g_frame; // still in use (objects of this story are drawn)
     for (int k = 0; k < 4; k++) out[k] = it->second.tex[k];
     return true;
@@ -221,6 +236,7 @@ void Clear() {
     for (auto& [lm, s] : g_basisOf) Release(s, lm);
     g_basisOf.clear();
     g_noted.clear();
+    g_missSeen.clear();
     g_psInfo.clear();
     g_lastNoted = nullptr;
     g_lastInfo = nullptr, g_lastInfoPs = nullptr;

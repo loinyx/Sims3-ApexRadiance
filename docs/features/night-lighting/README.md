@@ -456,7 +456,11 @@ The basis maps are read at their own scale: `IndoorBasisScale` sets the size con
 Only 64x64 basis maps (the only size captured) use it. The room light map covers the lot's power-of-two size at
 4 texels/m; the basis maps always cover 64 x 64 m (game basis VS: uv = lot half-metres x 1/128). `RoomMapPadding` keeps
 the directional maps of each room light map while the game holds both (reference count checked every 300 frames); the
-30-frame look is per (+X basis map, shader). The game's textures are never written. Details of the room maps:
+30-frame look is per (+X basis map, shader). When an indoor object's bound room light map has no known set (a
+`BasisFor` miss on a room-map-like texture), the next two frames look once per frame, so after the missing draw itself (on
+the game's shader) a kept solve's new map reaches Apex's indoor-object shader within 2 frames instead of up to 30 (11-40-32 recording: furniture going
+path A -> B -> A on lot load). A map that keeps missing (a lot without directional maps) re-arms the looks at most every
+30 frames. The game's textures are never written. Details of the room maps:
 [engine/room-light-maps.md](../../engine/room-light-maps.md).
 
 ### Game-code side
