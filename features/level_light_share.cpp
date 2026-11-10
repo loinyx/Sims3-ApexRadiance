@@ -9175,12 +9175,23 @@ void AfterChangedWalk(BYTE* tl) {
     // when every lamp registers, nor before the world is live (the load screen's lamps registering made a 16 s "edit"),
     // nor on a lot the camera is not on (a neighbour's lamps added by the game started holds that waited on its rooms)
     const uintptr_t walkMgr = *reinterpret_cast<const uintptr_t*>(tl);
-    if (lampAddedOrRemoved && !own.empty() && WorldLiveSeen() && !SettlingAfterWorldLoad() && !gpuTail && walkMgr && PlayedLotMgr(walkMgr))
-        LampMarkFilter::NoteEdit();
+    const bool played = walkMgr && PlayedLotMgr(walkMgr);
+    // 2026-11-10: a lot streaming in or becoming the played one flips its lamps' enabled bits and rebuilds its wall lists with
+    // no lamp note: its walks made room 0 and the roofless rooms urgent and opened 12-16 s "lamp edits" that solved final rooms
+    // again while visible rooms waited. With no note only a lamp added or removed on a lot played for 2 s is an edit (a delete,
+    // a sale, an undo); the rest is sent as before, at the game's pace. (light tree thread)
+    static uintptr_t s_playedTracker = 0;
+    static DWORD s_playedAt = 0;
+    const DWORD walkTick = GetTickCount();
+    if (played && tracker != s_playedTracker) s_playedTracker = tracker, s_playedAt = walkTick;
+    const bool gameEdit = lampAddedOrRemoved && played && WorldLiveSeen() && !SettlingAfterWorldLoad() && !gpuTail && walkTick - s_playedAt >= 2000;
+    const bool editWalk = noted > 0 || gameEdit;
+    if (gameEdit && !own.empty()) LampMarkFilter::NoteEdit();
     for (int id : own)
         if (void* room = RoomOfTreeLevel(tl, id)) {
             if (gpuTail) continue; // (Instant: a GPU edit's tail, solved by the game's walk with no urgency)
             const LampMarkNote* note = noteOf(id);
+            if (!note && !editWalk) continue; // (sent by the game's walk, state 1: solved, not urgent)
             const bool soon = std::find(ownSoon.begin(), ownSoon.end(), id) != ownSoon.end() && std::find(ownLate.begin(), ownLate.end(), id) == ownLate.end();
             // tier 0: the lamp's own room, and room 0 of the camera's story; room 0 of another story comes with the other rooms
             // (tier 1, by story): it went before the camera story's rooms (a lot entry spent 4 s on other stories' rooms 0)
@@ -9195,7 +9206,7 @@ void AfterChangedWalk(BYTE* tl) {
         const DragLite::WhyScope liteWhy(DragLite::Why::Fanout);
         for (int k = 0; k < ny; k++) QueueRoom(tracker, L, yards[k], true);
     }
-    const int tier = own.empty() ? -1 : 1; // the rooms of other stories taking the edited lamps: right after the lamp's own
+    const int tier = own.empty() || !editWalk ? -1 : 1; // the rooms of other stories taking the edited lamps: right after the lamp's own
     const auto sameStory = [&sameL](int S, int r) { return std::binary_search(sameL.begin(), sameL.end(), std::make_pair(S, r)); };
     {
         // (lamp drags: "now" stops a solve that may read a removed lamp, never left out; the rest below is the walk's fan-out)
