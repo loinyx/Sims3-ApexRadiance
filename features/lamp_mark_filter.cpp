@@ -752,6 +752,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
     const bool played = LevelLightShare::PlayedLotOfTl(tl) || TrackerOf(tl) == RtOutdoorLamps::ActiveTracker();
     bool same = false, edit = false, user = false, pure = false, stayed = false;
     bool autoSelf = false, switchedOn = false; // a light switching itself on (no edit); switched on in place (dusk below)
+    const char* editWhy = nullptr; // (the log line below: what made this mark an edit)
     {
         std::lock_guard<std::mutex> lk(g_mx);
         if (g_sig.size() > 65536) g_sig.clear();
@@ -797,6 +798,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
             std::memcpy(was.editable, editable, sizeof editable);
             g_editRefresh.store(true, std::memory_order_relaxed);
             user = edit = true;
+            editWhy = "a value changed";
             if (was.on == on) Recorder::NoteLampEdit(tl, on, true); // a value changed (a switch is noted below)
         }
         same = was.sig == h;
@@ -823,6 +825,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
             if (!selfSwitching) g_lampEvents.fetch_add(1, std::memory_order_relaxed);
             if (!selfSwitching) Recorder::NoteLampEdit(tl, on, was.on == on); // the recording's light update summary
             edit = edit || !selfSwitching;
+            if (!selfSwitching && !editWhy) editWhy = was.on != on ? (on ? "switched on" : "switched off") : moved ? "moved" : "into another room";
             user = user || (was.on != on && !selfSwitching);
             // the per-pixel lamps (objects, fences, roofs, water) and the ground bake read the lamp list again soon, not at
             // the next 20-frame enumeration: a dragged lamp's light follows it
@@ -861,6 +864,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
         if (edit) was.editUntil = (tick + kEditHoldMs) | 1;
         else if (played && !same && was.editUntil && static_cast<int32_t>(tick - was.editUntil) < 0) {
             edit = true;
+            editWhy = "a step of the same edit";
             DragLite::NoteLampStep("lamp entry: a step of the same edit", DragLite::StepKind::Move, gameMove());
         }
         was.sig = h;
@@ -896,6 +900,17 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
         }
         g_kept.fetch_add(1, std::memory_order_relaxed);
         return false;
+    }
+    // what started each lamp edit (a lot entering the view started 12-16 s edit windows with no player input, 2026-11-10):
+    // the first 8 a second
+    if (edit) {
+        static std::atomic<DWORD> s_sec{0};
+        static std::atomic<int> s_n{0};
+        const DWORD sec = GetTickCount() / 1000;
+        if (s_sec.exchange(sec) != sec) s_n.store(0);
+        if (s_n.fetch_add(1) < 8)
+            LOG_INFO(std::format("[LampMarkFilter] Lamp edit from the lamp entry: light {:08X} story {} room {} of tracker {:08X}: {}", light, StoryOfTl(tl), room,
+                                 TrackerOf(tl), editWhy ? editWhy : "?"));
     }
     // 12/10: every edit that reaches its rooms (switch, value, move, drag step) starts or extends the edit hold, before the
     // rooms are marked (MarkUrgent stamps them with this serial)
