@@ -2366,8 +2366,12 @@ constexpr DWORD kAutoRefreshDelay = 1000;
 std::atomic<DWORD> g_autoRefreshAt{0};
 // The pending refresh leaves the terrain alone (after a load: the load's own rebuild made it); any setting change clears it
 std::atomic<bool> g_autoRefreshRoomsOnly{false};
+// The pending refresh leaves the rooms alone: only "Street lamps light lots" changed, and its opening balance relit every
+// room at once (a second solve a second later made the walls flicker twice); any other change clears it
+std::atomic<bool> g_autoRefreshSkipRooms{false};
 void RequestAutoRefresh() {
     g_autoRefreshRoomsOnly.store(false);
+    g_autoRefreshSkipRooms.store(false);
     g_autoRefreshAt.store((GetTickCount() + kAutoRefreshDelay) | 1);
 }
 // The same refresh right after loading (a room lit only by lamps of another story was black after a load
@@ -2868,8 +2872,9 @@ class NightTerrainRelightPatch : public ApexPatch {
                         LoadTiming::NoteLoadSettled("the after-load refresh ran");
                     }
                     g_autoRefreshRoomsOnly.store(false);
+                    const bool rooms = afterLoad || !g_autoRefreshSkipRooms.exchange(false);
                     HookGuard::Try("Night Lighting automatic refresh",
-                                   [afterLoad] { NightLighting::RefreshAll(afterLoad ? "after loading" : "a setting changed", !afterLoad); });
+                                   [afterLoad, rooms] { NightLighting::RefreshAll(afterLoad ? "after loading" : "a setting changed", !afterLoad, rooms); });
                 } else g_autoRefreshAt.store((tick + 200) | 1);
             }
             HookGuard::Run("LevelLightShare frame update", [] { LevelLightShare::OnPresent(); });
@@ -3261,7 +3266,11 @@ class NightTerrainRelightPatch : public ApexPatch {
         if (body()) {
             ApplyLive(bridgeBefore, objBefore, shareBefore, objPixelBefore);
             NotifySettingChanged();
+            const bool onlyBridge = g_bridge != bridgeBefore && LevelLightShare::OpeningBalanceRelightsRooms() && g_objLamps == objBefore && g_levelShare == shareBefore && g_objPixel == objPixelBefore;
+            const bool pending = g_autoRefreshAt.load() != 0; // an earlier change still waiting needs its rooms
+            const bool skip = onlyBridge && (!pending || g_autoRefreshSkipRooms.load());
             RequestAutoRefresh();
+            g_autoRefreshSkipRooms.store(skip);
         }
     }
 
@@ -4026,14 +4035,14 @@ float NightLighting::InstantGpuMs() {
 // The "Refresh the lighting" shortcut (Hotkeys): what the Developer buttons "Rebuild terrain light now" and "Relight lots
 // now" do, plus every room and the object rigs (turning Night Lighting off and on did it before). Only while it runs
 // (g_menuLevel is -1 while it is off or no world is loaded).
-void NightLighting::RefreshAll(const char* why, bool terrain) {
+void NightLighting::RefreshAll(const char* why, bool terrain, bool rooms) {
     if (g_menuLevel.load() < 0.0f) return;
     if (terrain) g_kickRequested = true;
     g_relightLotsRequested = true;
-    LevelLightShare::RelightAllRooms(std::format("Refresh the lighting ({})", why).c_str());
+    if (rooms) LevelLightShare::RelightAllRooms(std::format("Refresh the lighting ({})", why).c_str());
     ObjectLightBridge::RequestRigRefresh();
     UnlitRooms::RigsAgainIn(2000); // and once the rooms are solved (their lights are what the rigs gather)
-    LOG_INFO(std::format("[NightTerrainRelight] Refresh the lighting ({}): {}lots and rooms light again", why, terrain ? "terrain, " : ""));
+    LOG_INFO(std::format("[NightTerrainRelight] Refresh the lighting ({}): {}lots{} light again", why, terrain ? "terrain, " : "", rooms ? " and rooms" : " (rooms already relit)"));
 }
 void NightLighting::RefreshSoon() { RequestAutoRefresh(); }
 void NightLighting::Restart() {
