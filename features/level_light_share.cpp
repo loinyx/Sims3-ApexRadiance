@@ -15713,6 +15713,7 @@ void Uninstall() {
 }
 
 bool IsInstalled() { return g_installed.load(); }
+bool OpeningBalanceRelightsRooms() { return RoofedOpeningsOn(); }
 bool BasisFloorGuardReady() {
     return g_installed.load(std::memory_order_relaxed) && g_indoorReady && g_basisGuardReady.load(std::memory_order_relaxed);
 }

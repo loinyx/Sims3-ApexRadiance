@@ -17,7 +17,7 @@ bool SplitLevelProvidedByS3SS();
 
 // The "Refresh the lighting" shortcut (Hotkeys): the terrain, every lot and every room light again, the object rigs gather
 // again (what turning Night Lighting off and on did). Nothing while Night Lighting is off. Render thread.
-void RefreshAll(const char* why = "shortcut", bool terrain = true); // terrain false: lots, rooms and rigs only (after a load)
+void RefreshAll(const char* why = "shortcut", bool terrain = true, bool rooms = true); // terrain false: lots, rooms and rigs only (after a load); rooms false: leaves the rooms to a relight already made
 // The same once the changes rest (1 s after the last call): any lighting setting changed (menu, profile, undo, reset, the
 // upper floors switch). Nothing while Night Lighting is off or no world is loaded when it runs. Render thread.
 void RefreshSoon();

@@ -18,6 +18,8 @@ bool LampFloorCap(const float lamp[3], float rows[2][4]);
 bool Install(std::string& error);
 void Uninstall();
 bool IsInstalled();
+// True while a change of the opening lamp balance relights every room at once (Outdoor light through openings in)
+bool OpeningBalanceRelightsRooms();
 // True only while the validated directional-map floor guard is installed and indoor sharing is ready.
 bool BasisFloorGuardReady();
 void OnPresent();      // render thread, every frame (runs the refresh asked by Install/Uninstall)
