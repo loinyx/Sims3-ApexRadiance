@@ -71,6 +71,20 @@ inline int EditHoldOutcomeTogether(int pending, bool groundPending, std::uint32_
 inline bool GatherAfterChange(std::uint32_t started, std::uint32_t changed) {
     return static_cast<std::int32_t>(started - changed) > 0;
 }
+// A lot's loading triggers of its rooms near openings (rebuilt, options, floors or openings, dirty floor managers) are
+// sent together: once none came for 600 ms (rebuilt -> dirty managers measured up to 0.52 s apart), at the latest 1.5 s
+// after the first (first 0 = nothing collected)
+inline bool OpeningSendDue(std::uint32_t now, std::uint32_t first, std::uint32_t latest) {
+    return first && (static_cast<std::uint32_t>(now - latest) >= 600u || static_cast<std::uint32_t>(now - first) >= 1500u);
+}
+// The gather serial after which a room near openings is not sent again (0 = every room): a lamp edit sends every room; the
+// settle skips rooms gathered after the last round ended (roundSerial, 0 = not over: every room); a collected loading send
+// skips rooms gathered after its latest trigger was seen
+inline std::uint32_t OpeningCoveredAfter(bool edit, bool settle, std::uint32_t roundSerial, std::uint32_t pendSerial) {
+    if (edit) return 0;
+    if (settle) return roundSerial ? (roundSerial > pendSerial ? roundSerial : pendSerial) : 0;
+    return pendSerial;
+}
 inline bool WindowRecheckDue(std::uint32_t now, std::uint32_t armed, unsigned pass) {
     return pass < 3 && static_cast<std::uint32_t>(now - armed) >= (pass == 0 ? 0u : pass == 1 ? 2000u : 6000u);
 }

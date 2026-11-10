@@ -288,6 +288,10 @@ In [`features/level_light_share.cpp`](../../../features/level_light_share.cpp):
   relight asked while the story share is off runs at once.
 - Whole-world relights asked in a burst run once, 250 ms after the last ask; the settle requeue is armed once per lot
   state.
+- A lot's loading triggers of its rooms near openings are sent once per burst (600 ms quiet, at most 1.5 s), skipping
+  rooms gathered after the latest trigger; the settle skips rooms gathered after the round ended
+  ([level-light-share.md](../night-lighting/level-light-share.md), Lot state). New Game waits for each household lot's
+  rooms before its capture, so these resends added to its time on every lot (not measured).
 - The per-point hooks return at once for a light the game is about to drop (colour sum under room+0x63C, the game's own
   sums in the same order).
 - Night Lighting does not relight every lot 3 s after a world loads at night (the game has just solved them).

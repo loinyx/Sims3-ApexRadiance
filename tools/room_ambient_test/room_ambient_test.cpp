@@ -82,6 +82,16 @@ int main() {
     check(WindowRecheckDue(6100, 100, 2), "window final retry at deadline");
     check(!WindowRecheckDue(20000, 100, 3), "window checks stop after bounded passes");
     check(WindowRecheckDue(0x800u, 0xfffffff0u, 1), "window deadline survives tick wrap");
+    check(!OpeningSendDue(5000, 0, 0), "nothing collected: no opening send");
+    check(!OpeningSendDue(1599, 1000, 1000) && OpeningSendDue(1600, 1000, 1000), "a lone loading trigger is sent after 600 ms");
+    check(!OpeningSendDue(1519, 1000, 1000) && !OpeningSendDue(2000, 1000, 1520), "dirty managers 0.52 s after rebuilt join the same send");
+    check(!OpeningSendDue(1799, 1000, 1200) && OpeningSendDue(1800, 1000, 1200), "triggers in a burst wait for the latest's quiet");
+    check(OpeningSendDue(2500, 1000, 2400), "a burst that never goes quiet is sent 1.5 s after its first trigger");
+    check(!OpeningSendDue(0x200u, 0xfffffff0u, 0xfffffff0u) && OpeningSendDue(0x300u, 0xfffffff0u, 0xfffffff0u), "opening send survives tick wrap");
+    check(OpeningCoveredAfter(true, true, 50, 40) == 0, "a lamp edit sends every room near openings");
+    check(OpeningCoveredAfter(false, true, 0, 40) == 0, "a settle before its round ended sends every room");
+    check(OpeningCoveredAfter(false, true, 50, 0) == 50 && OpeningCoveredAfter(false, true, 50, 60) == 60, "a settle skips rooms gathered after the round and the latest trigger");
+    check(OpeningCoveredAfter(false, false, 50, 40) == 40, "a collected send skips rooms gathered after its latest trigger");
     check(LampRefreshDelay(true) == 120, "switch is reconciled after a short batch");
     check(LampRefreshDelay(false) == 200, "moving a lamp waits the drag's quiet time (the edit itself sends its rooms at once)");
     check(LampLotGap(true) == 500 && LampLotGap(false) == 2000, "relocated lamps refresh again sooner than switches");

@@ -7997,9 +7997,9 @@ void ShareRoomZeroFromBelow(BYTE* treeLevel, BYTE* room) {
 }
 
 // Rooms of a lot near a stair opening (receivers on both sides), plus the rooms that took lamps before: they gather again
-// coveredAfter (the load's settle): a room whose gather came after that serial already saw the first round, so it is not sent
+// coveredAfter (OpeningCoveredAfter): a room whose gather came after that serial already saw the change or the round, so it is not sent
 // (11-40-32 recording: due 20 solved 0/23 and 2/20 again, identical maps, 3.5 s of the settle budget)
-void QueueOpeningRooms(uintptr_t tracker, std::vector<std::pair<int, int>>* sent = nullptr, uint32_t coveredAfter = 0) {
+int QueueOpeningRooms(uintptr_t tracker, std::vector<std::pair<int, int>>* sent = nullptr, uint32_t coveredAfter = 0) {
     std::vector<std::pair<int, int>> todo;
     BoostedRoomsOf(tracker, todo);
     {
@@ -8042,8 +8042,9 @@ void QueueOpeningRooms(uintptr_t tracker, std::vector<std::pair<int, int>>* sent
     }
     g_indoorQueued.fetch_add(queued, std::memory_order_relaxed);
     if (!kPublicBuild && (!todo.empty() || !summary.empty()))
-        GatherLog(tracker, std::format("rooms near openings sent to gather again: {} of {} (the others were waiting already; {} gathered after the first round) |{}",
+        GatherLog(tracker, std::format("rooms near openings sent to gather again: {} of {} (the others were waiting already; {} gathered after) |{}",
                                        queued, todo.size(), covered, summary));
+    return queued;
 }
 
 // Rooms taking lamps of other stories, checked against those lamps as they are now (atrium house: the second
@@ -8199,8 +8200,11 @@ struct LotState {
     unsigned windowPass = 3;
     int windowStory = -99;
     DWORD auditAt = 0; // the next AuditTakers of this lot
-    bool loading = false;     // since the settle was armed, a watched room showed no solve yet (the lot's first round)
-    uint32_t roundSerial = 0; // LatestGatherSerial once every watched room showed its first solve (0 = not yet)
+    uint32_t roundSerial = 0; // LatestGatherSerial once the last send's round was over (0 = not yet)
+    // Loading triggers not sent yet (OpeningSendDue): their bits, the first and latest, LatestGatherSerial at the latest
+    unsigned pendWhy = 0;
+    DWORD pendFirst = 0, pendAt = 0;
+    uint32_t pendSerial = 0;
     std::vector<std::pair<int, int>> watch; // (story, room) sent by the last QueueOpeningRooms
     // The lot's story managers when last seen: a lot whose lighting was rebuilt (the camera left it and came back, or
     // its tracker's address was reused by another lot) is a new lot for this state (the indoor fix sometimes needed the save
@@ -8470,9 +8474,10 @@ void BeforeRoomUpdate(BYTE* tl) {
         for (int s = 0; s <= 7; s++) mgrs[s] = StoryManager(tracker, s);
         if (std::memcmp(mgrs, lot.mgrs, sizeof mgrs) != 0) { // rebuilt: count its floors and openings from scratch
             HookGuard::Run("LevelLightShare rebuilt lot prune", [&] { DropReplacedManagers(tracker, lot.mgrs, mgrs); });
-            const long keepGen = lot.gen;
+            const LotState old = std::move(lot);
             lot = LotState{};
-            lot.gen = keepGen;
+            lot.gen = old.gen;
+            lot.pendWhy = old.pendWhy, lot.pendFirst = old.pendFirst; // (a rebuild does not push back what was collected)
             std::memcpy(lot.mgrs, mgrs, sizeof mgrs);
             due = true, why |= 1;
             g_lotRebuilds.fetch_add(1, std::memory_order_relaxed);
@@ -8516,25 +8521,32 @@ void BeforeRoomUpdate(BYTE* tl) {
         // lights them (entering the lot, it should already be right). That is as soon as the first round is
         // over (none of its rooms waits for a solve for kSettleQuiet), at the latest kSettleMax after (atrium house F8,
         // 29/09: the fixed 6 s came 2.5 s after the last solve of the first round; the lot looked right only then).
+        // A lot loading or streaming in fires these one after another (rebuilt, then the floors, the openings and the dirty
+        // managers within 0.5 s; each sent every room near openings again and reset the ones already gathered, so the
+        // game's lot capture of New Game waited for 4-6 rounds per lot): collected and sent once (OpeningSendDue)
+        if (const unsigned load = why & (1 | 2 | 8 | 16)) {
+            lot.pendWhy |= load;
+            lot.pendAt = now;
+            if (!lot.pendFirst) lot.pendFirst = std::max<DWORD>(now, 1);
+            lot.pendSerial = LatestGatherSerial(); // (light thread, as the gathers' stamps: a later serial gathered after this change)
+        }
         constexpr DWORD kSettleMin = 500, kSettleQuiet = 400, kSettleMax = 6000;
         if (due && lot.openings > 0 && !lot.settleAt) { // armed once: later dues do not push it back
             lot.settleAt = (now + kSettleMax) | 1;
             lot.armedAt = now;
             lot.quietSince = 0;
-            lot.loading = false, lot.roundSerial = 0;
         } else if (lot.settleAt) {
-            // a due while armed may bring rooms not solved yet into watch: take the serial again from the next poll on
-            if (due) lot.roundSerial = 0;
-            else if (!lot.roundSerial && !lot.watch.empty()) { // the first round is over once no watched room still shows nothing
+            // the last send's round is over once no watched room is unsolved, waiting for its gather or being solved
+            // (LotBusy: states 1-3, deferred, ambient queue and dependency waits; state 2's gather is still to come)
+            if (!lot.roundSerial && !lot.pendWhy && !lot.watch.empty() && !LotBusy(tracker, lot.watch)) {
                 bool unsolved = false;
                 for (const auto& [S, r] : lot.watch)
                     if (const BYTE* room = SafeRoomById(tracker, S, r); room && LevelLightShare::RoomNeverSolved(room)) unsolved = true;
-                if (unsolved) lot.loading = true;
-                else if (lot.loading) lot.roundSerial = std::max<uint32_t>(LatestGatherSerial(), 1);
+                if (!unsolved) lot.roundSerial = std::max<uint32_t>(LatestGatherSerial(), 1);
             }
             bool fire = static_cast<int32_t>(now - lot.settleAt) >= 0;
             if (!fire && now - lot.armedAt >= kSettleMin) {
-                if (LotBusy(tracker, lot.watch)) lot.quietSince = 0;
+                if (lot.pendWhy || LotBusy(tracker, lot.watch)) lot.quietSince = 0; // (a collected send not out yet is part of the round)
                 else if (!lot.quietSince) lot.quietSince = std::max<DWORD>(now, 1);
                 else fire = now - lot.quietSince >= kSettleQuiet;
             }
@@ -8570,10 +8582,14 @@ void BeforeRoomUpdate(BYTE* tl) {
             for (const DepKey& k : go)
                 if (QueueRoom(tracker, k.level, k.room, true)) g_indoorQueued.fetch_add(1, std::memory_order_relaxed);
         }
-        if (why && Recorder::Active())
-            LOG_INFO(std::format("[LevelLightShare] Lot {:08X}: rooms near openings sent again (due {:02X})", tracker, why));
-        if (due) QueueOpeningRooms(tracker, &lot.watch, why == 32 ? lot.roundSerial : 0); // the load's settle: only rooms gathered before its first round ended
-        else if (!lot.auditAt || static_cast<int32_t>(now - lot.auditAt) >= 0) { // (the rooms near openings just sent record again anyway)
+        // a lamp edit and the settle go at once (and take what was collected with them)
+        if ((why & (4 | 32)) || (lot.pendWhy && RoomAmbientPolicy::OpeningSendDue(now, lot.pendFirst, lot.pendAt))) {
+            const int queued = QueueOpeningRooms(tracker, &lot.watch, RoomAmbientPolicy::OpeningCoveredAfter(why & 4, why & 32, lot.roundSerial, lot.pendSerial));
+            if (Recorder::Active() && queued > 0) // (0 queued is no cost: e.g. luzInternaEntreAndares off)
+                LOG_INFO(std::format("[LevelLightShare] Lot {:08X}: rooms near openings sent again (due {:02X}, {} rooms)", tracker, why | lot.pendWhy, queued));
+            if (!(why & 32)) lot.roundSerial = 0; // a new round: its end is taken again
+            lot.pendWhy = 0, lot.pendFirst = 0, lot.pendAt = 0, lot.pendSerial = 0;
+        } else if (!lot.auditAt || static_cast<int32_t>(now - lot.auditAt) >= 0) { // (the rooms near openings just sent record again anyway)
             lot.auditAt = (now + kAuditEveryMs) | 1;
             AuditTakers(tracker, now);
         }

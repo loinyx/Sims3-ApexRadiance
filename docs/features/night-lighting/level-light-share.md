@@ -1184,14 +1184,24 @@ along the wall, sqrt(1 - (d.T)^2) / |d.N| up it), at most 1 m. The share of the 
 - **Lot state** (`LotState`, every 2 s per lot on level 0): the lot's 8 story managers are compared (a rebuilt lot starts
   again: *lots rebuilt N*); when the number of stories with a known floor object grows or the opening count changes, or
   `g_indoorGen` moved (install, option, `OnWorldLive`), or the lot's floors were edited, the rooms near its openings (both
-  sides) and the rooms holding lamps of another story gather again (`QueueOpeningRooms`).
+  sides) and the rooms holding lamps of another story gather again (`QueueOpeningRooms`). These loading triggers
+  (rebuilt, `g_indoorGen`, floors or openings, dirty floor managers) are collected per lot and sent once, 600 ms after
+  the latest or at most 1.5 s after the first (`RoomAmbientPolicy::OpeningSendDue`, `LotState::pendWhy`); that send skips
+  a room whose gather came after the latest trigger was seen (`pendSerial`: the gather stamps are taken on the same light
+  thread). A lot loading or streaming in fired them one after another within 0.5 s, and each send reset the rooms already
+  gathered. A lamp edit and the settle still send at once and take the collected triggers with them; a lamp edit sends
+  every room.
 - **Settle after loading.** A lot that finds its openings sends those rooms once more when its first round is over: none
-  of its watched rooms gathers, waits or solves (states 1-3), none is held and no lamp burst waits, for 400 ms, not before
+  of its watched rooms gathers, waits or solves (states 1-3), none is held, no lamp burst waits and no collected loading
+  send is still to go out, for 400 ms, not before
   500 ms after arming and at the latest after 6 s (`kSettleMin`, `kSettleQuiet`, `kSettleMax`).
-  On a load, the settle skips a room whose gather began after every watched room showed its first solve (`+0x100` no longer
-  4): that gather already saw the first round's boosts, stacked ambient and other-story lamps (`LotState::roundSerial`,
-  `QueueOpeningRooms(..., coveredAfter)`, only for a settle that fires alone; any other due while armed takes the serial
-  again). Lamps that register later are left to `AuditTakers`. In the 11-40-32 recording, the settle solved two refined rooms again with identical maps and held a third
+  The settle skips a room whose gather began after the last send's round was over: no watched room unsolved (`+0x100`
+  still 4) and the lot not busy by the same rule as the quiet check (`LotBusy`: states 1-3, held, ambient queue,
+  dependency waits). That gather already saw the round's boosts, stacked ambient and
+  other-story lamps (`LotState::roundSerial`, `RoomAmbientPolicy::OpeningCoveredAfter`, `QueueOpeningRooms(...,
+  coveredAfter)`). Every send other than the settle takes the serial again once its own round is over; a lot entered with
+  its rooms already solved gets one too (before 3.1.1 only a lot seen loading did, and any due while armed cleared it, so
+  the settle sent every room again). Lamps that register later are left to `AuditTakers`. In the 11-40-32 recording, the settle solved two refined rooms again with identical maps and held a third
   in mid-solve, using 3.5 s of the settle budget.
 - **Floor edits.** Floor set or remove calls mark the floor object; after 250 ms without another edit
   (`RoomAmbientPolicy::FloorEditReady`) the room list is marked stale, Rooms at Night is told, and the lot's rooms near
