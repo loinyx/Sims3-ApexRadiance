@@ -794,7 +794,13 @@ void OverviewStatusCard() {
         if (ImGui::BeginTable("##Halves", two ? 2 : 1, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoPadOuterX | (two ? ImGuiTableFlags_BordersInnerV : 0))) {
             ImGui::TableNextColumn();
             if (Screen::RenderFpsTile()) Go(PageDisplay); // the limit and the window mode live there
-            if (!two) ApexUi::Gap(ApexUi::kSpace4);
+            if (!two) { // stacked: a hairline between the two, like the vertical one side by side
+                ApexUi::Gap(ApexUi::kSpace4 * 0.5f);
+                ImGui::PushStyleColor(ImGuiCol_Separator, Col(VioletTheme::kCardBorder));
+                ImGui::Separator();
+                ImGui::PopStyleColor();
+                ApexUi::Gap(ApexUi::kSpace4 * 0.5f);
+            }
             ImGui::TableNextColumn();
             if (MemoryMeter::RenderTile()) Go(PagePerformance); // Room to save and the low-memory note live there
             ImGui::EndTable();
