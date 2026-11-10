@@ -337,6 +337,8 @@ int OwnRoomsPending(int* total = nullptr);
 // This room is a lamp edit's (urgent, any tier) and still waits for or is in its solve, or ended no solve begun after its
 // latest mark: its maps do not show the edit yet. Render thread (AtriumHold: maps and furniture kept until its solve ends)
 bool EditRoomWaiting(const void* room);
+// The room has never ended a solve: its maps were never written (RGBA 0, black). Any thread (SEH read)
+bool RoomNeverSolved(const void* room);
 // The room is on the story of a lamp an edit changed in the last 5 s (its own room's story, tier 0): the edit hold never
 // holds its maps (12/10). Any thread.
 bool OnEditStory(const void* room);

@@ -46,6 +46,13 @@ inline bool UrgencyKept(std::uint32_t now, std::uint32_t until, std::uint32_t ma
     if (static_cast<std::int32_t>(now - until) < 0) return true;
     return state >= 1 && state <= 3 && static_cast<std::uint32_t>(now - marked) < 8000u;
 }
+// An edit's room still waits (AtriumHold keeps its maps and furniture): until a solve begun after its mark ends and, for
+// a room that already showed light, while it waits for its next class's solve (states 1-3). A room never solved when
+// marked has nothing on screen to keep: its first solve ends the wait, even one begun before a later mark (neverSolvedNow:
+// +0x100 still 4; it changes only when a solve ends), so a lot entry's re-marks do not keep a story black for 8 s.
+inline bool EditRoomStillWaiting(int state, bool solvedSince, bool blankAtMark, bool neverSolvedNow) {
+    return blankAtMark ? neverSolvedNow : (state >= 1 && state <= 3) || !solvedSince;
+}
 // 12/10, lamp edits all at once (AtriumHold): 0 = keep holding, 1 = complete (every other story solved since the edit and
 // the ground's chunks written), 2 = timeout (2.5 s after the latest edit, 4 s after the first). A drag is never decided
 // while it goes on; its first edit is its release (the caller restarts `sinceFirst` then), so it times out 2.5 s after it.

@@ -95,6 +95,7 @@ DWORD g_ownReadyAt = 0; // render thread: this hold's own rooms all solved (GetT
 // (RoomShowsOldLight, lot_light_bridge.cpp).
 constexpr DWORD kTrailMaxMs = 8000;
 std::atomic<DWORD> g_trailUntil{0}; // GetTickCount | 1: rooms of the last hold may still trail until then
+std::atomic<long> g_blankSkipped{0}; // this hold: maps of never-solved rooms not held (nothing on screen to keep)
 std::atomic<long> g_holdRewrites{0}; // this hold: a held map written again (an earlier or thrown-away solve's content kept back)
 std::atomic<int> g_trailMaps{0};     // maps trailing now (OnPresent)
 bool OwnAtOnce() { return TesterToggles::ownRoomAtOnce.load(std::memory_order_relaxed); }
@@ -232,7 +233,12 @@ HRESULT LockHookBody(IDirect3DTexture9* t, UINT level, D3DLOCKED_RECT* out, cons
         // while it is not held): its maps keep what is on screen until that solve ends
         const bool trailRoom = solving && !editing && TrailingNow() && !(!HoldsOwnStory() && LevelLightShare::OnEditStory(solving)) &&
                                LevelLightShare::EditRoomWaiting(solving);
-        const bool want = editRoom || trailRoom || (solving && !own && g_active.load(std::memory_order_relaxed) && LevelLightShare::InAtrium(solving));
+        bool want = editRoom || trailRoom || (solving && !own && g_active.load(std::memory_order_relaxed) && LevelLightShare::InAtrium(solving));
+        // nothing on screen yet: holding it would show the never-written map (RGBA 0, black; a story on lot entry)
+        if (want && !refining && LevelLightShare::InMapLockStep() && LevelLightShare::RoomNeverSolved(solving)) {
+            want = false;
+            g_blankSkipped.fetch_add(1, std::memory_order_relaxed);
+        }
         bool fits = false;
         if (want && !refining && LevelLightShare::InMapLockStep() && RoomMap(t, w, h)) {
             fits = g_maps.size() < kMaxMaps && g_bytes + static_cast<size_t>(w) * h * 8 <= kMaxBytes;
@@ -483,6 +489,7 @@ HoldResult UpdateEditHold() {
                 g_holdPeakMaps = 0;
                 g_ownReadyAt = 0;
                 g_holdRewrites.store(0, std::memory_order_relaxed);
+                g_blankSkipped.store(0, std::memory_order_relaxed);
                 g_capHit.store(false, std::memory_order_relaxed);
                 g_holdTogether.store(TogetherNow(), std::memory_order_relaxed);
                 g_editHolds.fetch_add(1, std::memory_order_relaxed);
@@ -664,6 +671,7 @@ void OnPresent(IDirect3DDevice9* dev) {
                                            : std::string();
     if (ended.rewrites > 0) shown += std::format("; {} later map writes kept back (never shown)", ended.rewrites);
     if (trailMaps > 0) shown += std::format("; {} maps keep their light until their room's own solve ends", trailMaps);
+    if (const long blank = g_blankSkipped.exchange(0, std::memory_order_relaxed); blank > 0) shown += std::format("; {} never-lit maps not held", blank);
     if (ended.together) // Classic: show all floors together (one line per edit; a timeout is this line, once)
         LOG_INFO(std::format("[AtriumHold] Classic lamp edit{}, all floors together: {} maps held ({:.1f} MB), {} after {} ms{}{}",
                              g_holdDragged ? " (drag, from its release)" : "", releasedMaps, static_cast<double>(releasedBytes) / (1024.0 * 1024.0),

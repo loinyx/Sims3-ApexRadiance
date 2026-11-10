@@ -96,6 +96,11 @@ int main() {
     check(!UrgencyKept(2500, 2000, 0, 4) && !UrgencyKept(2500, 2000, 0, 0), "a solved room's urgency ends");
     check(!UrgencyKept(8000, 2000, 0, 3), "urgency kept at most 8 s");
     check(UrgencyKept(0x100u, 0xfffffff0u - 10u, 0xfffffff0u - 3000u, 2), "urgency survives tick wrap");
+    check(!EditRoomStillWaiting(2, true, true, false), "a room blank at its mark stops waiting at its first solve (lot entry)");
+    check(EditRoomStillWaiting(1, false, true, true), "a blank room waits until its first solve ends");
+    check(!EditRoomStillWaiting(2, false, true, false), "a blank room re-marked mid-solve stops waiting when that solve ends");
+    check(EditRoomStillWaiting(2, true, false, false), "a lit room still waits for its next class (unchanged)");
+    check(!EditRoomStillWaiting(5, true, false, false), "a lit room solved since its mark stops waiting");
     check(EditHoldOutcome(0, false, 100, 100, false) == 0, "the hold waits for the first sends");
     check(EditHoldOutcome(0, false, 200, 200, false) == 1, "every story solved: released together");
     check(EditHoldOutcome(0, true, 200, 200, false) == 0, "ground chunks still written: wait");

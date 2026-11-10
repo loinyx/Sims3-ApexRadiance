@@ -579,6 +579,7 @@ struct UrgentRoom {
     bool expiredPending = false; // reached the 8 s cap while still waiting (counted once)
     bool kept = false;           // outlived its deadline while waiting (counted once)
     bool quiet = false;          // an automatic switch-on's own room (NoteQuietMark): first in the queue, not an edit
+    bool blank = false;          // never solved when this entry was first marked (RoomNeverSolved; kept on re-marks): its wait ends at its first solve
 };
 std::mutex g_urgentMx;
 std::vector<UrgentRoom> g_urgent; // the rooms of the lamps edited in the last kUrgentMs (a handful; a big lot's net: more)
@@ -652,6 +653,7 @@ void MarkUrgent(void* room, int tier, bool soon) {
     if (!room || !RoomKey(room, mgr, id)) return;
     const DWORD now = GetTickCount();
     const unsigned long serial = LampMarkFilter::EditSerial();
+    const bool blank = LevelLightShare::RoomNeverSolved(room);
     std::lock_guard<std::mutex> lk(g_urgentMx);
     std::erase_if(g_urgent, [now](UrgentRoom& u) { return !UrgentLive(u, now); });
     const auto it = std::find_if(g_urgent.begin(), g_urgent.end(), [room](const UrgentRoom& u) { return u.room == reinterpret_cast<uintptr_t>(room); });
@@ -663,6 +665,7 @@ void MarkUrgent(void* room, int tier, bool soon) {
         UrgentRoom u{reinterpret_cast<uintptr_t>(room), mgr, id, tier, now + kUrgentMs, soon};
         u.marked = now;
         u.serial = serial;
+        u.blank = blank;
         g_urgent.push_back(u);
     } else {
         const bool same = it->mgr == mgr && it->id == id;
@@ -673,6 +676,7 @@ void MarkUrgent(void* room, int tier, bool soon) {
         if (tier != 2 || !same) it->soon = soon; // the safety net's tag never takes an edit's gather-at-once away
         it->marked = now;
         it->serial = serial;
+        it->blank = (same && it->blank) || blank; // sticky: a re-mark after its first solve keeps it (nothing was held)
         it->expiredPending = it->kept = false;
         it->quiet = false; // an edit's mark: a full lamp edit now
     }
@@ -17806,20 +17810,30 @@ bool EditRoomWaiting(const void* room) {
     int id = 0;
     if (!room || !g_urgentSize.load(std::memory_order_relaxed) || !RoomKey(room, mgr, id)) return false;
     unsigned long serial = 0;
-    bool found = false;
+    bool found = false, blank = false;
     {
         const DWORD now = GetTickCount();
         std::lock_guard<std::mutex> lk(g_urgentMx);
         for (UrgentRoom& u : g_urgent)
             if (u.room == reinterpret_cast<uintptr_t>(room) && u.mgr == mgr && u.id == id && UrgentLive(u, now)) {
                 serial = u.serial;
+                blank = u.blank;
                 found = true;
                 break;
             }
     }
     if (!found) return false;
-    const int state = RoomState(room);
-    return (state >= 1 && state <= 3) || !RoomLightQueue::SolvedSince(room, serial);
+    return RoomAmbientPolicy::EditRoomStillWaiting(RoomState(room), RoomLightQueue::SolvedSince(room, serial), blank,
+                                                   blank && RoomNeverSolved(room));
+}
+
+// "shown" class +0x100 stays 4 until a room's first solve ends (set at 0x0069EA70; the game tests it at 0x0069EF58)
+bool RoomNeverSolved(const void* room) {
+    __try {
+        return *reinterpret_cast<const int*>(static_cast<const BYTE*>(room) + 0x100) == 4;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
 }
 
 bool OnEditStory(const void* room) {

@@ -79,9 +79,16 @@ the lamp's own story too; moves and value edits then showed the stories one at a
   4 s after the first (`RoomAmbientPolicy::EditHoldOutcome`). A drag is never released while it goes on: its other
   stories keep their maps from before it, and its hold ends after it is let go (one hold per settled drag; 2.5 s after
   the release at most; 30 s in all). If the 192 maps or 96 MB are reached, everything held is released at once ("cap").
+- **A room that has never ended a solve is never held** (`LevelLightShare::RoomNeverSolved`: "shown" class `+0x100` is
+  still 4, which only the end of a solve changes, `0x0069EA70`). Its maps were never written (RGBA 0, black), so there is
+  nothing on screen to keep, and holding them showed a black story for up to 8 s after entering a lot (the lamps
+  switching on at entry count as an edit). Such a room's edit wait also ends at its first solve, class 0 included, instead
+  of waiting for its next class (`RoomAmbientPolicy::EditRoomStillWaiting`), so its furniture shows with it. The wait
+  ends when that first solve ends, even one begun before a later mark, and a re-mark keeps the room's "blank" flag. Rooms that
+  already showed light keep the rules above.
 - The lamp object itself (its lit model) is the game's and changes at once.
 - Log, one line per hold: `[AtriumHold] Lamp edit: own story shown N ms, others released together M ms (K maps, B MB;
-  complete|timeout|cap)`. Recordings note `[switch] lamp edit shown all at once, N ms ...`. The status line counts holds,
+  complete|timeout|cap)`, plus "N never-lit maps not held" when the rule above skipped maps. Recordings note `[switch] lamp edit shown all at once, N ms ...`. The status line counts holds,
   timeouts, cap releases and the most maps one hold kept.
 - It needs both solve hooks (the end `0x006A3E65`, Steam 1.67.2 only, and the lock step), which
   `LevelLightShare::InstallIndoor` installs with Night Lights' *Outdoor light between floors*
