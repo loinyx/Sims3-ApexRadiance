@@ -358,15 +358,35 @@ std::mutex g_rigRoomMx;
 std::unordered_map<uintptr_t, const void*> g_rigRoom;
 std::atomic<uint32_t> g_rigRoomGen{0}; // (2.15.3) bumped under g_rigRoomMx at every change of g_rigRoom (RigRoom's last answer)
 
+// (10/11) Rooms whose room-mode rigs gathered while the game had emptied the room's list (its invalidate, state 1): those rigs
+// took the [NoLight] lights, and Rooms at Night darkens such furniture, doors and windows as at night, by day too, until a
+// later regather (blind timers, 1.5 to 21 s in a day recording). LevelLightShare's room gather takes the room once its list is
+// final and has the rigs gather again (TakeEmptyGatherRoom), from the same list the next blind regather would read.
+std::mutex g_emptyGatherMx;
+std::unordered_set<const void*> g_emptyGather;
+bool EmptyWaitingRoom(const BYTE* room) {
+    __try {
+        return *reinterpret_cast<const int*>(room + 0xF0) == 1 && *reinterpret_cast<const uintptr_t*>(room + 0xC8) == *reinterpret_cast<const uintptr_t*>(room + 0xCC);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 // Apex's part after the game's gather (RoomGatherThunk)
 void AfterRoomGather(BYTE* rig, void* a, void* b, void* c, void* d) {
     const int mode = *reinterpret_cast<const int*>(rig + 0x1D4);
     if (mode == 0 && a) {
-        std::lock_guard<std::mutex> lk(g_rigRoomMx);
-        if (g_rigRoom.size() > 16384) g_rigRoom.clear(), g_rigRoomGen.fetch_add(1, std::memory_order_release);
-        const void*& room = g_rigRoom[reinterpret_cast<uintptr_t>(rig)];
         const void* const now = static_cast<const BYTE*>(a) - 0x30;
-        if (room != now) room = now, g_rigRoomGen.fetch_add(1, std::memory_order_release);
+        {
+            std::lock_guard<std::mutex> lk(g_rigRoomMx);
+            if (g_rigRoom.size() > 16384) g_rigRoom.clear(), g_rigRoomGen.fetch_add(1, std::memory_order_release);
+            const void*& room = g_rigRoom[reinterpret_cast<uintptr_t>(rig)];
+            if (room != now) room = now, g_rigRoomGen.fetch_add(1, std::memory_order_release);
+        }
+        if (EmptyWaitingRoom(static_cast<const BYTE*>(now))) {
+            std::lock_guard<std::mutex> lk(g_emptyGatherMx);
+            if (g_emptyGather.size() < 4096) g_emptyGather.insert(now);
+        }
     }
     if (mode == 0 && a && b) CrossStoryLamps(rig, a, b, c, d);
     if (!g_forceAll.load(std::memory_order_relaxed) || mode != 1) return;
@@ -1213,6 +1233,11 @@ void OnPresent() {
 void SetAllObjects(bool on) { g_forceAll = on; }
 
 void RequestRigRefresh() { g_refreshRequested = true; }
+bool TakeEmptyGatherRoom(const void* room) {
+    std::lock_guard<std::mutex> lk(g_emptyGatherMx);
+    return g_emptyGather.erase(room) != 0;
+}
+
 void RegatherRigsOfRoom(uintptr_t tracker, int story, int id) {
     std::lock_guard<std::mutex> lk(g_editRigMx);
     const std::tuple<uintptr_t, int, int> k{tracker, story, id};

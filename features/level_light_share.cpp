@@ -5898,6 +5898,15 @@ void PublishOpenRig(uintptr_t room, const OpenRigRoom* now) {
     if (g_openRigChanged.size() < 1024 && std::find(g_openRigChanged.begin(), g_openRigChanged.end(), room) == g_openRigChanged.end()) g_openRigChanged.push_back(room);
     g_openRigPublished.fetch_add(1, std::memory_order_relaxed);
 }
+// Gather thread, once the room's list is final: its room-mode rigs that gathered from the emptied list gather again
+// (ObjectLightBridge::TakeEmptyGatherRoom; drained with the opening rooms by the render thread)
+void RegatherRigsOfGatheredRoom(BYTE* room) {
+    if (!ObjectLightBridge::TakeEmptyGatherRoom(room)) return;
+    std::lock_guard<std::mutex> lk(g_openRigMx);
+    const uintptr_t r = reinterpret_cast<uintptr_t>(room);
+    if (g_openRigChanged.size() < 1024 && std::find(g_openRigChanged.begin(), g_openRigChanged.end(), r) == g_openRigChanged.end()) g_openRigChanged.push_back(r);
+    else if (g_openRigChanged.size() >= 1024) ObjectLightBridge::RequestRigRefresh();
+}
 std::shared_ptr<const OpenRigMap> OpenRigSnap() {
     std::lock_guard<std::mutex> lk(g_openRigMx);
     return g_openRig;
@@ -9502,6 +9511,7 @@ void __fastcall OutdoorGather(BYTE* treeLevel, void*, BYTE* room) {
         ShareInnerLamps(treeLevel, room);     // (every room) last: it adds to every record above
         t_captureGather = false;
         NoteGatherStamp(room, started);
+        RegatherRigsOfGatheredRoom(room);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         t_captureGather = false;
         g_faults.fetch_add(1, std::memory_order_relaxed);
