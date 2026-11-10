@@ -83,6 +83,7 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 | [Lot Streaming](features/performance/lot-streaming.md): lot detail farther away and smoother lot streaming (idavidveiga), off by default | Experimental (released in 2.7.0); Released in 2.16.2: shared lot build time, detailed-lot hysteresis, throttle threshold follow |
 | [Display](features/display.md): window mode, resolution and frame-rate limiter (System > Display) | Released in 3.1.0 |
 | [RTX Remix bridge](features/rtx-remix-bridge.md): the renderer (DXVK) in its own 64-bit process, about 600 to 800 MB more free memory in the game | Released in 3.0.0 (separate download); its `dxvk.conf` fix for exclusive fullscreen published again after 3.0.0; Released in 3.1.0: install guide, uncompressed-textures card, Fullscreen as Borderless under the bridge |
+| [Delegate signature fix](features/delegate-signature-fix.md): no simulator-thread crash when a script callback without arguments runs (always on) | In development (3.1.1) |
 
 ### Reports and diagnostics
 
