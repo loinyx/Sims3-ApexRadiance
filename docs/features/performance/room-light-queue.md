@@ -60,7 +60,10 @@ the lamp's own story too; moves and value edits then showed the stories one at a
 
 - Every player edit starts or extends a hold (`LampMarkFilter::EditLastTick` / `EditSerial`): a switch, a value change,
   a move or drag step, a lamp moved into another story, and a lamp added or removed (`LevelLightShare::AfterChangedWalk`,
-  `NoteEdit`; not while the loaded lots settle after a load, never at dusk or dawn). The hold is on in the very frame of
+  `NoteEdit`; not while the loaded lots settle after a load, never at dusk or dawn). Entering a lot is no edit: its
+  rebuilt stories give each lamp a new tree level with the same story number, which is no move (`LampMarkFilter`,
+  status *rebuilt lamps not taken as moves*), and a room whose lamps are seen for the first time is still sent at once
+  but starts no hold (status *first sights not taken as edits*). The hold is on in the very frame of
   the edit, before the next Present. The quick pass is off (`QuickPassRoom`); the drain gives the edit's rooms 16 ms a
   frame (6 ms while a lamp is dragged).
 - **The lamp's own story is never held** (`LevelLightShare::OnEditStory`: the story of an edited lamp's own room, tier 0,

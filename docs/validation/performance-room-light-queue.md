@@ -64,6 +64,11 @@ not identified.
   panning, and "all the lights" of a big lot. **Expected:** the lamp's own story within about 100 ms; the other stories
   in one release within 1.5 s (switch, value) or 2 s after a drag is let go; `[AtriumHold] Lamp edit:` lines end in
   `complete` (a timeout only on the big lot); no frame over 50 ms added (Frame Profiler).
+- Lot entry is no lamp edit (3.1.1, not yet tested in game): enter an atrium lot with the camera held still. **Expected:**
+  no `[AtriumHold] Lamp edit` line, no furniture *held for a lamp switch* and no RtOutdoorLamps *a lamp edit* line near
+  the entry; the counters *rebuilt lamps not taken as moves* (LampMarkFilter) or *first sights not taken as edits*
+  (LevelLightShare) rise; the final frame and wall seams match a capture before the change within 1/255. A lamp switch,
+  a drag and a lamp moved to another story on that lot still start the hold.
 - `room_ambient_test` covers the hold's decision (`EditHoldOutcome`), the urgency rule (`UrgencyKept`), an edit room's wait (`EditRoomStillWaiting`), the safety-net
   gap (`LampLotGap`) and the 200 ms move delay; the map hold itself has no offline harness.
 - Quick update for lamp switches (with *Lamp switches all at once* off): rooms show a quick light within a few frames

@@ -100,7 +100,10 @@ constexpr DWORD kEditHoldMs = 2000;
 std::unordered_map<Key, LampState, KeyHash> g_sig; // (tree level, light) -> the lamp at its last mark
 // The story (tree level) each lamp marked last: a first mark on another story of the same lot is the lamp moved between
 // stories (05/10, F8: nothing sent its lot again, and the rooms that gathered while the game registered it missed it)
-std::unordered_map<uintptr_t, uintptr_t> g_lampStory; // light -> tree level (under g_mx)
+// A lot rebuilt on entry gives every story a new tree level: the same story number is no move (it counted as a lamp edit,
+// with the edit hold and a whole-lot resend, at every lot entry)
+std::unordered_map<uintptr_t, std::pair<uintptr_t, int>> g_lampStory; // light -> {tree level, its story} (under g_mx)
+std::atomic<long> g_rebuiltNotMoved{0}; // first marks on a rebuilt tree level of the same story, not taken as moves
 
 // A lamp switched on or off, or moved (the lighting is refreshed then too, kept cheap): a switch waits 120 ms; a move still waits 200 ms after its last change (a drag:
 // once when it stops). At most once per RoomAmbientPolicy::LampLotGap per lot (2 s; 500 ms for a lamp into another room or
@@ -699,17 +702,22 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
     // lists settles its room); its object's occluder mark was dropped too (OwnObjectEditTaken: a lamp object carries no 3D blocker).
     // Into room 0 (as a move above), or not covered: the game's path below
     if (OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical() && room > 0 && ((type >= 3 && type <= 6) || type == 11)) {
-        bool fresh = false, relocated = false;
+        bool fresh = false, relocated = false, rebuilt = false;
         {
             std::lock_guard<std::mutex> lk(g_mx);
             if (g_sig.find(Key{tl, light}) == g_sig.end()) {
                 fresh = true;
                 const auto s = g_lampStory.find(light);
                 const uintptr_t tracker = TrackerOf(tl);
-                relocated = s != g_lampStory.end() && s->second != tl && tracker && TrackerOf(s->second) == tracker;
+                if (s != g_lampStory.end() && s->second.first != tl && tracker && TrackerOf(s->second.first) == tracker) {
+                    relocated = s->second.second != StoryOfTl(tl);
+                    rebuilt = !relocated;
+                    if (rebuilt) g_rebuiltNotMoved.fetch_add(1, std::memory_order_relaxed);
+                }
             }
         }
-        const char* firstKind = relocated ? "move to another story" : "new";
+        // (a rebuilt tree level keeps the move kind: no rig regather per lamp on lot entry; only a real move is a GPU edit below)
+        const char* firstKind = (relocated || rebuilt) ? "move to another story" : "new";
         if (fresh && OutdoorDelta::TakesLampEditPhys(tl, light, firstKind, on, true) && OutdoorDelta::TakesLampEditPhys(tl, light, firstKind, on)) {
             {
                 std::lock_guard<std::mutex> lk(g_mx);
@@ -719,7 +727,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
                 st.entry = entry;
                 g_sig.insert_or_assign(Key{tl, light}, st);
                 if (g_lampStory.size() > 65536) g_lampStory.clear();
-                g_lampStory[light] = tl;
+                g_lampStory[light] = {tl, StoryOfTl(tl)};
             }
             g_first.fetch_add(1, std::memory_order_relaxed);
             g_physFirst.fetch_add(1, std::memory_order_relaxed);
@@ -757,9 +765,12 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
             g_first.fetch_add(1, std::memory_order_relaxed);
             if (lamp) { // moved in from another story of the same lot: every room of the lot again, none kept
                 if (g_lampStory.size() > 65536) g_lampStory.clear();
-                uintptr_t& story = g_lampStory[light];
+                auto& story = g_lampStory[light];
                 const uintptr_t tracker = TrackerOf(tl);
-                if (story && story != tl && tracker && TrackerOf(story) == tracker) {
+                const int storyNo = StoryOfTl(tl);
+                const bool rebuilt = story.first && story.first != tl && tracker && TrackerOf(story.first) == tracker;
+                if (rebuilt && story.second == storyNo) g_rebuiltNotMoved.fetch_add(1, std::memory_order_relaxed);
+                if (rebuilt && story.second != storyNo) {
                     if (g_lotDue.size() > 1024) g_lotDue.clear();
                     LotDue& pending = g_lotDue[tracker];
                     const DWORD tick = GetTickCount();
@@ -773,7 +784,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
                     g_lampEvents.fetch_add(1, std::memory_order_relaxed);
                     NoteEditNow(tick); // a player's edit too: the edit hold covers the stories it leaves and enters
                 }
-                story = tl;
+                story = {tl, storyNo};
             }
             return true;
         }
@@ -1237,7 +1248,8 @@ std::string Status() {
     std::string s = std::format("{} | lamp marks kept (the lamp as it was) {}, let through: first sight {}, changed {}, window lights {}, unreadable {}, "
                                 "while off {}, held while their room was solved {}",
                                 g_on.load() ? "on" : "off", g_kept.load(), g_first.load(), g_changed.load(), g_windows.load(), g_unread.load(), g_off.load(), g_held.load());
-    s += std::format(" | lamps switched or moved {}, lots lit again {} (skipped at dusk or dawn {})", g_lampEvents.load(), g_lotRefreshes.load(), g_lotSkippedDusk.load());
+    s += std::format(" | lamps switched or moved {}, lots lit again {} (skipped at dusk or dawn {}), rebuilt lamps not taken as moves {}", g_lampEvents.load(), g_lotRefreshes.load(),
+                     g_lotSkippedDusk.load(), g_rebuiltNotMoved.load());
     if (g_leftInstalled)
         s += std::format(" | physical: rooms a lamp left not marked {}, marked {}; moves into room 0 left to the solves {}; first sights taken {}", g_leftDropped.load(),
                          g_leftMade.load(), g_intoRoom0.load(), g_physFirst.load());

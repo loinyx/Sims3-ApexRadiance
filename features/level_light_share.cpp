@@ -8712,6 +8712,7 @@ struct DepSig {
 std::unordered_map<DepKey, DepSig, DepHash> g_depSig; // last state sent on (under g_depsMx)
 std::atomic<long> g_lampWobbles{0};                  // lamp values changed without a move worth sending at once
 std::atomic<long> g_depShapeSends{0}; // lamps added, deleted or moved, walls changed: sent at once
+std::atomic<long> g_firstSightNotEdit{0}; // rooms whose lamps were first seen: sent at once, no edit hold
 std::atomic<long> g_outdoorQuiet{0};   // outside of a floor marked changed with its lamps and walls as they were: no other floor sent
 bool LampsMoved(const std::vector<LampAt>& was, const std::vector<LampAt>& now) {
     size_t i = 0;
@@ -8944,6 +8945,7 @@ void AfterChangedWalk(BYTE* tl) {
             // other's lamps then sent each other to gather again without end (atrium house: rooms 19 and 20 of stories 1
             // and 2, dozens of gathers in a row in the F8, each resetting their lighting LOD to 0)
             std::vector<uintptr_t> lights;
+            const bool seen = g_depSig.count(key) != 0; // a first sight (a lot entry registers every lamp) is no edit
             int change = LampChange(key, reinterpret_cast<uintptr_t>(tl), &lights);
             const bool moved = change == 3; // the same lamps, one moved (a drag): see g_litBy
             if (!change) {
@@ -8955,7 +8957,8 @@ void AfterChangedWalk(BYTE* tl) {
             const bool soon = note && note->pure && change != 2; // a lamp registered in it changed, none added or removed
             if (change == 2) { // a lamp of it added or removed: its gather waits for the game
                 ownLate.push_back(ids[i]);
-                lampAddedOrRemoved = true;
+                if (seen) lampAddedOrRemoved = true;
+                else g_firstSightNotEdit.fetch_add(1, std::memory_order_relaxed);
             }
             if (change == 1 && note && note->user) change = 3; // colour, intensity, on / off by a player or a Sim: at once
             auto& out = change == 2 ? now : change == 3 ? kept : later;
@@ -18692,8 +18695,8 @@ std::string Status() {
                                                     g_indoorOn ? "on" : "off", g_indoorAdded.load(), g_indoorTests.load(), g_indoorFloorBlocked.load(),
                                                     g_indoorWallBlocked.load(), g_indoorQueued.load(), g_lodReady ? "on" : "not installed", g_lodBoosts.load()) +
                                           std::format(", stacked rooms ambient {} ({} merges; members' values taken at the merge {} in {:.1f} ms, already right {}, kept from their gather {}, only an older solve's {}; quick passes with the refinement's light threshold {} and wall tests {}), lots settled after loading {} ({} as soon as their rooms were done), lamp changes folded into "
-                                                      "one update {} (lamps added, moved or removed, sent at once {}; lamp values changed without a move {}; outside of a floor marked changed without a change {}), lots rebuilt {}, floor objects made {}, rooms held until their solve ended {}, rooms still holding a lamp switched off gathered again {}",
-                                                      g_ambReady ? "on" : "not installed", g_ambMerges.load(), g_canonTaken.load(), CanonMs(), g_canonKept.load(), g_canonReused.load(), g_canonOld.load(), g_quickThreshold.load(), g_quickTests.load(), g_settles.load(), g_settlesEarly.load(), g_depCoalesced.load(), g_depShapeSends.load(), g_lampWobbles.load(), g_outdoorQuiet.load(), g_lotRebuilds.load(), g_levelsMade.load(), g_deferredCount.load(), g_staleSends.load()) +
+                                                      "one update {} (lamps added, moved or removed, sent at once {}; first sights not taken as edits {}; lamp values changed without a move {}; outside of a floor marked changed without a change {}), lots rebuilt {}, floor objects made {}, rooms held until their solve ended {}, rooms still holding a lamp switched off gathered again {}",
+                                                      g_ambReady ? "on" : "not installed", g_ambMerges.load(), g_canonTaken.load(), CanonMs(), g_canonKept.load(), g_canonReused.load(), g_canonOld.load(), g_quickThreshold.load(), g_quickTests.load(), g_settles.load(), g_settlesEarly.load(), g_depCoalesced.load(), g_depShapeSends.load(), g_firstSightNotEdit.load(), g_lampWobbles.load(), g_outdoorQuiet.load(), g_lotRebuilds.load(), g_levelsMade.load(), g_deferredCount.load(), g_staleSends.load()) +
                                           std::format(", lamp edits first: rooms made urgent {} (kept urgent past 3 s while waiting {}, past 8 s still waiting {}), gathered at once {}, marks held while their room was solved {} (given back {}), "
                                                       "floor batches with per-lamp wall lists {} (every wall tested {})",
                                                       g_urgentMarked.load(), g_urgentKept.load(), g_urgentExpiredPending.load(), g_gatherSoon.load(), g_heldMarks.load(), g_heldGiven.load(), g_maskListBatches.load(),
