@@ -286,7 +286,8 @@ void WriteDump(EXCEPTION_POINTERS* ep) {
     mei.ThreadId = GetCurrentThreadId();
     mei.ExceptionPointers = ep;
     mei.ClientPointers = FALSE;
-    const MINIDUMP_TYPE type = static_cast<MINIDUMP_TYPE>(MiniDumpWithIndirectlyReferencedMemory | MiniDumpScanMemory | MiniDumpWithThreadInfo);
+    const MINIDUMP_TYPE type = static_cast<MINIDUMP_TYPE>(MiniDumpWithIndirectlyReferencedMemory | MiniDumpScanMemory | MiniDumpWithThreadInfo |
+                                                          MiniDumpWithFullMemoryInfo); // the region list (a few KB): who held the address space
     g_writeDump(GetCurrentProcess(), GetCurrentProcessId(), f, type, &mei, nullptr, nullptr);
     CloseHandle(f);
 }
