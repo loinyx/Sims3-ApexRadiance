@@ -79,6 +79,8 @@ constexpr DWORD kHoldQuietMs = 1500;     // the rooms that take room 0's lamps a
 constexpr DWORD kCheckEveryMs = 2000;    // the consistency check of the GPU lamps' stories
 constexpr DWORD kRepairWaitMs = 4000;    // a story sent to gather a lamp is checked again after this
 constexpr uint64_t kGameWriteGapMs = 500; // a relight made only for a game write: at most this often per map
+// shortcut: a bake that keeps changing past this falls back to the share on the render thread, as before; tune from a recording
+constexpr uint64_t kUnderWaitMs = 500; // a shown map waits this long at most for the worker's under-floor share
 // (2.15.1) A lamp lying on the lot's ground (its light 5 cm over the lawn, F8 capture) lit a tree above it and left the
 // lawn dark: the law's light falls with its angle of incidence, and from 5 cm the lawn 2 m away takes about 1 % of what it
 // would from above. On story 0's floor map a lamp whose light stands lower than kLowLampLift over the lot's ground is
@@ -567,6 +569,7 @@ struct Slot {
     float uBase = 0.0f;
     uint64_t underSig = 0;
     bool underExact = false, underDirty = false;
+    uint64_t underWaitSince = 0; // tick at which this shown map began waiting for the worker's share
     std::shared_ptr<struct UnderJob> uJob;
     bool dynCurrent = false;        // the mask buffer holds the under-floor share with "all" left to the shader
     // (GPU room lamps, developer) the lamps of room 0's list it does not draw that are kept as a kept room's (outdoor_delta.h
@@ -1419,7 +1422,7 @@ bool UploadSlot(IDirect3DDevice9* dev, Slot& s, const Job& j, Prepared& p) {
     s.nPhys = 0, s.pLights.clear(), s.pRow.clear(), s.pBlk.reset(), s.pHeader = -1.0f, s.physLater = j.physLater;
     s.kRanges.clear(), s.kLamps.clear(), s.kX = false;
     s.masked.clear(), s.maskedPos.clear(), s.gated.clear(), s.under.clear(), s.uA.clear(), s.uU.clear(), s.uSnap.clear(), s.uIds.clear();
-    s.underSig = 0, s.underExact = false, s.underDirty = false, s.uJob.reset();
+    s.underSig = 0, s.underExact = false, s.underDirty = false, s.underWaitSince = 0, s.uJob.reset();
     s.dynCurrent = false;
     s.map = RtLampGpu::Map{};
     D3DSURFACE_DESC d{};
@@ -2977,6 +2980,12 @@ void Frame(IDirect3DDevice9* dev) {
                     // recording): the worker computes it, this map waits for it with its last copy bound
                     if (!s.uJob) startUnderJob();
                     maskWait = true;
+                } else if (!dragging && s.relit && s.copy && (!s.underWaitSince || GetTickCount64() - s.underWaitSince < kUnderWaitMs)) {
+                    // a shown map: the share from the worker (the same FullUnder sums), not this thread (22-31 ms in one frame,
+                    // 2026-11-10); its last copy stays bound meanwhile
+                    if (!s.underWaitSince) s.underWaitSince = GetTickCount64();
+                    if (!s.uJob) startUnderJob();
+                    maskWait = true;
                 } else if (s.under.size() != s.masked.size() || s.uA.size() != s.masked.size() || s.uBase != sBase) {
                     // (no sums to start from: the whole share, once; a slot from the worker always has them)
                     LARGE_INTEGER st0{}, st1{};
@@ -3004,7 +3013,7 @@ void Frame(IDirect3DDevice9* dev) {
                     maskShareMs += Ms(st0, st1);
                 }
             }
-            if (!maskWait) s.underDirty = false;
+            if (!maskWait) s.underDirty = false, s.underWaitSince = 0;
             // (a drag: with more lamps than one batch the shader cannot evaluate "all"; the CPU's per-texel pass waits for the
             // lamp to be still, the last values stay meanwhile)
             if (dragging && !maskGpu) write = false;
