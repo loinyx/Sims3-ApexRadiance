@@ -15470,6 +15470,54 @@ void ApplyAmbientBaseChanges() {
     }    g_ambDirty.clear();
 }
 
+// ---- One reflection for an atrium ----
+// Each room's draw binds its reflection (FUN_006ad300 thiscall(LightProbeProxy room+0x154; bottom room+0x140, top room+0x130),
+// ret 8, called by 0x006A0676 and 0x006A06B3): the probe's cubes with SpecularProbeMultiplierBottom / Top 1 once its probe is
+// ready (proxy+8, +0x2C95; 0x006B42C0), else the default cube times the room's +0x140 / +0x130, which only the surface
+// colour pass 0x006A0F00 writes and are 0 in a room it never reached. The pool gives probes out by camera rating, so one story
+// of an atrium often holds none: InteriorWall's c5 = c6 = 0 below the floor line and 1 above it, the cube reflection
+// (x 0.35) on the upper half only (light captures 2026-11-10 10-38-48..57 and 11-37-02 / 06: x1.05 to x1.07 at the line).
+// While the indoor share is on, a member without a ready probe draws with a member's that has one, the nearest other story's first
+// (ArchAmbient::AtriumProbe); every other room as the game.
+bool OtherMembers(const void* room, std::vector<DepKey>& others, int* ownLevel = nullptr); // below
+uintptr_t kProbeBind = 0;            // 0x006AD300 (GameAddr RoomProbeBind)
+uintptr_t kProbeBindCalls[2] = {};   // 0x006A0676, 0x006A06B3 (RoomProbeBindCall0/1)
+bool g_atriumProbeReady = false;
+std::atomic<long> g_atriumProbeLent{0};
+using ProbeBind_t = void(__fastcall*)(void* proxy, void* edx, const float* bottom, const float* top);
+bool ProbeReadyOf(uintptr_t proxy) {
+    __try {
+        const uintptr_t probe = proxy ? *reinterpret_cast<const uintptr_t*>(proxy + 8) : 0;
+        return probe && *reinterpret_cast<const uint8_t*>(probe + 0x2C95);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+uintptr_t ProxyOf(const BYTE* room) {
+    __try {
+        return room ? *reinterpret_cast<const uintptr_t*>(room + 0x154) : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+void __fastcall ProbeBindHook(void* proxy, void* edx, const float* bottom, const float* top) {
+    uintptr_t use = reinterpret_cast<uintptr_t>(proxy);
+    const BYTE* const room = reinterpret_cast<const BYTE*>(bottom) - 0x140;
+    if (AmbientActive() && !ProbeReadyOf(use) && ProxyOf(room) == use) {
+        thread_local std::vector<DepKey> others;
+        int level = 0;
+        if (OtherMembers(room, others, &level)) {
+            uintptr_t proxies[12] = {};
+            int gaps[12] = {}, n = 0;
+            for (const DepKey& key : others)
+                if (n < static_cast<int>(std::size(proxies))) gaps[n] = std::abs(key.level - level), proxies[n++] = ProxyOf(SafeRoomById(key.tracker, key.level, key.room));
+            use = ArchAmbient::AtriumProbe(use, proxies, gaps, n, ProbeReadyOf);
+            if (use != reinterpret_cast<uintptr_t>(proxy)) g_atriumProbeLent.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+    reinterpret_cast<ProbeBind_t>(kProbeBind)(reinterpret_cast<void*>(use), edx, bottom, top);
+}
+
 bool Install(std::string& error) {
     if (g_installed) return true;
     g_basisGuardReady.store(false, std::memory_order_relaxed);
@@ -15621,6 +15669,14 @@ bool Install(std::string& error) {
         g_wallUvReady = MemPatch::WriteBytes(kWallUvCalls[k], std::vector<BYTE>(call, call + 5), &g_patches);
     }
     LOG_INFO(std::string("[LevelLightShare] Walls taller than a story: ") + (g_wallUvReady ? "ready (their light spreads over the drawn height)" : "not available (code differs)"));
+    // One reflection for an atrium: the two calls of the room's reflection bind go through ProbeBindHook
+    kProbeBind = GameAddr::Get(Id::RoomProbeBind);
+    kProbeBindCalls[0] = GameAddr::Get(Id::RoomProbeBindCall0);
+    kProbeBindCalls[1] = GameAddr::Get(Id::RoomProbeBindCall1);
+    g_atriumProbeReady = GameAddr::Have({Id::RoomProbeBind, Id::RoomProbeBindCall0, Id::RoomProbeBindCall1}) && CallsTarget(kProbeBindCalls[0], kProbeBind) &&
+                         CallsTarget(kProbeBindCalls[1], kProbeBind);
+    for (int k = 0; k < 2 && g_atriumProbeReady; k++) g_atriumProbeReady = Redirect(kProbeBindCalls[k], kProbeBind, reinterpret_cast<const void*>(&ProbeBindHook));
+    LOG_INFO(std::string("[LevelLightShare] One reflection for an atrium: ") + (g_atriumProbeReady ? "ready (a story without a probe draws with its atrium's)" : "not available (code differs)"));
     // Light through doors and windows: the wall cutouts posted from now on (doors, windows, arches; lot loads included),
     // whatever the option, so lots loaded while it is off know their openings when it is turned on
     const bool cuts = InstallCutoutCapture();
@@ -15697,6 +15753,7 @@ void Uninstall() {
     MemPatch::RestoreAll(g_patches);
     g_patches.clear();
     UninstallCutoutCapture(); // light through doors and windows: the openings noted are forgotten with the hooks
+    g_atriumProbeReady = false;
     g_enterReady = false;
     g_floorMaskReady = false;
     {
@@ -17654,11 +17711,12 @@ bool SettlingAfterLoad() {
 }
 
 // The other members of a room's atrium group (false: not in one)
-bool OtherMembers(const void* room, std::vector<DepKey>& others) {
+bool OtherMembers(const void* room, std::vector<DepKey>& others, int* ownLevel) {
     others.clear();
     uintptr_t mgr = 0;
     int level = 0, id = 0;
     if (!room || !AmbientIdentity(static_cast<BYTE*>(const_cast<void*>(room)), mgr, level, id)) return false;
+    if (ownLevel) *ownLevel = level;
     const uintptr_t tracker = MgrTracker(mgr);
     if (!tracker) return false;
     std::lock_guard<std::mutex> lk(g_ambMx);
@@ -18620,9 +18678,10 @@ std::string ArchAmbientStatus() {
     return std::format("room ambient through arches: {} rooms with arches, floor draws given a neighbour's ambient {}, draws of no known room {}, "
                        "rooms of one ambient taken together with no story known {}, of an ambient rooms of the draw's story share (their arches together) {}, reads failed {}; "
                        "the draw's story found by its room map {} and by its directional maps {}; draws whose ambient matched only rooms of another story or lot (given nothing) {}, "
-                       "with no story known and matches on more than one story or lot (given nothing) {}; last draws near a room with arches but not matched:{}",
+                       "with no story known and matches on more than one story or lot (given nothing) {}; last draws near a room with arches but not matched:{}; "
+                       "atrium stories drawn with another member's reflection probe {}",
                        rooms, g_archDraws.load(), g_archUnmatched.load(), g_archUnion.load(), g_archShared.load(), g_archFaults.load(), g_archByMap.load(), g_archByBasis.load(),
-                       g_archOffStory.load(), g_archSpread.load(), misses.empty() ? " none" : misses);
+                       g_archOffStory.load(), g_archSpread.load(), misses.empty() ? " none" : misses, g_atriumProbeLent.load());
 }
 std::string Status() {
     return std::format("Colour groups committed {} ({} native fallbacks) | ", g_groupCommits.load(), g_groupFallbacks.load()) + SlabStatus() + " | " + std::format("{} | outdoor lights carried to other stories: {} | stories updated: {} | walls of the light's story: {}/{} classes, {} tests, {} blocked | indoor "

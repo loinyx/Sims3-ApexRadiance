@@ -350,6 +350,9 @@ enum class Id : uint16_t {
     WallUvCall0,        // call FUN_00c38530 (0x00C387B5)
     WallUvCall1,        // the second call (0x00C387CC)
     WallUv,             // FUN_00c38530: the wall light-UV writer
+    RoomProbeBindCall0, // call FUN_006ad300 in FUN_006a0640 (0x006A0676): a room draw binds its reflection probe
+    RoomProbeBindCall1, // the call in FUN_006a0680 (0x006A06B3), which then binds InteriorBuildingAmbientColor
+    RoomProbeBind,      // FUN_006ad300 thiscall(LightProbeProxy; float4* bottom = room+0x140, float4* top = room+0x130), ret 8
     WallEdgeFn,         // FUN_006a43b0 cdecl(dir) -> edge
     CutPostSite0,       // "push 6257EB4h" of the wall cutout message in the cutout Add (0x00B0D866)
     CutPostSite1,       //  ... and Remove (0x00B0DD15)

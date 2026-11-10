@@ -302,6 +302,20 @@ int main() {
         TakeCube(none, 2, 3.0f, zero, 0, cubeOf);
         Check(!none.tex && zero[0] == 0.0f, "cube: no room with one, no flag");
     }
+    // AtriumProbe: proxies 10 (own, not ready), 0 (a member without one), 20 (not ready), 30 (ready, same story), 40 (ready, story above)
+    {
+        const auto ready = [](std::uintptr_t p) { return p == 30 || p == 40 || p == 50; };
+        const std::uintptr_t members[4] = {0, 20, 30, 40};
+        const int gaps[4] = {1, 1, 0, 1};
+        Check(AtriumProbe(10, members, gaps, 4, ready) == 40, "atrium probe: the other story's ready member before one of its own story");
+        Check(AtriumProbe(10, members, gaps, 3, ready) == 30, "atrium probe: its own story's only when no other story has one");
+        Check(AtriumProbe(40, members, gaps, 4, ready) == 40, "atrium probe: a ready probe of its own is kept");
+        Check(AtriumProbe(10, members, gaps, 2, ready) == 10, "atrium probe: no member ready, its own (the game's default)");
+        Check(AtriumProbe(10, nullptr, nullptr, 0, ready) == 10, "atrium probe: no members, its own");
+        const std::uintptr_t far[2] = {50, 40};
+        const int farGaps[2] = {2, 1};
+        Check(AtriumProbe(10, far, farGaps, 2, ready) == 40, "atrium probe: the nearest other story first");
+    }
     std::printf("Arch ambient: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

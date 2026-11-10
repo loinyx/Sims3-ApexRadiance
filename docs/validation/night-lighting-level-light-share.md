@@ -41,6 +41,7 @@ an FPS gain, complete climate coverage or resolution of texture allocation stall
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-10 | Working tree on `771017f` (one reflection for an atrium) | Standard Release x86 build; `tools/arch_ambient_test` (`AtriumProbe`); `tools/room_ambient_test`; `tools/rt_lamps_test`; `tools/outdoor_delta_test`; `python tools/public_text_check.py`; both call sites and the fallback signature unique in `TS3W.exe` 1.67.2 | Build: 0 warnings. 0 failures. Not checked in game | CPU harness / native D3D9 |
 | 2026-10-29 | `d59f6ba` (released as 2.18.2, tag `v2.18.2`, ASI SHA-256 `0C96DABA986812C417E40E771CF6B5810B53565285ACD2A1AC801A7D09EE3DAA`; lamp posts on neighbouring lots `358a394`, picked by place `28975fe`, review fixes) | Standard Release x86 build; `tools/i18n_check`; `perl tools/menu_audit.pl .`; developer builds `C23EDBE4` and `907C47DA` in game | Build with no errors; i18n OK (21 languages, 2432 keys); menu audit: no new findings. In game: each move of a post relit every story of the neighbouring lots in 7.5 to 31 ms with no room solves, those lots 0.006 to 0.014 ms a frame; no visible delay after placing or dropping a post. The review fixes of `79c87e1` were not seen in game | In game, backend not recorded |
 | 2026-10-28 | `ddb9e44` (walls relit first, floor mask four texels at a time) | Developer recording of lamp drags | The under-floor share's update about 1.6 ms a relight round before, 0.65 ms on average after; every round fit in one frame (before: rounds of up to 20 maps over 5 to 8 frames, the seam between stories showing two lamp positions) | In game, backend not recorded |
 | 2026-10-28 | `ea376c0` (a room floor map smaller than its solve) | Developer recording on a 20 x 30 m lot (own floor maps 256x128 and 256x256 under a 512x256 working map) | Every lamp move relit all stories without a room-0 solve; the game's room solves during a drag fell from 5.0 ms to 0.6 ms a frame | In game, backend not recorded |
@@ -226,6 +227,13 @@ topology mutation inside a point is not reproduced. This release does not promis
   post about 0.6 s late (session `21-03-29`: its room 0s solved in full 563 ms after the edit).
 
 ## Open checks
+
+- One reflection for an atrium (`ProbeBindHook`): an atrium at night, lit by lamps of both stories, seen from the upper
+  story. Take F7 captures just below and just above the floor line on the double-height wall. **Expected:** InteriorWall
+  `c5` / `c6` are equal on both draws (1, the upper member's probe), and the reflection part of the step at the floor
+  line is gone. With the indoor share off, `c5` / `c6` are the game's again. The lower story's floors and furniture take the same reflection. Case 1 (lot `9CE90DF0`) also had a
+  step in the light maps themselves (the upper map 13-15% brighter at the line). This change does not touch that part.
+  A SceneWriteRoom replay of that lot is the next test for it.
 
 - Lamp posts of other lots (`358a394`). A lamp post placed near a neighbouring lot, dragged along it
   for about 10 s, put down, then deleted. **Expected:** about 1 s after it stops, the neighbour's outside walls take its

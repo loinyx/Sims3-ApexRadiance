@@ -630,6 +630,35 @@ and the walls cut off hard at the story line while their lower half was red.
   (story 3 over story 2: rooms 5, 6 and 7 open, 304 floorless quadrants over room 5 at tile granularity; story 2: the 40
   stairwell openings unchanged, rooms 1 to 4 under their floor closed).
 
+### One reflection for an atrium
+
+Each room's draw binds its own reflection probe: `FUN_006ad300` (`thiscall(room+0x154 LightProbeProxy; room+0x140,
+room+0x130)`, `ret 8`, called at `0x006A0676` and `0x006A06B3`). Once that room's probe is ready (`proxy+8`, `+0x2C95`) it
+binds the probe's cubes with *SpecularProbeMultiplierBottom* / *Top* of 1 (`0x006B42C0`). Otherwise it binds the default
+cube times room `+0x140` / `+0x130` (`0x006B2F30`). Only the surface colour pass `0x006A0F00` writes those two fields, and
+they stay 0 in a room it never reached. The probe pool hands out probes by camera rating, so one story of an atrium often
+has none.
+
+On InteriorWall these are `c5` / `c6`, the tint of the cube reflection (`x 0.35`). Two lots showed the same split: `c5 = c6 = 0`
+on the story-1 wall draw and 1 on the story-2 draw. The reflection was added only above the floor line, a step of x1.05 to
+x1.07 there (light captures 2026-11-10 10-38-48 to 10-38-57, 11-37-02 and 11-37-06). The precomp names come from the
+InteriorWall technique's parameter block.
+
+Apex sends both calls through `ProbeBindHook`. While the indoor share is on, a room of an atrium group (the stacked rooms'
+ambient merge) whose probe is not ready draws with a ready probe of another member (`ArchAmbient::AtriumProbe`): the
+nearest other story's first, since a group can hold several rooms of one story under one upper room; a member of its own
+story only when no other story has one. That covers its walls, floors and objects, so the whole atrium shows one
+reflection. A room with a ready probe of its own, one outside an atrium, or any room with the indoor share off is drawn
+as the game draws it.
+
+This is a partial fix of the floor-line step: the reflection part only. On lot `9CE90DF0` 70 to 85% of the step is in
+the light maps themselves (the upper room's map 13-15% brighter at the same point), and that part remains.
+
+- When two members both hold a ready probe, each keeps its own cube, and a smaller step between the two captures can
+  remain. Unverified in game.
+- Diagnostics: *atrium stories drawn with another member's reflection probe* in the arch ambient status.
+- Offline: `tools/arch_ambient_test` (the pick).
+
 ### Lamps under a story's floor
 
 The game lists a ceiling lamp of the story below on the story above, its light a few centimetres under that story's
@@ -1300,6 +1329,7 @@ lighting, diagnostic arming, solves or budgets. An empty file means no qualifyin
 | `0x006A13B4` / `0x006A0230` | normalisation CALL / function | Steam 1.67.2 only |
 | `0x006A0C56` / `0x0069F280` | basis light CALL / function | bytes `8D 94 24 C8 00 00 00 52 8B CF` |
 | `0x006C7CD6` | lamp mark call (`MarkThunk`) | bytes checked, Steam 1.67.2 only |
+| `0x006A0676`, `0x006A06B3` / `0x006AD300` | a room draw's reflection probe bind (`RoomProbeBindCall0/1`, `RoomProbeBind`) | signature, `E8` + rel32 == target, redirected to `ProbeBindHook` |
 
 ### Cost
 
