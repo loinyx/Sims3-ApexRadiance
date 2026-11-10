@@ -53,6 +53,15 @@ Release preparation: the public x86 build passes with zero warnings. Exact relea
 
 ## Open checks
 
+- Release 3.1.0 (commit `release: 3.1.0`, 2026-11-10): the garden edging set in a wall stays dark in game (release candidate). The fence-run masks now survive a 5 s re-read when the pieces did not move (review fix, not measured).
+
+- Pieces behind a wall and garden edging set in a house's wall (after 3.0.0, uncommitted). F7 2026-11-09 23-35-25: a
+  single-piece edging group at the foot of a brick wall, origin (979, 42.877, 914) on the wall's line, took a lamp of the
+  room behind the wall (L514D9900 at 978.5, 45.1, 913.5); with `FencePieceVisibility` it stays dark (seen in game on a
+  development build, 2026-11-09). Still to check: a long fence running past a free-standing wall (the pieces behind it
+  dark, the others lit, no seam at the run boundary), the draw cost with many runs, and `run_resource_checks.ps1`
+  (its `DrawFenceRuns` stub returns false, so the fixture does not cover the runs).
+
 - Ground light on stair tops (`04e5f3e`), F7 2026-10-29 17-35-27 and 17-35-29: an outdoor stair
   beside a house wall, at night. **Expected:** the steps above 1.25 m take the same wall shade as the grass beside the stair
   (no bright flat band over the shaded lower steps); the lamp at the top of the stair still lights the upper steps.

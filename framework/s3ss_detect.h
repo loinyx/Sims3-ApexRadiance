@@ -49,6 +49,8 @@ bool S3SSPatchEnabled(const char* patchName);
 // defaultValue is used (matching S3SS settings that default to on).
 bool S3SSPatchBoolSettingEnabled(const char* patchName, const char* settingName, bool defaultValue = true);
 bool S3SSOverlayDisabled();
+// [qol.borderless_window] mode is set to a borderless mode (anything but off / disabled)
+bool S3SSBorderlessConfigured();
 // Read-only compatibility data; no S3SS configuration is written.
 enum class RoomAmbientCorrectionStatus { S3SSNotLoaded, ConfigUnavailable, NoOverride, BackupFailed, ConfigChanged, WriteFailed, Saved };
 struct RoomAmbientCorrection {

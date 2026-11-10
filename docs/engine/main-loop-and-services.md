@@ -228,7 +228,7 @@ naming them record where the combined build touched the engine.
 | 0x007377F0, 0x00737560, +0x14 | Frame Budget; Profiler (name) | Detours; field in ms |
 | 0x00C7E3CA, `[0x011ECBC4]+0x41` | Frame Budget; also Smooth Streaming and GC Scheduler read `[0x011ECBC4]` | world-loaded test |
 | 0x00EC9F00, 0x00611680 | Frame Profiler | frame split: render / EndScene / Present / limiter |
-| 0x00EC9FBA | Smooth Patch (S3SS, `smooth_patch_precise.cpp`); Profiler `LimiterText` | limiter call site; must not be touched by Apex |
+| 0x00EC9FBA | Smooth Patch (S3SS, `smooth_patch_precise.cpp`); Profiler `LimiterText`; [Display](../features/display.md) | limiter call site; Apex never writes its bytes, Display only redirects S3SS's call target while an Apex limit is set |
 | 0x006EBB70, 0x006E8810, 0x009DE140, 0x00EC6C30, 0x005943F0, 0x00AD97E0 | Frame Profiler | timed (Detours) |
 | 0x00599720, 0x0059A220, 0x004E16F0, 0x004E2760, 0x004DB850, 0x004DB8E0, 0x004EC010 | Frame Profiler | timed (hand-made hooks, all threads suspended) |
 | 0x007D9840, 0x010650C4 | Frame Profiler | intended job keys for remote calls (the globals holding them are never set in the combined code; see the profiler doc) |
@@ -296,6 +296,9 @@ naming them record where the combined build touched the engine.
 | **0x00EC9F00** | **render frame**(bool present), `ret 4`: BeginFrame 0x00611620, scene + UI, `if (arg) 0x00611760` (end frame + Present), then at **0x00EC9FBA** `if (renderer+0x8D) sleep 30 ms` | full.asm |
 | 0x00611620 | BeginFrame (device BeginScene, vtable +0xA4 per profiler); fails when renderer+0x8D set | full.asm; frame_profiler.cpp header |
 | 0x00611760 -> 0x00611680 | end frame + Present: EndScene (device vtable +0xA8), Present (+0x44); 0x00611680 only caller 0x00611766 | full.asm; frame_profiler.cpp header |
+| 0x0061172C | in 0x00611680: Present returned `D3DERR_DEVICELOST` -> renderer+0x8D = 1 (device lost), 0x00610590; any failure -> 0x00610AB0(0) | disassembly 2026-11-09 |
+| 0x00610590 | device lost: calls vfunc 0 of every listener in the list at renderer+0xE4 (default-pool resources released) | disassembly 2026-11-09 |
+| **0x00610AB0** | **device recovery**(bool force), `ret 4`: unless forced and in fullscreen, only while the game's window is in the foreground; `TestCooperativeLevel` (must be OK or `D3DERR_DEVICENOTRESET`); listeners at +0xD8; gamma ramp in fullscreen only; **`Reset([renderer+0xE0]+0x14C)`** (the game's stored present parameters); on success copies them to +0x184 (+0x1A4 = current `Windowed`) | disassembly 2026-11-09; used by [Display](../features/display.md) for live mode changes |
 | 0x004E1320 | EA thread sleep: `SleepEx([arg], TRUE)` (arg points to ms) | full.asm, iat.map |
 | **0x006E8810** | **Scene::EndFrame**: waits for the scene jobs (several `Job::Wait` 0x0059A500 calls on scene+0x310 / +0x318 / +0x31C ...), pops the render queue | full.asm |
 | 0x00588E20 | after EndFrame: returns a bool from renderer+0x8E / 0x006115C0; result unused by the loop | full.asm; role not studied |

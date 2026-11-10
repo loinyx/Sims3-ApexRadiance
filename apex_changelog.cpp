@@ -6,47 +6,54 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k310Added[] = {
+    "Display: window, borderless or fullscreen, any resolution, and a smooth frame-rate limit",
+    "Display: a separate limit in the background and an FPS counter",
+    "Overview: one status card, game memory and a switch per page",
+    "Overview: Turn off Apex, and turning it on puts everything back",
+    "Performance: a note to save before the game runs out of memory",
+    nullptr};
+constexpr const char* k310Improved[] = {
+    "What's new: a short card after updating, and shorter notes",
+    "Compatibility: how to install the RTX Remix bridge",
+    "Compatibility: with the RTX Remix bridge, offers to turn off uncompressed textures that make the camera stutter",
+    nullptr};
+constexpr const char* k310Fixed[] = {
+    "Night Lights: fences and garden edging behind a wall no longer take lamp light through it",
+    "RTX Remix bridge: fullscreen runs as borderless instead of hanging the game",
+    nullptr};
+constexpr const char* k310Highlights[] = {
+    "Display: frame-rate limit and window modes",
+    "A new Overview with game memory",
+    "A note before the game runs out of memory",
+    "Fences stay dark behind walls",
+    nullptr};
+
+// 3.0.0 (rewritten after release: one line per subject, the details are in the GitHub notes)
 constexpr const char* k300Added[] = {
-    "Night Lights: on Steam, Instant (GPU) draws indoor lamps and their shadows too",
-    "Night Lights: on the EA app, Instant (GPU) draws indoor lamps too",
-    "Night Lights: indoor lamp edits show at once on every story",
-    "Night Lights: table legs and stairs cast shadows from indoor lamps",
+    "Night Lights: indoor lamps drawn on the GPU, on Steam and the EA app; table legs and stairs cast shadows",
     "Night Lights: new option Light bounces between rooms, on by default",
     nullptr};
 constexpr const char* k300Improved[] = {
-    "Night Lights: furniture, metal and stairs follow a dragged indoor lamp without blinking",
-    "Night Lights: a lamp on a table takes the table's shadow with it",
-    "Night Lights: lamp light on floors through doors and arches has no steps",
-    "Night Lights: lamp light passes through diagonal walls and the real shape of each opening",
-    "Night Lights: double-height rooms light the upper half of their walls",
-    "Night Lights: attics and rooms open to the roof light their upper walls",
-    "Night Lights: furniture takes up to twice the lamp light at night",
-    "Night Lights: lamp shadows keep their soft edge at door frames",
-    "Night Lights: curtains and furniture along walls take smooth room light",
-    "Night Lights: furniture shadows run on through arches into the next room",
-    "Night Lights: floors change tone smoothly through arches between rooms",
-    "Night Lights: lamp light loses strength at each pane of glass",
-    "Night Lights: outdoor lamps fade slowly at dawn and dusk",
-    "Night Lights: rooms take their day or night light much faster",
-    "Night Lights: a moved object's shadow follows it during the drag",
-    "Night Lights: sofa and chair arms no longer cast thin streaks",
-    "Night Lights: glossy indoor furniture takes smooth room light",
-    "Recording: up to 60 seconds, and the stop key waits 8 seconds for the light to settle",
+    "Night Lights: furniture, metal, stairs and a table's shadow follow a dragged indoor lamp without blinking",
+    "Night Lights: doors, arches, diagonal walls, real window shapes and glass let lamp light through as they should",
+    "Night Lights: tall rooms and attics light their upper walls",
+    "Night Lights: furniture takes more lamp light at night and smooth light along walls",
+    "Night Lights: rooms switch between day and night much faster; outdoor lamps fade slowly at dawn and dusk",
+    "Recording: up to 60 seconds",
     "Settings: a new default look for lighting and effects, and your own values stay",
     nullptr};
 constexpr const char* k300Fixed[] = {
-    "Night Lights: GPU lamps recover by themselves after a failure in long sessions",
-    "Night Lights: lamp light no longer leaks through floors",
-    "Night Lights: the game no longer pauses when rooms take new light",
-    "The game window no longer stays black under the RTX Remix bridge",
-    "Night Lights: a table's shadow no longer flickers during a drag",
-    "Night Lights: floors and decks beside diagonal walls and arches show no dark diamonds",
-    "Night Lights: furniture shadows end in a soft fade, with no round edge",
-    "Night Lights: street lamps and sconces reach the game's brightness up close",
-    "Banding Fix: sharpening no longer coarsens the grain in shadows",
-    "Performance: a light map scan no longer raises hundreds of errors a second",
-    "Performance: a model that changes detail no longer risks a crash when drawn",
-    "Household photos keep the hair colour of blond Sims",
+    "Night Lights: lamp light leaking through floors, and pauses when rooms take new light",
+    "Night Lights: dark diamonds beside diagonal walls, and a table shadow that flickered in a drag",
+    "RTX Remix bridge: the game window staying black",
+    "Household photos of blond Sims, grain in shadows with sharpening, and two rare crashes",
+    nullptr};
+constexpr const char* k300Highlights[] = {
+    "Indoor lamps on the GPU, with shadows",
+    "Lamp edits show at once on every story",
+    "Light through doors, arches and glass without steps",
+    "New option: Light bounces between rooms",
     nullptr};
 
 constexpr const char* k2184Improved[] = {
@@ -522,14 +529,18 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
-    {"3.0.0", "2026-11-09", k300Added, k300Improved, k300Fixed},
-    {"2.18.4", "2026-10-31", nullptr, k2184Improved, k2184Fixed},
-    {"2.18.3", "2026-10-30", nullptr, nullptr, k2183Fixed},
-    {"2.18.2", "2026-10-29", k2182Added, k2182Improved, k2182Fixed},
-    {"2.18.1", "2026-10-29", nullptr, nullptr, k2181Fixed},
-    {"2.18.0", "2026-10-29", k2180Added, k2180Improved, k2180Fixed},
-    {"2.17.2", "2026-10-28", k2172Added, nullptr, nullptr},
-    {"2.17.1", "2026-10-27", nullptr, k2171Improved, k2171Fixed},
+    {"3.1.0", "2026-11-10", k310Added, k310Improved, k310Fixed,
+     "A frame-rate limit and window modes, a new Overview with game memory, and fences dark behind walls", k310Highlights},
+    {"3.0.0", "2026-11-09", k300Added, k300Improved, k300Fixed,
+     "Indoor lamps light up on the graphics card, with shadows, and light passes cleanly through doors, arches and glass", k300Highlights,
+     "Two things moved once: lighting values still at the old defaults took the new ones, and Lamp lighting is on Instant (GPU)."},
+    {"2.18.4", "2026-10-31", nullptr, k2184Improved, k2184Fixed, "Lamp shadows on the ground follow a dragged lamp at once"},
+    {"2.18.3", "2026-10-30", nullptr, nullptr, k2183Fixed, "Steady lamp light on sidewalks and at lot edges"},
+    {"2.18.2", "2026-10-29", k2182Added, k2182Improved, k2182Fixed, "Lamp posts light the walls of neighbouring lots"},
+    {"2.18.1", "2026-10-29", nullptr, nullptr, k2181Fixed, "Fixes for fences, deleted lamps and rainy ground"},
+    {"2.18.0", "2026-10-29", k2180Added, k2180Improved, k2180Fixed, "Lighting options in tabs, one Ground light slider, and lamp light through fences"},
+    {"2.17.2", "2026-10-28", k2172Added, nullptr, nullptr, "Offers to fix Performance Patch options that freeze Sims"},
+    {"2.17.1", "2026-10-27", nullptr, k2171Improved, k2171Fixed, "A lamp's light stays in its own room"},
     {"2.17.0", "2026-10-27", k2170Added, k2170Improved, nullptr},
     {"2.16.3", "2026-10-27", nullptr, nullptr, k2163Fixed},
     {"2.16.2", "2026-10-27", nullptr, k2162Improved, k2162Fixed},

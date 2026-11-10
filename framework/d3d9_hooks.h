@@ -120,6 +120,10 @@ bool RegisterSetPixelShader(const std::string& name, SetPixelShaderHook hook, Pr
 bool RegisterSetVertexShader(const std::string& name, SetVertexShaderHook hook, Priority priority = Priority::Normal);
 bool RegisterSetTexture(const std::string& name, SetTextureHook hook, Priority priority = Priority::Normal);
 bool RegisterPresent(const std::string& name, PresentHook hook, Priority priority = Priority::Normal);
+// One function called right after the original Present returns, on the same thread, with its result (it may change it).
+// The frame-rate limiter waits there (features/screen_control.cpp). nullptr = none.
+using AfterPresentFn = void (*)(IDirect3DDevice9* device, HRESULT& result);
+void SetAfterPresent(AfterPresentFn fn);
 bool RegisterBeginScene(const std::string& name, BeginSceneHook hook, Priority priority = Priority::Normal);
 bool RegisterCreateTexture(const std::string& name, CreateTextureHook hook, Priority priority = Priority::Normal);
 bool RegisterCreateRenderTarget(const std::string& name, CreateRenderTargetHook hook, Priority priority = Priority::Normal);

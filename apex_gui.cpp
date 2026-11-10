@@ -30,6 +30,7 @@
 #include "light_probe.h"
 #include "hotkeys.h"
 #include "s3pp_settings.h"
+#include "s3ss_textures.h"
 #include "s3ss_detect.h"
 #include "platform.h"
 #include "depth_share.h"
@@ -43,6 +44,9 @@
 #include "ui/logo.h"
 #include "ui/violet_theme.h"
 #include "ui/widgets.h"
+#include "screen_control.h"
+#include "memory_meter.h"
+#include "overview_restore.h"
 #include "imgui.h"
 #include "imgui_internal.h"
 #include <toml++/toml.hpp>
@@ -83,7 +87,7 @@ std::atomic<bool> g_oldStandalone{false}; // an older S3SSApex.asi is loaded too
 std::string g_oldStandaloneModule;        // under g_detailLock
 
 // Sidebar pages and the tabs of each page. The selected page and tabs are kept while the game runs (not saved).
-enum Page : int { PageOverview, PageLighting, PageWaterSnow, PageColor, PageAmbientOcclusion, PageDepthBlur, PageEdgeSmoothing, PagePerformance, PageDeveloper, PageSettings, PageReport, PageConflicts, PageBanding, PageLotStreaming, PageProfiles };
+enum Page : int { PageOverview, PageLighting, PageWaterSnow, PageColor, PageAmbientOcclusion, PageDepthBlur, PageEdgeSmoothing, PagePerformance, PageDeveloper, PageSettings, PageReport, PageConflicts, PageBanding, PageLotStreaming, PageProfiles, PageDisplay };
 enum LightingTab : int { LightingLamps, LightingOutside, LightingInside, LightingFixes };
 enum SettingsTab : int { SettingsMenu, SettingsShortcuts, SettingsProfiles, SettingsCompatibility, SettingsAbout };
 int g_page = PageOverview;
@@ -165,6 +169,24 @@ bool Loading() { return g_startup.load() != Startup::Running; }
 
 // Switches are inert while features start and on an unsupported game version
 bool Switchable(const ApexPatch* patch) { return patch && patch->IsCompatibleWithCurrentVersion() && !Loading(); }
+
+// ApexConfig::ApplyFeatureState, plus: what the Overview's switches remembered no longer applies
+void ApplyFeatureStateForgetting(const toml::table& state) {
+    ApexConfig::ApplyFeatureState(state);
+    // (the Display settings are not part of a profile: those Turn off Apex kept come back, and the Display switch's
+    // own memory stays, ForgetAll leaves it)
+    if (int screen[6] = {}; OverviewRestore::Has(OverviewRestore::Scope::Apex) && OverviewRestore::Screen(screen)) {
+        Screen::Settings s;
+        s.mode = screen[0];
+        s.width = screen[1];
+        s.height = screen[2];
+        s.fps = screen[3];
+        s.backgroundFps = screen[4];
+        s.showFps = screen[5] != 0;
+        Screen::Set(s);
+    }
+    OverviewRestore::ForgetAll();
+}
 
 void SetPatch(ApexPatch* patch, bool on) {
     if (on ? patch->Install() : patch->Uninstall()) PatchManager::Get().SetUnsavedChanges(true);
@@ -311,7 +333,10 @@ bool DxvkMissing() { return g_startup.load() != Startup::Loading && !Platform::U
 // Sims 3 Performance Patch's spin settings next to sims3-modernization: suggested until the file is changed, and the result
 // stays in place of the buttons until the game restarts
 bool S3PPShown() { return S3PPSettings::Recommended() || S3PPSettings::Get().turnedOff; }
-bool AnythingRecommended() { return S3SSMissing() || DxvkMissing() || S3PPShown(); }
+// Sims3SettingsSetter's uncompressed textures under the RTX Remix bridge: suggested until the file is changed, and the result
+// stays in place of the button until the game restarts
+bool S3SSTexturesShown() { return S3SSTextures::Recommended() || S3SSTextures::Get().turnedOff; }
+bool AnythingRecommended() { return S3SSMissing() || DxvkMissing() || S3PPShown() || S3SSTexturesShown(); }
 // The RTX Remix bridge (a separate download of the release): offered in Settings > Compatibility only, with no start note,
 // while DXVK runs inside the game's 32-bit process
 bool BridgeSuggested() { return g_startup.load() != Startup::Loading && !Platform::UnderWine() && DxvkLoaded() && !Platform::RemixBridge(); }
@@ -331,6 +356,20 @@ void OpenPage(const wchar_t* url) {
 void DownloadS3SSButton() {
     if (ApexUi::IconTextButton("Download##S3SS", IconId::Download, "Opens the Sims3SettingsSetter releases page on GitHub in your browser", ButtonKind::Primary))
         OpenPage(kS3SSReleasesUrl);
+}
+constexpr const char* kS3SSTexturesText =
+    "With the RTX Remix bridge, Sims3SettingsSetter's uncompressed lot and Sim textures make every texture 4 to 8 times bigger, and copying them to the bridge makes the camera stutter. Apex can turn both off in Sims3SettingsSetter's settings; the change applies after a restart.";
+void S3SSTexturesItem() {
+    const S3SSTextures::State& s = S3SSTextures::Get();
+    ImGui::TextUnformatted("Sims3SettingsSetter");
+    if (s.turnedOff) {
+        ApexUi::MutedText("Turned off. Restart the game to apply.");
+        return;
+    }
+    ApexUi::MutedText(kS3SSTexturesText);
+    if (!s.error.empty()) ApexUi::MutedText("Could not change S3SS.toml. Open it and set enabled = false under UncompressedLotTexturesPatch and UncompressedSimTexturesPatch.");
+    if (ApexUi::IconTextButton("Turn off##S3SSTextures", IconId::Check, "Turns off both options in S3SS.toml and keeps a copy of the old file", ButtonKind::Primary))
+        S3SSTextures::Apply();
 }
 void S3PPItem() {
     const S3PPSettings::State& s3pp = S3PPSettings::Get();
@@ -369,6 +408,10 @@ void RecommendedItems() {
         S3PPItem();
         ApexUi::Gap(ApexUi::kSpace2);
     }
+    if (S3SSTexturesShown()) {
+        S3SSTexturesItem();
+        ApexUi::Gap(ApexUi::kSpace2);
+    }
 }
 void DontShowRecommended() {
     ApexConfig::UiSettings ui = ApexConfig::GetUi();
@@ -394,19 +437,11 @@ void RecommendS3SSCard() {
 
 bool g_menuGameAaOn = false;
 
-void OverviewPatchRow(const char* patchName, IconId icon, const char* name, const char* phrase, int page, int* tabOfPage = nullptr, int tab = 0) {
-    ApexPatch* patch = Find(patchName);
-    if (!patch) return;
-    bool on = patch->IsEnabled(), nameClicked = false;
-    char chipBuf[24];
-    const char* chip = CostChip(patch->GpuCostMs(), chipBuf);
-    const bool blocked = on && g_menuGameAaOn &&
-        (std::strcmp(patchName, "EdgeSmoothing") == 0 || std::strcmp(patchName, "DepthBlur") == 0 || std::strcmp(patchName, "AmbientOcclusion") == 0);
-    const char* summary = blocked ? "Waiting for game settings" : on ? patch->OverviewSummary() : nullptr;
-    if (ApexUi::OverviewRow(patchName, icon, name, phrase, Description(patch), &on, Switchable(patch), nullptr, &nameClicked, blocked ? nullptr : chip, summary, blocked)) SetPatch(patch, on);
-    if (nameClicked) Go(page, tabOfPage, tab);
-    CardError(patch->GetLastError());
-}
+constexpr const char* kOverviewMainPatches[] = {
+    kNightLighting, "AmbientOcclusion", "SceneDither", "DepthBlur", "EdgeSmoothing",
+};
+bool Comparing(); // the Compare shortcut has the effects off (defined with ToggleCompare)
+void ToggleCompare();
 
 constexpr const char* kOverviewPerformancePatches[] = {
     Performance::kResourceCacheName, Performance::kLookupMissesName, Performance::kFileListName,
@@ -415,25 +450,13 @@ constexpr const char* kOverviewPerformancePatches[] = {
     Performance::kFastMemoryName, Performance::kSceneBudgetName, Performance::kObjectIndexName,
     Performance::kMemoryGuardName, Performance::kWindowRepaintName, Performance::kScriptMathName,
 };
-
-constexpr const char* kOverviewMainPatches[] = {
-    kNightLighting, "AmbientOcclusion", "SceneDither", "DepthBlur", "EdgeSmoothing",
-};
-
-// An option this game version does not have counts neither as on nor as off: the group switch works with the others
-bool PerformanceGroupEnabled() {
-    for (const char* name : kOverviewPerformancePatches) {
-        const ApexPatch* patch = Find(name);
-        if (!patch) return false;
-        if (patch->IsCompatibleWithCurrentVersion() && !patch->IsEnabled()) return false;
-    }
-    return true;
-}
+constexpr const char* kOverviewLotPatches[] = {Performance::kLotDetailRangeName, Performance::kLotLodStreamingName, Performance::kLotVisibilityOverrideName,
+                                               Performance::kMapViewStreamingBlockerName, Performance::kLotObjectThrottleName};
 
 // "12 of 15 on": the Performance options this game version has, and how many of them are on
-std::string PerformanceCountText() {
+template <size_t N> std::string GroupCountText(const char* const (&names)[N]) {
     int on = 0, total = 0;
-    for (const char* name : kOverviewPerformancePatches) {
+    for (const char* name : names) {
         const ApexPatch* patch = Find(name);
         if (!patch || !patch->IsCompatibleWithCurrentVersion()) continue;
         ++total;
@@ -441,141 +464,385 @@ std::string PerformanceCountText() {
     }
     return I18n::Trf("{} of {} on", on, total);
 }
+std::string PerformanceCountText() { return GroupCountText(kOverviewPerformancePatches); }
 
-// (exceptSaveGuard: Room to save is left out, as All effects keeps it)
-bool PerformanceGroupAnyEnabled(bool exceptSaveGuard = false) {
-    for (const char* name : kOverviewPerformancePatches)
-        if (exceptSaveGuard && std::string_view(name) == Performance::kMemoryGuardName) continue;
+template <size_t N> bool GroupAnyOn(const char* const (&names)[N], const char* except = nullptr) {
+    for (const char* name : names)
+        if (except && std::string_view(name) == except) continue;
         else if (const ApexPatch* patch = Find(name); patch && patch->IsEnabled()) return true;
     return false;
 }
-
-bool PerformanceGroupSwitchable() {
+template <size_t N> bool GroupSwitchable(const char* const (&names)[N]) {
     if (Loading()) return false;
-    for (const char* name : kOverviewPerformancePatches)
+    for (const char* name : names)
         if (!Find(name)) return false;
     return true;
 }
 
-// keepSaveGuard: turning everything off leaves Room to save on (it protects saves from Error 12; it changes nothing on
-// screen); its own switch on the Performance page still turns it off
-void SetPerformanceGroup(bool on, bool keepSaveGuard = false) {
+// A page's group switch (Performance, Lot Streaming): off remembers the options that were on and turns them off; on turns
+// back on exactly those (every option when nothing is remembered). Kept across restarts (OverviewRestore). except = an
+// option left as it is (Room to save, when All effects turns the effects off).
+template <size_t N> void SetGroup(const char* const (&names)[N], OverviewRestore::Scope scope, bool on, const char* except = nullptr) {
     if (on) {
-        // Enable Faster Game File Lookups before its Remember Missing Files extension.
-        for (const char* name : kOverviewPerformancePatches)
-            if (ApexPatch* patch = Find(name); patch && Switchable(patch) && !patch->IsEnabled()) SetPatch(patch, true);
+        const std::vector<std::string> remembered = OverviewRestore::Names(scope);
+        const bool all = !OverviewRestore::Has(scope) || remembered.empty();
+        for (const char* name : names) // in list order: an extension after its parent
+            if (all || std::find(remembered.begin(), remembered.end(), name) != remembered.end())
+                if (ApexPatch* patch = Find(name); patch && Switchable(patch) && !patch->IsEnabled()) SetPatch(patch, true);
+        OverviewRestore::Forget(scope);
     } else {
-        // Stop the dependent negative cache before turning off its parent.
-        for (auto it = std::rbegin(kOverviewPerformancePatches); it != std::rend(kOverviewPerformancePatches); ++it)
-            if (ApexPatch* patch = Find(*it); patch && Switchable(patch) && patch->IsEnabled() && !(keepSaveGuard && std::string_view(*it) == Performance::kMemoryGuardName))
-                SetPatch(patch, false);
+        std::vector<std::string> wasOn;
+        for (const char* name : names)
+            if (const ApexPatch* patch = Find(name); patch && patch->IsEnabled() && !(except && std::string_view(name) == except)) wasOn.emplace_back(name);
+        if (wasOn.empty()) return;
+        if (OverviewRestore::Has(scope)) // (e.g. All effects kept Room to save, then the Performance switch turned it off too)
+            for (const std::string& n : OverviewRestore::Names(scope))
+                if (std::find(wasOn.begin(), wasOn.end(), n) == wasOn.end()) wasOn.push_back(n);
+        OverviewRestore::Remember(scope, wasOn);
+        for (auto it = std::rbegin(names); it != std::rend(names); ++it) // extensions before their parent
+            if (ApexPatch* patch = Find(*it); patch && Switchable(patch) && patch->IsEnabled() && !(except && std::string_view(*it) == except)) SetPatch(patch, false);
     }
 }
 
-bool AllOverviewEffectsEnabled() {
-    for (const char* name : kOverviewMainPatches) {
-        const ApexPatch* patch = Find(name);
-        if (!patch || !patch->IsEnabled()) return false;
+// Display as a page switch: off keeps its settings and puts the game's own window and no limit back; on restores them
+bool DisplayOn() { return !(Screen::Get() == Screen::Settings{}); }
+void SetDisplay(bool on) {
+    if (on && !OverviewRestore::Has(OverviewRestore::Scope::Display)) { // nothing to restore: choose a mode or a limit there
+        Go(PageDisplay);
+        return;
     }
-    return Picture::Get().GetParams().enabled && ShoreOn() && PerformanceGroupEnabled();
+    if (on) {
+        const std::vector<std::string> v = OverviewRestore::Names(OverviewRestore::Scope::Display);
+        if (v.size() == 6) {
+            Screen::Settings s;
+            s.mode = std::atoi(v[0].c_str());
+            s.width = std::atoi(v[1].c_str());
+            s.height = std::atoi(v[2].c_str());
+            s.fps = std::atoi(v[3].c_str());
+            s.backgroundFps = std::atoi(v[4].c_str());
+            s.showFps = v[5] == "1";
+            Screen::Set(s);
+        }
+        OverviewRestore::Forget(OverviewRestore::Scope::Display);
+    } else {
+        const Screen::Settings s = Screen::Get();
+        OverviewRestore::Remember(OverviewRestore::Scope::Display, {std::to_string(s.mode), std::to_string(s.width), std::to_string(s.height),
+                                                                    std::to_string(s.fps), std::to_string(s.backgroundFps), s.showFps ? "1" : "0"});
+        Screen::Set(Screen::Settings{});
+    }
 }
 
+// ---- the Overview's page tiles: one per sidebar page, its switch turns the whole page on or off ----
+struct OverviewTile {
+    const char* id;
+    IconId icon;
+    const char* name;
+    const char* phrase;
+    int page;
+    int* tab;
+    int tabIndex;
+    bool (*isOn)();
+    void (*set)(bool on);
+    bool (*switchable)();
+    std::string (*detail)();
+    bool inAllEffects;
+};
+
+std::string PatchDetail(const char* name) {
+    const ApexPatch* patch = Find(name);
+    if (!patch || !patch->IsEnabled()) return {};
+    char buf[24];
+    std::string s = CostChip(patch->GpuCostMs(), buf) ? buf : "";
+    if (const char* summary = patch->OverviewSummary(); summary && *summary && std::strcmp(name, kNightLighting) != 0)
+        s = std::string(I18n::Tr(summary)) + (s.empty() ? "" : " \xC2\xB7 ") + s;
+    const bool blocked = g_menuGameAaOn && (!std::strcmp(name, "EdgeSmoothing") || !std::strcmp(name, "DepthBlur") || !std::strcmp(name, "AmbientOcclusion"));
+    return blocked ? std::string(I18n::Tr("Waiting for game settings")) : s;
+}
+#define APEX_PATCH_TILE(fn, patchName)                                                                                                     \
+    bool fn##On() { const ApexPatch* p = Find(patchName); return p && p->IsEnabled(); }                                                 \
+    void fn##Set(bool on) { if (ApexPatch* p = Find(patchName); p && Switchable(p)) SetPatch(p, on); }                                   \
+    bool fn##Switchable() { return Switchable(Find(patchName)); }                                                                         \
+    std::string fn##Detail() { return PatchDetail(patchName); }
+APEX_PATCH_TILE(Lights, kNightLighting)
+APEX_PATCH_TILE(Banding, "SceneDither")
+APEX_PATCH_TILE(Occlusion, "AmbientOcclusion")
+APEX_PATCH_TILE(Blur, "DepthBlur")
+APEX_PATCH_TILE(Edges, "EdgeSmoothing")
+#undef APEX_PATCH_TILE
+
+bool WaterSwitchable() { return !Loading(); }
+std::string WaterDetail() { return ShoreOn() && g_menuGameAaOn ? std::string(I18n::Tr("Waiting for game settings")) : std::string(); }
+bool ColorOn() { return Picture::Get().GetParams().enabled; }
+void ColorSet(bool on) {
+    PictureParams p = Picture::Get().GetParams();
+    if (p.enabled == on) return;
+    p.enabled = on;
+    Picture::Get().SetParams(p, true);
+}
+bool AlwaysSwitchable() { return !Loading(); }
+std::string ColorDetail() {
+    char buf[24];
+    return ColorOn() && CostChip(Picture::Get().GpuMs(), buf) ? std::string(buf) : std::string();
+}
+bool PerfOn() { return GroupAnyOn(kOverviewPerformancePatches); }
+void PerfSet(bool on) { SetGroup(kOverviewPerformancePatches, OverviewRestore::Scope::Performance, on); }
+bool PerfSwitchable() { return GroupSwitchable(kOverviewPerformancePatches); }
+std::string PerfDetail() { return GroupCountText(kOverviewPerformancePatches); }
+bool LotOn() { return GroupAnyOn(kOverviewLotPatches); }
+void LotSet(bool on) { SetGroup(kOverviewLotPatches, OverviewRestore::Scope::LotStreaming, on); }
+bool LotSwitchable() { return GroupSwitchable(kOverviewLotPatches); }
+std::string LotDetail() { return GroupCountText(kOverviewLotPatches); }
+std::string DisplayDetail() { return Screen::Summary(); }
+
+const OverviewTile* OverviewTiles(int& count) {
+    static const OverviewTile kTiles[] = {
+        {"Lighting", IconId::MoonStar, "Lighting", "Lamps light up your neighborhood at night", PageLighting, &g_lightingTab, LightingLamps, LightsOn, LightsSet, LightsSwitchable, LightsDetail, true},
+        {"WaterSnow", IconId::WavesHorizontal, "Water & Snow", "Ponds mirror their shore", PageWaterSnow, nullptr, 0, ShoreOn, SetShore, WaterSwitchable, WaterDetail, true},
+        {"Color", IconId::Palette, "Color", "Adjustments, filters and LUTs", PageColor, nullptr, 0, ColorOn, ColorSet, AlwaysSwitchable, ColorDetail, true},
+        {"Banding", IconId::Blend, "Banding Fix", "No color steps in light and shadows", PageBanding, nullptr, 0, BandingOn, BandingSet, BandingSwitchable, BandingDetail, true},
+        {"Occlusion", IconId::Contrast, "Ambient Occlusion", "Soft shade where things meet", PageAmbientOcclusion, nullptr, 0, OcclusionOn, OcclusionSet, OcclusionSwitchable, OcclusionDetail, true},
+        {"Blur", IconId::Aperture, "Depth Blur", "Softly blurs the distant background", PageDepthBlur, nullptr, 0, BlurOn, BlurSet, BlurSwitchable, BlurDetail, true},
+        {"Edges", IconId::Spline, "Edge Smoothing", "Clean, smooth edges on the world", PageEdgeSmoothing, nullptr, 0, EdgesOn, EdgesSet, EdgesSwitchable, EdgesDetail, true},
+        {"Display", IconId::Monitor, "Display", "Window mode, resolution and frame-rate limit", PageDisplay, nullptr, 0, DisplayOn, SetDisplay, AlwaysSwitchable, DisplayDetail, false},
+        {"Performance", IconId::Gauge, "Performance", "Fewer stutters while you play", PagePerformance, nullptr, 0, PerfOn, PerfSet, PerfSwitchable, PerfDetail, true},
+        {"LotStreaming", IconId::Layers, "Lot Streaming", "How far lots show in full detail", PageLotStreaming, nullptr, 0, LotOn, LotSet, LotSwitchable, LotDetail, false},
+    };
+    count = IM_COUNTOF(kTiles);
+    return kTiles;
+}
+
+// All effects: every page tile but Display. Off remembers which tiles were on (each tile keeps its own options); Room
+// to save stays on, as before. On turns back on the remembered tiles (all of them when nothing is remembered).
 bool AnyOverviewEffectEnabled() {
-    for (const char* name : kOverviewMainPatches)
-        if (const ApexPatch* patch = Find(name); patch && patch->IsEnabled()) return true;
-    return Picture::Get().GetParams().enabled || ShoreOn() || PerformanceGroupAnyEnabled(true);
+    int n = 0;
+    const OverviewTile* tiles = OverviewTiles(n);
+    for (int i = 0; i < n; i++)
+        if (tiles[i].inAllEffects && (std::string_view(tiles[i].id) == "Performance" ? GroupAnyOn(kOverviewPerformancePatches, Performance::kMemoryGuardName) : tiles[i].isOn()))
+            return true;
+    return false;
 }
-
-bool AllOverviewEffectsSwitchable() {
-    if (Loading()) return false;
-    for (const char* name : kOverviewMainPatches)
-        if (!Switchable(Find(name))) return false;
-    return PerformanceGroupSwitchable();
-}
-
 void SetAllOverviewEffects(bool on) {
-    if (!on) SetShore(false); // Disable the reflection before its Night Lights / Depth Blur requirements.
-    for (const char* name : kOverviewMainPatches)
-        if (ApexPatch* patch = Find(name); patch && Switchable(patch) && patch->IsEnabled() != on) SetPatch(patch, on);
-
-    PictureParams picture = Picture::Get().GetParams();
-    if (picture.enabled != on) {
-        picture.enabled = on;
-        Picture::Get().SetParams(picture, true);
+    int n = 0;
+    const OverviewTile* tiles = OverviewTiles(n);
+    if (on) {
+        const std::vector<std::string> remembered = OverviewRestore::Names(OverviewRestore::Scope::Effects);
+        const bool all = !OverviewRestore::Has(OverviewRestore::Scope::Effects) || remembered.empty();
+        for (int i = 0; i < n; i++) { // Lighting before Water & Snow (reflections need Night Lights)
+            if (!tiles[i].inAllEffects || !(all || std::find(remembered.begin(), remembered.end(), tiles[i].id) != remembered.end())) continue;
+            // Performance: Room to save stayed on, so the tile reads on; its other options come back through its own set
+            const bool perf = std::string_view(tiles[i].id) == "Performance";
+            if (perf ? !GroupAnyOn(kOverviewPerformancePatches, Performance::kMemoryGuardName) : !tiles[i].isOn()) tiles[i].set(true);
+        }
+        OverviewRestore::Forget(OverviewRestore::Scope::Effects);
+    } else {
+        std::vector<std::string> wasOn;
+        for (int i = 0; i < n; i++)
+            if (tiles[i].inAllEffects && (std::string_view(tiles[i].id) == "Performance" ? GroupAnyOn(kOverviewPerformancePatches, Performance::kMemoryGuardName) : tiles[i].isOn()))
+                wasOn.emplace_back(tiles[i].id);
+        if (wasOn.empty()) return;
+        OverviewRestore::Remember(OverviewRestore::Scope::Effects, wasOn);
+        for (int i = n - 1; i >= 0; i--) { // Water & Snow before Lighting
+            if (!tiles[i].inAllEffects || !tiles[i].isOn()) continue;
+            if (std::string_view(tiles[i].id) == "Performance")
+                SetGroup(kOverviewPerformancePatches, OverviewRestore::Scope::Performance, false, Performance::kMemoryGuardName);
+            else tiles[i].set(false);
+        }
     }
-    SetPerformanceGroup(on, true);
-    if (on) SetShore(true); // Night Lights and Depth Blur are enabled above.
 }
 
-void OverviewPage() {
-    ApexUi::PageTitle("Overview", "See what is in use; click a resource to open its settings");
-    RecommendS3SSCard();
-    ImGui::PushID("Overview");
-    // One card: the All effects switch heads it, Lighting, Image and Performance are its groups (they were four cards)
-    if (ApexUi::BeginCard("##AllEffects")) {
-        const bool anyEffectOn = AnyOverviewEffectEnabled();
-        // "Some effects are on" names the ones that are off; "off" says Room to save stays (it was only a tooltip)
-        std::string state;
-        if (AllOverviewEffectsEnabled()) state = I18n::Tr("All effects are on");
-        else if (!anyEffectOn) state = I18n::Tr("All effects are off; Room to save stays on");
-        else {
-            static const std::pair<const char*, const char*> kNames[] = {{kNightLighting, "Night Lights"}, {"AmbientOcclusion", "Ambient Occlusion"},
-                {"SceneDither", "Banding Fix"}, {"DepthBlur", "Depth Blur"}, {"EdgeSmoothing", "Edge Smoothing"}};
-            std::string off;
-            const auto add = [&](const char* name) { off += off.empty() ? "" : ", "; off += I18n::Tr(name); };
-            if (!Picture::Get().GetParams().enabled) add("Color");
-            for (const auto& [patchName, name] : kNames)
-                if (const ApexPatch* p = Find(patchName); p && p->IsCompatibleWithCurrentVersion() && !p->IsEnabled()) add(name);
-            state = off.empty() ? std::string(I18n::Tr("Some effects are on")) : I18n::Trf("Some effects are on; off: {}", off);
+// Turn off Apex: everything with a switch in the menu off (every page, Room to save, Every-Story Ground Light, Display),
+// remembered as it was; Turn Apex on puts it back. Kept across restarts.
+bool ApexTurnedOff() { return OverviewRestore::Has(OverviewRestore::Scope::Apex); }
+void SetApexOff(bool off) {
+    std::vector<const char*> names(std::begin(kOverviewMainPatches), std::end(kOverviewMainPatches));
+    names.push_back(kUpperFloors);
+    names.insert(names.end(), std::begin(kOverviewPerformancePatches), std::end(kOverviewPerformancePatches));
+    names.insert(names.end(), std::begin(kOverviewLotPatches), std::end(kOverviewLotPatches));
+    if (off) {
+        std::vector<std::string> wasOn;
+        if (ShoreOn()) wasOn.emplace_back("#shore");
+        if (ColorOn()) wasOn.emplace_back("#picture");
+        for (const char* name : names)
+            if (const ApexPatch* p = Find(name); p && p->IsEnabled()) wasOn.emplace_back(name);
+        const Screen::Settings s = Screen::Get();
+        const int screen[6] = {s.mode, s.width, s.height, s.fps, s.backgroundFps, s.showFps ? 1 : 0};
+        OverviewRestore::RememberScreen(screen);
+        OverviewRestore::Remember(OverviewRestore::Scope::Apex, wasOn);
+        SetShore(false);
+        ColorSet(false);
+        for (auto it = names.rbegin(); it != names.rend(); ++it)
+            if (ApexPatch* p = Find(*it); p && Switchable(p) && p->IsEnabled()) SetPatch(p, false);
+        Screen::Set(Screen::Settings{});
+        LOG_INFO(std::format("[Menu] Apex turned off: {} parts off, remembered", wasOn.size()));
+    } else {
+        const std::vector<std::string> wasOn = OverviewRestore::Names(OverviewRestore::Scope::Apex);
+        const auto had = [&](const char* n) { return std::find(wasOn.begin(), wasOn.end(), n) != wasOn.end(); };
+        for (const char* name : names)
+            if (had(name))
+                if (ApexPatch* p = Find(name); p && Switchable(p) && !p->IsEnabled()) SetPatch(p, true);
+        if (had("#picture")) ColorSet(true);
+        if (had("#shore")) SetShore(true);
+        int screen[6] = {};
+        if (OverviewRestore::Screen(screen)) {
+            Screen::Settings s;
+            s.mode = screen[0];
+            s.width = screen[1];
+            s.height = screen[2];
+            s.fps = screen[3];
+            s.backgroundFps = screen[4];
+            s.showFps = screen[5] != 0;
+            Screen::Set(s);
         }
-        bool allEffects = AllOverviewEffectsEnabled();
-        if (ApexUi::CardHeader(IconId::ListChecks, "All effects", state.c_str(), "Turn all effects on or off together; Room to save stays on", &allEffects,
-                               AllOverviewEffectsSwitchable()))
-            SetAllOverviewEffects(allEffects);
+        OverviewRestore::Forget(OverviewRestore::Scope::Apex);
+        LOG_INFO("[Menu] Apex turned back on");
+    }
+}
+
+// One row of the Effects card: icon, name (opens the page) over its detail, the page switch at the right. Each row is
+// kRowH units high, its content centred; a hairline above every row but the first of its column.
+constexpr float kEffectRowH = 52.0f;
+void OverviewEffectRow(const OverviewTile& t, bool firstInColumn) {
+    const float u = ApexUi::Unit(), rowH = kEffectRowH * u, icon = 17.0f * u;
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float w = ImGui::GetContentRegionAvail().x;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    if (!firstInColumn) dl->AddRectFilled(ImVec2(p.x, p.y), ImVec2(p.x + w, p.y + 1.0f), ImGui::GetColorU32(Col(VioletTheme::kCardBorder)));
+    bool on = t.isOn();
+    const bool enabled = t.switchable() && !ApexTurnedOff() && !Comparing(); // Compare holds the effects off: nothing to remember then
+    const ImVec2 sw = ApexUi::ToggleSwitchSize();
+    // text block: name (regular size) over the detail (small), centred as one block
+    const char* name = I18n::Tr(t.name);
+    std::string detail = on ? t.detail() : std::string();
+    if (detail.empty()) detail = I18n::Tr(t.phrase); // nothing measured or the page is off: what the page does
+    const float nameH = ImGui::GetTextLineHeight();
+    ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
+    const float detailH = ImGui::GetTextLineHeight();
+    ImGui::PopFont();
+    const float blockH = nameH + 2.0f * u + detailH, top = p.y + (rowH - blockH) * 0.5f;
+    const float textX = p.x + icon + 13.0f * u, textW = std::max(0.0f, w - (icon + 13.0f * u) - sw.x - 16.0f * u);
+    ApexUi::DrawIcon(dl, t.icon, ImVec2(p.x, p.y + (rowH - icon) * 0.5f), icon, ImGui::GetColorU32(Col(on ? VioletTheme::kAccent : VioletTheme::kTextMuted)));
+    // the name: a button the size of the text (opens the page)
+    const ImVec2 nameSize = ImGui::CalcTextSize(name);
+    ImGui::SetCursorScreenPos(ImVec2(textX, top));
+    const bool clicked = ImGui::InvisibleButton("##open", ImVec2(std::min(nameSize.x, textW), nameH));
+    const bool hovered = ImGui::IsItemHovered();
+    if (hovered) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    ApexUi::Tooltip("Opens this page");
+    ImGui::PushStyleColor(ImGuiCol_Text, Col(hovered ? VioletTheme::kAccentLight : on ? VioletTheme::kText : 0xB9BAC2u));
+    ImGui::RenderTextEllipsis(dl, ImVec2(textX, top), ImVec2(textX + textW, top + nameH), textX + textW, name, nullptr, &nameSize);
+    ImGui::PopStyleColor();
+    ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
+    ImGui::PushStyleColor(ImGuiCol_Text, Col(VioletTheme::kTextMuted));
+    const float dy = top + nameH + 2.0f * u;
+    ImGui::RenderTextEllipsis(dl, ImVec2(textX, dy), ImVec2(textX + textW, dy + detailH), textX + textW, detail.c_str(), nullptr, nullptr);
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+    // the page switch, right, centred on the row
+    ImGui::SetCursorScreenPos(ImVec2(p.x + w - sw.x, p.y + (rowH - sw.y) * 0.5f));
+    ImGui::BeginDisabled(!enabled);
+    if (ApexUi::ToggleSwitch("##on", &on)) t.set(on);
+    ImGui::EndDisabled();
+    ImGui::SetCursorScreenPos(p);
+    ImGui::Dummy(ImVec2(w, rowH));
+    if (clicked) Go(t.page, t.tab, t.tabIndex);
+}
+
+// The Effects card: Effects and "n of m on" with All effects' switch in the header, then the pages in rows, two columns
+// side by side (reading left to right, in sidebar order), one column when the menu is narrow
+void OverviewEffectsCard() {
+    int n = 0;
+    const OverviewTile* tiles = OverviewTiles(n);
+    int on = 0;
+    for (int i = 0; i < n; i++) on += tiles[i].isOn() ? 1 : 0;
+    const std::string count = I18n::Trf("{} of {} on", on, n);
+    ImGui::PushID("Effects");
+    if (ApexUi::BeginCard("##Card")) {
+        bool all = AnyOverviewEffectEnabled();
+        if (ApexUi::CardHeader(IconId::None, "Effects", count.c_str(), "Turns every page below on or off; each page remembers its own options", &all,
+                               !Loading() && !ApexTurnedOff() && !Comparing()))
+            SetAllOverviewEffects(all);
         ApexUi::CardDivider();
-        ApexUi::CardGroup("Lighting");
-        bool nameClicked = false;
-        OverviewPatchRow(kNightLighting, IconId::MoonStar, "Night Lights", "Lamps light up your neighborhood at night", PageLighting, &g_lightingTab, LightingLamps);
-        if (ApexPatch* ntr = Find(kNightLighting)) {
-            ApexPatch* blur = Find("DepthBlur");
-            const char* phrase = !ntr->IsEnabled() ? "Needs Night Lights" : (blur && !blur->IsEnabled() && !DepthShare::Texture()) ? "Needs Depth Blur or Ambient Occlusion" : "Ponds mirror their shore";
-            bool on = ShoreOn();
-            if (ApexUi::OverviewRow("WaterReflections", IconId::MirrorRound, "Water Reflections", phrase, kShoreDescription, &on, !Loading(), nullptr, &nameClicked, nullptr, on && g_menuGameAaOn ? "Waiting for game settings" : nullptr, on && g_menuGameAaOn))
-                SetShore(on);
-            if (nameClicked) Go(PageWaterSnow);
-        }
-        ApexUi::CardGroup("Image");
-        {
-            nameClicked = false;
-            PictureParams p = Picture::Get().GetParams();
-            bool on = p.enabled;
-            char chipBuf[24];
-            const char* chip = p.enabled ? CostChip(Picture::Get().GpuMs(), chipBuf) : nullptr;
-            if (ApexUi::OverviewRow("Picture", IconId::Palette, "Color", "Adjustments, filters and LUTs", kPictureDescription, &on, true, nullptr, &nameClicked, chip)) {
-                p.enabled = on;
-                Picture::Get().SetParams(p, true);
+        const float u = ApexUi::Unit();
+        const int cols = ImGui::GetContentRegionAvail().x >= 560.0f * u ? 2 : 1;
+        const float gap = 32.0f * u;
+        ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(gap * 0.5f, 0.0f));
+        if (ImGui::BeginTable("##Rows", cols, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoPadOuterX)) {
+            for (int i = 0; i < n; i++) {
+                ImGui::TableNextColumn();
+                ImGui::PushID(tiles[i].id);
+                OverviewEffectRow(tiles[i], i < cols);
+                ImGui::PopID();
             }
-            if (nameClicked) Go(PageColor);
+            ImGui::EndTable();
         }
-        OverviewPatchRow("AmbientOcclusion", IconId::Contrast, "Ambient Occlusion", "Soft shade where things meet", PageAmbientOcclusion);
-        OverviewPatchRow("SceneDither", IconId::Blend, "Banding Fix", "No color steps in light and shadows", PageBanding);
-        OverviewPatchRow("DepthBlur", IconId::Aperture, "Depth Blur", "Softly blurs the distant background", PageDepthBlur);
-        OverviewPatchRow("EdgeSmoothing", IconId::Spline, "Edge Smoothing", "Clean, smooth edges on the world", PageEdgeSmoothing);
-        ApexUi::CardGroup("Performance");
-        {
-            // How many of the 15 are on, instead of a sentence pointing at the Performance page
-            bool on = PerformanceGroupEnabled(), perfClicked = false;
-            const std::string count = PerformanceCountText();
-            if (ApexUi::OverviewRow("PerformanceGroup", IconId::Gauge, "Performance", count.c_str(),
-                                    nullptr, &on, PerformanceGroupSwitchable(), nullptr, &perfClicked))
-                SetPerformanceGroup(on);
-            if (perfClicked) Go(PagePerformance);
-        }
+        ImGui::PopStyleVar();
     }
     ApexUi::EndCard();
     ImGui::PopID();
 }
 
+// The status card: Frame rate and Game memory as two halves with a hairline between them (one under the other when
+// narrow); both draw the same rows (ApexUi::Status*), so they line up
+void OverviewStatusCard() {
+    ImGui::PushID("Status");
+    if (ApexUi::BeginCard("##Card")) {
+        const float u = ApexUi::Unit();
+        const bool two = ImGui::GetContentRegionAvail().x >= 560.0f * u;
+        const float gap = 28.0f * u;
+        ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(gap * 0.5f, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_TableBorderLight, Col(VioletTheme::kCardBorder));
+        if (ImGui::BeginTable("##Halves", two ? 2 : 1, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoPadOuterX | (two ? ImGuiTableFlags_BordersInnerV : 0))) {
+            ImGui::TableNextColumn();
+            if (Screen::RenderFpsTile()) Go(PageDisplay); // the limit and the window mode live there
+            if (!two) ApexUi::Gap(ApexUi::kSpace4);
+            ImGui::TableNextColumn();
+            if (MemoryMeter::RenderTile()) Go(PagePerformance); // Room to save and the low-memory note live there
+            ImGui::EndTable();
+        }
+        ImGui::PopStyleColor();
+        ImGui::PopStyleVar();
+    }
+    ApexUi::EndCard();
+    ImGui::PopID();
+}
+
+// Header actions: Refresh lighting, Turn off Apex (Turn Apex on while it is off), right-aligned on the title's last line;
+// under the title when there is no room beside it
+void OverviewActions(float titleTop, float titleBottom) {
+    const float u = ApexUi::Unit(), gap = ApexUi::kSpace2 * u;
+    const bool off = ApexTurnedOff();
+    const char* power = off ? "Turn Apex on" : "Turn off Apex";
+    const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+    const float wRefresh = ApexUi::ButtonWidth("Refresh lighting", true), wPower = ApexUi::ButtonWidth(power, true);
+    const float total = wRefresh + gap + wPower, avail = ImGui::GetContentRegionAvail().x;
+    const float titleW = ImGui::CalcTextSize(I18n::Tr("How the game is running and what is in use")).x + ApexUi::kSpace4 * u;
+    const float afterTitle = ImGui::GetCursorPosY();
+    if (titleW + total <= avail) // beside the title, bottom-aligned with the subtitle
+        ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + avail - total, std::max(titleTop, titleBottom - ImGui::GetFrameHeight())));
+    ImGui::BeginDisabled(Loading() || off || !LightsOn());
+    if (ApexUi::IconTextButton("Refresh lighting", IconId::RotateCcw, "Recalculates the lighting of the lots around you")) NightLighting::RefreshAll();
+    ImGui::EndDisabled();
+    ImGui::SameLine(0.0f, gap);
+    ImGui::BeginDisabled(Loading() || Comparing());
+    if (ApexUi::IconTextButton(power, IconId::Power, off ? "Turns back on everything Turn off Apex turned off" : "Turns off every Apex feature, Room to save and Display; your settings are kept",
+                               off ? ButtonKind::Primary : ButtonKind::Secondary))
+        SetApexOff(!off);
+    ImGui::EndDisabled();
+    if (titleW + total <= avail) ImGui::SetCursorPosY(afterTitle);
+}
+
+void OverviewPage() {
+    const char* subtitle = ApexTurnedOff() ? "Apex is off; your settings are kept" : "How the game is running and what is in use";
+    const float titleTop = ImGui::GetCursorPosY();
+    ApexUi::PageTitle("Overview", subtitle);
+    const float titleBottom = ImGui::GetCursorPosY() - ImGui::GetStyle().ItemSpacing.y;
+    ImGui::PushID("Overview");
+    OverviewActions(titleTop, titleBottom);
+    RecommendS3SSCard();
+    OverviewStatusCard();
+    OverviewEffectsCard();
+    ImGui::PopID();
+}
 
 // ---- World > Lighting ----
 
@@ -1142,6 +1409,11 @@ void PerformanceCard() {
         ApexUi::CardGroup("Memory handling");
         FeatureSwitchRow(Performance::kFastMemoryName, "Faster memory handling", "Less waiting when the game hands out and frees memory");
         FeatureSwitchRow(Performance::kMemoryGuardName, "Room to save", "Keeps memory free for saving (Error 12); clears the game's idle cache when low");
+        {
+            ApexConfig::UiSettings ui = ApexConfig::GetUi();
+            if (ApexUi::SwitchRow("Warn when memory is low", &ui.lowMemoryWarning, "A small card at the top of the screen reminds you to save", true))
+                ApexConfig::SetUi(ui); // [ui] low_memory_warning
+        }
         ApexUi::CardGroup("Game and scripts");
         FeatureSwitchRow(Performance::kWindowRepaintName, "Lighter window updates", "Less work for the game each frame; nothing on screen changes");
         FeatureSwitchRow(Performance::kScriptMathName, "Faster scripts", "The game's scripts compare numbers and look up types with less work");
@@ -1254,6 +1526,19 @@ void LotStreamingCards() {
 void PerformancePage() {
     ApexUi::PageTitle("Performance", "Fewer stutters while you play");
     PerformanceCard();
+}
+
+// System > Display: window mode, resolution and frame-rate limit (features/screen_control.cpp)
+void DisplayContent() {
+    ImGui::PushID("Display");
+    if (ApexUi::BeginCard("##Card")) Screen::RenderUI();
+    ApexUi::EndCard();
+    ImGui::PopID();
+}
+
+void DisplayPage() {
+    ApexUi::PageTitle("Display", "Window mode, resolution and frame-rate limit");
+    DisplayContent();
 }
 
 void LotStreamingPage() {
@@ -2015,7 +2300,7 @@ void ResetAllRow() {
             ApexConfig::CaptureFeatureState(before);
             ApexConfig::DefaultFeatureState(defaults);
             const auto previousUi = ApexConfig::GetUi();
-            ApexConfig::ApplyFeatureState(defaults);
+            ApplyFeatureStateForgetting(defaults);
             ApexConfig::UiSettings uiDefaults;
             uiDefaults.startProfileDone = previousUi.startProfileDone; // the welcome is not repeated
             uiDefaults.changelogSeen = previousUi.changelogSeen; // nor the What's new dot
@@ -2023,6 +2308,8 @@ void ResetAllRow() {
             uiDefaults.roomToSaveAsked = previousUi.roomToSaveAsked; // nor the Room to save question
             uiDefaults.s3ppSpinAsked = previousUi.s3ppSpinAsked; // nor the Sims 3 Performance Patch one
             ApexConfig::SetUi(uiDefaults);
+            Screen::ResetDefaults(); // System > Display (not part of the undo: a device reset follows)
+            OverviewRestore::Forget(OverviewRestore::Scope::Display); // (its switch has nothing to put back)
             LOG_INFO("[Menu] All settings reset to their defaults");
             ShowToast(I18n::Tr("All settings reset"), std::move(before), "All settings reset");
             g_toast.restoreUi = true;
@@ -2105,7 +2392,7 @@ void DeveloperConfirmation() {
                 toml::table before; ApexConfig::CaptureFeatureState(before);
                 auto ui = ApexConfig::GetUi(); ui.developerMode = true; ApexConfig::SetUi(ui);
                 if (!g_developerPendingProfile.empty()) {
-                    ApexConfig::ApplyFeatureState(g_developerPendingProfile);
+                    ApplyFeatureStateForgetting(g_developerPendingProfile);
                     ShowToast(I18n::Trf("{} applied", g_developerPendingProfileName), std::move(before), "Profile loaded: " + g_developerPendingProfileName);
                     g_developerPendingProfile = {};
                 }
@@ -2359,7 +2646,7 @@ void ApplyProfileState(const std::string& name, const std::string& shown, const 
     }
     toml::table before;
     ApexConfig::CaptureFeatureState(before);
-    ApexConfig::ApplyFeatureState(state);
+    ApplyFeatureStateForgetting(state);
     LOG_INFO(std::format("[Menu] Profile loaded: {} (parts {:#x})", name, parts));
     ProfileMessage(I18n::Trf("Loaded \"{}\"", shown), false);
     ShowToast(I18n::Trf("{} applied", shown), std::move(before), "Profile loaded: " + name);
@@ -2996,6 +3283,45 @@ void RecoveryRow() {
     }
 }
 
+// The RTX Remix bridge, step by step (README "Optional: RTX Remix bridge"), folded by default: how to install it, or
+// how to remove it once installed. Windows only (under Wine / Proton the game's d3d9.dll is Proton's).
+void BridgeGuide() {
+    const bool installed = Platform::RemixBridge();
+    if (!ApexUi::BeginAdvanced("BridgeGuide", installed ? "RTX Remix bridge: how to remove" : "RTX Remix bridge: how to install")) return;
+    static const std::wstring bin = [] { // Game\\Bin: the folder of the running exe
+        wchar_t path[MAX_PATH] = {};
+        const DWORD n = GetModuleFileNameW(nullptr, path, MAX_PATH);
+        std::wstring p(path, n);
+        return p.substr(0, p.find_last_of(L'\\') + 1);
+    }();
+    static const bool eaApp = [] { // TS3.exe (EA app) instead of TS3W.exe (Steam, disc)
+        wchar_t path[MAX_PATH] = {};
+        GetModuleFileNameW(nullptr, path, MAX_PATH);
+        const wchar_t* name = wcsrchr(path, L'\\');
+        return name && _wcsicmp(name + 1, L"TS3.exe") == 0;
+    }();
+    if (!installed) {
+        ApexUi::MutedText(kBridgeText);
+        ApexUi::MutedText("The picture stays the same. It replaces the d3d9.dll in Game\\Bin.");
+        std::vector<const char*> steps{"Close the game.", "Download Apex-Radiance-RTX-Remix-bridge.zip from the releases page.",
+                                       "In Game\\Bin, move any d3d9.dll (DXVK) to a backup folder.",
+                                       "Unzip the package into Game\\Bin, keeping the .trex folder."};
+        if (eaApp) steps.push_back("In both bridge.conf files, set client.targetProcess = TS3.exe");
+        steps.push_back("Start the game: this page then shows RTX Remix bridge: Installed.");
+        for (size_t i = 0; i < steps.size(); i++) ApexUi::MutedText(std::format("{}. {}", i + 1, I18n::Tr(steps[i])).c_str());
+        if (ApexUi::IconTextButton("Download##BridgeGuide", IconId::Download, "Opens the Apex Radiance releases page on GitHub, where the bridge is a separate download",
+                                   ButtonKind::Primary))
+            OpenPage(kApexReleasesUrl);
+        ImGui::SameLine(0.0f, ApexUi::kSpace3 * ApexUi::Unit());
+    } else {
+        ApexUi::MutedText("Close the game, delete d3d9.dll, bridge.conf, dxvk.conf and .trex from Game\\Bin.");
+        ApexUi::MutedText("Then put your old d3d9.dll back, if you had one.");
+        ApexUi::MutedText("For a bug report, attach rtx-remix\\logs with Apex's log.");
+    }
+    if (ApexUi::IconTextButton("Open Game\\Bin", IconId::ExternalLink, "Opens the game's Bin folder in Explorer")) OpenPage(bin.c_str());
+    ApexUi::EndAdvanced();
+}
+
 void CompatibilityTab() {
     ImGui::PushID("Compatibility");
     if (ApexUi::BeginCard("##Card")) {
@@ -3048,6 +3374,7 @@ void CompatibilityTab() {
                 OpenPage(kApexReleasesUrl);
             ApexUi::Gap(ApexUi::kSpace2);
         }
+        if (!Platform::UnderWine()) BridgeGuide();
         if (ApexUi::BeginAdvanced("Details##Compatibility", "Details")) {
             ApexUi::MutedText(("Sims3SettingsSetter: " + S3SSDetect::Summary()).c_str());
             ApexUi::MutedText(I18n::Trf("Settings: {}", ApexConfig::MigrationNote()).c_str());
@@ -3083,10 +3410,12 @@ void AboutTab() {
 void SettingsPage() {
     ApexUi::PageTitle("Settings", "Menu, shortcuts, compatibility and credits");
     static const char* const kTabs[] = {"Menu", "Shortcuts", "Compatibility", "About"};
-    int visibleTab=g_settingsTab>SettingsProfiles?g_settingsTab-1:g_settingsTab;
-    if(g_settingsTab==SettingsProfiles) visibleTab=0;
+    static const int kTabIds[] = {SettingsMenu, SettingsShortcuts, SettingsCompatibility, SettingsAbout};
+    int visibleTab = 0;
+    for (int i = 0; i < IM_COUNTOF(kTabIds); i++)
+        if (kTabIds[i] == g_settingsTab) visibleTab = i;
     ApexUi::TabBar("##SettingsTabs", &visibleTab, kTabs, IM_COUNTOF(kTabs));
-    g_settingsTab=visibleTab>=SettingsProfiles?visibleTab+1:visibleTab;
+    g_settingsTab = kTabIds[visibleTab];
     switch (g_settingsTab) {
     case SettingsShortcuts: ShortcutsTab(); break;
     case SettingsProfiles: ProfilesTab(); break;
@@ -3128,6 +3457,7 @@ const SearchPart* SearchParts(int& count) {
         {"Ambient Occlusion", nullptr, PageAmbientOcclusion, nullptr, 0, AmbientOcclusionContent},
         {"Depth Blur", nullptr, PageDepthBlur, nullptr, 0, DepthBlurContent},
         {"Edge Smoothing", nullptr, PageEdgeSmoothing, nullptr, 0, AntiAliasingContent},
+        {"Display", nullptr, PageDisplay, nullptr, 0, DisplayContent},
         {"Performance", nullptr, PagePerformance, nullptr, 0, PerformanceCard},
         {"Lot Streaming", nullptr, PageLotStreaming, nullptr, 0, LotStreamingCards},
         {"Settings", "Menu", PageSettings, &g_settingsTab, SettingsMenu, MenuTab},
@@ -3339,6 +3669,7 @@ void Sidebar(bool collapsed) {
         {PageAmbientOcclusion, IconId::Contrast, "Ambient Occlusion", nullptr},
         {PageDepthBlur, IconId::Aperture, "Depth Blur", nullptr},
         {PageEdgeSmoothing, IconId::Spline, "Edge Smoothing", nullptr},
+        {PageDisplay, IconId::Monitor, "Display", nullptr},
         {PagePerformance, IconId::Gauge, "Performance", "SYSTEM"},
         {PageLotStreaming, IconId::Layers, "Lot Streaming", nullptr},
         {PageConflicts, IconId::TriangleAlert, "Attention", nullptr},
@@ -3417,6 +3748,7 @@ void MarkWelcomeShown() {
     ApexConfig::UiSettings ui = ApexConfig::GetUi();
     if (ui.startProfileDone) return;
     ui.startProfileDone = true; // [ui] start_profile_done: never shown again
+    ui.changelogSeen = ApexChangelog::Get(0).version; // (no update card after a new installation)
     ApexConfig::SetUi(ui);
 }
 
@@ -3443,7 +3775,7 @@ void PreviewWelcomePreset(int index) {
         return;
     }
     ApexConfig::KeepProfileParts(state, ApexConfig::ProfilePartsOf(state) & ~(ApexConfig::kPartShortcuts | ApexConfig::kPartDeveloper));
-    ApexConfig::ApplyFeatureState(state);
+    ApplyFeatureStateForgetting(state);
     g_welcomePreviewed = index;
     LOG_INFO(std::format("[Menu] Welcome: previewing {}", ApexPresets::Get(index).name));
 }
@@ -3479,7 +3811,7 @@ void WelcomeProfileStep() {
             const float actionsW = ApexUi::ButtonWidth("Keep my settings", false) + gap + ApexUi::ButtonWidth("Continue##Welcome", true);
             ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::fmax(0.0f, ImGui::GetContentRegionAvail().x - actionsW));
             if (ApexUi::TextButton("Keep my settings", "Puts back the settings you had before choosing a profile")) {
-                if (g_welcomePreviewed >= 0) ApexConfig::ApplyFeatureState(g_welcomeBefore);
+                if (g_welcomePreviewed >= 0) ApplyFeatureStateForgetting(g_welcomeBefore);
                 LOG_INFO("[Menu] Welcome: settings kept");
                 g_welcomePreviewed = -1;
                 g_welcomeState = 2;
@@ -3568,6 +3900,7 @@ void DrawPage() {
     case PageEdgeSmoothing: EdgeSmoothingPage(); break;
     case PageConflicts: ConflictsPage(); break;
     case PagePerformance: PerformancePage(); break;
+    case PageDisplay: DisplayPage(); break;
     case PageLotStreaming: LotStreamingPage(); break;
     case PageDeveloper:
         if (!kPublicBuild) {
@@ -3657,7 +3990,7 @@ int QuestionCard(const char* id, IconId icon, const char* question, const char* 
     const auto* vp = ImGui::GetMainViewport();
     const float u = ApexUi::Unit();
     const float margin = (ApexUi::kSpace4 + ApexUi::kSpace1) * u;
-    const float width = std::max(1.0f, std::min(700.0f * u, vp->Size.x - 2.0f * margin));
+    const float width = std::max(1.0f, std::min(520.0f * u, vp->Size.x - 2.0f * margin));
     const float compartment = 64.0f * u, pad = 20.0f * u, iconSize = 22.0f * u, rounding = 14.0f * u;
     ImGui::SetNextWindowPos(ImVec2(vp->Pos.x + (vp->Size.x - width) * 0.5f, vp->Pos.y + margin), ImGuiCond_Always);
     ImGui::SetNextWindowSizeConstraints(ImVec2(width, 1.0f), ImVec2(width, vp->Size.y));
@@ -3688,10 +4021,10 @@ int QuestionCard(const char* id, IconId icon, const char* question, const char* 
         ApexUi::Gap(ApexUi::kSpace3);
         {
             const ApexUi::ControlSizeScope controls(ApexUi::ControlSize::Compact);
-            const char* off = I18n::Tr(otherAnswer);
+            const char* off = otherAnswer ? I18n::Tr(otherAnswer) : nullptr; // nullptr: one answer only (OK)
             const char* keep = I18n::Tr(primaryAnswer);
             const float gap = ApexUi::kSpace3 * u;
-            const float buttons = ApexUi::ButtonWidth(off, false) + gap + ApexUi::ButtonWidth(keep, false);
+            const float buttons = (off ? ApexUi::ButtonWidth(off, false) + gap : 0.0f) + ApexUi::ButtonWidth(keep, false);
             const char* note = I18n::Tr(later);
             const float left = ImGui::GetCursorPosX();
             const bool sameRow = ImGui::CalcTextSize(note).x + gap + buttons <= right - left;
@@ -3706,8 +4039,10 @@ int QuestionCard(const char* id, IconId icon, const char* question, const char* 
                 ApexUi::Gap(ApexUi::kSpace2);
                 ImGui::SetCursorPosX(std::max(left, right - buttons));
             }
-            if (ApexUi::TextButton(off, nullptr, ButtonKind::Secondary)) answer = 0;
-            ImGui::SameLine(0.0f, gap);
+            if (off) {
+                if (ApexUi::TextButton(off, nullptr, ButtonKind::Secondary)) answer = 0;
+                ImGui::SameLine(0.0f, gap);
+            }
             if (ApexUi::TextButton(keep, nullptr, ButtonKind::Primary)) answer = 1;
         }
         ImGui::PopTextWrapPos();
@@ -3748,6 +4083,59 @@ void S3PPQuestionCard() {
         Overlay::SetVisible(true);
     }
 }
+// Sims3SettingsSetter's uncompressed textures under the RTX Remix bridge: asked at every start while they are on (Not now
+// hides it until the next start; the item in Settings > Compatibility stays until the file is changed)
+bool g_s3ssTexturesLater = false;
+bool S3SSTexturesQuestionPending() {
+    S3SSTextures::Refresh(); // (once a second at most: a switch in S3SS's menu during play brings the question back)
+    static bool s_was = false;
+    const bool now = S3SSTextures::Recommended();
+    if (now && !s_was) g_s3ssTexturesLater = false;
+    s_was = now;
+    if (g_s3ssTexturesLater || PublicTestPending() || WelcomeActive()) return false;
+    return now;
+}
+void S3SSTexturesQuestionCard() {
+    const int answer = QuestionCard("##S3SSTexturesCard", IconId::Gauge, "Turn off uncompressed textures?", kS3SSTexturesText,
+                                    "You can change it later in Settings \xE2\x80\xBA Compatibility", "Not now", "Turn off");
+    if (answer < 0) return;
+    const bool failed = answer == 1 && !S3SSTextures::Apply();
+    g_s3ssTexturesLater = answer == 0;
+    LOG_INFO(std::format("[Menu] Sims3SettingsSetter uncompressed textures question: {}", answer == 0 ? "not now" : failed ? "turn off failed" : "turned off"));
+    if (failed) { // the reason and the way to change it by hand are in Settings > Compatibility
+        g_page = PageSettings;
+        g_settingsTab = SettingsCompatibility;
+        Overlay::SetVisible(true);
+    }
+}
+// After an update: the first time the menu is available with a version that has a headline, a small card at the top
+// (the menu closed) names the version in one sentence, with What's new and OK. Not after a new installation (the
+// welcome marks the newest version seen) nor for a version without a headline (a small fix: the version's dot only).
+bool g_openWhatsNew = false; // the card's What's new: the menu opens with the popover open
+bool UpdateNotePending() {
+    static bool s_done = false;
+    if (s_done || kMemoryOptimizationTest || PublicTestPending() || WelcomeActive()) return false;
+    const ApexChangelog::Release& now = ApexChangelog::Get(0);
+    const ApexConfig::UiSettings& ui = ApexConfig::GetUi();
+    if (!now.headline || !ui.startProfileDone || ui.changelogSeen == now.version) return !(s_done = true);
+    return true;
+}
+void UpdateCard() {
+    const ApexChangelog::Release& now = ApexChangelog::Get(0);
+    const std::string title = I18n::Trf("Apex Radiance is now {}", now.version);
+    std::string text = I18n::Tr(now.headline);
+    if (now.settingsNote) text += std::string("\n\n") + I18n::Tr("Your settings are kept.") + " " + I18n::Tr(now.settingsNote);
+    const int answer = QuestionCard("##UpdateCard", IconId::Gift, title.c_str(), text.c_str(), "", "What's new", "OK");
+    if (answer < 0) return;
+    ApexConfig::UiSettings ui = ApexConfig::GetUi();
+    ui.changelogSeen = now.version; // [ui] changelog_seen: the card and the version's dot are done
+    ApexConfig::SetUi(ui);
+    LOG_INFO(std::format("[Menu] Update card {}: {}", now.version, answer == 0 ? "What's new opened" : "OK"));
+    if (answer == 0) {
+        g_openWhatsNew = true;
+        Overlay::SetVisible(true);
+    }
+}
 std::string VisibleVersionLabel(float maxTextWidth=FLT_MAX) {
     const std::string version=std::string("v")+APEX_VERSION_STRING;
     if (kMemoryOptimizationTest) {
@@ -3785,7 +4173,7 @@ void VersionButton(float x, float y, float h) {
     ImGui::PopFont();
     const std::string tip = std::string(I18n::Tr(kMemoryOptimizationTest ? "RAM and gameplay test" : "What's new")) + " \xC2\xB7 " APEX_PRODUCT_NAME " " APEX_VERSION_STRING;
     if (!open) ApexUi::Tooltip(tip.c_str());
-    if (clicked) {
+    if (clicked || std::exchange(g_openWhatsNew, false)) {
         ImGui::OpenPopup(kMemoryOptimizationTest ? "##PublicTestWelcome" : "##WhatsNew");
         g_whatsNewOpenedAt = ImGui::GetTime();
         g_whatsNewSettle = 3;
@@ -3909,6 +4297,23 @@ void VersionButton(float x, float y, float h) {
                     ImGui::SetCursorScreenPos(ImVec2(rx - cs.x, cy - cs.y * 0.5f));
                     ApexUi::Chip(inst, VioletTheme::kAccentLight);
                     ImGui::SetCursorScreenPos(after);
+                } else if (r.headline) { // the version's sentence, cut at the row's end
+                    const float hx = x + (r.date[0] ? ImGui::CalcTextSize(r.date).x + ApexUi::kSpace3 * u : 0.0f);
+                    const char* text = I18n::Tr(r.headline);
+                    const float room = rx - hx;
+                    if (room > 24.0f * u) {
+                        std::string shown = text;
+                        if (ImGui::CalcTextSize(text).x > room) { // whole UTF-8 characters, then an ellipsis
+                            const float ell = ImGui::CalcTextSize("\xE2\x80\xA6").x;
+                            while (!shown.empty() && ImGui::CalcTextSize(shown.c_str()).x + ell > room) {
+                                while (!shown.empty() && (static_cast<unsigned char>(shown.back()) & 0xC0) == 0x80) shown.pop_back(); // its continuation bytes
+                                if (!shown.empty()) shown.pop_back();                                                                     // then its lead byte
+                            }
+                            shown += "\xE2\x80\xA6";
+                        }
+                        dl->AddText(ImVec2(hx, cy - sh * 0.5f), ImGui::GetColorU32(Col(VioletTheme::kTextMuted)), shown.c_str());
+                    }
+                    ImGui::PopFont();
                 } else {
                     const struct { int n; const char* fmt; unsigned rgb; } kinds[] = {
                         {count(r.fixed), "{} fixed", 0x5F606A}, {count(r.improved), "{} improved", VioletTheme::kSuccess}, {count(r.added), "{} new", VioletTheme::kAccent}};
@@ -3934,66 +4339,108 @@ void VersionButton(float x, float y, float h) {
                                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoBackground);
                     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * eased);
                     const float textW = width - indent - pad;
-                    auto section = [&](IconId icon, unsigned rgb, const char* title, const char* const* lines) {
-                        if (!lines || !lines[0]) return;
-                        ImDrawList* bdl = ImGui::GetWindowDrawList();
+                    // The version's sentence and its highlights; then every line, grouped by area, each with its kind as a small
+                    // tag. With highlights the full list is folded under "All N changes"
+                    ImDrawList* bdl = ImGui::GetWindowDrawList();
+                    if (r.headline) {
                         ImGui::SetCursorPosX(indent);
-                        const ImVec2 h = ImGui::GetCursorScreenPos();
-                        const float hs = 14.0f * u;
-                        ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
-                        const float lh = ImGui::GetTextLineHeight();
-                        ApexUi::DrawIcon(bdl, icon, ImVec2(h.x, h.y + (lh - hs) * 0.5f), hs, ImGui::GetColorU32(Col(rgb)));
-                        bdl->AddText(ImVec2(h.x + hs + 6.0f * u, h.y), ImGui::GetColorU32(Col(VioletTheme::kTextMuted)), I18n::Tr(title));
-                        ImGui::Dummy(ImVec2(textW, lh));
+                        ImGui::PushTextWrapPos(indent + textW);
+                        ImGui::TextWrapped("%s", I18n::Tr(r.headline));
+                        ImGui::PopTextWrapPos();
+                        ImGui::Dummy(ImVec2(0.0f, 2.0f * u));
+                    }
+                    for (const char* const* h = r.highlights; h && *h; ++h) {
+                        ImGui::SetCursorPosX(indent);
+                        const ImVec2 l = ImGui::GetCursorScreenPos();
+                        const float bh = ImGui::GetTextLineHeight();
+                        bdl->AddCircleFilled(ImVec2(l.x + 4.0f * u, l.y + bh * 0.5f), 2.5f * u, ImGui::GetColorU32(Col(VioletTheme::kAccent)));
+                        ImGui::SetCursorPosX(indent + 14.0f * u);
+                        ImGui::PushFont(VioletTheme::BoldFont(), 0.0f);
+                        ImGui::TextUnformatted(I18n::Tr(*h));
                         ImGui::PopFont();
-                        // The lines grouped by area, in the order the areas first appear
-                        struct Line { std::string area; std::string text; };
+                    }
+                    const int total = count(r.added) + count(r.improved) + count(r.fixed);
+                    bool all = true;
+                    if (r.highlights && *r.highlights && total) {
+                        const ImGuiID allKey = ImGui::GetID("All");
+                        all = st->GetBool(allKey, false);
+                        ImGui::Dummy(ImVec2(0.0f, 2.0f * u));
+                        ImGui::SetCursorPosX(indent);
+                        const float fs = 12.0f * u, fx = indent + fs + 6.0f * u;
+                        const ImVec2 fp = ImGui::GetCursorScreenPos();
+                        ApexUi::DrawIcon(bdl, all ? IconId::ChevronDown : IconId::ChevronRight, ImVec2(fp.x, fp.y + (ImGui::GetTextLineHeight() - fs) * 0.5f), fs,
+                                         ImGui::GetColorU32(Col(VioletTheme::kAccent)));
+                        ImGui::SetCursorPosX(fx);
+                        const std::string fold = I18n::Trf("All {} changes", total) + "##All";
+                        ImGui::PushStyleColor(ImGuiCol_Text, Col(VioletTheme::kAccent));
+                        if (ImGui::Selectable(fold.c_str(), false, ImGuiSelectableFlags_None, ImVec2(textW - (fx - indent), 0.0f))) st->SetBool(allKey, all = !all);
+                        ImGui::PopStyleColor();
+                    }
+                    if (all && total) {
+                        struct Line { std::string area, text; int kind; }; // kind: 0 new, 1 better, 2 fixed
                         std::vector<Line> parsed;
-                        for (const char* const* line = lines; *line; ++line) {
-                            std::string_view text = I18n::Tr(*line);
-                            std::string area;
-                            for (std::string_view sep : {std::string_view(": "), std::string_view("\xEF\xBC\x9A")}) { // also a CJK full-width colon
-                                const size_t at = text.find(sep);
-                                if (at != std::string_view::npos && at > 0 && at <= 32) {
-                                    area.assign(text.substr(0, at));
-                                    text.remove_prefix(at + sep.size());
-                                    break;
+                        const char* const* kinds[] = {r.added, r.improved, r.fixed};
+                        for (int k = 0; k < 3; ++k)
+                            for (const char* const* line = kinds[k]; line && *line; ++line) {
+                                std::string_view text = I18n::Tr(*line);
+                                std::string area;
+                                for (std::string_view sep : {std::string_view(": "), std::string_view("\xEF\xBC\x9A")}) { // also a CJK full-width colon
+                                    const size_t at = text.find(sep);
+                                    if (at != std::string_view::npos && at > 0 && at <= 32) {
+                                        area.assign(text.substr(0, at));
+                                        text.remove_prefix(at + sep.size());
+                                        break;
+                                    }
+                                }
+                                std::string t(text);
+                                if (!t.empty() && t[0] >= 'a' && t[0] <= 'z') t[0] = static_cast<char>(t[0] - 'a' + 'A'); // a sentence of its own
+                                parsed.push_back({std::move(area), std::move(t), k});
+                            }
+                        static const char* const kTag[] = {"New", "Better", "Fix"}; // ("Fixed" is another key: a fixed position)
+                        const unsigned kTagRgb[] = {VioletTheme::kAccent, VioletTheme::kSuccess, VioletTheme::kTextMuted};
+                        ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale * 0.92f);
+                        float tagW = 0.0f;
+                        for (const char* t : kTag) tagW = std::fmax(tagW, ImGui::CalcTextSize(I18n::Tr(t)).x);
+                        ImGui::PopFont();
+                        tagW += 10.0f * u;
+                        std::vector<bool> done(parsed.size(), false);
+                        // the lines with an area first, in the order the areas first appear; then those without one
+                        for (int pass = 0; pass < 2; ++pass)
+                            for (size_t a = 0; a < parsed.size(); ++a) {
+                                if (done[a] || parsed[a].area.empty() != (pass == 1)) continue;
+                                ImGui::Dummy(ImVec2(0.0f, 4.0f * u));
+                                if (!parsed[a].area.empty()) {
+                                    ImGui::SetCursorPosX(indent);
+                                    ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
+                                    ImGui::PushStyleColor(ImGuiCol_Text, Col(VioletTheme::kAccentLight));
+                                    ImGui::TextUnformatted(parsed[a].area.c_str());
+                                    ImGui::PopStyleColor();
+                                    ImGui::PopFont();
+                                }
+                                for (size_t b = a; b < parsed.size(); ++b) {
+                                    if (done[b] || parsed[b].area != parsed[a].area) continue;
+                                    done[b] = true;
+                                    ImGui::SetCursorPosX(indent);
+                                    const ImVec2 l = ImGui::GetCursorScreenPos();
+                                    const float bh = ImGui::GetTextLineHeight();
+                                    { // the kind's tag, a small tinted box at the line's start
+                                        ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale * 0.92f);
+                                        const char* tag = I18n::Tr(kTag[parsed[b].kind]);
+                                        const ImVec2 ts = ImGui::CalcTextSize(tag);
+                                        const ImVec2 t0(l.x, l.y + (bh - ts.y - 2.0f * u) * 0.5f);
+                                        const unsigned rgb = kTagRgb[parsed[b].kind];
+                                        bdl->AddRectFilled(t0, ImVec2(t0.x + tagW, t0.y + ts.y + 2.0f * u), ImGui::GetColorU32(Col(rgb, 0.14f)), 4.0f * u);
+                                        bdl->AddText(ImVec2(t0.x + (tagW - ts.x) * 0.5f, t0.y + 1.0f * u), ImGui::GetColorU32(Col(rgb)), tag);
+                                        ImGui::PopFont();
+                                    }
+                                    ImGui::SetCursorPosX(indent + tagW + 8.0f * u);
+                                    ImGui::PushTextWrapPos(indent + textW);
+                                    ImGui::TextWrapped("%s", parsed[b].text.c_str());
+                                    ImGui::PopTextWrapPos();
                                 }
                             }
-                            std::string t(text);
-                            if (!t.empty() && t[0] >= 'a' && t[0] <= 'z') t[0] = static_cast<char>(t[0] - 'a' + 'A'); // a sentence of its own
-                            parsed.push_back({std::move(area), std::move(t)});
-                        }
-                        std::vector<bool> done(parsed.size(), false);
-                        for (size_t a = 0; a < parsed.size(); ++a) {
-                            if (done[a]) continue;
-                            ImGui::Dummy(ImVec2(0.0f, 2.0f * u));
-                            if (!parsed[a].area.empty()) {
-                                ImGui::SetCursorPosX(indent);
-                                ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
-                                ImGui::PushStyleColor(ImGuiCol_Text, Col(VioletTheme::kAccentLight));
-                                ImGui::TextUnformatted(parsed[a].area.c_str());
-                                ImGui::PopStyleColor();
-                                ImGui::PopFont();
-                            }
-                            for (size_t b = a; b < parsed.size(); ++b) {
-                                if (done[b] || parsed[b].area != parsed[a].area) continue;
-                                done[b] = true;
-                                ImGui::SetCursorPosX(indent);
-                                const ImVec2 l = ImGui::GetCursorScreenPos();
-                                const float bh = ImGui::GetTextLineHeight();
-                                bdl->AddCircleFilled(ImVec2(l.x + 4.0f * u, l.y + bh * 0.5f), 2.0f * u, ImGui::GetColorU32(Col(0x5F606A)));
-                                ImGui::SetCursorPosX(indent + 14.0f * u);
-                                ImGui::PushTextWrapPos(indent + textW);
-                                ImGui::TextWrapped("%s", parsed[b].text.c_str());
-                                ImGui::PopTextWrapPos();
-                            }
-                        }
-                        ImGui::Dummy(ImVec2(0.0f, ApexUi::kSpace2 * u));
-                    };
-                    section(IconId::Sparkles, VioletTheme::kAccent, "New", r.added);
-                    section(IconId::Rocket, VioletTheme::kSuccess, "Improved", r.improved);
-                    section(IconId::Wrench, VioletTheme::kTextMuted, "Fixed", r.fixed);
+                    }
+                    ImGui::Dummy(ImVec2(0.0f, ApexUi::kSpace2 * u));
                     ImGui::Dummy(ImVec2(0.0f, ApexUi::kSpace1 * u));
                     if (full) st->SetFloat(heightKey, ImGui::GetCursorPosY());
                     ImGui::PopStyleVar();
@@ -4133,7 +4580,7 @@ void DrawToast(float bottomY) {
         dl->AddText(ImVec2(up.x + is + 5.0f * u, up.y), col, undoText);
         if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows)) g_toast.start = now - std::fmin(elapsed, 1.0); // wait while pointed at
         if (undo) {
-            ApexConfig::ApplyFeatureState(g_toast.undo);
+            ApplyFeatureStateForgetting(g_toast.undo);
             if (g_toast.restoreUi) ApexConfig::SetUi(g_toast.undoUi);
             LOG_INFO("[Menu] Undo: " + g_toast.logText);
             g_toast.active = false;
@@ -5024,6 +5471,7 @@ void ShortcutsTab() {
 bool g_comparing = false;
 std::vector<ApexPatch*> g_comparePaused;
 bool g_comparePicture = false;
+bool Comparing() { return g_comparing; }
 void ToggleCompare() {
     if (!g_comparing) {
         g_comparePaused.clear();
@@ -5069,6 +5517,41 @@ bool CompareNote(bool drawAllowed = true) {
         NoticeText(cachedText, IconId::Columns2);
     EndNoticePill();
     return true;
+}
+// Low memory (Overview > Game memory, [ui] low_memory_warning): with the menu closed, a card at the top that stays until
+// OK when the largest free block gets low; again at most every 5 minutes while it stays low, and at once when it becomes
+// critical. Checked every 4 s.
+unsigned long long g_memoryNoteNext = 0, g_memoryHealthySince = 0;
+bool g_memoryCardOpen = false, g_memoryNoteCritical = false;
+bool MemoryNotePending() {
+    if (!ApexConfig::GetUi().lowMemoryWarning || Loading()) return g_memoryCardOpen = false;
+    const unsigned long long now = GetTickCount64();
+    const MemoryMeter::Status st = MemoryMeter::Check(9000);
+    if (!st.low) {
+        if (!g_memoryHealthySince) g_memoryHealthySince = now;
+        if (now - g_memoryHealthySince >= 60000) { // healthy for a minute: the next low is a new episode
+            g_memoryNoteNext = 0;
+            g_memoryNoteCritical = false;
+        }
+    } else {
+        g_memoryHealthySince = 0;
+    }
+    if (st.low && !g_memoryCardOpen && (now >= g_memoryNoteNext || (st.critical && !g_memoryNoteCritical))) {
+        g_memoryCardOpen = true;
+        g_memoryNoteCritical = st.critical;
+        LOG_INFO(st.critical ? "[Menu] Memory almost full: save note shown" : "[Menu] Memory getting low: save note shown");
+    }
+    return g_memoryCardOpen;
+}
+void MemoryCard() {
+    const int answer = QuestionCard("##MemoryCard", IconId::Save,
+                                    g_memoryNoteCritical ? "Memory is almost full: save your game now" : "Memory is getting low: save your game soon",
+                                    "A world save needs one large block of the game's memory, and little is left. Saving soon keeps it from failing with Error 12.",
+                                    "You can turn this note off in Performance \xE2\x80\xBA Memory handling", nullptr, "OK");
+    if (answer >= 0) {
+        g_memoryCardOpen = false;
+        g_memoryNoteNext = GetTickCount64() + 300000;
+    }
 }
 // Render thread, every frame: the shortcuts that are not the menu key
 void RunShortcuts() {
@@ -5169,6 +5652,7 @@ class GuiClient final : public Overlay::Client {
     }
   public:
     void Draw() override {
+        if (Screen::FpsCounterShown() && !Captures::ScreenshotPending()) Screen::DrawFpsCounter(); // System > Display
         if (!g_menuAvailable.load()) {
             Overlay::SetInteractive(false);
             if (HintVisible() && !Captures::ScreenshotPending()) Hint();
@@ -5192,11 +5676,17 @@ class GuiClient final : public Overlay::Client {
         if (!noticeShown) noticeShown = compareShown;
         if (BannerNeeded()) { Banner(); noticeShown = true; }
         // the Room to save question: with the menu closed, before the routine pills (the overlay takes the mouse over it)
+        const bool updateCard = !Overlay::IsVisible() && noticesAllowed && !noticeShown && UpdateNotePending();
+        if (updateCard) { UpdateCard(); noticeShown = true; }
         const bool roomCard = !Overlay::IsVisible() && noticesAllowed && !noticeShown && RoomToSavePending();
         const bool s3ppCard = !Overlay::IsVisible() && noticesAllowed && !noticeShown && !roomCard && S3PPQuestionPending();
-        Overlay::SetInteractive(roomCard || s3ppCard);
+        const bool texCard = !Overlay::IsVisible() && noticesAllowed && !noticeShown && !roomCard && !s3ppCard && S3SSTexturesQuestionPending();
+        const bool memoryCard = !Overlay::IsVisible() && noticesAllowed && !noticeShown && !roomCard && !s3ppCard && !texCard && MemoryNotePending();
+        Overlay::SetInteractive(updateCard || roomCard || s3ppCard || texCard || memoryCard);
         if (roomCard) { RoomToSaveCard(); noticeShown = true; }
         if (s3ppCard) { S3PPQuestionCard(); noticeShown = true; }
+        if (texCard) { S3SSTexturesQuestionCard(); noticeShown = true; }
+        if (memoryCard) { MemoryCard(); noticeShown = true; }
         if (!Overlay::IsVisible()) {
             if (!noticeShown && PresetPillVisible() && !Captures::ScreenshotPending()) { PresetPill(); noticeShown = true; }
             if (!noticeShown && HintVisible() && !Captures::ScreenshotPending()) Hint();
@@ -5212,11 +5702,11 @@ class GuiClient final : public Overlay::Client {
     bool AlwaysDraw() override {
         UpdateMenuAvailability();
         UpdateHint();
-        if (!g_menuAvailable.load()) { Overlay::SetVisible(false); return HintVisible(); }
+        if (!g_menuAvailable.load()) { Overlay::SetVisible(false); return HintVisible() || Screen::FpsCounterShown(); }
         if (PublicTestPending() && !BannerNeeded() && !Captures::ScreenshotPending()) Overlay::SetVisible(true);
         RunShortcuts();
         // the capture notes (recording, saved, an open session) show with the menu closed too
-        return BannerNeeded() || HintVisible() || RoomToSavePending() || S3PPQuestionPending() || PresetPillVisible() || g_comparing || Recorder::SecondsRecorded() >= 0 || Captures::CurrentNote().visible ||
+        return MemoryNotePending() || Screen::FpsCounterShown() || BannerNeeded() || HintVisible() || UpdateNotePending() || RoomToSavePending() || S3PPQuestionPending() || S3SSTexturesQuestionPending() || PresetPillVisible() || g_comparing || Recorder::SecondsRecorded() >= 0 || Captures::CurrentNote().visible ||
                NoticeAnimationsPending() || (!g_profiles.loading.empty() && ImGui::GetTime() - g_profiles.applyOpenedAt < 0.14) || LightProbe::Aiming() || g_returnFromProbe.load();
     }
 
@@ -5233,6 +5723,7 @@ class GuiClient final : public Overlay::Client {
     bool CanOpen() override { return g_menuAvailable.load(); }
 
     bool OnWindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, LRESULT* result) override {
+        if (Screen::OnWindowMessage(hwnd, msg, wp, lp, result)) return true; // Settings > Display: the window's style and position
         if (msg == WM_KILLFOCUS || (msg == WM_ACTIVATEAPP && !wp)) {
             eatProbeMouseUp = false;
             cheatConsoleGuess = false;

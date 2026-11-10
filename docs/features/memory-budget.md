@@ -9,6 +9,11 @@ Released in 2.14.0 with the standard build. Developer mode is off by default; no
 process-memory CSVs and lot-analysis pumping disabled. The controller uses the existing MemoryGuard worker,
 with a four-second address scan and process counter query, and action-only log messages. No UI setting is added.
 
+The Overview shows *Game memory*: the game's address space in use of 4 GB (large-address-aware) as one bar (the game's use, Room to save's 128 MB reserve faint after it, free),
+the largest free block in the state colour (Getting low below 320 MB, the threshold at which Room to save empties the game's idle cache;
+Critical below 160 MB), the session peak and the total, all in GB with two decimals (released in 3.1.0). Samples come from Room to save's worker every 4 s, else from the menu.
+*Warn when memory is low* (`[ui] low_memory_warning`, on by default) shows a card with the menu closed until OK.
+
 ## The problem
 
 Native cache trimming and Apex work-buffer retention have different ownership rules. The game owns resource entries;

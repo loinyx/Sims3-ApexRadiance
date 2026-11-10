@@ -1,5 +1,7 @@
 # Presentation and Frame Pacing
 
+> Replaced by [Display](display.md) (window mode, resolution and frame-rate limiter, released in 3.1.0).
+
 A V-Sync request policy and an optional Apex frame-rate limiter. The feature existed only in a private release
 candidate, was folded into [Display and Fluency](display-fluency.md) and removed with it before any release. Apex
 Radiance does not change the game's presentation interval and has no frame-rate limiter.

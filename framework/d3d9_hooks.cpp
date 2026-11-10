@@ -550,6 +550,7 @@ SetPixelShader_t o_sps = nullptr;
 SetVertexShader_t o_svs = nullptr;
 SetTexture_t o_stex = nullptr;
 Present_t o_present = nullptr;
+std::atomic<AfterPresentFn> g_afterPresent{nullptr};
 BeginScene_t o_begin = nullptr;
 CreateTexture_t o_ctex = nullptr;
 CreateRenderTarget_t o_crt = nullptr;
@@ -658,7 +659,9 @@ HRESULT STDMETHODCALLTYPE H_Present(IDirect3DDevice9* d, const RECT* sr, const R
     ReclaimRetired();
     if (!kPublicBuild && ThreadId() == g_renderTid.load(std::memory_order_relaxed)) LogDispatchCost();
     if (!Run(g_present, d, hr, sr, dr, w, rg)) return hr;
-    return o_present(d, sr, dr, w, rg);
+    hr = o_present(d, sr, dr, w, rg);
+    if (const AfterPresentFn after = g_afterPresent.load(std::memory_order_acquire)) after(d, hr);
+    return hr;
 }
 HRESULT STDMETHODCALLTYPE H_BeginScene(IDirect3DDevice9* d) {
     HRESULT hr = S_OK;
@@ -755,6 +758,7 @@ bool RegisterSetPixelShader(const std::string& n, SetPixelShaderHook h, Priority
 bool RegisterSetVertexShader(const std::string& n, SetVertexShaderHook h, Priority p) { return Add(g_svs, n, std::move(h), p); }
 bool RegisterSetTexture(const std::string& n, SetTextureHook h, Priority p) { return Add(g_stex, n, std::move(h), p); }
 bool RegisterPresent(const std::string& n, PresentHook h, Priority p) { return Add(g_present, n, std::move(h), p); }
+void SetAfterPresent(AfterPresentFn fn) { g_afterPresent.store(fn, std::memory_order_release); }
 bool RegisterBeginScene(const std::string& n, BeginSceneHook h, Priority p) { return Add(g_begin, n, std::move(h), p); }
 bool RegisterCreateTexture(const std::string& n, CreateTextureHook h, Priority p) { return Add(g_ctex, n, std::move(h), p); }
 bool RegisterCreateRenderTarget(const std::string& n, CreateRenderTargetHook h, Priority p) { return Add(g_crt, n, std::move(h), p); }

@@ -1,6 +1,6 @@
 # Apex Radiance documentation
 
-Apex Radiance is a native mod for The Sims 3 (Steam 1.67.2, `TS3W.exe`, 32-bit), loaded by Ultimate ASI Loader as
+Apex Radiance is a native mod for The Sims 3 (Steam 1.67.2, `TS3W.exe`, and EA app 1.69.47, `TS3.exe`; 32-bit), loaded by Ultimate ASI Loader as
 `ApexRadiance.asi`. It hooks Direct3D 9 and patches game code in memory to rebuild night lighting, add image effects
 (ambient occlusion, edge smoothing, depth blur, colour grading and stackable filters) and remove stutters. It can run beside an unmodified
 Sims3SettingsSetter.
@@ -50,7 +50,7 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 | [Stairs on the directional maps](features/night-lighting/stairs.md): stairs take no light through walls, the floor's colour and the light of the floor above | Released in 2.14.0 |
 | [Light through arches and doorways](features/night-lighting/arches.md): no colour step at arches, soft cone edges, indoor light independent of the camera | Released in 2.14.0; Released in 2.15.3: cheaper floor draws; Released in 3.0.0: furniture shadows, tone, glass and bounce through arches |
 | [Real-time outdoor lamps](features/night-lighting/rt-outdoor-lamps.md) (Lamp lighting: Instant (GPU), the default): the active lot's outdoor lamps drawn on the graphics card with shadows | Released in 2.13.0; Released in 2.14.0: lamps not yet listed on a floor still reach it; Released in 2.15.3: shaders from the shader cache; Released in 2.18.2: the active lot's lamp posts drawn on the four lots next to it; Released in 2.18.3: no lots next to it while the active lot has no lamp post |
-| [GPU room lamps](features/night-lighting/gpu-room-lamps.md) (Lamp lighting: Instant (GPU), Steam 1.67.2): indoor lamps drawn on the graphics card, with furniture, table leg and stair shadows | Released in 3.0.0 |
+| [GPU room lamps](features/night-lighting/gpu-room-lamps.md) (Lamp lighting: Instant (GPU), Steam 1.67.2 and EA app 1.69.47): indoor lamps drawn on the graphics card, with furniture, table leg and stair shadows | Released in 3.0.0 |
 | [Quick outdoor lamp edits](features/night-lighting/outdoor-lamp-delta.md): every story's outside updated from each lamp's kept part, with Instant | Released in 2.13.0; Released in 2.18.2: base-only kept solves of the lots next to the active one |
 | [Lamp drags](features/night-lighting/lamp-drags.md): room solves of a dragged lamp kept to its rooms; in Classic, relit after the release | Released in 2.13.0 |
 | [Smooth light maps](features/night-lighting/room-map-smoothing.md): room lamp light without blocks, bands or rings | Released in 2.13.0; Released in 2.16.3: no dark squares beside bright texels |
@@ -67,7 +67,7 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 | [Ambient Occlusion](features/ambient-occlusion.md): contact shade where surfaces meet | Released in 2.1.0; simplified controls in 2.11.1; one colour copy shared with the other screen passes in 2.15.3 |
 | [Sim Occlusion](features/sim-occlusion.md): separate shade controls for Sims and hair | Released in 2.6.0 |
 | [Reflections](features/reflections.md): water reflections and lamp glow | Released |
-| [Picture filters](features/picture-filters.md): colour and image controls, 26 stackable filters, LUT files | Released (Filters tab: 2.7.0) |
+| [Picture filters](features/picture-filters.md): colour and image controls, 25 stackable filters, LUT files | Released (Filters tab: 2.7.0) |
 | [Edge Smoothing](features/edge-smoothing.md): SMAA and FXAA | Released; Released in 3.0.0: sharpening skips flat areas |
 | [Depth Blur](features/depth-blur.md): depth of field | Released |
 | [Banding Fix](features/banding-fix.md): dither against colour banding | Experimental (released in 2.2.0); Released in 2.16.0: High-precision scene on by default, redesigned card |
@@ -81,6 +81,8 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 | [Room to save](features/performance/room-to-save.md), [Lighter window updates](features/performance/lighter-window-updates.md), [Faster scripts](features/performance/faster-scripts.md) | Experimental (released in 2.7.0); Room to save: Released in 2.14.0: earlier buffer release and compatibility with sims3-modernization; Released in 2.17.0: one-time question card |
 | [Faster memory handling](features/performance/fast-memory.md): allocator spin and background release | Released in 2.4.0; Released in 2.14.0: allocator trim and top-down large blocks |
 | [Lot Streaming](features/performance/lot-streaming.md): lot detail farther away and smoother lot streaming (idavidveiga), off by default | Experimental (released in 2.7.0); Released in 2.16.2: shared lot build time, detailed-lot hysteresis, throttle threshold follow |
+| [Display](features/display.md): window mode, resolution and frame-rate limiter (System > Display) | Released in 3.1.0 |
+| [RTX Remix bridge](features/rtx-remix-bridge.md): the renderer (DXVK) in its own 64-bit process, about 600 to 800 MB more free memory in the game | Released in 3.0.0 (separate download); its `dxvk.conf` fix for exclusive fullscreen published again after 3.0.0; Released in 3.1.0: install guide, uncompressed-textures card, Fullscreen as Borderless under the bridge |
 
 ### Reports and diagnostics
 
@@ -133,11 +135,6 @@ Project-wide history: [architecture](history/architecture.md), [workflow](histor
 - [Presets](features/presets.md): saved settings, portable ZIP packages with a LUT and keyboard shortcuts (Released in 2.12.2) and the Applied chip (Released in 2.18.0).
 - [Graphics recovery](features/graphics-recovery.md): restart image-effect resources without resetting settings.
 - [Steam Deck and Proton](features/steam-deck.md): Proton, Steam Deck and DXVK detection, built-in shaders, installing on Linux.
-- [2.14.0](releases/2.14.0.md): Released in 2.14.0 (pending publication); light through stairwells, stairs and arches, trees lit leaf by leaf, steady moonlight.
-- [2.13.0](releases/2.13.0.md): Released in 2.13.0; Instant lamp lighting and lamp light through doors, windows and arches.
-- [2.12.3](releases/2.12.3.md): Released in 2.12.3; realistic lamp reach, balconies blocking lamps below and faster lamp edits.
-- [2.12.2](releases/2.12.2.md): Released in 2.12.2; keyboard shortcuts for presets.
-- [2.12.1](releases/2.12.1.md): Released in 2.12.1; outdoor lighting corrections.
-- [2.12.0](releases/2.12.0.md): LUTs, presets and graphics improvements.
+- [Release notes](releases/README.md): every published version.
 
 - [Public memory budget experiment](features/memory-budget.md)

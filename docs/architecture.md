@@ -664,11 +664,12 @@ The localized folder name is resolved from the game executable's string table, w
 - **New lighting defaults** (`apex_lighting_defaults.h`, right after that migration, once: `[meta] lighting_defaults`; the log line
   `[Config] New lighting defaults taken: ...` lists the keys): in `[patches.NightTerrainRelight]`, a brightness key still at its old
   default takes the new one (a config before 2.18, with `brilhoNoChao` and `forcaDasLampadasDoLote` at theirs, takes the new `luzNoChao`); the three lamp colour keys move only together; any other value is a choice and stays. A new config is only
-  stamped. Checked by `tools/settings_migration_test`.
+  stamped. Revision 2 (3.0.0) also sets a saved `lampLightingMode` other than `"instant"` to `"instant"` once. Checked by `tools/settings_migration_test`.
 - Tables no longer read (features removed): `[qol.hdr]` (except the Picture fallback), `[patches.SmoothStreaming]`,
   `[patches.GcScheduler]`, `[patches.FrameBudget]`. Ambient Occlusion uses `[patches.AmbientOcclusion]` again.
-- **S3SS.toml** is read-only, with one exception: the explicit Rooms at Night compatibility action
-  ([section 11.3](#113-s3sstoml)).
+- **S3SS.toml** is read-only, with two exceptions, each after the player's click: the Rooms at Night compatibility action
+  ([section 11.3](#113-s3sstoml)) and, under the RTX Remix bridge, *Turn off* for the uncompressed textures
+  (`framework/s3ss_textures.cpp`, which keeps `S3SS.toml.apex-backup`; [ui.md](ui.md)).
 
 ### 5.4 Menu
 
@@ -914,8 +915,9 @@ one line for the log and the compatibility page.
   on its prologue (section 2.1). Apex never detaches at process exit.
 - S3SS's registry registers nothing; Apex's `CallOriginal*` paths may pass through S3SS's empty dispatch when S3SS is
   inner. This is harmless.
-- Apex makes no present-parameter changes, so S3SS's borderless window and Resolution Spoofer have no conflict.
-  Borderless stays in S3SS.
+- Apex changes present parameters only while System > Display sets a window mode or resolution
+  ([Display](features/display.md)). Its CreateDevice / Reset hook is normally inner (Apex loads first), so its request
+  replaces S3SS's borderless one; with *Game setting* the parameters pass through unchanged.
 - The Picture pass runs at Apex's EndScene. For SDR either order is correct: with Apex outer, S3SS's menu draws after
   the filters; with Apex inner, the menu counts as UI through the scene copy. Calling `EndScene` from a pass would
   re-enter S3SS's hook and draw its menu twice: never do it.

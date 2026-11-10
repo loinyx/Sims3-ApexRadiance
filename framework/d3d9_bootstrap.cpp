@@ -12,6 +12,7 @@
 #include "scene_target_logic.h"
 #include "picture.h"
 #include "captures.h"
+#include "screen_control.h"
 #include "vulkan_driver_guard.h"
 #include <detours/detours.h>
 #include <intrin.h>
@@ -124,6 +125,9 @@ void FrameInit(IDirect3DDevice9* dev) {
         OnPresent(ctx.device);
         return D3D9Hooks::HookAction::Continue;
     }, static_cast<D3D9Hooks::Priority>(-2000)); // before everything else (the profiler's frame start is -1000)
+    D3D9Hooks::SetAfterPresent([](IDirect3DDevice9* d, HRESULT& hr) {
+        HookGuard::Try("Display after Present", [&] { Screen::AfterPresent(d, hr); });
+    });
     SceneTarget::Init(); // (its frame callbacks return at once while the High-precision scene is off)
     Overlay::Init(dev, g_window.load());
     LOG_INFO("[D3D] Frame hooks ready");
@@ -208,7 +212,22 @@ HRESULT STDMETHODCALLTYPE Hooked_Reset(IDirect3DDevice9* dev, D3DPRESENT_PARAMET
     RenderCallbacks::Fire(RenderCallbacks::preReset, dev);
     HookGuard::Try("Picture before Reset", [] { Picture::Get().BeforeReset(); });
     if (dev == g_aliasDevice.load()) g_bbAlias.store(nullptr); // the Reset destroys it
+    // Window mode and resolution (System > Display); the game's own request again when the device refuses Apex's
+    const D3DPRESENT_PARAMETERS asked = pp ? *pp : D3DPRESENT_PARAMETERS{};
+    IDirect3D9* d3d = nullptr;
+    if (pp && SUCCEEDED(dev->GetDirect3D(&d3d)) && d3d) d3d->Release(); // (the device keeps it alive)
+    D3DDEVICE_CREATION_PARAMETERS cp{};
+    const bool changed = pp && HookGuard::Run("Display before Reset", false, [&] {
+        return Screen::AdjustPresentParams(d3d, SUCCEEDED(dev->GetCreationParameters(&cp)) ? cp.AdapterOrdinal : 0, pp->hDeviceWindow ? pp->hDeviceWindow : cp.hFocusWindow, pp, "Reset");
+    });
     HRESULT hr = o_reset(dev, pp);
+    const bool refused = FAILED(hr) && changed;
+    if (refused) {
+        LOG_WARNING(std::format("[D3D] Reset with Apex's display settings failed (0x{:08X}): the game's own parameters", static_cast<unsigned>(hr)));
+        *pp = asked;
+        hr = o_reset(dev, pp);
+    }
+    if (SUCCEEDED(hr) && pp) HookGuard::Try("Display after Reset", [&] { Screen::AfterDevice(pp->hDeviceWindow ? pp->hDeviceWindow : cp.hFocusWindow, pp, !refused); });
     if (SUCCEEDED(hr)) {
         if (o_getBackBuffer) NoteBackBufferAlias(dev);
         LOG_INFO(std::format("[D3D] Device reset: {}x{}, {}", pp ? pp->BackBufferWidth : 0, pp ? pp->BackBufferHeight : 0,
@@ -238,7 +257,18 @@ void HookDevice(IDirect3DDevice9* dev) {
 
 HRESULT STDMETHODCALLTYPE Hooked_CreateDevice(IDirect3D9* self, UINT adapter, D3DDEVTYPE type, HWND focus, DWORD flags, D3DPRESENT_PARAMETERS* pp, IDirect3DDevice9** out) {
     const bool hal = type == D3DDEVTYPE_HAL;
+    // Window mode and resolution (System > Display); the game's own request again when the device refuses Apex's
+    const D3DPRESENT_PARAMETERS asked = pp ? *pp : D3DPRESENT_PARAMETERS{};
+    const HWND window = pp && pp->hDeviceWindow ? pp->hDeviceWindow : focus;
+    const bool changed = hal && pp && HookGuard::Run("Display before CreateDevice", false, [&] { return Screen::AdjustPresentParams(self, adapter, window, pp, "CreateDevice"); });
     HRESULT hr = o_createDevice(self, adapter, type, focus, flags, pp, out);
+    const bool refused = FAILED(hr) && changed;
+    if (refused) {
+        LOG_WARNING(std::format("[D3D] CreateDevice with Apex's display settings failed (0x{:08X}): the game's own parameters", static_cast<unsigned>(hr)));
+        *pp = asked;
+        hr = o_createDevice(self, adapter, type, focus, flags, pp, out);
+    }
+    if (SUCCEEDED(hr) && hal && pp) HookGuard::Try("Display after CreateDevice", [&] { Screen::AfterDevice(window, pp, !refused); });
     if (SUCCEEDED(hr) && hal && out && *out) {
         LoadTiming::NoteDeviceCreated();
         LOG_INFO(std::format("[D3D] Game device created: {}x{}, {} (device {:#x}, back buffer format {}, multisample {}, flags {:#x})", pp ? pp->BackBufferWidth : 0,

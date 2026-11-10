@@ -75,7 +75,7 @@ test. The light solve itself, lamp ranges and attenuation are the game's.
     world's street lamps, on every story, with the weight the post has on its own lot. A post placed, moved or switched
     reaches them as it is let go, solved first and shown with the stories of its own lot; a post deleted leaves their light
     lists at once.
-11. **Double-height rooms** (in development). A roofed room with no floor ever placed over it whose walls go up
+11. **Double-height rooms**. A roofed room with no floor ever placed over it whose walls go up
     through the story above is one space two stories tall, but the upper half of its walls belongs to room 0 of that
     story. Room 0 now takes the lamps of such a room, so the walls no longer go dark at the story line
     ([Double-height rooms](#double-height-rooms)).
@@ -617,7 +617,7 @@ and the walls cut off hard at the story line while their lower half was red.
   (`indoor_lamp_walls`) applies. The lamp is scaled by its room's normalisation (room 0 has none, as for
   *Indoor light through openings*) and takes no *Realistic lamp reach*. Rows of a ghost solve under story S's plane over
   an open top are not slab rows.
-- **Window lights stay below** (2026-11-09, 14-06-26 Light capture, lot C49C story 3 at 9:16): a window light sits in its
+- **Window lights stay below** (Light capture 14-06-26, lot C49C story 3, in the morning): a window light sits in its
   wall's plane at the window's top, so the attic wall points just over it (lifted 12 cm off the floor line) took it from
   a few centimetres: soft warm spots over every door and window of the room below, by day only (the indoor texels'
   largest sum 21.8 by day, 0 at night), and story 3's room-0 list held 36 lights by day instead of 17 (19 window lights

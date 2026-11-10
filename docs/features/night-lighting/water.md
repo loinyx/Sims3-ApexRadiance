@@ -50,8 +50,8 @@ keep their hue. Both are spatial: there is no frame history, jitter or temporal 
 |---|---|---|---|---|---|
 | Lamp Glow (card switch) | `lagosRefletemLampadas` | bool | on | | Lamp glints and glow. With it off the pass still runs for the shore reflection, with lamp strength 0 |
 | Glow brightness | `brilhoNaAgua` | float | 40% | 10 to 40% | Lamp glint and glow strength (PS `c52.x`). Older saved values are clamped to the range at run time |
-| Water Reflections (card switch) | `reflexoNoLago` > 0 | | on | | Off sets the strength to 0; on restores the last value (default 156%) |
-| Reflection brightness (Water Reflections card) | `reflexoNoLago` | float | 156% | 0 to 300% (slider from 5%) | Shore reflection strength (PS `c58.x`). Needs Night Lighting and Depth Blur on |
+| Water Reflections (card switch) | `reflexoNoLago` > 0 | | on | | Off sets the strength to 0; on restores the last value (default 100%) |
+| Reflection brightness (Water Reflections card) | `reflexoNoLago` | float | 100% | 0 to 300% (slider from 5%) | Shore reflection strength (PS `c58.x`). Needs Night Lighting and Depth Blur on |
 | Developer > Water highlights > Stabilize lamp sparkles on water | `waterSpecularFilter` | bool | on | | Spatial widening of undersampled lamp highlights. Off = the original lamp lobe |
 | Developer > Water highlights > Preserve bright lamp colors on water | `waterPreserveLampColors` | bool | on | | Shared RGB scale for highlights above 0.7. Off = the original per-channel clamp at 0.8 |
 

@@ -5,7 +5,7 @@ The feature is described in [features/night-lighting/gpu-room-lamps.md](../featu
 - Draw indoor lamps of the active lot at the game's level: within 2/255 of the game's lamp part on the replayed recordings.
 - Show a colour, intensity, switch or move edit with no room solve in the frame of the edit.
 - Keep the soft furniture shadows of ceiling lamps: `roomLampTrueShadows` off by default.
-- Reach every player with no developer switch on Steam 1.67.2, and leave other game builds on the game's room solves.
+- Reach every player with no developer switch on Steam 1.67.2 and EA app 1.69.47, and leave builds whose addresses are not found on the game's room solves.
 - Free kept rooms on Instant to Classic, Night Lights off and a world change.
 
 ## Automated tests
@@ -28,7 +28,7 @@ Rows marked *tree* ran on `1f76e83` with the 3.0.0 working tree; the release com
 |---|---|---|---|---|
 | 2026-11-09 | release tree | `outdoor_delta_test`, `room_ambient_test` (with `unlit_rooms_recovery_test`), `rt_lamps_test`, `room_solve_causes_test`, `settings_migration_test`, `scene_target_test`, `story_maps_test`, `render_cost_test` | 287, 134 + 1,343, 680,409 checks and every other suite pass with 0 failures; the 17:18 switch replay: last room +2.14 s (+15.53 s before) | MSVC x86 |
 | 2026-11-09 | release tree | `i18n_check`, `public_text_check.py` | 2,497 keys in all 21 languages; no public text finding | MSVC x86 |
-| 2026-11-09 | release tree | in game, Steam 1.67.2 under the RTX Remix bridge | the maintainer confirmed the day/night switch and the 6:00 lamp switch of a neighbouring lot without the earlier pauses; not measured after the fix | DXVK x64 (bridge) |
+| 2026-11-09 | release tree | in game, Steam 1.67.2 under the RTX Remix bridge | confirmed in game: the day/night switch and the 6:00 lamp switch of a neighbouring lot without the earlier pauses; not measured after the fix | DXVK x64 (bridge) |
 | 2026-11-06 | tree | `scene_replay`, version 3.0.0 | 95.46% within 2/255 of 2,691,056 lamp texels in 10 recordings; walls 92.8%, floors 96.2%, ceilings 97.0%, objects 97.8%. The capture folder no longer holds its 3 oldest recordings, at 95.59% to 97.40%; each of the 10 left reads as in the run of 13 (95.68% of 3,357,815 texels) | MSVC x86 |
 | 2026-11-06 | tree | `rt_lamps_test`, `outdoor_delta_test`, `arch_ambient_test`, `room_map_smooth_check`, `settings_migration_test`, `i18n_check`, version 3.0.0 | 140, 224, 4,153 and 1,845 checks, 0 failures; 30 passed; 2,487 of 2,487 keys in every language | MSVC x86; native D3D9 |
 | 2026-11-06 | tree | Standard and `APEX_NO_DEV_TOOLS` builds, version 3.0.0 | Both build | MSVC x86 |

@@ -59,9 +59,9 @@ Snow has no setting of its own besides sidewalk snow. It uses these Night Lighti
 |---|---|---|---|---|---|
 | Street lamps light lots | `luzDoPosteNaGramaDoLote` | bool | on | | Dispatch gate for every snow fix ([lot-light-pass.md](lot-light-pass.md)) |
 | Smooth ground light | `mapaDeLuzSuavizado` | bool | on | | Builds the world atlas that every snow fix reads |
-| Ground light | `luzNoChao` | float | 100% | 25 to 300% | Scales the lot snow pass (`c4.x`) and snow on floors, weighted by the night level |
+| Ground light | `luzNoChao` | float | 90% | 25 to 300% | Scales the lot snow pass (`c4.x`) and snow on floors, weighted by the night level |
 | Fences and stairs catch light | `cercasComLuzDoChao` | bool | on | | Snow on fence tops (class 8) and stair tops (class 9) |
-| Fence brightness | `forcaNasCercas` | float | 75% | 25 to 200% | Strength of the atlas term on class 8 and 9 snow |
+| Fence brightness | `forcaNasCercas` | float | 100% | 25 to 200% | Strength of the atlas term on class 8 and 9 snow |
 | Sidewalk visibility | `calcadaComNevePisada` | float | 50% | 0 to 100% | How much sidewalk shows where Sims have walked ([roads.md](roads.md)) |
 
 ## Compatibility and interactions

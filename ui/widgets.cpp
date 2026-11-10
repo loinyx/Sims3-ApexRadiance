@@ -852,6 +852,99 @@ void Chip(const char* text, unsigned rgb) {
     ChipImpl(text, rgb);
 }
 
+// ---- Overview status halves ----
+namespace {
+constexpr float kStatusHeaderGap = 6.0f, kStatusValueGap = 10.0f, kStatusBand = 4.0f, kStatusBandGap = 10.0f, kStatusValueScale = 1.75f;
+} // namespace
+
+void StatusHeader(const char* label, const char* right, unsigned rightRgb, bool dot) {
+    if (Hidden()) return;
+    const float u = Unit(), y = ImGui::GetCursorPosY();
+    const ImVec2 start = ImGui::GetCursorScreenPos();
+    const float rightEdge = start.x + ImGui::GetContentRegionAvail().x; // the column's right edge (a table cell or the card)
+    PushSized(nullptr, kSmallScale);
+    const float h = ImGui::GetTextLineHeight();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddText(start, U32(VioletTheme::kTextMuted), T(label));
+    if (right && *right) {
+        const char* text = T(right);
+        const float dotW = dot ? 12.0f * u : 0.0f; // a 6-unit dot and a 6-unit gap
+        const float x = rightEdge - ImGui::CalcTextSize(text).x - dotW;
+        if (dot) dl->AddCircleFilled(ImVec2(x + 3.0f * u, start.y + h * 0.5f), 3.0f * u, U32(rightRgb));
+        dl->AddText(ImVec2(x + dotW, start.y), U32(rightRgb), text);
+    }
+    ImGui::PopFont();
+    ImGui::Dummy(ImVec2(0.0f, h));
+    ImGui::SetCursorPosY(y + h + kStatusHeaderGap * u);
+}
+
+float StatusValue(const char* value, const char* unit, ImVec2* lineMin) {
+    if (Hidden()) return 0.0f;
+    const float u = Unit(), y = ImGui::GetCursorPosY();
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    ImGui::PushFont(VioletTheme::BoldFont(), VioletTheme::BaseFontSize() * kStatusValueScale);
+    const float bigH = ImGui::GetTextLineHeight();
+    const float valueW = ImGui::CalcTextSize(value).x;
+    ImGui::GetWindowDrawList()->AddText(p, U32(VioletTheme::kText), value);
+    ImGui::PopFont();
+    if (unit && *unit) { // on the value's baseline (both fonts put the baseline at ~80% of the line)
+        PushSized(nullptr, kSmallScale);
+        const float smallH = ImGui::GetTextLineHeight();
+        ImGui::GetWindowDrawList()->AddText(ImVec2(p.x + valueW + 6.0f * u, p.y + bigH * 0.8f - smallH * 0.8f), U32(VioletTheme::kTextMuted), T(unit));
+        ImGui::PopFont();
+    }
+    if (lineMin) *lineMin = p;
+    ImGui::Dummy(ImVec2(valueW, bigH));
+    ImGui::SetCursorPosY(y + bigH + kStatusValueGap * u);
+    return bigH;
+}
+
+ImVec2 StatusBand() {
+    const float u = Unit(), y = ImGui::GetCursorPosY();
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    if (Hidden()) return p;
+    ImGui::Dummy(ImVec2(0.0f, kStatusBand * u));
+    ImGui::SetCursorPosY(y + (kStatusBand + kStatusBandGap) * u);
+    return p;
+}
+
+float StatusBandHeight() { return kStatusBand * Unit(); }
+
+void StatusFooter(const std::string& text) {
+    if (Hidden()) return;
+    PushSized(nullptr, kSmallScale);
+    const float h = ImGui::GetTextLineHeight(), w = ImGui::GetContentRegionAvail().x;
+    const ImVec2 q = ImGui::GetCursorScreenPos();
+    ImGui::Dummy(ImVec2(w, h));
+    ImGui::PushStyleColor(ImGuiCol_Text, Col(VioletTheme::kTextMuted));
+    ImGui::RenderTextEllipsis(ImGui::GetWindowDrawList(), q, ImVec2(q.x + w, q.y + h), q.x + w, text.c_str(), nullptr, nullptr);
+    ImGui::PopStyleColor();
+    ImGui::PopFont();
+}
+
+void StatColumns(const char* const* labels, const char* const* values, const unsigned* colours, int count) {
+    if (Hidden() || count <= 0) return;
+    const float w = ImGui::GetContentRegionAvail().x / static_cast<float>(count);
+    const float x0 = ImGui::GetCursorPosX(), y = ImGui::GetCursorPosY();
+    float bottom = y;
+    for (int i = 0; i < count; i++) {
+        ImGui::SetCursorPos(ImVec2(x0 + w * static_cast<float>(i), y));
+        ImGui::BeginGroup();
+        PushSized(nullptr, kSmallScale);
+        ImGui::PushStyleColor(ImGuiCol_Text, Col(VioletTheme::kTextMuted));
+        ImGui::TextUnformatted(I18n::Tr(labels[i]));
+        ImGui::PopStyleColor();
+        ImGui::PopFont();
+        ImGui::PushStyleColor(ImGuiCol_Text, Col(colours ? colours[i] : VioletTheme::kText));
+        ImGui::TextUnformatted(values[i]);
+        ImGui::PopStyleColor();
+        ImGui::EndGroup();
+        bottom = std::max(bottom, ImGui::GetItemRectMax().y - ImGui::GetWindowPos().y + ImGui::GetScrollY());
+    }
+    ImGui::SetCursorPos(ImVec2(x0, bottom));
+    ImGui::Dummy(ImVec2(0.0f, 0.0f));
+}
+
 bool CostChipText(float ms, char* buf, int size) {
     if (!buf || size <= 0) return false;
     buf[0] = '\0';
@@ -1498,15 +1591,17 @@ bool Slider(const char* label, float* v, float min, float max, const SliderOptio
     const float right = lineP.x + width;
     // Wide rows: the track and its value on the right of the label (InlineControlWidth); narrow ones keep the track
     // under the label with the value on the label's line
-    const float ctrlW = InlineControlWidth(width);
+    // alignWidth: the track in a select's column (SelectRow's combo width), the value left of it
+    const float alignW = o.alignWidth > 0.0f ? std::fmin(o.alignWidth * u, std::fmax(120.0f * u, width * 0.5f)) : 0.0f;
+    const float ctrlW = alignW > 0.0f && InlineControlWidth(width) > 0.0f ? alignW + valueW + swatchW + kSpace3 * u : InlineControlWidth(width);
     const bool inl = ctrlW > 0.0f;
-    auto drawValue = [&](float y) {
+    auto drawValue = [&](float y, float at) { // at: the value's right edge
         if (o.swatch)
-            dl->AddRectFilled(ImVec2(right - valueW - swatchW, y + (lineH - swatchS) * 0.5f), ImVec2(right - valueW - swatchW + swatchS, y + (lineH + swatchS) * 0.5f),
+            dl->AddRectFilled(ImVec2(at - valueW - swatchW, y + (lineH - swatchS) * 0.5f), ImVec2(at - valueW - swatchW + swatchS, y + (lineH + swatchS) * 0.5f),
                               WithStyleAlpha(o.swatch), 3.0f * u);
-        dl->AddText(ImVec2(right - valueW, y), U32(VioletTheme::kTextMuted), value);
+        dl->AddText(ImVec2(at - valueW, y), U32(VioletTheme::kTextMuted), value);
     };
-    if (!inl) drawValue(lineP.y);
+    if (!inl) drawValue(lineP.y, right);
     const float textRight = inl ? startX + width - ctrlW - kSpace4 * u : startX + width;
 
     // Label (after the optional icon), the description under it
@@ -1543,8 +1638,8 @@ bool Slider(const char* label, float* v, float min, float max, const SliderOptio
         ImGui::PopFont();
         const float blockH = ImGui::GetFrameHeight() + endH;
         const float rowH = std::fmax(textBottom - top, blockH);
-        trackW = std::fmax(ctrlW - valueW - swatchW - kSpace3 * u, 60.0f * u);
-        ImGui::SetCursorPos(ImVec2(startX + width - ctrlW, top + (rowH - blockH) * 0.5f));
+        trackW = alignW > 0.0f ? alignW : std::fmax(ctrlW - valueW - swatchW - kSpace3 * u, 60.0f * u);
+        ImGui::SetCursorPos(ImVec2(startX + width - (alignW > 0.0f ? alignW : ctrlW), top + (rowH - blockH) * 0.5f));
         rowBottom = top + rowH;
     } else {
         ImGui::SetCursorPosX(startX);
@@ -1591,7 +1686,7 @@ bool Slider(const char* label, float* v, float min, float max, const SliderOptio
     const float grabR = std::fmax(ImGui::GetStyle().GrabMinSize * 0.5f, 6.0f * u) + (active ? 1.0f : hovered ? 0.5f : 0.0f) * u;
     if (o.hueTrack || (o.trackFrom && o.trackTo)) dl->AddCircle(ImVec2(gx, cy), grabR + 1.0f * u, U32(0x000000, 0.35f), 0, 1.5f * u); // readable on light colours
     dl->AddCircleFilled(ImVec2(gx, cy), grabR, U32(0xFFFFFF));
-    if (inl) drawValue(cy - lineH * 0.5f); // right of the track, centred on it
+    if (inl) drawValue(cy - lineH * 0.5f, alignW > 0.0f ? a.x - kSpace3 * u : right); // beside the track, centred on it
 
     // End labels under the track
     if (o.leftLabel || o.rightLabel) {

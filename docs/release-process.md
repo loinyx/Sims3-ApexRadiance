@@ -49,6 +49,14 @@ The changelog opened from the version in the menu footer (`apex_changelog.cpp`):
 - Each line is one short sentence in the player's words (about 5 to 15 words), present tense, naming the feature by its
   menu name, with no ending period, internal names, addresses, test counts, marketing adjectives or emoji. A fix line
   states what now works ("Depth Blur waits until the world has loaded"), never "Fixed an issue where…".
+- A version players will notice gets a `headline`: one sentence (about 110 characters at most) on what they will see.
+  With it, the first menu after updating shows a small card with the headline, What's new and OK; a small fix leaves it
+  out and shows only the version's dot. When the version moves saved settings, `settingsNote` says what moved, on that card.
+- Up to four `highlights`: short titles of the main changes, the open version's first lines.
+- At most about 15 lines: merge lines on one subject ("doors, arches and glass" in one line). Write each as "Area: what
+  changed"; the area becomes a heading, so never repeat it in the text. Numbers of performance work and internal detail
+  stay in the GitHub notes. A line under `fixed` may name what was wrong ("lamp light leaking through floors"): the menu
+  tags it "Fix".
 - Every line is translated into all 21 menu languages (`i18n/tr_menu.cpp` and the `lang_<code>.cpp` tables).
 - `APEX_VERSION_NUMBER` in `apex_version.h` matches the newest entry; the footer shows it once.
 

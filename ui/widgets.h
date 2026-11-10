@@ -159,6 +159,20 @@ void EndControlRow();
 // A small muted chip ("~0.4 ms"); submitted as an item (hover it for a tooltip)
 ImVec2 ChipSize(const char* text);
 void Chip(const char* text, unsigned rgb = 0x8B8C96);
+// Figures side by side in equal columns: a small muted label (translated) over its value (shown as it is), each value in
+// its colour (nullptr = the text colour). For the Overview tiles.
+void StatColumns(const char* const* labels, const char* const* values, const unsigned* colours, int count);
+// The Overview's status halves (Frame rate, Game memory), drawn with the same metrics so their rows line up side by side:
+//   StatusHeader  small muted label on the left; optional small text on the right, in its colour, after a dot
+//   StatusValue   the value large and bold, its unit small and muted on the same baseline; returns the line's top-left
+//                 (screen) and its height, for a drawing beside it
+//   StatusBand    the 4-unit band under the value (Game memory draws its bar there; Frame rate leaves it empty)
+//   StatusFooter  one small muted line, cut with an ellipsis when narrow
+void StatusHeader(const char* label, const char* right = nullptr, unsigned rightRgb = 0x8B8C96, bool dot = false);
+float StatusValue(const char* value, const char* unit, ImVec2* lineMin = nullptr);
+ImVec2 StatusBand(); // returns the band's top-left (screen); its height is StatusBandHeight()
+float StatusBandHeight();
+void StatusFooter(const std::string& text);
 // A rounded pill with an optional icon; highlighted = violet. Submitted as an item (hover it for a tooltip).
 ImVec2 PillSize(const char* text, bool withIcon);
 void Pill(const char* text, bool highlighted, IconId icon = IconId::None);
@@ -230,6 +244,9 @@ struct SliderOptions {
     float defaultValue = kNoDefault;
     ImU32 trackFrom = 0, trackTo = 0; // both set = gradient track
     bool hueTrack = false;
+    // > 0: the track takes the column of a SelectRow with this controlWidth (aligned with the select above or below
+    // it) and the value moves to the track's left
+    float alignWidth = 0.0f;
 };
 bool Slider(const char* label, float* v, float min, float max, const SliderOptions& options = {});
 bool SliderCommitted();

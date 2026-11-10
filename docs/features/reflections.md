@@ -11,8 +11,8 @@ Lighting's water pass; this page covers what the player controls. The pass itsel
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier (present in the first version in this repository). Water without the game's reflection (Twinbrook, Bridgeport, Moonlight Falls) and the 156% default: Released in 2.7.0 |
-| Default | On (shore reflection 156%, lamp glow on) for new configurations |
+| Availability | Released in 2.1.0 or earlier (present in the first version in this repository). Water without the game's reflection (Twinbrook, Bridgeport, Moonlight Falls) and the 156% default: Released in 2.7.0. The 100% default: Released in 3.0.0 |
+| Default | On (shore reflection 100%, lamp glow on) for new configurations |
 | Menu | World > Water & Snow (cards *Lamp Glow* and *Water Reflections*); Overview > Lighting > Water Reflections |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` (keys owned by Night Lighting) |
 | Source | [`apex_gui.cpp`](../../apex_gui.cpp) (`WaterReflectionsCard`, `SetShore`), [`patches/night_terrain_relight_patch.cpp`](../../patches/night_terrain_relight_patch.cpp) (`DrawWaterCard`, settings), [`features/lot_light_bridge.cpp`](../../features/lot_light_bridge.cpp) (`DrawLake`, `SetWaterFix`) |
@@ -46,8 +46,8 @@ screen-space reflection of the shore.
 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
-| Water Reflections (card switch) | `reflexoNoLago` | float | on (156%) | | Off stores 0; on restores the last brightness (156% when there is none). Not a separate key |
-| Reflection brightness | `reflexoNoLago` | float | 156% | 5 to 300% (stored 0 to 3) | Strength of the shore reflection (PS `c58.x`) |
+| Water Reflections (card switch) | `reflexoNoLago` | float | on (100%) | | Off stores 0; on restores the last brightness (100% when there is none). Not a separate key |
+| Reflection brightness | `reflexoNoLago` | float | 100% | 5 to 300% (stored 0 to 3) | Strength of the shore reflection (PS `c58.x`) |
 | Lamp Glow (card switch) | `lagosRefletemLampadas` | bool | on | | Lamp glints and glow on ponds |
 | Lamp Glow > Glow brightness | `brilhoNaAgua` | float | 40% | 10 to 40% | Lamp glow strength (PS `c52.x`); 0 is sent while the glow is off |
 | Developer > Water highlights > Stabilize lamp sparkles on water | `waterSpecularFilter` | bool | on | | Filters tiny highlights (no temporal smoothing) |

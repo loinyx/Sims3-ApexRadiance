@@ -95,3 +95,16 @@ Sources: [NVIDIA VRR structure](https://docs.nvidia.com/nvapi/struct___n_v___g_e
 by project decision before any release. Apex forwards the game's original CreateDevice, Reset and Present requests
 without changing synchronization or window state; G-SYNC and FreeSync stay controlled by the driver and monitor. The
 `[display]` table is dropped from profiles.
+
+### 2026-11-09: revived as Display
+
+**Context:** Apex's own frame limiter and window control, taking precedence over
+Sims3SettingsSetter's and working under the RTX Remix bridge. New code, not the removed candidate:
+[features/display.md](../features/display.md).
+
+- Kept from the candidate: the game's request retried on failure, window changes on the window thread.
+- Changed: start-of-frame pacing after Present (the candidate waited before Present); a high-resolution waitable timer
+  plus a spin; live mode changes through the game's own device-lost path (TS3W `0x00610AB0`, found in this study);
+  Sims3SettingsSetter's limiter call redirected at run time instead of disabling Apex's when it is configured.
+- Left out: monitor selection, V-Sync requests and the NVIDIA / AMD variable-refresh queries.
+

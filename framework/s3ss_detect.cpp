@@ -8,6 +8,7 @@
 #include "memory_patch.h"
 #include "ui/i18n.h"
 #include <psapi.h>
+#include <cctype>
 #include <toml++/toml.hpp>
 #include <algorithm>
 #include <array>
@@ -222,6 +223,14 @@ bool S3SSPatchBoolSettingEnabled(const char* patchName, const char* settingName,
     const auto patch = (*root)["patches"][patchName];
     if (!patch["enabled"].value_or(false)) return false;
     return patch[settingName].value_or(defaultValue);
+}
+
+bool S3SSBorderlessConfigured() {
+    const auto root = ReadS3SSConfig();
+    if (!root) return false;
+    std::string mode = (*root)["qol"]["borderless_window"]["mode"].value_or(std::string());
+    for (char& c : mode) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return !mode.empty() && mode != "off" && mode != "disabled" && mode != "none";
 }
 
 bool S3SSOverlayDisabled() {

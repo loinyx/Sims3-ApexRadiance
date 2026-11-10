@@ -156,3 +156,17 @@ Measured in game the same evening on a development install with `story_samples` 
 samples turn every lamp pick memo off): the fence fix cost 2 to 5 us a draw (15 to 22 us with them on), its lamp pick
 0.3 to 1 us, outdoor objects 1.5 us; about 90 % of the fence picks were reused. Most of the rest landed in a slot another
 group held: the memo grew to 1024 entries and its slot now includes the law.
+
+### 2026-11-09: pieces behind a wall, and edging set in a house's wall
+
+F7 2026-11-09 (a short fence beside a house): a fence on the far side of an outside wall stayed lit by a lamp on the near
+side. The group's single lamp list kept the lamp because the piece nearest it saw it; the other pieces took it through the
+wall. `DrawFenceRuns` draws such groups in runs of consecutive pieces, each run without the lamps a wall hides from its
+pieces (the instance stream offset per run, the run's length as the instance count). Considered and left out: a per-pixel
+visibility test in the shader (no wall data on the GPU) and a lamp list per piece (8 lamps x pieces of constants a draw).
+
+F7 2026-11-09 23-35-25: the fix left one bright piece, garden edging at the foot of a brick wall. The capture showed a
+single-piece group (no runs) with its origin on the wall's line (z 914, the wall's face at 914.05) and its brightest lamp
+inside the house (room 1, 0.5 m behind the wall). The ray from the lamp ends on the wall's line and never crosses the
+wall, so no near-skip change could block it. `FencePieceVisibility` tests such pieces 0.15 m beyond the wall from the
+lamp, for lamps shining out of a house only; outdoor lamps keep the test at the piece. Seen dark in game the same night.

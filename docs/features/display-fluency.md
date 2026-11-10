@@ -1,5 +1,7 @@
 # Display and Fluency
 
+> Replaced by [Display](display.md) (window mode, resolution and frame-rate limiter, released in 3.1.0).
+
 Window mode, monitor selection, an Apex frame-rate limiter, V-Sync requests and read-only G-SYNC / FreeSync reports. The
 feature existed only in a private release candidate and was removed before any release. Apex Radiance has no window,
 monitor, V-Sync or FPS controls: it forwards the game's own CreateDevice, Reset and Present requests without changing

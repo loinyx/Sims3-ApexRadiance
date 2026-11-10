@@ -132,15 +132,16 @@ one row, *Lamp updates*, has two modes:
 | *Instant (GPU)* (default) | "Your graphics card updates lamp light instantly; moving lamps may dip FPS a little" | [Real-time outdoor lamps](../night-lighting/rt-outdoor-lamps.md) draws the active lot's outdoor lamps and their shadows on the graphics card, on the kept parts of [Quick outdoor lamp edits](../night-lighting/outdoor-lamp-delta.md); [GPU room lamps](../night-lighting/gpu-room-lamps.md) draws its indoor lamps |
 | *Classic* | "Easier on the graphics card; light updates once you let go of a lamp" | The game's room solves with every correction; a dragged lamp's rooms are solved once after the release ([lamp drags](../night-lighting/lamp-drags.md#classic-relight-only-after-release)) and an edit's stories change together ([Faster room lighting](room-light-queue.md#classic-show-all-floors-together)) |
 
-A warning note under the row says why Instant cannot run on the device (another game version than Steam 1.67.2, a
+A warning note under the row says why Instant cannot run on the device (a game build whose addresses were not found, a
 graphics card that cannot draw the shadows, or shaders that could not start); the lamps then work as Classic, and once
 Classic is picked Instant cannot be chosen again. With Instant chosen but doing nothing, a note names the cause (*Outdoor
 light between floors* off, or its lamp edits could not start). Instant runs inside Night Lights: with Night Lights off
 the card shows *Needs Night Lights (Lighting page)* and a button to turn it on. Switching modes relights the active lot
 once. The GPU time of the last lamp edit is on Developer > [Tester](../dev-tools/tester.md).
 
-Setting: `lampLightingMode` (`"classic"` or `"instant"`, default `"instant"`) under `[patches.NightTerrainRelight]`; a
-saved value is kept, and a file without the key starts on Instant. Presets carry it in the Performance part (the key is
+Setting: `lampLightingMode` (`"classic"` or `"instant"`, default `"instant"`) under `[patches.NightTerrainRelight]`; 3.0.0
+moves a saved Classic to Instant once (`[meta] lighting_defaults` 2), a later choice is kept, and a file without the key
+starts on Instant. Presets carry it in the Performance part (the key is
 taken out of Night Lights' table for a Lighting-only preset). Source: `LampLightingCard` in
 [`apex_gui.cpp`](../../../apex_gui.cpp).
 

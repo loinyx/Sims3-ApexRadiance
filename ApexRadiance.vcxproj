@@ -107,6 +107,9 @@
     <ClCompile Include="features\fast_memory.cpp" />
     <ClCompile Include="features\memory_guard.cpp" />
     <ClCompile Include="features\window_repaint.cpp" />
+    <ClCompile Include="features\screen_control.cpp" />
+    <ClCompile Include="features\memory_meter.cpp" />
+    <ClCompile Include="features\overview_restore.cpp" />
     <ClCompile Include="features\script_math.cpp" />
     <ClCompile Include="features\object_id_map.cpp" />
     <ClCompile Include="features\render_object_map.cpp" />
@@ -195,6 +198,7 @@
     <ClCompile Include="framework\patch_base.cpp" />
     <ClCompile Include="framework\s3pp_settings.cpp" />
     <ClCompile Include="framework\s3ss_detect.cpp" />
+    <ClCompile Include="framework\s3ss_textures.cpp" />
     <ClCompile Include="framework\scene_copy.cpp" />
     <ClCompile Include="framework\scene_target.cpp" />
     <ClCompile Include="framework\shader_cache.cpp" />
@@ -256,6 +260,10 @@
     <ClInclude Include="features\fast_memory.h" />
     <ClInclude Include="features\memory_guard.h" />
     <ClInclude Include="features\window_repaint.h" />
+    <ClInclude Include="features\screen_control.h" />
+    <ClInclude Include="features\memory_meter.h" />
+    <ClInclude Include="features\overview_restore.h" />
+    <ClInclude Include="features\frame_limiter_math.h" />
     <ClInclude Include="features\script_math.h" />
     <ClInclude Include="features\object_id_map.h" />
     <ClInclude Include="features\render_object_map.h" />
@@ -381,6 +389,7 @@
     <ClInclude Include="framework\render_callbacks.h" />
     <ClInclude Include="framework\s3pp_settings.h" />
     <ClInclude Include="framework\s3ss_detect.h" />
+    <ClInclude Include="framework\s3ss_textures.h" />
     <ClInclude Include="framework\s3ss_ambient_policy.h" />
     <ClInclude Include="framework\scene_copy.h" />
     <ClInclude Include="framework\scene_target.h" />

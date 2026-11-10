@@ -12,7 +12,7 @@ probe](gpu-room-lamps-probe.md) on too, each kept solve is recomposed on the CPU
 
 | | |
 |---|---|
-| Availability | Released in 3.0.0, on Steam 1.67.2 with Lamp lighting: Instant (GPU); other game builds keep the game's room solves (see Limitations) |
+| Availability | Released in 3.0.0, on Steam 1.67.2 and EA app 1.69.47 (once its addresses are found) with Lamp lighting: Instant (GPU); other game builds keep the game's room solves (see Limitations) |
 | Default | On, physical model, sharper floors; with Classic, on another game build, or when Quick outdoor lamp edits cannot run on the game build, the game's room solves |
 | Menu | No switch of its own (System > Performance > Lamp lighting); its comparison: Developer > Compare lighting paths > Keep indoor lamps for GPU |
 | Configuration | `gpuRoomLamps` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml`, read only in developer mode. An older config with `gpuRoomLampsCapture = false` takes the new model and floor defaults once; with it on, its saved values stay |

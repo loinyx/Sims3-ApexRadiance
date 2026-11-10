@@ -8,6 +8,8 @@
 #include "build_flavor.h"
 #include "patch_base.h"
 #include "picture.h"
+#include "screen_control.h"
+#include "overview_restore.h"
 #include "frame_profiler.h"
 #include "performance.h"
 #include "profile_package.h"
@@ -401,6 +403,7 @@ void LoadSettings() {
         u.testBuildSeen = (*ui)["test_build_seen"].value_or(std::string());
         u.roomToSaveAsked = (*ui)["room_to_save_asked"].value_or(false);
         u.s3ppSpinAsked = (*ui)["s3pp_spin_asked"].value_or(false);
+        u.lowMemoryWarning = (*ui)["low_memory_warning"].value_or(true);
         const std::string lang = (*ui)["language"].value_or(std::string("auto"));
         u.language = I18n::FromCode(lang); // "auto" or an unknown code = -1 (Windows' language)
         if (const toml::table* shortcuts = (*ui)["profile_shortcuts"].as_table()) {
@@ -505,6 +508,7 @@ bool Save(std::string* error) {
         if (!u.testBuildSeen.empty()) ui.insert("test_build_seen", u.testBuildSeen);
         if (u.roomToSaveAsked) ui.insert("room_to_save_asked", true);
         if (u.s3ppSpinAsked) ui.insert("s3pp_spin_asked", true);
+        ui.insert("low_memory_warning", u.lowMemoryWarning);
         ui.insert("language", u.language >= 0 && u.language < static_cast<int>(I18n::Lang::Count) ? I18n::Code(static_cast<I18n::Lang>(u.language)) : "auto");
         toml::table profileShortcuts;
         for (const ProfileShortcut& shortcut : u.profileShortcuts) {
@@ -544,6 +548,8 @@ bool Save(std::string* error) {
             }
         }
         PatchManager::Get().SaveToToml(root);
+        Screen::SaveToToml(root); // [screen]: System > Display
+        OverviewRestore::SaveToToml(root); // [overview_restore]: what the Overview's page switches turned off
         if (toml::table* saved = root["patches"].as_table()) // compared features: saved as on (review H2)
             for (const std::string& n : g_compareOff)
                 if (toml::table* pt = (*saved)[n].as_table()) pt->insert_or_assign("enabled", true);

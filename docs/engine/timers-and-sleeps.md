@@ -1,6 +1,6 @@
 # Clock, sleeps, frame limiter and Smooth Patch sites (TS3W.exe)
 
-This page documents how the game waits: the stopwatch behind every budget, the sleep wrapper `0x004E1320`, the simulation-thread idle, the render thread's inactive-window sleep and the background idle in the main loop. These are the sites frame limiters and tick patches touch. Apex Radiance ships no timer, sleep or tick patch; the Frame Profiler reports the limiter time.
+This page documents how the game waits: the stopwatch behind every budget, the sleep wrapper `0x004E1320`, the simulation-thread idle, the render thread's inactive-window sleep and the background idle in the main loop. These are the sites frame limiters and tick patches touch. Apex Radiance's [Display](../features/display.md) limiter waits after Present and, while it is on, redirects Sims3SettingsSetter's limiter call; Apex ships no sleep or tick patch. The Frame Profiler reports the limiter time.
 
 ## Scope
 
@@ -21,7 +21,7 @@ wait goes through, the simulation-thread idle (`IdleSimulationCycle`), the rende
 the background idle in the main loop. These are the sites every frame limiter / tick patch touches, including
 LazyDuchess's Smooth Patch and S3SS's Smooth Patch Classic / Precise.
 
-**Apex ships no timer, sleep or tick patch.** The improved Smooth Patch Precise of the combined build collides byte for
+**Apex ships no sleep or tick patch.** Its frame limiter ([Display](../features/display.md)) waits in the Present hook and, while on, points Sims3SettingsSetter's call at `0xEC9FBA` to an Apex function (only the rel32 changes). The improved Smooth Patch Precise of the combined build collides byte for
 byte with official S3SS's Smooth Patch (`0xD81FDE`, `0xEC9FBA`) and stays out of the standalone
 ([../architecture.md](../architecture.md#114-game-code-sites-and-the-conflict-guard), [../removed-features.md](../removed-features.md)). Apex code
 that meets these sites: the [Frame Profiler](../features/frame-profiler.md) (developer mode) detours the prologue of `0xEC9F00`
@@ -72,7 +72,7 @@ The render thread does not wait for the simulation thread each frame (see main-l
 |---|---|---|
 | LazyDuchess Smooth Patch (TS3FrameratePatch), and S3SS **Smooth Patch Classic** | every match of `8B 44 24 04 8B 08 6A 01 51 FF` (the start of `0x4E1320`) | `mov ecx, <1000/TPS>; nop` so every call sleeps a fixed time; `ret` for "uncapped"; `mov ecx,0; nop; push 0` for "system". Changes all 48 callers at once |
 | S3SS **Smooth Patch Precise** (Just Harry) | CALL at `0xD81FDE` | redirected to its own IdleSimulationCycle: QPC deadline at the chosen tick rate, optional "tick at most once per frame" hand-off from the render thread |
-| same | 9 bytes at `0xEC9FBA` | `3E 56` (`ds: push esi`, padding so the call ends where the original CMP ended), `E8 rel32` (call `DelayAfterFramePresentation(device)`), `5E` (pop esi), `EB` (jmp rel8, reusing the original displacement byte). Frame limiter for active and inactive windows, on the render thread after Present |
+| same | 9 bytes at `0xEC9FBA` | `3E 56` (`ds: push esi`, padding so the call ends where the original CMP ended), `E8 rel32` (call `DelayAfterFramePresentation(renderer)`, `__stdcall`: it pops its argument), `5E` (the render frame's own `pop esi`, kept), `EB` (jmp rel8, reusing the original displacement byte). Frame limiter for active and inactive windows, on the render thread after Present |
 | Apex's improved Smooth Patch Precise (combined build only) | same two sites | WaitOnAddress instead of spinning for "tick once per frame"; sleep until one timer period before the deadline (`NtDelayExecution`, relative) then `_mm_pause` spin; its own 0.5 ms timer request (`timeBeginPeriod(1)` then `NtSetTimerResolution(5000)`; per process since Windows 10 2004) plus `PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION`; optional render/simulation thread boost (Above normal or MMCSS "Games"). **Not in the standalone** |
 | S3SS Timer Optimization | process | `NtSetTimerResolution` to 1 ms |
 | S3SS AdaptiveWait | `WaitForSingleObject(Ex)` hooks | short spin before INFINITE waits; answers `WaitForSingleObjectEx(GetCurrentThread(), 0, FALSE)` (the APC pump at `0xEBB2B0+0x14 = 0xEBB2C4`) without a syscall; guards the dead Mono domain-unload path at `0xE661AE` |
@@ -82,6 +82,7 @@ The render thread does not wait for the simulation thread each frame (see main-l
 | Item | Apex user |
 |---|---|
 | `0xEC9F00` prologue, and the split "after `0x611680` returns = Frame limiter" | Frame Profiler (developer mode) |
+| The rel32 of Sims3SettingsSetter's call at `0xEC9FBA` (pattern `3E 56 E8 ?? ?? ?? ?? 5E EB`, target checked in its module) | [Display](../features/display.md) frame limiter, while a limit is set; its replacement is `__stdcall` and sleeps 30 ms while `renderer+0x8D` is set |
 | Stopwatch units (3 = us, 4 = ms) | only as knowledge (the removed performance patches rewrote budget units: [../removed-features.md](../removed-features.md)) |
 | Everything else in this file | nothing (knowledge for diagnosis) |
 
@@ -104,7 +105,8 @@ The render thread does not wait for the simulation thread each frame (see main-l
 - Timer resolution is per process since Windows 10 2004: another process's `timeBeginPeriod` no longer speeds up the
   game's sleeps.
 - Do not ship anything on `0xD81FDE` / `0xEC9FBA` / `0x4E1320` in the standalone while official S3SS's Smooth Patch can
-  be installed: same bytes.
+  be installed: same bytes. The one exception is Display's run-time redirect of S3SS's own call target at `0xEC9FBA`,
+  which leaves its bytes in place and puts its target back.
 
 ### Additional details (static analysis)
 

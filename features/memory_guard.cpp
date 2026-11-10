@@ -10,6 +10,7 @@
 //
 // Part of Apex Radiance. Credits: @loinyx
 #include "memory_guard.h"
+#include "memory_meter.h"
 #include "apex_log.h"
 #include "build_flavor.h"
 #include "game_addresses.h"
@@ -352,6 +353,7 @@ DWORD WINAPI Watch(LPVOID) {
             if (stressed && now64>=g_nextAutoTrim.load()) g_autoTrimWanted.store(true);
         }
         g_largest.store(largest, std::memory_order_relaxed);
+        MemoryMeter::Push(space.free, largest, Holding() ? kReserveBytes : 0); // the Overview's Game memory card
         if (largest < g_lowest.load(std::memory_order_relaxed)) g_lowest.store(largest, std::memory_order_relaxed);
         const DWORD now = GetTickCount();
         if (largest < kLowBytes) {

@@ -1,7 +1,7 @@
 #pragma once
 // Version of Apex Radiance for The Sims 3 (ApexRadiance.asi).
 #define APEX_VERSION_MAJOR 3
-#define APEX_VERSION_MINOR 0
+#define APEX_VERSION_MINOR 1
 #define APEX_VERSION_PATCH 0
 #define APEX_STRINGIZE_INNER(x) #x
 #define APEX_STRINGIZE(x) APEX_STRINGIZE_INNER(x)

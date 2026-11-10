@@ -134,6 +134,7 @@ enum class IconId : int {
     ChevronUp, // chevron-up
     FlaskConical, // flask-conical
     FolderOpen, // folder-open
+    Power, // power
     Count,
     None = Count, // "no icon" for widgets that take an optional one
 };
