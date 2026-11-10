@@ -43,7 +43,7 @@ double Sec(int64_t from, int64_t to) { return static_cast<double>(to - from) / s
 double SinceStart(int64_t at) { return Sec(ProcessStartQpc(), at); }
 
 // events (0 = none); noted by hooks, read by the pump
-std::atomic<int64_t> g_deviceAt{0}, g_featuresAt{0}, g_mapAt{0}, g_worldAt{0}, g_leftAt{0}, g_liveAt{0}, g_settledAt{0};
+std::atomic<int64_t> g_deviceAt{0}, g_featuresAt{0}, g_mapAt{0}, g_worldAt{0}, g_liveAt{0}, g_settledAt{0};
 std::atomic<const char*> g_liveSignal{""}, g_settledWhy{""};
 // room-light solves (always counted; the load window takes deltas)
 std::atomic<uint64_t> c_solveStarts{0}, c_solveEnds{0}, c_solveTicks{0};
@@ -130,7 +130,6 @@ void NoteDeviceCreated() {
 void NoteFeaturesStarted() { g_featuresAt.store(Qpc()); }
 void NoteObjectMapIndexed() { g_mapAt.store(Qpc(), std::memory_order_relaxed); }
 void NoteWorldChange() { g_worldAt.store(Qpc(), std::memory_order_relaxed); }
-void NoteWorldLeft() { g_leftAt.store(Qpc(), std::memory_order_relaxed); }
 void NoteFirstWorldDraw(const char* signal) {
     g_liveSignal.store(signal ? signal : "", std::memory_order_relaxed);
     g_liveAt.store(Qpc(), std::memory_order_release);
@@ -203,10 +202,6 @@ void Pump() {
             LOG_INFO(std::format("[LoadTiming] Load {}: first world draw at {:.2f} s after process start ({}); load screen {:.2f} s", g_loadNo, SinceStart(liveAt),
                                  g_liveSignal.load(std::memory_order_relaxed), Sec(g_startAt, liveAt)));
             LOG_INFO(std::format("[LoadTiming] Load {}: during the load screen: {}", g_loadNo, Counters(g_atStart, g_atDraw)));
-            // a reload: the world left after the previous load ended (no hook sees the click that starts the load)
-            if (const int64_t left = g_leftAt.load(std::memory_order_relaxed); left > g_lastEnd && left < g_startAt)
-                LOG_INFO(std::format("[LoadTiming] Load {}: reload phases: world left -> world active again {:.2f} s (includes main-menu time) -> first scene draw {:.2f} s",
-                                     g_loadNo, Sec(left, g_startAt), Sec(g_startAt, liveAt)));
         }
         break;
     case State::Live:

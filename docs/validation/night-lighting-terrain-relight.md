@@ -49,12 +49,6 @@ Rebuild triggers:
    rebuild or `Terrain sweep done`; grass around street and lot lamps lights up.
 2. Load a save at night. **Expected:** one `world load (night: also the dusk rebuild)` rebuild 1 to 2 s after the world is
    first drawn, no second dusk rebuild; `World live: world terrain drawn after X s` in developer mode.
-   Then return to the main menu and load a save. **Expected:** `World live` and `[LoadTiming] ... first world draw`
-   within about 1 s of the first visible world frame, never during the load screen; `[LoadTiming] Load N: reload
-   phases: world left -> world active again X s -> first scene draw Y s`.
-   Record a night save loaded from the main menu. **Pending (10/11):** the load rebuild and after-load refreshes now run
-   after the world is visible; check that the chunk-border cut shown before it (about 1.5 to 2 s) and the rebuild hitch
-   are acceptable. Repeat once with the shader cache cleared: `World live` must not wait for the 120 s fallback.
 3. Build mode, switch day/night repeatedly, including fast reversals. **Expected:** each settled endpoint rebuilds without
    the saved delay; the final state matches the final phase; no stale delayed target.
 4. Live mode at dusk and dawn. **Expected:** the endpoint rebuild after `atrasoSegundos`.
