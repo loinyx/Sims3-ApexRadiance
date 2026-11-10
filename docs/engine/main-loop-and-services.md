@@ -186,6 +186,24 @@ Cross-thread rules:
 - EA mutexes (0x004E16F0) are taken on all threads (864 call sites); render-thread blocking on them was measured small
   (< 0.1 ms per hitch on average, worst 3.3 ms).
 
+### Resolution change
+
+The game's own resolution change runs from a queued message, not on the caller's stack:
+
+1. `0x0077D1A0(w, h, hz, fullscreen)` (cdecl) builds a message and posts it with id `0x07983246` through the messenger
+   (`0x0044C470`, vtable `0x00FA1AF8`); `+0x1C` = `0x0044CEE0` inserts it into a priority list under the messenger's
+   lock. The queue is emptied on the main thread (the game's own post at `0x00610DFE` works this way; the emptying
+   itself was not traced).
+2. The handler `0x007F1B70` fills fields of -1 from the current values (`0x0060E6A0`), sets hz 0 when not fullscreen,
+   and calls `0x007F19E0`: UI `0x007F15C0`, the mode check `0x0058E510` (exact size at 1024x768 and above, else
+   nothing happens), `0x0058E390`, `0x0060E550` and `0x0060E520` (renderer size, hz and windowed flag, reset flag
+   `+0x8E` on a change), `0x0060FFE0`, and the input size at `[0x011D8AB0]+0x10/+0x14`.
+3. `0x006115C0` copies the renderer's size and mode into the stored present parameters and calls `0x00610AB0(1)`. After
+   that Reset the game clears `+0x8E` and posts `0x76CBB23D` (`0x00610DFE`), whose handler `0x007F1C03` resizes the
+   window and the UI.
+
+Apex's Display uses step 1 ([display](../features/display.md)).
+
 ### Measurements
 
 From the notes (static study + profiler, 2026-09-28): about **5 ms per frame unattributed** (render-thread time outside

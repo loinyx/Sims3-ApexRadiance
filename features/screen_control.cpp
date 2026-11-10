@@ -3,6 +3,7 @@
 #include "frame_limiter_math.h"
 #include "apex_config.h"
 #include "apex_log.h"
+#include "game_addresses.h"
 #include "imgui.h"
 #include "memory_patch.h"
 #include "overlay.h"
@@ -106,13 +107,10 @@ UINT BestRefresh(IDirect3D9* d3d, UINT adapter, UINT w, UINT h) {
 // Reset: the game hung for good (2026-11-10, AppHangB1 30 s after "Reset: ... exclusive fullscreen"). Borderless instead.
 int EffectiveMode(int mode) { return mode == static_cast<int>(WindowMode::Fullscreen) && Platform::RemixBridge() ? static_cast<int>(WindowMode::Borderless) : mode; }
 
-// The request Apex makes of the game's (lock held)
+// The request Apex makes of the game's (lock held). The game lays out UI, picking and input at its own resolution
+// (renderer+0x2C, Options.ini): the back buffer keeps the game's size; Apex changes that size through the game (AfterPresent)
 D3DPRESENT_PARAMETERS Wanted(const Settings& s) {
     D3DPRESENT_PARAMETERS pp = g_gameRequest;
-    if (s.width > 0) {
-        pp.BackBufferWidth = static_cast<UINT>(s.width);
-        pp.BackBufferHeight = static_cast<UINT>(s.height);
-    }
     const int mode = EffectiveMode(s.mode);
     switch (static_cast<WindowMode>(mode)) {
     case WindowMode::Windowed:
@@ -132,12 +130,90 @@ D3DPRESENT_PARAMETERS Wanted(const Settings& s) {
             if (pp.SwapEffect == D3DSWAPEFFECT_COPY) pp.BackBufferCount = 1;
         }
         break;
-    default: // the game's mode at another size: exclusive fullscreen needs a rate that size has
+    default: // the game's own exclusive fullscreen: the highest rate its size has
         if (!pp.Windowed && s.width > 0)
             if (const UINT hz = BestRefresh(g_d3d, g_adapter, pp.BackBufferWidth, pp.BackBufferHeight)) pp.FullScreen_RefreshRateInHz = hz;
         break;
     }
     return pp;
+}
+
+// ---- the game's own resolution (render thread) ----
+// TS3W 0x0077D1A0 (w, h, hz, fullscreen) queues message 0x07983246 on the game's messenger; its handler (0x007F1B70 ->
+// 0x007F19E0) checks the size against the game's mode list (0x0058E510: an exact match at 1024x768 and above), stores
+// it, saves Options.ini and resets the device through the game's own path (0x006115C0 -> 0x00610AB0)
+constexpr uintptr_t kRequestResolution = 0x0077D1A0, kRendererGetter = 0x0060E2C0, kResolutionHandler = 0x007F1B70;
+constexpr uintptr_t kRendererGlobal = 0x011CECC8, kUiGlobal = 0x011D8C48;
+int g_askedW = 0, g_askedH = 0, g_askedMode = -1, g_asks = 0;
+ULONGLONG g_askAt = 0;
+bool g_askWarned = false;
+
+bool ResolutionRequestAvailable() {
+    static const bool ok = [] {
+        static constexpr BYTE kRequest[] = {0x57, 0xE8, 0xCA, 0xF2, 0xCC, 0xFF};                                // push edi; call 0x0044C470
+        static constexpr BYTE kGetter[] = {0xA1, 0xC8, 0xEC, 0x1C, 0x01, 0xC3};                                 // mov eax,[0x011CECC8]; ret
+        static constexpr BYTE kHandler[] = {0x83, 0xEC, 0x30, 0x8B, 0x44, 0x24, 0x34, 0x3D, 0x46, 0x32, 0x98, 0x07}; // cmp eax,0x07983246
+        const bool v = GameAddr::IsFixed() && MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(kRequestResolution), kRequest, sizeof kRequest) &&
+                       MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(kRendererGetter), kGetter, sizeof kGetter) &&
+                       MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(kResolutionHandler), kHandler, sizeof kHandler);
+        if (!v) LOG_INFO("[Screen] Game resolution request not available on this game version");
+        return v;
+    }();
+    return ok;
+}
+
+// Asks the game to switch its own resolution to the Apex one, every 10 s while the game has not taken it (a message sent
+// before the game's UI listens is lost), at most kMaxAsks times, then one warning until the setting changes. The Apex
+// setting takes precedence: a later change in the game's own Options is asked back, as at every start
+constexpr int kMaxAsks = 6;
+void RequestGameResolution(const Settings& s) {
+    if (s.width <= 0 || g_resetPending.load() || !ResolutionRequestAvailable()) return;
+    const uint8_t* renderer = *reinterpret_cast<uint8_t* const*>(kRendererGlobal);
+    if (!renderer || !*reinterpret_cast<void* const*>(renderer + 0xC) || !*reinterpret_cast<void* const*>(kUiGlobal)) return;
+    const UINT gw = *reinterpret_cast<const UINT*>(renderer + 0x2C), gh = *reinterpret_cast<const UINT*>(renderer + 0x30);
+    const UINT w = static_cast<UINT>(s.width), h = static_cast<UINT>(s.height);
+    if (g_askedW != s.width || g_askedH != s.height || g_askedMode != s.mode) g_askedW = s.width, g_askedH = s.height, g_askedMode = s.mode, g_asks = 0, g_askWarned = false;
+    if (gw == w && gh == h) { // taken: a later change in the game's Options gets the full budget again
+        g_asks = 0, g_askWarned = false;
+        return;
+    }
+    if (renderer[0x8E]) return; // the game's own Reset for a size it took is still to come (0x0060E550)
+    if (g_askWarned) return;
+    const bool fs = !renderer[0x24]; // renderer+0x24: the game runs windowed
+    // below 1024x768 the game snaps up to another mode (0x0058E510) and would save that one; under the RTX Remix bridge
+    // an exclusive-fullscreen Reset hangs the game (EffectiveMode): the picture stays scaled to the window
+    const char* skip = w < 1024 || h < 768 ? "is below the game's 1024x768"
+                       : fs && Platform::RemixBridge() && EffectiveMode(s.mode) == static_cast<int>(WindowMode::Game) ? "would reset the RTX Remix bridge in exclusive fullscreen"
+                                                                                                                   : nullptr;
+    if (skip) {
+        LOG_INFO(std::format("[Screen] Game resolution {}x{} kept: {}x{} {}; the picture is scaled to the window", gw, gh, w, h, skip));
+        g_askWarned = true;
+        return;
+    }
+    const ULONGLONG now = GetTickCount64();
+    if (g_asks && now - g_askAt < 10000) return;
+    if (g_asks >= kMaxAsks) {
+        LOG_WARNING(std::format("[Screen] The game did not take {}x{}: its resolution stays {}x{}, the picture is scaled to the window", w, h, gw, gh));
+        g_askWarned = true;
+        return;
+    }
+    IDirect3D9* d3d = nullptr;
+    UINT adapter = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_lock);
+        d3d = g_d3d, adapter = g_adapter;
+    }
+    // windowed: the game sets the rate to 0 itself; fullscreen: -1 would keep the current rate, which the new size may lack
+    const UINT hz = fs ? BestRefresh(d3d, adapter, w, h) : 0xFFFFFFFF;
+    if (fs && !hz) {
+        LOG_WARNING(std::format("[Screen] No {}x{} display mode: the game's resolution stays {}x{}", w, h, gw, gh));
+        g_askWarned = true;
+        return;
+    }
+    LOG_INFO(std::format("[Screen] Game resolution {}x{} -> {}x{} (the game's own resolution change; it saves Options.ini)", gw, gh, w, h));
+    reinterpret_cast<void(__cdecl*)(UINT, UINT, UINT, bool)>(kRequestResolution)(w, h, hz, fs);
+    g_asks++;
+    g_askAt = now;
 }
 
 bool Same(const D3DPRESENT_PARAMETERS& a, const D3DPRESENT_PARAMETERS& b) { return std::memcmp(&a, &b, sizeof a) == 0; }
@@ -377,7 +453,7 @@ void ListModes() {
     const UINT n = d3d->GetAdapterModeCount(adapter, D3DFMT_X8R8G8B8);
     for (UINT i = 0; i < n; i++) {
         D3DDISPLAYMODE m{};
-        if (FAILED(d3d->EnumAdapterModes(adapter, D3DFMT_X8R8G8B8, i, &m)) || m.Width < 800 || m.Height < 600) continue;
+        if (FAILED(d3d->EnumAdapterModes(adapter, D3DFMT_X8R8G8B8, i, &m)) || m.Width < 1024 || m.Height < 768) continue; // the game snaps a smaller size up (0x0058E510)
         const Resolution r{static_cast<int>(m.Width), static_cast<int>(m.Height)};
         if (std::none_of(g_resolutions.begin(), g_resolutions.end(), [&](const Resolution& o) { return o.w == r.w && o.h == r.h; }))
             g_resolutions.push_back(r);
@@ -510,6 +586,7 @@ void AfterPresent(IDirect3DDevice9*, HRESULT& hr) {
                                             static_cast<double>(g_margin.worst) * 1000.0 / static_cast<double>(g_freq.QuadPart)));
         s_nextLog = start + g_freq.QuadPart * 60;
     }
+    if (SUCCEEDED(hr)) RequestGameResolution(s);
     // A new window mode or resolution: the game's own device-lost path resets the device (TS3W 0x0061172C -> 0x00610AB0)
     if (SUCCEEDED(hr) && g_resetPending.exchange(false)) {
         LOG_INFO("[Screen] Display change: the game resets its device");
