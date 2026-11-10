@@ -73,8 +73,9 @@ Shipped in the package; players do not need to change them.
 ## Compatibility and interactions
 
 - **Apex Radiance:** every feature runs under the bridge. Apex's [Display](display.md) window mode and resolution apply
-  through its Reset hook; the bridge's client is the game's `d3d9.dll`. Apex's *Fullscreen* runs as *Borderless* under
-  the bridge: its exclusive-fullscreen Reset hung the game.
+  through its Reset hook; the bridge's client is the game's `d3d9.dll`. Under the bridge, Apex runs exclusive
+  fullscreen as *Borderless*, whether Apex's *Fullscreen* or the game's own request in *Game setting*: an
+  exclusive-fullscreen Reset hung the game, and so did the first device creation when the game asked for fullscreen.
 - **Sims3SettingsSetter:** its borderless window does not apply under the bridge (no Reset reaches the server). Use
   Apex's window mode instead. Its uncompressed lot and Sim textures were reported to stutter under the bridge
   (unverified on this machine).

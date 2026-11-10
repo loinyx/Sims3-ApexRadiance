@@ -88,6 +88,8 @@ std::atomic<bool> g_resetPending{false};
 std::atomic<bool> g_applyPending{false};
 std::atomic<bool> g_refused{false}; // the device refused Apex's last request; the game's own is in use
 std::atomic<bool> g_s3ssBorderless{false};
+std::atomic<bool> g_gameExclusive{false}; // the game's own request is exclusive fullscreen (read on the window thread)
+std::atomic<bool> g_dropSaved{false}; // the window style saved under the bridge's Borderless is stale (window thread clears it)
 std::once_flag g_s3ssBorderlessOnce;
 
 // Highest refresh rate of a display mode of this size, 0 when the adapter has none
@@ -105,7 +107,11 @@ UINT BestRefresh(IDirect3D9* d3d, UINT adapter, UINT w, UINT h) {
 // Under the RTX Remix bridge, exclusive fullscreen is not used: the bridge's 64-bit server would restyle the game's window
 // from its own process (messages to the game's window thread) while that thread waits for the server to answer the
 // Reset: the game hung for good (2026-11-10, AppHangB1 30 s after "Reset: ... exclusive fullscreen"). Borderless instead.
-int EffectiveMode(int mode) { return mode == static_cast<int>(WindowMode::Fullscreen) && Platform::RemixBridge() ? static_cast<int>(WindowMode::Borderless) : mode; }
+// The first CreateDevice hangs the same way when the game itself asks for fullscreen (no Options.ini: 1024x768 exclusive)
+int EffectiveMode(int mode) {
+    const bool exclusive = mode == static_cast<int>(WindowMode::Fullscreen) || (mode == static_cast<int>(WindowMode::Game) && g_gameExclusive.load());
+    return exclusive && Platform::RemixBridge() ? static_cast<int>(WindowMode::Borderless) : mode;
+}
 
 // The request Apex makes of the game's (lock held). The game lays out UI, picking and input at its own resolution
 // (renderer+0x2C, Options.ini): the back buffer keeps the game's size; Apex changes that size through the game (AfterPresent)
@@ -180,13 +186,9 @@ void RequestGameResolution(const Settings& s) {
     if (renderer[0x8E]) return; // the game's own Reset for a size it took is still to come (0x0060E550)
     if (g_askWarned) return;
     const bool fs = !renderer[0x24]; // renderer+0x24: the game runs windowed
-    // below 1024x768 the game snaps up to another mode (0x0058E510) and would save that one; under the RTX Remix bridge
-    // an exclusive-fullscreen Reset hangs the game (EffectiveMode): the picture stays scaled to the window
-    const char* skip = w < 1024 || h < 768 ? "is below the game's 1024x768"
-                       : fs && Platform::RemixBridge() && EffectiveMode(s.mode) == static_cast<int>(WindowMode::Game) ? "would reset the RTX Remix bridge in exclusive fullscreen"
-                                                                                                                   : nullptr;
-    if (skip) {
-        LOG_INFO(std::format("[Screen] Game resolution {}x{} kept: {}x{} {}; the picture is scaled to the window", gw, gh, w, h, skip));
+    // below 1024x768 the game snaps up to another mode (0x0058E510) and would save that one
+    if (w < 1024 || h < 768) {
+        LOG_INFO(std::format("[Screen] Game resolution {}x{} kept: {}x{} is below the game's 1024x768; the picture is scaled to the window", gw, gh, w, h));
         g_askWarned = true;
         return;
     }
@@ -511,6 +513,11 @@ bool AdjustPresentParams(IDirect3D9* d3d, UINT adapter, HWND window, D3DPRESENT_
     // unchanged since Apex wrote it = the game asked for nothing new
     if (!g_haveRequest || !Same(*pp, g_written)) g_gameRequest = *pp;
     g_haveRequest = true;
+    // Game setting under the bridge: the game's own switch to windowed ends the Borderless stand-in, and the style saved
+    // then is the old fullscreen popup; the game's new windowed frame stays
+    if (g_gameExclusive.exchange(!g_gameRequest.Windowed) && g_gameRequest.Windowed && g_settings.mode == static_cast<int>(WindowMode::Game) &&
+        Platform::RemixBridge())
+        g_dropSaved = true;
     const D3DPRESENT_PARAMETERS want = Wanted(g_settings);
     const bool changed = !Same(want, *pp);
     if (changed) {
@@ -599,6 +606,7 @@ void AfterPresent(IDirect3DDevice9*, HRESULT& hr) {
 
 bool OnWindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM, LRESULT* result) {
     if (msg == ApplyMessage() && msg) {
+        if (g_dropSaved.exchange(false)) g_styleSaved = false;
         const int mode = EffectiveMode(Current().mode);
         if (NeedsApply(hwnd, mode)) Apply(hwnd, mode);
         if (result) *result = 0;
@@ -715,7 +723,7 @@ void RenderUI() {
     }
     if (ApexUi::FilterActive()) return; // the notes are not drawn in the search results
     if (g_refused.load()) ApexUi::IconNote(IconId::TriangleAlert, "The graphics card refused this mode: the game's own is in use", VioletTheme::kWarning);
-    if (s.mode == static_cast<int>(WindowMode::Fullscreen) && Platform::RemixBridge())
+    if (s.mode != static_cast<int>(WindowMode::Borderless) && EffectiveMode(s.mode) == static_cast<int>(WindowMode::Borderless))
         ApexUi::IconNote(IconId::Info, "With the RTX Remix bridge, fullscreen runs as Borderless");
     // Sims3SettingsSetter: one note, only while it is loaded and Apex overrides it now (its "Tick at most once per frame",
     // which Apex leaves alone, is in the log only)

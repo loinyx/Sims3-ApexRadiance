@@ -42,8 +42,7 @@ window and frame limiter when that mod is installed.
    again every 10 s while the game still has its old size and no Reset of its own is pending (`renderer+0x8E`; a
    message sent before the game's UI listens is lost), six times at most, then logged. The Apex setting takes
    precedence: a resolution later picked in the game's own Options is asked back, as at every start. A size below
-   1024x768 (the game would snap it up to another mode) and, under the RTX Remix bridge, a request that would reset
-   the game's own exclusive fullscreen are not sent: the picture is scaled to the window (logged). *Game setting*
+   1024x768 (the game would snap it up to another mode) is not sent: the picture is scaled to the window (logged). *Game setting*
    never touches `Options.ini`.
 3. If the device refuses the rewritten request, the call is made again with the game's own parameters and the menu
    says so.
@@ -99,10 +98,12 @@ Apex rewrote, the window it applied and the Sims3SettingsSetter overrides.
   stay. With its *Tick at most once per frame* on, the simulation waits for its limiter, so Apex leaves it in place
   and says so in the log only. No Sims3SettingsSetter file is written. The menu names Sims3SettingsSetter in one note,
   only while Apex overrides it.
-- **RTX Remix bridge and exclusive fullscreen.** Under the bridge, *Fullscreen* runs as *Borderless*
-  (`EffectiveMode`), with a menu note: an exclusive-fullscreen Reset hung the game (the bridge logged a Reset unanswered
-  after 30 s; a deadlock between the server restyling the game's window and the window thread waiting for the Reset is
-  likely, unverified).
+- **RTX Remix bridge and exclusive fullscreen.** Under the bridge, *Fullscreen*, and *Game setting* while the game
+  itself asks for exclusive fullscreen, run as *Borderless* (`EffectiveMode`), with a menu note: an exclusive-fullscreen
+  Reset hung the game (the bridge logged a Reset unanswered after 30 s), and so did the first device creation when the
+  game asked for fullscreen with no `Options.ini` (EA 1.69: the server finished creating the device only after the
+  game had exited). The likely cause is a deadlock between the server restyling the game's window and the window
+  thread waiting for its answer.
 - **DXVK and the RTX Remix bridge.** The same hooks apply: the bridge's client is the game's `d3d9.dll`. The bridge's
   `dxvk.conf` needs `d3d9.countLosableResources = False` for a Reset to succeed (exclusive fullscreen switches froze
   the game before it). DXVK's `d3d9.maxFrameRate` and `d3d9.presentInterval`, driver limiters and RTSS cannot be seen

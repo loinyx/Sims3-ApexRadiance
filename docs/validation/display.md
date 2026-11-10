@@ -42,6 +42,13 @@ Steam 1.67.2, 3840x2160 at 240 Hz, RTX Remix bridge installed, Sims3SettingsSett
   corners, `Options.ini` now `3840 2160`; after a restart no request line. The same in Window, Fullscreen and *Game
   setting* (game in fullscreen), under the RTX Remix bridge with Fullscreen (runs as Borderless), and with
   Sims3SettingsSetter's borderless window on.
+- RTX Remix bridge with *Game setting* and the game in exclusive fullscreen (no `Options.ini`, EA `TS3.exe` and Steam
+  `TS3W.exe`): the game reaches the main menu, the log has `[Screen] CreateDevice: ... -> ...` (windowed) and the
+  Borderless window; the menu shows the Borderless note. Switching the game's own Options to fullscreen and changing
+  the Apex resolution under the bridge reset to Borderless without a hang. Both executables without the bridge: device
+  requests unchanged.
+- RTX Remix bridge with *Game setting*: switching the game's own Options from fullscreen to windowed keeps the game's
+  title-bar window (no frameless window at the old 1024x768 place); the log has no `[Screen] Window: game` line.
 - Sizes already matching: the log has no request line and the device requests are unchanged from 3.1.0.
 - A resolution chosen live in the main menu, Live mode, CAS and during a loading screen.
 - A size the game does not list: one warning, the picture stays full (scaled).
