@@ -117,6 +117,7 @@ patches in order and builds x86 and x64 with meson; `package.ps1` makes the zip.
 | 0009 | `freeIdleManagedCopiesMs` (off): a finer threshold for patch 0003 |
 | 0010 | Render target 0 is back buffer 0: the client made render target 0 a separate place-holder, so `GetRenderTarget(0)` and `GetBackBuffer(0, 0)` returned two objects (Apex's scene detection, which compares them, saw no scene and the window stayed black). Apex 3.0.0 also handles the old client (`framework/d3d9_bootstrap.cpp`) |
 | 0011 | Render target 0 resets the viewport: `SetRenderTarget(0)` reset the viewport and scissor rect on the server but not in the client's copy, so `GetViewport` / `GetScissorRect` returned the previous target's. Light-map smoothing saves and restores them in the middle of a frame and put the stale viewport back: the sea lost its reflection for one frame now and then. Unverified in game that it is the whole cause |
+| 0012 | `SetFVF` and `SetVertexDeclaration` replace each other in the client's copy: `SetFVF` kept the previous declaration, so `GetVertexDeclaration` returned it while an FVF was in use. The High-precision scene's resolve saves the vertex input and restores "declaration if any, else FVF": on loading screens it put a game shader's declaration (`POSITION` float2) back, and the game drew its fixed-function UI (FVF `0x142`) with it, a black top-right quarter (248 of 249 no-scene frames STALE in the trace). Now `SetFVF` clears the declaration and `SetVertexDeclaration` sets the FVF to 0, under the device lock. d3d9 returns a declaration made for the FVF after `SetFVF`; the client returns none, and restoring the FVF gives the same result. The FVF also moved into the client's state, so a state block captures and applies it with the declaration (before, `Apply` put the declaration back and left the FVF of the last call). Apex 3.1.1 also handles the old client (below) |
 
 ### Diagnostics
 
@@ -140,7 +141,18 @@ patches in order and builds x86 and x64 with meson; `package.ps1` makes the zip.
   `POSITION` declaration point to the stale declaration; STALE vp hits to the stale viewport; clean state with no draw,
   `Clear` or copy covering the quarter (and no untraced calls) to undefined `DISCARD` content. It changes no call.
   State blocks, `Reset` and `UpdateSurface` are not followed. Written for the black top-right quarter seen on loading
-  screens under the bridge; cause unverified.
+  screens under the bridge; it found the stale declaration (patch 0012).
+- **Vertex input restore** (`ExtraHooks::UseVertexInputSetLast`, `framework/d3d9_extra_hooks.cpp`): every Apex pass
+  that saves the vertex input (High-precision scene resolve, light-map smoothing, Picture's depth copy and colour pass,
+  ambient occlusion, depth blur, edge smoothing's depth, FXAA and SMAA passes) restores the FVF set last when `SetFVF`
+  was called after the last `SetVertexDeclaration`, instead of the declaration the client answers. The `SetFVF` /
+  `SetVertexDeclaration` detours note which came last at every call (two relaxed atomic stores); they are installed at
+  the first frame under the bridge (`framework/d3d9_bootstrap.cpp`) and otherwise only with the trace. Under d3d9 and
+  DXVK the restore is the same (the FVF set last). A state block's `Apply` sets the input without the detours seeing
+  it: Apex's own state blocks (RT lamps, ground shade, the menu's ImGui backend) take a mark of what the detours know
+  before their work and give it back after `Apply` (`ExtraHooks::MarkVertexInput` / `RestoreVertexInput`). A game state
+  block that applies a declaration after a `SetFVF` is still not seen, and the restore would put that FVF back (the
+  game is not known to use state blocks; unverified).
 
 ### Game addresses (Steam 1.67.2)
 

@@ -1,0 +1,71 @@
+0012: SetFVF and SetVertexDeclaration replace each other in the client's state, as in d3d9 and DXVK. Upstream kept the previous declaration after SetFVF and the previous FVF after SetVertexDeclaration, so GetVertexDeclaration returned an old declaration while an FVF was in use; a caller that saves the vertex input and restores it with 'declaration if any, else FVF' (Apex Radiance's high-precision scene resolve on the loading screen) put a game shader's declaration back, and the game drew its fixed-function UI with it (a black quadrant). After SetVertexDeclaration GetFVF now returns 0, as in d3d9. After SetFVF GetVertexDeclaration returns no declaration, where d3d9 returns one made for the FVF; restoring the FVF gives the same result. The FVF moves into the client's State so a state block captures and applies it with the declaration (upstream applied the declaration and left the FVF as it was).
+
+Applies after 0001-0011 on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only).
+
+diff --git a/bridge/src/client/d3d9_device.cpp b/bridge/src/client/d3d9_device.cpp
+index 680aecb..33e6403 100644
+--- a/bridge/src/client/d3d9_device.cpp
++++ b/bridge/src/client/d3d9_device.cpp
+@@ -2587,6 +2587,7 @@ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::SetVertexDeclaration(IDirect3DVertexD
+     {
+       BRIDGE_DEVICE_LOCKGUARD();
+       m_state.vertexDecl = MakeD3DAutoPtr(pLssVtxDecl);
++      m_state.fvf = 0; // a declaration replaces the FVF, as in d3d9 (GetFVF returns 0)
+     }
+     {
+       BRIDGE_DEVICE_LOCKGUARD();
+@@ -2630,7 +2631,11 @@ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::SetFVF(DWORD FVF) {
+   {
+     {
+       BRIDGE_DEVICE_LOCKGUARD();
+-      m_FVF = FVF;
++      m_state.fvf = FVF;
++      // An FVF replaces the declaration. d3d9 then returns a declaration made for the FVF from GetVertexDeclaration;
++      // the client returns none, so a caller that saves and restores the input puts the FVF back, not the previous
++      // declaration (Apex Radiance's resolve did and the game drew its loading-screen UI with a game shader's layout)
++      m_state.vertexDecl.reset(nullptr);
+     }
+     {
+       BRIDGE_DEVICE_LOCKGUARD();
+@@ -2656,7 +2661,7 @@ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::GetFVF(DWORD* pFVF) {
+ 
+   {
+     BRIDGE_DEVICE_LOCKGUARD();
+-    *pFVF = m_FVF;
++    *pFVF = m_state.fvf;
+   }
+   return S_OK;
+ }
+diff --git a/bridge/src/client/d3d9_device_base.h b/bridge/src/client/d3d9_device_base.h
+index 9bb620a..4e5b138 100644
+--- a/bridge/src/client/d3d9_device_base.h
++++ b/bridge/src/client/d3d9_device_base.h
+@@ -191,7 +191,6 @@ protected:
+   BOOL m_bSoftwareVtxProcessing;
+   D3DCLIPSTATUS9 m_clipStatus;
+   float m_NPatchMode;
+-  DWORD m_FVF;
+   INT m_gpuThreadPriority;
+   UINT m_maxFrameLatency;
+ 
+@@ -275,6 +274,8 @@ protected:
+     RECT scissorRect;
+     // Vertex Decl
+     D3DAutoPtr vertexDecl;
++    // FVF (with the declaration: a state block carries both, as in d3d9)
++    DWORD fvf = 0;
+     // Vertex Shader
+     D3DAutoPtr vertexShader;
+     // Vertex Shader Constants
+diff --git a/bridge/src/client/d3d9_stateblock.cpp b/bridge/src/client/d3d9_stateblock.cpp
+index a790453..f64f026 100644
+--- a/bridge/src/client/d3d9_stateblock.cpp
++++ b/bridge/src/client/d3d9_stateblock.cpp
+@@ -77,6 +77,7 @@ void Direct3DStateBlock9_LSS::StateTransfer(const BaseDirect3DDevice9Ex_LSS::Sta
+   }
+   if (flags.vertexDecl) {
+     dst.vertexDecl = src.vertexDecl;
++    dst.fvf = src.fvf;
+   }
+   if (flags.indices) {
+     dst.indices = src.indices;

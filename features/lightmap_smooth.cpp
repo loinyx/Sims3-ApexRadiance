@@ -1346,6 +1346,7 @@ struct PassState {
         dev->GetVertexDeclaration(&decl);
         dev->GetFVF(&fvf);
         NoSceneTrace::Saved("lightmap_smooth.cpp Capture", decl, fvf);
+        ExtraHooks::UseVertexInputSetLast(decl, fvf);
         dev->GetStreamSource(0, &vb0, &vb0Offset, &vb0Stride);
         dev->GetStreamSourceFreq(0, &freq0);
         dev->GetStreamSourceFreq(1, &freq1);

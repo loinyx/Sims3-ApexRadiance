@@ -1,5 +1,6 @@
 #include "d3d9_bootstrap.h"
 #include "apex_log.h"
+#include "d3d9_extra_hooks.h"
 #include "d3d9_hooks.h"
 #include "hook_chain.h"
 #include "hook_guard.h"
@@ -121,6 +122,8 @@ void FrameInit(IDirect3DDevice9* dev) {
     const HWND w = DeviceWindow(dev);
     if (w) g_window.store(w);
     if (!D3D9Hooks::Install(dev)) LOG_ERROR("[D3D] Device hooks not installed: effects and Night Lighting cannot draw");
+    // the bridge's GetVertexDeclaration can answer a declaration older than the last SetFVF (ExtraHooks::UseVertexInputSetLast)
+    if (Platform::RemixBridge()) ExtraHooks::EnsureTraceHooks(dev);
     D3D9Hooks::RegisterPresent("ApexCore", [](D3D9Hooks::DeviceContext& ctx, const RECT*, const RECT*, HWND, const RGNDATA*) {
         OnPresent(ctx.device);
         return D3D9Hooks::HookAction::Continue;

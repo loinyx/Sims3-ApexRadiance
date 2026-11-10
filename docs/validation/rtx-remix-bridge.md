@@ -133,6 +133,10 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
    folder holds `bridge32.log` and `bridge64.log` (and the DXVK log when present), listed in `About this capture.txt`;
    `Recording.txt` ends with a `No-scene frame trace` section with `[no-scene]` frames and a line per Apex pass that
    saved the vertex input.
+6. With the 3.1.1 bridge (patch 0012), record from the main menu through a save's loading screen. **Expected:** no
+   black quarter on the loading screen; in `Recording.txt`, `scene_target.cpp Resolve: N save(s), 0 STALE` (every
+   other pass 0 STALE too). With an older bridge and Apex 3.1.1 STALE can still be counted (it is the client's answer),
+   but the quarter stays drawn: the pass restores the FVF set last.
 
 ## Confirmed in game
 
@@ -150,6 +154,7 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
 - The EA app build under the bridge on this machine.
 - Sims3SettingsSetter's uncompressed lot and Sim textures under the bridge (reported to stutter).
 - Which losable resource stays alive at a Reset.
-- The black top-right quarter on loading screens (3840 x 2160, Borderless, S3SS loaded): the no-scene frame trace and the
-  copied bridge logs (3.1.1) are built to tell a stale viewport, a stale vertex declaration and undefined `DISCARD`
-  content apart; not yet run in game.
+- The black top-right quarter on loading screens (3840 x 2160, Borderless, S3SS loaded): the no-scene frame trace
+  (session 2026-11-10 14-39-28) found the High-precision scene's resolve restoring a stale declaration, 248 STALE of
+  249 no-scene frames. Bridge patch 0012 and Apex's vertex input restore are built; not yet run in game (test plan
+  step 6).

@@ -776,6 +776,7 @@ struct SavedState {
         ok &= SUCCEEDED(dev->GetVertexDeclaration(&decl));
         ok &= SUCCEEDED(dev->GetFVF(&fvf));
         NoSceneTrace::Saved("ambient_occlusion_patch.cpp Capture", decl, fvf);
+        ExtraHooks::UseVertexInputSetLast(decl, fvf);
         ok &= SUCCEEDED(dev->GetStreamSource(0, &stream0, &stream0Offset, &stream0Stride));
         for (DWORD s = 0; s < kSamplers; s++) {
             ok &= SUCCEEDED(dev->GetTexture(s, &tex[s]));

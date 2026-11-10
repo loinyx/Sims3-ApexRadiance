@@ -49,7 +49,23 @@ void SetTargetSubstitution(SurfaceAccess access, TargetReport report);
 HRESULT RawGetRenderTarget(IDirect3DDevice9* device, DWORD index, IDirect3DSurface9** surface);
 
 // The diagnostic trace's own detours (SetScissorRect, SetVertexDeclaration, SetFVF; D3D9Hooks::Trace), installed with
-// EnsureInstalled's on the first call and kept; until a trace is set they only cost an atomic load.
+// EnsureInstalled's on the first call and kept; until a trace is set they only cost an atomic load. The SetFVF and
+// SetVertexDeclaration detours always note which of the two was called last (installed at the first frame under the RTX
+// Remix bridge, d3d9_bootstrap.cpp).
 bool EnsureTraceHooks(IDirect3DDevice9* device);
+
+// For a pass that saved the vertex input with GetVertexDeclaration / GetFVF and restores it with "declaration if any,
+// else FVF": when SetFVF was the call seen last, drops the declaration (released) and takes that FVF. RTX Remix bridges
+// before patch 0012 keep the old declaration after SetFVF, and restoring it drew the game's fixed-function UI with a
+// game shader's layout (a black quadrant on the loading screen). Unchanged while the detours are not installed. Under
+// d3d9 and DXVK the result is the same: restoring the FVF set last. Call it right after the reads.
+void UseVertexInputSetLast(IDirect3DVertexDeclaration9*& decl, DWORD& fvf);
+
+// What UseVertexInputSetLast knows, for a state block around Apex's own work: Apply puts the vertex input back inside
+// the runtime, unseen by the detours, so take a mark before the work and give it back after Apply (or the pass's own
+// SetFVF would be restored over the game's declaration by the next pass).
+struct VertexInputMark { bool fvfLast = false; DWORD fvf = 0; };
+VertexInputMark MarkVertexInput();
+void RestoreVertexInput(VertexInputMark mark);
 
 } // namespace ExtraHooks

@@ -905,6 +905,7 @@ void CopyDepth(IDirect3DDevice9* dev) {
     dev->GetVertexDeclaration(&decl);
     dev->GetFVF(&fvf);
     NoSceneTrace::Saved("picture.cpp CopyDepth", decl, fvf);
+    ExtraHooks::UseVertexInputSetLast(decl, fvf);
     dev->GetTexture(0, &tex0);
     dev->GetStreamSource(0, &stream, &streamOffset, &streamStride);
     RECT oldScissor{};
@@ -1767,6 +1768,7 @@ void Picture::OnEndScene(IDirect3DDevice9* dev) {
     dev->GetVertexDeclaration(&oldDecl);
     dev->GetFVF(&oldFvf);
     NoSceneTrace::Saved("picture.cpp colour pass", oldDecl, oldFvf);
+    ExtraHooks::UseVertexInputSetLast(oldDecl, oldFvf);
     dev->GetStreamSource(0, &oldStream, &oldOffset, &oldStride);
     dev->GetPixelShaderConstantF(0, oldConst, kConsts);
     dev->GetViewport(&oldVp);

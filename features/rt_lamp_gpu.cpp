@@ -357,6 +357,7 @@ bool Engine::MakePreblur(IDirect3DDevice9* dev, int w, int h, const uint32_t* px
 bool Engine::Begin(IDirect3DDevice9* dev) {
     if (!saved_ && (FAILED(dev->CreateStateBlock(D3DSBT_ALL, &saved_)) || !saved_)) return saved_ = nullptr, false; // (nothing to restore: nothing is touched)
     saved_->Capture();
+    savedInput_ = ExtraHooks::MarkVertexInput();
     for (DWORD i = 0; i < 4; i++)
         if (FAILED(dev->GetRenderTarget(i, &savedRt_[i]))) savedRt_[i] = nullptr;
     if (!c_.GetDepthStencil || FAILED(c_.GetDepthStencil(dev, &savedDs_))) savedDs_ = nullptr;
@@ -369,7 +370,7 @@ void Engine::End(IDirect3DDevice9* dev) {
     c_.SetRenderTarget(dev, 0, savedRt_[0]);
     for (DWORD i = 1; i < 4; i++) c_.SetRenderTarget(dev, i, savedRt_[i]);
     c_.SetDepthStencil(dev, savedDs_);
-    if (saved_) saved_->Apply(); // (after the targets: setting target 0 resets the viewport)
+    if (saved_) saved_->Apply(), ExtraHooks::RestoreVertexInput(savedInput_); // (after the targets: setting target 0 resets the viewport)
     if (c_.StateRestored) c_.StateRestored();
     for (auto*& s : savedRt_) Rel(s);
     Rel(savedDs_);

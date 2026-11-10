@@ -319,8 +319,8 @@ std::string End() {
          "v0 = the first vertex of a DrawPrimitiveUP / DrawIndexedPrimitiveUP (x, y, z, rhw for XYZRHW), then the x / y / 4th-float range of all its "
          "vertices; StretchRect / ColorFill into bb are listed with their rectangle.\n";
     if (!g_hooks) s += "WARNING: the FVF, declaration and scissor detours were not installed: those values are not followed.\n";
-    s += "Apex passes that read the vertex input back to restore it (STALE = the declaration read back was set before the last SetFVF, so the "
-         "restore puts an old declaration back; STALE vp = the device answered a viewport other than the one set last, as after "
+    s += "Apex passes that read the vertex input back to restore it (STALE = the declaration read back was set before the last SetFVF: a bridge "
+         "client before patch 0012; the pass restores the FVF set last instead; STALE vp = the device answered a viewport other than the one set last, as after "
          "SetRenderTarget(0) on a stale client):\n";
     if (g_sites.empty()) s += "    none ran\n";
     for (const auto& [site, c] : g_sites) s += std::format("    {}: {} save(s), {} STALE, {} STALE vp\n", site, c.saves, c.stale, c.staleVp);

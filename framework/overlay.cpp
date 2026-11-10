@@ -13,6 +13,7 @@
 #include "frame_pacing.h"
 #include "world_session.h"
 #include "apex_memory.h"
+#include "d3d9_extra_hooks.h"
 #include <atomic>
 #include <cmath>
 #include <format>
@@ -331,7 +332,9 @@ void DrawFrame(IDirect3DDevice9* device) {
     ImGui::EndFrame();
     ImGui::Render();
     const auto built = FrameClock::Clock::now();
+    const auto input = ExtraHooks::MarkVertexInput(); // (the backend's SetFVF is undone by its state block, unseen)
     ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
+    ExtraHooks::RestoreVertexInput(input);
     const auto submitted = FrameClock::Clock::now();
     const auto ms = [](auto from, auto to) { return std::chrono::duration<double, std::milli>(to - from).count(); };
     static auto lastSlowLog = FrameClock::Clock::time_point{};

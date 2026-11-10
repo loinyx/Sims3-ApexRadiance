@@ -19,6 +19,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include "d3d9_extra_hooks.h"
 #include "rt_lamp_blockers.h"
 #include "rt_lamp_model.h"
 #include "rt_lamp_proxy.h"
@@ -424,6 +425,7 @@ class Engine {
     bool ComposeImpl(IDirect3DDevice9* dev, const Map& m, IDirect3DBaseTexture9* game, IDirect3DTexture9* out, const Params& p, ShaderId ps, std::string& err,
                      IDirect3DTexture9* scale = nullptr);
     IDirect3DStateBlock9* saved_ = nullptr;
+    ExtraHooks::VertexInputMark savedInput_; // (saved_ restores the vertex input unseen by the detours)
     IDirect3DSurface9* savedRt_[4] = {};
     IDirect3DSurface9* savedDs_ = nullptr;
     Stats stats_;

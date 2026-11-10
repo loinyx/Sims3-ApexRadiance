@@ -104,6 +104,7 @@ void Resolve(IDirect3DDevice9* dev, Cause cause) {
     dev->GetVertexDeclaration(&decl);
     dev->GetFVF(&fvf);
     NoSceneTrace::Saved("scene_target.cpp Resolve", decl, fvf);
+    ExtraHooks::UseVertexInputSetLast(decl, fvf);
     dev->GetStreamSource(0, &stream0, &offset0, &stride0);
     // (a resolve at a copy or at the scene's end can come while the game's instancing is set: DrawPrimitiveUP needs both
     // streams at frequency 1)
