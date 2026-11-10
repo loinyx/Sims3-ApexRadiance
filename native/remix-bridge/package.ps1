@@ -26,8 +26,7 @@ if ((Get-FileHash $dxvkDll -Algorithm SHA256).Hash -ne $dxvkDllSha) { throw "DXV
 $pkg = Join-Path $out 'package'
 if (Test-Path $pkg) { Remove-Item -Recurse -Force $pkg }
 $trex = Join-Path $pkg '.trex'
-$lic = Join-Path $pkg 'licenses'
-New-Item -ItemType Directory -Force $trex, $lic | Out-Null
+New-Item -ItemType Directory -Force $trex | Out-Null
 Copy-Item (Join-Path $out 'd3d9.dll') $pkg
 Copy-Item (Join-Path $out '.trex\NvRemixBridge.exe') $trex
 Copy-Item $dxvkDll (Join-Path $trex 'd3d9vk_x64.dll')
@@ -35,11 +34,15 @@ Copy-Item $dxvkDll (Join-Path $trex 'd3d9vk_x64.dll')
 Copy-Item (Join-Path $here 'conf\bridge.conf') $pkg
 Copy-Item (Join-Path $here 'conf\bridge.conf') $trex
 Copy-Item (Join-Path $here 'conf\dxvk.conf') $pkg
-Copy-Item (Join-Path $here 'PLAYER-README.txt') (Join-Path $pkg 'Apex Radiance RTX Remix bridge.txt')
-Copy-Item (Join-Path $src 'bridge\LICENSE-MIT') (Join-Path $lic 'RTX-Remix-bridge-LICENSE.txt')
-Copy-Item (Join-Path $src 'bridge\ThirdPartyLicenses.txt') (Join-Path $lic 'RTX-Remix-bridge-ThirdPartyLicenses.txt')
-Copy-Item (Join-Path $src 'submodules\Detours\LICENSE.md') (Join-Path $lic 'Detours-LICENSE.txt')
-Copy-Item (Join-Path $here 'licenses\DXVK-LICENSE.txt') $lic
+# one text file: the install steps, then the licence texts the MIT and zlib terms ask to ship with the binaries
+$text = @(Get-Content -Raw (Join-Path $here 'PLAYER-README.txt'))
+foreach ($l in @(@('RTX Remix bridge', (Join-Path $src 'bridge\LICENSE-MIT')),
+                 @('RTX Remix bridge third-party notices', (Join-Path $src 'bridge\ThirdPartyLicenses.txt')),
+                 @('Microsoft Detours', (Join-Path $src 'submodules\Detours\LICENSE.md')),
+                 @('DXVK', (Join-Path $here 'licenses\DXVK-LICENSE.txt')))) {
+    $text += "`r`n`r`n==== Licence: $($l[0]) ====`r`n`r`n" + (Get-Content -Raw $l[1])
+}
+Set-Content -NoNewline -Encoding utf8 (Join-Path $pkg 'Apex Radiance RTX Remix bridge.txt') ($text -join '')
 
 $zip = Join-Path $out 'Apex-Radiance-RTX-Remix-bridge.zip'
 if (Test-Path $zip) { Remove-Item $zip }
