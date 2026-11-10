@@ -228,6 +228,14 @@ topology mutation inside a point is not reproduced. This release does not promis
 
 ## Open checks
 
+- The settle after loading skips rooms already gathered after the first round (3.1.1, not yet tested in game): enter
+  the atrium lot with the camera held still. **Expected:** the `due 20` line may remain, but the `rooms near openings sent to
+  gather again` line counts the skipped rooms (*gathered after the first round*); no `S`/`E` follows for rooms that are
+  already refined, and there is no `H` or FlushDeferred `Q` for a room in mid-solve. The skip count must be above 0 on the
+  atrium lot; refinements do not gather again, so with the AfterChangedWalk bursts gone it may read 0, and then the
+  criterion needs another test (the room's last solve against the time its sources became final). The final frame and
+  wall seams match a capture taken before the change within 1/255.
+
 - One reflection for an atrium (`ProbeBindHook`): an atrium at night, lit by lamps of both stories, seen from the upper
   story. Take F7 captures just below and just above the floor line on the double-height wall. **Expected:** InteriorWall
   `c5` / `c6` are equal on both draws (1, the upper member's probe), and the reflection part of the step at the floor

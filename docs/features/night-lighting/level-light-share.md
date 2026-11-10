@@ -1188,6 +1188,11 @@ along the wall, sqrt(1 - (d.T)^2) / |d.N| up it), at most 1 m. The share of the 
 - **Settle after loading.** A lot that finds its openings sends those rooms once more when its first round is over: none
   of its watched rooms gathers, waits or solves (states 1-3), none is held and no lamp burst waits, for 400 ms, not before
   500 ms after arming and at the latest after 6 s (`kSettleMin`, `kSettleQuiet`, `kSettleMax`).
+  On a load, the settle skips a room whose gather began after every watched room showed its first solve (`+0x100` no longer
+  4): that gather already saw the first round's boosts, stacked ambient and other-story lamps (`LotState::roundSerial`,
+  `QueueOpeningRooms(..., coveredAfter)`, only for a settle that fires alone; any other due while armed takes the serial
+  again). Lamps that register later are left to `AuditTakers`. In the 11-40-32 recording, the settle solved two refined rooms again with identical maps and held a third
+  in mid-solve, using 3.5 s of the settle budget.
 - **Floor edits.** Floor set or remove calls mark the floor object; after 250 ms without another edit
   (`RoomAmbientPolicy::FloorEditReady`) the room list is marked stale, Rooms at Night is told, and the lot's rooms near
   openings gather again.
