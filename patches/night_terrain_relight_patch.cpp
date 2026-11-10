@@ -3586,13 +3586,13 @@ class NightTerrainRelightPatch : public ApexPatch {
             ApexUi::CardDivider();
             Edit([] {
                 ApexUi::CardGroup("Background light");
-                bool changed = ApexUi::SwitchRow("Adjust the background light", &g_unlitOn, "Set the ambient glow indoors, with lamps on or off", true);
-                if (g_unlitOn) {
-                    changed |= ApexUi::SliderPercent("Brightness##Unlit", &g_unlitLight, 0.1f, 0.8f, "How bright that background light is, on walls and furniture", 0.20f);
-                    changed |= ApexUi::SliderPercent("Blue tint##Unlit", &g_unlitBlue, 0.0f, 1.0f, "0% is neutral grey, 100% is the game's blue, on walls and furniture", 0.0f);
-                }
-                return changed;
+                return ApexUi::SwitchRow("Adjust the background light", &g_unlitOn, "Set the ambient glow indoors, with lamps on or off", true);
             });
+            // the sliders: UnlitRooms retints the rooms in place and solves only those it cannot move, once the slider rests; the
+            // whole-world relight they started before (77 rooms of 46 lots a move, 2026-11-10) restarted those solves
+            if (g_unlitOn && (ApexUi::SliderPercent("Brightness##Unlit", &g_unlitLight, 0.1f, 0.8f, "How bright that background light is, on walls and furniture", 0.20f) |
+                              ApexUi::SliderPercent("Blue tint##Unlit", &g_unlitBlue, 0.0f, 1.0f, "0% is neutral grey, 100% is the game's blue, on walls and furniture", 0.0f)))
+                NotifySettingChanged();
             // S3SS's saved room colour: Rooms at Night already uses the game's blue in its place; removing it is on the Attention page
             if (g_unlitOn && S3SSDetect::SavedRoomAmbientOverride())
                 ApexUi::IconNote(ApexUi::IconId::Puzzle, "Sims3SettingsSetter saves its own room color; this replaces it (Attention page)");
