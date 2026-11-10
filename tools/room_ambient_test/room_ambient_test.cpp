@@ -36,6 +36,15 @@ int main() {
         check(SolverOwnsAmbient(state) == (state >= 1 && state <= 3), "solver ownership");
     for (int state = 0; state <= 5; ++state)
         check(AmbientStepRunning(state) == (state == 3), "a marked or gathered room's ambient retaken");
+    {
+        const float zero[4] = {}, seen[4] = {0.049f, 0.049f, 0.049f, 0}, unlit[4] = {0.15f, 0.15f, 0.3f, 0};
+        check(UnlitSeedDue(1, false, zero, zero, unlit) && UnlitSeedDue(2, false, zero, zero, unlit), "seed: a marked or gathered never-lit room");
+        check(UnlitSeedDue(4, false, zero, zero, unlit) && UnlitSeedDue(5, false, zero, zero, unlit), "seed: a solved room left at 0");
+        for (int state : {0, 3}) check(!UnlitSeedDue(state, false, zero, zero, unlit), "seed: not idle or while the ambient step runs");
+        check(!UnlitSeedDue(2, true, zero, zero, unlit), "seed: not a room with lamps");
+        check(!UnlitSeedDue(2, false, seen, zero, unlit) && !UnlitSeedDue(2, false, zero, seen, unlit), "seed: not a room with an ambient");
+        check(!UnlitSeedDue(2, false, zero, zero, zero), "seed: not a zero target");
+    }
     check(RebuildRoomList(false, false, false, true, false), "same lot new story manager invalidates cache");
     check(RebuildRoomList(false, false, true, false, false), "lot switch invalidates cache");
     check(!RebuildRoomList(false, false, false, false, false), "stable rooms keep cache");

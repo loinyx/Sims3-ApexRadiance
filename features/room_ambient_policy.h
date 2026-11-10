@@ -84,6 +84,13 @@ inline bool SolverOwnsAmbient(int state) { return state >= 1 && state <= 3; }
 // The solve's ambient step runs in state 3 only; a room marked (1) or gathered (2) keeps its last ambient until then, so a
 // lamp edit's retake may still write it (a dragged lamp's rooms wait in 1-2 for the whole drag: their fill froze, 03/11)
 inline bool AmbientStepRunning(int state) { return state == 3; }
+// A roofed room with no lamps whose ambient was never written (both colours exactly 0: new, or solved while roofless,
+// which skips the ambient step) draws its walls black: marked (1) or gathered (2) until its solve, solved (4, 5) until the
+// next one. It takes what that step writes for an empty list (the unlit colour). Not 3: the step itself runs then.
+inline bool UnlitSeedDue(int state, bool lamps, const float* amb, const float* amb2, const float* target) {
+    const auto zero = [](const float* v) { return v[0] == 0.0f && v[1] == 0.0f && v[2] == 0.0f; };
+    return (state == 1 || state == 2 || state == 4 || state == 5) && !lamps && zero(amb) && zero(amb2) && !zero(target);
+}
 inline bool AmbientUpdateDue(std::uint32_t now, std::uint32_t last) {
     return !last || static_cast<std::uint32_t>(now - last) >= 3000;
 }

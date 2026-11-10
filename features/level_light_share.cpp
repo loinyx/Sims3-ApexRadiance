@@ -8444,6 +8444,7 @@ void BeforeRoomUpdate(BYTE* tl) {
         FlushDeferred(tracker);
         FlushDepWaits(tracker);
         bool due = false;
+        unsigned why = 0; // (recording) what made the rooms near openings due
         const long gen = g_indoorGen.load(std::memory_order_relaxed);
         if (g_lots.size() > 4096) g_lots.clear();
         LotState& lot = g_lots[tracker];
@@ -8455,18 +8456,18 @@ void BeforeRoomUpdate(BYTE* tl) {
             lot = LotState{};
             lot.gen = keepGen;
             std::memcpy(lot.mgrs, mgrs, sizeof mgrs);
-            due = true;
+            due = true, why |= 1;
             g_lotRebuilds.fetch_add(1, std::memory_order_relaxed);
         }
         if (lot.gen != gen) {
             lot.gen = gen;
-            due = true;
+            due = true, why |= 2;
         }
         // (steady_indoor_light) a lamp edit's resend of the rooms near openings (a Sim's switch on a lot the camera is not on
         // needs it too), no longer through g_indoorGen, which PhysicsKey reads (each edit made every story's room 0 lose its
         // kept parts: "the lighting options changed", a full solve of each). lamp_edit_lot_only: the edited lamp's lot only
         if (const long editGen = g_editGen.load(std::memory_order_relaxed); lot.editGen != editGen) {
-            if (!DevSwitches::LampEditLotOnly() || EditedLot(tracker, lot.editGen)) due = true;
+            if (!DevSwitches::LampEditLotOnly() || EditedLot(tracker, lot.editGen)) due = true, why |= 4;
             lot.editGen = editGen;
         }
         const DWORD now = GetTickCount();
@@ -8476,7 +8477,7 @@ void BeforeRoomUpdate(BYTE* tl) {
             lot.nextCheck = now + 2000;
             const int known = FloorObjectsKnown(tracker);
             const int openings = known ? OpeningCount(tracker) : 0;
-            if (known > lot.floorsKnown || (openings != lot.openings && lot.openings >= 0)) due = true;
+            if (known > lot.floorsKnown || (openings != lot.openings && lot.openings >= 0)) due = true, why |= 8;
             lot.floorsKnown = known;
             lot.openings = openings;
         }
@@ -8487,7 +8488,7 @@ void BeforeRoomUpdate(BYTE* tl) {
                 auto it = m ? std::find(g_dirtyMgrs.begin(), g_dirtyMgrs.end(), m) : g_dirtyMgrs.end();
                 if (it != g_dirtyMgrs.end()) {
                     g_dirtyMgrs.erase(it);
-                    due = true;
+                    due = true, why |= 16;
                 }
             }
             if (g_dirtyMgrs.empty()) g_dirtyReady = false;
@@ -8511,7 +8512,7 @@ void BeforeRoomUpdate(BYTE* tl) {
             }
             if (fire) {
                 lot.settleAt = 0;
-                due = true;
+                due = true, why |= 32;
                 g_settles.fetch_add(1, std::memory_order_relaxed);
                 if (now - lot.armedAt < kSettleMax - 50) g_settlesEarly.fetch_add(1, std::memory_order_relaxed);
             }
@@ -8541,6 +8542,8 @@ void BeforeRoomUpdate(BYTE* tl) {
             for (const DepKey& k : go)
                 if (QueueRoom(tracker, k.level, k.room, true)) g_indoorQueued.fetch_add(1, std::memory_order_relaxed);
         }
+        if (why && Recorder::Active())
+            LOG_INFO(std::format("[LevelLightShare] Lot {:08X}: rooms near openings sent again (due {:02X})", tracker, why));
         if (due) QueueOpeningRooms(tracker, &lot.watch);
         else if (!lot.auditAt || static_cast<int32_t>(now - lot.auditAt) >= 0) { // (the rooms near openings just sent record again anyway)
             lot.auditAt = (now + kAuditEveryMs) | 1;

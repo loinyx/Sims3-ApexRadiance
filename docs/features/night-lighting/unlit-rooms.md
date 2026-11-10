@@ -168,6 +168,11 @@ N, moved at once N)*.
   lit rooms) are sent to the game's queue (deferred while being solved), then the rigs once more 1.5 s later.
 - A lit room's base survives a rejected queue request and is retired only when the queue accepts the restoring solve
   for the same manager and id; a fresh `NoteBase` result cancels the retirement.
+- A roofed room with no lamps that is marked or gathered for its solve (states 1 and 2) or solved (4 and 5) with both ambient colours exactly
+  0 (a new room, or one solved while roofless, which skips the ambient step) gets its family's target colour at once
+  (`RoomAmbientPolicy::UnlitSeedDue`); until then its walls draw black. The target is what the ambient step writes for an
+  empty list (Apex's colour while on, the game's while off), so the solve that follows lands on the same value. State 3
+  is left to the step itself. Unverified in game.
 - Unset periodic deadlines (0) are always due; real deadlines use wrap-safe comparisons.
 - Once a second, a reconciliation retries unknown or unbased idle rooms (once per target and per address, manager and
   id), including rooms skipped while their solve was active and rooms streamed in. Failed queue requests drop their sent

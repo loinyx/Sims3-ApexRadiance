@@ -351,6 +351,16 @@ static void SliderAndLifecycleTests() {
     const int previousRigs = rigs; Frame(3200);
     Check(rigs == previousRigs, "settled periodic reconciliation does not refresh rigs without a change");
 
+    Reset(); const float none[4] = {};
+    Room fresh(16); fresh.Field<int>(0xF0) = 2; fresh.SetAmbient(none, none); rooms = {fresh.Ptr()};
+    Retint(false);
+    Check(Equal(fresh.Ambient(), g_target[1].v) && Equal(fresh.Ambient(1), g_target[1].v) && attempts == 0, "never-lit gathered room takes the unlit colour");
+    Room solving(17); solving.Field<int>(0xF0) = 3; solving.SetAmbient(none, none);
+    Room litNew(18, 1, true); litNew.Field<int>(0xF0) = 2; litNew.SetAmbient(none, none);
+    Room openNew(19); openNew.Field<int>(0xF0) = 1; openNew.SetAmbient(none, none); openNew.Field<BYTE>(0x18) = 1;
+    rooms = {solving.Ptr(), litNew.Ptr(), openNew.Ptr()}; Retint(false);
+    Check(Equal(solving.Ambient(), none) && Equal(litNew.Ambient(), none) && Equal(openNew.Ambient(), none), "seed skips solving, lit and roofless rooms");
+
     Reset(); Room exterior(0), roofless(15); roofless.Field<BYTE>(0x18) = 1;
     rooms = {exterior.Ptr(), roofless.Ptr()}; Retint(true);
     Check(Equal(exterior.Ambient(), original[1]) && Equal(roofless.Ambient(), original[1]) && attempts == 0,

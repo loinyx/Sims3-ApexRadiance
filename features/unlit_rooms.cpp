@@ -85,7 +85,7 @@ std::vector<Vec4> g_known[2];
 Vec4 g_target[2];                  // what rooms should hold now (Apex's colours when on, the game's when off)
 bool g_retintDue = false, g_restDue = false;
 DWORD g_lastRetint = 0, g_lastRig = 0, g_rigAgainAt = 0;
-long g_retinted = 0, g_dimSent = 0;
+long g_retinted = 0, g_dimSent = 0, g_seeded = 0;
 DWORD g_changedAt = 0, g_nextBaseCheck = 0;
 DWORD g_nextReconcile = 0;
 bool g_retryRetint = false;
@@ -351,14 +351,20 @@ bool RetintUnlit(unsigned char* room, int& state, int slot) {
         }
         // Do not change ambient while the solver owns this room.
         const int solve = *reinterpret_cast<const int*>(room + 0xF0);
-        if (RoomAmbientPolicy::SolverOwnsAmbient(solve)) {
-            state = -2;
-            return false;
-        }
         float* amb = reinterpret_cast<float*>(room + 0x110);
         float* amb2 = reinterpret_cast<float*>(room + 0x120);
         const uintptr_t b = *reinterpret_cast<const uintptr_t*>(room + 0xC8), e = *reinterpret_cast<const uintptr_t*>(room + 0xCC);
         const bool roofless = *reinterpret_cast<const BYTE*>(room + 0x18) != 0;
+        if (!roofless && slot >= 0 && RoomAmbientPolicy::UnlitSeedDue(solve, e > b, amb, amb2, g_target[slot].v)) {
+            std::memcpy(amb, g_target[slot].v, sizeof g_target[slot].v);
+            std::memcpy(amb2, g_target[slot].v, sizeof g_target[slot].v);
+            state = 3; // seeded
+            return true;
+        }
+        if (RoomAmbientPolicy::SolverOwnsAmbient(solve)) {
+            state = -2;
+            return false;
+        }
         if (e > b && !roofless) { // an indoor room with lamps (roofless ones never get the base: matched as before)
             state = 2;
             return false;
@@ -406,6 +412,9 @@ bool VisitRoom(unsigned char* room, void* p) {
     int state = 0;
     if (RetintUnlit(room, state, SlotOfRoom(room))) {
         ctx.retinted += state == 1;
+        if (state == 3 && g_seeded++ < 50)
+            LOG_INFO(std::format("[UnlitRooms] Room {} of lot {:08X}: no ambient yet while it waits for its solve, given the unlit colour",
+                                 *reinterpret_cast<const int*>(room + 0xC), *reinterpret_cast<const uint32_t*>(room + 0x10)));
         return false;
     }
     // A merged ambient or an old colour evicted from g_known must still follow
