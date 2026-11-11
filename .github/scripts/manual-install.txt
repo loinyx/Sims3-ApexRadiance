@@ -1,20 +1,74 @@
-Apex Radiance: manual install (without Apex Radiance Setup)
+==============================================================================
+  APEX RADIANCE {VERSION}  -  INSTALL BY HAND
+==============================================================================
 
-Recommended instead: run ApexRadianceSetup.exe from this zip. It finds the game, installs everything below,
-checks your other mods, keeps a restore point before every change and updates in one click.
+  Easier way: run ApexRadianceSetup.exe, one folder up. It does all of
+  this for you.
 
-By hand:
-1. Close The Sims 3 and its launcher.
-2. If The Sims 3\Game\Bin has no ASI loader yet (another .asi mod such as Sims3SettingsSetter already brings one),
-   add one, for example Ultimate ASI Loader: https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases
-3. Copy ApexRadiance.asi from this folder into The Sims 3\Game\Bin.
-4. Optional, DXVK (fewer stutters, the renderer Apex Radiance is tested with): put DXVK's 32-bit d3d9.dll in
-   The Sims 3\Game\Bin.
-5. Optional, the RTX Remix bridge instead of DXVK (more free memory; needs a Vulkan graphics card): download the
-   separate "RTX Remix bridge" file from the Apex Radiance page, move any d3d9.dll in Game\Bin to a backup folder,
-   then unzip the bridge into The Sims 3\Game\Bin, keeping its .trex folder.
-   EA app version only: in both bridge.conf files (Game\Bin and Game\Bin\.trex), set client.targetProcess = TS3.exe
-6. Start the game, load a world and press Ctrl+Shift+F11 to open the Apex Radiance menu.
+  Where files go: the game's Bin folder, called "Game\Bin" below.
 
-Update: close the game and replace ApexRadiance.asi (and the bridge files, if you use it) with the new ones.
-Your settings stay in Documents\Electronic Arts\The Sims 3\Apex Radiance.
+    Steam ..... Steam\steamapps\common\The Sims 3\Game\Bin
+    EA app .... EA Games\The Sims 3\Game\Bin
+    (your folder may differ: find "Game\Bin" inside your The Sims 3 folder)
+
+
+------------------------------------------------------------------------------
+  STEP 1  -  CLOSE THE GAME
+------------------------------------------------------------------------------
+
+    Close The Sims 3 and its launcher.
+
+
+------------------------------------------------------------------------------
+  STEP 2  -  AN ASI LOADER  (skip if you already have one)
+------------------------------------------------------------------------------
+
+    Apex Radiance is an .asi mod: the game needs an ASI loader to load it.
+    If you already use another .asi mod (for example Sims3SettingsSetter),
+    you have one. If not, get Ultimate ASI Loader (32-bit) and put it in
+    Game\Bin:
+      https://github.com/ThirteenAG/Ultimate-ASI-Loader/releases
+
+
+------------------------------------------------------------------------------
+  STEP 3  -  APEX RADIANCE
+------------------------------------------------------------------------------
+
+    Copy ApexRadiance.asi (from this folder) into Game\Bin.
+
+
+------------------------------------------------------------------------------
+  STEP 4  -  RENDERER  (optional, pick one)
+------------------------------------------------------------------------------
+
+    A.  DXVK  -  fewer stutters; Apex Radiance is made and tested with it
+          Put DXVK's 32-bit d3d9.dll in Game\Bin.
+
+    B.  RTX Remix bridge  -  about 600 MB more free memory for big worlds
+          (needs a Vulkan graphics card)
+          1. Download the "RTX Remix bridge" file from the Apex Radiance
+             page.
+          2. Move any d3d9.dll already in Game\Bin to a backup folder.
+          3. Unzip the bridge into Game\Bin, keeping its .trex folder.
+          4. EA app only: in both bridge.conf files (Game\Bin and
+             Game\Bin\.trex), change
+               client.targetProcess = TS3W.exe
+             to
+               client.targetProcess = TS3.exe
+
+
+------------------------------------------------------------------------------
+  STEP 5  -  PLAY
+------------------------------------------------------------------------------
+
+    Start the game, load a world and press  Ctrl + Shift + F11  to open
+    the Apex Radiance menu.
+
+
+------------------------------------------------------------------------------
+  UPDATING
+------------------------------------------------------------------------------
+
+    Close the game and replace ApexRadiance.asi (and the bridge files, if
+    you use it) with the new ones. Your settings stay in:
+      Documents\Electronic Arts\The Sims 3\Apex Radiance

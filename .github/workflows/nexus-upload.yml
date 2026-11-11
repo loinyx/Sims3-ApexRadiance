@@ -61,7 +61,7 @@ jobs:
           HEAD=$(grep -m1 '^\*\*.*\*\*$' notes.md | sed -e 's/[*`]//g' || true)
           [ -n "$HEAD" ] || HEAD=$(grep -m1 '^## ' notes.md | sed -e 's/^## //' -e 's/[*`]//g' || true)
           if [ -f setup/ApexRadianceSetup.exe ]; then
-            TAIL=" Full list: Changelogs tab. Install: run ApexRadianceSetup.exe, or see Manual install in the zip. More free memory: the optional RTX Remix bridge file."
+            TAIL=" Full list: Changelogs tab. Install: see READ ME.txt in the zip (Setup or by hand). More free memory: the optional RTX Remix bridge file."
           else
             TAIL=" Full list: Changelogs tab. Install: copy ApexRadiance.asi into The Sims 3 > Game > Bin. More free memory: the optional RTX Remix bridge file."
           fi
@@ -73,12 +73,14 @@ jobs:
       - name: Zip
         run: |
           if [ "${SETUP:-}" = 1 ]; then
-            # ApexRadianceSetup.exe at the top (recommended), the ASI and the steps by hand in "Manual install"
+            # ApexRadianceSetup.exe and READ ME.txt at the top, the ASI and the steps by hand in "Manual install"
+            # (the texts get the version and Windows line endings, for Notepad)
             mkdir -p pack/"Manual install"
             cp setup/ApexRadianceSetup.exe pack/
             cp dist/ApexRadiance.asi pack/"Manual install"/
-            sed 's/$/\r/' .github/scripts/manual-install.txt > pack/"Manual install"/"How to install.txt"
-            (cd pack && zip -9 -r "../ApexRadiance-$VERSION.zip" ApexRadianceSetup.exe "Manual install")
+            sed -e "s/{VERSION}/$VERSION/" -e 's/$/\r/' .github/scripts/nexus-readme.txt > pack/"READ ME.txt"
+            sed -e "s/{VERSION}/$VERSION/" -e 's/$/\r/' .github/scripts/manual-install.txt > pack/"Manual install"/"How to install.txt"
+            (cd pack && zip -9 -r "../ApexRadiance-$VERSION.zip" "READ ME.txt" ApexRadianceSetup.exe "Manual install")
           else
             cd dist
             zip -9 "../ApexRadiance-$VERSION.zip" ApexRadiance.asi
