@@ -12,7 +12,8 @@ public partial class App : Application
     public App()
     {
         InitializeComponent();
-        UnhandledException += (_, e) => Log(e.Exception);
+        // logged and kept running: a UI error must not end Setup in the middle of an install
+        UnhandledException += (_, e) => { Log(e.Exception); e.Handled = true; };
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log(e.ExceptionObject as Exception);
     }
 

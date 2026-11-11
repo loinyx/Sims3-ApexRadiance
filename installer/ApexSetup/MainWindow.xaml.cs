@@ -243,7 +243,7 @@ public sealed partial class MainWindow : Window
         NextButton.Visibility = !settled && _step is Welcome or GameStep or ComponentsStep or DoneStep ? Visibility.Visible : Visibility.Collapsed;
         var (wa, wd) = _step == ComponentsStep ? Plan() : (new List<string>(), new List<string>());
         var work = wa.Concat(wd).ToList();
-        var fixes = _step == ComponentsStep && _game is not null && _state is not null && Compat.Check(_game, _state).Any(x => x.CanFix);
+        var fixes = _step == ComponentsStep && _found.Any(x => x.CanFix);
         NextText.Text = _step switch
         {
             Welcome => WelcomeUpdates().Count > 0 ? T("Update now") : _state?.ApexVersion is not null ? T("Next") : T("Get started"),
@@ -347,7 +347,7 @@ public sealed partial class MainWindow : Window
         foreach (var (c, name, present) in new[] { (Components.S3ss, "Sims3SettingsSetter", s.S3ss), (Components.Modernization, "Sims 3 Modernization", s.Modernization), (Components.MonoPatcher, "MonoPatcher", s.MonoPatcher) })
             if (present) Row(name, State(c), !Updates().Contains(c));
 
-        var found = Verify.Files(g, s, apexRelease).Concat(Compat.Check(g, s)).ToList();
+        var found = Verify.Files(g, s, apexRelease).Concat(_found).ToList();
         if (found.Count == 0)
             StatusList.Children.Add(new TextBlock { Text = _checkedAt is null ? T("Everything is in place.") : T("Everything is in place (checked at {0}).", _checkedAt), FontSize = 12, Foreground = ok });
         else if (_checkedAt is not null)
@@ -443,14 +443,17 @@ public sealed partial class MainWindow : Window
         GameList.SelectedItem = existing;
     }
 
+    List<Finding> _found = new();
     void RefreshGame()
     {
         _state = _game is null ? null : Scan.Run(_game);
+        // once per scan: Compat walks Mods and reads every Bin .asi, and the status and footer read it again
+        _found = _state is null ? new() : Compat.Check(_game!, _state);
         GameDetails.Visibility = _state is null ? Visibility.Collapsed : Visibility.Visible;
         if (_state is not { } s) return;
 
         ProblemList.Children.Clear();
-        var found = Compat.Check(_game!, s);
+        var found = _found;
         foreach (var x in found)
         {
             var bar = new InfoBar
@@ -593,7 +596,7 @@ public sealed partial class MainWindow : Window
         ShowCard(MonoToggle, s.MonoPatcher);
         ShowCard(S3ppToggle, S3ppPresent);
         if (!S3ppPresent) S3ppToggle.Visibility = Visibility.Collapsed; // (missing: its download buttons below)
-        S3ppGet.Visibility = !S3ppPresent && _s3ppArchive is null && _s3ppWatch is null ? Visibility.Visible : Visibility.Collapsed;
+        S3ppGet.Visibility = !S3ppPresent && _s3ppArchive is null ? Visibility.Visible : Visibility.Collapsed;
         S3ppWait.Visibility = _s3ppWatch is not null ? Visibility.Visible : Visibility.Collapsed;
         S3ppWaitText.Text = T("Waiting for your download in {0}…", DownloadsFolder());
         ModToggle.IsEnabled = g.ModernizationSupported || s.Modernization;
@@ -699,18 +702,21 @@ public sealed partial class MainWindow : Window
     async Task TakeS3ppAsync(string path, bool fromPicker = false)
     {
         var ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
-        if (ext is not (".zip" or ".asi")) return;
+        if (ext is not (".zip" or ".asi" or ".7z" or ".rar")) return;
         for (int i = 0; i < 20; i++) // wait until the browser has closed the file
         {
             try { using (File.Open(path, FileMode.Open, FileAccess.Read, FileShare.None)) break; }
             catch (IOException) { await Task.Delay(500); }
         }
-        var found = await Task.Run(() => GitHubSource.S3ppFiles(path));
+        // Firefox's empty placeholder: the finished download replaces it later (a rename)
+        try { if (!fromPicker && new FileInfo(path).Length == 0) return; } catch (IOException) { return; }
+        var found = ext is ".7z" or ".rar" ? null : await Task.Run(() => GitHubSource.S3ppFiles(path));
         DispatcherQueue.TryEnqueue(async () =>
         {
+            if (!fromPicker && _s3ppWatch is null) return; // (the watch already took a file)
             if (found is null)
             {
-                if (fromPicker || ext == ".zip" && System.IO.Path.GetFileName(path).Contains("Performance", StringComparison.OrdinalIgnoreCase))
+                if (fromPicker || ext != ".asi" && System.IO.Path.GetFileName(path).Contains("Performance", StringComparison.OrdinalIgnoreCase))
                     await Message(T("Not the Performance Patch"), T("{0} has no Sims3Performance.asi. If the download is a .7z or .rar, extract it and choose Sims3Performance.asi.", System.IO.Path.GetFileName(path)));
                 return;
             }
@@ -782,7 +788,7 @@ public sealed partial class MainWindow : Window
             _defaultsFor = null;
             var net = ex is HttpRequestException or TaskCanceledException;
             await Message(net ? T("Setup can't reach GitHub") : T("Setup could not finish"),
-                (net ? T("Check your internet connection, then try again.") : ex.Message) + (touched ? "\n\n" + T("Repair or remove sets the game right.") : ""));
+                (net ? T("Check your internet connection, then try again.") : T(ex.Message)) + (touched ? "\n\n" + T("Repair or remove sets the game right.") : ""));
             Show(from);
         }
     }
@@ -907,19 +913,22 @@ public sealed partial class MainWindow : Window
         _busy = true;
         RefreshAll();
         var ok = false;
+        string? error = null;
         try
         {
             await Task.Run(work);
-            SetInfo(bar, InfoBarSeverity.Success, done, "");
             ok = true;
         }
-        catch (Exception ex) { SetInfo(bar, InfoBarSeverity.Error, T("Setup could not finish"), ex.Message); }
+        catch (Exception ex) { error = T(ex.Message); }
         finally
         {
             _busy = false;
             _defaultsFor = null;
             RefreshAll();
         }
+        // after the refresh, which rewrites the screens' bars
+        if (ok) SetInfo(bar, InfoBarSeverity.Success, done, "");
+        else SetInfo(bar, InfoBarSeverity.Error, T("Setup could not finish"), error!);
         return ok;
     }
 
@@ -971,16 +980,23 @@ public sealed partial class MainWindow : Window
 
     // ---------- dialogs and language ----------
 
-    async Task Message(string title, string text)
-    {
-        var d = new ContentDialog { Title = title, Content = text, CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot };
-        await d.ShowAsync();
-    }
+    async Task Message(string title, string text) =>
+        await ShowDialog(new ContentDialog { Title = title, Content = text, CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
 
-    async Task<bool> Confirm(string title, string text, string yes)
+    async Task<bool> Confirm(string title, string text, string yes) =>
+        await ShowDialog(new ContentDialog { Title = title, Content = text, PrimaryButtonText = yes, CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Close, XamlRoot = Content.XamlRoot })
+            == ContentDialogResult.Primary;
+
+    // WinUI allows one open ContentDialog: a newer one closes the open one (a Confirm closed so reads as Cancel)
+    ContentDialog? _dialog;
+    Task<ContentDialogResult>? _dialogShown;
+    async Task<ContentDialogResult> ShowDialog(ContentDialog d)
     {
-        var d = new ContentDialog { Title = title, Content = text, PrimaryButtonText = yes, CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Close, XamlRoot = Content.XamlRoot };
-        return await d.ShowAsync() == ContentDialogResult.Primary;
+        while (_dialog is { } open) { open.Hide(); await _dialogShown!; }
+        _dialog = d;
+        _dialogShown = d.ShowAsync().AsTask();
+        try { return await _dialogShown; }
+        finally { if (_dialog == d) _dialog = null; }
     }
 
     void OnLanguage(object sender, RoutedEventArgs e)
