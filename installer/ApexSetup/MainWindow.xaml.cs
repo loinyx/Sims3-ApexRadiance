@@ -876,7 +876,7 @@ public sealed partial class MainWindow : Window
 
         foreach (var p in RestorePoints.List(g.Bin))
         {
-            var when = p.Created.ToLocalTime().ToString("g");
+            var when = p.Created.ToLocalTime().ToString("g", LangCulture());
             ManageRow(T("Before: {0}", T(p.Label, p.Args)), p.FileCount == 1 ? T("{0} \u00b7 1 file", when) : T("{0} \u00b7 {1} files", when, p.FileCount),
                 T("Restore"), () => RestoreAsync(p), list: RestoreList);
         }
@@ -885,20 +885,28 @@ public sealed partial class MainWindow : Window
                 FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = (Brush)Application.Current.Resources["ApexMutedBrush"] });
     }
 
+    // dates in Setup's language, not the format Windows uses
+    System.Globalization.CultureInfo LangCulture()
+    {
+        try { return System.Globalization.CultureInfo.GetCultureInfo(Bcp47(Lang)); }
+        catch (System.Globalization.CultureNotFoundException) { return System.Globalization.CultureInfo.CurrentCulture; }
+    }
+
     string GraphicsRemoval(bool backup) => backup ? T("Puts back the graphics files you had before.")
         : T("Goes back to the game's default graphics. Your in-game graphics settings may reset once.");
 
     void ManageRow(string title, string desc, string action, Func<Task> run, bool danger = false, Panel? list = null)
     {
+        var restore = list is not null;
         list ??= ManageList;
         var row = new Grid { Padding = new Thickness(18, 14, 18, 14), ColumnSpacing = 14, BorderBrush = (Brush)Application.Current.Resources["ApexCardBorderBrush"], BorderThickness = new Thickness(0, list.Children.Count == 0 ? 0 : 1, 0, 0) };
         row.ColumnDefinitions.Add(new ColumnDefinition());
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var text = new StackPanel { Spacing = 2 };
-        text.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold });
+        text.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
         text.Children.Add(new TextBlock { Text = desc, FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = (Brush)Application.Current.Resources["ApexMutedBrush"] });
         var b = new Button { Content = action, MinWidth = 96, VerticalAlignment = VerticalAlignment.Center, IsEnabled = !_running && !_busy };
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, action + " " + title);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, action + " " + title + (restore ? ", " + desc : "")); // (two points can share a title)
         if (danger) { b.Background = new SolidColorBrush(ColorHelper.FromArgb(255, 0x2A, 0x16, 0x15)); b.Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 0xF2, 0xB6, 0xB2)); }
         b.Click += async (_, _) => await run();
         Grid.SetColumn(b, 1);
@@ -972,7 +980,9 @@ public sealed partial class MainWindow : Window
         }
         // after the refresh, which rewrites the screens' bars
         if (ok) SetInfo(bar, InfoBarSeverity.Success, done, "");
-        else if (point?.Committed is { } p) SetInfo(bar, InfoBarSeverity.Error, T("Setup could not finish"), error!, T("Undo these changes"), () => _ = RestoreAsync(p, ask: false, bar));
+        else if (point?.Committed is { } p) SetInfo(bar, InfoBarSeverity.Error, T("Setup could not finish"), error!, T("Undo these changes"),
+            // a change made since then would be undone too: asked first
+            () => _ = RestoreAsync(p, ask: RestorePoints.List(g.Bin).FirstOrDefault()?.Dir != p.Dir, bar));
         else SetInfo(bar, InfoBarSeverity.Error, T("Setup could not finish"), error!);
         return ok;
     }

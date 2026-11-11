@@ -48,14 +48,34 @@ public static class RestorePoints
             if (!_outer) return;
             _open = null;
             if (Point.Entries.Count == 0) { if (Directory.Exists(Point.Dir)) DeleteTree(Point.Dir); return; }
-            Directory.CreateDirectory(Point.Dir);
-            var json = Path.Combine(Point.Dir, "point.json");
-            File.WriteAllText(json + ".tmp", JsonSerializer.Serialize(Point, new JsonSerializerOptions { WriteIndented = true }));
-            File.Move(json + ".tmp", json, true);
-            Committed = Point;
+            Committed = Point; // (point.json is already written, entry by entry)
             foreach (var old in List(Point.Bin).Skip(Keep)) DeleteTree(old.Dir);
+            // a folder with no readable point.json: cut off before its first entry was saved, so nothing it copied was changed
+            foreach (var d in Directory.EnumerateDirectories(RootOf(Point.Bin)))
+                if (Read(d) is null) DeleteTree(d);
         }
     }
+
+    static void Save(RestorePoint p)
+    {
+        var json = Path.Combine(p.Dir, "point.json");
+        File.WriteAllText(json + ".tmp", JsonSerializer.Serialize(p, new JsonSerializerOptions { WriteIndented = true }));
+        File.Move(json + ".tmp", json, true);
+    }
+
+    static RestorePoint? Read(string dir)
+    {
+        try
+        {
+            var p = JsonSerializer.Deserialize<RestorePoint>(File.ReadAllText(Path.Combine(dir, "point.json")));
+            if (p is not null) p.Dir = dir;
+            return p;
+        }
+        catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { return null; }
+    }
+
+    static bool Same(string a, string b) =>
+        string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(a)), Path.TrimEndingDirectorySeparator(Path.GetFullPath(b)), StringComparison.OrdinalIgnoreCase);
 
     public static Scope Begin(string bin, string label, params string[] args)
     {
@@ -72,39 +92,47 @@ public static class RestorePoints
         return _open = new Scope(p, true);
     }
 
-    // first touch wins: the path as it was before this action
+    // first touch wins: the path as it was before this action. All or nothing: the entry is kept only once its copy and
+    // point.json are on disk (an action cut off after it can still be restored); otherwise it throws before the change
     internal static void Touch(string path, bool dir = false)
     {
         if (_open is not { } s) return;
         path = Path.GetFullPath(path);
-        if (!s.Seen.Add(path)) return;
+        if (s.Seen.Contains(path)) return;
         var e = new RestoreEntry { Path = path, Dir = dir, Existed = dir ? Directory.Exists(path) : File.Exists(path) };
-        if (e.Existed && !dir)
+        Directory.CreateDirectory(s.Point.Dir);
+        try
         {
-            Directory.CreateDirectory(s.Point.Dir);
-            e.Copy = $"{s.Point.Entries.Count}-{Path.GetFileName(path)}";
-            File.Copy(path, Path.Combine(s.Point.Dir, e.Copy));
+            if (e.Existed && !dir)
+            {
+                e.Copy = $"{s.Point.Entries.Count}-{Path.GetFileName(path)}";
+                File.Copy(path, Path.Combine(s.Point.Dir, e.Copy), true);
+            }
+            s.Point.Entries.Add(e);
+            Save(s.Point);
         }
-        s.Point.Entries.Add(e);
+        catch
+        {
+            s.Point.Entries.Remove(e);
+            if (e.Copy is not null) try { File.Delete(Path.Combine(s.Point.Dir, e.Copy)); } catch (Exception x) when (x is IOException or UnauthorizedAccessException) { }
+            throw;
+        }
+        s.Seen.Add(path);
     }
 
-    // newest first; a folder without a readable point.json (an action cut off) is left out
+    // newest first, only the points of this Game\Bin (a game folder copied or moved brings the old one's, whose paths are
+    // elsewhere); a folder without a readable point.json is left out
     public static List<RestorePoint> List(string bin)
     {
-        var list = new List<RestorePoint>();
-        if (!Directory.Exists(RootOf(bin))) return list;
-        foreach (var d in Directory.EnumerateDirectories(RootOf(bin)))
-            try
-            {
-                if (JsonSerializer.Deserialize<RestorePoint>(File.ReadAllText(Path.Combine(d, "point.json"))) is { } p) { p.Dir = d; list.Add(p); }
-            }
-            catch (Exception e) when (e is IOException or JsonException or UnauthorizedAccessException) { }
+        if (!Directory.Exists(RootOf(bin))) return new();
         // by time, not name: a name freed by pruning can be taken again within the same second
-        return list.OrderByDescending(p => p.Created).ToList();
+        return Directory.EnumerateDirectories(RootOf(bin)).Select(Read).OfType<RestorePoint>().Where(p => Same(p.Bin, bin))
+            .OrderByDescending(p => p.Created).ToList();
     }
 
     // Undoes that point and every newer one, newest first. Restoring is final: the points restored are deleted (one with a path
-    // that could not be put back stays, to try again). Returns the paths that could not be put back.
+    // that could not be put back stays, to try again, and the older ones are left untouched: each point's copies are the state
+    // after the older ones, so they are undone only once every newer one is). Returns the paths that could not be put back.
     public static List<string> Restore(string bin, RestorePoint point)
     {
         Engine.CheckWritable();
@@ -119,7 +147,8 @@ public static class RestorePoints
             foreach (var e in Enumerable.Reverse(p.Entries))
                 try { Undo(p, e); }
                 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { failed.Add(e.Path); }
-            if (failed.Count == before) DeleteTree(p.Dir);
+            if (failed.Count > before) break;
+            DeleteTree(p.Dir);
         }
         // the backup folder Setup made goes too, once nothing is left in it
         foreach (var d in new[] { RootOf(bin), Manifest.DirOf(bin) })

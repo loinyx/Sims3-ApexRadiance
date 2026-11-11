@@ -332,6 +332,51 @@ try
     pts = RestorePoints.List(bin3);
     Check(pts.Count == RestorePoints.Keep && pts[0].Args[0] == "n5" && pts[4].Args[0] == "n1"
           && Directory.EnumerateDirectories(restoreDir).Count() == RestorePoints.Keep, "the newest 5 points kept, older ones deleted");
+    Check(RestorePoints.Restore(bin3, RestorePoints.List(bin3).Last()).Count == 0 && RestorePoints.List(bin3).Count == 0, "every point restored");
+
+    // a locked file in the newer of two points: the restore stops there, the older point untouched, then finishes on retry
+    var a3 = B3("a.txt");
+    File.WriteAllText(a3, "orig");
+    using (RestorePoints.Begin(bin3, "Install {0}", "p1")) { Fs.Write(a3, "p1"); Fs.Write(B3("new1.txt"), "x"); }
+    using (RestorePoints.Begin(bin3, "Install {0}", "p2")) { Fs.Write(B3("keep2.txt"), "new"); Fs.Write(a3, "p2"); }
+    var older = RestorePoints.List(bin3)[1];
+    using (File.Open(B3("keep2.txt"), FileMode.Open, FileAccess.Read, FileShare.None)) failedPaths = RestorePoints.Restore(bin3, older);
+    Check(failedPaths.Count == 1 && Read(a3) == "p1" && File.Exists(B3("new1.txt")) && RestorePoints.List(bin3).Count == 2,
+          "a failure in a newer point stops the restore before the older one");
+    Check(RestorePoints.Restore(bin3, older).Count == 0 && Read(a3) == "orig" && !File.Exists(B3("new1.txt")) && !File.Exists(B3("keep2.txt"))
+          && RestorePoints.List(bin3).Count == 0, "the retry undoes both points");
+
+    // point.json is written as the action goes: an action cut off is listed; a folder without it is pruned
+    using (RestorePoints.Begin(bin3, "Install {0}", "cut"))
+    {
+        Fs.Write(a3, "cut");
+        Check(RestorePoints.List(bin3) is [{ FileCount: 1 }], "a point being recorded is already listed");
+        Directory.CreateDirectory(Path.Combine(restoreDir, "junk"));
+        File.WriteAllText(Path.Combine(restoreDir, "junk", "0-x.txt"), "x");
+    }
+    Check(!Directory.Exists(Path.Combine(restoreDir, "junk")), "a folder without point.json is pruned");
+
+    // a copy that fails records nothing: a later change to the same file in that action still saves the original
+    using (RestorePoints.Begin(bin3, "Install {0}", "touch"))
+    {
+        using (File.Open(a3, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            try { Fs.ClearReadOnly(a3); Check(false, "a failed copy throws before the change"); } catch (IOException) { }
+        Fs.Write(a3, "touched");
+    }
+    Check(RestorePoints.Restore(bin3, RestorePoints.List(bin3).Last()).Count == 0 && Read(a3) == "orig", "the original saved by the retried touch");
+
+    // a game folder moved: its points name the old folder, so they are not offered there
+    var root4 = Path.Combine(root, "Fourth");
+    var bin4 = Path.Combine(root4, "Game", "Bin");
+    Directory.CreateDirectory(bin4);
+    File.WriteAllText(Path.Combine(bin4, "x.txt"), "orig");
+    using (RestorePoints.Begin(bin4, "Install {0}", "moved")) Fs.Write(Path.Combine(bin4, "x.txt"), "new");
+    var moved = RestorePoints.List(bin4)[0];
+    var bin5 = Path.Combine(root, "Fifth", "Game", "Bin");
+    Directory.Move(root4, Path.Combine(root, "Fifth"));
+    Check(RestorePoints.List(bin5).Count == 0 && RestorePoints.List(bin5 + "\\").Count == 0, "a moved game's points are not listed");
+    try { RestorePoints.Restore(bin5, moved); Check(false, "a moved game's point is refused"); }
+    catch (InvalidOperationException) { Check(!Directory.Exists(root4) && Read(Path.Combine(bin5, "x.txt")) == "new", "a moved game's point is refused"); }
 }
 catch (Exception e) { Console.WriteLine("FAIL exception: " + e); failures++; }
 finally
