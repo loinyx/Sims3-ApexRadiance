@@ -54,7 +54,7 @@ public static partial class Strings
         ["Wrong build"] = "Falscher Build",
         ["Update {0}"] = "Update {0}",
         ["Up to date"] = "Aktuell",
-        ["Setup could not finish"] = "Setup konnte nicht abschließen",
+        ["Setup could not finish"] = "Setup konnte nicht abgeschlossen werden",
         ["Close The Sims 3 first."] = "Schließe zuerst The Sims 3.",
         ["You're all set"] = "Alles bereit",
         ["Start The Sims 3, load a world and press Ctrl+Shift+F11 to open the Apex Radiance menu."] =
@@ -90,7 +90,7 @@ public static partial class Strings
         ["{0} in Game\\Bin loads a second copy of Apex Radiance."] =
             "{0} in Game\\Bin lädt eine zweite Kopie von Apex Radiance.",
         ["Two ASI loaders ({0}) load every mod twice. Keep one: remove all but {1}."] =
-            "Zwei ASI-Loader ({0}) laden jeden Mod doppelt. Behalte einen: Entferne alle außer {1}.",
+            "Zwei ASI-Loader ({0}) laden jede Mod doppelt. Behalte einen: Entferne alle außer {1}.",
         ["Sims 3 Modernization's ts3native is the build for the other edition and does nothing. Turn it on in Components to install the right one."] =
             "Der ts3native von Sims 3 Modernization ist der Build für die andere Edition und bewirkt nichts. Schalte ihn unter Komponenten ein, um den richtigen zu installieren.",
         ["Sims 3 Modernization has no build for this game version ({0}), so its ts3native does nothing. Turn it off in Components."] =
@@ -117,7 +117,7 @@ public static partial class Strings
             "In dxvk.conf fehlt {0} oder der Wert ist anders: Ohne ihn setzt das Spiel seine Grafikoptionen zurück oder friert mit der bridge beim Ändern der Auflösung ein.",
         ["Mods\\Resource.cfg does not read {0}, so the game does not load it. Setup adds the Packages folder lines (a copy is kept as Resource.cfg.apex-backup)."] =
             "Mods\\Resource.cfg liest {0} nicht, daher lädt das Spiel es nicht. Setup ergänzt die Zeilen für den Ordner Packages (eine Kopie bleibt als Resource.cfg.apex-backup).",
-        ["Fix settings"] = "Einstellungen beheben",
+        ["Fix settings"] = "Einstellungen korrigieren",
         ["Everything is installed and up to date."] = "Alles ist installiert und aktuell.",
         ["Will be removed"] = "Wird entfernt",
         ["Keep"] = "Behalten",
@@ -129,11 +129,11 @@ public static partial class Strings
         ["Checking the latest versions…"] = "Neueste Versionen werden geprüft…",
         ["Checking for updates…"] = "Suche nach Updates…",
         ["Close The Sims 3 to update."] = "Schließe The Sims 3, um zu aktualisieren.",
-        ["Update now installs them."] = "Jetzt aktualisieren installiert sie.",
+        ["Update now installs them."] = "„Jetzt aktualisieren“ installiert sie.",
         ["Graphics"] = "Grafik",
         ["Checked at {0}."] = "Geprüft um {0}.",
         ["Test build {0}: kept as it is."] = "Testbuild {0}: bleibt, wie er ist.",
-        ["Repair or remove sets the game right."] = "Reparieren oder entfernen stellt das Spiel wieder her.",
+        ["Repair or remove sets the game right."] = "Unter „Reparieren oder entfernen“ bringst du das Spiel wieder in Ordnung.",
         ["Changes applied"] = "Änderungen angewendet",
         ["Removed: {0}"] = "Entfernt: {0}",
         ["The Sims 3 · {0}"] = "The Sims 3 · {0}",
@@ -156,7 +156,7 @@ public static partial class Strings
         ["Your d3d9.dll stays as it is."] = "Deine d3d9.dll bleibt, wie sie ist.",
         ["Applying changes"] = "Änderungen werden angewendet",
         ["Remove {0}"] = "{0} entfernen",
-        ["Fix incompatible settings"] = "Inkompatible Einstellungen beheben",
+        ["Fix incompatible settings"] = "Inkompatible Einstellungen korrigieren",
         ["Updates available"] = "Updates verfügbar",
         ["Update now"] = "Jetzt aktualisieren",
         ["{0} {1} → {2}"] = "{0} {1} → {2}",
@@ -198,7 +198,7 @@ public static partial class Strings
         ["Fixes for game and graphics settings."] = "Korrekturen für Spiel- und Grafikeinstellungen.",
         ["Fixes stutters, Sims getting stuck and crashes."] = "Behebt Ruckler, hängende Sims und Abstürze.",
         ["Needed only by some script mods; turn it on if a mod asks for it."] =
-            "Nur für manche Script-Mods nötig; schalte es ein, wenn ein Mod es verlangt.",
+            "Nur für manche Script-Mods nötig; schalte es ein, wenn eine Mod es verlangt.",
         ["Makes the game run faster. Needs a free Nexus Mods account; Setup installs it when your download finishes."] =
             "Lässt das Spiel schneller laufen. Braucht ein kostenloses Konto bei Nexus Mods; Setup installiert es, sobald dein Download fertig ist.",
         ["Puts back the graphics files you had before."] =

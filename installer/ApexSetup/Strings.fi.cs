@@ -58,7 +58,7 @@ public static partial class Strings
             "Käynnistä The Sims 3, lataa maailma ja avaa Apex Radiancen valikko painamalla Ctrl+Shift+F11.",
         ["Installed: {0} {1}"] = "Asennettu: {0} {1}",
         ["Choose your game first."] = "Valitse ensin pelisi.",
-        ["Removes ApexRadiance.asi. Your settings in Documents stay."] = "Poistaa ApexRadiance.asi-tiedoston. Asetuksesi Documents-kansiossa säilyvät.",
+        ["Removes ApexRadiance.asi. Your settings in Documents stay."] = "Poistaa ApexRadiance.asi-tiedoston. Asetuksesi Tiedostot-kansiossa säilyvät.",
         ["Remove"] = "Poista",
         ["RTX Remix bridge"] = "RTX Remix bridge",
         ["Removes Sims3SettingsSetter.asi."] = "Poistaa Sims3SettingsSetter.asi-tiedoston.",
@@ -77,7 +77,7 @@ public static partial class Strings
         ["{0} removed."] = "{0} poistettu.",
         ["Uninstall everything?"] = "Poistetaanko kaikki?",
         ["Setup removes Apex Radiance and everything it installed in this game, and puts back every file it replaced. Your settings in Documents stay."] =
-            "Asennusohjelma poistaa Apex Radiancen ja kaiken, mitä se asensi tähän peliin, ja palauttaa jokaisen korvaamansa tiedoston. Asetuksesi Documents-kansiossa säilyvät.",
+            "Asennusohjelma poistaa Apex Radiancen ja kaiken, mitä se asensi tähän peliin, ja palauttaa jokaisen korvaamansa tiedoston. Asetuksesi Tiedostot-kansiossa säilyvät.",
         ["Everything Setup installed was removed."] = "Kaikki asennusohjelman asentama poistettiin.",
         ["Setup fixes this"] = "Asennusohjelma korjaa tämän",
         ["Read more"] = "Lue lisää",
@@ -85,7 +85,7 @@ public static partial class Strings
         ["No incompatible settings found."] = "Yhteensopimattomia asetuksia ei löytynyt.",
         ["{0} in Game\\Bin loads a second copy of Apex Radiance."] = "{0} kansiossa Game\\Bin lataa toisen kopion Apex Radiancesta.",
         ["Two ASI loaders ({0}) load every mod twice. Keep one: remove all but {1}."] =
-            "Kaksi ASI loaderia ({0}) lataa jokaisen modin kahdesti. Pidä vain yksi: poista kaikki paitsi {1}.",
+            "Kaksi ASI-loaderia ({0}) lataa jokaisen modin kahdesti. Pidä vain yksi: poista kaikki paitsi {1}.",
         ["Sims 3 Modernization's ts3native is the build for the other edition and does nothing. Turn it on in Components to install the right one."] =
             "Sims 3 Modernizationin ts3native on toisen pelin painoksen versio eikä tee mitään. Ota se käyttöön Komponenteissa, niin oikea versio asennetaan.",
         ["Sims 3 Modernization has no build for this game version ({0}), so its ts3native does nothing. Turn it off in Components."] =
@@ -104,7 +104,7 @@ public static partial class Strings
         ["Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. Setup sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup)."] =
             "Sims3Performancen ShortWaitSpin ja ThreadStackDiet ovat ristiriidassa Sims 3 Modernizationin kanssa. Asennusohjelma asettaa molemmat arvoon 0 (kopio säilytetään nimellä Sims3Performance.ini.apex-backup).",
         ["Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. Setup turns them off (a copy is kept as S3SS.toml.apex-backup)."] =
-            "Sims3SettingsSetterin pakkaamattomat tekstuurit nykivät RTX Remix bridgen kanssa. Asennusohjelma poistaa ne käytöstä (kopio säilytetään nimellä S3SS.toml.apex-backup).",
+            "Sims3SettingsSetterin pakkaamattomat tekstuurit saavat pelin nykimään RTX Remix bridgen kanssa. Asennusohjelma poistaa ne käytöstä (kopio säilytetään nimellä S3SS.toml.apex-backup).",
         ["{0} sets client.targetProcess = {1}, but this game is {2}: the bridge does not start."] =
             "{0} asettaa client.targetProcess = {1}, mutta tämä peli on {2}: bridge ei käynnisty.",
         ["dxvk.conf lacks {0} or has other values: without them the game resets its graphics options or freezes on a resolution change under the bridge."] =
@@ -123,11 +123,11 @@ public static partial class Strings
         ["Checking the latest versions…"] = "Tarkistetaan uusimpia versioita…",
         ["Checking for updates…"] = "Etsitään päivityksiä…",
         ["Close The Sims 3 to update."] = "Sulje The Sims 3 päivittääksesi.",
-        ["Update now installs them."] = "Päivitä nyt asentaa ne.",
+        ["Update now installs them."] = "”Päivitä nyt” asentaa ne.",
         ["Graphics"] = "Grafiikka",
         ["Checked at {0}."] = "Tarkistettu klo {0}.",
         ["Test build {0}: kept as it is."] = "Testiversio {0}: pidetään ennallaan.",
-        ["Repair or remove sets the game right."] = "Korjaa tai poista palauttaa pelin kuntoon.",
+        ["Repair or remove sets the game right."] = "”Korjaa tai poista” -sivulla voit palauttaa pelin kuntoon.",
         ["Changes applied"] = "Muutokset tehty",
         ["Removed: {0}"] = "Poistettu: {0}",
         ["The Sims 3 · {0}"] = "The Sims 3 · {0}",
@@ -141,12 +141,12 @@ public static partial class Strings
         ["{0} · test build"] = "{0} · testiversio",
         ["Install the official {0}"] = "Asenna virallinen {0}",
         ["No ASI loader in Game\\Bin: Apex Radiance and the other .asi mods do not load."] =
-            "Kansiossa Game\\Bin ei ole ASI loaderia: Apex Radiance ja muut .asi-modit eivät lataudu.",
+            "Kansiossa Game\\Bin ei ole ASI-loaderia: Apex Radiance ja muut .asi-modit eivät lataudu.",
         ["{0} is missing: the RTX Remix bridge does not start."] = "{0} puuttuu: RTX Remix bridge ei käynnisty.",
         ["Apply 1 change"] = "Tee 1 muutos",
         ["Apply {0} changes"] = "Tee {0} muutosta",
         ["{0} is installed and up to date: nothing to change."] = "Versio {0} on asennettu ja ajan tasalla: ei muutettavaa.",
-        ["Keep my d3d9.dll"] = "Pidä oma d3d9.dll",
+        ["Keep my d3d9.dll"] = "Säilytä oma d3d9.dll",
         ["Your d3d9.dll stays as it is."] = "Oma d3d9.dll-tiedostosi pysyy ennallaan.",
         ["Applying changes"] = "Tehdään muutoksia",
         ["Remove {0}"] = "Poista {0}",

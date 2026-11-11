@@ -91,7 +91,7 @@ public static partial class Strings
         ["{0} in Game\\Bin loads a second copy of Apex Radiance."] =
             "Το {0} στο Game\\Bin φορτώνει δεύτερο αντίγραφο του Apex Radiance.",
         ["Two ASI loaders ({0}) load every mod twice. Keep one: remove all but {1}."] =
-            "Δύο ASI loaders ({0}) φορτώνουν κάθε mod δύο φορές. Κράτα έναν: αφαίρεσε όλα εκτός από το {1}.",
+            "Δύο ASI loaders ({0}) φορτώνουν κάθε mod δύο φορές. Κράτα μόνο έναν: αφαίρεσε όλους τους άλλους εκτός από το {1}.",
         ["Sims 3 Modernization's ts3native is the build for the other edition and does nothing. Turn it on in Components to install the right one."] =
             "Το ts3native του Sims 3 Modernization είναι φτιαγμένο για την άλλη έκδοση του παιχνιδιού και δεν κάνει τίποτα. Ενεργοποίησέ το στα Στοιχεία για να εγκατασταθεί το σωστό.",
         ["Sims 3 Modernization has no build for this game version ({0}), so its ts3native does nothing. Turn it off in Components."] =
@@ -155,7 +155,7 @@ public static partial class Strings
         ["Apply {0} changes"] = "Εφαρμογή {0} αλλαγών",
         ["{0} is installed and up to date: nothing to change."] =
             "Η έκδοση {0} είναι εγκατεστημένη και ενημερωμένη: δεν χρειάζεται αλλαγή.",
-        ["Keep my d3d9.dll"] = "Κράτα το d3d9.dll μου",
+        ["Keep my d3d9.dll"] = "Διατήρηση του δικού μου d3d9.dll",
         ["Your d3d9.dll stays as it is."] = "Το d3d9.dll σου μένει ως έχει.",
         ["Applying changes"] = "Εφαρμογή αλλαγών",
         ["Remove {0}"] = "Αφαίρεση {0}",
@@ -199,7 +199,7 @@ public static partial class Strings
             "Οι ρυθμίσεις γραφικών του παιχνιδιού μπορεί να επανέλθουν μία φορά. Το πρόγραμμα εγκατάστασης κρατά αντίγραφο και το επαναφέρει αν γυρίσεις πίσω.",
         ["Fixes for game and graphics settings."] = "Διορθώσεις για τις ρυθμίσεις του παιχνιδιού και των γραφικών.",
         ["Fixes stutters, Sims getting stuck and crashes."] =
-            "Διορθώνει κολλήματα, Sims που μένουν κολλημένοι και κρασαρίσματα.",
+            "Διορθώνει κολλήματα, Sims που κολλάνε και κρασαρίσματα.",
         ["Needed only by some script mods; turn it on if a mod asks for it."] =
             "Χρειάζεται μόνο σε ορισμένα mods script· ενεργοποίησέ το αν σου το ζητήσει κάποιο mod.",
         ["Makes the game run faster. Needs a free Nexus Mods account; Setup installs it when your download finishes."] =

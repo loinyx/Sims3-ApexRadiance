@@ -49,7 +49,7 @@ public static partial class Strings
         ["Not available for this game version: it supports Steam 1.67.2 and EA app 1.69.47."] =
             "이 게임 버전에서는 사용할 수 없어요. Steam 1.67.2와 EA app 1.69.47을 지원해요.",
         ["Wrong build"] = "잘못된 빌드",
-        ["Update {0}"] = "{0} 업데이트",
+        ["Update {0}"] = "업데이트: {0}",
         ["Up to date"] = "최신",
         ["Setup could not finish"] = "설치 프로그램이 완료하지 못했어요",
         ["Close The Sims 3 first."] = "먼저 The Sims 3를 닫으세요.",
@@ -85,7 +85,7 @@ public static partial class Strings
         ["No incompatible settings found."] = "호환되지 않는 설정이 없어요.",
         ["{0} in Game\\Bin loads a second copy of Apex Radiance."] = "Game\\Bin의 {0}이(가) Apex Radiance의 두 번째 사본을 불러와요.",
         ["Two ASI loaders ({0}) load every mod twice. Keep one: remove all but {1}."] =
-            "ASI 로더 두 개({0})가 모든 모드를 두 번 불러와요. 하나만 남기세요. {1} 외에는 모두 제거해요.",
+            "ASI 로더 두 개({0})가 모든 모드를 두 번 불러와요. 하나만 남기고 {1} 외에는 모두 제거하세요.",
         ["Sims 3 Modernization's ts3native is the build for the other edition and does nothing. Turn it on in Components to install the right one."] =
             "Sims 3 Modernization의 ts3native는 다른 에디션용 빌드라 아무 효과가 없어요. 구성 요소에서 켜면 맞는 빌드를 설치해요.",
         ["Sims 3 Modernization has no build for this game version ({0}), so its ts3native does nothing. Turn it off in Components."] =

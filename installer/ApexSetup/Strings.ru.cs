@@ -50,7 +50,7 @@ public static partial class Strings
             "Недоступно для этой версии игры: поддерживаются Steam 1.67.2 и EA app 1.69.47.",
         ["Wrong build"] = "Не та версия",
         ["Update {0}"] = "Обновить {0}",
-        ["Up to date"] = "Обновлено",
+        ["Up to date"] = "Актуально",
         ["Setup could not finish"] = "Установщик не смог завершить работу",
         ["Close The Sims 3 first."] = "Сначала закройте The Sims 3.",
         ["You're all set"] = "Всё готово",
@@ -85,7 +85,7 @@ public static partial class Strings
         ["No incompatible settings found."] = "Несовместимых настроек не найдено.",
         ["{0} in Game\\Bin loads a second copy of Apex Radiance."] = "{0} в Game\\Bin загружает вторую копию Apex Radiance.",
         ["Two ASI loaders ({0}) load every mod twice. Keep one: remove all but {1}."] =
-            "Два ASI loader ({0}) загружают каждый мод дважды. Оставьте один: удалите все, кроме {1}.",
+            "Два загрузчика ASI ({0}) загружают каждый мод дважды. Оставьте один: удалите все, кроме {1}.",
         ["Sims 3 Modernization's ts3native is the build for the other edition and does nothing. Turn it on in Components to install the right one."] =
             "ts3native из Sims 3 Modernization — версия для другого издания игры и ничего не делает. Включите его в разделе «Компоненты», чтобы установить нужную.",
         ["Sims 3 Modernization has no build for this game version ({0}), so its ts3native does nothing. Turn it off in Components."] =
@@ -132,20 +132,20 @@ public static partial class Strings
         ["Removed: {0}"] = "Удалено: {0}",
         ["The Sims 3 · {0}"] = "The Sims 3 · {0}",
         ["{0} → {1}"] = "{0} → {1}",
-        ["{0} · up to date"] = "{0} · обновлено",
+        ["{0} · up to date"] = "{0} · актуально",
         ["Everything is in place."] = "Всё на месте.",
         ["Everything is in place (checked at {0})."] = "Всё на месте (проверено в {0}).",
         ["Check installation"] = "Проверить установку",
         ["Change components"] = "Изменить компоненты",
         ["Apex Radiance is not installed in this game."] = "Apex Radiance не установлен в этой игре.",
         ["{0} · test build"] = "{0} · тестовая версия",
-        ["Install the official {0}"] = "Установить официальную {0}",
+        ["Install the official {0}"] = "Установить официальную версию {0}",
         ["No ASI loader in Game\\Bin: Apex Radiance and the other .asi mods do not load."] =
             "В Game\\Bin нет ASI loader: Apex Radiance и другие моды .asi не загружаются.",
         ["{0} is missing: the RTX Remix bridge does not start."] = "Нет {0}: RTX Remix bridge не запустится.",
         ["Apply 1 change"] = "Применить 1 изменение",
         ["Apply {0} changes"] = "Применить изменения: {0}",
-        ["{0} is installed and up to date: nothing to change."] = "{0} установлен и обновлён: менять нечего.",
+        ["{0} is installed and up to date: nothing to change."] = "Версия {0} установлена и актуальна: менять нечего.",
         ["Keep my d3d9.dll"] = "Оставить мою d3d9.dll",
         ["Your d3d9.dll stays as it is."] = "Ваша d3d9.dll останется как есть.",
         ["Applying changes"] = "Применение изменений",
@@ -160,7 +160,7 @@ public static partial class Strings
         ["simler90's Gameplay Core Mod and NRaas StoryProgression replace the same game code. Keep one of them."] =
             "Gameplay Core Mod от simler90 и NRaas StoryProgression заменяют один и тот же код игры. Оставьте один из них.",
         ["MonoPatcher needs the Microsoft Visual C++ Redistributable (x86); it is not installed."] =
-            "MonoPatcher нужен Microsoft Visual C++ Redistributable (x86); он не установлен.",
+            "Для MonoPatcher нужен Microsoft Visual C++ Redistributable (x86), но он не установлен.",
         ["Download on Nexus Mods"] = "Скачать на Nexus Mods",
         ["Choose the downloaded file"] = "Выбрать скачанный файл",
         ["Ready to install"] = "Готово к установке",
@@ -177,7 +177,7 @@ public static partial class Strings
         ["No internet connection"] = "Нет подключения к интернету",
         ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (рекомендуется)",
         ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan с большим запасом памяти (RTX Remix bridge)",
-        ["Windows default (Direct3D 9)"] = "Стандартный Windows (Direct3D 9)",
+        ["Windows default (Direct3D 9)"] = "Стандартный Direct3D 9 (Windows)",
         ["Fewer stutters; Apex Radiance is made and tested with it."] = "Меньше рывков; Apex Radiance создан и проверен с ним.",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
             "Оставляет примерно на 600 МБ больше свободной памяти для больших миров. Нужна видеокарта с Vulkan. Если игра с ним работает плохо, выберите DXVK.",

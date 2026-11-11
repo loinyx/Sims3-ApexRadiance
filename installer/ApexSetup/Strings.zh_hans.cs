@@ -83,9 +83,9 @@ public static partial class Strings
         ["No incompatible settings found."] = "未发现不兼容的设置。",
         ["{0} in Game\\Bin loads a second copy of Apex Radiance."] = "Game\\Bin 中的 {0} 会加载第二份 Apex Radiance。",
         ["Two ASI loaders ({0}) load every mod twice. Keep one: remove all but {1}."] =
-            "两个 ASI loader（{0}）会让每个 mod 加载两次。只保留一个：除 {1} 外全部移除。",
+            "两个 ASI 加载器（{0}）会让每个模组加载两次。只保留一个：除 {1} 外全部移除。",
         ["Sims 3 Modernization's ts3native is the build for the other edition and does nothing. Turn it on in Components to install the right one."] =
-            "Sims 3 Modernization 的 ts3native 是另一游戏版本的构建，不起作用。在“组件”中开启它即可安装正确的版本。",
+            "Sims 3 Modernization 的 ts3native 是另一发行版（Steam/EA app）的构建，不起作用。在“组件”中开启它即可安装正确的构建。",
         ["Sims 3 Modernization has no build for this game version ({0}), so its ts3native does nothing. Turn it off in Components."] =
             "Sims 3 Modernization 没有适用于此游戏版本（{0}）的构建，因此其 ts3native 不起作用。请在“组件”中将其关闭。",
         ["{0} in Game\\Bin is a second copy of {1}; both load. Setup moves it to the backup folder."] =
@@ -93,7 +93,7 @@ public static partial class Strings
         ["Mods has {0} .package files but no Resource.cfg, so the game loads none of them."] =
             "Mods 中有 {0} 个 .package 文件，但没有 Resource.cfg，因此游戏一个都不会加载。",
         ["{0} is the build for the other edition of the game; it makes the game show \"unofficial game modification\". Use the {1} build."] =
-            "{0} 是另一游戏版本的构建；它会让游戏显示 \"unofficial game modification\"。请使用 {1} 构建。",
+            "{0} 是另一发行版的构建；它会让游戏显示 \"unofficial game modification\"。请使用 {1} 的构建。",
         ["NRaas ErrorTrap has no build known to work on EA app 1.69.47."] = "NRaas ErrorTrap 没有已知可在 EA app 1.69.47 上运行的版本。",
         ["{0} overrides game code Sims 3 Modernization also patches (not tested together)."] =
             "{0} 覆盖了 Sims 3 Modernization 也会修补的游戏代码（未一起测试过）。",
@@ -139,7 +139,7 @@ public static partial class Strings
         ["{0} · test build"] = "{0} · 测试版本",
         ["Install the official {0}"] = "安装官方的 {0}",
         ["No ASI loader in Game\\Bin: Apex Radiance and the other .asi mods do not load."] =
-            "Game\\Bin 中没有 ASI loader：Apex Radiance 和其他 .asi mod 不会加载。",
+            "Game\\Bin 中没有 ASI 加载器：Apex Radiance 和其他 .asi 模组不会加载。",
         ["{0} is missing: the RTX Remix bridge does not start."] = "缺少 {0}：RTX Remix bridge 无法启动。",
         ["Apply 1 change"] = "应用 1 项更改",
         ["Apply {0} changes"] = "应用 {0} 项更改",
@@ -161,7 +161,7 @@ public static partial class Strings
             "MonoPatcher 需要 Microsoft Visual C++ Redistributable (x86)，但它尚未安装。",
         ["Download on Nexus Mods"] = "在 Nexus Mods 下载",
         ["Choose the downloaded file"] = "选择下载的文件",
-        ["Ready to install"] = "准备安装",
+        ["Ready to install"] = "可以安装",
         ["Waiting for your download in {0}…"] = "正在 {0} 中等待你的下载…",
         ["Not the Performance Patch"] = "不是 Performance Patch",
         ["{0} has no Sims3Performance.asi. If the download is a .7z or .rar, extract it and choose Sims3Performance.asi."] =
@@ -174,7 +174,7 @@ public static partial class Strings
         ["Your Apex Radiance settings are always kept."] = "始终保留你的 Apex Radiance 设置。",
         ["No internet connection"] = "没有网络连接",
         ["Vulkan, DXVK (recommended)"] = "Vulkan，DXVK（推荐）",
-        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan，更多内存（RTX Remix bridge）",
+        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan，更多可用内存（RTX Remix bridge）",
         ["Windows default (Direct3D 9)"] = "Windows 默认（Direct3D 9）",
         ["Fewer stutters; Apex Radiance is made and tested with it."] = "卡顿更少；Apex Radiance 就是用它开发和测试的。",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
@@ -184,7 +184,7 @@ public static partial class Strings
             "游戏内的图形设置可能会重置一次。安装程序会保留副本，切换回来时会将其还原。",
         ["Fixes for game and graphics settings."] = "修复游戏和图形设置。",
         ["Fixes stutters, Sims getting stuck and crashes."] = "修复卡顿、模拟市民卡住和崩溃。",
-        ["Needed only by some script mods; turn it on if a mod asks for it."] = "只有部分脚本 mod 需要它；如果某个 mod 要求，请开启。",
+        ["Needed only by some script mods; turn it on if a mod asks for it."] = "只有部分脚本模组需要它；如果某个模组要求，请开启。",
         ["Makes the game run faster. Needs a free Nexus Mods account; Setup installs it when your download finishes."] =
             "让游戏运行更快。需要免费的 Nexus Mods 账户；下载完成后由安装程序安装。",
         ["Puts back the graphics files you had before."] = "还原你之前的图形文件。",

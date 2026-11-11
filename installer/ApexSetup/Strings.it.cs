@@ -112,7 +112,7 @@ public static partial class Strings
         ["Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. Setup sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup)."] =
             "ShortWaitSpin e ThreadStackDiet di Sims3Performance sono in conflitto con Sims 3 Modernization. Il programma di installazione li imposta entrambi a 0 (una copia resta in Sims3Performance.ini.apex-backup).",
         ["Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. Setup turns them off (a copy is kept as S3SS.toml.apex-backup)."] =
-            "Le texture non compresse di Sims3SettingsSetter fanno scattare il gioco con il RTX Remix bridge. Il programma di installazione le disattiva (una copia resta in S3SS.toml.apex-backup).",
+            "Le texture non compresse di Sims3SettingsSetter fanno scattare il gioco con l'RTX Remix bridge. Il programma di installazione le disattiva (una copia resta in S3SS.toml.apex-backup).",
         ["{0} sets client.targetProcess = {1}, but this game is {2}: the bridge does not start."] =
             "{0} imposta client.targetProcess = {1}, ma questo gioco è {2}: il bridge non si avvia.",
         ["dxvk.conf lacks {0} or has other values: without them the game resets its graphics options or freezes on a resolution change under the bridge."] =
@@ -131,11 +131,11 @@ public static partial class Strings
         ["Checking the latest versions…"] = "Controllo delle ultime versioni…",
         ["Checking for updates…"] = "Ricerca aggiornamenti…",
         ["Close The Sims 3 to update."] = "Chiudi The Sims 3 per aggiornare.",
-        ["Update now installs them."] = "Aggiorna ora li installa.",
+        ["Update now installs them."] = "«Aggiorna ora» li installa.",
         ["Graphics"] = "Grafica",
         ["Checked at {0}."] = "Controllato alle {0}.",
         ["Test build {0}: kept as it is."] = "Versione di prova {0}: resta così com'è.",
-        ["Repair or remove sets the game right."] = "Ripara o rimuovi rimette a posto il gioco.",
+        ["Repair or remove sets the game right."] = "«Ripara o rimuovi» rimette a posto il gioco.",
         ["Changes applied"] = "Modifiche applicate",
         ["Removed: {0}"] = "Rimosso: {0}",
         ["The Sims 3 · {0}"] = "The Sims 3 · {0}",
@@ -150,7 +150,7 @@ public static partial class Strings
         ["Install the official {0}"] = "Installa la versione ufficiale {0}",
         ["No ASI loader in Game\\Bin: Apex Radiance and the other .asi mods do not load."] =
             "Nessun ASI loader in Game\\Bin: Apex Radiance e le altre mod .asi non si caricano.",
-        ["{0} is missing: the RTX Remix bridge does not start."] = "Manca {0}: il RTX Remix bridge non si avvia.",
+        ["{0} is missing: the RTX Remix bridge does not start."] = "Manca {0}: l'RTX Remix bridge non si avvia.",
         ["Apply 1 change"] = "Applica 1 modifica",
         ["Apply {0} changes"] = "Applica {0} modifiche",
         ["{0} is installed and up to date: nothing to change."] = "{0} è installato e aggiornato: niente da cambiare.",
@@ -209,7 +209,7 @@ public static partial class Strings
         ["This file has no Sims3Performance.asi."] = "Questo file non contiene Sims3Performance.asi.",
         ["Dry run: Setup changes nothing."] = "Prova: il programma di installazione non cambia nulla.",
         ["Apex Radiance by loinyx. The RTX Remix bridge is NVIDIA's, ported to The Sims 3 by dalexlol and alexvixell35-stack. Sims3SettingsSetter is by sims3fiend, Sims 3 Modernization by rodneypantonial and Ultimate ASI Loader by ThirteenAG: Setup downloads them from their own GitHub releases."] =
-            "Apex Radiance di loinyx. Il RTX Remix bridge è di NVIDIA, portato su The Sims 3 da dalexlol e alexvixell35-stack. Sims3SettingsSetter è di sims3fiend, Sims 3 Modernization di rodneypantonial e Ultimate ASI Loader di ThirteenAG: il programma di installazione li scarica dalle loro release su GitHub.",
+            "Apex Radiance di loinyx. L'RTX Remix bridge è di NVIDIA, portato su The Sims 3 da dalexlol e alexvixell35-stack. Sims3SettingsSetter è di sims3fiend, Sims 3 Modernization di rodneypantonial e Ultimate ASI Loader di ThirteenAG: il programma di installazione li scarica dalle loro release su GitHub.",
         ["RTX Remix bridge: third-party notices"] = "RTX Remix bridge: avvisi di terze parti",
         ["Read"] = "Leggi",
         ["Licence text"] = "Testo della licenza",

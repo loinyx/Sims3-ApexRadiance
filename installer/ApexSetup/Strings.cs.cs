@@ -95,7 +95,7 @@ public static partial class Strings
         ["{0} in Game\\Bin is a second copy of {1}; both load. Setup moves it to the backup folder."] =
             "{0} v Game\\Bin je druhá kopie {1}; načítají se obě. Instalátor ji přesune do složky záloh.",
         ["Mods has {0} .package files but no Resource.cfg, so the game loads none of them."] =
-            "Mods obsahuje {0} souborů .package, ale žádný Resource.cfg, takže hra žádný z nich nenačte.",
+            "Složka Mods obsahuje soubory .package ({0}), ale žádný Resource.cfg, takže hra žádný z nich nenačte.",
         ["{0} is the build for the other edition of the game; it makes the game show \"unofficial game modification\". Use the {1} build."] =
             "{0} je verze pro jinou edici hry; kvůli ní hra zobrazuje \"unofficial game modification\". Použijte verzi {1}.",
         ["NRaas ErrorTrap has no build known to work on EA app 1.69.47."] =
@@ -142,7 +142,7 @@ public static partial class Strings
         ["Change components"] = "Změnit komponenty",
         ["Apex Radiance is not installed in this game."] = "Apex Radiance není v této hře nainstalován.",
         ["{0} · test build"] = "{0} · testovací verze",
-        ["Install the official {0}"] = "Nainstalovat oficiální {0}",
+        ["Install the official {0}"] = "Nainstalovat oficiální verzi {0}",
         ["No ASI loader in Game\\Bin: Apex Radiance and the other .asi mods do not load."] =
             "V Game\\Bin chybí ASI loader: Apex Radiance a další mody .asi se nenačtou.",
         ["{0} is missing: the RTX Remix bridge does not start."] = "Chybí {0}: RTX Remix bridge se nespustí.",
@@ -182,7 +182,7 @@ public static partial class Strings
         ["No internet connection"] = "Žádné připojení k internetu",
         ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (doporučeno)",
         ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan s více pamětí (RTX Remix bridge)",
-        ["Windows default (Direct3D 9)"] = "Výchozí Windows (Direct3D 9)",
+        ["Windows default (Direct3D 9)"] = "Výchozí ve Windows (Direct3D 9)",
         ["Fewer stutters; Apex Radiance is made and tested with it."] =
             "Méně trhání; Apex Radiance je s ním vyvíjen a testován.",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =

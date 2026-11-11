@@ -130,11 +130,11 @@ public static partial class Strings
         ["Checking the latest versions…"] = "Recherche des dernières versions…",
         ["Checking for updates…"] = "Recherche de mises à jour…",
         ["Close The Sims 3 to update."] = "Fermez The Sims 3 pour mettre à jour.",
-        ["Update now installs them."] = "Mettre à jour maintenant les installe.",
+        ["Update now installs them."] = "« Mettre à jour » les installe.",
         ["Graphics"] = "Graphismes",
         ["Checked at {0}."] = "Vérifié à {0}.",
         ["Test build {0}: kept as it is."] = "Version de test {0} : laissée telle quelle.",
-        ["Repair or remove sets the game right."] = "Réparer ou retirer remet le jeu en ordre.",
+        ["Repair or remove sets the game right."] = "« Réparer ou retirer » remet le jeu en état.",
         ["Changes applied"] = "Changements appliqués",
         ["Removed: {0}"] = "Retiré : {0}",
         ["The Sims 3 · {0}"] = "The Sims 3 · {0}",
@@ -146,7 +146,7 @@ public static partial class Strings
         ["Change components"] = "Modifier les composants",
         ["Apex Radiance is not installed in this game."] = "Apex Radiance n'est pas installé dans ce jeu.",
         ["{0} · test build"] = "{0} · version de test",
-        ["Install the official {0}"] = "Installer {0} officiel",
+        ["Install the official {0}"] = "Installer la version officielle {0}",
         ["No ASI loader in Game\\Bin: Apex Radiance and the other .asi mods do not load."] =
             "Aucun chargeur ASI dans Game\\Bin : Apex Radiance et les autres mods .asi ne se chargent pas.",
         ["{0} is missing: the RTX Remix bridge does not start."] =

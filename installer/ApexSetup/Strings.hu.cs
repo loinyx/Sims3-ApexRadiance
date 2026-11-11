@@ -104,7 +104,7 @@ public static partial class Strings
         ["{0} is the build for the other edition of the game; it makes the game show \"unofficial game modification\". Use the {1} build."] =
             "A(z) {0} a játék másik kiadásához készült; miatta a játék az \"unofficial game modification\" üzenetet mutatja. Használd a(z) {1} verziót.",
         ["NRaas ErrorTrap has no build known to work on EA app 1.69.47."] =
-            "Az NRaas ErrorTrap egyik ismert verziója sem működik az EA app 1.69.47 verzióval.",
+            "Az NRaas ErrorTrapnek nincs olyan verziója, amelyről biztosan tudni, hogy működik az EA app 1.69.47 verzióval.",
         ["{0} overrides game code Sims 3 Modernization also patches (not tested together)."] =
             "A(z) {0} olyan játékkódot ír felül, amelyet a Sims 3 Modernization is módosít (együtt nem tesztelték).",
         ["{0} is an old build with Apex inside; while it is in Game\\Bin, Apex Radiance stays off. Setup moves it to the backup folder (install the official Sims3SettingsSetter in its place if you used it)."] =
@@ -147,7 +147,7 @@ public static partial class Strings
         ["Change components"] = "Összetevők módosítása",
         ["Apex Radiance is not installed in this game."] = "Az Apex Radiance nincs telepítve ebben a játékban.",
         ["{0} · test build"] = "{0} · tesztverzió",
-        ["Install the official {0}"] = "Hivatalos {0} telepítése",
+        ["Install the official {0}"] = "A hivatalos {0} verzió telepítése",
         ["No ASI loader in Game\\Bin: Apex Radiance and the other .asi mods do not load."] =
             "Nincs ASI loader a Game\\Bin mappában: az Apex Radiance és a többi .asi mod nem töltődik be.",
         ["{0} is missing: the RTX Remix bridge does not start."] =

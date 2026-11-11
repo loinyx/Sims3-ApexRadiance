@@ -55,7 +55,7 @@ public static partial class Strings
         ["Wrong build"] = "Fel version",
         ["Update {0}"] = "Uppdatera {0}",
         ["Up to date"] = "Aktuell",
-        ["Setup could not finish"] = "Installationsprogrammet kunde inte slutföra",
+        ["Setup could not finish"] = "Installationen kunde inte slutföras",
         ["Close The Sims 3 first."] = "Stäng The Sims 3 först.",
         ["You're all set"] = "Allt är klart",
         ["Start The Sims 3, load a world and press Ctrl+Shift+F11 to open the Apex Radiance menu."] =
@@ -91,7 +91,7 @@ public static partial class Strings
         ["{0} in Game\\Bin loads a second copy of Apex Radiance."] =
             "{0} i Game\\Bin laddar en andra kopia av Apex Radiance.",
         ["Two ASI loaders ({0}) load every mod twice. Keep one: remove all but {1}."] =
-            "Två ASI loaders ({0}) laddar varje mod två gånger. Behåll en: ta bort alla utom {1}.",
+            "Två ASI-laddare ({0}) laddar varje mod två gånger. Behåll en: ta bort alla utom {1}.",
         ["Sims 3 Modernization's ts3native is the build for the other edition and does nothing. Turn it on in Components to install the right one."] =
             "Sims 3 Modernizations ts3native är versionen för den andra utgåvan och gör ingenting. Slå på den under Komponenter för att installera rätt version.",
         ["Sims 3 Modernization has no build for this game version ({0}), so its ts3native does nothing. Turn it off in Components."] =
@@ -111,11 +111,11 @@ public static partial class Strings
         ["Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. Setup sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup)."] =
             "ShortWaitSpin och ThreadStackDiet i Sims3Performance krockar med Sims 3 Modernization. Installationsprogrammet sätter båda till 0 (en kopia sparas som Sims3Performance.ini.apex-backup).",
         ["Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. Setup turns them off (a copy is kept as S3SS.toml.apex-backup)."] =
-            "Sims3SettingsSetters okomprimerade texturer hackar med RTX Remix bridge. Installationsprogrammet stänger av dem (en kopia sparas som S3SS.toml.apex-backup).",
+            "Sims3SettingsSetters okomprimerade texturer får spelet att hacka med RTX Remix bridge. Installationsprogrammet stänger av dem (en kopia sparas som S3SS.toml.apex-backup).",
         ["{0} sets client.targetProcess = {1}, but this game is {2}: the bridge does not start."] =
-            "{0} anger client.targetProcess = {1}, men det här spelet är {2}: bridge startar inte.",
+            "{0} anger client.targetProcess = {1}, men det här spelet är {2}: bryggan startar inte.",
         ["dxvk.conf lacks {0} or has other values: without them the game resets its graphics options or freezes on a resolution change under the bridge."] =
-            "dxvk.conf saknar {0} eller har andra värden: utan dem återställer spelet sina grafikalternativ eller fryser vid byte av upplösning med bridge.",
+            "dxvk.conf saknar {0} eller har andra värden: utan dem återställer spelet sina grafikalternativ eller fryser vid byte av upplösning med bryggan.",
         ["Mods\\Resource.cfg does not read {0}, so the game does not load it. Setup adds the Packages folder lines (a copy is kept as Resource.cfg.apex-backup)."] =
             "Mods\\Resource.cfg läser inte {0}, så spelet laddar den inte. Installationsprogrammet lägger till raderna för mappen Packages (en kopia sparas som Resource.cfg.apex-backup).",
         ["Fix settings"] = "Åtgärda inställningar",
@@ -130,11 +130,11 @@ public static partial class Strings
         ["Checking the latest versions…"] = "Söker efter de senaste versionerna…",
         ["Checking for updates…"] = "Söker efter uppdateringar…",
         ["Close The Sims 3 to update."] = "Stäng The Sims 3 för att uppdatera.",
-        ["Update now installs them."] = "Uppdatera nu installerar dem.",
+        ["Update now installs them."] = "”Uppdatera nu” installerar dem.",
         ["Graphics"] = "Grafik",
         ["Checked at {0}."] = "Kontrollerat {0}.",
         ["Test build {0}: kept as it is."] = "Testversion {0}: behålls som den är.",
-        ["Repair or remove sets the game right."] = "Reparera eller ta bort återställer spelet.",
+        ["Repair or remove sets the game right."] = "Under ”Reparera eller ta bort” kan du få ordning på spelet igen.",
         ["Changes applied"] = "Ändringarna har verkställts",
         ["Removed: {0}"] = "Borttaget: {0}",
         ["The Sims 3 · {0}"] = "The Sims 3 · {0}",
@@ -148,7 +148,7 @@ public static partial class Strings
         ["{0} · test build"] = "{0} · testversion",
         ["Install the official {0}"] = "Installera officiella {0}",
         ["No ASI loader in Game\\Bin: Apex Radiance and the other .asi mods do not load."] =
-            "Ingen ASI loader i Game\\Bin: Apex Radiance och de andra .asi-moddarna laddas inte.",
+            "Ingen ASI-laddare i Game\\Bin: Apex Radiance och de andra .asi-moddarna laddas inte.",
         ["{0} is missing: the RTX Remix bridge does not start."] = "{0} saknas: RTX Remix bridge startar inte.",
         ["Apply 1 change"] = "Verkställ 1 ändring",
         ["Apply {0} changes"] = "Verkställ {0} ändringar",
@@ -187,7 +187,7 @@ public static partial class Strings
         ["No internet connection"] = "Ingen internetanslutning",
         ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (rekommenderas)",
         ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan med mer minne (RTX Remix bridge)",
-        ["Windows default (Direct3D 9)"] = "Windows standard (Direct3D 9)",
+        ["Windows default (Direct3D 9)"] = "Windows-standard (Direct3D 9)",
         ["Fewer stutters; Apex Radiance is made and tested with it."] =
             "Färre hack; Apex Radiance är gjort och testat med det.",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =

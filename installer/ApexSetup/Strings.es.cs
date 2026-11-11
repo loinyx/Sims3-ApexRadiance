@@ -31,7 +31,7 @@ public static partial class Strings
         ["Try again"] = "Reintentar",
         ["Choose your game"] = "Elige tu juego",
         ["Setup found these installs. Pick the one you play."] =
-            "El instalador encontró estas instalaciones. Elige la que juegas.",
+            "El instalador encontró estas instalaciones. Elige con la que juegas.",
         ["Setup found no install. Browse for the game folder."] =
             "No se encontró ninguna instalación. Busca la carpeta del juego.",
         ["Browse for another folder"] = "Buscar otra carpeta",
@@ -130,11 +130,11 @@ public static partial class Strings
         ["Checking the latest versions…"] = "Buscando las últimas versiones…",
         ["Checking for updates…"] = "Buscando actualizaciones…",
         ["Close The Sims 3 to update."] = "Cierra The Sims 3 para actualizar.",
-        ["Update now installs them."] = "Actualizar ahora las instala.",
+        ["Update now installs them."] = "«Actualizar ahora» las instala.",
         ["Graphics"] = "Gráficos",
         ["Checked at {0}."] = "Comprobado a las {0}.",
         ["Test build {0}: kept as it is."] = "Versión de prueba {0}: se deja como está.",
-        ["Repair or remove sets the game right."] = "Reparar o quitar deja el juego como estaba.",
+        ["Repair or remove sets the game right."] = "«Reparar o quitar» deja el juego como estaba.",
         ["Changes applied"] = "Cambios aplicados",
         ["Removed: {0}"] = "Quitado: {0}",
         ["The Sims 3 · {0}"] = "The Sims 3 · {0}",

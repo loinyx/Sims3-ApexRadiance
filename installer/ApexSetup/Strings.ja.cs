@@ -49,7 +49,7 @@ public static partial class Strings
         ["Not available for this game version: it supports Steam 1.67.2 and EA app 1.69.47."] =
             "このゲームのバージョンでは利用できません。対応バージョンは Steam 1.67.2 と EA app 1.69.47 です。",
         ["Wrong build"] = "ビルド違い",
-        ["Update {0}"] = "{0} に更新",
+        ["Update {0}"] = "更新：{0}",
         ["Up to date"] = "最新",
         ["Setup could not finish"] = "セットアップを完了できませんでした",
         ["Close The Sims 3 first."] = "先に The Sims 3 を閉じてください。",
@@ -86,7 +86,7 @@ public static partial class Strings
         ["{0} in Game\\Bin loads a second copy of Apex Radiance."] =
             "Game\\Bin にある {0} が Apex Radiance の 2 つ目のコピーを読み込みます。",
         ["Two ASI loaders ({0}) load every mod twice. Keep one: remove all but {1}."] =
-            "2 つの ASI ローダー（{0}）がすべての MOD を 2 回読み込みます。1 つだけ残します：{1} 以外を削除してください。",
+            "2 つの ASI ローダー（{0}）がすべての MOD を 2 回読み込みます。1 つだけ残し、{1} 以外を削除してください。",
         ["Sims 3 Modernization's ts3native is the build for the other edition and does nothing. Turn it on in Components to install the right one."] =
             "Sims 3 Modernization の ts3native は別エディション用のビルドで、動作しません。正しいものをインストールするには「コンポーネント」でオンにしてください。",
         ["Sims 3 Modernization has no build for this game version ({0}), so its ts3native does nothing. Turn it off in Components."] =
