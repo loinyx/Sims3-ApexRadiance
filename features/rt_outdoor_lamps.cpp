@@ -572,6 +572,11 @@ struct Slot {
     uint64_t underWaitSince = 0; // tick at which this shown map began waiting for the worker's share
     std::shared_ptr<struct UnderJob> uJob;
     bool dynCurrent = false;        // the mask buffer holds the under-floor share with "all" left to the shader
+    // (more lamps than one batch) the CPU's "all" per masked texel, for the lamps and points of allSig; allCurrent: the mask buffer
+    // holds them (10/11: a 45-lamp lot computed them again at every relight, 60-187 ms of the render thread, 88 hitches)
+    std::vector<float> allVals;
+    uint64_t allSig = 0;
+    bool allCurrent = false;
     // (GPU room lamps, developer) the lamps of room 0's list it does not draw that are kept as a kept room's (outdoor_delta.h
     // Room0Export::kept0): their parts (MANAGED, at their texels' places, by lamp), and each one's law now
     IDirect3DVertexBuffer9* kvb = nullptr;
@@ -605,7 +610,11 @@ struct Ask {
     DWORD at = 0;
     int count = 0;
     bool logged = false;
+    DWORD keptAt = 0; // when its kept solve was first seen (its sends start again only once it held it kKeptHoldMs)
 };
+// (10/11) a kept solve the memory budget evicts at once gave the room a fresh round of sends each time: after 21:07, about 195
+// sends a minute to neighbour lots, each '(1 of 3)', each a full room-0 solve of the game. Its count resets only once held this long
+constexpr DWORD kKeptHoldMs = 10000;
 std::vector<std::unique_ptr<Slot>> g_slots;
 uintptr_t g_tracker = 0;
 uint64_t g_lotId = 0;
@@ -1423,7 +1432,7 @@ bool UploadSlot(IDirect3DDevice9* dev, Slot& s, const Job& j, Prepared& p) {
     s.kRanges.clear(), s.kLamps.clear(), s.kX = false;
     s.masked.clear(), s.maskedPos.clear(), s.gated.clear(), s.under.clear(), s.uA.clear(), s.uU.clear(), s.uSnap.clear(), s.uIds.clear();
     s.underSig = 0, s.underExact = false, s.underDirty = false, s.underWaitSince = 0, s.uJob.reset();
-    s.dynCurrent = false;
+    s.dynCurrent = false, s.allCurrent = false, s.allVals.clear();
     s.map = RtLampGpu::Map{};
     D3DSURFACE_DESC d{};
     // A room's own map may be smaller than the class's working map the solve wrote: the commit's copy 0x006191D0 takes
@@ -1984,8 +1993,13 @@ void Frame(IDirect3DDevice9* dev) {
         if (baseOnly == act) ver = 0;
         if (ver) {
             auto at = g_askedSolve.find(room);
-            if (at != g_askedSolve.end()) g_askedSolve.erase(at); // (kept: its sends start again if it loses it)
-        }
+            if (at != g_askedSolve.end()) { // (kept: its sends start again if it loses it after holding it a while)
+                const DWORD now = std::max<DWORD>(GetTickCount(), 1);
+                if (!at->second.keptAt) at->second.keptAt = now;
+                else if (now - at->second.keptAt >= kKeptHoldMs) g_askedSolve.erase(at);
+            }
+        } else if (auto at = g_askedSolve.find(room); at != g_askedSolve.end())
+            at->second.keptAt = 0; // (lost before it held it: its count stands)
         if (!ver) {
             // its kept solve is being renewed (a solve of room 0 drops it until its end): its maps relit from the last one stay
             // bound and count while every one of them is relit
@@ -2888,7 +2902,7 @@ void Frame(IDirect3DDevice9* dev) {
             const bool current = j->sig == UnderSig(sBakeSig, sBase);
             if ((current || (dragging && j->sig != s.underSig)) && j->under.size() == s.masked.size()) {
                 s.under = j->under, s.uA = j->A, s.uU = j->U, s.uSnap = j->bake, s.uIds = j->ids, s.uBase = j->base;
-                s.underSig = j->sig, s.underExact = current, s.underDirty = true, s.dynCurrent = false;
+                s.underSig = j->sig, s.underExact = current, s.underDirty = true, s.dynCurrent = false, s.allCurrent = false;
             }
             QueryPerformanceCounter(&jt1);
             maskJobsMs += Ms(jt0, jt1);
@@ -2973,7 +2987,15 @@ void Frame(IDirect3DDevice9* dev) {
         const bool maskGpu = mine.size() <= static_cast<size_t>(RtLampGpu::kAtlasLamps);
         if (s.dyn && !s.masked.empty()) {
             const uint64_t us = UnderSig(sBakeSig, sBase);
-            bool write = !maskGpu || !s.dynCurrent;
+            uint64_t allSig = 0;
+            if (!maskGpu) { // (what "all" depends on: the lamps' laws and mults, the threshold; the masked points only change with
+                            // the slot's rebuild, which clears allVals)
+                allSig = 1469598103934665603ull;
+                for (const auto& l : mine) Mix(allSig, &l, sizeof l);
+                Mix(allSig, &s.thr, sizeof s.thr);
+            }
+            const bool allNew = !maskGpu && (allSig != s.allSig || s.allVals.size() != s.masked.size());
+            bool write = maskGpu ? !s.dynCurrent : (allNew || !s.allCurrent);
             if (s.underSig != us) {
                 if (dragging && (s.under.size() != s.masked.size() || s.uA.size() != s.masked.size() || s.uBase != sBase)) {
                     // (14/10, drag solves) never the whole share on this thread while a lamp is dragged (10-30 ms a relight in a
@@ -3026,18 +3048,22 @@ void Frame(IDirect3DDevice9* dev) {
             maskLockMs += Ms(lk0, lk1);
             if (locked) {
                 auto* dyn = static_cast<RtLampGpu::TexelDyn*>(q);
-                for (size_t i = 0; i < s.masked.size(); i++) {
-                    float vis = 0, all = 0;
-                    if (!maskGpu)
-                        for (const auto& l : mine) RtLampModel::AddMask(l, &s.maskedPos[i * 6], 1.0f, s.thr, vis, all);
-                    dyn[s.masked[i]] = RtLampGpu::TexelDyn{{all, s.under[i], 0, 0}};
+                if (allNew) {
+                    s.allVals.assign(s.masked.size(), 0.0f);
+                    for (size_t i = 0; i < s.masked.size(); i++) {
+                        float vis = 0;
+                        for (const auto& l : mine) RtLampModel::AddMask(l, &s.maskedPos[i * 6], 1.0f, s.thr, vis, s.allVals[i]);
+                    }
+                    s.allSig = allSig;
                 }
+                for (size_t i = 0; i < s.masked.size(); i++) dyn[s.masked[i]] = RtLampGpu::TexelDyn{{maskGpu ? 0.0f : s.allVals[i], s.under[i], 0, 0}};
                 target->Unlock();
                 if (s.dynNext) {
                     std::swap(s.dyn, s.dynNext);
                     s.map.dyn = s.dyn;
                 }
                 s.dynCurrent = maskGpu;
+                s.allCurrent = !maskGpu;
                 LARGE_INTEGER fl1{};
                 QueryPerformanceCounter(&fl1);
                 maskFillMs += Ms(lk1, fl1);
