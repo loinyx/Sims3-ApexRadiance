@@ -396,11 +396,8 @@ bullets, then "All N changes", folded when it has highlights: every line grouped
 text before ": ", or a full-width colon in CJK; lines without an area last), each line led by a small tinted tag, New,
 Better or Fix. The footer reads "The last 8 versions" beside See all versions.
 
-**Update card.** After an update, the first time the menu is available (and not after a new installation: the welcome
-marks the newest version as seen), a version with a headline shows a question card with the menu closed: "Apex
-Radiance is now X", the headline and, when the version moved saved settings, "Your settings are kept." with what moved.
-What's new opens the menu with the popover open; either answer sets `[ui] changelog_seen`, which also clears the
-version's dot.
+**After an update** nothing pops up over the game: the version in the footer shows a dot until What's new is opened,
+which sets `[ui] changelog_seen` (a new installation marks the newest version as seen: no dot).
 The release heading comes from `apex_changelog.cpp`; the footer comes from `apex_version.h`. Keep the newest
 release entry aligned with the build version, and include intervening releases rather than skipping their history.
 Each player-facing bullet must be translated in all 21 languages, including the seventeen single-language tables.
