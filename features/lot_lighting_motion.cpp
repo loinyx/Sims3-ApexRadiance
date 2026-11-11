@@ -27,8 +27,9 @@
 // ---- The patch ----
 //   The 5 bytes of the CALL at 0x00ADB95D point to Hook_LotLightBudget (written with every other thread suspended and none
 //   inside them; restored the same way). The hook calls 0x00ADB120 and returns, in ST0 (a float return), either the
-//   game's value or, while the camera moves, max(0.25, min(game, game x budgetMs / 15)). Budgets >= 100 ms (tool mode)
-//   are never changed. No other code is touched: the Frame Profiler's lot lighting targets (the entry of 0x00ADB8F0 and
+//   game's value or, while the camera moves, max(floor, min(game, game x budgetMs / 15)): floor 0.25, and game x 3/15
+//   for a loading lot (the game's 30 / 10 ms budgets, chosen by [this+0x4F]). Budgets >= 100 ms (tool mode) are never
+//   changed. No other code is touched: the Frame Profiler's lot lighting targets (the entry of 0x00ADB8F0 and
 //   the CALL 0x00ADB9AD) are other bytes, and it keeps timing (the room solves receive the scaled budget).
 //
 // ---- Wall shading gate (feature "WallShadingWhileMoving"; research\engine_map\full.asm, Steam 1.67.2) ----
@@ -95,9 +96,12 @@ using SlotChain::Layer;
 using SlotChain::Site;
 
 constexpr float kPriorityMs = 15.0f;       // the game's budget for a priority lot (0x00ADB120, constant 0x00F9A62C)
-constexpr float kOtherLotMs = 5.0f;        // and for another lot (constant 0x00FBD498); while loading 30 / 10 (0x011833D8 / 0x01045CCC)
+constexpr float kOtherLotMs = 5.0f;        // and for another lot (constant 0x00FBD498)
+constexpr float kPriorityLoadingMs = 30.0f; // the same while the lot loads ([mgr+0x4F]; constants 0x011833D8 / 0x01045CCC):
+constexpr float kOtherLoadingMs = 10.0f;    // these two values are how the hook knows a lot is loading
 constexpr float kLeaveAloneMs = 100.0f;    // budgets from here up (the tool mode's 1000, the synchronous solve's 60,000) are the game's
 constexpr float kMinMs = 0.25f;            // never below
+constexpr float kLoadingShare = 3.0f / kPriorityMs; // a loading lot never below this share of the game's budget (6 / 2 ms)
 constexpr float kLampEditMs = 25.0f;       // the lot being played while a lamp edit's rooms wait, camera still (LevelLightShare)
 constexpr float kRefineMs = 6.0f;          // many lamps' rooms refined after their quick pass (RoomLightQueue::Refining)
 constexpr float kEditMovingMs = 6.0f;      // (12/10) a lamp edit's room is current while the camera moves: at most this
@@ -262,6 +266,11 @@ bool MovingAt(uint64_t now) {
     return last && now - last <= kHoldMs;
 }
 
+// The least a lowered budget gets: kMinMs, and for a loading lot 3/15 of the game's budget. At 1 ms while moving a loading
+// lot got 0.67 or 2 ms and a lot requested while panning finished only when the camera stopped (requested at 3.3 s, done
+// at 26 s; the same lot later in 0.5 s). The light is the same, only finished sooner.
+float FloorMs(float game) { return game == kPriorityLoadingMs || game == kOtherLoadingMs ? game * kLoadingShare : kMinMs; }
+
 // The lot lighting update's budget call (thiscall, ret, ST0): a float return is ST0 in every x86 convention
 std::atomic<uint32_t> g_drainSpent{0}; // float bits: Faster room lighting's drain time this frame (NoteDrainSpent)
 std::atomic<long> c_spreadCapped{0};
@@ -269,10 +278,10 @@ float __fastcall Hook_LotLightBudget(void* mgr, void* edx) {
     const float game = reinterpret_cast<BudgetFn>(g_budgetFn)(mgr, edx);
     // (14/10, drag solves) the flush once a dragged lamp is still (the rooms that waited for the stop, the sends left out):
     // the frame's solves together stay under the spread cap, with no edit boost; the lot being played gets what the drain
-    // left of it, the others the least (DragLite::SolveCapMs)
+    // left of it, the others the least (DragLite::SolveCapMs); a loading lot never below FloorMs
     if (const float cap = game > 0.0f && game < kLeaveAloneMs ? DragLite::SolveCapMs() : 0.0f; cap > 0.0f) {
         const float drain = std::bit_cast<float>(g_drainSpent.load(std::memory_order_relaxed));
-        const float out = game >= kPriorityMs ? std::max(kMinMs, cap - drain) : std::min(game, kMinMs);
+        const float out = game >= kPriorityMs ? std::max(FloorMs(game), cap - drain) : std::min(game, FloorMs(game));
         c_spreadCapped.fetch_add(1, std::memory_order_relaxed);
         g_lastGame.store(std::bit_cast<uint32_t>(game), std::memory_order_relaxed);
         g_lastOut.store(std::bit_cast<uint32_t>(out), std::memory_order_relaxed);
@@ -282,7 +291,7 @@ float __fastcall Hook_LotLightBudget(void* mgr, void* edx) {
     // other lots keep the least, as under the cap
     if (game > 0.0f && game < kPriorityMs && TesterToggles::dragSpreadCap.load(std::memory_order_relaxed) && DragLite::OwnRoomsWaiting() &&
         DragLite::Settling())
-        return std::min(game, kMinMs);
+        return std::min(game, FloorMs(game));
     if (!g_on.load(std::memory_order_acquire)) return game;
     c_calls.fetch_add(1, std::memory_order_relaxed);
     const uint64_t now = GetTickCount64();
@@ -302,7 +311,7 @@ float __fastcall Hook_LotLightBudget(void* mgr, void* edx) {
     const bool paced = (boosted || settling) && PerfToggles::MotionPacedRaise.load(std::memory_order_relaxed);
     if ((paced || (!boosted && !settling)) && moving && game > 0.0f && game < kLeaveAloneMs) {
         const float scaled = game * (static_cast<float>(g_budgetMs.load(std::memory_order_relaxed)) / kPriorityMs);
-        out = std::max(kMinMs, std::min(game, scaled));
+        out = std::max(FloorMs(game), std::min(game, scaled));
         if (paced) {
             const float raised = out + (game - out) * g_settleScale.load(std::memory_order_relaxed);
             if (raised > out) out = raised;
