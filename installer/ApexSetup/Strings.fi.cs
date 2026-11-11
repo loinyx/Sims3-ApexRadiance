@@ -211,6 +211,7 @@ public static partial class Strings
         ["No internet connection"] = "Ei internetyhteyttä",
         ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (suositus)",
         ["Vulkan with more memory (RTX Remix bridge, experimental)"] = "Vulkan, enemmän muistia (RTX Remix bridge, kokeellinen)",
+        ["The RTX Remix bridge needs a graphics card with Vulkan 1.3 (found: {0})."] = "RTX Remix bridge vaatii näytönohjaimen, jossa on Vulkan 1.3 (löytyi: {0}).",
         ["Windows default (Direct3D 9)"] = "Windowsin oletus (Direct3D 9)",
         ["Fewer stutters; Apex Radiance is made and tested with it."] = "Vähemmän nykimistä; Apex Radiance on tehty ja testattu sen kanssa.",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =

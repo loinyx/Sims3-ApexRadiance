@@ -220,6 +220,7 @@ public static partial class Strings
         ["No internet connection"] = "Keine Internetverbindung",
         ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (empfohlen)",
         ["Vulkan with more memory (RTX Remix bridge, experimental)"] = "Vulkan mit mehr Speicher (RTX Remix bridge, experimentell)",
+        ["The RTX Remix bridge needs a graphics card with Vulkan 1.3 (found: {0})."] = "Die RTX Remix bridge braucht eine Grafikkarte mit Vulkan 1.3 (gefunden: {0}).",
         ["Windows default (Direct3D 9)"] = "Windows-Standard (Direct3D 9)",
         ["Fewer stutters; Apex Radiance is made and tested with it."] =
             "Weniger Ruckler; Apex Radiance wird damit entwickelt und getestet.",

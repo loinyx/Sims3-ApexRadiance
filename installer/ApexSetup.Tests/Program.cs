@@ -523,6 +523,12 @@ finally
     }
 }
 
+// The bridge needs Vulkan 1.3: the driver's packed version reads right, and this PC's cards can be asked
+Check(Gpu.Decode((1u << 22) | (3u << 12) | 280) == new Version(1, 3) && Gpu.Decode((1u << 22) | (2u << 12) | 170) < Gpu.Needed,
+      "Vulkan 1.3 passes and 1.2 does not");
+try { var (vk, card) = Gpu.Vulkan(); Console.WriteLine($"info this PC: {card ?? "no Vulkan card"} Vulkan {vk?.ToString() ?? "-"}"); }
+catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: " + e.Message); }
+
 Console.WriteLine(failures == 0 ? "ALL PASSED" : failures + " FAILED");
 return failures == 0 ? 0 : 1;
 

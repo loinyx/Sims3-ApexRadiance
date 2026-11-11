@@ -9,7 +9,7 @@ only what differs from the player's choice.
 | Part | Source | Where |
 |---|---|---|
 | Apex Radiance (required) | `loinyx/Sims3-ApexRadiance` latest release | `Game\Bin\ApexRadiance.asi` |
-| Renderer: DXVK (recommended), RTX Remix bridge, or the game's own Direct3D 9 | `doitsujin/dxvk` (x32 `d3d9.dll`); the bridge zip of the Apex release | `Game\Bin` (`client.targetProcess` set to the game's exe) |
+| Renderer: DXVK (recommended), RTX Remix bridge (only with a Vulkan 1.3 graphics card, asked from `vulkan-1.dll`), or the game's own Direct3D 9 | `doitsujin/dxvk` (x32 `d3d9.dll`); the bridge zip of the Apex release | `Game\Bin` (`client.targetProcess` set to the game's exe) |
 | Sims3SettingsSetter | `sims3fiend/Sims3SettingsSetter` | `Game\Bin` |
 | Sims 3 Modernization | `rodneypantonial/sims3-modernization` (Steam or EA zip by edition) | `ts3native` in `Game\Bin`, `ts3fixes.package` in `Mods\Packages` |
 | MonoPatcher | `LazyDuchess/MonoPatcher` (its bundled loader is left out) | `MonoPatcher.asi` in `Game\Bin`, its package in `Mods\Packages\MonoPatcher` |

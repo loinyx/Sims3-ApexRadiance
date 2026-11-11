@@ -94,7 +94,20 @@ public sealed partial class MainWindow : Window
         _timer.Start();
         Localize();
         Show(Welcome);
+        _ = DetectVulkanAsync();
         await LoadReleasesAsync();
+    }
+
+    // The card's Vulkan version, asked once off the UI thread (loading the drivers takes a moment); null until known or
+    // when the driver could not be asked (the bridge then stays available)
+    (Version? Version, string? Card)? _vulkan;
+    bool BridgeBlocked => _vulkan is { } vk && (vk.Version is null || vk.Version < Gpu.Needed);
+
+    async Task DetectVulkanAsync()
+    {
+        try { _vulkan = await Task.Run(Gpu.Vulkan); }
+        catch (Exception e) { App.Log(e); return; }
+        if (BridgeBlocked && _step == ComponentsStep) RefreshComponents();
     }
 
     static readonly string? Preview = Environment.GetEnvironmentVariable("APEX_SETUP_PREVIEW_LATEST") is { Length: > 0 } pv ? pv : null;
@@ -588,7 +601,9 @@ public sealed partial class MainWindow : Window
     readonly List<string> _rendererTags = new();
     void FillRenderer(State s)
     {
+        // the bridge needs Vulkan 1.3; one already installed stays listed, so it can be kept or removed
         var tags = new List<string> { RDxvk, RBridge, RNative };
+        if (BridgeBlocked && s.Layer != Layer.Bridge) tags.Remove(RBridge);
         if (s.Layer == Layer.Other) tags.Add(RKeep);
         var titles = tags.Select(t => t switch
         {
@@ -621,6 +636,7 @@ public sealed partial class MainWindow : Window
             : Newer(latest, s.ApexVersion) ? T("Updates {0} to {1}. Your settings stay.", s.ApexVersion, latest)
             : T("{0} is installed and up to date: nothing to change.", s.ApexVersion);
 
+        if (BridgeBlocked && _renderer == RBridge && s.Layer != Layer.Bridge) _renderer = RDxvk;
         FillRenderer(s);
         var cur = RendererOf(s);
         var changed = _renderer != cur;
@@ -631,6 +647,9 @@ public sealed partial class MainWindow : Window
             RNative => T("Works, but Apex Radiance is tested with DXVK."),
             _ => T("Your d3d9.dll stays as it is."),
         };
+        if (BridgeBlocked && _renderer != RBridge && _vulkan is { } vk)
+            BridgeDetail.Text += "\n" + T("The RTX Remix bridge needs a graphics card with Vulkan 1.3 (found: {0}).",
+                vk.Card is null ? "Vulkan —" : $"{vk.Card}, Vulkan {vk.Version}");
 
         // the game resets its graphics options when the card it sees changes: DXVK's TS3W profile and the bridge report a
         // GeForce GTX 580; the game's own D3D9 the real card (DXVK on TS3.exe: unverified, so treated as a change)

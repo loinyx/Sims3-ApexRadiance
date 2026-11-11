@@ -185,6 +185,7 @@ public static partial class Strings
         ["No internet connection"] = "沒有網際網路連線",
         ["Vulkan, DXVK (recommended)"] = "Vulkan、DXVK（建議）",
         ["Vulkan with more memory (RTX Remix bridge, experimental)"] = "Vulkan，更多可用記憶體（RTX Remix bridge，實驗性）",
+        ["The RTX Remix bridge needs a graphics card with Vulkan 1.3 (found: {0})."] = "RTX Remix bridge 需要支援 Vulkan 1.3 的顯示卡（偵測到：{0}）。",
         ["Windows default (Direct3D 9)"] = "Windows 預設（Direct3D 9）",
         ["Fewer stutters; Apex Radiance is made and tested with it."] = "卡頓更少；Apex Radiance 以它開發和測試。",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] = "為大型世界多保留約 600 MB 可用記憶體。需要支援 Vulkan 的顯示卡。如果遊戲使用它時出現問題，請選擇 DXVK。",

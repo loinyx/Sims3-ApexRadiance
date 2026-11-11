@@ -224,6 +224,7 @@ public static partial class Strings
         ["No internet connection"] = "Nincs internetkapcsolat",
         ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (ajánlott)",
         ["Vulkan with more memory (RTX Remix bridge, experimental)"] = "Vulkan több memóriával (RTX Remix bridge, kísérleti)",
+        ["The RTX Remix bridge needs a graphics card with Vulkan 1.3 (found: {0})."] = "Az RTX Remix bridge-hez Vulkan 1.3-at támogató videokártya kell (talált: {0}).",
         ["Windows default (Direct3D 9)"] = "Windows alapértelmezett (Direct3D 9)",
         ["Fewer stutters; Apex Radiance is made and tested with it."] =
             "Kevesebb akadozás; az Apex Radiance ezzel készül, és ezzel tesztelik.",
