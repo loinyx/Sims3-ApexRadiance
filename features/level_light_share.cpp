@@ -9522,13 +9522,15 @@ bool SendRoomZero(uintptr_t tracker, int story) {
 
 // ---- the lot capture test (fast lot pictures): its inputs, read on each gather and by ProbeLotCapture ----
 uint64_t WorldActiveLotId(int* ok) {
-    // the world's active lot getter 0x00C5FB00 (mov eax,[ecx+170h]; mov edx,[ecx+174h]; ret) of Steam 1.67.2, checked once
+    // the world's active lot getter (mov eax,[ecx+170h]; mov edx,[ecx+174h]; ret: Steam 1.67.2 0x00C5FB00, EA 1.69.47 0x00C5EF10),
+    // found by its whole body, so its offsets are the ones read below; decided once the scan has run
     static std::atomic<int> s_getter{-1}; // (render and gather threads: both compute the same answer)
     if (s_getter.load(std::memory_order_relaxed) < 0) {
-        static const BYTE kGetter[13] = {0x8B, 0x81, 0x70, 0x01, 0x00, 0x00, 0x8B, 0x91, 0x74, 0x01, 0x00, 0x00, 0xC3};
-        BYTE got[sizeof kGetter] = {};
-        s_getter.store(GameAddr::Get(GameAddr::Id::WorldManagerPtr) && MemPatch::ReadBytes(0x00C5FB00, got, sizeof got) &&
-                       std::memcmp(got, kGetter, sizeof got) == 0, std::memory_order_relaxed);
+        if (!GameAddr::Resolved()) {
+            *ok = 0;
+            return 0;
+        }
+        s_getter.store(GameAddr::Get(GameAddr::Id::WorldManagerPtr) && GameAddr::Get(GameAddr::Id::WorldActiveLotGetter), std::memory_order_relaxed);
     }
     *ok = s_getter.load(std::memory_order_relaxed);
     if (!*ok) return 0;

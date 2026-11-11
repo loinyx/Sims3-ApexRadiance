@@ -1286,8 +1286,8 @@ logs.
 
 `ProbeLotCapture` (every 250 ms, from `OnPresent`) applies `SetupLotPolicy::Gate` (`features/setup_lot_policy.h`) to
 each lot at the high quality: the lot is a lot capture when its story manager has the high quality (+0x288), its id
-(+0x90/+0x94) is not the world's active lot (WorldManager +0x170/+0x174, the getter 0x00C5FB00, whose bytes are
-checked once), the game does not mark it as its priority lot, and *High quality on every lot* is off. It writes one
+(+0x90/+0x94) is not the world's active lot (WorldManager +0x170/+0x174, read as the getter `WorldActiveLotGetter` does:
+0x00C5FB00 on Steam 1.67.2, found by its whole body on other versions), the game does not mark it as its priority lot, and *High quality on every lot* is off. It writes one
 `[SetupLot]` line when a lot gets the high quality or its decision changes, and one when a lot capture ends.
 The priority lot comes from `RoomLightQueue::PlayedLot` (bytes checked, fault-guarded; unknown counts as priority). The
 same test also runs on each room gather in `OutdoorGather`, where it gates: the number of gathers it

@@ -372,6 +372,7 @@ at +n" = the target of the CALL there, "dword at +n" = the value there.
 | ResolutionRequest | 0x0077D1A0 | Sig | `57 E8 ?? ?? ?? ?? 8B F8 85 FF 74 7D 56 6A 00 6A 00 6A 00 6A 00 68 ?? ?? ?? ?? 6A 18 E8` +0 | matches 1 (EA 1.69.47: 0x0077E310) |
 | RendererGlobal | 0x011CECC8 | Sig (dword) | renderer getter and setter: `A1 ?? ?? ?? ?? C3 CC CC CC CC CC CC CC CC CC CC 8B 4C 24 04 A1 ?? ?? ?? ?? 89 0D ?? ?? ?? ?? C3 83 EC 30 53 8B D9 8B 83 E0 00 00 00` dword at +1 | matches 1 (EA 1.69.47: 0x01228D78) |
 | ResolutionHandler | 0x007F1B70 | Sig | `83 EC 30 8B 44 24 34 3D 46 32 98 07` +0 | matches 1 (EA 1.69.47: 0x007F1AB0) |
+| WorldActiveLotGetter | 0x00C5FB00 | Sig | the whole body `8B 81 70 01 00 00 8B 91 74 01 00 00 C3` +0 | matches 1 (EA 1.69.47: 0x00C5EF10) |
 | ResolutionUi | 0x011D8C48 | Sig (dword) | in the handler: `8A 5F 24 8B 0D ?? ?? ?? ?? 85 C9 74 05 E8 ?? ?? ?? ?? 84 DB 0F 94 C1 51 8B CF E8` dword at +5 | matches 1 (EA 1.69.47: 0x01232CF8) |
 
 The ids after the first one of a `Multi` / `CallersOf` entry take the following matches by address: ArmSiteRemoval

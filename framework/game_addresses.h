@@ -276,6 +276,7 @@ enum class Id : uint16_t {
     RendererGlobal,    // dword 0x011CECC8: the game's renderer (+0x2C/+0x30 size, +0x24 windowed, +0x8E reset pending)
     ResolutionHandler, // FUN_007f1b70: the handler of message 0x07983246 (checked only: the request needs it)
     ResolutionUi,      // dword 0x011D8C48: that handler's object, set once the game's UI listens
+    WorldActiveLotGetter, // FUN_00c5fb00: mov eax,[ecx+170h]; mov edx,[ecx+174h]; ret (the world's active lot, level_light_share)
     MonoTypeGetObject, // FUN_00ea8a00 cdecl(MonoDomain*, MonoType*): mono_type_get_object (domain lock at +0, type_hash at +0x40)
     MonoDomainFree, // FUN_00e75340 cdecl(MonoDomain*, int force): mono_domain_free
     ObjMapFind, // FUN_00939100 thiscall(map; out[2], key*), ret 8: the object service's hash map find (1033 buckets)

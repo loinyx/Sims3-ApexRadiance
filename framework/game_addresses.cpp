@@ -293,6 +293,7 @@ constexpr Info kInfo[] = {
     {"RendererGlobal", 0x011CECC8},
     {"ResolutionHandler", 0x007F1B70},
     {"ResolutionUi", 0x011D8C48},
+    {"WorldActiveLotGetter", 0x00C5FB00},
     {"MonoTypeGetObject", 0x00EA8A00},
     {"MonoDomainFree", 0x00E75340},
     {"ObjMapFind", 0x00939100},
@@ -744,6 +745,7 @@ const Entry kTable[] = {
     {Id::RendererGlobal, K::Sig, W::Image, None, 0, {{"A1 ?? ?? ?? ?? C3 CC CC CC CC CC CC CC CC CC CC 8B 4C 24 04 A1 ?? ?? ?? ?? 89 0D ?? ?? ?? ?? C3 83 EC 30 53 8B D9 8B 83 E0 00 00 00", 1, M::Dword}, NOSIG}},
     {Id::ResolutionHandler, K::Sig, W::Text, None, 0, {{"83 EC 30 8B 44 24 34 3D 46 32 98 07", 0, M::At}, NOSIG}},
     {Id::ResolutionUi, K::Sig, W::Image, None, 0, {{"8A 5F 24 8B 0D ?? ?? ?? ?? 85 C9 74 05 E8 ?? ?? ?? ?? 84 DB 0F 94 C1 51 8B CF E8", 5, M::Dword}, NOSIG}},
+    {Id::WorldActiveLotGetter, K::Sig, W::Text, None, 0, {{"8B 81 70 01 00 00 8B 91 74 01 00 00 C3", 0, M::At}, NOSIG}},
     {Id::WindowRepaintJump, K::Sig, W::Text, None, 0, {{"F6 46 08 08 57 74 ?? 39 5E 20 C6 46 1C 01 75 ?? 8B 46 70 53 53 50 FF 15", 14, M::At}, NOSIG}},
     // ---- Room to save: the update thunk (mov eax,[ecx+14h]; push eax; add ecx,18h; call; ret 8), the shrink of both caches,
     //      the world save call before "mov eax,0Ch" (Error 12); every signature unique on Steam (checked on TS3W.exe 05/10) ----
