@@ -97,7 +97,9 @@ public static class Strings
         ["Installs {0} into Game\\Bin."] = "Instala a {0} em Game\\Bin.",
         ["Replaces the installed copy with {0}. Your settings stay."] = "Substitui a cópia instalada pela {0}. As suas configurações ficam.",
         ["Updates {0} to {1}. Your settings stay."] = "Atualiza da {0} para a {1}. As suas configurações ficam.",
-        ["Also available"] = "Também disponível",
+        ["Recommended with Apex"] = "Recomendados com o Apex",
+        ["No updates available"] = "Nenhuma atualização disponível",
+        ["Everything in this game is on its latest version."] = "Tudo neste jogo está na versão mais recente.",
         ["Not available for this game version: it supports Steam 1.67.2 and EA app 1.69.47."] =
             "Indisponível nesta versão do jogo: ele suporta Steam 1.67.2 e EA app 1.69.47.",
         ["Wrong build"] = "Versão errada",

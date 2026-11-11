@@ -308,6 +308,9 @@ public sealed partial class MainWindow : Window
             SetInfo(WelcomeInfo, InfoBarSeverity.Informational, T("Updates available"),
                 string.Join(", ", lines) + ". " + (_running ? T("Close The Sims 3 to update.") : T("Update now installs them.")));
         }
+        // a game with Apex, checked and current: say so, so the player knows the check ran
+        else if (_game is not null && _state?.ApexVersion is not null && !_loading)
+            SetInfo(WelcomeInfo, InfoBarSeverity.Success, T("No updates available"), T("Everything in this game is on its latest version."));
         else WelcomeInfo.IsOpen = false;
         RefreshStatus();
     }
