@@ -1621,6 +1621,9 @@ void OnPreReset(IDirect3DDevice9* dev) {
         s->relit = false; // (14/10: its preblur texture is a MANAGED one: kept, and the slot stays built; only the copy is made again)
         if (s->pvb) s->pvb->Release(), s->pvb = nullptr, s->built = s->ok = false; // (DEFAULT: prepared again; its base lacks their lamps)
         ReleaseHiPoints(*s);
+        // (DEFAULT since 10/11: filled again from inBaseVal / inUvSrc)
+        if (s->inBase) s->inBase->Release(), s->inBase = nullptr, s->inBaseDirty = true;
+        if (s->inUv) s->inUv->Release(), s->inUv = nullptr, s->inUvBuilt.clear();
     }
     if (g_eng) g_eng->ReleaseDefault();
     GpuRoomLamps::ReleaseAll(); // (their buffers are DEFAULT: made again on use)
@@ -3757,6 +3760,21 @@ bool ReadRoomAmbient(const void* room, float* c) {
 // new kept solve of a room in the class its texels were matched in updates their entries (a wall texel its matched top-row texel's,
 // by its place in the room's map; a floor texel the top row's mean) and the map, in the frame it is kept, so the ratio's base and
 // the floors' light follow their room with no prepare (a prepare lagged them 100-500 ms per room solve: the "older kept solve" lines)
+// (10/11) A texture the compose reads, filled on the CPU: made DEFAULT and filled through a SYSTEMMEM texture freed at once. MANAGED
+// kept a full copy in the game's address space (under the RTX Remix bridge, freed after 2 s idle and fetched back, a wait, at the
+// next lock). DEFAULT ones are released at a device reset (OnPreReset) and filled again. fill(bits, pitch); false: none made
+template <typename Fill> IDirect3DTexture9* MakeFilledTexture(IDirect3DDevice9* dev, UINT w, UINT h, D3DFORMAT fmt, IDirect3DTexture9* reuse, Fill fill) {
+    IDirect3DTexture9 *stage = nullptr, *tex = reuse;
+    if (FAILED(dev->CreateTexture(w, h, 1, 0, fmt, D3DPOOL_SYSTEMMEM, &stage, nullptr)) || !stage) return nullptr;
+    D3DLOCKED_RECT lr{};
+    bool ok = SUCCEEDED(stage->LockRect(0, &lr, nullptr, 0));
+    if (ok) fill(static_cast<BYTE*>(lr.pBits), static_cast<size_t>(lr.Pitch)), stage->UnlockRect(0);
+    if (ok && !tex && (FAILED(dev->CreateTexture(w, h, 1, 0, fmt, D3DPOOL_DEFAULT, &tex, nullptr)) || !tex)) tex = nullptr, ok = false;
+    ok = ok && SUCCEEDED(dev->UpdateTexture(stage, tex));
+    stage->Release();
+    if (!ok && tex && tex != reuse) tex->Release();
+    return ok ? tex : nullptr;
+}
 void InBaseNow(IDirect3DDevice9* dev, Slot& s) {
     if (s.inBaseVal.size() != s.inUvSrc.size() || s.inUvSrc.empty()) return;
     for (size_t r = 0; r < s.inRooms.size() && r < 4; r++) {
@@ -3786,20 +3804,17 @@ void InBaseNow(IDirect3DDevice9* dev, Slot& s) {
     D3DSURFACE_DESC ad{}, bd{};
     if (!s.inBaseDirty || FAILED(s.game->GetLevelDesc(0, &ad))) return;
     if (s.inBase && (FAILED(s.inBase->GetLevelDesc(0, &bd)) || bd.Width != ad.Width || bd.Height != ad.Height)) s.inBase->Release(), s.inBase = nullptr;
-    if (!s.inBase && (FAILED(dev->CreateTexture(ad.Width, ad.Height, 1, 0, D3DFMT_A16B16G16R16F, D3DPOOL_MANAGED, &s.inBase, nullptr)) || !s.inBase)) {
-        s.inBase = nullptr; // (the vertices' bases, as the prepare carried them)
-        return;
-    }
-    D3DLOCKED_RECT lr{};
-    if (FAILED(s.inBase->LockRect(0, &lr, nullptr, 0))) return;
-    for (UINT y = 0; y < ad.Height; y++) std::memset(static_cast<BYTE*>(lr.pBits) + static_cast<size_t>(y) * lr.Pitch, 0, static_cast<size_t>(ad.Width) * 8);
-    for (size_t i = 0; i < s.inUvSrc.size(); i++) {
-        const InUv& e = s.inUvSrc[i];
-        if (e.x >= ad.Width || e.y >= ad.Height) continue;
-        uint16_t* px = reinterpret_cast<uint16_t*>(static_cast<BYTE*>(lr.pBits) + static_cast<size_t>(e.y) * lr.Pitch) + static_cast<size_t>(e.x) * 4;
-        px[0] = RtLampProxy::Half(s.inBaseVal[i][0]), px[1] = RtLampProxy::Half(s.inBaseVal[i][1]), px[2] = RtLampProxy::Half(s.inBaseVal[i][2]), px[3] = 0x3C00; // (alpha 1)
-    }
-    s.inBase->UnlockRect(0);
+    IDirect3DTexture9* const made = MakeFilledTexture(dev, ad.Width, ad.Height, D3DFMT_A16B16G16R16F, s.inBase, [&](BYTE* bits, size_t pitch) {
+        for (UINT y = 0; y < ad.Height; y++) std::memset(bits + static_cast<size_t>(y) * pitch, 0, static_cast<size_t>(ad.Width) * 8);
+        for (size_t i = 0; i < s.inUvSrc.size(); i++) {
+            const InUv& e = s.inUvSrc[i];
+            if (e.x >= ad.Width || e.y >= ad.Height) continue;
+            uint16_t* px = reinterpret_cast<uint16_t*>(bits + static_cast<size_t>(e.y) * pitch) + static_cast<size_t>(e.x) * 4;
+            px[0] = RtLampProxy::Half(s.inBaseVal[i][0]), px[1] = RtLampProxy::Half(s.inBaseVal[i][1]), px[2] = RtLampProxy::Half(s.inBaseVal[i][2]), px[3] = 0x3C00; // (alpha 1)
+        }
+    });
+    if (!made) return; // (the vertices' bases, as the prepare carried them)
+    s.inBase = made;
     s.inBaseDirty = false;
 }
 // (physical) this frame's rooms of a map whose texels continue rooms of the story below (render thread): their own wall maps
@@ -3851,12 +3866,11 @@ void InRoomsNow(IDirect3DDevice9* dev, Slot& s, uintptr_t tracker) {
     if (!fail && (!s.inUv || std::memcmp(size, s.inUvSize, sizeof size) || s.inUvBuilt != s.inUvSrc)) {
         IDirect3DTexture9* uv = nullptr;
         D3DSURFACE_DESC ad{};
-        D3DLOCKED_RECT lr{};
-        if (FAILED(s.game->GetLevelDesc(0, &ad)) || FAILED(dev->CreateTexture(ad.Width, ad.Height, 1, 0, D3DFMT_A16B16G16R16, D3DPOOL_MANAGED, &uv, nullptr)) || !uv) fail = 3;
-        else if (FAILED(uv->LockRect(0, &lr, nullptr, 0))) uv->Release(), fail = 3;
+        if (FAILED(s.game->GetLevelDesc(0, &ad)) || !(uv = MakeFilledTexture(dev, ad.Width, ad.Height, D3DFMT_A16B16G16R16, nullptr, [&](BYTE* bits, size_t pitch) {
+                RtLampProxy::FillUv(s.inUvSrc, size, ad.Width, ad.Height, pitch, static_cast<unsigned char*>(bits));
+            })))
+            fail = 3;
         else {
-            RtLampProxy::FillUv(s.inUvSrc, size, ad.Width, ad.Height, static_cast<size_t>(lr.Pitch), static_cast<unsigned char*>(lr.pBits));
-            uv->UnlockRect(0);
             if (s.inUv) s.inUv->Release();
             s.inUv = uv, s.inUvBuilt = s.inUvSrc;
             std::memcpy(s.inUvSize, size, sizeof size);
