@@ -177,6 +177,57 @@ struct IndoorRoomsBind {
     IndoorRoomsBind(const IndoorRoomsBind&) = delete;
     IndoorRoomsBind& operator=(const IndoorRoomsBind&) = delete;
 };
+// (draw cost) The pixel shader constants a fix sets for one draw and puts back after it (Add each, then Set before the draw,
+// Restore after it), read, set and put back as one run of registers, as ShaderConstantPair::Block does for two: the registers
+// of the run between them are written back as read, so during and after the draw the device holds the same values as with
+// one call per constant. A run longer than kRows, or whose read fails, takes one call per constant, as before. The values
+// are read at Set.
+class PsConstRun {
+public:
+    static constexpr UINT kRows = 40; // the run, and the constants added in all
+    explicit PsConstRun(IDirect3DDevice9* dev) : dev_(dev) {}
+    PsConstRun(const PsConstRun&) = delete;
+    PsConstRun& operator=(const PsConstRun&) = delete;
+    void Add(UINT reg, const float* values, UINT n) {
+        slot_[n_++] = {reg, n, values};
+        first_ = std::min(first_, reg), end_ = std::max(end_, reg + n);
+    }
+    void Set() {
+        const UINT count = end_ - first_;
+        run_ = count <= kRows && SUCCEEDED(dev_->GetPixelShaderConstantF(first_, &old_[0][0], count));
+        if (run_) {
+            float now[kRows][4];
+            std::memcpy(now, old_, count * sizeof now[0]);
+            for (int i = 0; i < n_; i++) std::memcpy(now[slot_[i].reg - first_], slot_[i].values, slot_[i].n * sizeof now[0]);
+            SetPsConst(dev_, first_, &now[0][0], count);
+            return;
+        }
+        for (UINT i = 0, at = 0; i < static_cast<UINT>(n_); at += slot_[i].n, i++) { // (a failed read leaves zeros, as before)
+            std::memset(old_[at], 0, slot_[i].n * sizeof old_[0]);
+            dev_->GetPixelShaderConstantF(slot_[i].reg, old_[at], slot_[i].n);
+            SetPsConst(dev_, slot_[i].reg, slot_[i].values, slot_[i].n);
+        }
+    }
+    void Restore() const {
+        if (run_) {
+            SetPsConst(dev_, first_, &old_[0][0], end_ - first_);
+            return;
+        }
+        for (UINT i = 0, at = 0; i < static_cast<UINT>(n_); at += slot_[i].n, i++) SetPsConst(dev_, slot_[i].reg, old_[at], slot_[i].n);
+    }
+
+private:
+    struct Slot {
+        UINT reg, n;
+        const float* values;
+    };
+    IDirect3DDevice9* dev_;
+    Slot slot_[5] = {};
+    int n_ = 0;
+    UINT first_ = ~0u, end_ = 0;
+    bool run_ = false;
+    float old_[kRows][4] = {};
+};
 
 //
 // Soft lot edges (28/09, research\borda2 + borda3): the lot map saturates at 1.0 within ~2.5 m of a street lamp while
@@ -5786,9 +5837,6 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
     // the lot's ground under the group when its ground lamp shade is drawn with it (ShadedOnGround); NaN otherwise
     const float shadeGroundY = groupLot && g_shadeOn && p.inst.shadeSampler >= 0 && p.inst.shadeConst >= 0 ? groupLot->ty : std::numeric_limits<float>::quiet_NaN();
     const float structureGain = GroundShadow::StructureLampGain(poolGate, g_wallGain.load(std::memory_order_relaxed));
-    float oldA[4] = {}, oldB[4] = {};
-    dev->GetPixelShaderConstantF(p.inst.atlasConst, oldA, 1);
-    dev->GetPixelShaderConstantF(p.inst.strengthConst, oldB, 1);
     const float gain = TerrainLightingPolicy::SurfaceLampGain(g_night.load(std::memory_order_relaxed), g_fenceStrength.load(std::memory_order_relaxed));
     const float s[4] = {gain, 0, 0, 0};
     // Per-pixel lamps (ShaderPatches::PatchInstancedLamps pixelLamps): the lamps chosen around the group's centre, as for
@@ -5799,7 +5847,8 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
     // lampConst + 2N: one upload covers both blocks), then with reach the 2 rows of r0^2 (reachConst = coneConst + 2N)
     constexpr unsigned kLampRows = 1 + 4 * N;
     const unsigned rows = kLampRows + (reachLaw ? 2u : 0u);
-    float lamps[kLampRows + 2][4] = {}, oldLamps[kLampRows + 2][4] = {}, weight[4] = {0.0f, 1.0f, 1.0f, 0.0f}, oldWeight[4] = {};
+    float lamps[kLampRows + 2][4] = {}, weight[4] = {0.0f, 1.0f, 1.0f, 0.0f};
+    static_assert(3 + kLampRows + 2 <= PsConstRun::kRows); // (the atlas, strength, ground weight and lamp rows: one run)
     int used = 0; // the lamps placed
     LampCone cones[N] = {}; // their cones (DrawFenceRuns tests each piece with them)
     float vis[N] = {}, lampTop = -1e9f; // the group's share of each placed lamp, the highest atlas lamp head (DrawFenceRuns)
@@ -5850,8 +5899,6 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
                 weight[0] = GroundLightGate::HeightGate(g->y, lampTop) * poolGate;
             }
         }
-        dev->GetPixelShaderConstantF(p.inst.lampParamConst, &oldLamps[0][0], rows);
-        dev->GetPixelShaderConstantF(p.inst.groundWeightConst, oldWeight, 1);
     }
     // Light probe (12/10 review: fence and balcony band draws showed only "mod draw (another fix)", so their law could not be
     // read from an F7): the lamps placed, the strengths and the lamp law
@@ -5886,12 +5933,14 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
     g_inOwnCall = true;
     {
         SamplerBind bind(dev, p.inst.atlasSampler, atlas, D3DTEXF_NONE);
-        SetPsConst(dev, p.inst.atlasConst, c, 1);
-        SetPsConst(dev, p.inst.strengthConst, s, 1);
+        PsConstRun consts(dev); // (PatchInstancedLamps: cA, cA + 1, then with the lamps the weight cA + 2 and the rows from cA + 3)
+        consts.Add(p.inst.atlasConst, c, 1);
+        consts.Add(p.inst.strengthConst, s, 1);
         if (p.inst.pixelLamps) {
-            SetPsConst(dev, p.inst.lampParamConst, &lamps[0][0], rows);
-            SetPsConst(dev, p.inst.groundWeightConst, weight, 1);
+            consts.Add(p.inst.lampParamConst, &lamps[0][0], rows);
+            consts.Add(p.inst.groundWeightConst, weight, 1);
         }
+        consts.Set();
         // The lot ground's lamp shade (13/10, F7 2026-10-13 09-31-30 #268: the curbs of a flowerbed behind a free-standing
         // wall stayed lit by the garden post on the other side). The group's one lamp list keeps a lamp that any of its points
         // sees, and the pixel has no wall test; the copy multiplies its lamp sum by the shade the lot pass gives the grass
@@ -5915,12 +5964,7 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
         if (!ran) draw();
         SetPs(dev, original);
         if (active != &p) SetPsConst(dev, active->inst.capConst, &oldCaps[0][0], kCapRows);
-        if (p.inst.pixelLamps) {
-            SetPsConst(dev, p.inst.groundWeightConst, oldWeight, 1);
-            SetPsConst(dev, p.inst.lampParamConst, &oldLamps[0][0], rows);
-        }
-        SetPsConst(dev, p.inst.strengthConst, oldB, 1);
-        SetPsConst(dev, p.inst.atlasConst, oldA, 1);
+        consts.Restore();
     }
     g_objDrawInfo.clear();
     g_inOwnCall = false;
@@ -6773,9 +6817,6 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
     const bool reach = p.obj.reachConst != 0;
     IDirect3DVertexShader9* vs = ObjectVsFor(dev, g_curVs);
     if (!vs) return false;
-    float oldA[4] = {}, oldB[4] = {};
-    dev->GetPixelShaderConstantF(p.obj.atlasConst, oldA, 1);
-    dev->GetPixelShaderConstantF(p.obj.strengthConst, oldB, 1);
     float s[4] = {TerrainLightingPolicy::SurfaceLampGain(g_night.load(std::memory_order_relaxed),
                        g_objPixelStrength.load(std::memory_order_relaxed)), 0, 0, 0};
     float groundShare = 1.0f; // the share of the nearby lamps' light no wall blocks (below)
@@ -6789,7 +6830,7 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
     constexpr unsigned kLampRows = 1 + 4 * N;
     const unsigned rows = kLampRows + (reach ? 2u : 0u);
     float lamps[kLampRows + 2][4] = {};
-    float oldLamps[kLampRows + 2][4] = {};
+    static_assert(3 + kLampRows + 2 <= PsConstRun::kRows); // (the atlas, strength and lamp rows: one run)
     bool zeroRig = false;
     float oldRig[3][4] = {}, oldVl[4][4] = {};
     const float noRig[4][4] = {};
@@ -6859,15 +6900,16 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
         g_objDrawInfo += ReachLawText(reach, reachRefused, zeroRig, lamps[0][1], lamps + kLampRows, nLamps);
     }
     if (reach && zeroRig) g_reachObjDraws++; // zeroRig: the lamps were placed (else cS.x = 0 and the sum is not used)
-    dev->GetPixelShaderConstantF(p.obj.lampParamConst, &oldLamps[0][0], rows);
     IDirect3DPixelShader9* originalPs = g_curPs;
     IDirect3DVertexShader9* originalVs = g_curVs;
     g_inOwnCall = true;
     {
         SamplerBind bind(dev, p.obj.atlasSampler, atlas, D3DTEXF_NONE);
-        SetPsConst(dev, p.obj.atlasConst, c, 1);
-        SetPsConst(dev, p.obj.strengthConst, s, 1);
-        SetPsConst(dev, p.obj.lampParamConst, &lamps[0][0], rows);
+        PsConstRun consts(dev); // (PatchObjectLampPs: cA, cA + 1 and the rows from cA + 3; cA + 2 is its own def)
+        consts.Add(p.obj.atlasConst, c, 1);
+        consts.Add(p.obj.strengthConst, s, 1);
+        consts.Add(p.obj.lampParamConst, &lamps[0][0], rows);
+        consts.Set();
         if (zeroRig && p.obj.rigLamps) {
             dev->GetPixelShaderConstantF(5, &oldRig[0][0], 3);
             SetPsConst(dev, 5, &noRig[0][0], 3);
@@ -6902,9 +6944,7 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
         SetVs(dev, originalVs);
         if ((zeroRig || rigDay) && vl >= 0) SetVsConst(dev, static_cast<UINT>(vl), &oldVl[0][0], 4);
         if ((zeroRig || rigDay) && p.obj.rigLamps) SetPsConst(dev, 5, &oldRig[0][0], 3);
-        SetPsConst(dev, p.obj.lampParamConst, &oldLamps[0][0], rows);
-        SetPsConst(dev, p.obj.strengthConst, oldB, 1);
-        SetPsConst(dev, p.obj.atlasConst, oldA, 1);
+        consts.Restore();
     }
     g_objDrawInfo.clear();
     g_inOwnCall = false;
@@ -7006,25 +7046,33 @@ IDirect3DTexture9* FloorWallMaskTexture(IDirect3DDevice9* dev, IDirect3DBaseText
     k[0] = 1.0f / (perTile * s), k[1] = split * s, k[2] = 1.0f, k[3] = 1.0f / 64.0f;
     return tex;
 }
-// Binds the mask at `sampler` (point filter, clamp, linear read: no sRGB decode) for one draw and puts the stage back after it
+// Binds the mask at `sampler` (point filter, clamp, linear read: no sRGB decode) for one draw and puts the stage back after it.
+// (draw cost) As SamplerBind: only the states that differ are set and put back (a state not read is set and put back as before)
 struct WallMaskBind {
     static constexpr int kCount = 6;
     IDirect3DDevice9* dev;
     DWORD s;
     IDirect3DBaseTexture9* old = nullptr;
     DWORD st[kCount] = {};
+    uint8_t changed = 0; // bit i: kStates[i] was set
     static constexpr D3DSAMPLERSTATETYPE kStates[kCount] = {D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV, D3DSAMP_SRGBTEXTURE};
     WallMaskBind(IDirect3DDevice9* d, DWORD sampler, IDirect3DTexture9* mask) : dev(d), s(sampler) {
         D3D9Hooks::GetBoundTexture(dev, s, &old);
-        for (int i = 0; i < kCount; i++) dev->GetSamplerState(s, kStates[i], &st[i]);
+        for (int i = 0; i < kCount; i++)
+            if (FAILED(dev->GetSamplerState(s, kStates[i], &st[i]))) changed |= static_cast<uint8_t>(1u << i);
         const DWORD want[kCount] = {D3DTEXF_POINT, D3DTEXF_POINT, D3DTEXF_NONE, D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP, FALSE};
         SetTex(dev, s, mask);
-        for (int i = 0; i < kCount; i++) dev->SetSamplerState(s, kStates[i], want[i]);
+        for (int i = 0; i < kCount; i++)
+            if ((changed & (1u << i)) || st[i] != want[i]) {
+                dev->SetSamplerState(s, kStates[i], want[i]);
+                changed |= static_cast<uint8_t>(1u << i);
+            }
     }
     ~WallMaskBind() {
         SetTex(dev, s, old);
         if (old) old->Release();
-        for (int i = 0; i < kCount; i++) dev->SetSamplerState(s, kStates[i], st[i]);
+        for (int i = 0; i < kCount; i++)
+            if (changed & (1u << i)) dev->SetSamplerState(s, kStates[i], st[i]);
     }
 };
 
@@ -7922,7 +7970,7 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
                                return ShaderPatches::PatchIndoorBasis(t, static_cast<DWORD>(lmS), pp.indoor, capToFloorMap);
                            });
     PatchedPs& p = *pick;
-    float size[4], oldSize[4] = {};
+    float size[4];
     const bool scaled = p.ps && IndoorBasisScale(dev, p.indoor, lightMap, basis[0], size);
     const uintptr_t lightMapPtr = reinterpret_cast<uintptr_t>(lightMap);
     if (!scaled && g_indoorScaleLogged.load(std::memory_order_relaxed) < 8 && g_indoorScaleLogged.fetch_add(1, std::memory_order_relaxed) < 8) { // (which shaders, and why: the first few)
@@ -7976,23 +8024,17 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
     // [NoLight], as the furniture guard has just turned them with Brightness and Blue tint) and 0 for its lamps, which
     // the basis light holds per pixel (so a lamp never counts twice and its light stays smooth across the object). The
     // vertex lights are zeroed as before: the game moves overflow lamps there, and the basis maps hold those too.
-    float rig[8][4] = {}, unlit[4][4] = {}, oldUnlit[4][4] = {}, oldVl[4][4] = {}, oldS[4] = {};
+    float rig[8][4] = {}, unlit[4][4] = {}, oldVl[4][4] = {};
     // shortcut: stairs and window copies keep strength 1, raise them if a stair looks dark beside furniture
     const float zero[4][4] = {}, strength[4] = {TerrainLightingPolicy::FurnitureLampGain(g_night.load(std::memory_order_relaxed)), 0, 0, 0};
     if (SUCCEEDED(dev->GetPixelShaderConstantF(0, &rig[0][0], 8)))
         for (int k = 0; k < 4; k++)
             if (UnlitRooms::IsUnlitLight(rig[4 + k], rig[k])) std::memcpy(unlit[k], rig[4 + k], sizeof unlit[k]);
     const int vl = g_curVsInfo->patched.vertexLight;
-    dev->GetPixelShaderConstantF(p.indoor.strengthConst, oldS, 1);
-    dev->GetPixelShaderConstantF(p.indoor.sizeConst, oldSize, 1);
-    if (p.indoor.diffuseConst >= 0) dev->GetPixelShaderConstantF(static_cast<UINT>(p.indoor.diffuseConst), &oldUnlit[0][0], 4);
-    float oldTint[4] = {}, oldSide[4] = {};
-    if (p.indoor.sideConst >= 0) dev->GetPixelShaderConstantF(static_cast<UINT>(p.indoor.sideConst), oldSide, 1);
     float cubeColour[3];
     UnlitRooms::FurnitureCubeColour(cubeColour);
     // Rooms at Night: the ambient cube towards grey, then x the room's colour (always set: (1, 1, 1, 1) = as it is)
     const float tint[4] = {UnlitRooms::FurnitureTint(), cubeColour[0], cubeColour[1], cubeColour[2]};
-    if (p.indoor.tintConst >= 0) dev->GetPixelShaderConstantF(static_cast<UINT>(p.indoor.tintConst), oldTint, 1);
     IDirect3DPixelShader9* original = g_curPs;
     g_inOwnCall = true;
     {
@@ -8000,11 +8042,13 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
         SamplerBind b2(dev, p.indoor.firstSampler + 2, basis[2]), b3(dev, p.indoor.firstSampler + 3, basis[3]);
         std::optional<WallMaskBind> maskBind;
         if (wallMask) maskBind.emplace(dev, static_cast<DWORD>(p.indoor.maskSampler), wallMask);
-        SetPsConst(dev, p.indoor.strengthConst, strength, 1);
-        SetPsConst(dev, p.indoor.sizeConst, size, 1);
-        if (p.indoor.diffuseConst >= 0) SetPsConst(dev, static_cast<UINT>(p.indoor.diffuseConst), &unlit[0][0], 4);
-        if (p.indoor.tintConst >= 0) SetPsConst(dev, static_cast<UINT>(p.indoor.tintConst), tint, 1);
-        if (p.indoor.sideConst >= 0) SetPsConst(dev, static_cast<UINT>(p.indoor.sideConst), side, 1); // 0: not set in a wall, read where it is
+        PsConstRun consts(dev); // (PatchIndoorBasis: all within cS .. cS + 13)
+        consts.Add(p.indoor.strengthConst, strength, 1);
+        consts.Add(p.indoor.sizeConst, size, 1);
+        if (p.indoor.diffuseConst >= 0) consts.Add(static_cast<UINT>(p.indoor.diffuseConst), &unlit[0][0], 4);
+        if (p.indoor.tintConst >= 0) consts.Add(static_cast<UINT>(p.indoor.tintConst), tint, 1);
+        if (p.indoor.sideConst >= 0) consts.Add(static_cast<UINT>(p.indoor.sideConst), side, 1); // 0: not set in a wall, read where it is
+        consts.Set();
         if (vl >= 0) {
             dev->GetVertexShaderConstantF(static_cast<UINT>(vl), &oldVl[0][0], 4);
             SetVsConst(dev, static_cast<UINT>(vl), &zero[0][0], 4);
@@ -8013,11 +8057,7 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
         draw();
         SetPs(dev, original);
         if (vl >= 0) SetVsConst(dev, static_cast<UINT>(vl), &oldVl[0][0], 4);
-        SetPsConst(dev, p.indoor.strengthConst, oldS, 1);
-        SetPsConst(dev, p.indoor.sizeConst, oldSize, 1);
-        if (p.indoor.diffuseConst >= 0) SetPsConst(dev, static_cast<UINT>(p.indoor.diffuseConst), &oldUnlit[0][0], 4);
-        if (p.indoor.tintConst >= 0) SetPsConst(dev, static_cast<UINT>(p.indoor.tintConst), oldTint, 1);
-        if (p.indoor.sideConst >= 0) SetPsConst(dev, static_cast<UINT>(p.indoor.sideConst), oldSide, 1);
+        consts.Restore();
     }
     g_traceA = TraceA{lightMapPtr, reinterpret_cast<uintptr_t>(basis[0]), size[0], size[1]};
     g_inOwnCall = false;
@@ -9401,7 +9441,10 @@ int FurnitureFloorMap(IDirect3DDevice9* dev) {
         }
     return -1;
 }
-template <typename DrawFn> D3D9Hooks::HookAction OnDrawFurniture(IDirect3DDevice9* dev, DrawFn draw, const ShaderPatches::RigPsInfo& info, const float (*rig)[4], const float* chroma) {
+// vsNow: RigHeld::vsNow (the vertex lights the device holds, as HoldRig read or set them in this draw), or null
+template <typename DrawFn>
+D3D9Hooks::HookAction OnDrawFurniture(IDirect3DDevice9* dev, DrawFn draw, const ShaderPatches::RigPsInfo& info, const float (*rig)[4], const float* chroma,
+                                      const float (*vsNow)[4]) {
     float psOld[4][4] = {}, vsOld[4][4] = {}, cubeOld[4] = {}, t[4][4], cube[4];
     bool psSet = false, vsSet = false, cubeSet = false;
     // PS c0..c3 = the slots' directions, c4..c7 their colours (each slot tested with its direction: fill and [NoLight]
@@ -9421,8 +9464,9 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawFurniture(IDirect3DDevice
     // a [NoLight] light there when it takes slot 1 (FUN_006b7e70)
     const int vl = g_curVsInfo ? g_curVsInfo->patched.vertexLight : -1;
     float vsDir[4][4] = {};
-    if (vl >= 4 && SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(vl - 4), &vsDir[0][0], 4)) &&
-        SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(vl), &vsOld[0][0], 4))) {
+    if (vl >= 4 && vsNow) std::memcpy(vsDir, vsNow, sizeof vsDir), std::memcpy(vsOld, vsNow + 4, sizeof vsOld); // (no second read)
+    if (vl >= 4 && (vsNow || (SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(vl - 4), &vsDir[0][0], 4)) &&
+                              SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(vl), &vsOld[0][0], 4))))) {
         std::memcpy(t, vsOld, sizeof t);
         for (int k = 0; k < 4; k++) vsSet |= UnlitRooms::FurnitureColour(t[k], vsDir[k], chroma);
         if (vsSet) SetVsConst(dev, static_cast<UINT>(vl), &t[0][0], 4);
@@ -9720,6 +9764,7 @@ struct RigHeld {
     int vl = -1;
     float psGame[8][4];
     float vsGame[8][4];
+    const float (*vsNow)[4] = nullptr; // (draw cost) the 8 rows from c(vl - 4) HoldRig read or set in this draw: the device's now
 };
 // rig: the pixel shader's rig lights c0..c7, or null for a part whose shader has no rig chain (its vertex lights alone)
 void HoldRig(IDirect3DDevice9* dev, float (*rig)[4], RigHeld& h) {
@@ -9779,6 +9824,7 @@ void HoldRig(IDirect3DDevice9* dev, float (*rig)[4], RigHeld& h) {
         if (rig) std::memcpy(s.ps, rig, sizeof s.ps);
         else std::memset(s.ps, 0, sizeof s.ps);
         s.haveVs = vl >= 4 && SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(vl - 4), &s.vs[0][0], 8));
+        if (s.haveVs) h.vsNow = s.vs;
         if (s.preEpisode == g_rigEpisodeFrame && g_rigEpisodeOn &&
             (std::memcmp(s.ps, s.prePs, sizeof s.ps) != 0 || (s.haveVs && std::memcmp(s.vs, s.preVs, sizeof s.vs) != 0)))
             s.preEpisode = 0; // (it showed other lights in this episode: holding it now would turn it back)
@@ -9829,6 +9875,7 @@ void HoldRig(IDirect3DDevice9* dev, float (*rig)[4], RigHeld& h) {
         SetVsConst(dev, static_cast<UINT>(vl - 4), &snapVs[0][0], 8);
         h.vs = true;
         h.vl = vl;
+        h.vsNow = snapVs;
     }
     ApexUtil::CountOne(g_rigHeldDraws);
 }
@@ -9869,7 +9916,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInner(IDirect3DDevice9* d
     D3D9Hooks::HookAction r;
     float chroma[3];
     const bool hued = active && !dark && RoomAmbientChroma(ObjectLightBridge::RigRoom(RigTracker::CurrentRig()), chroma);
-    if (active) r = OnDrawFurniture(dev, draw, info, haveRig ? rig : nullptr, hued ? chroma : nullptr);
+    if (active) r = OnDrawFurniture(dev, draw, info, haveRig ? rig : nullptr, hued ? chroma : nullptr, held.vsNow);
     else {
         if (!kPublicBuild) g_fdInactive.fetch_add(1, std::memory_order_relaxed);
         r = OnDrawInnerCore(dev, draw);

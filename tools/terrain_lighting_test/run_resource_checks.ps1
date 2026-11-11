@@ -11,6 +11,7 @@ function Extract-Block([string]$pattern) {
     return $m.Value
 }
 $sampler=Extract-Block '(?s)struct SamplerBind \{.*?\r?\n\};'
+$constRun=Extract-Block '(?s)class PsConstRun \{.*?\r?\n\};'
 $gain=Extract-Block '(?s)struct ConstGain \{.*?\r?\n\};'
 $constX=Extract-Block '(?s)struct ConstX \{.*?\r?\n\};'
 $weighted=Extract-Block '(?m)^float NightWeighted\(.*\r?\nfloat GroundGain\(.*\r?\nfloat RoadGain\(.*\r?\nfloat LotMapGain\(.*'
@@ -49,7 +50,7 @@ namespace LotLightBridge { int requests=0; void RequestLampEditRefresh(){++reque
 $arrival
 }
 "@
-$extracted=$sampler+"`n"+$gain+"`n"+$constX+"`n"+$weighted+"`n"+$nativeScale+"`n"+$wall+"`n"+$cone+"`n"+$hasCone+"`n"+$picked+"`n"+$picker+"`n"+$fencePicker+"`n"+$object+"`n"+$instanced+"`n"+$snowEdge+"`n"+$prefix+$lot+"`n"
+$extracted=$sampler+"`n"+$constRun+"`n"+$gain+"`n"+$constX+"`n"+$weighted+"`n"+$nativeScale+"`n"+$wall+"`n"+$cone+"`n"+$hasCone+"`n"+$picked+"`n"+$picker+"`n"+$fencePicker+"`n"+$object+"`n"+$instanced+"`n"+$snowEdge+"`n"+$prefix+$lot+"`n"
 $extracted += $arrivalFixture
 $header=Join-Path $OutDir 'extracted_resource_paths.h'
 Set-Content -LiteralPath $header -Value $extracted -Encoding UTF8
