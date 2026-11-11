@@ -147,8 +147,6 @@ public static partial class Strings
         ["Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it."] = "讓遊戲以 Vulkan 執行：卡頓更少，而且 Apex Radiance 就是以它開發與測試的。",
         ["Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings."] = "Apex Radiance 可以單獨運作，但與 sims3fiend 的 Sims3SettingsSetter 搭配更好：影格率限制、更少卡頓以及許多額外的遊戲設定。",
         ["Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds."] = "將 DXVK 移到獨立的 64 位元程序中：遊戲可多出約 600 MB 可用記憶體，適合長時間遊玩和大型世界。",
-        ["Sims3SettingsSetter's borderless window"] = "Sims3SettingsSetter 的無邊框視窗",
-        ["Sims3SettingsSetter's borderless window ({0}) does not apply under the RTX Remix bridge. Use the Window mode on Apex's Display page instead."] = "Sims3SettingsSetter 的無邊框視窗（{0}）在 RTX Remix bridge 下無效。請改用 Apex「顯示」頁面中的「視窗模式」。",
         ["{0} has {1} = {2}, which Setup cannot read. Setup leaves the file as it is."] = "{0} 中 {1} = {2}，安裝程式無法讀取。安裝程式會保持該檔案不變。",
         // restore points (Repair or remove)
         ["Install {0}"] = "安裝 {0}",

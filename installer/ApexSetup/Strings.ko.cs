@@ -169,8 +169,6 @@ public static partial class Strings
         ["Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it."] = "게임을 Vulkan으로 실행해요: 끊김이 줄고, Apex Radiance는 이것으로 만들고 테스트했어요.",
         ["Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings."] = "Apex Radiance는 단독으로 작동하지만 sims3fiend의 Sims3SettingsSetter와 함께 쓰면 좋아요: 프레임 제한, 끊김 감소, 다양한 추가 게임 설정.",
         ["Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds."] = "DXVK를 별도의 64비트 프로세스로 옮겨요. 게임의 여유 메모리가 약 600MB 늘어나 긴 플레이와 큰 월드에 도움이 돼요.",
-        ["Sims3SettingsSetter's borderless window"] = "Sims3SettingsSetter의 테두리 없는 창",
-        ["Sims3SettingsSetter's borderless window ({0}) does not apply under the RTX Remix bridge. Use the Window mode on Apex's Display page instead."] = "Sims3SettingsSetter의 테두리 없는 창({0})은 RTX Remix bridge에서 작동하지 않아요. 대신 Apex 디스플레이 페이지의 창 모드를 사용하세요.",
         ["{0} has {1} = {2}, which Setup cannot read. Setup leaves the file as it is."] = "{0}의 {1} = {2} 값을 설치 프로그램이 읽을 수 없어요. 설치 프로그램은 파일을 그대로 둬요.",
         // restore points (Repair or remove)
         ["Install {0}"] = "{0} 설치",

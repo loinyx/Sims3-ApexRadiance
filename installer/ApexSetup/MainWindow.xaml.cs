@@ -350,7 +350,8 @@ public sealed partial class MainWindow : Window
             if (present) Row(name, State(c), !Updates().Contains(c));
 
         var found = Verify.Files(g, s, apexRelease).Concat(_found.Where(x => x.Suggest is null)).ToList();
-        if (found.Count == 0)
+        // (a Warning suggestion is something to look at too)
+        if (found.Count == 0 && !_found.Any(x => x.Suggest is not null && x.Severity != Severity.Info))
             StatusList.Children.Add(new TextBlock { Text = _checkedAt is null ? T("Everything is in place.") : T("Everything is in place (checked at {0}).", _checkedAt), FontSize = 12, Foreground = ok });
         else if (_checkedAt is not null)
             StatusList.Children.Add(new TextBlock { Text = T("Checked at {0}.", _checkedAt), FontSize = 12, Foreground = muted });
@@ -492,7 +493,7 @@ public sealed partial class MainWindow : Window
             {
                 Engine.CheckWritable();
                 foreach (var x in Compat.Check(g, Scan.Run(g)).Where(x => x.CanApply && keys.Contains((x.Suggest, string.Join("\n", x.Args))))) x.Fix!();
-            }, T("Applied."), resultBar, label, args);
+            }, T("Applied."), resultBar, label, keepChoices: true, args: args);
         }
         foreach (var x in sug)
         {
@@ -505,12 +506,14 @@ public sealed partial class MainWindow : Window
             {
                 var b = new Button { Content = T("Apply"), IsEnabled = idle };
                 b.Click += (_, _) => Apply(new[] { x }, "Apply suggestion: {0}", x.Suggest!);
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, T("Apply") + " " + T(x.Suggest!)); // (which suggestion)
                 bar.ActionButton = b;
             }
             else if (onStatus && x.Suggest is "DXVK" or "Sims3SettingsSetter" or "RTX Remix bridge") // (a component to choose)
             {
                 var b = new Button { Content = T("Change components"), IsEnabled = idle };
                 b.Click += (_, _) => { if (CanLeaveGame()) GoFromStatus(ComponentsStep); };
+                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, T("Change components") + " " + T(x.Suggest!));
                 bar.ActionButton = b;
             }
             list.Children.Add(bar);
@@ -1007,8 +1010,9 @@ public sealed partial class MainWindow : Window
 
     // a change made in place (a removal, the settings' fixes): the buttons off while it runs, its result on the bar of the
     // screen it was started from (Repair or remove's by default); false when it did not run or failed. label: the restore point
-    // taken of what work changes (an English key with args, as the restore list shows it)
-    async Task<bool> Guarded(Action work, string done, InfoBar? bar = null, string? label = null, params string[] args)
+    // taken of what work changes (an English key with args, as the restore list shows it); keepChoices: the Components choices not
+    // yet installed stay (a suggestion changes the game's files, not what to install)
+    async Task<bool> Guarded(Action work, string done, InfoBar? bar = null, string? label = null, bool keepChoices = false, params string[] args)
     {
         if (_busy || _running || _game is not { } g) return false;
         bar ??= ManageInfo;
@@ -1026,11 +1030,12 @@ public sealed partial class MainWindow : Window
         finally
         {
             _busy = false;
-            _defaultsFor = null;
+            if (!keepChoices) _defaultsFor = null;
             RefreshAll();
         }
-        // after the refresh, which rewrites the screens' bars
-        if (ok) SetInfo(bar, InfoBarSeverity.Success, done, "");
+        // after the refresh, which rewrites the screens' bars; Components' bar open again holds the graphics-reset warning for
+        // the choices kept, so it stays (the suggestion's card going shows the result)
+        if (ok) { if (!(bar == GraphicsInfo && GraphicsInfo.IsOpen)) SetInfo(bar, InfoBarSeverity.Success, done, ""); }
         else if (point?.Committed is { } p) SetInfo(bar, InfoBarSeverity.Error, T("Setup could not finish"), error!, T("Undo these changes"),
             // a change made since then would be undone too: asked first
             () => _ = RestoreAsync(p, ask: RestorePoints.List(g.Bin).FirstOrDefault()?.Dir != p.Dir, bar));

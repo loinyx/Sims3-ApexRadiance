@@ -198,6 +198,7 @@ public static class Fs
         RestorePoints.Touch(path);
         File.SetAttributes(path, File.GetAttributes(path) & ~FileAttributes.ReadOnly);
     }
+    public static void SetAttributes(string path, FileAttributes attributes) { RestorePoints.Touch(path); File.SetAttributes(path, attributes); }
 
     // the folders this creates are recorded, outermost first
     public static void CreateDir(string path)

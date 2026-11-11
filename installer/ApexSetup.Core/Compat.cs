@@ -43,15 +43,19 @@ public static class Compat
             var name = Path.GetFileName(asi);
             if (name.Equals("ApexRadiance.asi", StringComparison.OrdinalIgnoreCase) || name.Equals("S3SSApex.asi", StringComparison.OrdinalIgnoreCase)) continue;
             var rel = Path.GetRelativePath(bin, asi);
-            if (Scan.Contains(asi, "Apex Edition"))
+            // the old standalone (S3SSApex.asi under another name): the Apex Edition name without S3SS's two strings, as
+            // s3ss_detect.cpp tells them apart; S3SS stays recommended
+            if (Scan.Contains(asi, "Apex Edition") && !(Scan.Contains(asi, "S3SS Log - Started at ") && Scan.Contains(asi, "###S3SSWindow")))
+                f.Add(new(Severity.Error, "{0} in Game\\Bin loads a second copy of Apex Radiance.", new[] { rel }, () => MoveAside(bin, rel)));
+            else if (Scan.Contains(asi, "Apex Edition"))
             {
                 combined = true;
                 f.Add(new(Severity.Error, "{0} is an old build with Apex inside; while it is in Game\\Bin, Apex Radiance stays off. Setup moves it to the backup folder (install the official Sims3SettingsSetter in its place if you used it).",
                     new[] { rel }, () => MoveAside(bin, rel)));
             }
             // a renamed ApexRadiance.asi: the copy loaded second stays idle (apex_main.cpp DllMain; its debugger line is in
-            // every release since 1.0.0 and not in the combined build)
-            else if (Scan.Contains(asi, "Another copy of ApexRadiance.asi is already running"))
+            // every release since 1.0.0 and not in the combined build); without ApexRadiance.asi it is the copy that runs
+            else if (File.Exists(B("ApexRadiance.asi")) && Scan.Contains(asi, "Another copy of ApexRadiance.asi is already running"))
                 f.Add(new(Severity.Warning, "{0} in Game\\Bin is another copy of Apex Radiance; only one copy runs. Apply moves it to the backup folder.",
                     new[] { rel }, () => MoveAside(bin, rel), Suggest: "Two copies of the mod"));
         }
@@ -153,7 +157,7 @@ public static class Compat
                     new[] { string.Join(", ", wrong) },
                     () => { if (File.Exists(dxvk)) Rewrite(dxvk, t => FixDxvk(t)); else Fs.Write(dxvk, FixDxvk("")); }));
         }
-        Suggestions(f, s, docs, combined, toml);
+        Suggestions(f, s, docs, combined);
         // each fix its own restore point, unless the action running it has one open
         return f.Select(x => x.Fix is not { } fix ? x : x with { Fix = () =>
         {
@@ -163,9 +167,11 @@ public static class Compat
     }
 
     // What Apex Radiance recommends in game (apex_gui.cpp: Overview, Compatibility, Attention), in its words where they fit.
-    // Only files that exist are read; a value Setup cannot read is reported and its file left as it is.
-    static void Suggestions(List<Finding> f, State s, string docs, bool combined, string s3ssToml)
+    // Only files that exist are read; a value Setup cannot read is reported and its file left as it is. Apex makes them only
+    // while it runs: none without ApexRadiance.asi
+    static void Suggestions(List<Finding> f, State s, string docs, bool combined)
     {
+        if (s.ApexVersion is null) return;
         // the game's MSAA blocks Apex's Edge Smoothing, Depth Blur, Ambient Occlusion and Water Reflections
         // (apex_gui.cpp GameAaCompatibilityNotice). Apex reads the back buffer; Setup reads Options.ini's edgesmoothing,
         // whose non-zero values are taken as MSAA on (0 seen with no MSAA; the others unverified in game)
@@ -187,13 +193,6 @@ public static class Compat
         if (s.Layer == Layer.Dxvk)
             f.Add(new(Severity.Info, "Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds.",
                 Array.Empty<string>(), Suggest: "RTX Remix bridge"));
-        // S3SS's borderless window does nothing under the bridge (docs/features/rtx-remix-bridge.md); Apex's window mode
-        // replaces it, and S3SS.toml stays as it is (docs/features/display.md). "Not off" as framework/s3ss_detect.cpp
-        if (s.Layer == Layer.Bridge && s.S3ss && File.Exists(s3ssToml)
-            && Values(File.ReadAllText(s3ssToml), "qol.borderless_window", "mode").LastOrDefault()?.Trim('"', '\'') is { Length: > 0 } mode
-            && !new[] { "off", "disabled", "none" }.Contains(mode, StringComparer.OrdinalIgnoreCase))
-            f.Add(new(Severity.Info, "Sims3SettingsSetter's borderless window ({0}) does not apply under the RTX Remix bridge. Use the Window mode on Apex's Display page instead.",
-                new[] { mode }, Suggest: "Sims3SettingsSetter's borderless window"));
     }
 
     // the Apex effects on in ApexRadiance.toml that the game's MSAA blocks; each is on by default, as with no file
@@ -306,11 +305,13 @@ public static class Compat
         var text = File.ReadAllText(file);
         var changed = change(text);
         if (changed == text) return;
+        var attributes = File.GetAttributes(file); // (kept: a player's read-only Options.ini stays read-only)
         foreach (var x in new[] { file, file + ".apex-backup" }) // a read-only file (or its copy from an earlier run) would block the copy and the move
             Fs.ClearReadOnly(x);
         Fs.Copy(file, file + ".apex-backup");
         Fs.Write(file + ".apex-new", changed);
         Fs.Move(file + ".apex-new", file);
+        Fs.SetAttributes(file, attributes);
     }
 
     public static void MoveAside(string bin, string rel)

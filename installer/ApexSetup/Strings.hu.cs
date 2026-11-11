@@ -178,8 +178,6 @@ public static partial class Strings
         ["Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it."] = "Vulkanon futtatja a játékot: kevesebb akadás, és az Apex Radiance ezzel készül és ezzel van tesztelve.",
         ["Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings."] = "Az Apex Radiance önállóan is működik, de jól párosul a sims3fiend Sims3SettingsSetter moddal: képkockasebesség-korlát, kevesebb akadás és sok extra játékbeállítás.",
         ["Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds."] = "A DXVK-t saját 64 bites folyamatba helyezi: a játéknak kb. 600 MB-tal több szabad memóriája marad hosszú játékokhoz és nagy világokhoz.",
-        ["Sims3SettingsSetter's borderless window"] = "A Sims3SettingsSetter keret nélküli ablaka",
-        ["Sims3SettingsSetter's borderless window ({0}) does not apply under the RTX Remix bridge. Use the Window mode on Apex's Display page instead."] = "A Sims3SettingsSetter keret nélküli ablaka ({0}) nem működik az RTX Remix bridge mellett. Használd helyette az Apex Megjelenítés oldalán a(z) Ablakmód beállítást.",
         ["{0} has {1} = {2}, which Setup cannot read. Setup leaves the file as it is."] = "A(z) {0} fájlban {1} = {2}, amit a telepítő nem tud beolvasni. A telepítő a fájlt változatlanul hagyja.",
         // restore points (Repair or remove)
         ["Install {0}"] = "Telepítés: {0}",

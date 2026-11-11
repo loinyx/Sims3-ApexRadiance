@@ -176,8 +176,6 @@ public static partial class Strings
         ["Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it."] = "Fait tourner le jeu sur Vulkan : moins d'à-coups, et Apex Radiance est conçu et testé avec.",
         ["Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings."] = "Apex Radiance fonctionne seul, mais s'associe bien à Sims3SettingsSetter de sims3fiend : limiteur d'images par seconde, moins de saccades et de nombreux réglages de jeu en plus.",
         ["Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds."] = "Place DXVK dans son propre processus 64 bits : le jeu garde environ 600 Mo de mémoire libre en plus pour les longues sessions et les grands mondes.",
-        ["Sims3SettingsSetter's borderless window"] = "Fenêtre sans bordure de Sims3SettingsSetter",
-        ["Sims3SettingsSetter's borderless window ({0}) does not apply under the RTX Remix bridge. Use the Window mode on Apex's Display page instead."] = "La fenêtre sans bordure de Sims3SettingsSetter ({0}) ne fonctionne pas avec le RTX Remix bridge. Utilisez plutôt le Mode de fenêtre de la page Affichage d'Apex.",
         ["{0} has {1} = {2}, which Setup cannot read. Setup leaves the file as it is."] = "{0} contient {1} = {2}, que l'installateur ne sait pas lire. L'installateur laisse le fichier tel quel.",
         // restore points (Repair or remove)
         ["Install {0}"] = "Installer {0}",

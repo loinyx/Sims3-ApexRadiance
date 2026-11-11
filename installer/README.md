@@ -72,11 +72,10 @@ each apply takes a restore point ("Apply suggestion: ..."). A value Setup cannot
 | Suggestion | When | Apply |
 |---|---|---|
 | Turn off the game's Edge Smoothing | `Options.ini` `[Options] edgesmoothing` not 0, and one of Apex's Edge Smoothing, Depth Blur, Ambient Occlusion or Water Reflections on in `Apex Radiance\ApexRadiance.toml` (all on by default) | `edgesmoothing = 0`, copy as `Options.ini.apex-backup` |
-| Two copies of the mod | Another `.asi` in `Game\Bin`, `scripts` or `plugins` that is a renamed `ApexRadiance.asi` (its "Another copy of ApexRadiance.asi" line) | Moved to the backup folder |
+| Two copies of the mod | Another `.asi` in `Game\Bin`, `scripts` or `plugins` that is a renamed `ApexRadiance.asi` (its "Another copy of ApexRadiance.asi" line), while `ApexRadiance.asi` is in `Game\Bin` | Moved to the backup folder |
 | DXVK | The game's own Direct3D 9, or a `d3d9.dll` that is neither DXVK nor the bridge | None: chosen in Components |
 | Sims3SettingsSetter | Not installed (and no old combined build) | None: turned on in Components |
 | RTX Remix bridge | DXVK in the game process | None: chosen in Components |
-| Sims3SettingsSetter's borderless window | Under the bridge, `S3SS.toml` `[qol.borderless_window] mode` not off | None: Apex's Display window mode replaces it; `S3SS.toml` stays as it is |
 
 The rule for the game's Edge Smoothing reads `Options.ini`, where Apex reads the back buffer: `edgesmoothing = 0` was
 seen with no MSAA; that every other value means MSAA is unverified in game.

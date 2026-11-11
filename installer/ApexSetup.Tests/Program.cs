@@ -398,6 +398,8 @@ try
         var opt6 = Path.Combine(docs6, "Options.ini");
         const string optText = "[Options]\r\nedgesmoothing = 2\r\nwaterreflection = 1\r\n";
         File.WriteAllText(opt6, optText);
+        Check(Sug().Count == 0, "suggestions: none without ApexRadiance.asi (Apex makes them while it runs)");
+        File.WriteAllText(B6("ApexRadiance.asi"), "MZ apex");
         var aa = Named(Aa);
         Check(aa is { CanApply: true, CanFix: false, Severity: Severity.Warning } && aa.Args[0] == "2"
               && aa.Args[1] == "Edge Smoothing, Depth Blur, Ambient Occlusion, Water Reflections", "edge smoothing: suggested with every Apex effect on by default");
@@ -410,6 +412,13 @@ try
               "edge smoothing: Apply sets edgesmoothing = 0 only, copy kept");
         Check(pts6.Count == 1 && pts6[0].Label == "Apply suggestion: {0}" && pts6[0].Args[0] == Aa && RestorePoints.Restore(bin6, pts6[0]).Count == 0
               && Same6(Tree6(), t6), "edge smoothing: its own restore point, restored byte for byte");
+        // a read-only Options.ini (players set it so the game keeps their settings) stays read-only, applied and restored
+        File.SetAttributes(opt6, FileAttributes.ReadOnly);
+        Named(Aa)!.Fix!();
+        Check(Read(opt6).Contains("edgesmoothing = 0") && File.GetAttributes(opt6).HasFlag(FileAttributes.ReadOnly), "edge smoothing: a read-only Options.ini stays read-only");
+        Check(RestorePoints.Restore(bin6, RestorePoints.List(bin6)[0]).Count == 0 && Read(opt6) == optText && File.GetAttributes(opt6).HasFlag(FileAttributes.ReadOnly),
+              "edge smoothing: restored, still read-only");
+        File.SetAttributes(opt6, FileAttributes.Normal);
 
         // the effects as ApexRadiance.toml has them
         var apexToml = Path.Combine(docs6, "Apex Radiance", "ApexRadiance.toml");
@@ -433,18 +442,27 @@ try
 
         // a renamed ApexRadiance.asi (its debugger line), not the old combined build
         File.WriteAllText(B6("ApexRadiance - Copy.asi"), "MZ [Apex Radiance] Another copy of ApexRadiance.asi is already running in this process");
-        File.WriteAllText(B6("Sims3SettingsSetter.asi"), "MZ Sims3 Settings Setter Apex Edition");
+        File.WriteAllText(B6("Sims3SettingsSetter.asi"), "MZ Sims3 Settings Setter Apex Edition S3SS Log - Started at  ###S3SSWindow");
         var found6 = Compat.Check(g6, Scan.Run(g6, docs6), docs6);
         var copy = found6.FirstOrDefault(x => x.Suggest == "Two copies of the mod");
         Check(copy is { CanApply: true } && copy.Args[0] == "ApexRadiance - Copy.asi"
               && found6.Count(x => x.Args.Contains("Sims3SettingsSetter.asi")) == 1 && found6.First(x => x.Args.Contains("Sims3SettingsSetter.asi")).CanFix,
               "renamed copy: suggested once, the combined build stays its own fix");
         File.Delete(B6("Sims3SettingsSetter.asi"));
+        File.Delete(B6("ApexRadiance.asi"));
+        Check(!Compat.Check(g6, Scan.Run(g6, docs6), docs6).Any(x => x.Args.Contains("ApexRadiance - Copy.asi")), "renamed copy: the only Apex (no ApexRadiance.asi) is left alone");
+        File.WriteAllText(B6("ApexRadiance.asi"), "MZ apex");
         var t6b = Tree6();
         copy!.Fix!();
         Check(!File.Exists(B6("ApexRadiance - Copy.asi")) && Named("Two copies of the mod") is null, "renamed copy: Apply moves it to the backup folder");
         Check(RestorePoints.Restore(bin6, RestorePoints.List(bin6)[0]).Count == 0 && Same6(Tree6(), t6b), "renamed copy: restored");
         File.Delete(B6("ApexRadiance - Copy.asi"));
+        // a renamed old standalone (the Apex Edition name without S3SS's strings): a second copy, and S3SS still suggested
+        File.WriteAllText(B6("OldApex.asi"), "MZ Sims3 Settings Setter Apex Edition");
+        var old6 = Compat.Check(g6, Scan.Run(g6, docs6), docs6);
+        Check(old6.Any(x => x.CanFix && x.Args.SequenceEqual(new[] { "OldApex.asi" }) && x.Text.Contains("second copy")) && old6.Any(x => x.Suggest == "Sims3SettingsSetter"),
+              "renamed old standalone: moved as a second copy, Sims3SettingsSetter still suggested");
+        File.Delete(B6("OldApex.asi"));
 
         // the components Apex recommends: pointers only, no fix
         Check(Named("DXVK") is { Fix: null } && Named("Sims3SettingsSetter") is { Fix: null } && Named("RTX Remix bridge") is null,
@@ -454,17 +472,6 @@ try
         File.WriteAllText(B6("d3d9.dll"), "dxvk d3d9");
         File.WriteAllText(B6("Sims3SettingsSetter.asi"), "s3ss");
         Check(Named("DXVK") is null && Named("Sims3SettingsSetter") is null && Named("RTX Remix bridge") is { Fix: null }, "DXVK and S3SS in: the bridge offered");
-
-        // S3SS's borderless window under the bridge: a note, S3SS.toml left as it is
-        File.WriteAllText(B6("d3d9.dll"), "bridge client dxvk remixapi_InitializeLibrary");
-        var s3ssToml6 = Path.Combine(docs6, "S3SS", "S3SS.toml");
-        Directory.CreateDirectory(Path.GetDirectoryName(s3ssToml6)!);
-        const string borderless = "[qol.borderless_window]\nmode = \"Maximized\"\n";
-        File.WriteAllText(s3ssToml6, borderless);
-        var bw = Named("Sims3SettingsSetter's borderless window");
-        Check(bw is { Fix: null } && bw.Args[0] == "Maximized" && Read(s3ssToml6) == borderless, "S3SS borderless under the bridge: noted, not changed");
-        File.WriteAllText(s3ssToml6, "[qol.borderless_window]\nmode = \"Disabled\"\n");
-        Check(Named("Sims3SettingsSetter's borderless window") is null, "S3SS borderless off: nothing to note");
 
         // Apply all: every suggestion with a fix, in one point
         File.WriteAllText(opt6, optText);
