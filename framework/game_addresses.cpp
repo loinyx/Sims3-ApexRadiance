@@ -289,6 +289,10 @@ constexpr Info kInfo[] = {
     {"WorldSaveCall", 0x00AAC320},
     {"WorldSave", 0x00C6D460},
     {"WindowRepaintJump", 0x004108AE},
+    {"ResolutionRequest", 0x0077D1A0},
+    {"RendererGlobal", 0x011CECC8},
+    {"ResolutionHandler", 0x007F1B70},
+    {"ResolutionUi", 0x011D8C48},
     {"MonoTypeGetObject", 0x00EA8A00},
     {"MonoDomainFree", 0x00E75340},
     {"ObjMapFind", 0x00939100},
@@ -736,6 +740,10 @@ const Entry kTable[] = {
     {Id::CompTileFetch, K::Sig, W::Text, None, 0, {{"83 EC 28 53 8B D9 8B 43 1C 55 8B 6C 24 34 89 45 08 8B 43 70 8B 53 60", 0, M::At}, NOSIG}},
     {Id::MonoDomainFree, K::Sig, W::Text, None, 0, {{"55 56 8B 74 24 0C 33 ED 3B 35 ?? ?? ?? ?? 75 16 39 6C 24 10 75 10 68 ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 C4 04 5E 5D C3 68", 0, M::At}, NOSIG}},
     {Id::MonoTypeGetObject, K::Sig, W::Text, None, 0, {{"53 8B 5C 24 0C 55 56 57 53 E8 ?? ?? ?? ?? 8B 74 24 18 83 C4 04 56 8B E8 FF 15 ?? ?? ?? ?? 83 7E 40 00 75 17 6A 02 68", 0, M::At}, NOSIG}},
+    {Id::ResolutionRequest, K::Sig, W::Text, None, 0, {{"57 E8 ?? ?? ?? ?? 8B F8 85 FF 74 7D 56 6A 00 6A 00 6A 00 6A 00 68 ?? ?? ?? ?? 6A 18 E8", 0, M::At}, NOSIG}},
+    {Id::RendererGlobal, K::Sig, W::Image, None, 0, {{"A1 ?? ?? ?? ?? C3 CC CC CC CC CC CC CC CC CC CC 8B 4C 24 04 A1 ?? ?? ?? ?? 89 0D ?? ?? ?? ?? C3 83 EC 30 53 8B D9 8B 83 E0 00 00 00", 1, M::Dword}, NOSIG}},
+    {Id::ResolutionHandler, K::Sig, W::Text, None, 0, {{"83 EC 30 8B 44 24 34 3D 46 32 98 07", 0, M::At}, NOSIG}},
+    {Id::ResolutionUi, K::Sig, W::Image, None, 0, {{"8A 5F 24 8B 0D ?? ?? ?? ?? 85 C9 74 05 E8 ?? ?? ?? ?? 84 DB 0F 94 C1 51 8B CF E8", 5, M::Dword}, NOSIG}},
     {Id::WindowRepaintJump, K::Sig, W::Text, None, 0, {{"F6 46 08 08 57 74 ?? 39 5E 20 C6 46 1C 01 75 ?? 8B 46 70 53 53 50 FF 15", 14, M::At}, NOSIG}},
     // ---- Room to save: the update thunk (mov eax,[ecx+14h]; push eax; add ecx,18h; call; ret 8), the shrink of both caches,
     //      the world save call before "mov eax,0Ch" (Error 12); every signature unique on Steam (checked on TS3W.exe 05/10) ----
@@ -871,6 +879,7 @@ const Group kGroups[] = {
     {"CompositorReadback", {Id::CompQueueCall, Id::CompDispatch, Id::CompState2Call, Id::CompTileRender, Id::CompState3Call, Id::CompTileRead, Id::CompReadbackCall,
                             Id::CompReadback, Id::CompTileFetch}},
     {"WindowRepaint", {Id::WindowRepaintJump}},
+    {"GameResolution", {Id::ResolutionRequest, Id::RendererGlobal, Id::ResolutionHandler, Id::ResolutionUi}},
     {"MemoryGuard", {Id::ResUpdateCall, Id::ResUpdate, Id::ResShrinkBoth, Id::WorldSaveCall, Id::WorldSave}},
 };
 

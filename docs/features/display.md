@@ -36,7 +36,8 @@ window and frame limiter when that mod is installed.
    fullscreen, the highest refresh rate the adapter lists for the game's size (`EnumAdapterModes`). The back-buffer size
    stays the game's: the game lays out its UI, picking and input at its own resolution (`renderer+0x2C/+0x30`).
 2. **Resolution** changes the game's own resolution. After a Present, while the game's size differs from the chosen
-   one, Apex calls the game's resolution request (`0x0077D1A0`), which queues a message for the game's main loop. The
+   one, Apex calls the game's resolution request (`0x0077D1A0` on Steam 1.67.2, found by signature on other versions:
+   group `GameResolution`), which queues a message for the game's main loop. The
    game checks the size against its mode list, stores it, saves `Options.ini` and resets its device through its own
    path. In the game's exclusive fullscreen Apex passes the highest refresh rate of the new size. The request is sent
    again every 10 s while the game still has its old size and no Reset of its own is pending (`renderer+0x8E`; a

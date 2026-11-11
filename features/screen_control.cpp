@@ -148,21 +148,17 @@ D3DPRESENT_PARAMETERS Wanted(const Settings& s) {
 // TS3W 0x0077D1A0 (w, h, hz, fullscreen) queues message 0x07983246 on the game's messenger; its handler (0x007F1B70 ->
 // 0x007F19E0) checks the size against the game's mode list (0x0058E510: an exact match at 1024x768 and above), stores
 // it, saves Options.ini and resets the device through the game's own path (0x006115C0 -> 0x00610AB0)
-constexpr uintptr_t kRequestResolution = 0x0077D1A0, kRendererGetter = 0x0060E2C0, kResolutionHandler = 0x007F1B70;
-constexpr uintptr_t kRendererGlobal = 0x011CECC8, kUiGlobal = 0x011D8C48;
+// (found by signature on every version: GameAddr group "GameResolution"; the EA app's TS3.exe 1.69 has them at other addresses)
 int g_askedW = 0, g_askedH = 0, g_askedMode = -1, g_asks = 0;
 ULONGLONG g_askAt = 0;
 bool g_askWarned = false;
 
 bool ResolutionRequestAvailable() {
+    if (!GameAddr::Resolved()) return false; // (the scan ends after the device is made: asked again at the next Present)
     static const bool ok = [] {
-        static constexpr BYTE kRequest[] = {0x57, 0xE8, 0xCA, 0xF2, 0xCC, 0xFF};                                // push edi; call 0x0044C470
-        static constexpr BYTE kGetter[] = {0xA1, 0xC8, 0xEC, 0x1C, 0x01, 0xC3};                                 // mov eax,[0x011CECC8]; ret
-        static constexpr BYTE kHandler[] = {0x83, 0xEC, 0x30, 0x8B, 0x44, 0x24, 0x34, 0x3D, 0x46, 0x32, 0x98, 0x07}; // cmp eax,0x07983246
-        const bool v = GameAddr::IsFixed() && MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(kRequestResolution), kRequest, sizeof kRequest) &&
-                       MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(kRendererGetter), kGetter, sizeof kGetter) &&
-                       MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(kResolutionHandler), kHandler, sizeof kHandler);
-        if (!v) LOG_INFO("[Screen] Game resolution request not available on this game version");
+        std::string missing;
+        const bool v = GameAddr::GroupAvailable("GameResolution", &missing);
+        if (!v) LOG_INFO("[Screen] Game resolution request not available on this game version: " + GameAddr::NotAvailable(missing));
         return v;
     }();
     return ok;
@@ -174,8 +170,8 @@ bool ResolutionRequestAvailable() {
 constexpr int kMaxAsks = 6;
 void RequestGameResolution(const Settings& s) {
     if (s.width <= 0 || g_resetPending.load() || !ResolutionRequestAvailable()) return;
-    const uint8_t* renderer = *reinterpret_cast<uint8_t* const*>(kRendererGlobal);
-    if (!renderer || !*reinterpret_cast<void* const*>(renderer + 0xC) || !*reinterpret_cast<void* const*>(kUiGlobal)) return;
+    const uint8_t* renderer = *reinterpret_cast<uint8_t* const*>(GameAddr::Get(GameAddr::Id::RendererGlobal));
+    if (!renderer || !*reinterpret_cast<void* const*>(renderer + 0xC) || !*reinterpret_cast<void* const*>(GameAddr::Get(GameAddr::Id::ResolutionUi))) return;
     const UINT gw = *reinterpret_cast<const UINT*>(renderer + 0x2C), gh = *reinterpret_cast<const UINT*>(renderer + 0x30);
     const UINT w = static_cast<UINT>(s.width), h = static_cast<UINT>(s.height);
     if (g_askedW != s.width || g_askedH != s.height || g_askedMode != s.mode) g_askedW = s.width, g_askedH = s.height, g_askedMode = s.mode, g_asks = 0, g_askWarned = false;
@@ -213,7 +209,7 @@ void RequestGameResolution(const Settings& s) {
         return;
     }
     LOG_INFO(std::format("[Screen] Game resolution {}x{} -> {}x{} (the game's own resolution change; it saves Options.ini)", gw, gh, w, h));
-    reinterpret_cast<void(__cdecl*)(UINT, UINT, UINT, bool)>(kRequestResolution)(w, h, hz, fs);
+    reinterpret_cast<void(__cdecl*)(UINT, UINT, UINT, bool)>(GameAddr::Get(GameAddr::Id::ResolutionRequest))(w, h, hz, fs);
     g_asks++;
     g_askAt = now;
 }
