@@ -55,7 +55,14 @@ public sealed class GitHubSource : ISource
     // downloads it there and Setup takes the archive from here
     public string? S3ppArchive { get; init; }
 
-    readonly string _tmp = Path.Combine(Path.GetTempPath(), "ApexRadianceSetup", Guid.NewGuid().ToString("N"));
+    // the releases Setup showed, by repo: every component of a run comes from them, not from a newer one published since
+    public IReadOnlyDictionary<string, Release?>? Shown { get; init; }
+    readonly Dictionary<string, Task<Release>> _rel = new();
+    Task<Release> Latest(string repo, CancellationToken ct) =>
+        _rel.TryGetValue(repo, out var t) ? t : _rel[repo] = Shown?.GetValueOrDefault(repo) is { } r ? Task.FromResult(r) : Releases.LatestAsync(repo, ct);
+
+    public static readonly string TempRoot = Path.Combine(Path.GetTempPath(), "ApexRadianceSetup");
+    readonly string _tmp = Path.Combine(TempRoot, Guid.NewGuid().ToString("N"));
 
     public async Task<(List<(string, string)>, string)> FetchAsync(string c, Game g, string docs, CancellationToken ct)
     {
@@ -65,13 +72,13 @@ public sealed class GitHubSource : ISource
         {
             case Components.Apex:
             {
-                var r = await Releases.LatestAsync(Releases.Apex, ct);
+                var r = await Latest(Releases.Apex, ct);
                 files.Add((await Releases.DownloadAsync(r.Find(n => n == "ApexRadiance.asi"), _tmp, ct), Path.Combine(bin, "ApexRadiance.asi")));
                 return (files, r.Version);
             }
             case Components.Bridge:
             {
-                var r = await Releases.LatestAsync(Releases.Apex, ct);
+                var r = await Latest(Releases.Apex, ct);
                 var dir = Releases.Unzip(await Releases.DownloadAsync(r.Find(n => n == "Apex-Radiance-RTX-Remix-bridge.zip"), _tmp, ct));
                 AddTree(files, dir, bin);
                 return (files, r.Version);
@@ -79,7 +86,7 @@ public sealed class GitHubSource : ISource
             case Components.Dxvk:
             {
                 // the 32-bit d3d9.dll of the official release (Apex recommends DXVK: Settings > Compatibility)
-                var r = await Releases.LatestAsync(Releases.Dxvk, ct);
+                var r = await Latest(Releases.Dxvk, ct);
                 var tgz = await Releases.DownloadAsync(r.Find(n => n.StartsWith("dxvk-") && n.EndsWith(".tar.gz") && !n.Contains("native")), _tmp, ct);
                 files.Add((Releases.ExtractFromTarGz(tgz, "x32/d3d9.dll"), Path.Combine(bin, "d3d9.dll")));
                 return (files, r.Version);
@@ -95,7 +102,7 @@ public sealed class GitHubSource : ISource
             case Components.MonoPatcher:
             {
                 // its zip also carries a wininet.dll loader: left out, Setup handles the loader (sims3-modernization's fixes.json)
-                var r = await Releases.LatestAsync(Releases.MonoPatcher, ct);
+                var r = await Latest(Releases.MonoPatcher, ct);
                 var dir = Releases.Unzip(await Releases.DownloadAsync(r.Find(n => n.EndsWith(".zip")), _tmp, ct));
                 foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories))
                     if (Path.GetFileName(f).Equals("MonoPatcher.asi", StringComparison.OrdinalIgnoreCase)) files.Add((f, Path.Combine(bin, "MonoPatcher.asi")));
@@ -106,20 +113,20 @@ public sealed class GitHubSource : ISource
             }
             case Components.Loader:
             {
-                var r = await Releases.LatestAsync(Releases.AsiLoader, ct);
+                var r = await Latest(Releases.AsiLoader, ct);
                 var dir = Releases.Unzip(await Releases.DownloadAsync(r.Find(n => n == "Ultimate-ASI-Loader-NoPDB.zip"), _tmp, ct));
                 files.Add((Path.Combine(dir, "dinput8.dll"), Path.Combine(bin, "wininet.dll"))); // the 32-bit loader, named as the mods' guides say
                 return (files, r.Version);
             }
             case Components.S3ss:
             {
-                var r = await Releases.LatestAsync(Releases.S3ss, ct);
+                var r = await Latest(Releases.S3ss, ct);
                 files.Add((await Releases.DownloadAsync(r.Find(n => n == "Sims3SettingsSetter.asi"), _tmp, ct), Path.Combine(bin, "Sims3SettingsSetter.asi")));
                 return (files, r.Version);
             }
             case Components.Modernization:
             {
-                var r = await Releases.LatestAsync(Releases.Modernization, ct);
+                var r = await Latest(Releases.Modernization, ct);
                 var prefix = g.Edition == Edition.EA ? "ts3native-ea169-" : "ts3native-v";
                 var dir = Releases.Unzip(await Releases.DownloadAsync(r.Find(n => n.StartsWith(prefix) && n.EndsWith(".zip")), _tmp, ct));
                 AddTree(files, dir, bin);
@@ -148,7 +155,7 @@ public sealed class GitHubSource : ISource
 
     static string CopyToTemp(string file)
     {
-        var dir = Path.Combine(Path.GetTempPath(), "ApexRadianceSetup", Guid.NewGuid().ToString("N"));
+        var dir = Path.Combine(TempRoot, Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(dir);
         var copy = Path.Combine(dir, Path.GetFileName(file));
         File.Copy(file, copy);
@@ -181,7 +188,7 @@ public static class Engine
 
     // An older copy of these is an update, not a foreign file: replaced without a backup.
     static readonly HashSet<string> Updates = new(StringComparer.OrdinalIgnoreCase)
-        { "ApexRadiance.asi", "Sims3SettingsSetter.asi", "ts3native.asi", "ts3native.ini", "ts3fixes.package", "Sims3Performance.asi", "MonoPatcher.asi" };
+        { "ApexRadiance.asi", "Sims3SettingsSetter.asi", "ts3native.asi", "ts3fixes.package", "Sims3Performance.asi", "MonoPatcher.asi" };
 
     // APEX_SETUP_DRY_RUN=1: Setup shows what it finds and plans but writes nothing (a check on a player's real game)
     public static void CheckWritable()
@@ -204,32 +211,44 @@ public static class Engine
         var s = Scan.Run(g, docs);
         var m = s.Manifest;
         var list = Components.All.Reverse().Where(components.Contains).ToList(); // loader first, bridge last
-        int i = 0;
-        foreach (var c in list)
+        // everything is downloaded before any file is placed: a network or checksum failure changes nothing
+        var fetched = new List<(List<(string Src, string Dest)> Files, string Version)>();
+        for (int i = 0; i < list.Count; i++)
         {
-            p?.Report(new((double)i / list.Count, "Downloading {0}", c));
-            var (files, version) = await src.FetchAsync(c, g, docs, ct);
-            p?.Report(new((i + 0.5) / list.Count, "Copying {0}", c));
-
-            if (c is Components.Bridge or Components.Dxvk && s.Layer is Layer.Native or Layer.Other && m.OptionsBackup is null && File.Exists(OptionsIni(docs)))
+            p?.Report(new(0.5 * i / list.Count, "Downloading {0}", list[i]));
+            fetched.Add(await src.FetchAsync(list[i], g, docs, ct));
+        }
+        if (list.Count > 0) CheckWritable(); // the downloads can take minutes: the game may have started since
+        for (int i = 0; i < list.Count; i++)
+        {
+            var c = list[i];
+            var (files, version) = fetched[i];
+            p?.Report(new(0.5 + 0.48 * i / list.Count, "Copying {0}", c));
+            try
             {
-                m.OptionsBackup = Path.Combine(Manifest.DirOf(g.Bin), "Options.ini.bak");
-                Directory.CreateDirectory(Manifest.DirOf(g.Bin));
-                File.Copy(OptionsIni(docs), m.OptionsBackup, true);
+                if (c is Components.Bridge or Components.Dxvk && s.Layer is Layer.Native or Layer.Other && m.OptionsBackup is null && File.Exists(OptionsIni(docs)))
+                {
+                    m.OptionsBackup = Path.Combine(Manifest.DirOf(g.Bin), "Options.ini.bak");
+                    Directory.CreateDirectory(Manifest.DirOf(g.Bin));
+                    File.Copy(OptionsIni(docs), m.OptionsBackup, true);
+                }
+                // a bridge installed by hand is this component's own files, not foreign ones to back up and restore on removal
+                var own = c == Components.Bridge && s.Layer == Layer.Bridge;
+                foreach (var (from, to) in files) Place(m, c, from, to, own);
+                if (c == Components.Bridge)
+                    foreach (var conf in new[] { Path.Combine(g.Bin, "bridge.conf"), Path.Combine(g.Bin, ".trex", "bridge.conf") })
+                        SetTargetProcess(conf, g.Exe);
+                if (c == Components.Modernization) EnsureResourceCfg(docs);
+                if (c == Components.Apex) RemoveLeftovers(m, g.Bin);
+                m.Versions[c] = version;
             }
-            foreach (var (from, to) in files) Place(m, c, from, to);
-            if (c == Components.Bridge)
-                foreach (var conf in new[] { Path.Combine(g.Bin, "bridge.conf"), Path.Combine(g.Bin, ".trex", "bridge.conf") })
-                    SetTargetProcess(conf, g.Exe);
-            if (c == Components.Modernization) EnsureResourceCfg(docs);
-            if (c == Components.Apex) RemoveLeftovers(m, g.Bin);
-            m.Versions[c] = version;
-            m.Save(); // after each component, so a failure later keeps what is done removable
-            i++;
+            finally { m.Save(); } // also when a copy fails: the files placed and their backups stay removable
         }
         // the install leaves nothing known broken (checks after the copies: the bridge, Sims3Performance and S3SS rules depend on them)
         p?.Report(new(0.98, "Fixing incompatible settings"));
-        foreach (var fix in Compat.Check(g, Scan.Run(g, docs), docs).Where(x => x.CanFix)) fix.Fix!();
+        foreach (var fix in Compat.Check(g, Scan.Run(g, docs), docs).Where(x => x.CanFix))
+            try { fix.Fix!(); }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // the files are in place; Check installation still shows this one
         p?.Report(new(1, "Done"));
     }
 
@@ -264,8 +283,8 @@ public static class Engine
         {
             foreach (var d in new[] { Path.Combine(g.Bin, ".trex"), Path.Combine(g.Bin, "licenses") })
                 if (Directory.Exists(d) && !Directory.EnumerateFileSystemEntries(d).Any()) Directory.Delete(d);
-            // the game had its own D3D9 before: the copy taken then matches the card it sees again, so nothing resets
-            if (m.OptionsBackup is not null && File.Exists(m.OptionsBackup) && !File.Exists(Path.Combine(g.Bin, "d3d9.dll")))
+            // the game is back on its own D3D9 (a restored loader or wrapper included): the copy taken then matches the card it sees again
+            if (m.OptionsBackup is not null && File.Exists(m.OptionsBackup) && Scan.Run(g, docs).Layer is Layer.Native or Layer.Other)
                 File.Copy(m.OptionsBackup, OptionsIni(docs), true);
             if (m.OptionsBackup is not null && File.Exists(m.OptionsBackup)) File.Delete(m.OptionsBackup);
             m.OptionsBackup = null;
@@ -285,11 +304,19 @@ public static class Engine
             if (c == Components.Apex || s.Manifest.Versions.ContainsKey(c)) Remove(g, c, docs);
     }
 
-    static void Place(Manifest m, string c, string from, string to)
+    static void Place(Manifest m, string c, string from, string to, bool own = false)
     {
         var owned = m.Files.FirstOrDefault(f => Same(f.Path, to));
+        // the player's ts3native.ini holds their feature switches: kept, only a missing one is written
+        if (Path.GetFileName(to).Equals("ts3native.ini", StringComparison.OrdinalIgnoreCase) && File.Exists(to))
+        {
+            if (owned is null) m.Files.Add(new ManifestFile { Component = c, Path = to });
+            else owned.Component = c;
+            return;
+        }
         string? backup = owned?.Backup;
-        if (owned is null && File.Exists(to) && !Updates.Contains(Path.GetFileName(to)))
+        if (owned is null && File.Exists(to) && !Updates.Contains(Path.GetFileName(to))
+            && !(own && Known[c].Contains(Path.GetRelativePath(m.Bin, to), StringComparer.OrdinalIgnoreCase)))
         {
             var rel = to.StartsWith(m.Bin, StringComparison.OrdinalIgnoreCase) ? Path.GetRelativePath(m.Bin, to) : Path.GetFileName(to);
             backup = Path.Combine(Manifest.DirOf(m.Bin), rel.Replace('\\', '_') + ".bak");

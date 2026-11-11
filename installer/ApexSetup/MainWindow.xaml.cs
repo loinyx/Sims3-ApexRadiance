@@ -760,7 +760,7 @@ public sealed partial class MainWindow : Window
         var touched = false; // (a file was already changed: the error message points at Repair or remove)
         var progress = new Progress<Progress>(p =>
         {
-            touched |= p.Fraction > 0;
+            touched |= p.Fraction >= 0.5; // (the downloads, before 0.5, change nothing)
             InstallBar.Value = p.Fraction;
             Mark(p.Arg is null ? (p.Fraction >= 1 ? rows.Count : p.Fraction > 0.9 ? rows.Count - 1 : dels.Count) : dels.Count + order.IndexOf(p.Arg));
         });
@@ -769,7 +769,8 @@ public sealed partial class MainWindow : Window
             await Task.Run(async () =>
             {
                 foreach (var c in dels) { touched = true; Engine.Remove(g, c); }
-                await Engine.InstallAsync(g, order, new GitHubSource { S3ppArchive = _s3ppArchive }, progress);
+                try { await Engine.InstallAsync(g, order, new GitHubSource { S3ppArchive = _s3ppArchive, Shown = _latest }, progress); }
+                finally { try { Directory.Delete(GitHubSource.TempRoot, true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } }
             });
             _lastInstall = order;
             _lastRemove = dels;

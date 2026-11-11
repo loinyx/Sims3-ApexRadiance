@@ -138,6 +138,55 @@ try
     Check(Read(B("d3d9.dll")) == "... DXVK v2.7 ...", "user's DXVK untouched by uninstall");
     Check(!File.Exists(Path.Combine(Scan.Packages(docs), "ts3fixes.package")), "ts3fixes.package removed");
     Check(!File.Exists(B("MonoPatcher.asi")) && !File.Exists(Path.Combine(Scan.Packages(docs), "MonoPatcher", "ld_MonoPatcher.package")), "MonoPatcher removed");
+
+    // 11. a download fails: nothing is placed (the loader is not left beside a d3d9.dll loader)
+    try { await Engine.InstallAsync(g, new[] { Components.Loader, Components.Bridge }, new FailingSource(src, Components.Bridge), null, docs); } catch (HttpRequestException) { }
+    Check(!File.Exists(B("wininet.dll")) && Read(B("d3d9.dll")) == "... DXVK v2.7 ...", "a failed download changes nothing");
+
+    // 12. a copy fails halfway: what was placed is saved, so Remove puts the player's d3d9.dll back
+    File.WriteAllText(B("d3d9.dll"), "reshade");
+    File.WriteAllText(Path.Combine(docs, "Options.ini"), "gpu=real");
+    Directory.CreateDirectory(B(@".trex\NvRemixBridge.exe")); // (a folder where a file goes: the copy throws)
+    try { await Engine.InstallAsync(g, new[] { Components.Bridge }, src, null, docs); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    Check(Manifest.Load(bin).Files.Any(f => f.Path.EndsWith("d3d9.dll") && f.Backup is not null) && !Manifest.Load(bin).Versions.ContainsKey(Components.Bridge),
+          "a half-placed component is saved with its backups, not marked installed");
+    Engine.Remove(g, Components.Bridge, docs);
+    Directory.Delete(B(".trex"), true);
+    Check(Read(B("d3d9.dll")) == "reshade", "the player's d3d9.dll restored after a failed copy");
+
+    // 13. over a d3d9 wrapper (not DXVK): removing the bridge restores the wrapper and the Options.ini copy
+    await Engine.InstallAsync(g, new[] { Components.Bridge }, src, null, docs);
+    File.WriteAllText(Path.Combine(docs, "Options.ini"), "gpu=gtx580 defaults");
+    Engine.Remove(g, Components.Bridge, docs);
+    Check(Read(B("d3d9.dll")) == "reshade" && Read(Path.Combine(docs, "Options.ini")) == "gpu=real", "wrapper and Options.ini restored after the bridge");
+
+    // 14. a bridge installed by hand: Repair takes its files as its own, so Remove takes the bridge out
+    File.Delete(B("d3d9.dll"));
+    File.WriteAllText(B("d3d9.dll"), "hand bridge");
+    Directory.CreateDirectory(B(".trex"));
+    File.WriteAllText(B(@".trex\NvRemixBridge.exe"), "hand server");
+    Check(Scan.Run(g, docs).Layer == Layer.Bridge, "scan sees the hand-installed bridge");
+    await Engine.InstallAsync(g, new[] { Components.Bridge }, src, null, docs);
+    Engine.Remove(g, Components.Bridge, docs);
+    Check(!File.Exists(B("d3d9.dll")) && !File.Exists(B(@".trex\NvRemixBridge.exe")) && !File.Exists(Path.Combine(Manifest.DirOf(bin), "d3d9.dll.bak")),
+          "a hand-installed bridge is removed after a repair, with no backup left");
+
+    // 15. the player's ts3native.ini survives a repair
+    await Engine.InstallAsync(g, new[] { Components.Modernization }, src, null, docs);
+    File.WriteAllText(B("ts3native.ini"), "player switches");
+    await Engine.InstallAsync(g, new[] { Components.Modernization }, src, null, docs);
+    Check(Read(B("ts3native.ini")) == "player switches", "ts3native.ini edits kept on repair");
+    Engine.Remove(g, Components.Modernization, docs);
+    Check(!File.Exists(B("ts3native.ini")), "ts3native.ini removed with Modernization");
+
+    // 16. a read-only file does not stop a compatibility fix
+    File.WriteAllText(B("ts3native.asi"), "ts3native");
+    File.WriteAllText(B("Sims3Performance.asi"), "s3pp");
+    File.WriteAllText(B("Sims3Performance.ini"), "[Patches]\r\nShortWaitSpin=1\r\n");
+    File.SetAttributes(B("Sims3Performance.ini"), FileAttributes.ReadOnly);
+    await Engine.InstallAsync(g, Array.Empty<string>(), src, null, docs);
+    Check(Read(B("Sims3Performance.ini")).Contains("ShortWaitSpin=0"), "read-only Sims3Performance.ini still fixed");
+    foreach (var f in Directory.EnumerateFiles(bin)) File.SetAttributes(f, FileAttributes.Normal); // (so the test folder can be deleted)
 }
 catch (Exception e) { Console.WriteLine("FAIL exception: " + e); failures++; }
 finally { Directory.Delete(root, true); }
@@ -152,6 +201,15 @@ sealed class MixedSource : ISource
     public MixedSource(ISource inner, string zip) { _inner = inner; _zip = zip; }
     public Task<(List<(string Src, string Dest)> Files, string Version)> FetchAsync(string c, Game g, string docs, CancellationToken ct) =>
         c == Components.S3pp ? new GitHubSource { S3ppArchive = _zip }.FetchAsync(c, g, docs, ct) : _inner.FetchAsync(c, g, docs, ct);
+}
+
+// the fake GitHub files, with one component's download failing
+sealed class FailingSource : ISource
+{
+    readonly ISource _inner; readonly string _fail;
+    public FailingSource(ISource inner, string fail) { _inner = inner; _fail = fail; }
+    public Task<(List<(string Src, string Dest)> Files, string Version)> FetchAsync(string c, Game g, string docs, CancellationToken ct) =>
+        c == _fail ? throw new HttpRequestException("offline") : _inner.FetchAsync(c, g, docs, ct);
 }
 
 sealed class FakeSource : ISource

@@ -177,6 +177,8 @@ public static class Compat
         var text = File.ReadAllText(file);
         var changed = change(text);
         if (changed == text) return;
+        foreach (var x in new[] { file, file + ".apex-backup" }) // a read-only file (or its copy from an earlier run) would block the copy and the move
+            if (File.Exists(x)) File.SetAttributes(x, File.GetAttributes(x) & ~FileAttributes.ReadOnly);
         File.Copy(file, file + ".apex-backup", true);
         File.WriteAllText(file + ".apex-new", changed);
         File.Move(file + ".apex-new", file, true);
