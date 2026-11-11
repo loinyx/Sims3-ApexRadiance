@@ -66,6 +66,9 @@ bool SolveRefiningUp();
 // The lot being played (the game's priority lot), by a story manager: known = false when the game's helpers are missing or
 // differ (then the caller falls back to its own test). Any thread.
 bool PlayedLot(uintptr_t mgr, bool* known);
+// GetTickCount when a room of the played lot on or below the camera's story was last seen still waiting for its solve
+// (0: never). Any thread.
+unsigned long PlayedRoomWaitingAt();
 // Development build: status lines
 void RenderDeveloperUI();
 }

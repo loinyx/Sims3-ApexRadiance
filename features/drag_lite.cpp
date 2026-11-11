@@ -203,10 +203,16 @@ DWORD g_gpuLogAt = 0;
 // some map of it drawn by the GPU, or its kept solve physical and drawn (a fresh keep counts for its first second). A room whose
 // copy was dropped is not held: its solve is the one that lets the edits be taken again (PhysLampPick::EditRefusal)
 bool GpuDrawnRoom(const void* room) { return GpuRoomLamps::DrawnAny(room, 0) || OutdoorDelta::PhysDrawnRoom(room); }
+// An object (not a lamp) dragged in a room the GPU draws: its live table moves its shadow each frame, while a solve begun mid-drag
+// showed it where the solve gathered it until the next one ended (10/11 recording: a sofa's shadow 1 to 3 s behind). Held like a lamp's
+// drag, for that room alone and at most kMaxHoldMs of moves without a pause
+bool ObjectDragIn(const void* room) { return OutdoorDelta::LiveMovedWithin(room, kStillMs, kMaxHoldMs); }
 bool HoldGpuDrawn(const void* room) {
-    if (!room || !GpuRoomLamps::PhysMoveRecent(kStillMs)) return false;
+    if (!room) return false;
+    const bool lamp = GpuRoomLamps::PhysMoveRecent(kStillMs);
+    if (!lamp && !ObjectDragIn(room)) return false;
     if (!GpuDrawnRoom(room)) {
-        g_gpuPassed.fetch_add(1, std::memory_order_relaxed);
+        if (lamp) g_gpuPassed.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
     g_gpuHeld.fetch_add(1, std::memory_order_relaxed);
@@ -215,7 +221,7 @@ bool HoldGpuDrawn(const void* room) {
 }
 
 void NoteGpuDragSolve(const void* room) {
-    if (!room || !GpuRoomLamps::PhysMoveRecent(kStillMs) || !GpuDrawnRoom(room)) return;
+    if (!room || !(GpuRoomLamps::PhysMoveRecent(kStillMs) || ObjectDragIn(room)) || !GpuDrawnRoom(room)) return;
     g_gpuLeaks.fetch_add(1, std::memory_order_relaxed), g_gpuLeakRoom.store(room, std::memory_order_relaxed);
     for (const auto& r : g_gpuHeldRing)
         if (r.load(std::memory_order_relaxed) == room) {

@@ -85,7 +85,7 @@ std::vector<Vec4> g_known[2];
 Vec4 g_target[2];                  // what rooms should hold now (Apex's colours when on, the game's when off)
 bool g_retintDue = false, g_restDue = false;
 DWORD g_lastRetint = 0, g_lastRig = 0, g_rigAgainAt = 0;
-long g_retinted = 0, g_dimSent = 0;
+long g_retinted = 0, g_dimSent = 0, g_seeded = 0;
 DWORD g_changedAt = 0, g_nextBaseCheck = 0;
 DWORD g_nextReconcile = 0;
 bool g_retryRetint = false;
@@ -189,7 +189,10 @@ bool AddBase(BYTE* room, float* r, int& slot, float* ce) {
         for (int k = 0; k < 4; k++) ce[k] = g_colour[slot].v[k] * s;
         const float sumC = ce[0] + ce[1] + ce[2], sumR = r[0] + r[1] + r[2];
         if (!std::isfinite(sumR) || !(sumC > 0.0f) || sumC >= 0.999f) return false;
-        if (Near(r, ce, 1e-6f)) return true; // no lamp light: the colour alone, as before
+        if (Near(r, ce, 1e-6f)) { // no lamp light: the colour alone, at least as bright as an empty room (below)
+            for (int k = 0; k < 3; k++) r[k] = std::fmax(r[k], g_colour[slot].v[k]);
+            return true;
+        }
         float t = 0.0f;                      // the shortfall the game added
         if (sumR < sumC) {
             const float sumL = (sumR - sumC * sumC) / (1.0f - sumC);
@@ -197,8 +200,10 @@ bool AddBase(BYTE* room, float* r, int& slot, float* ce) {
         }
         for (int k = 0; k < 4; k++) r[k] += (1.0f - t) * ce[k]; // lamp' + C
         // never darker than a room with no lamp: a room whose listed lamps are all blocked (or give almost nothing) came out
-        // at about a third of the unlit colour (a snapshot: 0.0068 against 0.0193 in the empty room beside it)
-        for (int k = 0; k < 3; k++) r[k] = std::fmax(r[k], ce[k]);
+        // at about a third of the unlit colour (a snapshot: 0.0068 against 0.0193 in the empty room beside it). The floor is
+        // the unscaled colour FUN_006a0f50 writes for an empty list: the scaled one left such rooms near black by day (lot
+        // 58EF0580, 0.019 against 0.049, 2026-11-10)
+        for (int k = 0; k < 3; k++) r[k] = std::fmax(r[k], g_colour[slot].v[k]);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -275,7 +280,9 @@ int MoveBase(BYTE* room, BaseRec& rec, const VisitCtx& ctx) {
         if (rec.has[0] && rec.has[1] && !Near(ce, rec.ce, 1e-7f)) {
             float next[2][4];
             for (int w = 0; w < 2; w++)
-                for (int k = 0; k < 4; k++) next[w][k] = RoomAmbientPolicy::MoveBackground(rec.res[w][k], rec.ce[k], ce[k]);
+                for (int k = 0; k < 4; k++)
+                    next[w][k] = k < 3 && ctx.scale > 1e-6f ? RoomAmbientPolicy::MoveBackgroundFloored(rec.res[w][k], rec.ce[k], ce[k], rec.ce[k] / ctx.scale, g_target[rec.slot].v[k])
+                                                            : RoomAmbientPolicy::MoveBackground(rec.res[w][k], rec.ce[k], ce[k]);
             if (LevelLightShare::StageAmbientBaseChange(room, rec.res[0], next[0], rec.res[1], next[1])) {
                 std::memcpy(rec.res, next, sizeof next);
                 std::memcpy(rec.ce, ce, sizeof ce);
@@ -288,7 +295,9 @@ int MoveBase(BYTE* room, BaseRec& rec, const VisitCtx& ctx) {
         if (Near(ce, rec.ce, 1e-7f)) return 0;
         for (int w = 0; w < 2; w++) {
             if (!rec.has[w]) continue;
-            for (int k = 0; k < 4; k++) rec.res[w][k] += ce[k] - rec.ce[k];
+            for (int k = 0; k < 4; k++)
+                rec.res[w][k] = k < 3 && ctx.scale > 1e-6f ? RoomAmbientPolicy::MoveBackgroundFloored(rec.res[w][k], rec.ce[k], ce[k], rec.ce[k] / ctx.scale, g_target[rec.slot].v[k])
+                                                           : RoomAmbientPolicy::MoveBackground(rec.res[w][k], rec.ce[k], ce[k]);
             std::memcpy(at[w], rec.res[w], sizeof rec.res[w]);
         }
         std::memcpy(rec.ce, ce, sizeof ce);
@@ -343,7 +352,8 @@ int SlotOfRoom(const unsigned char* room) {
 // share + the base) came within the tolerance of a colour set during the drag: rooms of 20 and 29 lamps (lot E4606BD0)
 // were taken for unlit ones, lost their lamps' share and followed the unlit colour from then on (+0x120 left behind). A
 // room with lamps is moved by MoveBase or solved again once the change rests.
-bool RetintUnlit(unsigned char* room, int& state, int slot) {
+// solved: the room's last solved ambient pair (+0x110, +0x120; BaseRec.res), or null when none is known
+bool RetintUnlit(unsigned char* room, int& state, int slot, const float (*solved)[4] = nullptr) {
     __try {
         if (*reinterpret_cast<const int*>(room + 0xC) <= 0 || *reinterpret_cast<const BYTE*>(room + 0x18)) {
             state = -1;
@@ -351,14 +361,31 @@ bool RetintUnlit(unsigned char* room, int& state, int slot) {
         }
         // Do not change ambient while the solver owns this room.
         const int solve = *reinterpret_cast<const int*>(room + 0xF0);
-        if (RoomAmbientPolicy::SolverOwnsAmbient(solve)) {
-            state = -2;
-            return false;
-        }
         float* amb = reinterpret_cast<float*>(room + 0x110);
         float* amb2 = reinterpret_cast<float*>(room + 0x120);
         const uintptr_t b = *reinterpret_cast<const uintptr_t*>(room + 0xC8), e = *reinterpret_cast<const uintptr_t*>(room + 0xCC);
         const bool roofless = *reinterpret_cast<const BYTE*>(room + 0x18) != 0;
+        if (!roofless && slot >= 0 && RoomAmbientPolicy::UnlitSeedDue(solve, amb, amb2, g_target[slot].v)) {
+            std::memcpy(amb, g_target[slot].v, sizeof g_target[slot].v);
+            std::memcpy(amb2, g_target[slot].v, sizeof g_target[slot].v);
+            // (10/11) a room the game cleared after a solve waits at the ambient that solve wrote (its maps on screen still
+            // show that light), never below the unlit colour: by day a window-lit room's +0x120 is up to 13x the unlit
+            // colour, so the seed alone left its walls and floors dark until the queue reached it. Its own solve writes the
+            // final values over these (state 3), so the end result is the same.
+            if (solved && (solve == 1 || solve == 2)) // (waiting for its solve; a solved room keeps the seed as before)
+                for (int k = 0; k < 3; k++) amb[k] = std::fmax(amb[k], solved[0][k]), amb2[k] = std::fmax(amb2[k], solved[1][k]);
+            // (a solve that ended between the state read and these writes lost its ambient: the room is solved again)
+            if (const int now = *reinterpret_cast<const int*>(room + 0xF0); (solve == 1 || solve == 2) && now != 1 && now != 2) {
+                state = -2;
+                return false;
+            }
+            state = 3; // seeded
+            return true;
+        }
+        if (RoomAmbientPolicy::SolverOwnsAmbient(solve)) {
+            state = -2;
+            return false;
+        }
         if (e > b && !roofless) { // an indoor room with lamps (roofless ones never get the base: matched as before)
             state = 2;
             return false;
@@ -404,8 +431,23 @@ bool RequestRetintSolve(unsigned char* room, bool rest) {
 bool VisitRoom(unsigned char* room, void* p) {
     auto& ctx = *static_cast<VisitCtx*>(p);
     int state = 0;
-    if (RetintUnlit(room, state, SlotOfRoom(room))) {
+    float solved[2][4] = {};
+    bool hasSolved = false;
+    uintptr_t mgr = 0;
+    int id = 0;
+    if (RoomKey(room, mgr, id)) {
+        std::lock_guard<std::mutex> lk(g_baseMx);
+        const auto it = g_baseRooms.find(reinterpret_cast<uintptr_t>(room));
+        if (it != g_baseRooms.end() && it->second.mgr == mgr && it->second.id == id && it->second.has[0] && it->second.has[1]) {
+            std::memcpy(solved, it->second.res, sizeof solved);
+            hasSolved = true;
+        }
+    }
+    if (RetintUnlit(room, state, SlotOfRoom(room), hasSolved ? solved : nullptr)) {
         ctx.retinted += state == 1;
+        if (state == 3 && g_seeded++ < 50)
+            LOG_INFO(std::format("[UnlitRooms] Room {} of lot {:08X}: no ambient yet while it waits for its solve, given the unlit colour",
+                                 *reinterpret_cast<const int*>(room + 0xC), *reinterpret_cast<const uint32_t*>(room + 0x10)));
         return false;
     }
     // A merged ambient or an old colour evicted from g_known must still follow

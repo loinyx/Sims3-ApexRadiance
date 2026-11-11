@@ -1,5 +1,6 @@
 // Offline, read-only checks of the policy used by the room updater.
 #include "features/room_ambient_policy.h"
+#include "features/outdoor_delta_model.h"
 #include <cstdio>
 #include <limits>
 #include <initializer_list>
@@ -36,6 +37,20 @@ int main() {
         check(SolverOwnsAmbient(state) == (state >= 1 && state <= 3), "solver ownership");
     for (int state = 0; state <= 5; ++state)
         check(AmbientStepRunning(state) == (state == 3), "a marked or gathered room's ambient retaken");
+    {
+        const float zero[4] = {}, seen[4] = {0.049f, 0.049f, 0.049f, 0}, unlit[4] = {0.15f, 0.15f, 0.3f, 0};
+        check(UnlitSeedDue(1, zero, zero, unlit) && UnlitSeedDue(2, zero, zero, unlit), "seed: a marked or gathered never-lit room");
+        check(UnlitSeedDue(4, zero, zero, unlit) && UnlitSeedDue(5, zero, zero, unlit), "seed: a solved room left at 0");
+        for (int state : {0, 3}) check(!UnlitSeedDue(state, zero, zero, unlit), "seed: not idle or while the ambient step runs");
+        check(!UnlitSeedDue(2, seen, zero, unlit) && !UnlitSeedDue(2, zero, seen, unlit), "seed: not a room with an ambient");
+        check(!UnlitSeedDue(2, zero, zero, zero), "seed: not a zero target");
+    }
+    {
+        // a room floored at the empty-room colour follows the new floor; above it, it moves as MoveBackground, never under the floor
+        check(std::fabs(MoveBackgroundFloored(0.049f, 0.019f, 0.030f, 0.049f, 0.080f) - 0.080f) < 1e-6f, "floored room follows the new floor");
+        check(std::fabs(MoveBackgroundFloored(0.30f, 0.019f, 0.030f, 0.049f, 0.080f) - MoveBackground(0.30f, 0.019f, 0.030f)) < 1e-6f, "lit room moves as before");
+        check(MoveBackgroundFloored(0.06f, 0.030f, 0.010f, 0.049f, 0.040f) >= 0.040f, "never under the new floor");
+    }
     check(RebuildRoomList(false, false, false, true, false), "same lot new story manager invalidates cache");
     check(RebuildRoomList(false, false, true, false, false), "lot switch invalidates cache");
     check(!RebuildRoomList(false, false, false, false, false), "stable rooms keep cache");
@@ -72,6 +87,16 @@ int main() {
     check(WindowRecheckDue(6100, 100, 2), "window final retry at deadline");
     check(!WindowRecheckDue(20000, 100, 3), "window checks stop after bounded passes");
     check(WindowRecheckDue(0x800u, 0xfffffff0u, 1), "window deadline survives tick wrap");
+    check(!OpeningSendDue(5000, 0, 0), "nothing collected: no opening send");
+    check(!OpeningSendDue(1599, 1000, 1000) && OpeningSendDue(1600, 1000, 1000), "a lone loading trigger is sent after 600 ms");
+    check(!OpeningSendDue(1519, 1000, 1000) && !OpeningSendDue(2000, 1000, 1520), "dirty managers 0.52 s after rebuilt join the same send");
+    check(!OpeningSendDue(1799, 1000, 1200) && OpeningSendDue(1800, 1000, 1200), "triggers in a burst wait for the latest's quiet");
+    check(OpeningSendDue(2500, 1000, 2400), "a burst that never goes quiet is sent 1.5 s after its first trigger");
+    check(!OpeningSendDue(0x200u, 0xfffffff0u, 0xfffffff0u) && OpeningSendDue(0x300u, 0xfffffff0u, 0xfffffff0u), "opening send survives tick wrap");
+    check(OpeningCoveredAfter(true, true, 50, 40) == 0, "a lamp edit sends every room near openings");
+    check(OpeningCoveredAfter(false, true, 0, 40) == 0, "a settle before its round ended sends every room");
+    check(OpeningCoveredAfter(false, true, 50, 0) == 50 && OpeningCoveredAfter(false, true, 50, 60) == 60, "a settle skips rooms gathered after the round and the latest trigger");
+    check(OpeningCoveredAfter(false, false, 50, 40) == 40, "a collected send skips rooms gathered after its latest trigger");
     check(LampRefreshDelay(true) == 120, "switch is reconciled after a short batch");
     check(LampRefreshDelay(false) == 200, "moving a lamp waits the drag's quiet time (the edit itself sends its rooms at once)");
     check(LampLotGap(true) == 500 && LampLotGap(false) == 2000, "relocated lamps refresh again sooner than switches");
@@ -87,6 +112,11 @@ int main() {
     check(!UrgencyKept(2500, 2000, 0, 4) && !UrgencyKept(2500, 2000, 0, 0), "a solved room's urgency ends");
     check(!UrgencyKept(8000, 2000, 0, 3), "urgency kept at most 8 s");
     check(UrgencyKept(0x100u, 0xfffffff0u - 10u, 0xfffffff0u - 3000u, 2), "urgency survives tick wrap");
+    check(!EditRoomStillWaiting(2, true, true, false), "a room blank at its mark stops waiting at its first solve (lot entry)");
+    check(EditRoomStillWaiting(1, false, true, true), "a blank room waits until its first solve ends");
+    check(!EditRoomStillWaiting(2, false, true, false), "a blank room re-marked mid-solve stops waiting when that solve ends");
+    check(EditRoomStillWaiting(2, true, false, false), "a lit room still waits for its next class (unchanged)");
+    check(!EditRoomStillWaiting(5, true, false, false), "a lit room solved since its mark stops waiting");
     check(EditHoldOutcome(0, false, 100, 100, false) == 0, "the hold waits for the first sends");
     check(EditHoldOutcome(0, false, 200, 200, false) == 1, "every story solved: released together");
     check(EditHoldOutcome(0, true, 200, 200, false) == 0, "ground chunks still written: wait");
@@ -201,6 +231,36 @@ int main() {
         check(!SwapHolds(live, rec, shared, rec[0]), "swap: a second colour not the record's is refused");
         live[1][0] = NAN;
         check(!SwapHolds(live, rec, shared, rec[0]), "swap: a NaN is refused");
+    }
+    // A kept atrium wall relit without a solve (FollowGhosts, GhostKeptPS): the rows lit beyond its edges follow the change of
+    // their edge texel, so the blur across the floor line does not pull the relit edge back to the solve's light
+    {
+        using OutdoorDeltaModel::FollowGhosts;
+        const uint32_t unlit = 0x10202020u, lit = 0x10A0B0C0u, ghostDark = 0x10181818u;
+        // ext: 2 rows above, 2 block rows, 2 rows below, 2 columns
+        uint32_t ext[12] = {ghostDark, ghostDark, ghostDark, ghostDark, lit, unlit, unlit, lit, ghostDark, ghostDark, ghostDark, ghostDark};
+        const uint32_t solved[4] = {unlit, unlit, unlit, unlit};
+        uint32_t same[12], sameBefore[12];
+        std::memcpy(same, ext, sizeof ext);
+        same[4] = unlit, same[7] = unlit;
+        std::memcpy(sameBefore, same, sizeof same);
+        FollowGhosts(same, solved, 2, 2, true, true);
+        check(std::equal(std::begin(same), std::end(same), std::begin(sameBefore)), "ghosts: an unchanged relight leaves the rows beyond as the solve lit them");
+        FollowGhosts(ext, solved, 2, 2, true, true);
+        check(ext[0] == 0x1098A8B8u && ext[2] == 0x1098A8B8u, "ghosts: the rows above follow their relit edge texel");
+        check(ext[1] == ghostDark && ext[3] == ghostDark, "ghosts: a column whose edge kept its light keeps its rows above");
+        check(ext[9] == 0x1098A8B8u && ext[11] == 0x1098A8B8u && ext[8] == ghostDark, "ghosts: the rows below follow the bottom edge");
+        uint32_t clampHi[3] = {0xF0F0F0F0u, 0xF0F0F0F0u, 0xFF000000u};
+        const uint32_t from[1] = {0x00000000u};
+        FollowGhosts(clampHi, from, 1, 1, true, false);
+        check(clampHi[0] == 0xFFF0F0F0u && clampHi[1] == 0xFFF0F0F0u, "ghosts: a byte past 255 is clamped");
+        uint32_t clampLo[3] = {0x00000000u, 0x00000005u, 0x00000005u};
+        const uint32_t fromLit[1] = {0x00000020u};
+        FollowGhosts(clampLo, fromLit, 1, 1, false, true);
+        check(clampLo[1] == 0u && clampLo[2] == 0u, "ghosts: a byte under 0 is clamped");
+        uint32_t none[2] = {lit, unlit};
+        FollowGhosts(none, solved, 2, 1, false, false);
+        check(none[0] == lit && none[1] == unlit, "ghosts: a block with no rows beyond is left alone");
     }
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

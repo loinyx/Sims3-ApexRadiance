@@ -122,6 +122,7 @@
 #include "opening_lamp_balance.h"
 #include "gpu_lamp_law.h"
 #include "tester_toggles.h"
+#include "setup_lot_policy.h"
 #include "drag_lite.h"
 #include "room_solve_causes.h"
 #include "restart_settle.h"
@@ -579,6 +580,7 @@ struct UrgentRoom {
     bool expiredPending = false; // reached the 8 s cap while still waiting (counted once)
     bool kept = false;           // outlived its deadline while waiting (counted once)
     bool quiet = false;          // an automatic switch-on's own room (NoteQuietMark): first in the queue, not an edit
+    bool blank = false;          // never solved when this entry was first marked (RoomNeverSolved; kept on re-marks): its wait ends at its first solve
 };
 std::mutex g_urgentMx;
 std::vector<UrgentRoom> g_urgent; // the rooms of the lamps edited in the last kUrgentMs (a handful; a big lot's net: more)
@@ -652,6 +654,7 @@ void MarkUrgent(void* room, int tier, bool soon) {
     if (!room || !RoomKey(room, mgr, id)) return;
     const DWORD now = GetTickCount();
     const unsigned long serial = LampMarkFilter::EditSerial();
+    const bool blank = LevelLightShare::RoomNeverSolved(room);
     std::lock_guard<std::mutex> lk(g_urgentMx);
     std::erase_if(g_urgent, [now](UrgentRoom& u) { return !UrgentLive(u, now); });
     const auto it = std::find_if(g_urgent.begin(), g_urgent.end(), [room](const UrgentRoom& u) { return u.room == reinterpret_cast<uintptr_t>(room); });
@@ -663,6 +666,7 @@ void MarkUrgent(void* room, int tier, bool soon) {
         UrgentRoom u{reinterpret_cast<uintptr_t>(room), mgr, id, tier, now + kUrgentMs, soon};
         u.marked = now;
         u.serial = serial;
+        u.blank = blank;
         g_urgent.push_back(u);
     } else {
         const bool same = it->mgr == mgr && it->id == id;
@@ -673,6 +677,7 @@ void MarkUrgent(void* room, int tier, bool soon) {
         if (tier != 2 || !same) it->soon = soon; // the safety net's tag never takes an edit's gather-at-once away
         it->marked = now;
         it->serial = serial;
+        it->blank = (same && it->blank) || blank; // sticky: a re-mark after its first solve keeps it (nothing was held)
         it->expiredPending = it->kept = false;
         it->quiet = false; // an edit's mark: a full lamp edit now
     }
@@ -998,6 +1003,24 @@ bool SeenBefore(const SeenLamp& a, const SeenLamp& b) { return a.light != b.ligh
 // them (a stale entry is rejected by RoomStillSame and replaced at its room's next gather).
 void MeasureGatherMemory(); // development builds (memory_owners): at the end of the file
 void MeasureRenderMemory(); // (the same, render thread: OnPresent)
+// ---- Fast lot pictures (setup_lot_policy.h): a lot the game lights only for its picture gathers without light sharing ----
+// t_captureGather: this gather is of such a lot (OutdoorGather); OpeningsOn, RoofedOpeningsOn, InnerOpeningsOn and the indoor
+// share then read off, so their existing off paths run. g_captureLots: the lots gathered or updated so, until their capture
+// ends (EndLotCapture clears Apex's per-room state of that lot then). g_captureRooms: the rooms whose last gather was gated, so
+// their solve takes the same off path (CapturedRoom). g_captureResolve: lots whose gate ended while still at the high quality
+// (no game re-solve follows): every room of theirs is sent again on the render thread (ProbeLotCapture). All under
+// g_captureLotsMx: gathers also run off the light tree thread (the lot impostor's synchronous solve)
+thread_local bool t_captureGather = false;
+struct CaptureNote {
+    uintptr_t tracker = 0;
+    DWORD since = 0;
+    int rooms = 0;
+};
+std::mutex g_captureLotsMx;
+std::unordered_map<uint64_t, CaptureNote> g_captureLots;
+std::unordered_set<uintptr_t> g_captureRooms;
+std::vector<uintptr_t> g_captureResolve;
+uint64_t CaptureGated(uintptr_t tracker); // below: the lot id when the gate is on for that lot, else 0
 void ClearRoomMeasures();  // below: the per-room measures of the normalisation hook (g_roomTook, g_roomWalls, g_normEnd, g_normUsed)
 void PruneDeadStoryCaches(bool world); // below: the story grid caches and room records of lots no longer loaded
 void MaybeClearRooms() {
@@ -1007,6 +1030,10 @@ void MaybeClearRooms() {
     if (world) {
         ClearYardCaches();   // light through doors and windows: the story grids and room outlines of the old world
         ClearRoomMeasures(); // their rooms are gone; an address reused by a room of the new world starts with no measure
+        std::lock_guard<std::mutex> lk(g_captureLotsMx);
+        g_captureLots.clear();
+        g_captureRooms.clear();
+        g_captureResolve.clear();
     }
     PruneDeadStoryCaches(world); // every kLiveSweepMs, and at a new world
     if (!world && g_rooms.size() <= 8192) return;
@@ -2175,6 +2202,7 @@ float RoomThreshold(const BYTE* room) {
     }
 }
 uint32_t GatherSerial(const BYTE* room); // below: which gather the room's light list comes from (0 = unknown)
+uint32_t LatestGatherSerial(); // below: the newest gather's serial (0 = none yet)
 // A member's value for the group: taken now (the solving room, or a gathered member whose list was gathered again since it
 // was last taken; the light of a lamp it holds cannot change without that), else the last one taken, else what its own
 // last solve computed. self: the room whose state 0 just ran (own = that result). False: nothing known.
@@ -2562,11 +2590,85 @@ int SettleNormInPlace(BYTE* room); // below (inner_norm_settle, a day/night swit
 // (stairwell_bounce) Bumped at each room solve's start on the thread that runs it (a solve's texels run on that thread): the
 // bounce context (t_bounce, StairwellBounceAt) is built again for every solve, so a solve right after a lamp below was moved
 // or switched never reuses the light of its earlier state
+// ---- (10/11) Borrowed lamps that light none of a room's samples ----
+// 66-80% of a room's light list are lamps LevelLightShare takes from other stories; for most of them every sample of the room is
+// blocked by Apex's slab and wall tests (colour exactly 0), yet the game evaluates them and Apex tests them at every sample of
+// every solve (the 10x solve cost since 2.15). A solve notes, per borrowed indoor lamp, whether any sample got light from it; a
+// later solve of the same room and class skips the lamps that got none, while the lamp (its fields as the room solve reads them),
+// the lot's walls, floors and openings, and the lighting options are as they were. The lamp stays in the list (+0x160 and every
+// other pass see it as before) and its evaluation would give 0 again: the same maps. Gather thread only.
+uint64_t BorrowedLampSig(const void* light) {
+    __try {
+        const uintptr_t l = reinterpret_cast<uintptr_t>(light);
+        uint64_t h = 1469598103934665603ull;
+        const auto mix = [&](uintptr_t at, int n) {
+            for (int k = 0; k < n; k++) h = (h ^ *reinterpret_cast<const uint32_t*>(at + k * 4)) * 1099511628211ull;
+        };
+        const int type = *reinterpret_cast<const int*>(l + 0xB0);
+        mix(l + 0x10, 4), mix(l + 0xB0, 1), mix(l + 0xC0, 8), mix(l + 0xE0, 5), mix(l + 0x100, 1), mix(l + 0x120, 3), mix(l + 0x130, 1);
+        if (type == 4 || type == 5) mix(l + 0x170, 13);
+        return h | 1;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+std::atomic<uint32_t> g_zeroGen{1}; // bumped by every whole relight (an option changed): every memo is dropped
+std::atomic<long> g_zeroSkipped{0}, g_zeroSkipRooms{0};
+struct ZeroMemo {
+    uint32_t gen = 0;
+    uint64_t geo = 0;
+    std::vector<std::pair<uintptr_t, uint64_t>> lamps; // (light, BorrowedLampSig) that lit no sample
+};
+std::unordered_map<uint64_t, ZeroMemo> g_zeroMemo; // (room, class) -> its memo
+const BYTE* t_zRoom = nullptr;
+int t_zCls = -1;
+uint64_t t_zGeo = 0;
+std::vector<uintptr_t> t_zSkip; // sorted: the lamps this solve skips
+std::unordered_map<uintptr_t, std::pair<uint64_t, bool>> t_zSeen; // light -> (its sig at its first evaluation, lit any sample)
+uint64_t ZeroKey(const BYTE* room, int cls) { return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(room)) << 3 | static_cast<uint64_t>(cls & 7); }
+int RoomSolveClass(const BYTE* room) {
+    __try {
+        return *reinterpret_cast<const int*>(room + 0xF4);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return -1;
+    }
+}
+void ZeroSolveStart(BYTE* room) {
+    t_zRoom = nullptr, t_zSkip.clear(), t_zSeen.clear();
+    if (!PerfToggles::BorrowedZeroSkip.load(std::memory_order_relaxed)) return;
+    // (a quick pass solves at class 0 with its target class's wall tests and threshold: neither class's samples, no memo)
+    if (RoomLightQueue::QuickPassTarget(room) > 0) return;
+    const int cls = RoomSolveClass(room);
+    if (cls < 0 || cls > 7) return;
+    const uint64_t geo = LevelLightShare::LotGeometryKey(room);
+    if (!geo) return;
+    t_zRoom = room, t_zCls = cls, t_zGeo = geo;
+    const auto it = g_zeroMemo.find(ZeroKey(room, cls));
+    if (it == g_zeroMemo.end() || it->second.gen != g_zeroGen.load(std::memory_order_relaxed) || it->second.geo != geo) return;
+    for (const auto& [l, sig] : it->second.lamps)
+        if (BorrowedLampSig(reinterpret_cast<const void*>(l)) == sig) t_zSkip.push_back(l);
+    std::sort(t_zSkip.begin(), t_zSkip.end());
+    if (!t_zSkip.empty()) ApexUtil::CountOne(g_zeroSkipRooms);
+}
+void ZeroSolveEnd(BYTE* room) {
+    if (!t_zRoom || room != t_zRoom) return;
+    t_zRoom = nullptr;
+    if (g_zeroMemo.size() > 4096) g_zeroMemo.clear();
+    ZeroMemo m{g_zeroGen.load(std::memory_order_relaxed), t_zGeo, {}};
+    for (uintptr_t l : t_zSkip) // (skipped: still no light, by the same rule)
+        if (const uint64_t s = BorrowedLampSig(reinterpret_cast<const void*>(l))) m.lamps.emplace_back(l, s);
+    for (const auto& [l, seen] : t_zSeen) // (a lamp changed during the solve is not noted)
+        if (!seen.second && seen.first && BorrowedLampSig(reinterpret_cast<const void*>(l)) == seen.first) m.lamps.emplace_back(l, seen.first);
+    if (m.lamps.empty() || LevelLightShare::LotGeometryKey(room) != t_zGeo) g_zeroMemo.erase(ZeroKey(room, t_zCls));
+    else g_zeroMemo[ZeroKey(room, t_zCls)] = std::move(m);
+    t_zSkip.clear(), t_zSeen.clear();
+}
 thread_local uint32_t t_bounceSolve = 0;
 void __fastcall RoomSolveStartHook(BYTE* room) {
     SyncHardWallTops();
     reinterpret_cast<RoomSolveStart_t>(kRoomSolveStart)(room);
     ++t_bounceSolve;
+    if (room && ThreadId() == g_gatherThread.load(std::memory_order_relaxed)) HookGuard::Run("LevelLightShare borrowed lamps memo start", [room] { ZeroSolveStart(room); });
     if (room && DevSwitches::RoomSolveCauses()) RoomSolveCauses::SolveStart(reinterpret_cast<uintptr_t>(room)); // (its texels come after state 0)
     if (room && ThreadId() == g_gatherThread.load(std::memory_order_relaxed)) DragLite::NoteSolveStarted(room); // (the re-pick throttle while a lamp is dragged)
     if (room) DragLite::NoteGpuDragSolve(room);
@@ -5084,6 +5186,7 @@ int RequeueInnerDoors(uintptr_t tracker, int S);      // below (indoor light thr
 bool InnerOpeningsOn();                               // below
 void RefreshStoryWallPatches(uintptr_t mgr);          // below (the outside walls' copy)
 void DrainWarmStories() {
+    if (t_captureGather) return; // (the options read off here: the next gather drains them)
     std::vector<std::pair<uintptr_t, int>> due;
     {
         std::lock_guard<std::mutex> lk(g_warmMx);
@@ -5099,6 +5202,7 @@ void DrainWarmStories() {
             const uintptr_t mgr = SafeStoryManager(tracker, story);
             WarmOpeningGrid(mgr);
             if (mgr) RefreshStoryWallPatches(mgr); // the outside walls' copy for objects and the ground (its openings)
+            if (CaptureGated(tracker)) continue; // (a lot lit only for its picture: its rooms solve again when the capture ends)
             if (roofed) RequeueRoofedDoors(tracker, story); // outdoor light through openings: the roofed rooms whose doors changed
             if (inner) RequeueInnerDoors(tracker, story);   // indoor light through openings: the rooms whose openings into roofed rooms changed
         }
@@ -5868,6 +5972,15 @@ void PublishOpenRig(uintptr_t room, const OpenRigRoom* now) {
     if (g_openRigChanged.size() < 1024 && std::find(g_openRigChanged.begin(), g_openRigChanged.end(), room) == g_openRigChanged.end()) g_openRigChanged.push_back(room);
     g_openRigPublished.fetch_add(1, std::memory_order_relaxed);
 }
+// Gather thread, once the room's list is final: its room-mode rigs that gathered from the emptied list gather again
+// (ObjectLightBridge::TakeEmptyGatherRoom; drained with the opening rooms by the render thread)
+void RegatherRigsOfGatheredRoom(BYTE* room) {
+    if (!ObjectLightBridge::TakeEmptyGatherRoom(room)) return;
+    std::lock_guard<std::mutex> lk(g_openRigMx);
+    const uintptr_t r = reinterpret_cast<uintptr_t>(room);
+    if (g_openRigChanged.size() < 1024 && std::find(g_openRigChanged.begin(), g_openRigChanged.end(), r) == g_openRigChanged.end()) g_openRigChanged.push_back(r);
+    else if (g_openRigChanged.size() >= 1024) ObjectLightBridge::RequestRigRefresh();
+}
 std::shared_ptr<const OpenRigMap> OpenRigSnap() {
     std::lock_guard<std::mutex> lk(g_openRigMx);
     return g_openRig;
@@ -6488,6 +6601,13 @@ uintptr_t RoomProbe(uintptr_t room) {
         return 0;
     }
 }
+// an address inside the game executable's image (its code, data and vtables)
+bool InGameImage(uintptr_t a) {
+    static BYTE* base = nullptr;
+    static size_t size = 0;
+    static const bool known = MemPatch::GetModuleInfo(GetModuleHandleW(nullptr), &base, &size);
+    return known && a - reinterpret_cast<uintptr_t>(base) < size;
+}
 // POD (SEH): the reflection cube a room's floors bind (0x006AD3DC: its probe once ready, +0x2C95; 0x006B42C0: +0x2C5C), the
 // IDirect3DCubeTexture9, null without one (the room then draws with the game's default cube, not read here). The draw hands it to the
 // device outside any SEH, and the room can be one of a lot gone (ReadRoomAmbient reads freed memory as still that room): GetType here
@@ -6497,7 +6617,12 @@ void* RoomSpecCube(uintptr_t room) {
     __try {
         const uintptr_t tex = *reinterpret_cast<const uint8_t*>(probe + 0x2C95) ? *reinterpret_cast<const uintptr_t*>(probe + 0x2C5C) : 0;
         IDirect3DCubeTexture9* const cube = tex && *reinterpret_cast<const uint32_t*>(tex + 0x2C) == 1 ? *reinterpret_cast<IDirect3DCubeTexture9* const*>(tex + 0x30) : nullptr; // (1 = cube; probe_neutral.cpp)
-        return cube && cube->GetType() == D3DRTYPE_CUBETEXTURE ? cube : nullptr;
+        // A freed room can hold a live game object here: its vtable lies in TS3W.exe and slot 10 (0x00620D60 on Steam 1.67, a plain
+        // ret) leaves `this` on the stack, so this frame returns with ESP 4 bytes low and corrupt callee-saved registers. A D3D9 cube's
+        // vtable never lies in the game image, so such an object is refused before the virtual call; SEH does not catch the skew
+        const uintptr_t vtbl = cube ? *reinterpret_cast<const uintptr_t*>(cube) : 0;
+        if (!vtbl || InGameImage(vtbl)) return nullptr;
+        return cube->GetType() == D3DRTYPE_CUBETEXTURE ? cube : nullptr;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         g_archFaults.fetch_add(1, std::memory_order_relaxed);
         return nullptr;
@@ -7587,6 +7712,7 @@ void __fastcall FinalizeHook(BYTE* room) {
     }
     reinterpret_cast<Finalize_t>(kFinalize)(room);
     if (!room) return;
+    if (ThreadId() == g_gatherThread.load(std::memory_order_relaxed)) HookGuard::Run("LevelLightShare borrowed lamps memo end", [room] { ZeroSolveEnd(room); });
     // GPU room lamps (developer): the room's texels in its maps were written again, its kept solve no longer holds them (any
     // thread; a solve kept below is kept again by SolveEnd)
     if (OutdoorDelta::RoomLampCapture()) {
@@ -7706,7 +7832,7 @@ void ShareIndoorLights(BYTE* treeLevel, BYTE* room) {
         ++g_roomsGen;
     }
     if (id > 0) BeginTaker(key); // what it took (and the boosts that came with it) is taken again below, or not
-    if (id <= 0 || !g_indoorReady || !g_indoorOn.load(std::memory_order_relaxed)) return;
+    if (id <= 0 || !g_indoorReady || !g_indoorOn.load(std::memory_order_relaxed) || t_captureGather) return;
     const uintptr_t rmgr = *reinterpret_cast<const uintptr_t*>(room);
     if (!rmgr) return;
     const int S = *reinterpret_cast<const int*>(rmgr + 0x88);
@@ -7928,7 +8054,7 @@ void ShareRoomZeroFromBelow(BYTE* treeLevel, BYTE* room) {
     std::shared_ptr<const StoryGrid> grid;
     std::vector<int> rooms;
     std::vector<uint8_t> placed;
-    if (g_indoorOn.load(std::memory_order_relaxed) && DevSwitches::OpenRoomsAbove() && mgrBelow && levelS && LevelManager(levelS) == rmgr &&
+    if (g_indoorOn.load(std::memory_order_relaxed) && !t_captureGather && DevSwitches::OpenRoomsAbove() && mgrBelow && levelS && LevelManager(levelS) == rmgr &&
         ReadGridSize(mgrBelow, w, h) && w > 0 && h > 0 && w <= 1024 && h <= 1024 && (grid = info.grid[0] ? info.grid[0] : EnsureStoryGrid(rmgr)) && grid->w == w && grid->h == h) {
         rooms.assign(static_cast<size_t>(w) * h * 4, 0);
         placed.assign(rooms.size(), 1);
@@ -7992,7 +8118,9 @@ void ShareRoomZeroFromBelow(BYTE* treeLevel, BYTE* room) {
 }
 
 // Rooms of a lot near a stair opening (receivers on both sides), plus the rooms that took lamps before: they gather again
-void QueueOpeningRooms(uintptr_t tracker, std::vector<std::pair<int, int>>* sent = nullptr) {
+// coveredAfter (OpeningCoveredAfter): a room whose gather came after that serial already saw the change or the round, so it is not sent
+// (11-40-32 recording: due 20 solved 0/23 and 2/20 again, identical maps, 3.5 s of the settle budget)
+int QueueOpeningRooms(uintptr_t tracker, std::vector<std::pair<int, int>>* sent = nullptr, uint32_t coveredAfter = 0) {
     std::vector<std::pair<int, int>> todo;
     BoostedRoomsOf(tracker, todo);
     {
@@ -8022,12 +8150,22 @@ void QueueOpeningRooms(uintptr_t tracker, std::vector<std::pair<int, int>>* sent
     std::sort(todo.begin(), todo.end());
     todo.erase(std::unique(todo.begin(), todo.end()), todo.end());
     if (sent) *sent = todo;
-    int queued = 0;
-    for (const auto& [S, r] : todo)
+    int queued = 0, covered = 0;
+    for (const auto& [S, r] : todo) {
+        if (coveredAfter) {
+            const BYTE* room = SafeRoomById(tracker, S, r);
+            if (room && GatherSerial(room) > coveredAfter) {
+                covered++;
+                continue;
+            }
+        }
         if (QueueRoom(tracker, S, r, true)) queued++;
+    }
     g_indoorQueued.fetch_add(queued, std::memory_order_relaxed);
     if (!kPublicBuild && (!todo.empty() || !summary.empty()))
-        GatherLog(tracker, std::format("rooms near openings sent to gather again: {} of {} (the others were waiting already) |{}", queued, todo.size(), summary));
+        GatherLog(tracker, std::format("rooms near openings sent to gather again: {} of {} (the others were waiting already; {} gathered after) |{}",
+                                       queued, todo.size(), covered, summary));
+    return queued;
 }
 
 // Rooms taking lamps of other stories, checked against those lamps as they are now (atrium house: the second
@@ -8183,6 +8321,11 @@ struct LotState {
     unsigned windowPass = 3;
     int windowStory = -99;
     DWORD auditAt = 0; // the next AuditTakers of this lot
+    uint32_t roundSerial = 0; // LatestGatherSerial once the last send's round was over (0 = not yet)
+    // Loading triggers not sent yet (OpeningSendDue): their bits, the first and latest, LatestGatherSerial at the latest
+    unsigned pendWhy = 0;
+    DWORD pendFirst = 0, pendAt = 0;
+    uint32_t pendSerial = 0;
     std::vector<std::pair<int, int>> watch; // (story, room) sent by the last QueueOpeningRooms
     // The lot's story managers when last seen: a lot whose lighting was rebuilt (the camera left it and came back, or
     // its tracker's address was reused by another lot) is a new lot for this state (the indoor fix sometimes needed the save
@@ -8369,6 +8512,73 @@ void DropReplacedManagers(uintptr_t tracker, const uintptr_t (&before)[8], const
     DropDeadSnaps(gone, n);
     if (ThreadId() == g_gatherThread.load(std::memory_order_relaxed)) DropDeadStoryGrids(gone, n); // (that thread's caches)
 }
+bool LotOfMgr(uintptr_t mgr, uint64_t* lot, int* quality); // below (the lot capture test)
+int ForgetRoomMeasures(const uintptr_t* mgrs, int n, uintptr_t tracker); // below (with ClearRoomMeasures)
+void NoteCapture(uint64_t lot, uintptr_t tracker, bool room) { // any thread
+    std::lock_guard<std::mutex> lk(g_captureLotsMx);
+    CaptureNote& c = g_captureLots[lot];
+    if (!c.since) c.since = std::max<DWORD>(GetTickCount(), 1);
+    c.tracker = tracker;
+    c.rooms += room ? 1 : 0;
+}
+// The room's last gather was gated or not (its solve, which can last several frames, takes the same path: CapturedRoom)
+void NoteCaptureRoom(const BYTE* room, bool gated) { // any thread
+    std::lock_guard<std::mutex> lk(g_captureLotsMx);
+    if (!gated) {
+        if (!g_captureRooms.empty()) g_captureRooms.erase(reinterpret_cast<uintptr_t>(room));
+        return;
+    }
+    if (g_captureRooms.size() > 16384) g_captureRooms.clear();
+    g_captureRooms.insert(reinterpret_cast<uintptr_t>(room));
+}
+// Per sample (ownYard): looked up once per room and solve (t_bounceSolve counts this thread's solves)
+bool CapturedRoom(const BYTE* room) {
+    thread_local const BYTE* s_room = nullptr;
+    thread_local uint32_t s_solve = 0;
+    thread_local bool s_gated = false;
+    if (room != s_room || s_solve != t_bounceSolve) {
+        s_room = room, s_solve = t_bounceSolve;
+        std::lock_guard<std::mutex> lk(g_captureLotsMx);
+        s_gated = !g_captureRooms.empty() && g_captureRooms.count(reinterpret_cast<uintptr_t>(room)) != 0;
+    }
+    return s_gated;
+}
+// A lot no longer gated after its capture (BeforeRoomUpdate, light tree thread). When its quality went back to low, the game
+// solves every room of each story again (0x006A5EF0 -> 0x006A5C90(1)); when the gate ended at the high quality (the world's
+// active lot or the priority lot was set late), no such solve follows, so every room of the lot is sent again (g_captureResolve).
+// Apex's per-room state of the gated solves goes: OutdoorDelta's kept parts and the per-room measures. LotState stays: it was
+// not advanced while gated, so the loading triggers missed meanwhile fire at the lot's next update (as before this gate).
+// (Real-time outdoor lamps keeps no relit map of such a lot: LotCapture.)
+void EndLotCapture(uintptr_t tracker) {
+    if (!tracker || ThreadId() != g_gatherThread.load(std::memory_order_relaxed)) return; // (the next update on that thread)
+    {
+        std::lock_guard<std::mutex> lk(g_captureLotsMx);
+        if (g_captureLots.empty()) return;
+    }
+    uint64_t lot = 0;
+    int quality = 0;
+    const uintptr_t mgr0 = SafeStoryManager(tracker, 0);
+    if (!mgr0 || !LotOfMgr(mgr0, &lot, &quality)) return;
+    CaptureNote note;
+    {
+        std::lock_guard<std::mutex> lk(g_captureLotsMx);
+        const auto it = g_captureLots.find(lot);
+        if (it == g_captureLots.end()) return;
+        note = it->second;
+        g_captureLots.erase(it);
+        if (quality) g_captureResolve.push_back(tracker);
+    }
+    uintptr_t mgrs[12];
+    int n = 0;
+    for (int s = -4; s <= 7; s++)
+        if (const uintptr_t m = SafeStoryManager(tracker, s)) mgrs[n++] = m;
+    const int kept = OutdoorDelta::ForgetLot(mgrs, n);
+    const int measures = ForgetRoomMeasures(mgrs, n, tracker);
+    LOG_INFO(std::format("[SetupLot] Lot {:016X}: lot capture over after {} ms, {} room gathers skipped light sharing; {} kept room parts and {} "
+                         "room measures cleared{}",
+                         lot, GetTickCount() - note.since, note.rooms, kept, measures,
+                         quality ? "; the gate ended at the high quality: every room is sent again" : ""));
+}
 void BeforeRoomUpdate(BYTE* tl) {
     const uintptr_t mgr = *reinterpret_cast<const uintptr_t*>(tl);
     if (!mgr) return;
@@ -8376,6 +8586,9 @@ void BeforeRoomUpdate(BYTE* tl) {
     const int L = *reinterpret_cast<const int*>(tl + 0x1A0);
     if (L < 0 || L > 7 || !tracker || TreeLevel(tracker, L) != reinterpret_cast<uintptr_t>(tl)) return;
     if (L == 0) { // once per lot and update
+        // a lot lit only for its picture: none of Apex's sends (its rooms solve again when the capture ends, EndLotCapture)
+        if (const uint64_t capture = CaptureGated(tracker)) return NoteCapture(capture, tracker, false);
+        EndLotCapture(tracker);
         // stacked rooms whose normalisation or ambient ramp changed in another member's solve (MergeStackedAmbient)
         std::vector<DepKey> send;
         {
@@ -8444,6 +8657,7 @@ void BeforeRoomUpdate(BYTE* tl) {
         FlushDeferred(tracker);
         FlushDepWaits(tracker);
         bool due = false;
+        unsigned why = 0; // (recording) what made the rooms near openings due
         const long gen = g_indoorGen.load(std::memory_order_relaxed);
         if (g_lots.size() > 4096) g_lots.clear();
         LotState& lot = g_lots[tracker];
@@ -8451,22 +8665,23 @@ void BeforeRoomUpdate(BYTE* tl) {
         for (int s = 0; s <= 7; s++) mgrs[s] = StoryManager(tracker, s);
         if (std::memcmp(mgrs, lot.mgrs, sizeof mgrs) != 0) { // rebuilt: count its floors and openings from scratch
             HookGuard::Run("LevelLightShare rebuilt lot prune", [&] { DropReplacedManagers(tracker, lot.mgrs, mgrs); });
-            const long keepGen = lot.gen;
+            const LotState old = std::move(lot);
             lot = LotState{};
-            lot.gen = keepGen;
+            lot.gen = old.gen;
+            lot.pendWhy = old.pendWhy, lot.pendFirst = old.pendFirst; // (a rebuild does not push back what was collected)
             std::memcpy(lot.mgrs, mgrs, sizeof mgrs);
-            due = true;
+            due = true, why |= 1;
             g_lotRebuilds.fetch_add(1, std::memory_order_relaxed);
         }
         if (lot.gen != gen) {
             lot.gen = gen;
-            due = true;
+            due = true, why |= 2;
         }
         // (steady_indoor_light) a lamp edit's resend of the rooms near openings (a Sim's switch on a lot the camera is not on
         // needs it too), no longer through g_indoorGen, which PhysicsKey reads (each edit made every story's room 0 lose its
         // kept parts: "the lighting options changed", a full solve of each). lamp_edit_lot_only: the edited lamp's lot only
         if (const long editGen = g_editGen.load(std::memory_order_relaxed); lot.editGen != editGen) {
-            if (!DevSwitches::LampEditLotOnly() || EditedLot(tracker, lot.editGen)) due = true;
+            if (!DevSwitches::LampEditLotOnly() || EditedLot(tracker, lot.editGen)) due = true, why |= 4;
             lot.editGen = editGen;
         }
         const DWORD now = GetTickCount();
@@ -8476,7 +8691,7 @@ void BeforeRoomUpdate(BYTE* tl) {
             lot.nextCheck = now + 2000;
             const int known = FloorObjectsKnown(tracker);
             const int openings = known ? OpeningCount(tracker) : 0;
-            if (known > lot.floorsKnown || (openings != lot.openings && lot.openings >= 0)) due = true;
+            if (known > lot.floorsKnown || (openings != lot.openings && lot.openings >= 0)) due = true, why |= 8;
             lot.floorsKnown = known;
             lot.openings = openings;
         }
@@ -8487,7 +8702,7 @@ void BeforeRoomUpdate(BYTE* tl) {
                 auto it = m ? std::find(g_dirtyMgrs.begin(), g_dirtyMgrs.end(), m) : g_dirtyMgrs.end();
                 if (it != g_dirtyMgrs.end()) {
                     g_dirtyMgrs.erase(it);
-                    due = true;
+                    due = true, why |= 16;
                 }
             }
             if (g_dirtyMgrs.empty()) g_dirtyReady = false;
@@ -8497,21 +8712,38 @@ void BeforeRoomUpdate(BYTE* tl) {
         // lights them (entering the lot, it should already be right). That is as soon as the first round is
         // over (none of its rooms waits for a solve for kSettleQuiet), at the latest kSettleMax after (atrium house F8,
         // 29/09: the fixed 6 s came 2.5 s after the last solve of the first round; the lot looked right only then).
+        // A lot loading or streaming in fires these one after another (rebuilt, then the floors, the openings and the dirty
+        // managers within 0.5 s; each sent every room near openings again and reset the ones already gathered, so the
+        // game's lot capture of New Game waited for 4-6 rounds per lot): collected and sent once (OpeningSendDue)
+        if (const unsigned load = why & (1 | 2 | 8 | 16)) {
+            lot.pendWhy |= load;
+            lot.pendAt = now;
+            if (!lot.pendFirst) lot.pendFirst = std::max<DWORD>(now, 1);
+            lot.pendSerial = LatestGatherSerial(); // (light thread, as the gathers' stamps: a later serial gathered after this change)
+        }
         constexpr DWORD kSettleMin = 500, kSettleQuiet = 400, kSettleMax = 6000;
         if (due && lot.openings > 0 && !lot.settleAt) { // armed once: later dues do not push it back
             lot.settleAt = (now + kSettleMax) | 1;
             lot.armedAt = now;
             lot.quietSince = 0;
         } else if (lot.settleAt) {
+            // the last send's round is over once no watched room is unsolved, waiting for its gather or being solved
+            // (LotBusy: states 1-3, deferred, ambient queue and dependency waits; state 2's gather is still to come)
+            if (!lot.roundSerial && !lot.pendWhy && !lot.watch.empty() && !LotBusy(tracker, lot.watch)) {
+                bool unsolved = false;
+                for (const auto& [S, r] : lot.watch)
+                    if (const BYTE* room = SafeRoomById(tracker, S, r); room && LevelLightShare::RoomNeverSolved(room)) unsolved = true;
+                if (!unsolved) lot.roundSerial = std::max<uint32_t>(LatestGatherSerial(), 1);
+            }
             bool fire = static_cast<int32_t>(now - lot.settleAt) >= 0;
             if (!fire && now - lot.armedAt >= kSettleMin) {
-                if (LotBusy(tracker, lot.watch)) lot.quietSince = 0;
+                if (lot.pendWhy || LotBusy(tracker, lot.watch)) lot.quietSince = 0; // (a collected send not out yet is part of the round)
                 else if (!lot.quietSince) lot.quietSince = std::max<DWORD>(now, 1);
                 else fire = now - lot.quietSince >= kSettleQuiet;
             }
             if (fire) {
                 lot.settleAt = 0;
-                due = true;
+                due = true, why |= 32;
                 g_settles.fetch_add(1, std::memory_order_relaxed);
                 if (now - lot.armedAt < kSettleMax - 50) g_settlesEarly.fetch_add(1, std::memory_order_relaxed);
             }
@@ -8541,8 +8773,14 @@ void BeforeRoomUpdate(BYTE* tl) {
             for (const DepKey& k : go)
                 if (QueueRoom(tracker, k.level, k.room, true)) g_indoorQueued.fetch_add(1, std::memory_order_relaxed);
         }
-        if (due) QueueOpeningRooms(tracker, &lot.watch);
-        else if (!lot.auditAt || static_cast<int32_t>(now - lot.auditAt) >= 0) { // (the rooms near openings just sent record again anyway)
+        // a lamp edit and the settle go at once (and take what was collected with them)
+        if ((why & (4 | 32)) || (lot.pendWhy && RoomAmbientPolicy::OpeningSendDue(now, lot.pendFirst, lot.pendAt))) {
+            const int queued = QueueOpeningRooms(tracker, &lot.watch, RoomAmbientPolicy::OpeningCoveredAfter(why & 4, why & 32, lot.roundSerial, lot.pendSerial));
+            if (Recorder::Active() && queued > 0) // (0 queued is no cost: e.g. luzInternaEntreAndares off)
+                LOG_INFO(std::format("[LevelLightShare] Lot {:08X}: rooms near openings sent again (due {:02X}, {} rooms)", tracker, why | lot.pendWhy, queued));
+            if (!(why & 32)) lot.roundSerial = 0; // a new round: its end is taken again
+            lot.pendWhy = 0, lot.pendFirst = 0, lot.pendAt = 0, lot.pendSerial = 0;
+        } else if (!lot.auditAt || static_cast<int32_t>(now - lot.auditAt) >= 0) { // (the rooms near openings just sent record again anyway)
             lot.auditAt = (now + kAuditEveryMs) | 1;
             AuditTakers(tracker, now);
         }
@@ -8705,6 +8943,7 @@ struct DepSig {
 std::unordered_map<DepKey, DepSig, DepHash> g_depSig; // last state sent on (under g_depsMx)
 std::atomic<long> g_lampWobbles{0};                  // lamp values changed without a move worth sending at once
 std::atomic<long> g_depShapeSends{0}; // lamps added, deleted or moved, walls changed: sent at once
+std::atomic<long> g_firstSightNotEdit{0}; // rooms whose lamps were first seen: sent at once, no edit hold
 std::atomic<long> g_outdoorQuiet{0};   // outside of a floor marked changed with its lamps and walls as they were: no other floor sent
 bool LampsMoved(const std::vector<LampAt>& was, const std::vector<LampAt>& now) {
     size_t i = 0;
@@ -8835,6 +9074,7 @@ bool DepWaitsFor(uintptr_t tracker) {
 
 bool SettlingAfterWorldLoad(); // below
 bool WorldLiveSeen(); // below: the world went live (OnWorldLive) since the load
+DWORD LotEnteredTick(); // (g_lotEnteredAt, below)
 void AfterChangedWalk(BYTE* tl) {
     if (!*reinterpret_cast<const uintptr_t*>(tl)) return;
     const uintptr_t tracker = *reinterpret_cast<const uintptr_t*>(tl + 4);
@@ -8937,6 +9177,7 @@ void AfterChangedWalk(BYTE* tl) {
             // other's lamps then sent each other to gather again without end (atrium house: rooms 19 and 20 of stories 1
             // and 2, dozens of gathers in a row in the F8, each resetting their lighting LOD to 0)
             std::vector<uintptr_t> lights;
+            const bool seen = g_depSig.count(key) != 0; // a first sight (a lot entry registers every lamp) is no edit
             int change = LampChange(key, reinterpret_cast<uintptr_t>(tl), &lights);
             const bool moved = change == 3; // the same lamps, one moved (a drag): see g_litBy
             if (!change) {
@@ -8948,7 +9189,8 @@ void AfterChangedWalk(BYTE* tl) {
             const bool soon = note && note->pure && change != 2; // a lamp registered in it changed, none added or removed
             if (change == 2) { // a lamp of it added or removed: its gather waits for the game
                 ownLate.push_back(ids[i]);
-                lampAddedOrRemoved = true;
+                if (seen) lampAddedOrRemoved = true;
+                else g_firstSightNotEdit.fetch_add(1, std::memory_order_relaxed);
             }
             if (change == 1 && note && note->user) change = 3; // colour, intensity, on / off by a player or a Sim: at once
             auto& out = change == 2 ? now : change == 3 ? kept : later;
@@ -9030,12 +9272,25 @@ void AfterChangedWalk(BYTE* tl) {
     // when every lamp registers, nor before the world is live (the load screen's lamps registering made a 16 s "edit"),
     // nor on a lot the camera is not on (a neighbour's lamps added by the game started holds that waited on its rooms)
     const uintptr_t walkMgr = *reinterpret_cast<const uintptr_t*>(tl);
-    if (lampAddedOrRemoved && !own.empty() && WorldLiveSeen() && !SettlingAfterWorldLoad() && !gpuTail && walkMgr && PlayedLotMgr(walkMgr))
-        LampMarkFilter::NoteEdit();
+    const bool played = walkMgr && PlayedLotMgr(walkMgr);
+    // 2026-11-10: a lot streaming in or becoming the played one flips its lamps' enabled bits and rebuilds its wall lists with
+    // no lamp note: its walks made room 0 and the roofless rooms urgent and opened 12-16 s "lamp edits" that solved final rooms
+    // again while visible rooms waited. With no note only a lamp added or removed on a lot played for 2 s is an edit (a delete,
+    // a sale, an undo); the rest is sent as before, at the game's pace. (light tree thread)
+    static uintptr_t s_playedTracker = 0;
+    static DWORD s_playedAt = 0;
+    const DWORD walkTick = GetTickCount();
+    if (played && tracker != s_playedTracker) s_playedTracker = tracker, s_playedAt = walkTick;
+    // (10/11) the camera back on the played lot ("entered" again: its LOD re-adds the lamps it dropped) is no edit either
+    if (const DWORD entered = LotEnteredTick(); entered && walkTick - entered < 2000) s_playedAt = std::max(s_playedAt, entered);
+    const bool gameEdit = lampAddedOrRemoved && played && WorldLiveSeen() && !SettlingAfterWorldLoad() && !gpuTail && walkTick - s_playedAt >= 2000;
+    const bool editWalk = noted > 0 || gameEdit;
+    if (gameEdit && !own.empty()) LampMarkFilter::NoteEdit();
     for (int id : own)
         if (void* room = RoomOfTreeLevel(tl, id)) {
             if (gpuTail) continue; // (Instant: a GPU edit's tail, solved by the game's walk with no urgency)
             const LampMarkNote* note = noteOf(id);
+            if (!note && !editWalk) continue; // (sent by the game's walk, state 1: solved, not urgent)
             const bool soon = std::find(ownSoon.begin(), ownSoon.end(), id) != ownSoon.end() && std::find(ownLate.begin(), ownLate.end(), id) == ownLate.end();
             // tier 0: the lamp's own room, and room 0 of the camera's story; room 0 of another story comes with the other rooms
             // (tier 1, by story): it went before the camera story's rooms (a lot entry spent 4 s on other stories' rooms 0)
@@ -9050,7 +9305,7 @@ void AfterChangedWalk(BYTE* tl) {
         const DragLite::WhyScope liteWhy(DragLite::Why::Fanout);
         for (int k = 0; k < ny; k++) QueueRoom(tracker, L, yards[k], true);
     }
-    const int tier = own.empty() ? -1 : 1; // the rooms of other stories taking the edited lamps: right after the lamp's own
+    const int tier = own.empty() || !editWalk ? -1 : 1; // the rooms of other stories taking the edited lamps: right after the lamp's own
     const auto sameStory = [&sameL](int S, int r) { return std::binary_search(sameL.begin(), sameL.end(), std::make_pair(S, r)); };
     {
         // (lamp drags: "now" stops a solve that may read a removed lamp, never left out; the rest below is the walk's fan-out)
@@ -9142,6 +9397,10 @@ uint32_t GatherSerial(const BYTE* room) {
         return 0;
     }
     return GatherSerialImpl(room, mgr, id);
+}
+uint32_t LatestGatherSerial() {
+    std::lock_guard<std::mutex> lock(g_gatherStampMx);
+    return g_gatherSerial;
 }
 // A lot lamp sold or deleted in Build mode stays registered, lit (+0x100 bit 0x20) with its full colour and only disabled
 // (bit 0x40 clear), also after a save load (07/10 snapshots: lamp post L3BEA4030, type 11, flags B5,
@@ -9261,6 +9520,64 @@ bool SendRoomZero(uintptr_t tracker, int story) {
     }
 }
 
+// ---- the lot capture test (fast lot pictures): its inputs, read on each gather and by ProbeLotCapture ----
+uint64_t WorldActiveLotId(int* ok) {
+    // the world's active lot getter (mov eax,[ecx+170h]; mov edx,[ecx+174h]; ret: Steam 1.67.2 0x00C5FB00, EA 1.69.47 0x00C5EF10),
+    // found by its whole body, so its offsets are the ones read below; decided once the scan has run
+    static std::atomic<int> s_getter{-1}; // (render and gather threads: both compute the same answer)
+    if (s_getter.load(std::memory_order_relaxed) < 0) {
+        if (!GameAddr::Resolved()) {
+            *ok = 0;
+            return 0;
+        }
+        s_getter.store(GameAddr::Get(GameAddr::Id::WorldManagerPtr) && GameAddr::Get(GameAddr::Id::WorldActiveLotGetter), std::memory_order_relaxed);
+    }
+    *ok = s_getter.load(std::memory_order_relaxed);
+    if (!*ok) return 0;
+    __try {
+        const uintptr_t wm = *reinterpret_cast<const uintptr_t*>(GameAddr::Get(GameAddr::Id::WorldManagerPtr));
+        return wm ? static_cast<uint64_t>(*reinterpret_cast<const uint32_t*>(wm + 0x174)) << 32 | *reinterpret_cast<const uint32_t*>(wm + 0x170) : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+bool LotOfMgr(uintptr_t mgr, uint64_t* lot, int* quality) {
+    __try {
+        *lot = static_cast<uint64_t>(*reinterpret_cast<const uint32_t*>(mgr + 0x94)) << 32 | *reinterpret_cast<const uint32_t*>(mgr + 0x90);
+        *quality = *reinterpret_cast<const BYTE*>(mgr + 0x288);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+// The game's priority lot through the checked helper (bytes verified, SEH-guarded); unknown counts as priority: not gated.
+bool CaptureGate(uintptr_t mgr, int quality, uint64_t lot, uint64_t world, int getterOk, bool allHigh, bool* priority) {
+    bool known = false;
+    const bool played = RoomLightQueue::PlayedLot(mgr, &known);
+    *priority = !known || played;
+    return SetupLotPolicy::Gate(allHigh, getterOk != 0, quality, lot, world, *priority);
+}
+// The lot id when the game lights this story manager's lot only for its picture (the test), else 0
+uint64_t CaptureLotOfMgr(uintptr_t mgr) {
+    uint64_t lot = 0;
+    int quality = 0, getterOk = 0;
+    if (!mgr || !LotOfMgr(mgr, &lot, &quality) || !quality) return 0;
+    const uint64_t world = WorldActiveLotId(&getterOk);
+    bool priority = false;
+    return CaptureGate(mgr, quality, lot, world, getterOk, g_allLotsHigh.load(std::memory_order_relaxed), &priority) ? lot : 0;
+}
+// fastLotPictures ([patches.NightTerrainRelight], TOML only, default on): such a lot gathers and updates without light sharing
+std::atomic<bool> g_fastLotPictures{true};
+uint64_t CaptureGated(uintptr_t tracker) {
+    return g_fastLotPictures.load(std::memory_order_relaxed) && tracker ? CaptureLotOfMgr(SafeStoryManager(tracker, 0)) : 0;
+}
+// Gathers of such lots, per lot id, at the gate (OutdoorGather): a short misdetection between two 250 ms samples shows here
+std::mutex g_captureMx;
+std::unordered_map<uint64_t, int> g_captureGathers;
+void NoteGatherCapture(uint64_t lot) { // gather thread
+    std::lock_guard<std::mutex> lk(g_captureMx);
+    g_captureGathers[lot]++;
+}
 void __fastcall OutdoorGather(BYTE* treeLevel, void*, BYTE* room) {
     const DWORD started = GetTickCount();
     const uint64_t me = g_installed.load(std::memory_order_relaxed) && room ? RoomZeroLot(room, &t_gatherStory) : 0; // (GatherLotId)
@@ -9272,14 +9589,23 @@ void __fastcall OutdoorGather(BYTE* treeLevel, void*, BYTE* room) {
         if (const int n = DropDisabledLotLights(room)) g_disabledDropped.fetch_add(n, std::memory_order_relaxed);
         if (me && g_xlotSafe.load(std::memory_order_relaxed)) TakeCrossLotLamps(treeLevel, room, me);
         NoteRoomStructure(room);
+        const uintptr_t tracker = *reinterpret_cast<const uintptr_t*>(treeLevel + 4);
+        const uint64_t capture = CaptureLotOfMgr(*reinterpret_cast<const uintptr_t*>(room)); // (room+0: its story manager)
+        if (capture) NoteGatherCapture(capture);
+        t_captureGather = capture && g_fastLotPictures.load(std::memory_order_relaxed);
+        if (t_captureGather) NoteCapture(capture, tracker, true);
+        NoteCaptureRoom(room, t_captureGather); // (the capture's end: BeforeRoomUpdate, EndLotCapture)
         ShareOutdoorLights(treeLevel, room);
         ShareIndoorLights(treeLevel, room);
         ShareRoomZeroFromBelow(treeLevel, room); // (room 0) after the outdoor share's record (RecordRoom), which it adds to
         ShareRooflessLights(treeLevel, room); // after the indoor share, which starts the room's record again
         ShareRoofedOpenings(treeLevel, room); // (roofed rooms) after it too: it adds to the indoor share's record
         ShareInnerLamps(treeLevel, room);     // (every room) last: it adds to every record above
+        t_captureGather = false;
         NoteGatherStamp(room, started);
+        RegatherRigsOfGatheredRoom(room);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
+        t_captureGather = false;
         g_faults.fetch_add(1, std::memory_order_relaxed);
     }
 }
@@ -10277,7 +10603,7 @@ __declspec(naked) void OutdoorAlphaThunk() {
 // wrapped light evaluation (the per-point test), the room update hooks (the sends) and GameWallTest (the game's test skipped)
 std::atomic<bool> g_openingsOn{false};
 bool OpeningsOn() {
-    return g_openingsOn.load(std::memory_order_relaxed) && g_installed.load(std::memory_order_relaxed) && g_indoorReady && g_enterReady && g_floorMaskReady &&
+    return !t_captureGather && g_openingsOn.load(std::memory_order_relaxed) && g_installed.load(std::memory_order_relaxed) && g_indoorReady && g_enterReady && g_floorMaskReady &&
            g_floorWallsOn.load(std::memory_order_relaxed) && g_evalClasses.load(std::memory_order_relaxed) > 0;
 }
 // Outdoor light through openings (option "luzDeForaPelasAberturas", ShareRoofedOpenings): the room update hooks (the gather
@@ -10285,12 +10611,12 @@ bool OpeningsOn() {
 // openings (without them no door is known and nothing is taken). Roofed rooms have no floor mask: "Walls block light on
 // floors" is not needed.
 bool RoofedOpeningsOn() {
-    return g_roofedOpenOn.load(std::memory_order_relaxed) && g_installed.load(std::memory_order_relaxed) && g_indoorReady && g_enterReady && g_cutReady &&
+    return !t_captureGather && g_roofedOpenOn.load(std::memory_order_relaxed) && g_installed.load(std::memory_order_relaxed) && g_indoorReady && g_enterReady && g_cutReady &&
            g_evalClasses.load(std::memory_order_relaxed) > 0;
 }
 // Indoor light through openings (option "luzInternaPelasAberturas", ShareInnerLamps): the same parts
 bool InnerOpeningsOn() {
-    return g_innerOpenOn.load(std::memory_order_relaxed) && g_installed.load(std::memory_order_relaxed) && g_indoorReady && g_enterReady && g_cutReady &&
+    return !t_captureGather && g_innerOpenOn.load(std::memory_order_relaxed) && g_installed.load(std::memory_order_relaxed) && g_indoorReady && g_enterReady && g_cutReady &&
            g_evalClasses.load(std::memory_order_relaxed) > 0;
 }
 
@@ -11173,7 +11499,8 @@ float* SolvePointBatchImpl(BYTE* room, float* out, void* list2D, void* list3D, v
     // With "Light through doors and windows" a roofless room with an id takes the outdoor lamps of its story that reach it in
     // its own list, tested through its openings and over its walls (GatherSameStory, YardShadow): its floor takes that list
     // only and none of the ground light map, which knows no walls
-    const bool ownYard = masked && *reinterpret_cast<const int*>(room + 0xC) > 0 && OpeningsOn();
+    // (a room gathered for a lot picture has no yard list: CapturedRoom, fast lot pictures)
+    const bool ownYard = masked && *reinterpret_cast<const int*>(room + 0xC) > 0 && OpeningsOn() && !CapturedRoom(room);
     BYTE* room0 = !masked ? nullptr : ownYard ? room : MaskedFloorRoom0(room);
     if (!room0) {
         if (t_odSample) OutdoorDelta::Tap(0, out);
@@ -11420,6 +11747,14 @@ float RoomTookSolveStart(const BYTE* room) { // allocates: HookGuard
     if (t[0] > 0.0f) t[1] = t[0]; // (else keep the one before)
     t[0] = 0.0f;
     return t[1];
+}
+int ForgetRoomMeasures(const uintptr_t* mgrs, int n, uintptr_t tracker) { // EndLotCapture: gather thread
+    const auto of = [&](const auto& kv) { return std::find(mgrs, mgrs + n, kv.second.stamp.mgr) != mgrs + n; };
+    const size_t gone = std::erase_if(g_roomTook, of) + std::erase_if(g_roomWalls, of) + std::erase_if(g_normEnd, of) + std::erase_if(g_normUsed, of);
+    t_normUsedRoom = nullptr;
+    std::lock_guard<std::mutex> lk(g_normResendMx);
+    std::erase_if(g_normResend, [&](const DepKey& k) { return k.tracker == tracker; });
+    return static_cast<int>(gone);
 }
 void ClearRoomMeasures() { // MaybeClearRooms (a new world): gather thread
     g_roomTook.clear();
@@ -13351,6 +13686,31 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
         g_innerMaskLeft.fetch_add(1, std::memory_order_relaxed);
         return;
     }
+    // (borrowed lamps that lit no sample of this room at its last solve: skipped, colour 0; the others noted at the way out)
+    struct ZeroNote {
+        std::pair<uint64_t, bool>* seen = nullptr;
+        const float* c = nullptr;
+        ~ZeroNote() {
+            if (seen && (c[0] > 0.0f || c[1] > 0.0f || c[2] > 0.0f)) seen->second = true;
+        }
+    } zeroNote;
+    // (not room 0 over rooms open to above: a lamp shining up out of one is scaled by that room's normalisation, which a solve
+    // of that room may still change)
+    if (t_zRoom && t_zRoom == t_solveRoom && g_ctx.info && !innerLamp && !t_odSample && !t_maskCopy && !t_exit.sum &&
+        (g_ctx.info->indoor || g_ctx.info->openBelow.empty()) &&
+        _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed))
+        if (const Cross* zc = FindCross(*g_ctx.info, reinterpret_cast<uintptr_t>(light)); zc && !zc->outdoor) {
+            const uintptr_t l = reinterpret_cast<uintptr_t>(light);
+            if (std::binary_search(t_zSkip.begin(), t_zSkip.end(), l)) {
+                for (int i = 0; i < 4; i++) colour[i] = 0.0f;
+                g_ctx.enterLight = 0, g_ctx.yardLight = 0; // (as the evaluated lamps: no entry point carried to a wall test)
+                ApexUtil::CountOne(g_zeroSkipped);
+                return;
+            }
+            auto at = t_zSeen.find(l);
+            if (at == t_zSeen.end()) at = t_zSeen.emplace(l, std::make_pair(BorrowedLampSig(light), false)).first;
+            zeroNote.seen = &at->second, zeroNote.c = colour;
+        }
     reinterpret_cast<LightEval_t>(g_evalOrig[I])(light, sample, normal, colour);
     if (probeOnExit.c) { // (the room lamp probe) the game's evaluation, and the lamp's set in the room's record
         const uintptr_t l = reinterpret_cast<uintptr_t>(light);
@@ -14005,8 +14365,10 @@ bool SettlingAfterWorldLoad() {
 // The same after the camera enters a lot (OnPresent): its rooms are solved within about 10 s at the settle budget (a logged
 // entry took 10-17 s at the 4 ms one, 1 ms while the camera moved)
 std::atomic<DWORD> g_lotEnteredAt{0};
+DWORD LotEnteredTick() { return g_lotEnteredAt.load(std::memory_order_relaxed); }
 std::atomic<long> g_lotEntries{0};
 constexpr DWORD kSettleAfterEntryMs = 10000;
+constexpr DWORD kSettleWhileWaitingMs = 30000; // and while the played lot's visible rooms wait for their class (SettlingAfterLoad)
 void RequeueAllRooms(const char* why) {
     const DragLite::WhyScope liteWhy(DragLite::Why::RelightAll);
     uintptr_t trackers[256];
@@ -14416,7 +14778,7 @@ void RequeueCutStories() {
             if (mgrIds[t] == lot) hit = t;
         for (size_t t = 0; t < nl && hit == nl; t++)
             if (ownerId(t) == lot) hit = t;
-        if (hit == nl) continue;
+        if (hit == nl || CaptureGated(trackers[hit])) continue; // (a lot lit only for its picture: re-solved when the capture ends)
         if (yards) queued += QueueRooflessOf(trackers[hit], story);
         if (std::find(zero.begin(), zero.end(), std::make_pair(lot, story)) != zero.end() && story >= 0 && story <= 7)
             queued += QueueRoomSafe(trackers[hit], story, 0) ? 1 : 0; // room 0's wall test through its openings (doors switched)
@@ -15463,6 +15825,54 @@ void ApplyAmbientBaseChanges() {
     }    g_ambDirty.clear();
 }
 
+// ---- One reflection for an atrium ----
+// Each room's draw binds its reflection (FUN_006ad300 thiscall(LightProbeProxy room+0x154; bottom room+0x140, top room+0x130),
+// ret 8, called by 0x006A0676 and 0x006A06B3): the probe's cubes with SpecularProbeMultiplierBottom / Top 1 once its probe is
+// ready (proxy+8, +0x2C95; 0x006B42C0), else the default cube times the room's +0x140 / +0x130, which only the surface
+// colour pass 0x006A0F00 writes and are 0 in a room it never reached. The pool gives probes out by camera rating, so one story
+// of an atrium often holds none: InteriorWall's c5 = c6 = 0 below the floor line and 1 above it, the cube reflection
+// (x 0.35) on the upper half only (light captures 2026-11-10 10-38-48..57 and 11-37-02 / 06: x1.05 to x1.07 at the line).
+// While the indoor share is on, a member without a ready probe draws with a member's that has one, the nearest other story's first
+// (ArchAmbient::AtriumProbe); every other room as the game.
+bool OtherMembers(const void* room, std::vector<DepKey>& others, int* ownLevel = nullptr); // below
+uintptr_t kProbeBind = 0;            // 0x006AD300 (GameAddr RoomProbeBind)
+uintptr_t kProbeBindCalls[2] = {};   // 0x006A0676, 0x006A06B3 (RoomProbeBindCall0/1)
+bool g_atriumProbeReady = false;
+std::atomic<long> g_atriumProbeLent{0};
+using ProbeBind_t = void(__fastcall*)(void* proxy, void* edx, const float* bottom, const float* top);
+bool ProbeReadyOf(uintptr_t proxy) {
+    __try {
+        const uintptr_t probe = proxy ? *reinterpret_cast<const uintptr_t*>(proxy + 8) : 0;
+        return probe && *reinterpret_cast<const uint8_t*>(probe + 0x2C95);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+uintptr_t ProxyOf(const BYTE* room) {
+    __try {
+        return room ? *reinterpret_cast<const uintptr_t*>(room + 0x154) : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+void __fastcall ProbeBindHook(void* proxy, void* edx, const float* bottom, const float* top) {
+    uintptr_t use = reinterpret_cast<uintptr_t>(proxy);
+    const BYTE* const room = reinterpret_cast<const BYTE*>(bottom) - 0x140;
+    if (AmbientActive() && !ProbeReadyOf(use) && ProxyOf(room) == use) {
+        thread_local std::vector<DepKey> others;
+        int level = 0;
+        if (OtherMembers(room, others, &level)) {
+            uintptr_t proxies[12] = {};
+            int gaps[12] = {}, n = 0;
+            for (const DepKey& key : others)
+                if (n < static_cast<int>(std::size(proxies))) gaps[n] = std::abs(key.level - level), proxies[n++] = ProxyOf(SafeRoomById(key.tracker, key.level, key.room));
+            use = ArchAmbient::AtriumProbe(use, proxies, gaps, n, ProbeReadyOf);
+            if (use != reinterpret_cast<uintptr_t>(proxy)) g_atriumProbeLent.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+    reinterpret_cast<ProbeBind_t>(kProbeBind)(reinterpret_cast<void*>(use), edx, bottom, top);
+}
+
 bool Install(std::string& error) {
     if (g_installed) return true;
     g_basisGuardReady.store(false, std::memory_order_relaxed);
@@ -15614,6 +16024,14 @@ bool Install(std::string& error) {
         g_wallUvReady = MemPatch::WriteBytes(kWallUvCalls[k], std::vector<BYTE>(call, call + 5), &g_patches);
     }
     LOG_INFO(std::string("[LevelLightShare] Walls taller than a story: ") + (g_wallUvReady ? "ready (their light spreads over the drawn height)" : "not available (code differs)"));
+    // One reflection for an atrium: the two calls of the room's reflection bind go through ProbeBindHook
+    kProbeBind = GameAddr::Get(Id::RoomProbeBind);
+    kProbeBindCalls[0] = GameAddr::Get(Id::RoomProbeBindCall0);
+    kProbeBindCalls[1] = GameAddr::Get(Id::RoomProbeBindCall1);
+    g_atriumProbeReady = GameAddr::Have({Id::RoomProbeBind, Id::RoomProbeBindCall0, Id::RoomProbeBindCall1}) && CallsTarget(kProbeBindCalls[0], kProbeBind) &&
+                         CallsTarget(kProbeBindCalls[1], kProbeBind);
+    for (int k = 0; k < 2 && g_atriumProbeReady; k++) g_atriumProbeReady = Redirect(kProbeBindCalls[k], kProbeBind, reinterpret_cast<const void*>(&ProbeBindHook));
+    LOG_INFO(std::string("[LevelLightShare] One reflection for an atrium: ") + (g_atriumProbeReady ? "ready (a story without a probe draws with its atrium's)" : "not available (code differs)"));
     // Light through doors and windows: the wall cutouts posted from now on (doors, windows, arches; lot loads included),
     // whatever the option, so lots loaded while it is off know their openings when it is turned on
     const bool cuts = InstallCutoutCapture();
@@ -15690,6 +16108,7 @@ void Uninstall() {
     MemPatch::RestoreAll(g_patches);
     g_patches.clear();
     UninstallCutoutCapture(); // light through doors and windows: the openings noted are forgotten with the hooks
+    g_atriumProbeReady = false;
     g_enterReady = false;
     g_floorMaskReady = false;
     {
@@ -15713,6 +16132,7 @@ void Uninstall() {
 }
 
 bool IsInstalled() { return g_installed.load(); }
+bool OpeningBalanceRelightsRooms() { return RoofedOpeningsOn(); }
 bool BasisFloorGuardReady() {
     return g_installed.load(std::memory_order_relaxed) && g_indoorReady && g_basisGuardReady.load(std::memory_order_relaxed);
 }
@@ -15812,6 +16232,69 @@ void SweepDayRooms() {
 
 namespace {
 void PublishVisSnap(); // below, with LampVisibilityShared
+
+// ---- the lot capture test (setup_lot_policy.h): logs its decisions; the gates read it live (CaptureGated) ----
+// During a New Game the game lights about 11 lots at the high quality only to take their pictures; such a lot skips light
+// sharing (OutdoorGather, BeforeRoomUpdate, EndLotCapture). Each time a lot gets the high quality, and each time its
+// decision changes, one [SetupLot] line.
+void ProbeLotCapture(const uintptr_t* trackers, int n) { // render thread, every 250 ms
+    { // lots whose gate ended at the high quality (EndLotCapture): every room of theirs again, with light sharing
+        std::vector<uintptr_t> resolve;
+        {
+            std::lock_guard<std::mutex> lk(g_captureLotsMx);
+            resolve.swap(g_captureResolve);
+        }
+        if (!resolve.empty()) {
+            uintptr_t all[256];
+            const int lots = AllTrackers(all, 256);
+            for (const uintptr_t tracker : resolve) {
+                if (std::find(all, all + std::max(lots, 0), tracker) == all + std::max(lots, 0)) continue; // (unloaded since)
+                int queued = 0;
+                for (int level = -4; level <= 7; level++) queued += RequeueStory(tracker, level);
+                LOG_INFO(std::format("[SetupLot] Tracker {:08X}: lot capture ended at the high quality, {} rooms sent again", tracker, queued));
+            }
+        }
+    }
+    static std::unordered_map<uint64_t, bool> s_gated; // lot id -> the test's last decision, while the lot has the high quality
+    static bool s_offLogged = false;
+    int getterOk = 0;
+    const uint64_t world = WorldActiveLotId(&getterOk);
+    const bool allHigh = g_allLotsHigh.load(std::memory_order_relaxed);
+    {
+        std::unordered_map<uint64_t, int> gathers;
+        {
+            std::lock_guard<std::mutex> lk(g_captureMx);
+            gathers.swap(g_captureGathers);
+        }
+        for (const auto& [lot, rooms] : gathers)
+            LOG_INFO(std::format("[SetupLot] Lot {:016X}: {} room gathers {} light sharing (world active lot {:016X})", lot, rooms,
+                                 g_fastLotPictures.load(std::memory_order_relaxed) ? "skipped" : "would have skipped (fastLotPictures off)", world));
+    }
+    if ((!getterOk || allHigh) && !s_offLogged) {
+        s_offLogged = true;
+        LOG_INFO(std::format("[SetupLot] gate off: {}", !getterOk ? "the world's active lot getter is not the expected code" : "high quality on every lot"));
+    }
+    std::unordered_map<uint64_t, bool> now;
+    for (int i = 0; i < n; i++) {
+        const uintptr_t mgr = SafeStoryManager(trackers[i], 0);
+        uint64_t lot = 0;
+        int quality = 0;
+        if (!mgr || !LotOfMgr(mgr, &lot, &quality) || now.count(lot)) continue;
+        bool priority = false;
+        const bool gate = CaptureGate(mgr, quality, lot, world, getterOk, allHigh, &priority);
+        now[lot] = gate;
+        const auto was = s_gated.find(lot);
+        if (was == s_gated.end() || was->second != gate)
+            LOG_INFO(std::format("[SetupLot] Lot {:016X} tracker {:08X}: quality {}, world active lot {:016X}, priority {}: {}", lot,
+                                 trackers[i], quality, world, priority ? 1 : 0, gate ? "lot capture" : "not gated"));
+        if (was != s_gated.end() && SetupLotPolicy::ResolveDue(lot, was->second, lot, gate))
+            LOG_INFO(std::format("[SetupLot] Lot {:016X}: lot capture ended", lot));
+    }
+    for (const auto& [lot, gated] : s_gated)
+        if (!now.count(lot) && SetupLotPolicy::ResolveDue(lot, gated, lot, false))
+            LOG_INFO(std::format("[SetupLot] Lot {:016X}: left the high quality after a lot capture", lot));
+    s_gated.swap(now);
+}
 } // namespace
 void OnPresent() {
     if (DevSwitches::kCompiled) MeasureRenderMemory(); // development builds (memory_owners): this file's containers, every 10 s
@@ -15836,6 +16319,7 @@ void OnPresent() {
             uintptr_t trackers[4] = {};
             // the played lot among the high-quality ones (every detailed lot is one with high quality on every lot)
             const int na = ActiveLotTrackers(trackers, 4);
+            ProbeLotCapture(trackers, na);
             uintptr_t active = na > 0 ? trackers[0] : 0;
             for (int i = 0; i < na; i++)
                 if (const uintptr_t g = StoryManager(trackers[i], 0); g && PlayedLotMgr(g)) {
@@ -17268,6 +17752,8 @@ void SetAllFloors(bool on) {
     if (g_allFloors.exchange(on) != on && g_lodReady) RelightAllRooms(on ? "Every floor in full detail on" : "Every floor in full detail off");
 }
 void SetAllLotsHighQuality(bool on) { g_allLotsHigh.store(on, std::memory_order_relaxed); }
+void SetFastLotPictures(bool on) { g_fastLotPictures.store(on, std::memory_order_relaxed); }
+bool LotCapture(uintptr_t tracker) { return CaptureGated(tracker) != 0; }
 
 void SetWallAlign(bool on) {
     if (g_alignOn.exchange(on) != on && g_alignReady) g_alignRequeue = true; // every room lights its walls again
@@ -17642,15 +18128,20 @@ unsigned DayNightSwitchSerial() { return g_dayNightSerial.load(std::memory_order
 bool SettlingAfterLoad() {
     const DWORD live = g_worldLiveAt.load(std::memory_order_relaxed), entered = g_lotEnteredAt.load(std::memory_order_relaxed);
     const DWORD now = GetTickCount();
-    return (live && now - live < kSettleAfterLoadMs) || (entered && now - entered < kSettleAfterEntryMs);
+    if ((live && now - live < kSettleAfterLoadMs) || (entered && now - entered < kSettleAfterEntryMs)) return true;
+    // the entry budget lasts while the played lot's visible rooms still wait for their solve, up to 30 s (lot entry
+    // recording 10/11: the last visible room took 49.6 s, its refinement all at the steady 1-4 ms after the 10 s window)
+    const DWORD waiting = RoomLightQueue::PlayedRoomWaitingAt();
+    return entered && now - entered < kSettleWhileWaitingMs && waiting && now - waiting < 1000;
 }
 
 // The other members of a room's atrium group (false: not in one)
-bool OtherMembers(const void* room, std::vector<DepKey>& others) {
+bool OtherMembers(const void* room, std::vector<DepKey>& others, int* ownLevel) {
     others.clear();
     uintptr_t mgr = 0;
     int level = 0, id = 0;
     if (!room || !AmbientIdentity(static_cast<BYTE*>(const_cast<void*>(room)), mgr, level, id)) return false;
+    if (ownLevel) *ownLevel = level;
     const uintptr_t tracker = MgrTracker(mgr);
     if (!tracker) return false;
     std::lock_guard<std::mutex> lk(g_ambMx);
@@ -17802,20 +18293,30 @@ bool EditRoomWaiting(const void* room) {
     int id = 0;
     if (!room || !g_urgentSize.load(std::memory_order_relaxed) || !RoomKey(room, mgr, id)) return false;
     unsigned long serial = 0;
-    bool found = false;
+    bool found = false, blank = false;
     {
         const DWORD now = GetTickCount();
         std::lock_guard<std::mutex> lk(g_urgentMx);
         for (UrgentRoom& u : g_urgent)
             if (u.room == reinterpret_cast<uintptr_t>(room) && u.mgr == mgr && u.id == id && UrgentLive(u, now)) {
                 serial = u.serial;
+                blank = u.blank;
                 found = true;
                 break;
             }
     }
     if (!found) return false;
-    const int state = RoomState(room);
-    return (state >= 1 && state <= 3) || !RoomLightQueue::SolvedSince(room, serial);
+    return RoomAmbientPolicy::EditRoomStillWaiting(RoomState(room), RoomLightQueue::SolvedSince(room, serial), blank,
+                                                   blank && RoomNeverSolved(room));
+}
+
+// "shown" class +0x100 stays 4 until a room's first solve ends (set at 0x0069EA70; the game tests it at 0x0069EF58)
+bool RoomNeverSolved(const void* room) {
+    __try {
+        return *reinterpret_cast<const int*>(static_cast<const BYTE*>(room) + 0x100) == 4;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
 }
 
 bool OnEditStory(const void* room) {
@@ -17879,6 +18380,7 @@ bool LampDragging() {
 // Developer Tester tab: a switch that changes the story grids (colonnades on a foundation) builds them again
 void TesterGridsChanged() { g_floorEditGen.fetch_add(1, std::memory_order_relaxed); }
 void RelightAllRooms(const char* why) {
+    g_zeroGen.fetch_add(1, std::memory_order_relaxed); // (the rules changed: every room's borrowed lamps are tested again)
     OutdoorDelta::InvalidateAll(why); // (Instant: every room's kept parts are of the old rules)
     LoadAddresses();
     if (!kRootPtr || !kRoomById || !kInvalidateRoom || !kSetInsert) return;
@@ -18602,12 +19104,14 @@ std::string ArchAmbientStatus() {
     return std::format("room ambient through arches: {} rooms with arches, floor draws given a neighbour's ambient {}, draws of no known room {}, "
                        "rooms of one ambient taken together with no story known {}, of an ambient rooms of the draw's story share (their arches together) {}, reads failed {}; "
                        "the draw's story found by its room map {} and by its directional maps {}; draws whose ambient matched only rooms of another story or lot (given nothing) {}, "
-                       "with no story known and matches on more than one story or lot (given nothing) {}; last draws near a room with arches but not matched:{}",
+                       "with no story known and matches on more than one story or lot (given nothing) {}; last draws near a room with arches but not matched:{}; "
+                       "atrium stories drawn with another member's reflection probe {}",
                        rooms, g_archDraws.load(), g_archUnmatched.load(), g_archUnion.load(), g_archShared.load(), g_archFaults.load(), g_archByMap.load(), g_archByBasis.load(),
-                       g_archOffStory.load(), g_archSpread.load(), misses.empty() ? " none" : misses);
+                       g_archOffStory.load(), g_archSpread.load(), misses.empty() ? " none" : misses, g_atriumProbeLent.load());
 }
 std::string Status() {
-    return std::format("Colour groups committed {} ({} native fallbacks) | ", g_groupCommits.load(), g_groupFallbacks.load()) + SlabStatus() + " | " + std::format("{} | outdoor lights carried to other stories: {} | stories updated: {} | walls of the light's story: {}/{} classes, {} tests, {} blocked | indoor "
+    return std::format("Colour groups committed {} ({} native fallbacks) | lamps of other stories that lit nothing, skipped: {} evaluations in {} solves | ", g_groupCommits.load(),
+                       g_groupFallbacks.load(), g_zeroSkipped.load(), g_zeroSkipRooms.load()) + SlabStatus() + " | " + std::format("{} | outdoor lights carried to other stories: {} | stories updated: {} | walls of the light's story: {}/{} classes, {} tests, {} blocked | indoor "
                        "lamps through stair openings: {} | seamless walls between floors: {}{}{}{}{}{}",
                        g_installed ? "Active" : "Off", g_shared.load(), g_queued.load(), g_evalClasses.load(), std::size(kClasses), g_wallTests.load(), g_wallBlocked.load(),
                        !g_indoorReady ? std::string("not installed")
@@ -18615,8 +19119,8 @@ std::string Status() {
                                                     g_indoorOn ? "on" : "off", g_indoorAdded.load(), g_indoorTests.load(), g_indoorFloorBlocked.load(),
                                                     g_indoorWallBlocked.load(), g_indoorQueued.load(), g_lodReady ? "on" : "not installed", g_lodBoosts.load()) +
                                           std::format(", stacked rooms ambient {} ({} merges; members' values taken at the merge {} in {:.1f} ms, already right {}, kept from their gather {}, only an older solve's {}; quick passes with the refinement's light threshold {} and wall tests {}), lots settled after loading {} ({} as soon as their rooms were done), lamp changes folded into "
-                                                      "one update {} (lamps added, moved or removed, sent at once {}; lamp values changed without a move {}; outside of a floor marked changed without a change {}), lots rebuilt {}, floor objects made {}, rooms held until their solve ended {}, rooms still holding a lamp switched off gathered again {}",
-                                                      g_ambReady ? "on" : "not installed", g_ambMerges.load(), g_canonTaken.load(), CanonMs(), g_canonKept.load(), g_canonReused.load(), g_canonOld.load(), g_quickThreshold.load(), g_quickTests.load(), g_settles.load(), g_settlesEarly.load(), g_depCoalesced.load(), g_depShapeSends.load(), g_lampWobbles.load(), g_outdoorQuiet.load(), g_lotRebuilds.load(), g_levelsMade.load(), g_deferredCount.load(), g_staleSends.load()) +
+                                                      "one update {} (lamps added, moved or removed, sent at once {}; first sights not taken as edits {}; lamp values changed without a move {}; outside of a floor marked changed without a change {}), lots rebuilt {}, floor objects made {}, rooms held until their solve ended {}, rooms still holding a lamp switched off gathered again {}",
+                                                      g_ambReady ? "on" : "not installed", g_ambMerges.load(), g_canonTaken.load(), CanonMs(), g_canonKept.load(), g_canonReused.load(), g_canonOld.load(), g_quickThreshold.load(), g_quickTests.load(), g_settles.load(), g_settlesEarly.load(), g_depCoalesced.load(), g_depShapeSends.load(), g_firstSightNotEdit.load(), g_lampWobbles.load(), g_outdoorQuiet.load(), g_lotRebuilds.load(), g_levelsMade.load(), g_deferredCount.load(), g_staleSends.load()) +
                                           std::format(", lamp edits first: rooms made urgent {} (kept urgent past 3 s while waiting {}, past 8 s still waiting {}), gathered at once {}, marks held while their room was solved {} (given back {}), "
                                                       "floor batches with per-lamp wall lists {} (every wall tested {})",
                                                       g_urgentMarked.load(), g_urgentKept.load(), g_urgentExpiredPending.load(), g_gatherSoon.load(), g_heldMarks.load(), g_heldGiven.load(), g_maskListBatches.load(),

@@ -129,6 +129,14 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
 3. Switch Apex's window mode between Window, Borderless and Fullscreen, and change the resolution. **Expected:** each
    applies, no freeze.
 4. EA app: the same with `client.targetProcess = TS3.exe`.
+5. Start a recording, start a new save or add a lot so a loading screen shows, then stop. **Expected:** the recording
+   folder holds `bridge32.log` and `bridge64.log` (and the DXVK log when present), listed in `About this capture.txt`;
+   `Recording.txt` ends with a `No-scene frame trace` section with `[no-scene]` frames and a line per Apex pass that
+   saved the vertex input.
+6. With the 3.1.1 bridge (patch 0012), record from the main menu through a save's loading screen. **Expected:** no
+   black quarter on the loading screen; in `Recording.txt`, `scene_target.cpp Resolve: N save(s), 0 STALE` (every
+   other pass 0 STALE too). With an older bridge and Apex 3.1.1 STALE can still be counted (it is the client's answer),
+   but the quarter stays drawn: the pass restores the FVF set last.
 
 ## Confirmed in game
 
@@ -146,3 +154,13 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
 - The EA app build under the bridge on this machine.
 - Sims3SettingsSetter's uncompressed lot and Sim textures under the bridge (reported to stutter).
 - Which losable resource stays alive at a Reset.
+- The black top-right quarter on loading screens (3840 x 2160, Borderless, S3SS loaded): the no-scene frame trace
+  (session 2026-11-10 14-39-28) found the High-precision scene's resolve restoring a stale declaration, 248 STALE of
+  249 no-scene frames. Bridge patch 0012 and Apex's vertex input restore are built; not yet run in game (test plan
+  step 6).
+- Patch 0011 (stale viewport after `SetRenderTarget(0)` or `Reset`): unverified in game that the sea no longer loses
+  its reflection for a frame.
+- Patch 0013 (idle copy fetches), as of 2026-11-11: unverified in game. Still to measure on a still lot: no blinking
+  parts of the picture, and the game's free address space and largest block against the 3.1.0 bridge.
+- `ApexRadiance.asi` 3.1.1 with the outdoor maps' room bases and UV maps in video memory (commit `94596c40`): the
+  address space it frees under the bridge is not measured.

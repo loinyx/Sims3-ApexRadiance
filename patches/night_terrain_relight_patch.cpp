@@ -268,6 +268,7 @@ bool g_lotPassNoTerrainMap = true;
 //    camera first (the world-load rebuild and the button stay full rebuilds).
 bool g_localRelight = false;
 bool g_pacedSweep = true; // test007: gradual external terrain updates, validated in game
+bool g_fastLotPictures = true; // TOML only (no menu row): lots lit only for their picture skip light sharing (LevelLightShare::LotCapture)
 
 // FUN_00c7f750(chunk, lot, out) builds the per-chunk light/fog pass. For the LOT pass (lot=1, [ebp+0Ch]) it binds the
 // rebuilt terrain lightmap chunk+0xD8 when it exists; that texture has no street-lamp light inside lot footprints, so
@@ -2366,8 +2367,12 @@ constexpr DWORD kAutoRefreshDelay = 1000;
 std::atomic<DWORD> g_autoRefreshAt{0};
 // The pending refresh leaves the terrain alone (after a load: the load's own rebuild made it); any setting change clears it
 std::atomic<bool> g_autoRefreshRoomsOnly{false};
+// The pending refresh leaves the rooms alone: only "Street lamps light lots" changed, and its opening balance relit every
+// room at once (a second solve a second later made the walls flicker twice); any other change clears it
+std::atomic<bool> g_autoRefreshSkipRooms{false};
 void RequestAutoRefresh() {
     g_autoRefreshRoomsOnly.store(false);
+    g_autoRefreshSkipRooms.store(false);
     g_autoRefreshAt.store((GetTickCount() + kAutoRefreshDelay) | 1);
 }
 // The same refresh right after loading (a room lit only by lamps of another story was black after a load
@@ -2592,6 +2597,9 @@ class NightTerrainRelightPatch : public ApexPatch {
         RegisterBoolSetting(&g_relightLots, "recalcularLotesAoAnoitecer", true,
             S3SS_TR("Depois de refazer o terreno a noite, recalcula a luz de todos os lotes como quando um poste e movido no modo construcao.",
                     "After the dusk terrain rebuild, re-solve the light of every lot."));
+        RegisterBoolSetting(&g_fastLotPictures, "fastLotPictures", true,
+                            "Lots the game lights only to take their picture (New Game household setup, Edit Town) are lit without light sharing, "
+                            "and lit in full again when that picture is taken.");
         if (!kPublicBuild) { // Developer controls only; public uses the approved paced sweep default without exposing diagnostic toggles.
             RegisterBoolSetting(&g_localRelight, "relightNearbyChunks", false,
                 "Developer: a lamp change re-renders only the terrain chunks under the changed lamps, one per frame through the game's own "
@@ -2825,6 +2833,7 @@ class NightTerrainRelightPatch : public ApexPatch {
             LevelLightShare::SetWallAlign(g_wallAlign);
             LevelLightShare::SetAllFloors(g_allFloors);
             LevelLightShare::SetAllLotsHighQuality(g_allLotsHQ);
+            LevelLightShare::SetFastLotPictures(g_fastLotPictures);
             LevelLightShare::SetFloorWalls(g_floorWalls);
             LevelLightShare::SetRealisticOpenings(g_realisticOpenings);
             LevelLightShare::SetOutdoorThroughOpenings(g_outdoorOpenings);
@@ -2868,8 +2877,9 @@ class NightTerrainRelightPatch : public ApexPatch {
                         LoadTiming::NoteLoadSettled("the after-load refresh ran");
                     }
                     g_autoRefreshRoomsOnly.store(false);
+                    const bool rooms = afterLoad || !g_autoRefreshSkipRooms.exchange(false);
                     HookGuard::Try("Night Lighting automatic refresh",
-                                   [afterLoad] { NightLighting::RefreshAll(afterLoad ? "after loading" : "a setting changed", !afterLoad); });
+                                   [afterLoad, rooms] { NightLighting::RefreshAll(afterLoad ? "after loading" : "a setting changed", !afterLoad, rooms); });
                 } else g_autoRefreshAt.store((tick + 200) | 1);
             }
             HookGuard::Run("LevelLightShare frame update", [] { LevelLightShare::OnPresent(); });
@@ -3250,6 +3260,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_relightLots = true;
         g_localRelight = false;
         g_pacedSweep = true;
+        g_fastLotPictures = true;
     }
 
     // ---- menu (see night_lighting.h): the Night Lights page draws these pieces card by card ----
@@ -3261,7 +3272,11 @@ class NightTerrainRelightPatch : public ApexPatch {
         if (body()) {
             ApplyLive(bridgeBefore, objBefore, shareBefore, objPixelBefore);
             NotifySettingChanged();
+            const bool onlyBridge = g_bridge != bridgeBefore && LevelLightShare::OpeningBalanceRelightsRooms() && g_objLamps == objBefore && g_levelShare == shareBefore && g_objPixel == objPixelBefore;
+            const bool pending = g_autoRefreshAt.load() != 0; // an earlier change still waiting needs its rooms
+            const bool skip = onlyBridge && (!pending || g_autoRefreshSkipRooms.load());
             RequestAutoRefresh();
+            g_autoRefreshSkipRooms.store(skip);
         }
     }
 
@@ -3571,13 +3586,13 @@ class NightTerrainRelightPatch : public ApexPatch {
             ApexUi::CardDivider();
             Edit([] {
                 ApexUi::CardGroup("Background light");
-                bool changed = ApexUi::SwitchRow("Adjust the background light", &g_unlitOn, "Set the ambient glow indoors, with lamps on or off", true);
-                if (g_unlitOn) {
-                    changed |= ApexUi::SliderPercent("Brightness##Unlit", &g_unlitLight, 0.1f, 0.8f, "How bright that background light is, on walls and furniture", 0.20f);
-                    changed |= ApexUi::SliderPercent("Blue tint##Unlit", &g_unlitBlue, 0.0f, 1.0f, "0% is neutral grey, 100% is the game's blue, on walls and furniture", 0.0f);
-                }
-                return changed;
+                return ApexUi::SwitchRow("Adjust the background light", &g_unlitOn, "Set the ambient glow indoors, with lamps on or off", true);
             });
+            // the sliders: UnlitRooms retints the rooms in place and solves only those it cannot move, once the slider rests; the
+            // whole-world relight they started before (77 rooms of 46 lots a move, 2026-11-10) restarted those solves
+            if (g_unlitOn && (ApexUi::SliderPercent("Brightness##Unlit", &g_unlitLight, 0.1f, 0.8f, "How bright that background light is, on walls and furniture", 0.20f) |
+                              ApexUi::SliderPercent("Blue tint##Unlit", &g_unlitBlue, 0.0f, 1.0f, "0% is neutral grey, 100% is the game's blue, on walls and furniture", 0.0f)))
+                NotifySettingChanged();
             // S3SS's saved room colour: Rooms at Night already uses the game's blue in its place; removing it is on the Attention page
             if (g_unlitOn && S3SSDetect::SavedRoomAmbientOverride())
                 ApexUi::IconNote(ApexUi::IconId::Puzzle, "Sims3SettingsSetter saves its own room color; this replaces it (Attention page)");
@@ -4026,14 +4041,14 @@ float NightLighting::InstantGpuMs() {
 // The "Refresh the lighting" shortcut (Hotkeys): what the Developer buttons "Rebuild terrain light now" and "Relight lots
 // now" do, plus every room and the object rigs (turning Night Lighting off and on did it before). Only while it runs
 // (g_menuLevel is -1 while it is off or no world is loaded).
-void NightLighting::RefreshAll(const char* why, bool terrain) {
+void NightLighting::RefreshAll(const char* why, bool terrain, bool rooms) {
     if (g_menuLevel.load() < 0.0f) return;
     if (terrain) g_kickRequested = true;
     g_relightLotsRequested = true;
-    LevelLightShare::RelightAllRooms(std::format("Refresh the lighting ({})", why).c_str());
+    if (rooms) LevelLightShare::RelightAllRooms(std::format("Refresh the lighting ({})", why).c_str());
     ObjectLightBridge::RequestRigRefresh();
     UnlitRooms::RigsAgainIn(2000); // and once the rooms are solved (their lights are what the rigs gather)
-    LOG_INFO(std::format("[NightTerrainRelight] Refresh the lighting ({}): {}lots and rooms light again", why, terrain ? "terrain, " : ""));
+    LOG_INFO(std::format("[NightTerrainRelight] Refresh the lighting ({}): {}lots{} light again", why, terrain ? "terrain, " : "", rooms ? " and rooms" : " (rooms already relit)"));
 }
 void NightLighting::RefreshSoon() { RequestAutoRefresh(); }
 void NightLighting::Restart() {

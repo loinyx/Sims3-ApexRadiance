@@ -10,7 +10,7 @@ The runner uses `vswhere` to locate the existing compiler, builds Release-style 
 `%TEMP%/ApexRoomAmbientTests`, then runs both suites. `-OutDir` and `-VsDevCmd` override those paths. It does not install
 dependencies, attach to TS3W, change game files or write test data from the executables.
 
-- `room_ambient_test.cpp`: production scheduling and ambient policy (89 checks).
+- `room_ambient_test.cpp`: production scheduling and ambient policy, and the kept wall rows beyond an edge (`FollowGhosts`) (153 checks).
 - `unlit_rooms_recovery_test.cpp`: includes `features/unlit_rooms.cpp` directly, preserving its real update and recovery
   logic. Windows time, the native room queue, group updater, address lookup and patch-write services are fixtures. The
   suite uses x86 buffers matching the accessed room fields and exercises 1,349 checks, including continuous slider

@@ -794,7 +794,13 @@ void OverviewStatusCard() {
         if (ImGui::BeginTable("##Halves", two ? 2 : 1, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoPadOuterX | (two ? ImGuiTableFlags_BordersInnerV : 0))) {
             ImGui::TableNextColumn();
             if (Screen::RenderFpsTile()) Go(PageDisplay); // the limit and the window mode live there
-            if (!two) ApexUi::Gap(ApexUi::kSpace4);
+            if (!two) { // stacked: a hairline between the two, like the vertical one side by side
+                ApexUi::Gap(ApexUi::kSpace4 * 0.5f);
+                ImGui::PushStyleColor(ImGuiCol_Separator, Col(VioletTheme::kCardBorder));
+                ImGui::Separator();
+                ImGui::PopStyleColor();
+                ApexUi::Gap(ApexUi::kSpace4 * 0.5f);
+            }
             ImGui::TableNextColumn();
             if (MemoryMeter::RenderTile()) Go(PagePerformance); // Room to save and the low-memory note live there
             ImGui::EndTable();
@@ -3748,7 +3754,7 @@ void MarkWelcomeShown() {
     ApexConfig::UiSettings ui = ApexConfig::GetUi();
     if (ui.startProfileDone) return;
     ui.startProfileDone = true; // [ui] start_profile_done: never shown again
-    ui.changelogSeen = ApexChangelog::Get(0).version; // (no update card after a new installation)
+    ui.changelogSeen = ApexChangelog::Get(0).version; // (no What's new dot after a new installation)
     ApexConfig::SetUi(ui);
 }
 
@@ -4108,34 +4114,6 @@ void S3SSTexturesQuestionCard() {
         Overlay::SetVisible(true);
     }
 }
-// After an update: the first time the menu is available with a version that has a headline, a small card at the top
-// (the menu closed) names the version in one sentence, with What's new and OK. Not after a new installation (the
-// welcome marks the newest version seen) nor for a version without a headline (a small fix: the version's dot only).
-bool g_openWhatsNew = false; // the card's What's new: the menu opens with the popover open
-bool UpdateNotePending() {
-    static bool s_done = false;
-    if (s_done || kMemoryOptimizationTest || PublicTestPending() || WelcomeActive()) return false;
-    const ApexChangelog::Release& now = ApexChangelog::Get(0);
-    const ApexConfig::UiSettings& ui = ApexConfig::GetUi();
-    if (!now.headline || !ui.startProfileDone || ui.changelogSeen == now.version) return !(s_done = true);
-    return true;
-}
-void UpdateCard() {
-    const ApexChangelog::Release& now = ApexChangelog::Get(0);
-    const std::string title = I18n::Trf("Apex Radiance is now {}", now.version);
-    std::string text = I18n::Tr(now.headline);
-    if (now.settingsNote) text += std::string("\n\n") + I18n::Tr("Your settings are kept.") + " " + I18n::Tr(now.settingsNote);
-    const int answer = QuestionCard("##UpdateCard", IconId::Gift, title.c_str(), text.c_str(), "", "What's new", "OK");
-    if (answer < 0) return;
-    ApexConfig::UiSettings ui = ApexConfig::GetUi();
-    ui.changelogSeen = now.version; // [ui] changelog_seen: the card and the version's dot are done
-    ApexConfig::SetUi(ui);
-    LOG_INFO(std::format("[Menu] Update card {}: {}", now.version, answer == 0 ? "What's new opened" : "OK"));
-    if (answer == 0) {
-        g_openWhatsNew = true;
-        Overlay::SetVisible(true);
-    }
-}
 std::string VisibleVersionLabel(float maxTextWidth=FLT_MAX) {
     const std::string version=std::string("v")+APEX_VERSION_STRING;
     if (kMemoryOptimizationTest) {
@@ -4173,7 +4151,7 @@ void VersionButton(float x, float y, float h) {
     ImGui::PopFont();
     const std::string tip = std::string(I18n::Tr(kMemoryOptimizationTest ? "RAM and gameplay test" : "What's new")) + " \xC2\xB7 " APEX_PRODUCT_NAME " " APEX_VERSION_STRING;
     if (!open) ApexUi::Tooltip(tip.c_str());
-    if (clicked || std::exchange(g_openWhatsNew, false)) {
+    if (clicked) {
         ImGui::OpenPopup(kMemoryOptimizationTest ? "##PublicTestWelcome" : "##WhatsNew");
         g_whatsNewOpenedAt = ImGui::GetTime();
         g_whatsNewSettle = 3;
@@ -5676,13 +5654,11 @@ class GuiClient final : public Overlay::Client {
         if (!noticeShown) noticeShown = compareShown;
         if (BannerNeeded()) { Banner(); noticeShown = true; }
         // the Room to save question: with the menu closed, before the routine pills (the overlay takes the mouse over it)
-        const bool updateCard = !Overlay::IsVisible() && noticesAllowed && !noticeShown && UpdateNotePending();
-        if (updateCard) { UpdateCard(); noticeShown = true; }
         const bool roomCard = !Overlay::IsVisible() && noticesAllowed && !noticeShown && RoomToSavePending();
         const bool s3ppCard = !Overlay::IsVisible() && noticesAllowed && !noticeShown && !roomCard && S3PPQuestionPending();
         const bool texCard = !Overlay::IsVisible() && noticesAllowed && !noticeShown && !roomCard && !s3ppCard && S3SSTexturesQuestionPending();
         const bool memoryCard = !Overlay::IsVisible() && noticesAllowed && !noticeShown && !roomCard && !s3ppCard && !texCard && MemoryNotePending();
-        Overlay::SetInteractive(updateCard || roomCard || s3ppCard || texCard || memoryCard);
+        Overlay::SetInteractive(roomCard || s3ppCard || texCard || memoryCard);
         if (roomCard) { RoomToSaveCard(); noticeShown = true; }
         if (s3ppCard) { S3PPQuestionCard(); noticeShown = true; }
         if (texCard) { S3SSTexturesQuestionCard(); noticeShown = true; }
@@ -5706,7 +5682,7 @@ class GuiClient final : public Overlay::Client {
         if (PublicTestPending() && !BannerNeeded() && !Captures::ScreenshotPending()) Overlay::SetVisible(true);
         RunShortcuts();
         // the capture notes (recording, saved, an open session) show with the menu closed too
-        return MemoryNotePending() || Screen::FpsCounterShown() || BannerNeeded() || HintVisible() || UpdateNotePending() || RoomToSavePending() || S3PPQuestionPending() || S3SSTexturesQuestionPending() || PresetPillVisible() || g_comparing || Recorder::SecondsRecorded() >= 0 || Captures::CurrentNote().visible ||
+        return MemoryNotePending() || Screen::FpsCounterShown() || BannerNeeded() || HintVisible() || RoomToSavePending() || S3PPQuestionPending() || S3SSTexturesQuestionPending() || PresetPillVisible() || g_comparing || Recorder::SecondsRecorded() >= 0 || Captures::CurrentNote().visible ||
                NoticeAnimationsPending() || (!g_profiles.loading.empty() && ImGui::GetTime() - g_profiles.applyOpenedAt < 0.14) || LightProbe::Aiming() || g_returnFromProbe.load();
     }
 

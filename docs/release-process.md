@@ -71,14 +71,24 @@ The changelog opened from the version in the menu footer (`apex_changelog.cpp`):
    asset is this build: developer mode ships off (`developer_mode = false`, enabling it asks for confirmation), and while it
    is off the build runs and logs as the players' build. (2.13.1 testing: a game session with the `APEX_NO_DEV_TOOLS` build
    behaved differently from the standard one with developer mode off; the cause was not found.)
+   Build Apex Radiance Setup from the same commit: `dotnet run --project installer/ApexSetup.Tests`, then
+   `dotnet publish installer/ApexSetup -c Release -o installer/publish` (one self-contained exe,
+   [installer.md](features/installer.md)); `installer/publish/ApexRadianceSetup.exe` is attached to the release.
 2. Test the build in game and record the results in the validation pages.
 3. The release PR is titled `release: X.Y.Z`; merging and publishing are maintainer actions.
-4. Publish `Release\ApexRadiance.asi` to `loinyx/Sims3-ApexRadiance` as `Apex Radiance X.Y.Z`, with
+4. Publish `Release\ApexRadiance.asi` and `ApexRadianceSetup.exe` to `loinyx/Sims3-ApexRadiance` as `Apex Radiance X.Y.Z`, with
    player-facing notes checked with `python tools/public_text_check.py --text-file`. The Nexus workflow derives its
-   changelog and file description from that body. The notes open with a bold headline (the release's theme in a few
-   words) and one short paragraph on what the player will notice, then one `## ` section per menu area the release
-   changes (for example `## Banding Fix`, `## Night Lights`, `## Performance`), then `## Fixes`; no install or upgrade
-   section (the release title carries the version):
+   changelog and file description from that body, and zips the main Nexus file: `READ ME.txt` (`.github/scripts/nexus-readme.txt`) and `ApexRadianceSetup.exe` at the top
+   and a `Manual install` folder with `ApexRadiance.asi` and `How to install.txt` (`.github/scripts/manual-install.txt`;
+   a release without the exe zips the ASI alone). When the release also carries `Apex-Radiance-RTX-Remix-bridge.zip`
+   (`native/remix-bridge/package.ps1`) and the repository variable `NEXUS_BRIDGE_FILE_ID` is set, the workflow uploads
+   the zip as a new version of the bridge's own Nexus file; without the variable the zip stays on GitHub only. The notes
+   open with a bold headline (the release's theme in a few words) and one short paragraph on what the player will
+   notice, then one `## ` section per menu area the release changes (for example `## Banding Fix`, `## Night Lights`,
+   `## Performance`), then `## Fixes`, and end with `## Install`: Apex Radiance Setup first (download
+   `ApexRadianceSetup.exe` from the release, run it, pick the game, click Install), then the manual steps of the
+   [README](../README.md#installation) (the ASI loader, `ApexRadiance.asi` into `Game\Bin`, the optional renderer,
+   updating by replacing the file). No upgrade section; the release title carries the version:
 
    ```
    **<headline>**
@@ -89,6 +99,8 @@ The changelog opened from the version in the menu footer (`apex_changelog.cpp`):
    - <what the player gets or what looks better>
    ## Fixes
    - <the problem that is gone, in the player's words>
+   ## Install
+   <Apex Radiance Setup first, then the manual steps>
    ```
 
    One short line per item, about 5 to 15 words, no ending period, no area prefix inside the lines (the section names

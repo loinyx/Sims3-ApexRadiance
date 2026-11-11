@@ -48,6 +48,12 @@ Anything else is solved in full, and its parts are kept again: a first solve, an
 floors or openings, a lighting option changed, more than eight lights changed, a quick pass, a solve off the light tree
 thread.
 
+**A solve with no light changed.** A camera pan to the next lot and back makes the game free the played lot's class-2
+maps, recreate them filled with 0 and solve every room 0 again (about 3.5 s each). When none of the lights of its list
+changed since its kept solve, that solve becomes a write of the kept texels in the solve's order, the class-2 walls
+through their blocks' blur as a delta writes them. A wall block that cannot be blurred again keeps the full solve. The
+record and its version stay as they are, and the delta self-check (*Check quick lamp edits*) still runs.
+
 The room 0s of the lots next to the active one that Real-time outdoor lamps relights with the active lot's posts
 (`SetNeighbourLots`, at most four) keep their texels and sums only, every light of the list kept with no part
 (`Record::baseOnly`): their sum is the GPU's base. No delta takes them (an edit there is a full solve), and the memory

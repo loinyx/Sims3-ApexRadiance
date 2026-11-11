@@ -39,6 +39,7 @@
 #include "recorder.h"
 #include "atrium_hold.h"
 #include "shader_cache.h"
+#include "no_scene_trace.h"
 #include <windows.h>
 #include <d3dcompiler.h>
 #include <algorithm>
@@ -1344,6 +1345,8 @@ struct PassState {
         dev->GetVertexShader(&vs);
         dev->GetVertexDeclaration(&decl);
         dev->GetFVF(&fvf);
+        NoSceneTrace::Saved("lightmap_smooth.cpp Capture", decl, fvf);
+        ExtraHooks::UseVertexInputSetLast(decl, fvf);
         dev->GetStreamSource(0, &vb0, &vb0Offset, &vb0Stride);
         dev->GetStreamSourceFreq(0, &freq0);
         dev->GetStreamSourceFreq(1, &freq1);

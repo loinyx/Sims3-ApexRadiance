@@ -923,3 +923,36 @@ rooms 1 to 4 have a floor over them, rooms 5, 6 and 7 have none over most of the
 them, walls of the story above on three quarters of their outline), each tested per point through their open tops
 ([Double-height rooms](../features/night-lighting/level-light-share.md#double-height-rooms)); developer switch
 `open_rooms_above`. The removed-floor openings are unchanged. Not yet checked in game.
+
+### 2026-11-10: room solves about ten times their 2.15 cost
+
+**Context:** frame profiler sessions showed room solves costing about ten times what they did in 2.15, and a New Game
+household setup taking about 110 s while the game lit lots only for their pictures.
+
+**Finding:** 66-80% of a room's light list are lamps taken from other stories; for most of them the slab and wall tests
+leave every sample at exactly 0, but the game still evaluated them and Apex tested them at every sample of every solve.
+Separately, each New Game picture lot was solved at the high quality with light sharing, and a big lot's room 0 that
+was too large to keep was sent to its solve again and again, so one New Game never left its loading screen.
+
+**Outcome:** kept. A borrowed lamp that lit nothing at a room's last solve of the same class gets colour 0 while its
+inputs are unchanged (`perf_borrowed_zero_skip`, same maps); picture lots skip light sharing (`fastLotPictures`); a
+room 0 too large to keep is not sent again ([rt-outdoor-lamps](../features/night-lighting/rt-outdoor-lamps.md)). On
+Steam 1.67.2 the public build with the skip played visibly smoother (2026-11-11), not measured. The picture-lot gate on
+the EA app 1.69 is under investigation.
+
+### 2026-11-10: render-thread stalls on a big lot's relights
+
+**Context:** frame profiler sessions on Steam 1.67.2 showed two render-thread stalls in the outdoor relight
+([rt-outdoor-lamps](../features/night-lighting/rt-outdoor-lamps.md)).
+
+**Finding:** a lot with more lamps than one GPU batch (45 lamps) computed every masked texel's lamp sum on the CPU at
+each relight: 60-187 ms a relight, 88 hitches over 20 ms. A room 0 whose kept solve the memory budget evicted at once
+was sent to its solve again with a fresh count each time: about 195 room-0 solves a minute on neighbour lots, one of
+them freezing a frame for 848 ms. Separately, a shown floor map whose bake signature changed without a drag had its
+under-floor share computed on the render thread, 22-31 ms in one frame. A big lot's room 0 too large to keep took about
+18 s a solve.
+
+**Outcome:** kept (`eec8ae81`, `4a06ebf6`). The CPU lamp sums are kept per map and computed again only when a lamp's law
+or multiplier, or the threshold, changes or the map is rebuilt; a room's send count resets only after it held a kept
+solve for 10 s; a shown map waits up to 500 ms for the worker's share. One session each; not measured again after the
+changes.

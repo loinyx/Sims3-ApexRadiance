@@ -10,7 +10,7 @@ their own story. Part of [Night Lighting](README.md).
 
 | | |
 |---|---|
-| Availability | Missing outdoor gather entries restored: Released in 2.15.5.  Outdoor and indoor light between stories: Released (present since 2.1.0, the first version in this repository). Indoor light through openings across more than one floor, the raised-room wall veto, structure-change refresh and the *Wall seams.csv* recording: Released in 2.6.0. Walls block light on floors and objects, indoor objects lit by lamps of another story and an atrium's stories changing together, and the lit story's wall test from where an outdoor lamp's ray enters it (upper half walls): Released in 2.7.0. Placed floors of balconies and upper stories block a lamp below them (walls, floors, windows, objects, fences) and *Buildings block light on objects* (was *Walls block light on objects*): Released in 2.12.3. Lighting corrections: Released in 2.12.1. Outdoor light through openings into roofed rooms (garden lamps of the story below included), indoor light through openings, *Doors block light*, lamp light through openings in the outside walls' copies and room 0's own wall test, *Walls shade lamp light near the ground*, *Buildings block lamp light on trees and objects*, *Shadow softness*, walls ending at a floor above: Released in 2.13.0. Closed-floor support-row guards, walls of the lamp's own story for light through floor openings, hard wall tops under a ceiling, floor-level sills without a soft rim, and indoor light independent of the camera: Released in 2.14.0. *Indoor light adds to the ground*, pane-sized windows, ceiling lamps kept out of closed rooms above, story boundaries at tile floors and gables sampled from their drawn foot: Released in 2.15.3. Adjacent gable samples stay consistent; short pillar blockers use their measured top, and verified floor tiles under emitters cast per-lamp soft shadows on instanced structures: Released in 2.15.4. Per-key outdoor queue recovery and exact lamp evaluation optimisation: Released in 2.15.6. Outdoor lamps through openings at the outdoor scale and cut, falling off from the opening and fading into the room; windows kept by the window built; lamp edits sending the rooms behind openings: Released in 2.16.0. A roofed room's own lamps tested against the story's walls in the directional maps: Released in 2.17.1. Lamp posts of other lots: Released in 2.18.2. Released in 3.0.0: diagonal doors and windows opened, doors, arches and windows shaped by the game's cutout masks, double-height rooms taking the lamps of the story below through their open tops. |
+| Availability | Missing outdoor gather entries restored: Released in 2.15.5.  Outdoor and indoor light between stories: Released (present since 2.1.0, the first version in this repository). Indoor light through openings across more than one floor, the raised-room wall veto, structure-change refresh and the *Wall seams.csv* recording: Released in 2.6.0. Walls block light on floors and objects, indoor objects lit by lamps of another story and an atrium's stories changing together, and the lit story's wall test from where an outdoor lamp's ray enters it (upper half walls): Released in 2.7.0. Placed floors of balconies and upper stories block a lamp below them (walls, floors, windows, objects, fences) and *Buildings block light on objects* (was *Walls block light on objects*): Released in 2.12.3. Lighting corrections: Released in 2.12.1. Outdoor light through openings into roofed rooms (garden lamps of the story below included), indoor light through openings, *Doors block light*, lamp light through openings in the outside walls' copies and room 0's own wall test, *Walls shade lamp light near the ground*, *Buildings block lamp light on trees and objects*, *Shadow softness*, walls ending at a floor above: Released in 2.13.0. Closed-floor support-row guards, walls of the lamp's own story for light through floor openings, hard wall tops under a ceiling, floor-level sills without a soft rim, and indoor light independent of the camera: Released in 2.14.0. *Indoor light adds to the ground*, pane-sized windows, ceiling lamps kept out of closed rooms above, story boundaries at tile floors and gables sampled from their drawn foot: Released in 2.15.3. Adjacent gable samples stay consistent; short pillar blockers use their measured top, and verified floor tiles under emitters cast per-lamp soft shadows on instanced structures: Released in 2.15.4. Per-key outdoor queue recovery and exact lamp evaluation optimisation: Released in 2.15.6. Outdoor lamps through openings at the outdoor scale and cut, falling off from the opening and fading into the room; windows kept by the window built; lamp edits sending the rooms behind openings: Released in 2.16.0. A roofed room's own lamps tested against the story's walls in the directional maps: Released in 2.17.1. Lamp posts of other lots: Released in 2.18.2. Released in 3.0.0: diagonal doors and windows opened, doors, arches and windows shaped by the game's cutout masks, double-height rooms taking the lamps of the story below through their open tops. Released in 3.1.1: fast lot pictures (`fastLotPictures`), a lot's loading triggers sent once, the settle skipping rooms already gathered, one reflection for an atrium, a lot entering the view no longer opening a lamp edit, and borrowed lamps that lit nothing skipped. |
 | Default | On (every switch; *Light through doors and windows* follows `kRealisticOpeningsDefault` in `build_flavor.h`, on) |
 | Menu | Lighting > Game fixes > Stories (*Wall lamps at the right height*, *Seamless walls between floors*, *Every floor in full detail*, *Smooth light maps*); Lighting > Inside & floors > Stories; Lighting > Inside & floors > Rooms at Night (group *Lamp light*: *Outdoor light through openings*, *Indoor light through openings*, *Indoor light adds to the ground*, *Doors block light*; then *Shadow softness*); Lighting > Outside > Objects (*Buildings block lamp light on trees and objects*); Lighting > Outside > Ground & Lots (*Walls shade lamp light near the ground*) |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -352,6 +352,12 @@ instead: every room 0 takes the plain path (its own floor only), and `AfterChang
 floors 0..7 with the same signature rules as indoor rooms (status *outside of a floor marked changed without a change*).
 This removes the game's restart of room 0 on every story for changes that are not lamp changes.
 
+A walk is a lamp edit (urgent sends, a lamp edit window through `LampMarkFilter::NoteEdit`) only when the lamp mark
+filter noted a lamp of that story, or when a lamp was added or removed on the played lot after it has been the played lot
+for 2 s (the 2 s start again when the camera enters the lot again), with the world live and not settling after a load. A lot streaming in or becoming the played lot flips its
+lamps' enabled bits and rebuilds its wall lists with no lamp note; its rooms are sent at the game's pace, not as an
+edit, so visible rooms are not kept waiting behind final rooms solved again.
+
 ### Part 3: walls of the lamp's story
 
 `LightPointWithAllLights` (`0x0069FD60`, thiscall `(room, out, list2D, list3D, flags, sample)`, `ret 0x14`) sums every
@@ -630,6 +636,35 @@ and the walls cut off hard at the story line while their lower half was red.
   (story 3 over story 2: rooms 5, 6 and 7 open, 304 floorless quadrants over room 5 at tile granularity; story 2: the 40
   stairwell openings unchanged, rooms 1 to 4 under their floor closed).
 
+### One reflection for an atrium
+
+Each room's draw binds its own reflection probe: `FUN_006ad300` (`thiscall(room+0x154 LightProbeProxy; room+0x140,
+room+0x130)`, `ret 8`, called at `0x006A0676` and `0x006A06B3`). Once that room's probe is ready (`proxy+8`, `+0x2C95`) it
+binds the probe's cubes with *SpecularProbeMultiplierBottom* / *Top* of 1 (`0x006B42C0`). Otherwise it binds the default
+cube times room `+0x140` / `+0x130` (`0x006B2F30`). Only the surface colour pass `0x006A0F00` writes those two fields, and
+they stay 0 in a room it never reached. The probe pool hands out probes by camera rating, so one story of an atrium often
+has none.
+
+On InteriorWall these are `c5` / `c6`, the tint of the cube reflection (`x 0.35`). Two lots showed the same split: `c5 = c6 = 0`
+on the story-1 wall draw and 1 on the story-2 draw. The reflection was added only above the floor line, a step of x1.05 to
+x1.07 there (light captures 2026-11-10 10-38-48 to 10-38-57, 11-37-02 and 11-37-06). The precomp names come from the
+InteriorWall technique's parameter block.
+
+Apex sends both calls through `ProbeBindHook`. While the indoor share is on, a room of an atrium group (the stacked rooms'
+ambient merge) whose probe is not ready draws with a ready probe of another member (`ArchAmbient::AtriumProbe`): the
+nearest other story's first, since a group can hold several rooms of one story under one upper room; a member of its own
+story only when no other story has one. That covers its walls, floors and objects, so the whole atrium shows one
+reflection. A room with a ready probe of its own, one outside an atrium, or any room with the indoor share off is drawn
+as the game draws it.
+
+This is a partial fix of the floor-line step: the reflection part only. On lot `9CE90DF0` 70 to 85% of the step is in
+the light maps themselves (the upper room's map 13-15% brighter at the same point), and that part remains.
+
+- When two members both hold a ready probe, each keeps its own cube, and a smaller step between the two captures can
+  remain. Unverified in game.
+- Diagnostics: *atrium stories drawn with another member's reflection probe* in the arch ambient status.
+- Offline: `tools/arch_ambient_test` (the pick).
+
 ### Lamps under a story's floor
 
 The game lists a ceiling lamp of the story below on the story above, its light a few centimetres under that story's
@@ -669,6 +704,13 @@ line (next to a sconce 1.2 m under the line: 0.86 against 0.46 at class 2).
   reset at piece 0). `BlurWalls` then blurs every class-2 block with the game's algorithm with those rows around it and
   writes it back, so the walls below and above blur across the line as one wall. Room 0 is left out: outside walls of
   stories under the camera are lit at class 0 (no blur), so the wall above must end on the exact light at the line.
+- A kept room relit on the GPU without a solve ([gpu-room-lamps.md](gpu-room-lamps.md)) has only its own texels lit with the
+  lamps of now; its rows beyond were lit by its solve. Since 3.1.1 each row beyond takes the change the relight made to its
+  column's edge texel, per byte and clamped (`OutdoorDeltaModel::FollowGhosts`, `GhostKeptPS`, and the same in
+  `KeptFinalCheck`); an edge texel left as it was leaves them unchanged. Before, after the lamps of a lot came on at night
+  with an atrium's lower story still to be solved, that story's top rows blurred against its lamps-off rows: a dark band
+  about one texel tall under the floor line, gone once the room was solved (F8 captures,
+  [validation](../../validation/night-lighting-gpu-room-lamps.md)).
 - The horizontal offset (samples at `(i + 0.5) * run/cols`, drawn texel centre to texel centre) is left alone: samples on
   a wall's very end sit on the next wall's line, where the 2D wall test is ambiguous.
 
@@ -1149,10 +1191,25 @@ along the wall, sqrt(1 - (d.T)^2) / |d.N| up it), at most 1 m. The share of the 
 - **Lot state** (`LotState`, every 2 s per lot on level 0): the lot's 8 story managers are compared (a rebuilt lot starts
   again: *lots rebuilt N*); when the number of stories with a known floor object grows or the opening count changes, or
   `g_indoorGen` moved (install, option, `OnWorldLive`), or the lot's floors were edited, the rooms near its openings (both
-  sides) and the rooms holding lamps of another story gather again (`QueueOpeningRooms`).
+  sides) and the rooms holding lamps of another story gather again (`QueueOpeningRooms`). These loading triggers
+  (rebuilt, `g_indoorGen`, floors or openings, dirty floor managers) are collected per lot and sent once, 600 ms after
+  the latest or at most 1.5 s after the first (`RoomAmbientPolicy::OpeningSendDue`, `LotState::pendWhy`); that send skips
+  a room whose gather came after the latest trigger was seen (`pendSerial`: the gather stamps are taken on the same light
+  thread). A lot loading or streaming in fired them one after another within 0.5 s, and each send reset the rooms already
+  gathered. A lamp edit and the settle still send at once and take the collected triggers with them; a lamp edit sends
+  every room.
 - **Settle after loading.** A lot that finds its openings sends those rooms once more when its first round is over: none
-  of its watched rooms gathers, waits or solves (states 1-3), none is held and no lamp burst waits, for 400 ms, not before
+  of its watched rooms gathers, waits or solves (states 1-3), none is held, no lamp burst waits and no collected loading
+  send is still to go out, for 400 ms, not before
   500 ms after arming and at the latest after 6 s (`kSettleMin`, `kSettleQuiet`, `kSettleMax`).
+  The settle skips a room whose gather began after the last send's round was over: no watched room unsolved (`+0x100`
+  still 4) and the lot not busy by the same rule as the quiet check (`LotBusy`: states 1-3, held, ambient queue,
+  dependency waits). That gather already saw the round's boosts, stacked ambient and
+  other-story lamps (`LotState::roundSerial`, `RoomAmbientPolicy::OpeningCoveredAfter`, `QueueOpeningRooms(...,
+  coveredAfter)`). Every send other than the settle takes the serial again once its own round is over; a lot entered with
+  its rooms already solved gets one too (before 3.1.1 only a lot seen loading did, and any due while armed cleared it, so
+  the settle sent every room again). Lamps that register later are left to `AuditTakers`. In the 11-40-32 recording, the settle solved two refined rooms again with identical maps and held a third
+  in mid-solve, using 3.5 s of the settle budget.
 - **Floor edits.** Floor set or remove calls mark the floor object; after 250 ms without another edit
   (`RoomAmbientPolicy::FloorEditReady`) the room list is marked stale, Rooms at Night is told, and the lot's rooms near
   openings gather again.
@@ -1227,6 +1284,49 @@ every room, rigs; the terrain keeps the load's own rebuild) once the room list i
 for 250 ms, polled every 200 ms from 500 ms after world-live, and at the latest after 8 s (`AfterLoadRefreshReady`). The
 room enumeration is expired at world-live. A setting change pending at that moment takes over.
 
+### Fast lot pictures (lot capture test)
+
+During a New Game the game lights about 11 lots at the high quality, one after another, only to take their pictures
+(the ThumbnailManager forces lot quality +0x4D and waits for every solve of the lot), and light sharing makes each of
+those solves heavier. Such a lot now skips light sharing (`fastLotPictures`, TOML only, default on); off, the test only
+logs.
+
+`ProbeLotCapture` (every 250 ms, from `OnPresent`) applies `SetupLotPolicy::Gate` (`features/setup_lot_policy.h`) to
+each lot at the high quality: the lot is a lot capture when its story manager has the high quality (+0x288), its id
+(+0x90/+0x94) is not the world's active lot (WorldManager +0x170/+0x174, read as the getter `WorldActiveLotGetter` does:
+0x00C5FB00 on Steam 1.67.2, found by its whole body on other versions), the game does not mark it as its priority lot, and *High quality on every lot* is off. It writes one
+`[SetupLot]` line when a lot gets the high quality or its decision changes, and one when a lot capture ends.
+The priority lot comes from `RoomLightQueue::PlayedLot` (bytes checked, fault-guarded; unknown counts as priority). The
+same test also runs on each room gather in `OutdoorGather`, where it gates: the number of gathers it
+gated is logged per lot every 250 ms, so a short misdetection between two samples still shows.
+Unverified while the game runs: that the played lot's id matches the world's active id. On the EA app 1.69 the getter
+is found by signature, but whether a lot capture is recognised there is unverified. `tools/setup_lot_test` checks
+the decision offline.
+
+What a gated lot skips (the test evaluated live, per lot):
+- Gather (`OutdoorGather`, latched per room): `OpeningsOn`, `RoofedOpeningsOn`, `InnerOpeningsOn` and the indoor share
+  (`ShareIndoorLights`, `ShareRoomZeroFromBelow`) read off, so the options' existing off paths run. The outdoor share
+  between stories stays. `DrainWarmStories` is not drained inside such a gather.
+- Sends: the lot's whole `BeforeRoomUpdate` block (loading triggers, settle round, stacked ambient and normalisation
+  resends, audits), its door sends in `DrainWarmStories` and its sends in `RequeueCutStories`.
+- Real-time outdoor lamps: such a lot is not the active lot, so no relit map is made for it.
+
+The solve itself is not gated, except that a roofless room gathered without its yard list does not take the yard path
+(`ownYard`, `CapturedRoom`: the rooms whose last gather was gated), so the pictures keep the ground light map on patios.
+When a lot's updates are no longer gated (its quality dropped, or it became the played lot), `EndLotCapture` (light tree
+thread, first `BeforeRoomUpdate` of that lot) clears Apex's per-room state of the gated solves: OutdoorDelta's kept parts
+of its story managers (`OutdoorDelta::ForgetLot`) and the per-room measures (`g_roomTook`, `g_roomWalls`, `g_normEnd`,
+`g_normUsed`, its `g_normResend`). The lot's `LotState` stays: it was not advanced while gated, so the loading triggers
+missed meanwhile fire at the lot's next update, as they did before the gate, and nothing runs twice. The game itself
+solves every room of a story again when its quality drops (0x006A5EF0 -> 0x006A5C90(1), from the disassembly, not traced
+in game). When the gate ends while the lot still has the high quality (the world's active lot or the priority lot was
+set late, a load or a camera return), no such game solve follows: every room of the lot is sent again from the render
+thread (`ProbeLotCapture`, `RequeueStory` on stories -4..7), so a misdetected lot recovers its full lighting. Logs:
+`[SetupLot] Lot X: lot capture over after N ms, R room gathers skipped light sharing; ...` and, for the high-quality
+case, `[SetupLot] Tracker T: lot capture ended at the high quality, N rooms sent again`. The pictures taken during the
+capture show the lighting without light sharing.
+Needs *Faster room lighting* (the priority lot check): when it cannot answer, no lot is gated.
+
 ### Wall seam recording
 
 Starting a recording (Developer > Recorder) arms `BeginSeamRecording`; saving writes `Wall seams.csv` to the recording
@@ -1294,6 +1394,7 @@ lighting, diagnostic arming, solves or budgets. An empty file means no qualifyin
 | `0x006A13B4` / `0x006A0230` | normalisation CALL / function | Steam 1.67.2 only |
 | `0x006A0C56` / `0x0069F280` | basis light CALL / function | bytes `8D 94 24 C8 00 00 00 52 8B CF` |
 | `0x006C7CD6` | lamp mark call (`MarkThunk`) | bytes checked, Steam 1.67.2 only |
+| `0x006A0676`, `0x006A06B3` / `0x006AD300` | a room draw's reflection probe bind (`RoomProbeBindCall0/1`, `RoomProbeBind`) | signature, `E8` + rel32 == target, redirected to `ProbeBindHook` |
 
 ### Cost
 
@@ -1312,7 +1413,18 @@ per door for each room 0 lamp in reach. A story with no opening noted builds not
 and a point for objects is kept while every input it reads is unchanged (same float bits and the same wall, floor and
 penumbra state), so a repeated query returns the value it would compute. Caches keyed by a story manager or lot (the
 outside walls' and slabs' copies `g_wallSnap` and `g_floorSnap`, the story grid caches) are pruned once their key has
-been missing from the loaded lots in two sweeps in a row (`liveness_prune.h`). Diagnostic sample recording exists only in developer mode and runs only while armed. Every
+been missing from the loaded lots in two sweeps in a row (`liveness_prune.h`). Diagnostic sample recording exists only in developer mode and runs only while armed.
+
+**Borrowed lamps that lit nothing.** 66-80% of a room's light list are lamps taken from other stories, and for most of
+them the slab and wall tests leave every sample at exactly 0, yet the game evaluated them and Apex tested them at every
+sample of every solve: the main reason a room solve cost about ten times what it did in 2.15. A solve notes, per
+borrowed indoor lamp, whether any sample got light from it (`ZeroSolveStart`, gather thread). The next solve of the same
+room and class gives the lamps that lit nothing colour 0 at once, while the lamp's fields as the solve reads them, the
+lot's walls, floors and openings and the lighting options are unchanged (an option change drops every memo). The lamp
+stays in the list, so the normalisation (`+0x160`) and every other pass see it as before, and the maps are the same. A
+quick pass (class 0 run with its target class's wall tests) neither reads nor writes the memo, and room 0 over rooms
+open to above is left out (that light follows another room's normalisation). Status: *lamps of other stories that lit
+nothing, skipped: N evaluations in M solves*. Tester key `perf_borrowed_zero_skip` (on) turns it off. Every
 floor in full detail adds solve work once when entering a lot. In-game cost has not been measured (see
 [validation](../../validation/night-lighting-level-light-share.md)).
 

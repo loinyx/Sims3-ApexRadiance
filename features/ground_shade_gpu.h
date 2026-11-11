@@ -107,6 +107,7 @@ private:
     IDirect3DTexture9 *shade_ = nullptr, *a_ = nullptr, *b_ = nullptr, *acc_[2] = {}, *mip_ = nullptr;
     int shadeW_ = 0, shadeH_ = 0, aW_ = 0, aH_ = 0, bW_ = 0, bH_ = 0, accW_[2] = {}, accH_[2] = {}, mipW_ = 0, mipH_ = 0;
     IDirect3DStateBlock9* saved_ = nullptr;
+    ExtraHooks::VertexInputMark savedInput_; // (saved_ restores the vertex input unseen by the detours)
     IDirect3DSurface9* savedRt_[4] = {};
     IDirect3DSurface9* savedDs_ = nullptr;
     IDirect3DQuery9 *qDis_ = nullptr, *qFreq_ = nullptr, *qT0_ = nullptr, *qT1_ = nullptr;

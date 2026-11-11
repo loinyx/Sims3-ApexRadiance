@@ -272,6 +272,11 @@ enum class Id : uint16_t {
     WorldSaveCall,            // CALL FUN_00c6d460 (0x00AAC320) in FUN_00aac110: the world save; false = Error 12
     WorldSave,
     WindowRepaintJump, // jne short over the window pump's per-frame InvalidateRect (0x004108AE, features/window_repaint.h)
+    ResolutionRequest, // FUN_0077d1a0 cdecl(w, h, hz, fullscreen): queues the game's resolution change (screen_control)
+    RendererGlobal,    // dword 0x011CECC8: the game's renderer (+0x2C/+0x30 size, +0x24 windowed, +0x8E reset pending)
+    ResolutionHandler, // FUN_007f1b70: the handler of message 0x07983246 (checked only: the request needs it)
+    ResolutionUi,      // dword 0x011D8C48: that handler's object, set once the game's UI listens
+    WorldActiveLotGetter, // FUN_00c5fb00: mov eax,[ecx+170h]; mov edx,[ecx+174h]; ret (the world's active lot, level_light_share)
     MonoTypeGetObject, // FUN_00ea8a00 cdecl(MonoDomain*, MonoType*): mono_type_get_object (domain lock at +0, type_hash at +0x40)
     MonoDomainFree, // FUN_00e75340 cdecl(MonoDomain*, int force): mono_domain_free
     ObjMapFind, // FUN_00939100 thiscall(map; out[2], key*), ret 8: the object service's hash map find (1033 buckets)
@@ -350,6 +355,9 @@ enum class Id : uint16_t {
     WallUvCall0,        // call FUN_00c38530 (0x00C387B5)
     WallUvCall1,        // the second call (0x00C387CC)
     WallUv,             // FUN_00c38530: the wall light-UV writer
+    RoomProbeBindCall0, // call FUN_006ad300 in FUN_006a0640 (0x006A0676): a room draw binds its reflection probe
+    RoomProbeBindCall1, // the call in FUN_006a0680 (0x006A06B3), which then binds InteriorBuildingAmbientColor
+    RoomProbeBind,      // FUN_006ad300 thiscall(LightProbeProxy; float4* bottom = room+0x140, float4* top = room+0x130), ret 8
     WallEdgeFn,         // FUN_006a43b0 cdecl(dir) -> edge
     CutPostSite0,       // "push 6257EB4h" of the wall cutout message in the cutout Add (0x00B0D866)
     CutPostSite1,       //  ... and Remove (0x00B0DD15)

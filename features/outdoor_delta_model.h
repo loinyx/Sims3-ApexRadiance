@@ -181,6 +181,28 @@ inline long BlurBlock(uint32_t* ext, const uint32_t* before, int n, int rows, bo
     }
     return edges;
 }
+// A kept block relit without a solve (GpuRoomLamps): the rows beyond its edges in `ext` (BlurBlock's layout) were lit by its
+// solve with the lamps of then. Each follows the change the relight made to its column's edge texel, per byte, clamped
+// (GhostKeptPS), so a story relit with other lamps does not blur its edge against the old light; `solved` holds the block's
+// rows as the solve left them. An edge texel the relight left as it was leaves its rows beyond as they were.
+inline void FollowGhosts(uint32_t* ext, const uint32_t* solved, int n, int rows, bool above, bool below) {
+    const auto follow = [&](uint32_t* ghost, const uint32_t* now, const uint32_t* then) {
+        for (int x = 0; x < n; x++) {
+            uint32_t r = 0;
+            for (int s = 0; s < 32; s += 8) {
+                const int v = static_cast<int>((ghost[x] >> s) & 0xFFu) + static_cast<int>((now[x] >> s) & 0xFFu) - static_cast<int>((then[x] >> s) & 0xFFu);
+                r |= static_cast<uint32_t>(std::clamp(v, 0, 255)) << s;
+            }
+            ghost[x] = r;
+        }
+    };
+    const int top = above ? 2 : 0;
+    if (above)
+        for (int k = 0; k < 2; k++) follow(ext + static_cast<size_t>(k) * n, ext + static_cast<size_t>(top) * n, solved);
+    if (below)
+        for (int k = 0; k < 2; k++)
+            follow(ext + static_cast<size_t>(top + rows + k) * n, ext + static_cast<size_t>(top + rows - 1) * n, solved + static_cast<size_t>(rows - 1) * n);
+}
 
 // ---- how far a light can reach a texel ----
 // The lamp classes' evaluation (bare bulb 0x006BDE90, street lamp 0x006BE020, shaded lamp 0x006BE1C0, spot 0x006BFFB0;

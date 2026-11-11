@@ -82,7 +82,12 @@ struct KeptRef {
     uint64_t live = 0; // (live_object_tables) what its objects moved to since its solve, KeptBlockers' table then (0: where it read them)
 };
 void LiveFrame(); // (render thread) a frame's round begins (live_object_tables)
+// (any thread) an object of that kept room (not room 0) moved in its live table within ms, in a run of moves begun less than maxRun ms ago
+bool LiveMovedWithin(const void* room, unsigned long ms, unsigned long maxRun);
 void KeptRooms(uintptr_t mgr, int cls, std::vector<KeptRef>& out);
+// (cross_room_shadows) the kept room of that lot, story and id at that class, with its live table's key as the last KeptRooms of
+// its story left it; false when none is kept. Reads Apex's records only (any thread)
+bool KeptAt(uint64_t lot, int story, int id, int cls, KeptRef& out);
 bool BuildKeptMap(const void* room, int cls, uint32_t version, int m, RtLampGpu::KeptMapData& out, std::string& why);
 // (render thread) that kept solve's furniture records as its objects stand now (KeptRef::live; BlockerTable::Join); false: none read, or no longer kept
 bool KeptBlockers(const void* room, int cls, uint32_t version, std::shared_ptr<const RtLampGpu::BlockerTable>& t, int& header);
@@ -380,6 +385,9 @@ void OnWorldChanged();
 // Every frame: the game's night level (0 day, 1 night), for the instant day/night switch's clock (PhaseCache)
 void NoteNightLevel(float level);
 void InvalidateAll(const char* why); // options that change how rooms are lit (every room lights again)
+// (light tree thread) the kept parts of the rooms of these story managers go (a lot's capture for its picture ended);
+// returns how many
+int ForgetLot(const uintptr_t* mgrs, int n);
 std::string Status();
 
 } // namespace OutdoorDelta

@@ -108,3 +108,15 @@ Sims3SettingsSetter's and working under the RTX Remix bridge. New code, not the 
   Sims3SettingsSetter's limiter call redirected at run time instead of disabling Apex's when it is configured.
 - Left out: monitor selection, V-Sync requests and the NVIDIA / AMD variable-refresh queries.
 
+### 2026-11-10: resolution through the game
+
+**Context:** a player's `Options.ini` was reset to 1024x768 while Apex was set to Borderless at 3840x2160. The log
+read `[Screen] CreateDevice: 1024x768 windowed -> 3840x2160 windowed`, and the game drew its whole picture, 3D view and
+UI, in the top-left 1024x768 of the back buffer; the rest stayed black or kept old frames.
+
+- Rejected: overriding the back-buffer size in Apex's device requests. The game keeps laying out at its own resolution.
+- Changed: Apex's Resolution now asks the game to change its own resolution (TS3W `0x0077D1A0`), which saves
+  `Options.ini` and resets the device through the game's path; the back buffer always keeps the game's size. The menu
+  lists sizes from 1024x768, the game's own floor.
+- Not run in game yet ([validation](../validation/display.md#pending)).
+

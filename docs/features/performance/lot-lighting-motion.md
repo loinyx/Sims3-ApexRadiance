@@ -67,8 +67,11 @@ the lot being played):
   lighting*'s drain left of it, the other lots 0.25 ms, with no edit boost. While the lamp's own rooms still wait there
   is no cap, and the other lots keep 0.25 ms ([lamp drags](../night-lighting/lamp-drags.md)). Tester switch *Spread the
   update after the stop* (`drag_spread_cap`, on).
-- **A lamp edited in Build mode:** while its rooms wait for or are in their solve, the lot being played gets 25 ms with
-  the camera still once the lamp is let go; while it is dragged the game's 15 ms stays.
+- **A lamp edited in Build mode:** while its rooms wait for or are in their solve (or a room 0 is sent to its solve),
+  the lot being played gets up to 25 ms with the camera still once the lamp is let go, dosed by the same frame-time
+  pacing as the settle window: `game + (25 - game) x scale`, the full 25 ms while frames hold, down to the game's 15 ms
+  when they do not (a flat 25 ms held frames at 28-31 ms for 8 to 25 s). Every room still gets the game's complete
+  solve; only the frame it ends in moves. While the lamp is dragged the game's 15 ms stays.
 - **Refinement after a quick pass:** while the rooms of a lamp switch that already show their quick pass are refined
   ([Faster room lighting](room-light-queue.md), *Quick update for lamp switches*), the budget is capped at 6 ms so the
   frame rate holds.

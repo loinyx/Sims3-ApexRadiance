@@ -1,0 +1,247 @@
+// Apex Radiance Setup texts in Czech (Čeština). Fill only the entries between the braces, one per line:
+//     ["<English key, exactly as in keys.json>"] = "<translation>",
+// C# strings: write \" for a quote, \\ for a backslash, \n for a line break; every other character as itself (UTF-8).
+// Keep each {0}, {1} of the key, product and file names as they are. A key without an entry shows in English; never
+// leave a translation empty. The same key twice: the last one wins, and ApexSetup.Tests fails.
+namespace ApexSetup;
+
+public static partial class Strings
+{
+    static readonly Dictionary<string, string> Cs = new()
+    {
+        ["Welcome"] = "Vítejte",
+        ["Game"] = "Hra",
+        ["Components"] = "Komponenty",
+        ["Install"] = "Instalovat",
+        ["Done"] = "Hotovo",
+        ["Repair or remove"] = "Opravit nebo odebrat",
+        ["About and licences"] = "O programu a licence",
+        ["Back"] = "Zpět",
+        ["Next"] = "Další",
+        ["Get started"] = "Začít",
+        ["Finish"] = "Dokončit",
+        ["Close The Sims 3 to continue."] = "Pro pokračování zavřete The Sims 3.",
+        ["Setup needs the internet to download the files."] = "Instalátor potřebuje internet ke stažení souborů.",
+        ["Nothing changes until you click Install."] = "Nic se nezmění, dokud nekliknete na Instalovat.",
+        ["Lighting, picture and performance for The Sims 3."] = "Osvětlení, obraz a výkon pro The Sims 3.",
+        ["What Setup does"] = "Co instalátor dělá",
+        ["Setup can't reach GitHub"] = "Instalátor se nemůže připojit ke GitHubu",
+        ["Check your internet connection, then try again."] = "Zkontrolujte připojení k internetu a zkuste to znovu.",
+        ["Try again"] = "Zkusit znovu",
+        ["Choose your game"] = "Vyberte svou hru",
+        ["Setup found these installs. Pick the one you play."] = "Instalátor našel tyto instalace. Vyberte tu, kterou hrajete.",
+        ["Setup found no install. Browse for the game folder."] = "Instalátor nenašel žádnou instalaci. Vyhledejte složku hry.",
+        ["Browse for another folder"] = "Vybrat jinou složku",
+        ["No game in this folder"] = "V této složce není hra",
+        ["Pick the The Sims 3 folder, or its Game\\Bin folder (the one with TS3W.exe or TS3.exe)."] =
+            "Vyberte složku The Sims 3 nebo její složku Game\\Bin (tu s TS3W.exe nebo TS3.exe).",
+        ["Not installed"] = "Nenainstalováno",
+        ["Installed"] = "Nainstalováno",
+        ["the game's own Direct3D 9"] = "vlastní Direct3D 9 hry",
+        ["another d3d9.dll"] = "jiná d3d9.dll",
+        ["Required"] = "Povinné",
+        ["Installs {0} into Game\\Bin."] = "Nainstaluje {0} do Game\\Bin.",
+        ["Replaces the installed copy with {0}. Your settings stay."] =
+            "Nahradí nainstalovanou kopii verzí {0}. Vaše nastavení zůstane.",
+        ["Updates {0} to {1}. Your settings stay."] = "Aktualizuje {0} na {1}. Vaše nastavení zůstane.",
+        ["Recommended with Apex"] = "Doporučeno s Apex",
+        ["No updates available"] = "Žádné aktualizace",
+        ["Everything in this game is on its latest version."] = "Vše v této hře je v nejnovější verzi.",
+        ["Not available for this game version: it supports Steam 1.67.2 and EA app 1.69.47."] =
+            "Pro tuto verzi hry není k dispozici: podporuje Steam 1.67.2 a EA app 1.69.47.",
+        ["Wrong build"] = "Špatná verze",
+        ["Update {0}"] = "Aktualizovat {0}",
+        ["Up to date"] = "Aktuální",
+        ["Setup could not finish"] = "Instalátor nemohl dokončit práci",
+        ["Close The Sims 3 first."] = "Nejprve zavřete The Sims 3.",
+        ["You're all set"] = "Vše je připraveno",
+        ["Start The Sims 3, load a world and press Ctrl+Shift+F11 to open the Apex Radiance menu."] =
+            "Spusťte The Sims 3, načtěte svět a stiskněte Ctrl+Shift+F11 pro otevření nabídky Apex Radiance.",
+        ["Installed: {0} {1}"] = "Nainstalováno: {0} {1}",
+        ["Choose your game first."] = "Nejprve vyberte svou hru.",
+        ["Removes ApexRadiance.asi. Your settings in Documents stay."] =
+            "Odebere ApexRadiance.asi. Vaše nastavení v Documents zůstane.",
+        ["Remove"] = "Odebrat",
+        ["RTX Remix bridge"] = "RTX Remix bridge",
+        ["Removes Sims3SettingsSetter.asi."] = "Odebere Sims3SettingsSetter.asi.",
+        ["Removes ts3native and ts3fixes.package."] = "Odebere ts3native a ts3fixes.package.",
+        ["Repair or update"] = "Opravit nebo aktualizovat",
+        ["Downloads and copies again everything installed here. Your settings stay."] =
+            "Znovu stáhne a zkopíruje vše, co je zde nainstalováno. Vaše nastavení zůstane.",
+        ["Repair"] = "Opravit",
+        ["Uninstall everything"] = "Odinstalovat vše",
+        ["Removes what Setup installed, and Apex Radiance, and puts back every file Setup replaced."] =
+            "Odebere vše, co instalátor nainstaloval, i Apex Radiance a vrátí každý soubor, který instalátor nahradil.",
+        ["Uninstall"] = "Odinstalovat",
+        ["Remove {0}?"] = "Odebrat {0}?",
+        ["Close the game first. Setup removes the files and puts back the ones it replaced."] =
+            "Nejprve zavřete hru. Instalátor odebere soubory a vrátí ty, které nahradil.",
+        ["{0} removed."] = "{0} odebráno.",
+        ["Uninstall everything?"] = "Odinstalovat vše?",
+        ["Setup removes Apex Radiance and everything it installed in this game, and puts back every file it replaced. Your settings in Documents stay."] =
+            "Instalátor odebere Apex Radiance a vše, co v této hře nainstaloval, a vrátí každý soubor, který nahradil. Vaše nastavení v Documents zůstane.",
+        ["Everything Setup installed was removed."] = "Vše, co instalátor nainstaloval, bylo odebráno.",
+        ["Setup fixes this"] = "Instalátor to opraví",
+        ["Read more"] = "Více informací",
+        ["Fixed."] = "Opraveno.",
+        ["No incompatible settings found."] = "Nenalezena žádná nekompatibilní nastavení.",
+        ["{0} in Game\\Bin loads a second copy of Apex Radiance."] = "{0} v Game\\Bin načítá druhou kopii Apex Radiance.",
+        ["Two ASI loaders ({0}) load every mod twice. Keep one: remove all but {1}."] =
+            "Dva ASI loadery ({0}) načítají každý mod dvakrát. Ponechte jeden: odeberte všechny kromě {1}.",
+        ["Sims 3 Modernization's ts3native is the build for the other edition and does nothing. Turn it on in Components to install the right one."] =
+            "ts3native ze Sims 3 Modernization je verze pro jinou edici a nic nedělá. Zapněte ho v Komponentách a nainstaluje se správná.",
+        ["Sims 3 Modernization has no build for this game version ({0}), so its ts3native does nothing. Turn it off in Components."] =
+            "Sims 3 Modernization nemá verzi pro tuto verzi hry ({0}), takže jeho ts3native nic nedělá. Vypněte ho v Komponentách.",
+        ["{0} in Game\\Bin is a second copy of {1}; both load. Setup moves it to the backup folder."] =
+            "{0} v Game\\Bin je druhá kopie {1}; načítají se obě. Instalátor ji přesune do složky záloh.",
+        ["Mods has {0} .package files but no Resource.cfg, so the game loads none of them."] =
+            "Složka Mods obsahuje soubory .package ({0}), ale žádný Resource.cfg, takže hra žádný z nich nenačte.",
+        ["{0} is the build for the other edition of the game; it makes the game show \"unofficial game modification\". Use the {1} build."] =
+            "{0} je verze pro jinou edici hry; kvůli ní hra zobrazuje \"unofficial game modification\". Použijte verzi {1}.",
+        ["NRaas ErrorTrap has no build known to work on EA app 1.69.47."] =
+            "NRaas ErrorTrap nemá žádnou verzi, o které se ví, že funguje na EA app 1.69.47.",
+        ["{0} overrides game code Sims 3 Modernization also patches (not tested together)."] =
+            "{0} přepisuje kód hry, který upravuje i Sims 3 Modernization (spolu netestováno).",
+        ["{0} is an old build with Apex inside; while it is in Game\\Bin, Apex Radiance stays off. Setup moves it to the backup folder (install the official Sims3SettingsSetter in its place if you used it)."] =
+            "{0} je stará verze se zabudovaným Apex; dokud je v Game\\Bin, Apex Radiance zůstane vypnutý. Instalátor ji přesune do složky záloh (pokud jste ji používali, nainstalujte místo ní oficiální Sims3SettingsSetter).",
+        ["Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. Setup sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup)."] =
+            "ShortWaitSpin a ThreadStackDiet ze Sims3Performance kolidují se Sims 3 Modernization. Instalátor obě nastaví na 0 (kopie se uloží jako Sims3Performance.ini.apex-backup).",
+        ["Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. Setup turns them off (a copy is kept as S3SS.toml.apex-backup)."] =
+            "Nekomprimované textury ze Sims3SettingsSetter způsobují s RTX Remix bridge trhání. Instalátor je vypne (kopie se uloží jako S3SS.toml.apex-backup).",
+        ["{0} sets client.targetProcess = {1}, but this game is {2}: the bridge does not start."] =
+            "{0} nastavuje client.targetProcess = {1}, ale tato hra je {2}: bridge se nespustí.",
+        ["dxvk.conf lacks {0} or has other values: without them the game resets its graphics options or freezes on a resolution change under the bridge."] =
+            "V dxvk.conf chybí {0} nebo má jiné hodnoty: bez nich hra s bridge resetuje grafické volby nebo zamrzne při změně rozlišení.",
+        ["Mods\\Resource.cfg does not read {0}, so the game does not load it. Setup adds the Packages folder lines (a copy is kept as Resource.cfg.apex-backup)."] =
+            "Mods\\Resource.cfg nečte {0}, takže to hra nenačte. Instalátor přidá řádky složky Packages (kopie se uloží jako Resource.cfg.apex-backup).",
+        ["Fix settings"] = "Opravit nastavení",
+        ["Everything is installed and up to date."] = "Vše je nainstalováno a aktuální.",
+        ["Will be removed"] = "Bude odebráno",
+        ["Keep"] = "Ponechat",
+        ["Nothing to apply"] = "Nic k provedení",
+        ["Preview"] = "Náhled",
+        ["This is a preview: nothing was installed."] = "Toto je náhled: nic nebylo nainstalováno.",
+        ["Setup is applying changes"] = "Instalátor provádí změny",
+        ["Wait until it finishes before closing."] = "Před zavřením počkejte na dokončení.",
+        ["Checking the latest versions…"] = "Kontrola nejnovějších verzí…",
+        ["Checking for updates…"] = "Hledání aktualizací…",
+        ["Close The Sims 3 to update."] = "Pro aktualizaci zavřete The Sims 3.",
+        ["Update now installs them."] = "Aktualizovat nyní je nainstaluje.",
+        ["Graphics"] = "Grafika",
+        ["Checked at {0}."] = "Zkontrolováno v {0}.",
+        ["Test build {0}: kept as it is."] = "Testovací verze {0}: ponechána beze změny.",
+        ["Repair or remove sets the game right."] = "Opravit nebo odebrat vrátí hru do pořádku.",
+        ["Changes applied"] = "Změny provedeny",
+        ["Removed: {0}"] = "Odebráno: {0}",
+        ["The Sims 3 · {0}"] = "The Sims 3 · {0}",
+        ["{0} → {1}"] = "{0} → {1}",
+        ["{0} · up to date"] = "{0} · aktuální",
+        ["Everything is in place."] = "Vše je v pořádku.",
+        ["Everything is in place (checked at {0})."] = "Vše je v pořádku (zkontrolováno v {0}).",
+        ["Check installation"] = "Zkontrolovat instalaci",
+        ["Change components"] = "Změnit komponenty",
+        ["Apex Radiance is not installed in this game."] = "Apex Radiance není v této hře nainstalován.",
+        ["{0} · test build"] = "{0} · testovací verze",
+        ["Install the official {0}"] = "Nainstalovat oficiální verzi {0}",
+        ["No ASI loader in Game\\Bin: Apex Radiance and the other .asi mods do not load."] =
+            "V Game\\Bin chybí ASI loader: Apex Radiance a další mody .asi se nenačtou.",
+        ["{0} is missing: the RTX Remix bridge does not start."] = "Chybí {0}: RTX Remix bridge se nespustí.",
+        ["Apply 1 change"] = "Provést 1 změnu",
+        ["Apply {0} changes"] = "Provést změny: {0}",
+        ["{0} is installed and up to date: nothing to change."] = "{0} je nainstalováno a aktuální: není co měnit.",
+        ["Keep my d3d9.dll"] = "Ponechat moji d3d9.dll",
+        ["Your d3d9.dll stays as it is."] = "Vaše d3d9.dll zůstane beze změny.",
+        ["Applying changes"] = "Provádění změn",
+        ["Remove {0}"] = "Odebrat {0}",
+        ["Fix incompatible settings"] = "Opravit nekompatibilní nastavení",
+        // suggestions: what Apex Radiance recommends in game (Compat.Suggestions); the game's own texts as the menu translates them
+        ["Suggested for Apex Radiance"] = "Doporučeno pro Apex Radiance",
+        ["Apply"] = "Použít",
+        ["Applied."] = "Použito.",
+        ["Apply all suggestions"] = "Použít všechny návrhy",
+        ["Apply suggestion: {0}"] = "Použít návrh: {0}",
+        ["Two copies of the mod"] = "Dvě kopie modu",
+        ["{0} in Game\\Bin is another copy of Apex Radiance; only one copy runs. Apply moves it to the backup folder."] = "{0} v Game\\Bin je další kopie Apex Radiance; běží jen jedna kopie. Použít ji přesune do složky záloh.",
+        ["Turn off the game's Edge Smoothing"] = "Vypnout vyhlazování hran ve hře",
+        ["Options.ini has edgesmoothing = {0}. The Sims 3's Edge Smoothing prevents these enabled Apex effects from working: {1}. Apply sets it to 0 (a copy is kept as Options.ini.apex-backup)."] = "Options.ini má edgesmoothing = {0}. Vyhlazování hran ve hře The Sims 3 brání v činnosti těmto zapnutým efektům Apex: {1}. Použít ho nastaví na 0 (kopie se uloží jako Options.ini.apex-backup).",
+        ["Edge Smoothing"] = "Vyhlazování hran",
+        ["Depth Blur"] = "Rozostření hloubky",
+        ["Ambient Occlusion"] = "Ambientní okluze",
+        ["Water Reflections"] = "Odrazy na vodě",
+        ["Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it."] = "Spouští hru přes Vulkan: méně zasekávání a Apex Radiance je s ním vyvíjen a testován.",
+        ["Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings."] = "Apex Radiance funguje samostatně, ale dobře se doplňuje se Sims3SettingsSetter od sims3fiend: omezovač snímkové frekvence, méně zasekávání a spousta dalších nastavení hry.",
+        ["Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds."] = "Přesune DXVK do vlastního 64bitového procesu: hra si ponechá asi o 600 MB více volné paměti pro dlouhé hraní a velké světy.",
+        ["{0} has {1} = {2}, which Setup cannot read. Setup leaves the file as it is."] = "{0} má {1} = {2}, což instalátor neumí přečíst. Instalátor soubor nechá, jak je.",
+        // restore points (Repair or remove)
+        ["Install {0}"] = "Instalovat {0}",
+        ["Restore points"] = "Body obnovení",
+        ["Setup keeps a copy of every file it changes. Restoring a point undoes that change and every later one."] = "Instalátor si uchovává kopii každého souboru, který změní. Obnovení bodu vrátí tuto změnu i všechny pozdější.",
+        ["Before: {0}"] = "Před: {0}",
+        ["{0} · 1 file"] = "{0} · 1 soubor",
+        ["{0} · {1} files"] = "{0} · souborů: {1}",
+        ["Restore"] = "Obnovit",
+        ["No restore points yet. Setup makes one before every change."] = "Zatím žádné body obnovení. Instalátor vytvoří jeden před každou změnou.",
+        ["Restore this point?"] = "Obnovit tento bod?",
+        ["Setup puts back the files as they were before this change, and undoes every change made after it. Close the game first."] = "Instalátor vrátí soubory do stavu před touto změnou a vrátí všechny změny provedené po ní. Nejprve zavřete hru.",
+        ["Setup could not put back {0}."] = "Instalátor nemohl vrátit {0}.",
+        ["Changes undone."] = "Změny vráceny.",
+        ["Undo these changes"] = "Vrátit tyto změny",
+        ["This restore point is gone."] = "Tento bod obnovení už neexistuje.",
+        ["Updates available"] = "Jsou dostupné aktualizace",
+        ["Update now"] = "Aktualizovat nyní",
+        ["{0} {1} → {2}"] = "{0} {1} → {2}",
+        ["Removes MonoPatcher.asi and its package."] = "Odebere MonoPatcher.asi a jeho balíček.",
+        ["Smooth Patch's TS3Patch.asi patches the same game code as Sims3SettingsSetter's Smooth Patch. Setup moves it to the backup folder (S3SS does the same job)."] =
+            "TS3Patch.asi ze Smooth Patch upravuje stejný kód hry jako Smooth Patch v Sims3SettingsSetter. Instalátor ho přesune do složky záloh (S3SS dělá totéž).",
+        ["simler90's Gameplay Core Mod and NRaas StoryProgression replace the same game code. Keep one of them."] =
+            "Gameplay Core Mod od simler90 a NRaas StoryProgression nahrazují stejný kód hry. Ponechte jen jeden z nich.",
+        ["MonoPatcher needs the Microsoft Visual C++ Redistributable (x86); it is not installed."] =
+            "MonoPatcher potřebuje Microsoft Visual C++ Redistributable (x86); není nainstalován.",
+        ["Download on Nexus Mods"] = "Stáhnout z Nexus Mods",
+        ["Choose the downloaded file"] = "Vybrat stažený soubor",
+        ["Ready to install"] = "Připraveno k instalaci",
+        ["Waiting for your download in {0}…"] = "Čekání na stažení v {0}…",
+        ["Not the Performance Patch"] = "Toto není Performance Patch",
+        ["{0} has no Sims3Performance.asi. If the download is a .7z or .rar, extract it and choose Sims3Performance.asi."] =
+            "{0} neobsahuje Sims3Performance.asi. Pokud je stažený soubor .7z nebo .rar, rozbalte ho a vyberte Sims3Performance.asi.",
+        ["Removes Sims3Performance.asi and its .ini."] = "Odebere Sims3Performance.asi a jeho .ini.",
+        ["Download Sims 3 Performance Patch from Nexus Mods first."] =
+            "Nejprve stáhněte Sims 3 Performance Patch z Nexus Mods.",
+        ["Finds your The Sims 3 (Steam or EA app)."] = "Najde vaši hru The Sims 3 (Steam nebo EA app).",
+        ["Installs Apex Radiance and the fixes you choose."] = "Nainstaluje Apex Radiance a opravy, které vyberete.",
+        ["Keeps a copy of every file it changes, so you can undo everything."] =
+            "Uchová kopii každého souboru, který změní, takže můžete vše vrátit zpět.",
+        ["Your Apex Radiance settings are always kept."] = "Vaše nastavení Apex Radiance se vždy zachová.",
+        ["No internet connection"] = "Žádné připojení k internetu",
+        ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (doporučeno)",
+        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan s více pamětí (RTX Remix bridge)",
+        ["Windows default (Direct3D 9)"] = "Výchozí ve Windows (Direct3D 9)",
+        ["Fewer stutters; Apex Radiance is made and tested with it."] =
+            "Méně trhání; Apex Radiance je s ním vyvíjen a testován.",
+        ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
+            "Uvolní asi o 600 MB víc paměti pro velké světy. Vyžaduje grafickou kartu s Vulkan. Pokud s ním hra nefunguje správně, zvolte DXVK.",
+        ["Works, but Apex Radiance is tested with DXVK."] = "Funguje, ale Apex Radiance je testován s DXVK.",
+        ["Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."] =
+            "Grafická nastavení ve hře se mohou jednou resetovat. Instalátor uchová kopii a vrátí ji, pokud přepnete zpět.",
+        ["Fixes for game and graphics settings."] = "Opravy nastavení hry a grafiky.",
+        ["Fixes stutters, Sims getting stuck and crashes."] = "Opravuje trhání, zaseknuté Simíky a pády.",
+        ["Needed only by some script mods; turn it on if a mod asks for it."] =
+            "Potřebují ho jen některé skriptové mody; zapněte ho, pokud ho mod vyžaduje.",
+        ["Makes the game run faster. Needs a free Nexus Mods account; Setup installs it when your download finishes."] =
+            "Hra poběží rychleji. Vyžaduje bezplatný účet na Nexus Mods; instalátor ho nainstaluje, až se stahování dokončí.",
+        ["Puts back the graphics files you had before."] = "Vrátí grafické soubory, které jste měli dříve.",
+        ["Goes back to the game's default graphics. Your in-game graphics settings may reset once."] =
+            "Vrátí výchozí grafiku hry. Grafická nastavení ve hře se mohou jednou resetovat.",
+        ["Language"] = "Jazyk",
+        ["Automatic"] = "Automaticky",
+        ["This file has no Sims3Performance.asi."] = "Tento soubor neobsahuje Sims3Performance.asi.",
+        ["Dry run: Setup changes nothing."] = "Zkušební běh: instalátor nic nemění.",
+        ["Apex Radiance by loinyx. The RTX Remix bridge is NVIDIA's, ported to The Sims 3 by dalexlol and alexvixell35-stack. Sims3SettingsSetter is by sims3fiend, Sims 3 Modernization by rodneypantonial and Ultimate ASI Loader by ThirteenAG: Setup downloads them from their own GitHub releases."] =
+            "Apex Radiance od loinyx. RTX Remix bridge je od NVIDIA, pro The Sims 3 ho převedli dalexlol a alexvixell35-stack. Sims3SettingsSetter je od sims3fiend, Sims 3 Modernization od rodneypantonial a Ultimate ASI Loader od ThirteenAG: instalátor je stahuje z jejich vlastních vydání na GitHubu.",
+        ["RTX Remix bridge: third-party notices"] = "RTX Remix bridge: oznámení třetích stran",
+        ["Read"] = "Číst",
+        ["Licence text"] = "Text licence",
+        ["OK"] = "OK",
+        ["Cancel"] = "Zrušit",
+    };
+}

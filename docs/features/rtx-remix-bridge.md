@@ -8,7 +8,7 @@ worlds. Apex Radiance detects the bridge on its own and runs under it with every
 
 | | |
 |---|---|
-| Availability | Released in 3.0.0 as a separate download (`Apex-Radiance-RTX-Remix-bridge.zip`). Its `dxvk.conf` with `d3d9.countLosableResources = False` (no freeze on a switch to exclusive fullscreen or a new resolution): published again after 3.0.0. A folded install guide in Settings > Compatibility, the uncompressed-textures card and Fullscreen as Borderless under the bridge: Released in 3.1.0 |
+| Availability | Released in 3.0.0 as a separate download (`Apex-Radiance-RTX-Remix-bridge.zip`). Its `dxvk.conf` with `d3d9.countLosableResources = False` (no freeze on a switch to exclusive fullscreen or a new resolution): published again after 3.0.0. A folded install guide in Settings > Compatibility, the uncompressed-textures card and Fullscreen as Borderless under the bridge: Released in 3.1.0. Patches 0011 to 0013, Apex's guard for the old client's vertex input, the bridge logs in captures and the bridge's own Nexus file: Released in 3.1.1 |
 | Default | Not installed |
 | Menu | Settings > Compatibility: *RTX Remix bridge: Installed* when it runs; while DXVK runs inside the game, the bridge is offered under *Optional* |
 | Configuration | `bridge.conf` (in `Game\Bin` and in `Game\Bin\.trex`) and `dxvk.conf` (in `Game\Bin`); nothing in `ApexRadiance.toml` |
@@ -46,6 +46,11 @@ app (`TS3.exe`), change `client.targetProcess = TS3W.exe` to `TS3.exe` in both `
 the game, delete `d3d9.dll`, `bridge.conf`, `dxvk.conf` and `.trex` from Bin, and put the old `d3d9.dll` back. The
 bridge writes its logs to `rtx-remix\logs`.
 
+**The package** holds only what goes into `Game\Bin`: `d3d9.dll`, `bridge.conf`, `dxvk.conf`, the `.trex` folder
+(the server, its `bridge.conf` and DXVK's x64 `d3d9vk_x64.dll`) and one text file, *Apex Radiance RTX Remix
+bridge.txt*, with the install steps followed by the licence texts of the bridge, Detours and DXVK. On Nexus Mods the
+zip is a separate optional file next to `ApexRadiance.asi` ([release-process.md](../release-process.md)).
+
 **In the menu** (Settings > Compatibility, `BridgeGuide` in [`apex_gui.cpp`](../../apex_gui.cpp)): a folded Advanced section, on Windows only (never under Wine or Proton), that shows nothing until it is opened
 (no start note, no pop-up). Without the bridge it is *RTX Remix bridge: how to install*: what the bridge does, that the
 picture stays the same and that it replaces the `d3d9.dll` in `Game\Bin`, the steps above (the EA app step for
@@ -73,8 +78,9 @@ Shipped in the package; players do not need to change them.
 ## Compatibility and interactions
 
 - **Apex Radiance:** every feature runs under the bridge. Apex's [Display](display.md) window mode and resolution apply
-  through its Reset hook; the bridge's client is the game's `d3d9.dll`. Apex's *Fullscreen* runs as *Borderless* under
-  the bridge: its exclusive-fullscreen Reset hung the game.
+  through its Reset hook; the bridge's client is the game's `d3d9.dll`. Under the bridge, Apex runs exclusive
+  fullscreen as *Borderless*, whether Apex's *Fullscreen* or the game's own request in *Game setting*: an
+  exclusive-fullscreen Reset hung the game, and so did the first device creation when the game asked for fullscreen.
 - **Sims3SettingsSetter:** its borderless window does not apply under the bridge (no Reset reaches the server). Use
   Apex's window mode instead. Its uncompressed lot and Sim textures were reported to stutter under the bridge
   (unverified on this machine).
@@ -116,6 +122,44 @@ patches in order and builds x86 and x64 with meson; `package.ps1` makes the zip.
 | 0008 | `client.freeIdleBufferCopiesSec`: frees idle static buffer copies, checked by a CRC32C on each fetch |
 | 0009 | `freeIdleManagedCopiesMs` (off): a finer threshold for patch 0003 |
 | 0010 | Render target 0 is back buffer 0: the client made render target 0 a separate place-holder, so `GetRenderTarget(0)` and `GetBackBuffer(0, 0)` returned two objects (Apex's scene detection, which compares them, saw no scene and the window stayed black). Apex 3.0.0 also handles the old client (`framework/d3d9_bootstrap.cpp`) |
+| 0011 | Render target 0 resets the viewport: `SetRenderTarget(0)` reset the viewport and scissor rect on the server but not in the client's copy, so `GetViewport` / `GetScissorRect` returned the previous target's. Light-map smoothing saves and restores them in the middle of a frame and put the stale viewport back: the sea lost its reflection for one frame now and then. Unverified in game that it is the whole cause |
+| 0012 | `SetFVF` and `SetVertexDeclaration` replace each other in the client's copy: `SetFVF` kept the previous declaration, so `GetVertexDeclaration` returned it while an FVF was in use. The High-precision scene's resolve saves the vertex input and restores "declaration if any, else FVF": on loading screens it put a game shader's declaration (`POSITION` float2) back, and the game drew its fixed-function UI (FVF `0x142`) with it, a black top-right quarter (248 of 249 no-scene frames STALE in the trace). Now `SetFVF` clears the declaration and `SetVertexDeclaration` sets the FVF to 0, under the device lock. d3d9 returns a declaration made for the FVF after `SetFVF`; the client returns none, and restoring the FVF gives the same result. The FVF also moved into the client's state, so a state block captures and applies it with the declaration (before, `Apply` put the declaration back and left the FVF of the last call). Apex 3.1.1 also handles the old client (below) |
+| 0013 | Idle copy fetches: under the bridge, small parts of the picture (a lamp's sprite, pieces of objects or pillars) blinked now and then with the lot left still, and stopped with `freeIdle*Sec = 0`. The fetch of a freed copy now fails the lock when the server sends no whole copy (before, the lock went on and the next `Unlock` uploaded an unfetched copy over the server's); a freed MANAGED level is always fetched (`DISCARD`, which MANAGED ignores, skipped the fetch and left the rest of the copy undefined); a texture fetch is checked by a CRC32C like a buffer's; and only copies of 64 KB and more, which come from `VirtualAlloc`, are freed (a heap copy gives back almost no address space). Which of these caused the blinking is unverified |
+
+### Diagnostics
+
+- Every capture folder (Report, Recording, Light capture, Lighting snapshot, session) also gets the bridge and DXVK
+  logs present in `Game\Bin`: `rtx-remix\logs\bridge32.log`, `rtx-remix\logs\bridge64.log`,
+  `NvRemixBridge_d3d9.log` (the server's DXVK) and `TS3W_d3d9.log` (DXVK in-process). A log over 8 MB keeps its last
+  8 MB. They are copied on a background thread; `About this capture.txt` lists them with their size and last write
+  time (`CopyBridgeLogs`, `features/captures.cpp`).
+- **No-scene frame trace** (`features/no_scene_trace.cpp`): armed with every recording under the bridge (and in the
+  development build). For frames whose back buffer gets fewer than 4 depth-tested draws (loading screens, the save
+  screen), up to 300 per recording, `Recording.txt` ends with a `[no-scene]` section: per frame the state at its start,
+  then each `SetRenderTarget(0)`, `SetViewport`, `StretchRect` or `ColorFill` into the back buffer, back-buffer
+  `Clear` and back-buffer draw with the viewport, scissor, FVF or vertex declaration (with its position element,
+  `POSITIONT` or `POSITION`), shaders and, for `DrawPrimitiveUP` / `DrawIndexedPrimitiveUP`, the first vertex and the
+  x / y / 4th-float range of all vertices. The values are those set through Apex's detours (`D3D9Hooks::Trace`; FVF,
+  declaration and scissor through `ExtraHooks::EnsureTraceHooks`), not the client's `Get*` answers, which can be stale
+  (patch 0011). Each Apex pass that reads the vertex input and viewport back to restore them reports through
+  `NoSceneTrace::Saved`; *STALE* marks a declaration read back although the last call was `SetFVF`, *STALE vp* a
+  viewport read back that differs from the one set last (the restore then puts old state back). Calls from another
+  thread or device are counted per frame, not traced. Reading it: STALE hits with an XYZRHW quad drawn through a
+  `POSITION` declaration point to the stale declaration; STALE vp hits to the stale viewport; clean state with no draw,
+  `Clear` or copy covering the quarter (and no untraced calls) to undefined `DISCARD` content. It changes no call.
+  State blocks, `Reset` and `UpdateSurface` are not followed. Written for the black top-right quarter seen on loading
+  screens under the bridge; it found the stale declaration (patch 0012).
+- **Vertex input restore** (`ExtraHooks::UseVertexInputSetLast`, `framework/d3d9_extra_hooks.cpp`): every Apex pass
+  that saves the vertex input (High-precision scene resolve, light-map smoothing, Picture's depth copy and colour pass,
+  ambient occlusion, depth blur, edge smoothing's depth, FXAA and SMAA passes) restores the FVF set last when `SetFVF`
+  was called after the last `SetVertexDeclaration`, instead of the declaration the client answers. The `SetFVF` /
+  `SetVertexDeclaration` detours note which came last at every call (two relaxed atomic stores); they are installed at
+  the first frame under the bridge (`framework/d3d9_bootstrap.cpp`) and otherwise only with the trace. Under d3d9 and
+  DXVK the restore is the same (the FVF set last). A state block's `Apply` sets the input without the detours seeing
+  it: Apex's own state blocks (RT lamps, ground shade, the menu's ImGui backend) take a mark of what the detours know
+  before their work and give it back after `Apply` (`ExtraHooks::MarkVertexInput` / `RestoreVertexInput`). A game state
+  block that applies a declaration after a `SetFVF` is still not seen, and the restore would put that FVF back (the
+  game is not known to use state blocks; unverified).
 
 ### Game addresses (Steam 1.67.2)
 

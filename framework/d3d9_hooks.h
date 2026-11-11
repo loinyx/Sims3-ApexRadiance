@@ -17,6 +17,7 @@
 //    lock-free dispatch that may still run the removed callbacks (bounded wait, 1 s, logged if it expires). Do not hold a
 //    lock that a draw / state callback takes while unregistering from another thread.
 #include <d3d9.h>
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -207,6 +208,28 @@ struct StateCallCounts {
 StateCallCounts ReadStateCallCounts();
 // Dispatches of the lock-free chains that came from a thread other than the render thread (they took the lock).
 uint32_t OffThreadDispatches();
+
+// ---- diagnostic trace (the no-scene frame trace, features/no_scene_trace.cpp) ----
+// Called with the values passed on towards the driver, whoever set them (the game, other modules, Apex's CallOriginal*),
+// so a trace does not rely on the device's Get* answers. requested / bound = the surface asked for / the one bound after
+// render-target substitution. ExtraHooks adds Clear, StretchRect / ColorFill (copy), DrawPrimitiveUP /
+// DrawIndexedPrimitiveUP (upData: the upVerts vertices used, 0 = count from the primitives), SetFVF,
+// SetVertexDeclaration and SetScissorRect once ExtraHooks::EnsureTraceHooks ran. Any field may be null; the trace never
+// changes a call. One atomic load per call while none is set.
+struct Trace {
+    void (*setRenderTarget)(IDirect3DDevice9*, DWORD index, IDirect3DSurface9* requested, IDirect3DSurface9* bound);
+    void (*setViewport)(IDirect3DDevice9*, const D3DVIEWPORT9*);
+    void (*draw)(IDirect3DDevice9*, const char* kind, D3DPRIMITIVETYPE, UINT prims, const void* upData, UINT upStride, UINT upVerts);
+    void (*copy)(IDirect3DDevice9*, const char* kind, IDirect3DSurface9* dst, const RECT* dstRect);
+    void (*clear)(IDirect3DDevice9*, DWORD count, const D3DRECT* rects, DWORD flags, D3DCOLOR color);
+    void (*setFvf)(IDirect3DDevice9*, DWORD fvf);
+    void (*setDecl)(IDirect3DDevice9*, IDirect3DVertexDeclaration9* decl);
+    void (*setScissor)(IDirect3DDevice9*, const RECT*);
+    void (*present)(IDirect3DDevice9*);
+};
+inline std::atomic<const Trace*> g_trace{nullptr};
+inline const Trace* CurrentTrace() { return g_trace.load(std::memory_order_relaxed); }
+inline void SetTrace(const Trace* trace) { g_trace.store(trace); } // nullptr = off
 
 // Framework (d3d9_bootstrap.cpp): attach the detours to the game's device (render thread, once) / detach (FreeLibrary).
 bool Install(IDirect3DDevice9* device);

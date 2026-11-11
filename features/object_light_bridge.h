@@ -24,6 +24,9 @@ bool RigRefreshPending(); // render thread: refresh request not yet dispatched
 // The room-mode rigs of that room (id 0: room 0) gather again at the next OnPresent: a lamp edit taken without its room's
 // solve (physical GPU room lamps). Any thread.
 void RegatherRigsOfRoom(uintptr_t tracker, int story, int id);
+// Gather thread (LevelLightShare's room gather, once the room's list is final): true, once, when a room-mode rig of that room
+// gathered while the game had emptied its list (state 1, [NoLight] lights); the caller has its rigs gather again
+bool TakeEmptyGatherRoom(const void* room);
 std::string LampColourStatus();
 // The room a room-mode rig gathered its lights for (its last gather; null when not seen). Any thread.
 const void* RigRoom(uintptr_t rig);

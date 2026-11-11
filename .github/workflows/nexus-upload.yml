@@ -1,10 +1,13 @@
-# Publishes each GitHub release to Nexus Mods: the release's ApexRadiance.asi, zipped, becomes a new version of the
+# Publishes each GitHub release to Nexus Mods: the release's ApexRadiance.asi (with ApexRadianceSetup.exe and a
+# "Manual install" folder from 3.1.1 on), zipped, becomes a new version of the
 # existing file on the Nexus mod page (official action Nexus-Mods/upload-action, Nexus upload API v3).
 #
 # One-time setup (repository Settings > Secrets and variables > Actions):
 #   secret   NEXUSMODS_API_KEY  the Nexus API key (Nexus Mods > your account > API keys)
 #   variable NEXUS_FILE_ID      the number of any version of the mod's main file (v1 API / Files tab "Advanced"; e.g. 590)
 #   variable NEXUS_MOD_ID       the number in the mod page URL (e.g. 247); both are turned into v3 ids at run time
+#   variable NEXUS_BRIDGE_FILE_ID  optional: the number of any version of the RTX Remix bridge file on the Nexus page;
+#                                  set, the release's Apex-Radiance-RTX-Remix-bridge.zip becomes its new version too
 # Without them the job is skipped.
 name: Upload to Nexus Mods
 
@@ -36,6 +39,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern ApexRadiance.asi --dir dist
+          # Apex Radiance Setup, when the release has it (3.1.1 on): the zip then holds the installer and a manual-install folder
+          if gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern ApexRadianceSetup.exe --dir setup; then
+            echo "SETUP=1" >> "$GITHUB_ENV"
+          fi
+          # the RTX Remix bridge, when the release has it (a separate file on the Nexus page)
+          if [ -n "${{ vars.NEXUS_BRIDGE_FILE_ID }}" ] &&
+             gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern Apex-Radiance-RTX-Remix-bridge.zip --dir bridge; then
+            echo "BRIDGE=1" >> "$GITHUB_ENV"
+          fi
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > notes.md
           echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
           {
@@ -45,8 +57,14 @@ jobs:
           } >> "$GITHUB_ENV"
           # the file's description on the Nexus page (at most 255 characters): the notes' main headline, where the full
           # list is, how to install; the headline is shortened when it would not fit
-          HEAD=$(grep -m1 '^## ' notes.md | sed -e 's/^## //' -e 's/[*`]//g' || true)
-          TAIL=" Full list: Changelogs tab. Install: copy ApexRadiance.asi into The Sims 3 > Game > Bin."
+          # the bold headline on the notes' first line ("**...**"), else the first section title
+          HEAD=$(grep -m1 '^\*\*.*\*\*$' notes.md | sed -e 's/[*`]//g' || true)
+          [ -n "$HEAD" ] || HEAD=$(grep -m1 '^## ' notes.md | sed -e 's/^## //' -e 's/[*`]//g' || true)
+          if [ -f setup/ApexRadianceSetup.exe ]; then
+            TAIL=" Full list: Changelogs tab. Install: see READ ME.txt in the zip (Setup or by hand). More free memory: the optional RTX Remix bridge file."
+          else
+            TAIL=" Full list: Changelogs tab. Install: copy ApexRadiance.asi into The Sims 3 > Game > Bin. More free memory: the optional RTX Remix bridge file."
+          fi
           START="Apex Radiance ${TAG#v}: "
           ROOM=$(( 255 - ${#START} - ${#TAIL} - 1 ))
           [ ${#HEAD} -le $ROOM ] || HEAD="${HEAD:0:$((ROOM - 3))}..."
@@ -54,8 +72,19 @@ jobs:
 
       - name: Zip
         run: |
-          cd dist
-          zip -9 "../ApexRadiance-$VERSION.zip" ApexRadiance.asi
+          if [ "${SETUP:-}" = 1 ]; then
+            # ApexRadianceSetup.exe and READ ME.txt at the top, the ASI and the steps by hand in "Manual install"
+            # (the texts get the version and Windows line endings, for Notepad)
+            mkdir -p pack/"Manual install"
+            cp setup/ApexRadianceSetup.exe pack/
+            cp dist/ApexRadiance.asi pack/"Manual install"/
+            sed -e "s/{VERSION}/$VERSION/" -e 's/$/\r/' .github/scripts/nexus-readme.txt > pack/"READ ME.txt"
+            sed -e "s/{VERSION}/$VERSION/" -e 's/$/\r/' .github/scripts/manual-install.txt > pack/"Manual install"/"How to install.txt"
+            (cd pack && zip -9 -r "../ApexRadiance-$VERSION.zip" "READ ME.txt" ApexRadianceSetup.exe "Manual install")
+          else
+            cd dist
+            zip -9 "../ApexRadiance-$VERSION.zip" ApexRadiance.asi
+          fi
 
       # The upload API (v3) names the mod and its file by their v3 ids, not by the numbers the site and the v1 API show
       # (mod 247, file 590): look them up from those numbers
@@ -71,6 +100,11 @@ jobs:
           echo "Nexus v3 ids: file $FILE, mod ${MOD:-unknown}"
           echo "V3_FILE_ID=$FILE" >> "$GITHUB_ENV"
           echo "V3_MOD_ID=$MOD" >> "$GITHUB_ENV"
+          if [ "$BRIDGE" = 1 ]; then
+            BFILE=$(api "/games/$GAME/mod-file-versions/${{ vars.NEXUS_BRIDGE_FILE_ID }}" | jq -r '.data.file.id // empty')
+            if [ -z "$BFILE" ]; then echo "::error::Could not find the v3 id of Nexus file ${{ vars.NEXUS_BRIDGE_FILE_ID }}"; exit 1; fi
+            echo "V3_BRIDGE_FILE_ID=$BFILE" >> "$GITHUB_ENV"
+          fi
 
       - name: Upload to Nexus Mods
         uses: Nexus-Mods/upload-action@c96019556046053aa26044b44396cd38929daf23 # v1.0.0-beta.10
@@ -86,3 +120,15 @@ jobs:
           update_mod_version: true
           archive_existing_version: true
 
+      - name: Upload the RTX Remix bridge to Nexus Mods
+        if: ${{ env.BRIDGE == '1' }}
+        uses: Nexus-Mods/upload-action@c96019556046053aa26044b44396cd38929daf23 # v1.0.0-beta.10
+        with:
+          api_key: ${{ secrets.NEXUSMODS_API_KEY }}
+          file_id: ${{ env.V3_BRIDGE_FILE_ID }}
+          mod_id: ${{ env.V3_MOD_ID }}
+          filename: bridge/Apex-Radiance-RTX-Remix-bridge.zip
+          version: ${{ env.VERSION }}
+          display_name: Apex Radiance RTX Remix bridge ${{ env.VERSION }}
+          description: "Optional, gives the game about 600 MB more free memory. Install: close the game, back up any d3d9.dll in Game > Bin, unzip this into Bin keeping the .trex folder. EA app: set TS3.exe in both bridge.conf files. Details in the .txt inside."
+          archive_existing_version: true

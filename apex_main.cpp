@@ -27,6 +27,7 @@
 #include "build_flavor.h"
 #include "conflict_guard.h"
 #include "crash_report.h"
+#include "delegate_sig_fix.h"
 #include "d3d9_bootstrap.h"
 #include "frame_profiler.h"
 #include "game_addresses.h"
@@ -207,6 +208,7 @@ DWORD InitBody() {
         }
         ApexGui::SetStartup(ApexGui::Startup::Running);
         AllocatorTuning::Install(); // allocator_trim / allocator_top_down (the allocator exists by now)
+        DelegateSigFix::Install();  // game fix, always on: zero-parameter script delegates (delegate_sig_fix.h)
         LOG_INFO("[Main] Features started");
         LoadTiming::NoteFeaturesStarted();
         TransitionWatch::Start();
@@ -264,7 +266,9 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID reserved) {
     case DLL_PROCESS_ATTACH: {
         DisableThreadLibraryCalls(module);
         g_module = module;
-        if (!IsGameProcess()) return FALSE; // the launcher and other tools: not loaded at all
+        // the launcher and other tools (the ASI loader loads us into Sims3Launcher.exe too): stay loaded and idle. FALSE would
+        // unload the DLL at once, and its CRT teardown then crashes freeing thread_local maps (WER dumps on every EA launch)
+        if (!IsGameProcess()) return TRUE;
         if (!ModuleLifetime::Pin(module)) {
             OutputDebugStringA("[" APEX_PRODUCT_NAME "] Could not retain the module for process lifetime; no hooks or workers started\n");
             return FALSE;

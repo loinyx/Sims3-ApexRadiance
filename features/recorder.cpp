@@ -40,6 +40,7 @@
 #include "post_scene.h"
 #include "capture_video.h"
 #include "capture_burst.h"
+#include "no_scene_trace.h"
 #include "lot_lighting_motion.h"
 #include "patch_base.h"
 #include <windows.h>
@@ -146,6 +147,7 @@ void SceneHook(bool on) {
 void ReleaseBuffers() {
     OutdoorDelta::SceneEnd({}); // (a cancelled recording drops its scene; after a save it was already moved: nothing left)
     CaptureVideo::End({});      // (the same for its video)
+    NoSceneTrace::End();        // (and its no-scene frame trace)
     SceneHook(false);
     if (!DevSwitches::ReleaseDebugBuffers() || g_on) return;
     using namespace ApexMemory::Est;
@@ -653,6 +655,7 @@ void Start() {
     g_counts.clear();
     g_settleAt = 0;
     SceneHook(true);
+    NoSceneTrace::Begin();
     PostScene::TakeRan();
     g_startTick = GetTickCount();
     g_lastRan = g_startTick;
@@ -689,6 +692,7 @@ void Start() {
 
 void Stop() {
     g_on = false;
+    const std::string noScene = NoSceneTrace::End();
     const std::string wallSeams = LevelLightShare::EndSeamRecording(true);
     const DWORD end = GetTickCount();
     Status(end);
@@ -776,6 +780,7 @@ void Stop() {
         if (g_notes >= kMaxNotes) out << std::format("(the furniture and probe lines stopped after {} lines)\n\n", kMaxNotes);
         if (g_roomNotes >= kMaxRoomNotes) out << std::format("(the [room] lines stopped after {} lines)\n\n", kMaxRoomNotes);
         for (const auto& [clock, text] : all) out << clock << ' ' << text << '\n';
+        if (!noScene.empty()) out << '\n' << noScene;
         out << "\n==== ApexRadiance.toml at the start of the recording ====\n" << g_settingsAtStart << '\n';
     }
     Captures::WriteText(folder / L"Recording.txt", out.str());

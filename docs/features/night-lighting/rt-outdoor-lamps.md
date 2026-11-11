@@ -78,7 +78,13 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    the same frame, so the seam between stories never shows two lamp positions, and the floors follow. When a lamp stays
    put between steps, the render thread updates the under-floor share from the changed lamps only (`UnderDelta`), four
    texels at a time (`RtLampModel::BakeStamp4`, SSE: `BakeStamp`'s single-precision operations in the same order, so each
-   lane equals it bit for bit, and each texel's sums take the lamps in the same order).
+   lane equals it bit for bit, and each texel's sums take the lamps in the same order). When the bake's signature changes
+   with no lamp dragged, a map already shown also keeps its last copy and takes the worker's share (the same `FullUnder`
+   sums), for up to 500 ms before the render thread computes it itself. A lot with more lamps
+   than one GPU batch computes each masked texel's lamp sum on the CPU; those sums are kept per map and computed again
+   only when a lamp's law or multiplier, or the threshold, changes or the map is rebuilt, and the mask buffer is
+   rewritten only then, so a relight does not stall the render thread
+   ([history](../../history/night-lighting-level-light-share.md#2026-11-10-render-thread-stalls-on-a-big-lots-relights)).
    A map the game writes again and again (its room solves, for instance while a lot stays loading) is relit for those
    writes at most every 0.5 s; a single write after a rest is relit at once (since 2.15.1; an F8 session: 105 writes in 10 s,
    each relight 45 ms of floor mask with 28 lamps, logged as "relights for repeated game writes moved later").
@@ -110,7 +116,11 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    (`OutdoorDelta::PinRooms`, 160 MB ceiling; their drawn lamps' parts kept as one sum per texel, the base this part reads).
    Past the ceiling a new solve of one is not kept and that story is no longer sent to its solve, so the stories do not
    evict one another in a loop ([outdoor-lamp-delta](outdoor-lamp-delta.md#limitations)). A story with no kept solve is sent
-   to its solve at most three times in a row.
+   to its solve at most three times in a row, then once a minute. A room 0 that came back from its solve dropped as *too
+   large to keep* is not sent again: it stays too large at every solve, and a lot photographed for its New Game picture waits
+   for every solve, so the loading screen would never end. Its maps stay the game's.
+   A room whose kept solve the memory budget evicts at once keeps its count of sends; the count starts again only after
+   the room has held a kept solve for 10 s, so a neighbour lot's room 0 is not sent to its solve in a loop.
 10. **The lots next to it.** The active lot's lamp posts (type 11) are drawn on the room-0 maps of the four nearest lots
    whose box comes within 20 m of the active lot's, the way the active lot's own maps are relit, with the active lot's
    occluders. Those lots' gathers leave the posts out ([level light share](level-light-share.md#lamp-posts-of-other-lots)),
@@ -214,6 +224,11 @@ handled, the shadow tiles rendered and the last relight times, or why the featur
   the copy built into the ASI ([shader precompile](../../architecture.md#44-shader-precompile)). The first frame the
   option runs, a worker takes the 13 bytecodes with `ShaderCache::Bytecode`; until they are ready the status says the
   shaders are being compiled, and a shader that failed to compile leaves the option inactive with the compiler's message.
+- **Room bases and UV maps**: the two textures each relit map reads from (the room base and the UV map) are DEFAULT
+  textures filled through a SYSTEMMEM texture that is released at once; they are released at a device reset and filled
+  again from their sources on use. As MANAGED textures they kept a full copy in the game's 32-bit address space, and
+  under the [RTX Remix bridge](../rtx-remix-bridge.md) that copy was freed after 2 s idle and fetched back, a wait, at
+  the next lock. The pixels are the same.
 - **Outdoor scale**: `Slot::scale` (DEFAULT render target, made with the copy, released with it and at a device reset),
   `Slot::scaled` (the last relight wrote it); `Engine::Compose(..., scale)` clears it to 0, binds it as target 1 for the
   texels' draw (`ComposePS` COLOR1) and, for a blurred atlas, binds scratch 3 there and copies it into `scale` before
@@ -228,3 +243,4 @@ handled, the shadow tiles rendered and the last relight times, or why the featur
 
 - [Quick outdoor lamp edits](outdoor-lamp-delta.md), [Level light share](level-light-share.md)
 - [engine/room-light-maps.md](../../engine/room-light-maps.md)
+- [History](../../history/night-lighting-level-light-share.md) (room-0 sends and relight stalls)

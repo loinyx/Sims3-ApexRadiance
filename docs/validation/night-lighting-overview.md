@@ -61,6 +61,12 @@ Sub-part results are on their own validation pages.
 
 ## Open checks
 
+- Smooth indoor light learns a new room light map on the frame after a miss (3.1.1, not yet tested in game): enter the
+  atrium lot of the 11-40-32 recording with the camera held still. **Expected:** each short path B gap of an object part
+  between two path A lines (07.5, 14.8 and 15.2 s, 30 ms to 0.3 s before) lasts at most 2 frames (path A back within
+  about 35 ms; the missing draw itself still logs one path B line, so measure the gap length, not the line count); the final frame matches a capture taken before the change within 1/255; frame time unchanged on a lot without
+  directional maps.
+
 - 2.15.3, in game: moonlight 0 by default (the night lit only by the lamps and the sky's glow) on a lot with few lamps; frame times at night against 2.15.2 on the same save with the paced room solving and the draw memos.
 - Draw cost by fix (`6592518`), development build at night on a busy lot: the `[LotLightBridge] Draw cost by fix ...`
   line every 10 s, its rows plausible against the Frame Profiler's *D3D hooks (mod)* and *Re-issued draw (driver)*.

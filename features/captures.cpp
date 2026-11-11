@@ -185,6 +185,50 @@ bool CopyIfThere(const std::filesystem::path& from, const std::filesystem::path&
     return !ec;
 }
 
+// The RTX Remix bridge's and DXVK's logs beside TS3W.exe (docs/features/rtx-remix-bridge.md), the ones present: the
+// last 8 MB of each, copied on a background thread (they can be large and the bridge keeps writing them). Returns the
+// lines for the about file ("" when there is none).
+std::string CopyBridgeLogs(const std::filesystem::path& folder) {
+    constexpr uint64_t kTail = 8ull << 20;
+    wchar_t exe[MAX_PATH]{};
+    if (!GetModuleFileNameW(nullptr, exe, MAX_PATH)) return "";
+    const std::filesystem::path bin = std::filesystem::path(exe).parent_path();
+    const wchar_t* logs[] = {L"rtx-remix\\logs\\bridge32.log", L"rtx-remix\\logs\\bridge64.log", L"NvRemixBridge_d3d9.log", L"TS3W_d3d9.log"};
+    std::vector<std::pair<std::filesystem::path, std::filesystem::path>> jobs;
+    std::string lines;
+    for (const wchar_t* rel : logs) {
+        const std::filesystem::path from = bin / rel;
+        WIN32_FILE_ATTRIBUTE_DATA a{};
+        if (!GetFileAttributesExW(from.c_str(), GetFileExInfoStandard, &a) || (a.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        const uint64_t size = (static_cast<uint64_t>(a.nFileSizeHigh) << 32) | a.nFileSizeLow;
+        FILETIME local{};
+        SYSTEMTIME t{};
+        FileTimeToLocalFileTime(&a.ftLastWriteTime, &local);
+        FileTimeToSystemTime(&local, &t);
+        lines += std::format("- {} ({:.1f} MB{}, last written {:04}-{:02}-{:02} {:02}:{:02}:{:02})\n", ApexUtil::ToUtf8(rel), size / 1048576.0,
+                             size > kTail ? ", its last 8 MB" : "", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
+        jobs.emplace_back(from, folder / from.filename());
+    }
+    if (jobs.empty()) return "";
+    HookGuard::StartDetached("Captures: copy the RTX Remix bridge logs", [jobs] {
+        for (const auto& [from, to] : jobs) {
+            // shared: the bridge and DXVK still have them open for writing
+            HANDLE in = CreateFileW(from.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+            if (in == INVALID_HANDLE_VALUE) continue;
+            LARGE_INTEGER size{}, start{};
+            if (GetFileSizeEx(in, &size) && static_cast<uint64_t>(size.QuadPart) > kTail) start.QuadPart = size.QuadPart - static_cast<LONGLONG>(kTail);
+            SetFilePointerEx(in, start, nullptr, FILE_BEGIN);
+            std::ofstream out(to, std::ios::binary | std::ios::trunc);
+            std::vector<char> buf(1 << 20);
+            DWORD got = 0;
+            while (out && ReadFile(in, buf.data(), static_cast<DWORD>(buf.size()), &got, nullptr) && got) out.write(buf.data(), got);
+            CloseHandle(in);
+            if (!out) LOG_WARNING("[Captures] Could not copy " + ApexUtil::ToUtf8(from.filename().wstring()));
+        }
+    });
+    return "\nRTX Remix bridge and DXVK logs found beside the game (copied here; a large one keeps its last 8 MB):\n" + lines;
+}
+
 uint64_t FolderSize(const std::filesystem::path& path) {
     namespace fs = std::filesystem;
     uint64_t bytes = 0;
@@ -517,6 +561,7 @@ void EndSession() {
     const bool logOk = CopyIfThere(Dir() / L"ApexRadiance_LOG.txt", s / L"ApexRadiance_LOG.txt");
     const bool configOk = CopyIfThere(Dir() / L"ApexRadiance.toml", s / L"ApexRadiance.toml");
     const bool crashOk = RecentCrash().empty() || CopyIfThere(Dir() / L"ApexRadiance_Crash.txt", s / L"ApexRadiance_Crash.txt");
+    const std::string bridgeLogs = CopyBridgeLogs(s);
     std::ostringstream about;
     {
         about << std::format("{} {} - a capture session with {} captures, on {}.\n\n", APEX_PRODUCT_NAME, APEX_VERSION_STRING, items.size(), GetGameVersionName());
@@ -526,6 +571,7 @@ void EndSession() {
                  "in the Bugs tab of Apex Radiance on Nexus Mods, or to an issue on GitHub (github.com/loinyx/Sims3-ApexRadiance/issues). Say in a few "
                  "words what you saw and what you did just before.\n";
     }
+    about << bridgeLogs;
     WriteText(s / L"About this session.txt", about.str());
     const auto existingNote = ReadDescription(ApexUtil::ToUtf8(s.filename().wstring()));
     if (!existingNote.Complete()) {
@@ -680,6 +726,7 @@ void Finish(const std::filesystem::path& folder, const std::string& what, Captur
     const bool logOk = CopyIfThere(Dir() / L"ApexRadiance_LOG.txt", folder / L"ApexRadiance_LOG.txt");
     const bool configOk = CopyIfThere(Dir() / L"ApexRadiance.toml", folder / L"ApexRadiance.toml");
     const bool crashOk = RecentCrash().empty() || CopyIfThere(Dir() / L"ApexRadiance_Crash.txt", folder / L"ApexRadiance_Crash.txt");
+    const std::string bridgeLogs = CopyBridgeLogs(folder);
     SYSTEMTIME t;
     GetLocalTime(&t);
     std::ostringstream about;
@@ -692,6 +739,7 @@ void Finish(const std::filesystem::path& folder, const std::string& what, Captur
     if (texturesPending)
         about << "\nThe texture images (T<n>_*.png, lossless) are still being written in the background when this note is saved; wait for the "
                  "\"saved\" note in the game before zipping the folder.\n";
+    about << bridgeLogs;
     WriteText(folder / L"About this capture.txt", about.str());
     if (!description.empty() || !title.empty()) WriteText(folder / L"User notes.txt", DescriptionText(title, description));
     // A failed text write is recoverable without measuring or recording the problem again.

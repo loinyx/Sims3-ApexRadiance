@@ -23,4 +23,4 @@ The bridge writes its logs to rtx-remix\logs (bridge32.log, bridge64.log). Attac
 to any bug report.
 
 Licences
-RTX Remix bridge (MIT), Microsoft Detours (MIT) and DXVK (zlib): see the licenses folder.
+RTX Remix bridge (MIT), Microsoft Detours (MIT) and DXVK (zlib): their texts follow below.

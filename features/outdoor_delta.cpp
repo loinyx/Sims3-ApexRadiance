@@ -2584,6 +2584,22 @@ struct LiveTable {
     int header = -1;
 };
 std::unordered_map<uint64_t, LiveTable> g_live; // (render thread) by KeyOf
+// (live_object_tables) when a kept room's live table last changed, and when that run of changes began (gaps under kLiveRunGapMs join
+// a run): an object dragged in a room the GPU draws holds its solve as a dragged lamp does (DragLite::HoldGpuDrawn)
+struct LiveRun {
+    DWORD first = 0, last = 0;
+};
+constexpr DWORD kLiveRunGapMs = 750;
+std::mutex g_liveRunMx;
+std::unordered_map<const void*, LiveRun> g_liveRuns; // (under g_liveRunMx) by room
+void NoteLiveMove(const void* room) {
+    const DWORD now = GetTickCount();
+    std::lock_guard<std::mutex> lk(g_liveRunMx);
+    if (g_liveRuns.size() > 512) g_liveRuns.clear();
+    LiveRun& r = g_liveRuns[room];
+    if (!r.last || now - r.last >= kLiveRunGapMs) r.first = now;
+    r.last = now;
+}
 // ObjectLegs::Gen at most every kLiveMs (0: nothing to read); a line a second of what moved it, for the capture that decides on the carry
 uint32_t LiveGen() {
     static uint32_t s_seen = 0, s_logHook = 0;
@@ -3000,6 +3016,7 @@ void KeptFinalCheck(const KeptRoom& k, const std::vector<float>& sum, const LARG
                 if (b.above) std::copy_n(k.preblur.begin() + b.ghostOff, static_cast<size_t>(w) * 2, ext.begin());
                 std::copy(blk.begin(), blk.end(), ext.begin() + static_cast<size_t>(top) * w);
                 if (b.below) std::copy_n(k.preblur.begin() + b.ghostOff + static_cast<size_t>(w) * 2, static_cast<size_t>(w) * 2, ext.begin() + static_cast<size_t>(top + rows) * w);
+                FollowGhosts(ext.data(), &k.preblur[b.off], w, rows, b.above, b.below);
                 BlurBlock(ext.data(), blk.data(), w, rows, b.above, b.below, k.passes);
                 for (int y = 0; y < rows; y++)
                     for (int x = 0; x < w; x++)
@@ -3627,8 +3644,28 @@ bool AtLockStep(unsigned char* room, bool gather) {
         if (!why && LevelLightShare::LotGeometryKey(room) != r.geo) why = "walls, floors or openings changed";
         if (!why) {
             const Delta d = ComputeDelta(room, rr, r, why, plan);
-            if (d == Delta::NoChange) why = "no light of its list changed";
-            else if (d == Delta::Ok) done = ApplyDelta(room, r, plan, why);
+            if (d == Delta::NoChange) {
+                why = "no light of its list changed";
+                // (10/11) its kept solve written back instead of the game's full solve: a camera pan to the next lot and back makes
+                // the game free and recreate this story's maps filled with 0 and solve room 0 again with nothing changed (8 such
+                // solves of about 3.5 s in a recording). Every kept texel is written in the solve's order (the last write of a texel
+                // two samples share stays), the class-2 walls through their blocks' blur as a delta does; a wall block that cannot
+                // be blurred again leaves the full solve. The record and its version are left as they are
+                Plan rp;
+                rp.dirtyBlock.assign(r.blocks.size(), 0);
+                bool ok = true;
+                for (size_t i = 0; i < r.texels.size() && ok; i++) {
+                    const TexelRec& t = r.texels[i];
+                    if (t.map == 0 && r.cls == 2) {
+                        if (r.passes <= 0 || t.block >= r.blocks.size() || !r.blocks[t.block].ok) ok = false;
+                        else rp.dirtyBlock[t.block] = 1;
+                    } else
+                        rp.writes.emplace_back(static_cast<uint32_t>(i), t.packed);
+                    rp.texels++;
+                }
+                if (!ok) why = "no light of its list changed; a wall block cannot be blurred again";
+                else if ((done = ApplyDelta(room, r, rp, why))) plan = std::move(rp), why = nullptr;
+            } else if (d == Delta::Ok) done = ApplyDelta(room, r, plan, why);
         }
         if (done) UpdateBytes(r);
     }
@@ -5207,6 +5244,7 @@ struct PhysBasisJob {
     uint32_t gen = 0;
     float radius = 0.0f;
     double workerMs = 0.0, partMs = 0.0; // (partMs: the moved lamps' parts on the light tree thread)
+    size_t basisRooms = 0;               // the physical kept rooms with directional maps the edits were tested against
     std::map<uint64_t, std::pair<long, long>> wroteNow; // the rooms written as the job started (no lamp of theirs needs the worker)
     std::map<uint64_t, const char*> failedNow;
     DWORD doneTick = 0;
@@ -5439,6 +5477,7 @@ void StartPhysBasis(std::map<uintptr_t, BasisEdit>&& edits) {
     for (const auto& [key, kp] : kept) {
         const KeptRoom& k = *kp;
         if (k.basisWhy == kNoBasis) continue;
+        job->basisRooms++;
         PhysBasisRoom r;
         r.ref = BasisRoomRef{key, k.story, k.id}, r.k = kp, r.redo = redo.count(key) > 0;
         const size_t n = k.basis.size();
@@ -5701,6 +5740,8 @@ void LogPhysBasis(const PhysBasisJob& job, const std::map<uint64_t, std::pair<lo
     const std::string worker = std::format("; {:.2f} ms of lamps' parts, {} rooms written at once", job.partMs, job.wroteNow.size()) +
                                (job.rooms.empty() ? std::string()
                                                   : std::format("; {} lamps' shares in {} rooms in {:.1f} ms on a worker ({} of {} samples traced, the others kept)", lamps, job.rooms.size(), job.workerMs, traced, lit));
+    int unmet = 0; // (edits whose lamp lit no kept room's directional samples: no write, and no line of their own)
+    const char* unmetKind = "";
     for (const auto& [light, e] : job.edits) {
         int done = 0;
         long w = 0, l = 0;
@@ -5710,12 +5751,17 @@ void LogPhysBasis(const PhysBasisJob& job, const std::map<uint64_t, std::pair<lo
             else if (const auto fw = failed.find(r.key); fw != failed.end())
                 why += std::format("{}story {} room {}: {}", why.empty() ? "" : ", ", r.story, r.id, fw->second);
         }
-        if (e.rooms.empty()) continue;
+        if (e.rooms.empty()) {
+            unmet++, unmetKind = e.kind;
+            continue;
+        }
         LOG_INFO(std::format("[GpuRoomLamps] physical {}: lamp {:08X} directional maps written in {} of {} rooms {:.1f} ms after the edit ({} texels{}{}){}", e.kind, light,
                              done, e.rooms.size(), 1000.0 * static_cast<double>(t1.QuadPart - e.at.QuadPart) / static_cast<double>(f.QuadPart), w,
                              l ? std::format(", {} left as another solve wrote them", l) : std::string(), worker,
                              why.empty() ? std::string() : std::format("; not written: {} (they follow its rooms' solves)", why)));
     }
+    if (unmet)
+        LOG_INFO(std::format("[GpuRoomLamps] physical {}: {} lamp edits reach no directional sample of the {} kept rooms with directional maps: none written", unmetKind, unmet, job.basisRooms));
     if (redo)
         LOG_INFO(std::format("[GpuRoomLamps] physical: directional maps written again in {} of {} rooms after their kept solve{}", redone, redo, worker));
 }
@@ -6410,6 +6456,12 @@ void SettleDue() {
     }
 }
 void LiveFrame() { g_liveStep = ObjectLegs::Gen(); }
+bool LiveMovedWithin(const void* room, unsigned long ms, unsigned long maxRun) {
+    const DWORD now = GetTickCount();
+    std::lock_guard<std::mutex> lk(g_liveRunMx);
+    const auto it = g_liveRuns.find(room);
+    return it != g_liveRuns.end() && now - it->second.last < ms && now - it->second.first < maxRun;
+}
 void KeptRooms(uintptr_t mgr, int cls, std::vector<KeptRef>& out) {
     out.clear();
     const uint32_t gen = LiveGen(), step = g_liveStep;
@@ -6442,6 +6494,8 @@ void KeptRooms(uintptr_t mgr, int cls, std::vector<KeptRef>& out) {
             now = 0; // (no memory: its solve's table)
         }
         if (!now) l.blk.reset(), l.header = -1;
+        // (room 0's table waits for its solve: holding its solve would keep the old shadow for the whole drag)
+        if (now != was && k->id != 0) NoteLiveMove(reinterpret_cast<const void*>(k->room));
         l.version = k->version, l.gen = gen, l.step = step, l.key = now;
         for (KeptRef& r : out)
             if (r.room == reinterpret_cast<const void*>(k->room)) r.live = now;
@@ -6449,6 +6503,16 @@ void KeptRooms(uintptr_t mgr, int cls, std::vector<KeptRef>& out) {
 }
 // What the GPU draws of map m of a kept room (render thread; the kept room is never changed once kept, so it is read without
 // the lock): rt_lamp_gpu.h KeptMapData
+bool KeptAt(uint64_t lot, int story, int id, int cls, KeptRef& out) {
+    std::lock_guard<std::mutex> lk(g_keptMx);
+    for (const auto& [key, k] : g_kept)
+        if (k->lot == lot && k->story == story && k->id == id && k->cls == cls && !k->tailWhy && k->tail.size() == k->texels.size()) {
+            out = KeptRef{reinterpret_cast<const void*>(k->room), k->id, k->version};
+            if (const auto l = g_live.find(key); l != g_live.end() && l->second.version == k->version) out.live = l->second.key;
+            return true;
+        }
+    return false;
+}
 bool KeptBlockers(const void* room, int cls, uint32_t version, std::shared_ptr<const RtLampGpu::BlockerTable>& t, int& header) {
     std::lock_guard<std::mutex> lk(g_keptMx);
     const auto it = g_kept.find(KeyOf(room, cls));
@@ -6910,6 +6974,19 @@ void NoteNightLevel(float level) {
 void InvalidateAll(const char* why) {
     (void)why;
     g_gen.fetch_add(1, std::memory_order_relaxed);
+}
+int ForgetLot(const uintptr_t* mgrs, int n) {
+    std::lock_guard<std::recursive_mutex> lk(g_mx);
+    int gone = 0;
+    for (auto it = g_records.begin(); it != g_records.end();)
+        if (std::find(mgrs, mgrs + n, it->second->mgr) != mgrs + n) {
+            g_bytes.fetch_sub(std::min(g_bytes.load(), it->second->bytes));
+            it = g_records.erase(it);
+            ++gone;
+        } else
+            ++it;
+    c_records.store(static_cast<long>(g_records.size()));
+    return gone;
 }
 
 std::string LastDrop(int story, int cls) {

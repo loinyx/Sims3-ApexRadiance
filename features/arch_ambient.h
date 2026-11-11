@@ -8,6 +8,7 @@
 // kReach metres in: on the line both sides show the higher of the two ambients (no step), and no room ever gets darker.
 #include <algorithm>
 #include <cmath>
+#include <climits>
 #include <cstdint>
 
 namespace ArchAmbient {
@@ -101,6 +102,21 @@ template <typename CubeFn> void TakeCube(CubePick& p, std::uintptr_t room, float
         std::fill(flags, flags + n, 0.0f);
         flags[n] = 1.0f, p = CubePick{room, sum, tex};
     }
+}
+
+// The probe proxy an atrium room draws its reflection with (LevelLightShare ProbeBindHook): its own once its probe is ready,
+// else the ready member of the nearest other story (the one across the floor line; a group can hold several rooms of one story
+// under one upper room), a member of its own story only when no other story has one, else its own (the game's default reflection).
+// gaps[k]: |story of others[k] - own story|
+template <typename ReadyFn> std::uintptr_t AtriumProbe(std::uintptr_t own, const std::uintptr_t* others, const int* gaps, int n, ReadyFn ready) {
+    if (ready(own)) return own;
+    std::uintptr_t best = own;
+    int bestRank = INT_MAX;
+    for (int k = 0; k < n; k++) {
+        const int rank = gaps[k] > 0 ? gaps[k] : INT_MAX - 1;
+        if (rank < bestRank && others[k] && ready(others[k])) best = others[k], bestRank = rank;
+    }
+    return best;
 }
 
 // Which rooms whose ambient matches a floor draw's give their arches (LevelLightShare::ArchAmbientConsts). The arch rows hold

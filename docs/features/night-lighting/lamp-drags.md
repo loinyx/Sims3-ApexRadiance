@@ -80,7 +80,8 @@ itself at 31 ms (two frames) it is not needed, and it would add a change of its 
   hold shows the own rooms in the frame after their solve ends (the 300 ms grace is 0; still at least 150 ms after the
   latest edit). Any hold that ends (not at the cap) keeps the maps of a room whose solve has not ended since its mark until
   it has (at most 8 s; "trailing"), and keeps the maps that room's solve locks later the same way: a solve thrown away by
-  an invalidate (the game unlocks its maps half written) or one begun before the mark is never shown.
+  an invalidate (the game unlocks its maps half written) or one begun before the mark is never shown. A room that has
+  never ended a solve is never held or trailed: its maps were never written, and keeping them showed black.
 - **The furniture with its room** (Tester switch *Furniture changes with its room*, `furniture_with_room`, on): every lamp
   edit, not only a switch, holds the furniture's rig lights until its room's maps show the edit
   (`AtriumHold::RoomShowsOldLight`). Before, the snapshot of the lights had to be older than the latest switch, so a move

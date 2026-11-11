@@ -60,7 +60,10 @@ the lamp's own story too; moves and value edits then showed the stories one at a
 
 - Every player edit starts or extends a hold (`LampMarkFilter::EditLastTick` / `EditSerial`): a switch, a value change,
   a move or drag step, a lamp moved into another story, and a lamp added or removed (`LevelLightShare::AfterChangedWalk`,
-  `NoteEdit`; not while the loaded lots settle after a load, never at dusk or dawn). The hold is on in the very frame of
+  `NoteEdit`; not while the loaded lots settle after a load, never at dusk or dawn). Entering a lot is no edit: its
+  rebuilt stories give each lamp a new tree level with the same story number, which is no move (`LampMarkFilter`,
+  status *rebuilt lamps not taken as moves*), and a room whose lamps are seen for the first time is still sent at once
+  but starts no hold (status *first sights not taken as edits*). The hold is on in the very frame of
   the edit, before the next Present. The quick pass is off (`QuickPassRoom`); the drain gives the edit's rooms 16 ms a
   frame (6 ms while a lamp is dragged).
 - **The lamp's own story is never held** (`LevelLightShare::OnEditStory`: the story of an edited lamp's own room, tier 0,
@@ -79,9 +82,16 @@ the lamp's own story too; moves and value edits then showed the stories one at a
   4 s after the first (`RoomAmbientPolicy::EditHoldOutcome`). A drag is never released while it goes on: its other
   stories keep their maps from before it, and its hold ends after it is let go (one hold per settled drag; 2.5 s after
   the release at most; 30 s in all). If the 192 maps or 96 MB are reached, everything held is released at once ("cap").
+- **A room that has never ended a solve is never held** (`LevelLightShare::RoomNeverSolved`: "shown" class `+0x100` is
+  still 4, which only the end of a solve changes, `0x0069EA70`). Its maps were never written (RGBA 0, black), so there is
+  nothing on screen to keep, and holding them showed a black story for up to 8 s after entering a lot (the lamps
+  switching on at entry count as an edit). Such a room's edit wait also ends at its first solve, class 0 included, instead
+  of waiting for its next class (`RoomAmbientPolicy::EditRoomStillWaiting`), so its furniture shows with it. The wait
+  ends when that first solve ends, even one begun before a later mark, and a re-mark keeps the room's "blank" flag. Rooms that
+  already showed light keep the rules above.
 - The lamp object itself (its lit model) is the game's and changes at once.
 - Log, one line per hold: `[AtriumHold] Lamp edit: own story shown N ms, others released together M ms (K maps, B MB;
-  complete|timeout|cap)`. Recordings note `[switch] lamp edit shown all at once, N ms ...`. The status line counts holds,
+  complete|timeout|cap)`, plus "N never-lit maps not held" when the rule above skipped maps. Recordings note `[switch] lamp edit shown all at once, N ms ...`. The status line counts holds,
   timeouts, cap releases and the most maps one hold kept.
 - It needs both solve hooks (the end `0x006A3E65`, Steam 1.67.2 only, and the lock step), which
   `LevelLightShare::InstallIndoor` installs with Night Lights' *Outdoor light between floors*
@@ -127,8 +137,10 @@ one change for every floor, shown once it is final, is the intended result.
   mark (`RoomAmbientPolicy::UrgencyKept`); the "settled" log line ends with `ended: complete` or `ended: urgency expired`.
 - A move's safety net comes 200 ms after it (was 300 ms), the drag's quiet time.
 - An edit's room on another lot than the one being played (a lamp the game disables or enables there, a Sim's switch, a
-  neighbour's dusk) keeps an urgency of at most 1000: after the played lot's camera story (x4000) and the stories below
-  it (x2000), before every other room. Its urgency on any lot had every room of the played lot wait behind it. The
+  neighbour's dusk) keeps an urgency of at most 10 (`kOffLotUrgency`): class 0 has 100 times the game's priority of
+  class 2, so at 1000 a neighbour's class-0 edit room still went before the played lot's class-2 rooms on the camera's
+  story (x4000) and below it (x2000), which showed their quick pass for up to 49.6 s after a lot entry. Its urgency on
+  any lot had every room of the played lot wait behind it. The
   played lot's own edits keep their whole urgency. The status line counts these as "edit priorities of other lots kept
   below the played lot's".
 - A lamp edit is pending (`LevelLightShare::LampEditPending`: the drain's edit pacing, the edit hold, the drag settle)
@@ -199,8 +211,13 @@ and feeds this queue.
 - **Lot entry.** The settle window (`LevelLightShare::SettlingAfterLoad`: 15 s after the world goes live) also opens for
   10 s when another lot becomes the high-quality lot, the camera entering it or coming back
   (`[LevelLightShare] Lot <tracker> entered`): the extra solves take the settle budget instead of 4 ms (1 ms while the
-  camera moves), and the played lot keeps the game's budget while the camera moves. Lamps the lot adds or removes then are
-  not lamp edits, as after a load.
+  camera moves), and the played lot keeps the game's budget while the camera moves. Past those 10 s the window stays
+  open, up to 30 s after the entry, while a room of the played lot on or below the camera's story still waits for its
+  solve (`RoomLightQueue::PlayedRoomWaitingAt`, seen by the priority hook within the last second): a camera pan to the
+  next lot and back otherwise left 6 rooms waiting at the steady pace, about 110 ms of solving a second instead of 460.
+  Lamps the lot adds or removes then are not lamp edits, as after a load, and a lamp added or removed counts as an edit
+  only once the lot has been the played lot for 2 s, a grace that starts again at every entry (a camera back on the
+  played lot re-adds the lamps its level of detail dropped) ([level-light-share.md](../night-lighting/level-light-share.md#part-2-refresh-cascade)).
 
 ## Compatibility and interactions
 
@@ -278,9 +295,16 @@ In [`features/level_light_share.cpp`](../../../features/level_light_share.cpp):
   relight asked while the story share is off runs at once.
 - Whole-world relights asked in a burst run once, 250 ms after the last ask; the settle requeue is armed once per lot
   state.
+- A lot's loading triggers of its rooms near openings are sent once per burst (600 ms quiet, at most 1.5 s), skipping
+  rooms gathered after the latest trigger; the settle skips rooms gathered after the round ended
+  ([level-light-share.md](../night-lighting/level-light-share.md), Lot state). New Game waits for each household lot's
+  rooms before its capture, so these resends added to its time on every lot (not measured).
 - The per-point hooks return at once for a light the game is about to drop (colour sum under room+0x63C, the game's own
   sums in the same order).
 - Night Lighting does not relight every lot 3 s after a world loads at night (the game has just solved them).
+- New Game's lot pictures: a lot the game lights only for its picture skips light sharing and Apex's sends, and its
+  per-room state is cleared when the picture is taken ([level-light-share.md](../night-lighting/level-light-share.md), Fast lot
+  pictures; `fastLotPictures`).
 
 ### Measuring who sends rooms to the solve
 

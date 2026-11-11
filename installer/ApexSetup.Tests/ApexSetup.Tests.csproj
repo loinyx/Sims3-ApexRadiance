@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Setup's language tables (no WinUI in them), checked below Program.cs's engine tests -->
+    <Compile Include="..\ApexSetup\Languages.cs;..\ApexSetup\Strings.*.cs" />
+    <ProjectReference Include="..\ApexSetup.Core\ApexSetup.Core.csproj" />
+  </ItemGroup>
+</Project>

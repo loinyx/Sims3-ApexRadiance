@@ -73,6 +73,7 @@ struct Entry {
     uint64_t liveKey = 0; // (KeptRef::live as its blkOwn holds it)
     DWORD retryAt = 0;    // (not ok, RetryLater) made again from its kept solve at this tick (0: never, nothing of it to draw)
     bool crossHead = false;
+    std::vector<std::pair<int, int>> homes; // (story, room) of other stories joined to its table: row 2 + i (DrawnTable)
     float paneFirst = 0.0f, paneCount = 0.0f;
     // (the arches it holds as of archGen; room_bounce: their rows now)
     uint32_t archGen = 0;
@@ -154,6 +155,10 @@ bool LogAllowed() { return g_lines.fetch_add(1, std::memory_order_relaxed) < 200
 // (S8) a room's ambient now (+0x110, which Rooms at Night moves and a lamp edit taken takes again: OutdoorDelta's AmbientDue)
 bool ReadAmbient(const void* room, float* c) {
     __try {
+        // only a solved room (state +0xF0 4 or 5): +0x110 changes only in the ambient step (state 3); in states 1 and 2 it may
+        // hold an interim value (Rooms at Night's seed or a retake), which AmbScale must not follow; the previous scale stays
+        const int state = *reinterpret_cast<const int*>(static_cast<const BYTE*>(room) + 0xF0);
+        if (state != 4 && state != 5) return false;
         std::memcpy(c, static_cast<const BYTE*>(room) + 0x110, 3 * sizeof(float));
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -396,27 +401,55 @@ void DrawnTable(Entry& e, const void* room, int cls) {
             rooms.push_back(&*r);
             Mix(key, &r->room, sizeof r->room), Mix(key, &r->version, sizeof r->version), Mix(key, &r->live, sizeof r->live);
         }
+    // (10/11) the rooms of other stories whose lamps it lists: their furniture shades it too (a lamp of story 2 lighting story 1's
+    // wall top through a stairwell), so a shadow continues across the floor line (BlockerTable::Join homes). At most 2
+    std::vector<std::pair<int, int>> homes, tried;
+    std::vector<OutdoorDelta::KeptRef> homeRefs;
+    if (cross)
+        for (uintptr_t l : e.listed) {
+            const auto at = g_lotAt.find(l);
+            if (at == g_lotAt.end() || homes.size() >= 2) continue;
+            const OutdoorDelta::LotLamp& L = g_lot[at->second];
+            const std::pair<int, int> h{L.story, L.home};
+            // (only a lamp of an upper story: its own story's furniture continues the shadow down past the floor line. A lamp of
+            // a story below shines up a stairwell at a grazing angle, where the soft band of the stairs' records drew a false
+            // diagonal band on the upper wall: F8 21-03-16)
+            if (L.story <= e.story || L.home <= 0 || std::find(tried.begin(), tried.end(), h) != tried.end()) continue;
+            tried.push_back(h);
+            OutdoorDelta::KeptRef r{};
+            if (!OutdoorDelta::KeptAt(e.lot, L.story, L.home, cls, r)) continue;
+            homes.push_back(h), homeRefs.push_back(r);
+            Mix(key, &h, sizeof h), Mix(key, &r.room, sizeof r.room), Mix(key, &r.version, sizeof r.version), Mix(key, &r.live, sizeof r.live);
+        }
     if (key == e.tblKey) return;
     e.tblKey = key;
     std::shared_ptr<const RtLampGpu::BlockerTable> t;
     for (int k = 0; k < 4 && !t; k++)
         if (const auto s = g_entries.find(std::make_tuple(room, cls, k)); s != g_entries.end() && &s->second != &e && s->second.tblKey == key && s->second.blkOwn == e.blkOwn && s->second.blkBase)
-            t = s->second.blkBase, e.crossHead = s->second.crossHead, e.paneFirst = s->second.paneFirst, e.paneCount = s->second.paneCount;
+            t = s->second.blkBase, e.crossHead = s->second.crossHead, e.homes = s->second.homes, e.paneFirst = s->second.paneFirst, e.paneCount = s->second.paneCount;
     if (!t) try {
         std::vector<std::shared_ptr<const RtLampGpu::BlockerTable>> hold;
-        std::vector<RtLampGpu::BlockerTable::Part> parts;
+        std::vector<RtLampGpu::BlockerTable::Part> parts, homeParts;
         for (const OutdoorDelta::KeptRef* r : rooms) {
             std::shared_ptr<const RtLampGpu::BlockerTable> b;
             int header = -1;
             if (OutdoorDelta::KeptBlockers(r->room, cls, r->version, b, header)) parts.push_back({b.get(), header}), hold.push_back(std::move(b));
         }
-        auto j = std::make_shared<RtLampGpu::BlockerTable>(RtLampGpu::BlockerTable::Join({e.blkOwn.get(), static_cast<int>(e.ownHeader)}, parts));
-        e.crossHead = j->rows[1].v[1] > j->rows[0].v[1];
+        e.homes.clear();
+        for (size_t i = 0; i < homeRefs.size(); i++) {
+            std::shared_ptr<const RtLampGpu::BlockerTable> b;
+            int header = -1;
+            if (OutdoorDelta::KeptBlockers(homeRefs[i].room, cls, homeRefs[i].version, b, header))
+                homeParts.push_back({b.get(), header}), hold.push_back(std::move(b)), e.homes.push_back(homes[i]);
+        }
+        auto j = std::make_shared<RtLampGpu::BlockerTable>(RtLampGpu::BlockerTable::Join({e.blkOwn.get(), static_cast<int>(e.ownHeader)}, parts, homeParts));
+        // (with homes and no arch room, row 1 equals row 0: a lamp of another room on its story walks the same records)
+        e.crossHead = j->rows[1].v[1] > j->rows[0].v[1] || !e.homes.empty();
         e.paneCount = glass ? static_cast<float>(g_panes.size()) : 0.0f;
         e.paneFirst = glass ? static_cast<float>(j->AppendPanes(g_panes)) : 0.0f;
         t = std::move(j);
     } catch (...) {
-        e.tblKey = 0;
+        e.tblKey = 0, e.crossHead = false, e.homes.clear();
         return;
     }
     e.blockers = e.blkBase = std::move(t), e.blkHeader = 0.0f, e.blkOut.reset(), e.offHash = 0;
@@ -444,7 +477,7 @@ bool BuildData(const void* room, int cls, uint32_t version, int m, int id, bool 
             }
     return true;
 }
-// A room solved again: its maps' data from a worker, while the entries of its last solve keep drawing. Built in Sig, the four
+// A room solved (again or for the first time in a class): its maps' data from a worker, while the entries of its last solve keep drawing. Built in Sig, the four
 // maps of a room of 47681 texels held the render thread 76 ms in one frame, and a day/night switch's first rooms 128 ms (the
 // hitch before the rooms' light changes, 2026-11-09)
 struct Prebuilt {
@@ -543,7 +576,11 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
     uint64_t sig = 1469598103934665603ull;
     bool any = false;
     for (const OutdoorDelta::KeptRef& r : g_refs) {
-        const auto [it, fresh] = g_entries.try_emplace(std::make_tuple(r.room, cls, m));
+        const auto key = std::make_tuple(r.room, cls, m);
+        // a room's first kept solve in this class: its data from a worker too (built here it held the render thread 160-208 ms
+        // in one frame while the camera moved, 2026-11-10); its texels keep the game's map, as before that solve, until it is ready
+        if (!g_entries.count(key) && !PrebuiltReady(key, mgr, r)) continue;
+        const auto [it, fresh] = g_entries.try_emplace(key);
         Entry& e = it->second;
         if (fresh) {
             e.mgr = mgr, e.cls = cls, e.m = m, e.version = r.version, e.id = r.id;
@@ -881,8 +918,13 @@ bool RelightPhys(IDirect3DDevice9* dev, RtLampGpu::Engine& eng, Entry& e, const 
             // (a lamp of another room: the joined rooms' records too; the table's z = 2, T3dDensePS. Its own room's lamps walk their own)
             const auto at = g_lotAt.find(lights[g0 + i]);
             const bool cross = e.crossHead && at != g_lotAt.end() && (g_lot[at->second].home != e.id || g_lot[at->second].story != e.story);
-            room[0].lamp.push_back({lamps[g0 + i].mult, reach[g0 + i], cross ? 2.0f : 0.0f});
-            room[0].fill.push_back(e.blockers ? e.blockers->FillOf(static_cast<int>(e.blkHeader) + (cross ? 1 : 0), world[g0 + i].data()) : 0.0f);
+            // (a lamp of a room of another story joined to the table: its row, 2 + i, also walks that room's records)
+            int off = cross ? 1 : 0;
+            if (cross)
+                for (size_t h = 0; h < e.homes.size(); h++)
+                    if (e.homes[h].first == g_lot[at->second].story && e.homes[h].second == g_lot[at->second].home) off = 2 + static_cast<int>(h);
+            room[0].lamp.push_back({lamps[g0 + i].mult, reach[g0 + i], off ? 1.0f + static_cast<float>(off) : 0.0f});
+            room[0].fill.push_back(e.blockers ? e.blockers->FillOf(static_cast<int>(e.blkHeader) + off, world[g0 + i].data()) : 0.0f);
         }
         if (hiOut)
             return eng.RelightKeptPhysHi(dev, e.gpu, lamps.data() + g0, tiles, reinterpret_cast<const float (*)[3]>(world.data() + g0), gn, room, p, hiOut, 2 * w, 2 * h, err,

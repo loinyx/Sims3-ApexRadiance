@@ -1,4 +1,5 @@
 #include "d3d9_extra_hooks.h"
+#include "d3d9_hooks.h"
 #include "memory_patch.h"
 #include "hook_guard.h"
 #include "apex_log.h"
@@ -57,6 +58,7 @@ HRESULT __stdcall HookedGetRenderTargetData(IDirect3DDevice9* dev, IDirect3DSurf
 
 HRESULT __stdcall HookedColorFill(IDirect3DDevice9* dev, IDirect3DSurface9* surface, const RECT* rect, D3DCOLOR color) {
     BeforeAccess(dev, surface, nullptr);
+    if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->copy) tr->copy(dev, "ColorFill", surface, rect);
     return oColorFill(dev, surface, rect, color);
 }
 
@@ -78,6 +80,7 @@ HRESULT __stdcall HookedGetRenderTarget(IDirect3DDevice9* dev, DWORD index, IDir
 HRESULT __stdcall HookedClear(IDirect3DDevice9* dev, DWORD count, const D3DRECT* rects, DWORD flags, D3DCOLOR color, float z, DWORD stencil) {
     if (auto before = g_beforeClear.load()) before(dev, count, rects, flags);
     if (auto obs = g_clearObs.load()) obs(dev, count, flags, color, z);
+    if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->clear) tr->clear(dev, count, rects, flags, color);
     return oClear(dev, count, rects, flags, color, z, stencil);
 }
 
@@ -108,17 +111,48 @@ HRESULT __stdcall HookedStretchRect(IDirect3DDevice9* dev, IDirect3DSurface9* sr
     if (auto before = g_beforeStretch.load())
         HookGuard::Try("PostScene before scene copy", [&] { before(dev, src, srcRect, dst, dstRect, filter); });
     if (auto obs = g_stretchObs.load()) obs(dev, src, dst, filter);
+    if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->copy) tr->copy(dev, "StretchRect", dst, dstRect);
     return oStretchRect(dev, src, srcRect, dst, dstRect, filter);
 }
 
 HRESULT __stdcall HookedDrawPrimitiveUP(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, UINT prims, const void* data, UINT stride) {
     if (auto obs = g_drawUpObs.load()) obs(dev, "DPUP", type, prims);
+    if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->draw) tr->draw(dev, "DPUP", type, prims, data, stride, 0);
     return oDrawPrimitiveUP(dev, type, prims, data, stride);
 }
 
 HRESULT __stdcall HookedDrawIndexedPrimitiveUP(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, UINT minIndex, UINT numVerts, UINT prims, const void* idx, D3DFORMAT idxFmt, const void* data, UINT stride) {
     if (auto obs = g_drawUpObs.load()) obs(dev, "DIPUP", type, prims);
+    if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->draw) tr->draw(dev, "DIPUP", type, prims, data ? static_cast<const char*>(data) + size_t(minIndex) * stride : nullptr, stride, numVerts);
     return oDrawIndexedPrimitiveUP(dev, type, minIndex, numVerts, prims, idx, idxFmt, data, stride);
+}
+
+using SetScissorRect_t = HRESULT(__stdcall*)(IDirect3DDevice9*, const RECT*);
+using SetVertexDeclaration_t = HRESULT(__stdcall*)(IDirect3DDevice9*, IDirect3DVertexDeclaration9*);
+using SetFVF_t = HRESULT(__stdcall*)(IDirect3DDevice9*, DWORD);
+SetScissorRect_t oSetScissorRect = nullptr;
+SetVertexDeclaration_t oSetVertexDeclaration = nullptr;
+SetFVF_t oSetFVF = nullptr;
+std::atomic<bool> g_traceInstalled{false};
+std::atomic<bool> g_traceAttempted{false};
+// The vertex input set last (UseVertexInputSetLast): SetFVF last and its value; false until a SetFVF is seen
+std::atomic<bool> g_fvfLast{false};
+std::atomic<DWORD> g_lastFvf{0};
+
+HRESULT __stdcall HookedSetScissorRect(IDirect3DDevice9* dev, const RECT* r) {
+    if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->setScissor) tr->setScissor(dev, r);
+    return oSetScissorRect(dev, r);
+}
+HRESULT __stdcall HookedSetVertexDeclaration(IDirect3DDevice9* dev, IDirect3DVertexDeclaration9* decl) {
+    g_fvfLast.store(false, std::memory_order_relaxed);
+    if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->setDecl) tr->setDecl(dev, decl);
+    return oSetVertexDeclaration(dev, decl);
+}
+HRESULT __stdcall HookedSetFVF(IDirect3DDevice9* dev, DWORD fvf) {
+    g_lastFvf.store(fvf, std::memory_order_relaxed);
+    g_fvfLast.store(true, std::memory_order_relaxed);
+    if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->setFvf) tr->setFvf(dev, fvf);
+    return oSetFVF(dev, fvf);
 }
 
 } // namespace
@@ -224,6 +258,51 @@ bool EnsureTargetHooks(IDirect3DDevice9* dev) {
 void SetTargetSubstitution(SurfaceAccess access, TargetReport report) {
     g_access.store(access);
     g_targetReport.store(report);
+}
+
+bool EnsureTraceHooks(IDirect3DDevice9* dev) {
+    if (!EnsureInstalled(dev)) return false; // (Clear, StretchRect and the UP draws)
+    EnsureTargetHooks(dev);                  // (ColorFill; pass-through while no target is substituted)
+    if (g_traceInstalled.load()) return true;
+    if (g_traceAttempted.exchange(true)) return false;
+    void** vt = *reinterpret_cast<void***>(dev);
+    const int owned[] = {16, 17, 23, 28, 32, 34, 35, 37, 38, 39, 40, 41, 42, 43, 47, 65, 81, 82, 83, 84, 91, 92, 94, 106, 107, 109};
+    const int mine[] = {75, 87, 89};
+    for (int m : mine)
+        for (int o : owned)
+            if (vt[m] == vt[o]) {
+                LOG_ERROR(std::format("[ExtraHooks] vtable[{}] shares code with vtable[{}], trace hooks not installed", m, o));
+                return false;
+            }
+    oSetScissorRect = reinterpret_cast<SetScissorRect_t>(vt[75]);
+    oSetVertexDeclaration = reinterpret_cast<SetVertexDeclaration_t>(vt[87]);
+    oSetFVF = reinterpret_cast<SetFVF_t>(vt[89]);
+    std::vector<DetourBatch::Hook> hooks = {
+        {reinterpret_cast<void**>(&oSetScissorRect), reinterpret_cast<void*>(HookedSetScissorRect)},
+        {reinterpret_cast<void**>(&oSetVertexDeclaration), reinterpret_cast<void*>(HookedSetVertexDeclaration)},
+        {reinterpret_cast<void**>(&oSetFVF), reinterpret_cast<void*>(HookedSetFVF)},
+    };
+    if (!DetourBatch::InstallHooks(hooks)) {
+        LOG_ERROR("[ExtraHooks] Failed to install the trace detours");
+        return false;
+    }
+    g_traceInstalled.store(true);
+    LOG_INFO("[ExtraHooks] Installed (SetScissorRect, SetVertexDeclaration, SetFVF) for the no-scene frame trace");
+    return true;
+}
+
+void UseVertexInputSetLast(IDirect3DVertexDeclaration9*& decl, DWORD& fvf) {
+    if (!g_fvfLast.load(std::memory_order_relaxed)) return;
+    fvf = g_lastFvf.load(std::memory_order_relaxed);
+    if (decl) decl->Release(), decl = nullptr;
+}
+
+VertexInputMark MarkVertexInput() {
+    return {g_fvfLast.load(std::memory_order_relaxed), g_lastFvf.load(std::memory_order_relaxed)};
+}
+void RestoreVertexInput(VertexInputMark mark) {
+    g_lastFvf.store(mark.fvf, std::memory_order_relaxed);
+    g_fvfLast.store(mark.fvfLast, std::memory_order_relaxed);
 }
 
 HRESULT RawGetRenderTarget(IDirect3DDevice9* dev, DWORD index, IDirect3DSurface9** surface) {

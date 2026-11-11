@@ -10,6 +10,7 @@
 #include "render_callbacks.h"
 #include "scene_dither.h"
 #include "shader_cache.h"
+#include "no_scene_trace.h"
 #include <d3dcompiler.h>
 #include <format>
 #include <iterator>
@@ -102,6 +103,8 @@ void Resolve(IDirect3DDevice9* dev, Cause cause) {
     dev->GetVertexShader(&vs);
     dev->GetVertexDeclaration(&decl);
     dev->GetFVF(&fvf);
+    NoSceneTrace::Saved("scene_target.cpp Resolve", decl, fvf);
+    ExtraHooks::UseVertexInputSetLast(decl, fvf);
     dev->GetStreamSource(0, &stream0, &offset0, &stride0);
     // (a resolve at a copy or at the scene's end can come while the game's instancing is set: DrawPrimitiveUP needs both
     // streams at frequency 1)

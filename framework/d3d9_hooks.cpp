@@ -613,12 +613,14 @@ inline void TakeBoundDevice(IDirect3DDevice9* d) {
 HRESULT STDMETHODCALLTYPE H_DrawIndexedPrimitive(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, INT bv, UINT mv, UINT nv, UINT si, UINT pc) {
     HRESULT hr = S_OK;
     if (!Run(g_dip, d, hr, t, bv, mv, nv, si, pc)) return hr;
+    if (const Trace* tr = CurrentTrace(); tr && tr->draw) tr->draw(d, "DIP", t, pc, nullptr, 0, 0);
     if (!kPublicBuild && t_reissue) return TimedReissueDraw([&] { return o_dip(d, t, bv, mv, nv, si, pc); });
     return o_dip(d, t, bv, mv, nv, si, pc);
 }
 HRESULT STDMETHODCALLTYPE H_DrawPrimitive(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, UINT sv, UINT pc) {
     HRESULT hr = S_OK;
     if (!Run(g_dp, d, hr, t, sv, pc)) return hr;
+    if (const Trace* tr = CurrentTrace(); tr && tr->draw) tr->draw(d, "DP", t, pc, nullptr, 0, 0);
     if (!kPublicBuild && t_reissue) return TimedReissueDraw([&] { return o_dp(d, t, sv, pc); });
     return o_dp(d, t, sv, pc);
 }
@@ -626,7 +628,9 @@ HRESULT STDMETHODCALLTYPE H_SetRenderTarget(IDirect3DDevice9* d, DWORD i, IDirec
     CountCall(kCallSetRT);
     HRESULT hr = S_OK;
     if (!Run(g_srt, d, hr, i, s)) return hr;
-    return o_srt(d, i, BoundFor(i, s));
+    IDirect3DSurface9* const bound = BoundFor(i, s);
+    if (const Trace* tr = CurrentTrace(); tr && tr->setRenderTarget) tr->setRenderTarget(d, i, s, bound);
+    return o_srt(d, i, bound);
 }
 HRESULT STDMETHODCALLTYPE H_SetPixelShader(IDirect3DDevice9* d, IDirect3DPixelShader9* s) {
     CountCall(kCallSetPS);
@@ -659,6 +663,7 @@ HRESULT STDMETHODCALLTYPE H_Present(IDirect3DDevice9* d, const RECT* sr, const R
     ReclaimRetired();
     if (!kPublicBuild && ThreadId() == g_renderTid.load(std::memory_order_relaxed)) LogDispatchCost();
     if (!Run(g_present, d, hr, sr, dr, w, rg)) return hr;
+    if (const Trace* tr = CurrentTrace(); tr && tr->present) tr->present(d);
     hr = o_present(d, sr, dr, w, rg);
     if (const AfterPresentFn after = g_afterPresent.load(std::memory_order_acquire)) after(d, hr);
     return hr;
@@ -689,6 +694,7 @@ HRESULT STDMETHODCALLTYPE H_CreateRenderTarget(IDirect3DDevice9* d, UINT w, UINT
 HRESULT STDMETHODCALLTYPE H_SetViewport(IDirect3DDevice9* d, const D3DVIEWPORT9* v) {
     HRESULT hr = S_OK;
     if (!Run(g_svp, d, hr, v)) return hr;
+    if (const Trace* tr = CurrentTrace(); tr && tr->setViewport) tr->setViewport(d, v);
     return o_svp(d, v);
 }
 HRESULT STDMETHODCALLTYPE H_CreatePixelShader(IDirect3DDevice9* d, const DWORD* fn, IDirect3DPixelShader9** s) {
@@ -825,20 +831,25 @@ HRESULT CallOriginalCreateRenderTarget(IDirect3DDevice9* d, UINT w, UINT h, D3DF
 }
 HRESULT CallOriginalSetRenderTarget(IDirect3DDevice9* d, DWORD i, IDirect3DSurface9* s) {
     ++t_origCalls[kOrigSRT];
+    IDirect3DSurface9* const requested = s;
     s = BoundFor(i, s);
+    if (const Trace* tr = CurrentTrace(); tr && tr->setRenderTarget) tr->setRenderTarget(d, i, requested, s);
     return o_srt ? o_srt(d, i, s) : d->SetRenderTarget(i, s);
 }
 HRESULT CallOriginalSetViewport(IDirect3DDevice9* d, const D3DVIEWPORT9* v) {
     ++t_origCalls[kOrigSVP];
+    if (const Trace* tr = CurrentTrace(); tr && tr->setViewport) tr->setViewport(d, v);
     return o_svp ? o_svp(d, v) : d->SetViewport(v);
 }
 HRESULT CallOriginalDrawIndexedPrimitive(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, INT bv, UINT mv, UINT nv, UINT si, UINT pc) {
     ++t_origCalls[kOrigDIP];
+    if (const Trace* tr = CurrentTrace(); tr && tr->draw) tr->draw(d, "DIP", t, pc, nullptr, 0, 0);
     if (!kPublicBuild && t_dispatchDepth > 0) return TimedReissueDraw([&] { return o_dip ? o_dip(d, t, bv, mv, nv, si, pc) : d->DrawIndexedPrimitive(t, bv, mv, nv, si, pc); });
     return o_dip ? o_dip(d, t, bv, mv, nv, si, pc) : d->DrawIndexedPrimitive(t, bv, mv, nv, si, pc);
 }
 HRESULT CallOriginalDrawPrimitive(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, UINT sv, UINT pc) {
     ++t_origCalls[kOrigDP];
+    if (const Trace* tr = CurrentTrace(); tr && tr->draw) tr->draw(d, "DP", t, pc, nullptr, 0, 0);
     if (!kPublicBuild && t_dispatchDepth > 0) return TimedReissueDraw([&] { return o_dp ? o_dp(d, t, sv, pc) : d->DrawPrimitive(t, sv, pc); });
     return o_dp ? o_dp(d, t, sv, pc) : d->DrawPrimitive(t, sv, pc);
 }

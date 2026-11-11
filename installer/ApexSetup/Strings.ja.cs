@@ -1,0 +1,244 @@
+// Apex Radiance Setup texts in Japanese (日本語). Fill only the entries between the braces, one per line:
+//     ["<English key, exactly as in keys.json>"] = "<translation>",
+// C# strings: write \" for a quote, \\ for a backslash, \n for a line break; every other character as itself (UTF-8).
+// Keep each {0}, {1} of the key, product and file names as they are. A key without an entry shows in English; never
+// leave a translation empty. The same key twice: the last one wins, and ApexSetup.Tests fails.
+namespace ApexSetup;
+
+public static partial class Strings
+{
+    static readonly Dictionary<string, string> Ja = new()
+    {
+        ["Welcome"] = "ようこそ",
+        ["Game"] = "ゲーム",
+        ["Components"] = "コンポーネント",
+        ["Install"] = "インストール",
+        ["Done"] = "完了",
+        ["Repair or remove"] = "修復または削除",
+        ["About and licences"] = "情報とライセンス",
+        ["Back"] = "戻る",
+        ["Next"] = "次へ",
+        ["Get started"] = "始める",
+        ["Finish"] = "完了",
+        ["Close The Sims 3 to continue."] = "続行するには The Sims 3 を閉じてください。",
+        ["Setup needs the internet to download the files."] = "ファイルのダウンロードにはインターネット接続が必要です。",
+        ["Nothing changes until you click Install."] = "「インストール」をクリックするまで何も変更されません。",
+        ["Lighting, picture and performance for The Sims 3."] = "The Sims 3 のためのライティング、画質、パフォーマンス。",
+        ["What Setup does"] = "セットアップが行うこと",
+        ["Setup can't reach GitHub"] = "GitHub に接続できません",
+        ["Check your internet connection, then try again."] = "インターネット接続を確認して、もう一度お試しください。",
+        ["Try again"] = "再試行",
+        ["Choose your game"] = "ゲームを選択",
+        ["Setup found these installs. Pick the one you play."] = "次のインストールが見つかりました。プレイするものを選んでください。",
+        ["Setup found no install. Browse for the game folder."] = "インストールが見つかりません。ゲームのフォルダーを参照してください。",
+        ["Browse for another folder"] = "別のフォルダーを参照",
+        ["No game in this folder"] = "このフォルダーにゲームがありません",
+        ["Pick the The Sims 3 folder, or its Game\\Bin folder (the one with TS3W.exe or TS3.exe)."] =
+            "The Sims 3 のフォルダー、またはその Game\\Bin フォルダー（TS3W.exe または TS3.exe があるフォルダー）を選んでください。",
+        ["Not installed"] = "未インストール",
+        ["Installed"] = "インストール済み",
+        ["the game's own Direct3D 9"] = "ゲーム標準の Direct3D 9",
+        ["another d3d9.dll"] = "別の d3d9.dll",
+        ["Required"] = "必須",
+        ["Installs {0} into Game\\Bin."] = "{0} を Game\\Bin にインストールします。",
+        ["Replaces the installed copy with {0}. Your settings stay."] = "インストール済みのものを {0} に置き換えます。設定はそのまま残ります。",
+        ["Updates {0} to {1}. Your settings stay."] = "{0} から {1} に更新します。設定はそのまま残ります。",
+        ["Recommended with Apex"] = "Apex との併用を推奨",
+        ["No updates available"] = "利用できる更新はありません",
+        ["Everything in this game is on its latest version."] = "このゲームはすべて最新バージョンです。",
+        ["Not available for this game version: it supports Steam 1.67.2 and EA app 1.69.47."] =
+            "このゲームのバージョンでは利用できません。対応バージョンは Steam 1.67.2 と EA app 1.69.47 です。",
+        ["Wrong build"] = "ビルド違い",
+        ["Update {0}"] = "更新：{0}",
+        ["Up to date"] = "最新",
+        ["Setup could not finish"] = "セットアップを完了できませんでした",
+        ["Close The Sims 3 first."] = "先に The Sims 3 を閉じてください。",
+        ["You're all set"] = "準備が整いました",
+        ["Start The Sims 3, load a world and press Ctrl+Shift+F11 to open the Apex Radiance menu."] =
+            "The Sims 3 を起動してワールドを読み込み、Ctrl+Shift+F11 を押すと Apex Radiance のメニューが開きます。",
+        ["Installed: {0} {1}"] = "インストール済み：{0} {1}",
+        ["Choose your game first."] = "先にゲームを選んでください。",
+        ["Removes ApexRadiance.asi. Your settings in Documents stay."] = "ApexRadiance.asi を削除します。ドキュメント内の設定は残ります。",
+        ["Remove"] = "削除",
+        ["RTX Remix bridge"] = "RTX Remix bridge",
+        ["Removes Sims3SettingsSetter.asi."] = "Sims3SettingsSetter.asi を削除します。",
+        ["Removes ts3native and ts3fixes.package."] = "ts3native と ts3fixes.package を削除します。",
+        ["Repair or update"] = "修復または更新",
+        ["Downloads and copies again everything installed here. Your settings stay."] =
+            "ここにインストールされたものをすべてダウンロードし、コピーし直します。設定は残ります。",
+        ["Repair"] = "修復",
+        ["Uninstall everything"] = "すべてアンインストール",
+        ["Removes what Setup installed, and Apex Radiance, and puts back every file Setup replaced."] =
+            "セットアップがインストールしたものと Apex Radiance を削除し、置き換えたファイルをすべて元に戻します。",
+        ["Uninstall"] = "アンインストール",
+        ["Remove {0}?"] = "{0} を削除しますか？",
+        ["Close the game first. Setup removes the files and puts back the ones it replaced."] =
+            "先にゲームを閉じてください。ファイルを削除し、置き換えたファイルを元に戻します。",
+        ["{0} removed."] = "{0} を削除しました。",
+        ["Uninstall everything?"] = "すべてアンインストールしますか？",
+        ["Setup removes Apex Radiance and everything it installed in this game, and puts back every file it replaced. Your settings in Documents stay."] =
+            "Apex Radiance とこのゲームにインストールしたものをすべて削除し、置き換えたファイルをすべて元に戻します。ドキュメント内の設定は残ります。",
+        ["Everything Setup installed was removed."] = "セットアップがインストールしたものはすべて削除されました。",
+        ["Setup fixes this"] = "セットアップで修正します",
+        ["Read more"] = "詳細",
+        ["Fixed."] = "修正しました。",
+        ["No incompatible settings found."] = "互換性のない設定は見つかりませんでした。",
+        ["{0} in Game\\Bin loads a second copy of Apex Radiance."] =
+            "Game\\Bin にある {0} が Apex Radiance の 2 つ目のコピーを読み込みます。",
+        ["Two ASI loaders ({0}) load every mod twice. Keep one: remove all but {1}."] =
+            "2 つの ASI ローダー（{0}）がすべての MOD を 2 回読み込みます。1 つだけ残し、{1} 以外を削除してください。",
+        ["Sims 3 Modernization's ts3native is the build for the other edition and does nothing. Turn it on in Components to install the right one."] =
+            "Sims 3 Modernization の ts3native は別エディション用のビルドで、動作しません。正しいものをインストールするには「コンポーネント」でオンにしてください。",
+        ["Sims 3 Modernization has no build for this game version ({0}), so its ts3native does nothing. Turn it off in Components."] =
+            "Sims 3 Modernization にはこのゲームのバージョン（{0}）用のビルドがないため、ts3native は動作しません。「コンポーネント」でオフにしてください。",
+        ["{0} in Game\\Bin is a second copy of {1}; both load. Setup moves it to the backup folder."] =
+            "Game\\Bin にある {0} は {1} の 2 つ目のコピーで、両方が読み込まれます。セットアップがバックアップフォルダーに移動します。",
+        ["Mods has {0} .package files but no Resource.cfg, so the game loads none of them."] =
+            "Mods に .package ファイルが {0} 個ありますが Resource.cfg がないため、ゲームはどれも読み込みません。",
+        ["{0} is the build for the other edition of the game; it makes the game show \"unofficial game modification\". Use the {1} build."] =
+            "{0} はゲームの別エディション用のビルドで、ゲームに \"unofficial game modification\" と表示されます。{1} のビルドを使ってください。",
+        ["NRaas ErrorTrap has no build known to work on EA app 1.69.47."] =
+            "NRaas ErrorTrap には EA app 1.69.47 で動作が確認されたビルドがありません。",
+        ["{0} overrides game code Sims 3 Modernization also patches (not tested together)."] =
+            "{0} は、Sims 3 Modernization も変更するゲームコードを上書きします（併用は未テスト）。",
+        ["{0} is an old build with Apex inside; while it is in Game\\Bin, Apex Radiance stays off. Setup moves it to the backup folder (install the official Sims3SettingsSetter in its place if you used it)."] =
+            "{0} は Apex を内蔵した古いビルドです。Game\\Bin にある間、Apex Radiance はオフのままです。セットアップがバックアップフォルダーに移動します（使っていた場合は、代わりに公式の Sims3SettingsSetter をインストールしてください）。",
+        ["Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. Setup sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup)."] =
+            "Sims3Performance の ShortWaitSpin と ThreadStackDiet は Sims 3 Modernization と競合します。セットアップが両方を 0 にします（コピーを Sims3Performance.ini.apex-backup として保存）。",
+        ["Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. Setup turns them off (a copy is kept as S3SS.toml.apex-backup)."] =
+            "Sims3SettingsSetter の非圧縮テクスチャは RTX Remix bridge 使用時にカクつきます。セットアップがオフにします（コピーを S3SS.toml.apex-backup として保存）。",
+        ["{0} sets client.targetProcess = {1}, but this game is {2}: the bridge does not start."] =
+            "{0} は client.targetProcess = {1} に設定されていますが、このゲームは {2} です。ブリッジが起動しません。",
+        ["dxvk.conf lacks {0} or has other values: without them the game resets its graphics options or freezes on a resolution change under the bridge."] =
+            "dxvk.conf に {0} がないか、値が異なります。このままではブリッジ使用時に、ゲームのグラフィック設定がリセットされたり、解像度の変更でフリーズしたりします。",
+        ["Mods\\Resource.cfg does not read {0}, so the game does not load it. Setup adds the Packages folder lines (a copy is kept as Resource.cfg.apex-backup)."] =
+            "Mods\\Resource.cfg が {0} を読み込まないため、ゲームはそれを読み込みません。セットアップが Packages フォルダーの行を追加します（コピーを Resource.cfg.apex-backup として保存）。",
+        ["Fix settings"] = "設定を修正",
+        ["Everything is installed and up to date."] = "すべてインストール済みで最新です。",
+        ["Will be removed"] = "削除予定",
+        ["Keep"] = "残す",
+        ["Nothing to apply"] = "適用する変更なし",
+        ["Preview"] = "プレビュー",
+        ["This is a preview: nothing was installed."] = "これはプレビューです。何もインストールされていません。",
+        ["Setup is applying changes"] = "セットアップが変更を適用しています",
+        ["Wait until it finishes before closing."] = "完了するまで閉じずにお待ちください。",
+        ["Checking the latest versions…"] = "最新バージョンを確認しています…",
+        ["Checking for updates…"] = "更新を確認しています…",
+        ["Close The Sims 3 to update."] = "更新するには The Sims 3 を閉じてください。",
+        ["Update now installs them."] = "「今すぐ更新」でインストールされます。",
+        ["Graphics"] = "グラフィック",
+        ["Checked at {0}."] = "{0} に確認しました。",
+        ["Test build {0}: kept as it is."] = "テストビルド {0}：そのまま残します。",
+        ["Repair or remove sets the game right."] = "「修復または削除」でゲームを元の状態に戻せます。",
+        ["Changes applied"] = "変更を適用しました",
+        ["Removed: {0}"] = "削除済み：{0}",
+        ["The Sims 3 · {0}"] = "The Sims 3 · {0}",
+        ["{0} → {1}"] = "{0} → {1}",
+        ["{0} · up to date"] = "{0} · 最新",
+        ["Everything is in place."] = "すべて正常です。",
+        ["Everything is in place (checked at {0})."] = "すべて正常です（{0} に確認）。",
+        ["Check installation"] = "インストールを確認",
+        ["Change components"] = "コンポーネントを変更",
+        ["Apex Radiance is not installed in this game."] = "このゲームには Apex Radiance がインストールされていません。",
+        ["{0} · test build"] = "{0} · テストビルド",
+        ["Install the official {0}"] = "公式の {0} をインストール",
+        ["No ASI loader in Game\\Bin: Apex Radiance and the other .asi mods do not load."] =
+            "Game\\Bin に ASI ローダーがありません。Apex Radiance やほかの .asi MOD は読み込まれません。",
+        ["{0} is missing: the RTX Remix bridge does not start."] = "{0} がありません。RTX Remix bridge が起動しません。",
+        ["Apply 1 change"] = "1 件の変更を適用",
+        ["Apply {0} changes"] = "{0} 件の変更を適用",
+        ["{0} is installed and up to date: nothing to change."] = "{0} はインストール済みで最新です。変更はありません。",
+        ["Keep my d3d9.dll"] = "現在の d3d9.dll を維持",
+        ["Your d3d9.dll stays as it is."] = "お使いの d3d9.dll はそのまま残ります。",
+        ["Applying changes"] = "変更を適用しています",
+        ["Remove {0}"] = "{0} を削除",
+        ["Fix incompatible settings"] = "互換性のない設定を修正",
+        // suggestions: what Apex Radiance recommends in game (Compat.Suggestions); the game's own texts as the menu translates them
+        ["Suggested for Apex Radiance"] = "Apex Radiance のおすすめ",
+        ["Apply"] = "適用",
+        ["Applied."] = "適用しました。",
+        ["Apply all suggestions"] = "すべてのおすすめを適用",
+        ["Apply suggestion: {0}"] = "おすすめを適用: {0}",
+        ["Two copies of the mod"] = "MOD のコピーが 2 つ",
+        ["{0} in Game\\Bin is another copy of Apex Radiance; only one copy runs. Apply moves it to the backup folder."] = "Game\\Bin にある {0} は Apex Radiance の別のコピーです。動くのは 1 つだけです。適用するとバックアップフォルダーに移動します。",
+        ["Turn off the game's Edge Smoothing"] = "ゲームのエッジスムージングをオフにする",
+        ["Options.ini has edgesmoothing = {0}. The Sims 3's Edge Smoothing prevents these enabled Apex effects from working: {1}. Apply sets it to 0 (a copy is kept as Options.ini.apex-backup)."] = "Options.ini は edgesmoothing = {0} です。The Sims 3 のエッジスムージングがオンだと、次の Apex の効果が動作しません: {1}。適用すると 0 にします（コピーを Options.ini.apex-backup として保存）。",
+        ["Edge Smoothing"] = "エッジスムージング",
+        ["Depth Blur"] = "深度ぼかし",
+        ["Ambient Occlusion"] = "アンビエントオクルージョン",
+        ["Water Reflections"] = "水面の反射",
+        ["Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it."] = "ゲームをVulkanで動かします。カクつきが減り、Apex Radianceもこの環境で開発・テストされています。",
+        ["Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings."] = "Apex Radianceは単体でも動きますが、sims3fiend作のSims3SettingsSetterとの相性が抜群です。フレームレート制限、カクつきの削減、多数の追加ゲーム設定があります。",
+        ["Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds."] = "DXVKを専用の64ビットプロセスに移します。ゲームの空きメモリが約600MB増え、長時間のプレイや大きな世界に役立ちます。",
+        ["{0} has {1} = {2}, which Setup cannot read. Setup leaves the file as it is."] = "{0} の {1} = {2} はセットアップが読み取れません。セットアップはファイルをそのままにします。",
+        // restore points (Repair or remove)
+        ["Install {0}"] = "{0} をインストール",
+        ["Restore points"] = "復元ポイント",
+        ["Setup keeps a copy of every file it changes. Restoring a point undoes that change and every later one."] = "セットアップは変更するすべてのファイルのコピーを保存します。ポイントを復元すると、その変更とそれ以降のすべての変更が元に戻ります。",
+        ["Before: {0}"] = "変更前: {0}",
+        ["{0} · 1 file"] = "{0} · 1 ファイル",
+        ["{0} · {1} files"] = "{0} · {1} ファイル",
+        ["Restore"] = "復元",
+        ["No restore points yet. Setup makes one before every change."] = "復元ポイントはまだありません。セットアップは変更のたびに作成します。",
+        ["Restore this point?"] = "このポイントを復元しますか？",
+        ["Setup puts back the files as they were before this change, and undoes every change made after it. Close the game first."] = "この変更の前の状態にファイルを戻し、それ以降のすべての変更を元に戻します。先にゲームを閉じてください。",
+        ["Setup could not put back {0}."] = "{0} を元に戻せませんでした。",
+        ["Changes undone."] = "変更を元に戻しました。",
+        ["Undo these changes"] = "この変更を元に戻す",
+        ["This restore point is gone."] = "この復元ポイントはもうありません。",
+        ["Updates available"] = "更新があります",
+        ["Update now"] = "今すぐ更新",
+        ["{0} {1} → {2}"] = "{0} {1} → {2}",
+        ["Removes MonoPatcher.asi and its package."] = "MonoPatcher.asi とそのパッケージを削除します。",
+        ["Smooth Patch's TS3Patch.asi patches the same game code as Sims3SettingsSetter's Smooth Patch. Setup moves it to the backup folder (S3SS does the same job)."] =
+            "Smooth Patch の TS3Patch.asi は、Sims3SettingsSetter の Smooth Patch と同じゲームコードを変更します。セットアップがバックアップフォルダーに移動します（S3SS が同じ役割を果たします）。",
+        ["simler90's Gameplay Core Mod and NRaas StoryProgression replace the same game code. Keep one of them."] =
+            "simler90 の Gameplay Core Mod と NRaas StoryProgression は同じゲームコードを置き換えます。どちらか一方だけを残してください。",
+        ["MonoPatcher needs the Microsoft Visual C++ Redistributable (x86); it is not installed."] =
+            "MonoPatcher には Microsoft Visual C++ Redistributable (x86) が必要ですが、インストールされていません。",
+        ["Download on Nexus Mods"] = "Nexus Mods でダウンロード",
+        ["Choose the downloaded file"] = "ダウンロードしたファイルを選択",
+        ["Ready to install"] = "インストール準備完了",
+        ["Waiting for your download in {0}…"] = "{0} でダウンロードを待っています…",
+        ["Not the Performance Patch"] = "Performance Patch ではありません",
+        ["{0} has no Sims3Performance.asi. If the download is a .7z or .rar, extract it and choose Sims3Performance.asi."] =
+            "{0} に Sims3Performance.asi がありません。ダウンロードしたファイルが .7z または .rar の場合は、展開して Sims3Performance.asi を選んでください。",
+        ["Removes Sims3Performance.asi and its .ini."] = "Sims3Performance.asi とその .ini を削除します。",
+        ["Download Sims 3 Performance Patch from Nexus Mods first."] =
+            "先に Nexus Mods から Sims 3 Performance Patch をダウンロードしてください。",
+        ["Finds your The Sims 3 (Steam or EA app)."] = "The Sims 3（Steam または EA app）を見つけます。",
+        ["Installs Apex Radiance and the fixes you choose."] = "Apex Radiance と、選んだ修正をインストールします。",
+        ["Keeps a copy of every file it changes, so you can undo everything."] = "変更するファイルはすべてコピーを保存するので、いつでも元に戻せます。",
+        ["Your Apex Radiance settings are always kept."] = "Apex Radiance の設定は常に保持されます。",
+        ["No internet connection"] = "インターネットに接続されていません",
+        ["Vulkan, DXVK (recommended)"] = "Vulkan、DXVK（推奨）",
+        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan、空きメモリ多め（RTX Remix bridge）",
+        ["Windows default (Direct3D 9)"] = "Windows 標準（Direct3D 9）",
+        ["Fewer stutters; Apex Radiance is made and tested with it."] = "カクつきが減ります。Apex Radiance はこれで開発・テストされています。",
+        ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
+            "大きなワールド向けに空きメモリを約 600 MB 増やします。Vulkan 対応のグラフィックカードが必要です。ゲームの動作がおかしい場合は DXVK を選んでください。",
+        ["Works, but Apex Radiance is tested with DXVK."] = "動作しますが、Apex Radiance は DXVK でテストされています。",
+        ["Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."] =
+            "ゲーム内のグラフィック設定が一度リセットされることがあります。セットアップがコピーを保存し、元に戻したときに復元します。",
+        ["Fixes for game and graphics settings."] = "ゲームとグラフィックの設定の修正。",
+        ["Fixes stutters, Sims getting stuck and crashes."] = "カクつき、シムが動かなくなる問題、クラッシュを修正します。",
+        ["Needed only by some script mods; turn it on if a mod asks for it."] =
+            "一部のスクリプト MOD でのみ必要です。MOD に求められたらオンにしてください。",
+        ["Makes the game run faster. Needs a free Nexus Mods account; Setup installs it when your download finishes."] =
+            "ゲームの動作を速くします。Nexus Mods の無料アカウントが必要です。ダウンロードが終わるとセットアップがインストールします。",
+        ["Puts back the graphics files you had before."] = "以前のグラフィックファイルを元に戻します。",
+        ["Goes back to the game's default graphics. Your in-game graphics settings may reset once."] =
+            "ゲーム標準のグラフィックに戻します。ゲーム内のグラフィック設定が一度リセットされることがあります。",
+        ["Language"] = "言語",
+        ["Automatic"] = "自動",
+        ["This file has no Sims3Performance.asi."] = "このファイルには Sims3Performance.asi がありません。",
+        ["Dry run: Setup changes nothing."] = "テスト実行：セットアップは何も変更しません。",
+        ["Apex Radiance by loinyx. The RTX Remix bridge is NVIDIA's, ported to The Sims 3 by dalexlol and alexvixell35-stack. Sims3SettingsSetter is by sims3fiend, Sims 3 Modernization by rodneypantonial and Ultimate ASI Loader by ThirteenAG: Setup downloads them from their own GitHub releases."] =
+            "Apex Radiance は loinyx が制作。RTX Remix bridge は NVIDIA によるもので、dalexlol と alexvixell35-stack が The Sims 3 に移植しました。Sims3SettingsSetter は sims3fiend、Sims 3 Modernization は rodneypantonial、Ultimate ASI Loader は ThirteenAG によるものです。セットアップはそれぞれの GitHub リリースからダウンロードします。",
+        ["RTX Remix bridge: third-party notices"] = "RTX Remix bridge：サードパーティ通知",
+        ["Read"] = "表示",
+        ["Licence text"] = "ライセンス文",
+        ["OK"] = "OK",
+        ["Cancel"] = "キャンセル",
+    };
+}

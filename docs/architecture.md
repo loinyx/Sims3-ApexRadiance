@@ -54,8 +54,9 @@ Related pages: [workflow.md](workflow.md) (build, test, install, release),
 Under the loader lock, in order:
 
 1. `DisableThreadLibraryCalls`.
-2. **Process check.** If the executable is neither `TS3W.exe` nor `TS3.exe`, return `FALSE` (the launcher and other
-   tools do not load the mod at all).
+2. **Process check.** If the executable is neither `TS3W.exe` nor `TS3.exe`, return `TRUE` and do nothing more: the
+   ASI loader also loads the mod into `Sims3Launcher.exe`, and there it stays loaded and idle (no hooks, threads or
+   files). Returning `FALSE` would unload the DLL at once, and its CRT teardown crashes freeing `thread_local` maps.
 3. **Instance mutexes** (`S3SSDetect::AcquireInstanceMutex`):
    - `Local\ApexRadiance.<pid>` already held: another copy of Apex Radiance runs. This copy stays idle (returns `TRUE`,
      no hooks, no menu) and writes only to `OutputDebugString`.
@@ -695,7 +696,8 @@ are documented in [ui.md](ui.md). Menu changes follow the [apex-menu](../.agents
 
 **Crash report** ([framework/crash_report.h](../framework/crash_report.h)): an unhandled exception writes
 `ApexRadiance_Crash.txt` (exception, registers, module and offset of the faulting address and of every stack value that
-points into a module's code, the enabled Apex features) and a small minidump `ApexRadiance_Crash.dmp`, then passes the
+points into a module's code, the enabled Apex features) and a small minidump `ApexRadiance_Crash.dmp` (referenced memory, thread info and the
+process's memory region list, so an address-space exhaustion shows who holds the space), then passes the
 exception on (to the game's filter, else Windows Error Reporting). Both files are overwritten by the next crash. The
 filter uses no heap, only stack buffers and Win32 calls. The pump thread takes the filter back once a second if another
 module replaced it (that one then runs after the report).

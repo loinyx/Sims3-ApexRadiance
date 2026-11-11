@@ -172,6 +172,7 @@ for uniqueness on Steam with `sigcheck.pl` (it must still resolve every id to th
 | | Faster Room Lighting (`features/room_light_queue.cpp`) | PriorityLotObject, PriorityLotTest (all parts); then per part: RoomPriorityCall + RoomPriority, LodStepSite, KeepClassA + KeepClassB, RoomPickJump + RoomPick + RoomSolveStep + StopwatchCtor/Start/Elapsed | "Faster room lighting: Not available ..."; a part whose bytes differ stays off |
 | Faster Sim Building (`FastCasSort`, group `FastCasSort`) | CasTriSort | "Not available on <version>: missing ..." |
 | Faster Memory (`FastMemory`, group `FastMemory`) | AllocGlobal, AllocMmapFreeCall | "Not available on <version>: missing ..." |
+| Display resolution (`GameResolution`, group `GameResolution`) | ResolutionRequest, RendererGlobal, ResolutionHandler, ResolutionUi | "[Screen] Game resolution request not available on this game version: ..." (the Resolution row then has no effect) |
 | Faster cache compression, record checksums (group `FastRecordCrc`) | RecordCrc, RecordCrcTable | "Not available on <version>: missing ..." |
 | Frame Profiler texture load counters (developer mode) | TexCreateCall, TexCreate, TexFillCall, TexFill | those counters are not installed |
 | Loaded-world gate (`features/world_session.h`: start note, Depth Blur) | WorldManagerPtr, UiServiceGetter (its first bytes must be `A1 imm32 ... C3`) | the world counts as not loaded: no start note and no Depth Blur |
@@ -368,6 +369,11 @@ at +n" = the target of the CALL there, "dword at +n" = the value there.
 | ObjectTreeSearch | 0x00C5FA60 | Sig | `53 55 56 8B 74 24 10 85 F6 0F 84 ?? ?? ?? ?? 8B 46 48 8B 5C 24 14 3B C3 8B 6C 24 18 75 ?? 8B 4E 4C 3B CD 74` +0<br>alt: `8B 04 B8 51 55 53 50 E8 ?? ?? ?? ?? 83 C4 10 85 C0 75` call at +7 (inside the walk) | matches 1 / 1 (sigcheck.pl 2026-09-29, after merging v1.4.0 and C6 / C8: 153 of 153 ok) |
 | WorldManagerPtr | 0x011ECBC4 | Sig (dword) | store in FUN_00c6cf80 at 0x00C6D0CC: `8D 8D 9C 00 00 00 89 2D ?? ?? ?? ?? E8` dword at +8<br>alt: clear in FUN_00c6b500 at 0x00C6B507: `51 53 56 33 DB 8B F1 89 1D ?? ?? ?? ?? 8B 8E 6C 01 00 00` dword at +9 | matches 1 / 1 |
 | TerrainUpdateCall | 0x00C6D68C | Sig | `8B 44 24 0C 50 8D 4C 24 14 51 8B 4E 58 E8 ?? ?? ?? ?? 80 BE 58 02 00 00 00` +10 (the call rel32 is wildcarded: the Frame Profiler redirects it)<br>alt: `51 8B 4E ?? E8 ?? ?? ?? ?? 80 BE 58 02 00 00 00 75` +1 | matches 1 / 1 (sigcheck.pl 2026-09-29: 155 of 155 ok) |
+| ResolutionRequest | 0x0077D1A0 | Sig | `57 E8 ?? ?? ?? ?? 8B F8 85 FF 74 7D 56 6A 00 6A 00 6A 00 6A 00 68 ?? ?? ?? ?? 6A 18 E8` +0 | matches 1 (EA 1.69.47: 0x0077E310) |
+| RendererGlobal | 0x011CECC8 | Sig (dword) | renderer getter and setter: `A1 ?? ?? ?? ?? C3 CC CC CC CC CC CC CC CC CC CC 8B 4C 24 04 A1 ?? ?? ?? ?? 89 0D ?? ?? ?? ?? C3 83 EC 30 53 8B D9 8B 83 E0 00 00 00` dword at +1 | matches 1 (EA 1.69.47: 0x01228D78) |
+| ResolutionHandler | 0x007F1B70 | Sig | `83 EC 30 8B 44 24 34 3D 46 32 98 07` +0 | matches 1 (EA 1.69.47: 0x007F1AB0) |
+| WorldActiveLotGetter | 0x00C5FB00 | Sig | the whole body `8B 81 70 01 00 00 8B 91 74 01 00 00 C3` +0 | matches 1 (EA 1.69.47: 0x00C5EF10) |
+| ResolutionUi | 0x011D8C48 | Sig (dword) | in the handler: `8A 5F 24 8B 0D ?? ?? ?? ?? 85 C9 74 05 E8 ?? ?? ?? ?? 84 DB 0F 94 C1 51 8B CF E8` dword at +5 | matches 1 (EA 1.69.47: 0x01232CF8) |
 
 The ids after the first one of a `Multi` / `CallersOf` entry take the following matches by address: ArmSiteRemoval
 0x6B60D3, ArmSiteRegister 0x6B6516, ArmSiteMoved 0x6B6618; QualitySite0 0xADB66B, QualitySite1 0xADB884; SetColourCall0..6

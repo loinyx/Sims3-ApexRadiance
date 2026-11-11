@@ -32,6 +32,9 @@ inline std::atomic<bool> SolveInfoCache{true};
 inline std::atomic<bool> FollowBoundTextures{true};
 // (2.15.3) Room solves: a window light's channel test is kept for the sample batch (level_light_share.cpp WindowChannelHook)
 inline std::atomic<bool> WindowChannelMemo{true};
+// (3.1.1) Room solves: a lamp of another story that lit none of a room's samples at its last solve is skipped (colour 0) while the
+// lamp, the lot's geometry and the options are as they were (level_light_share.cpp ZeroSolveStart); the same maps, fewer evaluations
+inline std::atomic<bool> BorrowedZeroSkip{true};
 // (2.15.3) Lot lighting while the camera moves: the raised budgets right after a load and after a lamp switch are dosed by
 // the frame time, as the settle budget with the camera still (lot_lighting_motion.cpp); off = the game's full budget while
 // moving, as before. Only how fast those rooms relight while panning changes, not their light

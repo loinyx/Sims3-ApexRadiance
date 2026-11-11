@@ -45,7 +45,7 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 | [World atlas and smoothed maps](features/night-lighting/world-atlas-and-smoothed-maps.md): smooth terrain light maps | Released; Released in 2.18.3: one light map per chunk on every terrain variant, sidewalks steady as the camera moves |
 | [Terrain relight](features/night-lighting/terrain-relight.md): rebuilding terrain lighting at dusk and after edits | Released |
 | [World lamp response](features/night-lighting/world-lamp-response.md): terrain and rigs follow lamp edits | Released in 2.5.6 |
-| [Every-story light](features/night-lighting/level-light-share.md): lamps on any floor light the ground and the rooms they reach; walls and balcony floors block lamp light outdoors | Released (walls blocking light outdoors: 2.7.0); Released in 2.12.1: update corrections; Released in 2.12.3: balcony and upper floors block lamps below them; Released in 2.13.0: light through openings, doors block light, ground lamp shade, shadow softness; Released in 2.14.0: the lamp's own walls through floor openings, hard wall tops, floor-level sills, steady indoor light; Released in 2.15.3: *Indoor light adds to the ground*, real window sizes with the wall's depth and glass, ceiling lamps of the story below kept out of the closed rooms above; Released in 2.15.5: missing outdoor lighting queue entries restored; Released in 2.17.1: a room's own lamps tested against its walls in the directional maps; Released in 2.18.2: lamp posts light the lots around them |
+| [Every-story light](features/night-lighting/level-light-share.md): lamps on any floor light the ground and the rooms they reach; walls and balcony floors block lamp light outdoors | Released (walls blocking light outdoors: 2.7.0); Released in 2.12.1: update corrections; Released in 2.12.3: balcony and upper floors block lamps below them; Released in 2.13.0: light through openings, doors block light, ground lamp shade, shadow softness; Released in 2.14.0: the lamp's own walls through floor openings, hard wall tops, floor-level sills, steady indoor light; Released in 2.15.3: *Indoor light adds to the ground*, real window sizes with the wall's depth and glass, ceiling lamps of the story below kept out of the closed rooms above; Released in 2.15.5: missing outdoor lighting queue entries restored; Released in 2.17.1: a room's own lamps tested against its walls in the directional maps; Released in 2.18.2: lamp posts light the lots around them; Released in 3.1.1: fast New Game lot pictures, borrowed lamps that lit nothing skipped |
 | [Light through stairwells](features/night-lighting/stairwells.md): lamps light the walls above a stairwell with a soft edge; bounce light and partial adaptation upstairs | Released in 2.14.0 |
 | [Stairs on the directional maps](features/night-lighting/stairs.md): stairs take no light through walls, the floor's colour and the light of the floor above | Released in 2.14.0 |
 | [Light through arches and doorways](features/night-lighting/arches.md): no colour step at arches, soft cone edges, indoor light independent of the camera | Released in 2.14.0; Released in 2.15.3: cheaper floor draws; Released in 3.0.0: furniture shadows, tone, glass and bounce through arches |
@@ -81,8 +81,9 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 | [Room to save](features/performance/room-to-save.md), [Lighter window updates](features/performance/lighter-window-updates.md), [Faster scripts](features/performance/faster-scripts.md) | Experimental (released in 2.7.0); Room to save: Released in 2.14.0: earlier buffer release and compatibility with sims3-modernization; Released in 2.17.0: one-time question card |
 | [Faster memory handling](features/performance/fast-memory.md): allocator spin and background release | Released in 2.4.0; Released in 2.14.0: allocator trim and top-down large blocks |
 | [Lot Streaming](features/performance/lot-streaming.md): lot detail farther away and smoother lot streaming (idavidveiga), off by default | Experimental (released in 2.7.0); Released in 2.16.2: shared lot build time, detailed-lot hysteresis, throttle threshold follow |
-| [Display](features/display.md): window mode, resolution and frame-rate limiter (System > Display) | Released in 3.1.0 |
-| [RTX Remix bridge](features/rtx-remix-bridge.md): the renderer (DXVK) in its own 64-bit process, about 600 to 800 MB more free memory in the game | Released in 3.0.0 (separate download); its `dxvk.conf` fix for exclusive fullscreen published again after 3.0.0; Released in 3.1.0: install guide, uncompressed-textures card, Fullscreen as Borderless under the bridge |
+| [Display](features/display.md): window mode, resolution and frame-rate limiter (System > Display) | Released in 3.1.0; Released in 3.1.1: resolution through the game's own change on every build, the game's fullscreen as Borderless under the bridge |
+| [RTX Remix bridge](features/rtx-remix-bridge.md): the renderer (DXVK) in its own 64-bit process, about 600 to 800 MB more free memory in the game | Released in 3.0.0 (separate download); its `dxvk.conf` fix for exclusive fullscreen published again after 3.0.0; Released in 3.1.0: install guide, uncompressed-textures card, Fullscreen as Borderless under the bridge; Released in 3.1.1: bridge patches 0011 to 0013, bridge logs in captures, its own Nexus file |
+| [Delegate signature fix](features/delegate-signature-fix.md): no simulator-thread crash when a script callback without arguments runs (always on) | Released in 3.1.1 |
 
 ### Reports and diagnostics
 
@@ -93,6 +94,12 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 | [Frame Profiler](features/frame-profiler.md): per-service and per-hook timing, hitches | Developer mode |
 | [Light Probe](features/dev-tools/light-probe.md), [Light Diag](features/dev-tools/light-diag.md), [Recorder](features/dev-tools/recorder.md) | Released (player captures) |
 | [Frame Capture](features/dev-tools/frame-capture.md), [Census](features/dev-tools/census.md) (with the exterior surface capture, 2.12.3), [Tester tab](features/dev-tools/tester.md) (since 2.13.0) | Developer mode |
+
+### Installation
+
+| Feature | Status |
+|---|---|
+| [Apex Radiance Setup](features/installer.md): an optional Windows program that installs, updates, checks, repairs and removes Apex Radiance and the mods it works with | Released in 3.1.1 |
 
 ### Removed
 

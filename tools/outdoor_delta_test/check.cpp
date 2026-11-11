@@ -1982,6 +1982,31 @@ void AcrossRoomsChecks() {
     Check(j.FillOf(0, standing) == 0.0f && j.FillOf(1, standing) == RtLampGpu::kFurnitureFill, "join: a lamp on the next room's table keeps its fill from row 1");
     j.Offset(0, 2, 1.0f, 0.0f);
     Check(j.Occlude(1, lamp2, floor2) > 0.99f, "join: a carried record moves");
+    {
+        // (cross-story homes) a room of another story joined: rows 0 and 1 as without it, row 2 adds its records, row 3 the second's
+        const RtLampGpu::BlockerTable plain = RtLampGpu::BlockerTable::Join({&a, ha}, {{&b, hb}});
+        const RtLampGpu::BlockerTable none = RtLampGpu::BlockerTable::Join({&a, ha}, {{&b, hb}}, {});
+        bool byteSame = none.rows.size() == plain.rows.size() && none.shapes == plain.shapes;
+        for (size_t i = 0; byteSame && i < plain.rows.size(); i++) byteSame = std::memcmp(none.rows[i].v, plain.rows[i].v, sizeof plain.rows[i].v) == 0;
+        Check(byteSame, "join homes: no home leaves the table byte for byte");
+        RoomLightTests::Room up, down;
+        up.rec.push_back(plate(6.0f, 2.0f));
+        down.rec.push_back(plate(6.0f, 8.0f));
+        RtLampGpu::BlockerTable u, d;
+        const int hu = u.Append(up), hd = d.Append(down);
+        const RtLampGpu::BlockerTable h = RtLampGpu::BlockerTable::Join({&a, ha}, {{&b, hb}}, {{&u, hu}, {&d, hd}});
+        const V lampU{6.0f, 2.5f, 2.0f}, floorU{6.0f, 0.0f, 2.0f}, lampD{6.0f, 2.5f, 8.0f}, floorD{6.0f, 0.0f, 8.0f};
+        bool rows01 = true;
+        for (const V& l : {lamp1, lamp2, lampU, lampD})
+            for (const V& p : {floor1, floor2, floorU, floorD, clear})
+                rows01 = rows01 && h.Occlude(0, l, p) == plain.Occlude(0, l, p) && h.Occlude(1, l, p) == plain.Occlude(1, l, p);
+        Check(rows01, "join homes: rows 0 and 1 walk what they walked");
+        Check(h.Occlude(2, lampU, floorU) < 0.05f && h.Occlude(2, lampD, floorD) == 1.0f && h.Occlude(2, lamp2, floor2) < 0.05f,
+              "join homes: row 2 walks the first home's records with the room's and its arch rooms'");
+        Check(h.Occlude(3, lampD, floorD) < 0.05f && h.Occlude(3, lampU, floorU) == 1.0f && h.Occlude(3, lamp1, floor1) == a.Occlude(ha, lamp1, floor1),
+              "join homes: row 3 walks the second home's, not the first's");
+        Check(h.ShapeOf(0, 0) == a.ShapeOf(ha, 0) && h.ShapeOf(1, 2) == b.ShapeOf(hb, 0), "join homes: rows 0 and 1 keep their shapes");
+    }
     RtLampGpu::BlockerTable empty = RtLampGpu::BlockerTable::Join({nullptr, -1}, {});
     Check(empty.rows.size() == 2 && empty.Occlude(0, lamp1, floor1) == 1.0f, "join: a room with no records walks none");
     // panes

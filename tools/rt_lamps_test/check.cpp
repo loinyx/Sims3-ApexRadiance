@@ -2141,6 +2141,7 @@ bool KeptGpuCheck() {
                 for (uint32_t& v : ext) v = static_cast<uint32_t>(rng()); // (rows beyond, and the block's unkept texels)
                 for (int y = 0; y < total; y++)
                     for (int x = 0; x < bw; x++) d.layout[static_cast<size_t>(ly + y) * d.layoutW + x] = ext[static_cast<size_t>(y) * bw + x];
+                const std::vector<uint32_t> solved(ext.begin() + static_cast<ptrdiff_t>(top) * bw, ext.begin() + static_cast<ptrdiff_t>(top + rows) * bw);
                 for (int y = 0; y < rows; y++)
                     for (int x = 0; x < bw; x++) {
                         const uint32_t i = at[static_cast<size_t>(b.y0 + y) * w + b.x0 + x];
@@ -2150,6 +2151,7 @@ bool KeptGpuCheck() {
                         }
                         before[static_cast<size_t>(y) * bw + x] = ext[static_cast<size_t>(top + y) * bw + x];
                     }
+                OutdoorDeltaModel::FollowGhosts(ext.data(), solved.data(), bw, rows, b.above, b.below); // (GhostKeptPS)
                 OutdoorDeltaModel::BlurBlock(ext.data(), before.data(), bw, rows, b.above, b.below, d.passes);
                 for (int y = 0; y < rows; y++)
                     for (int x = 0; x < bw; x++) expect[static_cast<size_t>(b.y0 + y) * w + b.x0 + x] = ext[static_cast<size_t>(top + y) * bw + x];

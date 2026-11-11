@@ -158,6 +158,7 @@ Lighting > "Individual options (for tests)" (developer mode) or the TOML file.
 | Developer: Smooth the ground light maps on the GPU (A/B) | `mapaDeLuzSuavizadoNaGpu` | bool | on | | Developer only; off = CPU worker path |
 | Developer: Relight only nearby terrain | `relightNearbyChunks` | bool | off | | Developer only; automatic lamp changes also take the local relight |
 | Developer: Paced terrain sweep | `relightPacedSweep` | bool | on | | Developer only (registration); the default is active in normal mode too |
+| (no menu row) | `fastLotPictures` | bool | on | | TOML only: lots lit only for their picture skip light sharing ([level-light-share.md](level-light-share.md), Fast lot pictures) |
 
 Notes:
 
@@ -180,7 +181,10 @@ Notes:
 - **Live vs reinstall.** Every menu edit goes through `Edit()`: `ApplyLive` installs or removes the parts that follow
   their switch (`LotLightBridge::SetEnabled`, `ObjectLightBridge::Install/Uninstall`, `LevelLightShare::Install/Uninstall`,
   `RigTracker::Install/Uninstall`), the configuration is saved and an automatic lighting refresh runs 1 s after the last
-  change (`RequestAutoRefresh`). `Update()` schedules a reinstall only when `postesAcesosNoCalculo`,
+  change (`RequestAutoRefresh`). When only *Street lamps light lots* changed and outdoor light through openings into
+  roofed rooms is on, that option's opening balance has already relit every room, so the refresh leaves the rooms alone
+  (terrain, lots and object rigs still refresh) and walls change light once. Rooms at Night's *Brightness* and *Blue
+  tint* sliders bypass `Edit()` ([unlit-rooms.md](unlit-rooms.md#settings)). `Update()` schedules a reinstall only when `postesAcesosNoCalculo`,
   `qualidadeAltaEmTodosOsLotes` or `gramaDoLoteUsaLuzDoLote` changed (they change code bytes), or when `luzDoLoteNaGrama`
   is on but its code could not be installed. `ReinstallNow` runs on the render thread through `DeferredReinstall`
   (`RenderCallbacks::endSceneBeforeOverlay`) and keeps the world state and ground light maps
@@ -456,7 +460,11 @@ The basis maps are read at their own scale: `IndoorBasisScale` sets the size con
 Only 64x64 basis maps (the only size captured) use it. The room light map covers the lot's power-of-two size at
 4 texels/m; the basis maps always cover 64 x 64 m (game basis VS: uv = lot half-metres x 1/128). `RoomMapPadding` keeps
 the directional maps of each room light map while the game holds both (reference count checked every 300 frames); the
-30-frame look is per (+X basis map, shader). The game's textures are never written. Details of the room maps:
+30-frame look is per (+X basis map, shader). When an indoor object's bound room light map has no known set (a
+`BasisFor` miss on a room-map-like texture), the next two frames look once per frame, so after the missing draw itself (on
+the game's shader) a kept solve's new map reaches Apex's indoor-object shader within 2 frames instead of up to 30 (11-40-32 recording: furniture going
+path A -> B -> A on lot load). A map that keeps missing (a lot without directional maps) re-arms the looks at most every
+30 frames. The game's textures are never written. Details of the room maps:
 [engine/room-light-maps.md](../../engine/room-light-maps.md).
 
 ### Game-code side

@@ -24,7 +24,8 @@ It must:
 | [`tools/terrain_lighting_test/run_indoor_stories_checks.ps1`](../../tools/terrain_lighting_test/run_indoor_stories_checks.ps1) (`indoor_stories_fixture.cpp`) | Extracts the production `IndoorBoundaryPass`, `IndoorPassImpl` and `BasisLightHook` and runs them on mock game structures: all story pairs, open shafts, every solid intermediate floor, wall blocking, wall-mode restoration, tile heights, unavailable data, ghost rows and split-level crossings, the raised-room exterior wall veto, partial basis transmission. Optional `-ReferenceSource` compiles an older `IndoorPassImpl` to compare adjacent-story results | `run_indoor_stories_checks.ps1 [-OutDir ...] [-ReferenceSource ...]` | MSVC x86 |
 | [`tools/room_structure_test/run.ps1`](../../tools/room_structure_test/run.ps1) (`check.cpp`) | Extracts `NoteRoomStructure`: a new room schedules a refresh, LOD or repeated gathers do not, roof and wall changes do, repeated changes coalesce | `run.ps1` | MSVC x86 |
 | [`tools/roofed_openings_test/run.ps1`](../../tools/roofed_openings_test/run.ps1) (`check.cpp`) | Extracts the story grid, its ray walk (`GridPassImpl`) and the roofed rooms' doors (`RoofedDoors`, `DoorSig`, `DoorSeen`) and runs them on synthetic grids: a roofed room with a two-cell arch, a lamp in front sees it, one behind or beside does not; the lit floor patch through the arch is bounded by the jambs with no seam between the cells; a ray over the wall's top meets the room's roof; a closed room has no door and stays dark; a window's sill; an arch into another roofed room is no door, into a roofless room it is; the signature follows the doors | `run.ps1` | MSVC x86 |
-| [`tools/room_ambient_test`](../../tools/room_ambient_test/README.md) (`room_ambient_test.cpp`) | Room ambient and scheduling policy (`room_ambient_policy.h`): group deadlines, first dispatch, overdue updates, tick wrap, window recheck timing (0 / 2 s / 6 s, bounded, wrap), lamp refresh delay (120 / 200 ms), safety-net gap (2 s / 500 ms), edit urgency (8 s cap) and edit hold decision, gather ordering, floor priority, structure and floor-edit timing | `run.ps1` | MSVC x86 |
+| [`tools/room_ambient_test`](../../tools/room_ambient_test/README.md) (`room_ambient_test.cpp`) | Room ambient and scheduling policy (`room_ambient_policy.h`): group deadlines, first dispatch, overdue updates, tick wrap, opening send collection (600 ms / 1.5 s) and skip serial, window recheck timing (0 / 2 s / 6 s, bounded, wrap), lamp refresh delay (120 / 200 ms), safety-net gap (2 s / 500 ms), edit urgency (8 s cap) and edit hold decision, gather ordering, floor priority, structure and floor-edit timing | `run.ps1` | MSVC x86 |
+| `tools/setup_lot_test/` (`check.cpp`) | The lot capture test (`setup_lot_policy.h`): the played lot, a priority lot (also with a world active id of 0 or stale), *High quality on every lot*, an unexpected getter and the low quality are never gated; a lot capture is gated, also with no world active lot; one re-solve per gated to not gated change, never carried to another lot id | `run.ps1` | MSVC x86 |
 | `tools/mesh_occlusion_test/` | The retired mesh blockers' collector, BVH and replacement policy, in the standard and development configurations | `run.ps1 -OpaqueShader <ps.bin> -CutoutShader <ps.bin> -Standard` or `-Development` | MSVC x86, two captured pixel shaders |
 | `tools/liveness_prune_test/` | `liveness_prune.h`: an entry survives one miss and is erased after two sweeps in a row without its key; key 0 is never live | `run.ps1` | MSVC x86 |
 | [`tools/basis_test/basis_test.cpp`](../../tools/basis_test/basis_test.cpp) | `PatchBasisSmooth` / `PatchIndoorBasis` on a captured pixel shader, disassembled with d3dcompiler_47 | `basis_test <ps.bin> [lmSampler]` | d3dcompiler_47, a captured shader |
@@ -41,6 +42,11 @@ an FPS gain, complete climate coverage or resolution of texture allocation stall
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-11 | `87213f32` (world's active lot getter by signature) | EA app 1.69.47 (`TS3.exe`) in game, log | The getter is found by signature at `0x00C5EF10`; `[SetupLot] gate off` is no longer logged. Whether a lot capture is recognised and skips light sharing on the EA app is not established (open checks) | In game, backend not recorded |
+| 2026-11-11 | `87213f32` (picture-lot gate on the EA app) | EA app 1.69.47 (`TS3.exe`), log review | No defect: 374 of 375 addresses found (only `RefPackDecompress` missing); `RootGetter`, `LodChoice`, `RoomSolve` and the lot priority getters match once each, with the Steam offsets. The session stopped at the household picker (no household played), so no lot reached the high quality and the gate did not run; `+0x288` on the EA app is inferred, not read | Log only |
+| 2026-11-11 | `206e4b45` (borrowed lamps that lit nothing skipped), public build | Steam 1.67.2 in game, played | Frame time and room updates visibly better in play; not measured, and the maps against `perf_borrowed_zero_skip = false` not compared | In game, backend not recorded |
+| 2026-11-10 | Working tree on `8a145cd` (loading triggers of rooms near openings collected) | Standard Release x86 build; `tools/room_ambient_test` (`OpeningSendDue`, `OpeningCoveredAfter`); `python tools/public_text_check.py` | Build: 0 warnings. 163 checks, 0 failures; production room updater 1345 checks, 0 failures. Not checked in game | CPU harness |
+| 2026-11-10 | Working tree on `771017f` (one reflection for an atrium) | Standard Release x86 build; `tools/arch_ambient_test` (`AtriumProbe`); `tools/room_ambient_test`; `tools/rt_lamps_test`; `tools/outdoor_delta_test`; `python tools/public_text_check.py`; both call sites and the fallback signature unique in `TS3W.exe` 1.67.2 | Build: 0 warnings. 0 failures. Not checked in game | CPU harness / native D3D9 |
 | 2026-10-29 | `d59f6ba` (released as 2.18.2, tag `v2.18.2`, ASI SHA-256 `0C96DABA986812C417E40E771CF6B5810B53565285ACD2A1AC801A7D09EE3DAA`; lamp posts on neighbouring lots `358a394`, picked by place `28975fe`, review fixes) | Standard Release x86 build; `tools/i18n_check`; `perl tools/menu_audit.pl .`; developer builds `C23EDBE4` and `907C47DA` in game | Build with no errors; i18n OK (21 languages, 2432 keys); menu audit: no new findings. In game: each move of a post relit every story of the neighbouring lots in 7.5 to 31 ms with no room solves, those lots 0.006 to 0.014 ms a frame; no visible delay after placing or dropping a post. The review fixes of `79c87e1` were not seen in game | In game, backend not recorded |
 | 2026-10-28 | `ddb9e44` (walls relit first, floor mask four texels at a time) | Developer recording of lamp drags | The under-floor share's update about 1.6 ms a relight round before, 0.65 ms on average after; every round fit in one frame (before: rounds of up to 20 maps over 5 to 8 frames, the seam between stories showing two lamp positions) | In game, backend not recorded |
 | 2026-10-28 | `ea376c0` (a room floor map smaller than its solve) | Developer recording on a 20 x 30 m lot (own floor maps 256x128 and 256x256 under a 512x256 working map) | Every lamp move relit all stories without a room-0 solve; the game's room solves during a drag fell from 5.0 ms to 0.6 ms a frame | In game, backend not recorded |
@@ -226,6 +232,50 @@ topology mutation inside a point is not reproduced. This release does not promis
   post about 0.6 s late (session `21-03-29`: its room 0s solved in full 563 ms after the edit).
 
 ## Open checks
+
+- Fast lot pictures (3.1.1, not yet tested in game). Load a save: **expected** one `[SetupLot]` line for the played lot,
+  reading `not gated`, with its id equal to the world active lot or priority 1, and no `room gathers skipped light
+  sharing` or `lot capture over` line for it. Start a New Game: **expected** `lot capture` and `room gathers skipped light
+  sharing` for each lot photographed during setup (world active lot 0 or another lot, priority 0), then one `lot capture
+  over after N ms` per lot; the household's lot reads `not gated` once picked. Compare the time from the first to the last
+  `Active lot tracker` line with `fastLotPictures = false` on the same world (~110 s before).
+  Also, in normal play: pan the camera onto a neighbour's lot and onto a community lot without travelling; open Edit Town
+  and select a non-active lot; travel to a community lot and back; open the save-file household picker. **Expected:** no
+  `lot capture` and no `room gathers skipped` line in any of these. Any of those lines for a lot played or viewed in
+  normal play is a failure: set `fastLotPictures = false`. After picking the household, a screenshot at the same camera
+  after 10 s matches a `fastLotPictures = false` run.
+  On the EA app 1.69.47 the getter is found (2026-11-11). The EA session's logs show no defect in the gate's address
+  chain, but no household was played in it, so no lot reached the high quality and the gate was never exercised.
+  **Still to confirm** on the EA app: pick a household and play about a minute; **expected**
+  `[SetupLot] Lot ... quality 1, world active lot ...` and `[RtOutdoorLamps] Active lot tracker ...`. Without them,
+  read `+0x288` of that lot's story managers while the game runs.
+- Borrowed lamps that lit nothing skipped (3.1.1): F7 captures of a multi-story house at night with
+  `perf_borrowed_zero_skip` on and off. **Expected:** identical room maps; the status line counts skipped evaluations.
+  The solve time a room saves is not measured.
+- A lot entering the view opens no lamp edit (3.1.1, not yet tested in game): with a recording on, pan onto a
+  neighbour's lot and back, and enter a lot. **Expected:** no lamp edit window in the log for these; a lamp deleted on
+  the played lot 2 s after entering it still relights at once.
+
+- Loading triggers of rooms near openings collected per lot (3.1.1, not yet tested in game): with *Light between
+  stories* on, start New Game and time Play to the game opening, against the same world with the build before. With a
+  recording on, enter a lot. **Expected:** one `due` line with several bits (for example `0B`, `19`) instead of `01`,
+  `09`, `10` in a row (the line is written only when rooms were queued, with their count); its `rooms near openings sent to gather again` line counts rooms skipped as gathered after; the
+  settle (`due 20`) skips the rooms gathered after the round. A lamp moved on that lot relights at once as before, and
+  rooms near openings and atrium walls match a capture taken before the change within 1/255.
+- The settle after loading skips rooms already gathered after the first round (3.1.1, not yet tested in game): enter
+  the atrium lot with the camera held still. **Expected:** the `due 20` line may remain, but the `rooms near openings sent to
+  gather again` line counts the skipped rooms (*gathered after*); no `S`/`E` follows for rooms that are
+  already refined, and there is no `H` or FlushDeferred `Q` for a room in mid-solve. The skip count must be above 0 on the
+  atrium lot; refinements do not gather again, so with the AfterChangedWalk bursts gone it may read 0, and then the
+  criterion needs another test (the room's last solve against the time its sources became final). The final frame and
+  wall seams match a capture taken before the change within 1/255.
+
+- One reflection for an atrium (`ProbeBindHook`): an atrium at night, lit by lamps of both stories, seen from the upper
+  story. Take F7 captures just below and just above the floor line on the double-height wall. **Expected:** InteriorWall
+  `c5` / `c6` are equal on both draws (1, the upper member's probe), and the reflection part of the step at the floor
+  line is gone. With the indoor share off, `c5` / `c6` are the game's again. The lower story's floors and furniture take the same reflection. Case 1 (lot `9CE90DF0`) also had a
+  step in the light maps themselves (the upper map 13-15% brighter at the line). This change does not touch that part.
+  A SceneWriteRoom replay of that lot is the next test for it.
 
 - Lamp posts of other lots (`358a394`). A lamp post placed near a neighbouring lot, dragged along it
   for about 10 s, put down, then deleted. **Expected:** about 1 s after it stops, the neighbour's outside walls take its

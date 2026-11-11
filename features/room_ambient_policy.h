@@ -46,6 +46,13 @@ inline bool UrgencyKept(std::uint32_t now, std::uint32_t until, std::uint32_t ma
     if (static_cast<std::int32_t>(now - until) < 0) return true;
     return state >= 1 && state <= 3 && static_cast<std::uint32_t>(now - marked) < 8000u;
 }
+// An edit's room still waits (AtriumHold keeps its maps and furniture): until a solve begun after its mark ends and, for
+// a room that already showed light, while it waits for its next class's solve (states 1-3). A room never solved when
+// marked has nothing on screen to keep: its first solve ends the wait, even one begun before a later mark (neverSolvedNow:
+// +0x100 still 4; it changes only when a solve ends), so a lot entry's re-marks do not keep a story black for 8 s.
+inline bool EditRoomStillWaiting(int state, bool solvedSince, bool blankAtMark, bool neverSolvedNow) {
+    return blankAtMark ? neverSolvedNow : (state >= 1 && state <= 3) || !solvedSince;
+}
 // 12/10, lamp edits all at once (AtriumHold): 0 = keep holding, 1 = complete (every other story solved since the edit and
 // the ground's chunks written), 2 = timeout (2.5 s after the latest edit, 4 s after the first). A drag is never decided
 // while it goes on; its first edit is its release (the caller restarts `sinceFirst` then), so it times out 2.5 s after it.
@@ -64,10 +71,29 @@ inline int EditHoldOutcomeTogether(int pending, bool groundPending, std::uint32_
 inline bool GatherAfterChange(std::uint32_t started, std::uint32_t changed) {
     return static_cast<std::int32_t>(started - changed) > 0;
 }
+// A lot's loading triggers of its rooms near openings (rebuilt, options, floors or openings, dirty floor managers) are
+// sent together: once none came for 600 ms (rebuilt -> dirty managers measured up to 0.52 s apart), at the latest 1.5 s
+// after the first (first 0 = nothing collected)
+inline bool OpeningSendDue(std::uint32_t now, std::uint32_t first, std::uint32_t latest) {
+    return first && (static_cast<std::uint32_t>(now - latest) >= 600u || static_cast<std::uint32_t>(now - first) >= 1500u);
+}
+// The gather serial after which a room near openings is not sent again (0 = every room): a lamp edit sends every room; the
+// settle skips rooms gathered after the last round ended (roundSerial, 0 = not over: every room); a collected loading send
+// skips rooms gathered after its latest trigger was seen
+inline std::uint32_t OpeningCoveredAfter(bool edit, bool settle, std::uint32_t roundSerial, std::uint32_t pendSerial) {
+    if (edit) return 0;
+    if (settle) return roundSerial ? (roundSerial > pendSerial ? roundSerial : pendSerial) : 0;
+    return pendSerial;
+}
 inline bool WindowRecheckDue(std::uint32_t now, std::uint32_t armed, unsigned pass) {
     return pass < 3 && static_cast<std::uint32_t>(now - armed) >= (pass == 0 ? 0u : pass == 1 ? 2000u : 6000u);
 }
 inline float MoveBackground(float own, float oldBase, float newBase) { return own + newBase - oldBase; }
+// the same for a room floored at the empty-room colour (UnlitRooms AddBase): on the floor it follows the new floor, above it it
+// moves as MoveBackground and never goes under the new floor
+inline float MoveBackgroundFloored(float own, float oldBase, float newBase, float oldFloor, float newFloor) {
+    return std::fabs(own - oldFloor) <= 1e-5f ? newFloor : std::fmax(own + newBase - oldBase, newFloor);
+}
 inline void AccumulateAmbient(float* total, const float* own, float ownNorm, float groupNorm, float area) {
     const float scale = ownNorm > 1e-6f ? groupNorm / ownNorm : 1.0f;
     for (int k = 0; k < 4; k++) total[k] += own[k] * (k < 3 ? scale : 1.0f) * area;
@@ -84,6 +110,14 @@ inline bool SolverOwnsAmbient(int state) { return state >= 1 && state <= 3; }
 // The solve's ambient step runs in state 3 only; a room marked (1) or gathered (2) keeps its last ambient until then, so a
 // lamp edit's retake may still write it (a dragged lamp's rooms wait in 1-2 for the whole drag: their fill froze, 03/11)
 inline bool AmbientStepRunning(int state) { return state == 3; }
+// A roofed room whose ambient was never written or was cleared (both colours exactly 0: new, solved while roofless, which
+// skips the ambient step, or invalidated by the game) draws its walls black: marked (1) or gathered (2) until its solve,
+// solved (4, 5) until the next one. It takes what that step writes for an empty list (the unlit colour), with lamps too: a
+// solved roofed room never ends under it (UnlitRooms AddBase's floor), so it is a lower bound. Not 3: the step runs then.
+inline bool UnlitSeedDue(int state, const float* amb, const float* amb2, const float* target) {
+    const auto zero = [](const float* v) { return v[0] == 0.0f && v[1] == 0.0f && v[2] == 0.0f; };
+    return (state == 1 || state == 2 || state == 4 || state == 5) && zero(amb) && zero(amb2) && !zero(target);
+}
 inline bool AmbientUpdateDue(std::uint32_t now, std::uint32_t last) {
     return !last || static_cast<std::uint32_t>(now - last) >= 3000;
 }

@@ -1,0 +1,35 @@
+0011: SetRenderTarget(0) resets the client's viewport and scissor rect to the new target's size, as d3d9 and DXVK do. Upstream only invalidated the sent state, so GetViewport / GetScissorRect returned the previous target's values; a caller that saves and restores them (Apex Radiance's light-map smoothing in the middle of a frame) put a stale viewport back and the game drew the rest of that pass with it (the sea glitched for one frame). Reset and ResetEx do the same for the new back buffer, so the size after a resolution change is not the old one.
+
+Applies after 0001-0010 on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only).
+
+diff --git a/bridge/src/client/d3d9_device.cpp b/bridge/src/client/d3d9_device.cpp
+index 7e067a7..680aecb 100644
+--- a/bridge/src/client/d3d9_device.cpp
++++ b/bridge/src/client/d3d9_device.cpp
+@@ -1067,6 +1067,13 @@ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::SetRenderTarget(DWORD RenderTargetInd
+     // Setting render target 0 resets the viewport and the scissor rect on the server.
+     if (RenderTargetIndex == 0) {
+       m_sentState.invalidateViewportAndScissor();
++      // ...and in d3d9: the client's copy follows, or GetViewport / GetScissorRect return the previous target's
++      // (a caller that saves and restores them put a stale viewport back mid-frame: the sea glitched for a frame)
++      if (pLssRenderTarget) {
++        const D3DSURFACE_DESC desc = pLssRenderTarget->getDesc();
++        m_state.viewport = { 0, 0, desc.Width, desc.Height, 0.f, 1.f };
++        m_state.scissorRect = { 0, 0, (LONG) desc.Width, (LONG) desc.Height };
++      }
+     }
+   }
+   WAIT_FOR_OPTIONAL_SERVER_RESPONSE("SetRenderTarget()", D3DERR_INVALIDCALL, currentUID);
+@@ -4008,6 +4015,12 @@ template<bool EnableSync>
+ void Direct3DDevice9Ex_LSS<EnableSync>::initImplicitObjects(const D3DPRESENT_PARAMETERS& presParam) {
+   initImplicitSwapchain(presParam);
+   initImplicitRenderTarget();
++  // A Reset (Reset, ResetEx) sets the viewport and scissor rect to the new back buffer, as SetRenderTarget(0) does
++  if (m_pImplicitRenderTarget) {
++    const D3DSURFACE_DESC desc = m_pImplicitRenderTarget->getDesc();
++    m_state.viewport = { 0, 0, desc.Width, desc.Height, 0.f, 1.f };
++    m_state.scissorRect = { 0, 0, (LONG) desc.Width, (LONG) desc.Height };
++  }
+   if (presParam.EnableAutoDepthStencil) {
+     initImplicitDepthStencil();
+   }
