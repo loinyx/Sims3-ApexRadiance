@@ -12,7 +12,7 @@ that cannot run it, none of it runs.
 
 | | |
 |---|---|
-| Availability | Released in 2.13.0 (Performance > Lamp lighting > Instant (GPU)). Repeated game writes relit at most every 0.5 s and lamps on the ground drawn from 40 cm: Released in 2.15.1. Baked lamp records without padding (the frame rate of 2.15.1 while moving the camera): Released in 2.15.2. Shaders from the shader cache: Released in 2.15.3. Light past 1 on the lot ground, outdoor floors and outside walls (the outdoor scale): Released in 2.16.0. Kept solves that account for every light: Released in 2.16.1. Released in 2.18.0: a lamp drawn on every story at once, floor maps smaller than their solve relit, walls relit first, each lamp counted once on floors. Released in 2.18.2: the active lot's lamp posts drawn on the four lots next to it. Released in 2.18.3: no lots next to it while the active lot has no lamp post. Released in 3.0.0: the shadow search walks the rim of the ball's cone, the penumbra at door jambs is whole, a street-class lamp's cap carries its street factor, and lamps follow the sun at dawn and dusk. |
+| Availability | Released in 2.13.0 (Performance > Lamp lighting > Instant (GPU)). Repeated game writes relit at most every 0.5 s and lamps on the ground drawn from 40 cm: Released in 2.15.1. Baked lamp records without padding (the frame rate of 2.15.1 while moving the camera): Released in 2.15.2. Shaders from the shader cache: Released in 2.15.3. Light past 1 on the lot ground, outdoor floors and outside walls (the outdoor scale): Released in 2.16.0. Kept solves that account for every light: Released in 2.16.1. Released in 2.18.0: a lamp drawn on every story at once, floor maps smaller than their solve relit, walls relit first, each lamp counted once on floors. Released in 2.18.2: the active lot's lamp posts drawn on the four lots next to it. Released in 2.18.3: no lots next to it while the active lot has no lamp post. Released in 3.0.0: the shadow search walks the rim of the ball's cone, the penumbra at door jambs is whole, a street-class lamp's cap carries its street factor, and lamps follow the sun at dawn and dusk. Released in 3.1.2: a big lot's floor mask lamp sums computed on a worker thread, the lots next to it gathered urgently only when they leave the set or after a lamp edit, the lot just left solved urgently only after a GPU lamp edit there. |
 | Default | On (Lamp lighting: Instant (GPU); a saved `lampLightingMode` keeps its choice) |
 | Menu | System > Performance > Lamp lighting > Lamp updates: Instant (GPU) |
 | Configuration | `lampLightingMode = "instant"` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -81,10 +81,15 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    lane equals it bit for bit, and each texel's sums take the lamps in the same order). When the bake's signature changes
    with no lamp dragged, a map already shown also keeps its last copy and takes the worker's share (the same `FullUnder`
    sums), for up to 500 ms before the render thread computes it itself. A lot with more lamps
-   than one GPU batch computes each masked texel's lamp sum on the CPU; those sums are kept per map and computed again
-   only when a lamp's law or multiplier, or the threshold, changes or the map is rebuilt, and the mask buffer is
-   rewritten only then, so a relight does not stall the render thread
-   ([history](../../history/night-lighting-level-light-share.md#2026-11-10-render-thread-stalls-on-a-big-lots-relights)).
+   than one GPU batch computes each masked texel's lamp sum (the floor mask's "all") on the CPU, on a worker thread
+   (`AllJob`): it copies the lamps, the points and the threshold, and runs with the render thread's floating-point state
+   (the x87 control word and MXCSR), so its values are the ones the render thread would compute. Meanwhile the map keeps
+   what it shows (its last copy; before its first relight, the game's map) and is relit when they arrive. Lamps that keep
+   changing for 2 s (`kAllWaitMs`), or a job that ends empty (no thread, an exception), leave the sums to the render
+   thread, as before; during a drag no job starts and the last sums stay until the lamp is still. The sums are kept per
+   map and computed again only when a lamp's law or multiplier, or the threshold, changes; a rebuild of the map with
+   the same points keeps them, and the mask buffer is rewritten only then
+   ([history](../../history/night-lighting-level-light-share.md#2026-11-11-floor-mask-sums-off-the-render-thread-and-false-lamp-edits)).
    A map the game writes again and again (its room solves, for instance while a lot stays loading) is relit for those
    writes at most every 0.5 s; a single write after a rest is relit at once (since 2.15.1; an F8 session: 105 writes in 10 s,
    each relight 45 ms of floor mask with 28 lamps, logged as "relights for repeated game writes moved later").
@@ -129,7 +134,11 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    map. The set follows the lots' places, so a post moved changes nothing of it and the lots next door follow it in the
    same frame; it is empty while the active lot has no lamp post (nothing of it to draw there), so a camera moving between
    lots without posts does not make their rooms gather again. It is checked once a second, never while a lamp is
-   dragged, and a lot that joins or leaves it gathers its outdoor rooms again (the posts left out or taken back). Their outdoor floors over another story take the under-floor share from their own
+   dragged, and a lot that joins or leaves it gathers its outdoor rooms again (the posts left out or taken back). A lot
+   leaving shows the game's maps at once, gathered without the posts, so its rooms go at a lamp edit's priority (tier 2);
+   a lot joining keeps the game's light until its relit copy shows the posts, so its rooms go at the game's pace, unless a
+   lamp was edited in the last 1.5 s (`LevelLightShare::RegatherOutdoorById`). As urgent rooms of the played lot, those
+   of every lot streaming in opened 8 s lamp-edit windows of room solves with no edit. Their outdoor floors over another story take the under-floor share from their own
    story's lamps of the bake, with the active lot's posts in the bake added as their gather took them before. A story the
    GPU cannot relight (a map refused, no kept solve after its three sends) takes the posts in its own gather again until
    the lot leaves the set.
@@ -161,7 +170,9 @@ handled, the shadow tiles rendered and the last relight times, or why the featur
   simultaneous render targets (`NumSimultaneousRTs` 2 or more); without them the maps are relit as before, cut at 1.
 - Classic (or Instant unable to run): nothing of this or of Quick outdoor lamp edits runs, no texture is swapped and no SetTexture
   callback is registered; the solve hooks only test that the option is off.
-- Turned off, the copies are dropped, the game's maps are bound again and the active lot's room 0s are solved again.
+- Turned off, or when the active lot changes, the copies are dropped, the game's maps are bound again and that lot's
+  room 0s are solved again: at a lamp edit's priority only when the GPU took a lamp edit on that lot since the last drop
+  (the game's maps lack it), else at the game's pace.
 
 ## Limitations
 
@@ -177,6 +188,8 @@ handled, the shadow tiles rendered and the last relight times, or why the featur
   other lots, winter and snowy floors, the ps_2_x walls (lower shader settings) and objects keep the cut at 1.
 - Rooms that take room 0's lamps (yards, rooms near openings) and their objects follow at the game's pace, through their
   own solve after the send above.
+- On a lot with more lamps than one GPU batch, a floor map keeps its previous light after a lamp edit until the worker's
+  lamp sums arrive (at most 2 s), and a map relit for the first time shows the game's map meanwhile.
 - Objects, Sims and terrain do not cast shadows; roofs are flat at the wall top, as in the solve's own test.
 - A lamp added or removed reaches the GPU set once the game gathers a story's room-0 light list again (a new lamp's own
   story does so at once; from then on it is drawn on every story).

@@ -302,6 +302,11 @@ In [`features/level_light_share.cpp`](../../../features/level_light_share.cpp):
 - The per-point hooks return at once for a light the game is about to drop (colour sum under room+0x63C, the game's own
   sums in the same order).
 - Night Lighting does not relight every lot 3 s after a world loads at night (the game has just solved them).
+- The outdoor rooms of other lots gathered again for the active lot's lamp posts, and the room 0s of a lot whose
+  Instant maps are dropped, are urgent only after a lamp edit (or, for a lot leaving Instant's lots next to the active
+  one, always): sent urgently with no edit, a lot streaming in opened an 8 s edit window of room solves
+  ([level-light-share.md](../night-lighting/level-light-share.md#lamp-posts-of-other-lots),
+  [rt-outdoor-lamps.md](../night-lighting/rt-outdoor-lamps.md)).
 - New Game's lot pictures: a lot the game lights only for its picture skips light sharing and Apex's sends, and its
   per-room state is cleared when the picture is taken ([level-light-share.md](../night-lighting/level-light-share.md), Fast lot
   pictures; `fastLotPictures`).

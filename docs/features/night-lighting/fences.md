@@ -9,7 +9,7 @@ same switch and strength. By day the lamp term fades to 3% of its night strength
 
 | | |
 |---|---|
-| Availability | Released (present since 1.0.0). Subdued daytime lamp response: Released in 2.6.0. Per-pixel lamps, walls blocking them and the game's own lighting in full daylight: Released in 2.7.0. Lighting corrections: Released in 2.12.1. The outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and tops above the lamp heads without ground light: Released in 2.12.3. The lot's ground lamp shade on pieces near the ground (*Walls shade lamp light near the ground*), upper-story railing and parapet tops without a ground lamp's pool, lamps tested from the piece nearest them: Released in 2.13.0. The reach law's scale without the outdoor walls' gain, the lamp sum held under 1 by its brightest channel, faces reading the ground lamp shade in front of them, gates closing their fence's gap in the lot shade: Released in 2.15.3. Elevated structures follow the architectural lamp gain and keep the ground pool out: Released in 2.15.4. A larger lamp pick memo, kept with lamps shining out of a house: Released in 2.17.1. The ground light on stair tops shaded at every height: Released in 2.18.2. Pieces a wall hides a lamp from drawn without it, and garden edging set in a house's wall dark to the lamps inside: Released in 3.1.0. |
+| Availability | Released (present since 1.0.0). Subdued daytime lamp response: Released in 2.6.0. Per-pixel lamps, walls blocking them and the game's own lighting in full daylight: Released in 2.7.0. Lighting corrections: Released in 2.12.1. The outdoor walls' lamp law with *Realistic lamp reach*, slabs blocking lamps below and tops above the lamp heads without ground light: Released in 2.12.3. The lot's ground lamp shade on pieces near the ground (*Walls shade lamp light near the ground*), upper-story railing and parapet tops without a ground lamp's pool, lamps tested from the piece nearest them: Released in 2.13.0. The reach law's scale without the outdoor walls' gain, the lamp sum held under 1 by its brightest channel, faces reading the ground lamp shade in front of them, gates closing their fence's gap in the lot shade: Released in 2.15.3. Elevated structures follow the architectural lamp gain and keep the ground pool out: Released in 2.15.4. A larger lamp pick memo, kept with lamps shining out of a house: Released in 2.17.1. The ground light on stair tops shaded at every height: Released in 2.18.2. Pieces a wall hides a lamp from drawn without it, and garden edging set in a house's wall dark to the lamps inside: Released in 3.1.0. Released in 3.1.2: each stair and fence piece lit from its own place (its own lamp shares and ground weight), groups found by their instance origins at every draw, pieces on an outside wall's line tested from the lamp's side, pieces on the lot's ground taking the lamps they see whole under the lot shade, the draw's constants set as one register run. |
 | Default | On |
 | Menu | Lighting > Game fixes > Objects > *Fences and stairs catch light*, *Fence brightness* |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -39,24 +39,33 @@ falls back to the brighter of the game's vertex lights and the world ground-ligh
    see [objects-and-rigs.md](objects-and-rigs.md#realistic-reach-on-objects-fences-and-windows)), with the walls' *Brightness* gain for elevated architectural runs. Ground-level runs retain their fence gain; the fence strength then acts as a trim over its 75% default. Only a group whose pieces were read (lamps placed) takes that copy; otherwise the
    first copy draws. F7 on a fence, railing or balcony band shows `FENCE/STAIRS (instanced) lit by the mod` with the lamps
    placed, the strengths and the `lamp law:` line.
-3. **Choose the lamps per group.** The group's centre and its two ends are read from the instance stream (the mean of the
-   instance positions, the farthest instance from it, then the farthest from that one; read again every 5 s), with up to
-   32 of its pieces taken evenly through the buffer. Lamps within 40 m plus the group's half length (at most 60 m more) are
+3. **Choose the lamps per group.** At every draw the instance origins are read from the instance stream and the group is
+   found by them (`InstancedGroupCentre`: a hash of their exact bits, the count and the stride). The game refills its
+   instance buffers, so one place in a buffer holds other pieces from one draw to the next; found by their origins, the
+   same pieces keep the same group, lamp pick and runs wherever the game puts them. A new set of origins gives the
+   group's centre and its two ends (the mean of the instance positions, the farthest instance from it, then the farthest
+   from that one), with up to 32 of its pieces taken evenly through the buffer. With `draw_reads_nowait` a busy buffer
+   keeps the group last read at that place and the next draw tries again (after three busy answers it waits). Lamps within 40 m plus the group's half length (at most 60 m more) are
    chosen around the centre. A lamp is dropped when an outside wall or a placed upper floor stands between it and the piece
    nearest it and both ends (0.5 m above the pieces), so a fence wholly behind a wall loses it and one that only runs past a
    wall keeps it. (The group's centre is not the first point: for an L-shaped band it stood in open air 3.6 m
    from its nearest piece, F7 18-17-00 #393; the centre is still used when no piece was read.)
-   **Pieces behind a wall** (`DrawFenceRuns`): a group of two or more pieces whose list keeps a lamp that a wall hides
-   from some of its pieces is drawn in runs of consecutive pieces that see the same lamps, each run with the colour of
-   the lamps it does not see set to 0 (`SetStreamSource` on the instance stream at the run's first piece, the instance
-   count set to the run's length). Each piece is tested 0.5 m above its origin. The masks are kept per group until its
-   positions, the lamp list, the wall and slab state or the placed lamps change; a group with more than 128 runs keeps
-   the one draw.
-   **Pieces set in an outside wall** (`FencePieceVisibility`): garden edging or a fence run into a house's wall has its
-   origin on the wall's line, so a ray from a lamp inside the house ends on that line without crossing the wall. For a
-   lamp shining out of a house, a piece (or a group end) within 0.1 m of an outside wall along x or z is tested 0.15 m
-   beyond that wall, on the side away from the lamp, so the lamp reaches it only through the wall's openings. Outdoor
-   lamps keep the test at the piece. With valid spatial data, the atlas contributes only to upward-facing surfaces; vertical faces use directional lamps.
+   **Each piece lit from its own place** (`DrawFenceRuns`, `FencePieceValues`): the game splits one stair or fence into
+   groups as it draws them, so one lamp share and ground weight per group gave neighbouring groups of one stair steps of
+   different brightness. In a group of two or more pieces each piece is tested 0.5 m above its origin: each listed lamp
+   takes the share of it the piece sees (the pick's wall and slab test, in steps of 1/32), and the ground light on faces
+   turned up takes the piece's own height gate and its own share of the atlas lamps (in steps of 1/64). Consecutive
+   pieces with the same values are drawn as one run (`SetStreamSource` on the instance stream at the run's first piece,
+   the instance count set to the run's length), each lamp's colour scaled from the group's share to the piece's and the
+   ground weight row set per run; a lamp a wall hides from a piece gives it no colour. The values are kept per group
+   until its pieces, the placed lamps, the ground gate's inputs or the wall and slab state change; a group with more
+   than 128 runs keeps the one draw with the group's values.
+   **Pieces on an outside wall's line** (`FencePieceVisibility`): garden edging or a fence run into a house's wall, and a
+   stair set on a foundation's edge, have their origins on the wall's line, where a ray from a lamp grazes the wall: a
+   lamp inside the house reached the edging without crossing the wall, and neighbouring steps took none, part or all of
+   an outdoor lamp by rounding, a cut at every piece. A piece (or a group end) within 0.1 m of an outside wall along x or
+   z is tested 0.15 m off that line: beyond the wall for a lamp shining out of a house (it reaches the piece only through
+   the wall's openings), on the lamp's side for any other lamp. With valid spatial data, the atlas contributes only to upward-facing surfaces; vertical faces use directional lamps.
    The atlas on those tops is weighted by `GroundLightGate` ([`ground_light_gate.h`](../../../features/ground_light_gate.h)):
    the height gate (none of it from 1.5 m over the highest head) counts only the heads of lamps in the atlas, not
    the indoor lamps shining out of a house; and the weight is multiplied by the share of the atlas lamps' light the group
@@ -71,15 +80,20 @@ falls back to the brighter of the game's vertex lights and the world ground-ligh
    the lot pass gives the grass under them ([lot-light-pass.md](lot-light-pass.md), as the story-0 outdoor floors,
    [floors.md](floors.md)), within about 1 m of the lot's ground; the ground light on faces turned up (the atlas, the light
    lying on the ground) takes that shade at every height, so the upper steps of an outdoor stair beside a house wall no
-   longer take the pool of the lamps behind the wall (a bright flat band over the shaded steps below). A curb or low fence
-   behind a free-standing wall no longer
-   keeps a lamp on the other side because another part of its group sees it; balcony railings and stair tops higher up
-   keep the per-group test alone. A face reads the shade 0.6 m in front of it along its normal
+   longer take the pool of the lamps behind the wall (a bright flat band over the shaded steps below). A piece within
+   about 1 m of the lot's ground (`ShadedOnGround`: the ground pool's full height gate) takes every listed lamp it sees
+   whole and the ground light without its share, and the shade dims it, smooth across the pieces: one partial share per
+   piece, tested at its origin, cut a stair against a foundation into 1 m blocks of different brightness. A lamp a wall
+   hides from the piece stays off, since the shade misses fence tops over 1.25 m, a face that reads it inside a house close
+   by, a lot whose shade is not built yet and the lamps shining out of a house; a lamp shining out of a house keeps its
+   share. A group whose every piece stands so takes the same values in its one draw. Balcony railings and stair tops higher up take the per-piece shares
+   above. A face reads the shade 0.6 m in front of it along its normal
    (`GroundShadow::kFenceShadeReach`); tops read it where they stand. The fence is itself a wall in the lot's mask, so at
    its own footprint a face turned to the lamp read the edge of its own shadow: a dark band under 1 m. Fence gates are
    objects ([objects-and-rigs.md](objects-and-rigs.md)); one standing in its fence's gap closes that gap in the lot shade
    ([lot-light-pass.md](lot-light-pass.md#lamp-shade-on-lot-ground-groundshadow)).
-4. **Draw with the atlas bound** and the strength and lamps set per draw; restore everything afterwards.
+4. **Draw with the atlas bound** and the atlas mapping, strength, ground weight and lamp rows set per draw as one run of
+   registers (`PsConstRun`); restore everything afterwards.
 5. **Daytime response:** the strength sent to the shader is `SurfaceLampGain(night, strength)` = strength x
    `LampDay(night)`: the configured strength at full night, 3% of it in full daylight, `0.03 + 0.97 smoothstep(0, 1,
    night)` between (2.12.3; until 2.12.2 a linear fade toward `0.08 x min(strength, 1)` and no draw at all at a night
@@ -122,12 +136,15 @@ The Lighting balance styles set `forcaNasCercas` to 67.5% (Subtle), 75% (Soft) o
 - Release cleanup has not yet received gameplay confirmation on the exact release artifact; see validation.
 
 - One lamp list serves a whole fence group (up to 8 lamps around its centre); a very long group can miss a lamp near one
-  end. Pieces a wall hides a listed lamp from are drawn without it, per piece; a lamp the list leaves out because no
-  piece near it and neither end sees it stays out for the whole group. A slab's edge dims a lamp by the largest share
-  of the three points. Within about 1 m of the lot's ground the ground lamp shade corrects this per pixel; higher up
-  (balconies, stair tops) it does not for the lamps, only for the ground light the tops take.
-- A piece set in an outside wall is tested beyond the wall only for walls along x or z; edging run into a diagonal wall
-  can still take a lamp from inside.
+  end, and a lamp the list leaves out because no piece near it and neither end sees it stays out for the whole group.
+  Each piece takes its own share of the listed lamps, tested at its origin only: a long piece half behind a wall takes
+  its origin's answer. Within about 1 m of the lot's ground a lamp the piece sees is taken whole and the ground lamp shade
+  dims it per pixel; higher up (balconies, stair tops) the per-piece share is the only wall test. A group of more than 128
+  runs keeps one draw with the group's values, so a long raised railing whose values change along it takes them whole.
+- A piece on an outside wall's line is tested off the line only for walls along x or z: edging run into a diagonal wall
+  can still take a lamp from inside, and a stair on a diagonal foundation's edge can still show a step between pieces.
+- A group's instance origins are read at every draw (a read-only lock of its instance buffer); while the buffer is busy
+  the group last read at that place is used.
 - The ground lamp shade is one factor for all lamps together (the lot mask's alpha, the share of lamp light the outside
   walls leave on the grass): a curb lit by a second lamp that no wall hides is dimmed as much as the first lamp's shade
   there. It is the lot ground's shade (outside walls only, at the lot's ground height, unverified as the ground under
@@ -222,9 +239,11 @@ Reached from `OnDrawInner` when the VS is class 7, after the *Street lamps light
 1. Off if `cercasComLuzDoChao` is off or the atlas (`LightmapSmooth::Atlas`) is not
    ready.
 2. `PatchedFor(g_fencePs, "Fence/stairs", PatchInstancedLamps)`: one patched copy per game pixel shader.
-3. Save `cA` and `cB`; bind the atlas to `sE` (`SamplerBind`, no mip filter); set `cA` to the atlas mapping and
-   `cB = (SurfaceLampGain(night, forcaNasCercas), 0, 0, 0)`; swap the pixel shader; draw; restore. The game's vertex
-   shader is kept. Counter: "fences/stairs: N" in the developer status line.
+3. Bind the atlas to `sE` (`SamplerBind`, no mip filter); set `cA` to the atlas mapping and
+   `cB = (SurfaceLampGain(night, forcaNasCercas), 0, 0, 0)`, with the per-pixel lamps the ground weight `cA + 2` and the
+   lamp rows from `cA + 3`, as one register run (`PsConstRun`: the run read once, set once and put back once, the
+   registers between the constants written back as read; one call per constant when the run is longer than 40 rows or
+   its read fails); swap the pixel shader; draw; restore. The game's vertex shader is kept. Counter: "fences/stairs: N" in the developer status line.
 4. Ground lamp shade (a copy with `shadeSampler >= 0`): `FloorShadeBind` with the lot whose rectangle holds the group's
    centre (`FindLotAt`, any rotation) binds `LotMaskTexture(lot)` to `sS` and the 3 rows, and restores both after the draw.
    No group read, no lot there, or *Walls shade lamp light near the ground* off: the white 1 x 1 mask and gate 0 (the draw as
@@ -233,15 +252,17 @@ Reached from `OnDrawInner` when the VS is class 7, after the *Street lamps light
    and the gate, or why there is none).
 
 **Lamp pick memo** (`PickFenceLamps`, `FencePickMemo`). The group's lamp pick (`PickFenceLampsImpl`: the lamps, their
-cones and reach rows, the highest atlas lamp head and the ground share) is kept in 1024 direct-mapped entries keyed by
-the group's entry, the generation of its positions (moved at every read of them) and the law, with the rules of the
+cones and reach rows, each placed lamp's share, the highest atlas lamp head and the ground share) is kept in 1024
+direct-mapped entries keyed by the group's entry, its read generation (moved when a new set of origins is read) and the
+law, with the rules of the
 outdoor objects' pick memo: an entry is valid while the lamp list (`g_lampMemoGen`) and everything the wall and slab
 test reads (`LevelLightShare::LampVisibilityState`, the same before and after the pick) are unchanged. A lamp shining
 out of a house is tested on its own copy of the walls, a snapshot that is replaced and never changed; its generation is
-part of `LampVisibilityState`, so picks with such lamps are kept too. A hit writes exactly what the pick would: the same rows, head
+part of `LampVisibilityState`, so picks with such lamps are kept too. A hit writes exactly what the pick would: the same rows, lamp shares, head
 height, share, counters and candidate count. The memo follows the development switch `lamp_visibility_memo` and is not
-used while the developer switch *Record story light samples for the diagnostics* has F8 record the wall and slab tests,
-or while a light capture runs; an F8 dump or an F7 no longer turns it off for the rest of the session. The draw-cost log
+used while the developer switch *Record story light samples for the diagnostics* has F8 record the wall and slab tests
+(that switch is not saved: it starts off each session, [developer mode](../developer-mode.md)), or while a light capture
+runs; an F8 dump or an F7 no longer turns it off for the rest of the session. The draw-cost log
 counts the draws that did not use it, by reason. Development builds pick one hit in 64 again on a copy and
 compare it bit for bit; a difference turns the memo off for the session
 (`[LotLightBridge] Fence lamp pick memo: a kept pick differed from a new one ...`). A world change empties it. The
@@ -294,7 +315,7 @@ The same function feeds the outdoor object lamp paths and snow on objects (`Draw
 | File | Symbols | Role |
 |---|---|---|
 | `features/shader_patches.cpp/.h` | `IsInstancedStructureVs`, `PatchInstancedLamps`, `InstancedPatch`, `AppendGroundShade` | Recognition and patch |
-| `features/lot_light_bridge.cpp` | `ClassifyVs` (class 7), `DrawInstanced`, `PatchedFor`, `g_fencePs`, `SetFenceGroundLight`; `PickFenceLamps` / `PickFenceLampsImpl`, `g_fencePick`; `DrawFenceRuns`, `g_fenceRunMasks`; `FencePieceVisibility`; `FindLotAt`, `FloorShadeBind`, `g_fenceShadeLot` / `g_fenceShadeNoLot` | Dispatch; lamp pick and its memo; pieces behind a wall; ground lamp shade |
+| `features/lot_light_bridge.cpp` | `ClassifyVs` (class 7), `DrawInstanced`, `PatchedFor`, `g_fencePs`, `SetFenceGroundLight`; `InstancedGroupCentre`, `g_groupAtPlace`; `PickFenceLamps` / `PickFenceLampsImpl`, `g_fencePick`; `DrawFenceRuns`, `FencePieceValues`, `ShadedOnGround`, `g_fenceRunMasks`; `FencePieceVisibility`; `PsConstRun`; `FindLotAt`, `FloorShadeBind`, `g_fenceShadeLot` / `g_fenceShadeNoLot` | Dispatch; groups by their origins; lamp pick and its memo; each piece's values and runs; pieces on a wall line; constants; ground lamp shade |
 | `features/ground_lamp_shadow.h` | `FloorShadeRows` | The shade's rows |
 | `features/terrain_lighting_policy.h` | `SurfaceLampGain`, `LampDay` | Daytime response |
 | `features/object_light_bridge.cpp` | `RoomGatherThunk` | Fenced yards on the CPU (mode 1) |
@@ -305,6 +326,11 @@ The same function feeds the outdoor object lamp paths and snow on objects (`Draw
   [history](../../history/night-lighting-fences.md).
 - Forcing `rig+0x224 & 0x10` for fences and stairs: the bit is already set.
 - A daytime endpoint of 0.25: replaced by 0.08 after gameplay feedback.
+- A group kept by its place in an instance buffer and read again every 5 s: the game refills its buffers, so pieces took
+  another group's lamps and stairs flickered as the camera moved
+  ([history](../../history/night-lighting-fences.md#2026-11-11-stairs-flickering-and-steps-between-groups)).
+- One lamp share and ground weight for a whole group: neighbouring groups of one stair showed steps of different
+  brightness (same entry).
 
 ## See also
 

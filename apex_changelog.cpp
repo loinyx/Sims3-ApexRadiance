@@ -6,6 +6,20 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k312Improved[] = {
+    "Performance: smoother camera on busy lots, with far fewer hitches",
+    "Performance: moving between lots no longer slows room lighting for seconds",
+    "Fences and stairs: each piece takes the light of the lamps around it",
+    nullptr};
+constexpr const char* k312Fixed[] = {
+    "Fences and stairs: no more flicker when the camera moves",
+    "Fences and stairs: steps on a raised floor no longer show blocks of light",
+    nullptr};
+constexpr const char* k312Highlights[] = {
+    "Smoother camera",
+    "Steady stair light",
+    nullptr};
+
 constexpr const char* k311Improved[] = {
     "Lighting: general improvements for better RTX Remix compatibility",
     nullptr};
@@ -542,6 +556,8 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"3.1.2", "2026-11-11", nullptr, k312Improved, k312Fixed,
+     "Smoother camera on busy lots, and stairs and fences keep a steady light", k312Highlights},
     {"3.1.1", "2026-11-11", nullptr, k311Improved, k311Fixed, "Better compatibility with the RTX Remix bridge, and fewer crashes"},
     {"3.1.0", "2026-11-10", k310Added, k310Improved, k310Fixed,
      "A frame-rate limit and window modes, a new Overview with game memory, and fences dark behind walls", k310Highlights},

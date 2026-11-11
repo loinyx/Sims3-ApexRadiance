@@ -10,7 +10,7 @@ appear in live tables in the menu and in `ApexRadiance_Hitches.txt`. Nothing is 
 
 | | |
 |---|---|
-| Availability | Developer mode only (included in the unified ASI; the normal runtime mode never loads or starts it). Sampled D3D dispatch timing and the *Re-issued draw (driver)* row: since 2.13.0 |
+| Availability | Developer mode only (included in the unified ASI; the normal runtime mode never loads or starts it). Sampled D3D dispatch timing and the *Re-issued draw (driver)* row: since 2.13.0. Measurement presets with per-hook registry timing on and every dispatch timed: since 3.1.2 |
 | Default | Off; never started automatically, also when the saved file says `enabled = true` |
 | Menu | Developer > Performance > *Frame times and stutters* |
 | Configuration | `[qol.frame_profiler]` in `ApexRadiance.toml`; profiles with the Development part store a copy under `[developer.frame_profiler]` |
@@ -334,7 +334,10 @@ none.
   one, except the driver call of any original draw a callback issues inside a dispatch (Night Lighting's re-issued
   draws, the Banding Fix's dithered re-issue of 3D back-buffer draws, any `CallOriginalDraw*`), booked as **Re-issued
   draw (driver)** (the game would have paid it for its own call). The same driver time is kept out of the dispatch cost
-  log line ([architecture.md](../architecture.md#33-dispatch-and-locking)). Per frame the figure is an estimate from about 1 in 16 dispatches; over a second it averages out.
+  log line ([architecture.md](../architecture.md#33-dispatch-and-locking)). Per frame the figure is an estimate from about 1 in 16 dispatches; over a second it averages out. With the Tester
+  switch *Sampled dispatch timing* off (`perf_sampled_dispatch_timing`, which both measurement presets turn off) every
+  outermost dispatch is timed with weight 1: a hitch's sampled dispatch booked 16 times showed 151 ms of mod time inside
+  a 55 ms frame.
   Night Lighting's share is split by fix in the development-build log line `[LotLightBridge] Draw cost by fix ...`
   ([Night Lighting diagnostics](night-lighting/README.md#diagnostics)), which is not part of the profiler.
 - **Present hooks (mod):** the -1000 Present hook is the frame boundary and pushes a `kPresentHooks` frame; the +1000

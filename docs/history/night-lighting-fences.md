@@ -170,3 +170,50 @@ single-piece group (no runs) with its origin on the wall's line (z 914, the wall
 inside the house (room 1, 0.5 m behind the wall). The ray from the lamp ends on the wall's line and never crosses the
 wall, so no near-skip change could block it. `FencePieceVisibility` tests such pieces 0.15 m beyond the wall from the
 lamp, for lamps shining out of a house only; outdoor lamps keep the test at the piece. Seen dark in game the same night.
+
+### 2026-11-11: stairs flickering and steps between groups
+
+**Context:** an outdoor stair flickered as the camera moved, and steps of one stair showed different brightness. Two F7
+captures of one corner of the stair showed two groups with ground weights 0.67 and 0.78.
+
+**Finding:** the game refills its instance buffers (dynamic, write-only), so one place in a buffer holds other pieces
+from one draw to the next. The group cache was keyed by the buffer, offset, count and stride and read again every 5 s:
+between reads the pieces drawn at a place were lit with another group's lamps, pick and runs. Separately, a group's lamp
+shares and ground weight were one for all its pieces, and the game groups the pieces of one stair as it draws them, so
+neighbouring groups of one stair took different values.
+
+**Outcome:** kept (`b9ada50c`). The origins are read at every draw and the group is found by their hash; each piece takes
+its own lamp shares and ground weight, drawn in runs of pieces with the same values (shares in steps of 1/32, weights in
+1/64). A lamp list per piece stays rejected (8 lamps of constants per piece and draw).
+
+### 2026-11-11: a stair on a foundation's edge
+
+**Context:** with the per-piece values, a stair set on a foundation's edge showed a cut at every piece, and a stair
+against a foundation showed 1 m blocks of different brightness.
+
+**Finding:** the stair's origins lie on the foundation's wall line, where an outdoor lamp's ray grazes the wall:
+neighbouring steps took none, part or all of the lamp by rounding. The test 0.15 m off the line applied only to lamps
+shining out of a house. Each piece within 1 m of the ground also took one share of a lamp, tested from a point beside
+the foundation, while the lot's ground lamp shade drawn with those pieces already tests the walls per pixel.
+
+**Outcome:** kept (`dc48ab9b`, `1c5f7434`). A piece on an outside wall's line is tested 0.15 m toward an outdoor lamp; a
+piece within the ground pool's full height gate under the lot shade takes every listed lamp whole and the ground light
+without its share, and the shade alone dims it. The release review found that this let a short fence beside a house take
+the lamp behind it again (the shade misses tops over 1.25 m, a face reading it inside the house, a lot with no shade built
+yet and the lamps shining out of a house): a lamp the piece's wall test hides stays off, a lamp it sees comes in whole.
+Not yet confirmed with an F7 in game
+([validation](../validation/night-lighting-fences.md#open-checks)).
+
+### 2026-11-11: the fence draw's cost
+
+**Context:** Frame Profiler runs on 3.1.2 development builds under the RTX Remix bridge: a fence or stair draw cost
+386 us on build 4.
+
+**Finding:** the draw noted its group for the ground shade under its buffer place, which the game's refills changed at
+almost every draw: each draw made a new group, read it again and rebuilt the fence grid and its gaps inside the draw hook
+([lot light pass](night-lighting-lot-light-pass.md#2026-11-11-the-fence-grid-rebuilt-at-almost-every-draw)). The draw
+also read, set and restored its pixel constants one call at a time, and a saved developer switch had kept the lamp pick
+memo off in every session ([developer mode](developer-mode.md#2026-11-11-the-story-samples-switch-not-restored)).
+
+**Outcome:** kept (`f1493b29`, `98980e41`, `fd7aed8d`): 7 to 11 us a draw on build 6. The draw cost line splits the
+fence draw into its parts (`7ef9c56b`) ([validation](../validation/night-lighting-fences.md#latest-results)).

@@ -5,6 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [3.1.2](3.1.2.md): stairs that no longer flicker or show steps of light, a fence or stair draw at 7 to 11 us instead of 386 us, a big lot's floor lamp sums off the render thread, no false lamp edits between lots.
 - [3.1.1](3.1.1.md): better compatibility with the RTX Remix bridge: no blinking parts and a steady sea reflection under the bridge, Display's Resolution changing the game's own resolution on every version, Apex Radiance Setup, no crash in the game's launcher, a crash fix contributed by @rodneypantonial.
 - [3.1.0](3.1.0.md): a Display page with window modes and a frame-rate limit, a new Overview with the game's memory, a low memory note, an update card, fences dark behind walls.
 - [3.0.0](3.0.0.md): indoor lights run on the GPU with Instant (GPU), table leg and stair shadows, steady table shadows in a drag, soft shadow ends, shadows and light continuous through arches, glass, a slow fade at dawn, lamp light through diagonal walls and real opening shapes, double-height rooms, new lighting defaults, 60 s recordings.
@@ -59,6 +60,7 @@ tests, publication) is in [workflow.md](../workflow.md#6-release).
 
 | Version | Published | Headline |
 |---|---|---|
+| [3.1.2](3.1.2.md) | 2026-11-11 | Smoother camera on busy lots, and stairs and fences keep a steady light |
 | [3.1.1](3.1.1.md) | 2026-11-11 | Better compatibility with the RTX Remix bridge |
 | [3.1.0](3.1.0.md) | 2026-11-10 | A steadier frame rate, a clearer Overview, and fences that stay dark behind walls |
 | [2.18.2](2.18.2.md) | 2026-10-29 | Lamp posts light neighbouring lots, and a stair fix |

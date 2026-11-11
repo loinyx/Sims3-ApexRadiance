@@ -10,7 +10,7 @@ in Build mode and at dusk. By day, lamps that the game keeps lit add a subdued g
 
 | | |
 |---|---|
-| Availability | Released (standalone since 0.1.0). Daylight composition, day/night phase updates, lot UV alignment and squared terrain lamp scales: Released in 2.6.0. Light detail, walls blocking lamp light outdoors, lamp switches in one frame, weather variants of the lot and terrain passes, and idavidveiga's daytime bloom fixes: Released in 2.7.0. Lamp lighting (Instant (GPU) with real-time outdoor lamps and quick outdoor lamp edits; Classic with lamp drags and floors shown together), outdoor and indoor light through openings, doors block light, walls shade lamp light near the ground, buildings block lamp light on trees and objects, shadow softness and smooth light maps: Released in 2.13.0. Light through stairwells, stairs on the directional maps, light through arches and doorways, foliage lit per vertex with crown shade on lot ground, and moonlight scaled at its reader: Released in 2.14.0. Moon at least 20 degrees high, Build mode keeping the season's sun times and smooth dusk: Released in 2.15.1. No moonlight by default, *Indoor light adds to the ground*, closed gates and fence gaps in the lot shade, trees kept on the normal light rig, windows at the size of their panes: Released in 2.15.3. Gable sampling, elevated trim gain, measured pillar blockers, per-lamp floor shadows on instanced structures, snowy lot edge blending and Restart lighting: Released in 2.15.4. Winter terrain layout recognition, foliage dusk synchronisation and reduced repeated work: Released in 2.15.6. Released in 2.18.0: the Lighting page in four tabs (Overview, Outside, Inside & floors, Game fixes), grouped cards and one Ground light slider. |
+| Availability | Released (standalone since 0.1.0). Daylight composition, day/night phase updates, lot UV alignment and squared terrain lamp scales: Released in 2.6.0. Light detail, walls blocking lamp light outdoors, lamp switches in one frame, weather variants of the lot and terrain passes, and idavidveiga's daytime bloom fixes: Released in 2.7.0. Lamp lighting (Instant (GPU) with real-time outdoor lamps and quick outdoor lamp edits; Classic with lamp drags and floors shown together), outdoor and indoor light through openings, doors block light, walls shade lamp light near the ground, buildings block lamp light on trees and objects, shadow softness and smooth light maps: Released in 2.13.0. Light through stairwells, stairs on the directional maps, light through arches and doorways, foliage lit per vertex with crown shade on lot ground, and moonlight scaled at its reader: Released in 2.14.0. Moon at least 20 degrees high, Build mode keeping the season's sun times and smooth dusk: Released in 2.15.1. No moonlight by default, *Indoor light adds to the ground*, closed gates and fence gaps in the lot shade, trees kept on the normal light rig, windows at the size of their panes: Released in 2.15.3. Gable sampling, elevated trim gain, measured pillar blockers, per-lamp floor shadows on instanced structures, snowy lot edge blending and Restart lighting: Released in 2.15.4. Winter terrain layout recognition, foliage dusk synchronisation and reduced repeated work: Released in 2.15.6. Released in 2.18.0: the Lighting page in four tabs (Overview, Outside, Inside & floors, Game fixes), grouped cards and one Ground light slider. Released in 3.1.2: a fix's pixel shader constants set as one register run, and only the wall mask's sampler states that differ. |
 | Default | On (`enabledByDefault = true`; the feature metadata keeps `experimental = true`) |
 | Menu | Lighting page (tabs Overview, Ground, Objects, Buildings, Stories); World > Water & Snow page (Lamp Glow, Water Reflections, Snow); developer options under Developer > Lighting |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -358,7 +358,11 @@ unchanged):
 - **CPU cost per replaced draw**: the handlers' own `SetPixelShader` / `SetVertexShader` / `SetTexture` /
   `Set*ShaderConstantF` use the wrappers `SetPs` / `SetVs` / `SetTex` / `SetPsConst` / `SetVsConst` over
   `D3D9Hooks::CallOriginal*`; `SetSamplerState` / `SetRenderState` are plain device calls. `SamplerBind` sets and
-  restores only the sampler states and texture that differ. `TrackPs` / `TrackVs` do nothing when the game sets the same
+  restores only the sampler states and texture that differ, `WallMaskBind` only the sampler states that differ. The fixes that set several pixel
+  shader constants for one draw (indoor furniture, outdoor objects, fences and stairs) read, set and restore them as one
+  run of registers (`PsConstRun`, at most 40 rows): the registers between them are written back as read, so the device
+  holds the same values as with one call per constant. Furniture takes the vertex-light rows its rig hold read or set in
+  the same draw (`RigHeld::vsNow`) instead of reading them again. `TrackPs` / `TrackVs` do nothing when the game sets the same
   shader again. `SelectLamps` results are memoized per (x, z, maxScore) bit pattern in a 512-entry direct-mapped table
   (`g_lampMemo`) until the lamp list changes. `RecordWorldChunk` hands back the chunk's `g_chunks` entry. The lamp
   refresh appears in the Frame Profiler as "Lamp refresh (mod)".
@@ -519,6 +523,9 @@ only DXVK's.
   a frame in the driver for the game draws the fixes made; <fix>: N draws a frame, U us each, Z ms a frame; ...`. A row
   is the claim source the fix marked (`ClaimSource`: `IndoorBasisSmooth`, `FoliageVertex`, `WorldTerrainLight`, ...),
   `several fixes` when a draw marked more than one, `left to the game` when none; the ten costliest rows are listed.
+  The fence and stair draw is split into its parts (the group noted for the ground shade, its positions read, the lamp
+  pick, the per-piece runs with their draws), followed by how many times the fence grid and its gaps were built and the
+  group count since the last line.
   The driver time of the game's own draw a fix issues (`UpdateHooks`' draw calls) is measured apart and taken out of
   the fix's time; the timed flag ends with the draw's scope, also when a fix throws (the hook's catch then makes the
   draw). The Frame Profiler's *D3D hooks (mod)* gives the total of every module's hooks

@@ -956,3 +956,21 @@ under-floor share computed on the render thread, 22-31 ms in one frame. A big lo
 or multiplier, or the threshold, changes or the map is rebuilt; a room's send count resets only after it held a kept
 solve for 10 s; a shown map waits up to 500 ms for the worker's share. One session each; not measured again after the
 changes.
+
+### 2026-11-11: floor mask sums off the render thread, and false lamp edits
+
+**Context:** Frame Profiler runs on 3.1.2 development builds
+([frame profiler](frame-profiler.md#2026-11-11-every-dispatch-timed-in-the-presets-and-the-312-analyses)).
+
+**Finding:** a story with more lamps than one GPU batch computed its floor mask's "all" values for every masked texel and
+lamp inside the buffer lock on the render thread when its lamps changed: hitches of 105 and 255 ms. Separately, the lot
+just left and lots streaming in were sent to their solve as lamp edits: `RegatherOutdoorById` always queued tier 2 and
+`DropAll` sent every story's room 0 at tier 1, so the played lot's urgent rooms opened 8 s lamp-edit windows at about
+10 ms of room solves a frame with nothing edited.
+
+**Outcome:** kept (`47d04a7e`). A worker computes "all" with the render thread's floating-point state; the map keeps
+what it shows until the values arrive, a rebuild with the same points keeps them, and the render thread computes them
+only after 2 s of changing lamps. A lot's outdoor regather is urgent only for a lot leaving the lots next to the active
+one or within 1.5 s of a lamp edit (the GPU's and the delta's included); the lot just left is sent urgently only when
+the GPU took an edit there. Not yet checked in game
+([validation](../validation/night-lighting-level-light-share.md#open-checks)).
