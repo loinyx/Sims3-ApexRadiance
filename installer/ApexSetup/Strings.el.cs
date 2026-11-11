@@ -221,7 +221,7 @@ public static partial class Strings
         ["Your Apex Radiance settings are always kept."] = "Οι ρυθμίσεις σου στο Apex Radiance διατηρούνται πάντα.",
         ["No internet connection"] = "Δεν υπάρχει σύνδεση στο Internet",
         ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (προτείνεται)",
-        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan με περισσότερη μνήμη (RTX Remix bridge)",
+        ["Vulkan with more memory (RTX Remix bridge, experimental)"] = "Vulkan με περισσότερη μνήμη (RTX Remix bridge, πειραματικό)",
         ["DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0})."] = "Το DXVK και το RTX Remix bridge χρειάζονται κάρτα γραφικών με Vulkan 1.3 (βρέθηκε: {0}).",
         ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again."] = "Το πρόγραμμα οδήγησης γραφικών είναι πολύ παλιό για το DXVK και το RTX Remix bridge (λείπει: {0}). Ενημερώστε το πρόγραμμα οδήγησης γραφικών και ανοίξτε ξανά το Setup.",
         ["{0} cannot start with this graphics driver (missing: {1}), so the game closes at start. Update the graphics driver, or choose Windows default (Direct3D 9) in Change components."] = "Το {0} δεν μπορεί να ξεκινήσει με αυτό το πρόγραμμα οδήγησης γραφικών (λείπει: {1}), οπότε το παιχνίδι κλείνει κατά την εκκίνηση. Ενημερώστε το πρόγραμμα οδήγησης ή επιλέξτε Προεπιλογή των Windows (Direct3D 9) στο Αλλαγή στοιχείων.",

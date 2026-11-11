@@ -214,7 +214,7 @@ public static partial class Strings
         ["Your Apex Radiance settings are always kept."] = "Vaše nastavení Apex Radiance se vždy zachová.",
         ["No internet connection"] = "Žádné připojení k internetu",
         ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (doporučeno)",
-        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan s více pamětí (RTX Remix bridge)",
+        ["Vulkan with more memory (RTX Remix bridge, experimental)"] = "Vulkan s více pamětí (RTX Remix bridge, experimentální)",
         ["DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0})."] = "DXVK a RTX Remix bridge vyžadují grafickou kartu s Vulkan 1.3 (nalezeno: {0}).",
         ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again."] = "Váš grafický ovladač je pro DXVK a RTX Remix bridge příliš starý (chybí: {0}). Aktualizujte grafický ovladač a pak znovu otevřete Setup.",
         ["{0} cannot start with this graphics driver (missing: {1}), so the game closes at start. Update the graphics driver, or choose Windows default (Direct3D 9) in Change components."] = "{0} se s tímto grafickým ovladačem nespustí (chybí: {1}), takže se hra hned při startu zavře. Aktualizujte grafický ovladač, nebo v Změnit komponenty zvolte Výchozí ve Windows (Direct3D 9).",

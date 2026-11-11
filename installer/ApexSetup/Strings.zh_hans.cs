@@ -207,7 +207,7 @@ public static partial class Strings
         ["Your Apex Radiance settings are always kept."] = "始终保留你的 Apex Radiance 设置。",
         ["No internet connection"] = "没有网络连接",
         ["Vulkan, DXVK (recommended)"] = "Vulkan，DXVK（推荐）",
-        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan，更多可用内存（RTX Remix bridge）",
+        ["Vulkan with more memory (RTX Remix bridge, experimental)"] = "Vulkan，更多可用内存（RTX Remix bridge，实验性）",
         ["DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0})."] = "DXVK 和 RTX Remix bridge 需要支持 Vulkan 1.3 的显卡（检测到：{0}）。",
         ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again."] = "显卡驱动太旧，无法使用 DXVK 和 RTX Remix bridge（缺少：{0}）。请更新显卡驱动，然后重新打开 Setup。",
         ["{0} cannot start with this graphics driver (missing: {1}), so the game closes at start. Update the graphics driver, or choose Windows default (Direct3D 9) in Change components."] = "{0} 无法在此显卡驱动下启动（缺少：{1}），因此游戏会在启动时关闭。请更新显卡驱动，或在“更改组件”中选择“Windows 默认（Direct3D 9）”。",

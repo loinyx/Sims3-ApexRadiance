@@ -45,8 +45,8 @@
     A.  DXVK  -  fewer stutters; Apex Radiance is made and tested with it
           Put DXVK's 32-bit d3d9.dll in Game\Bin.
 
-    B.  RTX Remix bridge  -  about 600 MB more free memory for big worlds
-          (needs a Vulkan graphics card)
+    B.  RTX Remix bridge (experimental)  -  about 600 MB more free memory
+          for big worlds (needs a Vulkan graphics card)
           1. Open the "RTX Remix bridge" folder next to this guide.
           2. Move any d3d9.dll already in Game\Bin to a backup folder.
           3. Copy everything inside the bridge folder into Game\Bin,

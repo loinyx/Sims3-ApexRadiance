@@ -210,7 +210,7 @@ public static partial class Strings
         ["Your Apex Radiance settings are always kept."] = "Je Apex Radiance-instellingen blijven altijd bewaard.",
         ["No internet connection"] = "Geen internetverbinding",
         ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (aanbevolen)",
-        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan met meer geheugen (RTX Remix bridge)",
+        ["Vulkan with more memory (RTX Remix bridge, experimental)"] = "Vulkan met meer geheugen (RTX Remix bridge, experimenteel)",
         ["DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0})."] = "DXVK en de RTX Remix bridge hebben een videokaart met Vulkan 1.3 nodig (gevonden: {0}).",
         ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again."] = "Je videodriver is te oud voor DXVK en de RTX Remix bridge (ontbreekt: {0}). Werk de videodriver bij en open Setup daarna opnieuw.",
         ["{0} cannot start with this graphics driver (missing: {1}), so the game closes at start. Update the graphics driver, or choose Windows default (Direct3D 9) in Change components."] = "{0} kan niet starten met deze videodriver (ontbreekt: {1}), dus het spel sluit bij het starten. Werk de videodriver bij of kies Windows-standaard (Direct3D 9) bij Onderdelen wijzigen.",
