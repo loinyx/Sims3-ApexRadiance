@@ -153,6 +153,25 @@ time (`LampLevelStep`), because the sky can still turn while the sun's part stan
 The moon-shadow shaders, the wet roads' sky and the terrain's daylight range keep the sky's own level (`SetSkyLevel`). By day nothing changes.
 The object rigs and tree lamps still follow the light manager's steps, and the ground bake still turns at the old moment.
 
+### Active lot switch while the camera moves
+
+The active lot is the first lot lit at the high quality, kept while it stays among them. A pan across lot borders moves the
+high quality from lot to lot, and each switch dropped every relit map and sent the lots next to it to gather their outdoor
+rooms at a lamp edit's priority, which opened lamp-edit windows of room solves with no lamp edited (a 22 s pan: 12
+switches, 10 windows of 3 to 16 ms of room solves a frame for 0.5 to 8 s).
+
+In development builds (switch `active_lot_hold`, not shipped, see
+[Limitations](#limitations)), while the camera moves the lot already active stays so until another lot has been the first
+lit at the high quality for 1.5 s (`kActiveLotHoldMs`), or until the camera has been still for 300 ms
+(`LotLightingMotion::SampleCameraMoving`). Meanwhile its maps are relit as before (nothing of the relight reads the high
+quality), and Quick outdoor lamp edits keep the same lot (`OutdoorDelta::ActiveLot` follows `RtOutdoorLamps::ActiveTracker`
+while Real-time outdoor lamps run, and reads a change of it at once). The lots next to it keep its lamp posts. The lot
+waiting is not sent to its solve during the hold (an urgent solve on the lot played, which the switch makes again in full),
+and once it shows a class with no copy left the hold ends and the switch runs on the next frame. A lamp edit on the lot waiting takes the
+game's solve. A lot the game no longer has, one with no relit map shown, or one whose maps are not drawn (waiting for its
+occluders) switches at once. Each hold is logged with its length (`Active lot switch held N ms while the camera moved`),
+and a hold ended by the lot waiting with `Active lot hold ends: Lot X story S (the lot waiting) ...`.
+
 ## Settings
 
 | Menu label | TOML key | Type | Default | Range | Effect |
@@ -172,7 +191,8 @@ handled, the shadow tiles rendered and the last relight times, or why the featur
   callback is registered; the solve hooks only test that the option is off.
 - Turned off, or when the active lot changes, the copies are dropped, the game's maps are bound again and that lot's
   room 0s are solved again: at a lamp edit's priority only when the GPU took a lamp edit on that lot since the last drop
-  (the game's maps lack it), else at the game's pace.
+  (the game's maps lack it), else at the game's pace. While the camera moves, the change can wait
+  ([active lot switch](#active-lot-switch-while-the-camera-moves)).
 
 ## Limitations
 
@@ -197,6 +217,9 @@ handled, the shadow tiles rendered and the last relight times, or why the featur
   working map; the log says so, and that lot's edits take the game's solve.
 - The lot geometry key counts wall tops that rose and floor edits of every lot together: such an edit on another lot
   rebuilds the active lot's occluders and solves its room 0s in full once.
+- While `active_lot_hold` is on, Quick outdoor lamp edits take the same lot: `OutdoorDelta::ActiveLot` follows
+  `RtOutdoorLamps::ActiveTracker` while it runs and any lot is lit at the high quality, so a room-0 solve of the lot
+  waiting is kept as a lot next to the active one. Unverified in game.
 
 ## Technical reference
 

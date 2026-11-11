@@ -35,6 +35,7 @@
 #include "penumbra.h"
 #include "room_map_dither.h"
 #include "lamp_mark_filter.h"
+#include "lot_lighting_motion.h"
 #include "apex_log.h"
 #include "hook_guard.h"
 #include "dev_switches.h"
@@ -74,6 +75,7 @@ constexpr DWORD kCoverFreshMs = 3000;    // a lot's coverage counts this long af
 constexpr int kSolveAsks = 3;            // a room 0 is sent to its solve for a kept solve at most this often in a row
 constexpr DWORD kSolveRetryMs = 60000;   // then this seldom: a run of refused sends left the story on the game's maps until the lot changed
 constexpr DWORD kDragQuietMs = 300;      // a GPU lamp that changed this recently is being dragged (or edited again and again)
+constexpr DWORD kActiveLotHoldMs = 1500; // (active_lot_hold) while the camera moves, another lot becomes the active one after this as the first lit at the high quality
 constexpr DWORD kHoldQuietMs = 1500;     // the rooms that take room 0's lamps are sent this long after a story's last move
                                          // (a Build mode drag moves in grid steps with pauses of up to about a second)
 constexpr DWORD kCheckEveryMs = 2000;    // the consistency check of the GPU lamps' stories
@@ -623,6 +625,10 @@ constexpr DWORD kKeptHoldMs = 10000;
 std::vector<std::unique_ptr<Slot>> g_slots;
 uintptr_t g_tracker = 0;
 uint64_t g_lotId = 0;
+// (active_lot_hold) the lot waiting to become the active one, since when it has been the first lit at the high quality, and
+// since when the switch has been held (0: none)
+uintptr_t g_holdFor = 0;
+DWORD g_holdForAt = 0, g_holdAt = 0;
 // (physical indoor lamps, render thread) a lot lamp as each room-0 map's pick reads it, once a round (Frame clears it): every
 // story's maps read every lot lamp again, with nothing edited
 struct LampNow {
@@ -1819,6 +1825,7 @@ void Frame(IDirect3DDevice9* dev) {
         }
         g_on.store(false);
         g_watch.store(false);
+        g_holdAt = 0, g_holdFor = 0; // (a hold ends unlogged: its length would span the time off)
         g_inactive = "off";
         return;
     }
@@ -1828,6 +1835,7 @@ void Frame(IDirect3DDevice9* dev) {
         if (!g_slots.empty()) DropAll(dev, why.c_str());
         g_on.store(false);
         g_watch.store(false);
+        g_holdAt = 0, g_holdFor = 0;
         Inactive(why);
     };
     if (g_ps3 == 0) return off("the device has no shader model 3");
@@ -1894,6 +1902,26 @@ void Frame(IDirect3DDevice9* dev) {
     uintptr_t tracker = trackers[0];
     for (int i = 0; i < nt; i++)
         if (trackers[i] == g_tracker) tracker = g_tracker;
+    // (active_lot_hold) while the camera moves, the active lot stays so until another has been the first lit at the high
+    // quality for kActiveLotHoldMs, or the camera has been still for 300 ms: a pan across lot borders switched back and forth
+    // (12 switches in 22 s), each dropping every relit map and sending the lots next to it to gather at a lamp edit's priority.
+    // Its maps keep relighting meanwhile (nothing below needs the high quality; OutdoorDelta::ActiveLot follows this lot while
+    // the switch is on, so its kept rooms stay). A lot the game no longer has, one with no relit room-0 map shown or none
+    // drawn, switches at once, and so does the waiting lot once it shows a map no copy stands in for (serve)
+    const DWORD holdNow = std::max<DWORD>(GetTickCount(), 1);
+    if (tracker == g_tracker || tracker != g_holdFor) g_holdFor = tracker, g_holdForAt = holdNow;
+    const bool hold = tracker != g_tracker && g_tracker && DevSwitches::ActiveLotHold() && holdNow - g_holdForAt < kActiveLotHoldMs &&
+                      g_on.load(std::memory_order_relaxed) &&
+                      std::any_of(g_slots.begin(), g_slots.end(), [](const std::unique_ptr<Slot>& s) { return !s->mgr && s->copy && s->relit && s->game; }) &&
+                      LevelLightShare::TrackerLive(g_tracker) && LotLightingMotion::SampleCameraMoving();
+    if (hold && !g_holdAt) g_holdAt = holdNow;
+    if (!hold && g_holdAt) {
+        if (DevSwitches::kCompiled)
+            LOG_INFO(std::format("[RtOutdoorLamps] Active lot switch held {} ms while the camera moved ({})", holdNow - g_holdAt,
+                                 tracker != g_tracker ? std::format("then tracker {:08X}", tracker) : std::string("the lot stayed the active one")));
+        g_holdAt = 0;
+    }
+    if (hold) tracker = g_tracker;
     if (tracker != g_tracker) {
         DropAll(dev, "another active lot");
         {
@@ -2064,6 +2092,16 @@ void Frame(IDirect3DDevice9* dev) {
                 allReady = false;
                 const std::string last = OutdoorDelta::LastDrop(S, cls);
                 waiting.push_back(std::format("story {}: no kept solve of class {}{}", S, cls, last.empty() ? std::string() : " - last: " + last));
+            }
+            // (active_lot_hold) the lot waiting to become the active one: not sent to its solve during the hold (an urgent solve on
+            // the lot played, which the switch makes again in full); with no copy of its class left the hold ends (the switch runs
+            // next frame), so its ground does not stay without the posts
+            if (!act && g_holdAt && LevelLightShare::TrackerOfLot(rn.lot) == g_holdFor) {
+                if (!had && holdNow - g_holdForAt < kActiveLotHoldMs) {
+                    g_holdForAt = holdNow - kActiveLotHoldMs;
+                    LOG_INFO(std::format("[RtOutdoorLamps] Active lot hold ends: {} (the lot waiting) shows class {} with no copy to stand in", who(), cls));
+                }
+                return true;
             }
             // idle: sent to its solve, which keeps its parts (a few times; never while the lot's parts overflow the budget, which
             // would drop another story's parts in turn)
@@ -3565,6 +3603,7 @@ void OnWorldChanged() {
     // (render thread) every map, the occluders and the edits of the previous world go; nothing is sent to a solve (the
     // previous world's lots are gone, and the new world's lots solve their rooms as they load)
     g_tracker = 0;
+    g_holdAt = 0, g_holdFor = 0;
     g_restartRequested = false;
     PublishNeighbours(0, {}, false);
     DropAll(g_dev, "the world changed");

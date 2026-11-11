@@ -974,3 +974,22 @@ only after 2 s of changing lamps. A lot's outdoor regather is urgent only for a 
 one or within 1.5 s of a lamp edit (the GPU's and the delta's included); the lot just left is sent urgently only when
 the GPU took an edit there. Not yet checked in game
 ([validation](../validation/night-lighting-level-light-share.md#open-checks)).
+
+### 2026-11-11: frames that drop or swing while the camera moves
+
+**Question:** the frame rate stayed steady with the camera still and dropped or swung while panning, turning or zooming
+out.
+
+**What we found:** a multi-agent reading of a 30-minute development session found the minutes marked still were all out
+of focus (the engine sleeps 10 ms a frame then), so the still baseline came from an earlier profiler run instead. In focus,
+frame time followed the draw count (about 3.3 us a draw, at most half of it Apex's draw callbacks). Crossing lot borders
+while panning switched Real-time outdoor lamps' active lot: 12 switches in 22 s, 10 of them followed by "Lamp edit"
+room-solve windows of 3 to 16 ms a frame for 0.5 to 8 s with no lamp edited, because every lot next to the old one was
+sent to gather at a lamp edit's priority. The Frame Profiler kept per-frame detail only for hitches (over twice the median
+of 120 frames), so a sustained slowdown while moving raised the median and stayed unrecorded.
+
+**Outcome:** the Frame Profiler writes a per-frame timeline (ApexRadiance_FrameTimeline.csv, with camera motion, focus,
+the room-queue drain, edit windows and the pick readback). The development switch ctive_lot_hold keeps the active lot
+while the camera moves until another has led for 1.5 s or the camera has been still for 300 ms, and Quick outdoor lamp
+edits follow the same lot during a hold (a first version left the two pickers apart, which a review caught). Unmeasured
+in game.

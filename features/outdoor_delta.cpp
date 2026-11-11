@@ -1663,17 +1663,24 @@ bool UpToDate(const void* roomPtr) {
 // The lot played now (light tree thread, read again every 500 ms): the first lot lit at the high quality, kept while it
 // stays among them (the list's order changes as the camera moves), as Real-time outdoor lamps and GPU room lamps pick it
 uint64_t ActiveLot() {
-    static uintptr_t s_tracker = 0;
+    static uintptr_t s_tracker = 0, s_held = 0;
     static uint64_t s_lot = 0;
     static DWORD s_at = 0;
     const DWORD now = GetTickCount();
-    if (s_at && now - s_at < 500) return s_lot;
+    // (active_lot_hold) the lot Real-time outdoor lamps holds while the camera moves, only while it runs (its tracker is
+    // current then); a change of it is read at once, not after the 500 ms: the lot it switches to is sent to its solve at once
+    const uintptr_t held = DevSwitches::ActiveLotHold() && RtOutdoorLamps::Watching() ? RtOutdoorLamps::ActiveTracker() : 0;
+    if (s_at && now - s_at < 500 && held == s_held) return s_lot;
     s_at = now | 1;
+    s_held = held;
     uintptr_t trackers[8];
     const int n = LevelLightShare::ActiveLotTrackers(trackers, 8);
     uintptr_t t = n > 0 ? trackers[0] : 0;
     for (int i = 0; i < n; i++)
         if (trackers[i] == s_tracker) t = s_tracker;
+    // (active_lot_hold) while Real-time outdoor lamps holds its active lot as the camera moves, the same lot: two pickers apart
+    // kept the waiting lot's room-0 solve in the active lot's form, which its neighbour copies cannot use
+    if (n > 0 && held && LevelLightShare::TrackerLive(held)) t = held;
     s_tracker = t;
     s_lot = 0;
     RoomRead r0;
