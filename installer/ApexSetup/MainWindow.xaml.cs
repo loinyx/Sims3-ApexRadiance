@@ -571,7 +571,7 @@ public sealed partial class MainWindow : Window
         BridgeDetail.Text = _renderer switch
         {
             RDxvk => T("Fewer stutters; Apex Radiance is made and tested with it."),
-            RBridge => T("Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card."),
+            RBridge => T("Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."),
             RNative => T("Works, but Apex Radiance is tested with DXVK."),
             _ => T("Your d3d9.dll stays as it is."),
         };
