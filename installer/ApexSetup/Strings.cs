@@ -225,7 +225,7 @@ public static class Strings
         ["Everything is installed and up to date."] = "Tudo está instalado e atualizado.",
         ["Will be removed"] = "Será removido",
         ["Keep"] = "Manter",
-        ["Close"] = "Fechar",
+        ["Nothing to apply"] = "Nada para aplicar",
         ["Apply 1 change"] = "Aplicar 1 mudança",
         ["Apply {0} changes"] = "Aplicar {0} mudanças",
         ["Setup changes only what is listed. Nothing changes until you click Install."] = "O instalador muda só o que está listado. Nada muda até você clicar em Instalar.",
