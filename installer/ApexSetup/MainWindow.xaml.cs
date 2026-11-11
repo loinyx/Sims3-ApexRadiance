@@ -593,7 +593,7 @@ public sealed partial class MainWindow : Window
         var titles = tags.Select(t => t switch
         {
             RDxvk => T("Vulkan, DXVK (recommended)"),
-            RBridge => T("Vulkan with more memory (RTX Remix bridge)"),
+            RBridge => T("Vulkan with more memory (RTX Remix bridge, experimental)"),
             RNative => T("Windows default (Direct3D 9)"),
             _ => T("Keep my d3d9.dll"),
         }).ToList();

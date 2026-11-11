@@ -184,7 +184,7 @@ public static partial class Strings
         ["Your Apex Radiance settings are always kept."] = "การตั้งค่า Apex Radiance ของคุณจะถูกเก็บไว้เสมอ",
         ["No internet connection"] = "ไม่มีการเชื่อมต่ออินเทอร์เน็ต",
         ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (แนะนำ)",
-        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan, หน่วยความจำว่างมากขึ้น (RTX Remix bridge)",
+        ["Vulkan with more memory (RTX Remix bridge, experimental)"] = "Vulkan, หน่วยความจำว่างมากขึ้น (RTX Remix bridge, ทดลอง)",
         ["Windows default (Direct3D 9)"] = "ค่าเริ่มต้นของ Windows (Direct3D 9)",
         ["Fewer stutters; Apex Radiance is made and tested with it."] = "กระตุกน้อยลง Apex Radiance สร้างและทดสอบด้วยตัวนี้",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] = "มีหน่วยความจำว่างเพิ่มราว 600 MB สำหรับโลกขนาดใหญ่ ต้องใช้การ์ดจอที่รองรับ Vulkan หากเกมทำงานผิดปกติ ให้เลือก DXVK",

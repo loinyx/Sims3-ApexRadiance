@@ -211,7 +211,7 @@ public static partial class Strings
         ["Your Apex Radiance settings are always kept."] = "Apex Radiance 설정은 항상 유지돼요.",
         ["No internet connection"] = "인터넷 연결 없음",
         ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (추천)",
-        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan, 메모리 추가 확보 (RTX Remix bridge)",
+        ["Vulkan with more memory (RTX Remix bridge, experimental)"] = "Vulkan, 메모리 추가 확보 (RTX Remix bridge, 실험적)",
         ["Windows default (Direct3D 9)"] = "Windows 기본값 (Direct3D 9)",
         ["Fewer stutters; Apex Radiance is made and tested with it."] = "끊김이 줄어요. Apex Radiance는 이것으로 만들고 테스트했어요.",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =

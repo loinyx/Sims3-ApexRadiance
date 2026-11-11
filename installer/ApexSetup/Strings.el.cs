@@ -221,7 +221,7 @@ public static partial class Strings
         ["Your Apex Radiance settings are always kept."] = "Οι ρυθμίσεις σου στο Apex Radiance διατηρούνται πάντα.",
         ["No internet connection"] = "Δεν υπάρχει σύνδεση στο Internet",
         ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (προτείνεται)",
-        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan με περισσότερη μνήμη (RTX Remix bridge)",
+        ["Vulkan with more memory (RTX Remix bridge, experimental)"] = "Vulkan με περισσότερη μνήμη (RTX Remix bridge, πειραματικό)",
         ["Windows default (Direct3D 9)"] = "Προεπιλογή των Windows (Direct3D 9)",
         ["Fewer stutters; Apex Radiance is made and tested with it."] =
             "Λιγότερα κολλήματα· το Apex Radiance φτιάχνεται και δοκιμάζεται με αυτό.",

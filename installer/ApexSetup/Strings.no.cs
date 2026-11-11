@@ -217,7 +217,7 @@ public static partial class Strings
         ["Your Apex Radiance settings are always kept."] = "Apex Radiance-innstillingene dine beholdes alltid.",
         ["No internet connection"] = "Ingen internettforbindelse",
         ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (anbefalt)",
-        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan med mer minne (RTX Remix bridge)",
+        ["Vulkan with more memory (RTX Remix bridge, experimental)"] = "Vulkan med mer minne (RTX Remix bridge, eksperimentell)",
         ["Windows default (Direct3D 9)"] = "Windows-standard (Direct3D 9)",
         ["Fewer stutters; Apex Radiance is made and tested with it."] =
             "Mindre hakking; Apex Radiance er laget og testet med det.",

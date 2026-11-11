@@ -167,11 +167,11 @@ The main settings file is `ApexRadiance.toml`. Saved presets remain in `Profiles
 
 **Upgrading from an older combined build?** Remove the old combined ASI or `S3SSApex.asi` from `Game\Bin`. Keep the official standalone `Sims3SettingsSetter.asi` if you use it. Apex imports recognised legacy settings on its first start.
 
-### Optional: RTX Remix bridge (64-bit renderer)
+### Optional: RTX Remix bridge (64-bit renderer, experimental)
 
 The bridge moves the game's renderer (DXVK) out of the 32-bit game into its own 64-bit process, so the game keeps about
-600 MB more free memory for long sessions and big worlds. The picture is the same as with DXVK. It needs Apex Radiance
-3.0.0 or later, which detects it on its own (**Settings → Compatibility** shows *RTX Remix bridge: Installed*).
+600 MB more free memory for long sessions and big worlds. The picture is the same as with DXVK.
+It is experimental: if the game misbehaves with it, use DXVK. It needs Apex Radiance 3.0.0 or later, which detects it on its own (**Settings → Compatibility** shows *RTX Remix bridge: Installed*).
 
 1. Close the game.
 2. Download `Apex-Radiance-RTX-Remix-bridge.zip` from the [latest release](https://github.com/loinyx/Sims3-ApexRadiance/releases/latest).
