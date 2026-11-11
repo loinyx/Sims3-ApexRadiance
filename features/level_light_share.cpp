@@ -2636,6 +2636,8 @@ int RoomSolveClass(const BYTE* room) {
 void ZeroSolveStart(BYTE* room) {
     t_zRoom = nullptr, t_zSkip.clear(), t_zSeen.clear();
     if (!PerfToggles::BorrowedZeroSkip.load(std::memory_order_relaxed)) return;
+    // (a quick pass solves at class 0 with its target class's wall tests and threshold: neither class's samples, no memo)
+    if (RoomLightQueue::QuickPassTarget(room) > 0) return;
     const int cls = RoomSolveClass(room);
     if (cls < 0 || cls > 7) return;
     const uint64_t geo = LevelLightShare::LotGeometryKey(room);

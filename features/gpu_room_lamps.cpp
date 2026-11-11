@@ -403,7 +403,7 @@ void DrawnTable(Entry& e, const void* room, int cls) {
         }
     // (10/11) the rooms of other stories whose lamps it lists: their furniture shades it too (a lamp of story 2 lighting story 1's
     // wall top through a stairwell), so a shadow continues across the floor line (BlockerTable::Join homes). At most 2
-    std::vector<std::pair<int, int>> homes;
+    std::vector<std::pair<int, int>> homes, tried;
     std::vector<OutdoorDelta::KeptRef> homeRefs;
     if (cross)
         for (uintptr_t l : e.listed) {
@@ -414,7 +414,8 @@ void DrawnTable(Entry& e, const void* room, int cls) {
             // (only a lamp of an upper story: its own story's furniture continues the shadow down past the floor line. A lamp of
             // a story below shines up a stairwell at a grazing angle, where the soft band of the stairs' records drew a false
             // diagonal band on the upper wall: F8 21-03-16)
-            if (L.story <= e.story || L.home <= 0 || std::find(homes.begin(), homes.end(), h) != homes.end()) continue;
+            if (L.story <= e.story || L.home <= 0 || std::find(tried.begin(), tried.end(), h) != tried.end()) continue;
+            tried.push_back(h);
             OutdoorDelta::KeptRef r{};
             if (!OutdoorDelta::KeptAt(e.lot, L.story, L.home, cls, r)) continue;
             homes.push_back(h), homeRefs.push_back(r);

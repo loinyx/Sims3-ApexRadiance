@@ -374,6 +374,11 @@ bool RetintUnlit(unsigned char* room, int& state, int slot, const float (*solved
             // final values over these (state 3), so the end result is the same.
             if (solved && (solve == 1 || solve == 2)) // (waiting for its solve; a solved room keeps the seed as before)
                 for (int k = 0; k < 3; k++) amb[k] = std::fmax(amb[k], solved[0][k]), amb2[k] = std::fmax(amb2[k], solved[1][k]);
+            // (a solve that ended between the state read and these writes lost its ambient: the room is solved again)
+            if (const int now = *reinterpret_cast<const int*>(room + 0xF0); (solve == 1 || solve == 2) && now != 1 && now != 2) {
+                state = -2;
+                return false;
+            }
             state = 3; // seeded
             return true;
         }

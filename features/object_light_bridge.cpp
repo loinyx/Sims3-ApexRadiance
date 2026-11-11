@@ -385,7 +385,8 @@ void AfterRoomGather(BYTE* rig, void* a, void* b, void* c, void* d) {
         }
         if (EmptyWaitingRoom(static_cast<const BYTE*>(now))) {
             std::lock_guard<std::mutex> lk(g_emptyGatherMx);
-            if (g_emptyGather.size() < 4096) g_emptyGather.insert(now);
+            if (g_emptyGather.size() >= 4096) g_emptyGather.clear(); // (rooms freed between an invalidate and their gather)
+            g_emptyGather.insert(now);
         }
     }
     if (mode == 0 && a && b) CrossStoryLamps(rig, a, b, c, d);

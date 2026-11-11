@@ -7774,7 +7774,9 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
     if (const int wk = g_curVsInfo->patched.worldK; wk >= 0) {
         float wm[5][4], uv[2] = {};
         int inWall = SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(wk), &wm[0][0], 5)) ? SetInWall(wm, size[0], size[1], uv) : 0;
-        if (inWall == 2 && wallMask && p.indoor.sideConst >= 0 && g_curVsInfo->lmRow[0] >= 0 && g_curVsInfo->lmRow[1] >= 0) {
+        // (only at an opening: a curtain or a cupboard against a wall also sits on a tile edge, and keeps its smooth read in place)
+        if (inWall == 2 && wallMask && p.indoor.sideConst >= 0 && g_curVsInfo->lmRow[0] >= 0 && g_curVsInfo->lmRow[1] >= 0 &&
+            LevelLightShare::OpeningNear(maskKey, uv[0], uv[1], 0.12f)) {
             float rx[4], ry[4];
             if (SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(g_curVsInfo->lmRow[0]), rx, 1)) &&
                 SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(g_curVsInfo->lmRow[1]), ry, 1))) {

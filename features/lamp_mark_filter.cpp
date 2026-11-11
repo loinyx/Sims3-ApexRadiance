@@ -903,7 +903,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
     }
     // what started each lamp edit (a lot entering the view started 12-16 s edit windows with no player input, 2026-11-10):
     // the first 8 a second
-    if (edit) {
+    if (edit && (!kPublicBuild || Recorder::Active())) {
         static std::atomic<DWORD> s_sec{0};
         static std::atomic<int> s_n{0};
         const DWORD sec = GetTickCount() / 1000;

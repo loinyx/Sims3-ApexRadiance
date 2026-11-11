@@ -223,7 +223,11 @@ bool BasisFor(IDirect3DTexture9* lightMap, IDirect3DTexture9* out[4]) {
         // directional maps) re-arms the looks no more often than kCheckEvery
         if (RoomMapLike(map)) {
             auto [seen, fresh] = g_missSeen.try_emplace(map, g_frame);
-            if (fresh || g_frame - seen->second >= kCheckEvery) seen->second = g_missAt = g_frame;
+            if (fresh || g_frame - seen->second >= kCheckEvery) {
+                seen->second = g_frame;
+                // (globally too: many maps that keep missing, each on its own cycle, held the one-frame look on every frame)
+                if (fresh || g_frame - g_missAt >= kCheckEvery) g_missAt = g_frame;
+            }
         }
         return false;
     }

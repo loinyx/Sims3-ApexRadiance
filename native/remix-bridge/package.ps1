@@ -35,12 +35,12 @@ Copy-Item (Join-Path $here 'conf\bridge.conf') $pkg
 Copy-Item (Join-Path $here 'conf\bridge.conf') $trex
 Copy-Item (Join-Path $here 'conf\dxvk.conf') $pkg
 # one text file: the install steps, then the licence texts the MIT and zlib terms ask to ship with the binaries
-$text = @(Get-Content -Raw (Join-Path $here 'PLAYER-README.txt'))
+$text = @(Get-Content -Raw -Encoding UTF8 (Join-Path $here 'PLAYER-README.txt'))
 foreach ($l in @(@('RTX Remix bridge', (Join-Path $src 'bridge\LICENSE-MIT')),
                  @('RTX Remix bridge third-party notices', (Join-Path $src 'bridge\ThirdPartyLicenses.txt')),
                  @('Microsoft Detours', (Join-Path $src 'submodules\Detours\LICENSE.md')),
                  @('DXVK', (Join-Path $here 'licenses\DXVK-LICENSE.txt')))) {
-    $text += "`r`n`r`n==== Licence: $($l[0]) ====`r`n`r`n" + (Get-Content -Raw $l[1])
+    $text += "`r`n`r`n==== Licence: $($l[0]) ====`r`n`r`n" + (Get-Content -Raw -Encoding UTF8 $l[1])
 }
 Set-Content -NoNewline -Encoding utf8 (Join-Path $pkg 'Apex Radiance RTX Remix bridge.txt') ($text -join '')
 
