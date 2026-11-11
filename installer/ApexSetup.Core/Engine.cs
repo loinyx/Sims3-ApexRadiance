@@ -226,6 +226,10 @@ public static class Engine
         {
             var c = list[i];
             var (files, version) = fetched[i];
+            // a mod the player keeps in the loader's scripts or plugins folder is updated there, beside its .ini
+            var asi = c == Components.Apex ? null : Known[c].FirstOrDefault(n => n.EndsWith(".asi"));
+            var home = asi is null ? g.Bin : Path.GetDirectoryName(Scan.FindAsi(g.Bin, asi) ?? Path.Combine(g.Bin, asi))!;
+            files = files.Select(f => Same(Path.GetDirectoryName(f.Dest)!, g.Bin) ? (f.Src, Path.Combine(home, Path.GetFileName(f.Dest))) : f).ToList();
             p?.Report(new(0.5 + 0.48 * i / list.Count, "Copying {0}", c));
             try
             {
@@ -242,7 +246,7 @@ public static class Engine
                     foreach (var conf in new[] { Path.Combine(g.Bin, "bridge.conf"), Path.Combine(g.Bin, ".trex", "bridge.conf") })
                         SetTargetProcess(conf, g.Exe);
                 // the log of a build that skipped itself would still say "wrong build" until the game runs
-                if (c == Components.Modernization) { EnsureResourceCfg(docs); File.Delete(Path.Combine(g.Bin, "ts3native.log")); }
+                if (c == Components.Modernization) { EnsureResourceCfg(docs); File.Delete(Path.Combine(home, "ts3native.log")); }
                 if (c == Components.Apex) RemoveLeftovers(m, g.Bin);
                 m.Versions[c] = version;
             }
@@ -305,7 +309,8 @@ public static class Engine
         // Apex, and what Setup installed; mods the player installed by hand stay (Repair or remove has a row for each)
         var s = Scan.Run(g, docs);
         foreach (var c in Components.All)
-            if (c == Components.Apex || s.Manifest.Versions.ContainsKey(c)) Remove(g, c, docs);
+            // (a component whose copy failed halfway has files but no version)
+            if (c == Components.Apex || s.Manifest.Versions.ContainsKey(c) || s.Manifest.Files.Any(f => f.Component == c)) Remove(g, c, docs);
     }
 
     static void Place(Manifest m, string c, string from, string to, bool own = false)
@@ -320,7 +325,8 @@ public static class Engine
         }
         string? backup = owned?.Backup;
         if (owned is null && File.Exists(to) && !Updates.Contains(Path.GetFileName(to))
-            && !(own && Known[c].Contains(Path.GetRelativePath(m.Bin, to), StringComparer.OrdinalIgnoreCase)))
+            // (the player's .conf edits are kept as a backup)
+            && !(own && !to.EndsWith(".conf", StringComparison.OrdinalIgnoreCase) && Known[c].Contains(Path.GetRelativePath(m.Bin, to), StringComparer.OrdinalIgnoreCase)))
         {
             var rel = to.StartsWith(m.Bin, StringComparison.OrdinalIgnoreCase) ? Path.GetRelativePath(m.Bin, to) : Path.GetFileName(to);
             backup = Path.Combine(Manifest.DirOf(m.Bin), rel.Replace('\\', '_') + ".bak");

@@ -169,7 +169,7 @@ try
     try { await Engine.InstallAsync(g, new[] { Components.Bridge }, src, null, docs); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
     Check(Manifest.Load(bin).Files.Any(f => f.Path.EndsWith("d3d9.dll") && f.Backup is not null) && !Manifest.Load(bin).Versions.ContainsKey(Components.Bridge),
           "a half-placed component is saved with its backups, not marked installed");
-    Engine.Remove(g, Components.Bridge, docs);
+    Engine.RemoveAll(g, docs); // (the bridge has no version, only files)
     Directory.Delete(B(".trex"), true);
     Check(Read(B("d3d9.dll")) == "reshade", "the player's d3d9.dll restored after a failed copy");
 
@@ -184,11 +184,14 @@ try
     File.WriteAllText(B("d3d9.dll"), "hand bridge remixapi_InitializeLibrary");
     Directory.CreateDirectory(B(".trex"));
     File.WriteAllText(B(@".trex\NvRemixBridge.exe"), "hand server");
+    File.WriteAllText(B("bridge.conf"), "player conf");
     Check(Scan.Run(g, docs).Layer == Layer.Bridge, "scan sees the hand-installed bridge");
     await Engine.InstallAsync(g, new[] { Components.Bridge }, src, null, docs);
+    Check(Read(Path.Combine(Manifest.DirOf(bin), "bridge.conf.bak")) == "player conf", "a hand-installed bridge's edited bridge.conf is backed up");
     Engine.Remove(g, Components.Bridge, docs);
     Check(!File.Exists(B("d3d9.dll")) && !File.Exists(B(@".trex\NvRemixBridge.exe")) && !File.Exists(Path.Combine(Manifest.DirOf(bin), "d3d9.dll.bak")),
           "a hand-installed bridge is removed after a repair, with no backup left");
+    File.Delete(B("bridge.conf"));
 
     // 15. the player's ts3native.ini survives a repair; installing the right build clears the wrong one's log
     File.WriteAllText(B("ts3native.log"), "SKIP all: host is not TS3W.exe at 0x400000");
@@ -219,6 +222,7 @@ try
     File.WriteAllText(B2("d3d9.dll"), "bridge client dxvk remixapi_InitializeLibrary"); // unzipped without .trex
     var s17 = Scan.Run(g2, docs2);
     Check(s17.Layer == Layer.Bridge && Verify.Files(g2, s17, null).Any(x => x.Args.Contains(@".trex\NvRemixBridge.exe")), "a bridge client without .trex is the bridge, its server missing");
+    Check(!Verify.Files(g2, s17, null).Any(x => x.Args.Contains(@".trex\d3d9vk_x64.dll")), "d3d9vk_x64.dll is not required of a bridge Setup did not install");
     Directory.CreateDirectory(B2(".trex"));
     File.WriteAllText(B2(@".trex\NvRemixBridge.exe"), "leftover");
     File.WriteAllText(B2("d3d9.dll"), "DXVK d3d9");
@@ -236,6 +240,10 @@ try
     Check(!f17.Any(x => x.Text.Contains("other edition of the game")), "a 1.69 script mod on Origin 1.69.43 is not the other edition's");
     f17.First(x => x.Args.Contains(@"scripts\Sims3SettingsSetter.asi")).Fix!();
     Check(!File.Exists(B2(@"scripts\Sims3SettingsSetter.asi")) && File.Exists(B2("Sims3SettingsSetter.asi")), "the scripts copy moved aside, the Game\\Bin one kept");
+    File.WriteAllText(B2(@"scripts\ts3native.ini"), "player switches");
+    await Engine.InstallAsync(g2, new[] { Components.Modernization }, src, null, docs2);
+    Check(!File.Exists(B2("ts3native.asi")) && File.Exists(B2(@"scripts\ts3native.asi")) && Read(B2(@"scripts\ts3native.ini")) == "player switches",
+          "Modernization in scripts is updated there, its ts3native.ini kept");
     Engine.Remove(g2, Components.Modernization, docs2);
     Check(!Scan.Run(g2, docs2).Ts3Native, "Modernization removed from scripts");
 }

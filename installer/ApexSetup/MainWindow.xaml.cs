@@ -765,7 +765,8 @@ public sealed partial class MainWindow : Window
         {
             touched |= p.Fraction >= 0.5; // (the downloads, before 0.5, change nothing)
             InstallBar.Value = p.Fraction;
-            Mark(p.Arg is null ? (p.Fraction >= 1 ? rows.Count : p.Fraction > 0.9 ? rows.Count - 1 : dels.Count) : dels.Count + order.IndexOf(p.Arg));
+            // (downloads, before 0.5, install nothing: the first row stays active until the copies start)
+            Mark(p.Arg is null || p.Fraction < 0.5 ?(p.Fraction >= 1 ? rows.Count : p.Fraction > 0.9 ? rows.Count - 1 : dels.Count) : dels.Count + order.IndexOf(p.Arg));
         });
         try
         {

@@ -16,7 +16,8 @@ public static class Verify
             f.Add(new(Severity.Error, "No ASI loader in Game\\Bin: Apex Radiance and the other .asi mods do not load.", Array.Empty<string>()));
         if (s.Layer == Layer.Bridge)
             foreach (var rel in new[] { "bridge.conf", @".trex\bridge.conf", @".trex\NvRemixBridge.exe", @".trex\d3d9vk_x64.dll" })
-                if (!File.Exists(B(rel)))
+                // only Setup's bridge (vanilla DXVK server) loads d3d9vk_x64.dll; NVIDIA's own Remix has none
+                if (!File.Exists(B(rel)) && (!rel.EndsWith("d3d9vk_x64.dll") || s.Installed(Components.Bridge) is not null))
                     f.Add(new(Severity.Error, "{0} is missing: the RTX Remix bridge does not start.", new[] { rel }));
         return f;
     }
