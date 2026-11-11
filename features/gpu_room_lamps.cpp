@@ -411,7 +411,10 @@ void DrawnTable(Entry& e, const void* room, int cls) {
             if (at == g_lotAt.end() || homes.size() >= 2) continue;
             const OutdoorDelta::LotLamp& L = g_lot[at->second];
             const std::pair<int, int> h{L.story, L.home};
-            if (L.story == e.story || L.home <= 0 || std::find(homes.begin(), homes.end(), h) != homes.end()) continue;
+            // (only a lamp of an upper story: its own story's furniture continues the shadow down past the floor line. A lamp of
+            // a story below shines up a stairwell at a grazing angle, where the soft band of the stairs' records drew a false
+            // diagonal band on the upper wall: F8 21-03-16)
+            if (L.story <= e.story || L.home <= 0 || std::find(homes.begin(), homes.end(), h) != homes.end()) continue;
             OutdoorDelta::KeptRef r{};
             if (!OutdoorDelta::KeptAt(e.lot, L.story, L.home, cls, r)) continue;
             homes.push_back(h), homeRefs.push_back(r);
@@ -445,7 +448,7 @@ void DrawnTable(Entry& e, const void* room, int cls) {
         e.paneFirst = glass ? static_cast<float>(j->AppendPanes(g_panes)) : 0.0f;
         t = std::move(j);
     } catch (...) {
-        e.tblKey = 0;
+        e.tblKey = 0, e.crossHead = false, e.homes.clear();
         return;
     }
     e.blockers = e.blkBase = std::move(t), e.blkHeader = 0.0f, e.blkOut.reset(), e.offHash = 0;
