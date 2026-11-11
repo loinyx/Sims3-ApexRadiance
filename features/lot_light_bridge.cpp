@@ -714,7 +714,7 @@ struct LotMask {
     IDirect3DTexture9* tex = nullptr;
     uint64_t sig = 0;
     DWORD checked = 0, shadeChecked = 0;
-    uint32_t fenceGenSeen = 0;      // g_fenceGen at its last shade check
+    uint32_t fenceGenSeen = 0;      // g_fenceSetGen at its last shade check
     int w = 0, h = 0;               // texels of the room mask
     std::vector<uint8_t> room;      // the room mask (255 outside rooms)
     std::vector<uint8_t> shade;     // the lamp shade (empty: none yet, 255 everywhere)
@@ -1382,6 +1382,12 @@ UINT g_curDipBase = 0, g_curDipMin = 0, g_curDipNum = 0; // the current DrawInde
 // The fence walls in a world box
 // (15/10) an 8 m grid of the fence walls, made again only when a group changed (each lot's check walked every group)
 uint32_t g_fenceGen = 1, g_fenceGridGen = 0;
+// The set of fence walls (FenceGridUpdate): a new generation only when the walls themselves changed, not when the same walls
+// came back under other groups (the game refills its instance buffers: a profiler run rebuilt the grid and its gaps many
+// times a frame, a third of the render thread's samples in its hitches, and every lot's shade every 250 ms)
+uint32_t g_fenceSetGen = 1, g_fenceGridFrame = ~0u;
+uint64_t g_fenceSetHash = 0;
+uint32_t g_fenceGridBuilds = 0, g_fenceGapBuilds = 0; // (developer log) grids made, gap lists made
 constexpr float kFenceCell = 8.0f;
 std::vector<GroundShadow::Wall> g_fenceAll;
 std::vector<uint64_t> g_fenceAllGroup; // each wall's group (g_fenceGroups key)
@@ -1395,11 +1401,13 @@ uint64_t FenceCellKey(int x, int z) { return (static_cast<uint64_t>(static_cast<
 // both sides was drawn in the last kGateFenceSeenMs (it was taken away; off screen it stays closed). A gap narrower than
 // kGapMin (a post, pieces a few cm short) is always closed: no fence has an opening that narrow, and light came round it
 // in a wedge. Render thread.
+uint32_t FloatBits(float f);
 struct FenceGap {
     GroundShadow::Wall w;
     float length = 0.0f;
     uint64_t key;
     uint64_t ga = 0, gb = 0; // the two pieces' groups
+    uint32_t ia = 0, ib = 0; // the two pieces (g_fenceAll; their groups again when the same walls come back under others)
     bool closed = false;     // under kGapMin: always a wall
 };
 constexpr float kGapMin = 0.4f, kGapMax = 2.5f, kGapNarrow = 0.02f;
@@ -1476,6 +1484,7 @@ void FenceGapsBuild() {
             // each gap once, whichever end found it (it is found from both: the walls' order follows a hash map)
             if (!seen.insert(gp.key).second) continue;
             gp.ga = g_fenceAllGroup[i], gp.gb = g_fenceAllGroup[bj];
+            gp.ia = i, gp.ib = static_cast<uint32_t>(bj);
             gp.closed = best < kGapMin;
             gp.length = ApexMath::Hypot(gp.w.x1 - gp.w.x0, gp.w.z1 - gp.w.z0);
             const uint32_t k = static_cast<uint32_t>(g_fenceGaps.size());
@@ -1487,22 +1496,41 @@ void FenceGapsBuild() {
 }
 void FenceGridUpdate() {
     if (g_fenceGridGen == g_fenceGen) return;
+    if (g_fenceGridFrame == g_roomMapFrame && !g_fenceAll.empty()) return; // at most once a frame: a later change waits a frame
+    g_fenceGridFrame = g_roomMapFrame;
     g_fenceGridGen = g_fenceGen;
+    g_fenceGridBuilds++;
+    // (2.15.3) a piece held by two groups (a group made again over the same fence stays until the sweep) once: two copies of
+    // a piece's end beside a gap made it look joined, and the gap and its gate were lost until the old group went.
+    // The pieces in a fixed order (by place; of two holders the lower group key), so the same walls give the same grid and gaps
+    // whatever groups hold them (the hash-map order flipped a gap's ends and changed the shade's key with nothing changed)
+    struct Piece { uint64_t place, group; const GroundShadow::Wall* w; };
+    std::vector<Piece> all;
+    for (const auto& [k, g] : g_fenceGroups)
+        for (const GroundShadow::Wall& w : g.walls)
+            all.push_back({GapKey(w.x0, w.z0, w.x1, w.z1) ^ static_cast<uint64_t>(std::lround(w.y0 * 20.0f)) * 0x9E3779B97F4A7C15ull, k, &w});
+    std::sort(all.begin(), all.end(), [](const Piece& a, const Piece& b) { return a.place != b.place ? a.place < b.place : a.group < b.group; });
     g_fenceAll.clear();
     g_fenceAllGroup.clear();
     g_fenceCells.clear();
-    // (2.15.3) a piece held by two groups (a group made again over the same fence stays until the sweep) once: two copies of
-    // a piece's end beside a gap made it look joined, and the gap and its gate were lost until the old group went
-    std::unordered_set<uint64_t> pieces;
-    for (const auto& [k, g] : g_fenceGroups)
-        for (const GroundShadow::Wall& w : g.walls) {
-            if (!pieces.insert(GapKey(w.x0, w.z0, w.x1, w.z1) ^ static_cast<uint64_t>(std::lround(w.y0 * 20.0f)) * 0x9E3779B97F4A7C15ull).second) continue;
-            const uint32_t i = static_cast<uint32_t>(g_fenceAll.size());
-            g_fenceAll.push_back(w);
-            g_fenceAllGroup.push_back(k);
-            const int cx = static_cast<int>(ApexMath::Floor(0.5f * (w.x0 + w.x1) / kFenceCell)), cz = static_cast<int>(ApexMath::Floor(0.5f * (w.z0 + w.z1) / kFenceCell));
-            g_fenceCells[FenceCellKey(cx, cz)].push_back(i);
-        }
+    uint64_t hash = 1469598103934665603ull;
+    for (size_t n = 0; n < all.size(); n++) {
+        if (n && all[n].place == all[n - 1].place) continue;
+        const GroundShadow::Wall& w = *all[n].w;
+        const uint32_t i = static_cast<uint32_t>(g_fenceAll.size());
+        g_fenceAll.push_back(w);
+        g_fenceAllGroup.push_back(all[n].group);
+        for (float v : {w.x0, w.z0, w.x1, w.z1, w.y0, w.y1, w.pass}) hash = (hash ^ FloatBits(v)) * 1099511628211ull;
+        const int cx = static_cast<int>(ApexMath::Floor(0.5f * (w.x0 + w.x1) / kFenceCell)), cz = static_cast<int>(ApexMath::Floor(0.5f * (w.z0 + w.z1) / kFenceCell));
+        g_fenceCells[FenceCellKey(cx, cz)].push_back(i);
+    }
+    if (hash == g_fenceSetHash) { // the same walls: the same gaps, with the groups that hold their pieces now
+        for (FenceGap& gp : g_fenceGaps) gp.ga = g_fenceAllGroup[gp.ia], gp.gb = g_fenceAllGroup[gp.ib];
+        return;
+    }
+    g_fenceSetHash = hash;
+    g_fenceSetGen++;
+    g_fenceGapBuilds++;
     FenceGapsBuild();
     if (!kPublicBuild && g_gapLogs < 12) {
         g_gapLogs++;
@@ -2042,6 +2070,16 @@ float FenceOpenShare(IDirect3DDevice9* dev) {
     return open;
 }
 
+// Every byte of an instance stream (FNV-1a, 32 bits at a time): a fence group's key with its mesh (NoteFenceGroup)
+bool HashInstanceBytes(const BYTE* p, UINT bytes, uint64_t& h) {
+    __try {
+        for (UINT i = 0; i + 4 <= bytes; i += 4) h = (h ^ *reinterpret_cast<const uint32_t*>(p + i)) * 1099511628211ull;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+std::unordered_map<uint64_t, uint64_t> g_fencePlaceKey; // a buffer place's last group key (used while the buffer is busy)
 void NoteFenceGroup(IDirect3DDevice9* dev) {
     if (!g_shadeOn || !g_curDipNum) return;
     UINT freq = 0;
@@ -2055,8 +2093,30 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
         vb0->Release();
         return;
     }
-    const uint64_t key = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb1)) << 32) ^ (static_cast<uint64_t>(off1) << 12) ^ (static_cast<uint64_t>(count) << 1) ^ stride1 ^
-                         (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb0)) << 7) ^ (static_cast<uint64_t>(g_curDipBase + g_curDipMin) << 40) ^ g_curDipNum;
+    // A group is keyed by its pieces (every byte of its instance records) and its mesh, not by its place: the game refills its
+    // instance buffers, so a place held other pieces from one draw to the next and every draw made a new group, read again,
+    // with the fence grid and every lot's shade built again after it (a profiler run: a third of the render thread in hitches)
+    const uint64_t place = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb1)) << 32) ^ (static_cast<uint64_t>(off1) << 12) ^ (static_cast<uint64_t>(count) << 1) ^ stride1 ^
+                           (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb0)) << 7) ^ (static_cast<uint64_t>(g_curDipBase + g_curDipMin) << 40) ^ g_curDipNum;
+    uint64_t key = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb0)) << 7) ^ (static_cast<uint64_t>(g_curDipBase + g_curDipMin) << 40) ^ g_curDipNum ^
+                   (static_cast<uint64_t>(stride0) << 56) ^ (static_cast<uint64_t>(count) << 20) ^ stride1;
+    {
+        void* pk = nullptr;
+        const auto known = g_fencePlaceKey.find(place);
+        const bool nowait = DevSwitches::DrawReadsNoWait() && known != g_fencePlaceKey.end();
+        const HRESULT hk = stride1 >= 12 && stride1 <= 256 ? vb1->Lock(off1, count * stride1, &pk, D3DLOCK_READONLY | (nowait ? D3DLOCK_DONOTWAIT : 0)) : E_FAIL;
+        const bool hashed = SUCCEEDED(hk) && pk && HashInstanceBytes(static_cast<const BYTE*>(pk), count * stride1, key);
+        if (pk) vb1->Unlock();
+        if (hashed) {
+            if (g_fencePlaceKey.size() > 4096) g_fencePlaceKey.clear();
+            g_fencePlaceKey[place] = key;
+        } else if (known != g_fencePlaceKey.end()) key = known->second; // busy: the pieces drawn there last
+        else {
+            vb0->Release();
+            vb1->Release();
+            return;
+        }
+    }
     const DWORD now = GetTickCount();
     FenceGroup& g = g_fenceGroups[key];
     g.seen = now ? now : 1;
@@ -2149,7 +2209,8 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
     if (now - s_swept > 1000) {
         s_swept = now;
         for (auto it = g_fenceGroups.begin(); it != g_fenceGroups.end();)
-            if (now - it->second.seen > 20000 || g_fenceGroups.size() > 4096) {
+            // (over 4096 groups: those not drawn for 2 s, not every group: erasing groups in use read them all again)
+            if (now - it->second.seen > (g_fenceGroups.size() > 4096 ? 2000u : 20000u)) {
                 g_fenceWalls.fetch_sub(static_cast<long>(it->second.walls.size()), std::memory_order_relaxed);
                 if (!it->second.walls.empty()) g_fenceGen++;
                 it = g_fenceGroups.erase(it);
@@ -2989,7 +3050,8 @@ IDirect3DTexture9* LotMaskTexture(IDirect3DDevice9* dev, const LotRect& rect) {
     // kShadeMinEveryMs more (log: "500 ms to its build sent"), the light in steps; at rest the key (every bake lamp, the
     // walls' copy) is not worked out more often than before
     // (the fast checks go on 200 ms past the drag, so one of them sees the key at rest when the drag hold and the moving lamp end)
-    const bool changing = m.fenceGenSeen != g_fenceGen || DragLite::Engaged() || DragLite::StepWithin(DragLite::kStillMs + 2 * kShadeCheckMs);
+    FenceGridUpdate(); // (the walls' set generation; once a frame)
+    const bool changing = m.fenceGenSeen != g_fenceSetGen || DragLite::Engaged() || DragLite::StepWithin(DragLite::kStillMs + 2 * kShadeCheckMs);
     // (GPU) a lot a dragged lamp moves over: every frame, so its walls' shadows follow the lamp (built at the next frame's first
     // reader with its chunks); a lot whose GPU build took over kEveryFrameMaxMs follows it at kShadeCheckMs
     constexpr double kEveryFrameMaxMs = 2.0;
@@ -2997,7 +3059,7 @@ IDirect3DTexture9* LotMaskTexture(IDirect3DDevice9* dev, const LotRect& rect) {
     if (!m.shadeChecked || everyFrame || now - m.shadeChecked >= (changing ? kShadeCheckMs : 500u)) {
         m.shadeChecked = now;
         m.shadeFrame = g_roomMapFrame;
-        m.fenceGenSeen = g_fenceGen;
+        m.fenceGenSeen = g_fenceSetGen;
         // the shade's grid is the room mask's (4 texels a metre over room 0's tiles); the lot rectangle must agree with it
         if (g_shadeOn && m.w > 0 && m.w == static_cast<int>(std::lround(r->w * GroundShadow::kTexelsPerMetre)) &&
             m.h == static_cast<int>(std::lround(r->d * GroundShadow::kTexelsPerMetre)))
@@ -10912,6 +10974,7 @@ void OnWorldChanged() {
     g_fenceOpen.clear();
     g_gates.clear();
     g_fenceBusy.clear();
+    g_fencePlaceKey.clear();
     g_fenceGen++;
     g_meshBoxes.clear();
     g_fenceWalls = 0;
@@ -11625,6 +11688,7 @@ void Shutdown(bool keepChunkMaps) {
     g_fenceOpen.clear();
     g_gates.clear();
     g_fenceBusy.clear();
+    g_fencePlaceKey.clear();
     g_fenceGen++;
     g_meshBoxes.clear();
     g_fenceWalls = 0;
