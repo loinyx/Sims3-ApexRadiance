@@ -3644,8 +3644,28 @@ bool AtLockStep(unsigned char* room, bool gather) {
         if (!why && LevelLightShare::LotGeometryKey(room) != r.geo) why = "walls, floors or openings changed";
         if (!why) {
             const Delta d = ComputeDelta(room, rr, r, why, plan);
-            if (d == Delta::NoChange) why = "no light of its list changed";
-            else if (d == Delta::Ok) done = ApplyDelta(room, r, plan, why);
+            if (d == Delta::NoChange) {
+                why = "no light of its list changed";
+                // (10/11) its kept solve written back instead of the game's full solve: a camera pan to the next lot and back makes
+                // the game free and recreate this story's maps filled with 0 and solve room 0 again with nothing changed (8 such
+                // solves of about 3.5 s in a recording). Every kept texel is written in the solve's order (the last write of a texel
+                // two samples share stays), the class-2 walls through their blocks' blur as a delta does; a wall block that cannot
+                // be blurred again leaves the full solve. The record and its version are left as they are
+                Plan rp;
+                rp.dirtyBlock.assign(r.blocks.size(), 0);
+                bool ok = true;
+                for (size_t i = 0; i < r.texels.size() && ok; i++) {
+                    const TexelRec& t = r.texels[i];
+                    if (t.map == 0 && r.cls == 2) {
+                        if (r.passes <= 0 || t.block >= r.blocks.size() || !r.blocks[t.block].ok) ok = false;
+                        else rp.dirtyBlock[t.block] = 1;
+                    } else
+                        rp.writes.emplace_back(static_cast<uint32_t>(i), t.packed);
+                    rp.texels++;
+                }
+                if (!ok) why = "no light of its list changed; a wall block cannot be blurred again";
+                else if ((done = ApplyDelta(room, r, rp, why))) plan = std::move(rp), why = nullptr;
+            } else if (d == Delta::Ok) done = ApplyDelta(room, r, plan, why);
         }
         if (done) UpdateBytes(r);
     }
