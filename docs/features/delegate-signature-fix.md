@@ -9,7 +9,7 @@ drawn or simulated changes.
 
 | | |
 |---|---|
-| Availability | In development (PR #60, 3.1.1) |
+| Availability | Released in 3.1.1 |
 | Default | Always on; no menu row |
 | Menu | None |
 | Configuration | None |

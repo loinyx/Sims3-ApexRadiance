@@ -59,7 +59,7 @@ tests, publication) is in [workflow.md](../workflow.md#6-release).
 
 | Version | Published | Headline |
 |---|---|---|
-| [3.1.1](3.1.1.md) | Pending | Better compatibility with the RTX Remix bridge |
+| [3.1.1](3.1.1.md) | 2026-11-11 | Better compatibility with the RTX Remix bridge |
 | [3.1.0](3.1.0.md) | 2026-11-10 | A steadier frame rate, a clearer Overview, and fences that stay dark behind walls |
 | [2.18.2](2.18.2.md) | 2026-10-29 | Lamp posts light neighbouring lots, and a stair fix |
 | [2.18.1](2.18.1.md) | 2026-10-29 | A hotfix for fences, dragged lamps and rainy dusks |
