@@ -227,7 +227,7 @@ public static class Strings
         ["Works, but Apex Radiance is tested with DXVK."] = "Funciona, mas o Apex Radiance é testado com o DXVK.",
         ["Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."] = "As configurações gráficas do jogo podem voltar ao padrão uma vez. O instalador guarda uma cópia e a devolve se você voltar atrás.",
         ["Fixes for game and graphics settings."] = "Correções para as configurações do jogo e dos gráficos.",
-        ["Fixes stutters, Sims getting stuck and crashes."] = "Corrige travamentos, Sims empacados e crashes.",
+        ["Fixes stutters, Sims getting stuck and crashes."] = "Corrige travamentos, Sims presos e crashes.",
         ["Needed only by some script mods; turn it on if a mod asks for it."] = "Só alguns mods de script precisam dele; ligue se um mod pedir.",
         ["Makes the game run faster. Needs a free Nexus Mods account; Setup installs it when your download finishes."] = "Deixa o jogo mais rápido. Precisa de uma conta grátis no Nexus Mods; o instalador o instala quando o download terminar.",
         ["Puts back the graphics files you had before."] = "Devolve os arquivos gráficos que você tinha antes.",

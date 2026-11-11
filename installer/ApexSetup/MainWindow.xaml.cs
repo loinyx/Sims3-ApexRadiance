@@ -237,7 +237,9 @@ public sealed partial class MainWindow : Window
     void UpdateFooter()
     {
         BackButton.Visibility = _step is GameStep or ComponentsStep ? Visibility.Visible : Visibility.Collapsed;
-        NextButton.Visibility = _step is Welcome or GameStep or ComponentsStep or DoneStep ? Visibility.Visible : Visibility.Collapsed;
+        // a game with Apex and nothing to update: the status card's own buttons are the actions, no wizard to go into
+        var settled = _step == Welcome && _state?.ApexVersion is not null && _game is not null && WelcomeUpdates().Count == 0;
+        NextButton.Visibility = !settled && _step is Welcome or GameStep or ComponentsStep or DoneStep ? Visibility.Visible : Visibility.Collapsed;
         var (wa, wd) = _step == ComponentsStep ? Plan() : (new List<string>(), new List<string>());
         var work = wa.Concat(wd).ToList();
         var fixes = _step == ComponentsStep && _game is not null && _state is not null && Compat.Check(_game, _state).Any(x => x.CanFix);
@@ -267,6 +269,9 @@ public sealed partial class MainWindow : Window
             _ => "",
         };
         NavComponents.IsEnabled = CanLeaveGame() && !_busy;
+        // an empty bar (no buttons, no note) reads as broken: the page takes its room instead
+        Footer.Visibility = BackButton.Visibility == Visibility.Visible || NextButton.Visibility == Visibility.Visible || FooterNote.Text.Length > 0
+            ? Visibility.Visible : Visibility.Collapsed;
     }
 
     // ---------- refresh ----------
