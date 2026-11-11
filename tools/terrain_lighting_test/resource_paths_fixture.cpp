@@ -217,7 +217,7 @@ struct FloorShadeBind {
 template<class LampArray> std::string DescribeObjectDraw(FakeDevice*,const ShaderPatches::ObjectPatch&,int,bool,int,int,const LampArray&,int){return "fixture";}
 void SetVs(FakeDevice* d,FakeShader* shader){++d->writes;d->vs=shader;}
 // the per-piece runs (DrawFenceRuns, not extracted): the fixture draws every group once, as before
-template<class D,class F> bool DrawFenceRuns(D*,const GroupCentre&,int,const float(*)[4],UINT,unsigned,const LampCone*,const float*,float,float,UINT,const float*,F){return false;}
+template<class D,class F> bool DrawFenceRuns(D*,const GroupCentre&,int,const float(*)[4],UINT,unsigned,const LampCone*,const float*,float,float,float,UINT,const float*,F){return false;}
 #include "extracted_resource_paths.h"
 
 int checks=0,failures=0;

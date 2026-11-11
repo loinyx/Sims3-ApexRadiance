@@ -5382,9 +5382,20 @@ struct FenceRunMasks {
 std::unordered_map<const GroupCentre*, FenceRunMasks> g_fenceRunMasks;
 constexpr unsigned kFenceRunsMax = 128; // more runs than this: the one draw with the group's values, as before
 constexpr float kRunShareSteps = 32.0f, kRunWeightSteps = 64.0f;
+// A piece within kFloorGateFull of its lot's ground, drawn with the lot's ground lamp shade (groundY finite): the shade
+// tests the walls per pixel (lamps and ground light), so the piece takes every listed lamp whole. Its one share per piece
+// cut the steps of a stair against a foundation into 1 m blocks of different brightness, where the shade beside them is
+// smooth.
+bool ShadedOnGround(float y, float groundY) { return std::isfinite(groundY) && GroundShadow::GroundPoolHeightGate(y, groundY) >= 1.0f; }
 // The values of piece `at` (0.5 m over its origin, y its origin's height): bytes [0, lit) the placed lamps' shares, byte lit
 // the ground weight. n candidates in g_lampData / g_lampCone (SelectLamps, as the pick).
-void FencePieceValues(const float* at, float y, int n, int lit, const float (*lamps)[4], const LampCone* cones, float lampTop, float poolGate, uint8_t* out) {
+void FencePieceValues(const float* at, float y, int n, int lit, const float (*lamps)[4], const LampCone* cones, float lampTop, float poolGate, float groundY,
+                      uint8_t* out) {
+    if (ShadedOnGround(y, groundY)) {
+        for (int k = 0; k < lit; k++) out[k] = static_cast<uint8_t>(kRunShareSteps);
+        out[lit] = static_cast<uint8_t>(std::round(std::clamp(GroundLightGate::HeightGate(y, lampTop) * poolGate, 0.0f, 1.0f) * kRunWeightSteps));
+        return;
+    }
     float seen[ShaderPatches::kObjectPixelLamps] = {};
     for (int k = 0; k < lit; k++) {
         seen[k] = FencePieceVisibility(cones[k], lamps[1 + 2 * k], at);
@@ -5408,7 +5419,7 @@ void FencePieceValues(const float* at, float y, int n, int lit, const float (*la
 // vis: the share the group's pick gave each placed lamp (its colour is scaled by it); weight: the group's ground weight row
 template <typename DrawFn>
 bool DrawFenceRuns(IDirect3DDevice9* dev, const GroupCentre& g, int used, const float (*lamps)[4], UINT lampConst, unsigned rows, const LampCone* cones, const float* vis,
-                   float lampTop, float poolGate, UINT weightConst, const float* weight, DrawFn draw) {
+                   float lampTop, float poolGate, float groundY, UINT weightConst, const float* weight, DrawFn draw) {
     constexpr unsigned N = ShaderPatches::kObjectPixelLamps;
     const size_t count = g.all.size() / 3;
     if (used <= 0 || count < 2) return false;
@@ -5420,6 +5431,7 @@ bool DrawFenceRuns(IDirect3DDevice9* dev, const GroupCentre& g, int used, const 
             for (int c = 0; c < 4; c++) lampKey = (lampKey ^ FloatBits(lamps[1 + 2 * k + r][c])) * 1099511628211ull;
     lampKey = (lampKey ^ FloatBits(lampTop)) * 1099511628211ull;
     lampKey = (lampKey ^ FloatBits(poolGate)) * 1099511628211ull;
+    lampKey = (lampKey ^ FloatBits(groundY)) * 1099511628211ull;
     if (g_fenceRunMasks.size() > 4096) g_fenceRunMasks.clear(); // (groups come and go with lots, as g_groupCentres)
     FenceRunMasks& m = g_fenceRunMasks[&g];
     const uint64_t state = LevelLightShare::LampVisibilityState();
@@ -5435,7 +5447,7 @@ bool DrawFenceRuns(IDirect3DDevice9* dev, const GroupCentre& g, int used, const 
         const int n = SelectLamps(g.x, g.z, 40.0f + std::min(g.ext, 60.0f), true); // the pick's candidates
         for (size_t i = 0; i < count; i++) {
             const float at[3] = {g.all[3 * i], g.all[3 * i + 1] + 0.5f, g.all[3 * i + 2]};
-            FencePieceValues(at, g.all[3 * i + 1], n, lit, lamps, cones, lampTop, poolGate, &m.mask[i * W]);
+            FencePieceValues(at, g.all[3 * i + 1], n, lit, lamps, cones, lampTop, poolGate, groundY, &m.mask[i * W]);
         }
     }
     const auto same = [&](size_t a, size_t b) { return std::memcmp(&m.mask[a * W], &m.mask[b * W], W) == 0; };
@@ -5688,6 +5700,8 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
     const bool reachLaw = p.inst.reachConst != 0;
     const LotRect* groupLot = g ? FindLotAt(g->x, g->z) : nullptr;
     const float poolGate = groupLot ? GroundShadow::GroundPoolHeightGate(g->minY, groupLot->ty) : 1.0f;
+    // the lot's ground under the group when its ground lamp shade is drawn with it (ShadedOnGround); NaN otherwise
+    const float shadeGroundY = groupLot && g_shadeOn && p.inst.shadeSampler >= 0 && p.inst.shadeConst >= 0 ? groupLot->ty : std::numeric_limits<float>::quiet_NaN();
     const float structureGain = GroundShadow::StructureLampGain(poolGate, g_wallGain.load(std::memory_order_relaxed));
     float oldA[4] = {}, oldB[4] = {};
     dev->GetPixelShaderConstantF(p.inst.atlasConst, oldA, 1);
@@ -5741,6 +5755,17 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
             // tops take it x the share of the atlas lamps' light the group sees (the objects' ground share), so a parapet over
             // the slab of an arcade takes none of the pool of the lamp under that slab.
             weight[0] = GroundLightGate::HeightGate(g->y, lampTop) * share * poolGate;
+            // every piece on the ground under the lot's shade: the lamps whole and the ground light unshared (ShadedOnGround)
+            float maxY = g->minY;
+            for (size_t i = 1; i < g->all.size(); i += 3) maxY = std::max(maxY, g->all[i]);
+            if (ShadedOnGround(g->minY, shadeGroundY) && ShadedOnGround(maxY, shadeGroundY)) {
+                for (int k = 0; k < used && k < static_cast<int>(N); k++) {
+                    if (vis[k] > 0.0f)
+                        for (int c = 0; c < 3; c++) lamps[2 + 2 * k][c] /= vis[k];
+                    vis[k] = 1.0f;
+                }
+                weight[0] = GroundLightGate::HeightGate(g->y, lampTop) * poolGate;
+            }
         }
         dev->GetPixelShaderConstantF(p.inst.lampParamConst, &oldLamps[0][0], rows);
         dev->GetPixelShaderConstantF(p.inst.groundWeightConst, oldWeight, 1);
@@ -5800,7 +5825,7 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
         SetPs(dev, active->ps);
         // each piece lit from its own place, run by run (DrawFenceRuns); a single piece or too many runs: one draw
         if (!(g && p.inst.pixelLamps &&
-              DrawFenceRuns(dev, *g, used, lamps, p.inst.lampParamConst, rows, cones, vis, lampTop, poolGate, p.inst.groundWeightConst, weight, draw)))
+              DrawFenceRuns(dev, *g, used, lamps, p.inst.lampParamConst, rows, cones, vis, lampTop, poolGate, shadeGroundY, p.inst.groundWeightConst, weight, draw)))
             draw();
         SetPs(dev, original);
         if (active != &p) SetPsConst(dev, active->inst.capConst, &oldCaps[0][0], kCapRows);
