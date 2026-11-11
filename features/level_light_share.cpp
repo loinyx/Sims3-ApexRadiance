@@ -2590,11 +2590,83 @@ int SettleNormInPlace(BYTE* room); // below (inner_norm_settle, a day/night swit
 // (stairwell_bounce) Bumped at each room solve's start on the thread that runs it (a solve's texels run on that thread): the
 // bounce context (t_bounce, StairwellBounceAt) is built again for every solve, so a solve right after a lamp below was moved
 // or switched never reuses the light of its earlier state
+// ---- (10/11) Borrowed lamps that light none of a room's samples ----
+// 66-80% of a room's light list are lamps LevelLightShare takes from other stories; for most of them every sample of the room is
+// blocked by Apex's slab and wall tests (colour exactly 0), yet the game evaluates them and Apex tests them at every sample of
+// every solve (the 10x solve cost since 2.15). A solve notes, per borrowed indoor lamp, whether any sample got light from it; a
+// later solve of the same room and class skips the lamps that got none, while the lamp (its fields as the room solve reads them),
+// the lot's walls, floors and openings, and the lighting options are as they were. The lamp stays in the list (+0x160 and every
+// other pass see it as before) and its evaluation would give 0 again: the same maps. Gather thread only.
+uint64_t BorrowedLampSig(const void* light) {
+    __try {
+        const uintptr_t l = reinterpret_cast<uintptr_t>(light);
+        uint64_t h = 1469598103934665603ull;
+        const auto mix = [&](uintptr_t at, int n) {
+            for (int k = 0; k < n; k++) h = (h ^ *reinterpret_cast<const uint32_t*>(at + k * 4)) * 1099511628211ull;
+        };
+        const int type = *reinterpret_cast<const int*>(l + 0xB0);
+        mix(l + 0x10, 4), mix(l + 0xB0, 1), mix(l + 0xC0, 8), mix(l + 0xE0, 5), mix(l + 0x100, 1), mix(l + 0x120, 3), mix(l + 0x130, 1);
+        if (type == 4 || type == 5) mix(l + 0x170, 13);
+        return h | 1;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+std::atomic<uint32_t> g_zeroGen{1}; // bumped by every whole relight (an option changed): every memo is dropped
+std::atomic<long> g_zeroSkipped{0}, g_zeroSkipRooms{0};
+struct ZeroMemo {
+    uint32_t gen = 0;
+    uint64_t geo = 0;
+    std::vector<std::pair<uintptr_t, uint64_t>> lamps; // (light, BorrowedLampSig) that lit no sample
+};
+std::unordered_map<uint64_t, ZeroMemo> g_zeroMemo; // (room, class) -> its memo
+const BYTE* t_zRoom = nullptr;
+int t_zCls = -1;
+uint64_t t_zGeo = 0;
+std::vector<uintptr_t> t_zSkip; // sorted: the lamps this solve skips
+std::unordered_map<uintptr_t, std::pair<uint64_t, bool>> t_zSeen; // light -> (its sig at its first evaluation, lit any sample)
+uint64_t ZeroKey(const BYTE* room, int cls) { return static_cast<uint64_t>(reinterpret_cast<uintptr_t>(room)) << 3 | static_cast<uint64_t>(cls & 7); }
+int RoomSolveClass(const BYTE* room) {
+    __try {
+        return *reinterpret_cast<const int*>(room + 0xF4);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return -1;
+    }
+}
+void ZeroSolveStart(BYTE* room) {
+    t_zRoom = nullptr, t_zSkip.clear(), t_zSeen.clear();
+    if (!PerfToggles::BorrowedZeroSkip.load(std::memory_order_relaxed)) return;
+    const int cls = RoomSolveClass(room);
+    if (cls < 0 || cls > 7) return;
+    const uint64_t geo = LevelLightShare::LotGeometryKey(room);
+    if (!geo) return;
+    t_zRoom = room, t_zCls = cls, t_zGeo = geo;
+    const auto it = g_zeroMemo.find(ZeroKey(room, cls));
+    if (it == g_zeroMemo.end() || it->second.gen != g_zeroGen.load(std::memory_order_relaxed) || it->second.geo != geo) return;
+    for (const auto& [l, sig] : it->second.lamps)
+        if (BorrowedLampSig(reinterpret_cast<const void*>(l)) == sig) t_zSkip.push_back(l);
+    std::sort(t_zSkip.begin(), t_zSkip.end());
+    if (!t_zSkip.empty()) ApexUtil::CountOne(g_zeroSkipRooms);
+}
+void ZeroSolveEnd(BYTE* room) {
+    if (!t_zRoom || room != t_zRoom) return;
+    t_zRoom = nullptr;
+    if (g_zeroMemo.size() > 4096) g_zeroMemo.clear();
+    ZeroMemo m{g_zeroGen.load(std::memory_order_relaxed), t_zGeo, {}};
+    for (uintptr_t l : t_zSkip) // (skipped: still no light, by the same rule)
+        if (const uint64_t s = BorrowedLampSig(reinterpret_cast<const void*>(l))) m.lamps.emplace_back(l, s);
+    for (const auto& [l, seen] : t_zSeen) // (a lamp changed during the solve is not noted)
+        if (!seen.second && seen.first && BorrowedLampSig(reinterpret_cast<const void*>(l)) == seen.first) m.lamps.emplace_back(l, seen.first);
+    if (m.lamps.empty() || LevelLightShare::LotGeometryKey(room) != t_zGeo) g_zeroMemo.erase(ZeroKey(room, t_zCls));
+    else g_zeroMemo[ZeroKey(room, t_zCls)] = std::move(m);
+    t_zSkip.clear(), t_zSeen.clear();
+}
 thread_local uint32_t t_bounceSolve = 0;
 void __fastcall RoomSolveStartHook(BYTE* room) {
     SyncHardWallTops();
     reinterpret_cast<RoomSolveStart_t>(kRoomSolveStart)(room);
     ++t_bounceSolve;
+    if (room && ThreadId() == g_gatherThread.load(std::memory_order_relaxed)) HookGuard::Run("LevelLightShare borrowed lamps memo start", [room] { ZeroSolveStart(room); });
     if (room && DevSwitches::RoomSolveCauses()) RoomSolveCauses::SolveStart(reinterpret_cast<uintptr_t>(room)); // (its texels come after state 0)
     if (room && ThreadId() == g_gatherThread.load(std::memory_order_relaxed)) DragLite::NoteSolveStarted(room); // (the re-pick throttle while a lamp is dragged)
     if (room) DragLite::NoteGpuDragSolve(room);
@@ -7626,6 +7698,7 @@ void __fastcall FinalizeHook(BYTE* room) {
     }
     reinterpret_cast<Finalize_t>(kFinalize)(room);
     if (!room) return;
+    if (ThreadId() == g_gatherThread.load(std::memory_order_relaxed)) HookGuard::Run("LevelLightShare borrowed lamps memo end", [room] { ZeroSolveEnd(room); });
     // GPU room lamps (developer): the room's texels in its maps were written again, its kept solve no longer holds them (any
     // thread; a solve kept below is kept again by SolveEnd)
     if (OutdoorDelta::RoomLampCapture()) {
@@ -13597,6 +13670,31 @@ template <int I> void __fastcall LightEvalHook(void* light, void*, const float* 
         g_innerMaskLeft.fetch_add(1, std::memory_order_relaxed);
         return;
     }
+    // (borrowed lamps that lit no sample of this room at its last solve: skipped, colour 0; the others noted at the way out)
+    struct ZeroNote {
+        std::pair<uint64_t, bool>* seen = nullptr;
+        const float* c = nullptr;
+        ~ZeroNote() {
+            if (seen && (c[0] > 0.0f || c[1] > 0.0f || c[2] > 0.0f)) seen->second = true;
+        }
+    } zeroNote;
+    // (not room 0 over rooms open to above: a lamp shining up out of one is scaled by that room's normalisation, which a solve
+    // of that room may still change)
+    if (t_zRoom && t_zRoom == t_solveRoom && g_ctx.info && !innerLamp && !t_odSample && !t_maskCopy && !t_exit.sum &&
+        (g_ctx.info->indoor || g_ctx.info->openBelow.empty()) &&
+        _ReturnAddress() == reinterpret_cast<void*>(kLightEvalReturn) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed))
+        if (const Cross* zc = FindCross(*g_ctx.info, reinterpret_cast<uintptr_t>(light)); zc && !zc->outdoor) {
+            const uintptr_t l = reinterpret_cast<uintptr_t>(light);
+            if (std::binary_search(t_zSkip.begin(), t_zSkip.end(), l)) {
+                for (int i = 0; i < 4; i++) colour[i] = 0.0f;
+                g_ctx.enterLight = 0, g_ctx.yardLight = 0; // (as the evaluated lamps: no entry point carried to a wall test)
+                ApexUtil::CountOne(g_zeroSkipped);
+                return;
+            }
+            auto at = t_zSeen.find(l);
+            if (at == t_zSeen.end()) at = t_zSeen.emplace(l, std::make_pair(BorrowedLampSig(light), false)).first;
+            zeroNote.seen = &at->second, zeroNote.c = colour;
+        }
     reinterpret_cast<LightEval_t>(g_evalOrig[I])(light, sample, normal, colour);
     if (probeOnExit.c) { // (the room lamp probe) the game's evaluation, and the lamp's set in the room's record
         const uintptr_t l = reinterpret_cast<uintptr_t>(light);
@@ -18266,6 +18364,7 @@ bool LampDragging() {
 // Developer Tester tab: a switch that changes the story grids (colonnades on a foundation) builds them again
 void TesterGridsChanged() { g_floorEditGen.fetch_add(1, std::memory_order_relaxed); }
 void RelightAllRooms(const char* why) {
+    g_zeroGen.fetch_add(1, std::memory_order_relaxed); // (the rules changed: every room's borrowed lamps are tested again)
     OutdoorDelta::InvalidateAll(why); // (Instant: every room's kept parts are of the old rules)
     LoadAddresses();
     if (!kRootPtr || !kRoomById || !kInvalidateRoom || !kSetInsert) return;
@@ -18995,7 +19094,8 @@ std::string ArchAmbientStatus() {
                        g_archOffStory.load(), g_archSpread.load(), misses.empty() ? " none" : misses, g_atriumProbeLent.load());
 }
 std::string Status() {
-    return std::format("Colour groups committed {} ({} native fallbacks) | ", g_groupCommits.load(), g_groupFallbacks.load()) + SlabStatus() + " | " + std::format("{} | outdoor lights carried to other stories: {} | stories updated: {} | walls of the light's story: {}/{} classes, {} tests, {} blocked | indoor "
+    return std::format("Colour groups committed {} ({} native fallbacks) | lamps of other stories that lit nothing, skipped: {} evaluations in {} solves | ", g_groupCommits.load(),
+                       g_groupFallbacks.load(), g_zeroSkipped.load(), g_zeroSkipRooms.load()) + SlabStatus() + " | " + std::format("{} | outdoor lights carried to other stories: {} | stories updated: {} | walls of the light's story: {}/{} classes, {} tests, {} blocked | indoor "
                        "lamps through stair openings: {} | seamless walls between floors: {}{}{}{}{}{}",
                        g_installed ? "Active" : "Off", g_shared.load(), g_queued.load(), g_evalClasses.load(), std::size(kClasses), g_wallTests.load(), g_wallBlocked.load(),
                        !g_indoorReady ? std::string("not installed")
