@@ -181,7 +181,14 @@ public sealed partial class MainWindow : Window
         {
             case Welcome: Show(GameStep); break;
             case GameStep: if (CanLeaveGame()) Show(ComponentsStep); break;
-            case ComponentsStep: { var (add, del) = Plan(); await InstallAsync(add, del); break; }
+            case ComponentsStep:
+            {
+                var (add, del) = Plan();
+                var fixes = _game is not null && _state is not null && Compat.Check(_game, _state).Any(x => x.CanFix);
+                if (add.Count + del.Count == 0 && !fixes) Close(); // (nothing to do: the button reads Close)
+                else await InstallAsync(add, del);
+                break;
+            }
             case DoneStep: Close(); break;
         }
     }
@@ -196,14 +203,15 @@ public sealed partial class MainWindow : Window
         NextText.Text = _step switch
         {
             Welcome => T("Get started"),
-            ComponentsStep => work.Count == 0 && fixes ? T("Fix settings") : _state?.ApexVersion is null ? T("Install") : T("Apply"),
+            ComponentsStep => work.Count == 0 ? (fixes ? T("Fix settings") : T("Close")) : _state?.ApexVersion is null ? T("Install")
+                : work.Count == 1 ? T("Apply 1 change") : T("Apply {0} changes", work.Count),
             DoneStep => T("Finish"),
             _ => T("Next"),
         };
         NextButton.IsEnabled = _step switch
         {
             GameStep => CanLeaveGame(),
-            ComponentsStep => !_running && _game is not null && (work.Count > 0 ? !_offline : fixes),
+            ComponentsStep => work.Count == 0 && !fixes || !_running && _game is not null && (work.Count > 0 ? !_offline : fixes),
             _ => true,
         };
         FooterNote.Text = _step switch
@@ -404,6 +412,24 @@ public sealed partial class MainWindow : Window
 
     void OnToggle(object sender, RoutedEventArgs e) => RefreshComponents();
 
+    // installed: its Remove button (Keep while marked), the switch hidden and carrying the choice for Plan(); missing: the switch
+    void ShowCard(ToggleSwitch toggle, Button remove, bool present)
+    {
+        toggle.Visibility = present ? Visibility.Collapsed : Visibility.Visible;
+        remove.Visibility = present ? Visibility.Visible : Visibility.Collapsed;
+        remove.Content = toggle.IsOn ? T("Remove") : T("Keep");
+    }
+
+    // marks an installed component for removal by Apply, or takes the mark back
+    void OnRemove(object sender, RoutedEventArgs e)
+    {
+        var toggle = (((Button)sender).Tag as string) switch
+        {
+            "S3ss" => S3ssToggle, "Mod" => ModToggle, "Mono" => MonoToggle, "S3pp" => S3ppToggle, _ => null,
+        };
+        if (toggle is not null) toggle.IsOn = !toggle.IsOn; // (OnToggle refreshes the cards and the footer)
+    }
+
     void OnRenderer(object sender, SelectionChangedEventArgs e)
     {
         if (_fillingRenderer || RendererChoice.SelectedIndex < 0) return;
@@ -470,11 +496,18 @@ public sealed partial class MainWindow : Window
                 T("DXVK and the bridge both report a GeForce GTX 580, so the game keeps its settings."));
         else GraphicsInfo.IsOpen = false;
 
-        S3ssPill.Text = Pill(Known(Components.S3ss), Latest(Components.S3ss), false);
-        ModPill.Text = Pill(Known(Components.Modernization), Latest(Components.Modernization), s.Ts3NativeWrongBuild);
-        MonoPill.Text = Pill(Known(Components.MonoPatcher), Latest(Components.MonoPatcher), false);
-        S3ppPill.Text = S3ppPresent ? T("Installed") : _s3ppArchive is not null ? T("Ready to install") : T("Not installed");
-        S3ppToggle.Visibility = S3ppPresent ? Visibility.Visible : Visibility.Collapsed;
+        // An installed component shows a Remove button (Keep once marked: Apply removes it, and its pill says so); a missing one
+        // its switch, which means Install. A switch that meant "keep" on an installed component, off meaning uninstall, read
+        // as a control that did nothing.
+        S3ssPill.Text = s.S3ss && !S3ssToggle.IsOn ? T("Will be removed") : Pill(Known(Components.S3ss), Latest(Components.S3ss), false);
+        ModPill.Text = s.Modernization && !ModToggle.IsOn ? T("Will be removed") : Pill(Known(Components.Modernization), Latest(Components.Modernization), s.Ts3NativeWrongBuild);
+        MonoPill.Text = s.MonoPatcher && !MonoToggle.IsOn ? T("Will be removed") : Pill(Known(Components.MonoPatcher), Latest(Components.MonoPatcher), false);
+        S3ppPill.Text = S3ppPresent && !S3ppToggle.IsOn ? T("Will be removed") : S3ppPresent ? T("Installed") : _s3ppArchive is not null ? T("Ready to install") : T("Not installed");
+        ShowCard(S3ssToggle, S3ssRemove, s.S3ss);
+        ShowCard(ModToggle, ModRemove, s.Modernization && g.ModernizationSupported);
+        ShowCard(MonoToggle, MonoRemove, s.MonoPatcher);
+        ShowCard(S3ppToggle, S3ppRemove, S3ppPresent);
+        if (!S3ppPresent) S3ppToggle.Visibility = Visibility.Collapsed; // (missing: its download buttons below)
         S3ppGet.Visibility = !S3ppPresent && _s3ppArchive is null && _s3ppWatch is null ? Visibility.Visible : Visibility.Collapsed;
         S3ppWait.Visibility = _s3ppWatch is not null ? Visibility.Visible : Visibility.Collapsed;
         S3ppWaitText.Text = T("Waiting for your download in {0}…", DownloadsFolder());

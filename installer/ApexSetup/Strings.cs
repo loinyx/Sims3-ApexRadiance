@@ -223,6 +223,11 @@ public static class Strings
 
         ["Fix settings"] = "Corrigir configurações",
         ["Everything is installed and up to date."] = "Tudo está instalado e atualizado.",
+        ["Will be removed"] = "Será removido",
+        ["Keep"] = "Manter",
+        ["Close"] = "Fechar",
+        ["Apply 1 change"] = "Aplicar 1 mudança",
+        ["Apply {0} changes"] = "Aplicar {0} mudanças",
         ["Setup changes only what is listed. Nothing changes until you click Install."] = "O instalador muda só o que está listado. Nada muda até você clicar em Instalar.",
         ["{0} is installed and up to date: nothing to change."] = "A {0} está instalada e atualizada: nada a mudar.",
         ["Installed and kept as it is. Turn on to copy the latest files again."] = "Instalado e mantido como está. Ligue para copiar de novo os arquivos mais recentes.",
