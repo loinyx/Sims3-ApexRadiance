@@ -115,8 +115,8 @@ public sealed partial class MainWindow : Window
     GameItem Item(Game g) => new()
     {
         Game = g, Path = g.Root,
-        Name = "The Sims 3 · " + g.Label,
-        Badge = g.Version + " · " + g.Exe,
+        Name = "The Sims 3",
+        Badge = g.Label,
     };
 
     string? Latest(string c) => Repo.TryGetValue(c, out var repo) ? _latest.GetValueOrDefault(repo)?.Version : null;
@@ -166,11 +166,11 @@ public sealed partial class MainWindow : Window
         RefreshAll();
     }
 
-    // the sidebar shows the screen that is open (also after a refused jump)
+    // the sidebar shows the screen that is open (also after a refused jump); Install and Done have no item
     void SyncNav()
     {
         _syncNav = true;
-        Nav.SelectedItem = Nav.MenuItems.Concat(Nav.FooterMenuItems).OfType<NavigationViewItem>().First(n => (string)n.Tag == _step.ToString());
+        Nav.SelectedItem = Nav.MenuItems.Concat(Nav.FooterMenuItems).OfType<NavigationViewItem>().FirstOrDefault(n => (string)n.Tag == _step.ToString());
         _syncNav = false;
     }
 
@@ -266,6 +266,7 @@ public sealed partial class MainWindow : Window
             ComponentsStep when _state?.ApexVersion is null => T("Nothing changes until you click Install."),
             _ => "",
         };
+        NavComponents.IsEnabled = CanLeaveGame() && !_busy;
     }
 
     // ---------- refresh ----------
@@ -273,6 +274,7 @@ public sealed partial class MainWindow : Window
     void RefreshAll()
     {
         LangText.Text = Pt ? "Português" : "English";
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(LangButton, T("Language"));
         RefreshGame();
         RefreshWelcome();
         RefreshComponents();
@@ -287,7 +289,7 @@ public sealed partial class MainWindow : Window
         WelcomeTitle.Text = "Apex Radiance" + (latest is null ? "" : " " + latest);
         var inst = _game is null ? null : _state?.ApexVersion;
         if (_offline)
-            SetInfo(WelcomeInfo, InfoBarSeverity.Error, T("Setup can't reach GitHub"), T("Check your internet connection, then try again."), T("Try again"), async () => await LoadReleasesAsync());
+            SetInfo(WelcomeInfo, InfoBarSeverity.Error, T("No internet connection"), T("Check your internet connection, then try again."), T("Try again"), async () => await LoadReleasesAsync());
         else if (_loading && _game is not null)
             SetInfo(WelcomeInfo, InfoBarSeverity.Informational, T("Checking for updates\u2026"), "");
         else if (Updates() is { Count: > 0 } ups && _game is { } g)
@@ -349,10 +351,10 @@ public sealed partial class MainWindow : Window
             });
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        Button Make(string text, Func<Task> act, bool primary = false, bool needsNet = false)
+        // (none accent: the footer's button is the screen's one accent button)
+        Button Make(string text, Func<Task> act, bool needsNet = false)
         {
             var b = new Button { Content = text, IsEnabled = !_running && !_busy && !(needsNet && (_offline || _loading)) };
-            if (primary) b.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
             b.Click += async (_, _) => await act();
             buttons.Children.Add(b);
             return b;
@@ -368,7 +370,7 @@ public sealed partial class MainWindow : Window
             {
                 if (fixable && !await Guarded(() => { Engine.CheckWritable(); foreach (var x in Compat.Check(g, Scan.Run(g)).Where(x => x.CanFix)) x.Fix!(); }, T("Fixed."), WelcomeInfo)) return;
                 if (repair.Count > 0 && !_offline) await InstallAsync(repair);
-            }, primary: true, needsNet: !fixable);
+            }, needsNet: !fixable);
         if (test && apexRelease is not null)
             Make(T("Install the official {0}", apexRelease.Version), () => InstallAsync(new List<string> { Components.Apex }), needsNet: true);
         Make(T("Check installation"), () =>
@@ -438,32 +440,6 @@ public sealed partial class MainWindow : Window
         GameDetails.Visibility = _state is null ? Visibility.Collapsed : Visibility.Visible;
         if (_state is not { } s) return;
 
-        Chip(ClosedIcon, ClosedText, !_running, _running ? T("The game is running: close it") : T("The game is closed"));
-        Chip(LoaderIcon, LoaderChip, s.Loader is not null, s.Loader is null ? T("No ASI loader yet") : T("ASI loader: {0}", s.Loader));
-        LayerChip.Text = T("Graphics: {0}", LayerName(s.Layer));
-
-        InstalledList.Children.Clear();
-        AddInstalled("Apex Radiance", Known(Components.Apex), Components.Apex);
-        AddInstalled("RTX Remix bridge", Known(Components.Bridge), Components.Bridge);
-        AddInstalled("Sims3SettingsSetter", Known(Components.S3ss), Components.S3ss);
-        AddInstalled("Sims 3 Modernization", Known(Components.Modernization), Components.Modernization);
-        AddInstalled("MonoPatcher", Known(Components.MonoPatcher), Components.MonoPatcher);
-        if (S3ppPresent) AddInstalled("Sims 3 Performance Patch", "", Components.S3pp);
-        // the other community mods Setup recognises (installed by hand; links to their official pages)
-        foreach (var k in KnownMods.Found(_game!.Bin, Scan.DocumentsFor(_game)))
-        {
-            var row = new Grid();
-            row.ColumnDefinitions.Add(new ColumnDefinition());
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.Children.Add(new TextBlock { Text = k.Name, FontSize = 13 });
-            UIElement right = k.Url is null
-                ? new TextBlock { Text = T("Installed"), FontSize = 12, Foreground = (Brush)Application.Current.Resources["ApexSuccessBrush"] }
-                : new HyperlinkButton { Content = T("Installed · official page"), NavigateUri = new Uri(k.Url), Padding = new Thickness(0), FontSize = 12 };
-            Grid.SetColumn((FrameworkElement)right, 1);
-            row.Children.Add(right);
-            InstalledList.Children.Add(row);
-        }
-
         ProblemList.Children.Clear();
         var found = Compat.Check(_game!, s);
         foreach (var x in found)
@@ -480,30 +456,6 @@ public sealed partial class MainWindow : Window
         // (the fixes run with Install / Apply, or Fix settings when nothing else changes)
         if (found.Count == 0)
             ProblemList.Children.Add(new TextBlock { Text = T("No incompatible settings found."), FontSize = 12, Foreground = (Brush)Application.Current.Resources["ApexSuccessBrush"] });
-    }
-
-    void Chip(FontIcon icon, TextBlock text, bool ok, string label)
-    {
-        icon.Glyph = ok ? "" : "";
-        icon.Foreground = (Brush)Application.Current.Resources[ok ? "ApexSuccessBrush" : "ApexWarningBrush"];
-        text.Text = label;
-    }
-
-    void AddInstalled(string name, string? version, string c)
-    {
-        var latest = Latest(c);
-        string status = version is null ? T("Not installed")
-            : version.Length == 0 ? T("Installed")
-            : Newer(latest, version) ? T("{0} · update to {1}", version, latest!)
-            : version;
-        var g = new Grid();
-        g.ColumnDefinitions.Add(new ColumnDefinition());
-        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        g.Children.Add(new TextBlock { Text = name, FontSize = 13 });
-        var st = new TextBlock { Text = status, FontSize = 12, Foreground = (Brush)Application.Current.Resources[version is null ? "ApexMutedBrush" : "ApexSuccessBrush"] };
-        Grid.SetColumn(st, 1);
-        g.Children.Add(st);
-        InstalledList.Children.Add(g);
     }
 
     string LayerName(Layer l) => l switch
@@ -546,7 +498,6 @@ public sealed partial class MainWindow : Window
         if (!_removeButtons.TryGetValue(toggle, out var remove))
         {
             remove = new Button { MinWidth = 96, VerticalAlignment = VerticalAlignment.Center };
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(remove, Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(toggle));
             Grid.SetColumn(remove, Grid.GetColumn(toggle));
             remove.Click += (_, _) => toggle.IsOn = !toggle.IsOn; // marks it for removal by Apply, or takes the mark back (OnToggle refreshes)
             if (toggle.Parent is Panel panel) panel.Children.Add(remove);
@@ -555,6 +506,7 @@ public sealed partial class MainWindow : Window
         toggle.Visibility = present ? Visibility.Collapsed : Visibility.Visible;
         remove.Visibility = present ? Visibility.Visible : Visibility.Collapsed;
         remove.Content = toggle.IsOn ? T("Remove") : T("Keep");
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(remove, (string)remove.Content + " " + Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(toggle));
     }
 
     void OnRenderer(object sender, SelectionChangedEventArgs e)
@@ -572,9 +524,9 @@ public sealed partial class MainWindow : Window
         if (s.Layer == Layer.Other) tags.Add(RKeep);
         var titles = tags.Select(t => t switch
         {
-            RDxvk => T("DXVK (recommended)"),
-            RBridge => T("RTX Remix bridge (64-bit, about 600 MB more free memory)"),
-            RNative => T("The game's own Direct3D 9"),
+            RDxvk => T("Vulkan, DXVK (recommended)"),
+            RBridge => T("Vulkan with more memory (RTX Remix bridge)"),
+            RNative => T("Windows default (Direct3D 9)"),
             _ => T("Keep my d3d9.dll"),
         }).ToList();
         _fillingRenderer = true;
@@ -604,33 +556,29 @@ public sealed partial class MainWindow : Window
         FillRenderer(s);
         var cur = RendererOf(s);
         var changed = _renderer != cur;
-        BridgeName.Text = T("Renderer · now {0}", LayerName(s.Layer));
-        BridgeDetail.Text = (_renderer switch
+        BridgeDetail.Text = _renderer switch
         {
-            RDxvk => T("Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it. From DXVK's GitHub release."),
-            RBridge => T("DXVK in its own 64-bit process: the game keeps about 600 MB more free memory. Set for {0}; needs a Vulkan graphics card.", g.Exe),
-            RNative => T("Windows' Direct3D 9. Apex Radiance works with it, but it is made and tested with DXVK."),
+            RDxvk => T("Fewer stutters; Apex Radiance is made and tested with it."),
+            RBridge => T("Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card."),
+            RNative => T("Works, but Apex Radiance is tested with DXVK."),
             _ => T("Your d3d9.dll stays as it is."),
-        }) + (changed && s.Layer != Layer.Native ? " " + T("Setup keeps your current d3d9.dll and puts it back if you remove the new one.") : "");
+        };
 
         // the game resets its graphics options when the card it sees changes: DXVK's TS3W profile and the bridge report a
         // GeForce GTX 580; the game's own D3D9 the real card (DXVK on TS3.exe: unverified, so treated as a change)
         string Card(string r) => r switch { RBridge => "580", RDxvk when g.Exe == "TS3W.exe" => "580", RNative => "real", _ => "?" };
         if (changed && (Card(_renderer) != Card(cur) || Card(cur) == "?"))
-            SetInfo(GraphicsInfo, InfoBarSeverity.Warning, T("Graphics options may reset once"),
-                T("The game resets its graphics options when the graphics card it sees changes, and {0} reports a different one than {1}. Setup keeps a copy of Options.ini and puts it back if you go back.", RendererName(_renderer), LayerName(s.Layer)));
-        else if (changed)
-            SetInfo(GraphicsInfo, InfoBarSeverity.Informational, T("Your graphics options stay"),
-                T("DXVK and the bridge both report a GeForce GTX 580, so the game keeps its settings."));
+            SetInfo(GraphicsInfo, InfoBarSeverity.Warning, "",
+                T("Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."));
         else GraphicsInfo.IsOpen = false;
 
         // An installed component shows a Remove button (Keep once marked: Apply removes it, and its pill says so); a missing one
         // its switch, which means Install. A switch that meant "keep" on an installed component, off meaning uninstall, read
         // as a control that did nothing.
-        S3ssPill.Text = s.S3ss && !S3ssToggle.IsOn ? T("Will be removed") : Pill(Known(Components.S3ss), Latest(Components.S3ss), false);
-        ModPill.Text = s.Modernization && !ModToggle.IsOn ? T("Will be removed") : Pill(Known(Components.Modernization), Latest(Components.Modernization), s.Ts3NativeWrongBuild);
-        MonoPill.Text = s.MonoPatcher && !MonoToggle.IsOn ? T("Will be removed") : Pill(Known(Components.MonoPatcher), Latest(Components.MonoPatcher), false);
-        S3ppPill.Text = S3ppPresent && !S3ppToggle.IsOn ? T("Will be removed") : S3ppPresent ? T("Installed") : _s3ppArchive is not null ? T("Ready to install") : T("Not installed");
+        SetPill(S3ssPill, s.S3ss && !S3ssToggle.IsOn ? T("Will be removed") : Pill(Known(Components.S3ss), Latest(Components.S3ss), false));
+        SetPill(ModPill, s.Modernization && !ModToggle.IsOn ? T("Will be removed") : Pill(Known(Components.Modernization), Latest(Components.Modernization), s.Ts3NativeWrongBuild));
+        SetPill(MonoPill, s.MonoPatcher && !MonoToggle.IsOn ? T("Will be removed") : Pill(Known(Components.MonoPatcher), Latest(Components.MonoPatcher), false));
+        SetPill(S3ppPill, S3ppPresent && !S3ppToggle.IsOn ? T("Will be removed") : S3ppPresent ? T("Installed") : _s3ppArchive is not null ? T("Ready to install") : T("Not installed"));
         ShowCard(S3ssToggle, s.S3ss);
         ShowCard(ModToggle, s.Modernization);
         ShowCard(MonoToggle, s.MonoPatcher);
@@ -642,24 +590,24 @@ public sealed partial class MainWindow : Window
         ModToggle.IsEnabled = g.ModernizationSupported || s.Modernization;
         if (!g.ModernizationSupported && !s.Modernization) ModToggle.IsOn = false;
         ModDesc.Text = g.ModernizationSupported
-            ? T("Stutter, route and crash fixes by rodneypantonial: ts3native in Game\\Bin and ts3fixes.package in Mods\\Packages, from its GitHub release.")
+            ? T("Fixes stutters, Sims getting stuck and crashes.")
             : T("Not available for this game version: it supports Steam 1.67.2 and EA app 1.69.47.");
 
-        bool need = Engine.NeedsLoader(s, changed && _renderer is RDxvk or RBridge);
-        LoaderPlanIcon.Glyph = need ? "" : "";
-        LoaderPlanIcon.Foreground = (Brush)Application.Current.Resources[need ? "ApexAccentBrush" : "ApexSuccessBrush"];
-        LoaderPlan.Text = !need ? T("ASI loader found: {0}.", s.Loader!)
-            : s.LoaderIsD3d9 ? T("Your ASI loader is d3d9.dll, which the new renderer replaces: Setup adds Ultimate ASI Loader as wininet.dll.")
-            : T("No ASI loader found: Setup adds Ultimate ASI Loader as wininet.dll, from its GitHub release.");
         UpdateFooter();
     }
 
     bool TestBuildNow() => _game is { } g && _state is { } s && Verify.TestBuild(g, s, _latest.GetValueOrDefault(Repo[Components.Apex]));
 
-    string RendererName(string r) => r switch
+    // the pill's colour follows its text; "Not installed" shows no pill (the switch says it)
+    static void SetPill(TextBlock pill, string text)
     {
-        RDxvk => "DXVK", RBridge => "RTX Remix bridge", RNative => T("the game's own Direct3D 9"), _ => T("another d3d9.dll"),
-    };
+        pill.Text = text;
+        var brush = text == T("Will be removed") || text == T("Wrong build") ? "ApexWarningBrush"
+            : text.StartsWith(T("Update {0}", "")) ? "ApexAccentBrush"
+            : text == T("Up to date") || text == T("Installed") ? "ApexSuccessBrush" : "ApexMutedBrush";
+        pill.Foreground = (Brush)Application.Current.Resources[brush];
+        ((FrameworkElement)pill.Parent).Visibility = text == T("Not installed") ? Visibility.Collapsed : Visibility.Visible;
+    }
 
     string Pill(string? version, string? latest, bool wrong) =>
         wrong ? T("Wrong build") : version is null ? T("Not installed") : version.Length == 0 ? T("Installed")
@@ -862,13 +810,7 @@ public sealed partial class MainWindow : Window
             DoneSummary.Children.Add(new TextBlock { Text = T("Installed: {0} {1}", Name(c), _state?.Installed(c) ?? ""), FontSize = 12, Foreground = (Brush)Application.Current.Resources["ApexSoftTextBrush"] });
         foreach (var c in _lastRemove)
             DoneSummary.Children.Add(new TextBlock { Text = T("Removed: {0}", Name(c)), FontSize = 12, Foreground = (Brush)Application.Current.Resources["ApexSoftTextBrush"] });
-        if (_game is { } g)
-            DoneSummary.Children.Add(new TextBlock { Text = T("Copies of replaced files: {0}", Manifest.DirOf(g.Bin)), FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = (Brush)Application.Current.Resources["ApexMutedBrush"] });
-    }
-
-    void OnOpenBin(object sender, RoutedEventArgs e)
-    {
-        if (_game is { } g) Process.Start(new ProcessStartInfo("explorer.exe", $"\"{g.Bin}\"") { UseShellExecute = true });
+        DoneSummaryCard.Visibility = DoneSummary.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     // ---------- repair or remove ----------
@@ -878,30 +820,27 @@ public sealed partial class MainWindow : Window
         if (_step == DoneStep) RefreshDone();
         ManageList.Children.Clear();
         if (_game is not { } g || _state is not { } s) { ManageIntro.Text = T("Choose your game first."); return; }
-        ManageIntro.Text = T("The Sims 3 · {0} · {1}", g.Label, g.Bin);
+        ManageIntro.Text = T("The Sims 3 \u00b7 {0}", g.Label);
         var m = s.Manifest;
+        ManageRow(T("Repair or update"), T("Downloads and copies again everything installed here. Your settings stay."), T("Repair"), Repair);
         if (s.ApexVersion is not null)
             ManageRow("Apex Radiance " + s.ApexVersion, T("Removes ApexRadiance.asi. Your settings in Documents stay."), T("Remove"), () => RemoveAsync(Components.Apex));
         if (s.Layer == Layer.Bridge)
         {
             bool backup = m.Files.Any(f => f.Component == Components.Bridge && f.Backup is not null && System.IO.Path.GetFileName(f.Path) == "d3d9.dll");
-            var desc = backup ? T("Puts your previous d3d9.dll back. Apex Radiance stays.")
-                : m.OptionsBackup is not null ? T("The game goes back to its own Direct3D 9; Setup puts your Options.ini copy back.")
-                : T("Setup has no copy of your previous d3d9.dll: the game goes back to its own Direct3D 9 and resets its graphics options once.");
-            ManageRow(T("RTX Remix bridge"), desc, T("Remove"), () => RemoveAsync(Components.Bridge));
+            ManageRow(T("RTX Remix bridge"), GraphicsRemoval(backup), T("Remove"), () => RemoveAsync(Components.Bridge));
         }
         if (s.Layer == Layer.Dxvk)
-            ManageRow("DXVK", m.Files.Any(f => f.Component == Components.Dxvk && f.Backup is not null)
-                ? T("Puts your previous d3d9.dll back.")
-                : T("The game goes back to its own Direct3D 9 and may reset its graphics options once."), T("Remove"), () => RemoveAsync(Components.Dxvk));
+            ManageRow("DXVK", GraphicsRemoval(m.Files.Any(f => f.Component == Components.Dxvk && f.Backup is not null)), T("Remove"), () => RemoveAsync(Components.Dxvk));
         if (S3ppPresent) ManageRow("Sims 3 Performance Patch", T("Removes Sims3Performance.asi and its .ini."), T("Remove"), () => RemoveAsync(Components.S3pp));
         if (s.MonoPatcher) ManageRow("MonoPatcher", T("Removes MonoPatcher.asi and its package."), T("Remove"), () => RemoveAsync(Components.MonoPatcher));
         if (s.S3ss) ManageRow("Sims3SettingsSetter", T("Removes Sims3SettingsSetter.asi."), T("Remove"), () => RemoveAsync(Components.S3ss));
         if (s.Modernization) ManageRow("Sims 3 Modernization", T("Removes ts3native and ts3fixes.package."), T("Remove"), () => RemoveAsync(Components.Modernization));
-        if (m.Versions.ContainsKey(Components.Loader)) ManageRow("Ultimate ASI Loader", T("Setup added it as wininet.dll. Without a loader no .asi mod loads."), T("Remove"), () => RemoveAsync(Components.Loader));
-        ManageRow(T("Repair or update"), T("Downloads and copies again everything installed here. Your settings stay."), T("Repair"), Repair);
         ManageRow(T("Uninstall everything"), T("Removes what Setup installed, and Apex Radiance, and puts back every file Setup replaced."), T("Uninstall"), UninstallAll, danger: true);
     }
+
+    string GraphicsRemoval(bool backup) => backup ? T("Puts back the graphics files you had before.")
+        : T("Goes back to the game's default graphics. Your in-game graphics settings may reset once.");
 
     void ManageRow(string title, string desc, string action, Func<Task> run, bool danger = false)
     {
@@ -912,6 +851,7 @@ public sealed partial class MainWindow : Window
         text.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold });
         text.Children.Add(new TextBlock { Text = desc, FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = (Brush)Application.Current.Resources["ApexMutedBrush"] });
         var b = new Button { Content = action, MinWidth = 96, VerticalAlignment = VerticalAlignment.Center, IsEnabled = !_running && !_busy };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, action + " " + title);
         if (danger) { b.Background = new SolidColorBrush(ColorHelper.FromArgb(255, 0x2A, 0x16, 0x15)); b.Foreground = new SolidColorBrush(ColorHelper.FromArgb(255, 0xF2, 0xB6, 0xB2)); }
         b.Click += async (_, _) => await run();
         Grid.SetColumn(b, 1);

@@ -46,9 +46,7 @@
             <NavigationView.MenuItems>
                 <NavigationViewItem Content="Welcome" Tag="0"><NavigationViewItem.Icon><FontIcon Glyph="&#xE80F;" /></NavigationViewItem.Icon></NavigationViewItem>
                 <NavigationViewItem Content="Game" Tag="1"><NavigationViewItem.Icon><FontIcon Glyph="&#xE7FC;" /></NavigationViewItem.Icon></NavigationViewItem>
-                <NavigationViewItem Content="Components" Tag="2"><NavigationViewItem.Icon><FontIcon Glyph="&#xE74C;" /></NavigationViewItem.Icon></NavigationViewItem>
-                <NavigationViewItem Content="Install" Tag="3"><NavigationViewItem.Icon><FontIcon Glyph="&#xE896;" /></NavigationViewItem.Icon></NavigationViewItem>
-                <NavigationViewItem Content="Done" Tag="4"><NavigationViewItem.Icon><FontIcon Glyph="&#xE930;" /></NavigationViewItem.Icon></NavigationViewItem>
+                <NavigationViewItem x:Name="NavComponents" Content="Components" Tag="2"><NavigationViewItem.Icon><FontIcon Glyph="&#xE74C;" /></NavigationViewItem.Icon></NavigationViewItem>
             </NavigationView.MenuItems>
             <NavigationView.FooterMenuItems>
                 <NavigationViewItem Content="Repair or remove" Tag="5"><NavigationViewItem.Icon><FontIcon Glyph="&#xE90F;" /></NavigationViewItem.Icon></NavigationViewItem>
@@ -85,19 +83,19 @@
                                     <TextBlock Text="What Setup does" Style="{StaticResource ApexStrong}" FontSize="13" />
                                     <StackPanel Orientation="Horizontal" Spacing="12">
                                         <FontIcon Glyph="&#xE721;" FontSize="16" Foreground="{StaticResource ApexAccentBrush}" />
-                                        <TextBlock Text="Finds your game: Steam 1.67.2 or EA app 1.69." Style="{StaticResource ApexBody}" Foreground="{StaticResource ApexSoftTextBrush}" />
+                                        <TextBlock Text="Finds your The Sims 3 (Steam or EA app)." Style="{StaticResource ApexBody}" Foreground="{StaticResource ApexSoftTextBrush}" />
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal" Spacing="12">
                                         <FontIcon Glyph="&#xE896;" FontSize="16" Foreground="{StaticResource ApexAccentBrush}" />
-                                        <TextBlock Text="Installs or updates Apex Radiance and, if you want them, the RTX Remix bridge, Sims3SettingsSetter and Sims 3 Modernization, from their official GitHub releases." Style="{StaticResource ApexBody}" Foreground="{StaticResource ApexSoftTextBrush}" MaxWidth="560" />
+                                        <TextBlock Text="Installs Apex Radiance and the fixes you choose." Style="{StaticResource ApexBody}" Foreground="{StaticResource ApexSoftTextBrush}" MaxWidth="560" />
                                     </StackPanel>
                                     <StackPanel Orientation="Horizontal" Spacing="12">
                                         <FontIcon Glyph="&#xE83D;" FontSize="16" Foreground="{StaticResource ApexAccentBrush}" />
-                                        <TextBlock Text="Keeps a copy of every file it replaces, so Remove puts your game back as it was." Style="{StaticResource ApexBody}" Foreground="{StaticResource ApexSoftTextBrush}" MaxWidth="560" />
+                                        <TextBlock Text="Keeps a copy of every file it changes, so you can undo everything." Style="{StaticResource ApexBody}" Foreground="{StaticResource ApexSoftTextBrush}" MaxWidth="560" />
                                     </StackPanel>
                                 </StackPanel>
                             </Border>
-                            <TextBlock Text="Your settings in Documents\Electronic Arts\The Sims 3\Apex Radiance stay untouched." Style="{StaticResource ApexMuted}" />
+                            <TextBlock Text="Your Apex Radiance settings are always kept." Style="{StaticResource ApexMuted}" />
                         </StackPanel>
 
                         <!-- 1 Game -->
@@ -119,7 +117,7 @@
                                                 <TextBlock Text="{x:Bind Path}" Style="{StaticResource ApexMuted}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                                             </StackPanel>
                                             <Border Grid.Column="2" Style="{StaticResource ApexPill}">
-                                                <TextBlock Text="{x:Bind Badge}" FontSize="11" Foreground="#CECBF6" />
+                                                <TextBlock Text="{x:Bind Badge}" FontSize="11" Foreground="{StaticResource ApexSoftTextBrush}" />
                                             </Border>
                                         </Grid>
                                     </DataTemplate>
@@ -133,37 +131,6 @@
                                 </StackPanel>
                             </Button>
                             <StackPanel x:Name="GameDetails" Spacing="12" Visibility="Collapsed">
-                                <Grid ColumnSpacing="10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
-                                    <Border Style="{StaticResource ApexCard}" Padding="12,10">
-                                        <StackPanel Orientation="Horizontal" Spacing="10">
-                                            <FontIcon x:Name="ClosedIcon" FontSize="15" />
-                                            <TextBlock x:Name="ClosedText" Tag="dyn" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
-                                        </StackPanel>
-                                    </Border>
-                                    <Border Grid.Column="1" Style="{StaticResource ApexCard}" Padding="12,10">
-                                        <StackPanel Orientation="Horizontal" Spacing="10">
-                                            <FontIcon x:Name="LoaderIcon" FontSize="15" />
-                                            <TextBlock x:Name="LoaderChip" Tag="dyn" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
-                                        </StackPanel>
-                                    </Border>
-                                    <Border Grid.Column="2" Style="{StaticResource ApexCard}" Padding="12,10">
-                                        <StackPanel Orientation="Horizontal" Spacing="10">
-                                            <FontIcon Glyph="&#xE7F4;" FontSize="15" Foreground="{StaticResource ApexAccentBrush}" />
-                                            <TextBlock x:Name="LayerChip" Tag="dyn" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
-                                        </StackPanel>
-                                    </Border>
-                                </Grid>
-                                <Border Style="{StaticResource ApexCard}">
-                                    <StackPanel Spacing="8">
-                                        <TextBlock Text="Installed in this game" Style="{StaticResource ApexStrong}" FontSize="13" />
-                                        <StackPanel x:Name="InstalledList" Tag="dyn" Spacing="6" />
-                                    </StackPanel>
-                                </Border>
                                 <StackPanel x:Name="ProblemList" Tag="dyn" Spacing="8" />
                             </StackPanel>
                         </StackPanel>
@@ -200,8 +167,7 @@
                                             <FontIcon Glyph="&#xE950;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
                                         </Border>
                                         <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                                            <TextBlock x:Name="BridgeName" Tag="dyn" Style="{StaticResource ApexStrong}" />
-                                            <TextBlock Text="How the game draws. DXVK and the bridge need a Vulkan graphics card." Style="{StaticResource ApexMuted}" />
+                                            <TextBlock Text="Graphics" Style="{StaticResource ApexStrong}" />
                                         </StackPanel>
                                     </Grid>
                                     <RadioButtons x:Name="RendererChoice" Tag="dyn" Margin="50,0,0,0" SelectionChanged="OnRenderer" />
@@ -223,8 +189,7 @@
                                     </Border>
                                     <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                         <TextBlock Text="Sims3SettingsSetter" Style="{StaticResource ApexStrong}" />
-                                        <TextBlock Text="Game and graphics settings fixes by sims3fiend, downloaded from its GitHub release." Style="{StaticResource ApexMuted}" />
-                                        <HyperlinkButton Content="Official page" NavigateUri="https://github.com/sims3fiend/Sims3SettingsSetter" Padding="0" FontSize="12" />
+                                        <TextBlock Text="Fixes for game and graphics settings." Style="{StaticResource ApexMuted}" />
                                     </StackPanel>
                                     <Border Grid.Column="2" Style="{StaticResource ApexPill}">
                                         <TextBlock x:Name="S3ssPill" Tag="dyn" FontSize="11" Foreground="{StaticResource ApexMutedBrush}" />
@@ -247,7 +212,6 @@
                                     <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                         <TextBlock Text="Sims 3 Modernization" Style="{StaticResource ApexStrong}" />
                                         <TextBlock x:Name="ModDesc" Tag="dyn" Style="{StaticResource ApexMuted}" />
-                                        <HyperlinkButton Content="Official page" NavigateUri="https://github.com/rodneypantonial/sims3-modernization" Padding="0" FontSize="12" />
                                     </StackPanel>
                                     <Border Grid.Column="2" Style="{StaticResource ApexPill}">
                                         <TextBlock x:Name="ModPill" Tag="dyn" FontSize="11" Foreground="{StaticResource ApexMutedBrush}" />
@@ -269,8 +233,7 @@
                                     </Border>
                                     <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                         <TextBlock Text="MonoPatcher" Style="{StaticResource ApexStrong}" />
-                                        <TextBlock Text="Lets script mods patch the game's code, by LazyDuchess; several community fixes need it. Downloaded from its GitHub release." Style="{StaticResource ApexMuted}" />
-                                        <HyperlinkButton Content="Official page" NavigateUri="https://github.com/LazyDuchess/MonoPatcher" Padding="0" FontSize="12" />
+                                        <TextBlock Text="Needed only by some script mods; turn it on if a mod asks for it." Style="{StaticResource ApexMuted}" />
                                     </StackPanel>
                                     <Border Grid.Column="2" Style="{StaticResource ApexPill}">
                                         <TextBlock x:Name="MonoPill" Tag="dyn" FontSize="11" Foreground="{StaticResource ApexMutedBrush}" />
@@ -293,7 +256,7 @@
                                         </Border>
                                         <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                             <TextBlock Text="Sims 3 Performance Patch" Style="{StaticResource ApexStrong}" />
-                                            <TextBlock Text="Performance patches for the game's code. Published on Nexus Mods only, which needs a free account: Setup opens its page, and when your download finishes it finds the file in Downloads and installs it." Style="{StaticResource ApexMuted}" />
+                                            <TextBlock Text="Makes the game run faster. Needs a free Nexus Mods account; Setup installs it when your download finishes." Style="{StaticResource ApexMuted}" />
                                         </StackPanel>
                                         <Border Grid.Column="2" Style="{StaticResource ApexPill}">
                                             <TextBlock x:Name="S3ppPill" Tag="dyn" FontSize="11" Foreground="{StaticResource ApexMutedBrush}" />
@@ -302,7 +265,7 @@
                                                       AutomationProperties.Name="Sims 3 Performance Patch" />
                                     </Grid>
                                     <StackPanel x:Name="S3ppGet" Orientation="Horizontal" Spacing="8" Margin="50,0,0,0">
-                                        <Button Style="{StaticResource AccentButtonStyle}" Click="OnS3ppDownload">
+                                        <Button Click="OnS3ppDownload">
                                             <StackPanel Orientation="Horizontal" Spacing="8">
                                                 <FontIcon Glyph="&#xE896;" FontSize="14" />
                                                 <TextBlock Text="Download on Nexus Mods" />
@@ -316,10 +279,6 @@
                                     </StackPanel>
                                 </StackPanel>
                             </Border>
-                            <StackPanel Orientation="Horizontal" Spacing="10" Margin="4,2,0,0">
-                                <FontIcon x:Name="LoaderPlanIcon" FontSize="14" />
-                                <TextBlock x:Name="LoaderPlan" Tag="dyn" Style="{StaticResource ApexMuted}" VerticalAlignment="Center" />
-                            </StackPanel>
                         </StackPanel>
 
                         <!-- 3 Install -->
@@ -339,25 +298,19 @@
                             <TextBlock x:Name="DoneTitle" Tag="dyn" FontSize="26" FontWeight="SemiBold" HorizontalAlignment="Center" />
                             <TextBlock x:Name="DoneText" Tag="dyn" Style="{StaticResource ApexBody}" FontSize="14" Foreground="{StaticResource ApexSoftTextBrush}"
                                        TextAlignment="Center" MaxWidth="480" HorizontalAlignment="Center" />
-                            <Border Style="{StaticResource ApexCard}" MinWidth="520" Margin="0,8,0,0">
+                            <Border x:Name="DoneSummaryCard" Style="{StaticResource ApexCard}" MinWidth="520" Margin="0,8,0,0">
                                 <StackPanel x:Name="DoneSummary" Tag="dyn" Spacing="6" />
                             </Border>
-                            <Button HorizontalAlignment="Center" Click="OnOpenBin">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon Glyph="&#xE838;" FontSize="14" />
-                                    <TextBlock Text="Open Game\Bin" />
-                                </StackPanel>
-                            </Button>
                         </StackPanel>
 
                         <!-- 5 Repair or remove -->
                         <StackPanel x:Name="ScreenManage" Spacing="14" Visibility="Collapsed">
                             <TextBlock Text="Repair or remove" Style="{StaticResource ApexTitle}" />
                             <TextBlock x:Name="ManageIntro" Tag="dyn" Style="{StaticResource ApexMuted}" FontSize="13" />
+                            <InfoBar x:Name="ManageInfo" IsClosable="True" />
                             <Border Style="{StaticResource ApexCard}" Padding="0">
                                 <StackPanel x:Name="ManageList" Tag="dyn" />
                             </Border>
-                            <InfoBar x:Name="ManageInfo" IsClosable="True" />
                         </StackPanel>
 
                         <!-- 6 About -->
@@ -380,7 +333,8 @@
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <TextBlock x:Name="FooterNote" Tag="dyn" Style="{StaticResource ApexMuted}" VerticalAlignment="Center" />
+                    <TextBlock x:Name="FooterNote" Tag="dyn" Style="{StaticResource ApexMuted}" VerticalAlignment="Center"
+                               TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" />
                     <Button x:Name="BackButton" Grid.Column="1" Content="Back" MinWidth="96" Click="OnBack" />
                     <Button x:Name="NextButton" Grid.Column="2" MinWidth="120" Style="{StaticResource AccentButtonStyle}" Click="OnNext">
                         <TextBlock x:Name="NextText" Tag="dyn" />
