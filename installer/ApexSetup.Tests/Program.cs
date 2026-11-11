@@ -37,8 +37,11 @@ try
         var good = new Release("loinyx/Sims3-ApexRadiance", "v3.1.1", new[] { new Asset("ApexRadiance.asi", "x", Verify.Sha256Of(B("ApexRadiance.asi"))) });
         var other = new Release("loinyx/Sims3-ApexRadiance", "v3.1.1", new[] { new Asset("ApexRadiance.asi", "x", new string('0', 64)) });
         Check(Verify.Files(g, sv, good).Count == 0, "check installation: a sound install has no finding");
-        Check(Verify.Files(g, sv, other).Any(x => x.Text.Contains("not the {0} release file")), "check installation: a changed ApexRadiance.asi is found");
-        Check(Verify.Files(g, sv with { ApexVersion = "3.1.0" }, other).Count == 0, "check installation: another version is not compared");
+        Check(!Verify.TestBuild(g, sv, good) && Verify.TestBuild(g, sv, other), "check installation: other bytes of the release's version are a test build");
+        Check(Verify.TestBuild(g, sv with { ApexVersion = "3.1.1-dev.3" }, good) && Verify.TestBuild(g, sv with { ApexVersion = "3.2.0" }, good),
+              "check installation: a -dev version and a version newer than the release are test builds");
+        Check(!Verify.TestBuild(g, sv with { ApexVersion = "3.1.0" }, other) && Verify.Files(g, sv, other).Count == 0,
+              "check installation: an older release is no test build, and a test build is no error");
         File.Move(B(@".trex\NvRemixBridge.exe"), B(@".trex\NvRemixBridge.exe.off"));
         Check(Verify.Files(g, sv, good).Any(x => x.Args.Contains(@".trex\NvRemixBridge.exe")), "check installation: a missing bridge server is found");
         File.Move(B(@".trex\NvRemixBridge.exe.off"), B(@".trex\NvRemixBridge.exe"));

@@ -54,7 +54,15 @@ public sealed partial class MainWindow : Window
         SetupVersion.Text = "Setup " + Assembly.GetExecutingAssembly().GetName().Version?.ToString(3);
 
         Pt = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "pt";
-        _timer.Tick += (_, _) => { var r = Games.IsRunning(); if (r != _running) { _running = r; RefreshGame(); UpdateFooter(); } };
+        // every screen's buttons follow the game starting or closing (the status and Manage rows are built with that state)
+        _timer.Tick += (_, _) => { var r = Games.IsRunning(); if (r != _running) { _running = r; RefreshAll(); } };
+        // closing in the middle of an install or a removal would leave the game half changed
+        AppWindow.Closing += (w, a) =>
+        {
+            if (!_busy) return;
+            a.Cancel = true;
+            _ = Message(T("Setup is applying changes"), T("Wait until it finishes before closing."));
+        };
         ((FrameworkElement)Content).Loaded += async (_, _) => await StartAsync();
     }
 
@@ -87,9 +95,12 @@ public sealed partial class MainWindow : Window
         await LoadReleasesAsync();
     }
 
+    bool _loading = true; // the release check has not answered yet: nothing is installed meanwhile
     async Task LoadReleasesAsync()
     {
         _offline = false;
+        _loading = true;
+        RefreshAll();
         try
         {
             var repos = Repo.Values.Distinct().ToList();
@@ -97,6 +108,7 @@ public sealed partial class MainWindow : Window
             for (int i = 0; i < repos.Count; i++) _latest[repos[i]] = got[i];
         }
         catch (Exception) { _offline = true; }
+        _loading = false;
         RefreshAll();
     }
 
@@ -150,10 +162,16 @@ public sealed partial class MainWindow : Window
         for (int i = 0; i < _screens.Length; i++) _screens[i].Visibility = i == step ? Visibility.Visible : Visibility.Collapsed;
         Animate(_screens[step]);
         Scroller.ChangeView(null, 0, null, true);
-        _syncNav = true;
-        Nav.SelectedItem = Nav.MenuItems.Concat(Nav.FooterMenuItems).OfType<NavigationViewItem>().First(n => (string)n.Tag == step.ToString());
-        _syncNav = false;
+        SyncNav();
         RefreshAll();
+    }
+
+    // the sidebar shows the screen that is open (also after a refused jump)
+    void SyncNav()
+    {
+        _syncNav = true;
+        Nav.SelectedItem = Nav.MenuItems.Concat(Nav.FooterMenuItems).OfType<NavigationViewItem>().First(n => (string)n.Tag == _step.ToString());
+        _syncNav = false;
     }
 
     static void Animate(UIElement el)
@@ -177,13 +195,23 @@ public sealed partial class MainWindow : Window
         var to = int.Parse((string)item.Tag);
         // steps open in order; Install and Done only through the buttons; nothing moves while Setup works
         bool ok = !_busy && (to is Welcome or About || to == GameStep || (to == ComponentsStep && CanLeaveGame()) || to == Manage);
-        if (!ok) { DispatcherQueue.TryEnqueue(() => Show(_step)); return; }
+        if (!ok) { DispatcherQueue.TryEnqueue(SyncNav); return; }
+        _backTo = -1;
         Show(to == Manage && _game is null ? GameStep : to);
     }
 
     bool CanLeaveGame() => _game is not null && !_running;
 
-    void OnBack(object sender, RoutedEventArgs e) => Show(Math.Max(Welcome, _step - 1));
+    // Back goes where the player came from: the status card's Change components / Repair or remove return to it; the steps
+    // go one back
+    int _backTo = -1;
+    void GoFromStatus(int to) { _backTo = Welcome; Show(to); }
+    void OnBack(object sender, RoutedEventArgs e)
+    {
+        var to = _backTo >= 0 ? _backTo : Math.Max(Welcome, _step - 1);
+        _backTo = -1;
+        Show(to);
+    }
 
     async void OnNext(object sender, RoutedEventArgs e)
     {
@@ -197,6 +225,7 @@ public sealed partial class MainWindow : Window
             case ComponentsStep:
             {
                 var (add, del) = Plan();
+                if (_offline && add.Count > 0) { await LoadReleasesAsync(); break; } // (the button reads Try again)
                 var fixes = _game is not null && _state is not null && Compat.Check(_game, _state).Any(x => x.CanFix);
                 if (add.Count + del.Count > 0 || fixes) await InstallAsync(add, del); // (nothing to do: the button is off and says so)
                 break;
@@ -215,23 +244,26 @@ public sealed partial class MainWindow : Window
         NextText.Text = _step switch
         {
             Welcome => WelcomeUpdates().Count > 0 ? T("Update now") : _state?.ApexVersion is not null ? T("Next") : T("Get started"),
+            ComponentsStep when _offline && wa.Count > 0 => T("Try again"),
             ComponentsStep => work.Count == 0 ? (fixes ? T("Fix settings") : T("Nothing to apply")) : _state?.ApexVersion is null ? T("Install")
                 : work.Count == 1 ? T("Apply 1 change") : T("Apply {0} changes", work.Count),
             DoneStep => T("Finish"),
             _ => T("Next"),
         };
-        NextButton.IsEnabled = _step switch
+        NextButton.IsEnabled = !_busy && _step switch
         {
             GameStep => CanLeaveGame(),
-            ComponentsStep => !_running && _game is not null && (work.Count > 0 ? !_offline : fixes),
+            // removals and fixes need no download; installs wait for the release check (offline: the button retries it)
+            ComponentsStep => !_loading && !_running && _game is not null && (work.Count > 0 || fixes),
             _ => true,
         };
         FooterNote.Text = _step switch
         {
-            GameStep when _running => T("Close The Sims 3 to continue."),
+            GameStep or ComponentsStep when _running => T("Close The Sims 3 to continue."),
+            ComponentsStep when _loading => T("Checking the latest versions\u2026"),
+            ComponentsStep when _offline && wa.Count > 0 => T("Setup needs the internet to download the files."),
             ComponentsStep when work.Count == 0 && !fixes => T("Everything is installed and up to date."),
-            ComponentsStep when _offline && work.Count > 0 => T("Setup needs the internet to download the files."),
-            ComponentsStep => T("Setup changes only what differs from your game now: {0}.", string.Join(", ", wa.Select(Name).Concat(wd.Select(c => T("remove {0}", Name(c)))))),
+            ComponentsStep when _state?.ApexVersion is null => T("Nothing changes until you click Install."),
             _ => "",
         };
     }
@@ -256,12 +288,14 @@ public sealed partial class MainWindow : Window
         var inst = _game is null ? null : _state?.ApexVersion;
         if (_offline)
             SetInfo(WelcomeInfo, InfoBarSeverity.Error, T("Setup can't reach GitHub"), T("Check your internet connection, then try again."), T("Try again"), async () => await LoadReleasesAsync());
+        else if (_loading && _game is not null)
+            SetInfo(WelcomeInfo, InfoBarSeverity.Informational, T("Checking for updates\u2026"), "");
         else if (Updates() is { Count: > 0 } ups && _game is { } g)
         {
             // checked at every start: the player learns about a new release here, without visiting GitHub
             var lines = ups.Select(c => T("{0} {1} → {2}", Name(c), Known(c) is { Length: > 0 } v ? v : "?", Latest(c)!));
             SetInfo(WelcomeInfo, InfoBarSeverity.Informational, T("Updates available"),
-                T("{0} in The Sims 3 · {1}.", string.Join(", ", lines), g.Label) + " " + T("Update now installs them; Game and Components hold every other change."));
+                string.Join(", ", lines) + ". " + (_running ? T("Close The Sims 3 to update.") : T("Update now installs them.")));
         }
         else WelcomeInfo.IsOpen = false;
         RefreshStatus();
@@ -295,15 +329,18 @@ public sealed partial class MainWindow : Window
             StatusList.Children.Add(row);
         }
         string State(string c) => Known(c) is not { Length: > 0 } v ? T("Installed") : Newer(Latest(c), v) ? T("{0} \u2192 {1}", v, Latest(c)!) : T("{0} \u00b7 up to date", v);
-        Row("Apex Radiance", State(Components.Apex), !Updates().Contains(Components.Apex));
-        Row(T("Renderer"), LayerName(s.Layer), true);
-        Row(T("ASI loader"), s.Loader ?? T("none"), s.Loader is not null);
+        var apexRelease = _latest.GetValueOrDefault(Repo[Components.Apex]);
+        var test = Verify.TestBuild(g, s, apexRelease);
+        Row("Apex Radiance", test ? T("{0} \u00b7 test build", s.ApexVersion!) : State(Components.Apex), !test && !Updates().Contains(Components.Apex));
+        Row(T("Graphics"), LayerName(s.Layer), true);
         foreach (var (c, name, present) in new[] { (Components.S3ss, "Sims3SettingsSetter", s.S3ss), (Components.Modernization, "Sims 3 Modernization", s.Modernization), (Components.MonoPatcher, "MonoPatcher", s.MonoPatcher) })
             if (present) Row(name, State(c), !Updates().Contains(c));
 
-        var found = Verify.Files(g, s, _latest.GetValueOrDefault(Repo[Components.Apex])).Concat(Compat.Check(g, s)).ToList();
+        var found = Verify.Files(g, s, apexRelease).Concat(Compat.Check(g, s)).ToList();
         if (found.Count == 0)
             StatusList.Children.Add(new TextBlock { Text = _checkedAt is null ? T("Everything is in place.") : T("Everything is in place (checked at {0}).", _checkedAt), FontSize = 12, Foreground = ok });
+        else if (_checkedAt is not null)
+            StatusList.Children.Add(new TextBlock { Text = T("Checked at {0}.", _checkedAt), FontSize = 12, Foreground = muted });
         foreach (var x in found)
             StatusList.Children.Add(new InfoBar
             {
@@ -312,9 +349,9 @@ public sealed partial class MainWindow : Window
             });
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        Button Make(string text, Func<Task> act, bool primary = false)
+        Button Make(string text, Func<Task> act, bool primary = false, bool needsNet = false)
         {
-            var b = new Button { Content = text, IsEnabled = !_running && !_busy };
+            var b = new Button { Content = text, IsEnabled = !_running && !_busy && !(needsNet && (_offline || _loading)) };
             if (primary) b.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
             b.Click += async (_, _) => await act();
             buttons.Children.Add(b);
@@ -322,23 +359,25 @@ public sealed partial class MainWindow : Window
         }
         // the install's own files set right by installing them again; the settings by their fixes
         var repair = new List<string>();
-        if (found.Any(x => x.Text.Contains("ApexRadiance.asi") || x.Text.StartsWith("Apex Radiance is not"))) repair.Add(Components.Apex);
+        if (found.Any(x => x.Text.StartsWith("Apex Radiance is not"))) repair.Add(Components.Apex);
         if (found.Any(x => x.Text.Contains("RTX Remix bridge does not start") && !x.CanFix)) repair.Add(Components.Bridge);
         if (s.Loader is null) repair.Add(Components.Loader);
-        if (repair.Count > 0 || found.Any(x => x.CanFix))
+        var fixable = found.Any(x => x.CanFix);
+        if (repair.Count > 0 || fixable)
             Make(T("Repair"), async () =>
             {
-                if (found.Any(x => x.CanFix)) await Guarded(() => { Engine.CheckWritable(); foreach (var x in Compat.Check(g, Scan.Run(g)).Where(x => x.CanFix)) x.Fix!(); }, T("Fixed."));
+                if (fixable && !await Guarded(() => { Engine.CheckWritable(); foreach (var x in Compat.Check(g, Scan.Run(g)).Where(x => x.CanFix)) x.Fix!(); }, T("Fixed."), WelcomeInfo)) return;
                 if (repair.Count > 0 && !_offline) await InstallAsync(repair);
-            }, primary: true);
+            }, primary: true, needsNet: !fixable);
+        if (test && apexRelease is not null)
+            Make(T("Install the official {0}", apexRelease.Version), () => InstallAsync(new List<string> { Components.Apex }), needsNet: true);
         Make(T("Check installation"), () =>
         {
             _checkedAt = DateTime.Now.ToString("HH:mm");
             RefreshAll(); // (scans the game again, then Verify and Compat on what is there now)
             return Task.CompletedTask;
         });
-        Make(T("Change components"), () => { if (CanLeaveGame()) Show(ComponentsStep); return Task.CompletedTask; });
-        Make(T("Repair or remove"), () => { Show(Manage); return Task.CompletedTask; });
+        Make(T("Change components"), () => { if (CanLeaveGame()) GoFromStatus(ComponentsStep); return Task.CompletedTask; });
         StatusList.Children.Add(buttons);
     }
 
@@ -370,6 +409,9 @@ public sealed partial class MainWindow : Window
     void OnGamePicked(object sender, SelectionChangedEventArgs e)
     {
         _game = (GameList.SelectedItem as GameItem)?.Game;
+        _checkedAt = null;
+        ManageInfo.IsOpen = false;
+        if (_game?.Bin != _s3ppFor) _s3ppArchive = null;
         if (_game is not null) Games.Remember(_game);
         RefreshAll();
     }
@@ -435,16 +477,8 @@ public sealed partial class MainWindow : Window
             if (x.Link is { } link) bar.ActionButton = new HyperlinkButton { Content = T("Read more"), NavigateUri = new Uri(link) };
             ProblemList.Children.Add(bar);
         }
-        if (found.Any(x => x.CanFix))
-        {
-            var fix = new Button { Content = T("Fix all now"), Style = (Style)Application.Current.Resources["AccentButtonStyle"], IsEnabled = !_running };
-            fix.Click += async (_, _) =>
-            {
-                await Guarded(() => { Engine.CheckWritable(); foreach (var x in Compat.Check(_game!, Scan.Run(_game!)).Where(x => x.CanFix)) x.Fix!(); }, T("Fixed."));
-            };
-            ProblemList.Children.Add(fix);
-        }
-        else if (found.Count == 0)
+        // (the fixes run with Install / Apply, or Fix settings when nothing else changes)
+        if (found.Count == 0)
             ProblemList.Children.Add(new TextBlock { Text = T("No incompatible settings found."), FontSize = 12, Foreground = (Brush)Application.Current.Resources["ApexSuccessBrush"] });
     }
 
@@ -490,12 +524,13 @@ public sealed partial class MainWindow : Window
 
     void SetDefaults()
     {
-        // after the release check: the defaults compare with the latest versions
-        if (_state is not { } s || _defaultsFor == _game || (_latest.Count == 0 && !_offline)) return;
+        if (_state is not { } s || _defaultsFor == _game) return;
         _defaultsFor = _game;
-        // what is installed stays on; what Apex recommends (DXVK, Sims3SettingsSetter) is on when missing
-        _renderer = s.Layer == Layer.Native ? RDxvk : RendererOf(s);
-        S3ssToggle.IsOn = true;
+        // what is installed stays on; a first install takes what Apex recommends (DXVK, Sims3SettingsSetter); a game that already
+        // has Apex keeps its renderer and its choices
+        var first = s.ApexVersion is null;
+        _renderer = first && s.Layer == Layer.Native ? RDxvk : RendererOf(s);
+        S3ssToggle.IsOn = first || s.S3ss;
         ModToggle.IsOn = s.Modernization;
         MonoToggle.IsOn = s.MonoPatcher;
         S3ppToggle.IsOn = true;
@@ -560,7 +595,8 @@ public sealed partial class MainWindow : Window
         if (_state is not { } s || _game is not { } g) return;
         SetDefaults();
         var latest = Latest(Components.Apex) ?? "";
-        ApexDesc.Text = s.ApexVersion is null ? T("Installs {0} into Game\\Bin.", latest)
+        ApexDesc.Text = TestBuildNow() ? T("Test build {0}: kept as it is.", s.ApexVersion!)
+            : s.ApexVersion is null ? T("Installs {0} into Game\\Bin.", latest)
             : s.ApexVersion == "?" ? T("Replaces the installed copy with {0}. Your settings stay.", latest)
             : Newer(latest, s.ApexVersion) ? T("Updates {0} to {1}. Your settings stay.", s.ApexVersion, latest)
             : T("{0} is installed and up to date: nothing to change.", s.ApexVersion);
@@ -596,15 +632,15 @@ public sealed partial class MainWindow : Window
         MonoPill.Text = s.MonoPatcher && !MonoToggle.IsOn ? T("Will be removed") : Pill(Known(Components.MonoPatcher), Latest(Components.MonoPatcher), false);
         S3ppPill.Text = S3ppPresent && !S3ppToggle.IsOn ? T("Will be removed") : S3ppPresent ? T("Installed") : _s3ppArchive is not null ? T("Ready to install") : T("Not installed");
         ShowCard(S3ssToggle, s.S3ss);
-        ShowCard(ModToggle, s.Modernization && g.ModernizationSupported);
+        ShowCard(ModToggle, s.Modernization);
         ShowCard(MonoToggle, s.MonoPatcher);
         ShowCard(S3ppToggle, S3ppPresent);
         if (!S3ppPresent) S3ppToggle.Visibility = Visibility.Collapsed; // (missing: its download buttons below)
         S3ppGet.Visibility = !S3ppPresent && _s3ppArchive is null && _s3ppWatch is null ? Visibility.Visible : Visibility.Collapsed;
         S3ppWait.Visibility = _s3ppWatch is not null ? Visibility.Visible : Visibility.Collapsed;
         S3ppWaitText.Text = T("Waiting for your download in {0}…", DownloadsFolder());
-        ModToggle.IsEnabled = g.ModernizationSupported;
-        if (!g.ModernizationSupported) ModToggle.IsOn = false;
+        ModToggle.IsEnabled = g.ModernizationSupported || s.Modernization;
+        if (!g.ModernizationSupported && !s.Modernization) ModToggle.IsOn = false;
         ModDesc.Text = g.ModernizationSupported
             ? T("Stutter, route and crash fixes by rodneypantonial: ts3native in Game\\Bin and ts3fixes.package in Mods\\Packages, from its GitHub release.")
             : T("Not available for this game version: it supports Steam 1.67.2 and EA app 1.69.47.");
@@ -617,6 +653,8 @@ public sealed partial class MainWindow : Window
             : T("No ASI loader found: Setup adds Ultimate ASI Loader as wininet.dll, from its GitHub release.");
         UpdateFooter();
     }
+
+    bool TestBuildNow() => _game is { } g && _state is { } s && Verify.TestBuild(g, s, _latest.GetValueOrDefault(Repo[Components.Apex]));
 
     string RendererName(string r) => r switch
     {
@@ -633,7 +671,7 @@ public sealed partial class MainWindow : Window
         var add = new List<string>();
         var del = new List<string>();
         if (_state is not { } s || _game is not { } g) return (add, del);
-        if (s.ApexVersion is null || s.ApexVersion == "?" || Newer(Latest(Components.Apex), s.ApexVersion)) add.Add(Components.Apex);
+        if (s.ApexVersion is null || s.ApexVersion == "?" || Newer(Latest(Components.Apex), s.ApexVersion) && !TestBuildNow()) add.Add(Components.Apex);
 
         var cur = RendererOf(s);
         if (_renderer == cur)
@@ -658,8 +696,9 @@ public sealed partial class MainWindow : Window
         Optional(Components.MonoPatcher, MonoToggle.IsOn, s.MonoPatcher, NeedsUpdate(Components.MonoPatcher));
         // Sims 3 Performance Patch: installed from the player's own download only
         if (S3ppPresent && !S3ppToggle.IsOn) del.Add(Components.S3pp);
-        if (!S3ppPresent && _s3ppArchive is not null) add.Add(Components.S3pp);
-        Optional(Components.Modernization, ModToggle.IsOn && g.ModernizationSupported, s.Modernization, s.Ts3NativeWrongBuild || NeedsUpdate(Components.Modernization));
+        if (!S3ppPresent && _s3ppArchive is not null && _s3ppFor == g.Bin) add.Add(Components.S3pp);
+        Optional(Components.Modernization, ModToggle.IsOn && (g.ModernizationSupported || s.Modernization), s.Modernization,
+                 g.ModernizationSupported && (s.Ts3NativeWrongBuild || NeedsUpdate(Components.Modernization)));
         if (Engine.NeedsLoader(s, _renderer != cur && _renderer is RDxvk or RBridge)) add.Add(Components.Loader);
         return (add, del);
     }
@@ -667,7 +706,7 @@ public sealed partial class MainWindow : Window
     // ---------- Sims 3 Performance Patch: the player downloads it on Nexus Mods, Setup picks the file up ----------
 
     const string S3ppPage = "https://www.nexusmods.com/thesims3/mods/235";
-    string? _s3ppArchive;
+    string? _s3ppArchive, _s3ppFor; // (the download and the Game\\Bin it is for)
     FileSystemWatcher? _s3ppWatch;
     bool S3ppPresent => _game is { } g && File.Exists(System.IO.Path.Combine(g.Bin, "Sims3Performance.asi"));
 
@@ -678,6 +717,7 @@ public sealed partial class MainWindow : Window
 
     void OnS3ppDownload(object sender, RoutedEventArgs e)
     {
+        _s3ppFor = _game?.Bin;
         // through Explorer, so the browser opens as the player, not with Setup's administrator rights
         Process.Start(new ProcessStartInfo("explorer.exe", S3ppPage) { UseShellExecute = true });
         _s3ppWatch?.Dispose();
@@ -690,6 +730,7 @@ public sealed partial class MainWindow : Window
 
     async void OnS3ppPick(object sender, RoutedEventArgs e)
     {
+        _s3ppFor = _game?.Bin;
         var picker = new Microsoft.Windows.Storage.Pickers.FileOpenPicker(AppWindow.Id);
         picker.FileTypeFilter.Add(".zip");
         picker.FileTypeFilter.Add(".asi");
@@ -720,8 +761,9 @@ public sealed partial class MainWindow : Window
             _s3ppWatch = null;
             _s3ppArchive = path;
             Activate(); // back in front of the browser
-            if (_game is not null && !_running && !_busy) await InstallAsync(new List<string> { Components.S3pp });
-            else RefreshComponents();
+            // with Apex installed, at once; on a first install it goes with Install (Plan)
+            if (_game is not null && _game.Bin == _s3ppFor && _state?.ApexVersion is not null && !_running && !_busy) await InstallAsync(new List<string> { Components.S3pp });
+            else RefreshAll();
         });
     }
 
@@ -736,7 +778,8 @@ public sealed partial class MainWindow : Window
 
     async Task InstallAsync(List<string> comps, List<string>? remove = null)
     {
-        if (_game is not { } g || _busy) return;
+        if (_game is not { } g || _busy || _running) return;
+        var from = _step == InstallStep ? ComponentsStep : _step;
         _busy = true;
         remove ??= new List<string>();
         var dels = Components.All.Where(remove.Contains).ToList();
@@ -753,8 +796,10 @@ public sealed partial class MainWindow : Window
                 rows[i](i < active ? 2 : i == active ? 1 : 0);
         }
         Mark(0);
+        var touched = false; // (a file was already changed: the error message points at Repair or remove)
         var progress = new Progress<Progress>(p =>
         {
+            touched |= p.Fraction > 0;
             InstallBar.Value = p.Fraction;
             Mark(p.Arg is null ? (p.Fraction >= 1 ? rows.Count : p.Fraction > 0.9 ? rows.Count - 1 : dels.Count) : dels.Count + order.IndexOf(p.Arg));
         });
@@ -762,18 +807,24 @@ public sealed partial class MainWindow : Window
         {
             await Task.Run(async () =>
             {
-                foreach (var c in dels) Engine.Remove(g, c);
+                foreach (var c in dels) { touched = true; Engine.Remove(g, c); }
                 await Engine.InstallAsync(g, order, new GitHubSource { S3ppArchive = _s3ppArchive }, progress);
             });
             _lastInstall = order;
+            _lastRemove = dels;
+            if (order.Contains(Components.S3pp)) _s3ppArchive = null;
+            _defaultsFor = null; // (the switches follow the game as it is now)
             _busy = false;
             Show(DoneStep);
         }
         catch (Exception ex)
         {
             _busy = false;
-            await Message(T("Setup could not finish"), T("{0}\n\nWhat was installed before the error can be removed in Repair or remove.", T(ex.Message)));
-            Show(ComponentsStep);
+            _defaultsFor = null;
+            var net = ex is HttpRequestException or TaskCanceledException;
+            await Message(net ? T("Setup can't reach GitHub") : T("Setup could not finish"),
+                (net ? T("Check your internet connection, then try again.") : ex.Message) + (touched ? "\n\n" + T("Repair or remove sets the game right.") : ""));
+            Show(from);
         }
     }
 
@@ -800,13 +851,17 @@ public sealed partial class MainWindow : Window
         };
     }
 
+    List<string> _lastRemove = new();
     void RefreshDone()
     {
-        DoneTitle.Text = T("You're all set");
-        DoneText.Text = T("Start The Sims 3, load a world and press Ctrl+Shift+F11 to open the Apex Radiance menu.");
+        var apex = _state?.ApexVersion is not null;
+        DoneTitle.Text = apex ? T("You're all set") : T("Changes applied");
+        DoneText.Text = apex ? T("Start The Sims 3, load a world and press Ctrl+Shift+F11 to open the Apex Radiance menu.") : "";
         DoneSummary.Children.Clear();
         foreach (var c in _lastInstall)
             DoneSummary.Children.Add(new TextBlock { Text = T("Installed: {0} {1}", Name(c), _state?.Installed(c) ?? ""), FontSize = 12, Foreground = (Brush)Application.Current.Resources["ApexSoftTextBrush"] });
+        foreach (var c in _lastRemove)
+            DoneSummary.Children.Add(new TextBlock { Text = T("Removed: {0}", Name(c)), FontSize = 12, Foreground = (Brush)Application.Current.Resources["ApexSoftTextBrush"] });
         if (_game is { } g)
             DoneSummary.Children.Add(new TextBlock { Text = T("Copies of replaced files: {0}", Manifest.DirOf(g.Bin)), FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = (Brush)Application.Current.Resources["ApexMutedBrush"] });
     }
@@ -866,14 +921,14 @@ public sealed partial class MainWindow : Window
 
     async Task RemoveAsync(string c)
     {
-        if (_game is not { } g) return;
+        if (_game is not { } g || _busy || _running) return;
         if (!await Confirm(T("Remove {0}?", Name(c)), T("Close the game first. Setup removes the files and puts back the ones it replaced."), T("Remove"))) return;
         await Guarded(() => Engine.Remove(g, c), T("{0} removed.", Name(c)));
     }
 
     async Task UninstallAll()
     {
-        if (_game is not { } g) return;
+        if (_game is not { } g || _busy || _running) return;
         if (!await Confirm(T("Uninstall everything?"), T("Setup removes Apex Radiance and everything it installed in this game, and puts back every file it replaced. Your settings in Documents stay."), T("Uninstall"))) return;
         await Guarded(() => Engine.RemoveAll(g), T("Everything Setup installed was removed."));
     }
@@ -881,7 +936,8 @@ public sealed partial class MainWindow : Window
     Task Repair()
     {
         if (_state is not { } s) return Task.CompletedTask;
-        var l = new List<string> { Components.Apex };
+        var l = new List<string>();
+        if (!TestBuildNow()) l.Add(Components.Apex);
         if (s.Layer == Layer.Bridge) l.Add(Components.Bridge);
         if (s.Layer == Layer.Dxvk && s.Installed(Components.Dxvk) is not null) l.Add(Components.Dxvk);
         if (s.S3ss) l.Add(Components.S3ss);
@@ -891,17 +947,29 @@ public sealed partial class MainWindow : Window
         return InstallAsync(l);
     }
 
-    async Task Guarded(Action work, string done)
+    // a change made in place (a removal, the settings' fixes): the buttons off while it runs, its result on the bar of the
+    // screen it was started from (Repair or remove's by default); false when it did not run or failed
+    async Task<bool> Guarded(Action work, string done, InfoBar? bar = null)
     {
+        if (_busy || _running) return false;
+        bar ??= ManageInfo;
         _busy = true;
+        RefreshAll();
+        var ok = false;
         try
         {
             await Task.Run(work);
-            SetInfo(ManageInfo, InfoBarSeverity.Success, done, "");
+            SetInfo(bar, InfoBarSeverity.Success, done, "");
+            ok = true;
         }
-        catch (Exception ex) { SetInfo(ManageInfo, InfoBarSeverity.Error, T("Setup could not finish"), T(ex.Message)); }
-        _busy = false;
-        RefreshAll();
+        catch (Exception ex) { SetInfo(bar, InfoBarSeverity.Error, T("Setup could not finish"), ex.Message); }
+        finally
+        {
+            _busy = false;
+            _defaultsFor = null;
+            RefreshAll();
+        }
+        return ok;
     }
 
     // ---------- about ----------
