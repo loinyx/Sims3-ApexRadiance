@@ -53,7 +53,9 @@ public sealed partial class MainWindow : Window
         if (File.Exists(ico)) AppWindow.SetIcon(ico);
         SetupVersion.Text = "Setup " + Assembly.GetExecutingAssembly().GetName().Version?.ToString(3);
 
-        Pt = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "pt";
+        // the player's choice (the title bar's language button), else Windows' display language, as the mod's menu
+        Lang = SavedChoice() ?? SystemLanguage(System.Globalization.CultureInfo.CurrentUICulture);
+        Root.Language = Bcp47(Lang);
         // every screen's buttons follow the game starting or closing (the status and Manage rows are built with that state)
         _timer.Tick += (_, _) => { var r = Games.IsRunning(); if (r != _running) { _running = r; RefreshAll(); } };
         // closing in the middle of an install or a removal would leave the game half changed
@@ -279,7 +281,7 @@ public sealed partial class MainWindow : Window
 
     void RefreshAll()
     {
-        LangText.Text = Pt ? "Português" : "English";
+        LangText.Text = Languages.First(l => l.Code == Lang).Name;
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(LangButton, T("Language"));
         RefreshGame();
         RefreshWelcome();
@@ -995,14 +997,37 @@ public sealed partial class MainWindow : Window
     {
         while (_dialog is { } open) { open.Hide(); await _dialogShown!; }
         _dialog = d;
+        d.Language = Root.Language; // (a dialog is a popup: it does not inherit the window's language)
         _dialogShown = d.ShowAsync().AsTask();
         try { return await _dialogShown; }
         finally { if (_dialog == d) _dialog = null; }
     }
 
+    // the language button's list: Automatic, then the 21 languages in their own names; a check on the choice and on the
+    // language shown
     void OnLanguage(object sender, RoutedEventArgs e)
     {
-        Pt = !Pt;
+        var saved = SavedChoice();
+        var menu = new MenuFlyout { Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedRight };
+        var auto = new ToggleMenuFlyoutItem { Text = T("Automatic"), IsChecked = saved is null, Language = Root.Language };
+        auto.Click += (_, _) => SetLanguage(null);
+        menu.Items.Add(auto);
+        menu.Items.Add(new MenuFlyoutSeparator());
+        foreach (var (code, name) in Languages)
+        {
+            var item = new ToggleMenuFlyoutItem { Text = name, IsChecked = code == Lang, Language = Bcp47(code) };
+            item.Click += (_, _) => SetLanguage(code);
+            menu.Items.Add(item);
+        }
+        menu.ShowAt(LangButton);
+    }
+
+    // every screen at once: the static texts by Localize, the ones set in code by the refresh
+    void SetLanguage(string? choice)
+    {
+        SaveChoice(choice);
+        Lang = choice ?? SystemLanguage(System.Globalization.CultureInfo.CurrentUICulture);
+        Root.Language = Bcp47(Lang);
         Localize();
         LicenceList.Children.Clear();
         RefreshAll();

@@ -250,8 +250,42 @@ try
 catch (Exception e) { Console.WriteLine("FAIL exception: " + e); failures++; }
 finally { Directory.Delete(root, true); }
 
+// Setup's languages: each table loads, its keys are English texts of Setup (the Portuguese table's keys, the complete
+// list), with the key's {n} placeholders and no empty text. A key twice in one file fails: the indexer initializer keeps
+// the last one without a word, so the file itself is read. Missing keys are only counted (English shows for them).
+{
+    Check(Strings.Languages.Length == 21 && Strings.Languages[0].Code == "en", "21 languages, English first");
+    foreach (var (name, want) in new[] { ("pt-PT", "pt"), ("pt-BR", "pt"), ("zh-CN", "zh_hans"), ("zh-SG", "zh_hans"), ("zh-Hans", "zh_hans"),
+                 ("zh-TW", "zh_hant"), ("zh-HK", "zh_hant"), ("zh-MO", "zh_hant"), ("zh-Hant", "zh_hant"), ("nb-NO", "no"), ("nn-NO", "no"),
+                 ("de-AT", "de"), ("ja-JP", "ja"), ("th-TH", "th"), ("tr-TR", "en"), ("en-GB", "en") })
+        Check(Strings.SystemLanguage(new System.Globalization.CultureInfo(name)) == want, $"Windows in {name} picks {want}");
+    var keys = Strings.Table("pt")!.Keys.ToHashSet();
+    var dir = Path.Combine(Path.GetDirectoryName(SourceFile())!, "..", "ApexSetup");
+    static IEnumerable<string> Holes(string s) => System.Text.RegularExpressions.Regex.Matches(s, @"\{\d+\}").Select(m => m.Value).Distinct().Order();
+    foreach (var (code, _) in Strings.Languages.Skip(1))
+    {
+        Dictionary<string, string>? t;
+        try { t = Strings.Table(code); }
+        catch (Exception e) { Check(false, $"{code}: the table loads ({e.InnerException?.Message ?? e.Message})"); continue; }
+        if (t is null) { Check(false, $"{code}: the table is registered in Languages.cs"); continue; }
+        var stray = t.Keys.Where(k => !keys.Contains(k)).ToList();
+        Check(stray.Count == 0, $"{code}: every key is a text of Setup" + string.Concat(stray.Select(k => "\n       not a key: " + k)));
+        var holes = t.Where(p => !Holes(p.Key).SequenceEqual(Holes(p.Value))).Select(p => p.Key).ToList();
+        Check(holes.Count == 0, $"{code}: the key's {{n}} placeholders" + string.Concat(holes.Select(k => "\n       other placeholders: " + k)));
+        var empty = t.Where(p => p.Value.Length == 0).Select(p => p.Key).ToList();
+        Check(empty.Count == 0, $"{code}: no empty text" + string.Concat(empty.Select(k => "\n       empty: " + k)));
+        var dups = System.Text.RegularExpressions.Regex.Matches(File.ReadAllText(Path.Combine(dir, $"Strings.{code}.cs")), @"(?m)^\s*\[""((?:[^""\\]|\\.)*)""\]\s*=")
+            .Select(m => System.Text.RegularExpressions.Regex.Unescape(m.Groups[1].Value)).GroupBy(k => k).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+        Check(dups.Count == 0, $"{code}: each key once in Strings.{code}.cs" + string.Concat(dups.Select(k => "\n       twice: " + k)));
+        var missing = keys.Count(k => !t.ContainsKey(k));
+        Console.WriteLine($"     {code}: {keys.Count - missing}/{keys.Count} translated" + (missing > 0 ? $", {missing} missing (shown in English)" : ""));
+    }
+}
+
 Console.WriteLine(failures == 0 ? "ALL PASSED" : failures + " FAILED");
 return failures == 0 ? 0 : 1;
+
+static string SourceFile([System.Runtime.CompilerServices.CallerFilePath] string path = "") => path;
 
 // the fake GitHub files, plus the S3PP archive the way GitHubSource takes it
 sealed class MixedSource : ISource

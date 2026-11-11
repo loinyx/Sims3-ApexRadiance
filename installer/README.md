@@ -29,8 +29,11 @@ only what differs from the player's choice.
   580), the game resets its graphics options once: Setup says so and keeps a copy of `Options.ini`, restored when the
   player goes back to the game's own Direct3D 9.
 - The welcome page lists the updates for the installed components at every start, with *Update now*.
-- Setup refuses to change files while `TS3W.exe` or `TS3.exe` runs. English and Portuguese (Brazil): English text is
-  the key (`Strings.cs`), as in the menu.
+- Setup refuses to change files while `TS3W.exe` or `TS3.exe` runs.
+- Languages: the 21 of The Sims 3, as the menu (`Languages.cs`): Windows' display language, or the one picked with the
+  title bar's language button (kept in `%LOCALAPPDATA%\Apex Radiance Setup\language.txt`). English text is the key;
+  each language is a `Strings.<code>.cs` table, and `Strings.pt.cs` lists every key. A text without a pair shows in
+  English. `ApexSetup.Tests` checks every table (keys, `{n}` placeholders, empty and duplicate entries).
 
 ## Compatibility fixes
 
