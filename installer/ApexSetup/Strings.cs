@@ -14,6 +14,9 @@ public static partial class Strings
         return args.Length == 0 ? s : string.Format(s, args);
     }
 
+    // arguments that are names Setup translates (an Apex effect, a suggestion), alone or in a ", " list; a file name stays
+    public static object[] TArgs(string[] args) => args.Select(a => (object)string.Join(", ", a.Split(", ").Select(p => T(p)))).ToArray();
+
     public static void Localize(object? e)
     {
         // the screen reader's name (also of a Tag="dyn" element: its name is static, its text is not)

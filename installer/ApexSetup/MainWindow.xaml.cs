@@ -349,7 +349,7 @@ public sealed partial class MainWindow : Window
         foreach (var (c, name, present) in new[] { (Components.S3ss, "Sims3SettingsSetter", s.S3ss), (Components.Modernization, "Sims 3 Modernization", s.Modernization), (Components.MonoPatcher, "MonoPatcher", s.MonoPatcher) })
             if (present) Row(name, State(c), !Updates().Contains(c));
 
-        var found = Verify.Files(g, s, apexRelease).Concat(_found).ToList();
+        var found = Verify.Files(g, s, apexRelease).Concat(_found.Where(x => x.Suggest is null)).ToList();
         if (found.Count == 0)
             StatusList.Children.Add(new TextBlock { Text = _checkedAt is null ? T("Everything is in place.") : T("Everything is in place (checked at {0}).", _checkedAt), FontSize = 12, Foreground = ok });
         else if (_checkedAt is not null)
@@ -360,6 +360,8 @@ public sealed partial class MainWindow : Window
                 IsOpen = true, IsClosable = false, Message = T(x.Text, x.Args), Title = x.CanFix ? T("Setup fixes this") : "",
                 Severity = x.Severity switch { Severity.Error => InfoBarSeverity.Error, Severity.Warning => InfoBarSeverity.Warning, _ => InfoBarSeverity.Informational },
             });
+
+        FillSuggestions(StatusList, WelcomeInfo, onStatus: true);
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         // (none accent: the footer's button is the screen's one accent button)
@@ -455,7 +457,7 @@ public sealed partial class MainWindow : Window
         if (_state is not { } s) return;
 
         ProblemList.Children.Clear();
-        var found = _found;
+        var found = _found.Where(x => x.Suggest is null).ToList();
         foreach (var x in found)
         {
             var bar = new InfoBar
@@ -470,6 +472,55 @@ public sealed partial class MainWindow : Window
         // (the fixes run with Install / Apply, or Fix settings when nothing else changes)
         if (found.Count == 0)
             ProblemList.Children.Add(new TextBlock { Text = T("No incompatible settings found."), FontSize = 12, Foreground = (Brush)Application.Current.Resources["ApexSuccessBrush"] });
+        SuggestList.Children.Clear();
+        FillSuggestions(SuggestList, GraphicsInfo, onStatus: false);
+    }
+
+    // "Suggested for Apex Radiance": what Apex recommends in game, each applied only by its own click (or Apply all
+    // suggestions), each in a restore point; a component's suggestion points to Components
+    void FillSuggestions(Panel list, InfoBar resultBar, bool onStatus)
+    {
+        var sug = _found.Where(x => x.Suggest is not null).ToList();
+        if (sug.Count == 0 || _game is not { } g) return;
+        list.Children.Add(new TextBlock { Text = T("Suggested for Apex Radiance"), Style = (Style)Application.Current.Resources["ApexStrong"], FontSize = 13 });
+        var idle = !_busy && !_running;
+        // the files as they are now: the scan may be minutes old
+        void Apply(IEnumerable<Finding> which, string label, params string[] args)
+        {
+            var keys = which.Select(x => (x.Suggest, string.Join("\n", x.Args))).ToHashSet();
+            _ = Guarded(() =>
+            {
+                Engine.CheckWritable();
+                foreach (var x in Compat.Check(g, Scan.Run(g)).Where(x => x.CanApply && keys.Contains((x.Suggest, string.Join("\n", x.Args))))) x.Fix!();
+            }, T("Applied."), resultBar, label, args);
+        }
+        foreach (var x in sug)
+        {
+            var bar = new InfoBar
+            {
+                IsOpen = true, IsClosable = false, Title = T(x.Suggest!), Message = T(x.Text, TArgs(x.Args)),
+                Severity = x.Severity == Severity.Warning ? InfoBarSeverity.Warning : InfoBarSeverity.Informational,
+            };
+            if (x.CanApply)
+            {
+                var b = new Button { Content = T("Apply"), IsEnabled = idle };
+                b.Click += (_, _) => Apply(new[] { x }, "Apply suggestion: {0}", x.Suggest!);
+                bar.ActionButton = b;
+            }
+            else if (onStatus && x.Suggest is "DXVK" or "Sims3SettingsSetter" or "RTX Remix bridge") // (a component to choose)
+            {
+                var b = new Button { Content = T("Change components"), IsEnabled = idle };
+                b.Click += (_, _) => { if (CanLeaveGame()) GoFromStatus(ComponentsStep); };
+                bar.ActionButton = b;
+            }
+            list.Children.Add(bar);
+        }
+        if (sug.Count(x => x.CanApply) > 1)
+        {
+            var all = new Button { Content = T("Apply all suggestions"), IsEnabled = idle };
+            all.Click += (_, _) => Apply(sug.Where(x => x.CanApply), "Apply all suggestions");
+            list.Children.Add(all);
+        }
     }
 
     string LayerName(Layer l) => l switch
@@ -877,7 +928,7 @@ public sealed partial class MainWindow : Window
         foreach (var p in RestorePoints.List(g.Bin))
         {
             var when = p.Created.ToLocalTime().ToString("g", LangCulture());
-            ManageRow(T("Before: {0}", T(p.Label, p.Args)), p.FileCount == 1 ? T("{0} \u00b7 1 file", when) : T("{0} \u00b7 {1} files", when, p.FileCount),
+            ManageRow(T("Before: {0}", T(p.Label, TArgs(p.Args))), p.FileCount == 1 ? T("{0} \u00b7 1 file", when) : T("{0} \u00b7 {1} files", when, p.FileCount),
                 T("Restore"), () => RestoreAsync(p), list: RestoreList);
         }
         if (RestoreList.Children.Count == 0)

@@ -175,6 +175,7 @@
                                 </StackPanel>
                             </Border>
                             <InfoBar x:Name="GraphicsInfo" IsClosable="False" />
+                            <StackPanel x:Name="SuggestList" Tag="dyn" Spacing="8" />
                             <TextBlock Text="Recommended with Apex" Style="{StaticResource ApexStrong}" FontSize="13" Margin="0,8,0,0" />
                             <Border Style="{StaticResource ApexCard}">
                                 <Grid ColumnSpacing="14">

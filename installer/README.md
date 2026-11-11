@@ -62,6 +62,25 @@ run at the end of every install, or with *Fix all now* on the game page.
 | `ts3native` built for the other edition | Reported; turning Sims 3 Modernization on installs the right one |
 | A Steam build of simler90 or XCAS on the EA app (or the reverse), NRaas ErrorTrap on the EA app, simler90 next to StoryProgression, MonoPatcher without the VC++ x86 runtime | Reported with a link |
 
+## Suggestions
+
+What Apex Radiance recommends in game (Overview, Compatibility and Attention pages), listed as *Suggested for Apex
+Radiance* on the Components step and on the game's status, in Apex's own words where they fit. Unlike the fixes above,
+none runs with Install or Repair: each has its own *Apply* (and *Apply all suggestions*), the game must be closed, and
+each apply takes a restore point ("Apply suggestion: ..."). A value Setup cannot read is reported and its file left alone.
+
+| Suggestion | When | Apply |
+|---|---|---|
+| Turn off the game's Edge Smoothing | `Options.ini` `[Options] edgesmoothing` not 0, and one of Apex's Edge Smoothing, Depth Blur, Ambient Occlusion or Water Reflections on in `Apex Radiance\ApexRadiance.toml` (all on by default) | `edgesmoothing = 0`, copy as `Options.ini.apex-backup` |
+| Two copies of the mod | Another `.asi` in `Game\Bin`, `scripts` or `plugins` that is a renamed `ApexRadiance.asi` (its "Another copy of ApexRadiance.asi" line) | Moved to the backup folder |
+| DXVK | The game's own Direct3D 9, or a `d3d9.dll` that is neither DXVK nor the bridge | None: chosen in Components |
+| Sims3SettingsSetter | Not installed (and no old combined build) | None: turned on in Components |
+| RTX Remix bridge | DXVK in the game process | None: chosen in Components |
+| Sims3SettingsSetter's borderless window | Under the bridge, `S3SS.toml` `[qol.borderless_window] mode` not off | None: Apex's Display window mode replaces it; `S3SS.toml` stays as it is |
+
+The rule for the game's Edge Smoothing reads `Options.ini`, where Apex reads the back buffer: `edgesmoothing = 0` was
+seen with no MSAA; that every other value means MSAA is unverified in game.
+
 Other mods published outside GitHub (Smooth Patch, NRaas, simler90, and others of sims3-modernization's
 community list) are recognised and listed with a link to their official page (`KnownMods.cs`), never downloaded.
 
@@ -84,6 +103,8 @@ logged to `%TEMP%\ApexRadianceSetup.log`.
 
 ## Not covered
 
-- Game Edge Smoothing (MSAA): Apex asks to turn it off in game; its `Options.ini` key is unverified, so Setup leaves it.
+- S3SS features to turn off: Apex asks only for the uncompressed textures under the bridge (above); every other S3SS
+  feature it shares (Split-Level Lighting Fix, Lot Streaming, the frame-rate limit) it leaves to S3SS, so Setup changes
+  none of them.
 - The AMD integrated-GPU Vulkan driver guard: Apex sets it for the game process only; a system-wide setting would
   affect other programs.
