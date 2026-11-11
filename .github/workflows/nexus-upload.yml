@@ -1,4 +1,5 @@
-# Publishes each GitHub release to Nexus Mods: the release's ApexRadiance.asi, zipped, becomes a new version of the
+# Publishes each GitHub release to Nexus Mods: the release's ApexRadiance.asi (with ApexRadianceSetup.exe and a
+# "Manual install" folder from 3.1.1 on), zipped, becomes a new version of the
 # existing file on the Nexus mod page (official action Nexus-Mods/upload-action, Nexus upload API v3).
 #
 # One-time setup (repository Settings > Secrets and variables > Actions):
@@ -38,6 +39,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern ApexRadiance.asi --dir dist
+          # Apex Radiance Setup, when the release has it (3.1.1 on): the zip then holds the installer and a manual-install folder
+          if gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern ApexRadianceSetup.exe --dir setup; then
+            echo "SETUP=1" >> "$GITHUB_ENV"
+          fi
           # the RTX Remix bridge, when the release has it (a separate file on the Nexus page)
           if [ -n "${{ vars.NEXUS_BRIDGE_FILE_ID }}" ] &&
              gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern Apex-Radiance-RTX-Remix-bridge.zip --dir bridge; then
@@ -52,8 +57,14 @@ jobs:
           } >> "$GITHUB_ENV"
           # the file's description on the Nexus page (at most 255 characters): the notes' main headline, where the full
           # list is, how to install; the headline is shortened when it would not fit
-          HEAD=$(grep -m1 '^## ' notes.md | sed -e 's/^## //' -e 's/[*`]//g' || true)
-          TAIL=" Full list: Changelogs tab. Install: copy ApexRadiance.asi into The Sims 3 > Game > Bin. More free memory: the optional RTX Remix bridge file."
+          # the bold headline on the notes' first line ("**...**"), else the first section title
+          HEAD=$(grep -m1 '^\*\*.*\*\*$' notes.md | sed -e 's/[*`]//g' || true)
+          [ -n "$HEAD" ] || HEAD=$(grep -m1 '^## ' notes.md | sed -e 's/^## //' -e 's/[*`]//g' || true)
+          if [ -f setup/ApexRadianceSetup.exe ]; then
+            TAIL=" Full list: Changelogs tab. Install: run ApexRadianceSetup.exe, or see Manual install in the zip. More free memory: the optional RTX Remix bridge file."
+          else
+            TAIL=" Full list: Changelogs tab. Install: copy ApexRadiance.asi into The Sims 3 > Game > Bin. More free memory: the optional RTX Remix bridge file."
+          fi
           START="Apex Radiance ${TAG#v}: "
           ROOM=$(( 255 - ${#START} - ${#TAIL} - 1 ))
           [ ${#HEAD} -le $ROOM ] || HEAD="${HEAD:0:$((ROOM - 3))}..."
@@ -61,8 +72,17 @@ jobs:
 
       - name: Zip
         run: |
-          cd dist
-          zip -9 "../ApexRadiance-$VERSION.zip" ApexRadiance.asi
+          if [ "${SETUP:-}" = 1 ]; then
+            # ApexRadianceSetup.exe at the top (recommended), the ASI and the steps by hand in "Manual install"
+            mkdir -p pack/"Manual install"
+            cp setup/ApexRadianceSetup.exe pack/
+            cp dist/ApexRadiance.asi pack/"Manual install"/
+            sed 's/$/\r/' .github/scripts/manual-install.txt > pack/"Manual install"/"How to install.txt"
+            (cd pack && zip -9 -r "../ApexRadiance-$VERSION.zip" ApexRadianceSetup.exe "Manual install")
+          else
+            cd dist
+            zip -9 "../ApexRadiance-$VERSION.zip" ApexRadiance.asi
+          fi
 
       # The upload API (v3) names the mod and its file by their v3 ids, not by the numbers the site and the v1 API show
       # (mod 247, file 590): look them up from those numbers

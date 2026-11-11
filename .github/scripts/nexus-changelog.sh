@@ -59,6 +59,6 @@ END {
     if (mode == "--description") {
         print ""
         print "INSTALL"
-        print "Close the game and copy ApexRadiance.asi into The Sims 3 > Game > Bin (needs an ASI loader). Your settings are kept."
+        print "Run ApexRadianceSetup.exe (recommended), or by hand: close the game and copy ApexRadiance.asi from the Manual install folder into The Sims 3 > Game > Bin (needs an ASI loader). Your settings are kept."
     }
 }'

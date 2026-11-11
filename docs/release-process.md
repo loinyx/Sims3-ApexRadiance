@@ -78,7 +78,9 @@ The changelog opened from the version in the menu footer (`apex_changelog.cpp`):
 3. The release PR is titled `release: X.Y.Z`; merging and publishing are maintainer actions.
 4. Publish `Release\ApexRadiance.asi` and `ApexRadianceSetup.exe` to `loinyx/Sims3-ApexRadiance` as `Apex Radiance X.Y.Z`, with
    player-facing notes checked with `python tools/public_text_check.py --text-file`. The Nexus workflow derives its
-   changelog and file description from that body. When the release also carries `Apex-Radiance-RTX-Remix-bridge.zip`
+   changelog and file description from that body, and zips the main Nexus file: `ApexRadianceSetup.exe` at the top
+   and a `Manual install` folder with `ApexRadiance.asi` and `How to install.txt` (`.github/scripts/manual-install.txt`;
+   a release without the exe zips the ASI alone). When the release also carries `Apex-Radiance-RTX-Remix-bridge.zip`
    (`native/remix-bridge/package.ps1`) and the repository variable `NEXUS_BRIDGE_FILE_ID` is set, the workflow uploads
    the zip as a new version of the bridge's own Nexus file; without the variable the zip stays on GitHub only. The notes
    open with a bold headline (the release's theme in a few words) and one short paragraph on what the player will
