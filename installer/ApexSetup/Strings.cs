@@ -167,6 +167,8 @@ public static class Strings
         ["Will be removed"] = "Será removido",
         ["Keep"] = "Manter",
         ["Nothing to apply"] = "Nada para aplicar",
+        ["Preview"] = "Pré-visualização",
+        ["This is a preview: nothing was installed."] = "Isto é uma pré-visualização: nada foi instalado.",
         ["Setup is applying changes"] = "O instalador está aplicando as mudanças",
         ["Wait until it finishes before closing."] = "Espere terminar antes de fechar.",
         ["Checking the latest versions…"] = "Verificando as últimas versões…",

@@ -95,6 +95,7 @@ public sealed partial class MainWindow : Window
         await LoadReleasesAsync();
     }
 
+    static readonly string? Preview = Environment.GetEnvironmentVariable("APEX_SETUP_PREVIEW_LATEST") is { Length: > 0 } pv ? pv : null;
     bool _loading = true; // the release check has not answered yet: nothing is installed meanwhile
     async Task LoadReleasesAsync()
     {
@@ -106,6 +107,9 @@ public sealed partial class MainWindow : Window
             var repos = Repo.Values.Distinct().ToList();
             var got = await Task.WhenAll(repos.Select(r => Releases.LatestAsync(r)));
             for (int i = 0; i < repos.Count; i++) _latest[repos[i]] = got[i];
+            // (screenshots and design checks) APEX_SETUP_PREVIEW_LATEST=3.2.0 makes the latest Apex release that version, to show
+            // the update screens; nothing is installed while it is set (InstallAsync)
+            if (Preview is { } v && _latest.GetValueOrDefault(Releases.Apex) is { } apex) _latest[Releases.Apex] = apex with { Tag = "v" + v };
         }
         catch (Exception) { _offline = true; }
         _loading = false;
@@ -732,6 +736,7 @@ public sealed partial class MainWindow : Window
     async Task InstallAsync(List<string> comps, List<string>? remove = null)
     {
         if (_game is not { } g || _busy || _running) return;
+        if (Preview is not null) { await Message(T("Preview"), T("This is a preview: nothing was installed.")); return; }
         var from = _step == InstallStep ? ComponentsStep : _step;
         _busy = true;
         remove ??= new List<string>();
