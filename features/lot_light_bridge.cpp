@@ -2131,6 +2131,7 @@ bool HashInstanceBytes(const BYTE* p, UINT bytes, uint64_t& h) {
     }
 }
 std::unordered_map<uint64_t, uint64_t> g_fencePlaceKey; // a buffer place's last group key (used while the buffer is busy)
+std::unordered_map<uint64_t, uint8_t> g_fencePlaceBusy; // draw_reads_nowait: busy answers per buffer place since its last read
 void NoteFenceGroup(IDirect3DDevice9* dev) {
     if (!g_shadeOn || !g_curDipNum) return;
     UINT freq = 0;
@@ -2154,14 +2155,21 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
     {
         void* pk = nullptr;
         const auto known = g_fencePlaceKey.find(place);
-        const bool nowait = DevSwitches::DrawReadsNoWait() && known != g_fencePlaceKey.end();
+        // (draw_reads_nowait: a place read before does not wait for the GPU; three busy answers in a row and it waits, as the
+        // positions' read does, so a place busy at every draw does not keep its first pieces)
+        uint8_t* busy = DevSwitches::DrawReadsNoWait() && known != g_fencePlaceKey.end() ? &g_fencePlaceBusy[place] : nullptr;
+        const bool nowait = busy && *busy < 3;
         const HRESULT hk = stride1 >= 12 && stride1 <= 256 ? vb1->Lock(off1, count * stride1, &pk, D3DLOCK_READONLY | (nowait ? D3DLOCK_DONOTWAIT : 0)) : E_FAIL;
         const bool hashed = SUCCEEDED(hk) && pk && HashInstanceBytes(static_cast<const BYTE*>(pk), count * stride1, key);
         if (pk) vb1->Unlock();
         if (hashed) {
-            if (g_fencePlaceKey.size() > 4096) g_fencePlaceKey.clear();
+            if (busy) *busy = 0;
+            if (g_fencePlaceKey.size() > 4096) g_fencePlaceKey.clear(), g_fencePlaceBusy.clear();
             g_fencePlaceKey[place] = key;
-        } else if (known != g_fencePlaceKey.end()) key = known->second; // busy: the pieces drawn there last
+        } else if (known != g_fencePlaceKey.end()) { // busy: the pieces drawn there last
+            if (busy && hk == D3DERR_WASSTILLDRAWING) ++*busy;
+            key = known->second;
+        }
         else {
             vb0->Release();
             vb1->Release();
@@ -5496,16 +5504,21 @@ std::unordered_map<const GroupCentre*, FenceRunMasks> g_fenceRunMasks;
 constexpr unsigned kFenceRunsMax = 128; // more runs than this: the one draw with the group's values, as before
 constexpr float kRunShareSteps = 32.0f, kRunWeightSteps = 64.0f;
 // A piece within kFloorGateFull of its lot's ground, drawn with the lot's ground lamp shade (groundY finite): the shade
-// tests the walls per pixel (lamps and ground light), so the piece takes every listed lamp whole. Its one share per piece
-// cut the steps of a stair against a foundation into 1 m blocks of different brightness, where the shade beside them is
-// smooth.
+// tests the walls per pixel, so a lamp the piece sees comes in whole (its one partial share per piece cut the steps of a
+// stair against a foundation into 1 m blocks of different brightness, where the shade beside them is smooth). A lamp a wall
+// hides from the piece stays off: the shade misses fence tops over 1.25 m, a face reading it inside a house close by, a lot
+// whose shade is not built yet and the lamps shining out of a house, and a short fence beside a house took the lamp behind
+// it. A lamp shining out of a house keeps its share.
 bool ShadedOnGround(float y, float groundY) { return std::isfinite(groundY) && GroundShadow::GroundPoolHeightGate(y, groundY) >= 1.0f; }
 // The values of piece `at` (0.5 m over its origin, y its origin's height): bytes [0, lit) the placed lamps' shares, byte lit
 // the ground weight. n candidates in g_lampData / g_lampCone (SelectLamps, as the pick).
 void FencePieceValues(const float* at, float y, int n, int lit, const float (*lamps)[4], const LampCone* cones, float lampTop, float poolGate, float groundY,
                       uint8_t* out) {
     if (ShadedOnGround(y, groundY)) {
-        for (int k = 0; k < lit; k++) out[k] = static_cast<uint8_t>(kRunShareSteps);
+        for (int k = 0; k < lit; k++) {
+            const float seen = FencePieceVisibility(cones[k], lamps[1 + 2 * k], at);
+            out[k] = static_cast<uint8_t>(seen < 0.01f ? 0.0f : cones[k].light ? std::round(std::min(seen, 1.0f) * kRunShareSteps) : kRunShareSteps);
+        }
         out[lit] = static_cast<uint8_t>(std::round(std::clamp(GroundLightGate::HeightGate(y, lampTop) * poolGate, 0.0f, 1.0f) * kRunWeightSteps));
         return;
     }
@@ -5887,11 +5900,13 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
             // tops take it x the share of the atlas lamps' light the group sees (the objects' ground share), so a parapet over
             // the slab of an arcade takes none of the pool of the lamp under that slab.
             weight[0] = GroundLightGate::HeightGate(g->y, lampTop) * share * poolGate;
-            // every piece on the ground under the lot's shade: the lamps whole and the ground light unshared (ShadedOnGround)
+            // every piece on the ground under the lot's shade: the lamps it sees whole and the ground light unshared
+            // (ShadedOnGround; a lamp shining out of a house keeps its share)
             float maxY = g->minY;
             for (size_t i = 1; i < g->all.size(); i += 3) maxY = std::max(maxY, g->all[i]);
             if (ShadedOnGround(g->minY, shadeGroundY) && ShadedOnGround(maxY, shadeGroundY)) {
                 for (int k = 0; k < used && k < static_cast<int>(N); k++) {
+                    if (cones[k].light) continue;
                     if (vis[k] > 0.0f)
                         for (int c = 0; c < 3; c++) lamps[2 + 2 * k][c] /= vis[k];
                     vis[k] = 1.0f;
@@ -11056,6 +11071,7 @@ void OnWorldChanged() {
     g_gates.clear();
     g_fenceBusy.clear();
     g_fencePlaceKey.clear();
+    g_fencePlaceBusy.clear();
     g_fenceGen++;
     g_meshBoxes.clear();
     g_fenceWalls = 0;
@@ -11770,6 +11786,7 @@ void Shutdown(bool keepChunkMaps) {
     g_gates.clear();
     g_fenceBusy.clear();
     g_fencePlaceKey.clear();
+    g_fencePlaceBusy.clear();
     g_fenceGen++;
     g_meshBoxes.clear();
     g_fenceWalls = 0;
