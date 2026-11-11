@@ -4549,17 +4549,20 @@ float LampConeVisibility(const LampCone& cone, const float* pr, const float* p, 
 // origin on the wall's line, 0.5 m from a sconce inside, so the ray never crossed the wall and the edging glowed). An indoor
 // lamp shining out (cone.light) reaches its outdoor face only past that wall: tested 0.15 m beyond the wall from the lamp,
 // through its openings as any exit lamp. shortcut: walls along x or z only, add diagonals if edging along one glows
+// A piece on an outside wall's line is tested 0.15 m off it: beyond the wall for a lamp shining out of a house (it reaches
+// the piece only through the openings), on the lamp's side for any other lamp. A stair set on a foundation's edge has its
+// origins on the foundation's wall line, where the ray grazes that wall: neighbouring steps took 0, part or all of the
+// lamp by rounding, and the stair showed a cut at every piece.
 float FencePieceVisibility(const LampCone& cone, const float* pr, const float* p) {
-    if (cone.light) {
-        const float base[3] = {p[0], p[1] - 0.5f, p[2]};
-        for (int axis = 0; axis < 2; axis++) // (axis 0: a wall along x, the piece moved along z; 1: the other way)
-            if (LevelLightShare::OnWallLine(base, axis ? 0.0f : 1.0f, axis ? 1.0f : 0.0f, 0.1f)) {
-                float q[3] = {p[0], p[1], p[2]};
-                const int c = axis ? 0 : 2;
-                q[c] += p[c] >= pr[c] ? 0.15f : -0.15f;
-                return LampConeVisibility(cone, pr, q, 0.05f);
-            }
-    }
+    const float base[3] = {p[0], p[1] - 0.5f, p[2]};
+    for (int axis = 0; axis < 2; axis++) // (axis 0: a wall along x, the piece moved along z; 1: the other way)
+        if (LevelLightShare::OnWallLine(base, axis ? 0.0f : 1.0f, axis ? 1.0f : 0.0f, 0.1f)) {
+            float q[3] = {p[0], p[1], p[2]};
+            const int c = axis ? 0 : 2;
+            const float away = p[c] >= pr[c] ? 0.15f : -0.15f;
+            q[c] += cone.light ? away : -away;
+            return LampConeVisibility(cone, pr, q, 0.05f);
+        }
     return LampConeVisibility(cone, pr, p, 0.2f);
 }
 bool g_lampConeLogged = false, g_fenceConeLogged = false; // render thread
