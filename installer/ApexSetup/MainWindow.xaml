@@ -63,8 +63,8 @@
                     <RowDefinition Height="*" />
                     <RowDefinition Height="64" />
                 </Grid.RowDefinitions>
-                <ScrollViewer x:Name="Scroller" Padding="32,28,32,20">
-                    <Grid x:Name="Screens">
+                <ScrollViewer x:Name="Scroller" Padding="32,28,32,0">
+                    <Grid x:Name="Screens" Margin="0,0,0,32">
 
                         <!-- 0 Welcome -->
                         <StackPanel x:Name="ScreenWelcome" Spacing="20">

@@ -26,6 +26,39 @@ public static class Games
         [0x568D4BAC] = (Edition.Other, "1.69.43 (Origin)"),
     };
 
+    // The folders the player picked with Browse, and the game used last, so the next run (an Apex update) opens on it:
+    // %LOCALAPPDATA%\Apex Radiance Setup\games.txt, one Game\Bin per line, the last used first. A folder that no longer holds
+    // the game is left out when read.
+    static string RememberedFile => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Apex Radiance Setup", "games.txt");
+
+    public static List<Game> Remembered()
+    {
+        var list = new List<Game>();
+        try
+        {
+            if (!File.Exists(RememberedFile)) return list;
+            foreach (var line in File.ReadAllLines(RememberedFile))
+                if (line.Trim() is { Length: > 0 } bin && FromFolder(bin) is { } g && !list.Any(f => f.Bin.Equals(g.Bin, StringComparison.OrdinalIgnoreCase)))
+                    list.Add(g);
+        }
+        catch (Exception) { } // (unreadable: nothing remembered)
+        return list;
+    }
+
+    // puts the game first in the remembered list (picked with Browse, or chosen on the Game step)
+    public static void Remember(Game game)
+    {
+        try
+        {
+            var bins = new List<string> { game.Bin };
+            if (File.Exists(RememberedFile))
+                bins.AddRange(File.ReadAllLines(RememberedFile).Select(l => l.Trim()).Where(l => l.Length > 0 && !l.Equals(game.Bin, StringComparison.OrdinalIgnoreCase)));
+            Directory.CreateDirectory(Path.GetDirectoryName(RememberedFile)!);
+            File.WriteAllLines(RememberedFile, bins.Take(16));
+        }
+        catch (Exception) { } // (not writable: the next run detects as before)
+    }
+
     public static List<Game> Detect()
     {
         var roots = new List<string>();

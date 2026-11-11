@@ -63,6 +63,16 @@ public sealed partial class MainWindow : Window
     async Task StartAsync()
     {
         _games.AddRange(Games.Detect().Select(Item));
+        // the folders picked before (Browse), and the game used last first: an update opens on the game it updates
+        var remembered = Games.Remembered();
+        foreach (var r in remembered)
+            if (!_games.Any(x => x.Game.Bin.Equals(r.Bin, StringComparison.OrdinalIgnoreCase))) _games.Add(Item(r));
+        if (remembered.FirstOrDefault() is { } last && _games.FindIndex(x => x.Game.Bin.Equals(last.Bin, StringComparison.OrdinalIgnoreCase)) is > 0 and var at)
+        {
+            var item = _games[at];
+            _games.RemoveAt(at);
+            _games.Insert(0, item);
+        }
         // a game folder on the command line (or a shortcut) comes first
         if (Environment.GetCommandLineArgs().Skip(1).FirstOrDefault() is { } arg && Games.FromFolder(arg) is { } given
             && !_games.Any(x => x.Game.Bin.Equals(given.Bin, StringComparison.OrdinalIgnoreCase)))
@@ -179,7 +189,10 @@ public sealed partial class MainWindow : Window
     {
         switch (_step)
         {
-            case Welcome: Show(GameStep); break;
+            case Welcome:
+                if (WelcomeUpdates() is { Count: > 0 } ups) await InstallAsync(ups); // (an update: one click, no steps)
+                else Show(GameStep);
+                break;
             case GameStep: if (CanLeaveGame()) Show(ComponentsStep); break;
             case ComponentsStep:
             {
@@ -202,7 +215,7 @@ public sealed partial class MainWindow : Window
         var fixes = _step == ComponentsStep && _game is not null && _state is not null && Compat.Check(_game, _state).Any(x => x.CanFix);
         NextText.Text = _step switch
         {
-            Welcome => T("Get started"),
+            Welcome => WelcomeUpdates().Count > 0 ? T("Update now") : T("Get started"),
             ComponentsStep => work.Count == 0 ? (fixes ? T("Fix settings") : T("Close")) : _state?.ApexVersion is null ? T("Install")
                 : work.Count == 1 ? T("Apply 1 change") : T("Apply {0} changes", work.Count),
             DoneStep => T("Finish"),
@@ -249,11 +262,13 @@ public sealed partial class MainWindow : Window
             // checked at every start: the player learns about a new release here, without visiting GitHub
             var lines = ups.Select(c => T("{0} {1} → {2}", Name(c), Known(c) is { Length: > 0 } v ? v : "?", Latest(c)!));
             SetInfo(WelcomeInfo, InfoBarSeverity.Informational, T("Updates available"),
-                T("{0} in The Sims 3 · {1}.", string.Join(", ", lines), g.Label), T("Update now"),
-                async () => { if (!_running) await InstallAsync(ups); });
+                T("{0} in The Sims 3 · {1}.", string.Join(", ", lines), g.Label) + " " + T("Update now installs them; Game and Components hold every other change."));
         }
         else WelcomeInfo.IsOpen = false;
     }
+
+    // the welcome page's one-click update: the installed components with a newer release, when Setup can download them now
+    List<string> WelcomeUpdates() => _offline || _running || _game is null ? new List<string>() : Updates();
 
     // installed components with a newer release (only those: nothing new is added from the welcome page)
     List<string> Updates()
@@ -280,6 +295,7 @@ public sealed partial class MainWindow : Window
     void OnGamePicked(object sender, SelectionChangedEventArgs e)
     {
         _game = (GameList.SelectedItem as GameItem)?.Game;
+        if (_game is not null) Games.Remember(_game);
         RefreshAll();
     }
 

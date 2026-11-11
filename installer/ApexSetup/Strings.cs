@@ -256,6 +256,7 @@ public static class Strings
         ["The game goes back to its own Direct3D 9 and may reset its graphics options once."] = "O jogo volta ao próprio Direct3D 9 e pode redefinir as opções gráficas uma vez.",
         ["Updates available"] = "Atualizações disponíveis",
         ["Update now"] = "Atualizar agora",
+        ["Update now installs them; Game and Components hold every other change."] = "Atualizar agora instala tudo isso; Jogo e Componentes cuidam de qualquer outra mudança.",
         ["{0} in The Sims 3 · {1}."] = "{0} no The Sims 3 · {1}.",
         ["{0} {1} → {2}"] = "{0} {1} → {2}",
         ["Lets script mods patch the game's code, by LazyDuchess; several community fixes need it. Downloaded from its GitHub release."] = "Permite que mods de script alterem o código do jogo, por LazyDuchess; várias correções da comunidade precisam dele. Baixado da release dele no GitHub.",
