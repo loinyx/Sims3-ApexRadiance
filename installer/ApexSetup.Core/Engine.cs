@@ -179,12 +179,15 @@ public static class Engine
         [Components.Apex] = new[] { "ApexRadiance.asi" },
         [Components.Bridge] = new[] { "d3d9.dll", "bridge.conf", "dxvk.conf", @".trex\bridge.conf", @".trex\NvRemixBridge.exe", @".trex\d3d9vk_x64.dll", "Apex Radiance RTX Remix bridge.txt" },
         [Components.Dxvk] = new[] { "d3d9.dll" },
-        [Components.S3ss] = new[] { "Sims3SettingsSetter.asi" },
-        [Components.MonoPatcher] = new[] { "MonoPatcher.asi" },
-        [Components.S3pp] = new[] { "Sims3Performance.asi", "Sims3Performance.ini" },
-        [Components.Modernization] = new[] { "ts3native.asi", "ts3native.ini" },
+        [Components.S3ss] = Loadable("Sims3SettingsSetter.asi"),
+        [Components.MonoPatcher] = Loadable("MonoPatcher.asi"),
+        [Components.S3pp] = Loadable("Sims3Performance.asi", "Sims3Performance.ini"),
+        [Components.Modernization] = Loadable("ts3native.asi", "ts3native.ini", "ts3native.log"),
         [Components.Loader] = Array.Empty<string>(),
     };
+
+    // in Game\Bin or the loader's scripts or plugins folder (Scan.FindAsi)
+    static string[] Loadable(params string[] names) => names.SelectMany(n => new[] { n, $@"scripts\{n}", $@"plugins\{n}" }).ToArray();
 
     // An older copy of these is an update, not a foreign file: replaced without a backup.
     static readonly HashSet<string> Updates = new(StringComparer.OrdinalIgnoreCase)
@@ -238,7 +241,8 @@ public static class Engine
                 if (c == Components.Bridge)
                     foreach (var conf in new[] { Path.Combine(g.Bin, "bridge.conf"), Path.Combine(g.Bin, ".trex", "bridge.conf") })
                         SetTargetProcess(conf, g.Exe);
-                if (c == Components.Modernization) EnsureResourceCfg(docs);
+                // the log of a build that skipped itself would still say "wrong build" until the game runs
+                if (c == Components.Modernization) { EnsureResourceCfg(docs); File.Delete(Path.Combine(g.Bin, "ts3native.log")); }
                 if (c == Components.Apex) RemoveLeftovers(m, g.Bin);
                 m.Versions[c] = version;
             }

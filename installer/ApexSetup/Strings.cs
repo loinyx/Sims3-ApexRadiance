@@ -146,6 +146,10 @@ public static class Strings
         ["Two ASI loaders ({0}) load every mod twice. Keep one: remove all but {1}."] = "Dois ASI loaders ({0}) carregam cada mod duas vezes. Fica só um: o instalador deixa o {1}.",
         ["Sims 3 Modernization's ts3native is the build for the other edition and does nothing. Turn it on in Components to install the right one."] =
             "O ts3native do Sims 3 Modernization é a versão da outra edição e não faz nada. Ligue-o em Componentes para instalar a certa.",
+        ["Sims 3 Modernization has no build for this game version ({0}), so its ts3native does nothing. Turn it off in Components."] =
+            "O Sims 3 Modernization não tem versão para esta versão do jogo ({0}), então o ts3native dele não faz nada. Desligue-o em Componentes.",
+        ["{0} in Game\\Bin is a second copy of {1}; both load. Setup moves it to the backup folder."] =
+            "{0} em Game\\Bin é uma segunda cópia de {1}; as duas carregam. O instalador a move para a pasta de cópias.",
         ["Mods has {0} .package files but no Resource.cfg, so the game loads none of them."] =
             "A pasta Mods tem {0} arquivos .package mas nenhum Resource.cfg, então o jogo não carrega nenhum.",
         ["{0} is the build for the other edition of the game; it makes the game show \"unofficial game modification\". Use the {1} build."] =

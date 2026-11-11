@@ -53,7 +53,8 @@ run at the end of every install, or with *Fix all now* on the game page.
 Other mods published outside GitHub (Smooth Patch, NRaas, simler90, and others of sims3-modernization's
 community list) are recognised and listed with a link to their official page (`KnownMods.cs`), never downloaded.
 
-The Documents folder is found the way Apex finds it (the localized name in the exe's string table).
+The Documents folder is found the way Apex finds it (the localized name in the exe's string table, by the user locale),
+in the signed-in player's profile when Setup was elevated with another administrator account.
 
 ## Build and test
 
@@ -74,4 +75,3 @@ logged to `%TEMP%\ApexRadianceSetup.log`.
 - Game Edge Smoothing (MSAA): Apex asks to turn it off in game; its `Options.ini` key is unverified, so Setup leaves it.
 - The AMD integrated-GPU Vulkan driver guard: Apex sets it for the game process only; a system-wide setting would
   affect other programs.
-- Under elevation with another administrator account, Documents is that account's.

@@ -59,7 +59,7 @@ try
     File.WriteAllText(B("dxvk.conf"), "user dxvk conf");
     Check(Scan.Run(g, docs).Layer == Layer.Dxvk, "scan sees DXVK");
     await Engine.InstallAsync(g, new[] { Components.Bridge }, src, null, docs);
-    Check(Read(B("d3d9.dll")) == "bridge client", "bridge replaced DXVK");
+    Check(Read(B("d3d9.dll")).StartsWith("bridge client"), "bridge replaced DXVK");
     await Engine.InstallAsync(g, new[] { Components.Bridge }, src, null, docs); // repair keeps the first backup
     Engine.Remove(g, Components.Bridge, docs);
     Check(Read(B("d3d9.dll")) == "... DXVK v2.7 ..." && Read(B("dxvk.conf")) == "user dxvk conf", "DXVK and its dxvk.conf restored after repair + remove");
@@ -162,7 +162,7 @@ try
 
     // 14. a bridge installed by hand: Repair takes its files as its own, so Remove takes the bridge out
     File.Delete(B("d3d9.dll"));
-    File.WriteAllText(B("d3d9.dll"), "hand bridge");
+    File.WriteAllText(B("d3d9.dll"), "hand bridge remixapi_InitializeLibrary");
     Directory.CreateDirectory(B(".trex"));
     File.WriteAllText(B(@".trex\NvRemixBridge.exe"), "hand server");
     Check(Scan.Run(g, docs).Layer == Layer.Bridge, "scan sees the hand-installed bridge");
@@ -171,8 +171,10 @@ try
     Check(!File.Exists(B("d3d9.dll")) && !File.Exists(B(@".trex\NvRemixBridge.exe")) && !File.Exists(Path.Combine(Manifest.DirOf(bin), "d3d9.dll.bak")),
           "a hand-installed bridge is removed after a repair, with no backup left");
 
-    // 15. the player's ts3native.ini survives a repair
+    // 15. the player's ts3native.ini survives a repair; installing the right build clears the wrong one's log
+    File.WriteAllText(B("ts3native.log"), "SKIP all: host is not TS3W.exe at 0x400000");
     await Engine.InstallAsync(g, new[] { Components.Modernization }, src, null, docs);
+    Check(!Scan.Run(g, docs).Ts3NativeWrongBuild, "installing ts3native clears the old wrong-build log");
     File.WriteAllText(B("ts3native.ini"), "player switches");
     await Engine.InstallAsync(g, new[] { Components.Modernization }, src, null, docs);
     Check(Read(B("ts3native.ini")) == "player switches", "ts3native.ini edits kept on repair");
@@ -187,6 +189,36 @@ try
     await Engine.InstallAsync(g, Array.Empty<string>(), src, null, docs);
     Check(Read(B("Sims3Performance.ini")).Contains("ShortWaitSpin=0"), "read-only Sims3Performance.ini still fixed");
     foreach (var f in Directory.EnumerateFiles(bin)) File.SetAttributes(f, FileAttributes.Normal); // (so the test folder can be deleted)
+
+    // 17. a second fake game (Origin 1.69.43): the layer comes from d3d9.dll itself, mods in the loader's subfolders count
+    var bin2 = Path.Combine(root, "Origin", "Game", "Bin");
+    var docs2 = Path.Combine(root, "Docs2");
+    string B2(string rel) => Path.Combine(bin2, rel);
+    Directory.CreateDirectory(Path.Combine(bin2, "scripts"));
+    Directory.CreateDirectory(Path.Combine(docs2, "Mods", "Packages"));
+    var g2 = new Game(Path.Combine(root, "Origin"), bin2, "TS3W.exe", Edition.Other, "1.69.43 (Origin)");
+    File.WriteAllText(B2("d3d9.dll"), "bridge client dxvk remixapi_InitializeLibrary"); // unzipped without .trex
+    var s17 = Scan.Run(g2, docs2);
+    Check(s17.Layer == Layer.Bridge && Verify.Files(g2, s17, null).Any(x => x.Args.Contains(@".trex\NvRemixBridge.exe")), "a bridge client without .trex is the bridge, its server missing");
+    Directory.CreateDirectory(B2(".trex"));
+    File.WriteAllText(B2(@".trex\NvRemixBridge.exe"), "leftover");
+    File.WriteAllText(B2("d3d9.dll"), "DXVK d3d9");
+    Check(Scan.Run(g2, docs2).Layer == Layer.Dxvk, "DXVK over a leftover .trex is DXVK");
+    File.WriteAllText(B2(@"scripts\Sims3SettingsSetter.asi"), "s3ss");
+    File.WriteAllText(B2(@"scripts\ts3native.asi"), "ts3native");
+    File.WriteAllText(B2(@"scripts\ts3native.log"), "SKIP all: host is not TS3W.exe at 0x400000");
+    var s17b = Scan.Run(g2, docs2);
+    Check(s17b.S3ss && s17b.Ts3Native && s17b.Ts3NativeWrongBuild, "S3SS and ts3native in scripts found, with the log next to them");
+    File.WriteAllText(B2("Sims3SettingsSetter.asi"), "s3ss");
+    File.WriteAllText(Path.Combine(docs2, "Mods", "Packages", "XCAS-1.69.package"), "pkg");
+    var f17 = Compat.Check(g2, s17b, docs2);
+    Check(f17.Any(x => x.Args.Contains(@"scripts\Sims3SettingsSetter.asi") && x.CanFix), "a second S3SS in scripts reported with a fix");
+    Check(f17.Any(x => x.Text.StartsWith("Sims 3 Modernization has no build")), "a ts3native on an unsupported version is told to be turned off");
+    Check(!f17.Any(x => x.Text.Contains("other edition of the game")), "a 1.69 script mod on Origin 1.69.43 is not the other edition's");
+    f17.First(x => x.Args.Contains(@"scripts\Sims3SettingsSetter.asi")).Fix!();
+    Check(!File.Exists(B2(@"scripts\Sims3SettingsSetter.asi")) && File.Exists(B2("Sims3SettingsSetter.asi")), "the scripts copy moved aside, the Game\\Bin one kept");
+    Engine.Remove(g2, Components.Modernization, docs2);
+    Check(!Scan.Run(g2, docs2).Ts3Native, "Modernization removed from scripts");
 }
 catch (Exception e) { Console.WriteLine("FAIL exception: " + e); failures++; }
 finally { Directory.Delete(root, true); }
@@ -249,11 +281,12 @@ sealed class FakeSource : ISource
     List<(string, string)> Bridge(string b, string conf)
     {
         var dir = Path.Combine(_dir, "bridge");
-        Make(@"bridge\d3d9.dll", "bridge client");
+        Make(@"bridge\d3d9.dll", "bridge client dxvk remixapi_InitializeLibrary"); // (the real client holds both)
         Make(@"bridge\bridge.conf", conf);
         Make(@"bridge\dxvk.conf", "d3d9.customDeviceId = 1080");
         Make(@"bridge\.trex\bridge.conf", conf);
         Make(@"bridge\.trex\NvRemixBridge.exe", "server");
+        Make(@"bridge\.trex\d3d9vk_x64.dll", "dxvk");
         Make(@"bridge\licenses\DXVK-LICENSE.txt", "zlib");
         var l = new List<(string, string)>();
         GitHubSource.AddTree(l, dir, b);

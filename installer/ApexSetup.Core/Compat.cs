@@ -35,14 +35,21 @@ public static class Compat
                 f.Add(new(Severity.Error, "{0} in Game\\Bin loads a second copy of Apex Radiance.", new[] { rel }, () => MoveAside(bin, rel)));
 
         // an old build with Apex inside S3SS (framework/s3ss_detect.cpp): while it loads, Apex stays off
-        foreach (var asi in Directory.EnumerateFiles(bin, "*.asi"))
+        foreach (var asi in new[] { "", "scripts", "plugins" }.Where(d => Directory.Exists(B(d))).SelectMany(d => Directory.EnumerateFiles(B(d), "*.asi")))
         {
             var name = Path.GetFileName(asi);
             if (name.Equals("ApexRadiance.asi", StringComparison.OrdinalIgnoreCase) || name.Equals("S3SSApex.asi", StringComparison.OrdinalIgnoreCase)) continue;
+            var rel = Path.GetRelativePath(bin, asi);
             if (Scan.Contains(asi, "Apex Edition"))
                 f.Add(new(Severity.Error, "{0} is an old build with Apex inside; while it is in Game\\Bin, Apex Radiance stays off. Setup moves it to the backup folder (install the official Sims3SettingsSetter in its place if you used it).",
-                    new[] { name }, () => MoveAside(bin, name)));
+                    new[] { rel }, () => MoveAside(bin, rel)));
         }
+
+        // a mod ASI both in Game\Bin and in the loader's scripts or plugins folder loads twice: the subfolder copy goes
+        foreach (var name in new[] { "Sims3SettingsSetter.asi", "MonoPatcher.asi", "ts3native.asi", "Sims3Performance.asi", "TS3Patch.asi" })
+            foreach (var rel in new[] { $@"scripts\{name}", $@"plugins\{name}" })
+                if (File.Exists(B(name)) && File.Exists(B(rel)))
+                    f.Add(new(Severity.Error, "{0} in Game\\Bin is a second copy of {1}; both load. Setup moves it to the backup folder.", new[] { rel, name }, () => MoveAside(bin, rel)));
 
         // two loaders load every mod twice: keep the first (wininet.dll, as the mods' guides name it)
         var loaders = Scan.Loaders(bin);
@@ -50,7 +57,10 @@ public static class Compat
             f.Add(new(Severity.Error, "Two ASI loaders ({0}) load every mod twice. Keep one: remove all but {1}.", new[] { string.Join(", ", loaders), loaders[0] },
                 () => { foreach (var l in loaders.Skip(1)) MoveAside(bin, l); }));
 
-        if (s.Ts3NativeWrongBuild)
+        if (s.Ts3NativeWrongBuild && !g.ModernizationSupported)
+            f.Add(new(Severity.Error, "Sims 3 Modernization has no build for this game version ({0}), so its ts3native does nothing. Turn it off in Components.",
+                new[] { g.Version }, Link: ModernizationPlayers));
+        else if (s.Ts3NativeWrongBuild)
             f.Add(new(Severity.Error, "Sims 3 Modernization's ts3native is the build for the other edition and does nothing. Turn it on in Components to install the right one.",
                 Array.Empty<string>(), Link: ModernizationPlayers));
 
@@ -60,11 +70,13 @@ public static class Compat
                 () => Engine.EnsureResourceCfg(docs)));
 
         // script mods built for the other edition (sims3-modernization's EA app notes)
-        string other = g.Edition == Edition.EA ? "steam" : "1.69";
+        // by version, not edition: Origin 1.69.43 takes the 1.69 builds too
+        var v169 = g.Version.StartsWith("1.69");
+        string other = v169 ? "steam" : "1.69";
         foreach (var p in packages.Where(p => (p.Contains("simler90", StringComparison.OrdinalIgnoreCase) || p.Contains("XCAS", StringComparison.OrdinalIgnoreCase))
                                               && p.Contains(other, StringComparison.OrdinalIgnoreCase)))
             f.Add(new(Severity.Warning, "{0} is the build for the other edition of the game; it makes the game show \"unofficial game modification\". Use the {1} build.",
-                new[] { p, g.Edition == Edition.EA ? "EA app" : "Steam" }, Link: ModernizationPlayers));
+                new[] { p, v169 ? "1.69" : "Steam" }, Link: ModernizationPlayers));
         if (g.Edition == Edition.EA && packages.Any(p => Path.GetFileName(p).StartsWith("NRaas_ErrorTrap", StringComparison.OrdinalIgnoreCase)))
             f.Add(new(Severity.Warning, "NRaas ErrorTrap has no build known to work on EA app 1.69.47.", Array.Empty<string>(), Link: ModernizationPlayers));
 
@@ -74,9 +86,13 @@ public static class Compat
                 f.Add(new(Severity.Info, "{0} overrides game code Sims 3 Modernization also patches (not tested together).", new[] { p }, Link: ModernizationCompat));
 
         // Smooth Patch's legacy ASI patches the same SleepEx wrapper as S3SS's Smooth Patch (sims3-modernization fixes.json)
-        if (File.Exists(B("TS3Patch.asi")) && s.S3ss)
+        if (Scan.FindAsi(bin, "TS3Patch.asi") is { } ts3patch && s.S3ss)
+        {
+            var rel = Path.GetRelativePath(bin, ts3patch);
+            var txt = Path.ChangeExtension(rel, ".txt");
             f.Add(new(Severity.Error, "Smooth Patch's TS3Patch.asi patches the same game code as Sims3SettingsSetter's Smooth Patch. Setup moves it to the backup folder (S3SS does the same job).",
-                Array.Empty<string>(), () => { MoveAside(bin, "TS3Patch.asi"); if (File.Exists(B("TS3Patch.txt"))) MoveAside(bin, "TS3Patch.txt"); }));
+                Array.Empty<string>(), () => { MoveAside(bin, rel); if (File.Exists(B(txt))) MoveAside(bin, txt); }));
+        }
         // two core mods that replace the same game module
         if (packages.Any(p => Path.GetFileName(p).StartsWith("simler90GameplayCoreMod", StringComparison.OrdinalIgnoreCase))
             && packages.Any(p => Path.GetFileName(p).Contains("StoryProgression", StringComparison.OrdinalIgnoreCase)))
@@ -87,8 +103,9 @@ public static class Compat
                 Link: "https://aka.ms/vs/17/release/vc_redist.x86.exe"));
 
         // Sims3Performance next to sims3-modernization: the two thread patches clash (framework/s3pp_settings.cpp)
-        var s3ppIni = B("Sims3Performance.ini");
-        if (File.Exists(B("Sims3Performance.asi")) && File.Exists(B("ts3native.asi")) && File.Exists(s3ppIni)
+        var s3pp = Scan.FindAsi(bin, "Sims3Performance.asi");
+        var s3ppIni = Path.ChangeExtension(s3pp ?? "", ".ini");
+        if (s3pp is not null && s.Ts3Native && File.Exists(s3ppIni)
             && Values(File.ReadAllText(s3ppIni), "Patches", "ShortWaitSpin", "ThreadStackDiet").Any(v => int.TryParse(v, out var n) && n > 0))
             f.Add(new(Severity.Warning, "Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. Setup sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup).",
                 Array.Empty<string>(), () => Rewrite(s3ppIni, t => Set(t, "Patches", new[] { "ShortWaitSpin", "ThreadStackDiet" }, v => v != "0", "0"))));

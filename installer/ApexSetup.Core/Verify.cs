@@ -15,7 +15,7 @@ public static class Verify
         if (s.Loader is null)
             f.Add(new(Severity.Error, "No ASI loader in Game\\Bin: Apex Radiance and the other .asi mods do not load.", Array.Empty<string>()));
         if (s.Layer == Layer.Bridge)
-            foreach (var rel in new[] { "bridge.conf", @".trex\bridge.conf", @".trex\NvRemixBridge.exe" })
+            foreach (var rel in new[] { "bridge.conf", @".trex\bridge.conf", @".trex\NvRemixBridge.exe", @".trex\d3d9vk_x64.dll" })
                 if (!File.Exists(B(rel)))
                     f.Add(new(Severity.Error, "{0} is missing: the RTX Remix bridge does not start.", new[] { rel }));
         return f;

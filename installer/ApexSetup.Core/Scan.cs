@@ -1,5 +1,8 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Text;
+using Microsoft.Win32;
 
 namespace ApexSetup;
 
@@ -31,11 +34,35 @@ public static class Scan
     public static string DocumentsFor(Game g)
     {
         if (Environment.GetEnvironmentVariable("APEX_SETUP_DOCUMENTS") is { } test) return test;
-        var ea = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Electronic Arts");
+        var ea = Path.Combine(PlayerShellFolder("Personal") ?? Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Electronic Arts");
         var dir = Path.Combine(ea, FolderName(g.ExePath) ?? "The Sims 3");
         // a game switched to another language keeps using the English folder (framework/apex_paths.cpp)
         return !Directory.Exists(dir) && Directory.Exists(Path.Combine(ea, "The Sims 3")) ? Path.Combine(ea, "The Sims 3") : dir;
     }
+
+    // Setup runs elevated (app.manifest): a standard player who types an administrator's password runs it as that account, whose
+    // folders the game never reads. The session's signed-in user is the player: their folder (a Shell Folders value) from their
+    // own registry hive; null when Setup runs as the player.
+    public static string? PlayerShellFolder(string value)
+    {
+        try
+        {
+            var player = (SecurityIdentifier)new NTAccount(Wts(7 /* WTSDomainName */), Wts(5 /* WTSUserName */)).Translate(typeof(SecurityIdentifier));
+            if (player == WindowsIdentity.GetCurrent().User) return null;
+            return Registry.Users.OpenSubKey($@"{player}\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders")?.GetValue(value) as string;
+        }
+        catch (Exception) { return null; } // (no signed-in user or hive: the elevated account's folder, as before)
+    }
+
+    static string Wts(int info)
+    {
+        if (!WTSQuerySessionInformationW(0, -1 /* this process's session */, info, out var buf, out _)) throw new InvalidOperationException();
+        try { return Marshal.PtrToStringUni(buf) ?? ""; }
+        finally { WTSFreeMemory(buf); }
+    }
+
+    [DllImport("wtsapi32.dll", CharSet = CharSet.Unicode)] static extern bool WTSQuerySessionInformationW(nint server, int session, int info, out nint buf, out int bytes);
+    [DllImport("wtsapi32.dll")] static extern void WTSFreeMemory(nint mem);
 
     // As Apex does (framework/apex_paths.cpp GameFolderName): the exe has one string-table block per language, the
     // language code at the block's first id and the folder name two ids later (blocks of 100 ids from 1000).
@@ -45,7 +72,8 @@ public static class Scan
         if (mod == 0) return null;
         try
         {
-            var locale = System.Globalization.CultureInfo.CurrentUICulture.Name.ToLowerInvariant();
+            // the user locale (GetUserDefaultLocaleName, as Apex), not the display language
+            var locale = System.Globalization.CultureInfo.CurrentCulture.Name.ToLowerInvariant();
             var language = locale.Split('-')[0];
             string? same = null;
             var buf = new char[260];
@@ -71,6 +99,10 @@ public static class Scan
     [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
     static extern int LoadStringW(nint mod, uint id, char[] buf, int max);
 
+    // a mod ASI where the loader reads it: Game\Bin, else its scripts or plugins folder (Ultimate ASI Loader); null when absent
+    public static string? FindAsi(string bin, string name) =>
+        new[] { "", "scripts", "plugins" }.Select(d => Path.Combine(bin, d, name)).FirstOrDefault(File.Exists);
+
     public static string Packages(string docs) => Path.Combine(docs, "Mods", "Packages");
 
     public static State Run(Game g, string? docs = null)
@@ -81,17 +113,19 @@ public static class Scan
 
         var apex = File.Exists(F("ApexRadiance.asi")) ? FileVersionInfo.GetVersionInfo(F("ApexRadiance.asi")).ProductVersion ?? "?" : null;
         var layer = !File.Exists(F("d3d9.dll")) ? Layer.Native
-            : File.Exists(Path.Combine(bin, ".trex", "NvRemixBridge.exe")) ? Layer.Bridge
+            // the bridge client exports this (framework/platform.cpp RemixBridge); it also holds "dxvk"
+            : Contains(F("d3d9.dll"), "remixapi_InitializeLibrary") ? Layer.Bridge
             : Contains(F("d3d9.dll"), "dxvk") ? Layer.Dxvk
             : IsLoader(F("d3d9.dll")) ? Layer.Native
             : Layer.Other;
         var loader = LoaderNames.FirstOrDefault(n => File.Exists(F(n)) && IsLoader(F(n)));
 
-        var log = F("ts3native.log");
-        var wrong = File.Exists(F("ts3native.asi")) && File.Exists(log) && File.ReadAllText(log).Contains("SKIP all: host is not");
+        var ts3native = FindAsi(bin, "ts3native.asi");
+        var log = Path.ChangeExtension(ts3native ?? "", ".log"); // (written next to the ASI)
+        var wrong = ts3native is not null && File.Exists(log) && File.ReadAllText(log).Contains("SKIP all: host is not");
 
-        return new State(apex, layer, loader, loader == "d3d9.dll", File.Exists(F("Sims3SettingsSetter.asi")), File.Exists(F("MonoPatcher.asi")),
-            File.Exists(F("ts3native.asi")), File.Exists(Path.Combine(Packages(docs), "ts3fixes.package")), wrong,
+        return new State(apex, layer, loader, loader == "d3d9.dll", FindAsi(bin, "Sims3SettingsSetter.asi") is not null, FindAsi(bin, "MonoPatcher.asi") is not null,
+            ts3native is not null, File.Exists(Path.Combine(Packages(docs), "ts3fixes.package")), wrong,
             Manifest.Load(bin));
     }
 
@@ -116,7 +150,7 @@ public static class Scan
         for (int i = 0, n = data.Length - needle.Length; i <= n; i++)
         {
             int j = 0;
-            while (j < needle.Length && (data[i + j] | 0x20) == needle[j]) j++;
+            while (j < needle.Length && (data[i + j] | 0x20) == (needle[j] | 0x20)) j++; // (both sides: '_' | 0x20 is not '_')
             if (j == needle.Length) return true;
         }
         return false;

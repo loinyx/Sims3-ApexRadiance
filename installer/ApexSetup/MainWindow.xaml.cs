@@ -132,7 +132,7 @@ public sealed partial class MainWindow : Window
         if (_state is not { } s || _game is not { } g) return null;
         var (present, file, asset) = c switch
         {
-            Components.S3ss => (s.S3ss, System.IO.Path.Combine(g.Bin, "Sims3SettingsSetter.asi"), "Sims3SettingsSetter.asi"),
+            Components.S3ss => (s.S3ss, Scan.FindAsi(g.Bin, "Sims3SettingsSetter.asi") ?? "", "Sims3SettingsSetter.asi"),
             Components.Modernization => (s.Modernization, System.IO.Path.Combine(Scan.Packages(Scan.DocumentsFor(g)), "ts3fixes.package"), "ts3fixes.package"),
             Components.Bridge => (s.Layer == Layer.Bridge, "", ""),
             Components.Dxvk => (s.Layer == Layer.Dxvk, "", ""),
@@ -668,10 +668,10 @@ public sealed partial class MainWindow : Window
     const string S3ppPage = "https://www.nexusmods.com/thesims3/mods/235";
     string? _s3ppArchive, _s3ppFor; // (the download and the Game\\Bin it is for)
     FileSystemWatcher? _s3ppWatch;
-    bool S3ppPresent => _game is { } g && File.Exists(System.IO.Path.Combine(g.Bin, "Sims3Performance.asi"));
+    bool S3ppPresent => _game is { } g && Scan.FindAsi(g.Bin, "Sims3Performance.asi") is not null;
 
     static string DownloadsFolder() =>
-        Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders")
+        Scan.PlayerShellFolder("{374DE290-123F-4565-9164-39C4925E467B}") ?? Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders")
             ?.GetValue("{374DE290-123F-4565-9164-39C4925E467B}") as string
         ?? System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
 
