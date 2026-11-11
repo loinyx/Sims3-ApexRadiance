@@ -15668,23 +15668,30 @@ uintptr_t TrackerOfLot(uint64_t lot) {
     return 0;
 }
 // (render thread, as QueueRoomSafe: a lot torn down meanwhile faults here, not in the game)
-static bool QueueOutdoorRegatherSafe(uintptr_t tracker) {
+static bool QueueOutdoorRegatherSafe(uintptr_t tracker, bool edit) {
     __try {
-        QueueOutdoorRegather(tracker, 2, true);
+        QueueOutdoorRegather(tracker, edit ? 2 : -1, edit);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         g_faults.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
 }
-bool RegatherOutdoorById(uint64_t lot) {
+bool RegatherOutdoorById(uint64_t lot, bool urgent) {
+    // urgent when the caller says so (a lot whose relit maps were just dropped shows the game's maps without the active lot's
+    // posts until it gathers again) or within 1.5 s of a player's lamp edit, the GPU's or the delta's included (a post let go
+    // is sent about 1 s after its last step). Otherwise (a lot streaming in registers its posts) its rooms go at the game's
+    // pace: as urgent rooms of the played lot they opened 8 s "lamp edits" at about 10 ms of room solves a frame with no edit
+    const DWORD now = GetTickCount(), gpu = g_gpuEditAt.load(std::memory_order_relaxed);
+    const unsigned long edit = LampMarkFilter::EditLastTick();
+    const bool afterEdit = urgent || (edit && now - edit < 1500) || (gpu && now - gpu < 1500);
     uintptr_t trackers[256];
     const int n = AllTrackers(trackers, 256);
     for (int t = 0; t < n; t++)
         if ((static_cast<uint64_t>(LotIdPart(trackers[t], 0x94)) << 32 | LotIdPart(trackers[t], 0x90)) == lot) {
             // as a lamp edit's safety net (tier 2): after the edit's own rooms, before any other, held with them by the edit
             // hold so the stories change together; gathered at once (the post is already in the light cells)
-            if (!QueueOutdoorRegatherSafe(trackers[t])) return false;
+            if (!QueueOutdoorRegatherSafe(trackers[t], afterEdit)) return false;
             g_xlotRegathers.fetch_add(1, std::memory_order_relaxed);
             return true;
         }
@@ -19950,10 +19957,10 @@ bool QueueRoomId(uintptr_t tracker, int story, int id, int urgentTier) {
     // (the sends a lamp drag left out: once; with no urgency, or tier 2 while the edit's stories change together)
     return QueueRoomSafe(tracker, story, id, urgentTier >= 0 && urgentTier <= 2 ? urgentTier : -1);
 }
-bool QueueRoom0(uintptr_t tracker, int story) {
+bool QueueRoom0(uintptr_t tracker, int story, bool urgent) {
     if (!tracker || story < 0 || story > 7 || !g_installed.load(std::memory_order_relaxed)) return false;
     t_queueForce = true;
-    const bool sent = QueueRoomSafe(tracker, story, 0, 1);
+    const bool sent = QueueRoomSafe(tracker, story, 0, urgent ? 1 : -1);
     t_queueForce = false;
     return sent;
 }

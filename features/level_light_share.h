@@ -271,8 +271,9 @@ struct CrossLotEvent {
 };
 // Render thread: the posts placed or moved since the last call
 void TakeCrossLotEvents(std::vector<CrossLotEvent>& out);
-// Render thread: the outdoor rooms of a loaded lot gather again (room 0 of each story, its roofless rooms); false = not loaded
-bool RegatherOutdoorById(uint64_t lot);
+// Render thread: the outdoor rooms of a loaded lot gather again (room 0 of each story, its roofless rooms); urgent (tier 2)
+// when `urgent` or within 1.5 s of a player's lamp edit, else at the game's pace; false = not loaded
+bool RegatherOutdoorById(uint64_t lot, bool urgent = false);
 // Real-time outdoor lamps draws the active lot's lamp posts on these lots' room-0 maps (render thread, when the set changes;
 // at most 4): their gathers no longer take those posts, except on the stories of cpuStories[i] (bit per story) it cannot relight
 void SetGpuNeighbourLots(uint64_t active, const uint64_t* lots, const uint8_t* cpuStories, int n);
@@ -468,8 +469,8 @@ bool ReachAppliesIn(const void* room, uintptr_t light);
 bool Room0MovePath(const void* room0, uintptr_t light, Room0Path& out, const char*& why);
 // Any thread: InnerPass of a lamp at lampW to pointW from the copy
 float Room0PassAt(const Room0Path& p, const float* lampW, const float* pointW);
-// Room 0 of a story sent to its solve (urgent, whatever its kept parts say)
-bool QueueRoom0(uintptr_t tracker, int story);
+// Room 0 of a story sent to its solve, whatever its kept parts say (urgent: as a lamp edit's room, else at the game's pace)
+bool QueueRoom0(uintptr_t tracker, int story, bool urgent = true);
 // After a room update: room 0 of story L changed by a lamp edit the delta took (its mark dropped); the rooms that take its
 // lamps are sent as the changed-room walk sends them. Returns the rooms sent.
 int SendRoom0Dependents(uintptr_t tracker, int story);

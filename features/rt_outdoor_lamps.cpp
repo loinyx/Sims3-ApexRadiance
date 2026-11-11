@@ -81,6 +81,8 @@ constexpr DWORD kRepairWaitMs = 4000;    // a story sent to gather a lamp is che
 constexpr uint64_t kGameWriteGapMs = 500; // a relight made only for a game write: at most this often per map
 // shortcut: a bake that keeps changing past this falls back to the share on the render thread, as before; tune from a recording
 constexpr uint64_t kUnderWaitMs = 500; // a shown map waits this long at most for the worker's under-floor share
+// shortcut: lamps that keep changing past this fall back to "all" on the render thread, as before; tune from a recording
+constexpr uint64_t kAllWaitMs = 2000; // a map waits this long at most for the worker's floor mask "all" (one run: 105-255 ms)
 // (2.15.1) A lamp lying on the lot's ground (its light 5 cm over the lawn, F8 capture) lit a tree above it and left the
 // lawn dark: the law's light falls with its angle of incidence, and from 5 cm the lawn 2 m away takes about 1 % of what it
 // would from above. On story 0's floor map a lamp whose light stands lower than kLowLampLift over the lot's ground is
@@ -440,6 +442,7 @@ struct EditNote {
 };
 std::mutex g_editMx;
 std::vector<EditNote> g_edits;                  // edits not yet shown (under g_editMx)
+std::atomic<uintptr_t> g_tookEdit{0};           // the tracker whose room-0 maps lack an edit the GPU took (DropAll)
 // (tracker, story) -> its edits since the last send: their dependents are sent kHoldQuietMs after the last one, or kDragQuietMs
 // when none moved a lamp (a value or a switch: no drag pauses to wait out); light tree thread
 struct SendDue {
@@ -577,6 +580,8 @@ struct Slot {
     std::vector<float> allVals;
     uint64_t allSig = 0;
     bool allCurrent = false;
+    std::shared_ptr<struct AllJob> aJob; // "all" for new lamps on a worker; the map keeps what it shows until they arrive
+    uint64_t allWaitSince = 0;           // tick at which this map began waiting for them
     // (GPU room lamps, developer) the lamps of room 0's list it does not draw that are kept as a kept room's (outdoor_delta.h
     // Room0Export::kept0): their parts (MANAGED, at their texels' places, by lamp), and each one's law now
     IDirect3DVertexBuffer9* kvb = nullptr;
@@ -861,14 +866,17 @@ void PublishNeighbours(uint64_t active, const std::vector<std::pair<uint64_t, ui
     std::vector<Neighbour> moved;
     for (const auto& n : g_nb)
         if (active != g_nbActive || !had(next, n)) moved.push_back(n);
+    // (the lots leaving show the game's maps again at once, gathered without the active lot's posts: urgent; a lot joining keeps
+    // the game's light until its relit copy shows the posts, so it goes at the game's pace)
+    const size_t leavers = moved.size();
     for (const auto& n : next)
         if (active != g_nbActive || !had(g_nb, n)) moved.push_back(n);
     g_nb = std::move(next);
     g_nbActive = active;
     SendNeighbours();
     int sent = 0;
-    for (const auto& n : moved)
-        if (regather && LevelLightShare::TrackerLive(n.tracker)) sent += LevelLightShare::RegatherOutdoorById(n.lot) ? 1 : 0;
+    for (size_t i = 0; i < moved.size(); i++)
+        if (regather && LevelLightShare::TrackerLive(moved[i].tracker)) sent += LevelLightShare::RegatherOutdoorById(moved[i].lot, i < leavers) ? 1 : 0;
     if (!moved.empty() && LogAllowed()) {
         std::string list;
         for (const auto& n : g_nb) list += std::format("{}{:08X}", list.empty() ? "" : " ", static_cast<uint32_t>(n.lot));
@@ -899,11 +907,14 @@ void DropAll(IDirect3DDevice9* dev, const char* why, bool requeue = true) {
         g_cover = Cover{};
     }
     // the game's room-0 maps never took the edits the GPU stood in for: each story's room 0 of that lot is solved again
-    // (only while the game still has that lot: after a world change or a lot's teardown its tracker is gone)
+    // (only while the game still has that lot: after a world change or a lot's teardown its tracker is gone). Urgent only
+    // when the GPU took an edit on that lot (its maps lack it); with none they hold the right light and go at the game's pace:
+    // as urgent rooms of the lot just left they opened an 8 s "lamp edit" of room solves with no edit
     int sent = 0;
+    const bool edited = g_tracker && g_tookEdit.exchange(0) == g_tracker;
     if (requeue && n && g_tracker && LevelLightShare::TrackerLive(g_tracker))
         for (int S = 0; S <= 7; S++)
-            if (LevelLightShare::Room0Of(g_tracker, S)) sent += LevelLightShare::QueueRoom0(g_tracker, S) ? 1 : 0;
+            if (LevelLightShare::Room0Of(g_tracker, S)) sent += LevelLightShare::QueueRoom0(g_tracker, S, edited) ? 1 : 0;
     if (n) LOG_INFO(std::format("[RtOutdoorLamps] {} relit maps dropped ({}): the game's maps are bound again, {} rooms 0 sent to their solve", n, why, sent));
 }
 
@@ -937,6 +948,42 @@ struct UnderJob {
     std::atomic<int> state{1}; // 1 running, 2 done
     std::vector<float> under;
     std::vector<double> A, U;
+};
+// The floor mask's "all" (more lamps than one batch): the GPU lamps' luminance with no walls at n masked points, each
+// `stride` floats after the last (x, y, z first). The render thread and AllJob's worker run this same code
+void AllMask(const std::vector<RtLampModel::Lamp>& lamps, const float* pos, size_t stride, size_t n, float thr, std::vector<float>& out) {
+    out.assign(n, 0.0f);
+    for (size_t i = 0; i < n; i++) {
+        float vis = 0;
+        for (const auto& l : lamps) RtLampModel::AddMask(l, &pos[i * stride], 1.0f, thr, vis, out[i]);
+    }
+}
+// The floating-point state the floats depend on, as in dxt_codec.cpp: the x87 control word and MXCSR (rounding, FTZ, DAZ).
+// AllJob's worker computes with the render thread's, so its values are the ones that thread would compute
+uint16_t X87Cw() {
+    uint16_t cw;
+    __asm fnstcw cw
+    return cw;
+}
+void SetFp(uint16_t x87, unsigned mxcsr) {
+    uint16_t cw = x87;
+    __asm {
+        fnclex
+        fldcw cw
+    }
+    _mm_setcsr(mxcsr & ~0x3Fu); // control bits only; the sticky exception flags start clear
+}
+// What the worker reads, copied when it starts (the lamps, the points' x, y, z, the threshold, the render thread's
+// floating-point state), and Frame's allSig for them
+struct AllJob {
+    std::vector<RtLampModel::Lamp> lamps;
+    std::vector<float> pos;
+    float thr = 0.0f;
+    uint16_t x87 = 0;
+    unsigned mxcsr = 0;
+    uint64_t sig = 0;
+    std::atomic<int> state{1}; // 1 running, 2 done
+    std::vector<float> vals;
 };
 uint64_t UnderSig(uint64_t bakeSig, float base) {
     uint64_t h = bakeSig;
@@ -1430,9 +1477,13 @@ bool UploadSlot(IDirect3DDevice9* dev, Slot& s, const Job& j, Prepared& p) {
     ReleaseHiPoints(s);
     s.nPhys = 0, s.pLights.clear(), s.pRow.clear(), s.pBlk.reset(), s.pHeader = -1.0f, s.physLater = j.physLater;
     s.kRanges.clear(), s.kLamps.clear(), s.kX = false;
+    // "all" depends only on the points' x, y, z and allSig's lamps and threshold: the same points keep its values and its job
+    const bool samePts = !s.maskedPos.empty() && s.maskedPos.size() == p.maskedPos.size() &&
+                         !std::memcmp(s.maskedPos.data(), p.maskedPos.data(), s.maskedPos.size() * sizeof(float));
     s.masked.clear(), s.maskedPos.clear(), s.gated.clear(), s.under.clear(), s.uA.clear(), s.uU.clear(), s.uSnap.clear(), s.uIds.clear();
     s.underSig = 0, s.underExact = false, s.underDirty = false, s.underWaitSince = 0, s.uJob.reset();
-    s.dynCurrent = false, s.allCurrent = false, s.allVals.clear();
+    s.dynCurrent = false, s.allCurrent = false; // (the new buffers start from zeros: written in full)
+    if (!samePts) s.allVals.clear(), s.aJob.reset(), s.allWaitSince = 0; // (a job read the old points)
     s.map = RtLampGpu::Map{};
     D3DSURFACE_DESC d{};
     // A room's own map may be smaller than the class's working map the solve wrote: the commit's copy 0x006191D0 takes
@@ -2918,12 +2969,17 @@ void Frame(IDirect3DDevice9* dev) {
         if (solvedHere) s.pendingWrite = true;
         if (wrote) s.pendingWrite = true;
         const bool exactUnder = s.underDirty;
-        const bool dirty = !s.relit || !s.copy || sig != s.sig || paramsChanged || (s.fast && !fast) || s.pendingWrite || s.underDirty;
-        if (!dirty) continue;
+        // (the floor mask's "all" values that arrived on a drag frame were not written: relit once the drag ends)
+        const bool allStale = !dragging && mine.size() > static_cast<size_t>(RtLampGpu::kAtlasLamps) && s.dyn && !s.masked.empty() && !s.allCurrent;
+        const bool dirty = !s.relit || !s.copy || sig != s.sig || paramsChanged || (s.fast && !fast) || s.pendingWrite || s.underDirty || allStale;
+        if (!dirty) {
+            s.allWaitSince = 0; // (a waiting map is always dirty: it is not relit)
+            continue;
+        }
         // (2.15.1) the game writing the map again and again (a lot that stays loading: 105 writes in 10 s, each relight
         // 45 ms of floor mask with 28 lamps): a relight made only for a game write waits kGameWriteGapMs after the last one; a
         // single write after a rest is relit at once, as before
-        const bool onlyWrite = s.relit && s.copy && sig == s.sig && !paramsChanged && !(s.fast && !fast) && !s.underDirty;
+        const bool onlyWrite = s.relit && s.copy && sig == s.sig && !paramsChanged && !(s.fast && !fast) && !s.underDirty && !allStale;
         if (onlyWrite && GetTickCount64() - s.relitTick < kGameWriteGapMs) {
             // (it keeps its last copy and stays dirty until its turn; not counted in `left`: a lot whose game keeps writing
             // would keep the round open, and with it the drag throttle off)
@@ -2984,18 +3040,28 @@ void Frame(IDirect3DDevice9* dev) {
         // kept while the bake's lamps stay; only the masked texels are written)
         LARGE_INTEGER tm0{}, tm1{};
         QueryPerformanceCounter(&tm0);
-        bool maskWait = false; // (a drag: the share's CPU work waits for the worker; this map keeps its last copy meanwhile)
+        bool maskWait = false; // (the share's or "all"'s CPU work waits for a worker; this map keeps what it shows meanwhile)
         // one batch of lamps (the usual case): "all" is evaluated by the compose shader, and the buffer is written only when the
-        // under-floor share changed; more lamps: "all" from the CPU every relight
+        // under-floor share changed; more lamps: "all" from the CPU (a worker) when the lamps change
         const bool maskGpu = mine.size() <= static_cast<size_t>(RtLampGpu::kAtlasLamps);
         if (s.dyn && !s.masked.empty()) {
             const uint64_t us = UnderSig(sBakeSig, sBase);
             uint64_t allSig = 0;
             if (!maskGpu) { // (what "all" depends on: the lamps' laws and mults, the threshold; the masked points only change with
-                            // the slot's rebuild, which clears allVals)
+                            // the slot's rebuild, which clears allVals unless its points are the same)
                 allSig = 1469598103934665603ull;
                 for (const auto& l : mine) Mix(allSig, &l, sizeof l);
                 Mix(allSig, &s.thr, sizeof s.thr);
+            }
+            // the worker's "all", taken only for the lamps and threshold now (a slot's rebuild with new points drops its job); a
+            // job that ended empty (no thread, an exception) leaves them to this thread
+            bool allFailed = false;
+            if (s.aJob && s.aJob->state.load() == 2) {
+                const auto j = std::move(s.aJob);
+                if (!maskGpu && j->sig == allSig) {
+                    if (j->vals.size() == s.masked.size()) s.allVals = std::move(j->vals), s.allSig = allSig, s.allCurrent = false, s.allWaitSince = 0;
+                    else allFailed = true;
+                }
             }
             const bool allNew = !maskGpu && (allSig != s.allSig || s.allVals.size() != s.masked.size());
             bool write = maskGpu ? !s.dynCurrent : (allNew || !s.allCurrent);
@@ -3038,7 +3104,40 @@ void Frame(IDirect3DDevice9* dev) {
                     maskShareMs += Ms(st0, st1);
                 }
             }
+            // new lamps: "all" from a worker (105-255 ms of this thread for a 45-lamp story's floor, one hitch each), never partial
+            // values: the map keeps what it shows (its last copy; before its first relight, the game's map, as while it is
+            // prepared) until they arrive. None during a drag (the last values stay, below)
+            if (allNew && !dragging && !allFailed && (!s.allWaitSince || GetTickCount64() - s.allWaitSince < kAllWaitMs)) {
+                if (!s.allWaitSince) s.allWaitSince = GetTickCount64();
+                if (!s.aJob) {
+                    LARGE_INTEGER jt0{}, jt1{};
+                    QueryPerformanceCounter(&jt0);
+                    auto j = std::make_shared<AllJob>();
+                    j->lamps = mine, j->thr = s.thr, j->x87 = X87Cw(), j->mxcsr = _mm_getcsr(), j->sig = allSig, j->pos.resize(s.masked.size() * 3);
+                    for (size_t i = 0; i < s.masked.size(); i++) std::memcpy(&j->pos[i * 3], &s.maskedPos[i * 6], 3 * sizeof(float));
+                    s.aJob = j;
+                    if (!HookGuard::StartDetached("RtOutdoorLamps floor mask job", [j] {
+                            SetFp(j->x87, j->mxcsr); // (a new thread that ends after the job: nothing to restore)
+                            try {
+                                AllMask(j->lamps, j->pos.data(), 3, j->pos.size() / 3, j->thr, j->vals);
+                            } catch (...) {
+                                j->vals.clear();
+                            }
+                            std::vector<float>().swap(j->pos); // (its points' copy freed before the job is taken)
+                            j->state.store(2);
+                        })) {
+                        j->vals.clear(); // (no thread: the job ends empty, as after an exception)
+                        j->state.store(2);
+                    }
+                    QueryPerformanceCounter(&jt1);
+                    maskJobsMs += Ms(jt0, jt1);
+                }
+                s.allCurrent = false; // (the share may change meanwhile: the buffer is written in full when they arrive)
+                maskWait = true;
+            }
             if (!maskWait) s.underDirty = false, s.underWaitSince = 0;
+            // (the wait ends only when the values match the lamps, not on a drag frame: lamps that keep changing still reach kAllWaitMs)
+            if (!allNew) s.allWaitSince = 0;
             // (a drag: with more lamps than one batch the shader cannot evaluate "all"; the CPU's per-texel pass waits for the
             // lamp to be still, the last values stay meanwhile)
             if (dragging && !maskGpu) write = false;
@@ -3051,13 +3150,11 @@ void Frame(IDirect3DDevice9* dev) {
             maskLockMs += Ms(lk0, lk1);
             if (locked) {
                 auto* dyn = static_cast<RtLampGpu::TexelDyn*>(q);
-                if (allNew) {
-                    s.allVals.assign(s.masked.size(), 0.0f);
-                    for (size_t i = 0; i < s.masked.size(); i++) {
-                        float vis = 0;
-                        for (const auto& l : mine) RtLampModel::AddMask(l, &s.maskedPos[i * 6], 1.0f, s.thr, vis, s.allVals[i]);
-                    }
+                if (allNew) { // (past kAllWaitMs or after a failed job; a job still running is dropped)
+                    AllMask(mine, s.maskedPos.data(), 6, s.masked.size(), s.thr, s.allVals);
                     s.allSig = allSig;
+                    s.allWaitSince = 0;
+                    s.aJob.reset();
                 }
                 for (size_t i = 0; i < s.masked.size(); i++) dyn[s.masked[i]] = RtLampGpu::TexelDyn{{maskGpu ? 0.0f : s.allVals[i], s.under[i], 0, 0}};
                 target->Unlock();
@@ -3075,7 +3172,7 @@ void Frame(IDirect3DDevice9* dev) {
         QueryPerformanceCounter(&tm1);
         maskMs += Ms(tm0, tm1);
         if (maskWait) {
-            left++; // (relit once the worker's share arrives)
+            left++; // (relit once the worker's values arrive)
             continue;
         }
         RtLampGpu::Params p;
@@ -3647,6 +3744,7 @@ void NoteLampEdit(uintptr_t tl, uintptr_t light, int kind, bool settle) {
     int story = -99;
     const uintptr_t tracker = TrackerOfTl(tl, story);
     if (!tracker) return;
+    g_tookEdit.store(tracker, std::memory_order_relaxed);
     c_edits.fetch_add(1, std::memory_order_relaxed);
     EditNote e;
     e.tracker = tracker, e.light = light, e.story = story, e.kind = kind;
