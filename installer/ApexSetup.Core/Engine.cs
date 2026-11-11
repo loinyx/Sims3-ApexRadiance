@@ -357,8 +357,9 @@ public static class Engine
         var cfg = Path.Combine(docs, "Mods", "Resource.cfg");
         if (File.Exists(cfg)) return;
         Directory.CreateDirectory(Path.GetDirectoryName(cfg)!);
-        File.WriteAllText(cfg, "Priority 500\r\nPackedFile Packages/*.package\r\nPackedFile Packages/*/*.package\r\nPackedFile Packages/*/*/*.package\r\n");
+        File.WriteAllText(cfg, ResourceCfg);
     }
+    public const string ResourceCfg = "Priority 500\r\nPackedFile Packages/*.package\r\nPackedFile Packages/*/*.package\r\nPackedFile Packages/*/*/*.package\r\n";
 
     static bool Same(string a, string b) => string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
 }

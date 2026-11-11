@@ -64,10 +64,17 @@ public static class Compat
             f.Add(new(Severity.Error, "Sims 3 Modernization's ts3native is the build for the other edition and does nothing. Turn it on in Components to install the right one.",
                 Array.Empty<string>(), Link: ModernizationPlayers));
 
-        // packages are only read through Mods\Resource.cfg
-        if (packages.Count > 0 && !File.Exists(Path.Combine(mods, "Resource.cfg")))
-            f.Add(new(Severity.Error, "Mods has {0} .package files but no Resource.cfg, so the game loads none of them.", new[] { packages.Count.ToString() },
+        // packages are only read through Mods\Resource.cfg: count the ones the cfg Setup writes would read
+        var cfg = Path.Combine(mods, "Resource.cfg");
+        if (!File.Exists(cfg) && packages.Count(p => CfgReads(Engine.ResourceCfg, p)) is var reads and > 0)
+            f.Add(new(Severity.Error, "Mods has {0} .package files but no Resource.cfg, so the game loads none of them.", new[] { reads.ToString() },
                 () => Engine.EnsureResourceCfg(docs)));
+        // Setup's own packages (ts3fixes, MonoPatcher's subfolder) under a Resource.cfg that does not reach them
+        if (File.Exists(cfg) && File.ReadAllText(cfg) is var cfgText)
+            foreach (var p in packages.Where(p => (Path.GetFileName(p).Equals("ts3fixes.package", StringComparison.OrdinalIgnoreCase)
+                                                   || Path.GetFileName(p).StartsWith("ld_MonoPatcher", StringComparison.OrdinalIgnoreCase)) && !CfgReads(cfgText, p)))
+                f.Add(new(Severity.Warning, "Mods\\Resource.cfg does not read {0}, so the game does not load it. Setup adds the Packages folder lines (a copy is kept as Resource.cfg.apex-backup).",
+                    new[] { p }, () => Rewrite(cfg, t => t.TrimEnd() + "\r\n" + string.Concat(Engine.ResourceCfg.Split("\r\n").Skip(1).Where(l => l != "" && !t.Contains(l, StringComparison.OrdinalIgnoreCase)).Select(l => l + "\r\n")))));
 
         // script mods built for the other edition (sims3-modernization's EA app notes)
         // by version, not edition: Origin 1.69.43 takes the 1.69 builds too
@@ -128,11 +135,12 @@ public static class Compat
             // dxvk.conf next to the bridge: DXVK's TS3 profile (else Options.ini resets) and the Reset fix
             var dxvk = B("dxvk.conf");
             var text = File.Exists(dxvk) ? File.ReadAllText(dxvk) : "";
-            var missing = BridgeDxvk.Where(kv => !Regex.IsMatch(text, $@"(?mi)^\s*{Regex.Escape(kv.Key)}\s*=")).ToList();
-            if (missing.Count > 0)
-                f.Add(new(Severity.Warning, "dxvk.conf lacks {0}: without them the game resets its graphics options or freezes on a resolution change under the bridge.",
-                    new[] { string.Join(", ", missing.Select(m => m.Key)) },
-                    () => File.AppendAllText(dxvk, "\r\n" + string.Concat(missing.Select(m => $"{m.Key} = {m.Value}\r\n")))));
+            var wrong = new List<string>();
+            FixDxvk(text, wrong);
+            if (wrong.Count > 0)
+                f.Add(new(Severity.Warning, "dxvk.conf lacks {0} or has other values: without them the game resets its graphics options or freezes on a resolution change under the bridge.",
+                    new[] { string.Join(", ", wrong) },
+                    () => { if (File.Exists(dxvk)) Rewrite(dxvk, t => FixDxvk(t)); else File.WriteAllText(dxvk, FixDxvk("")); }));
         }
         return f;
     }
@@ -141,8 +149,32 @@ public static class Compat
     static readonly Dictionary<string, string> BridgeDxvk = new()
     {
         ["d3d9.customVendorId"] = "10de", ["d3d9.customDeviceId"] = "1080", ["d3d9.customDeviceDesc"] = "\"Geforce GTX 580\"",
-        ["d3d9.countLosableResources"] = "False",
+        ["d3d9.countLosableResources"] = "False", ["d3d9.samplerAnisotropy"] = "16",
     };
+
+    // dxvk.conf with the bridge keys set in its global part (before the first [exe] section, which the bridge server
+    // does not read): wrong values replaced in place, missing keys added at the top; wrong gets the keys that were off
+    public static string FixDxvk(string text, List<string>? wrong = null)
+    {
+        int g = Regex.Match(text, @"(?m)^[ \t]*\[") is { Success: true } m ? m.Index : text.Length;
+        var head = text[..g];
+        var add = "";
+        foreach (var (key, value) in BridgeDxvk)
+        {
+            var re = new Regex($@"(?mi)^([ \t]*{Regex.Escape(key)}[ \t]*=[ \t]*)([^\r\n]*?)([ \t]*)(?=\r?$)");
+            var ms = re.Matches(head);
+            if (ms.Count == 0) add += $"{key} = {value}\r\n";
+            else if (ms.All(x => x.Groups[2].Value.Equals(value, StringComparison.OrdinalIgnoreCase))) continue;
+            else head = re.Replace(head, x => x.Groups[1].Value + value + x.Groups[3].Value);
+            wrong?.Add(key);
+        }
+        return add + head + text[g..];
+    }
+
+    // Mods\Resource.cfg reads that package (path relative to Mods) through one of its PackedFile patterns
+    static bool CfgReads(string cfg, string rel) =>
+        Regex.Matches(cfg, @"(?mi)^\s*PackedFile\s+(\S+)").Any(m => Regex.IsMatch(rel.Replace('\\', '/'),
+            "^" + Regex.Escape(m.Groups[1].Value.Replace('\\', '/')).Replace(@"\*", "[^/]*").Replace(@"\?", "[^/]") + "$", RegexOptions.IgnoreCase));
 
     static string? TargetProcess(string conf) =>
         Regex.Match(File.ReadAllText(conf), @"(?m)^\s*client\.targetProcess\s*=\s*(\S+)") is { Success: true } m ? m.Groups[1].Value : null;
@@ -174,9 +206,10 @@ public static class Compat
             if (end < 0) end = text.Length;
             var line = text[at..end].TrimEnd('\r');
             var trimmed = line.Trim();
-            if (trimmed.StartsWith('[')) inSection = trimmed.IndexOf(']') is var c and > 0 && trimmed[1..c].Trim() == section;
+            // without case, as Apex's ForPatchKey (SameText)
+            if (trimmed.StartsWith('[')) inSection = trimmed.IndexOf(']') is var c and > 0 && trimmed[1..c].Trim().Equals(section, StringComparison.OrdinalIgnoreCase);
             else if (inSection && !trimmed.StartsWith('#') && !trimmed.StartsWith(';') && line.IndexOf('=') is var eq and > 0
-                     && keys.Contains(line[..eq].Trim()))
+                     && keys.Contains(line[..eq].Trim(), StringComparer.OrdinalIgnoreCase))
             {
                 int v = eq + 1;
                 while (v < line.Length && line[v] is ' ' or '\t') v++;

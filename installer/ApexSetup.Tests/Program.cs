@@ -105,10 +105,26 @@ try
     var toml = "[patches.UncompressedLotTexturesPatch]\nenabled = true\nonlyForLOD0 = true\n[patches.Other]\nenabled = true\n";
     Check(Compat.Set(toml, "patches.UncompressedLotTexturesPatch", new[] { "enabled" }, v => v == "true", "false")
           == "[patches.UncompressedLotTexturesPatch]\nenabled = false\nonlyForLOD0 = true\n[patches.Other]\nenabled = true\n", "S3SS.toml rewrite touches only its section");
+    Check(Compat.Set("[ patches ]\nshortwaitspin=1\n", "Patches", new[] { "ShortWaitSpin" }, v => v != "0", "0") == "[ patches ]\nshortwaitspin=0\n", "ini section and key match without case");
+    var dxw = new List<string>();
+    var dxc = "d3d9.customVendorId = 10de\r\nd3d9.customDeviceId = 1080\r\nd3d9.customDeviceDesc = \"Geforce GTX 580\"\r\nd3d9.countLosableResources = True\r\n[TS3W.exe]\r\nd3d9.samplerAnisotropy = 16\r\n";
+    Check(Compat.FixDxvk(dxc, dxw) == "d3d9.samplerAnisotropy = 16\r\n" + dxc.Replace("= True", "= False") && dxw.SequenceEqual(new[] { "d3d9.countLosableResources", "d3d9.samplerAnisotropy" }),
+          "bridge dxvk.conf: wrong value replaced, key under [TS3W.exe] added to the global part");
+    var dxw2 = new List<string>();
+    Compat.FixDxvk(Compat.FixDxvk(dxc), dxw2);
+    Check(dxw2.Count == 0, "bridge dxvk.conf fix settles");
 
     // 8. MonoPatcher in, then out; Smooth Patch's ASI next to S3SS is moved away
     await Engine.InstallAsync(g, new[] { Components.MonoPatcher }, src, null, docs);
     Check(Scan.Run(g, docs).MonoPatcher && File.Exists(Path.Combine(Scan.Packages(docs), "MonoPatcher", "ld_MonoPatcher.package")), "MonoPatcher installed");
+    var rcfg = Path.Combine(docs, "Mods", "Resource.cfg");
+    var rcfgOld = Read(rcfg);
+    File.WriteAllText(rcfg, "Priority 500\r\nPackedFile Packages/*.package\r\n");
+    var lost = Compat.Check(g, Scan.Run(g, docs), docs).Where(x => x.Text.StartsWith("Mods\\Resource.cfg does not read")).ToList();
+    Check(lost.Count == 1 && lost[0].Args[0].EndsWith("ld_MonoPatcher.package"), "Resource.cfg that skips MonoPatcher's folder reported");
+    lost[0].Fix!();
+    Check(!Compat.Check(g, Scan.Run(g, docs), docs).Any(x => x.Text.StartsWith("Mods\\Resource.cfg does not read")) && File.Exists(rcfg + ".apex-backup"), "Resource.cfg fixed, copy kept");
+    File.WriteAllText(rcfg, rcfgOld); File.Delete(rcfg + ".apex-backup");
     File.WriteAllText(B("TS3Patch.asi"), "smooth");
     await Engine.InstallAsync(g, Array.Empty<string>(), src, null, docs); // nothing to copy: only the fixes run
     Check(!File.Exists(B("TS3Patch.asi")), "Smooth Patch ASI next to S3SS moved away");

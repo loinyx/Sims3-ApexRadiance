@@ -165,8 +165,10 @@ public static class Strings
             "As texturas não comprimidas do Sims3SettingsSetter travam sob o RTX Remix bridge. O instalador as desliga (fica uma cópia em S3SS.toml.apex-backup).",
         ["{0} sets client.targetProcess = {1}, but this game is {2}: the bridge does not start."] =
             "{0} define client.targetProcess = {1}, mas este jogo é o {2}: o bridge não inicia.",
-        ["dxvk.conf lacks {0}: without them the game resets its graphics options or freezes on a resolution change under the bridge."] =
-            "Falta {0} no dxvk.conf: sem isso o jogo redefine as opções gráficas ou congela ao trocar de resolução sob o bridge.",
+        ["dxvk.conf lacks {0} or has other values: without them the game resets its graphics options or freezes on a resolution change under the bridge."] =
+            "Falta {0} no dxvk.conf, ou o valor é outro: sem isso o jogo redefine as opções gráficas ou congela ao trocar de resolução sob o bridge.",
+        ["Mods\\Resource.cfg does not read {0}, so the game does not load it. Setup adds the Packages folder lines (a copy is kept as Resource.cfg.apex-backup)."] =
+            "O Mods\\Resource.cfg não lê {0}, então o jogo não o carrega. O instalador adiciona as linhas da pasta Packages (fica uma cópia em Resource.cfg.apex-backup).",
 
         ["Fix settings"] = "Corrigir configurações",
         ["Everything is installed and up to date."] = "Tudo está instalado e atualizado.",
