@@ -203,7 +203,7 @@ float Recv(float3 N, float3 dc, float planeD, float dr) {
 
 // The share of the lamp's ball the point sees: PCSS over the cube map. Blockers are searched on the rim of the cone through
 // which the point sees the ball, at the walk's depths (a disc sized for the nearest blocker put no tap inside the narrow cone of
-// a far one: the share jumped to 1 where the centre ray cleared a jamb, 05/11); the penumbra from their mean distance; then the
+// a far one: the share jumped to 1 where the centre ray cleared a jamb); the penumbra from their mean distance; then the
 // share of taps in that disc that see past every surface (at least the map's half texel and one shadow texel wide). The receiver's depth at
 // each tap is its own plane's along the tap's texel centre, so a receiver is never shadowed by its own surface. The emitter is
 // the part of the ball its centre sees (rt_lamp_proxy.h Visibility): a surface whose plane passes through the ball (a ceiling
@@ -274,10 +274,10 @@ float Shadow(LampRegs lamp, float3 P, float3 N, int kSearch, int kEmit, int kWal
             const float2 sq = Stored(k, o, dq);
             const bool valid = sq.x >= rho; // the lamp's centre sees this point of its ball
             // Behind what the lamp's centre sees: that alone cuts nothing (a segment passing a door jamb lies behind the jamb as the
-            // centre sees it, which lost the outer half of the penumbra, 05/11). A step entering a surface's shadow cuts when the
+            // centre sees it, which lost the outer half of the penumbra). A step entering a surface's shadow cuts when the
             // segment really crosses that surface: the same plane as the step before (a solid wall), or, at that depth along the
             // segment, a surface in front of the point's own plane (that surface, or past a jamb a wall that runs on behind the jamb, hidden from
-            // the centre: the segment meets it too, 05/11) or the plane still seen
+            // the centre: the segment meets it too) or the plane still seen
             float blocked = 0, hPrev = 1e9; // (hPrev: the step before's plane, negative when that step was behind it)
             [loop] for (int m = 0; m < kWalk; m++) {
                 [branch] if (blocked < 0.5) {
@@ -368,7 +368,7 @@ float Fin(float v) { return (v == v && abs(v) < 1e30) ? v : 0.0; }
 // c101.y = 1: the target is a 16-bit float one (a sharper floor, RtLampGpu::SharperFormat): no dither and no pack (Packed)
 float4 gF : register(c101);
 // A composed texel into its target: the dither and the game's 8-bit pack, or (gF.y) the texel as it is: the dither is there for 8
-// bits, and read at 16 texels a metre it showed as a lattice in dim light (05/11)
+// bits, and read at 16 texels a metre it showed as a lattice in dim light
 float4 Packed(float4 c, float dither) {
     if (gF.y > 0.5) return c;
     if (dither != 0) c.rgb = clamp(c.rgb + dither, 0.0, 1.0);
@@ -416,7 +416,7 @@ float4 ScaleOut(float sm, float flags) {
 // lamps' fall-off up the wall, lum(base + lamps here) / lum(base + lamps at the floor line) (1 there, where it is not darker and
 // where no lamp reaches it), in the outdoor scale's .z, which the outside walls' copy multiplies its room's texel by (ShaderPatches
 // IndoorPick rooms). base: the matched top-row texel's light the GPU lamps do not draw (its daylight, baked lights, bounce), so the
-// ratio shapes the lamps' part only: by day (no lamp light) it is exactly 1 and the attic is its room's top texel (16-17-55: the
+// ratio shapes the lamps' part only: by day (no lamp light) it is exactly 1 and the attic is its room's top texel (before, the
 // lamps' ratio alone took the daylight to near black at the top). The map itself holds the texel's light as bit 8 composes it
 // (its room's matched top-row texel carried), so every other reader of the map (the game's own shader, the bloom pass, the
 // class-2 wall blur, a draw whose rooms are not read) sees light, never a ratio
@@ -879,7 +879,7 @@ float4 gW3[4] : register(c104);
 float T3dLamp(float4 L, bool fill, float head, float3 b) {
     float t = 1.0;
     // (a lamp standing on furniture, its fill: true-size edges. The game's band made a 0.36 m table's floor shadow a blob with a
-    // crease at 1.3 m, 05/11; every other lamp keeps the band, the soft furniture shadows of ceiling lamps)
+    // crease at 1.3 m; every other lamp keeps the band, the soft furniture shadows of ceiling lamps)
     // (rt_lamp_blockers.h OccludeFill: the light the floor bounces under the table, more towards the shadow's edge than at its
     // middle. One call in a loop: two inlined exceed ps_3_0's temporary registers)
     const float rise = L.w;

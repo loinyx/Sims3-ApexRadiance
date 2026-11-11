@@ -108,7 +108,7 @@ inline bool SameRgb(const float* a, const float* b) {
 }
 inline bool SolverOwnsAmbient(int state) { return state >= 1 && state <= 3; }
 // The solve's ambient step runs in state 3 only; a room marked (1) or gathered (2) keeps its last ambient until then, so a
-// lamp edit's retake may still write it (a dragged lamp's rooms wait in 1-2 for the whole drag: their fill froze, 03/11)
+// lamp edit's retake may still write it (a dragged lamp's rooms wait in 1-2 for the whole drag: their fill froze)
 inline bool AmbientStepRunning(int state) { return state == 3; }
 // A roofed room whose ambient was never written or was cleared (both colours exactly 0: new, solved while roofless, which
 // skips the ambient step, or invalidated by the game) draws its walls black: marked (1) or gathered (2) until its solve,

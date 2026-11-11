@@ -648,7 +648,7 @@ bool CopyBytes(void* dst, const void* src, size_t n) {
     }
 }
 // A room's reflection cube (what metal shows) is taken only 2 s after its solve starts (0x006B1CA0 with 2.0), and a GPU edit runs no
-// solve: the fridge kept the lamp's old place until 4.5 s after the drop (05/11). Due at the probes' next pass
+// solve: the fridge kept the lamp's old place until 4.5 s after the drop). Due at the probes' next pass
 bool ReflectionDue(const BYTE* room) {
     BYTE *proxy = nullptr, *probe = nullptr, on = 0;
     float now = 0.0f, every = 0.0f;
@@ -660,7 +660,7 @@ bool ReflectionDue(const BYTE* room) {
     return true;
 }
 // During a drag a capture runs whole in one frame: one stage a frame took 0.29 s a cube at the drag's frame rate, and the rooms queued
-// behind each other (a reflection half a second late, 05/11)
+// behind each other (a reflection half a second late)
 void ReflectionPace() {
     static BYTE* const all = reinterpret_cast<BYTE*>(GameAddr::Get(GameAddr::Id::ProbeAllStages));
     static bool set = false;
@@ -1078,7 +1078,7 @@ Delta ComputeDelta(BYTE* room, const RoomRead& rr, Record& r, const char*& why, 
     }
     // (physical indoor lamps) a room 0 drawn physically takes every lamp with a GPU law out of its base and draws it from its law,
     // exit ground included (ExportRoom0): such lamps changing leave nothing to solve. The full solve below wrote the game's room-0
-    // maps over the GPU's at every indoor lamp edit (11:47 recording, 03/11: story 0 room 0 "solved in full (a lamp shining out of
+    // maps over the GPU's at every indoor lamp edit (story 0 room 0 "solved in full (a lamp shining out of
     // a room onto the ground changed)" at each drag; the stairs and objects reading those maps flickered)
     if (r.phys && RtOutdoorLamps::PhysCoversRoom0(room)) {
         bool allLaw = true;
@@ -1776,7 +1776,7 @@ void ProbeStart(unsigned char* room, const RoomRead& rr) {
     if (c.keep) r.geo = RoomGeoKey(room, r.geoParts, c.phys ? &c.tests : nullptr);
     c.phaseStart = PhaseCache::StampOf(ClockNow(), GetTickCount());
     // (physical) its lamps' places read with those records: the kept place anchors the carries of a table dragged with its lamp,
-    // and read at the end it was 0.2-0.5 m ahead of the records (one 78 ms solve, 03/11 17:43): the table's shadow trailed it
+    // and read at the end it was 0.2-0.5 m ahead of the records (one 78 ms solve): the table's shadow trailed it
     c.startPos.clear();
     if (c.phys) {
         uintptr_t list[64];
@@ -2031,7 +2031,7 @@ void ProbeEnd(const BYTE* room) {
                 if (p.texel < n) mv[p.texel] = FromHalf(p.vis), ma[p.texel] = FromHalf(p.all);
         }
         const RtLampModel::Lamp L{law, static_cast<float>(li.mult)};
-        // (11/01 game tests: the solve gave 0.4 to 0.7 of the law, and neither realistic reach indoors nor the cap explained it)
+        // (game tests: the solve gave 0.4 to 0.7 of the law, and neither realistic reach indoors nor the cap explained it)
         // the colour each evaluation left before the game's own wall and object tests: the law apart from those tests
         std::vector<float> hk, wl; // the colour before the game's tests, and after its 2D wall test
         std::vector<const Capture::ProbeHook*> hp; // (the dump) the texel's last evaluation of this lamp
@@ -2570,7 +2570,7 @@ std::shared_ptr<const RtLampGpu::BlockerTable> DrawnTableOf(const std::vector<Ro
     return blk;
 }
 // (live_object_tables) A kept room's table with its objects as they stand now. Only the room's solve read the records again, and it waits
-// for the drag to end: the shadow stayed behind for the whole drag plus 0.48 s (03/11 and 05/11 recordings). The game's move writes a
+// for the drag to end: the shadow stayed behind for the whole drag plus 0.48 s. The game's move writes a
 // blocker's fields in place (0x0069AD80, the disc's 0x0069BB47 and on), so the addresses a solve read keep following the object: no
 // room memory is touched here, and an object gone leaves an old copy (CopyBytes) or, its memory reused by a shape of the same kind,
 // wrong geometry until its solve. shortcut: room 0's table and the directional maps wait for the solve, an object new in the room or
@@ -2843,7 +2843,7 @@ void KeptSelfCheck(const KeptRoom& k) {
 }
 // ---- GPU room lamps, stage 2a: the kept texels' tail, to the texel the game leaves in the map ----
 // The roofed tail's k (FUN_006a31d0 +0x1D0: "mov ecx,0x011D0BA0" (Steam 1.67.2), +0x1DD: "call 0x00F626F0" (mov eax,ecx; ret),
-// +0x1F1: "movss xmm0,[eax]"; dumpbin 01/11): the float at that immediate. POD (SEH)
+// +0x1F1: "movss xmm0,[eax]"; dumpbin): the float at that immediate. POD (SEH)
 bool ReadToneK(float& k) {
     const uintptr_t f = GameAddr::Get(GameAddr::Id::WallSolve);
     if (!f) return false;
@@ -3293,11 +3293,11 @@ void KeepEnd(const BYTE* room) {
     if (g_keptClear.exchange(false)) ClearKept();
     // (stage 2b) the class the solve wrote is the one at its start: a room whose class changed meanwhile (a floor switch sends
     // it to the shown story's class) wrote maps of the other class's size; it is not kept (a 64 x 64 class-0 solve was kept as
-    // class 2, 02/11)
+    // class 2)
     if (c.ok && rr.cls != r.cls) {
         if (KeptLog()) LOG_INFO(std::format("[GpuRoomLamps] Story {} room {} class {}: not kept (its class was {} when its solve started)", rr.story, rr.id, rr.cls, r.cls));
         // (a lot made active solves its rooms at class 0 and shows them at class 2 meanwhile: a room no lamp lists was solved
-        // again only by an edit's fallback, 11 s after it in the 21:18 log of 02/11, refusing every physical edit until then;
+        // again only by an edit's fallback, 11 s after it in a log, refusing every physical edit until then;
         // a room gone to class 0, its lot no longer lit at the high quality, keeps nothing worth a solve)
         if (rr.cls != 0 && c.phys) NoteUnkept(room); // (Replica refuses no edit for a room it does not list: no load spike)
         return;
@@ -3646,7 +3646,7 @@ bool AtLockStep(unsigned char* room, bool gather) {
             const Delta d = ComputeDelta(room, rr, r, why, plan);
             if (d == Delta::NoChange) {
                 why = "no light of its list changed";
-                // (10/11) its kept solve written back instead of the game's full solve: a camera pan to the next lot and back makes
+                // its kept solve written back instead of the game's full solve: a camera pan to the next lot and back makes
                 // the game free and recreate this story's maps filled with 0 and solve room 0 again with nothing changed (8 such
                 // solves of about 3.5 s in a recording). Every kept texel is written in the solve's order (the last write of a texel
                 // two samples share stays), the class-2 walls through their blocks' blur as a delta does; a wall block that cannot
@@ -3717,7 +3717,7 @@ void SolveEnd(unsigned char* room) {
     if (!room) return;
     // (physical) Apex's last directional writes go back right after the finalize's unlock copied the game's levels over them (the
     // room's own carry, its siblings'), after DropHeld below: from BasisDuePhys alone they waited for the next room update with
-    // the maps free, and furniture showed the game's level for frames, A-B-A-B at the settle (23:07 videos of 03/11)
+    // the maps free, and furniture showed the game's level for frames, A-B-A-B at the settle
     struct CarryNow {
         ~CarryNow() {
             if (!g_capture.load(std::memory_order_relaxed) || !g_physical.load(std::memory_order_relaxed) || !LevelLightShare::RoomMapsFree()) return;
@@ -4270,8 +4270,8 @@ void SampleEnd(unsigned char* room, const void* sample, const char* flags, const
         if (!g.tex) return Fail("a map's texture is not known");
     }
     // the batch: the vector the solve's callers pass (rows lit beyond a wall's edges are another vector: not kept, but in a
-    // physical capture of a room > 0, which keeps no parts and redoes no batch, a batch of its own between two batches (the 21:19
-    // log of 02/11: 4 rooms of a lot never kept, so every physical edit of that lot was refused). One inside a batch would break
+    // physical capture of a room > 0, which keeps no parts and redoes no batch, a batch of its own between two batches (a log:
+    // 4 rooms of a lot never kept, so every physical edit of that lot was refused). One inside a batch would break
     // that batch's span (its sphere, the dump's batchOf): not kept. Room 0's batches feed the outdoor delta's in-solve redo: strict
     uintptr_t vb = 0, ve = 0;
     const uintptr_t sp = reinterpret_cast<uintptr_t>(sample);
@@ -4422,7 +4422,7 @@ void RefreshLotLamps() {
     if (!g_lotLampsDirty.exchange(false) && now - g_lotLampsAt < kLotLampsMs) return;
     g_lotLampsAt = now;
     const uintptr_t tracker = RtOutdoorLamps::ActiveTracker();
-    // (a lot no longer lit at the high quality unregisters its lamps: 175 "left" at once in the 21:19 log of 02/11 as the camera
+    // (a lot no longer lit at the high quality unregisters its lamps: 175 "left" at once in a log as the camera
     // moved off it, each rewriting the directional maps; the last snapshot stays until it is active again)
     uintptr_t active[4];
     const int na = std::max(LevelLightShare::ActiveLotTrackers(active, 4), 0);
@@ -4443,7 +4443,7 @@ void RefreshLotLamps() {
     }
     std::lock_guard<std::mutex> lk(g_lotLampsMx);
     // (a lamp of the last snapshot the registry lacks now stays in it for kLotGoneMs: the registry drops a lamp for a few
-    // frames while it is dragged and every lamp of the lot while build mode edits it (02/11 log: 709 lamps "left" in 3 min,
+    // frames while it is dragged and every lamp of the lot while build mode edits it (a log: 709 lamps "left" in 3 min,
     // 175 at once within 50 ms, none deleted), which took them off every map and rewrote the directional maps without them)
     PhysLampPick::CarryMissing(g_lotLamps, out, tracker == g_lotLampsTracker, now, kLotGoneMs, g_lotMissing);
     if (out == g_lotLamps) return;
@@ -5093,7 +5093,7 @@ const char* WriteBasisTexels(uint64_t key, const KeptRoom& k, const Want& want, 
     const size_t n = k.basis.size();
     std::vector<BasisTexelWrite> t(n);
     const long left0 = left;
-    double sumNew = 0.0, sumGame = 0.0; // (evidence, 03/11: furniture brighter for seconds after an edit) RGB levels written vs the solve's
+    double sumNew = 0.0, sumGame = 0.0; // (evidence: furniture brighter for seconds after an edit) RGB levels written vs the solve's
     const bool trace = Recorder::Verbose(); // (the sums feed only the [BasisRatio] trace line)
     const auto rgb = [](uint32_t c) { return static_cast<double>(((c >> 16) & 0xFF) + ((c >> 8) & 0xFF) + (c & 0xFF)); };
     for (int m = 0; m < 4; m++) {
@@ -5258,7 +5258,7 @@ bool g_pbBusy = false;                          // (light tree thread) a job han
 std::unique_ptr<PhysBasisJob> g_pbDone;         // (light tree thread) a finished job waiting for the working maps
 std::set<uint64_t> g_pbRedo;                    // (light tree thread) rooms written physically, kept again since
 // The game marks a room's rigs only for a lamp of that room: furniture of the rooms taking a lamp through an arch kept its old rig
-// until the 5 s sweep (the fridge lit 4.5 s after the lamp had left, video of 04/11). After a taken edit, at most every 100 ms and
+// until the 5 s sweep (the fridge lit 4.5 s after the lamp had left). After a taken edit, at most every 100 ms and
 // so also after the last step of a drag: the rooms listing it and every room of its story (one it comes into lists it only at
 // its next gather: ObjectLightBridge CrossCandidates). Light tree thread
 struct RigTail {
@@ -5288,8 +5288,8 @@ struct ModelPart {
 std::map<std::pair<uint64_t, uintptr_t>, ModelPart> g_modelParts;
 // (light tree thread) per kept room: its solve (basisId) and the records carried since, (record, dx, dz) (StartPhysBasis)
 std::unordered_map<uint64_t, std::pair<uint32_t, std::vector<std::array<float, 3>>>> g_basisCarried;
-// The solve wrote its own levels (about 2x the physical ones in the 03/11 stairwell), drawn until the redo's write lands a worker
-// trace later: the stairs flashed for 1 to 3 frames on each solve during a drag (video of 03/11). Apex's last write goes back at
+// The solve wrote its own levels (about 2x the physical ones in a stairwell), drawn until the redo's write lands a worker
+// trace later: the stairs flashed for 1 to 3 frames on each solve during a drag). Apex's last write goes back at
 // the end of this room update instead (WritePhysCarry) when the solve sampled the same texels; the redo still refines it
 void NotePhysBasisKept(uint64_t key, const KeptRoom* prev, const KeptRoom& k) {
     const auto it = g_basisNow.find(key);
@@ -5303,7 +5303,7 @@ void NotePhysBasisKept(uint64_t key, const KeptRoom* prev, const KeptRoom& k) {
     if (last.size() != k.basisGame.size()) return;
     CarryBasis(last.data(), prev->basisGame.data(), k.basisGame.data(), last.size());
     // ... except where a record that moved, came or went between the solves may shade a sample from a lamp: there the last write
-    // held the old table's shadow, left on furniture and stairs at its old place after the drop (15:25 of 03/11); the new solve's
+    // held the old table's shadow, left on furniture and stairs at its old place after the drop); the new solve's
     // value until the redo. Each lamp is tested along its way between the solves and from where the last write drew it (a lamp
     // the solves did not list, or one that left the room during the drag, included)
     size_t staleN = 0;
@@ -5577,7 +5577,7 @@ void StartPhysBasis(std::map<uintptr_t, BasisEdit>&& edits) {
                 toLot(l.world, l.lot);
                 // A moved lamp's part as the room's solve will add it at this place, by the list of the room's last gather: the
                 // furniture's tone during a drag is then the one after it. Modelled, it stepped -23% and +27% at the keep in story 1
-                // room 2 (a lamp through its arch: the share depends on the place; 04/11). Only a lamp the list holds,
+                // room 2 (a lamp through its arch: the share depends on the place). Only a lamp the list holds,
                 // indoors on the room's story: for any other the solve's own classes (made at the gather) do not describe it. A still
                 // lamp takes it too where its kept pass is unknown at a lit sample
                 const auto kl = std::find_if(k.lamps.begin(), k.lamps.end(), [&](const KeptLamp& x) { return x.light == l.light; });
@@ -5634,7 +5634,7 @@ void StartPhysBasis(std::map<uintptr_t, BasisEdit>&& edits) {
         job->rooms.push_back(std::move(r));
     }
     // A room none of whose lamps needs the worker is written now, in the update of the edit: through the worker the furniture followed
-    // the lamp 40-100 ms behind the floors (04/11); a room just kept goes through it (its scale is learnt there)
+    // the lamp 40-100 ms behind the floors); a room just kept goes through it (its scale is learnt there)
     if (LevelLightShare::RoomMapsFree()) {
         std::vector<PhysBasisRoom> now;
         const auto direct = [](const PhysBasisRoom& r) {
@@ -6094,16 +6094,16 @@ std::string PhysCoverWhy(uintptr_t tracker, uintptr_t light, PhysCover& o) {
                     if (const auto it = g_keptRefused.find(key); it != g_keptRefused.end()) fits = g_keptBytes + it->second <= kMaxKeptBytes;
                 }
                 f.kept = k && k->physical;
-                // (a room solved before its lot became active was never kept, and nothing else sends it again: every edit of the
-                // 11:59 log of 03/11 was refused for it; SolveUnkept's 3 sends a minute bound this)
+                // (a room solved before its lot became active was never kept, and nothing else sends it again: every edit of a
+                // lamp-edit log was refused for it; SolveUnkept's 3 sends a minute bound this)
                 if (!f.kept && fits && rr.cls > 0 && rr.cls <= 2 && rr.lot == ActiveLot()) NoteUnkept(room);
-                // (kept again, relit next frame: 42 refusals of 03/11; a fresh keep's maps are drawn by the next relight, so its first
-                // second counts as drawn: refused steps 70-150 ms after a keep held the 11:59 drag of 03/11)
+                // (kept again, relit next frame: 42 refusals in one log; a fresh keep's maps are drawn by the next relight, so its first
+                // second counts as drawn: refused steps 70-150 ms after a keep held a drag)
                 f.drawn = f.kept && (!k->maps || GpuRoomLamps::DrawnAny(room, k->maps) || GetTickCount() - k->keptAt < 1000);
                 f.baked = f.kept && std::find(k->baked.begin(), k->baked.end(), light) != k->baked.end();
                 // (an object moved in the room, its occluder mark dropped as the lamp's own: the side table a lamp stands on, dragged
                 // with it, kept its old blockers in the GPU's 3D test; the room's records follow the object before its solve). Its
-                // solve takes them again, 3 a minute at most; the edit is taken meanwhile (refused, every edit of 03/11 went to the solves)
+                // solve takes them again, 3 a minute at most; the edit is taken meanwhile (refused, every edit of a session went to the solves)
                 if (f.kept && k->roomGeo) {
                     uint64_t now[3] = {};
                     if (RoomGeoKey(static_cast<const BYTE*>(room), now) && PhysLampPick::BlockersKey(now) != k->roomGeo) NoteUnkept(room);
@@ -6126,7 +6126,7 @@ bool TakesLampEditPhys(uintptr_t tl, uintptr_t light, const char* kind, bool set
     const auto refuse = [&](const std::string& why) {
         if (dry) return false;
         c_physRefused.fetch_add(1, std::memory_order_relaxed);
-        // (a lamp of another lot: counted only; at 6:00 a neighbour's 100 street lamps used up the log's line budget)
+        // (a lamp of another lot: counted only; at dawn a neighbour's 100 street lamps used up the log's line budget)
         if (KeptLog() && why != "not a lamp of the active lot") LOG_INFO(std::format("[GpuRoomLamps] physical {}: lamp {:08X} left to the room solves ({})", kind, light, why));
         {
             std::string cls = why; // (the reason without the room it names)
@@ -6155,7 +6155,7 @@ bool TakesLampEditPhys(uintptr_t tl, uintptr_t light, const char* kind, bool set
     const bool move = std::strncmp(kind, "move", 4) == 0;
     QueueBasis(light, kind, std::strcmp(kind, "switch off") == 0, move, o.basisRooms);
     // The game marks a room's rigs only for a lamp of that room: furniture of the rooms taking this lamp through an arch kept its old
-    // rig until the 5 s sweep (the fridge lit 4.5 s after the lamp had left, video of 04/11). Every 100 ms of a drag, those listing
+    // rig until the 5 s sweep (the fridge lit 4.5 s after the lamp had left). Every 100 ms of a drag, those listing
     // it and every room of its story (one it comes into lists it only at its next gather: ObjectLightBridge CrossCandidates)
     g_rigTail.ids = o.ids, g_rigTail.tracker = tracker, g_rigTail.story = story, g_rigTail.due = true;
     if (!move) RegatherRigTail();
@@ -6716,7 +6716,7 @@ bool BuildKeptMap(const void* room, int cls, uint32_t version, int m, RtLampGpu:
         const auto sub = [&](uint32_t src, int x, int y) {
             for (int q = 0; q < 4; q++) {
                 RtLampGpu::TexelVertex v = texel(src, 2 * x + (q & 1), 2 * y + (q >> 1));
-                // (each sub-texel its own: the parent's in all four survived the read at twice the size as 12.5 cm blocks in dim light through an arch, 05/11; a 16-bit target takes none, Packed)
+                // (each sub-texel its own: the parent's in all four survived the read at twice the size as 12.5 cm blocks in dim light through an arch; a 16-bit target takes none, Packed)
                 if (v.p[3] != 0.0f) v.p[3] = RoomMapDither::Offset(2 * k.texels[src].x + (q & 1), 2 * k.texels[src].y + (q >> 1)) / 255.0f;
                 v.mask[0] = 2.0f * accX(src) + static_cast<float>(q & 1), v.mask[1] = 2.0f * accY(src) + static_cast<float>(q >> 1);
                 d.texelsHi.push_back(v);
@@ -7114,7 +7114,7 @@ bool ExportRoom0(const void* room, int cls, Room0Export& out, bool physical) {
                           !kl.colourOnly;
             }
         // (physical: always, so a fresh exit lamp, or one its solve did not take as one, lights the ground through the openings
-        // its shadow tile sees; 02/11: lot C49C's solves kept no exit part, so no indoor lamp ever lit its ground)
+        // its shadow tile sees; lot C49C's solves kept no exit part, so no indoor lamp ever lit its ground)
         bool exits = physical || std::any_of(r.kept0.begin(), r.kept0.end(), [](const KeptLamp& k) { return k.exit; });
         for (size_t j = 0; j < r.lamps.size(); j++) exits = exits || (phys[j] && r.lamps[j].exit);
         if (exits)

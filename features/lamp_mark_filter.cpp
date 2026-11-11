@@ -314,14 +314,14 @@ void OccluderObject(uintptr_t entry, uint64_t& id, uintptr_t& shape) {
 // GPU room lamps (developer): FUN_006c7250 updates the occluder entries (tl+0xD4, the NewOccluder entries flagged with the
 // light entries by FUN_006c4cf0) before the light entries (tl+0x90; dumpbin 2026-11-02), so a lamp's switch or value edit
 // marks the room under its object here before LampMarkFilter takes the edit itself; the game then gathers that room and the
-// changed-room walk sends the rooms of other stories taking its lamps (a switch off taken at 11:55:20: story 2 room 5 and
+// changed-room walk sends the rooms of other stories taking its lamps (a switch off: story 2 room 5 and
 // story 1 room 2 solved before the settle, their kept solves replaced). True: the occluder point is within kOwnObjectM of
 // such a lamp on story tl whose values differ from its last update, did not move, and whose edit OutdoorDelta would take now
 // (TakesLampEdit dry). A value edit it then refuses still marks the lamp's room through the lamp entry update.
 // UNVERIFIED in game: that the message handler changes what Signature reads before this update (the object record's
 // +0x90 bits, the enable bit), and that the occluder point is the lamp's own object.
-// Physical indoor lamps (stage 5): a lamp object carries no 3D blocker of the rooms' records (the room lamp probe's dumps of
-// 02/11: of 235 lamps listed by 77 rooms with 3D records, 231 lie outside every record's sphere; the other 4 sit on or beside
+// Physical indoor lamps (stage 5): a lamp object carries no 3D blocker of the rooms' records (the room lamp probe's dumps:
+// of 235 lamps listed by 77 rooms with 3D records, 231 lie outside every record's sphere; the other 4 sit on or beside
 // furniture whose record holds them, none a record of the lamp's own), so its occluder mark only sends its room to a solve. A
 // physical move (into another room too) and a new lamp whose edit OutdoorDelta takes drop it as well: a new lamp is a light
 // of the story's registry with no update seen yet (UNVERIFIED that it is registered when its object's occluder updates; the
@@ -363,7 +363,7 @@ thread_local bool t_onFurniture = false; // (OccDecideImpl) the occluder moved w
 bool OwnObjectEditTaken(uintptr_t tl, float x, float z, bool hadPoint, const float occWas[2]) {
     const bool physical = OutdoorDelta::RoomLampPhysical();
     // (physical) TakesLampEditPhys refuses every lamp of a lot that is not the active one: no scan of its lamps for each occluder
-    // mark (a neighbour's 60 objects updated at 6:00 each scanned every lamp of its story)
+    // mark (a neighbour's 60 objects updated at dawn each scanned every lamp of its story)
     if (physical && TrackerOf(tl) != RtOutdoorLamps::ActiveTracker()) return false;
     const float occNow[2] = {x, z};
     struct Pending { uintptr_t light; bool wasOn, moved; int room; float x, z; };
@@ -440,7 +440,7 @@ void __fastcall RemovalHook(uint8_t* level, void* edx, uint32_t idLo, uint32_t i
     OutdoorDelta::NoteLightObjectRemoved();
 }
 // An occluder's point is in its lot's space (the moving occluder at (20.00 24.10) under a lamp at (849.07 1233.74) in the world,
-// the recording of 03/11), the lamps' positions in the world's: taken to the world (the lot's rows, mgr+0xE0, a lot turning about
+// a drag), the lamps' positions in the world's: taken to the world (the lot's rows, mgr+0xE0, a lot turning about
 // y only) before the own-object tests compare them. Until then they never matched: each occluder mark of a dragged lamp's object
 // solved its room (121 in that recording) and the solves' maps showed between the GPU's
 uintptr_t ManagerOf(uintptr_t tl) { // POD (SEH)
@@ -478,7 +478,7 @@ bool OccDecideImpl(uintptr_t tl, int room, uintptr_t entry) {
             std::lock_guard<std::mutex> lk(g_mx);
             if (g_occPoint.size() > 65536) g_occPoint.clear();
             const auto [it, fresh] = g_occPoint.try_emplace(entry, OccPoint{x, z, id});
-            // (an entry made again at a freed one's address holds another object id: no move for the carry. 03/11 14:36: 148 entries
+            // (an entry made again at a freed one's address holds another object id: no move for the carry: 148 entries
             // made again at once read as moves of 1 to 229 m. `had` stays the address's, as before: its far jump keeps its mark)
             had = !fresh;
             was[0] = it->second.x, was[1] = it->second.z;
@@ -746,9 +746,9 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
     // `user` = a value a player or a Sim sets (colour, intensity, on / off), sent to the other stories at once; `pure` = the
     // same room, on or off as before (a move or a value change): a solve in progress keeps going, the mark is held;
     // `stayed` = the same room (switched too): the lamp is registered there, its rooms gather at once
-    // A lamp of a lot that is not being played (a neighbour's street lamps switching at 6:00, 100 in 3 frames) is no player's
+    // A lamp of a lot that is not being played (a neighbour's street lamps switching at dawn, 100 in 3 frames) is no player's
     // edit: its marks go through at the game's pace, as at dusk. Taken as edits they started a lamp drag, the edit hold and
-    // the quick pass for the whole world (frames of 150 ms at 6:00, recording of 09/11). The lot's safety net (LotDue) stays
+    // the quick pass for the whole world (frames of 150 ms at dawn). The lot's safety net (LotDue) stays
     const bool played = LevelLightShare::PlayedLotOfTl(tl) || TrackerOf(tl) == RtOutdoorLamps::ActiveTracker();
     bool same = false, edit = false, user = false, pure = false, stayed = false;
     bool autoSelf = false, switchedOn = false; // a light switching itself on (no edit); switched on in place (dusk below)
@@ -892,7 +892,7 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
     }
     if (same) {
         // off: every mark goes through (the values are still followed), but not a lamp the physical mode's GPU took lately (its drag),
-        // whose solve finishes mid-drag over the GPU's maps (16:25 recording of 03/11: 36 such marks of the dragged lamp's rooms)
+        // whose solve finishes mid-drag over the GPU's maps (36 such marks in one drag of the dragged lamp's rooms)
         if (PhysLampPick::MarkUnchanged(g_on.load(std::memory_order_relaxed),
                                         OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical() && LampMarkFilter::HandledLately(light, 1500))) {
             g_off.fetch_add(1, std::memory_order_relaxed);
@@ -1192,7 +1192,7 @@ void OnPresent(float nightLevel) {
         if (sent >= 0) g_lotRefreshes.fetch_add(1, std::memory_order_relaxed);
     }
     // (another lot's rigs: once its rooms are solved, LevelLightShare's g_rigWait; this world-wide regather at once was for the
-    // player's edits, and a neighbour's lamps at 6:00 regathered every rig of the world)
+    // player's edits, and a neighbour's lamps at dawn regathered every rig of the world)
     if (playedRun) {
         ObjectLightBridge::RequestRigRefresh();
         // RelightLot watches completion and retains its own bounded fallback.

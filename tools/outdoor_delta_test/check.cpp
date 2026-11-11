@@ -904,7 +904,7 @@ void OpenAboveChecks() {
     OpenAbove::Classify(6, 6, room, [](int x, int z, int) { return x <= 3 && z >= 2; }, [](int, int) { return true; }, [](int, int) { return true; }, open);
     Check(open == std::vector<int>{2}, "open to above: a room floored above but along one wall keeps its ceiling");
     // a room on half a tile cut by a diagonal (its quadrants 2 and 3 of tile (1, 1), diagonal 0 parting them from 0 and 1), no floor
-    // over it and the story above's wall only along that diagonal (13-50-15: lot C49C's room 6 runs along diagonals): open with
+    // over it and the story above's wall only along that diagonal (lot C49C's room 6 runs along diagonals): open with
     // the diagonal counted as its own wall, closed when only the tile sides are read
     {
         const auto half = [](int x, int z, int q) { return x == 1 && z == 1 && (q == 2 || q == 3) ? 1 : 0; };
@@ -917,7 +917,7 @@ void OpenAboveChecks() {
 }
 
 // ---- A TubeLight's law (gpu_lamp_law.h Tube) against the game's code: 0x006BFA70 over 0x006BD100 as dumpbin gives them (Steam
-// 1.67.2, read 02/11), instruction by instruction with the same SSE approximations (rsqrtps + 2 Newton steps, rcpps + 1) ----
+// 1.67.2), instruction by instruction with the same SSE approximations (rsqrtps + 2 Newton steps, rcpps + 1) ----
 namespace GameTube {
 inline float Rsqrt2(float d2) { // 0x006BD181 .. 0x006BD1D9
     const float y0 = _mm_cvtss_f32(_mm_rsqrt_ss(_mm_set_ss(d2)));
@@ -1000,7 +1000,7 @@ void TubeChecks() {
 }
 
 // ---- The area lights' law (gpu_lamp_law.h Area) against the game's code: 0x006BFBA0 (rectangle), 0x006BFDC0 with 0x006BD7C0
-// (disc), both over 0x006BFAF0, as dumpbin gives them (Steam 1.67.2, read 02/11): sqrtps for |D|, rcpps + 1 Newton step for
+// (disc), both over 0x006BFAF0, as dumpbin gives them (Steam 1.67.2): sqrtps for |D|, rcpps + 1 Newton step for
 // 1 / (k1 d^2) and the disc's 1 / |xy|, rsqrtps + 2 for the facing ----
 namespace GameArea {
 // the light at p of an area at A with axes U (+0x170), V (+0x190), N (+0x180), e0 (+0x1A0), e1 (+0x1A4)
@@ -1191,7 +1191,7 @@ void ProxyOpenTopsChecks() {
     RtLampProxy::Build(lot, noIds, true);
     Check(noIds.openTops == 0 && noIds.roofTris == before.roofTris && before.openTops == 0 && before.roofTris == after.roofTris + quads,
           "physical proxy: the outdoor lamps' build (ceilingsOpen off) and a story with no room ids keep every ceiling");
-    // the walls stories 2 and 3 really have (the probe's grids of 02/11 21:02, runs of tile edges: x, Z, length along x;
+    // the walls stories 2 and 3 really have (the probe's grids, runs of tile edges: x, Z, length along x;
     // X, z, length along z): story 2's rooms 5, 6 and 7 stand under a sloped roof with story 3's walls on part of their
     // outlines only, and story 1's room 8 is a single-storey wing beside story 2's floored rooms
     {
@@ -1252,8 +1252,8 @@ void ProxyOpenTopsChecks() {
 }
 
 // ---- The space rooms open to the story above continue into (RtLampProxy::InsideOf / InsideAt) over lot C49C's F8 maps and story
-// 3's real walls (the probe's grids of 02/11, as ProxyOpenTopsChecks): story 2's rooms 5 and 7 open under the sloped roof, and the
-// floored part of story 3 over room 12 beside them under the same roof (09/11: its walls and floor took the night sky) ----
+// 3's real walls (the probe's grids, as ProxyOpenTopsChecks): story 2's rooms 5 and 7 open under the sloped roof, and the
+// floored part of story 3 over room 12 beside them under the same roof (its walls and floor took the night sky) ----
 // The room texel a texel of the space over an open room shows (RtLampProxy::TopMatch): a wall the room's top-row texel facing
 // its way (not the nearer one behind the wall), a floor the nearest in plan; none without a top row
 void CarryChecks() {
@@ -1515,7 +1515,7 @@ void PhysPickChecks() {
     }
     {
         using PhysLampPick::OccMove;
-        // (03/11 13:56 recording) a table dragged with its lamp moves one occluder entry, 57B1E040, along with the head
+        // (a recording) a table dragged with its lamp moves one occluder entry, 57B1E040, along with the head
         const OccMove tableDrag[] = {{0x57B1E040, 1000, 854.55f, 1237.48f}, {0x57B1E040, 1100, 854.43f, 1237.63f}};
         const OccMove stale[] = {{0x10, 100, 5.0f, 5.0f}, {0x20, 110, 5.0f, 5.0f}};
         const OccMove far[] = {{0x10, 100, 5.0f, 5.0f}, {0x20, 1010, 9.0f, 5.0f}};
@@ -1525,7 +1525,7 @@ void PhysPickChecks() {
               "physical pick: a table dragged with its lamp (one occluder entry moving) carries its furniture; old or far moves do not count");
         // (ShapeMoved, the carry's decision) the table's record names its object by its first blocker (0x5000): the table dragged
         // moves an entry with that shape, so its record is carried. The lamp dragged alone moves no entry of the table: an entry of
-        // another object by the head (made again at a freed address, 14:36 of 03/11, now no move at all) or an old move of the
+        // another object by the head (made again at a freed address, in another recording, now no move at all) or an old move of the
         // table leaves it in place; an unknown shape never carries
         const OccMove table[] = {{0x57B1E040, 1100, 854.43f, 1237.63f, 0x5000}};
         const OccMove other[] = {{0x3B1B6390, 1100, 846.82f, 1235.04f, 0x7000}, {0x57B1E040, 400, 854.43f, 1237.63f, 0x5000}};
@@ -1735,7 +1735,7 @@ void PhysPickChecks() {
     }
 }
 // (sun_lamp_level) The lamp terms' level through a dawn and a dusk: the sky's level turns in half a second of frame time at any clock, the
-// sun's part of the game's curve moves with the clock. The sun's height from the 05/11 log's snapshots (-21.9 at 4.443 h, -6.9 at 5.508 h)
+// sun's part of the game's curve moves with the clock. The sun's height from a log's snapshots (-21.9 at 4.443 h, -6.9 at 5.508 h)
 void DawnChecks() {
     using namespace TerrainLightingPolicy;
     constexpr float kPi = 3.14159265f, kPerHour = 15.0f / 1.065f, kClockPerSec = 0.015f, kStep = kClockPerSec / 60.0f; // (a 60 fps frame, the log's clock)
@@ -1778,7 +1778,7 @@ void SeatChecks() {
         k.f[0xD0 / 4] = k.f[0xD8 / 4] = hu, k.f[0xD4 / 4] = k.f[0xDC / 4] = hw;
         return k;
     };
-    // a box-type armchair: seat and back as one slant, a back sheet, two arm sheets at the box's full height (record 10 of the 19-37-16 scene)
+    // a box-type armchair: seat and back as one slant, a back sheet, two arm sheets at the box's full height (record 10 of a recorded scene)
     const float s = 0.7071068f;
     const auto seat = [&](float armTop) {
         RoomLightTests::Record r;
@@ -1895,7 +1895,7 @@ void SeatChecks() {
         m.clear();
         Check(LiveMoves(std::vector<RoomLightTests::Record>{odd}, [&](uintptr_t at, Blocker& k) { k = oddMem[at - 1]; return true; }, m) == 0, "live table: an unknown kind's bytes are not a move");
     }
-    // LiveDue: a table dragged with its lamp, 60 frames a second at 6 m/s (23-38-26 recording of 05/11): the table's disc, the lamp 0.57 m over it
+    // LiveDue: a table dragged with its lamp, 60 frames a second at 6 m/s (a recording): the table's disc, the lamp 0.57 m over it
     {
         RoomLightTests::Record t;
         Blocker top{};
@@ -2179,7 +2179,7 @@ void BlockerTableChecks() {
         const float bySofa[3] = {0.0f, 0.86f, 0.0f};
         Check(stands(onTop) && !stands(over) && !stands(beside) && !stands(below) && !RoomLightTests::StandsOn(sofa, bySofa),
               "stands on: a table lamp yes; a chandelier over the table, a lamp beside or under it, or beside a sofa no");
-        // ([CarryTable], CarryOf) the 16:25 recording of 03/11: the lamp stood on the floor, 0.54 m up, under no top (no record
+        // ([CarryTable], CarryOf) a recording: the lamp stood on the floor, 0.54 m up, under no top (no record
         // decided, the log's "shape 00000000"); on its table it is carried only while the table's own entry moved
         Check(PhysLampPick::CarryOf(stands(below), false) == 0 && PhysLampPick::CarryOf(stands(onTop), true) == 2 &&
                   PhysLampPick::CarryOf(stands(onTop), false) == 1 && PhysLampPick::CarryOf(stands(over), true) == 0,
@@ -2368,7 +2368,7 @@ void BlockerTableChecks() {
     }
 }
 
-// ---- (physical) the instant day/night switch: the cache rule (PhaseCache) over the 16-54-11 and 17-11-35 sessions' switches ----
+// ---- (physical) the instant day/night switch: the cache rule (PhaseCache) over two recorded sessions' switches ----
 namespace PC = OutdoorDeltaModel::PhaseCache;
 struct PcRoom {
     size_t bytes = 0;
@@ -2386,7 +2386,7 @@ struct Session {
     std::vector<std::vector<uint32_t>> kept;
     uint32_t end;
 };
-constexpr uint32_t kFadeMs = 600, kModeLead = 300; // (the window lights' mode change ~0.2-0.3 s before the level moves: 187-219 ms in 17-11-35's log)
+constexpr uint32_t kFadeMs = 600, kModeLead = 300; // (the window lights' mode change ~0.2-0.3 s before the level moves: 187-219 ms in the second session's log)
 float SessionLevel(const Session& ss, uint32_t t) {
     float level = 0.0f;
     for (const Fade& f : ss.fades) {
@@ -2403,7 +2403,7 @@ struct SwitchResult {
 // The light tree thread's part (PhaseSwitchDue, KeepEnd) driven by the session: the game's solves as its log kept them (each begun
 // 250 ms before), the rooms Apex sends at a departure solved from 0.9 s after it, 250 ms apart, in turn (and once more when that
 // solve began in the fade). lampsAsKept(room, t): whether the room's lamps are as its cached solve kept them at the swap
-// 16-54-11 (16:52:00 + ms): to night at the load (8.3-8.86 s), to day 65.88, to night 95.78, to day 102.47, to night 134.09, to
+// The first session (ms from its minute): to night at the load (8.3-8.86 s), to day 65.88, to night 95.78, to day 102.47, to night 134.09, to
 // day 137.13; the 13 rooms of lot CF2DEA20, the first five kept only in the load's fade
 const Session kSession1654 = {
     {{8300, 0.0f, 1.0f}, {65877, 1.0f, 0.0f}, {95778, 0.0f, 1.0f}, {102469, 1.0f, 0.0f}, {134086, 0.0f, 1.0f}, {137125, 1.0f, 0.0f}},
@@ -2419,7 +2419,7 @@ const Session kSession1654 = {
         {10871, 73764, 81722, 99807, 114145, 135038, 139896},                                                 // s2r12
     },
     160000};
-// 17-11-35 (17:12:00 + ms): night from the load, to day 104.69, to night 119.10, to day 121.63, to night 153.69 (the departure
+// The second session (ms from its minute): night from the load, to day 104.69, to night 119.10, to day 121.63, to night 153.69 (the departure
 // lines); the same 13 rooms, the first five solved first at the switch to day
 const Session kSession1711 = {
     {{0, 1.0f, 1.0f}, {104687, 1.0f, 0.0f}, {119102, 0.0f, 1.0f}, {121628, 1.0f, 0.0f}, {153690, 0.0f, 1.0f}},
@@ -2643,21 +2643,21 @@ void PhaseCacheChecks() {
         // lamps switched since (a dusk switch not yet back as kept): those rooms wait with that reason, the others swap
         std::vector<SwitchResult> l = ReplaySession(kSession1654, [](int room, uint32_t t) { return !(room < 3 && t > 100000 && t < 110000); }, filled, dropped);
         Check(l.size() == 6 && l[3].swapped == 10 && l[3].why[PC::kLampState] == 3, "day/night cache: a lamp not as its cached solve kept it: the room waits, with the reason");
-        // 17-11-35: the switch's own solves (begun in its fade, the five Apex sent among them) are cached for the next switch
+        // the second session: the switch's own solves (begun in its fade, the five Apex sent among them) are cached for the next switch
         std::vector<SwitchResult> q = ReplaySession(kSession1711, [](int, uint32_t) { return true; }, filled, dropped);
         for (const SwitchResult& sw : q) {
-            std::printf("  17-11-35 switch to %s: %d rooms, %d swapped, %d solved, %d not solved, %d sent by Apex;", sw.to == PC::kNight ? "night" : "day", sw.rooms, sw.swapped,
+            std::printf("  second session, switch to %s: %d rooms, %d swapped, %d solved, %d not solved, %d sent by Apex;", sw.to == PC::kNight ? "night" : "day", sw.rooms, sw.swapped,
                         sw.solved, sw.never, sw.sent);
             for (const auto& [w, k] : sw.why) std::printf(" %s x%d;", w.c_str(), k);
             std::printf("|\n");
         }
         bool all = q.size() == 4;
         for (size_t i = 1; i < q.size(); i++) all = all && q[i].swapped + q[i].reasoned == q[i].rooms && q[i].rooms == 13;
-        Check(all, "day/night cache: 17-11-35, from the second switch on every room is swapped or has its reason");
+        Check(all, "day/night cache: second session, from the second switch on every room is swapped or has its reason");
         // (shown at once: swapped, or the game's own solve of the switch already landed by the arrival)
         const auto atOnce = [&](size_t i) { return q[i].swapped + q[i].why["its solve since the switch landed"]; };
         Check(q.size() == 4 && q[0].swapped == 0 && atOnce(1) == 9 && atOnce(2) == 12 && atOnce(3) == 13,
-              "day/night cache: 17-11-35, the fade's solves cached: 9, 12 and 13 of 13 rooms at once from the 2nd switch (the game's log: 0, 5 and 3 swapped)");
+              "day/night cache: second session, the fade's solves cached: 9, 12 and 13 of 13 rooms at once from the 2nd switch (the game's log: 0, 5 and 3 swapped)");
     }
     // validity: each fact alone sends the room to its solve; all of them: swapped
     {

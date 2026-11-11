@@ -231,7 +231,7 @@ struct LotLaw {
 std::vector<LotLaw> g_lotLaw;
 // (this round) the lot's lamps as every physical entry's pick reads them: each lamp's row inputs, its laws (world, and with its
 // reach radii) and the lamps gone. Unchanged: an entry's last lamp list stands (3.7 ms a frame rebuilding them with nothing
-// edited, the 23:37 log of 02/11)
+// edited, in a lamp-edit log)
 uint64_t g_lotSig = 0, g_lotSigLot = 0;
 bool g_lotSigRead = false;
 std::vector<uintptr_t> g_lotGone; // (the lot's lamps that left its registry: a kept list holding one no longer draws it)
@@ -401,7 +401,7 @@ void DrawnTable(Entry& e, const void* room, int cls) {
             rooms.push_back(&*r);
             Mix(key, &r->room, sizeof r->room), Mix(key, &r->version, sizeof r->version), Mix(key, &r->live, sizeof r->live);
         }
-    // (10/11) the rooms of other stories whose lamps it lists: their furniture shades it too (a lamp of story 2 lighting story 1's
+    // the rooms of other stories whose lamps it lists: their furniture shades it too (a lamp of story 2 lighting story 1's
     // wall top through a stairwell), so a shadow continues across the floor line (BlockerTable::Join homes). At most 2
     std::vector<std::pair<int, int>> homes, tried;
     std::vector<OutdoorDelta::KeptRef> homeRefs;
@@ -413,7 +413,7 @@ void DrawnTable(Entry& e, const void* room, int cls) {
             const std::pair<int, int> h{L.story, L.home};
             // (only a lamp of an upper story: its own story's furniture continues the shadow down past the floor line. A lamp of
             // a story below shines up a stairwell at a grazing angle, where the soft band of the stairs' records drew a false
-            // diagonal band on the upper wall: F8 21-03-16)
+            // diagonal band on the upper wall)
             if (L.story <= e.story || L.home <= 0 || std::find(tried.begin(), tried.end(), h) != tried.end()) continue;
             tried.push_back(h);
             OutdoorDelta::KeptRef r{};
@@ -663,7 +663,7 @@ uint64_t Sig(IDirect3DDevice9* dev, uintptr_t mgr, int cls, int m) {
             // moved lately (LampMarkFilter::ShapeMoved: the occluder entry of the record's first shape) and the lamp kept its height:
             // a table dragged with its lamp. A lamp dragged alone leaves its table where it is, still casting its shadow; nothing else
             // moves the record. The offset stays where the drag left it until the next solve reads the room again. Identity, not
-            // place: in a table drag the one entry that moves lies by the lamp's head (03/11 recordings 11:47 to 15:25, all table
+            // place: in a table drag the one entry that moves lies by the lamp's head (seen in table drag recordings)
             // drags); UNVERIFIED that its shape is the record's (PhysLampPick::ShapeMoved; the [CarryTable] line names both)
             if (const uint32_t ag = LevelLightShare::ArchGen(); ag != e.archGen) e.archGen = ag, LevelLightShare::ArchSpansOf(r.room, e.arches);
             if (r.live != e.liveKey && r.version == e.version) { // (an object of the room moved: the records as it stands, ahead of its solve)
@@ -1250,7 +1250,7 @@ void NoteEdit(uintptr_t light, const char* kind, const std::vector<const void*>&
 void NotePhysEdit(uintptr_t light, const char* kind) {
     if (std::strcmp(kind, "move") == 0) {
         // (a stamp never ahead of GetTickCount: "| 1" put an even tick's stamp 1 ms in the future for the rest of that ~16 ms tick,
-        // every "within ms" read wrapped to false and held rooms were picked mid-drag, 6-14 solves per 10 s, 03/11 captures)
+        // every "within ms" read wrapped to false and held rooms were picked mid-drag, 6-14 solves per 10 s)
         const DWORD now = std::max<DWORD>(GetTickCount(), 1), was = g_physMoveAt.exchange(now, std::memory_order_relaxed);
         if (!was || now - was >= 300) g_physDragAt.store(now, std::memory_order_relaxed);
         g_physMoveLight.store(light, std::memory_order_relaxed);

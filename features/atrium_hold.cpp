@@ -500,7 +500,7 @@ HoldResult UpdateEditHold() {
         }
     }
     // (one-way) a drag the GPU takes leaves "all floors together" 750 ms after its last refused step, edits or not: latched, the
-    // whole drag and its release showed a frozen mid-drag map for up to 5 s, then snapped back (10:06 recording, 03/11)
+    // whole drag and its release showed a frozen mid-drag map for up to 5 s, then snapped back
     if (holding && g_holdTogether.load(std::memory_order_relaxed) && !TogetherNow() && DragLite::LastMoveGpu())
         g_holdTogether.store(false, std::memory_order_relaxed);
     if (const unsigned long sw = LampMarkFilter::SwitchLastTick(); sw && sw != g_switchSeen.load(std::memory_order_relaxed)) {

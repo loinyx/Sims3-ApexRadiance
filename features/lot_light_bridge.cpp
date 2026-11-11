@@ -4545,7 +4545,7 @@ float LampConeVisibility(const LampCone& cone, const float* pr, const float* p, 
     e.used = e.state == state;
     return v;
 }
-// A fence piece (point p, 0.5 m above it) set in an outside wall, as garden edging run into a house's wall (F7 23-35-25: its
+// A fence piece (point p, 0.5 m above it) set in an outside wall, as garden edging run into a house's wall (an F7 capture: its
 // origin on the wall's line, 0.5 m from a sconce inside, so the ray never crossed the wall and the edging glowed). An indoor
 // lamp shining out (cone.light) reaches its outdoor face only past that wall: tested 0.15 m beyond the wall from the lamp,
 // through its openings as any exit lamp. shortcut: walls along x or z only, add diagonals if edging along one glows
@@ -5341,7 +5341,7 @@ std::string ReachLawText(bool reach, bool refused, bool placed, float scale, con
 
 // A group's lamp list is one for all its pieces: a lamp stays when any piece sees it (PickFenceLampsImpl), and the pixel tests
 // no wall. A flowerbed curb running from the garden to under the house, behind the house's brick wall, took on the hidden
-// pieces the light of the lamp on the other side of that wall (F7 2026-11-09 22-12-32 #336: 62 pieces, the top of the curb
+// pieces the light of the lamp on the other side of that wall (an F7 capture, #336: 62 pieces, the top of the curb
 // lit along the wall while the ground beside it, shaded, stayed dark). Each piece is tested with the same wall and slab test
 // from 0.5 m over its origin; consecutive pieces seeing the same lamps are drawn together, the lamps a run's pieces do not see
 // with no colour. A group whose pieces all see all its lamps keeps its one draw. The masks are kept per group read, lamp list
@@ -7664,7 +7664,7 @@ std::atomic<bool> g_doorsLogged{false}, g_doorsNoWorldLogged{false};
 // outside wall's line (1), or on a tile edge of the room map along one axis (2; uv rows 3..4 after the world triple, 0..1 over
 // the map, x its size: 1 texel per metre; F7 capture: c195 / c196, the door's centre at texel (12.99, 20.99)); 0: neither.
 // uv = that centre in texels (2 only). Most objects have their origin at a tile's centre, not its corner, so a curtain or a
-// cupboard against a wall lands here too (a curtain of 02/11: origin at texel (22.5, 26.5), the centre taken at (22.0, 26.0)).
+// cupboard against a wall lands here too (a curtain: origin at texel (22.5, 26.5), the centre taken at (22.0, 26.0)).
 int SetInWall(const float (&m)[5][4], float sizeU, float sizeV, float uv[2]) {
     const float xx = m[0][0], xz = m[2][0], zx = m[0][2], zz = m[2][2];
     const float lx = ApexMath::Sqrt(xx * xx + xz * xz), lz = ApexMath::Sqrt(zx * zx + zz * zz);
@@ -7765,8 +7765,8 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
     // The game's rig (one room, the camera's side) lights it, as before Apex. With the wall mask the read keeps to the pixel's
     // side of every wall, so only an object at an opening light passes through stays on the rig (on an outside wall's line it
     // does not: the texels outside the house add nothing to the smooth read)
-    // (10/11) A door between two rooms: each face reads the light kSideM in front of it, in the room it looks into (the
-    // shader's side read), so the two faces can differ. F7 captures 19-52-26 and 19-54-59..19-55-05: a glazed door on the rig
+    // A door between two rooms: each face reads the light kSideM in front of it, in the room it looks into (the
+    // shader's side read), so the two faces can differ. In F7 captures a glazed door on the rig
     // drew near black beside its sconce-lit wall (the rig evaluates its lamps at the door's centre, in the wall: edge-on, N.L ~ 0),
     // and the doors read smooth at the wall line took the far room's light on both faces. At 0.75 m the B-spline's taps
     // across the door's own wall line weigh about 7% where the edge is open (glass) and 0 where the wall mask closes it.
@@ -7920,7 +7920,7 @@ template <typename DrawFn> bool DrawWallGain(IDirect3DDevice9* dev, DrawFn draw)
         // (y: 1 the indoor texels take the room's light, at every hour as the room below does: the room's own map, read here in the
         // same frame as its own draw, IndoorPick rooms; 0 without the rooms' maps; z: 1 the bound scale holds no fall-off ratio in its .z).
         // Gated by the night level, the attic kept the outside light (no lamp, the sky) at hours the room below was lit
-        // (2026-11-09 13-05-53: 5.65 h, lamps on, sky night 0)
+        // (at 5.65 h, lamps on, sky night 0)
         RtOutdoorLamps::IndoorRooms in;
         const bool indoor = sp->wall.indoor && sp->wall.roomSampler >= 0 && RtOutdoorLamps::IndoorRoomsOf(scaleMapTex, in);
         const float q[4] = {marksOnly ? 0.0f : RtOutdoorLamps::kScaleLog2, indoor ? 1.0f : 0.0f, in.ratio ? 0.0f : 1.0f, 0.0f};
@@ -9521,8 +9521,8 @@ bool RoomShowsOldLightCached(const void* room) {
     return it->second;
 }
 // (physical) a room the GPU draws shows every lamp at once, drag or not, so its furniture must too: a part waiting for that room's
-// solve kept its old light for seconds, also after the drop while the solves ran ("63 object parts ... 4000 ms after the edit",
-// 04/11). Per room and frame
+// solve kept its old light for seconds, also after the drop while the solves ran ("63 object parts ... 4000 ms after the edit").
+// Per room and frame
 std::unordered_map<const void*, bool> g_rigRoomGpu;
 uint32_t g_rigRoomGpuFrame = 0;
 bool RoomGpuDragCached(const void* room) {

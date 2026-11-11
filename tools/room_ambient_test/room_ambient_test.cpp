@@ -185,7 +185,7 @@ int main() {
         check(!load.Open(100) && load.serial == 0, "a world loaded at twilight opens nothing until it reaches an end");
         check(DayNightWindow::kLotMs + DayNightWindow::kDrainMs <= 33.0f, "at most 33 ms of solving a frame in the window");
     }
-    // Replay of the first switch of the 17-18-28 recording (lot CF2DEA20, departure at 0): the played lot's solves in the
+    // Replay of the first switch of a day/night recording (lot CF2DEA20, departure at 0): the played lot's solves in the
     // game's order with the game's solve time of each (ms, its per-class total read every ~0.2 s). Before (measured): every
     // repeat as it was (story 1 room 2 three times, room 3 twice, room 8 three times plus one thrown away) at the budget the
     // steady pacing left, last end +15.53 s. After: the normalisation and retint resends gone (each room once, plus the repeats
@@ -209,7 +209,7 @@ int main() {
             worst = std::max(worst, spent);
             t += frameMs + spent;
         }
-        std::printf("replay 17-18-28 first switch: last room +%.2f s (measured before: +15.53 s), story 1 room 2 +%.2f s (before: +10.01 s, "
+        std::printf("replay first switch: last room +%.2f s (measured before: +15.53 s), story 1 room 2 +%.2f s (before: +10.01 s, "
                     "solved 3 times), at most %.0f ms of solving a frame\n", t / 1000.0f, bigEnd / 1000.0f, worst);
         check(t < 3000.0f, "the replayed switch ends within 3 s");
         check(worst <= 33.0f, "no replayed frame solves more than 33 ms");

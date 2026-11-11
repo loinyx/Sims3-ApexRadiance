@@ -15,7 +15,7 @@ namespace ArchAmbient {
 
 constexpr float kReach = 1.5f; // m from the arch's opening (lot space, horizontal) at which the neighbour's ambient is gone, at the least
 
-// (arch_reach) How far the blend runs: F7 of 05/11, rooms of ambient 0.0288 and 0.0116 through a 2.66 m arch, showed the floor falling
+// (arch_reach) How far the blend runs: an F7 capture, rooms of ambient 0.0288 and 0.0116 through a 2.66 m arch, showed the floor falling
 // 2.5x inside 1.5 m. Two rooms close in tone keep kReach; past a contrast (nb - own) / (nb + own) of kReachFree it grows, up to
 // kReachPerWidth x the opening, so a narrow arch keeps kReach too, and to kMaxReach. Contrast, not a ratio's log: no CRT call per draw.
 // UNVERIFIED in game: the four numbers, tuned to keep the fall under about 0.4 of a natural log per metre

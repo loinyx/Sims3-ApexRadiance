@@ -67,7 +67,7 @@ namespace {
 
 constexpr int kSetIdx[4] = {3, 0, 1, 2}; // the record's maps (wall, floor, ceiling, objects) in a texture set
 constexpr const char* kMapName[4] = {"wall atlas", "floor map", "ceiling map", "object map"};
-constexpr int kMaxWatch = 128;           // maps watched for writes (8 stories x 4 maps x 2 classes, the lots next to it from the upper half: a round relit 87 maps on 05/11, and a map past the cap went unwatched)
+constexpr int kMaxWatch = 128;           // maps watched for writes (8 stories x 4 maps x 2 classes, the lots next to it from the upper half: a round relit 87 maps, and a map past the cap went unwatched)
 constexpr float kFar = 64.0f;            // m: the shadow maps' range
 constexpr DWORD kSolveAskMs = 10000;     // a room 0 with no kept solve is sent to its solve at most this often
 constexpr DWORD kCoverFreshMs = 3000;    // a lot's coverage counts this long after the last check
@@ -255,7 +255,7 @@ struct LampRead {
     float areaU[3] = {}, areaV[3] = {}, areaN[3] = {}, areaE[2] = {}; // an area light: +0x170, +0x190, +0x180, +0x1A0 (GpuLampLaw::Area)
 };
 // What a TubeLight's share reads (FUN_006bd100, its evaluation 0x006BFA70's colour: min(Cmax, k2 x range +0x130 x intensity
-// +0x10 / (k1 d^2)) to the segment from +0x120 to +0x170 of length +0x1A0, times its colour +0xE0; dumpbin 02/11): the raw
+// +0x10 / (k1 d^2)) to the segment from +0x120 to +0x170 of length +0x1A0, times its colour +0xE0; dumpbin): the raw
 // values. POD (SEH)
 bool ReadTubeShare(uintptr_t L, uint32_t out[10]) {
     __try {
@@ -573,7 +573,7 @@ struct Slot {
     std::shared_ptr<struct UnderJob> uJob;
     bool dynCurrent = false;        // the mask buffer holds the under-floor share with "all" left to the shader
     // (more lamps than one batch) the CPU's "all" per masked texel, for the lamps and points of allSig; allCurrent: the mask buffer
-    // holds them (10/11: a 45-lamp lot computed them again at every relight, 60-187 ms of the render thread, 88 hitches)
+    // holds them (a 45-lamp lot computed them again at every relight, 60-187 ms of the render thread, 88 hitches)
     std::vector<float> allVals;
     uint64_t allSig = 0;
     bool allCurrent = false;
@@ -612,7 +612,7 @@ struct Ask {
     bool logged = false;
     DWORD keptAt = 0; // when its kept solve was first seen (its sends start again only once it held it kKeptHoldMs)
 };
-// (10/11) a kept solve the memory budget evicts at once gave the room a fresh round of sends each time: after 21:07, about 195
+// a kept solve the memory budget evicts at once gave the room a fresh round of sends each time: about 195
 // sends a minute to neighbour lots, each '(1 of 3)', each a full room-0 solve of the game. Its count resets only once held this long
 constexpr DWORD kKeptHoldMs = 10000;
 std::vector<std::unique_ptr<Slot>> g_slots;
@@ -1171,7 +1171,7 @@ void PrepareJob(Job& j) {
                 if (at != j.inRooms.end()) tv.p[3] += 8.0f, inSlot = static_cast<float>(at - j.inRooms.begin());
             }
             tv.n[3] = static_cast<float>(t.packed >> 24) / 255.0f;
-            // (bit 8) the street lamps the game's room-0 solve left in its base are no light of the room below either (14:33 F8, 03/11:
+            // (bit 8) the street lamps the game's room-0 solve left in its base are no light of the room below either (before:
             // the upper half beige from them, the lower half its room's red)
             for (int k = 0; k < 3; k++) tv.base[k] = RtLampModel::ComposeBase(t.base[k], t.worldBase[k], tv.p[3] >= 8.0f);
             if (inSlot >= 0.0f) { // (the log: the game's solve of these texels without the street lamps, by day the windows' daylight)
@@ -1183,7 +1183,7 @@ void PrepareJob(Job& j) {
             // the continued room's own map at its matched top-row texel, read by the draw in the same frame as the room's own draw
             // (bit 16: the compose writes the lamps' fall-off up the wall there in the scale's .z, IndoorRatio): what room 0's solve held there changed
             // with each solve of it, and a light carried here at a prepare lagged the room's (the attic matched its room only after a
-            // load: 14-07-34 log). With no top row known yet (a room never kept), its own solve stays
+            // load). With no top row known yet (a room never kept), its own solve stays
             // shortcut: a floor takes its room's top row's mean, carried at the prepare (24 of the 72 outdoor floor copies have no
             // samplers left for the rooms' maps); sample the room's map on floors too if their copies get the samplers
             if (inSlot >= 0.0f && m == 0 && !(t.bits & 1)) {
@@ -1621,7 +1621,7 @@ void OnPreReset(IDirect3DDevice9* dev) {
         s->relit = false; // (14/10: its preblur texture is a MANAGED one: kept, and the slot stays built; only the copy is made again)
         if (s->pvb) s->pvb->Release(), s->pvb = nullptr, s->built = s->ok = false; // (DEFAULT: prepared again; its base lacks their lamps)
         ReleaseHiPoints(*s);
-        // (DEFAULT since 10/11: filled again from inBaseVal / inUvSrc)
+        // (DEFAULT: filled again from inBaseVal / inUvSrc)
         if (s->inBase) s->inBase->Release(), s->inBase = nullptr, s->inBaseDirty = true;
         if (s->inUv) s->inUv->Release(), s->inUv = nullptr, s->inUvBuilt.clear();
     }
@@ -2593,7 +2593,7 @@ void Frame(IDirect3DDevice9* dev) {
     // (physical indoor lamps, stage 4: an indoor lamp moved without a solve is a drag too: fast taps, one exact pass once still)
     // (physical) a drag the GPU takes stays a drag until the lamp is still (DragLite::kStillMs, as its rooms' solves): each pause of
     // 300 ms drew every touched map exact and the next step fast again, the furniture shadows' softness flipping (677 exact
-    // relights in 10 s of a drag, 03/11)
+    // relights in 10 s of a drag)
     const bool dragging = (g_lampChangedAt && nowTick - g_lampChangedAt < kDragQuietMs) || GpuRoomLamps::PhysMoveRecent(DragLite::kStillMs);
     // fewer shadow taps while dragged, but not for a drag the GPU takes: the fast taps'
     // harder shadows were the light the drag showed, the exact ones at the release another (users saw the drop "flicker")
@@ -2630,7 +2630,7 @@ void Frame(IDirect3DDevice9* dev) {
     // while a lamp is dragged the maps are relit at every move with the cheaper shadows, as the ground outside the lot is
     // (a relight start every 200 ms left the lot's floors and walls up to that far behind the ground beside them; a relight
     // is 0.3-1.1 ms of CPU and under 1 ms of GPU in a recording of outdoor lamps; a drag the GPU takes draws every kept map, over
-    // 400,000 points and 29 ms of GPU a round on a 13-room lot before its dense quads, 05/11); every frame's work stops past kFrameCpuMs or kFrameGpuMs
+    // 400,000 points and 29 ms of GPU a round on a 13-room lot before its dense quads); every frame's work stops past kFrameCpuMs or kFrameGpuMs
     // (the maps left are relit the next frames)
     double gpuPlanned = 0, maskMs = 0, drawMs = 0, overMs = 0;
     double maskJobsMs = 0, maskShareMs = 0, maskLockMs = 0, maskFillMs = 0; // (the floor mask's parts)
@@ -2938,7 +2938,7 @@ void Frame(IDirect3DDevice9* dev) {
         QueryPerformanceCounter(&tn);
         // (GPU: the map's own time as last timed, else its texels x lamps; the lamp's own maps (an edit not shown there yet) always
         // go, so the light under the cursor follows in the frame; the other maps of an edit past the CPU budget up to kEditFrameCpuMs,
-        // never past the GPU's: a drag the GPU takes drew 13 maps a frame in 98 ms of GPU, 9-12 fps, 09/11)
+        // never past the GPU's: a drag the GPU takes drew 13 maps a frame in 98 ms of GPU, 9-12 fps)
         const double units = static_cast<double>(s.map.count) * static_cast<double>(std::max<size_t>(mine.size(), 1)) * (fast ? 1.0 : 7.0) +
                              (s.pvb ? static_cast<double>(s.nPhys) * static_cast<double>(s.qLights.size()) * 7.0 : 0.0);
         const double gpuEst = s.gpuMs > 0.0 ? s.gpuMs : units * kMsPerUnit;
@@ -3760,7 +3760,7 @@ bool ReadRoomAmbient(const void* room, float* c) {
 // new kept solve of a room in the class its texels were matched in updates their entries (a wall texel its matched top-row texel's,
 // by its place in the room's map; a floor texel the top row's mean) and the map, in the frame it is kept, so the ratio's base and
 // the floors' light follow their room with no prepare (a prepare lagged them 100-500 ms per room solve: the "older kept solve" lines)
-// (10/11) A texture the compose reads, filled on the CPU: made DEFAULT and filled through a SYSTEMMEM texture freed at once. MANAGED
+// A texture the compose reads, filled on the CPU: made DEFAULT and filled through a SYSTEMMEM texture freed at once. MANAGED
 // kept a full copy in the game's address space (under the RTX Remix bridge, freed after 2 s idle and fetched back, a wait, at the
 // next lock). DEFAULT ones are released at a device reset (OnPreReset) and filled again. fill(bits, pitch); false: none made
 template <typename Fill> IDirect3DTexture9* MakeFilledTexture(IDirect3DDevice9* dev, UINT w, UINT h, D3DFORMAT fmt, IDirect3DTexture9* reuse, Fill fill) {
@@ -3922,7 +3922,7 @@ bool IndoorRoomsOf(const void* texture, IndoorRooms& out) {
                 out.map[r] = g ? g : s->inUv; // (no texel of that slot matched: never read)
                 std::memcpy(out.amb[r], s->inAmb[static_cast<size_t>(r) < s->inRooms.size() ? r : 0], 3 * sizeof(float));
                 // shortcut: InteriorWall's hemisphere tint on the sky reflection as the light capture of the room below gave it at night
-                // (2026-11-09 11-05-47: c5 0.170, c6 0.064 grey, their mean); read the interior draw's c5 / c6 to follow the time of day
+                // (c5 0.170, c6 0.064 grey, their mean); read the interior draw's c5 / c6 to follow the time of day
                 out.amb[r][3] = kIndoorReflection;
             }
             return true;

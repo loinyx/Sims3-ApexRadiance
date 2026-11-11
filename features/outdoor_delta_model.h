@@ -276,7 +276,7 @@ inline void BasisPackInput(const float acc[16], int m, float out[4]) {
 // A directional texel takes `want` only while it holds `expect` (what the room's capture or Apex's last write left there:
 // another room's solve may have written it since) or `game`, the room's own kept solve's value: any solve of the story copies
 // the class's whole working set back, so a sibling room's solve put that value over Apex's write, and the room was left at the
-// game's light until its own next solve (furniture flicker, "392 left" right after room 3's keep, 03/11). True when written
+// game's light until its own next solve (furniture flicker, "392 left" right after room 3's keep). True when written
 inline bool BasisWrite(uint32_t& texel, uint32_t want, uint32_t expect, uint32_t game) {
     if (texel != expect && texel != game) return false;
     texel = want;
@@ -301,7 +301,7 @@ inline void BasisPartPhys(float row, float share, float drop, const float step[1
 // included); a moved one the physical part x scale (the game's over the physical levels when it last stood still, 1 unknown).
 // The moved part has the walls' share (vis) and no 3D test: the game's step takes no room, so its directional maps hold no
 // furniture shadow, and with one the counters behind the island read 22 during a drag and 36.6 once the solve landed, the lamp
-// in the same place (23:07 video of 03/11): the furniture's tone must already be the solve's while the lamp moves. game / phys:
+// in the same place: the furniture's tone must already be the solve's while the lamp moves. game / phys:
 // the still lamp's summed levels both ways (the next move's scale). pane (null: 1): the glass the lamp's light crosses to each sample, after
 // the drop as the room's maps take it
 inline void BasisLampAdd(bool still, const float* pass, int mult, float row, const float* vis, float drop, const float* step, size_t n, float scale,
@@ -341,7 +341,7 @@ template <class Owed> typename Owed::iterator ReflectionPick(Owed& owed, size_t&
 namespace PhaseCache {
 enum End : uint8_t { kDay = 0, kNight = 1, kTwilight = 2 };
 constexpr uint32_t kQuickMs = 3000; // an arrival this soon after leaving the other end is a quick switch; a slow dusk stays the game's
-// The mode change: window lights switch ~0.2-0.3 s before the night level moves (14-05-00: a room started with the night list,
+// The mode change: window lights switch ~0.2-0.3 s before the night level moves (a room started with the night list,
 // the level still 0). Their marks' burst begun within kModeLeadMs before the departure dates it; without one (no burst seen, or
 // window marks all along) a solve started within kPurgeMs before the departure counts as after it
 constexpr uint32_t kModeLeadMs = 3000, kPurgeMs = 1000;

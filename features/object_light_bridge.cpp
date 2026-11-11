@@ -229,7 +229,7 @@ int CrossCandidates(BYTE* rig, BYTE* room, const LightVector* list, uintptr_t* l
             n++;
         }
         // (physical) a lamp being dragged on the room's story, listed or not: no gather runs during the drag, so a room it comes into
-        // has no class of it and its furniture stayed dark until the room's solve after the drop (the fridge, 04/11). Its share
+        // has no class of it and its furniture stayed dark until the room's solve after the drop (a fridge). Its share
         // past the walls from where it is now, as the furniture's own visibility reads it
         if (dragged && n < kCrossMax) {
             const int id = *reinterpret_cast<const int*>(dragged + 8);
@@ -237,13 +237,13 @@ int CrossCandidates(BYTE* rig, BYTE* room, const LightVector* list, uintptr_t* l
             const float* head = reinterpret_cast<const float*>(dragged + 0x120);
             const float dx = head[0] - centre[0], dy = head[1] - centre[1], dz = head[2] - centre[2];
             // (a lamp now registered in the rig's own room, not listed yet: the game's gather walks the list, so it has not got it either;
-            // furniture went from no lamp to 5.09 at the room's solve, capture of 05/11)
+            // furniture went from no lamp to 5.09 at the room's solve, in a capture)
             const bool gathered = id == own && std::find(list->begin, list->end, dragged) != list->end;
             if (id > 0 && !gathered && mgr && *reinterpret_cast<const int*>(dragged + 0xD0) == *reinterpret_cast<const int*>(mgr + 0x88) && kRigLightTest &&
                 dx * dx + dy * dy + dz * dz < kCrossRangeM * kCrossRangeM) {
                 const float share = LevelLightShare::LampVisibilityShared(head, centre);
                 // (of the rig's own room: the game's gather of that lamp alone, the record its solve's gather will give, not the openings' law:
-                // metal, lit only by these records, showed another tone until the solve, 05/11)
+                // metal, lit only by these records, showed another tone until the solve)
                 if (share >= kCrossReachMin) lamps[n] = dragged, ids[n] = id, shares[n] = share, open[n] = id != own, nearby = true, n++;
             }
         }
@@ -358,7 +358,7 @@ std::mutex g_rigRoomMx;
 std::unordered_map<uintptr_t, const void*> g_rigRoom;
 std::atomic<uint32_t> g_rigRoomGen{0}; // (2.15.3) bumped under g_rigRoomMx at every change of g_rigRoom (RigRoom's last answer)
 
-// (10/11) Rooms whose room-mode rigs gathered while the game had emptied the room's list (its invalidate, state 1): those rigs
+// Rooms whose room-mode rigs gathered while the game had emptied the room's list (its invalidate, state 1): those rigs
 // took the [NoLight] lights, and Rooms at Night darkens such furniture, doors and windows as at night, by day too, until a
 // later regather (blind timers, 1.5 to 21 s in a day recording). LevelLightShare's room gather takes the room once its list is
 // final and has the rigs gather again (TakeEmptyGatherRoom), from the same list the next blind regather would read.
