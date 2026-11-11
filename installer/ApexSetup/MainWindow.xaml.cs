@@ -102,16 +102,16 @@ public sealed partial class MainWindow : Window
         _offline = false;
         _loading = true;
         RefreshAll();
-        try
+        // each repo on its own: an optional mod's repo that fails only hides that mod's update (its install fetches it again)
+        await Task.WhenAll(Repo.Values.Distinct().Select(async r =>
         {
-            var repos = Repo.Values.Distinct().ToList();
-            var got = await Task.WhenAll(repos.Select(r => Releases.LatestAsync(r)));
-            for (int i = 0; i < repos.Count; i++) _latest[repos[i]] = got[i];
-            // (screenshots and design checks) APEX_SETUP_PREVIEW_LATEST=3.2.0 makes the latest Apex release that version, to show
-            // the update screens; nothing is installed while it is set (InstallAsync)
-            if (Preview is { } v && _latest.GetValueOrDefault(Releases.Apex) is { } apex) _latest[Releases.Apex] = apex with { Tag = "v" + v };
-        }
-        catch (Exception) { _offline = true; }
+            try { _latest[r] = await Releases.LatestAsync(r); }
+            catch (Exception) { _latest.Remove(r); }
+        }));
+        // (screenshots and design checks) APEX_SETUP_PREVIEW_LATEST=3.2.0 makes the latest Apex release that version, to show
+        // the update screens; nothing is installed while it is set (InstallAsync)
+        if (Preview is { } v && _latest.GetValueOrDefault(Releases.Apex) is { } apex) _latest[Releases.Apex] = apex with { Tag = "v" + v };
+        _offline = !_latest.ContainsKey(Releases.Apex);
         _loading = false;
         RefreshAll();
     }
@@ -123,7 +123,9 @@ public sealed partial class MainWindow : Window
         Badge = g.Label,
     };
 
-    string? Latest(string c) => Repo.TryGetValue(c, out var repo) ? _latest.GetValueOrDefault(repo)?.Version : null;
+    // the bridge's version is the Apex release's only when that release ships the bridge zip
+    string? Latest(string c) => Repo.TryGetValue(c, out var repo) && _latest.GetValueOrDefault(repo) is { } r
+        && (c != Components.Bridge || r.Assets.Any(a => a.Name == "Apex-Radiance-RTX-Remix-bridge.zip")) ? r.Version : null;
 
     // The installed version: Setup's own record, else the latest release's when the file is identical to it (GitHub's SHA-256
     // digest), else "" (installed, version unknown), or null when absent.
@@ -151,12 +153,7 @@ public sealed partial class MainWindow : Window
     // installed and known to be older than the latest release; a copy of unknown version stays as it is (Repair copies it again)
     bool NeedsUpdate(string c) => Known(c) is { Length: > 0 } v && Newer(Latest(c), v);
 
-    static bool Newer(string? latest, string? installed)
-    {
-        static Version? V(string? s) => s is null ? null : Version.TryParse(s.Split('-', '+')[0], out var v) ? v : null;
-        if (installed is null || V(latest) is not { } l) return false;
-        return V(installed) is not { } i || l > i; // a copy without a version is older than any release
-    }
+    static bool Newer(string? latest, string? installed) => Releases.Newer(latest, installed);
 
     // ---------- navigation ----------
 
@@ -403,8 +400,8 @@ public sealed partial class MainWindow : Window
     {
         var l = new List<string>();
         if (_state is not { } s || _game is null) return l;
-        if (s.ApexVersion is { } a && (a == "?" || Newer(Latest(Components.Apex), a))) l.Add(Components.Apex);
-        if (s.Layer == Layer.Bridge && s.Installed(Components.Bridge) is { } b && Newer(Latest(Components.Bridge), b)) l.Add(Components.Bridge);
+        if (s.ApexVersion is { } a && (a == "?" || Newer(Latest(Components.Apex), a) && !TestBuildNow())) l.Add(Components.Apex);
+        if (s.Layer == Layer.Bridge && Newer(Latest(Components.Bridge), s.Installed(Components.Bridge) ?? "")) l.Add(Components.Bridge);
         if (s.Layer == Layer.Dxvk && s.Installed(Components.Dxvk) is { } d && Newer(Latest(Components.Dxvk), d)) l.Add(Components.Dxvk);
         foreach (var c in new[] { Components.S3ss, Components.Modernization, Components.MonoPatcher })
             if (Known(c) is { Length: > 0 } v && Newer(Latest(c), v)) l.Add(c);
@@ -636,7 +633,7 @@ public sealed partial class MainWindow : Window
         var cur = RendererOf(s);
         if (_renderer == cur)
         {
-            if (cur == RBridge && NeedsUpdate(Components.Bridge)) add.Add(Components.Bridge);
+            if (cur == RBridge && Newer(Latest(Components.Bridge), s.Installed(Components.Bridge) ?? "")) add.Add(Components.Bridge);
             if (cur == RDxvk && s.Installed(Components.Dxvk) is { } v && Newer(Latest(Components.Dxvk), v)) add.Add(Components.Dxvk);
         }
         else

@@ -42,6 +42,9 @@ try
               "check installation: a -dev version and a version newer than the release are test builds");
         Check(!Verify.TestBuild(g, sv with { ApexVersion = "3.1.0" }, other) && Verify.Files(g, sv, other).Count == 0,
               "check installation: an older release is no test build, and a test build is no error");
+        Check(Releases.Newer("3.2.0", "3.2.0-beta") && !Releases.Newer("3.2.0", "3.2.0") && !Releases.Newer("3.2.0-beta", "3.2.0")
+              && Releases.Newer("3.2.0", "3.1.9") && Releases.Newer("3.2.0", "") && !Releases.Newer(null, ""),
+              "update check: a final release is newer than its prerelease, an unknown copy is older than any release");
         File.Move(B(@".trex\NvRemixBridge.exe"), B(@".trex\NvRemixBridge.exe.off"));
         Check(Verify.Files(g, sv, good).Any(x => x.Args.Contains(@".trex\NvRemixBridge.exe")), "check installation: a missing bridge server is found");
         File.Move(B(@".trex\NvRemixBridge.exe.off"), B(@".trex\NvRemixBridge.exe"));

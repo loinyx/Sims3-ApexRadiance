@@ -34,8 +34,25 @@ public static class Releases
 
     public static async Task<Release> LatestAsync(string repo, CancellationToken ct = default)
     {
-        try { return await FromApiAsync(repo, ct); }
-        catch (HttpRequestException) { return await FromPageAsync(repo, ct); } // the API allows 60 calls an hour per address
+        // short limits: a stalled request must not keep Setup "checking" for the client's 5 minutes
+        using (var api = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        {
+            api.CancelAfter(TimeSpan.FromSeconds(15));
+            try { return await FromApiAsync(repo, api.Token); }
+            catch (Exception) when (!ct.IsCancellationRequested) { } // the API allows 60 calls an hour per address; a portal may answer HTML
+        }
+        using var page = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        page.CancelAfter(TimeSpan.FromSeconds(20));
+        return await FromPageAsync(repo, page.Token);
+    }
+
+    // a final release is newer than a prerelease of the same number (3.2.0 over 3.2.0-beta)
+    public static bool Newer(string? latest, string? installed)
+    {
+        static Version? V(string? s) => s is null ? null : Version.TryParse(s.Split('-', '+')[0], out var v) ? v : null;
+        static bool Pre(string s) => s.IndexOfAny(new[] { '-', '+' }) >= 0;
+        if (installed is null || V(latest) is not { } l) return false;
+        return V(installed) is not { } i || l > i || l == i && Pre(installed) && !Pre(latest!); // a copy without a version is older than any release
     }
 
     // The release page: /releases/latest redirects to the tag; expanded_assets lists each file with its SHA-256.
@@ -76,7 +93,20 @@ public static class Releases
         var file = Path.Combine(dir, a.Name);
         await using (var s = await Http.GetStreamAsync(a.Url, ct))
         await using (var f = File.Create(file))
-            await s.CopyToAsync(f, ct);
+        {
+            // HttpClient.Timeout stops at the headers: a body that stops coming fails after 60 s without data
+            using var idle = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var buf = new byte[81920];
+            while (true)
+            {
+                idle.CancelAfter(TimeSpan.FromSeconds(60));
+                int n;
+                try { n = await s.ReadAsync(buf, idle.Token); }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new HttpRequestException($"{a.Name}: download stalled"); }
+                if (n == 0) break;
+                await f.WriteAsync(buf.AsMemory(0, n), ct);
+            }
+        }
         if (a.Sha256 is { } want && !Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(file))).Equals(want, StringComparison.OrdinalIgnoreCase))
             throw new InvalidDataException($"{a.Name}: download is damaged (checksum mismatch)");
         return file;
