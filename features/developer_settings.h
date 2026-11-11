@@ -26,13 +26,13 @@ inline toml::table Capture() {
     { toml::table t; LotLightingMotion::SaveDeveloperState(t); result.insert("lot_lighting_motion", std::move(t)); }
     { toml::table t; TesterToggles::SaveDeveloperState(t); result.insert("tester", std::move(t)); }
     result.insert("keep_room_light", LampMarkFilter::Enabled());
-    result.insert("story_samples", LevelLightShare::DiagArmed());
     result.insert("false_color", LotLightBridge::FalseColor());
     return result;
 }
 inline void Apply(const toml::table& t) {
     if (auto v = t["keep_room_light"].value<bool>()) LampMarkFilter::SetEnabled(*v);
-    if (auto v = t["story_samples"].value<bool>()) LevelLightShare::SetDiagArmed(*v);
+    // (story_samples is not restored: recording the F8 story samples turns the lamp visibility memos off, and a saved switch kept
+    // fences and outdoor objects several times slower for every later session; it starts off, as the frame profiler)
     if (auto v = t["false_color"].value<bool>()) LotLightBridge::SetFalseColor(*v);
     if (const auto* p = t["fast_dxt"].as_table()) FastDxt::LoadDeveloperState(*p);
     if (const auto* p = t["fast_refpack"].as_table()) FastRefPack::LoadDeveloperState(*p);
