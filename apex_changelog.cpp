@@ -6,6 +6,19 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k311Improved[] = {
+    "Lighting: general improvements for better RTX Remix compatibility",
+    nullptr};
+constexpr const char* k311Fixed[] = {
+    "RTX Remix bridge: small parts of the picture no longer blink on a still lot",
+    "RTX Remix bridge: the sea no longer loses its reflection for a frame",
+    "RTX Remix bridge: no black corner on loading screens",
+    "Display: Resolution fills the whole screen and works on the EA app version",
+    "New Game no longer stays on its loading screen on big lots",
+    "Fewer crashes: shortly after the active lot changes, and in the game's script checks",
+    "No crash when the game starts through its launcher",
+    nullptr};
+
 constexpr const char* k310Added[] = {
     "Display: window, borderless or fullscreen, any resolution, and a smooth frame-rate limit",
     "Display: a separate limit in the background and an FPS counter",
@@ -529,6 +542,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"3.1.1", "2026-11-11", nullptr, k311Improved, k311Fixed, "Better compatibility with the RTX Remix bridge, and fewer crashes"},
     {"3.1.0", "2026-11-10", k310Added, k310Improved, k310Fixed,
      "A frame-rate limit and window modes, a new Overview with game memory, and fences dark behind walls", k310Highlights},
     {"3.0.0", "2026-11-09", k300Added, k300Improved, k300Fixed,
