@@ -142,7 +142,7 @@ bool Stranded(const BYTE* room) {
     }
 }
 
-// A room waiting for (2) or in (3) its solve, whatever class it shows (10/11: only the rooms on their quick pass kept the entry
+// A room waiting for (2) or in (3) its solve, whatever class it shows (only the rooms on their quick pass kept the entry
 // budget, so it ended while 6 rooms of the played lot still waited and the rest ran at about a quarter of the speed)
 bool WaitsForSolve(const BYTE* room) {
     __try {
@@ -295,8 +295,8 @@ bool OnPlayedLot(const BYTE* room) {
 }
 // An edit's room on another lot than the played one: its urgency at most this (see Prioritise). 10, not 1000: class 0 has
 // 100x the game's priority of class 2, so a neighbour's class-0 edit room at x1000 outranked the played lot's waiting
-// class-2 rooms on the camera's story (x4000) and below it (x2000); at x10 it stays under both (lot entry recording
-// 10/11: a neighbour's room 0 took 2.65 s ahead of 16 rooms still on their quick pass)
+// class-2 rooms on the camera's story (x4000) and below it (x2000); at x10 it stays under both (on a lot entry,
+// a neighbour's room 0 took 2.65 s ahead of 16 rooms still on their quick pass)
 constexpr float kOffLotUrgency = 10.0f;
 std::atomic<long> g_prioOffLotCapped{0};
 // When a room of the played lot on or below the camera's story was last seen waiting for a better class than it shows

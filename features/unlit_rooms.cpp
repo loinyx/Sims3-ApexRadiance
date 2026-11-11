@@ -368,7 +368,7 @@ bool RetintUnlit(unsigned char* room, int& state, int slot, const float (*solved
         if (!roofless && slot >= 0 && RoomAmbientPolicy::UnlitSeedDue(solve, amb, amb2, g_target[slot].v)) {
             std::memcpy(amb, g_target[slot].v, sizeof g_target[slot].v);
             std::memcpy(amb2, g_target[slot].v, sizeof g_target[slot].v);
-            // (10/11) a room the game cleared after a solve waits at the ambient that solve wrote (its maps on screen still
+            // a room the game cleared after a solve waits at the ambient that solve wrote (its maps on screen still
             // show that light), never below the unlit colour: by day a window-lit room's +0x120 is up to 13x the unlit
             // colour, so the seed alone left its walls and floors dark until the queue reached it. Its own solve writes the
             // final values over these (state 3), so the end result is the same.
@@ -491,7 +491,7 @@ void RetintQueueResult(unsigned char* room, bool queued, void*) {
     }
 }
 bool Retint(bool rest) {
-    // a quick day/night switch: no room is sent to a solve meanwhile (retried once the switch's solves are over). 17-18-28: story 1
+    // a quick day/night switch: no room is sent to a solve meanwhile (retried once the switch's solves are over). Once, story 1
     // room 2 (47,681 texels) and room 8 were each solved once more for a stacked ambient changed after the base, 3.9 s and 0.9 s
     // with the switch's other rooms waiting behind them, and came out with the same ambient
     if (rest && LevelLightShare::DayNightSwitching()) {

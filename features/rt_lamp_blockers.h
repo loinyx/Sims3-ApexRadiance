@@ -34,7 +34,7 @@ namespace RtLampGpu {
 // table column w (BlockerTable::FillOf). A lamp standing on furniture keeps kFurnitureFill of its light under it (the game's
 // point-light test left the floor under a lamp's own table near black in a side-table capture); every other lamp 0, its
 // furniture shadows the game's. UNVERIFIED in game: an estimate (floor albedo about 0.3 x about half the sky open under a table),
-// at the shadow's middle, kFillGlow more towards its edge (BlockerTable::OccludeFill: a flat fill looked a grey plate, 05/11); the
+// at the shadow's middle, kFillGlow more towards its edge (BlockerTable::OccludeFill: a flat fill looked a grey plate); the
 // directional maps keep the game's dark (BasisPartPhys). tools/rt_lamps_test checks the shader against this
 constexpr float kFurnitureFill = 0.10f, kFillGlow = 0.2f, kFillGlowR = 4.0f;
 inline float FurnitureFill(float t, float fill) { return fill + (1.0f - fill) * t; }
@@ -42,7 +42,7 @@ inline float FurnitureFill(float t, float fill) { return fill + (1.0f - fill) * 
 // (physical, true-size furniture shadows: Params::edgeR, and every lamp with a furniture fill) a blocker's edge at its real extent h, as wide as a lamp ball of radius
 // edgeR seen from the receiver p2 past the blocker's plane point X = A + v (0 at contact, edgeR at the lamp). The game's band
 // starts 0.15 m inside the extent and fades 0.35 m outside it at any distance, so a small table casts a round blob 2-3x its size
-// on the floor (13:45 F8 of 03/11). The shader's EdgeW / EdgeOp are the same operations
+// on the floor. The shader's EdgeW / EdgeOp are the same operations
 inline float EdgeW(RoomLightTests::V A, RoomLightTests::V v, RoomLightTests::V p1, RoomLightTests::V p2, float edgeR) {
     using namespace RoomLightTests;
     const V x = {A.x + v.x, A.y + v.y, A.z + v.z}, d = sub(p2, p1), r = sub(p2, x);
@@ -50,8 +50,8 @@ inline float EdgeW(RoomLightTests::V A, RoomLightTests::V v, RoomLightTests::V p
     return std::max(edgeR * clamp01(f), 1e-3f);
 }
 // (sphere_cut_fade) The game drops a record the moment the line leaves its sphere, about 0.13 m past a chair's top where the 0.35 m band
-// still has 0.45 of its opacity: the shadow stops at a step along the sphere's silhouette, a crisp round arc on the floor (23-40-21
-// scene of 05/11, 0.73 of T in 3 cm). The band, never a true-size edge (no step there), fades over the sphere's last kCutFadeM instead.
+// still has 0.45 of its opacity: the shadow stops at a step along the sphere's silhouette, a crisp round arc on the floor (0.73
+// of T in 3 cm). The band, never a true-size edge (no step there), fades over the sphere's last kCutFadeM instead.
 // The core of a shadow is unchanged: the map stops equalling the game's solve only in that zone. UNVERIFIED in game
 constexpr float kCutFadeM = 0.12f;
 inline float CutFade(float t, float r2, float q2, float invW) {
@@ -66,7 +66,7 @@ inline float EdgeOp(float c, float h, float w) { // (an S: a straight ramp leave
 // point of the segment p1 -> p2 to the capsule, there the width of a lamp ball of radius lampR seen past it (as EdgeW) and never under
 // half a texel seen from the lamp (without it the streak dots). A leg thinner than that width shades by their ratio. A lamp kPostHighM
 // over its top starts to fade (a smoothstep, gone at kPostGateM) and its streak widens by up to kPostHighW at the floor: under a ceiling
-// lamp a leg adds a faint soft foot to the furniture's soft shadow, never a hard streak (22-39-09 F8 of 05/11: no foot shadow at all under
+// lamp a leg adds a faint soft foot to the furniture's soft shadow, never a hard streak (before: no foot shadow at all under
 // a lamp above). The widest edge, 1.75 x (kPostFloorW + kPostHighW), stays within kPostReach. UNVERIFIED in game: the heights and the
 // streak's strength (offline against the shadow mesh: 0.52 mean light where the mesh gives 0.55)
 constexpr float kPostHighM = 1.5f, kPostGateM = 3.0f, kPostFloorW = 0.075f, kPostHighW = 0.125f, kPostReach = 0.35f; // kPostReach: past a leg's radius, the sphere that must still reach it
@@ -117,7 +117,7 @@ inline float DiscEdgeT(const RoomLightTests::Blocker& k, RoomLightTests::V p1, R
 
 // (physical, chair_arm_caps) A box-type chair or sofa's LITE has its arms as zero-thickness sheets at the box's full height, a slant for
 // the seat and back. Seen almost edge-on from a lamp beside it, the slant passes the light and the sheets' 0.35 m band alone draws a thin
-// streak far past the shadow (19-37-16 scene of 05/11: a separate spike 2.0 to 3.2 m from the lamp, none on the mesh's shadow). Only a
+// streak far past the shadow (a separate spike 2.0 to 3.2 m from the lamp, none on the mesh's shadow). Only a
 // record of exactly that shape changes: one slant, one back, arms whose base and top are the back's within 2 cm, all of one depth; 22 of
 // the 72 slant records of that scene's 28 solves, the arms a real model stepped are left alone. Its arms stand kArmHeight of the box tall
 // and a level cap at their top (kCapMark) holds the mass the sheets were standing for. On a copy: the 3D test as read stays what
@@ -247,7 +247,7 @@ struct BlockerTable {
     }
 
     // (physical, cross_room_shadows) a copy of own's room with the records of `others` after its own. Each room tested only its own
-    // furniture, so a shadow stopped dead at an arch (a 7.6x step, 1.3x with both rooms' records; offline 05/11). Row 0 is own's header,
+    // furniture, so a shadow stopped dead at an arch (a 7.6x step, 1.3x with both rooms' records; offline). Row 0 is own's header,
     // as Append leaves it: its own lamps walk what they walked, the soft furniture shadows of ceiling lamps bit for bit. Row 1, the
     // same first record, counts all of them: a lamp of another room (T3dDensePS). Without that gate a sofa behind a wall would shade
     // the next room: the game's soft band reaches 0.35 m past an object. Records are copied with their first blocker rows moved
@@ -257,9 +257,9 @@ struct BlockerTable {
         int Recs() const { return t && header >= 0 ? static_cast<int>(t->rows[static_cast<size_t>(header)].v[1]) : 0; }
         float Fade() const { return t && header >= 0 ? t->rows[static_cast<size_t>(header)].v[3] : 0.0f; }
     };
-    // (10/11, cross-story furniture shadows) homes: up to 2 rooms of other stories whose lamps light this room (a lamp of story 2
+    // (cross-story furniture shadows) homes: up to 2 rooms of other stories whose lamps light this room (a lamp of story 2
     // reaching story 1's wall top through a stairwell). Each room tested only its own story's furniture, so a dresser's shadow on the
-    // upper wall stopped dead at the floor line (F7 20-39-31..38). Row 2 + i counts own's and the arch rooms' records plus home i's:
+    // upper wall stopped dead at the floor line. Row 2 + i counts own's and the arch rooms' records plus home i's:
     // the records are laid out [homes[0]][own][others][homes[1]], so each row's are contiguous. With no homes the table is as before.
     static BlockerTable Join(const Part& own, const std::vector<Part>& others, const std::vector<Part>& homes = {}) {
         BlockerTable o;

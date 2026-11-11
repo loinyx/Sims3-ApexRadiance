@@ -2590,7 +2590,7 @@ int SettleNormInPlace(BYTE* room); // below (inner_norm_settle, a day/night swit
 // (stairwell_bounce) Bumped at each room solve's start on the thread that runs it (a solve's texels run on that thread): the
 // bounce context (t_bounce, StairwellBounceAt) is built again for every solve, so a solve right after a lamp below was moved
 // or switched never reuses the light of its earlier state
-// ---- (10/11) Borrowed lamps that light none of a room's samples ----
+// ---- Borrowed lamps that light none of a room's samples ----
 // 66-80% of a room's light list are lamps LevelLightShare takes from other stories; for most of them every sample of the room is
 // blocked by Apex's slab and wall tests (colour exactly 0), yet the game evaluates them and Apex tests them at every sample of
 // every solve (the 10x solve cost since 2.15). A solve notes, per borrowed indoor lamp, whether any sample got light from it; a
@@ -3608,7 +3608,7 @@ uint32_t EdgeKey(int x0, int z0, int x1, int z1) {
     return static_cast<uint32_t>(static_cast<uint8_t>(x0)) | static_cast<uint32_t>(static_cast<uint8_t>(z0)) << 8 |
            static_cast<uint32_t>(static_cast<uint8_t>(x1)) << 16 | static_cast<uint32_t>(static_cast<uint8_t>(z1)) << 24;
 }
-// A cut post's key spans one side of a cell (03/11: a cell's diagonal too, a window or door in a diagonal wall; until then those
+// A cut post's key spans one side of a cell (a cell's diagonal too, a window or door in a diagonal wall; before that those
 // posts were rejected and no diagonal wall ever opened for lamp light)
 bool CutKeyOnCell(int dx, int dz) { return std::abs(dx) + std::abs(dz) == 1 || (std::abs(dx) == 1 && std::abs(dz) == 1); }
 // At 0x00B0D860 (Add) and 0x00B0DD0F (Remove), the same 15 bytes: 8B 16 | 50 | 8B 42 1C | 68 B4 7E 25 06 | 8B CE | FF D0 =
@@ -4361,7 +4361,7 @@ void PlaceGridOpenings(StoryGrid& g, const std::vector<std::pair<uint32_t, CutRe
                   z1 = static_cast<int8_t>(key >> 24 & 0xFF);
         const bool alongZ = x0 == x1; // (EdgeKey keeps the low corner first)
         // a diagonal cut is on its tile's diagonal (dg: 0 for (x, z)-(x+1, z+1), 1 for (x, z+1)-(x+1, z)); taken as the edge along
-        // x at z0 until 03/11, its window opened another wall or none and the diagonal wall stayed whole
+        // x at z0 before, its window opened another wall or none and the diagonal wall stayed whole
         const bool diag = !alongZ && z0 != z1;
         const int32_t idx = CutEdge(g, key);
         if (idx < 0 || g.openings.size() >= 65535) {
@@ -8066,7 +8066,7 @@ void ShareRoomZeroFromBelow(BYTE* treeLevel, BYTE* room) {
             const auto at = [&](int x, int z, int q) { return (static_cast<size_t>(z) * w + x) * 4 + q; };
             // ownWalls, as the physical open tops (RtLampProxy::OpenTops): a double-height room under a sloped roof has walls of
             // story S only along its gables, so the 3/4 rule alone left its lamps out of this list while the occluders opened its
-            // top (09/11, lot C49C: story 3's attic walls over story 2's red room 5 got no red, F8 room 0 lists street lamps only)
+            // top (lot C49C: story 3's attic walls over story 2's red room 5 got no red, F8 room 0 lists street lamps only)
             OpenAbove::Classify(
                 w, h, [&](int x, int z, int q) { return rooms[at(x, z, q)]; }, [&](int x, int z, int q) { return placed[at(x, z, q)] != 0; },
                 [&](int x, int Z) { return GridZL(*grid, x, Z) >= 0; }, [&](int X, int z) { return GridXL(*grid, X, z) >= 0; },
@@ -8119,7 +8119,7 @@ void ShareRoomZeroFromBelow(BYTE* treeLevel, BYTE* room) {
 
 // Rooms of a lot near a stair opening (receivers on both sides), plus the rooms that took lamps before: they gather again
 // coveredAfter (OpeningCoveredAfter): a room whose gather came after that serial already saw the change or the round, so it is not sent
-// (11-40-32 recording: due 20 solved 0/23 and 2/20 again, identical maps, 3.5 s of the settle budget)
+// (due 20 solved 0/23 and 2/20 again, identical maps, 3.5 s of the settle budget)
 int QueueOpeningRooms(uintptr_t tracker, std::vector<std::pair<int, int>>* sent = nullptr, uint32_t coveredAfter = 0) {
     std::vector<std::pair<int, int>> todo;
     BoostedRoomsOf(tracker, todo);
@@ -8623,7 +8623,7 @@ void BeforeRoomUpdate(BYTE* tl) {
                     }
                     if (AmbientMergeAhead(it->first)) { ++it; continue; } // its own state 0 merges with the target
                     // (a member being solved: sent now it would be held and solved again in full once this solve ends, 1.8-3.9 s
-                    // for a tall room and three times in a row at a day/night switch, 17-18-28; after its solve the colour is
+                    // for a tall room and three times in a row at a day/night switch; after its solve the colour is
                     // tried without a solve first, ApplyIdleAmbient above, and it is sent only if that fails)
                     if (RoomSolving(it->first.tracker, it->first.level, it->first.room)) { ++it; continue; }
                     DWORD& last = g_ambQueuedAt[it->first];
@@ -9121,7 +9121,7 @@ void AfterChangedWalk(BYTE* tl) {
     } tailRestore{t_tailSend};
     if (gpuTail) t_tailSend = true;
     // (physical) a GPU edit's tail sends no other room mid-drag: every kept room draws the moved lamp from its law, and these solves
-    // finished over the GPU's maps (16:25 recording of 03/11: 138 sends). They wait in g_editWaits for the edit to be quiet instead
+    // finished over the GPU's maps (138 sends in one drag). They wait in g_editWaits for the edit to be quiet instead
     const bool fanout = PhysLampPick::TailFanout(gpuTail, OutdoorDelta::RoomLampCapture() && OutdoorDelta::RoomLampPhysical());
     bool room0Changed = false; // its lamps really changed (LampChange below): this story's roofless rooms mask with them
     bool lampAddedOrRemoved = false; // a room's lamps were added or removed (LampChange 2): an edit for the edit hold
@@ -9281,7 +9281,7 @@ void AfterChangedWalk(BYTE* tl) {
     static DWORD s_playedAt = 0;
     const DWORD walkTick = GetTickCount();
     if (played && tracker != s_playedTracker) s_playedTracker = tracker, s_playedAt = walkTick;
-    // (10/11) the camera back on the played lot ("entered" again: its LOD re-adds the lamps it dropped) is no edit either
+    // the camera back on the played lot ("entered" again: its LOD re-adds the lamps it dropped) is no edit either
     if (const DWORD entered = LotEnteredTick(); entered && walkTick - entered < 2000) s_playedAt = std::max(s_playedAt, entered);
     const bool gameEdit = lampAddedOrRemoved && played && WorldLiveSeen() && !SettlingAfterWorldLoad() && !gpuTail && walkTick - s_playedAt >= 2000;
     const bool editWalk = noted > 0 || gameEdit;
@@ -11689,7 +11689,7 @@ void NoteNormEnd(BYTE* room, float norm) {
     if (g_normResend.size() < 1024) g_normResend.push_back(key);
 }
 // (a quick day/night switch) The same settle inside the solve: while the taking room's normalisation moved since its samples
-// read it (the window lights change the rooms' brightest samples: 17-18-28, story 1 room 2 went from 1.000 to 0.120, room 3
+// read it (the window lights change the rooms' brightest samples: story 1 room 2 went from 1.000 to 0.120, room 3
 // to 0.518, room 8 to 0.728), its ambient step is run again before the texel passes (as QuickLikeRefinement does: the game's
 // own step, its sampler copy +0x650, then the stacked rooms' merge), at most kNormResends times. Its samples then read the value
 // the resend's state 0 would have read, so NoteNormEnd finds it settled and the room is not held and solved again in full
@@ -15831,7 +15831,7 @@ void ApplyAmbientBaseChanges() {
 // ready (proxy+8, +0x2C95; 0x006B42C0), else the default cube times the room's +0x140 / +0x130, which only the surface
 // colour pass 0x006A0F00 writes and are 0 in a room it never reached. The pool gives probes out by camera rating, so one story
 // of an atrium often holds none: InteriorWall's c5 = c6 = 0 below the floor line and 1 above it, the cube reflection
-// (x 0.35) on the upper half only (light captures 2026-11-10 10-38-48..57 and 11-37-02 / 06: x1.05 to x1.07 at the line).
+// (x 0.35) on the upper half only (light captures: x1.05 to x1.07 at the line).
 // While the indoor share is on, a member without a ready probe draws with a member's that has one, the nearest other story's first
 // (ArchAmbient::AtriumProbe); every other room as the game.
 bool OtherMembers(const void* room, std::vector<DepKey>& others, int* ownLevel = nullptr); // below
@@ -16141,7 +16141,7 @@ int RelightLot(uintptr_t tracker, const char* why, unsigned long changedAt, cons
 // One daytime curve (render thread, every frame): the factor the solves give outdoor lamps in roofed rooms, and once the
 // night level has reached day or night (kDaySettleMs after it), the roofed rooms noted with another factor gather again (once:
 // their next solve notes the settled factor). Nothing is sent at twilight. 0: sent the frame the level ends at day or night,
-// so they join the switch's own solves instead of a second wave 2 s later (14-05-00: the last room 5.4 s after the switch,
+// so they join the switch's own solves instead of a second wave 2 s later (the last room 5.4 s after the switch,
 // 2.5 s of it the wait; the level never comes back from an endpoint without crossing twilight, so nothing is sent twice)
 constexpr DWORD kDaySettleMs = 0;
 TerrainLightingPolicy::Phase g_dayPhase = TerrainLightingPolicy::Phase::Twilight;
@@ -18129,8 +18129,8 @@ bool SettlingAfterLoad() {
     const DWORD live = g_worldLiveAt.load(std::memory_order_relaxed), entered = g_lotEnteredAt.load(std::memory_order_relaxed);
     const DWORD now = GetTickCount();
     if ((live && now - live < kSettleAfterLoadMs) || (entered && now - entered < kSettleAfterEntryMs)) return true;
-    // the entry budget lasts while the played lot's visible rooms still wait for their solve, up to 30 s (lot entry
-    // recording 10/11: the last visible room took 49.6 s, its refinement all at the steady 1-4 ms after the 10 s window)
+    // the entry budget lasts while the played lot's visible rooms still wait for their solve, up to 30 s (on a lot
+    // entry the last visible room took 49.6 s, its refinement all at the steady 1-4 ms after the 10 s window)
     const DWORD waiting = RoomLightQueue::PlayedRoomWaitingAt();
     return entered && now - entered < kSettleWhileWaitingMs && waiting && now - waiting < 1000;
 }
@@ -19312,7 +19312,7 @@ bool AllEvalWrapped(const BYTE* room) {
     __try {
         const uintptr_t* b = *reinterpret_cast<const uintptr_t* const*>(room + 0xC8);
         const uintptr_t* e = *reinterpret_cast<const uintptr_t* const*>(room + 0xCC);
-        if (!b) return !e; // (an empty list holds no buffer: nothing in it is unwrapped; 02/11 log: rooms 13, 8, 4, 9, 11 and 10 never kept)
+        if (!b) return !e; // (an empty list holds no buffer: nothing in it is unwrapped; a log had rooms 13, 8, 4, 9, 11 and 10 never kept)
         if (e < b || e - b > 4096) return false;
         for (const uintptr_t* p = b; p < e; p++)
             if (*p && !EvalWrapped(*p)) return false;
@@ -20005,7 +20005,7 @@ bool ExportLotProxy(uintptr_t tracker, RtLampProxy::Lot& out, std::string& why) 
         st.roofed.assign(nt, 0);
         for (size_t t = 0; t < nt && t < g.ceil.size() && t < g.flags.size(); t++) {
             // (the floor from the tile: the grid's ceiling may be the story above's floor, so ceil - 3 m is not this story's floor
-            // there; 02/11 lot C49C: story 3's 4.74 m tiles made story 2's floor 1.74 m and cut story 1's rooms 2 and 8 at 0.75 m
+            // there; lot C49C: story 3's 4.74 m tiles made story 2's floor 1.74 m and cut story 1's rooms 2 and 8 at 0.75 m
             // over their floor through CeilingsUnderAbove)
             GridTileRead tile{};
             if (g.ceil[t] < 1e8f)

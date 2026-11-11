@@ -1235,7 +1235,7 @@ bool PatchSnowFloor(std::vector<DWORD>& t, int texcoord, FloorPatch& out, const 
 // compose put that room's weight in the alpha), and the sky cube's reflection, added where the light meets the albedo
 // ("mad rD.xyz, rX, rB, rS"), is scaled by cA.w (InteriorWall's hemisphere tint) - both by n = flag x night (night: a source the
 // draw sets to the night level), blended in by lrp; tex: the map's texld. n = 0 (unmarked, or by day) keeps every result bit for bit (cmp takes it
-// as is): by day the map holds no daylight, which the game lights these surfaces by (2026-11-09 11-42-45: the floored attic
+// as is): by day the map holds no daylight, which the game lights these surfaces by (without it: the floored attic
 // black at noon). alphaOk: rL.w still the map's alpha at the mad (else read again). N, T2, T3: free temps. indoor: the
 // light's part went in (not when the mad writes rL); spec: the reflection's too.
 // rooms (sU >= 0: samplers sU .. sU + 4 and constants cR .. cR + 4 free; dclAt the place of the sampler declarations): a marked
@@ -1298,7 +1298,7 @@ static void IndoorPick(std::vector<DWORD>& t, const std::vector<Ins>& all, size_
             // The albedo the light meets, X = "mul X.xyz, S.w, A" with S.w the game's wall shade strip (s6 at TEXCOORD1.zw:
             // 0.5 + 0.5 x its texel, x 0.5 along the foot of each story's wall), which InteriorWall has not: on an indoor texel
             // the albedo without it (X / S.w), else the floor line between the room's wall and the attic's showed the attic at half
-            // (light captures 2026-11-09 13-04-54 / 56: 175 below, 72 above, the same light)
+            // (light captures: 175 below, 72 above, the same light)
             const size_t xi = IsReg(r0, kTemp, B) ? 3 : 2;
             const DWORD X = t[y.at + xi];
             if (Type(X) == kTemp && Swz(X) == kSwzXYZW && !(X & 0x0F000000u) && Num(X) != B && Num(X) != N && Num(X) != T3) {
@@ -1330,7 +1330,7 @@ static void IndoorPick(std::vector<DWORD>& t, const std::vector<Ins>& all, size_
             }
             // The outside's atmosphere at the end, "lrp rO.xyz, rW.s, rH, rD" (rD this mad's result, rH the haze colour, rW.s its
             // weight: lrp gives rW x rH + (1 - rW) x rD, so 0 is no haze), which InteriorWall has not (its fog is c10 by v1.x): an
-            // indoor texel takes rD, weight rW x (1 - N) (forcing 1 showed the haze colour alone: attic black, 2026-11-09 13-41-43)
+            // indoor texel takes rD, weight rW x (1 - N) (forcing 1 showed the haze colour alone: attic black)
             const DWORD D = Num(t[y.at + 1]);
             for (size_t k = j + 1; k < firstFlow; k++) {
                 const Ins& z = all[k];
@@ -3467,7 +3467,7 @@ bool PatchIndoorBasis(std::vector<DWORD>& t, DWORD lmSampler, IndoorBasisPatch& 
                              Op(kMin, 3), Dst(kTemp, Acc, 0x7), Src(kTemp, Acc), Src(kTemp, Tmp)});
     edits.push_back({End(ins[static_cast<size_t>(nrm)]), body});
     // diffuse = the unlit-room lights (above) + the basis light x strength (lamps per pixel), as walls take lamp + base
-    // (the strength lifts dim furniture to the floor's light, never past 1: x2 burnt a table under its own lamp white, with a bloom, 05/11)
+    // (the strength lifts dim furniture to the floor's light, never past 1: x2 burnt a table under its own lamp white, with a bloom)
     edits.push_back({End(ins[static_cast<size_t>(chainEnd)]), {Op(kMul, 3), Dst(kTemp, Tmp, 0x7), Src(kTemp, Acc), Src(kConst, cStr, Sw(0, 0, 0, 0)),
                                                                Op(kMax, 3), Dst(kTemp, Acc, 0x7), Src(kTemp, Acc), Src(kConst, cK, Sw(3, 3, 3, 3)),
                                                                Op(kMin, 3), Dst(kTemp, Acc, 0x7), Src(kTemp, Acc), Src(kTemp, Tmp),
@@ -3805,7 +3805,7 @@ bool PatchRoomMapSmooth(std::vector<DWORD>& t, RoomMapPatch& out, bool archAmb, 
                                  Op(kRcp, 2), Dst(kTemp, A, 0x1), Src(kTemp, A, X),
                                  Op(kMul, 3), Dst(kTemp, Acc), Src(kTemp, Acc), Src(kTemp, A, X),
                                  Op(kCmp, 4), Dst(kTemp, r.L), Neg(Src(kTemp, A, W)), Src(kTemp, Acc), Src(kTemp, r.L)}); // the own side's read
-        // the split tiles' atlas (u >= cM.y: a diagonal wall's half tiles in short rotated strips, 03/11): the 4 x 4 taps reach other
+        // the split tiles' atlas (u >= cM.y: a diagonal wall's half tiles in short rotated strips): the 4 x 4 taps reach other
         // half tiles' strips (light far from the pixel, the diamonds along a diagonal wall); there the game's bilinear read
         if (wallMask)
             body.insert(body.end(), {

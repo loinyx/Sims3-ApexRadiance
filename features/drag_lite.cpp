@@ -204,7 +204,7 @@ DWORD g_gpuLogAt = 0;
 // copy was dropped is not held: its solve is the one that lets the edits be taken again (PhysLampPick::EditRefusal)
 bool GpuDrawnRoom(const void* room) { return GpuRoomLamps::DrawnAny(room, 0) || OutdoorDelta::PhysDrawnRoom(room); }
 // An object (not a lamp) dragged in a room the GPU draws: its live table moves its shadow each frame, while a solve begun mid-drag
-// showed it where the solve gathered it until the next one ended (10/11 recording: a sofa's shadow 1 to 3 s behind). Held like a lamp's
+// showed it where the solve gathered it until the next one ended (a sofa's shadow lagged 1 to 3 s). Held like a lamp's
 // drag, for that room alone and at most kMaxHoldMs of moves without a pause
 bool ObjectDragIn(const void* room) { return OutdoorDelta::LiveMovedWithin(room, kStillMs, kMaxHoldMs); }
 bool HoldGpuDrawn(const void* room) {

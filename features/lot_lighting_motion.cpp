@@ -326,7 +326,7 @@ float __fastcall Hook_LotLightBudget(void* mgr, void* edx) {
     // down to the moving budget when they run long (hitches while still were mostly the room solves: 25-50 ms frames). Not
     // during a lamp edit (its rooms keep the edit budgets), the settle window or a lamp switch's boost (their own budgets).
     // A quick day/night switch (LevelLightShare::DayNightSwitching, RoomAmbientPolicy::DayNightWindow): the lot being played gets
-    // the window's budget with the camera still, unpaced (17-18-28: the steady pacing held its rooms at about 3 ms a frame, the
+    // the window's budget with the camera still, unpaced (the steady pacing held its rooms at about 3 ms a frame, the
     // last room of the first switch ended 15.5 s after it); moving, at least kEditMovingMs
     const bool switching = game >= kPriorityMs && game < kLeaveAloneMs && LevelLightShare::DayNightSwitching();
     if (switching) out = std::max(out, moving ? std::min(game, kEditMovingMs) : RoomAmbientPolicy::DayNightWindow::kLotMs);
@@ -342,8 +342,8 @@ float __fastcall Hook_LotLightBudget(void* mgr, void* edx) {
     // A lamp being edited in Build mode (the corrections in Build mode should be near instant): its rooms
     // waiting for or in their solve get 25 ms of the lot being played per frame instead of 15, camera still, once the lamp
     // is let go (while it is dragged the game's 15 ms: in a recording, moving a lamp had become laggy)
-    // (10/11) dosed by the frame time as the settle window is (PaceSettle): flat, a lamp edit or a room 0 sent to its solve held
-    // the frame at 28-31 ms for 8 to 25 s with the camera still (frame profiler 21:02-21:06: the longest stretches of the session)
+    // dosed by the frame time as the settle window is (PaceSettle): flat, a lamp edit or a room 0 sent to its solve held
+    // the frame at 28-31 ms for 8 to 25 s with the camera still (in the frame profiler, the longest such stretches)
     if (!moving && game >= kPriorityMs && game < kLeaveAloneMs && LevelLightShare::LampEditPending() && !LevelLightShare::LampDragging())
         out = std::max(out, game + (kLampEditMs - game) * g_settleScale.load(std::memory_order_relaxed));
     // Many lamps switched at once whose rooms already show their quick pass (06/10, RoomLightQueue::Refining): the refinement
@@ -494,7 +494,7 @@ void PaceSettle() {
     }
     // (2.15.3) a lamp switch's boost is paced the same way while the camera moves (MotionPacedRaise)
     const bool boosted = PerfToggles::MotionPacedRaise.load(std::memory_order_relaxed) && GetTickCount64() < g_boostUntil.load(std::memory_order_relaxed);
-    // (10/11) a lamp edit's raised budget (Hook_LotLightBudget) is dosed by the same scale
+    // a lamp edit's raised budget (Hook_LotLightBudget) is dosed by the same scale
     const bool editing = LevelLightShare::LampEditPending() && !LevelLightShare::LampDragging();
     if (!LevelLightShare::SettlingAfterLoad() && !boosted && !editing) {
         g_baseFrameMs = g_baseFrameMs > 0.0f ? g_baseFrameMs * 0.95f + dt * 0.05f : dt;

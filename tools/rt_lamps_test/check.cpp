@@ -2786,7 +2786,7 @@ bool RatioCheck() {
 }
 
 // ---------------------------------------------------------------- Room 0's texels of a space a room of the story below continues into
-// (ComposePS IndoorOf, Params::inK; the attic over lot C49C's red room, 09/11): a texel with bit 8 is composed as that room's wall
+// (ComposePS IndoorOf, Params::inK; the attic over lot C49C's red room): a texel with bit 8 is composed as that room's wall
 // texel (GpuLampLaw::IndoorTexel with the ambient left to the draw: rgb toned, alpha 1 - sat(k x the toned sum) x its ramp at its
 // height), so with every lamp off its alpha carries the room's ambient weight, which the draw multiplies by the room's ambient as
 // InteriorWall does (not black); every other texel, and every texel with inK 0, is composed as before bit for bit
@@ -4457,7 +4457,7 @@ bool Room0PhysCheck() {
 
 // The stair set: kept only by the floor holes, it only grows, its uploads are bounded, and the floor under the treads loses the lamp
 // A whole tile kept in the split tiles' atlas gets copies at its place in the tile columns; a half tile's block, a tile with texels there
-// and a tile of another map do not (room 8's blocks of the 23-40-21 scene: 7 whole tiles, each copy landing on the map's 4 x 4 hole and border)
+// and a tile of another map do not (room 8's blocks in one scene: 7 whole tiles, each copy landing on the map's 4 x 4 hole and border)
 static void FloorGridTwinChecks() {
     struct T {
         float p[3];

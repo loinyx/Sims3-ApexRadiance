@@ -192,7 +192,7 @@ int main() {
         BounceAt(rows, 1, hue, opposite, Nw, wall);
         Check(wall[1] > 0.0f, "bounce: the wall facing the opening takes it too");
     }
-    // (arch_reach) The blend's length, on F7 and log numbers of 05/11: the 2.66 m arch of (18.06,10.06)-(19.94,11.94)
+    // (arch_reach) The blend's length, on F7 and log numbers: the 2.66 m arch of (18.06,10.06)-(19.94,11.94)
     {
         const float dark[3] = {0.0116f, 0.0116f, 0.0115f}, lit[3] = {0.0288f, 0.0282f, 0.0256f}, wide = 2.66f, a = 0.816f;
         const float dim[3] = {0.0119f, 0.0113f, 0.0113f}, lamplessFill[3] = {0.0322f, 0.0322f, 0.0322f};

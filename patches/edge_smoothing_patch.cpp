@@ -64,7 +64,7 @@ float Luma(float2 uv) { return dot(tex2Dlod(sColor, float4(uv, 0, 0)).rgb, float
 
 // Contrast-adaptive sharpening of one pixel from its 4 neighbours (after AMD FidelityFX CAS, MIT): less where the
 // neighbourhood is already contrasty or near black / white, so no halos. Nothing on a flat area: the Banding Fix grain (2 levels)
-// came out 5x stronger there, and the shadows looked noisy and coarse (05/11)
+// came out 5x stronger there, and the shadows looked noisy and coarse
 float Textured(float3 mn, float3 mx) { float3 d = mx - mn; return smoothstep(3.0 / 255.0, 8.0 / 255.0, max(d.r, max(d.g, d.b))); }
 float3 Sharpen(float3 c, float3 n, float3 s, float3 w, float3 e, float amount)
 {
