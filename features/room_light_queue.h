@@ -69,6 +69,11 @@ bool PlayedLot(uintptr_t mgr, bool* known);
 // GetTickCount when a room of the played lot on or below the camera's story was last seen still waiting for its solve
 // (0: never). Any thread.
 unsigned long PlayedRoomWaitingAt();
+// Microseconds the drain (point 4) has spent since the game started. Any thread (the Frame Profiler's per-frame timeline).
+long long DrainMicros();
+// Render thread: a lamp edit's rooms were waiting at the last drain (the burst that logs "Lamp edit: its rooms settled");
+// false while the drain is off
+bool EditBurstOn();
 // Development build: status lines
 void RenderDeveloperUI();
 }

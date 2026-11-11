@@ -702,6 +702,8 @@ void RestoreAll() {
 namespace RoomLightQueue {
 
 unsigned long PlayedRoomWaitingAt() { return g_playedWaitingAt.load(std::memory_order_relaxed); }
+long long DrainMicros() { return g_drainMicros.load(std::memory_order_relaxed); }
+bool EditBurstOn() { return g_drainOn && g_burst.on; } // (after Stop, g_burst.on keeps its last value)
 
 bool PlayedLot(uintptr_t mgr, bool* known) {
     *known = kSomGet && kPrioLot && g_prioLotOk.load(std::memory_order_relaxed);

@@ -46,6 +46,11 @@ std::atomic<SurfaceAccess> g_access{nullptr};
 std::atomic<TargetReport> g_targetReport{nullptr};
 std::atomic<bool> g_targetInstalled{false};
 std::atomic<bool> g_targetAttempted{false};
+#ifndef APEX_NO_DEV_TOOLS
+std::atomic<bool> g_countRtd{false};
+std::atomic<DWORD> g_rtdCalls{0};
+std::atomic<LONGLONG> g_rtdTicks{0};
+#endif
 
 inline void BeforeAccess(IDirect3DDevice9* dev, IDirect3DSurface9* a, IDirect3DSurface9* b) {
     if (auto access = g_access.load()) HookGuard::Try("High-precision scene before a back-buffer copy", [&] { access(dev, a, b); });
@@ -53,6 +58,19 @@ inline void BeforeAccess(IDirect3DDevice9* dev, IDirect3DSurface9* a, IDirect3DS
 
 HRESULT __stdcall HookedGetRenderTargetData(IDirect3DDevice9* dev, IDirect3DSurface9* src, IDirect3DSurface9* dst) {
     BeforeAccess(dev, src, dst);
+#ifndef APEX_NO_DEV_TOOLS
+    // The call alone: DXVK only marks the read-back (the GPU wait lands at the game's later LockRect); the RTX Remix
+    // bridge blocks here; native drivers unverified.
+    if (g_countRtd.load(std::memory_order_relaxed)) {
+        LARGE_INTEGER a, b;
+        QueryPerformanceCounter(&a);
+        const HRESULT hr = oGetRenderTargetData(dev, src, dst);
+        QueryPerformanceCounter(&b);
+        g_rtdCalls.fetch_add(1, std::memory_order_relaxed);
+        g_rtdTicks.fetch_add(b.QuadPart - a.QuadPart, std::memory_order_relaxed);
+        return hr;
+    }
+#endif
     return oGetRenderTargetData(dev, src, dst);
 }
 
@@ -259,6 +277,15 @@ void SetTargetSubstitution(SurfaceAccess access, TargetReport report) {
     g_access.store(access);
     g_targetReport.store(report);
 }
+
+#ifndef APEX_NO_DEV_TOOLS
+void CountGetRenderTargetData(bool on) { g_countRtd.store(on, std::memory_order_relaxed); }
+bool TakeGetRenderTargetData(DWORD& calls, LONGLONG& qpcTicks) {
+    calls = g_rtdCalls.exchange(0, std::memory_order_relaxed);
+    qpcTicks = g_rtdTicks.exchange(0, std::memory_order_relaxed);
+    return g_targetInstalled.load(std::memory_order_relaxed);
+}
+#endif
 
 bool EnsureTraceHooks(IDirect3DDevice9* dev) {
     if (!EnsureInstalled(dev)) return false; // (Clear, StretchRect and the UP draws)

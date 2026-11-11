@@ -48,6 +48,14 @@ bool EnsureTargetHooks(IDirect3DDevice9* device);
 void SetTargetSubstitution(SurfaceAccess access, TargetReport report);
 HRESULT RawGetRenderTarget(IDirect3DDevice9* device, DWORD index, IDirect3DSurface9** surface);
 
+#ifndef APEX_NO_DEV_TOOLS
+// Development builds (the Frame Profiler's per-frame timeline): while counting is on, the GetRenderTargetData detour adds
+// up its calls and their QueryPerformanceCounter time (off: one relaxed atomic load per call). Take returns both since
+// its last call and starts over; false while the render-target detours are not installed (nothing is counted).
+void CountGetRenderTargetData(bool on);
+bool TakeGetRenderTargetData(DWORD& calls, LONGLONG& qpcTicks);
+#endif
+
 // The diagnostic trace's own detours (SetScissorRect, SetVertexDeclaration, SetFVF; D3D9Hooks::Trace), installed with
 // EnsureInstalled's on the first call and kept; until a trace is set they only cost an atomic load. The SetFVF and
 // SetVertexDeclaration detours always note which of the two was called last (installed at the first frame under the RTX
