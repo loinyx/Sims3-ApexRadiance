@@ -235,6 +235,12 @@ listed twice is offered once. The rigs of a room whose set of such lamps changed
 openings: N (lamps offered, kept)*; F7 (`DescribeDraw`) lists the rig's lamps through openings with their share and
 whether the game kept them.
 
+**Gathers from an emptied list.** A room-mode rig that gathers while the game has emptied its room's light list (the
+room invalidated, state `+0xF0` = 1, list `+0xC8` = `+0xCC`) takes the [NoLight] lights, and Rooms at Night darkens such
+furniture, doors and windows as at night, by day too. `AfterRoomGather` notes the room (at most 4096, the set cleared
+when full); once the room's own gather in [light between stories](level-light-share.md) has finished, its rigs gather
+again from the same list (`TakeEmptyGatherRoom`) instead of waiting for a later timed regather.
+
 **Cap.** The operand at `0x006B9418` is redirected to `g_capScaled`, updated every frame to `*(0x011D0BA8) x max(1,
 forcaNosObjetos)`.
 
@@ -427,6 +433,18 @@ channel (`kBasisCap`). While the light-between-stories directional-map guard is 
 (`LevelLightShare::BasisFloorGuardReady`), a separate cached variant without the cap is used (`g_indoorPs` keys sampler
 0..7, +8 for the uncapped variant), because the cap transferred floor-height shadows onto wall objects (the cap removes 12
 tokens, three instructions). Without the guard the capped variant stays.
+
+**Doors: each face lit by its own room.** An object set in a wall at an opening (a door, glazed or not) draws on smooth
+room light with each face reading the room it looks into. The wall-mask variant of `PatchIndoorBasis` (`side`) moves
+every read of the light (directional maps, wall mask, the room light map cap) along the pixel's world normal by a
+per-draw offset in the pixel shader constant `sideConst`: 0.75 m (as the windows' outdoor read, converted to map UV
+from the vertex shader's light map rows) for an object on a tile edge within 0.12 tiles of a door or window open to lamps
+(`LevelLightShare::OpeningNear`; true when the story has no wall mask), 0 for every other object, which therefore draws as before. A curtain or a cupboard
+against a wall also sits on a tile edge and keeps its read in place. Without this, a glazed door stayed on the game's
+rig, which evaluates its lamps at the door's centre inside the wall (sconces on the same wall arrive edge-on), and drew
+near black beside the lit wall; other doors read the light at the wall line and could show the far room's light on both
+faces. The shader keeps the side read out when it has no room for the extra temporary and constant. Status counter:
+*doors, each face its own side*. `tools/basis_test` has a `side` mode.
 
 ### Windows lit by the room (experimental)
 

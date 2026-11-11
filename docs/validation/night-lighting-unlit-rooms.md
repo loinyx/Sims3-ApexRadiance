@@ -77,3 +77,8 @@ installed hooks or D3D9 draws; the check count includes many slider values rathe
   developer F8 snapshot lists each room's current `+0x110` (drawn), `+0x120` (objects), `+0x650` (sampler copy) and
   normalisation, and counts Apex `WriteAmbient` calls that write the native blue with their caller. Next evidence: an F8
   with a blue bathroom on screen.
+- 3.1.1 changes not yet run in game: a room whose lamps are all blocked is no darker than an empty room beside it (lot
+  `58EF0580`: 0.019 before against 0.049 in the empty room), also after moving *Brightness*; a room the game clears by
+  day waits at its last solved ambient instead of the dark unlit colour; *Brightness* and *Blue tint* moves start no
+  whole-world relight (no `a setting changed` refresh line). `room_ambient_test` covers `MoveBackgroundFloored` and
+  `UnlitSeedDue`.

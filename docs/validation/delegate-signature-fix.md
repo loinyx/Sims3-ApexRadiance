@@ -30,9 +30,9 @@ With `-Exe` it checks that the pattern matches once and that its call leads to `
 
 ## Confirmed in game
 
-- Nothing yet.
+- EA app 1.69.47 (2026-11-11): the log reads `[DelegateSigFix] On`, so the pattern and its call target are found on
+  that build.
 
 ## Open checks
 
-- EA app 1.69.47: the pattern and the call target (unverified, no copy of that build scanned).
 - The log line in a real session, and loads that crashed before the fix.

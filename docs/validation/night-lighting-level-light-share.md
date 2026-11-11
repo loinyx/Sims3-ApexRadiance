@@ -42,6 +42,9 @@ an FPS gain, complete climate coverage or resolution of texture allocation stall
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-11 | `87213f32` (world's active lot getter by signature) | EA app 1.69.47 (`TS3.exe`) in game, log | The getter is found by signature at `0x00C5EF10`; `[SetupLot] gate off` is no longer logged. Whether a lot capture is recognised and skips light sharing on the EA app is not established (open checks) | In game, backend not recorded |
+| 2026-11-11 | `87213f32` (picture-lot gate on the EA app) | EA app 1.69.47 (`TS3.exe`), log review | No defect: 374 of 375 addresses found (only `RefPackDecompress` missing); `RootGetter`, `LodChoice`, `RoomSolve` and the lot priority getters match once each, with the Steam offsets. The session stopped at the household picker (no household played), so no lot reached the high quality and the gate did not run; `+0x288` on the EA app is inferred, not read | Log only |
+| 2026-11-11 | `206e4b45` (borrowed lamps that lit nothing skipped), public build | Steam 1.67.2 in game, played | Frame time and room updates visibly better in play; not measured, and the maps against `perf_borrowed_zero_skip = false` not compared | In game, backend not recorded |
 | 2026-11-10 | Working tree on `8a145cd` (loading triggers of rooms near openings collected) | Standard Release x86 build; `tools/room_ambient_test` (`OpeningSendDue`, `OpeningCoveredAfter`); `python tools/public_text_check.py` | Build: 0 warnings. 163 checks, 0 failures; production room updater 1345 checks, 0 failures. Not checked in game | CPU harness |
 | 2026-11-10 | Working tree on `771017f` (one reflection for an atrium) | Standard Release x86 build; `tools/arch_ambient_test` (`AtriumProbe`); `tools/room_ambient_test`; `tools/rt_lamps_test`; `tools/outdoor_delta_test`; `python tools/public_text_check.py`; both call sites and the fallback signature unique in `TS3W.exe` 1.67.2 | Build: 0 warnings. 0 failures. Not checked in game | CPU harness / native D3D9 |
 | 2026-10-29 | `d59f6ba` (released as 2.18.2, tag `v2.18.2`, ASI SHA-256 `0C96DABA986812C417E40E771CF6B5810B53565285ACD2A1AC801A7D09EE3DAA`; lamp posts on neighbouring lots `358a394`, picked by place `28975fe`, review fixes) | Standard Release x86 build; `tools/i18n_check`; `perl tools/menu_audit.pl .`; developer builds `C23EDBE4` and `907C47DA` in game | Build with no errors; i18n OK (21 languages, 2432 keys); menu audit: no new findings. In game: each move of a post relit every story of the neighbouring lots in 7.5 to 31 ms with no room solves, those lots 0.006 to 0.014 ms a frame; no visible delay after placing or dropping a post. The review fixes of `79c87e1` were not seen in game | In game, backend not recorded |
@@ -241,6 +244,17 @@ topology mutation inside a point is not reproduced. This release does not promis
   `lot capture` and no `room gathers skipped` line in any of these. Any of those lines for a lot played or viewed in
   normal play is a failure: set `fastLotPictures = false`. After picking the household, a screenshot at the same camera
   after 10 s matches a `fastLotPictures = false` run.
+  On the EA app 1.69.47 the getter is found (2026-11-11). The EA session's logs show no defect in the gate's address
+  chain, but no household was played in it, so no lot reached the high quality and the gate was never exercised.
+  **Still to confirm** on the EA app: pick a household and play about a minute; **expected**
+  `[SetupLot] Lot ... quality 1, world active lot ...` and `[RtOutdoorLamps] Active lot tracker ...`. Without them,
+  read `+0x288` of that lot's story managers while the game runs.
+- Borrowed lamps that lit nothing skipped (3.1.1): F7 captures of a multi-story house at night with
+  `perf_borrowed_zero_skip` on and off. **Expected:** identical room maps; the status line counts skipped evaluations.
+  The solve time a room saves is not measured.
+- A lot entering the view opens no lamp edit (3.1.1, not yet tested in game): with a recording on, pan onto a
+  neighbour's lot and back, and enter a lot. **Expected:** no lamp edit window in the log for these; a lamp deleted on
+  the played lot 2 s after entering it still relights at once.
 
 - Loading triggers of rooms near openings collected per lot (3.1.1, not yet tested in game): with *Light between
   stories* on, start New Game and time Play to the game opening, against the same world with the build before. With a

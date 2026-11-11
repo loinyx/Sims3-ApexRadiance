@@ -50,7 +50,7 @@ None.
 
 ## Limitations
 
-- EA app 1.69.47: the pattern is unverified on that build. If it is not found, the fix stays off and logs it.
+- A game build where the pattern is not found keeps the fix off and logs it ([validation](../validation/delegate-signature-fix.md)).
 
 ## Technical reference
 

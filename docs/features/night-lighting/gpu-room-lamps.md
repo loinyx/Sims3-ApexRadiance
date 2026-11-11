@@ -299,7 +299,9 @@ lamp's position, not on its colour or intensity.
 25. Physical model, S8 (02/11): Rooms at Night without a solve. The kept compose scales a roofed texel's ramp x ambient (the
    ceiling pass's `+0x650`, read back by `IndoorSplit`) by the room's `+0x110` now over its solve's (`RtLampModel::AmbScale`,
    `ComposeKeptPS` `gAmb`, c108): exactly 1 while the ambient is unchanged, so the texel is the one before (byte for byte), and
-   only maps holding such texels follow it. After every physical edit taken, the rooms listing the lamp and its own room run the
+   only maps holding such texels follow it. `+0x110` is read only from a solved room (state 4 or 5): a solve zeroes it
+   until its ambient step, and a room with no lamps, whose texels are ambient alone, drew black meanwhile; the previous
+   scale stays until the solve is over. After every physical edit taken, the rooms listing the lamp and its own room run the
    game's ambient step again on the light tree thread (`AmbientDue` -> `UnlitRooms::RetakeAmbient` ->
    `LevelLightShare::ProbeRoomAmbient`: the lamps' share now plus Rooms at Night's colour), written to `+0x110` / `+0x120` and
    to the room's base record (so `MoveBase` keeps moving it with the sliders). Walls, floors and the furniture fill read
@@ -436,6 +438,21 @@ The room's maps are then relit, as for a step of a lamp drag. The room's next so
   3.7 times a step (124 moves a second, 33 steps a second) and the carry moved nothing; read the `[LiveTable]` lines of a minute of Live mode.
 - A table dragged with no lamp moving now relights its room and the rooms joined to it at each step, not 10 times a second. UNVERIFIED in the game.
 - Room 0, the directional maps, a new object and an object dragged into another room still wait for the solve.
+- While the live table moves the shadow, the room's own solve is held as a lamp drag holds its rooms (`DragLite`,
+  `ObjectDragIn` from `OutdoorDelta::LiveMovedWithin`): for that room alone, until its objects have been still for 750 ms,
+  at most 20 s of moves without a pause. A solve begun mid-drag showed the shadow where it gathered the object until the
+  next solve ended, 1 to 3 s behind. Room 0, whose table waits for its solve, is not held.
+
+### Furniture of another story
+
+Each GPU-drawn room's 3D test walks its own story's records. A lamp of an upper story that lights this room (a wall top
+seen through a stairwell) also walks the records of that lamp's room: the room's blocker table holds, in rows of their
+own, the records of up to two rooms of upper stories whose lamps its list holds (`BlockerTable`, `rt_lamp_blockers.h`;
+the shader's walk in `rt_lamps_hlsl.h`). Those lamps walk those rows; the room's own lamps walk exactly what they
+walked before, and a table with no such room is byte for byte the same. A lamp of a lower story shining up at a grazing
+angle walks only the room's own records: joining the lower story's furniture drew a stairwell's soft band as a false
+diagonal shadow on the wall above. A join that fails clears its rows. Each upper story's home room is asked once per
+frame. `outdoor_delta_test` checks the table.
 
 ### Box-type seats
 
@@ -665,7 +682,10 @@ No failure stops the GPU's light for good. Each case below used to last until a 
   `ComposeKeptPS` has the alpha floor; `ComposeRlgPS` (the earlier experiment's) does not.
 - **GPU** (`gpu_room_lamps.cpp`, render thread): `RtOutdoorLamps` mixes `GpuRoomLamps::Sig` (the kept rooms' versions, each
   lamp's law from `RtOutdoorLamps::WorldLaw` now) into each active-lot map's signature, and after its `Compose` calls
-  `GpuRoomLamps::ComposeOver`. `OutdoorDelta::BuildKeptMap` turns a kept room's map into points (`RtLampGpu::KeptMapData`):
+  `GpuRoomLamps::ComposeOver`. A kept room's map data is built on a worker, for its first kept solve in a class as for a
+  re-solve, never inside `Sig` on the render thread (that build took 160-208 ms in one frame); until it is ready the
+  room's texels keep the game's map, and a re-solved room keeps drawing its last solve. The relight's phase line times
+  *the kept rooms' checks*. `OutdoorDelta::BuildKeptMap` turns a kept room's map into points (`RtLampGpu::KeptMapData`):
   parts grouped by lamp in the sum's layout (texel j of the map at `(j % 1024, j / 1024)`), one compose point per place's last
   write (ramp x ambient and ramp from `IndoorSplit` on the CPU), the class-2 blocks with their rows beyond packed in shelves
   of a layout as wide as the atlas, the copies (to places kept or not) and the restores. `Engine::RelightKept`: `AccKeptPS`

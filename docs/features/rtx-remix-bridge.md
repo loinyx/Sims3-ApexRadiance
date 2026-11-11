@@ -8,7 +8,7 @@ worlds. Apex Radiance detects the bridge on its own and runs under it with every
 
 | | |
 |---|---|
-| Availability | Released in 3.0.0 as a separate download (`Apex-Radiance-RTX-Remix-bridge.zip`). Its `dxvk.conf` with `d3d9.countLosableResources = False` (no freeze on a switch to exclusive fullscreen or a new resolution): published again after 3.0.0. A folded install guide in Settings > Compatibility, the uncompressed-textures card and Fullscreen as Borderless under the bridge: Released in 3.1.0 |
+| Availability | Released in 3.0.0 as a separate download (`Apex-Radiance-RTX-Remix-bridge.zip`). Its `dxvk.conf` with `d3d9.countLosableResources = False` (no freeze on a switch to exclusive fullscreen or a new resolution): published again after 3.0.0. A folded install guide in Settings > Compatibility, the uncompressed-textures card and Fullscreen as Borderless under the bridge: Released in 3.1.0. Patches 0011 to 0013, Apex's guard for the old client's vertex input, the bridge logs in captures and the bridge's own Nexus file: In development (PR #60) |
 | Default | Not installed |
 | Menu | Settings > Compatibility: *RTX Remix bridge: Installed* when it runs; while DXVK runs inside the game, the bridge is offered under *Optional* |
 | Configuration | `bridge.conf` (in `Game\Bin` and in `Game\Bin\.trex`) and `dxvk.conf` (in `Game\Bin`); nothing in `ApexRadiance.toml` |
@@ -45,6 +45,11 @@ and patched for The Sims 3.
 app (`TS3.exe`), change `client.targetProcess = TS3W.exe` to `TS3.exe` in both `bridge.conf` files. **Removing:** close
 the game, delete `d3d9.dll`, `bridge.conf`, `dxvk.conf` and `.trex` from Bin, and put the old `d3d9.dll` back. The
 bridge writes its logs to `rtx-remix\logs`.
+
+**The package** holds only what goes into `Game\Bin`: `d3d9.dll`, `bridge.conf`, `dxvk.conf`, the `.trex` folder
+(the server, its `bridge.conf` and DXVK's x64 `d3d9vk_x64.dll`) and one text file, *Apex Radiance RTX Remix
+bridge.txt*, with the install steps followed by the licence texts of the bridge, Detours and DXVK. On Nexus Mods the
+zip is a separate optional file next to `ApexRadiance.asi` ([release-process.md](../release-process.md)).
 
 **In the menu** (Settings > Compatibility, `BridgeGuide` in [`apex_gui.cpp`](../../apex_gui.cpp)): a folded Advanced section, on Windows only (never under Wine or Proton), that shows nothing until it is opened
 (no start note, no pop-up). Without the bridge it is *RTX Remix bridge: how to install*: what the bridge does, that the

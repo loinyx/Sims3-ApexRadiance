@@ -137,8 +137,10 @@ one change for every floor, shown once it is final, is the intended result.
   mark (`RoomAmbientPolicy::UrgencyKept`); the "settled" log line ends with `ended: complete` or `ended: urgency expired`.
 - A move's safety net comes 200 ms after it (was 300 ms), the drag's quiet time.
 - An edit's room on another lot than the one being played (a lamp the game disables or enables there, a Sim's switch, a
-  neighbour's dusk) keeps an urgency of at most 1000: after the played lot's camera story (x4000) and the stories below
-  it (x2000), before every other room. Its urgency on any lot had every room of the played lot wait behind it. The
+  neighbour's dusk) keeps an urgency of at most 10 (`kOffLotUrgency`): class 0 has 100 times the game's priority of
+  class 2, so at 1000 a neighbour's class-0 edit room still went before the played lot's class-2 rooms on the camera's
+  story (x4000) and below it (x2000), which showed their quick pass for up to 49.6 s after a lot entry. Its urgency on
+  any lot had every room of the played lot wait behind it. The
   played lot's own edits keep their whole urgency. The status line counts these as "edit priorities of other lots kept
   below the played lot's".
 - A lamp edit is pending (`LevelLightShare::LampEditPending`: the drain's edit pacing, the edit hold, the drag settle)
@@ -209,8 +211,13 @@ and feeds this queue.
 - **Lot entry.** The settle window (`LevelLightShare::SettlingAfterLoad`: 15 s after the world goes live) also opens for
   10 s when another lot becomes the high-quality lot, the camera entering it or coming back
   (`[LevelLightShare] Lot <tracker> entered`): the extra solves take the settle budget instead of 4 ms (1 ms while the
-  camera moves), and the played lot keeps the game's budget while the camera moves. Lamps the lot adds or removes then are
-  not lamp edits, as after a load.
+  camera moves), and the played lot keeps the game's budget while the camera moves. Past those 10 s the window stays
+  open, up to 30 s after the entry, while a room of the played lot on or below the camera's story still waits for its
+  solve (`RoomLightQueue::PlayedRoomWaitingAt`, seen by the priority hook within the last second): a camera pan to the
+  next lot and back otherwise left 6 rooms waiting at the steady pace, about 110 ms of solving a second instead of 460.
+  Lamps the lot adds or removes then are not lamp edits, as after a load, and a lamp added or removed counts as an edit
+  only once the lot has been the played lot for 2 s, a grace that starts again at every entry (a camera back on the
+  played lot re-adds the lamps its level of detail dropped) ([level-light-share.md](../night-lighting/level-light-share.md#part-2-refresh-cascade)).
 
 ## Compatibility and interactions
 

@@ -26,6 +26,13 @@ Steam 1.67.2, 3840x2160 at 240 Hz, RTX Remix bridge installed, Sims3SettingsSett
 | `window_mode = "windowed"` over Sims3SettingsSetter's borderless window | window style `0x14CA0000` (caption, no frame resize), client 3840x2160; Sims3SettingsSetter reapplied its borderless window once and Apex put its own back, no further changes |
 | 120 fps limit, game in the background | 93.6 fps (the game's own 10 ms background sleep is the cap), frame time varies by 0.24 ms, timer late by up to 0.35 ms |
 
+EA app 1.69.47 (`TS3.exe`), 2026-11-11, commit `8f762fba` (resolution request found by signature):
+
+| Check | Result |
+|---|---|
+| Resolution set in Apex above the game's (`Options.ini` at 1024x768) | The log has `Game resolution 1024x768 -> 3840x2160` at start; the game draws at 3840x2160, not stretched. Confirmed in game |
+| Resolution changed live from the menu: 2560x1600, then back to 3840x2160 | Each change applies through the game's own resolution change. Confirmed in game |
+
 ## Pending
 
 - Focused game: 60 / 120 / 165 / 237 fps caps, measured rate and variation.

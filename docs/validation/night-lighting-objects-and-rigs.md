@@ -114,3 +114,8 @@ The updated resource-path fixture passed 13,754 checks. Geometry producers are f
 - Arcade column (not checked in game): a column or object inside a roofed arcade, a few metres behind an arch from a
   garden post, takes the post's dim light instead of drawing black; the F7 note says "kept" for that lamp, and the
   Night Lighting status counts "kept under the game's cut" (offline: `tools/roofed_openings_test`, the rig cut checks).
+- Doors lit per face (3.1.1, not checked in game): a glazed door beside a lit sconce at night. **Expected:** each face
+  takes the light of the room it looks into, no near-black door beside the lit wall; curtains and cupboards against a
+  wall unchanged; the status counts *doors, each face its own side*. Offline: `basis_test` in `side` mode.
+- Rigs gathered from an emptied list (3.1.1, not checked in game): by day, furniture, doors and windows of a room the
+  game invalidated are not darkened as at night while the room waits (before: 1.5 to 21 s in a day recording).

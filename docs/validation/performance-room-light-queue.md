@@ -73,3 +73,7 @@ not identified.
   gap (`LampLotGap`) and the 200 ms move delay; the map hold itself has no offline harness.
 - Quick update for lamp switches (with *Lamp switches all at once* off): rooms show a quick light within a few frames
   and refine without a frame-rate drop.
+- Lot entry priorities (3.1.1, not measured in game): enter a lot and pan to the next lot and back with a recording on.
+  **Expected:** a neighbour's edit room no longer goes before the played lot's waiting rooms (before: quick pass for up
+  to 49.6 s); the entry budget lasts while the played lot's rooms on or below the camera's story wait (up to 30 s;
+  before, the lot took 18.8 s to look right after a pan back); no false lamp edit on the way back.

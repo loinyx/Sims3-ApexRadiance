@@ -158,3 +158,9 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
   (session 2026-11-10 14-39-28) found the High-precision scene's resolve restoring a stale declaration, 248 STALE of
   249 no-scene frames. Bridge patch 0012 and Apex's vertex input restore are built; not yet run in game (test plan
   step 6).
+- Patch 0011 (stale viewport after `SetRenderTarget(0)` or `Reset`): unverified in game that the sea no longer loses
+  its reflection for a frame.
+- Patch 0013 (idle copy fetches), as of 2026-11-11: unverified in game. Still to measure on a still lot: no blinking
+  parts of the picture, and the game's free address space and largest block against the 3.1.0 bridge.
+- `ApexRadiance.asi` 3.1.1 with the outdoor maps' room bases and UV maps in video memory (commit `94596c40`): the
+  address space it frees under the bridge is not measured.

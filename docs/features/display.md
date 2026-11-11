@@ -10,7 +10,7 @@ window and frame limiter when that mod is installed.
 
 | | |
 |---|---|
-| Availability | Released in 3.1.0 |
+| Availability | Released in 3.1.0. Resolution through the game's own resolution change (every build, EA app 1.69 included) and the game's exclusive fullscreen run as Borderless under the RTX Remix bridge: In development (PR #60) |
 | Default | Game setting, no limit (nothing changes) |
 | Menu | System > Display |
 | Configuration | `[screen]` in `ApexRadiance.toml` (machine settings: not part of profiles) |

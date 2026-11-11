@@ -139,7 +139,16 @@ Press **F8** to save a screenshot with Apex effects applied. You can choose whet
 - The Sims 3 for Windows: Steam **1.67.2** (`TS3W.exe`) or EA app **1.69** (`TS3.exe`). The menu reports when a feature is unavailable on your game version.
 - An ASI loader in the game's `Game\Bin` folder, such as [Ultimate ASI Loader](https://github.com/ThirteenAG/Ultimate-ASI-Loader).
 
-### Install or update
+### Install with Apex Radiance Setup (recommended)
+
+1. Close the game and launcher.
+2. Download `ApexRadianceSetup.exe` from the [latest release](https://github.com/loinyx/Sims3-ApexRadiance/releases/latest) and run it.
+3. Pick your game, choose the components and click **Install**.
+
+Run Setup again to update, check or repair the installation, or to remove it; it keeps a backup of every file it
+replaces. See [Apex Radiance Setup](docs/features/installer.md).
+
+### Install or update by hand
 
 1. Close the game and launcher.
 2. Download `ApexRadiance.asi` from the [latest release](https://github.com/loinyx/Sims3-ApexRadiance/releases/latest).

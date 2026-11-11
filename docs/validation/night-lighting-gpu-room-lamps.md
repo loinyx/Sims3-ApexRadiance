@@ -112,3 +112,8 @@ in the 2026-11-04 recording), the stain under a moved lamp gone, rigs at their f
   `VPOS` with pre-transformed vertices, tested on NVIDIA.
 - `MigrateRoomLamps` has no test of its own.
 - Whole room-0 tiles beside a diagonal wall (`AddFloorGridTwins`): a deck beside a diagonal wall should show a lamp's light with no steps. Offline: `rt_lamps_test`, and room 8 of the 05/11 23-40-21 scene gives 7 tiles whose copies land on the map's 4 x 4 holes. Not run in game; room 0's own texels were not recorded.
+- 3.1.1 changes not yet run in game: a room with no lamps keeps its ambient while it is solved (not black); a room's
+  first kept solve built on a worker (no 160-208 ms frame while the camera moves over a lot solved for the first time);
+  an object dragged in a GPU-drawn room holds the room's solve (the shadow follows the drag with no 1-3 s lag); furniture
+  of an upper story shading a wall its lamps light through a stairwell, with no false diagonal shadow from a lower
+  story's lamp (F7 captures of the 20-39-31 and 21-03-16 scenes). `outdoor_delta_test` covers the cross-story table.

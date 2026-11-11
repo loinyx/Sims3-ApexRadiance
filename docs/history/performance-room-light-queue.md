@@ -336,3 +336,21 @@ every lot send its rooms near openings again (147 edits sent 1053 rooms), althou
 **Ninth session (2026-10-27, `lamp_edit_lot_only`):** a lamp switched off and on near a stair opening still updated the
 story below, and the minute lines showed no error from the change; the switch ships. The session had too few lamp
 edits (3) to compare the number of rooms sent with the earlier 1053 a minute.
+
+### 2026-11-10: lot entry took 49.6 s to final light
+
+**Context:** a recording of a lot entry showed the visible rooms on their quick pass for up to 49.6 s, and a camera pan
+to the next lot and back took 18.8 s before the played lot looked right.
+
+**Finding:** four causes, each in the recording. A neighbour lot's edit room at class 0 (100 times the game's priority
+of class 2) times the off-lot urgency cap of 1000 outranked the played lot's class-2 rooms on the camera's story; a lot
+entering the view flipped its lamps' enabled bits and rebuilt its wall lists, which opened 12-16 s lamp edit windows
+with no player input (found with a temporary log of each edit's cause, `20e6b6bc`); the entry budget ended after a
+fixed 10 s with 6 rooms still waiting, the rest solving at about 110 ms a second instead of 460; and on the pan back
+the game freed and recreated the class-2 maps, so every room 0 was solved again (about 3.5 s each, 14 of the 18.8 s).
+
+**Outcome:** kept. The off-lot urgency cap is 10; a walk without a lamp note is no edit unless a lamp is added or
+removed on a lot played for 2 s (the grace restarts at each entry); the entry budget lasts up to 30 s while a played-lot
+room on or below the camera's story waits; room 0's kept solve is written back when none of its lights changed
+([outdoor-lamp-delta](../features/night-lighting/outdoor-lamp-delta.md)). The cause log stays in developer builds and
+recordings only. Not measured in game after the changes.

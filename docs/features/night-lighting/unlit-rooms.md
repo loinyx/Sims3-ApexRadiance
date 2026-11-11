@@ -55,8 +55,10 @@ walls and floors on the next frame, without a new light solve where possible.
 | Refresh the lighting (button, with its shortcut chip) | (not saved) | action | | | Relights terrain, lot stories, every room of every loaded lot (basements too) and object rigs now and 2 s later (`NightLighting::RefreshAll`) |
 
 Values outside 10 to 80% saved by older versions or profiles are clamped on load; the keys are unchanged. Reset sets the
-defaults above. All settings apply live (`UnlitRooms::Set` every frame). Any Night Lighting setting change also triggers
-the automatic *Refresh the lighting* 1 s after the last change.
+defaults above. All settings apply live (`UnlitRooms::Set` every frame). *Brightness* and *Blue tint* are saved without
+the automatic *Refresh the lighting*: Rooms at Night retints the rooms in place and solves only those it cannot move once
+the slider rests (*Applying a change*). Any other Night Lighting setting change triggers that refresh 1 s after the last
+change.
 
 ## Compatibility and interactions
 
@@ -144,8 +146,11 @@ colour ...` (*not set yet: default* while still zero).
 
 The two top-up calls go through `BaseHook<0>` / `BaseHook<1>` while Rooms at Night is on, for indoor rooms that are not
 roofless. The unlit colour C (family by the lot test `FUN_00c63140` on the room's lot id `+0x10/+0x14`, times the scalar
-`[0x011D0B88]`) is always added to the lamps' ambient instead of only topping it up, and the result is never below C on any
-channel: a room whose listed lamps are all blocked came out at about a third of C, darker than an empty room beside it.
+`[0x011D0B88]`) is always added to the lamps' ambient instead of only topping it up, and the result is never below the
+unscaled unlit colour on any channel, the value the game's ambient step (`FUN_006a0f50`) writes for an empty list: a room
+whose listed lamps are all blocked came out at about a third of that, darker than an empty room beside it. `MoveBase`
+keeps a room that sits on this floor on the new floor when a slider moves (`RoomAmbientPolicy::MoveBackgroundFloored`);
+one above it moves by the base change and never goes under the new floor.
 The lamps' share is recovered from
 the game's result (sums over x, y, z with weight 1.0 `[0x0107A538]`; a top-up happened iff sum(out) < sum(C), then
 sum(lamp) = (sum(out) - sum(C)^2) / (1 - sum(C))). Each room's C and results are kept (`g_baseRooms`, keyed by room
@@ -168,11 +173,15 @@ N, moved at once N)*.
   lit rooms) are sent to the game's queue (deferred while being solved), then the rigs once more 1.5 s later.
 - A lit room's base survives a rejected queue request and is retired only when the queue accepts the restoring solve
   for the same manager and id; a fresh `NoteBase` result cancels the retirement.
-- A roofed room with no lamps that is marked or gathered for its solve (states 1 and 2) or solved (4 and 5) with both ambient colours exactly
-  0 (a new room, or one solved while roofless, which skips the ambient step) gets its family's target colour at once
-  (`RoomAmbientPolicy::UnlitSeedDue`); until then its walls draw black. The target is what the ambient step writes for an
-  empty list (Apex's colour while on, the game's while off), so the solve that follows lands on the same value. State 3
-  is left to the step itself. Unverified in game.
+- A roofed room, with or without lamps, that is marked or gathered for its solve (states 1 and 2) or solved (4 and 5)
+  with both ambient colours exactly 0 (a new room, one solved while roofless, which skips the ambient step, or one the
+  game invalidated) gets its family's target colour at once (`RoomAmbientPolicy::UnlitSeedDue`); until then its walls
+  draw black. The target is what the ambient step writes for an empty list (Apex's colour while on, the game's while
+  off), a lower bound for any solved roofed room. State 3 is left to the step itself. A room still waiting for its solve
+  (states 1 and 2) whose last solve is known (`g_baseRooms`) takes that solve's ambient pair instead, never below the
+  target: by day a window-lit room's ambient is up to 13 times the unlit colour, and its maps on screen still show that
+  light. Its own solve writes the final values over both. When a solve ends between the state read and these writes,
+  the room is sent to be solved again. Unverified in game.
 - Unset periodic deadlines (0) are always due; real deadlines use wrap-safe comparisons.
 - Once a second, a reconciliation retries unknown or unbased idle rooms (once per target and per address, manager and
   id), including rooms skipped while their solve was active and rooms streamed in. Failed queue requests drop their sent

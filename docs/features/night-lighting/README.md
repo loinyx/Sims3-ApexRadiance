@@ -181,7 +181,10 @@ Notes:
 - **Live vs reinstall.** Every menu edit goes through `Edit()`: `ApplyLive` installs or removes the parts that follow
   their switch (`LotLightBridge::SetEnabled`, `ObjectLightBridge::Install/Uninstall`, `LevelLightShare::Install/Uninstall`,
   `RigTracker::Install/Uninstall`), the configuration is saved and an automatic lighting refresh runs 1 s after the last
-  change (`RequestAutoRefresh`). `Update()` schedules a reinstall only when `postesAcesosNoCalculo`,
+  change (`RequestAutoRefresh`). When only *Street lamps light lots* changed and outdoor light through openings into
+  roofed rooms is on, that option's opening balance has already relit every room, so the refresh leaves the rooms alone
+  (terrain, lots and object rigs still refresh) and walls change light once. Rooms at Night's *Brightness* and *Blue
+  tint* sliders bypass `Edit()` ([unlit-rooms.md](unlit-rooms.md#settings)). `Update()` schedules a reinstall only when `postesAcesosNoCalculo`,
   `qualidadeAltaEmTodosOsLotes` or `gramaDoLoteUsaLuzDoLote` changed (they change code bytes), or when `luzDoLoteNaGrama`
   is on but its code could not be installed. `ReinstallNow` runs on the render thread through `DeferredReinstall`
   (`RenderCallbacks::endSceneBeforeOverlay`) and keeps the world state and ground light maps
