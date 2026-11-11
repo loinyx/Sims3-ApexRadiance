@@ -2,8 +2,9 @@
 
 A Windows program, `ApexRadianceSetup.exe`, that installs Apex Radiance and the mods it works with into The Sims 3,
 keeps them up to date, checks the installation and repairs or removes it. The player picks the game and the components;
-Setup downloads each file from its author's own release and changes only what differs from that choice. It is optional:
-the manual install in the [README](../../README.md#installation) gives the same result.
+Setup downloads each file from its author's own release and changes only what differs from that choice. Every change
+Setup makes can be undone from a restore point. It is optional: the manual install in the
+[README](../../README.md#installation) gives the same result.
 
 ## Status
 
@@ -12,7 +13,7 @@ the manual install in the [README](../../README.md#installation) gives the same 
 | Availability | In development (3.1.1); `ApexRadianceSetup.exe` is a release asset |
 | Default | Optional, a separate download |
 | Menu | None: a separate program, not part of the in-game menu |
-| Configuration | `Game\Bin\Apex Radiance backup\setup.json` (written by Setup); language in `%LOCALAPPDATA%\Apex Radiance Setup\language.txt` |
+| Configuration | `Game\Bin\Apex Radiance backup\setup.json` (written by Setup); restore points in `Game\Bin\Apex Radiance backup\restore`; language in `%LOCALAPPDATA%\Apex Radiance Setup\language.txt` |
 | Source | [`installer/`](../../installer/) ([installer/README.md](../../installer/README.md)) |
 
 ## The problem
@@ -39,10 +40,22 @@ Setup finds the game, compares what is installed with the player's choice and ap
 5. **Compatibility fixes.** At the end of every install, or with *Fix settings* on the Components step, Setup runs the checks of the game's
    Settings > Compatibility page before the game starts and fixes what it can (a second ASI loader or Apex copy, a
    wrong `client.targetProcess`, a missing `Resource.cfg`); the rest is reported with a link.
-6. **Check installation.** On a game that has Apex Radiance, the welcome page shows what is installed and whether it is
+6. **Suggestions.** What Apex Radiance recommends in game is listed as *Suggested for Apex Radiance* on the Components
+   step and on the game's status, only while `ApexRadiance.asi` is installed: turning off the game's Edge Smoothing
+   when it blocks Apex effects that are on, moving a renamed second copy of `ApexRadiance.asi` aside, and the renderer
+   and Sims3SettingsSetter Apex recommends. None runs with Install or Repair: each has its own *Apply* (or *Apply all
+   suggestions*), and a component suggestion points to Components. Applying one keeps the Components choices not yet
+   installed. The full list is in [installer/README.md](../../installer/README.md#suggestions).
+7. **Restore points.** Before every change (install, update, repair, removal, a fix or a suggestion) Setup opens a
+   restore point: a copy of each file as it was before Setup first touched it, in `Game\Bin` and in Documents, and the
+   files and folders it created. Every write of `ApexSetup.Core` goes through one function, so nothing is left out, and
+   a file's read-only attribute is kept. An action that changes nothing keeps no point; the newest 5 are kept. The
+   *Restore points* card on *Repair or remove* lists them; *Restore* puts the files back and undoes every newer point
+   too. When a change fails, its error offers *Undo these changes*.
+8. **Check installation.** On a game that has Apex Radiance, the welcome page shows what is installed and whether it is
    up to date, with *Update now* for the components that have a newer release. *Check installation* scans the game
    again and verifies the installed files and the compatibility checks.
-7. **Repair or remove.** *Repair* downloads and copies again everything installed. Each component can be removed on its
+9. **Repair or remove.** *Repair* downloads and copies again everything installed. Each component can be removed on its
    own, putting back the files it replaced. *Uninstall everything* removes Apex Radiance and what Setup installed and
    restores every replaced file; mods installed by hand and the settings in Documents stay.
 
@@ -68,15 +81,18 @@ and keeps a copy of `Options.ini`, restored when the player goes back to the gam
 
 - Windows 10 version 1809 or later, 64-bit.
 - Without the GitHub API (60 calls an hour per address) Setup reads the release pages instead.
-- Backups cover the files Setup replaced in `Game\Bin` and `Options.ini`; files changed by hand are not tracked.
-- Game Edge Smoothing (MSAA) is left as it is: its `Options.ini` key is unverified, and Apex asks to turn it off in
-  game.
+- Restore points cover the files Setup changes; files changed by hand are not tracked. Restoring is final, needs the
+  game closed, and only the newest 5 points are kept.
+- The Edge Smoothing suggestion reads `Options.ini` `edgesmoothing`, where Apex reads the back buffer: 0 was seen with
+  no MSAA, and that every other value means MSAA is unverified in game. It changes the file only when the player clicks
+  *Apply*.
 
 ## Technical reference
 
 - WinUI 3 on .NET 8, published as one self-contained x64 exe (`PublishSingleFile`, no MSIX, no runtime to install;
   [ApexSetup.csproj](../../installer/ApexSetup/ApexSetup.csproj)). The engine and the compatibility checks are in
-  [ApexSetup.Core](../../installer/ApexSetup.Core/) (`Engine.cs`, `Compat.cs`).
+  [ApexSetup.Core](../../installer/ApexSetup.Core/) (`Engine.cs`, `Compat.cs`); restore points in `RestorePoints.cs`
+  (`Fs` is the one place that writes).
 - Each language is a `Strings.<code>.cs` table with the English text as key; `ApexSetup.Tests` checks every table.
 - Errors are logged to `%TEMP%\ApexRadianceSetup.log`. `APEX_SETUP_DRY_RUN=1` shows what Setup finds and would change
   while writing nothing.
@@ -85,6 +101,6 @@ and keeps a copy of `Options.ini`, restored when the player goes back to the gam
 
 ## See also
 
-- [installer/README.md](../../installer/README.md): components, compatibility fixes, build and test
+- [installer/README.md](../../installer/README.md): components, compatibility fixes, suggestions, build and test
 - [README installation](../../README.md#installation): the manual install
 - [RTX Remix bridge](rtx-remix-bridge.md), [Display](display.md)
