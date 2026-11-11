@@ -88,6 +88,24 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception) { _offline = true; }
         RefreshAll();
+        if (!_offline) await UpdateSetupAsync();
+    }
+
+    // A newer Setup in the latest Apex release is downloaded and checked first; the player restarts into it before installing.
+    async Task UpdateSetupAsync()
+    {
+        if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1" || Environment.ProcessPath is not { } self
+            || _latest.GetValueOrDefault(Releases.Apex) is not { } apex) return;
+        try
+        {
+            if (await SelfUpdate.DownloadIfNewerAsync(apex, self) is not { } file || _busy) return;
+            var v = FileVersionInfo.GetVersionInfo(file).FileVersion;
+            if (!await Confirm(T("A new Setup is ready"), T("Apex Radiance Setup {0} was downloaded and checked. Restart Setup to install with it.", v ?? ""), T("Restart now"))) return;
+            SelfUpdate.Replace(file, self);
+            SelfUpdate.Restart(self, Environment.GetCommandLineArgs().Skip(1));
+            Application.Current.Exit();
+        }
+        catch (Exception e) { App.Log(e); } // Setup keeps working as it is
     }
 
     GameItem Item(Game g) => new()
@@ -683,7 +701,7 @@ public sealed partial class MainWindow : Window
         foreach (var c in _lastInstall)
             DoneSummary.Children.Add(new TextBlock { Text = T("Installed: {0} {1}", Name(c), _state?.Installed(c) ?? ""), FontSize = 12, Foreground = (Brush)Application.Current.Resources["ApexSoftTextBrush"] });
         if (_game is { } g)
-            DoneSummary.Children.Add(new TextBlock { Text = T("Copies of replaced files: {0}", Manifest.DirOf(g.Bin)), FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = (Brush)Application.Current.Resources["ApexMutedBrush"] });
+            DoneSummary.Children.Add(new TextBlock { Text = T("Copies of replaced files: {0}", Backup.Root(Scan.DocumentsFor(g))), FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = (Brush)Application.Current.Resources["ApexMutedBrush"] });
     }
 
     void OnOpenBin(object sender, RoutedEventArgs e)

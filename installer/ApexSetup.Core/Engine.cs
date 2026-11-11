@@ -14,10 +14,10 @@ public sealed class ManifestFile
 {
     public string Component { get; set; } = "";
     public string Path { get; set; } = "";
-    public string? Backup { get; set; } // the file Setup moved aside, restored on removal
+    public string? Backup { get; set; } // the copy of the file Setup replaced (under Backup.Root), restored on removal
 }
 
-// What Setup put where, kept in Game\Bin\Apex Radiance backup\setup.json next to the backups.
+// What Setup put where, kept in Game\Bin\Apex Radiance backup\setup.json (the replaced files are under Backup.Root).
 public sealed class Manifest
 {
     public List<ManifestFile> Files { get; set; } = new();
@@ -203,40 +203,40 @@ public static class Engine
         CheckWritable();
         var s = Scan.Run(g, docs);
         var m = s.Manifest;
+        Backup.Collect(m, docs);
         var list = Components.All.Reverse().Where(components.Contains).ToList(); // loader first, bridge last
+        var b = new Backup(g.Bin, docs, list.Count > 0 ? "Setup " + string.Join(", ", list) : "Compatibility fixes");
         int i = 0;
         foreach (var c in list)
         {
             p?.Report(new((double)i / list.Count, "Downloading {0}", c));
             var (files, version) = await src.FetchAsync(c, g, docs, ct);
             p?.Report(new((i + 0.5) / list.Count, "Copying {0}", c));
+            if (c == Components.Apex) b.Label = $"Apex Radiance {s.ApexVersion switch { null => "none", "?" => "unknown", var v => v }} to {version}"; // names the folder, made on the first copy
 
             if (c is Components.Bridge or Components.Dxvk && s.Layer is Layer.Native or Layer.Other && m.OptionsBackup is null && File.Exists(OptionsIni(docs)))
-            {
-                m.OptionsBackup = Path.Combine(Manifest.DirOf(g.Bin), "Options.ini.bak");
-                Directory.CreateDirectory(Manifest.DirOf(g.Bin));
-                File.Copy(OptionsIni(docs), m.OptionsBackup, true);
-            }
-            foreach (var (from, to) in files) Place(m, c, from, to);
+                m.OptionsBackup = b.Keep(OptionsIni(docs), "Graphics options before the renderer changed; put back with the game's own Direct3D 9");
+            foreach (var (from, to) in files) Place(m, b, c, from, to);
             if (c == Components.Bridge)
                 foreach (var conf in new[] { Path.Combine(g.Bin, "bridge.conf"), Path.Combine(g.Bin, ".trex", "bridge.conf") })
                     SetTargetProcess(conf, g.Exe);
             if (c == Components.Modernization) EnsureResourceCfg(docs);
-            if (c == Components.Apex) RemoveLeftovers(m, g.Bin);
+            if (c == Components.Apex) RemoveLeftovers(b, g.Bin);
             m.Versions[c] = version;
             m.Save(); // after each component, so a failure later keeps what is done removable
             i++;
         }
         // the install leaves nothing known broken (checks after the copies: the bridge, Sims3Performance and S3SS rules depend on them)
         p?.Report(new(0.98, "Fixing incompatible settings"));
-        foreach (var fix in Compat.Check(g, Scan.Run(g, docs), docs).Where(x => x.CanFix)) fix.Fix!();
+        foreach (var fix in Compat.Check(g, Scan.Run(g, docs), docs, b).Where(x => x.CanFix)) fix.Fix!();
         p?.Report(new(1, "Done"));
     }
 
-    public static void Remove(Game g, string c, string? docs = null)
+    public static void Remove(Game g, string c, string? docs = null, Backup? b = null)
     {
         docs ??= Scan.DocumentsFor(g);
         CheckWritable();
+        b ??= new Backup(g.Bin, docs, "Removed " + c);
         var m = Manifest.Load(g.Bin);
         var layerBefore = Scan.Run(g, docs).Layer;
         // hand-installed files first, so a backup restored below is never taken for one
@@ -245,12 +245,12 @@ public static class Engine
             var p = Path.Combine(g.Bin, rel);
             // only the d3d9.dll of the layer being removed
             if (rel == "d3d9.dll" && layerBefore != (c == Components.Dxvk ? Layer.Dxvk : Layer.Bridge)) continue;
-            if (File.Exists(p) && !m.Files.Any(f => Same(f.Path, p))) File.Delete(p);
+            if (File.Exists(p) && !m.Files.Any(f => Same(f.Path, p))) b.Keep(p, "Installed by hand, removed", move: true);
         }
         foreach (var f in m.Files.Where(f => f.Component == c).ToList())
         {
             if (File.Exists(f.Path)) File.Delete(f.Path);
-            if (f.Backup is not null && File.Exists(f.Backup)) File.Move(f.Backup, f.Path, true);
+            if (f.Backup is not null && File.Exists(f.Backup)) File.Copy(f.Backup, f.Path, true); // the backup keeps its copy
             m.Files.Remove(f);
         }
         if (c == Components.MonoPatcher && Directory.Exists(Path.Combine(Scan.Packages(docs), "MonoPatcher")))
@@ -267,34 +267,34 @@ public static class Engine
             // the game had its own D3D9 before: the copy taken then matches the card it sees again, so nothing resets
             if (m.OptionsBackup is not null && File.Exists(m.OptionsBackup) && !File.Exists(Path.Combine(g.Bin, "d3d9.dll")))
                 File.Copy(m.OptionsBackup, OptionsIni(docs), true);
-            if (m.OptionsBackup is not null && File.Exists(m.OptionsBackup)) File.Delete(m.OptionsBackup);
             m.OptionsBackup = null;
         }
         m.Versions.Remove(c);
         m.Save();
         // the restored d3d9.dll is a loader again: the one Setup added for the bridge would load every mod twice
         if (c is Components.Bridge or Components.Dxvk && m.Versions.ContainsKey(Components.Loader) && Scan.Run(g, docs).LoaderIsD3d9)
-            Remove(g, Components.Loader, docs);
+            Remove(g, Components.Loader, docs, b);
     }
 
     public static void RemoveAll(Game g, string? docs = null)
     {
         // Apex, and what Setup installed; mods the player installed by hand stay (Repair or remove has a row for each)
+        docs ??= Scan.DocumentsFor(g);
         var s = Scan.Run(g, docs);
+        var b = new Backup(g.Bin, docs, "Uninstall");
         foreach (var c in Components.All)
-            if (c == Components.Apex || s.Manifest.Versions.ContainsKey(c)) Remove(g, c, docs);
+            if (c == Components.Apex || s.Manifest.Versions.ContainsKey(c)) Remove(g, c, docs, b);
     }
 
-    static void Place(Manifest m, string c, string from, string to)
+    // Every file replaced goes to the backup; a foreign one (not an update of the same mod) is put back on removal.
+    static void Place(Manifest m, Backup b, string c, string from, string to)
     {
         var owned = m.Files.FirstOrDefault(f => Same(f.Path, to));
         string? backup = owned?.Backup;
-        if (owned is null && File.Exists(to) && !Updates.Contains(Path.GetFileName(to)))
+        if (File.Exists(to) && !File.ReadAllBytes(to).AsSpan().SequenceEqual(File.ReadAllBytes(from)))
         {
-            var rel = to.StartsWith(m.Bin, StringComparison.OrdinalIgnoreCase) ? Path.GetRelativePath(m.Bin, to) : Path.GetFileName(to);
-            backup = Path.Combine(Manifest.DirOf(m.Bin), rel.Replace('\\', '_') + ".bak");
-            Directory.CreateDirectory(Manifest.DirOf(m.Bin));
-            File.Move(to, backup, true);
+            if (owned is null && !Updates.Contains(Path.GetFileName(to))) backup = b.Keep(to, "Replaced; put back when " + c + " is removed", move: true);
+            else b.Keep(to, "Earlier version, replaced by " + c);
         }
         Directory.CreateDirectory(Path.GetDirectoryName(to)!);
         File.Copy(from, to, true);
@@ -303,14 +303,10 @@ public static class Engine
     }
 
     // An older combined build or a second copy of the ASI would load Apex twice.
-    static void RemoveLeftovers(Manifest m, string bin)
+    static void RemoveLeftovers(Backup b, string bin)
     {
         foreach (var p in new[] { Path.Combine(bin, "S3SSApex.asi"), Path.Combine(bin, "scripts", "ApexRadiance.asi"), Path.Combine(bin, "plugins", "ApexRadiance.asi") })
-            if (File.Exists(p))
-            {
-                Directory.CreateDirectory(Manifest.DirOf(bin));
-                File.Move(p, Path.Combine(Manifest.DirOf(bin), Path.GetRelativePath(bin, p).Replace('\\', '_') + ".bak"), true);
-            }
+            if (File.Exists(p)) b.Keep(p, "Loads a second copy of Apex Radiance", move: true);
     }
 
     public static void SetTargetProcess(string conf, string exe)

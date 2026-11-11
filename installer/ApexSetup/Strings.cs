@@ -161,6 +161,10 @@ public static class Strings
             "Abra The Sims 3, carregue um mundo e aperte Ctrl+Shift+F11 para abrir o menu do Apex Radiance.",
         ["Installed: {0} {1}"] = "Instalado: {0} {1}",
         ["Copies of replaced files: {0}"] = "Cópias dos arquivos substituídos: {0}",
+        ["A new Setup is ready"] = "Há um novo instalador pronto",
+        ["Apex Radiance Setup {0} was downloaded and checked. Restart Setup to install with it."] =
+            "O Apex Radiance Setup {0} foi baixado e verificado. Reinicie o instalador para instalar com ele.",
+        ["Restart now"] = "Reiniciar agora",
         ["Open Game\\Bin"] = "Abrir Game\\Bin",
 
         // repair or remove
@@ -212,10 +216,10 @@ public static class Strings
             "{0} substitui código do jogo que o Sims 3 Modernization também altera (não testados juntos).",
         ["{0} is an old build with Apex inside; while it is in Game\\Bin, Apex Radiance stays off. Setup moves it to the backup folder (install the official Sims3SettingsSetter in its place if you used it)."] =
             "{0} é uma versão antiga com o Apex embutido; enquanto estiver em Game\\Bin, o Apex Radiance fica desligado. O instalador a move para a pasta de cópias (instale o Sims3SettingsSetter oficial no lugar, se você o usava).",
-        ["Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. Setup sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup)."] =
-            "O ShortWaitSpin e o ThreadStackDiet do Sims3Performance conflitam com o Sims 3 Modernization. O instalador põe os dois em 0 (fica uma cópia em Sims3Performance.ini.apex-backup).",
-        ["Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. Setup turns them off (a copy is kept as S3SS.toml.apex-backup)."] =
-            "As texturas não comprimidas do Sims3SettingsSetter travam sob o RTX Remix bridge. O instalador as desliga (fica uma cópia em S3SS.toml.apex-backup).",
+        ["Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. Setup sets both to 0 (a copy is kept in the backup folder)."] =
+            "O ShortWaitSpin e o ThreadStackDiet do Sims3Performance conflitam com o Sims 3 Modernization. O instalador põe os dois em 0 (fica uma cópia na pasta de backup).",
+        ["Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. Setup turns them off (a copy is kept in the backup folder)."] =
+            "As texturas não comprimidas do Sims3SettingsSetter travam sob o RTX Remix bridge. O instalador as desliga (fica uma cópia na pasta de backup).",
         ["{0} sets client.targetProcess = {1}, but this game is {2}: the bridge does not start."] =
             "{0} define client.targetProcess = {1}, mas este jogo é o {2}: o bridge não inicia.",
         ["dxvk.conf lacks {0}: without them the game resets its graphics options or freezes on a resolution change under the bridge."] =

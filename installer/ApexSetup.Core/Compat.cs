@@ -18,9 +18,13 @@ public static class Compat
     const string ModernizationPlayers = "https://github.com/rodneypantonial/sims3-modernization/blob/main/docs/PLAYERS.md";
     const string ModernizationCompat = "https://github.com/rodneypantonial/sims3-modernization/blob/main/docs/COMPATIBILITY.md";
 
-    public static List<Finding> Check(Game g, State s, string? docs = null)
+    // Fixes keep what they move or change in b (a new backup folder, made on the first copy, when none is given).
+    public static List<Finding> Check(Game g, State s, string? docs = null, Backup? b = null)
     {
         docs ??= Scan.DocumentsFor(g);
+        var backup = b ?? new Backup(g.Bin, docs, "Compatibility fixes");
+        void MoveAside(string bin, string rel) => backup.Keep(Path.Combine(bin, rel), "Moved aside by a compatibility fix", move: true);
+        void Rewrite(string file, Func<string, string> change) => Compat.Rewrite(file, change, backup);
         var f = new List<Finding>();
         var bin = g.Bin;
         string B(string n) => Path.Combine(bin, n);
@@ -90,7 +94,7 @@ public static class Compat
         var s3ppIni = B("Sims3Performance.ini");
         if (File.Exists(B("Sims3Performance.asi")) && File.Exists(B("ts3native.asi")) && File.Exists(s3ppIni)
             && Values(File.ReadAllText(s3ppIni), "Patches", "ShortWaitSpin", "ThreadStackDiet").Any(v => int.TryParse(v, out var n) && n > 0))
-            f.Add(new(Severity.Warning, "Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. Setup sets both to 0 (a copy is kept as Sims3Performance.ini.apex-backup).",
+            f.Add(new(Severity.Warning, "Sims3Performance's ShortWaitSpin and ThreadStackDiet clash with Sims 3 Modernization. Setup sets both to 0 (a copy is kept in the backup folder).",
                 Array.Empty<string>(), () => Rewrite(s3ppIni, t => Set(t, "Patches", new[] { "ShortWaitSpin", "ThreadStackDiet" }, v => v != "0", "0"))));
 
         var bridge = s.Layer == Layer.Bridge;
@@ -98,7 +102,7 @@ public static class Compat
         var toml = Path.Combine(docs, "S3SS", "S3SS.toml");
         string[] texSections = { "patches.UncompressedLotTexturesPatch", "patches.UncompressedSimTexturesPatch" };
         if (bridge && s.S3ss && File.Exists(toml) && texSections.Any(sec => Values(File.ReadAllText(toml), sec, "enabled").Contains("true")))
-            f.Add(new(Severity.Warning, "Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. Setup turns them off (a copy is kept as S3SS.toml.apex-backup).",
+            f.Add(new(Severity.Warning, "Sims3SettingsSetter's uncompressed textures stutter under the RTX Remix bridge. Setup turns them off (a copy is kept in the backup folder).",
                 Array.Empty<string>(), () => Rewrite(toml, t => texSections.Aggregate(t, (x, sec) => Set(x, sec, new[] { "enabled" }, v => v == "true", "false")))));
 
         if (bridge)
@@ -172,20 +176,13 @@ public static class Compat
     }
 
     // a copy first, then the new text through a temporary file (as Apex does), so a failed write never leaves half a file
-    static void Rewrite(string file, Func<string, string> change)
+    static void Rewrite(string file, Func<string, string> change, Backup b)
     {
         var text = File.ReadAllText(file);
         var changed = change(text);
         if (changed == text) return;
-        File.Copy(file, file + ".apex-backup", true);
+        b.Keep(file, "Before a compatibility fix");
         File.WriteAllText(file + ".apex-new", changed);
         File.Move(file + ".apex-new", file, true);
-    }
-
-    public static void MoveAside(string bin, string rel)
-    {
-        var dir = Manifest.DirOf(bin);
-        Directory.CreateDirectory(dir);
-        File.Move(Path.Combine(bin, rel), Path.Combine(dir, rel.Replace('\\', '_') + ".bak"), true);
     }
 }

@@ -15,11 +15,17 @@ int failures = 0;
 void Check(bool ok, string what) { Console.WriteLine((ok ? "ok   " : "FAIL ") + what); if (!ok) failures++; }
 string B(string rel) => Path.Combine(bin, rel);
 string Read(string p) => File.Exists(p) ? File.ReadAllText(p) : "<missing>";
+var backups = Backup.Root(docs);
+// the saved copies of a file, across every backup folder
+List<string> Saved(string name) => Directory.Exists(backups)
+    ? Directory.EnumerateFiles(backups, name, SearchOption.AllDirectories).ToList() : new();
 
 try
 {
-    // 1. the game's own D3D9, no loader: Apex + bridge + loader
+    // 1. the game's own D3D9, no loader: Apex + bridge + loader; a backup the previous Setup left in Game\Bin is collected
     File.WriteAllText(Path.Combine(docs, "Options.ini"), "gpu=real");
+    Directory.CreateDirectory(Manifest.DirOf(bin));
+    File.WriteAllText(Path.Combine(Manifest.DirOf(bin), "old.asi.bak"), "earlier backup");
     var s = Scan.Run(g, docs);
     Check(s.Layer == Layer.Native && s.Loader is null && s.ApexVersion is null, "fresh game scans as native, no loader, no Apex");
     Check(Engine.NeedsLoader(s, true), "a loader is needed");
@@ -29,7 +35,11 @@ try
     Check(Read(B("bridge.conf")).Contains("client.targetProcess = TS3.exe") && Read(B(@".trex\bridge.conf")).Contains("client.targetProcess = TS3.exe"),
           "both bridge.conf target TS3.exe on the EA app");
     Check(Scan.Run(g, docs).Layer == Layer.Bridge, "scan sees the bridge");
-    Check(File.Exists(Path.Combine(Manifest.DirOf(bin), "Options.ini.bak")), "Options.ini copied before the bridge replaced native D3D9");
+    Check(Saved("Options.ini").Count == 1, "Options.ini copied before the bridge replaced native D3D9");
+    Check(!File.Exists(Path.Combine(Manifest.DirOf(bin), "old.asi.bak")) && Saved("old.asi.bak").Count == 1
+          && Saved("old.asi.bak")[0].Contains("Earlier Setup backups"), "loose backup of an earlier Setup collected into the backup folder");
+    var json = Directory.EnumerateFiles(backups, "backup.json", SearchOption.AllDirectories).Select(File.ReadAllText).ToList();
+    Check(json.Any(j => j.Contains("Options.ini") && j.Contains("\"Sha256\": \"") && j.Contains("\"Original\"")), "backup.json lists each file with its origin and SHA-256");
 
     // 2. the game resets Options.ini under the bridge; removing the bridge brings the copy back
     File.WriteAllText(Path.Combine(docs, "Options.ini"), "gpu=gtx580 defaults");
@@ -47,6 +57,8 @@ try
     await Engine.InstallAsync(g, new[] { Components.Bridge }, src, null, docs); // repair keeps the first backup
     Engine.Remove(g, Components.Bridge, docs);
     Check(Read(B("d3d9.dll")) == "... DXVK v2.7 ..." && Read(B("dxvk.conf")) == "user dxvk conf", "DXVK and its dxvk.conf restored after repair + remove");
+    Check(Saved("d3d9.dll").Any(f => Read(f) == "... DXVK v2.7 ...") && Saved("d3d9.dll").All(f => f.Contains(@"Game Bin\d3d9.dll")),
+          "the restored DXVK stays in the backup, under Game Bin");
 
     // 4. update over a hand-installed older Apex, a leftover combined build, S3SS and sims3-modernization
     File.WriteAllText(B("ApexRadiance.asi"), "apex 3.0.0");
@@ -59,7 +71,9 @@ try
     Check(found.Any(x => x.Text.Contains("Resource.cfg") && x.CanFix), "missing Resource.cfg reported with a fix");
     Check(found.Any(x => x.Text.Contains("other edition of the game")), "Steam build of a script mod on the EA app reported");
     await Engine.InstallAsync(g, new[] { Components.Apex, Components.S3ss, Components.Modernization }, src, null, docs);
-    Check(Read(B("ApexRadiance.asi")) == "apex 3.1.1" && !File.Exists(Path.Combine(Manifest.DirOf(bin), "ApexRadiance.asi.bak")), "update replaces Apex without a backup");
+    Check(Read(B("ApexRadiance.asi")) == "apex 3.1.1" && Saved("ApexRadiance.asi").Count(f => Read(f) == "apex 3.0.0") == 1, "update keeps the earlier Apex in the backup");
+    Check(Directory.EnumerateDirectories(backups).Any(d => d.EndsWith("Apex Radiance unknown to 3.1.1")), "backup folder named after the Apex versions");
+    Check(Manifest.Load(bin).Files.First(f => f.Path.EndsWith("ApexRadiance.asi")).Backup is null, "an update is not put back on removal");
     Check(!File.Exists(B("S3SSApex.asi")), "leftover combined build moved away");
     var s4 = Scan.Run(g, docs);
     Check(s4.S3ss && s4.Ts3Native && s4.Ts3Fixes && s4.Installed(Components.Modernization) == "0.2.10", "S3SS and sims3-modernization detected with versions");
@@ -111,6 +125,8 @@ try
     await Engine.InstallAsync(g, new[] { Components.S3pp }, s3ppSrc, null, docs);
     Check(File.Exists(B("Sims3Performance.asi")) && Read(B("Sims3Performance.ini")).Contains("ShortWaitSpin=0") && Read(B("Sims3Performance.ini")).Contains("ThreadStackDiet=0"),
           "S3PP installed with its clash with Sims 3 Modernization fixed");
+    Check(Saved("Sims3Performance.ini").Any(f => Read(f).Contains("ShortWaitSpin=1")) && !File.Exists(B("Sims3Performance.ini.apex-backup")),
+          "the ini before the fix kept in the backup folder, none next to the game");
     Engine.Remove(g, Components.S3pp, docs);
     Check(!File.Exists(B("Sims3Performance.asi")) && !File.Exists(B("Sims3Performance.ini")), "S3PP removed");
 
@@ -122,6 +138,16 @@ try
     Check(Read(B("d3d9.dll")) == "... DXVK v2.7 ...", "user's DXVK untouched by uninstall");
     Check(!File.Exists(Path.Combine(Scan.Packages(docs), "ts3fixes.package")), "ts3fixes.package removed");
     Check(!File.Exists(B("MonoPatcher.asi")) && !File.Exists(Path.Combine(Scan.Packages(docs), "MonoPatcher", "ld_MonoPatcher.package")), "MonoPatcher removed");
+
+    // 11. Setup's own update: only a newer Apex Radiance Setup is taken; the running exe is renamed, not overwritten
+    var core = typeof(Backup).Assembly.Location; // ApexSetup.Core.dll: another product
+    Check(!SelfUpdate.IsNewer(core, core), "a file that is not Apex Radiance Setup is never taken as an update");
+    var self = Path.Combine(root, "ApexRadianceSetup.exe"); var fresh = Path.Combine(root, "new.exe");
+    File.WriteAllText(self, "old setup"); File.WriteAllText(fresh, "new setup");
+    SelfUpdate.Replace(fresh, self);
+    Check(Read(self) == "new setup" && Read(self + ".old") == "old setup", "update puts the new exe in place and keeps the old one as .old");
+    SelfUpdate.CleanUp(self);
+    Check(!File.Exists(self + ".old"), "the .old exe is removed at the next start");
 }
 catch (Exception e) { Console.WriteLine("FAIL exception: " + e); failures++; }
 finally { Directory.Delete(root, true); }
