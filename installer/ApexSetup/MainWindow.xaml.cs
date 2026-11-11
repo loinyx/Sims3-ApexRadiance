@@ -214,7 +214,7 @@ public sealed partial class MainWindow : Window
         var fixes = _step == ComponentsStep && _game is not null && _state is not null && Compat.Check(_game, _state).Any(x => x.CanFix);
         NextText.Text = _step switch
         {
-            Welcome => WelcomeUpdates().Count > 0 ? T("Update now") : T("Get started"),
+            Welcome => WelcomeUpdates().Count > 0 ? T("Update now") : _state?.ApexVersion is not null ? T("Next") : T("Get started"),
             ComponentsStep => work.Count == 0 ? (fixes ? T("Fix settings") : T("Nothing to apply")) : _state?.ApexVersion is null ? T("Install")
                 : work.Count == 1 ? T("Apply 1 change") : T("Apply {0} changes", work.Count),
             DoneStep => T("Finish"),
@@ -264,6 +264,82 @@ public sealed partial class MainWindow : Window
                 T("{0} in The Sims 3 · {1}.", string.Join(", ", lines), g.Label) + " " + T("Update now installs them; Game and Components hold every other change."));
         }
         else WelcomeInfo.IsOpen = false;
+        RefreshStatus();
+    }
+
+    // A game that has Apex Radiance opens on its status: what is installed and whether it is up to date, and the checks of
+    // "Check installation" (Verify: the install's own files; Compat: the settings the game's Compatibility page checks), with the
+    // ways on: Repair, Change components, Repair or remove. A game without Apex keeps the first-install introduction.
+    string? _checkedAt;
+    void RefreshStatus()
+    {
+        var returning = _game is not null && _state?.ApexVersion is not null;
+        WelcomeStatus.Visibility = returning ? Visibility.Visible : Visibility.Collapsed;
+        WelcomeIntro.Visibility = returning ? Visibility.Collapsed : Visibility.Visible;
+        StatusList.Children.Clear();
+        if (!returning || _state is not { } s || _game is not { } g) return;
+        var muted = (Brush)Application.Current.Resources["ApexMutedBrush"];
+        var ok = (Brush)Application.Current.Resources["ApexSuccessBrush"];
+        var accent = (Brush)Application.Current.Resources["ApexAccentBrush"];
+        StatusList.Children.Add(new TextBlock { Text = T("The Sims 3 \u00b7 {0}", g.Label), Style = (Style)Application.Current.Resources["ApexStrong"] });
+        StatusList.Children.Add(new TextBlock { Text = g.Root, FontSize = 12, Foreground = muted, TextWrapping = TextWrapping.Wrap });
+        void Row(string name, string value, bool good)
+        {
+            var row = new Grid();
+            row.ColumnDefinitions.Add(new ColumnDefinition());
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            row.Children.Add(new TextBlock { Text = name, FontSize = 13 });
+            var right = new TextBlock { Text = value, FontSize = 12, Foreground = good ? ok : accent };
+            Grid.SetColumn(right, 1);
+            row.Children.Add(right);
+            StatusList.Children.Add(row);
+        }
+        string State(string c) => Known(c) is not { Length: > 0 } v ? T("Installed") : Newer(Latest(c), v) ? T("{0} \u2192 {1}", v, Latest(c)!) : T("{0} \u00b7 up to date", v);
+        Row("Apex Radiance", State(Components.Apex), !Updates().Contains(Components.Apex));
+        Row(T("Renderer"), LayerName(s.Layer), true);
+        Row(T("ASI loader"), s.Loader ?? T("none"), s.Loader is not null);
+        foreach (var (c, name, present) in new[] { (Components.S3ss, "Sims3SettingsSetter", s.S3ss), (Components.Modernization, "Sims 3 Modernization", s.Modernization), (Components.MonoPatcher, "MonoPatcher", s.MonoPatcher) })
+            if (present) Row(name, State(c), !Updates().Contains(c));
+
+        var found = Verify.Files(g, s, _latest.GetValueOrDefault(Repo[Components.Apex])).Concat(Compat.Check(g, s)).ToList();
+        if (found.Count == 0)
+            StatusList.Children.Add(new TextBlock { Text = _checkedAt is null ? T("Everything is in place.") : T("Everything is in place (checked at {0}).", _checkedAt), FontSize = 12, Foreground = ok });
+        foreach (var x in found)
+            StatusList.Children.Add(new InfoBar
+            {
+                IsOpen = true, IsClosable = false, Message = T(x.Text, x.Args), Title = x.CanFix ? T("Setup fixes this") : "",
+                Severity = x.Severity switch { Severity.Error => InfoBarSeverity.Error, Severity.Warning => InfoBarSeverity.Warning, _ => InfoBarSeverity.Informational },
+            });
+
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        Button Make(string text, Func<Task> act, bool primary = false)
+        {
+            var b = new Button { Content = text, IsEnabled = !_running && !_busy };
+            if (primary) b.Style = (Style)Application.Current.Resources["AccentButtonStyle"];
+            b.Click += async (_, _) => await act();
+            buttons.Children.Add(b);
+            return b;
+        }
+        // the install's own files set right by installing them again; the settings by their fixes
+        var repair = new List<string>();
+        if (found.Any(x => x.Text.Contains("ApexRadiance.asi") || x.Text.StartsWith("Apex Radiance is not"))) repair.Add(Components.Apex);
+        if (found.Any(x => x.Text.Contains("RTX Remix bridge does not start") && !x.CanFix)) repair.Add(Components.Bridge);
+        if (s.Loader is null) repair.Add(Components.Loader);
+        if (repair.Count > 0 || found.Any(x => x.CanFix))
+            Make(T("Repair"), async () =>
+            {
+                if (found.Any(x => x.CanFix)) await Guarded(() => { Engine.CheckWritable(); foreach (var x in Compat.Check(g, Scan.Run(g)).Where(x => x.CanFix)) x.Fix!(); }, T("Fixed."));
+                if (repair.Count > 0 && !_offline) await InstallAsync(repair);
+            }, primary: true);
+        Make(T("Check installation"), () =>
+        {
+            _checkedAt = DateTime.Now.ToString("HH:mm");
+            RefreshAll(); // (scans the game again, then Verify and Compat on what is there now)
+            return Task.CompletedTask;
+        });
+        Make(T("Change components"), () => { if (CanLeaveGame()) Show(ComponentsStep); return Task.CompletedTask; });
+        Make(T("Repair or remove"), () => { Show(Manage); return Task.CompletedTask; });
+        StatusList.Children.Add(buttons);
     }
 
     // the welcome page's one-click update: the installed components with a newer release, when Setup can download them now

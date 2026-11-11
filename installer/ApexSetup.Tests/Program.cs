@@ -31,6 +31,19 @@ try
     Check(Scan.Run(g, docs).Layer == Layer.Bridge, "scan sees the bridge");
     Check(File.Exists(Path.Combine(Manifest.DirOf(bin), "Options.ini.bak")), "Options.ini copied before the bridge replaced native D3D9");
 
+    // Check installation: the release's own file passes, other bytes of the same version do not; a missing bridge file shows
+    {
+        var sv = Scan.Run(g, docs) with { ApexVersion = "3.1.1", Loader = "wininet.dll" }; // (the fake loader is no real ASI loader)
+        var good = new Release("loinyx/Sims3-ApexRadiance", "v3.1.1", new[] { new Asset("ApexRadiance.asi", "x", Verify.Sha256Of(B("ApexRadiance.asi"))) });
+        var other = new Release("loinyx/Sims3-ApexRadiance", "v3.1.1", new[] { new Asset("ApexRadiance.asi", "x", new string('0', 64)) });
+        Check(Verify.Files(g, sv, good).Count == 0, "check installation: a sound install has no finding");
+        Check(Verify.Files(g, sv, other).Any(x => x.Text.Contains("not the {0} release file")), "check installation: a changed ApexRadiance.asi is found");
+        Check(Verify.Files(g, sv with { ApexVersion = "3.1.0" }, other).Count == 0, "check installation: another version is not compared");
+        File.Move(B(@".trex\NvRemixBridge.exe"), B(@".trex\NvRemixBridge.exe.off"));
+        Check(Verify.Files(g, sv, good).Any(x => x.Args.Contains(@".trex\NvRemixBridge.exe")), "check installation: a missing bridge server is found");
+        File.Move(B(@".trex\NvRemixBridge.exe.off"), B(@".trex\NvRemixBridge.exe"));
+    }
+
     // 2. the game resets Options.ini under the bridge; removing the bridge brings the copy back
     File.WriteAllText(Path.Combine(docs, "Options.ini"), "gpu=gtx580 defaults");
     Engine.Remove(g, Components.Bridge, docs);

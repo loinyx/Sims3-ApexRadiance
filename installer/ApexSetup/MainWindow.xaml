@@ -76,7 +76,11 @@
                                 </StackPanel>
                             </StackPanel>
                             <InfoBar x:Name="WelcomeInfo" IsClosable="False" />
-                            <Border Style="{StaticResource ApexCard}">
+                            <!-- a game with Apex Radiance: its status and the checks, filled in code (RefreshStatus) -->
+                            <Border x:Name="WelcomeStatus" Style="{StaticResource ApexCard}" Visibility="Collapsed">
+                                <StackPanel x:Name="StatusList" Tag="dyn" Spacing="10" />
+                            </Border>
+                            <Border x:Name="WelcomeIntro" Style="{StaticResource ApexCard}">
                                 <StackPanel Spacing="12">
                                     <TextBlock Text="What Setup does" Style="{StaticResource ApexStrong}" FontSize="13" />
                                     <StackPanel Orientation="Horizontal" Spacing="12">
