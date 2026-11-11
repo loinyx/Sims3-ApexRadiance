@@ -554,8 +554,8 @@ The write epochs of "Remember missing files" swap their database-class slots dir
 threads. The entry's relocation-free prologue is copied to a trampoline (plus a JMP back) and a 5-byte JMP to the
 outermost layer's hook is written with `MemPatch::WriteCodeSuspended`. Layers: 0 Frame Profiler, 1 FastDxt,
 2 ResourceCache, 3 ObjectIndex, 4 SceneBudget, 5 LevelLightShare, 6 FastCas, 7 FastCrc, 8 ScriptMath, 9 ObjectIdMap,
-10 RoomLightQueue, 11 LotObjectThrottle, 12 ProbeNeutral, 13 RenderObjectMap; each module layer is used on its own
-sites only.
+10 RoomLightQueue, 11 ProbeNeutral, 12 RenderObjectMap, 13 TreeLightRig, 14 LampMarkFilter; each module layer is used
+on its own sites only.
 
 | Site | Address | Prologue | Users |
 |---|---|---|---|

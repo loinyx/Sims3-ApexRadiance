@@ -74,9 +74,10 @@ Every switch works at the exact game function behind one measured cost, and foll
 | Lighter window updates | Game and scripts | 2.7.0 | [lighter-window-updates.md](lighter-window-updates.md) |
 | Faster scripts | Game and scripts | 2.7.0 | [faster-scripts.md](faster-scripts.md) |
 
-The System > Lot Streaming page holds five more switches, off by default (Extended lot detail, Smooth lot streaming,
-Keep lot visibility stable, Pause lot streaming in map view, Spread lot objects while loading; Experimental, 2.7.0,
-research and code by idavidveiga): [lot-streaming.md](lot-streaming.md). They are not part of the Overview group.
+The System > Lot Streaming page holds three more switches, off by default (Extended lot detail, Keep lot visibility
+stable, Pause lot streaming in map view; Experimental, 2.7.0, research and code by idavidveiga):
+[lot-streaming.md](lot-streaming.md). They are not part of the Overview group. Smooth lot streaming, Spread lot objects
+while loading and Maximum detailed lots were removed in 3.1.2 ([removed features](../../removed-features.md#lot-streaming-parts)).
 
 One related change has no switch: the [Vulkan driver guard](vulkan-driver-guard.md) keeps an unused AMD Vulkan driver
 out of the game's address space on hybrid-GPU PCs.
@@ -210,7 +211,7 @@ profiler). Each site type has a chain with fixed layer positions, lower = outer,
 | Chain | File | Hooks | Layers (outer to inner) |
 |---|---|---|---|
 | `SlotChain` | [`framework/slot_chain.{h,cpp}`](../../../framework/slot_chain.h) | Vtable slots | `Gate` (wall shading gate, site `WallAoStep` only), `FrameProfiler`, `ResourceCache`, `FastCompress` |
-| `EntryChain` | [`framework/entry_chain.{h,cpp}`](../../../framework/entry_chain.h) | Function entries: the prologue moves to a trampoline, a 5-byte JMP is written with every other thread suspended | `FrameProfiler`, `FastDxt`, `ResourceCache`, `ObjectIndex`, `SceneBudget`, `LevelLightShare`, `FastCas`, `FastCrc`, `ScriptMath`, `ObjectIdMap`, `RoomLightQueue`, `LotObjectThrottle`, `ProbeNeutral`, `RenderObjectMap` |
+| `EntryChain` | [`framework/entry_chain.{h,cpp}`](../../../framework/entry_chain.h) | Function entries: the prologue moves to a trampoline, a 5-byte JMP is written with every other thread suspended | `FrameProfiler`, `FastDxt`, `ResourceCache`, `ObjectIndex`, `SceneBudget`, `LevelLightShare`, `FastCas`, `FastCrc`, `ScriptMath`, `ObjectIdMap`, `RoomLightQueue`, `ProbeNeutral`, `RenderObjectMap`, `TreeLightRig`, `LampMarkFilter` |
 | `CallChain` | [`framework/call_chain.{h,cpp}`](../../../framework/call_chain.h) | One `E8 rel32` CALL, rewritten with every other thread suspended | `FrameProfiler`, `SceneBudget` |
 
 Protocol (`SlotChain`; the other two are the same idea):

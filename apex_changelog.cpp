@@ -10,10 +10,12 @@ constexpr const char* k312Improved[] = {
     "Performance: smoother camera on busy lots, with far fewer hitches",
     "Performance: moving between lots no longer slows room lighting for seconds",
     "Fences and stairs: each piece takes the light of the lamps around it",
+    "Lot Streaming: removed Smooth lot streaming, Spread lot objects while loading and Maximum detailed lots",
     nullptr};
 constexpr const char* k312Fixed[] = {
     "Fences and stairs: no more flicker when the camera moves",
     "Fences and stairs: steps on a raised floor no longer show blocks of light",
+    "Lot Streaming: turning its options off in a loaded world no longer stops lots loading",
     nullptr};
 constexpr const char* k312Highlights[] = {
     "Smoother camera",

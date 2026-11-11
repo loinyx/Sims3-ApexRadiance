@@ -17,6 +17,7 @@ that tree. Scope rule: these features are not restored without an explicit reque
 | [Smooth Streaming](#smooth-streaming) | 2026-09-28, no perceptible gain | Localized terrain relight moved into Night Lighting |
 | [Script GC Scheduler](#script-gc-scheduler) | 2026-09-28, no perceptible gain | Nothing |
 | [Service Frame Budget](#service-frame-budget) | 2026-09-28, no perceptible gain | Nothing |
+| [Lot Streaming parts](#lot-streaming-parts): Smooth lot streaming, Spread lot objects while loading, the threshold-12 switch, Maximum detailed lots | 3.1.2; two of them, turned off in a loaded world, left 4 detailed lots and no streaming while the camera moved | The game's own detailed-lot option (Max Active Lots and camera-speed threshold); nothing for object spreading ([features/performance/lot-streaming.md](features/performance/lot-streaming.md)) |
 
 ## HDR output
 
@@ -1433,3 +1434,54 @@ None.
   (grace period).
 - Decide whether ObjectDesigner (no budget) needs handling.
 - Consider sharing the "world loading" definition with Smooth Streaming, which uses a lot-pass gap heuristic.
+
+## Lot Streaming parts
+
+Removed in 3.1.2. Unlike the entries above, this code is in this repository, at tag `v3.1.1`. What remains of Lot
+Streaming is in [features/performance/lot-streaming.md](features/performance/lot-streaming.md).
+
+### What it was
+
+Four parts of Lot Streaming (parts 1, 2 and 4 on the System > Lot Streaming page):
+
+1. **Smooth lot streaming** (`[patches.LotLodStreaming]`, `features/lot_lod_streaming.{h,cpp}` before the map-view
+   blocker): turned on the game's "Throttle Lot LoD Transitions" flag (0x011ECBC0), set the camera-speed threshold
+   `WorldManager+0xEC` to 5.0, and raised "Max Active Lot Threshold" (0x01184328, 12) to Max Active Lots so the throttle
+   still applied at 16 detailed lots.
+2. **Spread lot objects while loading** (`[patches.LotObjectThrottle]`, `objectsPerLot` 2, `delayMs` 16;
+   `features/lot_object_throttle.{h,cpp}`): an `EntryChain` layer on `Lot::AddLotObjectsToScene` 0x00AC1130 that built
+   a promoted lot's regular objects a few per window, the next window posted through `PostRemoteMethodCall`, with
+   shells, large exterior geometry and flora in the first window.
+3. **Use LoD Active-Lot Threshold 12** (`[patches.LotActiveThreshold]`, no menu row;
+   `features/lot_active_threshold.{h,cpp}`): set "Max Active Lot Threshold" to 12, as Sims3SettingsSetter does. It
+   was registered for the EA app build only.
+4. **Maximum detailed lots** (`[patches.LotDetailRange] maxActiveLots`, 8 to 16, default 16): the second half of
+   Extended lot detail, writing Max Active Lots `WorldManager+0xE4`.
+
+### Why removed
+
+- The game constructs the WorldManager with Max Active Lots 4 and a camera-speed threshold of 0.0, and applies the
+  player's graphics option only at the end of the world load (0x00C60C00,
+  [engine page](engine/lot-loading-and-streaming.md#worldmanager-0x011ecbc4)). Parts 1 and 4 captured the constructor's
+  values as the native ones; turned off in a loaded world they wrote back 4 detailed lots and a threshold of 0.0, at
+  which no lot is promoted while the camera moves (a game log: `Max Active Lots restored 8 -> 4`, `Camera speed
+  threshold restored to 0.000`). With a count other than the game's option, part 4 took the option's value for another
+  owner's and stopped applying its own.
+- With the throttle on, one lot was promoted at a time, and none while a promoted lot was still building.
+- Part 2 spread a per-object call that cost 3.3 ms over 6075 calls, while its lamps arriving one by one relit the rooms
+  (5.8 to 7.2 s for a lamp edit to settle). Part 3 did nothing on Steam.
+
+Evidence and dates in [history/performance-lot-streaming.md](history/performance-lot-streaming.md).
+
+### Revival notes
+
+- The game's option sets Max Active Lots and the camera-speed threshold together (`GraphicsRules.sgr`: 1 to 8 lots with
+  1.0 to 32.0). A revival must capture them after load end, or read the option, never from the constructor.
+- At more than 12 detailed lots the native throttle is off unless "Max Active Lot Threshold" follows Max Active Lots
+  (`cmp edx,[0x01184328]` at 0x00C6C6B7).
+- The object throttle's six Steam addresses (0x00AC1130, 0x00ABFAC0, 0x007D2DB0, 0x007D2DF0, 0x00ABE9C0, 0x00B088C0)
+  are listed in the [engine page](engine/lot-loading-and-streaming.md#address-reference).
+- The fork's A/B with the throttle (distance 300, 16 lots): 149.3 to 99.2 transitions a minute, same-lot reversals
+  within 2 s 48 to 3 ([validation](validation/performance-lot-streaming.md#latest-results)). Keep lot visibility stable
+  now covers the reversals at the edge of the detail distance.
+- Old configurations still hold the keys; they are ignored when the configuration loads.

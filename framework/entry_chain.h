@@ -47,7 +47,6 @@ enum class Site : int {
     RenMapInsert,        // 0x006FE1F0 its insert, prologue as ObjMapInsert
     RenMapErase,         // 0x006FDF40 its erase, prologue as ObjMapErase
     LightObjectRemove,   // 0x006C7610 thiscall(idLo, idHi), ret 8: an object out of a level's five light maps; prologue 53 8B 5C 24 08 56 57 (push ebx; mov ebx,[esp+8]; push esi; push edi)
-    LotAddObjectsToScene, // Lot::AddLotObjectsToScene thiscall(lot, char, char), ret 8; prologue 83 EC 08 57 8B F9
     ProbeDiffuseWrite,    // 0x006B4720 thiscall(probe), ret: the light probe's diffuse cube writer; prologue 83 EC 28 53 55 (sub esp,28h; push ebx; push ebp)
     ProbeSpecularWrite,   // 0x006B4B10 thiscall(probe, rt), ret 4: its specular cube writer; prologue 81 EC F4 00 00 00 (sub esp,0F4h)
     TreeSetLevel,         // 0x0070D370 thiscall(cluster, level), ret 4: the SpeedTree cluster's level setter (vfunc +0x50); prologue 8B 44 24 04 56 50
@@ -58,7 +57,7 @@ enum class Site : int {
 };
 // lower = outer. FastDxt: the DXT sites only; ResourceCache: the DpfWriteDirect site only; ObjectIndex: the ObjectById
 // site only; SceneBudget: the three scene node sites only (features/scene_budget.h).
-enum class Layer : int { FrameProfiler, FastDxt, ResourceCache, ObjectIndex, SceneBudget, LevelLightShare, FastCas, FastCrc, ScriptMath, ObjectIdMap, RoomLightQueue, LotObjectThrottle, ProbeNeutral, RenderObjectMap, TreeLightRig, LampMarkFilter, Count };
+enum class Layer : int { FrameProfiler, FastDxt, ResourceCache, ObjectIndex, SceneBudget, LevelLightShare, FastCas, FastCrc, ScriptMath, ObjectIdMap, RoomLightQueue, ProbeNeutral, RenderObjectMap, TreeLightRig, LampMarkFilter, Count };
 
 // Installs `hook` as `layer` of `site` (true when installed, or already installed). error: why not.
 bool Install(Site site, Layer layer, void* hook, std::string* error);

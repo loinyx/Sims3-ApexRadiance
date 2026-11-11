@@ -95,7 +95,7 @@ restores these preferences but never starts a measurement.
   "Script GC" then stays empty and the simulation thread is never identified, so simulation time lands in "other threads"
   and simulation sampling cannot start.
 - **Entries other modules verify** are not hooked: the room lightmap solve 0x006A3EC0 (timed through its only caller
-  0x006A80E0), `Lot::AddLotObjectsToScene` 0x00AC1130 (the Lot Streaming throttle writes a JMP there),
+  0x006A80E0), `Lot::AddLotObjectsToScene` 0x00AC1130 (LotStreamingOptimizations' object throttle writes a JMP there),
   `WorldManager::Update` 0x00C6D570 (LotStreamingOptimizations' map-view blocker), `Lot::UpdateObjectSceneNode`
   0x00ABFAC0 by default (LotStreamingOptimizations finds it by an entry pattern; while it is timed, that module cannot
   re-install and its object throttle stays off), and the entries of 0x00AEA680 / 0x00C845C0 (timed at their call sites
@@ -610,9 +610,10 @@ registers draw hooks that would change what is measured. If the scoring point we
 
 - `camera` (and the report's moving / still hitch rates) is the lot LOD scoring point. Lot streaming reacts only to
   that point: the lot metric 0x00C62D80 is a squared distance from it with no view angle, and LotLodScoring returns
-  early while the point's mean speed over 10 samples is above `+0xEC`, which Smooth lot streaming sets to 5.0
-  ([lot streaming](performance/lot-streaming.md); history entry of 2026-10-27; units unverified). So in frames of a
-  rotation or a zoom alone, with `lots_promoted` 0 and *Lot load stages* about 0, lot loading is not the cause.
+  early while the point's mean speed over 10 samples is above `+0xEC`, the camera-speed threshold the game's own
+  option sets (1.0 to 32.0; [lot loading](../engine/lot-loading-and-streaming.md#worldmanager-0x011ecbc4); units
+  unverified). So in frames of a rotation or a zoom alone, with `lots_promoted` 0 and *Lot load stages* about 0, lot
+  loading is not the cause.
 - `apex_moving` is the eye-based detector of Apex's motion-gated budgets; it shows whether a slow frame ran with the
   moving budgets or the still ones.
 - `eye_move_m` is the raw eye motion of each frame.

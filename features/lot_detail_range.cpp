@@ -21,18 +21,12 @@ uintptr_t g_worldManagerGlobal = 0;
 uintptr_t g_worldManager = 0;
 
 float g_targetDistance = static_cast<float>(kDefaultDistance);
-int g_targetMaxActive = kDefaultMaxActiveLots;
 
 float g_originalDistance = 0.0f;
-int g_originalMaxActive = 0;
 bool g_originalDistanceValid = false;
-bool g_originalMaxActiveValid = false;
 bool g_distanceWritten = false;
-bool g_maxActiveWritten = false;
 bool g_distanceAbandoned = false;
-bool g_maxActiveAbandoned = false;
 bool g_distanceMaintainLogged = false;
-bool g_maxActiveMaintainLogged = false;
 
 template <typename T> bool Read(uintptr_t address, T& out) {
     return address && MemPatch::ReadBytes(address, &out, sizeof(T));
@@ -53,25 +47,16 @@ bool PlausibleDistance(float value) {
     return std::isfinite(value) && value >= 1.0f && value <= 2000.0f;
 }
 
-bool PlausibleMaxActive(int value) {
-    return value >= 1 && value <= 128;
-}
-
 void ClearWorldState() {
     g_worldManager = 0;
     g_originalDistance = 0.0f;
-    g_originalMaxActive = 0;
     g_originalDistanceValid = false;
-    g_originalMaxActiveValid = false;
     g_distanceWritten = false;
-    g_maxActiveWritten = false;
     g_distanceAbandoned = false;
-    g_maxActiveAbandoned = false;
     g_distanceMaintainLogged = false;
-    g_maxActiveMaintainLogged = false;
 }
 
-bool ApplyDistance(float current, bool newWorld, std::string* error) {
+bool ApplyDistance(float current, std::string* error) {
     if (g_distanceAbandoned) return true;
 
     if (current == g_targetDistance) return true;
@@ -107,40 +92,6 @@ bool ApplyDistance(float current, bool newWorld, std::string* error) {
     return true;
 }
 
-bool ApplyMaxActive(int current, bool newWorld, std::string* error) {
-    if (g_maxActiveAbandoned) return true;
-
-    if (current == g_targetMaxActive) return true;
-
-    if (!g_maxActiveWritten) {
-        if (!WriteExpected(g_worldManager + 0xE4, g_targetMaxActive, current)) {
-            if (error) *error = "Could not apply WorldManager+0xE4 Max Active Lots";
-            return false;
-        }
-        g_maxActiveWritten = true;
-        LOG_INFO(std::format("[LotDetailRange] Max Active Lots: {} -> {}", current, g_targetMaxActive));
-        return true;
-    }
-
-    if (g_originalMaxActiveValid && current == g_originalMaxActive) {
-        if (!WriteExpected(g_worldManager + 0xE4, g_targetMaxActive, current)) {
-            if (error) *error = "Could not maintain WorldManager+0xE4 Max Active Lots";
-            return false;
-        }
-        if (!g_maxActiveMaintainLogged) {
-            LOG_INFO(std::format("[LotDetailRange] Max Active Lots drifted {} -> {}; maintained",
-                                 current, g_targetMaxActive));
-            g_maxActiveMaintainLogged = true;
-        }
-        return true;
-    }
-
-    g_maxActiveAbandoned = true;
-    LOG_WARNING(std::format("[LotDetailRange] Another owner changed Max Active Lots to {}; Apex stops maintaining +0xE4",
-                            current));
-    return true;
-}
-
 bool ApplyCurrentWorld(std::string* error) {
     uintptr_t world = 0;
     if (!Read(g_worldManagerGlobal, world) || !world) return true;
@@ -153,35 +104,20 @@ bool ApplyCurrentWorld(std::string* error) {
     }
 
     float distance = 0.0f;
-    int maxActive = 0;
     if (!Read(world + 0xDC, distance) || !PlausibleDistance(distance)) {
         if (error) *error = "WorldManager+0xDC Lot LOD distance is unreadable or implausible";
-        if (newWorld) ClearWorldState();
-        return false;
-    }
-    if (!Read(world + 0xE4, maxActive) || !PlausibleMaxActive(maxActive)) {
-        if (error) *error = "WorldManager+0xE4 Max Active Lots is unreadable or implausible";
         if (newWorld) ClearWorldState();
         return false;
     }
 
     if (newWorld) {
         g_originalDistance = distance;
-        g_originalMaxActive = maxActive;
         g_originalDistanceValid = true;
-        g_originalMaxActiveValid = true;
-        LOG_INFO(std::format("[LotDetailRange] WorldManager {:#010x}: native Lot LOD distance {:.3f}, Max Active Lots {}; targets {:.0f} / {}",
-                             world, distance, maxActive, g_targetDistance, g_targetMaxActive));
+        LOG_INFO(std::format("[LotDetailRange] WorldManager {:#010x}: native Lot LOD distance {:.3f}; target {:.0f}",
+                             world, distance, g_targetDistance));
     }
 
-    if (!ApplyDistance(distance, newWorld, error)) return false;
-
-    // Re-read because the guarded +0xDC write above is intentionally independent of +0xE4.
-    if (!Read(world + 0xE4, maxActive) || !PlausibleMaxActive(maxActive)) {
-        if (error) *error = "WorldManager+0xE4 Max Active Lots became unreadable";
-        return false;
-    }
-    return ApplyMaxActive(maxActive, newWorld, error);
+    return ApplyDistance(distance, error);
 }
 
 void RestoreCurrentWorldIfOwned() {
@@ -192,7 +128,7 @@ void RestoreCurrentWorldIfOwned() {
 
     uintptr_t liveWorld = 0;
     if (!Read(g_worldManagerGlobal, liveWorld) || liveWorld != g_worldManager) {
-        if (g_distanceWritten || g_maxActiveWritten)
+        if (g_distanceWritten)
             LOG_INFO("[LotDetailRange] Restore skipped: WorldManager changed");
         ClearWorldState();
         return;
@@ -213,38 +149,18 @@ void RestoreCurrentWorldIfOwned() {
         }
     }
 
-    if (g_maxActiveWritten && g_originalMaxActiveValid && !g_maxActiveAbandoned) {
-        int current = 0;
-        if (!Read(g_worldManager + 0xE4, current)) {
-            LOG_WARNING("[LotDetailRange] Max Active Lots restore skipped: +0xE4 unreadable");
-        } else if (current != g_targetMaxActive) {
-            LOG_INFO(std::format("[LotDetailRange] Max Active Lots restore skipped: another owner changed {} to {}",
-                                 g_targetMaxActive, current));
-        } else if (WriteExpected(g_worldManager + 0xE4, g_originalMaxActive, current)) {
-            LOG_INFO(std::format("[LotDetailRange] Max Active Lots restored {} -> {}",
-                                 current, g_originalMaxActive));
-        } else {
-            LOG_WARNING("[LotDetailRange] Max Active Lots restore failed");
-        }
-    }
-
     ClearWorldState();
 }
 
 } // namespace
 
-bool Start(int distance, int maxActiveLots, std::string* error) {
+bool Start(int distance, std::string* error) {
     std::lock_guard<std::mutex> guard(g_lock);
     if (g_running) return true;
 
     if (distance < kMinDistance || distance > kMaxDistance) {
         if (error) *error = std::format("Lot detail distance {} is outside the validated range {}..{}",
                                         distance, kMinDistance, kMaxDistance);
-        return false;
-    }
-    if (maxActiveLots < kMinActiveLots || maxActiveLots > kMaxActiveLots) {
-        if (error) *error = std::format("Maximum detailed lots {} is outside the validated range {}..{}",
-                                        maxActiveLots, kMinActiveLots, kMaxActiveLots);
         return false;
     }
 
@@ -255,11 +171,9 @@ bool Start(int distance, int maxActiveLots, std::string* error) {
     }
 
     g_targetDistance = static_cast<float>(distance);
-    g_targetMaxActive = maxActiveLots;
     ClearWorldState();
 
-    LOG_INFO(std::format("[LotDetailRange] Starting on {}: target distance {}, max detailed lots {}",
-                         GetGameVersionName(), distance, maxActiveLots));
+    LOG_INFO(std::format("[LotDetailRange] Starting on {}: target distance {}", GetGameVersionName(), distance));
 
     std::string worldError;
     if (!ApplyCurrentWorld(&worldError)) {
@@ -301,10 +215,8 @@ std::string StatusText() {
     std::lock_guard<std::mutex> guard(g_lock);
     if (!g_running) return "Off";
     if (!g_worldManager)
-        return std::format("On; waiting for a world (distance {}, max {})",
-                           static_cast<int>(g_targetDistance), g_targetMaxActive);
-    return std::format("On; lot detail distance {}, max detailed lots {}",
-                       static_cast<int>(g_targetDistance), g_targetMaxActive);
+        return std::format("On; waiting for a world (distance {})", static_cast<int>(g_targetDistance));
+    return std::format("On; lot detail distance {}", static_cast<int>(g_targetDistance));
 }
 
 } // namespace LotDetailRange

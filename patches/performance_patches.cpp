@@ -12,8 +12,6 @@
 #include "lot_lighting_motion.h"
 #include "lot_lod_streaming.h"
 #include "lot_detail_range.h"
-#include "lot_object_throttle.h"
-#include "lot_active_threshold.h"
 #include "lot_visibility_override.h"
 #include "fast_dxt.h"
 #include "fast_refpack.h"
@@ -199,9 +197,6 @@ class LotDetailRangePatch : public ApexPatch {
         RegisterIntSetting(&distance_, "distance", LotDetailRange::kDefaultDistance,
                            LotDetailRange::kMinDistance, LotDetailRange::kMaxDistance,
                            "Lot detail distance");
-        RegisterIntSetting(&maxActiveLots_, "maxActiveLots", LotDetailRange::kDefaultMaxActiveLots,
-                           LotDetailRange::kMinActiveLots, LotDetailRange::kMaxActiveLots,
-                           "Maximum detailed lots");
         g_lotDetailRangePatch.store(this);
     }
     ~LotDetailRangePatch() override { g_lotDetailRangePatch.store(nullptr); }
@@ -210,7 +205,7 @@ class LotDetailRangePatch : public ApexPatch {
         if (isEnabled) return true;
         lastError.clear();
         std::string error;
-        if (!LotDetailRange::Start(distance_, maxActiveLots_, &error)) return Fail(error);
+        if (!LotDetailRange::Start(distance_, &error)) return Fail(error);
         isEnabled = true;
         return true;
     }
@@ -228,7 +223,6 @@ class LotDetailRangePatch : public ApexPatch {
     }
 
     int Distance() const { return distance_; }
-    int MaxActiveLots() const { return maxActiveLots_; }
 
     void SetDistance(int value) {
         value = std::clamp(value, LotDetailRange::kMinDistance, LotDetailRange::kMaxDistance);
@@ -237,46 +231,8 @@ class LotDetailRangePatch : public ApexPatch {
         NotifySettingChanged();
     }
 
-    void SetMaxActiveLots(int value) {
-        value = std::clamp(value, LotDetailRange::kMinActiveLots, LotDetailRange::kMaxActiveLots);
-        if (maxActiveLots_ == value) return;
-        maxActiveLots_ = value;
-        NotifySettingChanged();
-    }
-
   private:
     int distance_ = LotDetailRange::kDefaultDistance;
-    int maxActiveLots_ = LotDetailRange::kDefaultMaxActiveLots;
-};
-
-class LotLodStreamingPatch : public ApexPatch {
-  public:
-    LotLodStreamingPatch() : ApexPatch(Performance::kLotLodStreamingName, nullptr) {}
-
-    bool Install() override {
-        if (isEnabled) return true;
-        lastError.clear();
-        std::string error;
-        if (!LotLodStreaming::Start(&error)) return Fail(error);
-        isEnabled = true;
-        return true;
-    }
-
-    bool Uninstall() override {
-        if (!isEnabled) return true;
-        LotLodStreaming::Stop();
-        isEnabled = false;
-        lastError.clear();
-        return true;
-    }
-
-    void Update() override {
-        pendingReinstall = false;
-        LotLodStreaming::Tick();
-    }
-
-    void RenderCustomUI() override {} // the Performance card draws the row
-    void RenderDeveloperUI() override {}
 };
 
 class MapViewStreamingBlockerPatch : public ApexPatch {
@@ -303,101 +259,6 @@ class MapViewStreamingBlockerPatch : public ApexPatch {
     void Update() override {
         pendingReinstall = false;
         LotLodStreaming::TickMapViewBlocker();
-    }
-
-    void RenderCustomUI() override {}
-    void RenderDeveloperUI() override {}
-};
-
-class LotObjectThrottlePatch;
-std::atomic<LotObjectThrottlePatch*> g_lotObjectThrottlePatch{nullptr};
-
-class LotObjectThrottlePatch : public ApexPatch {
-  public:
-    LotObjectThrottlePatch() : ApexPatch(Performance::kLotObjectThrottleName, nullptr) {
-        RegisterIntSetting(&objectsPerWindow_, "objectsPerLot", LotObjectThrottle::kDefaultObjectsPerWindow, 1, 64,
-                           "Objects built per lot window. Lower is smoother.");
-        RegisterIntSetting(&delayMs_, "delayMs", LotObjectThrottle::kDefaultDelayMs, 0, 500,
-                           "Minimum milliseconds between a lot's object windows. Higher spreads the work more.");
-        g_lotObjectThrottlePatch.store(this);
-    }
-    ~LotObjectThrottlePatch() override { g_lotObjectThrottlePatch.store(nullptr); }
-
-    bool Install() override {
-        if (isEnabled) return true;
-        lastError.clear();
-        LotObjectThrottle::SetObjectsPerWindow(objectsPerWindow_);
-        LotObjectThrottle::SetDelayMs(delayMs_);
-        std::string error;
-        if (!LotObjectThrottle::Start(&error)) return Fail(error);
-        isEnabled = true;
-        return true;
-    }
-
-    bool Uninstall() override {
-        if (!isEnabled) return true;
-        LotObjectThrottle::Stop();
-        isEnabled = false;
-        lastError.clear();
-        return true;
-    }
-
-    void Update() override {
-        pendingReinstall = false;
-        LotObjectThrottle::SetObjectsPerWindow(objectsPerWindow_);
-        LotObjectThrottle::SetDelayMs(delayMs_);
-        LotObjectThrottle::Tick();
-    }
-
-    void RenderCustomUI() override {}
-    void RenderDeveloperUI() override {}
-
-    int ObjectsPerWindow() const { return objectsPerWindow_; }
-    int DelayMs() const { return delayMs_; }
-    void SetObjectsPerWindow(int value) {
-        value = std::clamp(value, 1, 64);
-        if (value == objectsPerWindow_) return;
-        objectsPerWindow_ = value;
-        LotObjectThrottle::SetObjectsPerWindow(value);
-        NotifySettingChanged();
-    }
-    void SetDelayMs(int value) {
-        value = std::clamp(value, 0, 500);
-        if (value == delayMs_) return;
-        delayMs_ = value;
-        LotObjectThrottle::SetDelayMs(value);
-        NotifySettingChanged();
-    }
-
-  private:
-    int objectsPerWindow_ = LotObjectThrottle::kDefaultObjectsPerWindow;
-    int delayMs_ = LotObjectThrottle::kDefaultDelayMs;
-};
-
-class LotActiveThresholdPatch : public ApexPatch {
-  public:
-    LotActiveThresholdPatch() : ApexPatch(Performance::kLotActiveThresholdName, nullptr) {}
-
-    bool Install() override {
-        if (isEnabled) return true;
-        lastError.clear();
-        std::string error;
-        if (!LotActiveThreshold::Start(&error)) return Fail(error);
-        isEnabled = true;
-        return true;
-    }
-
-    bool Uninstall() override {
-        if (!isEnabled) return true;
-        LotActiveThreshold::Stop();
-        isEnabled = false;
-        lastError.clear();
-        return true;
-    }
-
-    void Update() override {
-        pendingReinstall = false;
-        LotActiveThreshold::Tick();
     }
 
     void RenderCustomUI() override {}
@@ -803,8 +664,6 @@ std::string Performance::LookupMissesStatus() { return ResourceCache::MissesStat
 std::string Performance::FileListStatus() { return ResourceCache::KeyListStatusText(); }
 std::string Performance::LotLightingStatus() { return LotLightingMotion::StatusText(); }
 std::string Performance::WallShadingStatus() { return LotLightingMotion::WallAoStatusText(); }
-std::string Performance::LotLodStreamingStatus() { return LotLodStreaming::StatusText(); }
-bool Performance::LotLodStreamingHandledByS3SS() { return LotLodStreaming::HandledByS3SS(); }
 std::string Performance::LotDetailRangeStatus() { return LotDetailRange::StatusText(); }
 int Performance::LotDetailDistance() {
     if (LotDetailRangePatch* p = g_lotDetailRangePatch.load()) return p->Distance();
@@ -813,33 +672,8 @@ int Performance::LotDetailDistance() {
 void Performance::SetLotDetailDistance(int value) {
     if (LotDetailRangePatch* p = g_lotDetailRangePatch.load()) p->SetDistance(value);
 }
-int Performance::MaximumDetailedLots() {
-    if (LotDetailRangePatch* p = g_lotDetailRangePatch.load()) return p->MaxActiveLots();
-    return LotDetailRange::kDefaultMaxActiveLots;
-}
-void Performance::SetMaximumDetailedLots(int value) {
-    if (LotDetailRangePatch* p = g_lotDetailRangePatch.load()) p->SetMaxActiveLots(value);
-}
 std::string Performance::MapViewStreamingBlockerStatus() { return LotLodStreaming::MapViewBlockerStatusText(); }
 bool Performance::MapViewStreamingBlockerHandledByS3SS() { return LotLodStreaming::MapViewBlockerHandledByS3SS(); }
-std::string Performance::LotObjectThrottleStatus() { return LotObjectThrottle::StatusText(); }
-bool Performance::LotObjectThrottleHandledByS3SS() { return LotObjectThrottle::HandledByS3SS(); }
-int Performance::LotObjectThrottleObjectsPerWindow() {
-    if (LotObjectThrottlePatch* p = g_lotObjectThrottlePatch.load()) return p->ObjectsPerWindow();
-    return LotObjectThrottle::kDefaultObjectsPerWindow;
-}
-void Performance::SetLotObjectThrottleObjectsPerWindow(int value) {
-    if (LotObjectThrottlePatch* p = g_lotObjectThrottlePatch.load()) p->SetObjectsPerWindow(value);
-}
-int Performance::LotObjectThrottleDelayMs() {
-    if (LotObjectThrottlePatch* p = g_lotObjectThrottlePatch.load()) return p->DelayMs();
-    return LotObjectThrottle::kDefaultDelayMs;
-}
-void Performance::SetLotObjectThrottleDelayMs(int value) {
-    if (LotObjectThrottlePatch* p = g_lotObjectThrottlePatch.load()) p->SetDelayMs(value);
-}
-std::string Performance::LotActiveThresholdStatus() { return LotActiveThreshold::StatusText(); }
-bool Performance::LotActiveThresholdHandledByS3SS() { return LotActiveThreshold::HandledByS3SS(); }
 std::string Performance::LotVisibilityOverrideStatus() { return LotVisibilityOverride::StatusText(); }
 bool Performance::LotVisibilityOverrideHandledByS3SS() { return LotVisibilityOverride::HandledByS3SS(); }
 bool Performance::LotVisibilityOverrideAlreadyExternal() { return LotVisibilityOverride::AlreadyPatchedExternally(); }
@@ -928,32 +762,16 @@ APEX_REGISTER_FEATURE(LotLightingMotionPatch,
 
 APEX_REGISTER_FEATURE(LotDetailRangePatch,
                       {.displayName = "Extended Lot Detail",
-                       .description = "Keeps nearby lots eligible for full detail farther away and allows more of them to remain detailed at once. "
-                                      "Validated baseline: distance 300 and 16 detailed lots. Part of " APEX_PRODUCT_NAME ".",
+                       .description = "Keeps nearby lots in full detail farther away; uses more memory. Validated baseline: distance 300. "
+                                      "Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
                        .category = "Performance",
                        .experimental = true,
                        .enabledByDefault = false, // Lot Streaming off by default since 2.7.0 (little play-testing on Steam yet)
                        .supportedVersions = VERSION_STEAM,
                        .technicalDetails = {"EA 1.69 WorldManager+0xDC is the native Lot LOD distance. Controlled probes validated the squared-distance cutoffs: 200 -> ~40,000 and 300 -> ~90,000.",
-                                            "EA 1.69 WorldManager+0xE4 is the independent Max Active Lots capacity. Raising 8 -> 16 produced 16 simultaneous Detailed View lots at the same dense reference point that previously saturated at eight.",
-                                            "Apex captures the original values for each live WorldManager, uses guarded writes, reasserts only a captured game baseline, yields to an unexpected third-party value, and restores only fields it still owns.",
+                                            "The game's own Max Active Lots option (WorldManager+0xE4) is left alone.",
+                                            "Apex captures the original value for each live WorldManager, uses guarded writes, reasserts only a captured game baseline, yields to an unexpected third-party value, and restores it only while it still owns it.",
                                             "The diagnostic metric probe is not used by this production feature."},
-                       .gameCodeGroup = "LotLodStreaming"});
-
-APEX_REGISTER_FEATURE(LotLodStreamingPatch,
-                      {.displayName = "Smooth Lot Streaming",
-                       .description = "Loads nearby lots into full detail gradually instead of letting several lot-detail transitions start together. Uses the game's own "
-                                      "native Lot LoD throttle and a 5.0 camera-speed threshold; no lot loader is replaced. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
-                       .category = "Performance",
-                       .experimental = true,
-                       .enabledByDefault = false,
-                       .supportedVersions = VERSION_STEAM,
-                       .technicalDetails = {"Enables the game's native 'Throttle Lot LoD Transitions' byte. On Steam the test is 0xC6C695 and the byte is 0x11ECBC0; "
-                                            "EA 1.69.47 was verified in-game at 0xC6BA15 / 0x1246C50.",
-                                            "For each live WorldManager, +0xEC (Camera speed threshold) is validated as a finite value in 0..100 and set to 5.0. "
-                                            "Apex restores only values it changed, and only if they still equal Apex's applied value.",
-                                            "If official Sims3SettingsSetter has LotStreamingOptimizations.streamingSettings enabled, Apex makes no writes and reports "
-                                            "the setting as handled by Sims3SettingsSetter."},
                        .gameCodeGroup = "LotLodStreaming"});
 
 APEX_REGISTER_FEATURE(MapViewStreamingBlockerPatch,
@@ -968,34 +786,6 @@ APEX_REGISTER_FEATURE(MapViewStreamingBlockerPatch,
                                             "Apex does not detour WorldManager::Update. The skip gate stays set only while map view is open and for a 1000 ms grace period after exit, then its previous value is restored safely.",
                                             "If official Sims3SettingsSetter has LotStreamingOptimizations.mapViewBlocker enabled, Apex makes no writes and reports the setting as handled by Sims3SettingsSetter."},
                        .gameCodeGroup = "LotLodStreaming"});
-
-APEX_REGISTER_FEATURE(LotObjectThrottlePatch,
-                      {.displayName = "Spread Lot Objects While Loading",
-                       .description = "Builds regular objects of a lot in small continuation windows instead of one large burst when the lot enters detailed view. "
-                                      "Building and apartment shells, large exterior geometry and flora stay synchronous. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
-                       .category = "Performance",
-                       .experimental = true,
-                       .enabledByDefault = false, // 06/10: lamps arrive one by one and every arrival relit the rooms (7 s to settle)
-                       .supportedVersions = VERSION_STEAM,
-                       .technicalDetails = {"Port of Sims3SettingsSetter LotStreamingOptimizations.objectThrottle: Lot::AddLotObjectsToScene is replaced through Apex EntryChain and regular objects are processed in small windows.",
-                                            "Default: 2 regular objects per lot window, minimum 16 ms between continuation posts. Continuations use the game's PostRemoteMethodCall so they are marshalled through the engine.",
-                                            "Large/flora objects are built synchronously in the first window because Lot::SetActiveImpl has one-shot post-add fixups that require apartment/building shells to already have scene presence.",
-                                            "This is earlier than Spread New Objects Over Frames: that feature budgets the later Scene::BeginFrame pending-node drain. They are intentionally separate.",
-                                            "If official Sims3SettingsSetter owns LotStreamingOptimizations.objectThrottle, Apex makes no hook/write and reports it as handled by Sims3SettingsSetter."},
-                       .gameCodeGroup = "LotObjectThrottle"});
-
-APEX_REGISTER_FEATURE(LotActiveThresholdPatch,
-                      {.displayName = "Use LoD Active-Lot Threshold 12",
-                       .description = "Sets the internal lot-LoD transition threshold to 12, matching Sims3SettingsSetter. This is not the game's Max Active Lots option. "
-                                      "Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
-                       .category = "Performance",
-                       .experimental = true,
-                       .enabledByDefault = false,
-                       .supportedVersions = VersionBit(GameVersion::EA),
-                       .technicalDetails = {"Resolves the live setting 'Throttle Lot LoD Transitions Max Active Lot Threshold' from its UTF-16 registration name in TS3.exe; no EA address is hard-coded.",
-                                            "The resolved pointer must be module-writable, 4-byte aligned and contain a plausible integer before Apex writes anything. Ambiguous or missing registrations fail closed.",
-                                            "While enabled, Apex maintains the value at 12. On disable it restores the value observed before activation only if the current value is still 12.",
-                                            "This is the internal LoD transition threshold, not Options.ini maxactivelots. If official Sims3SettingsSetter owns LotStreamingOptimizations.streamingSettings, Apex makes no writes."}});
 
 APEX_REGISTER_FEATURE(LotVisibilityOverridePatch,
                       {.displayName = "Keep Lot Visibility Stable",

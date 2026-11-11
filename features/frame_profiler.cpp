@@ -55,7 +55,7 @@
 // Not hooked on purpose:
 //   - 0x006A3EC0 (room lightmap solve): LotEdgeLighting checks its entry bytes before installing and would refuse to
 //     install while it is detoured; it is timed through its only caller 0x006A80E0 instead.
-//   - Lot::AddLotObjectsToScene (0xAC1130): the Lot Streaming throttle overwrites its entry with a JMP.
+//   - Lot::AddLotObjectsToScene (0xAC1130): LotStreamingOptimizations' object throttle overwrites its entry with a JMP.
 //   - 0x00ABFAC0 by default: LotStreamingOptimizations finds it by a pattern that starts at the entry each time it
 //     installs; while detoured that fails and the object throttle stays off. Opt-in, not saved, for measurements.
 //   - WorldManager::Update (0xC6D570): detoured by LotStreamingOptimizations' map view blocker.
@@ -338,7 +338,7 @@ const CatInfo kCats[kCatCount] = {
     {"Lot lighting setup", "FUN_00ADBAD0: per lot level, the room lighting below and the lot light solvers (FUN_006A4180)."},
     {"Room lighting + solve", "FUN_006A80E0: for every room, the room light update (FUN_006C54E0) and the synchronous room lightmap solve (FUN_006A3EC0)."},
     {"Lot lighting update", "FUN_00ADB8F0 (lot renderer update -> FUN_00AE4CB0): the per-frame room lighting of a lot, time-boxed by FUN_00ADB120 (5-30 ms), solving rooms through FUN_006A8BA0."},
-    {"Lot object scene nodes", "Lot::UpdateObjectSceneNode (FUN_00ABFAC0): one object's scene node (AddLotObjectsToScene, Lot Streaming throttle). Optional, see Advanced."},
+    {"Lot object scene nodes", "Lot::UpdateObjectSceneNode (FUN_00ABFAC0): one object's scene node (AddLotObjectsToScene, LotStreamingOptimizations' object throttle). Optional, see Advanced."},
     {"Terrain update", "FUN_00C845C0 (from WorldManager::Update): terrain update / rebuild (Terrain/WorldLeafTexture)."},
     {"Script GC", "GC_try_to_collect (FUN_00E4A050): the explicit collection in MonoScriptHost::Simulate, on the simulation thread."},
     {"Scene::BeginFrame", "FUN_006EBB70 (main loop): submits the scene jobs and hands the render queue over; can wait for the previous frame's job."},

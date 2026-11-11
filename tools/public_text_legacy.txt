@@ -6,7 +6,6 @@ apex_gui.cpp	date	// (07/10, players' Runtime Error: started and run under HookG
 apex_gui.cpp	date	// (14/10: a header and one row; the GPU time of the last edit is on Developer > Tester)
 apex_gui.cpp	date	// Instant (GPU) is the default (14/10; a saved lampLightingMode keeps its choice). Instant cannot be chosen on a device
 apex_gui.cpp	date	// ---- System > Lot Streaming (06/10, its own page) ----
-apex_gui.cpp	date	// Lot detail and object streaming: research and code by idavidveiga's fork (02-04/10, docs/features/lot-streaming.md)
 apex_gui.cpp	date	// ---- System > Report a problem (30/09): the captures players send with a bug report (features/captures.h) ----
 apex_gui.cpp	date	return WorldSession::InWorld(); // the world drawn, not a load screen (06/10: the start note showed on Twinbrook's load screen)
 apex_gui.cpp	date	// not while the editor is not on screen, nor while another window has the keyboard (review 30/09, M1)
@@ -369,7 +368,6 @@ features/lot_lighting_motion.cpp	date	// ---- Lot build slice while moving (05/1
 features/lot_lighting_motion.cpp	date	// (14/10, drag solves) the flush once a dragged lamp is still (the rooms that waited for the stop, the sends left out):
 features/lot_lighting_motion.cpp	date	// 12/10: a lamp edit's room is the current room (RoomLightQueue::CurrentRoomUrgent): the lot being played keeps the
 features/lot_lighting_motion.cpp	date	// Many lamps switched at once whose rooms already show their quick pass (06/10, RoomLightQueue::Refining): the refinement
-features/lot_object_throttle.cpp	date	// copies: Stop on another thread may clear the pointers while the posts below run (06/10 review)
 features/memory_guard.cpp	date	// Steam 1.67.2 (research\engine_map\full.asm, 05/10)
 features/memory_guard.cpp	date	// 07/10, players' Runtime Error: these lines are written when address space is short, inside the game's calls or on the watch
 features/memory_guard.h	date	// false); it writes large streams, and a big allocation needs one contiguous free block (memory study 30/09, Backups
@@ -570,7 +568,6 @@ framework/d3d9_hooks.h	date	// them without a device call (14/10: the Banding Fi
 framework/entry_chain.cpp	date	// mono_type_get_object and mono_domain_free (05/10): register-only prologues; no branch in TS3W.exe lands on
 framework/entry_chain.cpp	date	// The object service's map find / insert / erase (05/10): register-only prologues; no branch lands on 0x00939101..07,
 framework/entry_chain.cpp	date	// The light object removal 0x006C7610 (05/10): register-only prologue; no branch lands on 0x006C7611..16 (same scan).
-framework/game_addresses.cpp	date	// Steam 1.67.2 addresses found offline in TS3W.exe with the fork's EA signatures (06/10, each unique; PostRemoteMethodCall: the
 framework/game_addresses.cpp	date	//      the world save call before "mov eax,0Ch" (Error 12); every signature unique on Steam (checked on TS3W.exe 05/10) ----
 framework/high_alloc.h	date	// Large buffers above the game's 2 GB line (14/10). TS3W.exe is large-address aware: on 64-bit Windows a 32-bit process of
 framework/hook_guard.h	date	// Exception safety nets where the game or the D3D9 runtime calls into Apex (07/10, players' "Microsoft Visual C++ Runtime
@@ -634,7 +631,6 @@ patches/night_terrain_relight_patch.cpp	date	// Rooms keep their light when thei
 patches/performance.h	date	// "Lamp edits all at once" under Faster room lighting ([patches.RoomLightQueue] switchAllAtOnce, default on; 12/10: every
 patches/performance_patches.cpp	date	// CompositorReadback (features/compositor_readback.h) is not started: in game (05/10) it made textures slower, since each
 patches/performance_patches.cpp	date	// "lightFade" (Smooth light changes indoors, 06/10) was removed: the light changes at once (an old key is ignored)
-patches/performance_patches.cpp	date	.enabledByDefault = false, // 06/10: lamps arrive one by one and every arrival relit the rooms (7 s to settle)
 shaders/rt_lamps_hlsl.h	date	// (15/10) the lot's ground (bit 4): no wall test, as the game's own solve of ground texels; the lot passes shade it with the
 tools/roofed_openings_test/check.cpp	date	// A colonnade on a foundation (13/10 in game): story 1 stands on the foundation's top (0.74), a garden post on the terrain
 tools/roofed_openings_test/check.cpp	date	// A neighbour that lost a lifted lamp (13/10 in game: room 56 gathered while the lamp of room 1 was lifted and stayed dark

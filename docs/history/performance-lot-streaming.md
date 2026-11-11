@@ -310,3 +310,44 @@ captures (244 completed lots).
 streaming keeps the threshold at Max Active Lots; the lot load stages share one budget per frame (6 ms still, 4 ms
 moving), started with Lot Lighting While Moving. The object throttle is kept as it was; removing it is left to the
 maintainer. Offline evidence in the [validation page](../validation/performance-lot-streaming.md).
+
+### 2026-11-11: Smooth lot streaming, object spreading, threshold 12 and detailed-lot count removed
+
+**Context:** lots requested while panning finished only when the camera stopped (a lot load analysis: lots requested at
+3.3 s done at 26 s, the same lot later in 0.5 s), and turning the lot options off in a loaded world left fewer detailed
+lots and no streaming while the camera moved. A study on Steam 1.67.2 of the WorldManager constructor, of 0x00C60C00 and
+of the game's `GraphicsRules.sgr`.
+
+**Finding:**
+
+- The constructor stores Max Active Lots `+0xE4` = 4 (0x00C672F6) and the camera-speed threshold `+0xEC` = 0.0
+  (0x00C67308). The player's option is applied only at the end of the world load: 0x00C65030, called at 0x00C6B05B just
+  before `+0x41` (world active) is stored, calls 0x00C60C00, which writes `+0xE4` = min(MaxActiveLots,
+  PlatformMaxActiveLots) and `+0xEC` = CameraSpeedThreshold. `GraphicsRules.sgr` sets both from one option (1 to 8 lots
+  with thresholds 1.0 to 32.0; its settings 12 and 16 also give 8 and 32.0), picks 4 lots at most for the hardware, and
+  caps PlatformMaxActiveLots at 4 on a 32-bit system and 8 on a 64-bit one.
+- Smooth lot streaming and Maximum detailed lots captured each WorldManager before the game applied the option. A game
+  log shows both: `camera speed threshold is 0.000` and `native Lot LOD distance 70.000, Max Active Lots 4` at the same
+  moment, then `Camera speed threshold drifted 32.000 -> 5.000; maintained at 5.000` once the game had applied the
+  option (8 lots, 32.0). Turned off in the loaded world they wrote the constructor's values back (`Max Active Lots
+  restored 8 -> 4`, `Camera speed threshold restored to 0.000`): 4 detailed lots instead of the player's 8, and a
+  threshold of 0.0, at which LotLodScoring returns early whenever the camera moves at all, so no lot was promoted until
+  the camera stood still. Maximum detailed lots wrote 4 back whenever its count equalled the game's option; with another
+  count, the option's value looked like another owner's and Apex stopped applying its own.
+- With the native throttle on, LotLodScoring promotes one lot per call and none while 0x00C69FF0 reports a promoted lot
+  still building: lots came in one at a time.
+- Lot Lighting While Moving at 1 ms left a loading lot 2 ms (the lot being played) or 0.67 ms (another lot) of lighting
+  per frame while the camera moved, so the lighting wait of load stage 20 lasted until the camera stopped. Loading lots
+  now keep a floor of 3/15 of the game's loading budget
+  ([Lot Lighting While Moving](../features/performance/lot-lighting-motion.md#how-apex-radiance-solves-it)).
+- Spread lot objects while loading spread a per-object call that cost 3.3 ms over 6075 calls (entry of 2026-10-27), and
+  its lamps arriving one by one relit the rooms (entry of 2026-10-06). The threshold-12 switch was registered for the
+  EA app build only and did nothing on Steam.
+
+**Outcome:** removed: Smooth lot streaming (`LotLodStreaming`'s throttle, camera threshold 5.0 and threshold follow),
+Spread lot objects while loading (`LotObjectThrottle`), the threshold-12 switch (`LotActiveThreshold`) and the Maximum
+detailed lots half of Extended lot detail, which writes only `+0xDC` (`LotDetailRange::Start(distance)`). The game's
+own option always sets Max Active Lots and the camera-speed threshold. Kept: Extended lot detail (distance), Keep lot
+visibility stable, Pause lot streaming in map view and the shared lot build time. The removed TOML keys are ignored.
+Not run in game yet ([validation](../validation/performance-lot-streaming.md#open-checks)); details in
+[removed features](../removed-features.md#lot-streaming-parts).

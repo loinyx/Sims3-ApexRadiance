@@ -450,8 +450,8 @@ constexpr const char* kOverviewPerformancePatches[] = {
     Performance::kFastMemoryName, Performance::kSceneBudgetName, Performance::kObjectIndexName,
     Performance::kMemoryGuardName, Performance::kWindowRepaintName, Performance::kScriptMathName,
 };
-constexpr const char* kOverviewLotPatches[] = {Performance::kLotDetailRangeName, Performance::kLotLodStreamingName, Performance::kLotVisibilityOverrideName,
-                                               Performance::kMapViewStreamingBlockerName, Performance::kLotObjectThrottleName};
+constexpr const char* kOverviewLotPatches[] = {Performance::kLotDetailRangeName, Performance::kLotVisibilityOverrideName,
+                                               Performance::kMapViewStreamingBlockerName};
 
 // "12 of 15 on": the Performance options this game version has, and how many of them are on
 template <size_t N> std::string GroupCountText(const char* const (&names)[N]) {
@@ -485,7 +485,10 @@ template <size_t N> bool GroupSwitchable(const char* const (&names)[N]) {
 template <size_t N> void SetGroup(const char* const (&names)[N], OverviewRestore::Scope scope, bool on, const char* except = nullptr) {
     if (on) {
         const std::vector<std::string> remembered = OverviewRestore::Names(scope);
-        const bool all = !OverviewRestore::Has(scope) || remembered.empty();
+        // none of the remembered names still in the list (nothing remembered, or only removed options): all of them
+        const bool all = std::none_of(std::begin(names), std::end(names), [&](const char* n) {
+            return std::find(remembered.begin(), remembered.end(), n) != remembered.end();
+        });
         for (const char* name : names) // in list order: an extension after its parent
             if (all || std::find(remembered.begin(), remembered.end(), name) != remembered.end())
                 if (ApexPatch* patch = Find(name); patch && Switchable(patch) && !patch->IsEnabled()) SetPatch(patch, true);
@@ -1430,15 +1433,15 @@ void PerformanceCard() {
 
 // ---- System > Lot Streaming (06/10, its own page) ----
 void LotStreamingCards() {
-    // Lot detail and object streaming: research and code by idavidveiga's fork (02-04/10, docs/features/lot-streaming.md)
+    // Lot detail: research and code by idavidveiga's fork (docs/features/performance/lot-streaming.md)
     // Every option here is experimental: one note for the page (the search results, shown without it, keep the badges)
     const bool badges = ApexUi::FilterActive();
     if (!badges)
         ApexUi::IconNote(IconId::FlaskConical, "Every option on this page is experimental: if anything looks wrong or the game crashes, turn it off", VioletTheme::kWarning);
     static constexpr const char* kHandled = "Handled by Sims3SettingsSetter, so Apex leaves it alone";
-    // One card in two groups (the former Lot detail streaming and Object streaming cards), its subtitle how many are on
-    static const char* const kLotOptions[] = {Performance::kLotDetailRangeName, Performance::kLotLodStreamingName, Performance::kLotVisibilityOverrideName,
-                                              Performance::kMapViewStreamingBlockerName, Performance::kLotObjectThrottleName};
+    // One card, its subtitle how many are on
+    static const char* const kLotOptions[] = {Performance::kLotDetailRangeName, Performance::kLotVisibilityOverrideName,
+                                              Performance::kMapViewStreamingBlockerName};
     int lotOn = 0;
     for (const char* name : kLotOptions)
         if (ApexPatch* p = Find(name); p && p->IsEnabled()) ++lotOn;
@@ -1450,7 +1453,7 @@ void LotStreamingCards() {
         ApexUi::CardGroup("Lot detail");
 
         const bool rangeOn = FeatureSwitchRow(Performance::kLotDetailRangeName, "Extended lot detail",
-                                              "More lots in full detail, and farther away; uses more memory", badges);
+                                              "Lots stay in full detail farther away; uses more memory", badges);
         if (rangeOn) {
             float distance = static_cast<float>(Performance::LotDetailDistance());
             char distanceValue[24];
@@ -1465,23 +1468,7 @@ void LotStreamingCards() {
                 const int snappedDistance = std::clamp(70 + static_cast<int>(std::lround((distance - 70.0f) / 10.0f)) * 10, 70, 300);
                 Performance::SetLotDetailDistance(snappedDistance);
             }
-
-            float maxLots = static_cast<float>(Performance::MaximumDetailedLots());
-            char maxLotsValue[24];
-            std::snprintf(maxLotsValue, sizeof maxLotsValue, "%d", Performance::MaximumDetailedLots());
-            ApexUi::SliderOptions maxLotsOptions;
-            maxLotsOptions.tooltip = "How many lots can be in full detail at once; 8 is the game's, 16 the tested maximum. More lots use more memory";
-            maxLotsOptions.valueText = maxLotsValue;
-            maxLotsOptions.leftLabel = "8 (game)";
-            maxLotsOptions.rightLabel = "16";
-            maxLotsOptions.defaultValue = 16.0f;
-            if (ApexUi::Slider("Maximum detailed lots", &maxLots, 8.0f, 16.0f, maxLotsOptions))
-                Performance::SetMaximumDetailedLots(static_cast<int>(std::lround(maxLots)));
         }
-
-        const bool streamingOn = FeatureSwitchRow(Performance::kLotLodStreamingName, "Smooth lot streaming",
-                                                  "Fewer lots switching detail back and forth while the camera moves", badges);
-        if (streamingOn && Performance::LotLodStreamingHandledByS3SS()) CardNote(kHandled);
 
         const bool visibilityOn = FeatureSwitchRow(Performance::kLotVisibilityOverrideName, "Keep lot visibility stable",
                                                    "Lots in full detail keep it a little farther, so lots at the edge stop switching back and forth", badges);
@@ -1493,37 +1480,6 @@ void LotStreamingCards() {
         const bool mapBlockerOn = FeatureSwitchRow(Performance::kMapViewStreamingBlockerName, "Pause lot streaming in map view",
                                                    "No lot detail streaming while the map view is open; it resumes when it closes", badges);
         if (mapBlockerOn && Performance::MapViewStreamingBlockerHandledByS3SS()) CardNote(kHandled);
-
-        ApexUi::CardGroup("Objects");
-        const bool objectThrottleOn = FeatureSwitchRow(Performance::kLotObjectThrottleName, "Spread lot objects while loading",
-                                                       "Builds a lot's objects a few at a time instead of all at once", badges);
-        if (objectThrottleOn && Performance::LotObjectThrottleHandledByS3SS()) {
-            CardNote(kHandled);
-        } else if (objectThrottleOn) {
-            float objects = static_cast<float>(Performance::LotObjectThrottleObjectsPerWindow());
-            char objectValue[24];
-            std::snprintf(objectValue, sizeof objectValue, "%d", Performance::LotObjectThrottleObjectsPerWindow());
-            ApexUi::SliderOptions objectOptions;
-            objectOptions.tooltip = "Objects built for each lot per step; 2 matches Sims3SettingsSetter";
-            objectOptions.valueText = objectValue;
-            objectOptions.leftLabel = "Smoother";
-            objectOptions.rightLabel = "Loads sooner";
-            objectOptions.defaultValue = 2.0f;
-            if (ApexUi::Slider("Objects per step", &objects, 1.0f, 64.0f, objectOptions))
-                Performance::SetLotObjectThrottleObjectsPerWindow(static_cast<int>(std::lround(objects)));
-
-            float delay = static_cast<float>(Performance::LotObjectThrottleDelayMs());
-            char delayValue[24];
-            std::snprintf(delayValue, sizeof delayValue, "%d ms", Performance::LotObjectThrottleDelayMs());
-            ApexUi::SliderOptions delayOptions;
-            delayOptions.tooltip = "Minimum wait between two steps of the same lot; 16 ms matches Sims3SettingsSetter";
-            delayOptions.valueText = delayValue;
-            delayOptions.leftLabel = "Loads sooner";
-            delayOptions.rightLabel = "More spread";
-            delayOptions.defaultValue = 16.0f;
-            if (ApexUi::Slider("Delay between steps", &delay, 0.0f, 500.0f, delayOptions))
-                Performance::SetLotObjectThrottleDelayMs(static_cast<int>(std::lround(delay)));
-        }
     }
     ApexUi::EndCard();
     ImGui::PopID();
@@ -1548,7 +1504,7 @@ void DisplayPage() {
 }
 
 void LotStreamingPage() {
-    ApexUi::PageTitle("Lot Streaming", "How far and how many lots show in full detail, and how they load");
+    ApexUi::PageTitle("Lot Streaming", "How far lots show in full detail");
     LotStreamingCards();
 }
 

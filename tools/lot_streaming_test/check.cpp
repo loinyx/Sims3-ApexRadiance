@@ -315,7 +315,6 @@ static void ExeChecks(const std::string& exe) {
     struct Site { uint32_t va; const char* what; std::vector<int> bytes; };
     const std::vector<Site> sites = {
         {0x00C63015, "metric: JZ over the detailed-lot bias, then subss xmm0,[edi+0E0h]", {0x74, 0x14, 0xF3, 0x0F, 0x10, 0x44, 0x24, 0x08, 0xF3, 0x0F, 0x5C, 0x87, 0xE0, 0, 0, 0}},
-        {0x00C6C6B5, "scoring: mov edx,[edi]; cmp edx,[0x01184328] (Max Active Lot Threshold)", {0x8B, 0x17, 0x3B, 0x15, 0x28, 0x43, 0x18, 0x01, 0xC6, 0x44, 0x24, 0x1A, 0x01}},
         {0x00AEB306, "renderer update: call 0x00AEA680 (load stages)", {0xE8, 0x75, 0xF3, 0xFF, 0xFF}},
         {0x00C7CEDF, "lot pass: call 0x00AEB2E0 (renderer update)", {0xE8, 0xFC, 0xE3, 0xE6, 0xFF}},
         {0x00AEB2E0, "renderer update: push esi only before the load stages call", {0x56, 0x8B, 0xF1, 0xE8}},
@@ -328,9 +327,6 @@ static void ExeChecks(const std::string& exe) {
         CHECK(ok, "exe bytes at %08X: %s", s.va, s.what);
         if (ok) std::printf("exe: %08X ok (%s)\n", s.va, s.what);
     }
-    const uint32_t threshold = u32(fileOf(0x01184328));
-    std::printf("exe: Max Active Lot Threshold initial value %u (the throttle applies only while Max Active Lots <= it)\n", threshold);
-    CHECK(threshold == 12, "threshold initial value 12, got %u", threshold);
 }
 
 int main(int argc, char** argv) {

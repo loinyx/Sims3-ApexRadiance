@@ -249,19 +249,7 @@ constexpr Info kInfo[] = {
     {"ObjectTreeSearch", 0x00C5FA60},
     {"LotLodScoring", 0x00C6C290},
     {"LotDetailRequest", 0x00AC20E0},
-    {"LotLodThrottleTest", 0x00C6C695},
-    {"LotLodThrottleFlag", 0x011ECBC0},
-    {"LotLodActiveThresholdTest", 0x00C6C6B7},
-    {"LotLodActiveThreshold", 0x01184328},
     {"LotVisibilityCameraBiasJZ", 0x00C63015},
-    // Steam 1.67.2 addresses found offline in TS3W.exe with the fork's EA signatures (06/10, each unique; PostRemoteMethodCall: the
-    // one called from LotDetailRequest at 0x00AC2117, the other copy has 4 unrelated callers)
-    {"LotAddObjectsToScene", 0x00AC1130},
-    {"LotUpdateObjectSceneNode", 0x00ABFAC0},
-    {"ScriptMessageScopeCtor", 0x007D2DB0},
-    {"ScriptMessageScopeDtor", 0x007D2DF0},
-    {"PostRemoteMethodCall", 0x00ABE9C0},
-    {"IsObjectLargeOrFlora", 0x00B088C0},
     {"WorldManagerPtr", 0x011ECBC4},
     {"TerrainUpdateCall", 0x00C6D68C},
     {"BakeColourSite", 0x00C2950F},
@@ -665,27 +653,13 @@ const Entry kTable[] = {
     // ---- Object lookup index (docs/features/performance.md): the tree walk behind ObjectById ----
     {Id::ObjectTreeWalk, K::Sig, W::Text, None, 0, {{"53 8B 5C 24 08 55 8B 6C 24 10 56 8B F1 8B CB 33 C0 0B CD 74 ?? 8B 96 A0 00 00 00 2B 96 9C 00 00 00 57 33 FF C1 FA 02", 0, M::At}, {"8B 44 24 0C 52 50 E8 ?? ?? ?? ?? 8B F0 85 F6 74 14 8B 16 8B 42 40 8B CE FF D0 83 F8 01", 6, M::Call}}},
     {Id::ObjectTreeSearch, K::Sig, W::Text, None, 0, {{"53 55 56 8B 74 24 10 85 F6 0F 84 ?? ?? ?? ?? 8B 46 48 8B 5C 24 14 3B C3 8B 6C 24 18 75 ?? 8B 4E 4C 3B CD 74", 0, M::At}, {"8B 04 B8 51 55 53 50 E8 ?? ?? ?? ?? 83 C4 10 85 C0 75", 7, M::Call}}},
-    // ---- Lot LoD streaming probe (docs/engine/lot-loading-and-streaming.md) ----
-    // Find the scoring function by its prologue. Then, only inside that function, locate the byte-global test used by
-    // "Throttle Lot LoD Transitions". If the test is not unique the resolver deliberately returns 0 and the probe
-    // writes nothing; the [Addr] log contains the matches needed to refine the EA signature.
+    // ---- Lot LoD scoring (docs/engine/lot-loading-and-streaming.md) ----
+    // The scoring function, found by its prologue
     {Id::LotLodScoring, K::Sig, W::Text, None, 0, {{"55 8B EC 83 E4 F0 81 EC 84 08 00 00 A1 ?? ?? ?? ?? 53 8B D9 8B 4D 0C 0F 28 8B A0 03 00 00", 0, M::At}, {"55 8B EC 83 E4 F0 81 EC ?? 08 00 00 A1 ?? ?? ?? ?? 53 8B D9 8B 4D 0C", 0, M::At}}},
     {Id::LotDetailRequest, K::Sig, W::Text, None, 0, {{"53 8A 5C 24 08 56 8B F1 8A 86 C1 00 00 00 3A C3 0F 84 ?? ?? ?? ?? 80 BE C9 00 00 00 00", 0, M::At}, NOSIG}},
-    {Id::LotLodThrottleTest, K::InRange, W::Text, Id::LotLodScoring, 0x700, {{"80 3D ?? ?? ?? ?? 00", 0, M::At}, NOSIG}},
-    {Id::LotLodThrottleFlag, K::Deref, W::Image, Id::LotLodThrottleTest, 2, {NOSIG, NOSIG}},
-    // the throttle only applies while Max Active Lots (edx) <= this threshold: mov edx,[edi]; cmp edx,[imm32]; mov byte [esp+1Ah],1
-    {Id::LotLodActiveThresholdTest, K::InRange, W::Text, Id::LotLodScoring, 0x700, {{"8B 17 3B 15 ?? ?? ?? ?? C6 44 24 ?? 01", 2, M::At}, NOSIG}},
-    {Id::LotLodActiveThreshold, K::Deref, W::Image, Id::LotLodActiveThresholdTest, 2, {NOSIG, NOSIG}},
     // ---- Lot visibility override: camera-view distance bias JZ -> JMP ----
     {Id::LotVisibilityCameraBiasJZ, K::Sig, W::Text, None, 0,
      {{"74 ?? F3 0F 10 44 24 08 F3 0F 5C 87 E0 00 00 00 F3 0F 11 44 24 08 D9 44 24 08 5F 5E 8B E5 5D C2 0C 00", 0, M::At}, NOSIG}},
-    // ---- Per-lot object streaming throttle (S3SS LotStreamingOptimizations objectThrottle, frozen 5eb2c65) ----
-    {Id::LotAddObjectsToScene, K::Sig, W::Text, None, 0, {{"83 EC 08 57 8B F9 80 BF C9 00 00 00 00 74 0E C6 87 C1 00 00 00 00 5F 83 C4 08 C2 08", 0, M::At}, NOSIG}},
-    {Id::LotUpdateObjectSceneNode, K::Sig, W::Text, None, 0, {{"83 EC 0C 83 B9 64 03 00 00 00 89 4C 24 04 0F 84 ?? ?? ?? ?? 83 B9 08 04 00 00 01", 0, M::At}, NOSIG}},
-    {Id::ScriptMessageScopeCtor, K::Sig, W::Text, None, 0, {{"8B 44 24 08 56 8B F1 8B 4C 24 10 57 8B 7C 24 0C 85 FF 89 06 89 4E 04 74 19", 0, M::At}, NOSIG}},
-    {Id::ScriptMessageScopeDtor, K::Sig, W::Text, None, 0, {{"56 8B F1 83 3E 00 74 1B E8 ?? ?? ?? ?? 85 C0 74 12 8B 4E 04 8B 10 8B 52 18 6A 00 51", 0, M::At}, NOSIG}},
-    {Id::PostRemoteMethodCall, K::Sig, W::Text, None, 0, {{"53 56 6A 00 6A 00 6A 00 6A 00 68 ?? ?? ?? ?? 6A 20 E8 ?? ?? ?? ?? 83 C4 18 85 C0 74 ?? C7 00 ?? ?? ?? ?? 33 C9 8D 50 04 87 0A 8B 4C 24 10 8B 54 24 14 89 48 0C 8B 4C 24 18 89 48 14 8A 4C 24 20", 0, M::At}, NOSIG}},
-    {Id::IsObjectLargeOrFlora, K::Sig, W::Text, None, 0, {{"8B 0D ?? ?? ?? ?? 56 8B 74 24 08 83 C6 18 56 E8 ?? ?? ?? ?? 85 C0 74 ?? 8B 80 98 00 00 00 8B C8 C1 E9 12 F6 C1 01 75 ?? C1 E8 07 A8 01 75 ??", 0, M::At}, NOSIG}},
     // ---- Local terrain relight (docs/features/night-lighting/terrain-relight.md): the WorldManager global from the store in
     //      FUN_00c6cf80 ("lea ecx,[ebp+9Ch]; mov [global],ebp; call"), alternate: the clear in FUN_00c6b500; the terrain link ----
     {Id::WorldManagerPtr, K::Sig, W::Image, None, 0, {{"8D 8D 9C 00 00 00 89 2D ?? ?? ?? ?? E8", 8, M::Dword}, {"51 53 56 33 DB 8B F1 89 1D ?? ?? ?? ?? 8B 8E 6C 01 00 00", 9, M::Dword}}},
@@ -863,12 +837,9 @@ const Group kGroups[] = {
     {"ObjectIndex", {Id::ObjectById, Id::ObjectTreeWalk, Id::ObjectTreeSearch}},
     {"RoomLightQueue", {Id::RoomPriorityCall, Id::RoomPriority, Id::LodStepSite, Id::KeepClassA, Id::KeepClassB, Id::RoomPickJump, Id::RoomPick, Id::RoomSolveStep,
                         Id::StopwatchCtor, Id::StopwatchStart, Id::StopwatchElapsed, Id::PriorityLotObject, Id::PriorityLotTest}},
-    {"LotLodStreaming", {Id::LotLodScoring, Id::LotLodThrottleTest, Id::LotLodThrottleFlag, Id::WorldManagerPtr}},
-    {"LotLodActiveFollow", {Id::LotLodActiveThresholdTest, Id::LotLodActiveThreshold}}, // optional part of LotLodStreaming
+    {"LotLodStreaming", {Id::LotLodScoring, Id::WorldManagerPtr}},
     {"LotBuildShare", {Id::LotLoadStagesCall, Id::LotLoadStages, Id::LotPassRendererCall, Id::LotRendererUpdate, Id::WorldManagerPtr, Id::PriorityLotObject, Id::PriorityLotTest}},
     {"LotLodDistanceProbe", {Id::LotLodScoring, Id::LotDetailRequest}},
-    {"LotObjectThrottle", {Id::LotAddObjectsToScene, Id::LotUpdateObjectSceneNode, Id::ScriptMessageScopeCtor, Id::ScriptMessageScopeDtor,
-                            Id::PostRemoteMethodCall, Id::IsObjectLargeOrFlora}},
     {"LotVisibilityOverride", {Id::LotVisibilityCameraBiasJZ}},
     {"FastCasSort", {Id::CasTriSort}},
     {"FastMemory", {Id::AllocGlobal, Id::AllocMmapFreeCall}},
