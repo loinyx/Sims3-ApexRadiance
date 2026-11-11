@@ -64,7 +64,8 @@ Buttons: **Clear** (forgets frames, hitches and session tables; the file keeps w
 **Measurement presets** (*Measurement setup*), for the 60-second measurement protocol:
 
 - **Timing run** (run type A): hitch multiplier 2.0, floor 8 ms, count state calls on, write the file on, sampling off,
-  Mutex::Lock not timed, per-hook registry timing and lot object building off; turns the profiler on.
+  Mutex::Lock not timed, per-hook registry timing on, every draw hook timed exactly (*Sampled dispatch timing* off: a 1-in-16
+  sample booked 16 times showed more mod time than the frame), lot object building off; turns the profiler on.
 - **Sampling run** (run type B): the same plus sampling of the render and simulation threads at 2000 Hz.
 
 Both save the settings and log `[FrameProfiler] Measurement preset: ...`. Neither presses Clear: the protocol presses

@@ -5665,6 +5665,23 @@ int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], f
 bool g_drawCostTimed = false; // the current draw is timed: UpdateHooks' draw calls add their driver time
 int64_t g_fencePickTicks = 0;
 uint32_t g_fencePickCalls = 0;
+// (development builds) the fence draw's other parts on the timed draws: the group noted for the ground shade (NoteFenceGroup),
+// its positions read (InstancedGroupCentre), the per-piece runs (DrawFenceRuns, with their draws)
+int64_t g_fenceStepTicks[3] = {};
+uint32_t g_fenceStepCalls[3] = {};
+struct FenceStepTimer {
+    int step;
+    LARGE_INTEGER a{};
+    explicit FenceStepTimer(int s) : step(kPublicBuild || !g_drawCostTimed ? -1 : s) {
+        if (step >= 0) QueryPerformanceCounter(&a);
+    }
+    ~FenceStepTimer() {
+        if (step < 0) return;
+        LARGE_INTEGER b;
+        QueryPerformanceCounter(&b);
+        g_fenceStepTicks[step] += b.QuadPart - a.QuadPart, g_fenceStepCalls[step]++;
+    }
+};
 int PickFenceLamps(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share, LampCone* cones, float* vis) {
     if (kPublicBuild || !g_drawCostTimed) return PickFenceLampsMemo(g, reachLaw, lamps, lampTop, share, cones, vis);
     LARGE_INTEGER a, b;
@@ -5736,7 +5753,7 @@ int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], f
 }
 
 template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw) {
-    NoteFenceGroup(dev); // garden walls and fences shade the ground (ShadeWalls)
+    { FenceStepTimer timer(0); NoteFenceGroup(dev); } // garden walls and fences shade the ground (ShadeWalls)
     if (!g_fenceFix.load(std::memory_order_relaxed)) return false;
     // (12/10, one daytime curve) No full-daylight gate any more: the pass runs at every level with its ground and lamp
     // strengths x LampDay(night) (3% by day), so a lamp left on by day fades on fences as on the walls behind them.
@@ -5748,7 +5765,11 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
     if (!chosen->ps) return false;
     // the group's pieces (per-pixel lamps on, a shader with them): read before the law is chosen, so a draw that will place
     // no lamp (option off, or a group that cannot be read) keeps the first law's lighter copy (12/10 review)
-    const GroupCentre* g = chosen->inst.pixelLamps && g_objPixelLamps.load(std::memory_order_relaxed) ? InstancedGroupCentre(dev) : nullptr;
+    const GroupCentre* g = nullptr;
+    if (chosen->inst.pixelLamps && g_objPixelLamps.load(std::memory_order_relaxed)) {
+        FenceStepTimer timer(1);
+        g = InstancedGroupCentre(dev);
+    }
     // realistic reach (12/10): the copy with the outdoor walls' law, made only from a shader the first law takes; refused
     // (no room for its 2 rows), the first law stays (g_reachLawRefused)
     bool reachRefused = false;
@@ -5886,9 +5907,12 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
         if (active != &p) SetPsConst(dev, active->inst.capConst, &caps[0][0], kCapRows);
         SetPs(dev, active->ps);
         // each piece lit from its own place, run by run (DrawFenceRuns); a single piece or too many runs: one draw
-        if (!(g && p.inst.pixelLamps &&
-              DrawFenceRuns(dev, *g, used, lamps, p.inst.lampParamConst, rows, cones, vis, lampTop, poolGate, shadeGroundY, p.inst.groundWeightConst, weight, draw)))
-            draw();
+        bool ran = false;
+        if (g && p.inst.pixelLamps) {
+            FenceStepTimer timer(2);
+            ran = DrawFenceRuns(dev, *g, used, lamps, p.inst.lampParamConst, rows, cones, vis, lampTop, poolGate, shadeGroundY, p.inst.groundWeightConst, weight, draw);
+        }
+        if (!ran) draw();
         SetPs(dev, original);
         if (active != &p) SetPsConst(dev, active->inst.capConst, &oldCaps[0][0], kCapRows);
         if (p.inst.pixelLamps) {
@@ -10221,6 +10245,16 @@ void LogDrawCost() {
         for (uint32_t& b : g_fencePickBypass) b = 0;
         s_hits = g_fencePickHits, s_misses = g_fencePickMisses, s_gen = g_lampMemoGen, s_state = LevelLightShare::LampVisibilityState();
         for (uint32_t& w : g_fenceMissWhy) w = 0;
+    }
+    {
+        static const char* const kStep[3] = {"groups noted for the ground shade", "positions read", "per-piece runs (with their draws)"};
+        for (int s = 0; s < 3; s++)
+            if (g_fenceStepCalls[s])
+                arch += std::format(" | of it the fence {}: {:.0f} a frame, {:.2f} us each", kStep[s], g_fenceStepCalls[s] * scale,
+                                    static_cast<double>(g_fenceStepTicks[s]) * msPerTick * 1000.0 / g_fenceStepCalls[s]);
+        arch += std::format(" | fence grid built {} times, its gaps {} times, {} groups", g_fenceGridBuilds, g_fenceGapBuilds, g_fenceGroups.size());
+        g_fenceGridBuilds = 0, g_fenceGapBuilds = 0;
+        for (int s = 0; s < 3; s++) g_fenceStepTicks[s] = 0, g_fenceStepCalls[s] = 0;
     }
     g_archRowsTicks = 0, g_archRowsCalls = 0, g_fencePickTicks = 0, g_fencePickCalls = 0;
     {

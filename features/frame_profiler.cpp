@@ -193,6 +193,7 @@
 #define NOMINMAX
 #endif
 #include "frame_profiler.h"
+#include "perf_toggles.h"
 #include "lot_load_analysis.h"
 #include "d3d9_hooks.h"
 #include "game_addresses.h"
@@ -4343,7 +4344,8 @@ void Hint(const char* text) {
 }
 
 // Measurement presets for the 60-second protocol (research\perf2\plan.md section 9.2). Both: hitch = 2.0 x median, floor 8 ms,
-// state calls counted, the file written, per-hook registry timing and lot object building off, Mutex::Lock not timed.
+// state calls counted, the file written, per-hook registry timing on, every draw hook timed (no 1 in 16 sample: a sampled
+// dispatch booked 16 times showed 151 ms of mod time inside a 55 ms frame), lot object building off, Mutex::Lock not timed.
 // Timing run (A): no sampling. Sampling run (B): the render and simulation threads sampled at 2000 Hz. Turns the profiler on.
 void ApplyPreset(bool sampling) {
     g_mult.store(2.0f);
@@ -4352,8 +4354,9 @@ void ApplyPreset(bool sampling) {
     g_sampleRender.store(sampling);
     g_sampleSim.store(sampling);
     g_sampleHz.store(2000);
-    g_regTiming.store(false);
-    g_regTimingActive.store(false);
+    g_regTiming.store(true);
+    g_regTimingActive.store(g_enabled.load());
+    PerfToggles::SampledDispatchTiming.store(false);
     const bool stateChanged = !g_countState.exchange(true);
     {
         std::lock_guard<std::mutex> lk(g_ctrlMutex);
@@ -4372,12 +4375,13 @@ void ApplyPreset(bool sampling) {
         }
     }
     if (!g_enabled.load()) FrameProfiler::SetEnabled(true);
+    g_regTimingActive.store(g_enabled.load());
     {
         std::lock_guard<std::mutex> lk(g_ctrlMutex);
         UpdateSamplerLocked();
     }
     ApexConfig::RequestSave();
-    LOG_INFO(std::format("[FrameProfiler] Measurement preset: {} run (hitch 2.0 x median, floor 8 ms, state calls counted, file on, Mutex::Lock not timed, sampling {})",
+    LOG_INFO(std::format("[FrameProfiler] Measurement preset: {} run (hitch 2.0 x median, floor 8 ms, state calls counted, file on, per-hook timing on, every dispatch timed, Mutex::Lock not timed, sampling {})",
                          sampling ? "sampling" : "timing", sampling ? "render + simulation threads at 2000 Hz" : "off"));
 }
 
@@ -5002,7 +5006,7 @@ void RenderUI(bool showEnable) {
         if (ApexUi::TextButton("Timing run##FpPreset")) ApplyPreset(false);
         Hint("Recommended settings for the 60-second measurement, run type A (research\\perf2\\plan.md section 9):\n"
              "hitch multiplier 2.0, floor 8 ms, count state calls on, write the file on, sampling off, Mutex::Lock not timed,\n"
-             "per-hook registry timing and lot object building off. Turns the profiler on.\n"
+             "per-hook registry timing on and every draw hook timed exactly, lot object building off. Turns the profiler on.\n"
              "Then press Clear right before the run and Save report now right after it.");
         ImGui::SameLine();
         if (ApexUi::TextButton("Sampling run##FpPreset")) ApplyPreset(true);
