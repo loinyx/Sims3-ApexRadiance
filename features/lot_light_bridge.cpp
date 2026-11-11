@@ -5231,8 +5231,7 @@ template <typename DrawFn> bool DrawRoad(IDirect3DDevice9* dev, DrawFn draw) {
 // pixel shader (ShaderPatches::PatchInstancedLamps) uses max(vertex lights, ground light atlas at the pixel) instead,
 // so every rail gets the same lamp light as the ground next to it. ----
 // The centre and half extent (xz) of an instanced group: the mean of its instance positions (stream 1, the first float3
-// of each record: world position, as the F7 capture reads them). Read once per (buffer, offset, count, stride) and again
-// every 5 s, since the game may refill a buffer; render thread.
+// of each record: world position, as the F7 capture reads them). Kept per set of origins (InstancedGroupCentre); render thread.
 constexpr unsigned kGroupPieces = 32;
 struct GroupCentre {
     float x = 0, y = 0, z = 0, ext = 0;
@@ -5292,7 +5291,26 @@ bool ReadInstancePositions(const BYTE* p, UINT count, UINT stride, GroupCentre& 
         return false;
     }
 }
-std::unordered_map<uint64_t, uint8_t> g_centreBusy; // draw_reads_nowait: busy answers per group since its last read
+std::unordered_map<uint64_t, uint8_t> g_centreBusy; // draw_reads_nowait: busy answers per buffer place since its last read
+std::unordered_map<uint64_t, GroupCentre*> g_groupAtPlace; // the group last read at a buffer place (used while it is busy)
+// The instance origins' hash (exact bits, with the count and stride): the key of the group they make
+bool HashInstancePositions(const BYTE* p, UINT count, UINT stride, uint64_t& key) {
+    __try {
+        uint64_t h = 1469598103934665603ull ^ (static_cast<uint64_t>(count) << 20) ^ stride;
+        for (UINT i = 0; i < count; i++) {
+            const uint32_t* v = reinterpret_cast<const uint32_t*>(p + static_cast<size_t>(i) * stride);
+            for (int k = 0; k < 3; k++) h = (h ^ v[k]) * 1099511628211ull;
+        }
+        key = h;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+// The game refills its instance buffers (dynamic, write-only): one place in a buffer holds other pieces from one draw to the
+// next, so a group kept by its place lit the pieces drawn there with another group's lamps until the next read (stairs
+// flickered as the camera moved). The origins are read at every draw and the group is found by them: the same pieces keep
+// the same group, its pick and its runs wherever the game puts them.
 const GroupCentre* InstancedGroupCentre(IDirect3DDevice9* dev) {
     UINT freq = 0;
     if (FAILED(dev->GetStreamSourceFreq(0, &freq)) || !(freq & D3DSTREAMSOURCE_INDEXEDDATA)) return nullptr;
@@ -5302,33 +5320,36 @@ const GroupCentre* InstancedGroupCentre(IDirect3DDevice9* dev) {
     if (FAILED(dev->GetStreamSource(1, &vb, &off, &stride)) || !vb) return nullptr;
     const GroupCentre* result = nullptr;
     if (count > 0 && count <= 4096 && stride >= 12 && stride <= 256) {
-        if (g_groupCentres.size() > 4096) g_groupCentres.clear(), g_centreBusy.clear(); // groups come and go with lots
-        const uint64_t key = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb)) << 32) ^ (static_cast<uint64_t>(off) << 12) ^ (static_cast<uint64_t>(count) << 1) ^ stride;
-        GroupCentre& g = g_groupCentres[key];
-        const DWORD now = GetTickCount();
-        if (!g.at || now - g.at > 5000) {
-            // draw_reads_nowait: a refresh of a group already read does not wait for the GPU; while the buffer is busy the
-            // last positions stay in use and the next draw tries again (three busy answers: it waits, as before)
-            uint8_t* busy = nullptr;
-            if (DevSwitches::DrawReadsNoWait() && g.at && g.ok) busy = &g_centreBusy[key];
-            const bool nowait = busy && *busy < 3;
-            void* p = nullptr;
-            const HRESULT hr = vb->Lock(off, count * stride, &p, D3DLOCK_READONLY | (nowait ? D3DLOCK_DONOTWAIT : 0));
-            if (nowait && hr == D3DERR_WASSTILLDRAWING) {
-                ++*busy;
-                p = nullptr;
-            } else {
-                g.at = now ? now : 1;
-                if (busy) *busy = 0;
+        if (g_groupCentres.size() > 4096) g_groupCentres.clear(), g_centreBusy.clear(), g_groupAtPlace.clear(); // groups come and go with lots
+        const uint64_t place = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb)) << 32) ^ (static_cast<uint64_t>(off) << 12) ^ (static_cast<uint64_t>(count) << 1) ^ stride;
+        const auto last = g_groupAtPlace.find(place);
+        // draw_reads_nowait: a place read before does not wait for the GPU; while the buffer is busy the group last read there
+        // stays in use and the next draw tries again (three busy answers: it waits, as before)
+        uint8_t* busy = nullptr;
+        if (DevSwitches::DrawReadsNoWait() && last != g_groupAtPlace.end()) busy = &g_centreBusy[place];
+        const bool nowait = busy && *busy < 3;
+        void* p = nullptr;
+        const HRESULT hr = vb->Lock(off, count * stride, &p, D3DLOCK_READONLY | (nowait ? D3DLOCK_DONOTWAIT : 0));
+        uint64_t key = 0;
+        if (nowait && hr == D3DERR_WASSTILLDRAWING) {
+            ++*busy;
+            p = nullptr;
+            if (last->second->ok) result = last->second;
+        } else if (SUCCEEDED(hr) && p && HashInstancePositions(static_cast<const BYTE*>(p), count, stride, key)) {
+            if (busy) *busy = 0;
+            GroupCentre& g = g_groupCentres[key];
+            if (!g.at) {
+                g.at = 1;
                 if (++g_groupReads == 0) g_groupReads = 1;
                 g.read = g_groupReads;
                 g.all.resize(static_cast<size_t>(count) * 3);
-                g.ok = SUCCEEDED(hr) && p && ReadInstancePositions(static_cast<const BYTE*>(p), count, stride, g, g.all.data());
+                g.ok = ReadInstancePositions(static_cast<const BYTE*>(p), count, stride, g, g.all.data());
                 if (!g.ok) g.all.clear();
             }
-            if (p) vb->Unlock();
+            g_groupAtPlace[place] = &g;
+            if (g.ok) result = &g;
         }
-        if (g.ok) result = &g;
+        if (p) vb->Unlock();
     }
     vb->Release();
     return result;
@@ -5339,62 +5360,86 @@ const GroupCentre* InstancedGroupCentre(IDirect3DDevice9* dev) {
 std::string g_objDrawInfo;
 std::string ReachLawText(bool reach, bool refused, bool placed, float scale, const float (*r0Rows)[4], int nLamps);
 
-// A group's lamp list is one for all its pieces: a lamp stays when any piece sees it (PickFenceLampsImpl), and the pixel tests
-// no wall. A flowerbed curb running from the garden to under the house, behind the house's brick wall, took on the hidden
-// pieces the light of the lamp on the other side of that wall (an F7 capture, #336: 62 pieces, the top of the curb
-// lit along the wall while the ground beside it, shaded, stayed dark). Each piece is tested with the same wall and slab test
-// from 0.5 m over its origin; consecutive pieces seeing the same lamps are drawn together, the lamps a run's pieces do not see
-// with no colour. A group whose pieces all see all its lamps keeps its one draw. The masks are kept per group read, lamp list
-// and wall state.
+// A group's lamp list is one for all its pieces, and the game groups pieces as it draws them: the same stair took one group's
+// lamps and ground light on some steps and another group's on the next (two F7 captures: two groups at one corner with
+// atlas weights 0.67 and 0.78), and the groups changed as the camera moved. Each piece is lit from its own place
+// instead: from 0.5 m over its origin, each listed lamp takes the share of it the piece sees (the wall and slab test of the
+// pick), and the ground light on faces turned up takes the piece's own height gate and its own share of the atlas lamps.
+// Consecutive pieces with the same values are drawn together (shares in 1/32, ground weights in 1/64). A curb behind a house
+// wall loses the lamp on the other side piece by piece, as before (F7 #336). The values are kept per group, lamp list and
+// wall state.
 // shortcut: a piece is tested at its origin only (a long piece half behind a wall takes its origin's answer), until pieces
 // carry their own extent
 std::atomic<uint32_t> g_fenceRunGroups{0}, g_fenceRunDraws{0};
 struct FenceRunMasks {
     uint32_t read = 0, gen = 0;
-    uint64_t state = 0, lamps = 0, places = 0; // places: the pieces' positions (a re-read that found them the same keeps the masks)
-    std::vector<uint8_t> mask;
+    uint64_t state = 0, lamps = 0, places = 0; // places: the pieces' positions (a re-read that found them the same keeps the values)
+    std::vector<uint8_t> mask;                 // per piece: the placed lamps' shares (0..32), then the ground weight (0..64)
 };
 std::unordered_map<const GroupCentre*, FenceRunMasks> g_fenceRunMasks;
-constexpr unsigned kFenceRunsMax = 128; // more runs than this: the one draw, as before
+constexpr unsigned kFenceRunsMax = 128; // more runs than this: the one draw with the group's values, as before
+constexpr float kRunShareSteps = 32.0f, kRunWeightSteps = 64.0f;
+// The values of piece `at` (0.5 m over its origin, y its origin's height): bytes [0, lit) the placed lamps' shares, byte lit
+// the ground weight. n candidates in g_lampData / g_lampCone (SelectLamps, as the pick).
+void FencePieceValues(const float* at, float y, int n, int lit, const float (*lamps)[4], const LampCone* cones, float lampTop, float poolGate, uint8_t* out) {
+    float seen[ShaderPatches::kObjectPixelLamps] = {};
+    for (int k = 0; k < lit; k++) {
+        seen[k] = FencePieceVisibility(cones[k], lamps[1 + 2 * k], at);
+        out[k] = static_cast<uint8_t>(seen[k] < 0.01f ? 0.0f : std::round(std::min(seen[k], 1.0f) * kRunShareSteps));
+    }
+    GroundLightGate::Share share; // as PickFenceLampsImpl, at this piece
+    for (int j = 0; j < n; j++) {
+        const float* pr = g_lampData[j];
+        const float* col = g_lampData[16 + j];
+        const float r = pr[3] > 0.1f ? pr[3] : 0.1f, dx = pr[0] - at[0], dy = pr[1] - at[1], dz = pr[2] - at[2];
+        const float w = (col[0] * 0.2126f + col[1] * 0.7152f + col[2] * 0.0722f) * LampConeAt(g_lampCone[j], pr, at) / (1.0f + (dx * dx + dy * dy + dz * dz) / (r * r));
+        float v = -1.0f;
+        for (int k = 0; k < lit && v < 0.0f; k++) // a placed lamp: its test above
+            if (lamps[1 + 2 * k][0] == pr[0] && lamps[1 + 2 * k][1] == pr[1] && lamps[1 + 2 * k][2] == pr[2]) v = seen[k];
+        if (v < 0.0f) v = FencePieceVisibility(g_lampCone[j], pr, at);
+        share.Add(w, v < 0.01f ? 0.0f : v, !g_lampCone[j].light);
+    }
+    const float weight = GroundLightGate::HeightGate(y, lampTop) * share.Value() * poolGate;
+    out[lit] = static_cast<uint8_t>(std::round(std::clamp(weight, 0.0f, 1.0f) * kRunWeightSteps));
+}
+// vis: the share the group's pick gave each placed lamp (its colour is scaled by it); weight: the group's ground weight row
 template <typename DrawFn>
-bool DrawFenceRuns(IDirect3DDevice9* dev, const GroupCentre& g, int used, const float (*lamps)[4], UINT lampConst, unsigned rows, const LampCone* cones, DrawFn draw) {
+bool DrawFenceRuns(IDirect3DDevice9* dev, const GroupCentre& g, int used, const float (*lamps)[4], UINT lampConst, unsigned rows, const LampCone* cones, const float* vis,
+                   float lampTop, float poolGate, UINT weightConst, const float* weight, DrawFn draw) {
     constexpr unsigned N = ShaderPatches::kObjectPixelLamps;
-    static_assert(N <= 8, "one bit per lamp in a uint8_t mask");
     const size_t count = g.all.size() / 3;
     if (used <= 0 || count < 2) return false;
     const int lit = std::min(used, static_cast<int>(N));
-    uint64_t lampKey = 1469598103934665603ull; // the placed lamps' positions and colours
+    const size_t W = static_cast<size_t>(lit) + 1;
+    uint64_t lampKey = 1469598103934665603ull; // the placed lamps' positions and colours, and the ground gate's inputs
     for (int k = 0; k < lit; k++)
         for (int r = 0; r < 2; r++)
             for (int c = 0; c < 4; c++) lampKey = (lampKey ^ FloatBits(lamps[1 + 2 * k + r][c])) * 1099511628211ull;
+    lampKey = (lampKey ^ FloatBits(lampTop)) * 1099511628211ull;
+    lampKey = (lampKey ^ FloatBits(poolGate)) * 1099511628211ull;
     if (g_fenceRunMasks.size() > 4096) g_fenceRunMasks.clear(); // (groups come and go with lots, as g_groupCentres)
     FenceRunMasks& m = g_fenceRunMasks[&g];
     const uint64_t state = LevelLightShare::LampVisibilityState();
-    if (m.read != g.read) { // the group's positions were read again (every 5 s): the masks stay if they did not move
+    if (m.read != g.read) { // another group at this address: the values stay if its pieces are the same
         uint64_t places = 1469598103934665603ull;
         for (float f : g.all) places = (places ^ FloatBits(f)) * 1099511628211ull;
         if (places != m.places) m.places = places, m.mask.clear();
         m.read = g.read;
     }
-    if (m.gen != g_lampMemoGen || m.state != state || m.lamps != lampKey || m.mask.size() != count) {
+    if (m.gen != g_lampMemoGen || m.state != state || m.lamps != lampKey || m.mask.size() != count * W) {
         m.gen = g_lampMemoGen, m.state = state, m.lamps = lampKey;
-        m.mask.assign(count, 0);
+        m.mask.assign(count * W, 0);
+        const int n = SelectLamps(g.x, g.z, 40.0f + std::min(g.ext, 60.0f), true); // the pick's candidates
         for (size_t i = 0; i < count; i++) {
             const float at[3] = {g.all[3 * i], g.all[3 * i + 1] + 0.5f, g.all[3 * i + 2]};
-            uint8_t bits = 0;
-            for (int k = 0; k < lit; k++)
-                if (FencePieceVisibility(cones[k], lamps[1 + 2 * k], at) >= 0.01f) bits |= static_cast<uint8_t>(1u << k);
-            m.mask[i] = bits;
+            FencePieceValues(at, g.all[3 * i + 1], n, lit, lamps, cones, lampTop, poolGate, &m.mask[i * W]);
         }
     }
-    const uint8_t all = static_cast<uint8_t>((1u << lit) - 1u);
-    unsigned runs = 0;
-    bool hidden = false;
-    for (size_t i = 0; i < count; i++) {
-        hidden = hidden || m.mask[i] != all;
-        if (i == 0 || m.mask[i] != m.mask[i - 1]) runs++;
-    }
-    if (!hidden || runs > kFenceRunsMax) return false;
+    const auto same = [&](size_t a, size_t b) { return std::memcmp(&m.mask[a * W], &m.mask[b * W], W) == 0; };
+    unsigned runs = 1;
+    for (size_t i = 1; i < count; i++)
+        if (!same(i, i - 1)) runs++;
+    if (runs > kFenceRunsMax) return false;
     UINT freq = 0, off = 0, stride = 0;
     IDirect3DVertexBuffer9* vb = nullptr;
     if (FAILED(dev->GetStreamSourceFreq(0, &freq)) || (freq & 0x3FFFFFFFu) != count || FAILED(dev->GetStreamSource(1, &vb, &off, &stride)) || !vb) {
@@ -5403,13 +5448,19 @@ bool DrawFenceRuns(IDirect3DDevice9* dev, const GroupCentre& g, int used, const 
     }
     float run[1 + 4 * N + 2][4];
     const unsigned n = std::min<unsigned>(rows, static_cast<unsigned>(std::size(run)));
+    float wrow[4] = {weight[0], weight[1], weight[2], weight[3]};
     for (size_t i0 = 0; i0 < count;) {
         size_t i1 = i0 + 1;
-        while (i1 < count && m.mask[i1] == m.mask[i0]) i1++;
+        while (i1 < count && same(i1, i0)) i1++;
+        const uint8_t* key = &m.mask[i0 * W];
         std::memcpy(run, lamps, n * sizeof run[0]);
-        for (int k = 0; k < lit; k++)
-            if (!(m.mask[i0] & (1u << k))) run[2 + 2 * k][0] = run[2 + 2 * k][1] = run[2 + 2 * k][2] = 0.0f;
+        for (int k = 0; k < lit; k++) { // the lamp's colour at this piece's share instead of the group's
+            const float scale = vis[k] > 0.0f ? key[k] / kRunShareSteps / vis[k] : 0.0f;
+            for (int c = 0; c < 3; c++) run[2 + 2 * k][c] *= scale;
+        }
+        wrow[0] = key[lit] / kRunWeightSteps;
         SetPsConst(dev, lampConst, &run[0][0], n);
+        SetPsConst(dev, weightConst, wrow, 1);
         dev->SetStreamSource(1, vb, off + static_cast<UINT>(i0) * stride, stride);
         dev->SetStreamSourceFreq(0, D3DSTREAMSOURCE_INDEXEDDATA | static_cast<UINT>(i1 - i0));
         draw();
@@ -5419,17 +5470,18 @@ bool DrawFenceRuns(IDirect3DDevice9* dev, const GroupCentre& g, int used, const 
     dev->SetStreamSource(1, vb, off, stride);
     dev->SetStreamSourceFreq(0, freq);
     SetPsConst(dev, lampConst, &lamps[0][0], n);
+    SetPsConst(dev, weightConst, weight, 1);
     vb->Release();
     g_fenceRunGroups.fetch_add(1, std::memory_order_relaxed);
     if (LightProbe::Capturing())
-        g_objDrawInfo += std::format("\n      pieces behind walls: {} runs of the group's {} pieces, each with the lamps its pieces see", runs, count);
+        g_objDrawInfo += std::format("\n      lit per piece: {} runs of the group's {} pieces, each with its own lamp shares and ground weight", runs, count);
     return true;
 }
 
 // The lamps of an instanced group (fences, stairs, railings) around its centre, into rows 1 .. 4N of lamps (pos, 1/R^2;
 // colour, spill; the two cones) and, with the reach law, rows 1 + 4N .. 2 + 4N (r0^2); lampTop: the highest atlas lamp head
 // around; share: the share of the atlas lamps' light the group sees. Returns the lamps placed.
-int PickFenceLampsImpl(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share, LampCone* cones) {
+int PickFenceLampsImpl(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share, LampCone* cones, float* vis) {
     constexpr unsigned N = ShaderPatches::kObjectPixelLamps;
     constexpr unsigned kLampRows = 1 + 4 * N;
     int used = 0;
@@ -5499,6 +5551,7 @@ int PickFenceLampsImpl(const GroupCentre& g, bool reachLaw, float (*lamps)[4], f
         std::memcpy(lamps[1 + 2 * N + 2 * used], cone.c1, 16);
         std::memcpy(lamps[2 + 2 * N + 2 * used], cone.c2, 16);
         if (cones) cones[used] = cone;
+        if (vis) vis[used] = v;
         if (!g_fenceConeLogged && HasCone(cone)) {
             g_fenceConeLogged = true;
             LOG_INFO(std::format("[LotLightBridge] Fence/stairs: per-pixel lamps follow their cones (first: the lamp at ({:.1f} {:.1f} {:.1f}), spill {:.3f})", pr[0], pr[1], pr[2], cone.spill));
@@ -5524,31 +5577,32 @@ struct FencePickMemo {
     float lampTop = 0.0f, share = 0.0f;
     float rows[kFenceRows][4] = {};
     LampCone cones[ShaderPatches::kObjectPixelLamps] = {};
+    float vis[ShaderPatches::kObjectPixelLamps] = {};
 };
 FencePickMemo g_fencePick[1024];
 uint32_t g_fencePickHits = 0, g_fencePickMisses = 0, g_fencePickChecks = 0;
 uint32_t g_fenceMissWhy[5] = {}; // (development builds) PickFenceLampsMemo's misses by reason, and picks not kept
 bool g_fencePickOff = false;
-int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share, LampCone* cones);
+int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share, LampCone* cones, float* vis);
 // (development builds) the draw cost log's timed draws (DrawCostSampled): the fence picks' own time, and the arch rows' below
 bool g_drawCostTimed = false; // the current draw is timed: UpdateHooks' draw calls add their driver time
 int64_t g_fencePickTicks = 0;
 uint32_t g_fencePickCalls = 0;
-int PickFenceLamps(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share, LampCone* cones) {
-    if (kPublicBuild || !g_drawCostTimed) return PickFenceLampsMemo(g, reachLaw, lamps, lampTop, share, cones);
+int PickFenceLamps(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share, LampCone* cones, float* vis) {
+    if (kPublicBuild || !g_drawCostTimed) return PickFenceLampsMemo(g, reachLaw, lamps, lampTop, share, cones, vis);
     LARGE_INTEGER a, b;
     QueryPerformanceCounter(&a);
-    const int used = PickFenceLampsMemo(g, reachLaw, lamps, lampTop, share, cones);
+    const int used = PickFenceLampsMemo(g, reachLaw, lamps, lampTop, share, cones, vis);
     QueryPerformanceCounter(&b);
     g_fencePickTicks += b.QuadPart - a.QuadPart, g_fencePickCalls++;
     return used;
 }
 uint32_t g_fencePickBypass[4] = {}; // memo not used: switch off, turned off, F8 records asked for, a capture
-int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share, LampCone* cones) {
+int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share, LampCone* cones, float* vis) {
     const int bypass = !DevSwitches::LampVisibilityMemo() ? 0 : g_fencePickOff ? 1 : LevelLightShare::VisibilityDiagArmed() ? 2 : LightProbe::Capturing() ? 3 : -1;
     if (bypass >= 0) {
         g_fencePickBypass[bypass]++;
-        return PickFenceLampsImpl(g, reachLaw, lamps, lampTop, share, cones);
+        return PickFenceLampsImpl(g, reachLaw, lamps, lampTop, share, cones, vis);
     }
     // (the law in the slot too: a group drawn with both laws kept evicting itself)
     FencePickMemo& e = g_fencePick[(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g)) * 2654435761u ^ g.read * 0x85EBCA77u ^ (reachLaw ? 0x9E3779B9u : 0u)) >> 22];
@@ -5561,7 +5615,7 @@ int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], f
             std::memcpy(chk, lamps, sizeof chk);
             float chkTop = -1e9f, chkShare = 0.0f;
             const uint32_t leftOut0 = g_fenceLampsLeftOut, dimmed0 = g_fenceLampsDimmed;
-            const int chkUsed = PickFenceLampsImpl(g, reachLaw, chk, chkTop, chkShare, nullptr);
+            const int chkUsed = PickFenceLampsImpl(g, reachLaw, chk, chkTop, chkShare, nullptr, nullptr);
             g_fenceLampsLeftOut = leftOut0, g_fenceLampsDimmed = dimmed0;
             if (chkUsed != e.used || FloatBits(chkTop) != FloatBits(e.lampTop) || FloatBits(chkShare) != FloatBits(e.share) ||
                 std::memcmp(chk[1], e.rows, sizeof e.rows) != 0) {
@@ -5572,6 +5626,7 @@ int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], f
         }
         std::memcpy(lamps[1], e.rows, sizeof e.rows);
         if (cones) std::memcpy(cones, e.cones, sizeof e.cones);
+        if (vis) std::memcpy(vis, e.vis, sizeof e.vis);
         lampTop = e.lampTop, share = e.share;
         g_fenceLampsLeftOut += e.leftOut, g_fenceLampsDimmed += e.dimmed;
         g_lastLampCandidates = e.candidates;
@@ -5586,8 +5641,10 @@ int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], f
     }
     const uint32_t gen = g_lampMemoGen, leftOut0 = g_fenceLampsLeftOut, dimmed0 = g_fenceLampsDimmed;
     LampCone picked[ShaderPatches::kObjectPixelLamps] = {};
-    const int used = PickFenceLampsImpl(g, reachLaw, lamps, lampTop, share, picked);
+    float pickedVis[ShaderPatches::kObjectPixelLamps] = {};
+    const int used = PickFenceLampsImpl(g, reachLaw, lamps, lampTop, share, picked, pickedVis);
     if (cones) std::memcpy(cones, picked, sizeof picked);
+    if (vis) std::memcpy(vis, pickedVis, sizeof pickedVis);
     if (!kPublicBuild && !(gen == g_lampMemoGen && LevelLightShare::LampVisibilityState() == state)) g_fenceMissWhy[4]++;
     if (gen == g_lampMemoGen && LevelLightShare::LampVisibilityState() == state) {
         e.g = &g, e.read = g.read, e.gen = gen, e.state = state, e.reachLaw = reachLaw;
@@ -5596,6 +5653,7 @@ int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], f
         e.lampTop = lampTop, e.share = share;
         std::memcpy(e.rows, lamps[1], sizeof e.rows);
         std::memcpy(e.cones, picked, sizeof picked);
+        std::memcpy(e.vis, pickedVis, sizeof pickedVis);
     }
     return used;
 }
@@ -5644,13 +5702,14 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
     float lamps[kLampRows + 2][4] = {}, oldLamps[kLampRows + 2][4] = {}, weight[4] = {0.0f, 1.0f, 1.0f, 0.0f}, oldWeight[4] = {};
     int used = 0; // the lamps placed
     LampCone cones[N] = {}; // their cones (DrawFenceRuns tests each piece with them)
+    float vis[N] = {}, lampTop = -1e9f; // the group's share of each placed lamp, the highest atlas lamp head (DrawFenceRuns)
     if (p.inst.pixelLamps) {
         lamps[0][3] = 1e-4f;
         for (unsigned k = 0; k < N; k++) lamps[1 + 2 * k][0] = lamps[1 + 2 * k][2] = 1e6f; // unused slot: far away, colour 0
         for (unsigned k = 0; k < N; k++) lamps[2 + 2 * k][3] = lamps[1 + 2 * N + 2 * k][3] = lamps[2 + 2 * N + 2 * k][3] = 1.0f; // no cone
         if (g) {
-            float lampTop = -1e9f, share = 0.0f;
-            used = PickFenceLamps(*g, reachLaw, lamps, lampTop, share, cones);
+            float share = 0.0f;
+            used = PickFenceLamps(*g, reachLaw, lamps, lampTop, share, cones, vis);
             lamps[0][1] = TerrainLightingPolicy::SurfaceLampGain(g_night.load(std::memory_order_relaxed), g_objPixelLampStrength.load(std::memory_order_relaxed)) *
                           std::max(g_fenceStrength.load(std::memory_order_relaxed), 0.0f);
             // Upper architectural runs use the same gain as adjacent loose pieces.
@@ -5736,8 +5795,10 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
         if (LightProbe::Capturing()) g_objDrawInfo += "\n      " + shade.Text();
         if (active != &p) SetPsConst(dev, active->inst.capConst, &caps[0][0], kCapRows);
         SetPs(dev, active->ps);
-        // pieces a wall hides a lamp from take it off, run by run (DrawFenceRuns); a group whose pieces all see its lamps: one draw
-        if (!(g && p.inst.pixelLamps && DrawFenceRuns(dev, *g, used, lamps, p.inst.lampParamConst, rows, cones, draw))) draw();
+        // each piece lit from its own place, run by run (DrawFenceRuns); a single piece or too many runs: one draw
+        if (!(g && p.inst.pixelLamps &&
+              DrawFenceRuns(dev, *g, used, lamps, p.inst.lampParamConst, rows, cones, vis, lampTop, poolGate, p.inst.groundWeightConst, weight, draw)))
+            draw();
         SetPs(dev, original);
         if (active != &p) SetPsConst(dev, active->inst.capConst, &oldCaps[0][0], kCapRows);
         if (p.inst.pixelLamps) {
@@ -10834,6 +10895,7 @@ void OnWorldChanged() {
     ReleaseLotMasks(); // (2.15.3: with the chunks' shades, whose texels are made again only where a lot changes)
     g_groupCentres.clear();
     g_centreBusy.clear();
+    g_groupAtPlace.clear();
     // (2.15.3) the foliage meshes' boxes (keyed by vertex buffer address: a buffer of the new world made at an old one's
     // address took that mesh's box and instance count) and the instances' picks of the old world's lamps
     g_foliageMeshes.clear();
@@ -11721,7 +11783,7 @@ void MeasureMemoryImpl() {
         g_solidTriangles);
     Set(sFence,
         Hash(g_fenceGroups, [](const auto& kv) { return Vec(kv.second.walls); }) + Hash(g_fenceBusy) + Hash(g_meshBoxes) + Vec(g_fenceAll) +
-            Hash(g_fenceCells, [](const auto& kv) { return Vec(kv.second); }) + Hash(g_groupCentres) + Hash(g_centreBusy),
+            Hash(g_fenceCells, [](const auto& kv) { return Vec(kv.second); }) + Hash(g_groupCentres) + Hash(g_centreBusy) + Hash(g_groupAtPlace),
         g_fenceGroups.size() + g_meshBoxes.size() + g_groupCentres.size());
     Set(sFoliage, Hash(g_foliageMeshes) + Hash(g_foliageInstances) + Vec(g_crowns), g_foliageMeshes.size() + g_foliageInstances.size() + g_crowns.size());
     Set(sWallMask, Hash(g_wallMaskTex), g_wallMaskTex.size());
