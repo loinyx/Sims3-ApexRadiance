@@ -379,7 +379,7 @@ public sealed partial class MainWindow : Window
         if (repair.Count > 0 || fixable)
             Make(T("Repair"), async () =>
             {
-                if (fixable && !await Guarded(() => { Engine.CheckWritable(); foreach (var x in Compat.Check(g, Scan.Run(g)).Where(x => x.CanFix)) x.Fix!(); }, T("Fixed."), WelcomeInfo)) return;
+                if (fixable && !await Guarded(() => { Engine.CheckWritable(); foreach (var x in Compat.Check(g, Scan.Run(g)).Where(x => x.CanFix)) x.Fix!(); }, T("Fixed."), WelcomeInfo, "Fix incompatible settings")) return;
                 if (repair.Count > 0 && !_offline) await InstallAsync(repair);
             }, needsNet: !fixable);
         if (test && apexRelease is not null)
@@ -732,12 +732,7 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    static string Name(string c) => c switch
-    {
-        Components.Apex => "Apex Radiance", Components.Bridge => "RTX Remix bridge", Components.Loader => "Ultimate ASI Loader",
-        Components.Dxvk => "DXVK", Components.S3ss => "Sims3SettingsSetter", Components.MonoPatcher => "MonoPatcher",
-        Components.S3pp => "Sims 3 Performance Patch", _ => "Sims 3 Modernization",
-    };
+    static string Name(string c) => Components.Name(c);
 
     // ---------- install ----------
 
@@ -770,13 +765,21 @@ public sealed partial class MainWindow : Window
             // (downloads, before 0.5, install nothing: the first row stays active until the copies start)
             Mark(p.Arg is null || p.Fraction < 0.5 ?(p.Fraction >= 1 ? rows.Count : p.Fraction > 0.9 ? rows.Count - 1 : dels.Count) : dels.Count + order.IndexOf(p.Arg));
         });
+        // one restore point for the whole change (the engine's own calls join it)
+        RestorePoints.Scope? point = null;
         try
         {
             await Task.Run(async () =>
             {
-                foreach (var c in dels) { touched = true; Engine.Remove(g, c); }
-                try { await Engine.InstallAsync(g, order, new GitHubSource { S3ppArchive = _s3ppArchive, Shown = _latest }, progress); }
-                finally { try { Directory.Delete(GitHubSource.TempRoot, true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } }
+                using (point = dels.Count == 0 && order.Count == 0 ? RestorePoints.Begin(g.Bin, "Fix incompatible settings")
+                    : dels.Count == 0 ? RestorePoints.Begin(g.Bin, "Install {0}", string.Join(", ", order.Select(Name)))
+                    : order.Count == 0 ? RestorePoints.Begin(g.Bin, "Remove {0}", string.Join(", ", dels.Select(Name)))
+                    : RestorePoints.Begin(g.Bin, "Change components"))
+                {
+                    foreach (var c in dels) { touched = true; Engine.Remove(g, c); }
+                    try { await Engine.InstallAsync(g, order, new GitHubSource { S3ppArchive = _s3ppArchive, Shown = _latest }, progress); }
+                    finally { try { Directory.Delete(GitHubSource.TempRoot, true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } }
+                }
             });
             _lastInstall = order;
             _lastRemove = dels;
@@ -790,8 +793,20 @@ public sealed partial class MainWindow : Window
             _busy = false;
             _defaultsFor = null;
             var net = ex is HttpRequestException or TaskCanceledException;
-            await Message(net ? T("Setup can't reach GitHub") : T("Setup could not finish"),
-                (net ? T("Check your internet connection, then try again.") : T(ex.Message)) + (touched ? "\n\n" + T("Repair or remove sets the game right.") : ""));
+            var title = net ? T("Setup can't reach GitHub") : T("Setup could not finish");
+            var text = (net ? T("Check your internet connection, then try again.") : T(ex.Message)) + (touched ? "\n\n" + T("Repair or remove sets the game right.") : "");
+            // the files it changed before the error: offered back at once
+            if (point?.Committed is { } p)
+            {
+                if (await ShowDialog(new ContentDialog { Title = title, Content = text, PrimaryButtonText = T("Undo these changes"), CloseButtonText = T("OK"),
+                        DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot }) == ContentDialogResult.Primary)
+                {
+                    Show(Manage);
+                    await RestoreAsync(p, ask: false);
+                    return;
+                }
+            }
+            else await Message(title, text);
             Show(from);
         }
     }
@@ -839,6 +854,7 @@ public sealed partial class MainWindow : Window
     {
         if (_step == DoneStep) RefreshDone();
         ManageList.Children.Clear();
+        RestoreList.Children.Clear();
         if (_game is not { } g || _state is not { } s) { ManageIntro.Text = T("Choose your game first."); return; }
         ManageIntro.Text = T("The Sims 3 \u00b7 {0}", g.Label);
         var m = s.Manifest;
@@ -857,14 +873,25 @@ public sealed partial class MainWindow : Window
         if (s.S3ss) ManageRow("Sims3SettingsSetter", T("Removes Sims3SettingsSetter.asi."), T("Remove"), () => RemoveAsync(Components.S3ss));
         if (s.Modernization) ManageRow("Sims 3 Modernization", T("Removes ts3native and ts3fixes.package."), T("Remove"), () => RemoveAsync(Components.Modernization));
         ManageRow(T("Uninstall everything"), T("Removes what Setup installed, and Apex Radiance, and puts back every file Setup replaced."), T("Uninstall"), UninstallAll, danger: true);
+
+        foreach (var p in RestorePoints.List(g.Bin))
+        {
+            var when = p.Created.ToLocalTime().ToString("g");
+            ManageRow(T("Before: {0}", T(p.Label, p.Args)), p.FileCount == 1 ? T("{0} \u00b7 1 file", when) : T("{0} \u00b7 {1} files", when, p.FileCount),
+                T("Restore"), () => RestoreAsync(p), list: RestoreList);
+        }
+        if (RestoreList.Children.Count == 0)
+            RestoreList.Children.Add(new TextBlock { Text = T("No restore points yet. Setup makes one before every change."), Margin = new Thickness(18, 14, 18, 14),
+                FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = (Brush)Application.Current.Resources["ApexMutedBrush"] });
     }
 
     string GraphicsRemoval(bool backup) => backup ? T("Puts back the graphics files you had before.")
         : T("Goes back to the game's default graphics. Your in-game graphics settings may reset once.");
 
-    void ManageRow(string title, string desc, string action, Func<Task> run, bool danger = false)
+    void ManageRow(string title, string desc, string action, Func<Task> run, bool danger = false, Panel? list = null)
     {
-        var row = new Grid { Padding = new Thickness(18, 14, 18, 14), ColumnSpacing = 14, BorderBrush = (Brush)Application.Current.Resources["ApexCardBorderBrush"], BorderThickness = new Thickness(0, ManageList.Children.Count == 0 ? 0 : 1, 0, 0) };
+        list ??= ManageList;
+        var row = new Grid { Padding = new Thickness(18, 14, 18, 14), ColumnSpacing = 14, BorderBrush = (Brush)Application.Current.Resources["ApexCardBorderBrush"], BorderThickness = new Thickness(0, list.Children.Count == 0 ? 0 : 1, 0, 0) };
         row.ColumnDefinitions.Add(new ColumnDefinition());
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var text = new StackPanel { Spacing = 2 };
@@ -876,21 +903,33 @@ public sealed partial class MainWindow : Window
         b.Click += async (_, _) => await run();
         Grid.SetColumn(b, 1);
         row.Children.Add(text); row.Children.Add(b);
-        ManageList.Children.Add(row);
+        list.Children.Add(row);
+    }
+
+    // the point and every newer one, back as they were; the result on the bar of the screen it was started from
+    async Task RestoreAsync(RestorePoint p, bool ask = true, InfoBar? bar = null)
+    {
+        if (_game is not { } g || _busy || _running) return;
+        if (ask && !await Confirm(T("Restore this point?"), T("Setup puts back the files as they were before this change, and undoes every change made after it. Close the game first."), T("Restore"))) return;
+        await Guarded(() =>
+        {
+            if (RestorePoints.Restore(g.Bin, p) is { Count: > 0 } failed)
+                throw new IOException(T("Setup could not put back {0}.", string.Join(", ", failed)));
+        }, T("Changes undone."), bar);
     }
 
     async Task RemoveAsync(string c)
     {
         if (_game is not { } g || _busy || _running) return;
         if (!await Confirm(T("Remove {0}?", Name(c)), T("Close the game first. Setup removes the files and puts back the ones it replaced."), T("Remove"))) return;
-        await Guarded(() => Engine.Remove(g, c), T("{0} removed.", Name(c)));
+        await Guarded(() => Engine.Remove(g, c), T("{0} removed.", Name(c)), label: "Remove {0}", args: Name(c));
     }
 
     async Task UninstallAll()
     {
         if (_game is not { } g || _busy || _running) return;
         if (!await Confirm(T("Uninstall everything?"), T("Setup removes Apex Radiance and everything it installed in this game, and puts back every file it replaced. Your settings in Documents stay."), T("Uninstall"))) return;
-        await Guarded(() => Engine.RemoveAll(g), T("Everything Setup installed was removed."));
+        await Guarded(() => Engine.RemoveAll(g), T("Everything Setup installed was removed."), label: "Uninstall everything");
     }
 
     Task Repair()
@@ -908,18 +947,20 @@ public sealed partial class MainWindow : Window
     }
 
     // a change made in place (a removal, the settings' fixes): the buttons off while it runs, its result on the bar of the
-    // screen it was started from (Repair or remove's by default); false when it did not run or failed
-    async Task<bool> Guarded(Action work, string done, InfoBar? bar = null)
+    // screen it was started from (Repair or remove's by default); false when it did not run or failed. label: the restore point
+    // taken of what work changes (an English key with args, as the restore list shows it)
+    async Task<bool> Guarded(Action work, string done, InfoBar? bar = null, string? label = null, params string[] args)
     {
-        if (_busy || _running) return false;
+        if (_busy || _running || _game is not { } g) return false;
         bar ??= ManageInfo;
         _busy = true;
         RefreshAll();
         var ok = false;
         string? error = null;
+        RestorePoints.Scope? point = null;
         try
         {
-            await Task.Run(work);
+            await Task.Run(() => { using (point = label is null ? null : RestorePoints.Begin(g.Bin, label, args)) work(); });
             ok = true;
         }
         catch (Exception ex) { error = T(ex.Message); }
@@ -931,6 +972,7 @@ public sealed partial class MainWindow : Window
         }
         // after the refresh, which rewrites the screens' bars
         if (ok) SetInfo(bar, InfoBarSeverity.Success, done, "");
+        else if (point?.Committed is { } p) SetInfo(bar, InfoBarSeverity.Error, T("Setup could not finish"), error!, T("Undo these changes"), () => _ = RestoreAsync(p, ask: false, bar));
         else SetInfo(bar, InfoBarSeverity.Error, T("Setup could not finish"), error!);
         return ok;
     }

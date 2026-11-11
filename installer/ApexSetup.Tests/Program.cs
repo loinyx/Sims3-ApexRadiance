@@ -246,9 +246,99 @@ try
           "Modernization in scripts is updated there, its ts3native.ini kept");
     Engine.Remove(g2, Components.Modernization, docs2);
     Check(!Scan.Run(g2, docs2).Ts3Native, "Modernization removed from scripts");
+
+    // 18. restore points: a third fake game, every file of Game\Bin and Documents compared byte for byte
+    var bin3 = Path.Combine(root, "Third", "Game", "Bin");
+    var docs3 = Path.Combine(root, "Docs3");
+    string B3(string rel) => Path.Combine(bin3, rel);
+    Directory.CreateDirectory(bin3);
+    Directory.CreateDirectory(docs3);
+    File.WriteAllText(B3("TS3W.exe"), "exe");
+    var g3 = new Game(Path.Combine(root, "Third"), bin3, "TS3W.exe", Edition.Steam, "1.67.2");
+    var restoreDir = RestorePoints.RootOf(bin3);
+    Dictionary<string, string> Tree() => new[] { bin3, docs3 }.SelectMany(d => Directory.EnumerateFiles(d, "*", SearchOption.AllDirectories))
+        .Where(f => !f.StartsWith(restoreDir, StringComparison.OrdinalIgnoreCase))
+        .ToDictionary(f => f, f => Convert.ToHexString(File.ReadAllBytes(f)));
+    bool SameTree(Dictionary<string, string> a, Dictionary<string, string> b) => a.Count == b.Count && a.All(p => b.TryGetValue(p.Key, out var v) && v == p.Value);
+
+    // a foreign d3d9.dll under the bridge, then the point restored: the original back, nothing of Setup left
+    File.WriteAllBytes(B3("d3d9.dll"), new byte[] { 0x4D, 0x5A, 0x90, 0x00, 0xFF, 0x13 });
+    File.WriteAllText(Path.Combine(docs3, "Options.ini"), "gpu=real");
+    var t0 = Tree();
+    await Engine.InstallAsync(g3, new[] { Components.Bridge, Components.Loader }, src, null, docs3);
+    var pts = RestorePoints.List(bin3);
+    Check(pts.Count == 1 && pts[0].Label == "Install {0}" && pts[0].Args[0] == "Ultimate ASI Loader, RTX Remix bridge"
+          && pts[0].Entries.Any(e => e.Path.EndsWith("setup.json")) && pts[0].Entries.Any(e => e.Dir && e.Path.EndsWith(".trex")),
+          "an install takes one restore point, with setup.json and the folders it created");
+    Check(RestorePoints.Restore(bin3, pts[0]).Count == 0 && SameTree(Tree(), t0) && !Directory.Exists(B3(".trex")) && !Directory.Exists(Manifest.DirOf(bin3)),
+          "restore: the foreign d3d9.dll byte-identical, no file or folder of Setup left");
+
+    // a compatibility fix on a Documents file, then restored
+    Directory.CreateDirectory(Path.Combine(docs3, "Mods", "Packages"));
+    File.WriteAllText(Path.Combine(docs3, "Mods", "Packages", "ts3fixes.package"), "pkg");
+    var cfg3 = Path.Combine(docs3, "Mods", "Resource.cfg");
+    File.WriteAllText(cfg3, "Priority 500\r\nPackedFile *.package\r\n");
+    var t1 = Tree();
+    Compat.Check(g3, Scan.Run(g3, docs3), docs3).First(x => x.Text.StartsWith("Mods\\Resource.cfg does not read")).Fix!();
+    Check(File.Exists(cfg3 + ".apex-backup") && Read(cfg3) != "Priority 500\r\nPackedFile *.package\r\n", "the Resource.cfg fix ran");
+    pts = RestorePoints.List(bin3);
+    Check(pts.Count == 1 && pts[0].Label == "Fix incompatible settings" && RestorePoints.Restore(bin3, pts[0]).Count == 0 && SameTree(Tree(), t1),
+          "a fix on a Documents file restored, its .apex-backup gone");
+
+    // three points, the oldest restored: all three undone, the folders they created removed
+    var t2 = Tree();
+    await Engine.InstallAsync(g3, new[] { Components.Apex }, src, null, docs3);
+    await Engine.InstallAsync(g3, new[] { Components.S3ss }, src, null, docs3);
+    await Engine.InstallAsync(g3, new[] { Components.MonoPatcher }, src, null, docs3);
+    pts = RestorePoints.List(bin3);
+    Check(pts.Count == 3 && pts[0].Args[0] == "MonoPatcher" && pts[2].Args[0] == "Apex Radiance", "three points, newest first");
+    Check(RestorePoints.Restore(bin3, pts[2]).Count == 0 && SameTree(Tree(), t2) && !Directory.Exists(Path.Combine(Scan.Packages(docs3), "MonoPatcher"))
+          && RestorePoints.List(bin3).Count == 0, "restoring the oldest of three undoes all three and removes the folders they created");
+
+    // setup.json back as it was (not removed: it existed)
+    await Engine.InstallAsync(g3, new[] { Components.Apex }, src, null, docs3);
+    var json3 = Path.Combine(Manifest.DirOf(bin3), "setup.json");
+    var jsonBefore = File.ReadAllText(json3);
+    await Engine.InstallAsync(g3, new[] { Components.S3ss }, src, null, docs3);
+    Check(RestorePoints.Restore(bin3, RestorePoints.List(bin3)[0]).Count == 0 && Read(json3) == jsonBefore && !File.Exists(B3("Sims3SettingsSetter.asi"))
+          && File.Exists(B3("ApexRadiance.asi")) && RestorePoints.List(bin3).Count == 1, "setup.json restored to the point's copy, the older point kept");
+
+    // refused while the game runs
+    Games.IsRunning = () => true;
+    try { RestorePoints.Restore(bin3, RestorePoints.List(bin3)[0]); Check(false, "restore refused while the game runs"); }
+    catch (InvalidOperationException) { Check(File.Exists(B3("ApexRadiance.asi")) && RestorePoints.List(bin3).Count == 1, "restore refused while the game runs"); }
+    finally { Games.IsRunning = () => false; }
+
+    // a path that cannot be put back is reported, the others are, and the point stays
+    File.WriteAllText(B3("ApexRadiance.asi"), "apex 3.0.0");
+    var keepFile = B3("keep.txt");
+    using (RestorePoints.Begin(bin3, "Install {0}", "test"))
+    {
+        Fs.Write(keepFile, "new");
+        Fs.Write(B3("ApexRadiance.asi"), "apex 3.1.1");
+    }
+    var p3 = RestorePoints.List(bin3)[0];
+    List<string> failedPaths;
+    using (File.Open(keepFile, FileMode.Open, FileAccess.Read, FileShare.None)) failedPaths = RestorePoints.Restore(bin3, p3);
+    Check(failedPaths.Count == 1 && failedPaths[0] == Path.GetFullPath(keepFile) && Read(B3("ApexRadiance.asi")) == "apex 3.0.0"
+          && RestorePoints.List(bin3).Any(p => p.Dir == p3.Dir), "a locked file is reported, the rest restored, the point kept");
+    Check(RestorePoints.Restore(bin3, p3).Count == 0 && !File.Exists(keepFile), "the kept point restores once the file is free");
+
+    // an action that changes nothing keeps no point; the newest 5 are kept
+    using (RestorePoints.Begin(bin3, "Install {0}", "nothing")) { }
+    Check(RestorePoints.List(bin3).Count == 1, "an empty point is not kept");
+    for (int i = 0; i < 6; i++)
+        using (RestorePoints.Begin(bin3, "Install {0}", "n" + i)) Fs.Write(B3("counter.txt"), i.ToString());
+    pts = RestorePoints.List(bin3);
+    Check(pts.Count == RestorePoints.Keep && pts[0].Args[0] == "n5" && pts[4].Args[0] == "n1"
+          && Directory.EnumerateDirectories(restoreDir).Count() == RestorePoints.Keep, "the newest 5 points kept, older ones deleted");
 }
 catch (Exception e) { Console.WriteLine("FAIL exception: " + e); failures++; }
-finally { Directory.Delete(root, true); }
+finally
+{
+    foreach (var f in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)) File.SetAttributes(f, FileAttributes.Normal); // (a restore point keeps a read-only file's copy read-only)
+    Directory.Delete(root, true);
+}
 
 // Setup's languages: each table loads, its keys are English texts of Setup (the Portuguese table's keys, the complete
 // list), with the key's {n} placeholders and no empty text. A key twice in one file fails: the indexer initializer keeps

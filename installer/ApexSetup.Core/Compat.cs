@@ -140,9 +140,10 @@ public static class Compat
             if (wrong.Count > 0)
                 f.Add(new(Severity.Warning, "dxvk.conf lacks {0} or has other values: without them the game resets its graphics options or freezes on a resolution change under the bridge.",
                     new[] { string.Join(", ", wrong) },
-                    () => { if (File.Exists(dxvk)) Rewrite(dxvk, t => FixDxvk(t)); else File.WriteAllText(dxvk, FixDxvk("")); }));
+                    () => { if (File.Exists(dxvk)) Rewrite(dxvk, t => FixDxvk(t)); else Fs.Write(dxvk, FixDxvk("")); }));
         }
-        return f;
+        // each fix its own restore point, unless the action running it has one open
+        return f.Select(x => x.Fix is not { } fix ? x : x with { Fix = () => { using var _ = RestorePoints.Begin(bin, "Fix incompatible settings"); fix(); } }).ToList();
     }
 
     // native/remix-bridge/conf/dxvk.conf
@@ -228,16 +229,16 @@ public static class Compat
         var changed = change(text);
         if (changed == text) return;
         foreach (var x in new[] { file, file + ".apex-backup" }) // a read-only file (or its copy from an earlier run) would block the copy and the move
-            if (File.Exists(x)) File.SetAttributes(x, File.GetAttributes(x) & ~FileAttributes.ReadOnly);
-        File.Copy(file, file + ".apex-backup", true);
-        File.WriteAllText(file + ".apex-new", changed);
-        File.Move(file + ".apex-new", file, true);
+            Fs.ClearReadOnly(x);
+        Fs.Copy(file, file + ".apex-backup");
+        Fs.Write(file + ".apex-new", changed);
+        Fs.Move(file + ".apex-new", file);
     }
 
     public static void MoveAside(string bin, string rel)
     {
         var dir = Manifest.DirOf(bin);
-        Directory.CreateDirectory(dir);
-        File.Move(Path.Combine(bin, rel), Path.Combine(dir, rel.Replace('\\', '_') + ".bak"), true);
+        Fs.CreateDir(dir);
+        Fs.Move(Path.Combine(bin, rel), Path.Combine(dir, rel.Replace('\\', '_') + ".bak"));
     }
 }

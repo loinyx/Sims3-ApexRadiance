@@ -8,6 +8,12 @@ public static class Components
     public const string Apex = "apex", Bridge = "bridge", Dxvk = "dxvk", Loader = "loader", S3ss = "s3ss", Modernization = "modernization", MonoPatcher = "monopatcher", S3pp = "s3pp";
     // removal order: what depends on the loader goes first (installs run in the reverse order)
     public static readonly string[] All = { Bridge, Dxvk, Modernization, MonoPatcher, S3pp, S3ss, Apex, Loader };
+
+    public static string Name(string c) => c switch
+    {
+        Apex => "Apex Radiance", Bridge => "RTX Remix bridge", Loader => "Ultimate ASI Loader", Dxvk => "DXVK", S3ss => "Sims3SettingsSetter",
+        MonoPatcher => "MonoPatcher", S3pp => "Sims 3 Performance Patch", _ => "Sims 3 Modernization",
+    };
 }
 
 public sealed class ManifestFile
@@ -38,8 +44,8 @@ public sealed class Manifest
 
     public void Save()
     {
-        Directory.CreateDirectory(DirOf(Bin));
-        File.WriteAllText(FilePath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+        Fs.CreateDir(DirOf(Bin));
+        Fs.Write(FilePath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
     }
 }
 
@@ -214,6 +220,8 @@ public static class Engine
         var s = Scan.Run(g, docs);
         var m = s.Manifest;
         var list = Components.All.Reverse().Where(components.Contains).ToList(); // loader first, bridge last
+        using var point = list.Count == 0 ? RestorePoints.Begin(g.Bin, "Fix incompatible settings")
+            : RestorePoints.Begin(g.Bin, "Install {0}", string.Join(", ", list.Select(Components.Name)));
         // everything is downloaded before any file is placed: a network or checksum failure changes nothing
         var fetched = new List<(List<(string Src, string Dest)> Files, string Version)>();
         for (int i = 0; i < list.Count; i++)
@@ -236,8 +244,8 @@ public static class Engine
                 if (c is Components.Bridge or Components.Dxvk && s.Layer is Layer.Native or Layer.Other && m.OptionsBackup is null && File.Exists(OptionsIni(docs)))
                 {
                     m.OptionsBackup = Path.Combine(Manifest.DirOf(g.Bin), "Options.ini.bak");
-                    Directory.CreateDirectory(Manifest.DirOf(g.Bin));
-                    File.Copy(OptionsIni(docs), m.OptionsBackup, true);
+                    Fs.CreateDir(Manifest.DirOf(g.Bin));
+                    Fs.Copy(OptionsIni(docs), m.OptionsBackup);
                 }
                 // a bridge installed by hand is this component's own files, not foreign ones to back up and restore on removal
                 var own = c == Components.Bridge && s.Layer == Layer.Bridge;
@@ -246,7 +254,7 @@ public static class Engine
                     foreach (var conf in new[] { Path.Combine(g.Bin, "bridge.conf"), Path.Combine(g.Bin, ".trex", "bridge.conf") })
                         SetTargetProcess(conf, g.Exe);
                 // the log of a build that skipped itself would still say "wrong build" until the game runs
-                if (c == Components.Modernization) { EnsureResourceCfg(docs); File.Delete(Path.Combine(home, "ts3native.log")); }
+                if (c == Components.Modernization) { EnsureResourceCfg(docs); Fs.Delete(Path.Combine(home, "ts3native.log")); }
                 if (c == Components.Apex) RemoveLeftovers(m, g.Bin);
                 m.Versions[c] = version;
             }
@@ -264,6 +272,7 @@ public static class Engine
     {
         docs ??= Scan.DocumentsFor(g);
         CheckWritable();
+        using var point = RestorePoints.Begin(g.Bin, "Remove {0}", Components.Name(c));
         var m = Manifest.Load(g.Bin);
         var layerBefore = Scan.Run(g, docs).Layer;
         // hand-installed files first, so a backup restored below is never taken for one
@@ -272,29 +281,29 @@ public static class Engine
             var p = Path.Combine(g.Bin, rel);
             // only the d3d9.dll of the layer being removed
             if (rel == "d3d9.dll" && layerBefore != (c == Components.Dxvk ? Layer.Dxvk : Layer.Bridge)) continue;
-            if (File.Exists(p) && !m.Files.Any(f => Same(f.Path, p))) File.Delete(p);
+            if (File.Exists(p) && !m.Files.Any(f => Same(f.Path, p))) Fs.Delete(p);
         }
         foreach (var f in m.Files.Where(f => f.Component == c).ToList())
         {
-            if (File.Exists(f.Path)) File.Delete(f.Path);
-            if (f.Backup is not null && File.Exists(f.Backup)) File.Move(f.Backup, f.Path, true);
+            Fs.Delete(f.Path);
+            if (f.Backup is not null && File.Exists(f.Backup)) Fs.Move(f.Backup, f.Path);
             m.Files.Remove(f);
         }
         if (c == Components.MonoPatcher && Directory.Exists(Path.Combine(Scan.Packages(docs), "MonoPatcher")))
-            foreach (var f in Directory.EnumerateFiles(Path.Combine(Scan.Packages(docs), "MonoPatcher"), "ld_MonoPatcher*.package")) File.Delete(f);
+            foreach (var f in Directory.EnumerateFiles(Path.Combine(Scan.Packages(docs), "MonoPatcher"), "ld_MonoPatcher*.package")) Fs.Delete(f);
         if (c == Components.Modernization)
         {
             var pkg = Path.Combine(Scan.Packages(docs), "ts3fixes.package");
-            if (File.Exists(pkg)) File.Delete(pkg);
+            Fs.Delete(pkg);
         }
         if (c is Components.Bridge or Components.Dxvk)
         {
             foreach (var d in new[] { Path.Combine(g.Bin, ".trex"), Path.Combine(g.Bin, "licenses") })
-                if (Directory.Exists(d) && !Directory.EnumerateFileSystemEntries(d).Any()) Directory.Delete(d);
+                if (Directory.Exists(d) && !Directory.EnumerateFileSystemEntries(d).Any()) Fs.DeleteDir(d);
             // the game is back on its own D3D9 (a restored loader or wrapper included): the copy taken then matches the card it sees again
             if (m.OptionsBackup is not null && File.Exists(m.OptionsBackup) && Scan.Run(g, docs).Layer is Layer.Native or Layer.Other)
-                File.Copy(m.OptionsBackup, OptionsIni(docs), true);
-            if (m.OptionsBackup is not null && File.Exists(m.OptionsBackup)) File.Delete(m.OptionsBackup);
+                Fs.Copy(m.OptionsBackup, OptionsIni(docs));
+            if (m.OptionsBackup is not null) Fs.Delete(m.OptionsBackup);
             m.OptionsBackup = null;
         }
         m.Versions.Remove(c);
@@ -308,6 +317,7 @@ public static class Engine
     {
         // Apex, and what Setup installed; mods the player installed by hand stay (Repair or remove has a row for each)
         var s = Scan.Run(g, docs);
+        using var point = RestorePoints.Begin(g.Bin, "Uninstall everything");
         foreach (var c in Components.All)
             // (a component whose copy failed halfway has files but no version)
             if (c == Components.Apex || s.Manifest.Versions.ContainsKey(c) || s.Manifest.Files.Any(f => f.Component == c)) Remove(g, c, docs);
@@ -330,11 +340,11 @@ public static class Engine
         {
             var rel = to.StartsWith(m.Bin, StringComparison.OrdinalIgnoreCase) ? Path.GetRelativePath(m.Bin, to) : Path.GetFileName(to);
             backup = Path.Combine(Manifest.DirOf(m.Bin), rel.Replace('\\', '_') + ".bak");
-            Directory.CreateDirectory(Manifest.DirOf(m.Bin));
-            File.Move(to, backup, true);
+            Fs.CreateDir(Manifest.DirOf(m.Bin));
+            Fs.Move(to, backup);
         }
-        Directory.CreateDirectory(Path.GetDirectoryName(to)!);
-        File.Copy(from, to, true);
+        Fs.CreateDir(Path.GetDirectoryName(to)!);
+        Fs.Copy(from, to);
         if (owned is null) m.Files.Add(new ManifestFile { Component = c, Path = to, Backup = backup });
         else owned.Component = c;
     }
@@ -345,8 +355,8 @@ public static class Engine
         foreach (var p in new[] { Path.Combine(bin, "S3SSApex.asi"), Path.Combine(bin, "scripts", "ApexRadiance.asi"), Path.Combine(bin, "plugins", "ApexRadiance.asi") })
             if (File.Exists(p))
             {
-                Directory.CreateDirectory(Manifest.DirOf(bin));
-                File.Move(p, Path.Combine(Manifest.DirOf(bin), Path.GetRelativePath(bin, p).Replace('\\', '_') + ".bak"), true);
+                Fs.CreateDir(Manifest.DirOf(bin));
+                Fs.Move(p, Path.Combine(Manifest.DirOf(bin), Path.GetRelativePath(bin, p).Replace('\\', '_') + ".bak"));
             }
     }
 
@@ -354,7 +364,7 @@ public static class Engine
     {
         if (!File.Exists(conf)) return;
         var text = File.ReadAllText(conf);
-        File.WriteAllText(conf, Regex.Replace(text, @"(?m)^(\s*client\.targetProcess\s*=\s*)\S+", "${1}" + exe));
+        Fs.Write(conf, Regex.Replace(text, @"(?m)^(\s*client\.targetProcess\s*=\s*)\S+", "${1}" + exe));
     }
 
     // sims3-modernization's player guide: Mods\Resource.cfg, created only when missing (kept on removal: other mods use it)
@@ -362,8 +372,8 @@ public static class Engine
     {
         var cfg = Path.Combine(docs, "Mods", "Resource.cfg");
         if (File.Exists(cfg)) return;
-        Directory.CreateDirectory(Path.GetDirectoryName(cfg)!);
-        File.WriteAllText(cfg, ResourceCfg);
+        Fs.CreateDir(Path.GetDirectoryName(cfg)!);
+        Fs.Write(cfg, ResourceCfg);
     }
     public const string ResourceCfg = "Priority 500\r\nPackedFile Packages/*.package\r\nPackedFile Packages/*/*.package\r\nPackedFile Packages/*/*/*.package\r\n";
 

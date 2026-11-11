@@ -311,6 +311,13 @@
                             <Border Style="{StaticResource ApexCard}" Padding="0">
                                 <StackPanel x:Name="ManageList" Tag="dyn" />
                             </Border>
+                            <StackPanel Spacing="2" Margin="0,8,0,0">
+                                <TextBlock Text="Restore points" Style="{StaticResource ApexStrong}" FontSize="13" />
+                                <TextBlock Text="Setup keeps a copy of every file it changes. Restoring a point undoes that change and every later one." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <Border Style="{StaticResource ApexCard}" Padding="0">
+                                <StackPanel x:Name="RestoreList" Tag="dyn" />
+                            </Border>
                         </StackPanel>
 
                         <!-- 6 About -->

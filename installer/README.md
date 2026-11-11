@@ -25,6 +25,14 @@ only what differs from the player's choice.
 - Every file Setup replaces is moved to `Game\Bin\Apex Radiance backup` (with `.bak` appended, so no loader reads it);
   `setup.json` there records what Setup installed. Repair or remove restores them. Uninstall everything removes Apex
   Radiance and what Setup installed; mods installed by hand stay.
+- Before every change (install, update, repair, removal, a compatibility fix) Setup opens a restore point in
+  `Game\Bin\Apex Radiance backup\restore\<yyyyMMdd-HHmmss>`: a copy of each file as it was before Setup first touched
+  it, in `Game\Bin` and in Documents (`Options.ini`, `Mods\Resource.cfg`, `S3SS.toml`, the `.apex-backup` copies,
+  `setup.json`), and the files and folders it created, listed in `point.json`. Every write of `ApexSetup.Core` goes
+  through `Fs` (`RestorePoints.cs`), so nothing is left out. An action that changes nothing keeps no point; the newest
+  5 are kept. Repair or remove lists them; *Restore* puts the files back and undoes every newer point too (the game
+  must be closed; restoring is final, and a file that cannot be put back is named and its point kept to try again).
+  When an install or a removal fails, its error offers *Undo these changes*.
 - When the renderer changes the graphics card the game sees (DXVK's TS3W profile and the bridge report a GeForce GTX
   580), the game resets its graphics options once: Setup says so and keeps a copy of `Options.ini`, restored when the
   player goes back to the game's own Direct3D 9.
