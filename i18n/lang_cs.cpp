@@ -916,6 +916,7 @@ const I18n::Pair kPairs[] = {
     {"FXAA 3.11: Timothy Lottes (NVIDIA).", "FXAA 3.11: Timothy Lottes (NVIDIA)."},
     {"Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.", "Streamování parcel a opravy denního bloomu: výzkum a kód od @idavidveiga."},
     {"Scene update safety: contribution by @rodneypantonial.", "Bezpečné aktualizace scény: příspěvek od @rodneypantonial."},
+    {"Restart host: adapted from Dalexlol's wrapper in sims3-modernization.", "Hostitel restartu: převzato z wrapperu od Dalexlol v sims3-modernization."},
     {"Thanks to @boringbones for testing every build.", "Díky @boringbones za testování každého sestavení."},
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT)."},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "Světlo na zemi z horních pater: technika od Arro, upravená v Apex Radiance."},
