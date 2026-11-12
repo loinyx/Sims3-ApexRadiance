@@ -84,7 +84,7 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 | [Display](features/display.md): window mode, resolution, frame-rate limiter and Turn off G-SYNC (System > Display) | Released in 3.1.0; Released in 3.1.1: resolution through the game's own change on every build, the game's fullscreen as Borderless under the bridge; Released in 3.1.2: Turn off G-SYNC |
 | [RTX Remix bridge](features/rtx-remix-bridge.md): the renderer (DXVK) in its own 64-bit process, about 600 to 800 MB more free memory in the game | Released in 3.0.0 (separate download); its `dxvk.conf` fix for exclusive fullscreen published again after 3.0.0; Released in 3.1.0: install guide, uncompressed-textures card, Fullscreen as Borderless under the bridge; Released in 3.1.1: bridge patches 0011 to 0013, bridge logs in captures, its own Nexus file; Released in 3.1.2: no forced 16x anisotropic filtering |
 | [Delegate signature fix](features/delegate-signature-fix.md): no simulator-thread crash when a script callback without arguments runs (always on) | Released in 3.1.1 |
-| [Bone index guard](features/bone-index-guard.md): no crash when a Sim part names a bone it does not have (always on) | Unreleased |
+| [Bone index guard](features/bone-index-guard.md): no crash when a Sim part names a bone it does not have (always on) | Released in 3.1.3 |
 
 ### Reports and diagnostics
 

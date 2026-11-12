@@ -8,7 +8,7 @@ fix such a vertex is tied to the part's first bone instead. Parts without the de
 
 | | |
 |---|---|
-| Availability | Unreleased |
+| Availability | Released in 3.1.3 |
 | Default | Always on; no menu row |
 | Menu | None |
 | Configuration | None |
