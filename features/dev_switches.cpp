@@ -23,6 +23,12 @@ void Load() {
     LOG_INFO(std::format("[DevBuild] Room solve switches: room_solve_causes {}, restart_settle {}, lamp_edit_lot_only {}, active_lot_hold {}", roomSolveCauses.load() ? "on" : "off",
                          restartSettle.load() ? "on" : "off", lampEditLotOnly.load() ? "on" : "off", activeLotHold.load() ? "on" : "off"));
     LOG_INFO(std::format("[DevBuild] Memory switches: memory_owners {}, release_debug_buffers {}, left_lot_release {}", memoryOwners.load() ? "on" : "off", releaseDebugBuffers.load() ? "on" : "off", leftLotRelease.load() ? "on" : "off"));
+    const auto offUnlessSet = [&](const char* key) { return t ? (*t)[key].value_or(false) : false; }; // not shipped: unmeasured in Apex
+    monoCoresBottom.store(offUnlessSet("mono_cores_bottom"));
+    bigBlockReuse.store(offUnlessSet("big_block_reuse"));
+    streamArena.store(offUnlessSet("stream_arena"));
+    LOG_INFO(std::format("[DevBuild] Address-space switches: mono_cores_bottom {}, big_block_reuse {}, stream_arena {}", monoCoresBottom.load() ? "on" : "off",
+                         bigBlockReuse.load() ? "on" : "off", streamArena.load() ? "on" : "off"));
     measurements.store(get("measurements"));
     drawReadsNoWait.store(get("draw_reads_nowait"));
     occlusionRelight.store(get("occlusion_relight"));

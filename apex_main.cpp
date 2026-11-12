@@ -24,6 +24,7 @@
 #include "dev_switches.h"
 #include "game_alloc_categories.h"
 #include "allocator_tuning.h"
+#include "stream_arena.h"
 #include "build_flavor.h"
 #include "conflict_guard.h"
 #include "crash_report.h"
@@ -208,6 +209,7 @@ DWORD InitBody() {
         }
         ApexGui::SetStartup(ApexGui::Startup::Running);
         AllocatorTuning::Install(); // allocator_trim / allocator_top_down (the allocator exists by now)
+        StreamArena::Install();     // stream_arena (dev switch, off unless set)
         DelegateSigFix::Install();  // game fix, always on: zero-parameter script delegates (delegate_sig_fix.h)
         LOG_INFO("[Main] Features started");
         LoadTiming::NoteFeaturesStarted();

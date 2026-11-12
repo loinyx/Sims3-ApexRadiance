@@ -76,6 +76,9 @@ follows the setting named on its page.
 | `room_drain_budget` | Shipped | Extra room solves never start a step the budget cannot hold | [room-light-queue.md](features/performance/room-light-queue.md#automatic-lamps-first-and-the-step-budget) |
 | `allocator_trim` | Shipped | The game allocator's own trim every 60 s and before saves | [fast-memory.md](features/performance/fast-memory.md#allocator-trim-and-top-down-large-blocks) |
 | `allocator_top_down` | Shipped | The game allocator's large blocks from the top of the address space | [fast-memory.md](features/performance/fast-memory.md#allocator-trim-and-top-down-large-blocks) |
+| `mono_cores_bottom` | Developer only, off unless set | The Mono sub-heap's cores stay bottom-up while the other large blocks go to the top | [fast-memory.md](features/performance/fast-memory.md#address-space-experiments-not-shipped) |
+| `big_block_reuse` | Developer only, off unless set | Freed large blocks kept reserved and recommitted for the next block of their size | [fast-memory.md](features/performance/fast-memory.md#address-space-experiments-not-shipped) |
+| `stream_arena` | Developer only, off unless set | Memory stream buffers from one 48 MB arena | [fast-memory.md](features/performance/fast-memory.md#address-space-experiments-not-shipped) |
 | `foliage_vertex_lamps` | Shipped | Lamp light on instanced foliage per vertex | [foliage.md](features/night-lighting/foliage.md#per-vertex-lamps-and-crown-shade) |
 | `canopy_ground_shadow` | Shipped | Tree and bush crowns as porous occluders on lot ground | [foliage.md](features/night-lighting/foliage.md#per-vertex-lamps-and-crown-shade) |
 | `foliage_sun_shadow` | Developer only | The sun and moon shadow on the tree shaders that read none | [foliage.md](features/night-lighting/foliage.md#the-suns-shadow-on-trees) |

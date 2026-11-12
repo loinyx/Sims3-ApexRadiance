@@ -3,6 +3,7 @@
 #include "memory_policy.h"
 #include "fast_refpack.h"
 #include "fast_memory.h"
+#include "stream_arena.h"
 #include "game_version.h"
 #include <psapi.h>
 // Room to save: a reserve of address space and the game's idle resource cache, given back when the game needs a large
@@ -274,6 +275,7 @@ bool __fastcall WorldSaveHook(void* wm, void*, void* a, void* b) {
     const bool startKnown=GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&startMemory),sizeof startMemory)!=FALSE;
     const uint64_t before = LargestFree();
     const auto queuedReleased=kMemoryOptimizationsEnabled ? FastMemory::PrepareForSave() : 0;
+    StreamArena::PrepareForSave(); // stream_arena: free slices decommitted
     const auto apexFreed=kMemoryOptimizationsEnabled ? FastRefPack::PrepareForSave() : 0;
     uint64_t freed = 0;
     void* rs = g_rs.load(std::memory_order_relaxed);
@@ -316,6 +318,7 @@ int __fastcall SaveDispatchHook(void* owner,void*,void* a,void* b) {
     MemoryTelemetry::SaveScope saving;
     const uint64_t before=PrivateBytes();
     const auto queued=FastMemory::PrepareForSave();
+    StreamArena::PrepareForSave();
     const auto released=FastRefPack::PrepareForSave();
     AllocatorTuning::TrimNow("save"); // allocator_trim: the allocator's own trim of free core tops
     const bool reserve=LetReserveGo();
@@ -357,6 +360,7 @@ DWORD WINAPI Watch(LPVOID) {
         if (largest < g_lowest.load(std::memory_order_relaxed)) g_lowest.store(largest, std::memory_order_relaxed);
         const DWORD now = GetTickCount();
         if (largest < kLowBytes) {
+            if (largest < kLetGoBytes) StreamArena::Retire(); // stream_arena: its 48 MB back once no block is in use
             if (largest < kLetGoBytes && LetReserveGo()) {
                 char line[128];
                 std::snprintf(line, sizeof line, "[MemoryGuard] Largest free block %llu MB: the reserve of %llu MB let go", static_cast<unsigned long long>(largest >> 20),

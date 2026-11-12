@@ -1,12 +1,14 @@
 #include "../../features/memory_guard.cpp"
 #include "../../features/fast_refpack.cpp"
 #include "../../features/fast_memory.cpp"
+#include "../../features/stream_arena.cpp"
 #include "../../features/scratch_budget.h"
 #include <cassert>
 #include <iostream>
 #include <thread>
 namespace ApexLog { void Write(Level,const std::string&,const std::source_location&) noexcept {} }
-namespace AllocatorTuning { unsigned TrimNow(const char*) { return 0; } } // development-build allocator trim: off here
+namespace AllocatorTuning { unsigned TrimNow(const char*) { return 0; } }
+namespace MemoryMeter { void Push(uint64_t,uint64_t,uint64_t) {} } // the Overview card: not part of these checks // development-build allocator trim: off here
 uint32_t g_exeTimestamp=0x52DEC247;
 namespace GameAddr {
 bool IsFixed(){return true;} uintptr_t Get(Id){return 0;}
@@ -21,6 +23,7 @@ bool WriteDWORD(uintptr_t,DWORD,std::vector<PatchLocation>*,const DWORD*){return
 bool RestoreAll(std::vector<PatchLocation>&){return true;}
 int32_t CalculateRelativeOffset(uintptr_t,uintptr_t,size_t){return 0;}
 bool WriteCodeSuspended(uintptr_t,const BYTE*,size_t){return false;}
+bool WriteCodeBatchSuspended(const CodeWrite*,size_t){return false;}
 }
 namespace SlotChain {
 std::atomic<void*> g_next[static_cast<int>(Site::Count)][static_cast<int>(Layer::Count)]{};
@@ -101,6 +104,43 @@ int main() {
         assert(directBlock && FastMemory::Stub_Free(directBlock,0,MEM_RELEASE));
         assert(FastMemory::g_queued==0);
         assert(VirtualQuery(directBlock,&blockInfo,sizeof blockInfo) && blockInfo.State==MEM_FREE);
+    }
+    {   // big_block_reuse: a released direct block is kept reserved, recommitted as zero pages for its 64 KB class, flushed before a save
+        FastMemory::AllocFn allocFunction=&VirtualAlloc;
+        FastMemory::g_allocSlot=reinterpret_cast<uintptr_t>(&allocFunction);
+        auto* kept=static_cast<uint8_t*>(VirtualAlloc(nullptr,MiB,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE));
+        assert(kept);kept[100]=7;
+        assert(FastMemory::Keep(kept) && FastMemory::g_keptN==1 && FastMemory::g_keptBytes==MiB);
+        assert(VirtualQuery(kept,&blockInfo,sizeof blockInfo) && blockInfo.State==MEM_RESERVE);
+        assert(!FastMemory::TakeKept(MiB-0x20000,PAGE_READWRITE)); // another 64 KB class
+        auto* again=static_cast<uint8_t*>(FastMemory::TakeKept(MiB-0x1000,PAGE_READWRITE));
+        assert(again==kept && again[100]==0 && FastMemory::g_keptN==0);
+        assert(FastMemory::Keep(again) && FastMemory::PrepareForSave()==1 && FastMemory::g_keptN==0);
+        assert(VirtualQuery(kept,&blockInfo,sizeof blockInfo) && blockInfo.State==MEM_FREE);
+        void* odd=VirtualAlloc(nullptr,32*MiB,MEM_RESERVE|MEM_COMMIT,PAGE_READWRITE);
+        assert(odd && !FastMemory::Keep(odd) && VirtualFree(odd,0,MEM_RELEASE)); // over 16 MB: released as before
+        FastMemory::g_allocSlot=0;
+    }
+    {   // stream_arena: best fit, zero-filled reuse, foreign pointers not taken, idle decommit, retire
+        auto* base=static_cast<uint8_t*>(VirtualAlloc(nullptr,StreamArena::kSlices*StreamArena::kSlice,MEM_RESERVE,PAGE_READWRITE));
+        assert(base);
+        StreamArena::g_base=base;StreamArena::g_armed=true;
+        auto* a=static_cast<uint8_t*>(StreamArena::Take(700*1024));
+        auto* b=static_cast<uint8_t*>(StreamArena::Take(1400*1024));
+        assert(a==base && b==base+11*StreamArena::kSlice && StreamArena::g_live==2);
+        std::memset(a,0xAB,700*1024);
+        StreamArena::Put(a);
+        auto* c=static_cast<uint8_t*>(StreamArena::Take(300*1024)); // best fit: the 11-slice hole
+        assert(c==base && c[0]==0 && c[300*1024-1]==0);
+        StreamArena::Put(c);StreamArena::Put(c);
+        assert(StreamArena::c_doubleFree==1 && StreamArena::g_live==1);
+        assert(StreamArena::Owned(b) && !StreamArena::Owned(base-1) && !StreamArena::Owned(base+StreamArena::kSlices*StreamArena::kSlice));
+        assert(StreamArena::Decommit(0)==11*64); // c's slices, not b's
+        StreamArena::Retire();
+        assert(!StreamArena::Take(200*1024) && !StreamArena::ReleaseIfRetired()); // b still in use
+        StreamArena::Put(b);
+        assert(StreamArena::ReleaseIfRetired() && !StreamArena::g_base && !StreamArena::Owned(b));
+        assert(VirtualQuery(base,&blockInfo,sizeof blockInfo) && blockInfo.State==MEM_FREE);
     }
     FastMemory::g_on=false;FastMemory::g_workerAlive=false;FastMemory::g_freeSlot=0;
     Space s; s.AddFree(0x7f000000ull,0x82000000ull);

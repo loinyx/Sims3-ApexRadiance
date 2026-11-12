@@ -52,6 +52,31 @@ Two further changes to the same allocator have no setting and are on in every ga
 Both require the Steam image base `0x00400000` and the trim's prologue bytes `83 EC 10 53 55 56 8B E9`; otherwise the
 log says *Not the Steam 1.67.2 allocator: off*. The log lists the first trims and any trim that freed 1 MB or more.
 
+### Address-space experiments (not shipped)
+
+Three development-build switches, off unless `[dev_build]` sets them to `true`, Steam 1.67.2 only. They come from
+sims3-modernization's `[BigBlock]` and `[StreamBuf]` research and have not been measured with Apex Radiance yet.
+
+- **`mono_cores_bottom`** (needs *Faster memory handling* and `allocator_top_down`). The Mono sub-heap takes its 1 MB+
+  cores from the game allocator as large blocks, so top-down placement sends these long-lived blocks among the
+  short-lived ones. The call in the Mono core supplier (`0x00D71553`, rel32 at `0x00D71554`, window `0x00D7154A`
+  checked) goes to `MonoCoreMalloc`, which marks its thread (one slot) around the game's Malloc; the large-block
+  `VirtualAlloc` stub (return `0x004E5130`) drops `MEM_TOP_DOWN` for that thread.
+- **`big_block_reuse`** (needs *Faster memory handling*). The helper thread decommits a released large block of 64 KB to
+  16 MB and keeps its reservation (at most 128 MB, 256 blocks; the oldest released first). The next large block of the
+  same 64 KB size class is committed in it (zero pages, as a new block). Every kept reservation is released before a
+  save (`PrepareForSave`) and when an allocator `VirtualAlloc` fails.
+- **`stream_arena`** ([`features/stream_arena.{h,cpp}`](../../../features/stream_arena.cpp)). `EA::IO::MemoryStream`
+  never grows in place: each size change is a new buffer, a copy and a free, and every buffer of 128 KB or more was its
+  own `VirtualAlloc`. Buffers of 128 KB to 8 MB come from one 48 MB reservation (top-down) in 64 KB slices, committed on
+  use, zero-filled when reused and decommitted 5 s after their last use. Sites: the SharedPointer constructor's
+  allocator call `0x004DEC0B` and the two data frees `0x004DEA99`, `0x004DEEF9` (their three functions checked byte for
+  byte, written while no thread is stopped inside); a pointer outside the arena goes to the game's free. Before a save
+  the free slices are decommitted; when *Room to save* lets its reserve go, no new arena block is made and the
+  reservation is released once none is in use.
+
+The save path logs `[FastMemory] Before the save: ...` and `[StreamArena] Before the save: ...` with their counters.
+
 ## Settings
 
 | Menu label | TOML key | Type | Default | Range | Effect |

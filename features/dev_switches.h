@@ -112,6 +112,21 @@ inline bool RoomSolveCauses() { return kCompiled && roomSolveCauses.load(std::me
 //                          restarts stop for 300 ms (at most 1 s of hold); a lamp edit's rooms never wait (restart_settle.h)
 inline std::atomic<bool> restartSettle{false};
 inline bool RestartSettle() { return kCompiled && restartSettle.load(std::memory_order_relaxed); }
+// Address-space experiments taken over from sims3-modernization (#361 [BigBlock], #364 [StreamBuf]); not shipped, off
+// unless the key says true; Steam 1.67.2 only:
+//   mono_cores_bottom  the Mono sub-heap's cores (long-lived direct blocks) stay bottom-up while allocator_top_down sends
+//                      the short-lived ones to the top (needs Faster memory handling: its VirtualAlloc stub strips the flag)
+//   big_block_reuse    a freed direct block of 64 KB to 16 MB is decommitted but kept reserved, and the next block of the
+//                      same 64 KB class recommits it; at most 128 MB kept, all of it released before a save or a failed
+//                      VirtualAlloc (needs Faster memory handling)
+//   stream_arena       the data buffers of EA's memory streams (128 KB to 8 MB) come from one 48 MB reservation at the top
+//                      of the address space instead of a VirtualAlloc each (stream_arena.h)
+inline std::atomic<bool> monoCoresBottom{false};
+inline std::atomic<bool> bigBlockReuse{false};
+inline std::atomic<bool> streamArena{false};
+inline bool MonoCoresBottom() { return kCompiled && monoCoresBottom.load(std::memory_order_relaxed); }
+inline bool BigBlockReuse() { return kCompiled && bigBlockReuse.load(std::memory_order_relaxed); }
+inline bool StreamArena() { return kCompiled && streamArena.load(std::memory_order_relaxed); }
 //   active_lot_hold        (shipped; development builds read a missing key as on; OutdoorDelta::ActiveLot follows
 //                          RtOutdoorLamps::ActiveTracker while it is on) while the camera moves, Real-time outdoor lamps keep the active
 //                          lot until another has been the first lit at the high quality for 1.5 s or the camera has been still
