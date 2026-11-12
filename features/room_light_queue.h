@@ -37,7 +37,8 @@ bool QuickPass();
 bool Refining();
 // A burst's quick pass is running: changed room maps hold their fade until every room shows it (any thread)
 bool QuickPassPending();
-// Render thread: the current room of the light tree is being solved (its maps are being written)
+// Render thread: the current room of the light tree, a lamp edit's (LevelLightShare::EditUrgent), is being solved (its maps
+// are being written)
 bool SolveInProgress();
 // Render thread: that room (null when SolveInProgress is false)
 const void* SolvingRoom();
@@ -57,9 +58,11 @@ void NoteSolveStart(const void* room);
 // Render thread: the room's last finished solve began after the edit whose LampMarkFilter::EditSerial is `since` (12/10: was
 // the switch serial); true when not known on this thread
 bool SolvedSince(const void* room, unsigned long since);
-// Render thread (LotLightingMotion's lot budget): the light tree's current room is a lamp edit's (LampUrgency > 1); false on
-// any other thread
+// Render thread (LotLightingMotion's lot budget): the light tree's current room is a lamp edit's (LevelLightShare::EditUrgent:
+// urgent, not a quiet mark); false on any other thread
 bool CurrentRoomUrgent();
+// Render thread: GetTickCount at the room's last solve end seen on this thread (0: none, or another thread)
+unsigned long SolveEndedAt(const void* room);
 // Render thread: that room is being solved at a higher class than the one on screen (the quick pass's refinement): the
 // maps it writes are not the ones shown, and hold the room's light from before the edit
 bool SolveRefiningUp();

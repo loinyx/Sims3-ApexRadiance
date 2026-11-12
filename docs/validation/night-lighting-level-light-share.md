@@ -245,6 +245,15 @@ topology mutation inside a point is not reproduced. This release does not promis
   lot and leave it. **Expected:** no 8 s lamp-edit windows of room solves with nothing edited. Then move and delete a
   lamp post of the active lot next to another lot. **Expected:** that lot's ground and outdoor walls follow with the
   edit's own rooms (urgent, within 1.5 s of the edit), not at the game's pace. Not yet run.
+- An active-lot switch opens no lamp edit (3.1.2, not yet tested in game): Lamp updates on Instant, at night, with a
+  recording and a Frame Profiler timing run. Pan between neighbouring lots with lamp posts so the active lot switches
+  with nothing edited, then switch a lamp on the played lot. **Expected:** `lamp_edit=1` in the timeline only after the
+  real edit. Record the drain and the lot room solve per frame for frames that are moving with a lot loading (before:
+  8.7 ms of lot room solves with a lamp edit pending, 1.4 ms without). After each `Active lot tracker` line, read
+  `story S room 0 solved N ms after the switch`, and compare the time to the next `Active:` line with the same pan on the
+  build before; if it is clearly longer, Real-time outdoor lamps' occluder send goes back to an edit mark. Any
+  `Drain step of` line gives that step's page faults. With `active_lot_hold` on, no `Active lot hold ends` line names
+  class 4.
 - Fast lot pictures (3.1.1, not yet tested in game). Load a save: **expected** one `[SetupLot]` line for the played lot,
   reading `not gated`, with its id equal to the world active lot or priority 1, and no `room gathers skipped light
   sharing` or `lot capture over` line for it. Start a New Game: **expected** `lot capture` and `room gathers skipped light

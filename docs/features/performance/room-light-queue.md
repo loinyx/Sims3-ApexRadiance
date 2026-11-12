@@ -132,7 +132,8 @@ one change for every floor, shown once it is final, is the intended result.
 
 - A lamp edit's room is drained on any lot, not only the priority lot (the finished-lot check still applies), and while
   it is the current room the lot being played keeps the game's budget, at most 6 ms, while the camera moves
-  ([lot-lighting-motion.md](lot-lighting-motion.md)).
+  ([lot-lighting-motion.md](lot-lighting-motion.md)). A room first in the queue by a quiet mark is not an edit's room
+  (`LevelLightShare::EditUrgent`).
 - An urgent room stays urgent while it still waits for or is in its solve (states 1 to 3), at most 8 s after its latest
   mark (`RoomAmbientPolicy::UrgencyKept`); the "settled" log line ends with `ended: complete` or `ended: urgency expired`.
 - A move's safety net comes 200 ms after it (was 300 ms), the drag's quiet time.
@@ -208,6 +209,10 @@ and feeds this queue.
   budget; the first step of a frame always runs, so the queue still advances. Lamp edits, held edits and urgent rooms
   keep the earlier pacing. The budget in the first seconds after a load is 6 ms (was 12 ms). Each room's light is still
   the game's complete solve; only the frame in which a room finishes can move.
+- **Slow steps.** A drain step of 20 ms or more is logged, at most 3 lines a second: `Drain step of N ms (budget B ms)`
+  with the room's lot, story, id and class and the process's page faults across the step (numbered development builds; `unknown` elsewhere). A timeline showed single
+  steps of 97 to 100 ms under the 1 ms budget while the camera moved, in frames with thousands of page faults. Measuring
+  only: nothing is solved differently.
 - **Lot entry.** The settle window (`LevelLightShare::SettlingAfterLoad`: 15 s after the world goes live) also opens for
   10 s when another lot becomes the high-quality lot, the camera entering it or coming back
   (`[LevelLightShare] Lot <tracker> entered`): the extra solves take the settle budget instead of 4 ms (1 ms while the
@@ -303,8 +308,9 @@ In [`features/level_light_share.cpp`](../../../features/level_light_share.cpp):
   sums in the same order).
 - Night Lighting does not relight every lot 3 s after a world loads at night (the game has just solved them).
 - The outdoor rooms of other lots gathered again for the active lot's lamp posts, and the room 0s of a lot whose
-  Instant maps are dropped, are urgent only after a lamp edit (or, for a lot leaving Instant's lots next to the active
-  one, always): sent urgently with no edit, a lot streaming in opened an 8 s edit window of room solves
+  Instant maps are dropped, are urgent only after a lamp edit; a lot leaving Instant's lots next to the active one is
+  always first in the queue, as a quiet mark (no lamp edit) when nothing was edited: sent as an edit with none, a lot
+  streaming in or an active-lot switch opened an 8 s edit window of room solves
   ([level-light-share.md](../night-lighting/level-light-share.md#lamp-posts-of-other-lots),
   [rt-outdoor-lamps.md](../night-lighting/rt-outdoor-lamps.md)).
 - New Game's lot pictures: a lot the game lights only for its picture skips light sharing and Apex's sends, and its
@@ -378,6 +384,8 @@ line every minute (with the `[RoomSolveCauses]` line) gives the picks held and l
   replaced by fixing the causes (one round per atrium, the quick pass looking like its refinement) and keeping the hold
   for atriums only. The edit hold of *Lamp edits all at once* is not this approach: it never holds the lamp's own story, only the other
   stories, which before showed one at a time.
+- Skipping the drain's first step while the camera moves (against the 100 ms steps): the lot pass runs the same step
+  under its own budget, and rooms never solved would wait longer.
 
 Details in [history](../../history/performance-room-light-queue.md).
 

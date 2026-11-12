@@ -36,6 +36,7 @@
 #include "room_map_dither.h"
 #include "lamp_mark_filter.h"
 #include "lot_lighting_motion.h"
+#include "room_light_queue.h"
 #include "apex_log.h"
 #include "hook_guard.h"
 #include "dev_switches.h"
@@ -629,6 +630,7 @@ uint64_t g_lotId = 0;
 // since when the switch has been held (0: none)
 uintptr_t g_holdFor = 0;
 DWORD g_holdForAt = 0, g_holdAt = 0;
+DWORD g_switchAt = 0; // the last active-lot switch, until a room-0 solve of the new lot ends after it (0: none)
 // (physical indoor lamps, render thread) a lot lamp as each room-0 map's pick reads it, once a round (Frame clears it): every
 // story's maps read every lot lamp again, with nothing edited
 struct LampNow {
@@ -1825,7 +1827,7 @@ void Frame(IDirect3DDevice9* dev) {
         }
         g_on.store(false);
         g_watch.store(false);
-        g_holdAt = 0, g_holdFor = 0; // (a hold ends unlogged: its length would span the time off)
+        g_holdAt = 0, g_holdFor = 0, g_switchAt = 0; // (a hold ends unlogged: its length would span the time off)
         g_inactive = "off";
         return;
     }
@@ -1835,7 +1837,7 @@ void Frame(IDirect3DDevice9* dev) {
         if (!g_slots.empty()) DropAll(dev, why.c_str());
         g_on.store(false);
         g_watch.store(false);
-        g_holdAt = 0, g_holdFor = 0;
+        g_holdAt = 0, g_holdFor = 0, g_switchAt = 0;
         Inactive(why);
     };
     if (g_ps3 == 0) return off("the device has no shader model 3");
@@ -1933,7 +1935,20 @@ void Frame(IDirect3DDevice9* dev) {
         g_budgetOut = false;
         g_proxyWanted.store(tracker);
         LOG_INFO(std::format("[RtOutdoorLamps] Active lot tracker {:08X}{}", tracker, nt > 1 ? std::format(" (the first of {} lots lit at the high quality)", nt) : std::string()));
+        g_switchAt = std::max<DWORD>(GetTickCount(), 1);
     }
+    // The switch's sends and the lots leaving it are quiet marks, which take no lamp edit's budget: how long the new lot's first
+    // room-0 solve takes after the switch, and how many quiet rooms still wait then
+    if (g_switchAt)
+        for (int S = 0; S <= 7; S++) {
+            const void* room = LevelLightShare::Room0Of(tracker, S);
+            const DWORD end = room ? RoomLightQueue::SolveEndedAt(room) : 0;
+            if (!end || static_cast<int32_t>(end - g_switchAt) < 0) continue;
+            LOG_INFO(std::format("[RtOutdoorLamps] Active lot tracker {:08X}: story {} room 0 solved {} ms after the switch, {} quiet rooms still waiting", tracker, S,
+                                 end - g_switchAt, LevelLightShare::QuietRoomsWaiting()));
+            g_switchAt = 0;
+            break;
+        }
     g_watch.store(true);
     // the occluders of the lot
     std::shared_ptr<const Proxy> proxy;
@@ -1957,7 +1972,7 @@ void Frame(IDirect3DDevice9* dev) {
                 if (AskDue(a, GetTickCount())) {
                     a.at = std::max<DWORD>(GetTickCount(), 1);
                     a.count++;
-                    LevelLightShare::QueueRoomAgain(room);
+                    LevelLightShare::QueueRoomAgain(room, true); // (for the occluders: no edit behind it)
                 } else if (a.count >= kSolveAsks && !a.logged) {
                     a.logged = true;
                     LOG_INFO(std::format("[RtOutdoorLamps] Story {} room 0 sent to its solve {} times with no occluders read: once a minute from now, or the lot's next room update", S, kSolveAsks));
@@ -2095,9 +2110,10 @@ void Frame(IDirect3DDevice9* dev) {
             }
             // (active_lot_hold) the lot waiting to become the active one: not sent to its solve during the hold (an urgent solve on
             // the lot played, which the switch makes again in full); with no copy of its class left the hold ends (the switch runs
-            // next frame), so its ground does not stay without the posts
+            // next frame), so its ground does not stay without the posts. Class 4 (no solve shown yet) has no map a copy stands in
+            // for, so no posts to lose: the hold goes on and the game solves it meanwhile
             if (!act && g_holdAt && LevelLightShare::TrackerOfLot(rn.lot) == g_holdFor) {
-                if (!had && holdNow - g_holdForAt < kActiveLotHoldMs) {
+                if (!had && cls >= 0 && cls <= 2 && holdNow - g_holdForAt < kActiveLotHoldMs) {
                     g_holdForAt = holdNow - kActiveLotHoldMs;
                     LOG_INFO(std::format("[RtOutdoorLamps] Active lot hold ends: {} (the lot waiting) shows class {} with no copy to stand in", who(), cls));
                 }
@@ -2114,7 +2130,7 @@ void Frame(IDirect3DDevice9* dev) {
             if ((rn.state == 4 || rn.state == 5) && !g_budgetOut && !tooLarge && AskDue(a, GetTickCount())) {
                 a.at = std::max<DWORD>(GetTickCount(), 1);
                 a.count++;
-                const bool sent = LevelLightShare::QueueRoomAgain(room);
+                const bool sent = LevelLightShare::QueueRoomAgain(room, true); // (an edit's light comes with the edit's own sends)
                 if (a.count <= kSolveAsks)
                     LOG_INFO(std::format("[RtOutdoorLamps] {} room 0 shows class {} with no kept solve: {} ({} of {})", who(), cls,
                                          sent ? "sent to its solve" : "could not be sent to its solve", a.count, kSolveAsks));
@@ -3603,7 +3619,7 @@ void OnWorldChanged() {
     // (render thread) every map, the occluders and the edits of the previous world go; nothing is sent to a solve (the
     // previous world's lots are gone, and the new world's lots solve their rooms as they load)
     g_tracker = 0;
-    g_holdAt = 0, g_holdFor = 0;
+    g_holdAt = 0, g_holdFor = 0, g_switchAt = 0;
     g_restartRequested = false;
     PublishNeighbours(0, {}, false);
     DropAll(g_dev, "the world changed");

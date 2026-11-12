@@ -579,7 +579,7 @@ struct UrgentRoom {
     unsigned long serial = 0;  // LampMarkFilter::EditSerial at the latest mark: a solve begun after it ends its wait
     bool expiredPending = false; // reached the 8 s cap while still waiting (counted once)
     bool kept = false;           // outlived its deadline while waiting (counted once)
-    bool quiet = false;          // an automatic switch-on's own room (NoteQuietMark): first in the queue, not an edit
+    bool quiet = false;          // an automatic switch-on's own room (NoteQuietMark) or a leaving lot's (t_quietMark): first in the queue, not an edit
     bool blank = false;          // never solved when this entry was first marked (RoomNeverSolved; kept on re-marks): its wait ends at its first solve
 };
 std::mutex g_urgentMx;
@@ -647,6 +647,10 @@ bool UrgentLive(UrgentRoom& u, DWORD now) {
     }
     return false;
 }
+// Set by RegatherOutdoorById around a lot's urgent regather with no lamp edit behind it (a lot leaving the lots next to the
+// active one): its rooms keep their place first in the queue as quiet marks (NoteQuietMark), not a lamp edit (LampEditPending,
+// the edit hold)
+thread_local bool t_quietMark = false;
 // soon: the edit is a lamp registered in that room that moved, switched or changed a value (see above); the latest decides
 void MarkUrgent(void* room, int tier, bool soon) {
     uintptr_t mgr = 0;
@@ -660,6 +664,7 @@ void MarkUrgent(void* room, int tier, bool soon) {
     const auto it = std::find_if(g_urgent.begin(), g_urgent.end(), [room](const UrgentRoom& u) { return u.room == reinterpret_cast<uintptr_t>(room); });
     if (it == g_urgent.end()) {
         if (g_urgent.size() >= kUrgentMax) { // full: the oldest room that is not a lamp's own goes first
+            if (t_quietMark) return; // a quiet mark evicts no edit's entry (as NoteQuietMark): the game's order
             const auto drop = std::find_if(g_urgent.begin(), g_urgent.end(), [](const UrgentRoom& u) { return u.tier != 0; });
             g_urgent.erase(drop != g_urgent.end() ? drop : g_urgent.begin());
         }
@@ -667,9 +672,9 @@ void MarkUrgent(void* room, int tier, bool soon) {
         u.marked = now;
         u.serial = serial;
         u.blank = blank;
+        u.quiet = t_quietMark;
         g_urgent.push_back(u);
-    } else {
-        const bool same = it->mgr == mgr && it->id == id;
+    } else if (const bool same = it->mgr == mgr && it->id == id; !t_quietMark || it->quiet || !same) { // (a quiet mark leaves an edit's entry as it is)
         it->tier = same ? std::min(it->tier, tier) : tier;
         it->mgr = mgr;
         it->id = id;
@@ -679,7 +684,7 @@ void MarkUrgent(void* room, int tier, bool soon) {
         it->serial = serial;
         it->blank = (same && it->blank) || blank; // sticky: a re-mark after its first solve keeps it (nothing was held)
         it->expiredPending = it->kept = false;
-        it->quiet = false; // an edit's mark: a full lamp edit now
+        it->quiet = t_quietMark; // an edit's mark: a full lamp edit now (a quiet one re-marks only a quiet entry or a new room)
     }
     if (tier == 0) { // the lamp's own story: never held by the edit hold (OnEditStory)
         std::erase_if(g_editStories, [now](const EditStory& s) { return now - s.at >= kEditStoryMs; });
@@ -691,9 +696,10 @@ void MarkUrgent(void* room, int tier, bool soon) {
     g_urgentMarked.fetch_add(1, std::memory_order_relaxed);
 }
 // The urgent entry of a room: its tier (0 = a lamp's own room, 1 = a room taking its light, 2 = sent by the edit's safety
-// net; -1 = not urgent) and whether it may gather at once
-int UrgentTier(const void* room, bool* soon = nullptr) {
+// net; -1 = not urgent), whether it may gather at once and whether it is a quiet mark (first in the queue, no edit)
+int UrgentTier(const void* room, bool* soon = nullptr, bool* quiet = nullptr) {
     if (soon) *soon = false;
+    if (quiet) *quiet = false;
     if (!room || !g_urgentSize.load(std::memory_order_relaxed)) return -1;
     uintptr_t mgr = 0;
     int id = 0;
@@ -703,6 +709,7 @@ int UrgentTier(const void* room, bool* soon = nullptr) {
     for (UrgentRoom& u : g_urgent)
         if (u.room == reinterpret_cast<uintptr_t>(room) && u.mgr == mgr && u.id == id && UrgentLive(u, now)) {
             if (soon) *soon = u.soon;
+            if (quiet) *quiet = u.quiet;
             return u.tier;
         }
     return -1;
@@ -15677,21 +15684,32 @@ static bool QueueOutdoorRegatherSafe(uintptr_t tracker, bool edit) {
         return false;
     }
 }
-bool RegatherOutdoorById(uint64_t lot, bool urgent) {
-    // urgent when the caller says so (a lot whose relit maps were just dropped shows the game's maps without the active lot's
-    // posts until it gathers again) or within 1.5 s of a player's lamp edit, the GPU's or the delta's included (a post let go
-    // is sent about 1 s after its last step). Otherwise (a lot streaming in registers its posts) its rooms go at the game's
-    // pace: as urgent rooms of the played lot they opened 8 s "lamp edits" at about 10 ms of room solves a frame with no edit
+// A player's lamp edit in the last 1.5 s, the GPU's or the delta's included (a post let go is sent about 1 s after its last step)
+static bool EditedLately() {
     const DWORD now = GetTickCount(), gpu = g_gpuEditAt.load(std::memory_order_relaxed);
     const unsigned long edit = LampMarkFilter::EditLastTick();
-    const bool afterEdit = urgent || (edit && now - edit < 1500) || (gpu && now - gpu < 1500);
+    return (edit && now - edit < 1500) || (gpu && now - gpu < 1500);
+}
+bool RegatherOutdoorById(uint64_t lot, bool urgent) {
+    // urgent when the caller says so (a lot whose relit maps were just dropped shows the game's maps without the active lot's
+    // posts until it gathers again) or within 1.5 s of a player's lamp edit (EditedLately). Otherwise (a lot streaming in
+    // registers its posts) its rooms go at the game's pace: as urgent rooms of the played lot they opened 8 s "lamp edits"
+    // at about 10 ms of room solves a frame with no edit.
+    // Urgent only from the caller (no edit in the last 1.5 s): quiet marks, first in the queue but no lamp edit. An active
+    // lot switch drops every lot next to the old one, and the new active lot was often one of them: as an edit's tier 2 its
+    // rooms opened the same lamp-edit window (a capture: 28 ms frames moving with a lot loading, 15 ms without)
+    const bool edited = EditedLately();
+    const bool afterEdit = urgent || edited;
     uintptr_t trackers[256];
     const int n = AllTrackers(trackers, 256);
     for (int t = 0; t < n; t++)
         if ((static_cast<uint64_t>(LotIdPart(trackers[t], 0x94)) << 32 | LotIdPart(trackers[t], 0x90)) == lot) {
             // as a lamp edit's safety net (tier 2): after the edit's own rooms, before any other, held with them by the edit
             // hold so the stories change together; gathered at once (the post is already in the light cells)
-            if (!QueueOutdoorRegatherSafe(trackers[t], afterEdit)) return false;
+            t_quietMark = !edited;
+            const bool queued = QueueOutdoorRegatherSafe(trackers[t], afterEdit);
+            t_quietMark = false;
+            if (!queued) return false;
             g_xlotRegathers.fetch_add(1, std::memory_order_relaxed);
             return true;
         }
@@ -18243,7 +18261,7 @@ int EditRoomsPending(unsigned long after, int* others, int* ownPending, int* own
         const DWORD now = GetTickCount();
         std::lock_guard<std::mutex> lk(g_urgentMx);
         for (UrgentRoom& u : g_urgent) {
-            if (static_cast<long>(u.serial - after) <= 0 || n >= static_cast<int>(std::size(rooms)) || !UrgentLive(u, now)) continue;
+            if (u.quiet || static_cast<long>(u.serial - after) <= 0 || n >= static_cast<int>(std::size(rooms)) || !UrgentLive(u, now)) continue; // (a quiet mark is no edit's)
             const bool own = std::any_of(g_editStories.begin(), g_editStories.end(), [&](const EditStory& s) { return s.mgr == u.mgr && now - s.at < kEditStoryMs; });
             rooms[n++] = Entry{u.room, u.mgr, u.id, u.serial, own};
         }
@@ -18376,6 +18394,20 @@ void NoteLampEditing(bool continuous, uintptr_t tracker) {
     if (continuous) g_continuousEditAt.store(now, std::memory_order_relaxed);
 }
 int UrgentTierOf(const void* room) { return UrgentTier(room); }
+bool EditUrgent(const void* room) {
+    bool quiet = false;
+    return UrgentTier(room, nullptr, &quiet) >= 0 && !quiet;
+}
+int QuietRoomsWaiting() {
+    if (!g_urgentSize.load(std::memory_order_relaxed)) return 0;
+    const DWORD now = GetTickCount();
+    std::lock_guard<std::mutex> lk(g_urgentMx);
+    return static_cast<int>(std::count_if(g_urgent.begin(), g_urgent.end(), [now](UrgentRoom& u) {
+        if (!u.quiet || !UrgentLive(u, now)) return false;
+        const int state = RoomState(reinterpret_cast<const void*>(u.room));
+        return state >= 1 && state <= 3;
+    }));
+}
 bool LampDragging() {
     if (DragLite::LetGo()) return false; // (2.13.1: the button let go of the lamp; its placement steps are no drag)
     const DWORD at = g_continuousEditAt.load(std::memory_order_relaxed);
@@ -19834,7 +19866,7 @@ uint64_t PhysicsKey() {
                   (RoomMapDither::Running() && RoomMapDither::Enabled() ? 4u : 0u));
     return h;
 }
-bool QueueRoomAgain(const void* room) {
+bool QueueRoomAgain(const void* room, bool quiet) {
     const DragLite::WhyScope liteWhy(DragLite::Why::QueueAgain);
     uintptr_t mgr = 0;
     int id = -1;
@@ -19844,8 +19876,9 @@ bool QueueRoomAgain(const void* room) {
     uint64_t lot = 0;
     if (!tracker || !ReadMgrLotStory(mgr, lot, story) || story < -4 || story > 7 || SafeStoryManager(tracker, story) != mgr) return false;
     t_queueForce = true;
+    t_quietMark = quiet && !EditedLately(); // (after a lamp edit the mark stays an edit's, as RegatherOutdoorById)
     const bool sent = QueueRoomSafe(tracker, story, id, 1);
-    t_queueForce = false;
+    t_queueForce = t_quietMark = false;
     return sent;
 }
 void* Room0Of(uintptr_t tracker, int story) { return tracker && story >= -4 && story <= 7 && kRoomById ? RoomOfTry(tracker, story) : nullptr; }

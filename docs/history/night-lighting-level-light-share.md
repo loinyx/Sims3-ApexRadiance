@@ -989,7 +989,42 @@ sent to gather at a lamp edit's priority. The Frame Profiler kept per-frame deta
 of 120 frames), so a sustained slowdown while moving raised the median and stayed unrecorded.
 
 **Outcome:** the Frame Profiler writes a per-frame timeline (ApexRadiance_FrameTimeline.csv, with camera motion, focus,
-the room-queue drain, edit windows and the pick readback). The development switch ctive_lot_hold keeps the active lot
+the room-queue drain, edit windows and the pick readback). The development switch `active_lot_hold` keeps the active lot
 while the camera moves until another has led for 1.5 s or the camera has been still for 300 ms, and Quick outdoor lamp
 edits follow the same lot during a hold (a first version left the two pickers apart, which a review caught). Unmeasured
 in game.
+
+### 2026-11-11: an active-lot switch opened a lamp edit
+
+**Context:** a Frame Profiler timeline of a development session where panning across lots dropped frames, checked
+against the log of a second session on the same build.
+
+**Finding:** moving with a lot loading, frames with a lamp edit pending and nothing edited averaged 28.2 ms (8.7 ms of
+the lot's room solves a frame) against 15.4 ms (1.4 ms) without. The cause is an active-lot switch: `DropAll`
+publishes no lots next to the active one, so every old neighbour regathers as a leaver with `RegatherOutdoorById(lot,
+true)`, at the edit's tier 2. When the new active lot was one of them, its outdoor rooms were urgent rooms of the played
+lot, so `LampEditPending` held the drain's and the lot pass's edit budgets until they were solved, up to 8 s. In the
+second session's log two of three such runs start right after a switch; the first has no neighbour line, so its trigger
+is unverified.
+
+**Outcome:** kept. Urgency that comes only from the caller, with no lamp edit in the last 1.5 s, marks the rooms quiet:
+the same tier 2 and gather at once, so the same place in the queue and the game's full solve, but no lamp edit, no
+place in the edit hold's count and no `kEditMovingMs` for the played lot's pass (`RoomLightQueue::CurrentRoomUrgent`
+reads `EditUrgent`); a quiet mark leaves an edit's entry unchanged and evicts none from a full urgent list. Real-time
+outdoor lamps' own room-0 sends after a switch (for the occluders, or a kept solve) take quiet marks on the same 1.5 s
+rule, and the edit hold keeps no quiet room's maps (`SolveInProgress`). The played lot's room 0 now takes the lot-entry
+budget instead of the edit's, so each switch logs how long the new lot's first room-0 solve takes after it. The frame
+gain and that time are not yet measured, and nothing is checked in game
+([validation](../validation/night-lighting-level-light-share.md#open-checks)).
+
+### 2026-11-11: the active-lot hold ended for a lot with no solve shown
+
+**Context:** the same second session's log, with the development switch `active_lot_hold` on.
+
+**Finding:** a hold ended after 31 ms because a story of the lot waiting showed class 4: no solve shown yet, so no map a
+relit copy stands in for and no lamp posts to lose. A hold of 16 ms ended for a lot whose kept solve was of the other
+kind (it had been a lot next to the active one).
+
+**Outcome:** kept. Only a class 0 to 2 shown with no copy left ends the hold; at class 4 the hold goes on while the game
+solves the room. The other case stays as it was: extending it is safe only while that lot's regather is unsolved, and
+`RoomLightQueue::SolvedSince` keys on edit serials, not switches, so nothing can tell yet. Not checked in game.
