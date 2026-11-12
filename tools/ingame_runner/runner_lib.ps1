@@ -598,8 +598,10 @@ function Get-StartObservation($Proc, [string]$LogPath, [string]$DocsDir, [dateti
 # heartbeat moves (two flat checks in a row fail); $AgentSec after Apex started its features (the main menu follows
 # within seconds) the agent's mailbox is found, and the message tells "not loaded" (no marker) from "loaded but its
 # mailbox not found" (marker).
-function Step-StartWatch([hashtable]$State, $Obs, [int]$AgentSec = 90) {
+function Step-StartWatch([hashtable]$State, $Obs, [int]$AgentSec = 90, [switch]$NoApex) {
     if (-not $Obs.Alive) { return "the game closed before the test agent answered (exit code $($Obs.ExitCode))" }
+    # without Apex there is no log: the agent's deadline counts from 120 s after the start instead of Apex's start line
+    if ($NoApex) { $Obs.LogBytes = 0; $Obs.Features = $Obs.Sec -ge 120 }
     if ($Obs.LogBytes -lt 0 -and $Obs.Sec -ge 60) {
         return 'no ApexRadiance_LOG.txt from this start after 60 s: ApexRadiance.asi did not load (is an ASI loader in Game\Bin? see -AsiLoader)'
     }

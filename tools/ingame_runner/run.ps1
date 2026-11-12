@@ -178,7 +178,7 @@ function Wait-Game([string]$What, [double]$Minutes, [scriptblock]$Done, [scriptb
 # Waits for the test agent's mailbox after the game starts. Scans the game's memory every 10 s; every 30 s
 # Step-StartWatch (runner_lib.ps1) checks the process, Apex's log, the agent's marker file and heartbeat and stops the
 # load with the reason; -LoadTimeoutMin is only the last resort.
-function Wait-Agent([datetime]$Started) {
+function Wait-Agent([datetime]$Started, [bool]$NoApex = $false) {
     $state = @{}
     $logPath = Join-Path $apexDir 'ApexRadiance_LOG.txt'
     $lastScan = [datetime]::MinValue
@@ -193,7 +193,7 @@ function Wait-Agent([datetime]$Started) {
             Say ("  test agent: {0:N0} s since start, cpu {1:N0} s, Apex log {2}, features {3}, agent marker {4}" -f $o.Sec, $o.Cpu,
                 $(if ($o.LogBytes -ge 0) { "$($o.LogBytes) bytes" } else { 'none yet' }), $(if ($o.Features) { 'started' } else { 'not yet' }),
                 $(if ($o.Marker) { $o.Marker } else { 'none yet' }))
-            $why = Step-StartWatch $state $o
+            $why = Step-StartWatch $state $o -NoApex:$NoApex
             if ($why) { throw $why }
         }
         if ((Get-Date) -ge $end) { throw "timeout after $LoadTimeoutMin min waiting for the test agent" }
@@ -306,6 +306,9 @@ function Invoke-Load($Load, [string]$BaseToml) {
     [IO.File]::WriteAllText($tomlPath, $toml, (New-Object Text.UTF8Encoding($false)))
     Copy-Item -LiteralPath $tomlPath -Destination (Join-Path $dir 'ApexRadiance.toml')
 
+    # "apex": false in a variant: the game starts without ApexRadiance.asi (the baseline); put back after the load
+    $noApex = ($v.PSObject.Properties.Name -contains 'apex') -and -not $v.apex
+    if ($noApex) { Move-Item -LiteralPath $asiPath -Destination $asiOffPath -Force }
     $started = Get-Date
     $script:speed = 'normal'
     $gameArgs = @($jobDef.gameArgs | Where-Object { $_ })
@@ -320,7 +323,7 @@ function Invoke-Load($Load, [string]$BaseToml) {
     else { $script:proc = Start-Process -FilePath $exe -WorkingDirectory $GameBin -PassThru }
     try {
         $script:mbox = New-Object ApexIngame.MailboxClient($script:proc.Id)
-        Wait-Agent $started
+        Wait-Agent $started $noApex
         Wait-Game 'the main menu' 5 { try { Call-Agent 'game_state' $null 5000 | Out-Null; return $true } catch { return $false } }
         Wait-MenuQuiet
         Call-Agent 'load_save' @{ file = "$($jobDef.save).sims3" } | Out-Null
@@ -428,6 +431,7 @@ function Invoke-Load($Load, [string]$BaseToml) {
         if ($script:mbox) { $script:mbox.Dispose(); $script:mbox = $null }
     }
     Wait-Process -Id $script:proc.Id -Timeout 60 -ErrorAction SilentlyContinue
+    if ($noApex -and (Test-Path -LiteralPath $asiOffPath)) { Move-Item -LiteralPath $asiOffPath -Destination $asiPath -Force }
     Start-Sleep -Seconds 2 # Apex's log writer and crash report finish with the process
 
     foreach ($f in 'ApexRadiance_LOG.txt', 'ApexRadiance_Crash.txt', 'ApexRadiance_Hitches.txt') {
@@ -440,7 +444,7 @@ function Invoke-Load($Load, [string]$BaseToml) {
         Where-Object { $_.LastWriteTime -ge $started -and (Select-String -LiteralPath $_.FullName -SimpleMatch '<ApexTestAgent ' -List) } |
         Move-Item -Destination $dir -Force
     $logPath = Join-Path $dir 'ApexRadiance_LOG.txt'
-    $lines = if (Test-Path -LiteralPath $logPath) { @(Get-Content -LiteralPath $logPath) } else { $notes.Add('no ApexRadiance_LOG.txt from this load'); @() }
+    $lines = if (Test-Path -LiteralPath $logPath) { @(Get-Content -LiteralPath $logPath) } elseif ($noApex) { @() } else { $notes.Add('no ApexRadiance_LOG.txt from this load'); @() }
     $check = Test-ApexLog $lines (@($jobDef.expect) + @($v.expect)) ($script:DefaultFailPatterns + @($jobDef.fail) + @($v.fail))
     foreach ($m in $check.Missing) { $notes.Add("missing log line: $m") }
     foreach ($m in $check.Failures) { $notes.Add("log: $m") }
@@ -463,9 +467,12 @@ function Invoke-Load($Load, [string]$BaseToml) {
 # ------------------------------------------------------------------ install, run, restore
 # The settings first: restored first too. Apex Radiance's own outputs and shader cache are written by the test build;
 # the job saves are only loaded (the agent saves under new names) but are kept in the backup all the same.
+$asiPath = Join-Path $GameBin 'ApexRadiance.asi'
+$asiOffPath = Join-Path $GameBin 'ApexRadiance.asi.off'
 $installs = @(
     @{ path = $tomlPath; from = $null },
     @{ path = (Join-Path $GameBin 'ApexRadiance.asi'); from = $Asi },
+    @{ path = (Join-Path $GameBin 'ApexRadiance.asi.off'); from = $null }, # an apex:false load's ASI set aside
     @{ path = (Join-Path $GameDocuments 'Mods/Packages/ApexTestAgent.package'); from = $agent },
     @{ path = (Join-Path $GameDocuments 'scriptCache.package'); from = $null } # stale compiled scripts; the game rebuilds it
 )

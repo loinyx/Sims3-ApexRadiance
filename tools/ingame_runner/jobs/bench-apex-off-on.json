@@ -1,0 +1,15 @@
+{
+  "id": "bench-apex-off-on",
+  "description": "Frame-time benchmark of the whole mod: the same save, speed and camera pan with ApexRadiance.asi left out (off) and installed with the tester's settings (on). Read FPS, frame time p50/p99 (1% low = 1000 / p99), frames over 50 ms per minute and visible freezes. Run with -AB -Profiler Both.",
+  "save": "Claude teste",
+  "toml": { "ui": { "developer_mode": false } },
+  "variants": {
+    "off": { "apex": false },
+    "on": { "expect": ["\\[Main\\] Features started"] }
+  },
+  "steps": [
+    { "do": "speed", "speed": "normal" },
+    { "do": "camera_pan", "lots": 8, "height": 40, "seconds": 60, "passes": 12 },
+    { "do": "wait", "minutes": 10, "measure": true }
+  ]
+}
