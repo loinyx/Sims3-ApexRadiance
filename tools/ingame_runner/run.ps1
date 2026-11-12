@@ -447,6 +447,7 @@ function Invoke-Load($Load, [string]$BaseToml) {
                 }
                 'stop_repros' {
                     $j = Call-Agent 'camera_jumps' @{ stop = $true }; $v = Call-Agent 'vfx_burst' @{ stop = $true }
+                    if ($j.jumpLog) { @($j.jumpLog) | Set-Content -LiteralPath (Join-Path $dir 'jumps.txt') -Encoding UTF8 } # flash_scan's settle times
                     $counts = 'jumps {0}, loops {1}, outfit changes {2}, Sims spawned {3} (removed {4}), effect rounds {5}, effects {6}, missing {7}' -f
                         $j.jumps, $j.loops, $j.outfitChanges, $j.spawned, $j.removed, $v.rounds, $v.started, $v.missing
                     $result.Events = (@($result.Events, $counts) | Where-Object { $_ }) -join '; '

@@ -75,6 +75,21 @@ def main():
     # arriving or changing (and Sims walking). Per jump: frames with 3 or more cells changing by 10 or more since the frame
     # before ("pops"), and the time from the jump to the last pop (settled).
     qpc = [float(r[head.index("qpcMs")]) for r in rows]
+    # camera_jumps logs its jumps (jumps.txt next to the grab folder, "HH:MM:SS.mmm lot"): exact, where a dark night
+    # jump may not look like a cut
+    log = os.path.join(os.path.dirname(os.path.abspath(d)), "jumps.txt")
+    if os.path.exists(log) and "clock" in head:
+        def sec(t):
+            h, m, x = t.split(":")
+            return int(h) * 3600 + int(m) * 60 + float(x)
+        fs = [sec(c) for c in clock]
+        jumps = []
+        for line in open(log, encoding="utf-8-sig"):
+            if line.strip():
+                t = sec(line.split()[0])
+                i = min(range(n), key=lambda k: abs(fs[k] - t))
+                if abs(fs[i] - t) < 1 and (not jumps or i > jumps[-1]):
+                    jumps.append(i)
     settle = []
     for k, j in enumerate(jumps):
         end = jumps[k + 1] - 3 if k + 1 < len(jumps) else n

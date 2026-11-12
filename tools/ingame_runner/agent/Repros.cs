@@ -37,6 +37,7 @@ namespace ApexTestAgent
 
         // ------------------------------------------------------------ camera_jumps
         static int sJumps, sJumpOutfits, sJumpSpawned, sJumpLoops;
+        static List<string> sJumpLog = new List<string>(); // wall clock and lot of every jump (flash_scan's settle times)
 
         // camera_jumps {order?: far|populated, lots?, dwellS?, height?, loops?, outfits?, spawn?} | {stop:true} | {status:true}
         // A game task jumps the camera (no pan) to one lot after another and holds it still dwellS (default 8) wall-clock
@@ -53,7 +54,7 @@ namespace ApexTestAgent
             if (a.Has("status") || a.Has("stop"))
             {
                 if (a.Has("stop")) { ++sPanGen; r["stopped"] = true; r["removed"] = RemoveSpawned(); }
-                r["jumps"] = sJumps; r["loops"] = sJumpLoops; r["outfitChanges"] = sJumpOutfits; r["spawned"] = sJumpSpawned;
+                r["jumps"] = sJumps; r["jumpLog"] = new List<string>(sJumpLog); r["loops"] = sJumpLoops; r["outfitChanges"] = sJumpOutfits; r["spawned"] = sJumpSpawned;
                 return r;
             }
             RequireLive();
@@ -66,6 +67,7 @@ namespace ApexTestAgent
             List<Lot> first = populated ? PopulatedLots(k) : FarLots(k);
             if (first.Count < 2) throw new AgentException("fewer than 2 lots to jump between");
             sJumps = sJumpOutfits = sJumpSpawned = sJumpLoops = 0;
+            sJumpLog.Clear();
             Simulator.AddObject(new OneShotFunctionTask(delegate
             {
                 for (int loop = 0; loop < loops && sPanGen == gen; loop++)
@@ -80,6 +82,7 @@ namespace ApexTestAgent
                         Vector3 target = new Vector3(c.x, World.GetTerrainHeight(c.x, c.z), c.z);
                         CameraController.SetPositionAndTarget(target + new Vector3(-height * 0.7f, height, -height * 0.7f), target);
                         sJumps++;
+                        sJumpLog.Add(DateTime.Now.ToString("HH:mm:ss.fff") + " " + lot.Name);
                         if (spawn > 0) sJumpSpawned += SpawnAround(c, spawn);
                         if (outfits > 0) sJumpOutfits += ChangeOutfitsOn(lot, outfits, cat);
                         int t0 = System.Environment.TickCount;
