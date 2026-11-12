@@ -239,6 +239,7 @@ namespace ApexTestAgent
             Dispatcher.Register("lots", Lots);
             Dispatcher.Register("lights_on", LightsOn);
             Dispatcher.Register("lamp_edit", LampEdit);
+            Dispatcher.Register("floor", Floor);
             Dispatcher.Register("lamp_drag", LampDrag);
             Dispatcher.Register("save_game", SaveGame);
             Dispatcher.Register("auto_dialog", AutoDialog);
@@ -621,13 +622,22 @@ namespace ApexTestAgent
             return r;
         }
 
-        // lamp_edit {near:{x,y,z}, radius?, count?, match?, action: off|on|color, color?}: the count (default 2) lights nearest
+        // lamp_edit {near:{x,y,z} | lot, door?, radius?, count?, match?, action: off|on|color, color?}: the count (default 2) lights nearest
         // `near` within radius (default 25 m), of any lot, whose type name has `match` (e.g. "Pool"), switched off or on or
         // recoloured (default Red; "White" back) the way the light's menu does it. Returns each light's type and place.
         static object LampEdit(Args a)
         {
             RequireLive();
-            Vector3 at = Vec(a, "near");
+            Vector3 at;
+            if (a.Has("near")) at = Vec(a, "near");
+            else
+            { // (lot: the lights nearest its front door with door true, else its centre)
+                Lot lot = FindLot(a.Str("lot", ""));
+                if (lot == null) throw new AgentException("near {x,y,z} or a lot needed");
+                at = lot.GetCenterPosition();
+                Vector3 door;
+                if (a.Bool("door", false) && FrontDoorOf(lot, out door)) at = door;
+            }
             float radius = (float)a.Double("radius", 25);
             int count = (int)a.Double("count", 2);
             string match = a.Str("match", "").ToLowerInvariant(), action = a.Str("action", "off").ToLowerInvariant();
@@ -661,6 +671,19 @@ namespace ApexTestAgent
             if (done.Count == 0) throw new AgentException("no light" + (match.Length > 0 ? " matching " + match : "") + " within " + radius + " m");
             Dictionary<string, object> r = Obj();
             r["lights"] = done;
+            return r;
+        }
+
+        // floor {lot?, level}: the floor shown on a lot (default the active lot), as the floor up and down buttons do
+        static object Floor(Args a)
+        {
+            RequireLive();
+            Lot lot = a.Has("lot") ? FindLot(a.Str("lot")) : LotManager.ActiveLot;
+            if (lot == null) throw new AgentException("no lot");
+            World.LotSetDisplayLevel(lot.LotId, (int)a.Double("level", 0));
+            Dictionary<string, object> r = Obj();
+            r["lot"] = lot.Name;
+            r["level"] = World.LotGetDisplayLevelInfo(lot.LotId).mCurrent;
             return r;
         }
 

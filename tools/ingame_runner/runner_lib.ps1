@@ -26,7 +26,7 @@ function Get-UntilCommand([string]$Field) {
 }
 function Format-Until($Until) { $p = @($Until.PSObject.Properties)[0]; return "$($p.Value) $($p.Name)" }
 # Every step run.ps1 knows.
-$script:KnownSteps = @('speed', 'wait', 'profile', 'camera', 'camera_pan', 'save', 'reload', 'camera_jumps', 'vfx_burst', 'mode', 'stop_repros', 'key', 'camera_orbit', 'lots', 'lights_on', 'lamp_drag', 'wait_file', 'camera_read', 'camera_goto', 'lamp_edit', 'track_record', 'track_play', 'input_record', 'input_play', 'clip_session')
+$script:KnownSteps = @('speed', 'wait', 'profile', 'camera', 'camera_pan', 'save', 'reload', 'camera_jumps', 'vfx_burst', 'mode', 'stop_repros', 'key', 'camera_orbit', 'lots', 'lights_on', 'lamp_drag', 'wait_file', 'camera_read', 'camera_goto', 'lamp_edit', 'track_record', 'track_play', 'input_record', 'input_play', 'clip_session', 'floor')
 
 function ConvertTo-TomlLiteral($Value) {
     if ($Value -is [bool]) { if ($Value) { return 'true' } else { return 'false' } }

@@ -514,6 +514,11 @@ function Invoke-Load($Load, [string]$BaseToml) {
                         Say "  $($c.Name): $(if (Test-Path $d) { Get-Content -LiteralPath $d -Raw -Encoding UTF8 } else { '(no description)' })"
                     }
                 }
+                'floor' { # the floor shown on a lot (default the active lot)
+                    $a = @{ level = $step.level }; if ($step.lot) { $a.lot = $step.lot }
+                    $o = Call-Agent 'floor' $a
+                    Say "  step ${n}: floor $($o.level) shown on $($o.lot)"
+                }
                 'lights_on' {
                     $o = Call-Agent 'lights_on' @{ lot = $step.lot }
                     Say "  step ${n}: lights on at $($o.name) through $($o.via)$(if ($null -ne $o.lights) { " ($($o.lights) lights)" })"

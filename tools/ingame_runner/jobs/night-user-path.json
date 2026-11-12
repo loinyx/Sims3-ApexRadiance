@@ -1,0 +1,319 @@
+{
+  "id": "night-user-path",
+  "description": "The tester's lighting path at night, scripted the same way every run (the standard light measure; profilers/light_latency.py reads its log): the household's lot (floors 1 to 3, an outdoor light dragged toward the house and back), the gym from its front door (its lights on; the lights by the door switched off, on, red and white; its pool light blue, off, on, white), the town square (Parque Central: lights off and on), and the art museum (floors 1 to 3, lights red and white). Recordings (F6) at the drag, the gym's and the square's arrival. Lights are left switched on; nothing is saved. Developer mode on, the background frame limit lifted.",
+  "save": "Claude teste",
+  "toml": {
+    "ui": {
+      "developer_mode": true,
+      "recorder_key": "F6"
+    },
+    "screen": {
+      "background_fps_limit": 0
+    }
+  },
+  "variants": {
+    "on": {
+      "expect": [
+        "\\[Recorder\\] Recording started"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "home",
+      "radius": 16,
+      "height": 10,
+      "seconds": 3600,
+      "turns": 0.001,
+      "face": "door"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    },
+    {
+      "do": "floor",
+      "lot": "home",
+      "level": 1
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "floor",
+      "lot": "home",
+      "level": 2
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "floor",
+      "lot": "home",
+      "level": 3
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "lamp_drag",
+      "seconds": 4,
+      "passes": 4
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.05
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kGym",
+      "radius": 14,
+      "height": 10,
+      "seconds": 3600,
+      "turns": 0.001,
+      "face": "door"
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.6
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "lights_on",
+      "lot": "kGym"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    },
+    {
+      "do": "lamp_edit",
+      "lot": "kGym",
+      "action": "off",
+      "door": true,
+      "radius": 20
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    },
+    {
+      "do": "lamp_edit",
+      "lot": "kGym",
+      "action": "on",
+      "door": true,
+      "radius": 20
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    },
+    {
+      "do": "lamp_edit",
+      "lot": "kGym",
+      "action": "color",
+      "door": true,
+      "radius": 20,
+      "color": "Red"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    },
+    {
+      "do": "lamp_edit",
+      "lot": "kGym",
+      "action": "color",
+      "door": true,
+      "radius": 20,
+      "color": "White"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    },
+    {
+      "do": "lamp_edit",
+      "lot": "kGym",
+      "action": "color",
+      "match": "pool",
+      "radius": 60,
+      "count": 1,
+      "color": "Blue"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.25
+    },
+    {
+      "do": "lamp_edit",
+      "lot": "kGym",
+      "action": "off",
+      "match": "pool",
+      "radius": 60,
+      "count": 1
+    },
+    {
+      "do": "wait",
+      "minutes": 0.25
+    },
+    {
+      "do": "lamp_edit",
+      "lot": "kGym",
+      "action": "on",
+      "match": "pool",
+      "radius": 60,
+      "count": 1
+    },
+    {
+      "do": "wait",
+      "minutes": 0.25
+    },
+    {
+      "do": "lamp_edit",
+      "lot": "kGym",
+      "action": "color",
+      "match": "pool",
+      "radius": 60,
+      "count": 1,
+      "color": "White"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.25
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kEP8_Festival",
+      "radius": 20,
+      "height": 12,
+      "seconds": 3600,
+      "turns": 0.001
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.6
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "lamp_edit",
+      "lot": "kEP8_Festival",
+      "action": "off",
+      "count": 3,
+      "radius": 40
+    },
+    {
+      "do": "wait",
+      "minutes": 0.25
+    },
+    {
+      "do": "lamp_edit",
+      "lot": "kEP8_Festival",
+      "action": "on",
+      "count": 3,
+      "radius": 40
+    },
+    {
+      "do": "wait",
+      "minutes": 0.3
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kArtGallery",
+      "radius": 16,
+      "height": 10,
+      "seconds": 3600,
+      "turns": 0.001,
+      "face": "door"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    },
+    {
+      "do": "floor",
+      "lot": "kArtGallery",
+      "level": 1
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "floor",
+      "lot": "kArtGallery",
+      "level": 2
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "floor",
+      "lot": "kArtGallery",
+      "level": 3
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "lamp_edit",
+      "lot": "kArtGallery",
+      "action": "color",
+      "count": 2,
+      "radius": 30,
+      "color": "Red"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.25
+    },
+    {
+      "do": "lamp_edit",
+      "lot": "kArtGallery",
+      "action": "color",
+      "count": 2,
+      "radius": 30,
+      "color": "White"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.3
+    }
+  ]
+}
