@@ -1,0 +1,22 @@
+{
+  "id": "night-pan-flicker",
+  "description": "Cause run for lights and terrain that flash while the camera moves at night: a pan over the town's lots with two F8 recordings of about 50 s each (video, screen pixels and Recording.txt) and developer mode on, so the log keeps the active lot switches, dropped relit maps and terrain lamp changes. Needs a night save. Read the recordings, not the frame times.",
+  "save": "Claude teste",
+  "toml": { "ui": { "developer_mode": true } },
+  "variants": {
+    "on": { "expect": ["\\[Recorder\\] Recording started", "\\[Recorder\\] Recording stopped"] }
+  },
+  "steps": [
+    { "do": "speed", "speed": "normal" },
+    { "do": "camera_pan", "lots": 8, "height": 40, "seconds": 45, "passes": 8 },
+    { "do": "wait", "minutes": 1 },
+    { "do": "key", "vk": 119 },
+    { "do": "wait", "minutes": 0.85 },
+    { "do": "key", "vk": 119 },
+    { "do": "wait", "minutes": 0.5 },
+    { "do": "key", "vk": 119 },
+    { "do": "wait", "minutes": 0.85 },
+    { "do": "key", "vk": 119 },
+    { "do": "wait", "minutes": 0.5 }
+  ]
+}

@@ -107,6 +107,7 @@ $loaders = @('wininet.dll', 'dinput8.dll', 'version.dll', 'winmm.dll', 'dsound.d
 if (-not $AsiLoader -and -not $loaders) { Say 'warning: no ASI loader found in Bin (for example Ultimate ASI Loader as wininet.dll); pass -AsiLoader' }
 
 Add-Type -Path (Join-Path $PSScriptRoot 'MailboxClient.cs')
+Add-Type -Namespace ApexIngame -Name Keys -MemberDefinition '[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);'
 Add-Type -Namespace ApexIngame -Name SystemTimes -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool GetSystemTimes(out long idle, out long kernel, out long user);'
 $runId = Get-Date -Format 'yyMMdd-HHmmss' # in the runner's save names, so no run meets another run's saves
 if (-not $OutDir) { $OutDir = Join-Path $stateDir "20$runId" }
@@ -351,6 +352,12 @@ function Invoke-Load($Load, [string]$BaseToml) {
             $stepAt = $script:commands.Count; $stepT0 = Get-QpcMs
             switch ($step.do) {
                 'speed' { $script:speed = $step.speed; Call-Agent 'set_speed' @{ speed = $step.speed } | Out-Null }
+                'key' { # a key press posted to the game window, never focused: Apex's shortcuts (F8 starts or stops a recording)
+                    $script:proc.Refresh()
+                    $null = [ApexIngame.Keys]::PostMessage($script:proc.MainWindowHandle, 0x100, [IntPtr][int]$step.vk, [IntPtr]1)
+                    $null = [ApexIngame.Keys]::PostMessage($script:proc.MainWindowHandle, 0x101, [IntPtr][int]$step.vk, [IntPtr]0xC0000001)
+                    Say "  step ${n}: key $($step.vk)"
+                }
                 'camera' { Call-Agent 'camera' @{ pos = $step.pos; target = $step.target } | Out-Null }
                 'camera_pan' {
                     $a = @{}; foreach ($p in $step.PSObject.Properties) { if ($p.Name -ne 'do') { $a[$p.Name] = $p.Value } }
