@@ -4,7 +4,7 @@
   "save": "Claude teste",
   "toml": { "ui": { "developer_mode": false } },
   "variants": {
-    "off": { "apex": false },
+    "off": { "apex": false, "fail": ["\\[Main\\] Features started"] },
     "on": { "expect": ["\\[Main\\] Features started"] }
   },
   "steps": [
