@@ -4,6 +4,7 @@
 #include "hook_guard.h"
 #include "hook_chain.h"
 #include "apex_log.h"
+#include "game_version.h"
 #include <intrin.h>
 #include <algorithm>
 #include <atomic>
@@ -121,7 +122,7 @@ HRESULT __stdcall HookedGetRenderTargetData(IDirect3DDevice9* dev, IDirect3DSurf
         uintptr_t ret = reinterpret_cast<uintptr_t>(_ReturnAddress());
         // Steam 1.67.2: the game's render-target copy 0x00610660 has nine callers; tally its own return address instead, 0x98
         // bytes above ours at this call (3 arguments, 3 saved registers, 0x7C of locals)
-        if (ret == reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)) + 0x210762)
+        if (g_gameVersion == GameVersion::Steam && ret == reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)) + 0x210762)
             ret = *reinterpret_cast<const uintptr_t*>(static_cast<const char*>(_AddressOfReturnAddress()) + 0x98);
         HookGuard::Try("GetRenderTargetData callers", [&] { NoteRtdCaller(ret, b.QuadPart - a.QuadPart); });
         return hr;

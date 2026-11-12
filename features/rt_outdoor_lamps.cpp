@@ -1948,6 +1948,7 @@ void Frame(IDirect3DDevice9* dev) {
     }
     // The switch's sends and the lots leaving it are quiet marks, which take no lamp edit's budget: how long the new lot's first
     // room-0 solve takes after the switch, and how many quiet rooms still wait then
+    if (g_switchAt && (!tracker || GetTickCount() - g_switchAt > 30000)) g_switchAt = 0; // (no lot, or it never solved: stop looking)
     if (g_switchAt)
         for (int S = 0; S <= 7; S++) {
             const void* room = LevelLightShare::Room0Of(tracker, S);

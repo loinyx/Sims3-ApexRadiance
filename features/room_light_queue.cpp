@@ -363,7 +363,8 @@ float __fastcall PriorityHook(BYTE* room) {
     if (BYTE* g = g_ground.load(std::memory_order_relaxed)) {
         const DWORD now = GetTickCount(), until = g_groundUntil.load(std::memory_order_relaxed);
         if (static_cast<int32_t>(now - until) >= 0) g_ground.store(nullptr, std::memory_order_relaxed);
-        else if (RoomAmbientPolicy::GroundFirstHolds(room == g, StateOf(g), now, until)) return p > 0.0f ? 0.0f : p;
+        else if (RoomAmbientPolicy::GroundFirstHolds(room == g, StateOf(g), now, until) && !LevelLightShare::EditUrgent(room))
+            return p > 0.0f ? 0.0f : p; // (a lamp edit's rooms keep their place)
     }
     return HookGuard::Run("RoomLightQueue room priority", p, [room, p] { return Prioritise(room, p); });
 }
