@@ -83,6 +83,7 @@ const I18n::Pair kPairs[] = {
     {"Night Lights: doors and objects beside coloured lamps no longer glow too brightly", "Νυχτερινά φώτα: πόρτες και αντικείμενα δίπλα σε χρωματιστές λάμπες δεν λάμπουν πια υπερβολικά"},
     {"Night Lights: the upper walls of double-height rooms are no longer black", "Νυχτερινά φώτα: οι πάνω τοίχοι των δωματίων διπλού ύψους δεν είναι πια μαύροι"},
     {"No crash when a Sim wears a broken custom part", "Καμία κατάρρευση όταν ένας Sim φορά ένα ελαττωματικό προσαρμοσμένο κομμάτι"},
+    {"Apex Radiance Setup: shows a newer Setup on its start page and updates itself", "Apex Radiance Setup: δείχνει στην αρχική σελίδα ένα νεότερο Setup και ενημερώνεται μόνο του"},
     {"Display: a switch to turn off G-SYNC for the game", "Οθόνη: διακόπτης για απενεργοποίηση του G-SYNC στο παιχνίδι"},
     {"Night Lights: new option Light bounces between rooms, on by default", "Νυχτερινά Φώτα: νέα επιλογή Το φως ανακλάται ανάμεσα στα δωμάτια, ενεργή από προεπιλογή"},
     {"Settings: a new default look for lighting and effects, and your own values stay", "Ρυθμίσεις: νέα προεπιλεγμένη εμφάνιση για φως και εφέ, και οι δικές σας τιμές μένουν"},

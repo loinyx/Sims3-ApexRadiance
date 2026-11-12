@@ -83,6 +83,7 @@ const I18n::Pair kPairs[] = {
     {"Night Lights: doors and objects beside coloured lamps no longer glow too brightly", "Nattlys: dører og gjenstander ved fargede lamper lyser ikke lenger for sterkt"},
     {"Night Lights: the upper walls of double-height rooms are no longer black", "Nattlys: de øverste veggene i rom med dobbel takhøyde er ikke lenger svarte"},
     {"No crash when a Sim wears a broken custom part", "Ingen krasj når en Sim bruker en defekt egendefinert del"},
+    {"Apex Radiance Setup: shows a newer Setup on its start page and updates itself", "Apex Radiance Setup: viser et nyere Setup på startsiden og oppdaterer seg selv"},
     {"Display: a switch to turn off G-SYNC for the game", "Skjerm: en bryter for å slå av G-SYNC i spillet"},
     {"Night Lights: new option Light bounces between rooms, on by default", "Nattlys: nytt valg Lys kastes mellom rom, på som standard"},
     {"Settings: a new default look for lighting and effects, and your own values stay", "Innstillinger: et nytt standardutseende for lys og effekter, og dine egne verdier blir"},

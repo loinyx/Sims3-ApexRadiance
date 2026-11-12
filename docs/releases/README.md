@@ -5,6 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [3.1.4](3.1.4.md): Apex Radiance Setup shows a newer Setup on its start page and updates itself.
 - [3.1.3](3.1.3.md): fence and stair lighting without waiting for the graphics card (36 ms to 1.2 ms a frame zoomed out, 9.5 ms to 0.2 ms close up), an active lot that holds through a pan, objects near a lamp no longer over-lit, double-height rooms' upper walls no longer black, no crash from a broken custom part.
 - [3.1.2](3.1.2.md): lots leaving full detail keep their lamp light on the ground, an active lot that no longer swaps while the camera moves, stairs that no longer flicker or show steps of light, a fence or stair draw at 7 to 11 us instead of 386 us, no forced 16x filtering under the RTX Remix bridge.
 - [3.1.1](3.1.1.md): better compatibility with the RTX Remix bridge: no blinking parts and a steady sea reflection under the bridge, Display's Resolution changing the game's own resolution on every version, Apex Radiance Setup, no crash in the game's launcher, a crash fix contributed by @rodneypantonial.

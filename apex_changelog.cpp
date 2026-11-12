@@ -6,6 +6,10 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k314Improved[] = {
+    "Apex Radiance Setup: shows a newer Setup on its start page and updates itself",
+    nullptr};
+
 constexpr const char* k313Improved[] = {
     "Performance: zooming out and the map view no longer drop the frame rate",
     "Performance: fences and stairs near the camera cost almost nothing to draw",
@@ -573,6 +577,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"3.1.4", "2026-11-12", nullptr, k314Improved, nullptr},
     {"3.1.3", "2026-11-12", nullptr, k313Improved, k313Fixed, "A smooth camera when zoomed out, and steadier lamp light at night"},
     {"3.1.2", "2026-11-12", k312Added, k312Improved, k312Fixed, "Smoother camera, and lamp light that stays put around town"},
     {"3.1.1", "2026-11-11", nullptr, k311Improved, k311Fixed, "Better compatibility with the RTX Remix bridge, and fewer crashes"},
