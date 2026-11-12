@@ -1,0 +1,16 @@
+{
+  "id": "night-lot-load",
+  "description": "Lights arriving after a lot loads, at night: the camera jumps across 10 far lots and holds still 10 s at each, twice round, and the window is recorded (-Grab). flash_scan's settle.csv counts per jump the light changes while the camera is still and when they stopped. Off (the game alone) against on. Run with -Grab, without -Profiler; the save loads at 21:14 and the run ends before dawn.",
+  "save": "Claude teste",
+  "toml": { "ui": { "developer_mode": true } },
+  "variants": {
+    "off": { "apex": false, "fail": ["\\[Main\\] Features started"] },
+    "on": { "expect": ["\\[Main\\] Features started"] }
+  },
+  "steps": [
+    { "do": "speed", "speed": "normal" },
+    { "do": "camera_jumps", "order": "far", "lots": 10, "dwellS": 10, "height": 25, "loops": 2 },
+    { "do": "wait", "minutes": 4.2 },
+    { "do": "stop_repros" }
+  ]
+}

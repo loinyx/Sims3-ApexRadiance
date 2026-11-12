@@ -4,6 +4,7 @@ comes back, which a camera move alone does not do (a pan changes the picture gra
 Usage: python flash_scan.py <grab dir> [--rise 22] [--back 0.35] [--max-frames 6]
 Writes flashes.csv (clock, frame, cells, the largest jump, frames until it came back) and, for each flash, the frame
 before, at and after it as flash-<n>-<frame>-{a,b,c}.jpg next to it; prints the strongest ones.
+settle.csv: per camera jump (a cut), the light changes while the camera then holds still and when they stopped.
 Frames near a camera cut (most cells change at once and stay changed) are left out.
 A cell flashes at frame i when its luma rises by at least --rise over the median of the 4 frames before, and within
 --max-frames it is back within --back of that rise. Darkening blinks are found the same way with the sign reversed.
@@ -32,7 +33,7 @@ def main():
     luma = [[float(x) for x in r[ci:]] for r in rows]
     n, cells = len(luma), len(luma[0]) if luma else 0
     # a camera cut (a jump, not a pan): most cells change at once and stay changed; flashes next to one are its own
-    cuts = set()
+    cuts, jumps = set(), []
     for i in range(4, n - 8):
         moved = 0
         for c in range(cells):
@@ -40,6 +41,8 @@ def main():
             if abs(luma[i][c] - base) >= opt["--rise"] and abs(luma[i + 8][c] - base) >= opt["--rise"] * 0.5:
                 moved += 1
         if moved * 2 >= cells:
+            if not jumps or i - jumps[-1] > 8:
+                jumps.append(i)
             cuts.update(range(i - 8, i + 9))
     events = []
     busy = [0] * cells  # a cell's flash lasts until it is back: its later frames are the same flash
@@ -68,6 +71,24 @@ def main():
             big = max(hit, key=lambda h: abs(h[1]))
             w.writerow([clock[i], frame[i], len(hit), sum(1 for h in hit if h[1] > 0), round(big[1], 1),
                         max(h[2] for h in hit), " ".join(str(h[0]) for h in hit)])
+    # After a camera jump the camera holds still (camera_jumps dwellS): what still changes on screen then is the lot's light
+    # arriving or changing (and Sims walking). Per jump: frames with 3 or more cells changing by 10 or more since the frame
+    # before ("pops"), and the time from the jump to the last pop (settled).
+    qpc = [float(r[head.index("qpcMs")]) for r in rows]
+    settle = []
+    for k, j in enumerate(jumps):
+        end = jumps[k + 1] - 3 if k + 1 < len(jumps) else n
+        pops = [f for f in range(j + 3, end)
+                if sum(1 for c in range(cells) if abs(luma[f][c] - luma[f - 1][c]) >= 10) >= 3]
+        settle.append((clock[j], frame[j], len(pops), round(qpc[pops[-1]] - qpc[j]) if pops else 0, round(qpc[end - 1] - qpc[j])))
+    with open(os.path.join(d, "settle.csv"), "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["clock", "frame", "pops", "settledMs", "stillMs"])
+        w.writerows(settle)
+    if settle:
+        ms = sorted(x[3] for x in settle)
+        print("%d camera jumps: %d pops after them, settled in median %d ms, worst %d ms -> settle.csv"
+              % (len(settle), sum(x[2] for x in settle), ms[len(ms) // 2], ms[-1]))
     ranked = sorted(events, key=lambda e: -sum(abs(h[1]) for h in e[1]))
     for rank, (i, hit) in enumerate(ranked[:12]):
         for tag, j in (("a", i - 1), ("b", i), ("c", min(n - 1, i + 2))):
