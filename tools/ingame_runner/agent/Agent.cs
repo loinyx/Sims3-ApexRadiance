@@ -234,6 +234,7 @@ namespace ApexTestAgent
             Dispatcher.Register("set_speed", SetSpeed);
             Dispatcher.Register("camera", CameraView);
             Dispatcher.Register("camera_pan", CameraPan);
+            Dispatcher.Register("camera_orbit", CameraOrbit);
             Dispatcher.Register("save_game", SaveGame);
             Dispatcher.Register("auto_dialog", AutoDialog);
             Dispatcher.Register("quit_game", QuitGame);
@@ -455,6 +456,40 @@ namespace ApexTestAgent
             r["lengthM"] = Math.Round(total);
             r["passMs"] = passMs;
             r["passes"] = passes;
+            return r;
+        }
+
+        // camera_orbit {radius?, height?, seconds?, turns?}: circles the camera around the active household's lot (radius
+        // default 18 m, height 12 m, one turn per `seconds`, default 30), in a game task like camera_pan; ends camera_pan.
+        static object CameraOrbit(Args a)
+        {
+            RequireLive();
+            int gen = ++sPanGen;
+            Lot lot = LotManager.ActiveLot;
+            if (lot == null && Sims3.Gameplay.CAS.Household.ActiveHousehold != null) lot = Sims3.Gameplay.CAS.Household.ActiveHousehold.LotHome;
+            if (lot == null) throw new AgentException("no active lot");
+            Vector3 c = lot.GetCenterPosition();
+            float radius = (float)a.Double("radius", 18), height = (float)a.Double("height", 12);
+            int turnMs = (int)(a.Double("seconds", 30) * 1000);
+            double turns = a.Double("turns", 2);
+            if (turnMs < 1000 || turns <= 0) throw new AgentException("seconds >= 1 and turns > 0 needed");
+            Vector3 target = new Vector3(c.x, World.GetTerrainHeight(c.x, c.z), c.z);
+            Simulator.AddObject(new Sims3.Gameplay.OneShotFunctionTask(delegate
+            {
+                int t0 = System.Environment.TickCount;
+                while (sPanGen == gen)
+                {
+                    int el = System.Environment.TickCount - t0;
+                    if (el >= turnMs * turns) break;
+                    double ang = 2 * Math.PI * el / turnMs;
+                    Vector3 off = new Vector3((float)Math.Cos(ang) * radius, height, (float)Math.Sin(ang) * radius);
+                    CameraController.SetPositionAndTarget(target + off, target);
+                    Simulator.Sleep(0);
+                }
+            }));
+            Dictionary<string, object> r = Obj();
+            r["lot"] = Pos(c);
+            r["turnMs"] = turnMs;
             return r;
         }
 
