@@ -1,0 +1,24 @@
+{
+  "id": "track-load-check",
+  "description": "Sends the recording bookmarks/user-check.track.json to the agent and nothing else (a check of the agent's mailbox with many large requests). Nothing is saved.",
+  "save": "Claude teste",
+  "toml": {
+    "screen": {
+      "background_fps_limit": 0
+    }
+  },
+  "variants": {
+    "on": {}
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "track_play",
+      "name": "user-check",
+      "load_only": true
+    }
+  ]
+}

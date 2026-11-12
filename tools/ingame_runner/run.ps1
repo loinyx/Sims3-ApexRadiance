@@ -131,6 +131,11 @@ function Call-Agent([string]$Cmd, $ArgsObject, [int]$TimeoutMs = 15000) {
     $json = if ($null -ne $ArgsObject) { $ArgsObject | ConvertTo-Json -Compress -Depth 6 } else { '' }
     $t0 = Get-QpcMs
     try { $reply = $script:mbox.Call($Cmd, $json, $TimeoutMs) | ConvertFrom-Json }
+    catch [TimeoutException], [System.Management.Automation.MethodInvocationException] {
+        # (the agent's heartbeat: moving = it polls but does not see the request; still = the game's simulation stopped)
+        $h0 = $script:mbox.Heartbeat; Start-Sleep -Milliseconds 1500; $h1 = $script:mbox.Heartbeat
+        throw "$($_.Exception.Message) [request $($json.Length) chars; agent heartbeat $h0 -> $h1 in 1.5 s]"
+    }
     finally { if ($null -ne $script:commands) { $script:commands.Add([pscustomobject]@{ label = $Cmd; kind = 'call'; t0 = $t0; t1 = (Get-QpcMs) }) } }
     if (-not $reply.ok) { throw "agent $Cmd failed: $($reply.error)" }
     return $reply.result
@@ -426,9 +431,13 @@ function Invoke-Load($Load, [string]$BaseToml) {
                     foreach ($k in 'lamps', 'cam', 'edits', 'levels', 'modes') {
                         if ($null -eq $t.$k) { continue }
                         $all = [object[]]$t.$k # (not through the pipeline: it would flatten each camera sample's array)
-                        for ($i = 0; $i -lt $all.Count; $i += 200) {
+                        # shortcut: the agent stopped answering past about 2300 camera samples sent (cause not found); every
+                        # other sample (5 a second, the replay interpolates between them) keeps a 6-minute check under it
+                        if ($k -eq 'cam' -and $all.Count -gt 1800) { $all = [object[]]@(for ($q = 0; $q -lt $all.Count; $q += 2) { , $all[$q] }) }
+                        $size = if ($step.chunk) { [int]$step.chunk } else { 200 }
+                        for ($i = 0; $i -lt $all.Count; $i += $size) {
                             $part = New-Object System.Collections.ArrayList
-                            for ($q = $i; $q -lt [Math]::Min($i + 200, $all.Count); $q++) { [void]$part.Add($all[$q]) }
+                            for ($q = $i; $q -lt [Math]::Min($i + $size, $all.Count); $q++) { [void]$part.Add($all[$q]) }
                             Call-Agent 'track_load' @{ $k = $part } 60000 | Out-Null
                         }
                     }
