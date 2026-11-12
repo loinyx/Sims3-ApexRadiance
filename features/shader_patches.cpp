@@ -1241,8 +1241,8 @@ bool PatchSnowFloor(std::vector<DWORD>& t, int texcoord, FloorPatch& out, const 
 // rooms (sU >= 0: samplers sU .. sU + 4 and constants cR .. cR + 4 free; dclAt the place of the sampler declarations): a marked
 // texel matched to a texel of its room's wall map (RtOutdoorLamps: the UV map at sU, point sampled at the map's uv = (u, v, slot
 // / 3, 1)) takes that room's map as the room's own draw sees it this frame (slot r at sU + 1 + r, point), lit as InteriorWall
-// lights it, R + R.w x the slot's ambient (cR + r), times the lamps' fall-off up the wall the relit map's outdoor scale holds
-// there (ratio: its .z, 1 at the floor line) floored at ratioFloor (1: the map holds no ratio). Walls only (PatchWallScale). Unmatched texels
+// lights it, R x the lamps' fall-off up the wall the relit map's outdoor scale holds there (ratio: its .z, 1 at the floor
+// line) floored at ratioFloor (1: the map holds no ratio), + R.w x the slot's ambient (cR + r), which the ratio never scales. Walls only (PatchWallScale). Unmatched texels
 // (UV .w = 0) as without rooms
 static void IndoorPick(std::vector<DWORD>& t, const std::vector<Ins>& all, size_t mad, size_t tex, size_t firstFlow, DWORD flag, DWORD night, DWORD cA, bool alphaOk,
                        DWORD N, DWORD T2, DWORD T3, DWORD T4, DWORD T5, std::vector<Edit>& edits, bool& indoor, bool& spec, bool& strip, bool& haze,
@@ -1272,9 +1272,11 @@ static void IndoorPick(std::vector<DWORD>& t, const std::vector<Ins>& all, size_
         light.insert(light.end(), {Op(kMov, 2), Dst(kTemp, T5, 0x7), Src(kConst, cR)});
         for (DWORD r = 1; r < 4; r++)
             light.insert(light.end(), {Op(kCmp, 4), Dst(kTemp, T5, 0x7), Src(kTemp, N, 0x55 * r), Src(kConst, cR + r), Src(kTemp, T5)});
-        light.insert(light.end(), {Op(kMad, 4), Dst(kTemp, T5, 0x7), Src(kTemp, T4, kSwzW), Src(kTemp, T5), Src(kTemp, T4), // the room's light
-                                   Op(kMax, 3), Dst(kTemp, T4, 0x1), ratio, ratioFloor,
-                                   Op(kMul, 3), Dst(kTemp, T5, 0x7), Src(kTemp, T5), Src(kTemp, T4, kSwzX),
+        // the ratio scales the map's light only, never the room's ambient: at night a texel no lamp reaches above a lit floor
+        // line has a ratio of 0, and the ambient scaled with it left the wall black beside the same room's grey
+        light.insert(light.end(), {Op(kMax, 3), Dst(kTemp, T3, 0x1), ratio, ratioFloor,
+                                   Op(kMul, 3), Dst(kTemp, T4, 0x7), Src(kTemp, T4), Src(kTemp, T3, kSwzX),
+                                   Op(kMad, 4), Dst(kTemp, T5, 0x7), Src(kTemp, T4, kSwzW), Src(kTemp, T5), Src(kTemp, T4), // the room's light
                                    Op(kCmp, 4), Dst(kTemp, T2, 0x7), Src(kTemp, T3, kSwzW) | kNeg, Src(kTemp, T2), Src(kTemp, T5)});
         *rooms = true;
     }

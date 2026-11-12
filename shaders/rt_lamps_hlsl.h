@@ -414,8 +414,8 @@ float4 ScaleOut(float sm, float flags) {
 }
 // (bit 16, with bit 8: a wall texel matched to a texel of its room's map, mask.xy the lowest marked texel of its column) the GPU
 // lamps' fall-off up the wall, lum(base + lamps here) / lum(base + lamps at the floor line) (1 there, where it is not darker and
-// where no lamp reaches it), in the outdoor scale's .z, which the outside walls' copy multiplies its room's texel by (ShaderPatches
-// IndoorPick rooms). base: the matched top-row texel's light the GPU lamps do not draw (its daylight, baked lights, bounce), so the
+// where no lamp reaches it), in the outdoor scale's .z, which the outside walls' copy multiplies its room's texel's map light by,
+// never its ambient (ShaderPatches IndoorPick rooms). base: the matched top-row texel's light the GPU lamps do not draw (its daylight, baked lights, bounce), so the
 // ratio shapes the lamps' part only: by day (no lamp light) it is exactly 1 and the attic is its room's top texel (before, the
 // lamps' ratio alone took the daylight to near black at the top). The map itself holds the texel's light as bit 8 composes it
 // (its room's matched top-row texel carried), so every other reader of the map (the game's own shader, the bloom pass, the

@@ -72,7 +72,10 @@ Three Night Lighting parts act on walls.
      from a base map: `RtOutdoorLamps` `InBaseNow`, `ComposePS` `InBase`), so the ratio shapes only the lamps'
      part: exactly 1 at the floor line, 1 by day with no lamp light and wherever the texel is not darker, and never under the
      plain base's share (16-17-55: the lamps' ratio alone took the attic's daylight to near black at the top; `rt_lamps_test`
-     RatioCheck covers night, day and no lamp). The map itself keeps light there (the matched texel carried at the prepare,
+     RatioCheck covers night, day and no lamp). The outside walls' copy multiplies only the room's map light by the ratio, never
+     the room's ambient: at night the base is near zero, so a texel no lamp reaches above a lit floor line has a ratio of 0, and
+     with the ambient scaled too the upper wall went black beside the same room's grey, with a sharp edge where the lamp's reach
+     ended at the floor line (`tools/wall_indoor_check`, the ratio-0 state). The map itself keeps light there (the matched texel carried at the prepare,
      composed as bit 8), so the game's shader, the bloom pass, the class-2 wall blur and a draw whose rooms are not read see light. The draw reads the room's own map in the
      same frame as the room's own draw (the relit copy when shown, as the `SetTexture` swap gives it), so the attic cannot show
      another solve than its room: a prepare carrying the room's light lagged it (the tone above the floor line changed after day
