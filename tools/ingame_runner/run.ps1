@@ -314,6 +314,12 @@ function Invoke-Load($Load, [string]$BaseToml) {
     Copy-Item -LiteralPath $tomlPath -Destination (Join-Path $dir 'ApexRadiance.toml')
     # "s3ss" in a job: Sims3SettingsSetter's own settings for the run (its frame limiter, say), on the player's file
     if ($jobDef.s3ss -and $script:baseS3ss) { [IO.File]::WriteAllText($s3ssPath, (Set-TomlOverrides $script:baseS3ss $jobDef.s3ss), (New-Object Text.UTF8Encoding($false))) }
+    # "options" in a job: the game's own Options.ini lines ("key = value") for the run (its window size, say)
+    if ($jobDef.options -and $script:baseOptions) {
+        $o = $script:baseOptions
+        foreach ($kv in $jobDef.options.PSObject.Properties) { $o = [regex]::Replace($o, '(?m)^' + [regex]::Escape($kv.Name) + ' = [^\r\n]*', "$($kv.Name) = $($kv.Value)") }
+        [IO.File]::WriteAllText($optionsPath, $o, (New-Object Text.UTF8Encoding($false)))
+    }
 
     # "apex": false in a variant: the game starts without ApexRadiance.asi (the baseline); put back after the load
     $noApex = ($v.PSObject.Properties.Name -contains 'apex') -and -not $v.apex
@@ -526,9 +532,11 @@ function Invoke-Load($Load, [string]$BaseToml) {
 $asiPath = Join-Path $GameBin 'ApexRadiance.asi'
 $asiOffPath = Join-Path $GameBin 'ApexRadiance.asi.off'
 $s3ssPath = Join-Path $GameDocuments 'S3SS/S3SS.toml'
+$optionsPath = Join-Path $GameDocuments 'Options.ini'
 $installs = @(
     @{ path = $tomlPath; from = $null },
     @{ path = $s3ssPath; from = $null }, # a job's "s3ss" settings
+    @{ path = $optionsPath; from = $null }, # a job's "options" lines
     @{ path = (Join-Path $GameBin 'ApexRadiance.asi'); from = $Asi },
     @{ path = (Join-Path $GameBin 'ApexRadiance.asi.off'); from = $null }, # an apex:false load's ASI set aside
     @{ path = (Join-Path $GameDocuments 'Mods/Packages/ApexTestAgent.package'); from = $agent },
@@ -542,6 +550,7 @@ try { $manifest = New-RunBackup $OutDir (@($installs | ForEach-Object { $_.path 
 catch { Exit-RunLock $stateDir $OutDir; throw } # nothing installed yet
 Say "backup of $($manifest.Count) files and folders in $OutDir\backup (by hand: run.ps1 -Restore '$OutDir')"
 $baseToml = if (Test-Path -LiteralPath $tomlPath) { [IO.File]::ReadAllText($tomlPath) } else { '' }
+$script:baseOptions = if (Test-Path -LiteralPath $optionsPath) { [IO.File]::ReadAllText($optionsPath) } else { $null }
 $script:baseS3ss = if (Test-Path -LiteralPath $s3ssPath) { [IO.File]::ReadAllText($s3ssPath) } else { $null }
 $results = @()
 $stopped = $null
