@@ -237,6 +237,7 @@ namespace ApexTestAgent
             Dispatcher.Register("camera_orbit", CameraOrbit);
             Dispatcher.Register("lots", Lots);
             Dispatcher.Register("lights_on", LightsOn);
+            Dispatcher.Register("lamp_drag", LampDrag);
             Dispatcher.Register("save_game", SaveGame);
             Dispatcher.Register("auto_dialog", AutoDialog);
             Dispatcher.Register("quit_game", QuitGame);
@@ -523,6 +524,61 @@ namespace ApexTestAgent
 
         // lights_on {lot}: turns on every light of a lot (a community lot at night with nobody inside has them off), through
         // the game's own TurnOnAllLightsOnLot found by reflection; else each light object's TurnOn().
+        // lamp_drag {lot?, meters?, seconds?, passes?} | {status:true}: moves an outdoor light of a lot (default the household's)
+        // the way a drag does, in a game task: from its place toward the lot's centre (meters, default 5) and back, seconds
+        // (default 8) a way, passes (default 6) times, then puts it back where it was. The lamp is the lot's light outside
+        // the house nearest its centre. Nothing is saved.
+        static volatile int sDragGen;
+        static string sDragState = "idle";
+        static object LampDrag(Args a)
+        {
+            Dictionary<string, object> r = Obj();
+            if (a.Has("status")) { r["state"] = sDragState; return r; }
+            RequireLive();
+            string key = a.Has("lot") ? a.Str("lot") : "home";
+            Lot lot = key == "home" ? (Sims3.Gameplay.CAS.Household.ActiveHousehold != null ? Sims3.Gameplay.CAS.Household.ActiveHousehold.LotHome : null) : FindLot(key);
+            if (lot == null) throw new AgentException("no lot named or of type '" + key + "'");
+            Vector3 c = lot.GetCenterPosition();
+            Sims3.Gameplay.Abstracts.GameObject best = null;
+            float bestD = float.MaxValue;
+            foreach (Sims3.Gameplay.Abstracts.GameObject o in lot.GetObjects<Sims3.Gameplay.Abstracts.GameObject>())
+            {
+                if (o == null || o.GetType().Name.IndexOf("Light", StringComparison.OrdinalIgnoreCase) < 0 || !o.IsOutside) continue;
+                float d = Flat(o.Position - c).Length();
+                if (d < bestD) { bestD = d; best = o; }
+            }
+            if (best == null) throw new AgentException("no outdoor light on " + lot.Name);
+            Sims3.Gameplay.Abstracts.GameObject lamp = best;
+            Vector3 from = lamp.Position, fwd = lamp.ForwardVector;
+            Vector3 dir = Flat(c - from);
+            float len = Math.Min((float)a.Double("meters", 5), Math.Max(0.5f, dir.Length() - 1f));
+            dir = dir * (1f / Math.Max(0.01f, dir.Length()));
+            int wayMs = (int)(a.Double("seconds", 8) * 1000), passes = (int)a.Double("passes", 6);
+            int gen = ++sDragGen;
+            sDragState = "dragging";
+            Simulator.AddObject(new Sims3.Gameplay.OneShotFunctionTask(delegate
+            {
+                int t0 = System.Environment.TickCount;
+                while (sDragGen == gen && System.Environment.TickCount - t0 < wayMs * passes)
+                {
+                    int el = System.Environment.TickCount - t0;
+                    float f = (float)(el % wayMs) / wayMs;
+                    if ((el / wayMs) % 2 == 1) f = 1f - f;
+                    Vector3 p = from + dir * (len * f);
+                    lamp.SetPosition(new Vector3(p.x, from.y, p.z));
+                    Simulator.Sleep(0);
+                }
+                lamp.SetPosition(from);
+                lamp.SetForward(fwd);
+                sDragState = "done";
+            }));
+            r["lamp"] = lamp.GetType().Name;
+            r["at"] = Pos(from);
+            r["meters"] = Math.Round(len, 2);
+            r["lot"] = lot.Name;
+            return r;
+        }
+
         static object LightsOn(Args a)
         {
             RequireLive();

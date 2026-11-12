@@ -377,6 +377,11 @@ function Invoke-Load($Load, [string]$BaseToml) {
                     $null = [ApexIngame.Keys]::PostMessage($script:proc.MainWindowHandle, 0x101, [IntPtr][int]$step.vk, [IntPtr]0xC0000001)
                     Say "  step ${n}: key $($step.vk)"
                 }
+                'lamp_drag' {
+                    $a = @{}; foreach ($p in $step.PSObject.Properties) { if ($p.Name -ne 'do') { $a[$p.Name] = $p.Value } }
+                    $d = Call-Agent 'lamp_drag' $a
+                    Say "  step ${n}: dragging $($d.lamp) of $($d.lot) $($d.meters) m toward the lot's centre and back"
+                }
                 'lights_on' {
                     $o = Call-Agent 'lights_on' @{ lot = $step.lot }
                     Say "  step ${n}: lights on at $($o.name) through $($o.via)$(if ($null -ne $o.lights) { " ($($o.lights) lights)" })"
