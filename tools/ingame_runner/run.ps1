@@ -406,6 +406,29 @@ function Invoke-Load($Load, [string]$BaseToml) {
                     $e = Call-Agent 'lamp_edit' $a
                     Say "  step ${n}: $($step.action) $(@($e.lights).Count) lights: $((@($e.lights) | ForEach-Object { "$($_.type) at $($_.at.x),$($_.at.z)" }) -join '; ')"
                 }
+                'track_record' { # the tester plays (camera, lights near it) until the file `file` (default done) exists; kept as bookmarks/<name>.track.json
+                    Call-Agent 'track_record' @{ start = $true } | Out-Null
+                    $f = Join-Path $OutDir $(if ($step.file) { $step.file } else { 'done' })
+                    Say "  step ${n}: recording the tester's path until $f exists (up to $($step.minutes) min)"
+                    Wait-Game "the file $f" ([double]$step.minutes) { Test-Path -LiteralPath $f } { Clear-Dialog }
+                    $t = Call-Agent 'track_record' @{ stop = $true }
+                    $tf = Join-Path $PSScriptRoot "bookmarks/$($step.name).track.json"
+                    New-Item -ItemType Directory -Path (Split-Path $tf) -Force | Out-Null
+                    ($t | ConvertTo-Json -Depth 6 -Compress) | Set-Content -LiteralPath $tf -Encoding UTF8
+                    Say "  step ${n}: recorded $(@($t.cam).Count) camera samples, $(@($t.lamps).Count) lights, $(@($t.edits).Count) light edits as $($step.name)"
+                }
+                'track_play' { # replays bookmarks/<name>.track.json (sent in pieces: a request is at most 64 KB) and waits for its end
+                    $t = Get-Content -LiteralPath (Join-Path $PSScriptRoot "bookmarks/$($step.name).track.json") -Raw | ConvertFrom-Json
+                    Call-Agent 'camera_pan' @{ stop = $true } | Out-Null
+                    Call-Agent 'track_load' @{ reset = $true; lamps = @($t.lamps) } | Out-Null
+                    foreach ($k in 'cam', 'edits') {
+                        $all = @($t.$k)
+                        for ($i = 0; $i -lt $all.Count; $i += 400) { Call-Agent 'track_load' @{ $k = @($all[$i..([Math]::Min($i + 399, $all.Count - 1))]) } | Out-Null }
+                    }
+                    $p = Call-Agent 'track_play' @{}
+                    Say "  step ${n}: replaying $($step.name): $($p.seconds) s, $($p.edits) light edits, $($p.matched) of $($p.lamps) lights found"
+                    Wait-Game "the replay of $($step.name)" ([double]$p.seconds / 60 + 2) { (Call-Agent 'track_play' @{ status = $true }).state -ne 'playing' } { Clear-Dialog }
+                }
                 'lights_on' {
                     $o = Call-Agent 'lights_on' @{ lot = $step.lot }
                     Say "  step ${n}: lights on at $($o.name) through $($o.via)$(if ($null -ne $o.lights) { " ($($o.lights) lights)" })"

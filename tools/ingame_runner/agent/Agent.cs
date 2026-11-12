@@ -229,6 +229,7 @@ namespace ApexTestAgent
         public static void Register()
         {
             RegisterRepros(); // Repros.cs
+            RegisterTrack(); // Track.cs
             Dispatcher.Register("game_state", GameState);
             Dispatcher.Register("load_save", LoadSave);
             Dispatcher.Register("set_speed", SetSpeed);
