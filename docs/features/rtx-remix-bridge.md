@@ -8,7 +8,7 @@ worlds. Apex Radiance detects the bridge on its own and runs under it with every
 
 | | |
 |---|---|
-| Availability | Released in 3.0.0 as a separate download (`Apex-Radiance-RTX-Remix-bridge.zip`). Its `dxvk.conf` with `d3d9.countLosableResources = False` (no freeze on a switch to exclusive fullscreen or a new resolution): published again after 3.0.0. A folded install guide in Settings > Compatibility, the uncompressed-textures card and Fullscreen as Borderless under the bridge: Released in 3.1.0. Patches 0011 to 0013, Apex's guard for the old client's vertex input, the bridge logs in captures and the bridge's own Nexus file: Released in 3.1.1 |
+| Availability | Released in 3.0.0 as a separate download (`Apex-Radiance-RTX-Remix-bridge.zip`). Its `dxvk.conf` with `d3d9.countLosableResources = False` (no freeze on a switch to exclusive fullscreen or a new resolution): published again after 3.0.0. A folded install guide in Settings > Compatibility, the uncompressed-textures card and Fullscreen as Borderless under the bridge: Released in 3.1.0. Patches 0011 to 0013, Apex's guard for the old client's vertex input, the bridge logs in captures and the bridge's own Nexus file: Released in 3.1.1. Changed in 3.1.2: its `dxvk.conf` no longer forces 16x anisotropic filtering (`d3d9.samplerAnisotropy`), which marred specular on hair and other glossy textures; filtering follows the game's and the driver's settings |
 | Default | Not installed |
 | Menu | Settings > Compatibility: *RTX Remix bridge: Installed* when it runs; while DXVK runs inside the game, the bridge is offered under *Optional* |
 | Configuration | `bridge.conf` (in `Game\Bin` and in `Game\Bin\.trex`) and `dxvk.conf` (in `Game\Bin`); nothing in `ApexRadiance.toml` |
@@ -72,7 +72,6 @@ Shipped in the package; players do not need to change them.
 | `bridge.conf` | `perfLogIntervalFrames` | `0` | Diagnostics off: with them on, their tables fragment the process heap |
 | `bridge.conf` | `serverChannelMemSize` | `72MB` | The server's channel |
 | `dxvk.conf` | `d3d9.customVendorId`, `d3d9.customDeviceId`, `d3d9.customDeviceDesc` | `10de`, `1080`, `Geforce GTX 580` | DXVK's TS3W profile, so `Options.ini` is kept |
-| `dxvk.conf` | `d3d9.samplerAnisotropy` | `16` | The same filtering as the in-process DXVK setup |
 | `dxvk.conf` | `d3d9.countLosableResources` | `False` | A Reset succeeds although one losable resource is still alive |
 
 ## Compatibility and interactions

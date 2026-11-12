@@ -110,8 +110,8 @@ try
           == "[patches.UncompressedLotTexturesPatch]\nenabled = false\nonlyForLOD0 = true\n[patches.Other]\nenabled = true\n", "S3SS.toml rewrite touches only its section");
     Check(Compat.Set("[ patches ]\nshortwaitspin=1\n", "Patches", new[] { "ShortWaitSpin" }, v => v != "0", "0") == "[ patches ]\nshortwaitspin=0\n", "ini section and key match without case");
     var dxw = new List<string>();
-    var dxc = "d3d9.customVendorId = 10de\r\nd3d9.customDeviceId = 1080\r\nd3d9.customDeviceDesc = \"Geforce GTX 580\"\r\nd3d9.countLosableResources = True\r\n[TS3W.exe]\r\nd3d9.samplerAnisotropy = 16\r\n";
-    Check(Compat.FixDxvk(dxc, dxw) == "d3d9.samplerAnisotropy = 16\r\n" + dxc.Replace("= True", "= False") && dxw.SequenceEqual(new[] { "d3d9.countLosableResources", "d3d9.samplerAnisotropy" }),
+    var dxc = "d3d9.customVendorId = 10de\r\nd3d9.customDeviceId = 1080\r\nd3d9.countLosableResources = True\r\n[TS3W.exe]\r\nd3d9.customDeviceDesc = \"Geforce GTX 580\"\r\n";
+    Check(Compat.FixDxvk(dxc, dxw) == "d3d9.customDeviceDesc = \"Geforce GTX 580\"\r\n" + dxc.Replace("= True", "= False") && dxw.SequenceEqual(new[] { "d3d9.customDeviceDesc", "d3d9.countLosableResources" }),
           "bridge dxvk.conf: wrong value replaced, key under [TS3W.exe] added to the global part");
     var dxw2 = new List<string>();
     Compat.FixDxvk(Compat.FixDxvk(dxc), dxw2);

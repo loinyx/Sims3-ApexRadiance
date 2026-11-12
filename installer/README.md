@@ -55,7 +55,7 @@ run at the end of every install, or with *Fix all now* on the game page.
 | Sims3Performance next to `ts3native` with `ShortWaitSpin` or `ThreadStackDiet` above 0 | Both set to 0, copy as `Sims3Performance.ini.apex-backup` |
 | S3SS uncompressed lot or Sim textures under the bridge | `enabled = false`, copy as `S3SS.toml.apex-backup` |
 | `client.targetProcess` in a `bridge.conf` not the game's exe | Set to the exe |
-| The bridge's `dxvk.conf` without the TS3 profile, `d3d9.countLosableResources = False` or `d3d9.samplerAnisotropy = 16` before its first `[exe]` section | Wrong values set, missing lines added at the top |
+| The bridge's `dxvk.conf` without the TS3 profile, `d3d9.countLosableResources = False` before its first `[exe]` section | Wrong values set, missing lines added at the top |
 | `.package` files in `Mods\Packages` (up to 3 folders deep) without `Resource.cfg` | `Resource.cfg` created |
 | A `Resource.cfg` that does not read `ts3fixes.package` or MonoPatcher's package | The `Packages` folder lines added, copy as `Resource.cfg.apex-backup` |
 | Smooth Patch's `TS3Patch.asi` next to S3SS (same game code) | Moved to the backup folder |
