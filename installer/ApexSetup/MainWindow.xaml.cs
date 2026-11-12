@@ -732,24 +732,42 @@ public sealed partial class MainWindow : Window
         var tags = new List<string> { RDxvk, RBridge, RNative };
         if (BridgeBlocked && s.Layer != Layer.Bridge) tags.Remove(RBridge);
         if (s.Layer == Layer.Other) tags.Add(RKeep);
-        var titles = tags.Select(t => t switch
-        {
-            RDxvk => T("Vulkan, DXVK (recommended)"),
-            RBridge => T("Vulkan with more memory (RTX Remix bridge, experimental)"),
-            RNative => T("Windows default (Direct3D 9)"),
-            _ => T("Keep my d3d9.dll"),
-        }).ToList();
+        // each choice: its name, what it does, and Installed on the one the game has now (rebuilt when the list, the language
+        // or the installed one changes)
+        var cur = RendererOf(s);
+        var key = string.Join("|", tags) + "|" + cur + "|" + Lang;
         _fillingRenderer = true;
-        if (!RendererChoice.Items.Cast<object>().Select(o => o as string).SequenceEqual(titles))
+        if (key != _rendererKey)
         {
+            _rendererKey = key;
             RendererChoice.Items.Clear();
-            foreach (var t in titles) RendererChoice.Items.Add(t);
+            foreach (var r in tags) RendererChoice.Items.Add(RendererItem(r, r == cur));
             _rendererTags.Clear();
             _rendererTags.AddRange(tags);
         }
         var want = _rendererTags.IndexOf(_renderer);
         if (RendererChoice.SelectedIndex != want) RendererChoice.SelectedIndex = want;
         _fillingRenderer = false;
+    }
+
+    string? _rendererKey;
+
+    StackPanel RendererItem(string r, bool installed)
+    {
+        var (title, desc) = r switch
+        {
+            RDxvk => (T("Vulkan, DXVK (recommended)"), T("Fewer stutters; Apex Radiance is made and tested with it.")),
+            RBridge => (T("Vulkan with more memory (RTX Remix bridge, experimental)"), T("Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK.")),
+            RNative => (T("Windows default (Direct3D 9)"), T("Works, but Apex Radiance is tested with DXVK.")),
+            _ => (T("Keep my d3d9.dll"), T("Your d3d9.dll stays as it is.")),
+        };
+        var item = new StackPanel { Spacing = 2, Margin = new Thickness(0, 4, 0, 8) };
+        var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        head.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+        if (installed) head.Children.Add(new TextBlock { Text = T("Installed"), FontSize = 12, Foreground = Res("ApexSuccessBrush"), VerticalAlignment = VerticalAlignment.Center });
+        item.Children.Add(head);
+        item.Children.Add(new TextBlock { Text = desc, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap, MaxWidth = 640 });
+        return item;
     }
 
     void RefreshComponents()
@@ -774,15 +792,9 @@ public sealed partial class MainWindow : Window
             : _renderer == RNative ? (T("Works, but Apex Radiance is tested with DXVK."), "ApexMutedBrush")
             : (T("Your d3d9.dll stays as it is."), "ApexMutedBrush"));
         GpuLine.Text = _vulkan is { } gpu && gpu.Card is not null ? T("Your graphics card: {0}", $"{gpu.Card} \u00b7 Vulkan {gpu.Version}") : "";
-        BridgeDetail.Text = _renderer switch
-        {
-            RDxvk => T("Fewer stutters; Apex Radiance is made and tested with it."),
-            RBridge => T("Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."),
-            RNative => T("Works, but Apex Radiance is tested with DXVK."),
-            _ => T("Your d3d9.dll stays as it is."),
-        };
+        BridgeDetail.Text = "";
         if (BridgeBlocked && _renderer != RBridge && _vulkan is { } vk)
-            BridgeDetail.Text += "\n" + T("The RTX Remix bridge needs a graphics card with Vulkan 1.3 (found: {0}).",
+            BridgeDetail.Text = T("The RTX Remix bridge needs a graphics card with Vulkan 1.3 (found: {0}).",
                 vk.Card is null ? "Vulkan —" : $"{vk.Card}, Vulkan {vk.Version}");
 
         // the game resets its graphics options when the card it sees changes: DXVK's TS3W profile and the bridge report a
