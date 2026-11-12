@@ -2147,10 +2147,15 @@ uint32_t g_fenceFarKept = 0, g_fenceNoted = 0;           // (development builds)
 uint32_t g_fenceEyeFrame = ~0u;
 float g_fenceEye[3] = {};
 bool g_fenceEyeOk = false;
+bool FenceEyeNow() {
+    if (g_fenceEyeFrame != g_roomMapFrame) g_fenceEyeFrame = g_roomMapFrame, g_fenceEyeOk = LotLightingMotion::CameraEye(g_fenceEye);
+    return g_fenceEyeOk;
+}
+// The positions last read at that instance buffer place (InstancedGroupCentre) lie farther than kFenceFarM from the eye
+bool FencePlaceFar(IDirect3DVertexBuffer9* vb, UINT off, UINT count, UINT stride);
 bool FenceGroupFar(const FenceGroup& g) {
     if (g.walls.empty()) return false; // (no box: read as before)
-    if (g_fenceEyeFrame != g_roomMapFrame) g_fenceEyeFrame = g_roomMapFrame, g_fenceEyeOk = LotLightingMotion::CameraEye(g_fenceEye);
-    if (!g_fenceEyeOk) return false;
+    if (!FenceEyeNow()) return false;
     const float dx = std::max({g.x0 - g_fenceEye[0], 0.0f, g_fenceEye[0] - g.x1}), dz = std::max({g.z0 - g_fenceEye[2], 0.0f, g_fenceEye[2] - g.z1});
     const float dy = g_fenceEye[1] - g.walls.front().y0;
     return dx * dx + dy * dy + dz * dz > kFenceFarM * kFenceFarM;
@@ -2182,7 +2187,9 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
     if (const auto kp = g_fencePlaceKey.find(place); kp != g_fencePlaceKey.end()) {
         const auto h = g_fencePlaceHashed.find(place);
         const auto kg = g_fenceGroups.find(kp->second);
-        if (h != g_fencePlaceHashed.end() && tick - h->second < kFenceFarRefreshMs && kg != g_fenceGroups.end() && kg->second.read && FenceGroupFar(kg->second)) {
+        // (far by its walls' box, or, for a group without walls, by the positions last read at its place)
+        if (h != g_fencePlaceHashed.end() && tick - h->second < kFenceFarRefreshMs && kg != g_fenceGroups.end() && kg->second.read &&
+            (FenceGroupFar(kg->second) || FencePlaceFar(vb1, off1, count, stride1))) {
             key = kp->second, keptFar = true;
             if (!kPublicBuild) g_fenceFarKept++;
         }
@@ -5596,6 +5603,20 @@ bool ReadInstancePositions(const BYTE* p, UINT count, UINT stride, GroupCentre& 
 }
 std::unordered_map<uint64_t, uint8_t> g_centreBusy; // draw_reads_nowait: busy answers per buffer place since its last read
 std::unordered_map<uint64_t, GroupCentre*> g_groupAtPlace; // the group last read at a buffer place (used while it is busy)
+std::unordered_map<uint64_t, DWORD> g_groupPlaceRead;      // its last read (GetTickCount): a far group keeps it kFenceFarRefreshMs
+uint32_t g_groupFarKept = 0;                               // (development builds) draws that kept a far group without the lock
+uint64_t GroupPlace(IDirect3DVertexBuffer9* vb, UINT off, UINT count, UINT stride) {
+    return (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb)) << 32) ^ (static_cast<uint64_t>(off) << 12) ^ (static_cast<uint64_t>(count) << 1) ^ stride;
+}
+bool GroupCentreFar(const GroupCentre& g) {
+    if (!g.ok || !FenceEyeNow()) return false;
+    const float dx = g.x - g_fenceEye[0], dy = g.y - g_fenceEye[1], dz = g.z - g_fenceEye[2], r = kFenceFarM + g.ext;
+    return dx * dx + dy * dy + dz * dz > r * r;
+}
+bool FencePlaceFar(IDirect3DVertexBuffer9* vb, UINT off, UINT count, UINT stride) {
+    const auto it = g_groupAtPlace.find(GroupPlace(vb, off, count, stride));
+    return it != g_groupAtPlace.end() && GroupCentreFar(*it->second);
+}
 // The instance origins' hash (exact bits, with the count and stride): the key of the group they make
 bool HashInstancePositions(const BYTE* p, UINT count, UINT stride, uint64_t& key) {
     __try {
@@ -5623,9 +5644,20 @@ const GroupCentre* InstancedGroupCentre(IDirect3DDevice9* dev) {
     if (FAILED(dev->GetStreamSource(1, &vb, &off, &stride)) || !vb) return nullptr;
     const GroupCentre* result = nullptr;
     if (count > 0 && count <= 4096 && stride >= 12 && stride <= 256) {
-        if (g_groupCentres.size() > 4096) g_groupCentres.clear(), g_centreBusy.clear(), g_groupAtPlace.clear(); // groups come and go with lots
-        const uint64_t place = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb)) << 32) ^ (static_cast<uint64_t>(off) << 12) ^ (static_cast<uint64_t>(count) << 1) ^ stride;
+        if (g_groupCentres.size() > 4096) g_groupCentres.clear(), g_centreBusy.clear(), g_groupAtPlace.clear(), g_groupPlaceRead.clear(); // groups come and go with lots
+        const uint64_t place = GroupPlace(vb, off, count, stride);
         const auto last = g_groupAtPlace.find(place);
+        // a group far from the camera keeps the positions read last at its place for kFenceFarRefreshMs: zoomed out, the lock
+        // waited for the GPU at most of 134 fence draws a frame (NoteFenceGroup's lock had paid that wait before)
+        const DWORD tick = GetTickCount();
+        if (last != g_groupAtPlace.end() && last->second->ok && GroupCentreFar(*last->second)) {
+            const auto r = g_groupPlaceRead.find(place);
+            if (r != g_groupPlaceRead.end() && tick - r->second < kFenceFarRefreshMs) {
+                if (!kPublicBuild) g_groupFarKept++;
+                vb->Release();
+                return last->second;
+            }
+        }
         // draw_reads_nowait: a place read before does not wait for the GPU; while the buffer is busy the group last read there
         // stays in use and the next draw tries again (three busy answers: it waits, as before)
         uint8_t* busy = nullptr;
@@ -5650,6 +5682,7 @@ const GroupCentre* InstancedGroupCentre(IDirect3DDevice9* dev) {
                 if (!g.ok) g.all.clear();
             }
             g_groupAtPlace[place] = &g;
+            g_groupPlaceRead[place] = tick;
             if (g.ok) result = &g;
         }
         if (p) vb->Unlock();
@@ -10498,9 +10531,9 @@ void LogDrawCost() {
             if (g_fenceStepCalls[s])
                 arch += std::format(" | of it the fence {}: {:.0f} a frame, {:.2f} us each", kStep[s], g_fenceStepCalls[s] * scale,
                                     static_cast<double>(g_fenceStepTicks[s]) * msPerTick * 1000.0 / g_fenceStepCalls[s]);
-        arch += std::format(" | fence grid built {} times, its gaps {} times, {} groups; {} of {} fence draws kept a far group's key", g_fenceGridBuilds, g_fenceGapBuilds,
-                            g_fenceGroups.size(), g_fenceFarKept, g_fenceNoted);
-        g_fenceFarKept = 0, g_fenceNoted = 0;
+        arch += std::format(" | fence grid built {} times, its gaps {} times, {} groups; {} of {} fence draws kept a far group's key, {} its positions", g_fenceGridBuilds,
+                            g_fenceGapBuilds, g_fenceGroups.size(), g_fenceFarKept, g_fenceNoted, g_groupFarKept);
+        g_fenceFarKept = 0, g_fenceNoted = 0, g_groupFarKept = 0;
         g_fenceGridBuilds = 0, g_fenceGapBuilds = 0;
         for (int s = 0; s < 3; s++) g_fenceStepTicks[s] = 0, g_fenceStepCalls[s] = 0;
     }

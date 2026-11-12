@@ -286,8 +286,10 @@ fences for the game, not in the outside-wall copy. `DrawInstanced` notes each in
 read again every 60 s, dropped after 20 s unseen; with more than 4096 groups, after 2 s unseen). A group is keyed by
 every byte of its instance records and its mesh, not by its place in a buffer: the game refills its instance buffers,
 so a place held other pieces from one draw to the next and every draw made a new group. While a buffer is busy
-(`draw_reads_nowait`), the group last read at that place is used. A place whose group stands more than 60 m from the camera keeps its last group for 2 s
-without reading the buffer (zoomed out: 134 fence draws a frame at about 250 us each took the frame rate from 237 to 17). A group holds the mesh's box over the draw's vertex range (POSITION0 / w) and, per
+(`draw_reads_nowait`), the group last read at that place is used. A place whose group stands more than 60 m from the camera (its walls' box, or the positions last read there) keeps
+its last group and positions for 2 s without locking the buffer, in both reads (`NoteFenceGroup`, `InstancedGroupCentre`): zoomed
+out, 134 fence draws a frame waited for the GPU at the first lock, about 250 us each (237 to 17 fps); skipping one read moved
+the wait to the other. A group holds the mesh's box over the draw's vertex range (POSITION0 / w) and, per
 instance, its place (POSITION1) and turn (POSITION2 = cos, slope, sin; world = (px c - pz s, py + px k, px s + pz c) + place,
 VS_21C41B90 of F7 2026-10-13 11-50-47). Each piece becomes a wall along its longer side from its base to its top, so the
 shade follows each wall's own height (the lamp is tested over every wall's top). Posts (under 0.3 m both ways) and thick
