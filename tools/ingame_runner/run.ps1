@@ -225,7 +225,7 @@ function Keep-Speed {
 
 function Wait-LiveMode([string]$What) {
     Wait-Game $What $LoadTimeoutMin {
-        try { $s = Call-Agent 'game_state' $null 5000; return ($s.in_world -and $s.sub_state -eq 'LiveModeState' -and -not $s.modal) } catch { return $false }
+        try { $s = Call-Agent 'game_state' $null 5000; return ($s.in_world -and $s.sub_state -like 'LiveModeState*' -and -not $s.modal) } catch { return $false }
     } { Clear-Dialog }
 }
 

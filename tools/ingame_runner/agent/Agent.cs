@@ -367,7 +367,8 @@ namespace ApexTestAgent
 
         static void RequireLive()
         {
-            if (SubState() != "LiveModeState") throw new AgentException("not in live mode (state " + SubState() + ")");
+            string st = SubState(); if (st == null || !st.StartsWith("LiveModeState")) // a mod may subclass it (LiveModeStateEx)
+                throw new AgentException("not in live mode (state " + SubState() + ")");
         }
 
         static Vector3 Vec(Args a, string key)
