@@ -10,7 +10,7 @@
   "steps": [
     { "do": "speed", "speed": "normal" },
     { "do": "camera_jumps", "order": "far", "lots": 10, "dwellS": 10, "height": 25, "loops": 2 },
-    { "do": "wait", "minutes": 4.2 },
+    { "do": "wait", "minutes": 4.2, "measure": true },
     { "do": "stop_repros" }
   ]
 }
