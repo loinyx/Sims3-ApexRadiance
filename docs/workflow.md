@@ -251,7 +251,10 @@ Ask first exactly what was seen: where, time of day, season, which lot, a screen
    wrappers in `Game\Bin`, `Options.ini`, S3SS and old-build detection, the `[Config] Migration path:` line, every
    address and pattern found or missing (`[Addr]`), every hook attach and whether its target was already hooked
    (`[D3D]`), and shader patchers that found no expected pattern. Feature status lines are on each feature card and,
-   in developer mode, on the Developer page.
+   in developer mode, on the Developer page. Each start moves the previous session's log to `ApexRadiance_LOG.old.txt`
+   beside it (replacing the one before; not while another game process still writes the log). *Report a problem*
+   copies only `ApexRadiance_LOG.txt`: after a restart, send `ApexRadiance_LOG.old.txt` too. Long room solves and the read-back callers have their own lines
+   ([features/frame-profiler.md](features/frame-profiler.md#related-log-lines)).
 2. **Crash:** `ApexRadiance_Crash.txt` and `ApexRadiance_Crash.dmp` in the same folder (exception, registers, modules,
    the features that were on).
 3. **Report a problem** (menu page): saves the log, the settings, recordings and captures into a dated folder under

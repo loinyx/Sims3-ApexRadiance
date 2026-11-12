@@ -591,7 +591,7 @@ Columns (render-thread values are self ms, as in the hitch blocks; empty = unkno
 | `scene_nodes`, `scene_deferred` | Render thread: nodes the scene pending-node drain added this frame, and nodes the scene node budget left queued |
 | `tex_loads`, `tex_mb` | DDS texture loads that reached the create call this frame on any thread, and their size (whole mip chain, MB, estimated from the format) |
 | `page_faults` | The process's page faults during the frame (soft and hard) |
-| `rtd_calls`, `rtd_ms` | `IDirect3DDevice9::GetRenderTargetData` calls this frame on any thread (the game's and Apex's GPU-to-CPU copies) and the wall time of the call alone (QPC, ms). Under DXVK the call only marks the surface for read-back (`SetNeedsReadback`), so `rtd_ms` stays near 0 and the GPU wait lands at the game's later lock (`0x00618DF0`: the self time of the category that runs it, and `smp_system`; see the [Faster Sim Building history](../history/performance-fast-cas-sort.md)). Through the RTX Remix bridge the call itself blocks (about 1.9 ms a frame in live play); with a native driver, unverified. Not an extra category: the time is already in the self time of the category that made the call. Counted in `ExtraHooks`' detour while the profiler is on (`CountGetRenderTargetData`; off: one atomic load per call). Empty while that detour is not installed: it comes with *High-precision scene* (Banding Fix), the no-scene trace or the RTX Remix bridge's trace detours |
+| `rtd_calls`, `rtd_ms` | `IDirect3DDevice9::GetRenderTargetData` calls this frame on any thread (the game's and Apex's GPU-to-CPU copies) and the wall time of the call alone (QPC, ms). Under DXVK the call only marks the surface for read-back (`SetNeedsReadback`), so `rtd_ms` stays near 0 and the GPU wait lands at the game's later lock (`0x00618DF0`: the self time of the category that runs it, and `smp_system`; see the [Faster Sim Building history](../history/performance-fast-cas-sort.md)). Through the RTX Remix bridge the call itself blocks (about 1.9 ms a frame in live play); with a native driver, unverified. Not an extra category: the time is already in the self time of the category that made the call. Counted in `ExtraHooks`' detour while the profiler is on (`CountGetRenderTargetData`; off: one atomic load per call, but numbered development builds always count), which also logs the callers ([Related log lines](#related-log-lines)). Empty while that detour is not installed: it comes with *High-precision scene* (Banding Fix), the no-scene trace or the RTX Remix bridge's trace detours |
 | `mod_dispatches` | Outermost registry dispatches booked as *D3D hooks (mod)* this frame; with `mod_sampled` = 1 an estimate (each timed dispatch counts 16) |
 | `mod_sampled` | 1 while `PerfToggles::SampledDispatchTiming` is on: one outermost dispatch in 16 is timed and booked 16 times, so in this row *D3D hooks (mod)*, *Re-issued draw (driver)*, the self time of *Render frame (game)*, `mod_dispatches` and `Unattributed` are estimates (one long sampled dispatch can push the categories' sum over `frame_ms`, and `Unattributed` is then clamped to 0). Averages over many rows stay unbiased. A measurement preset turns it off (every dispatch timed): rows are exact only then |
 | `reg_timing` | 1 while per-hook registry timing is on: it adds its own cost to *D3D hooks (mod)* |
@@ -622,6 +622,52 @@ Before trusting `yaw_change_deg`, `eye_target_m` and the moving / still hitch ra
 pan, then orbit, then zoom, each alone, about 10 seconds each, with the profiler on. A pan moves both the eye and
 the target; if an orbit and a zoom move the eye with `target_move_m` about 0 and `camera` 0, the scoring point is the
 orbit target (this settles the unverified point above); a zoom then changes `eye_target_m`, an orbit `yaw_change_deg`.
+
+### Related log lines
+
+Two instruments outside the profiler write to `ApexRadiance_LOG.txt`. Neither changes the call it measures.
+
+**Slow room step** (`features/lot_lighting_motion.cpp`, every build, while Lot Lighting While Moving is on):
+`[LotLightingMotion] Slow room step: lot pass, room 3 class 2, lot <16 hex digits>, story 1, 136.5 ms, budget 15.00 -> 3.00 ms, 11029 page faults`.
+One line per story solve of the lot lighting update (0x00ADB8F0) that ends 20 ms or more past the update's budget, at
+most 5 lines in 10 s; the next line logged ends with "(N more not logged before)". A solve runs until the update's
+stopwatch reaches the budget, so a long solve inside a large budget (a loading lot's 30 ms, a lamp edit's 25 ms, tool
+mode's 1000 ms) is by design and not logged.
+
+| Field | Meaning |
+|---|---|
+| `lot pass` | Where: the lot lighting update's per-story solve (this profiler's *Lot room solve*) |
+| `room` | The light tree's current room at the solve's start (id, LOD class) when it belongs to the updated lot; `-` otherwise (the solve then ran the story's other dirty rooms or its wall shading) |
+| `lot` | The updated lot (`[[manager+0x14]+0x48 / +0x4C]`) |
+| `story` | That room's story; `-` with the room |
+| ms | The update's own stopwatch between the read before the solve (or the budget call) and the read after it: the CALL at 0x00ADB9BA, 13 bytes after the solve's CALL 0x00ADB9AD, which stays this profiler's counter |
+| `budget` | The game's budget and the one Lot Lighting While Moving returned, at this update's budget call (per thread) |
+| `page faults` | The process's `PageFaultCount` across the solve (every thread's; numbered development builds only, `unknown` elsewhere or when unreadable) |
+
+**GetRenderTargetData callers** (`framework/d3d9_extra_hooks.cpp`, developer build only; while the profiler counts, and
+always in numbered development builds; only while the render-target detour is installed, see `rtd_calls` above):
+`[ExtraHooks] GetRenderTargetData callers in the last 10 s: TS3W.exe+0x2DFF4A 412 calls 1130.2 ms; ...`. The detour
+tallies calls and their QPC time by return address (module + offset; 16 callers, then "N calls from other callers")
+and logs the 4 costliest about every 10 s.
+
+On Steam 1.67.2, every call from the game's render-target copy 0x00610660 (thiscall, ret 0x18) returns to
+`TS3W.exe+0x210762`. That function takes render target 0 (GetRenderTarget), copies it with GetRenderTargetData at 0x00610760 when
+the destination's flag (`+0x20`, bit 8; meaning unverified) is set, else with StretchRect, and checks for a lost device.
+It has nine direct callers, so the detour tallies such a call by 0x00610660's own return address instead (the stack slot
+0x98 bytes above the detour's return address: the 3 arguments, 3 saved registers and 0x7C bytes of locals). Of those callers, the pick
+readback returns to `TS3W.exe+0x2DFF4A`, the lot impostor textures (LotLODCreator, 0x00ADE069) to `TS3W.exe+0x6DE06E`
+and the texture compositor (0x005FDDA0) to `TS3W.exe+0x1FDDA5`. By static reading of `TS3W.exe`, the pick readback is
+the copy that runs every other frame during play; the impostor and compositor copies can run during play too (how
+often is unverified):
+
+- Scene::BeginFrame calls the pick manager's per-frame update 0x006DFEC0 at 0x006EBC62 (manager `[scene+0x38]`;
+  skipped while `[scene+0x2A2]`).
+- `RenderPickDelayReadback` (GraphicsRules.sgr sets 1 for every card level) is stored in the manager's `+0x16` at
+  0x006DF17D. With it on, one update renders the pick target and sets `+0x14`; the next reads it back
+  (0x006DFF45 -> 0x00610660) and stores the result flag in `+0x15`. A new pick is rendered only after that flag is
+  cleared, so the read-back runs at most every other frame.
+- The texture compositor (Sim building) calls GetRenderTargetData itself in 0x005FBCE0 (return `TS3W.exe+0x1FBD75`).
+- Apex's own read-backs (developer tools, recordings, GPU room lamp self-checks) return into `ApexRadiance.asi`.
 
 ### UI
 
@@ -663,7 +709,8 @@ The card *Frame times and stutters* (Developer > Performance) has the on switch 
 | | `RenderUI`, `RenderLive`, `RenderHitches`, `RenderKeyed`, `RenderSampling`, `RenderAdvanced` | UI |
 | `features/address_space.{h,cpp}` | `Start`, `Stop`, `ReportText` | address-space monitor |
 | `framework/d3d9_hooks.cpp` | `Run`, `RunList`, `CountCall`, `ReadStateCallCounts`, `OffThreadDispatches` | mod D3D time, per-name timing, state-call counts |
-| `framework/d3d9_extra_hooks.cpp` | `CountGetRenderTargetData`, `TakeGetRenderTargetData` | the timeline's `rtd_calls` and `rtd_ms` |
+| `framework/d3d9_extra_hooks.cpp` | `CountGetRenderTargetData`, `TakeGetRenderTargetData`, `NoteRtdCaller` | the timeline's `rtd_calls` and `rtd_ms`; the callers' log line |
+| `features/lot_lighting_motion.cpp` | `Hook_SolveElapsed`, `NoteUpdateStart`, `LogSlowStep` | the slow room step log line |
 | `features/room_light_queue.cpp` | `DrainMicros`, `EditBurstOn` | the timeline's `drain_ms` and `lamp_edit` |
 | `framework/game_addresses.*` | ids `ResFindProvider` .. `RemoteMethodVtable2`, `TexCreateCall`, `TexFillCall` | counter addresses |
 | `apex_gui.cpp` | `DevProfilerTab` | the Developer card |

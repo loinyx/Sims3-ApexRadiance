@@ -577,7 +577,8 @@ the outermost layer's hook, written with `WriteCodeSuspended`; removing the last
 Site: `Scene::BeginFrame` (`0x006EBB70`)'s CALL at `0x006EBC49` of the pending-node drain `0x006E4130`; layers 0 Frame
 Profiler ("Scene pending nodes"), 1 SceneBudget (Spread New Objects Over Frames).
 
-Lot Lighting While Moving rewrites its CALL at `0x00ADB95D` with `WriteCodeSuspended`; the Frame Profiler keeps its own
+Lot Lighting While Moving rewrites its CALLs at `0x00ADB95D` (the budget) and `0x00ADB9BA` (the stopwatch read after
+each solve, for the slow room step log line) with `WriteCodeSuspended`; the Frame Profiler keeps its own
 copy of that routine (`WriteCallSuspended`). Details of the performance sites: [features/performance/README.md](features/performance/README.md).
 
 ---
@@ -682,7 +683,8 @@ are documented in [ui.md](ui.md). Menu changes follow the [apex-menu](../.agents
 
 ## 6. Logger and crash report
 
-**Log** ([framework/apex_log.cpp](../framework/apex_log.cpp)): `ApexRadiance_LOG.txt`, truncated at each start, header
+**Log** ([framework/apex_log.cpp](../framework/apex_log.cpp)): `ApexRadiance_LOG.txt`, truncated at each start (the previous one is kept as
+`ApexRadiance_LOG.old.txt` unless another game process still writes it), header
 "Apex Radiance Log". Levels `Debug < Info < Warning < Error < Critical` (`LOG_DEBUG` ... `LOG_CRITICAL`).
 
 - Lines are queued in memory and written by a writer thread at most every 0.5 s (`kWriteIntervalMs = 500`). Warnings

@@ -51,7 +51,9 @@ HRESULT RawGetRenderTarget(IDirect3DDevice9* device, DWORD index, IDirect3DSurfa
 #ifndef APEX_NO_DEV_TOOLS
 // Development builds (the Frame Profiler's per-frame timeline): while counting is on, the GetRenderTargetData detour adds
 // up its calls and their QueryPerformanceCounter time (off: one relaxed atomic load per call). Take returns both since
-// its last call and starts over; false while the render-target detours are not installed (nothing is counted).
+// its last call and starts over; false while the render-target detours are not installed (nothing is counted). The same
+// calls are tallied by return address and the 4 costliest callers logged about every 10 s ("[ExtraHooks]
+// GetRenderTargetData callers"); numbered development builds count and log them with the profiler off too.
 void CountGetRenderTargetData(bool on);
 bool TakeGetRenderTargetData(DWORD& calls, LONGLONG& qpcTicks);
 #endif

@@ -12,6 +12,9 @@
 // Camera motion: the camera eye ([[root]+0x24]+0x60, the same read WorldManager::Update does at 0x00C6D5C9), sampled at
 // each budget call and once per frame (Present) while this feature or the wall shading gate below is on, and at each
 // Scene::BeginFrame drain while the scene node budget (features/scene_budget.h) is on (SampleCameraMoving).
+// While on, it also logs each story solve of the update that ends 20 ms or more past the update's budget ("Slow room step:
+// lot pass, ..."; at most 5 lines in 10 s), timed by the update's own stopwatch read after the solve (CALL 0x00ADB9BA),
+// whose value is passed on as it is.
 #include <string>
 
 namespace LotLightingMotion {

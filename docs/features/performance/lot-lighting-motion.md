@@ -174,6 +174,9 @@ frame's shared budget leaves.
 
 ### The patch
 
+- The 5 bytes of the CALL at 0x00ADB9BA (the stopwatch read after each solve, 0x004F33C0) become
+  `call Hook_SolveElapsed`. It only logs `Slow room step` when one solve ends 20 ms or more past its budget (at most 5
+  lines in 10 s); budgets and solves are unchanged. Restored the same way.
 - The 5 bytes of the CALL at 0x00ADB95D become `call Hook_LotLightBudget` (`MemPatch::WriteCodeSuspended`; restored the
   same way, only if it still points to Apex's hook). Start checks that the CALL reaches 0x00ADB120 and that the next
   instruction reads ST0 (`D9` / `DD`).

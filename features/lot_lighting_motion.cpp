@@ -29,8 +29,9 @@
 //   inside them; restored the same way). The hook calls 0x00ADB120 and returns, in ST0 (a float return), either the
 //   game's value or, while the camera moves, max(floor, min(game, game x budgetMs / 15)): floor 0.25, and game x 3/15
 //   for a loading lot (the game's 30 / 10 ms budgets, chosen by [this+0x4F]). Budgets >= 100 ms (tool mode) are never
-//   changed. No other code is touched: the Frame Profiler's lot lighting targets (the entry of 0x00ADB8F0 and
-//   the CALL 0x00ADB9AD) are other bytes, and it keeps timing (the room solves receive the scaled budget).
+//   changed. The only other CALL of the update rewritten is the stopwatch read after each solve (0x00ADB9BA, the slow room
+//   step log, below). The Frame Profiler's lot lighting targets (the entry of 0x00ADB8F0 and the CALL 0x00ADB9AD) are
+//   other bytes, and it keeps timing (the room solves receive the scaled budget).
 //
 // ---- Wall shading gate (feature "WallShadingWhileMoving"; research\engine_map\full.asm, Steam 1.67.2) ----
 //   0x006A8BA0 (one lot level, from the lot lighting update above) calls, if [lvl+0x88] >= 0, vfunc +0xC of its two
@@ -79,6 +80,7 @@
 #include "tester_toggles.h"
 #include "perf_toggles.h"
 #include <windows.h>
+#include <psapi.h>
 #include <intrin.h>
 #include <algorithm>
 #include <atomic>
@@ -87,6 +89,7 @@
 #include <cstring>
 #include <format>
 #include <mutex>
+#include <utility>
 
 
 namespace LotLightingMotion {
@@ -189,6 +192,124 @@ __declspec(naked) void LotBuildStub() {
 }
 std::atomic<uint32_t> g_lastGame{0}, g_lastOut{0}; // float bits
 
+// ---- Slow room steps (a log line only; no budget or solve changes) ----
+// The lot lighting update reads its stopwatch after each story's solve: the CALL 13 bytes after the solve's CALL
+// 0x00ADB9AD (0x00ADB9BA -> 0x004F33C0, thiscall(stopwatch) -> ST0, ms; the solve's CALL is the Frame Profiler's "Lot room
+// solve" counter and stays the game's). That CALL goes through Hook_SolveElapsed: the time since the last reading (or since
+// the budget call) is one solve, and one that ends kSlowStepMs or more past the update's budget is logged with the updated
+// lot, the light tree's current room when it is of that lot, the update's budget and the process page faults across it. A
+// solve runs until the stopwatch reaches the budget, so a long step inside a large budget (a loading lot's 30 ms, a lamp
+// edit's 25, tool mode's 1000) is by design and not logged.
+using ElapsedFn = float(__fastcall*)(void* stopwatch, void* edx);
+constexpr float kSlowStepMs = 20.0f;
+constexpr int kSlowLinesPer10s = 5;
+uintptr_t g_stepSite = 0, g_elapsedFn = 0; // the CALL and the stopwatch read it reaches (constant once set)
+uint8_t g_stepOrig[5] = {};
+std::atomic<bool> g_stepOn{false}; // the CALL reaches Hook_SolveElapsed (changed under g_ctrl)
+struct StepMark {
+    float atMs;       // the stopwatch at the step's start
+    DWORD faults;     // the process page faults then
+    uint64_t lot;     // the updated lot (0: unreadable)
+    const BYTE* room; // the light tree's current room then
+    float game, out;  // the update's budget: the game's, and the one Hook_LotLightBudget returned
+};
+thread_local StepMark t_step{}; // the update running on this thread (render thread, or a lot impostor build)
+std::mutex g_slowMx;
+uint64_t g_slowWindow = 0; // under g_slowMx, as the two below
+int g_slowLines = 0;
+long g_slowDropped = 0;
+
+DWORD PageFaults() { // numbered development builds only: one kernel call per budget call and stopwatch read (0: unread)
+#ifdef APEX_DEVELOPMENT_BUILD_FLAVOR
+    PROCESS_MEMORY_COUNTERS pmc{};
+    return GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof pmc) ? pmc.PageFaultCount : 0;
+#else
+    return 0;
+#endif
+}
+
+// [[root]+0x1C0] light manager, +0xD4 its tree, +0x74 the current room (docs/engine/room-light-maps.md); root = the camera's
+const BYTE* CurrentRoom() {
+    if (!g_camReady.load(std::memory_order_acquire)) return nullptr;
+    __try {
+        const uintptr_t root = *reinterpret_cast<const uintptr_t*>(g_rootGlobal);
+        const uintptr_t mgr = root ? *reinterpret_cast<const uintptr_t*>(root + 0x1C0) : 0;
+        const uintptr_t tree = mgr ? *reinterpret_cast<const uintptr_t*>(mgr + 0xD4) : 0;
+        return tree ? *reinterpret_cast<const BYTE* const*>(tree + 0x74) : nullptr;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return nullptr;
+    }
+}
+
+// The lot lighting manager's lot ([[mgr+0x14]+0x48 / +0x4C], as 0x00ADB120 reads it)
+uint64_t LotOfUpdate(const void* mgr) {
+    __try {
+        const BYTE* lot = *reinterpret_cast<const BYTE* const*>(static_cast<const BYTE*>(mgr) + 0x14);
+        return lot ? static_cast<uint64_t>(*reinterpret_cast<const uint32_t*>(lot + 0x4C)) << 32 | *reinterpret_cast<const uint32_t*>(lot + 0x48) : 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+
+// Room id +0x0C, LOD class +0xF4; its story manager +0x00: story +0x88, lot +0x90 / +0x94
+bool ReadRoom(const BYTE* room, int& id, int& cls, int& story, uint64_t& lot) {
+    if (!room) return false;
+    __try {
+        const BYTE* m = *reinterpret_cast<const BYTE* const*>(room);
+        if (!m) return false;
+        id = *reinterpret_cast<const int*>(room + 0x0C);
+        cls = *reinterpret_cast<const int*>(room + 0xF4);
+        story = *reinterpret_cast<const int*>(m + 0x88);
+        lot = static_cast<uint64_t>(*reinterpret_cast<const uint32_t*>(m + 0x94)) << 32 | *reinterpret_cast<const uint32_t*>(m + 0x90);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// At most kSlowLinesPer10s lines in 10 s; the next line logged counts the ones left out
+void LogSlowStep(const StepMark& s, float ms, DWORD faultsNow) noexcept {
+    try {
+        int id = 0, cls = 0, story = 0;
+        uint64_t roomLot = 0;
+        const bool ofLot = s.lot && ReadRoom(s.room, id, cls, story, roomLot) && roomLot == s.lot;
+        const uint64_t now = GetTickCount64();
+        long dropped = 0;
+        {
+            std::lock_guard<std::mutex> lock(g_slowMx);
+            if (now - g_slowWindow >= 10000) {
+                g_slowWindow = now;
+                g_slowLines = 0;
+            }
+            if (++g_slowLines > kSlowLinesPer10s) {
+                g_slowDropped++;
+                return;
+            }
+            dropped = std::exchange(g_slowDropped, 0);
+        }
+        LOG_INFO(std::format("[LotLightingMotion] Slow room step: lot pass, room {}, lot {:016X}, story {}, {:.1f} ms, budget {:.2f} -> {:.2f} ms, {} page faults{}",
+                             ofLot ? std::format("{} class {}", id, cls) : std::string("-"), s.lot, ofLot ? std::to_string(story) : std::string("-"), ms, s.game, s.out,
+                             faultsNow && s.faults ? std::to_string(faultsNow - s.faults) : std::string("unknown"),
+                             dropped ? std::format(" ({} more not logged before)", dropped) : std::string()));
+    } catch (...) {
+    }
+}
+
+// The budget call starts an update (its stopwatch started just before it); Hook_LotLightBudget sets out where it changes it
+void NoteUpdateStart(const void* mgr, float game) { t_step = {0.0f, PageFaults(), LotOfUpdate(mgr), CurrentRoom(), game, game}; }
+
+float __fastcall Hook_SolveElapsed(void* stopwatch, void* edx) {
+    const float at = reinterpret_cast<ElapsedFn>(g_elapsedFn)(stopwatch, edx);
+    if (g_stepOn.load(std::memory_order_acquire)) {
+        const DWORD faults = PageFaults();
+        if (at - std::max(t_step.atMs, t_step.out) >= kSlowStepMs) LogSlowStep(t_step, at - t_step.atMs, faults);
+        t_step.atMs = at;
+        t_step.faults = faults;
+        t_step.room = CurrentRoom();
+    }
+    return at;
+}
+
 // ---- wall shading gate ----
 using AoStepFn = int(__fastcall*)(void* solver, void* edx, void* stopwatch, uint32_t budgetBits);
 constexpr uint64_t kFrameFallbackMs = 33;   // no Present for kNoPresentMs: a "frame" is this long
@@ -276,6 +397,7 @@ std::atomic<uint32_t> g_drainSpent{0}; // float bits: Faster room lighting's dra
 std::atomic<long> c_spreadCapped{0};
 float __fastcall Hook_LotLightBudget(void* mgr, void* edx) {
     const float game = reinterpret_cast<BudgetFn>(g_budgetFn)(mgr, edx);
+    if (g_stepOn.load(std::memory_order_relaxed)) NoteUpdateStart(mgr, game);
     // (14/10, drag solves) the flush once a dragged lamp is still (the rooms that waited for the stop, the sends left out):
     // the frame's solves together stay under the spread cap, with no edit boost; the lot being played gets what the drain
     // left of it, the others the least (DragLite::SolveCapMs); a loading lot never below FloorMs
@@ -285,13 +407,16 @@ float __fastcall Hook_LotLightBudget(void* mgr, void* edx) {
         c_spreadCapped.fetch_add(1, std::memory_order_relaxed);
         g_lastGame.store(std::bit_cast<uint32_t>(game), std::memory_order_relaxed);
         g_lastOut.store(std::bit_cast<uint32_t>(out), std::memory_order_relaxed);
+        t_step.out = out;
         return out;
     }
     // (2.13.1) while the lamps' own rooms take the edit budget after a drag (no spread cap: DragLite::OwnRoomsWaiting), the
     // other lots keep the least, as under the cap
     if (game > 0.0f && game < kPriorityMs && TesterToggles::dragSpreadCap.load(std::memory_order_relaxed) && DragLite::OwnRoomsWaiting() &&
-        DragLite::Settling())
-        return std::min(game, FloorMs(game));
+        DragLite::Settling()) {
+        t_step.out = std::min(game, FloorMs(game));
+        return t_step.out;
+    }
     if (!g_on.load(std::memory_order_acquire)) return game;
     c_calls.fetch_add(1, std::memory_order_relaxed);
     const uint64_t now = GetTickCount64();
@@ -360,6 +485,7 @@ float __fastcall Hook_LotLightBudget(void* mgr, void* edx) {
     if (RoomLightQueue::Refining() && game > 0.0f && game < kLeaveAloneMs) out = std::min(out, std::max(kMinMs, std::min(game, kRefineMs)));
     g_lastGame.store(std::bit_cast<uint32_t>(game), std::memory_order_relaxed);
     g_lastOut.store(std::bit_cast<uint32_t>(out), std::memory_order_relaxed);
+    t_step.out = out;
     return out;
 }
 
@@ -696,6 +822,24 @@ bool Start(std::string* error) {
         }
         if (!g_buildOn) LOG_WARNING(std::format("[LotLightingMotion] Lot build slice left as it is (the code at {:#010x} differs or could not be written)", site));
     }
+    // the slow room step log (optional part): "jmp +2; fstp st0; lea ecx,[esp+disp8]; call stopwatch read" after the solve's CALL
+    if (!g_stepOn.load() && GameAddr::Have({GameAddr::Id::RoomSolveCall, GameAddr::Id::StopwatchElapsed})) {
+        const uintptr_t solve = GameAddr::Get(GameAddr::Id::RoomSolveCall), site = solve + 13;
+        uint8_t b[5] = {};
+        const uintptr_t target = MatchBytes(solve + 5, "EB 02 DD D8 8D 4C 24 ?? E8") && MemPatch::ReadBytes(site, b, 5) ? CallTargetOf(b, site) : 0;
+        if (target == reinterpret_cast<uintptr_t>(&Hook_SolveElapsed)) {
+            g_stepOn.store(true); // left in place by a Stop that could not restore it
+        } else if (target && target == GameAddr::Get(GameAddr::Id::StopwatchElapsed)) {
+            g_elapsedFn = target;
+            g_stepSite = site;
+            std::memcpy(g_stepOrig, b, 5);
+            uint8_t c[5] = {0xE8};
+            const int32_t r = MemPatch::CalculateRelativeOffset(site, reinterpret_cast<uintptr_t>(&Hook_SolveElapsed));
+            std::memcpy(c + 1, &r, 4);
+            g_stepOn.store(MemPatch::WriteCodeSuspended(site, c, 5));
+        }
+        if (!g_stepOn.load()) LOG_INFO(std::format("[LotLightingMotion] Slow room steps not logged (the code at {:#010x} differs or could not be written)", site));
+    }
     g_started = true;
     UpdatePresentSampler();
     // the share caps each lot's slice through the stub above: without it the first lot would keep its whole slice
@@ -704,9 +848,10 @@ bool Start(std::string* error) {
     else if (!LotBuildShare::Start(&shareError)) LOG_WARNING("[LotLightingMotion] Shared lot build time left off: " + shareError);
     else if (!g_presentRegistered) LOG_WARNING("[LotLightingMotion] Shared lot build time: no per-frame sample, a frame is taken as 50 ms");
     LOG_INFO(std::format("[LotLightingMotion] On: the call at {:#010x} to the lot lighting budget {:#010x} goes through Apex; camera eye [[{:#010x}]+{:#x}]+{:#x}; "
-                         "budget while moving {} ms for the current lot; lot build slice {}",
+                         "budget while moving {} ms for the current lot; lot build slice {}{}",
                          call, budget, g_rootGlobal, g_camOff, g_eyeOff, g_budgetMs.load(),
-                         g_buildOn ? std::format("{} ms while moving ({:#010x})", kBuildMovingMs, g_buildSite) : std::string("left as it is")));
+                         g_buildOn ? std::format("{} ms while moving ({:#010x})", kBuildMovingMs, g_buildSite) : std::string("left as it is"),
+                         g_stepOn.load() ? std::format("; room solves of {:.0f} ms or more logged ({:#010x})", kSlowStepMs, g_stepSite) : std::string()));
     return true;
 }
 
@@ -727,6 +872,13 @@ void Stop() {
     if (g_buildOn) {
         if (MemPatch::WriteCodeSuspended(g_buildSite, g_buildOrig, 5)) g_buildOn = false;
         else LOG_ERROR(std::format("[LotLightingMotion] Could not restore the lot build slice at {:#010x}; it stays on Apex's stub, which keeps the game's budget now", g_buildSite));
+    }
+    if (g_stepOn.load()) {
+        uint8_t b[5] = {};
+        if (MemPatch::ReadBytes(g_stepSite, b, 5) && b[0] == 0xE8 && CallTargetOf(b, g_stepSite) == reinterpret_cast<uintptr_t>(&Hook_SolveElapsed) &&
+            !MemPatch::WriteCodeSuspended(g_stepSite, g_stepOrig, 5))
+            LOG_ERROR(std::format("[LotLightingMotion] Could not restore the stopwatch read at {:#010x}; it stays on Apex's wrapper, which only passes it on now", g_stepSite));
+        g_stepOn.store(false); // (rewritten by another module after Apex: left as it is, the wrapper passes it on)
     }
     g_started = false;
     UpdatePresentSampler();
