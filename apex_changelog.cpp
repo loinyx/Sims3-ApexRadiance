@@ -6,6 +6,9 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k312Added[] = {
+    "Display: a switch to turn off G-SYNC for the game",
+    nullptr};
 constexpr const char* k312Improved[] = {
     "Night Lights: lots that leave full detail keep their lamp light on the ground",
     "Night Lights: the glow under lamp posts shows up sooner when you enter a lot",
@@ -559,7 +562,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
-    {"3.1.2", "2026-11-12", nullptr, k312Improved, k312Fixed, "Smoother camera, and lamp light that stays put around town"},
+    {"3.1.2", "2026-11-12", k312Added, k312Improved, k312Fixed, "Smoother camera, and lamp light that stays put around town"},
     {"3.1.1", "2026-11-11", nullptr, k311Improved, k311Fixed, "Better compatibility with the RTX Remix bridge, and fewer crashes"},
     {"3.1.0", "2026-11-10", k310Added, k310Improved, k310Fixed,
      "A frame-rate limit and window modes, a new Overview with game memory, and fences dark behind walls", k310Highlights},

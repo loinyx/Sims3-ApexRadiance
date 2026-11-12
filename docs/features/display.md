@@ -4,13 +4,14 @@ Window mode, resolution and a frame-rate limiter, in System > Display. The game 
 the whole monitor, or in exclusive fullscreen at the monitor's highest refresh rate, at the game's resolution or a
 chosen one, which Apex sets through the game's own resolution change. The limiter caps the frame rate evenly, with a separate cap while another window is in front, and shows
 the measured rate and how much the frame time varies; an optional counter shows the frame rate in a corner of the screen. Both take precedence over Sims3SettingsSetter's borderless
-window and frame limiter when that mod is installed.
+window and frame limiter when that mod is installed. On NVIDIA graphics cards, *Turn off G-SYNC* turns variable refresh
+off for the game only, from its next start.
 
 ## Status
 
 | | |
 |---|---|
-| Availability | Released in 3.1.0. Resolution through the game's own resolution change (every build, EA app 1.69 included) and the game's exclusive fullscreen run as Borderless under the RTX Remix bridge: Released in 3.1.1 |
+| Availability | Released in 3.1.0. Resolution through the game's own resolution change (every build, EA app 1.69 included) and the game's exclusive fullscreen run as Borderless under the RTX Remix bridge: Released in 3.1.1. Turn off G-SYNC: Released in 3.1.2 |
 | Default | Game setting, no limit (nothing changes) |
 | Menu | System > Display |
 | Configuration | `[screen]` in `ApexRadiance.toml` (machine settings: not part of profiles) |
@@ -74,6 +75,24 @@ window and frame limiter when that mod is installed.
    game starts), and read again at every frame: if Sims3SettingsSetter rewrites it, Apex follows; if it holds neither
    target, Apex leaves it alone for the session.
 
+**Turn off G-SYNC** writes the NVIDIA driver's per-application G-SYNC setting (`VRR_APP_OVERRIDE`, `0x10A879CF`, named
+"G-SYNC" in NVIDIA's headers):
+
+1. On a worker thread, Apex loads `nvapi.dll` and opens a driver-settings session (NVAPI DRS). The switch stays
+   disabled until that works; without an NVIDIA driver, or on any NVAPI error, it stays disabled with a menu note,
+   nothing is changed and the log has the failing call and its status.
+2. Turned on, it sets the setting to *force off* (1) in the profile that holds the running game exe (`TS3W.exe` or
+   `TS3.exe`, looked up by its full path) and, when `.trex\NvRemixBridge.exe` exists beside the game, in the profile
+   of the RTX Remix bridge's server, which presents the frames. An exe that no profile holds gets a new profile,
+   *Apex Radiance <exe>*. The global profile and other programs are not touched.
+3. What each profile had before is kept in `[screen.gsync_restore]`: the user value to put back, -1 (no user value:
+   the setting is deleted, which also brings back a driver-predefined value) or -2 (Apex made the profile: it is
+   deleted). Turned off, or by Settings > Menu > Reset all, Apex puts each one back and forgets it. A failed session
+   saves nothing, and the switch then shows what the profiles still hold; a pending change is tried again at the next
+   start.
+4. The driver reads a profile when a program starts, so the change takes effect at the next game start. The switch is
+   not part of the Overview's Display switch or *Turn off Apex*.
+
 ## Settings
 
 | Menu label | TOML key | Type | Default | Range | Effect |
@@ -83,6 +102,7 @@ window and frame limiter when that mod is installed.
 | Frame-rate limit | `fps_limit` | integer | 0 | 0 (off) or 20 to 1000; menu: 30, 60, 120, 144, 165, 240, the monitor's rate minus 3, or Custom (20 to 500) | Live |
 | In the background | `background_fps_limit` | integer | 0 | 0 (same limit) or 5 to 1000; menu: 10, 15, 30, 60 | Applies while another window has the focus. Live |
 | Show FPS | `show_fps` | boolean | false | | A small white number (the average of the last 240 frames, updated every 30) in the top-left corner, menu open or closed; left out of Apex screenshots. Live |
+| Turn off G-SYNC | `gsync_off` | boolean | false | | G-SYNC forced off in the NVIDIA profiles of the game and the bridge's server; applies at the next game start. `gsync_restore` (exe name to value) holds what to put back and is written by Apex |
 
 Settings > Menu > Reset all puts these back to their defaults. The row *Measured* shows the frames per second and the
 standard deviation of the frame time over the last 240 frames. The Overview's frame-rate card counts as a hitch a
@@ -110,7 +130,8 @@ Apex rewrote, the window it applied and the Sims3SettingsSetter overrides.
   the game before it). DXVK's `d3d9.maxFrameRate` and `d3d9.presentInterval`, driver limiters and RTSS cannot be seen
   by Apex: use one limiter.
 - **V-Sync / variable refresh.** Apex does not change the presentation interval. With G-SYNC or FreeSync, the menu's
-  "monitor rate minus 3" entry keeps the frame rate inside the variable-refresh range.
+  "monitor rate minus 3" entry keeps the frame rate inside the variable-refresh range. *Turn off G-SYNC* changes only
+  the NVIDIA driver profiles above; FreeSync on AMD and Intel cards is not affected.
 - **Apex's effects.** They release and recreate their screen resources on every Reset as before.
 - A borderless window with a resolution below the monitor's is stretched by the swap chain; the game's mouse
   coordinates follow the window (unverified in game for every resolution). Until the game has switched to the chosen
@@ -127,6 +148,9 @@ Apex rewrote, the window it applied and the Sims3SettingsSetter overrides.
   are not limited.
 - In the background the game's own 10 ms sleep per frame also applies, so a background cap above about 90 fps has
   no effect.
+- *Turn off G-SYNC* is NVIDIA only and takes effect at the next game start. A change of the same setting made
+  meanwhile in NVIDIA's tools is overwritten when the switch is turned off (the kept value is put back). Unverified in
+  game.
 
 ## Technical reference
 
@@ -150,6 +174,10 @@ The Sims3SettingsSetter site is found by the pattern `3E 56 E8 ?? ?? ?? ?? 5E EB
 only when the call lands in Sims3SettingsSetter's module, so the Retail and EA builds are covered without addresses.
 Apex's replacement must be `__stdcall`: a `__cdecl` one left the argument on the stack and the render frame returned
 to it (crash at the first Present, 2026-11-09).
+
+NVAPI interface ids (`nvapi_QueryInterface`), structure layouts and status codes come from NVIDIA's public headers
+([NVIDIA/nvapi](https://github.com/NVIDIA/nvapi): `nvapi_interface.h`, `nvapi.h`, `nvapi_lite_common.h`); the
+setting id and values from `NvApiDriverSettings.h` (`VRR_APP_OVERRIDE_ID`, `VRR_APP_OVERRIDE_FORCE_OFF`).
 
 The schedule and its measurements are tested offline by [`tools/frame_limiter_test`](../../tools/frame_limiter_test).
 

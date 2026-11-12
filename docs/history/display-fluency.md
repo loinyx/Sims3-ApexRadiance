@@ -120,3 +120,14 @@ UI, in the top-left 1024x768 of the back buffer; the rest stayed black or kept o
   lists sizes from 1024x768, the game's own floor.
 - Not run in game yet ([validation](../validation/display.md#pending)).
 
+### 2026-11-12: Turn off G-SYNC
+
+**Context:** a switch to turn variable refresh off for the game on NVIDIA cards, for 3.1.2.
+
+**Finding:** the driver's per-application setting `VRR_APP_OVERRIDE` (`0x10A879CF`, value 1 = force off) and the DRS
+functions are public in NVIDIA's NVAPI headers, so the profile can be changed through `nvapi.dll` without linking
+NVIDIA's library. The RTX Remix bridge presents from `NvRemixBridge.exe`, so its profile needs the setting too.
+
+**Outcome:** kept. Apex sets the value in the profiles of the game exe and the bridge's server and keeps the previous
+state in its settings to put it back. The driver reads it at program start, so it applies after a restart. Not tested in
+game ([validation](../validation/display.md#pending)).
