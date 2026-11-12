@@ -15,6 +15,7 @@
 // Part of Apex Radiance. Credits: @loinyx
 
 #include "rt_outdoor_lamps.h"
+#include "build_flavor.h"
 #include "terrain_bake_rule.h"
 #include "rt_lamp_gpu.h"
 #include "drag_lite.h"
@@ -869,6 +870,67 @@ void ReleaseRetired(IDirect3DDevice9* dev, const char* why) {
     g_retiredLo = ~uintptr_t{0}, g_retiredHi = 0;
     LOG_INFO(std::format("[RtOutdoorLamps] {} relit maps of the lot left released ({}, {} ms after the switch)", n, why, GetTickCount() - g_retiredAt));
     g_retiredAt = 0;
+}
+// (developer) GPU against the game: every 10 s one relit map of the active lot is read back and compared texel by texel with
+// the game's own map of the same room 0, as its last solve wrote it (the copy is drawn instead of it; that the solve had the
+// same lamps on is not verified: a lamp edit since the solve differs by design). Where
+// the game's texel holds light, the copy's luma over the game's, and the texels at the top of the range on each side: the
+// data a calibration of the GPU lamps against the game's solve starts from. Render thread; a short GPU wait (one map).
+void CompareWithGame(IDirect3DDevice9* dev) {
+    static DWORD s_last = 0;
+    static size_t s_next = 0;
+    const DWORD now = GetTickCount();
+    if (kPublicBuild || !dev || g_slots.empty() || now - s_last < 10000) return;
+    s_last = now;
+    Slot* s = nullptr;
+    for (size_t i = 0; i < g_slots.size() && !s; i++) {
+        Slot* c = g_slots[(s_next + i) % g_slots.size()].get();
+        if (c->copy && c->game && c->relit && !c->mgr) s = c, s_next = (s_next + i + 1) % g_slots.size();
+    }
+    if (!s) return;
+    D3DSURFACE_DESC dc{}, dg{};
+    if (FAILED(s->copy->GetLevelDesc(0, &dc)) || FAILED(s->game->GetLevelDesc(0, &dg)) || dc.Width != dg.Width || dc.Height != dg.Height ||
+        dc.Format != D3DFMT_A8R8G8B8 || dg.Format != D3DFMT_A8R8G8B8)
+        return;
+    IDirect3DSurface9 *rt = nullptr, *sys = nullptr;
+    if (FAILED(s->copy->GetSurfaceLevel(0, &rt))) return;
+    if (FAILED(dev->CreateOffscreenPlainSurface(dc.Width, dc.Height, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &sys, nullptr)) || FAILED(dev->GetRenderTargetData(rt, sys))) {
+        if (sys) sys->Release();
+        rt->Release();
+        return;
+    }
+    rt->Release();
+    D3DLOCKED_RECT lc{}, lg{};
+    if (FAILED(sys->LockRect(&lc, nullptr, D3DLOCK_READONLY))) return void(sys->Release());
+    if (FAILED(s->game->LockRect(0, &lg, nullptr, D3DLOCK_READONLY))) {
+        sys->UnlockRect();
+        return void(sys->Release());
+    }
+    const auto luma = [](const BYTE* p) { return 0.0722 * p[0] + 0.7152 * p[1] + 0.2126 * p[2]; };
+    std::vector<double> ratios;
+    long lit = 0, topCopy = 0, topGame = 0;
+    double sumC = 0, sumG = 0;
+    for (UINT y = 0; y < dc.Height; y++) {
+        const BYTE* rc = static_cast<const BYTE*>(lc.pBits) + y * lc.Pitch;
+        const BYTE* rg = static_cast<const BYTE*>(lg.pBits) + y * lg.Pitch;
+        for (UINT x = 0; x < dc.Width; x++) {
+            const double g = luma(rg + 4 * x), c = luma(rc + 4 * x);
+            if (g < 8.0) continue; // (no light the game put there worth a ratio)
+            lit++, sumC += c, sumG += g;
+            ratios.push_back(c / g);
+            topCopy += std::max({rc[4 * x], rc[4 * x + 1], rc[4 * x + 2]}) >= 254;
+            topGame += std::max({rg[4 * x], rg[4 * x + 1], rg[4 * x + 2]}) >= 254;
+        }
+    }
+    s->game->UnlockRect(0);
+    sys->UnlockRect();
+    sys->Release();
+    if (ratios.empty()) return;
+    std::sort(ratios.begin(), ratios.end());
+    const auto pct = [&](double q) { return ratios[std::min(ratios.size() - 1, static_cast<size_t>(q * ratios.size()))]; };
+    LOG_INFO(std::format("[RtOutdoorLamps] GPU against the game: story {} {} class {} ({}x{}): {} lit texels, copy over game luma: mean {:.2f}, "
+                         "p10 {:.2f}, median {:.2f}, p90 {:.2f}; at the top of the range: copy {} texels, game {}",
+                         s->story, kMapName[s->m], s->cls, dc.Width, dc.Height, lit, sumG > 0 ? sumC / sumG : 0.0, pct(0.1), pct(0.5), pct(0.9), topCopy, topGame));
 }
 // ---- the lots next to the active one (render thread) ----
 // Their room-0 maps are relit with the active lot's lamp posts: their gathers leave those posts out (LevelLightShare::GatherLotId)
@@ -2783,6 +2845,7 @@ void Frame(IDirect3DDevice9* dev) {
     } else {
         Inactive("");
         ReleaseRetired(dev, "the new active lot is relit");
+        CompareWithGame(dev);
     }
     g_on.store(true);
     // ---- relight what changed ----
