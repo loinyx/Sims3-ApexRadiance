@@ -1,6 +1,6 @@
 {
   "id": "night-gpu-calibration",
-  "description": "Calibration data for the real-time outdoor lamps: at night the camera circles the household's lot (the active lot), then the gym and the square, while the developer log compares each relit map with the game's own map of the same room 0 every 10 s (RtOutdoorLamps \"GPU against the game\"). Developer mode on, the background frame limit lifted; needs a build with that comparison.",
+  "description": "Calibration data for the real-time outdoor lamps: at night the camera circles the household's lot (the active lot), then the gym and the square, while the developer log compares each relit map with the game's own map of the same room 0 every 10 s (RtOutdoorLamps \"GPU against the game\"). Developer mode on, the background frame limit lifted; needs a build with that comparison. Variants: the physical room lamp model (the default since 3.0.0) and the replica model (the parts of the game's own solve).",
   "save": "Claude teste",
   "toml": {
     "ui": {
@@ -11,7 +11,22 @@
     }
   },
   "variants": {
-    "on": {
+    "physical": {
+      "toml": {
+        "patches.NightTerrainRelight": {
+          "roomLampModel": "physical"
+        }
+      },
+      "expect": [
+        "\\[RtOutdoorLamps\\] GPU against the game"
+      ]
+    },
+    "replica": {
+      "toml": {
+        "patches.NightTerrainRelight": {
+          "roomLampModel": "replica"
+        }
+      },
       "expect": [
         "\\[RtOutdoorLamps\\] GPU against the game"
       ]
