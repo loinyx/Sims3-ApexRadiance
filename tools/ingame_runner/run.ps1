@@ -332,10 +332,8 @@ function Invoke-Load($Load, [string]$BaseToml) {
     else { $script:proc = Start-Process -FilePath $exe -WorkingDirectory $GameBin -PassThru }
     try {
         $script:mbox = New-Object ApexIngame.MailboxClient($script:proc.Id)
-        Wait-Agent $started $noApex
-        Wait-Game 'the main menu' 5 { try { Call-Agent 'game_state' $null 5000 | Out-Null; return $true } catch { return $false } }
-        Wait-MenuQuiet
-        # profilers attach here, at the menu (attaching in a world timed out), and record from the measured window on
+        # profilers attach right after the start, as sims3-modernization's harness attaches at launch: attaching in a world
+        # timed out, and attaching at the menu once hung the simulation thread; they record from the measured window on
         $script:preProf = $null
         if ($Profiler -ne 'None') {
             $i = 0
@@ -349,7 +347,7 @@ function Invoke-Load($Load, [string]$BaseToml) {
             }
         }
         # -Grab: screen-luma.js reads what the game draws (inside the game: a window capture gets black frames from the
-        # DXVK swap chain); attached here at the menu, sampling from live mode until the game is asked to quit
+        # DXVK swap chain); attached at the start too, sampling from live mode until the game is asked to quit
         $grabProc = $null
         $grabDir = Join-Path $dir 'grab'
         if ($Grab) {
@@ -359,6 +357,9 @@ function Invoke-Load($Load, [string]$BaseToml) {
             $grabProc = Start-Process -FilePath 'python' -NoNewWindow -PassThru -RedirectStandardOutput (Join-Path $dir 'grab.log') -RedirectStandardError (Join-Path $dir 'grab.err.log') `
                 -ArgumentList ($ga | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' })
         }
+        Wait-Agent $started $noApex
+        Wait-Game 'the main menu' 5 { try { Call-Agent 'game_state' $null 5000 | Out-Null; return $true } catch { return $false } }
+        Wait-MenuQuiet
         Call-Agent 'load_save' @{ file = "$($jobDef.save).sims3"; reload = $true } | Out-Null
         Say "$($Load.Name): loading $($jobDef.save)"
         Wait-LiveMode "the save $($jobDef.save)"
