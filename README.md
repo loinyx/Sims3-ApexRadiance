@@ -151,9 +151,11 @@ replaces. See [Apex Radiance Setup](docs/features/installer.md).
 ### Install or update by hand
 
 1. Close the game and launcher.
-2. Download `ApexRadiance.asi` from the [latest release](https://github.com/loinyx/Sims3-ApexRadiance/releases/latest).
-3. Copy it into `The Sims 3\Game\Bin\`, replacing the previous Apex Radiance file when updating.
+2. Download `Apex-Radiance-X.Y.Z-Manual-install.zip` from the [latest release](https://github.com/loinyx/Sims3-ApexRadiance/releases/latest) and open it.
+3. Follow `How to install.txt` inside: copy `ApexRadiance.asi` into `The Sims 3\Game\Bin\`, replacing the previous Apex Radiance file when updating.
 4. Load a world and press **Ctrl+Shift+F11** to open the menu.
+
+The release page also lists `ApexRadiance.asi` and `Apex-Radiance-RTX-Remix-bridge.zip` as files of their own: Apex Radiance Setup downloads them from there.
 
 Optional, experimental: copy `ts3wrap.exe` from the same release next to `ApexRadiance.asi` and add
 `restart_host = true` under `[ui]` in `ApexRadiance.toml`. After a save that leaves the game little free memory,

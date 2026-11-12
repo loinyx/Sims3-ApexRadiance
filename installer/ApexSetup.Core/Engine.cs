@@ -79,10 +79,24 @@ public sealed class GitHubSource : ISource
             case Components.Apex:
             {
                 var r = await Latest(Releases.Apex, ct);
-                files.Add((await Releases.DownloadAsync(r.Find(n => n == "ApexRadiance.asi"), _tmp, ct), Path.Combine(bin, "ApexRadiance.asi")));
-                // the restart host (Apex starts it only with [ui] restart_host on); releases before 3.1.3 have none
+                // the ASI as a file of its own (every release so far: Setups before 1.1.1 need it), else from the manual-install
+                // zip, so a later release can ship the zip alone
+                string? manualDir = null;
+                async Task<string?> FromManual(string name)
+                {
+                    if (manualDir is null && r.Assets.FirstOrDefault(a => a.Name.EndsWith("-Manual-install.zip", StringComparison.OrdinalIgnoreCase)) is { } z)
+                        manualDir = Releases.Unzip(await Releases.DownloadAsync(z, _tmp, ct));
+                    return manualDir is null ? null : Directory.EnumerateFiles(manualDir, name, SearchOption.AllDirectories).FirstOrDefault();
+                }
+                var asi = r.Assets.FirstOrDefault(a => a.Name == "ApexRadiance.asi") is { } own ? await Releases.DownloadAsync(own, _tmp, ct)
+                    : await FromManual("ApexRadiance.asi") ?? throw new InvalidOperationException($"{r.Repo} {r.Tag}: asset not found");
+                files.Add((asi, Path.Combine(bin, "ApexRadiance.asi")));
+                // the restart host (Apex starts it only with [ui] restart_host on): a file of its own in 3.1.3 and 3.1.4, inside
+                // the manual-install zip from 3.1.5; releases before 3.1.3 have none
                 if (r.Assets.FirstOrDefault(a => a.Name == "ts3wrap.exe") is { } wrap)
                     files.Add((await Releases.DownloadAsync(wrap, _tmp, ct), Path.Combine(bin, "ts3wrap.exe")));
+                else if (await FromManual("ts3wrap.exe") is { } inZip)
+                    files.Add((inZip, Path.Combine(bin, "ts3wrap.exe")));
                 return (files, r.Version);
             }
             case Components.Bridge:
