@@ -22,7 +22,7 @@ param(
     [switch]$KeepSaves,
     [switch]$InactiveIdle,
     [switch]$Lean,
-    [switch]$Grab, # read the game's picture all load long (profilers/screen-luma.js) and scan it for flashes (flash_scan.py)
+    [switch]$Grab, # record the game window all load long (profilers/grab.ps1) and scan it for flashes (flash_scan.py)
     [double]$GrabFps = 20,
     [switch]$DryRun,
     [string]$Restore
@@ -84,8 +84,8 @@ if (-not (Test-Path -LiteralPath $agent)) { throw "No test agent: run node tools
 $savesDir = Join-Path $GameDocuments 'Saves'
 if (-not (Test-Path -LiteralPath (Join-Path $GameDocuments 'Mods/Resource.cfg'))) { throw "No Mods\Resource.cfg in ${GameDocuments}: set up the Mods folder for script mods first (README)." }
 foreach ($j in $jobs) { if (-not (Test-Path -LiteralPath (Join-Path $savesDir "$($j.save).sims3"))) { throw "Job $($j.id): save '$($j.save).sims3' not found in $savesDir" } }
-# the picture reads cost the game frames (and share frame-times.js's hook): a timing run and a light run are separate
-if ($Grab -and $Profiler -ne 'None') { throw '-Grab and -Profiler are separate runs: reading the picture costs frames and would skew the timing.' }
+# the window recording costs the game frames: a timing run and a light run are separate runs
+if ($Grab -and $Profiler -ne 'None') { throw '-Grab and -Profiler are separate runs: the window recording costs frames and would skew the timing.' }
 if ($Profiler -ne 'None') {
     & python -c 'import frida' 2>$null
     if ($LASTEXITCODE -ne 0) { throw "-Profiler $Profiler needs Python with the frida package (pip install frida)." }
@@ -346,24 +346,16 @@ function Invoke-Load($Load, [string]$BaseToml) {
                 }
             }
         }
-        # -Grab: screen-luma.js reads what the game draws (inside the game: a window capture gets black frames from the
-        # DXVK swap chain); attached at the start too, sampling from live mode until the game is asked to quit
-        $grabProc = $null
-        $grabDir = Join-Path $dir 'grab'
-        if ($Grab) {
-            New-Item -ItemType Directory -Path $grabDir -Force | Out-Null
-            $ga = @((Join-Path $PSScriptRoot 'profilers/attach.py'), '--keep', '--start', "$grabDir\start", '--stop', "$grabDir\stop", $script:proc.Id, 86400,
-                (Join-Path $PSScriptRoot 'profilers/screen-luma.js'), (@{ out = ($grabDir -replace '\\', '/'); everyMs = [int](1000 / $GrabFps) } | ConvertTo-Json -Compress))
-            $grabProc = Start-Process -FilePath 'python' -NoNewWindow -PassThru -RedirectStandardOutput (Join-Path $dir 'grab.log') -RedirectStandardError (Join-Path $dir 'grab.err.log') `
-                -ArgumentList ($ga | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' })
-        }
-        Wait-Agent $started $noApex
-        Wait-Game 'the main menu' 5 { try { Call-Agent 'game_state' $null 5000 | Out-Null; return $true } catch { return $false } }
-        Wait-MenuQuiet
         Call-Agent 'load_save' @{ file = "$($jobDef.save).sims3"; reload = $true } | Out-Null
         Say "$($Load.Name): loading $($jobDef.save)"
         Wait-LiveMode "the save $($jobDef.save)"
-        if ($grabProc) { [IO.File]::WriteAllText("$grabDir\start", ''); Say "  reading the game's picture $GrabFps times a second into grab\" }
+        $grabProc = $null
+        if ($Grab) {
+            $grabProc = Start-Process -FilePath 'powershell' -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $dir 'grab.err.log') -ArgumentList @(
+                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + (Join-Path $PSScriptRoot 'profilers/grab.ps1') + '"'),
+                '-GamePid', $script:proc.Id, '-OutDir', ('"' + (Join-Path $dir 'grab') + '"'), '-Fps', $GrabFps)
+            Say "  recording the game window at $GrabFps frames a second into grab\"
+        }
         $lastSave = $null
         $n = 0
         foreach ($step in (Get-JobSteps $jobDef)) {
@@ -475,7 +467,6 @@ function Invoke-Load($Load, [string]$BaseToml) {
         }
         if ($measured) { Complete-Measured $measured $machine $notes } # a profile step's window may outlast the steps
         Say "$($Load.Name): closing the game"
-        if ($grabProc) { [IO.File]::WriteAllText("$grabDir\stop", ''); Start-Sleep -Seconds 2 } # close() writes the last rows
         try { Call-Agent 'quit_game' $null | Out-Null } catch { $notes.Add("quit_game: $($_.Exception.Message)") }
         if ($script:proc.WaitForExit(120000)) { $result.Closed = 'quit' }
         elseif ($script:proc.CloseMainWindow() -and $script:proc.WaitForExit(60000)) { $result.Closed = 'window closed' }
@@ -490,7 +481,7 @@ function Invoke-Load($Load, [string]$BaseToml) {
     Wait-Process -Id $script:proc.Id -Timeout 60 -ErrorAction SilentlyContinue
     if ($noApex -and (Test-Path -LiteralPath $asiOffPath)) { Move-Item -LiteralPath $asiOffPath -Destination $asiPath -Force }
     if ($grabProc) {
-        if (-not $grabProc.WaitForExit(30000)) { $grabProc.Kill() } # its session ends with the game
+        if (-not $grabProc.WaitForExit(30000)) { $grabProc.Kill() } # it ends with the game
         $scan = & python -I (Join-Path $PSScriptRoot 'profilers/flash_scan.py') (Join-Path $dir 'grab') 2>&1
         $scan | Set-Content -LiteralPath (Join-Path $dir 'flashes.txt') -Encoding UTF8
         Say "  $(@($scan)[-1])"
