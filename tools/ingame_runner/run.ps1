@@ -23,7 +23,7 @@ param(
     [switch]$InactiveIdle,
     [switch]$Lean,
     [switch]$Grab, # record the game window all load long (profilers/grab.ps1) and scan it for flashes (flash_scan.py)
-    [double]$GrabFps = 8,
+    [double]$GrabFps = 20, # as fast as PrintWindow allows on a 1440p window: about 20
     [switch]$DryRun,
     [string]$Restore
 )

@@ -4,6 +4,7 @@ comes back, which a camera move alone does not do (a pan changes the picture gra
 Usage: python flash_scan.py <grab dir> [--rise 22] [--back 0.35] [--max-frames 6]
 Writes flashes.csv (clock, frame, cells, the largest jump, frames until it came back) and, for each flash, the frame
 before, at and after it as flash-<n>-<frame>-{a,b,c}.jpg next to it; prints the strongest ones.
+Frames near a camera cut (most cells change at once and stay changed) are left out.
 A cell flashes at frame i when its luma rises by at least --rise over the median of the 4 frames before, and within
 --max-frames it is back within --back of that rise. Darkening blinks are found the same way with the sign reversed.
 """
@@ -30,6 +31,16 @@ def main():
     frame = [int(r[head.index("frame")]) for r in rows]
     luma = [[float(x) for x in r[ci:]] for r in rows]
     n, cells = len(luma), len(luma[0]) if luma else 0
+    # a camera cut (a jump, not a pan): most cells change at once and stay changed; flashes next to one are its own
+    cuts = set()
+    for i in range(4, n - 8):
+        moved = 0
+        for c in range(cells):
+            base = statistics.median(luma[j][c] for j in range(i - 4, i))
+            if abs(luma[i][c] - base) >= opt["--rise"] and abs(luma[i + 8][c] - base) >= opt["--rise"] * 0.5:
+                moved += 1
+        if moved * 2 >= cells:
+            cuts.update(range(i - 8, i + 9))
     events = []
     busy = [0] * cells  # a cell's flash lasts until it is back: its later frames are the same flash
     for i in range(4, n - 1):
@@ -47,7 +58,7 @@ def main():
                         hit.append((c, sign * rise, k - i))
                         busy[c] = k
                         break
-        if hit:
+        if hit and i not in cuts:
             events.append((i, hit))
     out = os.path.join(d, "flashes.csv")
     with open(out, "w", newline="", encoding="utf-8") as f:
@@ -65,7 +76,7 @@ def main():
                 shutil.copy(src, os.path.join(d, "flash-%02d-%06d-%s.jpg" % (rank, frame[i], tag)))
         big = max(hit, key=lambda h: abs(h[1]))
         print("%s frame %d: %d cells, largest %+.0f, back in %d frames" % (clock[i], frame[i], len(hit), big[1], max(h[2] for h in hit)))
-    print("%d frames, %d flash frames -> %s" % (n, len(events), out))
+    print("%d frames, %d flash frames (%d frames near camera cuts left out) -> %s" % (n, len(events), len(cuts), out))
 
 
 if __name__ == "__main__":
