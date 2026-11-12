@@ -80,6 +80,9 @@ public sealed class GitHubSource : ISource
             {
                 var r = await Latest(Releases.Apex, ct);
                 files.Add((await Releases.DownloadAsync(r.Find(n => n == "ApexRadiance.asi"), _tmp, ct), Path.Combine(bin, "ApexRadiance.asi")));
+                // the restart host (Apex starts it only with [ui] restart_host on); releases before 3.1.3 have none
+                if (r.Assets.FirstOrDefault(a => a.Name == "ts3wrap.exe") is { } wrap)
+                    files.Add((await Releases.DownloadAsync(wrap, _tmp, ct), Path.Combine(bin, "ts3wrap.exe")));
                 return (files, r.Version);
             }
             case Components.Bridge:
@@ -182,7 +185,7 @@ public static class Engine
     // Files a component may own although Setup did not install them (installed by hand): removed by Remove, never restored.
     static readonly Dictionary<string, string[]> Known = new()
     {
-        [Components.Apex] = new[] { "ApexRadiance.asi" },
+        [Components.Apex] = new[] { "ApexRadiance.asi", "ts3wrap.exe" },
         [Components.Bridge] = new[] { "d3d9.dll", "bridge.conf", "dxvk.conf", @".trex\bridge.conf", @".trex\NvRemixBridge.exe", @".trex\d3d9vk_x64.dll", "Apex Radiance RTX Remix bridge.txt" },
         [Components.Dxvk] = new[] { "d3d9.dll" },
         [Components.S3ss] = Loadable("Sims3SettingsSetter.asi"),
@@ -197,7 +200,7 @@ public static class Engine
 
     // An older copy of these is an update, not a foreign file: replaced without a backup.
     static readonly HashSet<string> Updates = new(StringComparer.OrdinalIgnoreCase)
-        { "ApexRadiance.asi", "Sims3SettingsSetter.asi", "ts3native.asi", "ts3fixes.package", "Sims3Performance.asi", "MonoPatcher.asi" };
+        { "ApexRadiance.asi", "ts3wrap.exe", "Sims3SettingsSetter.asi", "ts3native.asi", "ts3fixes.package", "Sims3Performance.asi", "MonoPatcher.asi" };
 
     // APEX_SETUP_DRY_RUN=1: Setup shows what it finds and plans but writes nothing (a check on a player's real game)
     public static void CheckWritable()

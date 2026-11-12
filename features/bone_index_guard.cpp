@@ -18,6 +18,8 @@ namespace {
 // mov eax,[eax+ecx*4]; ret 4. Unique in Steam 1.67.2 TS3W.exe (0x005C6DF0). EA 1.69: unverified.
 constexpr const char* kPattern = "8B 41 5C 2B 41 58 C1 F8 02 C3 CC CC CC CC CC CC 8B 41 58 8B 4C 24 04 8B 04 88 C2 04 00";
 constexpr int kGetterOffset = 16;
+// the getter alone (EA app 1.69, whose padding or neighbour may differ): used only when it is the only match in the game
+constexpr const char* kGetterPattern = "8B 41 58 8B 4C 24 04 8B 04 88 C2 04 00";
 constexpr unsigned kLoggedCases = 8;
 
 std::atomic<unsigned> g_cases{0};
@@ -44,16 +46,22 @@ void Install() {
     size_t size = 0;
     if (!MemPatch::GetModuleInfo(GetModuleHandleW(nullptr), &base, &size)) return;
     const uintptr_t hit = MemPatch::ScanPattern(base, size, kPattern);
-    if (!hit) {
-        LOG_WARNING("[BoneIndexGuard] The Sim part bone getter was not found in this game build: off");
+    uintptr_t getter = hit ? hit + kGetterOffset : 0;
+    if (!getter) {
+        const uintptr_t a = MemPatch::ScanPattern(base, size, kGetterPattern);
+        const uintptr_t next = a ? a + 1 : 0, end = reinterpret_cast<uintptr_t>(base) + size;
+        if (a && !MemPatch::ScanPattern(reinterpret_cast<BYTE*>(next), end - next, kGetterPattern)) getter = a;
+    }
+    if (!getter) {
+        LOG_WARNING("[BoneIndexGuard] The Sim part bone getter was not found (or not only once) in this game build: off");
         return;
     }
-    const uintptr_t getter = hit + kGetterOffset;
     BYTE bytes[5] = {0xE9};
     const int32_t rel = MemPatch::CalculateRelativeOffset(getter, reinterpret_cast<uintptr_t>(&Get));
     std::memcpy(bytes + 1, &rel, 4);
     if (MemPatch::WriteCodeSuspended(getter, bytes, sizeof bytes))
-        LOG_INFO(std::format("[BoneIndexGuard] On at {:#010x}: a bone index past a Sim part's bone list takes its first bone", getter));
+        LOG_INFO(std::format("[BoneIndexGuard] On at {:#010x} ({}): a bone index past a Sim part's bone list takes its first bone", getter,
+                             hit ? "with the count getter" : "the getter alone"));
     else
         LOG_WARNING(std::format("[BoneIndexGuard] Could not patch the getter at {:#010x}: off", getter));
 }

@@ -8,7 +8,7 @@ menu. The new process starts with a fresh 32-bit address space. The feature is o
 
 | | |
 |---|---|
-| Availability | In development, not in a release package |
+| Availability | Experimental: `ts3wrap.exe` is in the 3.1.3 release and installed with Apex Radiance by Setup; off by default, no menu option |
 | Default | Off |
 | Menu | None |
 | Configuration | `[ui] restart_host` in `ApexRadiance.toml`, and `ts3wrap.exe` next to `ApexRadiance.asi` |

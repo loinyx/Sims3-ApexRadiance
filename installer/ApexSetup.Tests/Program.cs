@@ -25,6 +25,7 @@ try
     Check(Engine.NeedsLoader(s, true), "a loader is needed");
     await Engine.InstallAsync(g, new[] { Components.Apex, Components.Bridge, Components.Loader }, src, null, docs);
     Check(Read(B("ApexRadiance.asi")) == "apex 3.1.1", "ApexRadiance.asi installed");
+    Check(Read(B("ts3wrap.exe")) == "wrap 3.1.1", "ts3wrap.exe installed with Apex");
     Check(Read(B("wininet.dll")) == "loader", "loader installed as wininet.dll");
     Check(Read(B("bridge.conf")).Contains("client.targetProcess = TS3.exe") && Read(B(@".trex\bridge.conf")).Contains("client.targetProcess = TS3.exe"),
           "both bridge.conf target TS3.exe on the EA app");
@@ -56,6 +57,7 @@ try
     Check(!File.Exists(B("d3d9.dll")) && !Directory.Exists(B(".trex")) && !File.Exists(B("dxvk.conf")), "bridge files removed");
     Check(Read(Path.Combine(docs, "Options.ini")) == "gpu=real", "Options.ini restored when going back to native D3D9");
     Check(File.Exists(B("ApexRadiance.asi")), "Apex stays when only the bridge is removed");
+    Check(File.Exists(B("ts3wrap.exe")), "ts3wrap.exe stays with Apex");
 
     // 3. DXVK installed by hand: the bridge backs it up and puts it back
     File.WriteAllText(B("d3d9.dll"), "... DXVK v2.7 ...");
@@ -583,7 +585,7 @@ sealed class FakeSource : ISource
         const string conf = "client.targetProcess = TS3W.exe\nserver.useVanillaDxvk = True\n";
         List<(string, string)> f = c switch
         {
-            Components.Apex => new() { (Make("ApexRadiance.asi", "apex 3.1.1"), Path.Combine(b, "ApexRadiance.asi")) },
+            Components.Apex => new() { (Make("ApexRadiance.asi", "apex 3.1.1"), Path.Combine(b, "ApexRadiance.asi")), (Make("ts3wrap.exe", "wrap 3.1.1"), Path.Combine(b, "ts3wrap.exe")) },
             Components.Loader => new() { (Make("dinput8.dll", "loader"), Path.Combine(b, "wininet.dll")) },
             Components.Dxvk => new() { (Make(@"dxvk\d3d9.dll", "DXVK 3.1.1 d3d9"), Path.Combine(b, "d3d9.dll")) },
             Components.S3ss => new() { (Make("Sims3SettingsSetter.asi", "s3ss"), Path.Combine(b, "Sims3SettingsSetter.asi")) },

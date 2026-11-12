@@ -44,7 +44,8 @@ None.
 ## Limitations
 
 - A broken part is drawn with those vertices following its first bone; the part itself is not repaired.
-- A game build where the pattern is not found keeps the fix off and logs it.
+- A game build where neither pattern is found once keeps the fix off and logs it. EA app 1.69: the patterns are checked at
+  start-up on the decrypted code (its executable is encrypted on disk); the log line says which one was found.
 
 ## Technical reference
 

@@ -63,6 +63,11 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i + sizeof pat <= exe.size(); i++) matches += std::memcmp(exe.data() + i, pat, sizeof pat) == 0;
         std::printf("pattern matches: %d\n", matches);
         Expect(matches == 1, "the pattern matches once in the executable");
+        const uint8_t getter[] = {0x8B, 0x41, 0x58, 0x8B, 0x4C, 0x24, 0x04, 0x8B, 0x04, 0x88, 0xC2, 0x04, 0x00};
+        int alone = 0;
+        for (size_t i = 0; i + sizeof getter <= exe.size(); i++) alone += std::memcmp(exe.data() + i, getter, sizeof getter) == 0;
+        std::printf("getter alone matches: %d\n", alone);
+        Expect(alone == 1, "the getter alone matches once too (the fallback for other builds)");
     }
     std::printf(g_fail ? "%d FAILED\n" : "all passed\n", g_fail);
     return g_fail ? 1 : 0;
