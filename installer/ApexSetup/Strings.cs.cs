@@ -268,5 +268,8 @@ public static partial class Strings
         ["Licence text"] = "Text licence",
         ["OK"] = "OK",
         ["Cancel"] = "Zrušit",
+        ["A new Setup is available"] = "Je k dispozici nový Setup",
+        ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Apex Radiance Setup {0} byl stažen a ověřen. Aktualizuj Setup a znovu se otevře.",
+        ["Update Setup"] = "Aktualizovat Setup",
     };
 }
