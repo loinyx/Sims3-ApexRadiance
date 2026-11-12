@@ -73,8 +73,9 @@ room's full record (a lot that was active) is refused, so the capture ends with 
 - The first edit after a room 0 was solved without its parts kept (a load, another class, an option change) is a full
   solve; the edits after it are quick.
 - A texel can differ from a full solve by one 8-bit level (rounding of the kept parts).
-- The kept parts take memory: up to 96 MB for every room together and 160 MB for the active lot's room 0s (pinned by
-  Real-time outdoor lamps), kept above 2 GB of the address space when possible; the oldest rooms of other lots are dropped
+- The kept parts take memory: up to 96 MB for every room together, plus 16 MB for the lots next to the active one
+  (base only), and 160 MB for the active lot's room 0s (pinned by Real-time outdoor lamps) and, for 20 s, those of the
+  lot just left, kept above 2 GB of the address space when possible; the oldest rooms of other lots are dropped
   first. In a pinned room the parts of the lamps the GPU draws are kept as one sum per texel (`CollapseDrawn`: the
   GPU reads only the base, the texel's sum less them; exact), and a pinned room never drops another pinned room: past the
   ceiling the new solve is simply not kept (`not kept` log line with what fills it) and Real-time outdoor lamps stops

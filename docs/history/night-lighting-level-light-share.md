@@ -1028,3 +1028,21 @@ kind (it had been a lot next to the active one).
 **Outcome:** kept. Only a class 0 to 2 shown with no copy left ends the hold; at class 4 the hold goes on while the game
 solves the room. The other case stays as it was: extending it is safe only while that lot's regather is unsolved, and
 `RoomLightQueue::SolvedSince` keys on edit serials, not switches, so nothing can tell yet. Not checked in game.
+
+### 2026-11-12: active-lot switches back and forth near lot borders
+
+**Context:** a recording at night with the public build, camera near the borders of three lots.
+
+**Finding:** the game lights one lot at a time at the high quality and moves it with the camera, so the active lot
+switched 27 times, 13 undone within 2 s, twice 4 switches in under 1 s. Each switch drops every relit map (60 maps), the
+GPU room lamps and the pins, and sends the 4 lots next to it to gather twice. Unpinned, the lot left lost its kept room-0
+solves within about 1 s (27.5 MB for one story), so a return took a 3.3 s full solve of that story. Separately the active
+lot's pinned records filled the 96 MB budget, so each base-only record of a lot next to it (0.1 to 0.4 MB) evicted
+another: 55 drops, 18 in about 1 s, each sent again to its solve with nothing changed.
+
+**Outcome:** kept, not measured in game. `active_lot_hold` ships (a replay of the logged switches: 26 to 7, both
+sub-second clusters gone) and logs each hold in public builds; the lot left keeps its room 0s' kept parts for 20 s
+within the 160 MB pinned ceiling, which helps a return only before a room 0 of it is solved again as a lot next to the
+active one (that solve keeps only the base and replaces the full record, as at 01:24:05 to 06 in the capture); base-only records have their own 16 MB allowance outside the 96 MB
+(`OutdoorDeltaModel::BudgetVictim`, checked offline); the new lot's ground room 0 is solved first after a switch
+([validation](../validation/night-lighting-level-light-share.md#open-checks)).

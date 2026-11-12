@@ -254,6 +254,15 @@ topology mutation inside a point is not reproduced. This release does not promis
   build before; if it is clearly longer, Real-time outdoor lamps' occluder send goes back to an edit mark. Any
   `Drain step of` line gives that step's page faults. With `active_lot_hold` on, no `Active lot hold ends` line names
   class 4.
+- Active-lot hold, grace for the lot left and a separate allowance for lots next to the active one (3.1.2, not yet
+  tested in game): on the test save, never during a played session, pan at night across lot borders with lamp posts,
+  stop, and pan back onto the played lot within 20 s. Count the `Active lot tracker` and `Active lot switch held` lines
+  (before: 27 switches in one session, 13 undone within 2 s), and the lot left's `solved in full (a lot next to the
+  active one keeps only the GPU's base)` and `shows class C with no kept solve: sent to its solve` lines before the
+  return. **Expected:** fewer switches, and a return within 20 s logs `Outdoor lamp delta: ... (no re-solve)` for each
+  returning story with none of those lines in between, instead of a full solve (before: 3328 ms for story 3);
+  the time from a return to the next `Active:` line is shorter than before (0.5 to 21 s), and a return while panning is
+  at most 1.5 s later than before. In a still view, no `kept parts dropped` line of 0.1 to 0.4 MB.
 - Fast lot pictures (3.1.1, not yet tested in game). Load a save: **expected** one `[SetupLot]` line for the played lot,
   reading `not gated`, with its id equal to the world active lot or priority 1, and no `room gathers skipped light
   sharing` or `lot capture over` line for it. Start a New Game: **expected** `lot capture` and `room gathers skipped light

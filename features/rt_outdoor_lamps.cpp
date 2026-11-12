@@ -76,6 +76,7 @@ constexpr DWORD kCoverFreshMs = 3000;    // a lot's coverage counts this long af
 constexpr int kSolveAsks = 3;            // a room 0 is sent to its solve for a kept solve at most this often in a row
 constexpr DWORD kSolveRetryMs = 60000;   // then this seldom: a run of refused sends left the story on the game's maps until the lot changed
 constexpr DWORD kDragQuietMs = 300;      // a GPU lamp that changed this recently is being dragged (or edited again and again)
+constexpr DWORD kLeftLotGraceMs = 20000; // the lot left at a switch keeps its room 0s' kept solves this long (a return reuses them)
 constexpr DWORD kActiveLotHoldMs = 1500; // (active_lot_hold) while the camera moves, another lot becomes the active one after this as the first lit at the high quality
 constexpr DWORD kHoldQuietMs = 1500;     // the rooms that take room 0's lamps are sent this long after a story's last move
                                          // (a Build mode drag moves in grid steps with pauses of up to about a second)
@@ -1918,14 +1919,22 @@ void Frame(IDirect3DDevice9* dev) {
                       LevelLightShare::TrackerLive(g_tracker) && LotLightingMotion::SampleCameraMoving();
     if (hold && !g_holdAt) g_holdAt = holdNow;
     if (!hold && g_holdAt) {
-        if (DevSwitches::kCompiled)
-            LOG_INFO(std::format("[RtOutdoorLamps] Active lot switch held {} ms while the camera moved ({})", holdNow - g_holdAt,
-                                 tracker != g_tracker ? std::format("then tracker {:08X}", tracker) : std::string("the lot stayed the active one")));
+        LOG_INFO(std::format("[RtOutdoorLamps] Active lot switch held {} ms while the camera moved ({})", holdNow - g_holdAt,
+                             tracker != g_tracker ? std::format("then tracker {:08X}", tracker) : std::string("the lot stayed the active one")));
         g_holdAt = 0;
     }
     if (hold) tracker = g_tracker;
     if (tracker != g_tracker) {
+        // the lot left keeps its room 0s' kept solves a while (a return reuses them instead of a full solve), and the new lot's
+        // ground room 0 is solved first (lot grass reads story 0's room-0 map; the occluder send below regathers it)
+        const void* left[8];
+        int nl = 0;
+        if (g_tracker && LevelLightShare::TrackerLive(g_tracker))
+            for (int S = 0; S <= 7; S++)
+                if (const void* r = LevelLightShare::Room0Of(g_tracker, S)) left[nl++] = r;
+        if (g_tracker) RoomLightQueue::GroundFirst(LevelLightShare::Room0Of(tracker, 0));
         DropAll(dev, "another active lot");
+        OutdoorDelta::GraceRooms(left, nl, GetTickCount() + kLeftLotGraceMs);
         {
             std::lock_guard<std::mutex> lk(g_editMx);
             g_edits.clear(); // (the edits of the lot that was active)

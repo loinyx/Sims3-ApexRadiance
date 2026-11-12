@@ -167,8 +167,7 @@ of room solves with no lamp edited (a 22 s pan: 12 switches, 10 windows of 3 to 
 when the new lot's first room-0 solve ends after it: `Active lot tracker X: story S room 0 solved N ms after the switch,
 K quiet rooms still waiting` (with *Faster room lighting* on, which sees the solve ends).
 
-In development builds (switch `active_lot_hold`, not shipped, see
-[Limitations](#limitations)), while the camera moves the lot already active stays so until another lot has been the first
+With the switch `active_lot_hold` (shipped, unmeasured in game, see [Limitations](#limitations)), while the camera moves the lot already active stays so until another lot has been the first
 lit at the high quality for 1.5 s (`kActiveLotHoldMs`), or until the camera has been still for 300 ms
 (`LotLightingMotion::SampleCameraMoving`). Meanwhile its maps are relit as before (nothing of the relight reads the high
 quality), and Quick outdoor lamp edits keep the same lot (`OutdoorDelta::ActiveLot` follows `RtOutdoorLamps::ActiveTracker`
@@ -179,6 +178,14 @@ shows no solve yet (class 4) has no map a copy stands in for, so the hold goes o
 game's solve. A lot the game no longer has, one with no relit map shown, or one whose maps are not drawn (waiting for its
 occluders) switches at once. Each hold is logged with its length (`Active lot switch held N ms while the camera moved`),
 and a hold ended by the lot waiting with `Active lot hold ends: Lot X story S (the lot waiting) ...`.
+
+At a switch the lot left keeps its room 0s' kept parts for 20 s (`kLeftLotGraceMs`, `OutdoorDelta::GraceRooms`): the
+memory budget drops them only once they and the active lot's pass the pinned ceiling. A return within that time takes a
+quick edit (`Outdoor lamp delta: ... (no re-solve)`) instead of a full solve of each story (3.3 s for one story in a
+capture) only for the stories not solved again in between: the lot left is usually next to the new active one, and a
+solve of its room 0 as such a lot keeps only the GPU's base, replacing the full record (`... solved in full (a lot next
+to the active one keeps only the GPU's base)`). The grace does not stop that solve. The new lot's ground room 0 is solved first, for at most 1 s
+([room light queue](../performance/room-light-queue.md#ground-first-after-an-active-lot-switch)).
 
 ## Settings
 

@@ -112,13 +112,13 @@ inline bool RoomSolveCauses() { return kCompiled && roomSolveCauses.load(std::me
 //                          restarts stop for 300 ms (at most 1 s of hold); a lamp edit's rooms never wait (restart_settle.h)
 inline std::atomic<bool> restartSettle{false};
 inline bool RestartSettle() { return kCompiled && restartSettle.load(std::memory_order_relaxed); }
-//   active_lot_hold        (not shipped until a pan is measured in game; OutdoorDelta::ActiveLot follows
+//   active_lot_hold        (shipped; development builds read a missing key as on; OutdoorDelta::ActiveLot follows
 //                          RtOutdoorLamps::ActiveTracker while it is on) while the camera moves, Real-time outdoor lamps keep the active
 //                          lot until another has been the first lit at the high quality for 1.5 s or the camera has been still
 //                          for 300 ms: a pan across lot borders no longer drops every relit map and sends the lots next to it to
 //                          gather at a lamp edit's priority at each border (rt_outdoor_lamps.cpp kActiveLotHoldMs)
 inline std::atomic<bool> activeLotHold{false};
-inline bool ActiveLotHold() { return kCompiled && activeLotHold.load(std::memory_order_relaxed); }
+inline bool ActiveLotHold() { return kCompiled ? activeLotHold.load(std::memory_order_relaxed) : kShipped; }
 inline bool ReleaseDebugBuffers() { return kCompiled ? releaseDebugBuffers.load(std::memory_order_relaxed) : kShipped; }
 inline bool LeftLotRelease() { return kCompiled ? leftLotRelease.load(std::memory_order_relaxed) : kShipped; }
 

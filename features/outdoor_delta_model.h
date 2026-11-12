@@ -474,4 +474,26 @@ template <class Map, class P> P SwapIn(Map& kept, size_t& bytes, uint64_t key, c
 }
 } // namespace PhaseCache
 
+// The kept parts' memory budget: the record dropped next, -1 for none. Base-only records (lots next to the active one) have
+// their own allowance; the other records keep maxBytes, never a pinned one nor the one just kept; graced records (the lot
+// just left) go, oldest first, only once they and the pinned records pass the pinned ceiling
+struct BudgetRec { size_t bytes; uint32_t used; bool baseOnly, pinned, graced, fresh; };
+inline int BudgetVictim(const BudgetRec* r, int n, size_t maxBytes, size_t maxBaseOnlyBytes, size_t maxPinnedBytes) {
+    size_t base = 0, full = 0, held = 0;
+    for (int i = 0; i < n; i++) {
+        (r[i].baseOnly ? base : full) += r[i].bytes;
+        if (!r[i].baseOnly && (r[i].pinned || r[i].graced)) held += r[i].bytes;
+    }
+    const auto oldest = [&](auto pick) {
+        int v = -1;
+        for (int i = 0; i < n; i++)
+            if (pick(r[i]) && (v < 0 || static_cast<int32_t>(r[i].used - r[v].used) < 0)) v = i;
+        return v;
+    };
+    if (base > maxBaseOnlyBytes) if (const int v = oldest([](const BudgetRec& x) { return x.baseOnly; }); v >= 0) return v;
+    if (full > maxBytes) if (const int v = oldest([](const BudgetRec& x) { return !x.baseOnly && !x.pinned && !x.graced && !x.fresh; }); v >= 0) return v;
+    if (held > maxPinnedBytes) return oldest([](const BudgetRec& x) { return !x.baseOnly && x.graced && !x.pinned; });
+    return -1;
+}
+
 } // namespace OutdoorDeltaModel
