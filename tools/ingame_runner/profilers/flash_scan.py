@@ -32,6 +32,9 @@ def main():
     frame = [int(r[head.index("frame")]) for r in rows]
     luma = [[float(x) for x in r[ci:]] for r in rows]
     n, cells = len(luma), len(luma[0]) if luma else 0
+    black = sum(1 for row in luma if max(row) < 1.0)
+    if n and black * 2 > n:
+        print("%d of %d frames are black: the window was not captured (a borderless window over the whole screen?)" % (black, n))
     # a camera cut (a jump, not a pan): most cells change at once and stay changed; flashes next to one are its own
     cuts, jumps = set(), []
     for i in range(4, n - 8):
