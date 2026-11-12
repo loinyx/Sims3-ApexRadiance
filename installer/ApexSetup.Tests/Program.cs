@@ -493,6 +493,15 @@ finally
     Directory.Delete(root, true);
 }
 
+// Sims 3 Modernization: a release without this edition's build is not taken for it (v0.2.11 had no ts3native-ea169)
+{
+    var steamOnly = new Release("rodneypantonial/sims3-modernization", "v0.2.11", new[] { new Asset("ts3fixes.package", "x", null), new Asset("ts3native-v0.2.11.zip", "x", null) });
+    var both = new Release("rodneypantonial/sims3-modernization", "v0.2.10", new[] { new Asset("ts3fixes.package", "x", null), new Asset("ts3native-v0.2.10.zip", "x", null), new Asset("ts3native-ea169-v0.2.10.zip", "x", null) });
+    Check(!Engine.HasModernizationBuild(steamOnly, Edition.EA) && Engine.HasModernizationBuild(steamOnly, Edition.Steam), "a Steam-only Modernization release is no build for the EA app");
+    Check(Engine.HasModernizationBuild(both, Edition.EA) && Engine.HasModernizationBuild(both, Edition.Steam), "a release with both zips serves both editions");
+    Check(new[] { steamOnly, both }.FirstOrDefault(x => Engine.HasModernizationBuild(x, Edition.EA))?.Tag == "v0.2.10", "the EA app falls back to the newest release with its build");
+}
+
 // Setup's own update: only a newer Apex Radiance Setup is taken; the running exe is renamed, not overwritten
 {
     var dir = Path.Combine(Path.GetTempPath(), "ApexSetupSelf-" + Guid.NewGuid().ToString("N")[..8]);

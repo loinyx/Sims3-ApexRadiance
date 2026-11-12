@@ -136,7 +136,12 @@ public sealed class GitHubSource : ISource
             case Components.Modernization:
             {
                 var r = await Latest(Releases.Modernization, ct);
-                var prefix = g.Edition == Edition.EA ? "ts3native-ea169-" : "ts3native-v";
+                // a release can ship without this edition's build (v0.2.11: no ts3native-ea169): the newest recent one with it,
+                // its ts3native and ts3fixes.package together
+                if (!Engine.HasModernizationBuild(r, g.Edition))
+                    r = (await Releases.RecentAsync(Releases.Modernization, ct)).FirstOrDefault(x => Engine.HasModernizationBuild(x, g.Edition))
+                        ?? throw new InvalidOperationException($"Sims 3 Modernization has no build for the {(g.Edition == Edition.EA ? "EA app" : "Steam")} version in its recent releases. Turn it off in Components and install again.");
+                var prefix = Engine.ModernizationPrefix(g.Edition);
                 var dir = Releases.Unzip(await Releases.DownloadAsync(r.Find(n => n.StartsWith(prefix) && n.EndsWith(".zip")), _tmp, ct));
                 AddTree(files, dir, bin);
                 files.Add((await Releases.DownloadAsync(r.Find(n => n == "ts3fixes.package"), _tmp, ct), Path.Combine(Scan.Packages(docs), "ts3fixes.package")));
@@ -182,6 +187,11 @@ public sealed record Progress(double Fraction, string Text, string? Arg = null);
 
 public static class Engine
 {
+    // Sims 3 Modernization's zip for the game's edition, and a release that has it with its ts3fixes.package
+    public static string ModernizationPrefix(Edition e) => e == Edition.EA ? "ts3native-ea169-" : "ts3native-v";
+    public static bool HasModernizationBuild(Release r, Edition e) =>
+        r.Assets.Any(a => a.Name.StartsWith(ModernizationPrefix(e)) && a.Name.EndsWith(".zip")) && r.Assets.Any(a => a.Name == "ts3fixes.package");
+
     // Files a component may own although Setup did not install them (installed by hand): removed by Remove, never restored.
     static readonly Dictionary<string, string[]> Known = new()
     {
