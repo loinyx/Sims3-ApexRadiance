@@ -237,6 +237,7 @@ namespace ApexTestAgent
             Dispatcher.Register("camera_orbit", CameraOrbit);
             Dispatcher.Register("lots", Lots);
             Dispatcher.Register("lights_on", LightsOn);
+            Dispatcher.Register("lamp_edit", LampEdit);
             Dispatcher.Register("lamp_drag", LampDrag);
             Dispatcher.Register("save_game", SaveGame);
             Dispatcher.Register("auto_dialog", AutoDialog);
@@ -616,6 +617,49 @@ namespace ApexTestAgent
             r["at"] = Pos(from);
             r["meters"] = Math.Round(len, 2);
             r["lot"] = lot.Name;
+            return r;
+        }
+
+        // lamp_edit {near:{x,y,z}, radius?, count?, match?, action: off|on|color, color?}: the count (default 2) lights nearest
+        // `near` within radius (default 25 m), of any lot, whose type name has `match` (e.g. "Pool"), switched off or on or
+        // recoloured (default Red; "White" back) the way the light's menu does it. Returns each light's type and place.
+        static object LampEdit(Args a)
+        {
+            RequireLive();
+            Vector3 at = Vec(a, "near");
+            float radius = (float)a.Double("radius", 25);
+            int count = (int)a.Double("count", 2);
+            string match = a.Str("match", "").ToLowerInvariant(), action = a.Str("action", "off").ToLowerInvariant();
+            List<KeyValuePair<float, Sims3.Gameplay.Abstracts.LightGameObject>> found = new List<KeyValuePair<float, Sims3.Gameplay.Abstracts.LightGameObject>>();
+            foreach (Lot l in LotManager.AllLots)
+            {
+                if (l == null) continue;
+                foreach (Sims3.Gameplay.Abstracts.LightGameObject o in l.GetObjects<Sims3.Gameplay.Abstracts.LightGameObject>())
+                {
+                    if (o == null || (match.Length > 0 && o.GetType().Name.ToLowerInvariant().IndexOf(match) < 0)) continue;
+                    float d = (o.Position - at).Length();
+                    if (d <= radius) found.Add(new KeyValuePair<float, Sims3.Gameplay.Abstracts.LightGameObject>(d, o));
+                }
+            }
+            found.Sort(delegate(KeyValuePair<float, Sims3.Gameplay.Abstracts.LightGameObject> x, KeyValuePair<float, Sims3.Gameplay.Abstracts.LightGameObject> y) { return x.Key.CompareTo(y.Key); });
+            Sims3.Gameplay.Abstracts.LightGameObject.LightColor color = (Sims3.Gameplay.Abstracts.LightGameObject.LightColor)Enum.Parse(
+                typeof(Sims3.Gameplay.Abstracts.LightGameObject.LightColor), a.Str("color", "Red"), true);
+            List<object> done = new List<object>();
+            for (int i = 0; i < found.Count && i < count; i++)
+            {
+                Sims3.Gameplay.Abstracts.LightGameObject o = found[i].Value;
+                if (action == "on" || action == "off") o.SwitchLight(action == "on", true);
+                else if (action == "color") Sims3.Gameplay.Abstracts.LightGameObject.SetColorLight(o, color);
+                else throw new AgentException("action is off, on or color");
+                Dictionary<string, object> e = Obj();
+                e["type"] = o.GetType().Name;
+                e["at"] = Pos(o.Position);
+                e["on"] = o.IsLightOn();
+                done.Add(e);
+            }
+            if (done.Count == 0) throw new AgentException("no light" + (match.Length > 0 ? " matching " + match : "") + " within " + radius + " m");
+            Dictionary<string, object> r = Obj();
+            r["lights"] = done;
             return r;
         }
 

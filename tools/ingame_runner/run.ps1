@@ -400,6 +400,12 @@ function Invoke-Load($Load, [string]$BaseToml) {
                     $d = Call-Agent 'lamp_drag' $a
                     Say "  step ${n}: dragging $($d.lamp) of $($d.lot) $($d.meters) m toward the lot's centre and back"
                 }
+                'lamp_edit' { # lights near a point (or a bookmark's target) switched off, on or recoloured
+                    $a = @{}; foreach ($p in $step.PSObject.Properties) { if ($p.Name -notin 'do', 'bookmark') { $a[$p.Name] = $p.Value } }
+                    if ($step.bookmark) { $a.near = (Get-Content -LiteralPath (Join-Path $PSScriptRoot "bookmarks/$($step.bookmark).json") -Raw | ConvertFrom-Json).target }
+                    $e = Call-Agent 'lamp_edit' $a
+                    Say "  step ${n}: $($step.action) $(@($e.lights).Count) lights: $((@($e.lights) | ForEach-Object { "$($_.type) at $($_.at.x),$($_.at.z)" }) -join '; ')"
+                }
                 'lights_on' {
                     $o = Call-Agent 'lights_on' @{ lot = $step.lot }
                     Say "  step ${n}: lights on at $($o.name) through $($o.via)$(if ($null -ne $o.lights) { " ($($o.lights) lights)" })"
