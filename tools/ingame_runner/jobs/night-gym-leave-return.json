@@ -1,6 +1,6 @@
 {
   "id": "night-gym-leave-return",
-  "description": "The gym at night: the camera held still on it until it is the active lot and relit, then on the square for 30 s (the gym is no longer the active lot), then back on the gym. Two recordings (the shortcut F6 for the run): the last frames before leaving and the first frames after coming back; equal frames mean the lot left kept its light. No light is switched by the harness. Developer mode on, the background frame limit lifted.",
+  "description": "The tester's bookmark gym-entrance at night: the camera held there until that lot is the active one and relit, then on the household's lot for 30 s (that lot is no longer active), then back at the bookmark. Two recordings (the shortcut F6 for the run): the last frames before leaving and the first frames after coming back; equal frames mean the lot left kept its light. No light is switched by the harness. Developer mode on, the background frame limit lifted.",
   "save": "Claude teste",
   "toml": {
     "ui": {
@@ -24,13 +24,8 @@
       "speed": "normal"
     },
     {
-      "do": "camera_orbit",
-      "lot": "kGym",
-      "radius": 14,
-      "height": 8,
-      "seconds": 3600,
-      "turns": 0.001,
-      "face": "door"
+      "do": "camera_goto",
+      "name": "gym-entrance"
     },
     {
       "do": "wait",
@@ -54,9 +49,8 @@
     },
     {
       "do": "camera_orbit",
-      "lot": "pra\u00e7a|praca|square|plaza|central|kBigPark",
-      "radius": 30,
-      "height": 15,
+      "radius": 18,
+      "height": 12,
       "seconds": 3600,
       "turns": 0.001
     },
@@ -65,13 +59,8 @@
       "minutes": 0.5
     },
     {
-      "do": "camera_orbit",
-      "lot": "kGym",
-      "radius": 14,
-      "height": 8,
-      "seconds": 3600,
-      "turns": 0.001,
-      "face": "door"
+      "do": "camera_goto",
+      "name": "gym-entrance"
     },
     {
       "do": "key",
