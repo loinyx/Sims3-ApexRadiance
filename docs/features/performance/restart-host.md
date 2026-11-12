@@ -8,7 +8,7 @@ menu. The new process starts with a fresh 32-bit address space. The feature is o
 
 | | |
 |---|---|
-| Availability | In development (release 3.1.2 branch), not in a release package |
+| Availability | In development, not in a release package |
 | Default | Off |
 | Menu | None |
 | Configuration | `[ui] restart_host` in `ApexRadiance.toml`, and `ts3wrap.exe` next to `ApexRadiance.asi` |
@@ -63,7 +63,7 @@ The design is adapted from Dalexlol's wrapper in sims3-modernization (PRs #360 a
 
 - Shared block: `RestartChannel` (fixed-width fields, one layout for the 32-bit game and the 64-bit host,
   `static_assert`). The host keeps it mapped past the game's end and checks its magic, version and mapped size.
-- Normal exit: exit code under `0xC0000000`.
+- Normal exit: exit code 0 (a crash, or Task Manager's End task with code 1, brings no question).
 - Save pick: the newest last-write time of a file inside each `*.sims3` folder, because a folder's own time misses
   files rewritten in place. `.backup` folders are ignored.
 - Build: `native/ts3wrap/ts3wrap.vcxproj` (x64, static CRT) is part of `ApexRadiance.sln`; the solution's `Release|x86`

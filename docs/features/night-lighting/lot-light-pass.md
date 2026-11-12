@@ -291,7 +291,10 @@ its last group and positions for 2 s without locking the buffer, in both reads (
 out, 134 fence draws a frame waited for the GPU at the first lock, about 250 us each (237 to 17 fps); skipping one read moved
 the wait to the other. Draws read a copy of the game's own writes: the vertex buffers a fence draw reads are noted, and
 their writes are copied at the game's `Unlock` (vertex buffer vtable slots 11 and 12, called through), so the draw reads the same
-bytes without a `Lock` (about 0.5 ms a near draw before); a range the copy does not hold is locked as before. A far place keeps
+bytes without a `Lock` (about 0.5 ms a near draw before); a range the copy does not hold is locked as before. Only behind a d3d9 wrapper (DXVK, the RTX Remix bridge): with Windows' own d3d9 the
+mapping is write-combined memory and the reads lock as before. At most 512 buffers or 64 MB are copied; when full, copies
+unread for 10 s go, a buffer address reused at another size drops its old copy, and a second write lock before an Unlock
+copies neither write. A far place keeps
 its last group only when the copy does not hold its range: the place holds other pieces as the camera moves, and a kept group
 lit them with its own lamps and ground shade for up to 2 s. A group holds the mesh's box over the draw's vertex range (POSITION0 / w) and, per
 instance, its place (POSITION1) and turn (POSITION2 = cos, slope, sin; world = (px c - pz s, py + px k, px s + pz c) + place,

@@ -32,7 +32,7 @@ inline bool RhValid(const RestartChannel* c, size_t mapped) {
 
 // Offer a restart: the game asked for one at its last save and ended normally (an exception code is a crash: no offer).
 inline bool RhShouldOffer(uint32_t exitCode, const RestartChannel& c) {
-    return c.restart == 1 && exitCode < 0xC0000000u && c.exe[0] && c.cmd[0];
+    return c.restart == 1 && exitCode == 0 && c.exe[0] && c.cmd[0]; // (Task Manager's End task gives 1: no offer)
 }
 
 // The command line for the relaunch: `cmd` without any -worldFile switch of its own (the game that is ending may itself

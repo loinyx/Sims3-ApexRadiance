@@ -2143,13 +2143,16 @@ struct Copy {
     std::vector<std::pair<UINT, UINT>> held; // the ranges [a, b) the game wrote since the buffer was noted (merged)
     const BYTE* mapped = nullptr;            // the game's write in progress: its pointer and range
     UINT off = 0, end = 0;
+    DWORD used = 0; // the last read or note (GetTickCount): copies unread for kIdleMs go when the cache is full
 };
+constexpr DWORD kIdleMs = 10000;
 LockFn g_lock = nullptr;
 UnlockFn g_unlock = nullptr;
 void** g_vtable = nullptr;
 bool g_hookTried = false;
 SRWLOCK g_srw = SRWLOCK_INIT;
-std::unordered_map<IDirect3DVertexBuffer9*, Copy> g_copies;
+// (never destroyed: a Lock after the static destructors at process exit still reaches HookLock)
+std::unordered_map<IDirect3DVertexBuffer9*, Copy>& g_copies = *new std::unordered_map<IDirect3DVertexBuffer9*, Copy>;
 size_t g_bytes = 0;
 uint32_t g_hits = 0, g_locks = 0; // (development builds) reads from the copy / with a lock
 
@@ -2182,7 +2185,8 @@ HRESULT STDMETHODCALLTYPE HookLock(IDirect3DVertexBuffer9* vb, UINT off, UINT si
             Copy& c = it->second;
             const UINT end = size ? off + size : static_cast<UINT>(c.bytes.size());
             if (flags & D3DLOCK_DISCARD) c.held.clear(); // (the buffer's earlier contents are gone)
-            if (end <= c.bytes.size() && off < end) c.mapped = static_cast<const BYTE*>(*pp), c.off = off, c.end = end;
+            if (c.mapped) c.mapped = nullptr, c.held.clear(); // a second write lock before the Unlock: neither write is copied
+            else if (end <= c.bytes.size() && off < end) c.mapped = static_cast<const BYTE*>(*pp), c.off = off, c.end = end;
             else c.mapped = nullptr, c.held.clear();
         }
         ReleaseSRWLockExclusive(&g_srw);
@@ -2204,6 +2208,15 @@ HRESULT STDMETHODCALLTYPE HookUnlock(IDirect3DVertexBuffer9* vb) {
 void Note(IDirect3DVertexBuffer9* vb) {
     if (!g_hookTried) {
         g_hookTried = true;
+        // Only behind a d3d9 wrapper (DXVK, the RTX Remix bridge): with Windows' own d3d9 a dynamic buffer's mapping is
+        // write-combined memory, and copying the game's writes back out of it is slow; the fence reads lock as before
+        wchar_t path[MAX_PATH] = {}, sys[MAX_PATH] = {};
+        const HMODULE d3d9 = GetModuleHandleW(L"d3d9.dll");
+        if (!d3d9 || !GetModuleFileNameW(d3d9, path, MAX_PATH) || !GetSystemDirectoryW(sys, MAX_PATH) ||
+            _wcsnicmp(path, sys, wcslen(sys)) == 0) {
+            LOG_INFO("[LotLightBridge] Fence instance buffers: Windows' own d3d9, read with a lock");
+            return;
+        }
         void** vt = *reinterpret_cast<void***>(vb);
         g_lock = reinterpret_cast<LockFn>(vt[11]), g_unlock = reinterpret_cast<UnlockFn>(vt[12]);
         const uintptr_t hooks[2] = {reinterpret_cast<uintptr_t>(&HookLock), reinterpret_cast<uintptr_t>(&HookUnlock)};
@@ -2215,12 +2228,32 @@ void Note(IDirect3DVertexBuffer9* vb) {
                              reinterpret_cast<uintptr_t>(vt)));
     }
     // (a buffer of another vtable, as another wrapper's, is not copied)
-    if (!g_vtable || *reinterpret_cast<void***>(vb) != g_vtable || g_copies.count(vb) || g_copies.size() >= kMaxBuffers) return;
+    if (!g_vtable || *reinterpret_cast<void***>(vb) != g_vtable) return;
     D3DVERTEXBUFFER_DESC d{};
-    if (FAILED(vb->GetDesc(&d)) || !d.Size || g_bytes + d.Size > kMaxBytes) return;
+    if (FAILED(vb->GetDesc(&d)) || !d.Size) return;
+    const DWORD now = GetTickCount();
     AcquireSRWLockExclusive(&g_srw);
-    g_copies[vb].bytes.resize(d.Size);
-    g_bytes += d.Size;
+    // (a released buffer's address given to a new one of another size: the old copy goes)
+    if (const auto it = g_copies.find(vb); it != g_copies.end()) {
+        if (it->second.bytes.size() == d.Size) {
+            it->second.used = now;
+            ReleaseSRWLockExclusive(&g_srw);
+            return;
+        }
+        g_bytes -= it->second.bytes.size();
+        g_copies.erase(it);
+    }
+    // full: the copies nobody read for kIdleMs go (buffers the game released, lots left behind)
+    if (g_copies.size() >= kMaxBuffers || g_bytes + d.Size > kMaxBytes)
+        for (auto it = g_copies.begin(); it != g_copies.end();)
+            if (!it->second.mapped && now - it->second.used > kIdleMs) g_bytes -= it->second.bytes.size(), it = g_copies.erase(it);
+            else ++it;
+    if (g_copies.size() < kMaxBuffers && g_bytes + d.Size <= kMaxBytes) {
+        Copy& c = g_copies[vb];
+        c.bytes.resize(d.Size);
+        c.used = now;
+        g_bytes += d.Size;
+    }
     ReleaseSRWLockExclusive(&g_srw);
 }
 // [off, off + n) of an instance buffer: from the copy of the game's writes when it holds them (*locked false), else the buffer
@@ -10664,8 +10697,9 @@ void LogDrawCost() {
             if (g_fenceStepCalls[s])
                 arch += std::format(" | of it the fence {}: {:.0f} a frame, {:.2f} us each", kStep[s], g_fenceStepCalls[s] * scale,
                                     static_cast<double>(g_fenceStepTicks[s]) * msPerTick * 1000.0 / g_fenceStepCalls[s]);
-        arch += std::format(" | fence grid built {} times, its gaps {} times, {} groups; {} of {} fence draws kept a far group's key, {} its positions; instance reads {} from the copy, {} with a lock",
-                            g_fenceGridBuilds, g_fenceGapBuilds, g_fenceGroups.size(), g_fenceFarKept, g_fenceNoted, g_groupFarKept, InstanceCopy::g_hits, InstanceCopy::g_locks);
+        arch += std::format(" | fence grid built {} times, its gaps {} times, {} groups; {} of {} fence draws kept a far group's key, {} its positions; instance reads {} from the copy, {} with a lock ({} buffers copied, {:.1f} MB)",
+                            g_fenceGridBuilds, g_fenceGapBuilds, g_fenceGroups.size(), g_fenceFarKept, g_fenceNoted, g_groupFarKept, InstanceCopy::g_hits, InstanceCopy::g_locks,
+                            InstanceCopy::g_copies.size(), InstanceCopy::g_bytes / 1048576.0);
         g_fenceFarKept = 0, g_fenceNoted = 0, g_groupFarKept = 0, InstanceCopy::g_hits = 0, InstanceCopy::g_locks = 0;
         g_fenceGridBuilds = 0, g_fenceGapBuilds = 0;
         for (int s = 0; s < 3; s++) g_fenceStepTicks[s] = 0, g_fenceStepCalls[s] = 0;

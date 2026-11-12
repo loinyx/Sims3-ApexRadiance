@@ -39,7 +39,7 @@ int wmain(int argc, wchar_t** argv) {
     wcscpy_s(c.exe, L"TS3W.exe"), wcscpy_s(c.cmd, L"TS3W.exe");
     Check(!RhShouldOffer(0, c), "no offer without a low save");
     c.restart = 1;
-    Check(RhShouldOffer(0, c) && RhShouldOffer(1, c), "offer after a low save and a normal exit");
+    Check(RhShouldOffer(0, c) && !RhShouldOffer(1, c), "offer after a low save and a normal exit, not after End task");
     Check(!RhShouldOffer(0xC0000005u, c), "no offer after a crash");
     c.exe[0] = 0;
     Check(!RhShouldOffer(0, c), "no offer without the executable");
