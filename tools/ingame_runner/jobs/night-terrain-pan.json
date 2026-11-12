@@ -1,6 +1,6 @@
 {
   "id": "night-terrain-pan",
-  "description": "Terrain light at night under the benchmark's pan (8 lots at 40 m, 60 s passes): four back-to-back recordings of the mod (its shortcut set to F6 for the run), whose Screen pixels.csv samples the screen every frame without touching the game; flashes are read from it (flash_scan.py over the grid points) next to the log's NightTerrainRelight lines. Developer mode on, the background frame limit lifted.",
+  "description": "Terrain light at night under the benchmark's pan (8 lots at 40 m, 60 s passes): four back-to-back recordings of the mod (its shortcut set to F6 for the run), whose Screen pixels.csv samples the screen every frame without touching the game; flashes are read from it (flash_scan.py over the grid points) next to the log's NightTerrainRelight lines. Developer mode on, the background frame limit lifted. Variants switch off the lot detail range or the lot visibility override, to find which one the one-frame bright lot squares come from.",
   "save": "Claude teste",
   "toml": {
     "ui": {
@@ -12,7 +12,27 @@
     }
   },
   "variants": {
-    "on": {
+    "all": {
+      "expect": [
+        "\\[Recorder\\] Recording started"
+      ]
+    },
+    "no-detail-range": {
+      "toml": {
+        "patches.LotDetailRange": {
+          "enabled": false
+        }
+      },
+      "expect": [
+        "\\[Recorder\\] Recording started"
+      ]
+    },
+    "no-visibility-override": {
+      "toml": {
+        "patches.LotVisibilityOverride": {
+          "enabled": false
+        }
+      },
       "expect": [
         "\\[Recorder\\] Recording started"
       ]
@@ -98,5 +118,10 @@
       "do": "wait",
       "minutes": 0.25
     }
+  ],
+  "order": [
+    "all",
+    "no-detail-range",
+    "no-visibility-override"
   ]
 }
