@@ -84,6 +84,8 @@ const I18n::Pair kPairs[] = {
     {"Night Lights: the upper walls of double-height rooms are no longer black", "Ночное освещение: верхние стены комнат двойной высоты больше не чёрные"},
     {"No crash when a Sim wears a broken custom part", "Нет вылета, когда сим носит неисправный пользовательский предмет"},
     {"Apex Radiance Setup: shows a newer Setup on its start page and updates itself", "Apex Radiance Setup: показывает на начальной странице более новый Setup и обновляется сам"},
+    {"Apex Radiance Setup: Sims 3 Modernization installs on the EA app again", "Apex Radiance Setup: Sims 3 Modernization снова устанавливается в EA app"},
+    {"Apex Radiance Setup: an EA app game moved to another folder is no longer taken for Steam", "Apex Radiance Setup: игра EA app, перенесённая в другую папку, больше не принимается за Steam"},
     {"Display: a switch to turn off G-SYNC for the game", "Экран: переключатель для отключения G-SYNC в игре"},
     {"Night Lights: new option Light bounces between rooms, on by default", "Ночное освещение: новая опция «Свет отражается между комнатами», включена по умолчанию"},
     {"Settings: a new default look for lighting and effects, and your own values stay", "Настройки: новый стандартный вид света и эффектов, а ваши значения остаются"},

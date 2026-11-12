@@ -84,6 +84,8 @@ const I18n::Pair kPairs[] = {
     {"Night Lights: the upper walls of double-height rooms are no longer black", "야간 조명: 층고가 두 배인 방의 위쪽 벽이 더 이상 검게 보이지 않습니다"},
     {"No crash when a Sim wears a broken custom part", "심이 손상된 커스텀 파츠를 착용해도 더 이상 충돌하지 않습니다"},
     {"Apex Radiance Setup: shows a newer Setup on its start page and updates itself", "Apex Radiance Setup: 시작 페이지에 새 Setup을 표시하고 스스로 업데이트합니다"},
+    {"Apex Radiance Setup: Sims 3 Modernization installs on the EA app again", "Apex Radiance Setup: EA 앱에서 Sims 3 Modernization이 다시 설치됩니다"},
+    {"Apex Radiance Setup: an EA app game moved to another folder is no longer taken for Steam", "Apex Radiance Setup: 다른 폴더로 옮긴 EA 앱 게임을 더 이상 Steam으로 인식하지 않습니다"},
     {"Display: a switch to turn off G-SYNC for the game", "디스플레이: 게임의 G-SYNC를 끄는 스위치"},
     {"Night Lights: new option Light bounces between rooms, on by default", "야간 조명: 새 옵션 방 사이 빛 반사, 기본으로 켜져 있어요"},
     {"Settings: a new default look for lighting and effects, and your own values stay", "설정: 조명과 효과의 새 기본 모습, 직접 바꾼 값은 그대로예요"},

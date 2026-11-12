@@ -84,6 +84,8 @@ const I18n::Pair kPairs[] = {
     {"Night Lights: the upper walls of double-height rooms are no longer black", "夜间灯光：挑高房间的上半部墙壁不再发黑"},
     {"No crash when a Sim wears a broken custom part", "模拟市民穿戴损坏的自定义部件时不再崩溃"},
     {"Apex Radiance Setup: shows a newer Setup on its start page and updates itself", "Apex Radiance Setup：在起始页显示更新的安装程序，并可自行更新"},
+    {"Apex Radiance Setup: Sims 3 Modernization installs on the EA app again", "Apex Radiance Setup：EA app 版本可以再次安装 Sims 3 Modernization"},
+    {"Apex Radiance Setup: an EA app game moved to another folder is no longer taken for Steam", "Apex Radiance Setup：移到其他文件夹的 EA app 游戏不再被误认为 Steam 版"},
     {"Display: a switch to turn off G-SYNC for the game", "显示：用于关闭游戏 G-SYNC 的开关"},
     {"Night Lights: new option Light bounces between rooms, on by default", "夜间灯光：新选项“光在房间之间反射”，默认开启"},
     {"Settings: a new default look for lighting and effects, and your own values stay", "设置：灯光和效果的全新默认外观，你自己的数值保持不变"},

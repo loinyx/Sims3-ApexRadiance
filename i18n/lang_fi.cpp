@@ -84,6 +84,8 @@ const I18n::Pair kPairs[] = {
     {"Night Lights: the upper walls of double-height rooms are no longer black", "Yövalot: kaksinkertaisen korkeuden huoneiden yläseinät eivät ole enää mustia"},
     {"No crash when a Sim wears a broken custom part", "Ei kaatumista, kun Sim käyttää viallista omaa sisältöä"},
     {"Apex Radiance Setup: shows a newer Setup on its start page and updates itself", "Apex Radiance Setup: näyttää aloitussivulla uudemman Setupin ja päivittää itsensä"},
+    {"Apex Radiance Setup: Sims 3 Modernization installs on the EA app again", "Apex Radiance Setup: Sims 3 Modernization asentuu taas EA-sovellukseen"},
+    {"Apex Radiance Setup: an EA app game moved to another folder is no longer taken for Steam", "Apex Radiance Setup: toiseen kansioon siirrettyä EA-sovelluksen peliä ei enää luulla Steam-versioksi"},
     {"Display: a switch to turn off G-SYNC for the game", "Näyttö: kytkin G-SYNCin poistamiseen käytöstä pelissä"},
     {"Night Lights: new option Light bounces between rooms, on by default", "Yövalot: uusi asetus Valo heijastuu huoneiden välillä, oletuksena päällä"},
     {"Settings: a new default look for lighting and effects, and your own values stay", "Asetukset: uusi oletusulkoasu valolle ja tehosteille, ja omat arvosi säilyvät"},
