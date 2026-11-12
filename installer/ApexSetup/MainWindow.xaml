@@ -110,7 +110,8 @@
                             <ListView x:Name="GameList" SelectionMode="Single" SelectionChanged="OnGamePicked">
                                 <ListView.ItemTemplate>
                                     <DataTemplate x:DataType="local:GameItem">
-                                        <Grid Padding="4,10" ColumnSpacing="14">
+                                        <Border Style="{StaticResource ApexCard}" Padding="14,12" Margin="0,4">
+                                        <Grid ColumnSpacing="14">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto" />
                                                 <ColumnDefinition Width="*" />
@@ -125,6 +126,7 @@
                                                 <TextBlock Text="{x:Bind Badge}" FontSize="11" Foreground="{StaticResource ApexSoftTextBrush}" />
                                             </Border>
                                         </Grid>
+                                        </Border>
                                     </DataTemplate>
                                 </ListView.ItemTemplate>
                             </ListView>
@@ -323,9 +325,9 @@
                             <StackPanel x:Name="StepsRenderer" Tag="dyn" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8" />
                             <TextBlock Text="How the game draws" Style="{StaticResource ApexTitle}" />
                             <TextBlock x:Name="GpuLine" Tag="dyn" Style="{StaticResource ApexMuted}" FontSize="13" />
-                            <RadioButtons x:Name="RendererChoice" Tag="dyn" SelectionChanged="OnRenderer" />
+                            <StackPanel x:Name="RendererCards" Tag="dyn" Spacing="8" />
                             <TextBlock x:Name="BridgeDetail" Tag="dyn" Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
-                            <TextBlock Text="Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
+                            <TextBlock x:Name="RendererResetNote" Text="Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" Foreground="{StaticResource ApexWarningBrush}" />
                         </StackPanel>
 
                         <!-- 6 About -->

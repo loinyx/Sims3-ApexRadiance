@@ -508,7 +508,8 @@ public sealed partial class MainWindow : Window
         var test = Verify.TestBuild(g, s, apexRelease);
         var found = Verify.Files(g, s, apexRelease).Concat(_found.Where(x => x.Suggest is null)).ToList();
         var clean = found.Count == 0;
-        var check = clean ? (_checkedAt is null ? T("Everything is in place.") : T("Everything is in place (checked at {0}).", _checkedAt))
+        // (the header already says the game is current: "in place" only after a check the player asked for)
+        var check = clean ? (_checkedAt is null ? "" : T("Everything is in place (checked at {0}).", _checkedAt))
             : _checkedAt is not null ? T("Checked at {0}.", _checkedAt) : "";
         CardHeader(StatusList, clean ? "\uE73E" : "\uE7BA", clean ? "ApexSuccessBrush" : "ApexWarningBrush", T("The Sims 3 \u00b7 {0}", g.Label),
             string.Join("\n", new[] { g.Root, !_loading && !_offline && Updates().Count == 0 ? T("Everything in this game is on its latest version.") : "", check }.Where(x => x.Length > 0)));
@@ -640,13 +641,15 @@ public sealed partial class MainWindow : Window
             ProblemList.Children.Add(new TextBlock { Text = T("No incompatible settings found."), FontSize = 12, Foreground = (Brush)Application.Current.Resources["ApexSuccessBrush"] });
         SuggestList.Children.Clear();
         FillSuggestions(SuggestList, GraphicsInfo, onStatus: false);
+        SuggestList.Visibility = SuggestList.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed; // (an empty one still takes a gap)
     }
 
     // "Suggested for Apex Radiance": what Apex recommends in game, each applied only by its own click (or Apply all
     // suggestions), each in a restore point; a component's suggestion points to Components
     void FillSuggestions(Panel list, InfoBar resultBar, bool onStatus)
     {
-        var sug = _found.Where(x => x.Suggest is not null).ToList();
+        // a component to choose (DXVK, the bridge, Sims3SettingsSetter) is already a choice on Components: only what can be applied shows
+        var sug = _found.Where(x => x.Suggest is not null && x.CanApply).ToList();
         if (sug.Count == 0 || _game is not { } g) return;
         list.Children.Add(new TextBlock { Text = T("Suggested for Apex Radiance"), Style = (Style)Application.Current.Resources["ApexStrong"], FontSize = 13 });
         var idle = !_busy && !_running;
@@ -717,15 +720,10 @@ public sealed partial class MainWindow : Window
 
     void OnToggle(object sender, RoutedEventArgs e) => RefreshComponents();
 
-    void OnRenderer(object sender, SelectionChangedEventArgs e)
-    {
-        if (_fillingRenderer || RendererChoice.SelectedIndex < 0) return;
-        _renderer = _rendererTags[RendererChoice.SelectedIndex];
-        RefreshComponents();
-    }
     bool _fillingRenderer;
+    // the renderer choices as cards: a radio button over the whole card, the chosen card outlined in the accent
+    readonly Dictionary<string, (Border Card, RadioButton Radio)> _rendererCards = new();
 
-    readonly List<string> _rendererTags = new();
     void FillRenderer(State s)
     {
         // the bridge needs Vulkan 1.3; one already installed stays listed, so it can be kept or removed
@@ -740,13 +738,24 @@ public sealed partial class MainWindow : Window
         if (key != _rendererKey)
         {
             _rendererKey = key;
-            RendererChoice.Items.Clear();
-            foreach (var r in tags) RendererChoice.Items.Add(RendererItem(r, r == cur));
-            _rendererTags.Clear();
-            _rendererTags.AddRange(tags);
+            RendererCards.Children.Clear();
+            _rendererCards.Clear();
+            foreach (var r in tags)
+            {
+                var radio = new RadioButton { GroupName = "renderer", Content = RendererItem(r, r == cur), HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch };
+                radio.Checked += (_, _) => { if (_fillingRenderer) return; _renderer = r; RefreshComponents(); };
+                var card = new Border { Child = radio, CornerRadius = new CornerRadius(8), BorderThickness = new Thickness(1), Padding = new Thickness(16, 12, 16, 10) };
+                RendererCards.Children.Add(card);
+                _rendererCards[r] = (card, radio);
+            }
         }
-        var want = _rendererTags.IndexOf(_renderer);
-        if (RendererChoice.SelectedIndex != want) RendererChoice.SelectedIndex = want;
+        foreach (var (r, (card, radio)) in _rendererCards)
+        {
+            var on = r == _renderer;
+            radio.IsChecked = on;
+            card.BorderBrush = Res(on ? "ApexAccentBrush" : "ApexCardBorderBrush");
+            card.Background = on ? new SolidColorBrush(ColorHelper.FromArgb(255, 0x16, 0x16, 0x1D)) : Res("ApexCardBrush");
+        }
         _fillingRenderer = false;
     }
 
@@ -761,7 +770,7 @@ public sealed partial class MainWindow : Window
             RNative => (T("Windows default (Direct3D 9)"), T("Works, but Apex Radiance is tested with DXVK.")),
             _ => (T("Keep my d3d9.dll"), T("Your d3d9.dll stays as it is.")),
         };
-        var item = new StackPanel { Spacing = 2, Margin = new Thickness(0, 4, 0, 8) };
+        var item = new StackPanel { Spacing = 4, Margin = new Thickness(4, 0, 0, 0) };
         var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
         head.Children.Add(new TextBlock { Text = title, FontSize = 14, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
         if (installed) head.Children.Add(new TextBlock { Text = T("Installed"), FontSize = 12, Foreground = Res("ApexSuccessBrush"), VerticalAlignment = VerticalAlignment.Center });
@@ -804,6 +813,7 @@ public sealed partial class MainWindow : Window
             SetInfo(GraphicsInfo, InfoBarSeverity.Warning, "",
                 T("Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."));
         else GraphicsInfo.IsOpen = false;
+        RendererResetNote.Visibility = GraphicsInfo.IsOpen ? Visibility.Visible : Visibility.Collapsed;
 
         // An installed component shows a Remove button (Keep once marked: Apply removes it, and its pill says so); a missing one
         // its switch, which means Install. A switch that meant "keep" on an installed component, off meaning uninstall, read
