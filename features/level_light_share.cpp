@@ -2450,7 +2450,7 @@ void MergeStackedAmbient(BYTE* room) {
 // Steam 1.67.2: tables 0x00FF36A4 / 0x00FF36C4 / 0x00FF36D0, read by 0x006A8CB0 / 0x006A8CE0 / 0x006A8D00 (GameAddr ClassWallMode*,
 // ClassWalls*, ClassObjects*; set by CheckClassTables)
 uintptr_t kClassWallMode = 0, kClassWalls2D = 0, kClassObjects3D = 0;
-bool g_classTables = false; // the code above checked (and the pass tables made writable) at install
+bool g_classTables = false; // the code above checked at install
 bool CheckClassTables() {
     using GameAddr::Id;
     if (!GameAddr::Have({Id::ClassWallModeFn, Id::ClassWallMode, Id::ClassWallsFn, Id::ClassObjectsFn, Id::ClassWalls2D, Id::ClassObjects3D})) return false;
@@ -2469,10 +2469,19 @@ bool CheckClassTables() {
     kClassWallMode = modeAt;
     kClassWalls2D = wallsAt;
     kClassObjects3D = objectsAt;
+    return true;
+}
+// The tables stay read-only: the page also holds the light and probe vtables, so a stray write there must still fault on
+// the spot (issue #76). Each change opens the bytes for the write only.
+void WriteTableByte(uintptr_t at, BYTE value) {
     DWORD old = 0;
-    if (kClassObjects3D == kClassWalls2D + 0xC) return VirtualProtect(reinterpret_cast<void*>(kClassWalls2D), 0x18, PAGE_READWRITE, &old) != 0; // Steam: both in one call
-    return VirtualProtect(reinterpret_cast<void*>(kClassWalls2D), 0xC, PAGE_READWRITE, &old) != 0 &&
-           VirtualProtect(reinterpret_cast<void*>(kClassObjects3D), 0xC, PAGE_READWRITE, &old) != 0;
+    if (!VirtualProtect(reinterpret_cast<void*>(at), 1, PAGE_READWRITE, &old)) return;
+    *reinterpret_cast<BYTE*>(at) = value;
+    VirtualProtect(reinterpret_cast<void*>(at), 1, old, &old);
+}
+void WriteWallTests(int idx, BYTE walls, BYTE objects) {
+    WriteTableByte(kClassWalls2D + 9 + idx, walls);
+    WriteTableByte(kClassObjects3D + 9 + idx, objects);
 }
 int ClassIndex(const BYTE* room, int cls) {
     __try {
@@ -2735,17 +2744,13 @@ WallTests SwapWallTests(BYTE* room) {
     }
     const int cur = ClassIndex(room, cls), to = ClassIndex(room, target);
     if (cur < 0 || to < 0 || cur == to) return saved;
-    BYTE* walls = reinterpret_cast<BYTE*>(kClassWalls2D + 9 + cur);
-    BYTE* objects = reinterpret_cast<BYTE*>(kClassObjects3D + 9 + cur);
-    saved = WallTests{cur, *walls, *objects};
-    *walls = *reinterpret_cast<const BYTE*>(kClassWalls2D + 9 + to);
-    *objects = *reinterpret_cast<const BYTE*>(kClassObjects3D + 9 + to);
+    saved = WallTests{cur, *reinterpret_cast<const BYTE*>(kClassWalls2D + 9 + cur), *reinterpret_cast<const BYTE*>(kClassObjects3D + 9 + cur)};
+    WriteWallTests(cur, *reinterpret_cast<const BYTE*>(kClassWalls2D + 9 + to), *reinterpret_cast<const BYTE*>(kClassObjects3D + 9 + to));
     return saved;
 }
 void RestoreWallTests(const WallTests& saved) {
     if (saved.idx < 0) return;
-    *reinterpret_cast<BYTE*>(kClassWalls2D + 9 + saved.idx) = saved.walls;
-    *reinterpret_cast<BYTE*>(kClassObjects3D + 9 + saved.idx) = saved.objects;
+    WriteWallTests(saved.idx, saved.walls, saved.objects);
 }
 char WallPassCall(BYTE* room, int arg, float budget) {
     const WallTests tests = SwapWallTests(room);
