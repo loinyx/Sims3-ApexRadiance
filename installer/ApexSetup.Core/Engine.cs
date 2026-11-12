@@ -68,6 +68,15 @@ public sealed class GitHubSource : ISource
         _rel.TryGetValue(repo, out var t) ? t : _rel[repo] = Shown?.GetValueOrDefault(repo) is { } r ? Task.FromResult(r) : Releases.LatestAsync(repo, ct);
 
     public static readonly string TempRoot = Path.Combine(Path.GetTempPath(), "ApexRadianceSetup");
+
+    // The release's *-Manual-install.zip, downloaded and unzipped once per run, or null when the release has none
+    readonly Dictionary<string, string?> _manual = new();
+    async Task<string?> ManualDirAsync(Release r, CancellationToken ct)
+    {
+        if (_manual.TryGetValue(r.Tag, out var d)) return d;
+        return _manual[r.Tag] = HasManualZip(r) is { } z ? Releases.Unzip(await Releases.DownloadAsync(z, _tmp, ct)) : null;
+    }
+    public static Asset? HasManualZip(Release r) => r.Assets.FirstOrDefault(a => a.Name.EndsWith("-Manual-install.zip", StringComparison.OrdinalIgnoreCase));
     readonly string _tmp = Path.Combine(TempRoot, Guid.NewGuid().ToString("N"));
 
     public async Task<(List<(string, string)>, string)> FetchAsync(string c, Game g, string docs, CancellationToken ct)
@@ -79,15 +88,10 @@ public sealed class GitHubSource : ISource
             case Components.Apex:
             {
                 var r = await Latest(Releases.Apex, ct);
-                // the ASI as a file of its own (every release so far: Setups before 1.1.1 need it), else from the manual-install
-                // zip, so a later release can ship the zip alone
-                string? manualDir = null;
-                async Task<string?> FromManual(string name)
-                {
-                    if (manualDir is null && r.Assets.FirstOrDefault(a => a.Name.EndsWith("-Manual-install.zip", StringComparison.OrdinalIgnoreCase)) is { } z)
-                        manualDir = Releases.Unzip(await Releases.DownloadAsync(z, _tmp, ct));
-                    return manualDir is null ? null : Directory.EnumerateFiles(manualDir, name, SearchOption.AllDirectories).FirstOrDefault();
-                }
+                // the ASI as a file of its own (releases up to 3.1.5), else from the manual-install zip (3.1.6 on: the release has
+                // only Setup and that zip)
+                async Task<string?> FromManual(string name) =>
+                    await ManualDirAsync(r, ct) is { } d ? Directory.EnumerateFiles(d, name, SearchOption.AllDirectories).FirstOrDefault() : null;
                 var asi = r.Assets.FirstOrDefault(a => a.Name == "ApexRadiance.asi") is { } own ? await Releases.DownloadAsync(own, _tmp, ct)
                     : await FromManual("ApexRadiance.asi") ?? throw new InvalidOperationException($"{r.Repo} {r.Tag}: asset not found");
                 files.Add((asi, Path.Combine(bin, "ApexRadiance.asi")));
@@ -102,7 +106,11 @@ public sealed class GitHubSource : ISource
             case Components.Bridge:
             {
                 var r = await Latest(Releases.Apex, ct);
-                var dir = Releases.Unzip(await Releases.DownloadAsync(r.Find(n => n == "Apex-Radiance-RTX-Remix-bridge.zip"), _tmp, ct));
+                // its own zip (releases up to 3.1.5), else the "RTX Remix bridge" folder of the manual-install zip (3.1.6 on)
+                var dir = r.Assets.FirstOrDefault(a => a.Name == "Apex-Radiance-RTX-Remix-bridge.zip") is { } own
+                    ? Releases.Unzip(await Releases.DownloadAsync(own, _tmp, ct))
+                    : await ManualDirAsync(r, ct) is { } m && Directory.EnumerateDirectories(m, "RTX Remix bridge", SearchOption.AllDirectories).FirstOrDefault() is { } b ? b
+                    : throw new InvalidOperationException($"{r.Repo} {r.Tag}: asset not found");
                 AddTree(files, dir, bin);
                 return (files, r.Version);
             }

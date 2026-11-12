@@ -38,18 +38,24 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern ApexRadiance.asi --dir dist
-          # the restart host, when the release has it: a file of its own (3.1.3, 3.1.4) or inside the manual-install zip (3.1.5 on)
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern ts3wrap.exe --dir dist ||
-            { gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*-Manual-install.zip' --dir manual &&
-              unzip -j -o manual/*-Manual-install.zip '*ts3wrap.exe' -d dist; } || true
+          # the ASI, ts3wrap.exe and the bridge: files of their own up to 3.1.5, inside the manual-install zip from 3.1.6
+          if gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*-Manual-install.zip' --dir manual; then
+            unzip -q -o manual/*-Manual-install.zip -d manual/x
+            mkdir -p dist
+            find manual/x -maxdepth 2 -name ApexRadiance.asi -exec cp {} dist/ \; -o -maxdepth 2 -name ts3wrap.exe -exec cp {} dist/ \;
+            BR=$(find manual/x -maxdepth 2 -type d -name 'RTX Remix bridge' | head -1)
+            if [ -n "$BR" ]; then mkdir -p bridge && (cd "$BR" && zip -q -9 -r "$GITHUB_WORKSPACE/bridge/Apex-Radiance-RTX-Remix-bridge.zip" .); fi
+          fi
+          [ -f dist/ApexRadiance.asi ] || gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern ApexRadiance.asi --dir dist
+          [ -f dist/ts3wrap.exe ] || gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern ts3wrap.exe --dir dist || true
           # Apex Radiance Setup, when the release has it (3.1.1 on): the zip then holds the installer and a manual-install folder
           if gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern ApexRadianceSetup.exe --dir setup; then
             echo "SETUP=1" >> "$GITHUB_ENV"
           fi
           # the RTX Remix bridge, when the release has it (a separate file on the Nexus page)
           if [ -n "${{ vars.NEXUS_BRIDGE_FILE_ID }}" ] &&
-             gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern Apex-Radiance-RTX-Remix-bridge.zip --dir bridge; then
+             { [ -f bridge/Apex-Radiance-RTX-Remix-bridge.zip ] ||
+               gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern Apex-Radiance-RTX-Remix-bridge.zip --dir bridge; }; then
             echo "BRIDGE=1" >> "$GITHUB_ENV"
           fi
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > notes.md

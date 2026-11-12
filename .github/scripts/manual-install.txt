@@ -45,12 +45,13 @@
     A.  DXVK  -  fewer stutters; Apex Radiance is made and tested with it
           Put DXVK's 32-bit d3d9.dll in Game\Bin.
 
-    B.  RTX Remix bridge (experimental)  -  about 600 MB more free memory
-          for big worlds (needs a Vulkan graphics card)
-          1. Download the RTX Remix bridge: the "RTX Remix bridge" file on
-             Nexus, or Apex-Radiance-RTX-Remix-bridge.zip on GitHub.
+    B.  RTX Remix bridge  -  about 600 MB more free memory for big worlds
+          (needs a Vulkan graphics card)
+          1. Find the bridge: the "RTX Remix bridge" folder of the GitHub
+             zip, or the "RTX Remix bridge" file on Nexus (unzip it).
           2. Move any d3d9.dll already in Game\Bin to a backup folder.
-          3. Unzip the bridge into Game\Bin, keeping its .trex folder.
+          3. Copy everything inside the bridge folder into Game\Bin,
+             keeping its .trex folder.
           4. EA app only: in both bridge.conf files (Game\Bin and
              Game\Bin\.trex), change
                client.targetProcess = TS3W.exe

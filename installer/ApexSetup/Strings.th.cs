@@ -184,7 +184,7 @@ public static partial class Strings
         ["Your Apex Radiance settings are always kept."] = "การตั้งค่า Apex Radiance ของคุณจะถูกเก็บไว้เสมอ",
         ["No internet connection"] = "ไม่มีการเชื่อมต่ออินเทอร์เน็ต",
         ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (แนะนำ)",
-        ["Vulkan with more memory (RTX Remix bridge, experimental)"] = "Vulkan, หน่วยความจำว่างมากขึ้น (RTX Remix bridge, ทดลอง)",
+        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan, หน่วยความจำว่างมากขึ้น (RTX Remix bridge)",
         ["The RTX Remix bridge needs a graphics card with Vulkan 1.3 (found: {0})."] = "RTX Remix bridge ต้องใช้การ์ดจอที่รองรับ Vulkan 1.3 (พบ: {0})",
         ["1 update for The Sims 3 · {0}"] = "The Sims 3 · {0} มีอัปเดต 1 รายการ",
         ["Change"] = "เปลี่ยน",

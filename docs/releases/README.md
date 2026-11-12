@@ -5,6 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [3.1.6](3.1.6.md): two downloads, the installer and one manual-install zip with the RTX Remix bridge inside; the bridge no longer marked experimental.
 - [3.1.5](3.1.5.md): Apex Radiance Setup installs Sims 3 Modernization on the EA app again and recognises a moved EA app game.
 - [3.1.4](3.1.4.md): Apex Radiance Setup shows a newer Setup on its start page and updates itself.
 - [3.1.3](3.1.3.md): fence and stair lighting without waiting for the graphics card (36 ms to 1.2 ms a frame zoomed out, 9.5 ms to 0.2 ms close up), an active lot that holds through a pan, objects near a lamp no longer over-lit, double-height rooms' upper walls no longer black, no crash from a broken custom part.

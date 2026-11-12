@@ -10,7 +10,7 @@ Setup makes can be undone from a restore point. It is optional: the manual insta
 
 | | |
 |---|---|
-| Availability | Released in 3.1.1; `ApexRadianceSetup.exe` is a release asset. Setup's own update: Released in 3.1.4 (Setup 1.1.0). Modernization from the newest release with the game's build, a moved EA app game: Released in 3.1.5 (Setup 1.1.1) |
+| Availability | Released in 3.1.1; `ApexRadianceSetup.exe` is a release asset. Setup's own update: Released in 3.1.4 (Setup 1.1.0). Modernization from the newest release with the game's build, a moved EA app game: Released in 3.1.5 (Setup 1.1.1). Installs from the manual-install zip (the release's two files): Released in 3.1.6 (Setup 1.1.2) |
 | Default | Optional, a separate download |
 | Menu | None: a separate program, not part of the in-game menu |
 | Configuration | `Game\Bin\Apex Radiance backup\setup.json` (written by Setup); restore points in `Game\Bin\Apex Radiance backup\restore`; language in `%LOCALAPPDATA%\Apex Radiance Setup\language.txt` |
@@ -29,7 +29,7 @@ Setup finds the game, compares what is installed with the player's choice and ap
 
 1. **Game.** It finds Steam 1.67.2 (`TS3W.exe`) and EA app 1.69.47 (`TS3.exe`) installs, or a folder the player picks.
 2. **Components.** Apex Radiance is required. The renderer is DXVK (recommended), the RTX Remix bridge zip of the Apex
-   release (labelled experimental, offered only when a graphics card has Vulkan 1.3, which its DXVK 2 needs), or the game's own Direct3D 9; Ultimate ASI Loader is added only when no loader is found; other mods that work
+   release (offered only when a graphics card has Vulkan 1.3, which its DXVK 2 needs), or the game's own Direct3D 9; Ultimate ASI Loader is added only when no loader is found; other mods that work
    with Apex can be switched on. The full list, with sources and target folders, is in
    [installer/README.md](../../installer/README.md#what-it-does).
 3. **Install.** Every file is downloaded at install time from its author's GitHub release (never re-hosted) and checked

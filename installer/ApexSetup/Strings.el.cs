@@ -221,7 +221,7 @@ public static partial class Strings
         ["Your Apex Radiance settings are always kept."] = "Οι ρυθμίσεις σου στο Apex Radiance διατηρούνται πάντα.",
         ["No internet connection"] = "Δεν υπάρχει σύνδεση στο Internet",
         ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (προτείνεται)",
-        ["Vulkan with more memory (RTX Remix bridge, experimental)"] = "Vulkan με περισσότερη μνήμη (RTX Remix bridge, πειραματικό)",
+        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan με περισσότερη μνήμη (RTX Remix bridge)",
         ["The RTX Remix bridge needs a graphics card with Vulkan 1.3 (found: {0})."] = "Το RTX Remix bridge χρειάζεται κάρτα γραφικών με Vulkan 1.3 (βρέθηκε: {0}).",
         ["1 update for The Sims 3 · {0}"] = "1 ενημέρωση για το The Sims 3 · {0}",
         ["Change"] = "Αλλαγή",
