@@ -9,6 +9,7 @@
 #include "memory_patch.h"
 #include "apex_log.h"
 #include "build_flavor.h"
+#include "dev_switches.h"
 #include "imgui.h"
 #include <windows.h>
 #include <atomic>
@@ -64,6 +65,105 @@ using AllocFn = LPVOID(WINAPI*)(LPVOID, SIZE_T, DWORD, DWORD);
 inline FreeFn RealFree() { return *reinterpret_cast<FreeFn*>(g_freeSlot); }
 inline AllocFn RealAlloc() { return *reinterpret_cast<AllocFn*>(g_allocSlot); }
 
+// ---- mono_cores_bottom and big_block_reuse (dev switches; Steam 1.67.2 sites, see dev_switches.h) ----
+constexpr uintptr_t kDirectAllocAt = 0x004E512A;  // the direct-block "call [VirtualAlloc]" (blocks of 128 KB and more)
+constexpr uintptr_t kDirectAllocRet = kDirectAllocAt + kCallLen;
+// The Mono sub-heap's core supplier (0x00D71510) ends in a main-heap Malloc: mov ecx,[0x11CB864]; push 0; push esi;
+// call 0x004E69D0; test eax,eax. Its rel32 (0x00D71554) goes to MonoCoreMalloc.
+constexpr uintptr_t kMonoWindow = 0x00D7154A, kMonoCall = 0x00D71553, kMalloc = 0x004E69D0;
+constexpr BYTE kMonoBytes[16] = {0x8B, 0x0D, 0x64, 0xB8, 0x1C, 0x01, 0x6A, 0x00, 0x56, 0xE8, 0x78, 0x54, 0x77, 0xFF, 0x85, 0xC0};
+std::atomic<DWORD> g_monoThread{0}; // the thread inside the supplier's Malloc (one slot: a second one is only counted)
+bool g_monoPatched = false;
+std::atomic<uint64_t> c_monoStrips{0}, c_monoBusy{0};
+
+void* __fastcall MonoCoreMalloc(void* heap, void*, size_t size, int flags) {
+    DWORD none = 0;
+    const bool marked = g_monoThread.compare_exchange_strong(none, GetCurrentThreadId());
+    if (!marked) c_monoBusy.fetch_add(1, std::memory_order_relaxed);
+    void* r = reinterpret_cast<void*(__thiscall*)(void*, size_t, int)>(kMalloc)(heap, size, flags);
+    if (marked) g_monoThread.store(0);
+    return r;
+}
+
+constexpr uint32_t kReuseMin = 0x10000, kReuseMaxBlock = 16u << 20, kReuseBudget = 128u << 20;
+constexpr int kReuseCap = 256;
+struct Kept {
+    uintptr_t base;
+    uint32_t size; // the whole reservation
+};
+std::atomic<bool> g_reuse{false};
+SRWLOCK g_keepLock = SRWLOCK_INIT;
+Kept g_kept[kReuseCap]; // oldest first, under g_keepLock
+int g_keptN = 0;
+uint64_t g_keptBytes = 0;
+std::atomic<uint64_t> c_reuseHits{0}, c_reuseKept{0}, c_reuseEvicted{0}, c_reuseCommitFail{0};
+
+uint32_t ReservationSize(uintptr_t base) {
+    MEMORY_BASIC_INFORMATION m;
+    uintptr_t a = base;
+    while (VirtualQuery(reinterpret_cast<LPCVOID>(a), &m, sizeof m) && reinterpret_cast<uintptr_t>(m.AllocationBase) == base && m.State != MEM_FREE) a += m.RegionSize;
+    return static_cast<uint32_t>(a - base);
+}
+
+// A direct block the allocator released: decommitted and kept reserved. False = release it as before.
+bool Keep(void* p) {
+    const uintptr_t base = reinterpret_cast<uintptr_t>(p);
+    if (base & 0xFFFF) return false;
+    const uint32_t size = ReservationSize(base);
+    if (size < kReuseMin || size > kReuseMaxBlock || !RealFree()(p, size, MEM_DECOMMIT)) return false;
+    Kept out[kReuseCap];
+    int nOut = 0;
+    AcquireSRWLockExclusive(&g_keepLock);
+    while (g_keptN && (g_keptN == kReuseCap || g_keptBytes + size > kReuseBudget)) {
+        out[nOut++] = g_kept[0];
+        g_keptBytes -= g_kept[0].size;
+        std::memmove(g_kept, g_kept + 1, --g_keptN * sizeof(Kept));
+    }
+    g_kept[g_keptN++] = {base, size};
+    g_keptBytes += size;
+    ReleaseSRWLockExclusive(&g_keepLock);
+    for (int i = 0; i < nOut; i++) RealFree()(reinterpret_cast<void*>(out[i].base), 0, MEM_RELEASE);
+    c_reuseKept.fetch_add(1, std::memory_order_relaxed);
+    c_reuseEvicted.fetch_add(nOut, std::memory_order_relaxed);
+    return true;
+}
+
+// A kept reservation of size's 64 KB class, committed again (zero pages, as a new block), or nullptr
+LPVOID TakeKept(SIZE_T size, DWORD protect) {
+    const uint64_t cls = (uint64_t(size) + 0xFFFF) & ~uint64_t(0xFFFF);
+    uintptr_t base = 0;
+    AcquireSRWLockExclusive(&g_keepLock);
+    for (int i = g_keptN - 1; i >= 0; i--) {
+        if (((uint64_t(g_kept[i].size) + 0xFFFF) & ~uint64_t(0xFFFF)) != cls || g_kept[i].size < size) continue;
+        base = g_kept[i].base;
+        g_keptBytes -= g_kept[i].size;
+        std::memmove(g_kept + i, g_kept + i + 1, (--g_keptN - i) * sizeof(Kept));
+        break;
+    }
+    ReleaseSRWLockExclusive(&g_keepLock);
+    if (!base) return nullptr;
+    if (LPVOID r = RealAlloc()(reinterpret_cast<LPVOID>(base), size, MEM_COMMIT, protect)) {
+        c_reuseHits.fetch_add(1, std::memory_order_relaxed);
+        return r;
+    }
+    c_reuseCommitFail.fetch_add(1, std::memory_order_relaxed); // commit limit: the reservation goes and the game's call runs
+    RealFree()(reinterpret_cast<LPVOID>(base), 0, MEM_RELEASE);
+    return nullptr;
+}
+
+// Releases every kept reservation. Returns how many.
+uint32_t FlushKept() {
+    Kept out[kReuseCap];
+    AcquireSRWLockExclusive(&g_keepLock);
+    const int n = g_keptN;
+    std::memcpy(out, g_kept, n * sizeof(Kept));
+    g_keptN = 0;
+    g_keptBytes = 0;
+    ReleaseSRWLockExclusive(&g_keepLock);
+    for (int i = 0; i < n; i++) RealFree()(reinterpret_cast<void*>(out[i].base), 0, MEM_RELEASE);
+    return static_cast<uint32_t>(n);
+}
+
 uint64_t Qpc() {
     LARGE_INTEGER t;
     QueryPerformanceCounter(&t);
@@ -76,8 +176,8 @@ SRWLOCK g_drainLock = SRWLOCK_INIT;
 std::atomic<uint32_t> g_releasedGen{0};
 HANDLE g_workerDone = nullptr; // set by the worker when it leaves its loop (a thread's exit waits for the loader lock)
 
-// Releases every queued block on the calling thread. Returns how many.
-uint32_t ReleaseQueued() {
+// Releases every queued block on the calling thread (keep: big_block_reuse keeps what it can). Returns how many.
+uint32_t ReleaseQueued(bool keep = false) {
     void* batch[kQueueCap];
     AcquireSRWLockExclusive(&g_drainLock);
     AcquireSRWLockExclusive(&g_qLock);
@@ -88,7 +188,8 @@ uint32_t ReleaseQueued() {
     if (n) {
         const uint64_t t0 = Qpc();
         const FreeFn f = RealFree();
-        for (uint32_t i = 0; i < n; i++) f(batch[i], 0, MEM_RELEASE);
+        for (uint32_t i = 0; i < n; i++)
+            if (!(keep && Keep(batch[i]))) f(batch[i], 0, MEM_RELEASE);
         g_releaseTicks.fetch_add(Qpc() - t0, std::memory_order_relaxed);
         g_releasedGen.fetch_add(1, std::memory_order_release);
     }
@@ -100,7 +201,7 @@ DWORD WINAPI WorkerProc(LPVOID) {
     SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL); // the queue is short-lived address space: empty it promptly
     while (!g_workerStop.load(std::memory_order_acquire)) {
         WaitForSingleObject(g_wake, 100);
-        c_deferred.fetch_add(ReleaseQueued(), std::memory_order_relaxed);
+        c_deferred.fetch_add(ReleaseQueued(g_reuse.load(std::memory_order_relaxed)), std::memory_order_relaxed);
     }
     SetEvent(g_workerDone);
     return 0;
@@ -131,6 +232,17 @@ LPVOID WINAPI Stub_Alloc(LPVOID address, SIZE_T size, DWORD type, DWORD protect)
     const AllocFn alloc = RealAlloc();
     const uint32_t gen = g_releasedGen.load(std::memory_order_acquire);
     const uintptr_t caller = reinterpret_cast<uintptr_t>(_ReturnAddress());
+    if (caller == kDirectAllocRet && !address) {
+        if (g_monoThread.load(std::memory_order_relaxed) == GetCurrentThreadId()) {
+            if (type & MEM_TOP_DOWN) c_monoStrips.fetch_add(1, std::memory_order_relaxed);
+            type &= ~MEM_TOP_DOWN; // a Mono core: long-lived, kept with the other cores at the bottom
+        } else if (g_reuse.load(std::memory_order_relaxed)) {
+            if (LPVOID kept = TakeKept(size, protect)) {
+                MemoryTelemetry::Attempt(size, true, caller, 0, type);
+                return kept;
+            }
+        }
+    }
     auto observed = [&]() {
         LPVOID result = alloc(address, size, type, protect);
         const DWORD lastError = GetLastError();
@@ -142,7 +254,8 @@ LPVOID WINAPI Stub_Alloc(LPVOID address, SIZE_T size, DWORD type, DWORD protect)
     if (r) return r;
     const DWORD err = GetLastError();
     // ReleaseQueued waits for a drain in progress; a drain that ended since before the call also counts
-    if (!ReleaseQueued() && g_releasedGen.load(std::memory_order_acquire) == gen) {
+    const bool freed = ReleaseQueued() + FlushKept() != 0;
+    if (!freed && g_releasedGen.load(std::memory_order_acquire) == gen) {
         SetLastError(err);
         return r;
     }
@@ -231,6 +344,38 @@ bool Restore(CallSite& site) {
     return true;
 }
 
+// mono_cores_bottom / big_block_reuse, once the allocator's calls go through the stubs. Steam 1.67.2 only: the
+// direct-block call must be one of the five found, and the Mono supplier's bytes must match.
+void StartAddressExperiments(const uintptr_t (&found)[kAllocSites]) {
+    bool steam = false;
+    for (uintptr_t a : found) steam |= a == kDirectAllocAt;
+    if (!steam) {
+        LOG_INFO("[FastMemory] mono_cores_bottom / big_block_reuse: not the Steam 1.67.2 allocator, off");
+        return;
+    }
+    if (DevSwitches::BigBlockReuse()) g_reuse.store(true);
+    if (DevSwitches::MonoCoresBottom()) {
+        if (!DevSwitches::AllocatorTopDown()) LOG_INFO("[FastMemory] mono_cores_bottom: allocator_top_down is off, nothing to keep at the bottom");
+        else if (!MemPatch::ValidateBytes(reinterpret_cast<LPCVOID>(kMonoWindow), kMonoBytes, sizeof kMonoBytes))
+            LOG_INFO("[FastMemory] mono_cores_bottom: the Mono core supplier's bytes differ, off");
+        else {
+            const int32_t rel = MemPatch::CalculateRelativeOffset(kMonoCall, reinterpret_cast<uintptr_t>(&MonoCoreMalloc), 5);
+            g_monoPatched = MemPatch::WriteCodeSuspended(kMonoCall + 1, reinterpret_cast<const BYTE*>(&rel), 4);
+        }
+    }
+    LOG_INFO(std::format("[FastMemory] Address-space experiments: Mono cores bottom-up {}, direct-block reuse {} (up to {} MB kept, blocks of 64 KB to {} MB)",
+                         g_monoPatched ? "on" : "off", g_reuse.load() ? "on" : "off", kReuseBudget >> 20, kReuseMaxBlock >> 20));
+}
+
+std::string ExperimentCounters() {
+    AcquireSRWLockShared(&g_keepLock);
+    const int n = g_keptN;
+    const uint64_t bytes = g_keptBytes;
+    ReleaseSRWLockShared(&g_keepLock);
+    return std::format("Mono cores kept bottom-up {} (missed {}); reuse hits {}, kept {}, evicted {}, commit failures {}, now kept {} ({:.1f} MB)", c_monoStrips.load(),
+                       c_monoBusy.load(), c_reuseHits.load(), c_reuseKept.load(), c_reuseEvicted.load(), c_reuseCommitFail.load(), n, bytes / 1048576.0);
+}
+
 // Deferral on: the allocator's VirtualAlloc calls first (the retry must exist before anything is queued), then the release
 bool StartDeferral(std::string* why) {
     const uintptr_t freeAt = GameAddr::Get(GameAddr::Id::AllocMmapFreeCall);
@@ -284,6 +429,7 @@ bool StartDeferral(std::string* why) {
     bool ok = true;
     for (int i = 0; i < kAllocSites && ok; i++) ok = Redirect(g_allocSites[i], found[i], reinterpret_cast<void*>(&Stub_Alloc));
     if (ok) ok = Redirect(g_freeSite, freeAt, reinterpret_cast<void*>(&Stub_Free));
+    if (ok && (DevSwitches::MonoCoresBottom() || DevSwitches::BigBlockReuse())) StartAddressExperiments(found);
     if (ok) return true;
     *why = "a call could not be rewritten (a thread was stopped on it)";
     return false; // the caller runs StopDeferral
@@ -292,6 +438,11 @@ bool StartDeferral(std::string* why) {
 // The release first (nothing new is queued), then the queue emptied here, then the VirtualAlloc calls. False when a call
 // could not be written back (it stays redirected: the stubs keep working, releasing on the calling thread).
 bool StopDeferral() {
+    if (g_monoPatched) {
+        constexpr BYTE orig[4] = {0x78, 0x54, 0x77, 0xFF};
+        g_monoPatched = !MemPatch::WriteCodeSuspended(kMonoCall + 1, orig, 4);
+    }
+    g_reuse.store(false);
     bool ok = Restore(g_freeSite);
     AcquireSRWLockExclusive(&g_qLock);
     g_workerAlive = false;
@@ -306,6 +457,7 @@ bool StopDeferral() {
         g_worker = nullptr;
     }
     c_deferred.fetch_add(ReleaseQueued(), std::memory_order_relaxed);
+    FlushKept();
     for (auto& s : g_allocSites) ok = Restore(s) && ok;
     return ok;
 }
@@ -366,7 +518,8 @@ bool Running() { return g_on.load(std::memory_order_acquire); }
 
 uint32_t PrepareForSave() {
     if (!Running()) return 0;
-    const auto released = ReleaseQueued();
+    if (g_reuse.load() || g_monoPatched) LOG_INFO("[FastMemory] Before the save: " + ExperimentCounters());
+    const auto released = ReleaseQueued() + FlushKept(); // kept reservations go back before the save
     c_direct.fetch_add(released, std::memory_order_relaxed);
     return released;
 }

@@ -12,7 +12,7 @@ that cannot run it, none of it runs.
 
 | | |
 |---|---|
-| Availability | Released in 2.13.0 (Performance > Lamp lighting > Instant (GPU)). Repeated game writes relit at most every 0.5 s and lamps on the ground drawn from 40 cm: Released in 2.15.1. Baked lamp records without padding (the frame rate of 2.15.1 while moving the camera): Released in 2.15.2. Shaders from the shader cache: Released in 2.15.3. Light past 1 on the lot ground, outdoor floors and outside walls (the outdoor scale): Released in 2.16.0. Kept solves that account for every light: Released in 2.16.1. Released in 2.18.0: a lamp drawn on every story at once, floor maps smaller than their solve relit, walls relit first, each lamp counted once on floors. Released in 2.18.2: the active lot's lamp posts drawn on the four lots next to it. Released in 2.18.3: no lots next to it while the active lot has no lamp post. Released in 3.0.0: the shadow search walks the rim of the ball's cone, the penumbra at door jambs is whole, a street-class lamp's cap carries its street factor, and lamps follow the sun at dawn and dusk. Released in 3.1.2: a big lot's floor mask lamp sums computed on a worker thread, the lots next to it gathered urgently only when they leave the set or after a lamp edit, the lot just left solved urgently only after a GPU lamp edit there, an active-lot switch no longer opening a lamp edit. |
+| Availability | Released in 2.13.0 (Performance > Lamp lighting > Instant (GPU)). Repeated game writes relit at most every 0.5 s and lamps on the ground drawn from 40 cm: Released in 2.15.1. Baked lamp records without padding (the frame rate of 2.15.1 while moving the camera): Released in 2.15.2. Shaders from the shader cache: Released in 2.15.3. Light past 1 on the lot ground, outdoor floors and outside walls (the outdoor scale): Released in 2.16.0. Kept solves that account for every light: Released in 2.16.1. Released in 2.18.0: a lamp drawn on every story at once, floor maps smaller than their solve relit, walls relit first, each lamp counted once on floors. Released in 2.18.2: the active lot's lamp posts drawn on the four lots next to it. Released in 2.18.3: no lots next to it while the active lot has no lamp post. Released in 3.0.0: the shadow search walks the rim of the ball's cone, the penumbra at door jambs is whole, a street-class lamp's cap carries its street factor, and lamps follow the sun at dawn and dusk. Released in 3.1.2: a big lot's floor mask lamp sums computed on a worker thread, the lots next to it gathered urgently only when they leave the set or after a lamp edit, the lot just left solved urgently only after a GPU lamp edit there, an active-lot switch no longer opening a lamp edit. Released in 3.1.3: an active lot still preparing its maps holds through a pan. |
 | Default | On (Lamp lighting: Instant (GPU); a saved `lampLightingMode` keeps its choice) |
 | Menu | System > Performance > Lamp lighting > Lamp updates: Instant (GPU) |
 | Configuration | `lampLightingMode = "instant"` under `[patches.NightTerrainRelight]` in `ApexRadiance.toml` |
@@ -168,15 +168,14 @@ when the new lot's first room-0 solve ends after it: `Active lot tracker X: stor
 K quiet rooms still waiting` (with *Faster room lighting* on, which sees the solve ends).
 
 With the switch `active_lot_hold` (shipped, unmeasured in game, see [Limitations](#limitations)), while the camera moves the lot already active stays so until another lot has been the first
-lit at the high quality for 1.5 s (`kActiveLotHoldMs`), or until the camera has been still for 300 ms
+lit at the high quality for 3 s (`kActiveLotHoldMs`), or until the camera has been still for 300 ms
 (`LotLightingMotion::SampleCameraMoving`). Meanwhile its maps are relit as before (nothing of the relight reads the high
 quality), and Quick outdoor lamp edits keep the same lot (`OutdoorDelta::ActiveLot` follows `RtOutdoorLamps::ActiveTracker`
 while Real-time outdoor lamps run, and reads a change of it at once). The lots next to it keep its lamp posts. The lot
 waiting is not sent to its solve during the hold (an urgent solve on the lot played, which the switch makes again in full),
 and once it shows a class (0 to 2) with no copy left the hold ends and the switch runs on the next frame; a room 0 that
 shows no solve yet (class 4) has no map a copy stands in for, so the hold goes on. A lamp edit on the lot waiting takes the
-game's solve. A lot the game no longer has, one with no relit map shown, or one whose maps are not drawn (waiting for its
-occluders) switches at once. Each hold is logged with its length (`Active lot switch held N ms while the camera moved`),
+game's solve. A lot the game no longer has switches at once. An active lot still preparing its maps (waiting for its occluders or kept solves) is held as well: a pan that let the next border switch at once chained the switches (4 in 750 ms in a recording, each new lot waiting 3 to 5 s for its maps, the game's maps shown on every lot meanwhile). Each hold is logged with its length (`Active lot switch held N ms while the camera moved`),
 and a hold ended by the lot waiting with `Active lot hold ends: Lot X story S (the lot waiting) ...`.
 
 At a switch the lot left keeps its room 0s' kept parts for 20 s (`kLeftLotGraceMs`, `OutdoorDelta::GraceRooms`): the

@@ -519,6 +519,33 @@ void BasisChecks() {
 // holds only the lights without a law. A room with a wall at x = 4 (lamp A behind it for x > 4) and a table top at y = 1
 // under lamp B (listed twice, norm scale 0.8); lamp C has no law (in the base). Packed against the game's own fill with those
 // shares; then the write rule: only texels still holding the expected value take the new one
+// (basis_lamp_law) GpuLampLaw::BasisToLaw: a lamp's directional part brought to the law at the sample, facing the lamp, with
+// the game's split over the directions and its alpha kept; an unlit channel and a sample at the lamp stay as the step
+void BasisLawChecks() {
+    GpuLampLaw::Lamp L; // a red shaded lamp as the F7 capture's sconce: cones down and up, spill 0.213, 0.24 m over the floor
+    L.pos[0] = 0.0f, L.pos[1] = 0.24f, L.pos[2] = 0.0f, L.W = 0.8f, L.colour[0] = 1.0f;
+    const float down[3] = {0.0f, -1.0f, 0.0f}, S[3] = {0.213f, 0.213f, 0.213f};
+    GpuLampLaw::ShadedCone(L, down, 5.0f, 0.766f, 5.0f, 0.766f, S);
+    const float p[3] = {3.0f, 0.5f, 0.0f};
+    float step[16] = {0.6f, 0.0f, 0.0f, 1.0f, 0.3f, 0.0f, 0.0f, 1.0f, 0.1f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 1.0f}; // the rig's red, 1.0 in all
+    GpuLampLaw::BasisToLaw(L, p, step);
+    float n[3] = {L.pos[0] - p[0], L.pos[1] - p[1], L.pos[2] - p[2]};
+    const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+    for (float& v : n) v /= len;
+    float want[3];
+    GpuLampLaw::Eval(L, p, n, 0.0f, want);
+    const float red = ((step[0] + step[4]) + step[8]) + step[12];
+    const bool sum = std::fabs(red - want[0]) <= 1e-6f * std::max(1.0f, want[0]) && want[0] > 0.0f && want[0] < 0.5f;
+    const bool split = std::fabs(step[0] / red - 0.6f) < 1e-5f && std::fabs(step[4] / red - 0.3f) < 1e-5f && step[12] == 0.0f;
+    const bool rest = step[1] == 0.0f && step[2] == 0.0f && step[5] == 0.0f && step[3] == 1.0f && step[7] == 1.0f && step[15] == 1.0f;
+    std::printf("  directional law: the rig's red 1.0 at 3 m becomes %.4f (the law facing the lamp)\n", red);
+    Check(sum && split && rest, "directional law: a lamp's part sums to the law at the sample, the game's split and alpha kept, unlit channels 0");
+    float at[16];
+    std::fill(at, at + 16, 0.5f);
+    GpuLampLaw::BasisToLaw(L, L.pos, at);
+    Check(std::all_of(at, at + 16, [](float v) { return v == 0.5f; }), "directional law: a sample at the lamp itself keeps the game's step");
+}
+
 void BasisPhysChecks() {
     using namespace RoomLightTests;
     std::mt19937 rng(20261105);
@@ -3181,6 +3208,7 @@ int main() {
     DawnChecks();
     SeatChecks();
     PhysPickChecks();
+    BasisLawChecks();
     ReflectionChecks();
     PhaseCacheChecks();
     BudgetChecks();

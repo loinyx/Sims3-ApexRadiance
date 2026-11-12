@@ -112,9 +112,37 @@ inline bool RoomSolveCauses() { return kCompiled && roomSolveCauses.load(std::me
 //                          restarts stop for 300 ms (at most 1 s of hold); a lamp edit's rooms never wait (restart_settle.h)
 inline std::atomic<bool> restartSettle{false};
 inline bool RestartSettle() { return kCompiled && restartSettle.load(std::memory_order_relaxed); }
+// Address-space experiments taken over from sims3-modernization (#361 [BigBlock], #364 [StreamBuf]); not shipped, off
+// unless the key says true; Steam 1.67.2 only:
+//   mono_cores_bottom  the Mono sub-heap's cores (long-lived direct blocks) stay bottom-up while allocator_top_down sends
+//                      the short-lived ones to the top (needs Faster memory handling: its VirtualAlloc stub strips the flag)
+//   big_block_reuse    a freed direct block of 64 KB to 16 MB is decommitted but kept reserved, and the next block of the
+//                      same 64 KB class recommits it; at most 128 MB kept, all of it released before a save or a failed
+//                      VirtualAlloc (needs Faster memory handling)
+//   stream_arena       the data buffers of EA's memory streams (128 KB to 8 MB) come from one 48 MB reservation at the top
+//                      of the address space instead of a VirtualAlloc each (stream_arena.h)
+inline std::atomic<bool> monoCoresBottom{false};
+inline std::atomic<bool> bigBlockReuse{false};
+inline std::atomic<bool> streamArena{false};
+// With stream_arena (stream_arena.h), each off unless set:
+//   stream_arena_grow      small streams that grow get 4x (2x from 4 KB, at least 64 bytes, 4 KB for the text encoder)
+//                          instead of 1.5x; an arena block grows into the free slices behind it instead of being copied
+//   stream_arena_scratch   the game's RefPack compressor's two work tables (only calls Faster cache compression passes on)
+//   stream_arena_package   the package writer's record buffer and packed buffer
+//   stream_arena_assemble  the block assembler's scratch buffer
+//   stream_arena_verify    0; 1 = freed blocks poisoned and checked when reused; 2 = also handed out with a pattern and
+//                          the bytes never written counted at the free (2 changes what an unwritten byte reads)
+inline std::atomic<bool> streamArenaGrow{false};
+inline std::atomic<bool> streamArenaScratch{false};
+inline std::atomic<bool> streamArenaPackage{false};
+inline std::atomic<bool> streamArenaAssemble{false};
+inline std::atomic<int> streamArenaVerify{0};
+inline bool MonoCoresBottom() { return kCompiled && monoCoresBottom.load(std::memory_order_relaxed); }
+inline bool BigBlockReuse() { return kCompiled && bigBlockReuse.load(std::memory_order_relaxed); }
+inline bool StreamArena() { return kCompiled && streamArena.load(std::memory_order_relaxed); }
 //   active_lot_hold        (shipped; development builds read a missing key as on; OutdoorDelta::ActiveLot follows
 //                          RtOutdoorLamps::ActiveTracker while it is on) while the camera moves, Real-time outdoor lamps keep the active
-//                          lot until another has been the first lit at the high quality for 1.5 s or the camera has been still
+//                          lot until another has been the first lit at the high quality for 3 s or the camera has been still
 //                          for 300 ms: a pan across lot borders no longer drops every relit map and sends the lots next to it to
 //                          gather at a lamp edit's priority at each border (rt_outdoor_lamps.cpp kActiveLotHoldMs)
 inline std::atomic<bool> activeLotHold{false};
@@ -161,6 +189,10 @@ inline std::atomic<bool> sunLampLevel{false};
 inline std::atomic<bool> chairArmCaps{false};
 inline std::atomic<bool> sphereCutFade{false};
 inline std::atomic<bool> liveObjectTables{false};
+//   basis_lamp_law        a lamp's part of the directional maps objects and Sims read follows the lamp law walls and floors are lit
+//                         by (GpuLampLaw::Eval at the sample, facing the lamp): the rig colour the game puts there held a 47 m red
+//                         sconce at full red 3 m away, where the wall beside the door took 2% of it (LevelLightShare BasisLawStep)
+inline std::atomic<bool> basisLampLaw{false};
 
 void Load(); // init thread, before the features start; logs the values
 
@@ -205,5 +237,6 @@ inline bool SunLampLevel() { return kCompiled ? sunLampLevel.load(std::memory_or
 inline bool ChairArmCaps() { return kCompiled ? chairArmCaps.load(std::memory_order_relaxed) : kShipped; }
 inline bool SphereCutFade() { return kCompiled ? sphereCutFade.load(std::memory_order_relaxed) : kShipped; }
 inline bool LiveObjectTables() { return kCompiled ? liveObjectTables.load(std::memory_order_relaxed) : kShipped; }
+inline bool BasisLampLaw() { return kCompiled ? basisLampLaw.load(std::memory_order_relaxed) : kShipped; }
 
 } // namespace DevSwitches

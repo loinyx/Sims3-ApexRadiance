@@ -11968,6 +11968,32 @@ bool BasisStepImpl(const float* pos, uintptr_t light, float* acc16) {
     std::memcpy(acc16, a, sizeof a);
     return true;
 }
+// (basis_lamp_law) The game's step for one lamp at pos into out (zeroed here), its rgb brought to the lamp law walls and floors
+// are lit by (GpuLampLaw::BasisToLaw); a light with no law keeps the game's step. An F7 capture: a red sconce (type 5, range 47,
+// spill 0.21) held its room's directional maps at 255 up to 2 m away and 58 to 135 at 3 m, so a door there glowed red where
+// the wall beside it took 0.02 of red
+std::atomic<long> g_basisLawScaled{0};
+void BasisLawStep(const float* pos, void* light, float* out) {
+    for (int i = 0; i < 16; ++i) out[i] = 0.0f;
+    reinterpret_cast<BasisLight_t>(kBasisLight)(pos, light, out);
+    GpuLampLaw::Lamp law;
+    if (!RtOutdoorLamps::OwnLotLaw(reinterpret_cast<uintptr_t>(light), law)) return;
+    GpuLampLaw::BasisToLaw(law, pos, out);
+    g_basisLawScaled.fetch_add(1, std::memory_order_relaxed);
+}
+// The lamp's part at pos x k added to acc: the game's step itself with basis_lamp_law off (bit for bit)
+void BasisAdd(const float* pos, void* light, float* acc, float k) {
+    if (!DevSwitches::BasisLampLaw()) {
+        if (k == 1.0f) return reinterpret_cast<BasisLight_t>(kBasisLight)(pos, light, acc);
+        alignas(16) float c[16] = {};
+        reinterpret_cast<BasisLight_t>(kBasisLight)(pos, light, c);
+        for (int i = 0; i < 16; ++i) acc[i] += c[i] * k;
+        return;
+    }
+    alignas(16) float c[16];
+    BasisLawStep(pos, light, c);
+    for (int i = 0; i < 16; ++i) acc[i] += c[i] * k;
+}
 void BasisLightBody(BYTE* room, const float* pos, void* light, float* acc) {
     if (g_installed.load(std::memory_order_relaxed) && g_indoorReady && ThreadId() == g_gatherThread.load(std::memory_order_relaxed))
         if (const RoomInfo* info = SolveInfo(room); info && (info->indoor || info->id == 0) && FindCross(*info, reinterpret_cast<uintptr_t>(light)) &&
@@ -11998,9 +12024,7 @@ void BasisLightBody(BYTE* room, const float* pos, void* light, float* acc) {
                 return; // behind the floor: this lamp adds nothing to the texel
             }
             if (pass[0] < 1.0f || raise) {
-                alignas(16) float contribution[16] = {};
-                reinterpret_cast<BasisLight_t>(kBasisLight)(at, light, contribution);
-                for (int i = 0; i < 16; ++i) acc[i] += contribution[i] * pass[0];
+                BasisAdd(at, light, acc, pass[0]);
                 if (raise) g_basisRaised.fetch_add(1, std::memory_order_relaxed);
                 return; // attenuate this lamp alone; leave earlier lamps in the accumulator unchanged
             }
@@ -12062,18 +12086,14 @@ void BasisLightBody(BYTE* room, const float* pos, void* light, float* acc) {
     if (openShare == 1.0f && g_installed.load(std::memory_order_relaxed) && ThreadId() == g_gatherThread.load(std::memory_order_relaxed))
         if (const float own = OwnLampPass(room, light, pos); own < 1.0f) {
             if (!(own > 0.0f)) return; // behind a wall: this lamp adds nothing to the texel
-            alignas(16) float contribution[16] = {};
-            reinterpret_cast<BasisLight_t>(kBasisLight)(pos, light, contribution);
-            for (int i = 0; i < 16; ++i) acc[i] += contribution[i] * own;
+            BasisAdd(pos, light, acc, own);
             return;
         }
     if (openShare != 1.0f) { // Keep earlier lamps unchanged when an imported lamp needs a different weight.
-        alignas(16) float contribution[16] = {};
-        reinterpret_cast<BasisLight_t>(kBasisLight)(pos, light, contribution);
-        for (int i = 0; i < 16; ++i) acc[i] += contribution[i] * openShare;
+        BasisAdd(pos, light, acc, openShare);
         return;
     }
-    reinterpret_cast<BasisLight_t>(kBasisLight)(pos, light, acc);
+    BasisAdd(pos, light, acc, 1.0f);
 }
 
 // The share of a lamp of another story that reaches a point of an indoor room, tested as the basis maps test it (the floor

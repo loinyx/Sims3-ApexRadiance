@@ -5,6 +5,8 @@ VisualStudioVersion = 17.11.35303.130
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ApexRadiance", "ApexRadiance.vcxproj", "{6F2C1B7A-3D54-4E8B-9A61-5C0E7D2F4A93}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ts3wrap", "native\ts3wrap\ts3wrap.vcxproj", "{3B7E9A51-6C2D-4F80-9E14-2A5D8C7F0B36}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x86 = Debug|x86
@@ -15,6 +17,10 @@ Global
 		{6F2C1B7A-3D54-4E8B-9A61-5C0E7D2F4A93}.Debug|x86.Build.0 = Debug|Win32
 		{6F2C1B7A-3D54-4E8B-9A61-5C0E7D2F4A93}.Release|x86.ActiveCfg = Release|Win32
 		{6F2C1B7A-3D54-4E8B-9A61-5C0E7D2F4A93}.Release|x86.Build.0 = Release|Win32
+		{3B7E9A51-6C2D-4F80-9E14-2A5D8C7F0B36}.Debug|x86.ActiveCfg = Debug|x64
+		{3B7E9A51-6C2D-4F80-9E14-2A5D8C7F0B36}.Debug|x86.Build.0 = Debug|x64
+		{3B7E9A51-6C2D-4F80-9E14-2A5D8C7F0B36}.Release|x86.ActiveCfg = Release|x64
+		{3B7E9A51-6C2D-4F80-9E14-2A5D8C7F0B36}.Release|x86.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

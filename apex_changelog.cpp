@@ -6,6 +6,17 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k313Improved[] = {
+    "Performance: zooming out and the map view no longer drop the frame rate",
+    "Performance: fences and stairs near the camera cost almost nothing to draw",
+    "Night Lights: the lot you look at keeps its lights while the camera pans",
+    nullptr};
+constexpr const char* k313Fixed[] = {
+    "Night Lights: doors and objects beside coloured lamps no longer glow too brightly",
+    "Night Lights: the upper walls of double-height rooms are no longer black",
+    "No crash when a Sim wears a broken custom part",
+    nullptr};
+
 constexpr const char* k312Added[] = {
     "Display: a switch to turn off G-SYNC for the game",
     nullptr};
@@ -562,6 +573,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"3.1.3", "2026-11-12", nullptr, k313Improved, k313Fixed, "A smooth camera when zoomed out, and steadier lamp light at night"},
     {"3.1.2", "2026-11-12", k312Added, k312Improved, k312Fixed, "Smoother camera, and lamp light that stays put around town"},
     {"3.1.1", "2026-11-11", nullptr, k311Improved, k311Fixed, "Better compatibility with the RTX Remix bridge, and fewer crashes"},
     {"3.1.0", "2026-11-10", k310Added, k310Improved, k310Fixed,

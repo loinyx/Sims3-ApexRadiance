@@ -69,6 +69,9 @@ whether to keep it on (**Keep it on** / **Turn it off**); the answer sets the sw
 
 - **Faster memory handling** ([fast-memory.md](fast-memory.md)) changes the allocator lock and big-block releases; the
   two work together.
+- **Address-space experiments** (development builds, off unless set;
+  [fast-memory.md](fast-memory.md#address-space-experiments-not-shipped)): kept large blocks are released and the
+  stream arena's free slices decommitted before every save; the arena's 48 MB go back when the reserve is let go.
 - **Lot Streaming** ([lot-streaming.md](lot-streaming.md)) with more detailed lots uses more address space.
 - **Vulkan driver guard** ([vulkan-driver-guard.md](vulkan-driver-guard.md)) keeps an unused driver out of the same
   address space.

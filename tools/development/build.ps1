@@ -19,7 +19,7 @@ elseif ($DevelopmentVersion) { $argsList += '/p:ApexStudyDefines=APEX_DEVELOPMEN
 if ($Flavor -eq 'Public') { $argsList += '/p:ApexFlavorDefines=APEX_NO_DEV_TOOLS' }
 else { $argsList += '/p:ApexFlavorDefines=' }
 New-Item -ItemType Directory -Path (Join-Path $repo 'outputs/build') -Force | Out-Null
-$recipe = @{ executable=$msbuild; args=$argsList; target="Release/x86/$Flavor"; artifacts=@("$relativeOutput/ApexRadiance.asi"); requires=@($dependencies) }
+$recipe = @{ executable=$msbuild; args=$argsList; target="Release/x86/$Flavor"; artifacts=@("$relativeOutput/ApexRadiance.asi","$relativeOutput/ts3wrap.exe"); requires=@($dependencies) }
 $recipePath = Join-Path $repo "outputs/build/$Flavor-recipe.json"
 $recipe | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $recipePath -Encoding utf8
 Push-Location $repo

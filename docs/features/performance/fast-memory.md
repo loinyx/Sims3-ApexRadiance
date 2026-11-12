@@ -52,6 +52,59 @@ Two further changes to the same allocator have no setting and are on in every ga
 Both require the Steam image base `0x00400000` and the trim's prologue bytes `83 EC 10 53 55 56 8B E9`; otherwise the
 log says *Not the Steam 1.67.2 allocator: off*. The log lists the first trims and any trim that freed 1 MB or more.
 
+### Address-space experiments (not shipped)
+
+Three development-build switches, off unless `[dev_build]` sets them to `true`, Steam 1.67.2 only. They come from
+sims3-modernization's `[BigBlock]` and `[StreamBuf]` research and have not been measured with Apex Radiance yet.
+
+- **`mono_cores_bottom`** (needs *Faster memory handling* and `allocator_top_down`). The Mono sub-heap takes its 1 MB+
+  cores from the game allocator as large blocks, so top-down placement sends these long-lived blocks among the
+  short-lived ones. The call in the Mono core supplier (`0x00D71553`, rel32 at `0x00D71554`, window `0x00D7154A`
+  checked) goes to `MonoCoreMalloc`, which marks its thread (one slot) around the game's Malloc; the large-block
+  `VirtualAlloc` stub (return `0x004E5130`) drops `MEM_TOP_DOWN` for that thread.
+- **`big_block_reuse`** (needs *Faster memory handling*). The helper thread decommits a released large block of 64 KB to
+  16 MB and keeps its reservation (at most 128 MB, 256 blocks; the oldest released first). The next large block of the
+  same 64 KB size class is committed in it (zero pages, as a new block). Every kept reservation is released before a
+  save (`PrepareForSave`) and when an allocator `VirtualAlloc` fails.
+- **`stream_arena`** ([`features/stream_arena.{h,cpp}`](../../../features/stream_arena.cpp)). `EA::IO::MemoryStream`
+  never grows in place: each size change is a new buffer, a copy and a free, and every buffer of 128 KB or more was its
+  own `VirtualAlloc`. Buffers of 128 KB to 8 MB come from one 48 MB reservation (top-down) in 64 KB slices, committed on
+  use, zero-filled when reused and decommitted 5 s after their last use. Sites: the SharedPointer constructor's
+  allocator call `0x004DEC0B` and the two data frees `0x004DEA99`, `0x004DEEF9` (their three functions checked byte for
+  byte, written while no thread is stopped inside); a pointer outside the arena goes to the game's free. Before a save
+  the free slices are decommitted; when *Room to save* lets its reserve go, no new arena block is made and the
+  reservation is released once none is in use.
+
+With `stream_arena` on, more switches (each off unless set) add the rest of `[StreamBuf]`:
+
+- **`stream_arena_grow`.** `Write` grows a stream 1.5x from the size of its first write, so a stream fed four bytes at a
+  time is reallocated ten times before 256 bytes (about 80% of all stream buffer requests in sims3-modernization's runs
+  were grows). Write's call of `Realloc` (`0x004DF05C`) goes through `WriteGrow`: a stream that already has a buffer and
+  asks for under 128 KB gets 4 times its capacity under 4 KB, twice above, at least 64 bytes, and 4 KB when the writer
+  is the text encoder (Write's return address `0x004B590C`, read from its byte-checked frame). A stream's first buffer and
+  anything from 128 KB on are as asked. An arena block whose stream is its only owner grows into the free slices behind
+  it; `Realloc`'s copy (`0x004DEECB`, now `GrowCopy`) then copies nothing, and its free of the old SharedPointer only
+  clears the mark.
+- **`stream_arena_scratch`.** The game's RefPack compressor `0x004EC0A0` takes its two work tables (256 KB and 512 KB)
+  from the arena (four sites in that function). *Faster cache compression* replaces the stream write through its vtable
+  slot and keeps its own work memory, so this serves only the calls it passes to the game (the feature off, size
+  bounds, comparisons).
+- **`stream_arena_package`.** The package writer's record commit (`0x004A8910` with `0x004A82C0` and `0x004A7030`): the
+  record buffer and the packed buffer, six sites.
+- **`stream_arena_assemble`.** The block assembler `0x006165A0`'s scratch buffer (`Memalign` at `0x006169A8`, `Free` at
+  `0x00616A93`).
+- **`stream_arena_verify`** (0, 1 or 2). 1: a freed block is filled with `0xB5` and checked when its slices are handed
+  out again (a changed byte was written after the free). 2: also every block is handed out filled with `0xA7` instead of
+  zeros, and the 8-byte groups still holding it at the free are counted. 2 changes what an unwritten byte reads, so it
+  is for test runs only; zero-fill stays on otherwise (sims3-modernization found buffers freed with unwritten tails).
+
+Every part checks its whole function byte for byte and is written while no thread is stopped inside a site. The byte
+windows are in [`features/stream_arena_sites.h`](../../../features/stream_arena_sites.h). The `[StreamArena]` line (every
+2 minutes while the arena serves, and before each save) gives the blocks served per user, commit calls, fallbacks,
+failures, double frees, the arena's own time and the part of it spent filling, and with Grow or Verify their counters.
+
+The save path logs `[FastMemory] Before the save: ...` and `[StreamArena] Before the save: ...` with their counters.
+
 ## Settings
 
 | Menu label | TOML key | Type | Default | Range | Effect |

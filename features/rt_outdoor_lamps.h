@@ -74,6 +74,8 @@ bool CoversLamp(const void* room0, uintptr_t light);
 // developer's room lamp probe (OutdoorDelta::SetRoomProbe)
 // lotXf (16 floats, LotXform): the law in that lot space instead (physical indoor lamps' shadow tiles)
 bool WorldLaw(uintptr_t light, uint64_t lot, bool reachOn, GpuLampLaw::Lamp& out, int& type, int& regRoom, const float* lotXf = nullptr);
+// Any thread: WorldLaw for the lamp's own lot (no reach), false for a light with no law
+bool OwnLotLaw(uintptr_t light, GpuLampLaw::Lamp& out);
 // Any thread: a story manager's lot space (its +0xE0 row-major 4x4: world row vector x it = lot), false when unreadable
 bool LotXform(uintptr_t mgr, float out[16]);
 // Render thread: the generation of the occluders the kept shadow tiles use (physical indoor lamps' open tops), 0 none

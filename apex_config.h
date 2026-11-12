@@ -69,6 +69,7 @@ struct UiSettings {
     std::string testBuildSeen; // acknowledged public test version ([ui] test_build_seen)
     bool roomToSaveAsked = false; // the one-time question "Keep Room to save on?" was answered ([ui] room_to_save_asked)
     bool lowMemoryWarning = true; // a short note when the game's largest free memory block gets low ([ui] low_memory_warning)
+    bool restartHost = false; // start ts3wrap.exe, which offers a restart into the last save after a low-memory save and a normal quit ([ui] restart_host; no menu option)
     bool s3ppSpinAsked = false; // the one-time question about Sims3Performance's spin next to sims3-modernization was answered ([ui] s3pp_spin_asked)
     std::string changelogSeen; // the newest What's new version opened; the version button shows a dot until then ([ui] changelog_seen)
     int language = -1;             // menu language: -1 = Windows' display language, else I18n::Lang ([ui] language = "auto" or I18n::Code: "en", "pt", ..., "zh_hant", "th")

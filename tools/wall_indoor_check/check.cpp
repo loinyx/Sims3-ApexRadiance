@@ -9,7 +9,7 @@
 //    rounding).
 //  - marked texels matched to their room's map (IndoorPick rooms): the room's texel lit as InteriorWall lights it, through the
 //    rest of the copy bit for bit as the copy draws it with that room texel as its map (fall-off ratio 1, the floor line), over
-//    load -> day -> night -> day (and a ratio 0 night): the room's map, its ambient, its slot and the bound map (relit copy or the game's) change between
+//    load -> day -> night -> day (and a ratio 0 night: the room's ambient kept, its map's light gone): the room's map, its ambient, its slot and the bound map (relit copy or the game's) change between
 //    them, the UV map does not.
 #define NOMINMAX
 #include <windows.h>
@@ -428,7 +428,8 @@ void CheckShader(Gpu& gpu, const std::vector<DWORD>& game, const std::string& wh
     // (rooms) load -> day -> night -> day with no prepare between: in each state the room's map holds another solve (the game's,
     // a relit copy), its ambient and slot differ, and the attic's bound map is its relit copy (any texel: its scale's .z the fall-off
     // ratio, 1 at the floor line, constReg.z = 0) or the game's own map (its scale's .z 0, floored at 1 by constReg.z = 1); a last
-    // night with the ratio 0 gives the copy drawn with a black map (the room's light x the scale's ratio, never the map's colour).
+    // night with the ratio 0 gives the copy drawn with the room's texel's alpha and no colour (the ratio scales the map's light, never
+    // the room's ambient: a ratio 0 left the attic black beside its room's grey).
     // Reference: the same copy with no texel matched (UV map 0) drawn with that room texel as its map and its ambient as cA: the
     // indoor light then is the room's texel lit as InteriorWall lights it (map + map alpha x the room's ambient). The rgb out of
     // the whole copy, bit for bit, at the floor line. The outside light both blend from (the lamp mad rB = rL x cK.x + rC) is the
@@ -452,7 +453,7 @@ void CheckShader(Gpu& gpu, const std::vector<DWORD>& game, const std::string& wh
             return t;
         };
         // (the relit copy's scale: y the mark, z the fall-off ratio, 1 or 0; x is taken x 0 below)
-        IDirect3DTexture9 *ratio1 = flat(0x0000FFFFu), *ratio0 = flat(0x0000FF00u), *black = flat(0);
+        IDirect3DTexture9 *ratio1 = flat(0x0000FFFFu), *ratio0 = flat(0x0000FF00u), *black = flat(0x80000000u);
         const char* names[6] = {"load", "day", "night", "day again", "night, ratio 0", "the game's map with its last relight's ratio 0"};
         for (int k = 0; k < 6 && ok; k++) {
             const int slot = (k + 1) & 3;
@@ -461,7 +462,8 @@ void CheckShader(Gpu& gpu, const std::vector<DWORD>& game, const std::string& wh
             // IndoorRoomsOf gives it, so the attic keeps the fall-off instead of switching to its room's top texel up the wall)
             const bool marks = k == 5;
             const bool relit = k != 1 && !marks; // (by day after the switch the game's own map is shown: no ratio in it)
-            IDirect3DBaseTexture9* room = RandomTexture(gpu.dev, false, rng);
+            // (ratio 0: a flat room texel, so the reference can be the same texel without its colour)
+            IDirect3DBaseTexture9* room = zero ? static_cast<IDirect3DBaseTexture9*>(flat(0x80A0B0C0u)) : RandomTexture(gpu.dev, false, rng);
             IDirect3DBaseTexture9* game = RandomTexture(gpu.dev, false, rng);
             IDirect3DTexture9* uvK = uvMap(slot);
             std::vector<float> got, want;
