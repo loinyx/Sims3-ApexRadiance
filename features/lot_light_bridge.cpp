@@ -28,6 +28,8 @@
 #include "terrain_bake_rule.h"
 #include "rt_outdoor_lamps.h"
 #include "game_addresses.h"
+#include "game_version.h"
+#include "transition_watch_native.h"
 #include "shader_ids.h"
 #include "roof_ps_hlsl.h"
 #include "water_lamps_hlsl.h"
@@ -690,6 +692,9 @@ int ReadLotRects(LotRect* out, int max) {
 
 // (2.15.3) moved whenever g_lotRects is written: FindFloorLot's and FindLotAt's last answers (render thread)
 uint32_t g_lotRectsGen = 1;
+// every lot's base as last read since the world change: LotGroundY for a lot that left the light tree (a lot out of
+// Detailed View, whose lamps the LOD hold keeps in the bake, is still lifted from its own ground)
+std::unordered_map<uint64_t, float> g_lotBase;
 void RefreshLotRects() {
     static LotRect buf[1024];
     const int n = ReadLotRects(buf, 1024);
@@ -699,6 +704,7 @@ void RefreshLotRects() {
         return;
     }
     g_lotRects.assign(buf, buf + n);
+    for (const LotRect& r : g_lotRects) g_lotBase[static_cast<uint64_t>(r.lotHi) << 32 | r.lotLo] = r.base;
 }
 
 // The rectangle of the lot the current lot pass draws, matched by its matrix (VS c8, c10). nullptr = unknown lot.
@@ -3684,14 +3690,16 @@ bool EnumerateLights() {
     }
 }
 
-bool ReadLamp(uintptr_t L, float out[8], LampCone& cone) { // POD only (SEH)
+// heldFade >= 0: a lamp the LOD hold keeps in the terrain bake (HeldFade), taken without its enabled bit at that fade, so the
+// objects beside its ground light keep it as the ground does
+bool ReadLamp(uintptr_t L, float out[8], LampCone& cone, float heldFade = -1.0f) { // POD only (SEH)
     __try {
         const BYTE f = *reinterpret_cast<const BYTE*>(L + 0x100);
         if (!(f & 0x01) || !(f & 0x20)) return false; // alive and lit
         // A disabled lot lamp must leave the direct roof/water/object pool too,
         // rather than remaining there until the game's fade reaches zero.
         const bool lotOwned = (*reinterpret_cast<const uint32_t*>(L + 0xC0) | *reinterpret_cast<const uint32_t*>(L + 0xC4)) != 0;
-        if (lotOwned && !(f & 0x40)) return false;
+        if (lotOwned && !(f & 0x40) && heldFade < 0.0f) return false;
         const int type = *reinterpret_cast<const int*>(L + 0xB0);
         const int room = *reinterpret_cast<const int*>(L + 0x08);
         if (type != 0xB && !((f & 0x04) && room == 0)) return false; // world lamp or outdoor lot lamp
@@ -3699,7 +3707,7 @@ bool ReadLamp(uintptr_t L, float out[8], LampCone& cone) { // POD only (SEH)
         const float* bounds = reinterpret_cast<const float*>(L + 0x134);
         const float* col = reinterpret_cast<const float*>(L + 0xF0);
         const float inten = *reinterpret_cast<const float*>(L + 0x10);
-        const float fade = *reinterpret_cast<const float*>(L + 0x20);
+        const float fade = heldFade >= 0.0f ? heldFade : *reinterpret_cast<const float*>(L + 0x20);
         // Visual reach of the lamp's light pool: from its range value +0x130 (97, 40, 100...), about 7-12 m. The light
         // bounds (+0x134) are much larger (~50 m) and made roofs and water blow out to white.
         (void)bounds;
@@ -3852,7 +3860,10 @@ struct LotLampState {
     float col[3] = {}, inten = 0.0f, range = 0.0f, pos[3] = {};
     float rect[4] = {}; // light rect +0x134 {minX, minZ, maxX, maxZ} (FUN_006BDDF0: position +- sqrt(range / k))
     bool plain = false; // type 3..6
-    bool baked = false; // InBake
+    bool baked = false; // InBake, or held (LodHolds)
+    float fade = 0.0f;  // +0x20 (not read by the bake; the per-pixel lamp lists take it)
+    bool held = false;  // kept in the bake after a Detailed View demotion (LodHolds)
+    float heldFade = 0.0f; // the fade it had while enabled: what its per-pixel rows keep while held
     // automatic changes of this lamp in the current 60 s window (carried from enumeration to enumeration)
     int autoChanges = 0;
     Clock::time_point autoWindow{};
@@ -3914,6 +3925,7 @@ bool ReadLotLamp(uintptr_t L, LotLampState& out) {
         if (!WorldLampPolicy::Eligible(lot, type, f, *reinterpret_cast<const int*>(L + 0x08))) return false;
         std::memcpy(out.col, reinterpret_cast<const void*>(L + 0xF0), 12);  // base colour
         out.inten = *reinterpret_cast<const float*>(L + 0x10);               // intensity (x)
+        out.fade = *reinterpret_cast<const float*>(L + 0x20);                // fade
         out.range = *reinterpret_cast<const float*>(L + 0x130);              // range
         std::memcpy(out.pos, reinterpret_cast<const void*>(L + 0x120), 12); // position
         std::memcpy(out.rect, reinterpret_cast<const void*>(L + 0x134), 16); // light rect (the bake's chunk test, 0xC29480)
@@ -3962,9 +3974,23 @@ bool LightChanged(const float* a, const float* b) {
     return false;
 }
 
-bool RawChanged(const LotLampState& a, const LotLampState& b) {
-    return a.flags != b.flags || a.type != b.type || std::memcmp(a.col, b.col, sizeof a.col) != 0 || std::memcmp(&a.inten, &b.inten, 4) != 0 ||
+bool ValuesChanged(const LotLampState& a, const LotLampState& b) {
+    return a.type != b.type || std::memcmp(a.col, b.col, sizeof a.col) != 0 || std::memcmp(&a.inten, &b.inten, 4) != 0 ||
            std::memcmp(&a.range, &b.range, 4) != 0 || std::memcmp(a.pos, b.pos, sizeof a.pos) != 0;
+}
+
+bool RawChanged(const LotLampState& a, const LotLampState& b) { return a.flags != b.flags || ValuesChanged(a, b); }
+
+// The LOD hold. When the game drops a lot out of Detailed View it clears its lamps' enabled bit 0x40 and 0x02 (flags
+// 0x77 -> 0x35, 0xF7 -> 0xB5) while they stay alive, lit and listed, so the bake would take their light off the ground until
+// the lot is detailed again. A lamp that was in the bake stays in it while nothing else of it changes: a lit bit, light,
+// place or lot change releases it, as does the lot staying detailed for kHoldPromoted with the lamp still disabled.
+// p: the lamp at the last read. detail: its lot's +0xC1 now (DetailOf: -1 unknown, 0 no, 1 yes, 2 for kHoldPromoted).
+// A lamp sold or deleted in Build mode goes out on a detailed lot, so it is never held.
+bool LodHolds(const LotLampState& p, const LotLampState& s, int detail) {
+    if (s.lot == 0 || p.lot != s.lot || (s.flags & 0x61) != 0x21 || ValuesChanged(p, s)) return false;
+    if (p.held) return p.flags == s.flags && detail != 2;
+    return detail == 0 && p.baked && (p.flags & 0x40) && ((p.flags ^ s.flags) & ~0x02) == 0x40;
 }
 
 // Developer log: what changed on one lamp ("L1234ABCD type 3: lit 1->0, intensity 1.00->0.00 [leaves the bake]")
@@ -3992,6 +4018,69 @@ void AddDetail(std::string& d, int& n, const std::string& t) {
     else if (n == 6) d += "; ...";
     n++;
 }
+
+// Lots in Detailed View. The detail request 0x00AC20E0 stores Lot+0xC1, then posts AddLotObjectsToScene or the demotion
+// through PostRemoteMethodCall; a demoted lot's lamps then clear their enabled bit 0x40 within a second. The set is read at
+// each lamp read from the lot renderers' map (the global LotLodScoring loads first; Steam layout,
+// transition_watch_native.h). It is the one detail signal of the lamp tracking, for the Detailed View demotion route and the
+// LOD hold (LodHolds): exact and read in the same frame as the lamps, where a lot's light tracker only follows its loading.
+// Unreadable, or more than 16 detailed lots (the ReadLots cap): unknown, so no switch is recorded and no hold starts.
+constexpr auto kDetailSwitch = std::chrono::seconds(2);
+// a promoted lot's lamps are taken to come back with its load (unverified; loads of up to 25 s captured)
+constexpr auto kHoldPromoted = std::chrono::seconds(30);
+bool g_detailKnown = false; // the last read was complete
+std::unordered_map<uint64_t, Clock::time_point> g_detailedSince; // lots with +0xC1 at the last complete read, and since when
+std::unordered_map<uint64_t, Clock::time_point> g_detailSwitchAt; // lots that left that set, and when
+uintptr_t LotRenderers() { // SEH only
+    const uintptr_t scoring = g_gameVersion == GameVersion::Steam ? GameAddr::Get(GameAddr::Id::LotLodScoring) : 0;
+    if (!scoring) return 0;
+    __try {
+        if (*reinterpret_cast<const BYTE*>(scoring + 12) != 0xA1) return 0; // mov eax,[0x011ECE58]
+        return *reinterpret_cast<const uintptr_t*>(*reinterpret_cast<const uintptr_t*>(scoring + 13));
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+void ReadDetailSwitches(Clock::time_point now) {
+    std::erase_if(g_detailSwitchAt, [now](const auto& kv) { return now - kv.second >= kDetailSwitch; });
+    TransitionWatch::Native n;
+    if (const uintptr_t map = LotRenderers()) TransitionWatch::ReadLots(map, &n);
+    g_detailKnown = n.readable && !n.truncated;
+    if (!g_detailKnown) return;
+    std::unordered_map<uint64_t, Clock::time_point> lots;
+    for (unsigned i = 0; i < n.stored; i++) {
+        const auto it = g_detailedSince.find(n.lots[i].id);
+        lots.emplace(n.lots[i].id, it == g_detailedSince.end() ? now : it->second);
+    }
+    for (const auto& [lot, since] : g_detailedSince)
+        if (!lots.contains(lot)) g_detailSwitchAt[lot] = now;
+    g_detailedSince.swap(lots);
+}
+int DetailOf(uint64_t lot, Clock::time_point now) {
+    if (!g_detailKnown) return -1;
+    const auto it = g_detailedSince.find(lot);
+    return it == g_detailedSince.end() ? 0 : now - it->second >= kHoldPromoted ? 2 : 1;
+}
+
+// The lamps the LOD hold keeps, for the bake's light test on the game's thread (LotLightBridge::LodHeld): made again from
+// g_lotLampSig whenever a hold starts or ends. Holds start and last only while KeepDemotedLamps is on (not by day), the
+// world is live and the game is not in its edit mode (ChunkRelight::Editing: a deleted lamp stays registered and lit with
+// 0x40 clear, as a held lamp already is, so a held lamp deleted there would not show; all holds end when it starts).
+struct LodHold {
+    uint64_t lot;
+    int type;
+};
+std::mutex g_lodHeldMx;
+std::unordered_map<uintptr_t, LodHold> g_lodHeld;
+std::atomic<int> g_lodHeldCount{0}; // g_lodHeld.size(): the light test takes no lock while none is held
+bool g_lodHoldOn = false;
+// Lots whose held lamps left the lamp list (the lot unloaded or was bulldozed), and when: among the snapshot's settled lots
+// for 60 s, so DiffBake takes their light off the ground even when the whole lot left the list
+std::vector<std::pair<uint64_t, Clock::time_point>> g_lodGoneLots;
+// The fade a held lamp's per-pixel rows take (-1: not held): the one it had while enabled, at most the light manager's level
+// now, so trees, water and roofs beside its ground light keep the light they had, never more
+float HeldFade(const LotLampState& s) { return s.held && s.heldFade >= 0.0f ? std::min(s.heldFade, g_rigNight.load(std::memory_order_relaxed)) : -1.0f; }
+bool g_heldInRead = false; // a lamp of the last ReadEnumeratedLamps is held: only then does ReadFoliageLamps look the holds up
 
 // One pass over the enumeration g_enumLights (every 20 frames; before 2026-09-29 two passes, UpdateLampList and
 // TrackLotLampEdits): the lit outdoor lamps for SelectLamps (only when rebuildAll, as UpdateLampList did) and the tracked
@@ -4105,7 +4194,12 @@ void ReadFoliageLamps(bool rebuilt) {
         for (uintptr_t L : g_enumLights) {
             std::array<float, 8> v;
             LampCone cone;
-            if (ReadLamp(L, v.data(), cone)) g_foliageLamps.push_back(v), g_foliageCones.push_back(cone);
+            float held = -1.0f; // (as ReadEnumeratedLamps just read it)
+            if (g_heldInRead) {
+                const auto it = std::lower_bound(g_lotLampCur.begin(), g_lotLampCur.end(), L, [](const LampSig& a, uintptr_t l) { return a.first < l; });
+                if (it != g_lotLampCur.end() && it->first == L) held = HeldFade(it->second);
+            }
+            if (ReadLamp(L, v.data(), cone, held)) g_foliageLamps.push_back(v), g_foliageCones.push_back(cone);
             else if (!exitList.empty() && std::binary_search(exitList.begin(), exitList.end(), L) && exitRows.size() < 256 && ReadExitLamp(L, v.data(), cone))
                 exitRows.push_back(v), exitCones.push_back(cone);
         }
@@ -4164,22 +4258,32 @@ void ReadEnumeratedLamps(bool rebuildAll) {
         LevelLightShare::ExitLamps(g_exitList);
     }
     g_lotLampCur.clear();
+    const auto now = Clock::now();
+    ReadDetailSwitches(now);
+    const bool hold = g_lodHoldOn && LevelLightShare::WorldIsLive() && !ChunkRelight::Editing();
+    g_heldInRead = false;
     for (uintptr_t L : g_enumLights) {
+        LotLampState s;
+        if (ReadLotLamp(L, s)) {
+            if (hold && s.lot != 0 && (s.flags & 0x61) == 0x21) { // a disabled lot lamp: the LOD hold (its last read, g_lotLampSig)
+                const auto p = std::lower_bound(g_lotLampSig.begin(), g_lotLampSig.end(), L, [](const LampSig& a, uintptr_t l) { return a.first < l; });
+                if (p != g_lotLampSig.end() && p->first == L && LodHolds(p->second, s, DetailOf(s.lot, now)))
+                    s.held = true, s.heldFade = p->second.held ? p->second.heldFade : p->second.fade;
+            }
+            s.baked = s.held || InBake(s);
+            g_heldInRead |= s.held;
+            g_lotLampCur.emplace_back(L, s);
+        }
         if (rebuildAll) {
             std::array<float, 8> v;
             LampCone cone;
-            if (ReadLamp(L, v.data(), cone)) {
+            if (ReadLamp(L, v.data(), cone, HeldFade(s))) {
                 g_allLamps.push_back(v);
                 g_allCones.push_back(cone);
             } else if (!g_exitList.empty() && std::binary_search(g_exitList.begin(), g_exitList.end(), L) && g_exitLampRows.size() < 256 && ReadExitLamp(L, v.data(), cone)) {
                 g_exitLampRows.push_back(v);
                 g_exitCones.push_back(cone);
             }
-        }
-        LotLampState s;
-        if (ReadLotLamp(L, s)) {
-            s.baked = InBake(s);
-            g_lotLampCur.emplace_back(L, s);
         }
     }
     if (rebuildAll) {
@@ -4242,6 +4346,8 @@ void TrackLotLampEdits() {
     };
     std::map<uint64_t, Quiet> quiet;
     int total = 0;
+    bool holdsChanged = false;           // a LOD hold started or ended: g_lodHeld is made again
+    std::map<uint64_t, int> heldGone;    // held lamps that left the list, by lot
     // (14/10, drag solves) type-11 lights added in this enumeration: one removed on the same lot within 0.5 m is the same lamp
     // moving (a lamp drag, drag_lite.h)
     std::vector<const LotLampState*> added11;
@@ -4274,7 +4380,7 @@ void TrackLotLampEdits() {
         s.lastAuto = p.lastAuto;
         s.animated = p.animated;
         if (p.lot != s.lot) snapDirty = true;
-        if (!RawChanged(p, s)) {
+        if (!RawChanged(p, s) && p.baked == s.baked) { // (baked differs with no raw change only when a LOD hold ended)
             // the rect follows position and range (FUN_006BDDF0); should the game update it an enumeration later, the
             // snapshot still gets the current one (it never counts as a change by itself)
             if (std::memcmp(p.rect, s.rect, sizeof s.rect) != 0) snapDirty = true;
@@ -4282,6 +4388,7 @@ void TrackLotLampEdits() {
             continue;
         }
         snapDirty = true;
+        if (p.held != s.held) holdsChanged = true;
         // a lot lamp disabled (sold or deleted in Build mode: it stays registered and lit, 07/10): every room of its lot
         // gathers again at once (also when it comes back enabled: Ctrl+Z / redo of a sale or delete), so rooms the lamp edit does not send (the diagonal outside walls) drop it too
         if (s.lot != 0 && p.lot == s.lot && ((p.flags ^ s.flags) & 0x40) &&
@@ -4289,6 +4396,10 @@ void TrackLotLampEdits() {
             g_disabledLots.push_back(s.lot);
         const char* why = nullptr; // why a raw change does not count
         bool counts = false, moved = false;
+        // a lamp of a lot that left Detailed View (ReadDetailSwitches) going out of the bake: one the LOD hold could not keep
+        // (by day, in the edit mode, or changed in the same read); lamps of a promoted lot keep the priority path below, so
+        // the street around a lot that turns detailed lights at once
+        const bool leftDetail = s.lot != 0 && p.lot == s.lot && p.baked && !s.baked && g_detailSwitchAt.contains(s.lot) && DetailOf(s.lot, now) == 0;
         float pl[3], sl[3];
         for (int c = 0; c < 3; c++) {
             pl[c] = LampLight(p, c);
@@ -4298,6 +4409,18 @@ void TrackLotLampEdits() {
             counts = moved = true; // user-driven (Build mode)
             // (a lamp the GPU draws, Instant, is not a lamp the game solves: its drag keeps the Instant rules)
             DragLite::NoteLampStep("lamp list: moved", DragLite::StepKind::Move, !LampMarkFilter::HandledLately(static_cast<uintptr_t>(L), 1500));
+        } else if (p.held != s.held && p.baked && s.baked && !LightChanged(pl, sl)) {
+            // its lot left Detailed View and the lamp stays in the bake, or it is enabled again: the ground keeps its light
+            why = s.held ? "kept in the bake (Detailed View demotion)" : "enabled again after a Detailed View demotion";
+            // a chunk re-rendered while it was disabled may have left it out (before the read that started the hold, or a
+            // bake gate): the lot's bounded entry relight bakes it again once
+            if (!s.held) g_lotArrivals.insert(s.lot);
+        } else if (leftDetail) {
+            // not counted on purpose (no settle or bulk gate, no rebuild): the lot's bounded entry relight takes its ground
+            // while it is drawn (RefreshArrivingLots); otherwise the snapshot keeps the change for the next relight that
+            // covers the lot. Its rooms still gather again (g_disabledLots).
+            why = "Detailed View switch";
+            g_lotArrivals.insert(s.lot);
         } else if ((editing || (s.type == 11 && p.type == 11 && p.lot == s.lot &&
                     (s.lot != 0 || (p.baked && s.baked && LightChanged(pl, sl)) || ((p.flags ^ s.flags) & 0x40)
                      || ((p.inten <= 1e-3f) != (s.inten <= 1e-3f)))) || ObservedEnableSwitch(p, s)
@@ -4386,9 +4509,20 @@ void TrackLotLampEdits() {
             total++;
             if (Recorder::Verbose()) AddDetail(c.detail, c.details, std::format("L{:08X} type {}: removed", L, p.type));
         }
+        if (p.held) {
+            holdsChanged = true;
+            heldGone[p.lot]++;
+        }
         TraceGpuLamp(&GpuLampTrace::gone, L, p, p.baked);
     }
     g_lotLampSig.swap(cur); // g_lotLampCur keeps the old list's memory for the next read
+    if (holdsChanged) {
+        std::lock_guard<std::mutex> lk(g_lodHeldMx);
+        g_lodHeld.clear();
+        for (const auto& [L, s] : g_lotLampSig)
+            if (s.held) g_lodHeld[L] = LodHold{s.lot, s.type};
+        g_lodHeldCount.store(static_cast<int>(g_lodHeld.size()), std::memory_order_release);
+    }
     for (uint64_t lot : g_disabledLots) LevelLightShare::RelightLotById(lot, "a lamp disabled or enabled again (sold, deleted, undo)");
 
     // lots seen: new lots start their settle time, vanished lots are forgotten (with any pending removal)
@@ -4420,6 +4554,16 @@ void TrackLotLampEdits() {
         // every room of the lot lights again (07/10, a deleted lamp post kept lighting its wall): a deleted lamp runs no lamp
         // entry update, so the outdoor rooms of the other stories (the walls) kept it in their light lists
         if (lot != 0) LevelLightShare::RelightLotById(lot, "a lamp removed");
+    }
+    // held lamps that left the list (their lot unloaded or was bulldozed): no streaming, settle, bulk or confirmation wait, as
+    // nothing else takes their light off the ground; their lot stays among the snapshot's settled lots for DiffBake
+    std::erase_if(g_lodGoneLots, [now](const auto& g) { return now - g.second > std::chrono::seconds(60); });
+    for (const auto& [lot, n] : heldGone) {
+        counted++;
+        userDriven = true;
+        what = std::format("lot {:016X}: {} held lamp(s) left the lamp list (user-driven)", lot, n);
+        std::erase_if(g_lodGoneLots, [lot](const auto& g) { return g.first == lot; });
+        g_lodGoneLots.emplace_back(lot, now);
     }
     // More than 8 changes = lamps switching at dusk / dawn or streaming in bulk; except when they are all switches (no lamp
     // added or removed) of ONE lot: a lot's own lamps switched together (30/09: a town square's 57 lamps were ignored here,
@@ -4524,6 +4668,11 @@ void TrackLotLampEdits() {
     g_bakeSnap.settledLots.clear(); // time-dependent: every refresh
     for (const auto& [lot, seen] : g_lotSeen)
         if (seen.explicitEdit || (now - seen.firstSeen >= std::chrono::seconds(10) && now - seen.lastUncounted >= std::chrono::seconds(5))) g_bakeSnap.settledLots.push_back(lot);
+    if (!g_lodGoneLots.empty()) {
+        for (const auto& g : g_lodGoneLots) g_bakeSnap.settledLots.push_back(g.first);
+        std::sort(g_bakeSnap.settledLots.begin(), g_bakeSnap.settledLots.end());
+        g_bakeSnap.settledLots.erase(std::unique(g_bakeSnap.settledLots.begin(), g_bakeSnap.settledLots.end()), g_bakeSnap.settledLots.end());
+    }
     g_lampEnumerations++;
 }
 
@@ -11058,8 +11207,18 @@ void OnWorldChanged() {
     g_lastUserLots.clear();
     g_lotRects.clear(); // soft lot edges: the next Present reads the new world's lots
     g_lotRectsGen++;
+    g_lotBase.clear();
     g_lotDrawSeen.clear();
     g_lotArrivals.clear();
+    {
+        std::lock_guard<std::mutex> lk(g_lodHeldMx);
+        g_lodHeld.clear();
+        g_lodHeldCount.store(0, std::memory_order_release);
+    }
+    g_lodGoneLots.clear();
+    g_detailKnown = false;
+    g_detailedSince.clear();
+    g_detailSwitchAt.clear();
     g_lampEditRefresh = false;
     g_lotRectMiss = true;
     g_haveLastEdgeRect = false;
@@ -11369,9 +11528,9 @@ int LampSwitches() { return g_lampSwitches.load(std::memory_order_relaxed); }
 
 std::string LotLampStatus() {
     return std::format("changes counted: {} (user-driven: {}) | ignored (streaming, still loading, bulk): {} | not counted: outside the bake {}, below the threshold {}, "
-                       "animated {} ({} lamps) | lots tracked: {} | last: {}",
+                       "animated {} ({} lamps) | lots tracked: {} | kept in the bake after a Detailed View demotion: {} | last: {}",
                        g_lotChangesCounted, g_lotLampUserEdits.load(), g_lotChangesIgnored, g_lampChangesOutside, g_lampChangesNoise, g_lampChangesAnimated,
-                       g_lampsAnimated, g_lotSeen.size(), g_lastLotChange);
+                       g_lampsAnimated, g_lotSeen.size(), g_lodHeldCount.load(std::memory_order_relaxed), g_lastLotChange);
 }
 
 const BakeSnapshot& CurrentBakeLamps() { return g_bakeSnap; }
@@ -11506,6 +11665,10 @@ bool LotGroundY(uint64_t lot, float& y) {
         return false;
     };
     if (!lot || find()) return lot != 0;
+    if (const auto it = g_lotBase.find(lot); it != g_lotBase.end()) { // it left the light tree (g_lotBase)
+        y = it->second;
+        return true;
+    }
     // a lot the table does not hold yet (it streamed in since the last refresh): read the lots again, once a frame
     static DWORD missTick = ~0u;
     if (missTick == g_lotDrawTick.load()) return false;
@@ -11525,6 +11688,27 @@ std::vector<uint64_t> TakeLotArrivals() {
     return out;
 }
 bool LotVisible(uint64_t lot) { return VisibleLot(lot); }
+
+bool LodHeld(uintptr_t light, uint64_t lot, int type) {
+    if (g_lodHeldCount.load(std::memory_order_acquire) == 0) return false;
+    std::lock_guard<std::mutex> lk(g_lodHeldMx);
+    const auto it = g_lodHeld.find(light);
+    return it != g_lodHeld.end() && it->second.lot == lot && it->second.type == type;
+}
+
+void KeepDemotedLamps(bool on) {
+    if (g_lodHoldOn == on) return;
+    g_lodHoldOn = on;
+    if (on) return;
+    // the bake leaves them out from now (the daylight rebuild may start this frame); the next read counts them switched off
+    for (auto& [L, s] : g_lotLampSig) s.held = false;
+    {
+        std::lock_guard<std::mutex> lk(g_lodHeldMx);
+        g_lodHeld.clear();
+        g_lodHeldCount.store(0, std::memory_order_release);
+    }
+    g_lampRefreshNow = true;
+}
 
 bool EnumerateAllLights(std::vector<uintptr_t>& out) {
     if (!EnumerateLights()) return false;
@@ -11978,7 +12162,7 @@ void MeasureMemoryImpl() {
     Set(sFoliage, Hash(g_foliageMeshes) + Hash(g_foliageInstances) + Vec(g_crowns), g_foliageMeshes.size() + g_foliageInstances.size() + g_crowns.size());
     Set(sWallMask, Hash(g_wallMaskTex), g_wallMaskTex.size());
     Set(sOther,
-        Tree(g_chunks) + Hash(g_chunkOfTexture) + Vec(g_lotRects) + Hash(g_lotDrawSeen) + Hash(g_lotArrivals) + Vec(g_enumLights) + Vec(g_allLamps) + Vec(g_allCones) +
+        Tree(g_chunks) + Hash(g_chunkOfTexture) + Vec(g_lotRects) + Hash(g_lotBase) + Hash(g_lotDrawSeen) + Hash(g_lotArrivals) + Hash(g_lodHeld) + Vec(g_enumLights) + Vec(g_allLamps) + Vec(g_allCones) +
             Vec(g_exitLampRows) + Vec(g_exitCones) + Vec(g_exitList) + Vec(g_lotLampSig) + Vec(g_lotLampCur) + Vec(g_lotsNow) + Tree(g_lotSeen) + Tree(g_quietLogAt) +
             Vec(g_lastUserLots) + Hash(g_lampSwitchPrev) + Vec(g_disabledLots) + Hash(g_traceLast, [](const auto& kv) { return Vec(kv.second.states); }) + Hash(g_rigSnaps) +
             Hash(g_rigEpisodeParts) + Hash(g_rigRoomWaits) + Tree(g_census) + Tree(g_lightingBloom) + Tree(g_exterior) + Str(g_objDrawInfo),

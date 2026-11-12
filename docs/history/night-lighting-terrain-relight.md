@@ -363,3 +363,48 @@ straight line at the lot border.
 
 **Outcome:** the bake runs Apex's copy of its pixel shader with each lamp's cones, the rows written by the position stub;
 the dragged lamps' stamp takes the same rows (`91af563`). Not yet checked in game.
+
+### 2026-11-11: lamp flips of a Detailed View switch counted as edits
+
+**Context:** a frame-time capture of panning at night between lots that swap Detailed View, compared with the lot
+detail requests the Lot Load Analysis recorded in the same session.
+
+**Finding:** 8 of the 10 "manual-driven" lot lamp changes in one minute were lamps of lots nobody played flipping their
+enabled bit 0x40 (flags 0x77 <-> 0x35, 0xF7 <-> 0xB5). Those inside the recorded window came within 0.6 s of their lot's
+detail request, in both directions. `ObservedEnableSwitch` and the lot-owned type-11 rule took them as priority value
+edits: each one ran the user path's local terrain relight (4 to 6 ms a chunk, while the camera moved) and switched the
+ground light around those lots off and on during the pan.
+
+**Outcome:** the lots with Lot+0xC1 are read at each lamp enumeration (`ReadDetailSwitches`). For 2 s after a lot leaves
+that set, a lamp of it that goes out of the bake is not counted and makes the lot a lot arrival: the bounded entry
+relight updates its ground while the lot is drawn, behind real edits, and the change never reaches the settle or bulk
+gate. Lamps of a promoted lot keep the priority path. A first version made every flip in both directions an automatic
+change: the street around a newly detailed lot then waited for the automatic path's camera wait, 5 s / 30 s rate and
+64-chunk paced sweep (up to about 30 s, against about 90 ms before), and a swap read with more than 8 changes was bulk,
+so both lots were dropped. The lot's rooms still gather again at normal priority. Not yet checked in game.
+
+### 2026-11-11: the lamps of a lot leaving Detailed View held in the terrain bake
+
+**Context:** at night, lot lamp light went out on the ground of loaded lots while the camera moved; the log and Lot Load
+Analysis of one session.
+
+**Finding:** every `enabled 1->0` lot lamp line of the session (5 of 5) was a lot leaving Detailed View, its light
+tracker already gone; the three inside the recorded window came within 0.4 s of the lot's detail request. The flags went
+0x77 -> 0x35 or 0xF7 -> 0xB5 with colour, intensity, place and the lit bit unchanged. The bake needs 0x40, so the lamps left the ground at the
+next relight of their chunks and stayed out until the lot was detailed again (about 4 s for one lot).
+
+**Outcome:** the LOD hold. A lamp in the bake whose lot is not detailed keeps its place there while nothing else of it
+changes: the bake's light test takes it without 0x40, the snapshot keeps it baked and its per-pixel rows keep its enabled
+fade, so the demotion queues no relight. The promotion queues the lot's bounded entry relight once (a lot arrival,
+behind real edits, not the priority path): a chunk re-rendered in the up to 20 frames between the demotion and the read
+that starts the hold, or by the game's own LOD re-render, may have baked the lamp out, and the snapshot alone would never
+show it. The low-lamp lift reads a held lamp's ground from the base its lot had when last in the light tree
+(`LotGroundY`), so a lamp under 40 cm keeps its pool rather than a dot when its chunk is re-rendered during the hold.
+A swap thus saves the demotion's relight, not the promotion's; the gain is not measured yet. The detail signal is the
++0xC1 set the Detailed View guard already reads: the game's own flag, read in the same frame as the lamps, so the guard
+and the hold agree; the lot's light tracker is only a proxy that follows its loading and costs a walk of every tracker per lot. Holds end,
+counted as switch-offs, on any change of the lamp, after 30 s of detail with the lamp still disabled, in the edit mode
+(a deletion there would not show) and on the first day frame (whether a demoted lamp's lit bit clears at dawn is
+unverified). A held lamp that leaves the lamp list is relit at once, its lot kept among the settled lots for 60 s.
+Steam only, like the guard. Offline fixture: 42 checks pass. Not yet checked in game
+([open checks](../validation/night-lighting-terrain-relight.md#open-checks)).

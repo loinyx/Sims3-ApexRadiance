@@ -1088,16 +1088,22 @@ bool __stdcall ArmTestMoved(BYTE* light) {
 // The bake's light test without its counters: 0 rejected, 1 taken by the original test, 2 a lot lamp switched off, 3 a lot
 // lamp taken
 int BakeTest(BYTE* light) {
+    const BYTE f = light[0x100];
+    const int type = *reinterpret_cast<const int*>(light + 0xB0);
+    const uint64_t lot = *reinterpret_cast<const uint32_t*>(light + 0xC0) | static_cast<uint64_t>(*reinterpret_cast<const uint32_t*>(light + 0xC4)) << 32;
+    const bool outdoorLot = lot != 0 && (f & 0x04) && *reinterpret_cast<const int*>(light + 0x08) == 0;
+    // A lamp of a lot the game dropped out of Detailed View while it was in the bake (LotLightBridge::LodHeld): taken as it
+    // was, without its enabled bit. Looked up only for an alive, lit, disabled outdoor lot lamp, and with no lock while none
+    // is held.
+    const bool held = outdoorLot && (f & 0x61) == 0x21 && LotLightBridge::LodHeld(reinterpret_cast<uintptr_t>(light), lot, type);
     // Type-11 vfunc+0x20 is FUN_007EAEA0 (always true). For a lot-owned outdoor
     // lamp, respect the observed enabled/lit state before accepting that original test.
     // World-owned lights and other classes keep their original behavior.
-    if (*reinterpret_cast<const int*>(light + 0xB0) == 11 &&
-        (*reinterpret_cast<const uint32_t*>(light + 0xC0) | *reinterpret_cast<const uint32_t*>(light + 0xC4)) != 0 &&
-        (light[0x100] & 0x04) && *reinterpret_cast<const int*>(light + 0x08) == 0 &&
-        (light[0x100] & 0x61) != 0x61) return 0;
+    if (type == 11 && outdoorLot && (f & 0x61) != 0x61 && !held) return 0;
     if (OriginalWorldLightTest(light)) return 1;
+    if (held && g_lotLamps) return 3;
     if (!g_lotLamps || !IsOutdoorLotLamp(light)) return 0;
-    return (light[0x100] & 0x20) ? 3 : 2;
+    return (f & 0x20) ? 3 : 2;
 }
 // The lot lights the bake has given colour to (NightTerrainBake::EverBaked: a lamp new from the catalog is in no chunk's
 // map yet). shortcut: never shrinks; it holds the lot lights of the session, a few thousand at most
@@ -2012,6 +2018,9 @@ void OnPresent() {
             LOG_INFO(std::format("[NightTerrainRelight] Night level crossed 0.99 {} ({}; {:.1f} s after the world change; up {} / down {})", night ? "upwards" : "downwards",
                                  LevelText(s.level), MsSince(g_worldAt) / 1000.0, g_crossUp, g_crossDown));
     }
+    // Lamps of lots that left Detailed View stay in the bake at night and twilight only: whether their lit bit clears at dawn
+    // is unverified, so the holds end on the first day frame, before the daylight rebuild below
+    LotLightBridge::KeepDemotedLamps(TerrainLightingPolicy::LevelPhase(s.level) != TerrainLightingPolicy::Phase::Day);
     const auto cycleMs = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
     const auto phaseDelay = TerrainLightingPolicy::PhaseDelay(static_cast<int64_t>(g_delaySec * 1000.0f), ChunkRelight::Editing());
     g_cycle.Observe(s.level, cycleMs, phaseDelay, g_autoDusk, g_loadKickPending);

@@ -35,13 +35,13 @@ struct BakeLamp {
     float pos[3] = {};      // +0x120
     float light[3] = {};    // what the bake draws: base colour +0xF0 x intensity +0x10 x range +0x130 (the bake also x 0.2)
     float rect[4] = {};     // light rect +0x134 {minX, minZ, maxX, maxZ}: the bake draws the lamp into the chunks it overlaps
-    bool baked = false;     // the bake takes it now: lit, enabled, and its light is not zero
+    bool baked = false;     // the bake takes it now: lit, enabled (or held, LodHeld), and its light is not zero
     bool animated = false;  // switches / dims by itself (3+ automatic changes within 60 s): its changes never trigger
     uintptr_t id = 0;       // the light (its address when read; NightTerrainBake::Excluded takes the same)
 };
 struct BakeSnapshot {
     std::vector<BakeLamp> lamps;       // lamps of type 3..6 or 0xB on lots (outdoors, alive), sorted by lot
-    std::vector<uint64_t> settledLots; // settled lots or those with an explicit existing-lamp value edit (sorted)
+    std::vector<uint64_t> settledLots; // settled lots, those with an explicit existing-lamp value edit, and for 60 s lots whose held lamps left the list (sorted)
     std::vector<uint64_t> lots;        // every lot with a tracked lamp (sorted)
 };
 const BakeSnapshot& CurrentBakeLamps();
@@ -49,7 +49,8 @@ const BakeSnapshot& CurrentBakeLamps();
 int LotsNear(float x0, float z0, float x1, float z1, uint64_t* out, int max);
 // Render thread: a loaded lot's world box {x0, z0, x1, z1}; false when the lot table does not hold it
 bool LotWorldBox(uint64_t lot, float box[4]);
-// (2.15.1) The ground (lot base, world y) of a lot the soft lot edges' table holds; render thread (the terrain bake's low lamps)
+// (2.15.1) The ground (lot base, world y) of a lot the soft lot edges' table holds, else the base last read since the world
+// change (a lot out of Detailed View); render thread (the terrain bake's low lamps)
 bool LotGroundY(uint64_t lot, float& y);
 // Developer capture (GroundProfile, render thread): the lot holding world (x, z) (0 = none) and the ground gains now
 uint64_t LotAt(float x, float z);
@@ -102,6 +103,14 @@ void RequestLampEditRefresh(); // lamp-entry event; burst reads capped at one pe
 // Confirmed lot-pass draws and late lamp registrations on those lots, render thread only.
 std::vector<uint64_t> TakeLotArrivals();
 bool LotVisible(uint64_t lot); // a verified lot light pass drew within 500 ms
+// The LOD hold, any thread (the bake's light test): a lamp of a lot the game dropped out of Detailed View, which cleared its
+// enabled bit 0x40 while it stayed alive, lit and listed, kept in the terrain bake as it was until it changes (0x40 back
+// too), its lot has been detailed for 30 s, the edit mode or the day starts or it leaves the lamp list
+// (TrackLotLampEdits). Lots never detailed this session have no held lamp.
+bool LodHeld(uintptr_t light, uint64_t lot, int type);
+// Render thread, every frame: whether lamps may be held. Off (by day: whether a demoted lamp's lit bit clears at dawn is
+// unverified) ends every hold at once, counted as switched off at the next read, and starts none.
+void KeepDemotedLamps(bool on);
 int ChunkCount();            // world terrain chunks whose light map was seen in a draw (0 until the world is drawn)
 std::string RoofStatus();
 void SetWaterFix(bool on, float strength, float reflection, bool filter = true, bool preserveColors = true);
