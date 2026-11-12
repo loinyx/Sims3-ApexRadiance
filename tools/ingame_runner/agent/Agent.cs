@@ -235,6 +235,7 @@ namespace ApexTestAgent
             Dispatcher.Register("camera", CameraView);
             Dispatcher.Register("camera_pan", CameraPan);
             Dispatcher.Register("camera_orbit", CameraOrbit);
+            Dispatcher.Register("lots", Lots);
             Dispatcher.Register("save_game", SaveGame);
             Dispatcher.Register("auto_dialog", AutoDialog);
             Dispatcher.Register("quit_game", QuitGame);
@@ -414,7 +415,8 @@ namespace ApexTestAgent
             int gen = ++sPanGen;
             Dictionary<string, object> r = Obj();
             if (a.Has("stop")) { r["stopped"] = true; return r; }
-            List<Vector3> path = DenseLotPath((int)a.Double("lots", 8));
+            List<Vector3> path = DenseLotPath((int)a.Double("lots", 8), a.Has("near") ? FindLot(a.Str("near")) : null);
+            if (a.Has("near") && path.Count == 0) throw new AgentException("no lot named or of type '" + a.Str("near") + "'");
             if (path.Count < 2) throw new AgentException("no path: fewer than 2 lots in this world");
             float height = (float)a.Double("height", 25);
             int moveMs = (int)(a.Double("seconds", 40) * 1000), dwellMs = (int)(a.Double("dwellS", 0) * 1000);
@@ -465,9 +467,9 @@ namespace ApexTestAgent
         {
             RequireLive();
             int gen = ++sPanGen;
-            Lot lot = LotManager.ActiveLot;
-            if (lot == null && Sims3.Gameplay.CAS.Household.ActiveHousehold != null) lot = Sims3.Gameplay.CAS.Household.ActiveHousehold.LotHome;
-            if (lot == null) throw new AgentException("no active lot");
+            Lot lot = a.Has("lot") ? FindLot(a.Str("lot")) : LotManager.ActiveLot;
+            if (lot == null && !a.Has("lot") && Sims3.Gameplay.CAS.Household.ActiveHousehold != null) lot = Sims3.Gameplay.CAS.Household.ActiveHousehold.LotHome;
+            if (lot == null) throw new AgentException(a.Has("lot") ? "no lot named or of type '" + a.Str("lot") + "'" : "no active lot");
             Vector3 c = lot.GetCenterPosition();
             float radius = (float)a.Double("radius", 18), height = (float)a.Double("height", 12);
             int turnMs = (int)(a.Double("seconds", 30) * 1000);
@@ -489,6 +491,7 @@ namespace ApexTestAgent
             }));
             Dictionary<string, object> r = Obj();
             r["lot"] = Pos(c);
+            r["name"] = lot.Name;
             r["turnMs"] = turnMs;
             return r;
         }
@@ -496,10 +499,50 @@ namespace ApexTestAgent
         static Vector3 Flat(Vector3 v) { return new Vector3(v.x, 0, v.z); }
 
         // The k lots nearest the lot with the most other lots within 150 m, in x order.
-        static List<Vector3> DenseLotPath(int k)
+        // lots {}: every lot's name, commercial type and centre (to pick a lot for camera_orbit lot / camera_pan near)
+        static object Lots(Args a)
+        {
+            List<object> list = new List<object>();
+            foreach (Lot l in LotManager.AllLots)
+            {
+                if (l == null || l.IsWorldLot) continue;
+                Dictionary<string, object> d = Obj();
+                d["name"] = l.Name;
+                d["type"] = l.CommercialLotSubType.ToString();
+                d["residential"] = l.IsResidentialLot;
+                d["active"] = l == LotManager.ActiveLot;
+                d["pos"] = Pos(l.GetCenterPosition());
+                list.Add(d);
+            }
+            Dictionary<string, object> r = Obj();
+            r["lots"] = list;
+            return r;
+        }
+
+        // A lot by its commercial type (kGym, kBigPark, ...) or a part of its name, case-insensitive.
+        static Lot FindLot(string key)
+        {
+            string k = key.ToLowerInvariant();
+            foreach (Lot l in LotManager.AllLots)
+                if (l != null && !l.IsWorldLot && l.CommercialLotSubType.ToString().ToLowerInvariant() == k) return l;
+            foreach (Lot l in LotManager.AllLots)
+                if (l != null && !l.IsWorldLot && l.Name != null && l.Name.ToLowerInvariant().Contains(k)) return l;
+            return null;
+        }
+
+        // The k lots nearest `around` (else the lot with the most other lots within 150 m), in x order.
+        static List<Vector3> DenseLotPath(int k, Lot around)
         {
             List<Vector3> c = new List<Vector3>();
             foreach (Lot l in LotManager.AllLots) if (l != null && !l.IsWorldLot) c.Add(l.GetCenterPosition());
+            if (around != null)
+            {
+                Vector3 at = around.GetCenterPosition();
+                c.Sort(delegate(Vector3 x, Vector3 y) { return Flat(x - at).Length().CompareTo(Flat(y - at).Length()); });
+                if (c.Count > k) c.RemoveRange(k, c.Count - k);
+                c.Sort(delegate(Vector3 x, Vector3 y) { return x.x.CompareTo(y.x); });
+                return c;
+            }
             if (c.Count < 2) return c;
             int best = 0, bestN = -1;
             for (int i = 0; i < c.Count; i++)

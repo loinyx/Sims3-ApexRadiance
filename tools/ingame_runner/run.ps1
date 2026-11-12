@@ -358,6 +358,11 @@ function Invoke-Load($Load, [string]$BaseToml) {
                     $null = [ApexIngame.Keys]::PostMessage($script:proc.MainWindowHandle, 0x101, [IntPtr][int]$step.vk, [IntPtr]0xC0000001)
                     Say "  step ${n}: key $($step.vk)"
                 }
+                'lots' { # every lot's name, type and centre, for picking lots in a job
+                    $l = Call-Agent 'lots' $null
+                    $l.lots | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $dir 'lots.json') -Encoding UTF8
+                    Say "  step ${n}: $(@($l.lots).Count) lots listed in lots.json"
+                }
                 'camera_orbit' {
                     $a = @{}; foreach ($p in $step.PSObject.Properties) { if ($p.Name -ne 'do') { $a[$p.Name] = $p.Value } }
                     $o = Call-Agent 'camera_orbit' $a

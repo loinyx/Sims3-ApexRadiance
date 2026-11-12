@@ -1,6 +1,6 @@
 {
   "id": "night-pan-flicker",
-  "description": "Cause run for lights and terrain that flash at night: a pan over the town's lots with two F8 recordings, then the camera circling the active lot while the floor goes up and down (Page Up, Page Down) in a third recording. Developer mode on, so the log keeps the active lot switches, dropped relit maps, terrain lamp changes and room solves. Needs a night save. Read the recordings and the log, not the frame times.",
+  "description": "Cause run for lights and terrain that flash at night: a pan over the town's lots with two F8 recordings, then the camera circling the active lot while the floor goes up and down (Page Up, Page Down) in a third recording. Developer mode on, so the log keeps the active lot switches, dropped relit maps, terrain lamp changes and room solves. Needs a night save. Read the recordings and the log, not the frame times. Then the camera circles the gym and its floors change in a fourth recording, and pans over the lots around it.",
   "save": "Claude teste",
   "toml": {
     "ui": {
@@ -19,6 +19,9 @@
     {
       "do": "speed",
       "speed": "normal"
+    },
+    {
+      "do": "lots"
     },
     {
       "do": "camera_pan",
@@ -129,6 +132,110 @@
     {
       "do": "wait",
       "minutes": 0.15
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kGym",
+      "radius": 22,
+      "height": 14,
+      "seconds": 30,
+      "turns": 3
+    },
+    {
+      "do": "wait",
+      "minutes": 0.3
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "key",
+      "vk": 33
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "key",
+      "vk": 33
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "key",
+      "vk": 34
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "key",
+      "vk": 34
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "key",
+      "vk": 34
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "key",
+      "vk": 33
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    },
+    {
+      "do": "camera_pan",
+      "near": "kGym",
+      "lots": 6,
+      "height": 30,
+      "seconds": 30,
+      "passes": 4
+    },
+    {
+      "do": "wait",
+      "minutes": 0.3
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.85
     },
     {
       "do": "key",
