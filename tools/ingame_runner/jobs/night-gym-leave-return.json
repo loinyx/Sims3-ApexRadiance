@@ -26,10 +26,11 @@
     {
       "do": "camera_orbit",
       "lot": "kGym",
-      "radius": 20,
-      "height": 11,
+      "radius": 14,
+      "height": 8,
       "seconds": 3600,
-      "turns": 0.001
+      "turns": 0.001,
+      "face": "door"
     },
     {
       "do": "wait",
@@ -66,10 +67,11 @@
     {
       "do": "camera_orbit",
       "lot": "kGym",
-      "radius": 20,
-      "height": 11,
+      "radius": 14,
+      "height": 8,
       "seconds": 3600,
-      "turns": 0.001
+      "turns": 0.001,
+      "face": "door"
     },
     {
       "do": "key",

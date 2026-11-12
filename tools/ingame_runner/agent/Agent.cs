@@ -475,6 +475,21 @@ namespace ApexTestAgent
             if (lot == null) throw new AgentException(key == "home" ? "no active household lot" : "no lot named or of type '" + key + "'");
             Vector3 c = lot.GetCenterPosition();
             float radius = (float)a.Double("radius", 18), height = (float)a.Double("height", 12);
+            // face "door": the camera looks at the lot's front door from outside (Lot.GetFrontDoor, found by reflection: its
+            // parameters take their defaults), the orbit starting there
+            double startAng = a.Double("angle", 0) * Math.PI / 180.0;
+            string doorNote = "";
+            if (a.Str("face", "") == "door")
+            {
+                Vector3 door;
+                if (FrontDoorOf(lot, out door))
+                {
+                    startAng = Math.Atan2(door.z - c.z, door.x - c.x);
+                    c = door;
+                    doorNote = "front door";
+                }
+                else doorNote = "no front door found: the lot's centre";
+            }
             int turnMs = (int)(a.Double("seconds", 30) * 1000);
             double turns = a.Double("turns", 2);
             if (turnMs < 1000 || turns <= 0) throw new AgentException("seconds >= 1 and turns > 0 needed");
@@ -486,7 +501,7 @@ namespace ApexTestAgent
                 {
                     int el = System.Environment.TickCount - t0;
                     if (el >= turnMs * turns) break;
-                    double ang = 2 * Math.PI * el / turnMs;
+                    double ang = startAng + 2 * Math.PI * el / turnMs;
                     Vector3 off = new Vector3((float)Math.Cos(ang) * radius, height, (float)Math.Sin(ang) * radius);
                     CameraController.SetPositionAndTarget(target + off, target);
                     Simulator.Sleep(0);
@@ -496,6 +511,7 @@ namespace ApexTestAgent
             r["lot"] = Pos(c);
             r["name"] = lot.Name;
             r["turnMs"] = turnMs;
+            r["door"] = doorNote;
             return r;
         }
 
@@ -520,6 +536,26 @@ namespace ApexTestAgent
             Dictionary<string, object> r = Obj();
             r["lots"] = list;
             return r;
+        }
+
+        static bool FrontDoorOf(Lot lot, out Vector3 at)
+        {
+            at = Vector3.Empty;
+            foreach (MethodInfo m in lot.GetType().GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
+            {
+                if (m.Name != "GetFrontDoor") continue;
+                ParameterInfo[] ps = m.GetParameters();
+                object[] args = new object[ps.Length];
+                for (int i = 0; i < ps.Length; i++)
+                    args[i] = ps[i].ParameterType.IsValueType ? Activator.CreateInstance(ps[i].ParameterType) : null;
+                try
+                {
+                    Sims3.Gameplay.Abstracts.GameObject door = m.Invoke(lot, args) as Sims3.Gameplay.Abstracts.GameObject;
+                    if (door != null) { at = door.Position; return true; }
+                }
+                catch { }
+            }
+            return false;
         }
 
         // lights_on {lot}: turns on every light of a lot (a community lot at night with nobody inside has them off), through

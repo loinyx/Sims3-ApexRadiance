@@ -377,6 +377,24 @@ function Invoke-Load($Load, [string]$BaseToml) {
                     $null = [ApexIngame.Keys]::PostMessage($script:proc.MainWindowHandle, 0x101, [IntPtr][int]$step.vk, [IntPtr]0xC0000001)
                     Say "  step ${n}: key $($step.vk)"
                 }
+                'wait_file' { # waits (answering dialogs) until a file exists: the tester saying "ready", e.g. after placing the camera
+                    $f = Join-Path $OutDir $step.file
+                    Say "  step ${n}: waiting for $f (up to $($step.minutes) min)"
+                    Wait-Game "the file $($step.file)" ([double]$step.minutes) { Test-Path -LiteralPath $f } { Clear-Dialog }
+                }
+                'camera_read' { # the camera now, kept as a bookmark (bookmarks/<name>.json) that camera_goto takes back to
+                    $cam = Call-Agent 'camera' $null
+                    $bm = Join-Path $PSScriptRoot "bookmarks/$($step.name).json"
+                    New-Item -ItemType Directory -Path (Split-Path $bm) -Force | Out-Null
+                    ($cam | ConvertTo-Json -Depth 4) | Set-Content -LiteralPath $bm -Encoding UTF8
+                    Say "  step ${n}: camera kept as bookmark $($step.name): pos $($cam.pos.x), $($cam.pos.y), $($cam.pos.z)"
+                }
+                'camera_goto' { # a bookmark's camera (a running pan or orbit is stopped first)
+                    $cam = Get-Content -LiteralPath (Join-Path $PSScriptRoot "bookmarks/$($step.name).json") -Raw | ConvertFrom-Json
+                    Call-Agent 'camera_pan' @{ stop = $true } | Out-Null
+                    Call-Agent 'camera' @{ pos = $cam.pos; target = $cam.target } | Out-Null
+                    Say "  step ${n}: camera at bookmark $($step.name)"
+                }
                 'lamp_drag' {
                     $a = @{}; foreach ($p in $step.PSObject.Properties) { if ($p.Name -ne 'do') { $a[$p.Name] = $p.Value } }
                     $d = Call-Agent 'lamp_drag' $a
@@ -394,7 +412,7 @@ function Invoke-Load($Load, [string]$BaseToml) {
                 'camera_orbit' {
                     $a = @{}; foreach ($p in $step.PSObject.Properties) { if ($p.Name -ne 'do') { $a[$p.Name] = $p.Value } }
                     $o = Call-Agent 'camera_orbit' $a
-                    Say "  step ${n}: camera orbit around $($o.name) at $($o.lot.x), $($o.lot.z)"
+                    Say "  step ${n}: camera orbit around $($o.name) at $($o.lot.x), $($o.lot.z)$(if ($o.door) { " ($($o.door))" })"
                 }
                 'camera' { Call-Agent 'camera' @{ pos = $step.pos; target = $step.target } | Out-Null }
                 'camera_pan' {
