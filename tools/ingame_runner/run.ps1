@@ -346,6 +346,9 @@ function Invoke-Load($Load, [string]$BaseToml) {
                 }
             }
         }
+        Wait-Agent $started $noApex
+        Wait-Game 'the main menu' 5 { try { Call-Agent 'game_state' $null 5000 | Out-Null; return $true } catch { return $false } }
+        Wait-MenuQuiet
         Call-Agent 'load_save' @{ file = "$($jobDef.save).sims3"; reload = $true } | Out-Null
         Say "$($Load.Name): loading $($jobDef.save)"
         Wait-LiveMode "the save $($jobDef.save)"
