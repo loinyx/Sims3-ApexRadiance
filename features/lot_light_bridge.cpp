@@ -2241,6 +2241,14 @@ HRESULT Read(IDirect3DVertexBuffer9* vb, UINT off, UINT n, void** p, DWORD flags
     if (!kPublicBuild) g_locks++;
     return vb->Lock(off, n, p, flags);
 }
+// The copy holds [off, off + n): a Read takes no lock (and waits for no GPU)
+bool Has(IDirect3DVertexBuffer9* vb, UINT off, UINT n) {
+    AcquireSRWLockShared(&g_srw);
+    const auto it = g_copies.find(vb);
+    const bool held = it != g_copies.end() && !it->second.mapped && off + n <= it->second.bytes.size() && Holds(it->second, off, off + n);
+    ReleaseSRWLockShared(&g_srw);
+    return held;
+}
 } // namespace InstanceCopy
 
 // Every byte of an instance stream (FNV-1a, 32 bits at a time): a fence group's key with its mesh (NoteFenceGroup)
@@ -2303,8 +2311,10 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
     if (const auto kp = g_fencePlaceKey.find(place); kp != g_fencePlaceKey.end()) {
         const auto h = g_fencePlaceHashed.find(place);
         const auto kg = g_fenceGroups.find(kp->second);
-        // (far by its walls' box, or, for a group without walls, by the positions last read at its place)
+        // (far by its walls' box, or, for a group without walls, by the positions last read at its place; only when the read
+        // would lock: the place holds other pieces as the camera moves, and the copy of the game's writes reads them free)
         if (h != g_fencePlaceHashed.end() && tick - h->second < kFenceFarRefreshMs && kg != g_fenceGroups.end() && kg->second.read &&
+            !InstanceCopy::Has(vb1, off1, count * stride1) &&
             (FenceGroupFar(kg->second) || FencePlaceFar(vb1, off1, count, stride1))) {
             key = kp->second, keptFar = true;
             if (!kPublicBuild) g_fenceFarKept++;
@@ -5770,7 +5780,9 @@ const GroupCentre* InstancedGroupCentre(IDirect3DDevice9* dev) {
         // a group far from the camera keeps the positions read last at its place for kFenceFarRefreshMs: zoomed out, the lock
         // waited for the GPU at most of 134 fence draws a frame (NoteFenceGroup's lock had paid that wait before)
         const DWORD tick = GetTickCount();
-        if (last != g_groupAtPlace.end() && last->second->ok && GroupCentreFar(*last->second)) {
+        // (only when the read would lock: from the copy the place's pieces of this draw are read without a wait, and a kept
+        // group lit other pieces put there as the camera moved with its lamps for up to 2 s)
+        if (last != g_groupAtPlace.end() && last->second->ok && GroupCentreFar(*last->second) && !InstanceCopy::Has(vb, off, count * stride)) {
             const auto r = g_groupPlaceRead.find(place);
             if (r != g_groupPlaceRead.end() && tick - r->second < kFenceFarRefreshMs) {
                 if (!kPublicBuild) g_groupFarKept++;

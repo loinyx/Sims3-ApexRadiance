@@ -289,9 +289,11 @@ so a place held other pieces from one draw to the next and every draw made a new
 (`draw_reads_nowait`), the group last read at that place is used. A place whose group stands more than 60 m from the camera (its walls' box, or the positions last read there) keeps
 its last group and positions for 2 s without locking the buffer, in both reads (`NoteFenceGroup`, `InstancedGroupCentre`): zoomed
 out, 134 fence draws a frame waited for the GPU at the first lock, about 250 us each (237 to 17 fps); skipping one read moved
-the wait to the other. Near groups read a copy of the game's own writes: the vertex buffers a fence draw reads are noted, and
+the wait to the other. Draws read a copy of the game's own writes: the vertex buffers a fence draw reads are noted, and
 their writes are copied at the game's `Unlock` (vertex buffer vtable slots 11 and 12, called through), so the draw reads the same
-bytes without a `Lock` (about 0.5 ms a near draw before); a range the copy does not hold is locked as before. A group holds the mesh's box over the draw's vertex range (POSITION0 / w) and, per
+bytes without a `Lock` (about 0.5 ms a near draw before); a range the copy does not hold is locked as before. A far place keeps
+its last group only when the copy does not hold its range: the place holds other pieces as the camera moves, and a kept group
+lit them with its own lamps and ground shade for up to 2 s. A group holds the mesh's box over the draw's vertex range (POSITION0 / w) and, per
 instance, its place (POSITION1) and turn (POSITION2 = cos, slope, sin; world = (px c - pz s, py + px k, px s + pz c) + place,
 VS_21C41B90 of F7 2026-10-13 11-50-47). Each piece becomes a wall along its longer side from its base to its top, so the
 shade follows each wall's own height (the lamp is tested over every wall's top). Posts (under 0.3 m both ways) and thick
