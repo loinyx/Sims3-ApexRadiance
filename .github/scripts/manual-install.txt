@@ -47,8 +47,7 @@
 
     B.  RTX Remix bridge  -  about 600 MB more free memory for big worlds
           (needs a Vulkan graphics card)
-          1. Find the bridge: the "RTX Remix bridge" folder of the GitHub
-             zip, or the "RTX Remix bridge" file on Nexus (unzip it).
+          1. Open the "RTX Remix bridge" folder next to this guide.
           2. Move any d3d9.dll already in Game\Bin to a backup folder.
           3. Copy everything inside the bridge folder into Game\Bin,
              keeping its .trex folder.
