@@ -209,7 +209,7 @@ function Wait-MenuQuiet {
     $m = @{ Start = Get-Date; Quiet = Get-Date; Saw = $false } # a hashtable: the script block below cannot assign outer variables
     Wait-Game 'the "Mod Scripts Found" dialog' 3 {
         try { $d = Call-Agent 'auto_dialog' $null 5000 } catch { return $false }
-        if ($d.open) { Say "  menu dialog '$($d.title)': clicked $($d.clicked)"; if ($d.title -match 'mod scripts') { $m.Saw = $true }; $m.Quiet = Get-Date }
+        if ($d.open) { Say "  menu dialog '$($d.title)': clicked $($d.clicked)"; if ($d.title -match 'mod scripts|scripts de modifica') { $m.Saw = $true }; $m.Quiet = Get-Date }
         if ($m.Saw) { return ((Get-Date) - $m.Quiet).TotalSeconds -ge 5 }
         return ((Get-Date) - $m.Start).TotalSeconds -ge 120
     }
@@ -326,7 +326,7 @@ function Invoke-Load($Load, [string]$BaseToml) {
         Wait-Agent $started $noApex
         Wait-Game 'the main menu' 5 { try { Call-Agent 'game_state' $null 5000 | Out-Null; return $true } catch { return $false } }
         Wait-MenuQuiet
-        Call-Agent 'load_save' @{ file = "$($jobDef.save).sims3" } | Out-Null
+        Call-Agent 'load_save' @{ file = "$($jobDef.save).sims3"; reload = $true } | Out-Null
         Say "$($Load.Name): loading $($jobDef.save)"
         Wait-LiveMode "the save $($jobDef.save)"
         $lastSave = $null
