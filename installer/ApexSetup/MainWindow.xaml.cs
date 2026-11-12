@@ -507,8 +507,7 @@ public sealed partial class MainWindow : Window
         var apexRelease = _latest.GetValueOrDefault(Repo[Components.Apex]);
         var test = Verify.TestBuild(g, s, apexRelease);
         var found = Verify.Files(g, s, apexRelease).Concat(_found.Where(x => x.Suggest is null)).ToList();
-        // (a Warning suggestion is something to look at too)
-        var clean = found.Count == 0 && !_found.Any(x => x.Suggest is not null && x.Severity != Severity.Info);
+        var clean = found.Count == 0;
         var check = clean ? (_checkedAt is null ? T("Everything is in place.") : T("Everything is in place (checked at {0}).", _checkedAt))
             : _checkedAt is not null ? T("Checked at {0}.", _checkedAt) : "";
         CardHeader(StatusList, clean ? "\uE73E" : "\uE7BA", clean ? "ApexSuccessBrush" : "ApexWarningBrush", T("The Sims 3 \u00b7 {0}", g.Label),
@@ -528,7 +527,7 @@ public sealed partial class MainWindow : Window
                 IsOpen = true, IsClosable = false, Message = T(x.Text, x.Args), Title = x.CanFix ? T("Setup fixes this") : "",
                 Severity = x.Severity switch { Severity.Error => InfoBarSeverity.Error, Severity.Warning => InfoBarSeverity.Warning, _ => InfoBarSeverity.Informational },
             });
-        FillSuggestions(notes, WelcomeInfo, onStatus: true);
+        // (the suggestions show on Components, not on the status)
         if (notes.Children.Count > 0) StatusList.Children.Add(notes);
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
