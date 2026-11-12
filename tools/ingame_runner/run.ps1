@@ -422,8 +422,13 @@ function Invoke-Load($Load, [string]$BaseToml) {
                     Call-Agent 'camera_pan' @{ stop = $true } | Out-Null
                     Call-Agent 'track_load' @{ reset = $true } | Out-Null
                     foreach ($k in 'lamps', 'cam', 'edits', 'levels', 'modes') {
-                        $all = @($t.$k | Where-Object { $null -ne $_ })
-                        for ($i = 0; $i -lt $all.Count; $i += 200) { Call-Agent 'track_load' @{ $k = @($all[$i..([Math]::Min($i + 199, $all.Count - 1))]) } | Out-Null }
+                        if ($null -eq $t.$k) { continue }
+                        $all = [object[]]$t.$k # (not through the pipeline: it would flatten each camera sample's array)
+                        for ($i = 0; $i -lt $all.Count; $i += 200) {
+                            $part = New-Object System.Collections.ArrayList
+                            for ($q = $i; $q -lt [Math]::Min($i + 200, $all.Count); $q++) { [void]$part.Add($all[$q]) }
+                            Call-Agent 'track_load' @{ $k = $part } 60000 | Out-Null
+                        }
                     }
                     $p = Call-Agent 'track_play' @{}
                     Say "  step ${n}: replaying $($step.name): $($p.seconds) s, $($p.edits) light edits, $($p.matched) of $($p.lamps) lights found, $($p.placed) put down, $($p.levels) floor and $($p.modes) mode changes"
