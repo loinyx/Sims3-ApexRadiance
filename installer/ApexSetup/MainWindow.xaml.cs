@@ -22,7 +22,7 @@ public sealed class GameItem
 
 public sealed partial class MainWindow : Window
 {
-    const int Welcome = 0, GameStep = 1, ComponentsStep = 2, InstallStep = 3, DoneStep = 4, Manage = 5, About = 6;
+    const int Welcome = 0, GameStep = 1, ComponentsStep = 2, InstallStep = 3, DoneStep = 4, Manage = 5, About = 6, RendererStep = 7;
     readonly UIElement[] _screens;
     readonly List<GameItem> _games = new();
     readonly Dictionary<string, Release?> _latest = new();
@@ -42,7 +42,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        _screens = new UIElement[] { ScreenWelcome, ScreenGame, ScreenComponents, ScreenInstall, ScreenDone, ScreenManage, ScreenAbout };
+        _screens = new UIElement[] { ScreenWelcome, ScreenGame, ScreenComponents, ScreenInstall, ScreenDone, ScreenManage, ScreenAbout, ScreenRenderer };
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(DragArea);
         void Size(double scale) => AppWindow.Resize(new SizeInt32((int)(980 * scale), (int)(680 * scale)));
@@ -107,7 +107,7 @@ public sealed partial class MainWindow : Window
     {
         try { _vulkan = await Task.Run(Gpu.Vulkan); }
         catch (Exception e) { App.Log(e); return; }
-        if (BridgeBlocked && _step == ComponentsStep) RefreshComponents();
+        RefreshComponents();
     }
 
     static readonly string? Preview = Environment.GetEnvironmentVariable("APEX_SETUP_PREVIEW_LATEST") is { Length: > 0 } pv ? pv : null;
@@ -186,7 +186,8 @@ public sealed partial class MainWindow : Window
     void SyncNav()
     {
         _syncNav = true;
-        Nav.SelectedItem = Nav.MenuItems.Concat(Nav.FooterMenuItems).OfType<NavigationViewItem>().FirstOrDefault(n => (string)n.Tag == _step.ToString());
+        var tag = (_step == RendererStep ? ComponentsStep : _step).ToString();
+        Nav.SelectedItem = Nav.MenuItems.Concat(Nav.FooterMenuItems).OfType<NavigationViewItem>().FirstOrDefault(n => (string)n.Tag == tag);
         _syncNav = false;
     }
 
@@ -224,6 +225,7 @@ public sealed partial class MainWindow : Window
     void GoFromStatus(int to) { _backTo = Welcome; Show(to); }
     void OnBack(object sender, RoutedEventArgs e)
     {
+        if (_step == RendererStep) { Show(ComponentsStep); return; }
         var to = _backTo >= 0 ? _backTo : Math.Max(Welcome, _step - 1);
         _backTo = -1;
         Show(to);
@@ -234,9 +236,11 @@ public sealed partial class MainWindow : Window
         switch (_step)
         {
             case Welcome:
-                if (WelcomeUpdates() is { Count: > 0 } ups) await InstallAsync(ups); // (an update: one click, no steps)
+                if (_updated is not null) { _updated = null; RefreshAll(); } // (the update's result read: back to the status)
+                else if (WelcomeUpdates() is { Count: > 0 } ups) await InstallAsync(ups, inline: true); // (an update: one click, in its card)
                 else Show(GameStep);
                 break;
+            case RendererStep: Show(ComponentsStep); break;
             case GameStep: if (CanLeaveGame()) Show(ComponentsStep); break;
             case ComponentsStep:
             {
@@ -252,16 +256,23 @@ public sealed partial class MainWindow : Window
 
     void UpdateFooter()
     {
-        BackButton.Visibility = _step is GameStep or ComponentsStep ? Visibility.Visible : Visibility.Collapsed;
+        // a first install opens on its own welcome over the window; its steps show their bar beside the sidebar
+        FirstRun.Visibility = FirstInstall && _step == Welcome && !_busy ? Visibility.Visible : Visibility.Collapsed;
+        // the glow moves only while it shows, and not when Windows' animation effects are off (started once, not on every refresh)
+        var glow = FirstRun.Visibility == Visibility.Visible && new Windows.UI.ViewManagement.UISettings().AnimationsEnabled;
+        if (glow != _glowOn) { _glowOn = glow; if (glow) FirstRunGlow.Begin(); else FirstRunGlow.Stop(); }
+        BackButton.Visibility = _step is GameStep or ComponentsStep or RendererStep ? Visibility.Visible : Visibility.Collapsed;
         // a game with Apex and nothing to update: the status card's own buttons are the actions, no wizard to go into
-        var settled = _step == Welcome && _state?.ApexVersion is not null && _game is not null && WelcomeUpdates().Count == 0;
-        NextButton.Visibility = !settled && _step is Welcome or GameStep or ComponentsStep or DoneStep ? Visibility.Visible : Visibility.Collapsed;
+        var settled = _step == Welcome && _state?.ApexVersion is not null && _game is not null && WelcomeUpdates().Count == 0 && _updated is null;
+        NextButton.Visibility = !settled && _step is Welcome or GameStep or ComponentsStep or DoneStep or RendererStep ? Visibility.Visible : Visibility.Collapsed;
         var (wa, wd) = _step == ComponentsStep ? Plan() : (new List<string>(), new List<string>());
         var work = wa.Concat(wd).ToList();
         var fixes = _step == ComponentsStep && _found.Any(x => x.CanFix);
         NextText.Text = _step switch
         {
-            Welcome => WelcomeUpdates().Count > 0 ? T("Update now") : _state?.ApexVersion is not null ? T("Next") : T("Get started"),
+            Welcome => _updated is not null ? T("Done") : WelcomeUpdates() is { Count: > 0 } u ? (u.Count == 1 ? T("Update 1 item") : T("Update {0} items", u.Count))
+                : _state?.ApexVersion is not null ? T("Next") : T("Get started"),
+            RendererStep => T("Use {0}", RendererShort(_renderer)),
             ComponentsStep when _offline && wa.Count > 0 => T("Try again"),
             ComponentsStep => work.Count == 0 ? (fixes ? T("Fix settings") : T("Nothing to apply")) : _state?.ApexVersion is null ? T("Install")
                 : work.Count == 1 ? T("Apply 1 change") : T("Apply {0} changes", work.Count),
@@ -290,6 +301,147 @@ public sealed partial class MainWindow : Window
             ? Visibility.Visible : Visibility.Collapsed;
     }
 
+    // ---------- first install ----------
+
+    // no Apex Radiance in the chosen game (or no game yet): the welcome covers the window and the steps show their bar
+    bool FirstInstall => _state?.ApexVersion is null;
+    bool _glowOn;
+
+    void RefreshFirstRun()
+    {
+        var latest = Latest(Components.Apex);
+        FirstTitle.Text = "Apex Radiance" + (latest is null ? "" : " " + latest);
+        FirstGame.Text = _game is { } g ? T("The Sims 3 \u00b7 {0} found", g.Label) : T("Setup found no install. Browse for the game folder.");
+        FirstGameIcon.Visibility = FirstNotThis.Visibility = _game is null ? Visibility.Collapsed : Visibility.Visible;
+        FirstGamePath.Text = _game?.Root ?? "";
+        FirstGamePath.Visibility = FirstGameIcon.Visibility;
+        Steps(StepsGame, 1);
+        Steps(StepsComponents, 2);
+        Steps(StepsRenderer, 2);
+        Steps(StepsInstall, 3);
+    }
+
+    void OnFirstStart(object sender, RoutedEventArgs e) => Show(GameStep);
+    void OnGlowPanelSize(object sender, SizeChangedEventArgs e) =>
+        GlowPanel.Clip = new RectangleGeometry { Rect = new Windows.Foundation.Rect(0, 0, e.NewSize.Width, e.NewSize.Height) };
+    void OnNotThisGame(object sender, RoutedEventArgs e) => Show(GameStep);
+
+    // Game, Components, Install: numbered, the done ones checked, the current one in the accent
+    void Steps(StackPanel host, int current)
+    {
+        host.Children.Clear();
+        host.Visibility = FirstInstall ? Visibility.Visible : Visibility.Collapsed;
+        if (!FirstInstall) return;
+        var names = new[] { T("Game"), T("Components"), T("Install") };
+        for (int i = 1; i <= names.Length; i++)
+        {
+            if (i > 1) host.Children.Add(new Border { Width = 40, Height = 1, VerticalAlignment = VerticalAlignment.Center, Background = (Brush)Application.Current.Resources["ApexCardBorderBrush"] });
+            var done = i < current;
+            var on = i == current;
+            var dot = new Border
+            {
+                Width = 22, Height = 22, CornerRadius = new CornerRadius(11),
+                Background = on ? (Brush)Application.Current.Resources["ApexAccentBrush"] : done ? new SolidColorBrush(ColorHelper.FromArgb(255, 0x1A, 0x2A, 0x22)) : null,
+                BorderBrush = (Brush)Application.Current.Resources["ApexCardBorderBrush"], BorderThickness = new Thickness(on || done ? 0 : 1),
+                Child = done
+                    ? new FontIcon { Glyph = "\uE73E", FontSize = 11, Foreground = (Brush)Application.Current.Resources["ApexSuccessBrush"] }
+                    : new TextBlock { Text = i.ToString(), FontSize = 11, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+                                      Foreground = on ? new SolidColorBrush(ColorHelper.FromArgb(255, 0x0B, 0x0C, 0x0E)) : (Brush)Application.Current.Resources["ApexMutedBrush"] },
+            };
+            var label = new TextBlock
+            {
+                Text = names[i - 1], FontSize = 13, VerticalAlignment = VerticalAlignment.Center, FontWeight = on ? FontWeights.SemiBold : FontWeights.Normal,
+                Foreground = (Brush)Application.Current.Resources[done ? "ApexSuccessBrush" : on ? "ApexSoftTextBrush" : "ApexMutedBrush"],
+            };
+            var step = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            step.Children.Add(dot);
+            step.Children.Add(label);
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(step, T("Step {0} of {1}: {2}", i, names.Length, names[i - 1]));
+            host.Children.Add(step);
+        }
+    }
+
+    // ---------- the update card (Welcome, a game with Apex) ----------
+
+    readonly HashSet<string> _skipUpdate = new();          // updates the player unticked
+    bool _inline;                                           // an update runs in the card
+    (List<(string Name, string From, string To)> Rows, RestorePoint? Point)? _updated; // the last update's result, until Done
+
+    void RefreshUpdateCard()
+    {
+        if (_inline) return; // (the install fills the card itself)
+        var ups = _state?.ApexVersion is not null && !_offline && !_loading ? Updates() : new List<string>();
+        var show = _game is not null && (_updated is not null || ups.Count > 0);
+        UpdateCard.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        WelcomeStatus.Visibility = show ? Visibility.Collapsed : WelcomeStatus.Visibility;
+        UpdateList.Children.Clear();
+        if (!show || _game is not { } g) return;
+        var muted = (Brush)Application.Current.Resources["ApexMutedBrush"];
+        if (_updated is { } done)
+        {
+            CardHeader("\uE73E", "ApexSuccessBrush", T("Everything is updated"), T("Start The Sims 3, load a world and press Ctrl+Shift+F11 to open the Apex Radiance menu."));
+            foreach (var (name, from, to) in done.Rows) CardRow(new TextBlock { Text = name, FontSize = 14 }, from.Length > 0 ? $"{from} \u2192 {to}" : to, "ApexSuccessBrush");
+            if (done.Point is { } p)
+            {
+                var undo = new Button { Content = T("Undo this update"), IsEnabled = !_busy && !_running };
+                undo.Click += async (_, _) => { await RestoreAsync(p, ask: true, WelcomeInfo); _updated = null; RefreshAll(); };
+                CardStrip(T("Something looks wrong in the game? This puts back everything as it was before this update."), undo);
+            }
+            return;
+        }
+        CardHeader("\uE896", "ApexAccentBrush", ups.Count == 1 ? T("1 update for The Sims 3 \u00b7 {0}", g.Label) : T("{0} updates for The Sims 3 \u00b7 {1}", ups.Count, g.Label),
+            T("Setup makes a restore point before it changes any file, so you can undo this."));
+        foreach (var c in ups)
+        {
+            var box = new CheckBox { Content = Name(c), IsChecked = !_skipUpdate.Contains(c), MinWidth = 0, IsEnabled = !_busy };
+            box.Checked += (_, _) => { _skipUpdate.Remove(c); UpdateFooter(); };
+            box.Unchecked += (_, _) => { _skipUpdate.Add(c); UpdateFooter(); };
+            var left = new StackPanel { Spacing = 2 };
+            left.Children.Add(box);
+            if (c == Components.Apex && _latest.GetValueOrDefault(Releases.Apex) is { } rel)
+                left.Children.Add(new HyperlinkButton { Content = T("See what's new"), Padding = new Thickness(28, 0, 0, 0),
+                    NavigateUri = new Uri($"https://github.com/{Releases.Apex}/releases/tag/{Uri.EscapeDataString(rel.Tag)}") });
+            CardRow(left, $"{(Known(c) is { Length: > 0 } v ? v : "?")} \u2192 {Latest(c)}", "ApexSoftTextBrush");
+        }
+        if (_running) CardStrip(T("Close The Sims 3 to update."), null);
+
+        void CardHeader(string glyph, string brush, string title, string sub)
+        {
+            var head = new Grid { Padding = new Thickness(18, 14, 18, 14), ColumnSpacing = 12 };
+            head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            head.ColumnDefinitions.Add(new ColumnDefinition());
+            head.Children.Add(new FontIcon { Glyph = glyph, FontSize = 18, Foreground = (Brush)Application.Current.Resources[brush], VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 2, 0, 0) });
+            var text = new StackPanel { Spacing = 2 };
+            text.Children.Add(new TextBlock { Text = title, FontSize = 15, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+            text.Children.Add(new TextBlock { Text = sub, FontSize = 12, Foreground = muted, TextWrapping = TextWrapping.Wrap });
+            Grid.SetColumn(text, 1);
+            head.Children.Add(text);
+            UpdateList.Children.Add(head);
+        }
+        void CardRow(FrameworkElement left, string right, string brush)
+        {
+            var row = new Grid { Padding = new Thickness(18, 10, 18, 10), ColumnSpacing = 12, BorderBrush = (Brush)Application.Current.Resources["ApexCardBorderBrush"], BorderThickness = new Thickness(0, 1, 0, 0) };
+            row.ColumnDefinitions.Add(new ColumnDefinition());
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            left.VerticalAlignment = VerticalAlignment.Center;
+            row.Children.Add(left);
+            var v = new TextBlock { Text = right, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = (Brush)Application.Current.Resources[brush] };
+            Grid.SetColumn(v, 1);
+            row.Children.Add(v);
+            UpdateList.Children.Add(row);
+        }
+        void CardStrip(string text, Button? action)
+        {
+            var strip = new Grid { Padding = new Thickness(18, 10, 18, 10), ColumnSpacing = 12, Background = new SolidColorBrush(ColorHelper.FromArgb(255, 0x0F, 0x10, 0x13)),
+                BorderBrush = (Brush)Application.Current.Resources["ApexCardBorderBrush"], BorderThickness = new Thickness(0, 1, 0, 0) };
+            strip.ColumnDefinitions.Add(new ColumnDefinition());
+            strip.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            strip.Children.Add(new TextBlock { Text = text, FontSize = 12, Foreground = muted, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center });
+            if (action is not null) { Grid.SetColumn(action, 1); strip.Children.Add(action); }
+            UpdateList.Children.Add(strip);
+        }
+    }
+
     // ---------- refresh ----------
 
     void RefreshAll()
@@ -298,6 +450,7 @@ public sealed partial class MainWindow : Window
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(LangButton, T("Language"));
         RefreshGame();
         RefreshWelcome();
+        RefreshFirstRun();
         RefreshComponents();
         RefreshManage();
         RefreshAbout();
@@ -313,6 +466,8 @@ public sealed partial class MainWindow : Window
             SetInfo(WelcomeInfo, InfoBarSeverity.Error, T("No internet connection"), T("Check your internet connection, then try again."), T("Try again"), async () => await LoadReleasesAsync());
         else if (_loading && _game is not null)
             SetInfo(WelcomeInfo, InfoBarSeverity.Informational, T("Checking for updates\u2026"), "");
+        else if (_updated is not null || _inline || Updates().Count > 0 && _state?.ApexVersion is not null)
+            WelcomeInfo.IsOpen = false; // (the update card says it)
         else if (Updates() is { Count: > 0 } ups && _game is { } g)
         {
             // checked at every start: the player learns about a new release here, without visiting GitHub
@@ -325,6 +480,7 @@ public sealed partial class MainWindow : Window
             SetInfo(WelcomeInfo, InfoBarSeverity.Success, T("No updates available"), T("Everything in this game is on its latest version."));
         else WelcomeInfo.IsOpen = false;
         RefreshStatus();
+        RefreshUpdateCard();
     }
 
     // A game that has Apex Radiance opens on its status: what is installed and whether it is up to date, and the checks of
@@ -411,7 +567,7 @@ public sealed partial class MainWindow : Window
     }
 
     // the welcome page's one-click update: the installed components with a newer release, when Setup can download them now
-    List<string> WelcomeUpdates() => _offline || _running || _game is null ? new List<string>() : Updates();
+    List<string> WelcomeUpdates() => _offline || _running || _game is null ? new List<string>() : Updates().Where(c => !_skipUpdate.Contains(c)).ToList();
 
     // installed components with a newer release (only those: nothing new is added from the welcome page)
     List<string> Updates()
@@ -563,32 +719,13 @@ public sealed partial class MainWindow : Window
         // has Apex keeps its renderer and its choices
         var first = s.ApexVersion is null;
         _renderer = first && s.Layer == Layer.Native ? RDxvk : RendererOf(s);
-        S3ssToggle.IsOn = first || s.S3ss;
+        S3ssToggle.IsOn = s.S3ss; // (optional mods start off unless installed)
         ModToggle.IsOn = s.Modernization;
         MonoToggle.IsOn = s.MonoPatcher;
         S3ppToggle.IsOn = true;
     }
 
     void OnToggle(object sender, RoutedEventArgs e) => RefreshComponents();
-
-    // installed: its Remove button (Keep while marked), the switch hidden and carrying the choice for Plan(); missing: the switch
-    // (made here beside the switch, in its grid cell: declared in the XAML they failed its parse at start)
-    readonly Dictionary<ToggleSwitch, Button> _removeButtons = new();
-    void ShowCard(ToggleSwitch toggle, bool present)
-    {
-        if (!_removeButtons.TryGetValue(toggle, out var remove))
-        {
-            remove = new Button { MinWidth = 96, VerticalAlignment = VerticalAlignment.Center };
-            Grid.SetColumn(remove, Grid.GetColumn(toggle));
-            remove.Click += (_, _) => toggle.IsOn = !toggle.IsOn; // marks it for removal by Apply, or takes the mark back (OnToggle refreshes)
-            if (toggle.Parent is Panel panel) panel.Children.Add(remove);
-            _removeButtons[toggle] = remove;
-        }
-        toggle.Visibility = present ? Visibility.Collapsed : Visibility.Visible;
-        remove.Visibility = present ? Visibility.Visible : Visibility.Collapsed;
-        remove.Content = toggle.IsOn ? T("Remove") : T("Keep");
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(remove, (string)remove.Content + " " + Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(toggle));
-    }
 
     void OnRenderer(object sender, SelectionChangedEventArgs e)
     {
@@ -640,6 +777,13 @@ public sealed partial class MainWindow : Window
         FillRenderer(s);
         var cur = RendererOf(s);
         var changed = _renderer != cur;
+        RendererName.Text = T("Graphics") + ": " + RendererShort(_renderer);
+        SetState(RendererState, changed ? (T("Replaces {0}", LayerName(s.Layer)), "ApexAccentBrush")
+            : _renderer == RDxvk ? StateLine(Components.Dxvk, true, true, false)
+            : _renderer == RBridge ? StateLine(Components.Bridge, true, true, false)
+            : _renderer == RNative ? (T("Works, but Apex Radiance is tested with DXVK."), "ApexMutedBrush")
+            : (T("Your d3d9.dll stays as it is."), "ApexMutedBrush"));
+        GpuLine.Text = _vulkan is { } gpu && gpu.Card is not null ? T("Your graphics card: {0}", $"{gpu.Card} \u00b7 Vulkan {gpu.Version}") : "";
         BridgeDetail.Text = _renderer switch
         {
             RDxvk => T("Fewer stutters; Apex Radiance is made and tested with it."),
@@ -662,14 +806,12 @@ public sealed partial class MainWindow : Window
         // An installed component shows a Remove button (Keep once marked: Apply removes it, and its pill says so); a missing one
         // its switch, which means Install. A switch that meant "keep" on an installed component, off meaning uninstall, read
         // as a control that did nothing.
-        SetPill(S3ssPill, s.S3ss && !S3ssToggle.IsOn ? T("Will be removed") : Pill(Known(Components.S3ss), Latest(Components.S3ss), false));
-        SetPill(ModPill, s.Modernization && !ModToggle.IsOn ? T("Will be removed") : Pill(Known(Components.Modernization), Latest(Components.Modernization), s.Ts3NativeWrongBuild));
-        SetPill(MonoPill, s.MonoPatcher && !MonoToggle.IsOn ? T("Will be removed") : Pill(Known(Components.MonoPatcher), Latest(Components.MonoPatcher), false));
-        SetPill(S3ppPill, S3ppPresent && !S3ppToggle.IsOn ? T("Will be removed") : S3ppPresent ? T("Installed") : _s3ppArchive is not null ? T("Ready to install") : T("Not installed"));
-        ShowCard(S3ssToggle, s.S3ss);
-        ShowCard(ModToggle, s.Modernization);
-        ShowCard(MonoToggle, s.MonoPatcher);
-        ShowCard(S3ppToggle, S3ppPresent);
+        SetState(S3ssPill, StateLine(Components.S3ss, S3ssToggle.IsOn, s.S3ss, false));
+        SetState(ModPill, StateLine(Components.Modernization, ModToggle.IsOn, s.Modernization, s.Ts3NativeWrongBuild));
+        SetState(MonoPill, StateLine(Components.MonoPatcher, MonoToggle.IsOn, s.MonoPatcher, false));
+        SetState(S3ppPill, S3ppPresent ? (S3ppToggle.IsOn ? (T("Installed"), "ApexMutedBrush") : (T("Will be removed"), "ApexWarningBrush"))
+            : _s3ppArchive is not null ? (T("Ready to install"), "ApexAccentBrush") : (T("Not installed"), "ApexMutedBrush"));
+        S3ppToggle.Visibility = Visibility.Visible;
         if (!S3ppPresent) S3ppToggle.Visibility = Visibility.Collapsed; // (missing: its download buttons below)
         S3ppGet.Visibility = !S3ppPresent && _s3ppArchive is null ? Visibility.Visible : Visibility.Collapsed;
         S3ppWait.Visibility = _s3ppWatch is not null ? Visibility.Visible : Visibility.Collapsed;
@@ -685,20 +827,30 @@ public sealed partial class MainWindow : Window
 
     bool TestBuildNow() => _game is { } g && _state is { } s && Verify.TestBuild(g, s, _latest.GetValueOrDefault(Repo[Components.Apex]));
 
-    // the pill's colour follows its text; "Not installed" shows no pill (the switch says it)
-    static void SetPill(TextBlock pill, string text)
+    // what Apply does to a component, under its name: kept, installed, updated or removed
+    (string, string) StateLine(string c, bool on, bool present, bool wrong)
     {
-        pill.Text = text;
-        var brush = text == T("Will be removed") || text == T("Wrong build") ? "ApexWarningBrush"
-            : text.StartsWith(T("Update {0}", "")) ? "ApexAccentBrush"
-            : text == T("Up to date") || text == T("Installed") ? "ApexSuccessBrush" : "ApexMutedBrush";
-        pill.Foreground = (Brush)Application.Current.Resources[brush];
-        ((FrameworkElement)pill.Parent).Visibility = text == T("Not installed") ? Visibility.Collapsed : Visibility.Visible;
+        var v = Known(c);
+        var latest = Latest(c);
+        if (!present) return on ? (T("Will be installed"), "ApexAccentBrush") : (T("Not installed"), "ApexMutedBrush");
+        if (!on) return (v is { Length: > 0 } ? T("{0} \u00b7 will be removed", v) : T("Will be removed"), "ApexWarningBrush");
+        if (wrong) return (T("Wrong build"), "ApexWarningBrush");
+        if (v is not { Length: > 0 }) return (T("Installed"), "ApexMutedBrush");
+        return Newer(latest, v) ? (T("{0} \u2192 updates to {1}", v, latest!), "ApexAccentBrush") : (T("{0} \u00b7 up to date", v), "ApexMutedBrush");
     }
 
-    string Pill(string? version, string? latest, bool wrong) =>
-        wrong ? T("Wrong build") : version is null ? T("Not installed") : version.Length == 0 ? T("Installed")
-        : Newer(latest, version) ? T("Update {0}", latest!) : T("Up to date");
+    static void SetState(TextBlock line, (string Text, string Brush) state)
+    {
+        line.Text = state.Text;
+        line.Foreground = (Brush)Application.Current.Resources[state.Brush];
+    }
+
+    string RendererShort(string r) => r switch
+    {
+        RDxvk => "DXVK", RBridge => "RTX Remix bridge", RNative => T("Windows default (Direct3D 9)"), _ => T("Keep my d3d9.dll"),
+    };
+
+    void OnChangeRenderer(object sender, RoutedEventArgs e) => Show(RendererStep);
 
     // What Apply does: the components to install or update, and the ones to remove. Only what differs from the game as it is.
     (List<string> Install, List<string> Remove) Plan()
@@ -809,7 +961,8 @@ public sealed partial class MainWindow : Window
 
     // ---------- install ----------
 
-    async Task InstallAsync(List<string> comps, List<string>? remove = null)
+    // inline: an update from the welcome page, shown in its card (no Install and Done screens)
+    async Task InstallAsync(List<string> comps, List<string>? remove = null, bool inline = false)
     {
         if (_game is not { } g || _busy || _running) return;
         if (Preview is not null) { await Message(T("Preview"), T("This is a preview: nothing was installed.")); return; }
@@ -818,12 +971,33 @@ public sealed partial class MainWindow : Window
         remove ??= new List<string>();
         var dels = Components.All.Where(remove.Contains).ToList();
         var order = Components.All.Reverse().Where(comps.Contains).ToList(); // the engine's order
-        InstallTitle.Text = T("Applying changes");
-        Show(InstallStep);
-        TaskList.Children.Clear();
-        InstallBar.Value = 0;
-        var rows = dels.Select(c => AddTask(T("Remove {0}", Name(c)))).Concat(order.Select(c => AddTask(Name(c)))).ToList();
-        rows.Add(AddTask(T("Fix incompatible settings")));
+        var before = order.ToDictionary(c => c, c => Known(c) ?? "");
+        var installBar = InstallBar;
+        Panel host = TaskList;
+        if (inline)
+        {
+            _inline = true;
+            _updated = null;
+            UpdateList.Children.Clear();
+            var head = new StackPanel { Spacing = 10, Padding = new Thickness(18, 14, 18, 14) };
+            head.Children.Add(new TextBlock { Text = T("Applying changes"), FontSize = 15, FontWeight = FontWeights.SemiBold });
+            installBar = new ProgressBar { Maximum = 1 };
+            head.Children.Add(installBar);
+            UpdateList.Children.Add(head);
+            var list = new StackPanel { BorderBrush = (Brush)Application.Current.Resources["ApexCardBorderBrush"], BorderThickness = new Thickness(0, 1, 0, 0), Padding = new Thickness(0, 4, 0, 4) };
+            UpdateList.Children.Add(list);
+            host = list;
+            UpdateFooter();
+        }
+        else
+        {
+            InstallTitle.Text = T("Applying changes");
+            Show(InstallStep);
+            TaskList.Children.Clear();
+        }
+        installBar.Value = 0;
+        var rows = dels.Select(c => AddTask(host, T("Remove {0}", Name(c)))).Concat(order.Select(c => AddTask(host, Name(c)))).ToList();
+        rows.Add(AddTask(host, T("Fix incompatible settings")));
         void Mark(int active)
         {
             for (int i = 0; i < rows.Count; i++)
@@ -834,7 +1008,7 @@ public sealed partial class MainWindow : Window
         var progress = new Progress<Progress>(p =>
         {
             touched |= p.Fraction >= 0.5; // (the downloads, before 0.5, change nothing)
-            InstallBar.Value = p.Fraction;
+            installBar.Value = p.Fraction;
             // (downloads, before 0.5, install nothing: the first row stays active until the copies start)
             Mark(p.Arg is null || p.Fraction < 0.5 ?(p.Fraction >= 1 ? rows.Count : p.Fraction > 0.9 ? rows.Count - 1 : dels.Count) : dels.Count + order.IndexOf(p.Arg));
         });
@@ -859,11 +1033,20 @@ public sealed partial class MainWindow : Window
             if (order.Contains(Components.S3pp)) _s3ppArchive = null;
             _defaultsFor = null; // (the switches follow the game as it is now)
             _busy = false;
-            Show(DoneStep);
+            if (inline)
+            {
+                _inline = false;
+                _state = Scan.Run(g); // (the versions now installed)
+                _updated = (order.Where(c => c != Components.Loader).Select(c => (Name(c), before[c], Known(c) ?? Latest(c) ?? "")).ToList(), point?.Committed);
+                _skipUpdate.Clear();
+                RefreshAll();
+            }
+            else Show(DoneStep);
         }
         catch (Exception ex)
         {
             _busy = false;
+            _inline = false;
             _defaultsFor = null;
             var net = ex is HttpRequestException or TaskCanceledException;
             var title = net ? T("Setup can't reach GitHub") : T("Setup could not finish");
@@ -885,7 +1068,7 @@ public sealed partial class MainWindow : Window
     }
 
     // a row of the task list; the returned action sets it to 0 pending, 1 working, 2 done
-    Action<int> AddTask(string text)
+    Action<int> AddTask(Panel host, string text)
     {
         var row = new Grid { Padding = new Thickness(18, 10, 18, 10), ColumnSpacing = 12 };
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
@@ -895,7 +1078,7 @@ public sealed partial class MainWindow : Window
         var label = new TextBlock { Text = text, FontSize = 13, VerticalAlignment = VerticalAlignment.Center };
         Grid.SetColumn(label, 1);
         row.Children.Add(ring); row.Children.Add(icon); row.Children.Add(label);
-        TaskList.Children.Add(row);
+        host.Children.Add(row);
         return state =>
         {
             ring.IsActive = state == 1;
