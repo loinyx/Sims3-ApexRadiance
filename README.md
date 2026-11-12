@@ -142,8 +142,10 @@ Press **F8** to save a screenshot with Apex effects applied. You can choose whet
 ### Install with Apex Radiance Setup (recommended)
 
 1. Close the game and launcher.
-2. Download `ApexRadianceSetup.exe` from the [latest release](https://github.com/loinyx/Sims3-ApexRadiance/releases/latest) and run it.
+2. Download **Apex Radiance Setup.exe (recommended)** from the [latest release](https://github.com/loinyx/Sims3-ApexRadiance/releases/latest) and run it.
 3. Pick your game, choose the components and click **Install**.
+
+Setup updates itself. If an older Setup says *asset not found*, download Setup again from the latest release once.
 
 Run Setup again to update, check or repair the installation, or to remove it; it keeps a backup of every file it
 replaces. See [Apex Radiance Setup](docs/features/installer.md).
@@ -151,12 +153,12 @@ replaces. See [Apex Radiance Setup](docs/features/installer.md).
 ### Install or update by hand
 
 1. Close the game and launcher.
-2. Download `Apex-Radiance-X.Y.Z-Manual-install.zip` from the [latest release](https://github.com/loinyx/Sims3-ApexRadiance/releases/latest) and open it.
+2. Download **Apex Radiance.zip (manual install)** from the [latest release](https://github.com/loinyx/Sims3-ApexRadiance/releases/latest) and open it.
 3. Follow `How to install.txt` inside: copy `ApexRadiance.asi` into `The Sims 3\Game\Bin\`, replacing the previous Apex Radiance file when updating.
 4. Load a world and press **Ctrl+Shift+F11** to open the menu.
 
-A release has two files: `ApexRadianceSetup.exe` and the manual-install zip, which holds `ApexRadiance.asi`, `ts3wrap.exe`,
-the `RTX Remix bridge` folder and `How to install.txt`. Setup 1.1.2 and later install from that zip.
+A release has two files: Setup and the manual-install zip, which holds `ApexRadiance.asi`, `ts3wrap.exe`,
+the `RTX Remix bridge` folder and `How to install.txt`.
 
 Optional, experimental: copy `ts3wrap.exe` from the same release next to `ApexRadiance.asi` and add
 `restart_host = true` under `[ui]` in `ApexRadiance.toml`. After a save that leaves the game little free memory,
@@ -182,7 +184,7 @@ The bridge moves the game's renderer (DXVK) out of the 32-bit game into its own 
 If the game misbehaves with it, use DXVK. It needs Apex Radiance 3.0.0 or later, which detects it on its own (**Settings → Compatibility** shows *RTX Remix bridge: Installed*).
 
 1. Close the game.
-2. Download `Apex-Radiance-X.Y.Z-Manual-install.zip` from the [latest release](https://github.com/loinyx/Sims3-ApexRadiance/releases/latest): the bridge is its `RTX Remix bridge` folder.
+2. Download **Apex Radiance.zip (manual install)** from the [latest release](https://github.com/loinyx/Sims3-ApexRadiance/releases/latest): the bridge is its `RTX Remix bridge` folder.
 3. If `Game\Bin` already has a `d3d9.dll` (for example DXVK), move it to a backup folder.
 4. Copy everything inside `RTX Remix bridge` into `Game\Bin`, keeping the `.trex` folder: Bin then holds `d3d9.dll`, `bridge.conf`, `dxvk.conf` and
    `.trex\` (`NvRemixBridge.exe`, `d3d9vk_x64.dll`, `bridge.conf`).
