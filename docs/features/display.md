@@ -84,12 +84,15 @@ off for the game only, from its next start.
 2. Turned on, it sets the setting to *force off* (1) in the profile that holds the running game exe (`TS3W.exe` or
    `TS3.exe`, looked up by its full path) and, when `.trex\NvRemixBridge.exe` exists beside the game, in the profile
    of the RTX Remix bridge's server, which presents the frames. An exe that no profile holds gets a new profile,
-   *Apex Radiance <exe>*. The global profile and other programs are not touched.
+   *Apex Radiance <exe>*, holding the exe by its full path, so other installs and other RTX Remix games keep their
+   own setting. The global profile and other programs are not touched.
 3. What each profile had before is kept in `[screen.gsync_restore]`: the user value to put back, -1 (no user value:
    the setting is deleted, which also brings back a driver-predefined value) or -2 (Apex made the profile: it is
-   deleted). Turned off, or by Settings > Menu > Reset all, Apex puts each one back and forgets it. A failed session
+   deleted, only while the exe's profile is still a user profile with that name; any other gets the setting deleted).
+   An Apex profile already at force off whose entry was lost counts as -2. Turned off, or by Settings > Menu > Reset all, Apex puts each one back and forgets it. A failed session
    saves nothing, and the switch then shows what the profiles still hold; a pending change is tried again at the next
-   start.
+   start. While the switch is on it stays usable, so it can always be turned off; while the driver settings have not
+   answered, they are asked again each time the page opens.
 4. The driver reads a profile when a program starts, so the change takes effect at the next game start. The switch is
    not part of the Overview's Display switch or *Turn off Apex*.
 

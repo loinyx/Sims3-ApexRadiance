@@ -493,6 +493,7 @@ struct Api {
     int(__cdecl* GetSetting)(H, H, uint32_t, Setting*);
     int(__cdecl* SetSetting)(H, H, Setting*);
     int(__cdecl* DeleteProfileSetting)(H, H, uint32_t);
+    int(__cdecl* GetProfileInfo)(H, H, Profile*);
 };
 
 // nullptr when nvapi.dll or one of the functions is missing (kept loaded: the driver may hold it too)
@@ -503,7 +504,7 @@ const Api* Load() {
         if (!query) return nullptr;
         static Api a;
         const uint32_t ids[] = {0x0150E828, 0xD22BDD7E, 0x0694D52E, 0xDAD9CFF8, 0x375DBD6B, 0xFCBC7E14, 0xEEE566B2,
-                                0xCC176068, 0x17093206, 0x4347A9DE, 0x73BF8338, 0x577DD202, 0xE4A26362}; // in Api's order
+                                0xCC176068, 0x17093206, 0x4347A9DE, 0x73BF8338, 0x577DD202, 0xE4A26362, 0x61CD6FD6}; // in Api's order
         void** slots = reinterpret_cast<void**>(&a);
         static_assert(sizeof(Api) == sizeof(ids) / sizeof(ids[0]) * sizeof(void*));
         for (size_t i = 0; i < std::size(ids); i++)
@@ -592,17 +593,25 @@ void GsyncSession(void* p) {
             static Nv::Setting s;
             std::memset(&s, 0, sizeof s);
             s.version = Nv::Ver<Nv::Setting>(1);
+            const std::wstring apexName = L"Apex Radiance " + name;
+            // the profile Apex made for this exe (by name, never a predefined one); any other is the player's or NVIDIA's
+            auto apexProfile = [&] {
+                static Nv::Profile info;
+                std::memset(&info, 0, sizeof info);
+                info.version = Nv::Ver<Nv::Profile>(1);
+                return nv->GetProfileInfo(session, profile, &info) == Nv::kOk && !info.isPredefined && apexName == info.profileName;
+            };
             if (job.want) {
                 int64_t previous = kDeleteSetting;
                 if (missing) { // no profile has this exe: an Apex one, deleted again when the switch is turned off
                     static Nv::Profile prof;
                     std::memset(&prof, 0, sizeof prof);
                     prof.version = Nv::Ver<Nv::Profile>(1);
-                    wcsncpy_s(prof.profileName, (L"Apex Radiance " + name).c_str(), _TRUNCATE);
+                    wcsncpy_s(prof.profileName, apexName.c_str(), _TRUNCATE);
                     if (const int st = nv->CreateProfile(session, &prof, &profile); st != Nv::kOk) return fail("CreateProfile", st);
                     std::memset(&app, 0, sizeof app);
                     app.version = Nv::Ver<Nv::Application>(3);
-                    wcsncpy_s(app.appName, name.c_str(), _TRUNCATE);
+                    wcsncpy_s(app.appName, path, _TRUNCATE); // the full path: this install only (nvapi.h recommends it)
                     if (const int st = nv->CreateApplication(session, profile, &app); st != Nv::kOk) return fail("CreateApplication", st);
                     previous = kDeleteProfile;
                 } else {
@@ -610,6 +619,8 @@ void GsyncSession(void* p) {
                     if (st != Nv::kOk && st != Nv::kSettingNotFound) return fail("GetSetting", st);
                     // a user value of this profile is put back; none, or the driver's predefined one, is deleted
                     if (st == Nv::kOk && s.location == 0 && !s.isCurrentPredefined) previous = s.current.u32;
+                    // Apex's own profile from an earlier session whose restore entry was lost: deleted again, not kept at force off
+                    if (previous == Nv::kForceOff && apexProfile()) previous = kDeleteProfile;
                     std::memset(&s, 0, sizeof s);
                     s.version = Nv::Ver<Nv::Setting>(1);
                 }
@@ -623,8 +634,8 @@ void GsyncSession(void* p) {
                 job.restore.erase(key);
                 if (missing) continue; // the profile is gone already
                 int st = Nv::kOk;
-                if (previous == kDeleteProfile) st = nv->DeleteProfile(session, profile);
-                else if (previous == kDeleteSetting) {
+                if (previous == kDeleteProfile && apexProfile()) st = nv->DeleteProfile(session, profile);
+                else if (previous == kDeleteProfile || previous == kDeleteSetting) {
                     st = nv->DeleteProfileSetting(session, profile, Nv::kVrrAppOverride);
                     if (st == Nv::kSettingNotFound) st = Nv::kOk;
                 } else {
@@ -980,16 +991,18 @@ void RenderUI() {
 
     if (ApexUi::SwitchRow("Show FPS", &s.showFps, "A small frame counter in the corner of the screen", false)) Set(s);
 
-    // Turn off G-SYNC: off until the driver settings answered (first look when the page opens)
-    static std::atomic<bool> s_probed{false};
-    if (g_nvState.load() == NvUnknown && !s_probed.exchange(true)) StartGsyncSync();
+    // Turn off G-SYNC: disabled until the driver settings answered, looked at each time the page opens until they do
+    static int s_lastFrame = -10;
+    const bool opened = ImGui::GetFrameCount() > s_lastFrame + 1;
+    s_lastFrame = ImGui::GetFrameCount();
+    if (opened && g_nvState.load() != NvReady && g_nvState.load() != NvMissing) StartGsyncSync();
     const int nv = g_nvState.load();
     bool gsyncOff = false;
     {
         std::lock_guard<std::mutex> lock(g_lock);
         gsyncOff = g_gsyncOff;
     }
-    ImGui::BeginDisabled(nv != NvReady);
+    ImGui::BeginDisabled(nv != NvReady && !gsyncOff); // on: it can always be turned off
     if (ApexUi::SwitchRow("Turn off G-SYNC", &gsyncOff, "For this game only, on NVIDIA graphics cards. Applies after restarting the game", false))
         SetGsyncOff(gsyncOff);
     ImGui::EndDisabled();
