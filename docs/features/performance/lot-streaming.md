@@ -1,16 +1,16 @@
 # Lot Streaming
 
-Lot Streaming lets nearby lots keep their full detail farther from the camera, keeps lots at the edge of the detail
-distance from flickering between detailed and simple, and pauses lot streaming while the map view is open. Lots that
-load together share one build time per frame, so a burst of lots no longer stalls a frame. How many lots are detailed at
-once and how fast the camera may move before lots stop streaming stay the game's own graphics option. Research,
-measurements and code by **idavidveiga**; detailed-lot hysteresis and shared build time by @loinyx.
+Lot Streaming lets nearby lots keep their full detail farther from the camera, makes lots switch between full detail
+and impostor less while the camera moves, and pauses lot streaming while the map view is open. Lots that load together
+share one build time per frame, so a burst of lots no longer stalls a frame. How many lots are detailed at once and how
+fast the camera may move before lots stop streaming stay the game's own graphics option. Research, measurements and code
+by **idavidveiga**; detailed-lot hysteresis and shared build time by @loinyx.
 
 ## Status
 
 | | |
 |---|---|
-| Availability | Experimental: Released in 2.7.0. Detailed-lot hysteresis and shared lot build time: Released in 2.16.2. Smooth lot streaming, Spread lot objects while loading, the threshold-12 switch and Maximum detailed lots: Removed in 3.1.2 ([removed features](../../removed-features.md#lot-streaming-parts)) |
+| Availability | Experimental: Released in 2.7.0. Detailed-lot hysteresis and shared lot build time: Released in 2.16.2; hysteresis factor 0.5 instead of 0.81 in 3.1.2. Smooth lot streaming, Spread lot objects while loading, the threshold-12 switch and Maximum detailed lots: Removed in 3.1.2 ([removed features](../../removed-features.md#lot-streaming-parts)) |
 | Default | Off (every switch); the shared lot build time is part of Lot Lighting While Moving, on by default |
 | Menu | System > Lot Streaming (card *Lot streaming*, group *Lot detail*) |
 | Configuration | `[patches.LotDetailRange]`, `[patches.LotVisibilityOverride]`, `[patches.MapViewStreamingBlocker]` in `ApexRadiance.toml` |
@@ -27,8 +27,11 @@ lots are detailed, and while the camera moves lots switch detail back and forth.
 
 Two native details make it worse than it looks:
 
-- The lot metric is a squared distance from the camera's target point (no view angle), and Active Lot Bias (8.0) is
-  subtracted from it: for a detailed lot that is under 3 m of distance, so the native hysteresis does almost nothing.
+- The lot metric is the squared distance from the camera's target point to the lot's rectangle (the largest axis
+  distance; no view angle). The lots are ranked by it, and for a detailed lot Active Lot Bias (8.0) is subtracted
+  first: under 3 m of distance, so lots competing for the Max Active Lots slots swap back and forth as the camera moves.
+  The 0.81 factor Keep lot visibility stable used until 3.1.1 did not stop it: a recorded session at distance 300 with
+  it on asked for the same lot 12 times in 96 s, and 13 of 31 promoted lots were demoted before their build finished.
 - Each loading lot runs its load stages with its own 20 ms slice (35 for the lot being played), so lots that load
   together add up in one frame. Recorded loads show up to 7 lots building in one frame and 96 hitches dominated by the
   load stages (frames up to 134 ms).
@@ -41,9 +44,10 @@ Each step is a separate switch that sets the game's own value or code; no lot lo
    (300 by default; the game's metric is a squared distance). Max Active Lots (`+0xE4`) and the camera-speed threshold
    (`+0xEC`) stay the values the game applies from its own option at the end of each world load.
 2. **Keep lot visibility stable** gives detailed lots a real hysteresis: the metric's subtraction of Active Lot Bias is
-   replaced by a multiplication by 0.81 for lots already detailed. A detailed lot keeps its detail until it is about
-   11% farther than where a new lot is promoted (333 m at a distance of 300) and wins capacity ties against a lot only
-   slightly nearer. Lots not detailed are measured as before.
+   replaced by a multiplication by 0.5 for lots already detailed. Only the ranking reads that value: when more lots are
+   in range than the game keeps detailed, a detailed lot keeps its slot until a waiting lot is about 1.41 times nearer
+   (the square root of 2). The game's distance test still reads the raw distance, so no lot without a game priority is
+   detailed beyond the detail distance and the number of detailed lots stays the game's.
 3. **Pause lot streaming in map view** holds the live "skip lot streaming" gate (`+0x258`) while the map view is open
    and for 1 s after it closes, without detouring WorldManager::Update.
 
@@ -70,7 +74,7 @@ the [validation page](../../validation/performance-lot-streaming.md#latest-resul
 |---|---|---|---|---|---|
 | Extended lot detail (Experimental) | `[patches.LotDetailRange] enabled` | bool | off | | Lots stay in full detail farther away than the game's 70 |
 | Lot detail distance (shown while on) | `[patches.LotDetailRange] distance` | int | 300 | 70 to 300, steps of 10 | How far lots stay in full detail; 70 is the game's. Applied live |
-| Keep lot visibility stable (Experimental) | `[patches.LotVisibilityOverride] enabled` | bool | off | | Lots in full detail keep it about 11% farther, so lots at the edge stop switching back and forth |
+| Keep lot visibility stable (Experimental) | `[patches.LotVisibilityOverride] enabled` | bool | off | | When more lots are in range than the game keeps in full detail, a lot in full detail keeps it until a lot about 1.4 times nearer needs it, so lots swap less while the camera moves |
 | Pause lot streaming in map view (Experimental) | `[patches.MapViewStreamingBlocker] enabled` | bool | off | | No lot detail streaming while the map view is open |
 
 A missing key reads as off. None of these switches is part of a profile part, and the built-in profiles leave them as
@@ -85,7 +89,8 @@ the player set them. The keys of the removed parts (`[patches.LotLodStreaming]`,
 - **The game's graphics option for detailed lots:** it sets Max Active Lots and the camera-speed threshold together, and
   the game applies it at the end of each world load. Apex never writes either value.
 - **Memory:** a longer distance keeps more lots detailed, up to the game's Max Active Lots, and uses more of the 32-bit
-  game's address space; see *Room to save* ([room-to-save.md](room-to-save.md)).
+  game's address space; see *Room to save* ([room-to-save.md](room-to-save.md)). Keep lot visibility stable changes
+  only which lots are detailed, never how many or how far.
 
 ## Limitations
 
@@ -95,6 +100,11 @@ the player set them. The keys of the removed parts (`[patches.LotLodStreaming]`,
   signatures; the research and the controlled tests were made on the EA app build 1.69.
 - A single load stage can take longer than the shared budget (stage 0 of a large lot took up to 68 ms in recordings);
   the shared build time cannot split a stage.
+- Lots at the edge of the detail distance still switch as natively: the hysteresis reaches only the ranking (see the
+  rejected distance-test change below).
+- With the 0.5 factor a detailed lot may stay ahead of a waiting lot up to 1.41 times nearer, and it keeps that place
+  while the camera stays still (a nearer lot waited in 61% of the town model's frames, 14% with 0.81). The lot under the
+  camera target is detailed whenever the game gives it priority (inferred).
 - Most of a lot's time to full detail is the lighting wait of stage 20 (median 1.9 s of 2.3 s in recordings), which the
   build share does not change ([engine page](../../engine/lot-loading-and-streaming.md#stage-20-the-lighting-wait)).
 
@@ -103,7 +113,7 @@ the player set them. The keys of the removed parts (`[patches.LotLodStreaming]`,
 | Part | Game side (Steam 1.67.2) | What Apex writes |
 |---|---|---|
 | Extended lot detail | WorldManager `[0x011ECBC4]`: `+0xDC` Lot LOD distance (70.0 from the constructor). `+0xE4` Max Active Lots, `+0xEC` camera-speed threshold (both from the game's option at load end, 0x00C60C00), `+0xE0` Active Lot Bias (8.0) and `+0xE8` terrain-height threshold (600) are left alone | `+0xDC` per live WorldManager, captured first and maintained by `Tick` while still owned |
-| Keep lot visibility stable | `JZ` (0x74) at 0x00C63015 in the lot metric 0x00C62D80, then `subss xmm0,[edi+0E0h]` (8 bytes at 0x00C6301D) | That instruction becomes `mulss xmm0,[factor]` (0.81), only when the JZ reads 0x74 and the 8 bytes match |
+| Keep lot visibility stable | `JZ` (0x74) at 0x00C63015 in the lot metric 0x00C62D80, then `subss xmm0,[edi+0E0h]` (8 bytes at 0x00C6301D) on the value it returns (entry `+0xC`, ranked by 0x00C64050); the raw value goes to its out pointer (entry `+4`, read by the distance test `comiss xmm0,[edi+4]` at 0x00C6C706) | That instruction becomes `mulss xmm0,[factor]` (0.5), only when the JZ reads 0x74 and the 8 bytes match; the distance test stays native |
 | Shared lot build time | CALL 0x00AEB306 (renderer update 0x00AEB2E0 -> load stages 0x00AEA680, result unused); lot pass CALL 0x00C7CEDF; slice load 0x00AEA6D8 | `CallChain` layer `LotBuildGate` on 0x00AEB306 (the gate) and on 0x00C7CEDF (the lot pass marker); the slice cap through Lot Lighting While Moving's stub at 0x00AEA6D8 |
 | Pause in map view | `+0x258` "skip lot streaming"; map view from `Camera_IsMapViewModeEnabled` | The gate while the map is open and 1000 ms after |
 
@@ -124,7 +134,15 @@ signature and stay off when a signature is missing. The fork's diagnostic metric
 - The threshold-12 switch (`[patches.LotActiveThreshold]`, EA app only, no menu row): it set "Max Active Lot Threshold"
   to 12, not Max Active Lots, and did nothing on Steam. Removed in 3.1.2.
 - The visibility override as a `JZ` -> `JMP` (Sims3SettingsSetter's): the metric has no view angle, so it only removed
-  the small native hysteresis; replaced by the 0.81 factor.
+  the small native hysteresis; replaced by the factor.
+- The 0.81 factor (2.16.2 to 3.1.1): it changed only the ranking, not the distance test, so it never kept a lot detailed
+  farther; a detailed lot held its slot only against lots up to 1.11 times nearer. Replaced by 0.5 (11% to 49% fewer
+  switches in the model where the 8 slots are the limit). 0.25 cuts more but lets a lot twice as far keep its slot.
+- The distance test on the ranked value (1 byte at 0x00C6C709, `04` -> `0C`), for a hysteresis at the edge of the
+  distance: a detailed lot up to 1.41 times past the distance kept a slot that a waiting lot inside it needed, so that
+  nearer lot stayed an impostor without its lighting. In the scoring model this happened in 18% of the frames of a
+  sparse grid (lots 100 m apart, at 120 or 150 m) and 80% with lots 200 m apart at 300 m; the raw test never allows it.
+  Rejected in 3.1.2 before release.
 - A smaller per-lot slice alone: lots that load together still add up in one frame; the budget is shared instead.
 
 Details in [history](../../history/performance-lot-streaming.md).

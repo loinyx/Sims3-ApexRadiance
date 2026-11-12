@@ -1,14 +1,16 @@
 #pragma once
 // Keep lot visibility stable: a real hysteresis for lots already in Detailed View.
 //
-// The game's lot metric 0x00C62D80 (Steam 1.67.2) is a squared distance from the camera's target point to the lot, with
-// no view angle. For a lot already detailed it then subtracts WorldManager+0xE0 ("Active Lot Bias", 8.0), meant to keep
-// that lot detailed a little longer; but 8 square metres is under 3 m of distance, so the native hysteresis does almost
-// nothing and lots at the edge of the detail distance or of the capacity switch back and forth. The 8 bytes of that
-// subtraction (`subss xmm0,[edi+0E0h]`, 8 bytes after the JZ that skips it for lots not detailed) become
-// `mulss xmm0,[kKeepFactor]`: a detailed lot is measured at kKeepFactor of its squared distance (0.81 = 90 % of its
-// distance), so it keeps its detail until it is about 11 % farther than where a new lot is promoted, and it wins capacity
-// ties against a lot that is only slightly nearer. Lots not detailed are measured exactly as before.
+// The game's lot metric 0x00C62D80 (Steam 1.67.2) is the largest axis distance from the camera's target point to the
+// lot's rectangle, squared, with no view angle. For a lot already detailed it then subtracts WorldManager+0xE0 ("Active
+// Lot Bias", 8.0) from the value it returns; 8 square metres is under 3 m of distance, so lots fighting for the Max
+// Active Lots slots swap back and forth as the camera moves. The 8 bytes of that subtraction (`subss xmm0,[edi+0E0h]`,
+// 8 bytes after the JZ that skips it for lots not detailed) become `mulss xmm0,[kKeepFactor]`: a detailed lot ranks at
+// kKeepFactor of its squared distance, so it keeps its slot against a lot up to 1/sqrt(kKeepFactor) times nearer (0.5:
+// about 1.41 times). Lots not detailed are measured exactly as before.
+// Only the ranking (0x00C64050) reads that value. LotLodScoring's distance test (`comiss xmm0,[edi+4]` at 0x00C6C706)
+// reads the metric's raw out value and stays native: on the ranked value, a detailed lot past the distance would keep a
+// slot that a waiting lot inside it needs, leaving that nearer lot an impostor without its lighting.
 //
 // Sims3SettingsSetter's visibilityOverride turns the JZ into a JMP (0xEB), which skips the subtraction for every lot
 // (removing the small native hysteresis). When it owns that setting, or the JZ already reads 0xEB, Apex writes nothing.
@@ -18,8 +20,8 @@
 
 namespace LotVisibilityOverride {
 
-// Squared-distance factor for lots already detailed (0.81 = keep detail 1/0.9 times as far)
-inline constexpr float kKeepFactor = 0.81f;
+// Ranking factor for lots already detailed (0.5 = keep the slot against a lot up to sqrt(2) times nearer)
+inline constexpr float kKeepFactor = 0.5f;
 
 bool Start(std::string* error = nullptr);
 void Stop();

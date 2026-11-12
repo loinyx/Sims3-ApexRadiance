@@ -1483,5 +1483,6 @@ Evidence and dates in [history/performance-lot-streaming.md](history/performance
   are listed in the [engine page](engine/lot-loading-and-streaming.md#address-reference).
 - The fork's A/B with the throttle (distance 300, 16 lots): 149.3 to 99.2 transitions a minute, same-lot reversals
   within 2 s 48 to 3 ([validation](validation/performance-lot-streaming.md#latest-results)). Keep lot visibility stable
-  now covers the reversals at the edge of the detail distance.
+  does not replace it: it changes only the ranking, so lots at the edge of the detail distance still reverse as
+  natively ([history](history/performance-lot-streaming.md#2026-11-11-detailed-lot-hysteresis-factor-081---05)).
 - Old configurations still hold the keys; they are ignored when the configuration loads.

@@ -1471,7 +1471,7 @@ void LotStreamingCards() {
         }
 
         const bool visibilityOn = FeatureSwitchRow(Performance::kLotVisibilityOverrideName, "Keep lot visibility stable",
-                                                   "Lots in full detail keep it a little farther, so lots at the edge stop switching back and forth", badges);
+                                                   "Lots switch detail less while the camera moves; a nearer lot may wait", badges);
         if (visibilityOn && Performance::LotVisibilityOverrideHandledByS3SS())
             CardNote(kHandled);
         else if (visibilityOn && Performance::LotVisibilityOverrideAlreadyExternal())

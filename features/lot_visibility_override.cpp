@@ -151,7 +151,7 @@ std::string StatusText() {
     if (!g_running) return "Off";
     if (g_externalS3SS) return "Handled by Sims3SettingsSetter";
     if (g_externalPatched) return "On; another mod's visibility override is in place";
-    if (g_owned) return "On; detailed lots keep their detail about 11% farther";
+    if (g_owned) return "On; a detailed lot keeps its slot until a lot about 1.4 times nearer needs it";
     return "On";
 }
 

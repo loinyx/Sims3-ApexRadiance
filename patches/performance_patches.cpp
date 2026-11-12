@@ -789,15 +789,15 @@ APEX_REGISTER_FEATURE(MapViewStreamingBlockerPatch,
 
 APEX_REGISTER_FEATURE(LotVisibilityOverridePatch,
                       {.displayName = "Keep Lot Visibility Stable",
-                       .description = "Lots already in full detail keep it a little farther than where a new lot is promoted, so lots at the edge of the detail "
-                                      "distance or of the detailed-lot limit stop switching back and forth. "
+                       .description = "When more lots are in range than the game keeps in full detail, a lot already in full detail keeps it until a lot "
+                                      "about 1.4 times nearer needs it, so lots switch back and forth less while the camera moves. "
                                       "Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
                        .category = "Performance",
                        .experimental = true,
                        .enabledByDefault = false,
                        .supportedVersions = VERSION_STEAM,
                        .technicalDetails = {"The lot metric 0x00C62D80 is a squared distance from the camera's target point; for a detailed lot it subtracts Active Lot Bias (8.0), under 3 m of distance.",
-                                            "Apex replaces that subtraction (8 bytes after the JZ at the resolved site) with a multiplication by 0.81 for detailed lots only, after checking the JZ and the instruction bytes.",
+                                            "Apex replaces that subtraction (8 bytes after the JZ at the resolved site) with a multiplication by 0.5 for detailed lots only, after checking the JZ and the instruction bytes. Only the ranking reads that value; the distance test reads the raw distance.",
                                             "If the JZ is already a JMP (Sims3SettingsSetter's visibility override), Apex writes nothing. Apex restores the subtraction only when it still reads Apex's instruction.",
                                             "If official Sims3SettingsSetter owns LotStreamingOptimizations.visibilityOverride, Apex makes no write."},
                        .gameCodeGroup = "LotVisibilityOverride"});

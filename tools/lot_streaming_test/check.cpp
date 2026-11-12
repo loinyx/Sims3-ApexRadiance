@@ -4,6 +4,7 @@
 //   check.exe [--csv-dir <folder with LotLoadAnalysis-*.csv>] [--exe <TS3W.exe>]
 // Part of Apex Radiance. Credits: @loinyx
 #include "lot_build_share_policy.h"
+#include "lot_visibility_override.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -240,52 +241,76 @@ static void WaitBound() {
 }
 
 // ---- 3. detailed-lot hysteresis ----
-// LotLodScoring: metric = squared distance from the camera target; a detailed lot's metric gets the bias; the lots are
-// ranked by metric and the first maxActive below distance^2 are detailed (priority lots left out of the model).
-static int Transitions(double keepFactor, double nativeBias, double distance, int maxActive, unsigned seed) {
+// LotLodScoring (0x00C6C290, Steam 1.67.2) stores per lot the metric's raw value (+4: the largest axis distance from the
+// camera target to the lot's rectangle, squared; 0x00C62E49 to 0x00C62EE5), a priority (+8; 3 for the lot under the
+// target) and the metric's return (+0xC: for a lot already detailed, raw - Active Lot Bias natively, raw * factor with
+// Apex). It partial-sorts the first Max Active Lots by
+// priority, then +0xC (0x00C64050), and walks the entries in that order: while fewer than Max Active Lots are kept, a lot
+// with a priority or with its raw value (+4) below distance^2 (0x00C6C706) is kept, any other is demoted. The factor only
+// changes the ranking. Lots are 30 m squares on a grid; 8 detailed lots at most (the game's option).
+struct Switches { int count = 0; double farthest = 0; }; // farthest: farthest detailed lot without priority / distance
+static Switches Transitions(double keepFactor, double distance, double spacing, int cols, int rows, unsigned seed) {
+    constexpr int kMaxActive = 8;
     struct L { double x, z; bool detailed; };
+    struct E { int lot; double raw; int prio; double ranked; };
     std::vector<L> lots;
-    for (int i = 0; i < 40; i++) lots.push_back({(i % 8) * 40.0, (i / 8) * 40.0, false});
+    for (int i = 0; i < cols * rows; i++) lots.push_back({(i % cols) * spacing, (i / cols) * spacing, false});
+    const double half = 15, mx = (cols - 1) * spacing / 2, mz = (rows - 1) * spacing / 2;
     uint32_t s = seed;
     auto rnd = [&s] { s = s * 1664525u + 1013904223u; return (s >> 8) / 16777216.0; };
-    int changes = 0;
-    double cx = 140, cz = 80;
+    Switches out;
     for (int frame = 0; frame < 3000; frame++) {
         // a pan that drifts and sways around the same area, the camera target moving up to ~2 m a frame
-        cx = 140 + 60 * std::sin(frame * 0.01) + (rnd() - 0.5) * 4;
-        cz = 80 + 25 * std::sin(frame * 0.023) + (rnd() - 0.5) * 4;
-        std::vector<std::pair<double, int>> ranked;
+        const double cx = mx + 60 * std::sin(frame * 0.01) + (rnd() - 0.5) * 4, cz = mz + 25 * std::sin(frame * 0.023) + (rnd() - 0.5) * 4;
+        std::vector<E> e;
         for (int i = 0; i < static_cast<int>(lots.size()); i++) {
-            double m = (lots[i].x - cx) * (lots[i].x - cx) + (lots[i].z - cz) * (lots[i].z - cz);
-            if (lots[i].detailed) m = keepFactor > 0 ? m * keepFactor : m - nativeBias;
-            ranked.push_back({m, i});
+            const double ax = std::fabs(lots[i].x - cx), az = std::fabs(lots[i].z - cz);
+            const double d = std::max({0.0, ax - half, az - half}), raw = d * d; // the largest axis distance, squared
+            const double ranked = !lots[i].detailed ? raw : keepFactor > 0 ? raw * keepFactor : raw - 8.0;
+            e.push_back({i, raw, ax <= half && az <= half ? 3 : 0, ranked});
         }
-        std::sort(ranked.begin(), ranked.end());
-        std::vector<bool> want(lots.size(), false);
-        for (int k = 0; k < static_cast<int>(ranked.size()) && k < maxActive; k++)
-            if (ranked[k].first < distance * distance) want[ranked[k].second] = true;
-        for (size_t i = 0; i < lots.size(); i++)
-            if (want[i] != lots[i].detailed) {
-                lots[i].detailed = want[i];
-                if (frame > 50) changes++; // after the initial fill
+        const size_t top = std::min(e.size(), static_cast<size_t>(kMaxActive));
+        std::partial_sort(e.begin(), e.begin() + top, e.end(), [](const E& a, const E& b) { return a.prio != b.prio ? a.prio > b.prio : a.ranked < b.ranked; });
+        int kept = 0;
+        for (const E& x : e) {
+            const bool want = kept < kMaxActive && (x.prio > 0 || x.raw < distance * distance);
+            kept += want;
+            if (frame <= 50) { lots[x.lot].detailed = want; continue; } // the initial fill
+            if (want != lots[x.lot].detailed) {
+                lots[x.lot].detailed = want;
+                out.count++;
             }
+            if (want && x.prio == 0) out.farthest = std::max(out.farthest, std::sqrt(x.raw) / distance);
+        }
     }
-    return changes;
+    return out;
 }
 
 static void HysteresisChecks() {
-    for (const auto& [distance, maxActive] : std::vector<std::pair<double, int>>{{70, 8}, {300, 16}, {150, 12}}) {
-        int native = 0, keep = 0;
+    const double shipped = LotVisibilityOverride::kKeepFactor;
+    struct Case { const char* layout; double spacing; int cols, rows; double distance; bool quarterCut; };
+    // the town gives the same counts at every distance from 120 to 300 (the slots bind); the sparse grid at 150 is also
+    // limited by the distance, where edge lots switch with every factor
+    const Case cases[] = {{"town 8x5, 40 m apart", 40, 8, 5, 150, true}, {"sparse 12x8, 100 m apart", 100, 12, 8, 150, false},
+                          {"sparse 12x8, 100 m apart", 100, 12, 8, 300, false}};
+    for (const Case& c : cases) {
+        int native = 0, old = 0, keep = 0;
+        double farthest = 0;
         for (unsigned seed = 1; seed <= 5; seed++) {
-            native += Transitions(0, 8.0, distance, maxActive, seed);
-            keep += Transitions(0.81, 0, distance, maxActive, seed);
+            const Switches n = Transitions(0, c.distance, c.spacing, c.cols, c.rows, seed), o = Transitions(0.81, c.distance, c.spacing, c.cols, c.rows, seed),
+                           k = Transitions(shipped, c.distance, c.spacing, c.cols, c.rows, seed);
+            native += n.count, old += o.count, keep += k.count;
+            farthest = std::max({farthest, n.farthest, o.farthest, k.farthest});
         }
-        std::printf("hysteresis: distance %.0f, %d lots: detail switches native %d, with 0.81 %d\n", distance, maxActive, native, keep);
-        CHECK(keep * 2 <= native, "0.81 must at least halve the switches at %.0f / %d (%d vs %d)", distance, maxActive, keep, native);
+        std::printf("hysteresis: %s, distance %.0f, 8 lots: detail switches native %d, with 0.81 %d, with %.2f %d; farthest detailed lot %.2f x distance\n",
+                    c.layout, c.distance, native, old, shipped, keep, farthest);
+        // a detailed lot past the distance would hold a slot that a waiting lot inside it needs
+        CHECK(farthest <= 1.0, "a lot stayed detailed beyond the detail distance (%.3f x)", farthest);
+        CHECK(keep * 2 <= native, "%.2f must at least halve the switches at %.0f m (%d vs %d)", shipped, c.distance, keep, native);
+        CHECK(keep < old, "%.2f must switch less than 0.81 at %.0f m (%d vs %d)", shipped, c.distance, keep, old);
+        // in the town, where many lots compete for the 8 slots, it must cut a quarter of 0.81's switches
+        if (c.quarterCut) CHECK(keep * 4 <= old * 3, "%.2f must cut 0.81's switches by 25%% at %.0f m (%d vs %d)", shipped, c.distance, keep, old);
     }
-    // never wider than intended: a detailed lot stays detailed only up to distance / 0.9
-    const double d = 300, keepAt = d / std::sqrt(0.81);
-    CHECK(std::fabs(keepAt - 333.33) < 0.1, "keep distance %.2f", keepAt);
 }
 
 // ---- 4. game bytes (Steam 1.67.2) ----
@@ -315,6 +340,7 @@ static void ExeChecks(const std::string& exe) {
     struct Site { uint32_t va; const char* what; std::vector<int> bytes; };
     const std::vector<Site> sites = {
         {0x00C63015, "metric: JZ over the detailed-lot bias, then subss xmm0,[edi+0E0h]", {0x74, 0x14, 0xF3, 0x0F, 0x10, 0x44, 0x24, 0x08, 0xF3, 0x0F, 0x5C, 0x87, 0xE0, 0, 0, 0}},
+        {0x00C6C700, "scoring: distance test comiss distance^2,[edi+4] on the raw metric, not the ranked one", {0xF3, 0x0F, 0x10, 0x44, 0x24, 0x5C, 0x0F, 0x2F, 0x47, 0x04}},
         {0x00AEB306, "renderer update: call 0x00AEA680 (load stages)", {0xE8, 0x75, 0xF3, 0xFF, 0xFF}},
         {0x00C7CEDF, "lot pass: call 0x00AEB2E0 (renderer update)", {0xE8, 0xFC, 0xE3, 0xE6, 0xFF}},
         {0x00AEB2E0, "renderer update: push esi only before the load stages call", {0x56, 0x8B, 0xF1, 0xE8}},

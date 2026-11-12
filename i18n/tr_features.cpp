@@ -39,13 +39,13 @@ const I18n::Entry kEntries[] = {
      "streaming de solares durante la transición del mapa. Parte de " APEX_PRODUCT_NAME ". Créditos: @loinyx",
      "Suspend le streaming détaillé des terrains pendant l'ouverture de la carte du quartier, puis le reprend à sa fermeture. Cela évite du "
      "travail de streaming pendant la transition de la carte. Fait partie d'" APEX_PRODUCT_NAME ". Crédits : @loinyx"},
-    {"Lots already in full detail keep it a little farther than where a new lot is promoted, so lots at the edge of the detail distance or of the detailed-lot limit stop switching back and forth. "
+    {"When more lots are in range than the game keeps in full detail, a lot already in full detail keeps it until a lot about 1.4 times nearer needs it, so lots switch back and forth less while the camera moves. "
      "Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
-     "Lotes que já estão em detalhe total o mantêm um pouco além do ponto em que um lote novo é promovido, e os lotes no limite da distância ou da quantidade de lotes detalhados param de trocar para lá e para cá. "
+     "Quando há mais lotes ao alcance do que o jogo mantém em detalhe total, um lote que já está em detalhe total o mantém até que um lote cerca de 1,4 vez mais próximo precise dele, e os lotes trocam menos para lá e para cá enquanto a câmera se move. "
      "Parte do " APEX_PRODUCT_NAME ". Créditos: @loinyx",
-     "Los solares que ya tienen todo el detalle lo mantienen un poco más allá del punto en que se promueve un solar nuevo, y los solares en el límite de la distancia o del número de solares detallados dejan de cambiar una y otra vez. "
+     "Cuando hay más solares al alcance de los que el juego mantiene con todo el detalle, un solar que ya lo tiene lo mantiene hasta que lo necesita un solar unas 1,4 veces más cercano, así que los solares cambian con menos frecuencia mientras la cámara se mueve. "
      "Parte de " APEX_PRODUCT_NAME ". Créditos: @loinyx",
-     "Les terrains déjà en détail complet le gardent un peu au-delà du point où un nouveau terrain est promu : ceux à la limite de la distance ou du nombre de terrains détaillés ne changent plus sans arrêt. "
+     "Quand plus de terrains sont à portée que le jeu n'en garde en détail complet, un terrain déjà en détail complet le garde jusqu'à ce qu'un terrain environ 1,4 fois plus proche en ait besoin : les terrains changent moins souvent quand la caméra bouge. "
      "Fait partie d'" APEX_PRODUCT_NAME ". Crédits : @loinyx"},
     {"Remembers which of the game's packages holds each file the game asks for, so it does not search every package again. Fewer small "
      "stutters when objects, textures and lots load. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",

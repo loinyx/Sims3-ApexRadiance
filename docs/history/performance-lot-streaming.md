@@ -351,3 +351,82 @@ own option always sets Max Active Lots and the camera-speed threshold. Kept: Ext
 visibility stable, Pause lot streaming in map view and the shared lot build time. The removed TOML keys are ignored.
 Not run in game yet ([validation](../validation/performance-lot-streaming.md#open-checks)); details in
 [removed features](../removed-features.md#lot-streaming-parts).
+
+### 2026-11-11: detailed-lot hysteresis factor 0.81 -> 0.5
+
+**Context:** with Extended lot detail and Keep lot visibility stable on, lots kept switching between full detail and
+impostor while the camera moved, few lots looked fully loaded and ground light took long to appear. A LotLoadAnalysis
+capture at distance 300 with 8 detailed lots: 31 promotions and 31 demotions of 12 lots in 121 s; one lot was requested
+detailed and not detailed 12 times in 96 s; 13 of the promoted lots were demoted before their build finished; request to
+done median 5.6 s, max 51 s (18 builds). The session's frame timeline had 8 lots in the lighting stage in 8127 of 8190
+frames.
+
+**Finding:** a disassembly of Steam 1.67.2 showed that the factor never reached the distance test.
+
+- The metric 0x00C62D80 writes its raw value to its out pointer (0x00C62EE5, 0x00C62FFE): the largest axis distance
+  from the camera target to the lot's rectangle in lot space, squared (`[0x011843F8]` = 1, 0x00C62E49 to 0x00C62EE5).
+  The bias, or Apex's `mulss`, applies to a local copy that it returns in ST0 (0x00C63017 to 0x00C6302B).
+- The caller (0x00C6C5D7 to 0x00C6C5F9) stores per lot: the lot `+0`, the raw value `+4`, a priority `+8`, the returned
+  value `+0xC`. 0x00C64050 partial-sorts the first Max Active Lots by priority, then `+0xC`. The walk at 0x00C6C6EC
+  keeps entries while fewer than Max Active Lots are kept; a lot with a priority skips the distance test, any other must
+  have `+4` below distance² (`comiss` at 0x00C6C706); every other lot is demoted. The lot under the camera target gets
+  priority 3 (0x00C6C4F8 to 0x00C6C534; inferred: 0x00C7E1B0 looks up the lot at the target's x and z).
+- So 0.81 changed only which lots won the 8 slots: a detailed lot held its slot against a lot up to 1.11 times nearer
+  and never stayed detailed farther. The "about 11% farther, 333 m at 300" of 2.16.2 was wrong, and so was the model of
+  2026-10-27, which tested the ranked value; its counts included edge switches the game never removes.
+- A model of the game's scoring (30 m lots, 8 slots, the swaying path, 5 seeds of 3000 frames; switches summed):
+
+  | Factor | Holds against a lot nearer by | Town 8x5, 40 m apart (any distance 120 to 300) | Town: frames with a nearer lot waiting | Sparse 12x8, 100 m apart, at 150 | Sparse at 200 or 300 |
+  |---|---|---|---|---|---|
+  | native (-8.0) | 1.00x | 5686 | <1% | 1750 | 1750 |
+  | 0.81 | 1.11x | 1710 | 14% | 696 | 696 |
+  | 0.64 | 1.25x | 1634 | 33% | 666 | 656 |
+  | 0.5 | 1.41x | 872 | 61% | 664 | 618 |
+  | 0.36 | 1.67x | 838 | 69% | 674 | 210 |
+  | 0.25 | 2.00x | 784 | 76% | 664 | 110 |
+
+  In the sparse grid at 120, where the distance limits most lots, native gives 1964 switches and every factor 1832. The
+  model applies the game's distance test, so it cannot show a lot past the distance; that bound rests on the bytes of
+  the test at 0x00C6C700.
+- Making the distance test read `+0xC` (1 byte at 0x00C6C709, `04` -> `0C`) would keep a detailed lot detailed to
+  distance / sqrt(factor): with 0.5, 1.41 times the distance (424 m at 300), beyond the tested maximum.
+
+**Outcome:** Keep lot visibility stable multiplies a detailed lot's ranked value by 0.5 (the same 8 bytes, the same
+checks and restore). Where the 8 slots are the limit, the model switches 49% (town) and 11% (sparse at 300) less than
+with 0.81, 85% and 65% less than native. The cost: a detailed lot keeps its slot against a waiting lot up to 1.41 times
+nearer, and keeps it while the camera stays still (a nearer lot waits in 61% of the town's frames, 14% with 0.81); the
+lot under the camera target is detailed whenever the game gives it priority (inferred). No lot without a priority is
+detailed beyond the distance and memory is unchanged. Lots at the edge of the distance itself still switch as natively.
+Rejected: 0.36 and 0.25 (a lot 1.67 or 2 times as far keeps its slot) and the 1-byte distance change (next entry).
+`tools/lot_streaming_test` now models the game's scoring and, with `-Exe`, checks the distance test's bytes. Not run in
+game yet ([validation](../validation/performance-lot-streaming.md#open-checks)).
+
+### 2026-11-11: detailed-lot hysteresis at the edge of the detail distance (rejected)
+
+**Context:** an analysis of two frame-timeline captures placed 22% and 31% of the time spent in frame spikes within
+0.3 s after a lot promotion or demotion. With 0.5 on the ranking alone, lots at the edge of the detail distance still
+switch with no hysteresis: the game's distance test reads the raw squared distance.
+
+**Finding:**
+
+- The test is `comiss xmm0,[edi+4]` at 0x00C6C706 (xmm0 = distance², entry `+4` = the raw value); its disp8 at
+  0x00C6C709 reads `04`. `0C` makes it read entry `+0xC`, the ranked value the partial sort 0x00C64050 orders by. For a
+  lot not detailed both entries hold the same float, so promotion still happens within the distance; a detailed lot is
+  kept up to distance / sqrt(0.5), 1.41 times (424 m at 300).
+- The walk still keeps at most Max Active Lots (`jae` at 0x00C6C6F0), but the byte changes which lots fill them: a
+  detailed lot past the distance ranks at 0.5 × raw, ahead of a waiting lot inside the distance at 0.71 to 1.0 times its
+  distance, and once the slots are full the nearer lot is demoted or never promoted. It stays an impostor, with baked
+  light and no Apex lamp or room light, while the farther lot stays detailed for as long as the camera stays still.
+  With the raw test a lot past the distance is always demoted.
+- The model (5 seeds of 3000 frames, 8 slots), ranking only -> ranked test: switches in the sparse grid at 120 1832 ->
+  618 and at 150 664 -> 618. A replica with two more counters: frames where a lot inside the distance is not detailed
+  while a lot without priority past it is, 0 -> 18.8% and 18.3% (lots 100 m apart at 120 and 150) and 0 -> 80.2% (lots
+  200 m apart at 300); lot-frames inside the distance without detail +13% and +50%. With the raw test the number of
+  lots kept is the same for any factor (the lesser of the slots and the lots in range or with a priority), so the
+  ranking alone leaves both counters at native. With lots 250 m apart at 300 the ranked test also raised the average
+  number of detailed lots from 4.1 to 7.7, out to 424 m.
+
+**Outcome:** rejected before release; the byte, implemented the same day, was removed and Keep lot visibility stable
+stays on the ranking alone. A hysteresis at the edge needs a change in the walk so that a held lot past the distance
+never takes a slot a lot inside it needs. `tools/lot_streaming_test` fails on any
+detailed lot without priority past the distance.
