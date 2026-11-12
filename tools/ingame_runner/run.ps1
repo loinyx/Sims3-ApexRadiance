@@ -231,9 +231,10 @@ function Wait-LiveMode([string]$What) {
 
 # Sim: stutter-profile.js, unloaded at the end of the window. Frames: frame-times.js in its own session, its file closed at
 # the end of the window and the session kept loaded until the game exits (attach.py --keep). Returns the processes.
-function Start-Profilers([string]$Base, [double]$Seconds) {
+function Start-Profilers([string]$Base, [double]$Seconds, [switch]$AtMenu) {
     $started = @{}
     $attach = Join-Path $PSScriptRoot 'profilers/attach.py'
+    $gate = if ($AtMenu) { @('--start', "$Base.start") } else { @() } # attached now, recording from the measured window
     $launch = {
         param($Name, $PyArgs)
         Start-Process -FilePath 'python' -ArgumentList ($PyArgs | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' }) -NoNewWindow -PassThru `
@@ -242,10 +243,10 @@ function Start-Profilers([string]$Base, [double]$Seconds) {
     if ($Profiler -in 'Sim', 'Both') {
         $opts = @{ out = ($Base -replace '\\', '/'); hitchMs = 50 }
         if ($Lean) { $opts.stages = $false }
-        $started.Sim = & $launch 'profiler' @($attach, '--stop', "$Base.stop", $script:proc.Id, $Seconds, (Join-Path $PSScriptRoot 'profilers/stutter-profile.js'), ($opts | ConvertTo-Json -Compress))
+        $started.Sim = & $launch 'profiler' @($attach) + $gate + @('--stop', "$Base.stop", $script:proc.Id, $Seconds, (Join-Path $PSScriptRoot 'profilers/stutter-profile.js'), ($opts | ConvertTo-Json -Compress))
     }
     if ($Profiler -in 'Frames', 'Both') {
-        $started.Frames = & $launch 'frames' @($attach, '--keep', '--stop', "$Base.stop", $script:proc.Id, $Seconds, (Join-Path $PSScriptRoot 'profilers/frame-times.js'),
+        $started.Frames = & $launch 'frames' @($attach, '--keep') + $gate + @('--stop', "$Base.stop", $script:proc.Id, $Seconds, (Join-Path $PSScriptRoot 'profilers/frame-times.js'),
             (@{ out = ("$Base-frames.csv" -replace '\\', '/') } | ConvertTo-Json -Compress))
     }
     return $started
@@ -257,7 +258,8 @@ function Start-Measured([string]$Base, [double]$Seconds, $Machine) {
     $script:cpuPrev = $null
     Remove-Item -LiteralPath "$Base.stop" -ErrorAction SilentlyContinue
     $m = @{ Base = $Base; Seconds = $Seconds; Start = (Get-Date); End = (Get-Date).AddSeconds($Seconds); Machine = $Machine; Done = $false }
-    $m.Prof = Start-Profilers $Base $Seconds
+    if ($script:preProf -and $script:preProf.Base -eq $Base) { $m.Prof = $script:preProf.Prof; [IO.File]::WriteAllText("$Base.start", '') }
+    else { $m.Prof = Start-Profilers $Base $Seconds }
     Add-MachineSample $Machine
     $script:window = $m
     return $m
@@ -326,6 +328,19 @@ function Invoke-Load($Load, [string]$BaseToml) {
         Wait-Agent $started $noApex
         Wait-Game 'the main menu' 5 { try { Call-Agent 'game_state' $null 5000 | Out-Null; return $true } catch { return $false } }
         Wait-MenuQuiet
+        # profilers attach here, at the menu (attaching in a world timed out), and record from the measured window on
+        $script:preProf = $null
+        if ($Profiler -ne 'None') {
+            $i = 0
+            foreach ($st in (Get-JobSteps $jobDef)) {
+                $i++
+                if ($st.do -eq 'profile' -or ($st.do -eq 'wait' -and $st.measure)) {
+                    $b = Join-Path $dir "measure$i"
+                    $script:preProf = @{ Base = $b; Prof = (Start-Profilers $b ([double]$st.minutes * 60) -AtMenu) }
+                    break
+                }
+            }
+        }
         Call-Agent 'load_save' @{ file = "$($jobDef.save).sims3"; reload = $true } | Out-Null
         Say "$($Load.Name): loading $($jobDef.save)"
         Wait-LiveMode "the save $($jobDef.save)"

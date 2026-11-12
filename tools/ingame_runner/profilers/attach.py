@@ -1,8 +1,10 @@
 """Attaches the profiler scripts to TS3W.exe for a fixed time, then unloads them (each flushes its files on unload).
 
-Usage: python attach.py [--keep] [--stop <file>] <pid> <seconds> <script.js> <params-json> [<script.js> <params-json> ...]
+Usage: python attach.py [--keep] [--stop <file>] [--start <file>] <pid> <seconds> <script.js> <params-json> [<script.js> <params-json> ...]
 Needs Python with the frida package. One Frida session for all scripts; they unload in reverse load order.
 --stop: the window ends early once <file> exists (a repro reached its event count set before the run).
+--start: attach now but load the scripts (and count <seconds>) only once <file> exists. Used to attach at the main
+menu: once a world is loaded, attaching was seen to time out (cause not verified).
 --keep: after <seconds>, call each script's close() export (it writes its last rows and closes its files) and leave the
 session loaded until the game exits. Used for the frame recorder: unloading its hook on the main thread's per-frame path
 while the game runs is where an end-of-profile crash was seen.
@@ -19,10 +21,12 @@ import frida
 
 def main():
     args = sys.argv[1:]
-    keep, stop = False, None
+    keep, stop, start = False, None, None
     while args and args[0].startswith("--"):
         if args[0] == "--keep":
             keep, args = True, args[1:]
+        elif args[0] == "--start" and len(args) > 1:
+            start, args = args[1], args[2:]
         elif args[0] == "--stop" and len(args) > 1:
             stop, args = args[1], args[2:]
         else:
@@ -35,6 +39,12 @@ def main():
     session.on("detached", lambda *_: gone.set())
     scripts = []
     try:
+        if start:
+            print("attached; waiting for the start file", flush=True)
+            while not os.path.exists(start):
+                if gone.is_set():
+                    return
+                time.sleep(0.2)
         for path, params in zip(pairs[::2], pairs[1::2]):
             with open(path, encoding="utf-8") as f:
                 script = session.create_script(f.read())
