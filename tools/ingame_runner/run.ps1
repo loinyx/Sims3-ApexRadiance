@@ -244,11 +244,11 @@ function Start-Profilers([string]$Base, [double]$Seconds, [switch]$AtMenu) {
     if ($Profiler -in 'Sim', 'Both') {
         $opts = @{ out = ($Base -replace '\\', '/'); hitchMs = 50 }
         if ($Lean) { $opts.stages = $false }
-        $started.Sim = & $launch 'profiler' @($attach) + $gate + @('--stop', "$Base.stop", $script:proc.Id, $Seconds, (Join-Path $PSScriptRoot 'profilers/stutter-profile.js'), ($opts | ConvertTo-Json -Compress))
+        $started.Sim = & $launch 'profiler' (@($attach) + $gate + @('--stop', "$Base.stop", $script:proc.Id, $Seconds, (Join-Path $PSScriptRoot 'profilers/stutter-profile.js'), ($opts | ConvertTo-Json -Compress)))
     }
     if ($Profiler -in 'Frames', 'Both') {
-        $started.Frames = & $launch 'frames' @($attach, '--keep') + $gate + @('--stop', "$Base.stop", $script:proc.Id, $Seconds, (Join-Path $PSScriptRoot 'profilers/frame-times.js'),
-            (@{ out = ("$Base-frames.csv" -replace '\\', '/') } | ConvertTo-Json -Compress))
+        $started.Frames = & $launch 'frames' (@($attach, '--keep') + $gate + @('--stop', "$Base.stop", $script:proc.Id, $Seconds, (Join-Path $PSScriptRoot 'profilers/frame-times.js'),
+            (@{ out = ("$Base-frames.csv" -replace '\\', '/') } | ConvertTo-Json -Compress)))
     }
     return $started
 }
