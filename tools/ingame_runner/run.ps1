@@ -448,6 +448,69 @@ function Invoke-Load($Load, [string]$BaseToml) {
                     Say "  step ${n}: replaying $($step.name): $($p.seconds) s, $($p.edits) light edits, $($p.matched) of $($p.lamps) lights found, $($p.placed) put down, $($p.levels) floor and $($p.modes) mode changes"
                     Wait-Game "the replay of $($step.name)" ([double]$p.seconds / 60 + 2) { (Call-Agent 'track_play' @{ status = $true }).state -ne 'playing' } { Clear-Dialog }
                 }
+                'input_record' { # the tester's exact clicks and keys (profilers/input_track.py) until the file `file` (default done) exists; kept as bookmarks/<name>.input.json
+                    $f = Join-Path $OutDir $(if ($step.file) { $step.file } else { 'done' })
+                    $stopF = Join-Path $OutDir 'input-stop'
+                    $out = Join-Path $PSScriptRoot "bookmarks/$($step.name).input.json"
+                    $rec = Start-Process -FilePath 'python' -NoNewWindow -PassThru -RedirectStandardOutput (Join-Path $dir 'input.log') -ArgumentList @(
+                        '-I', ('"' + (Join-Path $PSScriptRoot 'profilers/input_track.py') + '"'), 'record', ('"' + $out + '"'), ('"' + $stopF + '"'))
+                    Say "  step ${n}: recording the tester's clicks and keys until $f exists (up to $($step.minutes) min)"
+                    try { Wait-Game "the file $f" ([double]$step.minutes) { Test-Path -LiteralPath $f } { Clear-Dialog } }
+                    finally { New-Item -ItemType File -Path $stopF -Force | Out-Null; $rec.WaitForExit(10000) | Out-Null }
+                    Say "  step ${n}: $(Get-Content -LiteralPath (Join-Path $dir 'input.log') -Raw) kept as $($step.name)"
+                }
+                'input_play' { # plays bookmarks/<name>.input.json back (the game window to the front; a real key or click ends it)
+                    $in = Join-Path $PSScriptRoot "bookmarks/$($step.name).input.json"
+                    $last = (Get-Content -LiteralPath $in -Raw | ConvertFrom-Json).events | Select-Object -Last 1
+                    $play = Start-Process -FilePath 'python' -NoNewWindow -PassThru -RedirectStandardOutput (Join-Path $dir 'input-play.log') -ArgumentList @(
+                        '-I', ('"' + (Join-Path $PSScriptRoot 'profilers/input_track.py') + '"'), 'play', ('"' + $in + '"'), ('"' + (Join-Path $OutDir 'input-stop') + '"'))
+                    Say "  step ${n}: playing $($step.name) back ($([math]::Round($last[0] / 1000)) s)"
+                    Wait-Game "the playback of $($step.name)" ([double]$last[0] / 60000 + 2) { $play.HasExited } { }
+                    Say "  step ${n}: $(Get-Content -LiteralPath (Join-Path $dir 'input-play.log') -Raw)"
+                }
+                'clip_session' { # the tester records clips with F9 (profilers/input_track.py session) until the file done exists: each clip
+                    # keeps its clicks and keys (input.json), the scene's state (track.json: camera, floors, lights), its own recording
+                    # (the recorder key F6 at its start and end) and the tester's description (desc.txt), in <run>/clips/clip-N
+                    $clips = Join-Path $OutDir 'clips'
+                    New-Item -ItemType Directory -Path $clips -Force | Out-Null
+                    $stopF = Join-Path $OutDir 'session-stop'
+                    $f = Join-Path $OutDir 'done'
+                    $sess = Start-Process -FilePath 'python' -NoNewWindow -PassThru -RedirectStandardOutput (Join-Path $dir 'session.log') -ArgumentList @(
+                        '-I', ('"' + (Join-Path $PSScriptRoot 'profilers/input_track.py') + '"'), 'session', ('"' + $clips + '"'), ('"' + $stopF + '"'))
+                    $handled = @{}
+                    $press = { $script:proc.Refresh(); $h = $script:proc.MainWindowHandle # (F6, the run's recorder key)
+                        $null = [ApexIngame.Keys]::PostMessage($h, 0x100, [IntPtr]0x75, [IntPtr]1); $null = [ApexIngame.Keys]::PostMessage($h, 0x101, [IntPtr]0x75, [IntPtr]0xC0000001) }
+                    Say "  step ${n}: clip session: F9 starts and stops a clip; the run ends when $f exists (up to $($step.minutes) min)"
+                    try {
+                        Wait-Game "the file $f" ([double]$step.minutes) {
+                            foreach ($c in @(Get-ChildItem -LiteralPath $clips -Directory -ErrorAction SilentlyContinue)) {
+                                if ((Test-Path (Join-Path $c.FullName 'start')) -and -not $handled["$($c.Name)+"]) {
+                                    $handled["$($c.Name)+"] = $true
+                                    try { Call-Agent 'track_record' @{ start = $true } | Out-Null } catch { Say "  $($c.Name): no scene track ($_)" }
+                                    & $press
+                                    Say "  $($c.Name) started"
+                                }
+                                if ((Test-Path (Join-Path $c.FullName 'stopped')) -and -not $handled["$($c.Name)-"]) {
+                                    $handled["$($c.Name)-"] = $true
+                                    & $press
+                                    try {
+                                        $t = Call-Agent 'track_record' @{ stop = $true } 60000
+                                        ($t | ConvertTo-Json -Depth 6 -Compress) | Set-Content -LiteralPath (Join-Path $c.FullName 'track.json') -Encoding UTF8
+                                    } catch { Say "  $($c.Name): scene track not kept ($_)" }
+                                    Say "  $($c.Name) stopped"
+                                }
+                            }
+                            Test-Path -LiteralPath $f
+                        } { Clear-Dialog }
+                    } finally {
+                        New-Item -ItemType File -Path $stopF -Force | Out-Null
+                        $sess.WaitForExit(15000) | Out-Null
+                    }
+                    foreach ($c in @(Get-ChildItem -LiteralPath $clips -Directory)) {
+                        $d = Join-Path $c.FullName 'desc.txt'
+                        Say "  $($c.Name): $(if (Test-Path $d) { Get-Content -LiteralPath $d -Raw -Encoding UTF8 } else { '(no description)' })"
+                    }
+                }
                 'lights_on' {
                     $o = Call-Agent 'lights_on' @{ lot = $step.lot }
                     Say "  step ${n}: lights on at $($o.name) through $($o.via)$(if ($null -ne $o.lights) { " ($($o.lights) lights)" })"
