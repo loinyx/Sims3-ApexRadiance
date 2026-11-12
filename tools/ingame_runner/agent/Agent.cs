@@ -236,6 +236,7 @@ namespace ApexTestAgent
             Dispatcher.Register("camera_pan", CameraPan);
             Dispatcher.Register("camera_orbit", CameraOrbit);
             Dispatcher.Register("lots", Lots);
+            Dispatcher.Register("lights_on", LightsOn);
             Dispatcher.Register("save_game", SaveGame);
             Dispatcher.Register("auto_dialog", AutoDialog);
             Dispatcher.Register("quit_game", QuitGame);
@@ -517,6 +518,55 @@ namespace ApexTestAgent
             }
             Dictionary<string, object> r = Obj();
             r["lots"] = list;
+            return r;
+        }
+
+        // lights_on {lot}: turns on every light of a lot (a community lot at night with nobody inside has them off), through
+        // the game's own TurnOnAllLightsOnLot found by reflection; else each light object's TurnOn().
+        static object LightsOn(Args a)
+        {
+            RequireLive();
+            string key = a.Has("lot") ? a.Str("lot") : "home";
+            Lot lot = key == "home" ? (Sims3.Gameplay.CAS.Household.ActiveHousehold != null ? Sims3.Gameplay.CAS.Household.ActiveHousehold.LotHome : null) : FindLot(key);
+            if (lot == null) throw new AgentException("no lot named or of type '" + key + "'");
+            Dictionary<string, object> r = Obj();
+            r["name"] = lot.Name;
+            foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type[] types;
+                try { types = asm.GetTypes(); } catch { continue; }
+                foreach (Type t in types)
+                    foreach (MethodInfo m in t.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static))
+                    {
+                        if (m.Name != "TurnOnAllLightsOnLot") continue;
+                        ParameterInfo[] ps = m.GetParameters();
+                        object[] args = new object[ps.Length];
+                        bool ok = true;
+                        for (int i = 0; i < ps.Length; i++)
+                        {
+                            Type pt = ps[i].ParameterType;
+                            if (pt.IsAssignableFrom(typeof(Lot))) args[i] = lot;
+                            else if (pt == typeof(bool)) args[i] = true;
+                            else if (pt.IsValueType) args[i] = Activator.CreateInstance(pt);
+                            else ok = false;
+                        }
+                        if (!ok) continue;
+                        m.Invoke(null, args);
+                        r["via"] = t.FullName + "." + m.Name;
+                        return r;
+                    }
+            }
+            int n = 0;
+            foreach (Sims3.Gameplay.Abstracts.GameObject o in lot.GetObjects<Sims3.Gameplay.Abstracts.GameObject>())
+            {
+                if (o == null || o.GetType().Name.IndexOf("Light", StringComparison.OrdinalIgnoreCase) < 0) continue;
+                MethodInfo on = o.GetType().GetMethod("TurnOn", Type.EmptyTypes);
+                if (on == null) continue;
+                on.Invoke(o, null);
+                n++;
+            }
+            r["via"] = "TurnOn";
+            r["lights"] = n;
             return r;
         }
 

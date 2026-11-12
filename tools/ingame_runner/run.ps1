@@ -358,6 +358,10 @@ function Invoke-Load($Load, [string]$BaseToml) {
                     $null = [ApexIngame.Keys]::PostMessage($script:proc.MainWindowHandle, 0x101, [IntPtr][int]$step.vk, [IntPtr]0xC0000001)
                     Say "  step ${n}: key $($step.vk)"
                 }
+                'lights_on' {
+                    $o = Call-Agent 'lights_on' @{ lot = $step.lot }
+                    Say "  step ${n}: lights on at $($o.name) through $($o.via)$(if ($null -ne $o.lights) { " ($($o.lights) lights)" })"
+                }
                 'lots' { # every lot's name, type and centre, for picking lots in a job
                     $l = Call-Agent 'lots' $null
                     $l.lots | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $dir 'lots.json') -Encoding UTF8

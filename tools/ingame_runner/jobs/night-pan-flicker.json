@@ -1,6 +1,6 @@
 {
   "id": "night-pan-flicker",
-  "description": "Cause run for light changes and flashes, at night first: the save loads at 21:14 at normal speed. The camera circles the town square and pans over the lots around it, circles the gym and the active lot while the floor goes up and down (Page Up, Page Down), and pans over the town for the terrain outside the lots, each in a recording (its shortcut set to F6 for the run: F8 is often the screenshot key) (video, screen pixels, Recording.txt). The clock then runs to the morning and the square, gym and active lot are recorded again by day. Developer mode on, so the log keeps active lot switches, dropped relit maps, terrain lamp changes and room solves. Read the recordings and the log, not the frame times.",
+  "description": "Cause run for light changes and flashes, at night first: the save loads at 21:14 at normal speed. The square's and the gym's lights are turned on first (a community lot at night with nobody inside has them off). The camera circles the town square and pans over the lots around it, circles the gym and the active lot while the floor goes up and down (Page Up, Page Down), and pans over the town for the terrain outside the lots, each in a recording (its shortcut set to F6 for the run: F8 is often the screenshot key) (video, screen pixels, Recording.txt). The clock then runs to the morning and the square, gym and active lot are recorded again by day. Developer mode on, so the log keeps active lot switches, dropped relit maps, terrain lamp changes and room solves. Read the recordings and the log, not the frame times.",
   "save": "Claude teste",
   "toml": {
     "ui": {
@@ -23,6 +23,10 @@
     },
     {
       "do": "lots"
+    },
+    {
+      "do": "lights_on",
+      "lot": "pra\u00e7a|praca|square|plaza|central|kBigPark"
     },
     {
       "do": "camera_orbit",
@@ -79,6 +83,10 @@
     {
       "do": "wait",
       "minutes": 0.17
+    },
+    {
+      "do": "lights_on",
+      "lot": "kGym"
     },
     {
       "do": "camera_orbit",
@@ -272,6 +280,10 @@
       "minutes": 5.5
     },
     {
+      "do": "lights_on",
+      "lot": "pra\u00e7a|praca|square|plaza|central|kBigPark"
+    },
+    {
       "do": "camera_orbit",
       "lot": "pra\u00e7a|praca|square|plaza|central|kBigPark",
       "radius": 30,
@@ -326,6 +338,10 @@
     {
       "do": "wait",
       "minutes": 0.17
+    },
+    {
+      "do": "lights_on",
+      "lot": "kGym"
     },
     {
       "do": "camera_orbit",
