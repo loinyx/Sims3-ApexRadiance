@@ -7,8 +7,9 @@
 //                 levels:[[t,lotId,level],...] (the floor shown on each lot near the camera), modes:[[t,state],...]}
 //   track_load    {reset?:true, cam?:[...], lamps?:[...], edits?:[...]}: a recording sent in pieces (a request is at most 64 KB)
 //   track_play    {} | {status:true} | {stop:true}: replays the loaded recording; the lights are matched by type and first place
-// Both run in game tasks (the simulation): in build and buy mode the game's simulation waits, so a light moved there is
-// recorded, and replayed, as one move when live mode is back.
+// Both run in game tasks. The game modes (live, build, buy) are recorded but not replayed: a mode switched from a script
+// left the screen black (the transition never ended while the camera was set every tick); a light put down in buy mode is
+// put down again directly.
 using System;
 using System.Collections.Generic;
 using Sims3.Gameplay.Abstracts;
@@ -239,7 +240,7 @@ namespace ApexTestAgent
             sPlayState = "playing";
             Simulator.AddObject(new OneShotFunctionTask(delegate
             {
-                int t0 = System.Environment.TickCount, c = 0, e = 0, lv = 0, md = 0;
+                int t0 = System.Environment.TickCount, c = 0, e = 0, lv = 0;
                 int end = (int)D(((List<object>)cam[cam.Count - 1])[0]);
                 while (sPlayGen == gen)
                 {
@@ -263,14 +264,6 @@ namespace ApexTestAgent
                         List<object> x = (List<object>)levels[lv];
                         try { World.LotSetDisplayLevel(ulong.Parse((string)x[1]), (int)D(x[2])); } catch { }
                     }
-                    for (; md < modes.Count && D(((List<object>)modes[md])[0]) <= t; md++)
-                    {
-                        string want = (string)((List<object>)modes[md])[1] ?? "";
-                        string kind = want.StartsWith("Build") ? "build" : want.StartsWith("Buy") ? "buy" : want.StartsWith("LiveMode") ? "live" : null;
-                        string now = SubState() ?? "";
-                        if (kind == null || (kind == "live" && now.StartsWith("LiveMode")) || (kind != "live" && now.StartsWith(want))) continue;
-                        try { SetMode(new Args(new Dictionary<string, object> { { "mode", kind } })); } catch { }
-                    }
                     for (; e < edits.Count && D(((List<object>)edits[e])[0]) <= t; e++)
                     {
                         List<object> x = (List<object>)edits[e];
@@ -288,7 +281,6 @@ namespace ApexTestAgent
                     Simulator.Sleep(0);
                 }
                 if (sPlayGen == gen) sPlayState = "done";
-                if (!(SubState() ?? "").StartsWith("LiveMode")) try { SetMode(new Args(new Dictionary<string, object> { { "mode", "live" } })); } catch { }
             }));
             r["lamps"] = lamps.Length;
             r["matched"] = matched;
