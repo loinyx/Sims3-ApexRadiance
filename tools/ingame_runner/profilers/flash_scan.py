@@ -1,4 +1,4 @@
-"""Finds flashes in a recording made by grab.ps1 (run.ps1 -Grab): a screen cell that gets much brighter (or darker) for a moment and then
+"""Finds flashes in a recording made by grab_wgc.py (run.ps1 -Grab): a screen cell that gets much brighter (or darker) for a moment and then
 comes back, which a camera move alone does not do (a pan changes the picture gradually and does not return).
 
 Usage: python flash_scan.py <grab dir> [--rise 22] [--back 0.35] [--max-frames 6]
@@ -110,7 +110,7 @@ def main():
     ranked = sorted(events, key=lambda e: -sum(abs(h[1]) for h in e[1]))
     for rank, (i, hit) in enumerate(ranked[:12]):
         for tag, j in (("a", i - 1), ("b", i), ("c", min(n - 1, i + 2))):
-            for ext in ("bmp", "jpg"):  # grab.ps1 writes JPEG
+            for ext in ("bmp", "jpg"):  # grab_wgc.py writes JPEG
                 src = os.path.join(d, "%06d.%s" % (frame[j], ext))
                 if os.path.exists(src):
                     shutil.copy(src, os.path.join(d, "flash-%02d-%06d-%s.%s" % (rank, frame[i], tag, ext)))

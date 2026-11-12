@@ -22,7 +22,7 @@ param(
     [switch]$KeepSaves,
     [switch]$InactiveIdle,
     [switch]$Lean,
-    [switch]$Grab, # record the game window all load long (profilers/grab.ps1) and scan it for flashes (flash_scan.py)
+    [switch]$Grab, # record the game window all load long (profilers/grab_wgc.py) and scan it for flashes (flash_scan.py)
     [double]$GrabFps = 20,
     [switch]$DryRun,
     [string]$Restore
@@ -354,9 +354,8 @@ function Invoke-Load($Load, [string]$BaseToml) {
         Wait-LiveMode "the save $($jobDef.save)"
         $grabProc = $null
         if ($Grab) {
-            $grabProc = Start-Process -FilePath 'powershell' -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $dir 'grab.err.log') -ArgumentList @(
-                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + (Join-Path $PSScriptRoot 'profilers/grab.ps1') + '"'),
-                '-GamePid', $script:proc.Id, '-OutDir', ('"' + (Join-Path $dir 'grab') + '"'), '-Fps', $GrabFps)
+            $grabProc = Start-Process -FilePath 'python' -NoNewWindow -PassThru -RedirectStandardError (Join-Path $dir 'grab.err.log') -ArgumentList @(
+                ('"' + (Join-Path $PSScriptRoot 'profilers/grab_wgc.py') + '"'), $script:proc.Id, ('"' + (Join-Path $dir 'grab') + '"'), $GrabFps)
             Say "  recording the game window at $GrabFps frames a second into grab\"
         }
         $lastSave = $null
