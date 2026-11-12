@@ -379,17 +379,17 @@ public sealed partial class MainWindow : Window
         var muted = (Brush)Application.Current.Resources["ApexMutedBrush"];
         if (_updated is { } done)
         {
-            CardHeader("\uE73E", "ApexSuccessBrush", T("Everything is updated"), T("Start The Sims 3, load a world and press Ctrl+Shift+F11 to open the Apex Radiance menu."));
-            foreach (var (name, from, to) in done.Rows) CardRow(new TextBlock { Text = name, FontSize = 14 }, from.Length > 0 ? $"{from} \u2192 {to}" : to, "ApexSuccessBrush");
+            CardHeader(UpdateList, "\uE73E", "ApexSuccessBrush", T("Everything is updated"), T("Start The Sims 3, load a world and press Ctrl+Shift+F11 to open the Apex Radiance menu."));
+            foreach (var (name, from, to) in done.Rows) CardRow(UpdateList, new TextBlock { Text = name, FontSize = 14 }, from.Length > 0 ? $"{from} \u2192 {to}" : to, "ApexSuccessBrush");
             if (done.Point is { } p)
             {
                 var undo = new Button { Content = T("Undo this update"), IsEnabled = !_busy && !_running };
                 undo.Click += async (_, _) => { await RestoreAsync(p, ask: true, WelcomeInfo); _updated = null; RefreshAll(); };
-                CardStrip(T("Something looks wrong in the game? This puts back everything as it was before this update."), undo);
+                CardStrip(UpdateList, T("Something looks wrong in the game? This puts back everything as it was before this update."), undo);
             }
             return;
         }
-        CardHeader("\uE896", "ApexAccentBrush", ups.Count == 1 ? T("1 update for The Sims 3 \u00b7 {0}", g.Label) : T("{0} updates for The Sims 3 \u00b7 {1}", ups.Count, g.Label),
+        CardHeader(UpdateList, "\uE896", "ApexAccentBrush", ups.Count == 1 ? T("1 update for The Sims 3 \u00b7 {0}", g.Label) : T("{0} updates for The Sims 3 \u00b7 {1}", ups.Count, g.Label),
             T("Setup makes a restore point before it changes any file, so you can undo this."));
         foreach (var c in ups)
         {
@@ -401,45 +401,53 @@ public sealed partial class MainWindow : Window
             if (c == Components.Apex && _latest.GetValueOrDefault(Releases.Apex) is { } rel)
                 left.Children.Add(new HyperlinkButton { Content = T("See what's new"), Padding = new Thickness(28, 0, 0, 0),
                     NavigateUri = new Uri($"https://github.com/{Releases.Apex}/releases/tag/{Uri.EscapeDataString(rel.Tag)}") });
-            CardRow(left, $"{(Known(c) is { Length: > 0 } v ? v : "?")} \u2192 {Latest(c)}", "ApexSoftTextBrush");
+            CardRow(UpdateList, left, $"{(Known(c) is { Length: > 0 } v ? v : "?")} \u2192 {Latest(c)}", "ApexSoftTextBrush");
         }
-        if (_running) CardStrip(T("Close The Sims 3 to update."), null);
+        if (_running) CardStrip(UpdateList, T("Close The Sims 3 to update."), null);
 
-        void CardHeader(string glyph, string brush, string title, string sub)
-        {
-            var head = new Grid { Padding = new Thickness(18, 14, 18, 14), ColumnSpacing = 12 };
-            head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            head.ColumnDefinitions.Add(new ColumnDefinition());
-            head.Children.Add(new FontIcon { Glyph = glyph, FontSize = 18, Foreground = (Brush)Application.Current.Resources[brush], VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 2, 0, 0) });
-            var text = new StackPanel { Spacing = 2 };
-            text.Children.Add(new TextBlock { Text = title, FontSize = 15, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
-            text.Children.Add(new TextBlock { Text = sub, FontSize = 12, Foreground = muted, TextWrapping = TextWrapping.Wrap });
-            Grid.SetColumn(text, 1);
-            head.Children.Add(text);
-            UpdateList.Children.Add(head);
-        }
-        void CardRow(FrameworkElement left, string right, string brush)
-        {
-            var row = new Grid { Padding = new Thickness(18, 10, 18, 10), ColumnSpacing = 12, BorderBrush = (Brush)Application.Current.Resources["ApexCardBorderBrush"], BorderThickness = new Thickness(0, 1, 0, 0) };
-            row.ColumnDefinitions.Add(new ColumnDefinition());
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            left.VerticalAlignment = VerticalAlignment.Center;
-            row.Children.Add(left);
-            var v = new TextBlock { Text = right, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = (Brush)Application.Current.Resources[brush] };
-            Grid.SetColumn(v, 1);
-            row.Children.Add(v);
-            UpdateList.Children.Add(row);
-        }
-        void CardStrip(string text, Button? action)
-        {
-            var strip = new Grid { Padding = new Thickness(18, 10, 18, 10), ColumnSpacing = 12, Background = new SolidColorBrush(ColorHelper.FromArgb(255, 0x0F, 0x10, 0x13)),
-                BorderBrush = (Brush)Application.Current.Resources["ApexCardBorderBrush"], BorderThickness = new Thickness(0, 1, 0, 0) };
-            strip.ColumnDefinitions.Add(new ColumnDefinition());
-            strip.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            strip.Children.Add(new TextBlock { Text = text, FontSize = 12, Foreground = muted, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center });
-            if (action is not null) { Grid.SetColumn(action, 1); strip.Children.Add(action); }
-            UpdateList.Children.Add(strip);
-        }
+    }
+
+    // ---------- card rows (the update card, the status card) ----------
+
+    static Brush Res(string key) => (Brush)Application.Current.Resources[key];
+
+    static void CardHeader(Panel card, string glyph, string brush, string title, string sub)
+    {
+        var head = new Grid { Padding = new Thickness(18, 14, 18, 14), ColumnSpacing = 12 };
+        head.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        head.ColumnDefinitions.Add(new ColumnDefinition());
+        head.Children.Add(new FontIcon { Glyph = glyph, FontSize = 18, Foreground = Res(brush), VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 2, 0, 0) });
+        var text = new StackPanel { Spacing = 2 };
+        text.Children.Add(new TextBlock { Text = title, FontSize = 15, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap });
+        foreach (var line in sub.Split('\n'))
+            text.Children.Add(new TextBlock { Text = line, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap });
+        Grid.SetColumn(text, 1);
+        head.Children.Add(text);
+        card.Children.Add(head);
+    }
+
+    static void CardRow(Panel card, FrameworkElement left, string right, string brush)
+    {
+        var row = new Grid { Padding = new Thickness(18, 10, 18, 10), ColumnSpacing = 12, BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, 1, 0, 0) };
+        row.ColumnDefinitions.Add(new ColumnDefinition());
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        left.VerticalAlignment = VerticalAlignment.Center;
+        row.Children.Add(left);
+        var v = new TextBlock { Text = right, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, Foreground = Res(brush) };
+        Grid.SetColumn(v, 1);
+        row.Children.Add(v);
+        card.Children.Add(row);
+    }
+
+    static void CardStrip(Panel card, string text, FrameworkElement? action)
+    {
+        var strip = new Grid { Padding = new Thickness(18, 10, 18, 10), ColumnSpacing = 12, Background = new SolidColorBrush(ColorHelper.FromArgb(255, 0x0F, 0x10, 0x13)),
+            BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, 1, 0, 0) };
+        strip.ColumnDefinitions.Add(new ColumnDefinition());
+        strip.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        strip.Children.Add(new TextBlock { Text = text, FontSize = 12, Foreground = Res("ApexMutedBrush"), TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center });
+        if (action is not null) { Grid.SetColumn(action, 1); strip.Children.Add(action); }
+        card.Children.Add(strip);
     }
 
     // ---------- refresh ----------
@@ -475,9 +483,7 @@ public sealed partial class MainWindow : Window
             SetInfo(WelcomeInfo, InfoBarSeverity.Informational, T("Updates available"),
                 string.Join(", ", lines) + ". " + (_running ? T("Close The Sims 3 to update.") : T("Update now installs them.")));
         }
-        // a game with Apex, checked and current: say so, so the player knows the check ran
-        else if (_game is not null && _state?.ApexVersion is not null && !_loading)
-            SetInfo(WelcomeInfo, InfoBarSeverity.Success, T("No updates available"), T("Everything in this game is on its latest version."));
+        // (a game with Apex, checked and current: the status card's header says so)
         else WelcomeInfo.IsOpen = false;
         RefreshStatus();
         RefreshUpdateCard();
@@ -497,41 +503,33 @@ public sealed partial class MainWindow : Window
         var muted = (Brush)Application.Current.Resources["ApexMutedBrush"];
         var ok = (Brush)Application.Current.Resources["ApexSuccessBrush"];
         var accent = (Brush)Application.Current.Resources["ApexAccentBrush"];
-        StatusList.Children.Add(new TextBlock { Text = T("The Sims 3 \u00b7 {0}", g.Label), Style = (Style)Application.Current.Resources["ApexStrong"] });
-        StatusList.Children.Add(new TextBlock { Text = g.Root, FontSize = 12, Foreground = muted, TextWrapping = TextWrapping.Wrap });
-        void Row(string name, string value, bool good)
-        {
-            var row = new Grid();
-            row.ColumnDefinitions.Add(new ColumnDefinition());
-            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            row.Children.Add(new TextBlock { Text = name, FontSize = 13 });
-            var right = new TextBlock { Text = value, FontSize = 12, Foreground = good ? ok : accent };
-            Grid.SetColumn(right, 1);
-            row.Children.Add(right);
-            StatusList.Children.Add(row);
-        }
         string State(string c) => Known(c) is not { Length: > 0 } v ? T("Installed") : Newer(Latest(c), v) ? T("{0} \u2192 {1}", v, Latest(c)!) : T("{0} \u00b7 up to date", v);
         var apexRelease = _latest.GetValueOrDefault(Repo[Components.Apex]);
         var test = Verify.TestBuild(g, s, apexRelease);
+        var found = Verify.Files(g, s, apexRelease).Concat(_found.Where(x => x.Suggest is null)).ToList();
+        // (a Warning suggestion is something to look at too)
+        var clean = found.Count == 0 && !_found.Any(x => x.Suggest is not null && x.Severity != Severity.Info);
+        var check = clean ? (_checkedAt is null ? T("Everything is in place.") : T("Everything is in place (checked at {0}).", _checkedAt))
+            : _checkedAt is not null ? T("Checked at {0}.", _checkedAt) : "";
+        CardHeader(StatusList, clean ? "\uE73E" : "\uE7BA", clean ? "ApexSuccessBrush" : "ApexWarningBrush", T("The Sims 3 \u00b7 {0}", g.Label),
+            string.Join("\n", new[] { g.Root, !_loading && !_offline && Updates().Count == 0 ? T("Everything in this game is on its latest version.") : "", check }.Where(x => x.Length > 0)));
+        void Row(string name, string value, bool good) =>
+            CardRow(StatusList, new TextBlock { Text = name, FontSize = 14 }, value, good ? "ApexMutedBrush" : "ApexAccentBrush");
         Row("Apex Radiance", test ? T("{0} \u00b7 test build", s.ApexVersion!) : State(Components.Apex), !test && !Updates().Contains(Components.Apex));
         Row(T("Graphics"), LayerName(s.Layer), true);
         foreach (var (c, name, present) in new[] { (Components.S3ss, "Sims3SettingsSetter", s.S3ss), (Components.Modernization, "Sims 3 Modernization", s.Modernization), (Components.MonoPatcher, "MonoPatcher", s.MonoPatcher) })
             if (present) Row(name, State(c), !Updates().Contains(c));
 
-        var found = Verify.Files(g, s, apexRelease).Concat(_found.Where(x => x.Suggest is null)).ToList();
-        // (a Warning suggestion is something to look at too)
-        if (found.Count == 0 && !_found.Any(x => x.Suggest is not null && x.Severity != Severity.Info))
-            StatusList.Children.Add(new TextBlock { Text = _checkedAt is null ? T("Everything is in place.") : T("Everything is in place (checked at {0}).", _checkedAt), FontSize = 12, Foreground = ok });
-        else if (_checkedAt is not null)
-            StatusList.Children.Add(new TextBlock { Text = T("Checked at {0}.", _checkedAt), FontSize = 12, Foreground = muted });
+        // the problems and suggestions, between the rows and the buttons
+        var notes = new StackPanel { Spacing = 8, Padding = new Thickness(18, 12, 18, 12), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, 1, 0, 0) };
         foreach (var x in found)
-            StatusList.Children.Add(new InfoBar
+            notes.Children.Add(new InfoBar
             {
                 IsOpen = true, IsClosable = false, Message = T(x.Text, x.Args), Title = x.CanFix ? T("Setup fixes this") : "",
                 Severity = x.Severity switch { Severity.Error => InfoBarSeverity.Error, Severity.Warning => InfoBarSeverity.Warning, _ => InfoBarSeverity.Informational },
             });
-
-        FillSuggestions(StatusList, WelcomeInfo, onStatus: true);
+        FillSuggestions(notes, WelcomeInfo, onStatus: true);
+        if (notes.Children.Count > 0) StatusList.Children.Add(notes);
 
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         // (none accent: the footer's button is the screen's one accent button)
@@ -562,8 +560,7 @@ public sealed partial class MainWindow : Window
             RefreshAll(); // (scans the game again, then Verify and Compat on what is there now)
             return Task.CompletedTask;
         });
-        Make(T("Change components"), () => { if (CanLeaveGame()) GoFromStatus(ComponentsStep); return Task.CompletedTask; });
-        StatusList.Children.Add(buttons);
+        CardStrip(StatusList, "", buttons); // (the settings line sits under the card)
     }
 
     // the welcome page's one-click update: the installed components with a newer release, when Setup can download them now
@@ -678,13 +675,7 @@ public sealed partial class MainWindow : Window
                 Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, T("Apply") + " " + T(x.Suggest!)); // (which suggestion)
                 bar.ActionButton = b;
             }
-            else if (onStatus && x.Suggest is "DXVK" or "Sims3SettingsSetter" or "RTX Remix bridge") // (a component to choose)
-            {
-                var b = new Button { Content = T("Change components"), IsEnabled = idle };
-                b.Click += (_, _) => { if (CanLeaveGame()) GoFromStatus(ComponentsStep); };
-                Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, T("Change components") + " " + T(x.Suggest!));
-                bar.ActionButton = b;
-            }
+            // (a component to choose: the sidebar's Components; no button here, the status card keeps one)
             list.Children.Add(bar);
         }
         if (sug.Count(x => x.CanApply) > 1)

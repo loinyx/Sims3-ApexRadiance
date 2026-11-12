@@ -79,8 +79,8 @@
                                 <StackPanel x:Name="UpdateList" Tag="dyn" />
                             </Border>
                             <!-- a game with Apex Radiance: its status and the checks, filled in code (RefreshStatus) -->
-                            <Border x:Name="WelcomeStatus" Style="{StaticResource ApexCard}" Visibility="Collapsed">
-                                <StackPanel x:Name="StatusList" Tag="dyn" Spacing="10" />
+                            <Border x:Name="WelcomeStatus" Style="{StaticResource ApexCard}" Padding="0" Visibility="Collapsed">
+                                <StackPanel x:Name="StatusList" Tag="dyn" />
                             </Border>
                             <Border x:Name="WelcomeIntro" Style="{StaticResource ApexCard}">
                                 <StackPanel Spacing="12">
