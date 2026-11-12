@@ -11,6 +11,7 @@
 //
 // Part of Apex Radiance. Credits: @loinyx
 #include "memory_guard.h"
+#include "restart_host.h"
 #include "memory_meter.h"
 #include "apex_log.h"
 #include "build_flavor.h"
@@ -285,6 +286,7 @@ bool __fastcall WorldSaveHook(void* wm, void*, void* a, void* b) {
     SaveStages stages;
     auto* previousStages=t_stages;t_stages=&stages;
     const bool ok = reinterpret_cast<WorldSave_t>(kWorldSave)(wm, a, b);
+    RestartHost::AfterSave(ok, before); // with the reserve held, as the "low" line below
     t_stages=previousStages;
     MemoryTelemetry::Mark(ok ? 3 : 4);
     g_saves.fetch_add(1, std::memory_order_relaxed);

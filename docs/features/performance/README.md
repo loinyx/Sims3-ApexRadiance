@@ -71,6 +71,7 @@ Every switch works at the exact game function behind one measured cost, and foll
 | Faster Sim building | Textures and Sims | 2.3.0 | [fast-cas-sort.md](fast-cas-sort.md) |
 | Faster memory handling | Memory handling | 2.4.0 | [fast-memory.md](fast-memory.md) |
 | Room to save | Memory handling | 2.7.0 | [room-to-save.md](room-to-save.md) |
+| Restart host (no menu option, `[ui] restart_host`, off) | None | In development | [restart-host.md](restart-host.md) |
 | Lighter window updates | Game and scripts | 2.7.0 | [lighter-window-updates.md](lighter-window-updates.md) |
 | Faster scripts | Game and scripts | 2.7.0 | [faster-scripts.md](faster-scripts.md) |
 

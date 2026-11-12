@@ -20,6 +20,7 @@
 #include "apex_util.h"
 #include "apex_version.h"
 #include "address_space.h"
+#include "restart_host.h"
 #include "va_ledger.h"
 #include "dev_switches.h"
 #include "game_alloc_categories.h"
@@ -211,6 +212,7 @@ DWORD InitBody() {
         AllocatorTuning::Install(); // allocator_trim / allocator_top_down (the allocator exists by now)
         StreamArena::Install();     // stream_arena (dev switch, off unless set)
         DelegateSigFix::Install();  // game fix, always on: zero-parameter script delegates (delegate_sig_fix.h)
+        RestartHost::Start();       // [ui] restart_host: ts3wrap.exe, off by default
         LOG_INFO("[Main] Features started");
         LoadTiming::NoteFeaturesStarted();
         TransitionWatch::Start();
