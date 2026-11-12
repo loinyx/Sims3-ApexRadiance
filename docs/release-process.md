@@ -79,7 +79,12 @@ The changelog opened from the version in the menu footer (`apex_changelog.cpp`):
    [installer.md](features/installer.md)); `installer/publish/ApexRadianceSetup.exe` is attached to the release.
 2. Test the build in game and record the results in the validation pages.
 3. The release PR is titled `release: X.Y.Z`; merging and publishing are maintainer actions.
-4. Publish `Release\ApexRadiance.asi` and `ApexRadianceSetup.exe` to `loinyx/Sims3-ApexRadiance` as `Apex Radiance X.Y.Z`, with
+4. Publish to `loinyx/Sims3-ApexRadiance` as `Apex Radiance X.Y.Z`, each file with a label saying what it is: `ApexRadianceSetup.exe`
+   (the installer, recommended); `Apex-Radiance-X.Y.Z-Manual-install.zip`, one folder `Apex Radiance X.Y.Z - Manual install` with
+   `How to install.txt` (`.github/scripts/manual-install.txt`, version filled, CRLF), `ApexRadiance.asi` and `ts3wrap.exe`;
+   `Release\ApexRadiance.asi` and `Apex-Radiance-RTX-Remix-bridge.zip`, kept as files of their own because every Setup
+   downloads them by name (Setup 1.1.1 can also take the ASI and `ts3wrap.exe` from the zip, so they can go once the
+   Setups before it are out of use). The release goes out with
    player-facing notes checked with `python tools/public_text_check.py --text-file`. The Nexus workflow derives its
    changelog and file description from that body, and zips the main Nexus file: `READ ME.txt` (`.github/scripts/nexus-readme.txt`) and `ApexRadianceSetup.exe` at the top
    and a `Manual install` folder with `ApexRadiance.asi` and `How to install.txt` (`.github/scripts/manual-install.txt`;

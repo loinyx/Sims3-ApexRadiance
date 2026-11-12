@@ -46,6 +46,22 @@ public static class Releases
         return await FromPageAsync(repo, page.Token);
     }
 
+    // The repo's recent published releases, newest first (drafts and prereleases left out); used when the latest one lacks
+    // a file another edition needs
+    public static async Task<IReadOnlyList<Release>> RecentAsync(string repo, CancellationToken ct = default)
+    {
+        using var api = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        api.CancelAfter(TimeSpan.FromSeconds(20));
+        using var doc = JsonDocument.Parse(await Http.GetStringAsync($"https://api.github.com/repos/{repo}/releases?per_page=10", api.Token));
+        return doc.RootElement.EnumerateArray()
+            .Where(r => !r.GetProperty("draft").GetBoolean() && !r.GetProperty("prerelease").GetBoolean())
+            .Select(r => new Release(repo, r.GetProperty("tag_name").GetString()!, r.GetProperty("assets").EnumerateArray().Select(a => new Asset(
+                a.GetProperty("name").GetString()!,
+                a.GetProperty("browser_download_url").GetString()!,
+                a.TryGetProperty("digest", out var d) && d.GetString() is { } s && s.StartsWith("sha256:") ? s[7..] : null)).ToList()))
+            .ToList();
+    }
+
     // a final release is newer than a prerelease of the same number (3.2.0 over 3.2.0-beta)
     public static bool Newer(string? latest, string? installed)
     {

@@ -39,8 +39,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern ApexRadiance.asi --dir dist
-          # the restart host, when the release has it (3.1.3 on): into the manual-install folder
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern ts3wrap.exe --dir dist || true
+          # the restart host, when the release has it: a file of its own (3.1.3, 3.1.4) or inside the manual-install zip (3.1.5 on)
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern ts3wrap.exe --dir dist ||
+            { gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*-Manual-install.zip' --dir manual &&
+              unzip -j -o manual/*-Manual-install.zip '*ts3wrap.exe' -d dist; } || true
           # Apex Radiance Setup, when the release has it (3.1.1 on): the zip then holds the installer and a manual-install folder
           if gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern ApexRadianceSetup.exe --dir setup; then
             echo "SETUP=1" >> "$GITHUB_ENV"

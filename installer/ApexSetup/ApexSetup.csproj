@@ -24,7 +24,7 @@
     <!-- the XAML resources as resources.pri, the name an unpackaged app finds whatever its exe is called: as ApexRadianceSetup.pri,
          a renamed download ("ApexRadianceSetup (1).exe") looked for its own name and failed its XAML parse at start -->
     <ProjectPriFileName>resources.pri</ProjectPriFileName>
-    <Version>1.1.0</Version>
+    <Version>1.1.1</Version>
     <Product>Apex Radiance Setup</Product>
     <Company>loinyx</Company>
   </PropertyGroup>

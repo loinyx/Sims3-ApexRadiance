@@ -3361,6 +3361,7 @@ void AboutTab() {
         CreditLine("Upper-floor ground light: Arro's technique, adapted in Apex Radiance.");
         CreditLine("Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.");
         CreditLine("Scene update safety: contribution by @rodneypantonial.");
+        CreditLine("Restart host: adapted from Dalexlol's wrapper in sims3-modernization.");
         CreditLine("Thanks to @boringbones for testing every build.");
         CreditLine("RTX Remix bridge: NVIDIA (MIT), ported to The Sims 3 by dalexlol and alexvixell35-stack in sims3-modernization; DXVK by Philip Rebohle (zlib).");
         CreditLine("Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC).");

@@ -167,7 +167,8 @@ public sealed partial class MainWindow : Window
 
     // the bridge's version is the Apex release's only when that release ships the bridge zip
     string? Latest(string c) => Repo.TryGetValue(c, out var repo) && _latest.GetValueOrDefault(repo) is { } r
-        && (c != Components.Bridge || r.Assets.Any(a => a.Name == "Apex-Radiance-RTX-Remix-bridge.zip")) ? r.Version : null;
+        && (c != Components.Bridge || r.Assets.Any(a => a.Name == "Apex-Radiance-RTX-Remix-bridge.zip"))
+        && (c != Components.Modernization || _game is null || Engine.HasModernizationBuild(r, _game.Edition)) ? r.Version : null; // (no update to a release without this edition's build)
 
     // The installed version: Setup's own record, else the latest release's when the file is identical to it (GitHub's SHA-256
     // digest), else "" (installed, version unknown), or null when absent.

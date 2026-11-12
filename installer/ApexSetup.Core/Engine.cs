@@ -79,10 +79,24 @@ public sealed class GitHubSource : ISource
             case Components.Apex:
             {
                 var r = await Latest(Releases.Apex, ct);
-                files.Add((await Releases.DownloadAsync(r.Find(n => n == "ApexRadiance.asi"), _tmp, ct), Path.Combine(bin, "ApexRadiance.asi")));
-                // the restart host (Apex starts it only with [ui] restart_host on); releases before 3.1.3 have none
+                // the ASI as a file of its own (every release so far: Setups before 1.1.1 need it), else from the manual-install
+                // zip, so a later release can ship the zip alone
+                string? manualDir = null;
+                async Task<string?> FromManual(string name)
+                {
+                    if (manualDir is null && r.Assets.FirstOrDefault(a => a.Name.EndsWith("-Manual-install.zip", StringComparison.OrdinalIgnoreCase)) is { } z)
+                        manualDir = Releases.Unzip(await Releases.DownloadAsync(z, _tmp, ct));
+                    return manualDir is null ? null : Directory.EnumerateFiles(manualDir, name, SearchOption.AllDirectories).FirstOrDefault();
+                }
+                var asi = r.Assets.FirstOrDefault(a => a.Name == "ApexRadiance.asi") is { } own ? await Releases.DownloadAsync(own, _tmp, ct)
+                    : await FromManual("ApexRadiance.asi") ?? throw new InvalidOperationException($"{r.Repo} {r.Tag}: asset not found");
+                files.Add((asi, Path.Combine(bin, "ApexRadiance.asi")));
+                // the restart host (Apex starts it only with [ui] restart_host on): a file of its own in 3.1.3 and 3.1.4, inside
+                // the manual-install zip from 3.1.5; releases before 3.1.3 have none
                 if (r.Assets.FirstOrDefault(a => a.Name == "ts3wrap.exe") is { } wrap)
                     files.Add((await Releases.DownloadAsync(wrap, _tmp, ct), Path.Combine(bin, "ts3wrap.exe")));
+                else if (await FromManual("ts3wrap.exe") is { } inZip)
+                    files.Add((inZip, Path.Combine(bin, "ts3wrap.exe")));
                 return (files, r.Version);
             }
             case Components.Bridge:
@@ -136,7 +150,12 @@ public sealed class GitHubSource : ISource
             case Components.Modernization:
             {
                 var r = await Latest(Releases.Modernization, ct);
-                var prefix = g.Edition == Edition.EA ? "ts3native-ea169-" : "ts3native-v";
+                // a release can ship without this edition's build (v0.2.11: no ts3native-ea169): the newest recent one with it,
+                // its ts3native and ts3fixes.package together
+                if (!Engine.HasModernizationBuild(r, g.Edition))
+                    r = (await Releases.RecentAsync(Releases.Modernization, ct)).FirstOrDefault(x => Engine.HasModernizationBuild(x, g.Edition))
+                        ?? throw new InvalidOperationException($"Sims 3 Modernization has no build for the {(g.Edition == Edition.EA ? "EA app" : "Steam")} version in its recent releases. Turn it off in Components and install again.");
+                var prefix = Engine.ModernizationPrefix(g.Edition);
                 var dir = Releases.Unzip(await Releases.DownloadAsync(r.Find(n => n.StartsWith(prefix) && n.EndsWith(".zip")), _tmp, ct));
                 AddTree(files, dir, bin);
                 files.Add((await Releases.DownloadAsync(r.Find(n => n == "ts3fixes.package"), _tmp, ct), Path.Combine(Scan.Packages(docs), "ts3fixes.package")));
@@ -182,6 +201,11 @@ public sealed record Progress(double Fraction, string Text, string? Arg = null);
 
 public static class Engine
 {
+    // Sims 3 Modernization's zip for the game's edition, and a release that has it with its ts3fixes.package
+    public static string ModernizationPrefix(Edition e) => e == Edition.EA ? "ts3native-ea169-" : "ts3native-v";
+    public static bool HasModernizationBuild(Release r, Edition e) =>
+        r.Assets.Any(a => a.Name.StartsWith(ModernizationPrefix(e)) && a.Name.EndsWith(".zip")) && r.Assets.Any(a => a.Name == "ts3fixes.package");
+
     // Files a component may own although Setup did not install them (installed by hand): removed by Remove, never restored.
     static readonly Dictionary<string, string[]> Known = new()
     {
