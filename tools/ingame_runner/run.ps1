@@ -84,6 +84,8 @@ if (-not (Test-Path -LiteralPath $agent)) { throw "No test agent: run node tools
 $savesDir = Join-Path $GameDocuments 'Saves'
 if (-not (Test-Path -LiteralPath (Join-Path $GameDocuments 'Mods/Resource.cfg'))) { throw "No Mods\Resource.cfg in ${GameDocuments}: set up the Mods folder for script mods first (README)." }
 foreach ($j in $jobs) { if (-not (Test-Path -LiteralPath (Join-Path $savesDir "$($j.save).sims3"))) { throw "Job $($j.id): save '$($j.save).sims3' not found in $savesDir" } }
+# the window grabber costs the game frames: a timing run and a light run are separate runs
+if ($Grab -and $Profiler -ne 'None') { throw '-Grab and -Profiler are separate runs: the window recording costs frames and would skew the timing.' }
 if ($Profiler -ne 'None') {
     & python -c 'import frida' 2>$null
     if ($LASTEXITCODE -ne 0) { throw "-Profiler $Profiler needs Python with the frida package (pip install frida)." }
