@@ -273,5 +273,8 @@ public static partial class Strings
         ["Licence text"] = "Licenstext",
         ["OK"] = "OK",
         ["Cancel"] = "Avbryt",
+        ["A new Setup is available"] = "Ett nytt Setup finns",
+        ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Apex Radiance Setup {0} har laddats ned och kontrollerats. Uppdatera Setup, så öppnas det igen.",
+        ["Update Setup"] = "Uppdatera Setup",
     };
 }

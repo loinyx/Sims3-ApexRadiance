@@ -273,5 +273,8 @@ public static partial class Strings
         ["Licence text"] = "Testo della licenza",
         ["OK"] = "OK",
         ["Cancel"] = "Annulla",
+        ["A new Setup is available"] = "È disponibile un nuovo Setup",
+        ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Apex Radiance Setup {0} è stato scaricato e verificato. Aggiorna Setup e si riaprirà.",
+        ["Update Setup"] = "Aggiorna Setup",
     };
 }

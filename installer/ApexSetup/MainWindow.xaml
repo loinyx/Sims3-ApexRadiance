@@ -73,6 +73,8 @@
                                     <TextBlock Text="Lighting, picture and performance for The Sims 3." Foreground="{StaticResource ApexMutedBrush}" FontSize="14" />
                                 </StackPanel>
                             </StackPanel>
+                            <!-- a newer Setup in the latest Apex Radiance release, downloaded and checked (CheckSetupUpdateAsync) -->
+                            <InfoBar x:Name="SetupUpdateInfo" IsClosable="False" IsOpen="False" />
                             <InfoBar x:Name="WelcomeInfo" IsClosable="False" />
                             <!-- the updates of a game with Apex: choose, progress and result in this one card (RefreshUpdateCard) -->
                             <Border x:Name="UpdateCard" Style="{StaticResource ApexCard}" Padding="0" Visibility="Collapsed">

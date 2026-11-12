@@ -231,5 +231,8 @@ public static partial class Strings
         ["Licence text"] = "ข้อความสัญญาอนุญาต",
         ["OK"] = "ตกลง",
         ["Cancel"] = "ยกเลิก",
+        ["A new Setup is available"] = "มีตัวติดตั้งใหม่",
+        ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "ดาวน์โหลดและตรวจสอบ Apex Radiance Setup {0} แล้ว อัปเดตตัวติดตั้ง แล้วมันจะเปิดขึ้นใหม่",
+        ["Update Setup"] = "อัปเดตตัวติดตั้ง",
     };
 }

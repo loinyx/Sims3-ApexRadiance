@@ -71,6 +71,9 @@ The changelog opened from the version in the menu footer (`apex_changelog.cpp`):
    asset is this build: developer mode ships off (`developer_mode = false`, enabling it asks for confirmation), and while it
    is off the build runs and logs as the players' build. (2.13.1 testing: a game session with the `APEX_NO_DEV_TOOLS` build
    behaved differently from the standard one with developer mode off; the cause was not found.)
+   Every change to Setup raises `<Version>` in `installer/ApexSetup/ApexSetup.csproj` in the same change (patch for fixes
+   and texts, minor for features): Setup 1.1.0 and later offer a newer version of themselves from the latest release by
+   that version, so a change without it never reaches players who already have Setup.
    Build Apex Radiance Setup from the same commit: `dotnet run --project installer/ApexSetup.Tests`, then
    `dotnet publish installer/ApexSetup -c Release -o installer/publish` (one self-contained exe,
    [installer.md](features/installer.md)); `installer/publish/ApexRadianceSetup.exe` is attached to the release.

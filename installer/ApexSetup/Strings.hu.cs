@@ -278,5 +278,8 @@ public static partial class Strings
         ["Licence text"] = "Licencszöveg",
         ["OK"] = "OK",
         ["Cancel"] = "Mégse",
+        ["A new Setup is available"] = "Új Setup érhető el",
+        ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Az Apex Radiance Setup {0} letöltve és ellenőrizve. Frissítsd a Setupot, utána újra megnyílik.",
+        ["Update Setup"] = "Setup frissítése",
     };
 }

@@ -24,6 +24,7 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        if (Environment.ProcessPath is { } self) SelfUpdate.CleanUp(self); // (the exe a Setup update replaced)
         _window = new MainWindow();
         _window.Activate();
     }

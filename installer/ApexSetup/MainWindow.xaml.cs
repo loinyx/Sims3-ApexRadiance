@@ -96,6 +96,33 @@ public sealed partial class MainWindow : Window
         Show(Welcome);
         _ = DetectVulkanAsync();
         await LoadReleasesAsync();
+        await CheckSetupUpdateAsync();
+    }
+
+    // A newer Apex Radiance Setup in the latest Apex release is downloaded and checked, then offered on the start page;
+    // Update Setup puts it in place of this exe and starts it. Any failure leaves this Setup working as it is.
+    async Task CheckSetupUpdateAsync()
+    {
+        if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1" || Preview is not null || Environment.ProcessPath is not { } self
+            || _latest.GetValueOrDefault(Releases.Apex) is not { } apex) return;
+        try
+        {
+            if (await SelfUpdate.DownloadIfNewerAsync(apex, self) is not { } file) return;
+            var v = System.Diagnostics.FileVersionInfo.GetVersionInfo(file).FileVersion is { } fv && Version.TryParse(fv, out var pv) ? pv.ToString(3) : "";
+            SetInfo(SetupUpdateInfo, InfoBarSeverity.Success, T("A new Setup is available"),
+                T("Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again.", v), T("Update Setup"), () =>
+                {
+                    if (_busy) return; // (an install in progress finishes first)
+                    try
+                    {
+                        SelfUpdate.Replace(file, self);
+                        SelfUpdate.Restart(self, Environment.GetCommandLineArgs().Skip(1));
+                        Application.Current.Exit();
+                    }
+                    catch (Exception e) { App.Log(e); SetupUpdateInfo.IsOpen = false; }
+                });
+        }
+        catch (Exception e) { App.Log(e); }
     }
 
     // The card's Vulkan version, asked once off the UI thread (loading the drivers takes a moment); null until known or

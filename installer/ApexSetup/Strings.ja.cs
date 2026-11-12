@@ -265,5 +265,8 @@ public static partial class Strings
         ["Licence text"] = "ライセンス文",
         ["OK"] = "OK",
         ["Cancel"] = "キャンセル",
+        ["A new Setup is available"] = "新しい Setup があります",
+        ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Apex Radiance Setup {0} をダウンロードして確認しました。Setup を更新すると、もう一度開きます。",
+        ["Update Setup"] = "Setup を更新",
     };
 }

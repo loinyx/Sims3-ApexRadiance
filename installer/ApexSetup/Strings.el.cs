@@ -276,5 +276,8 @@ public static partial class Strings
         ["Licence text"] = "Κείμενο άδειας",
         ["OK"] = "OK",
         ["Cancel"] = "Ακύρωση",
+        ["A new Setup is available"] = "Υπάρχει νέο Setup",
+        ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Το Apex Radiance Setup {0} κατέβηκε και ελέγχθηκε. Ενημέρωσε το Setup και θα ανοίξει ξανά.",
+        ["Update Setup"] = "Ενημέρωση Setup",
     };
 }

@@ -493,6 +493,25 @@ finally
     Directory.Delete(root, true);
 }
 
+// Setup's own update: only a newer Apex Radiance Setup is taken; the running exe is renamed, not overwritten
+{
+    var dir = Path.Combine(Path.GetTempPath(), "ApexSetupSelf-" + Guid.NewGuid().ToString("N")[..8]);
+    Directory.CreateDirectory(dir);
+    var core = typeof(SelfUpdate).Assembly.Location;
+    Check(!SelfUpdate.IsNewer(core, core), "a file that is not Apex Radiance Setup is never taken as an update");
+    var self = Path.Combine(dir, "ApexRadianceSetup.exe"); var fresh = Path.Combine(dir, "new.exe");
+    File.WriteAllText(self, "old setup"); File.WriteAllText(fresh, "new setup");
+    SelfUpdate.Replace(fresh, self);
+    Check(File.ReadAllText(self) == "new setup" && File.ReadAllText(self + ".old") == "old setup", "an update puts the new exe in place and keeps the old one as .old");
+    SelfUpdate.CleanUp(self);
+    Check(!File.Exists(self + ".old"), "the .old exe is removed at the next start");
+    var none = new Release("loinyx/Sims3-ApexRadiance", "v3.1.4", new[] { new Asset("ApexRadiance.asi", "x", null) });
+    Check(await SelfUpdate.DownloadIfNewerAsync(none, self) is null, "a release without ApexRadianceSetup.exe offers no update");
+    var unchecked_ = new Release("loinyx/Sims3-ApexRadiance", "v3.1.4", new[] { new Asset("ApexRadianceSetup.exe", "x", null) });
+    Check(await SelfUpdate.DownloadIfNewerAsync(unchecked_, self) is null, "an exe without a SHA-256 digest is never downloaded");
+    Directory.Delete(dir, true);
+}
+
 // Setup's languages: each table loads, its keys are English texts of Setup (the Portuguese table's keys, the complete
 // list), with the key's {n} placeholders and no empty text. A key twice in one file fails: the indexer initializer keeps
 // the last one without a word, so the file itself is read. Missing keys are only counted (English shows for them).

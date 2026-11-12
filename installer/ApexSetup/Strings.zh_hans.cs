@@ -259,5 +259,8 @@ public static partial class Strings
         ["Licence text"] = "许可证文本",
         ["OK"] = "确定",
         ["Cancel"] = "取消",
+        ["A new Setup is available"] = "有新的安装程序",
+        ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Apex Radiance Setup {0} 已下载并校验。更新安装程序后它会重新打开。",
+        ["Update Setup"] = "更新安装程序",
     };
 }

@@ -10,7 +10,7 @@ Setup makes can be undone from a restore point. It is optional: the manual insta
 
 | | |
 |---|---|
-| Availability | Released in 3.1.1; `ApexRadianceSetup.exe` is a release asset |
+| Availability | Released in 3.1.1; `ApexRadianceSetup.exe` is a release asset. Setup's own update: Released in 3.1.4 (Setup 1.1.0) |
 | Default | Optional, a separate download |
 | Menu | None: a separate program, not part of the in-game menu |
 | Configuration | `Game\Bin\Apex Radiance backup\setup.json` (written by Setup); restore points in `Game\Bin\Apex Radiance backup\restore`; language in `%LOCALAPPDATA%\Apex Radiance Setup\language.txt` |
@@ -55,6 +55,10 @@ Setup finds the game, compares what is installed with the player's choice and ap
 8. **Check installation.** On a game that has Apex Radiance, the welcome page shows what is installed and whether it is
    up to date, with *Update now* for the components that have a newer release. *Check installation* scans the game
    again and verifies the installed files and the compatibility checks.
+   **Setup's own update:** when the latest Apex Radiance release has an `ApexRadianceSetup.exe` of a higher version
+   (Apex Radiance Setup, checked against GitHub's SHA-256 digest), the welcome page shows *A new Setup is available*
+   with *Update Setup*: the running exe is renamed to `.old` (deleted at the next start), the new one takes its place
+   and opens. Setups before 1.1.0 (Apex Radiance 3.1.3 and earlier) do not look for it.
 9. **Repair or remove.** *Repair* downloads and copies again everything installed. Each component can be removed on its
    own, putting back the files it replaced. *Uninstall everything* removes Apex Radiance and what Setup installed and
    restores every replaced file; mods installed by hand and the settings in Documents stay.
