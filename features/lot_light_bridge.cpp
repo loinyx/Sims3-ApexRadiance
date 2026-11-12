@@ -9713,6 +9713,7 @@ D3D9Hooks::HookAction OnDrawFurniture(IDirect3DDevice9* dev, DrawFn draw, const 
 struct TraceSeen {
     std::vector<std::pair<uint64_t, DWORD>> states; // the part's recent states and when each was last seen (GetTickCount)
     uint64_t last = 0;                              // the state seen at its last draw
+    uint64_t lastText = 0;                          // hash of the last line written (the state hashes values it does not print)
 };
 std::unordered_map<uint64_t, TraceSeen> g_traceLast; // object part (rig + pixel shader) -> its states (render thread)
 uint64_t TraceHash(uint64_t h, int64_t v) { return (h ^ static_cast<uint64_t>(v)) * 1099511628211ull; }
@@ -9821,6 +9822,10 @@ void TraceFurniture(IDirect3DDevice9* dev, const float (*rigIn)[4], bool rigChai
         for (int k = 0; k < 4; k++) text += std::format(" {}({:.3f} {:.3f} {:.3f})", SlotKind(own[4 + k], own[k]), own[4 + k][0], own[4 + k][1], own[4 + k][2]);
     }
     if (!kPublicBuild) text += RigBoxText(rigPtr);
+    uint64_t textHash = 14695981039346656037ull;
+    for (const char c : text) textHash = TraceHash(textHash, static_cast<unsigned char>(c));
+    if (textHash == seen.lastText) return;
+    seen.lastText = textHash;
     Recorder::Note(text);
 }
 

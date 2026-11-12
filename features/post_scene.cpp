@@ -179,6 +179,14 @@ float g_vp[4][4] = {};
 bool g_vpValid = false;
 float g_lastVp[4][4] = {}; // the last frame's (read at its Present, after the boundary cleared g_vp)
 bool g_lastVpValid = false;
+// The camera's own (not mirrored) view-projection for recording tools: with water in view the first scene draws are the
+// reflection pass, so g_vp is its mirrored copy (vp[1][1] < 0). Effects keep reading g_vp.
+std::atomic<int> g_plainWanted{0};
+float g_plainVp[4][4] = {};
+bool g_plainVpValid = false;
+float g_lastPlainVp[4][4] = {};
+bool g_lastPlainVpValid = false;
+int g_plainSeek = 0;
 
 bool NearFromBlock(const float m[4][4], float& nearZ) {
     const float *r0 = m[0], *r1 = m[1], *r2 = m[2], *r3 = m[3];
@@ -249,6 +257,27 @@ void VoteCamera(IDirect3DDevice9* dev) {
         }
     }
     g_vpValid = bestVp > 0;
+    if (g_plainWanted.load(std::memory_order_relaxed) > 0) {
+        int bestPlain = 0;
+        for (const auto& v : g_vpVotes) {
+            float n;
+            if (v.count > bestPlain && v.m[1][1] >= 0 && NearFromBlock(v.m, n) && std::fabs(n - g_near) < 1e-3f * g_near) {
+                bestPlain = v.count;
+                std::memcpy(g_plainVp, v.m, sizeof g_plainVp);
+            }
+        }
+        if (bestPlain > 0) g_plainVpValid = true;
+    }
+}
+
+// After the vote: the first later scene draw whose c40 is a plain camera with this frame's near (recording tools only)
+void SeekPlainCamera(IDirect3DDevice9* dev) {
+    float m[4][4], n;
+    if (FAILED(dev->GetVertexShaderConstantF(40, &m[0][0], 4)) || !NearFromBlock(m, n) || m[1][1] < 0 ||
+        std::fabs(n - g_near) >= 1e-3f * g_near)
+        return;
+    std::memcpy(g_plainVp, m, sizeof g_plainVp);
+    g_plainVpValid = true;
 }
 
 void OnFrameBoundary(IDirect3DDevice9* dev) {
@@ -280,6 +309,10 @@ void OnFrameBoundary(IDirect3DDevice9* dev) {
     if (g_vpValid) std::memcpy(g_lastVp, g_vp, sizeof g_vp);
     g_lastVpValid = g_vpValid;
     g_vpValid = false;
+    if (g_plainVpValid) std::memcpy(g_lastPlainVp, g_plainVp, sizeof g_plainVp);
+    g_lastPlainVpValid = g_plainVpValid;
+    g_plainVpValid = false;
+    g_plainSeek = 0;
 }
 
 void OnGameDraw(D3D9Hooks::DeviceContext& ctx) {
@@ -296,7 +329,10 @@ void OnGameDraw(D3D9Hooks::DeviceContext& ctx) {
         g_sceneDraws++;
         if (!g_sceneOnSharedDepth && SceneDepthReady(dev)) g_sceneOnSharedDepth = true;
         if (ctx.ZWriteEnable()) g_depthWrites++;
-        if (g_nearDraws < kNearDraws && g_cameraWanted.load(std::memory_order_relaxed) > 0) VoteCamera(dev);
+        if (g_cameraWanted.load(std::memory_order_relaxed) > 0) {
+            if (g_nearDraws < kNearDraws) VoteCamera(dev);
+            else if (!g_plainVpValid && g_plainWanted.load(std::memory_order_relaxed) > 0 && g_plainSeek++ < 512) SeekPlainCamera(dev);
+        }
         return;
     }
     if (g_sceneDraws > 0) g_uiDrawSeen = true; // a depth-off draw after scene draws: the UI may have started (EndScene fallback off)
@@ -413,10 +449,14 @@ void Remove(Effect fn) {
     SyncHooks();
 }
 
-void WantCamera(bool on) {
+void WantCamera(bool on, bool plain) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (on) g_cameraWanted.fetch_add(1);
     else if (g_cameraWanted.fetch_sub(1) <= 0) g_cameraWanted.store(0);
+    if (plain) {
+        if (on) g_plainWanted.fetch_add(1);
+        else if (g_plainWanted.fetch_sub(1) <= 0) g_plainWanted.store(0);
+    }
     SyncHooks();
 }
 
@@ -461,6 +501,10 @@ bool CameraViewProj(float vp[4][4]) {
     return true;
 }
 bool RecentCameraViewProj(float vp[4][4]) {
+    if (g_plainVpValid || g_lastPlainVpValid) {
+        std::memcpy(vp, g_plainVpValid ? g_plainVp : g_lastPlainVp, sizeof g_plainVp);
+        return true;
+    }
     if (CameraViewProj(vp)) return true;
     if (!g_lastVpValid) return false;
     std::memcpy(vp, g_lastVp, sizeof g_lastVp);

@@ -106,6 +106,27 @@ int main() {
     IDirect3DSurface9* unknown=nullptr;dev->CreateRenderTarget(2048,1024,D3DFMT_A8R8G8B8,D3DMULTISAMPLE_NONE,0,FALSE,&unknown,nullptr);
     frame(20);hidden();BeforeColourTile(dev,bb,&tile,unknown,&tile,D3DTEXF_POINT);Check(applied.empty(),"same dimensions but unknown target excluded");unknown->Release();
     frame(20);hidden();OnPreReset(dev);copy();Check(!g_knownTileTarget&&applied.empty(),"Reset invalidates learnt target identity");
+    // Water in view: the first scene draws are the reflection pass (mirrored c40); recording tools seek the plain camera after the vote
+    float mirrored[4][4]={{1,0,0,0},{0,-1,0,0},{0,0,1,-0.25f},{0,0,1,0}};
+    float got[4][4]={};
+    g_effects.clear();g_cameraWanted=1;g_plainWanted=0;
+    frame(0);
+    for (UINT base : kNearBlocks) dev->SetVertexShaderConstantF(base,&mirrored[0][0],4);
+    for(int i=0;i<kNearDraws;++i)draw();
+    Check(g_nearDraws==kNearDraws&&!g_plainVpValid,"mirrored-only vote has no plain camera");
+    dev->SetVertexShaderConstantF(40,&projection[0][0],4);
+    draw();draw();Check(!g_plainVpValid&&g_plainSeek==0,"no plain seek unless a recording tool wants it");
+    g_plainWanted=1;draw();
+    Check(g_plainVpValid&&PostScene::RecentCameraViewProj(got)&&std::memcmp(got,projection,sizeof got)==0,"recent camera prefers the plain block");
+    Check(PostScene::CameraViewProj(got)&&std::memcmp(got,mirrored,sizeof got)==0,"effects' camera unchanged (mirrored winner)");
+    Check(PostScene::CameraNear()==0.25f&&g_plainSeek==1,"near unchanged, seek stops once found");
+    OnFrameBoundary(dev);
+    Check(!g_plainVpValid&&g_plainSeek==0&&PostScene::RecentCameraViewProj(got)&&std::memcmp(got,projection,sizeof got)==0,"last frame's plain block after the boundary");
+    g_nearVotes.clear();g_vpVotes.clear();g_nearDraws=0;g_plainVpValid=false;
+    for (UINT base : kNearBlocks) dev->SetVertexShaderConstantF(base,&projection[0][0],4);
+    g_plainWanted=0;VoteCamera(dev);Check(!g_plainVpValid,"no plain vote winner unless a recording tool wants it");
+    g_plainWanted=1;VoteCamera(dev);Check(g_plainVpValid&&std::memcmp(g_plainVp,projection,sizeof got)==0,"plain vote winner taken directly");
+    g_cameraWanted=0;g_plainWanted=0;
     snapshot->Release();bb->Release();
     other->Release();expectedDepth->Release();expectedDepth=nullptr;dev->Release();d3d->Release();DestroyWindow(window);
     std::printf("PASS: %d native post-scene checks\n",checks);

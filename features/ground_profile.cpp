@@ -353,7 +353,7 @@ void WatchBegin(POINT mouse, int bbWidth, int bbHeight) {
     g_watch = WatchState{};
     g_watch.on = true, g_watch.mouse = mouse, g_watch.w = bbWidth, g_watch.h = bbHeight;
     g_watch.rows.reserve(kWatchRows);
-    PostScene::WantCamera(true);
+    PostScene::WantCamera(true, true);
 }
 
 bool WatchPoints(int x[kWatchPoints], int y[kWatchPoints]) {
@@ -397,7 +397,7 @@ bool WatchPoints(int x[kWatchPoints], int y[kWatchPoints]) {
 void WatchEnd() {
     if (!g_watch.on) return;
     g_watch.on = false;
-    PostScene::WantCamera(false);
+    PostScene::WantCamera(false, true);
 }
 
 std::string WatchCsv(unsigned long startTick) {

@@ -238,7 +238,7 @@ void Close(const std::string& why) {
     g_shade = g_armed = g_wanted = g_asked = false;
     Free();
     RenderCallbacks::Remove(RenderCallbacks::filteredSceneBeforeOverlay, AtOverlay);
-    PostScene::WantCamera(false);
+    PostScene::WantCamera(false, true);
     g_step = Step::Off;
     LOG_INFO(std::format("[CaptureBurst] Done{}{}", why.empty() ? "" : ": ", why));
     Captures::WriteText(g_folder / L"Burst.txt", g_text);
@@ -303,7 +303,7 @@ bool Begin(const std::filesystem::path& folder, const std::string& what) {
         RenderCallbacks::Add(RenderCallbacks::preReset, PreReset);
         g_resetHooked = true;
     }
-    PostScene::WantCamera(true);
+    PostScene::WantCamera(true, true);
     g_step = Step::Shot;
     LOG_INFO("[CaptureBurst] The frames after the recording start");
     return true;
