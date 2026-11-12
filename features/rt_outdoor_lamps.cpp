@@ -650,13 +650,24 @@ bool AskDue(const Ask& ask, DWORD now, DWORD askMs = kSolveAskMs) { return !ask.
 bool g_restartGpuPending = false, g_restartGpuFallback = false;
 std::unordered_map<const void*, Ask> g_askedSolve; // room -> its sends to its solve for a kept solve
 std::unordered_map<const IDirect3DBaseTexture9*, Slot*> g_swap; // the game's map -> its slot (the SetTexture swap; render thread)
-// (render thread) the relit copies of the lot left at an active lot switch: kept bound (frozen, no relight) until the new
-// lot is relit on every story or kRetiredMaxMs, so the switch is not seen as both lots dropping to the game's maps at once
-std::vector<std::unique_ptr<Slot>> g_retired;
+// (render thread) the relit copies of the lots left at active lot switches: kept bound (frozen, not relit) while the game
+// does not write those maps again (a lamp switched there, the day's light), for up to kRetiredLots lots, the least recently
+// left dropped first. A lot left does not fall back to the game's maps at the switch, nor a lot visited again while its
+// own maps are prepared: with Instant on, the lots seen keep the GPU's light
+struct Retired {
+    uintptr_t lot = 0; // the tracker it was the active lot of
+    DWORD at = 0;      // when it was left
+    std::unique_ptr<Slot> s;
+};
+std::vector<Retired> g_retired;
 std::unordered_map<const IDirect3DBaseTexture9*, Slot*> g_swapRetired;
 uintptr_t g_retiredLo = ~uintptr_t{0}, g_retiredHi = 0;
-DWORD g_retiredAt = 0;
-constexpr DWORD kRetiredMaxMs = 8000;
+constexpr size_t kRetiredLots = 3;
+// (any thread: the game's map unlock) the retired copies' game maps, and those the game wrote since (their copies are stale)
+std::mutex g_retiredMx;
+std::unordered_set<const void*> g_retiredGame;
+std::vector<const void*> g_retiredStale;
+std::atomic<bool> g_retiredAny{false};
 // (the 10 s summary, render thread) the frames of the maps with texels over open rooms of the story below: their rooms read now,
 // the last binding kept (why: a room's ambient, a room's map, the UV map), none (the draw shows the texels' carried light), a switch
 // between the relit copy and the game's map, a room showing another class than the one matched, a new kept solve not yet prepared
@@ -837,39 +848,93 @@ void RebuildSwap() {
             g_swapLo = std::min(g_swapLo, a), g_swapHi = std::max(g_swapHi, a);
         }
 }
-// The lot left at a switch: its relit copies stay bound (g_swapRetired), the rest of its slots are released
-void RetireSlots() {
+void RebuildRetired() {
+    g_swapRetired.clear();
+    g_retiredLo = ~uintptr_t{0}, g_retiredHi = 0;
+    std::lock_guard<std::mutex> lk(g_retiredMx);
+    g_retiredGame.clear();
+    for (const Retired& r : g_retired) {
+        g_swapRetired[r.s->game] = r.s.get();
+        g_retiredGame.insert(r.s->game);
+        const uintptr_t a = reinterpret_cast<uintptr_t>(r.s->game);
+        g_retiredLo = std::min(g_retiredLo, a), g_retiredHi = std::max(g_retiredHi, a);
+    }
+    g_retiredAny.store(!g_retired.empty(), std::memory_order_relaxed);
+}
+// Releases the retired copies `drop` picks (their stages take the game's maps back) and logs them with why
+template <typename Pred> void ReleaseRetiredIf(IDirect3DDevice9* dev, Pred drop, const char* why) {
+    if (std::none_of(g_retired.begin(), g_retired.end(), [&](const Retired& r) { return drop(r); })) return;
+    if (dev)
+        for (DWORD st = 0; st < 16; st++) {
+            IDirect3DBaseTexture9* t = nullptr;
+            if (FAILED(dev->GetTexture(st, &t)) || !t) continue;
+            for (const Retired& r : g_retired)
+                if (drop(r) && (t == r.s->copy || (r.s->hi && t == r.s->hi))) D3D9Hooks::CallOriginalSetTexture(dev, st, r.s->game);
+            t->Release();
+        }
+    size_t n = 0;
+    std::unordered_set<uintptr_t> lots;
+    for (auto it = g_retired.begin(); it != g_retired.end();)
+        if (drop(*it)) {
+            lots.insert(it->lot);
+            ReleaseSlot(*it->s);
+            it = g_retired.erase(it), n++;
+        } else
+            ++it;
+    RebuildRetired();
+    LOG_INFO(std::format("[RtOutdoorLamps] {} relit maps of {} lot{} left released ({}); {} kept", n, lots.size(), lots.size() == 1 ? "" : "s", why, g_retired.size()));
+}
+void ReleaseRetired(IDirect3DDevice9* dev, const char* why) {
+    ReleaseRetiredIf(dev, [](const Retired&) { return true; }, why);
+}
+// The lot left at a switch (lot: its tracker): its relit copies stay bound (g_swapRetired), the rest of its slots are released.
+// Only kRetiredLots lots are kept: the least recently left goes first
+void RetireSlots(IDirect3DDevice9* dev, uintptr_t lot) {
+    const DWORD now = std::max<DWORD>(GetTickCount(), 1);
     for (auto& s : g_slots) {
         if (!(s->copy && s->relit && s->game)) {
             ReleaseSlot(*s);
             continue;
         }
         if (s->watch >= 0) g_watchTex[s->watch].store(nullptr), s->watch = -1;
-        g_swapRetired[s->game] = s.get();
-        const uintptr_t a = reinterpret_cast<uintptr_t>(s->game);
-        g_retiredLo = std::min(g_retiredLo, a), g_retiredHi = std::max(g_retiredHi, a);
-        g_retired.push_back(std::move(s));
+        for (auto it = g_retired.begin(); it != g_retired.end(); ++it) // (an older copy of the same map: the newer one stands in)
+            if (it->s->game == s->game) {
+                ReleaseSlot(*it->s);
+                g_retired.erase(it);
+                break;
+            }
+        g_retired.push_back({lot, now, std::move(s)});
     }
     g_slots.clear();
-    if (!g_retired.empty()) g_retiredAt = std::max<DWORD>(GetTickCount(), 1);
+    std::vector<std::pair<DWORD, uintptr_t>> lots;
+    for (const Retired& r : g_retired) {
+        auto l = std::find_if(lots.begin(), lots.end(), [&](const auto& x) { return x.second == r.lot; });
+        if (l == lots.end()) lots.push_back({r.at, r.lot});
+        else l->first = std::max(l->first, r.at);
+    }
+    RebuildRetired();
+    if (lots.size() > kRetiredLots) {
+        std::sort(lots.begin(), lots.end());
+        std::unordered_set<uintptr_t> old;
+        for (size_t i = 0; i + kRetiredLots < lots.size(); i++) old.insert(lots[i].second);
+        ReleaseRetiredIf(dev, [&](const Retired& r) { return old.count(r.lot) != 0; }, "the least recently left");
+    }
 }
-void ReleaseRetired(IDirect3DDevice9* dev, const char* why) {
+// Render thread, each frame: retired copies whose game map the game wrote (stale), or whose lot the game no longer has
+void ServiceRetired(IDirect3DDevice9* dev) {
     if (g_retired.empty()) return;
-    if (dev)
-        for (DWORD st = 0; st < 16; st++) {
-            IDirect3DBaseTexture9* t = nullptr;
-            if (FAILED(dev->GetTexture(st, &t)) || !t) continue;
-            for (const auto& s : g_retired)
-                if (t == s->copy || (s->hi && t == s->hi)) D3D9Hooks::CallOriginalSetTexture(dev, st, s->game);
-            t->Release();
-        }
-    const size_t n = g_retired.size();
-    for (auto& s : g_retired) ReleaseSlot(*s);
-    g_retired.clear();
-    g_swapRetired.clear();
-    g_retiredLo = ~uintptr_t{0}, g_retiredHi = 0;
-    LOG_INFO(std::format("[RtOutdoorLamps] {} relit maps of the lot left released ({}, {} ms after the switch)", n, why, GetTickCount() - g_retiredAt));
-    g_retiredAt = 0;
+    std::unordered_set<const void*> stale;
+    {
+        std::lock_guard<std::mutex> lk(g_retiredMx);
+        stale.insert(g_retiredStale.begin(), g_retiredStale.end());
+        g_retiredStale.clear();
+    }
+    if (!stale.empty()) ReleaseRetiredIf(dev, [&](const Retired& r) { return stale.count(r.s->game) != 0; }, "the game wrote its maps again");
+    static DWORD s_liveAt = 0;
+    if (GetTickCount() - s_liveAt > 1000) {
+        s_liveAt = GetTickCount();
+        ReleaseRetiredIf(dev, [](const Retired& r) { return !LevelLightShare::TrackerLive(r.lot); }, "its lot is no longer loaded");
+    }
 }
 // (developer) GPU against the game: every 10 s one relit map of the active lot is read back and compared texel by texel with
 // the game's own map of the same room 0, as its last solve wrote it (the copy is drawn instead of it; that the solve had the
@@ -1012,7 +1077,7 @@ void DropAll(IDirect3DDevice9* dev, const char* why, bool requeue = true, bool r
     GpuRoomLamps::ReleaseAll();
     if (g_slots.empty() && !g_eng) return;
     const size_t n = g_slots.size();
-    if (retire) RetireSlots(); // (its copies stay bound until the new lot is relit)
+    if (retire) RetireSlots(dev, g_tracker); // (its copies stay bound while the game does not write those maps)
     else {
         UnbindCopies(dev);
         for (auto& s : g_slots) ReleaseSlot(*s);
@@ -1780,7 +1845,7 @@ HRESULT SwapCopy(IDirect3DDevice9* dev, DWORD stage, IDirect3DBaseTexture9* t, b
     Slot* s = nullptr;
     if (g_on.load(std::memory_order_relaxed) && !g_swap.empty() && a >= g_swapLo && a <= g_swapHi)
         if (const auto it = g_swap.find(t); it != g_swap.end()) s = it->second;
-    if (!s && !g_swapRetired.empty() && a >= g_retiredLo && a <= g_retiredHi) // (the lot left at the last switch)
+    if (!s && !g_swapRetired.empty() && a >= g_retiredLo && a <= g_retiredHi) // (the lots left at earlier switches)
         if (const auto it = g_swapRetired.find(t); it != g_swapRetired.end()) s = it->second;
     if (!s) return S_OK;
     s->binds++;
@@ -1951,7 +2016,7 @@ void Frame(IDirect3DDevice9* dev) {
         g_inactive = "off";
         return;
     }
-    if (!g_retired.empty() && GetTickCount() - g_retiredAt > kRetiredMaxMs) ReleaseRetired(dev, "held its longest");
+    ServiceRetired(dev);
     const auto off = [&](const std::string& why) {
         PublishNeighbours(0, {});
         OutdoorDelta::SolveTouched(nullptr);
@@ -2053,7 +2118,6 @@ void Frame(IDirect3DDevice9* dev) {
             for (int S = 0; S <= 7; S++)
                 if (const void* r = LevelLightShare::Room0Of(g_tracker, S)) left[nl++] = r;
         if (g_tracker) RoomLightQueue::GroundFirst(LevelLightShare::Room0Of(tracker, 0));
-        ReleaseRetired(dev, "another switch"); // (one lot left at a time)
         DropAll(dev, "another active lot", true, true);
         OutdoorDelta::GraceRooms(left, nl, GetTickCount() + kLeftLotGraceMs);
         {
@@ -2844,7 +2908,7 @@ void Frame(IDirect3DDevice9* dev) {
         if (g_slots.empty()) return;
     } else {
         Inactive("");
-        ReleaseRetired(dev, "the new active lot is relit");
+        ReleaseRetiredIf(dev, [](const Retired& r) { return r.lot == g_tracker; }, "its lot is the active one again and relit");
         CompareWithGame(dev);
     }
     g_on.store(true);
@@ -4028,7 +4092,12 @@ void NoteMapsWritten(const void* room) {
     if (g_solvedNotes.size() < 512) g_solvedNotes.emplace_back(mgr, cls);
 }
 void NoteUnlock(const void* texture) {
-    if (!g_watch.load(std::memory_order_relaxed) || !texture) return;
+    if (!texture) return;
+    if (g_retiredAny.load(std::memory_order_relaxed)) { // (a retired copy's game map written: the copy is stale)
+        std::lock_guard<std::mutex> lk(g_retiredMx);
+        if (g_retiredGame.count(texture)) g_retiredStale.push_back(texture);
+    }
+    if (!g_watch.load(std::memory_order_relaxed)) return;
     for (int i = 0; i < kMaxWatch; i++)
         if (g_watchTex[i].load(std::memory_order_relaxed) == texture) g_watchDirty[i / 64].fetch_or(1ull << (i % 64), std::memory_order_relaxed);
 }
@@ -4193,8 +4262,8 @@ IDirect3DTexture9* ScaleOf(const void* texture) {
     if (g_on.load(std::memory_order_relaxed))
         for (const auto& s : g_slots)
             if (s->copy == texture || (s->hi && s->hi == texture)) return s->relit && s->scaled ? s->scale : nullptr;
-    for (const auto& s : g_retired) // (the lot left at the last switch: its copies are still bound)
-        if (s->copy == texture || (s->hi && s->hi == texture)) return s->relit && s->scaled ? s->scale : nullptr;
+    for (const Retired& r : g_retired) // (the lots left: their copies are still bound)
+        if (r.s->copy == texture || (r.s->hi && r.s->hi == texture)) return r.s->relit && r.s->scaled ? r.s->scale : nullptr;
     return nullptr;
 }
 bool IndoorRoomsOf(const void* texture, IndoorRooms& out) {
@@ -4230,8 +4299,8 @@ const void* GameMapOf(const void* texture) {
     if (g_on.load(std::memory_order_relaxed))
         for (const auto& s : g_slots)
             if (s->copy == texture || (s->hi && s->hi == texture)) return s->game;
-    for (const auto& s : g_retired)
-        if (s->copy == texture || (s->hi && s->hi == texture)) return s->game;
+    for (const Retired& r : g_retired)
+        if (r.s->copy == texture || (r.s->hi && r.s->hi == texture)) return r.s->game;
     return texture;
 }
 
