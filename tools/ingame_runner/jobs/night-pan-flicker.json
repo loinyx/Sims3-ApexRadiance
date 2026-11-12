@@ -1,6 +1,6 @@
 {
   "id": "night-pan-flicker",
-  "description": "Cause run for lights and terrain that flash at night: a pan over the town's lots with two F8 recordings, then the camera circling the active lot while the floor goes up and down (Page Up, Page Down) in a third recording. Developer mode on, so the log keeps the active lot switches, dropped relit maps, terrain lamp changes and room solves. Needs a night save. Read the recordings and the log, not the frame times. Then the camera circles the gym and its floors change in a fourth recording, and pans over the lots around it.",
+  "description": "Cause run for lights and terrain that flash at night: a pan over the town's lots with two F8 recordings, then the camera circling the active lot while the floor goes up and down (Page Up, Page Down) in a third recording. Developer mode on, so the log keeps the active lot switches, dropped relit maps, terrain lamp changes and room solves. Needs a night save; the game stays paused so the clock stays at the save's night hour (the save loads at 21:14). Read the recordings and the log, not the frame times. Then the camera circles the gym and its floors change in a fourth recording, and pans over the lots around it.",
   "save": "Claude teste",
   "toml": {
     "ui": {
@@ -18,7 +18,7 @@
   "steps": [
     {
       "do": "speed",
-      "speed": "normal"
+      "speed": "pause"
     },
     {
       "do": "lots"
