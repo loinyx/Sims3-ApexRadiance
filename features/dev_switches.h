@@ -124,6 +124,19 @@ inline bool RestartSettle() { return kCompiled && restartSettle.load(std::memory
 inline std::atomic<bool> monoCoresBottom{false};
 inline std::atomic<bool> bigBlockReuse{false};
 inline std::atomic<bool> streamArena{false};
+// With stream_arena (stream_arena.h), each off unless set:
+//   stream_arena_grow      small streams that grow get 4x (2x from 4 KB, at least 64 bytes, 4 KB for the text encoder)
+//                          instead of 1.5x; an arena block grows into the free slices behind it instead of being copied
+//   stream_arena_scratch   the game's RefPack compressor's two work tables (only calls Faster cache compression passes on)
+//   stream_arena_package   the package writer's record buffer and packed buffer
+//   stream_arena_assemble  the block assembler's scratch buffer
+//   stream_arena_verify    0; 1 = freed blocks poisoned and checked when reused; 2 = also handed out with a pattern and
+//                          the bytes never written counted at the free (2 changes what an unwritten byte reads)
+inline std::atomic<bool> streamArenaGrow{false};
+inline std::atomic<bool> streamArenaScratch{false};
+inline std::atomic<bool> streamArenaPackage{false};
+inline std::atomic<bool> streamArenaAssemble{false};
+inline std::atomic<int> streamArenaVerify{0};
 inline bool MonoCoresBottom() { return kCompiled && monoCoresBottom.load(std::memory_order_relaxed); }
 inline bool BigBlockReuse() { return kCompiled && bigBlockReuse.load(std::memory_order_relaxed); }
 inline bool StreamArena() { return kCompiled && streamArena.load(std::memory_order_relaxed); }

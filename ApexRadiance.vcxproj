@@ -285,6 +285,7 @@
     <ClInclude Include="features\game_alloc_categories.h" />
     <ClInclude Include="features\allocator_tuning.h" />
     <ClInclude Include="features\stream_arena.h" />
+    <ClInclude Include="features\stream_arena_sites.h" />
     <ClInclude Include="features\foliage_vertex_lamps.h" />
     <ClInclude Include="features\foliage_canopy.h" />
     <ClInclude Include="features\frame_profiler.h" />

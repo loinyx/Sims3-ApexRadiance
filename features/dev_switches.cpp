@@ -3,6 +3,7 @@
 #include "apex_config.h"
 #include "apex_log.h"
 #include <toml++/toml.hpp>
+#include <algorithm>
 #include <format>
 
 namespace DevSwitches {
@@ -27,8 +28,15 @@ void Load() {
     monoCoresBottom.store(offUnlessSet("mono_cores_bottom"));
     bigBlockReuse.store(offUnlessSet("big_block_reuse"));
     streamArena.store(offUnlessSet("stream_arena"));
-    LOG_INFO(std::format("[DevBuild] Address-space switches: mono_cores_bottom {}, big_block_reuse {}, stream_arena {}", monoCoresBottom.load() ? "on" : "off",
-                         bigBlockReuse.load() ? "on" : "off", streamArena.load() ? "on" : "off"));
+    streamArenaGrow.store(offUnlessSet("stream_arena_grow"));
+    streamArenaScratch.store(offUnlessSet("stream_arena_scratch"));
+    streamArenaPackage.store(offUnlessSet("stream_arena_package"));
+    streamArenaAssemble.store(offUnlessSet("stream_arena_assemble"));
+    streamArenaVerify.store(std::clamp(t ? (*t)["stream_arena_verify"].value_or(0) : 0, 0, 2));
+    LOG_INFO(std::format("[DevBuild] Address-space switches: mono_cores_bottom {}, big_block_reuse {}, stream_arena {} (grow {}, scratch {}, package {}, assemble {}, verify {})",
+                         monoCoresBottom.load() ? "on" : "off", bigBlockReuse.load() ? "on" : "off", streamArena.load() ? "on" : "off",
+                         streamArenaGrow.load() ? "on" : "off", streamArenaScratch.load() ? "on" : "off", streamArenaPackage.load() ? "on" : "off",
+                         streamArenaAssemble.load() ? "on" : "off", streamArenaVerify.load()));
     measurements.store(get("measurements"));
     drawReadsNoWait.store(get("draw_reads_nowait"));
     occlusionRelight.store(get("occlusion_relight"));

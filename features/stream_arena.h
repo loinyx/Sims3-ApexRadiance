@@ -1,5 +1,6 @@
 #pragma once
-// Stream arena (dev switch stream_arena; not shipped). Taken over from sims3-modernization's [StreamBuf] (#364), pool part only.
+// Stream arena (dev switch stream_arena; not shipped). Taken over from sims3-modernization's [StreamBuf] (#364). The
+// optional parts (stream_arena_grow / _scratch / _package / _assemble / _verify) are listed in dev_switches.h.
 //
 // EA::IO::MemoryStream never grows in place: every size change is a new buffer, a copy and a free, and the async resource
 // loader sizes one stream per streamed record (1024x1024 textures: the 704 KB and 1408 KB classes). Each buffer of 128 KB

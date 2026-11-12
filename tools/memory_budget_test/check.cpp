@@ -121,26 +121,65 @@ int main() {
         assert(odd && !FastMemory::Keep(odd) && VirtualFree(odd,0,MEM_RELEASE)); // over 16 MB: released as before
         FastMemory::g_allocSlot=0;
     }
-    {   // stream_arena: best fit, zero-filled reuse, foreign pointers not taken, idle decommit, retire
-        auto* base=static_cast<uint8_t*>(VirtualAlloc(nullptr,StreamArena::kSlices*StreamArena::kSlice,MEM_RESERVE,PAGE_READWRITE));
+    {   // stream_arena: best fit, zero-filled reuse, foreign pointers not taken, growth in place, Verify, idle decommit, retire
+        using namespace StreamArena;
+        auto* base=static_cast<uint8_t*>(VirtualAlloc(nullptr,kSlices*kSlice,MEM_RESERVE,PAGE_READWRITE));
         assert(base);
-        StreamArena::g_base=base;StreamArena::g_armed=true;
-        auto* a=static_cast<uint8_t*>(StreamArena::Take(700*1024));
-        auto* b=static_cast<uint8_t*>(StreamArena::Take(1400*1024));
-        assert(a==base && b==base+11*StreamArena::kSlice && StreamArena::g_live==2);
+        g_base=base;g_armed=true;g_qpcMs=1.0;
+        auto* a=static_cast<uint8_t*>(Take(700*1024,kStream));
+        auto* b=static_cast<uint8_t*>(Take(1400*1024,kStream));
+        assert(a==base && b==base+11*kSlice && g_live==2);
         std::memset(a,0xAB,700*1024);
-        StreamArena::Put(a);
-        auto* c=static_cast<uint8_t*>(StreamArena::Take(300*1024)); // best fit: the 11-slice hole
-        assert(c==base && c[0]==0 && c[300*1024-1]==0);
-        StreamArena::Put(c);StreamArena::Put(c);
-        assert(StreamArena::c_doubleFree==1 && StreamArena::g_live==1);
-        assert(StreamArena::Owned(b) && !StreamArena::Owned(base-1) && !StreamArena::Owned(base+StreamArena::kSlices*StreamArena::kSlice));
-        assert(StreamArena::Decommit(0)==11*64); // c's slices, not b's
-        StreamArena::Retire();
-        assert(!StreamArena::Take(200*1024) && !StreamArena::ReleaseIfRetired()); // b still in use
-        StreamArena::Put(b);
-        assert(StreamArena::ReleaseIfRetired() && !StreamArena::g_base && !StreamArena::Owned(b));
-        assert(VirtualQuery(base,&blockInfo,sizeof blockInfo) && blockInfo.State==MEM_FREE);
+        Put(a);
+        auto* c=static_cast<uint8_t*>(Take(300*1024,kPackage)); // best fit: the 11-slice hole
+        assert(c==base && c[0]==0 && c[300*1024-1]==0 && c_served[kPackage]==1);
+        Put(c);Put(c);
+        assert(c_doubleFree==1 && g_live==1);
+        assert(Owned(b) && !Owned(base-1) && !Owned(base+kSlices*kSlice));
+        // a stream whose SharedPointer (one reference, owns its data) holds b: Realloc to 2 MB grows b where it is
+        alignas(4) uint8_t sp[0x14]{},stream[0x28]{};
+        void* const alloc=reinterpret_cast<void*>(0x1234);
+        *reinterpret_cast<void**>(sp+4)=alloc;*reinterpret_cast<uint8_t**>(sp+8)=b;*reinterpret_cast<int32_t*>(sp+0xC)=1;sp[0x10]=1;
+        *reinterpret_cast<uint8_t**>(stream+4)=sp;*reinterpret_cast<uint32_t*>(stream+0x14)=1400*1024;
+        std::memset(b,0xCD,1400*1024);
+        assert(GrowInPlace(stream,2*MiB,alloc)==b && g_head[11]==32 && g_keep[11]==1 && g_live==1);
+        assert(b[1400*1024-1]==0xCD && b[1400*1024]==0 && b[2*MiB-1]==0);
+        assert(GrowCopy(b,b,1400*1024)==b && b[0]==0xCD);
+        assert(ClearKeep(b) && !ClearKeep(b)); // Realloc's free of the old SharedPointer: not a free
+        *reinterpret_cast<uint32_t*>(stream+0x14)=2*MiB;
+        *reinterpret_cast<int32_t*>(sp+0xC)=2;assert(!GrowInPlace(stream,3*MiB,alloc)); // shared: allocate and copy as before
+        // small streams: 4x under 4 KB, 2x above, at least 64 bytes (4 KB for the text encoder); first buffers and 128 KB+ as asked
+        g_grow=true;
+        *reinterpret_cast<uint32_t*>(stream+0x14)=12;
+        assert(GrowCap(stream,18,false)==64 && GrowCap(stream,18,true)==4096);
+        *reinterpret_cast<uint32_t*>(stream+0x14)=8192;
+        assert(GrowCap(stream,12288,false)==16384 && GrowCap(stream,200*1024,false)==200*1024);
+        *reinterpret_cast<uint32_t*>(stream+0x14)=100*1024;assert(GrowCap(stream,150*1024-1,false)==150*1024-1);
+        *reinterpret_cast<uint8_t**>(sp+8)=nullptr;assert(GrowCap(stream,18,false)==18);
+        g_grow=false;
+        assert(GrowCap(stream,18,false)==18);
+        // Verify 1: a write after the free is seen when the slices are reused; Verify 2: bytes never written are counted
+        g_verify=1;
+        auto* d=static_cast<uint8_t*>(Take(128*1024,kAssemble));
+        Put(d);d[5]=1;
+        auto* e=static_cast<uint8_t*>(Take(128*1024,kAssemble));
+        assert(e==d && c_uafw==1 && e[5]==0);
+        Put(e);
+        g_verify=2;
+        auto* f=static_cast<uint8_t*>(Take(130*1024,kScratch));
+        assert(f==base && f[0]==kPattern && f[130*1024-1]==kPattern);
+        std::memset(f,0,64*1024);
+        Put(f);
+        assert(c_uafw==1 && c_unwrittenBlocks==1 && c_unwrittenKB==66);
+        g_verify=0;
+        assert(Decommit(0)==11*64); // the free slices in front of b, not b's
+        assert(!g_poisoned[0] && !g_committed[0]);
+        Retire();
+        assert(!Take(200*1024,kStream) && !ReleaseIfRetired()); // b still in use
+        Put(b);
+        assert(ReleaseIfRetired() && !g_base && !Owned(b));
+        MEMORY_BASIC_INFORMATION arenaInfo{};
+        assert(VirtualQuery(base,&arenaInfo,sizeof arenaInfo) && arenaInfo.State==MEM_FREE);
     }
     FastMemory::g_on=false;FastMemory::g_workerAlive=false;FastMemory::g_freeSlot=0;
     Space s; s.AddFree(0x7f000000ull,0x82000000ull);
