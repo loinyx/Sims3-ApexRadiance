@@ -6,6 +6,11 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k316Improved[] = {
+    "Downloads: just the installer and one manual-install zip, with the RTX Remix bridge inside",
+    "RTX Remix bridge: no longer marked experimental",
+    nullptr};
+
 constexpr const char* k315Fixed[] = {
     "Apex Radiance Setup: Sims 3 Modernization installs on the EA app again",
     "Apex Radiance Setup: an EA app game moved to another folder is no longer taken for Steam",
@@ -582,6 +587,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"3.1.6", "2026-11-12", nullptr, k316Improved, nullptr},
     {"3.1.5", "2026-11-12", nullptr, nullptr, k315Fixed},
     {"3.1.4", "2026-11-12", nullptr, k314Improved, nullptr},
     {"3.1.3", "2026-11-12", nullptr, k313Improved, k313Fixed, "A smooth camera when zoomed out, and steadier lamp light at night"},

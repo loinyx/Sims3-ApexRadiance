@@ -86,6 +86,8 @@ const I18n::Pair kPairs[] = {
     {"Apex Radiance Setup: shows a newer Setup on its start page and updates itself", "Apex Radiance Setup: 新しい Setup があるとスタートページに表示し、自動で更新します"},
     {"Apex Radiance Setup: Sims 3 Modernization installs on the EA app again", "Apex Radiance Setup: EA app で Sims 3 Modernization を再びインストールできます"},
     {"Apex Radiance Setup: an EA app game moved to another folder is no longer taken for Steam", "Apex Radiance Setup: 別のフォルダーに移した EA app 版のゲームを Steam 版と誤認しなくなりました"},
+    {"Downloads: just the installer and one manual-install zip, with the RTX Remix bridge inside", "ダウンロード: インストーラーと、RTX Remix bridge 入りの手動インストール用 zip の 2 つだけになりました"},
+    {"RTX Remix bridge: no longer marked experimental", "RTX Remix bridge: 試験的の表示がなくなりました"},
     {"Display: a switch to turn off G-SYNC for the game", "ディスプレイ：ゲームの G-SYNC をオフにするスイッチ"},
     {"Night Lights: new option Light bounces between rooms, on by default", "ナイトライト：新しいオプション「部屋の間で光が反射」、初期設定でオン"},
     {"Settings: a new default look for lighting and effects, and your own values stay", "設定：ライトとエフェクトの新しい初期の見た目、自分で変えた値はそのままです"},
