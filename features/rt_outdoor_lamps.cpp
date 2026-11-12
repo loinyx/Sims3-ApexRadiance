@@ -77,7 +77,7 @@ constexpr int kSolveAsks = 3;            // a room 0 is sent to its solve for a 
 constexpr DWORD kSolveRetryMs = 60000;   // then this seldom: a run of refused sends left the story on the game's maps until the lot changed
 constexpr DWORD kDragQuietMs = 300;      // a GPU lamp that changed this recently is being dragged (or edited again and again)
 constexpr DWORD kLeftLotGraceMs = 20000; // the lot left at a switch keeps its room 0s' kept solves this long (a return reuses them)
-constexpr DWORD kActiveLotHoldMs = 1500; // (active_lot_hold) while the camera moves, another lot becomes the active one after this as the first lit at the high quality
+constexpr DWORD kActiveLotHoldMs = 3000; // (active_lot_hold) while the camera moves, another lot becomes the active one after this as the first lit at the high quality
 constexpr DWORD kHoldQuietMs = 1500;     // the rooms that take room 0's lamps are sent this long after a story's last move
                                          // (a Build mode drag moves in grid steps with pauses of up to about a second)
 constexpr DWORD kCheckEveryMs = 2000;    // the consistency check of the GPU lamps' stories
@@ -1915,13 +1915,13 @@ void Frame(IDirect3DDevice9* dev) {
     // quality for kActiveLotHoldMs, or the camera has been still for 300 ms: a pan across lot borders switched back and forth
     // (12 switches in 22 s), each dropping every relit map and sending the lots next to it to gather at a lamp edit's priority.
     // Its maps keep relighting meanwhile (nothing below needs the high quality; OutdoorDelta::ActiveLot follows this lot while
-    // the switch is on, so its kept rooms stay). A lot the game no longer has, one with no relit room-0 map shown or none
-    // drawn, switches at once, and so does the waiting lot once it shows a map no copy stands in for (serve)
+    // the switch is on, so its kept rooms stay). A lot the game no longer has switches at once, and so does the waiting lot
+    // once it shows a map no copy stands in for (serve). An active lot still preparing its maps (occluders or kept solves) is
+    // held too: a switch made it so, and letting the next border switch again at once chained them (4 switches in 750 ms of
+    // one pan, each new lot waiting 3 to 5 s for its maps, so no lot was ever relit while the camera moved)
     const DWORD holdNow = std::max<DWORD>(GetTickCount(), 1);
     if (tracker == g_tracker || tracker != g_holdFor) g_holdFor = tracker, g_holdForAt = holdNow;
     const bool hold = tracker != g_tracker && g_tracker && DevSwitches::ActiveLotHold() && holdNow - g_holdForAt < kActiveLotHoldMs &&
-                      g_on.load(std::memory_order_relaxed) &&
-                      std::any_of(g_slots.begin(), g_slots.end(), [](const std::unique_ptr<Slot>& s) { return !s->mgr && s->copy && s->relit && s->game; }) &&
                       LevelLightShare::TrackerLive(g_tracker) && LotLightingMotion::SampleCameraMoving();
     if (hold && !g_holdAt) g_holdAt = holdNow;
     if (!hold && g_holdAt) {

@@ -142,7 +142,7 @@ inline bool BigBlockReuse() { return kCompiled && bigBlockReuse.load(std::memory
 inline bool StreamArena() { return kCompiled && streamArena.load(std::memory_order_relaxed); }
 //   active_lot_hold        (shipped; development builds read a missing key as on; OutdoorDelta::ActiveLot follows
 //                          RtOutdoorLamps::ActiveTracker while it is on) while the camera moves, Real-time outdoor lamps keep the active
-//                          lot until another has been the first lit at the high quality for 1.5 s or the camera has been still
+//                          lot until another has been the first lit at the high quality for 3 s or the camera has been still
 //                          for 300 ms: a pan across lot borders no longer drops every relit map and sends the lots next to it to
 //                          gather at a lamp edit's priority at each border (rt_outdoor_lamps.cpp kActiveLotHoldMs)
 inline std::atomic<bool> activeLotHold{false};

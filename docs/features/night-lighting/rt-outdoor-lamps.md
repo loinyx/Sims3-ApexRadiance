@@ -168,15 +168,14 @@ when the new lot's first room-0 solve ends after it: `Active lot tracker X: stor
 K quiet rooms still waiting` (with *Faster room lighting* on, which sees the solve ends).
 
 With the switch `active_lot_hold` (shipped, unmeasured in game, see [Limitations](#limitations)), while the camera moves the lot already active stays so until another lot has been the first
-lit at the high quality for 1.5 s (`kActiveLotHoldMs`), or until the camera has been still for 300 ms
+lit at the high quality for 3 s (`kActiveLotHoldMs`), or until the camera has been still for 300 ms
 (`LotLightingMotion::SampleCameraMoving`). Meanwhile its maps are relit as before (nothing of the relight reads the high
 quality), and Quick outdoor lamp edits keep the same lot (`OutdoorDelta::ActiveLot` follows `RtOutdoorLamps::ActiveTracker`
 while Real-time outdoor lamps run, and reads a change of it at once). The lots next to it keep its lamp posts. The lot
 waiting is not sent to its solve during the hold (an urgent solve on the lot played, which the switch makes again in full),
 and once it shows a class (0 to 2) with no copy left the hold ends and the switch runs on the next frame; a room 0 that
 shows no solve yet (class 4) has no map a copy stands in for, so the hold goes on. A lamp edit on the lot waiting takes the
-game's solve. A lot the game no longer has, one with no relit map shown, or one whose maps are not drawn (waiting for its
-occluders) switches at once. Each hold is logged with its length (`Active lot switch held N ms while the camera moved`),
+game's solve. A lot the game no longer has switches at once. An active lot still preparing its maps (waiting for its occluders or kept solves) is held as well: a pan that let the next border switch at once chained the switches (4 in 750 ms in a recording, each new lot waiting 3 to 5 s for its maps, the game's maps shown on every lot meanwhile). Each hold is logged with its length (`Active lot switch held N ms while the camera moved`),
 and a hold ended by the lot waiting with `Active lot hold ends: Lot X story S (the lot waiting) ...`.
 
 At a switch the lot left keeps its room 0s' kept parts for 20 s (`kLeftLotGraceMs`, `OutdoorDelta::GraceRooms`): the
