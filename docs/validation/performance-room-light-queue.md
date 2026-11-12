@@ -78,7 +78,7 @@ not identified.
   **Expected:** a neighbour's edit room no longer goes before the played lot's waiting rooms (before: quick pass for up
   to 49.6 s); the entry budget lasts while the played lot's rooms on or below the camera's story wait (up to 30 s;
   before, the lot took 18.8 s to look right after a pan back); no false lamp edit on the way back.
-- Ground first after an active-lot switch (not yet tested in game): on the *Claude teste* save, pan from a neighbour
+- Ground first after an active-lot switch (not yet tested in game): on a test save, pan from a neighbour
   into the played lot at least 5 times with a recording on. **Expected:** the first `[solve]` after
   `Active lot tracker X` is room 0 of story 0 of that lot; `story 0 room 0 solved N ms after the switch` with N under
   about 600 (before, the camera story ran first: story 3 at 3328, 594, 969 and 5406 ms); `Story 0 class 2 floor map` /
