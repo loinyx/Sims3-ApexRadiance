@@ -894,7 +894,8 @@ void PublishNeighbours(uint64_t active, const std::vector<std::pair<uint64_t, ui
     }
 }
 struct Job;
-std::vector<std::shared_ptr<Job>> g_jobs; // render thread: the stories whose maps are being prepared (a worker thread each, one at a time)
+std::vector<std::shared_ptr<Job>> g_jobs; // render thread: the stories whose maps are being prepared (a worker thread each, up to kPrepareJobs at once)
+constexpr long kPrepareJobs = 3;
 void DropAll(IDirect3DDevice9* dev, const char* why, bool requeue = true) {
     PublishNeighbours(0, {}, requeue); // (their maps are the game's again: their gathers take the posts back)
     if (requeue) OutdoorDelta::SolveTouched(nullptr); // (and the rooms with physical lamp edits taken since their solve go to one)
@@ -2207,10 +2208,12 @@ void Frame(IDirect3DDevice9* dev) {
             jit = g_jobs.end();
         }
         if (jit == g_jobs.end()) {
-            const bool running = std::any_of(g_jobs.begin(), g_jobs.end(), [](const std::shared_ptr<Job>& j) { return j->state.load() == 1; });
+            // up to kPrepareJobs stories at once: a lot whose maps the game made anew (its detail rising as the camera stops) waited
+            // story after story with the game's own maps shown (6 stories, about 210 ms: the whole lot flashed)
+            const auto running = std::count_if(g_jobs.begin(), g_jobs.end(), [](const std::shared_ptr<Job>& j) { return j->state.load() == 1; });
             const auto back = g_exportBackoff.find(room); // (14/10: a failed export waits before the next one)
             const bool waitExport = back != g_exportBackoff.end() && static_cast<int32_t>(GetTickCount() - back->second.at) < 0;
-            if (!running && !waitExport) {
+            if (running < kPrepareJobs && !waitExport) {
                 auto j = std::make_shared<Job>();
                 j->room = room, j->story = S, j->cls = cls, j->ver = ver, j->rn = rn, j->space = space, j->lot = act ? 0 : 1;
                 if (act) j->bake = g_bakeLast[S], j->bakeKeys = g_bakeKeysLast[S];
