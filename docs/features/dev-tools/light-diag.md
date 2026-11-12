@@ -38,7 +38,7 @@ why an enclosed plaza is dark (a room with 0 lights), and the cone of a spotligh
 | Shortcut (`[ui] diagnostics_key`; preset `B`, `5` or `F8`) | In game | Same request, edge-triggered through `Hotkeys::Take(Action::Diagnostics)` |
 | Include a screenshot (`[ui] capture_screenshot`, default true) | Report a problem | Adds `Screenshot.png` to the folder |
 | Save light diagnostics | Developer > Lighting > Collect lighting evidence | Same request; shows the shortcut beside it |
-| Record story light samples for the diagnostics | Same card | Arms Level Light Share sample recording (`LevelLightShare::SetDiagArmed`) |
+| Record story light samples for the diagnostics | Same card | Arms Level Light Share sample recording (`LevelLightShare::SetDiagArmed`). Not saved: it turns the lamp visibility memos off, so it starts off each session |
 | Diagnostics status | Developer > Lighting | `Ready`, `No world loaded`, or `Saved: N lights, M lot stories, R rooms` |
 
 ## Compatibility and interactions

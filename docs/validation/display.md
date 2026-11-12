@@ -60,3 +60,11 @@ EA app 1.69.47 (`TS3.exe`), 2026-11-11, commit `8f762fba` (resolution request fo
 - A resolution chosen live in the main menu, Live mode, CAS and during a loading screen.
 - A size the game does not list: one warning, the picture stays full (scaled).
 - Show FPS and the Custom slider do not reset the device (no "Display change" line in the log).
+- Turn off G-SYNC (2026-11-12: built, not tested in game). On an NVIDIA machine the switch is enabled once the page
+  opens; turning it on logs `[Screen] G-SYNC off in the NVIDIA profile of TS3W.exe` (and `NvRemixBridge.exe` with the
+  bridge). NVIDIA Profile Inspector shows setting `0x10A879CF` (G-SYNC application mode) at Force off in the game's
+  profile; NVIDIA Control Panel > Manage 3D settings > Program Settings shows the game's G-SYNC / Monitor Technology
+  entry changed (which entry it maps to is unverified). After a game restart the monitor's on-screen display shows a
+  fixed refresh rate. Turning it off puts the old value back, removes the setting or removes the *Apex Radiance <exe>*
+  profile, and `[screen.gsync_restore]` empties. Without an NVIDIA driver the switch is disabled with its note and the
+  log has `no NVIDIA driver`.

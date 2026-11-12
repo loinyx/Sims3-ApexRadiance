@@ -2,9 +2,15 @@
 #include "d3d9_hooks.h"
 #include "memory_patch.h"
 #include "hook_guard.h"
+#include "hook_chain.h"
 #include "apex_log.h"
+#include "game_version.h"
+#include <intrin.h>
+#include <algorithm>
 #include <atomic>
 #include <format>
+#include <mutex>
+#include <tuple>
 #include <vector>
 
 namespace ExtraHooks {
@@ -46,6 +52,56 @@ std::atomic<SurfaceAccess> g_access{nullptr};
 std::atomic<TargetReport> g_targetReport{nullptr};
 std::atomic<bool> g_targetInstalled{false};
 std::atomic<bool> g_targetAttempted{false};
+#ifndef APEX_NO_DEV_TOOLS
+std::atomic<bool> g_countRtd{false};
+std::atomic<DWORD> g_rtdCalls{0};
+std::atomic<LONGLONG> g_rtdTicks{0};
+// Who makes the counted calls: calls and time per return address, the 4 costliest logged about every 10 s (while the Frame
+// Profiler counts, and always in numbered development builds)
+#ifdef APEX_DEVELOPMENT_BUILD_FLAVOR
+constexpr bool kRtdCallersAlways = true;
+#else
+constexpr bool kRtdCallersAlways = false;
+#endif
+struct RtdCaller {
+    uintptr_t ret;
+    DWORD calls;
+    LONGLONG ticks;
+};
+std::mutex g_rtdCallerLock;
+RtdCaller g_rtdCallers[16] = {}; // filled in order, cleared together (under g_rtdCallerLock, as the two below)
+DWORD g_rtdOtherCalls = 0;       // calls from a 17th caller on
+ULONGLONG g_rtdCallersSince = 0;
+
+void NoteRtdCaller(uintptr_t ret, LONGLONG ticks) {
+    std::lock_guard<std::mutex> lock(g_rtdCallerLock);
+    RtdCaller* slot = std::find_if(std::begin(g_rtdCallers), std::end(g_rtdCallers), [ret](const RtdCaller& c) { return c.ret == ret || !c.ret; });
+    if (slot == std::end(g_rtdCallers)) {
+        g_rtdOtherCalls++;
+    } else {
+        slot->ret = ret;
+        slot->calls++;
+        slot->ticks += ticks;
+    }
+    const ULONGLONG now = GetTickCount64();
+    if (!g_rtdCallersSince) g_rtdCallersSince = now;
+    if (now - g_rtdCallersSince < 10000) return;
+    std::sort(std::begin(g_rtdCallers), std::end(g_rtdCallers), [](const RtdCaller& a, const RtdCaller& b) { // used slots first (DXVK calls can time 0)
+        return std::tuple(a.ret != 0, a.ticks, a.calls) > std::tuple(b.ret != 0, b.ticks, b.calls);
+    });
+    LARGE_INTEGER f{};
+    QueryPerformanceFrequency(&f);
+    std::string line = std::format("[ExtraHooks] GetRenderTargetData callers in the last {:.0f} s:", static_cast<double>(now - g_rtdCallersSince) / 1000.0);
+    for (int i = 0; i < 4 && g_rtdCallers[i].ret; i++)
+        line += std::format("{} {} {} calls {:.1f} ms", i ? ";" : "", HookChain::AddressText(reinterpret_cast<const void*>(g_rtdCallers[i].ret)), g_rtdCallers[i].calls,
+                            f.QuadPart ? 1000.0 * static_cast<double>(g_rtdCallers[i].ticks) / static_cast<double>(f.QuadPart) : 0.0);
+    if (g_rtdOtherCalls) line += std::format("; {} calls from other callers", g_rtdOtherCalls);
+    std::fill(std::begin(g_rtdCallers), std::end(g_rtdCallers), RtdCaller{});
+    g_rtdOtherCalls = 0;
+    g_rtdCallersSince = now;
+    LOG_INFO(line);
+}
+#endif
 
 inline void BeforeAccess(IDirect3DDevice9* dev, IDirect3DSurface9* a, IDirect3DSurface9* b) {
     if (auto access = g_access.load()) HookGuard::Try("High-precision scene before a back-buffer copy", [&] { access(dev, a, b); });
@@ -53,6 +109,25 @@ inline void BeforeAccess(IDirect3DDevice9* dev, IDirect3DSurface9* a, IDirect3DS
 
 HRESULT __stdcall HookedGetRenderTargetData(IDirect3DDevice9* dev, IDirect3DSurface9* src, IDirect3DSurface9* dst) {
     BeforeAccess(dev, src, dst);
+#ifndef APEX_NO_DEV_TOOLS
+    // The call alone: DXVK only marks the read-back (the GPU wait lands at the game's later LockRect); the RTX Remix
+    // bridge blocks here; native drivers unverified.
+    if (kRtdCallersAlways || g_countRtd.load(std::memory_order_relaxed)) {
+        LARGE_INTEGER a, b;
+        QueryPerformanceCounter(&a);
+        const HRESULT hr = oGetRenderTargetData(dev, src, dst);
+        QueryPerformanceCounter(&b);
+        g_rtdCalls.fetch_add(1, std::memory_order_relaxed);
+        g_rtdTicks.fetch_add(b.QuadPart - a.QuadPart, std::memory_order_relaxed);
+        uintptr_t ret = reinterpret_cast<uintptr_t>(_ReturnAddress());
+        // Steam 1.67.2: the game's render-target copy 0x00610660 has nine callers; tally its own return address instead, 0x98
+        // bytes above ours at this call (3 arguments, 3 saved registers, 0x7C of locals)
+        if (g_gameVersion == GameVersion::Steam && ret == reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr)) + 0x210762)
+            ret = *reinterpret_cast<const uintptr_t*>(static_cast<const char*>(_AddressOfReturnAddress()) + 0x98);
+        HookGuard::Try("GetRenderTargetData callers", [&] { NoteRtdCaller(ret, b.QuadPart - a.QuadPart); });
+        return hr;
+    }
+#endif
     return oGetRenderTargetData(dev, src, dst);
 }
 
@@ -259,6 +334,15 @@ void SetTargetSubstitution(SurfaceAccess access, TargetReport report) {
     g_access.store(access);
     g_targetReport.store(report);
 }
+
+#ifndef APEX_NO_DEV_TOOLS
+void CountGetRenderTargetData(bool on) { g_countRtd.store(on, std::memory_order_relaxed); }
+bool TakeGetRenderTargetData(DWORD& calls, LONGLONG& qpcTicks) {
+    calls = g_rtdCalls.exchange(0, std::memory_order_relaxed);
+    qpcTicks = g_rtdTicks.exchange(0, std::memory_order_relaxed);
+    return g_targetInstalled.load(std::memory_order_relaxed);
+}
+#endif
 
 bool EnsureTraceHooks(IDirect3DDevice9* dev) {
     if (!EnsureInstalled(dev)) return false; // (Clear, StretchRect and the UP draws)

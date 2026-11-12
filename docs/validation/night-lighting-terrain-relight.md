@@ -19,6 +19,7 @@ It must:
 | [`tools/terrain_lighting_test`](../../tools/terrain_lighting_test/README.md) (`check.cpp`) | Day/night endpoint debounce, reversal cancellation, world-load merging, disabled scheduling, 200,000 deterministic stress frames; Build preview zero phase delay, preserved Live delay, captured rapid-switch timeline replay, at most four nearest priority chunks with a known eye; all edit-priority combinations of `DeferDayEdit` | `run.ps1 -Captures ... -OutDir ...` | Native D3D9 GPU (whole suite) |
 | `queue_check_fixture.cpp` | Extracted `Attach`, `QueueSweep`, `OnPresent`, completion and refusal helpers and limits against fake native memory and timing: 3,000 randomized phase handoffs, an old completed bake awaiting consumption, nearest-first order, preserved batch ownership, non-mutating sweep refusals, native rebuild and render gates, rolling caps, terrain-owner changes | `run_queue_checks.ps1 -OutDir ...` | None |
 | `edit_dispatch_fixture.cpp` | The real `DecideEdit` guards up to the snapshot compare: both former early exits, the priority route, snapshot wait, automatic serialization, load/phase merge; optional `-Baseline` reproduces the old behaviour | `run_dispatch_checks.ps1` | None |
+| `lod_hold_fixture.cpp` | The real `ReadDetailSwitches`, `DetailOf`, `LodHolds`, `InBake`, `DiffBake` and `BakeTest` (fake lot renderer map and light record): the detail set (a lot leaving it recorded for 2 s, its detail time, unknown past 16 detailed lots or without a map); a demotion on a lot that is not detailed held with no snapshot difference, the same flip on a detailed lot (a sale) leaving the bake, the promotion after a hold with no difference, every release (day, edit mode, lit bit, light, place, lot, 30 s of detail) a listed switch-off, no hold for lamps never in the bake, world lamps or an unknown detail set, a held lamp gone with its lot a removal only while the lot is among the settled lots, the hold asked only for alive, lit, disabled outdoor lot lamps; the real `RefreshLotRects` and `LotGroundY` on a fake lot table: a lot that left the light tree keeps its last base with no read, a lot never read reads the table once a frame. `TrackLotLampEdits` (the kept and enabled-again routes, the arrival on a promotion) is not covered | `run_lod_hold_checks.ps1` | MSVC x86 |
 | `stamped_fixture.cpp` | The real `AllStamped`: the excluded light matched by its id at any distance, other additions within 1.5 m, a lamp 3.64 m away and unpaired removals sent to the relight, nothing excluded | `run_stamped_checks.ps1` | None |
 | `resource_paths_fixture.cpp` | Resource restoration around the extracted draw paths | `run_resource_checks.ps1` | Native D3D9 GPU |
 | `tools/terrain_stamp_test` (`check.cpp`) | The game's bake pixel shader against the CPU law and its recognition (size, FNV-1a); `StampPS` against the game's shader on flat ground, 8 lamps in one pass against 8 additive 8-bit passes, chunk borders, the base kept, its GPU time; `BakeConePS` without cones against the game's shader and with spot and shaded-lamp cones against the CPU law times the cone factor; `StampPS` with cones against `BakeConePS` (T0 to T9) | `run.ps1 -Precomp <Shaders_Win32.precomp>` | MSVC x86, Direct3D 9 device, the game's precomp (read only) |
@@ -31,6 +32,7 @@ FPS or absence of visible flicker.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-12 | not committed (3.1.2 working tree) | LOD hold fixture (`run_lod_hold_checks.ps1`) | 42 passed, 0 failed; with the `LotGroundY` fallback removed, its check fails | None |
 | 2026-10-29 | `7eca05b` | Edit dispatch fixture, with a `RebuildActive` stub and its executable renamed (Windows asked to elevate a program named `dispatch_checks.exe`, which is why it was cancelled before) | 194 passed, 0 failed | None |
 | 2026-10-29 | `7eca05b` | Terrain queue fixture (`run_queue_checks.ps1`) | Does not compile: the paced full rebuild (`g_rb`, `StepRebuild`, `kSlowMs`) is not in its extracted code; with it added, 386 of 11,963 assertions fail on the release rules of chunks changed since. Not updated in this release | None |
 | 2026-10-29 | `8d13e95` (a dragged lamp's ground light on the GPU) | Developer recordings of lot lamp drags, before and after | Local terrain relights during the drags: 127 (2,155 ms of CPU in 73 s) before, 7 (94 ms in 101 s) after | In game, backend not recorded |
@@ -86,6 +88,36 @@ Lamp changes (night and Build-mode day preview; stationary and moving camera):
 
 ## Open checks
 
+- The LOD hold, at night on a save with lit lamp posts on neighbouring lots: pan across lot borders so lots swap
+  Detailed View. **Expected:** no `Lot lamp change: ... (manual-driven)` line and no `switched off (user-driven)`
+  decision for a lot leaving Detailed View; `Lamp changes that do not rebuild the terrain` lists `kept in the bake
+  (Detailed View demotion)` and, on the promotion, `enabled again after a Detailed View demotion`; the developer status
+  counts the lamps kept; no local terrain relight on a demotion; on a promotion at most one `Entry relight queued:
+  visible lot <id>` for that lot (also expected without the hold when demoted lots are not drawn). Trees, water and
+  roofs beside a held lamp keep its light, never brighter than before the demotion. A timeline of the pan, before and
+  after, gives the time saved per swap.
+- The ground of a held lot, with a lamp less than 40 cm high on it. Capture the ground before the demotion; during the
+  hold, re-render the lot's chunk (a neighbour lot's entry relight, or *Refresh lighting*) and capture again; capture a
+  third time after the promotion. **Expected:** the three captures match: the low lamp keeps its lifted pool, not a dot.
+  The same after a pan with several swaps, the promoted lot's ground compared with its capture before the demotion
+  (a chunk re-rendered between the demotion and the read that starts the hold leaves the lamp out until the
+  promotion's entry relight; the bake's lot and story gate at 0x00C294D9 is unverified).
+- The objects beside a held lamp on its promotion. **Expected:** roofs, water and trees beside its pool do not go dark
+  and fade in again: held rows keep the enabled fade and switch to the live `+0x20` fade at the promotion read. If the
+  game fades `+0x20` down while a lamp is disabled, keep the larger of the two fades until the live one catches up, or
+  keep held lamps out of the per-pixel rows.
+- Lamps registered again on a promotion (new light objects at a held lamp's place were seen for one lot, cause
+  unconfirmed). **Expected:** no lamp counted twice: one pool on the ground, one per-pixel row. If both are listed, end
+  a hold when a lamp in the bake that is not held appears on the same lot, of the same type, within 5 cm.
+- The per-pixel cost of held lamps: `RoofStatus` *lamps N*, the `SelectLamps` memo misses and the Frame Profiler's
+  render-thread time, before and after a night pan across 10 or more lots. **Expected:** no material growth; otherwise
+  keep held lamps out of the per-pixel rows, as before the hold.
+- The same at dawn. **Expected:** the held count drops to 0 on the first day frame, before the daylight rebuild. Whether a
+  demoted lamp's lit bit clears at dawn (`lit 1->0` on a held lamp) is unverified; if it does, the day release can go.
+- Build mode entered with lamps held, and a demoted lot bulldozed in Edit Town. **Expected:** entering the edit mode ends
+  the holds with one local relight or a paced sweep; a bulldozed lot's light leaves the ground.
+- Unverified for held lamps: whether a lot out of Detailed View still draws its lamp posts (pools without posts), and the
+  bake's lot and story gate at 0x00C294D9 (light +0xD0).
 - A full terrain rebuild or a lot load. **Expected:** no object drawn just after it with wrong rig lamps. The cone rows
   (c5..c7) of a bake that does not run inside the chunk render call are given back only at the game's next other pixel
   shader; whether those bakes go through that call has not been checked.

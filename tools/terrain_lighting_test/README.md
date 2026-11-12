@@ -68,6 +68,21 @@ Coverage includes:
   failed enumerations, 512 world changes without false edit events and successful
   new-world selection. Optional `WorldReferenceSource` reproduces the old cache
   behavior from an unchanged `lot_light_bridge.cpp` snapshot.
+- LOD hold (`run_lod_hold_checks.ps1`): the extracted `ReadDetailSwitches`, `DetailOf`,
+  `LodHolds`, `InBake`, `DiffBake` and `BakeTest` (with a fake 32-bit lot renderer map,
+  light record and vtable). The detail set: a lot leaving it is a recorded demotion for
+  2 s, detail time kept or restarted, more than 16 detailed lots or no map unknown. A demotion (0x77 -> 0x35,
+  0xF7 -> 0xB5) on a lot that is not detailed stays in the bake with no snapshot
+  difference; the same flip on a detailed lot (a sale) leaves it; the promotion after
+  a hold makes no difference; day, edit mode, a lit bit, light, place or lot change
+  and 30 s of detail end a hold as a listed switch-off; lamps never enabled, world
+  lamps and unknown detail start none; a held lamp gone with its lot is a removal only
+  while the lot is among the settled lots; the bake's test asks the hold only for an
+  alive, lit, disabled outdoor lot lamp. The extracted `RefreshLotRects` and `LotGroundY`
+  on a fake lot table: a lot that left the light tree keeps its last base (a held lamp
+  is lifted from its own ground) with no read; a lot never read reads it once a frame.
+  The read step is restated in the fixture; the runner fails if its production lines
+  change.
 
 Per-pixel lamp law of outdoor objects, fences and windows (12/10, realistic reach):
 

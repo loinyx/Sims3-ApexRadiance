@@ -2555,6 +2555,47 @@ template <class LampsAsKept> std::vector<SwitchResult> ReplaySession(const Sessi
     close();
     return out;
 }
+void BudgetChecks() {
+    constexpr size_t MB = size_t{1} << 20, kMax = 96 * MB, kBase = 16 * MB, kPinned = 160 * MB;
+    const auto victim = [](const std::vector<BudgetRec>& r) { return BudgetVictim(r.data(), static_cast<int>(r.size()), kMax, kBase, kPinned); };
+    // {bytes, used, baseOnly, pinned, graced, fresh}
+    {
+        std::vector<BudgetRec> r = {{90 * MB, 1, false, false, false, false}, {10 * MB, 5, true, false, false, false},
+                                    {7 * MB, 3, true, false, false, false}, {MB, 9, true, false, false, true}};
+        Check(victim(r) == 2, "budget: a base-only record over its own allowance drops the oldest base-only, never a full record");
+    }
+    {
+        std::vector<BudgetRec> r = {{96 * MB, 1, false, true, false, false}, {MB / 2, 2, true, false, false, false},
+                                    {MB * 2 / 5, 3, true, false, false, true}};
+        Check(victim(r) == -1, "budget: base-only records under their allowance stay when pinned records fill maxBytes (no ring)");
+    }
+    {
+        std::vector<BudgetRec> r = {{60 * MB, 1, false, true, false, false}, {20 * MB, 2, false, false, true, false},
+                                    {10 * MB, 4, false, false, false, false}, {10 * MB, 3, false, false, false, false},
+                                    {5 * MB, 0, false, false, false, true}, {MB, 0, true, false, false, false}};
+        Check(victim(r) == 3, "budget: full over maxBytes drops the oldest record neither pinned, graced nor just kept");
+    }
+    {
+        std::vector<BudgetRec> r = {{100 * MB, 1, false, true, false, false}, {50 * MB, 0, false, false, true, false},
+                                    {5 * MB, 2, false, false, false, true}};
+        Check(victim(r) == -1, "budget: graced records stay while they and the pinned ones are within the pinned ceiling");
+    }
+    {
+        std::vector<BudgetRec> r = {{120 * MB, 0, false, true, false, false}, {30 * MB, 5, false, false, true, false},
+                                    {20 * MB, 2, false, false, true, false}};
+        Check(victim(r) == 2, "budget: past the pinned ceiling the oldest graced record goes, never a pinned one");
+        r.resize(1);
+        Check(victim(r) == -1, "budget: pinned records alone past the ceiling drop nothing");
+    }
+    {
+        std::vector<BudgetRec> r = {{170 * MB, 0, false, true, true, false}};
+        Check(victim(r) == -1, "budget: a room both pinned and graced is never dropped");
+    }
+    {
+        std::vector<BudgetRec> r = {{10 * MB, 0xFFFFFFF0u, true, false, false, false}, {10 * MB, 0x10u, true, false, false, false}};
+        Check(victim(r) == 0, "budget: the used tick's wrap keeps the oldest first");
+    }
+}
 void PhaseCacheChecks() {
     // the clock: one departure per end left, a quick switch only on arriving at the other end within kQuickMs
     {
@@ -3142,6 +3183,7 @@ int main() {
     PhysPickChecks();
     ReflectionChecks();
     PhaseCacheChecks();
+    BudgetChecks();
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

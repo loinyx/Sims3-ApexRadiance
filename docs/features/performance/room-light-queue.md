@@ -132,7 +132,8 @@ one change for every floor, shown once it is final, is the intended result.
 
 - A lamp edit's room is drained on any lot, not only the priority lot (the finished-lot check still applies), and while
   it is the current room the lot being played keeps the game's budget, at most 6 ms, while the camera moves
-  ([lot-lighting-motion.md](lot-lighting-motion.md)).
+  ([lot-lighting-motion.md](lot-lighting-motion.md)). A room first in the queue by a quiet mark is not an edit's room
+  (`LevelLightShare::EditUrgent`).
 - An urgent room stays urgent while it still waits for or is in its solve (states 1 to 3), at most 8 s after its latest
   mark (`RoomAmbientPolicy::UrgencyKept`); the "settled" log line ends with `ended: complete` or `ended: urgency expired`.
 - A move's safety net comes 200 ms after it (was 300 ms), the drag's quiet time.
@@ -151,6 +152,25 @@ one change for every floor, shown once it is final, is the intended result.
 - Furniture of an edit (*Lamp edits all at once*): for 400 ms from the edit's start, while it is pending, a part waits as
   if its room were marked (the game updates the rig at once, the room is marked about 140 ms later), and parts lit only by
   their vertex lights (no rig chain in their pixel shader) are held too, so an object and its floor change together.
+
+### Ground first after an active-lot switch
+
+When the active lot changes, room 0 of the new lot's ground story (story 0) is solved before any other room, for at
+most 1 s (`RoomLightQueue::GroundFirst`, `RoomAmbientPolicy::GroundFirstHolds`). That room's map is the one the lot's
+grass reads, and *Real-time outdoor lamps* builds the lamp post's bright circle from it, so the circle cannot appear
+before it is solved.
+
+- **Why:** the switch's occluder send puts the ground room back to gathering (state 1, game priority 0), and a room the
+  scheduler picks keeps it until its solve ends. In a recording, one frame after the switch the scheduler picked the
+  camera story's room 0, which needed a full solve of 3328 ms; the ground then solved in 1 ms from its kept parts, and
+  the circle showed 3.5 s after the switch, 3.3 s of it spent waiting.
+- **How:** while the ground room is in state 1 or 2, every other room of every lot gets priority 0, so the scheduler
+  picks nothing else. The hold lasts while the ground waits for a gather or a pick (states 1-2, including its next class
+  after a quick class-0 solve, `0x0069EA70`), at most 1 s from the switch; it ends earlier when the ground is picked,
+  solved or unreadable. A pick made before the deadline keeps the scheduler on the ground past 1 s until that solve ends.
+  The ground room itself keeps the game's priority. With *Faster room lighting* off there is no hold.
+- **Effect on light:** none on the final result: the same solves run in a different order. A lamp edit made in that
+  second waits too; the camera story's room 0 shows its class-0 light meanwhile, as before.
 
 ### Quick update for lamp switches
 
@@ -208,6 +228,10 @@ and feeds this queue.
   budget; the first step of a frame always runs, so the queue still advances. Lamp edits, held edits and urgent rooms
   keep the earlier pacing. The budget in the first seconds after a load is 6 ms (was 12 ms). Each room's light is still
   the game's complete solve; only the frame in which a room finishes can move.
+- **Slow steps.** A drain step of 20 ms or more is logged, at most 3 lines a second: `Drain step of N ms (budget B ms)`
+  with the room's lot, story, id and class and the process's page faults across the step (numbered development builds; `unknown` elsewhere). A timeline showed single
+  steps of 97 to 100 ms under the 1 ms budget while the camera moved, in frames with thousands of page faults. Measuring
+  only: nothing is solved differently.
 - **Lot entry.** The settle window (`LevelLightShare::SettlingAfterLoad`: 15 s after the world goes live) also opens for
   10 s when another lot becomes the high-quality lot, the camera entering it or coming back
   (`[LevelLightShare] Lot <tracker> entered`): the extra solves take the settle budget instead of 4 ms (1 ms while the
@@ -302,6 +326,12 @@ In [`features/level_light_share.cpp`](../../../features/level_light_share.cpp):
 - The per-point hooks return at once for a light the game is about to drop (colour sum under room+0x63C, the game's own
   sums in the same order).
 - Night Lighting does not relight every lot 3 s after a world loads at night (the game has just solved them).
+- The outdoor rooms of other lots gathered again for the active lot's lamp posts, and the room 0s of a lot whose
+  Instant maps are dropped, are urgent only after a lamp edit; a lot leaving Instant's lots next to the active one is
+  always first in the queue, as a quiet mark (no lamp edit) when nothing was edited: sent as an edit with none, a lot
+  streaming in or an active-lot switch opened an 8 s edit window of room solves
+  ([level-light-share.md](../night-lighting/level-light-share.md#lamp-posts-of-other-lots),
+  [rt-outdoor-lamps.md](../night-lighting/rt-outdoor-lamps.md)).
 - New Game's lot pictures: a lot the game lights only for its picture skips light sharing and Apex's sends, and its
   per-room state is cleared when the picture is taken ([level-light-share.md](../night-lighting/level-light-share.md), Fast lot
   pictures; `fastLotPictures`).
@@ -373,6 +403,11 @@ line every minute (with the `[RoomSolveCauses]` line) gives the picks held and l
   replaced by fixing the causes (one round per atrium, the quick pass looking like its refinement) and keeping the hold
   for atriums only. The edit hold of *Lamp edits all at once* is not this approach: it never holds the lamp's own story, only the other
   stories, which before showed one at a time.
+- Skipping the drain's first step while the camera moves (against the 100 ms steps): the lot pass runs the same step
+  under its own budget, and rooms never solved would wait longer.
+- Raising the floor priority for the ground room after an active-lot switch: right after the switch that room is in
+  state 1, where the game's priority is 0 and `FloorPriorityFactor` multiplies it, so it stays 0. Replaced by holding
+  the other rooms (*Ground first after an active-lot switch*).
 
 Details in [history](../../history/performance-room-light-queue.md).
 

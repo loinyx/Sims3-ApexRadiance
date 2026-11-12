@@ -29,6 +29,8 @@ an FPS gain, complete climate coverage or resolution of texture allocation stall
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-11 | `47d04a7e` (release 3.1.2 tree: fence groups keyed by their pieces, the fence grid once a frame, gaps and lot shades only when the walls change) | `tools/ground_shade_test` | 248 checks, 0 failures. No harness covers `NoteFenceGroup`'s keys or `FenceGridUpdate`'s order and wall hash | Offline CPU |
+| 2026-11-11 | A 3.1.2 development build before `f1493b29` | Frame Profiler run | A third of the render thread's samples in hitch frames were in the fence grid's gap build (`FenceGapsBuild`), rebuilt at almost every fence draw; frame times after the change in [frame profiler](frame-profiler.md#latest-results) | In game |
 | 2026-10-30 | uncommitted on `6db9dfb` (lamp shade on the GPU) | `tools/ground_shade_gpu_test` (`run.ps1`) | 117 checks, 0 failures. Lots: the bytes equal `ShadeJob::Result` but for 3 texels of 1/255 over the 13 scenes (1 on the soft 40 m lot, 2 on the soft stress lot); stamp weight within 4.5e-7 relative on the 40 m lots, 2e-4 on the stress lot (GPU square roots and divisions are not correctly rounded; the bytes are not affected); lowest byte and occlusion query right on every scene, 0 on the lot that shades nothing; masks bit for bit. Chunks: the whole chunk and 39 changed-box updates bit for bit at all 11 levels, against the whole chunk made again and `ChunkFull`, in L8 and in A8R8G8B8; the chunk from the GPU's own lot textures equal to `ChunkFull` of the CPU's shades; the readers' sampling equal to the CPU's L8 texture (0 difference). Timing: GPU 0.05 to 0.07 ms a 40 m lot, 0.24 to 0.28 ms the 88 m stress lot (CPU `ShadeJob` 2 to 5.8 ms and 31 to 44 ms), CPU setup 0.01 to 0.25 ms; a changed box 0.28 to 0.39 ms with the CPU's wait, the whole chunk 0.16 to 0.24 ms (CPU `ChunkFull` 13 ms). Shaders: `ShadePS` 2441 slots (190 ms to compile, without optimisation), `ChunkPS` 528 | Native D3D9, RTX 4070 Ti SUPER |
 | 2026-10-30 | uncommitted on `6db9dfb` | `tools/ground_shade_gpu_test` with the game's DXVK `d3d9.dll` | 117 checks, 0 failures; the same differences; GPU 0.05 to 0.07 ms a 40 m lot, 0.23 to 0.27 ms the stress lot; a changed box 0.41 ms (L8) and 0.75 ms (A8R8G8B8) with the wait | DXVK, RTX 4070 Ti SUPER |
 | 2026-10-30 | uncommitted on `6db9dfb` | `tools/ground_shade_test` (`run.ps1 -Reference HEAD -Reps 3`) after `LampBox`, `WallBox` and `CrownBox` moved out of `ShadeJob`; `run_shade_lamps_checks.ps1` with the GPU path's `ShadeLamps`; `run_stamped_checks.ps1`, `run_dispatch_checks.ps1`, `run_chunk_map_checks.ps1` | 254 checks, 0 failures (the lot build bit for bit with `HEAD`'s header, 2.0 to 3.1 ms); 20 shade lamp assertions (the GPU path keeps a moving lamp tested at its place now, the total as at rest), 7 stamped, 194 dispatch, 31 chunk map: 0 failures | MSVC x86 |
@@ -115,6 +117,10 @@ at ps_2_0 it had no c32 and failed since the lot shade's mask rows moved there.
 
 ## Open checks
 
+- 3.1.2, fence groups keyed by their pieces and the fence grid once a frame: chain-link fences, gates and a removed
+  piece keep the lot shade they had (the scenarios are in the
+  [fences validation](night-lighting-fences.md#open-checks)); a lot's shade is no longer built again every 250 ms while
+  the camera pans past fences (the developer timing log).
 - 2.18.3: right after a world loads, the ground shows the lamps without the walls' shade until each lot's shade is built
   (174 lots in about 50 s in the tested neighbourhood), then dims where walls block a lamp; more visible since the shade
   past a lot's edge is no longer lightened by the lots next door (player report).

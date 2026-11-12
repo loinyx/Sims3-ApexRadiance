@@ -8,7 +8,7 @@ This page documents how `TS3W.exe` streams lots around the camera: LOD scoring, 
 |---|---|
 | Game build | Steam 1.67.2 (`TS3W.exe`, image base 0x00400000) unless stated |
 | Used by | [Architecture: loaded-world gate](../architecture.md#12-loaded-world-gate-and-start-note) (`features/world_session.h`), [Depth Blur](../features/depth-blur.md), [Performance](../features/performance/README.md) (with the scene message router's map for [Faster Object Lookups](../features/performance/object-lookup-index.md)), [Terrain relight](../features/night-lighting/terrain-relight.md), [Frame Profiler](../features/frame-profiler.md) |
-| Evidence | Disassembly (`engine_map`), Ghidra `re/out/fn_00aea680.c`, combined-build patch headers, `features/world_session.h`; items marked *(inferred)* are static only |
+| Evidence | Disassembly (`engine_map`), Ghidra `re/out/fn_00aea680.c`, combined-build patch headers, `features/world_session.h`, the game's `GraphicsRules.sgr`; items marked *(inferred)* are static only |
 
 ## Overview
 
@@ -53,11 +53,11 @@ Sources:
 | +0x60 | Sea/water (0x00C0DD60) | `profiler_targets.tsv` |
 | +0x64 | Sky/lighting (0x00C15D80) | `profiler_targets.tsv` |
 | +0xDA | Forces the terrain "low camera" flag | `f_C6D570.asm` 0xC6D66F |
-| +0xDC | Live setting "Lot LOD dist.", float, default 70.0 | ctor 0xC672A4; registered at 0xC676E2 |
+| +0xDC | Live setting "Lot LOD dist.", float, 70.0 at construction | ctor 0xC672A4; registered at 0xC676E2 |
 | +0xE0 | Live setting "Active Lot Bias", float, default 8.0. Subtracted from the lot metric of lots already in detailed view (0xC6301D) | ctor 0xC672B4; 0xC67718 |
-| +0xE4 | Live setting "Max Active Lots", int, default 4, range 0..12 | ctor 0xC672F6; 0xC6763C |
+| +0xE4 | Live setting "Max Active Lots", int, 4 at construction, range 0..12; the player's option from load end ([below](#the-players-option-at-load-end)) | ctor 0xC672F6; 0xC6763C; 0xC60C53 |
 | +0xE8 | Live setting "Terrain Height Thresh", float, default 600.0. The camera eye y is compared with it (0xC6D650) | ctor 0xC67300; 0xC676AC |
-| +0xEC | Live setting "Camera speed threshold", float, 0.0 at construction, UI range 0..100. LSO writes 5.0 | ctor 0xC67308; 0xC67676 |
+| +0xEC | Live setting "Camera speed threshold", float, 0.0 at construction, UI range 0..100; the player's option from load end ([below](#the-players-option-at-load-end)). LSO writes 5.0 | ctor 0xC67308; 0xC67676; 0xC60C8D |
 | +0x1B4 | World mode: 0 tool, 1 world loaded, 2 edit in game, 3 save in game | Smooth Streaming note 1 |
 | +0x258 | "Skip lot streaming": skips the lot LOD scoring call (0xC6D694). LSO's map-view blocker sets it | LSO, `f_C6D570.asm` |
 | +0x310 | 10-sample list of camera motion (the game's "Camera speed") | GC Scheduler / Smooth Streaming comments |
@@ -73,6 +73,29 @@ The live settings are registered in the WorldManager constructor (0xC6763C..0xC6
 | 0x0118432C (int) | "Force LoD Min Priority" | 1, range 0..4 |
 
 "World Stats" (0x01079400) is also registered.
+
+#### The player's option at load end
+
+The constructor's Max Active Lots (4) and camera-speed threshold (0.0) are not the values a world runs with.
+0x00C60C00, thiscall(WorldManager), reads three values of the game's configuration (`[0x0114FAB0]`) by name:
+`MaxActiveLots` and `PlatformMaxActiveLots` through 0x0058ABA0 (int, 4 when missing) and `CameraSpeedThreshold` through
+0x0058ABF0 (float, 1.0 when missing). It writes `+0xE4` = min(MaxActiveLots, PlatformMaxActiveLots) and `+0xEC` =
+CameraSpeedThreshold. It has two callers:
+
+- 0x00C65030 (the call at 0x00C6548F), called at 0x00C6B05B at the end of the world load step 0x00C6AEB0 (the callback
+  the load function 0x00C6CF80 passes at 0x00C6D2FE), just before that step stores `+0x41` (world active). Before the
+  call it registers the WorldManager for the messages 0xFC6AA1FE and 0x0E167D37 *(inferred)*.
+- 0x00C643C0 (the call at 0x00C643DE), a message handler (vtable slot 0x01079370) that runs it on message 0xFC6AA1FE,
+  most likely an options change *(inferred)*.
+
+The game's `GraphicsRules.sgr` sets both values from one option, `MaxActiveLots`: its settings 1, 2, 3, 4, 6 and 8 give
+1, 2, 3, 4, 6 and 8 lots with thresholds 1.0, 2.0, 4.0, 8.0, 16.0 and 32.0 (settings 12 and 16 also give 8 and 32.0).
+The hardware pick is 4 at most (1 on the lowest class). `PlatformMaxActiveLots` is 4 on a 32-bit system and 8 on a
+64-bit one, so Max Active Lots is 8 at most.
+
+A module that captures `+0xE4` or `+0xEC` as soon as the WorldManager exists gets 4 and 0.0, not the player's values.
+Written back in a loaded world, a threshold of 0.0 makes LotLodScoring return early whenever the camera moves, so no lot
+is promoted until it stands still ([removed features](../removed-features.md#lot-streaming-parts)).
 
 #### Lot (`Sims3::World::Lot`)
 
@@ -269,6 +292,7 @@ LSO's install log lines, as seen on 28/09:
 | WorldManager+0x3A0, camera chain 0x11D1860+0x24+0x60, WorldManager ctor store 0xC67883 | Script GC Scheduler (removed, see [../removed-features.md](../removed-features.md#script-gc-scheduler)) |
 | 0xC6C290, 0xAC20E0, 0xAEB2E0, call 0xAEB306, 0xAD9E30, 0xADBAD0, 0x6A80E0, 0xADB8F0, call 0xC6D68F, 0xABFAC0 (optional), 0xAD97E0, 0x4DB850/8E0, 0x4EC010 | [Frame Profiler](../features/frame-profiler.md) (timing only) |
 | 0x73E060 | `map_view.cpp` (Depth Blur off in map view), LSO |
+| WorldManager+0xDC, the JZ 0xC63015 and the 8 bytes at 0xC6301D, WorldManager+0x258, CALLs 0xAEB306 and 0xC7CEDF | [Lot Streaming](../features/performance/lot-streaming.md): Extended lot detail, Keep lot visibility stable, Pause lot streaming in map view, shared lot build time. It never writes +0xE4 or +0xEC ([removed features](../removed-features.md#lot-streaming-parts)) |
 | CALL 0xADB95D (-> 0xADB120), camera eye read 0xC6D5BD (0x6E8330 / 0x6E8400, +0x60) | Lot Lighting While Moving ([../features/performance/lot-lighting-motion.md](../features/performance/lot-lighting-motion.md)): the budget is scaled while the camera moves |
 | 0x4AFFC0 FindProvider and the resource manager's list methods (0x4B2D00, 0x736A70, 0x4B2EC0, 0x4B0960) | Faster Game File Lookups ([../features/performance/resource-lookup-cache.md](../features/performance/resource-lookup-cache.md)) |
 | The scene message router's map by ID: 0x6FDFB0 find, 0x6FE1F0 insert, 0x6FDF40 erase | Faster Object Lookups ([../features/performance/object-lookup-index.md](../features/performance/object-lookup-index.md)): a side index answers the finds |
@@ -280,7 +304,9 @@ LSO's install log lines, as seen on 28/09:
   of the priority lot ids, and its registration `0x006FDE20` sits next to the SceneObjectManager getter `0x006FDE10`
   *(not checked)*.
 - The default of "Throttle Lot LoD Transitions" (0x011ECBC0 is presumably zero-initialized) and whether the live-setting
-  registry loads saved values over the constructor's defaults.
+  registry loads saved values over the constructor's other defaults (Max Active Lots and the camera-speed threshold come
+  from the configuration at load end, [above](#the-players-option-at-load-end)).
+- Which event sends message 0xFC6AA1FE, the one that runs 0x00C60C00 again in a loaded world.
 - The world cache's role in streaming.
 
 ## Address reference
@@ -293,13 +319,18 @@ LSO's install log lines, as seen on 28/09:
 | 0x00C6D570 | `WorldManager::Update` thiscall(float, float), RET 8, called at 0xC7E403 | `f_C6D570.asm`; LSO detours it |
 | 0x00C845C0 | Terrain update, thiscall(terrain, float* camera, char), RET 8, called at 0xC6D68F | Smooth Streaming site, profiler |
 | 0x00C6C290 | Lot LOD scoring, thiscall(4), RET 0x10, called at 0xC6D6E4 (skipped while WorldManager+0x258 != 0) | `f_C6D570.asm`, profiler |
-| 0x00C62D80 | Lot metric thiscall(WorldManager; point*, lot, out float*), RET 0xC, called from 0xC6C5D7: the squared distance from the camera's target point to the lot (with [0x011843F8] set, to the lot's rectangle in lot space, else to its centre), no view angle; a detailed lot then gets `-= [WorldManager+0xE0]` | disassembly |
+| 0x00C62D80 | Lot metric thiscall(WorldManager; point*, lot, out float*), RET 0xC, called from 0xC6C5D7: the squared distance from the camera's target point to the lot (with [0x011843F8] set, to the lot's rectangle in lot space, the largest axis distance, squared; else to its centre), no view angle; a detailed lot then gets `-= [WorldManager+0xE0]` | disassembly |
 | 0x00C63015 | `je` in 0xC62D80 that skips `metric -= [WorldManager+0xE0]` when `FUN_00AB1860(lot)` (= lot+0xC1) is 0. LSO patches it to `jmp` | disassembly; LSO `lotVisibilityCameraBiasJZ` |
+| 0x00C6C706 | Distance test in 0xC6C290, `comiss xmm0,[edi+4]` (xmm0 = Lot LOD distance squared): a lot without priority stays or gets detailed only while entry `+4` (the metric's raw out value) is below it. Entry `+0xC` holds the returned (ranked) value. Keep lot visibility stable leaves the test native | disassembly |
 | 0x00C69FF0 | Blocks the next promotion while a promoted lot is still loading (LoD throttle): 1 when a detailed lot fails 0x00D432E0 or the scene object manager's 0x00700DC0(lot id, -1) | Smooth Streaming note 2, disassembly |
 | 0x00C6C6B7 | `cmp edx,[0x01184328]` (edx = Max Active Lots): the throttle is on only when it is not above the threshold | disassembly |
 | 0x00C7CEDF | The lot pass's CALL of the renderer update 0x00AEB2E0 (other callers: the impostor builder at 0x00AEB3F9 / 0x00AEB41C) | disassembly |
 | 0x00961440 | Camera: the point LotLodScoring and the terrain update use (+0x230 when +0x6DC, else +0x240 when +0x6DD, else +0x200) | disassembly |
 | 0x00C6C695 | `cmp byte [0x011ECBC0],0`: the "Throttle Lot LoD Transitions" test in the scoring | `full.asm` |
+| 0x00C672A4 / 0x00C672F6 / 0x00C67308 | WorldManager constructor stores: `+0xDC` = 70.0, `+0xE4` = 4, `+0xEC` = 0.0 (xmm0 cleared at 0x00C67279) | disassembly |
+| 0x00C60C00 | Applies the player's option, thiscall(WorldManager): `+0xE4` = min(`MaxActiveLots`, `PlatformMaxActiveLots`) (0x0058ABA0, 4 when missing), `+0xEC` = `CameraSpeedThreshold` (0x0058ABF0, 1.0 when missing) | disassembly, `GraphicsRules.sgr` |
+| 0x00C65030 | Load-end setup: registers the WorldManager's messages *(inferred)* and calls 0x00C60C00 at 0x00C6548F. Called at 0x00C6B05B by the load step 0x00C6AEB0 | disassembly |
+| 0x00C643C0 | Message handler (vtable slot 0x01079370): message 0xFC6AA1FE calls 0x00C60C00 at 0x00C643DE | disassembly |
 | 0x00AC20E0 | Lot detail request, thiscall(1), RET 4. If lot+0xC1 != arg and lot+0xC9 == 0, stores the flag and posts AddLotObjectsToScene (arg 1) or the demotion (arg 0) through PostRemoteMethodCall. Callers 0xC6A0F9, 0xC6C7C3, 0xC6C7CE, 0xAE61A7 | profiler header |
 | 0x00AC1130 | `Lot::AddLotObjectsToScene` thiscall(lot, char initialLoad, char alwaysVisibleOnly), RET 8. Called from 0xACE1E2 | LSO pattern, PLANO §3, `calls.tsv` |
 | 0x00ABFAC0 | `Lot::UpdateObjectSceneNode` thiscall(lot, obj, char, char), RET 0xC, per object | LSO pattern, profiler |

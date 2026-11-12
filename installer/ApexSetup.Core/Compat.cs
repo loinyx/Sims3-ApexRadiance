@@ -227,7 +227,7 @@ public static class Compat
     static readonly Dictionary<string, string> BridgeDxvk = new()
     {
         ["d3d9.customVendorId"] = "10de", ["d3d9.customDeviceId"] = "1080", ["d3d9.customDeviceDesc"] = "\"Geforce GTX 580\"",
-        ["d3d9.countLosableResources"] = "False", ["d3d9.samplerAnisotropy"] = "16",
+        ["d3d9.countLosableResources"] = "False",
     };
 
     // dxvk.conf with the bridge keys set in its global part (before the first [exe] section, which the bridge server

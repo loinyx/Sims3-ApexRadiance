@@ -45,3 +45,18 @@ overwritten ([bug-reports.md](../features/bug-reports.md)).
 
 **Outcome:** each recording also writes `Wall seams.csv`, with the wall samples at the floor lines from every batched
 solve during the recording, in normal mode too.
+
+### 2026-11-12: plain camera, game marks with no edit, repeated furniture lines
+
+**Context:** a recording over a lot by the park pond, where a lamp post's ground light appeared late.
+
+**Finding:** every `[camera]` check was the water reflection's mirrored copy (126 of 126): the camera vote reads the
+frame's first 24 scene draws, which are the reflection pass when water is in view, so the ground points of
+`Screen pixels.csv` and `Ground timeline.csv` were placed with the wrong camera. A second recording had 27 game marks of
+room 0 on story 0 let through for the same two lamps in 25 s with no edit, and the room's solve never ended; which
+signature field changes is unknown. One rig wrote 148 `[furniture]` lines that print the same values.
+
+**Outcome:** the recording tools ask for the plain camera: after the vote, scene draws are searched for an unmirrored
+`c40` block with the frame's near, and `RecentCameraViewProj` prefers it. The effects keep the voted camera. A lamp whose
+marks pass more than 5 times in 10 s with no edit is logged once with the signature dwords that changed. A `[furniture]`
+line identical to the part's last one is no longer written.

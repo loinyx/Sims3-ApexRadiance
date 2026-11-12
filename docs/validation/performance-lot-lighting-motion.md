@@ -6,8 +6,8 @@ It must:
 - Scale the lot lighting budget while the camera moved in the last 300 ms, and with the camera still only by the
   frame-time pacing (never while a lamp edit's rooms wait, in the settle window or during a lamp switch's boost); only
   budgets under 100 ms.
-- Return `max(0.25, min(game, game x budgetMs / 15))` while moving, and the game's value with the camera still while
-  the frames hold.
+- Return `max(floor, min(game, game x budgetMs / 15))` while moving (floor 0.25 ms, and 3/15 of the game's 30 / 10 ms
+  budget for a loading lot), and the game's value with the camera still while the frames hold.
 - Read the camera eye without faulting when no world is loaded.
 
 ## Automated tests
@@ -19,6 +19,7 @@ None offline.
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
 | 2026-10-22 | `0b6b5af` | None: no offline harness covers the budget hook or the steady pacing | Not measured | not run in game yet |
+| 2026-11-11 | branch `release/3.1.2` | None: no offline harness covers the loading floor | Not measured | not run in game yet |
 
 ## In-game test plan
 
@@ -51,3 +52,6 @@ None offline.
   card's *Steady pacing* below 100% only while frames run long, with its *lowered in N budget calls* count growing; the
   same final light. Lamps moved, dragged or switched in Build mode relight as quickly as with it off. Not yet measured in
   game.
+- 3/15 loading floor (3.1.2): not run in game. At 1 ms, pan over lots that load. **Expected:** the developer card shows
+  "game 30.00 ms -> 6.00 ms" or "game 10.00 ms -> 2.00 ms" while a lot loads, and lots requested while panning finish
+  without waiting for the camera to stop.

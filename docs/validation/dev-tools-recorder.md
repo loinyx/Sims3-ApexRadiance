@@ -45,3 +45,8 @@ The feature is described in [features/dev-tools/recorder.md](../features/dev-too
   while a lot lamp is dragged. **Expected:** `Ground timeline.csv` follows the lamp (its place, the chunk's versions,
   `excluded` 1 and a stamp state while dragged, back to 0 after the release) and `Screen pixels.csv` has 17
   `luma_ground` columns whose pixels move with the lamp. Not yet seen in a recording.
+- Plain camera (2026-11-12): a recording over the park pond with the water in view. **Expected:** `[camera] plain`
+  lines, no mirrored-camera `WARNING`, the ground points of `Screen pixels.csv` on the ground around the lamp, and the
+  ambient occlusion and Picture effects look the same as before (they still read the voted camera).
+- Game marks with no edit (2026-11-12): a recording where a room's solve keeps restarting. **Expected:** a
+  `[LampMarkFilter] Light ... with no edit: changed ...` line naming the changing dwords, and no other change.

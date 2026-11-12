@@ -22,6 +22,7 @@ None for the profiler itself. The analysis tools in `research\perf2\tools\` (out
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-11 | 3.1.2 development builds 4 (`fd7aed8d`) and 6 (`7ef9c56b`) | In game, timing runs | Frame time p95 71 ms on build 4, 35 ms on build 6; p99 90 and 50 ms; hitch frames 9 % and 4.4 %. Between them: `f1493b29` (fence groups keyed by their pieces, the fence grid once a frame), `7ef9c56b` (this profiler times every dispatch; the hook times of the two runs are not comparable, the frame times are) and possibly `98980e41` (one register run), which kept build number 6 | In game, RTX Remix bridge |
 | 2026-09-28 | combined build | `dom.pl`, `cond2.pl` on the combined build's 51 MB `S3SS_Hitches.txt` | Same numbers as the anti-stutter plan's sections 2.1 and 2.2 (`cond2.pl` `Scene::BeginFrame 8`: 772 hitches) | DXVK |
 | 2026-09-28 | combined build | In game, 13:19 report, 51 600 frames | p50 4.38 / p95 14.28 / p99 32.38 ms, 6.86% hitches; overhead: "Present hooks (mod)" about 0.2 ms per frame (all modules, profiler included), "D3D hooks (mod)" about 0.08 ms per frame | DXVK |
 
@@ -54,6 +55,10 @@ None for the profiler itself. The analysis tools in `research\perf2\tools\` (out
 
 ## Open checks
 
+- Measurement presets with every dispatch timed and per-hook registry timing on (3.1.2, `7ef9c56b`): after *Timing
+  run*, the log's preset line reads `per-hook timing on, every dispatch timed`, the Tester switch *Sampled dispatch
+  timing* is off, "Registry hooks by name" fills in, and a hitch's *D3D hooks (mod)* never exceeds its frame time. The
+  profiler's own overhead with every dispatch timed is not measured.
 - The CPU line (`02f9234`): not yet seen in a saved report. Check on an SMT CPU that the logical processors and core
   pairs match the system's topology and that the shared-core estimate is plausible for the counts listed.
 - The dispatch cost line and *D3D hooks (mod)* with the re-issued driver time kept apart (`24684ff`): with the Banding

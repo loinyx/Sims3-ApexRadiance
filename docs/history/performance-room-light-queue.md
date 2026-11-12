@@ -354,3 +354,32 @@ removed on a lot played for 2 s (the grace restarts at each entry); the entry bu
 room on or below the camera's story waits; room 0's kept solve is written back when none of its lights changed
 ([outdoor-lamp-delta](../features/night-lighting/outdoor-lamp-delta.md)). The cause log stays in developer builds and
 recordings only. Not measured in game after the changes.
+
+### 2026-11-11: drain steps of 100 ms while the camera moved
+
+**Context:** a Frame Profiler timeline of a development session where panning across lots dropped frames.
+
+**Finding:** three frames had single drain steps of 96.7, 99.9 and 98.5 ms under the 1 ms budget of a moving camera,
+and two more had one 137 to 147 ms solve; the first step of a frame always runs. All five frames had 3,942 to 26,019
+page faults and no lamp edit pending. Whether the game's step itself is slow there or memory is being paged in is not
+known. Skipping the first step while moving was rejected: the lot pass runs the same step under its own budget, and
+rooms never solved would wait longer.
+
+**Outcome:** measuring only. A drain step of 20 ms or more is logged with its room, class, budget and the page faults
+across it ([feature page](../features/performance/room-light-queue.md), *Slow steps*). The next capture decides.
+
+### 2026-11-12: the lamp post's circle late after a lot switch
+
+**Context:** entering a lot, the lamp post's bright circle on the ground appeared only after a while (a recording of the
+switch with the solve journal).
+
+**Finding:** the circle is built from the ground story's room 0, which can only be relit once that room is solved. The
+switch's occluder send put it back to gathering (state 1, priority 0); one frame later the scheduler picked the camera
+story's room 0 (story 3), and a picked room keeps the scheduler until its solve ends. Story 3 needed a full solve of
+3328 ms; the ground then solved in 1.0 ms and the circle showed 3.5 s after the switch, 3.3 s of it waiting. An earlier
+switch in the same session had the same race (story 3 took 5.4 s). Raising the ground's floor priority cannot help: the
+game's priority is 0 in state 1.
+
+**Outcome:** kept, not yet checked in game. For at most 1 s after an active-lot switch, while the new lot's ground room
+0 is in state 1 or 2, every other room gets priority 0 (*Ground first after an active-lot switch* on the
+[feature page](../features/performance/room-light-queue.md)). Only the order of the solves changes.

@@ -46,6 +46,11 @@ inline bool UrgencyKept(std::uint32_t now, std::uint32_t until, std::uint32_t ma
     if (static_cast<std::int32_t>(now - until) < 0) return true;
     return state >= 1 && state <= 3 && static_cast<std::uint32_t>(now - marked) < 8000u;
 }
+// After an active-lot switch every other room waits while the new lot's ground room 0 (the map the lot's grass reads) waits
+// for its gather or its pick (states 1-2), until `until`
+inline bool GroundFirstHolds(bool isGround, int groundState, std::uint32_t now, std::uint32_t until) {
+    return !isGround && (groundState == 1 || groundState == 2) && static_cast<std::int32_t>(now - until) < 0;
+}
 // An edit's room still waits (AtriumHold keeps its maps and furniture): until a solve begun after its mark ends and, for
 // a room that already showed light, while it waits for its next class's solve (states 1-3). A room never solved when
 // marked has nothing on screen to keep: its first solve ends the wait, even one begun before a later mark (neverSolvedNow:

@@ -6,6 +6,26 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k312Added[] = {
+    "Display: a switch to turn off G-SYNC for the game",
+    nullptr};
+constexpr const char* k312Improved[] = {
+    "Night Lights: lots that leave full detail keep their lamp light on the ground",
+    "Night Lights: the glow under lamp posts shows up sooner when you enter a lot",
+    "Night Lights: the lot you look at no longer swaps back and forth, redoing its lights",
+    "Performance: smoother camera on busy lots, with far fewer hitches",
+    "Performance: moving between lots no longer slows room lighting for seconds",
+    "Fences and stairs: each piece takes the light of the lamps around it",
+    "Lot Streaming: lots in full detail keep it longer while the camera moves",
+    "Lot Streaming: Smooth lot streaming, Spread lot objects while loading and Maximum detailed lots are removed",
+    nullptr};
+constexpr const char* k312Fixed[] = {
+    "Fences and stairs: no more flicker when the camera moves",
+    "Fences and stairs: steps on a raised floor no longer show blocks of light",
+    "Lot Streaming: turning its options off no longer leaves only 4 detailed lots",
+    "RTX Remix bridge: no forced 16x filtering spoiling the shine on hair",
+    nullptr};
+
 constexpr const char* k311Improved[] = {
     "Lighting: general improvements for better RTX Remix compatibility",
     nullptr};
@@ -542,6 +562,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"3.1.2", "2026-11-12", k312Added, k312Improved, k312Fixed, "Smoother camera, and lamp light that stays put around town"},
     {"3.1.1", "2026-11-11", nullptr, k311Improved, k311Fixed, "Better compatibility with the RTX Remix bridge, and fewer crashes"},
     {"3.1.0", "2026-11-10", k310Added, k310Improved, k310Fixed,
      "A frame-rate limit and window modes, a new Overview with game memory, and fences dark behind walls", k310Highlights},

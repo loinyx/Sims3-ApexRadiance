@@ -5,7 +5,7 @@
 // D3D9 call counts and the time the mod's own D3D9 registry hooks take per frame. A hitch is a frame longer than
 // max(multiplier x median of the last 120 frames, floor). Results: live UI (graph, percentiles, per-category breakdown of
 // the last hitches) and ApexRadiance_Hitches.txt in the Apex Radiance folder, appended in batches at most once per second from a
-// background thread.
+// background thread; beside it, ApexRadiance_FrameTimeline.csv gets one row per frame (started over by Clear).
 //
 // Optional statistical sampling (Advanced): a sampler thread records where the render / simulation thread is (EIP, TS3W
 // call sites on its stack) ~2000 times a second, so each hitch also shows which code its untimed time was spent in.

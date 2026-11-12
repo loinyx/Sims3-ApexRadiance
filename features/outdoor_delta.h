@@ -366,6 +366,9 @@ bool ExportRoom0(const void* room, int cls, Room0Export& out, bool physical = fa
 // solve of one is not kept instead, and their drawn lamps' parts are kept as one sum per texel. Returns how many of their
 // solves the budget has not kept so far (logged with their sizes)
 long PinRooms(const void* const* rooms, int n);
+// The lot Real-time outdoor lamps just left (render thread, at a switch): until `untilTick` the memory budget drops its room
+// 0s' kept parts only when they and the pinned rooms together pass the pinned ceiling, so a return reuses them
+void GraceRooms(const void* const* rooms, int n, unsigned long untilTick);
 // The lots next to the active one whose room 0s Real-time outdoor lamps relights with the active lot's lamps (render thread,
 // every frame; at most 4, n = 0 clears): a solve of one of their room 0s keeps only its texels and their sums (every light of
 // its list kept, none drawn, no light's part), so ExportRoom0's base is the whole sum and a delta solves the room in full.

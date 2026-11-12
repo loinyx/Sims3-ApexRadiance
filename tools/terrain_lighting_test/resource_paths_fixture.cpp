@@ -192,7 +192,10 @@ uint32_t g_objLampsLeftOut=0,g_objLampsDimmed=0,g_fenceLampsLeftOut=0,g_fenceLam
 constexpr float kWindowWallSkip=.75f;
 bool ObjectLampPoint(const float (&m)[3][4],float (&at)[3]){for(int k=0;k<3;++k)at[k]=m[k][3];return false;}
 constexpr unsigned kGroupPieces=32;
-struct GroupCentre {float x=0,y=0,z=0,ext=0,minY=0,a[3]{},b[3]{};float piece[kGroupPieces][3]{};unsigned pieces=0;uint32_t read=0;};
+struct GroupCentre {float x=0,y=0,z=0,ext=0,minY=0,a[3]{},b[3]{};float piece[kGroupPieces][3]{};unsigned pieces=0;uint32_t read=0;std::vector<float> all;};
+bool g_shadeOn=true;
+bool ShadedOnGround(float,float){return false;}
+float FencePieceVisibility(const LampCone&,const float*,const float*){return 1.0f;}
 GroupCentre fixtureGroup;
 const GroupCentre* InstancedGroupCentre(FakeDevice*){return fixtureNoGroup?nullptr:&fixtureGroup;}
 std::map<FakeShader*,int> g_wetLotPs;
@@ -217,7 +220,7 @@ struct FloorShadeBind {
 template<class LampArray> std::string DescribeObjectDraw(FakeDevice*,const ShaderPatches::ObjectPatch&,int,bool,int,int,const LampArray&,int){return "fixture";}
 void SetVs(FakeDevice* d,FakeShader* shader){++d->writes;d->vs=shader;}
 // the per-piece runs (DrawFenceRuns, not extracted): the fixture draws every group once, as before
-template<class D,class F> bool DrawFenceRuns(D*,const GroupCentre&,int,const float(*)[4],UINT,unsigned,const LampCone*,F){return false;}
+template<class D,class F> bool DrawFenceRuns(D*,const GroupCentre&,int,const float(*)[4],UINT,unsigned,const LampCone*,const float*,float,float,float,UINT,const float*,F){return false;}
 #include "extracted_resource_paths.h"
 
 int checks=0,failures=0;

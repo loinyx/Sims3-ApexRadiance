@@ -4,13 +4,14 @@ A developer tool that measures every frame and records what each stutter (hitch)
 functions (render and Present path, frame limiter, main-loop steps, every ServiceManager service, jobs, waits, file and
 RefPack I/O, lot streaming, lot lighting, terrain, script GC, the performance counters), counts D3D9 calls and the time
 Apex Radiance's own D3D9 hooks take. An optional statistical sampler covers the time no timed function explains. Results
-appear in live tables in the menu and in `ApexRadiance_Hitches.txt`. Nothing is hooked while it is off.
+appear in live tables in the menu and in `ApexRadiance_Hitches.txt`; one row per frame goes to
+`ApexRadiance_FrameTimeline.csv`. Nothing is hooked while it is off.
 
 ## Status
 
 | | |
 |---|---|
-| Availability | Developer mode only (included in the unified ASI; the normal runtime mode never loads or starts it). Sampled D3D dispatch timing and the *Re-issued draw (driver)* row: since 2.13.0 |
+| Availability | Developer mode only (included in the unified ASI; the normal runtime mode never loads or starts it). Sampled D3D dispatch timing and the *Re-issued draw (driver)* row: since 2.13.0. Measurement presets with per-hook registry timing on and every dispatch timed: since 3.1.2. Per-frame timeline: since 3.1.2 |
 | Default | Off; never started automatically, also when the saved file says `enabled = true` |
 | Menu | Developer > Performance > *Frame times and stutters* |
 | Configuration | `[qol.frame_profiler]` in `ApexRadiance.toml`; profiles with the Development part store a copy under `[developer.frame_profiler]` |
@@ -39,6 +40,9 @@ breakdown for every frame that exceeds the hitch threshold.
    and longer than the floor.
 5. **Report.** Each hitch is queued to a writer thread that appends it to `ApexRadiance_Hitches.txt`; *Save report now*
    appends a full session report.
+6. **Timeline.** Every frame also queues one row to the same writer, which appends it to
+   `ApexRadiance_FrameTimeline.csv`. A slowdown that lasts (camera motion) raises the median, so its frames are not
+   hitches; the timeline keeps them frame by frame.
 
 ## Settings
 
@@ -50,7 +54,7 @@ All settings are in the card's *Measurement setup* section and its *Advanced* no
 | Hitch multiplier | `hitch_multiplier` | float | 2.0 | 1.2 to 5.0 | Hitch = frame longer than this times the median of the last 120 frames |
 | Hitch floor | `hitch_floor_ms` | float | 8 ms | 1 to 100 ms | Frames shorter than this are never hitches |
 | Count state calls | `count_state_calls` | bool | on | | Shows SetTexture, Set*Shader, Set*ShaderConstantF and SetRenderTarget per frame |
-| Write ApexRadiance_Hitches.txt | `write_file` | bool | on | | Hitches are queued to the writer only while this is on |
+| Write ApexRadiance_Hitches.txt | `write_file` | bool | on | | Hitches and the per-frame timeline rows are queued to the writer only while this is on |
 | Sample the render thread | `sample_render` | bool | off | | Starts or stops the sampler for the render thread |
 | Sample the simulation thread | `sample_simulation` | bool | off | | Needs the simulation thread id (known after the first script GC call) |
 | Sampling rate | `sample_hz` | int | 2000 | 250 to 4000 Hz | Per sampled thread |
@@ -58,13 +62,16 @@ All settings are in the card's *Measurement setup* section and its *Advanced* no
 | Time the Mutex::Lock hook | `time_mutex_lock` | bool | off | | Attaches the hand-made hook on `Mutex::Lock` 0x004E16F0 live; off leaves "Mutex wait" empty |
 | Per-hook registry timing | `registry_timing` | bool | off | | Times each module's draw and state callbacks by name. The toggle itself does not request a save; the value is written with the next save |
 
-Buttons: **Clear** (forgets frames, hitches and session tables; the file keeps what was written) and **Save report now**
-(appends a full report), shown while on or once data exists.
+Buttons: **Clear** (forgets frames, hitches and session tables; the hitch file keeps what was written; starts a new
+`ApexRadiance_FrameTimeline.csv`, the previous one kept as `ApexRadiance_FrameTimeline.old.csv`) and **Save report now**
+(appends a full report, which names the timeline file and its rows written and dropped, and makes the writer append the
+queued timeline rows at once), shown while on or once data exists.
 
 **Measurement presets** (*Measurement setup*), for the 60-second measurement protocol:
 
 - **Timing run** (run type A): hitch multiplier 2.0, floor 8 ms, count state calls on, write the file on, sampling off,
-  Mutex::Lock not timed, per-hook registry timing and lot object building off; turns the profiler on.
+  Mutex::Lock not timed, per-hook registry timing on, every draw hook timed exactly (*Sampled dispatch timing* off: a 1-in-16
+  sample booked 16 times showed more mod time than the frame), lot object building off; turns the profiler on.
 - **Sampling run** (run type B): the same plus sampling of the render and simulation threads at 2000 Hz.
 
 Both save the settings and log `[FrameProfiler] Measurement preset: ...`. Neither presses Clear: the protocol presses
@@ -88,13 +95,15 @@ restores these preferences but never starts a measurement.
   "Script GC" then stays empty and the simulation thread is never identified, so simulation time lands in "other threads"
   and simulation sampling cannot start.
 - **Entries other modules verify** are not hooked: the room lightmap solve 0x006A3EC0 (timed through its only caller
-  0x006A80E0), `Lot::AddLotObjectsToScene` 0x00AC1130 (the Lot Streaming throttle writes a JMP there),
+  0x006A80E0), `Lot::AddLotObjectsToScene` 0x00AC1130 (LotStreamingOptimizations' object throttle writes a JMP there),
   `WorldManager::Update` 0x00C6D570 (LotStreamingOptimizations' map-view blocker), `Lot::UpdateObjectSceneNode`
   0x00ABFAC0 by default (LotStreamingOptimizations finds it by an entry pattern; while it is timed, that module cannot
   re-install and its object throttle stays off), and the entries of 0x00AEA680 / 0x00C845C0 (timed at their call sites
   instead).
-- **Camera motion** comes from the lot LOD scoring point (0x00C6C290) and, when that function did not run, from
-  PostScene's view-projection, which is captured only while an effect using PostScene is on.
+- **Camera motion** comes from the lot LOD scoring point (0x00C6C290); frames in which that function did not run count
+  as unknown (the PostScene view-projection fallback exists only in the combined build). The timeline also reads the
+  camera eye through `LotLightingMotion::CameraEye` (a read only: it does not feed that feature's motion samples) and
+  that feature's own motion state (`CameraMoving`, which does not sample either).
 
 ## Limitations
 
@@ -110,8 +119,21 @@ restores these preferences but never starts a measurement.
 - Sampling: the stack walk is heuristic and `fn~` keys are guesses; a sampled thread is paused about 5 to 30 us per
   sample under WOW64, roughly 1 to 6% of that thread at 2000 Hz, plus similar CPU on the sampler's core.
 - Services on other threads are session totals only.
-- The writer drops hitches when more than 256 are queued within one writer period.
-- `ApexRadiance_Hitches.txt` grows without bound.
+- The writer drops hitches when more than 256 are queued within one writer period, and timeline rows when 1024 wait:
+  the ring wakes the writer at 512, so rows are dropped only when the writer stalls (disk, antivirus) for about
+  512 / fps seconds after that wake (about 10 s at 50 fps). Rows that cannot be written (the file locked by another
+  program) also count as dropped.
+- `ApexRadiance_Hitches.txt` grows without bound; `ApexRadiance_FrameTimeline.csv` grows until the next Clear (about
+  300 bytes per frame, estimate: about 54 MB per hour at 50 fps, 155 MB at 144 fps; Excel stops at 1,048,576 rows,
+  about 5.8 hours at 50 fps) and keeps one older generation only.
+- The camera state counts rotations and zooms as still if the lot LOD scoring point is the orbit target (see
+  [Hitch detection](#hitch-detection); unverified in game). The moving / still hitch rates of the report use that
+  state; the timeline's `eye_move_m` and `apex_moving` see every kind of camera motion.
+- Through the RTX Remix bridge (d3d9 out of process) `Present (driver)` is usually about 0 and the waits for the bridge
+  server land in other rows instead: Present (driver) now and then, Present hooks (mod), D3D hooks (mod), Scene::BeginFrame
+  (the pick readback), Texture create ("includes driver waits") and Render frame (game) self. Those rows are then not pure
+  CPU work, and `cpu_ms` (frame - Present (driver) - Frame limiter) is not CPU time. The sampler's `smp_gfx` (d3d9.dll,
+  the bridge client) and `smp_system` (waits) columns separate bridge waits from CPU work.
 - Counters: "packages per lookup" reads the provider list without the manager's lock (a statistic); the two DXT encoders
   share one category; the scene pending nodes and the room solves are counted only from their per-frame CALLs; the
   longest call of the other threads mixes simulation and other threads. The async-load request counter (slot
@@ -333,7 +355,10 @@ none.
   one, except the driver call of any original draw a callback issues inside a dispatch (Night Lighting's re-issued
   draws, the Banding Fix's dithered re-issue of 3D back-buffer draws, any `CallOriginalDraw*`), booked as **Re-issued
   draw (driver)** (the game would have paid it for its own call). The same driver time is kept out of the dispatch cost
-  log line ([architecture.md](../architecture.md#33-dispatch-and-locking)). Per frame the figure is an estimate from about 1 in 16 dispatches; over a second it averages out.
+  log line ([architecture.md](../architecture.md#33-dispatch-and-locking)). Per frame the figure is an estimate from about 1 in 16 dispatches; over a second it averages out. With the Tester
+  switch *Sampled dispatch timing* off (`perf_sampled_dispatch_timing`, which both measurement presets turn off) every
+  outermost dispatch is timed with weight 1: a hitch's sampled dispatch booked 16 times showed 151 ms of mod time inside
+  a 55 ms frame.
   Night Lighting's share is split by fix in the development-build log line `[LotLightBridge] Draw cost by fix ...`
   ([Night Lighting diagnostics](night-lighting/README.md#diagnostics)), which is not part of the profiler.
 - **Present hooks (mod):** the -1000 Present hook is the frame boundary and pushes a `kPresentHooks` frame; the +1000
@@ -373,8 +398,12 @@ data); *Save report now* adds it. The *Per-hook registry timing* tooltip still m
 - Warm-up: no hitch until 30 frames are in the window (`kWarmupFrames`); the window resets at every enable.
 - Histogram: 2000 bins of 0.05 ms up to 100 ms, 900 bins of 1 ms up to 1000 ms, one overflow bin; percentiles are bin
   centres (the overflow bin reads 1000.0); "max" is exact.
-- Camera signal (`SampleCamera`): moved when the point passed to 0x00C6C290 changed by more than 1e-3 on any axis; when
-  that function did not run (map view, loading), PostScene's view-projection is compared instead; `camera -1` = unknown.
+- Camera signal (`SampleCamera`): moved when the point passed to 0x00C6C290 changed by more than 1e-3 on any axis;
+  `camera -1` = unknown (that function did not run: map view, loading). The point is what 0x00961440 returns, camera
+  +0x200 (or +0x230 / +0x240 by two flags at +0x6DC / +0x6DD), not the eye at camera +0x60 (WorldManager::Update
+  0x00C6D5C9..0x00C6D5DD, then pushed as argument 2 at 0x00C6D6D9); the engine notes call it the camera's target point.
+  If it is the orbit target, a rotation or zoom around a fixed target counts as still (unverified in game; the
+  timeline's eye columns show it).
 - Per hitch: foreground check (`GetForegroundWindow` pid; else "(window in background)"), top 8 services, 6 jobs, 6
   waits, file bytes, the sampler summary, page faults; stored in a 200-entry ring and pushed to the writer queue (256
   entries, single producer / single consumer; drops counted).
@@ -447,7 +476,8 @@ joinable `std::thread` would `std::terminate` at exit), appending in binary mode
    self)`, `jobs run on the render thread`, `render-thread waits`, `file reads`, and the per-thread sample summaries when
    sampling.
 4. *Save report now* (`BuildReport`): percentiles, last-60-frame averages, the CPU line, camera hit rates, hook status, GC call-site
-   state, limiter state, totals since Clear per category and bucket, per-hitch averages over the last 200 hitches, all
+   state, limiter state, totals since Clear per category and bucket, the texture loads by size, "Per-frame timeline:
+   ApexRadiance_FrameTimeline.csv ... section S ...; N rows written so far, D dropped", per-hitch averages over the last 200 hitches, all
    200 hitches, keyed session tables (services / jobs / waits: ms per hitch vs per other frame), sim-loop services, the
    sampling tables, "Counters since Clear", "Counters per hitch", "Apex shaders: ..." (the
    [shader precompile](../architecture.md#44-shader-precompile) status), "Registry hooks by name (last second; ...)", "Draw /
@@ -494,6 +524,151 @@ distribution per bucket; `agg.pl` prints per-hitch counter averages (`C:`) and d
 `dom:<dominant key>` and `job:remote call -> X`; `smp.pl` reads the sampling lines. New lines are only appended after
 existing ones, so the tools read older and newer files alike.
 
+### Per-frame timeline
+
+The hitch records keep detail only for frames longer than the hitch threshold, and a slowdown that lasts (the camera
+moving for seconds) raises the median it is measured against, so those frames are never recorded. The timeline writes
+every frame.
+
+- **File:** `ApexRadiance_FrameTimeline.csv`, beside `ApexRadiance_Hitches.txt`. One header line, then one row per
+  frame. Rows are written while the profiler is on and *Write ApexRadiance_Hitches.txt* is on.
+- **Sections:** Clear, and the first profiler start of a game session, open a new section, and the mod log gets the line
+  `[FrameProfiler] Timeline section N starts (ApexRadiance_FrameTimeline.csv): time_s 0 = tick_ms T`. The writer then
+  appends the rows still queued for the old file, renames it `ApexRadiance_FrameTimeline.old.csv` (`MoveFileExW`
+  with `MOVEFILE_REPLACE_EXISTING`: the older generation is replaced only when the rename succeeds) and starts a new
+  file with the header. If the rename fails while the file can still be written, the new section is appended after the
+  old one, header first. Rows that cannot be written count as dropped; when the failed write carried the header, the
+  next pass starts the file again. Turning the profiler off and on without Clear continues the file and its clock;
+  `frame` shows the gap.
+- **Path of a row:** `FrameBoundary` -> `TimelineFrame` (render thread, after `UpdateStats`) fills a fixed-size
+  `TimelineRow` (352 bytes) and puts it in a 1024-row single-producer / single-consumer ring (`g_tlRing`). The writer
+  thread drains it in each pass (`WriteTimeline`, every 1000 ms, at *Save report now*, and when the ring reaches 512
+  rows) and formats the rows there. Nothing is formatted or written on the render thread.
+- **Cost on the render thread per frame:** one SEH-guarded read of the camera eye (two pointer loads and three floats),
+  14 relaxed atomic loads (texture-load totals), about 12 more atomic loads and two `GetTickCount64` calls (Apex's
+  motion state, the pacing scales, the timing modes), one `atan2` and up to three square roots, four more relaxed
+  atomic operations and two plain loads (RoomLightQueue's drain total and edit burst, the GetRenderTargetData counters),
+  one `GetForegroundWindow` and `GetWindowThreadProcessId` (the focus column and the hitch record's foreground flag,
+  read once a frame; before the timeline, only for hitches), and a 352-byte copy. While the sampler runs,
+  `ConsumeSamples` also counts every frame's samples per code class (it did so only for hitches). Not measured;
+  estimated about 1 us. The ring is 352 KB of static memory (demand-zero pages: no RAM
+  until the profiler runs). File size about 300 bytes per frame (estimate; zeros print as `0`, unknown values as empty
+  fields): about 0.9 MB for a 60-second run at 50 fps.
+
+**Joining the rows to other files.** `frame` is `#frame` of the hitch blocks. `tick_ms` is `GetTickCount64` at the
+frame boundary, the clock of `uptime_ms` in the GameplayMemory, MemoryAnalysis and GameCategories CSVs and of
+LotLightingMotion's 300 ms hold; its resolution is the system timer's (usually about 16 ms), so it joins rows to
+other files but does not time frames. The section's log line maps it to the mod log's local time:
+local time of a row = the line's time + (`tick_ms` - T) ms. `time_s` is the profiler's clock (RDTSC or QPC) since the
+section started, not since the profiler was enabled, so it differs from `t=` in the hitch blocks after Clear or an
+off / on cycle.
+
+Columns (render-thread values are self ms, as in the hitch blocks; empty = unknown):
+
+| Column | Meaning |
+|---|---|
+| `time_s` | Seconds since the section started (Clear, or the first profiler start of the game session) |
+| `tick_ms` | `GetTickCount64` at the frame boundary (see above) |
+| `frame` | Frames the profiler measured since the game started (never reset), the same as `#frame` in the hitch blocks |
+| `frame_ms`, `cpu_ms`, `present_ms`, `limiter_ms` | Frame interval; frame - Present (driver) - Frame limiter (CPU time only when Present (driver) holds the GPU and driver waits; not through the RTX Remix bridge, see [Limitations](#limitations)); Present (driver); Frame limiter |
+| `hitch` | 1 when the frame is a hitch (it then also has a block in `ApexRadiance_Hitches.txt`) |
+| `focus` | 1 when the foreground window belongs to the game's process (`GetForegroundWindow`, read once a frame): rows with 0 were measured with the game in the background |
+| `camera` | The camera state of the hitch records: 1 moving, 0 still, -1 unknown (from the lot LOD scoring point; not the detector Apex's features use, see below) |
+| `apex_moving` | `LotLightingMotion::CameraMoving()`: 1 when the camera eye moved (more than 5 mm between two samples, or a slow pan within 100 ms) in the last 300 ms. Every motion-gated budget of Apex uses this detector (lot lighting budget while moving, lot build share, scene node budget, wall shading deferral, room queue drain). Empty when neither *Lot lighting while moving* nor *Wall shading while moving* runs (the scene node budget and the room queue drain still sample the same detector then; the timeline does not sample it, so as not to add samples) |
+| `steady_scale`, `settle_scale` | `LotLightingMotion::SteadyScale()` and `SettleScale()`, 0 to 1: the frame-time pacing of the room solving budgets (camera still; and while a lot settles after loading, a lamp switch boost or a lamp edit). Each frame over its target takes 0.15 off, each frame well under it gives 0.05 back, so a scale that swings frame to frame shows the pacing loop at work. `steady_scale` is 1 while `SteadyRoomPacing` is off; `settle_scale` keeps its last value outside a settle. Read at the profiler's Present hook, before or after that feature's own Present sample (one frame of lag possible). Empty as `apex_moving` |
+| `lamp_edit` | `RoomLightQueue::EditBurstOn()`: 1 while a lamp edit's rooms were waiting at the room queue's last drain (`LevelLightShare::LampEditPending()`), from the first such frame to the log line `[RoomLightQueue] Lamp edit: its rooms settled after ...`. The drain picks its lamp-edit budgets then. 0 while the drain (*Faster room lighting*) is off |
+| `drain_ms` | Time the room queue's drain spent solving rooms after the game's pick this frame (ms; the change of `RoomLightQueue::DrainMicros()` since the previous frame). 0 while the drain is off |
+| `eye_move_m` | Distance the camera eye moved since the previous frame (metres); it moves with pans, rotations and zooms |
+| `eye_x`, `eye_y`, `eye_z` | Camera eye, world coordinates (`LotLightingMotion::CameraEye`, `[[0x011D1860]+0x24]+0x60`); y is the world height, not the height above the ground |
+| `target_move_m` | Distance the lot LOD scoring point moved since the previous frame (empty when 0x00C6C290 did not run in either frame) |
+| `eye_target_m` | Distance from the eye to that point: grows when zooming out, if the point is the orbit target |
+| `yaw_change_deg` | Change of the horizontal direction from the eye to that point since the previous frame (degrees, -180 to 180): the turn indicator |
+| `draws`, `prims` | Game draws this frame (draws inside EndScene not included) and their primitives (scene size on a zoom out) |
+| `lots_promoted`, `lots_demoted` | Lots switched to the detailed view or back this frame (`Hook_LotDetailRequest`) |
+| `lot_load_calls` | Calls of *Lot load stages* this frame, all threads: load work running now, not only the promotion events |
+| `lots_lighting` | Calls of *Lot lighting update* this frame (lots with lighting work) |
+| `room_solve_calls`, `room_solve_max_ms` | Calls of *Lot room solve* this frame (all threads) and the longest single one on the render thread (ms): more lots solving versus one long solve that no budget interrupts |
+| `scene_nodes`, `scene_deferred` | Render thread: nodes the scene pending-node drain added this frame, and nodes the scene node budget left queued |
+| `tex_loads`, `tex_mb` | DDS texture loads that reached the create call this frame on any thread, and their size (whole mip chain, MB, estimated from the format) |
+| `page_faults` | The process's page faults during the frame (soft and hard) |
+| `rtd_calls`, `rtd_ms` | `IDirect3DDevice9::GetRenderTargetData` calls this frame on any thread (the game's and Apex's GPU-to-CPU copies) and the wall time of the call alone (QPC, ms). Under DXVK the call only marks the surface for read-back (`SetNeedsReadback`), so `rtd_ms` stays near 0 and the GPU wait lands at the game's later lock (`0x00618DF0`: the self time of the category that runs it, and `smp_system`; see the [Faster Sim Building history](../history/performance-fast-cas-sort.md)). Through the RTX Remix bridge the call itself blocks (about 1.9 ms a frame in live play); with a native driver, unverified. Not an extra category: the time is already in the self time of the category that made the call. Counted in `ExtraHooks`' detour while the profiler is on (`CountGetRenderTargetData`; off: one atomic load per call, but numbered development builds always count), which also logs the callers ([Related log lines](#related-log-lines)). Empty while that detour is not installed: it comes with *High-precision scene* (Banding Fix), the no-scene trace or the RTX Remix bridge's trace detours |
+| `mod_dispatches` | Outermost registry dispatches booked as *D3D hooks (mod)* this frame; with `mod_sampled` = 1 an estimate (each timed dispatch counts 16) |
+| `mod_sampled` | 1 while `PerfToggles::SampledDispatchTiming` is on: one outermost dispatch in 16 is timed and booked 16 times, so in this row *D3D hooks (mod)*, *Re-issued draw (driver)*, the self time of *Render frame (game)*, `mod_dispatches` and `Unattributed` are estimates (one long sampled dispatch can push the categories' sum over `frame_ms`, and `Unattributed` is then clamped to 0). Averages over many rows stay unbiased. A measurement preset turns it off (every dispatch timed): rows are exact only then |
+| `reg_timing` | 1 while per-hook registry timing is on: it adds its own cost to *D3D hooks (mod)* |
+| `sim_script_gc_ms` | Script GC on the simulation thread, booked in the frame in which it returned |
+| `other_jobs_ms` | *Jobs (self)* on threads other than the render and simulation threads, booked in the frame in which they returned |
+| `smp_ts3w`, `smp_gfx`, `smp_system`, `smp_apex`, `smp_other_asi`, `smp_other` | Render-thread samples in the frame per code class (TS3W, DXVK/driver including the bridge client d3d9.dll, system waits, this ASI, other ASI files, other modules); their sum is the frame's samples. Empty while the render-thread sampler is off |
+| one column per category | The 43 categories of `kCats`, by name, render thread self ms (Render frame (game), EndScene + overlays, Present hooks (mod), Present (driver), D3D hooks (mod), Scene::BeginFrame, Lot room solve, Texture create, Texture fill, Resource lookup, Scene pending nodes, Lot load stages, Lot renderer update, Terrain update, Services (self), Jobs (self), Wait for job, Lamp refresh (mod) and the rest) |
+| `Unattributed` | Frame time not covered by any render-thread category (clamped to 0) |
+
+The turn indicator uses the eye and the lot LOD scoring point, which both exist in every frame in which the LOD scoring
+runs, and not PostScene's view-projection: that is captured only while an effect asks for the camera, and asking for it
+registers draw hooks that would change what is measured. If the scoring point were not the orbit target,
+`eye_target_m` and `yaw_change_deg` would not mean zoom and turn (unverified in game).
+
+**Reading camera motion.** Three motion signals, each for its own question:
+
+- `camera` (and the report's moving / still hitch rates) is the lot LOD scoring point. Lot streaming reacts only to
+  that point: the lot metric 0x00C62D80 is a squared distance from it with no view angle, and LotLodScoring returns
+  early while the point's mean speed over 10 samples is above `+0xEC`, the camera-speed threshold the game's own
+  option sets (1.0 to 32.0; [lot loading](../engine/lot-loading-and-streaming.md#worldmanager-0x011ecbc4); units
+  unverified). So in frames of a rotation or a zoom alone, with `lots_promoted` 0 and *Lot load stages* about 0, lot
+  loading is not the cause.
+- `apex_moving` is the eye-based detector of Apex's motion-gated budgets; it shows whether a slow frame ran with the
+  moving budgets or the still ones.
+- `eye_move_m` is the raw eye motion of each frame.
+
+Before trusting `yaw_change_deg`, `eye_target_m` and the moving / still hitch rates, check in game for 30 seconds:
+pan, then orbit, then zoom, each alone, about 10 seconds each, with the profiler on. A pan moves both the eye and
+the target; if an orbit and a zoom move the eye with `target_move_m` about 0 and `camera` 0, the scoring point is the
+orbit target (this settles the unverified point above); a zoom then changes `eye_target_m`, an orbit `yaw_change_deg`.
+
+### Related log lines
+
+Two instruments outside the profiler write to `ApexRadiance_LOG.txt`. Neither changes the call it measures.
+
+**Slow room step** (`features/lot_lighting_motion.cpp`, every build, while Lot Lighting While Moving is on):
+`[LotLightingMotion] Slow room step: lot pass, room 3 class 2, lot <16 hex digits>, story 1, 136.5 ms, budget 15.00 -> 3.00 ms, 11029 page faults`.
+One line per story solve of the lot lighting update (0x00ADB8F0) that ends 20 ms or more past the update's budget, at
+most 5 lines in 10 s; the next line logged ends with "(N more not logged before)". A solve runs until the update's
+stopwatch reaches the budget, so a long solve inside a large budget (a loading lot's 30 ms, a lamp edit's 25 ms, tool
+mode's 1000 ms) is by design and not logged.
+
+| Field | Meaning |
+|---|---|
+| `lot pass` | Where: the lot lighting update's per-story solve (this profiler's *Lot room solve*) |
+| `room` | The light tree's current room at the solve's start (id, LOD class) when it belongs to the updated lot; `-` otherwise (the solve then ran the story's other dirty rooms or its wall shading) |
+| `lot` | The updated lot (`[[manager+0x14]+0x48 / +0x4C]`) |
+| `story` | That room's story; `-` with the room |
+| ms | The update's own stopwatch between the read before the solve (or the budget call) and the read after it: the CALL at 0x00ADB9BA, 13 bytes after the solve's CALL 0x00ADB9AD, which stays this profiler's counter |
+| `budget` | The game's budget and the one Lot Lighting While Moving returned, at this update's budget call (per thread) |
+| `page faults` | The process's `PageFaultCount` across the solve (every thread's; numbered development builds only, `unknown` elsewhere or when unreadable) |
+
+**GetRenderTargetData callers** (`framework/d3d9_extra_hooks.cpp`, developer build only; while the profiler counts, and
+always in numbered development builds; only while the render-target detour is installed, see `rtd_calls` above):
+`[ExtraHooks] GetRenderTargetData callers in the last 10 s: TS3W.exe+0x2DFF4A 412 calls 1130.2 ms; ...`. The detour
+tallies calls and their QPC time by return address (module + offset; 16 callers, then "N calls from other callers")
+and logs the 4 costliest about every 10 s.
+
+On Steam 1.67.2, every call from the game's render-target copy 0x00610660 (thiscall, ret 0x18) returns to
+`TS3W.exe+0x210762`. That function takes render target 0 (GetRenderTarget), copies it with GetRenderTargetData at 0x00610760 when
+the destination's flag (`+0x20`, bit 8; meaning unverified) is set, else with StretchRect, and checks for a lost device.
+It has nine direct callers, so the detour tallies such a call by 0x00610660's own return address instead (the stack slot
+0x98 bytes above the detour's return address: the 3 arguments, 3 saved registers and 0x7C bytes of locals). Of those callers, the pick
+readback returns to `TS3W.exe+0x2DFF4A`, the lot impostor textures (LotLODCreator, 0x00ADE069) to `TS3W.exe+0x6DE06E`
+and the texture compositor (0x005FDDA0) to `TS3W.exe+0x1FDDA5`. By static reading of `TS3W.exe`, the pick readback is
+the copy that runs every other frame during play; the impostor and compositor copies can run during play too (how
+often is unverified):
+
+- Scene::BeginFrame calls the pick manager's per-frame update 0x006DFEC0 at 0x006EBC62 (manager `[scene+0x38]`;
+  skipped while `[scene+0x2A2]`).
+- `RenderPickDelayReadback` (GraphicsRules.sgr sets 1 for every card level) is stored in the manager's `+0x16` at
+  0x006DF17D. With it on, one update renders the pick target and sets `+0x14`; the next reads it back
+  (0x006DFF45 -> 0x00610660) and stores the result flag in `+0x15`. A new pick is rendered only after that flag is
+  cleared, so the read-back runs at most every other frame.
+- The texture compositor (Sim building) calls GetRenderTargetData itself in 0x005FBCE0 (return `TS3W.exe+0x1FBD75`).
+- Apex's own read-backs (developer tools, recordings, GPU room lamp self-checks) return into `ApexRadiance.asi`.
+
 ### UI
 
 The card *Frame times and stutters* (Developer > Performance) has the on switch in its header.
@@ -530,9 +705,13 @@ The card *Frame times and stutters* (Developer > Performance) has the on switch 
 | | `OnPresentStart`, `OnDrawStart`, `RegisterD3DHooks` | registry hooks |
 | | `CounterScope`, `NoteMax`, `AddX`, `PackagesProbed`, `CounterFrame`, `ComputeDominant`, `DomName`, `DominantText`, `FormatCounters`, `CounterExtraText`, `CounterReport`, `DominantSummaryLines`, `RenderCounters`, `ApplyPreset` | counters |
 | | `StartWriter`, `StopWriter`, `WriterMain`, `FormatHitch`, `BuildReport`, `SaveReport`, `KeyedReport`, `SamplingReport` | output |
+| | `TimelineRow`, `TimelineFrame`, `TimelineSync`, `TimelineRestart`, `WriteTimeline`, `FormatTimelineRow`, `TimelineHeader` | per-frame timeline |
 | | `RenderUI`, `RenderLive`, `RenderHitches`, `RenderKeyed`, `RenderSampling`, `RenderAdvanced` | UI |
 | `features/address_space.{h,cpp}` | `Start`, `Stop`, `ReportText` | address-space monitor |
 | `framework/d3d9_hooks.cpp` | `Run`, `RunList`, `CountCall`, `ReadStateCallCounts`, `OffThreadDispatches` | mod D3D time, per-name timing, state-call counts |
+| `framework/d3d9_extra_hooks.cpp` | `CountGetRenderTargetData`, `TakeGetRenderTargetData`, `NoteRtdCaller` | the timeline's `rtd_calls` and `rtd_ms`; the callers' log line |
+| `features/lot_lighting_motion.cpp` | `Hook_SolveElapsed`, `NoteUpdateStart`, `LogSlowStep` | the slow room step log line |
+| `features/room_light_queue.cpp` | `DrainMicros`, `EditBurstOn` | the timeline's `drain_ms` and `lamp_edit` |
 | `framework/game_addresses.*` | ids `ResFindProvider` .. `RemoteMethodVtable2`, `TexCreateCall`, `TexFillCall` | counter addresses |
 | `apex_gui.cpp` | `DevProfilerTab` | the Developer card |
 | `apex_config.cpp` | settings load / save, profile capture | `[qol.frame_profiler]`, `[developer.frame_profiler]`; `enabled` forced off on load and import |

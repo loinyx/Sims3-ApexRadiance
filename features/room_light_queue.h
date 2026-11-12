@@ -37,7 +37,8 @@ bool QuickPass();
 bool Refining();
 // A burst's quick pass is running: changed room maps hold their fade until every room shows it (any thread)
 bool QuickPassPending();
-// Render thread: the current room of the light tree is being solved (its maps are being written)
+// Render thread: the current room of the light tree, a lamp edit's (LevelLightShare::EditUrgent), is being solved (its maps
+// are being written)
 bool SolveInProgress();
 // Render thread: that room (null when SolveInProgress is false)
 const void* SolvingRoom();
@@ -57,9 +58,12 @@ void NoteSolveStart(const void* room);
 // Render thread: the room's last finished solve began after the edit whose LampMarkFilter::EditSerial is `since` (12/10: was
 // the switch serial); true when not known on this thread
 bool SolvedSince(const void* room, unsigned long since);
-// Render thread (LotLightingMotion's lot budget): the light tree's current room is a lamp edit's (LampUrgency > 1); false on
-// any other thread
+// Render thread (LotLightingMotion's lot budget): the light tree's current room is a lamp edit's (LevelLightShare::EditUrgent:
+// urgent, not a quiet mark); false on any other thread
 bool CurrentRoomUrgent();
+// Render thread: GetTickCount at the room's last solve end seen on this thread (0: none, or another thread)
+unsigned long SolveEndedAt(const void* room);
+void GroundFirst(const void* room0); // an active-lot switch: no other room is picked while this ground room 0 waits (states 1-2), at most 1 s
 // Render thread: that room is being solved at a higher class than the one on screen (the quick pass's refinement): the
 // maps it writes are not the ones shown, and hold the room's light from before the edit
 bool SolveRefiningUp();
@@ -69,6 +73,11 @@ bool PlayedLot(uintptr_t mgr, bool* known);
 // GetTickCount when a room of the played lot on or below the camera's story was last seen still waiting for its solve
 // (0: never). Any thread.
 unsigned long PlayedRoomWaitingAt();
+// Microseconds the drain (point 4) has spent since the game started. Any thread (the Frame Profiler's per-frame timeline).
+long long DrainMicros();
+// Render thread: a lamp edit's rooms were waiting at the last drain (the burst that logs "Lamp edit: its rooms settled");
+// false while the drain is off
+bool EditBurstOn();
 // Development build: status lines
 void RenderDeveloperUI();
 }

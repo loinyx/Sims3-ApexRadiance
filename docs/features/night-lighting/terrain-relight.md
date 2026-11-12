@@ -11,7 +11,7 @@ light the ground through their cones, as they light the lot. Part of [Night Ligh
 
 | | |
 |---|---|
-| Availability | Released (visitor patch, arm sites and dusk rebuild since 0.1.0; paced sweep default since 2.5.3; local relight of user and visible-lot edits since 2.5.4; world-owned type-11 lamps since 2.5.6; day/night endpoint rebuilds, Build-mode phase response, priority re-queue of in-flight chunks and the world-lamp rig request on early completion since 2.6.0). Changed in 2.7.0: the world-load and Refresh terrain rebuilds run one chunk per frame, nearest first; a lamp switch's ground changes in one frame; urgent chunks go back to back. Lot area lights in the bake and lamps on the ground stamped from 40 cm: Released in 2.15.1. No lamp edit budget for lamps switched on the load screen: Released in 2.15.3 Released in 2.18.0: lamp cones in the bake, a dragged lamp's ground light drawn on the GPU, moves under 5 cm added up. Released in 2.18.1: only the dragged lamps' own changes skip the relight. Released in 2.18.4: a lamp picked up again during its release keeps its stamp; the stamps follow the lot's baked lamps no room-0 list holds. |
+| Availability | Released (visitor patch, arm sites and dusk rebuild since 0.1.0; paced sweep default since 2.5.3; local relight of user and visible-lot edits since 2.5.4; world-owned type-11 lamps since 2.5.6; day/night endpoint rebuilds, Build-mode phase response, priority re-queue of in-flight chunks and the world-lamp rig request on early completion since 2.6.0). Changed in 2.7.0: the world-load and Refresh terrain rebuilds run one chunk per frame, nearest first; a lamp switch's ground changes in one frame; urgent chunks go back to back. Lot area lights in the bake and lamps on the ground stamped from 40 cm: Released in 2.15.1. No lamp edit budget for lamps switched on the load screen: Released in 2.15.3 Released in 2.18.0: lamp cones in the bake, a dragged lamp's ground light drawn on the GPU, moves under 5 cm added up. Released in 2.18.1: only the dragged lamps' own changes skip the relight. Released in 2.18.4: a lamp picked up again during its release keeps its stamp; the stamps follow the lot's baked lamps no room-0 list holds. Changed in 3.1.2: the lamps of a lot that leaves Detailed View stay on the ground until it is detailed again (the LOD hold, at night); a lamp the hold cannot keep is not taken as an edit, and the lot's entry relight updates its ground. |
 | Default | On |
 | Menu | Lighting > Outside > Ground & Lots > *Lot lamps light the street*; Lighting > Game fixes > Ground & Lots (*Update at dusk*, *Delay after dusk*); Lighting > Overview > Refresh lighting |
 | Configuration | `[patches.NightTerrainRelight]` in `ApexRadiance.toml` (keys below) |
@@ -64,6 +64,11 @@ Reverse-engineering summary (Steam 1.67.2.024037; details in
 8. **Dragged lamps on the GPU.** While a lamp of the active lot moves, the bake leaves it out and the GPU smoothing draws
    its ground light into the chunk maps; once it stays put, one local relight bakes it again (see
    [Dragged lamps on the GPU](#dragged-lamps-on-the-gpu)).
+9. **Keep the lamps of lots leaving Detailed View.** When the camera moves, the game drops lots out of its detailed
+   slots and disables their lamps while they stay lit. At night the bake keeps those lamps as they were until the lot is
+   detailed again, so the ground under and around the lot keeps its light. The demotion queues no relight; the promotion
+   queues the lot's bounded entry relight once (see the LOD hold in
+   [Lamp change tracking](#lamp-change-tracking-lotlightbridgetracklotlampedits-every-light-enumeration)).
 
 ## Settings
 
@@ -119,10 +124,10 @@ gives it. `BakePosStub` replaces the copy of the light's position into its shade
 at install) with `call BakePosStub; nop x5`: it makes the same copy and, for a lot lamp (lot id != 0, types 3..6, 9, 10)
 whose light stands less than 40 cm over its lot's ground and not 0.5 m under it, stamps it from 40 cm
 (`TerrainBakeRule::StampHeight`; the ground is the lot base, manager `+0xD4`, from the soft lot edges' table,
-`LotLightBridge::LotGroundY`, read again once a frame for a lot it lacks). EAX, ECX, EDX and the flags are dead there; xmm1..7
-are kept. The world grass, the atlas, snow (atlas x 4), the soft lot edge and Classic then agree with Instant's lifted floor
-map. Optional (a warning if the bytes differ); the developer A/B is a switch edit (one rebuild). Shows after the next
-terrain rebuild of the lamp's chunks (placing or moving a lamp rebuilds them).
+`LotLightBridge::LotGroundY`, read again once a frame for a lot it lacks; a lot that left it keeps its last base). EAX,
+ECX, EDX and the flags are dead there; xmm1..7 are kept. The world grass, the atlas, snow (atlas x 4), the soft lot
+edge and Classic then agree with Instant's lifted floor map. Optional (a warning if the bytes differ); the developer A/B
+is a switch edit (one rebuild). Shows after the next terrain rebuild of the lamp's chunks (placing or moving a lamp rebuilds them).
 
 ## Limitations
 
@@ -133,6 +138,20 @@ terrain rebuild of the lamp's chunks (placing or moving a lamp rebuilds them).
 - Animated lamps (3 automatic changes within 60 s) do not trigger work; their state reaches the ground with the next
   rebuild made for another reason, or after 2 min without an automatic change.
 - The first-observation baseline of a newly seen lot is an assumption about the current bake, not a readback.
+- The LOD hold keeps only lamps seen in the bake while their lot was detailed: a lot not detailed since its lamps came
+  on has no lamp light on the ground, as before. Non-Steam builds, or more than 16 detailed lots, start no hold.
+  Entering the edit mode ends every hold (a local relight, or a paced sweep for more than 16 chunks), and lots demoted
+  while editing lose their ground light as before. A lamp deleted outside the edit mode while its lot is demoted keeps
+  its light until the lot has been detailed for 30 s, the day comes or the lamp leaves the lamp list. Rooms that take an
+  outdoor lamp through their openings (`ObjectLampColourAt`) do not take a held lamp.
+- A chunk re-rendered between a demotion and the next lamp read (up to 20 frames; another lot's relight, a paced sweep or
+  the game's own re-render on a LOD change, which the chunk thunk does not report) leaves the lamp out until the
+  promotion's entry relight, as before the hold. That entry relight runs only while the lot is drawn, and is dropped
+  after 8 s of refusals; the ground then waits for a later relight of the lot.
+- Held lamps stay in the per-pixel lamp lists (`g_allLamps`, the trees' list) until their hold ends, so after a night pan
+  these lists hold the lamps of every lot demoted since dusk, not only the detailed lots'. `SelectLamps` memo misses,
+  crown matches and tree picks scan them in full, mostly while the camera moves; the cost is not measured yet
+  ([open checks](../../validation/night-lighting-terrain-relight.md#open-checks)).
 - A local relight is refused (full path instead) for more than 16 chunks or a quarter of the world, a lamp rect that does
   not hold its lamp, a lot the last rebuild did not have, or an unexpected terrain layout. Arrival work is never escalated
   to a full rebuild.
@@ -169,7 +188,7 @@ terrain rebuild of the lamp's chunks (placing or moving a lamp rebuilds them).
 
 | Function | Replaces | Accepts |
 |---|---|---|
-| `TerrainLightTest(light)` (visitor 0xC29626) | vfunc+0x20 | A lot-owned outdoor type-11 lamp (lot id != 0, room known 0x04, room 0) is refused unless flags have 0x01 alive, 0x20 lit and 0x40 enabled (its vfunc+0x20 is `FUN_007EAEA0`, always true). Then the original test (world lights). With `luzDoLoteNaGrama`: `IsOutdoorLotLamp` and lit (+0x100 & 0x20). Counters "on the ground" (`g_lotLampsBaked`) and "off" (`g_lotLampsSkippedOff`) |
+| `TerrainLightTest(light)` (visitor 0xC29626) | vfunc+0x20 | A lot-owned outdoor type-11 lamp (lot id != 0, room known 0x04, room 0) is refused unless flags have 0x01 alive, 0x20 lit and 0x40 enabled (its vfunc+0x20 is `FUN_007EAEA0`, always true). Then the original test (world lights). A lamp the LOD hold keeps (`LotLightBridge::LodHeld`, asked only for an alive, lit, disabled outdoor lot lamp) is taken without 0x40: type 11 by the original test, the lamp classes with `luzDoLoteNaGrama`. With `luzDoLoteNaGrama`: `IsOutdoorLotLamp` and lit (+0x100 & 0x20). Counters "on the ground" (`g_lotLampsBaked`) and "off" (`g_lotLampsSkippedOff`) |
 | `ArmTest(light)` (0x6B6516, 0x6B60D3, 0x6B6618) | vfunc+0x20 | World lights, or outdoor lot lamps with `luzDoLoteNaGrama` (counted in `g_lotLampArms`, "armed") |
 
 `IsOutdoorLotLamp(L)`: lot id (+0xC0 | +0xC4) != 0, type +0xB0 in 3..6, 9 or 10 (`TerrainBakeRule::LotLampType`), flags +0x100 with 0x01 alive, 0x40 enabled,
@@ -193,6 +212,8 @@ terrain rebuild of the lamp's chunks (placing or moving a lamp rebuilds them).
 5. **Phase cycle** (`TerrainLightingPolicy::Cycle`): phases Day (< 0.01), Twilight, Night (> 0.99). Reaching a settled
    endpoint different from the last one schedules a rebuild after `PhaseDelay` (`atrasoSegundos`, 0 while editing);
    reversing direction cancels it; disabled or loading cancels it. Consumed: `RebuildAll("dusk" | "daylight transition")`.
+   Before it, `LotLightBridge::KeepDemotedLamps(phase != Day)`: the first day frame ends every LOD hold, so the daylight
+   rebuild bakes without them.
 6. **Load rebuild**: live for 1 s and the level within 0.02 for 1 s (or 20 s after live): `Kick` with reason "world load"
    or "world load (night: also the dusk rebuild)"; a scheduled endpoint rebuild is merged. Always a full rebuild.
 7. Camera sample, snapshot capture, lamp-switch boost, new edits (`NoteEdit`), adoption of new lots into the snapshot,
@@ -225,7 +246,9 @@ assumed (a save loaded by day keeps a lamps-off terrain light).
 |---|---|
 | Moved | More than 5 cm (`kMoveTol`), both in the bake: user-driven. A smaller move of a lamp in the bake keeps the place and rect last compared, so the small steps of a drag add up and count once the lamp has moved 5 cm in all |
 | Light changed (automatic) | More than 5% relative per channel with an absolute floor of 0.05 (`kLightRel`, `kLightAbs`) |
-| Priority value edit | Exact comparison (`LightChanged`) for: Build mode editing; type-11 edits on the same lot (lot-owned any change, world-owned light, enable or zero-intensity change); ordinary enable switches (0x40 or intensity through 0, `ObservedEnableSwitch`); any change of a plain lamp on a visible lot. Resets the animated state |
+| LOD hold | A lamp whose lot is not detailed (+0xC1 clear) and that goes from in the bake to flags with only 0x40 and 0x02 cleared (0x77 -> 0x35, 0xF7 -> 0xB5: alive, lit, same colour, intensity, range, place and lot) stays in the bake (`LodHolds`, read in `ReadEnumeratedLamps`): baked in the snapshot, taken by the bake's light test (`LodHeld`), not counted. It ends, counted as a switch-off, when anything of the lamp changes (the lit bit too), its lot has been detailed for 30 s with the lamp still disabled, the edit mode starts (`ChunkRelight::Editing`: a lamp deleted there keeps 0x40 clear and would not show) or the first day frame comes (`KeepDemotedLamps`; whether a demoted lamp's lit bit clears at dawn is unverified). When 0x40 comes back with nothing else changed, the hold ends with the lamp still in the bake, not counted, and the lot becomes a lot arrival: a chunk re-rendered while the lamp was disabled (before the read that started the hold, by the game's own re-render, or a bake gate) may have left it out, so its entry relight bakes it again once. A held lamp that leaves the lamp list (its lot unloaded or bulldozed) is a user-driven change at once, and its lot stays among the snapshot's settled lots for 60 s, so `DiffBake` lists the removal even when the whole lot is gone. Holds start only at night or twilight, once the world is live, outside the edit mode and with the detail set known. A held lamp's per-pixel rows (roofs, water, trees, outdoor objects) keep the fade it had while enabled, at most the light manager's level now (`HeldFade`). The low-lamp lift finds a held lamp's ground although its lot left the light tree: `LotGroundY` keeps each lot's base last read since the world change |
+| Detailed View demotion | A lamp the LOD hold does not keep (by day, in the edit mode, or changed in the same read) that goes out of the bake on a lot that left Detailed View within 2 s and is not detailed (`ReadDetailSwitches`, `DetailOf`). The detail request `0x00AC20E0` stores Lot+0xC1, then posts `AddLotObjectsToScene` or the demotion through `PostRemoteMethodCall`; a demoted lot's lamps then clear their enabled bit 0x40 (flags 0x77 -> 0x35 or 0xF7 -> 0xB5) within a second. Not counted, on purpose: no settle or bulk gate, no rebuild, no animated count. The lot becomes a lot arrival, so its entry relight updates its ground while the lot is drawn (that the lot pass still draws a demoted lot is unverified). When the arrival does not run (lot not drawn, by day, refused for 8 s), the ground keeps the lamps' light until a later relight covers the lot. The lot's rooms still gather again (`RelightLotById`). Lamps of a promoted lot keep the priority value edit path, so the street around it lights right after the flip. The lots with +0xC1 are read at each enumeration from the lot renderers' map (the global that `LotLodScoring` loads first; `TransitionWatch::ReadLots`, Steam only), the one detail signal for this route and the hold: exact and read with the lamps, where a lot's light tracker only follows its loading; unreadable, or more than 16 detailed lots (the `ReadLots` cap): no demotion is recorded and no hold starts |
+| Priority value edit | Exact comparison (`LightChanged`) for: Build mode editing; type-11 edits on the same lot (lot-owned any change, world-owned light, enable or zero-intensity change); ordinary enable switches (0x40 or intensity through 0, `ObservedEnableSwitch`); any change of a plain lamp on a visible lot. Not for a Detailed View demotion. Resets the animated state |
 | Animated | 3 automatic changes within 60 s; expires after 120 s without one |
 | Settled lot | Seen for 10 s and no uncounted change for 5 s; required unless the change is an observed value edit with no addition or removal on that lot |
 | Observed value edit | A player-driven value change, or a counted move, of a known lamp with no addition or removal on its lot. Moves count so that a drag reaches the ground on a lot that would not settle: its ignored changes (a pick-up, or a neighbour's lamps switching in the same read) restart the 5 s settle time at every move. Counts only once the world is live (`LevelLightShare::WorldIsLive`, set by `OnWorldLive`), as the addition and removal path already requires: a lamp the game switches on the load screen is not taken as an edit and does not put the lot's rooms on the lamp edit budget |
@@ -234,17 +257,18 @@ assumed (a save loaded by day keeps a lamps-off terrain light).
 | World lamps (lot 0) | `WorldLampPolicy::AcceptEdit`: observed value edits only, no additions or removals |
 
 Additions, removals, moves and priority value edits are user-driven; the rest is automatic. A late lamp registration on a
-visible lot, a lot's first visibility, and reappearance after 2 s without a draw are lot arrivals (visibility expires
-500 ms after the last regular lot-pass draw).
+visible lot, a lot's first visibility, reappearance after 2 s without a draw, a Detailed View demotion and a held lamp
+enabled again are lot arrivals (visibility expires 500 ms after the last regular lot-pass draw).
 
 ### Snapshot (`DiffBake`)
 
 `g_baked` holds the lamps the last rebuild baked. `DiffBake(g_baked, current, plainLamps, priorityLots)` looks only at
-settled lots present in the snapshot; lamps are matched by type and place (5 cm), not pointer. Changes listed: removed
-or moved away (old rect), placed or moved here (new rect), switched on / off, light change (exact for pending priority
-lots, else the 5% rule); animated lamps are counted but not listed. `AdoptNewLots` adds lots first seen after the last
-rebuild with their first observed state, except lots in the pending priority edit. A finished local batch updates only
-its changed lamps (`CoverLots`), so small unrelit changes still add up.
+settled lots present in the snapshot (and, for 60 s, lots whose held lamps left the lamp list); lamps are matched by
+type and place (5 cm), not pointer. Changes listed: removed or moved away (old rect), placed or moved here (new rect),
+switched on / off, light change (exact for pending priority lots, else the 5% rule); animated lamps are counted but not
+listed. `AdoptNewLots` adds lots first seen after the last rebuild with their first observed state, except lots in the
+pending priority edit. A finished local batch updates only its changed lamps (`CoverLots`), so small unrelit changes
+still add up.
 
 ### Decision rules (`DecideEdit`, once quiet)
 
@@ -440,7 +464,7 @@ The root getter, visitor, arm sites, room queue and light enumeration are listed
 | | `QueueAllLotOutdoorRooms` | Lot relight |
 | terrain_chunk_relight.cpp | `ChunkRelight::Init`, `QueueLocal`, `QueueSweep`, `OnPresent`, `OnChunkRendered`, `OnFullRebuild`, `OnWorldChanged`, `Drop`, `Busy`, `Editing`, `LikelyAvailable`, `Status`; `Attach`, `Check`, `ReleaseLimit`, `FinishFlight`, `Fail`, `ReadViewRaw`, `ReadChunkRaw`, `LayoutOk`, `BakeRectRaw`, `GatesRaw`, `ScanFlagsRaw`, `WriteFlag54` | Selection, validation, paced release, completion, timeout |
 | terrain_lighting_policy.h | `DeferDayEdit`, `PhaseDelay`, `PreviewPriorityChunks`, `Phase`, `LevelPhase`, `Cycle` | Day/night policy |
-| lot_light_bridge.cpp | `ReadLotLamp`, `InBake`, `TrackLotLampEdits`, `ObservedEnableSwitch`, `DiffBake`, `AdoptNewLots`, `LampsOfLots`, `CoverLots`, `BakeTakes`, `TakeLotArrivals`, `LotVisible`, `RequestLampEditRefresh`, `LampSwitches` | Lamp tracking and snapshot |
+| lot_light_bridge.cpp | `ReadLotLamp`, `InBake`, `TrackLotLampEdits`, `ReadDetailSwitches`, `DetailOf`, `LodHolds`, `HeldFade`, `LodHeld`, `KeepDemotedLamps`, `ObservedEnableSwitch`, `DiffBake`, `AdoptNewLots`, `LampsOfLots`, `CoverLots`, `BakeTakes`, `TakeLotArrivals`, `LotVisible`, `RequestLampEditRefresh`, `LampSwitches` | Lamp tracking and snapshot |
 | world_lamp_policy.h | `Eligible`, `AcceptEdit`, `Track` | [World lamp response](world-lamp-response.md) |
 | night_terrain_relight_patch.cpp | `BakeTest`, `BakeLiftHead`, `BakeLightRows`, `BindConeShader`, `IsGameBakePs`, `AllStamped`, `GiveBackBakeRows`; `NightTerrainBake::SetExcluded`, `Excluded`, `EverBaked`, `ConeShader`, `StampOf` | Bake exclusion list, cone shader |
 | terrain_stamps.cpp | `TerrainStamps::Update`, `ForChunk`, `Clear`, `Status`, `LastLights`, `LampState` | Dragged lamps on the GPU |
@@ -450,13 +474,13 @@ The root getter, visitor, arm sites, room queue and light enumeration are listed
 
 Developer > Lighting > *Rebuild events and terrain tests*: last event; night level and countdowns; "Terrain: armed /
 rebuilt / last: reason: armed -> rebuilt ms"; "World load: ... | night level crossings"; "Lamp changes: counted /
-ignored / not counted (outside the bake, below the threshold, animated) / last"; "Lamp change decisions: rebuilt U
-user-driven / A automatic | skipped ... | deferred: camera, rate-limited | pending | camera | last rebuild's lamps: N
-lamps on K lots, taken S s ago | last"; "Chunk re-render notices"; the two developer checkboxes; "Local terrain relight:
-relit locally U / A, done, refused (last), failures | paced sweeps"; "Terrain chunks: <ready | why not> | local relights,
-sweeps, chunks re-rendered (by another game path), refused, failures | queue, in flight | chunk render: last / average /
-max ms | waits: rebuild flags, terrain not ready, 8 per second | sweep renders seen | last"; lot relights; "Lot lamps:
-armed | on the ground | off".
+ignored / not counted (outside the bake, below the threshold, animated) / kept in the bake after a Detailed View
+demotion / last"; "Lamp change decisions: rebuilt U user-driven / A automatic | skipped ... | deferred: camera,
+rate-limited | pending | camera | last rebuild's lamps: N lamps on K lots, taken S s ago | last"; "Chunk re-render
+notices"; the two developer checkboxes; "Local terrain relight: relit locally U / A, done, refused (last), failures |
+paced sweeps"; "Terrain chunks: <ready | why not> | local relights, sweeps, chunks re-rendered (by another game path),
+refused, failures | queue, in flight | chunk render: last / average / max ms | waits: rebuild flags, terrain not ready,
+8 per second | sweep renders seen | last"; lot relights; "Lot lamps: armed | on the ground | off".
 
 Log (normal mode): `World loaded`, `Rebuild armed`, `Terrain rebuilt (...) N ms after it was armed`, `Terrain sweep
 started / done`, `Local relight done: ...`, `Paced sweep not possible`, `[ChunkRelight] <why>: queue dropped, ...`.

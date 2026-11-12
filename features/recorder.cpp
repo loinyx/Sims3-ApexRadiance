@@ -138,7 +138,7 @@ void SceneHook(bool on) {
     g_sceneHooked = on;
     if (on) PostScene::Add(PostScene::kRecording, SceneBoundary, false);
     else PostScene::Remove(SceneBoundary);
-    PostScene::WantCamera(on);
+    PostScene::WantCamera(on, true);
 }
 
 // (development builds, release_debug_buffers) Once a recording is saved or cancelled its lines (up to 60000 strings), views,
@@ -567,7 +567,8 @@ std::string CameraLine(DWORD now) {
     return s;
 }
 
-// The camera of the frame just drawn, when it changes. The eye is the game's own: the view-projection may be the mirrored copy
+// The camera of the frame just drawn, when it changes. The eye is the game's own: the view-projection is the mirrored copy only
+// when no plain block was seen (RecentCameraViewProj prefers the unmirrored camera)
 void CameraNote(DWORD now) {
     float vp[4][4], eye[3] = {};
     if (!PostScene::RecentCameraViewProj(vp)) return;

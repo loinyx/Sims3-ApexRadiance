@@ -1,25 +1,19 @@
 #pragma once
-// Production lot-detail range/capacity control.
-// Applies validated WorldManager values without the diagnostic metric probe:
-//   +0xDC Lot LOD distance
-//   +0xE4 Max Active Lots
-// Values are captured per live WorldManager, guarded before writes, maintained only while Apex still owns them,
-// and restored on a clean disable/unload.
+// Extended lot detail: the Lot LOD distance (WorldManager +0xDC) of each live WorldManager. The value is captured per
+// WorldManager, guarded before writes, maintained only while Apex still owns it and restored on a clean disable/unload.
+// The game's own Max Active Lots option (+0xE4) is left alone.
 //
-// EA 1.69 validation baseline: distance 300, max detailed lots 16.
+// EA 1.69 validation baseline: distance 300.
 
 #include <string>
 
 namespace LotDetailRange {
 
 inline constexpr int kDefaultDistance = 300;
-inline constexpr int kDefaultMaxActiveLots = 16;
 inline constexpr int kMinDistance = 70;
 inline constexpr int kMaxDistance = 300;
-inline constexpr int kMinActiveLots = 8;
-inline constexpr int kMaxActiveLots = 16;
 
-bool Start(int distance, int maxActiveLots, std::string* error = nullptr);
+bool Start(int distance, std::string* error = nullptr);
 void Stop();
 void Tick();
 bool Running();

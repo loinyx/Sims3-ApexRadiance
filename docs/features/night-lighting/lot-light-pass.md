@@ -8,7 +8,7 @@ border. Near the border the two sides blend over 3 m, so a lamp standing next to
 
 | | |
 |---|---|
-| Availability | Released (part of Night Lighting since 0.1.0). Lot UV alignment, daylight terrain term and the constant-read guard: Released in 2.6.0. Rain and other weather variants recognised (exact rain variant and by structure): Released in 2.7.0. Lamp shade on lot ground (*Walls shade lamp light near the ground*) and lamps through the outside walls' openings: Released in 2.13.0. Crown shade from trees and bushes: Released in 2.14.0. A shade that takes only the light of the lamps a wall blocks, closed gates and narrow fence gaps, the room mask and lamp shade on snowy lots, the lot map aligned on each axis, *Indoor light adds to the ground*, and a lot's shade shown with its chunks' texels: Released in 2.15.3. Verified winter terrain layouts and exact fence-gap length reuse: Released in 2.15.6. Light past 1 with the walls' shade on it: Released in 2.16.0. Fence grid and half-float reads without x87 control-word calls: Released in 2.16.2. Released in 2.18.0: mesh fences pass their open share, fence gaps and gates only for real gates, shade updates within a quarter second. Released in 2.18.1: a fence type removed whole drops its shadow with the camera still. Released in 2.18.3: a wall's shade on the world grass continuous past the lot's edge. Released in 2.18.4: the lamp shade built on the GPU, a dragged lamp's wall shadows every frame, crowns holding a lamp's head left out. |
+| Availability | Released (part of Night Lighting since 0.1.0). Lot UV alignment, daylight terrain term and the constant-read guard: Released in 2.6.0. Rain and other weather variants recognised (exact rain variant and by structure): Released in 2.7.0. Lamp shade on lot ground (*Walls shade lamp light near the ground*) and lamps through the outside walls' openings: Released in 2.13.0. Crown shade from trees and bushes: Released in 2.14.0. A shade that takes only the light of the lamps a wall blocks, closed gates and narrow fence gaps, the room mask and lamp shade on snowy lots, the lot map aligned on each axis, *Indoor light adds to the ground*, and a lot's shade shown with its chunks' texels: Released in 2.15.3. Verified winter terrain layouts and exact fence-gap length reuse: Released in 2.15.6. Light past 1 with the walls' shade on it: Released in 2.16.0. Fence grid and half-float reads without x87 control-word calls: Released in 2.16.2. Released in 2.18.0: mesh fences pass their open share, fence gaps and gates only for real gates, shade updates within a quarter second. Released in 2.18.1: a fence type removed whole drops its shadow with the camera still. Released in 2.18.3: a wall's shade on the world grass continuous past the lot's edge. Released in 2.18.4: the lamp shade built on the GPU, a dragged lamp's wall shadows every frame, crowns holding a lamp's head left out. Released in 3.1.2: fence groups keyed by their pieces, the fence grid built at most once a frame and its gaps and the lots' shades only when the walls change. |
 | Default | On |
 | Menu | Lighting > Game fixes > Ground & Lots > *Street lamps light lots* |
 | Configuration | `[patches.NightTerrainRelight]` `luzDoPosteNaGramaDoLote` in `ApexRadiance.toml` |
@@ -283,7 +283,10 @@ shade exact.
 
 **Garden walls and fences** (2.13.1). A brick garden wall let a post's light over the grass behind it: garden walls are
 fences for the game, not in the outside-wall copy. `DrawInstanced` notes each instanced group it draws (`NoteFenceGroup`,
-read again every 60 s, dropped after 20 s unseen): the mesh's box over the draw's vertex range (POSITION0 / w) and, per
+read again every 60 s, dropped after 20 s unseen; with more than 4096 groups, after 2 s unseen). A group is keyed by
+every byte of its instance records and its mesh, not by its place in a buffer: the game refills its instance buffers,
+so a place held other pieces from one draw to the next and every draw made a new group. While a buffer is busy
+(`draw_reads_nowait`), the group last read at that place is used. A group holds the mesh's box over the draw's vertex range (POSITION0 / w) and, per
 instance, its place (POSITION1) and turn (POSITION2 = cos, slope, sin; world = (px c - pz s, py + px k, px s + pz c) + place,
 VS_21C41B90 of F7 2026-10-13 11-50-47). Each piece becomes a wall along its longer side from its base to its top, so the
 shade follows each wall's own height (the lamp is tested over every wall's top). Posts (under 0.3 m both ways) and thick
@@ -316,8 +319,11 @@ higher base to the lower top of the two pieces; no new gate is noted while a lam
 or over a gap does not close it. A gap between two mesh fences passes the lower of their open shares. A gate stays while
 its gap does; it goes only when it has not been drawn for 30 s while the fence on both sides was drawn in the last 2 s, so
 off screen it stays closed. Gaps narrower than 0.4 m (a post, pieces a few cm short) are always closed. Developer builds log the gaps, the gates and the objects near a gap that were not taken.
-The fence grid is built again whenever a fence group changes, which happens often while the camera pans; its piece
-lengths and end distances use `ApexMath::Hypot` ([`features/fast_math.h`](../../../features/fast_math.h)), a double
+The fence grid (`FenceGridUpdate`) is built again after a fence group changes, at most once a frame, with its pieces in
+a fixed order (by place; of two groups holding a piece, the lower key), so the same walls give the same grid and gaps
+whatever groups hold them. The gaps are found again, and the lots' shades checked as changing, only when the walls
+themselves change (a hash of every piece's ends, heights and open share; `g_fenceSetGen`); with the same walls the gaps
+keep their place and take the groups that hold their pieces now. The grid's piece lengths and end distances use `ApexMath::Hypot` ([`features/fast_math.h`](../../../features/fast_math.h)), a double
 `sqrtsd` of the exact squares, instead of `std::hypot`, whose x87 CRT path sets and restores the FPU control word on
 every call (`__ctrlfp` and `__hypothlp` were the hottest Apex samples of the "Render frame (game)" hitches). The results
 are the same bits. The half-float vertex and texture reads (`ReadElement`, the light probe, the outdoor delta) scale by

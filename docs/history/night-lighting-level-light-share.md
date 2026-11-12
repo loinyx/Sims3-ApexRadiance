@@ -956,3 +956,93 @@ under-floor share computed on the render thread, 22-31 ms in one frame. A big lo
 or multiplier, or the threshold, changes or the map is rebuilt; a room's send count resets only after it held a kept
 solve for 10 s; a shown map waits up to 500 ms for the worker's share. One session each; not measured again after the
 changes.
+
+### 2026-11-11: floor mask sums off the render thread, and false lamp edits
+
+**Context:** Frame Profiler runs on 3.1.2 development builds
+([frame profiler](frame-profiler.md#2026-11-11-every-dispatch-timed-in-the-presets-and-the-312-analyses)).
+
+**Finding:** a story with more lamps than one GPU batch computed its floor mask's "all" values for every masked texel and
+lamp inside the buffer lock on the render thread when its lamps changed: hitches of 105 and 255 ms. Separately, the lot
+just left and lots streaming in were sent to their solve as lamp edits: `RegatherOutdoorById` always queued tier 2 and
+`DropAll` sent every story's room 0 at tier 1, so the played lot's urgent rooms opened 8 s lamp-edit windows at about
+10 ms of room solves a frame with nothing edited.
+
+**Outcome:** kept (`47d04a7e`). A worker computes "all" with the render thread's floating-point state; the map keeps
+what it shows until the values arrive, a rebuild with the same points keeps them, and the render thread computes them
+only after 2 s of changing lamps. A lot's outdoor regather is urgent only for a lot leaving the lots next to the active
+one or within 1.5 s of a lamp edit (the GPU's and the delta's included); the lot just left is sent urgently only when
+the GPU took an edit there. Not yet checked in game
+([validation](../validation/night-lighting-level-light-share.md#open-checks)).
+
+### 2026-11-11: frames that drop or swing while the camera moves
+
+**Question:** the frame rate stayed steady with the camera still and dropped or swung while panning, turning or zooming
+out.
+
+**What we found:** a multi-agent reading of a 30-minute development session found the minutes marked still were all out
+of focus (the engine sleeps 10 ms a frame then), so the still baseline came from an earlier profiler run instead. In focus,
+frame time followed the draw count (about 3.3 us a draw, at most half of it Apex's draw callbacks). Crossing lot borders
+while panning switched Real-time outdoor lamps' active lot: 12 switches in 22 s, 10 of them followed by "Lamp edit"
+room-solve windows of 3 to 16 ms a frame for 0.5 to 8 s with no lamp edited, because every lot next to the old one was
+sent to gather at a lamp edit's priority. The Frame Profiler kept per-frame detail only for hitches (over twice the median
+of 120 frames), so a sustained slowdown while moving raised the median and stayed unrecorded.
+
+**Outcome:** the Frame Profiler writes a per-frame timeline (ApexRadiance_FrameTimeline.csv, with camera motion, focus,
+the room-queue drain, edit windows and the pick readback). The development switch `active_lot_hold` keeps the active lot
+while the camera moves until another has led for 1.5 s or the camera has been still for 300 ms, and Quick outdoor lamp
+edits follow the same lot during a hold (a first version left the two pickers apart, which a review caught). Unmeasured
+in game.
+
+### 2026-11-11: an active-lot switch opened a lamp edit
+
+**Context:** a Frame Profiler timeline of a development session where panning across lots dropped frames, checked
+against the log of a second session on the same build.
+
+**Finding:** moving with a lot loading, frames with a lamp edit pending and nothing edited averaged 28.2 ms (8.7 ms of
+the lot's room solves a frame) against 15.4 ms (1.4 ms) without. The cause is an active-lot switch: `DropAll`
+publishes no lots next to the active one, so every old neighbour regathers as a leaver with `RegatherOutdoorById(lot,
+true)`, at the edit's tier 2. When the new active lot was one of them, its outdoor rooms were urgent rooms of the played
+lot, so `LampEditPending` held the drain's and the lot pass's edit budgets until they were solved, up to 8 s. In the
+second session's log two of three such runs start right after a switch; the first has no neighbour line, so its trigger
+is unverified.
+
+**Outcome:** kept. Urgency that comes only from the caller, with no lamp edit in the last 1.5 s, marks the rooms quiet:
+the same tier 2 and gather at once, so the same place in the queue and the game's full solve, but no lamp edit, no
+place in the edit hold's count and no `kEditMovingMs` for the played lot's pass (`RoomLightQueue::CurrentRoomUrgent`
+reads `EditUrgent`); a quiet mark leaves an edit's entry unchanged and evicts none from a full urgent list. Real-time
+outdoor lamps' own room-0 sends after a switch (for the occluders, or a kept solve) take quiet marks on the same 1.5 s
+rule, and the edit hold keeps no quiet room's maps (`SolveInProgress`). The played lot's room 0 now takes the lot-entry
+budget instead of the edit's, so each switch logs how long the new lot's first room-0 solve takes after it. The frame
+gain and that time are not yet measured, and nothing is checked in game
+([validation](../validation/night-lighting-level-light-share.md#open-checks)).
+
+### 2026-11-11: the active-lot hold ended for a lot with no solve shown
+
+**Context:** the same second session's log, with the development switch `active_lot_hold` on.
+
+**Finding:** a hold ended after 31 ms because a story of the lot waiting showed class 4: no solve shown yet, so no map a
+relit copy stands in for and no lamp posts to lose. A hold of 16 ms ended for a lot whose kept solve was of the other
+kind (it had been a lot next to the active one).
+
+**Outcome:** kept. Only a class 0 to 2 shown with no copy left ends the hold; at class 4 the hold goes on while the game
+solves the room. The other case stays as it was: extending it is safe only while that lot's regather is unsolved, and
+`RoomLightQueue::SolvedSince` keys on edit serials, not switches, so nothing can tell yet. Not checked in game.
+
+### 2026-11-12: active-lot switches back and forth near lot borders
+
+**Context:** a recording at night with the public build, camera near the borders of three lots.
+
+**Finding:** the game lights one lot at a time at the high quality and moves it with the camera, so the active lot
+switched 27 times, 13 undone within 2 s, twice 4 switches in under 1 s. Each switch drops every relit map (60 maps), the
+GPU room lamps and the pins, and sends the 4 lots next to it to gather twice. Unpinned, the lot left lost its kept room-0
+solves within about 1 s (27.5 MB for one story), so a return took a 3.3 s full solve of that story. Separately the active
+lot's pinned records filled the 96 MB budget, so each base-only record of a lot next to it (0.1 to 0.4 MB) evicted
+another: 55 drops, 18 in about 1 s, each sent again to its solve with nothing changed.
+
+**Outcome:** kept, not measured in game. `active_lot_hold` ships (a replay of the logged switches: 26 to 7, both
+sub-second clusters gone) and logs each hold in public builds; the lot left keeps its room 0s' kept parts for 20 s
+within the 160 MB pinned ceiling, which helps a return only before a room 0 of it is solved again as a lot next to the
+active one (that solve keeps only the base and replaces the full record, as at 01:24:05 to 06 in the capture); base-only records have their own 16 MB allowance outside the 96 MB
+(`OutdoorDeltaModel::BudgetVictim`, checked offline); the new lot's ground room 0 is solved first after a switch
+([validation](../validation/night-lighting-level-light-share.md#open-checks)).

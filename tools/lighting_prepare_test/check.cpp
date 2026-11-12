@@ -13,7 +13,7 @@
 #include <cassert>
 namespace ApexMath { float Fabs(float x){return std::fabs(x);} float Floor(float x){return std::floor(x);} }
 namespace GroundShadow { struct Wall{float x0,z0,x1,z1,y0,y1; float pass=0.0f;}; }
-struct FenceGap {GroundShadow::Wall w;float length=0;uint64_t key;uint64_t ga=0,gb=0;bool closed=false;};
+struct FenceGap {GroundShadow::Wall w;float length=0;uint64_t key;uint64_t ga=0,gb=0;uint32_t ia=0,ib=0;bool closed=false;};
 constexpr float kFenceCell=8.0f,kGapMax=2.5f,kGapMin=.4f,kGapNarrow=.02f;
 std::vector<GroundShadow::Wall> g_fenceAll;std::vector<uint64_t> g_fenceAllGroup;
 std::unordered_map<uint64_t,std::vector<uint32_t>> g_fenceCells,g_gapCells;

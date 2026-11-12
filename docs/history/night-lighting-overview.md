@@ -173,3 +173,14 @@ blend. Restart completion could confuse terminal native-map fallback with pendin
 transition and arrival notification, and restart completion distinguishes native fallback from recoverable work.
 Unknown wall anchors and winter shaders remain native; gameplay and general performance still require separate
 validation. Scene draw-state scheduling is recorded in [performance history](performance-scene-node-budget.md).
+
+### 2026-11-11: a fix's pixel constants as one register run
+
+**Context:** commit `98980e41`. About 1000 replaced draws a frame each read, set and restored their pixel shader
+constants one call at a time.
+
+**Outcome:** `PsConstRun` reads the run of registers that covers a fix's constants once, sets it once and restores it
+once, writing the registers in between back as read (indoor furniture, outdoor objects, fences and stairs);
+`WallMaskBind` sets and restores only the sampler states that differ; furniture reuses the vertex-light rows its rig hold
+read in the same draw. The registers, values and their order relative to each draw are unchanged by design; not measured
+on its own ([validation](../validation/night-lighting-overview.md#open-checks)).

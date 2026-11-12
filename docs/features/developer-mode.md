@@ -51,7 +51,7 @@ The `[developer]` section holds:
 | Key | Content |
 |---|---|
 | `enabled` | The requested mode |
-| `controls` | `DeveloperSettings::Capture()`: tables `fast_dxt`, `fast_refpack`, `fast_cas`, `resource_cache`, `object_index`, `scene_budget`, `lot_lighting_motion`, `tester` (the [Tester tab](dev-tools/tester.md) switches; verification frequencies, texture workers, scene-node budgets, wall-shading wait), plus `keep_room_light`, `story_samples`, `false_color` |
+| `controls` | `DeveloperSettings::Capture()`: tables `fast_dxt`, `fast_refpack`, `fast_cas`, `resource_cache`, `object_index`, `scene_budget`, `lot_lighting_motion`, `tester` (the [Tester tab](dev-tools/tester.md) switches; verification frequencies, texture workers, scene-node budgets, wall-shading wait), plus `keep_room_light`, `false_color` (*Record story light samples* is not saved: it turns the lamp visibility memos off) |
 | `patches` | Each feature's preferences without its `enabled` flag (Frame Capture excluded) |
 | `frame_profiler` | Profiler tuning and sampling preferences, always with `enabled = false` |
 

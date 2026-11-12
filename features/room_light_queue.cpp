@@ -54,6 +54,7 @@
 #include "restart_settle.h"
 #include "imgui.h"
 #include <windows.h>
+#include <psapi.h>
 #include <algorithm>
 #include <atomic>
 #include <cstring>
@@ -329,6 +330,13 @@ float Prioritise(BYTE* room, float p) {
     return p * factor * urgency;
 }
 
+// (Real-time outdoor lamps) the new active lot's ground room 0 after a switch: the switch's occluder send leaves it gathering
+// (state 1, priority 0) and a picked room keeps the scheduler until its solve ends, so the camera story's room 0 ran first
+constexpr DWORD kGroundFirstMs = 1000;
+std::atomic<BYTE*> g_ground{nullptr};
+std::atomic<DWORD> g_groundUntil{0};
+int StateOf(const BYTE* room); // below (SEH, -1 when unreadable)
+
 // 07/10, players' Runtime Error: Apex's parts around the game's priority call are caught on their own (HookGuard); on a C++
 // exception the room keeps the game's own priority and that part stays off
 
@@ -352,6 +360,12 @@ float __fastcall PriorityHook(BYTE* room) {
         RestartSettle::Global().Hold(reinterpret_cast<uintptr_t>(room), GetTickCount64()))
         return 0.0f;
     if (!room || !g_prioOn) return p;
+    if (BYTE* g = g_ground.load(std::memory_order_relaxed)) {
+        const DWORD now = GetTickCount(), until = g_groundUntil.load(std::memory_order_relaxed);
+        if (static_cast<int32_t>(now - until) >= 0) g_ground.store(nullptr, std::memory_order_relaxed);
+        else if (RoomAmbientPolicy::GroundFirstHolds(room == g, StateOf(g), now, until) && !LevelLightShare::EditUrgent(room))
+            return p > 0.0f ? 0.0f : p; // (a lamp edit's rooms keep their place)
+    }
     return HookGuard::Run("RoomLightQueue room priority", p, [room, p] { return Prioritise(room, p); });
 }
 
@@ -550,6 +564,34 @@ int StateOf(const BYTE* room) {
     }
 }
 
+DWORD PageFaults() { // the process's page faults so far, numbered development builds only (0: unread)
+#ifdef APEX_DEVELOPMENT_BUILD_FLAVOR
+    PROCESS_MEMORY_COUNTERS pm{};
+    return GetProcessMemoryInfo(GetCurrentProcess(), &pm, sizeof pm) ? pm.PageFaultCount : 0;
+#else
+    return 0;
+#endif
+}
+// A drain step of 20 ms or more (a timeline: 97-100 ms steps under a 1 ms budget while the camera moved, thousands of page
+// faults in those frames): its room and the page faults across it, at most 3 lines a second. Render thread.
+// noexcept: an exception reaching HookGuard would turn the drain off for the session
+void LogSlowStep(const BYTE* room, int cls, float stepMs, float budget, DWORD faultsBefore) noexcept {
+    try {
+        static DWORD s_second = 0;
+        static int s_lines = 0;
+        const DWORD now = GetTickCount();
+        if (now - s_second >= 1000) s_second = now, s_lines = 0;
+        if (++s_lines > 3) return;
+        const DWORD faults = PageFaults();
+        uintptr_t mgr = 0;
+        int story = -99, id = -1;
+        RoomKeyOf(room, mgr, story, id);
+        LOG_INFO(std::format("[RoomLightQueue] Drain step of {:.1f} ms (budget {:.1f} ms): lot {:016X} story {} room {} class {}, {} page faults in the step", stepMs,
+                             budget, LotOf(room), story, id, cls, faults && faultsBefore ? std::to_string(faults - faultsBefore) : std::string("unknown")));
+    } catch (...) {
+    }
+}
+
 // After the game's pick (PickHook): more solve steps of the priority lot's rooms within a time budget
 void Drain(BYTE* tree, BYTE* before) {
     const auto pick = reinterpret_cast<Pick_t>(kPick);
@@ -598,11 +640,12 @@ void Drain(BYTE* tree, BYTE* before) {
             const float at = elapsed(sw);
             if (at >= budget * 0.8f) break;
             if (predict && n > 0 && at + s_stepMs > budget) break; // the first step always runs, as before: the queue still advances
+            const int cls = ClassOf(room);
+            const DWORD faults = PageFaults();
             solve(room, sw, budget);
-            if (predict) {
-                const float step = elapsed(sw) - at;
-                s_stepMs = s_stepMs <= 0.0f ? step : s_stepMs * 0.8f + step * 0.2f;
-            }
+            const float step = elapsed(sw) - at;
+            if (predict) s_stepMs = s_stepMs <= 0.0f ? step : s_stepMs * 0.8f + step * 0.2f;
+            if (step >= 20.0f) LogSlowStep(room, cls, step, budget, faults);
             g_drainSolves.fetch_add(1, std::memory_order_relaxed);
             if (CurrentRoom(tree) == room) break; // the budget ran out inside it: the lot pass goes on next frame
             g_drainFinished.fetch_add(1, std::memory_order_relaxed);
@@ -702,6 +745,8 @@ void RestoreAll() {
 namespace RoomLightQueue {
 
 unsigned long PlayedRoomWaitingAt() { return g_playedWaitingAt.load(std::memory_order_relaxed); }
+long long DrainMicros() { return g_drainMicros.load(std::memory_order_relaxed); }
+bool EditBurstOn() { return g_drainOn && g_burst.on; } // (after Stop, g_burst.on keeps its last value)
 
 bool PlayedLot(uintptr_t mgr, bool* known) {
     *known = kSomGet && kPrioLot && g_prioLotOk.load(std::memory_order_relaxed);
@@ -823,8 +868,9 @@ bool SolveInProgress() {
     if (ThreadId() != g_renderThread.load(std::memory_order_relaxed)) return false;
     const BYTE* tree = g_tree.load(std::memory_order_relaxed);
     const BYTE* room = tree ? CurrentRoom(tree) : nullptr;
-    // a room of the lamp edit (06/10: other rooms solving meanwhile, even of other lots, filled the 128 kept maps)
-    return room && StateOf(room) == 3 && LevelLightShare::LampUrgency(room) > 1.0f;
+    // a room of the lamp edit (other rooms solving meanwhile, even of other lots, filled the 128 kept maps); a quiet
+    // mark is no edit's (EditUrgent): the edit hold does not wait for it, so its maps are not kept either
+    return room && StateOf(room) == 3 && LevelLightShare::EditUrgent(room);
 }
 const void* SolvingRoom() {
     if (!SolveInProgress()) return nullptr;
@@ -863,7 +909,16 @@ bool CurrentRoomUrgent() {
     if (ThreadId() != g_renderThread.load(std::memory_order_relaxed)) return false;
     const BYTE* tree = g_tree.load(std::memory_order_relaxed);
     const BYTE* room = tree ? CurrentRoom(tree) : nullptr;
-    return room && LevelLightShare::LampUrgency(room) > 1.0f;
+    return room && LevelLightShare::EditUrgent(room); // (a quiet mark keeps its place in the queue, not the edit budgets)
+}
+void GroundFirst(const void* room0) {
+    g_groundUntil.store(GetTickCount() + kGroundFirstMs, std::memory_order_relaxed);
+    g_ground.store(static_cast<BYTE*>(const_cast<void*>(room0)), std::memory_order_relaxed);
+}
+unsigned long SolveEndedAt(const void* room) {
+    if (!room || ThreadId() != g_renderThread.load(std::memory_order_relaxed)) return 0;
+    const auto it = g_lastEnd.find(reinterpret_cast<uintptr_t>(room));
+    return it == g_lastEnd.end() ? 0 : it->second;
 }
 bool SolvedSince(const void* room, unsigned long since) {
     if (!room || ThreadId() != g_renderThread.load(std::memory_order_relaxed)) return true; // unknown: never waited for

@@ -55,7 +55,7 @@
 // Not hooked on purpose:
 //   - 0x006A3EC0 (room lightmap solve): LotEdgeLighting checks its entry bytes before installing and would refuse to
 //     install while it is detoured; it is timed through its only caller 0x006A80E0 instead.
-//   - Lot::AddLotObjectsToScene (0xAC1130): the Lot Streaming throttle overwrites its entry with a JMP.
+//   - Lot::AddLotObjectsToScene (0xAC1130): LotStreamingOptimizations' object throttle overwrites its entry with a JMP.
 //   - 0x00ABFAC0 by default: LotStreamingOptimizations finds it by a pattern that starts at the entry each time it
 //     installs; while detoured that fails and the object throttle stays off. Opt-in, not saved, for measurements.
 //   - WorldManager::Update (0xC6D570): detoured by LotStreamingOptimizations' map view blocker.
@@ -188,11 +188,18 @@
 // Render thread: rings (graph, averages, median window, the last 200 hitches), histogram for percentiles, totals.
 // Hitches go to a single-producer / single-consumer queue; a writer thread appends them to ApexRadiance_Hitches.txt at most
 // once per second (and on "Save report now"). Nothing is written or flushed on the render thread.
+// Per-frame timeline: while the hitch file is written, every frame also queues one fixed-size row (frame / Present /
+// limiter ms, GetTickCount64, camera eye and target motion, Apex's own motion state and pacing scales, draws, lot loading
+// and room solving counts, texture loads, page faults, the mod's dispatch count and timing mode, sampler classes, every
+// render-thread category's self ms) to a second ring that the same writer appends to ApexRadiance_FrameTimeline.csv;
+// Clear starts a new file. It shows sustained slowdowns (camera motion) that never cross the hitch threshold because they
+// raise the median.
 
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
 #include "frame_profiler.h"
+#include "perf_toggles.h"
 #include "lot_load_analysis.h"
 #include "d3d9_hooks.h"
 #include "game_addresses.h"
@@ -206,6 +213,8 @@
 #include "scene_budget.h"
 #include "object_index.h"
 #include "lot_lighting_motion.h"
+#include "room_light_queue.h"
+#include "d3d9_extra_hooks.h"
 #include "fast_crc.h"
 #include "fast_memory.h"
 #include "address_space.h"
@@ -229,6 +238,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -328,7 +338,7 @@ const CatInfo kCats[kCatCount] = {
     {"Lot lighting setup", "FUN_00ADBAD0: per lot level, the room lighting below and the lot light solvers (FUN_006A4180)."},
     {"Room lighting + solve", "FUN_006A80E0: for every room, the room light update (FUN_006C54E0) and the synchronous room lightmap solve (FUN_006A3EC0)."},
     {"Lot lighting update", "FUN_00ADB8F0 (lot renderer update -> FUN_00AE4CB0): the per-frame room lighting of a lot, time-boxed by FUN_00ADB120 (5-30 ms), solving rooms through FUN_006A8BA0."},
-    {"Lot object scene nodes", "Lot::UpdateObjectSceneNode (FUN_00ABFAC0): one object's scene node (AddLotObjectsToScene, Lot Streaming throttle). Optional, see Advanced."},
+    {"Lot object scene nodes", "Lot::UpdateObjectSceneNode (FUN_00ABFAC0): one object's scene node (AddLotObjectsToScene, LotStreamingOptimizations' object throttle). Optional, see Advanced."},
     {"Terrain update", "FUN_00C845C0 (from WorldManager::Update): terrain update / rebuild (Terrain/WorldLeafTexture)."},
     {"Script GC", "GC_try_to_collect (FUN_00E4A050): the explicit collection in MonoScriptHost::Simulate, on the simulation thread."},
     {"Scene::BeginFrame", "FUN_006EBB70 (main loop): submits the scene jobs and hands the render queue over; can wait for the previous frame's job."},
@@ -2965,15 +2975,15 @@ void ClearSampleAggregates() {
 }
 
 // Render thread, at the frame boundary once the frame is classified: moves the samples taken in [intervalStart, now)
-// into the session aggregates and, for a hitch, into out.
+// into the session aggregates and, for a hitch, into out (every frame: out's per-class counts, for the timeline).
 void ConsumeSamples(uint64_t intervalStart, uint64_t now, bool hitch, HitchSamples* out) {
     uint32_t t = g_sTail.load(std::memory_order_relaxed);
     const uint32_t h = g_sHead.load(std::memory_order_acquire);
     if (t == h) return;
     FrameSampleAgg& fa = g_frameAgg;
+    std::memset(fa.n, 0, sizeof fa.n);
+    std::memset(fa.cls, 0, sizeof fa.cls);
     if (hitch) {
-        std::memset(fa.n, 0, sizeof fa.n);
-        std::memset(fa.cls, 0, sizeof fa.cls);
         fa.fn[0].Clear();
         fa.fn[1].Clear();
         fa.site.Clear();
@@ -2994,9 +3004,9 @@ void ConsumeSamples(uint64_t intervalStart, uint64_t now, bool hitch, HitchSampl
         agg.total[thr]++;
         agg.cls[thr][cls]++;
         agg.fn[thr].Add(key);
+        fa.n[thr]++;
+        fa.cls[thr][cls]++;
         if (hitch) {
-            fa.n[thr]++;
-            fa.cls[thr][cls]++;
             fa.fn[thr].Add(key);
             if (thr == 0) g_hotEip.Add(s.eip);
         }
@@ -3016,11 +3026,14 @@ void ConsumeSamples(uint64_t intervalStart, uint64_t now, bool hitch, HitchSampl
         }
     }
     g_sTail.store(t, std::memory_order_release);
-    if (!hitch || !out) return;
-    uint32_t keys[kTopN], counts[kTopN];
+    if (!out) return;
     for (int thr = 0; thr < 2; thr++) {
         out->n[thr] = static_cast<uint16_t>(std::min<uint32_t>(fa.n[thr], 65535));
         for (int c = 0; c < kClsCount; c++) out->cls[thr][c] = static_cast<uint16_t>(std::min<uint32_t>(fa.cls[thr][c], 65535));
+    }
+    if (!hitch) return;
+    uint32_t keys[kTopN], counts[kTopN];
+    for (int thr = 0; thr < 2; thr++) {
         const int n = fa.fn[thr].Top(keys, counts, kTopN);
         for (int i = 0; i < n; i++) {
             out->fnKey[thr][i] = keys[i];
@@ -3196,6 +3209,192 @@ void QueuePush(const HitchRecord& r) {
     g_qHead.store(h + 1, std::memory_order_release);
 }
 
+// ---- per-frame timeline (ApexRadiance_FrameTimeline.csv): one fixed-size row per frame, render thread -> writer thread
+// (single producer / single consumer), queued while the hitch file is written. Clear (and the first profiler start of the
+// game session) opens a new section; the writer starts a new file for it (the previous one becomes
+// ApexRadiance_FrameTimeline.old.csv). Turning the profiler off and on again continues the section and its clock. ----
+constexpr uint32_t kTimelineRing = 1024; // more than one writer period below ~1000 fps; half full wakes the writer early
+enum TimelineFlags : uint16_t {
+    kTlHitch = 1, kTlEye = 2, kTlEyeMove = 4, kTlTargetMove = 8, kTlEyeTarget = 16, kTlYaw = 32,
+    kTlModSampled = 64,  // PerfToggles::SampledDispatchTiming: the mod's D3D time is one dispatch in 16, booked 16 times
+    kTlRegTiming = 128,  // per-hook registry timing on (it adds its own cost to D3D hooks (mod))
+    kTlSampler = 256,    // the render thread sampler ran: smp_* are known
+    kTlApex = 512,       // LotLightingMotion or the wall shading gate runs: apex_moving and the pacing scales are known
+    kTlApexMoving = 1024, // LotLightingMotion::CameraMoving()
+    kTlFocus = 2048,      // the foreground window is this process's
+    kTlLampEdit = 4096,   // RoomLightQueue::EditBurstOn()
+    kTlRtd = 8192         // the GetRenderTargetData detour is installed: rtd_* are known
+};
+struct TimelineRow {
+    uint32_t section, frame;
+    uint64_t tick, prims; // GetTickCount64 (the clock of the log's memory CSVs), primitives drawn
+    double tSec;
+    float frameMs, cpuMs, presentMs, limiterMs, unattributedMs, gcMs, otherJobsMs, texMB, roomSolveMaxMs, steadyScale, settleScale, drainMs, rtdMs;
+    float eye[3], eyeMove, targetMove, eyeTarget, yawChange;
+    float render[kCatCount]; // render thread, self ms
+    uint32_t draws, promoted, demoted, texLoads, lotLoadCalls, lotsLighting, roomSolveCalls, sceneNodes, sceneDeferred, modDispatches, pageFaults, rtdCalls;
+    uint16_t smp[kClsCount]; // render thread samples in the frame, per code class
+    int8_t camera;
+    uint16_t flags;
+};
+TimelineRow g_tlRing[kTimelineRing];
+std::atomic<uint32_t> g_tlHead{0}, g_tlTail{0}, g_tlDropped{0}, g_tlWritten{0};
+HANDLE g_wake = nullptr; // the writer thread's wake event (writer section below)
+// render thread
+uint32_t g_tlSection = 0;
+uint64_t g_tlStart = 0;                      // time origin: the last Clear (or the first profiler start)
+uint64_t g_tlTexLoads = 0, g_tlTexBytes = 0; // texture-load totals at the last frame
+long long g_tlDrainMicros = 0;               // RoomLightQueue::DrainMicros at the last frame
+float g_tlEye[3] = {}, g_tlTarget[3] = {}, g_tlYaw = 0.0f;
+bool g_tlEyeOk = false, g_tlTargetOk = false, g_tlYawOk = false;
+
+void TexTotals(uint64_t& loads, uint64_t& bytes) {
+    loads = bytes = 0;
+    for (const TexBucket& t : g_tex) {
+        loads += t.loads.load(std::memory_order_relaxed);
+        bytes += t.bytes.load(std::memory_order_relaxed);
+    }
+}
+
+// Render thread (profiler start, Clear): no delta across the gap
+void TimelineSync() {
+    TexTotals(g_tlTexLoads, g_tlTexBytes);
+    g_tlDrainMicros = RoomLightQueue::DrainMicros();
+    DWORD rtdCalls;
+    LONGLONG rtdTicks;
+    ExtraHooks::TakeGetRenderTargetData(rtdCalls, rtdTicks); // drops the calls counted before
+    g_tlEyeOk = g_tlTargetOk = g_tlYawOk = false;
+}
+
+// Render thread (Clear, first profiler start): a new section from `now`
+void TimelineRestart(uint64_t now) {
+    g_tlSection++;
+    g_tlStart = now;
+    TimelineSync();
+    // the log line's local time + this tick join the rows' tick_ms to the mod log
+    LOG_INFO(std::format("[FrameProfiler] Timeline section {} starts (ApexRadiance_FrameTimeline.csv): time_s 0 = tick_ms {}", g_tlSection, GetTickCount64()));
+}
+
+float Dist3(const float a[3], const float b[3]) {
+    const float x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2];
+    return std::sqrt(x * x + y * y + z * z);
+}
+
+// Render thread, every frame (so the camera and texture deltas stay frame to frame); the row is queued only while the
+// hitch file is written
+void TimelineFrame(const HitchRecord& r, bool hitch, uint64_t now) {
+    TimelineRow row{};
+    row.flags = static_cast<uint16_t>(hitch ? kTlHitch : 0);
+    // The camera eye ([[0x011D1860]+0x24]+0x60) moves with pans, rotations and zooms. The lot LOD scoring's point (r.camera,
+    // 0x00961440: camera +0x200 / +0x230 / +0x240), taken as the camera's target, moves only with pans (unverified in game).
+    float eye[3];
+    const bool eyeOk = LotLightingMotion::CameraEye(eye);
+    if (eyeOk) {
+        std::memcpy(row.eye, eye, sizeof eye);
+        row.flags |= kTlEye;
+        if (g_tlEyeOk) {
+            row.eyeMove = Dist3(eye, g_tlEye);
+            row.flags |= kTlEyeMove;
+        }
+        std::memcpy(g_tlEye, eye, sizeof eye);
+    }
+    g_tlEyeOk = eyeOk;
+    const bool targetOk = r.camera >= 0; // the scoring ran this frame: g_camPoint is this frame's
+    if (targetOk) {
+        if (g_tlTargetOk) {
+            row.targetMove = Dist3(g_camPoint, g_tlTarget);
+            row.flags |= kTlTargetMove;
+        }
+        std::memcpy(g_tlTarget, g_camPoint, sizeof g_tlTarget);
+    }
+    g_tlTargetOk = targetOk;
+    bool yawOk = false;
+    if (eyeOk && targetOk) {
+        row.eyeTarget = Dist3(g_camPoint, eye);
+        row.flags |= kTlEyeTarget;
+        const float dx = g_camPoint[0] - eye[0], dz = g_camPoint[2] - eye[2];
+        if (dx * dx + dz * dz > 1e-4f) { // the view's direction on the ground plane
+            const float yaw = std::atan2(dx, dz) * 57.29578f;
+            if (g_tlYawOk) {
+                float d = yaw - g_tlYaw;
+                if (d > 180.0f) d -= 360.0f;
+                else if (d < -180.0f) d += 360.0f;
+                row.yawChange = d;
+                row.flags |= kTlYaw;
+            }
+            g_tlYaw = yaw;
+            yawOk = true;
+        }
+    }
+    g_tlYawOk = yawOk;
+    uint64_t loads, bytes;
+    TexTotals(loads, bytes);
+    row.texLoads = static_cast<uint32_t>(loads - g_tlTexLoads); // the totals only grow between two TimelineSync calls
+    row.texMB = static_cast<float>(static_cast<double>(bytes - g_tlTexBytes) / (1024.0 * 1024.0));
+    g_tlTexLoads = loads;
+    g_tlTexBytes = bytes;
+    const long long drain = RoomLightQueue::DrainMicros();
+    row.drainMs = static_cast<float>(drain - g_tlDrainMicros) / 1000.0f;
+    g_tlDrainMicros = drain;
+    DWORD rtdCalls;
+    LONGLONG rtdTicks;
+    if (ExtraHooks::TakeGetRenderTargetData(rtdCalls, rtdTicks)) {
+        row.flags |= kTlRtd;
+        row.rtdCalls = rtdCalls;
+        row.rtdMs = static_cast<float>(static_cast<double>(rtdTicks) * 1000.0 / g_qpcFreq);
+    }
+    if (!g_writeFile.load(std::memory_order_relaxed) || !g_writerRunning.load(std::memory_order_relaxed)) return;
+    if (r.foreground) row.flags |= kTlFocus;
+    if (RoomLightQueue::EditBurstOn()) row.flags |= kTlLampEdit;
+
+    row.section = g_tlSection;
+    row.frame = static_cast<uint32_t>(r.frame);
+    row.tick = GetTickCount64();
+    row.tSec = static_cast<double>(now - g_tlStart) * g_msPerTick / 1000.0;
+    row.frameMs = r.frameMs;
+    row.cpuMs = r.cpuMs;
+    row.presentMs = r.presentMs;
+    row.limiterMs = r.limiterMs;
+    row.unattributedMs = r.unattributedMs;
+    row.gcMs = r.sim[kScriptGC];
+    row.otherJobsMs = r.other[kJob];
+    std::memcpy(row.render, r.render, sizeof row.render);
+    row.draws = r.gameDraws;
+    row.prims = r.prims;
+    row.promoted = r.lotsPromoted;
+    row.demoted = r.lotsDemoted;
+    row.camera = r.camera;
+    row.lotLoadCalls = r.calls[kLotLoadStages];
+    row.lotsLighting = r.calls[kLotLightingUpdate];
+    row.roomSolveCalls = r.calls[kLotRoomSolve];
+    row.roomSolveMaxMs = r.counters.maxMs[0][kLotRoomSolve - kFirstCounterCat];
+    row.sceneNodes = static_cast<uint32_t>(r.counters.extra[0][kXNodes]);
+    row.sceneDeferred = static_cast<uint32_t>(r.counters.extra[0][kXDeferred]);
+    row.modDispatches = r.calls[kModD3DHooks]; // x16 per sampled dispatch (kTlModSampled)
+    row.pageFaults = r.pageFaults;
+    if (PerfToggles::SampledDispatchTiming.load(std::memory_order_relaxed)) row.flags |= kTlModSampled;
+    if (g_regTimingActive.load(std::memory_order_relaxed)) row.flags |= kTlRegTiming;
+    if (g_samplerRunning.load(std::memory_order_relaxed) && g_sampleRender.load(std::memory_order_relaxed)) {
+        row.flags |= kTlSampler;
+        for (int c = 0; c < kClsCount; c++) row.smp[c] = r.samples.cls[0][c];
+    }
+    if (LotLightingMotion::Running() || LotLightingMotion::WallAoRunning()) {
+        row.flags |= kTlApex;
+        if (LotLightingMotion::CameraMoving()) row.flags |= kTlApexMoving;
+        row.steadyScale = LotLightingMotion::SteadyScale();
+        row.settleScale = LotLightingMotion::SettleScale();
+    }
+    const uint32_t h = g_tlHead.load(std::memory_order_relaxed);
+    const uint32_t queued = h - g_tlTail.load(std::memory_order_acquire);
+    if (queued >= kTimelineRing) {
+        g_tlDropped.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+    g_tlRing[h % kTimelineRing] = row;
+    g_tlHead.store(h + 1, std::memory_order_release);
+    if (queued + 1 == kTimelineRing / 2) SetEvent(g_wake); // above ~500 fps one batch per second would not keep up
+}
+
 void RollRegistryWindow(uint64_t now) {
     g_regFrames++;
     if (static_cast<double>(now - g_regWindowStart) * g_msPerTick < 1000.0) return;
@@ -3297,6 +3496,8 @@ void FrameBoundary(uint64_t now) {
         g_regWindowStart = now;
         g_regFrames = 0;
         g_medianCount = g_medianPos = 0; // warm-up again: the first frames include attaching the hooks
+        if (g_tlSection) TimelineSync();
+        else TimelineRestart(now);
         ClearFrameTables();
         for (auto& row : g_cMax)
             for (auto& m : row) m.store(0, std::memory_order_relaxed);
@@ -3371,9 +3572,10 @@ void FrameBoundary(uint64_t now) {
     ConsumeFrameTables(hitch, &r.detail);
     if (hitch) ComputeDominant(r);
 
+    r.foreground = IsForeground(); // once a frame: the hitch record and the timeline's focus column
     UpdateStats(r, hitch);
+    TimelineFrame(r, hitch, now);
     if (hitch) {
-        r.foreground = IsForeground();
         g_hitches[g_hitchPos] = r;
         g_hitchPos = (g_hitchPos + 1) % kHitchRing;
         g_hitchCount = std::min(g_hitchCount + 1, kHitchRing);
@@ -3803,16 +4005,16 @@ std::string SessionHeader() {
         NowString(), GetGameVersionName(), ClockText(), g_mult.load(), kMedianWindow, g_floorMs.load());
 }
 
-void AppendFile(const std::filesystem::path& path, const std::string& text) {
+bool AppendFile(const std::filesystem::path& path, const std::string& text) {
     std::ofstream f(path, std::ios::out | std::ios::app | std::ios::binary);
     if (f) f.write(text.data(), static_cast<std::streamsize>(text.size()));
+    return f.good();
 }
 
 // ---- writer thread ----
 // A raw Win32 thread, not a global std::thread: a joinable std::thread destroyed at process exit calls std::terminate.
 HANDLE g_writerThread = nullptr;
 std::atomic<bool> g_writerStop{false};
-HANDLE g_wake = nullptr;
 std::mutex g_pendingMutex;
 std::string g_pendingText;
 std::filesystem::path g_filePath;
@@ -3822,8 +4024,110 @@ struct WriterArgs {
     std::string header;
 };
 
+// ---- per-frame timeline file (writer thread) ----
+std::string TimelineHeader() {
+    std::string s = "time_s,tick_ms,frame,frame_ms,cpu_ms,present_ms,limiter_ms,hitch,focus,camera,apex_moving,steady_scale,settle_scale,"
+                    "lamp_edit,drain_ms,eye_move_m,eye_x,eye_y,eye_z,target_move_m,eye_target_m,yaw_change_deg,draws,prims,lots_promoted,lots_demoted,"
+                    "lot_load_calls,lots_lighting,room_solve_calls,room_solve_max_ms,scene_nodes,scene_deferred,tex_loads,tex_mb,page_faults,"
+                    "rtd_calls,rtd_ms,mod_dispatches,mod_sampled,reg_timing,sim_script_gc_ms,other_jobs_ms,smp_ts3w,smp_gfx,smp_system,smp_apex,smp_other_asi,smp_other";
+    for (const CatInfo& c : kCats) (s += ',') += c.name; // render thread self ms; the names hold no comma
+    return s + ",Unattributed\n";
+}
+
+// "0" for zero (most category columns in most frames), an empty field for unknown
+void Csv(std::string& s, float v, bool known = true, int decimals = 2) {
+    s += ',';
+    if (!known) return;
+    if (v == 0.0f) s += '0';
+    else std::format_to(std::back_inserter(s), "{:.{}f}", v, decimals);
+}
+
+static_assert(kClsCount == 6, "the smp_* columns of TimelineHeader follow CodeClass");
+void FormatTimelineRow(std::string& s, const TimelineRow& r) {
+    auto out = std::back_inserter(s);
+    std::format_to(out, "{:.3f},{},{}", r.tSec, r.tick, r.frame);
+    Csv(s, r.frameMs);
+    Csv(s, r.cpuMs);
+    Csv(s, r.presentMs);
+    Csv(s, r.limiterMs);
+    std::format_to(out, ",{},{},{},", (r.flags & kTlHitch) ? 1 : 0, (r.flags & kTlFocus) ? 1 : 0, static_cast<int>(r.camera));
+    const bool apex = (r.flags & kTlApex) != 0;
+    if (apex) s += (r.flags & kTlApexMoving) ? '1' : '0';
+    Csv(s, r.steadyScale, apex);
+    Csv(s, r.settleScale, apex);
+    std::format_to(out, ",{}", (r.flags & kTlLampEdit) ? 1 : 0);
+    Csv(s, r.drainMs, true, 3);
+    const bool eye = (r.flags & kTlEye) != 0;
+    Csv(s, r.eyeMove, (r.flags & kTlEyeMove) != 0, 3);
+    for (float v : r.eye) Csv(s, v, eye);
+    Csv(s, r.targetMove, (r.flags & kTlTargetMove) != 0, 3);
+    Csv(s, r.eyeTarget, (r.flags & kTlEyeTarget) != 0);
+    Csv(s, r.yawChange, (r.flags & kTlYaw) != 0);
+    std::format_to(out, ",{},{},{},{},{},{},{}", r.draws, r.prims, r.promoted, r.demoted, r.lotLoadCalls, r.lotsLighting, r.roomSolveCalls);
+    Csv(s, r.roomSolveMaxMs);
+    std::format_to(out, ",{},{},{}", r.sceneNodes, r.sceneDeferred, r.texLoads);
+    Csv(s, r.texMB, true, 3);
+    std::format_to(out, ",{},", r.pageFaults);
+    const bool rtd = (r.flags & kTlRtd) != 0;
+    if (rtd) std::format_to(out, "{}", r.rtdCalls);
+    Csv(s, r.rtdMs, rtd, 3);
+    std::format_to(out, ",{},{},{}", r.modDispatches, (r.flags & kTlModSampled) ? 1 : 0, (r.flags & kTlRegTiming) ? 1 : 0);
+    Csv(s, r.gcMs);
+    Csv(s, r.otherJobsMs);
+    for (uint16_t n : r.smp) {
+        s += ',';
+        if (r.flags & kTlSampler) std::format_to(out, "{}", n);
+    }
+    for (float v : r.render) Csv(s, v);
+    Csv(s, r.unattributedMs);
+    s += '\n';
+}
+
+uint32_t g_tlFileSection = 0; // writer thread: the section the file holds (0: none yet; kept across writer threads)
+
+// Drains the timeline ring. A row of another section closes the file: it becomes ApexRadiance_FrameTimeline.old.csv and
+// a new file starts with the header (if the rename fails while the file can still be written, the new section is appended
+// to it, header first). Rows that cannot be written (the file locked by another program) count as dropped; when they
+// carried the header, the next write starts the file again.
+void WriteTimeline(const std::filesystem::path& path) {
+    uint32_t& section = g_tlFileSection;
+    std::string out;
+    uint32_t rows = 0;
+    bool header = false;
+    auto flush = [&] {
+        if (out.empty()) return;
+        if (AppendFile(path, out)) g_tlWritten.fetch_add(rows, std::memory_order_relaxed);
+        else {
+            g_tlDropped.fetch_add(rows, std::memory_order_relaxed);
+            if (header) section = 0;
+        }
+        out.clear();
+        rows = 0;
+        header = false;
+    };
+    uint32_t t = g_tlTail.load(std::memory_order_relaxed);
+    const uint32_t h = g_tlHead.load(std::memory_order_acquire);
+    for (; t != h; t++) {
+        const TimelineRow& row = g_tlRing[t % kTimelineRing];
+        if (row.section != section) {
+            flush();
+            // replaces the older generation only when the rename succeeds
+            const auto old = path.parent_path() / L"ApexRadiance_FrameTimeline.old.csv";
+            MoveFileExW(path.c_str(), old.c_str(), MOVEFILE_REPLACE_EXISTING);
+            out = TimelineHeader();
+            header = true;
+            section = row.section;
+        }
+        FormatTimelineRow(out, row);
+        rows++;
+    }
+    g_tlTail.store(t, std::memory_order_release);
+    flush();
+}
+
 void WriterMain(const std::filesystem::path& path, const std::string& header) {
     AppendFile(path, header);
+    const std::filesystem::path timelinePath = path.parent_path() / L"ApexRadiance_FrameTimeline.csv";
     std::vector<HitchRecord> batch;
     batch.reserve(kQueueSize);
     for (;;) {
@@ -3845,6 +4149,7 @@ void WriterMain(const std::filesystem::path& path, const std::string& header) {
         }
         if (!out.empty()) AppendFile(path, out);
         g_qWritten.fetch_add(static_cast<uint32_t>(batch.size()), std::memory_order_relaxed);
+        WriteTimeline(timelinePath);
         if (stop) break;
         WaitForSingleObject(g_wake, 1000); // batches at most once per second (sooner only for "Save report now")
     }
@@ -3879,6 +4184,7 @@ void StartWriter() {
     }
     g_writerStop.store(false);
     g_qTail.store(g_qHead.load()); // nothing queued is carried over into a new session
+    g_tlTail.store(g_tlHead.load());
     auto* args = new WriterArgs{g_filePath, SessionHeader()};
     g_writerThread = CreateThread(nullptr, 0, WriterThreadProc, args, 0, nullptr);
     if (!g_writerThread) {
@@ -4242,6 +4548,10 @@ std::string BuildReport() {
     s += std::format("   {:<24} {:>12.1f}\n", "Unattributed (render)", g_stats.unattributed);
     s += CounterReport();
     s += TextureLoadReport();
+    s += std::format("Per-frame timeline: ApexRadiance_FrameTimeline.csv in this folder, one row per frame since Clear while this file is written "
+                     "(the previous file, from before the last Clear or the previous game session: ApexRadiance_FrameTimeline.old.csv); section {} "
+                     "(the mod log's \"Timeline section {} starts\" line gives its local time and tick_ms); {} rows written so far, {} dropped\n",
+        g_tlSection, g_tlSection, g_tlWritten.load(), g_tlDropped.load());
     s += PageFaultText();
     s += AddressSpace::ReportText();
     s += "Apex shaders: " + ShaderCache::StatusText() + "\n";
@@ -4315,6 +4625,9 @@ void Clear() {
         t.fillMax = 0;
         t.bytes = 0;
     }
+    TimelineRestart(Now()); // a new ApexRadiance_FrameTimeline.csv
+    g_tlWritten.store(0);
+    g_tlDropped.store(0);
     for (int b = 0; b < 2; b++) g_pfSum[b] = g_pfFrames[b] = 0;
     for (int b = 0; b < 2; b++) {
         g_aSvc[b].Clear();
@@ -4343,7 +4656,8 @@ void Hint(const char* text) {
 }
 
 // Measurement presets for the 60-second protocol (research\perf2\plan.md section 9.2). Both: hitch = 2.0 x median, floor 8 ms,
-// state calls counted, the file written, per-hook registry timing and lot object building off, Mutex::Lock not timed.
+// state calls counted, the file written, per-hook registry timing on, every draw hook timed (no 1 in 16 sample: a sampled
+// dispatch booked 16 times showed 151 ms of mod time inside a 55 ms frame), lot object building off, Mutex::Lock not timed.
 // Timing run (A): no sampling. Sampling run (B): the render and simulation threads sampled at 2000 Hz. Turns the profiler on.
 void ApplyPreset(bool sampling) {
     g_mult.store(2.0f);
@@ -4352,8 +4666,9 @@ void ApplyPreset(bool sampling) {
     g_sampleRender.store(sampling);
     g_sampleSim.store(sampling);
     g_sampleHz.store(2000);
-    g_regTiming.store(false);
-    g_regTimingActive.store(false);
+    g_regTiming.store(true);
+    g_regTimingActive.store(g_enabled.load());
+    PerfToggles::SampledDispatchTiming.store(false);
     const bool stateChanged = !g_countState.exchange(true);
     {
         std::lock_guard<std::mutex> lk(g_ctrlMutex);
@@ -4372,12 +4687,13 @@ void ApplyPreset(bool sampling) {
         }
     }
     if (!g_enabled.load()) FrameProfiler::SetEnabled(true);
+    g_regTimingActive.store(g_enabled.load());
     {
         std::lock_guard<std::mutex> lk(g_ctrlMutex);
         UpdateSamplerLocked();
     }
     ApexConfig::RequestSave();
-    LOG_INFO(std::format("[FrameProfiler] Measurement preset: {} run (hitch 2.0 x median, floor 8 ms, state calls counted, file on, Mutex::Lock not timed, sampling {})",
+    LOG_INFO(std::format("[FrameProfiler] Measurement preset: {} run (hitch 2.0 x median, floor 8 ms, state calls counted, file on, per-hook timing on, every dispatch timed, Mutex::Lock not timed, sampling {})",
                          sampling ? "sampling" : "timing", sampling ? "render + simulation threads at 2000 Hz" : "off"));
 }
 
@@ -4947,6 +5263,7 @@ void SetEnabled(bool on) {
         StartWriter(); // before the Present hook exists: the queue has no producer yet
         g_attachPending.store(true);
         RegisterD3DHooks(); // the first Present attaches the game functions (OnPresentStart)
+        ExtraHooks::CountGetRenderTargetData(true);
         g_enabled.store(true);
         g_regTimingActive.store(g_regTiming.load());
         UpdateSamplerLocked();
@@ -4958,6 +5275,7 @@ void SetEnabled(bool on) {
         g_regTimingActive.store(false);
         UpdateSamplerLocked(); // stops it: g_enabled is false
         D3D9Hooks::UnregisterAll(kHookName);
+        ExtraHooks::CountGetRenderTargetData(false);
         for (int i = 0; i < kTargetCount; i++) {
             DetachTarget(i);
             g_targets[i].waitingAddr = false;
@@ -5002,7 +5320,7 @@ void RenderUI(bool showEnable) {
         if (ApexUi::TextButton("Timing run##FpPreset")) ApplyPreset(false);
         Hint("Recommended settings for the 60-second measurement, run type A (research\\perf2\\plan.md section 9):\n"
              "hitch multiplier 2.0, floor 8 ms, count state calls on, write the file on, sampling off, Mutex::Lock not timed,\n"
-             "per-hook registry timing and lot object building off. Turns the profiler on.\n"
+             "per-hook registry timing on and every draw hook timed exactly, lot object building off. Turns the profiler on.\n"
              "Then press Clear right before the run and Save report now right after it.");
         ImGui::SameLine();
         if (ApexUi::TextButton("Sampling run##FpPreset")) ApplyPreset(true);

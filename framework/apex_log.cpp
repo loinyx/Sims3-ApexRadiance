@@ -12,15 +12,16 @@ constexpr DWORD kWriteIntervalMs = 500;          // queued Info lines reach the 
 constexpr size_t kMaxQueuedBytes = 256 * 1024;   // beyond this the logging thread writes the queue itself
 constexpr size_t kMaxEarlyBytes = 1024 * 1024;   // lines kept before Open (a failed Open must not grow forever)
 
+std::mutex g_fileLock;             // held across every write (keeps them in order); always taken before g_lock
 std::mutex g_lock;
 std::string g_queue;               // lines not written yet (guarded by g_lock)
-HANDLE g_file = INVALID_HANDLE_VALUE;
+HANDLE g_file = INVALID_HANDLE_VALUE; // changed only under both locks
 HANDLE g_wake = nullptr;           // writer thread: set to stop it
 bool g_opened = false;             // Open ran (successfully or not)
 bool g_openResult = false;
 std::atomic<bool> g_verbose{false};
 
-// Caller holds g_lock.
+// Caller holds g_fileLock and g_lock (Open, Close, exit: run once).
 void WriteQueueLocked() {
     if (g_queue.empty() || g_file == INVALID_HANDLE_VALUE) return;
     DWORD written = 0;
@@ -28,13 +29,27 @@ void WriteQueueLocked() {
     g_queue.clear();
 }
 
+// Caller holds g_fileLock only. g_lock covers just the swap, so a line logged during WriteFile (render thread) does not
+// wait for the disk.
+void WriteQueue() {
+    std::string pending;
+    {
+        std::lock_guard<std::mutex> lock(g_lock);
+        if (g_file == INVALID_HANDLE_VALUE) return;
+        pending.swap(g_queue);
+    }
+    if (pending.empty()) return;
+    DWORD written = 0;
+    WriteFile(g_file, pending.data(), static_cast<DWORD>(pending.size()), &written, nullptr);
+}
+
 DWORD WINAPI WriterThread(LPVOID param) {
     const HANDLE wake = static_cast<HANDLE>(param);
     for (;;) {
         const bool stop = WaitForSingleObject(wake, kWriteIntervalMs) == WAIT_OBJECT_0;
         {
-            std::lock_guard<std::mutex> lock(g_lock);
-            WriteQueueLocked();
+            std::lock_guard<std::mutex> fileLock(g_fileLock);
+            WriteQueue();
         }
         if (stop) break;
     }
@@ -61,21 +76,36 @@ const char* BaseName(const char* path) {
 }
 
 // At process exit DllMain does not close the log (the loader may hold other threads' locks), so what is still queued is
-// written by this static object's destructor. Another thread may have died holding the lock: never wait for it.
+// written by this static object's destructor. Another thread may have died holding a lock: never wait for it.
 struct ExitWriter {
     ~ExitWriter() {
-        if (!g_lock.try_lock()) return;
-        WriteQueueLocked();
-        g_lock.unlock();
+        if (!g_fileLock.try_lock()) return;
+        if (g_lock.try_lock()) {
+            WriteQueueLocked();
+            g_lock.unlock();
+        }
+        g_fileLock.unlock();
     }
 } g_exitWriter;
 
 } // namespace
 
 bool Open(const std::wstring& path) {
+    std::lock_guard<std::mutex> fileLock(g_fileLock);
     std::lock_guard<std::mutex> lock(g_lock);
     if (g_opened) return g_openResult;
     g_opened = true;
+    // The previous session's log is kept as <name>.old.txt (replacing the one before); none yet or locked: truncated as before.
+    // Still open for writing (a second game process, or one still exiting): the probe fails and nothing is moved, so that
+    // process keeps writing its own log and this one's create fails as before
+    const HANDLE probe = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (probe != INVALID_HANDLE_VALUE) {
+        CloseHandle(probe);
+        std::wstring old = path;
+        const size_t dot = old.find_last_of(L'.'), name = old.find_last_of(L"\\/") + 1; // (npos + 1 = 0: no folder)
+        old.insert(dot != std::wstring::npos && dot > name ? dot : old.size(), L".old");
+        MoveFileExW(path.c_str(), old.c_str(), MOVEFILE_REPLACE_EXISTING);
+    }
     g_file = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (g_file == INVALID_HANDLE_VALUE) {
         g_queue.clear();
@@ -101,6 +131,7 @@ bool Open(const std::wstring& path) {
 }
 
 void Close() {
+    std::lock_guard<std::mutex> fileLock(g_fileLock);
     std::lock_guard<std::mutex> lock(g_lock);
     if (g_wake) {
         SetEvent(g_wake); // the thread wakes, writes nothing new and closes its event; never waited for (DllMain)
@@ -134,14 +165,21 @@ void WriteLine(Level level, const std::string& text, const std::source_location&
     OutputDebugStringA(line.c_str());
     if (level == Level::Debug && !g_verbose.load(std::memory_order_relaxed)) return;
 
-    std::lock_guard<std::mutex> lock(g_lock);
-    if (!g_opened) { // before Open: keep it (bounded)
-        if (g_queue.size() + line.size() <= kMaxEarlyBytes) g_queue += line;
-        return;
+    bool writeNow;
+    {
+        std::lock_guard<std::mutex> lock(g_lock);
+        if (!g_opened) { // before Open: keep it (bounded)
+            if (g_queue.size() + line.size() <= kMaxEarlyBytes) g_queue += line;
+            return;
+        }
+        if (g_file == INVALID_HANDLE_VALUE) return;
+        g_queue += line;
+        writeNow = level >= Level::Warning || !g_wake || g_queue.size() >= kMaxQueuedBytes;
     }
-    if (g_file == INVALID_HANDLE_VALUE) return;
-    g_queue += line;
-    if (level >= Level::Warning || !g_wake || g_queue.size() >= kMaxQueuedBytes) WriteQueueLocked();
+    if (!writeNow) return;
+    // Once g_fileLock is ours, any write that took this line first has finished
+    std::lock_guard<std::mutex> fileLock(g_fileLock);
+    WriteQueue();
 }
 } // namespace
 

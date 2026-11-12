@@ -42,6 +42,9 @@ an FPS gain, complete climate coverage or resolution of texture allocation stall
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-11 | `47d04a7e` (release 3.1.2 tree: Instant's floor mask "all" on a worker, other lots' regathers and the dropped lot's room 0s urgent only after a lamp edit) | `tools/outdoor_delta_test`, `tools/room_ambient_test`, `tools/room_solve_causes_test`, `tools/room_gather_queue_test`, `tools/roofed_openings_test` | 0 failures: outdoor delta 292 checks, room ambient 1346, roofed openings 1744; room solve causes and room gather queue passed. None covers `AllJob`, the urgency of `RegatherOutdoorById` or `DropAll`'s requeue | CPU harness |
+| 2026-11-11 | `47d04a7e` | `tools/rt_lamps_test`, `tools/lighting_restart_test` | Not run: neither compiles, on `main` either (stale includes and extractions) | Not run |
+| 2026-11-11 | Development build 7 (`47d04a7e`) | Played at night | Visibly better than the earlier 3.1.2 development builds; the floor mask's hitches and the false lamp-edit windows not measured after the change | In game, backend not recorded |
 | 2026-11-11 | `87213f32` (world's active lot getter by signature) | EA app 1.69.47 (`TS3.exe`) in game, log | The getter is found by signature at `0x00C5EF10`; `[SetupLot] gate off` is no longer logged. Whether a lot capture is recognised and skips light sharing on the EA app is not established (open checks) | In game, backend not recorded |
 | 2026-11-11 | `87213f32` (picture-lot gate on the EA app) | EA app 1.69.47 (`TS3.exe`), log review | No defect: 374 of 375 addresses found (only `RefPackDecompress` missing); `RootGetter`, `LodChoice`, `RoomSolve` and the lot priority getters match once each, with the Steam offsets. The session stopped at the household picker (no household played), so no lot reached the high quality and the gate did not run; `+0x288` on the EA app is inferred, not read | Log only |
 | 2026-11-11 | `206e4b45` (borrowed lamps that lit nothing skipped), public build | Steam 1.67.2 in game, played | Frame time and room updates visibly better in play; not measured, and the maps against `perf_borrowed_zero_skip = false` not compared | In game, backend not recorded |
@@ -233,6 +236,33 @@ topology mutation inside a point is not reproduced. This release does not promis
 
 ## Open checks
 
+- Instant's floor mask "all" on a worker (3.1.2, `47d04a7e`, not yet tested in game): on the 45-lamp lot at night,
+  enter the lot, then switch, recolour and drag a lamp with a Frame Profiler timing run. **Expected:** no 105 to 255 ms
+  render-thread hitches in the relight's floor mask; after an edit the floor keeps its previous light, then shows the
+  new one with no step against a relight computed on the render thread. Still to measure: how long the first build of
+  each floor map waits for the worker (the game's map shows meanwhile).
+- Regathers urgent only after a lamp edit (3.1.2, `47d04a7e`): with a recording on, pan onto neighbour lots, enter a
+  lot and leave it. **Expected:** no 8 s lamp-edit windows of room solves with nothing edited. Then move and delete a
+  lamp post of the active lot next to another lot. **Expected:** that lot's ground and outdoor walls follow with the
+  edit's own rooms (urgent, within 1.5 s of the edit), not at the game's pace. Not yet run.
+- An active-lot switch opens no lamp edit (3.1.2, not yet tested in game): Lamp updates on Instant, at night, with a
+  recording and a Frame Profiler timing run. Pan between neighbouring lots with lamp posts so the active lot switches
+  with nothing edited, then switch a lamp on the played lot. **Expected:** `lamp_edit=1` in the timeline only after the
+  real edit. Record the drain and the lot room solve per frame for frames that are moving with a lot loading (before:
+  8.7 ms of lot room solves with a lamp edit pending, 1.4 ms without). After each `Active lot tracker` line, read
+  `story S room 0 solved N ms after the switch`, and compare the time to the next `Active:` line with the same pan on the
+  build before; if it is clearly longer, Real-time outdoor lamps' occluder send goes back to an edit mark. Any
+  `Drain step of` line gives that step's page faults. With `active_lot_hold` on, no `Active lot hold ends` line names
+  class 4.
+- Active-lot hold, grace for the lot left and a separate allowance for lots next to the active one (3.1.2, not yet
+  tested in game): on the test save, never during a played session, pan at night across lot borders with lamp posts,
+  stop, and pan back onto the played lot within 20 s. Count the `Active lot tracker` and `Active lot switch held` lines
+  (before: 27 switches in one session, 13 undone within 2 s), and the lot left's `solved in full (a lot next to the
+  active one keeps only the GPU's base)` and `shows class C with no kept solve: sent to its solve` lines before the
+  return. **Expected:** fewer switches, and a return within 20 s logs `Outdoor lamp delta: ... (no re-solve)` for each
+  returning story with none of those lines in between, instead of a full solve (before: 3328 ms for story 3);
+  the time from a return to the next `Active:` line is shorter than before (0.5 to 21 s), and a return while panning is
+  at most 1.5 s later than before. In a still view, no `kept parts dropped` line of 0.1 to 0.4 MB.
 - Fast lot pictures (3.1.1, not yet tested in game). Load a save: **expected** one `[SetupLot]` line for the played lot,
   reading `not gated`, with its id equal to the world active lot or priority 1, and no `room gathers skipped light
   sharing` or `lot capture over` line for it. Start a New Game: **expected** `lot capture` and `room gathers skipped light

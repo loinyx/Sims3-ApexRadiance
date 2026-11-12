@@ -88,3 +88,17 @@ window after a load and a lamp switch's boost. The loading budgets (30 and 10 ms
 **Outcome:** the steady budgets (15 and 5 ms) and the drain's 4 ms are paced with the camera still, behind the Tester
 switch *Paced relight at rest* (`perf_steady_room_pacing`, on). Gameplay measurement and the Build-mode check are open
 ([validation](../validation/performance-lot-lighting-motion.md)).
+
+### 2026-11-11: a floor for loading lots
+
+**Context:** in a lot load analysis, lots requested while panning finished only when the camera stopped (requested at
+3.3 s, done at 26 s; the same lot later in 0.5 s).
+
+**Finding:** at 1 ms a loading lot got 2 ms (the lot being played, from 30) or 0.67 ms (another lot, from 10) while the
+camera moved, and after a drag at most the 3.5 ms spread cap (another lot 0.25 ms), so the lighting wait of load stage
+20 lasted until the camera stopped. The game's budget is 30 or 10 ms only while the lot lighting manager's loading flag `+0x4F` is set, so the
+hook can tell a loading lot from the budget alone.
+
+**Outcome:** loading lots keep at least 3/15 of the game's budget (6 / 2 ms, `FloorMs`) in the moving scale and in both
+drag branches; other budgets keep the 0.25 ms floor. At the default 3 ms only the two drag branches change.
+Released in 3.1.2. Not run in game yet ([validation](../validation/performance-lot-lighting-motion.md#open-checks)).

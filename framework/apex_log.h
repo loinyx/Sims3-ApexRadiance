@@ -10,7 +10,9 @@ namespace ApexLog {
 
 enum class Level { Debug, Info, Warning, Error, Critical };
 
-// Opens (truncates) the log file and starts the writer thread. Safe to call once; later calls return the first result.
+// Moves the previous session's log to <name>.old.txt (ApexRadiance_LOG.old.txt, replacing the one before; not while
+// another process has it open for writing), creates the log file and starts the writer thread. Safe to call once; later
+// calls return the first result.
 bool Open(const std::wstring& path);
 // Writes what is queued and stops the writer thread (FreeLibrary only; process exit flushes by itself).
 void Close();

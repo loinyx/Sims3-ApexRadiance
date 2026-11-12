@@ -105,6 +105,13 @@ public static class Scan
 
     public static string Packages(string docs) => Path.Combine(docs, "Mods", "Packages");
 
+    // a log the running game keeps open for writing: read beside it
+    static string ReadShared(string file)
+    {
+        using var r = new StreamReader(new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete));
+        return r.ReadToEnd();
+    }
+
     public static State Run(Game g, string? docs = null)
     {
         docs ??= DocumentsFor(g);
@@ -122,7 +129,7 @@ public static class Scan
 
         var ts3native = FindAsi(bin, "ts3native.asi");
         var log = Path.ChangeExtension(ts3native ?? "", ".log"); // (written next to the ASI)
-        var wrong = ts3native is not null && File.Exists(log) && File.ReadAllText(log).Contains("SKIP all: host is not");
+        var wrong = ts3native is not null && File.Exists(log) && ReadShared(log).Contains("SKIP all: host is not");
 
         return new State(apex, layer, loader, loader == "d3d9.dll", FindAsi(bin, "Sims3SettingsSetter.asi") is not null, FindAsi(bin, "MonoPatcher.asi") is not null,
             ts3native is not null, File.Exists(Path.Combine(Packages(docs), "ts3fixes.package")), wrong,

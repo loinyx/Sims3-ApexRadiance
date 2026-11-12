@@ -61,6 +61,11 @@ Sub-part results are on their own validation pages.
 
 ## Open checks
 
+- One register run per fix, wall mask sampler states and furniture's vertex-light rows (3.1.2, `98980e41`): furniture,
+  outdoor objects, fences and stairs at night, with a lamp switch and a drag. **Expected:** the same image as 3.1.1
+  (F7 captures of a furniture piece, an outdoor object and a fence show the same constants before and after their
+  draws) and a lower cost per draw in the draw cost line. `run_resource_checks.ps1`, which extracts `PsConstRun`, is
+  not yet run on the release tree.
 - Smooth indoor light learns a new room light map on the frame after a miss (3.1.1, not yet tested in game): enter the
   atrium lot of the 11-40-32 recording with the camera held still. **Expected:** each short path B gap of an object part
   between two path A lines (07.5, 14.8 and 15.2 s, 30 ms to 0.3 s before) lasts at most 2 frames (path A back within

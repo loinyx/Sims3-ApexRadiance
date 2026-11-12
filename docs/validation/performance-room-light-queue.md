@@ -20,6 +20,7 @@ not identified.
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-12 | Uncommitted change on release/3.1.2 | `tools/room_ambient_test` | Room ambient policy 170 checks, 0 failures (now also `GroundFirstHolds`: other rooms wait while the ground room 0 is in state 1 or 2, never the ground itself, until the deadline, across tick wrap); production room updater 1346 checks, 0 failures. Ground first not yet run in game | None (mocks) |
 | 2026-11-10 | Uncommitted change on `810d882b` (release/3.1.1) | Developer Release x86 build; `tools/room_ambient_test` | Build passed; room ambient policy 146 checks, 0 failures (now also `EditRoomStillWaiting`: a room blank at its first mark stops waiting when its first solve ends, even one begun before a later mark; lit rooms unchanged); the unlit-rooms recovery executable was blocked by security software and did not run; production room updater 1345 checks, 0 failures. Never-solved rooms not held: not yet run in game | None (mocks) / x86 build |
 | 2026-10-27 | `e39db28`, `b6959de` | In game, Steam 1.67.2, development and standard builds | `lamp_edit_lot_only`: a lamp switched off and on near a stair opening updated the story below; lamp edits on the release build settled in 234 to 3187 ms; Smoke and Lighting suites passed | DXVK |
 | 2026-10-13 | Release preparation tree for 2.12.3; final SHA in the release PR | Developer and public Release x86 builds: 0 errors, 0 warnings; `tools/room_ambient_test`; `run_lamp_state_checks.ps1` | Builds passed; room ambient policy 102 checks, 0 failures (hold decision, urgency, safety-net gap, 200 ms move delay); lamp edit state 12 assertions, 0 failures. The map hold itself has no offline harness | None (mocks) / x86 build |
@@ -69,7 +70,7 @@ not identified.
   the entry; the counters *rebuilt lamps not taken as moves* (LampMarkFilter) or *first sights not taken as edits*
   (LevelLightShare) rise; the final frame and wall seams match a capture before the change within 1/255. A lamp switch,
   a drag and a lamp moved to another story on that lot still start the hold.
-- `room_ambient_test` covers the hold's decision (`EditHoldOutcome`), the urgency rule (`UrgencyKept`), an edit room's wait (`EditRoomStillWaiting`), the safety-net
+- `room_ambient_test` covers the hold's decision (`EditHoldOutcome`), the urgency rule (`UrgencyKept`), the ground-first hold (`GroundFirstHolds`), an edit room's wait (`EditRoomStillWaiting`), the safety-net
   gap (`LampLotGap`) and the 200 ms move delay; the map hold itself has no offline harness.
 - Quick update for lamp switches (with *Lamp switches all at once* off): rooms show a quick light within a few frames
   and refine without a frame-rate drop.
@@ -77,3 +78,10 @@ not identified.
   **Expected:** a neighbour's edit room no longer goes before the played lot's waiting rooms (before: quick pass for up
   to 49.6 s); the entry budget lasts while the played lot's rooms on or below the camera's story wait (up to 30 s;
   before, the lot took 18.8 s to look right after a pan back); no false lamp edit on the way back.
+- Ground first after an active-lot switch (not yet tested in game): on a test save, pan from a neighbour
+  into the played lot at least 5 times with a recording on. **Expected:** the first `[solve]` after
+  `Active lot tracker X` is room 0 of story 0 of that lot; `story 0 room 0 solved N ms after the switch` with N under
+  about 600 (before, the camera story ran first: story 3 at 3328, 594, 969 and 5406 ms); `Story 0 class 2 floor map` /
+  `sharper copy` within 1 s of the switch (before: 3.503 s and 3.882 s); frame median and p95 in the 5 s after the switch
+  no worse than 9.4 / 15.6 ms. Entries where story 0 has window-light marks (`M ... let through of lamp`) are expected
+  to stay slow (a separate follow-up).

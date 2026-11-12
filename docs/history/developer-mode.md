@@ -36,3 +36,15 @@ and collected errors. The native page uses the existing diagnostics only (no exa
 controls). Hooks, actions, setting keys and defaults, diagnostic persistence, activation and restart rules and profile
 behaviour did not change. Compact tool controls and primary collection actions share the menu's control geometry
 (commit 393399f).
+
+### 2026-11-11: the story samples switch not restored
+
+**Context:** a Frame Profiler run while zooming out showed outdoor objects at 20 ms a frame, and fences several times
+their usual cost per draw.
+
+**Finding:** *Record story light samples for the diagnostics* (`story_samples`) was saved with the developer controls and
+restored at load. Recording the F8 story samples turns the lamp visibility memos of fences and outdoor objects off, so
+once saved on it kept them off in every later session.
+
+**Outcome:** kept (`fd7aed8d`): the switch is no longer saved or restored and starts off each session, as the frame
+profiler does. Not yet checked in game ([validation](../validation/developer-mode.md#open-checks)).

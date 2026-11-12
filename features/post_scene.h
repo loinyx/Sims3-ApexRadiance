@@ -27,8 +27,9 @@ void Add(int order, Effect fn, bool needsDepth = true);
 void Remove(Effect fn);         // and unregisters them with the last one
 // At a scene boundary: the shared INTZ depth holds this scene (false while a needsDepth = false effect runs without it)
 bool SceneDepthValid();
-// The camera, read from the scene draws' vertex constants while an effect asks for it (reference counted)
-void WantCamera(bool on);
+// The camera, read from the scene draws' vertex constants while an effect asks for it (reference counted). plain: a
+// recording tool that also wants the unmirrored camera when the water reflection pass draws first (RecentCameraViewProj)
+void WantCamera(bool on, bool plain = false);
 // How many times each effect ran since the last call, by order (render thread; a recording's [ran] lines)
 std::map<int, long> TakeRan();
 // The camera's near plane of the current frame (metres). Device depth d = A - near * A / z (A = 1.00008 measured, far
@@ -47,7 +48,8 @@ std::string DiagText();
 bool EffectsPending();
 // The camera's view-projection of the current frame (world -> clip, rows = c40..c43), false when not seen this frame
 bool CameraViewProj(float vp[4][4]);
-// The same, or the last frame's when this frame has none yet (at a Present: the frame just drawn)
+// The same, or the last frame's when this frame has none yet (at a Present: the frame just drawn); the unmirrored camera
+// first when a plain WantCamera caller found one (this frame's, then the last frame's)
 bool RecentCameraViewProj(float vp[4][4]);
 // A of the projection (d = A - near * A / z, so view z / near = A / (A - d)); 1.00008 when unknown
 float CameraDepthA();

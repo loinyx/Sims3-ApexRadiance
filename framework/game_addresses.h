@@ -220,22 +220,11 @@ enum class Id : uint16_t {
     // ---- Object lookup index (features/object_index.cpp; group "ObjectIndex" = ObjectById + these two) ----
     ObjectTreeWalk,           // FUN_00c60d30 thiscall(idLo, idHi, int* visited), ret 0xC: walks the root vector [this+0x9C, this+0xA0)
     ObjectTreeSearch,         // FUN_00c5fa60 cdecl(node, idLo, idHi, int* visited): recursive depth-first search (id at +0x48/+0x4C)
-    // ---- Lot LoD streaming probe (features/lot_lod_streaming.cpp; group "LotLodStreaming") ----
+    // ---- Lot LoD scoring (groups "LotLodStreaming" and "LotLodDistanceProbe") ----
     LotLodScoring,            // FUN_00c6c290: scores nearby lots and requests Detailed View transitions
     LotDetailRequest,          // FUN_00ac20e0: applies Detailed View on/off to one lot
-    LotLodThrottleTest,       // Steam 0x00c6c695: cmp byte [Throttle Lot LoD Transitions],0 inside LotLodScoring
-    LotLodThrottleFlag,       // global byte tested above; Steam 0x011ecbc0
-    LotLodActiveThresholdTest, // Steam 0x00c6c6b7: cmp edx,[Max Active Lot Threshold] (edx = WorldManager+0xE4) inside LotLodScoring
-    LotLodActiveThreshold,     // the int global compared above ("Throttle Lot LoD Transitions Max Active Lot Threshold"); Steam 0x01184328
     // ---- Lot visibility override (features/lot_visibility_override.cpp; group "LotVisibilityOverride") ----
     LotVisibilityCameraBiasJZ, // JZ in the lot visibility/distance camera-bias metric; 0x74 -> 0xEB
-    // ---- Per-lot object streaming throttle (features/lot_object_throttle.cpp; group "LotObjectThrottle") ----
-    LotAddObjectsToScene,     // Lot::AddLotObjectsToScene thiscall(lot, initialLoad, alwaysVisibleOnly), ret 8
-    LotUpdateObjectSceneNode, // Lot::UpdateObjectSceneNode thiscall(lot, object, initialLoad, alwaysVisibleOnly)
-    ScriptMessageScopeCtor,   // ScriptMessageScope ctor thiscall(scope, beginMsg, endMsg, lot)
-    ScriptMessageScopeDtor,   // ScriptMessageScope dtor fastcall(scope)
-    PostRemoteMethodCall,     // cdecl(thread, lot, func, a4, initialLoad, alwaysVisibleOnly)
-    IsObjectLargeOrFlora,     // cdecl(object) -> int; shells / large exterior geometry / outdoor flora
     // ---- Local terrain relight (features/terrain_chunk_relight.cpp; optional part of Night Lights: without them lamp
     //      changes keep the full terrain rebuild) ----
     WorldManagerPtr,          // the WorldManager global 0x011ECBC4 (FUN_00c6cf80 stores the manager there at 0x00C6D0CC)
@@ -418,7 +407,7 @@ std::string NotAvailable(const std::string& missing);
 
 // Feature groups (FeatureInfo::gameCodeGroup): "NightLights" (core of Night Lights), "SplitLevel", "ResourceCache",
 // "LotLightingMotion", "FastTextureCompression", "FastCacheCompression", "WallShadingWhileMoving", "FileListCache",
-// "SceneNodeBudget", "ObjectIndex", "MemoryGuard", "LotLodStreaming", "LotObjectThrottle", "LotVisibilityOverride"
+// "SceneNodeBudget", "ObjectIndex", "MemoryGuard", "LotLodStreaming", "LotVisibilityOverride"
 bool GroupAvailable(const char* group, std::string* missing = nullptr);
 
 // Light type (3..11) of a light vtable, or -1

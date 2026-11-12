@@ -28,6 +28,8 @@
 #include "terrain_bake_rule.h"
 #include "rt_outdoor_lamps.h"
 #include "game_addresses.h"
+#include "game_version.h"
+#include "transition_watch_native.h"
 #include "shader_ids.h"
 #include "roof_ps_hlsl.h"
 #include "water_lamps_hlsl.h"
@@ -176,6 +178,57 @@ struct IndoorRoomsBind {
     ~IndoorRoomsBind() { SetPsConst(dev, reg, old, 4); }
     IndoorRoomsBind(const IndoorRoomsBind&) = delete;
     IndoorRoomsBind& operator=(const IndoorRoomsBind&) = delete;
+};
+// (draw cost) The pixel shader constants a fix sets for one draw and puts back after it (Add each, then Set before the draw,
+// Restore after it), read, set and put back as one run of registers, as ShaderConstantPair::Block does for two: the registers
+// of the run between them are written back as read, so during and after the draw the device holds the same values as with
+// one call per constant. A run longer than kRows, or whose read fails, takes one call per constant, as before. The values
+// are read at Set.
+class PsConstRun {
+public:
+    static constexpr UINT kRows = 40; // the run, and the constants added in all
+    explicit PsConstRun(IDirect3DDevice9* dev) : dev_(dev) {}
+    PsConstRun(const PsConstRun&) = delete;
+    PsConstRun& operator=(const PsConstRun&) = delete;
+    void Add(UINT reg, const float* values, UINT n) {
+        slot_[n_++] = {reg, n, values};
+        first_ = std::min(first_, reg), end_ = std::max(end_, reg + n);
+    }
+    void Set() {
+        const UINT count = end_ - first_;
+        run_ = count <= kRows && SUCCEEDED(dev_->GetPixelShaderConstantF(first_, &old_[0][0], count));
+        if (run_) {
+            float now[kRows][4];
+            std::memcpy(now, old_, count * sizeof now[0]);
+            for (int i = 0; i < n_; i++) std::memcpy(now[slot_[i].reg - first_], slot_[i].values, slot_[i].n * sizeof now[0]);
+            SetPsConst(dev_, first_, &now[0][0], count);
+            return;
+        }
+        for (UINT i = 0, at = 0; i < static_cast<UINT>(n_); at += slot_[i].n, i++) { // (a failed read leaves zeros, as before)
+            std::memset(old_[at], 0, slot_[i].n * sizeof old_[0]);
+            dev_->GetPixelShaderConstantF(slot_[i].reg, old_[at], slot_[i].n);
+            SetPsConst(dev_, slot_[i].reg, slot_[i].values, slot_[i].n);
+        }
+    }
+    void Restore() const {
+        if (run_) {
+            SetPsConst(dev_, first_, &old_[0][0], end_ - first_);
+            return;
+        }
+        for (UINT i = 0, at = 0; i < static_cast<UINT>(n_); at += slot_[i].n, i++) SetPsConst(dev_, slot_[i].reg, old_[at], slot_[i].n);
+    }
+
+private:
+    struct Slot {
+        UINT reg, n;
+        const float* values;
+    };
+    IDirect3DDevice9* dev_;
+    Slot slot_[5] = {};
+    int n_ = 0;
+    UINT first_ = ~0u, end_ = 0;
+    bool run_ = false;
+    float old_[kRows][4] = {};
 };
 
 //
@@ -639,6 +692,9 @@ int ReadLotRects(LotRect* out, int max) {
 
 // (2.15.3) moved whenever g_lotRects is written: FindFloorLot's and FindLotAt's last answers (render thread)
 uint32_t g_lotRectsGen = 1;
+// every lot's base as last read since the world change: LotGroundY for a lot that left the light tree (a lot out of
+// Detailed View, whose lamps the LOD hold keeps in the bake, is still lifted from its own ground)
+std::unordered_map<uint64_t, float> g_lotBase;
 void RefreshLotRects() {
     static LotRect buf[1024];
     const int n = ReadLotRects(buf, 1024);
@@ -648,6 +704,7 @@ void RefreshLotRects() {
         return;
     }
     g_lotRects.assign(buf, buf + n);
+    for (const LotRect& r : g_lotRects) g_lotBase[static_cast<uint64_t>(r.lotHi) << 32 | r.lotLo] = r.base;
 }
 
 // The rectangle of the lot the current lot pass draws, matched by its matrix (VS c8, c10). nullptr = unknown lot.
@@ -714,7 +771,7 @@ struct LotMask {
     IDirect3DTexture9* tex = nullptr;
     uint64_t sig = 0;
     DWORD checked = 0, shadeChecked = 0;
-    uint32_t fenceGenSeen = 0;      // g_fenceGen at its last shade check
+    uint32_t fenceGenSeen = 0;      // g_fenceSetGen at its last shade check
     int w = 0, h = 0;               // texels of the room mask
     std::vector<uint8_t> room;      // the room mask (255 outside rooms)
     std::vector<uint8_t> shade;     // the lamp shade (empty: none yet, 255 everywhere)
@@ -1382,6 +1439,12 @@ UINT g_curDipBase = 0, g_curDipMin = 0, g_curDipNum = 0; // the current DrawInde
 // The fence walls in a world box
 // (15/10) an 8 m grid of the fence walls, made again only when a group changed (each lot's check walked every group)
 uint32_t g_fenceGen = 1, g_fenceGridGen = 0;
+// The set of fence walls (FenceGridUpdate): a new generation only when the walls themselves changed, not when the same walls
+// came back under other groups (the game refills its instance buffers: a profiler run rebuilt the grid and its gaps many
+// times a frame, a third of the render thread's samples in its hitches, and every lot's shade every 250 ms)
+uint32_t g_fenceSetGen = 1, g_fenceGridFrame = ~0u;
+uint64_t g_fenceSetHash = 0;
+uint32_t g_fenceGridBuilds = 0, g_fenceGapBuilds = 0; // (developer log) grids made, gap lists made
 constexpr float kFenceCell = 8.0f;
 std::vector<GroundShadow::Wall> g_fenceAll;
 std::vector<uint64_t> g_fenceAllGroup; // each wall's group (g_fenceGroups key)
@@ -1395,11 +1458,13 @@ uint64_t FenceCellKey(int x, int z) { return (static_cast<uint64_t>(static_cast<
 // both sides was drawn in the last kGateFenceSeenMs (it was taken away; off screen it stays closed). A gap narrower than
 // kGapMin (a post, pieces a few cm short) is always closed: no fence has an opening that narrow, and light came round it
 // in a wedge. Render thread.
+uint32_t FloatBits(float f);
 struct FenceGap {
     GroundShadow::Wall w;
     float length = 0.0f;
     uint64_t key;
     uint64_t ga = 0, gb = 0; // the two pieces' groups
+    uint32_t ia = 0, ib = 0; // the two pieces (g_fenceAll; their groups again when the same walls come back under others)
     bool closed = false;     // under kGapMin: always a wall
 };
 constexpr float kGapMin = 0.4f, kGapMax = 2.5f, kGapNarrow = 0.02f;
@@ -1476,6 +1541,7 @@ void FenceGapsBuild() {
             // each gap once, whichever end found it (it is found from both: the walls' order follows a hash map)
             if (!seen.insert(gp.key).second) continue;
             gp.ga = g_fenceAllGroup[i], gp.gb = g_fenceAllGroup[bj];
+            gp.ia = i, gp.ib = static_cast<uint32_t>(bj);
             gp.closed = best < kGapMin;
             gp.length = ApexMath::Hypot(gp.w.x1 - gp.w.x0, gp.w.z1 - gp.w.z0);
             const uint32_t k = static_cast<uint32_t>(g_fenceGaps.size());
@@ -1487,22 +1553,41 @@ void FenceGapsBuild() {
 }
 void FenceGridUpdate() {
     if (g_fenceGridGen == g_fenceGen) return;
+    if (g_fenceGridFrame == g_roomMapFrame && !g_fenceAll.empty()) return; // at most once a frame: a later change waits a frame
+    g_fenceGridFrame = g_roomMapFrame;
     g_fenceGridGen = g_fenceGen;
+    g_fenceGridBuilds++;
+    // (2.15.3) a piece held by two groups (a group made again over the same fence stays until the sweep) once: two copies of
+    // a piece's end beside a gap made it look joined, and the gap and its gate were lost until the old group went.
+    // The pieces in a fixed order (by place; of two holders the lower group key), so the same walls give the same grid and gaps
+    // whatever groups hold them (the hash-map order flipped a gap's ends and changed the shade's key with nothing changed)
+    struct Piece { uint64_t place, group; const GroundShadow::Wall* w; };
+    std::vector<Piece> all;
+    for (const auto& [k, g] : g_fenceGroups)
+        for (const GroundShadow::Wall& w : g.walls)
+            all.push_back({GapKey(w.x0, w.z0, w.x1, w.z1) ^ static_cast<uint64_t>(std::lround(w.y0 * 20.0f)) * 0x9E3779B97F4A7C15ull, k, &w});
+    std::sort(all.begin(), all.end(), [](const Piece& a, const Piece& b) { return a.place != b.place ? a.place < b.place : a.group < b.group; });
     g_fenceAll.clear();
     g_fenceAllGroup.clear();
     g_fenceCells.clear();
-    // (2.15.3) a piece held by two groups (a group made again over the same fence stays until the sweep) once: two copies of
-    // a piece's end beside a gap made it look joined, and the gap and its gate were lost until the old group went
-    std::unordered_set<uint64_t> pieces;
-    for (const auto& [k, g] : g_fenceGroups)
-        for (const GroundShadow::Wall& w : g.walls) {
-            if (!pieces.insert(GapKey(w.x0, w.z0, w.x1, w.z1) ^ static_cast<uint64_t>(std::lround(w.y0 * 20.0f)) * 0x9E3779B97F4A7C15ull).second) continue;
-            const uint32_t i = static_cast<uint32_t>(g_fenceAll.size());
-            g_fenceAll.push_back(w);
-            g_fenceAllGroup.push_back(k);
-            const int cx = static_cast<int>(ApexMath::Floor(0.5f * (w.x0 + w.x1) / kFenceCell)), cz = static_cast<int>(ApexMath::Floor(0.5f * (w.z0 + w.z1) / kFenceCell));
-            g_fenceCells[FenceCellKey(cx, cz)].push_back(i);
-        }
+    uint64_t hash = 1469598103934665603ull;
+    for (size_t n = 0; n < all.size(); n++) {
+        if (n && all[n].place == all[n - 1].place) continue;
+        const GroundShadow::Wall& w = *all[n].w;
+        const uint32_t i = static_cast<uint32_t>(g_fenceAll.size());
+        g_fenceAll.push_back(w);
+        g_fenceAllGroup.push_back(all[n].group);
+        for (float v : {w.x0, w.z0, w.x1, w.z1, w.y0, w.y1, w.pass}) hash = (hash ^ FloatBits(v)) * 1099511628211ull;
+        const int cx = static_cast<int>(ApexMath::Floor(0.5f * (w.x0 + w.x1) / kFenceCell)), cz = static_cast<int>(ApexMath::Floor(0.5f * (w.z0 + w.z1) / kFenceCell));
+        g_fenceCells[FenceCellKey(cx, cz)].push_back(i);
+    }
+    if (hash == g_fenceSetHash) { // the same walls: the same gaps, with the groups that hold their pieces now
+        for (FenceGap& gp : g_fenceGaps) gp.ga = g_fenceAllGroup[gp.ia], gp.gb = g_fenceAllGroup[gp.ib];
+        return;
+    }
+    g_fenceSetHash = hash;
+    g_fenceSetGen++;
+    g_fenceGapBuilds++;
     FenceGapsBuild();
     if (!kPublicBuild && g_gapLogs < 12) {
         g_gapLogs++;
@@ -2042,6 +2127,17 @@ float FenceOpenShare(IDirect3DDevice9* dev) {
     return open;
 }
 
+// Every byte of an instance stream (FNV-1a, 32 bits at a time): a fence group's key with its mesh (NoteFenceGroup)
+bool HashInstanceBytes(const BYTE* p, UINT bytes, uint64_t& h) {
+    __try {
+        for (UINT i = 0; i + 4 <= bytes; i += 4) h = (h ^ *reinterpret_cast<const uint32_t*>(p + i)) * 1099511628211ull;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+std::unordered_map<uint64_t, uint64_t> g_fencePlaceKey; // a buffer place's last group key (used while the buffer is busy)
+std::unordered_map<uint64_t, uint8_t> g_fencePlaceBusy; // draw_reads_nowait: busy answers per buffer place since its last read
 void NoteFenceGroup(IDirect3DDevice9* dev) {
     if (!g_shadeOn || !g_curDipNum) return;
     UINT freq = 0;
@@ -2055,8 +2151,37 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
         vb0->Release();
         return;
     }
-    const uint64_t key = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb1)) << 32) ^ (static_cast<uint64_t>(off1) << 12) ^ (static_cast<uint64_t>(count) << 1) ^ stride1 ^
-                         (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb0)) << 7) ^ (static_cast<uint64_t>(g_curDipBase + g_curDipMin) << 40) ^ g_curDipNum;
+    // A group is keyed by its pieces (every byte of its instance records) and its mesh, not by its place: the game refills its
+    // instance buffers, so a place held other pieces from one draw to the next and every draw made a new group, read again,
+    // with the fence grid and every lot's shade built again after it (a profiler run: a third of the render thread in hitches)
+    const uint64_t place = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb1)) << 32) ^ (static_cast<uint64_t>(off1) << 12) ^ (static_cast<uint64_t>(count) << 1) ^ stride1 ^
+                           (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb0)) << 7) ^ (static_cast<uint64_t>(g_curDipBase + g_curDipMin) << 40) ^ g_curDipNum;
+    uint64_t key = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb0)) << 7) ^ (static_cast<uint64_t>(g_curDipBase + g_curDipMin) << 40) ^ g_curDipNum ^
+                   (static_cast<uint64_t>(stride0) << 56) ^ (static_cast<uint64_t>(count) << 20) ^ stride1;
+    {
+        void* pk = nullptr;
+        const auto known = g_fencePlaceKey.find(place);
+        // (draw_reads_nowait: a place read before does not wait for the GPU; three busy answers in a row and it waits, as the
+        // positions' read does, so a place busy at every draw does not keep its first pieces)
+        uint8_t* busy = DevSwitches::DrawReadsNoWait() && known != g_fencePlaceKey.end() ? &g_fencePlaceBusy[place] : nullptr;
+        const bool nowait = busy && *busy < 3;
+        const HRESULT hk = stride1 >= 12 && stride1 <= 256 ? vb1->Lock(off1, count * stride1, &pk, D3DLOCK_READONLY | (nowait ? D3DLOCK_DONOTWAIT : 0)) : E_FAIL;
+        const bool hashed = SUCCEEDED(hk) && pk && HashInstanceBytes(static_cast<const BYTE*>(pk), count * stride1, key);
+        if (pk) vb1->Unlock();
+        if (hashed) {
+            if (busy) *busy = 0;
+            if (g_fencePlaceKey.size() > 4096) g_fencePlaceKey.clear(), g_fencePlaceBusy.clear();
+            g_fencePlaceKey[place] = key;
+        } else if (known != g_fencePlaceKey.end()) { // busy: the pieces drawn there last
+            if (busy && hk == D3DERR_WASSTILLDRAWING) ++*busy;
+            key = known->second;
+        }
+        else {
+            vb0->Release();
+            vb1->Release();
+            return;
+        }
+    }
     const DWORD now = GetTickCount();
     FenceGroup& g = g_fenceGroups[key];
     g.seen = now ? now : 1;
@@ -2149,7 +2274,8 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
     if (now - s_swept > 1000) {
         s_swept = now;
         for (auto it = g_fenceGroups.begin(); it != g_fenceGroups.end();)
-            if (now - it->second.seen > 20000 || g_fenceGroups.size() > 4096) {
+            // (over 4096 groups: those not drawn for 2 s, not every group: erasing groups in use read them all again)
+            if (now - it->second.seen > (g_fenceGroups.size() > 4096 ? 2000u : 20000u)) {
                 g_fenceWalls.fetch_sub(static_cast<long>(it->second.walls.size()), std::memory_order_relaxed);
                 if (!it->second.walls.empty()) g_fenceGen++;
                 it = g_fenceGroups.erase(it);
@@ -2989,7 +3115,8 @@ IDirect3DTexture9* LotMaskTexture(IDirect3DDevice9* dev, const LotRect& rect) {
     // kShadeMinEveryMs more (log: "500 ms to its build sent"), the light in steps; at rest the key (every bake lamp, the
     // walls' copy) is not worked out more often than before
     // (the fast checks go on 200 ms past the drag, so one of them sees the key at rest when the drag hold and the moving lamp end)
-    const bool changing = m.fenceGenSeen != g_fenceGen || DragLite::Engaged() || DragLite::StepWithin(DragLite::kStillMs + 2 * kShadeCheckMs);
+    FenceGridUpdate(); // (the walls' set generation; once a frame)
+    const bool changing = m.fenceGenSeen != g_fenceSetGen || DragLite::Engaged() || DragLite::StepWithin(DragLite::kStillMs + 2 * kShadeCheckMs);
     // (GPU) a lot a dragged lamp moves over: every frame, so its walls' shadows follow the lamp (built at the next frame's first
     // reader with its chunks); a lot whose GPU build took over kEveryFrameMaxMs follows it at kShadeCheckMs
     constexpr double kEveryFrameMaxMs = 2.0;
@@ -2997,7 +3124,7 @@ IDirect3DTexture9* LotMaskTexture(IDirect3DDevice9* dev, const LotRect& rect) {
     if (!m.shadeChecked || everyFrame || now - m.shadeChecked >= (changing ? kShadeCheckMs : 500u)) {
         m.shadeChecked = now;
         m.shadeFrame = g_roomMapFrame;
-        m.fenceGenSeen = g_fenceGen;
+        m.fenceGenSeen = g_fenceSetGen;
         // the shade's grid is the room mask's (4 texels a metre over room 0's tiles); the lot rectangle must agree with it
         if (g_shadeOn && m.w > 0 && m.w == static_cast<int>(std::lround(r->w * GroundShadow::kTexelsPerMetre)) &&
             m.h == static_cast<int>(std::lround(r->d * GroundShadow::kTexelsPerMetre)))
@@ -3563,14 +3690,16 @@ bool EnumerateLights() {
     }
 }
 
-bool ReadLamp(uintptr_t L, float out[8], LampCone& cone) { // POD only (SEH)
+// heldFade >= 0: a lamp the LOD hold keeps in the terrain bake (HeldFade), taken without its enabled bit at that fade, so the
+// objects beside its ground light keep it as the ground does
+bool ReadLamp(uintptr_t L, float out[8], LampCone& cone, float heldFade = -1.0f) { // POD only (SEH)
     __try {
         const BYTE f = *reinterpret_cast<const BYTE*>(L + 0x100);
         if (!(f & 0x01) || !(f & 0x20)) return false; // alive and lit
         // A disabled lot lamp must leave the direct roof/water/object pool too,
         // rather than remaining there until the game's fade reaches zero.
         const bool lotOwned = (*reinterpret_cast<const uint32_t*>(L + 0xC0) | *reinterpret_cast<const uint32_t*>(L + 0xC4)) != 0;
-        if (lotOwned && !(f & 0x40)) return false;
+        if (lotOwned && !(f & 0x40) && heldFade < 0.0f) return false;
         const int type = *reinterpret_cast<const int*>(L + 0xB0);
         const int room = *reinterpret_cast<const int*>(L + 0x08);
         if (type != 0xB && !((f & 0x04) && room == 0)) return false; // world lamp or outdoor lot lamp
@@ -3578,7 +3707,7 @@ bool ReadLamp(uintptr_t L, float out[8], LampCone& cone) { // POD only (SEH)
         const float* bounds = reinterpret_cast<const float*>(L + 0x134);
         const float* col = reinterpret_cast<const float*>(L + 0xF0);
         const float inten = *reinterpret_cast<const float*>(L + 0x10);
-        const float fade = *reinterpret_cast<const float*>(L + 0x20);
+        const float fade = heldFade >= 0.0f ? heldFade : *reinterpret_cast<const float*>(L + 0x20);
         // Visual reach of the lamp's light pool: from its range value +0x130 (97, 40, 100...), about 7-12 m. The light
         // bounds (+0x134) are much larger (~50 m) and made roofs and water blow out to white.
         (void)bounds;
@@ -3731,7 +3860,10 @@ struct LotLampState {
     float col[3] = {}, inten = 0.0f, range = 0.0f, pos[3] = {};
     float rect[4] = {}; // light rect +0x134 {minX, minZ, maxX, maxZ} (FUN_006BDDF0: position +- sqrt(range / k))
     bool plain = false; // type 3..6
-    bool baked = false; // InBake
+    bool baked = false; // InBake, or held (LodHolds)
+    float fade = 0.0f;  // +0x20 (not read by the bake; the per-pixel lamp lists take it)
+    bool held = false;  // kept in the bake after a Detailed View demotion (LodHolds)
+    float heldFade = 0.0f; // the fade it had while enabled: what its per-pixel rows keep while held
     // automatic changes of this lamp in the current 60 s window (carried from enumeration to enumeration)
     int autoChanges = 0;
     Clock::time_point autoWindow{};
@@ -3793,6 +3925,7 @@ bool ReadLotLamp(uintptr_t L, LotLampState& out) {
         if (!WorldLampPolicy::Eligible(lot, type, f, *reinterpret_cast<const int*>(L + 0x08))) return false;
         std::memcpy(out.col, reinterpret_cast<const void*>(L + 0xF0), 12);  // base colour
         out.inten = *reinterpret_cast<const float*>(L + 0x10);               // intensity (x)
+        out.fade = *reinterpret_cast<const float*>(L + 0x20);                // fade
         out.range = *reinterpret_cast<const float*>(L + 0x130);              // range
         std::memcpy(out.pos, reinterpret_cast<const void*>(L + 0x120), 12); // position
         std::memcpy(out.rect, reinterpret_cast<const void*>(L + 0x134), 16); // light rect (the bake's chunk test, 0xC29480)
@@ -3841,9 +3974,23 @@ bool LightChanged(const float* a, const float* b) {
     return false;
 }
 
-bool RawChanged(const LotLampState& a, const LotLampState& b) {
-    return a.flags != b.flags || a.type != b.type || std::memcmp(a.col, b.col, sizeof a.col) != 0 || std::memcmp(&a.inten, &b.inten, 4) != 0 ||
+bool ValuesChanged(const LotLampState& a, const LotLampState& b) {
+    return a.type != b.type || std::memcmp(a.col, b.col, sizeof a.col) != 0 || std::memcmp(&a.inten, &b.inten, 4) != 0 ||
            std::memcmp(&a.range, &b.range, 4) != 0 || std::memcmp(a.pos, b.pos, sizeof a.pos) != 0;
+}
+
+bool RawChanged(const LotLampState& a, const LotLampState& b) { return a.flags != b.flags || ValuesChanged(a, b); }
+
+// The LOD hold. When the game drops a lot out of Detailed View it clears its lamps' enabled bit 0x40 and 0x02 (flags
+// 0x77 -> 0x35, 0xF7 -> 0xB5) while they stay alive, lit and listed, so the bake would take their light off the ground until
+// the lot is detailed again. A lamp that was in the bake stays in it while nothing else of it changes: a lit bit, light,
+// place or lot change releases it, as does the lot staying detailed for kHoldPromoted with the lamp still disabled.
+// p: the lamp at the last read. detail: its lot's +0xC1 now (DetailOf: -1 unknown, 0 no, 1 yes, 2 for kHoldPromoted).
+// A lamp sold or deleted in Build mode goes out on a detailed lot, so it is never held.
+bool LodHolds(const LotLampState& p, const LotLampState& s, int detail) {
+    if (s.lot == 0 || p.lot != s.lot || (s.flags & 0x61) != 0x21 || ValuesChanged(p, s)) return false;
+    if (p.held) return p.flags == s.flags && detail != 2;
+    return detail == 0 && p.baked && (p.flags & 0x40) && ((p.flags ^ s.flags) & ~0x02) == 0x40;
 }
 
 // Developer log: what changed on one lamp ("L1234ABCD type 3: lit 1->0, intensity 1.00->0.00 [leaves the bake]")
@@ -3871,6 +4018,69 @@ void AddDetail(std::string& d, int& n, const std::string& t) {
     else if (n == 6) d += "; ...";
     n++;
 }
+
+// Lots in Detailed View. The detail request 0x00AC20E0 stores Lot+0xC1, then posts AddLotObjectsToScene or the demotion
+// through PostRemoteMethodCall; a demoted lot's lamps then clear their enabled bit 0x40 within a second. The set is read at
+// each lamp read from the lot renderers' map (the global LotLodScoring loads first; Steam layout,
+// transition_watch_native.h). It is the one detail signal of the lamp tracking, for the Detailed View demotion route and the
+// LOD hold (LodHolds): exact and read in the same frame as the lamps, where a lot's light tracker only follows its loading.
+// Unreadable, or more than 16 detailed lots (the ReadLots cap): unknown, so no switch is recorded and no hold starts.
+constexpr auto kDetailSwitch = std::chrono::seconds(2);
+// a promoted lot's lamps are taken to come back with its load (unverified; loads of up to 25 s captured)
+constexpr auto kHoldPromoted = std::chrono::seconds(30);
+bool g_detailKnown = false; // the last read was complete
+std::unordered_map<uint64_t, Clock::time_point> g_detailedSince; // lots with +0xC1 at the last complete read, and since when
+std::unordered_map<uint64_t, Clock::time_point> g_detailSwitchAt; // lots that left that set, and when
+uintptr_t LotRenderers() { // SEH only
+    const uintptr_t scoring = g_gameVersion == GameVersion::Steam ? GameAddr::Get(GameAddr::Id::LotLodScoring) : 0;
+    if (!scoring) return 0;
+    __try {
+        if (*reinterpret_cast<const BYTE*>(scoring + 12) != 0xA1) return 0; // mov eax,[0x011ECE58]
+        return *reinterpret_cast<const uintptr_t*>(*reinterpret_cast<const uintptr_t*>(scoring + 13));
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+void ReadDetailSwitches(Clock::time_point now) {
+    std::erase_if(g_detailSwitchAt, [now](const auto& kv) { return now - kv.second >= kDetailSwitch; });
+    TransitionWatch::Native n;
+    if (const uintptr_t map = LotRenderers()) TransitionWatch::ReadLots(map, &n);
+    g_detailKnown = n.readable && !n.truncated;
+    if (!g_detailKnown) return;
+    std::unordered_map<uint64_t, Clock::time_point> lots;
+    for (unsigned i = 0; i < n.stored; i++) {
+        const auto it = g_detailedSince.find(n.lots[i].id);
+        lots.emplace(n.lots[i].id, it == g_detailedSince.end() ? now : it->second);
+    }
+    for (const auto& [lot, since] : g_detailedSince)
+        if (!lots.contains(lot)) g_detailSwitchAt[lot] = now;
+    g_detailedSince.swap(lots);
+}
+int DetailOf(uint64_t lot, Clock::time_point now) {
+    if (!g_detailKnown) return -1;
+    const auto it = g_detailedSince.find(lot);
+    return it == g_detailedSince.end() ? 0 : now - it->second >= kHoldPromoted ? 2 : 1;
+}
+
+// The lamps the LOD hold keeps, for the bake's light test on the game's thread (LotLightBridge::LodHeld): made again from
+// g_lotLampSig whenever a hold starts or ends. Holds start and last only while KeepDemotedLamps is on (not by day), the
+// world is live and the game is not in its edit mode (ChunkRelight::Editing: a deleted lamp stays registered and lit with
+// 0x40 clear, as a held lamp already is, so a held lamp deleted there would not show; all holds end when it starts).
+struct LodHold {
+    uint64_t lot;
+    int type;
+};
+std::mutex g_lodHeldMx;
+std::unordered_map<uintptr_t, LodHold> g_lodHeld;
+std::atomic<int> g_lodHeldCount{0}; // g_lodHeld.size(): the light test takes no lock while none is held
+bool g_lodHoldOn = false;
+// Lots whose held lamps left the lamp list (the lot unloaded or was bulldozed), and when: among the snapshot's settled lots
+// for 60 s, so DiffBake takes their light off the ground even when the whole lot left the list
+std::vector<std::pair<uint64_t, Clock::time_point>> g_lodGoneLots;
+// The fade a held lamp's per-pixel rows take (-1: not held): the one it had while enabled, at most the light manager's level
+// now, so trees, water and roofs beside its ground light keep the light they had, never more
+float HeldFade(const LotLampState& s) { return s.held && s.heldFade >= 0.0f ? std::min(s.heldFade, g_rigNight.load(std::memory_order_relaxed)) : -1.0f; }
+bool g_heldInRead = false; // a lamp of the last ReadEnumeratedLamps is held: only then does ReadFoliageLamps look the holds up
 
 // One pass over the enumeration g_enumLights (every 20 frames; before 2026-09-29 two passes, UpdateLampList and
 // TrackLotLampEdits): the lit outdoor lamps for SelectLamps (only when rebuildAll, as UpdateLampList did) and the tracked
@@ -3984,7 +4194,12 @@ void ReadFoliageLamps(bool rebuilt) {
         for (uintptr_t L : g_enumLights) {
             std::array<float, 8> v;
             LampCone cone;
-            if (ReadLamp(L, v.data(), cone)) g_foliageLamps.push_back(v), g_foliageCones.push_back(cone);
+            float held = -1.0f; // (as ReadEnumeratedLamps just read it)
+            if (g_heldInRead) {
+                const auto it = std::lower_bound(g_lotLampCur.begin(), g_lotLampCur.end(), L, [](const LampSig& a, uintptr_t l) { return a.first < l; });
+                if (it != g_lotLampCur.end() && it->first == L) held = HeldFade(it->second);
+            }
+            if (ReadLamp(L, v.data(), cone, held)) g_foliageLamps.push_back(v), g_foliageCones.push_back(cone);
             else if (!exitList.empty() && std::binary_search(exitList.begin(), exitList.end(), L) && exitRows.size() < 256 && ReadExitLamp(L, v.data(), cone))
                 exitRows.push_back(v), exitCones.push_back(cone);
         }
@@ -4043,22 +4258,32 @@ void ReadEnumeratedLamps(bool rebuildAll) {
         LevelLightShare::ExitLamps(g_exitList);
     }
     g_lotLampCur.clear();
+    const auto now = Clock::now();
+    ReadDetailSwitches(now);
+    const bool hold = g_lodHoldOn && LevelLightShare::WorldIsLive() && !ChunkRelight::Editing();
+    g_heldInRead = false;
     for (uintptr_t L : g_enumLights) {
+        LotLampState s;
+        if (ReadLotLamp(L, s)) {
+            if (hold && s.lot != 0 && (s.flags & 0x61) == 0x21) { // a disabled lot lamp: the LOD hold (its last read, g_lotLampSig)
+                const auto p = std::lower_bound(g_lotLampSig.begin(), g_lotLampSig.end(), L, [](const LampSig& a, uintptr_t l) { return a.first < l; });
+                if (p != g_lotLampSig.end() && p->first == L && LodHolds(p->second, s, DetailOf(s.lot, now)))
+                    s.held = true, s.heldFade = p->second.held ? p->second.heldFade : p->second.fade;
+            }
+            s.baked = s.held || InBake(s);
+            g_heldInRead |= s.held;
+            g_lotLampCur.emplace_back(L, s);
+        }
         if (rebuildAll) {
             std::array<float, 8> v;
             LampCone cone;
-            if (ReadLamp(L, v.data(), cone)) {
+            if (ReadLamp(L, v.data(), cone, HeldFade(s))) {
                 g_allLamps.push_back(v);
                 g_allCones.push_back(cone);
             } else if (!g_exitList.empty() && std::binary_search(g_exitList.begin(), g_exitList.end(), L) && g_exitLampRows.size() < 256 && ReadExitLamp(L, v.data(), cone)) {
                 g_exitLampRows.push_back(v);
                 g_exitCones.push_back(cone);
             }
-        }
-        LotLampState s;
-        if (ReadLotLamp(L, s)) {
-            s.baked = InBake(s);
-            g_lotLampCur.emplace_back(L, s);
         }
     }
     if (rebuildAll) {
@@ -4121,6 +4346,8 @@ void TrackLotLampEdits() {
     };
     std::map<uint64_t, Quiet> quiet;
     int total = 0;
+    bool holdsChanged = false;           // a LOD hold started or ended: g_lodHeld is made again
+    std::map<uint64_t, int> heldGone;    // held lamps that left the list, by lot
     // (14/10, drag solves) type-11 lights added in this enumeration: one removed on the same lot within 0.5 m is the same lamp
     // moving (a lamp drag, drag_lite.h)
     std::vector<const LotLampState*> added11;
@@ -4153,7 +4380,7 @@ void TrackLotLampEdits() {
         s.lastAuto = p.lastAuto;
         s.animated = p.animated;
         if (p.lot != s.lot) snapDirty = true;
-        if (!RawChanged(p, s)) {
+        if (!RawChanged(p, s) && p.baked == s.baked) { // (baked differs with no raw change only when a LOD hold ended)
             // the rect follows position and range (FUN_006BDDF0); should the game update it an enumeration later, the
             // snapshot still gets the current one (it never counts as a change by itself)
             if (std::memcmp(p.rect, s.rect, sizeof s.rect) != 0) snapDirty = true;
@@ -4161,6 +4388,7 @@ void TrackLotLampEdits() {
             continue;
         }
         snapDirty = true;
+        if (p.held != s.held) holdsChanged = true;
         // a lot lamp disabled (sold or deleted in Build mode: it stays registered and lit, 07/10): every room of its lot
         // gathers again at once (also when it comes back enabled: Ctrl+Z / redo of a sale or delete), so rooms the lamp edit does not send (the diagonal outside walls) drop it too
         if (s.lot != 0 && p.lot == s.lot && ((p.flags ^ s.flags) & 0x40) &&
@@ -4168,6 +4396,10 @@ void TrackLotLampEdits() {
             g_disabledLots.push_back(s.lot);
         const char* why = nullptr; // why a raw change does not count
         bool counts = false, moved = false;
+        // a lamp of a lot that left Detailed View (ReadDetailSwitches) going out of the bake: one the LOD hold could not keep
+        // (by day, in the edit mode, or changed in the same read); lamps of a promoted lot keep the priority path below, so
+        // the street around a lot that turns detailed lights at once
+        const bool leftDetail = s.lot != 0 && p.lot == s.lot && p.baked && !s.baked && g_detailSwitchAt.contains(s.lot) && DetailOf(s.lot, now) == 0;
         float pl[3], sl[3];
         for (int c = 0; c < 3; c++) {
             pl[c] = LampLight(p, c);
@@ -4177,6 +4409,18 @@ void TrackLotLampEdits() {
             counts = moved = true; // user-driven (Build mode)
             // (a lamp the GPU draws, Instant, is not a lamp the game solves: its drag keeps the Instant rules)
             DragLite::NoteLampStep("lamp list: moved", DragLite::StepKind::Move, !LampMarkFilter::HandledLately(static_cast<uintptr_t>(L), 1500));
+        } else if (p.held != s.held && p.baked && s.baked && !LightChanged(pl, sl)) {
+            // its lot left Detailed View and the lamp stays in the bake, or it is enabled again: the ground keeps its light
+            why = s.held ? "kept in the bake (Detailed View demotion)" : "enabled again after a Detailed View demotion";
+            // a chunk re-rendered while it was disabled may have left it out (before the read that started the hold, or a
+            // bake gate): the lot's bounded entry relight bakes it again once
+            if (!s.held) g_lotArrivals.insert(s.lot);
+        } else if (leftDetail) {
+            // not counted on purpose (no settle or bulk gate, no rebuild): the lot's bounded entry relight takes its ground
+            // while it is drawn (RefreshArrivingLots); otherwise the snapshot keeps the change for the next relight that
+            // covers the lot. Its rooms still gather again (g_disabledLots).
+            why = "Detailed View switch";
+            g_lotArrivals.insert(s.lot);
         } else if ((editing || (s.type == 11 && p.type == 11 && p.lot == s.lot &&
                     (s.lot != 0 || (p.baked && s.baked && LightChanged(pl, sl)) || ((p.flags ^ s.flags) & 0x40)
                      || ((p.inten <= 1e-3f) != (s.inten <= 1e-3f)))) || ObservedEnableSwitch(p, s)
@@ -4265,9 +4509,20 @@ void TrackLotLampEdits() {
             total++;
             if (Recorder::Verbose()) AddDetail(c.detail, c.details, std::format("L{:08X} type {}: removed", L, p.type));
         }
+        if (p.held) {
+            holdsChanged = true;
+            heldGone[p.lot]++;
+        }
         TraceGpuLamp(&GpuLampTrace::gone, L, p, p.baked);
     }
     g_lotLampSig.swap(cur); // g_lotLampCur keeps the old list's memory for the next read
+    if (holdsChanged) {
+        std::lock_guard<std::mutex> lk(g_lodHeldMx);
+        g_lodHeld.clear();
+        for (const auto& [L, s] : g_lotLampSig)
+            if (s.held) g_lodHeld[L] = LodHold{s.lot, s.type};
+        g_lodHeldCount.store(static_cast<int>(g_lodHeld.size()), std::memory_order_release);
+    }
     for (uint64_t lot : g_disabledLots) LevelLightShare::RelightLotById(lot, "a lamp disabled or enabled again (sold, deleted, undo)");
 
     // lots seen: new lots start their settle time, vanished lots are forgotten (with any pending removal)
@@ -4299,6 +4554,16 @@ void TrackLotLampEdits() {
         // every room of the lot lights again (07/10, a deleted lamp post kept lighting its wall): a deleted lamp runs no lamp
         // entry update, so the outdoor rooms of the other stories (the walls) kept it in their light lists
         if (lot != 0) LevelLightShare::RelightLotById(lot, "a lamp removed");
+    }
+    // held lamps that left the list (their lot unloaded or was bulldozed): no streaming, settle, bulk or confirmation wait, as
+    // nothing else takes their light off the ground; their lot stays among the snapshot's settled lots for DiffBake
+    std::erase_if(g_lodGoneLots, [now](const auto& g) { return now - g.second > std::chrono::seconds(60); });
+    for (const auto& [lot, n] : heldGone) {
+        counted++;
+        userDriven = true;
+        what = std::format("lot {:016X}: {} held lamp(s) left the lamp list (user-driven)", lot, n);
+        std::erase_if(g_lodGoneLots, [lot](const auto& g) { return g.first == lot; });
+        g_lodGoneLots.emplace_back(lot, now);
     }
     // More than 8 changes = lamps switching at dusk / dawn or streaming in bulk; except when they are all switches (no lamp
     // added or removed) of ONE lot: a lot's own lamps switched together (30/09: a town square's 57 lamps were ignored here,
@@ -4403,6 +4668,11 @@ void TrackLotLampEdits() {
     g_bakeSnap.settledLots.clear(); // time-dependent: every refresh
     for (const auto& [lot, seen] : g_lotSeen)
         if (seen.explicitEdit || (now - seen.firstSeen >= std::chrono::seconds(10) && now - seen.lastUncounted >= std::chrono::seconds(5))) g_bakeSnap.settledLots.push_back(lot);
+    if (!g_lodGoneLots.empty()) {
+        for (const auto& g : g_lodGoneLots) g_bakeSnap.settledLots.push_back(g.first);
+        std::sort(g_bakeSnap.settledLots.begin(), g_bakeSnap.settledLots.end());
+        g_bakeSnap.settledLots.erase(std::unique(g_bakeSnap.settledLots.begin(), g_bakeSnap.settledLots.end()), g_bakeSnap.settledLots.end());
+    }
     g_lampEnumerations++;
 }
 
@@ -4549,17 +4819,20 @@ float LampConeVisibility(const LampCone& cone, const float* pr, const float* p, 
 // origin on the wall's line, 0.5 m from a sconce inside, so the ray never crossed the wall and the edging glowed). An indoor
 // lamp shining out (cone.light) reaches its outdoor face only past that wall: tested 0.15 m beyond the wall from the lamp,
 // through its openings as any exit lamp. shortcut: walls along x or z only, add diagonals if edging along one glows
+// A piece on an outside wall's line is tested 0.15 m off it: beyond the wall for a lamp shining out of a house (it reaches
+// the piece only through the openings), on the lamp's side for any other lamp. A stair set on a foundation's edge has its
+// origins on the foundation's wall line, where the ray grazes that wall: neighbouring steps took 0, part or all of the
+// lamp by rounding, and the stair showed a cut at every piece.
 float FencePieceVisibility(const LampCone& cone, const float* pr, const float* p) {
-    if (cone.light) {
-        const float base[3] = {p[0], p[1] - 0.5f, p[2]};
-        for (int axis = 0; axis < 2; axis++) // (axis 0: a wall along x, the piece moved along z; 1: the other way)
-            if (LevelLightShare::OnWallLine(base, axis ? 0.0f : 1.0f, axis ? 1.0f : 0.0f, 0.1f)) {
-                float q[3] = {p[0], p[1], p[2]};
-                const int c = axis ? 0 : 2;
-                q[c] += p[c] >= pr[c] ? 0.15f : -0.15f;
-                return LampConeVisibility(cone, pr, q, 0.05f);
-            }
-    }
+    const float base[3] = {p[0], p[1] - 0.5f, p[2]};
+    for (int axis = 0; axis < 2; axis++) // (axis 0: a wall along x, the piece moved along z; 1: the other way)
+        if (LevelLightShare::OnWallLine(base, axis ? 0.0f : 1.0f, axis ? 1.0f : 0.0f, 0.1f)) {
+            float q[3] = {p[0], p[1], p[2]};
+            const int c = axis ? 0 : 2;
+            const float away = p[c] >= pr[c] ? 0.15f : -0.15f;
+            q[c] += cone.light ? away : -away;
+            return LampConeVisibility(cone, pr, q, 0.05f);
+        }
     return LampConeVisibility(cone, pr, p, 0.2f);
 }
 bool g_lampConeLogged = false, g_fenceConeLogged = false; // render thread
@@ -5231,8 +5504,7 @@ template <typename DrawFn> bool DrawRoad(IDirect3DDevice9* dev, DrawFn draw) {
 // pixel shader (ShaderPatches::PatchInstancedLamps) uses max(vertex lights, ground light atlas at the pixel) instead,
 // so every rail gets the same lamp light as the ground next to it. ----
 // The centre and half extent (xz) of an instanced group: the mean of its instance positions (stream 1, the first float3
-// of each record: world position, as the F7 capture reads them). Read once per (buffer, offset, count, stride) and again
-// every 5 s, since the game may refill a buffer; render thread.
+// of each record: world position, as the F7 capture reads them). Kept per set of origins (InstancedGroupCentre); render thread.
 constexpr unsigned kGroupPieces = 32;
 struct GroupCentre {
     float x = 0, y = 0, z = 0, ext = 0;
@@ -5292,7 +5564,26 @@ bool ReadInstancePositions(const BYTE* p, UINT count, UINT stride, GroupCentre& 
         return false;
     }
 }
-std::unordered_map<uint64_t, uint8_t> g_centreBusy; // draw_reads_nowait: busy answers per group since its last read
+std::unordered_map<uint64_t, uint8_t> g_centreBusy; // draw_reads_nowait: busy answers per buffer place since its last read
+std::unordered_map<uint64_t, GroupCentre*> g_groupAtPlace; // the group last read at a buffer place (used while it is busy)
+// The instance origins' hash (exact bits, with the count and stride): the key of the group they make
+bool HashInstancePositions(const BYTE* p, UINT count, UINT stride, uint64_t& key) {
+    __try {
+        uint64_t h = 1469598103934665603ull ^ (static_cast<uint64_t>(count) << 20) ^ stride;
+        for (UINT i = 0; i < count; i++) {
+            const uint32_t* v = reinterpret_cast<const uint32_t*>(p + static_cast<size_t>(i) * stride);
+            for (int k = 0; k < 3; k++) h = (h ^ v[k]) * 1099511628211ull;
+        }
+        key = h;
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+// The game refills its instance buffers (dynamic, write-only): one place in a buffer holds other pieces from one draw to the
+// next, so a group kept by its place lit the pieces drawn there with another group's lamps until the next read (stairs
+// flickered as the camera moved). The origins are read at every draw and the group is found by them: the same pieces keep
+// the same group, its pick and its runs wherever the game puts them.
 const GroupCentre* InstancedGroupCentre(IDirect3DDevice9* dev) {
     UINT freq = 0;
     if (FAILED(dev->GetStreamSourceFreq(0, &freq)) || !(freq & D3DSTREAMSOURCE_INDEXEDDATA)) return nullptr;
@@ -5302,33 +5593,36 @@ const GroupCentre* InstancedGroupCentre(IDirect3DDevice9* dev) {
     if (FAILED(dev->GetStreamSource(1, &vb, &off, &stride)) || !vb) return nullptr;
     const GroupCentre* result = nullptr;
     if (count > 0 && count <= 4096 && stride >= 12 && stride <= 256) {
-        if (g_groupCentres.size() > 4096) g_groupCentres.clear(), g_centreBusy.clear(); // groups come and go with lots
-        const uint64_t key = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb)) << 32) ^ (static_cast<uint64_t>(off) << 12) ^ (static_cast<uint64_t>(count) << 1) ^ stride;
-        GroupCentre& g = g_groupCentres[key];
-        const DWORD now = GetTickCount();
-        if (!g.at || now - g.at > 5000) {
-            // draw_reads_nowait: a refresh of a group already read does not wait for the GPU; while the buffer is busy the
-            // last positions stay in use and the next draw tries again (three busy answers: it waits, as before)
-            uint8_t* busy = nullptr;
-            if (DevSwitches::DrawReadsNoWait() && g.at && g.ok) busy = &g_centreBusy[key];
-            const bool nowait = busy && *busy < 3;
-            void* p = nullptr;
-            const HRESULT hr = vb->Lock(off, count * stride, &p, D3DLOCK_READONLY | (nowait ? D3DLOCK_DONOTWAIT : 0));
-            if (nowait && hr == D3DERR_WASSTILLDRAWING) {
-                ++*busy;
-                p = nullptr;
-            } else {
-                g.at = now ? now : 1;
-                if (busy) *busy = 0;
+        if (g_groupCentres.size() > 4096) g_groupCentres.clear(), g_centreBusy.clear(), g_groupAtPlace.clear(); // groups come and go with lots
+        const uint64_t place = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb)) << 32) ^ (static_cast<uint64_t>(off) << 12) ^ (static_cast<uint64_t>(count) << 1) ^ stride;
+        const auto last = g_groupAtPlace.find(place);
+        // draw_reads_nowait: a place read before does not wait for the GPU; while the buffer is busy the group last read there
+        // stays in use and the next draw tries again (three busy answers: it waits, as before)
+        uint8_t* busy = nullptr;
+        if (DevSwitches::DrawReadsNoWait() && last != g_groupAtPlace.end()) busy = &g_centreBusy[place];
+        const bool nowait = busy && *busy < 3;
+        void* p = nullptr;
+        const HRESULT hr = vb->Lock(off, count * stride, &p, D3DLOCK_READONLY | (nowait ? D3DLOCK_DONOTWAIT : 0));
+        uint64_t key = 0;
+        if (nowait && hr == D3DERR_WASSTILLDRAWING) {
+            ++*busy;
+            p = nullptr;
+            if (last->second->ok) result = last->second;
+        } else if (SUCCEEDED(hr) && p && HashInstancePositions(static_cast<const BYTE*>(p), count, stride, key)) {
+            if (busy) *busy = 0;
+            GroupCentre& g = g_groupCentres[key];
+            if (!g.at) {
+                g.at = 1;
                 if (++g_groupReads == 0) g_groupReads = 1;
                 g.read = g_groupReads;
                 g.all.resize(static_cast<size_t>(count) * 3);
-                g.ok = SUCCEEDED(hr) && p && ReadInstancePositions(static_cast<const BYTE*>(p), count, stride, g, g.all.data());
+                g.ok = ReadInstancePositions(static_cast<const BYTE*>(p), count, stride, g, g.all.data());
                 if (!g.ok) g.all.clear();
             }
-            if (p) vb->Unlock();
+            g_groupAtPlace[place] = &g;
+            if (g.ok) result = &g;
         }
-        if (g.ok) result = &g;
+        if (p) vb->Unlock();
     }
     vb->Release();
     return result;
@@ -5339,62 +5633,103 @@ const GroupCentre* InstancedGroupCentre(IDirect3DDevice9* dev) {
 std::string g_objDrawInfo;
 std::string ReachLawText(bool reach, bool refused, bool placed, float scale, const float (*r0Rows)[4], int nLamps);
 
-// A group's lamp list is one for all its pieces: a lamp stays when any piece sees it (PickFenceLampsImpl), and the pixel tests
-// no wall. A flowerbed curb running from the garden to under the house, behind the house's brick wall, took on the hidden
-// pieces the light of the lamp on the other side of that wall (an F7 capture, #336: 62 pieces, the top of the curb
-// lit along the wall while the ground beside it, shaded, stayed dark). Each piece is tested with the same wall and slab test
-// from 0.5 m over its origin; consecutive pieces seeing the same lamps are drawn together, the lamps a run's pieces do not see
-// with no colour. A group whose pieces all see all its lamps keeps its one draw. The masks are kept per group read, lamp list
-// and wall state.
+// A group's lamp list is one for all its pieces, and the game groups pieces as it draws them: the same stair took one group's
+// lamps and ground light on some steps and another group's on the next (two F7 captures: two groups at one corner with
+// atlas weights 0.67 and 0.78), and the groups changed as the camera moved. Each piece is lit from its own place
+// instead: from 0.5 m over its origin, each listed lamp takes the share of it the piece sees (the wall and slab test of the
+// pick), and the ground light on faces turned up takes the piece's own height gate and its own share of the atlas lamps.
+// Consecutive pieces with the same values are drawn together (shares in 1/32, ground weights in 1/64). A curb behind a house
+// wall loses the lamp on the other side piece by piece, as before (F7 #336). The values are kept per group, lamp list and
+// wall state.
 // shortcut: a piece is tested at its origin only (a long piece half behind a wall takes its origin's answer), until pieces
 // carry their own extent
 std::atomic<uint32_t> g_fenceRunGroups{0}, g_fenceRunDraws{0};
 struct FenceRunMasks {
     uint32_t read = 0, gen = 0;
-    uint64_t state = 0, lamps = 0, places = 0; // places: the pieces' positions (a re-read that found them the same keeps the masks)
-    std::vector<uint8_t> mask;
+    uint64_t state = 0, lamps = 0, places = 0; // places: the pieces' positions (a re-read that found them the same keeps the values)
+    std::vector<uint8_t> mask;                 // per piece: the placed lamps' shares (0..32), then the ground weight (0..64)
 };
 std::unordered_map<const GroupCentre*, FenceRunMasks> g_fenceRunMasks;
-constexpr unsigned kFenceRunsMax = 128; // more runs than this: the one draw, as before
+constexpr unsigned kFenceRunsMax = 128; // more runs than this: the one draw with the group's values, as before
+constexpr float kRunShareSteps = 32.0f, kRunWeightSteps = 64.0f;
+// A piece within kFloorGateFull of its lot's ground, drawn with the lot's ground lamp shade (groundY finite): the shade
+// tests the walls per pixel, so a lamp the piece sees comes in whole (its one partial share per piece cut the steps of a
+// stair against a foundation into 1 m blocks of different brightness, where the shade beside them is smooth). A lamp a wall
+// hides from the piece stays off: the shade misses fence tops over 1.25 m, a face reading it inside a house close by, a lot
+// whose shade is not built yet and the lamps shining out of a house, and a short fence beside a house took the lamp behind
+// it. A lamp shining out of a house keeps its share.
+bool ShadedOnGround(float y, float groundY) { return std::isfinite(groundY) && GroundShadow::GroundPoolHeightGate(y, groundY) >= 1.0f; }
+// The values of piece `at` (0.5 m over its origin, y its origin's height): bytes [0, lit) the placed lamps' shares, byte lit
+// the ground weight. n candidates in g_lampData / g_lampCone (SelectLamps, as the pick).
+void FencePieceValues(const float* at, float y, int n, int lit, const float (*lamps)[4], const LampCone* cones, float lampTop, float poolGate, float groundY,
+                      uint8_t* out) {
+    if (ShadedOnGround(y, groundY)) {
+        for (int k = 0; k < lit; k++) {
+            const float seen = FencePieceVisibility(cones[k], lamps[1 + 2 * k], at);
+            out[k] = static_cast<uint8_t>(seen < 0.01f ? 0.0f : cones[k].light ? std::round(std::min(seen, 1.0f) * kRunShareSteps) : kRunShareSteps);
+        }
+        out[lit] = static_cast<uint8_t>(std::round(std::clamp(GroundLightGate::HeightGate(y, lampTop) * poolGate, 0.0f, 1.0f) * kRunWeightSteps));
+        return;
+    }
+    float seen[ShaderPatches::kObjectPixelLamps] = {};
+    for (int k = 0; k < lit; k++) {
+        seen[k] = FencePieceVisibility(cones[k], lamps[1 + 2 * k], at);
+        out[k] = static_cast<uint8_t>(seen[k] < 0.01f ? 0.0f : std::round(std::min(seen[k], 1.0f) * kRunShareSteps));
+    }
+    GroundLightGate::Share share; // as PickFenceLampsImpl, at this piece
+    for (int j = 0; j < n; j++) {
+        const float* pr = g_lampData[j];
+        const float* col = g_lampData[16 + j];
+        const float r = pr[3] > 0.1f ? pr[3] : 0.1f, dx = pr[0] - at[0], dy = pr[1] - at[1], dz = pr[2] - at[2];
+        const float w = (col[0] * 0.2126f + col[1] * 0.7152f + col[2] * 0.0722f) * LampConeAt(g_lampCone[j], pr, at) / (1.0f + (dx * dx + dy * dy + dz * dz) / (r * r));
+        float v = -1.0f;
+        for (int k = 0; k < lit && v < 0.0f; k++) // a placed lamp: its test above
+            if (lamps[1 + 2 * k][0] == pr[0] && lamps[1 + 2 * k][1] == pr[1] && lamps[1 + 2 * k][2] == pr[2]) v = seen[k];
+        if (v < 0.0f) v = FencePieceVisibility(g_lampCone[j], pr, at);
+        share.Add(w, v < 0.01f ? 0.0f : v, !g_lampCone[j].light);
+    }
+    const float weight = GroundLightGate::HeightGate(y, lampTop) * share.Value() * poolGate;
+    out[lit] = static_cast<uint8_t>(std::round(std::clamp(weight, 0.0f, 1.0f) * kRunWeightSteps));
+}
+// vis: the share the group's pick gave each placed lamp (its colour is scaled by it); weight: the group's ground weight row
 template <typename DrawFn>
-bool DrawFenceRuns(IDirect3DDevice9* dev, const GroupCentre& g, int used, const float (*lamps)[4], UINT lampConst, unsigned rows, const LampCone* cones, DrawFn draw) {
+bool DrawFenceRuns(IDirect3DDevice9* dev, const GroupCentre& g, int used, const float (*lamps)[4], UINT lampConst, unsigned rows, const LampCone* cones, const float* vis,
+                   float lampTop, float poolGate, float groundY, UINT weightConst, const float* weight, DrawFn draw) {
     constexpr unsigned N = ShaderPatches::kObjectPixelLamps;
-    static_assert(N <= 8, "one bit per lamp in a uint8_t mask");
     const size_t count = g.all.size() / 3;
     if (used <= 0 || count < 2) return false;
     const int lit = std::min(used, static_cast<int>(N));
-    uint64_t lampKey = 1469598103934665603ull; // the placed lamps' positions and colours
+    const size_t W = static_cast<size_t>(lit) + 1;
+    uint64_t lampKey = 1469598103934665603ull; // the placed lamps' positions and colours, and the ground gate's inputs
     for (int k = 0; k < lit; k++)
         for (int r = 0; r < 2; r++)
             for (int c = 0; c < 4; c++) lampKey = (lampKey ^ FloatBits(lamps[1 + 2 * k + r][c])) * 1099511628211ull;
+    lampKey = (lampKey ^ FloatBits(lampTop)) * 1099511628211ull;
+    lampKey = (lampKey ^ FloatBits(poolGate)) * 1099511628211ull;
+    lampKey = (lampKey ^ FloatBits(groundY)) * 1099511628211ull;
     if (g_fenceRunMasks.size() > 4096) g_fenceRunMasks.clear(); // (groups come and go with lots, as g_groupCentres)
     FenceRunMasks& m = g_fenceRunMasks[&g];
     const uint64_t state = LevelLightShare::LampVisibilityState();
-    if (m.read != g.read) { // the group's positions were read again (every 5 s): the masks stay if they did not move
+    if (m.read != g.read) { // another group at this address: the values stay if its pieces are the same
         uint64_t places = 1469598103934665603ull;
         for (float f : g.all) places = (places ^ FloatBits(f)) * 1099511628211ull;
         if (places != m.places) m.places = places, m.mask.clear();
         m.read = g.read;
     }
-    if (m.gen != g_lampMemoGen || m.state != state || m.lamps != lampKey || m.mask.size() != count) {
+    if (m.gen != g_lampMemoGen || m.state != state || m.lamps != lampKey || m.mask.size() != count * W) {
         m.gen = g_lampMemoGen, m.state = state, m.lamps = lampKey;
-        m.mask.assign(count, 0);
+        m.mask.assign(count * W, 0);
+        const int n = SelectLamps(g.x, g.z, 40.0f + std::min(g.ext, 60.0f), true); // the pick's candidates
         for (size_t i = 0; i < count; i++) {
             const float at[3] = {g.all[3 * i], g.all[3 * i + 1] + 0.5f, g.all[3 * i + 2]};
-            uint8_t bits = 0;
-            for (int k = 0; k < lit; k++)
-                if (FencePieceVisibility(cones[k], lamps[1 + 2 * k], at) >= 0.01f) bits |= static_cast<uint8_t>(1u << k);
-            m.mask[i] = bits;
+            FencePieceValues(at, g.all[3 * i + 1], n, lit, lamps, cones, lampTop, poolGate, groundY, &m.mask[i * W]);
         }
     }
-    const uint8_t all = static_cast<uint8_t>((1u << lit) - 1u);
-    unsigned runs = 0;
-    bool hidden = false;
-    for (size_t i = 0; i < count; i++) {
-        hidden = hidden || m.mask[i] != all;
-        if (i == 0 || m.mask[i] != m.mask[i - 1]) runs++;
-    }
-    if (!hidden || runs > kFenceRunsMax) return false;
+    const auto same = [&](size_t a, size_t b) { return std::memcmp(&m.mask[a * W], &m.mask[b * W], W) == 0; };
+    unsigned runs = 1;
+    for (size_t i = 1; i < count; i++)
+        if (!same(i, i - 1)) runs++;
+    if (runs > kFenceRunsMax) return false;
     UINT freq = 0, off = 0, stride = 0;
     IDirect3DVertexBuffer9* vb = nullptr;
     if (FAILED(dev->GetStreamSourceFreq(0, &freq)) || (freq & 0x3FFFFFFFu) != count || FAILED(dev->GetStreamSource(1, &vb, &off, &stride)) || !vb) {
@@ -5403,13 +5738,19 @@ bool DrawFenceRuns(IDirect3DDevice9* dev, const GroupCentre& g, int used, const 
     }
     float run[1 + 4 * N + 2][4];
     const unsigned n = std::min<unsigned>(rows, static_cast<unsigned>(std::size(run)));
+    float wrow[4] = {weight[0], weight[1], weight[2], weight[3]};
     for (size_t i0 = 0; i0 < count;) {
         size_t i1 = i0 + 1;
-        while (i1 < count && m.mask[i1] == m.mask[i0]) i1++;
+        while (i1 < count && same(i1, i0)) i1++;
+        const uint8_t* key = &m.mask[i0 * W];
         std::memcpy(run, lamps, n * sizeof run[0]);
-        for (int k = 0; k < lit; k++)
-            if (!(m.mask[i0] & (1u << k))) run[2 + 2 * k][0] = run[2 + 2 * k][1] = run[2 + 2 * k][2] = 0.0f;
+        for (int k = 0; k < lit; k++) { // the lamp's colour at this piece's share instead of the group's
+            const float scale = vis[k] > 0.0f ? key[k] / kRunShareSteps / vis[k] : 0.0f;
+            for (int c = 0; c < 3; c++) run[2 + 2 * k][c] *= scale;
+        }
+        wrow[0] = key[lit] / kRunWeightSteps;
         SetPsConst(dev, lampConst, &run[0][0], n);
+        SetPsConst(dev, weightConst, wrow, 1);
         dev->SetStreamSource(1, vb, off + static_cast<UINT>(i0) * stride, stride);
         dev->SetStreamSourceFreq(0, D3DSTREAMSOURCE_INDEXEDDATA | static_cast<UINT>(i1 - i0));
         draw();
@@ -5419,17 +5760,18 @@ bool DrawFenceRuns(IDirect3DDevice9* dev, const GroupCentre& g, int used, const 
     dev->SetStreamSource(1, vb, off, stride);
     dev->SetStreamSourceFreq(0, freq);
     SetPsConst(dev, lampConst, &lamps[0][0], n);
+    SetPsConst(dev, weightConst, weight, 1);
     vb->Release();
     g_fenceRunGroups.fetch_add(1, std::memory_order_relaxed);
     if (LightProbe::Capturing())
-        g_objDrawInfo += std::format("\n      pieces behind walls: {} runs of the group's {} pieces, each with the lamps its pieces see", runs, count);
+        g_objDrawInfo += std::format("\n      lit per piece: {} runs of the group's {} pieces, each with its own lamp shares and ground weight", runs, count);
     return true;
 }
 
 // The lamps of an instanced group (fences, stairs, railings) around its centre, into rows 1 .. 4N of lamps (pos, 1/R^2;
 // colour, spill; the two cones) and, with the reach law, rows 1 + 4N .. 2 + 4N (r0^2); lampTop: the highest atlas lamp head
 // around; share: the share of the atlas lamps' light the group sees. Returns the lamps placed.
-int PickFenceLampsImpl(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share, LampCone* cones) {
+int PickFenceLampsImpl(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share, LampCone* cones, float* vis) {
     constexpr unsigned N = ShaderPatches::kObjectPixelLamps;
     constexpr unsigned kLampRows = 1 + 4 * N;
     int used = 0;
@@ -5499,6 +5841,7 @@ int PickFenceLampsImpl(const GroupCentre& g, bool reachLaw, float (*lamps)[4], f
         std::memcpy(lamps[1 + 2 * N + 2 * used], cone.c1, 16);
         std::memcpy(lamps[2 + 2 * N + 2 * used], cone.c2, 16);
         if (cones) cones[used] = cone;
+        if (vis) vis[used] = v;
         if (!g_fenceConeLogged && HasCone(cone)) {
             g_fenceConeLogged = true;
             LOG_INFO(std::format("[LotLightBridge] Fence/stairs: per-pixel lamps follow their cones (first: the lamp at ({:.1f} {:.1f} {:.1f}), spill {:.3f})", pr[0], pr[1], pr[2], cone.spill));
@@ -5524,31 +5867,49 @@ struct FencePickMemo {
     float lampTop = 0.0f, share = 0.0f;
     float rows[kFenceRows][4] = {};
     LampCone cones[ShaderPatches::kObjectPixelLamps] = {};
+    float vis[ShaderPatches::kObjectPixelLamps] = {};
 };
 FencePickMemo g_fencePick[1024];
 uint32_t g_fencePickHits = 0, g_fencePickMisses = 0, g_fencePickChecks = 0;
 uint32_t g_fenceMissWhy[5] = {}; // (development builds) PickFenceLampsMemo's misses by reason, and picks not kept
 bool g_fencePickOff = false;
-int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share, LampCone* cones);
+int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share, LampCone* cones, float* vis);
 // (development builds) the draw cost log's timed draws (DrawCostSampled): the fence picks' own time, and the arch rows' below
 bool g_drawCostTimed = false; // the current draw is timed: UpdateHooks' draw calls add their driver time
 int64_t g_fencePickTicks = 0;
 uint32_t g_fencePickCalls = 0;
-int PickFenceLamps(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share, LampCone* cones) {
-    if (kPublicBuild || !g_drawCostTimed) return PickFenceLampsMemo(g, reachLaw, lamps, lampTop, share, cones);
+// (development builds) the fence draw's other parts on the timed draws: the group noted for the ground shade (NoteFenceGroup),
+// its positions read (InstancedGroupCentre), the per-piece runs (DrawFenceRuns, with their draws)
+int64_t g_fenceStepTicks[3] = {};
+uint32_t g_fenceStepCalls[3] = {};
+struct FenceStepTimer {
+    int step;
+    LARGE_INTEGER a{};
+    explicit FenceStepTimer(int s) : step(kPublicBuild || !g_drawCostTimed ? -1 : s) {
+        if (step >= 0) QueryPerformanceCounter(&a);
+    }
+    ~FenceStepTimer() {
+        if (step < 0) return;
+        LARGE_INTEGER b;
+        QueryPerformanceCounter(&b);
+        g_fenceStepTicks[step] += b.QuadPart - a.QuadPart, g_fenceStepCalls[step]++;
+    }
+};
+int PickFenceLamps(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share, LampCone* cones, float* vis) {
+    if (kPublicBuild || !g_drawCostTimed) return PickFenceLampsMemo(g, reachLaw, lamps, lampTop, share, cones, vis);
     LARGE_INTEGER a, b;
     QueryPerformanceCounter(&a);
-    const int used = PickFenceLampsMemo(g, reachLaw, lamps, lampTop, share, cones);
+    const int used = PickFenceLampsMemo(g, reachLaw, lamps, lampTop, share, cones, vis);
     QueryPerformanceCounter(&b);
     g_fencePickTicks += b.QuadPart - a.QuadPart, g_fencePickCalls++;
     return used;
 }
 uint32_t g_fencePickBypass[4] = {}; // memo not used: switch off, turned off, F8 records asked for, a capture
-int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share, LampCone* cones) {
+int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share, LampCone* cones, float* vis) {
     const int bypass = !DevSwitches::LampVisibilityMemo() ? 0 : g_fencePickOff ? 1 : LevelLightShare::VisibilityDiagArmed() ? 2 : LightProbe::Capturing() ? 3 : -1;
     if (bypass >= 0) {
         g_fencePickBypass[bypass]++;
-        return PickFenceLampsImpl(g, reachLaw, lamps, lampTop, share, cones);
+        return PickFenceLampsImpl(g, reachLaw, lamps, lampTop, share, cones, vis);
     }
     // (the law in the slot too: a group drawn with both laws kept evicting itself)
     FencePickMemo& e = g_fencePick[(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(&g)) * 2654435761u ^ g.read * 0x85EBCA77u ^ (reachLaw ? 0x9E3779B9u : 0u)) >> 22];
@@ -5561,7 +5922,7 @@ int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], f
             std::memcpy(chk, lamps, sizeof chk);
             float chkTop = -1e9f, chkShare = 0.0f;
             const uint32_t leftOut0 = g_fenceLampsLeftOut, dimmed0 = g_fenceLampsDimmed;
-            const int chkUsed = PickFenceLampsImpl(g, reachLaw, chk, chkTop, chkShare, nullptr);
+            const int chkUsed = PickFenceLampsImpl(g, reachLaw, chk, chkTop, chkShare, nullptr, nullptr);
             g_fenceLampsLeftOut = leftOut0, g_fenceLampsDimmed = dimmed0;
             if (chkUsed != e.used || FloatBits(chkTop) != FloatBits(e.lampTop) || FloatBits(chkShare) != FloatBits(e.share) ||
                 std::memcmp(chk[1], e.rows, sizeof e.rows) != 0) {
@@ -5572,6 +5933,7 @@ int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], f
         }
         std::memcpy(lamps[1], e.rows, sizeof e.rows);
         if (cones) std::memcpy(cones, e.cones, sizeof e.cones);
+        if (vis) std::memcpy(vis, e.vis, sizeof e.vis);
         lampTop = e.lampTop, share = e.share;
         g_fenceLampsLeftOut += e.leftOut, g_fenceLampsDimmed += e.dimmed;
         g_lastLampCandidates = e.candidates;
@@ -5586,8 +5948,10 @@ int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], f
     }
     const uint32_t gen = g_lampMemoGen, leftOut0 = g_fenceLampsLeftOut, dimmed0 = g_fenceLampsDimmed;
     LampCone picked[ShaderPatches::kObjectPixelLamps] = {};
-    const int used = PickFenceLampsImpl(g, reachLaw, lamps, lampTop, share, picked);
+    float pickedVis[ShaderPatches::kObjectPixelLamps] = {};
+    const int used = PickFenceLampsImpl(g, reachLaw, lamps, lampTop, share, picked, pickedVis);
     if (cones) std::memcpy(cones, picked, sizeof picked);
+    if (vis) std::memcpy(vis, pickedVis, sizeof pickedVis);
     if (!kPublicBuild && !(gen == g_lampMemoGen && LevelLightShare::LampVisibilityState() == state)) g_fenceMissWhy[4]++;
     if (gen == g_lampMemoGen && LevelLightShare::LampVisibilityState() == state) {
         e.g = &g, e.read = g.read, e.gen = gen, e.state = state, e.reachLaw = reachLaw;
@@ -5596,12 +5960,13 @@ int PickFenceLampsMemo(const GroupCentre& g, bool reachLaw, float (*lamps)[4], f
         e.lampTop = lampTop, e.share = share;
         std::memcpy(e.rows, lamps[1], sizeof e.rows);
         std::memcpy(e.cones, picked, sizeof picked);
+        std::memcpy(e.vis, pickedVis, sizeof pickedVis);
     }
     return used;
 }
 
 template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw) {
-    NoteFenceGroup(dev); // garden walls and fences shade the ground (ShadeWalls)
+    { FenceStepTimer timer(0); NoteFenceGroup(dev); } // garden walls and fences shade the ground (ShadeWalls)
     if (!g_fenceFix.load(std::memory_order_relaxed)) return false;
     // (12/10, one daytime curve) No full-daylight gate any more: the pass runs at every level with its ground and lamp
     // strengths x LampDay(night) (3% by day), so a lamp left on by day fades on fences as on the walls behind them.
@@ -5613,7 +5978,11 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
     if (!chosen->ps) return false;
     // the group's pieces (per-pixel lamps on, a shader with them): read before the law is chosen, so a draw that will place
     // no lamp (option off, or a group that cannot be read) keeps the first law's lighter copy (12/10 review)
-    const GroupCentre* g = chosen->inst.pixelLamps && g_objPixelLamps.load(std::memory_order_relaxed) ? InstancedGroupCentre(dev) : nullptr;
+    const GroupCentre* g = nullptr;
+    if (chosen->inst.pixelLamps && g_objPixelLamps.load(std::memory_order_relaxed)) {
+        FenceStepTimer timer(1);
+        g = InstancedGroupCentre(dev);
+    }
     // realistic reach (12/10): the copy with the outdoor walls' law, made only from a shader the first law takes; refused
     // (no room for its 2 rows), the first law stays (g_reachLawRefused)
     bool reachRefused = false;
@@ -5627,10 +5996,9 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
     const bool reachLaw = p.inst.reachConst != 0;
     const LotRect* groupLot = g ? FindLotAt(g->x, g->z) : nullptr;
     const float poolGate = groupLot ? GroundShadow::GroundPoolHeightGate(g->minY, groupLot->ty) : 1.0f;
+    // the lot's ground under the group when its ground lamp shade is drawn with it (ShadedOnGround); NaN otherwise
+    const float shadeGroundY = groupLot && g_shadeOn && p.inst.shadeSampler >= 0 && p.inst.shadeConst >= 0 ? groupLot->ty : std::numeric_limits<float>::quiet_NaN();
     const float structureGain = GroundShadow::StructureLampGain(poolGate, g_wallGain.load(std::memory_order_relaxed));
-    float oldA[4] = {}, oldB[4] = {};
-    dev->GetPixelShaderConstantF(p.inst.atlasConst, oldA, 1);
-    dev->GetPixelShaderConstantF(p.inst.strengthConst, oldB, 1);
     const float gain = TerrainLightingPolicy::SurfaceLampGain(g_night.load(std::memory_order_relaxed), g_fenceStrength.load(std::memory_order_relaxed));
     const float s[4] = {gain, 0, 0, 0};
     // Per-pixel lamps (ShaderPatches::PatchInstancedLamps pixelLamps): the lamps chosen around the group's centre, as for
@@ -5641,16 +6009,18 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
     // lampConst + 2N: one upload covers both blocks), then with reach the 2 rows of r0^2 (reachConst = coneConst + 2N)
     constexpr unsigned kLampRows = 1 + 4 * N;
     const unsigned rows = kLampRows + (reachLaw ? 2u : 0u);
-    float lamps[kLampRows + 2][4] = {}, oldLamps[kLampRows + 2][4] = {}, weight[4] = {0.0f, 1.0f, 1.0f, 0.0f}, oldWeight[4] = {};
+    float lamps[kLampRows + 2][4] = {}, weight[4] = {0.0f, 1.0f, 1.0f, 0.0f};
+    static_assert(3 + kLampRows + 2 <= PsConstRun::kRows); // (the atlas, strength, ground weight and lamp rows: one run)
     int used = 0; // the lamps placed
     LampCone cones[N] = {}; // their cones (DrawFenceRuns tests each piece with them)
+    float vis[N] = {}, lampTop = -1e9f; // the group's share of each placed lamp, the highest atlas lamp head (DrawFenceRuns)
     if (p.inst.pixelLamps) {
         lamps[0][3] = 1e-4f;
         for (unsigned k = 0; k < N; k++) lamps[1 + 2 * k][0] = lamps[1 + 2 * k][2] = 1e6f; // unused slot: far away, colour 0
         for (unsigned k = 0; k < N; k++) lamps[2 + 2 * k][3] = lamps[1 + 2 * N + 2 * k][3] = lamps[2 + 2 * N + 2 * k][3] = 1.0f; // no cone
         if (g) {
-            float lampTop = -1e9f, share = 0.0f;
-            used = PickFenceLamps(*g, reachLaw, lamps, lampTop, share, cones);
+            float share = 0.0f;
+            used = PickFenceLamps(*g, reachLaw, lamps, lampTop, share, cones, vis);
             lamps[0][1] = TerrainLightingPolicy::SurfaceLampGain(g_night.load(std::memory_order_relaxed), g_objPixelLampStrength.load(std::memory_order_relaxed)) *
                           std::max(g_fenceStrength.load(std::memory_order_relaxed), 0.0f);
             // Upper architectural runs use the same gain as adjacent loose pieces.
@@ -5679,9 +6049,20 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
             // tops take it x the share of the atlas lamps' light the group sees (the objects' ground share), so a parapet over
             // the slab of an arcade takes none of the pool of the lamp under that slab.
             weight[0] = GroundLightGate::HeightGate(g->y, lampTop) * share * poolGate;
+            // every piece on the ground under the lot's shade: the lamps it sees whole and the ground light unshared
+            // (ShadedOnGround; a lamp shining out of a house keeps its share)
+            float maxY = g->minY;
+            for (size_t i = 1; i < g->all.size(); i += 3) maxY = std::max(maxY, g->all[i]);
+            if (ShadedOnGround(g->minY, shadeGroundY) && ShadedOnGround(maxY, shadeGroundY)) {
+                for (int k = 0; k < used && k < static_cast<int>(N); k++) {
+                    if (cones[k].light) continue;
+                    if (vis[k] > 0.0f)
+                        for (int c = 0; c < 3; c++) lamps[2 + 2 * k][c] /= vis[k];
+                    vis[k] = 1.0f;
+                }
+                weight[0] = GroundLightGate::HeightGate(g->y, lampTop) * poolGate;
+            }
         }
-        dev->GetPixelShaderConstantF(p.inst.lampParamConst, &oldLamps[0][0], rows);
-        dev->GetPixelShaderConstantF(p.inst.groundWeightConst, oldWeight, 1);
     }
     // Light probe (12/10 review: fence and balcony band draws showed only "mod draw (another fix)", so their law could not be
     // read from an F7): the lamps placed, the strengths and the lamp law
@@ -5716,12 +6097,14 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
     g_inOwnCall = true;
     {
         SamplerBind bind(dev, p.inst.atlasSampler, atlas, D3DTEXF_NONE);
-        SetPsConst(dev, p.inst.atlasConst, c, 1);
-        SetPsConst(dev, p.inst.strengthConst, s, 1);
+        PsConstRun consts(dev); // (PatchInstancedLamps: cA, cA + 1, then with the lamps the weight cA + 2 and the rows from cA + 3)
+        consts.Add(p.inst.atlasConst, c, 1);
+        consts.Add(p.inst.strengthConst, s, 1);
         if (p.inst.pixelLamps) {
-            SetPsConst(dev, p.inst.lampParamConst, &lamps[0][0], rows);
-            SetPsConst(dev, p.inst.groundWeightConst, weight, 1);
+            consts.Add(p.inst.lampParamConst, &lamps[0][0], rows);
+            consts.Add(p.inst.groundWeightConst, weight, 1);
         }
+        consts.Set();
         // The lot ground's lamp shade (13/10, F7 2026-10-13 09-31-30 #268: the curbs of a flowerbed behind a free-standing
         // wall stayed lit by the garden post on the other side). The group's one lamp list keeps a lamp that any of its points
         // sees, and the pixel has no wall test; the copy multiplies its lamp sum by the shade the lot pass gives the grass
@@ -5736,16 +6119,16 @@ template <typename DrawFn> bool DrawInstanced(IDirect3DDevice9* dev, DrawFn draw
         if (LightProbe::Capturing()) g_objDrawInfo += "\n      " + shade.Text();
         if (active != &p) SetPsConst(dev, active->inst.capConst, &caps[0][0], kCapRows);
         SetPs(dev, active->ps);
-        // pieces a wall hides a lamp from take it off, run by run (DrawFenceRuns); a group whose pieces all see its lamps: one draw
-        if (!(g && p.inst.pixelLamps && DrawFenceRuns(dev, *g, used, lamps, p.inst.lampParamConst, rows, cones, draw))) draw();
+        // each piece lit from its own place, run by run (DrawFenceRuns); a single piece or too many runs: one draw
+        bool ran = false;
+        if (g && p.inst.pixelLamps) {
+            FenceStepTimer timer(2);
+            ran = DrawFenceRuns(dev, *g, used, lamps, p.inst.lampParamConst, rows, cones, vis, lampTop, poolGate, shadeGroundY, p.inst.groundWeightConst, weight, draw);
+        }
+        if (!ran) draw();
         SetPs(dev, original);
         if (active != &p) SetPsConst(dev, active->inst.capConst, &oldCaps[0][0], kCapRows);
-        if (p.inst.pixelLamps) {
-            SetPsConst(dev, p.inst.groundWeightConst, oldWeight, 1);
-            SetPsConst(dev, p.inst.lampParamConst, &oldLamps[0][0], rows);
-        }
-        SetPsConst(dev, p.inst.strengthConst, oldB, 1);
-        SetPsConst(dev, p.inst.atlasConst, oldA, 1);
+        consts.Restore();
     }
     g_objDrawInfo.clear();
     g_inOwnCall = false;
@@ -6598,9 +6981,6 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
     const bool reach = p.obj.reachConst != 0;
     IDirect3DVertexShader9* vs = ObjectVsFor(dev, g_curVs);
     if (!vs) return false;
-    float oldA[4] = {}, oldB[4] = {};
-    dev->GetPixelShaderConstantF(p.obj.atlasConst, oldA, 1);
-    dev->GetPixelShaderConstantF(p.obj.strengthConst, oldB, 1);
     float s[4] = {TerrainLightingPolicy::SurfaceLampGain(g_night.load(std::memory_order_relaxed),
                        g_objPixelStrength.load(std::memory_order_relaxed)), 0, 0, 0};
     float groundShare = 1.0f; // the share of the nearby lamps' light no wall blocks (below)
@@ -6614,7 +6994,7 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
     constexpr unsigned kLampRows = 1 + 4 * N;
     const unsigned rows = kLampRows + (reach ? 2u : 0u);
     float lamps[kLampRows + 2][4] = {};
-    float oldLamps[kLampRows + 2][4] = {};
+    static_assert(3 + kLampRows + 2 <= PsConstRun::kRows); // (the atlas, strength and lamp rows: one run)
     bool zeroRig = false;
     float oldRig[3][4] = {}, oldVl[4][4] = {};
     const float noRig[4][4] = {};
@@ -6684,15 +7064,16 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
         g_objDrawInfo += ReachLawText(reach, reachRefused, zeroRig, lamps[0][1], lamps + kLampRows, nLamps);
     }
     if (reach && zeroRig) g_reachObjDraws++; // zeroRig: the lamps were placed (else cS.x = 0 and the sum is not used)
-    dev->GetPixelShaderConstantF(p.obj.lampParamConst, &oldLamps[0][0], rows);
     IDirect3DPixelShader9* originalPs = g_curPs;
     IDirect3DVertexShader9* originalVs = g_curVs;
     g_inOwnCall = true;
     {
         SamplerBind bind(dev, p.obj.atlasSampler, atlas, D3DTEXF_NONE);
-        SetPsConst(dev, p.obj.atlasConst, c, 1);
-        SetPsConst(dev, p.obj.strengthConst, s, 1);
-        SetPsConst(dev, p.obj.lampParamConst, &lamps[0][0], rows);
+        PsConstRun consts(dev); // (PatchObjectLampPs: cA, cA + 1 and the rows from cA + 3; cA + 2 is its own def)
+        consts.Add(p.obj.atlasConst, c, 1);
+        consts.Add(p.obj.strengthConst, s, 1);
+        consts.Add(p.obj.lampParamConst, &lamps[0][0], rows);
+        consts.Set();
         if (zeroRig && p.obj.rigLamps) {
             dev->GetPixelShaderConstantF(5, &oldRig[0][0], 3);
             SetPsConst(dev, 5, &noRig[0][0], 3);
@@ -6727,9 +7108,7 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
         SetVs(dev, originalVs);
         if ((zeroRig || rigDay) && vl >= 0) SetVsConst(dev, static_cast<UINT>(vl), &oldVl[0][0], 4);
         if ((zeroRig || rigDay) && p.obj.rigLamps) SetPsConst(dev, 5, &oldRig[0][0], 3);
-        SetPsConst(dev, p.obj.lampParamConst, &oldLamps[0][0], rows);
-        SetPsConst(dev, p.obj.strengthConst, oldB, 1);
-        SetPsConst(dev, p.obj.atlasConst, oldA, 1);
+        consts.Restore();
     }
     g_objDrawInfo.clear();
     g_inOwnCall = false;
@@ -6831,25 +7210,33 @@ IDirect3DTexture9* FloorWallMaskTexture(IDirect3DDevice9* dev, IDirect3DBaseText
     k[0] = 1.0f / (perTile * s), k[1] = split * s, k[2] = 1.0f, k[3] = 1.0f / 64.0f;
     return tex;
 }
-// Binds the mask at `sampler` (point filter, clamp, linear read: no sRGB decode) for one draw and puts the stage back after it
+// Binds the mask at `sampler` (point filter, clamp, linear read: no sRGB decode) for one draw and puts the stage back after it.
+// (draw cost) As SamplerBind: only the states that differ are set and put back (a state not read is set and put back as before)
 struct WallMaskBind {
     static constexpr int kCount = 6;
     IDirect3DDevice9* dev;
     DWORD s;
     IDirect3DBaseTexture9* old = nullptr;
     DWORD st[kCount] = {};
+    uint8_t changed = 0; // bit i: kStates[i] was set
     static constexpr D3DSAMPLERSTATETYPE kStates[kCount] = {D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV, D3DSAMP_SRGBTEXTURE};
     WallMaskBind(IDirect3DDevice9* d, DWORD sampler, IDirect3DTexture9* mask) : dev(d), s(sampler) {
         D3D9Hooks::GetBoundTexture(dev, s, &old);
-        for (int i = 0; i < kCount; i++) dev->GetSamplerState(s, kStates[i], &st[i]);
+        for (int i = 0; i < kCount; i++)
+            if (FAILED(dev->GetSamplerState(s, kStates[i], &st[i]))) changed |= static_cast<uint8_t>(1u << i);
         const DWORD want[kCount] = {D3DTEXF_POINT, D3DTEXF_POINT, D3DTEXF_NONE, D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP, FALSE};
         SetTex(dev, s, mask);
-        for (int i = 0; i < kCount; i++) dev->SetSamplerState(s, kStates[i], want[i]);
+        for (int i = 0; i < kCount; i++)
+            if ((changed & (1u << i)) || st[i] != want[i]) {
+                dev->SetSamplerState(s, kStates[i], want[i]);
+                changed |= static_cast<uint8_t>(1u << i);
+            }
     }
     ~WallMaskBind() {
         SetTex(dev, s, old);
         if (old) old->Release();
-        for (int i = 0; i < kCount; i++) dev->SetSamplerState(s, kStates[i], st[i]);
+        for (int i = 0; i < kCount; i++)
+            if (changed & (1u << i)) dev->SetSamplerState(s, kStates[i], st[i]);
     }
 };
 
@@ -7747,7 +8134,7 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
                                return ShaderPatches::PatchIndoorBasis(t, static_cast<DWORD>(lmS), pp.indoor, capToFloorMap);
                            });
     PatchedPs& p = *pick;
-    float size[4], oldSize[4] = {};
+    float size[4];
     const bool scaled = p.ps && IndoorBasisScale(dev, p.indoor, lightMap, basis[0], size);
     const uintptr_t lightMapPtr = reinterpret_cast<uintptr_t>(lightMap);
     if (!scaled && g_indoorScaleLogged.load(std::memory_order_relaxed) < 8 && g_indoorScaleLogged.fetch_add(1, std::memory_order_relaxed) < 8) { // (which shaders, and why: the first few)
@@ -7801,23 +8188,17 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
     // [NoLight], as the furniture guard has just turned them with Brightness and Blue tint) and 0 for its lamps, which
     // the basis light holds per pixel (so a lamp never counts twice and its light stays smooth across the object). The
     // vertex lights are zeroed as before: the game moves overflow lamps there, and the basis maps hold those too.
-    float rig[8][4] = {}, unlit[4][4] = {}, oldUnlit[4][4] = {}, oldVl[4][4] = {}, oldS[4] = {};
+    float rig[8][4] = {}, unlit[4][4] = {}, oldVl[4][4] = {};
     // shortcut: stairs and window copies keep strength 1, raise them if a stair looks dark beside furniture
     const float zero[4][4] = {}, strength[4] = {TerrainLightingPolicy::FurnitureLampGain(g_night.load(std::memory_order_relaxed)), 0, 0, 0};
     if (SUCCEEDED(dev->GetPixelShaderConstantF(0, &rig[0][0], 8)))
         for (int k = 0; k < 4; k++)
             if (UnlitRooms::IsUnlitLight(rig[4 + k], rig[k])) std::memcpy(unlit[k], rig[4 + k], sizeof unlit[k]);
     const int vl = g_curVsInfo->patched.vertexLight;
-    dev->GetPixelShaderConstantF(p.indoor.strengthConst, oldS, 1);
-    dev->GetPixelShaderConstantF(p.indoor.sizeConst, oldSize, 1);
-    if (p.indoor.diffuseConst >= 0) dev->GetPixelShaderConstantF(static_cast<UINT>(p.indoor.diffuseConst), &oldUnlit[0][0], 4);
-    float oldTint[4] = {}, oldSide[4] = {};
-    if (p.indoor.sideConst >= 0) dev->GetPixelShaderConstantF(static_cast<UINT>(p.indoor.sideConst), oldSide, 1);
     float cubeColour[3];
     UnlitRooms::FurnitureCubeColour(cubeColour);
     // Rooms at Night: the ambient cube towards grey, then x the room's colour (always set: (1, 1, 1, 1) = as it is)
     const float tint[4] = {UnlitRooms::FurnitureTint(), cubeColour[0], cubeColour[1], cubeColour[2]};
-    if (p.indoor.tintConst >= 0) dev->GetPixelShaderConstantF(static_cast<UINT>(p.indoor.tintConst), oldTint, 1);
     IDirect3DPixelShader9* original = g_curPs;
     g_inOwnCall = true;
     {
@@ -7825,11 +8206,13 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
         SamplerBind b2(dev, p.indoor.firstSampler + 2, basis[2]), b3(dev, p.indoor.firstSampler + 3, basis[3]);
         std::optional<WallMaskBind> maskBind;
         if (wallMask) maskBind.emplace(dev, static_cast<DWORD>(p.indoor.maskSampler), wallMask);
-        SetPsConst(dev, p.indoor.strengthConst, strength, 1);
-        SetPsConst(dev, p.indoor.sizeConst, size, 1);
-        if (p.indoor.diffuseConst >= 0) SetPsConst(dev, static_cast<UINT>(p.indoor.diffuseConst), &unlit[0][0], 4);
-        if (p.indoor.tintConst >= 0) SetPsConst(dev, static_cast<UINT>(p.indoor.tintConst), tint, 1);
-        if (p.indoor.sideConst >= 0) SetPsConst(dev, static_cast<UINT>(p.indoor.sideConst), side, 1); // 0: not set in a wall, read where it is
+        PsConstRun consts(dev); // (PatchIndoorBasis: all within cS .. cS + 13)
+        consts.Add(p.indoor.strengthConst, strength, 1);
+        consts.Add(p.indoor.sizeConst, size, 1);
+        if (p.indoor.diffuseConst >= 0) consts.Add(static_cast<UINT>(p.indoor.diffuseConst), &unlit[0][0], 4);
+        if (p.indoor.tintConst >= 0) consts.Add(static_cast<UINT>(p.indoor.tintConst), tint, 1);
+        if (p.indoor.sideConst >= 0) consts.Add(static_cast<UINT>(p.indoor.sideConst), side, 1); // 0: not set in a wall, read where it is
+        consts.Set();
         if (vl >= 0) {
             dev->GetVertexShaderConstantF(static_cast<UINT>(vl), &oldVl[0][0], 4);
             SetVsConst(dev, static_cast<UINT>(vl), &zero[0][0], 4);
@@ -7838,11 +8221,7 @@ template <typename DrawFn> bool DrawIndoorObject(IDirect3DDevice9* dev, DrawFn d
         draw();
         SetPs(dev, original);
         if (vl >= 0) SetVsConst(dev, static_cast<UINT>(vl), &oldVl[0][0], 4);
-        SetPsConst(dev, p.indoor.strengthConst, oldS, 1);
-        SetPsConst(dev, p.indoor.sizeConst, oldSize, 1);
-        if (p.indoor.diffuseConst >= 0) SetPsConst(dev, static_cast<UINT>(p.indoor.diffuseConst), &oldUnlit[0][0], 4);
-        if (p.indoor.tintConst >= 0) SetPsConst(dev, static_cast<UINT>(p.indoor.tintConst), oldTint, 1);
-        if (p.indoor.sideConst >= 0) SetPsConst(dev, static_cast<UINT>(p.indoor.sideConst), oldSide, 1);
+        consts.Restore();
     }
     g_traceA = TraceA{lightMapPtr, reinterpret_cast<uintptr_t>(basis[0]), size[0], size[1]};
     g_inOwnCall = false;
@@ -9226,7 +9605,10 @@ int FurnitureFloorMap(IDirect3DDevice9* dev) {
         }
     return -1;
 }
-template <typename DrawFn> D3D9Hooks::HookAction OnDrawFurniture(IDirect3DDevice9* dev, DrawFn draw, const ShaderPatches::RigPsInfo& info, const float (*rig)[4], const float* chroma) {
+// vsNow: RigHeld::vsNow (the vertex lights the device holds, as HoldRig read or set them in this draw), or null
+template <typename DrawFn>
+D3D9Hooks::HookAction OnDrawFurniture(IDirect3DDevice9* dev, DrawFn draw, const ShaderPatches::RigPsInfo& info, const float (*rig)[4], const float* chroma,
+                                      const float (*vsNow)[4]) {
     float psOld[4][4] = {}, vsOld[4][4] = {}, cubeOld[4] = {}, t[4][4], cube[4];
     bool psSet = false, vsSet = false, cubeSet = false;
     // PS c0..c3 = the slots' directions, c4..c7 their colours (each slot tested with its direction: fill and [NoLight]
@@ -9246,8 +9628,9 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawFurniture(IDirect3DDevice
     // a [NoLight] light there when it takes slot 1 (FUN_006b7e70)
     const int vl = g_curVsInfo ? g_curVsInfo->patched.vertexLight : -1;
     float vsDir[4][4] = {};
-    if (vl >= 4 && SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(vl - 4), &vsDir[0][0], 4)) &&
-        SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(vl), &vsOld[0][0], 4))) {
+    if (vl >= 4 && vsNow) std::memcpy(vsDir, vsNow, sizeof vsDir), std::memcpy(vsOld, vsNow + 4, sizeof vsOld); // (no second read)
+    if (vl >= 4 && (vsNow || (SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(vl - 4), &vsDir[0][0], 4)) &&
+                              SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(vl), &vsOld[0][0], 4))))) {
         std::memcpy(t, vsOld, sizeof t);
         for (int k = 0; k < 4; k++) vsSet |= UnlitRooms::FurnitureColour(t[k], vsDir[k], chroma);
         if (vsSet) SetVsConst(dev, static_cast<UINT>(vl), &t[0][0], 4);
@@ -9330,6 +9713,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawFurniture(IDirect3DDevice
 struct TraceSeen {
     std::vector<std::pair<uint64_t, DWORD>> states; // the part's recent states and when each was last seen (GetTickCount)
     uint64_t last = 0;                              // the state seen at its last draw
+    uint64_t lastText = 0;                          // hash of the last line written (the state hashes values it does not print)
 };
 std::unordered_map<uint64_t, TraceSeen> g_traceLast; // object part (rig + pixel shader) -> its states (render thread)
 uint64_t TraceHash(uint64_t h, int64_t v) { return (h ^ static_cast<uint64_t>(v)) * 1099511628211ull; }
@@ -9438,6 +9822,10 @@ void TraceFurniture(IDirect3DDevice9* dev, const float (*rigIn)[4], bool rigChai
         for (int k = 0; k < 4; k++) text += std::format(" {}({:.3f} {:.3f} {:.3f})", SlotKind(own[4 + k], own[k]), own[4 + k][0], own[4 + k][1], own[4 + k][2]);
     }
     if (!kPublicBuild) text += RigBoxText(rigPtr);
+    uint64_t textHash = 14695981039346656037ull;
+    for (const char c : text) textHash = TraceHash(textHash, static_cast<unsigned char>(c));
+    if (textHash == seen.lastText) return;
+    seen.lastText = textHash;
     Recorder::Note(text);
 }
 
@@ -9545,6 +9933,7 @@ struct RigHeld {
     int vl = -1;
     float psGame[8][4];
     float vsGame[8][4];
+    const float (*vsNow)[4] = nullptr; // (draw cost) the 8 rows from c(vl - 4) HoldRig read or set in this draw: the device's now
 };
 // rig: the pixel shader's rig lights c0..c7, or null for a part whose shader has no rig chain (its vertex lights alone)
 void HoldRig(IDirect3DDevice9* dev, float (*rig)[4], RigHeld& h) {
@@ -9604,6 +9993,7 @@ void HoldRig(IDirect3DDevice9* dev, float (*rig)[4], RigHeld& h) {
         if (rig) std::memcpy(s.ps, rig, sizeof s.ps);
         else std::memset(s.ps, 0, sizeof s.ps);
         s.haveVs = vl >= 4 && SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(vl - 4), &s.vs[0][0], 8));
+        if (s.haveVs) h.vsNow = s.vs;
         if (s.preEpisode == g_rigEpisodeFrame && g_rigEpisodeOn &&
             (std::memcmp(s.ps, s.prePs, sizeof s.ps) != 0 || (s.haveVs && std::memcmp(s.vs, s.preVs, sizeof s.vs) != 0)))
             s.preEpisode = 0; // (it showed other lights in this episode: holding it now would turn it back)
@@ -9654,6 +10044,7 @@ void HoldRig(IDirect3DDevice9* dev, float (*rig)[4], RigHeld& h) {
         SetVsConst(dev, static_cast<UINT>(vl - 4), &snapVs[0][0], 8);
         h.vs = true;
         h.vl = vl;
+        h.vsNow = snapVs;
     }
     ApexUtil::CountOne(g_rigHeldDraws);
 }
@@ -9694,7 +10085,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawInner(IDirect3DDevice9* d
     D3D9Hooks::HookAction r;
     float chroma[3];
     const bool hued = active && !dark && RoomAmbientChroma(ObjectLightBridge::RigRoom(RigTracker::CurrentRig()), chroma);
-    if (active) r = OnDrawFurniture(dev, draw, info, haveRig ? rig : nullptr, hued ? chroma : nullptr);
+    if (active) r = OnDrawFurniture(dev, draw, info, haveRig ? rig : nullptr, hued ? chroma : nullptr, held.vsNow);
     else {
         if (!kPublicBuild) g_fdInactive.fetch_add(1, std::memory_order_relaxed);
         r = OnDrawInnerCore(dev, draw);
@@ -10070,6 +10461,16 @@ void LogDrawCost() {
         for (uint32_t& b : g_fencePickBypass) b = 0;
         s_hits = g_fencePickHits, s_misses = g_fencePickMisses, s_gen = g_lampMemoGen, s_state = LevelLightShare::LampVisibilityState();
         for (uint32_t& w : g_fenceMissWhy) w = 0;
+    }
+    {
+        static const char* const kStep[3] = {"groups noted for the ground shade", "positions read", "per-piece runs (with their draws)"};
+        for (int s = 0; s < 3; s++)
+            if (g_fenceStepCalls[s])
+                arch += std::format(" | of it the fence {}: {:.0f} a frame, {:.2f} us each", kStep[s], g_fenceStepCalls[s] * scale,
+                                    static_cast<double>(g_fenceStepTicks[s]) * msPerTick * 1000.0 / g_fenceStepCalls[s]);
+        arch += std::format(" | fence grid built {} times, its gaps {} times, {} groups", g_fenceGridBuilds, g_fenceGapBuilds, g_fenceGroups.size());
+        g_fenceGridBuilds = 0, g_fenceGapBuilds = 0;
+        for (int s = 0; s < 3; s++) g_fenceStepTicks[s] = 0, g_fenceStepCalls[s] = 0;
     }
     g_archRowsTicks = 0, g_archRowsCalls = 0, g_fencePickTicks = 0, g_fencePickCalls = 0;
     {
@@ -10811,8 +11212,18 @@ void OnWorldChanged() {
     g_lastUserLots.clear();
     g_lotRects.clear(); // soft lot edges: the next Present reads the new world's lots
     g_lotRectsGen++;
+    g_lotBase.clear();
     g_lotDrawSeen.clear();
     g_lotArrivals.clear();
+    {
+        std::lock_guard<std::mutex> lk(g_lodHeldMx);
+        g_lodHeld.clear();
+        g_lodHeldCount.store(0, std::memory_order_release);
+    }
+    g_lodGoneLots.clear();
+    g_detailKnown = false;
+    g_detailedSince.clear();
+    g_detailSwitchAt.clear();
     g_lampEditRefresh = false;
     g_lotRectMiss = true;
     g_haveLastEdgeRect = false;
@@ -10823,6 +11234,8 @@ void OnWorldChanged() {
     g_fenceOpen.clear();
     g_gates.clear();
     g_fenceBusy.clear();
+    g_fencePlaceKey.clear();
+    g_fencePlaceBusy.clear();
     g_fenceGen++;
     g_meshBoxes.clear();
     g_fenceWalls = 0;
@@ -10834,6 +11247,7 @@ void OnWorldChanged() {
     ReleaseLotMasks(); // (2.15.3: with the chunks' shades, whose texels are made again only where a lot changes)
     g_groupCentres.clear();
     g_centreBusy.clear();
+    g_groupAtPlace.clear();
     // (2.15.3) the foliage meshes' boxes (keyed by vertex buffer address: a buffer of the new world made at an old one's
     // address took that mesh's box and instance count) and the instances' picks of the old world's lamps
     g_foliageMeshes.clear();
@@ -11119,9 +11533,9 @@ int LampSwitches() { return g_lampSwitches.load(std::memory_order_relaxed); }
 
 std::string LotLampStatus() {
     return std::format("changes counted: {} (user-driven: {}) | ignored (streaming, still loading, bulk): {} | not counted: outside the bake {}, below the threshold {}, "
-                       "animated {} ({} lamps) | lots tracked: {} | last: {}",
+                       "animated {} ({} lamps) | lots tracked: {} | kept in the bake after a Detailed View demotion: {} | last: {}",
                        g_lotChangesCounted, g_lotLampUserEdits.load(), g_lotChangesIgnored, g_lampChangesOutside, g_lampChangesNoise, g_lampChangesAnimated,
-                       g_lampsAnimated, g_lotSeen.size(), g_lastLotChange);
+                       g_lampsAnimated, g_lotSeen.size(), g_lodHeldCount.load(std::memory_order_relaxed), g_lastLotChange);
 }
 
 const BakeSnapshot& CurrentBakeLamps() { return g_bakeSnap; }
@@ -11256,6 +11670,10 @@ bool LotGroundY(uint64_t lot, float& y) {
         return false;
     };
     if (!lot || find()) return lot != 0;
+    if (const auto it = g_lotBase.find(lot); it != g_lotBase.end()) { // it left the light tree (g_lotBase)
+        y = it->second;
+        return true;
+    }
     // a lot the table does not hold yet (it streamed in since the last refresh): read the lots again, once a frame
     static DWORD missTick = ~0u;
     if (missTick == g_lotDrawTick.load()) return false;
@@ -11275,6 +11693,27 @@ std::vector<uint64_t> TakeLotArrivals() {
     return out;
 }
 bool LotVisible(uint64_t lot) { return VisibleLot(lot); }
+
+bool LodHeld(uintptr_t light, uint64_t lot, int type) {
+    if (g_lodHeldCount.load(std::memory_order_acquire) == 0) return false;
+    std::lock_guard<std::mutex> lk(g_lodHeldMx);
+    const auto it = g_lodHeld.find(light);
+    return it != g_lodHeld.end() && it->second.lot == lot && it->second.type == type;
+}
+
+void KeepDemotedLamps(bool on) {
+    if (g_lodHoldOn == on) return;
+    g_lodHoldOn = on;
+    if (on) return;
+    // the bake leaves them out from now (the daylight rebuild may start this frame); the next read counts them switched off
+    for (auto& [L, s] : g_lotLampSig) s.held = false;
+    {
+        std::lock_guard<std::mutex> lk(g_lodHeldMx);
+        g_lodHeld.clear();
+        g_lodHeldCount.store(0, std::memory_order_release);
+    }
+    g_lampRefreshNow = true;
+}
 
 bool EnumerateAllLights(std::vector<uintptr_t>& out) {
     if (!EnumerateLights()) return false;
@@ -11535,6 +11974,8 @@ void Shutdown(bool keepChunkMaps) {
     g_fenceOpen.clear();
     g_gates.clear();
     g_fenceBusy.clear();
+    g_fencePlaceKey.clear();
+    g_fencePlaceBusy.clear();
     g_fenceGen++;
     g_meshBoxes.clear();
     g_fenceWalls = 0;
@@ -11721,12 +12162,12 @@ void MeasureMemoryImpl() {
         g_solidTriangles);
     Set(sFence,
         Hash(g_fenceGroups, [](const auto& kv) { return Vec(kv.second.walls); }) + Hash(g_fenceBusy) + Hash(g_meshBoxes) + Vec(g_fenceAll) +
-            Hash(g_fenceCells, [](const auto& kv) { return Vec(kv.second); }) + Hash(g_groupCentres) + Hash(g_centreBusy),
+            Hash(g_fenceCells, [](const auto& kv) { return Vec(kv.second); }) + Hash(g_groupCentres) + Hash(g_centreBusy) + Hash(g_groupAtPlace),
         g_fenceGroups.size() + g_meshBoxes.size() + g_groupCentres.size());
     Set(sFoliage, Hash(g_foliageMeshes) + Hash(g_foliageInstances) + Vec(g_crowns), g_foliageMeshes.size() + g_foliageInstances.size() + g_crowns.size());
     Set(sWallMask, Hash(g_wallMaskTex), g_wallMaskTex.size());
     Set(sOther,
-        Tree(g_chunks) + Hash(g_chunkOfTexture) + Vec(g_lotRects) + Hash(g_lotDrawSeen) + Hash(g_lotArrivals) + Vec(g_enumLights) + Vec(g_allLamps) + Vec(g_allCones) +
+        Tree(g_chunks) + Hash(g_chunkOfTexture) + Vec(g_lotRects) + Hash(g_lotBase) + Hash(g_lotDrawSeen) + Hash(g_lotArrivals) + Hash(g_lodHeld) + Vec(g_enumLights) + Vec(g_allLamps) + Vec(g_allCones) +
             Vec(g_exitLampRows) + Vec(g_exitCones) + Vec(g_exitList) + Vec(g_lotLampSig) + Vec(g_lotLampCur) + Vec(g_lotsNow) + Tree(g_lotSeen) + Tree(g_quietLogAt) +
             Vec(g_lastUserLots) + Hash(g_lampSwitchPrev) + Vec(g_disabledLots) + Hash(g_traceLast, [](const auto& kv) { return Vec(kv.second.states); }) + Hash(g_rigSnaps) +
             Hash(g_rigEpisodeParts) + Hash(g_rigRoomWaits) + Tree(g_census) + Tree(g_lightingBloom) + Tree(g_exterior) + Str(g_objDrawInfo),

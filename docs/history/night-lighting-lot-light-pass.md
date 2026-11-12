@@ -215,3 +215,21 @@ developer build.
 **Outcome:** the open share at half alpha, overlapped ends joined, gates only on the ground inside a gap and not while a
 lamp is dragged, the memo off only with the story samples switch, groups replaced 300 ms after a new group's first draw,
 inputs checked every 100 ms and builds every 250 ms ([validation](../validation/night-lighting-lot-light-pass.md)).
+
+### 2026-11-11: the fence grid rebuilt at almost every draw
+
+**Context:** a Frame Profiler run on a 3.1.2 development build put a third of the render thread's samples in hitch frames
+in the fence grid's gap build (`FenceGapsBuild`).
+
+**Finding:** fence groups were keyed by their place in an instance buffer. The game refills its buffers, so a place held
+other pieces from one draw to the next and every draw made a new group. Each new group read its buffers, moved the fence
+generation, rebuilt the grid and its gaps inside a draw hook and made every lot's ground shade count as changing, so each
+shade was built again every 250 ms. The grid took its pieces in a hash map's order, so the same walls could give a gap
+with its ends flipped and a new shade key. Over 4096 groups the sweep dropped every group, those in use included, which
+were then read again.
+
+**Outcome:** kept (`f1493b29`). Groups are keyed by every byte of their instance records and their mesh (a busy buffer
+keeps the group last read at that place); the grid is built at most once a frame in a fixed order; the gaps and the
+lots' shades follow only a change of the walls themselves (a hash of the pieces); over 4096 groups only those not drawn
+for 2 s go. Not yet checked in game with mesh fences and gates
+([validation](../validation/night-lighting-lot-light-pass.md#open-checks)).

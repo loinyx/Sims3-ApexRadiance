@@ -95,7 +95,10 @@ uint32_t TestVt(uint32_t vt) {
 constexpr int kMaxChanged = 8;                    // more changed lights: solved in full
 // (14/10: 160 MB, 256 MB pinned; with the game's saves failing on a fragmented address space below 2 GB, the parts are
 // kept above 2 GB (HighAllocator) and within a lower budget)
-constexpr size_t kMaxBytes = size_t{96} << 20;    // every room's kept parts together; past it the oldest go
+constexpr size_t kMaxBytes = size_t{96} << 20;    // every room's kept parts together but the base-only ones; past it the oldest go
+// the base-only records' own allowance: lots next to the active one, about 4 lots x 5 stories x 2 classes x 0.4 MB; inside
+// kMaxBytes they evicted one another in a ring of room-0 solves with nothing changed
+constexpr size_t kMaxBaseOnlyBytes = size_t{16} << 20;
 constexpr size_t kMaxRecordBytes = size_t{96} << 20;
 // (the room lamp probe) per probed solve: the evaluation records kept for lamps of another room or story and for lamps the
 // floor cut stopped (about 300 B each), and the evaluations kept although Apex left them dark (the dump's Z lines)
@@ -107,7 +110,8 @@ constexpr size_t kMaxKeptBytes = size_t{192} << 20;
 // shortcut: an evaluation darker than this share of the threshold before the soft light cut is not kept (a lamp brightened
 // more than 4 times misses those texels); lower it if instant edits brighten lamps further
 constexpr float kKeepFloor = 0.25f;
-// past kMaxBytes only the pinned rooms (Real-time outdoor lamps' active lot) are left. 14/10: 160 MB, with the drawn lamps'
+// past kMaxBytes only the pinned rooms (Real-time outdoor lamps' active lot) and the graced ones (the lot just left, while
+// they and the pinned rooms are within this ceiling) are left. 160 MB, with the drawn lamps'
 // parts of those rooms kept as one sum per texel (CollapseDrawn), which is what Real-time outdoor lamps reads; a pinned room
 // never drops another pinned room (that made the active lot's stories evict one another in a loop: dropped, sent to their
 // solve, kept again, dropping the next): past this ceiling the new pinned solve is not kept instead
@@ -301,6 +305,10 @@ std::recursive_mutex g_mx; // g_records (the light tree thread uses them, the re
 std::unordered_map<uint64_t, std::unique_ptr<Record>> g_records;
 std::vector<const void*> g_pinned; // (under g_mx) rooms dropped last by the budget
 std::atomic<long> c_pinnedDrops{0};
+// the lot just left (GraceRooms): its own mutex, as the render thread never waits for g_mx (lock order g_mx -> g_graceMx)
+std::mutex g_graceMx;
+std::vector<const void*> g_graced;
+DWORD g_graceUntil = 0;
 bool PinnedLocked(uintptr_t room) { return std::find(g_pinned.begin(), g_pinned.end(), reinterpret_cast<const void*>(room)) != g_pinned.end(); }
 uint64_t KeyOf(const void* room, int cls) { return (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(room)) << 2) | static_cast<uint64_t>(cls & 3); }
 size_t BytesOf(const Record& r) {
@@ -1663,17 +1671,24 @@ bool UpToDate(const void* roomPtr) {
 // The lot played now (light tree thread, read again every 500 ms): the first lot lit at the high quality, kept while it
 // stays among them (the list's order changes as the camera moves), as Real-time outdoor lamps and GPU room lamps pick it
 uint64_t ActiveLot() {
-    static uintptr_t s_tracker = 0;
+    static uintptr_t s_tracker = 0, s_held = 0;
     static uint64_t s_lot = 0;
     static DWORD s_at = 0;
     const DWORD now = GetTickCount();
-    if (s_at && now - s_at < 500) return s_lot;
+    // (active_lot_hold) the lot Real-time outdoor lamps holds while the camera moves, only while it runs (its tracker is
+    // current then); a change of it is read at once, not after the 500 ms: the lot it switches to is sent to its solve at once
+    const uintptr_t held = DevSwitches::ActiveLotHold() && RtOutdoorLamps::Watching() ? RtOutdoorLamps::ActiveTracker() : 0;
+    if (s_at && now - s_at < 500 && held == s_held) return s_lot;
     s_at = now | 1;
+    s_held = held;
     uintptr_t trackers[8];
     const int n = LevelLightShare::ActiveLotTrackers(trackers, 8);
     uintptr_t t = n > 0 ? trackers[0] : 0;
     for (int i = 0; i < n; i++)
         if (trackers[i] == s_tracker) t = s_tracker;
+    // (active_lot_hold) while Real-time outdoor lamps holds its active lot as the camera moves, the same lot: two pickers apart
+    // kept the waiting lot's room-0 solve in the active lot's form, which its neighbour copies cannot use
+    if (n > 0 && held && LevelLightShare::TrackerLive(held)) t = held;
     s_tracker = t;
     s_lot = 0;
     RoomRead r0;
@@ -3956,7 +3971,7 @@ void SolveEnd(unsigned char* room) {
             // is not kept (the others stay, so the active lot's stories do not evict one another in a loop). Nor is another
             // room's solve that would pass it beside the pinned rooms: the loop below never drops the new record, so it would
             // stay over the ceiling (with no pinned room the check never refuses: a record is at most kMaxRecordBytes). A base-only
-            // record is neither counted nor refused here: the loop below drops it first, the new one too
+            // record is neither counted nor refused here: the loop below keeps those within their own allowance (kMaxBaseOnlyBytes)
             size_t pinnedBytes = 0;
             for (const auto& [k2, rec] : g_records)
                 if (PinnedLocked(rec->room) && !rec->baseOnly) pinnedBytes += rec->bytes;
@@ -3976,22 +3991,33 @@ void SolveEnd(unsigned char* room) {
                 g_bytes.fetch_add(r.bytes);
                 g_records[key] = std::move(c.rec);
             }
-            // the oldest rooms go past the budget: never a pinned one (the active lot's room 0s, bounded above). The base-only
-            // records go first, and only they make room for a new one (it goes last of them): the other records are as without them
-            while (g_bytes.load() > kMaxBytes && g_records.size() > 1) {
-                auto oldest = g_records.end();
-                for (auto it = g_records.begin(); it != g_records.end(); ++it)
-                    if ((it->second->baseOnly || (!baseOnly && it->first != key && !PinnedLocked(it->second->room))) &&
-                        (oldest == g_records.end() || (it->second->baseOnly != oldest->second->baseOnly ? it->second->baseOnly
-                                                                                                        : static_cast<int32_t>(it->second->used - oldest->second->used) < 0)))
-                        oldest = it;
-                if (oldest == g_records.end()) break;
-                LOG_INFO(std::format("[OutdoorDelta] Story {} room 0 class {}: kept parts dropped (memory budget: {:.1f} MB of {:.1f} MB kept in {} rooms, {} MB allowed)",
-                                     oldest->second->story, oldest->second->cls, static_cast<double>(oldest->second->bytes) / (1 << 20),
-                                     static_cast<double>(g_bytes.load()) / (1 << 20), g_records.size(), kMaxBytes >> 20));
+            // the oldest rooms go past the budget (OutdoorDeltaModel::BudgetVictim): the base-only records within their own
+            // allowance, the others within kMaxBytes, never a pinned one (the active lot's room 0s, bounded above) nor the new
+            // one; the lot just left keeps its room 0s while they and the pinned ones stay within kMaxPinnedBytes
+            std::vector<const void*> graced;
+            {
+                std::lock_guard<std::mutex> gl(g_graceMx);
+                if (static_cast<int32_t>(GetTickCount() - g_graceUntil) < 0) graced = g_graced;
+            }
+            for (std::vector<OutdoorDeltaModel::BudgetRec> recs; ; recs.clear()) {
+                std::vector<uint64_t> keys;
+                for (const auto& [k2, rec] : g_records) {
+                    const void* r0 = reinterpret_cast<const void*>(rec->room);
+                    recs.push_back({rec->bytes, rec->used, rec->baseOnly, PinnedLocked(rec->room),
+                                    std::find(graced.begin(), graced.end(), r0) != graced.end(), k2 == key});
+                    keys.push_back(k2);
+                }
+                const int i = OutdoorDeltaModel::BudgetVictim(recs.data(), static_cast<int>(recs.size()), kMaxBytes, kMaxBaseOnlyBytes, kMaxPinnedBytes);
+                if (i < 0) break;
+                const Record& v = *g_records.at(keys[i]);
+                LOG_INFO(std::format("[OutdoorDelta] Story {} room 0 class {}{}: kept parts dropped (memory budget: {:.1f} MB of {:.1f} MB kept in {} rooms, {} MB allowed{})",
+                                     v.story, v.cls, v.baseOnly ? " of a lot next to the active one" : "", static_cast<double>(v.bytes) / (1 << 20),
+                                     static_cast<double>(g_bytes.load()) / (1 << 20), g_records.size(),
+                                     (v.baseOnly ? kMaxBaseOnlyBytes : recs[i].graced ? kMaxPinnedBytes : kMaxBytes) >> 20,
+                                     v.baseOnly ? " for lots next to the active one" : recs[i].graced ? " for the active lot and the lot just left" : ""));
                 NoteReason("memory budget");
                 c_budgetDrops.fetch_add(1, std::memory_order_relaxed);
-                EraseLocked(oldest->first);
+                EraseLocked(keys[i]);
             }
             if (baseOnly && g_records.count(key) && LogAllowed())
                 LOG_INFO(std::format("[OutdoorDelta] Story {} room 0 class {} of a lot next to the active one: kept as Real-time outdoor lamps' base only ({} texels, {:.1f} MB)",
@@ -7012,6 +7038,11 @@ long PinRooms(const void* const* rooms, int n) {
                 }
     }
     return c_pinnedDrops.load();
+}
+void GraceRooms(const void* const* rooms, int n, unsigned long untilTick) {
+    std::lock_guard<std::mutex> lk(g_graceMx);
+    g_graced.assign(rooms, rooms + std::max(n, 0));
+    g_graceUntil = untilTick;
 }
 size_t KeptBytes() { return g_bytes.load(); }
 std::string MemoryText() {

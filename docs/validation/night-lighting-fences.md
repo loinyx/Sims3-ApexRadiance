@@ -26,6 +26,9 @@ Release preparation: the public x86 build passes with zero warnings. Exact relea
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-11 | `47d04a7e` (release 3.1.2 tree: pieces lit from their own place, groups found by their origins and keyed by their pieces, wall-line test from the lamp's side, pieces on the ground under the lot shade, `PsConstRun`) | Development build 7 (`47d04a7e`) played at night | Visibly better than the earlier 3.1.2 development builds; no capture or measurement on that build. Steady stairs while the camera moves and no 1 m steps are not yet confirmed with an F7 (open checks) | In game, backend not recorded |
+| 2026-11-11 | Development builds 4 (`fd7aed8d`) and 6 (`7ef9c56b`) | Frame Profiler timing runs ([frame profiler](frame-profiler.md#latest-results)) | A fence or stair draw cost 386 us on build 4 and 7 to 11 us on build 6 (groups keyed by their pieces, the fence grid once a frame) | In game, RTX Remix bridge |
+| 2026-11-11 | `47d04a7e` | `tools/terrain_lighting_test/run_resource_checks.ps1` (extracts `DrawInstanced` and, since `98980e41`, `PsConstRun`) | Not run. Its `DrawFenceRuns` stub returns false, so no harness covers `DrawFenceRuns`, `FencePieceValues`, `ShadedOnGround` or `InstancedGroupCentre` | Not run |
 | 2026-10-29 | `04e5f3e` (released in 2.18.2, `d59f6ba`: the ground light on stair tops shaded at every height) | `tools/floor_shade_check` (`run.ps1 -Precomp <Shaders_Win32.precomp>`) | 10,854 checks, 0 failures (the shade inserted before the max, on the atlas at every height; both laws over the 116 instanced pixel shaders) | Offline; in game not confirmed |
 | 2026-10-23 | `4802ed9` (ASI SHA-256 `FC2D565C0F003F0DD9DF2BC56DFC5F047CA6FCDAC508B2DA66A83D032258ECFB`) | Standard Release x86 build; `tools/terrain_lighting_test/run_resource_checks.ps1`; `tools/floor_shade_check`; `tools/ground_shade_test/run.ps1` | Build: 0 warnings. Resource paths: 14,637 checks, 0 failures, including `DrawInstanced` (85) and realistic reach (388). Floor shade: 7,885 checks, 0 failures, including the per-lamp cap shader. Ground shade: 240 checks, 0 failures. Release gameplay remains unverified | MSBuild x86 / fake D3D9 / native D3D9 |
 | 2026-10-23 | `40f351e` | `tools/floor_shade_check` (`run.ps1 -Precomp <Shaders_Win32.precomp>`) | 7,103 checks, 0 failures (the fence copy's mask read in front of the face). No harness covers the reach scale without the walls' gain or the gates in the lot shade | Offline, native D3D9 |
@@ -53,14 +56,28 @@ Release preparation: the public x86 build passes with zero warnings. Exact relea
 
 ## Open checks
 
-- Release 3.1.0 (commit `release: 3.1.0`, 2026-11-10): the garden edging set in a wall stays dark in game (release candidate). The fence-run masks now survive a 5 s re-read when the pieces did not move (review fix, not measured).
+- Release 3.1.2, stairs and fences lit per piece (`b9ada50c` to `f1493b29`), at night with *Fences and stairs catch
+  light* on:
+  - An outdoor stair against a foundation, beside a garden post and a wall sconce, while the camera pans and zooms.
+    **Expected:** no flicker; no 1 m steps of brightness between pieces or between the game's groups of one stair; the
+    steps on the foundation's edge show no cut at every piece. F7 on two neighbouring steps of different groups:
+    `lit per piece: N runs` lines and the same lamps, shares and ground weight for steps that stand alike.
+  - A chain-link fence and a lattice beside a lamp, and a fence with a closed gate, after the camera leaves and comes
+    back and after a piece is added and removed. **Expected:** the mesh fence's shadow keeps its open share, the gate
+    keeps its gap closed and a removed piece drops its shadow at once (groups keyed by their pieces, the grid's gaps
+    rebuilt only when the walls change); the draw cost line's `fence grid built N times, its gaps M times` with M near 0
+    while nothing changes.
+  - A long fence running past a free-standing wall. **Expected:** the pieces behind it dark, the others lit, no seam at a
+    run boundary.
+  - `run_resource_checks.ps1` re-run on the release tree (the extracted `DrawInstanced` with `PsConstRun`).
+- Release 3.1.0 (commit `release: 3.1.0`, 2026-11-10): the garden edging set in a wall stays dark in game (release
+  candidate).
 
 - Pieces behind a wall and garden edging set in a house's wall (after 3.0.0, uncommitted). F7 2026-11-09 23-35-25: a
   single-piece edging group at the foot of a brick wall, origin (979, 42.877, 914) on the wall's line, took a lamp of the
   room behind the wall (L514D9900 at 978.5, 45.1, 913.5); with `FencePieceVisibility` it stays dark (seen in game on a
-  development build, 2026-11-09). Still to check: a long fence running past a free-standing wall (the pieces behind it
-  dark, the others lit, no seam at the run boundary), the draw cost with many runs, and `run_resource_checks.ps1`
-  (its `DrawFenceRuns` stub returns false, so the fixture does not cover the runs).
+  development build, 2026-11-09). The long fence past a free-standing wall and the resource fixture are listed under
+  release 3.1.2 above.
 
 - Ground light on stair tops (`04e5f3e`), F7 2026-10-29 17-35-27 and 17-35-29: an outdoor stair
   beside a house wall, at night. **Expected:** the steps above 1.25 m take the same wall shade as the grass beside the stair

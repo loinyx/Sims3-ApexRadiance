@@ -41,6 +41,9 @@ Offline checks do not validate game performance or menu layout.
 
 ## Open checks
 
+- *Record story light samples* not restored (3.1.2, `fd7aed8d`): with `story_samples = true` left in `[developer.controls]` of
+  an older file, start the game in developer mode. **Expected:** the switch is off, the fence lamp pick memo counts
+  hits in the draw cost line, and the next save writes no `story_samples` key. Not yet run.
 - Confirmation layout, restart behaviour and profile round trips in game.
 - Performance in normal mode compared with the former public build.
 - Developer page hierarchy: full visual and diagnostic validation in game (native UI checks do not establish it).

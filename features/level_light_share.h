@@ -271,8 +271,10 @@ struct CrossLotEvent {
 };
 // Render thread: the posts placed or moved since the last call
 void TakeCrossLotEvents(std::vector<CrossLotEvent>& out);
-// Render thread: the outdoor rooms of a loaded lot gather again (room 0 of each story, its roofless rooms); false = not loaded
-bool RegatherOutdoorById(uint64_t lot);
+// Render thread: the outdoor rooms of a loaded lot gather again (room 0 of each story, its roofless rooms); urgent (tier 2)
+// when `urgent` or within 1.5 s of a player's lamp edit, else at the game's pace; `urgent` with no edit in those 1.5 s marks
+// them quiet (first in the queue, no lamp edit: LampEditPending stays false); false = not loaded
+bool RegatherOutdoorById(uint64_t lot, bool urgent = false);
 // Real-time outdoor lamps draws the active lot's lamp posts on these lots' room-0 maps (render thread, when the set changes;
 // at most 4): their gathers no longer take those posts, except on the stories of cpuStories[i] (bit per story) it cannot relight
 void SetGpuNeighbourLots(uint64_t active, const uint64_t* lots, const uint8_t* cpuStories, int n);
@@ -330,7 +332,7 @@ bool GroupPending(const void* room);
 // A lamp edit's rooms are waiting for or in their solve (RoomLightQueue: a larger budget per frame meanwhile)
 bool LampEditPending();
 // Lamp edits all at once (AtriumHold, render thread; 12/10, was SwitchRoomsPending): of the rooms lamp edits marked (the urgent
-// list, the safety net's tier 2 included) whose latest mark has a LampMarkFilter::EditSerial above `after`, on a story other
+// list, the safety net's tier 2 included, quiet marks left out) whose latest mark has a LampMarkFilter::EditSerial above `after`, on a story other
 // than the lamps' own (OnEditStory), how many are still gathered or solved or ended no solve begun after their mark;
 // `others` gets how many such rooms there are, `ownPending` how many of the own stories' rooms still wait, `ownTotal` how many
 // own stories' rooms there are
@@ -369,6 +371,12 @@ bool LampDragging();
 // The room's lamp-edit urgency tier (0 = a lamp's own room or story, 1 = a room taking its light, 2 = the edit's safety net;
 // -1 = none). Render thread (DragLite's re-pick throttle).
 int UrgentTierOf(const void* room);
+// The room is urgent for a lamp edit: LampUrgency > 1 from an edit's mark, not a quiet one. A quiet mark (NoteQuietMark, or a
+// lot leaving the lots next to the active one with no edit: RegatherOutdoorById) keeps the room first in the queue but is no
+// edit. Any thread.
+bool EditUrgent(const void* room);
+// How many quiet marks' rooms still wait for or are in their solve (states 1-3): the log of an active-lot switch. Any thread.
+int QuietRoomsWaiting();
 // A room of a lot's story sent to its solve (any room id; the sends a lamp drag left out): with no urgency, or with an
 // urgency tier (0..2) while a Classic edit's stories change together (AtriumHold)
 bool QueueRoomId(uintptr_t tracker, int story, int id, int urgentTier = -1);
@@ -428,8 +436,10 @@ bool IsReplayList(const void* begin);                       // a room's list poi
 uint64_t LotGeometryKey(const void* room);
 // The rules every room solve follows (the options that change how rooms are lit), as one key
 uint64_t PhysicsKey();
-// Render thread: the room is sent to be solved again (its gather and solve, as a refresh sends it)
-bool QueueRoomAgain(const void* room);
+// Render thread: the room is sent to be solved again (its gather and solve, as a refresh sends it), urgent (tier 1). quiet:
+// no lamp edit is behind the send (Real-time outdoor lamps' sends for a lot's occluders or kept solve): a quiet mark (first
+// in the queue, no lamp edit) unless a lamp was edited in the last 1.5 s
+bool QueueRoomAgain(const void* room, bool quiet = false);
 // Room 0 of a story of a lot (tracker), null when none; any thread
 void* Room0Of(uintptr_t tracker, int story);
 // (the room lamp probe) room `id` of a story of a lot, null when none; any thread
@@ -468,8 +478,8 @@ bool ReachAppliesIn(const void* room, uintptr_t light);
 bool Room0MovePath(const void* room0, uintptr_t light, Room0Path& out, const char*& why);
 // Any thread: InnerPass of a lamp at lampW to pointW from the copy
 float Room0PassAt(const Room0Path& p, const float* lampW, const float* pointW);
-// Room 0 of a story sent to its solve (urgent, whatever its kept parts say)
-bool QueueRoom0(uintptr_t tracker, int story);
+// Room 0 of a story sent to its solve, whatever its kept parts say (urgent: as a lamp edit's room, else at the game's pace)
+bool QueueRoom0(uintptr_t tracker, int story, bool urgent = true);
 // After a room update: room 0 of story L changed by a lamp edit the delta took (its mark dropped); the rooms that take its
 // lamps are sent as the changed-room walk sends them. Returns the rooms sent.
 int SendRoom0Dependents(uintptr_t tracker, int story);

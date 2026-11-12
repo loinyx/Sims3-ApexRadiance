@@ -110,8 +110,8 @@ try
           == "[patches.UncompressedLotTexturesPatch]\nenabled = false\nonlyForLOD0 = true\n[patches.Other]\nenabled = true\n", "S3SS.toml rewrite touches only its section");
     Check(Compat.Set("[ patches ]\nshortwaitspin=1\n", "Patches", new[] { "ShortWaitSpin" }, v => v != "0", "0") == "[ patches ]\nshortwaitspin=0\n", "ini section and key match without case");
     var dxw = new List<string>();
-    var dxc = "d3d9.customVendorId = 10de\r\nd3d9.customDeviceId = 1080\r\nd3d9.customDeviceDesc = \"Geforce GTX 580\"\r\nd3d9.countLosableResources = True\r\n[TS3W.exe]\r\nd3d9.samplerAnisotropy = 16\r\n";
-    Check(Compat.FixDxvk(dxc, dxw) == "d3d9.samplerAnisotropy = 16\r\n" + dxc.Replace("= True", "= False") && dxw.SequenceEqual(new[] { "d3d9.countLosableResources", "d3d9.samplerAnisotropy" }),
+    var dxc = "d3d9.customVendorId = 10de\r\nd3d9.customDeviceId = 1080\r\nd3d9.countLosableResources = True\r\n[TS3W.exe]\r\nd3d9.customDeviceDesc = \"Geforce GTX 580\"\r\n";
+    Check(Compat.FixDxvk(dxc, dxw) == "d3d9.customDeviceDesc = \"Geforce GTX 580\"\r\n" + dxc.Replace("= True", "= False") && dxw.SequenceEqual(new[] { "d3d9.customDeviceDesc", "d3d9.countLosableResources" }),
           "bridge dxvk.conf: wrong value replaced, key under [TS3W.exe] added to the global part");
     var dxw2 = new List<string>();
     Compat.FixDxvk(Compat.FixDxvk(dxc), dxw2);
@@ -522,6 +522,30 @@ finally
         Console.WriteLine($"     {code}: {keys.Count - missing}/{keys.Count} translated" + (missing > 0 ? $", {missing} missing (shown in English)" : ""));
     }
 }
+
+// a running game keeps ts3native.log open for writing: the scan still reads it
+{
+    var lb = Path.Combine(Path.GetTempPath(), "ApexSetupLog-" + Guid.NewGuid().ToString("N")[..8], "The Sims 3", "Game", "Bin");
+    Directory.CreateDirectory(lb);
+    File.WriteAllText(Path.Combine(lb, "TS3W.exe"), "exe");
+    File.WriteAllText(Path.Combine(lb, "ts3native.asi"), "asi");
+    using (var open = new FileStream(Path.Combine(lb, "ts3native.log"), FileMode.Create, FileAccess.Write, FileShare.Read))
+    {
+        open.Write(System.Text.Encoding.ASCII.GetBytes("SKIP all: host is not TS3W.exe"));
+        open.Flush();
+        var gl = new Game(Path.GetDirectoryName(Path.GetDirectoryName(lb))!, lb, "TS3W.exe", Edition.Steam, "1.67.2");
+        bool wrongBuild = false;
+        try { wrongBuild = Scan.Run(gl, Path.Combine(lb, "docs")).Ts3NativeWrongBuild; } catch (IOException) { }
+        Check(wrongBuild, "ts3native.log open in the running game is still read");
+    }
+    Directory.Delete(Path.GetDirectoryName(Path.GetDirectoryName(Path.GetDirectoryName(lb)))!, true);
+}
+
+// The bridge needs Vulkan 1.3: the driver's packed version reads right, and this PC's cards can be asked
+Check(Gpu.Decode((1u << 22) | (3u << 12) | 280) == new Version(1, 3) && Gpu.Decode((1u << 22) | (2u << 12) | 170) < Gpu.Needed,
+      "Vulkan 1.3 passes and 1.2 does not");
+try { var (vk, card) = Gpu.Vulkan(); Console.WriteLine($"info this PC: {card ?? "no Vulkan card"} Vulkan {vk?.ToString() ?? "-"}"); }
+catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: " + e.Message); }
 
 Console.WriteLine(failures == 0 ? "ALL PASSED" : failures + " FAILED");
 return failures == 0 ? 0 : 1;

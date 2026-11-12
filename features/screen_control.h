@@ -12,8 +12,11 @@
 // in the render frame (the 9 bytes at TS3W 0x00EC9FBA, found by pattern), its target is pointed at an Apex function that
 // keeps only the game's 30 ms sleep while the device is lost, and put back when Apex's limiter is turned off.
 //
-// Config: [screen] in ApexRadiance.toml (window_mode, width, height, fps_limit, background_fps_limit, show_fps). Machine settings:
-// not part of profiles.
+// Turn off G-SYNC: VRR_APP_OVERRIDE set to "force off" in the NVIDIA driver profile of the game's exe and of the RTX Remix
+// bridge's NvRemixBridge.exe (NVAPI driver settings, on a worker thread); the previous values are kept to put them back.
+//
+// Config: [screen] in ApexRadiance.toml (window_mode, width, height, fps_limit, background_fps_limit, show_fps, gsync_off,
+// gsync_restore). Machine settings: not part of profiles.
 #include <windows.h>
 #include <d3d9.h>
 #include <string>

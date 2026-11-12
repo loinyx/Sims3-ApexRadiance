@@ -112,6 +112,11 @@ int main() {
     check(!UrgencyKept(2500, 2000, 0, 4) && !UrgencyKept(2500, 2000, 0, 0), "a solved room's urgency ends");
     check(!UrgencyKept(8000, 2000, 0, 3), "urgency kept at most 8 s");
     check(UrgencyKept(0x100u, 0xfffffff0u - 10u, 0xfffffff0u - 3000u, 2), "urgency survives tick wrap");
+    check(GroundFirstHolds(false, 1, 100, 1100) && GroundFirstHolds(false, 2, 100, 1100), "other rooms wait while the ground gathers or waits for its pick");
+    check(!GroundFirstHolds(true, 1, 100, 1100) && !GroundFirstHolds(true, 2, 100, 1100), "the ground room itself is never held");
+    check(!GroundFirstHolds(false, 3, 100, 1100) && !GroundFirstHolds(false, 5, 100, 1100) && !GroundFirstHolds(false, -1, 100, 1100), "no hold once the ground is picked, solved or unreadable");
+    check(!GroundFirstHolds(false, 2, 1100, 1100), "the hold ends at its deadline");
+    check(GroundFirstHolds(false, 1, 0x10u, 0xfffffff0u + 1000u), "the deadline survives tick wrap");
     check(!EditRoomStillWaiting(2, true, true, false), "a room blank at its mark stops waiting at its first solve (lot entry)");
     check(EditRoomStillWaiting(1, false, true, true), "a blank room waits until its first solve ends");
     check(!EditRoomStillWaiting(2, false, true, false), "a blank room re-marked mid-solve stops waiting when that solve ends");

@@ -9,7 +9,7 @@ every room still gets the game's complete solve.
 
 | | |
 |---|---|
-| Availability | Released in 2.1.0 or earlier (on by default since its introduction). Lot build slice while moving, the lamp edit and after-load budgets and the refinement cap: Released in 2.7.0. A lamp edit's room while moving: Released in 2.12.3. Spread cap after a drag: Released in 2.13.0. Settle window after entering a lot: Released in 2.15.0. Settle window paced by the frame time: Released in 2.15.1. Paced budgets while moving and steady pacing with the camera still: Released in 2.15.3. Shared lot build time: Released in 2.16.2 |
+| Availability | Released in 2.1.0 or earlier (on by default since its introduction). Lot build slice while moving, the lamp edit and after-load budgets and the refinement cap: Released in 2.7.0. A lamp edit's room while moving: Released in 2.12.3. Spread cap after a drag: Released in 2.13.0. Settle window after entering a lot: Released in 2.15.0. Settle window paced by the frame time: Released in 2.15.1. Paced budgets while moving and steady pacing with the camera still: Released in 2.15.3. Shared lot build time: Released in 2.16.2. Released in 3.1.2: a floor of 3/15 of the game's budget for loading lots |
 | Default | On, 3 ms |
 | Menu | System > Performance > Camera and lighting > *Spread lot lighting while moving* |
 | Configuration | `[patches.LotLightingMotion]` in `ApexRadiance.toml` |
@@ -29,12 +29,20 @@ The single CALL that fetches the budget is redirected to Apex Radiance:
 
 1. Call the game's budget function and read its result.
 2. If the camera moved in the last 300 ms and the budget is under 100 ms, return
-   `max(0.25, min(game, game x budgetMs / 15))`.
+   `max(floor, min(game, game x budgetMs / 15))`.
 3. Otherwise return the game's value.
 
 At the default 3 ms the priority lot goes from 15 to 3 ms (30 to 6 while loading) and other lots from 5 to 1 ms (10 to 2
 while loading). The engine's own order and the priority lot's larger share stay; only the time per frame shrinks. The
 tool mode's 1000 ms budget is never changed.
+
+**Loading lots keep a floor.** The floor is 0.25 ms, and for a loading lot the game's budget x 3/15: 6 ms of the played
+lot's 30, 2 ms of another lot's 10, never more than the game's own. The hook knows a lot is loading from the budget
+itself: 0x00ADB120 returns 30 or 10 only while the lot lighting manager's loading flag `+0x4F` is set (cleared at load
+stage 20). Without the floor, the 1 ms setting gave a loading lot 2 or 0.67 ms, and lots requested while panning
+finished only when the camera stopped (a lot load analysis: lots requested at 3.3 s done at 26 s, the same lot later in
+0.5 s). The floor also applies under the drag spread cap below. The light is the same; only the frame it finishes in
+moves.
 
 The same hook also adjusts the budget around lamp edits and loads (budgets of 15 ms or more and under 100 ms, that is
 the lot being played):
@@ -65,8 +73,9 @@ the lot being played):
 - **After a drag stops:** while the rooms that waited for a dragged lamp to stop are solved (at most 15 s), the frame's
   room solves stay under the spread cap of 3.5 ms (`DragLite::SolveCapMs`): the lot being played gets what *Faster room
   lighting*'s drain left of it, the other lots 0.25 ms, with no edit boost. While the lamp's own rooms still wait there
-  is no cap, and the other lots keep 0.25 ms ([lamp drags](../night-lighting/lamp-drags.md)). Tester switch *Spread the
-  update after the stop* (`drag_spread_cap`, on).
+  is no cap, and the other lots keep 0.25 ms ([lamp drags](../night-lighting/lamp-drags.md)). A loading lot keeps its
+  floor in both cases (6 or 2 ms), so a load can take the frame past the cap. Tester switch *Spread the update after
+  the stop* (`drag_spread_cap`, on).
 - **A lamp edited in Build mode:** while its rooms wait for or are in their solve (or a room 0 is sent to its solve),
   the lot being played gets up to 25 ms with the camera still once the lamp is let go, dosed by the same frame-time
   pacing as the settle window: `game + (25 - game) x scale`, the full 25 ms while frames hold, down to the game's 15 ms
@@ -101,7 +110,7 @@ frame's shared budget leaves.
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Spread lot lighting while moving | `[patches.LotLightingMotion] enabled` | bool | on | | Turns the budget scaling on |
-| Lot lighting time while moving (shown while the switch is on) | `[patches.LotLightingMotion] budgetWhileMovingMs` | int | 3 | 1 to 15 ms | The current lot's time per frame while moving. End labels "Smoother" / "Lights sooner"; 15 = the game's own. Applied at once (the hook reads it on every call; `Update` clears the reinstall request). The key is never renamed |
+| Lot lighting time while moving (shown while the switch is on) | `[patches.LotLightingMotion] budgetWhileMovingMs` | int | 3 | 1 to 15 ms | The current lot's time per frame while moving; below 3 ms, loading lots keep the 3 ms share (6 / 2 ms). End labels "Smoother" / "Lights sooner"; 15 = the game's own. Applied at once (the hook reads it on every call; `Update` clears the reinstall request). The key is never renamed |
 
 ## Compatibility and interactions
 
@@ -124,7 +133,10 @@ frame's shared budget leaves.
 ## Limitations
 
 - The current lot's lights, and lots streaming in, finish over more frames while the camera moves. They catch up within
-  about 300 ms of stopping plus the remaining work at full budget.
+  about 300 ms of stopping plus the remaining work at full budget. Loading lots never go below 3/15 of the game's budget,
+  so at settings under 3 ms a pan over lots that load costs more than the setting.
+- Loading is read from the budget's value (30 or 10 ms), not from the flag: if another module changes the game's
+  loading budgets, loading lots get the 0.25 ms floor as before.
 - With the camera still on a PC whose frames run long, rooms relit by something other than a lamp edit (dusk, a load
   still solving after its settle window, Night Lighting's requeues) finish over more frames than with the game's budget.
 - Budgets of 100 ms or more (tool mode) are never scaled.
@@ -162,12 +174,16 @@ frame's shared budget leaves.
 
 ### The patch
 
+- The 5 bytes of the CALL at 0x00ADB9BA (the stopwatch read after each solve, 0x004F33C0) become
+  `call Hook_SolveElapsed`. It only logs `Slow room step` when one solve ends 20 ms or more past its budget (at most 5
+  lines in 10 s); budgets and solves are unchanged. Restored the same way.
 - The 5 bytes of the CALL at 0x00ADB95D become `call Hook_LotLightBudget` (`MemPatch::WriteCodeSuspended`; restored the
   same way, only if it still points to Apex's hook). Start checks that the CALL reaches 0x00ADB120 and that the next
   instruction reads ST0 (`D9` / `DD`).
 - `float __fastcall Hook_LotLightBudget(mgr, edx)` calls 0x00ADB120 (a float return is ST0 in every x86 convention; the
-  caller's x87 stack is empty at the call), samples the camera, and applies the rules above. The minimum is 0.25 ms
-  (`kMinMs`); the lamp edit and after-load budget is `kLampEditMs` (25 ms), the refinement cap `kRefineMs` (6 ms), the edit room's budget while moving `kEditMovingMs` (6 ms; a room counts as
+  caller's x87 stack is empty at the call), samples the camera, and applies the rules above. The minimum is `FloorMs`:
+  0.25 ms (`kMinMs`), or for the loading budgets `kPriorityLoadingMs` / `kOtherLoadingMs` (30 / 10 ms) the game's budget
+  x `kLoadingShare` (3/15); it applies in the moving scale and in both drag branches. The lamp edit and after-load budget is `kLampEditMs` (25 ms), the refinement cap `kRefineMs` (6 ms), the edit room's budget while moving `kEditMovingMs` (6 ms; a room counts as
   urgent when `LevelLightShare::LampUrgency` of the queue's current room is above 1). The drag spread cap is checked
   first, before the switch's own rules, and is `DragLite::kSpreadCapMs` (3.5 ms) for at most `kSettleMs` (15 s). The
   steady pacing applies to budgets equal to `kPriorityMs` (15 ms) or `kOtherLotMs` (5 ms); `SteadyScale()` (1 with the
@@ -210,7 +226,7 @@ Group `LotLightingMotion`.
 
 `features/lot_lighting_motion.{h,cpp}`: `Start`, `Stop`, `Hook_LotLightBudget`, `SampleCamera`, `ReadEye`,
 `ParseCamera` (`ParseRootGetter` / `ParseCameraGetter` / `ParseEyeRead`), `UpdatePresentSampler` / `OnPresentSample`,
-`SetBudgetMs`, `CameraMoving`, `SampleCameraMoving`, `EnsureCamera`, `PaceSettle`, `SettleScale`, `SteadyScale`,
+`SetBudgetMs`, `FloorMs`, `CameraMoving`, `SampleCameraMoving`, `EnsureCamera`, `PaceSettle`, `SettleScale`, `SteadyScale`,
 `SteadyDrainMs`, `DrainBudget`, `StatusText`, `RenderDeveloperUI`.
 `Performance::LotLightingBudgetMs` / `SetLotLightingBudgetMs` in [`patches/performance.h`](../../../patches/performance.h).
 

@@ -93,7 +93,8 @@ then `==== ApexRadiance.toml at the start of the recording ====` and the setting
 | `[log]` | `ApexRadiance_LOG.txt` | Log lines written during the recording |
 | `[solve]` | Level Light Share solve journal | `S` ambient step done, `W` wall pass done, `Q` sent by Apex, `H` held by Apex, `I` / `F` invalidated, with the caller, LOD class, light counts, lot and camera story |
 | `[status]` | `Status()` every 100 ms, written when changed | Indoor light between stories (`LevelLightShare::Status`), Rooms at Night (`UnlitRooms::Status`), Faster Room Lighting (`RoomLightQueue::StatusText`), Indoor object maps (`RoomMapPadding::Status`), "Furniture (last 100 ms)" with the night level, "Stories shown (lot:story)" (a floor switch is a new line), "Rooms at Night sliders" (`UnlitRooms::SettingsText`), "Rooms keep their light" (`LampMarkFilter::Status`) |
-| `[furniture]` | `LotLightBridge` | Each room-mode object part (world position from the VS world rows + pixel shader) at its first draw and at every change of: the path (A = Apex's indoor-object shader, B = the game's shader turned by Rooms at Night, game = untouched), dark (the rig holds [NoLight] lights) and acting, the 4 rig lights as the game set them (N = [NoLight], F = fill, L = lamp, - = empty) with their colours, the vertex lights' sum, the ambient cube weight (game -> drawn), the blue kept, and for path A the room light map, its first directional map and the read scale. Cheap hashes decide when a line is written |
+| `[furniture]` | `LotLightBridge` | Each room-mode object part (world position from the VS world rows + pixel shader) at its first draw and at every change of: the path (A = Apex's indoor-object shader, B = the game's shader turned by Rooms at Night, game = untouched), dark (the rig holds [NoLight] lights) and acting, the 4 rig lights as the game set them (N = [NoLight], F = fill, L = lamp, - = empty) with their colours, the vertex lights' sum, the ambient cube weight (game -> drawn), the blue kept, and for path A the room light map, its first directional map and the read scale. Cheap hashes decide when a line is written; a line identical to the part's last one is not written again (the state hash also covers values the line does not print) |
+| `[camera]` | `PostScene::RecentCameraViewProj`, written when changed | `plain` or `mirrored`, the near plane, the game's eye and the view-projection. With water in view the first scene draws are the reflection pass, so the recording tools ask for the plain camera (`WantCamera(on, true)`): after the frame's vote, scene draws are searched (at most 512 a frame, until one is found) for a `c40` block that is not mirrored and has the frame's near. The mirrored copy is used only when no plain block was seen, and then the file's `WARNING: the camera was the water reflection's mirrored copy` line still applies. The effects keep the voted camera (`CameraViewProj`) |
 | `[room]` | `LevelLightShare::TraceRooms` | Every indoor room of the loaded lots once at the start and again when its ambient (+0x110, the colour its walls take; +0x120), normalisation, solve state, LOD class (solving / shown), light count or shown story changes |
 | `[probe]` | `LightProbe` | Each capture with its reason, and `[probe] floor change (...): automatic captures in 1 s and 3 s` |
 
@@ -114,8 +115,8 @@ Three parts measure how the light updates on screen after a lamp edit, all insid
     at the first frame with a camera and listed lamps, the active lot's lamp being dragged (`TerrainStamps::MovedWithin`
     2 s), else the one nearest the mouse's ground point, is chosen,
     and the points lie every metre from 4 m behind it to 12 m past it on the line towards that point, at its lot's
-    ground height, following the lamp as it moves. Their pixels come from the post-scene camera vote, asked for while the
-    recording runs (`PostScene::WantCamera`); a point off screen reads pixel (0, 0).
+    ground height, following the lamp as it moves. Their pixels come from the post-scene camera (the plain one, as in `[camera]`), asked for
+    while the recording runs (`PostScene::WantCamera`); a point off screen reads pixel (0, 0).
   - Copied at `RenderCallbacks::filteredSceneBeforeOverlay` (the first EndScene of the frame, right before the Apex menu
     and notices are drawn, as the report screenshot does), at Present only when no EndScene reached the overlay that frame,
     so a recording started from the open menu measures the game and not the menu's own pixels.
@@ -134,6 +135,10 @@ Three parts measure how the light updates on screen after a lamp edit, all insid
 - **Lamp edits**: `LampMarkFilter` notes every player edit (a switch, a move or a value change; not a light switching
   itself) as `[edit]` lines, one per light and story tree level that saw it first (a lamp object has several lights; the
   game marks the rooms of every story its light reaches, so the story is where the change was seen, not always the lamp's).
+- **Game marks with no edit**: while recording (always in development builds), a lamp whose own marks pass the filter more
+  than 5 times in 10 s with no edit is logged once (at most 16 lines a session): `[LampMarkFilter] Light ... marks story S
+  room R of tracker ... N times in 10 s with no edit: changed +0xOFF a->b (hex)`, the signature dwords that differ from
+  its previous mark. It names the field that keeps restarting a room's solve; the filter's decisions are unchanged.
 
 `Recording.txt` then opens with **Light updates**, one block per edit burst (edits less than 400 ms apart). A burst's window
 ends at the next burst, or when its lot shows another story or leaves the view (the "Stories shown" status, every 100 ms,

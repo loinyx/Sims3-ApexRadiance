@@ -133,3 +133,24 @@ so the Banding Fix's re-issue of every 3D back-buffer draw counted as mod time.
 
 **Outcome:** every original draw issued inside a dispatch is booked as *Re-issued draw (driver)*, and the dispatch
 cost line reports the callbacks' own time and that driver time apart ([architecture.md](../architecture.md#33-dispatch-and-locking)).
+
+### 2026-11-11: every dispatch timed in the presets, and the 3.1.2 analyses
+
+**Context:** Frame Profiler timing and sampling runs on 3.1.2 development builds, under the RTX Remix bridge. Each report
+was read by several independent analyses (hitch causes, render-thread samples, hook times), and their findings were
+compared before any change.
+
+**Finding:** the Timing run sampled one outermost dispatch in 16 and booked it 16 times: in one hitch the sample showed
+151 ms of mod time inside a 55 ms frame. Per-hook registry timing was off in both presets and had to be turned on by
+hand. The causes found: the fence grid's gap build (a third of the render thread's samples in hitch frames), the lamp
+visibility memos left off by a saved developer switch (outdoor objects 20 ms a frame while zooming out), Instant's floor
+mask "all" computed on the render thread (105 and 255 ms hitches) and urgent room solves of lots streaming in (8 s
+lamp-edit windows at about 10 ms of room solves a frame).
+
+**Outcome:** kept (`7ef9c56b`): both presets time every dispatch (*Sampled dispatch timing* off) and turn per-hook
+registry timing on, and the Night Lighting draw cost line splits the fence draw. Each cause was fixed in its own commit
+([lot light pass](night-lighting-lot-light-pass.md#2026-11-11-the-fence-grid-rebuilt-at-almost-every-draw),
+[developer mode](developer-mode.md#2026-11-11-the-story-samples-switch-not-restored),
+[light between stories](night-lighting-level-light-share.md#2026-11-11-floor-mask-sums-off-the-render-thread-and-false-lamp-edits)).
+From build 4 to build 6: p95 71 to 35 ms, p99 90 to 50 ms, hitch frames 9 % to 4.4 %
+([validation](../validation/frame-profiler.md#latest-results)).

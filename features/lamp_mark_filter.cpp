@@ -94,6 +94,11 @@ struct LampState {
     DWORD editUntil = 0;    // an edit (move, switch, colour) is going on until then: its next changes are part of it
     DWORD lastAuto = 0;     // (auto_light_priority) its latest quiet mark: at most one every 5 s
     uintptr_t entry = 0;    // its light entry at its last update (GPU room lamps: OwnObjectEditTaken)
+    uint32_t raw[34] = {};  // (diagnostics) the signature's dwords at its last mark (ReadSigDwords)
+    bool rawSet = false;
+    DWORD quietFrom = 0;    // marks with changed values and no edit since then (10 s window)
+    uint16_t quietMarks = 0;
+    bool quietLogged = false;
 };
 std::atomic<long> g_autoSelfOn{0}, g_autoDuskOn{0}; // automatic switch-ons left out of the lamp edits (counters)
 constexpr DWORD kEditHoldMs = 2000;
@@ -235,6 +240,30 @@ bool Signature(uintptr_t entry, uintptr_t light, int room, uint64_t& h, int& typ
         MixDwords(h, light + 0x120, 3);
         MixDwords(h, light + 0x130, 1);
         if (type == 4 || type == 5) MixDwords(h, light + 0x170, 13);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// (diagnostics) The dword ranges Signature mixes, in its order; the last 13 only for spot lights (types 4 and 5)
+constexpr struct { uint16_t at, n; } kSigRanges[] = {{0x10, 4}, {0xC0, 8}, {0xE0, 5}, {0x120, 3}, {0x130, 1}, {0x170, 13}};
+int SigDwordCount(int type) { return type == 4 || type == 5 ? 34 : 21; }
+uint16_t SigDwordOffset(int k) {
+    for (const auto& r : kSigRanges) {
+        if (k < r.n) return static_cast<uint16_t>(r.at + k * 4);
+        k -= r.n;
+    }
+    return 0;
+}
+bool ReadSigDwords(uintptr_t light, int type, uint32_t* out) {
+    __try {
+        int k = 0;
+        for (const auto& r : kSigRanges) {
+            if (k + r.n > SigDwordCount(type)) break;
+            std::memcpy(out + k, reinterpret_cast<const void*>(light + r.at), r.n * sizeof(uint32_t));
+            k += r.n;
+        }
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -866,6 +895,34 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
             edit = true;
             editWhy = "a step of the same edit";
             DragLite::NoteLampStep("lamp entry: a step of the same edit", DragLite::StepKind::Move, gameMove());
+        }
+        // (diagnostics) a lamp whose game marks keep passing with no edit: which signature dword changes between them
+        if (!same && (!kPublicBuild || Recorder::Active())) {
+            uint32_t raw[34] = {};
+            if (ReadSigDwords(light, type, raw)) {
+                if (!edit) {
+                    if (tick - was.quietFrom > 10000) {
+                        was.quietFrom = tick;
+                        was.quietMarks = 0;
+                    }
+                    static std::atomic<int> s_quietLines{0};
+                    if (++was.quietMarks > 5 && !was.quietLogged && was.rawSet && s_quietLines.fetch_add(1) < 16) {
+                        was.quietLogged = true;
+                        std::string diff;
+                        for (int k = 0; k < SigDwordCount(type); k++) {
+                            if (raw[k] == was.raw[k]) continue;
+                            float a, b;
+                            std::memcpy(&a, &was.raw[k], sizeof a);
+                            std::memcpy(&b, &raw[k], sizeof b);
+                            diff += std::format(" +0x{:X} {:g}->{:g} ({:08X}->{:08X})", SigDwordOffset(k), a, b, was.raw[k], raw[k]);
+                        }
+                        LOG_INFO(std::format("[LampMarkFilter] Light {:08X} (type {}) marks story {} room {} of tracker {:08X} {} times in 10 s with no edit: changed{}",
+                                             light, type, StoryOfTl(tl), room, TrackerOf(tl), was.quietMarks, diff.empty() ? " room, lit bit or object flags only" : diff));
+                    }
+                }
+                std::memcpy(was.raw, raw, sizeof raw);
+                was.rawSet = true;
+            }
         }
         was.sig = h;
     }
