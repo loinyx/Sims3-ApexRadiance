@@ -2,7 +2,8 @@
 // DXVK swap chain gives a window capture black frames). Hooks the game's Device_BeginScene (0x611620, Steam 1.67.2,
 // thiscall: the device is [this+0xC], vtable +0xA4 = BeginScene): at the start of a frame the back buffer still holds
 // the frame just presented, with everything the mod drew at Present (its picture is composed there: before Present the
-// back buffer holds only the game's UI), so the sample is one frame late. Every `everyMs` (default 50) it copies
+// back buffer holds only the game's UI), so the sample is one frame late. Only a BeginScene that follows the game's
+// EndSceneAndPresent (0x611760) is sampled. Every `everyMs` (default 50) it copies
 // the back buffer into a 160x90 render target (StretchRect), reads it back (GetRenderTargetData: a short GPU wait) and
 // writes:
 //   luma.csv  qpcMs,clock,frame,c0..c143  (the mean luma of a 16 x 9 grid, for flash_scan.py)
@@ -11,7 +12,7 @@
 'use strict';
 
 const W = 160, H = 90, GX = 16, GY = 9;
-let out = null, everyMs = 50, csv = null, frame = 0, last = 0, rt = null, sys = null, dev0 = null, busy = false, closed = false;
+let presented = false, out = null, everyMs = 50, csv = null, frame = 0, last = 0, rt = null, sys = null, dev0 = null, busy = false, closed = false;
 
 const k32 = Process.getModuleByName('kernel32.dll');
 const QPC = new NativeFunction(k32.getExportByName('QueryPerformanceCounter'), 'int', ['pointer']);
@@ -83,9 +84,16 @@ rpc.exports = {
         const site = ptr(0x611620), want = '568bf180be';
         const have = Array.from(new Uint8Array(site.readByteArray(5))).map(b => b.toString(16).padStart(2, '0')).join('');
         if (have !== want) throw new Error('0x611620 is ' + have + ', not ' + want + ': not Steam 1.67.2');
+        // only the BeginScene right after a presented frame: the render callback's passes without a Present (frame-times.js:
+        // present = 0) leave the back buffer half drawn, and reading after them alternates UI-only and scene-only pictures
+        const presentSite = ptr(0x611760), presentWant = '6a006a006a00e8';
+        const presentHave = Array.from(new Uint8Array(presentSite.readByteArray(7))).map(b => b.toString(16).padStart(2, '0')).join('');
+        if (presentHave !== presentWant) throw new Error('0x611760 is ' + presentHave + ', not ' + presentWant + ': not Steam 1.67.2');
+        Interceptor.attach(presentSite, { onLeave() { presented = true; } });
         Interceptor.attach(site, {
             onEnter() {
-                if (closed || busy) return;
+                if (closed || busy || !presented) return;
+                presented = false;
                 const t = qpcMs();
                 if (t - last < everyMs) return;
                 last = t; busy = true;
