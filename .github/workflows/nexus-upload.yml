@@ -89,6 +89,9 @@ jobs:
             cp setup/ApexRadianceSetup.exe pack/
             cp dist/ApexRadiance.asi pack/"Manual install"/
             [ -f dist/ts3wrap.exe ] && cp dist/ts3wrap.exe pack/"Manual install"/
+            # the RTX Remix bridge folder of the release's manual-install zip (3.1.6 on), as in the GitHub download
+            BR=$(find manual/x -maxdepth 2 -type d -name 'RTX Remix bridge' 2>/dev/null | head -1)
+            [ -n "$BR" ] && cp -r "$BR" pack/"Manual install"/
             sed -e "s/{VERSION}/$VERSION/" -e 's/$/\r/' .github/scripts/nexus-readme.txt > pack/"READ ME.txt"
             sed -e "s/{VERSION}/$VERSION/" -e 's/$/\r/' .github/scripts/manual-install.txt > pack/"Manual install"/"How to install.txt"
             (cd pack && zip -9 -r "../ApexRadiance-$VERSION.zip" "READ ME.txt" ApexRadianceSetup.exe "Manual install")

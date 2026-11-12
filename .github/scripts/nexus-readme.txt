@@ -6,7 +6,8 @@
   What is in this zip
 
     ApexRadianceSetup.exe ...... the installer (recommended)
-    Manual install\ ............ the mod files, to install them by hand
+    Manual install\ ............ the mod files and the RTX Remix bridge,
+                                  to install them by hand
 
 
 ------------------------------------------------------------------------------
