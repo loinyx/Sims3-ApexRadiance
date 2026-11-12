@@ -330,6 +330,13 @@ float Prioritise(BYTE* room, float p) {
     return p * factor * urgency;
 }
 
+// (Real-time outdoor lamps) the new active lot's ground room 0 after a switch: the switch's occluder send leaves it gathering
+// (state 1, priority 0) and a picked room keeps the scheduler until its solve ends, so the camera story's room 0 ran first
+constexpr DWORD kGroundFirstMs = 1000;
+std::atomic<BYTE*> g_ground{nullptr};
+std::atomic<DWORD> g_groundUntil{0};
+int StateOf(const BYTE* room); // below (SEH, -1 when unreadable)
+
 // 07/10, players' Runtime Error: Apex's parts around the game's priority call are caught on their own (HookGuard); on a C++
 // exception the room keeps the game's own priority and that part stays off
 
@@ -353,6 +360,11 @@ float __fastcall PriorityHook(BYTE* room) {
         RestartSettle::Global().Hold(reinterpret_cast<uintptr_t>(room), GetTickCount64()))
         return 0.0f;
     if (!room || !g_prioOn) return p;
+    if (BYTE* g = g_ground.load(std::memory_order_relaxed)) {
+        const DWORD now = GetTickCount(), until = g_groundUntil.load(std::memory_order_relaxed);
+        if (static_cast<int32_t>(now - until) >= 0) g_ground.store(nullptr, std::memory_order_relaxed);
+        else if (RoomAmbientPolicy::GroundFirstHolds(room == g, StateOf(g), now, until)) return p > 0.0f ? 0.0f : p;
+    }
     return HookGuard::Run("RoomLightQueue room priority", p, [room, p] { return Prioritise(room, p); });
 }
 
@@ -897,6 +909,10 @@ bool CurrentRoomUrgent() {
     const BYTE* tree = g_tree.load(std::memory_order_relaxed);
     const BYTE* room = tree ? CurrentRoom(tree) : nullptr;
     return room && LevelLightShare::EditUrgent(room); // (a quiet mark keeps its place in the queue, not the edit budgets)
+}
+void GroundFirst(const void* room0) {
+    g_groundUntil.store(GetTickCount() + kGroundFirstMs, std::memory_order_relaxed);
+    g_ground.store(static_cast<BYTE*>(const_cast<void*>(room0)), std::memory_order_relaxed);
 }
 unsigned long SolveEndedAt(const void* room) {
     if (!room || ThreadId() != g_renderThread.load(std::memory_order_relaxed)) return 0;

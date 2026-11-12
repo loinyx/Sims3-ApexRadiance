@@ -153,6 +153,25 @@ one change for every floor, shown once it is final, is the intended result.
   if its room were marked (the game updates the rig at once, the room is marked about 140 ms later), and parts lit only by
   their vertex lights (no rig chain in their pixel shader) are held too, so an object and its floor change together.
 
+### Ground first after an active-lot switch
+
+When the active lot changes, room 0 of the new lot's ground story (story 0) is solved before any other room, for at
+most 1 s (`RoomLightQueue::GroundFirst`, `RoomAmbientPolicy::GroundFirstHolds`). That room's map is the one the lot's
+grass reads, and *Real-time outdoor lamps* builds the lamp post's bright circle from it, so the circle cannot appear
+before it is solved.
+
+- **Why:** the switch's occluder send puts the ground room back to gathering (state 1, game priority 0), and a room the
+  scheduler picks keeps it until its solve ends. In a recording, one frame after the switch the scheduler picked the
+  camera story's room 0, which needed a full solve of 3328 ms; the ground then solved in 1 ms from its kept parts, and
+  the circle showed 3.5 s after the switch, 3.3 s of it spent waiting.
+- **How:** while the ground room is in state 1 or 2, every other room of every lot gets priority 0, so the scheduler
+  picks nothing else. The hold lasts while the ground waits for a gather or a pick (states 1-2, including its next class
+  after a quick class-0 solve, `0x0069EA70`), at most 1 s from the switch; it ends earlier when the ground is picked,
+  solved or unreadable. A pick made before the deadline keeps the scheduler on the ground past 1 s until that solve ends.
+  The ground room itself keeps the game's priority. With *Faster room lighting* off there is no hold.
+- **Effect on light:** none on the final result: the same solves run in a different order. A lamp edit made in that
+  second waits too; the camera story's room 0 shows its class-0 light meanwhile, as before.
+
 ### Quick update for lamp switches
 
 Used only while *Lamp edits all at once* is off (`quickPass`, once per room and switch). After a player's switch
@@ -386,6 +405,9 @@ line every minute (with the `[RoomSolveCauses]` line) gives the picks held and l
   stories, which before showed one at a time.
 - Skipping the drain's first step while the camera moves (against the 100 ms steps): the lot pass runs the same step
   under its own budget, and rooms never solved would wait longer.
+- Raising the floor priority for the ground room after an active-lot switch: right after the switch that room is in
+  state 1, where the game's priority is 0 and `FloorPriorityFactor` multiplies it, so it stays 0. Replaced by holding
+  the other rooms (*Ground first after an active-lot switch*).
 
 Details in [history](../../history/performance-room-light-queue.md).
 

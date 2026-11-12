@@ -63,6 +63,7 @@ bool SolvedSince(const void* room, unsigned long since);
 bool CurrentRoomUrgent();
 // Render thread: GetTickCount at the room's last solve end seen on this thread (0: none, or another thread)
 unsigned long SolveEndedAt(const void* room);
+void GroundFirst(const void* room0); // an active-lot switch: no other room is picked while this ground room 0 waits (states 1-2), at most 1 s
 // Render thread: that room is being solved at a higher class than the one on screen (the quick pass's refinement): the
 // maps it writes are not the ones shown, and hold the room's light from before the edit
 bool SolveRefiningUp();
