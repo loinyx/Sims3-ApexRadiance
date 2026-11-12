@@ -22,6 +22,8 @@ param(
     [switch]$KeepSaves,
     [switch]$InactiveIdle,
     [switch]$Lean,
+    [switch]$Grab, # record the game window all load long (profilers/grab.ps1) and scan it for flashes (flash_scan.py)
+    [double]$GrabFps = 8,
     [switch]$DryRun,
     [string]$Restore
 )
@@ -308,6 +310,8 @@ function Invoke-Load($Load, [string]$BaseToml) {
     New-Item -ItemType Directory -Path $apexDir -Force | Out-Null
     [IO.File]::WriteAllText($tomlPath, $toml, (New-Object Text.UTF8Encoding($false)))
     Copy-Item -LiteralPath $tomlPath -Destination (Join-Path $dir 'ApexRadiance.toml')
+    # "s3ss" in a job: Sims3SettingsSetter's own settings for the run (its frame limiter, say), on the player's file
+    if ($jobDef.s3ss -and $script:baseS3ss) { [IO.File]::WriteAllText($s3ssPath, (Set-TomlOverrides $script:baseS3ss $jobDef.s3ss), (New-Object Text.UTF8Encoding($false))) }
 
     # "apex": false in a variant: the game starts without ApexRadiance.asi (the baseline); put back after the load
     $noApex = ($v.PSObject.Properties.Name -contains 'apex') -and -not $v.apex
@@ -345,6 +349,13 @@ function Invoke-Load($Load, [string]$BaseToml) {
         Call-Agent 'load_save' @{ file = "$($jobDef.save).sims3"; reload = $true } | Out-Null
         Say "$($Load.Name): loading $($jobDef.save)"
         Wait-LiveMode "the save $($jobDef.save)"
+        $grabProc = $null
+        if ($Grab) {
+            $grabProc = Start-Process -FilePath 'powershell' -WindowStyle Hidden -PassThru -RedirectStandardError (Join-Path $dir 'grab.err.log') -ArgumentList @(
+                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"' + (Join-Path $PSScriptRoot 'profilers/grab.ps1') + '"'),
+                '-GamePid', $script:proc.Id, '-OutDir', ('"' + (Join-Path $dir 'grab') + '"'), '-Fps', $GrabFps)
+            Say "  recording the game window at $GrabFps frames a second into grab\"
+        }
         $lastSave = $null
         $n = 0
         foreach ($step in (Get-JobSteps $jobDef)) {
@@ -468,6 +479,12 @@ function Invoke-Load($Load, [string]$BaseToml) {
     }
     Wait-Process -Id $script:proc.Id -Timeout 60 -ErrorAction SilentlyContinue
     if ($noApex -and (Test-Path -LiteralPath $asiOffPath)) { Move-Item -LiteralPath $asiOffPath -Destination $asiPath -Force }
+    if ($grabProc) {
+        if (-not $grabProc.WaitForExit(30000)) { $grabProc.Kill() } # it ends with the game
+        $scan = & python -I (Join-Path $PSScriptRoot 'profilers/flash_scan.py') (Join-Path $dir 'grab') 2>&1
+        $scan | Set-Content -LiteralPath (Join-Path $dir 'flashes.txt') -Encoding UTF8
+        Say "  $(@($scan)[-1])"
+    }
     Start-Sleep -Seconds 2 # Apex's log writer and crash report finish with the process
 
     foreach ($f in 'ApexRadiance_LOG.txt', 'ApexRadiance_Crash.txt', 'ApexRadiance_Hitches.txt') {
@@ -505,8 +522,10 @@ function Invoke-Load($Load, [string]$BaseToml) {
 # the job saves are only loaded (the agent saves under new names) but are kept in the backup all the same.
 $asiPath = Join-Path $GameBin 'ApexRadiance.asi'
 $asiOffPath = Join-Path $GameBin 'ApexRadiance.asi.off'
+$s3ssPath = Join-Path $GameDocuments 'S3SS/S3SS.toml'
 $installs = @(
     @{ path = $tomlPath; from = $null },
+    @{ path = $s3ssPath; from = $null }, # a job's "s3ss" settings
     @{ path = (Join-Path $GameBin 'ApexRadiance.asi'); from = $Asi },
     @{ path = (Join-Path $GameBin 'ApexRadiance.asi.off'); from = $null }, # an apex:false load's ASI set aside
     @{ path = (Join-Path $GameDocuments 'Mods/Packages/ApexTestAgent.package'); from = $agent },
@@ -520,6 +539,7 @@ try { $manifest = New-RunBackup $OutDir (@($installs | ForEach-Object { $_.path 
 catch { Exit-RunLock $stateDir $OutDir; throw } # nothing installed yet
 Say "backup of $($manifest.Count) files and folders in $OutDir\backup (by hand: run.ps1 -Restore '$OutDir')"
 $baseToml = if (Test-Path -LiteralPath $tomlPath) { [IO.File]::ReadAllText($tomlPath) } else { '' }
+$script:baseS3ss = if (Test-Path -LiteralPath $s3ssPath) { [IO.File]::ReadAllText($s3ssPath) } else { $null }
 $results = @()
 $stopped = $null
 $restored = $null
