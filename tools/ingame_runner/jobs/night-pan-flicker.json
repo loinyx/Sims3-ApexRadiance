@@ -1,6 +1,6 @@
 {
   "id": "night-pan-flicker",
-  "description": "Cause run for lights and terrain that flash at night: a pan over the town's lots with two F8 recordings, then the camera circling the active lot while the floor goes up and down (Page Up, Page Down) in a third recording. Developer mode on, so the log keeps the active lot switches, dropped relit maps, terrain lamp changes and room solves. Needs a night save; the game stays paused so the clock stays at the save's night hour (the save loads at 21:14). Read the recordings and the log, not the frame times. Then the camera circles the gym and its floors change in a fourth recording, and pans over the lots around it.",
+  "description": "Cause run for light changes and flashes, at night first: the save loads at 21:14 at normal speed. The camera circles the town square and pans over the lots around it, circles the gym and the active lot while the floor goes up and down (Page Up, Page Down), and pans over the town for the terrain outside the lots, each in an F8 recording (video, screen pixels, Recording.txt). The clock then runs to the morning and the square, gym and active lot are recorded again by day. Developer mode on, so the log keeps active lot switches, dropped relit maps, terrain lamp changes and room solves. Read the recordings and the log, not the frame times.",
   "save": "Claude teste",
   "toml": {
     "ui": {
@@ -18,64 +18,50 @@
   "steps": [
     {
       "do": "speed",
-      "speed": "pause"
+      "speed": "normal"
     },
     {
       "do": "lots"
     },
     {
-      "do": "camera_pan",
-      "lots": 8,
-      "height": 40,
-      "seconds": 45,
-      "passes": 8
-    },
-    {
-      "do": "wait",
-      "minutes": 1
-    },
-    {
-      "do": "key",
-      "vk": 119
-    },
-    {
-      "do": "wait",
-      "minutes": 0.85
-    },
-    {
-      "do": "key",
-      "vk": 119
-    },
-    {
-      "do": "wait",
-      "minutes": 0.5
-    },
-    {
-      "do": "key",
-      "vk": 119
-    },
-    {
-      "do": "wait",
-      "minutes": 0.85
-    },
-    {
-      "do": "key",
-      "vk": 119
-    },
-    {
-      "do": "wait",
-      "minutes": 0.5
-    },
-    {
       "do": "camera_orbit",
-      "radius": 18,
-      "height": 12,
+      "lot": "pra\u00e7a|praca|square|plaza|central|kBigPark",
+      "radius": 30,
+      "height": 15,
+      "seconds": 25,
+      "turns": 2
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.58
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.17
+    },
+    {
+      "do": "camera_pan",
+      "near": "pra\u00e7a|praca|square|plaza|central|kBigPark",
+      "lots": 6,
+      "height": 30,
       "seconds": 30,
-      "turns": 3
+      "passes": 2
     },
     {
       "do": "wait",
-      "minutes": 0.3
+      "minutes": 0.2
     },
     {
       "do": "key",
@@ -83,55 +69,7 @@
     },
     {
       "do": "wait",
-      "minutes": 0.15
-    },
-    {
-      "do": "key",
-      "vk": 33
-    },
-    {
-      "do": "wait",
-      "minutes": 0.1
-    },
-    {
-      "do": "key",
-      "vk": 33
-    },
-    {
-      "do": "wait",
-      "minutes": 0.1
-    },
-    {
-      "do": "key",
-      "vk": 34
-    },
-    {
-      "do": "wait",
-      "minutes": 0.1
-    },
-    {
-      "do": "key",
-      "vk": 34
-    },
-    {
-      "do": "wait",
-      "minutes": 0.1
-    },
-    {
-      "do": "key",
-      "vk": 34
-    },
-    {
-      "do": "wait",
-      "minutes": 0.1
-    },
-    {
-      "do": "key",
-      "vk": 33
-    },
-    {
-      "do": "wait",
-      "minutes": 0.15
+      "minutes": 0.58
     },
     {
       "do": "key",
@@ -139,19 +77,19 @@
     },
     {
       "do": "wait",
-      "minutes": 0.5
+      "minutes": 0.17
     },
     {
       "do": "camera_orbit",
       "lot": "kGym",
       "radius": 22,
       "height": 14,
-      "seconds": 30,
-      "turns": 3
+      "seconds": 25,
+      "turns": 2
     },
     {
       "do": "wait",
-      "minutes": 0.3
+      "minutes": 0.2
     },
     {
       "do": "key",
@@ -159,14 +97,6 @@
     },
     {
       "do": "wait",
-      "minutes": 0.15
-    },
-    {
-      "do": "key",
-      "vk": 33
-    },
-    {
-      "do": "wait",
       "minutes": 0.1
     },
     {
@@ -175,31 +105,7 @@
     },
     {
       "do": "wait",
-      "minutes": 0.1
-    },
-    {
-      "do": "key",
-      "vk": 34
-    },
-    {
-      "do": "wait",
-      "minutes": 0.1
-    },
-    {
-      "do": "key",
-      "vk": 34
-    },
-    {
-      "do": "wait",
-      "minutes": 0.1
-    },
-    {
-      "do": "key",
-      "vk": 34
-    },
-    {
-      "do": "wait",
-      "minutes": 0.1
+      "minutes": 0.08
     },
     {
       "do": "key",
@@ -207,7 +113,43 @@
     },
     {
       "do": "wait",
-      "minutes": 0.15
+      "minutes": 0.08
+    },
+    {
+      "do": "key",
+      "vk": 34
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "key",
+      "vk": 34
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "key",
+      "vk": 34
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "key",
+      "vk": 33
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "wait",
+      "minutes": 0.05
     },
     {
       "do": "key",
@@ -215,19 +157,157 @@
     },
     {
       "do": "wait",
-      "minutes": 0.5
+      "minutes": 0.17
+    },
+    {
+      "do": "camera_orbit",
+      "radius": 18,
+      "height": 12,
+      "seconds": 25,
+      "turns": 2
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "key",
+      "vk": 33
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "key",
+      "vk": 33
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "key",
+      "vk": 34
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "key",
+      "vk": 34
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "key",
+      "vk": 34
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "key",
+      "vk": 33
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "wait",
+      "minutes": 0.05
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.17
     },
     {
       "do": "camera_pan",
-      "near": "kGym",
+      "lots": 8,
+      "height": 40,
+      "seconds": 45,
+      "passes": 2
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.67
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.17
+    },
+    {
+      "do": "wait",
+      "minutes": 5.5
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "pra\u00e7a|praca|square|plaza|central|kBigPark",
+      "radius": 30,
+      "height": 15,
+      "seconds": 25,
+      "turns": 2
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.58
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.17
+    },
+    {
+      "do": "camera_pan",
+      "near": "pra\u00e7a|praca|square|plaza|central|kBigPark",
       "lots": 6,
       "height": 30,
       "seconds": 30,
-      "passes": 4
+      "passes": 2
     },
     {
       "do": "wait",
-      "minutes": 0.3
+      "minutes": 0.2
     },
     {
       "do": "key",
@@ -235,7 +315,7 @@
     },
     {
       "do": "wait",
-      "minutes": 0.85
+      "minutes": 0.58
     },
     {
       "do": "key",
@@ -243,7 +323,166 @@
     },
     {
       "do": "wait",
-      "minutes": 0.5
+      "minutes": 0.17
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kGym",
+      "radius": 22,
+      "height": 14,
+      "seconds": 25,
+      "turns": 2
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "key",
+      "vk": 33
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "key",
+      "vk": 33
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "key",
+      "vk": 34
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "key",
+      "vk": 34
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "key",
+      "vk": 34
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "key",
+      "vk": 33
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "wait",
+      "minutes": 0.05
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.17
+    },
+    {
+      "do": "camera_orbit",
+      "radius": 18,
+      "height": 12,
+      "seconds": 25,
+      "turns": 2
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "key",
+      "vk": 33
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "key",
+      "vk": 33
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "key",
+      "vk": 34
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "key",
+      "vk": 34
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "key",
+      "vk": 34
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "key",
+      "vk": 33
+    },
+    {
+      "do": "wait",
+      "minutes": 0.08
+    },
+    {
+      "do": "wait",
+      "minutes": 0.05
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.17
     }
   ]
 }

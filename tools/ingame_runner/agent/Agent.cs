@@ -520,13 +520,18 @@ namespace ApexTestAgent
         }
 
         // A lot by its commercial type (kGym, kBigPark, ...) or a part of its name, case-insensitive.
+        // Several keys separated by | are tried in order (the first that finds a lot wins).
         static Lot FindLot(string key)
         {
-            string k = key.ToLowerInvariant();
-            foreach (Lot l in LotManager.AllLots)
-                if (l != null && !l.IsWorldLot && l.CommercialLotSubType.ToString().ToLowerInvariant() == k) return l;
-            foreach (Lot l in LotManager.AllLots)
-                if (l != null && !l.IsWorldLot && l.Name != null && l.Name.ToLowerInvariant().Contains(k)) return l;
+            foreach (string part in key.Split('|'))
+            {
+                string k = part.Trim().ToLowerInvariant();
+                if (k.Length == 0) continue;
+                foreach (Lot l in LotManager.AllLots)
+                    if (l != null && !l.IsWorldLot && l.CommercialLotSubType.ToString().ToLowerInvariant() == k) return l;
+                foreach (Lot l in LotManager.AllLots)
+                    if (l != null && !l.IsWorldLot && l.Name != null && l.Name.ToLowerInvariant().Contains(k)) return l;
+            }
             return null;
         }
 
