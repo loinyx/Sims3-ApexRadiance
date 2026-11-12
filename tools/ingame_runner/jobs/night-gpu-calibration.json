@@ -1,10 +1,11 @@
 {
   "id": "night-gpu-calibration",
-  "description": "Calibration data for the real-time outdoor lamps: at night the camera circles the household's lot (the active lot), then the gym and the square, while the developer log compares each relit map with the game's own map of the same room 0 every 10 s (RtOutdoorLamps \"GPU against the game\"). Developer mode on, the background frame limit lifted; needs a build with that comparison. Variants: the physical room lamp model (the default since 3.0.0) and the replica model (the parts of the game's own solve).",
+  "description": "Calibration data for the real-time outdoor lamps: at night the camera circles the household's lot (the active lot), then the gym and the square, while the developer log compares each relit map with the game's own map of the same room 0 every 10 s (RtOutdoorLamps \"GPU against the game\"). Developer mode on, the background frame limit lifted; needs a build with that comparison. Variants: the physical room lamp model (the default since 3.0.0) and the replica model (the parts of the game's own solve). A recording (its shortcut F6 for the run) of the household's lot gives its Wall seams.csv, the light either side of each story line.",
   "save": "Claude teste",
   "toml": {
     "ui": {
-      "developer_mode": true
+      "developer_mode": true,
+      "recorder_key": "F6"
     },
     "screen": {
       "background_fps_limit": 0
@@ -46,7 +47,23 @@
     },
     {
       "do": "wait",
-      "minutes": 2.8
+      "minutes": 1.0
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.9
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.9
     },
     {
       "do": "lights_on",
