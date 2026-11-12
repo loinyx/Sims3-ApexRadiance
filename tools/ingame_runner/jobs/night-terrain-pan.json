@@ -36,6 +36,26 @@
       "expect": [
         "\\[Recorder\\] Recording started"
       ]
+    },
+    "no-lot-grass-light": {
+      "toml": {
+        "patches.NightTerrainRelight": {
+          "gramaDoLoteUsaLuzDoLote": false
+        }
+      },
+      "expect": [
+        "\\[Recorder\\] Recording started"
+      ]
+    },
+    "no-gpu-smooth": {
+      "toml": {
+        "patches.NightTerrainRelight": {
+          "mapaDeLuzSuavizadoNaGpu": false
+        }
+      },
+      "expect": [
+        "\\[Recorder\\] Recording started"
+      ]
     }
   },
   "steps": [
@@ -122,6 +142,8 @@
   "order": [
     "all",
     "no-detail-range",
-    "no-visibility-override"
+    "no-visibility-override",
+    "no-lot-grass-light",
+    "no-gpu-smooth"
   ]
 }
