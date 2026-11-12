@@ -16,6 +16,7 @@
 
 #include "rt_outdoor_lamps.h"
 #include "build_flavor.h"
+#include "apex_paths.h"
 #include "terrain_bake_rule.h"
 #include "rt_lamp_gpu.h"
 #include "drag_lite.h"
@@ -986,6 +987,38 @@ void CompareWithGame(IDirect3DDevice9* dev) {
             topCopy += std::max({rc[4 * x], rc[4 * x + 1], rc[4 * x + 2]}) >= 254;
             topGame += std::max({rg[4 * x], rg[4 * x + 1], rg[4 * x + 2]}) >= 254;
         }
+    }
+    // a map that differs (p90 over 1.3 or p10 under 0.7): both written as BMP next to the log once, for a look at where
+    std::vector<double> sorted = ratios;
+    std::sort(sorted.begin(), sorted.end());
+    static int s_dumps = 0;
+    if (!sorted.empty() && s_dumps < 12 && (sorted[sorted.size() * 9 / 10] > 1.3 || sorted[sorted.size() / 10] < 0.7)) {
+        s_dumps++;
+        const auto bmp = [&](const char* tag, const D3DLOCKED_RECT& lr) {
+            const std::wstring dir = ApexPaths::ApexDirectory();
+            const std::wstring path = dir + std::format(L"\\calib_{}_s{}_m{}_c{}_{}.bmp", s_dumps, s->story, s->m, s->cls, std::wstring(tag, tag + std::strlen(tag)));
+            FILE* f = _wfopen(path.c_str(), L"wb");
+            if (!f) return;
+            const uint32_t w = dc.Width, h = dc.Height, row = w * 3, size = 54 + row * h;
+            uint8_t hd[54] = {'B', 'M'};
+            std::memcpy(hd + 2, &size, 4);
+            const uint32_t off = 54, hs = 40, bits = row * h;
+            const uint16_t planes = 1, bpp = 24;
+            const int32_t iw = static_cast<int32_t>(w), ih = -static_cast<int32_t>(h);
+            std::memcpy(hd + 10, &off, 4), std::memcpy(hd + 14, &hs, 4), std::memcpy(hd + 18, &iw, 4), std::memcpy(hd + 22, &ih, 4);
+            std::memcpy(hd + 26, &planes, 2), std::memcpy(hd + 28, &bpp, 2), std::memcpy(hd + 34, &bits, 4);
+            fwrite(hd, 1, 54, f);
+            std::vector<uint8_t> line(row);
+            for (uint32_t y = 0; y < h; y++) {
+                const BYTE* src = static_cast<const BYTE*>(lr.pBits) + y * lr.Pitch;
+                for (uint32_t x = 0; x < w; x++) line[3 * x] = src[4 * x], line[3 * x + 1] = src[4 * x + 1], line[3 * x + 2] = src[4 * x + 2];
+                fwrite(line.data(), 1, row, f);
+            }
+            fclose(f);
+        };
+        bmp("gpu", lc);
+        bmp("game", lg);
+        LOG_INFO(std::format("[RtOutdoorLamps] GPU against the game: maps written as calib_{}_s{}_m{}_c{}_gpu.bmp / _game.bmp", s_dumps, s->story, s->m, s->cls));
     }
     s->game->UnlockRect(0);
     sys->UnlockRect();
