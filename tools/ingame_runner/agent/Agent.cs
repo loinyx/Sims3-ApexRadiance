@@ -524,10 +524,9 @@ namespace ApexTestAgent
 
         // lights_on {lot}: turns on every light of a lot (a community lot at night with nobody inside has them off), through
         // the game's own TurnOnAllLightsOnLot found by reflection; else each light object's TurnOn().
-        // lamp_drag {lot?, meters?, seconds?, passes?} | {status:true}: moves an outdoor light of a lot (default the household's)
+        // lamp_drag {lot?, pick?, meters?, seconds?, passes?} | {status:true}: moves an outdoor light of a lot (default the household's)
         // the way a drag does, in a game task: from its place toward the lot's centre (meters, default 5) and back, seconds
-        // (default 8) a way, passes (default 6) times, then puts it back where it was. The lamp is the lot's light outside
-        // the house nearest its centre. Nothing is saved.
+        // (default 8) a way, passes (default 6) times, then puts it back where it was. Nothing is saved.
         static volatile int sDragGen;
         static string sDragState = "idle";
         static object LampDrag(Args a)
@@ -539,13 +538,18 @@ namespace ApexTestAgent
             Lot lot = key == "home" ? (Sims3.Gameplay.CAS.Household.ActiveHousehold != null ? Sims3.Gameplay.CAS.Household.ActiveHousehold.LotHome : null) : FindLot(key);
             if (lot == null) throw new AgentException("no lot named or of type '" + key + "'");
             Vector3 c = lot.GetCenterPosition();
+            // the newest outdoor light (the highest object id: the one placed last, e.g. by the tester for this test), or with
+            // pick "centre" the one nearest the lot's centre
+            bool newest = a.Str("pick", "newest").ToLowerInvariant() != "centre";
             Sims3.Gameplay.Abstracts.GameObject best = null;
             float bestD = float.MaxValue;
+            ulong bestId = 0;
             foreach (Sims3.Gameplay.Abstracts.GameObject o in lot.GetObjects<Sims3.Gameplay.Abstracts.GameObject>())
             {
                 if (o == null || o.GetType().Name.IndexOf("Light", StringComparison.OrdinalIgnoreCase) < 0 || !o.IsOutside) continue;
                 float d = Flat(o.Position - c).Length();
-                if (d < bestD) { bestD = d; best = o; }
+                ulong id = o.ObjectId.Value;
+                if (newest ? id > bestId : d < bestD) { bestD = d; bestId = id; best = o; }
             }
             if (best == null) throw new AgentException("no outdoor light on " + lot.Name);
             Sims3.Gameplay.Abstracts.GameObject lamp = best;
