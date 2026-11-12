@@ -1,8 +1,7 @@
 """The tester's own clicks and keys, recorded and played back exactly (Windows low-level hooks and SendInput).
 
   python input_track.py record <out.json> <stop file>   records until the stop file exists
-  python input_track.py play <in.json> [<stop file>]     plays them back (stops early if the stop file appears or
-                                                          the tester clicks the real mouse)
+  python input_track.py play <in.json> [<stop file>]     plays them back (stops early if the stop file appears)
   python input_track.py session <dir> <stop file> [--no-clips]  F9 (unless --no-clips) (kept from the game) starts and stops a clip, as often as the
                                                           tester likes: <dir>/clip-N/input.json, then a small window
                                                           asks what went wrong (desc.txt). Markers for the runner:
@@ -301,20 +300,8 @@ def play(path, stop):
     user32.SetForegroundWindow(hwnd)
     vx, vy = user32.GetSystemMetrics(76), user32.GetSystemMetrics(77)
     vw, vh = user32.GetSystemMetrics(78), user32.GetSystemMetrics(79)
-    real = [False]
-
-    def on_real(code, wp, lp):  # (keys typed elsewhere, a chat say, do not end it)
-        return user32.CallNextHookEx(None, code, wp, lp)
-
-    def on_real_mouse(code, wp, lp):
-        if code == 0 and wp != WM_MOUSEMOVE:
-            if not ctypes.cast(lp, ctypes.POINTER(MSLLHOOKSTRUCT)).contents.flags & LLMHF_INJECTED:
-                real[0] = True
-        return user32.CallNextHookEx(None, code, wp, lp)
-
-    kp, mp = HOOKPROC(on_real), HOOKPROC(on_real_mouse)
-    hk = user32.SetWindowsHookExW(WH_KEYBOARD_LL, kp, None, 0)
-    hm = user32.SetWindowsHookExW(WH_MOUSE_LL, mp, None, 0)
+    real = [False]  # shortcut: a real click was also seen as the tester taking over (with our own clicks); only the stop file ends a playback
+    ctypes.WinDLL("winmm").timeBeginPeriod(1)  # (1 ms sleeps: dense mouse moves keep their pace)
     t0 = time.perf_counter()
     sent, msg, held = 0, wt.MSG(), {}
     rect, rect_at = client_rect(hwnd), t0
@@ -351,8 +338,6 @@ def play(path, stop):
                 data_ = e[4] & 0xFFFFFFFF
             send(INPUT(0, _U(mi=MOUSEINPUT(ax, ay, data_, fl, 0, 0))))
         sent += 1
-    for h in (hk, hm):
-        user32.UnhookWindowsHookEx(h)
     for scan, ext in held.items():  # (no key left held down by a playback stopped early)
         send(INPUT(1, _U(ki=KEYBDINPUT(0, scan, KEY_SCAN | KEY_UP | ext, 0, 0))))
     print("%d of %d events played in %.1f s" % (sent, len(data["events"]), time.perf_counter() - t0))
