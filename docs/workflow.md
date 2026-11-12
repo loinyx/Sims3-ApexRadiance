@@ -212,6 +212,7 @@ failure; CI runs `Smoke` and `Lighting`.
 | `tools/game_alloc_categories_test/` | The development flavour's game allocation category tables under concurrency (`run.ps1`) |
 | `tools/crt_math_test/` | CRT math replaced in hot code: `Pow2` against `std::ldexp` over every half value, `ApexMath::Hypot` against `std::hypot` over random pairs (`run.ps1`) |
 | `tools/delegate_sig_fix_test/` | Delegate signature fix: the stub inside the game's check sequence (crash memory, `Object[]`, other parameter), the pattern and call target in TS3W.exe (`run.ps1 [-Exe <TS3W.exe>]`) |
+| `tools/bone_index_guard_test/` | Bone index guard: Apex's getter called as the game calls it (valid index, past the list, empty list, stack balance), the pattern in TS3W.exe (`run.ps1 [-Exe <TS3W.exe>]`) |
 | `tools/dxt_test/` | Fast DXT1 / DXT5 encoder against the translation of `0x006152F0` / `0x006154B0` |
 | `tools/i18n_check/` | Translation tables: conflicts, missing languages, placeholder and `##id` mismatches; coverage and stale keys of the other languages; `i18n/keys.tsv` up to date (`tools/i18n_keys.pl` writes it) |
 | `tools/liveness_prune_test/` | Pruning of per-story caches by live story managers (`features/liveness_prune.h`, `run.ps1`) |
