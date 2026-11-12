@@ -32,6 +32,10 @@ def main():
     frame = [int(r[head.index("frame")]) for r in rows]
     luma = [[float(x) for x in r[ci:]] for r in rows]
     n, cells = len(luma), len(luma[0]) if luma else 0
+    qpc0 = [float(r[head.index("qpcMs")]) for r in rows]
+    gaps = [(clock[i], round((qpc0[i] - qpc0[i - 1]) / 1000, 1)) for i in range(1, n) if qpc0[i] - qpc0[i - 1] > 2000]
+    if gaps:  # the window gave no frames (minimized, or shown by independent flip): those seconds are not measured
+        print("capture gaps: %d, %.0f s in all, the longest %.0f s at %s" % (len(gaps), sum(g[1] for g in gaps), max(g[1] for g in gaps), max(gaps, key=lambda g: g[1])[0]))
     black = sum(1 for row in luma if max(row) < 1.0)
     if n and black * 2 > n:
         print("%d of %d frames are black: the window was not captured" % (black, n))
