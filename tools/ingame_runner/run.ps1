@@ -469,15 +469,18 @@ function Invoke-Load($Load, [string]$BaseToml) {
                     Say "  step ${n}: $(Get-Content -LiteralPath (Join-Path $dir 'input-play.log') -Raw)"
                 }
                 'clip_session' { # the tester records clips with F9 (profilers/input_track.py session) until the file done exists: each clip
-                    # keeps its clicks and keys (input.json), the scene's state (track.json: camera, floors, lights), its own recording
-                    # (the recorder key F6 at its start and end) and the tester's description (desc.txt), in <run>/clips/clip-N
+                    # keeps its clicks and keys (input.json), its own recording (the recorder key F6 at its start and end) and the tester's
+                    # description (desc.txt), in <run>/clips/clip-N; the whole session is kept too: every click and key (clips/all.json)
+                    # and the scene's state (clips/track.json: camera, floors, lights; its start in clips/track-start)
                     $clips = Join-Path $OutDir 'clips'
                     New-Item -ItemType Directory -Path $clips -Force | Out-Null
                     $stopF = Join-Path $OutDir 'session-stop'
                     $f = Join-Path $OutDir 'done'
                     $sess = Start-Process -FilePath 'python' -NoNewWindow -PassThru -RedirectStandardOutput (Join-Path $dir 'session.log') -ArgumentList @(
-                        '-I', ('"' + (Join-Path $PSScriptRoot 'profilers/input_track.py') + '"'), 'session', ('"' + $clips + '"'), ('"' + $stopF + '"'))
+                        '-I', ('"' + (Join-Path $PSScriptRoot 'profilers/input_track.py') + '"'), 'session', ('"' + $clips + '"'), ('"' + $stopF + '"'), $(if ($step.clips -eq $false) { '--no-clips' } else { '' }))
                     $handled = @{}
+                    try { Call-Agent 'track_record' @{ start = $true } | Out-Null; ('{0:F3}' -f ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0)) | Set-Content (Join-Path $clips 'track-start') }
+                    catch { Say "  no scene track for the session ($_)" }
                     $press = { $script:proc.Refresh(); $h = $script:proc.MainWindowHandle # (F6, the run's recorder key)
                         $null = [ApexIngame.Keys]::PostMessage($h, 0x100, [IntPtr]0x75, [IntPtr]1); $null = [ApexIngame.Keys]::PostMessage($h, 0x101, [IntPtr]0x75, [IntPtr]0xC0000001) }
                     Say "  step ${n}: clip session: F9 starts and stops a clip; the run ends when $f exists (up to $($step.minutes) min)"
@@ -486,17 +489,12 @@ function Invoke-Load($Load, [string]$BaseToml) {
                             foreach ($c in @(Get-ChildItem -LiteralPath $clips -Directory -ErrorAction SilentlyContinue)) {
                                 if ((Test-Path (Join-Path $c.FullName 'start')) -and -not $handled["$($c.Name)+"]) {
                                     $handled["$($c.Name)+"] = $true
-                                    try { Call-Agent 'track_record' @{ start = $true } | Out-Null } catch { Say "  $($c.Name): no scene track ($_)" }
                                     & $press
                                     Say "  $($c.Name) started"
                                 }
                                 if ((Test-Path (Join-Path $c.FullName 'stopped')) -and -not $handled["$($c.Name)-"]) {
                                     $handled["$($c.Name)-"] = $true
                                     & $press
-                                    try {
-                                        $t = Call-Agent 'track_record' @{ stop = $true } 60000
-                                        ($t | ConvertTo-Json -Depth 6 -Compress) | Set-Content -LiteralPath (Join-Path $c.FullName 'track.json') -Encoding UTF8
-                                    } catch { Say "  $($c.Name): scene track not kept ($_)" }
                                     Say "  $($c.Name) stopped"
                                 }
                             }
@@ -505,6 +503,11 @@ function Invoke-Load($Load, [string]$BaseToml) {
                     } finally {
                         New-Item -ItemType File -Path $stopF -Force | Out-Null
                         $sess.WaitForExit(15000) | Out-Null
+                        try {
+                            $t = Call-Agent 'track_record' @{ stop = $true } 60000
+                            ($t | ConvertTo-Json -Depth 6 -Compress) | Set-Content -LiteralPath (Join-Path $clips 'track.json') -Encoding UTF8
+                            Say "  session scene track: $(@($t.cam).Count) camera samples, $(@($t.edits).Count) light edits"
+                        } catch { Say "  session scene track not kept ($_)" }
                     }
                     foreach ($c in @(Get-ChildItem -LiteralPath $clips -Directory)) {
                         $d = Join-Path $c.FullName 'desc.txt'

@@ -3,10 +3,12 @@
   python input_track.py record <out.json> <stop file>   records until the stop file exists
   python input_track.py play <in.json> [<stop file>]     plays them back (stops early if the stop file appears or
                                                           the tester moves the real mouse or presses a real key)
-  python input_track.py session <dir> <stop file>        F9 (kept from the game) starts and stops a clip, as often as the
+  python input_track.py session <dir> <stop file> [--no-clips]  F9 (unless --no-clips) (kept from the game) starts and stops a clip, as often as the
                                                           tester likes: <dir>/clip-N/input.json, then a small window
                                                           asks what went wrong (desc.txt). Markers for the runner:
-                                                          clip-N/start at its start, clip-N/stopped at its end
+                                                          clip-N/start at its start, clip-N/stopped at its end (each
+                                                          holds the ms since the session's start). The whole session
+                                                          is kept too: <dir>/all.json, every event since the start
 
 Mouse places are kept relative to the game window's client area (TS3W.exe), so a moved or resized window still gets the
 clicks in the same place. Times count from the start of the recording; a playback starts when the script starts, so the
@@ -159,11 +161,16 @@ def ask_description(n):
     return text or ""
 
 
-def session(folder, stop):
+def session(folder, stop, clips=True):
     hwnd = game_window()
     if not hwnd:
         sys.exit("TS3W.exe window not found")
-    st = {"on": False, "n": 0, "t0": 0.0, "ev": [], "last": 0.0, "toggle": False, "asking": False}
+    s0 = time.perf_counter()
+    st = {"on": False, "n": 0, "t0": 0.0, "ev": [], "last": 0.0, "toggle": False, "asking": False, "all": [], "lastAll": 0.0}
+    open(os.path.join(folder, "session-start"), "w").write("%.3f" % time.time())
+
+    def ms():
+        return round((time.perf_counter() - s0) * 1000, 1)
     rect = [client_rect(hwnd), time.perf_counter()]
 
     def rel(x, y):
@@ -173,37 +180,48 @@ def session(folder, stop):
         cx, cy, w, h = rect[0]
         return round((x - cx) / w, 5), round((y - cy) / h, 5)
 
-    def on_mouse(code, wp, lp):
-        if code == 0 and st["on"]:
-            m = ctypes.cast(lp, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
+    def add(e, move):  # (one event: to the whole session, and to the clip running)
+        ta = ms()
+        if not move or ta - st["lastAll"] >= 8:
+            if move:
+                st["lastAll"] = ta
+            st["all"].append([ta] + e)
+        if st["on"]:
             t = round((time.perf_counter() - st["t0"]) * 1000, 1)
+            if not move or t - st["last"] >= 8:
+                if move:
+                    st["last"] = t
+                st["ev"].append([t] + e)
+
+    def on_mouse(code, wp, lp):
+        if code == 0:
+            m = ctypes.cast(lp, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
             x, y = rel(m.pt.x, m.pt.y)
             if wp == WM_MOUSEMOVE:
-                if t - st["last"] >= 8:
-                    st["last"] = t
-                    st["ev"].append([t, "move", x, y])
+                add(["move", x, y], True)
             elif wp in (WM_LBUTTONDOWN, WM_LBUTTONUP, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP):
-                st["ev"].append([t, {WM_LBUTTONDOWN: "ld", WM_LBUTTONUP: "lu", WM_RBUTTONDOWN: "rd", WM_RBUTTONUP: "ru",
-                                     WM_MBUTTONDOWN: "md", WM_MBUTTONUP: "mu"}[wp], x, y])
+                add([{WM_LBUTTONDOWN: "ld", WM_LBUTTONUP: "lu", WM_RBUTTONDOWN: "rd", WM_RBUTTONUP: "ru",
+                      WM_MBUTTONDOWN: "md", WM_MBUTTONUP: "mu"}[wp], x, y], False)
             elif wp == WM_MOUSEWHEEL:
-                st["ev"].append([t, "wheel", x, y, ctypes.c_short(m.mouseData >> 16).value])
+                add(["wheel", x, y, ctypes.c_short(m.mouseData >> 16).value], False)
         return user32.CallNextHookEx(None, code, wp, lp)
 
     def on_key(code, wp, lp):
         if code == 0:
             k = ctypes.cast(lp, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
-            if k.vkCode == VK_F9 and not k.flags & LLKHF_INJECTED:
+            if clips and k.vkCode == VK_F9 and not k.flags & LLKHF_INJECTED:
                 if wp in (WM_KEYDOWN, WM_SYSKEYDOWN) and not st["asking"]:
                     st["toggle"] = True
                 return 1  # (the game never sees F9)
-            if st["on"]:
-                t = round((time.perf_counter() - st["t0"]) * 1000, 1)
-                st["ev"].append([t, "kd" if wp in (WM_KEYDOWN, WM_SYSKEYDOWN) else "ku", k.vkCode, k.scanCode, k.flags & LLKHF_EXTENDED])
+            add(["kd" if wp in (WM_KEYDOWN, WM_SYSKEYDOWN) else "ku", k.vkCode, k.scanCode, k.flags & LLKHF_EXTENDED], False)
         return user32.CallNextHookEx(None, code, wp, lp)
 
     def save(d):
         json.dump({"window": list(rect[0][2:]), "events": st["ev"]}, open(os.path.join(d, "input.json"), "w"))
-        open(os.path.join(d, "stopped"), "w").write(time.strftime("%H:%M:%S"))
+        open(os.path.join(d, "stopped"), "w").write("%.1f" % ms())
+
+    def save_all():
+        json.dump({"window": list(rect[0][2:]), "events": st["all"]}, open(os.path.join(folder, "all.json"), "w"))
 
     mp, kp = HOOKPROC(on_mouse), HOOKPROC(on_key)
     hm = user32.SetWindowsHookExW(WH_MOUSE_LL, mp, None, 0)
@@ -211,7 +229,11 @@ def session(folder, stop):
     if not hm or not hk:
         sys.exit("hooks not set (error %d)" % ctypes.get_last_error())
     msg = wt.MSG()
+    saved = time.perf_counter()
     while not os.path.exists(stop):
+        if time.perf_counter() - saved > 30:  # (kept every 30 s: a game that closes keeps the session so far)
+            saved = time.perf_counter()
+            save_all()
         while user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, PM_REMOVE):
             user32.TranslateMessage(ctypes.byref(msg))
             user32.DispatchMessageW(ctypes.byref(msg))
@@ -222,7 +244,7 @@ def session(folder, stop):
                 st["n"] += 1
                 os.makedirs(d, exist_ok=True)
                 st["ev"], st["last"], st["t0"], st["on"] = [], 0.0, time.perf_counter(), True
-                open(os.path.join(d, "start"), "w").write(time.strftime("%H:%M:%S"))
+                open(os.path.join(d, "start"), "w").write("%.1f" % ms())
                 print("clip %d started" % st["n"], flush=True)
             else:
                 st["on"] = False
@@ -239,6 +261,7 @@ def session(folder, stop):
         time.sleep(0.001)
     if st["on"]:  # (a clip still running when the session ends is kept)
         save(os.path.join(folder, "clip-%d" % st["n"]))
+    save_all()
     user32.UnhookWindowsHookEx(hm), user32.UnhookWindowsHookEx(hk)
 
 
@@ -345,7 +368,7 @@ if __name__ == "__main__":
     if sys.argv[1] == "session":
         if len(sys.argv) < 4:
             sys.exit(__doc__)
-        session(sys.argv[2], sys.argv[3])
+        session(sys.argv[2], sys.argv[3], "--no-clips" not in sys.argv)
     elif sys.argv[1] == "record":
         if len(sys.argv) < 4:
             sys.exit(__doc__)
