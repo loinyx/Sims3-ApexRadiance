@@ -1,0 +1,91 @@
+{
+  "id": "night-gym-leave-return",
+  "description": "The gym at night: the camera held still on it until it is the active lot and relit, then on the square for 30 s (the gym is no longer the active lot), then back on the gym. Two recordings (the shortcut F6 for the run): the last frames before leaving and the first frames after coming back; equal frames mean the lot left kept its light. No light is switched by the harness. Developer mode on, the background frame limit lifted.",
+  "save": "Claude teste",
+  "toml": {
+    "ui": {
+      "developer_mode": true,
+      "recorder_key": "F6"
+    },
+    "screen": {
+      "background_fps_limit": 0
+    }
+  },
+  "variants": {
+    "on": {
+      "expect": [
+        "\\[Recorder\\] Recording started"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kGym",
+      "radius": 20,
+      "height": 11,
+      "seconds": 3600,
+      "turns": 0.001
+    },
+    {
+      "do": "wait",
+      "minutes": 0.8
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.25
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "pra\u00e7a|praca|square|plaza|central|kBigPark",
+      "radius": 30,
+      "height": 15,
+      "seconds": 3600,
+      "turns": 0.001
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kGym",
+      "radius": 20,
+      "height": 11,
+      "seconds": 3600,
+      "turns": 0.001
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.4
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.3
+    }
+  ]
+}
