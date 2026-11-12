@@ -56,6 +56,16 @@
       "expect": [
         "\\[Recorder\\] Recording started"
       ]
+    },
+    "classic-lamps": {
+      "toml": {
+        "patches.NightTerrainRelight": {
+          "lampLightingMode": "classic"
+        }
+      },
+      "expect": [
+        "\\[Recorder\\] Recording started"
+      ]
     }
   },
   "steps": [
@@ -144,6 +154,7 @@
     "no-detail-range",
     "no-visibility-override",
     "no-lot-grass-light",
-    "no-gpu-smooth"
+    "no-gpu-smooth",
+    "classic-lamps"
   ]
 }
