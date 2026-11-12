@@ -44,6 +44,7 @@
 #include "foliage_canopy.h"
 #include "foliage_vertex_lamps.h"
 #include "lot_lighting_motion.h"
+#include "memory_patch.h"
 #include "hook_guard.h"
 #include <tuple>
 #include <array>
@@ -2127,6 +2128,121 @@ float FenceOpenShare(IDirect3DDevice9* dev) {
     return open;
 }
 
+// ---- Instance buffers read without waiting for the GPU ----
+// The game writes a fence group's instance records (Lock / Unlock) just before it draws them, and a READONLY Lock of them at the
+// draw waited for the GPU: about 0.5 ms a near fence draw, 18 a frame close up (9.5 ms). The buffers the fence draws read are
+// noted; the game's writes to them are copied at its Unlock (IDirect3DVertexBuffer9 vtable slots 11 Lock and 12 Unlock, shared by
+// the device's vertex buffers, called through to whatever they held), and the draw reads the copy: the same bytes, no wait. A
+// range the copy does not hold (written before the buffer was noted, or more than kMaxBytes noted) is locked as before.
+namespace InstanceCopy {
+using LockFn = HRESULT(STDMETHODCALLTYPE*)(IDirect3DVertexBuffer9*, UINT, UINT, void**, DWORD);
+using UnlockFn = HRESULT(STDMETHODCALLTYPE*)(IDirect3DVertexBuffer9*);
+constexpr size_t kMaxBuffers = 512, kMaxBytes = 64u << 20;
+struct Copy {
+    std::vector<BYTE> bytes;
+    std::vector<std::pair<UINT, UINT>> held; // the ranges [a, b) the game wrote since the buffer was noted (merged)
+    const BYTE* mapped = nullptr;            // the game's write in progress: its pointer and range
+    UINT off = 0, end = 0;
+};
+LockFn g_lock = nullptr;
+UnlockFn g_unlock = nullptr;
+void** g_vtable = nullptr;
+bool g_hookTried = false;
+SRWLOCK g_srw = SRWLOCK_INIT;
+std::unordered_map<IDirect3DVertexBuffer9*, Copy> g_copies;
+size_t g_bytes = 0;
+uint32_t g_hits = 0, g_locks = 0; // (development builds) reads from the copy / with a lock
+
+void Hold(Copy& c, UINT a, UINT b) {
+    std::vector<std::pair<UINT, UINT>> out;
+    for (const auto& r : c.held)
+        if (r.second < a || r.first > b) out.push_back(r);
+        else a = std::min(a, r.first), b = std::max(b, r.second);
+    out.push_back({a, b});
+    c.held.swap(out);
+}
+bool Holds(const Copy& c, UINT a, UINT b) {
+    for (const auto& r : c.held)
+        if (r.first <= a && b <= r.second) return true;
+    return false;
+}
+bool CopyBytes(BYTE* dst, const BYTE* src, size_t n) { // (no C++ objects here: SEH)
+    __try {
+        std::memcpy(dst, src, n);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+HRESULT STDMETHODCALLTYPE HookLock(IDirect3DVertexBuffer9* vb, UINT off, UINT size, void** pp, DWORD flags) {
+    const HRESULT hr = g_lock(vb, off, size, pp, flags);
+    if (SUCCEEDED(hr) && pp && *pp && !(flags & D3DLOCK_READONLY)) {
+        AcquireSRWLockExclusive(&g_srw);
+        if (const auto it = g_copies.find(vb); it != g_copies.end()) {
+            Copy& c = it->second;
+            const UINT end = size ? off + size : static_cast<UINT>(c.bytes.size());
+            if (flags & D3DLOCK_DISCARD) c.held.clear(); // (the buffer's earlier contents are gone)
+            if (end <= c.bytes.size() && off < end) c.mapped = static_cast<const BYTE*>(*pp), c.off = off, c.end = end;
+            else c.mapped = nullptr, c.held.clear();
+        }
+        ReleaseSRWLockExclusive(&g_srw);
+    }
+    return hr;
+}
+HRESULT STDMETHODCALLTYPE HookUnlock(IDirect3DVertexBuffer9* vb) {
+    AcquireSRWLockExclusive(&g_srw);
+    if (const auto it = g_copies.find(vb); it != g_copies.end() && it->second.mapped) {
+        Copy& c = it->second;
+        if (CopyBytes(c.bytes.data() + c.off, c.mapped, c.end - c.off)) Hold(c, c.off, c.end);
+        else c.held.clear();
+        c.mapped = nullptr;
+    }
+    ReleaseSRWLockExclusive(&g_srw);
+    return g_unlock(vb);
+}
+// Render thread. The first buffer noted puts the two slots through the hooks (once per process)
+void Note(IDirect3DVertexBuffer9* vb) {
+    if (!g_hookTried) {
+        g_hookTried = true;
+        void** vt = *reinterpret_cast<void***>(vb);
+        g_lock = reinterpret_cast<LockFn>(vt[11]), g_unlock = reinterpret_cast<UnlockFn>(vt[12]);
+        const uintptr_t hooks[2] = {reinterpret_cast<uintptr_t>(&HookLock), reinterpret_cast<uintptr_t>(&HookUnlock)};
+        std::vector<BYTE> bytes(sizeof hooks);
+        std::memcpy(bytes.data(), hooks, sizeof hooks);
+        if (MemPatch::WriteBytes(reinterpret_cast<uintptr_t>(vt + 11), bytes)) g_vtable = vt;
+        LOG_INFO(std::format("[LotLightBridge] Fence instance buffers: the game's writes {} (vertex buffer vtable {:08X})",
+                             g_vtable ? "copied at its Unlock, read without waiting for the GPU" : "not copied (the vtable could not be written): read with a lock",
+                             reinterpret_cast<uintptr_t>(vt)));
+    }
+    // (a buffer of another vtable, as another wrapper's, is not copied)
+    if (!g_vtable || *reinterpret_cast<void***>(vb) != g_vtable || g_copies.count(vb) || g_copies.size() >= kMaxBuffers) return;
+    D3DVERTEXBUFFER_DESC d{};
+    if (FAILED(vb->GetDesc(&d)) || !d.Size || g_bytes + d.Size > kMaxBytes) return;
+    AcquireSRWLockExclusive(&g_srw);
+    g_copies[vb].bytes.resize(d.Size);
+    g_bytes += d.Size;
+    ReleaseSRWLockExclusive(&g_srw);
+}
+// [off, off + n) of an instance buffer: from the copy of the game's writes when it holds them (*locked false), else the buffer
+// locked READONLY with flags (*locked true: Unlock after use)
+HRESULT Read(IDirect3DVertexBuffer9* vb, UINT off, UINT n, void** p, DWORD flags, bool* locked) {
+    Note(vb);
+    AcquireSRWLockShared(&g_srw);
+    const auto it = g_copies.find(vb);
+    const bool held = it != g_copies.end() && !it->second.mapped && off + n <= it->second.bytes.size() && Holds(it->second, off, off + n);
+    if (held) *p = it->second.bytes.data() + off;
+    ReleaseSRWLockShared(&g_srw);
+    if (held) {
+        *locked = false;
+        if (!kPublicBuild) g_hits++;
+        return D3D_OK;
+    }
+    *locked = true;
+    if (!kPublicBuild) g_locks++;
+    return vb->Lock(off, n, p, flags);
+}
+} // namespace InstanceCopy
+
 // Every byte of an instance stream (FNV-1a, 32 bits at a time): a fence group's key with its mesh (NoteFenceGroup)
 bool HashInstanceBytes(const BYTE* p, UINT bytes, uint64_t& h) {
     __try {
@@ -2201,9 +2317,10 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
         // positions' read does, so a place busy at every draw does not keep its first pieces)
         uint8_t* busy = DevSwitches::DrawReadsNoWait() && known != g_fencePlaceKey.end() ? &g_fencePlaceBusy[place] : nullptr;
         const bool nowait = busy && *busy < 3;
-        const HRESULT hk = stride1 >= 12 && stride1 <= 256 ? vb1->Lock(off1, count * stride1, &pk, D3DLOCK_READONLY | (nowait ? D3DLOCK_DONOTWAIT : 0)) : E_FAIL;
+        bool pkLocked = false;
+        const HRESULT hk = stride1 >= 12 && stride1 <= 256 ? InstanceCopy::Read(vb1, off1, count * stride1, &pk, D3DLOCK_READONLY | (nowait ? D3DLOCK_DONOTWAIT : 0), &pkLocked) : E_FAIL;
         const bool hashed = SUCCEEDED(hk) && pk && HashInstanceBytes(static_cast<const BYTE*>(pk), count * stride1, key);
-        if (pk) vb1->Unlock();
+        if (pk && pkLocked) vb1->Unlock();
         if (hashed) {
             if (busy) *busy = 0;
             if (g_fencePlaceKey.size() > 4096) g_fencePlaceKey.clear(), g_fencePlaceBusy.clear(), g_fencePlaceHashed.clear();
@@ -2230,8 +2347,9 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
             uint8_t& busy = g_fenceBusy[key];
             if (busy < 3) {
                 void* probe = nullptr;
-                const HRESULT hr = vb1->Lock(off1, count * stride1, &probe, D3DLOCK_READONLY | D3DLOCK_DONOTWAIT);
-                if (probe) vb1->Unlock();
+                bool probeLocked = false;
+                const HRESULT hr = InstanceCopy::Read(vb1, off1, count * stride1, &probe, D3DLOCK_READONLY | D3DLOCK_DONOTWAIT, &probeLocked);
+                if (probe && probeLocked) vb1->Unlock();
                 if (hr == D3DERR_WASSTILLDRAWING) {
                     ++busy;
                     vb0->Release();
@@ -2265,8 +2383,10 @@ void NoteFenceGroup(IDirect3DDevice9* dev) {
                 g_meshBoxes[meshKey] = {lo[0], lo[1], lo[2], hi[0], hi[1], hi[2], ok ? 1.0f : 0.0f};
             }
         }
-        ok = ok && SUCCEEDED(vb1->Lock(off1, count * stride1, &p1, D3DLOCK_READONLY)) && p1 && FencePieceWalls(static_cast<const BYTE*>(p1), count, stride1, L, lo, hi, fresh);
-        if (p1) vb1->Unlock();
+        bool p1Locked = false;
+        ok = ok && SUCCEEDED(InstanceCopy::Read(vb1, off1, count * stride1, &p1, D3DLOCK_READONLY, &p1Locked)) && p1 &&
+             FencePieceWalls(static_cast<const BYTE*>(p1), count, stride1, L, lo, hi, fresh);
+        if (p1 && p1Locked) vb1->Unlock();
         if (!ok) fresh.walls.clear();
         if (!fresh.walls.empty()) { // a mesh fence (chain-link, lattice) lets the lamps' light through its open share
             const float pass = FenceOpenShare(dev);
@@ -5664,7 +5784,8 @@ const GroupCentre* InstancedGroupCentre(IDirect3DDevice9* dev) {
         if (DevSwitches::DrawReadsNoWait() && last != g_groupAtPlace.end()) busy = &g_centreBusy[place];
         const bool nowait = busy && *busy < 3;
         void* p = nullptr;
-        const HRESULT hr = vb->Lock(off, count * stride, &p, D3DLOCK_READONLY | (nowait ? D3DLOCK_DONOTWAIT : 0));
+        bool pLocked = false;
+        const HRESULT hr = InstanceCopy::Read(vb, off, count * stride, &p, D3DLOCK_READONLY | (nowait ? D3DLOCK_DONOTWAIT : 0), &pLocked);
         uint64_t key = 0;
         if (nowait && hr == D3DERR_WASSTILLDRAWING) {
             ++*busy;
@@ -5685,7 +5806,7 @@ const GroupCentre* InstancedGroupCentre(IDirect3DDevice9* dev) {
             g_groupPlaceRead[place] = tick;
             if (g.ok) result = &g;
         }
-        if (p) vb->Unlock();
+        if (p && pLocked) vb->Unlock();
     }
     vb->Release();
     return result;
@@ -10531,9 +10652,9 @@ void LogDrawCost() {
             if (g_fenceStepCalls[s])
                 arch += std::format(" | of it the fence {}: {:.0f} a frame, {:.2f} us each", kStep[s], g_fenceStepCalls[s] * scale,
                                     static_cast<double>(g_fenceStepTicks[s]) * msPerTick * 1000.0 / g_fenceStepCalls[s]);
-        arch += std::format(" | fence grid built {} times, its gaps {} times, {} groups; {} of {} fence draws kept a far group's key, {} its positions", g_fenceGridBuilds,
-                            g_fenceGapBuilds, g_fenceGroups.size(), g_fenceFarKept, g_fenceNoted, g_groupFarKept);
-        g_fenceFarKept = 0, g_fenceNoted = 0, g_groupFarKept = 0;
+        arch += std::format(" | fence grid built {} times, its gaps {} times, {} groups; {} of {} fence draws kept a far group's key, {} its positions; instance reads {} from the copy, {} with a lock",
+                            g_fenceGridBuilds, g_fenceGapBuilds, g_fenceGroups.size(), g_fenceFarKept, g_fenceNoted, g_groupFarKept, InstanceCopy::g_hits, InstanceCopy::g_locks);
+        g_fenceFarKept = 0, g_fenceNoted = 0, g_groupFarKept = 0, InstanceCopy::g_hits = 0, InstanceCopy::g_locks = 0;
         g_fenceGridBuilds = 0, g_fenceGapBuilds = 0;
         for (int s = 0; s < 3; s++) g_fenceStepTicks[s] = 0, g_fenceStepCalls[s] = 0;
     }
