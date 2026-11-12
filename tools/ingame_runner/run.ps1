@@ -418,6 +418,8 @@ function Invoke-Load($Load, [string]$BaseToml) {
                     Say "  step ${n}: recorded $(@($t.cam).Count) camera samples, $(@($t.lamps).Count) lights ($(@($t.lamps | Where-Object { $_.placed }).Count) put down), $(@($t.edits).Count) light edits, $(@($t.levels).Count) floor and $(@($t.modes).Count) mode changes as $($step.name)"
                 }
                 'track_play' { # replays bookmarks/<name>.track.json (sent in pieces: a request is at most 64 KB) and waits for its end
+                    # (load_only: sent and not started, e.g. before the recorder key; loaded: started from what was sent)
+                    if (-not $step.loaded) {
                     $t = Get-Content -LiteralPath (Join-Path $PSScriptRoot "bookmarks/$($step.name).track.json") -Raw | ConvertFrom-Json
                     Call-Agent 'camera_pan' @{ stop = $true } | Out-Null
                     Call-Agent 'track_load' @{ reset = $true } | Out-Null
@@ -430,6 +432,9 @@ function Invoke-Load($Load, [string]$BaseToml) {
                             Call-Agent 'track_load' @{ $k = $part } 60000 | Out-Null
                         }
                     }
+                    Say "  step ${n}: $($step.name) sent to the agent"
+                    }
+                    if ($step.load_only) { break }
                     $p = Call-Agent 'track_play' @{}
                     Say "  step ${n}: replaying $($step.name): $($p.seconds) s, $($p.edits) light edits, $($p.matched) of $($p.lamps) lights found, $($p.placed) put down, $($p.levels) floor and $($p.modes) mode changes"
                     Wait-Game "the replay of $($step.name)" ([double]$p.seconds / 60 + 2) { (Call-Agent 'track_play' @{ status = $true }).state -ne 'playing' } { Clear-Dialog }

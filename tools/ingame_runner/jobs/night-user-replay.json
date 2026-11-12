@@ -28,12 +28,18 @@
       "minutes": 0.3
     },
     {
+      "do": "track_play",
+      "name": "user-check",
+      "load_only": true
+    },
+    {
       "do": "key",
       "vk": 117
     },
     {
       "do": "track_play",
-      "name": "user-check"
+      "name": "user-check",
+      "loaded": true
     },
     {
       "do": "wait",
