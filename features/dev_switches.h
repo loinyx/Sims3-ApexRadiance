@@ -189,6 +189,10 @@ inline std::atomic<bool> sunLampLevel{false};
 inline std::atomic<bool> chairArmCaps{false};
 inline std::atomic<bool> sphereCutFade{false};
 inline std::atomic<bool> liveObjectTables{false};
+//   basis_lamp_law        a lamp's part of the directional maps objects and Sims read follows the lamp law walls and floors are lit
+//                         by (GpuLampLaw::Eval at the sample, facing the lamp): the rig colour the game puts there held a 47 m red
+//                         sconce at full red 3 m away, where the wall beside the door took 2% of it (LevelLightShare BasisLawStep)
+inline std::atomic<bool> basisLampLaw{false};
 
 void Load(); // init thread, before the features start; logs the values
 
@@ -233,5 +237,6 @@ inline bool SunLampLevel() { return kCompiled ? sunLampLevel.load(std::memory_or
 inline bool ChairArmCaps() { return kCompiled ? chairArmCaps.load(std::memory_order_relaxed) : kShipped; }
 inline bool SphereCutFade() { return kCompiled ? sphereCutFade.load(std::memory_order_relaxed) : kShipped; }
 inline bool LiveObjectTables() { return kCompiled ? liveObjectTables.load(std::memory_order_relaxed) : kShipped; }
+inline bool BasisLampLaw() { return kCompiled ? basisLampLaw.load(std::memory_order_relaxed) : kShipped; }
 
 } // namespace DevSwitches

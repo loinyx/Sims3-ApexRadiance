@@ -520,6 +520,17 @@ z+.5; world through `room+0xF8`) and, for each light of the room's own list, `FU
 acc[4][4])`, `ret 0xC`; its only call `0x006A0C56` after `mov ecx, edi`; pos = the sample 0.5 m up) adds the light's rig
 colour (`vfunc+0x10`, `FUN_006bdb00`) weighted towards the 4 directions (±0.894, 0.447, 0) and (0, 0.447, ±0.894), with no
 threshold, wall or floor test. `BasisLightHook` redirects that call (bytes `8D 94 24 C8 00 00 00 52 8B CF` checked).
+
+**The lamp law in the directional maps** (`basis_lamp_law`, on in released builds): every lamp's part of a sample (each
+path of `BasisLightHook` but an outdoor lamp in a roofed room) goes through `BasisLawStep`: the game's step, then its rgb
+scaled per channel so it sums to the lamp law walls and floors are lit by (`GpuLampLaw::BasisToLaw`: `Eval` at the sample on
+a surface facing the lamp, cones, spill and reach included); the split over the four directions and the alpha stay the
+game's, and a light with no law (`RtOutdoorLamps::OwnLotLaw` false) keeps the step. The rig colour the game puts there does
+not fall off as the room's light does: in an F7 capture a red shaded lamp (range 47, spill 0.213) held its room's maps at 255
+up to 2 m away and at 58 to 135 at 3 m, so a door and a switch there glowed red while the wall beside them took 0.02 of red.
+A kept solve's part carries the scale (its share of the step, `OutdoorDelta::NoteBasis`); a lamp moved since its solve takes
+the physical part x the scale learnt while it stood still until its room is solved again. `outdoor_delta_test`
+`BasisLawChecks`.
 For a lamp of another story (`FindCross`):
 
 - `IndoorShadow` runs with wall flags on and the basis flag set, so the floor crossings, every segment including the

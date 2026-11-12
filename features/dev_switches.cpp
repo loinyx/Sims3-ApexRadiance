@@ -76,6 +76,8 @@ void Load() {
     chairArmCaps.store(get("chair_arm_caps"));
     sphereCutFade.store(get("sphere_cut_fade"));
     liveObjectTables.store(get("live_object_tables"));
+    basisLampLaw.store(get("basis_lamp_law"));
+    LOG_INFO(std::format("[DevBuild] basis_lamp_law {}", basisLampLaw.load() ? "on" : "off"));
     const auto on = [](const std::atomic<bool>& b) { return b.load() ? "on" : "off"; };
     LOG_INFO(std::format("[DevBuild] Switches ([dev_build] in ApexRadiance.toml): measurements {}, draw_reads_nowait {}, occlusion_relight {}, "
                          "room_drain_budget {}, allocator_trim {}, allocator_top_down {}, foliage_vertex_lamps {}, canopy_ground_shadow {}, foliage_sun_shadow {}, auto_light_priority {}, lamp_visibility_memo {}, daylight_log {}, indoor_lamp_walls {}, arch_ambient {}, basis_wall_filter {}, hard_wall_tops {}, stair_height_light {}, steady_indoor_light {}, inner_norm_settle {}, soft_opening_edges {}, stair_room_fill {}, opening_bounce {}, stair_floor_tone {}, stair_story_blend {}, no_opening_band {}, stairwell_bounce {}, borrowed_light_adapt {}, soft_slab_edges {}, room_fill {}, lot_build_share {}, open_rooms_above {}, cross_room_shadows {}, tone_soft {}, glass_share {}, room_bounce {}, sun_lamp_level {}, chair_arm_caps {}, sphere_cut_fade {}, live_object_tables {}",

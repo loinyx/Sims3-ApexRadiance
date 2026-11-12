@@ -159,6 +159,24 @@ inline void Eval(const Lamp& L, const float p[3], const float n[3], float wallRe
     for (int c = 0; c < 3; c++) out[c] = (L.spill[c] - L.spill[c] * t + t) * s * L.colour[c];
 }
 
+// (basis_lamp_law) A lamp's part of a directional map sample (the game's step 0x0069F280: 4 directions x rgba, the rig colour at
+// p split over the directions) scaled per channel so its rgb sum is the law's light at p on a surface facing the lamp, as walls
+// and floors take it. The directions' split and the alpha stay the game's; a channel the step leaves at 0 stays 0.
+inline void BasisToLaw(const Lamp& L, const float p[3], float step[16]) {
+    float n[3] = {L.pos[0] - p[0], L.pos[1] - p[1], L.pos[2] - p[2]};
+    const float len = ApexMath::Sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+    if (!(len > 1e-4f)) return;
+    for (float& v : n) v /= len;
+    float want[3];
+    Eval(L, p, n, 0.0f, want);
+    for (int c = 0; c < 3; c++) {
+        const float rig = ((step[c] + step[4 + c]) + step[8 + c]) + step[12 + c];
+        if (!(rig > 1e-6f) || !std::isfinite(want[c])) continue;
+        const float s = want[c] / rig;
+        for (int d = 0; d < 4; d++) step[d * 4 + c] *= s;
+    }
+}
+
 // The reach share's weight at a normal, as the shader: sat((0.5 - |n.y|) x 1e4) x reachOn
 inline float WallReach(const float n[3], bool reachOn) { return reachOn ? Sat((0.5f - std::fabs(n[1])) * 1e4f) : 0.0f; }
 

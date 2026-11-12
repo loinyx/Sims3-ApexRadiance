@@ -1618,6 +1618,12 @@ bool WorldLaw(uintptr_t light, uint64_t lot, bool reachOn, GpuLampLaw::Lamp& out
     return true;
 }
 
+bool OwnLotLaw(uintptr_t light, GpuLampLaw::Lamp& out) {
+    LampRead r;
+    int type = 0, reg = -1;
+    return ReadLamp(light, r) && r.f.lot != 0 && WorldLaw(light, r.f.lot, false, out, type, reg);
+}
+
 bool LotXform(uintptr_t mgr, float out[16]) {
     if (!mgr) return false;
     __try {
