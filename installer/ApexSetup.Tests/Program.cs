@@ -493,6 +493,22 @@ finally
     Directory.Delete(root, true);
 }
 
+// Game detection: an EA app install moved out of the EA app's folder, with a stray TS3W.exe beside its TS3.exe 1.69.47,
+// is the EA app game (a player's report: Setup took it for Steam and called its TS3.exe bridge.conf wrong)
+{
+    var bin2 = Path.Combine(Path.GetTempPath(), "ApexSetupMoved-" + Guid.NewGuid().ToString("N")[..8], "The Sims 3", "Game", "Bin");
+    Directory.CreateDirectory(bin2);
+    static byte[] Pe(uint stamp) { var b = new byte[0x100]; BitConverter.GetBytes(0x80).CopyTo(b, 0x3C); "PE  "u8.ToArray().CopyTo(b, 0x80); BitConverter.GetBytes(stamp).CopyTo(b, 0x88); return b; }
+    File.WriteAllBytes(Path.Combine(bin2, "TS3.exe"), Pe(0x6707155C));
+    File.WriteAllBytes(Path.Combine(bin2, "TS3W.exe"), Pe(0x12345678));
+    var moved = Games.FromFolder(Path.Combine(bin2, "..", ".."));
+    Check(moved is { Edition: Edition.EA, Exe: "TS3.exe" }, "a moved EA app install with a stray TS3W.exe is the EA app game");
+    File.WriteAllBytes(Path.Combine(bin2, "TS3W.exe"), Pe(0x52DEC247));
+    File.Delete(Path.Combine(bin2, "TS3.exe"));
+    Check(Games.FromFolder(bin2) is { Edition: Edition.Steam, Exe: "TS3W.exe" }, "a Steam install is still the Steam game");
+    Directory.Delete(Path.GetFullPath(Path.Combine(bin2, "..", "..", "..")), true);
+}
+
 // Sims 3 Modernization: a release without this edition's build is not taken for it (v0.2.11 had no ts3native-ea169)
 {
     var steamOnly = new Release("rodneypantonial/sims3-modernization", "v0.2.11", new[] { new Asset("ts3fixes.package", "x", null), new Asset("ts3native-v0.2.11.zip", "x", null) });

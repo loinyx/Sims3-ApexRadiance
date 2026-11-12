@@ -85,16 +85,19 @@ public static class Games
     {
         if (File.Exists(path)) path = Path.GetDirectoryName(path)!;
         foreach (var bin in new[] { path, Path.Combine(path, "Bin"), Path.Combine(path, "Game", "Bin") })
-            foreach (var exe in new[] { "TS3W.exe", "TS3.exe" })
-            {
-                var p = Path.Combine(bin, exe);
-                if (!File.Exists(p)) continue;
-                var full = Path.GetFullPath(bin);
-                var root = Path.GetFullPath(Path.Combine(full, "..", ".."));
-                var (ed, ver) = Builds.TryGetValue(PeTimestamp(p), out var b) ? b
-                    : (exe == "TS3.exe" ? Edition.EA : Edition.Steam, FileVersionInfo.GetVersionInfo(p).FileVersion ?? "?");
-                return new Game(root, full, exe, ed, ver);
-            }
+        {
+            var exes = new[] { "TS3W.exe", "TS3.exe" }.Where(e => File.Exists(Path.Combine(bin, e))).ToList();
+            if (exes.Count == 0) continue;
+            // a folder with both exes (an EA app install moved or copied, a leftover TS3W.exe) is the build its known exe
+            // is: the EA app's TS3.exe 1.69.47 next to a stray TS3W.exe made Setup take the game for Steam
+            var exe = exes.FirstOrDefault(e => Builds.ContainsKey(PeTimestamp(Path.Combine(bin, e)))) ?? exes[0];
+            var p = Path.Combine(bin, exe);
+            var full = Path.GetFullPath(bin);
+            var root = Path.GetFullPath(Path.Combine(full, "..", ".."));
+            var (ed, ver) = Builds.TryGetValue(PeTimestamp(p), out var b) ? b
+                : (exe == "TS3.exe" ? Edition.EA : Edition.Steam, FileVersionInfo.GetVersionInfo(p).FileVersion ?? "?");
+            return new Game(root, full, exe, ed, ver);
+        }
         return null;
     }
 
