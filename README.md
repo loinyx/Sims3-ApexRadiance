@@ -155,6 +155,11 @@ replaces. See [Apex Radiance Setup](docs/features/installer.md).
 3. Copy it into `The Sims 3\Game\Bin\`, replacing the previous Apex Radiance file when updating.
 4. Load a world and press **Ctrl+Shift+F11** to open the menu.
 
+Optional, experimental: copy `ts3wrap.exe` from the same release next to `ApexRadiance.asi` and add
+`restart_host = true` under `[ui]` in `ApexRadiance.toml`. After a save that leaves the game little free memory,
+quitting the game then asks whether to start it again into that save ([restart host](docs/features/performance/restart-host.md)).
+Apex Radiance Setup installs `ts3wrap.exe` for you; the line in `ApexRadiance.toml` turns it on.
+
 Updating Apex won't remove your settings. Settings, profiles, LUTs and reports are stored here:
 
 ```text

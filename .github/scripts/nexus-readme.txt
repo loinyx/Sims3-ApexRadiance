@@ -6,7 +6,7 @@
   What is in this zip
 
     ApexRadianceSetup.exe ...... the installer (recommended)
-    Manual install\ ............ the mod file, to install it by hand
+    Manual install\ ............ the mod files, to install them by hand
 
 
 ------------------------------------------------------------------------------

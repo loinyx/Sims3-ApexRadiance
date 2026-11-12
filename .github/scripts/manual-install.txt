@@ -58,7 +58,26 @@
 
 
 ------------------------------------------------------------------------------
-  STEP 5  -  PLAY
+  STEP 5  -  RESTART HOST  (optional, experimental)
+------------------------------------------------------------------------------
+
+    After a save that leaves the game little free memory, quitting the
+    game asks whether to start it again straight into that save.
+
+    1.  Copy ts3wrap.exe (from this folder) into Game\Bin, next to
+        ApexRadiance.asi.
+    2.  Start the game once and close it, so the settings file exists.
+    3.  Open Documents\Electronic Arts\The Sims 3\Apex Radiance\
+        ApexRadiance.toml in Notepad, find the line  [ui]  and add
+        right under it:
+          restart_host = true
+
+    Skip this step if you do not want it: without the line, ts3wrap.exe
+    does nothing.
+
+
+------------------------------------------------------------------------------
+  STEP 6  -  PLAY
 ------------------------------------------------------------------------------
 
     Start the game, load a world and press  Ctrl + Shift + F11  to open
@@ -69,6 +88,7 @@
   UPDATING
 ------------------------------------------------------------------------------
 
-    Close the game and replace ApexRadiance.asi (and the bridge files, if
-    you use it) with the new ones. Your settings stay in:
+    Close the game and replace ApexRadiance.asi (and ts3wrap.exe and the
+    bridge files, if you use them) with the new ones. Your settings stay
+    in:
       Documents\Electronic Arts\The Sims 3\Apex Radiance
