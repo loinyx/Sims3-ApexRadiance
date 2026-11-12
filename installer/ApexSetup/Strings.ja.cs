@@ -212,7 +212,7 @@ public static partial class Strings
         ["Your Apex Radiance settings are always kept."] = "Apex Radiance の設定は常に保持されます。",
         ["No internet connection"] = "インターネットに接続されていません",
         ["Vulkan, DXVK (recommended)"] = "Vulkan、DXVK（推奨）",
-        ["Vulkan with more memory (RTX Remix bridge, experimental)"] = "Vulkan、空きメモリ多め（RTX Remix bridge、試験的）",
+        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan、空きメモリ多め（RTX Remix bridge）",
         ["The RTX Remix bridge needs a graphics card with Vulkan 1.3 (found: {0})."] = "RTX Remix bridge には Vulkan 1.3 対応のグラフィックカードが必要です（検出: {0}）。",
         ["1 update for The Sims 3 · {0}"] = "The Sims 3 · {0} の更新が 1 件",
         ["Change"] = "変更",

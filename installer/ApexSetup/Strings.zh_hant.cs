@@ -184,7 +184,7 @@ public static partial class Strings
         ["Your Apex Radiance settings are always kept."] = "一律保留你的 Apex Radiance 設定。",
         ["No internet connection"] = "沒有網際網路連線",
         ["Vulkan, DXVK (recommended)"] = "Vulkan、DXVK（建議）",
-        ["Vulkan with more memory (RTX Remix bridge, experimental)"] = "Vulkan，更多可用記憶體（RTX Remix bridge，實驗性）",
+        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan，更多可用記憶體（RTX Remix bridge）",
         ["The RTX Remix bridge needs a graphics card with Vulkan 1.3 (found: {0})."] = "RTX Remix bridge 需要支援 Vulkan 1.3 的顯示卡（偵測到：{0}）。",
         ["1 update for The Sims 3 · {0}"] = "The Sims 3 · {0} 有 1 個更新",
         ["Change"] = "變更",

@@ -167,7 +167,7 @@ public sealed partial class MainWindow : Window
 
     // the bridge's version is the Apex release's only when that release ships the bridge zip
     string? Latest(string c) => Repo.TryGetValue(c, out var repo) && _latest.GetValueOrDefault(repo) is { } r
-        && (c != Components.Bridge || r.Assets.Any(a => a.Name == "Apex-Radiance-RTX-Remix-bridge.zip"))
+        && (c != Components.Bridge || r.Assets.Any(a => a.Name == "Apex-Radiance-RTX-Remix-bridge.zip") || GitHubSource.HasManualZip(r) is not null)
         && (c != Components.Modernization || _game is null || Engine.HasModernizationBuild(r, _game.Edition)) ? r.Version : null; // (no update to a release without this edition's build)
 
     // The installed version: Setup's own record, else the latest release's when the file is identical to it (GitHub's SHA-256
@@ -794,7 +794,7 @@ public sealed partial class MainWindow : Window
         var (title, desc) = r switch
         {
             RDxvk => (T("Vulkan, DXVK (recommended)"), T("Fewer stutters; Apex Radiance is made and tested with it.")),
-            RBridge => (T("Vulkan with more memory (RTX Remix bridge, experimental)"), T("Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK.")),
+            RBridge => (T("Vulkan with more memory (RTX Remix bridge)"), T("Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK.")),
             RNative => (T("Windows default (Direct3D 9)"), T("Works, but Apex Radiance is tested with DXVK.")),
             _ => (T("Keep my d3d9.dll"), T("Your d3d9.dll stays as it is.")),
         };

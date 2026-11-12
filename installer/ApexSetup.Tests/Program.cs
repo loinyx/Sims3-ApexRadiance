@@ -493,6 +493,53 @@ finally
     Directory.Delete(root, true);
 }
 
+// A release with only Setup and the manual-install zip (3.1.6 on): Apex, ts3wrap.exe and the bridge come from the zip,
+// downloaded over HTTP from a local server as from GitHub
+{
+    var work = Path.Combine(Path.GetTempPath(), "ApexSetupZip-" + Guid.NewGuid().ToString("N")[..8]);
+    var top = Path.Combine(work, "src", "Apex Radiance 9.9.9 - Manual install");
+    Directory.CreateDirectory(Path.Combine(top, "RTX Remix bridge", ".trex"));
+    File.WriteAllText(Path.Combine(top, "How to install.txt"), "guide");
+    File.WriteAllText(Path.Combine(top, "ApexRadiance.asi"), "apex 9.9.9");
+    File.WriteAllText(Path.Combine(top, "ts3wrap.exe"), "wrap 9.9.9");
+    File.WriteAllText(Path.Combine(top, "RTX Remix bridge", "d3d9.dll"), "bridge d3d9");
+    File.WriteAllText(Path.Combine(top, "RTX Remix bridge", ".trex", "NvRemixBridge.exe"), "bridge server");
+    var zip = Path.Combine(work, "Apex-Radiance-9.9.9-Manual-install.zip");
+    System.IO.Compression.ZipFile.CreateFromDirectory(Path.Combine(work, "src"), zip);
+    var port = new System.Random().Next(42000, 48000);
+    using var http = new System.Net.HttpListener();
+    http.Prefixes.Add($"http://localhost:{port}/");
+    http.Start();
+    _ = Task.Run(async () =>
+    {
+        while (http.IsListening)
+        {
+            System.Net.HttpListenerContext ctx;
+            try { ctx = await http.GetContextAsync(); } catch { break; }
+            var bytes = File.ReadAllBytes(zip);
+            ctx.Response.ContentLength64 = bytes.Length;
+            await ctx.Response.OutputStream.WriteAsync(bytes);
+            ctx.Response.Close();
+        }
+    });
+    var rel = new Release("loinyx/Sims3-ApexRadiance", "v9.9.9", new[] {
+        new Asset("ApexRadianceSetup.exe", $"http://localhost:{port}/setup", null),
+        new Asset("Apex-Radiance-9.9.9-Manual-install.zip", $"http://localhost:{port}/zip", Verify.Sha256Of(zip)) });
+    var gs = new GitHubSource { Shown = new Dictionary<string, Release?> { [Releases.Apex] = rel } };
+    var zbin = Path.Combine(work, "Game", "Bin");
+    Directory.CreateDirectory(zbin);
+    var zg = new Game(Path.Combine(work), zbin, "TS3W.exe", Edition.Steam, "1.67.2");
+    var (apexFiles, apexVer) = await gs.FetchAsync(Components.Apex, zg, work, default);
+    string Body(List<(string, string)> l, string name) => l.FirstOrDefault(f => f.Item2.EndsWith(name)) is { Item1: { } src } ? File.ReadAllText(src) : "<missing>";
+    Check(apexVer == "9.9.9" && Body(apexFiles, "ApexRadiance.asi") == "apex 9.9.9" && Body(apexFiles, "ts3wrap.exe") == "wrap 9.9.9",
+          "a release with only Setup and the manual zip: Apex Radiance and ts3wrap.exe from the zip");
+    var (bridgeFiles, _) = await gs.FetchAsync(Components.Bridge, zg, work, default);
+    Check(Body(bridgeFiles, "d3d9.dll") == "bridge d3d9" && bridgeFiles.Any(f => f.Item2 == Path.Combine(zbin, ".trex", "NvRemixBridge.exe")),
+          "the bridge from the zip's RTX Remix bridge folder, .trex kept, into Game\\Bin");
+    http.Stop();
+    try { Directory.Delete(work, true); } catch (IOException) { }
+}
+
 // Game detection: an EA app install moved out of the EA app's folder, with a stray TS3W.exe beside its TS3.exe 1.69.47,
 // is the EA app game (a player's report: Setup took it for Steam and called its TS3.exe bridge.conf wrong)
 {
