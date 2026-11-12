@@ -2,7 +2,7 @@
 
   python input_track.py record <out.json> <stop file>   records until the stop file exists
   python input_track.py play <in.json> [<stop file>]     plays them back (stops early if the stop file appears or
-                                                          the tester moves the real mouse or presses a real key)
+                                                          the tester clicks the real mouse)
   python input_track.py session <dir> <stop file> [--no-clips]  F9 (unless --no-clips) (kept from the game) starts and stops a clip, as often as the
                                                           tester likes: <dir>/clip-N/input.json, then a small window
                                                           asks what went wrong (desc.txt). Markers for the runner:
@@ -303,11 +303,7 @@ def play(path, stop):
     vw, vh = user32.GetSystemMetrics(78), user32.GetSystemMetrics(79)
     real = [False]
 
-    def on_real(code, wp, lp):  # (the tester takes over: a real mouse move or key ends the playback)
-        if code == 0:
-            if wp in (WM_KEYDOWN, WM_SYSKEYDOWN):
-                if not ctypes.cast(lp, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents.flags & LLKHF_INJECTED:
-                    real[0] = True
+    def on_real(code, wp, lp):  # (keys typed elsewhere, a chat say, do not end it)
         return user32.CallNextHookEx(None, code, wp, lp)
 
     def on_real_mouse(code, wp, lp):
