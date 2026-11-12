@@ -366,7 +366,7 @@ function Invoke-Load($Load, [string]$BaseToml) {
                 'camera_orbit' {
                     $a = @{}; foreach ($p in $step.PSObject.Properties) { if ($p.Name -ne 'do') { $a[$p.Name] = $p.Value } }
                     $o = Call-Agent 'camera_orbit' $a
-                    Say "  step ${n}: camera orbit around the active lot at $($o.lot.x), $($o.lot.z)"
+                    Say "  step ${n}: camera orbit around $($o.name) at $($o.lot.x), $($o.lot.z)"
                 }
                 'camera' { Call-Agent 'camera' @{ pos = $step.pos; target = $step.target } | Out-Null }
                 'camera_pan' {

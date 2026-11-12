@@ -461,15 +461,16 @@ namespace ApexTestAgent
             return r;
         }
 
-        // camera_orbit {radius?, height?, seconds?, turns?}: circles the camera around the active household's lot (radius
+        // camera_orbit {lot?, radius?, height?, seconds?, turns?}: circles the camera around a lot (default the active household's) (radius
         // default 18 m, height 12 m, one turn per `seconds`, default 30), in a game task like camera_pan; ends camera_pan.
         static object CameraOrbit(Args a)
         {
             RequireLive();
             int gen = ++sPanGen;
-            Lot lot = a.Has("lot") ? FindLot(a.Str("lot")) : LotManager.ActiveLot;
-            if (lot == null && !a.Has("lot") && Sims3.Gameplay.CAS.Household.ActiveHousehold != null) lot = Sims3.Gameplay.CAS.Household.ActiveHousehold.LotHome;
-            if (lot == null) throw new AgentException(a.Has("lot") ? "no lot named or of type '" + a.Str("lot") + "'" : "no active lot");
+            // lot "home" (or none): the active household's lot (LotManager.ActiveLot is the lot under the camera, not the home)
+            string key = a.Has("lot") ? a.Str("lot") : "home";
+            Lot lot = key == "home" ? (Sims3.Gameplay.CAS.Household.ActiveHousehold != null ? Sims3.Gameplay.CAS.Household.ActiveHousehold.LotHome : null) : FindLot(key);
+            if (lot == null) throw new AgentException(key == "home" ? "no active household lot" : "no lot named or of type '" + key + "'");
             Vector3 c = lot.GetCenterPosition();
             float radius = (float)a.Double("radius", 18), height = (float)a.Double("height", 12);
             int turnMs = (int)(a.Double("seconds", 30) * 1000);
