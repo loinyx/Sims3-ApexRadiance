@@ -9036,6 +9036,15 @@ int LampChange(const DepKey& key, uintptr_t tl, std::vector<uintptr_t>* lightsOu
     }
     DepSig& s = it->second;
     if (s.all == sig) return 0;
+    // A floor switch empties every story's light registry and fills it again within ~10 ms; a walk in between saw each room 0
+    // with no lamp (a lamp removed, an edit: urgent, the edit hold, ~250 ms of solves at every floor switch) and the next one
+    // saw them back. A story whose registry is wholly empty is read as not known now: the last state stays, and the walk
+    // after the refill compares with it. shortcut: deleting a story's very last light (window lights included) is then not
+    // seen as an edit by this walk (the game's own mark still solves the room), upgrade if a story can lose its last light
+    // while players watch it
+    bool any = false;
+    WalkRegistry(tl, [&any](uintptr_t) { any = true; });
+    if (!any) return 0;
     const bool reshaped = s.shape != shape;
     const bool moved = reshaped || LampsMoved(s.lamps, lamps);
     s.all = sig;

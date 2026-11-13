@@ -1047,7 +1047,10 @@ floor mask.
   through with the yards' sends): when the change is known lamp by lamp (`LampChange`'s exact pairs), only the rooms one
   of the changed lamps saw (and, for a move or a player's edit, those it can reach now); else (a lamp added or removed, a
   wall changed) the rooms that took one or that one can reach. The roofed rooms of the story above are sent the same way
-  for a change of room 0's lamps. A lamp switch's safety net (`RelightLampSwitch`) sends
+  for a change of room 0's lamps. A story whose whole light registry is empty is read as not known (`LampChange` keeps the last
+  state): a floor switch empties every story's registry and fills it again within ~10 ms, and a walk in between counted
+  each room 0's lamps as removed, an edit with urgency and the edit hold at every floor switch (29 in a minute of floor
+  switches, 3 since, at load). Deleting a story's very last light is then not an edit for this walk. A lamp switch's safety net (`RelightLampSwitch`) sends
   every noted room of the lamp's lot for an outdoor lamp. The cutout posts send, once quiet, the roofed rooms beside an
   opening whose doors are not the ones their last gather saw (`RequeueRoofedDoors`; the room whose gather is running is
   left alone).
