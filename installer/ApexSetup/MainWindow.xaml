@@ -225,7 +225,7 @@
                                                   AutomationProperties.Name="Sims 3 Modernization" />
                                 </Grid>
                             </Border>
-                            <Border Style="{StaticResource ApexCard}">
+                            <Border x:Name="MonoCard" Style="{StaticResource ApexCard}">
                                 <Grid ColumnSpacing="14">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />

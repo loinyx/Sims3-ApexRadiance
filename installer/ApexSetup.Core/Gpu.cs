@@ -9,7 +9,9 @@ public static class Gpu
 {
     public static readonly Version Needed = new(1, 3);
 
-    // The extensions DXVK 3.1.1 marks required (src/dxvk/dxvk_device_info.cpp, ENABLE_EXT / ENABLE_EXT_FEATURE with true).
+    // The extensions DXVK 3.1.1 marks required (src/dxvk/dxvk_device_info.cpp, ENABLE_EXT / ENABLE_EXT_FEATURE with true). Setup
+    // installs DXVK's latest release: check this list again when DXVK publishes a new version. Setup asks the 64-bit driver; the
+    // game's 32-bit DXVK asks the 32-bit one, which ships with it.
     public static readonly string[] DxvkExtensions =
     {
         "VK_KHR_swapchain", "VK_EXT_depth_clip_enable", "VK_EXT_robustness2", "VK_KHR_load_store_op_none", "VK_KHR_maintenance5", "VK_KHR_maintenance6",
@@ -30,9 +32,9 @@ public static class Gpu
         try
         {
             uint n = 0;
-            vkEnumeratePhysicalDevices(instance, ref n, null);
+            Ok(vkEnumeratePhysicalDevices(instance, ref n, null));
             var devices = new nint[n];
-            if (n > 0) vkEnumeratePhysicalDevices(instance, ref n, devices);
+            if (n > 0) Ok(vkEnumeratePhysicalDevices(instance, ref n, devices));
             (Version? Version, string? Card, string[] Missing) best = (null, null, Array.Empty<string>());
             var props = new byte[1024]; // VkPhysicalDeviceProperties: 824 bytes on x64
             foreach (var d in devices.Take((int)n))
@@ -67,13 +69,16 @@ public static class Gpu
     static HashSet<string> Extensions(nint device)
     {
         uint n = 0;
-        vkEnumerateDeviceExtensionProperties(device, 0, ref n, null);
+        Ok(vkEnumerateDeviceExtensionProperties(device, 0, ref n, null));
         var raw = new byte[n * 260]; // VkExtensionProperties: char extensionName[256], uint32 specVersion
-        if (n > 0) vkEnumerateDeviceExtensionProperties(device, 0, ref n, raw);
+        if (n > 0) Ok(vkEnumerateDeviceExtensionProperties(device, 0, ref n, raw));
         var set = new HashSet<string>();
         for (var i = 0; i < n; i++) set.Add(System.Text.Encoding.UTF8.GetString(raw, i * 260, 256).Split('\0')[0]);
         return set;
     }
+
+    // a failed query is "unknown", never "this card cannot" (VK_INCOMPLETE, 5, is a success code)
+    static void Ok(int r) { if (r < 0) throw new InvalidOperationException($"Vulkan query {r}"); }
 
     // VK_MAKE_API_VERSION: variant 3 bits, major 7, minor 10, patch 12
     public static Version Decode(uint v) => new((int)(v >> 22) & 0x7F, (int)(v >> 12) & 0x3FF);

@@ -155,7 +155,7 @@ public sealed partial class MainWindow : Window
         catch (Exception e) { App.Log(e); return; }
         RefreshComponents();
         RefreshStatus(); // (their DXVK warning needs the card)
-        RefreshGame();
+        FillProblems();
     }
 
     static readonly string? Preview = Environment.GetEnvironmentVariable("APEX_SETUP_PREVIEW_LATEST") is { Length: > 0 } pv ? pv : null;
@@ -674,8 +674,13 @@ public sealed partial class MainWindow : Window
         // once per scan: Compat walks Mods and reads every Bin .asi, and the status and footer read it again
         _found = _state is null ? new() : Compat.Check(_game!, _state);
         GameDetails.Visibility = _state is null ? Visibility.Collapsed : Visibility.Visible;
-        if (_state is not { } s) return;
+        FillProblems();
+    }
 
+    // the Game page's problems and suggestions, from the last scan (redrawn without a new scan when the card is known)
+    void FillProblems()
+    {
+        if (_state is not { } s) return;
         ProblemList.Children.Clear();
         var found = GpuFindings(s).Concat(_found.Where(x => x.Suggest is null)).ToList();
         foreach (var x in found)
@@ -768,6 +773,8 @@ public sealed partial class MainWindow : Window
         S3ssToggle.IsOn = s.S3ss; // (optional mods start off unless installed)
         ModToggle.IsOn = s.Modernization;
         MonoToggle.IsOn = s.MonoPatcher;
+        // no longer offered (no mod Setup installs needs it, and it crashed the launcher on some PCs): shown only to keep or remove it
+        MonoCard.Visibility = s.MonoPatcher ? Visibility.Visible : Visibility.Collapsed;
         S3ppToggle.IsOn = true;
     }
 

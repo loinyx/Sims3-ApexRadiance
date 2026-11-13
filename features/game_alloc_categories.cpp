@@ -245,7 +245,7 @@ void Report(unsigned long long uptimeMs) {
     static std::wstring file;
     static uint64_t written = 0;
     static bool disabled = false;
-    if (!disabled && file.empty()) file = ApexPaths::NewSessionFile(L"GameCategories", L"csv");
+    if (!disabled && file.empty() && (file = ApexPaths::NewSessionFile(L"GameCategories", L"csv")).empty()) disabled = true;
     std::string csv;
     for (size_t i = 0; i < rows.size() && i < 150; i++)
         csv += std::format("{},{},\"{}\",{},{},{},{},{}\n", APEX_VERSION_STRING, uptimeMs, NameOf(rows[i].key), rows[i].live, rows[i].blocks, rows[i].peak,

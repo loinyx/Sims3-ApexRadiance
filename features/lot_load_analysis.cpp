@@ -195,7 +195,7 @@ void Pump() {
     if (stopped) return;
     if (path.empty()) {
         path = ApexPaths::NewSessionFile(L"LotLoadAnalysis", L"csv");
-        if (path.empty()) return;
+        if (path.empty()) { stopped = true; return; } // (no Diagnostics folder: not retried every pump)
     }
     struct Load { uint64_t request=0, calls=0; double elapsed=0; };
     static std::unordered_map<uint64_t,Load> loads;
