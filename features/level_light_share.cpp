@@ -13679,6 +13679,23 @@ bool LampOverOwnFloor(const unsigned char* room, const float* lp) {
 bool OwnFloorBlocks(const unsigned char* room, void* light, const float* sample) {
     alignas(16) float lp[4];
     LampPos(light, lp);
+    // A lamp over its floor cuts no sample (LampOverOwnFloor: the same reads as OwnFloorBlocksAt's lamp side). The room, its
+    // lot and the lamp do not change within one batch (g_batchSerial, the light tree thread), so the lamp side is kept per
+    // room and lamp for the batch; only a lamp under the floor tests each sample.
+    struct OverMemo {
+        uint32_t serial = 0;
+        const unsigned char* room = nullptr;
+        uintptr_t light = 0;
+        bool over = false;
+    };
+    static OverMemo memo[256];
+    if (t_inBatchSample && g_batchSerial && ThreadId() == g_gatherThread.load(std::memory_order_relaxed)) {
+        const uintptr_t l = reinterpret_cast<uintptr_t>(light);
+        OverMemo& m = memo[(static_cast<uint32_t>(l ^ reinterpret_cast<uintptr_t>(room)) * 2654435761u) >> 24];
+        if (m.serial != g_batchSerial || m.room != room || m.light != l)
+            m.serial = g_batchSerial, m.room = room, m.light = l, m.over = LampOverOwnFloor(room, lp);
+        if (m.over) return false;
+    }
     return OwnFloorBlocksAt(room, lp, sample);
 }
 
