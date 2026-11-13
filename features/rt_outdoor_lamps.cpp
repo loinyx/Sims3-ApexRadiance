@@ -439,6 +439,7 @@ uint64_t g_proxyGeo = 0;                      // (under g_proxyMx) the geometry 
 struct Cover {
     uintptr_t tracker = 0;
     bool full = false;
+    uint8_t stories = 0; // the active lot's stories whose room-0 maps are all relit (an edit there marks no room, StoryCovered)
     DWORD at = 0;
     std::unordered_set<uintptr_t> lamps;
     std::set<std::pair<int, uintptr_t>> kept0; // (GPU room lamps) (story, lamp): a lamp room 0's kept parts draw there
@@ -2309,6 +2310,7 @@ void Frame(IDirect3DDevice9* dev) {
     }
     std::vector<std::string> waiting;
     bool allReady = true;
+    uint32_t notReady = 0; // the active lot's stories not covered yet (their maps waiting, being prepared or uploaded)
     int uploads = 0;
     // (14/10, drag solves) while a lamp is dragged no slot is uploaded (a slot upload makes its buffers and textures on this
     // thread: 12-14 ms in a recording); the old copies stay bound and the uploads go once the lamp is still
@@ -2343,7 +2345,7 @@ void Frame(IDirect3DDevice9* dev) {
             for (const auto& sl : g_slots)
                 if (sl->story == S && sl->room == room && sl->cls == cls && sl->used) had = true, all = all && sl->ok && sl->relit;
             if (!(had && all) && act) {
-                allReady = false;
+                allReady = false, notReady |= 1u << S;
                 if (g_rushFrom && GetTickCount() - g_rushFrom < kKeptRushMs) {
                     if (S == 0) RoomLightQueue::GroundFirst(room); // (renewed each frame)
                     static std::unordered_map<const void*, DWORD> s_firstAt; // (a mark a second per room)
@@ -2459,18 +2461,18 @@ void Frame(IDirect3DDevice9* dev) {
                 StartJob(j);
                 g_why.build++;
             }
-            if (!covered && act) allReady = false, waiting.push_back(std::format("story {}: its maps are being prepared", S));
+            if (!covered && act) allReady = false, notReady |= 1u << S, waiting.push_back(std::format("story {}: its maps are being prepared", S));
             return true;
         }
         Job& job = **jit;
         const int st = job.state.load();
         if (st == 1) {
-            if (!covered && act) allReady = false, waiting.push_back(std::format("story {}: its maps are being prepared", S));
+            if (!covered && act) allReady = false, notReady |= 1u << S, waiting.push_back(std::format("story {}: its maps are being prepared", S));
             return true;
         }
         if (st == 3) {
             g_jobs.erase(jit);
-            if (act) allReady = false, waiting.push_back(std::format("story {}: its kept solve could not be read", S));
+            if (act) allReady = false, notReady |= 1u << S, waiting.push_back(std::format("story {}: its kept solve could not be read", S));
             ExportBackoff& b = g_exportBackoff[room];
             b.fails = std::min(b.fails + 1, 6);
             b.at = (GetTickCount() + (250u << (b.fails - 1))) | 1; // 0.25 s ... 8 s
@@ -2538,7 +2540,7 @@ void Frame(IDirect3DDevice9* dev) {
             }
             uploads++;
             if (!UploadSlot(dev, *slot, job, p)) {
-                if (act) allReady = false;
+                if (act) allReady = false, notReady |= 1u << S;
                 LOG_INFO(std::format("[RtOutdoorLamps] {} class {} {}: not relit ({})", who(), cls, kMapName[m], slot->why));
             }
             // watched for writes (a lot next to it from the upper half: the active lot's maps keep theirs)
@@ -2551,7 +2553,7 @@ void Frame(IDirect3DDevice9* dev) {
             if (slot->watch >= 0) g_watchTex[slot->watch].store(slot->game);
         }
         if (done) g_jobs.erase(std::find_if(g_jobs.begin(), g_jobs.end(), [room](const std::shared_ptr<Job>& j) { return j->room == room; }));
-        else if (!covered && act) allReady = false, waiting.push_back(std::format("story {}: its maps are being uploaded", S));
+        else if (!covered && act) allReady = false, notReady |= 1u << S, waiting.push_back(std::format("story {}: its maps are being uploaded", S));
         return true;
     };
     for (int S = 0; S <= 7; S++) {
@@ -3729,6 +3731,14 @@ void Frame(IDirect3DDevice9* dev) {
         std::lock_guard<std::mutex> lk(g_coverMx);
         g_cover.tracker = tracker;
         g_cover.full = full;
+        // a story covered on its own: its room 0 shown, waiting for nothing, and every map of it relit. An edit on such a story
+        // marks no room there while another story still waits (a lot arrived at: the town square's lamps the game switched
+        // off at once went through the game's room solves on every story, about 5 ms a frame for 6 s)
+        g_cover.stories = 0;
+        for (int S = 0; S <= 7; S++)
+            if (rooms[S] && !(notReady >> S & 1) &&
+                std::all_of(g_slots.begin(), g_slots.end(), [&](const auto& s) { return s->mgr || s->story != S || !s->used || (s->ok && s->relit); }))
+                g_cover.stories |= static_cast<uint8_t>(1u << S);
         g_cover.at = GetTickCount();
         g_cover.lamps.clear();
         g_cover.lamps.insert(covered.begin(), covered.end());
@@ -3995,6 +4005,8 @@ void BuildProxy(uintptr_t tracker, const void* room0) {
 }
 } // namespace
 
+// (under g_coverMx) every story covered, or this one on its own
+bool StoryCovered(int story) { return g_cover.full || (story >= 0 && story <= 7 && (g_cover.stories >> story & 1)); }
 uintptr_t TrackerOf(const void* room) {
     int story = -99, id = -1, cls = -1;
     uintptr_t mgr = 0;
@@ -4007,7 +4019,7 @@ bool CoversRoom(const void* room) {
     const uintptr_t tracker = TrackerOfRoom(room, story, id, cls, mgr);
     if (!tracker || id != 0) return false;
     std::lock_guard<std::mutex> lk(g_coverMx);
-    return g_cover.tracker == tracker && g_cover.full && GetTickCount() - g_cover.at < kCoverFreshMs;
+    return g_cover.tracker == tracker && StoryCovered(story) && GetTickCount() - g_cover.at < kCoverFreshMs;
 }
 uintptr_t ActiveTracker() { return g_proxyWanted.load(); }
 bool PhysCoversRoom0(const void* room0) {
@@ -4022,7 +4034,7 @@ bool CoversLamp(const void* room0, uintptr_t light) {
     const uintptr_t tracker = TrackerOfRoom(room0, story, id, cls, mgr);
     if (!tracker || id != 0) return false;
     std::lock_guard<std::mutex> lk(g_coverMx);
-    return g_cover.tracker == tracker && g_cover.full && GetTickCount() - g_cover.at < kCoverFreshMs &&
+    return g_cover.tracker == tracker && StoryCovered(story) && GetTickCount() - g_cover.at < kCoverFreshMs &&
            (g_cover.lamps.count(light) || g_cover.kept0.count({story, light}));
 }
 bool ColourLaw(uintptr_t light, uint64_t lot, float colour[3], uint64_t& geo) {
@@ -4047,7 +4059,7 @@ bool HandlesLamp(uintptr_t tl, uintptr_t light, int room) {
     if (!tracker) return false;
     std::lock_guard<std::mutex> lk(g_coverMx);
     if (g_cover.tracker != tracker) return false;
-    const bool handled = g_cover.full && GetTickCount() - g_cover.at < kCoverFreshMs && g_cover.lamps.count(light);
+    const bool handled = StoryCovered(story) && GetTickCount() - g_cover.at < kCoverFreshMs && g_cover.lamps.count(light);
     if (!handled && g_cover.lamps.count(light)) c_editsRefused.fetch_add(1, std::memory_order_relaxed);
     return handled;
 }

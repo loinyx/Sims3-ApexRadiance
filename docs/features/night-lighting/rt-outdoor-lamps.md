@@ -116,7 +116,8 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    ([walls](walls.md)) multiply the copy's colour by `2^(3 r)`; every other draw reads the copy as before.
 8. **Rebuilds.** A story's maps are built again only when its base changes (`OutdoorDelta` `BaseHash`). The export and
    the texel streams are prepared on a worker thread; the render thread uploads one map a frame, and the old copy stays
-   bound meanwhile. An upload that fails waits 1 s, 2 s ... 32 s; an export that fails waits 0.25 s ... 8 s.
+   bound meanwhile (more maps a frame with the camera still, up to 2 ms of uploads, relit a lot whose detail rose no
+   sooner: refresh gaps median 0.06-0.08 s against 0.07 s, the wait being the game's room-0 solves). An upload that fails waits 1 s, 2 s ... 32 s; an export that fails waits 0.25 s ... 8 s.
 9. **Kept parts.** The memory budget of Quick outdoor lamp edits never drops the active lot's room 0s
    (`OutdoorDelta::PinRooms`, 160 MB ceiling; their drawn lamps' parts kept as one sum per texel, the base this part reads).
    Past the ceiling a new solve of one is not kept and that story is no longer sent to its solve, so the stories do not
@@ -247,8 +248,11 @@ handled, the shadow tiles rendered and the last relight times, or why the featur
   `[wrapper+0x30]` while `[wrapper+0x2C] == 0` ([engine/room-light-maps.md](../../engine/room-light-maps.md)).
 - **Self-measure.** Every 10 s while the option is on: the average and largest cost a frame on the render thread, the
   relights and why the maps were relit, and of a frame's cost the lots next to it and the relight loop.
-- **Coverage.** Lamp edits mark no room only while every story's maps are relit; the log says when that starts and
-  stops (`Every story covered` / `Not every story covered (...)`). A lamp counts as covered on the stories it is drawn
+- **Coverage.** Lamp edits mark no room on a story whose maps are all relit and that waits for nothing
+  (`Cover::stories`, `StoryCovered`); the other stories' room 0s still go to the game's solve. Before, every story had to
+  be covered: on arrival at the town square, the lamps the game switched off at once went through the game's room solves
+  on every story (about 5 ms a frame for 6 s). The log says when the whole lot's coverage starts and stops
+  (`Every story covered` / `Not every story covered (...)`). A lamp counts as covered on the stories it is drawn
   on, a story that draws it before its room 0 gathers it included. A lamp not drawn on a story where it can be drawn, or
   kept baked in a relit map's base, is not covered: its edit also goes to the game's solve. The consistency check reads
   the stories' real lists, so a story that draws a lamp it has not gathered is still sent to gather it.
