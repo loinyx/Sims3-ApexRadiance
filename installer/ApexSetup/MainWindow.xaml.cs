@@ -125,16 +125,37 @@ public sealed partial class MainWindow : Window
         catch (Exception e) { App.Log(e); }
     }
 
-    // The card's Vulkan version, asked once off the UI thread (loading the drivers takes a moment); null until known or
-    // when the driver could not be asked (the bridge then stays available)
-    (Version? Version, string? Card)? _vulkan;
-    bool BridgeBlocked => _vulkan is { } vk && (vk.Version is null || vk.Version < Gpu.Needed);
+    // The card's Vulkan version and the DXVK extensions its driver lacks, asked once off the UI thread (loading the drivers
+    // takes a moment); null until known or when the driver could not be asked (DXVK and the bridge then stay available)
+    (Version? Version, string? Card, string[] Missing)? _vulkan;
+    bool OldCard => _vulkan is { } vk && (vk.Version is null || vk.Version < Gpu.Needed);
+    bool OldDriver => !OldCard && _vulkan is { Missing.Length: > 0 };
+    bool VulkanBlocked => OldCard || OldDriver; // DXVK, and the bridge drawing through it, close the game at start
+    string CardFound => _vulkan is not { Card: { } card } vk ? "Vulkan —" : $"{card}, Vulkan {vk.Version}";
+    string MissingList => string.Join(", ", _vulkan?.Missing ?? Array.Empty<string>());
+
+    // DXVK or the bridge installed where it cannot start: the game closes at start (an old driver: the vendor's driver page)
+    List<Finding> GpuFindings(State s)
+    {
+        var name = s.Layer switch { Layer.Dxvk => "DXVK", Layer.Bridge => "RTX Remix bridge", _ => null };
+        if (name is null || !VulkanBlocked) return new();
+        return new()
+        {
+            OldDriver
+                ? new(Severity.Error, "{0} cannot start with this graphics driver (missing: {1}), so the game closes at start. Update the graphics driver, or choose Windows default (Direct3D 9) in Change components.",
+                    new[] { name, MissingList }, Link: Gpu.DriverPage(_vulkan?.Card))
+                : new(Severity.Error, "{0} cannot start on this graphics card ({1}), so the game closes at start. Choose Windows default (Direct3D 9) in Change components.",
+                    new[] { name, CardFound }),
+        };
+    }
 
     async Task DetectVulkanAsync()
     {
         try { _vulkan = await Task.Run(Gpu.Vulkan); }
         catch (Exception e) { App.Log(e); return; }
         RefreshComponents();
+        RefreshStatus(); // (their DXVK warning needs the card)
+        RefreshGame();
     }
 
     static readonly string? Preview = Environment.GetEnvironmentVariable("APEX_SETUP_PREVIEW_LATEST") is { Length: > 0 } pv ? pv : null;
@@ -534,7 +555,7 @@ public sealed partial class MainWindow : Window
         string State(string c) => Known(c) is not { Length: > 0 } v ? T("Installed") : Newer(Latest(c), v) ? T("{0} \u2192 {1}", v, Latest(c)!) : T("{0} \u00b7 up to date", v);
         var apexRelease = _latest.GetValueOrDefault(Repo[Components.Apex]);
         var test = Verify.TestBuild(g, s, apexRelease);
-        var found = Verify.Files(g, s, apexRelease).Concat(_found.Where(x => x.Suggest is null)).ToList();
+        var found = GpuFindings(s).Concat(Verify.Files(g, s, apexRelease)).Concat(_found.Where(x => x.Suggest is null)).ToList();
         var clean = found.Count == 0;
         // (the header already says the game is current: "in place" only after a check the player asked for)
         var check = clean ? (_checkedAt is null ? "" : T("Everything is in place (checked at {0}).", _checkedAt))
@@ -551,11 +572,15 @@ public sealed partial class MainWindow : Window
         // the problems and suggestions, between the rows and the buttons
         var notes = new StackPanel { Spacing = 8, Padding = new Thickness(18, 12, 18, 12), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, 1, 0, 0) };
         foreach (var x in found)
-            notes.Children.Add(new InfoBar
+        {
+            var bar = new InfoBar
             {
                 IsOpen = true, IsClosable = false, Message = T(x.Text, x.Args), Title = x.CanFix ? T("Setup fixes this") : "",
                 Severity = x.Severity switch { Severity.Error => InfoBarSeverity.Error, Severity.Warning => InfoBarSeverity.Warning, _ => InfoBarSeverity.Informational },
-            });
+            };
+            if (x.Link is { } link) bar.ActionButton = new HyperlinkButton { Content = T("Read more"), NavigateUri = new Uri(link) };
+            notes.Children.Add(bar);
+        }
         // (the suggestions show on Components, not on the status)
         if (notes.Children.Count > 0) StatusList.Children.Add(notes);
 
@@ -652,7 +677,7 @@ public sealed partial class MainWindow : Window
         if (_state is not { } s) return;
 
         ProblemList.Children.Clear();
-        var found = _found.Where(x => x.Suggest is null).ToList();
+        var found = GpuFindings(s).Concat(_found.Where(x => x.Suggest is null)).ToList();
         foreach (var x in found)
         {
             var bar = new InfoBar
@@ -754,9 +779,11 @@ public sealed partial class MainWindow : Window
 
     void FillRenderer(State s)
     {
-        // the bridge needs Vulkan 1.3; one already installed stays listed, so it can be kept or removed
+        // DXVK and the bridge need what DXVK asks of the card and its driver (Gpu); one already installed stays listed, so it can
+        // be removed
         var tags = new List<string> { RDxvk, RBridge, RNative };
-        if (BridgeBlocked && s.Layer != Layer.Bridge) tags.Remove(RBridge);
+        if (VulkanBlocked && s.Layer != Layer.Bridge) tags.Remove(RBridge);
+        if (VulkanBlocked && s.Layer != Layer.Dxvk) tags.Remove(RDxvk);
         if (s.Layer == Layer.Other) tags.Add(RKeep);
         // each choice: its name, what it does, and Installed on the one the game has now (rebuilt when the list, the language
         // or the installed one changes)
@@ -818,7 +845,8 @@ public sealed partial class MainWindow : Window
             : Newer(latest, s.ApexVersion) ? T("Updates {0} to {1}. Your settings stay.", s.ApexVersion, latest)
             : T("{0} is installed and up to date: nothing to change.", s.ApexVersion);
 
-        if (BridgeBlocked && _renderer == RBridge && s.Layer != Layer.Bridge) _renderer = RDxvk;
+        if (VulkanBlocked && _renderer == RBridge && s.Layer != Layer.Bridge) _renderer = RDxvk;
+        if (VulkanBlocked && _renderer == RDxvk && s.Layer != Layer.Dxvk) _renderer = RNative;
         FillRenderer(s);
         var cur = RendererOf(s);
         var changed = _renderer != cur;
@@ -830,9 +858,10 @@ public sealed partial class MainWindow : Window
             : (T("Your d3d9.dll stays as it is."), "ApexMutedBrush"));
         GpuLine.Text = _vulkan is { } gpu && gpu.Card is not null ? T("Your graphics card: {0}", $"{gpu.Card} \u00b7 Vulkan {gpu.Version}") : "";
         BridgeDetail.Text = "";
-        if (BridgeBlocked && _renderer != RBridge && _vulkan is { } vk)
-            BridgeDetail.Text = T("The RTX Remix bridge needs a graphics card with Vulkan 1.3 (found: {0}).",
-                vk.Card is null ? "Vulkan —" : $"{vk.Card}, Vulkan {vk.Version}");
+        if (OldCard)
+            BridgeDetail.Text = T("DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0}).", CardFound);
+        else if (OldDriver)
+            BridgeDetail.Text = T("Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again.", MissingList);
 
         // the game resets its graphics options when the card it sees changes: DXVK's TS3W profile and the bridge report a
         // GeForce GTX 580; the game's own D3D9 the real card (DXVK on TS3.exe: unverified, so treated as a change)

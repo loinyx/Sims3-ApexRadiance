@@ -29,7 +29,11 @@ Setup finds the game, compares what is installed with the player's choice and ap
 
 1. **Game.** It finds Steam 1.67.2 (`TS3W.exe`) and EA app 1.69.47 (`TS3.exe`) installs, or a folder the player picks.
 2. **Components.** Apex Radiance is required. The renderer is DXVK (recommended), the RTX Remix bridge zip of the Apex
-   release (offered only when a graphics card has Vulkan 1.3, which its DXVK 2 needs), or the game's own Direct3D 9; Ultimate ASI Loader is added only when no loader is found; other mods that work
+   release, or the game's own Direct3D 9. DXVK and the bridge are offered only when a graphics card has Vulkan 1.3 and the
+   device extensions DXVK requires (`Gpu.DxvkExtensions`, from DXVK 3.1.1's required list); without them DXVK finds no adapter
+   and the game closes at start. Vulkan 1.3 with an extension missing is an old driver, not an old card (an Intel Iris Xe on
+   driver 101.4502 lacks `VK_KHR_load_store_op_none`, which Iris Xe drivers have from 101.6556): Setup then asks for a driver
+   update, and when DXVK or the bridge is already installed the status shows the error with the vendor's driver page; Ultimate ASI Loader is added only when no loader is found; other mods that work
    with Apex can be switched on. The full list, with sources and target folders, is in
    [installer/README.md](../../installer/README.md#what-it-does).
 3. **Install.** Every file is downloaded at install time from its author's GitHub release (never re-hosted) and checked
