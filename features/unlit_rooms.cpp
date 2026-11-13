@@ -84,6 +84,10 @@ float FurnitureTintNow() { return 1.0f + (g_blue - 1.0f) * NightNow(); }
 std::vector<Vec4> g_known[2];
 Vec4 g_target[2];                  // what rooms should hold now (Apex's colours when on, the game's when off)
 bool g_retintDue = false, g_restDue = false;
+// the target colours moved (a slider, the game's base, on/off) since the last rest: the rigs gather again even when no room
+// was retinted. Rooms streaming in alone (OnRoomsChanged) regather the rigs only when a room took another colour: each
+// regather walks every rig of the world (4 to 20 ms a frame, 40 times in 10 s while the camera flew over a town)
+bool g_targetMoved = false;
 DWORD g_lastRetint = 0, g_lastRig = 0, g_rigAgainAt = 0;
 long g_retinted = 0, g_dimSent = 0, g_seeded = 0;
 DWORD g_changedAt = 0, g_nextBaseCheck = 0;
@@ -139,6 +143,7 @@ void Retarget() {
         g_target[i] = g_on ? g_colour[i] : g_base[i];
     }
     g_retintDue = g_restDue = true;
+    g_targetMoved = true;
     g_changedAt = GetTickCount();
 }
 // ---- The unlit colour as a base under the lamps (the controls set the room's tone with a lamp on too, so turning
@@ -703,21 +708,24 @@ void OnPresent() {
     if (g_retintDue && now - g_lastRetint >= 50) {
         g_retintDue = false;
         g_lastRetint = now;
-        Retint(false);
-        if (now - g_lastRig >= 250) { // objects: their rigs gather again (at most 4 times a second)
-            g_lastRig = now;
-            ObjectLightBridge::RequestRigRefresh();
-        } else
-            g_rigAgainAt = now + 250;
+        if (Retint(false) || g_targetMoved) {
+            if (now - g_lastRig >= 250) { // objects: their rigs gather again (at most 4 times a second)
+                g_lastRig = now;
+                ObjectLightBridge::RequestRigRefresh();
+            } else
+                g_rigAgainAt = now + 250;
+        }
     }
     // At rest: rooms topped up from their lamps get a new solve; the rigs once more after those solves
     if (g_restDue && !g_retintDue && now - g_changedAt > 400) {
         g_restDue = false;
         g_relights++;
-        Retint(true);
-        g_lastRig = now;
-        ObjectLightBridge::RequestRigRefresh();
-        g_rigAgainAt = now + 1500;
+        if (Retint(true) || g_targetMoved) {
+            g_lastRig = now;
+            ObjectLightBridge::RequestRigRefresh();
+            g_rigAgainAt = now + 1500;
+        }
+        g_targetMoved = false;
     }
     if (g_rigAgainAt && static_cast<int32_t>(now - g_rigAgainAt) >= 0) {
         g_rigAgainAt = 0;
