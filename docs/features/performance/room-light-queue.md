@@ -198,8 +198,10 @@ edits never take it.
 About 120 ms after a switch (`LevelLightShare::RelightLampSwitch`, with either option), the rooms the lamp can reach are
 sent again: those holding it, its own room (`LampHome`: room id `light+8` on the story whose lowest floor is the highest
 at or under the lamp's height), the rooms near the stair openings of its story and the stories next to it, and every
-story's outdoor rooms for an outdoor lamp. A lamp moved into another room, moved and switched, or more than 8 lamps at
-once still send the whole lot. A room that is queued and has not started its solve is skipped (its gather reads the
+story's outdoor rooms for an outdoor lamp (a lamp of a basement's room 0 is not one: the game shares no basement lamp
+with the stories above, so a pool light's switch sent every story's room 0 and the roofed rooms with doors outside, 3 to
+4 s of 30 ms solve frames). A lamp moved into another room, or more than 8 lamps at once, still send the whole lot; a
+switch in place is no move (it was taken for one, and every room it reaches lost its fresh solve). A room that is queued and has not started its solve is skipped (its gather reads the
 lamps as they are when it starts), and when only lamps switched off, a room with an empty light list is left alone.
 The rooms it sends, and the fresh solves it keeps that are still running, are urgent (tier 2) and held with
 the edit's other stories; only a lamp moved into another room or story resends every room (fresh solves of the other

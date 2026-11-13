@@ -18022,7 +18022,9 @@ int RelightLampSwitch(uintptr_t tracker, const char* why, unsigned long changedA
         anyOn = anyOn || on;
         reach.emplace_back(L, own);
         const uintptr_t mgrL = StoryManager(tracker, L);
-        if (own == 0 || (g_indoorReady && mgrL && RooflessRoom(mgrL, own))) outdoorLamp = true;
+        // (a basement's room 0 is no outdoor room of the stories above: the game shares no basement lamp with them, so a pool
+        // light's switch sent every story's room 0 and the roofed rooms with doors outside, 3 to 4 s of 30 ms solve frames)
+        if (L >= 0 && (own == 0 || (g_indoorReady && mgrL && RooflessRoom(mgrL, own)))) outdoorLamp = true;
         // the rooms with an opening into its room, whether they took its lamps at their last gather or not (indoor light
         // through openings: a room that lost a lifted lamp holds none of them now)
         if (own > 0 && mgrL) SameStoryInner(mgrL, L >= 1 ? StoryManager(tracker, L - 1) : 0, L, own, 2, reach);

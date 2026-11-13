@@ -875,7 +875,9 @@ bool MarkDecideImpl(uintptr_t tl, int room, uintptr_t entry, uintptr_t light) {
                     if (sw != end) *sw = LevelLightShare::LampSwitch{light, tl, room}; // a drag: where it is now
                     else if (pending.switchCount < kLotLamps) pending.switched[pending.switchCount++] = LevelLightShare::LampSwitch{light, tl, room};
                     else pending.allRooms = true;
-                    if (!pure) pending.relocated = true;
+                    // (into another room only: a switch in place is no relocation; marked as one, a pool light's switch sent
+                    // every room it reaches again, the fresh solves that had its new state too)
+                    if (!stayed) pending.relocated = true;
                 } else if (!pending.allRooms && std::find(pending.lamps, pending.lamps + pending.lampCount, light) == pending.lamps + pending.lampCount) {
                     if (pending.lampCount < kLotLamps) pending.lamps[pending.lampCount++] = light;
                     else pending.allRooms = true;
