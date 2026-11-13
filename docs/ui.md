@@ -282,10 +282,9 @@ translated labels do not fit.
 
 `Profiles`, `LUTs`, `Captures` and `Screenshots` keep their existing paths; internal profile keys and part bits are
 unchanged. Player settings and logs stay at the root so older builds and report tools remain compatible.
-Development-only shader rejection, shader census and depth captures now use `Diagnostics/RejectedShaders`,
-`Diagnostics/ShaderCensus` and `Diagnostics/DepthCaptures`. Public builds do not create rejected-shader dumps.
-Legacy diagnostic folders are left intact; their existing filenames are checked where needed to avoid duplicate dumps
-or capture-number reuse. No user files are moved or deleted.
+Development builds write their diagnostics at the root too: refused shaders in `ShadersRecusados`, the shader census
+in `Censo` and depth captures in `Profundidade`. Each file is named by content or number and written once, so a later
+session does not duplicate it. Public builds create none of these folders, and no user files are moved or deleted.
 
 ## Startup and notices
 
