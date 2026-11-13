@@ -52,7 +52,6 @@
 #include "memory_patch.h"
 #include "drag_lite.h"
 #include "restart_settle.h"
-#include "rt_outdoor_lamps.h"
 #include "imgui.h"
 #include <windows.h>
 #include <psapi.h>
@@ -619,7 +618,6 @@ void Drain(BYTE* tree, BYTE* before) {
         const float budget = LotLightingMotion::DrainBudget(LotLightingMotion::SampleCameraMoving() ? 1.0f
                              : AtriumHold::EditHolding() && !LevelLightShare::LampDragging() ? 16.0f
                              : lampEdit ? (g_refining ? 4.0f : LevelLightShare::LampDragging() ? 6.0f : 12.0f)
-                             : RtOutdoorLamps::KeptRush() ? 12.0f // (the new active lot's kept room-0 solves; predicted steps below)
                              : LevelLightShare::DayNightSwitching() ? RoomAmbientPolicy::DayNightWindow::kDrainMs // (with the lot pass's 25 ms: 33 ms a frame)
                                         : LevelLightShare::SettlingAfterLoad() ? 4.0f + ((DevSwitches::RoomDrainBudget() ? 6.0f : 12.0f) - 4.0f) * LotLightingMotion::SettleScale()
                                                                                : LotLightingMotion::SteadyDrainMs(4.0f)); // (2.15.3) the steady pacing: 1 to 4 ms
@@ -629,8 +627,7 @@ void Drain(BYTE* tree, BYTE* before) {
         // complete solve; only the frame a room finishes in can move.
         // Lamp edits keep the old pacing (their light must follow the lamp; a slower edit drain was rejected before).
         // nor an urgent room (an automatic switch-on put first: auto_light_priority), which keeps the whole budget
-        const bool predict = !lampEdit && !AtriumHold::EditHolding() &&
-                             ((DevSwitches::RoomDrainBudget() && !(LevelLightShare::LampUrgency(room) > 1.0f)) || RtOutdoorLamps::KeptRush());
+        const bool predict = DevSwitches::RoomDrainBudget() && !lampEdit && !AtriumHold::EditHolding() && !(LevelLightShare::LampUrgency(room) > 1.0f);
         static float s_stepMs = 0.0f; // running average of one solve step (render thread only)
         if (lampEdit) g_drainUrgent.fetch_add(1, std::memory_order_relaxed);
         alignas(16) BYTE sw[32] = {};

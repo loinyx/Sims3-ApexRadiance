@@ -637,11 +637,10 @@ uintptr_t g_holdFor = 0;
 DWORD g_holdForAt = 0, g_holdAt = 0;
 DWORD g_switchAt = 0; // the last active-lot switch, until a room-0 solve of the new lot ends after it (0: none)
 // The new active lot's kept room-0 solves come one story at a time (the game solves one room at a time): for kKeptRushMs
-// after a switch its ground story goes first (RoomLightQueue::GroundFirst, renewed while it has none) and the queue takes
-// the edit budget while any story waits (KeptRush). The town square waited 18 s, its ground story last
+// after a switch its ground story goes first (RoomLightQueue::GroundFirst, renewed while it has none). The town square's
+// ground story waited 14 s, solved last; first, 3.5 s. (A 12 ms budget meanwhile was tried: 30-140 ms steps, no gain.)
 constexpr DWORD kKeptRushMs = 8000;
 DWORD g_rushFrom = 0;                  // (render thread) the switch the rush follows (0: none)
-std::atomic<bool> g_rush{false};       // the active lot waits for kept solves within the rush
 // (physical indoor lamps, render thread) a lot lamp as each room-0 map's pick reads it, once a round (Frame clears it): every
 // story's maps read every lot lamp again, with nothing edited
 struct LampNow {
@@ -2942,7 +2941,6 @@ void Frame(IDirect3DDevice9* dev) {
     LARGE_INTEGER tp2{};
     QueryPerformanceCounter(&tp2);
     const double lampsMs = Ms(tp1, tp2) - Ms(tn0, tn1); // (the lots next to it count in slotsMs)
-    g_rush.store(!allReady && g_rushFrom && GetTickCount() - g_rushFrom < kKeptRushMs, std::memory_order_relaxed);
     if (allReady) g_rushFrom = 0;
     if (g_slots.empty() || !allReady) {
         g_on.store(!g_slots.empty());
@@ -3995,7 +3993,6 @@ bool CoversRoom(const void* room) {
     return g_cover.tracker == tracker && g_cover.full && GetTickCount() - g_cover.at < kCoverFreshMs;
 }
 uintptr_t ActiveTracker() { return g_proxyWanted.load(); }
-bool KeptRush() { return g_rush.load(std::memory_order_relaxed); }
 bool PhysCoversRoom0(const void* room0) {
     if (!CoversRoom(room0)) return false;
     std::lock_guard<std::mutex> lk(g_coverMx);
