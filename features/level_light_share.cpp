@@ -625,7 +625,8 @@ void GatherSoon(void* room) {
     }
 }
 // 12/10: an urgent entry is live until its deadline, and after it while its room still waits for or is in its solve
-// (states 1-3), at most 8 s after its latest mark (RoomAmbientPolicy::UrgencyKept): a room of the edit whose solve had not
+// (states 1-3), at most 8 s after its latest mark or a drag's release after it (RoomAmbientPolicy::UrgencyKept,
+// UrgencyClockFrom), and while a drag holds it: a room of the edit whose solve had not
 // begun 3 s after the mark lost its first place and was solved seconds later in the game's order. Under g_urgentMx; the
 // room's fields are read with SEH (RoomKey, RoomState).
 bool UrgentLive(UrgentRoom& u, DWORD now) {
@@ -634,7 +635,9 @@ bool UrgentLive(UrgentRoom& u, DWORD now) {
     int id = 0;
     const void* room = reinterpret_cast<const void*>(u.room);
     const int state = RoomKey(room, mgr, id) && mgr == u.mgr && id == u.id ? RoomState(room) : -1;
-    if (RoomAmbientPolicy::UrgencyKept(now, u.until, u.marked, state)) {
+    // (a drag's hold keeps the room waiting on purpose: kept while it lasts, its 8 s counted from the release)
+    const bool dragHeld = state >= 1 && state <= 3 && DragLite::Engaged();
+    if (dragHeld || RoomAmbientPolicy::UrgencyKept(now, u.until, RoomAmbientPolicy::UrgencyClockFrom(u.marked, DragLite::LastReleaseTick()), state)) {
         if (!u.kept) { // counted once per mark (the first time it outlives its deadline)
             u.kept = true;
             g_urgentKept.fetch_add(1, std::memory_order_relaxed);
