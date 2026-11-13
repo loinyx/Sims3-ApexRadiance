@@ -18,8 +18,8 @@ independently of the profiler's selectable clock. A call can span several stages
 the entering or exiting stage.
 
 A bounded queue passes events to the existing initialization pump. Hook producers use a nonblocking lock attempt;
-contention and full queues increment a loss counter. The pump writes `LotLoadAnalysis-<pid>-<date>-<time>.csv` in the
-Apex documents folder, capped at 16 MiB per session, and logs terminal events. Captures have separate epochs when
+contention and full queues increment a loss counter. The pump writes `Diagnostics\LotLoadAnalysis-<pid>-<date>-<time>.csv` in
+the Apex documents folder (the newest 10 sessions are kept), capped at 16 MiB per session, and logs terminal events. Captures have separate epochs when
 the profiler is toggled. Tracking holds at most 256 lot IDs; exceeding it discards request baselines with a warning.
 
 ## Lighting wait note

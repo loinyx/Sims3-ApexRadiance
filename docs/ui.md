@@ -282,9 +282,13 @@ translated labels do not fit.
 
 `Profiles`, `LUTs`, `Captures` and `Screenshots` keep their existing paths; internal profile keys and part bits are
 unchanged. Player settings and logs stay at the root so older builds and report tools remain compatible.
-Development builds write their diagnostics at the root too: refused shaders in `ShadersRecusados`, the shader census
-in `Censo` and depth captures in `Profundidade`. Each file is named by content or number and written once, so a later
-session does not duplicate it. Public builds create none of these folders, and no user files are moved or deleted.
+Developer mode writes its per-session files (`MemoryAnalysis`, `GameplayMemory`, `GameCategories`, `AddressOwners`,
+`LotLoadAnalysis`, `RoomLampProbe`, plus the `calib_*.bmp` map comparisons) to `Diagnostics\`
+(`ApexPaths::NewSessionFile`, `framework/session_file.h`). Only the newest 10 sessions of each family stay, and copies
+that older builds left at the root move there the first time. Refused shaders (`ShadersRecusados`), the shader census
+(`Censo`) and depth captures (`Profundidade`) keep their folders at the root; their files are named by content or
+number, so they do not pile up. With developer mode off none of these are written. Captures prune themselves
+(`Captures\`), and the log, hitch and timeline files keep one `.old` copy.
 
 ## Startup and notices
 

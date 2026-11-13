@@ -1,5 +1,6 @@
 #include "../../features/address_space.cpp"
 #include <cassert>
+#include <fstream>
 #include <iostream>
 
 namespace ApexLog { void Write(Level, const std::string&, const std::source_location&) noexcept {} }
@@ -56,7 +57,30 @@ void CheckGameDomains() {
     std::cout << "Game domains: core rings, the second instance, a broken ring and the script heap passed\n";
 }
 
+// NewSessionFile moves the family's root files into Diagnostics\ and keeps the newest kKeepSessions - 1 there
+void CheckSessionRetention() {
+    namespace fs = std::filesystem;
+    const fs::path root = ApexPaths::ApexDirectory(), dir = root / L"Diagnostics";
+    fs::create_directories(dir);
+    const auto touch = [](const fs::path& p, int age) {
+        std::ofstream(p) << "x";
+        fs::last_write_time(p, fs::file_time_type::clock::now() - std::chrono::hours(age));
+    };
+    for (int i = 0; i < 3; i++) touch(root / std::format(L"RetentionCheck-{}-old.txt", i), 100 + i);
+    for (int i = 0; i < 12; i++) touch(dir / std::format(L"RetentionCheck-{}-kept.txt", i), i);
+    touch(root / L"RetentionCheckOther-1.txt", 1); // another family: never moved
+    const std::wstring made = ApexPaths::NewSessionFile(L"RetentionCheck", L"txt");
+    assert(fs::path(made).parent_path() == dir && fs::path(made).filename().wstring().rfind(L"RetentionCheck-", 0) == 0);
+    assert(ApexPaths::SessionFiles(root, L"RetentionCheck").empty() && fs::exists(root / L"RetentionCheckOther-1.txt"));
+    const auto left = ApexPaths::SessionFiles(dir, L"RetentionCheck");
+    assert(left.size() == ApexPaths::kKeepSessions - 1);
+    for (int i = 0; i < 12; i++) assert(fs::exists(dir / std::format(L"RetentionCheck-{}-kept.txt", i)) == (i < 9)); // the 9 newest
+    for (const auto& p : left) fs::remove(p);
+    fs::remove(root / L"RetentionCheckOther-1.txt");
+}
+
 int main() {
+    CheckSessionRetention();
     kPublicBuild=false;
     SetLastError(1234);
     MemoryTelemetry::Attempt(1024, true, 0x123456, 0, MEM_COMMIT);

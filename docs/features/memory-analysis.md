@@ -19,8 +19,8 @@ of rendering. It runs only in builds containing development tools: when develope
 numbered development-flavour build (`APEX_DEVELOPMENT_BUILD_FLAVOR`) whose `measurements` switch is on, which also
 installs the address-space owner ledger and the game allocation categories. Those two measurements exist only in
 development-flavour builds. Players' builds never start the worker. No rendering hook performs the scan.
-Each session writes `MemoryAnalysis-<pid>-<date>-<time>.csv` in the Apex Radiance documents folder. Files stop growing
-at 16 MiB per session; log and profiler snapshots continue. Previous sessions remain available for comparison.
+Each session writes `Diagnostics\MemoryAnalysis-<pid>-<date>-<time>.csv` in the Apex Radiance documents folder. Files
+stop growing at 16 MiB per session; log and profiler snapshots continue. The newest 10 sessions stay for comparison.
 
 Samples contain process private committed bytes, physical working set and peak working set, system available
 physical memory and commit usage/limit, free virtual bytes and largest free regions below/above 2 GiB, committed
@@ -75,7 +75,7 @@ splits free regions crossing 2 GiB. No heap is walked, no thread is suspended an
 
 ## Gameplay allocation telemetry
 
-Developer mode adds `GameplayMemory-<pid>-<date>-<time>.csv`. Six cumulative size buckets record
+Developer mode adds `Diagnostics\GameplayMemory-<pid>-<date>-<time>.csv`. Six cumulative size buckets record
 VirtualAlloc attempts, requested bytes and failed attempts at the five existing FastMemory allocator call sites.
 Retries count as attempts. Requested bytes are allocation traffic, not live memory or unique committed bytes.
 Coverage requires FastMemory to be running; `hook_active` records its state at the worker sample, not event time.

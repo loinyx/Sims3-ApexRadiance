@@ -1026,8 +1026,10 @@ void CompareWithGame(IDirect3DDevice9* dev) {
     if (!sorted.empty() && s_dumps < 12 && (sorted[sorted.size() * 9 / 10] > 1.3 || sorted[sorted.size() / 10] < 0.7)) {
         s_dumps++;
         const auto bmp = [&](const char* tag, const D3DLOCKED_RECT& lr) {
-            const std::wstring dir = ApexPaths::ApexDirectory();
-            const std::wstring path = dir + std::format(L"\\calib_{}_s{}_m{}_c{}_{}.bmp", s_dumps, s->story, s->m, s->cls, std::wstring(tag, tag + std::strlen(tag)));
+            const std::wstring dir = ApexPaths::DiagnosticsDirectory();
+            if (!ApexPaths::EnsureApexDirectory()) return;
+            CreateDirectoryW(dir.c_str(), nullptr);
+            const std::wstring path = dir + std::format(L"calib_{}_s{}_m{}_c{}_{}.bmp", s_dumps, s->story, s->m, s->cls, std::wstring(tag, tag + std::strlen(tag)));
             FILE* f = _wfopen(path.c_str(), L"wb");
             if (!f) return;
             const uint32_t w = dc.Width, h = dc.Height, row = w * 3, size = 54 + row * h;
@@ -1049,7 +1051,7 @@ void CompareWithGame(IDirect3DDevice9* dev) {
         };
         bmp("gpu", lc);
         bmp("game", lg);
-        LOG_INFO(std::format("[RtOutdoorLamps] GPU against the game: maps written as calib_{}_s{}_m{}_c{}_gpu.bmp / _game.bmp", s_dumps, s->story, s->m, s->cls));
+        LOG_INFO(std::format("[RtOutdoorLamps] GPU against the game: maps written as Diagnostics\\calib_{}_s{}_m{}_c{}_gpu.bmp / _game.bmp", s_dumps, s->story, s->m, s->cls));
     }
     s->game->UnlockRect(0);
     sys->UnlockRect();

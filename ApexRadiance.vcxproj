@@ -368,6 +368,7 @@
     <ClInclude Include="features\terrain_bake_cone.h" />
     <ClInclude Include="framework\apex_log.h" />
     <ClInclude Include="framework\apex_paths.h" />
+    <ClInclude Include="framework\session_file.h" />
     <ClInclude Include="framework\apex_util.h" />
     <ClInclude Include="framework\call_chain.h" />
     <ClInclude Include="framework\crash_report.h" />

@@ -10,7 +10,7 @@ try {
  if($LASTEXITCODE -ne 0){throw 'Lot analysis test compilation failed'}
  & '.\lot_analysis_checks.exe'
  if($LASTEXITCODE -ne 0){throw 'Lot analysis checks failed'}
- $csv=Get-ChildItem -LiteralPath $OutDir -Filter 'LotLoadAnalysis-*.csv' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+ $csv=Get-ChildItem -LiteralPath (Join-Path $OutDir 'Diagnostics') -Filter 'LotLoadAnalysis-*.csv' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
  $rows=@(Import-Csv -LiteralPath $csv.FullName)
  if($rows.Count -ne 4 -or @($rows[0].PSObject.Properties).Count -ne 19){throw 'CSV schema/count failed'}
  if($rows[0].kind -ne 'request' -or $rows[1].stage_before -ne $rows[1].stage_after -or $rows[-1].done -ne 'true'){throw 'CSV event sequence failed'}
