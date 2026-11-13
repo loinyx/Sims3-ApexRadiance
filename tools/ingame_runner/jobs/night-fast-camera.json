@@ -8,6 +8,13 @@
     },
     "screen": {
       "background_fps_limit": 0
+    },
+    "qol": {
+      "frame_profiler": {
+        "start_at_load": true,
+        "report_every_s": 60,
+        "write_file": true
+      }
     }
   },
   "variants": {

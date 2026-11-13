@@ -389,6 +389,9 @@ std::atomic<float> g_floorMs{8.0f};
 std::atomic<bool> g_countState{true};
 std::atomic<bool> g_writeFile{true};
 std::atomic<bool> g_regTiming{false};       // Advanced option
+// (runner) `start_at_load`: the timing run at load, no menu; `report_every_s`: a report and a Clear every N s of frames
+std::atomic<int> g_reportEveryS{0};
+DWORD g_lastReport = 0;
 std::atomic<bool> g_regTimingActive{false}; // option && enabled, read by the registry instrumentation
 std::atomic<bool> g_sampleRender{false};    // statistical sampler: render thread
 std::atomic<bool> g_sampleSim{false};       // statistical sampler: simulation thread
@@ -3588,6 +3591,8 @@ void FrameBoundary(uint64_t now) {
 void AttachAllLocked();
 void AttachWaitingLocked();
 
+void SaveReport();
+void Clear();
 void OnPresentStart(D3D9Hooks::DeviceContext& ctx) {
     const uint64_t now = Now();
     g_renderTid.store(GetCurrentThreadId(), std::memory_order_relaxed);
@@ -3598,6 +3603,11 @@ void OnPresentStart(D3D9Hooks::DeviceContext& ctx) {
         Push(s, kPresentHooks, &ctx, kDispatch); // the bookkeeping below counts as mod Present-hook time
     }
     FrameBoundary(now);
+    if (const int every = g_reportEveryS.load(std::memory_order_relaxed); every > 0) {
+        const DWORD tick = GetTickCount();
+        if (!g_lastReport) g_lastReport = tick;
+        else if (tick - g_lastReport >= static_cast<DWORD>(every) * 1000u) g_lastReport = tick, SaveReport(), Clear();
+    }
     if (g_attachPending.load(std::memory_order_relaxed)) {
         // First frame after enabling: the timed functions are attached here, on the render thread, so the call-site
         // writes never race the render thread executing them, and after the startup patches have installed.
@@ -5363,7 +5373,7 @@ void SaveToToml(toml::table& qolTable) {
 
 void LoadFromToml(const toml::table& qolTable) {
     if (kPublicBuild) return;
-    bool enabled = false;
+    bool enabled = false, startAtLoad = false;
     bool mutexChanged = false;
     if (auto node = qolTable["frame_profiler"].as_table()) {
         const auto& t = *node;
@@ -5379,6 +5389,8 @@ void LoadFromToml(const toml::table& qolTable) {
         const bool mutexTimed = t["time_mutex_lock"].value_or(false);
         mutexChanged = mutexTimed != g_timeMutex.exchange(mutexTimed);
         enabled = t["enabled"].value_or(false);
+        g_reportEveryS.store(std::clamp(static_cast<int>(t["report_every_s"].value_or(int64_t{0})), 0, 3600));
+        startAtLoad = t["start_at_load"].value_or(false);
         if (state != g_countState.load()) {
             g_countState.store(state);
             std::lock_guard<std::mutex> lk(g_ctrlMutex);
@@ -5389,6 +5401,7 @@ void LoadFromToml(const toml::table& qolTable) {
         }
     }
     SetEnabled(enabled);
+    if (startAtLoad && !g_enabled.load()) ApplyPreset(false);
     std::lock_guard<std::mutex> lk(g_ctrlMutex); // sampling / Mutex::Lock options may have changed while the profiler stays on
     UpdateSamplerLocked();
     if (mutexChanged) ApplyMutexOptionLocked();
