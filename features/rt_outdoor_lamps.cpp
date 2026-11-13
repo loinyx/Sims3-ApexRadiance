@@ -636,6 +636,12 @@ uint64_t g_lotId = 0;
 uintptr_t g_holdFor = 0;
 DWORD g_holdForAt = 0, g_holdAt = 0;
 DWORD g_switchAt = 0; // the last active-lot switch, until a room-0 solve of the new lot ends after it (0: none)
+// The new active lot's kept room-0 solves come one story at a time (the game solves one room at a time): for kKeptRushMs
+// after a switch its ground story goes first (RoomLightQueue::GroundFirst, renewed while it has none) and the queue takes
+// the edit budget while any story waits (KeptRush). The town square waited 18 s, its ground story last
+constexpr DWORD kKeptRushMs = 8000;
+DWORD g_rushFrom = 0;                  // (render thread) the switch the rush follows (0: none)
+std::atomic<bool> g_rush{false};       // the active lot waits for kept solves within the rush
 // (physical indoor lamps, render thread) a lot lamp as each room-0 map's pick reads it, once a round (Frame clears it): every
 // story's maps read every lot lamp again, with nothing edited
 struct LampNow {
@@ -2151,6 +2157,7 @@ void Frame(IDirect3DDevice9* dev) {
             for (int S = 0; S <= 7; S++)
                 if (const void* r = LevelLightShare::Room0Of(g_tracker, S)) left[nl++] = r;
         if (g_tracker) RoomLightQueue::GroundFirst(LevelLightShare::Room0Of(tracker, 0));
+        g_rushFrom = std::max<DWORD>(GetTickCount(), 1);
         DropAll(dev, "another active lot", true, true);
         OutdoorDelta::GraceRooms(left, nl, GetTickCount() + kLeftLotGraceMs);
         {
@@ -2333,6 +2340,7 @@ void Frame(IDirect3DDevice9* dev) {
                 if (sl->story == S && sl->room == room && sl->cls == cls && sl->used) had = true, all = all && sl->ok && sl->relit;
             if (!(had && all) && act) {
                 allReady = false;
+                if (S == 0 && g_rushFrom && GetTickCount() - g_rushFrom < kKeptRushMs) RoomLightQueue::GroundFirst(room); // (renewed each frame)
                 const std::string last = OutdoorDelta::LastDrop(S, cls);
                 waiting.push_back(std::format("story {}: no kept solve of class {}{}", S, cls, last.empty() ? std::string() : " - last: " + last));
             }
@@ -2934,6 +2942,8 @@ void Frame(IDirect3DDevice9* dev) {
     LARGE_INTEGER tp2{};
     QueryPerformanceCounter(&tp2);
     const double lampsMs = Ms(tp1, tp2) - Ms(tn0, tn1); // (the lots next to it count in slotsMs)
+    g_rush.store(!allReady && g_rushFrom && GetTickCount() - g_rushFrom < kKeptRushMs, std::memory_order_relaxed);
+    if (allReady) g_rushFrom = 0;
     if (g_slots.empty() || !allReady) {
         g_on.store(!g_slots.empty());
         Inactive(waiting.empty() ? (g_slots.empty() ? "no room-0 map of the active lot could be relit (see the lines above)" : "")
@@ -3985,6 +3995,7 @@ bool CoversRoom(const void* room) {
     return g_cover.tracker == tracker && g_cover.full && GetTickCount() - g_cover.at < kCoverFreshMs;
 }
 uintptr_t ActiveTracker() { return g_proxyWanted.load(); }
+bool KeptRush() { return g_rush.load(std::memory_order_relaxed); }
 bool PhysCoversRoom0(const void* room0) {
     if (!CoversRoom(room0)) return false;
     std::lock_guard<std::mutex> lk(g_coverMx);

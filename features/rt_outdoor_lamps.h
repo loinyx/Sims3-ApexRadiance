@@ -99,6 +99,9 @@ bool CoversRoom(const void* room);
 bool PhysCoversRoom0(const void* room0);
 // Any thread: the active lot's tracker (the one whose occluders are wanted), 0 none
 uintptr_t ActiveTracker();
+// (any thread) the new active lot still waits for kept room-0 solves, within kKeptRushMs of the switch: the room queue gives
+// it the edit budget (RoomLightQueue drain) meanwhile
+bool KeptRush();
 // An edit of such a lamp (kind 0 a value or a switch, 1 a move; settle: a switch or an intensity change): timed until every
 // story shows it; the rooms that take room 0's lamps are sent after the room update (with the physical model, only after a
 // switch or an intensity change when every story draws the lamp from its law)
