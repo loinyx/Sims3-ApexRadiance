@@ -50,6 +50,7 @@ void SetLowLampLift(bool on);
 long LowLampLifted();
 bool Enabled();
 bool Watching(); // any thread: on, or copies still to drop
+bool RetiredAny(); // any thread: relit copies of lots left are still bound (their maps' unlocks must reach NoteUnlock)
 // Render thread, every frame: installs the callbacks once (EndScene pass, SetTexture swap, device reset)
 void OnPresent(IDirect3DDevice9* dev);
 // Render thread, SetTexture: a room-0 map with a relit copy is bound as the copy (CallOriginalSetTexture). True when it

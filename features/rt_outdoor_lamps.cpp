@@ -42,6 +42,7 @@
 #include "apex_log.h"
 #include "hook_guard.h"
 #include "dev_switches.h"
+#include "atrium_hold.h"
 #include "apex_memory.h"
 #include "game_addresses.h"
 #include "d3d9_hooks.h"
@@ -673,6 +674,7 @@ struct Retired {
 };
 std::vector<Retired> g_retired;
 std::unordered_map<const IDirect3DBaseTexture9*, Slot*> g_swapRetired;
+std::unordered_map<const void*, Slot*> g_retiredCopies; // a retired copy (or its high-detail one) -> its slot (ScaleOf, GameMapOf)
 uintptr_t g_retiredLo = ~uintptr_t{0}, g_retiredHi = 0;
 constexpr size_t kRetiredLots = 3;
 // (any thread: the game's map unlock) the retired copies' game maps, and those the game wrote since (their copies are stale)
@@ -830,6 +832,19 @@ void ReleaseSlot(Slot& s) {
     s.inAmbOk = false;
     s.map = RtLampGpu::Map{};
 }
+// A retired slot keeps only what its bound copy needs (game, copy, hi, scale): its relight buffers and indoor data go
+void TrimRetired(Slot& s) {
+    for (IDirect3DVertexBuffer9** vb : {&s.vb, &s.dyn, &s.dynNext, &s.kvb, &s.pvb})
+        if (*vb) (*vb)->Release(), *vb = nullptr;
+    if (s.preblur) s.preblur->Release(), s.preblur = nullptr;
+    ReleaseHiPoints(s);
+    if (s.inUv) s.inUv->Release(), s.inUv = nullptr;
+    s.inUvBuilt.clear();
+    if (s.inBase) s.inBase->Release(), s.inBase = nullptr;
+    for (IDirect3DTexture9*& g : s.inGame)
+        if (g) g->Release(), g = nullptr;
+    s.inAmbOk = false;
+}
 // Every stage that holds a copy takes the game's map back (render thread)
 void UnbindCopies(IDirect3DDevice9* dev) {
     if (!dev) return;
@@ -862,11 +877,14 @@ void RebuildSwap() {
 }
 void RebuildRetired() {
     g_swapRetired.clear();
+    g_retiredCopies.clear();
     g_retiredLo = ~uintptr_t{0}, g_retiredHi = 0;
     std::lock_guard<std::mutex> lk(g_retiredMx);
     g_retiredGame.clear();
     for (const Retired& r : g_retired) {
         g_swapRetired[r.s->game] = r.s.get();
+        g_retiredCopies[r.s->copy] = r.s.get();
+        if (r.s->hi) g_retiredCopies[r.s->hi] = r.s.get();
         g_retiredGame.insert(r.s->game);
         const uintptr_t a = reinterpret_cast<uintptr_t>(r.s->game);
         g_retiredLo = std::min(g_retiredLo, a), g_retiredHi = std::max(g_retiredHi, a);
@@ -904,11 +922,13 @@ void ReleaseRetired(IDirect3DDevice9* dev, const char* why) {
 void RetireSlots(IDirect3DDevice9* dev, uintptr_t lot) {
     const DWORD now = std::max<DWORD>(GetTickCount(), 1);
     for (auto& s : g_slots) {
-        if (!(s->copy && s->relit && s->game)) {
+        const bool written = s->watch >= 0 && (g_watchDirty[s->watch / 64].load(std::memory_order_relaxed) >> (s->watch % 64) & 1); // (its copy predates that)
+        if (!(s->copy && s->relit && s->game) || written) {
             ReleaseSlot(*s);
             continue;
         }
         if (s->watch >= 0) g_watchTex[s->watch].store(nullptr), s->watch = -1;
+        TrimRetired(*s);
         for (auto it = g_retired.begin(); it != g_retired.end(); ++it) // (an older copy of the same map: the newer one stands in)
             if (it->s->game == s->game) {
                 ReleaseSlot(*it->s);
@@ -957,7 +977,7 @@ void CompareWithGame(IDirect3DDevice9* dev) {
     static DWORD s_last = 0;
     static size_t s_next = 0;
     const DWORD now = GetTickCount();
-    if (kPublicBuild || !dev || g_slots.empty() || now - s_last < 10000) return;
+    if (!DevSwitches::kCompiled || kPublicBuild || !dev || g_slots.empty() || now - s_last < 10000) return; // (development builds: it locks the game's maps and waits on the GPU)
     s_last = now;
     Slot* s = nullptr;
     for (size_t i = 0; i < g_slots.size() && !s; i++) {
@@ -1121,7 +1141,7 @@ void DropAll(IDirect3DDevice9* dev, const char* why, bool requeue = true, bool r
     GpuRoomLamps::ReleaseAll();
     if (g_slots.empty() && !g_eng) return;
     const size_t n = g_slots.size();
-    if (retire) RetireSlots(dev, g_tracker); // (its copies stay bound while the game does not write those maps)
+    if (retire && AtriumHold::UnlockHooked()) RetireSlots(dev, g_tracker); // (its copies stay bound while the game does not write those maps)
     else {
         UnbindCopies(dev);
         for (auto& s : g_slots) ReleaseSlot(*s);
@@ -1879,6 +1899,7 @@ void SetEnabled(bool on) {
 }
 bool Enabled() { return g_option.load(std::memory_order_relaxed); }
 bool Watching() { return g_watch.load(std::memory_order_relaxed); }
+bool RetiredAny() { return g_retiredAny.load(std::memory_order_relaxed); }
 
 namespace {
 // The SetTexture swap (render thread, lock-free chain): the game's map -> its copy
@@ -1938,7 +1959,7 @@ void OnEndScene(IDirect3DDevice9* dev) {
     LARGE_INTEGER a{}, b{};
     QueryPerformanceCounter(&a);
     g_stampLights.clear();
-    if (!HookGuard::Run("RtOutdoorLamps frame", [dev] { Frame(dev); }) && (g_on.load() || !g_slots.empty() || !g_nb.empty())) {
+    if (!HookGuard::Run("RtOutdoorLamps frame", [dev] { Frame(dev); }) && (g_on.load() || !g_slots.empty() || !g_nb.empty() || !g_retired.empty())) {
         // Frame threw (now or before: it is off for the session): the game's maps are bound again and edits go to its solves
         g_on.store(false);
         g_watch.store(false);
@@ -4332,8 +4353,8 @@ IDirect3DTexture9* ScaleOf(const void* texture) {
     if (g_on.load(std::memory_order_relaxed))
         for (const auto& s : g_slots)
             if (s->copy == texture || (s->hi && s->hi == texture)) return s->relit && s->scaled ? s->scale : nullptr;
-    for (const Retired& r : g_retired) // (the lots left: their copies are still bound)
-        if (r.s->copy == texture || (r.s->hi && r.s->hi == texture)) return r.s->relit && r.s->scaled ? r.s->scale : nullptr;
+    if (const auto it = g_retiredCopies.find(texture); it != g_retiredCopies.end()) // (the lots left: their copies are still bound)
+        return it->second->relit && it->second->scaled ? it->second->scale : nullptr;
     return nullptr;
 }
 bool IndoorRoomsOf(const void* texture, IndoorRooms& out) {
@@ -4369,8 +4390,7 @@ const void* GameMapOf(const void* texture) {
     if (g_on.load(std::memory_order_relaxed))
         for (const auto& s : g_slots)
             if (s->copy == texture || (s->hi && s->hi == texture)) return s->game;
-    for (const Retired& r : g_retired)
-        if (r.s->copy == texture || (r.s->hi && r.s->hi == texture)) return r.s->game;
+    if (const auto it = g_retiredCopies.find(texture); it != g_retiredCopies.end()) return it->second->game;
     return texture;
 }
 

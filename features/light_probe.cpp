@@ -17,6 +17,7 @@
 #include "recorder.h"
 #include "d3d9_hooks.h"
 #include "shader_cache.h"
+#include "dev_switches.h"
 #include "apex_log.h"
 #include "apex_util.h"
 #include "apex_paths.h"
@@ -630,7 +631,7 @@ void ServicePaintChecks(IDirect3DDevice9* dev) {
 
 void RegisterPaintCheck() {
     static bool s_done = false;
-    if (s_done || kPublicBuild.load(std::memory_order_relaxed)) return;
+    if (s_done || !DevSwitches::kCompiled || kPublicBuild.load(std::memory_order_relaxed)) return; // (development builds: a hook on every SetTexture)
     s_done = true;
     D3D9Hooks::RegisterSetTexture("LightProbePaintCheck", [](D3D9Hooks::DeviceContext&, DWORD, IDirect3DBaseTexture9* b) {
         if (!b || b->GetType() != D3DRTYPE_TEXTURE) return D3D9Hooks::HookAction::Continue;
@@ -690,7 +691,7 @@ std::string DumpTexture(IDirect3DDevice9* dev, IDirect3DBaseTexture9* base, cons
     // pass 1: the stats (and the scale); pass 2 writes the 8-bit pixels directly (07/10: no float copies of a 5632x5632 map)
     double sum[4] = {};
     float mx[4] = {-1e30f, -1e30f, -1e30f, -1e30f}, mn[4] = {1e30f, 1e30f, 1e30f, 1e30f};
-    const bool gpuCheck = d.Pool != D3DPOOL_DEFAULT && d.Width * d.Height <= kMaxGpuReadTexels && GpuComparable(fmt);
+    const bool gpuCheck = d.Pool == D3DPOOL_MANAGED && d.Width * d.Height <= kMaxGpuReadTexels && GpuComparable(fmt);
     std::vector<float> game(gpuCheck ? static_cast<size_t>(d.Width) * d.Height * 4 : 0);
     for (UINT y = 0; y < d.Height; y++) {
         const BYTE* row = bits + static_cast<size_t>(y) * pitch;
@@ -1529,7 +1530,7 @@ bool ConfirmAim(POINT clientPixel) {
 void OnPresent(IDirect3DDevice9* dev) {
     if (!dev) return;
     RegisterPaintCheck();
-    if (!kPublicBuild.load(std::memory_order_relaxed)) ServicePaintChecks(dev);
+    if (DevSwitches::kCompiled && !kPublicBuild.load(std::memory_order_relaxed)) ServicePaintChecks(dev);
     if (g_state == State::Capturing) {
         g_state = State::Idle;
         FinishCapture(dev);

@@ -390,7 +390,7 @@ float __fastcall PriorityHook(BYTE* room) {
     if (room && p > 0.0f && DevSwitches::RestartSettle() && LevelLightShare::LampUrgency(room) <= 1.0f &&
         RestartSettle::Global().Hold(reinterpret_cast<uintptr_t>(room), GetTickCount64()))
         return 0.0f;
-    if (room && p > 0.0f && HookGuard::Run("RoomLightQueue moving room-0 hold", false, [room] { return MoveHold(room); })) return 0.0f;
+    if (room && p > 0.0f && g_prioOn && HookGuard::Run("RoomLightQueue moving room-0 hold", false, [room] { return MoveHold(room); })) return 0.0f;
     if (!room || !g_prioOn) return p;
     if (BYTE* g = g_ground.load(std::memory_order_relaxed)) {
         const DWORD now = GetTickCount(), until = g_groundUntil.load(std::memory_order_relaxed);
