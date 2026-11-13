@@ -21,6 +21,13 @@ public static class Gpu
     // card lacks. (null, null, []) when no Vulkan driver or card is found. Throws when the driver could not be asked: unknown, not a no.
     public static (Version? Version, string? Card, string[] Missing) Vulkan()
     {
+        // test runs: APEX_SETUP_FAKE_GPU = "<version>|<card>|<missing extension>,..." stands in for the driver's answer
+        if (Environment.GetEnvironmentVariable("APEX_SETUP_FAKE_GPU") is { Length: > 0 } fake)
+        {
+            var p = fake.Split('|');
+            return (Version.TryParse(p[0], out var fv) ? fv : null, p.Length > 1 && p[1].Length > 0 ? p[1] : null,
+                    p.Length > 2 ? p[2].Split(',', StringSplitOptions.RemoveEmptyEntries) : Array.Empty<string>());
+        }
         nint instance;
         var info = new InstanceCreateInfo { SType = 1 }; // VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO
         try

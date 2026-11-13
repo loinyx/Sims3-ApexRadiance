@@ -94,6 +94,8 @@ dotnet publish installer/ApexSetup -c Release -o installer/publish
 ```
 
 `APEX_SETUP_DRY_RUN=1` shows what Setup finds and would change on a real game while writing nothing.
+`APEX_SETUP_FAKE_GPU=<version>|<card>|<missing extension>,...` stands in for the Vulkan driver's answer (for example
+`1.3|Intel(R) Iris(R) Xe Graphics|VK_KHR_load_store_op_none`), to see the screens of an old driver or an old card.
 
 The tests run the engine on a fake `Game\Bin` and Documents folder in `%TEMP%` with local files (no network, no game).
 For a manual run against a fake game: start the exe with the game folder as its argument and `APEX_SETUP_DOCUMENTS` set
