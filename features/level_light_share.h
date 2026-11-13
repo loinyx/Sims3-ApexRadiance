@@ -440,6 +440,9 @@ uint64_t PhysicsKey();
 // no lamp edit is behind the send (Real-time outdoor lamps' sends for a lot's occluders or kept solve): a quiet mark (first
 // in the queue, no lamp edit) unless a lamp was edited in the last 1.5 s
 bool QueueRoomAgain(const void* room, bool quiet = false);
+// A room already waiting for or in its solve put first in the queue as a quiet mark (no lamp edit, no new solve: one in
+// progress goes on): a new active lot's room 0 that has no kept solve yet
+void MarkRoomFirst(void* room);
 // Room 0 of a story of a lot (tracker), null when none; any thread
 void* Room0Of(uintptr_t tracker, int story);
 // (the room lamp probe) room `id` of a story of a lot, null when none; any thread

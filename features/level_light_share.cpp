@@ -19889,6 +19889,11 @@ uint64_t PhysicsKey() {
                   (RoomMapDither::Running() && RoomMapDither::Enabled() ? 4u : 0u));
     return h;
 }
+void MarkRoomFirst(void* room) {
+    t_quietMark = true;
+    MarkUrgent(room, 1, false);
+    t_quietMark = false;
+}
 bool QueueRoomAgain(const void* room, bool quiet) {
     const DragLite::WhyScope liteWhy(DragLite::Why::QueueAgain);
     uintptr_t mgr = 0;

@@ -637,8 +637,10 @@ uintptr_t g_holdFor = 0;
 DWORD g_holdForAt = 0, g_holdAt = 0;
 DWORD g_switchAt = 0; // the last active-lot switch, until a room-0 solve of the new lot ends after it (0: none)
 // The new active lot's kept room-0 solves come one story at a time (the game solves one room at a time): for kKeptRushMs
-// after a switch its ground story goes first (RoomLightQueue::GroundFirst, renewed while it has none). The town square's
-// ground story waited 14 s, solved last; first, 3.5 s. (A 12 ms budget meanwhile was tried: 30-140 ms steps, no gain.)
+// after a switch its ground story goes first (RoomLightQueue::GroundFirst, renewed while it has none) and every other story's
+// room 0 still waiting for its solve is put first in the queue (LevelLightShare::MarkRoomFirst, a quiet mark: a solve in
+// progress goes on). The town square's ground story waited 14 s, solved last; first, 3.5 s. The gym's story 2 waited 10 s
+// behind the lot's other rooms. (A 12 ms budget meanwhile was tried: 30-140 ms steps, no gain.)
 constexpr DWORD kKeptRushMs = 8000;
 DWORD g_rushFrom = 0;                  // (render thread) the switch the rush follows (0: none)
 // (physical indoor lamps, render thread) a lot lamp as each room-0 map's pick reads it, once a round (Frame clears it): every
@@ -2339,7 +2341,16 @@ void Frame(IDirect3DDevice9* dev) {
                 if (sl->story == S && sl->room == room && sl->cls == cls && sl->used) had = true, all = all && sl->ok && sl->relit;
             if (!(had && all) && act) {
                 allReady = false;
-                if (S == 0 && g_rushFrom && GetTickCount() - g_rushFrom < kKeptRushMs) RoomLightQueue::GroundFirst(room); // (renewed each frame)
+                if (g_rushFrom && GetTickCount() - g_rushFrom < kKeptRushMs) {
+                    if (S == 0) RoomLightQueue::GroundFirst(room); // (renewed each frame)
+                    static std::unordered_map<const void*, DWORD> s_firstAt; // (a mark a second per room)
+                    DWORD& at = s_firstAt[room];
+                    if (rn.state >= 1 && rn.state <= 3 && GetTickCount() - at >= 1000) {
+                        at = GetTickCount();
+                        LevelLightShare::MarkRoomFirst(const_cast<BYTE*>(room));
+                    }
+                    if (s_firstAt.size() > 256) s_firstAt.clear();
+                }
                 const std::string last = OutdoorDelta::LastDrop(S, cls);
                 waiting.push_back(std::format("story {}: no kept solve of class {}{}", S, cls, last.empty() ? std::string() : " - last: " + last));
             }
