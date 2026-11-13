@@ -1,0 +1,15 @@
+0014: a surface's new client copy starts zeroed, as a new d3d9 or DXVK texture does. Upstream left a copy under 64 KB uninitialized (new[] without ()), and TS3 uploaded heap leftovers into the lot terrain overlay weights (64x64 A8R8G8B8): some lots drew their ground black on some loads.
+Applies after 0001-0013 on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only).
+diff --git a/bridge/src/client/d3d9_surface.cpp b/bridge/src/client/d3d9_surface.cpp
+--- a/bridge/src/client/d3d9_surface.cpp
++++ b/bridge/src/client/d3d9_surface.cpp
+@@ -353,7 +353,8 @@
+         p = static_cast<uint8_t*>(VirtualAlloc(nullptr, surfaceSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+       }
+       m_shadow.get_deleter().virtualAlloc = p != nullptr;  // m_shadow is empty here, so no old block is freed the wrong way
+-      m_shadow.reset(p ? p : new uint8_t[surfaceSize]);
++      // A new copy starts zeroed, as a new d3d9 or DXVK texture does (TS3's lot terrain overlay maps rely on it).
++      m_shadow.reset(p ? p : new uint8_t[surfaceSize]());
+       // MANAGED ignores DISCARD, so the whole level is fetched. An unfetched copy would be uploaded over the server's on Unlock,
+       // so the lock fails and the copy stays freed.
+       if (m_copyFreed && !fetchCopy(surfaceSize)) {
