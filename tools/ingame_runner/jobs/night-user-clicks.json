@@ -1,7 +1,7 @@
 {
   "id": "night-user-clicks",
   "description": "The tester's own clicks and keys (bookmarks/user-session.input.json, from continuous-session) played back exactly, from the same point after the save loads: the game window comes to the front and keeps the mouse and keyboard until the playback ends (a real key or click ends it early). One recording (F6) over the whole playback; the developer log times each lamp edit. Nothing is saved.",
-  "save": "Claude teste",
+  "save": "ApexTest-Night",
   "toml": {
     "ui": {
       "developer_mode": true,

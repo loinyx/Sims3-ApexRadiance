@@ -1,7 +1,7 @@
 {
   "id": "night-fast-camera",
   "description": "Frame rate and smoothness at night with the camera moving fast, as a player flies over the town: pans over 8 lots at 30 m (20 s a pass, 4 passes), fast orbits of the gym, the art museum and the household's lot (3 turns in 10 s each), and pans around the town square at 20 m. No recordings, nothing edited or saved. Developer mode on, the background frame limit lifted; run with -Profiler Frames for frame times.",
-  "save": "Claude teste",
+  "save": "ApexTest-Night",
   "toml": {
     "ui": {
       "developer_mode": true

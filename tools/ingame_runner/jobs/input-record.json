@@ -1,7 +1,7 @@
 {
   "id": "input-record",
   "description": "The tester's lighting check, clicked by hand at night right after the save loads: every click, key and mouse move (relative to the game window) is kept until the file done is in the run's folder (up to 30 minutes), as bookmarks/<name>.input.json for input_play. Developer mode on (the recorder key F6 as in the playback). Nothing is saved.",
-  "save": "Claude teste",
+  "save": "ApexTest-Night",
   "toml": {
     "ui": {
       "developer_mode": true,

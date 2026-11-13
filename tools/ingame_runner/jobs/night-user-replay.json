@@ -1,7 +1,7 @@
 {
   "id": "night-user-replay",
   "description": "The tester's own lighting check (bookmarks/user-check.track.json, from track-record) replayed at night: the same camera path at the same pace and the same light edits, in one recording (the shortcut F6 for the run); the developer log times each lamp edit. Lights left as the recording ended; nothing is saved. Developer mode on, the background frame limit lifted.",
-  "save": "Claude teste",
+  "save": "ApexTest-Night",
   "toml": {
     "ui": {
       "developer_mode": true,

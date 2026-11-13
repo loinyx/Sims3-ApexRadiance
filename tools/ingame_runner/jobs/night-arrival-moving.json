@@ -1,7 +1,7 @@
 {
   "id": "night-arrival-moving",
   "description": "Arrivals at night with the camera still moving, as a player arrives: from the household's lot to the town square (Parque Central), the art museum and the gym, twice, the camera circling each lot for 9 s (one turn in 12 s) before it rests 12 s. Measures how long a lot arrived at shows the game's light before the GPU's (the active lot hold); profilers/light_latency.py reads its log. The game is paused while the camera rests (it runs while the camera circles), so the night lasts. Developer mode on, the background frame limit lifted; nothing is saved.",
-  "save": "Claude teste",
+  "save": "ApexTest-Night",
   "toml": {
     "ui": {
       "developer_mode": true

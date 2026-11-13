@@ -1,7 +1,7 @@
 {
   "id": "track-load-check",
   "description": "Sends the recording bookmarks/user-check.track.json to the agent and nothing else (a check of the agent's mailbox with many large requests). Nothing is saved.",
-  "save": "Claude teste",
+  "save": "ApexTest-Night",
   "toml": {
     "screen": {
       "background_fps_limit": 0

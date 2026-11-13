@@ -1,7 +1,7 @@
 {
   "id": "bench-apex-off-on",
   "description": "Frame-time benchmark of the whole mod: the same save, speed and camera pan with ApexRadiance.asi left out (off) and installed with the tester's settings (on). Read FPS, frame time p50/p99 (1% low = 1000 / p99), frames over 50 ms per minute and visible freezes. Run with -AB -Profiler Both. Both frame limiters are lifted for the run (Apex's fps_limit 0, Sims3SettingsSetter's precise limiter at 1000), so a frame-rate cap does not hide a difference. The mod's background frame limit is lifted: the runner never focuses the game, so it would cap every run.",
-  "save": "Claude teste",
+  "save": "ApexTest-Night",
   "toml": {
     "ui": {
       "developer_mode": false

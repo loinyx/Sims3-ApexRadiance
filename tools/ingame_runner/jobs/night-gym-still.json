@@ -1,7 +1,7 @@
 {
   "id": "night-gym-still",
   "description": "The gym at night with the camera held still for about 2.5 minutes right after it arrives (lights turned on first): what changes on screen then is the lot's light switching between the game's maps and the GPU's (two recordings with the shortcut F6 for the run: Screen pixels.csv every frame; the log's active lot switches and, with a calibration build, GPU against the game). Developer mode on, the background frame limit lifted.",
-  "save": "Claude teste",
+  "save": "ApexTest-Night",
   "toml": {
     "ui": {
       "developer_mode": true,

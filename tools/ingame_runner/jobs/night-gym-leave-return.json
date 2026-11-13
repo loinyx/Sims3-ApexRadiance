@@ -1,7 +1,7 @@
 {
   "id": "night-gym-leave-return",
   "description": "The tester's bookmark gym-entrance at night: the camera held there until that lot is the active one and relit, then on the household's lot for 30 s (that lot is no longer active), then back at the bookmark. Two recordings (the shortcut F6 for the run): the last frames before leaving and the first frames after coming back; equal frames mean the lot left kept its light. No light is switched by the harness. Developer mode on, the background frame limit lifted.",
-  "save": "Claude teste",
+  "save": "ApexTest-Night",
   "toml": {
     "ui": {
       "developer_mode": true,

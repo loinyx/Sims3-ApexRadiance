@@ -1,7 +1,7 @@
 {
   "id": "night-museum-front-lamp",
   "description": "The art museum's front outdoor lamp (the one a player recoloured with the walls left unlit), recoloured red, blue, white, red and white, 9 s apart, the camera on the museum's front door and the game paused; run with -Grab to see the walls take each colour. Nothing is saved.",
-  "save": "Claude teste",
+  "save": "ApexTest-Night",
   "toml": {
     "ui": {
       "developer_mode": true

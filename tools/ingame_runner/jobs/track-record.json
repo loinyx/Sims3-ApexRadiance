@@ -1,7 +1,7 @@
 {
   "id": "track-record",
   "description": "The tester plays the lighting check by hand at night (camera, lights switched, recoloured or moved): the camera 10 times a second and the lights within 60 m of it 5 times a second are kept until the file done is in the run's folder (up to 30 minutes), as bookmarks/<name>.track.json for track_play. Nothing is saved.",
-  "save": "Claude teste",
+  "save": "ApexTest-Night",
   "toml": {
     "screen": {
       "background_fps_limit": 0

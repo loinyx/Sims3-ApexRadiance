@@ -72,7 +72,7 @@ A queue (every performance job as an ABBA pair, about 15 minutes per load):
 ./tools/ingame_runner/run.ps1 -GameBin '...\Game\Bin' -Queue tools/ingame_runner/queues/performance.json -Profiler Frames
 ```
 
-`-DryRun` lists the loads and each load's TOML changes without touching anything. Other options: `-Variant <name>`,
+`-Save <name>` loads that save (without `.sims3`) instead of each job's own. `-DryRun` lists the loads and each load's TOML changes without touching anything. Other options: `-Variant <name>`,
 `-Profiler Sim|Both` (simulation-thread hitches and visible freezes), `-Lean` (the simulation profiler keeps only
 iterations, steps and publish gaps: no per-stage hooks, for measurements where its own cost matters),
 `-InactiveIdle` (keep the game's inactive-window sleep, below), `-GameDocuments <folder>` for a localized Documents

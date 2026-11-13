@@ -15,6 +15,7 @@ param(
     [switch]$AB,
     [ValidateSet('None', 'Frames', 'Sim', 'Both')][string]$Profiler = 'None',
     [string]$Asi,
+    [string]$Save, # a save to load instead of each job's own (a tester's copy of the night save under another name)
     [string]$AsiLoader,
     [string]$GameDocuments = (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Electronic Arts\The Sims 3'),
     [string]$OutDir,
@@ -83,6 +84,7 @@ $agent = Join-Path $repo 'outputs/ingame/agent/ApexTestAgent.package'
 if (-not (Test-Path -LiteralPath $agent)) { throw "No test agent: run node tools/ingame_runner/build_agent.mjs -GameBin '$GameBin'." }
 $savesDir = Join-Path $GameDocuments 'Saves'
 if (-not (Test-Path -LiteralPath (Join-Path $GameDocuments 'Mods/Resource.cfg'))) { throw "No Mods\Resource.cfg in ${GameDocuments}: set up the Mods folder for script mods first (README)." }
+if ($Save) { foreach ($j in $jobs) { $j.save = $Save } }
 foreach ($j in $jobs) { if (-not (Test-Path -LiteralPath (Join-Path $savesDir "$($j.save).sims3"))) { throw "Job $($j.id): save '$($j.save).sims3' not found in $savesDir" } }
 # the window recording costs the game frames: a timing run and a light run are separate runs
 if ($Grab -and $Profiler -ne 'None') { throw '-Grab and -Profiler are separate runs: the window recording costs frames and would skew the timing.' }

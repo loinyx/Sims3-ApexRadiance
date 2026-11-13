@@ -1,7 +1,7 @@
 {
   "id": "night-user-path",
   "description": "The tester's lighting path at night, scripted the same way every run (the standard light measure; profilers/light_latency.py reads its log): the household's lot (floors 1 to 3, an outdoor light dragged toward the house and back), the gym from its front door (its lights on; the lights by the door switched off, on, red and white; its pool light blue, off, on, white), the town square (Parque Central: lights off and on), and the art museum (floors 1 to 3, lights red and white). A recording (F6) at the drag only, ended 18 s before the gym: a recording running during lamp edits sends rooms to the game's solves and its end relights the whole lot (a light capture), which the measure would count. Lights are left switched on; nothing is saved. The game is paused while the camera rests on a lot (it runs only for the drag), so the night lasts the whole path. Developer mode on, the background frame limit lifted.",
-  "save": "Claude teste",
+  "save": "ApexTest-Night",
   "toml": {
     "ui": {
       "developer_mode": true,

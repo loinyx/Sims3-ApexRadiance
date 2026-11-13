@@ -1,7 +1,7 @@
 {
   "id": "night-user-scenario",
   "description": "The tester's own lighting check at night, each part in its own recording (the shortcut F6 for the run): an outdoor light of the household's lot dragged toward the house and back (walls and garden walls), then at the bookmark gym-entrance the gym's lights on, the two lights nearest the entrance switched off, on, red and white again, and the gym's pool light blue, off, on and white, then the camera still at the square. The developer log times each lamp edit (\"Lamp edit: its rooms settled after\"). Lights are put back as they were except switched on; nothing is saved. Developer mode on, the background frame limit lifted.",
-  "save": "Claude teste",
+  "save": "ApexTest-Night",
   "toml": {
     "ui": {
       "developer_mode": true,

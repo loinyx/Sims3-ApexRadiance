@@ -1,7 +1,7 @@
 {
   "id": "continuous-session",
   "description": "The tester plays at night; every click, key and mouse move and the scene's state (camera, floors, lights) are kept from the load until the file done is in the run's folder (up to 60 minutes), in the run's clips folder (all.json, track.json); the developer log times every light change. No clips, no questions. Nothing is saved.",
-  "save": "Claude teste",
+  "save": "ApexTest-Night",
   "toml": {
     "ui": {
       "developer_mode": true,
