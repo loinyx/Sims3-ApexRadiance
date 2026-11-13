@@ -61,6 +61,8 @@ All settings are in the card's *Measurement setup* section and its *Advanced* no
 | Time lot object building (this session) | `time_objects` | bool | off | | Attaches `Lot::UpdateObjectSceneNode` 0x00ABFAC0 live. Its tooltip says "Not saved", but the value is written and read back |
 | Time the Mutex::Lock hook | `time_mutex_lock` | bool | off | | Attaches the hand-made hook on `Mutex::Lock` 0x004E16F0 live; off leaves "Mutex wait" empty |
 | Per-hook registry timing | `registry_timing` | bool | off | | Times each module's draw and state callbacks by name. The toggle itself does not request a save; the value is written with the next save |
+| (no menu; development builds, for the in-game runner) | `start_at_load` | bool | off | | Applies the Timing run preset when the settings load, so a scripted run is measured without the menu |
+| (no menu; development builds) | `report_every_s` | int | 0 | 0 to 3600 s | Appends a report to `ApexRadiance_Hitches.txt` and clears every N seconds of frames (0: only by the button) |
 
 Buttons: **Clear** (forgets frames, hitches and session tables; the hitch file keeps what was written; starts a new
 `ApexRadiance_FrameTimeline.csv`, the previous one kept as `ApexRadiance_FrameTimeline.old.csv`) and **Save report now**

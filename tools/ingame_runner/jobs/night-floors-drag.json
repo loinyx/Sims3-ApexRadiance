@@ -1,0 +1,217 @@
+{
+  "id": "night-floors-drag",
+  "description": "Light between floors after a lamp drag at night: on the household's lot, with floor 1, 2 and 3 shown in turn, its newest outdoor light is dragged toward the house and back (3 s a way, twice), then the floors are switched 1, 2, 3 right after the release, so the walls, fences and floors of every story show whether they took the lamp's new place at once. Run with -Grab; profilers/light_latency.py reads the log (edits settled, drags shown after release). The game is paused while the camera rests (it runs only for the drags). Nothing is saved. Developer mode on, the background frame limit lifted.",
+  "save": "ApexTest-Night",
+  "toml": {
+    "ui": {
+      "developer_mode": true
+    },
+    "screen": {
+      "background_fps_limit": 0
+    }
+  },
+  "variants": {
+    "on": {},
+    "noaogate": {
+      "toml": {
+        "patches.WallShadingWhileMoving": {
+          "enabled": false
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "home",
+      "radius": 16,
+      "height": 10,
+      "seconds": 3600,
+      "turns": 0.001,
+      "face": "door"
+    },
+    {
+      "do": "speed",
+      "speed": "pause"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    },
+    {
+      "do": "floor",
+      "lot": "home",
+      "level": 1
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "lamp_drag",
+      "seconds": 3,
+      "passes": 2
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "speed",
+      "speed": "pause"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "floor",
+      "lot": "home",
+      "level": 1
+    },
+    {
+      "do": "wait",
+      "minutes": 0.05
+    },
+    {
+      "do": "floor",
+      "lot": "home",
+      "level": 2
+    },
+    {
+      "do": "wait",
+      "minutes": 0.05
+    },
+    {
+      "do": "floor",
+      "lot": "home",
+      "level": 3
+    },
+    {
+      "do": "wait",
+      "minutes": 0.05
+    },
+    {
+      "do": "floor",
+      "lot": "home",
+      "level": 2
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "lamp_drag",
+      "seconds": 3,
+      "passes": 2
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "speed",
+      "speed": "pause"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "floor",
+      "lot": "home",
+      "level": 1
+    },
+    {
+      "do": "wait",
+      "minutes": 0.05
+    },
+    {
+      "do": "floor",
+      "lot": "home",
+      "level": 2
+    },
+    {
+      "do": "wait",
+      "minutes": 0.05
+    },
+    {
+      "do": "floor",
+      "lot": "home",
+      "level": 3
+    },
+    {
+      "do": "wait",
+      "minutes": 0.05
+    },
+    {
+      "do": "floor",
+      "lot": "home",
+      "level": 3
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "lamp_drag",
+      "seconds": 3,
+      "passes": 2
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "speed",
+      "speed": "pause"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "floor",
+      "lot": "home",
+      "level": 1
+    },
+    {
+      "do": "wait",
+      "minutes": 0.05
+    },
+    {
+      "do": "floor",
+      "lot": "home",
+      "level": 2
+    },
+    {
+      "do": "wait",
+      "minutes": 0.05
+    },
+    {
+      "do": "floor",
+      "lot": "home",
+      "level": 3
+    },
+    {
+      "do": "wait",
+      "minutes": 0.05
+    }
+  ]
+}

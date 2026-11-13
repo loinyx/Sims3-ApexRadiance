@@ -6,6 +6,19 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k320Improved[] = {
+    "Night Lights: Instant (GPU) light reaches a lot you arrive at within a second",
+    "Night Lights: lamp edits and the pool light show their light several times sooner",
+    "Night Lights: switching floors no longer recalculates the light of every window",
+    "Night Lights: lots you leave keep the instant light instead of older game light",
+    "Performance: higher frame rate at night and fewer hitches with a fast camera",
+    "Performance: trees and plants near lamps cost half as much to draw at night",
+    nullptr};
+constexpr const char* k320Fixed[] = {
+    "No crash after deleting lamps",
+    "RTX Remix bridge: some lots no longer draw their ground black",
+    nullptr};
+
 constexpr const char* k316Improved[] = {
     "Downloads: just the installer and one manual-install zip, with the RTX Remix bridge inside",
     "RTX Remix bridge: no longer marked experimental",
@@ -587,6 +600,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"3.2.0", "2026-11-13", nullptr, k320Improved, k320Fixed, "Instant lamp light arrives much sooner, the game runs faster, and no black lot ground on the bridge"},
     {"3.1.6", "2026-11-12", nullptr, k316Improved, nullptr},
     {"3.1.5", "2026-11-12", nullptr, nullptr, k315Fixed},
     {"3.1.4", "2026-11-12", nullptr, k314Improved, nullptr},

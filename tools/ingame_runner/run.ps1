@@ -1,0 +1,740 @@
+# In-game runner: installs a built ApexRadiance.asi and the test agent, starts the game once per load with that load's
+# ApexRadiance.toml, loads a test save, drives the job's steps, collects Apex's own outputs (and optional frame times),
+# closes the game and writes results.md. Everything installed is put back afterwards. See README.md.
+# Adapted from sims3-modernization tools/harness (MIT, see LICENSE-sims3-modernization).
+#
+#   ./tools/ingame_runner/run.ps1 -GameBin '<Game>\Bin' -Job tools/ingame_runner/jobs/smoke.json
+#   ./tools/ingame_runner/run.ps1 -GameBin '<Game>\Bin' -Job tools/ingame_runner/jobs/resource-lookup-cache.json -AB -Profiler Frames
+#   ./tools/ingame_runner/run.ps1 -GameBin '<Game>\Bin' -Queue tools/ingame_runner/queues/performance.json -Profiler Frames
+#   ./tools/ingame_runner/run.ps1 -Restore outputs/ingame/<run>            (puts a run's backup back after a power loss)
+param(
+    [string[]]$Job,
+    [string]$Queue,
+    [string]$GameBin,
+    [string]$Variant,
+    [switch]$AB,
+    [ValidateSet('None', 'Frames', 'Sim', 'Both')][string]$Profiler = 'None',
+    [string]$Asi,
+    [string]$Save, # a save to load instead of each job's own (a tester's copy of the night save under another name)
+    [string]$AsiLoader,
+    [string]$GameDocuments = (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Electronic Arts\The Sims 3'),
+    [string]$OutDir,
+    [int]$LoadTimeoutMin = 20,
+    [switch]$KeepSaves,
+    [switch]$InactiveIdle,
+    [switch]$Lean,
+    [switch]$Grab, # record the game window all load long (profilers/grab_wgc.py) and scan it for flashes (flash_scan.py)
+    [double]$GrabFps = 20,
+    [switch]$DryRun,
+    [string]$Restore
+)
+$ErrorActionPreference = 'Stop'
+$repo = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+. (Join-Path $PSScriptRoot 'runner_lib.ps1')
+$apexDir = Join-Path $GameDocuments 'Apex Radiance'
+$tomlPath = Join-Path $apexDir 'ApexRadiance.toml'
+
+# ------------------------------------------------------------------ backup and restore
+# The manifest (runner_lib.ps1 New-RunBackup) lists every file and folder the run may replace or remove, with whether it
+# existed. restore-pending.json in outputs/ingame locks the run and stays until every entry is back.
+$stateDir = Join-Path $repo 'outputs/ingame'
+function Test-GameClosed { -not @(Get-Process -Name 'TS3W', 'Sims3LauncherW' -ErrorAction SilentlyContinue).Count }
+
+function Write-RestoreState($R, [string]$RunDir) {
+    if ($R.Pending.Count) {
+        foreach ($p in $R.Pending) { Say "  not put back: $($p.path) ($($p.error))" }
+        Say "$($R.Pending.Count) file(s) still to put back: close every TS3W.exe, then run.ps1 -Restore '$RunDir'"
+    } else { Say "put back $($R.Restored) file(s) from $RunDir\backup" }
+}
+
+if ($Restore) {
+    $runDir = (Resolve-Path $Restore).Path
+    if (-not (Test-GameClosed)) { throw 'The game or its launcher is running: close TS3W.exe and Sims3LauncherW.exe, then run -Restore again.' }
+    $marker = Get-PendingRun $stateDir
+    if ($marker -and (Test-RunAlive $marker)) { throw (Get-RunLockError $marker) }
+    if (-not (Test-Path -LiteralPath (Join-Path $runDir 'backup/manifest.json'))) {
+        # the run stopped before its backup was complete, so it installed nothing
+        if ($marker -and $marker.runDir -eq $runDir) { Exit-RunLock $stateDir $runDir; Say "nothing was installed by $runDir; lock removed"; return }
+        throw "No backup manifest in $runDir"
+    }
+    $r = Restore-RunBackup $runDir
+    if ($r.Already) { Say "$runDir was already put back (its manifest is used up); nothing copied" } else { Write-RestoreState $r $runDir }
+    if ($r.Pending.Count) { exit 3 }
+    Exit-RunLock $stateDir $runDir
+    return
+}
+
+# ------------------------------------------------------------------ jobs and checks before touching anything
+if ($Queue) {
+    $queueDir = Split-Path (Resolve-Path $Queue).Path
+    $q = Get-Content -LiteralPath $Queue -Raw | ConvertFrom-Json
+    $Job = @($q.jobs | ForEach-Object { Join-Path $queueDir $_ })
+    if ($q.ab) { $AB = [switch]$true }
+}
+if (-not $Job) { throw 'Pass -Job <file.json> (one or more) or -Queue <file.json>.' }
+$jobs = @($Job | ForEach-Object { $j = Get-Content -LiteralPath $_ -Raw | ConvertFrom-Json; if (-not $j.id) { throw "$_ has no id" }; $j })
+$loads = @($jobs | ForEach-Object { Get-JobLoads $_ -Variant $Variant -AB:$AB })
+
+if (-not $GameBin) { throw "Pass -GameBin '<Game>\Bin' (the folder with TS3W.exe)." }
+$exe = Join-Path $GameBin 'TS3W.exe'
+if (-not (Test-Path -LiteralPath $exe)) { throw "TS3W.exe not found in $GameBin" }
+if (-not $Asi) { $Asi = @('Public/ApexRadiance.asi', 'Release/ApexRadiance.asi') | ForEach-Object { Join-Path $repo $_ } | Where-Object { Test-Path $_ } | Select-Object -First 1 }
+if (-not $Asi -or -not (Test-Path -LiteralPath $Asi)) { throw 'No built ApexRadiance.asi: run tools/development/build.ps1 or pass -Asi.' }
+$agent = Join-Path $repo 'outputs/ingame/agent/ApexTestAgent.package'
+if (-not (Test-Path -LiteralPath $agent)) { throw "No test agent: run node tools/ingame_runner/build_agent.mjs -GameBin '$GameBin'." }
+$savesDir = Join-Path $GameDocuments 'Saves'
+if (-not (Test-Path -LiteralPath (Join-Path $GameDocuments 'Mods/Resource.cfg'))) { throw "No Mods\Resource.cfg in ${GameDocuments}: set up the Mods folder for script mods first (README)." }
+if ($Save) { foreach ($j in $jobs) { $j.save = $Save } }
+foreach ($j in $jobs) { if (-not (Test-Path -LiteralPath (Join-Path $savesDir "$($j.save).sims3"))) { throw "Job $($j.id): save '$($j.save).sims3' not found in $savesDir" } }
+# the window recording costs the game frames: a timing run and a light run are separate runs
+if ($Grab -and $Profiler -ne 'None') { throw '-Grab and -Profiler are separate runs: the window recording costs frames and would skew the timing.' }
+if ($Profiler -ne 'None') {
+    & python -c 'import frida' 2>$null
+    if ($LASTEXITCODE -ne 0) { throw "-Profiler $Profiler needs Python with the frida package (pip install frida)." }
+}
+
+if ($DryRun) {
+    Say "dry run: $($loads.Count) load(s), asi $Asi"
+    $base = if (Test-Path -LiteralPath $tomlPath) { [IO.File]::ReadAllText($tomlPath) } else { '' }
+    foreach ($l in $loads) {
+        $v = $l.Job.variants.($l.Variant)
+        $toml = Set-TomlOverrides (Set-TomlOverrides $base $l.Job.toml) $v.toml
+        Say "$($l.Name): save $($l.Job.save), steps $(@(Get-JobSteps $l.Job).Count), toml changes:"
+        Compare-Object @($base -split "`r?`n") @($toml -split "`r?`n") | Where-Object { $_.SideIndicator -eq '=>' -and $_.InputObject } | ForEach-Object { Write-Output "    $($_.InputObject)" }
+    }
+    return
+}
+
+$lockError = Get-RunLockError (Get-PendingRun $stateDir)
+if ($lockError) { throw $lockError }
+if (-not (Test-GameClosed)) { throw 'The game or its launcher is running. The runner never touches a game in use: close it first.' }
+if (-not (Get-Process -Name 'steam' -ErrorAction SilentlyContinue)) { Say 'warning: Steam is not running; the Steam game needs it to start' }
+$loaders = @('wininet.dll', 'dinput8.dll', 'version.dll', 'winmm.dll', 'dsound.dll') | Where-Object { Test-Path (Join-Path $GameBin $_) }
+if (-not $AsiLoader -and -not $loaders) { Say 'warning: no ASI loader found in Bin (for example Ultimate ASI Loader as wininet.dll); pass -AsiLoader' }
+
+Add-Type -Path (Join-Path $PSScriptRoot 'MailboxClient.cs')
+Add-Type -Namespace ApexIngame -Name Keys -MemberDefinition '[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);'
+Add-Type -Namespace ApexIngame -Name SystemTimes -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool GetSystemTimes(out long idle, out long kernel, out long user);'
+$runId = Get-Date -Format 'yyMMdd-HHmmss' # in the runner's save names, so no run meets another run's saves
+if (-not $OutDir) { $OutDir = Join-Path $stateDir "20$runId" }
+New-Item -ItemType Directory -Path (Join-Path $OutDir 'backup') -Force | Out-Null
+$OutDir = (Resolve-Path $OutDir).Path
+
+# ------------------------------------------------------------------ game control
+$script:proc = $null
+$script:mbox = $null
+$script:speed = 'normal'
+$script:commands = $null # agent calls and job steps of the current load, QPC ms (runner_lib.ps1 Get-Measurement)
+
+# QueryPerformanceCounter in ms: the clock the profilers stamp with, so commands and profiles line up exactly
+function Get-QpcMs { [Diagnostics.Stopwatch]::GetTimestamp() * 1000.0 / [Diagnostics.Stopwatch]::Frequency }
+
+function Call-Agent([string]$Cmd, $ArgsObject, [int]$TimeoutMs = 15000) {
+    $json = if ($null -ne $ArgsObject) { $ArgsObject | ConvertTo-Json -Compress -Depth 6 } else { '' }
+    $t0 = Get-QpcMs
+    try { $reply = $script:mbox.Call($Cmd, $json, $TimeoutMs) | ConvertFrom-Json }
+    catch [TimeoutException], [System.Management.Automation.MethodInvocationException] {
+        # (the agent's heartbeat: moving = it polls but does not see the request; still = the game's simulation stopped)
+        $h0 = $script:mbox.Heartbeat; Start-Sleep -Milliseconds 1500; $h1 = $script:mbox.Heartbeat
+        throw "$($_.Exception.Message) [request $($json.Length) chars; agent heartbeat $h0 -> $h1 in 1.5 s]"
+    }
+    finally { if ($null -ne $script:commands) { $script:commands.Add([pscustomobject]@{ label = $Cmd; kind = 'call'; t0 = $t0; t1 = (Get-QpcMs) }) } }
+    if (-not $reply.ok) { throw "agent $Cmd failed: $($reply.error)" }
+    return $reply.result
+}
+
+# CPU of the game and of everything else, as a share of the whole machine since the previous sample
+$script:cpuPrev = $null
+function Add-MachineSample($List) {
+    $idle = 0L; $kernel = 0L; $user = 0L
+    if (-not [ApexIngame.SystemTimes]::GetSystemTimes([ref]$idle, [ref]$kernel, [ref]$user)) { return }
+    $script:proc.Refresh()
+    $now = @{ T = (Get-QpcMs); Total = $kernel + $user; Busy = $kernel + $user - $idle; Game = $script:proc.TotalProcessorTime.Ticks }
+    $p = $script:cpuPrev; $script:cpuPrev = $now
+    if (-not $p -or $now.Total -le $p.Total) { return }
+    $total = [double]($now.Total - $p.Total)
+    $game = 100 * ($now.Game - $p.Game) / $total
+    $List.Add([pscustomobject]@{ t = $now.T; game = [math]::Round($game, 1); other = [math]::Round([math]::Max(0, 100 * ($now.Busy - $p.Busy) / $total - $game), 1) })
+}
+
+# Waits until $Done returns true. Every 30 s the game must show progress (simulator ticks, or CPU time while loading);
+# two checks in a row without progress, a closed game or the time limit fail the wait with the reason.
+function Wait-Game([string]$What, [double]$Minutes, [scriptblock]$Done, [scriptblock]$Each) {
+    $end = (Get-Date).AddMinutes($Minutes)
+    $nextCheck = (Get-Date).AddSeconds(30)
+    $misses = 0
+    $cpu = $script:proc.TotalProcessorTime.TotalSeconds
+    $beat = $null
+    while ($true) {
+        if ($script:proc.HasExited) { throw "game closed while waiting for $What (exit code $($script:proc.ExitCode))" }
+        if (& $Done) { return }
+        if ((Get-Date) -ge $end) { throw "timeout after $Minutes min waiting for $What" }
+        if ((Get-Date) -ge $nextCheck) {
+            $nextCheck = (Get-Date).AddSeconds(30)
+            $script:proc.Refresh()
+            $nowCpu = $script:proc.TotalProcessorTime.TotalSeconds
+            $nowBeat = $null
+            if ($script:mbox -and $script:mbox.Found) { try { $nowBeat = $script:mbox.Heartbeat } catch { } }
+            $progress = ($nowCpu - $cpu -gt 1) -or ($null -ne $nowBeat -and $nowBeat -ne $beat)
+            $cpu = $nowCpu; $beat = $nowBeat
+            if ($progress) { $misses = 0 } else { $misses++ }
+            Say ("  {0}: {1:N1} min left, cpu {2:N0} s, ticks {3}" -f $What, ($end - (Get-Date)).TotalMinutes, $nowCpu, $nowBeat)
+            if ($misses -ge 2) { throw "no progress for 60 s while waiting for $What" }
+            if ($script:window -and (Get-Date) -lt $script:window.End) { Add-MachineSample $script:window.Machine }
+            if ($Each) { & $Each }
+        }
+        Start-Sleep -Milliseconds 1000
+    }
+}
+
+# Waits for the test agent's mailbox after the game starts. Scans the game's memory every 10 s; every 30 s
+# Step-StartWatch (runner_lib.ps1) checks the process, Apex's log, the agent's marker file and heartbeat and stops the
+# load with the reason; -LoadTimeoutMin is only the last resort.
+function Wait-Agent([datetime]$Started, [bool]$NoApex = $false) {
+    $state = @{}
+    $logPath = Join-Path $apexDir 'ApexRadiance_LOG.txt'
+    $lastScan = [datetime]::MinValue
+    $nextCheck = $Started.AddSeconds(30)
+    $end = $Started.AddMinutes($LoadTimeoutMin)
+    while (-not $script:mbox.Found) {
+        if ($script:proc.HasExited) { throw "the game closed before the test agent answered (exit code $($script:proc.ExitCode))" }
+        if (((Get-Date) - $lastScan).TotalSeconds -ge 10) { $lastScan = Get-Date; if ($script:mbox.Scan()) { break } }
+        if ((Get-Date) -ge $nextCheck) {
+            $nextCheck = (Get-Date).AddSeconds(30)
+            $o = Get-StartObservation $script:proc $logPath $GameDocuments $Started $script:mbox
+            Say ("  test agent: {0:N0} s since start, cpu {1:N0} s, Apex log {2}, features {3}, agent marker {4}" -f $o.Sec, $o.Cpu,
+                $(if ($o.LogBytes -ge 0) { "$($o.LogBytes) bytes" } else { 'none yet' }), $(if ($o.Features) { 'started' } else { 'not yet' }),
+                $(if ($o.Marker) { $o.Marker } else { 'none yet' }))
+            $why = Step-StartWatch $state $o -NoApex:$NoApex
+            if ($why) { throw $why }
+        }
+        if ((Get-Date) -ge $end) { throw "timeout after $LoadTimeoutMin min waiting for the test agent" }
+        Start-Sleep -Seconds 1
+    }
+    Say "  test agent found $([math]::Round(((Get-Date) - $Started).TotalSeconds)) s after the start"
+}
+
+# "Mod Scripts Found" (the game's warning when script mods are installed) opens at the main menu up to ~90 s after the
+# agent answers, and accepting it during a load leaves the game on the loading screen.
+# Answers menu dialogs until that one was seen and the menu stayed quiet for 5 s, or for 120 s without it.
+function Wait-MenuQuiet {
+    $m = @{ Start = Get-Date; Quiet = Get-Date; Saw = $false } # a hashtable: the script block below cannot assign outer variables
+    Wait-Game 'the "Mod Scripts Found" dialog' 3 {
+        try { $d = Call-Agent 'auto_dialog' $null 5000 } catch { return $false }
+        if ($d.open) { Say "  menu dialog '$($d.title)': clicked $($d.clicked)"; if ($d.title -match 'mod scripts|scripts de modifica') { $m.Saw = $true }; $m.Quiet = Get-Date }
+        if ($m.Saw) { return ((Get-Date) - $m.Quiet).TotalSeconds -ge 5 }
+        return ((Get-Date) - $m.Start).TotalSeconds -ge 120
+    }
+    if (-not $m.Saw) { Say '  no "Mod Scripts Found" dialog within 120 s; loading anyway' }
+}
+
+function Clear-Dialog { try { $d = Call-Agent 'auto_dialog' $null; if ($d.clicked) { Say "  dialog '$($d.title)': clicked $($d.clicked)" } } catch { Say "  dialog: $($_.Exception.Message)" } }
+
+function Keep-Speed {
+    Clear-Dialog
+    try { $s = Call-Agent 'game_state' $null; if ($script:speed -ne 'pause' -and $s.speed -eq 'Pause') { Call-Agent 'set_speed' @{ speed = $script:speed } | Out-Null } } catch { }
+}
+
+function Wait-LiveMode([string]$What) {
+    Wait-Game $What $LoadTimeoutMin {
+        try { $s = Call-Agent 'game_state' $null 5000; return ($s.in_world -and $s.sub_state -like 'LiveModeState*' -and -not $s.modal) } catch { return $false }
+    } { Clear-Dialog }
+}
+
+# Sim: stutter-profile.js, unloaded at the end of the window. Frames: frame-times.js in its own session, its file closed at
+# the end of the window and the session kept loaded until the game exits (attach.py --keep). Returns the processes.
+function Start-Profilers([string]$Base, [double]$Seconds, [switch]$AtMenu) {
+    $started = @{}
+    $attach = Join-Path $PSScriptRoot 'profilers/attach.py'
+    $gate = if ($AtMenu) { @('--start', "$Base.start") } else { @() } # attached now, recording from the measured window
+    $launch = {
+        param($Name, $PyArgs)
+        Start-Process -FilePath 'python' -ArgumentList ($PyArgs | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' }) -NoNewWindow -PassThru `
+            -RedirectStandardOutput "$Base-$Name.log" -RedirectStandardError "$Base-$Name.err.log"
+    }
+    if ($Profiler -in 'Sim', 'Both') {
+        $opts = @{ out = ($Base -replace '\\', '/'); hitchMs = 50 }
+        if ($Lean) { $opts.stages = $false }
+        $started.Sim = & $launch 'profiler' (@($attach) + $gate + @('--stop', "$Base.stop", $script:proc.Id, $Seconds, (Join-Path $PSScriptRoot 'profilers/stutter-profile.js'), ($opts | ConvertTo-Json -Compress)))
+    }
+    if ($Profiler -in 'Frames', 'Both') {
+        $started.Frames = & $launch 'frames' (@($attach, '--keep') + $gate + @('--stop', "$Base.stop", $script:proc.Id, $Seconds, (Join-Path $PSScriptRoot 'profilers/frame-times.js'),
+            (@{ out = ("$Base-frames.csv" -replace '\\', '/') } | ConvertTo-Json -Compress)))
+    }
+    return $started
+}
+
+# The measured window: profilers for $Seconds and a machine sample every 30 s (Wait-Game) while it lasts.
+$script:window = $null
+function Start-Measured([string]$Base, [double]$Seconds, $Machine) {
+    $script:cpuPrev = $null
+    Remove-Item -LiteralPath "$Base.stop" -ErrorAction SilentlyContinue
+    $m = @{ Base = $Base; Seconds = $Seconds; Start = (Get-Date); End = (Get-Date).AddSeconds($Seconds); Machine = $Machine; Done = $false }
+    if ($script:preProf -and $script:preProf.Base -eq $Base) { $m.Prof = $script:preProf.Prof; [IO.File]::WriteAllText("$Base.start", '') }
+    else { $m.Prof = Start-Profilers $Base $Seconds }
+    Add-MachineSample $Machine
+    $script:window = $m
+    return $m
+}
+
+# until: { "<field>": N } of camera_jumps (jumps, loops, outfitChanges, spawned) or vfx_burst (rounds, started), read from
+# the repro's status. Decided before the run and independent of the on/off difference, so stopping there biases nothing.
+function Get-UntilCount($Until) {
+    $p = @($Until.PSObject.Properties)[0]
+    $cmd = Get-UntilCommand $p.Name
+    $s = Call-Agent $cmd @{ status = $true } 5000
+    $have = [double]$s.($p.Name)
+    [pscustomobject]@{ Reached = ($have -ge [double]$p.Value); Text = "$($p.Name) $have of $($p.Value)" }
+}
+
+# Waits for the window's end (the game keeps running at its speed), then for the simulation profiler to unload.
+function Complete-Measured($M, $Machine, $Notes) {
+    if ($M.Done) { return }
+    if ((Get-Date) -lt $M.End) {
+        Say "  measured window: $([math]::Ceiling(($M.End - (Get-Date)).TotalSeconds)) s left"
+        Wait-Game 'the end of the measured window' (($M.End - (Get-Date)).TotalMinutes + 2) { (Get-Date) -ge $M.End } { Keep-Speed }
+    }
+    Add-MachineSample $Machine
+    $script:window = $null; $M.Done = $true
+    if ($M.Prof.Sim) {
+        if (-not $M.Prof.Sim.WaitForExit(90000)) { $M.Prof.Sim.Kill(); $Notes.Add('profiler did not stop in time and was ended') }
+        elseif ($M.Prof.Sim.ExitCode -ne 0) { $Notes.Add("profiler exit $($M.Prof.Sim.ExitCode), see $(Split-Path $M.Base -Leaf)-profiler.err.log") }
+    }
+}
+
+# ------------------------------------------------------------------ one load
+function Invoke-Load($Load, [string]$BaseToml) {
+    $jobDef = $Load.Job
+    $v = $jobDef.variants.($Load.Variant)
+    $dir = Join-Path $OutDir $Load.Name
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    $notes = New-Object System.Collections.Generic.List[string]
+    $result = [pscustomobject]@{ Name = $Load.Name; JobId = $jobDef.id; Variant = $Load.Variant; Ok = $false; Closed = ''; Frames = $null; Sim = $null; M = $null; Events = $null; Notes = $notes; Saves = @() }
+    $script:commands = New-Object System.Collections.Generic.List[object]
+    $machine = New-Object System.Collections.Generic.List[object]
+    $measured = $null # the measured window (a profile step or the first measured wait): base, seconds, profilers
+    $script:window = $null
+
+    $toml = Set-TomlOverrides (Set-TomlOverrides $BaseToml $jobDef.toml) $v.toml
+    New-Item -ItemType Directory -Path $apexDir -Force | Out-Null
+    [IO.File]::WriteAllText($tomlPath, $toml, (New-Object Text.UTF8Encoding($false)))
+    Copy-Item -LiteralPath $tomlPath -Destination (Join-Path $dir 'ApexRadiance.toml')
+    # "s3ss" in a job: Sims3SettingsSetter's own settings for the run (its frame limiter, say), on the player's file
+    if ($jobDef.s3ss -and $script:baseS3ss) { [IO.File]::WriteAllText($s3ssPath, (Set-TomlOverrides $script:baseS3ss $jobDef.s3ss), (New-Object Text.UTF8Encoding($false))) }
+    # "options" in a job: the game's own Options.ini lines ("key = value") for the run (its window size, say)
+    if ($jobDef.options -and $script:baseOptions) {
+        $o = $script:baseOptions
+        foreach ($kv in $jobDef.options.PSObject.Properties) { $o = [regex]::Replace($o, '(?m)^' + [regex]::Escape($kv.Name) + ' = [^\r\n]*', "$($kv.Name) = $($kv.Value)") }
+        [IO.File]::WriteAllText($optionsPath, $o, (New-Object Text.UTF8Encoding($false)))
+    }
+
+    # "apex": false in a variant: the game starts without ApexRadiance.asi (the baseline); put back after the load
+    $noApex = ($v.PSObject.Properties.Name -contains 'apex') -and -not $v.apex
+    if ($noApex) { Move-Item -LiteralPath $asiPath -Destination $asiOffPath -Force }
+    $started = Get-Date
+    $script:speed = 'normal'
+    $gameArgs = @($jobDef.gameArgs | Where-Object { $_ })
+    # The game sleeps 10 ms per main-loop pass while another window is in front unless the NoInactiveIdle key is in its
+    # [Config] settings; the command line fills that section (-Key or -Key=value), Default.ini's [Config] does not reach
+    # this key. The runner never focuses the game window, so without it every frame and publish gap of a measured load
+    # would carry that sleep. -InactiveIdle keeps the game's default.
+    if (-not $InactiveIdle) { $gameArgs += '-NoInactiveIdle' }
+    $gameArgs += '-ApexTestAgent:1' # the run marker: without it the agent stays idle (agent/Agent.cs)
+    Say "$($Load.Name): starting the game"
+    if ($gameArgs) { $script:proc = Start-Process -FilePath $exe -WorkingDirectory $GameBin -ArgumentList $gameArgs -PassThru }
+    else { $script:proc = Start-Process -FilePath $exe -WorkingDirectory $GameBin -PassThru }
+    try {
+        $script:mbox = New-Object ApexIngame.MailboxClient($script:proc.Id)
+        # profilers attach right after the start, as sims3-modernization's harness attaches at launch: attaching in a world
+        # timed out, and attaching at the menu once hung the simulation thread; they record from the measured window on
+        $script:preProf = $null
+        if ($Profiler -ne 'None') {
+            $i = 0
+            foreach ($st in (Get-JobSteps $jobDef)) {
+                $i++
+                if ($st.do -eq 'profile' -or ($st.do -eq 'wait' -and $st.measure)) {
+                    $b = Join-Path $dir "measure$i"
+                    $script:preProf = @{ Base = $b; Prof = (Start-Profilers $b ([double]$st.minutes * 60) -AtMenu) }
+                    break
+                }
+            }
+        }
+        Wait-Agent $started $noApex
+        Wait-Game 'the main menu' 5 { try { Call-Agent 'game_state' $null 5000 | Out-Null; return $true } catch { return $false } }
+        Wait-MenuQuiet
+        Call-Agent 'load_save' @{ file = "$($jobDef.save).sims3"; reload = $true } | Out-Null
+        Say "$($Load.Name): loading $($jobDef.save)"
+        Wait-LiveMode "the save $($jobDef.save)"
+        $grabProc = $null
+        if ($Grab) {
+            $grabProc = Start-Process -FilePath 'python' -NoNewWindow -PassThru -RedirectStandardError (Join-Path $dir 'grab.err.log') -ArgumentList @(
+                ('"' + (Join-Path $PSScriptRoot 'profilers/grab_wgc.py') + '"'), $script:proc.Id, ('"' + (Join-Path $dir 'grab') + '"'), $GrabFps)
+            Say "  recording the game window at $GrabFps frames a second into grab\"
+        }
+        $lastSave = $null
+        $n = 0
+        foreach ($step in (Get-JobSteps $jobDef)) {
+            $n++
+            $stepAt = $script:commands.Count; $stepT0 = Get-QpcMs
+            switch ($step.do) {
+                'speed' { $script:speed = $step.speed; Call-Agent 'set_speed' @{ speed = $step.speed } | Out-Null }
+                'key' { # a key press posted to the game window, never focused: Apex's shortcuts (F8 starts or stops a recording)
+                    $script:proc.Refresh()
+                    $null = [ApexIngame.Keys]::PostMessage($script:proc.MainWindowHandle, 0x100, [IntPtr][int]$step.vk, [IntPtr]1)
+                    $null = [ApexIngame.Keys]::PostMessage($script:proc.MainWindowHandle, 0x101, [IntPtr][int]$step.vk, [IntPtr]0xC0000001)
+                    Say "  step ${n}: key $($step.vk)"
+                }
+                'wait_file' { # waits (answering dialogs) until a file exists: the tester saying "ready", e.g. after placing the camera
+                    $f = Join-Path $OutDir $step.file
+                    Say "  step ${n}: waiting for $f (up to $($step.minutes) min)"
+                    Wait-Game "the file $($step.file)" ([double]$step.minutes) { Test-Path -LiteralPath $f } { Clear-Dialog }
+                }
+                'camera_read' { # the camera now, kept as a bookmark (bookmarks/<name>.json) that camera_goto takes back to
+                    $cam = Call-Agent 'camera' $null
+                    $bm = Join-Path $PSScriptRoot "bookmarks/$($step.name).json"
+                    New-Item -ItemType Directory -Path (Split-Path $bm) -Force | Out-Null
+                    ($cam | ConvertTo-Json -Depth 4) | Set-Content -LiteralPath $bm -Encoding UTF8
+                    Say "  step ${n}: camera kept as bookmark $($step.name): pos $($cam.pos.x), $($cam.pos.y), $($cam.pos.z)"
+                }
+                'camera_goto' { # a bookmark's camera (a running pan or orbit is stopped first)
+                    $cam = Get-Content -LiteralPath (Join-Path $PSScriptRoot "bookmarks/$($step.name).json") -Raw | ConvertFrom-Json
+                    Call-Agent 'camera_pan' @{ stop = $true } | Out-Null
+                    Call-Agent 'camera' @{ pos = $cam.pos; target = $cam.target } | Out-Null
+                    Say "  step ${n}: camera at bookmark $($step.name)"
+                }
+                'lamp_drag' {
+                    $a = @{}; foreach ($p in $step.PSObject.Properties) { if ($p.Name -ne 'do') { $a[$p.Name] = $p.Value } }
+                    $d = Call-Agent 'lamp_drag' $a
+                    Say "  step ${n}: dragging $($d.lamp) of $($d.lot) $($d.meters) m toward the lot's centre and back"
+                }
+                'lamp_edit' { # lights near a point (or a bookmark's target) switched off, on or recoloured
+                    $a = @{}; foreach ($p in $step.PSObject.Properties) { if ($p.Name -notin 'do', 'bookmark') { $a[$p.Name] = $p.Value } }
+                    if ($step.bookmark) { $a.near = (Get-Content -LiteralPath (Join-Path $PSScriptRoot "bookmarks/$($step.bookmark).json") -Raw | ConvertFrom-Json).target }
+                    $e = Call-Agent 'lamp_edit' $a
+                    Say "  step ${n}: $($step.action) $(@($e.lights).Count) lights: $((@($e.lights) | ForEach-Object { "$($_.type) at $($_.at.x),$($_.at.z)" }) -join '; ')"
+                }
+                'track_record' { # the tester plays (camera, lights near it) until the file `file` (default done) exists; kept as bookmarks/<name>.track.json
+                    Call-Agent 'track_record' @{ start = $true } | Out-Null
+                    $f = Join-Path $OutDir $(if ($step.file) { $step.file } else { 'done' })
+                    Say "  step ${n}: recording the tester's path until $f exists (up to $($step.minutes) min)"
+                    Wait-Game "the file $f" ([double]$step.minutes) { Test-Path -LiteralPath $f } { Clear-Dialog }
+                    $t = Call-Agent 'track_record' @{ stop = $true }
+                    $tf = Join-Path $PSScriptRoot "bookmarks/$($step.name).track.json"
+                    New-Item -ItemType Directory -Path (Split-Path $tf) -Force | Out-Null
+                    ($t | ConvertTo-Json -Depth 6 -Compress) | Set-Content -LiteralPath $tf -Encoding UTF8
+                    Say "  step ${n}: recorded $(@($t.cam).Count) camera samples, $(@($t.lamps).Count) lights ($(@($t.lamps | Where-Object { $_.placed }).Count) put down), $(@($t.edits).Count) light edits, $(@($t.levels).Count) floor and $(@($t.modes).Count) mode changes as $($step.name)"
+                }
+                'track_play' { # replays bookmarks/<name>.track.json (sent in pieces: a request is at most 64 KB) and waits for its end
+                    # (load_only: sent and not started, e.g. before the recorder key; loaded: started from what was sent)
+                    if (-not $step.loaded) {
+                    $t = Get-Content -LiteralPath (Join-Path $PSScriptRoot "bookmarks/$($step.name).track.json") -Raw | ConvertFrom-Json
+                    Call-Agent 'camera_pan' @{ stop = $true } | Out-Null
+                    Call-Agent 'track_load' @{ reset = $true } | Out-Null
+                    foreach ($k in 'lamps', 'cam', 'edits', 'levels', 'modes') {
+                        if ($null -eq $t.$k) { continue }
+                        $all = [object[]]$t.$k # (not through the pipeline: it would flatten each camera sample's array)
+                        # shortcut: the agent stopped answering past about 2300 camera samples sent (cause not found); every
+                        # other sample (5 a second, the replay interpolates between them) keeps a 6-minute check under it
+                        if ($k -eq 'cam' -and $all.Count -gt 1800) { $all = [object[]]@(for ($q = 0; $q -lt $all.Count; $q += 2) { , $all[$q] }) }
+                        $size = if ($step.chunk) { [int]$step.chunk } else { 200 }
+                        for ($i = 0; $i -lt $all.Count; $i += $size) {
+                            $part = New-Object System.Collections.ArrayList
+                            for ($q = $i; $q -lt [Math]::Min($i + $size, $all.Count); $q++) { [void]$part.Add($all[$q]) }
+                            Call-Agent 'track_load' @{ $k = $part } 60000 | Out-Null
+                        }
+                    }
+                    Say "  step ${n}: $($step.name) sent to the agent"
+                    }
+                    if ($step.load_only) { break }
+                    $p = Call-Agent 'track_play' @{}
+                    Say "  step ${n}: replaying $($step.name): $($p.seconds) s, $($p.edits) light edits, $($p.matched) of $($p.lamps) lights found, $($p.placed) put down, $($p.levels) floor and $($p.modes) mode changes"
+                    Wait-Game "the replay of $($step.name)" ([double]$p.seconds / 60 + 2) { (Call-Agent 'track_play' @{ status = $true }).state -ne 'playing' } { Clear-Dialog }
+                }
+                'input_record' { # the tester's exact clicks and keys (profilers/input_track.py) until the file `file` (default done) exists; kept as bookmarks/<name>.input.json
+                    $f = Join-Path $OutDir $(if ($step.file) { $step.file } else { 'done' })
+                    $stopF = Join-Path $OutDir 'input-stop'
+                    $out = Join-Path $PSScriptRoot "bookmarks/$($step.name).input.json"
+                    $rec = Start-Process -FilePath 'python' -NoNewWindow -PassThru -RedirectStandardOutput (Join-Path $dir 'input.log') -ArgumentList @(
+                        '-I', ('"' + (Join-Path $PSScriptRoot 'profilers/input_track.py') + '"'), 'record', ('"' + $out + '"'), ('"' + $stopF + '"'))
+                    Say "  step ${n}: recording the tester's clicks and keys until $f exists (up to $($step.minutes) min)"
+                    try { Wait-Game "the file $f" ([double]$step.minutes) { Test-Path -LiteralPath $f } { Clear-Dialog } }
+                    finally { New-Item -ItemType File -Path $stopF -Force | Out-Null; $rec.WaitForExit(10000) | Out-Null }
+                    Say "  step ${n}: $(Get-Content -LiteralPath (Join-Path $dir 'input.log') -Raw) kept as $($step.name)"
+                }
+                'input_play' { # plays bookmarks/<name>.input.json back (the game window to the front; a real key or click ends it)
+                    $in = Join-Path $PSScriptRoot "bookmarks/$($step.name).input.json"
+                    $last = (Get-Content -LiteralPath $in -Raw | ConvertFrom-Json).events | Select-Object -Last 1
+                    $play = Start-Process -FilePath 'python' -NoNewWindow -PassThru -RedirectStandardOutput (Join-Path $dir 'input-play.log') -ArgumentList @(
+                        '-I', ('"' + (Join-Path $PSScriptRoot 'profilers/input_track.py') + '"'), 'play', ('"' + $in + '"'), ('"' + (Join-Path $OutDir 'input-stop') + '"'))
+                    Say "  step ${n}: playing $($step.name) back ($([math]::Round($last[0] / 1000)) s)"
+                    Wait-Game "the playback of $($step.name)" ([double]$last[0] / 60000 + 2) { $play.HasExited } { }
+                    Say "  step ${n}: $(Get-Content -LiteralPath (Join-Path $dir 'input-play.log') -Raw)"
+                }
+                'clip_session' { # the tester records clips with F9 (profilers/input_track.py session) until the file done exists: each clip
+                    # keeps its clicks and keys (input.json), its own recording (the recorder key F6 at its start and end) and the tester's
+                    # description (desc.txt), in <run>/clips/clip-N; the whole session is kept too: every click and key (clips/all.json)
+                    # and the scene's state (clips/track.json: camera, floors, lights; its start in clips/track-start)
+                    $clips = Join-Path $OutDir 'clips'
+                    New-Item -ItemType Directory -Path $clips -Force | Out-Null
+                    $stopF = Join-Path $OutDir 'session-stop'
+                    $f = Join-Path $OutDir 'done'
+                    $sess = Start-Process -FilePath 'python' -NoNewWindow -PassThru -RedirectStandardOutput (Join-Path $dir 'session.log') -ArgumentList @(
+                        '-I', ('"' + (Join-Path $PSScriptRoot 'profilers/input_track.py') + '"'), 'session', ('"' + $clips + '"'), ('"' + $stopF + '"'), $(if ($step.clips -eq $false) { '--no-clips' } else { '' }))
+                    $handled = @{}
+                    try { Call-Agent 'track_record' @{ start = $true } | Out-Null; ('{0:F3}' -f ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0)) | Set-Content (Join-Path $clips 'track-start') }
+                    catch { Say "  no scene track for the session ($_)" }
+                    $press = { $script:proc.Refresh(); $h = $script:proc.MainWindowHandle # (F6, the run's recorder key)
+                        $null = [ApexIngame.Keys]::PostMessage($h, 0x100, [IntPtr]0x75, [IntPtr]1); $null = [ApexIngame.Keys]::PostMessage($h, 0x101, [IntPtr]0x75, [IntPtr]0xC0000001) }
+                    Say "  step ${n}: clip session: F9 starts and stops a clip; the run ends when $f exists (up to $($step.minutes) min)"
+                    try {
+                        Wait-Game "the file $f" ([double]$step.minutes) {
+                            foreach ($c in @(Get-ChildItem -LiteralPath $clips -Directory -ErrorAction SilentlyContinue)) {
+                                if ((Test-Path (Join-Path $c.FullName 'start')) -and -not $handled["$($c.Name)+"]) {
+                                    $handled["$($c.Name)+"] = $true
+                                    & $press
+                                    Say "  $($c.Name) started"
+                                }
+                                if ((Test-Path (Join-Path $c.FullName 'stopped')) -and -not $handled["$($c.Name)-"]) {
+                                    $handled["$($c.Name)-"] = $true
+                                    & $press
+                                    Say "  $($c.Name) stopped"
+                                }
+                            }
+                            Test-Path -LiteralPath $f
+                        } { Clear-Dialog }
+                    } finally {
+                        New-Item -ItemType File -Path $stopF -Force | Out-Null
+                        $sess.WaitForExit(15000) | Out-Null
+                        try {
+                            $t = Call-Agent 'track_record' @{ stop = $true } 60000
+                            ($t | ConvertTo-Json -Depth 6 -Compress) | Set-Content -LiteralPath (Join-Path $clips 'track.json') -Encoding UTF8
+                            Say "  session scene track: $(@($t.cam).Count) camera samples, $(@($t.edits).Count) light edits"
+                        } catch { Say "  session scene track not kept ($_)" }
+                    }
+                    foreach ($c in @(Get-ChildItem -LiteralPath $clips -Directory)) {
+                        $d = Join-Path $c.FullName 'desc.txt'
+                        Say "  $($c.Name): $(if (Test-Path $d) { Get-Content -LiteralPath $d -Raw -Encoding UTF8 } else { '(no description)' })"
+                    }
+                }
+                'floor' { # the floor shown on a lot (default the active lot)
+                    $a = @{ level = $step.level }; if ($step.lot) { $a.lot = $step.lot }
+                    $o = Call-Agent 'floor' $a
+                    Say "  step ${n}: floor $($o.level) shown on $($o.lot)"
+                }
+                'lights_on' {
+                    $o = Call-Agent 'lights_on' @{ lot = $step.lot }
+                    Say "  step ${n}: lights on at $($o.name) through $($o.via)$(if ($null -ne $o.lights) { " ($($o.lights) lights)" })"
+                }
+                'lots' { # every lot's name, type and centre, for picking lots in a job
+                    $l = Call-Agent 'lots' $null
+                    $l.lots | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $dir 'lots.json') -Encoding UTF8
+                    Say "  step ${n}: $(@($l.lots).Count) lots listed in lots.json"
+                }
+                'camera_orbit' {
+                    $a = @{}; foreach ($p in $step.PSObject.Properties) { if ($p.Name -ne 'do') { $a[$p.Name] = $p.Value } }
+                    $o = Call-Agent 'camera_orbit' $a
+                    Say "  step ${n}: camera orbit around $($o.name) at $($o.lot.x), $($o.lot.z)$(if ($o.door) { " ($($o.door))" })"
+                }
+                'camera' { Call-Agent 'camera' @{ pos = $step.pos; target = $step.target } | Out-Null }
+                'camera_pan' {
+                    $a = @{}; foreach ($p in $step.PSObject.Properties) { if ($p.Name -ne 'do') { $a[$p.Name] = $p.Value } }
+                    $pan = Call-Agent 'camera_pan' $a
+                    Say "  camera pan over $($pan.lots) lots, $($pan.passes) passes of $([math]::Round($pan.passMs / 1000)) s"
+                }
+                'profile' { # starts the measured window and goes on with the next steps; the load waits for its end after the last step
+                    if ($measured) { throw 'profile: a load has one measured window' }
+                    $measured = Start-Measured (Join-Path $dir "measure$n") ([double]$step.minutes * 60) $machine
+                    Say "  step ${n}: profiling $($step.minutes) min in the background"
+                }
+                'wait' {
+                    $seconds = [double]$step.minutes * 60
+                    $first = $step.measure -and -not $measured # shortcut: only the first measured wait counts; sum several when a job needs it
+                    if ($first) { $measured = Start-Measured (Join-Path $dir "measure$n") $seconds $machine }
+                    Say "  step ${n}: wait $($step.minutes) min$(if ($first) { ' (measured)' })$(if ($step.until) { ', or until ' + (Format-Until $step.until) })"
+                    $until = (Get-Date).AddSeconds($seconds)
+                    $poll = if ($step.until -and $first) { { # every 30 s: the repro's own count against the count set in the job
+                        $c = Get-UntilCount $step.until
+                        if ($c.Reached -and -not $script:stopAt) {
+                            $script:stopAt = Get-Date; Set-Content -LiteralPath "$($measured.Base).stop" -Value $c.Text
+                            $result.Events = "stopped at $($c.Text) after $([math]::Round(($script:stopAt - $measured.Start).TotalMinutes, 1)) min"
+                            Say "  $($result.Events)"
+                        }
+                    } } else { $null }
+                    $script:stopAt = $null
+                    Wait-Game "step $n (wait)" ([double]$step.minutes + 2) { (Get-Date) -ge $until -or $script:stopAt } { Keep-Speed; if ($poll) { & $poll } }
+                    if ($first) {
+                        if ($script:stopAt) { $measured.Seconds = ($script:stopAt - $measured.Start).TotalSeconds; $measured.End = $script:stopAt }
+                        elseif ($step.until) { $result.Events = "cap of $($step.minutes) min reached before $(Format-Until $step.until)" }
+                        Complete-Measured $measured $machine $notes
+                    }
+                }
+                'save' {
+                    $lastSave = 'ApexRunner-{0}-{1}-{2}' -f $runId, $Load.Name, $n
+                    # a save of that name from before would pass the check below at once
+                    if (Test-Path -LiteralPath (Join-Path $savesDir "$lastSave.sims3")) { throw "save: $lastSave.sims3 already exists" }
+                    $result.Saves += $lastSave
+                    Call-Agent 'save_game' @{ name = $lastSave } | Out-Null
+                    Say "  step ${n}: saving as $lastSave"
+                    Start-Sleep -Seconds 5
+                    Wait-Game "save $lastSave" 15 {
+                        try { $s = Call-Agent 'game_state' $null 5000; return (-not $s.save_in_progress -and (Test-Path -LiteralPath (Join-Path $savesDir "$lastSave.sims3"))) } catch { return $false }
+                    }
+                }
+                { $_ -in 'camera_jumps', 'vfx_burst' } {
+                    $a = @{}; foreach ($p in $step.PSObject.Properties) { if ($p.Name -ne 'do') { $a[$p.Name] = $p.Value } }
+                    $rep = Call-Agent $step.do $a
+                    Say "  step ${n}: $($step.do) $(if ($rep.path) { 'over ' + @($rep.path).Count + ' lots' } else { "$($rep.count) effects" }) in the background"
+                }
+                'mode' {
+                    $want = $script:ModeStates[[string]$step.mode]
+                    if (-not $want) { throw "mode: '$($step.mode)' is not one of $($script:ModeStates.Keys -join ', ')" }
+                    Call-Agent 'set_mode' @{ mode = $step.mode } | Out-Null
+                    Say "  step ${n}: mode $($step.mode)"
+                    Wait-Game "mode $($step.mode)" $LoadTimeoutMin {
+                        try { $s = Call-Agent 'game_state' $null 5000; return ($s.sub_state -eq $want -and -not $s.modal) } catch { return $false }
+                    } { Clear-Dialog }
+                    if ($step.seconds) { Start-Sleep -Seconds ([double]$step.seconds) } # time in the mode before the next step
+                }
+                'stop_repros' {
+                    $j = Call-Agent 'camera_jumps' @{ stop = $true }; $v = Call-Agent 'vfx_burst' @{ stop = $true }
+                    if ($j.jumpLog) { @($j.jumpLog) | Set-Content -LiteralPath (Join-Path $dir 'jumps.txt') -Encoding UTF8 } # flash_scan's settle times
+                    $counts = 'jumps {0}, loops {1}, outfit changes {2}, Sims spawned {3} (removed {4}), effect rounds {5}, effects {6}, missing {7}' -f
+                        $j.jumps, $j.loops, $j.outfitChanges, $j.spawned, $j.removed, $v.rounds, $v.started, $v.missing
+                    $result.Events = (@($result.Events, $counts) | Where-Object { $_ }) -join '; '
+                    Say "  step ${n}: repros stopped: $($result.Events)"
+                }
+                'reload' {
+                    $file = if ($step.save -and $step.save -ne 'last') { "$($step.save).sims3" } elseif ($lastSave) { "$lastSave.sims3" } else { throw 'reload: no save made yet' }
+                    Say "  step ${n}: reloading $file"
+                    Call-Agent 'load_save' @{ file = $file; reload = $true } | Out-Null
+                    Start-Sleep -Seconds 10
+                    Wait-LiveMode "reload of $file"
+                }
+                default { throw "unknown step '$($step.do)'" }
+            }
+            if ($step.do -notin 'wait', 'profile') {
+                $label = if ($step.do -eq 'mode') { "mode $($step.mode)" } else { $step.do }
+                $script:commands.Add([pscustomobject]@{ label = $label; kind = 'step'; t0 = $stepT0; t1 = (Get-QpcMs) })
+            }
+        }
+        if ($measured) { Complete-Measured $measured $machine $notes } # a profile step's window may outlast the steps
+        Say "$($Load.Name): closing the game"
+        try { Call-Agent 'quit_game' $null | Out-Null } catch { $notes.Add("quit_game: $($_.Exception.Message)") }
+        if ($script:proc.WaitForExit(120000)) { $result.Closed = 'quit' }
+        elseif ($script:proc.CloseMainWindow() -and $script:proc.WaitForExit(60000)) { $result.Closed = 'window closed' }
+        else { Stop-Process -Id $script:proc.Id -Force; $result.Closed = 'ended'; $notes.Add('the game did not close and was ended') }
+    } catch {
+        $notes.Add($_.Exception.Message)
+        if ($script:proc.HasExited) { $result.Closed = "exited $($script:proc.ExitCode)" }
+        else { Stop-Process -Id $script:proc.Id -Force; $result.Closed = 'ended after a failure' }
+    } finally {
+        if ($script:mbox) { $script:mbox.Dispose(); $script:mbox = $null }
+    }
+    Wait-Process -Id $script:proc.Id -Timeout 60 -ErrorAction SilentlyContinue
+    if ($noApex -and (Test-Path -LiteralPath $asiOffPath)) { Move-Item -LiteralPath $asiOffPath -Destination $asiPath -Force }
+    if ($grabProc) {
+        if (-not $grabProc.WaitForExit(30000)) { $grabProc.Kill() } # it ends with the game
+        $scan = & python -I (Join-Path $PSScriptRoot 'profilers/flash_scan.py') (Join-Path $dir 'grab') 2>&1
+        $scan | Set-Content -LiteralPath (Join-Path $dir 'flashes.txt') -Encoding UTF8
+        Say "  $(@($scan)[-1])"
+    }
+    Start-Sleep -Seconds 2 # Apex's log writer and crash report finish with the process
+
+    foreach ($f in 'ApexRadiance_LOG.txt', 'ApexRadiance_Crash.txt', 'ApexRadiance_Hitches.txt') {
+        $p = Join-Path $apexDir $f
+        if ((Test-Path -LiteralPath $p) -and (Get-Item -LiteralPath $p).LastWriteTime -ge $started) { Copy-Item -LiteralPath $p -Destination $dir }
+    }
+    if (Test-Path (Join-Path $dir 'ApexRadiance_Crash.txt')) { $notes.Add('crash report written') }
+    # the agent's marker files (Marker in agent/Agent.cs) belong to the run, not to the player's folder
+    Get-ChildItem -LiteralPath $GameDocuments -Filter 'ScriptError*.xml' -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -ge $started -and (Select-String -LiteralPath $_.FullName -SimpleMatch '<ApexTestAgent ' -List) } |
+        Move-Item -Destination $dir -Force
+    $logPath = Join-Path $dir 'ApexRadiance_LOG.txt'
+    $lines = if (Test-Path -LiteralPath $logPath) { @(Get-Content -LiteralPath $logPath) } elseif ($noApex) { @() } else { $notes.Add('no ApexRadiance_LOG.txt from this load'); @() }
+    $check = Test-ApexLog $lines (@($jobDef.expect) + @($v.expect)) ($script:DefaultFailPatterns + @($jobDef.fail) + @($v.fail))
+    foreach ($m in $check.Missing) { $notes.Add("missing log line: $m") }
+    foreach ($m in $check.Failures) { $notes.Add("log: $m") }
+    $script:commands | ForEach-Object { $_ | ConvertTo-Json -Compress } | Set-Content -LiteralPath (Join-Path $dir 'commands.jsonl') -Encoding UTF8
+    if ($measured) {
+        # the frame recorder's session ends with the game; give it a moment, then end it
+        if ($measured.Prof.Frames -and -not $measured.Prof.Frames.WaitForExit(30000)) { $measured.Prof.Frames.Kill(); $notes.Add('frame recorder still attached after the game closed; ended') }
+        $machine | ForEach-Object { $_ | ConvertTo-Json -Compress } | Set-Content -LiteralPath "$($measured.Base)-machine.jsonl" -Encoding UTF8
+        $crash = if (Test-Path (Join-Path $dir 'ApexRadiance_Crash.txt')) { 'crash report written' } elseif ($result.Closed -notin 'quit', 'window closed') { "game did not quit ($($result.Closed))" } else { $null }
+        $result.M = Get-Measurement $measured.Base $measured.Seconds $script:commands $machine -NoInactiveIdle:(-not $InactiveIdle) -Crash $crash
+        if ($result.M) { $result.Frames = $result.M.Frames; $result.Sim = $result.M.Sim }
+    }
+    $result.Ok = $check.Ok -and ($result.Closed -in 'quit', 'window closed') -and -not (Test-Path (Join-Path $dir 'ApexRadiance_Crash.txt')) -and
+        -not ($notes | Where-Object { $_ -notmatch '^(log|missing log line):' -and $_ -notmatch 'profiler' })
+    if (-not $KeepSaves) { foreach ($s in $result.Saves) { $p = Join-Path $savesDir "$s.sims3"; if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force } } }
+    Say "$($Load.Name): $(if ($result.Ok) { 'pass' } else { 'FAIL' })$(if ($notes.Count) { ' - ' + ($notes -join '; ') })"
+    return $result
+}
+
+# ------------------------------------------------------------------ install, run, restore
+# The settings first: restored first too. Apex Radiance's own outputs and shader cache are written by the test build;
+# the job saves are only loaded (the agent saves under new names) but are kept in the backup all the same.
+$asiPath = Join-Path $GameBin 'ApexRadiance.asi'
+$asiOffPath = Join-Path $GameBin 'ApexRadiance.asi.off'
+$s3ssPath = Join-Path $GameDocuments 'S3SS/S3SS.toml'
+$optionsPath = Join-Path $GameDocuments 'Options.ini'
+$installs = @(
+    @{ path = $tomlPath; from = $null },
+    @{ path = $s3ssPath; from = $null }, # a job's "s3ss" settings
+    @{ path = $optionsPath; from = $null }, # a job's "options" lines
+    @{ path = (Join-Path $GameBin 'ApexRadiance.asi'); from = $Asi },
+    @{ path = (Join-Path $GameBin 'ApexRadiance.asi.off'); from = $null }, # an apex:false load's ASI set aside
+    @{ path = (Join-Path $GameDocuments 'Mods/Packages/ApexTestAgent.package'); from = $agent },
+    @{ path = (Join-Path $GameDocuments 'scriptCache.package'); from = $null } # stale compiled scripts; the game rebuilds it
+)
+if ($AsiLoader) { $installs += @{ path = (Join-Path $GameBin 'wininet.dll'); from = $AsiLoader } }
+$kept = @('ApexRadiance_LOG.txt', 'ApexRadiance_Crash.txt', 'ApexRadiance_Hitches.txt', 'ApexRadiance_ShaderCache.bin' | ForEach-Object { Join-Path $apexDir $_ }) +
+    @($jobs | ForEach-Object { Join-Path $savesDir "$($_.save).sims3" } | Select-Object -Unique)
+Enter-RunLock $stateDir $OutDir
+try { $manifest = New-RunBackup $OutDir (@($installs | ForEach-Object { $_.path }) + $kept) }
+catch { Exit-RunLock $stateDir $OutDir; throw } # nothing installed yet
+Say "backup of $($manifest.Count) files and folders in $OutDir\backup (by hand: run.ps1 -Restore '$OutDir')"
+$baseToml = if (Test-Path -LiteralPath $tomlPath) { [IO.File]::ReadAllText($tomlPath) } else { '' }
+$script:baseOptions = if (Test-Path -LiteralPath $optionsPath) { [IO.File]::ReadAllText($optionsPath) } else { $null }
+$script:baseS3ss = if (Test-Path -LiteralPath $s3ssPath) { [IO.File]::ReadAllText($s3ssPath) } else { $null }
+$results = @()
+$stopped = $null
+$restored = $null
+try {
+    foreach ($e in $installs) {
+        if ($e.from) { New-Item -ItemType Directory -Path (Split-Path $e.path) -Force | Out-Null; Copy-Item -LiteralPath $e.from -Destination $e.path -Force }
+        elseif ($e.path -like '*scriptCache.package' -and (Test-Path -LiteralPath $e.path)) { Remove-Item -LiteralPath $e.path -Force }
+    }
+    Say "installed $(Split-Path $Asi -Leaf) ($((Get-FileHash -LiteralPath $Asi -Algorithm SHA256).Hash.Substring(0, 12))) and the test agent; $($loads.Count) load(s)"
+    foreach ($l in $loads) {
+        $row = @(Invoke-Load $l $baseToml)
+        if ($row.Count -ne 1) { throw "internal: Invoke-Load returned $($row.Count) values instead of one result" }
+        $results += $row[0]
+        if (Get-Process -Name 'TS3W' -ErrorAction SilentlyContinue) { throw 'TS3W.exe still running after a load; stopping the run' }
+    }
+} catch {
+    $stopped = $_.Exception.Message
+    Say "run stopped: $stopped"
+} finally {
+    if ($script:proc -and -not $script:proc.HasExited) { Stop-Process -Id $script:proc.Id -Force; Wait-Process -Id $script:proc.Id -Timeout 60 -ErrorAction SilentlyContinue }
+    # every TS3W, not only ours: a second one started through Steam holds the ASI too. Waited for, never ended.
+    $others = @(Get-Process -Name 'TS3W' -ErrorAction SilentlyContinue)
+    if ($others) { Say "waiting up to 2 min for $($others.Count) TS3W.exe to close before putting files back"; $others | Wait-Process -Timeout 120 -ErrorAction SilentlyContinue }
+    try { $restored = Restore-RunBackup $OutDir }
+    catch { $restored = [pscustomobject]@{ Already = $false; Restored = 0; Pending = @([pscustomobject]@{ path = "$OutDir\backup"; error = $_.Exception.Message }) } }
+    Write-RestoreState $restored $OutDir
+    if (-not $restored.Pending.Count) { Exit-RunLock $stateDir $OutDir }
+    if ($results) {
+        $title = 'In-game run ' + (Split-Path $OutDir -Leaf)
+        $md = Format-Results $results $title
+        if ($stopped) { $md += "`r`nRun stopped: $($stopped -replace '\|', '/')`r`n" }
+        if ($restored.Pending.Count) {
+            $md += "`r`n## Files not put back`r`n`r`nClose every TS3W.exe, then run ``run.ps1 -Restore '$OutDir'``.`r`n`r`n" +
+                (($restored.Pending | ForEach-Object { "- $($_.path): $($_.error -replace '\|', '/')" }) -join "`r`n") + "`r`n"
+        }
+        [IO.File]::WriteAllText((Join-Path $OutDir 'results.md'), $md, (New-Object Text.UTF8Encoding($false)))
+        $results | Select-Object Name, JobId, Variant, Ok, Closed, Frames, Sim, Events, Notes | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $OutDir 'results.json') -Encoding UTF8
+        Say "results: $OutDir\results.md ($(@($results | Where-Object Ok).Count) of $($results.Count) loads passed)"
+    }
+}
+# 0 all loads passed, 1 a load failed, 2 the run stopped early, 3 files still to put back (runner_lib.ps1 Get-RunExitCode)
+exit (Get-RunExitCode $results $loads.Count ([bool]$stopped) ([bool]$restored.Pending.Count))

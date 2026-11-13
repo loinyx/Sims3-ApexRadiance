@@ -52,6 +52,8 @@
 #include "memory_patch.h"
 #include "drag_lite.h"
 #include "restart_settle.h"
+#include "perf_toggles.h"
+#include "rt_outdoor_lamps.h"
 #include "imgui.h"
 #include <windows.h>
 #include <psapi.h>
@@ -337,6 +339,35 @@ std::atomic<BYTE*> g_ground{nullptr};
 std::atomic<DWORD> g_groundUntil{0};
 int StateOf(const BYTE* room); // below (SEH, -1 when unreadable)
 
+// (fast camera) while the camera moves, a room 0 of a lot other than the one played and the GPU's active lot is not picked,
+// for at most kMoveHoldMs per motion: a room 0 solve runs whole in one step whatever the lot's budget (38-67 ms at class 2
+// in a fast-camera recording, the largest moving hitches), and the lots the camera passes over queue them one after the
+// other. Each keeps its state and marks and is picked once the camera stops or the wait runs out; a lamp edit's rooms are
+// never held
+constexpr DWORD kMoveHoldMs = 2000;
+std::atomic<DWORD> g_moveHoldSince{0}; // the first hold of this motion (0: none yet, or the camera stopped)
+std::atomic<long> g_moveHeld{0};
+bool MoveHold(BYTE* room) {
+    if (!PerfToggles::MotionRoom0Hold.load(std::memory_order_relaxed) || !LotLightingMotion::CameraMoving()) {
+        g_moveHoldSince.store(0, std::memory_order_relaxed);
+        return false;
+    }
+    int id = -1;
+    __try {
+        id = *reinterpret_cast<const int*>(room + 0x0C);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+    if (id != 0 || !g_prioLotOk.load(std::memory_order_relaxed) || OnPlayedLot(room) || RtOutdoorLamps::TrackerOf(room) || LevelLightShare::LampUrgency(room) > 1.0f)
+        return false;
+    const DWORD now = std::max<DWORD>(GetTickCount(), 1);
+    DWORD since = g_moveHoldSince.load(std::memory_order_relaxed);
+    if (!since) g_moveHoldSince.store(since = now, std::memory_order_relaxed);
+    if (now - since >= kMoveHoldMs) return false;
+    g_moveHeld.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
+
 // 07/10, players' Runtime Error: Apex's parts around the game's priority call are caught on their own (HookGuard); on a C++
 // exception the room keeps the game's own priority and that part stays off
 
@@ -359,6 +390,7 @@ float __fastcall PriorityHook(BYTE* room) {
     if (room && p > 0.0f && DevSwitches::RestartSettle() && LevelLightShare::LampUrgency(room) <= 1.0f &&
         RestartSettle::Global().Hold(reinterpret_cast<uintptr_t>(room), GetTickCount64()))
         return 0.0f;
+    if (room && p > 0.0f && g_prioOn && HookGuard::Run("RoomLightQueue moving room-0 hold", false, [room] { return MoveHold(room); })) return 0.0f;
     if (!room || !g_prioOn) return p;
     if (BYTE* g = g_ground.load(std::memory_order_relaxed)) {
         const DWORD now = GetTickCount(), until = g_groundUntil.load(std::memory_order_relaxed);

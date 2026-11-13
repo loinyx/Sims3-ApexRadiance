@@ -1,0 +1,47 @@
+{
+  "id": "scene-node-budget",
+  "description": "Scene Node Budget while the camera pans over new lots. Pass: the budget logs On, no safety check fails, no node warnings; A/B metric: frames over 50 ms per minute.",
+  "save": "ApexTest-Town",
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.SceneNodeBudget": {
+          "enabled": false
+        }
+      },
+      "fail": [
+        "\\[SceneBudget\\] On:"
+      ]
+    },
+    "on": {
+      "toml": {
+        "patches.SceneNodeBudget": {
+          "enabled": true
+        }
+      },
+      "expect": [
+        "\\[SceneBudget\\] On:"
+      ]
+    }
+  },
+  "fail": [
+    "\\[SceneBudget\\] Node .* (destroyed|added to a scene) while still queued"
+  ],
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "fast"
+    },
+    {
+      "do": "camera_pan",
+      "lots": 8,
+      "seconds": 40,
+      "passes": 15
+    },
+    {
+      "do": "wait",
+      "minutes": 10,
+      "measure": true
+    }
+  ]
+}

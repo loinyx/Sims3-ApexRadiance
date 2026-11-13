@@ -15,6 +15,8 @@
 // Part of Apex Radiance. Credits: @loinyx
 
 #include "rt_outdoor_lamps.h"
+#include "build_flavor.h"
+#include "apex_paths.h"
 #include "terrain_bake_rule.h"
 #include "rt_lamp_gpu.h"
 #include "drag_lite.h"
@@ -40,6 +42,7 @@
 #include "apex_log.h"
 #include "hook_guard.h"
 #include "dev_switches.h"
+#include "atrium_hold.h"
 #include "apex_memory.h"
 #include "game_addresses.h"
 #include "d3d9_hooks.h"
@@ -72,12 +75,17 @@ constexpr const char* kMapName[4] = {"wall atlas", "floor map", "ceiling map", "
 constexpr int kMaxWatch = 128;           // maps watched for writes (8 stories x 4 maps x 2 classes, the lots next to it from the upper half: a round relit 87 maps, and a map past the cap went unwatched)
 constexpr float kFar = 64.0f;            // m: the shadow maps' range
 constexpr DWORD kSolveAskMs = 10000;     // a room 0 with no kept solve is sent to its solve at most this often
+constexpr DWORD kSolveAskActiveMs = 1500; // the active lot's: a solve that kept no parts (walls or floors changed while the lot
+                                          // streamed in) waited 10 s for the next send, the lot on the game's maps meanwhile
 constexpr DWORD kCoverFreshMs = 3000;    // a lot's coverage counts this long after the last check
 constexpr int kSolveAsks = 3;            // a room 0 is sent to its solve for a kept solve at most this often in a row
 constexpr DWORD kSolveRetryMs = 60000;   // then this seldom: a run of refused sends left the story on the game's maps until the lot changed
 constexpr DWORD kDragQuietMs = 300;      // a GPU lamp that changed this recently is being dragged (or edited again and again)
 constexpr DWORD kLeftLotGraceMs = 20000; // the lot left at a switch keeps its room 0s' kept solves this long (a return reuses them)
-constexpr DWORD kActiveLotHoldMs = 3000; // (active_lot_hold) while the camera moves, another lot becomes the active one after this as the first lit at the high quality
+// (active_lot_hold) while the camera moves, another lot becomes the active one after this as the first lit at the high quality.
+// 3 s once, when a new lot waited 3 to 5 s for its maps; with its stories put first (0.1 to 0.7 s) the hold only kept the
+// lot arrived at on the game's dimmer light: a player's arrival at the town square waited the full 3 s, then brightened
+constexpr DWORD kActiveLotHoldMs = 800;
 constexpr DWORD kHoldQuietMs = 1500;     // the rooms that take room 0's lamps are sent this long after a story's last move
                                          // (a Build mode drag moves in grid steps with pauses of up to about a second)
 constexpr DWORD kCheckEveryMs = 2000;    // the consistency check of the GPU lamps' stories
@@ -432,6 +440,7 @@ uint64_t g_proxyGeo = 0;                      // (under g_proxyMx) the geometry 
 struct Cover {
     uintptr_t tracker = 0;
     bool full = false;
+    uint8_t stories = 0; // the active lot's stories whose room-0 maps are all relit (an edit there marks no room, StoryCovered)
     DWORD at = 0;
     std::unordered_set<uintptr_t> lamps;
     std::set<std::pair<int, uintptr_t>> kept0; // (GPU room lamps) (story, lamp): a lamp room 0's kept parts draw there
@@ -632,6 +641,13 @@ uint64_t g_lotId = 0;
 uintptr_t g_holdFor = 0;
 DWORD g_holdForAt = 0, g_holdAt = 0;
 DWORD g_switchAt = 0; // the last active-lot switch, until a room-0 solve of the new lot ends after it (0: none)
+// The new active lot's kept room-0 solves come one story at a time (the game solves one room at a time): for kKeptRushMs
+// after a switch its ground story goes first (RoomLightQueue::GroundFirst, renewed while it has none) and every other story's
+// room 0 still waiting for its solve is put first in the queue (LevelLightShare::MarkRoomFirst, a quiet mark: a solve in
+// progress goes on). The town square's ground story waited 14 s, solved last; first, 3.5 s. The gym's story 2 waited 10 s
+// behind the lot's other rooms. (A 12 ms budget meanwhile was tried: 30-140 ms steps, no gain.)
+constexpr DWORD kKeptRushMs = 8000;
+DWORD g_rushFrom = 0;                  // (render thread) the switch the rush follows (0: none)
 // (physical indoor lamps, render thread) a lot lamp as each room-0 map's pick reads it, once a round (Frame clears it): every
 // story's maps read every lot lamp again, with nothing edited
 struct LampNow {
@@ -643,10 +659,29 @@ std::unordered_map<uintptr_t, LampNow> g_lampNow;
 bool RestartSolveTerminal(const Ask& ask, int state, bool budgetOut) {
     return (state == 4 || state == 5) && (budgetOut || (ask.count >= kSolveAsks && ask.logged));
 }
-bool AskDue(const Ask& ask, DWORD now) { return !ask.at || now - ask.at > (ask.count < kSolveAsks ? kSolveAskMs : kSolveRetryMs); }
+bool AskDue(const Ask& ask, DWORD now, DWORD askMs = kSolveAskMs) { return !ask.at || now - ask.at > (ask.count < kSolveAsks ? askMs : kSolveRetryMs); }
 bool g_restartGpuPending = false, g_restartGpuFallback = false;
 std::unordered_map<const void*, Ask> g_askedSolve; // room -> its sends to its solve for a kept solve
 std::unordered_map<const IDirect3DBaseTexture9*, Slot*> g_swap; // the game's map -> its slot (the SetTexture swap; render thread)
+// (render thread) the relit copies of the lots left at active lot switches: kept bound (frozen, not relit) while the game
+// does not write those maps again (a lamp switched there, the day's light), for up to kRetiredLots lots, the least recently
+// left dropped first. A lot left does not fall back to the game's maps at the switch, nor a lot visited again while its
+// own maps are prepared: with Instant on, the lots seen keep the GPU's light
+struct Retired {
+    uintptr_t lot = 0; // the tracker it was the active lot of
+    DWORD at = 0;      // when it was left
+    std::unique_ptr<Slot> s;
+};
+std::vector<Retired> g_retired;
+std::unordered_map<const IDirect3DBaseTexture9*, Slot*> g_swapRetired;
+std::unordered_map<const void*, Slot*> g_retiredCopies; // a retired copy (or its high-detail one) -> its slot (ScaleOf, GameMapOf)
+uintptr_t g_retiredLo = ~uintptr_t{0}, g_retiredHi = 0;
+constexpr size_t kRetiredLots = 3;
+// (any thread: the game's map unlock) the retired copies' game maps, and those the game wrote since (their copies are stale)
+std::mutex g_retiredMx;
+std::unordered_set<const void*> g_retiredGame;
+std::vector<const void*> g_retiredStale;
+std::atomic<bool> g_retiredAny{false};
 // (the 10 s summary, render thread) the frames of the maps with texels over open rooms of the story below: their rooms read now,
 // the last binding kept (why: a room's ambient, a room's map, the UV map), none (the draw shows the texels' carried light), a switch
 // between the relit copy and the game's map, a room showing another class than the one matched, a new kept solve not yet prepared
@@ -797,6 +832,19 @@ void ReleaseSlot(Slot& s) {
     s.inAmbOk = false;
     s.map = RtLampGpu::Map{};
 }
+// A retired slot keeps only what its bound copy needs (game, copy, hi, scale): its relight buffers and indoor data go
+void TrimRetired(Slot& s) {
+    for (IDirect3DVertexBuffer9** vb : {&s.vb, &s.dyn, &s.dynNext, &s.kvb, &s.pvb})
+        if (*vb) (*vb)->Release(), *vb = nullptr;
+    if (s.preblur) s.preblur->Release(), s.preblur = nullptr;
+    ReleaseHiPoints(s);
+    if (s.inUv) s.inUv->Release(), s.inUv = nullptr;
+    s.inUvBuilt.clear();
+    if (s.inBase) s.inBase->Release(), s.inBase = nullptr;
+    for (IDirect3DTexture9*& g : s.inGame)
+        if (g) g->Release(), g = nullptr;
+    s.inAmbOk = false;
+}
 // Every stage that holds a copy takes the game's map back (render thread)
 void UnbindCopies(IDirect3DDevice9* dev) {
     if (!dev) return;
@@ -826,6 +874,192 @@ void RebuildSwap() {
             const uintptr_t a = reinterpret_cast<uintptr_t>(s->game);
             g_swapLo = std::min(g_swapLo, a), g_swapHi = std::max(g_swapHi, a);
         }
+}
+void RebuildRetired() {
+    g_swapRetired.clear();
+    g_retiredCopies.clear();
+    g_retiredLo = ~uintptr_t{0}, g_retiredHi = 0;
+    std::lock_guard<std::mutex> lk(g_retiredMx);
+    g_retiredGame.clear();
+    for (const Retired& r : g_retired) {
+        g_swapRetired[r.s->game] = r.s.get();
+        g_retiredCopies[r.s->copy] = r.s.get();
+        if (r.s->hi) g_retiredCopies[r.s->hi] = r.s.get();
+        g_retiredGame.insert(r.s->game);
+        const uintptr_t a = reinterpret_cast<uintptr_t>(r.s->game);
+        g_retiredLo = std::min(g_retiredLo, a), g_retiredHi = std::max(g_retiredHi, a);
+    }
+    g_retiredAny.store(!g_retired.empty(), std::memory_order_relaxed);
+}
+// Releases the retired copies `drop` picks (their stages take the game's maps back) and logs them with why
+template <typename Pred> void ReleaseRetiredIf(IDirect3DDevice9* dev, Pred drop, const char* why) {
+    if (std::none_of(g_retired.begin(), g_retired.end(), [&](const Retired& r) { return drop(r); })) return;
+    if (dev)
+        for (DWORD st = 0; st < 16; st++) {
+            IDirect3DBaseTexture9* t = nullptr;
+            if (FAILED(dev->GetTexture(st, &t)) || !t) continue;
+            for (const Retired& r : g_retired)
+                if (drop(r) && (t == r.s->copy || (r.s->hi && t == r.s->hi))) D3D9Hooks::CallOriginalSetTexture(dev, st, r.s->game);
+            t->Release();
+        }
+    size_t n = 0;
+    std::unordered_set<uintptr_t> lots;
+    for (auto it = g_retired.begin(); it != g_retired.end();)
+        if (drop(*it)) {
+            lots.insert(it->lot);
+            ReleaseSlot(*it->s);
+            it = g_retired.erase(it), n++;
+        } else
+            ++it;
+    RebuildRetired();
+    LOG_INFO(std::format("[RtOutdoorLamps] {} relit maps of {} lot{} left released ({}); {} kept", n, lots.size(), lots.size() == 1 ? "" : "s", why, g_retired.size()));
+}
+void ReleaseRetired(IDirect3DDevice9* dev, const char* why) {
+    ReleaseRetiredIf(dev, [](const Retired&) { return true; }, why);
+}
+// The lot left at a switch (lot: its tracker): its relit copies stay bound (g_swapRetired), the rest of its slots are released.
+// Only kRetiredLots lots are kept: the least recently left goes first
+void RetireSlots(IDirect3DDevice9* dev, uintptr_t lot) {
+    const DWORD now = std::max<DWORD>(GetTickCount(), 1);
+    for (auto& s : g_slots) {
+        const bool written = s->watch >= 0 && (g_watchDirty[s->watch / 64].load(std::memory_order_relaxed) >> (s->watch % 64) & 1); // (its copy predates that)
+        if (!(s->copy && s->relit && s->game) || written) {
+            ReleaseSlot(*s);
+            continue;
+        }
+        if (s->watch >= 0) g_watchTex[s->watch].store(nullptr), s->watch = -1;
+        TrimRetired(*s);
+        for (auto it = g_retired.begin(); it != g_retired.end(); ++it) // (an older copy of the same map: the newer one stands in)
+            if (it->s->game == s->game) {
+                ReleaseSlot(*it->s);
+                g_retired.erase(it);
+                break;
+            }
+        g_retired.push_back({lot, now, std::move(s)});
+    }
+    g_slots.clear();
+    std::vector<std::pair<DWORD, uintptr_t>> lots;
+    for (const Retired& r : g_retired) {
+        auto l = std::find_if(lots.begin(), lots.end(), [&](const auto& x) { return x.second == r.lot; });
+        if (l == lots.end()) lots.push_back({r.at, r.lot});
+        else l->first = std::max(l->first, r.at);
+    }
+    RebuildRetired();
+    if (lots.size() > kRetiredLots) {
+        std::sort(lots.begin(), lots.end());
+        std::unordered_set<uintptr_t> old;
+        for (size_t i = 0; i + kRetiredLots < lots.size(); i++) old.insert(lots[i].second);
+        ReleaseRetiredIf(dev, [&](const Retired& r) { return old.count(r.lot) != 0; }, "the least recently left");
+    }
+}
+// Render thread, each frame: retired copies whose game map the game wrote (stale), or whose lot the game no longer has
+void ServiceRetired(IDirect3DDevice9* dev) {
+    if (g_retired.empty()) return;
+    std::unordered_set<const void*> stale;
+    {
+        std::lock_guard<std::mutex> lk(g_retiredMx);
+        stale.insert(g_retiredStale.begin(), g_retiredStale.end());
+        g_retiredStale.clear();
+    }
+    if (!stale.empty()) ReleaseRetiredIf(dev, [&](const Retired& r) { return stale.count(r.s->game) != 0; }, "the game wrote its maps again");
+    static DWORD s_liveAt = 0;
+    if (GetTickCount() - s_liveAt > 1000) {
+        s_liveAt = GetTickCount();
+        ReleaseRetiredIf(dev, [](const Retired& r) { return !LevelLightShare::TrackerLive(r.lot); }, "its lot is no longer loaded");
+    }
+}
+// (developer) GPU against the game: every 10 s one relit map of the active lot is read back and compared texel by texel with
+// the game's own map of the same room 0, as its last solve wrote it (the copy is drawn instead of it; that the solve had the
+// same lamps on is not verified: a lamp edit since the solve differs by design). Where
+// the game's texel holds light, the copy's luma over the game's, and the texels at the top of the range on each side: the
+// data a calibration of the GPU lamps against the game's solve starts from. Render thread; a short GPU wait (one map).
+void CompareWithGame(IDirect3DDevice9* dev) {
+    static DWORD s_last = 0;
+    static size_t s_next = 0;
+    const DWORD now = GetTickCount();
+    if (!DevSwitches::kCompiled || kPublicBuild || !dev || g_slots.empty() || now - s_last < 10000) return; // (development builds: it locks the game's maps and waits on the GPU)
+    s_last = now;
+    Slot* s = nullptr;
+    for (size_t i = 0; i < g_slots.size() && !s; i++) {
+        Slot* c = g_slots[(s_next + i) % g_slots.size()].get();
+        if (c->copy && c->game && c->relit && !c->mgr) s = c, s_next = (s_next + i + 1) % g_slots.size();
+    }
+    if (!s) return;
+    D3DSURFACE_DESC dc{}, dg{};
+    if (FAILED(s->copy->GetLevelDesc(0, &dc)) || FAILED(s->game->GetLevelDesc(0, &dg)) || dc.Width != dg.Width || dc.Height != dg.Height ||
+        dc.Format != D3DFMT_A8R8G8B8 || dg.Format != D3DFMT_A8R8G8B8)
+        return;
+    IDirect3DSurface9 *rt = nullptr, *sys = nullptr;
+    if (FAILED(s->copy->GetSurfaceLevel(0, &rt))) return;
+    if (FAILED(dev->CreateOffscreenPlainSurface(dc.Width, dc.Height, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &sys, nullptr)) || FAILED(dev->GetRenderTargetData(rt, sys))) {
+        if (sys) sys->Release();
+        rt->Release();
+        return;
+    }
+    rt->Release();
+    D3DLOCKED_RECT lc{}, lg{};
+    if (FAILED(sys->LockRect(&lc, nullptr, D3DLOCK_READONLY))) return void(sys->Release());
+    if (FAILED(s->game->LockRect(0, &lg, nullptr, D3DLOCK_READONLY))) {
+        sys->UnlockRect();
+        return void(sys->Release());
+    }
+    const auto luma = [](const BYTE* p) { return 0.0722 * p[0] + 0.7152 * p[1] + 0.2126 * p[2]; };
+    std::vector<double> ratios;
+    long lit = 0, topCopy = 0, topGame = 0;
+    double sumC = 0, sumG = 0;
+    for (UINT y = 0; y < dc.Height; y++) {
+        const BYTE* rc = static_cast<const BYTE*>(lc.pBits) + y * lc.Pitch;
+        const BYTE* rg = static_cast<const BYTE*>(lg.pBits) + y * lg.Pitch;
+        for (UINT x = 0; x < dc.Width; x++) {
+            const double g = luma(rg + 4 * x), c = luma(rc + 4 * x);
+            if (g < 8.0) continue; // (no light the game put there worth a ratio)
+            lit++, sumC += c, sumG += g;
+            ratios.push_back(c / g);
+            topCopy += std::max({rc[4 * x], rc[4 * x + 1], rc[4 * x + 2]}) >= 254;
+            topGame += std::max({rg[4 * x], rg[4 * x + 1], rg[4 * x + 2]}) >= 254;
+        }
+    }
+    // a map that differs (p90 over 1.3 or p10 under 0.7): both written as BMP next to the log once, for a look at where
+    std::vector<double> sorted = ratios;
+    std::sort(sorted.begin(), sorted.end());
+    static int s_dumps = 0;
+    if (!sorted.empty() && s_dumps < 12 && (sorted[sorted.size() * 9 / 10] > 1.3 || sorted[sorted.size() / 10] < 0.7)) {
+        s_dumps++;
+        const auto bmp = [&](const char* tag, const D3DLOCKED_RECT& lr) {
+            const std::wstring dir = ApexPaths::ApexDirectory();
+            const std::wstring path = dir + std::format(L"\\calib_{}_s{}_m{}_c{}_{}.bmp", s_dumps, s->story, s->m, s->cls, std::wstring(tag, tag + std::strlen(tag)));
+            FILE* f = _wfopen(path.c_str(), L"wb");
+            if (!f) return;
+            const uint32_t w = dc.Width, h = dc.Height, row = w * 3, size = 54 + row * h;
+            uint8_t hd[54] = {'B', 'M'};
+            std::memcpy(hd + 2, &size, 4);
+            const uint32_t off = 54, hs = 40, bits = row * h;
+            const uint16_t planes = 1, bpp = 24;
+            const int32_t iw = static_cast<int32_t>(w), ih = -static_cast<int32_t>(h);
+            std::memcpy(hd + 10, &off, 4), std::memcpy(hd + 14, &hs, 4), std::memcpy(hd + 18, &iw, 4), std::memcpy(hd + 22, &ih, 4);
+            std::memcpy(hd + 26, &planes, 2), std::memcpy(hd + 28, &bpp, 2), std::memcpy(hd + 34, &bits, 4);
+            fwrite(hd, 1, 54, f);
+            std::vector<uint8_t> line(row);
+            for (uint32_t y = 0; y < h; y++) {
+                const BYTE* src = static_cast<const BYTE*>(lr.pBits) + y * lr.Pitch;
+                for (uint32_t x = 0; x < w; x++) line[3 * x] = src[4 * x], line[3 * x + 1] = src[4 * x + 1], line[3 * x + 2] = src[4 * x + 2];
+                fwrite(line.data(), 1, row, f);
+            }
+            fclose(f);
+        };
+        bmp("gpu", lc);
+        bmp("game", lg);
+        LOG_INFO(std::format("[RtOutdoorLamps] GPU against the game: maps written as calib_{}_s{}_m{}_c{}_gpu.bmp / _game.bmp", s_dumps, s->story, s->m, s->cls));
+    }
+    s->game->UnlockRect(0);
+    sys->UnlockRect();
+    sys->Release();
+    if (ratios.empty()) return;
+    std::sort(ratios.begin(), ratios.end());
+    const auto pct = [&](double q) { return ratios[std::min(ratios.size() - 1, static_cast<size_t>(q * ratios.size()))]; };
+    LOG_INFO(std::format("[RtOutdoorLamps] GPU against the game: story {} {} class {} ({}x{}): {} lit texels, copy over game luma: mean {:.2f}, "
+                         "p10 {:.2f}, median {:.2f}, p90 {:.2f}; at the top of the range: copy {} texels, game {}",
+                         s->story, kMapName[s->m], s->cls, dc.Width, dc.Height, lit, sumG > 0 ? sumC / sumG : 0.0, pct(0.1), pct(0.5), pct(0.9), topCopy, topGame));
 }
 // ---- the lots next to the active one (render thread) ----
 // Their room-0 maps are relit with the active lot's lamp posts: their gathers leave those posts out (LevelLightShare::GatherLotId)
@@ -895,7 +1129,8 @@ void PublishNeighbours(uint64_t active, const std::vector<std::pair<uint64_t, ui
 }
 struct Job;
 std::vector<std::shared_ptr<Job>> g_jobs; // render thread: the stories whose maps are being prepared (a worker thread each, one at a time)
-void DropAll(IDirect3DDevice9* dev, const char* why, bool requeue = true) {
+void DropAll(IDirect3DDevice9* dev, const char* why, bool requeue = true, bool retire = false) {
+    if (!retire) ReleaseRetired(dev, why);
     PublishNeighbours(0, {}, requeue); // (their maps are the game's again: their gathers take the posts back)
     if (requeue) OutdoorDelta::SolveTouched(nullptr); // (and the rooms with physical lamp edits taken since their solve go to one)
     g_jobs.clear(); // (a job still running finishes on its own)
@@ -905,10 +1140,13 @@ void DropAll(IDirect3DDevice9* dev, const char* why, bool requeue = true) {
     OutdoorDelta::PinRooms(nullptr, 0); // (no relit map stands for a kept room any more: the budget pins none)
     GpuRoomLamps::ReleaseAll();
     if (g_slots.empty() && !g_eng) return;
-    UnbindCopies(dev);
     const size_t n = g_slots.size();
-    for (auto& s : g_slots) ReleaseSlot(*s);
-    g_slots.clear();
+    if (retire && AtriumHold::UnlockHooked()) RetireSlots(dev, g_tracker); // (its copies stay bound while the game does not write those maps)
+    else {
+        UnbindCopies(dev);
+        for (auto& s : g_slots) ReleaseSlot(*s);
+        g_slots.clear();
+    }
     for (auto& d : g_watchDirty) d.store(0);
     g_atlasKey = 0;
     {
@@ -1661,22 +1899,26 @@ void SetEnabled(bool on) {
 }
 bool Enabled() { return g_option.load(std::memory_order_relaxed); }
 bool Watching() { return g_watch.load(std::memory_order_relaxed); }
+bool RetiredAny() { return g_retiredAny.load(std::memory_order_relaxed); }
 
 namespace {
 // The SetTexture swap (render thread, lock-free chain): the game's map -> its copy
 HRESULT SwapCopy(IDirect3DDevice9* dev, DWORD stage, IDirect3DBaseTexture9* t, bool& swapped) {
     swapped = false;
-    if (!t || !g_on.load(std::memory_order_relaxed) || g_swap.empty()) return S_OK;
+    if (!t) return S_OK;
     const uintptr_t a = reinterpret_cast<uintptr_t>(t);
-    if (a < g_swapLo || a > g_swapHi) return S_OK;
-    const auto it = g_swap.find(t);
-    if (it == g_swap.end()) return S_OK;
-    Slot* s = it->second;
+    Slot* s = nullptr;
+    if (g_on.load(std::memory_order_relaxed) && !g_swap.empty() && a >= g_swapLo && a <= g_swapHi)
+        if (const auto it = g_swap.find(t); it != g_swap.end()) s = it->second;
+    if (!s && !g_swapRetired.empty() && a >= g_retiredLo && a <= g_retiredHi) // (the lots left at earlier switches)
+        if (const auto it = g_swapRetired.find(t); it != g_swapRetired.end()) s = it->second;
+    if (!s) return S_OK;
     s->binds++;
     swapped = true;
     return D3D9Hooks::CallOriginalSetTexture(dev, stage, s->hiOk && s->hi ? s->hi : s->copy);
 }
 void OnPreReset(IDirect3DDevice9* dev) {
+    ReleaseRetired(dev, "device reset"); // (DEFAULT render targets)
     UnbindCopies(dev);
     for (auto& s : g_slots) {
         if (s->copy) s->copy->Release(), s->copy = nullptr;
@@ -1717,7 +1959,7 @@ void OnEndScene(IDirect3DDevice9* dev) {
     LARGE_INTEGER a{}, b{};
     QueryPerformanceCounter(&a);
     g_stampLights.clear();
-    if (!HookGuard::Run("RtOutdoorLamps frame", [dev] { Frame(dev); }) && (g_on.load() || !g_slots.empty() || !g_nb.empty())) {
+    if (!HookGuard::Run("RtOutdoorLamps frame", [dev] { Frame(dev); }) && (g_on.load() || !g_slots.empty() || !g_nb.empty() || !g_retired.empty())) {
         // Frame threw (now or before: it is off for the session): the game's maps are bound again and edits go to its solves
         g_on.store(false);
         g_watch.store(false);
@@ -1832,12 +2074,14 @@ void Frame(IDirect3DDevice9* dev) {
             if (sent) LOG_INFO(std::format("[RtOutdoorLamps] Switched off: {} room 0s of the active lot sent to their solve (their maps are the game's again)", sent));
             DropAll(dev, "switched off");
         }
+        ReleaseRetired(dev, "switched off");
         g_on.store(false);
         g_watch.store(false);
         g_holdAt = 0, g_holdFor = 0, g_switchAt = 0; // (a hold ends unlogged: its length would span the time off)
         g_inactive = "off";
         return;
     }
+    ServiceRetired(dev);
     const auto off = [&](const std::string& why) {
         PublishNeighbours(0, {});
         OutdoorDelta::SolveTouched(nullptr);
@@ -1939,7 +2183,8 @@ void Frame(IDirect3DDevice9* dev) {
             for (int S = 0; S <= 7; S++)
                 if (const void* r = LevelLightShare::Room0Of(g_tracker, S)) left[nl++] = r;
         if (g_tracker) RoomLightQueue::GroundFirst(LevelLightShare::Room0Of(tracker, 0));
-        DropAll(dev, "another active lot");
+        g_rushFrom = std::max<DWORD>(GetTickCount(), 1);
+        DropAll(dev, "another active lot", true, true);
         OutdoorDelta::GraceRooms(left, nl, GetTickCount() + kLeftLotGraceMs);
         {
             std::lock_guard<std::mutex> lk(g_editMx);
@@ -2086,6 +2331,7 @@ void Frame(IDirect3DDevice9* dev) {
     }
     std::vector<std::string> waiting;
     bool allReady = true;
+    uint32_t notReady = 0; // the active lot's stories not covered yet (their maps waiting, being prepared or uploaded)
     int uploads = 0;
     // (14/10, drag solves) while a lamp is dragged no slot is uploaded (a slot upload makes its buffers and textures on this
     // thread: 12-14 ms in a recording); the old copies stay bound and the uploads go once the lamp is still
@@ -2120,7 +2366,17 @@ void Frame(IDirect3DDevice9* dev) {
             for (const auto& sl : g_slots)
                 if (sl->story == S && sl->room == room && sl->cls == cls && sl->used) had = true, all = all && sl->ok && sl->relit;
             if (!(had && all) && act) {
-                allReady = false;
+                allReady = false, notReady |= 1u << S;
+                if (g_rushFrom && GetTickCount() - g_rushFrom < kKeptRushMs) {
+                    if (S == 0) RoomLightQueue::GroundFirst(room); // (renewed each frame)
+                    static std::unordered_map<const void*, DWORD> s_firstAt; // (a mark a second per room)
+                    DWORD& at = s_firstAt[room];
+                    if (rn.state >= 1 && rn.state <= 3 && GetTickCount() - at >= 1000) {
+                        at = GetTickCount();
+                        LevelLightShare::MarkRoomFirst(const_cast<BYTE*>(room));
+                    }
+                    if (s_firstAt.size() > 256) s_firstAt.clear();
+                }
                 const std::string last = OutdoorDelta::LastDrop(S, cls);
                 waiting.push_back(std::format("story {}: no kept solve of class {}{}", S, cls, last.empty() ? std::string() : " - last: " + last));
             }
@@ -2143,7 +2399,7 @@ void Frame(IDirect3DDevice9* dev) {
             // (LastDrop is per story, not per room: only once this room was sent at least once and came back with that reason)
             const bool tooLarge = a.count >= 1 && OutdoorDelta::LastDrop(S, cls).find("too large to keep") != std::string::npos;
             if (tooLarge && a.count < kSolveAsks) a.count = kSolveAsks;
-            if ((rn.state == 4 || rn.state == 5) && !g_budgetOut && !tooLarge && AskDue(a, GetTickCount())) {
+            if ((rn.state == 4 || rn.state == 5) && !g_budgetOut && !tooLarge && AskDue(a, GetTickCount(), act ? kSolveAskActiveMs : kSolveAskMs)) {
                 a.at = std::max<DWORD>(GetTickCount(), 1);
                 a.count++;
                 const bool sent = LevelLightShare::QueueRoomAgain(room, true); // (an edit's light comes with the edit's own sends)
@@ -2226,18 +2482,18 @@ void Frame(IDirect3DDevice9* dev) {
                 StartJob(j);
                 g_why.build++;
             }
-            if (!covered && act) allReady = false, waiting.push_back(std::format("story {}: its maps are being prepared", S));
+            if (!covered && act) allReady = false, notReady |= 1u << S, waiting.push_back(std::format("story {}: its maps are being prepared", S));
             return true;
         }
         Job& job = **jit;
         const int st = job.state.load();
         if (st == 1) {
-            if (!covered && act) allReady = false, waiting.push_back(std::format("story {}: its maps are being prepared", S));
+            if (!covered && act) allReady = false, notReady |= 1u << S, waiting.push_back(std::format("story {}: its maps are being prepared", S));
             return true;
         }
         if (st == 3) {
             g_jobs.erase(jit);
-            if (act) allReady = false, waiting.push_back(std::format("story {}: its kept solve could not be read", S));
+            if (act) allReady = false, notReady |= 1u << S, waiting.push_back(std::format("story {}: its kept solve could not be read", S));
             ExportBackoff& b = g_exportBackoff[room];
             b.fails = std::min(b.fails + 1, 6);
             b.at = (GetTickCount() + (250u << (b.fails - 1))) | 1; // 0.25 s ... 8 s
@@ -2265,7 +2521,10 @@ void Frame(IDirect3DDevice9* dev) {
                 break;
             }
             Prepared& p = job.maps[m];
-            if (!p.used) { // (no texel of room 0 in this map: nothing to relight there; a slot notes it, so it is not prepared again)
+            // (no texel of room 0 in this map, or none the prepare kept: nothing to relight there; a slot notes it, so it is not
+            // prepared again. A map whose texels were all left out made an empty buffer, "could not be made", and was prepared
+            // again 1, 2, 4 ... 32 s later, the lot inactive meanwhile: the town square's story 1 at each arrival)
+            if (!p.used || p.v.empty()) {
                 if (!slot) {
                     g_slots.push_back(std::make_unique<Slot>());
                     slot = g_slots.back().get();
@@ -2302,7 +2561,7 @@ void Frame(IDirect3DDevice9* dev) {
             }
             uploads++;
             if (!UploadSlot(dev, *slot, job, p)) {
-                if (act) allReady = false;
+                if (act) allReady = false, notReady |= 1u << S;
                 LOG_INFO(std::format("[RtOutdoorLamps] {} class {} {}: not relit ({})", who(), cls, kMapName[m], slot->why));
             }
             // watched for writes (a lot next to it from the upper half: the active lot's maps keep theirs)
@@ -2315,7 +2574,7 @@ void Frame(IDirect3DDevice9* dev) {
             if (slot->watch >= 0) g_watchTex[slot->watch].store(slot->game);
         }
         if (done) g_jobs.erase(std::find_if(g_jobs.begin(), g_jobs.end(), [room](const std::shared_ptr<Job>& j) { return j->room == room; }));
-        else if (!covered && act) allReady = false, waiting.push_back(std::format("story {}: its maps are being uploaded", S));
+        else if (!covered && act) allReady = false, notReady |= 1u << S, waiting.push_back(std::format("story {}: its maps are being uploaded", S));
         return true;
     };
     for (int S = 0; S <= 7; S++) {
@@ -2722,13 +2981,17 @@ void Frame(IDirect3DDevice9* dev) {
     LARGE_INTEGER tp2{};
     QueryPerformanceCounter(&tp2);
     const double lampsMs = Ms(tp1, tp2) - Ms(tn0, tn1); // (the lots next to it count in slotsMs)
+    if (allReady) g_rushFrom = 0;
     if (g_slots.empty() || !allReady) {
         g_on.store(!g_slots.empty());
         Inactive(waiting.empty() ? (g_slots.empty() ? "no room-0 map of the active lot could be relit (see the lines above)" : "")
                                  : "waiting for kept room-0 solves: " + waiting.front() + (waiting.size() > 1 ? std::format(" (+{} more)", waiting.size() - 1) : ""));
         if (g_slots.empty()) return;
-    } else
+    } else {
         Inactive("");
+        ReleaseRetiredIf(dev, [](const Retired& r) { return r.lot == g_tracker; }, "its lot is the active one again and relit");
+        CompareWithGame(dev);
+    }
     g_on.store(true);
     // ---- relight what changed ----
     LARGE_INTEGER t0{};
@@ -3489,6 +3752,14 @@ void Frame(IDirect3DDevice9* dev) {
         std::lock_guard<std::mutex> lk(g_coverMx);
         g_cover.tracker = tracker;
         g_cover.full = full;
+        // a story covered on its own: its room 0 shown, waiting for nothing, and every map of it relit. An edit on such a story
+        // marks no room there while another story still waits (a lot arrived at: the town square's lamps the game switched
+        // off at once went through the game's room solves on every story, about 5 ms a frame for 6 s)
+        g_cover.stories = 0;
+        for (int S = 0; S <= 7; S++)
+            if (rooms[S] && !(notReady >> S & 1) &&
+                std::all_of(g_slots.begin(), g_slots.end(), [&](const auto& s) { return s->mgr || s->story != S || !s->used || (s->ok && s->relit); }))
+                g_cover.stories |= static_cast<uint8_t>(1u << S);
         g_cover.at = GetTickCount();
         g_cover.lamps.clear();
         g_cover.lamps.insert(covered.begin(), covered.end());
@@ -3755,6 +4026,8 @@ void BuildProxy(uintptr_t tracker, const void* room0) {
 }
 } // namespace
 
+// (under g_coverMx) every story covered, or this one on its own
+bool StoryCovered(int story) { return g_cover.full || (story >= 0 && story <= 7 && (g_cover.stories >> story & 1)); }
 uintptr_t TrackerOf(const void* room) {
     int story = -99, id = -1, cls = -1;
     uintptr_t mgr = 0;
@@ -3767,7 +4040,7 @@ bool CoversRoom(const void* room) {
     const uintptr_t tracker = TrackerOfRoom(room, story, id, cls, mgr);
     if (!tracker || id != 0) return false;
     std::lock_guard<std::mutex> lk(g_coverMx);
-    return g_cover.tracker == tracker && g_cover.full && GetTickCount() - g_cover.at < kCoverFreshMs;
+    return g_cover.tracker == tracker && StoryCovered(story) && GetTickCount() - g_cover.at < kCoverFreshMs;
 }
 uintptr_t ActiveTracker() { return g_proxyWanted.load(); }
 bool PhysCoversRoom0(const void* room0) {
@@ -3782,7 +4055,7 @@ bool CoversLamp(const void* room0, uintptr_t light) {
     const uintptr_t tracker = TrackerOfRoom(room0, story, id, cls, mgr);
     if (!tracker || id != 0) return false;
     std::lock_guard<std::mutex> lk(g_coverMx);
-    return g_cover.tracker == tracker && g_cover.full && GetTickCount() - g_cover.at < kCoverFreshMs &&
+    return g_cover.tracker == tracker && StoryCovered(story) && GetTickCount() - g_cover.at < kCoverFreshMs &&
            (g_cover.lamps.count(light) || g_cover.kept0.count({story, light}));
 }
 bool ColourLaw(uintptr_t light, uint64_t lot, float colour[3], uint64_t& geo) {
@@ -3807,7 +4080,7 @@ bool HandlesLamp(uintptr_t tl, uintptr_t light, int room) {
     if (!tracker) return false;
     std::lock_guard<std::mutex> lk(g_coverMx);
     if (g_cover.tracker != tracker) return false;
-    const bool handled = g_cover.full && GetTickCount() - g_cover.at < kCoverFreshMs && g_cover.lamps.count(light);
+    const bool handled = StoryCovered(story) && GetTickCount() - g_cover.at < kCoverFreshMs && g_cover.lamps.count(light);
     if (!handled && g_cover.lamps.count(light)) c_editsRefused.fetch_add(1, std::memory_order_relaxed);
     return handled;
 }
@@ -3910,7 +4183,12 @@ void NoteMapsWritten(const void* room) {
     if (g_solvedNotes.size() < 512) g_solvedNotes.emplace_back(mgr, cls);
 }
 void NoteUnlock(const void* texture) {
-    if (!g_watch.load(std::memory_order_relaxed) || !texture) return;
+    if (!texture) return;
+    if (g_retiredAny.load(std::memory_order_relaxed)) { // (a retired copy's game map written: the copy is stale)
+        std::lock_guard<std::mutex> lk(g_retiredMx);
+        if (g_retiredGame.count(texture)) g_retiredStale.push_back(texture);
+    }
+    if (!g_watch.load(std::memory_order_relaxed)) return;
     for (int i = 0; i < kMaxWatch; i++)
         if (g_watchTex[i].load(std::memory_order_relaxed) == texture) g_watchDirty[i / 64].fetch_or(1ull << (i % 64), std::memory_order_relaxed);
 }
@@ -4071,9 +4349,12 @@ void InRoomsNow(IDirect3DDevice9* dev, Slot& s, uintptr_t tracker) {
 }
 } // namespace
 IDirect3DTexture9* ScaleOf(const void* texture) {
-    if (!texture || !g_on.load(std::memory_order_relaxed)) return nullptr;
-    for (const auto& s : g_slots)
-        if (s->copy == texture || (s->hi && s->hi == texture)) return s->relit && s->scaled ? s->scale : nullptr;
+    if (!texture) return nullptr;
+    if (g_on.load(std::memory_order_relaxed))
+        for (const auto& s : g_slots)
+            if (s->copy == texture || (s->hi && s->hi == texture)) return s->relit && s->scaled ? s->scale : nullptr;
+    if (const auto it = g_retiredCopies.find(texture); it != g_retiredCopies.end()) // (the lots left: their copies are still bound)
+        return it->second->relit && it->second->scaled ? it->second->scale : nullptr;
     return nullptr;
 }
 bool IndoorRoomsOf(const void* texture, IndoorRooms& out) {
@@ -4105,9 +4386,11 @@ IDirect3DTexture9* IndoorFlagsOf(const void* texture) {
     return nullptr;
 }
 const void* GameMapOf(const void* texture) {
-    if (!texture || !g_on.load(std::memory_order_relaxed)) return texture;
-    for (const auto& s : g_slots)
-        if (s->copy == texture || (s->hi && s->hi == texture)) return s->game;
+    if (!texture) return texture;
+    if (g_on.load(std::memory_order_relaxed))
+        for (const auto& s : g_slots)
+            if (s->copy == texture || (s->hi && s->hi == texture)) return s->game;
+    if (const auto it = g_retiredCopies.find(texture); it != g_retiredCopies.end()) return it->second->game;
     return texture;
 }
 

@@ -46,6 +46,12 @@ inline bool UrgencyKept(std::uint32_t now, std::uint32_t until, std::uint32_t ma
     if (static_cast<std::int32_t>(now - until) < 0) return true;
     return state >= 1 && state <= 3 && static_cast<std::uint32_t>(now - marked) < 8000u;
 }
+// The urgency's clock: from the latest of its mark and a drag's release after it. A drag's hold keeps the edit's rooms
+// waiting on purpose, so a drag longer than 8 s spent their urgency before they could be solved, and after the release
+// they waited for the game's own order (15.7 s in a recording)
+inline std::uint32_t UrgencyClockFrom(std::uint32_t marked, std::uint32_t release) {
+    return release && static_cast<std::int32_t>(release - marked) > 0 ? release : marked;
+}
 // After an active-lot switch every other room waits while the new lot's ground room 0 (the map the lot's grass reads) waits
 // for its gather or its pick (states 1-2), until `until`
 inline bool GroundFirstHolds(bool isGround, int groundState, std::uint32_t now, std::uint32_t until) {

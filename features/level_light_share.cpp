@@ -625,7 +625,8 @@ void GatherSoon(void* room) {
     }
 }
 // 12/10: an urgent entry is live until its deadline, and after it while its room still waits for or is in its solve
-// (states 1-3), at most 8 s after its latest mark (RoomAmbientPolicy::UrgencyKept): a room of the edit whose solve had not
+// (states 1-3), at most 8 s after its latest mark or a drag's release after it (RoomAmbientPolicy::UrgencyKept,
+// UrgencyClockFrom), and while a drag holds it: a room of the edit whose solve had not
 // begun 3 s after the mark lost its first place and was solved seconds later in the game's order. Under g_urgentMx; the
 // room's fields are read with SEH (RoomKey, RoomState).
 bool UrgentLive(UrgentRoom& u, DWORD now) {
@@ -634,7 +635,9 @@ bool UrgentLive(UrgentRoom& u, DWORD now) {
     int id = 0;
     const void* room = reinterpret_cast<const void*>(u.room);
     const int state = RoomKey(room, mgr, id) && mgr == u.mgr && id == u.id ? RoomState(room) : -1;
-    if (RoomAmbientPolicy::UrgencyKept(now, u.until, u.marked, state)) {
+    // (a drag's hold keeps the room waiting on purpose: kept while it lasts, its 8 s counted from the release)
+    const bool dragHeld = state >= 1 && state <= 3 && DragLite::Engaged();
+    if (dragHeld || RoomAmbientPolicy::UrgencyKept(now, u.until, RoomAmbientPolicy::UrgencyClockFrom(u.marked, DragLite::LastReleaseTick()), state)) {
         if (!u.kept) { // counted once per mark (the first time it outlives its deadline)
             u.kept = true;
             g_urgentKept.fetch_add(1, std::memory_order_relaxed);
@@ -2450,7 +2453,7 @@ void MergeStackedAmbient(BYTE* room) {
 // Steam 1.67.2: tables 0x00FF36A4 / 0x00FF36C4 / 0x00FF36D0, read by 0x006A8CB0 / 0x006A8CE0 / 0x006A8D00 (GameAddr ClassWallMode*,
 // ClassWalls*, ClassObjects*; set by CheckClassTables)
 uintptr_t kClassWallMode = 0, kClassWalls2D = 0, kClassObjects3D = 0;
-bool g_classTables = false; // the code above checked (and the pass tables made writable) at install
+bool g_classTables = false; // the code above checked at install
 bool CheckClassTables() {
     using GameAddr::Id;
     if (!GameAddr::Have({Id::ClassWallModeFn, Id::ClassWallMode, Id::ClassWallsFn, Id::ClassObjectsFn, Id::ClassWalls2D, Id::ClassObjects3D})) return false;
@@ -2469,10 +2472,19 @@ bool CheckClassTables() {
     kClassWallMode = modeAt;
     kClassWalls2D = wallsAt;
     kClassObjects3D = objectsAt;
+    return true;
+}
+// The tables stay read-only: the page also holds the light and probe vtables, so a stray write there must still fault on
+// the spot (issue #76). Each change opens the bytes for the write only.
+void WriteTableByte(uintptr_t at, BYTE value) {
     DWORD old = 0;
-    if (kClassObjects3D == kClassWalls2D + 0xC) return VirtualProtect(reinterpret_cast<void*>(kClassWalls2D), 0x18, PAGE_READWRITE, &old) != 0; // Steam: both in one call
-    return VirtualProtect(reinterpret_cast<void*>(kClassWalls2D), 0xC, PAGE_READWRITE, &old) != 0 &&
-           VirtualProtect(reinterpret_cast<void*>(kClassObjects3D), 0xC, PAGE_READWRITE, &old) != 0;
+    if (!VirtualProtect(reinterpret_cast<void*>(at), 1, PAGE_READWRITE, &old)) return;
+    *reinterpret_cast<BYTE*>(at) = value;
+    VirtualProtect(reinterpret_cast<void*>(at), 1, old, &old);
+}
+void WriteWallTests(int idx, BYTE walls, BYTE objects) {
+    WriteTableByte(kClassWalls2D + 9 + idx, walls);
+    WriteTableByte(kClassObjects3D + 9 + idx, objects);
 }
 int ClassIndex(const BYTE* room, int cls) {
     __try {
@@ -2735,17 +2747,13 @@ WallTests SwapWallTests(BYTE* room) {
     }
     const int cur = ClassIndex(room, cls), to = ClassIndex(room, target);
     if (cur < 0 || to < 0 || cur == to) return saved;
-    BYTE* walls = reinterpret_cast<BYTE*>(kClassWalls2D + 9 + cur);
-    BYTE* objects = reinterpret_cast<BYTE*>(kClassObjects3D + 9 + cur);
-    saved = WallTests{cur, *walls, *objects};
-    *walls = *reinterpret_cast<const BYTE*>(kClassWalls2D + 9 + to);
-    *objects = *reinterpret_cast<const BYTE*>(kClassObjects3D + 9 + to);
+    saved = WallTests{cur, *reinterpret_cast<const BYTE*>(kClassWalls2D + 9 + cur), *reinterpret_cast<const BYTE*>(kClassObjects3D + 9 + cur)};
+    WriteWallTests(cur, *reinterpret_cast<const BYTE*>(kClassWalls2D + 9 + to), *reinterpret_cast<const BYTE*>(kClassObjects3D + 9 + to));
     return saved;
 }
 void RestoreWallTests(const WallTests& saved) {
     if (saved.idx < 0) return;
-    *reinterpret_cast<BYTE*>(kClassWalls2D + 9 + saved.idx) = saved.walls;
-    *reinterpret_cast<BYTE*>(kClassObjects3D + 9 + saved.idx) = saved.objects;
+    WriteWallTests(saved.idx, saved.walls, saved.objects);
 }
 char WallPassCall(BYTE* room, int arg, float budget) {
     const WallTests tests = SwapWallTests(room);
@@ -3727,7 +3735,10 @@ void NoteCutoutPostImpl(int add, const uintptr_t* siteEsp, uintptr_t frame, uint
             if (!cut && s.edges.count(k) && s.edges[k].kind == kCutWindow && !s.edges[k].closed) g_cutWindowCloses.fetch_add(1, std::memory_order_relaxed);
             const auto was = s.edges.find(k);
             const int wasClosed = was != s.edges.end() && was->second.kind == kCutWindow ? was->second.closed : -1; // (-1: not a window)
-            const CutRec rec{CutKind(r.flags), r.orient, r.piece, r.count, r.flags, {r.tgi[0], r.tgi[1], r.tgi[2], r.tgi[3]}};
+            // (each cell of an opening is posted twice, one post a side: pieces 2j and 2j + 1 on the same edge key. Kept by its cell,
+            // j: kept as posted, the edge's record took the last side's piece, so a repost starting with the other side (a floor
+            // shown, an object moved) differed, made a new generation and sent the story to its solves, its walls relit 0.3 s)
+            const CutRec rec{CutKind(r.flags), r.orient, static_cast<uint8_t>(r.piece >> 1), r.count, r.flags, {r.tgi[0], r.tgi[1], r.tgi[2], r.tgi[3]}};
             const int post = ApplyCutPost(s.edges, k, cut, rec);
             // (developer log) a window's close or reopen: the post's path and what it did, to tell the camera's posts in game
             if (dev && wasClosed >= 0 && (!cut || wasClosed) && g_windowPostLogged.fetch_add(1, std::memory_order_relaxed) < 300)
@@ -9030,6 +9041,15 @@ int LampChange(const DepKey& key, uintptr_t tl, std::vector<uintptr_t>* lightsOu
     }
     DepSig& s = it->second;
     if (s.all == sig) return 0;
+    // A floor switch empties every story's light registry and fills it again within ~10 ms; a walk in between saw each room 0
+    // with no lamp (a lamp removed, an edit: urgent, the edit hold, ~250 ms of solves at every floor switch) and the next one
+    // saw them back. A story whose registry is wholly empty is read as not known now: the last state stays, and the walk
+    // after the refill compares with it. shortcut: deleting a story's very last light (window lights included) is then not
+    // seen as an edit by this walk (the game's own mark still solves the room), upgrade if a story can lose its last light
+    // while players watch it
+    bool any = false;
+    WalkRegistry(tl, [&any](uintptr_t) { any = true; });
+    if (!any) return 0;
     const bool reshaped = s.shape != shape;
     const bool moved = reshaped || LampsMoved(s.lamps, lamps);
     s.all = sig;
@@ -18019,7 +18039,9 @@ int RelightLampSwitch(uintptr_t tracker, const char* why, unsigned long changedA
         anyOn = anyOn || on;
         reach.emplace_back(L, own);
         const uintptr_t mgrL = StoryManager(tracker, L);
-        if (own == 0 || (g_indoorReady && mgrL && RooflessRoom(mgrL, own))) outdoorLamp = true;
+        // (a basement's room 0 is no outdoor room of the stories above: the game shares no basement lamp with them, so a pool
+        // light's switch sent every story's room 0 and the roofed rooms with doors outside, 3 to 4 s of 30 ms solve frames)
+        if (L >= 0 && (own == 0 || (g_indoorReady && mgrL && RooflessRoom(mgrL, own)))) outdoorLamp = true;
         // the rooms with an opening into its room, whether they took its lamps at their last gather or not (indoor light
         // through openings: a room that lost a lifted lamp holds none of them now)
         if (own > 0 && mgrL) SameStoryInner(mgrL, L >= 1 ? StoryManager(tracker, L - 1) : 0, L, own, 2, reach);
@@ -19885,6 +19907,11 @@ uint64_t PhysicsKey() {
     MixGeo(h, (Penumbra::g_on.load(std::memory_order_relaxed) ? 1u : 0u) | (g_softCut.load(std::memory_order_relaxed) ? 2u : 0u) |
                   (RoomMapDither::Running() && RoomMapDither::Enabled() ? 4u : 0u));
     return h;
+}
+void MarkRoomFirst(void* room) {
+    t_quietMark = true;
+    MarkUrgent(room, 1, false);
+    t_quietMark = false;
 }
 bool QueueRoomAgain(const void* room, bool quiet) {
     const DragLite::WhyScope liteWhy(DragLite::Why::QueueAgain);

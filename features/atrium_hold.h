@@ -36,6 +36,7 @@
 namespace AtriumHold {
 void SetAllAtOnce(bool on);
 bool AllAtOnce();     // on, and the texture lock hooks are installed
+bool UnlockHooked();  // the texture lock hooks are installed (the game's map writes are seen)
 bool SwitchHolding(); // an edit hold covering a switch (or any edit, all floors together) is on now (any thread)
 bool EditHolding();   // an edit hold is on now, or an edit happened this frame (any thread)
 bool OwnStoryHeld();  // an edit hold is on that holds the lamp's own story too (show all floors together; any thread)

@@ -333,7 +333,7 @@ HRESULT __stdcall LockHook(IDirect3DTexture9* t, UINT level, D3DLOCKED_RECT* out
 }
 
 HRESULT __stdcall UnlockHook(IDirect3DTexture9* t, UINT level) {
-    if (level == 0 && RtOutdoorLamps::Watching()) RtOutdoorLamps::NoteUnlock(t); // (Instant: a relit copy starts from the map again)
+    if (level == 0 && (RtOutdoorLamps::Watching() || RtOutdoorLamps::RetiredAny())) RtOutdoorLamps::NoteUnlock(t); // (Instant: a relit copy starts from the map again)
     if (t_own || level != 0 || !g_count.load(std::memory_order_relaxed)) return g_origUnlock(t, level);
     {
         std::lock_guard<std::mutex> lk(g_mx);
@@ -587,6 +587,7 @@ void SetAllAtOnce(bool on) {
     g_holdHasSwitch.store(false, std::memory_order_relaxed);
 }
 bool AllAtOnce() { return AllAtOnceUsable() && g_hooked.load(std::memory_order_relaxed); }
+bool UnlockHooked() { return g_hooked.load(std::memory_order_relaxed); }
 // held, or a switch in this very frame, before the next Present starts the hold: the furniture and lamps already wait
 bool SwitchHolding() { return g_hooked.load(std::memory_order_relaxed) && SwitchPendingNow(); }
 bool EditHolding() { return g_hooked.load(std::memory_order_relaxed) && EditPendingNow(); }

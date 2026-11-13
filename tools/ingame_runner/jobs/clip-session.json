@@ -1,0 +1,27 @@
+{
+  "id": "clip-session",
+  "description": "The tester plays at night and records clips with F9 (start and stop, as many as wanted): each clip keeps the clicks and keys, the scene's state (camera, floors, lights), its own recording (F6) and the tester's description of what went wrong, in the run's clips folder, for replays and measures. The run ends when the file done is in the run's folder (up to 60 minutes). Nothing is saved.",
+  "save": "ApexTest-Night",
+  "toml": {
+    "ui": {
+      "developer_mode": true,
+      "recorder_key": "F6"
+    },
+    "screen": {
+      "background_fps_limit": 0
+    }
+  },
+  "variants": {
+    "on": {}
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "clip_session",
+      "minutes": 60
+    }
+  ]
+}

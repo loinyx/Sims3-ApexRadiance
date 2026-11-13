@@ -47,4 +47,8 @@ inline std::atomic<bool> SteadyRoomPacing{true};
 // write epochs) also answer from memory while their write epoch is the same (resource_cache.cpp EmulateKeyList). Off: only
 // the read-only packages, as before
 inline std::atomic<bool> KeyListCountedPackages{true};
+// Faster room lighting: while the camera moves, a room 0 of another lot than the played one and the GPU's active lot waits
+// for the camera to stop, at most 2 s per motion (room_light_queue.cpp MoveHold). Off: picked at once, as before. Only when
+// those rooms relight changes, not their light
+inline std::atomic<bool> MotionRoom0Hold{true};
 } // namespace PerfToggles

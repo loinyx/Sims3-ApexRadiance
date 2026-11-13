@@ -16,6 +16,8 @@
 #include "shader_patches.h"
 #include "recorder.h"
 #include "d3d9_hooks.h"
+#include "shader_cache.h"
+#include "dev_switches.h"
 #include "apex_log.h"
 #include "apex_util.h"
 #include "apex_paths.h"
@@ -32,6 +34,7 @@
 #include <format>
 #include <fstream>
 #include <map>
+#include <mutex>
 #include <set>
 #include <sstream>
 #include <string>
@@ -232,6 +235,7 @@ const char* FmtName(D3DFORMAT f) {
     case D3DFMT_R5G6B5: return "R5G6B5";
     case D3DFMT_A2R10G10B10: return "A2R10G10B10";
     case D3DFMT_A16B16G16R16: return "A16B16G16R16";
+    case D3DFMT_Q8W8V8U8: return "Q8W8V8U8";
     case D3DFMT_DXT1: return "DXT1";
     case D3DFMT_DXT3: return "DXT3";
     case D3DFMT_DXT5: return "DXT5";
@@ -287,6 +291,9 @@ bool Texel(D3DFORMAT f, const BYTE* p, float out[4]) {
         for (int i = 0; i < 4; i++) out[i] = v[i] / 65535.f;
         return true;
     }
+    case D3DFMT_Q8W8V8U8: // signed bytes U V W Q, read as r g b a (the lot terrain's paint weights)
+        for (int i = 0; i < 4; i++) out[i] = std::max(static_cast<float>(static_cast<int8_t>(p[i])) / 127.f, -1.f);
+        return true;
     case D3DFMT_A2R10G10B10: {
         const uint32_t v = *reinterpret_cast<const uint32_t*>(p);
         out[0] = ((v >> 20) & 0x3FF) / 1023.f; out[1] = ((v >> 10) & 0x3FF) / 1023.f; out[2] = (v & 0x3FF) / 1023.f; out[3] = (v >> 30) / 3.f;
@@ -409,6 +416,235 @@ std::string CubeMeans(IDirect3DDevice9* dev, IDirect3DCubeTexture9* cube) {
     return s;
 }
 
+// What the GPU samples from a texture, next to the game's copy that DumpTexture reads: the texture is point-sampled into a
+// float target and read back, so a copy that never reached the GPU (an upload lost in a D3D9 wrapper) shows as a difference.
+const ShaderCache::Id kReadTexelsPs = [] {
+    ShaderCache::Desc d;
+    d.tag = "LightProbe ReadTexelsPS";
+    d.source = "sampler s0 : register(s0); float4 main(float2 uv : TEXCOORD0) : COLOR { return tex2D(s0, uv); }";
+    d.sourceName = "light_probe_read.hlsl";
+    d.target = "ps_2_0";
+    d.priority = 2;
+    return ShaderCache::Add(std::move(d));
+}();
+IDirect3DPixelShader9* g_readTexelsPs = nullptr;
+constexpr UINT kMaxGpuReadTexels = 512 * 512; // 4 MB of float texels read back through the device
+// Formats whose GPU texel has the channels Texel() gives (formats without green, blue or alpha read 1 there on the GPU).
+bool GpuComparable(D3DFORMAT f) {
+    switch (static_cast<DWORD>(f)) {
+    case D3DFMT_R32F: case D3DFMT_R16F: case D3DFMT_G16R16F: case D3DFMT_G32R32F: return false;
+    default: return true;
+    }
+}
+
+std::string g_readControl; // the last ReadGpuTexels' control clear, for the report line
+
+bool ReadGpuTexels(IDirect3DDevice9* dev, IDirect3DTexture9* tex, UINT w, UINT h, std::vector<float>& out, std::string& err) {
+    if (!g_readTexelsPs) {
+        std::string msg;
+        if (ShaderCache::CreatePixelShader(dev, kReadTexelsPs, &g_readTexelsPs, &msg) != ShaderCache::Result::Ok || !g_readTexelsPs) {
+            err = "no read shader " + msg;
+            return false;
+        }
+    }
+    IDirect3DSurface9* rt = nullptr;
+    IDirect3DSurface9* sys = nullptr;
+    IDirect3DStateBlock9* sb = nullptr;
+    auto release = [&] {
+        if (sb) sb->Release();
+        if (sys) sys->Release();
+        if (rt) rt->Release();
+    };
+    if (FAILED(dev->CreateRenderTarget(w, h, D3DFMT_A32B32G32R32F, D3DMULTISAMPLE_NONE, 0, FALSE, &rt, nullptr)) ||
+        FAILED(dev->CreateOffscreenPlainSurface(w, h, D3DFMT_A32B32G32R32F, D3DPOOL_SYSTEMMEM, &sys, nullptr)) || FAILED(dev->CreateStateBlock(D3DSBT_ALL, &sb))) {
+        release();
+        err = "no float target";
+        return false;
+    }
+    IDirect3DSurface9* oldRt[4] = {};
+    IDirect3DSurface9* oldDepth = nullptr;
+    for (DWORD i = 0; i < 4; i++) dev->GetRenderTarget(i, &oldRt[i]);
+    dev->GetDepthStencilSurface(&oldDepth);
+    dev->SetRenderTarget(0, rt);
+    for (DWORD i = 1; i < 4; i++) dev->SetRenderTarget(i, nullptr);
+    dev->SetDepthStencilSurface(nullptr);
+    for (auto [s, v] : {std::pair{D3DRS_ZENABLE, 0u}, {D3DRS_ZWRITEENABLE, 0u}, {D3DRS_ALPHABLENDENABLE, 0u}, {D3DRS_ALPHATESTENABLE, 0u},
+                        {D3DRS_CULLMODE, static_cast<DWORD>(D3DCULL_NONE)}, {D3DRS_COLORWRITEENABLE, 0xFu}, {D3DRS_SCISSORTESTENABLE, 0u},
+                        {D3DRS_STENCILENABLE, 0u}, {D3DRS_FOGENABLE, 0u}, {D3DRS_SRGBWRITEENABLE, 0u}, {D3DRS_CLIPPLANEENABLE, 0u}})
+        dev->SetRenderState(s, v);
+    D3D9Hooks::CallOriginalSetTexture(dev, 0, tex); // (past Apex's swaps: Instant (GPU) binds its relit copy for a room map)
+    for (auto [s, v] : {std::pair{D3DSAMP_MINFILTER, static_cast<DWORD>(D3DTEXF_POINT)}, {D3DSAMP_MAGFILTER, static_cast<DWORD>(D3DTEXF_POINT)},
+                        {D3DSAMP_MIPFILTER, static_cast<DWORD>(D3DTEXF_NONE)}, {D3DSAMP_ADDRESSU, static_cast<DWORD>(D3DTADDRESS_CLAMP)},
+                        {D3DSAMP_ADDRESSV, static_cast<DWORD>(D3DTADDRESS_CLAMP)}, {D3DSAMP_SRGBTEXTURE, 0ul}, {D3DSAMP_MAXMIPLEVEL, 0ul}})
+        dev->SetSamplerState(0, s, v);
+    dev->SetVertexShader(nullptr);
+    dev->SetPixelShader(g_readTexelsPs);
+    dev->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX1);
+    struct V { float x, y, z, rhw, u, v; };
+    const float fw = static_cast<float>(w), fh = static_cast<float>(h);
+    const V quad[4] = {{-0.5f, -0.5f, 0, 1, 0, 0}, {fw - 0.5f, -0.5f, 0, 1, 1, 0}, {-0.5f, fh - 0.5f, 0, 1, 0, 1}, {fw - 0.5f, fh - 0.5f, 0, 1, 1, 1}};
+    // A vertex buffer of its own, drawn past Apex's draw hooks (DrawPrimitiveUP left a patch of about 250 texels near (16..32,
+    // 22..29) of the target that the game's copy did not have, under the RTX Remix bridge)
+    HRESULT drawn = E_FAIL;
+    IDirect3DVertexBuffer9* vb = nullptr;
+    void* vbData = nullptr;
+    if (SUCCEEDED(dev->CreateVertexBuffer(sizeof quad, D3DUSAGE_WRITEONLY, D3DFVF_XYZRHW | D3DFVF_TEX1, D3DPOOL_MANAGED, &vb, nullptr)) &&
+        SUCCEEDED(vb->Lock(0, sizeof quad, &vbData, 0))) {
+        std::memcpy(vbData, quad, sizeof quad);
+        vb->Unlock();
+        dev->SetStreamSource(0, vb, 0, sizeof(V));
+        const bool began = SUCCEEDED(dev->BeginScene());
+        drawn = D3D9Hooks::CallOriginalDrawPrimitive(dev, D3DPT_TRIANGLESTRIP, 0, 2);
+        if (began) dev->EndScene();
+    }
+    if (vb) vb->Release(); // (the stream source holds its own reference until the state block puts the game's back)
+    for (DWORD i = 0; i < 4; i++) {
+        if (i == 0 || oldRt[i]) dev->SetRenderTarget(i, oldRt[i]);
+        if (oldRt[i]) oldRt[i]->Release();
+    }
+    dev->SetDepthStencilSurface(oldDepth);
+    if (oldDepth) oldDepth->Release();
+    sb->Apply();
+    D3DLOCKED_RECT lr{};
+    if (FAILED(drawn) || FAILED(dev->GetRenderTargetData(rt, sys)) || FAILED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY))) {
+        release();
+        err = FAILED(drawn) ? "draw failed" : "read back failed";
+        return false;
+    }
+    out.resize(static_cast<size_t>(w) * h * 4);
+    for (UINT y = 0; y < h; y++) std::memcpy(out.data() + static_cast<size_t>(y) * w * 4, static_cast<const BYTE*>(lr.pBits) + static_cast<size_t>(y) * lr.Pitch, w * 16);
+    sys->UnlockRect();
+
+    // Control: the same target cleared to a known colour, no draw, read back. Texels that changed were written by something
+    // other than this read (an overlay or a cursor drawn into the bound target), not by the texture.
+    g_readControl.clear();
+    IDirect3DSurface9* cur = nullptr;
+    dev->GetRenderTarget(0, &cur);
+    dev->SetRenderTarget(0, rt);
+    const HRESULT cleared = dev->Clear(0, nullptr, D3DCLEAR_TARGET, D3DCOLOR_ARGB(255, 0x33, 0x66, 0x99), 1.f, 0);
+    dev->SetRenderTarget(0, cur);
+    if (cur) cur->Release();
+    sb->Apply();
+    if (SUCCEEDED(cleared) && SUCCEEDED(dev->GetRenderTargetData(rt, sys)) && SUCCEEDED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY))) {
+        size_t changed = 0;
+        UINT x0 = w, y0 = h, x1 = 0, y1 = 0;
+        const float want[4] = {0x33 / 255.f, 0x66 / 255.f, 0x99 / 255.f, 1.f};
+        for (UINT y = 0; y < h; y++)
+            for (UINT x = 0; x < w; x++) {
+                const float* v = reinterpret_cast<const float*>(static_cast<const BYTE*>(lr.pBits) + static_cast<size_t>(y) * lr.Pitch) + x * 4;
+                if (std::fabs(v[0] - want[0]) > 0.01f || std::fabs(v[1] - want[1]) > 0.01f || std::fabs(v[2] - want[2]) > 0.01f || std::fabs(v[3] - want[3]) > 0.01f)
+                    changed++, x0 = std::min(x0, x), y0 = std::min(y0, y), x1 = std::max(x1, x), y1 = std::max(y1, y);
+            }
+        sys->UnlockRect();
+        g_readControl = changed ? std::format("; control clear: {} texels changed in ({}..{}, {}..{})", changed, x0, x1, y0, y1) : "; control clear: clean";
+    }
+    release();
+    return true;
+}
+
+// " | GPU: ..." for the report line: the GPU texels' mean and how many differ from the game's copy (texels: w*h*4 floats)
+std::string CompareWithGpu(IDirect3DDevice9* dev, IDirect3DTexture9* tex, UINT w, UINT h, const std::vector<float>& game) {
+    std::vector<float> gpu;
+    std::string err;
+    if (!ReadGpuTexels(dev, tex, w, h, gpu, err)) return " | GPU: not read (" + err + ")";
+    double sum[4] = {};
+    size_t differ = 0, worst = 0;
+    float worstDiff = 0;
+    for (size_t i = 0; i < static_cast<size_t>(w) * h; i++) {
+        float d = 0;
+        for (int c = 0; c < 4; c++) {
+            sum[c] += gpu[i * 4 + c];
+            d = std::max(d, std::fabs(gpu[i * 4 + c] - game[i * 4 + c]));
+        }
+        if (d > 0.02f) differ++;
+        if (d > worstDiff) worstDiff = d, worst = i;
+    }
+    const double n = static_cast<double>(w) * h;
+    std::string s = std::format(" | GPU: media RGBA=({:.3f} {:.3f} {:.3f} {:.3f}); ", sum[0] / n, sum[1] / n, sum[2] / n, sum[3] / n);
+    if (!differ) return s + "the GPU has the game's copy" + g_readControl;
+    const float* g = &game[worst * 4];
+    const float* v = &gpu[worst * 4];
+    return s + std::format("DIFFERS from the game's copy at {} of {} texels; largest at ({}, {}): game ({:.3f} {:.3f} {:.3f} {:.3f}), GPU ({:.3f} {:.3f} {:.3f} {:.3f})",
+                           differ, w * h, worst % w, worst / w, g[0], g[1], g[2], g[3], v[0], v[1], v[2], v[3]) + g_readControl;
+}
+
+// (developer) Lot terrain paint weights (256x256 Q8W8V8U8) and overlay weights (64x64 A8R8G8B8), one level, MANAGED: each one
+// bound is checked against the GPU at the next Present and every 5 s for 30 s, and the log gives the game's copy and the GPU's
+// (a lot drawn black: the overlay weights held heap leftovers under the RTX Remix bridge, all four channels near 1).
+bool IsPaintWeights(const D3DSURFACE_DESC& d, IDirect3DTexture9* t) {
+    const bool paint = d.Format == D3DFMT_Q8W8V8U8 && d.Width == 256 && d.Height == 256;
+    const bool overlay = d.Format == D3DFMT_A8R8G8B8 && d.Width == 64 && d.Height == 64;
+    return (paint || overlay) && d.Pool == D3DPOOL_MANAGED && t->GetLevelCount() == 1;
+}
+struct PaintCheck {
+    DWORD first = 0, next = 0;
+    std::string last;
+};
+std::mutex g_paintMx;
+std::vector<IDirect3DTexture9*> g_paintNew; // bound since the last Present (AddRef'd)
+std::map<IDirect3DTexture9*, PaintCheck> g_paintChecks; // render thread (AddRef'd)
+std::set<const void*> g_paintSeen;          // every texture queued once
+
+std::string CheckPaintWeights(IDirect3DDevice9* dev, IDirect3DTexture9* t) {
+    D3DSURFACE_DESC d{};
+    D3DLOCKED_RECT lr{};
+    if (FAILED(t->GetLevelDesc(0, &d)) || FAILED(t->LockRect(0, &lr, nullptr, D3DLOCK_READONLY))) return "the game's copy could not be read";
+    std::vector<float> game(static_cast<size_t>(d.Width) * d.Height * 4);
+    for (UINT y = 0; y < d.Height; y++)
+        for (UINT x = 0; x < d.Width; x++) Texel(d.Format, static_cast<const BYTE*>(lr.pBits) + static_cast<size_t>(y) * lr.Pitch + x * 4, &game[(static_cast<size_t>(y) * d.Width + x) * 4]);
+    t->UnlockRect(0);
+    double sum[4] = {};
+    for (size_t i = 0; i < game.size(); i++) sum[i % 4] += game[i];
+    const double n = static_cast<double>(d.Width) * d.Height;
+    return std::format("{}x{} {} game media RGBA=({:.3f} {:.3f} {:.3f} {:.3f})", d.Width, d.Height, FmtStr(d.Format), sum[0] / n, sum[1] / n, sum[2] / n, sum[3] / n) +
+           CompareWithGpu(dev, t, d.Width, d.Height, game);
+}
+
+void ServicePaintChecks(IDirect3DDevice9* dev) {
+    {
+        std::lock_guard<std::mutex> lk(g_paintMx);
+        for (IDirect3DTexture9* t : g_paintNew) {
+            if (g_paintChecks.count(t)) t->Release();
+            else g_paintChecks[t] = PaintCheck{};
+        }
+        g_paintNew.clear();
+    }
+    const DWORD now = std::max<DWORD>(GetTickCount(), 1);
+    for (auto it = g_paintChecks.begin(); it != g_paintChecks.end();) {
+        PaintCheck& c = it->second;
+        if (!c.first) c.first = now;
+        if (now - c.first > 30000) {
+            it->first->Release();
+            it = g_paintChecks.erase(it);
+            continue;
+        }
+        if (now >= c.next) {
+            c.next = now + 5000;
+            std::string r = CheckPaintWeights(dev, it->first);
+            const bool same = r.find("DIFFERS") == std::string::npos;
+            if (r != c.last) LOG_INFO(std::format("[LightProbe] Paint weights {:p} {} s after first bound: {}", static_cast<const void*>(it->first), (now - c.first) / 1000, same ? r : "MISMATCH " + r));
+            c.last = std::move(r);
+        }
+        ++it;
+    }
+}
+
+void RegisterPaintCheck() {
+    static bool s_done = false;
+    if (s_done || !DevSwitches::kCompiled || kPublicBuild.load(std::memory_order_relaxed)) return; // (development builds: a hook on every SetTexture)
+    s_done = true;
+    D3D9Hooks::RegisterSetTexture("LightProbePaintCheck", [](D3D9Hooks::DeviceContext&, DWORD, IDirect3DBaseTexture9* b) {
+        if (!b || b->GetType() != D3DRTYPE_TEXTURE) return D3D9Hooks::HookAction::Continue;
+        auto* t = static_cast<IDirect3DTexture9*>(b);
+        std::lock_guard<std::mutex> lk(g_paintMx);
+        if (g_paintSeen.count(t)) return D3D9Hooks::HookAction::Continue;
+        D3DSURFACE_DESC d{};
+        g_paintSeen.insert(t); // (a texture freed and its address reused is not checked again: enough for a diagnostic)
+        if (SUCCEEDED(t->GetLevelDesc(0, &d)) && IsPaintWeights(d, t)) t->AddRef(), g_paintNew.push_back(t);
+        return D3D9Hooks::HookAction::Continue;
+    }, D3D9Hooks::Priority::Last);
+}
+
 std::string DumpTexture(IDirect3DDevice9* dev, IDirect3DBaseTexture9* base, const std::string& name, std::string& fileOut) {
     if (base->GetType() == D3DRTYPE_CUBETEXTURE) return CubeMeans(dev, static_cast<IDirect3DCubeTexture9*>(base));
     if (base->GetType() != D3DRTYPE_TEXTURE) return "not a 2D texture (volume), not saved";
@@ -455,11 +691,14 @@ std::string DumpTexture(IDirect3DDevice9* dev, IDirect3DBaseTexture9* base, cons
     // pass 1: the stats (and the scale); pass 2 writes the 8-bit pixels directly (07/10: no float copies of a 5632x5632 map)
     double sum[4] = {};
     float mx[4] = {-1e30f, -1e30f, -1e30f, -1e30f}, mn[4] = {1e30f, 1e30f, 1e30f, 1e30f};
+    const bool gpuCheck = d.Pool == D3DPOOL_MANAGED && d.Width * d.Height <= kMaxGpuReadTexels && GpuComparable(fmt);
+    std::vector<float> game(gpuCheck ? static_cast<size_t>(d.Width) * d.Height * 4 : 0);
     for (UINT y = 0; y < d.Height; y++) {
         const BYTE* row = bits + static_cast<size_t>(y) * pitch;
         for (UINT x = 0; x < d.Width; x++) {
             float t[4];
             Texel(fmt, row + x * bpp, t);
+            if (gpuCheck) std::memcpy(&game[(static_cast<size_t>(y) * d.Width + x) * 4], t, 16);
             for (int c = 0; c < 4; c++) {
                 if (!std::isfinite(t[c])) t[c] = 0;
                 sum[c] += t[c];
@@ -489,6 +728,7 @@ std::string DumpTexture(IDirect3DDevice9* dev, IDirect3DBaseTexture9* base, cons
     readable->UnlockRect();
     if (sys) sys->Release();
     src->Release();
+    const std::string gpuNote = gpuCheck ? CompareWithGpu(dev, tex, d.Width, d.Height, game) : std::string{};
 
     std::error_code dirError; // (07/10: the throwing overload could end the game; a failed folder just fails the writes below)
     std::filesystem::create_directories(CapDir(), dirError);
@@ -499,7 +739,7 @@ std::string DumpTexture(IDirect3DDevice9* dev, IDirect3DBaseTexture9* base, cons
     if (hasAlpha) Captures::WritePngAsync(PngOwner(), CapDir() / (file.substr(0, file.size() - 4) + "_alpha.png"), std::move(grey), d.Width, d.Height, 1);
     const double n = static_cast<double>(d.Width) * d.Height;
     return std::format("salva {}; media RGBA=({:.3f} {:.3f} {:.3f} {:.3f}) min=({:.3f} {:.3f} {:.3f}) max=({:.3f} {:.3f} {:.3f} {:.3f}){}", file, sum[0] / n, sum[1] / n,
-        sum[2] / n, sum[3] / n, mn[0], mn[1], mn[2], mx[0], mx[1], mx[2], mx[3], scale < 1.0f ? std::format(" (imagem escalada por 1/{:.2f})", peak) : "");
+        sum[2] / n, sum[3] / n, mn[0], mn[1], mn[2], mx[0], mx[1], mx[2], mx[3], scale < 1.0f ? std::format(" (imagem escalada por 1/{:.2f})", peak) : "") + gpuNote;
 }
 
 std::string TexDesc(IDirect3DBaseTexture9* t) {
@@ -1289,6 +1529,8 @@ bool ConfirmAim(POINT clientPixel) {
 
 void OnPresent(IDirect3DDevice9* dev) {
     if (!dev) return;
+    RegisterPaintCheck();
+    if (DevSwitches::kCompiled && !kPublicBuild.load(std::memory_order_relaxed)) ServicePaintChecks(dev);
     if (g_state == State::Capturing) {
         g_state = State::Idle;
         FinishCapture(dev);
@@ -1426,6 +1668,14 @@ void Shutdown() {
         g_whiteTex->Release();
         g_whiteTex = nullptr;
     }
+    if (g_readTexelsPs) g_readTexelsPs->Release(), g_readTexelsPs = nullptr;
+    {
+        std::lock_guard<std::mutex> lk(g_paintMx);
+        for (IDirect3DTexture9* t : g_paintNew) t->Release();
+        g_paintNew.clear();
+    }
+    for (auto& [t, c] : g_paintChecks) t->Release();
+    g_paintChecks.clear();
     g_state = State::Idle;
 }
 

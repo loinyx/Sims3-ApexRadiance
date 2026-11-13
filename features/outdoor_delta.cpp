@@ -514,6 +514,7 @@ struct LightNow {
 };
 using LightPos_t = void*(__thiscall*)(void* light, float* out);
 inline void Mix(uint64_t& h, uint32_t v) { h = (h ^ v) * 1099511628211ull; }
+uintptr_t LightPosFn() { return GameAddr::Get(GameAddr::Id::LightPos); }
 bool ReadLight(uintptr_t L, LightNow& r) {
     if (!L) return false;
     __try {
@@ -530,8 +531,12 @@ bool ReadLight(uintptr_t L, LightNow& r) {
         if (r.type == 4 || r.type == 5)
             for (int k = 0; k < 24; k++) Mix(h, *reinterpret_cast<const uint32_t*>(p + 0x150 + k * 4));
         alignas(16) float pos[4] = {};
-        const void* vt = *reinterpret_cast<void* const*>(p);
-        reinterpret_cast<LightPos_t>(reinterpret_cast<void* const*>(vt)[0x24 / 4])(const_cast<BYTE*>(p), pos);
+        // A destroyed light keeps its memory with the base vtable 0xFF39F8, whose +0x24 is the text "Ligh": calling through it
+        // ran the heap as code (issue #76). Only a live light's slot, the position function of all nine classes, is called.
+        const uintptr_t lightPos = LightPosFn();
+        const uintptr_t slot = reinterpret_cast<const uintptr_t*>(*reinterpret_cast<const uintptr_t*>(p))[0x24 / 4];
+        if (!lightPos || slot != lightPos) return false;
+        reinterpret_cast<LightPos_t>(slot)(const_cast<BYTE*>(p), pos);
         for (int k = 0; k < 4; k++) {
             uint32_t v;
             std::memcpy(&v, &pos[k], 4);

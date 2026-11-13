@@ -1,0 +1,14 @@
+{
+  "id": "bench-apex-costs",
+  "description": "Cause run for the benchmark: the same save and pan as bench-apex-off-on with developer mode on, so the log carries the hook dispatch cost and the lot light pass draw cost by fix every 10 s. Not a timing run: read the log, not the frame times.",
+  "save": "ApexTest-Night",
+  "toml": { "ui": { "developer_mode": true } },
+  "variants": {
+    "on": { "expect": ["\\[D3D9Hooks\\] Dispatch cost over"] }
+  },
+  "steps": [
+    { "do": "speed", "speed": "normal" },
+    { "do": "camera_pan", "lots": 8, "height": 40, "seconds": 60, "passes": 12 },
+    { "do": "wait", "minutes": 8, "measure": false }
+  ]
+}

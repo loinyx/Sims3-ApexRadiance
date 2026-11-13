@@ -1,0 +1,201 @@
+{
+  "id": "night-user-scenario",
+  "description": "The tester's own lighting check at night, each part in its own recording (the shortcut F6 for the run): an outdoor light of the household's lot dragged toward the house and back (walls and garden walls), then at the bookmark gym-entrance the gym's lights on, the two lights nearest the entrance switched off, on, red and white again, and the gym's pool light blue, off, on and white, then the camera still at the square. The developer log times each lamp edit (\"Lamp edit: its rooms settled after\"). Lights are put back as they were except switched on; nothing is saved. Developer mode on, the background frame limit lifted.",
+  "save": "ApexTest-Night",
+  "toml": {
+    "ui": {
+      "developer_mode": true,
+      "recorder_key": "F6"
+    },
+    "screen": {
+      "background_fps_limit": 0
+    }
+  },
+  "variants": {
+    "on": {
+      "expect": [
+        "\\[Recorder\\] Recording started"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "home",
+      "radius": 16,
+      "height": 10,
+      "seconds": 3600,
+      "turns": 0.001,
+      "face": "door"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.6
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "lamp_drag",
+      "seconds": 4,
+      "passes": 4
+    },
+    {
+      "do": "wait",
+      "minutes": 0.4
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "camera_goto",
+      "name": "gym-entrance"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.8
+    },
+    {
+      "do": "lights_on",
+      "lot": "kGym"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.3
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "lamp_edit",
+      "bookmark": "gym-entrance",
+      "action": "off"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.25
+    },
+    {
+      "do": "lamp_edit",
+      "bookmark": "gym-entrance",
+      "action": "on"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.25
+    },
+    {
+      "do": "lamp_edit",
+      "bookmark": "gym-entrance",
+      "action": "color",
+      "color": "Red"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.25
+    },
+    {
+      "do": "lamp_edit",
+      "bookmark": "gym-entrance",
+      "action": "color",
+      "color": "White"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.25
+    },
+    {
+      "do": "lamp_edit",
+      "bookmark": "gym-entrance",
+      "action": "color",
+      "match": "pool",
+      "radius": 120,
+      "count": 1,
+      "color": "Blue"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.3
+    },
+    {
+      "do": "lamp_edit",
+      "bookmark": "gym-entrance",
+      "action": "off",
+      "match": "pool",
+      "radius": 120,
+      "count": 1
+    },
+    {
+      "do": "wait",
+      "minutes": 0.25
+    },
+    {
+      "do": "lamp_edit",
+      "bookmark": "gym-entrance",
+      "action": "on",
+      "match": "pool",
+      "radius": 120,
+      "count": 1
+    },
+    {
+      "do": "wait",
+      "minutes": 0.25
+    },
+    {
+      "do": "lamp_edit",
+      "bookmark": "gym-entrance",
+      "action": "color",
+      "match": "pool",
+      "radius": 120,
+      "count": 1,
+      "color": "White"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.3
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "pra\u00e7a|praca|square|plaza|central|kBigPark",
+      "radius": 20,
+      "height": 12,
+      "seconds": 3600,
+      "turns": 0.001
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.7
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    }
+  ]
+}
