@@ -23,6 +23,10 @@ Patches. Each applies after the ones before it. "Internal" is the name the #40 r
 | 0008 | 0014 | `client.freeIdleBufferCopiesSec`: free a static vertex / index buffer's client copy (64 KB to 4 MB) after N s without a lock. A CRC32C checks each fetch. | conf: 2 |
 | 0009 | 0015 | `client.freeIdleManagedCopiesMs`: 0003's threshold in milliseconds | off |
 | 0010 | 0016 | render target 0 is the implicit swapchain's back buffer 0 object, so `GetRenderTarget(0)` and `GetBackBuffer(0, 0)` return the same surface, as in d3d9 and DXVK (upstream made a separate place-holder; Apex Radiance compares the two by pointer and drew a black picture) | always |
+| 0011 | | render target 0 also resets the viewport and the scissor rectangle, as d3d9 does | always |
+| 0012 | | `SetFVF` and `SetVertexDeclaration` replace each other, as in d3d9 (a stale declaration stayed bound) | always |
+| 0013 | | idle copy fetches: a freed MANAGED level is always fetched, a lock fails when no whole copy came back, texture fetches are CRC32C-checked, only copies of 64 KB and more are freed | with 0003 / 0008 |
+| 0014 | | a surface's new client copy starts zeroed, as a new d3d9 or DXVK texture does (some lots drew their ground black: the game uploads part of a terrain overlay map it never wrote) | always |
 
 The TS3-only options patch the game's code in memory only when the bytes there match TS3W 1.67. Otherwise they change
 nothing.
