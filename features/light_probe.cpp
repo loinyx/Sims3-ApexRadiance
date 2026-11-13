@@ -232,6 +232,7 @@ const char* FmtName(D3DFORMAT f) {
     case D3DFMT_R5G6B5: return "R5G6B5";
     case D3DFMT_A2R10G10B10: return "A2R10G10B10";
     case D3DFMT_A16B16G16R16: return "A16B16G16R16";
+    case D3DFMT_Q8W8V8U8: return "Q8W8V8U8";
     case D3DFMT_DXT1: return "DXT1";
     case D3DFMT_DXT3: return "DXT3";
     case D3DFMT_DXT5: return "DXT5";
@@ -287,6 +288,9 @@ bool Texel(D3DFORMAT f, const BYTE* p, float out[4]) {
         for (int i = 0; i < 4; i++) out[i] = v[i] / 65535.f;
         return true;
     }
+    case D3DFMT_Q8W8V8U8: // signed bytes U V W Q, read as r g b a (the lot terrain's paint weights)
+        for (int i = 0; i < 4; i++) out[i] = std::max(static_cast<float>(static_cast<int8_t>(p[i])) / 127.f, -1.f);
+        return true;
     case D3DFMT_A2R10G10B10: {
         const uint32_t v = *reinterpret_cast<const uint32_t*>(p);
         out[0] = ((v >> 20) & 0x3FF) / 1023.f; out[1] = ((v >> 10) & 0x3FF) / 1023.f; out[2] = (v & 0x3FF) / 1023.f; out[3] = (v >> 30) / 3.f;
