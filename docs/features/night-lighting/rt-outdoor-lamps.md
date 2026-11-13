@@ -168,7 +168,8 @@ when the new lot's first room-0 solve ends after it: `Active lot tracker X: stor
 K quiet rooms still waiting` (with *Faster room lighting* on, which sees the solve ends).
 
 With the switch `active_lot_hold` (shipped, unmeasured in game, see [Limitations](#limitations)), while the camera moves the lot already active stays so until another lot has been the first
-lit at the high quality for 3 s (`kActiveLotHoldMs`), or until the camera has been still for 300 ms
+lit at the high quality for 0.8 s (`kActiveLotHoldMs`; 3 s before its stories were put first, which kept the lot arrived at on
+the game's dimmer light for the whole hold), or until the camera has been still for 300 ms
 (`LotLightingMotion::SampleCameraMoving`). Meanwhile its maps are relit as before (nothing of the relight reads the high
 quality), and Quick outdoor lamp edits keep the same lot (`OutdoorDelta::ActiveLot` follows `RtOutdoorLamps::ActiveTracker`
 while Real-time outdoor lamps run, and reads a change of it at once). The lots next to it keep its lamp posts. The lot
@@ -185,6 +186,10 @@ capture) only for the stories not solved again in between: the lot left is usual
 solve of its room 0 as such a lot keeps only the GPU's base, replacing the full record (`... solved in full (a lot next
 to the active one keeps only the GPU's base)`). The grace does not stop that solve. The new lot's ground room 0 is solved first, for at most 1 s
 ([room light queue](../performance/room-light-queue.md#ground-first-after-an-active-lot-switch)).
+
+A map with no texel of room 0 to relight, or none the prepare kept, is noted as having nothing to relight and is not
+prepared again. Such a map once made an empty buffer, failed as "its texel buffer could not be made" and was prepared
+again 1, 2, 4 ... 32 s later, the lot inactive during each prepare (the town square's story 1 at every arrival).
 
 ## Settings
 

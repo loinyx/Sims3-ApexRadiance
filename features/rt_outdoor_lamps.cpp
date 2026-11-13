@@ -81,7 +81,10 @@ constexpr int kSolveAsks = 3;            // a room 0 is sent to its solve for a 
 constexpr DWORD kSolveRetryMs = 60000;   // then this seldom: a run of refused sends left the story on the game's maps until the lot changed
 constexpr DWORD kDragQuietMs = 300;      // a GPU lamp that changed this recently is being dragged (or edited again and again)
 constexpr DWORD kLeftLotGraceMs = 20000; // the lot left at a switch keeps its room 0s' kept solves this long (a return reuses them)
-constexpr DWORD kActiveLotHoldMs = 3000; // (active_lot_hold) while the camera moves, another lot becomes the active one after this as the first lit at the high quality
+// (active_lot_hold) while the camera moves, another lot becomes the active one after this as the first lit at the high quality.
+// 3 s once, when a new lot waited 3 to 5 s for its maps; with its stories put first (0.1 to 0.7 s) the hold only kept the
+// lot arrived at on the game's dimmer light: a player's arrival at the town square waited the full 3 s, then brightened
+constexpr DWORD kActiveLotHoldMs = 800;
 constexpr DWORD kHoldQuietMs = 1500;     // the rooms that take room 0's lamps are sent this long after a story's last move
                                          // (a Build mode drag moves in grid steps with pauses of up to about a second)
 constexpr DWORD kCheckEveryMs = 2000;    // the consistency check of the GPU lamps' stories
@@ -2495,7 +2498,10 @@ void Frame(IDirect3DDevice9* dev) {
                 break;
             }
             Prepared& p = job.maps[m];
-            if (!p.used) { // (no texel of room 0 in this map: nothing to relight there; a slot notes it, so it is not prepared again)
+            // (no texel of room 0 in this map, or none the prepare kept: nothing to relight there; a slot notes it, so it is not
+            // prepared again. A map whose texels were all left out made an empty buffer, "could not be made", and was prepared
+            // again 1, 2, 4 ... 32 s later, the lot inactive meanwhile: the town square's story 1 at each arrival)
+            if (!p.used || p.v.empty()) {
                 if (!slot) {
                     g_slots.push_back(std::make_unique<Slot>());
                     slot = g_slots.back().get();
