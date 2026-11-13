@@ -1,0 +1,126 @@
+{
+  "id": "night-museum-front-lamp",
+  "description": "The art museum's front outdoor lamp (the one a player recoloured with the walls left unlit), recoloured red, blue, white, red and white, 9 s apart, the camera on the museum's front door and the game paused; run with -Grab to see the walls take each colour. Nothing is saved.",
+  "save": "Claude teste",
+  "toml": {
+    "ui": {
+      "developer_mode": true
+    },
+    "screen": {
+      "background_fps_limit": 0
+    }
+  },
+  "variants": {
+    "on": {},
+    "classic": {
+      "toml": {
+        "patches.NightTerrainRelight": {
+          "lampLightingMode": "classic"
+        }
+      }
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kArtGallery",
+      "radius": 9,
+      "height": 2.5,
+      "seconds": 3600,
+      "turns": 0.001,
+      "face": "door"
+    },
+    {
+      "do": "speed",
+      "speed": "pause"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    },
+    {
+      "do": "lamp_edit",
+      "near": {
+        "x": 931.5,
+        "y": 43.04,
+        "z": 951.0
+      },
+      "radius": 1.5,
+      "count": 1,
+      "action": "color",
+      "color": "Red"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "lamp_edit",
+      "near": {
+        "x": 931.5,
+        "y": 43.04,
+        "z": 951.0
+      },
+      "radius": 1.5,
+      "count": 1,
+      "action": "color",
+      "color": "Blue"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "lamp_edit",
+      "near": {
+        "x": 931.5,
+        "y": 43.04,
+        "z": 951.0
+      },
+      "radius": 1.5,
+      "count": 1,
+      "action": "color",
+      "color": "White"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "lamp_edit",
+      "near": {
+        "x": 931.5,
+        "y": 43.04,
+        "z": 951.0
+      },
+      "radius": 1.5,
+      "count": 1,
+      "action": "color",
+      "color": "Red"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "lamp_edit",
+      "near": {
+        "x": 931.5,
+        "y": 43.04,
+        "z": 951.0
+      },
+      "radius": 1.5,
+      "count": 1,
+      "action": "color",
+      "color": "White"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    }
+  ]
+}
