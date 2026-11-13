@@ -374,7 +374,10 @@ solve).
   object's bounds (`0x006FACA0`: the object's `+0x1B0`, six dwords) and marks the room under it (`0x006C7939`); nothing reads
   a visibility flag. So a room on a hidden story is solved without those objects' 3D blockers (`0x0069E070` walks the
   room's copied spheres, 0x40 bytes each, at `room+0x30` `+0x10/+0x14`), and solved again with them once the story is shown:
-  the upper stories' walls showed lighter for about 0.45 s after each switch. In the same switch the light registry
+  those rooms' solves at a switch. On screen this is not what a switch shows: holding those rooms unsolved while their story
+  was hidden (so the light on screen was the one solved with the objects) left the same picture, the outside walls of the
+  story shown going from about 40 to 17 (mean grey of the wall in a 4 fps capture) over 2 s, with or without the wall
+  shading gate: the camera's move to the new story and the walls fading in, not a light change. Not kept. In the same switch the light registry
   (`tl+0x90`) is emptied and filled again within ~10 ms (`LampChange` keeps the last state over that gap).
 - **Map sets.** A manager's room light maps are at `+0x16C` + class x 64, three classes of four maps each (the teardown
   at `0x006A805A` frees exactly these; *unverified* in game). `+0x230` onward is the room hash, not a map set. Its

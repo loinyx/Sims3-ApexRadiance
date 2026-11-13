@@ -11,7 +11,14 @@
     }
   },
   "variants": {
-    "on": {}
+    "on": {},
+    "noaogate": {
+      "toml": {
+        "patches.WallShadingWhileMoving": {
+          "enabled": false
+        }
+      }
+    }
   },
   "steps": [
     {

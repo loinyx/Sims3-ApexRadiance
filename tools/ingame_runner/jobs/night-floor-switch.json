@@ -1,6 +1,6 @@
 {
   "id": "night-floor-switch",
-  "description": "Floor switches alone at night: on the household's lot, paused, floors 1, 2 and 3 shown in turn eight times (3 s each), nothing edited, so every room solve and light change in that minute comes from the switches. Developer switch room_solve_causes on (its minute lines name who sent each room); run with -Grab for the light changes. Nothing is saved. Developer mode on, the background frame limit lifted.",
+  "description": "Floor switches alone at night: on the household's lot, paused, floors 1, 2 and 3 shown in turn eight times (3 s each), nothing edited, so every room solve and light change in that minute comes from the switches. Developer switch room_solve_causes on (its minute lines name who sent each room); run with -Grab for the light changes. At the end, right after floor 1 is shown, the game is saved under a runner name (removed after the run): a lot thumbnail must not wait on the rooms of the hidden stories. Developer mode on, the background frame limit lifted.",
   "save": "Claude teste",
   "toml": {
     "ui": {
@@ -255,8 +255,20 @@
       "minutes": 0.05
     },
     {
+      "do": "floor",
+      "lot": "home",
+      "level": 1
+    },
+    {
       "do": "wait",
-      "minutes": 1.1
+      "minutes": 0.02
+    },
+    {
+      "do": "save"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.3
     }
   ]
 }
