@@ -97,6 +97,7 @@ const I18n::Pair kPairs[] = {
     {"Performance: trees and plants near lamps cost half as much to draw at night", "Prestanda: träd och växter nära lampor kostar hälften att rita på natten"},
     {"No crash after deleting lamps", "Ingen krasch efter att lampor tagits bort"},
     {"RTX Remix bridge: some lots no longer draw their ground black", "RTX Remix bridge: vissa tomter ritar inte längre sin mark svart"},
+    {"Apex Radiance Setup: no longer offers DXVK when the graphics driver cannot run it", "Apex Radiance Setup: erbjuder inte längre DXVK när grafikdrivrutinen inte kan köra det"},
     {"Display: a switch to turn off G-SYNC for the game", "Skärm: en knapp för att stänga av G-SYNC i spelet"},
     {"Night Lights: new option Light bounces between rooms, on by default", "Nattbelysning: nytt alternativ Ljus studsar mellan rum, på som standard"},
     {"Settings: a new default look for lighting and effects, and your own values stay", "Inställningar: ett nytt standardutseende för ljus och effekter, och dina egna värden blir kvar"},

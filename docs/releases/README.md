@@ -5,6 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [3.2.1](3.2.1.md): Apex Radiance Setup offers DXVK and the RTX Remix bridge only when the graphics driver can run them; developer mode keeps its per-session files in Diagnostics, newest 10 of each.
 - [3.2.0](3.2.0.md): faster Instant (GPU) light on arriving at a lot, lamp edits and floor switches; median FPS 90 to 113 on the night route; no crash after deleting lamps; no black lot ground under the RTX Remix bridge.
 - [3.1.6](3.1.6.md): two downloads, the installer and one manual-install zip with the RTX Remix bridge inside; the bridge no longer marked experimental.
 - [3.1.5](3.1.5.md): Apex Radiance Setup installs Sims 3 Modernization on the EA app again and recognises a moved EA app game.

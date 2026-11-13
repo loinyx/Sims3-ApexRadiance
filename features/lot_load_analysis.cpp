@@ -1,6 +1,7 @@
 #include "lot_load_analysis.h"
 #include "apex_log.h"
 #include "apex_paths.h"
+#include "session_file.h"
 #include "apex_version.h"
 #include "game_version.h"
 #include "frame_profiler.h"
@@ -193,9 +194,8 @@ void Pump() {
     static bool stopped = false;
     if (stopped) return;
     if (path.empty()) {
-        if (!ApexPaths::EnsureApexDirectory()) return;
-        SYSTEMTIME t{}; GetLocalTime(&t);
-        path = ApexPaths::ApexDirectory()+std::format(L"LotLoadAnalysis-{}-{:04}{:02}{:02}-{:02}{:02}{:02}.csv",GetCurrentProcessId(),t.wYear,t.wMonth,t.wDay,t.wHour,t.wMinute,t.wSecond);
+        path = ApexPaths::NewSessionFile(L"LotLoadAnalysis", L"csv");
+        if (path.empty()) { stopped = true; return; } // (no Diagnostics folder: not retried every pump)
     }
     struct Load { uint64_t request=0, calls=0; double elapsed=0; };
     static std::unordered_map<uint64_t,Load> loads;

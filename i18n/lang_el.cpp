@@ -97,6 +97,7 @@ const I18n::Pair kPairs[] = {
     {"Performance: trees and plants near lamps cost half as much to draw at night", "Απόδοση: τα δέντρα και τα φυτά κοντά σε λαμπτήρες κοστίζουν τα μισά στη σχεδίαση τη νύχτα"},
     {"No crash after deleting lamps", "Καμία κατάρρευση μετά τη διαγραφή λαμπτήρων"},
     {"RTX Remix bridge: some lots no longer draw their ground black", "RTX Remix bridge: ορισμένα οικόπεδα δεν σχεδιάζουν πια το έδαφός τους μαύρο"},
+    {"Apex Radiance Setup: no longer offers DXVK when the graphics driver cannot run it", "Apex Radiance Setup: δεν προσφέρει πλέον το DXVK όταν το πρόγραμμα οδήγησης γραφικών δεν μπορεί να το τρέξει"},
     {"Display: a switch to turn off G-SYNC for the game", "Οθόνη: διακόπτης για απενεργοποίηση του G-SYNC στο παιχνίδι"},
     {"Night Lights: new option Light bounces between rooms, on by default", "Νυχτερινά Φώτα: νέα επιλογή Το φως ανακλάται ανάμεσα στα δωμάτια, ενεργή από προεπιλογή"},
     {"Settings: a new default look for lighting and effects, and your own values stay", "Ρυθμίσεις: νέα προεπιλεγμένη εμφάνιση για φως και εφέ, και οι δικές σας τιμές μένουν"},

@@ -97,6 +97,7 @@ const I18n::Pair kPairs[] = {
     {"Performance: trees and plants near lamps cost half as much to draw at night", "Teljesítmény: a lámpák közelében lévő fák és növények rajzolása éjjel feleannyiba kerül"},
     {"No crash after deleting lamps", "Nincs összeomlás lámpák törlése után"},
     {"RTX Remix bridge: some lots no longer draw their ground black", "RTX Remix bridge: néhány telek talaja már nem fekete"},
+    {"Apex Radiance Setup: no longer offers DXVK when the graphics driver cannot run it", "Apex Radiance Setup: már nem kínálja fel a DXVK-t, ha a videokártya-illesztőprogram nem tudja futtatni"},
     {"Display: a switch to turn off G-SYNC for the game", "Megjelenítés: kapcsoló a G-SYNC kikapcsolásához a játékban"},
     {"Night Lights: new option Light bounces between rooms, on by default", "Éjszakai fények: új beállítás A fény visszaverődik a szobák között, alapból bekapcsolva"},
     {"Settings: a new default look for lighting and effects, and your own values stay", "Beállítások: új alapértelmezett megjelenés a fényhez és az effektekhez, a saját értékeid maradnak"},

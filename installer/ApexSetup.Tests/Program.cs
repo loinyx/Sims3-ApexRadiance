@@ -46,6 +46,15 @@ try
         Check(Releases.Newer("3.2.0", "3.2.0-beta") && !Releases.Newer("3.2.0", "3.2.0") && !Releases.Newer("3.2.0-beta", "3.2.0")
               && Releases.Newer("3.2.0", "3.1.9") && Releases.Newer("3.2.0", "") && !Releases.Newer(null, ""),
               "update check: a final release is newer than its prerelease, an unknown copy is older than any release");
+        // an Iris Xe on a 2023 driver: Vulkan 1.3 without VK_KHR_load_store_op_none, which DXVK 3 requires
+        var old = Gpu.DxvkExtensions.Where(e => e != "VK_KHR_load_store_op_none").Append("VK_EXT_load_store_op_none").ToList();
+        Check(Gpu.Lacking(old).SequenceEqual(new[] { "VK_KHR_load_store_op_none" }) && Gpu.Lacking(Gpu.DxvkExtensions).Length == 0,
+              "gpu: the DXVK extensions a driver lacks are found");
+        Check(Gpu.Better((new Version(1, 3), Array.Empty<string>()), (new Version(1, 4), new[] { "VK_KHR_maintenance6" }))
+              && !Gpu.Better((new Version(1, 2), Array.Empty<string>()), (new Version(1, 3), Array.Empty<string>())),
+              "gpu: a card DXVK can use beats a newer one it cannot");
+        Check(Gpu.DriverPage("Intel(R) Iris(R) Xe Graphics").Contains("intel.com") && Gpu.DriverPage("AMD Radeon 780M").Contains("amd.com"),
+              "gpu: an old driver points at its vendor's driver page");
         File.Move(B(@".trex\NvRemixBridge.exe"), B(@".trex\NvRemixBridge.exe.off"));
         Check(Verify.Files(g, sv, good).Any(x => x.Args.Contains(@".trex\NvRemixBridge.exe")), "check installation: a missing bridge server is found");
         File.Move(B(@".trex\NvRemixBridge.exe.off"), B(@".trex\NvRemixBridge.exe"));
@@ -637,7 +646,7 @@ finally
 // The bridge needs Vulkan 1.3: the driver's packed version reads right, and this PC's cards can be asked
 Check(Gpu.Decode((1u << 22) | (3u << 12) | 280) == new Version(1, 3) && Gpu.Decode((1u << 22) | (2u << 12) | 170) < Gpu.Needed,
       "Vulkan 1.3 passes and 1.2 does not");
-try { var (vk, card) = Gpu.Vulkan(); Console.WriteLine($"info this PC: {card ?? "no Vulkan card"} Vulkan {vk?.ToString() ?? "-"}"); }
+try { var (vk, card, missing) = Gpu.Vulkan(); Console.WriteLine($"info this PC: {card ?? "no Vulkan card"} Vulkan {vk?.ToString() ?? "-"}, DXVK extensions missing: {(missing.Length == 0 ? "none" : string.Join(", ", missing))}"); }
 catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: " + e.Message); }
 
 Console.WriteLine(failures == 0 ? "ALL PASSED" : failures + " FAILED");

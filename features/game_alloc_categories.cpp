@@ -5,6 +5,7 @@
 #include "dev_switches.h"
 #include "apex_log.h"
 #include "apex_paths.h"
+#include "session_file.h"
 #include "apex_version.h"
 #include "memory_patch.h"
 #include <windows.h>
@@ -244,12 +245,7 @@ void Report(unsigned long long uptimeMs) {
     static std::wstring file;
     static uint64_t written = 0;
     static bool disabled = false;
-    if (!disabled && file.empty() && ApexPaths::EnsureApexDirectory()) {
-        SYSTEMTIME t{};
-        GetLocalTime(&t);
-        file = ApexPaths::ApexDirectory() + std::format(L"GameCategories-{}-{:04}{:02}{:02}-{:02}{:02}{:02}.csv", GetCurrentProcessId(), t.wYear, t.wMonth,
-                                                        t.wDay, t.wHour, t.wMinute, t.wSecond);
-    }
+    if (!disabled && file.empty() && (file = ApexPaths::NewSessionFile(L"GameCategories", L"csv")).empty()) disabled = true;
     std::string csv;
     for (size_t i = 0; i < rows.size() && i < 150; i++)
         csv += std::format("{},{},\"{}\",{},{},{},{},{}\n", APEX_VERSION_STRING, uptimeMs, NameOf(rows[i].key), rows[i].live, rows[i].blocks, rows[i].peak,

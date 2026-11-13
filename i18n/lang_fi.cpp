@@ -97,6 +97,7 @@ const I18n::Pair kPairs[] = {
     {"Performance: trees and plants near lamps cost half as much to draw at night", "Suorituskyky: lamppujen lähellä olevien puiden ja kasvien piirtäminen maksaa yöllä puolet"},
     {"No crash after deleting lamps", "Ei kaatumista lamppujen poistamisen jälkeen"},
     {"RTX Remix bridge: some lots no longer draw their ground black", "RTX Remix bridge: jotkin tontit eivät enää piirrä maataan mustana"},
+    {"Apex Radiance Setup: no longer offers DXVK when the graphics driver cannot run it", "Apex Radiance Setup: ei enää tarjoa DXVK:ta, kun näytönohjaimen ajuri ei pysty ajamaan sitä"},
     {"Display: a switch to turn off G-SYNC for the game", "Näyttö: kytkin G-SYNCin poistamiseen käytöstä pelissä"},
     {"Night Lights: new option Light bounces between rooms, on by default", "Yövalot: uusi asetus Valo heijastuu huoneiden välillä, oletuksena päällä"},
     {"Settings: a new default look for lighting and effects, and your own values stay", "Asetukset: uusi oletusulkoasu valolle ja tehosteille, ja omat arvosi säilyvät"},

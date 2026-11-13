@@ -44,6 +44,7 @@
 #include "unlit_rooms.h"
 #include "apex_log.h"
 #include "apex_paths.h"
+#include "session_file.h"
 #include "game_addresses.h"
 #include "game_version.h"
 #include "hook_guard.h"
@@ -1880,13 +1881,8 @@ void ProbeDump(const BYTE* room, const RoomRead& rr, const std::string& texels) 
     constexpr size_t kMaxBytes = 64u << 20; // (one file, at most 64 MB a session)
     if (!s_tried) {
         s_tried = true;
-        SYSTEMTIME t{};
-        GetLocalTime(&t);
-        if (ApexPaths::EnsureApexDirectory())
-            s_file = _wfopen((ApexPaths::ApexDirectory() + std::format(L"RoomLampProbe-{:04}{:02}{:02}-{:02}{:02}{:02}.txt", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute,
-                                                                       t.wSecond)).c_str(),
-                             L"wb");
-        LOG_INFO(s_file ? "[RoomLampProbe] Dump: RoomLampProbe-<time>.txt in the Apex Radiance folder" : "[RoomLampProbe] Dump: the file could not be made");
+        if (const std::wstring path = ApexPaths::NewSessionFile(L"RoomLampProbe", L"txt"); !path.empty()) s_file = _wfopen(path.c_str(), L"wb");
+        LOG_INFO(s_file ? "[RoomLampProbe] Dump: Diagnostics\\RoomLampProbe-<pid>-<time>.txt in the Apex Radiance folder" : "[RoomLampProbe] Dump: the file could not be made");
         if (s_file) { // the 3D test's constants (0x0069D910, 0x0069FCE0, the blockers' vfunc+0x14 and their helpers 0x0069B4C0..0x0069B72A)
             static constexpr uint32_t kConsts[] = {0x00F98964, 0x00F98A58, 0x00F9A5AC, 0x00FAA210, 0x00FB2F6C, 0x00FBD498, 0x00FECE18, 0x00FF31AC, 0x0106B4B4, 0x0106D6CC,
                                                    0x0107A538, 0x011CB864, 0x011D01B0, 0x011D01C0, 0x011D01D0, 0x011D01E0, 0x011D01F0, 0x011D0200, 0x011D0240,

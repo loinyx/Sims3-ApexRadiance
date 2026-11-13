@@ -4,6 +4,7 @@
 #include "va_ledger.h"
 #include "apex_log.h"
 #include "apex_paths.h"
+#include "session_file.h"
 #include "apex_version.h"
 #include "memory_patch.h"
 #include "dev_switches.h"
@@ -245,11 +246,8 @@ void WriteCsv(const Aggregate& a) {
     static bool disabled = false;
     if (disabled) return;
     if (file.empty()) {
-        if (!ApexPaths::EnsureApexDirectory()) { disabled = true; return; }
-        SYSTEMTIME t{};
-        GetLocalTime(&t);
-        file = ApexPaths::ApexDirectory() + std::format(L"AddressOwners-{}-{:04}{:02}{:02}-{:02}{:02}{:02}.csv", GetCurrentProcessId(), t.wYear, t.wMonth,
-                                                        t.wDay, t.wHour, t.wMinute, t.wSecond);
+        file = ApexPaths::NewSessionFile(L"AddressOwners", L"csv");
+        if (file.empty()) { disabled = true; return; }
     }
     constexpr const char* header = "build,uptime_ms,level,name,allocations,committed_bytes,reserved_bytes\n";
     std::string rows;

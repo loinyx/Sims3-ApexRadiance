@@ -7,6 +7,7 @@
 #include "build_flavor.h"
 #include "game_addresses.h"
 #include "apex_paths.h"
+#include "session_file.h"
 #include "apex_version.h"
 #include "high_alloc.h"
 #include "va_ledger.h"
@@ -270,9 +271,8 @@ void WriteMemorySample(const Snapshot& s) {
     static bool haveBaseline = false;
     if (disabled) return;
     if (file.empty()) {
-        if (!ApexPaths::EnsureApexDirectory()) { disabled = true; LOG_WARNING("[MemoryAnalysis] Output directory unavailable"); return; }
-        SYSTEMTIME t{}; GetLocalTime(&t);
-        file = ApexPaths::ApexDirectory() + std::format(L"MemoryAnalysis-{}-{:04}{:02}{:02}-{:02}{:02}{:02}.csv", GetCurrentProcessId(), t.wYear,t.wMonth,t.wDay,t.wHour,t.wMinute,t.wSecond);
+        file = ApexPaths::NewSessionFile(L"MemoryAnalysis", L"csv");
+        if (file.empty()) { disabled = true; LOG_WARNING("[MemoryAnalysis] Output directory unavailable"); return; }
         LOG_INFO("[MemoryAnalysis] CSV enabled for " APEX_VERSION_STRING "; samples every 10 s on a background thread, capped at 16 MiB per session. No memory is freed or trimmed. Private executable pages are not attributed to the script heap.");
     }
     if (s.processValid && !haveBaseline) { baseline = s.privateBytes; haveBaseline = true; }
@@ -303,10 +303,8 @@ void WriteGameplayTelemetry(const Snapshot& s) {
     static bool disabled = false;
     if (disabled) return;
     if (path.empty()) {
-        if (!ApexPaths::EnsureApexDirectory()) { disabled = true; return; }
-        SYSTEMTIME t{}; GetLocalTime(&t);
-        path = ApexPaths::ApexDirectory() + std::format(L"GameplayMemory-{}-{:04}{:02}{:02}-{:02}{:02}{:02}.csv",
-            GetCurrentProcessId(), t.wYear,t.wMonth,t.wDay,t.wHour,t.wMinute,t.wSecond);
+        path = ApexPaths::NewSessionFile(L"GameplayMemory", L"csv");
+        if (path.empty()) { disabled = true; return; }
     }
     MemoryTelemetry::Event batch[64]{};
     const unsigned n = MemoryTelemetry::Drain(batch);

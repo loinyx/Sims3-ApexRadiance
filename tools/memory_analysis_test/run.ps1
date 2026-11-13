@@ -10,7 +10,7 @@ try {
  if($LASTEXITCODE -ne 0){throw 'Memory analysis check compilation failed'}
  & '.\memory_analysis_checks.exe'
  if($LASTEXITCODE -ne 0){throw 'Memory analysis checks failed'}
- $csv=Get-ChildItem -LiteralPath $OutDir -Filter 'MemoryAnalysis-*.csv' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+ $csv=Get-ChildItem -LiteralPath (Join-Path $OutDir 'Diagnostics') -Filter 'MemoryAnalysis-*.csv' | Sort-Object LastWriteTime -Descending | Select-Object -First 1
  $samples=@(Import-Csv -LiteralPath $csv.FullName)
  if($samples.Count -ne 4 -or $samples[0].PSObject.Properties.Count -contains 0){throw 'CSV sample count failed'}
  if(@($samples[0].PSObject.Properties).Count -ne 39){throw 'CSV schema failed'}
