@@ -172,6 +172,17 @@ before it is solved.
 - **Effect on light:** none on the final result: the same solves run in a different order. A lamp edit made in that
   second waits too; the camera story's room 0 shows its class-0 light meanwhile, as before.
 
+### Other lots' room 0 waits while the camera moves
+
+While the camera moves, room 0 (the outdoor room) of a lot that is neither the lot being played nor *Real-time outdoor
+lamps*' active lot is not picked, for at most 2 s per camera motion (`MoveHold`, Tester switch `perf_motion_room0_hold`).
+
+- **Why:** a room 0 solve runs whole in one step whatever the lot's budget: 38-67 ms at class 2 in a fast-camera
+  recording, the largest moving hitches, as the lots the camera passed over queued them one after the other.
+- **How:** priority 0 in the priority hook, so the scheduler leaves the room in its state with its marks and picks it
+  once the camera stops or the wait has run out. A lamp edit's rooms (urgency above 1) are never held.
+- **Effect on light:** none on the final result: those lots' outdoor light is solved up to 2 s later, after the motion.
+
 ### Quick update for lamp switches
 
 Used only while *Lamp edits all at once* is off (`quickPass`, once per room and switch). After a player's switch

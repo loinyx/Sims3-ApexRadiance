@@ -16,7 +16,14 @@
     }
   },
   "variants": {
-    "on": {}
+    "on": {},
+    "nohold": {
+      "toml": {
+        "developer.tester": {
+          "perf_motion_room0_hold": false
+        }
+      }
+    }
   },
   "steps": [
     {
