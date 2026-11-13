@@ -1,0 +1,44 @@
+{
+  "id": "frame-stability-tour",
+  "description": "Frame-time consistency on any town save, as a player plays: a slow orbit of the household's lot, pans over 8 nearby lots at 30 m (20 s a pass, 4 passes), fast orbits of the household's lot (3 turns in 10 s), then a calm 1-minute wait at normal speed. Nothing edited or saved. The background frame limit is lifted; run with -Profiler Both for frame times and simulation hitches.",
+  "save": "ApexTest-Town",
+  "toml": {
+    "screen": {
+      "background_fps_limit": 0
+    }
+  },
+  "variants": {
+    "off": {
+      "apex": false,
+      "fail": ["\\[Main\\] Features started"]
+    },
+    "on": {
+      "expect": ["\\[Main\\] Features started"]
+    },
+    "inside": {
+      "toml": {
+        "qol.frame_profiler": {
+          "enabled": true,
+          "start_at_load": true,
+          "registry_timing": true,
+          "report_every_s": 60,
+          "write_file": true
+        }
+      }
+    }
+  },
+  "steps": [
+    { "do": "speed", "speed": "normal" },
+    { "do": "camera_orbit", "lot": "home", "radius": 16, "height": 10, "seconds": 3600, "turns": 0.001 },
+    { "do": "wait", "minutes": 0.5 },
+    { "do": "profile", "minutes": 4.0 },
+    { "do": "camera_orbit", "lot": "home", "radius": 18, "height": 12, "seconds": 30, "turns": 1 },
+    { "do": "wait", "minutes": 0.5 },
+    { "do": "camera_pan", "lots": 8, "height": 30, "seconds": 20, "passes": 4 },
+    { "do": "wait", "minutes": 1.4 },
+    { "do": "camera_orbit", "lot": "home", "radius": 16, "height": 10, "seconds": 10, "turns": 3 },
+    { "do": "wait", "minutes": 0.5 },
+    { "do": "camera_orbit", "lot": "home", "radius": 16, "height": 10, "seconds": 3600, "turns": 0.001 },
+    { "do": "wait", "minutes": 1.0 }
+  ]
+}

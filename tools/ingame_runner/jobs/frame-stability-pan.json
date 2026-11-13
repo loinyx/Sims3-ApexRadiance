@@ -1,0 +1,37 @@
+{
+  "id": "frame-stability-pan",
+  "description": "Frame-time drops while the camera flies over a town: pans over 8 nearby lots at 30 m (20 s a pass, 4 passes) inside a 2-minute measured window, the case where most drops of frame-stability-tour happen. Nothing edited or saved. The background frame limit is lifted; run with -Profiler Frames, or the inside variant (Developer build) for the mod's own frame timeline, whose last two minutes then hold the pan.",
+  "save": "ApexTest-Town",
+  "toml": {
+    "screen": {
+      "background_fps_limit": 0
+    }
+  },
+  "variants": {
+    "off": {
+      "apex": false,
+      "fail": ["\\[Main\\] Features started"]
+    },
+    "on": {
+      "expect": ["\\[Main\\] Features started"]
+    },
+    "inside": {
+      "toml": {
+        "qol.frame_profiler": {
+          "enabled": true,
+          "start_at_load": true,
+          "registry_timing": true,
+          "write_file": true
+        }
+      }
+    }
+  },
+  "steps": [
+    { "do": "speed", "speed": "normal" },
+    { "do": "camera_orbit", "lot": "home", "radius": 16, "height": 10, "seconds": 3600, "turns": 0.001 },
+    { "do": "wait", "minutes": 0.75 },
+    { "do": "profile", "minutes": 1.8 },
+    { "do": "camera_pan", "lots": 8, "height": 30, "seconds": 20, "passes": 4 },
+    { "do": "wait", "minutes": 1.8 }
+  ]
+}
