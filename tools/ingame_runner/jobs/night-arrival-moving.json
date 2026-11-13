@@ -1,0 +1,178 @@
+{
+  "id": "night-arrival-moving",
+  "description": "Arrivals at night with the camera still moving, as a player arrives: from the household's lot to the town square (Parque Central), the art museum and the gym, twice, the camera circling each lot for 9 s (one turn in 12 s) before it rests 12 s. Measures how long a lot arrived at shows the game's light before the GPU's (the active lot hold); profilers/light_latency.py reads its log. Developer mode on, the background frame limit lifted; nothing is saved.",
+  "save": "Claude teste",
+  "toml": {
+    "ui": {
+      "developer_mode": true
+    },
+    "screen": {
+      "background_fps_limit": 0
+    }
+  },
+  "variants": {
+    "on": {}
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "home",
+      "radius": 16,
+      "height": 10,
+      "seconds": 3600,
+      "turns": 0.001
+    },
+    {
+      "do": "wait",
+      "minutes": 0.4
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kEP8_Festival",
+      "radius": 20,
+      "height": 12,
+      "seconds": 12,
+      "turns": 1
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kEP8_Festival",
+      "radius": 20,
+      "height": 12,
+      "seconds": 3600,
+      "turns": 0.001
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kArtGallery",
+      "radius": 20,
+      "height": 12,
+      "seconds": 12,
+      "turns": 1
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kArtGallery",
+      "radius": 20,
+      "height": 12,
+      "seconds": 3600,
+      "turns": 0.001
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kGym",
+      "radius": 20,
+      "height": 12,
+      "seconds": 12,
+      "turns": 1
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kGym",
+      "radius": 20,
+      "height": 12,
+      "seconds": 3600,
+      "turns": 0.001
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kEP8_Festival",
+      "radius": 20,
+      "height": 12,
+      "seconds": 12,
+      "turns": 1
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kEP8_Festival",
+      "radius": 20,
+      "height": 12,
+      "seconds": 3600,
+      "turns": 0.001
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kArtGallery",
+      "radius": 20,
+      "height": 12,
+      "seconds": 12,
+      "turns": 1
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kArtGallery",
+      "radius": 20,
+      "height": 12,
+      "seconds": 3600,
+      "turns": 0.001
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kGym",
+      "radius": 20,
+      "height": 12,
+      "seconds": 12,
+      "turns": 1
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kGym",
+      "radius": 20,
+      "height": 12,
+      "seconds": 3600,
+      "turns": 0.001
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    }
+  ]
+}

@@ -792,6 +792,8 @@ namespace ApexTestAgent
         // the dialog picks the first button containing one of its preferred words. Anything else falls back to Score().
         static readonly string[][][] kDialogRules = {
             new[] { new[] { "placing the following lots", "new lots available" }, new[] { "don't place", "dont place", "no" } },
+            // (a game in Portuguese: "Sim" and "Não" tie, and the first, a move of the household to another town, was clicked)
+            new[] { new[] { "new towns", "another town", "novas cidades", "outra cidade" }, new[] { "não", "nao", "no" } },
             new[] { new[] { "save your town before continuing" }, new[] { "just continue", "continue" } },
             new[] { new[] { "name your saved game" }, new[] { "cancel" } },
             new[] { new[] { "come over", "invite", "would like to visit", "wants to visit", "join them" }, new[] { "decline", "not now", "no", "cancel" } },

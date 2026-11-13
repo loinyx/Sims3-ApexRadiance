@@ -1,0 +1,97 @@
+{
+  "id": "night-fast-camera",
+  "description": "Frame rate and smoothness at night with the camera moving fast, as a player flies over the town: pans over 8 lots at 30 m (20 s a pass, 4 passes), fast orbits of the gym, the art museum and the household's lot (3 turns in 10 s each), and pans around the town square at 20 m. No recordings, nothing edited or saved. Developer mode on, the background frame limit lifted; run with -Profiler Frames for frame times.",
+  "save": "Claude teste",
+  "toml": {
+    "ui": {
+      "developer_mode": true
+    },
+    "screen": {
+      "background_fps_limit": 0
+    }
+  },
+  "variants": {
+    "on": {}
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "home",
+      "radius": 16,
+      "height": 10,
+      "seconds": 3600,
+      "turns": 0.001
+    },
+    {
+      "do": "wait",
+      "minutes": 0.4
+    },
+    {
+      "do": "profile",
+      "minutes": 3.9
+    },
+    {
+      "do": "camera_pan",
+      "lots": 8,
+      "height": 30,
+      "seconds": 20,
+      "passes": 4
+    },
+    {
+      "do": "wait",
+      "minutes": 1.4
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kGym",
+      "radius": 22,
+      "height": 14,
+      "seconds": 10,
+      "turns": 3
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    },
+    {
+      "do": "camera_pan",
+      "near": "praça|praca|square|plaza|central|kBigPark",
+      "lots": 6,
+      "height": 20,
+      "seconds": 15,
+      "passes": 4
+    },
+    {
+      "do": "wait",
+      "minutes": 1.0
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kArtGallery",
+      "radius": 20,
+      "height": 12,
+      "seconds": 10,
+      "turns": 3
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "home",
+      "radius": 16,
+      "height": 10,
+      "seconds": 10,
+      "turns": 3
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    }
+  ]
+}

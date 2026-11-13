@@ -7,6 +7,7 @@ Prints, per log:
   lamp edits     "Lamp edit: its rooms settled after N ms" (median, p90, max, count) and the game's own solve time
                  a frame while they settled (the frame drops of an edit)
   drags          "AtriumHold ... (drag, from its release) ... shown N ms after" (the light of a dragged lamp after release)
+  holds          "Active lot switch held N ms while the camera moved" (the lot arrived at on the game's light meanwhile)
   frames         frames per 10 s from the "Draw cost by fix over N frames" lines (min and median FPS)
 """
 import re
@@ -27,7 +28,7 @@ def pct(v, q):
 
 
 def analyse(path):
-    switches, edits, solve_ms, drags, fps = [], [], [], [], []
+    switches, edits, solve_ms, drags, fps, holds = [], [], [], [], [], []
     pending = None
     for line in open(path, encoding="utf-8", errors="replace"):
         t = sec(line)
@@ -50,17 +51,21 @@ def analyse(path):
         if m:
             drags.append(int(m.group(1)))
             continue
+        m = re.search(r"\[RtOutdoorLamps\] Active lot switch held (\d+) ms while the camera moved \(then tracker", line)
+        if m:
+            holds.append(int(m.group(1)))
+            continue
         m = re.search(r"\[LotLightBridge\] Draw cost by fix over (\d+) frames", line)
         if m:
             fps.append(int(m.group(1)) / 10.0)
-    return switches, edits, solve_ms, drags, fps
+    return switches, edits, solve_ms, drags, fps, holds
 
 
 def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
     for path in sys.argv[1:]:
-        sw, ed, so, dr, fps = analyse(path)
+        sw, ed, so, dr, fps, ho = analyse(path)
         print("== %s" % path)
         print("  lot switches to the GPU's light on every story: %s" % (", ".join("%s %.1f s" % (k[-4:], v) for k, v in sw) or "none"))
         if ed:
@@ -68,6 +73,8 @@ def main():
                   % (len(ed), statistics.median(ed), pct(ed, 0.9), max(ed), statistics.median(so), max(so)))
         if dr:
             print("  drags: %d, light shown after release median %d ms, max %d ms" % (len(dr), statistics.median(dr), max(dr)))
+        if ho:
+            print("  switches held while the camera moved: %s ms" % ", ".join(str(h) for h in ho))
         if fps:
             print("  frames: median %.0f FPS, lowest 10 s %.0f FPS" % (statistics.median(fps), min(fps)))
 
