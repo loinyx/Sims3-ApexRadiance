@@ -8544,10 +8544,10 @@ template <typename DrawFn> bool DrawWallGain(IDirect3DDevice9* dev, DrawFn draw)
             D3D9Hooks::GetBoundTexture(dev, sp->wall.mapSampler, &map);
             // the outdoor scale at night (by day lamps are off: the wall as before); the indoor marks at every hour, by day with no
             // outdoor scale (marksOnly: x 1, so the outside texels draw as the game's)
-            scale = g_night.load(std::memory_order_relaxed) > 0.0f ? RtOutdoorLamps::ScaleOf(map) : nullptr;
+            IDirect3DTexture9* const own = RtOutdoorLamps::ScaleOf(map); // (one slot scan for both uses)
+            scale = g_night.load(std::memory_order_relaxed) > 0.0f ? own : nullptr;
             if (!scale && sp->wall.indoor) {
                 RtOutdoorLamps::IndoorRooms probe;
-                IDirect3DTexture9* const own = RtOutdoorLamps::ScaleOf(map);
                 scale = own && RtOutdoorLamps::IndoorRoomsOf(map, probe) ? own : RtOutdoorLamps::IndoorFlagsOf(map);
                 marksOnly = scale != nullptr;
             }
