@@ -1,0 +1,47 @@
+{
+  "id": "fast-memory",
+  "description": "Fast Memory over a camera pan and a save. Pass: the allocator logs On, the save completes; A/B metric: frame time p99.",
+  "save": "ApexTest-Town",
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.FastMemory": {
+          "enabled": false
+        }
+      },
+      "fail": [
+        "\\[FastMemory\\] On:"
+      ]
+    },
+    "on": {
+      "toml": {
+        "patches.FastMemory": {
+          "enabled": true
+        }
+      },
+      "expect": [
+        "\\[FastMemory\\] On:"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "fast"
+    },
+    {
+      "do": "camera_pan",
+      "lots": 8,
+      "seconds": 40,
+      "passes": 15
+    },
+    {
+      "do": "wait",
+      "minutes": 10,
+      "measure": true
+    },
+    {
+      "do": "save"
+    }
+  ]
+}

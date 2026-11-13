@@ -6124,6 +6124,23 @@ struct FenceStepTimer {
         g_fenceStepTicks[step] += b.QuadPart - a.QuadPart, g_fenceStepCalls[step]++;
     }
 };
+// (development builds) the foliage draw's parts on the timed draws: its mesh box, its constants read, its instances, the
+// per-vertex constants saved and set, the draw with the game's constants put back
+int64_t g_folStepTicks[8] = {};
+uint32_t g_folStepCalls[8] = {};
+struct FolStepTimer {
+    int step;
+    LARGE_INTEGER a{};
+    explicit FolStepTimer(int s) : step(kPublicBuild || !g_drawCostTimed ? -1 : s) {
+        if (step >= 0) QueryPerformanceCounter(&a);
+    }
+    ~FolStepTimer() {
+        if (step < 0) return;
+        LARGE_INTEGER b;
+        QueryPerformanceCounter(&b);
+        g_folStepTicks[step] += b.QuadPart - a.QuadPart, g_folStepCalls[step]++;
+    }
+};
 int PickFenceLamps(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share, LampCone* cones, float* vis) {
     if (kPublicBuild || !g_drawCostTimed) return PickFenceLampsMemo(g, reachLaw, lamps, lampTop, share, cones, vis);
     LARGE_INTEGER a, b;
@@ -6986,10 +7003,16 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
     const bool noting = LightProbe::Capturing();
     if (noting) g_foliageNote.clear();
     FoliageCrown mesh;
-    if (!FoliageMeshBox(dev, mesh)) return false;
+    {
+        const FolStepTimer timer(0);
+        if (!FoliageMeshBox(dev, mesh)) return false;
+    }
     const int count = std::clamp(mesh.instances, 1, 9);
     float c[81][4];
-    if (FAILED(dev->GetVertexShaderConstantF(0, &c[0][0], 81))) return false;
+    {
+        const FolStepTimer timer(1);
+        if (FAILED(dev->GetVertexShaderConstantF(0, &c[0][0], 81))) return false;
+    }
     float eye[3]; // the origin of c0 (named eye below: the camera eye, or 0 for world positions)
     if (!FoliageOriginFound(eye)) {
         VoteFoliageOrigin(c, count, mesh);
@@ -7018,7 +7041,11 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
     const float phase = TerrainLightingPolicy::LampDay(lampNight);
     const float lawScale = TerrainLightingPolicy::ReachLampScale(NativeWallScale(), lampNight, g_wallEnabled.load(std::memory_order_relaxed),
                                                                  g_wallGain.load(std::memory_order_relaxed), g_objPixelLampStrength.load(std::memory_order_relaxed) / kPixelLampTrimUnit);
+    const FolStepTimer instTimer(2);
+    const bool split = instTimer.step >= 0;
+    LARGE_INTEGER q0{}, q1{}, q2{};
     for (int i = 0; i < count; i++) {
+        if (split) QueryPerformanceCounter(&q0);
         const float* inst = c[3 * i];
         const float scale = c[3 * i + 2][0];
         if (!ApexMath::IsFinite(inst[0] + inst[1] + inst[2])) return false;
@@ -7034,6 +7061,7 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
             if (f.shaped && DevSwitches::CanopyGroundShadow()) NoteCrown(f);
         }
         f.seen = now;
+        if (split) QueryPerformanceCounter(&q1), g_folStepTicks[5] += q1.QuadPart - q0.QuadPart, g_folStepCalls[5]++;
         if (!perVertex) continue;
         // the whole mesh box (trunk included: a lamp at the foot of a tree lights its trunk) and the crown's middle (or the
         // box's, without a crown shape), where the cones and the walls' share are taken
@@ -7044,14 +7072,17 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
         // same refresh: it waited for the hold, 5 to 9 s); a new list that changed nothing near it only moves its
         // generation. Picked again every 1.5 s within the budget when what a pick reads changed since: the walls and floors
         // (they arrive after a lot's first frames: a pick made before them kept a wrong wall share), the lamps' colours (the
-        // ranking), or with indoor lamps shining out (their openings). A colour alone is taken at once below, with no pick.
+        // ranking), or the openings of indoor lamps shining out (in visState). A colour alone is taken at once below, with no pick.
         bool urgent = !f.picked;
         if (f.picked && f.pickGen != g_foliageLampGen) {
             if (FoliageLampsChangedNear(f.pickGen, boxC, ext)) urgent = true;
             else f.pickGen = g_foliageLampGen;
         }
         const uint64_t visState = LevelLightShare::LampVisibilityState();
-        const bool stale = f.pickState != visState || f.pickColourGen != g_foliageColourGen || !g_exitLampRows.empty();
+        // (the indoor lamps shining out of a house: their openings' snapshot is part of visState since a75eaef5, so a pick
+        // weighing one is kept like any other; picked again every 1.5 s, the same lamps 97% of the time, it was most of the
+        // foliage draws' cost: 29 -> 14 us a draw, 0.9 -> 0.5 ms a frame at night in a fast-camera run)
+        const bool stale = f.pickState != visState || f.pickColourGen != g_foliageColourGen;
         if (urgent || (stale && now - f.pickTick > 1500 && s_budget > 0)) {
             {
                 if (!urgent) s_budget--;
@@ -7082,6 +7113,7 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
                 if (const auto it = g_foliageColour.find(f.own[k].key); it != g_foliageColour.end())
                     for (int a = 0; a < 3; a++) f.own[k].colour[a] = it->second[a] * f.own[k].share;
         }
+        if (split) QueryPerformanceCounter(&q2), g_folStepTicks[6] += q2.QuadPart - q1.QuadPart, g_folStepCalls[6]++;
         const float groundY = inst[1] + eye[1];
         for (int k = 0; k < 3; k++) {
             float* lp = &out[(3 * i + k) * 4];
@@ -7117,6 +7149,11 @@ bool FoliageVertexConstants(IDirect3DDevice9* dev, bool perVertex, std::vector<f
             cr[0] = inst[0], cr[1] = inst[1], cr[2] = inst[2], cr[3] = 1.0f;
             cr2[0] = 1.0f, cr2[1] = 0.0f; // no extinction
             out[(56 + 3 * i) * 4 + 3] = 0.0f;
+        }
+        if (split) {
+            LARGE_INTEGER q3;
+            QueryPerformanceCounter(&q3);
+            g_folStepTicks[7] += q3.QuadPart - q2.QuadPart, g_folStepCalls[7]++;
         }
     }
     if (perVertex) {
@@ -10381,6 +10418,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawTracked(IDirect3DDevice9*
         static std::vector<float> s_pv;
         const bool want = perVertex && base > 0;
         const bool matched = HookGuard::Run("Foliage per-vertex lamps", false, [&] { return FoliageVertexConstants(dev, want, s_pv); });
+        const FolStepTimer setTimer(3);
         if (want && matched && SUCCEEDED(dev->GetVertexShaderConstantF(static_cast<UINT>(base), s_pvSaved.data(), 82)) &&
             SUCCEEDED(dev->GetVertexShaderConstantF(54, &s_colSaved[0][0], 27))) {
             g_inOwnCall = true;
@@ -10412,6 +10450,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawTracked(IDirect3DDevice9*
                                     g_eyeOffset[2]) +
                         (pvBase > 0 ? g_foliageNote : std::string());
     }
+    const FolStepTimer drawTimer(4);
     g_inOwnCall = true;
     SetVs(dev, drawVs);
     SetVsConst(dev, ShaderPatches::kFoliageWrapConst, wrap, 1);
@@ -10703,6 +10742,13 @@ void LogDrawCost() {
         g_fenceFarKept = 0, g_fenceNoted = 0, g_groupFarKept = 0, InstanceCopy::g_hits = 0, InstanceCopy::g_locks = 0;
         g_fenceGridBuilds = 0, g_fenceGapBuilds = 0;
         for (int s = 0; s < 3; s++) g_fenceStepTicks[s] = 0, g_fenceStepCalls[s] = 0;
+        static const char* const kFol[8] = {"mesh box", "constants read", "instances", "per-vertex constants saved and set", "draw with the constants put back",
+                                            "instance key and lookup", "instance pick check", "instance constants"};
+        for (int s = 0; s < 8; s++)
+            if (g_folStepCalls[s])
+                arch += std::format(" | of it the foliage {}: {:.0f} a frame, {:.2f} us each", kFol[s], g_folStepCalls[s] * scale,
+                                    static_cast<double>(g_folStepTicks[s]) * msPerTick * 1000.0 / g_folStepCalls[s]);
+        for (int s = 0; s < 8; s++) g_folStepTicks[s] = 0, g_folStepCalls[s] = 0;
     }
     g_archRowsTicks = 0, g_archRowsCalls = 0, g_fencePickTicks = 0, g_fencePickCalls = 0;
     {

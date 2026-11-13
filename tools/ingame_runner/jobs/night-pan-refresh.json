@@ -1,0 +1,12 @@
+{
+  "id": "night-pan-refresh",
+  "description": "Lighting gaps of the real-time outdoor lamps at night under the benchmark's pan (8 lots at 40 m, 60 s passes: the lots' detail rises each time the camera slows): read with profilers/lot_switch_gap.py from the log (switch and refresh gaps). Compare two builds with -Asi in ABBA order; developer mode on for the log, the background frame limit lifted.",
+  "save": "Claude teste",
+  "toml": { "ui": { "developer_mode": true }, "screen": { "background_fps_limit": 0 } },
+  "variants": { "on": { "expect": ["\\[RtOutdoorLamps\\] Active: outdoor lamps"] } },
+  "steps": [
+    { "do": "speed", "speed": "normal" },
+    { "do": "camera_pan", "lots": 8, "height": 40, "seconds": 60, "passes": 5 },
+    { "do": "wait", "minutes": 5 }
+  ]
+}

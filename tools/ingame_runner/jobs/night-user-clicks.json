@@ -1,0 +1,47 @@
+{
+  "id": "night-user-clicks",
+  "description": "The tester's own clicks and keys (bookmarks/user-session.input.json, from continuous-session) played back exactly, from the same point after the save loads: the game window comes to the front and keeps the mouse and keyboard until the playback ends (a real key or click ends it early). One recording (F6) over the whole playback; the developer log times each lamp edit. Nothing is saved.",
+  "save": "Claude teste",
+  "toml": {
+    "ui": {
+      "developer_mode": true,
+      "recorder_key": "F6"
+    },
+    "screen": {
+      "background_fps_limit": 0
+    }
+  },
+  "variants": {
+    "on": {
+      "expect": [
+        "\\[Recorder\\] Recording started"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "input_play",
+      "name": "user-session"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    }
+  ]
+}

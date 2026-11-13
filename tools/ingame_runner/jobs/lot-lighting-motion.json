@@ -1,0 +1,44 @@
+{
+  "id": "lot-lighting-motion",
+  "description": "Lot lighting while the camera moves, at night: the pan keeps lots entering the view. Needs a save made at night. Pass: the lot lighting budget logs On; A/B metric: frame time p99 and frames over 50 ms per minute.",
+  "save": "ApexTest-Night",
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.LotLightingMotion": {
+          "enabled": false
+        }
+      },
+      "fail": [
+        "\\[LotLightingMotion\\] On:"
+      ]
+    },
+    "on": {
+      "toml": {
+        "patches.LotLightingMotion": {
+          "enabled": true
+        }
+      },
+      "expect": [
+        "\\[LotLightingMotion\\] On:"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_pan",
+      "lots": 8,
+      "seconds": 30,
+      "passes": 20
+    },
+    {
+      "do": "wait",
+      "minutes": 10,
+      "measure": true
+    }
+  ]
+}

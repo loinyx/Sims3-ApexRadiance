@@ -1,0 +1,44 @@
+{
+  "id": "room-light-queue",
+  "description": "Room Light Queue at night while the camera pans over lit lots. Needs a save made at night. Pass: the queue logs Started; A/B metric: frame time p99.",
+  "save": "ApexTest-Night",
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.RoomLightQueue": {
+          "enabled": false
+        }
+      },
+      "fail": [
+        "\\[RoomLightQueue\\] Started:"
+      ]
+    },
+    "on": {
+      "toml": {
+        "patches.RoomLightQueue": {
+          "enabled": true
+        }
+      },
+      "expect": [
+        "\\[RoomLightQueue\\] Started:"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_pan",
+      "lots": 8,
+      "seconds": 40,
+      "passes": 15
+    },
+    {
+      "do": "wait",
+      "minutes": 10,
+      "measure": true
+    }
+  ]
+}

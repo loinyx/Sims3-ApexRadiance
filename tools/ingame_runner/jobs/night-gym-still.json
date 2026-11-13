@@ -1,0 +1,79 @@
+{
+  "id": "night-gym-still",
+  "description": "The gym at night with the camera held still for about 2.5 minutes right after it arrives (lights turned on first): what changes on screen then is the lot's light switching between the game's maps and the GPU's (two recordings with the shortcut F6 for the run: Screen pixels.csv every frame; the log's active lot switches and, with a calibration build, GPU against the game). Developer mode on, the background frame limit lifted.",
+  "save": "Claude teste",
+  "toml": {
+    "ui": {
+      "developer_mode": true,
+      "recorder_key": "F6"
+    },
+    "screen": {
+      "background_fps_limit": 0
+    }
+  },
+  "variants": {
+    "on": {
+      "expect": [
+        "\\[Recorder\\] Recording started"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "lights_on",
+      "lot": "kGym"
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kGym",
+      "radius": 20,
+      "height": 11,
+      "seconds": 3600,
+      "turns": 0.001
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.9
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.9
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    }
+  ]
+}

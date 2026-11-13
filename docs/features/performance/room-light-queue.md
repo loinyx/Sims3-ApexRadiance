@@ -172,6 +172,17 @@ before it is solved.
 - **Effect on light:** none on the final result: the same solves run in a different order. A lamp edit made in that
   second waits too; the camera story's room 0 shows its class-0 light meanwhile, as before.
 
+### Other lots' room 0 waits while the camera moves
+
+While the camera moves, room 0 (the outdoor room) of a lot that is neither the lot being played nor *Real-time outdoor
+lamps*' active lot is not picked, for at most 2 s per camera motion (`MoveHold`, Tester switch `perf_motion_room0_hold`).
+
+- **Why:** a room 0 solve runs whole in one step whatever the lot's budget: 38-67 ms at class 2 in a fast-camera
+  recording, the largest moving hitches, as the lots the camera passed over queued them one after the other.
+- **How:** priority 0 in the priority hook, so the scheduler leaves the room in its state with its marks and picks it
+  once the camera stops or the wait has run out. A lamp edit's rooms (urgency above 1) are never held.
+- **Effect on light:** none on the final result: those lots' outdoor light is solved up to 2 s later, after the motion.
+
 ### Quick update for lamp switches
 
 Used only while *Lamp edits all at once* is off (`quickPass`, once per room and switch). After a player's switch
@@ -198,8 +209,10 @@ edits never take it.
 About 120 ms after a switch (`LevelLightShare::RelightLampSwitch`, with either option), the rooms the lamp can reach are
 sent again: those holding it, its own room (`LampHome`: room id `light+8` on the story whose lowest floor is the highest
 at or under the lamp's height), the rooms near the stair openings of its story and the stories next to it, and every
-story's outdoor rooms for an outdoor lamp. A lamp moved into another room, moved and switched, or more than 8 lamps at
-once still send the whole lot. A room that is queued and has not started its solve is skipped (its gather reads the
+story's outdoor rooms for an outdoor lamp (a lamp of a basement's room 0 is not one: the game shares no basement lamp
+with the stories above, so a pool light's switch sent every story's room 0 and the roofed rooms with doors outside, 3 to
+4 s of 30 ms solve frames). A lamp moved into another room, or more than 8 lamps at once, still send the whole lot; a
+switch in place is no move (it was taken for one, and every room it reaches lost its fresh solve). A room that is queued and has not started its solve is skipped (its gather reads the
 lamps as they are when it starts), and when only lamps switched off, a room with an empty light list is left alone.
 The rooms it sends, and the fresh solves it keeps that are still running, are urgent (tier 2) and held with
 the edit's other stories; only a lamp moved into another room or story resends every room (fresh solves of the other

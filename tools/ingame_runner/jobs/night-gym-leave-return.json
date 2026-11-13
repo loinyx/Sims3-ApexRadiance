@@ -1,0 +1,82 @@
+{
+  "id": "night-gym-leave-return",
+  "description": "The tester's bookmark gym-entrance at night: the camera held there until that lot is the active one and relit, then on the household's lot for 30 s (that lot is no longer active), then back at the bookmark. Two recordings (the shortcut F6 for the run): the last frames before leaving and the first frames after coming back; equal frames mean the lot left kept its light. No light is switched by the harness. Developer mode on, the background frame limit lifted.",
+  "save": "Claude teste",
+  "toml": {
+    "ui": {
+      "developer_mode": true,
+      "recorder_key": "F6"
+    },
+    "screen": {
+      "background_fps_limit": 0
+    }
+  },
+  "variants": {
+    "on": {
+      "expect": [
+        "\\[Recorder\\] Recording started"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_goto",
+      "name": "gym-entrance"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.8
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.25
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.2
+    },
+    {
+      "do": "camera_orbit",
+      "radius": 18,
+      "height": 12,
+      "seconds": 3600,
+      "turns": 0.001
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    },
+    {
+      "do": "camera_goto",
+      "name": "gym-entrance"
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.4
+    },
+    {
+      "do": "key",
+      "vk": 117
+    },
+    {
+      "do": "wait",
+      "minutes": 0.3
+    }
+  ]
+}

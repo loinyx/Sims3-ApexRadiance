@@ -1,0 +1,44 @@
+{
+  "id": "resource-lookup-cache",
+  "description": "Faster Game File Lookups. The camera pans over the densest lots so objects, textures and lots load. Pass: the cache logs On, no verification mismatch; A/B metric: frame time p99 and frames over 50 ms per minute.",
+  "save": "ApexTest-Town",
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.ResourceLookupCache": {
+          "enabled": false
+        }
+      },
+      "fail": [
+        "\\[ResourceCache\\] On:"
+      ]
+    },
+    "on": {
+      "toml": {
+        "patches.ResourceLookupCache": {
+          "enabled": true
+        }
+      },
+      "expect": [
+        "\\[ResourceCache\\] On:"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "fast"
+    },
+    {
+      "do": "camera_pan",
+      "lots": 8,
+      "seconds": 40,
+      "passes": 15
+    },
+    {
+      "do": "wait",
+      "minutes": 10,
+      "measure": true
+    }
+  ]
+}

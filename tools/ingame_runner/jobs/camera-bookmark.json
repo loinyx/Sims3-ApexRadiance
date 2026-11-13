@@ -1,0 +1,28 @@
+{
+  "id": "camera-bookmark",
+  "description": "The tester places the camera: the save loads at night, paused, and the run waits (up to 15 minutes) for the file ready in its folder, then keeps the camera as the bookmark named in the job (bookmarks/<name>.json) for camera_goto in other jobs. Nothing is saved.",
+  "save": "Claude teste",
+  "toml": {
+    "screen": {
+      "background_fps_limit": 0
+    }
+  },
+  "variants": {
+    "on": {}
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "pause"
+    },
+    {
+      "do": "wait_file",
+      "file": "ready",
+      "minutes": 15
+    },
+    {
+      "do": "camera_read",
+      "name": "gym-entrance"
+    }
+  ]
+}

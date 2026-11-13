@@ -110,6 +110,10 @@ int main() {
     check(UrgencyKept(1000, 2000, 0, 4), "urgent before its deadline");
     check(UrgencyKept(2500, 2000, 0, 3) && UrgencyKept(2500, 2000, 0, 1), "a room still waiting keeps its urgency");
     check(!UrgencyKept(2500, 2000, 0, 4) && !UrgencyKept(2500, 2000, 0, 0), "a solved room's urgency ends");
+    check(UrgencyClockFrom(1000, 0) == 1000 && UrgencyClockFrom(1000, 500) == 1000, "no drag released after the mark: the mark's clock");
+    check(UrgencyClockFrom(1000, 9000) == 9000, "a drag released after the mark: its clock starts at the release");
+    check(UrgencyKept(12000, 2000, UrgencyClockFrom(1000, 9000), 2) && !UrgencyKept(12000, 2000, 1000, 2),
+          "a room held by a 8 s drag stays urgent after the release");
     check(!UrgencyKept(8000, 2000, 0, 3), "urgency kept at most 8 s");
     check(UrgencyKept(0x100u, 0xfffffff0u - 10u, 0xfffffff0u - 3000u, 2), "urgency survives tick wrap");
     check(GroundFirstHolds(false, 1, 100, 1100) && GroundFirstHolds(false, 2, 100, 1100), "other rooms wait while the ground gathers or waits for its pick");
