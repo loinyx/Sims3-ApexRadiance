@@ -367,7 +367,15 @@ solve).
 - **Inside the batch solve.** `this` (the room) is in `ebx` from `0x006A31E8`; the sample list (0x30-byte entries) is
   at `[ebp+8]` and the current sample's offset at `[esp+0Ch]` (read in the native disassembly).
 - **Floor switch.** When the camera changes stories, the game invalidates rooms from the caller `0x006C7451` and solves
-  the shown story again at class 2 (the most detailed).
+  the shown story again at class 2 (the most detailed). The objects of the stories the switch hides leave the light registry's occluder entries
+  (`tl+0xD4`) and come back as new entries when they are shown again: a log of every occluder entry update
+  (`0x006C78E0`) over eight switches on a 4-story house (13/11) saw 106 entries per switch, the same addresses holding
+  other objects each time (id `+0x08`, point and bounds of the object `+0x24` all different). The update only reads the
+  object's bounds (`0x006FACA0`: the object's `+0x1B0`, six dwords) and marks the room under it (`0x006C7939`); nothing reads
+  a visibility flag. So a room on a hidden story is solved without those objects' 3D blockers (`0x0069E070` walks the
+  room's copied spheres, 0x40 bytes each, at `room+0x30` `+0x10/+0x14`), and solved again with them once the story is shown:
+  the upper stories' walls showed lighter for about 0.45 s after each switch. In the same switch the light registry
+  (`tl+0x90`) is emptied and filled again within ~10 ms (`LampChange` keeps the last state over that gap).
 - **Map sets.** A manager's room light maps are at `+0x16C` + class x 64, three classes of four maps each (the teardown
   at `0x006A805A` frees exactly these; *unverified* in game). `+0x230` onward is the room hash, not a map set. Its
   directional basis maps are at `+0x220` with the same layout; the texture is the wrapper's `+0x30`, confirmed in game
