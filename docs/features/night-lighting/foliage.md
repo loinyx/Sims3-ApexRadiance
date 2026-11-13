@@ -129,7 +129,9 @@ a changed lamp is within 20 m of its box, else it only takes the new generation.
 fade at dusk, a recolour) keeps its place in each pick: the instance takes its new colour, times the cone and walls'
 share of its pick, at its next draw; a lamp going to black or coming out of it counts as a change. Instances also pick
 again every 1.5 s when what a pick reads changed since (the walls and floors, which arrive after a lot's first frames;
-the lamps' colours, which set the ranking; or with indoor lamps shining out), at most 96 per 8 ms, keeping their older
+the lamps' colours, which set the ranking; or the openings of indoor lamps shining out, whose snapshot is part of the
+visibility state: before, any such lamp on the town re-picked every crown every 1.5 s, the same lamps 97% of the time: a
+foliage draw took 29 us, 14 us since, 0.9 -> 0.5 ms a frame at night in a fast-camera run), at most 96 per 8 ms, keeping their older
 pick meanwhile; an instance's first pick is never put off, so no draw falls back to the old light. When the instance map
 passes 16,384 (grass and flowers are instances too), the ones not drawn for 3 s go, then the ones not drawn for 250 ms;
 the map is cleared only past 32,768. A world change clears the mesh boxes (kept by vertex buffer address, so a
