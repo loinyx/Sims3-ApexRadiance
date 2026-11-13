@@ -777,7 +777,10 @@ half wall and the objects in them.
   `0x00B0D460` and its removal `0x00B0D920` post message `0x06257EB4` for each wall cell an object cuts. The push of the
   id at `0x00B0D866` / `0x00B0DD15` becomes a call of `CutAddThunk` / `CutRemoveThunk`, which note the payload (lot id
   `+0x08/+0x0C`, edge key `+0x10` {x0, z0, story, x1, z1, story}, mask `+0x18`, all zero = closed again) with the
-  product's kind (`+0xD0`: door, window, gate, arch).
+  product's kind (`+0xD0`: door, window, gate, arch). Each cell of an opening is posted twice, one post a side, as pieces
+  `2j` and `2j + 1` (`+0x29`) of the same edge key; the record keeps the cell `j`, so a repost that starts with the other
+  side changes nothing (kept as posted, every floor switch and object move made a new generation for the story with
+  windows, and its walls were solved and relit again).
 - **Lot id:** a cut is filed under the post's own lot id (`g_cuts`, per lot id and story). That id is the posting lot's
   `+0x48/+0x4C` (`0x00B0D792`), the one the game routes the message by (`0x00C52AA0`). A post with no lot id, with an
   unreadable payload or with a key that is neither one side edge nor the diagonal of a cell is rejected (a diagonal key, a

@@ -3730,7 +3730,10 @@ void NoteCutoutPostImpl(int add, const uintptr_t* siteEsp, uintptr_t frame, uint
             if (!cut && s.edges.count(k) && s.edges[k].kind == kCutWindow && !s.edges[k].closed) g_cutWindowCloses.fetch_add(1, std::memory_order_relaxed);
             const auto was = s.edges.find(k);
             const int wasClosed = was != s.edges.end() && was->second.kind == kCutWindow ? was->second.closed : -1; // (-1: not a window)
-            const CutRec rec{CutKind(r.flags), r.orient, r.piece, r.count, r.flags, {r.tgi[0], r.tgi[1], r.tgi[2], r.tgi[3]}};
+            // (each cell of an opening is posted twice, one post a side: pieces 2j and 2j + 1 on the same edge key. Kept by its cell,
+            // j: kept as posted, the edge's record took the last side's piece, so a repost starting with the other side (a floor
+            // shown, an object moved) differed, made a new generation and sent the story to its solves, its walls relit 0.3 s)
+            const CutRec rec{CutKind(r.flags), r.orient, static_cast<uint8_t>(r.piece >> 1), r.count, r.flags, {r.tgi[0], r.tgi[1], r.tgi[2], r.tgi[3]}};
             const int post = ApplyCutPost(s.edges, k, cut, rec);
             // (developer log) a window's close or reopen: the post's path and what it did, to tell the camera's posts in game
             if (dev && wasClosed >= 0 && (!cut || wasClosed) && g_windowPostLogged.fetch_add(1, std::memory_order_relaxed) < 300)
