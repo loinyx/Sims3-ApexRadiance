@@ -678,7 +678,9 @@ namespace ApexTestAgent
         static object Floor(Args a)
         {
             RequireLive();
-            Lot lot = a.Has("lot") ? FindLot(a.Str("lot")) : LotManager.ActiveLot;
+            string key = a.Str("lot", "");
+            Lot lot = key == "home" ? (Sims3.Gameplay.CAS.Household.ActiveHousehold != null ? Sims3.Gameplay.CAS.Household.ActiveHousehold.LotHome : null)
+                    : key.Length > 0 ? FindLot(key) : LotManager.ActiveLot;
             if (lot == null) throw new AgentException("no lot");
             World.LotSetDisplayLevel(lot.LotId, (int)a.Double("level", 0));
             Dictionary<string, object> r = Obj();
