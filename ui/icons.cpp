@@ -396,6 +396,7 @@ void DrawIcon(ImDrawList* dl, IconId id, ImVec2 pos, float sizePx, ImU32 color) 
     for (const Circle& c : icon.circles) {
         // A filled circle keeps its stroke too (Lucide's palette dots): radius + half the stroke
         if (c.filled) dl->AddCircleFilled(P(Pt{c.cx, c.cy}), c.r * s + r, color);
+        else if (c.r * s <= th) dl->AddCircleFilled(P(Pt{c.cx, c.cy}), c.r * s + 0.5f * th, color); // a dot (the ellipsis): the stroke fills it
         else dl->AddCircle(P(Pt{c.cx, c.cy}), c.r * s, color, 0, th);
     }
     for (const Rect& rc : icon.rects) dl->AddRect(P(Pt{rc.x, rc.y}), P(Pt{rc.x + rc.w, rc.y + rc.h}), color, rc.rx * s, ImDrawFlags_None, th);

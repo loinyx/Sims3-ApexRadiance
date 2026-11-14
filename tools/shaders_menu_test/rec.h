@@ -1,15 +1,15 @@
 #pragma once
 // Included first by the units under test: every ImGui:: call below goes through ImGuiRec, which records each control's
-// rectangle and window (and the IDs of the open/closed toggles) and then calls ImGui itself.
+// rectangle and window (and can open every toggle) and then calls ImGui itself.
 #include "imgui.h"
 #include "imgui_internal.h"
+#include <cstring>
 #include <string>
 #include <vector>
 
 struct RecItem { std::string id; ImRect rect; ImGuiWindow* window; bool disabled; };
 inline std::vector<RecItem>& RecItems() { static std::vector<RecItem> v; return v; }
-struct RecToggle { ImGuiWindow* window; ImGuiID id; std::string key; };
-inline std::vector<RecToggle>& RecToggles() { static std::vector<RecToggle> v; return v; }
+inline bool g_recOpenAll = false; // every shader panel, author group and Advanced section opens as it is drawn
 
 namespace ImGuiRec {
 using namespace ImGui;
@@ -22,7 +22,7 @@ inline void Record(const char* id)
 inline ImGuiID GetID(const char* s)
 {
     const ImGuiID id = ImGui::GetID(s);
-    if (!strcmp(s, "##Open") || !strcmp(s, "##AdvancedOpen") || !strcmp(s, "##GroupOpen")) RecToggles().push_back({ ImGui::GetCurrentWindow(), id, s });
+    if (g_recOpenAll && (!strcmp(s, "##Open") || !strcmp(s, "##AdvancedOpen") || !strcmp(s, "##GroupOpen"))) ImGui::GetStateStorage()->SetBool(id, true);
     return id;
 }
 inline ImGuiID GetID(const char* b, const char* e) { return ImGui::GetID(b, e); }

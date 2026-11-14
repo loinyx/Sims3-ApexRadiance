@@ -1204,7 +1204,10 @@ void ShowInExplorer(const std::filesystem::path& file) {
     ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
 }
 
-std::string MinSec(int sec) { sec = std::max(0, sec); return std::format("{}:{:02}", sec / 60, sec % 60); }
+std::string MinSec(int sec) {
+    sec = std::max(0, sec);
+    return sec >= 3600 ? std::format("{}:{:02}:{:02}", sec / 3600, sec / 60 % 60, sec % 60) : std::format("{}:{:02}", sec / 60, sec % 60);
+}
 int MbPerMinute(const VideoSettings& v) { return static_cast<int>(KbpsFor(v) * 60.0 / 8.0 / 1024.0 + 0.5); }
 
 // "<key> · Last: <name>" (the name only when one was saved this session)

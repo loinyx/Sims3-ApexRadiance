@@ -758,7 +758,7 @@ const I18n::Entry kEntries[] = {
     {"Soft vintage", "Vintage suave", "Vintage suave", "Vintage doux"},
     // ---- Color > Looks (patches/looks_patch.cpp, apex_gui.cpp) ----
     {"Save this list and its values as a .ini of your own in the Looks folder", "Salva esta lista e seus valores como um .ini seu na pasta Looks", "Guarda esta lista y sus valores como un .ini propio en la carpeta Looks", "Enregistre cette liste et ses valeurs dans un .ini à vous, dans le dossier Looks"},
-    {"Pick one, or import a ReShade or GShade preset (.ini)", "Escolha um ou importe um preset do ReShade ou GShade (.ini)", "Elige uno o importa un preajuste de ReShade o GShade (.ini)", "Choisissez-en un ou importez un préréglage ReShade ou GShade (.ini)"},
+    {"Pick one, or import a ReShade or GShade preset", "Escolha um ou importe um preset do ReShade ou GShade", "Elige uno o importa un preajuste de ReShade o GShade", "Choisissez-en un ou importez un préréglage ReShade ou GShade"},
     {"Copy a ReShade or GShade preset (.ini) into the Looks folder and choose it", "Copia um preset do ReShade ou GShade (.ini) para a pasta Looks e o escolhe", "Copia un preajuste de ReShade o GShade (.ini) a la carpeta Looks y lo elige", "Copie un préréglage ReShade ou GShade (.ini) dans le dossier Looks et le choisit"},
     {"Shaders in this look", "Shaders deste visual", "Shaders de este estilo", "Shaders de ce rendu"},
     {"ReShade look", "Visual do ReShade", "Estilo de ReShade", "Rendu ReShade"},
@@ -882,6 +882,7 @@ const I18n::Entry kEntries[] = {
     {"no longer in ReShade's list", "não está mais na lista do ReShade", "ya no está en la lista de ReShade", "n'est plus dans la liste de ReShade"},
     {"No pack matches", "Nenhum pacote corresponde", "Ningún paquete coincide", "Aucun pack ne correspond"},
     {"{} selected · {}", "{} selecionados · {}", "{} seleccionados · {}", "{} sélectionnés · {}"},
+    {"{} selected", "{} selecionados", "{} seleccionados", "{} sélectionnés"},
     {"Apex goes online only when you click Download. Each pack comes from its author's GitHub under its own licence; only .fx, .fxh and textures are kept.", "O Apex só acessa a internet quando você clica em Baixar. Cada pacote vem do GitHub do autor, sob a licença dele; só os arquivos .fx, .fxh e as texturas são mantidos.", "Apex solo se conecta a internet cuando pulsas Descargar. Cada paquete viene del GitHub de su autor, con su propia licencia; solo se conservan los .fx, .fxh y las texturas.", "Apex ne se connecte que lorsque vous cliquez sur Télécharger. Chaque pack vient du GitHub de son auteur, sous sa propre licence ; seuls les .fx, .fxh et les textures sont conservés."},
     {"Download 1 pack", "Baixar 1 pacote", "Descargar 1 paquete", "Télécharger 1 pack"},
     {"Download {} packs", "Baixar {} pacotes", "Descargar {} paquetes", "Télécharger {} packs"},

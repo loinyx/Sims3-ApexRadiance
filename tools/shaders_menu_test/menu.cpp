@@ -1,0 +1,389 @@
+// Draws Image > Shaders and Image > Capture in every language, at two widths and two text scales, in each state, and
+// checks the layout of the last of four frames from the recorded controls (rec.h) and the text in the draw lists.
+#define NOMINMAX
+#include <windows.h>
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <map>
+#include <mutex>
+#include <set>
+#include <string>
+#include <unordered_map>
+#include <vector>
+#include "imgui.h"
+#include "imgui_internal.h"
+#include "rec.h"
+#undef ImGui
+#include "ui/violet_theme.h"
+#include "ui/i18n.h"
+#include "ui/widgets.h"
+#include "fixture.h"
+
+void ShadersPage();
+void CapturePage();
+extern int g_shadersTab, g_captureTab;
+extern bool g_menuGameAaOn;
+extern class ApexPatch* g_looksPatch;
+#include "raster.inc"
+
+namespace {
+struct State { const char* name; int page; int tab; bool compiling, edited, offer; int batch; int video, options; bool gameAa; bool openAll; };
+// page 0 Shaders (tab 0 Look, 1 Library), 1 Capture (tab 0 Screenshots, 1 Video)
+const State kStates[] = {
+    { "look", 0, 0, false, false, true, 0, 0, 0, false, false },
+    { "look-open-compiling", 0, 0, true, false, false, 1, 0, 0, false, true },
+    { "look-open-edited", 0, 0, false, true, true, 0, 0, 0, false, true },
+    { "library-downloading", 0, 1, false, false, false, 1, 0, 0, false, false },
+    { "library-list", 0, 1, false, false, false, 0, 0, 0, false, true },
+    { "library-finished", 0, 1, false, false, false, 2, 0, 0, false, false },
+    { "shots", 1, 0, false, false, false, 0, 0, 0, false, false },
+    { "shots-advanced", 1, 0, false, false, false, 0, 0, 1, false, true },
+    { "video-idle-advanced", 1, 1, false, false, false, 0, 0, 1, true, true },
+    { "video-recording", 1, 1, false, false, false, 0, 1, 0, false, true },
+    { "video-saving", 1, 1, false, false, false, 0, 2, 1, false, false },
+};
+
+struct Run { ImRect r; std::string text; };
+std::unordered_map<uint64_t, unsigned> g_glyphs; // atlas U0,V0 -> codepoint
+
+uint64_t UvKey(ImVec2 uv) { return (uint64_t)(uint32_t)std::lround(uv.x * 1e6f) << 32 | (uint32_t)std::lround(uv.y * 1e6f); }
+void IndexGlyphs()
+{
+    g_glyphs.clear();
+    ImFontAtlasBuilder* b = ImGui::GetIO().Fonts->Builder;
+    for (int i = 0; b && i < b->BakedPool.Size; ++i)
+        for (const ImFontGlyph& gl : b->BakedPool[i].Glyphs) g_glyphs[UvKey(ImVec2(gl.U0, gl.V0))] = gl.Codepoint;
+}
+void AppendUtf8(std::string& s, unsigned c)
+{
+    char buf[5] = {};
+    ImTextCharToUtf8(buf, c);
+    s += buf;
+}
+
+// The text runs of a draw list: glyph quads (4 vertices, 6 indices, atlas UVs other than the white pixel), one run per line
+std::vector<Run> TextRuns(const ImDrawList* dl)
+{
+    std::vector<Run> runs;
+    const ImVec2 white = dl->_Data->TexUvWhitePixel;
+    for (const ImDrawCmd& cmd : dl->CmdBuffer)
+    {
+        if (cmd.UserCallback) continue;
+        const ImDrawIdx* idx = dl->IdxBuffer.Data + cmd.IdxOffset;
+        int lastBase = -10;
+        float lastMinX = 0.0f;
+        for (unsigned k = 0; k + 6 <= cmd.ElemCount;)
+        {
+            const unsigned a = idx[k];
+            const bool quad = idx[k + 1] == a + 1 && idx[k + 2] == a + 2 && idx[k + 3] == a && idx[k + 4] == a + 2 && idx[k + 5] == a + 3;
+            const ImDrawVert* v = dl->VtxBuffer.Data + cmd.VtxOffset + a;
+            if (!quad || v[0].pos.y != v[1].pos.y || v[1].pos.x != v[2].pos.x || v[2].pos.y != v[3].pos.y || v[3].pos.x != v[0].pos.x ||
+                (v[0].uv.x == white.x && v[0].uv.y == white.y) || v[0].uv.x == v[2].uv.x || v[0].uv.y == v[2].uv.y)
+            {
+                k += 3;
+                continue;
+            }
+            const ImRect r(v[0].pos, v[2].pos);
+            const auto found = g_glyphs.find(UvKey(v[0].uv));
+            const unsigned c = found == g_glyphs.end() ? '?' : found->second;
+            Run* last = runs.empty() ? nullptr : &runs.back();
+            // one run: glyphs written one after the other on one line, each after the one before (a word gap at most) or, a
+            // combining mark (Thai vowels and tones), back over it
+            const bool mark = c == 0x0E31 || (c >= 0x0E34 && c <= 0x0E3A) || (c >= 0x0E47 && c <= 0x0E4E) || (c >= 0x0300 && c <= 0x036F);
+            const bool joins = last && (int)a == lastBase + 4 &&
+                               (mark ? r.Min.x >= last->r.Min.x - 1.0f && r.Min.y < last->r.Max.y + r.GetHeight() && r.Max.y > last->r.Min.y - r.GetHeight()
+                                     : r.Min.y < last->r.Max.y && r.Max.y > last->r.Min.y && r.Min.x >= lastMinX) &&
+                               r.Min.x - last->r.Max.x < r.GetHeight() * 0.6f;
+            if (joins)
+            {
+                if (r.Min.x - last->r.Max.x > r.GetHeight() * 0.2f) last->text += ' ';
+                last->r.Add(r);
+                AppendUtf8(last->text, c);
+            }
+            else
+            {
+                runs.push_back({ r, "" });
+                AppendUtf8(runs.back().text, c);
+            }
+            if (!mark) lastMinX = r.Min.x;
+            lastBase = (int)a;
+            k += 6;
+        }
+    }
+    return runs;
+}
+
+std::string ShortName(const char* name)
+{
+    std::string s = name, out;
+    for (size_t i = 0; i < s.size(); ++i) // "##Card_1A2B3C4D" -> "##Card"
+    {
+        if (s[i] == '_' && i + 9 <= s.size() && std::all_of(s.begin() + i + 1, s.begin() + i + 9, [](char c) { return isxdigit((unsigned char)c); }) &&
+            (i + 9 == s.size() || s[i + 9] == '/'))
+        {
+            i += 8;
+            continue;
+        }
+        out += s[i];
+    }
+    return out;
+}
+std::string Clip(const std::string& s) { return s.size() > 48 ? s.substr(0, 45) + "..." : s; }
+bool Overlaps(const ImRect& a, const ImRect& b, float tol = 1.0f)
+{
+    return std::min(a.Max.x, b.Max.x) - std::max(a.Min.x, b.Min.x) > tol && std::min(a.Max.y, b.Max.y) - std::max(a.Min.y, b.Min.y) > tol;
+}
+bool Inside(const ImRect& in, const ImRect& out, float tol = 1.0f)
+{
+    return in.Min.x >= out.Min.x - tol && in.Min.y >= out.Min.y - tol && in.Max.x <= out.Max.x + tol && in.Max.y <= out.Max.y + tol;
+}
+
+// Invisible hit areas laid over a row's own text (the name side of a shader row, a group label, Advanced)
+bool HitArea(const std::string& id) { return id == "##Toggle" || id == "##Group" || id == "##Advanced" || id == "##HeaderLink" || id == "##Link"; }
+
+struct Finding { int count = 0; std::string example; std::set<std::string> where; };
+std::map<std::string, Finding> g_findings;
+long long g_controls = 0, g_runs = 0; // checked
+int g_newFindings = 0; // findings first seen in this case (its preview is saved)
+
+void Report(const std::string& key, const std::string& example, const std::string& where)
+{
+    Finding& f = g_findings[key];
+    if (!f.count) { f.example = example + " [" + where + "]"; ++g_newFindings; }
+    ++f.count;
+    f.where.insert(where);
+}
+
+// Horizontal overflow, controls overlapping each other, text over a control, text over text
+std::string g_dump; // "<state> <lang>/<units>/<scale>%": that case's controls and text runs are printed
+void CheckLayout(const std::string& state, const std::string& where)
+{
+    const bool dump = g_dump == state.substr(state.find(' ') + 1) + " " + where;
+    ImGuiContext& g = *ImGui::GetCurrentContext();
+    IndexGlyphs();
+    std::map<ImGuiWindow*, std::vector<const RecItem*>> controls;
+    for (const RecItem& it : RecItems()) controls[it.window].push_back(&it);
+    for (ImGuiWindow* w : g.Windows)
+    {
+        if (!w->WasActive || w->Hidden) continue;
+        const float right = w->ContentRegionRect.Max.x, bottom = w->InnerClipRect.Max.y;
+        const bool scrolls = w->ScrollMax.y > 0.0f; // a list that scrolls inside its card
+        const std::string win = ShortName(w->Name);
+        auto& cs = controls[w];
+        g_controls += (long long)cs.size();
+        char buf[512];
+        for (size_t i = 0; i < cs.size(); ++i)
+        {
+            const RecItem& a = *cs[i];
+            if (!scrolls && a.rect.Max.y > bottom + 1.0f)
+            {
+                snprintf(buf, sizeof buf, "control %.0f..%.0f, window bottom %.0f", a.rect.Min.y, a.rect.Max.y, bottom);
+                Report(state + " | cut off at the bottom | " + win + " | control " + a.id, buf, where);
+            }
+            if (a.rect.Max.x > right + 1.0f)
+            {
+                snprintf(buf, sizeof buf, "%.0f px past the right edge (control %.0f..%.0f, edge %.0f)", a.rect.Max.x - right, a.rect.Min.x, a.rect.Max.x, right);
+                Report(state + " | overflow | " + win + " | control " + a.id, buf, where);
+            }
+            for (size_t j = i + 1; j < cs.size(); ++j)
+            {
+                const RecItem& b = *cs[j];
+                if (!Overlaps(a.rect, b.rect)) continue;
+                snprintf(buf, sizeof buf, "%s %.0f,%.0f-%.0f,%.0f and %s %.0f,%.0f-%.0f,%.0f", a.id.c_str(), a.rect.Min.x, a.rect.Min.y, a.rect.Max.x, a.rect.Max.y, b.id.c_str(),
+                         b.rect.Min.x, b.rect.Min.y, b.rect.Max.x, b.rect.Max.y);
+                Report(state + " | controls overlap | " + win + " | " + a.id + " / " + b.id, buf, where);
+            }
+        }
+        const std::vector<Run> runs = TextRuns(w->DrawList);
+        g_runs += (long long)runs.size();
+        if (dump)
+        {
+            printf("window %s content %.0f..%.0f\n", win.c_str(), w->ContentRegionRect.Min.x, right);
+            for (const RecItem* c : cs) printf("  control %s %.0f,%.0f-%.0f,%.0f\n", c->id.c_str(), c->rect.Min.x, c->rect.Min.y, c->rect.Max.x, c->rect.Max.y);
+            for (const Run& t : runs) printf("  text \"%s\" %.0f,%.0f-%.0f,%.0f\n", t.text.c_str(), t.r.Min.x, t.r.Min.y, t.r.Max.x, t.r.Max.y);
+        }
+        for (size_t i = 0; i < runs.size(); ++i)
+        {
+            const Run& t = runs[i];
+            if (!scrolls && t.r.Min.y > bottom)
+            {
+                snprintf(buf, sizeof buf, "\"%s\" below the window bottom %.0f", Clip(t.text).c_str(), bottom);
+                Report(state + " | text cut off at the bottom | " + win, buf, where);
+            }
+            if (t.r.Max.x > right + 1.0f)
+            {
+                snprintf(buf, sizeof buf, "\"%s\" ends %.0f px past the right edge", Clip(t.text).c_str(), t.r.Max.x - right);
+                Report(state + " | text overflow | " + win, buf, where);
+            }
+            for (const RecItem* c : cs)
+                if (!HitArea(c->id) && Overlaps(t.r, c->rect) && !Inside(t.r, c->rect))
+                {
+                    snprintf(buf, sizeof buf, "\"%s\" %.0f,%.0f-%.0f,%.0f crosses %s %.0f,%.0f-%.0f,%.0f", Clip(t.text).c_str(), t.r.Min.x, t.r.Min.y, t.r.Max.x, t.r.Max.y,
+                             c->id.c_str(), c->rect.Min.x, c->rect.Min.y, c->rect.Max.x, c->rect.Max.y);
+                    Report(state + " | text over control | " + win + " | " + c->id, buf, where);
+                }
+            for (size_t j = i + 1; j < runs.size(); ++j)
+                if (Overlaps(t.r, runs[j].r, std::min(t.r.GetHeight(), runs[j].r.GetHeight()) * 0.25f))
+                {
+                    snprintf(buf, sizeof buf, "\"%s\" over \"%s\"", Clip(t.text).c_str(), Clip(runs[j].text).c_str());
+                    Report(state + " | text over text | " + win, buf, where);
+                }
+        }
+    }
+}
+} // namespace
+
+int main(int argc, char** argv)
+{
+    if (argc != 2 && argc != 3) return 2;
+    if (argc == 3) g_dump = argv[2];
+    const std::filesystem::path out = std::filesystem::absolute(argv[1]);
+    ImGui::CreateContext();
+    auto& io = ImGui::GetIO();
+    io.IniFilename = nullptr;
+    io.ConfigErrorRecoveryEnableAssert = false;
+    io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures; // as the game's DX9 backend: glyphs rasterised on demand
+    io.Fonts->TexDesiredFormat = ImTextureFormat_RGBA32;
+    VioletTheme::ApplyStyle(ImGui::GetStyle());
+    VioletTheme::LoadFonts(io);
+    g_looksPatch = Fixture::StartLooks();
+    {
+        // self-check: a frame with each fault must give each finding
+        io.DisplaySize = ImVec2(400, 300);
+        io.DeltaTime = 1.0f / 60.0f;
+        for (int frame = 0; frame < 2; ++frame)
+        {
+            RecItems().clear();
+            ImGui::NewFrame();
+            ImGui::SetNextWindowPos(ImVec2(0, 0));
+            ImGui::SetNextWindowSize(io.DisplaySize);
+            ImGui::Begin("SelfCheck", nullptr, ImGuiWindowFlags_NoTitleBar);
+            ImGuiRec::InvisibleButton("##Wide", ImVec2(500, 30));        // past the right edge
+            ImGui::SetCursorPos(ImVec2(50, 20));
+            ImGuiRec::InvisibleButton("##Under", ImVec2(60, 30));        // over ##Wide
+            ImGui::SetCursorPos(ImVec2(90, 80));
+            ImGuiRec::InvisibleButton("##Box", ImVec2(60, 30));
+            ImGui::SetCursorPos(ImVec2(40, 85));
+            ImGui::TextUnformatted("Crossing the box");                 // text over a control
+            ImGui::SetCursorPos(ImVec2(40, 150));
+            ImGui::TextUnformatted("First text");
+            ImGui::SetCursorPos(ImVec2(44, 152));
+            ImGui::TextUnformatted("Second text");                      // text over text
+            ImGui::End();
+            ImGui::Render();
+            if (ImVector<ImTextureData*>* textures = ImGui::GetDrawData()->Textures)
+                for (ImTextureData* t : *textures)
+                    if (t->Status != ImTextureStatus_OK && t->Status != ImTextureStatus_Destroyed) { t->SetTexID((ImTextureID)1); t->SetStatus(ImTextureStatus_OK); }
+        }
+        CheckLayout("self check", "-");
+        int kinds = 0;
+        for (const char* k : { "| overflow |", "| controls overlap |", "| text over control |", "| text over text |" })
+            kinds += std::any_of(g_findings.begin(), g_findings.end(), [&](const auto& f) { return f.first.find(k) != std::string::npos; });
+        if (kinds != 4) { printf("FAIL self check: %d of 4 kinds of finding detected\n", kinds); return 13; }
+        g_findings.clear();
+        g_newFindings = 0;
+        g_controls = g_runs = 0;
+    }
+    const char* kCodes[] = { "en", "pt", "es", "fr", "de", "it", "nl", "pl", "ru", "cs", "hu", "el", "da", "sv", "no", "fi", "ja", "ko", "zh_hans", "zh_hant", "th" };
+    int cases = 0, failures = 0;
+    std::set<std::string> missing;
+    const float height = 16000.0f;
+    for (int lang = 0; lang < 21; ++lang)
+        for (int units : { 400, 900 })
+            for (float scale : { 1.0f, 2.0f })
+                for (int st = 0; st < (int)IM_COUNTOF(kStates); ++st)
+                {
+                    const State& s = kStates[st];
+                    I18n::SetChoice(lang);
+                    I18n::ClearMissing();
+                    VioletTheme::UpdateFonts(io); // the language's script merged, as the menu does between frames
+                    ImGui::GetStyle().FontScaleMain = scale;
+                    Fixture::LooksState(s.compiling, s.edited, s.offer, s.batch);
+                    Fixture::CaptureState(s.video, s.options);
+                    g_menuGameAaOn = s.gameAa;
+                    g_recOpenAll = s.openAll;
+                    (s.page ? g_captureTab : g_shadersTab) = s.tab;
+                    // no toggle stays open from the case before
+                    for (ImGuiWindow* w : ImGui::GetCurrentContext()->Windows) w->StateStorage.Clear();
+                    const std::string winName = "Apex";
+                    const float pad = ImGui::GetStyle().WindowPadding.x;
+                    const float width = units * scale + 2.0f * pad;
+                    io.DisplaySize = ImVec2(width, height);
+                    io.MousePos = ImVec2(-FLT_MAX, -FLT_MAX);
+                    io.DeltaTime = 1.0f / 60.0f;
+                    char where[96];
+                    snprintf(where, sizeof where, "%s/%d/%.0f%%", kCodes[lang], units, scale * 100.0f);
+                    for (int frame = 0; frame < 4; ++frame)
+                    {
+                        RecItems().clear();
+                        ImGui::NewFrame();
+                        ImGui::SetNextWindowPos(ImVec2(0, 0));
+                        ImGui::SetNextWindowSize(io.DisplaySize);
+                        ImGui::Begin(winName.c_str(), nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoSavedSettings);
+                        ImGuiContext& g = *ImGui::GetCurrentContext();
+                        const int vars = g.StyleVarStack.Size, cols = g.ColorStack.Size, ids = g.CurrentWindow->IDStack.Size;
+                        if (s.page) CapturePage();
+                        else ShadersPage();
+                        if (g.StyleVarStack.Size != vars || g.ColorStack.Size != cols || g.CurrentWindow->IDStack.Size != ids)
+                        {
+                            printf("FAIL stack %s %s frame %d: style vars %d->%d, colours %d->%d, ids %d->%d\n", s.name, where, frame, vars, g.StyleVarStack.Size, cols,
+                                   g.ColorStack.Size, ids, g.CurrentWindow->IDStack.Size);
+                            return 10;
+                        }
+                        const float used = g.CurrentWindow->DC.CursorMaxPos.y + ImGui::GetStyle().WindowPadding.y;
+                        ImGui::End();
+                        ImGui::Render();
+                        if (ImVector<ImTextureData*>* textures = ImGui::GetDrawData()->Textures) // the CPU copy is all the previews need
+                            for (ImTextureData* t : *textures)
+                                if (t->Status == ImTextureStatus_WantCreate || t->Status == ImTextureStatus_WantUpdates)
+                                {
+                                    t->SetTexID((ImTextureID)1);
+                                    t->SetStatus(ImTextureStatus_OK);
+                                }
+                                else if (t->Status == ImTextureStatus_WantDestroy && t->UnusedFrames > 0)
+                                {
+                                    t->SetTexID(ImTextureID_Invalid);
+                                    t->SetStatus(ImTextureStatus_Destroyed);
+                                }
+                        if (g.ErrorCountCurrentFrame)
+                        {
+                            printf("FAIL ImGui error recovery %s %s frame %d\n", s.name, where, frame);
+                            return 11;
+                        }
+                        if (used > height - 10.0f)
+                        {
+                            printf("FAIL the page is taller than the test window %s %s\n", s.name, where);
+                            return 12;
+                        }
+                        if (frame == 3)
+                        {
+                            const int before = g_newFindings;
+                            CheckLayout(std::string(s.page ? "capture " : "shaders ") + s.name, where);
+                            const bool preview = g_newFindings != before || ((lang == 0 || lang == 1) && (st == 1 || st == 3 || st == 4 || st == 7 || st == 9) && (scale == 1.0f || (lang == 1 && units == 400)));
+                            if (preview)
+                            {
+                                const auto file = out / (std::string(kCodes[lang]) + "-" + std::to_string(units) + "-" + std::to_string((int)(scale * 100)) + "-" + s.name + ".ppm");
+                                Rasterize(file, (int)width, (int)std::min(height, used + 8.0f));
+                            }
+                        }
+                    }
+                    if (I18n::MissingCount()) missing.insert(I18n::MissingList(40));
+                    ++cases;
+                }
+    for (const std::string& m : missing) printf("Missing translations:\n%s\n", m.c_str());
+    for (const auto& [key, f] : g_findings)
+    {
+        ++failures;
+        std::string w;
+        int n = 0;
+        for (const std::string& x : f.where) { if (n++ < 6) w += (w.empty() ? "" : ", ") + x; }
+        printf("%s\n    %d cases (%s%s)\n    e.g. %s\n", key.c_str(), f.count, w.c_str(), f.where.size() > 6 ? ", ..." : "", f.example.c_str());
+    }
+    printf("%d cases (21 languages, widths 400 and 900 units, text 100%% and 200%%, %d states), four frames each; %lld controls and %lld text runs checked: %d layout findings, %d missing-translation sets\n",
+           cases, (int)IM_COUNTOF(kStates), g_controls, g_runs, failures, (int)missing.size());
+    ImGui::DestroyContext();
+    return failures || !missing.empty() ? 1 : 0;
+}

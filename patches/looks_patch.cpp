@@ -1144,7 +1144,7 @@ bool LookRow()
         if (comboW < 120.0f * u) { comboW = avail; importBelow = true; } // too narrow for both: Import on its own line
     }
     const float fh = ImGui::GetFrameHeight();
-    if (!ApexUi::BeginControlRow("Look", "Pick one, or import a ReShade or GShade preset (.ini)", importBelow ? avail : comboW + gap + importW, IconId::None,
+    if (!ApexUi::BeginControlRow("Look", "Pick one, or import a ReShade or GShade preset", importBelow ? avail : comboW + gap + importW, IconId::None,
                                  importBelow ? 2.0f * fh + ImGui::GetStyle().ItemSpacing.y : 0.0f))
         return false;
     bool changed = false;
@@ -2002,7 +2002,8 @@ void PackRow(const Looks::Packs::Pack& p, bool* pick, const std::string& line, c
     const float gap = ApexUi::kSpace2 * u, fh = ImGui::GetFrameHeight(), lh = ImGui::GetTextLineHeight();
     const float box = VioletTheme::kCheckboxSize * u;
     ImGui::PushID(p.folder.c_str());
-    const ImVec2 start = ImGui::GetCursorScreenPos();
+    const float pad = ApexUi::kSpace1 * u; // above and below each row, so rows read apart
+    const ImVec2 start(ImGui::GetCursorScreenPos().x, ImGui::GetCursorScreenPos().y + pad);
     const float avail = ImGui::GetContentRegionAvail().x;
     const float textX = start.x + box + gap;
     const float menuW = fh;
@@ -2043,8 +2044,8 @@ void PackRow(const Looks::Packs::Pack& p, bool* pick, const std::string& line, c
     }
     ImGui::SetCursorScreenPos(ImVec2(start.x + avail - menuW, start.y + (rowH - fh) * 0.5f));
     PackMenu(p, downloaded);
-    ImGui::SetCursorScreenPos(start);
-    ImGui::Dummy(ImVec2(avail, rowH));
+    ImGui::SetCursorScreenPos(ImVec2(start.x, start.y - pad));
+    ImGui::Dummy(ImVec2(avail, rowH + 2.0f * pad));
     ImGui::PopID();
 }
 
@@ -2063,8 +2064,11 @@ void PacksCardBody()
     const std::vector<Pack>& packs = List();
     const Batch batch = Status();
     if (CurrentListState() == ListState::Offline) ApexUi::MutedText(I18n::Tr("No connection; the list may be out of date"));
-    auto beginList = [&](const char* id) {
-        ImGui::BeginChild(id, ImVec2(0.0f, std::min(320.0f * u, ImGui::GetIO().DisplaySize.y * 0.45f)), ImGuiChildFlags_Borders);
+    // fit: as tall as its rows up to the cap (the download list); else the cap, so the list keeps its height while searching
+    auto beginList = [&](const char* id, bool fit = false) {
+        const float cap = std::min(320.0f * u, ImGui::GetIO().DisplaySize.y * 0.45f);
+        if (fit) ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 0.0f), ImVec2(FLT_MAX, cap));
+        ImGui::BeginChild(id, ImVec2(0.0f, fit ? 0.0f : cap), ImGuiChildFlags_Borders | (fit ? ImGuiChildFlags_AutoResizeY : 0));
     };
     auto rightButtons = [&](const char* a, const char* b, bool bIcon, bool bEnabled, bool& aClicked, bool& bClicked) {
         const float aw = a ? ApexUi::ButtonWidth(I18n::Tr(a), false) : 0.0f, bw = ApexUi::ButtonWidth(I18n::Tr(b), bIcon);
@@ -2084,7 +2088,7 @@ void PacksCardBody()
 
     if (!batch.rows.empty())
     {
-        beginList("##Progress");
+        beginList("##Progress", true);
         for (const Row& r : batch.rows)
         {
             const Pack* p = Find(r.folder);
@@ -2179,7 +2183,7 @@ void PacksCardBody()
     for (const Pack& p : packs)
         if (picked.count(p.folder) && selectable(p)) { chosen.push_back(p.folder); kb += p.downloadKB; }
     ImGui::PushFont(VioletTheme::BoldFont(), 0.0f);
-    ImGui::TextUnformatted(I18n::Trf("{} selected \xC2\xB7 {}", chosen.size(), SizeText(kb)).c_str());
+    ImGui::TextUnformatted(chosen.empty() ? I18n::Trf("{} selected", 0).c_str() : I18n::Trf("{} selected \xC2\xB7 {}", chosen.size(), SizeText(kb)).c_str());
     ImGui::PopFont();
     ImGui::PushStyleColor(ImGuiCol_Text, VioletTheme::Col(VioletTheme::kTextMuted));
     ImGui::TextWrapped("%s", I18n::Tr("Apex goes online only when you click Download. Each pack comes from its author's GitHub under its own licence; only .fx, .fxh and textures are kept."));
