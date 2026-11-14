@@ -977,6 +977,9 @@ const I18n::Pair kPairs[] = {
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT)."},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "위층 지면 조명: Arro의 기법을 Apex Radiance에 맞게 적용."},
     {"Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC).", "라이브러리와 라이선스: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez 외 (MIT), Lucide 아이콘 (ISC)."},
+    {"ReShade shaders in Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).", "Looks의 ReShade 셰이더: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint)."},
+    {"Looks and Capture: contributed by @ModestPixels.", "Looks 및 Capture: @ModestPixels 기여."},
+    {"Third-party licenses", "타사 라이선스"},
     {"Welcome · step {} of {}", "환영합니다 · {}/{}단계"},
     {"A companion mod by sims3fiend", "sims3fiend의 동반 모드"},
     {"Installed; you're all set", "설치됨. 준비 완료예요"},
@@ -2862,6 +2865,9 @@ const I18n::Pair kPairs[] = {
     {"Video saved: {} · {} MB", "동영상 저장됨: {} · {} MB"},
     {"{} left", "{} 남음"},
     {"{} stops", "{} 정지"},
+    {"Warm evening", "따뜻한 저녁"},
+    {"Cinematic", "시네마틱"},
+    {"Soft vintage", "부드러운 빈티지"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Korean, kPairs, std::size(kPairs));

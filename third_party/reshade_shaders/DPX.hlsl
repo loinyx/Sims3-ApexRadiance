@@ -1,28 +1,30 @@
-// Generated from DPX.fx by tools/gen_gshade_shaders.py
-// GShade looks: ReShade -> ps_3_0 compatibility layer. Prepended to every ported shader.
-// Only declarations live here; the shaders' maths stay as written in the GShade .fx files.
-#define GSHADE_DITHER 0 // GShade.ini UseDithering=0
-#define __RENDERER__ 0x9000 // D3D9, as GShade sees TS3: shaders take their D3D9 branches
-#define __RESHADE__ 60703   // GShade 5.2.4 is based on ReShade 6.7.3
-float4 gs_buf : register(c0);       // 1/W, 1/H, W, H of the back buffer
-float4 gs_aux : register(c1);       // pass-specific
-float4 gs_depth : register(c2);     // x = far plane (ReShade RESHADE_DEPTH_LINEARIZATION_FAR_PLANE), y = reversed
-#define BUFFER_RCP_WIDTH   gs_buf.x
-#define BUFFER_RCP_HEIGHT  gs_buf.y
-#define BUFFER_WIDTH       gs_buf.z
-#define BUFFER_HEIGHT      gs_buf.w
-#define BUFFER_PIXEL_SIZE  gs_buf.xy
-#define BUFFER_SCREEN_SIZE gs_buf.zw
-#define BUFFER_COLOR_BIT_DEPTH 8
-#define rcp(x) (1.0 / (x))
-// ReShade's D3D9 code generator emulates texel offsets this way (ps_3_0 has no offset overload)
-#define tex2Doffset(s, c, o) tex2D(s, (c) + (o) * BUFFER_PIXEL_SIZE)
-#define tex2Dlodoffset(s, c, o) tex2Dlod(s, (c) + float4((o) * BUFFER_PIXEL_SIZE, 0.0, 0.0))
-sampler2D BackBuffer : register(s0);
 /**
  * DPX/Cineon shader by Loadus
- * Lightly optimized by Marot Satil for the GShade project.
  */
+
+// Ported to ps_3_0 for Apex Radiance (Looks) from https://github.com/CeeJayDK/SweetFX/blob/93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361/Shaders/SweetFX/DPX.fx
+// Licence of the repository, which covers this file:
+// The MIT License (MIT)
+//
+// Copyright (c) 2014 CeeJayDK
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
 float3 RGB_Curve : register(c8);
 float3 RGB_C : register(c9);
@@ -33,11 +35,6 @@ float Colorfulness : register(c12);
 
 float Strength : register(c13);
 
-
-
-#if GSHADE_DITHER
-
-#endif
 
 static const float3x3 RGB = float3x3(
 	 2.6714711726599600, -1.2672360578624100, -0.4109956021722270,
@@ -56,26 +53,21 @@ float3 DPXPass(float4 vois : SV_Position, float2 texcoord : TexCoord) : SV_Targe
 
 	float3 B = input;
 	B = B * (1.0 - Contrast) + (0.5 * Contrast);
-	const float3 Btemp = (1.0 / (1.0 + exp(RGB_Curve / 2.0)));
+	float3 Btemp = (1.0 / (1.0 + exp(RGB_Curve / 2.0)));
 	B = ((1.0 / (1.0 + exp(-RGB_Curve * (B - RGB_C)))) / (-2.0 * Btemp + 1.0)) + (-Btemp / (-2.0 * Btemp + 1.0));
 
-	const float value = max(max(B.r, B.g), B.b);
+	float value = max(max(B.r, B.g), B.b);
 	float3 color = B / value;
 	color = pow(abs(color), 1.0 / Colorfulness);
 
 	float3 c0 = color * value;
 	c0 = mul(XYZ, c0);
-	const float luma = dot(c0, float3(0.30, 0.59, 0.11));
+	float luma = dot(c0, float3(0.30, 0.59, 0.11));
 	c0 = (1.0 - Saturation) * luma + Saturation * c0;
 	c0 = mul(RGB, c0);
 
-#if GSHADE_DITHER
-	c0 = lerp(input, c0, Strength);
-	return c0 + TriDither(c0, texcoord, BUFFER_COLOR_BIT_DEPTH);
-#else
 	return lerp(input, c0, Strength);
-#endif
 }
 
-// ---- ps_3_0 entry points (GShade looks) ----
+// ---- ps_3_0 entry points (Looks) ----
 float4 gs_DPXPass(float2 vp : VPOS, float2 uv : TEXCOORD0) : COLOR0 { return float4(DPXPass(float4(vp + 0.5, 0.0, 1.0), uv), 1.0); }

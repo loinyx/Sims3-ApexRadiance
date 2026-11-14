@@ -977,6 +977,9 @@ const I18n::Pair kPairs[] = {
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT)."},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "Yläkerrosten maavalo: Arron tekniikka, sovitettu Apex Radianceen."},
     {"Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC).", "Kirjastot ja lisenssit: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez ym. (MIT), Lucide-kuvakkeet (ISC)."},
+    {"ReShade shaders in Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).", "ReShade-varjostimet (Looks): CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint)."},
+    {"Looks and Capture: contributed by @ModestPixels.", "Looks ja Capture: @ModestPixels."},
+    {"Third-party licenses", "Kolmansien osapuolten lisenssit"},
     {"Welcome · step {} of {}", "Tervetuloa · vaihe {}/{}"},
     {"A companion mod by sims3fiend", "sims3fiendin kumppanimodi"},
     {"Installed; you're all set", "Asennettu; kaikki valmista"},
@@ -2862,6 +2865,9 @@ const I18n::Pair kPairs[] = {
     {"Video saved: {} · {} MB", "Video tallennettu: {} · {} MB"},
     {"{} left", "{} jäljellä"},
     {"{} stops", "{} pysäyttää"},
+    {"Warm evening", "Lämmin ilta"},
+    {"Cinematic", "Elokuvamainen"},
+    {"Soft vintage", "Pehmeä vintage"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Finnish, kPairs, std::size(kPairs));

@@ -806,6 +806,13 @@ void ShowLooksFolder()
 std::vector<Looks::LookItem> g_list;
 bool g_listDirty = true;
 
+// The name the menu shows for a look: built-in Apex looks are translated menu texts, files keep their names
+std::string ShownName(const std::string& ref)
+{
+    const std::string name = Looks::RefName(ref);
+    return Looks::RefSource(ref) == Looks::Source::Apex ? std::string(I18n::Tr(name.c_str())) : name;
+}
+
 const char* SourceLabel(Looks::Source s)
 {
     switch (s)
@@ -827,7 +834,7 @@ bool LookRow()
     if (!ApexUi::BeginControlRow("Look", "Add .ini presets to the Looks folder, or import one from the list", comboW + ApexUi::kSpace2 * u + iconW))
         return false;
     bool changed = false;
-    const std::string current = g.preset.empty() ? std::string(I18n::Tr("Choose a look")) : Looks::RefName(g.preset);
+    const std::string current = g.preset.empty() ? std::string(I18n::Tr("Choose a look")) : ShownName(g.preset);
     const ImVec2 comboPos = ImGui::GetCursorScreenPos();
     ImGui::SetNextItemWidth(comboW);
     static bool wasOpen = false;
@@ -855,11 +862,12 @@ bool LookRow()
             bool header = false;
             for (const auto& item : g_list)
             {
-                if (item.source != s || (!q.empty() && Lower(item.name).find(q) == std::string::npos)) continue;
+                const std::string label = ShownName(item.ref);
+                if (item.source != s || (!q.empty() && Lower(label).find(q) == std::string::npos)) continue;
                 if (!header) { ImGui::SeparatorText(I18n::Tr(SourceLabel(s))); header = true; }
                 ImGui::PushID(item.ref.c_str());
                 const bool selected = item.ref == g.preset;
-                if (ImGui::Selectable(item.name.c_str(), selected) && !selected)
+                if (ImGui::Selectable(label.c_str(), selected) && !selected)
                 {
                     SelectLook(item.ref);
                     g_message.clear();
@@ -1094,7 +1102,7 @@ bool SaveLookModal(bool openNow)
     static std::string error;
     if (openNow)
     {
-        const std::string stem = g.preset.empty() ? std::string("My look") : Looks::RefName(g.preset);
+        const std::string stem = g.preset.empty() ? std::string("My look") : ShownName(g.preset);
         snprintf(name, sizeof(name), "%s", I18n::Trf("{} (mine)", stem.substr(stem.find_last_of("\\/") == std::string::npos ? 0 : stem.find_last_of("\\/") + 1)).c_str());
         error.clear();
         ImGui::OpenPopup("##SaveLook");
@@ -1451,7 +1459,7 @@ std::string StatusLine()
 {
     if (!g.active) return I18n::Tr("Off");
     if (g.preset.empty()) return I18n::Tr("No look chosen");
-    const std::string name = RefName(g.preset);
+    const std::string name = ShownName(g.preset);
     if (!g.loaded) return I18n::Trf("{} \xC2\xB7 can't be read", name);
     const int n = RunnableCount(true);
     return n == 1 ? I18n::Trf("{} \xC2\xB7 1 shader", name) : I18n::Trf("{} \xC2\xB7 {} shaders", name, n);

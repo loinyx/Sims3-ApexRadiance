@@ -977,6 +977,9 @@ const I18n::Pair kPairs[] = {
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT)."},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "Grondlicht van hogere verdiepingen: Arro's techniek, aangepast in Apex Radiance."},
     {"Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC).", "Bibliotheken en licenties: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez e.a. (MIT), Lucide-pictogrammen (ISC)."},
+    {"ReShade shaders in Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).", "ReShade-shaders in Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint)."},
+    {"Looks and Capture: contributed by @ModestPixels.", "Looks en Capture: bijdrage van @ModestPixels."},
+    {"Third-party licenses", "Licenties van derden"},
     {"Welcome · step {} of {}", "Welkom · stap {} van {}"},
     {"A companion mod by sims3fiend", "Een begeleidende mod van sims3fiend"},
     {"Installed; you're all set", "Geïnstalleerd; je bent er klaar voor"},
@@ -2862,6 +2865,9 @@ const I18n::Pair kPairs[] = {
     {"Video saved: {} · {} MB", "Video opgeslagen: {} · {} MB"},
     {"{} left", "Nog {}"},
     {"{} stops", "{} stopt"},
+    {"Warm evening", "Warme avond"},
+    {"Cinematic", "Filmisch"},
+    {"Soft vintage", "Zachte vintage"},
     {nullptr, nullptr},
 };
 const I18n::LangTable kTable(I18n::Lang::Dutch, kPairs, std::size(kPairs));

@@ -1,24 +1,3 @@
-// Generated from AdaptiveSharpen.fx by tools/gen_gshade_shaders.py
-// GShade looks: ReShade -> ps_3_0 compatibility layer. Prepended to every ported shader.
-// Only declarations live here; the shaders' maths stay as written in the GShade .fx files.
-#define GSHADE_DITHER 0 // GShade.ini UseDithering=0
-#define __RENDERER__ 0x9000 // D3D9, as GShade sees TS3: shaders take their D3D9 branches
-#define __RESHADE__ 60703   // GShade 5.2.4 is based on ReShade 6.7.3
-float4 gs_buf : register(c0);       // 1/W, 1/H, W, H of the back buffer
-float4 gs_aux : register(c1);       // pass-specific
-float4 gs_depth : register(c2);     // x = far plane (ReShade RESHADE_DEPTH_LINEARIZATION_FAR_PLANE), y = reversed
-#define BUFFER_RCP_WIDTH   gs_buf.x
-#define BUFFER_RCP_HEIGHT  gs_buf.y
-#define BUFFER_WIDTH       gs_buf.z
-#define BUFFER_HEIGHT      gs_buf.w
-#define BUFFER_PIXEL_SIZE  gs_buf.xy
-#define BUFFER_SCREEN_SIZE gs_buf.zw
-#define BUFFER_COLOR_BIT_DEPTH 8
-#define rcp(x) (1.0 / (x))
-// ReShade's D3D9 code generator emulates texel offsets this way (ps_3_0 has no offset overload)
-#define tex2Doffset(s, c, o) tex2D(s, (c) + (o) * BUFFER_PIXEL_SIZE)
-#define tex2Dlodoffset(s, c, o) tex2Dlod(s, (c) + float4((o) * BUFFER_PIXEL_SIZE, 0.0, 0.0))
-sampler2D BackBuffer : register(s0);
 // Copyright (c) 2015-2018, bacondither
 // All rights reserved.
 //
@@ -46,8 +25,8 @@ sampler2D BackBuffer : register(s0);
 // Adaptive sharpen - version 2018-04-14
 // EXPECTS FULL RANGE GAMMA LIGHT
 
-// Lightly optimized by Marot Satil for the GShade project.
-
+// Ported to ps_3_0 for Apex Radiance (Looks) from https://github.com/crosire/reshade-shaders/blob/bcb5ba54199f4455026dd8ba66dc1b74461d3152/Shaders/AdaptiveSharpen.fx
+// Licence: as stated above.
 
 float curve_height : register(c8);
 
@@ -78,9 +57,7 @@ float pm_p : register(c18);
 //-------------------------------------------------------------------------------------------------
 
 
-
-
-sampler2D AS_Pass0Sampler : register(s1);
+sampler2D AS_Pass0Sampler : register(s1); // AS_Pass0Tex: the runner's G16R16F target
 
 // Helper funcs
 #define sqr(a)         ( (a)*(a) )
@@ -95,63 +72,11 @@ sampler2D AS_Pass0Sampler : register(s1);
 #define soft_if(a,b,c) ( saturate((a + b + c + 0.056)*rcp(abs(maxedge) + 0.03) - 0.85) )
 
 // Soft limit, modified tanh
-
-// modified - Craig - Jul 5th, 2020
-// !!! lot of redundant math in the tokenized func,
-// !!! and we can use overloaded funcs. so just
-// !!! make an optimized, overloaded func for each
-// !!! float type. more code, but less calc's.
-
-// Soft limit, modified tanh
 #if (fast_ops == 1) // Tanh approx
-	float soft_lim( float v, float s )
-	{
-		const float vs = v / s;
-		const float vs2 = sqr(vs);
-		return saturate( abs(vs) * ( 27 + vs2 ) / ( 27 + 9 * vs2 ) ) * s;
-	}
-	float2 soft_lim( float2 v, float2 s )
-	{
-		const float2 vs = v / s;
-		const float2 vs2 = sqr(vs);
-		return saturate( abs(vs) * ( 27 + vs2 ) / ( 27 + 9 * vs2 ) ) * s;
-	}
-	float3 soft_lim( float3 v, float3 s )
-	{
-		const float3 vs = v / s;
-		const float3 vs2 = sqr(vs);
-		return saturate( abs(vs) * ( 27 + vs2 ) / ( 27 + 9 * vs2 ) ) * s;
-	}
-	float4 soft_lim( float4 v, float4 s )
-	{
-		const float4 vs = v / s;
-		const float4 vs2 = sqr(vs);
-		return saturate( abs(vs) * ( 27 + vs2 ) / ( 27 + 9 * vs2 ) ) * s;
-	}
+	#define soft_lim(v,s)  ( saturate(abs(v/s)*(27 + sqr(v/s))/(27 + 9*sqr(v/s)))*s )
 #else
-	float soft_lim( float v, float s )
-	{
-		const float sv = exp( 2 * min( abs(v), s * 24 ) / s );
-		return ( sv - 1 ) / ( sv + 1 ) * s;
-	}
-	float2 soft_lim( float2 v, float2 s )
-	{
-		const float2 sv = exp( 2 * min( abs(v), s * 24 ) / s );
-		return ( sv - 1 ) / ( sv + 1 ) * s;
-	}
-	float3 soft_lim( float3 v, float3 s )
-	{
-		const float3 sv = exp( 2 * min( abs(v), s * 24 ) / s );
-		return ( sv - 1 ) / ( sv + 1 ) * s;
-	}
-	float4 soft_lim( float4 v, float4 s )
-	{
-		const float4 sv = exp( 2 * min( abs(v), s * 24 ) / s );
-		return ( sv - 1 ) / ( sv + 1 ) * s;
-	}
+	#define soft_lim(v,s)  ( (exp(2*min(abs(v), s*24)/s) - 1)/(exp(2*min(abs(v), s*24)/s) + 1)*s )
 #endif
-
-
 
 // Weighted power mean
 #define wpmean(a,b,w)  ( pow(abs(w)*pow(abs(a), pm_p) + abs(1-w)*pow(abs(b), pm_p), (1.0/pm_p)) )
@@ -186,24 +111,18 @@ float2 AdaptiveSharpenP0(float4 vpos : SV_Position, float2 tex : TEXCOORD) : SV_
 	// [      c10, c4,  c0,  c5, c11      ]
 	// [           c6,  c7,  c8           ]
 	// [                c12               ]
-	const float3 c[13] = { getB( 0, 0), getB(-1,-1), getB( 0,-1), getB( 1,-1), getB(-1, 0),
+	float3 c[13] = { getB( 0, 0), getB(-1,-1), getB( 0,-1), getB( 1,-1), getB(-1, 0),
 	                 getB( 1, 0), getB(-1, 1), getB( 0, 1), getB( 1, 1), getB( 0,-2),
 	                 getB(-2, 0), getB( 2, 0), getB( 0, 2) };
 
 	// Colour to luma, fast approx gamma, avg of rec. 709 & 601 luma coeffs
-	const float luma = sqrt(dot(float3(0.2558, 0.6511, 0.0931), sqr(c[0])));
+	float luma = sqrt(dot(float3(0.2558, 0.6511, 0.0931), sqr(c[0])));
 
 	// Blur, gauss 3x3
-	const float3 blur = (2*(c[2]+c[4]+c[5]+c[7]) + (c[1]+c[3]+c[6]+c[8]) + 4*c[0])/16;
+	float3 blur = (2*(c[2]+c[4]+c[5]+c[7]) + (c[1]+c[3]+c[6]+c[8]) + 4*c[0])/16;
 
 	// Contrast compression, center = 0.5, scaled to 1/3
-	// !!! could pre-calc the static value math here (eg: 4.0/15.0 = 0.2666666666666667)
-	// !!! but might lead to decimal rounding / truncation (like MS Calculator did above).
-	// !!! but the rounding might be within tolerance. Pre-calc'ing 4/15 & -37 / 15 would
-	// !!! save 2 calc's per call here. Maybe have it pre-calc if fast_ops flag is
-	// !!! set, that way fast_ops will trim calculation cycles while fast_ops false
-	// !!! will try to go with more detail by doing the calculations on-the-fly each time?
-	const float c_comp = saturate(4.0/15.0 + 0.9*exp2(dot(blur, -37.0/15.0)));
+	float c_comp = saturate(4.0/15.0 + 0.9*exp2(dot(blur, -37.0/15.0)));
 
 	// Edge detection
 	// Relative matrix weights
@@ -212,7 +131,7 @@ float2 AdaptiveSharpenP0(float4 vpos : SV_Position, float2 tex : TEXCOORD) : SV_
 	// [  1,  5,  6,  5,  1  ]
 	// [      4,  5,  4      ]
 	// [          1          ]
-	const float edge = length( 1.38*(b_diff(0))
+	float edge = length( 1.38*(b_diff(0))
 	                   + 1.15*(b_diff(2) + b_diff(4)  + b_diff(5)  + b_diff(7))
 	                   + 0.92*(b_diff(1) + b_diff(3)  + b_diff(6)  + b_diff(8))
 	                   + 0.23*(b_diff(9) + b_diff(10) + b_diff(11) + b_diff(12)) );
@@ -232,14 +151,14 @@ float3 AdaptiveSharpenP1(float4 vpos : SV_Position, float2 tex : TEXCOORD) : SV_
 	// [      d20, d6,  d7,  d8, d17      ]
 	// [           d15, d12, d14          ]
 	// [                d13               ]
-	const float2 d[25] = { getT( 0, 0), getT(-1,-1), getT( 0,-1), getT( 1,-1), getT(-1, 0),
+	float2 d[25] = { getT( 0, 0), getT(-1,-1), getT( 0,-1), getT( 1,-1), getT(-1, 0),
 	                 getT( 1, 0), getT(-1, 1), getT( 0, 1), getT( 1, 1), getT( 0,-2),
 	                 getT(-2, 0), getT( 2, 0), getT( 0, 2), getT( 0, 3), getT( 1, 2),
 	                 getT(-1, 2), getT( 3, 0), getT( 2, 1), getT( 2,-1), getT(-3, 0),
 	                 getT(-2, 1), getT(-2,-1), getT( 0,-3), getT( 1,-2), getT(-1,-2) };
 
 	// Allow for higher overshoot if the current edge pixel is surrounded by similar edge pixels
-	const float maxedge = max4( max4(d[1].x,d[2].x,d[3].x,d[4].x), max4(d[5].x,d[6].x,d[7].x,d[8].x),
+	float maxedge = max4( max4(d[1].x,d[2].x,d[3].x,d[4].x), max4(d[5].x,d[6].x,d[7].x,d[8].x),
 	                      max4(d[9].x,d[10].x,d[11].x,d[12].x), d[0].x );
 
 	// [          x          ]
@@ -249,16 +168,16 @@ float3 AdaptiveSharpenP1(float4 vpos : SV_Position, float2 tex : TEXCOORD) : SV_
 	// [    w, w, x, z, z    ]
 	// [       w, x, z       ]
 	// [          x          ]
-	const float sbe = soft_if(d[2].x,d[9].x, d[22].x)*soft_if(d[7].x,d[12].x,d[13].x)  // x dir
+	float sbe = soft_if(d[2].x,d[9].x, d[22].x)*soft_if(d[7].x,d[12].x,d[13].x)  // x dir
 	          + soft_if(d[4].x,d[10].x,d[19].x)*soft_if(d[5].x,d[11].x,d[16].x)  // y dir
 	          + soft_if(d[1].x,d[24].x,d[21].x)*soft_if(d[8].x,d[14].x,d[17].x)  // z dir
 	          + soft_if(d[3].x,d[23].x,d[18].x)*soft_if(d[6].x,d[20].x,d[15].x); // w dir
 
 	#if (fast_ops == 1)
-		const float2 cs = lerp( float2(L_compr_low,  D_compr_low),
+		float2 cs = lerp( float2(L_compr_low,  D_compr_low),
 		                  float2(L_compr_high, D_compr_high), saturate(1.091*sbe - 2.282) );
 	#else
-		const float2 cs = lerp( float2(L_compr_low,  D_compr_low),
+		float2 cs = lerp( float2(L_compr_low,  D_compr_low),
 		                  float2(L_compr_high, D_compr_high), smoothstep(2, 3.1, sbe) );
 	#endif
 
@@ -274,12 +193,12 @@ float3 AdaptiveSharpenP1(float4 vpos : SV_Position, float2 tex : TEXCOORD) : SV_
 
 	// Transition to a concave kernel if the center edge val is above thr
 	#if (fast_ops == 1)
-		const float3 dW = sqr(lerp( W1, W2, saturate(2.4*d[0].x - 0.82) ));
+		float3 dW = sqr(lerp( W1, W2, saturate(2.4*d[0].x - 0.82) ));
 	#else
-		const float3 dW = sqr(lerp( W1, W2, smoothstep(0.3, 0.8, d[0].x) ));
+		float3 dW = sqr(lerp( W1, W2, smoothstep(0.3, 0.8, d[0].x) ));
 	#endif
 
-	const float mdiff_c0 = 0.02 + 3*( abs(luma[0]-luma[2]) + abs(luma[0]-luma[4])
+	float mdiff_c0 = 0.02 + 3*( abs(luma[0]-luma[2]) + abs(luma[0]-luma[4])
 	                          + abs(luma[0]-luma[5]) + abs(luma[0]-luma[7])
 	                          + 0.25*(abs(luma[0]-luma[1]) + abs(luma[0]-luma[3])
 	                                 +abs(luma[0]-luma[6]) + abs(luma[0]-luma[8])) );
@@ -308,27 +227,20 @@ float3 AdaptiveSharpenP1(float4 vpos : SV_Position, float2 tex : TEXCOORD) : SV_
 	float lowthrsum   = 0;
 	float weightsum   = 0;
 	float neg_laplace = 0;
-	
-	// modified - Craig - Jul 5th, 2020
+
 	[unroll] for (int pix = 0; pix < 12; ++pix)
 	{
-		// !!! pre-calc (weights[pix]*lowthr) once,
-		// !!! then use twice to save an extra calc per-loop
 		#if (fast_ops == 1)
 			float lowthr = clamp((13.2*d[pix + 1].x - 0.221), 0.01, 1);
-			float weighted_lowthr = weights[pix] * lowthr;
-//			neg_laplace += sqr(luma[pix + 1])*(weights[pix]*lowthr);
-			neg_laplace += sqr(luma[pix + 1])*weighted_lowthr;
+
+			neg_laplace += sqr(luma[pix + 1])*(weights[pix]*lowthr);
 		#else
 			float t = saturate((d[pix + 1].x - 0.01)/0.09);
 			float lowthr = t*t*(2.97 - 1.98*t) + 0.01; // t*t*(3 - a*3 - (2 - a*2)*t) + a
-			float weighted_lowthr = weights[pix] * lowthr;
-//			neg_laplace += pow(abs(luma[pix + 1]) + 0.06, 2.4)*(weights[pix]*lowthr);
-			neg_laplace += pow(abs(luma[pix + 1]) + 0.06, 2.4)*weighted_lowthr;
-		#endif
 
-//		weightsum += weights[pix]*lowthr;
-		weightsum += weighted_lowthr;
+			neg_laplace += pow(abs(luma[pix + 1]) + 0.06, 2.4)*(weights[pix]*lowthr);
+		#endif
+		weightsum += weights[pix]*lowthr;
 		lowthrsum += lowthr/12;
 	}
 
@@ -339,7 +251,7 @@ float3 AdaptiveSharpenP1(float4 vpos : SV_Position, float2 tex : TEXCOORD) : SV_
 	#endif
 
 	// Compute sharpening magnitude function
-	const float sharpen_val = curve_height/(curve_height*curveslope*pow(abs(d[0].x), 3.5) + 0.625);
+	float sharpen_val = curve_height/(curve_height*curveslope*pow(abs(d[0].x), 3.5) + 0.625);
 
 	// Calculate sharpening diff and scale
 	float sharpdiff = (d[0].y - neg_laplace)*(lowthrsum*sharpen_val + 0.01);
@@ -410,41 +322,37 @@ float3 AdaptiveSharpenP1(float4 vpos : SV_Position, float2 tex : TEXCOORD) : SV_
 
 		// Calculate tanh scale factors
 		#if (fast_ops == 1)
-			const float nmax = (max(luma[23], d[0].y)*2 + luma[24])/3;
-			const float nmin = (min(luma[1],  d[0].y)*2 + luma[0])/3;
+			float nmax = (max(luma[23], d[0].y)*2 + luma[24])/3;
+			float nmin = (min(luma[1],  d[0].y)*2 + luma[0])/3;
 
-			const float min_dist  = min(abs(nmax - d[0].y), abs(d[0].y - nmin));
+			float min_dist  = min(abs(nmax - d[0].y), abs(d[0].y - nmin));
 			float pos_scale = min_dist + L_overshoot;
 			float neg_scale = min_dist + D_overshoot;
 		#else
-			const float nmax = (max(luma[22] + luma[23]*2, d[0].y*3) + luma[24])/4;
-			const float nmin = (min(luma[2]  + luma[1]*2,  d[0].y*3) + luma[0])/4;
+			float nmax = (max(luma[22] + luma[23]*2, d[0].y*3) + luma[24])/4;
+			float nmin = (min(luma[2]  + luma[1]*2,  d[0].y*3) + luma[0])/4;
 
-			const float min_dist  = min(abs(nmax - d[0].y), abs(d[0].y - nmin));
+			float min_dist  = min(abs(nmax - d[0].y), abs(d[0].y - nmin));
 			float pos_scale = min_dist + min(L_overshoot, 1.0001 - min_dist - d[0].y);
 			float neg_scale = min_dist + min(D_overshoot, 0.0001 + d[0].y - min_dist);
 		#endif
 
-		// modified - Craig - Jul 5th, 2020
-		// !!! pre-calc scale_lim_temp once, use twice
-		const float scale_lim_temp = scale_lim * (1 - scale_cs);
-		pos_scale = min(pos_scale, scale_lim_temp + pos_scale*scale_cs);
-		neg_scale = min(neg_scale, scale_lim_temp + neg_scale*scale_cs);
-		
-		// modified - Craig - Jul 5th, 2020
-		// pre-calc min / max sharpdiff used twice each below
-		const float maxsharpdiff = max(sharpdiff, 0);
-		const float minsharpdiff = min(sharpdiff, 0);
-		sharpdiff = wpmean( maxsharpdiff, soft_lim( maxsharpdiff, pos_scale ), cs.x )
-		          - wpmean( minsharpdiff, soft_lim( minsharpdiff, neg_scale ), cs.y );
+		pos_scale = min(pos_scale, scale_lim*(1 - scale_cs) + pos_scale*scale_cs);
+		neg_scale = min(neg_scale, scale_lim*(1 - scale_cs) + neg_scale*scale_cs);
+
+		// Soft limited anti-ringing with tanh, wpmean to control compression slope
+		sharpdiff = wpmean( max(sharpdiff, 0), soft_lim( max(sharpdiff, 0), pos_scale ), cs.x )
+		          - wpmean( min(sharpdiff, 0), soft_lim( min(sharpdiff, 0), neg_scale ), cs.y );
 	}
 
 	// Compensate for saturation loss/gain while making pixels brighter/darker
-	const float sharpdiff_lim = saturate(d[0].y + sharpdiff) - d[0].y;
+	float sharpdiff_lim = saturate(d[0].y + sharpdiff) - d[0].y;
+	float satmul = (d[0].y + max(sharpdiff_lim*0.9, sharpdiff_lim)*1.03 + 0.03)/(d[0].y + 0.03);
+	float3 res = d[0].y + (sharpdiff_lim*3 + sharpdiff)/4 + (origsat - d[0].y)*satmul;
 
-	return saturate(d[0].y + (sharpdiff_lim*3 + sharpdiff)/4 + (origsat - d[0].y)*((d[0].y + max(sharpdiff_lim*0.9, sharpdiff_lim)*1.03 + 0.03)/(d[0].y + 0.03)));
+	return saturate(res);
 }
 
-// ---- ps_3_0 entry points (GShade looks) ----
+// ---- ps_3_0 entry points (Looks) ----
 float4 gs_AdaptiveSharpenP0(float2 vp : VPOS, float2 uv : TEXCOORD0) : COLOR0 { return float4(AdaptiveSharpenP0(float4(vp + 0.5, 0.0, 1.0), uv), 0.0, 1.0); }
 float4 gs_AdaptiveSharpenP1(float2 vp : VPOS, float2 uv : TEXCOORD0) : COLOR0 { return float4(AdaptiveSharpenP1(float4(vp + 0.5, 0.0, 1.0), uv), 1.0); }

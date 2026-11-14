@@ -1,28 +1,6 @@
-// Generated from LumaSharpen.fx by tools/gen_gshade_shaders.py
-// GShade looks: ReShade -> ps_3_0 compatibility layer. Prepended to every ported shader.
-// Only declarations live here; the shaders' maths stay as written in the GShade .fx files.
-#define GSHADE_DITHER 0 // GShade.ini UseDithering=0
-#define __RENDERER__ 0x9000 // D3D9, as GShade sees TS3: shaders take their D3D9 branches
-#define __RESHADE__ 60703   // GShade 5.2.4 is based on ReShade 6.7.3
-float4 gs_buf : register(c0);       // 1/W, 1/H, W, H of the back buffer
-float4 gs_aux : register(c1);       // pass-specific
-float4 gs_depth : register(c2);     // x = far plane (ReShade RESHADE_DEPTH_LINEARIZATION_FAR_PLANE), y = reversed
-#define BUFFER_RCP_WIDTH   gs_buf.x
-#define BUFFER_RCP_HEIGHT  gs_buf.y
-#define BUFFER_WIDTH       gs_buf.z
-#define BUFFER_HEIGHT      gs_buf.w
-#define BUFFER_PIXEL_SIZE  gs_buf.xy
-#define BUFFER_SCREEN_SIZE gs_buf.zw
-#define BUFFER_COLOR_BIT_DEPTH 8
-#define rcp(x) (1.0 / (x))
-// ReShade's D3D9 code generator emulates texel offsets this way (ps_3_0 has no offset overload)
-#define tex2Doffset(s, c, o) tex2D(s, (c) + (o) * BUFFER_PIXEL_SIZE)
-#define tex2Dlodoffset(s, c, o) tex2Dlod(s, (c) + float4((o) * BUFFER_PIXEL_SIZE, 0.0, 0.0))
-sampler2D BackBuffer : register(s0);
 /**
    LumaSharpen version 1.5.0
    by Christian Cann Schuldt Jensen ~ CeeJay.dk
-   License: MIT
   
    It blurs the original pixel with the surrounding pixels and then subtracts this blur to sharpen the image.
    It does this in luma to avoid color artifacts and allows limiting the maximum sharpning to avoid or lessen halo artifacts.
@@ -30,42 +8,37 @@ sampler2D BackBuffer : register(s0);
 
    Version 1.5.1
   - UI improvements for Reshade 3.x
-
-   Version 1.5.2
-  - Inversed attribution added by Bapho - https://github.com/Bapho https://www.shadertoy.com/user/Bapho
-  - Lightly optimized by Marot Satil for the GShade project.
-
-
-   The MIT License (MIT)
-
-   Copyright (c) 2014 CeeJayDK
-
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
-
-   The above copyright notice and this permission notice shall be included in all
-   copies or substantial portions of the Software.
-
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-   SOFTWARE.
  */
 
+// Ported to ps_3_0 for Apex Radiance (Looks) from https://github.com/CeeJayDK/SweetFX/blob/93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361/Shaders/SweetFX/LumaSharpen.fx
+// Licence of the repository, which covers this file:
+// The MIT License (MIT)
+//
+// Copyright (c) 2014 CeeJayDK
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 float sharp_strength : register(c8);
-float inversedAttribution : register(c9);
 float sharp_clamp : register(c10);
 float pattern : register(c11);
 float offset_bias : register(c12);
 float show_sharpen : register(c13);
-
 
 
    /*-----------------------------------------------------------.
@@ -82,7 +55,7 @@ float show_sharpen : register(c13);
 float3 LumaSharpenPass(float4 position : SV_Position, float2 tex : TEXCOORD) : SV_Target
 {
 	// -- Get the original pixel --
-	const float3 ori = tex2D(BackBuffer, tex).rgb; // ori = original pixel
+	float3 ori = tex2D(BackBuffer, tex).rgb; // ori = original pixel
 
 	// -- Combining the strength and luma multipliers --
 	float3 sharp_strength_luma = (CoefLuma * sharp_strength); //I'll be combining even more multipliers with it later on
@@ -176,7 +149,7 @@ float3 LumaSharpenPass(float4 position : SV_Position, float2 tex : TEXCOORD) : S
 	'-----------------------------------------------------------*/
 
 	// -- Calculate the sharpening --
-	const float3 sharp = ori - blur_ori;  //Subtracting the blurred image from the original image
+	float3 sharp = ori - blur_ori;  //Subtracting the blurred image from the original image
 
 #if 0 //older 1.4 code (included here because the new code while faster can be difficult to understand)
 	// -- Adjust strength of the sharpening --
@@ -186,15 +159,8 @@ float3 LumaSharpenPass(float4 position : SV_Position, float2 tex : TEXCOORD) : S
 	sharp_luma = clamp(sharp_luma, -sharp_clamp, sharp_clamp);  //TODO Try a curve function instead of a clamp
 
 #else //new code
-
-	if (inversedAttribution)
-	{
-		const float3 revert_sharp_strength = (1.01 / (abs(sharp) + 0.01)) / 30.0;
-		sharp_strength_luma *= revert_sharp_strength;
-	}
-
 	// -- Adjust strength of the sharpening and clamp it--
-	const float4 sharp_strength_luma_clamp = float4(sharp_strength_luma * (0.5 / sharp_clamp),0.5); //Roll part of the clamp into the dot
+	float4 sharp_strength_luma_clamp = float4(sharp_strength_luma * (0.5 / sharp_clamp),0.5); //Roll part of the clamp into the dot
 
 	//sharp_luma = saturate((0.5 / sharp_clamp) * sharp_luma + 0.5); //scale up and clamp
 	float sharp_luma = saturate(dot(float4(sharp,1.0), sharp_strength_luma_clamp)); //Calculate the luma, adjust the strength, scale up and clamp
@@ -217,5 +183,5 @@ float3 LumaSharpenPass(float4 position : SV_Position, float2 tex : TEXCOORD) : S
 	return saturate(outputcolor);
 }
 
-// ---- ps_3_0 entry points (GShade looks) ----
+// ---- ps_3_0 entry points (Looks) ----
 float4 gs_LumaSharpenPass(float2 vp : VPOS, float2 uv : TEXCOORD0) : COLOR0 { return float4(LumaSharpenPass(float4(vp + 0.5, 0.0, 1.0), uv), 1.0); }

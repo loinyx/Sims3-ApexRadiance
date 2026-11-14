@@ -65,10 +65,11 @@ struct LookItem
     std::string ref, name;
     Source source = Source::None;
 };
-// Apex looks, then My looks, then GShade (only when its folder exists); names sorted within each source
+// Apex looks (in their own order), then My looks, then GShade (only when its folder exists), sorted by name
 std::vector<LookItem> ListLooks();
 
-// Built-in Apex looks (apex:<name>): their names, and the .ini text of one (nullptr when unknown)
+// Built-in Apex looks (apex:<name>, read-only): their names (English menu keys), and the .ini text of one (nullptr
+// when unknown)
 std::vector<std::string> BuiltInLooks();
 const char* BuiltInLookText(const std::string& name);
 

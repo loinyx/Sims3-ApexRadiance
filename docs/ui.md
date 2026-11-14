@@ -61,7 +61,7 @@ Sims 3"); internal names keep "Apex". Visible text uses `APEX_PRODUCT_NAME`, nev
 | Menu | **Menu**: Language (select, 220 units), Text size (- / value / + / Reset; 80, 90, 100, 115, 130, 150, 175, 200%), Startup menu hint (`[ui] start_note`). **Settings and maintenance** ("Saving, reset and recovery"): Save now ("Changes also save by themselves after a second"), Enable developer mode, Reset all settings (inline confirmation and Undo; restores features, Picture and every `[ui]` preference; captures, reports and presets stay), Restart Apex ([Graphics recovery](#graphics-recovery)) |
 | Shortcuts | **Shortcuts**: Shortcut preset (Letters / Numbers / F keys / Custom, 180 units), Open the menu, Compare with the game, Refresh the lighting, Take a filtered screenshot, Record a video (`[capture.video] record_key`, not in the shortcut presets), ReShade/GShade looks on or off (`looks_key`), The other app's key (`[capture.video] external_key`, the only key that may use Win, e.g. Win+Alt+R), note "F10 always hides the game interface"; the capture options themselves are on Image > Capture. **Report a problem**: Recording, Light capture, Lighting snapshot, and Frame Capture in developer mode. **While Apex is open**: Search the settings, Peek at the game behind the menu, Compare the picture without its filters. |
 | Compatibility | **Compatibility** card: Game version; Platform (Windows, Steam Deck (Proton), Linux (Proton), macOS (Wine) or Wine); Sims3SettingsSetter Installed / Not installed; DXVK Installed / Not in use (WineD3D) (under Wine without DXVK) / Not installed; Sims 3 Modernization Installed and Sims 3 Performance Patch Installed / Settings to change / Restart the game to apply, each only when loaded (see **Other performance mods** below); RTX Remix bridge Installed (only under the bridge); Features Running / Starting… / Off (old combined build found); on a Steam Deck, a *Steam Deck* group with a note and **Load Performance**, which loads the Performance preset without its lighting part; *Recommended* group while one is missing or the Sims 3 Performance Patch settings should change; an *Optional* group with the RTX Remix bridge (what it does and Download) while DXVK runs inside the game; on Windows, a folded *RTX Remix bridge: how to install* (the steps, the EA app step only under `TS3.exe`, Download and Open Game\Bin) or, once installed, *RTX Remix bridge: how to remove* (removal and where its logs are); Details (the raw S3SS summary and the settings migration note) |
-| About | "Apex Radiance for The Sims 3", "Version X" (or "Version X - Developer mode"), a *Credits* group, including the scene update safety contribution by @rodneypantonial |
+| About | "Apex Radiance for The Sims 3", "Version X" (or "Version X - Developer mode"), a *Credits* group, including the scene update safety contribution by @rodneypantonial, and the folded *Third-party licenses* section |
 
 There is no per-page or per-card reset. Each row with a default shows a changed dot and, on hover, its own Reset
 button; Settings > Menu has the whole-mod reset.
@@ -499,9 +499,12 @@ credited in Settings > About.
 "Apex Radiance by @loinyx."; "Sims3SettingsSetter by sims3fiend: project origin and framework reference."; "FXAA 3.11:
 Timothy Lottes (NVIDIA)."; "FidelityFX CAS: AMD (MIT)."; "Upper-floor ground light: Arro's technique, adapted in Apex
 Radiance."; "Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga."; "Thanks to @boringbones
-for testing every build."; "RTX Remix bridge: NVIDIA (MIT), ported to The Sims 3 by dalexlol and alexvixell35-stack in
+for testing every build."; "Looks and Capture: contributed by @ModestPixels."; "ReShade shaders in Looks: CeeJay.dk
+(SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint)."; "RTX Remix bridge: NVIDIA (MIT), ported to The Sims 3 by dalexlol and alexvixell35-stack in
 sims3-modernization; DXVK by Philip Rebohle (zlib)."; "Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et
-al. (MIT), Lucide icons (ISC)." Arro's technique is also credited in the README. Functional notices about official
+al. (MIT), Lucide icons (ISC)." Under them, a folded *Third-party licenses* section shows the full licence texts of
+the ReShade shaders (`third_party/reshade_shaders/reshade_licenses.h`, from `LICENSES.md`) as wrapped muted text, untranslated.
+Arro's technique is also credited in the README. Functional notices about official
 S3SS's own fix ("Already handled by Sims3SettingsSetter (its Split-Level Lighting Fix is on)") are shown where relevant;
 Sims3SettingsSetter also appears in compatibility notices, detection, the recommendation card and the settings migration.
 

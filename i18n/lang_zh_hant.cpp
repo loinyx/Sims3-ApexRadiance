@@ -977,6 +977,9 @@ const I18n::Pair kPairs[] = {
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS：AMD（MIT）。"},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "上層樓地面光：Arro 的技術，由 Apex Radiance 改編。"},
     {"Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC).", "函式庫與授權：Dear ImGui（MIT）、Microsoft Detours（MIT）、toml++（MIT）、SMAA - Jorge Jimenez 等人（MIT）、Lucide 圖示（ISC）。"},
+    {"ReShade shaders in Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).", "Looks 中的 ReShade 著色器：CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint)."},
+    {"Looks and Capture: contributed by @ModestPixels.", "Looks 和 Capture：由 @ModestPixels 貢獻。"},
+    {"Third-party licenses", "第三方授權"},
     {"Welcome · step {} of {}", "歡迎 · 第 {} 步，共 {} 步"},
     {"A companion mod by sims3fiend", "sims3fiend 製作的搭配模組"},
     {"Installed; you're all set", "已安裝；一切就緒"},
@@ -2862,6 +2865,9 @@ const I18n::Pair kPairs[] = {
     {"Video saved: {} · {} MB", "影片已儲存：{} · {} MB"},
     {"{} left", "剩餘 {}"},
     {"{} stops", "{} 停止"},
+    {"Warm evening", "溫暖傍晚"},
+    {"Cinematic", "電影感"},
+    {"Soft vintage", "柔和復古"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::ChineseTraditional, kPairs, std::size(kPairs));

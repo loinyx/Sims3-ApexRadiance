@@ -22,8 +22,10 @@ static bool IEquals(const std::string& a, const std::string& b)
 
 int FindShader(const std::string& technique, const std::string& file)
 {
+    // GShade renamed SweetFX's HDR technique of FakeHDR.fx to FakeHDR; its presets still name it so
+    const std::string& t = technique == "FakeHDR" && IEquals(file, "FakeHDR.fx") ? std::string("HDR") : technique;
     for (int i = 0; i < ShaderCount(); ++i)
-        if (technique == Shader(i).technique && IEquals(file, Shader(i).file)) return i;
+        if (t == Shader(i).technique && IEquals(file, Shader(i).file)) return i;
     return -1;
 }
 

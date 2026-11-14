@@ -27,13 +27,14 @@ written for ReShade's runtime, not for shader model 3.0 as the game uses it.
 
 ## How Apex Radiance solves it
 
-The shaders a look uses are ported once to ps_3_0 with their maths unchanged (`third_party/reshade_shaders`); a
-generated header embeds them in the ASI and they are compiled by Apex's shader cache the first time the feature is
+The shaders a look uses are ported once to ps_3_0 with their maths unchanged (`third_party/reshade_shaders`, see
+[Shader sources and licences](#shader-sources-and-licences)); a generated header embeds them in the ASI and they are compiled by Apex's shader cache the first time the feature is
 turned on. At run time Apex reads the chosen preset, runs its enabled techniques in the preset's `TechniqueSorting`
 order with its values, and blends the result over the picture by *Strength*.
 
 1. The look is a reference to a source and a relative path: `looks:<file>` (Apex Radiance\Looks\), `gshade:<file>`
-   (GShade's folder, recursive) or `apex:<name>` (a built-in Apex look, embedded .ini text; none yet). Apex never
+   (GShade's folder, recursive) or `apex:<name>` (a built-in Apex look, embedded .ini text, read-only; see
+   [Built-in looks](#built-in-looks)). Apex never
    stores an absolute path and never writes in GShade's folder.
 2. The run list is the preset's enabled techniques, plus shaders added here (at the end), in the player's own order
    when one was set. Techniques Apex has no port for are listed as *can't run here*.
@@ -66,6 +67,51 @@ that opens to their names. *Add a shader* opens a list of every built-in shader 
 file with the same name gets a numbered name ("Name-1.ini"), the same file is reused; a file without `Techniques=` or
 `TechniqueSorting=` is refused. *Save as a new look…* writes Looks\<name>.ini (replacing a look of that name after a
 note) with the run list, the switches and the edited values, then selects it.
+
+## Built-in looks
+
+Five looks ship inside the ASI (`kBuiltInLooks` in `features/looks_preset.cpp`) and are listed first, under *Apex
+looks*, with translated names. They use only the ported shaders, with moderate values for a life-simulation game. They
+are read-only: edits are kept as tweaks like any look's, and *Save as a new look…* copies one into the Looks folder.
+
+| Look | Shaders in run order | Key values |
+|---|---|---|
+| Natural | Levels, Vibrance, LumaSharpen | Black point 4, white point 250; Vibrance 0.12; sharpening 0.40, limit 0.025 |
+| Warm evening | LiftGammaGain, Tonemap, Vignette | Gain 1.04 / 1.01 / 0.95; Tonemap saturation 0.03, defog 0.015 of blue; vignette amount -0.5 |
+| Cinematic | Curves, Technicolor2, Tonemap, Vignette | Luma contrast 0.15 (Catmull-Rom); Technicolor2 strength 0.25; Tonemap saturation -0.10; vignette amount -0.7 |
+| Soft vintage | HDR (FakeHDR), Curves, Tint (Sepia), Vignette | HDR power 1.1, radii 0.793 / 0.85; contrast 0.06; tint strength 0.15; vignette amount -0.6 |
+| Vivid | Vibrance, Colourfulness, CAS | Vibrance 0.20; colourfulness 0.30; CAS sharpening 0.5 |
+
+`tools/looks_test` parses each one with the real loader and checks every technique and value against the shader table.
+
+## Shader sources and licences
+
+Each port is the author's `.fx` from the author's public repository, with only mechanical ps_3_0 changes (uniforms in
+constant registers, includes and techniques replaced, ReShade's sampler names mapped to Apex's). The table of files,
+repositories, authors and licences, and the licence texts, are in
+[third_party/reshade_shaders/LICENSES.md](../../third_party/reshade_shaders/LICENSES.md); Settings > About shows the
+texts under *Third-party licenses*.
+
+| Source | Shaders | Licence |
+|---|---|---|
+| [CeeJayDK/SweetFX](https://github.com/CeeJayDK/SweetFX) | CAS (AMD's notice), Curves, DPX, FakeHDR, Levels, LiftGammaGain, LumaSharpen, Sepia (Tint), Technicolor, Technicolor2, Tonemap, Vibrance, Vignette | MIT (CAS: AMD's MIT notice in the file) |
+| [crosire/reshade-shaders](https://github.com/crosire/reshade-shaders/tree/legacy), `legacy` | AdaptiveSharpen, Colourfulness (bacondither) | BSD 2-Clause style, in the file |
+| [prod80/prod80-ReShade-Repository](https://github.com/prod80/prod80-ReShade-Repository) | PD80 04 Selective Color | MIT |
+| [Daodan317081/reshade-shaders](https://github.com/Daodan317081/reshade-shaders) | RetroTint | BSD 3-Clause |
+
+The earlier ports came from GShade's copies, which differ from the authors' code; the authors' versions replace them:
+
+- GShade's dithering branches (`GSHADE_DITHER`, `TriDither`) are gone from every port and from `looks_common.hlsl`.
+- FakeHDR uses the author's names again: technique `HDR`, uniforms `HDRPower`, `radius1`, `radius2`. GShade renamed
+  them `FakeHDR`, `fHDRPower`, `fradius1`, `fradius2`; a preset with GShade's names is read through those names
+  (`FindShader`, `PresetValues`), checked by `tools/looks_test`.
+- Colourfulness: `wpmean` squares again (GShade multiplied by 2), the soft-limit floor is `1e-7` again, and
+  `col_noise` defaults to on as in the `.fx`.
+- Curves: the split formula picks per channel again (GShade switched all three channels when any one was below 0.5).
+- LumaSharpen: GShade's `inversedAttribution` option is gone; Vibrance: GShade's `Vibrance_Luma` uniform is gone
+  (commented out in the `.fx`).
+- AdaptiveSharpen, CAS, Levels, Tonemap and the other GShade "light optimisations" (reordered or folded
+  expressions, `const`, overloaded helpers) are back to the authors' code.
 
 ## Settings
 
@@ -106,7 +152,7 @@ refused. Built-in looks (`apex:`) need no file.
 ## Limitations
 
 - Only the 17 ported shaders run (Levels, Technicolor2, RetroTint, DPX, AdaptiveSharpen, Vibrance, Tint (Sepia),
-  Tonemap, Colourfulness, LumaSharpen, CAS, Curves, Vignette, Technicolor, FakeHDR, PD80 Selective Color,
+  Tonemap, Colourfulness, LumaSharpen, CAS, Curves, Vignette, Technicolor, HDR (FakeHDR), PD80 Selective Color,
   LiftGammaGain); other techniques of a preset are listed as *can't run here*.
 - `PreprocessorDefinitions` of a preset are not applied: the ports are compiled with the .fx defaults.
 - *Reset all settings* resets the switch, Strength, Applies to and Order; the chosen look and its edits stay.
@@ -134,6 +180,8 @@ refused. Built-in looks (`apex:`) need no file.
 - **A two-pane menu** (run list beside a values pane): it did not fit the 400-unit minimum width or text size 200%;
   each shader's values now open under its row.
 - **Clarity, HighPassSharp and FilmicPass ports:** removed, no licence in their sources.
+- **Ports of GShade's copies of the shaders:** GShade edited the maths, names and notices; the ports follow the
+  authors' repositories instead.
 
 ## See also
 

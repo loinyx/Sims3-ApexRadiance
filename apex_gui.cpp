@@ -39,6 +39,7 @@
 #include "shader_cache.h"
 #include "scene_dither.h"
 #include "scene_target.h"
+#include "third_party/reshade_shaders/reshade_licenses.h"
 #include "sim_occlusion.h"
 #include "ui/i18n.h"
 #include "looks.h"
@@ -3415,10 +3416,23 @@ void AboutTab() {
         CreditLine("Upper-floor ground light: Arro's technique, adapted in Apex Radiance.");
         CreditLine("Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.");
         CreditLine("Scene update safety: contribution by @rodneypantonial.");
+        CreditLine("Looks and Capture: contributed by @ModestPixels.");
         CreditLine("Restart host: adapted from Dalexlol's wrapper in sims3-modernization.");
         CreditLine("Thanks to @boringbones for testing every build.");
         CreditLine("RTX Remix bridge: NVIDIA (MIT), ported to The Sims 3 by dalexlol and alexvixell35-stack in sims3-modernization; DXVK by Philip Rebohle (zlib).");
+        CreditLine("ReShade shaders in Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).");
         CreditLine("Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC).");
+        if (ApexUi::BeginAdvanced("Licenses##About", "Third-party licenses")) {
+            // Licence texts stay as written (untranslated)
+            for (const auto& l : ReShadeShaders::kLicenses) {
+                ImGui::TextUnformatted(l.title);
+                ImGui::PushStyleColor(ImGuiCol_Text, Col(VioletTheme::kTextMuted));
+                ImGui::TextWrapped("%s", l.text);
+                ImGui::PopStyleColor();
+                ApexUi::Gap(ApexUi::kSpace2);
+            }
+            ApexUi::EndAdvanced();
+        }
     }
     ApexUi::EndCard();
     ImGui::PopID();

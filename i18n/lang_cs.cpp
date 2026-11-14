@@ -977,6 +977,9 @@ const I18n::Pair kPairs[] = {
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT)."},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "Světlo na zemi z horních pater: technika od Arro, upravená v Apex Radiance."},
     {"Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC).", "Knihovny a licence: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA – Jorge Jimenez a kol. (MIT), ikony Lucide (ISC)."},
+    {"ReShade shaders in Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).", "Shadery ReShade v Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint)."},
+    {"Looks and Capture: contributed by @ModestPixels.", "Looks a Capture: příspěvek od @ModestPixels."},
+    {"Third-party licenses", "Licence třetích stran"},
     {"Welcome · step {} of {}", "Vítej · krok {} z {}"},
     {"A companion mod by sims3fiend", "Doprovodný mod od sims3fiend"},
     {"Installed; you're all set", "Nainstalováno; vše je připraveno"},
@@ -2862,6 +2865,9 @@ const I18n::Pair kPairs[] = {
     {"Video saved: {} · {} MB", "Video uloženo: {} · {} MB"},
     {"{} left", "Zbývá {}"},
     {"{} stops", "{} zastaví"},
+    {"Warm evening", "Teplý večer"},
+    {"Cinematic", "Filmový"},
+    {"Soft vintage", "Jemné vintage"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Czech, kPairs, std::size(kPairs));

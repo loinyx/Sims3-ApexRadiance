@@ -977,6 +977,9 @@ const I18n::Pair kPairs[] = {
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT)."},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "Felső szinti talajfény: Arro technikája, az Apex Radiance-hez igazítva."},
     {"Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC).", "Könyvtárak és licencek: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez és mtsai. (MIT), Lucide ikonok (ISC)."},
+    {"ReShade shaders in Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).", "ReShade shaderek a Looks funkcióban: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint)."},
+    {"Looks and Capture: contributed by @ModestPixels.", "Looks és Capture: @ModestPixels hozzájárulása."},
+    {"Third-party licenses", "Harmadik felek licencei"},
     {"Welcome · step {} of {}", "Üdvözlés · {}. lépés / {}"},
     {"A companion mod by sims3fiend", "Kiegészítő mod sims3fiendtől"},
     {"Installed; you're all set", "Telepítve; minden rendben"},
@@ -2862,6 +2865,9 @@ const I18n::Pair kPairs[] = {
     {"Video saved: {} · {} MB", "Videó mentve: {} · {} MB"},
     {"{} left", "Hátravan: {}"},
     {"{} stops", "{} leállítja"},
+    {"Warm evening", "Meleg este"},
+    {"Cinematic", "Filmes"},
+    {"Soft vintage", "Lágy vintage"},
     {nullptr, nullptr},
 };
 const I18n::LangTable kTable(I18n::Lang::Hungarian, kPairs, std::size(kPairs));

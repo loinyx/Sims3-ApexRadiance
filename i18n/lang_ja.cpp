@@ -977,6 +977,9 @@ const I18n::Pair kPairs[] = {
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD（MIT）。"},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "上の階からの地面ライト: Arroの手法をApex Radianceで応用。"},
     {"Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC).", "ライブラリとライセンス: Dear ImGui（MIT）、Microsoft Detours（MIT）、toml++（MIT）、SMAA - Jorge Jimenez et al.（MIT）、Lucideアイコン（ISC）。"},
+    {"ReShade shaders in Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).", "Looks の ReShade シェーダー: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint)."},
+    {"Looks and Capture: contributed by @ModestPixels.", "Looks と Capture: @ModestPixels による貢献。"},
+    {"Third-party licenses", "サードパーティのライセンス"},
     {"Welcome · step {} of {}", "ようこそ · ステップ {} / {}"},
     {"A companion mod by sims3fiend", "sims3fiend作の関連MOD"},
     {"Installed; you're all set", "インストール済み。準備完了です"},
@@ -2862,6 +2865,9 @@ const I18n::Pair kPairs[] = {
     {"Video saved: {} · {} MB", "動画を保存しました：{} · {} MB"},
     {"{} left", "残り {}"},
     {"{} stops", "{} で停止"},
+    {"Warm evening", "暖かな夕暮れ"},
+    {"Cinematic", "シネマティック"},
+    {"Soft vintage", "ソフトビンテージ"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Japanese, kPairs, std::size(kPairs));

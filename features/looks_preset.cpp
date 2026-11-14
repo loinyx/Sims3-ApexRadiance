@@ -168,7 +168,13 @@ std::vector<float> PresetValues(const Preset& preset, const LooksShader& d)
         const LooksParam& p = d.params[i];
         for (int c = 0; c < 4; ++c) v[i * 4 + c] = p.def[c];
         if (!sec) continue;
-        const auto it = sec->find(p.key);
+        auto it = sec->find(p.key);
+        if (it == sec->end() && !_stricmp(d.file, "FakeHDR.fx")) // GShade's names for SweetFX's FakeHDR uniforms
+        {
+            const std::string key(p.key);
+            const char* gshade = key == "HDRPower" ? "fHDRPower" : key == "radius1" ? "fradius1" : key == "radius2" ? "fradius2" : nullptr;
+            if (gshade) it = sec->find(gshade);
+        }
         if (it == sec->end()) continue;
         const std::vector<std::string> parts = SplitList(it->second);
         for (int c = 0; c < p.comps && c < (int)parts.size(); ++c)
@@ -270,9 +276,60 @@ std::vector<LookItem> ListLooks()
     return out;
 }
 
-// The built-in looks are added in a later step (embedded .ini text, one entry per look)
-std::vector<std::string> BuiltInLooks() { return {}; }
-const char* BuiltInLookText(const std::string&) { return nullptr; }
+// The built-in looks: ReShade preset text over the ported shaders only, with moderate values (no crushed blacks, no
+// neon). The names are English menu keys (the menu shows them translated). tools/looks_test checks every technique and
+// value against the shader table.
+namespace {
+struct BuiltInLook { const char* name; const char* ini; };
+const BuiltInLook kBuiltInLooks[] = {
+    { "Natural",
+      "Techniques=Levels@Levels.fx,Vibrance@Vibrance.fx,LumaSharpen@LumaSharpen.fx\n"
+      "TechniqueSorting=Levels@Levels.fx,Vibrance@Vibrance.fx,LumaSharpen@LumaSharpen.fx\n\n"
+      "[Levels.fx]\nBlackPoint=4\nWhitePoint=250\nHighlightClipping=0\n\n"
+      "[LumaSharpen.fx]\nsharp_strength=0.400000\nsharp_clamp=0.025000\npattern=1\noffset_bias=1.000000\nshow_sharpen=0\n\n"
+      "[Vibrance.fx]\nVibrance=0.120000\nVibranceRGBBalance=1.000000,1.000000,1.000000\n" },
+    { "Warm evening",
+      "Techniques=LiftGammaGain@LiftGammaGain.fx,Tonemap@Tonemap.fx,Vignette@Vignette.fx\n"
+      "TechniqueSorting=LiftGammaGain@LiftGammaGain.fx,Tonemap@Tonemap.fx,Vignette@Vignette.fx\n\n"
+      "[LiftGammaGain.fx]\nRGB_Lift=1.000000,1.000000,1.000000\nRGB_Gamma=1.000000,1.000000,1.000000\nRGB_Gain=1.040000,1.010000,0.950000\n\n"
+      "[Tonemap.fx]\nGamma=1.000000\nExposure=0.000000\nSaturation=0.030000\nBleach=0.000000\nDefog=0.015000\nFogColor=0.000000,0.000000,1.000000\n\n"
+      "[Vignette.fx]\nType=0\nRatio=1.000000\nRadius=2.000000\nAmount=-0.500000\nSlope=2\nCenter=0.500000,0.500000\n" },
+    { "Cinematic",
+      "Techniques=Curves@Curves.fx,Technicolor2@Technicolor2.fx,Tonemap@Tonemap.fx,Vignette@Vignette.fx\n"
+      "TechniqueSorting=Curves@Curves.fx,Technicolor2@Technicolor2.fx,Tonemap@Tonemap.fx,Vignette@Vignette.fx\n\n"
+      "[Curves.fx]\nMode=0\nFormula=4\nContrast=0.150000\n\n"
+      "[Technicolor2.fx]\nColorStrength=0.200000,0.200000,0.200000\nBrightness=1.000000\nSaturation=1.000000\nStrength=0.250000\n\n"
+      "[Tonemap.fx]\nGamma=1.000000\nExposure=0.000000\nSaturation=-0.100000\nBleach=0.000000\nDefog=0.000000\nFogColor=0.000000,0.000000,1.000000\n\n"
+      "[Vignette.fx]\nType=0\nRatio=1.000000\nRadius=2.000000\nAmount=-0.700000\nSlope=2\nCenter=0.500000,0.500000\n" },
+    { "Soft vintage",
+      "Techniques=HDR@FakeHDR.fx,Curves@Curves.fx,Tint@Sepia.fx,Vignette@Vignette.fx\n"
+      "TechniqueSorting=HDR@FakeHDR.fx,Curves@Curves.fx,Tint@Sepia.fx,Vignette@Vignette.fx\n\n"
+      "[Curves.fx]\nMode=0\nFormula=4\nContrast=0.060000\n\n"
+      "[FakeHDR.fx]\nHDRPower=1.100000\nradius1=0.793000\nradius2=0.850000\n\n"
+      "[Sepia.fx]\nTint=0.550000,0.430000,0.420000\nStrength=0.150000\n\n"
+      "[Vignette.fx]\nType=0\nRatio=1.000000\nRadius=2.000000\nAmount=-0.600000\nSlope=2\nCenter=0.500000,0.500000\n" },
+    { "Vivid",
+      "Techniques=Vibrance@Vibrance.fx,Colourfulness@Colourfulness.fx,ContrastAdaptiveSharpen@CAS.fx\n"
+      "TechniqueSorting=Vibrance@Vibrance.fx,Colourfulness@Colourfulness.fx,ContrastAdaptiveSharpen@CAS.fx\n\n"
+      "[CAS.fx]\nContrast=0.000000\nSharpening=0.500000\n\n"
+      "[Colourfulness.fx]\ncolourfulness=0.300000\nlim_luma=0.700000\nenable_dither=0\ncol_noise=1\nbackbuffer_bits=8.000000\n\n"
+      "[Vibrance.fx]\nVibrance=0.200000\nVibranceRGBBalance=1.000000,1.000000,1.000000\n" },
+};
+} // namespace
+
+std::vector<std::string> BuiltInLooks()
+{
+    std::vector<std::string> out;
+    for (const auto& l : kBuiltInLooks) out.push_back(l.name);
+    return out;
+}
+
+const char* BuiltInLookText(const std::string& name)
+{
+    for (const auto& l : kBuiltInLooks)
+        if (name == l.name) return l.ini;
+    return nullptr;
+}
 
 // ============================================================================================== storing
 bool ValidLookFileName(const std::string& name)

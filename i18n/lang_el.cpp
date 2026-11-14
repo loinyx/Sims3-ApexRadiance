@@ -977,6 +977,9 @@ const I18n::Pair kPairs[] = {
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT)."},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "Φως εδάφους από πάνω ορόφους: τεχνική του Arro, προσαρμοσμένη στο Apex Radiance."},
     {"Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC).", "Βιβλιοθήκες και άδειες: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), εικονίδια Lucide (ISC)."},
+    {"ReShade shaders in Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).", "Shaders του ReShade στο Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint)."},
+    {"Looks and Capture: contributed by @ModestPixels.", "Looks και Capture: συνεισφορά του @ModestPixels."},
+    {"Third-party licenses", "Άδειες τρίτων"},
     {"Welcome · step {} of {}", "Καλώς ήρθες · βήμα {} από {}"},
     {"A companion mod by sims3fiend", "Ένα συνοδευτικό mod του sims3fiend"},
     {"Installed; you're all set", "Εγκαταστάθηκε· είσαι έτοιμος"},
@@ -2862,6 +2865,9 @@ const I18n::Pair kPairs[] = {
     {"Video saved: {} · {} MB", "Το βίντεο αποθηκεύτηκε: {} · {} MB"},
     {"{} left", "Απομένουν {}"},
     {"{} stops", "{} για διακοπή"},
+    {"Warm evening", "Ζεστό βράδυ"},
+    {"Cinematic", "Κινηματογραφικό"},
+    {"Soft vintage", "Απαλό vintage"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Greek, kPairs, std::size(kPairs));

@@ -434,6 +434,7 @@
     <ClInclude Include="third_party\smaa\SearchTex.h" />
     <ClInclude Include="third_party\smaa\smaa_hlsl.h" />
     <ClInclude Include="third_party\reshade_shaders\reshade_shaders_hlsl.h" />
+    <ClInclude Include="third_party\reshade_shaders\reshade_licenses.h" />
     <ClInclude Include="ui\icons.h" />
     <ClInclude Include="ui\logo.h" />
     <ClInclude Include="ui\logo_data.h" />

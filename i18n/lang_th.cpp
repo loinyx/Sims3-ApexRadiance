@@ -977,6 +977,9 @@ const I18n::Pair kPairs[] = {
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT)"},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.", "แสงบนพื้นจากชั้นบน: เทคนิคของ Arro ปรับใช้ใน Apex Radiance"},
     {"Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC).", "ไลบรารีและสัญญาอนุญาต: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez และคณะ (MIT), ไอคอน Lucide (ISC)"},
+    {"ReShade shaders in Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).", "เชดเดอร์ ReShade ใน Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint)."},
+    {"Looks and Capture: contributed by @ModestPixels.", "Looks และ Capture: ผลงานจาก @ModestPixels."},
+    {"Third-party licenses", "สัญญาอนุญาตของบุคคลที่สาม"},
     {"Welcome · step {} of {}", "ยินดีต้อนรับ · ขั้นที่ {} จาก {}"},
     {"A companion mod by sims3fiend", "ม็อดคู่หูโดย sims3fiend"},
     {"Installed; you're all set", "ติดตั้งแล้ว พร้อมใช้งาน"},
@@ -2862,6 +2865,9 @@ const I18n::Pair kPairs[] = {
     {"Video saved: {} · {} MB", "บันทึกวิดีโอแล้ว: {} · {} MB"},
     {"{} left", "เหลือ {}"},
     {"{} stops", "{} หยุด"},
+    {"Warm evening", "ยามเย็นอบอุ่น"},
+    {"Cinematic", "แบบภาพยนตร์"},
+    {"Soft vintage", "วินเทจนุ่มนวล"},
     {nullptr, nullptr},
 };
 const I18n::LangTable kTable(I18n::Lang::Thai, kPairs, std::size(kPairs));

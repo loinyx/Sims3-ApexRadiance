@@ -1,55 +1,33 @@
-// Generated from Curves.fx by tools/gen_gshade_shaders.py
-// GShade looks: ReShade -> ps_3_0 compatibility layer. Prepended to every ported shader.
-// Only declarations live here; the shaders' maths stay as written in the GShade .fx files.
-#define GSHADE_DITHER 0 // GShade.ini UseDithering=0
-#define __RENDERER__ 0x9000 // D3D9, as GShade sees TS3: shaders take their D3D9 branches
-#define __RESHADE__ 60703   // GShade 5.2.4 is based on ReShade 6.7.3
-float4 gs_buf : register(c0);       // 1/W, 1/H, W, H of the back buffer
-float4 gs_aux : register(c1);       // pass-specific
-float4 gs_depth : register(c2);     // x = far plane (ReShade RESHADE_DEPTH_LINEARIZATION_FAR_PLANE), y = reversed
-#define BUFFER_RCP_WIDTH   gs_buf.x
-#define BUFFER_RCP_HEIGHT  gs_buf.y
-#define BUFFER_WIDTH       gs_buf.z
-#define BUFFER_HEIGHT      gs_buf.w
-#define BUFFER_PIXEL_SIZE  gs_buf.xy
-#define BUFFER_SCREEN_SIZE gs_buf.zw
-#define BUFFER_COLOR_BIT_DEPTH 8
-#define rcp(x) (1.0 / (x))
-// ReShade's D3D9 code generator emulates texel offsets this way (ps_3_0 has no offset overload)
-#define tex2Doffset(s, c, o) tex2D(s, (c) + (o) * BUFFER_PIXEL_SIZE)
-#define tex2Dlodoffset(s, c, o) tex2Dlod(s, (c) + float4((o) * BUFFER_PIXEL_SIZE, 0.0, 0.0))
-sampler2D BackBuffer : register(s0);
 /**
  * Curves
  * by Christian Cann Schuldt Jensen ~ CeeJay.dk
- * License: MIT
  *
  * Curves, uses S-curves to increase contrast, without clipping highlights and shadows.
- *
- *
- * The MIT License (MIT)
- * 
- * Copyright (c) 2014 CeeJayDK
- * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
  */
- // Lightly optimized by Marot Satil for the GShade project.
+
+// Ported to ps_3_0 for Apex Radiance (Looks) from https://github.com/CeeJayDK/SweetFX/blob/93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361/Shaders/SweetFX/Curves.fx
+// Licence of the repository, which covers this file:
+// The MIT License (MIT)
+//
+// Copyright (c) 2014 CeeJayDK
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
 float Mode : register(c8);
 float Formula : register(c9);
@@ -57,15 +35,10 @@ float Formula : register(c9);
 float Contrast : register(c10);
 
 
-
-#if GSHADE_DITHER
-
-#endif
-
 float4 CurvesPass(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_Target
 {
 	float4 colorInput = tex2D(BackBuffer, texcoord);
-	const float3 lumCoeff = float3(0.2126, 0.7152, 0.0722);  //Values to calculate luma with
+	float3 lumCoeff = float3(0.2126, 0.7152, 0.0722);  //Values to calculate luma with
 	float Contrast_blend = Contrast; 
 	const float PI = 3.1415927;
 
@@ -75,9 +48,9 @@ float4 CurvesPass(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_Ta
 
 	// -- Calculate Luma and Chroma if needed --
 	//calculate luma (grey)
-	const float luma = dot(lumCoeff, colorInput.rgb);
+	float luma = dot(lumCoeff, colorInput.rgb);
 	//calculate chroma
-	const float3 chroma = colorInput.rgb - luma;
+	float3 chroma = colorInput.rgb - luma;
 
 	// -- Which value to put through the contrast formula? --
 	// I name it x because makes it easier to copy-paste to Graphtoy or Wolfram Alpha or another graphing program
@@ -167,9 +140,9 @@ float4 CurvesPass(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_Ta
 	// -- Curve 10 --
 	if (Formula == 9)
 	{
-		const float3 xstep = step(x, 0.5); //tenary might be faster here
-		const float3 xstep_shift = (xstep - 0.5);
-		const float3 shifted_x = x + xstep_shift;
+		float3 xstep = step(x, 0.5); //tenary might be faster here
+		float3 xstep_shift = (xstep - 0.5);
+		float3 shifted_x = x + xstep_shift;
 
 		x = abs(xstep - sqrt(-shifted_x * shifted_x + shifted_x)) - xstep_shift;
 
@@ -199,10 +172,7 @@ float4 CurvesPass(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_Ta
 
 		a = x * x * 2.0;
 		b = (2.0 * -x + 4.0) * x - 1.0;
-		if (x.r < 0.5 || x.g < 0.5 || x.b < 0.5)
-			x = a;
-		else
-			x = b;
+		x = (x < 0.5) ? a : b;
 	}
 
 	/*-----------------------------------------------------------.
@@ -217,21 +187,17 @@ float4 CurvesPass(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_Ta
 	else if (Mode == 1) // Only Chroma
 	{
 		x = x * 2.0 - 1.0; //adjust the Chroma range back to -1 -> 1
-		const float3 color = luma + x; //Luma + Chroma
+		float3 color = luma + x; //Luma + Chroma
 		colorInput.rgb = lerp(colorInput.rgb, color, Contrast_blend); //Blend by Contrast
 	}
 	else // Both Luma and Chroma
 	{
-		const float3 color = x;  //if the curve should be applied to both Luma and Chroma
+		float3 color = x;  //if the curve should be applied to both Luma and Chroma
 		colorInput.rgb = lerp(colorInput.rgb, color, Contrast_blend); //Blend by Contrast
 	}
 
-#if GSHADE_DITHER
-	return float4(colorInput.rgb + TriDither(colorInput.rgb, texcoord, BUFFER_COLOR_BIT_DEPTH), colorInput.a);
-#else
 	return colorInput;
-#endif
 }
 
-// ---- ps_3_0 entry points (GShade looks) ----
+// ---- ps_3_0 entry points (Looks) ----
 float4 gs_CurvesPass(float2 vp : VPOS, float2 uv : TEXCOORD0) : COLOR0 { float4 c = CurvesPass(float4(vp + 0.5, 0.0, 1.0), uv); return float4(c.rgb, 1.0); }

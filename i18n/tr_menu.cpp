@@ -1124,6 +1124,9 @@ const I18n::Entry kEntries[] = {
      "Bibliotecas e licenças: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), ícones Lucide (ISC).",
      "Bibliotecas y licencias: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), iconos Lucide (ISC).",
      "Bibliothèques et licences : Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), icônes Lucide (ISC)."},
+    {"ReShade shaders in Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).", "Shaders do ReShade em Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).", "Shaders de ReShade en Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).", "Shaders ReShade de Looks : CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint)."},
+    {"Looks and Capture: contributed by @ModestPixels.", "Looks e Capture: contribuição de @ModestPixels.", "Looks y Capture: contribución de @ModestPixels.", "Looks et Capture : contribution de @ModestPixels."},
+    {"Third-party licenses", "Licenças de terceiros", "Licencias de terceros", "Licences tierces"},
     // ---- welcome tour ----
     {"Welcome \xC2\xB7 step {} of {}", "Boas-vindas · passo {} de {}", "Bienvenida · paso {} de {}", "Bienvenue · étape {} sur {}"},
     {"A companion mod by sims3fiend", "Um mod parceiro do sims3fiend", "Un mod complementario de sims3fiend", "Un mod compagnon de sims3fiend"},

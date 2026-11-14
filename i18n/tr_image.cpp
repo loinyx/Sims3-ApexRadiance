@@ -809,6 +809,10 @@ const I18n::Entry kEntries[] = {
     {"Automatic", "Automático", "Automático", "Automatique"},
     {"Stock", "Padrão NVIDIA", "Estándar NVIDIA", "Réglage NVIDIA"},
     {"Always", "Sempre", "Siempre", "Toujours"},
+    // ---- Looks: built-in looks (Natural and Vivid are shared keys) ----
+    {"Warm evening", "Fim de tarde quente", "Atardecer cálido", "Soirée chaleureuse"},
+    {"Cinematic", "Cinematográfico", "Cinematográfico", "Cinématographique"},
+    {"Soft vintage", "Vintage suave", "Vintage suave", "Vintage doux"},
 };
 const I18n::Table kTable(kEntries, std::size(kEntries));
 

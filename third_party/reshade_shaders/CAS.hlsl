@@ -1,24 +1,3 @@
-// Generated from CAS.fx by tools/gen_gshade_shaders.py
-// GShade looks: ReShade -> ps_3_0 compatibility layer. Prepended to every ported shader.
-// Only declarations live here; the shaders' maths stay as written in the GShade .fx files.
-#define GSHADE_DITHER 0 // GShade.ini UseDithering=0
-#define __RENDERER__ 0x9000 // D3D9, as GShade sees TS3: shaders take their D3D9 branches
-#define __RESHADE__ 60703   // GShade 5.2.4 is based on ReShade 6.7.3
-float4 gs_buf : register(c0);       // 1/W, 1/H, W, H of the back buffer
-float4 gs_aux : register(c1);       // pass-specific
-float4 gs_depth : register(c2);     // x = far plane (ReShade RESHADE_DEPTH_LINEARIZATION_FAR_PLANE), y = reversed
-#define BUFFER_RCP_WIDTH   gs_buf.x
-#define BUFFER_RCP_HEIGHT  gs_buf.y
-#define BUFFER_WIDTH       gs_buf.z
-#define BUFFER_HEIGHT      gs_buf.w
-#define BUFFER_PIXEL_SIZE  gs_buf.xy
-#define BUFFER_SCREEN_SIZE gs_buf.zw
-#define BUFFER_COLOR_BIT_DEPTH 8
-#define rcp(x) (1.0 / (x))
-// ReShade's D3D9 code generator emulates texel offsets this way (ps_3_0 has no offset overload)
-#define tex2Doffset(s, c, o) tex2D(s, (c) + (o) * BUFFER_PIXEL_SIZE)
-#define tex2Dlodoffset(s, c, o) tex2Dlod(s, (c) + float4((o) * BUFFER_PIXEL_SIZE, 0.0, 0.0))
-sampler2D BackBuffer : register(s0);
 // LICENSE
 // =======
 // Copyright (c) 2017-2019 Advanced Micro Devices, Inc. All rights reserved.
@@ -48,7 +27,7 @@ sampler2D BackBuffer : register(s0);
 //
 //	restructured final weighting, 49 -> 48 instructions
 //
-//     delayed RCP to replace SQRT with RSQRT
+//	delayed RCP to replace SQRT with RSQRT
 //
 //	removed the saturate() from the control var as it is clamped
 //	by UI manager already, 48 -> 47 instructions
@@ -81,11 +60,32 @@ float Contrast : register(c8);
 
 float Sharpening : register(c9);
 
-
+// Ported to ps_3_0 for Apex Radiance (Looks) from https://github.com/CeeJayDK/SweetFX/blob/93ddf39b357f5da534ed6d34ba4ec8cc7dcfa361/Shaders/SweetFX/CAS.fx
+// Licence of the repository, which covers this file:
+// The MIT License (MIT)
+//
+// Copyright (c) 2014 CeeJayDK
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 #define pixel float2(BUFFER_RCP_WIDTH, BUFFER_RCP_HEIGHT)
 
-texture TexCASColor : COLOR;
-
+#define sTexColor BackBuffer // SRGBTexture: the runner sets sRGB on s0
 
 float3 CASPass(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_Target
 {	
@@ -95,33 +95,45 @@ float3 CASPass(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_Targe
 	//  g h i
 	
 
-	const float3 b = tex2Doffset(BackBuffer, texcoord, int2(0, -1)).rgb;
-	const float3 d = tex2Doffset(BackBuffer, texcoord, int2(-1, 0)).rgb;
+	float3 b = tex2Doffset(sTexColor, texcoord, int2(0, -1)).rgb;
+	float3 d = tex2Doffset(sTexColor, texcoord, int2(-1, 0)).rgb;
 	
  
 #if __RENDERER__ >= 0xb000 // If DX11 or higher
-	const float4 red_efhi = tex2DgatherR(BackBuffer, texcoord + 0.5 * pixel);
-	const float4 green_efhi = tex2DgatherG(BackBuffer, texcoord + 0.5 * pixel);
-	const float4 blue_efhi = tex2DgatherB(BackBuffer, texcoord + 0.5 * pixel);
+	float4 red_efhi = tex2DgatherR(sTexColor, texcoord + 0.5 * pixel);
+	
+	float3 e = float3( red_efhi.w, red_efhi.w, red_efhi.w);
+	float3 f = float3( red_efhi.z, red_efhi.z, red_efhi.z);
+	float3 h = float3( red_efhi.x, red_efhi.x, red_efhi.x);
+	float3 i = float3( red_efhi.y, red_efhi.y, red_efhi.y);
+	
+	float4 green_efhi = tex2DgatherG(sTexColor, texcoord + 0.5 * pixel);
+	
+	e.g = green_efhi.w;
+	f.g = green_efhi.z;
+	h.g = green_efhi.x;
+	i.g = green_efhi.y;
+	
+	float4 blue_efhi = tex2DgatherB(sTexColor, texcoord + 0.5 * pixel);
+	
+	e.b = blue_efhi.w;
+	f.b = blue_efhi.z;
+	h.b = blue_efhi.x;
+	i.b = blue_efhi.y;
 
-	const float3 e = float3( red_efhi.w, green_efhi.w, blue_efhi.w);
-	const float3 f = float3( red_efhi.z, green_efhi.z, blue_efhi.z);
-	const float3 h = float3( red_efhi.x, green_efhi.x, blue_efhi.x);
-	const float3 i = float3( red_efhi.y, green_efhi.y, blue_efhi.y);
 
+#else // If lower than DX11 (DX9 or DX10)
+	float3 e = tex2D(sTexColor, texcoord).rgb;
+	float3 f = tex2Doffset(sTexColor, texcoord, int2(1, 0)).rgb;
 
-#else // If DX9
-	const float3 e = tex2D(BackBuffer, texcoord).rgb;
-	const float3 f = tex2Doffset(BackBuffer, texcoord, int2(1, 0)).rgb;
-
-	const float3 h = tex2Doffset(BackBuffer, texcoord, int2(0, 1)).rgb;
-	const float3 i = tex2Doffset(BackBuffer, texcoord, int2(1, 1)).rgb;
+	float3 h = tex2Doffset(sTexColor, texcoord, int2(0, 1)).rgb;
+	float3 i = tex2Doffset(sTexColor, texcoord, int2(1, 1)).rgb;
 
 #endif
 
-	const float3 g = tex2Doffset(BackBuffer, texcoord, int2(-1, 1)).rgb; 
-	const float3 a = tex2Doffset(BackBuffer, texcoord, int2(-1, -1)).rgb;
-	const float3 c = tex2Doffset(BackBuffer, texcoord, int2(1, -1)).rgb;
+	float3 g = tex2Doffset(sTexColor, texcoord, int2(-1, 1)).rgb; 
+	float3 a = tex2Doffset(sTexColor, texcoord, int2(-1, -1)).rgb;
+	float3 c = tex2Doffset(sTexColor, texcoord, int2(1, -1)).rgb;
    
 
 	// Soft min and max.
@@ -130,20 +142,33 @@ float3 CASPass(float4 vpos : SV_Position, float2 texcoord : TexCoord) : SV_Targe
 	//  g h i			 h
 	// These are 2.0x bigger (factored out the extra multiply).
 	float3 mnRGB = min(min(min(d, e), min(f, b)), h);
-	mnRGB += min(mnRGB, min(min(a, c), min(g, i)));
+	float3 mnRGB2 = min(mnRGB, min(min(a, c), min(g, i)));
+	mnRGB += mnRGB2;
 
 	float3 mxRGB = max(max(max(d, e), max(f, b)), h);
-	mxRGB += max(mxRGB, max(max(a, c), max(g, i)));
+	float3 mxRGB2 = max(mxRGB, max(max(a, c), max(g, i)));
+	mxRGB += mxRGB2;
 
 	// Smooth minimum distance to signal limit divided by smooth max.
+	float3 rcpMRGB = rcp(mxRGB);
+	float3 ampRGB = saturate(min(mnRGB, 2.0 - mxRGB) * rcpMRGB);	
+	
 	// Shaping amount of sharpening.
-	const float3 wRGB = -rcp(rsqrt(saturate(min(mnRGB, 2.0 - mxRGB) * rcp(mxRGB))) * (-3.0 * Contrast + 8.0));
+	ampRGB = rsqrt(ampRGB);
+	
+	float peak = -3.0 * Contrast + 8.0;
+	float3 wRGB = -rcp(ampRGB * peak);
+
+	float3 rcpWeightRGB = rcp(4.0 * wRGB + 1.0);
 
 	//						  0 w 0
 	//  Filter shape:		   w 1 w
 	//						  0 w 0  
-	return lerp(e, saturate((((b + d) + (f + h)) * wRGB + e) * rcp(4.0 * wRGB + 1.0)), Sharpening);
+	float3 window = (b + d) + (f + h);
+	float3 outColor = saturate((window * wRGB + e) * rcpWeightRGB);
+	
+	return lerp(e, outColor, Sharpening);
 }
 
-// ---- ps_3_0 entry points (GShade looks) ----
+// ---- ps_3_0 entry points (Looks) ----
 float4 gs_CASPass(float2 vp : VPOS, float2 uv : TEXCOORD0) : COLOR0 { return float4(CASPass(float4(vp + 0.5, 0.0, 1.0), uv), 1.0); }

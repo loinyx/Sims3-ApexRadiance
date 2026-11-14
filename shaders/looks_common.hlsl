@@ -1,8 +1,6 @@
 // Looks: Apex's ReShade -> ps_3_0 compatibility layer, prepended to every ported shader (third_party/reshade_shaders).
-// Only declarations live here; the shaders' maths stay as written in their .fx files.
-#define GSHADE_DITHER 0 // GShade.ini UseDithering=0
-#define __RENDERER__ 0x9000 // D3D9, as GShade sees TS3: shaders take their D3D9 branches
-#define __RESHADE__ 60703   // GShade 5.2.4 is based on ReShade 6.7.3
+// Only declarations live here; the shaders' maths stay as written in their authors' .fx files.
+#define __RENDERER__ 0x9000 // D3D9: the shaders take their D3D9 branches
 float4 gs_buf : register(c0);       // 1/W, 1/H, W, H of the back buffer
 float4 gs_aux : register(c1);       // pass-specific
 float4 gs_depth : register(c2);     // x = far plane (ReShade RESHADE_DEPTH_LINEARIZATION_FAR_PLANE), y = reversed
