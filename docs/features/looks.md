@@ -372,7 +372,7 @@ the copy gets a numbered name, which the look then does not use); names with a f
 - **Address space:** D3DCompile's own heap takes up to about 420 MB while a few large pack shaders compile; the
   process heap then grew new segments in the middle of the largest free block and kept them there (offline: 1202 MB to
   794 MB after the first check of six packs). The process heap grows by 40 MB once before the first compile, which keeps
-  them at the bottom (1202 MB to 1154 MB, the same bytecode). Background checks pause while less than 768 MB is free.
+  them at the bottom (1202 MB to 1154 MB, the same bytecode). Background checks pause while less than 512 MB is free.
 - **GPU memory:** an effect instance not run for 120 frames (switched off, out of the look) gives its render targets
   back; the 384 MB cap counts only the ones in use. The scene depth (DepthBlur's INTZ copy) is asked for only while a
   shader that is on reads it.
