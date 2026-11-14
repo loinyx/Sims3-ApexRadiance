@@ -58,6 +58,7 @@ struct UiSettings {
     KeyChord peekKey{VK_MENU, false, false, false}; // hold to peek through the menu ([ui] peek_key)
     KeyChord pictureCompareKey{'B', false, false, false}; // hold to bypass Picture while over the menu ([ui] picture_compare_key)
     bool screenshotShortcutEnabled = true; // intercept a configurable key for filtered screenshots ([ui] screenshot_shortcut_enabled)
+    KeyChord looksKey{'L', true, true, false}; // switches the ReShade/GShade looks on and off ([ui] looks_key)
     KeyChord screenshotKey{VK_F8, false, false, false}; // F8 alone: an extra filtered screenshot (Ctrl+Shift+F8 is the lighting snapshot); the game's own C stays untouched
     // [ui] screenshot_folder: "game" (Documents\...\The Sims 3\Screenshots), "apex" (Apex Radiance\Screenshots) or "custom"
     // ([ui] screenshot_custom_folder, UTF-8; the game's folder while none is chosen or it cannot be created)

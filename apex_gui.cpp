@@ -26,6 +26,7 @@
 #include "picture.h"
 #include "recorder.h"
 #include "captures.h"
+#include "apex_capture.h"
 #include "light_diag.h"
 #include "light_probe.h"
 #include "hotkeys.h"
@@ -93,6 +94,8 @@ enum SettingsTab : int { SettingsMenu, SettingsShortcuts, SettingsProfiles, Sett
 int g_page = PageOverview;
 int g_lightingTab = LightingLamps;
 int g_colorTab = Picture::TabOverview;
+// The Color page's ReShade/GShade tab: a g_colorTab value after Picture's own tabs (Go and the overview rows keep working)
+constexpr int kColorTabLooks = Picture::TabCount;
 int g_settingsTab = SettingsMenu;
 
 // ---- menu state (render thread, inside the overlay's ImGui frame) ----
@@ -1203,11 +1206,12 @@ void ColorOverview() {
 }
 void ColorPage() {
     ApexUi::PageTitle("Color", "How the game's picture looks");
-    static const char* const kTabs[] = {"Overview","Basic", "Tones", "Color", "Detail", "Filters", "LUTs"};
-    if (g_colorTab < 0 || g_colorTab >= Picture::TabCount) g_colorTab = Picture::TabOverview;
-    int selected=g_colorTab==Picture::TabOverview ? 0 : g_colorTab==Picture::TabLuts ? 6 : g_colorTab+1;
+    static const char* const kTabs[] = {"Overview","Basic", "Tones", "Color", "Detail", "Filters", "LUTs", "ReShade/GShade"};
+    if (g_colorTab < 0 || g_colorTab > kColorTabLooks) g_colorTab = Picture::TabOverview;
+    int selected=g_colorTab==kColorTabLooks ? 7 : g_colorTab==Picture::TabOverview ? 0 : g_colorTab==Picture::TabLuts ? 6 : g_colorTab+1;
     ApexUi::TabBar("##ColorTabs", &selected, kTabs, IM_COUNTOF(kTabs));
-    g_colorTab=selected==0 ? Picture::TabOverview : selected==6 ? Picture::TabLuts : selected-1;
+    g_colorTab=selected==7 ? kColorTabLooks : selected==0 ? Picture::TabOverview : selected==6 ? Picture::TabLuts : selected-1;
+    if (g_colorTab == kColorTabLooks) { FeatureCard("GShadeLooks", IconId::SwatchBook, "ReShade/GShade", "Your ReShade or GShade preset, inside Apex"); return; }
     if(g_colorTab==Picture::TabOverview) {ColorOverview();return;}
     if(g_colorTab==Picture::TabLuts) {Picture::Get().RenderFiltersUI(true);return;}
     ColorGroupHeader(g_colorTab);
@@ -2271,6 +2275,7 @@ void ResetAllRow() {
             uiDefaults.s3ppSpinAsked = previousUi.s3ppSpinAsked; // nor the Sims 3 Performance Patch one
             ApexConfig::SetUi(uiDefaults);
             Screen::ResetDefaults(); // System > Display (not part of the undo: a device reset follows)
+            ApexCapture::Set(ApexCapture::Settings{}); // ApexCapture.ini (screenshot and video options; not part of the undo)
             OverviewRestore::Forget(OverviewRestore::Scope::Display); // (its switch has nothing to put back)
             LOG_INFO("[Menu] All settings reset to their defaults");
             ShowToast(I18n::Tr("All settings reset"), std::move(before), "All settings reset");
@@ -2379,6 +2384,7 @@ void MenuTab() {
         }
     }
     ApexUi::EndCard();
+    ApexCapture::ProfileCard(); // capture profiles: which settings the two capture cards show
     ScreenshotCaptureCard();
     if (ApexUi::BeginCard("##Maintenance")) {
         ApexUi::CardHeader(IconId::Wrench, "Settings and maintenance", "Saving, reset and recovery", nullptr, nullptr);
@@ -3417,6 +3423,8 @@ const SearchPart* SearchParts(int& count) {
         {"Color", "Tones", PageColor, &g_colorTab, Picture::TabTones, [] { PictureRows(Picture::TabTones); }},
         {"Color", "Color", PageColor, &g_colorTab, Picture::TabColor, [] { PictureRows(Picture::TabColor); }},
         {"Color", "Detail", PageColor, &g_colorTab, Picture::TabDetail, [] { PictureRows(Picture::TabDetail); }},
+        {"Color", "ReShade/GShade", PageColor, &g_colorTab, kColorTabLooks,
+         [] { FeatureCard("GShadeLooks", IconId::SwatchBook, "ReShade/GShade", "Your ReShade or GShade preset, inside Apex"); }},
         {"Ambient Occlusion", nullptr, PageAmbientOcclusion, nullptr, 0, AmbientOcclusionContent},
         {"Depth Blur", nullptr, PageDepthBlur, nullptr, 0, DepthBlurContent},
         {"Edge Smoothing", nullptr, PageEdgeSmoothing, nullptr, 0, AntiAliasingContent},
@@ -4998,8 +5006,19 @@ bool CaptureHoldKey(ApexConfig::KeyChord& out) {
 // Sims3SettingsSetter's menu (Insert alone), or a bare letter, digit or Space (it would stop that key from typing in the game).
 enum ShortcutRow : int {
     RowMenu, RowCompare, RowRefresh, RowScreenshot, RowRecorder, RowProbe, RowDiagnostics, RowFrameCapture,
-    RowSearch, RowPeek, RowPictureCompare, RowCount
+    RowSearch, RowPeek, RowPictureCompare, RowVideo, RowLooks,
+    RowProfileKey, RowProfileShot, RowProfileNext, RowExternalKey, RowCount
 };
+// Capture profile rows: their keys are text in ApexCapture.ini / the profile file (Win+ allowed on the other app's key)
+bool IsCaptureKeyRow(int row) { return row == RowProfileKey || row == RowProfileShot || row == RowProfileNext || row == RowExternalKey; }
+std::string& CaptureKeyRef(ApexCapture::Settings& s, int row) {
+    switch (row) {
+    case RowProfileKey: return s.profileKey;
+    case RowProfileShot: return s.profileShotKey;
+    case RowProfileNext: return s.keyNextProfile;
+    default: return s.externalKey;
+    }
+}
 UINT g_recHeldVk = 0;       // a refused key still held: ignored until released
 bool g_recWaitRelease = false; // recording starts only once every key is up (the click's Enter, a held chord)
 int g_recSeenFrame = -1;       // the last frame the editor was drawn: recording stops when it is not (menu closed, page left)
@@ -5017,6 +5036,18 @@ ApexConfig::KeyChord RowKey(int row) {
     case RowFrameCapture: return Hotkeys::Key(Hotkeys::Action::FrameCapture);
     case RowSearch: return ApexConfig::GetUi().searchKey;
     case RowPeek: return ApexConfig::GetUi().peekKey;
+    case RowLooks: return ApexConfig::GetUi().looksKey;
+    case RowVideo: { // ApexCapture.ini KeyRecord
+        UINT vk = 0; bool c = false, s = false, a = false, w = false;
+        if (!ApexCapture::ParseKey(ApexCapture::Get().keyRecord, vk, c, s, a, w) || w) return {};
+        return {vk, c, s, a};
+    }
+    case RowProfileKey: case RowProfileShot: case RowProfileNext: case RowExternalKey: { // text keys; a Win+ key never clashes
+        ApexCapture::Settings cs = ApexCapture::Get();
+        UINT vk = 0; bool c = false, s = false, a = false, w = false;
+        if (!ApexCapture::ParseKey(CaptureKeyRef(cs, row), vk, c, s, a, w) || w) return {0, false, false, false};
+        return {vk, c, s, a};
+    }
     default: return ApexConfig::GetUi().pictureCompareKey;
     }
 }
@@ -5032,6 +5063,12 @@ const char* RowName(int row) {
     case RowFrameCapture: return "Frame Capture";
     case RowSearch: return "Search the settings";
     case RowPeek: return "Hide the menu while held";
+    case RowVideo: return "Record a video";
+    case RowLooks: return "ReShade/GShade looks on or off";
+    case RowProfileKey: return "Key for this profile";
+    case RowProfileShot: return "One picture with this profile";
+    case RowProfileNext: return "Next profile key";
+    case RowExternalKey: return "The other app's key";
     default: return "Compare the picture without its filters";
     }
 }
@@ -5047,6 +5084,12 @@ const char* RowText(int row) {
     case RowFrameCapture: return "Records draw calls for troubleshooting";
     case RowSearch: return "Focuses the settings search field";
     case RowPeek: return "Hold the key over the menu to hide it and see the game";
+    case RowVideo: return "Press once to start, again to stop";
+    case RowLooks: return "Switches the ReShade/GShade preset off (no GPU cost) and back on";
+    case RowProfileKey: return "Switches to the profile in use from the game; each profile has its own key";
+    case RowProfileShot: return "Takes a picture with this profile without switching to it";
+    case RowProfileNext: return "Goes through the profiles in game; the same for every profile";
+    case RowExternalKey: return "Only with Recorder set to Another app: Apex presses it to start Xbox Game Bar, OBS or ShadowPlay";
     default: return "Hold the key over the menu to bypass Picture";
     }
 }
@@ -5073,7 +5116,22 @@ std::string ChordProblem(const ApexConfig::KeyChord& c, int row) {
     }
     return {};
 }
+// Capture profile rows: the text kept in ApexCapture.ini or the profile file ("" removes the key)
+void StoreCaptureKey(int row, const std::string& text) {
+    ApexCapture::Settings s = ApexCapture::Get();
+    CaptureKeyRef(s, row) = text;
+    ApexCapture::Set(s);
+    LOG_INFO(std::format("[Menu] {}: {}", RowName(row), text.empty() ? std::string("none") : text));
+}
 void StoreRowKey(int row, const ApexConfig::KeyChord& c) {
+    if (IsCaptureKeyRow(row)) { StoreCaptureKey(row, ApexConfig::KeyChordText(c)); return; }
+    if (row == RowVideo) { // kept in ApexCapture.ini (KeyRecord), not in the shortcut presets
+        ApexCapture::Settings s = ApexCapture::Get();
+        s.keyRecord = ApexConfig::KeyChordText(c);
+        ApexCapture::Set(s);
+        LOG_INFO(std::format("[Menu] {}: {}", RowName(row), s.keyRecord));
+        return;
+    }
     ApexConfig::UiSettings ui = ApexConfig::GetUi();
     const int base = ui.hotkeyPreset >= 0 && ui.hotkeyPreset < static_cast<int>(Hotkeys::Preset::Count) ? ui.hotkeyPreset : static_cast<int>(Hotkeys::Preset::FKeys);
     if (ui.hotkeyPreset != Hotkeys::kMine) ui.minePresetBase = base;
@@ -5089,6 +5147,7 @@ void StoreRowKey(int row, const ApexConfig::KeyChord& c) {
     case RowSearch: ui.searchKey = c; break;
     case RowPeek: ui.peekKey = c; break;
     case RowPictureCompare: ui.pictureCompareKey = c; break;
+    case RowLooks: ui.looksKey = c; break;
     default: break;
     }
     ui.hotkeyPreset = Hotkeys::kMine;
@@ -5122,9 +5181,24 @@ void RecordStep() {
         if (GetAsyncKeyState(static_cast<int>(g_recHeldVk)) & 0x8000) return;
         g_recHeldVk = 0;
     }
+    const bool modsDown = (GetAsyncKeyState(VK_CONTROL) & 0x8000) || (GetAsyncKeyState(VK_SHIFT) & 0x8000) || (GetAsyncKeyState(VK_MENU) & 0x8000);
+    if (IsCaptureKeyRow(g_recRow) && !modsDown && ((GetAsyncKeyState(VK_DELETE) & 0x8000) || (GetAsyncKeyState(VK_BACK) & 0x8000))) {
+        StoreCaptureKey(g_recRow, {}); // Delete or Backspace alone: no key
+        g_recRow = -1;
+        g_recNote.clear();
+        return;
+    }
     ApexConfig::KeyChord c;
     const bool holdKeyRow = g_recRow == RowPeek || g_recRow == RowPictureCompare;
     if (!(holdKeyRow ? CaptureHoldKey(c) : CaptureChordAny(c))) return;
+    // the other app's key may use the Windows key (Win+Alt+R = Xbox Game Bar); no Apex key uses it, so it never clashes
+    const bool win = g_recRow == RowExternalKey && ((GetAsyncKeyState(VK_LWIN) & 0x8000) || (GetAsyncKeyState(VK_RWIN) & 0x8000));
+    if (win) {
+        StoreCaptureKey(g_recRow, "Win+" + ApexConfig::KeyChordText(c));
+        g_recRow = -1;
+        g_recNote.clear();
+        return;
+    }
     const std::string problem = ChordProblem(c, g_recRow);
     if (!problem.empty()) {
         g_recNote = ApexConfig::KeyChordText(c) + ": " + I18n::Tr(problem.c_str()); // a text already translated comes back as it is
@@ -5147,7 +5221,22 @@ void ApplyPreset(int preset) {
 }
 
 std::string KeyChipText(int row) {
-    return g_recRow == row ? std::string(I18n::Tr("Press the keys\xE2\x80\xA6")) : ApexConfig::KeyChordText(RowKey(row));
+    if (g_recRow == row) return std::string(I18n::Tr("Press the keys\xE2\x80\xA6"));
+    if (IsCaptureKeyRow(row)) { // as written in the file (Win+ included); empty = none
+        ApexCapture::Settings cs = ApexCapture::Get();
+        std::string t = CaptureKeyRef(cs, row);
+        while (!t.empty() && (t.back() == ' ' || t.back() == '\t')) t.pop_back();
+        while (!t.empty() && (t.front() == ' ' || t.front() == '\t')) t.erase(t.begin());
+        return t.empty() ? std::string(I18n::Tr("No key")) : t;
+    }
+    return ApexConfig::KeyChordText(RowKey(row));
+}
+// The note under a card while one of its rows records
+void RecordNote(bool captureCard) {
+    if (g_recRow < 0 || IsCaptureKeyRow(g_recRow) != captureCard) return;
+    const char* idle = captureCard ? I18n::Tr("Press the new combination now; Esc cancels, Delete removes the key")
+                                   : I18n::Tr("Press the new combination now; Esc cancels");
+    ApexUi::IconNote(IconId::Keyboard, g_recNote.empty() ? idle : g_recNote.c_str(), g_recNote.empty() ? VioletTheme::kAccent : VioletTheme::kWarning);
 }
 float KeyChipWidth(int row) {
     const std::string text = KeyChipText(row);
@@ -5202,6 +5291,12 @@ void ShortcutsContent() {
         KeyChip(row);
         ApexUi::EndControlRow();
     }
+    ApexUi::GroupLabel("CAPTURE PROFILES");
+    for (int row : {RowProfileKey, RowProfileShot, RowProfileNext, RowExternalKey}) {
+        if (!ApexUi::BeginControlRow(RowName(row), RowText(row), KeyChipWidth(row))) continue;
+        KeyChip(row);
+        ApexUi::EndControlRow();
+    }
     ApexUi::GroupLabel("REPORT A PROBLEM");
     for (int row : {RowRecorder, RowProbe, RowDiagnostics}) {
         if (!ApexUi::BeginControlRow(RowName(row), RowText(row), KeyChipWidth(row))) continue;
@@ -5217,56 +5312,6 @@ void ShortcutsContent() {
     }
 }
 
-// The screenshots folder picker (Windows' folder dialog on its own thread, as the profile file dialog): the chosen path is
-// taken by the card on a later frame; nothing when cancelled.
-std::mutex g_shotFolderLock;
-std::optional<std::wstring> g_shotFolderResult;
-std::atomic<bool> g_shotFolderBusy{false};
-void PickScreenshotFolder(std::string current) {
-    if (g_shotFolderBusy.exchange(true)) return;
-    std::wstring title = ApexUtil::ToWide(I18n::Tr("Choose a folder for the screenshots"));
-    if (!HookGuard::StartDetached("Screenshots: folder dialog", [current = std::move(current), title = std::move(title)] {
-        std::optional<std::wstring> picked;
-        struct Finish {
-            std::optional<std::wstring>& picked;
-            ~Finish() {
-                std::lock_guard<std::mutex> lock(g_shotFolderLock);
-                g_shotFolderResult = std::move(picked);
-                g_shotFolderBusy = false;
-            }
-        } finish{picked};
-        const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-        if (FAILED(com)) return;
-        IFileDialog* dialog = nullptr;
-        if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)))) {
-            DWORD options = 0;
-            dialog->GetOptions(&options);
-            dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR | FOS_PATHMUSTEXIST);
-            dialog->SetTitle(title.c_str());
-            if (!current.empty()) {
-                IShellItem* start = nullptr;
-                if (SUCCEEDED(SHCreateItemFromParsingName(ApexUtil::ToWide(current).c_str(), nullptr, IID_PPV_ARGS(&start)))) {
-                    dialog->SetFolder(start);
-                    start->Release();
-                }
-            }
-            if (SUCCEEDED(dialog->Show(nullptr))) {
-                IShellItem* item = nullptr;
-                if (SUCCEEDED(dialog->GetResult(&item))) {
-                    PWSTR path = nullptr;
-                    if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
-                        picked = path;
-                        CoTaskMemFree(path);
-                    }
-                    item->Release();
-                }
-            }
-            dialog->Release();
-        }
-        CoUninitialize();
-    })) g_shotFolderBusy = false;
-}
-
 // Settings > Menu: screenshot settings and the existing validated shortcut recorder.
 void ScreenshotCaptureCard() {
     g_recSeenFrame = ImGui::GetFrameCount();
@@ -5274,45 +5319,42 @@ void ScreenshotCaptureCard() {
         ApexConfig::UiSettings ui = ApexConfig::GetUi();
         ApexUi::CardHeader(IconId::Camera, "Screenshot capture", "Save the finished game image with Apex's active effects", nullptr, nullptr);
         ApexUi::CardDivider();
-        {
-            std::lock_guard<std::mutex> lock(g_shotFolderLock);
-            if (g_shotFolderResult) { // a folder was picked: it becomes the screenshots folder
-                ui.screenshotCustomFolder = ApexUtil::ToUtf8(*g_shotFolderResult);
-                ui.screenshotFolder = 2;
-                ApexConfig::SetUi(ui);
-                g_shotFolderResult.reset();
-            }
-        }
         static const char* const kFolders[] = {"Game's Screenshots folder", "Apex Radiance folder", "Another folder"};
         static const char* const kFolderTips[] = {"Next to the photos the game takes, in Documents > Electronic Arts > The Sims 3 > Screenshots",
                                                   "Kept apart from the game's photos, in Documents > Electronic Arts > The Sims 3 > Apex Radiance > Screenshots",
                                                   "Any folder you choose, for example on another drive"};
         int folder = std::clamp(ui.screenshotFolder, 0, 2);
         if (ApexUi::SegmentedRow("Save screenshots to", "Where the filtered screenshots are saved", "##ShotFolder", &folder, kFolders, 3, kFolderTips, nullptr, 0)) {
-            if (folder == 2 && ui.screenshotCustomFolder.empty()) PickScreenshotFolder({}); // the choice applies once a folder is picked
-            else {
+            if (folder == 2 && ui.screenshotCustomFolder.empty()) { // start from the folder in use; type over it or press Change
+                std::string why;
+                ui.screenshotCustomFolder = ApexUtil::ToUtf8(ApexCapture::ResolveFolder(ui.screenshotFolder == 1 ? "%ApexFolder%\\Screenshots" : "%GameScreenshots%", why).wstring());
+            }
+            if (folder != 2 || !ui.screenshotCustomFolder.empty()) {
                 ui.screenshotFolder = folder;
                 ApexConfig::SetUi(ui);
             }
         }
-        if (ui.screenshotFolder == 2) {
-            const bool busy = g_shotFolderBusy.load();
-            const char* button = "Change##ShotFolderPick";
-            ApexUi::SetNextRowUntranslated();
-            const std::string label = I18n::Tr("Screenshots folder");
-            if (ApexUi::BeginControlRow(label.c_str(), ui.screenshotCustomFolder.c_str(), ApexUi::ButtonWidth(I18n::Tr("Change"), true))) {
-                ImGui::BeginDisabled(busy);
-                if (ApexUi::IconTextButton(button, IconId::FolderOpen, "Choose another folder for the screenshots")) PickScreenshotFolder(ui.screenshotCustomFolder);
-                ImGui::EndDisabled();
-                ApexUi::EndControlRow();
+        if (ui.screenshotFolder == 2) { // the folder in Apex row style; the typed path is under "Type a folder"
+            std::string v = ui.screenshotCustomFolder;
+            if (ApexCapture::FolderRow("Screenshots folder", "ShotFolder", v, 0, "Choose another folder for the screenshots") && !v.empty()) {
+                ui.screenshotCustomFolder = v;
+                ApexConfig::SetUi(ui);
             }
         }
         // (its key is set once, on the Shortcuts tab)
-        if (ApexUi::SwitchRow("Hide game UI in screenshots", &ui.screenshotHideGameUi,
-                              "Hides the game interface for the photo, then restores it; turn off to include it", true)) ApexConfig::SetUi(ui);
+        ApexCapture::ScreenshotRows(); // file name, type, size, Hide game UI, burst ... (ApexCapture.ini)
     }
     ApexUi::EndCard();
 
+    // Settings > Menu: video recording (ApexCapture.ini); its key is on the Shortcuts tab
+    if (ApexUi::BeginCard("##VideoRecording")) {
+        ApexUi::CardHeader(IconId::Video, "Video recording", "Records the game with your look as an MP4", nullptr, nullptr);
+        ApexUi::CardDivider();
+        ApexCapture::VideoRows();
+        ApexUi::GroupLabel("SETTINGS FILE");
+        ApexCapture::FileRows();
+    }
+    ApexUi::EndCard();
 }
 
 // Settings > Shortcuts
@@ -5354,7 +5396,7 @@ void ShortcutsTab() {
             }
             ApexUi::EndControlRow();
         }
-        for (int row : {RowMenu, RowCompare, RowRefresh, RowScreenshot}) {
+        for (int row : {RowMenu, RowCompare, RowRefresh, RowScreenshot, RowVideo, RowLooks}) {
             ImGui::BeginDisabled(row == RowScreenshot && !ApexConfig::GetUi().screenshotShortcutEnabled);
             if (ApexUi::BeginControlRow(RowName(row), nullptr, KeyChipWidth(row))) {
                 KeyChip(row);
@@ -5362,11 +5404,26 @@ void ShortcutsTab() {
             }
             ImGui::EndDisabled();
         }
-        if (g_recRow >= 0)
-            ApexUi::IconNote(IconId::Keyboard, g_recNote.empty() ? I18n::Tr("Press the new combination now; Esc cancels") : g_recNote.c_str(),
-                             g_recNote.empty() ? VioletTheme::kAccent : VioletTheme::kWarning);
+        RecordNote(false);
         ApexUi::Gap(ApexUi::kSpace1);
         ApexUi::MutedText("F10 always hides the game interface");
+    }
+    ApexUi::EndCard();
+
+    // Capture profiles (ApexCapture.ini / the profile in use): the same key chips; the profile itself is on Settings > Menu
+    if (ApexUi::BeginCard("##CaptureProfileKeys")) {
+        ApexUi::CardHeader(IconId::Settings2, "Capture profiles", "Keys for the capture profiles; set the profiles up on the Menu tab", nullptr, nullptr);
+        ApexUi::CardDivider();
+        for (int row : {RowProfileKey, RowProfileShot, RowProfileNext, RowExternalKey}) {
+            std::string text = RowText(row);
+            if (row == RowProfileKey || row == RowProfileShot) // per profile: name the one in use
+                text = I18n::Trf("{} (now: {})", I18n::Tr(RowText(row)), ApexCapture::Get().profileActive);
+            ApexUi::SetNextRowUntranslated();
+            if (!ApexUi::BeginControlRow(I18n::Tr(RowName(row)), text.c_str(), KeyChipWidth(row))) continue;
+            KeyChip(row);
+            ApexUi::EndControlRow();
+        }
+        RecordNote(true);
     }
     ApexUi::EndCard();
 
@@ -5488,6 +5545,20 @@ void MemoryCard() {
         g_memoryNoteNext = GetTickCount64() + 300000;
     }
 }
+// The looks key: the same as the feature card's switch (Install / Uninstall, saved by the autosave), with a short pill
+void ToggleFeatureByKey(const char* patchName, const char* shown, IconId icon) {
+    ApexPatch* patch = Find(patchName);
+    if (!patch || !Switchable(patch)) return;
+    const bool want = !patch->IsEnabled();
+    SetPatch(patch, want);
+    const bool now = patch->IsEnabled();
+    LOG_INFO(std::format("[Menu] Shortcut: {} {}", patchName, now ? "on" : "off"));
+    g_presetPillName = I18n::Trf(now ? "{} turned on" : "{} turned off", I18n::Tr(shown));
+    if (now != want && !patch->GetLastError().empty()) g_presetPillName += " \xC2\xB7 " + patch->GetLastError();
+    g_presetPillIcon = icon;
+    g_presetPillLeftMs = kPresetPillMs;
+    g_presetPillLastDraw = 0;
+}
 // Render thread, every frame: the shortcuts that are not the menu key
 void RunShortcuts() {
     RecordStep();
@@ -5495,6 +5566,7 @@ void RunShortcuts() {
     if (Hotkeys::Take(Hotkeys::Action::Refresh)) NightLighting::RefreshAll();
     if (Hotkeys::Take(Hotkeys::Action::Screenshot))
         Captures::RequestPlayerScreenshot(ApexConfig::GetUi().screenshotHideGameUi);
+    if (Hotkeys::Take(Hotkeys::Action::LooksToggle)) ToggleFeatureByKey("GShadeLooks", "ReShade/GShade", IconId::SwatchBook); // the card's title and icon
     RunPresetShortcut();
 }
 
@@ -5606,6 +5678,7 @@ class GuiClient final : public Overlay::Client {
         if (!Captures::ScreenshotPending()) {
             CaptureTarget();
         }
+        ApexCapture::DrawTimer(); // ApexCapture.ini [VIDEO] timer and red frame while a video records
         noticeShown = CaptureNote(noticesAllowed); // never in the capture's own screenshot
         const bool compareShown = CompareNote(noticesAllowed && !noticeShown);
         if (!noticeShown) noticeShown = compareShown;
@@ -5639,7 +5712,7 @@ class GuiClient final : public Overlay::Client {
         if (PublicTestPending() && !BannerNeeded() && !Captures::ScreenshotPending()) Overlay::SetVisible(true);
         RunShortcuts();
         // the capture notes (recording, saved, an open session) show with the menu closed too
-        return MemoryNotePending() || Screen::FpsCounterShown() || BannerNeeded() || HintVisible() || RoomToSavePending() || S3PPQuestionPending() || S3SSTexturesQuestionPending() || PresetPillVisible() || g_comparing || Recorder::SecondsRecorded() >= 0 || Captures::CurrentNote().visible ||
+        return MemoryNotePending() || Screen::FpsCounterShown() || BannerNeeded() || HintVisible() || RoomToSavePending() || S3PPQuestionPending() || S3SSTexturesQuestionPending() || PresetPillVisible() || g_comparing || Recorder::SecondsRecorded() >= 0 || ApexCapture::Recording() || Captures::CurrentNote().visible ||
                NoticeAnimationsPending() || (!g_profiles.loading.empty() && ImGui::GetTime() - g_profiles.applyOpenedAt < 0.14) || LightProbe::Aiming() || g_returnFromProbe.load();
     }
 
@@ -5724,6 +5797,7 @@ class GuiClient final : public Overlay::Client {
         if (g_recRow < 0 && Overlay::IsVisible() && g_menuTextInput.load() && screenshot.vk == vk &&
             !screenshot.ctrl && !screenshot.shift && !screenshot.alt)
             return false; // let ImGui handle typing; its keyboard capture still keeps the key from reaching the game
+        if (g_recRow < 0 && !g_menuTextInput.load() && ApexCapture::KeyDown(vk, repeat)) return true; // ApexCapture.ini KeyRecord
         const bool aiming = LightProbe::Aiming();
         const bool handled = g_recRow >= 0 || Hotkeys::OnKeyDown(vk, repeat) ||
             ((!Overlay::IsVisible() || !g_menuTextInput.load()) && PresetKeyDown(vk, repeat));

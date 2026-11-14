@@ -783,6 +783,26 @@ inline constexpr Element kFlaskConical[] = {
     {Kind::Path, "M6.453 15h11.094", {}, false},
     {Kind::Path, "M8.5 2h7", {}, false},
 };
+// video.svg (Lucide, ISC)
+inline constexpr Element kVideo[] = {
+    {Kind::Path, "m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5", {}, false},
+    {Kind::Rect, nullptr, {2.0f, 6.0f, 14.0f, 12.0f, 2.0f}, false},
+};
+// swatch-book.svg (Lucide, ISC)
+inline constexpr Element kSwatchBook[] = {
+    {Kind::Path, "M11 17a4 4 0 0 1-8 0V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2Z", {}, false},
+    {Kind::Path, "M16.7 13H19a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H7", {}, false},
+    {Kind::Path, "M 7 17h.01", {}, false},
+    {Kind::Path, "m11 8 2.3-2.3a2.4 2.4 0 0 1 3.404.004L18.6 7.6a2.4 2.4 0 0 1 .026 3.434L9.9 19.8", {}, false},
+};
+// settings-2.svg (Lucide, ISC)
+inline constexpr Element kSettings2[] = {
+    {Kind::Path, "M14 17H5", {}, false},
+    {Kind::Path, "M19 7h-9", {}, false},
+    {Kind::Circle, nullptr, {17.0f, 17.0f, 3.0f}, false},
+    {Kind::Circle, nullptr, {7.0f, 7.0f, 3.0f}, false},
+};
+
 inline constexpr IconData kIcons[] = {
     {"activity", kActivity, static_cast<int>(sizeof(kActivity) / sizeof(kActivity[0]))},
     {"aperture", kAperture, static_cast<int>(sizeof(kAperture) / sizeof(kAperture[0]))},
@@ -903,6 +923,9 @@ inline constexpr IconData kIcons[] = {
     {"flask-conical", kFlaskConical, static_cast<int>(sizeof(kFlaskConical) / sizeof(kFlaskConical[0]))},
     {"folder-open", kFolderOpen, static_cast<int>(sizeof(kFolderOpen) / sizeof(kFolderOpen[0]))},
     {"power", kPower, static_cast<int>(sizeof(kPower) / sizeof(kPower[0]))},
+    {"video", kVideo, static_cast<int>(sizeof(kVideo) / sizeof(kVideo[0]))},
+    {"swatch-book", kSwatchBook, static_cast<int>(sizeof(kSwatchBook) / sizeof(kSwatchBook[0]))},
+    {"settings-2", kSettings2, static_cast<int>(sizeof(kSettings2) / sizeof(kSettings2[0]))},
 };
 
 } // namespace ApexUi::LucideData

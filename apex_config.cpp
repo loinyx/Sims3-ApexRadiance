@@ -393,6 +393,7 @@ void LoadSettings() {
         if (ParseKeyChord((*ui)["search_key"].value_or(std::string()), own)) u.searchKey = own;
         if (ParseKeyChord((*ui)["peek_key"].value_or(std::string()), own)) u.peekKey = own;
         if (ParseKeyChord((*ui)["picture_compare_key"].value_or(std::string()), own)) u.pictureCompareKey = own;
+        if (ParseKeyChord((*ui)["looks_key"].value_or(std::string()), own)) u.looksKey = own;
         // screenshot_shortcut_enabled is no longer shown in the menu; a saved false would hide the shortcut for good
         if (ParseKeyChord((*ui)["screenshot_key"].value_or(std::string()), own)) u.screenshotKey = AcceptScreenshotKey(own);
         u.screenshotHideGameUi = (*ui)["screenshot_hide_game_ui"].value_or(true);
@@ -499,6 +500,7 @@ bool Save(std::string* error) {
         ui.insert("search_key", KeyChordText(u.searchKey));
         ui.insert("peek_key", KeyChordText(u.peekKey));
         ui.insert("picture_compare_key", KeyChordText(u.pictureCompareKey));
+        ui.insert("looks_key", KeyChordText(u.looksKey));
         ui.insert("screenshot_shortcut_enabled", u.screenshotShortcutEnabled);
         ui.insert("screenshot_key", KeyChordText(u.screenshotKey));
         ui.insert("screenshot_hide_game_ui", u.screenshotHideGameUi);
@@ -605,6 +607,7 @@ unsigned FeaturePart(const std::string& name) {
     if (name == "NightTerrainRelight" || name == "SplitLevelGroundLight") return kPartNightLights;
     if (name == "AmbientOcclusion") return kPartAmbientOcclusion;
     if (name == "SceneDither") return kPartColor; // the Color page's Banding Fix
+    if (name == "GShadeLooks") return kPartColor; // the Color page's ReShade/GShade tab
     if (name == "DepthBlur") return kPartDepthBlur;
     if (name == "EdgeSmoothing") return kPartEdgeSmoothing;
     for (const char* p : {Performance::kResourceCacheName, Performance::kLookupMissesName, Performance::kFileListName, Performance::kLotLightingName,
@@ -718,6 +721,7 @@ void ApplyFeatureState(const toml::table& state) {
         if (ParseKeyChord((*sc)["search_key"].value_or(std::string()), k)) u.searchKey = k;
         if (ParseKeyChord((*sc)["peek_key"].value_or(std::string()), k)) u.peekKey = k;
         if (ParseKeyChord((*sc)["picture_compare_key"].value_or(std::string()), k)) u.pictureCompareKey = k;
+        if (ParseKeyChord((*sc)["looks_key"].value_or(std::string()), k)) u.looksKey = k;
         if (ParseKeyChord((*sc)["screenshot_key"].value_or(std::string()), k)) u.screenshotKey = AcceptScreenshotKey(k);
         u.screenshotHideGameUi = (*sc)["screenshot_hide_game_ui"].value_or(u.screenshotHideGameUi);
         // (a profile carries the choice, never a folder path: another PC's path would create folders here)
@@ -890,6 +894,7 @@ void CaptureProfileState(toml::table& root) {
             sc.insert("search_key", KeyChordText(u.searchKey));
             sc.insert("peek_key", KeyChordText(u.peekKey));
             sc.insert("picture_compare_key", KeyChordText(u.pictureCompareKey));
+            sc.insert("looks_key", KeyChordText(u.looksKey));
             sc.insert("screenshot_shortcut_enabled", u.screenshotShortcutEnabled);
             sc.insert("screenshot_key", KeyChordText(u.screenshotKey));
             sc.insert("screenshot_hide_game_ui", u.screenshotHideGameUi);

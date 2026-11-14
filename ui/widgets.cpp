@@ -1683,6 +1683,13 @@ bool Slider(const char* label, float* v, float min, float max, const SliderOptio
         dl->AddRectFilled(ImVec2(x0, cy - track), ImVec2(x1, cy + track), U32(VioletTheme::kToggleOff), track);
         dl->AddRectFilled(ImVec2(x0, cy - track), ImVec2(gx, cy + track), U32(VioletTheme::kAccent), track);
     }
+    if (o.markDefault && d.hasDefault && max > min) {
+        const float td = (o.defaultValue - min) / (max - min);
+        if (td >= 0.0f && td <= 1.0f) {
+            const float mx = x0 + (x1 - x0) * td;
+            dl->AddRectFilled(ImVec2(mx - 1.0f * u, cy - 5.0f * u), ImVec2(mx + 1.0f * u, cy + 5.0f * u), U32(VioletTheme::kWarning));
+        }
+    }
     const float grabR = std::fmax(ImGui::GetStyle().GrabMinSize * 0.5f, 6.0f * u) + (active ? 1.0f : hovered ? 0.5f : 0.0f) * u;
     if (o.hueTrack || (o.trackFrom && o.trackTo)) dl->AddCircle(ImVec2(gx, cy), grabR + 1.0f * u, U32(0x000000, 0.35f), 0, 1.5f * u); // readable on light colours
     dl->AddCircleFilled(ImVec2(gx, cy), grabR, U32(0xFFFFFF));

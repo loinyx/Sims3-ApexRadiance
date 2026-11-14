@@ -244,6 +244,7 @@ struct SliderOptions {
     float defaultValue = kNoDefault;
     ImU32 trackFrom = 0, trackTo = 0; // both set = gradient track
     bool hueTrack = false;
+    bool markDefault = false; // a small amber tick on the track at defaultValue (GShade looks: the .ini's value)
     // > 0: the track takes the column of a SelectRow with this controlWidth (aligned with the select above or below
     // it) and the value moves to the track's left
     float alignWidth = 0.0f;

@@ -242,6 +242,8 @@ const I18n::Entry kEntries[] = {
      "; ANCIENNE VERSION COMBINÉE chargée ({}) : les fonctions d'" APEX_PRODUCT_NAME " restent désactivées"},
     {"; an older {} is also installed (idle): delete it from Game\\Bin", "; um {} mais antigo também está instalado (inativo): apague-o de Game\\Bin",
      "; también hay un {} más antiguo instalado (inactivo): bórralo de Game\\Bin", "; un ancien {} est aussi installé (inactif) : supprimez-le de Game\\Bin"},
+    // ---- ReShade/GShade looks ----
+    {"Runs your ReShade or GShade preset (.ini) inside Apex, with the same shader maths.", "Roda seu preset do ReShade ou GShade (.ini) dentro do Apex, com a mesma matemática dos shaders.", "Ejecuta tu preajuste de ReShade o GShade (.ini) dentro de Apex, con las mismas matemáticas de los shaders.", "Exécute votre préréglage ReShade ou GShade (.ini) dans Apex, avec les mêmes calculs de shaders."},
 };
 const I18n::Table kTable(kEntries, std::size(kEntries));
 
