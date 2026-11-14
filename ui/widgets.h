@@ -189,6 +189,9 @@ bool IconTextButton(const char* label, IconId icon, const char* tooltip = nullpt
 bool TextButton(const char* label, const char* tooltip = nullptr, ButtonKind kind = ButtonKind::Secondary, float minWidth = 0.0f);
 // Width of those buttons (for BeginControlRow)
 float ButtonWidth(const char* label, bool withIcon, float minWidth = 0.0f);
+// A custom control's closed text cut with "…" to maxW like the select rows (true when cut), and the full-text tooltip
+bool FitClosedText(std::string_view text, float maxW, std::string& out);
+void ShowFullText(std::string_view text);
 // Sidebar entry: icon + label, filled background and a violet bar when selected. True when clicked. collapsed = the
 // icon-only rail (the label becomes the hover tooltip).
 bool SidebarItem(IconId icon, const char* label, bool selected, bool collapsed = false);

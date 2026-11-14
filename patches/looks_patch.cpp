@@ -839,13 +839,15 @@ bool LookRow()
     ImGui::SetNextItemWidth(comboW);
     static bool wasOpen = false;
     static char query[96] = {};
-    const bool open = ImGui::BeginCombo("##LookPick", current.c_str(), ImGuiComboFlags_NoArrowButton | ImGuiComboFlags_HeightLarge);
-    const bool hovered = ImGui::IsItemHovered();
-    if (!open && ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip) && ImGui::CalcTextSize(current.c_str()).x > comboW - 40.0f * u)
-        ApexUi::Tooltip(current.c_str());
+    // as the select rows: the name stops short of the chevron, cut with "…" and shown whole on hover
     const float arrow = 12.0f * u;
+    std::string fitted;
+    const bool cut = ApexUi::FitClosedText(current, comboW - ImGui::GetStyle().FramePadding.x - 9.0f * u - arrow - ApexUi::kSpace1 * u, fitted);
+    const bool open = ImGui::BeginCombo("##LookPick", fitted.c_str(), ImGuiComboFlags_NoArrowButton | ImGuiComboFlags_HeightLarge);
+    const bool hovered = ImGui::IsItemHovered();
+    if (cut && !open && ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) ApexUi::ShowFullText(current);
     ApexUi::DrawIcon(ImGui::GetWindowDrawList(), IconId::ChevronDown, ImVec2(comboPos.x + comboW - 9.0f * u - arrow, comboPos.y + (ImGui::GetFrameHeight() - arrow) * 0.5f),
-                     arrow, ImGui::GetColorU32(open || hovered ? ImGuiCol_CheckMark : ImGuiCol_TextDisabled));
+                     arrow, ImGui::GetColorU32(VioletTheme::Col(open || hovered ? VioletTheme::kAccent : VioletTheme::kTextMuted)));
     if (open)
     {
         if (!wasOpen || g_listDirty) { g_list = Looks::ListLooks(); g_listDirty = false; query[0] = 0; }
@@ -856,7 +858,7 @@ bool LookRow()
             ImGui::InputTextWithHint("##LookSearch", I18n::Tr("Search looks"), query, sizeof(query));
         }
         const std::string q = Lower(query);
-        int shown = 0;
+        int shown = 0, groups = 0;
         for (Looks::Source s : { Looks::Source::Apex, Looks::Source::Mine, Looks::Source::GShade })
         {
             bool header = false;
@@ -864,7 +866,12 @@ bool LookRow()
             {
                 const std::string label = ShownName(item.ref);
                 if (item.source != s || (!q.empty() && Lower(label).find(q) == std::string::npos)) continue;
-                if (!header) { ImGui::SeparatorText(I18n::Tr(SourceLabel(s))); header = true; }
+                if (!header) // a quiet group label on the items' left edge, a line between groups
+                {
+                    if (groups++) { ImGui::Spacing(); ImGui::Separator(); ImGui::Spacing(); }
+                    ImGui::TextDisabled("%s", I18n::Tr(SourceLabel(s)));
+                    header = true;
+                }
                 ImGui::PushID(item.ref.c_str());
                 const bool selected = item.ref == g.preset;
                 if (ImGui::Selectable(label.c_str(), selected) && !selected)
@@ -879,7 +886,9 @@ bool LookRow()
             }
         }
         if (!shown) ImGui::TextDisabled("%s", I18n::Tr(g_list.empty() ? "No looks yet" : "No look matches"));
+        ImGui::Spacing();
         ImGui::Separator();
+        ImGui::Spacing();
         if (ImGui::Selectable(I18n::Tr("Open the Looks folder"))) ShowLooksFolder();
         ImGui::EndCombo();
     }

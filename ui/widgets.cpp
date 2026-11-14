@@ -498,6 +498,13 @@ bool g_ctrlStacked = false;
 
 } // namespace
 
+// For a custom control's closed text (the Looks picker): `text` cut with "…" to maxW, as the select rows do; true when cut
+bool FitClosedText(std::string_view text, float maxW, std::string& out) {
+    if (!FitText(text, maxW, out)) { out.assign(text); return false; }
+    return true;
+}
+void ShowFullText(std::string_view text) { FullTextTooltip(text); }
+
 float Unit() {
     const float s = ImGui::GetStyle().FontScaleMain;
     return s > 0.0f ? s : 1.0f;
