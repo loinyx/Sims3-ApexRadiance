@@ -21,6 +21,13 @@ reasons. The compile time and texture memory of each file go to stderr.
   preset that names a user technique (its `.ini` value reaches the parameter), a built-in one that is also a user file
   (the built-in port wins), a missing file and a file that cannot run; with `--run` the user technique also runs
   through the catalog and another picture size asks for a new compile.
+- `--compare` (with `[--image <file>]...`): `<Shaders folder>` holds the authors' original `.fx` of the 17 built-in
+  ports (and `ReShade.fxh`, `ReShadeUI.fxh`); each port and its original run on the same Direct3D 9 device on a
+  gradient, per-pixel noise and the given images, with the defaults, every parameter at a quarter and at three quarters
+  of its range, and the two in turn. One table row per run gives the largest and the mean channel difference in 8-bit
+  levels; a port more than 1 level from its original is a problem.
+- `--packs <Apex Radiance folder>`: the scan of `Shaders\Packs\<pack>\`: no pack file compiles before it is wanted,
+  then every pack is compiled and counted ("<x> of <y> run here").
 - Always: the licence text shown in Settings > About (`third_party/reshadefx/reshadefx_license.h`) is
   `third_party/reshadefx/LICENSE.md`.
 

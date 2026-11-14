@@ -109,6 +109,8 @@ struct Folders
 bool Compile(const std::wstring& fxPath, const Folders& folders, UINT width, UINT height, Effect& out);
 // True when path (absolute) is inside root and has no ".." part
 bool InsideRoot(const std::wstring& root, const std::wstring& path);
+// An image file (at most kMaxTextureFileBytes) decoded with WIC to BGRA, resized to w x h
+bool DecodeImage(const std::wstring& path, UINT w, UINT h, std::vector<uint8_t>& bgra);
 
 // ---------------------------------------------------------------------------------------------- uniforms
 // Uniform storage = SM3 float constant registers (constRegs x 4 floats)
@@ -180,9 +182,19 @@ std::string Reason(const std::string& technique, const std::string& file);
 bool HasFile(const std::string& file); // a .fx of that name is in the folder
 bool Pending(const std::string& file); // that file is not compiled yet (or the first scan has not finished)
 
-// The Add a shader list: every user technique, runnable (index >= 0) or not (reason)
-struct Listed { int index = -1; std::string technique, file, reason; };
+// The Add a shader list: every user technique, runnable (index >= 0) or not (reason); pack = the downloaded pack's
+// folder (Shaders\Packs\<pack>), "" for the player's own files
+struct Listed { int index = -1; std::string technique, file, reason, pack; };
 std::vector<Listed> List();
+
+// Downloaded packs (Shaders\Packs\<folder>\Shaders and Textures) are scanned with the folder, but a pack's .fx compiles
+// only when wanted: a file a look names (WantFiles, the render thread, with the look's missing files), or every pack
+// file while the player browses shaders (BrowsePacks, once a session).
+void WantFiles(const std::vector<std::string>& files);
+void BrowsePacks();
+std::vector<std::string> PackFolders(); // folders in Shaders\Packs (complete downloads only), as the last scan found them
+struct PackCount { int runnable = 0, total = 0; bool checked = false; }; // checked: every file of the pack compiled
+PackCount CountPack(const std::string& folder);
 
 // Copies picked files into the Shaders folder (any thread; not the render thread): .fx / .fxh into Shaders\Shaders\,
 // images (.png .jpg .jpeg .bmp .dds) into Shaders\Textures\. Other files and files over the size caps are refused. A

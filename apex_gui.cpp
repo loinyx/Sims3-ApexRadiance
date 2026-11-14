@@ -41,6 +41,7 @@
 #include "scene_target.h"
 #include "third_party/reshade_shaders/reshade_licenses.h"
 #include "third_party/reshadefx/reshadefx_license.h"
+#include "third_party/miniz/miniz_license.h"
 #include "sim_occlusion.h"
 #include "ui/i18n.h"
 #include "looks.h"
@@ -3423,7 +3424,8 @@ void AboutTab() {
         CreditLine("RTX Remix bridge: NVIDIA (MIT), ported to The Sims 3 by dalexlol and alexvixell35-stack in sims3-modernization; DXVK by Philip Rebohle (zlib).");
         CreditLine("ReShade shaders in Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).");
         CreditLine("ReShade FX compiler: crosire (BSD-3-Clause).");
-        CreditLine("Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC).");
+        CreditLine("Shader packs: downloaded from their authors' GitHub, under each author's licence.");
+        CreditLine("Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), miniz (MIT), Lucide icons (ISC).");
         if (ApexUi::BeginAdvanced("Licenses##About", "Third-party licenses")) {
             // Licence texts stay as written (untranslated); each title wraps too (narrow window, large text)
             auto licence = [](const char* title, const char* text, bool last) {
@@ -3434,7 +3436,8 @@ void AboutTab() {
                 if (!last) ApexUi::Gap(ApexUi::kSpace2);
             };
             for (const auto& l : ReShadeShaders::kLicenses) licence(l.title, l.text, false);
-            licence(ReShadeFx::kLicenseTitle, ReShadeFx::kLicense, true);
+            licence(ReShadeFx::kLicenseTitle, ReShadeFx::kLicense, false);
+            licence(Miniz::kLicenseTitle, Miniz::kLicense, true);
             ApexUi::EndAdvanced();
         }
     }

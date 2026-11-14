@@ -13,6 +13,7 @@
 #include "looks_runner.h"
 #include "apex_log.h"
 #include "apex_paths.h"
+#include "apex_util.h"
 #include "hook_guard.h"
 
 #include <algorithm>
@@ -20,12 +21,14 @@
 #include <deque>
 #include <map>
 #include <mutex>
+#include <set>
 
 namespace Looks::Fx {
 
 namespace {
 
-constexpr size_t kMaxFiles = 500;              // .fx files read from the folder
+constexpr size_t kMaxFiles = 500;              // .fx files read from the player's own folder, and from each pack
+constexpr size_t kMaxPackFiles = 3000;         // .fx files read from every downloaded pack together
 constexpr DWORD kCompileTimeoutMs = 120000;    // one file
 constexpr uint64_t kMaxTotalGpuBytes = 384ull << 20; // every user effect running at once (a 32-bit game: room left for its own)
 constexpr int kMaxFramePasses = 256;           // user passes drawn in one frame
@@ -48,7 +51,7 @@ std::string Utf8(const std::wstring& w)
 // One user technique, as a LooksShader the rest of Looks uses (its strings live in `text`, never moved)
 struct UserTech
 {
-    std::string technique, file, reason;
+    std::string technique, file, reason, pack;
     std::shared_ptr<const Effect> fx;
     size_t tech = 0;
     bool hidden = false;
@@ -65,6 +68,9 @@ struct Catalog
     std::vector<std::pair<std::string, std::string>> fileErrors; // file, reason
     std::vector<std::string> files;                              // lower-case .fx names in the folder
     std::vector<std::string> pending;                            // ... of those not compiled yet
+    std::vector<std::string> lazy;                               // ... pack files left uncompiled (not wanted)
+    std::vector<std::string> packs;                              // pack folders
+    std::map<std::string, PackCount> counts;                     // per pack folder
     int generation = 0;
 };
 
@@ -209,25 +215,43 @@ void ListFx(const std::wstring& dir, int depth, std::vector<std::wstring>& out)
     FindClose(h);
 }
 
-std::shared_ptr<Catalog> Build(const std::vector<std::shared_ptr<const Effect>>& effects, const std::vector<std::wstring>& files)
+// One .fx of the scan: the player's own (pack "") or a downloaded pack's, with where its includes and textures are found
+struct Source { std::wstring path; std::string pack; size_t folders = 0; };
+
+std::shared_ptr<Catalog> Build(const std::vector<std::shared_ptr<const Effect>>& effects, const std::vector<Source>& files,
+                               const std::vector<bool>& lazy, const std::vector<std::string>& packs)
 {
     auto c = std::make_shared<Catalog>();
-    std::map<std::string, bool> seen; // "tech@file" lower: the first file of a name wins, as in ReShade's search
+    c->packs = packs;
+    std::map<std::string, bool> seen; // "tech@file" lower: the first file of a name wins, as in ReShade's search (the player's own first)
     for (size_t i = 0; i < files.size(); ++i)
     {
-        c->files.push_back(LowerA(Utf8(files[i].substr(files[i].find_last_of(L'\\') + 1))));
-        if (i < effects.size() && !effects[i]) c->pending.push_back(c->files.back());
+        c->files.push_back(LowerA(Utf8(files[i].path.substr(files[i].path.find_last_of(L'\\') + 1))));
+        if (!effects[i]) (lazy[i] ? c->lazy : c->pending).push_back(c->files.back());
+        if (!files[i].pack.empty())
+        {
+            PackCount& n = c->counts[files[i].pack];
+            if (i == 0 || files[i - 1].pack != files[i].pack) n.checked = true;
+            n.checked &= effects[i] != nullptr;
+        }
     }
-    for (const auto& fx : effects)
+    for (size_t i = 0; i < effects.size(); ++i)
     {
+        const auto& fx = effects[i];
         if (!fx) continue;
         if (!fx->error.empty()) { c->fileErrors.push_back({ fx->file, fx->error }); continue; }
         for (size_t t = 0; t < fx->techniques.size(); ++t)
         {
             const Technique& tq = fx->techniques[t];
+            if (!files[i].pack.empty() && !tq.hidden)
+            {
+                PackCount& n = c->counts[files[i].pack];
+                ++n.total;
+                n.runnable += tq.reason.empty();
+            }
             if (!seen.emplace(LowerA(tq.name + "@" + fx->file), true).second) continue;
             auto u = std::make_unique<UserTech>();
-            u->technique = tq.name; u->file = fx->file; u->reason = tq.reason; u->fx = fx; u->tech = t; u->hidden = tq.hidden;
+            u->technique = tq.name; u->file = fx->file; u->reason = tq.reason; u->fx = fx; u->tech = t; u->hidden = tq.hidden; u->pack = files[i].pack;
             Describe(*u);
             c->techs.push_back(std::move(u));
         }
@@ -235,59 +259,130 @@ std::shared_ptr<Catalog> Build(const std::vector<std::shared_ptr<const Effect>>&
     return c;
 }
 
-void Publish(const std::vector<std::shared_ptr<const Effect>>& effects, const std::vector<std::wstring>& files)
+std::set<std::string> g_want;    // lower-case .fx names the render thread wants compiled (under g_lock)
+bool g_browse = false;            // every pack file is wanted (under g_lock)
+
+void Publish(const std::vector<std::shared_ptr<const Effect>>& effects, const std::vector<Source>& files, const std::vector<bool>& lazy,
+             const std::vector<std::string>& packs)
 {
-    auto c = Build(effects, files);
+    auto c = Build(effects, files, lazy, packs);
     std::lock_guard<std::mutex> lock(g_lock);
     c->generation = g_nextGeneration++;
     g_published = std::move(c);
+}
+
+// Shaders\Packs\<folder>: complete downloads only (a download in progress is "<folder>.part")
+std::vector<std::string> ListPacks(const std::wstring& dir)
+{
+    std::vector<std::string> out;
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((dir + L"*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return out;
+    do
+    {
+        const std::wstring n = fd.cFileName;
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) || n[0] == L'.' || n.find(L'.') != std::wstring::npos)
+            continue;
+        out.push_back(Utf8(n));
+    } while (out.size() < 200 && FindNextFileW(h, &fd));
+    FindClose(h);
+    std::sort(out.begin(), out.end(), [](const std::string& a, const std::string& b) { return _stricmp(a.c_str(), b.c_str()) < 0; });
+    return out;
 }
 
 void ScanOnce(UINT W, UINT H, bool force)
 {
     const std::wstring root = ShadersFolder();
     if (root.empty()) return;
-    Folders folders;
-    folders.root = root;
-    folders.includeDirs = { root + L"Shaders\\", root };
-    folders.textureDirs = { root + L"Textures\\", root };
-    std::vector<std::wstring> files;
-    ListFx(root, 0, files);
-    ListFx(root + L"Shaders\\", 3, files);
-    std::sort(files.begin(), files.end(), [](const std::wstring& a, const std::wstring& b) { return _wcsicmp(a.c_str(), b.c_str()) < 0; });
+    const std::wstring packRoot = root + L"Packs\\";
+    const std::vector<std::string> packs = ListPacks(packRoot);
+    auto byName = [](const std::wstring& a, const std::wstring& b) { return _wcsicmp(a.c_str(), b.c_str()) < 0; };
+    // includes and textures: the file's own folders, the player's folder, then every pack's (the standard effects first:
+    // ReShade.fxh), as ReShade finds them in one reshade-shaders tree
+    std::vector<std::wstring> packShaders, packTextures;
+    for (const std::string& p : packs)
+    {
+        const std::wstring d = packRoot + ApexUtil::ToWide(p) + L"\\";
+        const bool standard = _stricmp(p.c_str(), "ReShade standard effects") == 0;
+        packShaders.insert(standard ? packShaders.begin() : packShaders.end(), d + L"Shaders\\");
+        packTextures.insert(standard ? packTextures.begin() : packTextures.end(), d + L"Textures\\");
+    }
+    std::vector<Folders> folders(1 + packs.size());
+    folders[0].root = root;
+    folders[0].includeDirs = { root + L"Shaders\\", root };
+    folders[0].textureDirs = { root + L"Textures\\", root };
+    std::vector<Source> files;
+    {
+        std::vector<std::wstring> mine;
+        ListFx(root, 0, mine);
+        ListFx(root + L"Shaders\\", 3, mine);
+        std::sort(mine.begin(), mine.end(), byName);
+        for (auto& p : mine) files.push_back({ p, "", 0 });
+    }
+    size_t packFiles = 0;
+    for (size_t k = 0; k < packs.size(); ++k)
+    {
+        const std::wstring d = packRoot + ApexUtil::ToWide(packs[k]) + L"\\";
+        Folders& f = folders[k + 1];
+        f.root = root;
+        f.includeDirs = { d + L"Shaders\\" };
+        f.textureDirs = { d + L"Textures\\" };
+        std::vector<std::wstring> list;
+        if (packFiles < kMaxPackFiles) ListFx(d + L"Shaders\\", 3, list);
+        std::sort(list.begin(), list.end(), byName);
+        for (auto& p : list)
+            if (packFiles++ < kMaxPackFiles) files.push_back({ p, packs[k], k + 1 });
+    }
+    for (Folders& f : folders)
+    {
+        if (&f != &folders[0]) { f.includeDirs.push_back(root + L"Shaders\\"); f.textureDirs.push_back(root + L"Textures\\"); }
+        f.includeDirs.insert(f.includeDirs.end(), packShaders.begin(), packShaders.end());
+        f.textureDirs.insert(f.textureDirs.end(), packTextures.begin(), packTextures.end());
+    }
     if (force) g_cache.clear();
+    std::set<std::string> want;
+    bool browse;
+    {
+        std::lock_guard<std::mutex> lock(g_lock);
+        want = g_want;
+        browse = g_browse;
+    }
 
     std::vector<std::shared_ptr<const Effect>> effects(files.size());
+    std::vector<bool> lazy(files.size(), false);
     std::vector<size_t> todo;
     for (size_t i = 0; i < files.size(); ++i)
     {
         WIN32_FILE_ATTRIBUTE_DATA a{};
-        if (!GetFileAttributesExW(files[i].c_str(), GetFileExInfoStandard, &a)) continue;
+        if (!GetFileAttributesExW(files[i].path.c_str(), GetFileExInfoStandard, &a)) continue;
         const uint64_t size = ((uint64_t)a.nFileSizeHigh << 32) | a.nFileSizeLow;
-        auto it = g_cache.find(files[i]);
+        auto it = g_cache.find(files[i].path);
         if (it != g_cache.end() && it->second.size == size && CompareFileTime(&it->second.written, &a.ftLastWriteTime) == 0 &&
             it->second.w == W && it->second.h == H)
             effects[i] = it->second.fx;
+        else if (!files[i].pack.empty() && !browse && !want.count(LowerA(Utf8(files[i].path.substr(files[i].path.find_last_of(L'\\') + 1)))))
+            lazy[i] = true; // a pack file nobody needs yet: not compiled (memory and time)
         else todo.push_back(i);
     }
-    Publish(effects, files); // what is known already (cached files) shows at once
+    Publish(effects, files, lazy, packs); // what is known already (cached files) shows at once
     const DWORD t0 = GetTickCount();
     for (size_t i : todo)
     {
         WIN32_FILE_ATTRIBUTE_DATA a{};
-        GetFileAttributesExW(files[i].c_str(), GetFileExInfoStandard, &a);
-        effects[i] = CompileGuarded(files[i], folders, W, H);
-        CacheEntry& e = g_cache[files[i]];
+        GetFileAttributesExW(files[i].path.c_str(), GetFileExInfoStandard, &a);
+        effects[i] = CompileGuarded(files[i].path, folders[files[i].folders], W, H);
+        CacheEntry& e = g_cache[files[i].path];
         e.written = a.ftLastWriteTime; e.size = ((uint64_t)a.nFileSizeHigh << 32) | a.nFileSizeLow; e.w = W; e.h = H; e.fx = effects[i];
-        Publish(effects, files); // each compiled file shows as soon as it is ready
+        Publish(effects, files, lazy, packs); // each compiled file shows as soon as it is ready
         const Effect& fx = *effects[i];
-        if (!fx.error.empty()) LOG_INFO("[Looks] " + fx.file + " can't run here: " + fx.error);
+        const std::string where = files[i].pack.empty() ? fx.file : files[i].pack + "\\" + fx.file;
+        if (!fx.error.empty()) LOG_INFO("[Looks] " + where + " can't run here: " + fx.error);
         for (const Technique& t : fx.techniques)
-            if (!t.reason.empty()) LOG_INFO("[Looks] " + fx.file + ", " + t.name + " can't run here: " + t.reason);
-        for (const std::string& n : fx.notes) LOG_INFO("[Looks] " + fx.file + ": Direct3D 9 fallback, " + n);
+            if (!t.reason.empty()) LOG_INFO("[Looks] " + where + ", " + t.name + " can't run here: " + t.reason);
+        for (const std::string& n : fx.notes) LOG_INFO("[Looks] " + where + ": Direct3D 9 fallback, " + n);
     }
     for (auto it = g_cache.begin(); it != g_cache.end();)
-        it = std::find(files.begin(), files.end(), it->first) == files.end() ? g_cache.erase(it) : std::next(it);
+        it = std::find_if(files.begin(), files.end(), [&](const Source& s) { return s.path == it->first; }) == files.end() ? g_cache.erase(it) : std::next(it);
     if (!todo.empty())
         LOG_INFO("[Looks] Shaders folder: compiled " + std::to_string(todo.size()) + " of " + std::to_string(files.size()) + " .fx files for " +
                  std::to_string(W) + "x" + std::to_string(H) + " in " + std::to_string(GetTickCount() - t0) + " ms");
@@ -408,7 +503,46 @@ bool Pending(const std::string& file)
 {
     if (!g_current) return Scanning();
     const std::string l = LowerA(file);
-    return std::find(g_current->pending.begin(), g_current->pending.end(), l) != g_current->pending.end();
+    if (std::find(g_current->pending.begin(), g_current->pending.end(), l) != g_current->pending.end()) return true;
+    if (std::find(g_current->lazy.begin(), g_current->lazy.end(), l) == g_current->lazy.end()) return false;
+    std::lock_guard<std::mutex> lock(g_lock); // a pack file asked for since the last scan
+    return g_browse || g_want.count(l) != 0;
+}
+
+void WantFiles(const std::vector<std::string>& files)
+{
+    std::set<std::string> want;
+    for (const std::string& f : files) want.insert(LowerA(f));
+    bool scan = false;
+    {
+        std::lock_guard<std::mutex> lock(g_lock);
+        for (const std::string& f : want)
+            if (!g_want.count(f) && g_current && std::find(g_current->lazy.begin(), g_current->lazy.end(), f) != g_current->lazy.end()) scan = true;
+        g_want.insert(want.begin(), want.end()); // kept for the session: a file compiled once stays compiled
+    }
+    if (scan) RequestScan(false);
+}
+
+void BrowsePacks()
+{
+    {
+        std::lock_guard<std::mutex> lock(g_lock);
+        if (g_browse) return;
+        g_browse = true;
+    }
+    RequestScan(false);
+}
+
+std::vector<std::string> PackFolders() { return g_current ? g_current->packs : std::vector<std::string>(); }
+
+PackCount CountPack(const std::string& folder)
+{
+    if (!g_current) return {};
+    for (const auto& [k, n] : g_current->counts)
+        if (_stricmp(k.c_str(), folder.c_str()) == 0) return n;
+    PackCount none;
+    for (const std::string& p : g_current->packs) none.checked |= _stricmp(p.c_str(), folder.c_str()) == 0; // a pack without .fx files
+    return none;
 }
 
 bool HasFile(const std::string& file)
@@ -427,7 +561,7 @@ std::vector<Listed> List()
         const UserTech& u = *g_current->techs[i];
         if (u.hidden) continue;
         Listed l;
-        l.technique = u.technique; l.file = u.file; l.reason = u.reason;
+        l.technique = u.technique; l.file = u.file; l.reason = u.reason; l.pack = u.pack;
         l.index = u.reason.empty() ? (int)i : -1;
         out.push_back(std::move(l));
     }

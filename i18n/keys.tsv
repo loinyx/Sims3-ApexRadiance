@@ -919,7 +919,7 @@ Restart host: adapted from Dalexlol's wrapper in sims3-modernization.	tr_menu.cp
 Thanks to @boringbones for testing every build.	tr_menu.cpp:kEntries	Obrigado a @boringbones por testar cada build.	Gracias a @boringbones por probar cada build.	Merci à @boringbones d'avoir testé chaque build.	
 FidelityFX CAS: AMD (MIT).	tr_menu.cpp:kEntries	FidelityFX CAS: AMD (MIT).	FidelityFX CAS: AMD (MIT).	FidelityFX CAS : AMD (MIT).	
 Upper-floor ground light: Arro's technique, adapted in Apex Radiance.	tr_menu.cpp:kEntries	Luz dos andares superiores no chão: técnica de Arro, adaptada no Apex Radiance.	Luz de los pisos superiores en el suelo: técnica de Arro, adaptada en Apex Radiance.	Lumière des étages supérieurs au sol : technique d'Arro, adaptée dans Apex Radiance.	
-Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC).	tr_menu.cpp:kEntries	Bibliotecas e licenças: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), ícones Lucide (ISC).	Bibliotecas y licencias: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), iconos Lucide (ISC).	Bibliothèques et licences : Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), icônes Lucide (ISC).	
+Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), miniz (MIT), Lucide icons (ISC).	tr_menu.cpp:kEntries	Bibliotecas e licenças: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), miniz (MIT), ícones Lucide (ISC).	Bibliotecas y licencias: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), miniz (MIT), iconos Lucide (ISC).	Bibliothèques et licences : Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), miniz (MIT), icônes Lucide (ISC).	
 ReShade shaders in Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).	tr_menu.cpp:kEntries	Shaders do ReShade em Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).	Shaders de ReShade en Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).	Shaders ReShade de Looks : CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).	
 ReShade FX compiler: crosire (BSD-3-Clause).	tr_menu.cpp:kEntries	Compilador ReShade FX: crosire (BSD-3-Clause).	Compilador ReShade FX: crosire (BSD-3-Clause).	Compilateur ReShade FX : crosire (BSD-3-Clause).	
 Looks and Capture: contributed by @ModestPixels.	tr_menu.cpp:kEntries	Looks e Capture: contribuição de @ModestPixels.	Looks y Capture: contribución de @ModestPixels.	Looks et Capture : contribution de @ModestPixels.	
@@ -2603,7 +2603,6 @@ Open the Shaders folder	tr_image.cpp:kEntries	Abrir a pasta Shaders	Abrir la car
 ReShade shaders and textures	tr_image.cpp:kEntries	Shaders e texturas do ReShade	Shaders y texturas de ReShade	Shaders et textures ReShade	
 Checking your shaders…	tr_image.cpp:kEntries	Verificando seus shaders…	Comprobando tus shaders…	Vérification de vos shaders…	
 {} shaders run in The Sims 3	tr_image.cpp:kEntries	{} shaders funcionam no The Sims 3	{} shaders funcionan en The Sims 3	{} shaders fonctionnent dans Les Sims 3	{}
-Missing a shader? Add your own .fx files	tr_image.cpp:kEntries	Falta algum shader? Adicione seus próprios arquivos .fx	¿Falta algún shader? Añade tus propios archivos .fx	Il manque un shader ? Ajoutez vos propres fichiers .fx	
 Add a built-in shader or one of your own .fx files to this look	tr_image.cpp:kEntries	Adiciona a este visual um shader do Apex ou um dos seus arquivos .fx	Añade a este estilo un shader integrado o uno de tus archivos .fx	Ajoute à ce rendu un shader intégré ou l'un de vos fichiers .fx	
 {} of {} on · {} missing	tr_image.cpp:kEntries	{} de {} ligados · {} faltando	{} de {} activados · faltan {}	{} sur {} activés · {} manquants	{} {} {}
 {} ({}): checking the file…	tr_image.cpp:kEntries	{} ({}): verificando o arquivo…	{} ({}): comprobando el archivo…	{} ({}) : vérification du fichier…	{} {}
@@ -2618,6 +2617,54 @@ All shaders found	tr_image.cpp:kEntries	Todos os shaders encontrados	Se encontra
 {} still missing	tr_image.cpp:kEntries	Ainda faltam {}	Aún faltan {}	Il en manque encore {}	{}
 My look	tr_image.cpp:kEntries	Meu visual	Mi estilo	Mon rendu	
 Read the look's .ini again and compile the Shaders folder again	tr_image.cpp:kEntries	Lê o .ini do visual de novo e compila a pasta Shaders outra vez	Vuelve a leer el .ini del estilo y compila otra vez la carpeta Shaders	Relit le .ini du rendu et recompile le dossier Shaders	
+Get shader packs	tr_image.cpp:kEntries	Baixar pacotes de shaders	Descargar paquetes de shaders	Obtenir des packs de shaders	
+Download shader packs from ReShade's official list	tr_image.cpp:kEntries	Baixa pacotes de shaders da lista oficial do ReShade	Descarga paquetes de shaders de la lista oficial de ReShade	Télécharge des packs de shaders de la liste officielle de ReShade	
+Missing something? Get more packs or add your own .fx files.	tr_image.cpp:kEntries	Falta algo? Baixe mais pacotes ou adicione seus próprios arquivos .fx.	¿Falta algo? Descarga más paquetes o añade tus propios archivos .fx.	Il manque quelque chose ? Obtenez d'autres packs ou ajoutez vos propres fichiers .fx.	
+{} and {}	tr_image.cpp:kEntries	{} e {}	{} y {}	{} et {}	{} {}
+{} packs	tr_image.cpp:kEntries	{} pacotes	{} paquetes	{} packs	{}
+Download {}	tr_image.cpp:kEntries	Baixar {}	Descargar {}	Télécharger {}	{}
+Download both	tr_image.cpp:kEntries	Baixar os dois	Descargar ambos	Télécharger les deux	
+Download all	tr_image.cpp:kEntries	Baixar todos	Descargar todos	Tout télécharger	
+{} KB	tr_image.cpp:kEntries	{} KB	{} KB	{} KB	{}
+{:.1f} MB	tr_image.cpp:kEntries	{:.1f} MB	{:.1f} MB	{:.1f} MB	{:.1f}
+{} of {} run here	tr_image.cpp:kEntries	{} de {} funcionam aqui	{} de {} funcionan aquí	{} sur {} fonctionnent ici	{} {}
+Checking its shaders…	tr_image.cpp:kEntries	Verificando os shaders…	Comprobando sus shaders…	Vérification de ses shaders…	
+{} removed	tr_image.cpp:kEntries	{} removido	{} quitado	{} retiré	{}
+Open on GitHub	tr_image.cpp:kEntries	Abrir no GitHub	Abrir en GitHub	Ouvrir sur GitHub	
+Back to the list	tr_image.cpp:kEntries	Voltar à lista	Volver a la lista	Retour à la liste	
+No connection; the list may be out of date	tr_image.cpp:kEntries	Sem conexão; a lista pode estar desatualizada	Sin conexión; la lista puede estar desactualizada	Pas de connexion ; la liste n'est peut-être pas à jour	
+Downloaded	tr_image.cpp:kEntries	Baixado	Descargado	Téléchargé	
+Downloading {}%	tr_image.cpp:kEntries	Baixando {}%	Descargando {}%	Téléchargement {} %	{}
+Waiting	tr_image.cpp:kEntries	Aguardando	En espera	En attente	
+Stopped	tr_image.cpp:kEntries	Interrompido	Detenido	Arrêté	
+Not downloaded	tr_image.cpp:kEntries	Não baixado	No descargado	Non téléchargé	
+Stop the rest	tr_image.cpp:kEntries	Parar o restante	Detener el resto	Arrêter le reste	
+Search packs or authors	tr_image.cpp:kEntries	Buscar pacotes ou autores	Buscar paquetes o autores	Rechercher des packs ou des auteurs	
+Select all	tr_image.cpp:kEntries	Selecionar todos	Seleccionar todos	Tout sélectionner	
+no longer in ReShade's list	tr_image.cpp:kEntries	não está mais na lista do ReShade	ya no está en la lista de ReShade	n'est plus dans la liste de ReShade	
+No pack matches	tr_image.cpp:kEntries	Nenhum pacote corresponde	Ningún paquete coincide	Aucun pack ne correspond	
+{} selected · {}	tr_image.cpp:kEntries	{} selecionados · {}	{} seleccionados · {}	{} sélectionnés · {}	{} {}
+Apex goes online only when you click Download. Each pack comes from its author's GitHub under its own licence; only .fx, .fxh and textures are kept.	tr_image.cpp:kEntries	O Apex só acessa a internet quando você clica em Baixar. Cada pacote vem do GitHub do autor, sob a licença dele; só os arquivos .fx, .fxh e as texturas são mantidos.	Apex solo se conecta a internet cuando pulsas Descargar. Cada paquete viene del GitHub de su autor, con su propia licencia; solo se conservan los .fx, .fxh y las texturas.	Apex ne se connecte que lorsque vous cliquez sur Télécharger. Chaque pack vient du GitHub de son auteur, sous sa propre licence ; seuls les .fx, .fxh et les textures sont conservés.	
+Download 1 pack	tr_image.cpp:kEntries	Baixar 1 pacote	Descargar 1 paquete	Télécharger 1 pack	
+Download {} packs	tr_image.cpp:kEntries	Baixar {} pacotes	Descargar {} paquetes	Télécharger {} packs	{}
+Imported: {}	tr_image.cpp:kEntries	Importado: {}	Importado: {}	Importé : {}	{}
+This look uses {} shaders from {}, which you don't have yet	tr_image.cpp:kEntries	Este visual usa {} shaders de {}, que você ainda não tem	Este estilo usa {} shaders de {}, que aún no tienes	Ce rendu utilise {} shaders de {}, que vous n'avez pas encore	{} {}
+{} ({}): downloading {}…	tr_image.cpp:kEntries	{} ({}): baixando {}…	{} ({}): descargando {}…	{} ({}) : téléchargement de {}…	{} {} {}
+{} ({}): in {}, not downloaded	tr_image.cpp:kEntries	{} ({}): está em {}, ainda não baixado	{} ({}): en {}, no descargado	{} ({}) : dans {}, non téléchargé	{} {} {}
+Get {}	tr_image.cpp:kEntries	Baixar {}	Descargar {}	Obtenir {}	{}
+Downloading {} of {} · you can keep playing	tr_image.cpp:kEntries	Baixando {} de {} · você pode continuar jogando	Descargando {} de {} · puedes seguir jugando	Téléchargement {} sur {} · vous pouvez continuer à jouer	{} {}
+{} of {} done	tr_image.cpp:kEntries	{} de {} concluídos	{} de {} terminados	{} sur {} terminés	{} {}
+ReShade's official list · {} packs · {} downloaded	tr_image.cpp:kEntries	Lista oficial do ReShade · {} pacotes · {} baixados	Lista oficial de ReShade · {} paquetes · {} descargados	Liste officielle de ReShade · {} packs · {} téléchargés	{} {}
+Downloading {} of {}	tr_image.cpp:kEntries	Baixando {} de {}	Descargando {} de {}	Téléchargement {} sur {}	{} {}
+No connection to GitHub	tr_image.cpp:kEntries	Sem conexão com o GitHub	Sin conexión con GitHub	Pas de connexion à GitHub	
+This pack is no longer on GitHub	tr_image.cpp:kEntries	Este pacote não está mais no GitHub	Este paquete ya no está en GitHub	Ce pack n'est plus sur GitHub	
+GitHub is busy; try again in a few minutes	tr_image.cpp:kEntries	O GitHub está ocupado; tente de novo em alguns minutos	GitHub está ocupado; inténtalo de nuevo en unos minutos	GitHub est occupé ; réessayez dans quelques minutes	
+This pack is larger than Apex accepts	tr_image.cpp:kEntries	Este pacote é maior do que o Apex aceita	Este paquete es más grande de lo que Apex acepta	Ce pack est plus gros que ce qu'Apex accepte	
+GitHub sent the download somewhere else	tr_image.cpp:kEntries	O GitHub mandou o download para outro lugar	GitHub envió la descarga a otro sitio	GitHub a envoyé le téléchargement ailleurs	
+The pack could not be unpacked	tr_image.cpp:kEntries	Não foi possível descompactar o pacote	No se pudo descomprimir el paquete	Le pack n'a pas pu être décompressé	
+The pack could not be saved in the Shaders folder	tr_image.cpp:kEntries	Não foi possível salvar o pacote na pasta Shaders	No se pudo guardar el paquete en la carpeta Shaders	Le pack n'a pas pu être enregistré dans le dossier Shaders	
+The download failed	tr_image.cpp:kEntries	O download falhou	La descarga falló	Le téléchargement a échoué	
+Shader packs: downloaded from their authors' GitHub, under each author's licence.	tr_image.cpp:kEntries	Pacotes de shaders: baixados do GitHub dos autores, sob a licença de cada um.	Paquetes de shaders: descargados del GitHub de sus autores, con la licencia de cada uno.	Packs de shaders : téléchargés depuis le GitHub de leurs auteurs, sous la licence de chacun.	
 Choose the intensity	tr_lighting.cpp:kEntries	Escolha a intensidade	Elige la intensidad	Choisissez l’intensité	
 Ground, objects and buildings are already balanced together	tr_lighting.cpp:kEntries	Chão, objetos e construções já estão equilibrados entre si	El suelo, los objetos y los edificios ya están equilibrados	Le sol, les objets et les bâtiments sont déjà équilibrés ensemble	
 Less light, more contrast at night	tr_lighting.cpp:kEntries	Menos luz, mais contraste à noite	Menos luz, más contraste por la noche	Moins de lumière, plus de contraste la nuit	

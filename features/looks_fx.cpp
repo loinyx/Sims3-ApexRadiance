@@ -652,6 +652,8 @@ SetDepthStencilFn g_setDS = nullptr;
 void BindRT(IDirect3DDevice9* dev, DWORD i, IDirect3DSurface9* s) { if (g_setRT) g_setRT(dev, i, s); else dev->SetRenderTarget(i, s); }
 void BindDS(IDirect3DDevice9* dev, IDirect3DSurface9* s) { if (g_setDS) g_setDS(dev, s); else dev->SetDepthStencilSurface(s); }
 
+} // namespace
+
 // An image file -> BGRA at w x h (WIC; COM is initialised here when the thread has not done it)
 bool DecodeImage(const std::wstring& path, UINT w, UINT h, std::vector<uint8_t>& bgra)
 {
@@ -678,8 +680,6 @@ bool DecodeImage(const std::wstring& path, UINT w, UINT h, std::vector<uint8_t>&
     if (SUCCEEDED(com)) CoUninitialize();
     return ok;
 }
-
-} // namespace
 
 void SetBindFunctions(SetRenderTargetFn rt, SetDepthStencilFn ds) { g_setRT = rt; g_setDS = ds; }
 
