@@ -197,7 +197,8 @@ instead of hiding them.
    post-pixel-shader blending (`CheckDeviceFormat` with `D3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING`), a depth format that
    does not match it (`CheckDepthStencilMatch`), or the target not created.
 6. **Only frames with a 3D scene.** Every DrawIndexedPrimitive and DrawPrimitive with render target 0 asked as the
-   back buffer and depth testing on counts, up to 4. A frame with fewer (a loading screen, the save screen) has no 3D
+   back buffer and depth testing on counts, up to 4, as Picture counts the scene (a test that passes everything with no
+   depth write, the UI's glass passes and back-buffer copies, does not); the count restarts at every Present and Reset. A frame with fewer (a loading screen, the save screen) has no 3D
    scene, and the next frame is not substituted: the game draws it straight into the back buffer, and the first frame
    of a scene again arms the next one. Under the RTX Remix bridge on one hybrid-graphics laptop (Intel Arc and RTX 4060
    Laptop, EA app 1.69), loading screens drawn into the target came out as whole frames of solid blue (0, 0, 255 at every

@@ -46,7 +46,7 @@ bool g_inResolve = false;
 // scene (a loading or save screen), and the next frame is drawn straight into the back buffer: the precision is for a 3D
 // scene, and under the RTX Remix bridge on a hybrid-graphics laptop the loading screen drawn into the target came out as
 // whole frames of solid blue (unverified why; the screen drawn straight into the back buffer was right)
-constexpr int kMinSceneDraws = 4; // as Picture and the no-scene trace
+constexpr int kMinSceneDraws = 4; // as Picture and the no-scene trace (counted as Picture counts them)
 int g_sceneDraws = 0;
 bool g_onBb = true;
 bool g_installed = false; // substitution callbacks set and the PostScene effect added
@@ -306,6 +306,8 @@ void ResolveAtPresent(IDirect3DDevice9* dev) {
 // Present, after every other callback: the next frame starts in the target (a Clear before its first SetRenderTarget lands
 // in it). Present shows the back buffer whatever is bound.
 void ArmAtPresent(IDirect3DDevice9* dev) {
+    const bool scene = g_sceneDraws >= kMinSceneDraws; // (the frame that ends here; reset on every path)
+    g_sceneDraws = 0;
     if (!g_want || !SceneDither::On()) {
         if (g_installed || g_tex || g_ps) TurnOff(dev);
         return;
@@ -315,8 +317,6 @@ void ArmAtPresent(IDirect3DDevice9* dev) {
         g_armed = false;
         return;
     }
-    const bool scene = g_sceneDraws >= kMinSceneDraws;
-    g_sceneDraws = 0;
     g_armed = scene;
     g_resolved = false;
     g_used = false;
@@ -328,13 +328,18 @@ void ArmAtPresent(IDirect3DDevice9* dev) {
     }
 }
 
+// As Picture and PostScene: a depth test that passes everything with no depth write (the UI's glass passes, back-buffer
+// copies drawn back) is not scene
 void CountSceneDraw(D3D9Hooks::DeviceContext& ctx) {
-    if (g_sceneDraws < kMinSceneDraws && g_onBb && ctx.ZEnable() != D3DZB_FALSE) g_sceneDraws++;
+    if (g_sceneDraws >= kMinSceneDraws || !g_installed || !g_onBb || ctx.ZEnable() == D3DZB_FALSE) return;
+    if (!ctx.ZWriteEnable() && ctx.ZFunc() == D3DCMP_ALWAYS) return;
+    g_sceneDraws++;
 }
 
 void OnPreReset(IDirect3DDevice9* dev) {
     ReleaseTarget(dev);
     g_bb = nullptr;
+    g_sceneDraws = 0;
     g_refusedFor = {};
     if (g_state != State::Off) g_state = State::Waiting;
 }
