@@ -14,7 +14,7 @@ and can switch, reorder and tune the preset's shaders, then save the result as a
 | Configuration | `[patches.Looks]` in `ApexRadiance.toml` (an older `[patches.GShadeLooks]` is read once and written under the new name) |
 | Folders | `Documents\Electronic Arts\The Sims 3\Apex Radiance\Looks\` (the player's looks; created on first use); `Game\Bin\1. Shader Presets\` (GShade's, read-only, listed only when it exists) |
 | Presets | Part of the Color part; the look's .ini travels in an exported ZIP |
-| Shortcut | *ReShade/GShade looks on or off*, `[ui] looks_key` (Ctrl+Shift+L) |
+| Shortcut | *Looks on or off*, `[ui] looks_key` (Ctrl+Shift+L) |
 | Source | [`patches/looks_patch.cpp`](../../patches/looks_patch.cpp) (feature, menu), [`features/looks_preset.cpp`](../../features/looks_preset.cpp) (.ini files, sources), [`features/looks_runner.cpp`](../../features/looks_runner.cpp) (passes), [`features/looks_shaders.h`](../../features/looks_shaders.h), [`shaders/looks_common.hlsl`](../../shaders/looks_common.hlsl), [`third_party/reshade_shaders/`](../../third_party/reshade_shaders/LICENSES.md), [`tools/looks_shaders_gen.py`](../../tools/looks_shaders_gen.py) |
 | Validation | [validation/looks.md](../validation/looks.md) |
 

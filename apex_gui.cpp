@@ -5118,7 +5118,7 @@ const char* RowName(int row) {
     case RowSearch: return "Search the settings";
     case RowPeek: return "Hide the menu while held";
     case RowVideo: return "Record a video";
-    case RowLooks: return "ReShade/GShade looks on or off";
+    case RowLooks: return "Looks on or off";
     case RowExternalKey: return "The other app's key";
     default: return "Compare the picture without its filters";
     }
@@ -5136,7 +5136,7 @@ const char* RowText(int row) {
     case RowSearch: return "Focuses the settings search field";
     case RowPeek: return "Hold the key over the menu to hide it and see the game";
     case RowVideo: return "Press once to start, again to stop";
-    case RowLooks: return "Switches the ReShade/GShade preset off (no GPU cost) and back on";
+    case RowLooks: return "Switches the look off (no GPU cost) and back on";
     case RowExternalKey: return "Only with Recorder set to Another app: Apex presses it to start Xbox Game Bar, OBS or ShadowPlay";
     default: return "Hold the key over the menu to bypass Picture";
     }
@@ -5556,7 +5556,7 @@ void RunShortcuts() {
     const bool menuShot = std::exchange(g_takeShot, false); // Image > Capture's "Take one" (the F8 path)
     if (Hotkeys::Take(Hotkeys::Action::Screenshot) || menuShot)
         Captures::RequestPlayerScreenshot(ApexConfig::GetUi().screenshotHideGameUi);
-    if (Hotkeys::Take(Hotkeys::Action::LooksToggle)) ToggleFeatureByKey(Looks::kPatchName, "ReShade look", IconId::SwatchBook); // the card's title and icon
+    if (Hotkeys::Take(Hotkeys::Action::LooksToggle)) ToggleFeatureByKey(Looks::kPatchName, "Look", IconId::SwatchBook); // "Look turned on", with the card's icon
     RunPresetShortcut();
 }
 

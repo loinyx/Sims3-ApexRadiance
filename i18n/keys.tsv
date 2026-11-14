@@ -404,11 +404,7 @@ Enter a title to finish. The description is optional; your capture files are alr
 Image	tr_menu.cpp:kEntries	Imagem	Imagen	Image	
 Your individual lighting settings are active	tr_menu.cpp:kEntries	Seus ajustes individuais de iluminação estão ativos	Tus ajustes individuales de iluminación están activos	Vos réglages d'éclairage individuels sont actifs	
 Press {} to save one screenshot with Apex's effects	tr_menu.cpp:kEntries	Aperte {} para salvar uma captura com os efeitos do Apex	Pulsa {} para guardar una captura con los efectos de Apex	Appuyez sur {} pour enregistrer une capture avec les effets d'Apex	{}
-Save screenshots to	tr_menu.cpp:kEntries	Salvar capturas em	Guardar capturas en	Enregistrer les captures dans	
-Where the filtered screenshots are saved	tr_menu.cpp:kEntries	Onde as capturas com filtros são salvas	Dónde se guardan las capturas con filtros	Où les captures filtrées sont enregistrées	
-Game's Screenshots folder	tr_menu.cpp:kEntries	Pasta de capturas do jogo	Carpeta de capturas del juego	Dossier de captures du jeu	
 Apex Radiance folder	tr_menu.cpp:kEntries	Pasta do Apex Radiance	Carpeta de Apex Radiance	Dossier d'Apex Radiance	
-Another folder	tr_menu.cpp:kEntries	Outra pasta	Otra carpeta	Autre dossier	
 Any folder you choose, for example on another drive	tr_menu.cpp:kEntries	Qualquer pasta que você escolher, por exemplo em outro disco	Cualquier carpeta que elijas, por ejemplo en otra unidad	N'importe quel dossier de votre choix, par exemple sur un autre disque	
 Screenshots folder	tr_menu.cpp:kEntries	Pasta dos prints	Carpeta de capturas	Dossier des captures	
 Tokens for the folder and the file name	tr_menu.cpp:kEntries	Códigos para a pasta e o nome do arquivo	Códigos para la carpeta y el nombre del archivo	Codes pour le dossier et le nom du fichier	
@@ -434,13 +430,10 @@ Screenshot or Video	tr_menu.cpp:kEntries	Print ou vídeo	Captura o vídeo	Captur
 Clip number of a long video	tr_menu.cpp:kEntries	Número do trecho de um vídeo longo	Número de fragmento de un vídeo largo	Numéro de segment d'une longue vidéo	
 Picture width	tr_menu.cpp:kEntries	Largura da imagem	Ancho de la imagen	Largeur de l'image	
 Picture height	tr_menu.cpp:kEntries	Altura da imagem	Alto de la imagen	Hauteur de l'image	
-A running number	tr_menu.cpp:kEntries	Um número sequencial	Un número correlativo	Un numéro qui s'incrémente	
 Choose a folder for the screenshots	tr_menu.cpp:kEntries	Escolha uma pasta para os prints	Elige una carpeta para las capturas	Choisissez un dossier pour les captures	
 Choose another folder for the screenshots	tr_menu.cpp:kEntries	Escolher outra pasta para os prints	Elegir otra carpeta para las capturas	Choisir un autre dossier pour les captures	
-Videos folder	tr_menu.cpp:kEntries	Pasta dos vídeos	Carpeta de vídeos	Dossier des vidéos	
 Choose another folder for the videos	tr_menu.cpp:kEntries	Escolher outra pasta para os vídeos	Elegir otra carpeta para los vídeos	Choisir un autre dossier pour les vidéos	
 Choose a folder for the videos	tr_menu.cpp:kEntries	Escolha uma pasta para os vídeos	Elige una carpeta para los vídeos	Choisissez un dossier pour les vidéos	
-Opens this folder in Explorer	tr_menu.cpp:kEntries	Abre esta pasta no Explorador	Abre esta carpeta en el Explorador	Ouvre ce dossier dans l'Explorateur	
 No folder set	tr_menu.cpp:kEntries	Nenhuma pasta definida	Ninguna carpeta definida	Aucun dossier défini	
 Type a folder	tr_menu.cpp:kEntries	Digitar uma pasta	Escribir una carpeta	Saisir un dossier	
 Folder path	tr_menu.cpp:kEntries	Caminho da pasta	Ruta de la carpeta	Chemin du dossier	
@@ -448,7 +441,6 @@ Hover the box for the tokens; applies when you leave the box	tr_menu.cpp:kEntrie
 The chosen screenshots folder is not available; saved in the game's Screenshots folder	tr_menu.cpp:kEntries	A pasta escolhida para os prints não está disponível; salvo na pasta Screenshots do jogo	La carpeta elegida para las capturas no está disponible; guardada en la carpeta Screenshots del juego	Le dossier choisi pour les captures n'est pas disponible ; enregistrée dans le dossier Screenshots du jeu	
 Next to the photos the game takes, in Documents > Electronic Arts > The Sims 3 > Screenshots	tr_menu.cpp:kEntries	Junto às fotos do jogo, em Documentos > Electronic Arts > The Sims 3 > Screenshots	Junto a las fotos del juego, en Documentos > Electronic Arts > The Sims 3 > Screenshots	À côté des photos du jeu, dans Documents > Electronic Arts > The Sims 3 > Screenshots	
 Kept apart from the game's photos, in Documents > Electronic Arts > The Sims 3 > Apex Radiance > Screenshots	tr_menu.cpp:kEntries	Separadas das fotos do jogo, em Documentos > Electronic Arts > The Sims 3 > Apex Radiance > Screenshots	Separadas de las fotos del juego, en Documentos > Electronic Arts > The Sims 3 > Apex Radiance > Screenshots	À part des photos du jeu, dans Documents > Electronic Arts > The Sims 3 > Apex Radiance > Screenshots	
-Hides the game interface for the photo, then restores it; turn off to include it	tr_menu.cpp:kEntries	Esconde a interface do jogo durante a foto e a restaura depois; desative para incluí-la	Oculta la interfaz del juego durante la foto y la restaura después; desactiva para incluirla	Masque l'interface du jeu pour la photo, puis la rétablit ; désactivez pour l'inclure	
 Escape cancels the current action	tr_menu.cpp:kEntries	Esc cancela a ação atual	Esc cancela la acción actual	Échap annule l'action en cours	
 Diagnostic: dumps the draw calls of 2 frames to ApexRadiance_FrameCapture.txt (shortcut in Settings > Shortcuts).	tr_menu.cpp:kEntries	Diagnóstico: grava as chamadas de desenho de 2 quadros em ApexRadiance_FrameCapture.txt (atalho em Configurações > Atalhos).	Diagnóstico: vuelca las llamadas de dibujo de 2 fotogramas a ApexRadiance_FrameCapture.txt (atajo en Ajustes > Atajos).	Diagnostic : enregistre les appels de rendu de 2 images dans ApexRadiance_FrameCapture.txt (raccourci dans Paramètres > Raccourcis).	
 Some space around the focus stays sharp	tr_menu.cpp:kEntries	Um pouco ao redor do foco fica nítido	Un poco alrededor del enfoque queda nítido	Un peu d'espace autour du point net reste net	
@@ -456,7 +448,6 @@ The default; a wide sharp zone around the focus	tr_menu.cpp:kEntries	O padrão; 
 The blur starts at a middle distance	tr_menu.cpp:kEntries	O desfoque começa a uma distância média	El desenfoque empieza a una distancia media	Le flou commence à mi-distance	
 The default; smoother	tr_menu.cpp:kEntries	O padrão; mais suave	El predeterminado; más suave	Par défaut ; plus doux	
 Smoother still	tr_menu.cpp:kEntries	Ainda mais suave	Aún más suave	Encore plus doux	
-Hide game UI in screenshots	tr_menu.cpp:kEntries	Ocultar a interface do jogo nas fotos	Ocultar la interfaz del juego en las fotos	Masquer l'interface du jeu dans les photos	
 SCREENSHOTS	tr_menu.cpp:kEntries	CAPTURAS	CAPTURAS	CAPTURES	
 Take a filtered screenshot	tr_menu.cpp:kEntries	Tirar uma captura com filtros	Tomar una captura con filtros	Prendre une capture avec les filtres	
 Saves the finished game image after Apex's visual effects	tr_menu.cpp:kEntries	Salva a imagem final do jogo após os efeitos visuais do Apex	Guarda la imagen final del juego después de los efectos visuales de Apex	Enregistre l'image finale du jeu après les effets visuels d'Apex	
@@ -750,8 +741,6 @@ Assigned by the selected preset	tr_menu.cpp:kEntries	Definido pelo preset seleci
 No Apex shortcut assigned	tr_menu.cpp:kEntries	Nenhum atalho do Apex atribuído	No hay ningún atajo de Apex asignado	Aucun raccourci Apex attribué	
 Core actions	tr_menu.cpp:kEntries	Ações principais	Acciones principales	Actions principales	
 Shortcuts used most often	tr_menu.cpp:kEntries	Atalhos usados com mais frequência	Atajos más utilizados	Raccourcis les plus utilisés	
-Screenshot capture	tr_menu.cpp:kEntries	Captura de tela	Captura de pantalla	Capture d'écran	
-Save the finished game image with Apex's active effects	tr_menu.cpp:kEntries	Salva a imagem final do jogo com os efeitos ativos do Apex	Guarda la imagen final del juego con los efectos activos de Apex	Enregistre l'image finale du jeu avec les effets actifs d'Apex	
 Saves one filtered PNG in the game's Documents > Electronic Arts > The Sims 3 > Screenshots folder	tr_menu.cpp:kEntries	Salva um PNG com filtros na pasta Documentos > Electronic Arts > The Sims 3 > Screenshots do jogo	Guarda un PNG con filtros en la carpeta Documentos > Electronic Arts > The Sims 3 > Screenshots del juego	Enregistre un PNG filtré dans le dossier Documents > Electronic Arts > The Sims 3 > Screenshots du jeu	
 F10 hides the game UI for the shot; Ctrl+Shift+F10 still compares Apex effects	tr_menu.cpp:kEntries	F10 oculta a interface do jogo na captura; Ctrl+Shift+F10 continua comparando os efeitos do Apex	F10 oculta la interfaz del juego en la captura; Ctrl+Shift+F10 sigue comparando los efectos de Apex	F10 masque l'interface du jeu pour la capture ; Ctrl+Shift+F10 compare toujours les effets d'Apex	
 While Apex is open	tr_menu.cpp:kEntries	Com o Apex aberto	Con Apex abierto	Quand Apex est ouvert	
@@ -778,12 +767,7 @@ Press the keys…	tr_menu.cpp:kEntries	Aperte as teclas…	Pulsa las teclas…	A
 Click, then press the new combination (Esc cancels)	tr_menu.cpp:kEntries	Clique e aperte a nova combinação (Esc cancela)	Haz clic y pulsa la nueva combinación (Esc cancela)	Cliquez, puis appuyez sur la nouvelle combinaison (Esc annule)	
 Press the new combination now; Esc cancels	tr_menu.cpp:kEntries	Aperte a nova combinação agora; Esc cancela	Pulsa la nueva combinación ahora; Esc cancela	Appuyez maintenant sur la nouvelle combinaison ; Esc annule	
 Press the new combination now; Esc cancels, Delete removes the key	tr_menu.cpp:kEntries	Aperte a nova combinação agora; Esc cancela, Delete remove a tecla	Pulsa la nueva combinación ahora; Esc cancela, Delete quita la tecla	Appuyez maintenant sur la nouvelle combinaison ; Esc annule, Delete retire la touche	
-CAPTURE PROFILES	tr_menu.cpp:kEntries	PERFIS DE CAPTURA	PERFILES DE CAPTURA	PROFILS DE CAPTURE	
-Keys for the capture profiles; set the profiles up on the Menu tab	tr_menu.cpp:kEntries	Teclas dos perfis de captura; configure os perfis na aba Menu	Teclas de los perfiles de captura; configura los perfiles en la pestaña Menú	Touches des profils de capture ; configurez les profils dans l'onglet Menu	
-Switches to the profile in use from the game; each profile has its own key	tr_menu.cpp:kEntries	Muda para o perfil em uso, no jogo; cada perfil tem sua própria tecla	Cambia al perfil en uso desde el juego; cada perfil tiene su propia tecla	Passe au profil utilisé, en jeu ; chaque profil a sa propre touche	
-Takes a picture with this profile without switching to it	tr_menu.cpp:kEntries	Tira uma foto com este perfil sem mudar para ele	Hace una foto con este perfil sin cambiar a él	Prend une photo avec ce profil sans y passer	
 Only with Recorder set to Another app: Apex presses it to start Xbox Game Bar, OBS or ShadowPlay	tr_menu.cpp:kEntries	Só com Gravador em Outro aplicativo: o Apex aperta esta tecla para iniciar o Xbox Game Bar, o OBS ou o ShadowPlay	Solo con Grabador en Otra aplicación: Apex la pulsa para iniciar Xbox Game Bar, OBS o ShadowPlay	Seulement avec Enregistreur sur Une autre application : Apex appuie dessus pour lancer la Xbox Game Bar, OBS ou ShadowPlay	
-{} (now: {})	tr_menu.cpp:kEntries	{} (agora: {})	{} (ahora: {})	{} (actuel : {})	{} {}
 Insert alone opens Sims3SettingsSetter's menu	tr_menu.cpp:kEntries	Insert sozinho abre o menu do Sims3SettingsSetter	Insert solo abre el menú de Sims3SettingsSetter	Insert seul ouvre le menu de Sims3SettingsSetter	
 Ctrl+Shift+C is the game's cheat console	tr_menu.cpp:kEntries	Ctrl+Shift+C é o console de cheats do jogo	Ctrl+Shift+C es la consola de trucos del juego	Ctrl+Maj+C est la console de triche du jeu	
 That combination belongs to Windows	tr_menu.cpp:kEntries	Essa combinação é do Windows	Esa combinación es de Windows	Cette combinaison appartient à Windows	
@@ -1114,9 +1098,6 @@ Effects	tr_menu.cpp:kEntries	Efeitos	Efectos	Effets
 Turns every page below on or off; each page remembers its own options	tr_menu.cpp:kEntries	Liga ou desliga todas as páginas abaixo; cada uma lembra suas opções	Activa o desactiva todas las páginas de abajo; cada una recuerda sus opciones	Active ou désactive toutes les pages ci-dessous ; chacune garde ses options	
 You can turn this note off in Performance › Memory handling	tr_menu.cpp:kEntries	Você pode desligar este aviso em Desempenho › Gerenciamento de memória	Puedes desactivar este aviso en Rendimiento › Gestión de memoria	Vous pouvez désactiver cet avis dans Performances › Gestion de la mémoire	
 With the RTX Remix bridge, fullscreen runs as Borderless	tr_menu.cpp:kEntries	Com o bridge do RTX Remix, a tela cheia roda como Sem bordas	Con el puente RTX Remix, la pantalla completa funciona como Sin bordes	Avec le pont RTX Remix, le plein écran fonctionne en mode Sans bordure	
-Video recording	tr_menu.cpp:kEntries	Gravação de vídeo	Grabación de vídeo	Enregistrement vidéo	
-Records the game with your look as an MP4	tr_menu.cpp:kEntries	Grava o jogo com o seu visual em MP4	Graba el juego con tu estilo en MP4	Enregistre le jeu avec votre rendu en MP4	
-SETTINGS FILE	tr_menu.cpp:kEntries	ARQUIVO DE CONFIGURAÇÕES	ARCHIVO DE AJUSTES	FICHIER DE RÉGLAGES	
 Record a video	tr_menu.cpp:kEntries	Gravar um vídeo	Grabar un vídeo	Enregistrer une vidéo	
 Press once to start, again to stop	tr_menu.cpp:kEntries	Pressione uma vez para iniciar e de novo para parar	Pulsa una vez para empezar y otra para parar	Appuyez une fois pour démarrer, à nouveau pour arrêter	
 File name	tr_menu.cpp:kEntries	Nome do arquivo	Nombre del archivo	Nom du fichier	
@@ -1125,15 +1106,9 @@ File type	tr_menu.cpp:kEntries	Tipo de arquivo	Tipo de archivo	Type de fichier
 PNG keeps every detail; JPG files are smaller	tr_menu.cpp:kEntries	PNG mantém todos os detalhes; arquivos JPG são menores	PNG conserva todos los detalles; los archivos JPG son más pequeños	Le PNG garde tous les détails ; les fichiers JPG sont plus petits	
 JPG quality	tr_menu.cpp:kEntries	Qualidade do JPG	Calidad del JPG	Qualité du JPG	
 Higher keeps more detail and makes larger files	tr_menu.cpp:kEntries	Mais alto mantém mais detalhes e gera arquivos maiores	Más alto conserva más detalle y crea archivos más grandes	Plus haut garde plus de détails et crée des fichiers plus lourds	
-Picture size	tr_menu.cpp:kEntries	Tamanho da foto	Tamaño de la imagen	Taille de l'image	
 Of the game's screen size	tr_menu.cpp:kEntries	Do tamanho da tela do jogo	Del tamaño de la pantalla del juego	De la taille de l'écran du jeu	
 Include the Apex menu	tr_menu.cpp:kEntries	Incluir o menu do Apex	Incluir el menú de Apex	Inclure le menu Apex	
 When the menu is open, it is in the picture	tr_menu.cpp:kEntries	Com o menu aberto, ele aparece na foto	Con el menú abierto, aparece en la imagen	Quand le menu est ouvert, il est sur l'image	
-Save a copy without ReShade/GShade	tr_menu.cpp:kEntries	Salvar uma cópia sem ReShade/GShade	Guardar una copia sin ReShade/GShade	Enregistrer une copie sans ReShade/GShade	
-The same moment without ReShade/GShade, ending in _before	tr_menu.cpp:kEntries	O mesmo momento sem ReShade/GShade, terminando em _before	El mismo momento sin ReShade/GShade, terminado en _before	Le même instant sans ReShade/GShade, finissant par _before	
-Save the ReShade/GShade preset with it	tr_menu.cpp:kEntries	Salvar a predefinição do ReShade/GShade junto	Guardar el preajuste de ReShade/GShade con ella	Enregistrer le préréglage ReShade/GShade avec	
-A copy of the ReShade/GShade preset file next to the picture	tr_menu.cpp:kEntries	Uma cópia do arquivo de predefinição do ReShade/GShade ao lado da foto	Una copia del archivo del preajuste de ReShade/GShade junto a la imagen	Une copie du fichier de préréglage ReShade/GShade à côté de l'image	
-Pictures per key press	tr_menu.cpp:kEntries	Fotos por toque na tecla	Imágenes por pulsación	Images par appui	
 More than one takes a quick series	tr_menu.cpp:kEntries	Mais de uma tira uma sequência rápida	Más de una toma una serie rápida	Plus d'une prend une rafale	
 Time between pictures	tr_menu.cpp:kEntries	Tempo entre as fotos	Tiempo entre imágenes	Temps entre les images	
 In milliseconds	tr_menu.cpp:kEntries	Em milissegundos	En milisegundos	En millisecondes	
@@ -1149,33 +1124,12 @@ Set in the settings file: {} MB	tr_menu.cpp:kEntries	Definido no arquivo de conf
 2 GB	tr_menu.cpp:kEntries	2 GB	2 GB	2 Go	
 4 GB	tr_menu.cpp:kEntries	4 GB	4 GB	4 Go	
 8 GB	tr_menu.cpp:kEntries	8 GB	8 GB	8 Go	
-Capture profiles	tr_menu.cpp:kEntries	Perfis de captura	Perfiles de captura	Profils de capture	
-Every screenshot and video setting below belongs to the profile in use	tr_menu.cpp:kEntries	Todas as opções de captura e vídeo abaixo pertencem ao perfil em uso	Todos los ajustes de captura y vídeo de abajo pertenecen al perfil en uso	Tous les réglages de capture et de vidéo ci-dessous appartiennent au profil utilisé	
-Capture profile: {}	tr_menu.cpp:kEntries	Perfil de captura: {}	Perfil de captura: {}	Profil de capture : {}	{}
 UI	tr_menu.cpp:kEntries	Interface	Interfaz	Interface	
-No UI	tr_menu.cpp:kEntries	Sem interface	Sin interfaz	Sans interface	
 Pointer	tr_menu.cpp:kEntries	Cursor	Puntero	Pointeur	
-No pointer	tr_menu.cpp:kEntries	Sem cursor	Sin puntero	Sans pointeur	
-Silent	tr_menu.cpp:kEntries	Silencioso	Silencio	Silencieux	
-Own sound	tr_menu.cpp:kEntries	Som próprio	Sonido propio	Son personnel	
 JPG	tr_menu.cpp:kEntries	JPG	JPG	JPG	
 PNG	tr_menu.cpp:kEntries	PNG	PNG	PNG	
 MP4	tr_menu.cpp:kEntries	MP4	MP4	MP4	
 No key	tr_menu.cpp:kEntries	Sem tecla	Sin tecla	Aucune touche	
-Click to use this profile	tr_menu.cpp:kEntries	Clique para usar este perfil	Haz clic para usar este perfil	Cliquez pour utiliser ce profil	
-New copies the profile in use; Delete removes it	tr_menu.cpp:kEntries	Novo copia o perfil em uso; Excluir o remove	Nuevo copia el perfil en uso; Eliminar lo borra	Nouveau copie le profil utilisé ; Supprimer l'efface	
-New profile	tr_menu.cpp:kEntries	Novo perfil	Nuevo perfil	Nouveau profil	
-A copy of the profile in use, under a new name	tr_menu.cpp:kEntries	Uma cópia do perfil em uso, com um novo nome	Una copia del perfil en uso, con un nombre nuevo	Une copie du profil utilisé, sous un nouveau nom	
-Deletes the profile in use and switches to the next one	tr_menu.cpp:kEntries	Exclui o perfil em uso e passa para o próximo	Elimina el perfil en uso y pasa al siguiente	Supprime le profil utilisé et passe au suivant	
-The name of the profile in use	tr_menu.cpp:kEntries	O nome do perfil em uso	El nombre del perfil en uso	Le nom du profil utilisé	
-Key for this profile	tr_menu.cpp:kEntries	Tecla deste perfil	Tecla de este perfil	Touche de ce profil	
-One picture with this profile	tr_menu.cpp:kEntries	Uma foto com este perfil	Una foto con este perfil	Une photo avec ce profil	
-Next profile key	tr_menu.cpp:kEntries	Tecla do próximo perfil	Tecla del siguiente perfil	Touche du profil suivant	
-Goes through the profiles in game; the same for every profile	tr_menu.cpp:kEntries	Percorre os perfis no jogo; a mesma para todos os perfis	Recorre los perfiles en el juego; la misma para todos los perfiles	Parcourt les profils en jeu ; la même pour tous les profils	
-Keys for capture are on the Shortcuts tab	tr_menu.cpp:kEntries	As teclas de captura ficam na aba Atalhos	Las teclas de captura están en la pestaña Atajos	Les touches de capture sont dans l'onglet Raccourcis	
-Show the name when switching	tr_menu.cpp:kEntries	Mostrar o nome ao mudar	Mostrar el nombre al cambiar	Afficher le nom au changement	
-A short note on screen, never in pictures or videos	tr_menu.cpp:kEntries	Uma nota curta na tela, nunca em fotos ou vídeos	Una nota breve en pantalla, nunca en fotos ni vídeos	Une courte note à l'écran, jamais dans les photos ou vidéos	
-Shutter sound	tr_menu.cpp:kEntries	Som do obturador	Sonido del obturador	Son de l'obturateur	
 Include the mouse pointer	tr_menu.cpp:kEntries	Incluir o ponteiro do mouse	Incluir el puntero del ratón	Inclure le pointeur de la souris	
 Where it was on screen, at the picture's size	tr_menu.cpp:kEntries	Onde estava na tela, no tamanho da foto	Donde estaba en pantalla, al tamaño de la imagen	Là où il était à l'écran, à la taille de l'image	
 The pointer moves in the video as on screen	tr_menu.cpp:kEntries	O ponteiro se move no vídeo como na tela	El puntero se mueve en el vídeo como en pantalla	Le pointeur bouge dans la vidéo comme à l'écran	
@@ -1184,57 +1138,33 @@ Own file	tr_menu.cpp:kEntries	Arquivo próprio	Archivo propio	Fichier perso
 Plays with each picture and when a video starts and stops	tr_menu.cpp:kEntries	Toca a cada foto e quando um vídeo começa e termina	Suena con cada imagen y al empezar y terminar un vídeo	Joué à chaque image et au début et à la fin d'une vidéo	
 Sound file	tr_menu.cpp:kEntries	Arquivo de som	Archivo de sonido	Fichier son	
 Full path of a .wav file	tr_menu.cpp:kEntries	Caminho completo de um arquivo .wav	Ruta completa de un archivo .wav	Chemin complet d'un fichier .wav	
-GShade is not installed here; the camera sound plays instead	tr_menu.cpp:kEntries	O GShade não está instalado aqui; toca o som de câmera	GShade no está instalado aquí; suena la cámara	GShade n'est pas installé ici ; le son d'appareil photo est joué	
-Recording: {}:{:02}	tr_menu.cpp:kEntries	Gravando: {}:{:02}	Grabando: {}:{:02}	Enregistrement : {}:{:02}	{} {:02}
-Saving the last video	tr_menu.cpp:kEntries	Salvando o último vídeo	Guardando el último vídeo	Enregistrement de la dernière vidéo	
-Or press the key set on the Shortcuts tab	tr_menu.cpp:kEntries	Ou pressione a tecla definida na aba Atalhos	O pulsa la tecla elegida en la pestaña Atajos	Ou appuyez sur la touche choisie dans l'onglet Raccourcis	
-Record now	tr_menu.cpp:kEntries	Gravar agora	Grabar ahora	Enregistrer maintenant	
-Allow video recording	tr_menu.cpp:kEntries	Permitir gravação de vídeo	Permitir grabar vídeo	Autoriser l'enregistrement vidéo	
-Turn off to make the record key do nothing	tr_menu.cpp:kEntries	Desative para que a tecla de gravar não faça nada	Desactívalo para que la tecla de grabar no haga nada	Désactivez pour que la touche d'enregistrement ne fasse rien	
 Recorder	tr_menu.cpp:kEntries	Gravador	Grabador	Enregistreur	
 Another app	tr_menu.cpp:kEntries	Outro aplicativo	Otra aplicación	Une autre application	
 Another app: Apex presses its key (Xbox Game Bar, OBS)	tr_menu.cpp:kEntries	Outro aplicativo: o Apex pressiona a tecla dele (Xbox Game Bar, OBS)	Otra aplicación: Apex pulsa su tecla (Xbox Game Bar, OBS)	Autre application : Apex appuie sur sa touche (Xbox Game Bar, OBS)	
 The other app's key	tr_menu.cpp:kEntries	Tecla do outro aplicativo	Tecla de la otra aplicación	Touche de l'autre application	
 The other app's key is set on the Shortcuts tab	tr_menu.cpp:kEntries	A tecla do outro aplicativo fica na aba Atalhos	La tecla de la otra aplicación se define en la pestaña Atajos	La touche de l'autre application se règle dans l'onglet Raccourcis	
-Video size	tr_menu.cpp:kEntries	Tamanho do vídeo	Tamaño del vídeo	Taille de la vidéo	
 Larger looks sharper and costs more speed	tr_menu.cpp:kEntries	Maior fica mais nítido e pesa mais no jogo	Más grande se ve más nítido y cuesta más rendimiento	Plus grand est plus net et coûte plus de fluidité	
 Frames per second	tr_menu.cpp:kEntries	Quadros por segundo	Fotogramas por segundo	Images par seconde	
 60 is smoothest and costs the most speed	tr_menu.cpp:kEntries	60 é o mais fluido e o que mais pesa	60 es lo más fluido y lo que más cuesta	60 est le plus fluide et coûte le plus	
-By quality	tr_menu.cpp:kEntries	Por qualidade	Por calidad	Par qualité	
-Fixed size	tr_menu.cpp:kEntries	Tamanho fixo	Tamaño fijo	Taille fixe	
-Quality mode	tr_menu.cpp:kEntries	Modo de qualidade	Modo de calidad	Mode de qualité	
-Fixed size keeps every minute about the same size	tr_menu.cpp:kEntries	Tamanho fixo deixa cada minuto com quase o mesmo tamanho	Tamaño fijo mantiene cada minuto con un tamaño parecido	Taille fixe garde chaque minute à peu près de la même taille	
 Megabits per second	tr_menu.cpp:kEntries	Megabits por segundo	Megabits por segundo	Mégabits par seconde	
-Video quality	tr_menu.cpp:kEntries	Qualidade do vídeo	Calidad del vídeo	Qualité de la vidéo	
 Crash-safe MP4	tr_menu.cpp:kEntries	MP4 seguro contra travamentos	MP4 a prueba de cierres	MP4 protégé des plantages	
 Crash-safe keeps the video if the game crashes	tr_menu.cpp:kEntries	O seguro mantém o vídeo se o jogo travar	A prueba de cierres conserva el vídeo si el juego se cierra	La version protégée garde la vidéo si le jeu plante	
 Compression	tr_menu.cpp:kEntries	Compressão	Compresión	Compression	
 HEVC files are smaller; it needs a newer graphics card	tr_menu.cpp:kEntries	Arquivos HEVC são menores; exige uma placa de vídeo mais nova	Los archivos HEVC son más pequeños; necesita una tarjeta gráfica reciente	Les fichiers HEVC sont plus petits ; il faut une carte graphique récente	
-Record the game's sound	tr_menu.cpp:kEntries	Gravar o som do jogo	Grabar el sonido del juego	Enregistrer le son du jeu	
 Only The Sims 3, not music or chat apps	tr_menu.cpp:kEntries	Só The Sims 3, sem música ou apps de chat	Solo The Sims 3, sin música ni apps de chat	Seulement Les Sims 3, sans musique ni applis de discussion	
-Hide game UI while recording	tr_menu.cpp:kEntries	Ocultar a interface ao gravar	Ocultar la interfaz al grabar	Masquer l'interface pendant l'enregistrement	
 Hides the game interface until the video stops	tr_menu.cpp:kEntries	Oculta a interface do jogo até o vídeo parar	Oculta la interfaz del juego hasta que el vídeo termina	Masque l'interface du jeu jusqu'à l'arrêt de la vidéo	
 When the menu is open, it is in the video	tr_menu.cpp:kEntries	Com o menu aberto, ele aparece no vídeo	Con el menú abierto, aparece en el vídeo	Quand le menu est ouvert, il est dans la vidéo	
 Stop after	tr_menu.cpp:kEntries	Parar depois de	Parar después de	Arrêter après	
 0 records until you stop it	tr_menu.cpp:kEntries	0 grava até você parar	0 graba hasta que lo pares	0 enregistre jusqu'à ce que vous arrêtiez	
 Stop at file size	tr_menu.cpp:kEntries	Parar no tamanho de arquivo	Parar al llegar a un tamaño	Arrêter à une taille de fichier	
 0 has no limit	tr_menu.cpp:kEntries	0 não tem limite	0 no tiene límite	0 n'a pas de limite	
-About {} MB per minute; if the game stutters, lower the video size or frames per second	tr_menu.cpp:kEntries	Cerca de {} MB por minuto; se o jogo engasgar, reduza o tamanho do vídeo ou os quadros por segundo	Unos {} MB por minuto; si el juego se traba, baja el tamaño del vídeo o los fotogramas por segundo	Environ {} Mo par minute ; si le jeu saccade, baissez la taille de la vidéo ou les images par seconde	{}
-Settings file	tr_menu.cpp:kEntries	Arquivo de configurações	Archivo de ajustes	Fichier de réglages	
-Screenshots and videos follow ApexCapture.ini; you can edit it yourself	tr_menu.cpp:kEntries	Fotos e vídeos seguem o ApexCapture.ini; você pode editá-lo	Las capturas y vídeos siguen ApexCapture.ini; puedes editarlo tú	Les captures et vidéos suivent ApexCapture.ini ; vous pouvez le modifier	
-Open in Notepad	tr_menu.cpp:kEntries	Abrir no Bloco de Notas	Abrir en el Bloc de notas	Ouvrir dans le Bloc-notes	
-Read again	tr_menu.cpp:kEntries	Ler de novo	Leer de nuevo	Relire	
-Reads the file now	tr_menu.cpp:kEntries	Lê o arquivo agora	Lee el archivo ahora	Lit le fichier maintenant	
-Read changes automatically	tr_menu.cpp:kEntries	Ler mudanças automaticamente	Leer cambios automáticamente	Lire les modifications automatiquement	
-Edit the file while the game runs	tr_menu.cpp:kEntries	Edite o arquivo com o jogo aberto	Edita el archivo con el juego abierto	Modifiez le fichier pendant que le jeu tourne	
-Show a note when saved	tr_menu.cpp:kEntries	Mostrar aviso ao salvar	Mostrar aviso al guardar	Afficher une note à l'enregistrement	
 A short note when a picture or video is saved	tr_menu.cpp:kEntries	Um aviso curto quando uma foto ou vídeo é salvo	Un aviso breve al guardar una imagen o un vídeo	Une courte note quand une image ou une vidéo est enregistrée	
 Show a recording timer	tr_menu.cpp:kEntries	Mostrar um cronômetro de gravação	Mostrar un temporizador de grabación	Afficher un minuteur d'enregistrement	
 Time and file size on screen while recording	tr_menu.cpp:kEntries	Tempo e tamanho do arquivo na tela durante a gravação	Tiempo y tamaño del archivo en pantalla mientras graba	Durée et taille du fichier à l'écran pendant l'enregistrement	
 Timer position	tr_menu.cpp:kEntries	Posição do cronômetro	Posición del temporizador	Position du minuteur	
 Where the timer sits on the screen	tr_menu.cpp:kEntries	Onde o cronômetro fica na tela	Dónde aparece el temporizador en la pantalla	Où le minuteur se place à l'écran	
 Top left	tr_menu.cpp:kEntries	Superior esquerdo	Arriba a la izquierda	En haut à gauche	
-Top centre	tr_menu.cpp:kEntries	Superior central	Arriba en el centro	En haut au centre	
+Top center	tr_menu.cpp:kEntries	Superior central	Arriba en el centro	En haut au centre	
 Top right	tr_menu.cpp:kEntries	Superior direito	Arriba a la derecha	En haut à droite	
 Bottom left	tr_menu.cpp:kEntries	Inferior esquerdo	Abajo a la izquierda	En bas à gauche	
 Bottom right	tr_menu.cpp:kEntries	Inferior direito	Abajo a la derecha	En bas à droite	
@@ -1256,14 +1186,66 @@ Timer in the video too	tr_menu.cpp:kEntries	Cronômetro também no vídeo	Tempor
 An open Apex menu is then in the video too	tr_menu.cpp:kEntries	Um menu do Apex aberto também aparece no vídeo	Un menú de Apex abierto también sale en el vídeo	Un menu Apex ouvert sera aussi dans la vidéo	
 Warn before the limit	tr_menu.cpp:kEntries	Avisar antes do limite	Avisar antes del límite	Avertir avant la limite	
 The timer turns amber and shows the time left; 0 is off	tr_menu.cpp:kEntries	O cronômetro fica âmbar e mostra o tempo restante; 0 desliga	El temporizador se vuelve ámbar y muestra el tiempo restante; 0 lo apaga	Le minuteur passe à l'ambre et affiche le temps restant ; 0 le désactive	
-Short note when saved	tr_menu.cpp:kEntries	Nota curta ao salvar	Nota breve al guardar	Courte note à l'enregistrement	
-Length and size of the saved video	tr_menu.cpp:kEntries	Duração e tamanho do vídeo salvo	Duración y tamaño del vídeo guardado	Durée et taille de la vidéo enregistrée	
 Video saved: {} · {} MB	tr_menu.cpp:kEntries	Vídeo salvo: {} · {} MB	Vídeo guardado: {} · {} MB	Vidéo enregistrée : {} · {} Mo	{} {}
 {} left	tr_menu.cpp:kEntries	faltam {}	quedan {}	{} restantes	{}
 {} stops	tr_menu.cpp:kEntries	{} para	{} detiene	{} arrête	{}
-ReShade/GShade	tr_menu.cpp:kEntries	ReShade/GShade	ReShade/GShade	ReShade/GShade	
-ReShade/GShade looks on or off	tr_menu.cpp:kEntries	Ligar ou desligar os visuais ReShade/GShade	Activar o desactivar los estilos ReShade/GShade	Activer ou désactiver les rendus ReShade/GShade	
-Switches the ReShade/GShade preset off (no GPU cost) and back on	tr_menu.cpp:kEntries	Desliga o preset ReShade/GShade (sem custo na GPU) e liga de novo	Desactiva el preajuste ReShade/GShade (sin coste de GPU) y lo vuelve a activar	Désactive le préréglage ReShade/GShade (sans coût GPU) puis le réactive	
+Screenshots and videos with your effects	tr_menu.cpp:kEntries	Capturas de tela e vídeos com seus efeitos	Capturas y vídeos con tus efectos	Captures et vidéos avec vos effets	
+Screenshots	tr_menu.cpp:kEntries	Capturas de tela	Capturas	Captures d'écran	
+Video	tr_menu.cpp:kEntries	Vídeo	Vídeo	Vidéo	
+Take one	tr_menu.cpp:kEntries	Tirar uma	Tomar una	En prendre une	
+The other app's key is not allowed or the game is not in front; choose a key with Ctrl, Alt, Shift or Win	tr_menu.cpp:kEntries	A tecla do outro app não é permitida ou o jogo não está em primeiro plano; escolha uma tecla com Ctrl, Alt, Shift ou Win	La tecla de la otra app no está permitida o el juego no está en primer plano; elige una tecla con Ctrl, Alt, Shift o Win	La touche de l'autre appli n'est pas autorisée ou le jeu n'est pas au premier plan ; choisissez une touche avec Ctrl, Alt, Shift ou Win	
+The other app is recording ({})	tr_menu.cpp:kEntries	O outro app está gravando ({})	La otra app está grabando ({})	L'autre appli enregistre ({})	{}
+The chosen videos folder is not available; saved in the game's videos folder	tr_menu.cpp:kEntries	A pasta de vídeos escolhida não está disponível; salvo na pasta de vídeos do jogo	La carpeta de vídeos elegida no está disponible; se guardó en la carpeta de vídeos del juego	Le dossier de vidéos choisi n'est pas disponible ; enregistrée dans le dossier de vidéos du jeu	
+Could not create the videos folder	tr_menu.cpp:kEntries	Não foi possível criar a pasta de vídeos	No se pudo crear la carpeta de vídeos	Impossible de créer le dossier de vidéos	
+The video could not start; the reason is in the log	tr_menu.cpp:kEntries	O vídeo não pôde começar; o motivo está no log	El vídeo no pudo empezar; el motivo está en el registro	La vidéo n'a pas pu démarrer ; la raison est dans le journal	
+The other app stopped recording; the video is in its own folder	tr_menu.cpp:kEntries	O outro app parou de gravar; o vídeo está na pasta dele	La otra app dejó de grabar; el vídeo está en su propia carpeta	L'autre appli a arrêté l'enregistrement ; la vidéo est dans son propre dossier	
+Saving the video...	tr_menu.cpp:kEntries	Salvando o vídeo...	Guardando el vídeo...	Enregistrement de la vidéo...	
+Saving the video…	tr_menu.cpp:kEntries	Salvando o vídeo…	Guardando el vídeo…	Enregistrement de la vidéo…	
+The video could not be saved; the reason is in the log	tr_menu.cpp:kEntries	Não foi possível salvar o vídeo; o motivo está no log	No se pudo guardar el vídeo; el motivo está en el registro	La vidéo n'a pas pu être enregistrée ; la raison est dans le journal	
+A number that goes up by one with each file	tr_menu.cpp:kEntries	Um número que aumenta em um a cada arquivo	Un número que sube de uno en uno con cada archivo	Un nombre qui augmente de un à chaque fichier	
+Last: {}	tr_menu.cpp:kEntries	Último: {}	Último: {}	Dernier : {}	{}
+Where	tr_menu.cpp:kEntries	Onde	Dónde	Emplacement	
+Other	tr_menu.cpp:kEntries	Outra	Otra	Autre	
+Open the folder	tr_menu.cpp:kEntries	Abrir a pasta	Abrir la carpeta	Ouvrir le dossier	
+Save to	tr_menu.cpp:kEntries	Salvar em	Guardar en	Enregistrer dans	
+Folder	tr_menu.cpp:kEntries	Pasta	Carpeta	Dossier	
+When saved	tr_menu.cpp:kEntries	Ao salvar	Al guardar	À l'enregistrement	
+Sound	tr_menu.cpp:kEntries	Som	Sonido	Son	
+Note when saved	tr_menu.cpp:kEntries	Aviso ao salvar	Aviso al guardar	Note à l'enregistrement	
+Videos need Windows' Media Feature Pack, which this Windows does not have	tr_menu.cpp:kEntries	Os vídeos precisam do Media Feature Pack do Windows, que este Windows não tem	Los vídeos necesitan el Media Feature Pack de Windows, que este Windows no tiene	Les vidéos nécessitent le Media Feature Pack de Windows, absent de ce Windows	
+The game's own Edge Smoothing is on; turn it off to record (Options › Graphics)	tr_menu.cpp:kEntries	A Suavização de Bordas do próprio jogo está ligada; desligue para gravar (Opções › Gráficos)	El Suavizado de Bordes del propio juego está activado; desactívalo para grabar (Opciones › Gráficos)	Le Lissage des Bords du jeu est activé ; désactivez-le pour enregistrer (Options › Graphismes)	
+The game is low on free memory for a video; save and restart the game	tr_menu.cpp:kEntries	O jogo está com pouca memória livre para um vídeo; salve e reinicie o jogo	Al juego le queda poca memoria libre para un vídeo; guarda y reinicia el juego	Le jeu manque de mémoire libre pour une vidéo ; sauvegardez et redémarrez le jeu	
+In the picture	tr_menu.cpp:kEntries	Na imagem	En la imagen	Dans l'image	
+Hides the game interface for the photo, then restores it	tr_menu.cpp:kEntries	Esconde a interface do jogo para a foto e depois a mostra de novo	Oculta la interfaz del juego para la foto y luego la restaura	Masque l'interface du jeu pour la photo, puis la rétablit	
+With	tr_menu.cpp:kEntries	Com	Con	Avec	
+Without	tr_menu.cpp:kEntries	Sem	Sin	Sans	
+Both	tr_menu.cpp:kEntries	Os dois	Ambas	Les deux	
+Look	tr_menu.cpp:kEntries	Visual	Estilo	Rendu	
+Both also saves the picture without it	tr_menu.cpp:kEntries	Os dois também salva a imagem sem o visual	Ambas también guarda la imagen sin el estilo	Les deux enregistre aussi l'image sans le rendu	
+Also in the picture	tr_menu.cpp:kEntries	Também na imagem	También en la imagen	Aussi dans l'image	
+Save the look's preset too	tr_menu.cpp:kEntries	Salvar também o preset do visual	Guardar también el preajuste del estilo	Enregistrer aussi le préréglage du rendu	
+A copy of the look's .ini next to the picture	tr_menu.cpp:kEntries	Uma cópia do .ini do visual ao lado da imagem	Una copia del .ini del estilo junto a la imagen	Une copie du .ini du rendu à côté de l'image	
+A copy of the look's .ini next to the video	tr_menu.cpp:kEntries	Uma cópia do .ini do visual ao lado do vídeo	Una copia del .ini del estilo junto al vídeo	Une copie du .ini du rendu à côté de la vidéo	
+Series	tr_menu.cpp:kEntries	Sequência	Ráfaga	Rafale	
+Pictures per press	tr_menu.cpp:kEntries	Fotos por toque	Imágenes por pulsación	Images par appui	
+Recording {} · {} MB	tr_menu.cpp:kEntries	Gravando {} · {} MB	Grabando {} · {} MB	Enregistrement {} · {} Mo	{} {}
+Recording {}	tr_menu.cpp:kEntries	Gravando {}	Grabando {}	Enregistrement {}	{}
+about {} MB a minute	tr_menu.cpp:kEntries	cerca de {} MB por minuto	unos {} MB por minuto	environ {} Mo par minute	{}
+Another app records these videos; set their folder and quality in that app	tr_menu.cpp:kEntries	Outro app grava estes vídeos; a pasta e a qualidade são definidas nele	Otra app graba estos vídeos; la carpeta y la calidad se eligen en ella	Une autre appli enregistre ces vidéos ; réglez leur dossier et leur qualité dans celle-ci	
+In the video	tr_menu.cpp:kEntries	No vídeo	En el vídeo	Dans la vidéo	
+Game sound	tr_menu.cpp:kEntries	Som do jogo	Sonido del juego	Son du jeu	
+Without records the game without your look	tr_menu.cpp:kEntries	Sem grava o jogo sem o seu visual	Sin graba el juego sin tu estilo	Sans enregistre le jeu sans votre rendu	
+Best	tr_menu.cpp:kEntries	Melhor	Mejor	Meilleure	
+{}p · {} fps · about {} MB a minute	tr_menu.cpp:kEntries	{}p · {} fps · cerca de {} MB por minuto	{}p · {} fps · unos {} MB por minuto	{}p · {} i/s · environ {} Mo par minute	{} {} {}
+Custom bitrate	tr_menu.cpp:kEntries	Taxa de bits personalizada	Tasa de bits personalizada	Débit personnalisé	
+Megabits per second; higher keeps more detail and makes larger files	tr_menu.cpp:kEntries	Megabits por segundo; mais alto guarda mais detalhes e gera arquivos maiores	Megabits por segundo; más alto conserva más detalle y crea archivos más grandes	Mégabits par seconde ; plus haut garde plus de détails et donne des fichiers plus lourds	
+Also in the video	tr_menu.cpp:kEntries	Também no vídeo	También en el vídeo	Aussi dans la vidéo	
+Length	tr_menu.cpp:kEntries	Duração	Duración	Durée	
+Timer on screen	tr_menu.cpp:kEntries	Cronômetro na tela	Temporizador en pantalla	Minuteur à l'écran	
+Looks on or off	tr_menu.cpp:kEntries	Ligar ou desligar o visual	Activar o desactivar el estilo	Activer ou désactiver le rendu	
+Switches the look off (no GPU cost) and back on	tr_menu.cpp:kEntries	Desliga o visual (sem custo na GPU) e liga de novo	Desactiva el estilo (sin coste de GPU) y lo vuelve a activar	Désactive le rendu (sans coût GPU) puis le réactive	
+The preset and its files are exported together as one ZIP file.	tr_menu.cpp:kEntries	O preset e os arquivos dele são exportados juntos em um arquivo ZIP.	El preajuste y sus archivos se exportan juntos en un archivo ZIP.	Le préréglage et ses fichiers sont exportés ensemble dans un fichier ZIP.	
+Licenses	tr_menu.cpp:kEntries	Licenças	Licencias	Licences	
 Developer	tr_developer.inc:kDeveloperEntries	Desenvolvimento	Desarrollo	Développement	
 Start here	tr_developer.inc:kDeveloperEntries	Comece aqui	Empieza aquí	Commencer ici	
 Captures	tr_developer.inc:kDeveloperEntries	Capturas	Capturas	Captures	
@@ -2528,79 +2510,99 @@ Unavailable while the game's own Edge Smoothing is on	tr_image.cpp:kEntries	Indi
 Unavailable with the game's screen format	tr_image.cpp:kEntries	Indisponível com o formato de tela do jogo	No disponible con el formato de pantalla del juego	Indisponible avec le format d'écran du jeu	
 Unavailable: not enough video memory	tr_image.cpp:kEntries	Indisponível: memória de vídeo insuficiente	No disponible: memoria de video insuficiente	Indisponible : mémoire vidéo insuffisante	
 Unavailable on this graphics card	tr_image.cpp:kEntries	Indisponível nesta placa de vídeo	No disponible en esta tarjeta gráfica	Indisponible sur cette carte graphique	
-Your ReShade or GShade preset, inside Apex	tr_image.cpp:kEntries	Seu preset do ReShade ou GShade, dentro do Apex	Tu preajuste de ReShade o GShade, dentro de Apex	Votre préréglage ReShade ou GShade, dans Apex	
 Preset	tr_image.cpp:kEntries	Preset	Preajuste	Préréglage	
-Rescan	tr_image.cpp:kEntries	Procurar de novo	Volver a buscar	Rechercher à nouveau	
-Look for new .ini files in 1. Shader Presets	tr_image.cpp:kEntries	Procura novos arquivos .ini em 1. Shader Presets	Busca nuevos archivos .ini en 1. Shader Presets	Cherche de nouveaux fichiers .ini dans 1. Shader Presets	
-{} presets in 1. Shader Presets	tr_image.cpp:kEntries	{} presets em 1. Shader Presets	{} preajustes en 1. Shader Presets	{} préréglages dans 1. Shader Presets	{}
-Search presets	tr_image.cpp:kEntries	Buscar presets	Buscar preajustes	Rechercher des préréglages	
-Look options	tr_image.cpp:kEntries	Opções do visual	Opciones del estilo	Options du rendu	
 Runs	tr_image.cpp:kEntries	Onde roda	Dónde se aplica	Position	
-Where in the picture chain	tr_image.cpp:kEntries	Em que ponto da imagem é aplicado	En qué punto de la imagen se aplica	À quelle étape de l'image il s'applique	
-After Apex color	tr_image.cpp:kEntries	Depois da cor do Apex	Después del color de Apex	Après la couleur d'Apex	
-Before Apex color	tr_image.cpp:kEntries	Antes da cor do Apex	Antes del color de Apex	Avant la couleur d'Apex	
-Game UI	tr_image.cpp:kEntries	Interface do jogo	Interfaz del juego	Interface du jeu	
-Whether menus and the game's UI get the look too	tr_image.cpp:kEntries	Se os menus e a interface do jogo também recebem o visual	Si los menús y la interfaz del juego también reciben el estilo	Si les menus et l'interface du jeu reçoivent aussi le rendu	
-Shaded too	tr_image.cpp:kEntries	Também	También	Aussi	
-Left clean	tr_image.cpp:kEntries	Intacta	Intacta	Intacte	
-Like GShade: menus and loading screens get the look too; UI text stays sharp	tr_image.cpp:kEntries	Como no GShade: menus e telas de carregamento também recebem o visual; o texto fica nítido	Como en GShade: menús y pantallas de carga también reciben el estilo; el texto sigue nítido	Comme GShade : menus et écrans de chargement reçoivent aussi le rendu ; le texte reste net	
-Only the 3D world gets the look; the game's UI is drawn after it	tr_image.cpp:kEntries	Só o mundo 3D recebe o visual; a interface do jogo é desenhada depois	Solo el mundo 3D recibe el estilo; la interfaz del juego se dibuja después	Seul le monde 3D reçoit le rendu ; l'interface du jeu est dessinée après	
-Mix	tr_image.cpp:kEntries	Mistura	Mezcla	Mélange	
-How much of the look is blended over the game	tr_image.cpp:kEntries	Quanto do visual é misturado sobre o jogo	Cuánto del estilo se mezcla sobre el juego	Part du rendu mélangée à l'image du jeu	
-If a LUT in Apex's LUTs tab copies this look, turn it off, or the color is applied twice	tr_image.cpp:kEntries	Se uma LUT da aba LUTs do Apex copia este visual, desligue-a, ou a cor é aplicada duas vezes	Si una LUT de la pestaña LUTs de Apex copia este estilo, desactívala o el color se aplicará dos veces	Si une LUT de l'onglet LUTs d'Apex copie ce rendu, désactivez-la, sinon la couleur s'applique deux fois	
-Shaders in my preset (run order)	tr_image.cpp:kEntries	Shaders do meu preset (ordem de execução)	Shaders de mi preajuste (orden de ejecución)	Shaders de mon préréglage (ordre d'exécution)	
-No shader with values in this preset	tr_image.cpp:kEntries	Nenhum shader com valores neste preset	Ningún shader con valores en este preajuste	Aucun shader avec des valeurs dans ce préréglage	
-Switched off: the values apply once it is on again	tr_image.cpp:kEntries	Desligado: os valores valem quando for ligado de novo	Desactivado: los valores se aplican cuando vuelva a activarse	Désactivé : les valeurs s'appliquent une fois réactivé	
-Changed from the .ini: {} added, {} switched off	tr_image.cpp:kEntries	Diferente do .ini: {} adicionados, {} desligados	Distinto del .ini: {} añadidos, {} desactivados	Modifié par rapport au .ini : {} ajoutés, {} désactivés	{} {}
-Changed from the .ini: {} added, {} switched off, order changed	tr_image.cpp:kEntries	Diferente do .ini: {} adicionados, {} desligados, ordem alterada	Distinto del .ini: {} añadidos, {} desactivados, orden cambiado	Modifié par rapport au .ini : {} ajoutés, {} désactivés, ordre changé	{} {}
-Same as the .ini	tr_image.cpp:kEntries	Igual ao .ini	Igual que el .ini	Identique au .ini	
 {} edited	tr_image.cpp:kEntries	{} editados	{} editados	{} modifiés	{}
-No values edited	tr_image.cpp:kEntries	Nenhum valor editado	Ningún valor editado	Aucune valeur modifiée	
-Shaders whose values differ from the .ini (a dot on their row); click one to see them	tr_image.cpp:kEntries	Shaders com valores diferentes do .ini (um ponto na linha); clique em um para vê-los	Shaders con valores distintos del .ini (un punto en su fila); pulsa uno para verlos	Shaders dont les valeurs diffèrent du .ini (un point sur leur ligne) ; cliquez pour les voir	
-Reset all to .ini	tr_image.cpp:kEntries	Voltar tudo ao .ini	Restablecer todo al .ini	Tout rétablir au .ini	
-Put every value back to the preset's .ini	tr_image.cpp:kEntries	Volta cada valor ao .ini do preset	Devuelve cada valor al .ini del preajuste	Remet chaque valeur à celle du .ini du préréglage	
-Save as .ini…	tr_image.cpp:kEntries	Salvar como .ini…	Guardar como .ini…	Enregistrer en .ini…	
-Write this run list and its values as a preset of your own in 1. Shader Presets	tr_image.cpp:kEntries	Grava esta lista e seus valores como um preset seu em 1. Shader Presets	Guarda esta lista y sus valores como un preajuste propio en 1. Shader Presets	Écrit cette liste et ses valeurs comme votre propre préréglage dans 1. Shader Presets	
-Back to the .ini	tr_image.cpp:kEntries	Voltar ao .ini	Volver al .ini	Revenir au .ini	
-Undo the switches, added shaders and order changes made here (values: Reset all)	tr_image.cpp:kEntries	Desfaz as chaves, shaders adicionados e mudanças de ordem feitas aqui (valores: Voltar tudo)	Deshace los interruptores, shaders añadidos y cambios de orden hechos aquí (valores: Restablecer todo)	Annule les interrupteurs, shaders ajoutés et changements d'ordre faits ici (valeurs : Tout rétablir)	
-Name of the new preset	tr_image.cpp:kEntries	Nome do novo preset	Nombre del nuevo preajuste	Nom du nouveau préréglage	
-Saved in Bin\\1. Shader Presets\\ as <name>.ini, then selected	tr_image.cpp:kEntries	Salvo em Bin\\1. Shader Presets\\ como <name>.ini e depois selecionado	Se guarda en Bin\\1. Shader Presets\\ como <name>.ini y luego se selecciona	Enregistré dans Bin\\1. Shader Presets\\ sous <name>.ini, puis sélectionné	
-Write my edited values (off = the .ini's values)	tr_image.cpp:kEntries	Gravar meus valores editados (desligado = valores do .ini)	Guardar mis valores editados (desactivado = valores del .ini)	Écrire mes valeurs modifiées (désactivé = valeurs du .ini)	
-A preset with this name exists: saving replaces it (the old file is kept as .ini.bak)	tr_image.cpp:kEntries	Já existe um preset com este nome: salvar o substitui (o antigo fica como .ini.bak)	Ya existe un preajuste con este nombre: guardar lo reemplaza (el antiguo queda como .ini.bak)	Un préréglage de ce nom existe : l'enregistrer le remplace (l'ancien est gardé en .ini.bak)	
-Save and select it	tr_image.cpp:kEntries	Salvar e selecionar	Guardar y seleccionar	Enregistrer et sélectionner	
 Run earlier	tr_image.cpp:kEntries	Rodar antes	Ejecutar antes	Exécuter plus tôt	
 Run later	tr_image.cpp:kEntries	Rodar depois	Ejecutar después	Exécuter plus tard	
-All built-in shaders	tr_image.cpp:kEntries	Todos os shaders incluídos	Todos los shaders incluidos	Tous les shaders intégrés	
-Search shaders (name, .fx file, label)	tr_image.cpp:kEntries	Buscar shaders (nome, arquivo .fx, rótulo)	Buscar shaders (nombre, archivo .fx, etiqueta)	Rechercher des shaders (nom, fichier .fx, libellé)	
 Kind	tr_image.cpp:kEntries	Tipo	Tipo	Type	
 Only shaders of this kind	tr_image.cpp:kEntries	Só shaders deste tipo	Solo shaders de este tipo	Seulement les shaders de ce type	
 All kinds	tr_image.cpp:kEntries	Todos os tipos	Todos los tipos	Tous les types	
 Sharpen	tr_image.cpp:kEntries	Nitidez	Nitidez	Netteté	
-Light & AO	tr_image.cpp:kEntries	Luz e AO	Luz y AO	Lumière et AO	
-Bloom & glow	tr_image.cpp:kEntries	Bloom e brilho	Bloom y resplandor	Bloom et lueur	
-Depth of field	tr_image.cpp:kEntries	Profundidade de campo	Profundidad de campo	Profondeur de champ	
 Film & camera	tr_image.cpp:kEntries	Filme e câmera	Película y cámara	Film et caméra	
 Stylized	tr_image.cpp:kEntries	Estilizado	Estilizado	Stylisé	
-Utility	tr_image.cpp:kEntries	Utilitários	Utilidades	Utilitaires	
-All of them, only the ones switched on, or only the ones off	tr_image.cpp:kEntries	Todos, só os ligados ou só os desligados	Todos, solo los activados o solo los desactivados	Tous, seulement ceux activés ou seulement ceux désactivés	
 All	tr_image.cpp:kEntries	Todos	Todos	Tous	
 On	tr_image.cpp:kEntries	Ligados	Activados	Activés	
 No shader matches	tr_image.cpp:kEntries	Nenhum shader corresponde	Ningún shader coincide	Aucun shader ne correspond	
-Reset {} to .ini	tr_image.cpp:kEntries	Voltar {} ao .ini	Restablecer {} al .ini	Rétablir {} au .ini	{}
-Put every value of this shader back to the preset's .ini	tr_image.cpp:kEntries	Volta cada valor deste shader ao .ini do preset	Devuelve cada valor de este shader al .ini del preajuste	Remet chaque valeur de ce shader à celle du .ini du préréglage	
 Engine	tr_image.cpp:kEntries	Motor	Motor	Moteur	
 Mode	tr_image.cpp:kEntries	Modo	Modo	Mode	
 Model	tr_image.cpp:kEntries	Modelo	Modelo	Modèle	
 Style	tr_image.cpp:kEntries	Estilo	Estilo	Style	
 Intensity	tr_image.cpp:kEntries	Intensidade	Intensidad	Intensité	
-Structure	tr_image.cpp:kEntries	Estrutura	Estructura	Structure	
-Skin	tr_image.cpp:kEntries	Pele	Piel	Peau	
 Automatic	tr_image.cpp:kEntries	Automático	Automático	Automatique	
-Stock	tr_image.cpp:kEntries	Padrão NVIDIA	Estándar NVIDIA	Réglage NVIDIA	
 Always	tr_image.cpp:kEntries	Sempre	Siempre	Toujours	
 Warm evening	tr_image.cpp:kEntries	Fim de tarde quente	Atardecer cálido	Soirée chaleureuse	
 Cinematic	tr_image.cpp:kEntries	Cinematográfico	Cinematográfico	Cinématographique	
 Soft vintage	tr_image.cpp:kEntries	Vintage suave	Vintage suave	Vintage doux	
+Looks	tr_image.cpp:kEntries	Visuais	Estilos	Rendus	
+ReShade look	tr_image.cpp:kEntries	Visual do ReShade	Estilo de ReShade	Rendu ReShade	
+Hold to see the game without the look	tr_image.cpp:kEntries	Segure para ver o jogo sem o visual	Mantén pulsado para ver el juego sin el estilo	Maintenez pour voir le jeu sans le rendu	
+A LUT is also on; both change color, so the picture may look too strong	tr_image.cpp:kEntries	Um LUT também está ligado; os dois mudam a cor, então a imagem pode ficar forte demais	También hay un LUT activado; ambos cambian el color, así que la imagen puede verse demasiado intensa	Un LUT est aussi activé ; les deux changent la couleur, l'image peut donc paraître trop forte	
+Turn off the LUT	tr_image.cpp:kEntries	Desligar o LUT	Desactivar el LUT	Désactiver le LUT	
+LUT turned off	tr_image.cpp:kEntries	LUT desligado	LUT desactivado	LUT désactivé	
+Use letters, digits and spaces for the name	tr_image.cpp:kEntries	Use letras, números e espaços no nome	Usa letras, números y espacios en el nombre	Utilisez des lettres, des chiffres et des espaces pour le nom	
+The Looks folder could not be created	tr_image.cpp:kEntries	Não foi possível criar a pasta Looks	No se pudo crear la carpeta Looks	Impossible de créer le dossier Looks	
+Could not save {}	tr_image.cpp:kEntries	Não foi possível salvar {}	No se pudo guardar {}	Impossible d'enregistrer {}	{}
+ReShade presets	tr_image.cpp:kEntries	Presets do ReShade	Preajustes de ReShade	Préréglages ReShade	
+This file can't be read as a preset	tr_image.cpp:kEntries	Este arquivo não pode ser lido como preset	Este archivo no se puede leer como preajuste	Ce fichier ne peut pas être lu comme préréglage	
+This file is not a ReShade preset	tr_image.cpp:kEntries	Este arquivo não é um preset do ReShade	Este archivo no es un preajuste de ReShade	Ce fichier n'est pas un préréglage ReShade	
+The preset could not be copied to the Looks folder	tr_image.cpp:kEntries	Não foi possível copiar o preset para a pasta Looks	No se pudo copiar el preajuste a la carpeta Looks	Impossible de copier le préréglage dans le dossier Looks	
+Imported as {}	tr_image.cpp:kEntries	Importado como {}	Importado como {}	Importé sous {}	{}
+Apex looks	tr_image.cpp:kEntries	Visuais do Apex	Estilos de Apex	Rendus d'Apex	
+My looks	tr_image.cpp:kEntries	Meus visuais	Mis estilos	Mes rendus	
+Add .ini presets to the Looks folder, or import one from the list	tr_image.cpp:kEntries	Coloque presets .ini na pasta Looks ou importe um pela lista	Añade preajustes .ini a la carpeta Looks o importa uno desde la lista	Ajoutez des préréglages .ini au dossier Looks ou importez-en un depuis la liste	
+Choose a look	tr_image.cpp:kEntries	Escolha um visual	Elige un estilo	Choisissez un rendu	
+Search looks	tr_image.cpp:kEntries	Buscar visuais	Buscar estilos	Rechercher des rendus	
+No looks yet	tr_image.cpp:kEntries	Nenhum visual ainda	Aún no hay estilos	Aucun rendu pour l'instant	
+No look matches	tr_image.cpp:kEntries	Nenhum visual encontrado	Ningún estilo coincide	Aucun rendu ne correspond	
+Import a preset…	tr_image.cpp:kEntries	Importar um preset…	Importar un preajuste…	Importer un préréglage…	
+Open the Looks folder	tr_image.cpp:kEntries	Abrir a pasta Looks	Abrir la carpeta Looks	Ouvrir le dossier Looks	
+Look changed	tr_image.cpp:kEntries	Visual alterado	Estilo cambiado	Rendu changé	
+{} of {}	tr_image.cpp:kEntries	{} de {}	{} de {}	{} sur {}	{} {}
+Put back the look's values	tr_image.cpp:kEntries	Restaurar os valores do visual	Restablecer los valores del estilo	Rétablir les valeurs du rendu	
+{} values put back	tr_image.cpp:kEntries	Valores de {} restaurados	Valores de {} restablecidos	Valeurs de {} rétablies	{}
+Changed from the look	tr_image.cpp:kEntries	Alterado em relação ao visual	Cambiado respecto al estilo	Modifié par rapport au rendu	
+Close	tr_image.cpp:kEntries	Fechar	Cerrar	Fermer	
+Add a shader	tr_image.cpp:kEntries	Adicionar um shader	Añadir un shader	Ajouter un shader	
+Built-in shaders you can add to this look	tr_image.cpp:kEntries	Shaders embutidos que você pode adicionar a este visual	Shaders integrados que puedes añadir a este estilo	Shaders intégrés que vous pouvez ajouter à ce rendu	
+Search shaders	tr_image.cpp:kEntries	Buscar shaders	Buscar shaders	Rechercher des shaders	
+Added	tr_image.cpp:kEntries	Adicionado	Añadido	Ajouté	
+Add	tr_image.cpp:kEntries	Adicionar	Añadir	Ajouter	
+{} added	tr_image.cpp:kEntries	{} adicionado	{} añadido	{} ajouté	{}
+{} (mine)	tr_image.cpp:kEntries	{} (meu)	{} (mío)	{} (le mien)	{}
+Save as a new look	tr_image.cpp:kEntries	Salvar como novo visual	Guardar como nuevo estilo	Enregistrer comme nouveau rendu	
+Save as a new look…	tr_image.cpp:kEntries	Salvar como novo visual…	Guardar como nuevo estilo…	Enregistrer comme nouveau rendu…	
+Saved in the Looks folder, then chosen	tr_image.cpp:kEntries	Salvo na pasta Looks e depois escolhido	Se guarda en la carpeta Looks y luego se elige	Enregistré dans le dossier Looks, puis choisi	
+Name of the look	tr_image.cpp:kEntries	Nome do visual	Nombre del estilo	Nom du rendu	
+A look with this name exists; saving replaces it	tr_image.cpp:kEntries	Já existe um visual com este nome; salvar vai substituí-lo	Ya existe un estilo con este nombre; guardar lo reemplaza	Un rendu porte déjà ce nom ; l'enregistrement le remplace	
+Saved as {}	tr_image.cpp:kEntries	Salvo como {}	Guardado como {}	Enregistré sous {}	{}
+Look saved	tr_image.cpp:kEntries	Visual salvo	Estilo guardado	Rendu enregistré	
+Look imported	tr_image.cpp:kEntries	Visual importado	Estilo importado	Rendu importé	
+This look can't be read: {}	tr_image.cpp:kEntries	Não foi possível ler este visual: {}	No se puede leer este estilo: {}	Ce rendu ne peut pas être lu : {}	{}
+How much of the look is applied	tr_image.cpp:kEntries	Quanto do visual é aplicado	Cuánto del estilo se aplica	Quelle part du rendu est appliquée	
+World and menus	tr_image.cpp:kEntries	Mundo e menus	Mundo y menús	Monde et menus	
+World only	tr_image.cpp:kEntries	Só o mundo	Solo el mundo	Monde seulement	
+Applies to	tr_image.cpp:kEntries	Aplica-se a	Se aplica a	S'applique à	
+Menus and loading screens can get the look too	tr_image.cpp:kEntries	Menus e telas de carregamento também podem receber o visual	Los menús y las pantallas de carga también pueden recibir el estilo	Les menus et écrans de chargement peuvent aussi recevoir le rendu	
+After Apex Color	tr_image.cpp:kEntries	Depois da Cor do Apex	Después del Color de Apex	Après la Couleur d'Apex	
+Before Apex Color	tr_image.cpp:kEntries	Antes da Cor do Apex	Antes del Color de Apex	Avant la Couleur d'Apex	
+Order	tr_image.cpp:kEntries	Ordem	Orden	Ordre	
+Where the look runs in the picture chain	tr_image.cpp:kEntries	Em que ponto da imagem o visual é aplicado	En qué punto de la imagen se aplica el estilo	À quelle étape de l'image le rendu s'applique	
+Shaders	tr_image.cpp:kEntries	Shaders	Shaders	Shaders	
+Put every value back	tr_image.cpp:kEntries	Restaurar todos os valores	Restablecer todos los valores	Rétablir toutes les valeurs	
+Every value put back	tr_image.cpp:kEntries	Todos os valores restaurados	Todos los valores restablecidos	Toutes les valeurs rétablies	
+Back to the look's list	tr_image.cpp:kEntries	Voltar à lista do visual	Volver a la lista del estilo	Revenir à la liste du rendu	
+No shader of this look can run here	tr_image.cpp:kEntries	Nenhum shader deste visual pode rodar aqui	Ningún shader de este estilo puede ejecutarse aquí	Aucun shader de ce rendu ne peut s'exécuter ici	
+Choose a look to see its shaders	tr_image.cpp:kEntries	Escolha um visual para ver os shaders dele	Elige un estilo para ver sus shaders	Choisissez un rendu pour voir ses shaders	
+{} can't run here	tr_image.cpp:kEntries	{} não podem rodar aqui	{} no pueden ejecutarse aquí	{} ne peuvent pas s'exécuter ici	{}
+{} ({}): not built into Apex	tr_image.cpp:kEntries	{} ({}): não incluído no Apex	{} ({}): no incluido en Apex	{} ({}) : non intégré à Apex	{} {}
+Add one of Apex's built-in shaders to this look	tr_image.cpp:kEntries	Adiciona um dos shaders embutidos do Apex a este visual	Añade uno de los shaders integrados de Apex a este estilo	Ajoute un des shaders intégrés d'Apex à ce rendu	
+No look chosen	tr_image.cpp:kEntries	Nenhum visual escolhido	Ningún estilo elegido	Aucun rendu choisi	
+{} · can't be read	tr_image.cpp:kEntries	{} · não pode ser lido	{} · no se puede leer	{} · illisible	{}
+{} · 1 shader	tr_image.cpp:kEntries	{} · 1 shader	{} · 1 shader	{} · 1 shader	{}
+{} · {} shaders	tr_image.cpp:kEntries	{} · {} shaders	{} · {} shaders	{} · {} shaders	{} {}
+Reload	tr_image.cpp:kEntries	Recarregar	Recargar	Recharger	
+Read the look's .ini again	tr_image.cpp:kEntries	Lê o .ini do visual de novo	Vuelve a leer el .ini del estilo	Relit le .ini du rendu	
 Choose the intensity	tr_lighting.cpp:kEntries	Escolha a intensidade	Elige la intensidad	Choisissez l’intensité	
 Ground, objects and buildings are already balanced together	tr_lighting.cpp:kEntries	Chão, objetos e construções já estão equilibrados entre si	El suelo, los objetos y los edificios ya están equilibrados	Le sol, les objets et les bâtiments sont déjà équilibrés ensemble	
 Less light, more contrast at night	tr_lighting.cpp:kEntries	Menos luz, mais contraste à noite	Menos luz, más contraste por la noche	Moins de lumière, plus de contraste la nuit	
@@ -2851,4 +2853,4 @@ official Sims3SettingsSetter loaded ({})	tr_features.cpp:kEntries	Sims3SettingsS
 official Sims3SettingsSetter not loaded	tr_features.cpp:kEntries	Sims3SettingsSetter oficial não carregado	Sims3SettingsSetter oficial no cargado	Sims3SettingsSetter officiel non chargé	
 ; OLD COMBINED BUILD loaded ({}): Apex Radiance's features stay off	tr_features.cpp:kEntries	; VERSÃO COMBINADA ANTIGA carregada ({}): os recursos do Apex Radiance ficam desligados	; VERSIÓN COMBINADA ANTIGUA cargada ({}): las funciones de Apex Radiance quedan desactivadas	; ANCIENNE VERSION COMBINÉE chargée ({}) : les fonctions d'Apex Radiance restent désactivées	{}
 ; an older {} is also installed (idle): delete it from Game\\Bin	tr_features.cpp:kEntries	; um {} mais antigo também está instalado (inativo): apague-o de Game\\Bin	; también hay un {} más antiguo instalado (inactivo): bórralo de Game\\Bin	; un ancien {} est aussi installé (inactif) : supprimez-le de Game\\Bin	{}
-Runs your ReShade or GShade preset (.ini) inside Apex, with the same shader maths.	tr_features.cpp:kEntries	Roda seu preset do ReShade ou GShade (.ini) dentro do Apex, com a mesma matemática dos shaders.	Ejecuta tu preajuste de ReShade o GShade (.ini) dentro de Apex, con las mismas matemáticas de los shaders.	Exécute votre préréglage ReShade ou GShade (.ini) dans Apex, avec les mêmes calculs de shaders.	
+Runs a ReShade or GShade preset (.ini) on the game's picture, with the same shader math. Part of Apex Radiance. Credits: @loinyx	tr_features.cpp:kEntries	Roda um preset do ReShade ou GShade (.ini) na imagem do jogo, com a mesma matemática dos shaders. Parte do Apex Radiance. Créditos: @loinyx	Aplica un preajuste de ReShade o GShade (.ini) a la imagen del juego, con las mismas matemáticas de los shaders. Parte de Apex Radiance. Créditos: @loinyx	Applique un préréglage ReShade ou GShade (.ini) à l'image du jeu, avec les mêmes calculs de shaders. Fait partie d'Apex Radiance. Crédits : @loinyx	

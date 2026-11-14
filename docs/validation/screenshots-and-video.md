@@ -23,7 +23,7 @@ The feature is described in [features/screenshots-and-video.md](../features/scre
 ## In-game test plan
 
 1. F8 in a world with a look on. **Expected:** a PNG with the look in the screenshot folder, named as FileNaming says.
-2. *Save a copy without ReShade/GShade* on, F8. **Expected:** a second picture ending in `_before` without the look.
+2. *Look* set to Both, F8. **Expected:** a second picture ending in `_before` without the look.
 3. Burst of 5 at 500 ms. **Expected:** five pictures, about half a second apart.
 4. Shift+F8, record 30 s, Shift+F8. **Expected:** an MP4 that plays with sound; the timer pill shows while recording and
    is not in the video.

@@ -1274,7 +1274,7 @@ bool ScreenshotCard(bool lookOn) {
             ApexUi::CardGroup("Also in the picture");
             ch |= ApexUi::SwitchRow("Include the Apex menu", &s.shot.includeMenu, "When the menu is open, it is in the picture", def.shot.includeMenu);
             ch |= ApexUi::SwitchRow("Include the mouse pointer", &s.shot.includePointer, "Where it was on screen, at the picture's size", def.shot.includePointer);
-            ch |= ApexUi::SwitchRow("Save the look's preset too", &s.shot.savePreset, "A copy of the ReShade/GShade preset file next to the picture", def.shot.savePreset);
+            ch |= ApexUi::SwitchRow("Save the look's preset too", &s.shot.savePreset, "A copy of the look's .ini next to the picture", def.shot.savePreset);
             ApexUi::CardGroup("Series");
             ch |= IntSlider("Pictures per press", "More than one takes a quick series", s.shot.burstCount, 1, kMaxBurst, def.shot.burstCount);
             if (s.shot.burstCount > 1) ch |= IntSlider("Time between pictures", "In milliseconds", s.shot.burstIntervalMs, 50, 5000, def.shot.burstIntervalMs, "%.0f ms");
@@ -1321,7 +1321,7 @@ void VideoCard(bool lookOn, bool gameAa) {
         ApexUi::CardDivider();
 
         const bool own = !v.external; // Apex records; with another app, Apex only presses its key and the rest is that app's
-        if (!own) ApexUi::IconNote(IconId::Info, "Another app records these videos; Apex presses its key. Its folder and quality are set in that app");
+        if (!own) ApexUi::IconNote(IconId::Info, "Another app records these videos; set their folder and quality in that app");
         if (own) ch |= WhereRows(true, v.folder, v.customFolder);
         ApexUi::CardGroup("In the video");
         ch |= ApexUi::SwitchRow("Hide game UI", &v.hideGameUi, "Hides the game interface until the video stops", dv.hideGameUi);
@@ -1329,7 +1329,7 @@ void VideoCard(bool lookOn, bool gameAa) {
         if (own && lookOn) {
             static const char* const kLook[] = {"With", "Without"};
             int look = v.look == kLookWithout ? 1 : 0;
-            if (Pick("Look", "Without records the game without the ReShade/GShade look", "##VideoLook", look, kLook, 2, 0)) {
+            if (Pick("Look", "Without records the game without your look", "##VideoLook", look, kLook, 2, 0)) {
                 v.look = look ? kLookWithout : kLookWith;
                 ch = true;
             }
@@ -1365,7 +1365,7 @@ void VideoCard(bool lookOn, bool gameAa) {
             ApexUi::CardGroup("Also in the video");
             ch |= ApexUi::SwitchRow("Include the Apex menu", &v.includeMenu, "When the menu is open, it is in the video", dv.includeMenu);
             ch |= ApexUi::SwitchRow("Include the mouse pointer", &v.includePointer, "The pointer moves in the video as on screen", dv.includePointer);
-            ch |= ApexUi::SwitchRow("Save the look's preset too", &v.savePreset, "A copy of the ReShade/GShade preset file next to the video", dv.savePreset);
+            ch |= ApexUi::SwitchRow("Save the look's preset too", &v.savePreset, "A copy of the look's .ini next to the video", dv.savePreset);
             ApexUi::CardGroup("Length");
             {
                 static const int kClipMB[] = {0, 500, 1024, 2048, 4096, 8192};
@@ -1386,7 +1386,7 @@ void VideoCard(bool lookOn, bool gameAa) {
             ApexUi::CardGroup("Timer on screen");
             ch |= ApexUi::SwitchRow("Show a recording timer", &v.timer, "Time and file size on screen while recording", dv.timer);
             if (v.timer) {
-                static const char* const kPos[] = {"Top left", "Top centre", "Top right", "Bottom left", "Bottom right"};
+                static const char* const kPos[] = {"Top left", "Top center", "Top right", "Bottom left", "Bottom right"};
                 ch |= Pick("Timer position", "Where the timer sits on the screen", "##CapTimerPos", v.timerPosition, kPos, 5, dv.timerPosition);
                 ch |= IntSlider("Timer size", "100 is the size of Apex notes", v.timerSize, 70, 160, dv.timerSize, "%.0f%%");
                 ch |= IntSlider("Timer opacity", "Lower lets more of the game show through", v.timerOpacity, 30, 100, dv.timerOpacity, "%.0f%%");

@@ -1166,7 +1166,7 @@ public:
     LooksPatch() : ApexPatch(Looks::kPatchName, nullptr)
     {
         g_patch = this;
-        RegisterBoolSetting(&g.beforeColor, "beforeColor", false, "Run before Apex's colour instead of after it");
+        RegisterBoolSetting(&g.beforeColor, "beforeColor", false, "Run before Apex's color instead of after it");
         RegisterBoolSetting(&g.onUi, "onUi", true, "Also shade the game's UI, menus and loading screens");
         RegisterFloatSetting(&g.mix, "mix", SettingWidget::Slider, 1.0f, 0.0f, 1.0f, "How much of the look is applied");
     }
@@ -1475,11 +1475,11 @@ void ShadersCard()
 } // namespace Looks
 
 APEX_REGISTER_FEATURE(LooksPatch, { .displayName = "ReShade look",
-                                    .description = "Runs a ReShade or GShade preset (.ini) on the game's picture, with the same shader maths. "
+                                    .description = "Runs a ReShade or GShade preset (.ini) on the game's picture, with the same shader math. "
                                                    "Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
                                     .category = "Graphics",
                                     .experimental = true,
                                     .enabledByDefault = false,
                                     .supportedVersions = VERSION_ALL,
-                                    .technicalDetails = { "Post-scene order 45 (after Apex colour) or 35 (before).",
+                                    .technicalDetails = { "Post-scene order 45 (after Apex color) or 35 (before).",
                                                           "Built in: 17 ported shaders (third_party/reshade_shaders/reshade_shaders_hlsl.h)." } })

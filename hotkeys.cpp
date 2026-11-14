@@ -82,7 +82,7 @@ const char* ActionName(Action a) {
     case Action::Diagnostics: return "Lighting snapshot";
     case Action::Recorder: return "Recording";
     case Action::Screenshot: return "Take a filtered screenshot";
-    case Action::LooksToggle: return "ReShade/GShade looks on or off";
+    case Action::LooksToggle: return "Looks on or off";
     default: return "Frame Capture";
     }
 }
