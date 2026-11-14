@@ -6,6 +6,10 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k322Fixed[] = {
+    "RTX Remix bridge: no longer freezes at start with Turbo Simulation Engine installed",
+    nullptr};
+
 constexpr const char* k321Fixed[] = {
     "Apex Radiance Setup: no longer offers DXVK when the graphics driver cannot run it",
     nullptr};
@@ -604,6 +608,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"3.2.2", "2026-11-13", nullptr, nullptr, k322Fixed},
     {"3.2.1", "2026-11-13", nullptr, nullptr, k321Fixed},
     {"3.2.0", "2026-11-13", nullptr, k320Improved, k320Fixed, "Instant lamp light arrives much sooner, the game runs faster, and no black lot ground on the bridge"},
     {"3.1.6", "2026-11-12", nullptr, k316Improved, nullptr},
