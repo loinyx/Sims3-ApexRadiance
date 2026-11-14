@@ -192,13 +192,13 @@ HRESULT __stdcall HookedStretchRect(IDirect3DDevice9* dev, IDirect3DSurface9* sr
 
 HRESULT __stdcall HookedDrawPrimitiveUP(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, UINT prims, const void* data, UINT stride) {
     if (auto obs = g_drawUpObs.load()) obs(dev, "DPUP", type, prims);
-    if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->draw) tr->draw(dev, "DPUP", type, prims, data, stride, 0);
+    if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->draw) D3D9Hooks::g_traceCaller = _ReturnAddress(), tr->draw(dev, "DPUP", type, prims, data, stride, 0);
     return oDrawPrimitiveUP(dev, type, prims, data, stride);
 }
 
 HRESULT __stdcall HookedDrawIndexedPrimitiveUP(IDirect3DDevice9* dev, D3DPRIMITIVETYPE type, UINT minIndex, UINT numVerts, UINT prims, const void* idx, D3DFORMAT idxFmt, const void* data, UINT stride) {
     if (auto obs = g_drawUpObs.load()) obs(dev, "DIPUP", type, prims);
-    if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->draw) tr->draw(dev, "DIPUP", type, prims, data ? static_cast<const char*>(data) + size_t(minIndex) * stride : nullptr, stride, numVerts);
+    if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->draw) D3D9Hooks::g_traceCaller = _ReturnAddress(), tr->draw(dev, "DIPUP", type, prims, data ? static_cast<const char*>(data) + size_t(minIndex) * stride : nullptr, stride, numVerts);
     return oDrawIndexedPrimitiveUP(dev, type, minIndex, numVerts, prims, idx, idxFmt, data, stride);
 }
 
@@ -220,13 +220,13 @@ HRESULT __stdcall HookedSetScissorRect(IDirect3DDevice9* dev, const RECT* r) {
 }
 HRESULT __stdcall HookedSetVertexDeclaration(IDirect3DDevice9* dev, IDirect3DVertexDeclaration9* decl) {
     g_fvfLast.store(false, std::memory_order_relaxed);
-    if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->setDecl) tr->setDecl(dev, decl);
+    if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->setDecl) D3D9Hooks::g_traceCaller = _ReturnAddress(), tr->setDecl(dev, decl);
     return oSetVertexDeclaration(dev, decl);
 }
 HRESULT __stdcall HookedSetFVF(IDirect3DDevice9* dev, DWORD fvf) {
     g_lastFvf.store(fvf, std::memory_order_relaxed);
     g_fvfLast.store(true, std::memory_order_relaxed);
-    if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->setFvf) tr->setFvf(dev, fvf);
+    if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->setFvf) D3D9Hooks::g_traceCaller = _ReturnAddress(), tr->setFvf(dev, fvf);
     return oSetFVF(dev, fvf);
 }
 
