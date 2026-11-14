@@ -104,6 +104,8 @@ Failure WinHttpFetch(const std::string& url8, uint64_t cap, std::string& body, c
         if (std::wstring cl = header(WINHTTP_QUERY_CONTENT_LENGTH, WINHTTP_HEADER_NAME_BY_INDEX); !cl.empty()) total = _wcstoui64(cl.c_str(), nullptr, 10);
         if (total > cap) { close(); result = Failure::TooLarge; break; }
         result = Failure::None;
+        try // out of memory while the body grows: the handles still close
+        {
         if (total) body.reserve((size_t)total); // one block, not a series of growing copies
         for (;;)
         {
@@ -118,6 +120,8 @@ Failure WinHttpFetch(const std::string& url8, uint64_t cap, std::string& body, c
             body.resize(at + got);
             if (progress && !progress(body.size(), total)) { result = Failure::Stopped; break; }
         }
+        }
+        catch (...) { result = Failure::Failed; }
         close();
         break;
     }
@@ -242,6 +246,7 @@ void Worker()
             job = *next;
         }
         Failure f = Failure::Failed;
+        bool placed = false; // the new files are in place (a later exception does not make the pack Failed)
         try // out of memory (a large pack in the 32-bit game) fails this pack, never the worker
         {
         Pack pack;
@@ -288,6 +293,7 @@ void Worker()
                         if (had && GetFileAttributesW(dest.c_str()) == INVALID_FILE_ATTRIBUTES) MoveFileW((dest + L".old").c_str(), dest.c_str());
                         f = Failure::Disk;
                     }
+                    placed = f == Failure::None;
                     DeleteTree(dest + L".old");
                     LOG_INFO("[Looks] pack " + folder + " downloaded: " + std::to_string(u.shaders) + " shader files, " + std::to_string(u.textures) +
                              " textures, " + std::to_string(u.skipped) + " files left out");
@@ -299,9 +305,13 @@ void Worker()
         }
         catch (...)
         {
-            f = Failure::Failed;
-            DeleteTree(PacksFolder() + Wide(job.folder) + L".part");
-            LOG_WARNING("[Looks] pack " + job.folder + ": failed (out of memory)");
+            f = placed ? Failure::None : Failure::Failed;
+            try
+            {
+                DeleteTree(PacksFolder() + Wide(job.folder) + L".part");
+                LOG_WARNING("[Looks] pack " + job.folder + ": failed (out of memory)");
+            }
+            catch (...) {}
         }
         {
             std::lock_guard<std::mutex> lock(g_mu);

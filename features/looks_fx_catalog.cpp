@@ -537,9 +537,11 @@ void ScanOnce(UINT W, UINT H, bool force)
             if (g_again || g_requested) break;
         }
         // a large shader's compile briefly needs up to ~420 MB: background checks wait for room rather than risk the game
-        if (LargestFreeBlock() < (size_t(768) << 20))
+        if (LargestFreeBlock() < (size_t(512) << 20))
         {
-            LOG_INFO("[Looks] Shader packs: background checks paused, little free memory left");
+            static bool said = false;
+            if (!said) LOG_INFO("[Looks] Shader packs: background checks wait, less than 512 MB of addresses free");
+            said = true;
             break;
         }
         const std::shared_ptr<const Effect> fx = CompileGuarded(files[i].path, folders[files[i].folders], W, H);

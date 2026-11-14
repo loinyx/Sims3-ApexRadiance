@@ -596,8 +596,8 @@ bool StoreShaderFile(const std::string& rel, const std::string& bytes, std::stri
     const size_t slash = rel.find('/');
     // a different file of that name stays and the import fails: a renamed copy would never run, since the look and the
     // other files' #include lines name the original
-    const std::wstring target = root + ApexUtil::ToWide(rel.substr(0, slash)) + L"\\" + ApexUtil::ToWide(rel.substr(slash + 1));
-    if (ApexUtil::FileExists(target))
+    const std::wstring target = OwnFilePath(rel); // where the scan would find a file of that name, subfolders included
+    if (!target.empty())
     {
         std::string existing;
         if (ReadBounded(target, existing, nullptr, IsCode(rel) ? kMaxSharedFxBytes : kMaxSharedTextureBytes) && existing == bytes) { stored = rel; return true; }

@@ -276,6 +276,9 @@ public static class Engine
         var m = s.Manifest;
         var list = Components.All.Reverse().Where(components.Contains).ToList(); // loader first, bridge last
         if (list.Contains(Components.RestartHost) && RestartHostWaits(docs)) throw new InvalidOperationException(RestartHostWaitsText);
+        // the restart host is started by Apex Radiance: never installed on its own
+        if (list.Contains(Components.RestartHost) && !list.Contains(Components.Apex) && !File.Exists(Path.Combine(g.Bin, "ApexRadiance.asi")))
+            throw new InvalidOperationException("Install Apex Radiance first: it starts the restart host");
         using var point = list.Count == 0 ? RestorePoints.Begin(g.Bin, "Fix incompatible settings")
             : RestorePoints.Begin(g.Bin, "Install {0}", string.Join(", ", list.Select(Components.Name)));
         // everything is downloaded before any file is placed: a network or checksum failure changes nothing

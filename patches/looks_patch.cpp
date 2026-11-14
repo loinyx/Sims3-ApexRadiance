@@ -485,12 +485,16 @@ void AtEndScene(IDirect3DDevice9* dev)
 }
 
 // The scene depth (DepthBlur's INTZ copy) is asked for only while a shader that is on reads it
+// (at once when one turns on; given back after 120 frames without one, so switching shaders never rebuilds it)
 bool g_depthHeld = false;
+int g_depthIdle = 0; // frames without a depth shader while held
 void SyncDepth(bool installed)
 {
     bool want = false;
     for (size_t i = 0; installed && !want && i < g.order.size(); ++i) want = Runnable(i) && !IsOff(i) && Looks::Shader(g.order[i].shader).needsDepth;
-    if (want != g_depthHeld) { DepthShare::Request(want); g_depthHeld = want; }
+    g_depthIdle = want ? 0 : g_depthIdle + 1;
+    if (want && !g_depthHeld) { DepthShare::Request(true); g_depthHeld = true; }
+    else if (g_depthHeld && (!installed || g_depthIdle > 120)) { DepthShare::Request(false); g_depthHeld = false; }
 }
 
 void OnPresent(IDirect3DDevice9* dev)
@@ -2843,6 +2847,18 @@ std::vector<std::string> MissingPresetPacks(const std::vector<std::string>& pack
                 std::find(folders.begin(), folders.end(), p.folder) == folders.end())
             {
                 folders.push_back(p.folder);
+                kb += p.downloadKB;
+                sized &= p.downloadKB != 0;
+                break;
+            }
+    // Download adds ReShade's standard effects (ReShade.fxh) when it is missing: named and counted here too
+    const char* standard = "ReShade standard effects";
+    if (!folders.empty() && !Looks::Packs::Downloaded(standard) &&
+        std::none_of(folders.begin(), folders.end(), [&](const std::string& f) { return _stricmp(f.c_str(), standard) == 0; }))
+        for (const Looks::Packs::Pack& p : Looks::Packs::List())
+            if (_stricmp(p.folder.c_str(), standard) == 0)
+            {
+                folders.insert(folders.begin(), p.folder);
                 kb += p.downloadKB;
                 sized &= p.downloadKB != 0;
                 break;
