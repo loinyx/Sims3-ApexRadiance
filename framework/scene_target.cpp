@@ -42,6 +42,13 @@ bool g_armed = false;    // this frame substitutes until resolved
 bool g_resolved = false; // this frame's scene is in the back buffer
 bool g_used = false;     // this frame's scene went into the target (it was bound since the arm)
 bool g_inResolve = false;
+// Depth-tested draws into the scene this frame (render target 0 asked as the back buffer). A frame with fewer has no 3D
+// scene (a loading or save screen), and the next frame is drawn straight into the back buffer: the precision is for a 3D
+// scene, and under the RTX Remix bridge on a hybrid-graphics laptop the loading screen drawn into the target came out as
+// whole frames of solid blue (unverified why; the screen drawn straight into the back buffer was right)
+constexpr int kMinSceneDraws = 4; // as Picture and the no-scene trace
+int g_sceneDraws = 0;
+bool g_onBb = true;
 bool g_installed = false; // substitution callbacks set and the PostScene effect added
 State g_state = State::Off;
 D3DSURFACE_DESC g_refusedFor{}; // the back buffer a refusal was made for: checked again only when it changes
@@ -55,6 +62,7 @@ template <class T> void SafeRelease(T*& p) {
 bool Live() { return g_armed && !g_resolved; }
 
 IDirect3DSurface9* SubstituteRt(DWORD index, IDirect3DSurface9* requested) {
+    if (index == 0) g_onBb = requested && requested == g_bb;
     if (!SceneTargetLogic::Substitutes(Live(), index, requested, g_bb)) return requested;
     g_used = true;
     return g_surf;
@@ -307,14 +315,21 @@ void ArmAtPresent(IDirect3DDevice9* dev) {
         g_armed = false;
         return;
     }
-    g_armed = true;
+    const bool scene = g_sceneDraws >= kMinSceneDraws;
+    g_sceneDraws = 0;
+    g_armed = scene;
     g_resolved = false;
     g_used = false;
     IDirect3DSurface9* rt = nullptr;
     if (SUCCEEDED(ExtraHooks::RawGetRenderTarget(dev, 0, &rt)) && rt) {
-        if (rt == g_bb) D3D9Hooks::CallOriginalSetRenderTarget(dev, 0, g_bb); // (substituted, g_used set there)
+        g_onBb = rt == g_bb;
+        if (scene && g_onBb) D3D9Hooks::CallOriginalSetRenderTarget(dev, 0, g_bb); // (substituted, g_used set there)
         rt->Release();
     }
+}
+
+void CountSceneDraw(D3D9Hooks::DeviceContext& ctx) {
+    if (g_sceneDraws < kMinSceneDraws && g_onBb && ctx.ZEnable() != D3DZB_FALSE) g_sceneDraws++;
 }
 
 void OnPreReset(IDirect3DDevice9* dev) {
@@ -336,6 +351,14 @@ void Init() {
         HookGuard::Try("High-precision scene", [&] { ArmAtPresent(ctx.device); });
         return HookAction::Continue;
     }, static_cast<Priority>(100000));
+    RegisterDrawIndexedPrimitive(kHookName, [](DeviceContext& ctx, D3DPRIMITIVETYPE, INT, UINT, UINT, UINT, UINT) {
+        CountSceneDraw(ctx);
+        return HookAction::Continue;
+    });
+    RegisterDrawPrimitive(kHookName, [](DeviceContext& ctx, D3DPRIMITIVETYPE, UINT, UINT) {
+        CountSceneDraw(ctx);
+        return HookAction::Continue;
+    });
     RenderCallbacks::Add(RenderCallbacks::endSceneBeforeOverlay, AtEndScene);
     RenderCallbacks::Add(RenderCallbacks::preReset, OnPreReset);
 }

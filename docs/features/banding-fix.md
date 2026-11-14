@@ -10,7 +10,7 @@ rounds it once, with one grain, so blended passes no longer add their own roundi
 
 | | |
 |---|---|
-| Availability | Released in 2.2.0 (Experimental, with a "Still being tested" note on its page, until 2.15.0). Its own page, Smooth gradients off by default and copies made at a shader's first scene draw: Released in 2.7.0. Smooth gradients and Moving grain removed, High-precision scene on by default: Released in 2.16.0 |
+| Availability | Released in 2.2.0 (Experimental, with a "Still being tested" note on its page, until 2.15.0). Its own page, Smooth gradients off by default and copies made at a shader's first scene draw: Released in 2.7.0. Smooth gradients and Moving grain removed, High-precision scene on by default: Released in 2.16.0. Frames without a 3D scene drawn straight into the back buffer: Released in 3.2.3 |
 | Default | On for new configurations |
 | Menu | Image > Banding Fix (card *Banding Fix*: a before / after picture of a stepped and a smoothed gradient that follows the current state, then *Grain* with Strength and *Precision* with High-precision scene and its status; Live counters in the development build); Overview > Image > Banding Fix |
 | Configuration | `[patches.SceneDither]` in `ApexRadiance.toml` |
@@ -196,7 +196,14 @@ instead of hiding them.
    its depth-stencil is multisampled too), a back buffer other than `A8R8G8B8`, no 16-bit render target with
    post-pixel-shader blending (`CheckDeviceFormat` with `D3DUSAGE_QUERY_POSTPIXELSHADER_BLENDING`), a depth format that
    does not match it (`CheckDepthStencilMatch`), or the target not created.
-6. **Hooks.** `GetRenderTargetData`, `ColorFill` and `GetRenderTarget` are detoured (`ExtraHooks::EnsureTargetHooks`)
+6. **Only frames with a 3D scene.** Every DrawIndexedPrimitive and DrawPrimitive with render target 0 asked as the
+   back buffer and depth testing on counts, up to 4. A frame with fewer (a loading screen, the save screen) has no 3D
+   scene, and the next frame is not substituted: the game draws it straight into the back buffer, and the first frame
+   of a scene again arms the next one. Under the RTX Remix bridge on one hybrid-graphics laptop (Intel Arc and RTX 4060
+   Laptop, EA app 1.69), loading screens drawn into the target came out as whole frames of solid blue (0, 0, 255 at every
+   sampled point, 93 to 116 frames per recording), only in the frames where the game also drew its 512 and 256 pixel
+   targets; drawn into the back buffer they were right. Why the target gave blue there is unverified.
+7. **Hooks.** `GetRenderTargetData`, `ColorFill` and `GetRenderTarget` are detoured (`ExtraHooks::EnsureTargetHooks`)
    only when the switch first turns on. With the switch off the frame callbacks return at once.
 
 **Status.** The *High-precision scene* switch shows its state as a chip after its label (Active, Starting or Unavailable; none while off) with the video memory of the
