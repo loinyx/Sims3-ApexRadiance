@@ -39,7 +39,21 @@ public sealed class Manifest
         var p = System.IO.Path.Combine(DirOf(bin), "setup.json");
         var m = File.Exists(p) ? JsonSerializer.Deserialize(File.ReadAllText(p), SetupJson.Default.Manifest) ?? new() : new();
         m.Bin = bin;
+        m.MoveTo(bin);
         return m;
+    }
+
+    // A game folder copied or moved keeps the old one's setup.json, whose paths are absolute: they are moved to this Bin, or
+    // removing or repairing here would change the files of the other folder.
+    void MoveTo(string bin)
+    {
+        if (Files.FirstOrDefault(f => System.IO.Path.GetFileName(f.Path).Equals("ApexRadiance.asi", StringComparison.OrdinalIgnoreCase)) is not { } apex) return;
+        var old = System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetDirectoryName(apex.Path)!) + System.IO.Path.DirectorySeparatorChar;
+        var now = System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(bin)) + System.IO.Path.DirectorySeparatorChar;
+        if (old.Equals(now, StringComparison.OrdinalIgnoreCase)) return;
+        string? Move(string? path) => path is not null && path.StartsWith(old, StringComparison.OrdinalIgnoreCase) ? now + path[old.Length..] : path;
+        foreach (var f in Files) { f.Path = Move(f.Path)!; f.Backup = Move(f.Backup); }
+        OptionsBackup = Move(OptionsBackup);
     }
 
     public void Save()
