@@ -30,6 +30,7 @@ Measured cost on your GPU per frame	tr_widgets.cpp:kEntries	Custo medido na sua 
 {} turned off	tr_widgets.cpp:kEntries	{} desligado	{} desactivado	{} désactivé	{}
 {} reset	tr_widgets.cpp:kEntries	{} voltou ao padrão	{} restablecido	{} réinitialisé	{}
 {} changed	tr_widgets.cpp:kEntries	{} alterado	{} cambiado	{} modifié	{}
+Pick a color	tr_widgets.cpp:kEntries	Escolher uma cor	Elegir un color	Choisir une couleur	
 Automatic ({})	tr_widgets.cpp:kEntries	Automático ({})	Automático ({})	Automatique ({})	{}
 Language	tr_widgets.cpp:kEntries	Idioma	Idioma	Langue	
 The language of this menu	tr_widgets.cpp:kEntries	O idioma deste menu	El idioma de este menú	La langue de ce menu	
@@ -2550,6 +2551,14 @@ Open the Looks folder	tr_image.cpp:kEntries	Abrir a pasta Looks	Abrir la carpeta
 Look changed	tr_image.cpp:kEntries	Visual alterado	Estilo cambiado	Rendu changé	
 {} of {}	tr_image.cpp:kEntries	{} de {}	{} de {}	{} sur {}	{} {}
 Put back the look's values	tr_image.cpp:kEntries	Restaurar os valores do visual	Restablecer los valores del estilo	Rétablir les valeurs du rendu	
+Quality settings ({})	tr_image.cpp:kEntries	Configurações de qualidade ({})	Ajustes de calidad ({})	Réglages de qualité ({})	{}
+0 or 1	tr_image.cpp:kEntries	0 ou 1	0 o 1	0 ou 1	
+{} to {}	tr_image.cpp:kEntries	{} a {}	{} a {}	{} à {}	{} {}
+A number	tr_image.cpp:kEntries	Um número	Un número	Un nombre	
+A value	tr_image.cpp:kEntries	Um valor	Un valor	Une valeur	
+Put back the look's settings	tr_image.cpp:kEntries	Restaurar as configurações do visual	Restablecer los ajustes del estilo	Rétablir les réglages du rendu	
+Compiling the new settings…	tr_image.cpp:kEntries	Compilando as novas configurações…	Compilando los nuevos ajustes…	Compilation des nouveaux réglages…	
+{} settings put back	tr_image.cpp:kEntries	Configurações de {} restauradas	Ajustes de {} restablecidos	Réglages de {} rétablis	{}
 {} values put back	tr_image.cpp:kEntries	Valores de {} restaurados	Valores de {} restablecidos	Valeurs de {} rétablies	{}
 Changed from the look	tr_image.cpp:kEntries	Alterado em relação ao visual	Cambiado respecto al estilo	Modifié par rapport au rendu	
 Close	tr_image.cpp:kEntries	Fechar	Cerrar	Fermer	

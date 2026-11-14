@@ -113,6 +113,10 @@ void GroupLabel(const char* text);
 // A quiet label that opens a group of rows inside a card ("What stays sharp"): the row divider above it when it follows
 // a row, small muted text, and no divider between it and the group's first row
 void CardGroup(const char* text);
+// The same quiet label with a small chevron that collapses its group (open unless openByDefault is false; the state is
+// kept per id while the game runs). True when open: submit the group's rows. The search results draw no label and
+// return true.
+bool CardGroupToggle(const char* id, const char* text, bool openByDefault = true);
 // A note: a small icon and wrapped text in a subtly tinted rounded box, in the given colour (0xRRGGBB). Info notes use
 // IconId::Info and the default muted colour, warnings IconId::TriangleAlert and VioletTheme::kWarning, errors
 // IconId::TriangleAlert and VioletTheme::kError. The box is one item: hover it for a Tooltip.
@@ -156,6 +160,15 @@ bool SwitchRow(const char* label, bool* v, const char* tooltip = nullptr, BoolDe
 // nestable.
 bool BeginControlRow(const char* label, const char* description, float controlsWidth, IconId icon = IconId::None, float controlsHeight = 0.0f);
 void EndControlRow();
+// The next BeginControlRow has a default: the changed dot while `changed`, and on hover the row's Reset button.
+// ControlRowReset(): that Reset was clicked (read between BeginControlRow and EndControlRow; the caller puts the value
+// back and reports it). The caller gives the row a unique ID scope (PushID).
+void SetNextRowDefault(bool changed);
+bool ControlRowReset();
+// A colour row (a control row): a swatch with the colour's 0..255 values beside it; clicking the swatch opens a colour
+// picker (with an alpha bar when comps is 4). rgba holds comps floats in 0..1; def (optional) = the default (changed
+// dot + Reset). True when the colour changed.
+bool ColorRow(const char* label, const char* description, float* rgba, int comps, const float* def = nullptr);
 // A long list draws only the rows it shows: a row outside the view advances the layout exactly as BeginControlRow +
 // EndControlRow did with the same label and description, by its height measured then (ControlRowHeight, read before
 // EndControlRow), without drawing it.

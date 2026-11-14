@@ -83,46 +83,8 @@ struct Catalog
 // The parameters of an effect: its uniforms without a source annotation, as the menu shows ReShade's
 void Describe(UserTech& u)
 {
+    DescribeParams(*u.fx, u.text, u.params, u.uniform);
     const Effect& fx = *u.fx;
-    for (size_t i = 0; i < fx.uniforms.size(); ++i)
-    {
-        const Uniform& un = fx.uniforms[i];
-        LooksParam p{};
-        p.key = u.Keep(un.name);
-        const Ann* label = FindAnn(un.ann, "ui_label");
-        p.label = u.Keep(label && label->isString && !label->s.empty() ? label->s : un.name);
-        p.comps = (int)std::min(4u, un.Comps());
-        p.reg = (int)i;
-        for (int c = 0; c < p.comps && c < (int)un.init.size(); ++c) p.def[c] = un.init[c];
-        const Ann* type = FindAnn(un.ann, "ui_type");
-        const std::string t = type && type->isString ? type->s : "";
-        const Ann* src = FindAnn(un.ann, "source");
-        const Ann* hid = FindAnn(un.ann, "hidden");
-        if (src || (hid && !hid->isString && hid->f[0] != 0.0f) || un.array || un.cols > 1)
-            p.kind = LooksParamKind::Source; // set by the runtime, hidden, or not a slider (matrix, array)
-        else if (un.base == kBool) p.kind = LooksParamKind::Bool;
-        else if (t == "combo" || t == "radio" || t == "list") p.kind = LooksParamKind::Combo;
-        else if (t == "color") p.kind = LooksParamKind::Color;
-        else p.kind = un.base == kFloat ? LooksParamKind::Float : LooksParamKind::Int;
-        const Ann* mn = FindAnn(un.ann, "ui_min");
-        const Ann* mx = FindAnn(un.ann, "ui_max");
-        p.min = mn && !mn->isString ? mn->f[0] : 0.0f;
-        p.max = mx && !mx->isString ? mx->f[0] : (p.kind == LooksParamKind::Color ? 1.0f : 0.0f);
-        if (p.kind == LooksParamKind::Combo)
-        {
-            const Ann* items = FindAnn(un.ann, "ui_items");
-            if (items && items->isString)
-            {
-                p.items = u.Keep(items->s + '\0');
-                int n = 0;
-                for (char c : items->s) n += c == '\0';
-                if (!mx) { p.min = 0; p.max = (float)std::max(0, n - 1); }
-            }
-        }
-        if (p.kind == LooksParamKind::Source) p.items = "";
-        u.params.push_back(p);
-        u.uniform.push_back((int)i);
-    }
     u.desc.technique = u.technique.c_str();
     u.desc.file = u.file.c_str();
     u.desc.params = u.params.data();
@@ -389,6 +351,7 @@ std::shared_ptr<Catalog> Build(const std::vector<std::shared_ptr<const Effect>>&
 }
 
 std::set<std::string> g_want;    // lower-case .fx names the render thread wants compiled (under g_lock)
+std::map<std::string, LooksDefines> g_defines; // the look's definitions per lower-case .fx name (under g_lock)
 bool g_browse = false;            // the player browses shaders: pack files without a check result are checked (under g_lock)
 
 void Publish(const std::vector<std::shared_ptr<const Effect>>& effects, const std::vector<Source>& files, const std::vector<bool>& lazy,
@@ -473,12 +436,19 @@ void ScanOnce(UINT W, UINT H, bool force)
     }
     if (force) g_cache.clear();
     std::set<std::string> want;
+    std::map<std::string, LooksDefines> defines;
     bool browse;
     {
         std::lock_guard<std::mutex> lock(g_lock);
         want = g_want;
+        defines = g_defines;
         browse = g_browse;
     }
+    static const LooksDefines kNone;
+    auto definesOf = [&](size_t i) -> const LooksDefines& {
+        auto it = defines.find(LowerA(Utf8(files[i].path.substr(files[i].path.find_last_of(L'\\') + 1))));
+        return it == defines.end() ? kNone : it->second;
+    };
 
     std::vector<std::shared_ptr<const Effect>> effects(files.size());
     std::vector<bool> lazy(files.size(), false);
@@ -493,7 +463,10 @@ void ScanOnce(UINT W, UINT H, bool force)
         auto it = g_cache.find(files[i].path);
         if (it != g_cache.end() && it->second.size == size && CompareFileTime(&it->second.written, &a.ftLastWriteTime) == 0 &&
             it->second.w == W && it->second.h == H)
-            effects[i] = it->second.fx;
+        {
+            effects[i] = it->second.fx; // with other definitions: compiled again, this one runs until then
+            if (!MacrosMatch(*it->second.fx, definesOf(i))) todo.push_back(i);
+        }
         else if (!files[i].pack.empty() && !want.count(LowerA(Utf8(files[i].path.substr(files[i].path.find_last_of(L'\\') + 1)))))
         {
             lazy[i] = true; // a pack file no look needs: not compiled (memory and time); the check cache says what runs
@@ -507,7 +480,9 @@ void ScanOnce(UINT W, UINT H, bool force)
     {
         WIN32_FILE_ATTRIBUTE_DATA a{};
         GetFileAttributesExW(files[i].path.c_str(), GetFileExInfoStandard, &a);
-        effects[i] = CompileGuarded(files[i].path, folders[files[i].folders], W, H);
+        Folders f = folders[files[i].folders];
+        f.defines = definesOf(i);
+        effects[i] = CompileGuarded(files[i].path, f, W, H);
         CacheEntry& e = g_cache[files[i].path];
         e.written = a.ftLastWriteTime; e.size = ((uint64_t)a.nFileSizeHigh << 32) | a.nFileSizeLow; e.w = W; e.h = H; e.fx = effects[i];
         if (!files[i].pack.empty()) RecordChecked(files[i].path, a, *effects[i]);
@@ -585,6 +560,55 @@ void StartWorker()
 
 } // namespace
 
+// ============================================================================================== parameters
+void DescribeParams(const Effect& fx, std::deque<std::string>& text, std::vector<LooksParam>& params, std::vector<int>& uniform)
+{
+    auto keep = [&](std::string s) { text.push_back(std::move(s)); return text.back().c_str(); };
+    auto str = [](const Ann* a) { return a && a->isString && !a->s.empty() ? a : nullptr; };
+    for (size_t i = 0; i < fx.uniforms.size(); ++i)
+    {
+        const Uniform& un = fx.uniforms[i];
+        LooksParam p{};
+        p.key = keep(un.name);
+        const Ann* label = str(FindAnn(un.ann, "ui_label"));
+        p.label = keep(label ? label->s : un.name);
+        p.comps = (int)std::min(4u, un.Comps());
+        p.reg = (int)i;
+        for (int c = 0; c < p.comps && c < (int)un.init.size(); ++c) p.def[c] = un.init[c];
+        const Ann* type = FindAnn(un.ann, "ui_type");
+        const std::string t = type && type->isString ? type->s : "";
+        const Ann* hid = FindAnn(un.ann, "hidden");
+        if (FindAnn(un.ann, "source") || un.array || un.cols > 1)
+            p.kind = LooksParamKind::Source; // set by the runtime, or no control (matrix, array): the .fx's value
+        else if (un.base == kBool) p.kind = LooksParamKind::Bool;
+        else if (t == "combo" || t == "radio" || t == "list") p.kind = LooksParamKind::Combo;
+        else if (t == "color") p.kind = LooksParamKind::Color;
+        else p.kind = un.base == kFloat ? LooksParamKind::Float : LooksParamKind::Int;
+        if (hid && (hid->isString ? hid->s == "true" : hid->f[0] != 0.0f)) p.flags |= kParamHidden;
+        if (t.empty() || t == "input") p.flags |= kParamField;
+        const Ann* mn = FindAnn(un.ann, "ui_min");
+        const Ann* mx = FindAnn(un.ann, "ui_max");
+        const Ann* step = FindAnn(un.ann, "ui_step");
+        p.min = mn && !mn->isString ? mn->f[0] : 0.0f;
+        p.max = mx && !mx->isString ? mx->f[0] : (p.kind == LooksParamKind::Color ? 1.0f : 0.0f);
+        p.step = step && !step->isString && step->f[0] > 0.0f ? step->f[0] : 0.0f;
+        if (const Ann* a = str(FindAnn(un.ann, "ui_tooltip"))) p.tooltip = keep(a->s);
+        if (const Ann* a = str(FindAnn(un.ann, "ui_category"))) p.category = keep(a->s);
+        if (const Ann* a = str(FindAnn(un.ann, "ui_text"))) p.text = keep(a->s);
+        if (const Ann* a = FindAnn(un.ann, "ui_category_closed"); a && (a->isString ? a->s == "true" : a->f[0] != 0.0f)) p.flags |= kParamClosed;
+        if (p.kind == LooksParamKind::Combo)
+        {
+            const Ann* items = FindAnn(un.ann, "ui_items");
+            if (items && items->isString) p.items = keep(items->s + '\0'); // ReShade's '\0' separated list (the last '\0' optional)
+            const size_t n = LooksItems(p).size();
+            if (!mx && n) { p.min = 0; p.max = (float)(n - 1); }
+        }
+        if (p.kind == LooksParamKind::Source) p.items = "";
+        params.push_back(p);
+        uniform.push_back((int)i);
+    }
+}
+
 // ============================================================================================== folder
 std::wstring ShadersFolder()
 {
@@ -635,6 +659,22 @@ bool Poll(UINT width, UINT height)
 
 int Generation() { return g_current ? g_current->generation : 0; }
 bool Scanned() { return g_current != nullptr; }
+
+const Effect* UserEffect(int index)
+{
+    if (!g_current || index < 0 || index >= (int)g_current->techs.size()) return nullptr;
+    return g_current->techs[index]->fx.get();
+}
+
+void SetDefines(const std::map<std::string, LooksDefines>& perFile)
+{
+    {
+        std::lock_guard<std::mutex> lock(g_lock);
+        if (perFile == g_defines) return;
+        g_defines = perFile;
+    }
+    if (g_current) RequestScan(false); // before the first scan: that scan uses them
+}
 
 const LooksShader* UserShader(int index)
 {

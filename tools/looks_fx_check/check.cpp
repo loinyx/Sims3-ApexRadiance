@@ -10,6 +10,7 @@
 #include "third_party/reshadefx/reshadefx_license.h"
 #include <cmath>
 #include <cstring>
+#include <deque>
 #include <d3d9.h>
 #include <d3dcompiler.h>
 #include <algorithm>
@@ -132,6 +133,7 @@ static void CatalogChecks(IDirect3DDevice9* dev)
 }
 
 static std::string Narrow(const std::wstring& w);
+static void ListFx(const std::wstring& dir, int depth, std::vector<std::wstring>& out);
 
 // --packs <Apex Radiance folder with Shaders\Packs\<pack>\ inside>: a pack's files are not compiled until wanted; browsing
 // fills "<x> of <y> run here" and the Add a shader list from the check cache (Shaders\.cache), checking the files it does
@@ -672,10 +674,137 @@ static int CacheChecks(const std::wstring& root, const std::vector<std::wstring>
     run("again", true);
     write(fx, source(0.6f));
     run("the .fx changed", false);
+    t.defines = { { "APEX_CACHE_TEST", "1" } }; // another set of definitions: its own cache file, the first one kept
+    run("with a definition", false);
+    run("with it again", true);
+    t.defines.clear();
+    run("without it again", true);
     run("another picture size", (W = W / 2, false));
     DeleteFileW(fx.c_str()); DeleteFileW(fxh.c_str()); RemoveDirectoryW(dir.c_str());
     printf("cache: %d problems\n", problems);
     return problems;
+}
+
+// ---- --params <folder>...: every .fx under the folders (a file name once), each uniform mapped to the menu's control
+// (DescribeParams + LooksControlOf, as the Shaders page shows them); a uniform that gets no control and is neither hidden
+// nor set by ReShade is reported. Then the preprocessor definitions: the ones each effect tests, and a round trip of one
+// (an .ini's PreprocessorDefinitions -> compile with it -> another cache key, the .fx default kept -> written back).
+static bool AsIntChk(const std::string& s, int& v) { char* e = nullptr; const long x = strtol(s.c_str(), &e, 10); v = (int)x; return !s.empty() && !*e; }
+static const char* DefineControl(const Macro& m)
+{
+    int a = 0, b = 0;
+    if ((m.value == "0" || m.value == "1") && (m.def == "0" || m.def == "1") && (m.hi < m.lo || (m.lo >= 0 && m.hi <= 1))) return "switch";
+    if (m.hi >= m.lo && m.hi - m.lo <= 7 && AsIntChk(m.value, a) && AsIntChk(m.def, b)) return "segmented";
+    char* e = nullptr;
+    strtod(m.value.c_str(), &e);
+    return !m.value.empty() && !*e ? "number field" : "text field";
+}
+static int ParamChecks(const std::vector<std::wstring>& dirs, UINT W, UINT H)
+{
+    int problems = 0;
+    // root: the folders' common parent (includes must stay inside it); includes: each folder, its Shaders\ and their subfolders
+    std::wstring root = dirs[0];
+    for (const std::wstring& d : dirs)
+        while (!root.empty() && _wcsnicmp(d.c_str(), root.c_str(), root.size()) != 0) root.resize(root.find_last_of(L'\\', root.size() - 2) + 1);
+    Folders f;
+    f.root = root;
+    std::vector<std::wstring> files;
+    std::map<std::wstring, bool> seen;
+    for (const std::wstring& d : dirs)
+    {
+        for (const std::wstring& inc : { d + L"Shaders\\", d }) f.includeDirs.push_back(inc);
+        f.textureDirs.push_back(d + L"Textures\\");
+        std::vector<std::wstring> list;
+        ListFx(d, 5, list);
+        std::sort(list.begin(), list.end());
+        for (const std::wstring& p : list)
+        {
+            std::wstring n = p.substr(p.find_last_of(L'\\') + 1);
+            for (wchar_t& c : n) c = towlower(c);
+            if (seen.emplace(n, true).second) files.push_back(p);
+        }
+    }
+    std::map<std::string, int> controls, defineControls;
+    int uniforms = 0, shown = 0, hidden = 0, sourced = 0, unmapped = 0, compiled = 0, withText = 0, categories = 0, macroFiles = 0, macros = 0;
+    const Effect* sample = nullptr; // an effect whose 0/1 definition makes the round trip
+    std::vector<std::shared_ptr<Effect>> keep;
+    for (const std::wstring& path : files)
+    {
+        auto fx = std::make_shared<Effect>();
+        if (!Compile(path, f, W, H, *fx)) continue; // the file cannot run here: nothing to show
+        ++compiled;
+        std::deque<std::string> text;
+        std::vector<LooksParam> params;
+        std::vector<int> uni;
+        DescribeParams(*fx, text, params, uni);
+        std::string lastCat;
+        for (size_t p = 0; p < params.size(); ++p)
+        {
+            const LooksParam& pd = params[p];
+            const Uniform& un = fx->uniforms[uni[p]];
+            ++uniforms;
+            const bool hasSource = FindAnn(un.ann, "source") != nullptr;
+            const LooksControl c = LooksControlOf(pd);
+            if (hasSource) { ++sourced; continue; }
+            if (c == LooksControl::None)
+            {
+                if (pd.flags & kParamHidden) { ++hidden; continue; }
+                ++unmapped;
+                printf("params: %s %s: no control (%s)\n", Narrow(path.substr(root.size())).c_str(), pd.key,
+                       un.array ? "an array" : un.cols > 1 ? "a matrix" : "unknown");
+                continue;
+            }
+            static const char* const kNames[] = { "none", "switch", "slider", "choice", "color", "vector", "field", "text" };
+            std::string name = kNames[(int)c];
+            if (c == LooksControl::Choice)
+            {
+                const auto items = LooksItems(pd);
+                size_t chars = 0;
+                for (const char* s : items) chars += strlen(s);
+                name += items.size() <= 4 && chars <= 32 ? " (segmented)" : " (dropdown)";
+                if (pd.max >= (float)items.size()) printf("params: note: %s %s: ui_max %g past its %zu items\n", Narrow(path).c_str(), pd.key, pd.max, items.size());
+            }
+            ++controls[name];
+            ++shown;
+            withText += pd.text != nullptr;
+            const std::string cat = pd.category ? pd.category : "";
+            if (!cat.empty() && cat != lastCat) ++categories;
+            lastCat = cat;
+        }
+        macros += (int)fx->macros.size();
+        macroFiles += !fx->macros.empty();
+        for (const Macro& m : fx->macros)
+        {
+            ++defineControls[DefineControl(m)];
+            if (!strcmp(DefineControl(m), "text field")) printf("params: text definition: %s %s=%s\n", fx->file.c_str(), m.name.c_str(), m.value.c_str());
+            if (!sample && !strcmp(DefineControl(m), "switch") && fx->cacheKey) { sample = fx.get(); keep.push_back(fx); }
+        }
+    }
+    printf("params: %zu files (a name once), %d compiled; %d uniforms: %d shown, %d hidden, %d set by ReShade, %d with no control\n",
+           files.size(), compiled, uniforms, shown, hidden, sourced, unmapped);
+    for (auto& [n, k] : controls) printf("params:   %5d %s\n", k, n.c_str());
+    printf("params: %d text blocks (ui_text), %d groups (ui_category)\n", withText, categories);
+    printf("params: %d definitions in %d files\n", macros, macroFiles);
+    for (auto& [n, k] : defineControls) printf("params:   %5d %s\n", k, n.c_str());
+    problems += unmapped;
+
+    // the round trip: .ini -> compile with the definitions -> another cache key and the value applied -> .ini again
+    if (!sample) { printf("params: no effect with a 0/1 definition (round trip skipped)\n"); return problems + 1; }
+    const Macro& m = *std::find_if(sample->macros.begin(), sample->macros.end(), [](const Macro& x) { return !strcmp(DefineControl(x), "switch"); });
+    const std::string flipped = m.value == "1" ? "0" : "1";
+    Looks::Preset ini;
+    Looks::ParsePreset("PreprocessorDefinitions=UNUSED_NAME=7\nTechniques=X@" + sample->file + "\n[" + sample->file + "]\nPreprocessorDefinitions=" + m.name + "=" + flipped + "\n", ini);
+    Folders g = f;
+    g.defines = Looks::PresetDefines(ini, sample->file);
+    Effect again;
+    Compile(sample->path, g, W, H, again);
+    const Macro* m2 = nullptr;
+    for (const Macro& x : again.macros) if (x.name == m.name) m2 = &x;
+    const bool ok = m2 && m2->value == flipped && m2->def == m.value && again.cacheKey != sample->cacheKey && MacrosMatch(again, g.defines) &&
+                    !MacrosMatch(*sample, g.defines) && MacrosMatch(*sample, {}) && Looks::ParseDefines(Looks::FormatDefines(g.defines)) == g.defines &&
+                    Looks::FormatDefines(g.defines) == "UNUSED_NAME=7," + m.name + "=" + flipped;
+    printf("params: definitions round trip on %s, %s %s -> %s: %s\n", sample->file.c_str(), m.name.c_str(), m.value.c_str(), flipped.c_str(), ok ? "ok" : "PROBLEM");
+    return problems + !ok;
 }
 #endif
 
@@ -715,7 +844,7 @@ static std::string Category(const std::string& r)
 
 int main(int argc, char** argv)
 {
-    if (argc < 2) { printf("usage: looks_fx_check <Shaders folder> [--run] [WxH] [--catalog <Apex Radiance folder>] [--compare [--image <file>]...] [--hashes] [--state] [--cache] [--packs <Apex Radiance folder>]\n"); return 2; }
+    if (argc < 2) { printf("usage: looks_fx_check <Shaders folder> [--run] [WxH] [--catalog <Apex Radiance folder>] [--compare [--image <file>]...] [--hashes] [--state] [--cache] [--packs <Apex Radiance folder>] [--params <folder>...]\n"); return 2; }
     wchar_t full[MAX_PATH];
     GetFullPathNameW(std::wstring(argv[1], argv[1] + strlen(argv[1])).c_str(), MAX_PATH, full, nullptr);
     std::wstring root = full;
@@ -740,6 +869,22 @@ int main(int argc, char** argv)
             printf("packs: %d checks, %d failures\n%s\n", g_checks, g_failures, g_failures ? "PROBLEMS" : "OK");
             return g_failures ? 1 : 0;
         }
+#ifndef LOOKS_FX_CHECK_BASELINE
+        else if (!strcmp(argv[i], "--params") && i + 1 < argc)
+        {
+            std::vector<std::wstring> dirs;
+            for (++i; i < argc && strncmp(argv[i], "--", 2) != 0; ++i)
+            {
+                wchar_t dir[MAX_PATH];
+                GetFullPathNameW(std::wstring(argv[i], argv[i] + strlen(argv[i])).c_str(), MAX_PATH, dir, nullptr);
+                dirs.push_back(dir);
+                if (dirs.back().back() != L'\\') dirs.back() += L'\\';
+            }
+            const int problems = ParamChecks(dirs, W, H);
+            printf(problems ? "PROBLEMS\n" : "OK\n");
+            return problems ? 1 : 0;
+        }
+#endif
         else if (!strcmp(argv[i], "--image") && i + 1 < argc) { ++i; images.push_back(std::wstring(argv[i], argv[i] + strlen(argv[i]))); }
         else if (!strcmp(argv[i], "--catalog") && i + 1 < argc)
         {

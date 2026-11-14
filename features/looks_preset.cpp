@@ -7,6 +7,7 @@
 #include <windows.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <set>
@@ -159,6 +160,39 @@ bool ParsePreset(const std::string& raw, Preset& out)
 
 std::vector<std::string> PresetSorting(const Preset& preset) { return SplitList(TopValue(preset, "TechniqueSorting")); }
 
+LooksDefines ParseDefines(const std::string& value)
+{
+    LooksDefines out;
+    for (const std::string& item : SplitList(value))
+    {
+        const size_t eq = item.find('=');
+        std::string name = Trim(item.substr(0, eq)), v = eq == std::string::npos ? "1" : Trim(item.substr(eq + 1));
+        bool ok = !name.empty() && name.size() <= 64 && !isdigit((unsigned char)name[0]) && v.size() <= 256;
+        for (char c : name) ok &= isalnum((unsigned char)c) || c == '_';
+        for (char c : v) ok &= (unsigned char)c >= 32;
+        if (!ok) continue;
+        auto it = std::find_if(out.begin(), out.end(), [&](const auto& d) { return d.first == name; });
+        if (it != out.end()) it->second = v;
+        else if (out.size() < 128) out.push_back({ std::move(name), std::move(v) });
+    }
+    return out;
+}
+
+std::string FormatDefines(const LooksDefines& defines)
+{
+    std::string s;
+    for (const auto& [name, value] : defines) s += (s.empty() ? "" : ",") + name + "=" + value;
+    return s;
+}
+
+LooksDefines PresetDefines(const Preset& preset, const std::string& file)
+{
+    std::string all = TopValue(preset, "PreprocessorDefinitions");
+    if (const auto* sec = FindSection(preset, file))
+        if (auto it = sec->find("PreprocessorDefinitions"); it != sec->end()) all += "," + it->second;
+    return ParseDefines(all);
+}
+
 std::vector<float> PresetValues(const Preset& preset, const LooksShader& d)
 {
     std::vector<float> v((size_t)d.paramCount * 4, 0.0f);
@@ -179,11 +213,25 @@ std::vector<float> PresetValues(const Preset& preset, const LooksShader& d)
         const std::vector<std::string> parts = SplitList(it->second);
         for (int c = 0; c < p.comps && c < (int)parts.size(); ++c)
         {
-            const float x = (float)atof(parts[c].c_str());
+            const float x = !_stricmp(parts[c].c_str(), "true") ? 1.0f : !_stricmp(parts[c].c_str(), "false") ? 0.0f : (float)atof(parts[c].c_str());
             if (std::isfinite(x)) v[i * 4 + c] = x;
         }
     }
     return v;
+}
+
+std::string FormatValue(const LooksParam& p, const float* v)
+{
+    const bool isFloat = p.kind == LooksParamKind::Float || p.kind == LooksParamKind::Color;
+    std::string s;
+    char buf[64];
+    for (int c = 0; c < p.comps; ++c)
+    {
+        if (isFloat) snprintf(buf, sizeof buf, "%f", v[c]);
+        else snprintf(buf, sizeof buf, "%ld", std::lround(v[c]));
+        s += (c ? "," : "") + std::string(buf);
+    }
+    return s;
 }
 
 // ============================================================================================== sources

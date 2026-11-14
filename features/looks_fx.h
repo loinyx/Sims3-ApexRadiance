@@ -9,6 +9,7 @@
 // inside the Shaders folder, and a technique that cannot run on Direct3D 9 gets a reason instead of running.
 #include <d3d9.h>
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <memory>
 #include <string>
@@ -80,6 +81,10 @@ struct Technique
     bool needsDepth = false; // samples the DEPTH texture
     bool hidden = false;     // annotation hidden = true
 };
+// A preprocessor definition the effect tests (#ifdef / #ifndef), as ReShade lists them for its "Preprocessor
+// definitions": value = as compiled, def = the .fx's own (#define after #ifndef), lo..hi = the integers its #if / #elif
+// lines compare it with and its own value (hi < lo: none)
+struct Macro { std::string name, value, def; int lo = 0, hi = -1; };
 struct Shader { std::string entry; uint8_t vs = 0; std::vector<uint8_t> code; std::string error; };
 struct Effect
 {
@@ -94,6 +99,8 @@ struct Effect
     std::vector<Shader> shaders;
     std::string error;          // why the whole file cannot run ("" = see each technique)
     std::vector<std::string> notes; // D3D9 fallbacks used (lowered texture formats, other compile flags)
+    std::vector<Macro> macros;      // the definitions it tests (see Macro), by name
+    uint64_t cacheKey = 0;          // the compile cache's key (generated code, compiler, definitions)
     uint64_t gpuBytes = 0;
 };
 
@@ -105,11 +112,16 @@ struct Folders
     std::wstring root;
     std::vector<std::wstring> includeDirs, textureDirs;
     std::wstring cacheDir;
+    LooksDefines defines; // the look's definitions, applied before the file (ReShade's PreprocessorDefinitions)
 };
 
 // Preprocess, parse, generate shader model 3.0 HLSL and D3DCompile every entry point the techniques use, at the given
 // buffer size. Never throws (an exception becomes out.error). False when the file cannot run at all (out.error).
 bool Compile(const std::wstring& fxPath, const Folders& folders, UINT width, UINT height, Effect& out);
+// True when every definition the effect tests has the value `defines` gives it (else its .fx default): no new compile needed
+bool MacrosMatch(const Effect& fx, const LooksDefines& defines);
+// The menu's parameters of an effect, one per uniform (strings kept in `text`); uniform = per parameter its index
+void DescribeParams(const Effect& fx, std::deque<std::string>& text, std::vector<LooksParam>& params, std::vector<int>& uniform);
 // Compiles that read every shader of an effect from the compile cache / that compiled and wrote it (this process)
 void CacheCounts(int* hits, int* misses);
 // True when path (absolute) is inside root and has no ".." part
@@ -186,6 +198,10 @@ int FindUser(const std::string& technique, const std::string& file); // a runnab
 std::string Reason(const std::string& technique, const std::string& file);
 bool HasFile(const std::string& file); // a .fx of that name is in the folder
 bool Pending(const std::string& file); // that file is not compiled yet (or the first scan has not finished)
+const Effect* UserEffect(int index);   // the compiled effect of a user technique (nullptr when out of range)
+// The look's definitions per .fx file (lower-case name); a compiled file whose definitions differ compiles again in the
+// background (its previous compile keeps running until then). Render thread.
+void SetDefines(const std::map<std::string, LooksDefines>& perFile);
 
 // The Add a shader list: every user technique, runnable (index >= 0) or not (reason); pack = the downloaded pack's
 // folder (Shaders\Packs\<pack>), "" for the player's own files. checked: a pack technique that runs here as an earlier

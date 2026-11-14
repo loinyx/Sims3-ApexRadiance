@@ -420,9 +420,15 @@ struct RowDecor {
     bool changed = false;
 };
 
-// Takes the pending SetNextRowBadge / SetNextRowChangedDot (every row consumes them, drawn or not)
+int g_nextDefault = -1;   // SetNextRowDefault: -1 none, 0 at the default, 1 changed
+bool g_ctrlReset = false; // ControlRowReset
+
+// Takes the pending SetNextRowBadge / SetNextRowChangedDot / SetNextRowDefault (every row consumes them, drawn or not)
 RowDecor TakeDecor() {
     RowDecor d;
+    d.hasDefault = g_nextDefault >= 0;
+    d.changed = g_nextDefault == 1;
+    g_nextDefault = -1;
     d.badge = g_nextBadge;
     d.badgeTip = g_nextBadgeTip;
     d.badgeRgb = g_nextBadgeRgb;
@@ -637,6 +643,39 @@ void CardGroup(const char* text) {
     ImGui::Dummy(ImVec2(0.0f, 0.0f));
 }
 
+bool CardGroupToggle(const char* id, const char* text, bool openByDefault) {
+    if (Hidden()) return true; // search: the group's rows are searched, without the label
+    const float u = Unit();
+    ImGui::PushID(id);
+    ImGuiStorage* storage = ImGui::GetStateStorage();
+    const ImGuiID key = ImGui::GetID("##GroupOpen");
+    bool open = storage->GetBool(key, openByDefault);
+    const float startX = ImGui::GetCursorPosX();
+    const float width = ImGui::GetContentRegionAvail().x;
+    ImGui::SetCursorPos(ImVec2(startX, RowTop()));
+    PushSized(nullptr, kSmallScale);
+    const float lineH = ImGui::GetTextLineHeight();
+    const float is = 12.0f * u, gap = 6.0f * u;
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    if (ImGui::InvisibleButton("##Group", ImVec2(width, lineH), ImGuiButtonFlags_EnableNav)) {
+        open = !open;
+        storage->SetBool(key, open);
+    }
+    const ImU32 col = U32(ImGui::IsItemHovered() ? VioletTheme::kText : VioletTheme::kTextMuted);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    DrawIcon(dl, open ? IconId::ChevronDown : IconId::ChevronRight, ImVec2(p.x, p.y + (lineH - is) * 0.5f), is, col);
+    const std::string_view shown = I18n::TrLabel(text);
+    if (DrawFitted(dl, ImVec2(p.x + is + gap, p.y), col, shown, width - is - gap) && ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+        FullTextTooltip(shown);
+    ImGui::RenderNavCursor(ImGui::GetCurrentContext()->LastItemData.Rect, ImGui::GetItemID());
+    ImGui::PopFont();
+    ImGui::PopID();
+    // The first row starts right under the label (as CardGroup); a closed group leaves the same gap before what follows
+    ImGui::SetCursorPos(ImVec2(startX, LocalY(ImGui::GetItemRectMax().y) + kSpace2 * u - ImGui::GetStyle().ItemSpacing.y));
+    ImGui::Dummy(ImVec2(0.0f, 0.0f));
+    return open;
+}
+
 void IconNote(IconId icon, const char* text, unsigned rgb) {
     if (Hidden()) return;
     text = T(text);
@@ -809,7 +848,7 @@ bool BeginControlRow(const char* label, const char* description, float controlsW
     LabelInfo li;
     const float rowH = std::fmax(RowText(label, description, textWrapX, std::fmax(textWrapX - DecorWidth(d), textX + 40.0f * u), &li,
                                          stacked ? 0.0f : minimumHeight), stacked ? 0.0f : minimumHeight);
-    RowDecorations(d, li, ToScreen(startX, top), ToScreen(startX + width, top + rowH)); // no Reset: hasDefault is never set here
+    g_ctrlReset = RowDecorations(d, li, ToScreen(startX, top), ToScreen(startX + width, top + rowH)); // Reset: SetNextRowDefault
     if (hasIcon) {
         const float size = kIconMedium * u;
         DrawIcon(ImGui::GetWindowDrawList(), icon,
@@ -833,6 +872,66 @@ void SkipControlRow(const char* label, const char* description, float height) {
 }
 
 float ControlRowHeight() { return g_ctrlBottom - g_ctrlTop; }
+
+void SetNextRowDefault(bool changed) { g_nextDefault = changed ? 1 : 0; }
+bool ControlRowReset() { return g_ctrlReset; }
+
+bool ColorRow(const char* label, const char* description, float* rgba, int comps, const float* def) {
+    const float u = Unit();
+    comps = std::clamp(comps, 3, 4);
+    if (def) {
+        bool diff = false;
+        for (int c = 0; c < comps; ++c) diff |= std::fabs(rgba[c] - def[c]) > 1e-4f;
+        SetNextRowDefault(diff);
+    }
+    // the values measured at their widest, so the row keeps its width while the colour changes
+    PushSized(nullptr, kSmallScale);
+    const float textW = ImGui::CalcTextSize(comps > 3 ? "255, 255, 255, 255" : "255, 255, 255").x;
+    ImGui::PopFont();
+    const float swatchW = 44.0f * u, gap = kSpace2 * u;
+    ImGui::PushID(label);
+    if (!BeginControlRow(label, description, swatchW + gap + textW)) {
+        ImGui::PopID();
+        return false;
+    }
+    bool changed = false;
+    if (g_ctrlReset && def) {
+        for (int c = 0; c < comps; ++c) rgba[c] = def[c];
+        changed = true;
+        ReportLabel(label, "{} reset");
+    }
+    const float fh = ImGui::GetFrameHeight();
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    if (ImGui::InvisibleButton("##Swatch", ImVec2(swatchW, fh), ImGuiButtonFlags_EnableNav)) ImGui::OpenPopup("##Picker");
+    const bool hovered = ImGui::IsItemHovered();
+    Tooltip("Pick a color");
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const float r = 7.0f * u;
+    dl->AddRectFilled(p, ImVec2(p.x + swatchW, p.y + fh), WithStyleAlpha(ImGui::ColorConvertFloat4ToU32(ImVec4(rgba[0], rgba[1], rgba[2], 1.0f))), r);
+    dl->AddRect(p, ImVec2(p.x + swatchW, p.y + fh), U32(hovered ? VioletTheme::kAccent : kButtonBorder), r, 0, 1.0f);
+    ImGui::RenderNavCursor(ImGui::GetCurrentContext()->LastItemData.Rect, ImGui::GetItemID());
+    char values[48];
+    auto byte = [&](int c) { return (int)std::lround(std::clamp(rgba[c], 0.0f, 1.0f) * 255.0f); };
+    if (comps > 3) std::snprintf(values, sizeof values, "%d, %d, %d, %d", byte(0), byte(1), byte(2), byte(3));
+    else std::snprintf(values, sizeof values, "%d, %d, %d", byte(0), byte(1), byte(2));
+    PushSized(nullptr, kSmallScale);
+    dl->AddText(ImVec2(p.x + swatchW + gap, p.y + (fh - ImGui::GetFontSize()) * 0.5f), U32(VioletTheme::kTextMuted), values);
+    ImGui::PopFont();
+    if (ImGui::BeginPopup("##Picker")) {
+        const ImGuiColorEditFlags flags = ImGuiColorEditFlags_NoSidePreview | ImGuiColorEditFlags_DisplayRGB | ImGuiColorEditFlags_InputRGB;
+        ImGui::SetNextItemWidth(220.0f * u);
+        const bool picked = comps > 3 ? ImGui::ColorPicker4("##Pick", rgba, flags | ImGuiColorEditFlags_AlphaBar)
+                                      : ImGui::ColorPicker3("##Pick", rgba, flags);
+        if (picked && !changed) {
+            changed = true;
+            ReportLabel(label, "{} changed");
+        }
+        ImGui::EndPopup();
+    }
+    EndControlRow();
+    ImGui::PopID();
+    return changed;
+}
 
 void LastControlRow(float* topScreenY, bool* stacked) {
     if (topScreenY) *topScreenY = g_ctrlTopScreen;

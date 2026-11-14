@@ -8,6 +8,7 @@ cl /nologo /c /std:c++20 /Zc:char8_t- /D_SILENCE_CXX20_U8PATH_DEPRECATION_WARNIN
 cl /nologo /std:c++20 /EHsc /utf-8 /O2 /DNOMINMAX /I. /Iframework /Ifeatures tools\looks_fx_check\check.cpp features\looks_fx.cpp features\looks_fx_catalog.cpp features\looks_runner.cpp features\looks_preset.cpp framework\apex_util.cpp %TEMP%\effect_*.obj /Fe:%TEMP%\looks_fx_check.exe /Fo:%TEMP%\
 %TEMP%\looks_fx_check.exe <Shaders folder> [--run] [WxH] [--catalog <Apex Radiance folder>] [--compare] [--hashes] [--state] [--cache]
 %TEMP%\looks_fx_check.exe <any folder> --packs <Apex Radiance folder>
+%TEMP%\looks_fx_check.exe <any folder> --params <folder> [<folder>...]
 ```
 
 `<Shaders folder>` is laid out like `Apex Radiance\Shaders\`: `.fx` files in it or in `Shaders\` (and subfolders),
@@ -38,7 +39,15 @@ reasons. The compile time and texture memory of each file go to stderr.
   `D3DSBT_ALL` state block's Capture and Apply and the chain that Strength 0 skips.
 - `--cache`: every .fx compiled without the compile cache, then with it twice (`<Shaders folder>\.cache-check\`, written):
   the bytecode, notes and reasons must be the same; a test effect is compiled again after its `.fxh`, its `.fx` and the
-  picture size change, and read from the cache otherwise. Prints the times.
+  picture size change, and read from the cache otherwise; with a definition it compiles again into its own cache file,
+  and both the definition and going back without it are read from the cache. Prints the times.
+- `--params <folder>...` (pack folders or a Shaders folder; a file name is taken once): every `.fx` compiled, each uniform
+  mapped to the control the Shaders page gives it (`DescribeParams`, `LooksControlOf`), with counts per control, text
+  blocks and groups; a uniform with no control that is neither hidden nor set by ReShade is a problem. Then the
+  definitions each effect tests, by the control they get, and a round trip of one 0/1 definition: an `.ini` with
+  `PreprocessorDefinitions=` (global and in the effect's section) is parsed, the effect compiles with it (the value
+  applied, the `.fx` default kept, another compile-cache key, `MacrosMatch`), and the definitions are written back the
+  same. Nothing is written.
 - `--hashes` (with `--compare` or `--run`): one line per picture with a hash of its pixels. Built against the sources
   before a change (`/DLOOKS_FX_CHECK_BASELINE`, which leaves out the checks of newer parts), the two builds' hash lines
   are the same when the pictures are the same to the level.

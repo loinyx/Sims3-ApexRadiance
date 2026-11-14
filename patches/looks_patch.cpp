@@ -120,6 +120,7 @@ struct State
     float mix = 1.0f;
     std::set<std::string> off; // techniques switched off here (still enabled in the .ini)
     std::map<std::string, std::vector<float>> tweaks; // technique -> 4 floats per param
+    std::map<std::string, std::map<std::string, std::string>> defs; // lower-case .fx name -> definition -> value edited here
     std::vector<std::string> extra;    // "Tech@File.fx" switched on here although the .ini does not enable it
     std::vector<std::string> runOrder; // my run order ("Tech@File.fx"); empty = the .ini's order
 
@@ -163,6 +164,31 @@ const char* Describe(int shader)
 {
     const LooksShader& d = Looks::Shader(shader);
     return Looks::IsUserShader(shader) ? d.description : I18n::Tr(d.description);
+}
+
+// The definitions a .fx compiles with: the look's (PreprocessorDefinitions=, then its [File.fx] section's), then the
+// ones edited here
+LooksDefines DefinesFor(const std::string& file)
+{
+    LooksDefines d = Looks::PresetDefines(g.ini, file);
+    auto it = g.defs.find(Lower(file));
+    if (it != g.defs.end())
+        for (const auto& [name, value] : it->second)
+        {
+            auto at = std::find_if(d.begin(), d.end(), [&](const auto& x) { return x.first == name; });
+            if (at != d.end()) at->second = value;
+            else d.push_back({ name, value });
+        }
+    return d;
+}
+
+// The run list's player files compile with their definitions (a changed one compiles again in the background)
+void PushDefines()
+{
+    std::map<std::string, LooksDefines> files;
+    for (const auto& e : g.order)
+        if (LooksDefines d = DefinesFor(e.file); !d.empty()) files[Lower(e.file)] = std::move(d);
+    Looks::Fx::SetDefines(files);
 }
 
 // The run list = the .ini's enabled techniques + the ones switched on here (at their TechniqueSorting place, like
@@ -220,6 +246,7 @@ void RebuildOrder()
         if (g.order[i].shader >= 0) g.iniValues[i] = Looks::PresetValues(g.ini, Looks::Shader(g.order[i].shader));
         else missing.push_back(g.order[i].file);
     if (!missing.empty()) Looks::Fx::WantFiles(missing);
+    PushDefines();
     if (g.loaded)
         g.status = std::format("{}: {} of {} shaders built in", Looks::RefName(g.preset), RunnableCount(false), g.order.size());
 }
@@ -590,7 +617,7 @@ void RestartEffects(IDirect3DDevice9*) { ReleaseGpu(); }
 void SelectLook(const std::string& ref)
 {
     g.preset = ref;
-    g.off.clear(); g.extra.clear(); g.runOrder.clear(); g.tweaks.clear();
+    g.off.clear(); g.extra.clear(); g.runOrder.clear(); g.tweaks.clear(); g.defs.clear();
     LoadPreset();
     g.runner.Release();
 }
@@ -664,24 +691,16 @@ int EditedValues(size_t i)
     return it == g.tweaks.end() || !Runnable(i) ? 0 : Diffs(it->second, g.iniValues[i]);
 }
 
+// Run-list entry i's file has quality settings (definitions) edited here
+bool DefsEdited(size_t i) { return g.defs.count(Lower(g.order[i].file)) != 0; }
+
 bool AnyEdited()
 {
     for (size_t i = 0; i < g.order.size(); ++i) if (EditedValues(i)) return true;
-    return false;
+    return !g.defs.empty();
 }
 
 // ---------------------------------------------------------------------------------------------- Save as a new look
-std::string FormatValue(const float* v, size_t n, bool isFloat)
-{
-    std::string s;
-    for (size_t c = 0; c < n; ++c)
-    {
-        if (c) s += ',';
-        s += isFloat ? std::format("{:.6f}", v[c]) : std::format("{}", (int)std::lround(v[c]));
-    }
-    return s;
-}
-
 // The look as it runs now, as ReShade preset text: Techniques= (the ones on, in run order), TechniqueSorting= (run list
 // first, then the rest of the source's sorting), the source's other top lines and its [File.fx] sections, with the
 // values of every built-in shader in the run list as they are now.
@@ -732,13 +751,28 @@ std::string LookAsText()
             auto at = std::find_if(secs.begin(), secs.end(), [&](const auto& s) { return _stricmp(s.first.c_str(), e.file.c_str()) > 0; });
             sec = secs.insert(at, { e.file, {} });
         }
+        if (g.defs.count(Lower(e.file))) // ReShade 6 keeps an effect's own definitions in its section
+        {
+            std::string own;
+            for (const auto& [k, lines] : g.ini.sections)
+                if (_stricmp(k.c_str(), e.file.c_str()) == 0)
+                    if (auto it = lines.find("PreprocessorDefinitions"); it != lines.end()) own = it->second;
+            LooksDefines d = Looks::ParseDefines(own);
+            for (const auto& [name, value] : g.defs[Lower(e.file)])
+            {
+                auto at = std::find_if(d.begin(), d.end(), [&](const auto& x) { return x.first == name; });
+                if (at != d.end()) at->second = value;
+                else d.push_back({ name, value });
+            }
+            setLine(sec->second, "PreprocessorDefinitions", Looks::FormatDefines(d));
+        }
         const LooksShader& d = Looks::Shader(e.shader);
         const float* v = ValuesFor(i);
         for (int p = 0; p < d.paramCount; ++p)
         {
             const LooksParam& pd = d.params[p];
             if (pd.kind == LooksParamKind::Source) continue;
-            setLine(sec->second, pd.key, FormatValue(v + p * 4, (size_t)pd.comps, pd.kind == LooksParamKind::Float || pd.kind == LooksParamKind::Color));
+            setLine(sec->second, pd.key, Looks::FormatValue(pd, v + p * 4));
         }
     }
     std::string out;
@@ -1165,7 +1199,315 @@ bool LookRow()
 }
 
 // ---------------------------------------------------------------------------------------------- menu: the Shaders card
-// One shader's sliders: one row per parameter component, the .ini's value as each slider's default
+// The names of a vector's components: a "(a, b)" or "(a/b)" list at the end of its label that names every component
+// (the label then stops before it), "R G B (A)" for a label starting with RGB, else X Y Z W
+std::vector<std::string> ComponentNames(const LooksParam& pd, std::string& label)
+{
+    label = pd.label;
+    std::vector<std::string> names;
+    const size_t open = label.rfind('('), close = label.rfind(')');
+    if (open != std::string::npos && close == label.size() - 1 && close > open + 1)
+    {
+        const std::string inner = label.substr(open + 1, close - open - 1);
+        const char sep = inner.find('/') != std::string::npos ? '/' : ',';
+        for (size_t a = 0; a <= inner.size();)
+        {
+            size_t b = inner.find(sep, a);
+            if (b == std::string::npos) b = inner.size();
+            std::string part = inner.substr(a, b - a);
+            while (!part.empty() && part.front() == ' ') part.erase(0, 1);
+            while (!part.empty() && part.back() == ' ') part.pop_back();
+            names.push_back(part);
+            a = b + 1;
+        }
+        if ((int)names.size() == pd.comps && std::none_of(names.begin(), names.end(), [](const std::string& s) { return s.empty() || s.size() > 12; }))
+        {
+            label.resize(open);
+            while (!label.empty() && label.back() == ' ') label.pop_back();
+            if (label.empty()) label = pd.label;
+            return names;
+        }
+        names.clear();
+    }
+    const bool rgb = _strnicmp(pd.label, "RGB", 3) == 0 || pd.kind == LooksParamKind::Color;
+    for (int c = 0; c < pd.comps; ++c) names.push_back(std::string(1, (rgb ? "RGBA" : "XYZW")[c]));
+    return names;
+}
+
+// A row of number fields, one per component (names: shown in each field before its value; empty = a single field). The
+// fields keep one width (from the range, not the value) and go under the label, wrapping, when the row is narrow.
+bool FieldsRow(const char* label, const char* desc, float* v, const float* def, const LooksParam& pd, const std::vector<std::string>& names)
+{
+    const float u = ApexUi::Unit();
+    const int comps = std::max(1, (int)names.size());
+    const bool isFloat = pd.kind == LooksParamKind::Float || pd.kind == LooksParamKind::Color;
+    const bool ranged = pd.max > pd.min;
+    auto text = [&](float x) { return isFloat ? std::format("{:.3f}", x) : std::format("{}", (int)std::lround(x)); };
+    float valueW = 0.0f, nameW = 0.0f;
+    for (float x : { ranged ? pd.min : -1000.0f, ranged ? pd.max : 10000.0f, def[0] }) valueW = std::fmax(valueW, ImGui::CalcTextSize(text(x).c_str()).x);
+    for (const std::string& n : names) nameW = std::fmax(nameW, ImGui::CalcTextSize(n.c_str()).x + ApexUi::kSpace2 * u);
+    const float fw = std::clamp(valueW + nameW + 2.0f * ImGui::GetStyle().FramePadding.x + ApexUi::kSpace1 * u, 56.0f * u, 124.0f * u);
+    const float gap = ApexUi::kSpace2 * u, fh = ImGui::GetFrameHeight(), avail = ImGui::GetContentRegionAvail().x;
+    int per = comps; // fields per line: all of them beside the label, else as many as fit under it
+    if (avail - (comps * fw + (comps - 1) * gap) - ApexUi::kSpace3 * u < 120.0f * u) per = std::clamp((int)((avail + gap) / (fw + gap)), 1, comps);
+    const int lines = (comps + per - 1) / per;
+    bool diff = false;
+    for (int c = 0; c < comps; ++c) diff |= std::fabs(v[c] - def[c]) > 1e-5f * (std::max)(1.0f, std::fabs(def[c]));
+    ApexUi::SetNextRowDefault(diff);
+    ApexUi::SetNextRowUntranslated(); // the shader's own label
+    if (!ApexUi::BeginControlRow(label, desc, per * fw + (per - 1) * gap, IconId::None, lines * fh + (lines - 1) * gap)) return false;
+    bool changed = false;
+    if (ApexUi::ControlRowReset())
+    {
+        for (int c = 0; c < comps; ++c) v[c] = def[c];
+        ApexUi::ReportChange(I18n::Trf("{} reset", label).c_str());
+        changed = true;
+    }
+    const ImVec2 o = ImGui::GetCursorScreenPos();
+    const float speed = pd.step > 0.0f ? pd.step : ranged ? (pd.max - pd.min) / 300.0f : isFloat ? 0.01f : 0.2f;
+    bool edited = false;
+    for (int c = 0; c < comps; ++c)
+    {
+        ImGui::SetCursorScreenPos(ImVec2(o.x + (c % per) * (fw + gap), o.y + (c / per) * (fh + gap)));
+        ImGui::SetNextItemWidth(fw);
+        ImGui::PushID(c);
+        std::string fmt = isFloat ? "%.3f" : "%.0f";
+        if (!names.empty() && !names[0].empty())
+        {
+            std::string n = names[c];
+            for (size_t k = 0; (k = n.find('%', k)) != std::string::npos; k += 2) n.insert(k, "%");
+            fmt = n + "  " + fmt;
+        }
+        if (ImGui::DragFloat("##Value", &v[c], speed, ranged ? pd.min : 0.0f, ranged ? pd.max : 0.0f, fmt.c_str(), ranged ? ImGuiSliderFlags_AlwaysClamp : 0))
+        {
+            if (!isFloat) v[c] = (float)std::lround(v[c]);
+            edited = true;
+        }
+        ImGui::PopID();
+    }
+    ApexUi::EndControlRow();
+    if (edited)
+    {
+        ApexUi::ReportChange(I18n::Trf("{} changed", label).c_str());
+        changed = true;
+    }
+    return changed;
+}
+
+// One parameter: the control the .fx asks for (LooksControlOf), the .ini's value as its default (changed dot, Reset)
+bool ParamRow(const LooksParam& pd, float* v, const float* ini)
+{
+    const char* desc = pd.tooltip;
+    const LooksControl control = LooksControlOf(pd);
+    const float u = ApexUi::Unit();
+    bool changed = false;
+    switch (control)
+    {
+    case LooksControl::Switch:
+    {
+        bool on = v[0] != 0.0f;
+        ApexUi::SetNextRowUntranslated();
+        if (ApexUi::SwitchRow(pd.label, &on, desc, ApexUi::BoolDefault(ini[0] != 0.0f))) { v[0] = on ? 1.0f : 0.0f; changed = true; }
+        break;
+    }
+    case LooksControl::Choice:
+    {
+        const std::vector<const char*> items = LooksItems(pd);
+        const int n = (int)items.size();
+        int current = (int)std::lround(v[0]);
+        if (current < 0 || current >= n) current = -1;
+        const int def = std::clamp((int)std::lround(ini[0]), 0, n - 1);
+        // segmented for a few short choices (a vertical list when the row is narrow), else a dropdown
+        float natural = 0.0f;
+        for (const char* s : items) natural += ImGui::CalcTextSize(I18n::Tr(s)).x + 2.0f * ImGui::GetStyle().FramePadding.x;
+        ApexUi::SetNextRowUntranslated();
+        if (n <= 4 && natural <= 280.0f * u)
+            changed = ApexUi::SegmentedRow(pd.label, desc, "##Choice", &current, items.data(), n, nullptr, nullptr, def);
+        else
+        {
+            if (current < 0) current = def;
+            const bool stacked = ImGui::GetContentRegionAvail().x < 360.0f * u; // the list under its label
+            changed = ApexUi::SelectRow(pd.label, desc, "##Choice", &current, items.data(), n, 220.0f, def, stacked);
+        }
+        if (changed && current >= 0) v[0] = (float)current;
+        break;
+    }
+    case LooksControl::Color:
+        ApexUi::SetNextRowUntranslated();
+        changed = ApexUi::ColorRow(pd.label, desc, v, pd.comps, ini);
+        break;
+    case LooksControl::Vector:
+    {
+        std::string label;
+        const std::vector<std::string> names = ComponentNames(pd, label);
+        changed = FieldsRow(label.c_str(), desc, v, ini, pd, names);
+        break;
+    }
+    case LooksControl::Field:
+        changed = FieldsRow(pd.label, desc, v, ini, pd, {});
+        break;
+    case LooksControl::Slider:
+    {
+        ApexUi::SliderOptions so;
+        so.tooltip = desc;
+        so.defaultValue = ini[0]; // the .ini's value
+        so.markDefault = true;
+        const bool isFloat = pd.kind == LooksParamKind::Float || pd.kind == LooksParamKind::Color;
+        so.format = isFloat ? "%.3f" : "%.0f";
+        ApexUi::SetNextRowUntranslated(); // the shader's own label
+        if (ApexUi::Slider(pd.label, v, pd.min, pd.max, so))
+        {
+            if (!isFloat)
+            {
+                const float step = pd.step >= 1.0f ? pd.step : 1.0f;
+                v[0] = pd.min + std::round((v[0] - pd.min) / step) * step;
+            }
+            changed = true;
+        }
+        break;
+    }
+    default: break;
+    }
+    return changed;
+}
+
+bool AsInt(const std::string& s, int& v)
+{
+    char* end = nullptr;
+    const long x = strtol(s.c_str(), &end, 10);
+    if (s.empty() || *end || x < -1000000 || x > 1000000) return false;
+    v = (int)x;
+    return true;
+}
+
+bool IsNumber(const std::string& s)
+{
+    char* end = nullptr;
+    strtod(s.c_str(), &end);
+    return !s.empty() && !*end;
+}
+
+// A definition's value as typed text; it applies when the field is left (each change compiles the shader again)
+bool DefineField(const char* name, const char* desc, std::string& value, const std::string& def, bool numeric)
+{
+    const float u = ApexUi::Unit();
+    const float w = 120.0f * u;
+    ApexUi::SetNextRowDefault(value != def);
+    ApexUi::SetNextRowUntranslated();
+    if (!ApexUi::BeginControlRow(name, desc, w)) return false;
+    bool commit = false;
+    if (ApexUi::ControlRowReset()) { value = def; commit = true; }
+    static char buf[260]; // the field being typed in (one at a time)
+    const ImGuiID id = ImGui::GetID("##Value");
+    if (ImGui::GetActiveID() != id) strncpy_s(buf, value.c_str(), _TRUNCATE);
+    ImGui::SetNextItemWidth(w);
+    ImGui::InputText("##Value", buf, sizeof buf, numeric ? ImGuiInputTextFlags_CharsScientific : 0);
+    if (ImGui::IsItemDeactivatedAfterEdit())
+    {
+        std::string s = buf;
+        while (!s.empty() && s.back() == ' ') s.pop_back();
+        while (!s.empty() && s.front() == ' ') s.erase(0, 1);
+        if (s.empty()) s = def;
+        commit = s != value;
+        value = s;
+    }
+    ApexUi::EndControlRow();
+    return commit;
+}
+
+// One file's quality settings (the definitions its .fx tests), under Advanced: 0/1 a switch, a few integers its #if lines
+// compare segmented, anything else a field. The look's value is each row's default. Put back the look's settings and,
+// while the shader compiles with new ones, "Compiling the new settings…" end it.
+bool DefinesUi(size_t i, const Looks::Fx::Effect& fx)
+{
+    if (fx.macros.empty()) return false;
+    const float u = ApexUi::Unit();
+    const std::string& file = g.order[i].file;
+    const std::string key = Lower(file);
+    const LooksDefines look = Looks::PresetDefines(g.ini, file);
+    const std::string title = I18n::Trf("Quality settings ({})", fx.macros.size());
+    if (!ApexUi::BeginAdvanced("##Defines", title.c_str())) return false;
+    bool changed = false;
+    for (const Looks::Fx::Macro& m : fx.macros)
+    {
+        std::string lookValue = m.def;
+        for (const auto& d : look) if (d.first == m.name) lookValue = d.second;
+        std::string value = lookValue;
+        if (auto f = g.defs.find(key); f != g.defs.end())
+            if (auto x = f->second.find(m.name); x != f->second.end()) value = x->second;
+        const std::string before = value;
+        ImGui::PushID(m.name.c_str());
+        const bool flag = (value == "0" || value == "1") && (lookValue == "0" || lookValue == "1") && (m.hi < m.lo || (m.lo >= 0 && m.hi <= 1));
+        int iv = 0, il = 0;
+        if (flag)
+        {
+            bool on = value == "1";
+            ApexUi::SetNextRowUntranslated();
+            if (ApexUi::SwitchRow(m.name.c_str(), &on, "0 or 1", ApexUi::BoolDefault(lookValue == "1"))) value = on ? "1" : "0";
+        }
+        else if (m.hi >= m.lo && m.hi - m.lo <= 7 && AsInt(value, iv) && AsInt(lookValue, il))
+        {
+            std::vector<std::string> labels;
+            for (int x = m.lo; x <= m.hi; ++x) labels.push_back(std::to_string(x));
+            std::vector<const char*> ptrs;
+            for (const auto& s : labels) ptrs.push_back(s.c_str());
+            int current = iv - m.lo;
+            if (current < 0 || current >= (int)ptrs.size()) current = -1;
+            const std::string desc = I18n::Trf("{} to {}", m.lo, m.hi);
+            ApexUi::SetNextRowUntranslated();
+            if (ApexUi::SegmentedRow(m.name.c_str(), desc.c_str(), "##Define", &current, ptrs.data(), (int)ptrs.size(), nullptr, nullptr,
+                                     il >= m.lo && il <= m.hi ? il - m.lo : ApexUi::kNoDefaultIndex) && current >= 0)
+                value = std::to_string(m.lo + current);
+        }
+        else
+        {
+            const bool numeric = IsNumber(value) && IsNumber(lookValue);
+            DefineField(m.name.c_str(), numeric ? "A number" : "A value", value, lookValue, numeric);
+        }
+        ImGui::PopID();
+        if (value != before)
+        {
+            if (value == lookValue) { g.defs[key].erase(m.name); if (g.defs[key].empty()) g.defs.erase(key); }
+            else g.defs[key][m.name] = value.substr(0, 256);
+            PushDefines();
+            ApexUi::ReportChange(I18n::Trf("{} changed", m.name).c_str());
+            changed = true;
+        }
+    }
+    if (!ApexUi::FilterActive())
+    {
+        // the footer: the compile's state on the left, the reset on the right (under it when narrow)
+        ApexUi::Gap(ApexUi::kSpace2);
+        const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+        const char* reset = I18n::Tr("Put back the look's settings");
+        const float resetW = ApexUi::ButtonWidth(reset, false);
+        const float right = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+        const bool compiling = !Looks::Fx::MacrosMatch(fx, DefinesFor(file));
+        const char* status = I18n::Tr("Compiling the new settings\xE2\x80\xA6");
+        if (compiling)
+        {
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextColored(VioletTheme::Col(VioletTheme::kAccentLight), "%s", status);
+            if (ImGui::GetItemRectMax().x + ApexUi::kSpace3 * u + resetW <= right) ImGui::SameLine(right - resetW - ImGui::GetWindowPos().x);
+            else ImGui::SetCursorScreenPos(ImVec2(std::fmax(ImGui::GetCursorScreenPos().x, right - resetW), ImGui::GetCursorScreenPos().y));
+        }
+        else ImGui::SetCursorScreenPos(ImVec2(std::fmax(ImGui::GetCursorScreenPos().x, right - resetW), ImGui::GetCursorScreenPos().y)); // on the right
+        ImGui::BeginDisabled(!g.defs.count(key));
+        if (ApexUi::TextButton(reset))
+        {
+            g.defs.erase(key);
+            PushDefines();
+            ApexUi::ReportChange(I18n::Trf("{} settings put back", g.order[i].technique).c_str());
+            changed = true;
+        }
+        ImGui::EndDisabled();
+    }
+    ApexUi::EndAdvanced();
+    return changed;
+}
+
+// One shader's values: one row per parameter with the control its .fx asks for, in the author's groups (ui_category,
+// collapsible) with the author's text blocks (ui_text); a player's .fx adds its quality settings under Advanced
 bool ValuesUi(size_t i)
 {
     bool changed = false;
@@ -1173,32 +1515,27 @@ bool ValuesUi(size_t i)
     const LooksShader& d = Looks::Shader(e.shader);
     auto& tv = g.tweaks[e.technique];
     if (tv.size() != g.iniValues[i].size()) tv = g.iniValues[i];
+    std::string category;
+    bool open = true;
     for (int p = 0; p < d.paramCount; ++p)
     {
         const LooksParam& pd = d.params[p];
-        if (pd.kind == LooksParamKind::Source) continue; // timer/frame count/random: set every frame
-        for (int c = 0; c < pd.comps; ++c)
+        if (LooksControlOf(pd) == LooksControl::None) continue; // timer/frame count/random, hidden: never shown
+        const std::string cat = pd.category ? pd.category : "";
+        if (cat != category) // a new group: ReShade opens one where the category changes
         {
-            float* v = &tv[(size_t)p * 4 + c];
-            const std::string label = pd.comps > 1 ? std::format("{} [{}]", pd.label, "RGBA"[c]) : std::string(pd.label);
-            ApexUi::SliderOptions so;
-            so.defaultValue = g.iniValues[i][(size_t)p * 4 + c]; // the .ini's value
-            so.markDefault = true;
-            so.format = (pd.kind == LooksParamKind::Float || pd.kind == LooksParamKind::Color) ? "%.3f" : "%.0f";
-            float lo = pd.min, hi = pd.max;
-            if (pd.kind == LooksParamKind::Bool) { lo = 0.0f; hi = 1.0f; }
-            if (hi <= lo) { lo = 0.0f; hi = (std::max)(1.0f, *v * 2.0f); }
-            ImGui::PushID(p * 4 + c);
-            ApexUi::SetNextRowUntranslated(); // the shader's own label
-            if (ApexUi::Slider(label.c_str(), v, lo, hi, so))
-            {
-                if (pd.kind != LooksParamKind::Float && pd.kind != LooksParamKind::Color) *v = (float)(int)(*v + 0.5f);
-                changed = true;
-            }
-            ImGui::PopID();
+            category = cat;
+            open = cat.empty() || ApexUi::CardGroupToggle(("##Group" + cat).c_str(), cat.c_str(), !(pd.flags & kParamClosed));
         }
+        if (!open) continue;
+        ImGui::PushID(p);
+        if (pd.text && !ApexUi::FilterActive()) ApexUi::IconNote(IconId::Info, pd.text);
+        changed |= ParamRow(pd, &tv[(size_t)p * 4], &g.iniValues[i][(size_t)p * 4]);
+        ImGui::PopID();
     }
     if (!EditedValues(i) && !ImGui::IsAnyItemActive()) g.tweaks.erase(e.technique); // back at the .ini: not "edited"
+    if (Looks::IsUserShader(e.shader))
+        if (const Looks::Fx::Effect* fx = Looks::Fx::UserEffect(e.shader - Looks::kUserShaderBase)) changed |= DefinesUi(i, *fx);
     return changed;
 }
 
@@ -1264,7 +1601,7 @@ bool ShaderRow(size_t i, int pos, int count, bool& reorder)
     bool open = storage->GetBool(openId, false);
     const float left = ImGui::GetCursorScreenPos().x;
     const float width = ImGui::GetContentRegionAvail().x;
-    if (EditedValues(i)) ApexUi::SetNextRowChangedDot("Changed from the look");
+    if (EditedValues(i) || DefsEdited(i)) ApexUi::SetNextRowChangedDot("Changed from the look");
     ApexUi::SetNextRowUntranslated(); // the shader's own name
     const std::string label = e.technique;
     const std::string description = RowDescription(e.shader);
@@ -1996,6 +2333,14 @@ public:
             tw.insert_or_assign(tech, std::move(a));
         }
         table.insert_or_assign("tweaks", std::move(tw));
+        toml::table df;
+        for (auto& [file, defs] : g.defs)
+        {
+            toml::array a;
+            for (auto& [name, value] : defs) a.push_back(name + "=" + value);
+            df.insert_or_assign(file, std::move(a));
+        }
+        table.insert_or_assign("defines", std::move(df));
     }
 
     // The look's own keys (preset, off, extra, runOrder, tweaks), each only when the table has it; every count is
@@ -2030,6 +2375,19 @@ public:
                     vals.push_back(std::isfinite(f) ? f : 0.0f);
                 }
                 g.tweaks[std::string(k.str())] = std::move(vals);
+            }
+            any = true;
+        }
+        if (const toml::table* t = table["defines"].as_table()) // quality settings edited here: file = ["NAME=VALUE", ...]
+        {
+            g.defs.clear();
+            for (auto& [k, v] : *t)
+            {
+                const toml::array* a = v.as_array();
+                if (!a || g.defs.size() >= kMaxTweaks || k.str().size() > 200) continue;
+                std::string list;
+                for (auto& x : *a) if (auto s = x.value<std::string>(); s && s->size() <= 400) list += *s + ",";
+                for (auto& [name, value] : Looks::ParseDefines(list)) g.defs[Lower(std::string(k.str()))][name] = value;
             }
             any = true;
         }
@@ -2158,6 +2516,8 @@ public:
                     if (ApexUi::ActionMenuItem("Put every value back", IconId::RotateCcw, AnyEdited()))
                     {
                         g.tweaks.clear();
+                        g.defs.clear();
+                        PushDefines();
                         ApexUi::ReportChange("Every value put back");
                         changed = true;
                         ImGui::CloseCurrentPopup();

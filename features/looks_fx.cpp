@@ -170,6 +170,112 @@ std::string ReasonFrom(const std::string& text, const std::wstring& root)
     return line;
 }
 
+std::string TrimA(std::string s)
+{
+    const size_t a = s.find_first_not_of(" \t\r\n"), b = s.find_last_not_of(" \t\r\n");
+    return a == std::string::npos ? std::string() : s.substr(a, b - a + 1);
+}
+
+bool AsInt(const std::string& s, int& v)
+{
+    char* end = nullptr;
+    const long x = strtol(s.c_str(), &end, 10);
+    if (s.empty() || *end || x < -1000000 || x > 1000000) return false;
+    v = (int)x;
+    return true;
+}
+
+bool IdChar(char c) { return isalnum((unsigned char)c) || c == '_'; }
+
+// The definitions an effect tests, as ReShade 6 lists them under "Preprocessor definitions": not ReShade's own (a leading
+// '_', BUFFER_*, RESHADE_*), not include guards (no value). def and lo..hi come from the #define and #if / #elif lines of
+// the file and its includes.
+std::vector<Macro> UsedMacros(const reshadefx::preprocessor& pp, const std::wstring& fxPath, const LooksDefines& defines)
+{
+    std::vector<Macro> out;
+    for (const auto& [name, value] : pp.used_macro_definitions())
+    {
+        if (name.empty() || name[0] == '_' || !name.compare(0, 7, "BUFFER_") || !name.compare(0, 8, "RESHADE_")) continue;
+        std::string v = TrimA(value);
+        if (!v.empty() && out.size() < 128) out.push_back({ name, v, v });
+    }
+    if (out.empty()) return out;
+    std::sort(out.begin(), out.end(), [](const Macro& a, const Macro& b) { return a.name < b.name; });
+    auto find = [&](const std::string& n) -> Macro* {
+        auto it = std::lower_bound(out.begin(), out.end(), n, [](const Macro& m, const std::string& k) { return m.name < k; });
+        return it != out.end() && it->name == n ? &*it : nullptr;
+    };
+    std::vector<std::string> overridden; // their .fx default is the first #define of the name
+    for (const auto& d : defines)
+        if (Macro* m = find(d.first)) { overridden.push_back(d.first); m->def.clear(); } // "" = the .fx does not define it
+    std::vector<std::wstring> files{ fxPath };
+    for (const auto& p : pp.included_files()) files.push_back(p.wstring());
+    std::vector<bool> seen(out.size(), false), compared(out.size(), false);
+    std::string text;
+    for (const std::wstring& f : files)
+    {
+        if (!ReadCapped(f, kMaxFxBytes, text)) continue;
+        for (size_t pos = 0; pos < text.size();)
+        {
+            size_t e = text.find('\n', pos);
+            if (e == std::string::npos) e = text.size();
+            std::string line = TrimA(text.substr(pos, e - pos));
+            pos = e + 1;
+            if (line.empty() || line[0] != '#') continue;
+            if (const size_t c = line.find("//"); c != std::string::npos) line.resize(c);
+            size_t at = line.find_first_not_of(" \t", 1);
+            if (at == std::string::npos) continue;
+            size_t wordEnd = at;
+            while (wordEnd < line.size() && IdChar(line[wordEnd])) ++wordEnd;
+            const std::string word = line.substr(at, wordEnd - at);
+            if (word == "define")
+            {
+                const size_t n0 = line.find_first_not_of(" \t", wordEnd);
+                size_t n1 = n0;
+                while (n1 != std::string::npos && n1 < line.size() && IdChar(line[n1])) ++n1;
+                if (n0 == std::string::npos || n1 == n0 || (n1 < line.size() && line[n1] == '(')) continue;
+                const std::string name = line.substr(n0, n1 - n0);
+                Macro* m = find(name);
+                if (!m || seen[m - out.data()]) continue;
+                seen[m - out.data()] = true;
+                if (std::find(overridden.begin(), overridden.end(), name) != overridden.end()) m->def = TrimA(line.substr(n1));
+            }
+            else if (word == "if" || word == "elif")
+            {
+                // NAME op integer: every integer it is compared with (a cheap look at the common "#if NAME == 2")
+                for (size_t i = wordEnd; i < line.size();)
+                {
+                    if (!IdChar(line[i]) || (i > 0 && IdChar(line[i - 1]))) { ++i; continue; }
+                    size_t j = i;
+                    while (j < line.size() && IdChar(line[j])) ++j;
+                    Macro* m = find(line.substr(i, j - i));
+                    i = j;
+                    if (!m) continue;
+                    size_t k = line.find_first_not_of(" \t", j);
+                    if (k == std::string::npos || !strchr("=!<>", line[k])) continue;
+                    while (k < line.size() && strchr("=!<>", line[k])) ++k;
+                    k = line.find_first_not_of(" \t", k);
+                    if (k == std::string::npos) continue;
+                    size_t l = k;
+                    while (l < line.size() && (isdigit((unsigned char)line[l]) || (l == k && line[l] == '-'))) ++l;
+                    int v = 0;
+                    if (!AsInt(line.substr(k, l - k), v)) continue;
+                    const size_t idx = m - out.data();
+                    m->lo = compared[idx] ? std::min(m->lo, v) : v;
+                    m->hi = compared[idx] ? std::max(m->hi, v) : v;
+                    compared[idx] = true;
+                }
+            }
+        }
+    }
+    for (Macro& m : out)
+    {
+        int v = 0;
+        if (m.hi >= m.lo && AsInt(m.def, v)) { m.lo = std::min(m.lo, v); m.hi = std::max(m.hi, v); }
+    }
+    return out;
+}
+
 std::vector<float> Floats(const reshadefx::type& t, const reshadefx::constant& c, unsigned n)
 {
     std::vector<float> v(n, 0.0f);
@@ -281,12 +387,16 @@ uint64_t Fnv(uint64_t h, const void* data, size_t n)
 
 struct CachedShader { int tried = -1; std::vector<uint8_t> code; std::string errors; };
 
-std::wstring CacheFile(const std::wstring& dir, const std::wstring& fxPath, UINT W, UINT H)
+// One file per effect, picture size and set of definitions (going back to definitions used before reads their file)
+std::wstring CacheFile(const std::wstring& dir, const std::wstring& fxPath, UINT W, UINT H, const LooksDefines& defines)
 {
     const std::wstring l = Lower(FullPath(fxPath));
     const uint64_t h = Fnv(14695981039346656037ull, l.data(), l.size() * sizeof(wchar_t));
-    wchar_t name[64];
-    swprintf_s(name, L"fx_%016llx_%ux%u.bin", (unsigned long long)h, W, H);
+    uint64_t d = 14695981039346656037ull;
+    for (const auto& [name, value] : defines) { d = Fnv(d, name.c_str(), name.size() + 1); d = Fnv(d, value.c_str(), value.size() + 1); }
+    wchar_t name[80];
+    if (defines.empty()) swprintf_s(name, L"fx_%016llx_%ux%u.bin", (unsigned long long)h, W, H);
+    else swprintf_s(name, L"fx_%016llx_%ux%u_%08x.bin", (unsigned long long)h, W, H, (unsigned)(d ^ (d >> 32)));
     return dir + name;
 }
 
@@ -424,6 +534,8 @@ bool CompileImpl(const std::wstring& fxPath, const Folders& folders, UINT W, UIN
     pp.add_macro_definition("BUFFER_COLOR_SPACE", "1");   // sRGB
     pp.add_macro_definition("BUFFER_COLOR_FORMAT", "88"); // B8G8R8X8 (the game's back buffer)
     pp.add_macro_definition("BUFFER_COLOR_BIT_DEPTH", "8");
+    for (const auto& [name, value] : folders.defines) // the look's PreprocessorDefinitions: before the file, as ReShade adds them
+        if (!name.empty()) pp.add_macro_definition(name, value);
     for (const std::wstring& d : folders.includeDirs) pp.add_include_path(d);
     pp.append_string(
         "#define tex2Doffset(s, coords, offset) tex2D(s, coords, offset)\n"
@@ -437,6 +549,7 @@ bool CompileImpl(const std::wstring& fxPath, const Folders& folders, UINT W, UIN
     if (!pp.append_string(std::move(source), std::filesystem::path(fxPath)))
         return fail(ReasonFrom(pp.errors(), folders.root));
     if (pp.output().size() > kMaxPreprocessedBytes) return fail("the file expands to more than 16 MB of code");
+    out.macros = UsedMacros(pp, fxPath, folders.defines);
 
     // ---- parse and generate shader model 3.0 HLSL
     std::unique_ptr<reshadefx::codegen> cg(reshadefx::create_codegen_hlsl(30, false, false));
@@ -613,6 +726,7 @@ bool CompileImpl(const std::wstring& fxPath, const Folders& folders, UINT W, UIN
     const uint32_t compilerVersion = D3D_COMPILER_VERSION;
     key = Fnv(key, kCacheMagic, sizeof kCacheMagic);
     key = Fnv(key, &compilerVersion, sizeof compilerVersion);
+    for (const auto& [name, value] : folders.defines) { key = Fnv(key, name.c_str(), name.size() + 1); key = Fnv(key, value.c_str(), value.size() + 1); }
     for (size_t k = 0; k < todo.size(); ++k)
     {
         const Shader& s = out.shaders[todo[k]];
@@ -620,7 +734,8 @@ bool CompileImpl(const std::wstring& fxPath, const Folders& folders, UINT W, UIN
         key = Fnv(key, &s.vs, 1);
         key = Fnv(key, hlsl[k].c_str(), hlsl[k].size() + 1);
     }
-    const std::wstring cacheFile = folders.cacheDir.empty() || todo.empty() ? std::wstring() : CacheFile(folders.cacheDir, fxPath, W, H);
+    out.cacheKey = key;
+    const std::wstring cacheFile = folders.cacheDir.empty() || todo.empty() ? std::wstring() : CacheFile(folders.cacheDir, fxPath, W, H, folders.defines);
     std::vector<CachedShader> results;
     const bool cached = !cacheFile.empty() && ReadCache(cacheFile, key, todo.size(), results);
     if (!cached)
@@ -670,6 +785,17 @@ bool InsideRoot(const std::wstring& root, const std::wstring& path)
 }
 
 void CacheCounts(int* hits, int* misses) { *hits = g_cacheHits; *misses = g_cacheMisses; }
+
+bool MacrosMatch(const Effect& fx, const LooksDefines& defines)
+{
+    for (const Macro& m : fx.macros)
+    {
+        const std::string* want = &m.def;
+        for (const auto& d : defines) if (d.first == m.name) want = &d.second; // the last one wins, as in the preprocessor's order
+        if (TrimA(*want) != m.value) return false;
+    }
+    return true;
+}
 
 bool Compile(const std::wstring& fxPath, const Folders& folders, UINT width, UINT height, Effect& out)
 {

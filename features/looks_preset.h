@@ -40,9 +40,20 @@ bool ParsePreset(const std::string& text, Preset& out);
 // Values of one shader as the .ini sets them (missing keys keep the .fx default; non-finite numbers are ignored).
 // 4 floats per parameter.
 std::vector<float> PresetValues(const Preset& preset, const LooksShader& shader);
+// One parameter's value as ReShade writes it in a preset: floats "%f" (0.500000), ints and bools as integers, the
+// components comma-separated
+std::string FormatValue(const LooksParam& param, const float* values);
 // TechniqueSorting= of the preset (bounded)
 std::vector<std::string> PresetSorting(const Preset& preset);
 std::vector<std::string> SplitList(const std::string& s);
+// PreprocessorDefinitions= as ReShade writes it: "NAME=VALUE,NAME2" (a name alone is 1). Bounded: at most 128 entries,
+// names are C identifiers of at most 64 characters, values at most 256 characters; anything else is dropped. A name
+// given twice keeps its last value.
+LooksDefines ParseDefines(const std::string& value);
+std::string FormatDefines(const LooksDefines& defines);
+// The definitions one .fx compiles with: the preset's PreprocessorDefinitions=, then its [File.fx] section's (ReShade 6
+// keeps the ones edited for one effect there), the later winning
+LooksDefines PresetDefines(const Preset& preset, const std::string& file);
 
 // ---------------------------------------------------------------------------------------------- sources
 enum class Source { None, Apex, Mine, GShade };

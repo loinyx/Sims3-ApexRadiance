@@ -12,6 +12,9 @@ Each built-in look (`kBuiltInLooks` in `features/looks_preset.cpp`) is parsed wi
 technique must be a ported shader of `third_party/reshade_shaders/reshade_shaders_hlsl.h`, every `[File.fx]` section
 must belong to an enabled technique, and every value must be a uniform of that shader with its number of components and
 inside its `ui_min` / `ui_max`. Each licence text shown in Settings > About (`reshade_licenses.h`) must appear in
-`LICENSES.md`. The output ends with `OK` or `PROBLEMS`. Nothing is written.
+`LICENSES.md`. Every value kind (float, int, bool, combo, float3 and float4 colours, vectors, a hidden value) is written
+as ReShade writes it (`FormatValue`) and read back the same (`PresetValues`, bools also as `true` / `false`), with the
+menu control each kind gets; `PreprocessorDefinitions=` is parsed (bounded, names checked), written back the same, and
+an effect section's definitions follow the global ones. The output ends with `OK` or `PROBLEMS`. Nothing is written.
 
 These checks do not show how a look renders in the game.

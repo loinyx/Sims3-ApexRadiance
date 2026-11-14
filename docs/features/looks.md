@@ -67,10 +67,10 @@ change the color, with *Turn off the LUT* (undoable).
 
 **Shaders in this look** card: "<on> of <total> on" and an ellipsis menu (*Save as a new look…*, *Put every value back*, *Back to the
 look's list*). One row per built-in shader of the run list: a chevron, the name (changed dot while its values differ
-from the .ini) over one short description, the switch. The name side opens its sliders (one per parameter component,
-the .ini's value as each slider's default, so the changed dot and Reset work) in a rounded panel set into the card;
-the panel's footer, under a line, has the bordered buttons Run earlier / Run later, "<pos> of <n>" and *Put back the
-look's values* (under them when narrow). A shader from a downloaded pack or the player's folder has the same row, its
+from the .ini) over one short description, the switch. The name side opens its parameters in a rounded panel set into
+the card, each with the control its .fx asks for and the .ini's value as its default (changed dot, Reset; see
+[Parameters and quality settings](#parameters-and-quality-settings)); the panel's footer, under a line, has the bordered
+buttons Run earlier / Run later, "<pos> of <n>" and *Put back the look's values* (under them when narrow). A shader from a downloaded pack or the player's folder has the same row, its
 description naming the source and the file ("qUINT · qUINT_mxao.fx", "Your shaders · Mine.fx"). When some shaders of the look cannot run, the subtitle reads "<on> of <total> on · <n> missing" and one
 line, "<n> can't run here", opens to one line per shader that says what to do: "<Technique> (<file>.fx): in <pack>,
 not downloaded" when a pack of ReShade's list has the file, "<Technique> (<file>.fx): downloading <pack>…" while it
@@ -155,6 +155,41 @@ refused; the same file is reused and a different file of that name gets a number
 
 Measured offline over six common packs (AlucardDH, SweetFX, reshade-shaders slim and legacy, prod80, FXShaders): 146 of
 148 techniques run on Direct3D 9 ([history](../history/looks-fx-loading.md)).
+
+## Parameters and quality settings
+
+Each parameter of an open shader gets the control ReShade's own overlay would give it, from the .fx annotations
+(`LooksControlOf` in `features/looks_shaders.h`; the 17 ports from their parameter table, which has the kind, the
+components, the range and the combo items):
+
+| In the .fx | Control |
+|---|---|
+| `bool` | Switch |
+| `ui_type = "slider"` or `"drag"` (one component) | Slider, the .ini's value as an amber tick, integers rounded (to `ui_step` when it is larger than 1) |
+| `"combo"`, `"radio"`, `"list"` with `ui_items` (split on `\0` as ReShade does) | Segmented when at most 4 choices whose labels fit 280 units (a vertical list when the row is narrow), else a dropdown (under the label below 360 units) |
+| `ui_type = "color"`, float3 / float4 | `ColorRow`: a swatch with its 0..255 values; the swatch opens a colour picker (an alpha bar for float4) |
+| float2..4, int2..4 that are not a colour | One row of number fields, one per component, named by a "(a, b)" or "(a/b)" list at the end of the label, R G B for a label starting with RGB, else X Y Z W; each keeps the author's range; under the label, wrapping, when narrow |
+| `"input"` or no `ui_type` | A number field, clamped to `ui_min` / `ui_max` when the .fx gives them |
+| `ui_category` (`ui_category_closed`) | A quiet group label with a chevron where the category changes, as ReShade groups them (collapsed when the author asked) |
+| `ui_tooltip` | The row's description |
+| `ui_text` (also a `"radio"` without items, used as a label) | A muted text block before the row |
+| `hidden = true`, `source = ...`, arrays, matrices | Not shown; hidden ones still take the .ini's value |
+
+Labels, descriptions and choices are the author's text, shown as written. Measured over the 131 `.fx` files of six
+common packs (`tools/looks_fx_check --params`): 1310 uniforms, 1245 shown, 65 set by ReShade, none without a control.
+
+**Quality settings** are ReShade's preprocessor definitions. The look's `PreprocessorDefinitions=` line (all its
+effects) and an effect section's own `PreprocessorDefinitions=` (ReShade 6 keeps an effect's edited ones there, the
+later winning) are passed to ReShade's preprocessor before each of the player's or a pack's .fx, so a look compiles as
+in ReShade. An open shader from a .fx lists, under Advanced *Quality settings (<n>)*, the definitions the effect tests
+with `#ifdef` / `#ifndef` (ReShade's own list: not `BUFFER_*`, `RESHADE_*`, names starting with `_`, or include guards),
+each with the look's value (else the .fx's own `#define`) as its default: 0 or 1 a switch; an integer that the effect's
+`#if` / `#elif` lines compare with at most 8 values ("0 to 5") segmented; any other number or text a field that applies
+when it is left. A change compiles that effect again on the background compile thread; the old one keeps running and
+"Compiling the new settings…" shows beside *Put back the look's settings* until the new one replaces it. Edits are
+undoable, kept per .fx file in `defines`, written by *Save as a new look…* into the effect's section
+(`PreprocessorDefinitions=`) and carried by Apex presets in `[patches.Looks]`. The built-in ports have none. Measured
+over the same packs: 169 definitions in 52 files (94 switches, 4 segmented, 46 number fields, 25 text fields).
 
 ## Shader packs
 
@@ -242,7 +277,8 @@ The earlier ports came from GShade's copies, which differ from the authors' code
 | Shader switches | `off` | array of technique names | empty | at most 256 read | The look's shaders switched off here |
 | Add a shader | `extra` | array of `Tech@File.fx` | empty | at most 256 read | Shaders added to the look (built-in or from the Shaders folder) |
 | Run earlier / Run later | `runOrder` | array of `Tech@File.fx` | empty (the .ini's order) | at most 256 read | The run order |
-| Shader sliders | `tweaks` | table: technique = 4 floats per parameter | empty | at most 64 shaders, 256 values each | Edited values; a shader back at the .ini's values is dropped |
+| Shader parameters | `tweaks` | table: technique = 4 floats per parameter | empty | at most 64 shaders, 256 values each | Edited values; a shader back at the .ini's values is dropped |
+| Quality settings | `defines` | table: lower-case .fx name = array of `NAME=VALUE` | empty | at most 64 files, 128 definitions each (names C identifiers up to 64 characters, values up to 256) | Edited preprocessor definitions; one back at the look's value is dropped |
 
 Older keys `presetPath`, `useTweaks` (a saved false drops the tweaks once) and `protectUi` are read once and no longer
 written.
@@ -285,7 +321,9 @@ the copy gets a numbered name, which the look then does not use); names with a f
 - The player's effects compile for the picture's size (`BUFFER_WIDTH` is a constant in ReShade): after a resolution
   change they wait while the folder compiles again. A changed `.fxh` alone is noticed by *Check again*, not by the
   automatic scan.
-- `PreprocessorDefinitions` of a preset are not applied: the ports are compiled with the .fx defaults.
+- The built-in ports have no quality settings: they are compiled with the .fx defaults. A definition that only an
+  `#if` line uses (no `#ifdef` / `#ifndef`) is applied but not listed, as in ReShade.
+- A definition change that adds or removes uniforms puts that shader's edited values back to the .ini's.
 - Downloaded packs compile for the picture's size like the player's files. The check cache knows only a file's own
   size and time: a pack's changed `.fxh` alone shows in "<x> of <y> run here" after *Check again*.
 - *Reset all settings* resets the switch, Strength, Applies to and Order; the chosen look and its edits stay.
@@ -326,8 +364,9 @@ the copy gets a numbered name, which the look then does not use); names with a f
   A shader is never skipped for having neutral values: the ports' maths are not exact identities.
 - **Compiling:** the player's and the wanted packs' effects compile once per session and picture size; D3DCompile's
   results are kept in `Shaders\.cache\` keyed by every entry point's generated HLSL (the preprocessed source with its
-  includes and macros), the target and D3DCompiler's version, so a changed `.fx`, `.fxh` or picture size compiles
-  again and anything else is read back.
+  includes and macros), the target, D3DCompiler's version and the look's definitions, so a changed `.fx`, `.fxh` or
+  picture size compiles again and anything else is read back. Each set of definitions has its own cache file, so going
+  back to quality settings used before reads them instead of compiling.
 - **Browsing packs:** *Add a shader* and Get shader packs compile nothing and keep no pack effect in memory (the check
   cache above); the background check of unknown files lets each effect go.
 - **Menu:** *Add a shader* works out its filtered list only when the search, Kind, the sources or the language
