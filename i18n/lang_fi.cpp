@@ -2939,6 +2939,8 @@ const I18n::Pair kPairs[] = {
     {"Your library", "Kirjastosi"},
     {"{} shaders from {} sources", "{} varjostinta {} lähteestä"},
     {"This preset uses shaders from {}, which you don't have yet", "Tämä esiasetus käyttää varjostimia lähteestä {}, joita sinulla ei vielä ole"},
+    {"Turn on Shaders to check what changed", "Ota Varjostimet käyttöön tarkistaaksesi muutokset"},
+    {"Your Shaders folder already has a different {}. Rename or move it, then import again", "Shaders-kansiossasi on jo toinen {}. Nimeä se uudelleen tai siirrä se ja tuo uudelleen"},
     {"This preset needs {} ({})", "Tämä esiasetus tarvitsee {} ({})"},
     {"This preset needs {}", "Tämä esiasetus tarvitsee {}"},
     {"Download them now", "Lataa ne nyt"},

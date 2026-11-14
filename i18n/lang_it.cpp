@@ -2939,6 +2939,8 @@ const I18n::Pair kPairs[] = {
     {"Your library", "La tua libreria"},
     {"{} shaders from {} sources", "{} shader da {} fonti"},
     {"This preset uses shaders from {}, which you don't have yet", "Questo preset usa shader di {}, che non hai ancora"},
+    {"Turn on Shaders to check what changed", "Attiva Shader per controllare cosa è cambiato"},
+    {"Your Shaders folder already has a different {}. Rename or move it, then import again", "La tua cartella Shaders ha già un altro {}. Rinominalo o spostalo, poi importa di nuovo"},
     {"This preset needs {} ({})", "Questo preset richiede {} ({})"},
     {"This preset needs {}", "Questo preset richiede {}"},
     {"Download them now", "Scaricali ora"},

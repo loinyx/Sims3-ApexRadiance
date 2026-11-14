@@ -25,6 +25,7 @@
 #include <format>
 #include <map>
 #include <mutex>
+#include <deque>
 #include <optional>
 
 #pragma comment(lib, "winmm.lib")
@@ -36,6 +37,7 @@ using ApexUi::IconId;
 namespace {
 
 std::string Lower(std::string s) { for (auto& c : s) c = static_cast<char>(tolower(static_cast<unsigned char>(c))); return s; }
+std::wstring LowerW(std::wstring s) { for (auto& c : s) c = static_cast<wchar_t>(towlower(c)); return s; }
 std::string Trim(const std::string& s) {
     const size_t a = s.find_first_not_of(" \t\r\n"), b = s.find_last_not_of(" \t\r\n");
     return a == std::string::npos ? std::string() : s.substr(a, b - a + 1);
@@ -529,22 +531,23 @@ void TokenTooltip() {
 }
 
 bool TextRow(const char* label, const char* desc, std::string& value, float width = 300.0f, bool tokens = false) {
-    static std::map<const void*, std::string> editing;
+    static std::map<ImGuiID, std::string> editing; // by the row's ImGui id: the cards' settings are copies on the stack
     bool changed = false;
     const float w = std::fmin(width * ApexUi::Unit(), ImGui::GetContentRegionAvail().x); // never past the card when narrow
     if (ApexUi::BeginControlRow(label, desc, w)) {
         const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
         char buf[512];
-        auto it = editing.find(&value);
+        const ImGuiID key = ImGui::GetID(label);
+        auto it = editing.find(key);
         snprintf(buf, sizeof(buf), "%s", it != editing.end() ? it->second.c_str() : value.c_str());
         ImGui::SetNextItemWidth(w);
         ImGui::PushID(&value);
         ImGui::InputText("##t", buf, sizeof(buf));
         if (tokens) TokenTooltip();
-        if (ImGui::IsItemActive()) editing[&value] = buf;
+        if (ImGui::IsItemActive()) editing[key] = buf;
         if (ImGui::IsItemDeactivated()) {
             if (value != buf) { value = buf; changed = true; }
-            editing.erase(&value);
+            editing.erase(key);
         }
         ImGui::PopID();
         ApexUi::EndControlRow();
@@ -894,9 +897,20 @@ std::filesystem::path NewFile(const std::filesystem::path& folder, const std::st
     n = SafeName(n);
     if (n.empty()) n = L"Apex";
     const std::wstring e = L"." + ApexUtil::ToWide(ext);
+    // names already handed out count as taken: a picture's file is written later, on another thread, so a burst or two
+    // quick presses in one second would otherwise get the same name
+    static std::mutex lock;
+    static std::deque<std::wstring> given; // the latest 256, lower case
+    std::lock_guard<std::mutex> guard(lock);
+    auto taken = [&](const std::filesystem::path& f) {
+        std::error_code ec;
+        const std::wstring key = LowerW(f.wstring());
+        return std::filesystem::exists(f, ec) || std::find(given.begin(), given.end(), key) != given.end();
+    };
     std::filesystem::path file = folder / (n + e);
-    std::error_code ec;
-    for (unsigned k = 2; !folder.empty() && std::filesystem::exists(file, ec) && k < 10000; ++k) file = folder / (n + std::format(L" ({})", k) + e);
+    for (unsigned k = 2; !folder.empty() && taken(file) && k < 10000; ++k) file = folder / (n + std::format(L" ({})", k) + e);
+    given.push_back(LowerW(file.wstring()));
+    if (given.size() > 256) given.pop_front();
     return file;
 }
 
@@ -950,8 +964,11 @@ void PlaySoundFile() {
         wchar_t env[MAX_PATH * 2]{};
         std::wstring file = ApexUtil::ToWide(p);
         if (ExpandEnvironmentStringsW(file.c_str(), env, MAX_PATH * 2)) file = env;
+        // only a file on this PC: a network path would stall the frame and hand Windows' sign-in to that host
+        const bool local = file.size() > 3 && iswalpha(file[0]) && file[1] == L':' && (file[2] == L'\\' || file[2] == L'/') &&
+                           GetDriveTypeW(file.substr(0, 3).c_str()) != DRIVE_REMOTE;
         std::error_code ec;
-        if (std::filesystem::exists(file, ec)) { PlaySoundW(file.c_str(), nullptr, SND_FILENAME | SND_ASYNC | SND_NODEFAULT); return; }
+        if (local && std::filesystem::exists(file, ec)) { PlaySoundW(file.c_str(), nullptr, SND_FILENAME | SND_ASYNC | SND_NODEFAULT); return; }
     }
     PlaySoundW(reinterpret_cast<LPCWSTR>(CameraShutterWav().data()), nullptr, SND_MEMORY | SND_ASYNC | SND_NODEFAULT); // camera, or a missing file
 }

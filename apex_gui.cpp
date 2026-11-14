@@ -27,6 +27,7 @@
 #include "recorder.h"
 #include "captures.h"
 #include "apex_capture.h"
+#include "looks_preset.h"
 #include "light_diag.h"
 #include "light_probe.h"
 #include "hotkeys.h"
@@ -2982,7 +2983,11 @@ void PresetDialog() {
                             if(s.applyAfterImport) LoadProfileNow(name,s.saveParts);
                             else ProfileMessage(I18n::Trf("Saved \"{}\"",name),false);
                             s.listDirty=true; s.dialog=ProfilesState::None; ImGui::CloseCurrentPopup();
-                        } else {LOG_ERROR("[Profiles] Import save: "+error);ProfileMessage(I18n::Tr("Could not save the imported preset"),true);}
+                        } else {
+                            LOG_ERROR("[Profiles] Import save: "+error);
+                            if(error.starts_with(Looks::kShaderNameTaken)) ProfileMessage(I18n::Trf("Your Shaders folder already has a different {}. Rename or move it, then import again",error.substr(std::strlen(Looks::kShaderNameTaken))),true);
+                            else ProfileMessage(I18n::Tr("Could not save the imported preset"),true);
+                        }
                     } else if(ApexConfig::ProfileExists(name) && s.confirmReplace!=name) s.confirmReplace=name;
                     else {SaveProfileNow(name);if(!s.messageError){s.dialog=ProfilesState::None;ImGui::CloseCurrentPopup();}}
                 }

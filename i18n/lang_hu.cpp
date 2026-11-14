@@ -2939,6 +2939,8 @@ const I18n::Pair kPairs[] = {
     {"Your library", "A könyvtárad"},
     {"{} shaders from {} sources", "{} shader {} forrásból"},
     {"This preset uses shaders from {}, which you don't have yet", "Ez az előbeállítás shadereket használ innen: {}, amelyek még nincsenek meg"},
+    {"Turn on Shaders to check what changed", "Kapcsold be a Shadereket a változások ellenőrzéséhez"},
+    {"Your Shaders folder already has a different {}. Rename or move it, then import again", "A Shaders mappádban már van egy másik {}. Nevezd át vagy helyezd át, majd importáld újra"},
     {"This preset needs {} ({})", "Ehhez az előbeállításhoz kell: {} ({})"},
     {"This preset needs {}", "Ehhez az előbeállításhoz kell: {}"},
     {"Download them now", "Letöltés most"},

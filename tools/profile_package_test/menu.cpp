@@ -16,6 +16,7 @@
 #include "apex_util.h"
 #include "build_flavor.h"
 #include "hotkeys.h"
+#include "looks_preset.h"
 #include "framework/overlay.h"
 #include "features/captures.h"
 #include "ui/widgets.h"

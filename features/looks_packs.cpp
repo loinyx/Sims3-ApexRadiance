@@ -104,6 +104,7 @@ Failure WinHttpFetch(const std::string& url8, uint64_t cap, std::string& body, c
         if (std::wstring cl = header(WINHTTP_QUERY_CONTENT_LENGTH, WINHTTP_HEADER_NAME_BY_INDEX); !cl.empty()) total = _wcstoui64(cl.c_str(), nullptr, 10);
         if (total > cap) { close(); result = Failure::TooLarge; break; }
         result = Failure::None;
+        if (total) body.reserve((size_t)total); // one block, not a series of growing copies
         for (;;)
         {
             DWORD avail = 0;
@@ -240,6 +241,9 @@ void Worker()
             next->state = RowState::Downloading;
             job = *next;
         }
+        Failure f = Failure::Failed;
+        try // out of memory (a large pack in the 32-bit game) fails this pack, never the worker
+        {
         Pack pack;
         const Pack* p = nullptr;
         for (const IndexPack& x : kIndex) if (IEq(x.folder, job.folder)) { pack = FromIndex(x); p = &pack; }
@@ -249,7 +253,6 @@ void Worker()
                 for (const IniPack& x : ParseList(g_listText))
                     if (IEq(FolderName(x.name), job.folder)) { pack.repo = x.repo; pack.branch = x.branch; p = &pack; }
         }
-        Failure f = Failure::Failed;
         if (p)
         {
             url = "https://codeload.github.com/" + p->repo + "/zip/refs/heads/" + p->branch;
@@ -292,6 +295,13 @@ void Worker()
                 DeleteTree(dest + L".part");
             }
             if (f != Failure::None) LOG_WARNING("[Looks] pack " + folder + ": " + FailureText(f));
+        }
+        }
+        catch (...)
+        {
+            f = Failure::Failed;
+            DeleteTree(PacksFolder() + Wide(job.folder) + L".part");
+            LOG_WARNING("[Looks] pack " + job.folder + ": failed (out of memory)");
         }
         {
             std::lock_guard<std::mutex> lock(g_mu);

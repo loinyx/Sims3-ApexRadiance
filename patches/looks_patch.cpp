@@ -1061,6 +1061,12 @@ void FxMessages(int missingFiles)
                                      : I18n::Trf("{} files added", copied);
         g_checkPending = true;
     }
+    if (g_checkPending && !g.active) // nothing is checked while Shaders is off
+    {
+        g_checkPending = false;
+        g_fxMessage = I18n::Tr("Turn on Shaders to check what changed");
+        g_fxMessageError = false;
+    }
     if (g_checkPending && !Looks::Fx::Scanning())
     {
         g_checkPending = false;
@@ -2668,6 +2674,8 @@ public:
                 g_fxMessage.clear();
             }
             if (!ApexUi::FilterActive()) ApexUi::CardDivider();
+            // a check waits for Shaders to be on (new packs and Check again): say so instead of nothing happening
+            if (!g.active && Looks::Fx::Scanning() && !ApexUi::FilterActive()) ApexUi::IconNote(IconId::Info, "Turn on Shaders to check what changed");
             const float u = ApexUi::Unit();
             // rows: Built into Apex, each downloaded pack, Your shaders; each with its source's icon
             struct LibRow { std::string row; std::string note; int count; std::string pack; bool mine; };

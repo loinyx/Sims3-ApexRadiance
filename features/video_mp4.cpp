@@ -172,7 +172,7 @@ bool WriteAudio(Session& s, const BYTE* data, UINT32 frames, LONGLONG t) {
         buf->SetCurrentLength(bytes);
         ok = SUCCEEDED(MFCreateSample(&smp)) && SUCCEEDED(smp->AddBuffer(buf)) && SUCCEEDED(smp->SetSampleTime(t)) &&
              SUCCEEDED(smp->SetSampleDuration(frames * kHns / kRate));
-        if (ok) { std::lock_guard<std::mutex> lk(s.writerLock); ok = SUCCEEDED(s.writer->WriteSample(s.as, smp)); }
+        if (ok) { std::lock_guard<std::mutex> lk(s.writerLock); ok = s.writer && SUCCEEDED(s.writer->WriteSample(s.as, smp)); } // null once finalized
     }
     SafeRelease(smp);
     SafeRelease(buf);
@@ -311,7 +311,12 @@ void Worker(std::shared_ptr<Session> sp) {
     if (ok && s.o.audio) {
         std::string aw;
         if (OpenAudio(s, aw) && AddAudioStream(s)) s.hasAudio = true;
-        else { s.notes += (aw.empty() ? std::string("game sound could not be added") : aw) + "; "; SafeRelease(s.capture); SafeRelease(s.audio); }
+        else {
+            s.notes += (aw.empty() ? std::string("game sound could not be added") : aw) + "; ";
+            SafeRelease(s.capture);
+            SafeRelease(s.audio);
+            if (s.audioEvent) { CloseHandle(s.audioEvent); s.audioEvent = nullptr; }
+        }
     }
     if (ok && FAILED(s.writer->BeginWriting())) { ok = false; why = "the MP4 file could not be started"; }
     if (!ok) {
@@ -320,7 +325,7 @@ void Worker(std::shared_ptr<Session> sp) {
         SafeRelease(s.writer);
         SafeRelease(s.capture);
         SafeRelease(s.audio);
-        if (s.audioEvent) CloseHandle(s.audioEvent);
+        if (s.audioEvent) { CloseHandle(s.audioEvent); s.audioEvent = nullptr; }
         DeleteFileW(s.file.c_str());
         if (mf) MFShutdown();
         if (SUCCEEDED(com)) CoUninitialize();
@@ -381,8 +386,12 @@ void Worker(std::shared_ptr<Session> sp) {
     s.audioStop = true;
     const bool audioEnded = !audioDone || WaitForSingleObject(audioDone, 5000) == WAIT_OBJECT_0;
     if (audioEnded && audioDone) CloseHandle(audioDone);
-    const HRESULT fin = s.writer->Finalize();
-    SafeRelease(s.writer);
+    HRESULT fin;
+    { // under the lock: a sound thread that missed the wait finds no writer instead of a released one
+        std::lock_guard<std::mutex> lk(s.writerLock);
+        fin = s.writer->Finalize();
+        SafeRelease(s.writer);
+    }
     if (audioEnded) { // else the sound thread may still use them: left to the process
         SafeRelease(s.capture);
         SafeRelease(s.audio);
@@ -489,7 +498,14 @@ bool Start(IDirect3DDevice9* dev, const std::filesystem::path& file, const Optio
     g_active = true;
     g_finishing++;
     if (!o.nextClip) { std::lock_guard<std::mutex> lk(g_resultLock); g_result.clear(); }
-    HookGuard::StartDetached("Video: MP4 writer", [s] { Worker(s); });
+    if (!HookGuard::StartDetached("Video: MP4 writer", [s] { Worker(s); })) {
+        g_active = false;
+        g_finishing--;
+        { std::lock_guard<std::mutex> lk(g_sLock); g_s.reset(); }
+        ReleaseSlots();
+        why = "the video writer could not be started";
+        return false;
+    }
     LOG_INFO(std::format("[Video] Recording {} at {}x{}, {} fps, {} kbit/s{}{}", ApexUtil::ToUtf8(file.wstring()), s->w, s->h, s->o.fps, o.bitrateKbps,
                          o.hevc ? ", HEVC" : ", H.264", o.audio ? ", game sound" : ""));
     return true;

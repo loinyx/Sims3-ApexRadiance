@@ -8,6 +8,7 @@
 #include <random>
 #include "profile_package.h"
 #include "apex_config.h"
+#include "looks_preset.h"
 #include "apex_log.h"
 #include "apex_util.h"
 namespace ApexLog { void Write(Level,const std::string&,const std::source_location&) noexcept {} }
@@ -118,7 +119,8 @@ int wmain(int argc,wchar_t** argv) {
     Check(ApexConfig::ReadProfileImport(testRoot+L"own.zip",ownImport,&error) && ownImport.shaderFiles.size()==3 && ApexConfig::ProfilePacks(ownImport.state)==std::vector<std::string>{"qUINT"},"own files and packs read back");
     Check(ApexConfig::SaveImportedProfile("Own",ownImport,ApexConfig::kPartShaders,"bookmark",&error) && !std::filesystem::exists(testRoot+L"Shaders\\Shaders\\Mine-1.fx"),"identical shader files reused");
     auto changedFx=ownImport;changedFx.shaderFiles[0].bytes+="// changed\n";
-    Check(ApexConfig::SaveImportedProfile("Own 2",changedFx,ApexConfig::kPartShaders,"bookmark",&error) && std::filesystem::exists(testRoot+L"Shaders\\Shaders\\Mine-1.fx"),"shader file clash gets a numbered name");
+    Check(!ApexConfig::SaveImportedProfile("Own 2",changedFx,ApexConfig::kPartShaders,"bookmark",&error) && error.starts_with(Looks::kShaderNameTaken) &&
+          !std::filesystem::exists(testRoot+L"Shaders\\Shaders\\Mine-1.fx") && !ApexConfig::ProfileExists("Own 2"),"a different shader file of that name fails the import, nothing saved");
     {std::string kept;ApexUtil::ReadFileBytes(testRoot+L"Shaders\\Shaders\\Mine.fx",kept);Check(kept==fx,"existing shader file never overwritten");}
     std::filesystem::remove_all(testRoot+L"Shaders");
     Check(ApexConfig::SaveImportedProfile("Own 3",ownImport,ApexConfig::kPartShaders,"bookmark",&error) && std::filesystem::exists(testRoot+L"Shaders\\Textures\\noise.png"),"shader files written into the Shaders folder");

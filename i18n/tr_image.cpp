@@ -895,6 +895,8 @@ const I18n::Entry kEntries[] = {
     {"Your library", "Sua biblioteca", "Tu biblioteca", "Votre bibliothèque"},
     {"{} shaders from {} sources", "{} shaders de {} fontes", "{} shaders de {} fuentes", "{} shaders de {} sources"},
     {"This preset uses shaders from {}, which you don't have yet", "Este preset usa shaders de {}, que você ainda não tem", "Este preajuste usa shaders de {}, que aún no tienes", "Ce préréglage utilise des shaders de {}, que vous n'avez pas encore"},
+    {"Turn on Shaders to check what changed", "Ligue os Shaders para verificar o que mudou", "Activa Shaders para revisar lo que cambió", "Activez Shaders pour vérifier ce qui a changé"},
+    {"Your Shaders folder already has a different {}. Rename or move it, then import again", "Sua pasta Shaders já tem outro {}. Renomeie ou mova esse arquivo e importe de novo", "Tu carpeta Shaders ya tiene otro {}. Cámbiale el nombre o muévelo e importa de nuevo", "Votre dossier Shaders contient déjà un autre {}. Renommez-le ou déplacez-le, puis importez à nouveau"},
     {"This preset needs {} ({})", "Este preset precisa de {} ({})", "Este preajuste necesita {} ({})", "Ce préréglage a besoin de {} ({})"},
     {"This preset needs {}", "Este preset precisa de {}", "Este preajuste necesita {}", "Ce préréglage a besoin de {}"},
     {"Download them now", "Baixar agora", "Descargarlos ahora", "Les télécharger maintenant"},

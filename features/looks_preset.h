@@ -104,8 +104,9 @@ bool ValidShaderFileName(const std::string& rel);
 std::vector<std::string> PlayerShaderFiles(const std::vector<std::string>& fxFiles);
 // The bytes of one of them (false when missing, unsafe or over its cap)
 bool ReadShaderFile(const std::string& rel, std::string& bytes);
-// Stores bytes in the player's folder with StoreLook's rules (identical bytes reused, a numbered name on a clash, never
-// overwritten); stored = the relative name used
+// Stores bytes in the player's folder (identical bytes reuse the file, never overwritten); a different file of that name
+// fails with error = kShaderNameTaken + its file name; stored = the relative name used
+inline constexpr const char* kShaderNameTaken = "shader name taken: ";
 bool StoreShaderFile(const std::string& rel, const std::string& bytes, std::string& stored, std::wstring* created, std::string* error);
 
 } // namespace Looks

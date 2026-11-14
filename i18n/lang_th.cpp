@@ -2939,6 +2939,8 @@ const I18n::Pair kPairs[] = {
     {"Your library", "คลังของคุณ"},
     {"{} shaders from {} sources", "เชดเดอร์ {} รายการจาก {} แหล่ง"},
     {"This preset uses shaders from {}, which you don't have yet", "ค่าที่ตั้งไว้นี้ใช้เชดเดอร์จาก {} ซึ่งคุณยังไม่มี"},
+    {"Turn on Shaders to check what changed", "เปิดเชดเดอร์เพื่อตรวจสอบสิ่งที่เปลี่ยนไป"},
+    {"Your Shaders folder already has a different {}. Rename or move it, then import again", "โฟลเดอร์ Shaders ของคุณมี {} อีกไฟล์อยู่แล้ว เปลี่ยนชื่อหรือย้ายไฟล์นั้น แล้วนำเข้าอีกครั้ง"},
     {"This preset needs {} ({})", "ค่าที่ตั้งไว้นี้ต้องใช้ {} ({})"},
     {"This preset needs {}", "ค่าที่ตั้งไว้นี้ต้องใช้ {}"},
     {"Download them now", "ดาวน์โหลดเลย"},

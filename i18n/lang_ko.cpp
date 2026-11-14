@@ -2939,6 +2939,8 @@ const I18n::Pair kPairs[] = {
     {"Your library", "내 라이브러리"},
     {"{} shaders from {} sources", "셰이더 {}개 · 소스 {}개"},
     {"This preset uses shaders from {}, which you don't have yet", "이 프리셋은 아직 없는 {}의 셰이더를 사용해요"},
+    {"Turn on Shaders to check what changed", "변경 사항을 확인하려면 셰이더를 켜세요"},
+    {"Your Shaders folder already has a different {}. Rename or move it, then import again", "Shaders 폴더에 이미 다른 {}이(가) 있어요. 이름을 바꾸거나 옮긴 뒤 다시 가져오세요"},
     {"This preset needs {} ({})", "이 프리셋에는 {}이(가) 필요해요 ({})"},
     {"This preset needs {}", "이 프리셋에는 {}이(가) 필요해요"},
     {"Download them now", "지금 다운로드"},

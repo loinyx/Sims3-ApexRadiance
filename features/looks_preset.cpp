@@ -490,10 +490,64 @@ bool ValidShaderFileName(const std::string& rel)
     return rel.rfind("Textures/", 0) == 0 && ValidFileName(rel.substr(9), { ".png", ".jpg", ".jpeg", ".bmp", ".dds" });
 }
 
+// A file of that name (lower case) in dir or up to depth folders below it; "" when none
+std::wstring FindInTree(const std::wstring& dir, int depth, const std::wstring& name)
+{
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((dir + L"*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return {};
+    std::wstring found;
+    std::vector<std::wstring> sub;
+    do
+    {
+        const std::wstring n = fd.cFileName;
+        if (n == L"." || n == L".." || (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) continue;
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) { if (depth > 0 && sub.size() < 64) sub.push_back(dir + n + L"\\"); }
+        else if (_wcsicmp(n.c_str(), name.c_str()) == 0) found = dir + n;
+    } while (found.empty() && FindNextFileW(h, &fd));
+    FindClose(h);
+    for (size_t k = 0; found.empty() && k < sub.size(); ++k) found = FindInTree(sub[k], depth - 1, name);
+    return found;
+}
+
+// Where the player's own file is, as the scan finds it: Shaders\Shaders\<name> (or Textures\<name>), else the Shaders
+// folder itself or up to three folders below Shaders\Shaders (Textures)
+std::wstring OwnFilePath(const std::string& rel)
+{
+    const std::wstring root = PlayerShadersFolder();
+    if (root.empty() || !ValidShaderFileName(rel)) return {};
+    const std::wstring direct = ShaderPath(rel);
+    if (GetFileAttributesW(direct.c_str()) != INVALID_FILE_ATTRIBUTES) return direct;
+    const std::wstring name = ApexUtil::ToWide(rel.substr(rel.find('/') + 1));
+    const bool code = IsCode(rel);
+    if (std::wstring f = FindInTree(root, 0, name); !f.empty()) return f;
+    return FindInTree(root + (code ? L"Shaders\\" : L"Textures\\"), 3, name);
+}
+
+// A file a downloaded pack has (or ReShade's standard headers): the importer gets it with that pack, so it is not shared
+bool InAPack(const std::string& rel)
+{
+    const std::string name = rel.substr(rel.find('/') + 1);
+    if (!_stricmp(name.c_str(), "ReShade.fxh") || !_stricmp(name.c_str(), "ReShadeUI.fxh")) return true;
+    const std::wstring packs = PlayerShadersFolder() + L"Packs\\";
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((packs + L"*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    bool found = false;
+    do
+    {
+        const std::wstring n = fd.cFileName;
+        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && n[0] != L'.' && n.find(L'.') == std::wstring::npos)
+            found = !FindInTree(packs + n + (IsCode(rel) ? L"\\Shaders\\" : L"\\Textures\\"), 3, ApexUtil::ToWide(name)).empty();
+    } while (!found && FindNextFileW(h, &fd));
+    FindClose(h);
+    return found;
+}
+
 bool ReadShaderFile(const std::string& rel, std::string& bytes)
 {
-    return ValidShaderFileName(rel) && !PlayerShadersFolder().empty() &&
-           ReadBounded(ShaderPath(rel), bytes, nullptr, IsCode(rel) ? kMaxSharedFxBytes : kMaxSharedTextureBytes);
+    const std::wstring path = OwnFilePath(rel);
+    return !path.empty() && ReadBounded(path, bytes, nullptr, IsCode(rel) ? kMaxSharedFxBytes : kMaxSharedTextureBytes);
 }
 
 std::vector<std::string> PlayerShaderFiles(const std::vector<std::string>& fxFiles)
@@ -507,10 +561,13 @@ std::vector<std::string> PlayerShaderFiles(const std::vector<std::string>& fxFil
         std::string key = rel;
         for (char& c : key) c = (char)tolower((unsigned char)c);
         if (!seen.insert(key).second || !ValidShaderFileName(rel)) continue;
+        // shortcut: a pack file an own .fx includes is left out but its pack is not added to the preset's packs list; add it
+        // when players share own shaders built on packs other than ReShade's standard effects
+        if (next >= fxFiles.size() && InAPack(rel)) continue; // an include or texture, not one of the look's own .fx files
         if (!IsCode(rel)) // a texture: only whether it is there and within its cap
         {
             WIN32_FILE_ATTRIBUTE_DATA a{};
-            if (GetFileAttributesExW(ShaderPath(rel).c_str(), GetFileExInfoStandard, &a) && !(a.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+            if (GetFileAttributesExW(OwnFilePath(rel).c_str(), GetFileExInfoStandard, &a) && !(a.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
                 !a.nFileSizeHigh && a.nFileSizeLow <= kMaxSharedTextureBytes)
                 out.push_back(rel);
             continue;
@@ -537,6 +594,16 @@ bool StoreShaderFile(const std::string& rel, const std::string& bytes, std::stri
     for (const std::wstring& d : { root, root + L"Shaders\\", root + L"Textures\\" })
         if (!CreateDirectoryW(d.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS) return fail("the Shaders folder could not be created");
     const size_t slash = rel.find('/');
+    // a different file of that name stays and the import fails: a renamed copy would never run, since the look and the
+    // other files' #include lines name the original
+    const std::wstring target = root + ApexUtil::ToWide(rel.substr(0, slash)) + L"\\" + ApexUtil::ToWide(rel.substr(slash + 1));
+    if (ApexUtil::FileExists(target))
+    {
+        std::string existing;
+        if (ReadBounded(target, existing, nullptr, IsCode(rel) ? kMaxSharedFxBytes : kMaxSharedTextureBytes) && existing == bytes) { stored = rel; return true; }
+        if (error) *error = kShaderNameTaken + rel.substr(slash + 1);
+        return false;
+    }
     std::string name;
     if (!StoreIn(root + ApexUtil::ToWide(rel.substr(0, slash)) + L"\\", rel.substr(slash + 1), bytes, IsCode(rel) ? kMaxSharedFxBytes : kMaxSharedTextureBytes, name,
                  created, error, "the shader file could not be saved"))

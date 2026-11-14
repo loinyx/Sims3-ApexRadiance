@@ -2939,6 +2939,8 @@ const I18n::Pair kPairs[] = {
     {"Your library", "你的庫"},
     {"{} shaders from {} sources", "{} 個著色器，來自 {} 個來源"},
     {"This preset uses shaders from {}, which you don't have yet", "此預設使用了來自 {} 的著色器，你還沒有它們"},
+    {"Turn on Shaders to check what changed", "開啟著色器以檢查有哪些變化"},
+    {"Your Shaders folder already has a different {}. Rename or move it, then import again", "你的 Shaders 資料夾裡已有另一個 {}。請重新命名或移走它，然後重新匯入"},
     {"This preset needs {} ({})", "此預設需要 {}（{}）"},
     {"This preset needs {}", "此預設需要 {}"},
     {"Download them now", "立即下載"},

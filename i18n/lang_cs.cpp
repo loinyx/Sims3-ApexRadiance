@@ -2939,6 +2939,8 @@ const I18n::Pair kPairs[] = {
     {"Your library", "Tvoje knihovna"},
     {"{} shaders from {} sources", "{} shaderů z {} zdrojů"},
     {"This preset uses shaders from {}, which you don't have yet", "Tato předvolba používá shadery z {}, které ještě nemáš"},
+    {"Turn on Shaders to check what changed", "Zapni Shadery a zkontroluj, co se změnilo"},
+    {"Your Shaders folder already has a different {}. Rename or move it, then import again", "Tvoje složka Shaders už obsahuje jiný {}. Přejmenuj ho nebo přesuň a importuj znovu"},
     {"This preset needs {} ({})", "Tato předvolba potřebuje {} ({})"},
     {"This preset needs {}", "Tato předvolba potřebuje {}"},
     {"Download them now", "Stáhnout je hned"},

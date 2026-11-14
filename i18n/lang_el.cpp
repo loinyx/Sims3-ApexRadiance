@@ -2939,6 +2939,8 @@ const I18n::Pair kPairs[] = {
     {"Your library", "Η βιβλιοθήκη σου"},
     {"{} shaders from {} sources", "{} shaders από {} πηγές"},
     {"This preset uses shaders from {}, which you don't have yet", "Αυτή η προρύθμιση χρησιμοποιεί shaders από {}, που δεν έχεις ακόμα"},
+    {"Turn on Shaders to check what changed", "Ενεργοποίησε τα Shaders για έλεγχο των αλλαγών"},
+    {"Your Shaders folder already has a different {}. Rename or move it, then import again", "Ο φάκελος Shaders έχει ήδη άλλο {}. Μετονόμασέ το ή μετακίνησέ το και κάνε ξανά εισαγωγή"},
     {"This preset needs {} ({})", "Αυτή η προρύθμιση χρειάζεται {} ({})"},
     {"This preset needs {}", "Αυτή η προρύθμιση χρειάζεται {}"},
     {"Download them now", "Λήψη τώρα"},

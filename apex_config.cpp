@@ -944,6 +944,7 @@ void CaptureProfileState(toml::table& root) {
             ApexCapture::ToToml(ApexCapture::Get(), root);
             if (toml::table* capture = root["capture"].as_table()) {
                 capture->erase("counter");
+                if (auto snd = (*capture)["sound"].value<std::string>(); snd && *snd != "off" && *snd != "camera") capture->erase("sound"); // a file path: the player's own
                 if (toml::table* video = (*capture)["video"].as_table()) video->erase("custom_folder");
             }
         }
@@ -1162,10 +1163,10 @@ bool SaveImportedProfile(const std::string& name, const ProfileImport& input, un
             if(!Looks::StoreLook(input.lookName,input.lookBytes,stored,&createdLook,&why)) throw std::runtime_error("The look could not be saved");
             SetLookRef(state,"looks:"+stored);
         }
-        if(withLook) // the player's shader files into Apex Radiance\Shaders\ (the same rules: a different file of that name stays, the copy gets a numbered name)
+        if(withLook) // the player's shader files into Apex Radiance\Shaders\ (identical bytes reuse the file; a different file of that name fails the import)
             for(const auto& f:input.shaderFiles) {
                 std::string stored, why; std::wstring created;
-                if(!Looks::StoreShaderFile(f.name,f.bytes,stored,&created,&why)) throw std::runtime_error("A shader file could not be saved");
+                if(!Looks::StoreShaderFile(f.name,f.bytes,stored,&created,&why)) throw std::runtime_error(why.starts_with(Looks::kShaderNameTaken)?why:"A shader file could not be saved");
                 if(!created.empty()) createdShaders.push_back(created);
             }
         toml::table meta;
