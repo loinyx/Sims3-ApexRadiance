@@ -19,6 +19,7 @@
 #include "third_party/reshadefx/effect_preprocessor.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <functional>
@@ -232,18 +233,19 @@ D3DFORMAT Format(reshadefx::texture_format f, const char** lowered)
 
 // D3DCompile of one entry point's shader model 3.0 HLSL. ReShade compiles with optimisation level 3 (performance mode)
 // or 1; when that fails here the other flag sets D3D9 offers are tried in turn: flow control kept (loops it cannot unroll,
-// fewer instruction slots), flow control avoided (gradients inside loops), then no optimisation. *used names the set that
-// worked when it was not the first.
-bool CompileSm3(const std::string& hlsl, const std::string& entry, bool vs, std::vector<uint8_t>& code, std::string& errors, std::string* used)
+// fewer instruction slots), flow control avoided (gradients inside loops), then no optimisation. *tried is the set that
+// worked (0 = the first), or -1.
+struct Try { UINT flags; const char* name; };
+const Try kTries[] = {
+    { D3DCOMPILE_OPTIMIZATION_LEVEL3, "" },
+    { D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_PREFER_FLOW_CONTROL, "flow control kept" },
+    { D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_AVOID_FLOW_CONTROL, "flow control avoided" },
+    { D3DCOMPILE_OPTIMIZATION_LEVEL1, "optimisation level 1" },
+    { D3DCOMPILE_SKIP_OPTIMIZATION, "no optimisation" },
+};
+bool CompileSm3(const std::string& hlsl, const std::string& entry, bool vs, std::vector<uint8_t>& code, std::string& errors, int* tried)
 {
-    struct Try { UINT flags; const char* name; };
-    static const Try kTries[] = {
-        { D3DCOMPILE_OPTIMIZATION_LEVEL3, "" },
-        { D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_PREFER_FLOW_CONTROL, "flow control kept" },
-        { D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_AVOID_FLOW_CONTROL, "flow control avoided" },
-        { D3DCOMPILE_OPTIMIZATION_LEVEL1, "optimisation level 1" },
-        { D3DCOMPILE_SKIP_OPTIMIZATION, "no optimisation" },
-    };
+    *tried = -1;
     for (const Try& t : kTries)
     {
         ID3DBlob* blob = nullptr; ID3DBlob* err = nullptr;
@@ -257,13 +259,82 @@ bool CompileSm3(const std::string& hlsl, const std::string& entry, bool vs, std:
         {
             code.assign((const uint8_t*)blob->GetBufferPointer(), (const uint8_t*)blob->GetBufferPointer() + blob->GetBufferSize());
             blob->Release();
-            if (used) *used = t.name;
+            *tried = (int)(&t - kTries);
             return true;
         }
         if (blob) blob->Release();
     }
     return false;
 }
+
+// ---- the compile cache (Folders::cacheDir): D3DCompile's results for one effect, keyed by every entry point's generated
+// HLSL (the preprocessed source with its includes and macros, BUFFER_WIDTH / BUFFER_HEIGHT among them), its target and
+// D3DCompiler's version, so a changed .fx, .fxh or picture size is compiled again. One file per effect and picture size.
+constexpr char kCacheMagic[8] = { 'A', 'P', 'X', 'F', 'X', 'C', '1', 0 };
+
+uint64_t Fnv(uint64_t h, const void* data, size_t n)
+{
+    const uint8_t* p = (const uint8_t*)data;
+    for (size_t i = 0; i < n; ++i) h = (h ^ p[i]) * 1099511628211ull;
+    return h;
+}
+
+struct CachedShader { int tried = -1; std::vector<uint8_t> code; std::string errors; };
+
+std::wstring CacheFile(const std::wstring& dir, const std::wstring& fxPath, UINT W, UINT H)
+{
+    const std::wstring l = Lower(FullPath(fxPath));
+    const uint64_t h = Fnv(14695981039346656037ull, l.data(), l.size() * sizeof(wchar_t));
+    wchar_t name[64];
+    swprintf_s(name, L"fx_%016llx_%ux%u.bin", (unsigned long long)h, W, H);
+    return dir + name;
+}
+
+bool ReadCache(const std::wstring& file, uint64_t key, size_t count, std::vector<CachedShader>& out)
+{
+    std::string b;
+    if (!ReadCapped(file, 64u << 20, b) || b.size() < 20 || memcmp(b.data(), kCacheMagic, 8) != 0) return false;
+    size_t at = 8;
+    auto get = [&](void* dst, size_t n) { if (b.size() - at < n) return false; memcpy(dst, b.data() + at, n); at += n; return true; };
+    uint64_t k = 0; uint32_t n = 0;
+    if (!get(&k, 8) || !get(&n, 4) || k != key || n != count) return false;
+    out.assign(count, {});
+    for (CachedShader& c : out)
+    {
+        int32_t tried = -1; uint32_t len = 0;
+        if (!get(&tried, 4) || !get(&len, 4) || b.size() - at < len) return false;
+        c.tried = tried;
+        c.code.assign((const uint8_t*)b.data() + at, (const uint8_t*)b.data() + at + len);
+        at += len;
+        if (!get(&len, 4) || b.size() - at < len) return false;
+        c.errors.assign(b.data() + at, len);
+        at += len;
+    }
+    return at == b.size();
+}
+
+void WriteCache(const std::wstring& dir, const std::wstring& file, uint64_t key, const std::vector<CachedShader>& in)
+{
+    std::string b(kCacheMagic, 8);
+    auto put = [&](const void* p, size_t n) { b.append((const char*)p, n); };
+    const uint32_t n = (uint32_t)in.size();
+    put(&key, 8); put(&n, 4);
+    for (const CachedShader& c : in)
+    {
+        const int32_t tried = c.tried; const uint32_t code = (uint32_t)c.code.size(), err = (uint32_t)c.errors.size();
+        put(&tried, 4); put(&code, 4); put(c.code.data(), code); put(&err, 4); put(c.errors.data(), err);
+    }
+    CreateDirectoryW(dir.c_str(), nullptr);
+    const std::wstring tmp = file + L".tmp";
+    HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    DWORD wrote = 0;
+    const bool ok = WriteFile(h, b.data(), (DWORD)b.size(), &wrote, nullptr) && wrote == b.size();
+    CloseHandle(h);
+    if (!ok || !MoveFileExW(tmp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(tmp.c_str());
+}
+
+std::atomic<int> g_cacheHits{ 0 }, g_cacheMisses{ 0 };
 
 uint32_t BytesPerPixel(D3DFORMAT f)
 {
@@ -522,19 +593,57 @@ bool CompileImpl(const std::wstring& fxPath, const Folders& folders, UINT W, UIN
         out.techniques.push_back(std::move(x));
     }
 
-    // ---- D3DCompile each entry point a runnable technique uses (vs_3_0 / ps_3_0)
+    // ---- D3DCompile each entry point a runnable technique uses (vs_3_0 / ps_3_0), or their results from the compile cache
     std::vector<bool> wanted(out.shaders.size(), false);
     for (const Technique& t : out.techniques)
         if (t.reason.empty())
             for (const Pass& p : t.passes) { if (p.vs >= 0) wanted[p.vs] = true; if (p.ps >= 0) wanted[p.ps] = true; }
+    std::vector<size_t> todo;
+    std::vector<std::string> hlsl;
     for (size_t i = 0; i < out.shaders.size(); ++i)
     {
         if (!wanted[i]) continue;
         Shader& s = out.shaders[i];
-        std::string hlsl, unused, errors, used;
-        if (!cg->assemble_code_for_entry_point(s.entry, hlsl, unused, unused)) { s.error = "the shader does not compile"; continue; }
-        if (CompileSm3(hlsl, s.entry, s.vs != 0, s.code, errors, &used)) { if (!used.empty()) out.notes.push_back("shader " + s.entry + ": " + used); }
-        else s.error = ReasonFrom(errors.empty() ? std::string("the shader does not compile") : errors, folders.root);
+        std::string code, unused;
+        if (!cg->assemble_code_for_entry_point(s.entry, code, unused, unused)) { s.error = "the shader does not compile"; continue; }
+        todo.push_back(i);
+        hlsl.push_back(std::move(code));
+    }
+    uint64_t key = 14695981039346656037ull;
+    const uint32_t compilerVersion = D3D_COMPILER_VERSION;
+    key = Fnv(key, kCacheMagic, sizeof kCacheMagic);
+    key = Fnv(key, &compilerVersion, sizeof compilerVersion);
+    for (size_t k = 0; k < todo.size(); ++k)
+    {
+        const Shader& s = out.shaders[todo[k]];
+        key = Fnv(key, s.entry.c_str(), s.entry.size() + 1);
+        key = Fnv(key, &s.vs, 1);
+        key = Fnv(key, hlsl[k].c_str(), hlsl[k].size() + 1);
+    }
+    const std::wstring cacheFile = folders.cacheDir.empty() || todo.empty() ? std::wstring() : CacheFile(folders.cacheDir, fxPath, W, H);
+    std::vector<CachedShader> results;
+    const bool cached = !cacheFile.empty() && ReadCache(cacheFile, key, todo.size(), results);
+    if (!cached)
+    {
+        results.assign(todo.size(), {});
+        for (size_t k = 0; k < todo.size(); ++k)
+        {
+            const Shader& s = out.shaders[todo[k]];
+            if (!CompileSm3(hlsl[k], s.entry, s.vs != 0, results[k].code, results[k].errors, &results[k].tried)) results[k].code.clear();
+        }
+        if (!cacheFile.empty()) WriteCache(folders.cacheDir, cacheFile, key, results);
+    }
+    if (!cacheFile.empty()) ++(cached ? g_cacheHits : g_cacheMisses);
+    for (size_t k = 0; k < todo.size(); ++k)
+    {
+        Shader& s = out.shaders[todo[k]];
+        CachedShader& r = results[k];
+        if (r.tried >= 0 && r.tried < (int)std::size(kTries) && r.code.size() >= 8)
+        {
+            s.code = std::move(r.code);
+            if (r.tried) out.notes.push_back("shader " + s.entry + ": " + kTries[r.tried].name);
+        }
+        else s.error = ReasonFrom(r.errors.empty() ? std::string("the shader does not compile") : r.errors, folders.root);
     }
     for (Technique& t : out.techniques)
         for (const Pass& p : t.passes)
@@ -559,6 +668,8 @@ bool InsideRoot(const std::wstring& root, const std::wstring& path)
     }
     return Lower(p.substr(0, root.size())) == Lower(root);
 }
+
+void CacheCounts(int* hits, int* misses) { *hits = g_cacheHits; *misses = g_cacheMisses; }
 
 bool Compile(const std::wstring& fxPath, const Folders& folders, UINT width, UINT height, Effect& out)
 {
@@ -812,11 +923,12 @@ bool Instance::Run(IDirect3DDevice9* dev, size_t technique, IDirect3DSurface9* t
     };
 
     // States, samplers and textures are sent only when they change within the technique
-    std::vector<std::pair<DWORD, DWORD>> rsCache;
-    rsCache.reserve(40);
+    std::pair<DWORD, DWORD> rsCache[40]; // on the stack: no allocation per frame (29 states are set below)
+    int rsCount = 0;
     auto RS = [&](D3DRENDERSTATETYPE st, DWORD v) {
-        for (auto& e : rsCache) if (e.first == (DWORD)st) { if (e.second != v) { e.second = v; dev->SetRenderState(st, v); } return; }
-        rsCache.push_back({ (DWORD)st, v }); dev->SetRenderState(st, v);
+        for (int i = 0; i < rsCount; ++i) if (rsCache[i].first == (DWORD)st) { if (rsCache[i].second != v) { rsCache[i].second = v; dev->SetRenderState(st, v); } return; }
+        if (rsCount < (int)std::size(rsCache)) rsCache[rsCount++] = { (DWORD)st, v };
+        dev->SetRenderState(st, v);
     };
     DWORD ssVal[16][14]; bool ssSet[16][14] = {};
     auto SS = [&](DWORD stage, D3DSAMPLERSTATETYPE st, DWORD v) {

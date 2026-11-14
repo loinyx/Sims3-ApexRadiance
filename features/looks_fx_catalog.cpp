@@ -9,6 +9,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <d3dcompiler.h>
 #include "looks_fx.h"
 #include "looks_runner.h"
 #include "apex_log.h"
@@ -54,6 +55,7 @@ struct UserTech
     std::string technique, file, reason, pack;
     std::shared_ptr<const Effect> fx;
     size_t tech = 0;
+    size_t seq = 0;           // place in the scan's file order (List)
     bool hidden = false;
     std::deque<std::string> text;
     std::vector<LooksParam> params;
@@ -62,9 +64,13 @@ struct UserTech
     const char* Keep(std::string s) { text.push_back(std::move(s)); return text.back().c_str(); }
 };
 
+// A pack file not compiled this session whose techniques run here, as an earlier compile found (the check cache)
+struct CheckedTech { std::string technique, file, pack; size_t seq = 0; };
+
 struct Catalog
 {
     std::vector<std::unique_ptr<UserTech>> techs;
+    std::vector<CheckedTech> checked;                            // runnable, not hidden, of files not compiled
     std::vector<std::pair<std::string, std::string>> fileErrors; // file, reason
     std::vector<std::string> files;                              // lower-case .fx names in the folder
     std::vector<std::string> pending;                            // ... of those not compiled yet
@@ -218,8 +224,114 @@ void ListFx(const std::wstring& dir, int depth, std::vector<std::wstring>& out)
 // One .fx of the scan: the player's own (pack "") or a downloaded pack's, with where its includes and textures are found
 struct Source { std::wstring path; std::string pack; size_t folders = 0; };
 
+// The check cache (Shaders\.cache\checked.txt): per pack .fx, its size and time and which techniques run here, from the
+// last compile of that file in any session. The Add a shader list and "<x> of <y> run here" read it, so browsing compiles
+// nothing; a file not in it (new or changed) is checked once in the background while the player browses.
+struct Checked
+{
+    uint64_t size = 0;
+    FILETIME written{};
+    std::vector<std::pair<std::string, uint8_t>> techs; // technique, kRuns | kHidden
+};
+constexpr uint8_t kRuns = 1, kHidden = 2;
+std::map<std::wstring, Checked> g_checked; // worker only; by full path
+bool g_checkedLoaded = false, g_checkedDirty = false;
+std::atomic<int> g_checkedThisSession{ 0 }; // files checked in the background (log, tools)
+
+std::wstring CheckedFile(const std::wstring& root) { return root + L".cache\\checked.txt"; }
+std::string CheckedHeader() { return "ApexLooksChecked 1 " + std::to_string(D3D_COMPILER_VERSION); }
+
+void LoadChecked(const std::wstring& root)
+{
+    g_checkedLoaded = true;
+    g_checked.clear();
+    HANDLE h = CreateFileW(CheckedFile(root).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    std::string text;
+    LARGE_INTEGER size{};
+    if (GetFileSizeEx(h, &size) && size.QuadPart > 0 && size.QuadPart < (8 << 20))
+    {
+        text.resize((size_t)size.QuadPart);
+        DWORD got = 0;
+        if (!ReadFile(h, text.data(), (DWORD)text.size(), &got, nullptr) || got != text.size()) text.clear();
+    }
+    CloseHandle(h);
+    // first line: the header (another D3DCompiler or format: start again); then size \t time \t path \t tech|flags;...
+    size_t pos = text.find('\n');
+    if (pos == std::string::npos || text.substr(0, pos) != CheckedHeader()) return;
+    for (++pos; pos < text.size() && g_checked.size() < 20000;)
+    {
+        size_t e = text.find('\n', pos);
+        if (e == std::string::npos) e = text.size();
+        const std::string line = text.substr(pos, e - pos);
+        pos = e + 1;
+        const size_t t1 = line.find('\t'), t2 = t1 == std::string::npos ? t1 : line.find('\t', t1 + 1), t3 = t2 == std::string::npos ? t2 : line.find('\t', t2 + 1);
+        if (t3 == std::string::npos) continue;
+        Checked c;
+        unsigned long long when = 0;
+        c.size = strtoull(line.c_str(), nullptr, 10);
+        when = strtoull(line.c_str() + t1 + 1, nullptr, 10);
+        c.written.dwLowDateTime = (DWORD)when; c.written.dwHighDateTime = (DWORD)(when >> 32);
+        for (size_t a = t3 + 1; a < line.size();)
+        {
+            size_t b = line.find(';', a);
+            if (b == std::string::npos) b = line.size();
+            const std::string item = line.substr(a, b - a);
+            a = b + 1;
+            const size_t bar = item.rfind('|');
+            if (bar == std::string::npos || bar == 0) continue;
+            c.techs.push_back({ item.substr(0, bar), (uint8_t)atoi(item.c_str() + bar + 1) });
+        }
+        g_checked[ApexUtil::ToWide(line.substr(t2 + 1, t3 - t2 - 1))] = std::move(c);
+    }
+}
+
+void SaveChecked(const std::wstring& root)
+{
+    if (!g_checkedDirty) return;
+    g_checkedDirty = false;
+    std::string text = CheckedHeader() + "\n";
+    for (const auto& [path, c] : g_checked)
+    {
+        const unsigned long long when = ((unsigned long long)c.written.dwHighDateTime << 32) | c.written.dwLowDateTime;
+        text += std::to_string(c.size) + "\t" + std::to_string(when) + "\t" + Utf8(path) + "\t";
+        for (const auto& [t, f] : c.techs) text += t + "|" + std::to_string(f) + ";";
+        text += "\n";
+    }
+    const std::wstring dir = root + L".cache\\";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    const std::wstring file = CheckedFile(root), tmp = file + L".tmp";
+    HANDLE h = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return;
+    DWORD put = 0;
+    const bool ok = WriteFile(h, text.data(), (DWORD)text.size(), &put, nullptr) && put == text.size();
+    CloseHandle(h);
+    if (!ok || !MoveFileExW(tmp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING)) DeleteFileW(tmp.c_str());
+}
+
+// A compiled pack file's result, kept in the check cache
+void RecordChecked(const std::wstring& path, const WIN32_FILE_ATTRIBUTE_DATA& a, const Effect& fx)
+{
+    Checked c;
+    c.size = ((uint64_t)a.nFileSizeHigh << 32) | a.nFileSizeLow;
+    c.written = a.ftLastWriteTime;
+    if (fx.error.empty())
+        for (const Technique& t : fx.techniques) c.techs.push_back({ t.name, (uint8_t)((t.reason.empty() ? kRuns : 0) | (t.hidden ? kHidden : 0)) });
+    g_checked[path] = std::move(c);
+    g_checkedDirty = true;
+}
+
+// The check cache's entry for a file when it still matches the file (size and time), else nullptr
+const Checked* CheckedFor(const std::wstring& path, const WIN32_FILE_ATTRIBUTE_DATA& a)
+{
+    auto it = g_checked.find(path);
+    if (it == g_checked.end()) return nullptr;
+    const uint64_t size = ((uint64_t)a.nFileSizeHigh << 32) | a.nFileSizeLow;
+    return it->second.size == size && CompareFileTime(&it->second.written, &a.ftLastWriteTime) == 0 ? &it->second : nullptr;
+}
+
 std::shared_ptr<Catalog> Build(const std::vector<std::shared_ptr<const Effect>>& effects, const std::vector<Source>& files,
-                               const std::vector<bool>& lazy, const std::vector<std::string>& packs)
+                               const std::vector<bool>& lazy, const std::vector<std::string>& packs, const std::vector<const Checked*>& checked)
 {
     auto c = std::make_shared<Catalog>();
     c->packs = packs;
@@ -232,12 +344,28 @@ std::shared_ptr<Catalog> Build(const std::vector<std::shared_ptr<const Effect>>&
         {
             PackCount& n = c->counts[files[i].pack];
             if (i == 0 || files[i - 1].pack != files[i].pack) n.checked = true;
-            n.checked &= effects[i] != nullptr;
+            n.checked &= effects[i] != nullptr || checked[i] != nullptr;
         }
     }
     for (size_t i = 0; i < effects.size(); ++i)
     {
         const auto& fx = effects[i];
+        if (!fx && checked[i]) // not compiled this session: what an earlier compile found
+        {
+            const std::string file = Utf8(files[i].path.substr(files[i].path.find_last_of(L'\\') + 1));
+            for (const auto& [name, flags] : checked[i]->techs)
+            {
+                if (!(flags & kHidden))
+                {
+                    PackCount& n = c->counts[files[i].pack];
+                    ++n.total;
+                    n.runnable += (flags & kRuns) != 0;
+                }
+                if (!seen.emplace(LowerA(name + "@" + file), true).second || !(flags & kRuns) || (flags & kHidden)) continue;
+                c->checked.push_back({ name, file, files[i].pack, i });
+            }
+            continue;
+        }
         if (!fx) continue;
         if (!fx->error.empty()) { c->fileErrors.push_back({ fx->file, fx->error }); continue; }
         for (size_t t = 0; t < fx->techniques.size(); ++t)
@@ -252,6 +380,7 @@ std::shared_ptr<Catalog> Build(const std::vector<std::shared_ptr<const Effect>>&
             if (!seen.emplace(LowerA(tq.name + "@" + fx->file), true).second) continue;
             auto u = std::make_unique<UserTech>();
             u->technique = tq.name; u->file = fx->file; u->reason = tq.reason; u->fx = fx; u->tech = t; u->hidden = tq.hidden; u->pack = files[i].pack;
+            u->seq = i;
             Describe(*u);
             c->techs.push_back(std::move(u));
         }
@@ -260,12 +389,12 @@ std::shared_ptr<Catalog> Build(const std::vector<std::shared_ptr<const Effect>>&
 }
 
 std::set<std::string> g_want;    // lower-case .fx names the render thread wants compiled (under g_lock)
-bool g_browse = false;            // every pack file is wanted (under g_lock)
+bool g_browse = false;            // the player browses shaders: pack files without a check result are checked (under g_lock)
 
 void Publish(const std::vector<std::shared_ptr<const Effect>>& effects, const std::vector<Source>& files, const std::vector<bool>& lazy,
-             const std::vector<std::string>& packs)
+             const std::vector<std::string>& packs, const std::vector<const Checked*>& checked)
 {
-    auto c = Build(effects, files, lazy, packs);
+    auto c = Build(effects, files, lazy, packs, checked);
     std::lock_guard<std::mutex> lock(g_lock);
     c->generation = g_nextGeneration++;
     g_published = std::move(c);
@@ -307,6 +436,8 @@ void ScanOnce(UINT W, UINT H, bool force)
         packShaders.insert(standard ? packShaders.begin() : packShaders.end(), d + L"Shaders\\");
         packTextures.insert(standard ? packTextures.begin() : packTextures.end(), d + L"Textures\\");
     }
+    if (!g_checkedLoaded) LoadChecked(root);
+    if (force && !g_checked.empty()) { g_checked.clear(); g_checkedDirty = true; } // Check again: an included file may have changed
     std::vector<Folders> folders(1 + packs.size());
     folders[0].root = root;
     folders[0].includeDirs = { root + L"Shaders\\", root };
@@ -335,6 +466,7 @@ void ScanOnce(UINT W, UINT H, bool force)
     }
     for (Folders& f : folders)
     {
+        f.cacheDir = root + L".cache\\"; // compiled shaders, kept between sessions
         if (&f != &folders[0]) { f.includeDirs.push_back(root + L"Shaders\\"); f.textureDirs.push_back(root + L"Textures\\"); }
         f.includeDirs.insert(f.includeDirs.end(), packShaders.begin(), packShaders.end());
         f.textureDirs.insert(f.textureDirs.end(), packTextures.begin(), packTextures.end());
@@ -350,21 +482,26 @@ void ScanOnce(UINT W, UINT H, bool force)
 
     std::vector<std::shared_ptr<const Effect>> effects(files.size());
     std::vector<bool> lazy(files.size(), false);
+    std::vector<const Checked*> checked(files.size(), nullptr);
+    std::vector<WIN32_FILE_ATTRIBUTE_DATA> attrs(files.size());
     std::vector<size_t> todo;
     for (size_t i = 0; i < files.size(); ++i)
     {
-        WIN32_FILE_ATTRIBUTE_DATA a{};
+        WIN32_FILE_ATTRIBUTE_DATA& a = attrs[i];
         if (!GetFileAttributesExW(files[i].path.c_str(), GetFileExInfoStandard, &a)) continue;
         const uint64_t size = ((uint64_t)a.nFileSizeHigh << 32) | a.nFileSizeLow;
         auto it = g_cache.find(files[i].path);
         if (it != g_cache.end() && it->second.size == size && CompareFileTime(&it->second.written, &a.ftLastWriteTime) == 0 &&
             it->second.w == W && it->second.h == H)
             effects[i] = it->second.fx;
-        else if (!files[i].pack.empty() && !browse && !want.count(LowerA(Utf8(files[i].path.substr(files[i].path.find_last_of(L'\\') + 1)))))
-            lazy[i] = true; // a pack file nobody needs yet: not compiled (memory and time)
+        else if (!files[i].pack.empty() && !want.count(LowerA(Utf8(files[i].path.substr(files[i].path.find_last_of(L'\\') + 1)))))
+        {
+            lazy[i] = true; // a pack file no look needs: not compiled (memory and time); the check cache says what runs
+            checked[i] = CheckedFor(files[i].path, a);
+        }
         else todo.push_back(i);
     }
-    Publish(effects, files, lazy, packs); // what is known already (cached files) shows at once
+    Publish(effects, files, lazy, packs, checked); // what is known already (cached files) shows at once
     const DWORD t0 = GetTickCount();
     for (size_t i : todo)
     {
@@ -373,7 +510,8 @@ void ScanOnce(UINT W, UINT H, bool force)
         effects[i] = CompileGuarded(files[i].path, folders[files[i].folders], W, H);
         CacheEntry& e = g_cache[files[i].path];
         e.written = a.ftLastWriteTime; e.size = ((uint64_t)a.nFileSizeHigh << 32) | a.nFileSizeLow; e.w = W; e.h = H; e.fx = effects[i];
-        Publish(effects, files, lazy, packs); // each compiled file shows as soon as it is ready
+        if (!files[i].pack.empty()) RecordChecked(files[i].path, a, *effects[i]);
+        Publish(effects, files, lazy, packs, checked); // each compiled file shows as soon as it is ready
         const Effect& fx = *effects[i];
         const std::string where = files[i].pack.empty() ? fx.file : files[i].pack + "\\" + fx.file;
         if (!fx.error.empty()) LOG_INFO("[Looks] " + where + " can't run here: " + fx.error);
@@ -386,6 +524,31 @@ void ScanOnce(UINT W, UINT H, bool force)
     if (!todo.empty())
         LOG_INFO("[Looks] Shaders folder: compiled " + std::to_string(todo.size()) + " of " + std::to_string(files.size()) + " .fx files for " +
                  std::to_string(W) + "x" + std::to_string(H) + " in " + std::to_string(GetTickCount() - t0) + " ms");
+    SaveChecked(root);
+
+    // While the player browses shaders: pack files the check cache does not know (new or changed) are checked once, one at a
+    // time at low priority, each result kept and the effect let go. A new scan request (a look that wants a file) comes first.
+    if (!browse) return;
+    int done = 0;
+    const DWORD t1 = GetTickCount();
+    for (size_t i = 0; i < files.size(); ++i)
+    {
+        if (!lazy[i] || checked[i]) continue;
+        {
+            std::lock_guard<std::mutex> lock(g_lock);
+            if (g_again || g_requested) break;
+        }
+        const std::shared_ptr<const Effect> fx = CompileGuarded(files[i].path, folders[files[i].folders], W, H);
+        RecordChecked(files[i].path, attrs[i], *fx);
+        checked[i] = CheckedFor(files[i].path, attrs[i]);
+        ++done;
+        ++g_checkedThisSession;
+        Publish(effects, files, lazy, packs, checked);
+        if (done % 25 == 0) SaveChecked(root);
+        Sleep(20); // the game first
+    }
+    SaveChecked(root);
+    if (done) LOG_INFO("[Looks] Shader packs: checked " + std::to_string(done) + " .fx files in the background in " + std::to_string(GetTickCount() - t1) + " ms");
 }
 
 void StartWorker()
@@ -447,6 +610,8 @@ void RequestScan(bool force)
 
 bool Scanning() { return g_scanning || g_requested; }
 
+int CheckedThisSession() { return g_checkedThisSession; }
+
 bool Poll(UINT width, UINT height)
 {
     g_framePasses = 0;
@@ -506,7 +671,7 @@ bool Pending(const std::string& file)
     if (std::find(g_current->pending.begin(), g_current->pending.end(), l) != g_current->pending.end()) return true;
     if (std::find(g_current->lazy.begin(), g_current->lazy.end(), l) == g_current->lazy.end()) return false;
     std::lock_guard<std::mutex> lock(g_lock); // a pack file asked for since the last scan
-    return g_browse || g_want.count(l) != 0;
+    return g_want.count(l) != 0;
 }
 
 void WantFiles(const std::vector<std::string>& files)
@@ -533,6 +698,35 @@ void BrowsePacks()
     RequestScan(false);
 }
 
+std::map<std::string, std::string> FindFiles(const std::vector<std::string>& names)
+{
+    std::map<std::string, std::string> out;
+    const std::wstring root = ShadersFolder();
+    if (root.empty() || names.empty()) return out;
+    std::set<std::string> wanted;
+    for (const std::string& n : names) wanted.insert(LowerA(n));
+    auto nameOf = [](const std::wstring& path) { return LowerA(Utf8(path.substr(path.find_last_of(L'\\') + 1))); };
+    std::vector<std::wstring> mine;
+    ListFx(root, 0, mine);
+    ListFx(root + L"Shaders\\", 3, mine);
+    for (const std::wstring& p : mine) if (wanted.count(nameOf(p))) out.emplace(nameOf(p), std::string());
+    const std::wstring packRoot = root + L"Packs\\";
+    size_t packFiles = 0;
+    std::set<std::string> inPack;
+    for (const std::string& pack : ListPacks(packRoot)) // in the scan's order: the first pack with the file
+    {
+        std::vector<std::wstring> list;
+        if (packFiles < kMaxPackFiles) ListFx(packRoot + ApexUtil::ToWide(pack) + L"\\Shaders\\", 3, list);
+        for (const std::wstring& p : list)
+        {
+            if (packFiles++ >= kMaxPackFiles) break;
+            const std::string n = nameOf(p);
+            if (wanted.count(n) && inPack.insert(n).second) out[n] = pack; // a pack's file is named over the player's own
+        }
+    }
+    return out;
+}
+
 std::vector<std::string> PackFolders() { return g_current ? g_current->packs : std::vector<std::string>(); }
 
 PackCount CountPack(const std::string& folder)
@@ -556,6 +750,7 @@ std::vector<Listed> List()
 {
     std::vector<Listed> out;
     if (!g_current) return out;
+    std::vector<size_t> seq;
     for (size_t i = 0; i < g_current->techs.size(); ++i)
     {
         const UserTech& u = *g_current->techs[i];
@@ -564,6 +759,15 @@ std::vector<Listed> List()
         l.technique = u.technique; l.file = u.file; l.reason = u.reason; l.pack = u.pack;
         l.index = u.reason.empty() ? (int)i : -1;
         out.push_back(std::move(l));
+        seq.push_back(u.seq);
+    }
+    for (const CheckedTech& t : g_current->checked) // in the scan's file order with the compiled ones
+    {
+        Listed l;
+        l.technique = t.technique; l.file = t.file; l.pack = t.pack; l.checked = true;
+        const size_t at = (size_t)(std::upper_bound(seq.begin(), seq.end(), t.seq) - seq.begin());
+        out.insert(out.begin() + (std::ptrdiff_t)at, std::move(l));
+        seq.insert(seq.begin() + (std::ptrdiff_t)at, t.seq);
     }
     for (const auto& [f, why] : g_current->fileErrors)
     {

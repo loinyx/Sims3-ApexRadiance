@@ -43,6 +43,7 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <string_view>
 #include <set>
 #include <string>
 #include <vector>
@@ -187,7 +188,7 @@ void RebuildOrder()
         e.technique = x.substr(0, at);
         e.file = at == std::string::npos ? std::string() : x.substr(at + 1);
         e.shader = Looks::FindShader(e.technique, e.file);
-        if (e.shader < 0) continue; // only built-in shaders can be added
+        if (e.shader < 0 && !Looks::Fx::HasFile(e.file)) continue; // added here, its file gone: dropped (one not compiled yet waits)
         const int p = sortPos(x);
         size_t ins = g.order.size();
         for (size_t i = 0; i < g.order.size(); ++i)
@@ -261,21 +262,14 @@ const float* ValuesFor(size_t entry)
 }
 
 // ---------------------------------------------------------------------------------------------- device state
-// The first kRSBuiltIn render states, kSamplers samplers and kPSConsts constants are what the built-in passes change; a
-// run with a player's effect (Fx::Instance::Run) changes all of these lists, every sampler, more PS constants, the VS
-// constants and render targets 1..3.
-constexpr D3DRENDERSTATETYPE kRS[] = { D3DRS_ZENABLE, D3DRS_ZWRITEENABLE, D3DRS_ALPHABLENDENABLE, D3DRS_SEPARATEALPHABLENDENABLE,
-    D3DRS_SRCBLEND, D3DRS_DESTBLEND, D3DRS_BLENDOP, D3DRS_BLENDFACTOR, D3DRS_ALPHATESTENABLE, D3DRS_STENCILENABLE, D3DRS_CULLMODE,
-    D3DRS_SCISSORTESTENABLE, D3DRS_FOGENABLE, D3DRS_SRGBWRITEENABLE, D3DRS_CLIPPLANEENABLE, D3DRS_COLORWRITEENABLE,
-    D3DRS_SRCBLENDALPHA, D3DRS_DESTBLENDALPHA, D3DRS_BLENDOPALPHA, D3DRS_COLORWRITEENABLE1, D3DRS_COLORWRITEENABLE2, D3DRS_COLORWRITEENABLE3,
-    D3DRS_STENCILFUNC, D3DRS_STENCILPASS, D3DRS_STENCILFAIL, D3DRS_STENCILZFAIL, D3DRS_STENCILREF, D3DRS_STENCILMASK, D3DRS_STENCILWRITEMASK };
-constexpr D3DSAMPLERSTATETYPE kSS[] = { D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV,
-    D3DSAMP_SRGBTEXTURE, D3DSAMP_MAXMIPLEVEL, D3DSAMP_MIPMAPLODBIAS, D3DSAMP_ADDRESSW, D3DSAMP_BORDERCOLOR };
-constexpr int kRSCount = (int)(sizeof(kRS) / sizeof(kRS[0]));
-constexpr int kSSCount = (int)(sizeof(kSS) / sizeof(kSS[0]));
-constexpr int kRSBuiltIn = 16, kSSBuiltIn = 8;
-constexpr DWORD kSamplers = 6, kAllSamplers = 16;
-constexpr UINT kPSConsts = 32, kAllPSConsts = 224, kVSConsts = 256;
+// What the passes change (Looks::kSavedRenderStates, looks_runner.h): the built-in passes the first kBuiltIn* render
+// states, sampler states and samplers and the PS constants their parameters use; a run with a player's effect
+// (Fx::Instance::Run) all of the lists, every sampler, more PS constants, the VS constants and render targets 1..3.
+constexpr const D3DRENDERSTATETYPE* kRS = Looks::kSavedRenderStates;
+constexpr const D3DSAMPLERSTATETYPE* kSS = Looks::kSavedSamplerStates;
+constexpr int kRSCount = Looks::kSavedRenderStateCount, kSSCount = Looks::kSavedSamplerStateCount;
+constexpr DWORD kSamplers = Looks::kBuiltInSamplers, kAllSamplers = 16;
+constexpr UINT kAllPSConsts = 224, kVSConsts = 256;
 
 struct SavedState
 {
@@ -283,20 +277,22 @@ struct SavedState
     IDirect3DPixelShader9* ps = nullptr; IDirect3DVertexShader9* vs = nullptr; IDirect3DVertexDeclaration9* decl = nullptr; DWORD fvf = 0;
     IDirect3DVertexBuffer9* stream0 = nullptr; UINT stream0Offset = 0, stream0Stride = 0;
     IDirect3DBaseTexture9* tex[kAllSamplers] = {}; DWORD rs[kRSCount] = {}; DWORD ss[kAllSamplers][kSSCount] = {};
-    float psConst[kAllPSConsts * 4] = {}; D3DVIEWPORT9 viewport{}; RECT scissor{};
-    std::vector<float> vsConst;              // full only
+    float psConst[kAllPSConsts * 4]; D3DVIEWPORT9 viewport{}; RECT scissor{};
+    float vsConst[kVSConsts * 4];            // full only (okVsConst)
     IDirect3DSurface9* rtN[3] = {};          // render targets 1..3, full only
     bool full = false;                       // a player's effect runs: everything it changes is kept
-    DWORD samplers = kSamplers; int rsCount = kRSBuiltIn, ssCount = kSSBuiltIn; UINT psConsts = kPSConsts;
+    DWORD samplers = kSamplers; int rsCount = Looks::kBuiltInRenderStates, ssCount = Looks::kBuiltInSamplerStates; UINT psConsts = 3;
     IDirect3DDevice9* captured = nullptr;
     std::string failed; // the getters that failed (a D3D9 wrapper such as the RTX Remix bridge may not answer all of them)
-    bool okConst = false, okView = false, okScissor = false, okStream = false, okFvf = false;
+    bool okConst = false, okVsConst = false, okView = false, okScissor = false, okStream = false, okFvf = false;
     bool okSamplerStates = false, okRenderStates = false;
 
     ~SavedState() { if (captured) Restore(captured); else Release(); }
-    bool Capture(IDirect3DDevice9* dev, bool all)
+    // builtInConsts: the PS constants the built-in steps write (Looks::PsConstsUsed)
+    bool Capture(IDirect3DDevice9* dev, bool all, UINT builtInConsts)
     {
         full = all;
+        psConsts = (std::min)(builtInConsts, kAllPSConsts);
         if (full) { samplers = kAllSamplers; rsCount = kRSCount; ssCount = kSSCount; psConsts = kAllPSConsts; }
         auto note = [&](bool good, const char* name) { if (!good) failed += failed.empty() ? name : std::string(", ") + name; return good; };
         // Only the render target is required. Everything else is also kept by the D3DSBT_ALL state block around the
@@ -323,8 +319,7 @@ struct SavedState
         okConst = note(SUCCEEDED(dev->GetPixelShaderConstantF(0, psConst, psConsts)), "GetPixelShaderConstantF");
         if (full)
         {
-            vsConst.resize(kVSConsts * 4);
-            if (!note(SUCCEEDED(dev->GetVertexShaderConstantF(0, vsConst.data(), kVSConsts)), "GetVertexShaderConstantF")) vsConst.clear();
+            okVsConst = note(SUCCEEDED(dev->GetVertexShaderConstantF(0, vsConst, kVSConsts)), "GetVertexShaderConstantF");
             for (DWORD r = 0; r < 3; ++r) if (FAILED(dev->GetRenderTarget(r + 1, &rtN[r]))) rtN[r] = nullptr; // NOTFOUND: none bound
         }
         okView = note(SUCCEEDED(dev->GetViewport(&viewport)), "GetViewport");
@@ -348,7 +343,7 @@ struct SavedState
         }
         if (okRenderStates) for (int i = 0; i < rsCount; ++i) dev->SetRenderState(kRS[i], rs[i]);
         if (okConst) dev->SetPixelShaderConstantF(0, psConst, psConsts);
-        if (!vsConst.empty()) dev->SetVertexShaderConstantF(0, vsConst.data(), kVSConsts);
+        if (okVsConst) dev->SetVertexShaderConstantF(0, vsConst, kVSConsts);
         dev->SetPixelShader(ps);
         dev->SetVertexShader(vs);
         if (decl) dev->SetVertexDeclaration(decl); else if (okFvf) dev->SetFVF(fvf);
@@ -371,16 +366,17 @@ struct SavedState
 std::string g_why = "not run yet (no scene boundary seen)";
 std::string g_frameWhy;    // this frame's parts, joined; shown and logged at the next Present
 bool g_frameTried = false; // a part was attempted this frame
-void Why(std::string s)
+void Why(const std::string& s)
 {
     if (s == g_why) return;
-    g_why = std::move(s);
+    g_why = s;
     LOG_INFO("[Looks] " + g_why);
 }
-void PartWhy(const std::string& s)
+void PartWhy(std::string_view s) // appended in place: no allocation once the line has its size
 {
     if (s.empty()) return;
-    g_frameWhy += (g_frameWhy.empty() ? "" : "; then ") + s;
+    if (!g_frameWhy.empty()) g_frameWhy += "; then ";
+    g_frameWhy += s;
 }
 
 // Where each shader runs. The game's frame: its 3D scene, then Apex's scene boundary (first depth-off back-buffer draw,
@@ -464,7 +460,7 @@ void AtEndScene(IDirect3DDevice9* dev)
 void OnPresent(IDirect3DDevice9* dev)
 {
     if (!g_frameWhy.empty()) Why(g_frameWhy);
-    else if (g_frameTried) Why("nothing to run: every shader is switched off or not built in");
+    else if (g_frameTried) { static const std::string kNothing = "nothing to run: every shader is switched off or not built in"; Why(kNothing); }
     g_frameWhy.clear();
     g_frameTried = false;
     g_stripExpected = g_stripThisFrame;
@@ -487,7 +483,8 @@ void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask)
     if (!ShaderCache::PrecompileComplete()) { PartWhy("waiting: Apex shaders still compiling"); return; }
     auto inPart = [mask](size_t i) { return ((mask >> WhereOf(i)) & 1u) != 0; };
 
-    std::vector<Looks::Step> steps; // in the run list's order
+    static std::vector<Looks::Step> steps; // in the run list's order; kept between frames (no allocation per frame)
+    steps.clear();
     int keptOffUi = 0;
     bool userFx = false;
     for (size_t i = 0; i < g.order.size(); ++i)
@@ -505,6 +502,9 @@ void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask)
     rt->GetDesc(&rd);
     if (!g_beforeLookDone) ApexCapture::BeforeLook(dev, rt); // [capture] look = without | both: the frame before the look (only while a capture wants it); once a frame
     g_beforeLookDone = true;
+    // Strength 0 (a blend factor that rounds to 0, as Runner::Run computes it): the write-back keeps the destination x 1 and
+    // adds the source x 0, the picture as it was, so nothing runs
+    if (g.mix * 255.0f + 0.5f < 1.0f) { PartWhy("strength 0: nothing to draw"); rt->Release(); return; }
 
     // Depth only when it is the scene's own depth bound right now (not a reflection or UI pass)
     IDirect3DTexture9* depth = DepthShare::Texture();
@@ -518,10 +518,16 @@ void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask)
 
     {
         SavedState saved;
-        if (!saved.Capture(dev, userFx)) { PartWhy("stopped: device state could not be read (" + saved.failed + ")"); rt->Release(); return; }
+        if (!saved.Capture(dev, userFx, (UINT)Looks::PsConstsUsed(steps))) { PartWhy("stopped: device state could not be read (" + saved.failed + ")"); rt->Release(); return; }
         ExtraHooks::RawSetDepthStencilSurface(dev, nullptr); // depth is sampled, so it must not be bound
-        if (!g_sb) dev->CreateStateBlock(D3DSBT_ALL, &g_sb);
-        if (g_sb) g_sb->Capture();
+        // Everything the passes change is put back by hand (SavedState). Only when a getter failed (a D3D9 wrapper such as
+        // the RTX Remix bridge may not answer all of them) does a D3DSBT_ALL state block keep what could not be read.
+        IDirect3DStateBlock9* sb = nullptr;
+        if (!saved.failed.empty())
+        {
+            if (!g_sb) dev->CreateStateBlock(D3DSBT_ALL, &g_sb);
+            if (g_sb && SUCCEEDED(g_sb->Capture())) sb = g_sb;
+        }
 
         // One tick per game frame, not per run point (a shader that alternates on FRAMECOUNT parity would otherwise see
         // the same parity at both run points of a frame)
@@ -536,26 +542,28 @@ void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask)
             struct Key
             {
                 const char* mode; UINT w, h; int fmt; bool depth; bool drew; size_t steps; int kept; float mix; bool boundary;
-                std::vector<std::string> skipped;
                 bool operator==(const Key&) const = default;
             };
             static Key lastKey[3];
+            static std::vector<std::string> lastSkipped[3];
             static std::string lastLine[3];
-            Key k{ g_mode, rd.Width, rd.Height, (int)rd.Format, depth != nullptr, drew, steps.size(), keptOffUi, g.mix, g_boundaryThisFrame, g.runner.skipped() };
+            const Key k{ g_mode, rd.Width, rd.Height, (int)rd.Format, depth != nullptr, drew, steps.size(), keptOffUi, g.mix, g_boundaryThisFrame };
+            const std::vector<std::string>& skipped = g.runner.skipped();
             const int slot = atEndScene ? 2 : (mask & (1u << kBoundary)) ? 0 : 1;
-            if (lastLine[slot].empty() || !(k == lastKey[slot]))
+            if (lastLine[slot].empty() || !(k == lastKey[slot]) || skipped != lastSkipped[slot])
             {
                 std::string s = std::format("drawing at the {} on {}x{} (format {}), depth {}: {} shaders, {}, mix {:.0f}%",
                     g_mode, rd.Width, rd.Height, (int)rd.Format, depth ? "yes" : "no", steps.size(), drew ? "drew" : "nothing drawn", g.mix * 100.0f);
                 if (keptOffUi) s += std::format("; {} kept off the UI (depth{})", keptOffUi, g_boundaryThisFrame ? ", run on the world before it" : "");
-                if (!k.skipped.empty()) { s += "; skipped:"; for (auto& sk : k.skipped) s += " " + sk; }
+                if (!skipped.empty()) { s += "; skipped:"; for (auto& sk : skipped) s += " " + sk; }
                 lastLine[slot] = std::move(s);
-                lastKey[slot] = std::move(k);
+                lastKey[slot] = k;
+                lastSkipped[slot] = skipped;
             }
             PartWhy(lastLine[slot]);
+            if (g.skipped != skipped) g.skipped = skipped;
         }
-        g.skipped = g.runner.skipped();
-        if (g_sb) g_sb->Apply();
+        if (sb) sb->Apply();
     } // render target + depth restored here
     rt->Release();
 }
@@ -613,12 +621,12 @@ void Move(size_t i, int dir)
     RebuildOrder();
 }
 
-// Adds a built-in shader at the end of the run list (or switches the .ini's own one back on)
-void AddShader(int shader)
+// Adds a shader at the end of the run list (or switches the .ini's own one back on). A pack's shader not compiled yet
+// joins the list at once and compiles (RebuildOrder asks for its file).
+void AddShader(const std::string& technique, const std::string& file)
 {
-    const LooksShader& d = Looks::Shader(shader);
-    const std::string key = std::string(d.technique) + "@" + d.file;
-    g.off.erase(d.technique);
+    const std::string key = technique + "@" + file;
+    g.off.erase(technique);
     if (InIni(key)) return;
     RemoveExtra(key);
     g.extra.push_back(key);
@@ -631,6 +639,13 @@ void AddShader(int shader)
 bool InRunList(int shader)
 {
     for (size_t i = 0; i < g.order.size(); ++i) if (g.order[i].shader == shader && !IsOff(i)) return true;
+    return false;
+}
+
+bool InRunList(const std::string& technique, const std::string& file)
+{
+    for (size_t i = 0; i < g.order.size(); ++i)
+        if (g.order[i].technique == technique && _stricmp(g.order[i].file.c_str(), file.c_str()) == 0 && !IsOff(i)) return true;
     return false;
 }
 
@@ -1314,6 +1329,11 @@ bool ShaderRow(size_t i, int pos, int count, bool& reorder)
 
 // Where shaders come from, in the order the menu lists them: Apex's ports, each downloaded pack, then the player's own
 // .fx files. Only shaders that run here are listed.
+struct SourceRow
+{
+    int shader = -1;               // -1: a pack's shader that runs here (check cache), its file not compiled this session
+    std::string technique, file;
+};
 struct ShaderSource
 {
     std::string name;        // group name in Add a shader (English and translated for Apex's own, a pack's name as is)
@@ -1321,7 +1341,7 @@ struct ShaderSource
     std::string author;      // a pack's author (searched)
     std::string pack;        // a pack's folder ("" = not a pack)
     bool mine = false;       // the player's folder: the folder button
-    std::vector<int> shaders; // runnable shader indices
+    std::vector<SourceRow> rows; // in the folder's file order
 };
 
 // Rebuilt when the Shaders folder was compiled again
@@ -1333,13 +1353,18 @@ const std::vector<ShaderSource>& ShaderSources()
     generation = Looks::Fx::Generation();
     cache.clear();
     ShaderSource apex{ "Apex" };
-    for (int s = 0; s < Looks::ShaderCount(); ++s) apex.shaders.push_back(s);
+    for (int s = 0; s < Looks::ShaderCount(); ++s) apex.rows.push_back({ s, Looks::Shader(s).technique, Looks::Shader(s).file });
     cache.push_back(std::move(apex));
     const auto listed = Looks::Fx::List();
     auto runnable = [&](ShaderSource& src) {
         for (const auto& l : listed)
-            if (l.pack == src.pack && l.index >= 0 && Looks::FindShader(l.technique, l.file) == Looks::kUserShaderBase + l.index) // a built-in port of that name wins
-                src.shaders.push_back(Looks::kUserShaderBase + l.index);
+        {
+            if (l.pack != src.pack) continue;
+            if (l.index >= 0 && Looks::FindShader(l.technique, l.file) == Looks::kUserShaderBase + l.index) // a built-in port of that name wins
+                src.rows.push_back({ Looks::kUserShaderBase + l.index, l.technique, l.file });
+            else if (l.checked && Looks::FindShader(l.technique, l.file) < 0)
+                src.rows.push_back({ -1, l.technique, l.file });
+        }
     };
     for (const std::string& folder : Looks::Fx::PackFolders())
     {
@@ -1373,15 +1398,15 @@ std::string RowDescription(int shader)
 {
     if (!Looks::IsUserShader(shader)) return Describe(shader);
     for (const ShaderSource& src : ShaderSources())
-        if (std::find(src.shaders.begin(), src.shaders.end(), shader) != src.shaders.end())
-            return (src.translate ? std::string(I18n::Tr(src.name.c_str())) : src.name) + " Â· " + Describe(shader);
+        for (const SourceRow& r : src.rows)
+            if (r.shader == shader) return (src.translate ? std::string(I18n::Tr(src.name.c_str())) : src.name) + " \xC2\xB7 " + Describe(shader);
     return Describe(shader);
 }
 
 int ShaderTotal()
 {
     int n = 0;
-    for (const auto& s : ShaderSources()) n += (int)s.shaders.size();
+    for (const auto& s : ShaderSources()) n += (int)s.rows.size();
     return n;
 }
 
@@ -1463,38 +1488,77 @@ bool AddShaderModal(bool openNow)
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(padX, 0.0f));
             ImGui::BeginChild("##ShaderList", ImVec2(ImGui::GetWindowWidth(), std::min(360.0f * u, ImGui::GetIO().DisplaySize.y * 0.5f)), ImGuiChildFlags_AlwaysUseWindowPadding);
             ImGui::PopStyleVar();
-            int shown = 0;
-            for (const ShaderSource& src : ShaderSources())
+            // the rows that match, per source: worked out again only when the search, the kind, the sources, the run list
+            // or the language change (not every frame over hundreds of shaders)
+            struct Match { const ShaderSource* src; std::vector<const SourceRow*> rows; };
+            static std::vector<Match> matches;
+            static std::string lastQuery;
+            static int lastKind = -1, lastGeneration = -1;
+            static I18n::Lang lastLang{};
+            const std::vector<ShaderSource>& sources = ShaderSources();
+            if (q != lastQuery || kind != lastKind || Looks::Fx::Generation() != lastGeneration || matches.empty() ||
+                I18n::Current() != lastLang)
             {
-                std::vector<int> match;
-                const std::string srcText = Lower(src.name + " " + (src.translate ? I18n::Tr(src.name.c_str()) : "") + " " + src.author);
-                for (int s : src.shaders)
+                lastQuery = q; lastKind = kind; lastGeneration = Looks::Fx::Generation(); lastLang = I18n::Current();
+                matches.clear();
+                for (const ShaderSource& src : sources)
                 {
-                    const LooksShader& d = Looks::Shader(s);
-                    if (kind && (int)d.kind != kind) continue;
-                    if (!q.empty() && Lower(std::string(d.technique) + " " + Describe(s) + " " + d.description + " " + srcText).find(q) == std::string::npos) continue;
-                    match.push_back(s);
+                    Match m{ &src, {} };
+                    const std::string srcText = Lower(src.name + " " + (src.translate ? I18n::Tr(src.name.c_str()) : "") + " " + src.author);
+                    for (const SourceRow& r : src.rows)
+                    {
+                        const bool built = r.shader >= 0;
+                        if (kind && (!built || (int)Looks::Shader(r.shader).kind != kind)) continue;
+                        if (!q.empty())
+                        {
+                            const std::string text = built ? std::string(Looks::Shader(r.shader).technique) + " " + Describe(r.shader) + " " + Looks::Shader(r.shader).description
+                                                           : r.technique + " " + r.file + " " + r.file;
+                            if (Lower(text + " " + srcText).find(q) == std::string::npos) continue;
+                        }
+                        m.rows.push_back(&r);
+                    }
+                    if (!m.rows.empty()) matches.push_back(std::move(m)); // a source with nothing to show is hidden
                 }
-                if (match.empty()) continue; // a source with nothing to show is hidden
-                if (!GroupHeader(src, (int)match.size(), !q.empty())) continue;
-                for (int s : match)
+            }
+            // a row's height, measured when it was last drawn at this width: rows outside the view only advance the layout
+            static std::map<std::string, float> rowHeight;
+            static float heightWidth = -1.0f, heightFont = -1.0f;
+            if (ImGui::GetContentRegionAvail().x != heightWidth || ImGui::GetFontSize() != heightFont)
+            {
+                rowHeight.clear();
+                heightWidth = ImGui::GetContentRegionAvail().x;
+                heightFont = ImGui::GetFontSize();
+            }
+            int shown = 0;
+            for (const Match& m : matches)
+            {
+                const ShaderSource& src = *m.src;
+                if (!GroupHeader(src, (int)m.rows.size(), !q.empty())) continue;
+                for (const SourceRow* r : m.rows)
                 {
-                    const LooksShader& d = Looks::Shader(s);
+                    const bool built = r->shader >= 0;
+                    const char* name = built ? Looks::Shader(r->shader).technique : r->technique.c_str();
+                    const char* desc = built ? Describe(r->shader) : r->file.c_str();
                     ++shown;
-                    ImGui::PushID(s);
-                    const bool added = InRunList(s);
+                    const std::string key = name + std::string("@") + (built ? Looks::Shader(r->shader).file : r->file.c_str());
+                    ImGui::PushID(key.c_str());
+                    const bool added = built ? InRunList(r->shader) : InRunList(r->technique, r->file);
                     const char* button = added ? "Added" : "Add";
                     ApexUi::SetNextRowUntranslated();
-                    if (ApexUi::BeginControlRow(d.technique, Describe(s), ApexUi::ButtonWidth(I18n::Tr(button), false)))
+                    auto known = rowHeight.find(key);
+                    if (known != rowHeight.end() && !ImGui::IsRectVisible(ImVec2(1.0f, known->second + ApexUi::kSpace4 * u)))
+                        ApexUi::SkipControlRow(name, desc, known->second); // out of view: the same space, nothing drawn
+                    else if (ApexUi::BeginControlRow(name, desc, ApexUi::ButtonWidth(I18n::Tr(button), false)))
                     {
                         ImGui::BeginDisabled(added);
                         if (ApexUi::TextButton(button))
                         {
-                            AddShader(s);
-                            ApexUi::ReportChange(I18n::Trf("{} added", d.technique).c_str());
+                            AddShader(built ? std::string(Looks::Shader(r->shader).technique) : r->technique, built ? std::string(Looks::Shader(r->shader).file) : r->file);
+                            ApexUi::ReportChange(I18n::Trf("{} added", name).c_str());
                             changed = true;
                         }
                         ImGui::EndDisabled();
+                        rowHeight[key] = ApexUi::ControlRowHeight();
                         ApexUi::EndControlRow();
                     }
                     ImGui::PopID();
@@ -2054,7 +2118,7 @@ public:
             if (gpu) ImGui::TextDisabled("GPU memory: %.0f MB", gpu / 1048576.0);
             // why the player's .fx techniques that do not run were refused (the public menu lists only what runs)
             for (const auto& l : Looks::Fx::List())
-                if (l.index < 0) ImGui::TextDisabled("%s (%s): %s", l.technique.c_str(), l.file.c_str(), l.reason.c_str());
+                if (l.index < 0 && !l.checked) ImGui::TextDisabled("%s (%s): %s", l.technique.c_str(), l.file.c_str(), l.reason.c_str());
             ApexUi::EndAdvanced();
         }
         if (changed) NotifySettingChanged();
@@ -2251,10 +2315,10 @@ public:
             {
                 std::string note = p->author;
                 if (const std::string run = RunHere(p->pack); !run.empty()) note += (note.empty() ? "" : "  \xC2\xB7  ") + run;
-                rows.push_back({ p->name, note, (int)p->shaders.size(), p->pack, false });
+                rows.push_back({ p->name, note, (int)p->rows.size(), p->pack, false });
             }
             rows.push_back({ "Your shaders", I18n::Tr(g.active && Looks::Fx::Scanning() ? "Checking your shaders\xE2\x80\xA6" : ".fx files in the Shaders folder"),
-                             (int)ShaderSources().back().shaders.size(), "", true });
+                             (int)ShaderSources().back().rows.size(), "", true });
             for (const LibRow& src : rows)
             {
                 ImGui::PushID(src.row.c_str());
@@ -2403,21 +2467,35 @@ void OfferPresetPacks(const std::string& preset, const std::vector<std::string>&
 
 std::vector<std::string> NeededPacks()
 {
-    std::vector<std::string> names;
-    const auto listed = Looks::Fx::List();
-    for (const auto& e : g.order)
+    // the look's run list: this session's once the look was loaded, else its .ini's techniques and the shaders added here
+    // (so a preset exported while Shaders is off names its packs too)
+    std::vector<Looks::PresetEntry> entries = g.order;
+    if (!g.loaded && !g.preset.empty())
     {
-        if (e.shader >= 0 && !Looks::IsUserShader(e.shader)) continue; // a built-in port
+        std::string text;
+        Looks::Preset ini;
+        if (Looks::LookText(g.preset, text) && Looks::ParsePreset(text, ini)) entries = ini.order;
+        for (const std::string& x : g.extra)
+        {
+            const size_t at = x.find('@');
+            if (at == std::string::npos) continue;
+            Looks::PresetEntry e;
+            e.technique = x.substr(0, at);
+            e.file = x.substr(at + 1);
+            entries.push_back(e);
+        }
+    }
+    std::vector<std::string> files;
+    for (const auto& e : entries) files.push_back(e.file);
+    const std::map<std::string, std::string> where = Looks::Fx::FindFiles(files); // read from the folders, not this session's compiles
+    std::vector<std::string> names;
+    for (const auto& e : entries)
+    {
+        const int s = Looks::FindShader(e.technique, e.file);
+        if (s >= 0 && !Looks::IsUserShader(s)) continue; // a built-in port
         std::string pack;
-        bool mine = false;
-        for (const auto& l : listed)
-            if (_stricmp(l.file.c_str(), e.file.c_str()) == 0)
-            {
-                if (l.pack.empty()) mine = true;
-                else { pack = l.pack; break; }
-            }
-        if (pack.empty() && !mine)
-            if (const Looks::Packs::Pack* p = Looks::Packs::PackForFile(e.file, e.technique)) pack = p->folder;
+        if (auto it = where.find(Lower(e.file)); it != where.end()) pack = it->second; // a downloaded pack's, or "" for the player's own
+        else if (const Looks::Packs::Pack* p = Looks::Packs::PackForFile(e.file, e.technique)) pack = p->folder;
         if (pack.empty()) continue;
         const std::string name = PackName(pack);
         if (std::find(names.begin(), names.end(), name) == names.end() && names.size() < 32) names.push_back(name);

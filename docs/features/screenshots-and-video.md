@@ -113,4 +113,5 @@ device reset stops the recording.
 the Apex note style on the foreground list: dot, time, size, stop key, or in amber the time left within warn_before_s. Top
 centre moves under an Apex note when one shows. It is skipped while a screenshot is taken, and hidden when the menu is
 recorded but timer_in_video is off (it would end up in the video). The external recorder gets the time only (from when Apex sent
-its key).
+its key). The pill's text is built again only when it changes (about once a second), and the video settings the frame
+reads are copied only after the menu changed them, so a recording frame allocates nothing on the render thread for them.

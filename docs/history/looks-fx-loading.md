@@ -128,3 +128,45 @@ detail), with *Add .fx files…*, *Open the Shaders folder* and *Check again* wh
 log and in the developer build's *Live counters*.
 
 **Outcome:** built (0 errors, 0 warnings); offline checks pass (`tools/looks_fx_check`); not checked in the game.
+
+### 2026-11-14: performance and memory pass
+
+**Context:** the per-frame cost of a look, the work done while Looks is off, and the compiles and memory of browsing
+shader packs, with one rule: the picture must not change.
+
+**Changes:**
+
+- Device state: `SavedState` puts back by hand exactly what the passes change (the lists moved to
+  `features/looks_runner.h`). The built-in passes' PS constants are saved up to the highest register their parameters
+  use (`Looks::PsConstsUsed`): PD80 Selective Color writes up to c63, which the hand restore of c0..c31 left to the state
+  block. The `D3DSBT_ALL` state block, captured and applied at every run point (up to three a frame), is now used only
+  when a getter fails (RTX Remix). The VS constants of a full save live in a fixed array instead of a vector per run.
+- *Strength* 0 (a blend factor that rounds to 0) skips the chain: the write-back was destination x 1 + source x 0.
+- No allocation per frame in the run path: the step list is kept, the status line is appended in place and compared
+  without copies, the render-state cache of `Fx::Instance::Run` is on the stack.
+- Compile cache: `Fx::Compile` keeps D3DCompile's results in `Shaders\.cache\fx_<path hash>_<W>x<H>.bin`, keyed by the
+  generated HLSL of every entry point, the target and D3DCompiler's version.
+- No shader is skipped for neutral values: none of the ports is an exact identity at its defaults.
+- With Looks off nothing was hooked or polled already (hooks are registered at Install; the folder is read on request
+  only), so no folder watcher was added: a watcher would be new work.
+
+**Measured** (`tools/looks_fx_check`, Direct3D 9 HAL, 1920x1080, the six packs of the first entry):
+
+| What | Before | After |
+|---|---|---|
+| Device state not put back by hand after the 17 ports (`--state`) | 32 PS constants (c32..c63, left to the state block) | 0 of 118 changed states |
+| ... after the ports and 24 techniques of players' effects | | 0 of 588 |
+| `D3DSBT_ALL` Capture + Apply per run point (CPU) | 26 to 28 us, up to 3 a frame | 0 (only when a getter fails) |
+| The chain at Strength 0: Natural / all 17 ports (CPU + GPU, flushed) | 1.4 to 1.6 / 1.4 to 3.7 ms a frame | 0 |
+| Compiling the 131 .fx files | 76.9 s | 76.9 s the first time, 0.33 s after |
+| `dh_uber_rt.fx` | 17.8 s | 16 ms from the cache |
+
+`--cache`: the 131 effects compiled with and without the cache have the same bytecode, notes and reasons; a test effect
+compiles again after its `.fxh`, its `.fx` or the picture size changed and is read from the cache otherwise.
+
+**Picture:** `--compare --hashes` (17 ports and their originals, four value sets, gradient, noise and two game
+screenshots: 272 pictures) and `--run --hashes` (146 techniques of the six packs) print the same hashes when built from
+the sources before the change (`/DLOOKS_FX_CHECK_BASELINE`) and after it: the same pixels.
+
+**Outcome:** kept; built (0 errors, 0 warnings); offline checks pass; not checked in the game (the state block's share
+of the GPU driver's work and the frame time in the game are not measured).

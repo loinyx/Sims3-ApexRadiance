@@ -156,6 +156,11 @@ bool SwitchRow(const char* label, bool* v, const char* tooltip = nullptr, BoolDe
 // nestable.
 bool BeginControlRow(const char* label, const char* description, float controlsWidth, IconId icon = IconId::None, float controlsHeight = 0.0f);
 void EndControlRow();
+// A long list draws only the rows it shows: a row outside the view advances the layout exactly as BeginControlRow +
+// EndControlRow did with the same label and description, by its height measured then (ControlRowHeight, read before
+// EndControlRow), without drawing it.
+void SkipControlRow(const char* label, const char* description, float height);
+float ControlRowHeight();
 // The last control row: its top (screen y) and whether its controls went under the text (narrow)
 void LastControlRow(float* topScreenY, bool* stacked);
 // A small muted chip ("~0.4 ms"); submitted as an item (hover it for a tooltip)

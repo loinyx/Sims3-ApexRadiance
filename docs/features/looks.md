@@ -92,11 +92,12 @@ to show is hidden. A search field matches shader, description, source or author;
 Light, Film & camera, Stylized) applies to the built-in ports. The list spans the modal edge to edge between two
 hairlines; under it, "Missing something? Get more packs or add your own .fx files." with *Get shader packs* at its
 right (under the line when they do not fit; it closes the modal on Library's Get shader packs card). A long group title is
-cut with "…" before the folder button. Shaders that cannot run here are never listed. Opening it compiles the
-downloaded packs' files once a session.
+cut with "…" before the folder button. Shaders that cannot run here are never listed. Opening it compiles nothing: a
+downloaded pack's shaders are listed from the check cache ([Shader packs](#shader-packs)), and adding one compiles its
+file (its row shows "checking the file…" under *can't run here* until then).
 
 **Your library** card (tab Library): "<n> shaders from <k> sources" (only what runs here) and *Check again*
-(secondary: compiles the Shaders folder and the packs again where they changed), one row per source with its icon:
+(secondary: compiles the Shaders folder again and checks the packs again where they changed), one row per source with its icon:
 *Built into Apex* (`sparkles`, "17 shaders"), each downloaded pack (`package`; its name, "<author> · <x> of <y> run
 here", its count and a ⋯ menu: Update, Remove, Open on GitHub), and *Your shaders* (".fx files in the Shaders folder",
 "Checking your shaders…" while it compiles; `user-round`; its count, *Add .fx files…* and the folder button). While packs download,
@@ -132,7 +133,9 @@ refused; the same file is reused and a different file of that name gets a number
 
 - When Looks is turned on, every `.fx` compiles on a background thread with ReShade's own effect compiler (vendored,
   BSD 3-Clause) and its shader model 3.0 code generator, the path ReShade itself uses on Direct3D 9, for the picture's
-  size. Shaders appear in the menu as they compile; unchanged files are not compiled again in the session.
+  size. Shaders appear in the menu as they compile; unchanged files are not compiled again in the session, and the
+  compiled shaders are kept in `Shaders\.cache\` (one file per effect and picture size), so the next session reads
+  them instead of compiling (see [Performance and memory](#performance-and-memory)).
 - A preset that names a technique of those files runs it in its place in the run list, with the .ini's values, beside the
   built-in ports. A built-in port of the same technique and file wins.
 - What runs: vertex and pixel shader passes with their render targets (up to 4 per pass), blending, stencil, sRGB
@@ -168,8 +171,11 @@ under its author's licence, when the player clicks Download.
   the pack's branch, at most 64 MB, 5000 files and 128 MB kept, only `.fx`, `.fxh` and images, no unsafe paths. A pack
   goes to `Shaders\Packs\<pack>\Shaders\` and `Textures\`; an update replaces it only once the new files are all
   written. ReShade's standard effects (`ReShade.fxh`, which most packs include) download first when missing.
-- A downloaded pack's `.fx` compiles only when a look names it or the player opens *Add a shader* or the Get shader
-  packs card (once a session). Its includes and textures are searched in the pack, the player's folder, then every
+- A downloaded pack's `.fx` compiles only when a look names it or the player adds one of its shaders. What the others
+  run is read from the check cache (`Shaders\.cache\checked.txt`: per file, its size and time and which techniques run
+  here); while *Add a shader* or the Get shader packs card is open, the files it does not know (new or changed) are
+  checked once in the background, one at a time at low priority, and let go, so "<x> of <y> run here" and the list fill
+  in. A look that wants a file comes first. Its includes and textures are searched in the pack, the player's folder, then every
   other pack (the standard effects first), as in one `reshade-shaders` folder. A file of the same name in the
   player's own folder wins.
 - A downloaded pack is never changed or removed except by *Update* or *Remove*. A pack gone from GitHub fails with
@@ -244,7 +250,8 @@ written.
 ## Presets
 
 `[patches.Looks]` is the Shaders part (bit 10). A preset also stores `packs`, the names of the packs the look's run list
-uses (`Looks::NeededPacks`: a downloaded pack's file, or the pack of ReShade's list that has a missing file); importing
+uses (`Looks::NeededPacks`: a downloaded pack's file, or the pack of ReShade's list that has a missing file, read from the
+look's .ini and the folders, so it is right while Shaders is off); importing
 a preset with the Shaders part offers those not downloaded in the same note card as an imported look ("Imported:
 <preset>", "This preset uses shaders from <packs>, which you don't have yet"), on the Presets page and on Shaders >
 Look. A `[patches.Looks]` table without `packs` was written by a 3.3.0 development build, whose Color part carried
@@ -267,8 +274,8 @@ the copy gets a numbered name, which the look then does not use); names with a f
 - **Captures:** `%PresetName%` in file names and *Save the look's preset too* use the look's .ini; *Look only while a
   look is on* captures the frame before the look (`ApexCapture::BeforeLook`).
 - **ReShade or GShade installed too:** both grade the picture; turn one off.
-- **RTX Remix bridge:** the device state the passes change is put back by hand and by a state block, for getters the
-  bridge does not answer.
+- **RTX Remix bridge:** the device state the passes change is put back by hand, and by a `D3DSBT_ALL` state block when a
+  getter the bridge does not answer failed.
 
 ## Limitations
 
@@ -279,8 +286,8 @@ the copy gets a numbered name, which the look then does not use); names with a f
   change they wait while the folder compiles again. A changed `.fxh` alone is noticed by *Check again*, not by the
   automatic scan.
 - `PreprocessorDefinitions` of a preset are not applied: the ports are compiled with the .fx defaults.
-- Downloaded packs compile for the picture's size like the player's files; with many packs, opening *Add a shader*
-  compiles them all once a session in the background (the memory they keep is not measured in the game).
+- Downloaded packs compile for the picture's size like the player's files. The check cache knows only a file's own
+  size and time: a pack's changed `.fxh` alone shows in "<x> of <y> run here" after *Check again*.
 - *Reset all settings* resets the switch, Strength, Applies to and Order; the chosen look and its edits stay.
 
 ## Technical reference
@@ -294,12 +301,39 @@ the copy gets a numbered name, which the look then does not use); names with a f
 - Constants: c0 `1/W, 1/H, W, H`, c1 pass data, c2 depth far plane; parameters from c8 (PD80 Selective Color uses up to
   c63). ReShade's uniform sources timer, frametime, framecount and random are filled once per frame.
 - The player's effects: compiled by `third_party/reshadefx` (shader model 3.0) and `D3DCompile`; each runs in place on
-  the ping texture as ReShade runs it on the back buffer (uniforms from PS/VS `c0`, `__TEXEL_SIZE__` at VS `c255`), and
-  the device state around a run with one is saved in full (render states, 16 samplers, PS and VS constants, render
-  targets 1 to 3). Textures and render targets are released before a device Reset and created again at the next run.
+  the ping texture as ReShade runs it on the back buffer (uniforms from PS/VS `c0`, `__TEXEL_SIZE__` at VS `c255`).
+  Textures and render targets are released before a device Reset and created again at the next run.
+- Device state: around each run point (`SavedState` in `patches/looks_patch.cpp`) Apex reads and puts back by hand the
+  state the passes change, listed in `Looks::kSavedRenderStates` / `kSavedSamplerStates` (`features/looks_runner.h`):
+  for the built-in passes 16 render states, 8 sampler states of s0 to s5 and the PS constants up to the highest register
+  their parameters use (`Looks::PsConstsUsed`); with a player's effect every listed state, 16 samplers, PS c0 to c223,
+  VS c0 to c255 and render targets 1 to 3; always the shaders, declaration or FVF, stream 0, render target 0,
+  depth-stencil, viewport and scissor. `tools/looks_fx_check --state` checks that nothing else changes. A `D3DSBT_ALL`
+  state block is captured and applied only when a getter failed.
 - Shader registration is lazy (`RegisterShaders` on the first Install); the cache compiles them on a new worker run.
 - Everything read from files is bounded: a preset over 1 MB is refused, at most 256 techniques are kept, at most 2000
   files are listed per source, and non-finite values are ignored.
+
+## Performance and memory
+
+- **Off or never used:** nothing is hooked and nothing runs per frame; the shaders are registered and the Shaders folder
+  scanned at the first Install. There is no folder polling: the folder is read when Looks is turned on, by *Check
+  again*, after *Add .fx files…*, a download or a removal, when a look wants a pack file and after a picture size change.
+- **Per frame with a look on:** at most three run points; each reads and puts back only the listed state (no state block
+  when every getter answers) and, while no shader is skipped, allocates nothing (the step list and the status line keep
+  their memory).
+  *Strength* 0 skips the chain (the write-back's blend factor is 0, so the picture is the game's to the bit).
+  A shader is never skipped for having neutral values: the ports' maths are not exact identities.
+- **Compiling:** the player's and the wanted packs' effects compile once per session and picture size; D3DCompile's
+  results are kept in `Shaders\.cache\` keyed by every entry point's generated HLSL (the preprocessed source with its
+  includes and macros), the target and D3DCompiler's version, so a changed `.fx`, `.fxh` or picture size compiles
+  again and anything else is read back.
+- **Browsing packs:** *Add a shader* and Get shader packs compile nothing and keep no pack effect in memory (the check
+  cache above); the background check of unknown files lets each effect go.
+- **Menu:** *Add a shader* works out its filtered list only when the search, Kind, the sources or the language
+  change, and lays out only the rows in view (the others take their measured height).
+
+Measurements: [history/looks-fx-loading.md](../history/looks-fx-loading.md#2026-11-14-performance-and-memory-pass), [history/looks-shader-packs.md](../history/looks-shader-packs.md#2026-11-14-browsing-packs-compiles-nothing).
 
 ## Rejected approaches
 

@@ -9,6 +9,7 @@
 // inside the Shaders folder, and a technique that cannot run on Direct3D 9 gets a reason instead of running.
 #include <d3d9.h>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -98,15 +99,19 @@ struct Effect
 
 // Where a compile may read: root = the Shaders folder (with a trailing backslash); includes are searched in
 // includeDirs after the including file's own folder, texture files in textureDirs (and their subfolders).
+// cacheDir: where compiled shaders are kept between sessions ("" = no compile cache; tools leave it empty).
 struct Folders
 {
     std::wstring root;
     std::vector<std::wstring> includeDirs, textureDirs;
+    std::wstring cacheDir;
 };
 
 // Preprocess, parse, generate shader model 3.0 HLSL and D3DCompile every entry point the techniques use, at the given
 // buffer size. Never throws (an exception becomes out.error). False when the file cannot run at all (out.error).
 bool Compile(const std::wstring& fxPath, const Folders& folders, UINT width, UINT height, Effect& out);
+// Compiles that read every shader of an effect from the compile cache / that compiled and wrote it (this process)
+void CacheCounts(int* hits, int* misses);
 // True when path (absolute) is inside root and has no ".." part
 bool InsideRoot(const std::wstring& root, const std::wstring& path);
 // An image file (at most kMaxTextureFileBytes) decoded with WIC to BGRA, resized to w x h
@@ -183,16 +188,22 @@ bool HasFile(const std::string& file); // a .fx of that name is in the folder
 bool Pending(const std::string& file); // that file is not compiled yet (or the first scan has not finished)
 
 // The Add a shader list: every user technique, runnable (index >= 0) or not (reason); pack = the downloaded pack's
-// folder (Shaders\Packs\<pack>), "" for the player's own files
-struct Listed { int index = -1; std::string technique, file, reason, pack; };
+// folder (Shaders\Packs\<pack>), "" for the player's own files. checked: a pack technique that runs here as an earlier
+// compile found (the check cache), its file not compiled this session (index -1, no reason): adding it to a look compiles it.
+struct Listed { int index = -1; std::string technique, file, reason, pack; bool checked = false; };
 std::vector<Listed> List();
 
 // Downloaded packs (Shaders\Packs\<folder>\Shaders and Textures) are scanned with the folder, but a pack's .fx compiles
-// only when wanted: a file a look names (WantFiles, the render thread, with the look's missing files), or every pack
-// file while the player browses shaders (BrowsePacks, once a session).
+// only when a look names it (WantFiles, the render thread, with the look's missing files). What the others run comes from
+// the check cache (Shaders\.cache\checked.txt); while the player browses shaders (BrowsePacks, once a session) the pack
+// files it does not know yet are checked in the background, one at a time, and let go.
 void WantFiles(const std::vector<std::string>& files);
 void BrowsePacks();
+int CheckedThisSession(); // pack files checked in the background this session
 std::vector<std::string> PackFolders(); // folders in Shaders\Packs (complete downloads only), as the last scan found them
+// Where .fx files of these names are, read from the folders now (also while Looks is off): per lower-case name, the first
+// downloaded pack that has it, or "" when only the player's own folder has it; a name found nowhere is left out
+std::map<std::string, std::string> FindFiles(const std::vector<std::string>& names);
 struct PackCount { int runnable = 0, total = 0; bool checked = false; }; // checked: every file of the pack compiled
 PackCount CountPack(const std::string& folder);
 

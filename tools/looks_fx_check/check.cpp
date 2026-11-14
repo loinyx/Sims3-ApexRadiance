@@ -17,10 +17,12 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <psapi.h>
 
 #pragma comment(lib, "d3d9.lib")
 #pragma comment(lib, "d3dcompiler.lib")
 #pragma comment(lib, "user32.lib")
+#pragma comment(lib, "psapi.lib")
 
 using namespace Looks::Fx;
 
@@ -35,6 +37,38 @@ namespace CrashReport { void ThreadStart() {} }
 namespace HookGuard { void Note(const char* where) noexcept { fprintf(stderr, "caught: %s\n", where); } }
 
 static int g_checks = 0, g_failures = 0;
+#ifdef LOOKS_FX_CHECK_BASELINE // built against an older Looks (the sources before a change) to compare its pictures and memory
+static bool IsChecked(const Listed&) { return false; }
+#else
+static bool IsChecked(const Listed& l) { return l.checked; }
+#endif
+static bool g_hashes = false; // --hashes: one line per picture run, to compare two builds' pictures (diff of the outputs)
+
+// FNV-1a of a picture's RGB: two builds that print the same hash drew the same pixels (0 levels apart)
+static unsigned long long PictureHash(const uint32_t* px, size_t n)
+{
+    unsigned long long h = 14695981039346656037ull;
+    for (size_t i = 0; i < n; ++i) { const uint32_t c = px[i] & 0xFFFFFFu; for (int b = 0; b < 3; ++b) h = (h ^ ((c >> (b * 8)) & 0xFF)) * 1099511628211ull; }
+    return h;
+}
+
+// The process's private bytes and its largest free block of address space (a 32-bit game: room matters more than bytes)
+static void Memory(const char* when)
+{
+    PROCESS_MEMORY_COUNTERS_EX pmc{};
+    pmc.cb = sizeof pmc;
+    GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof pmc);
+    size_t largest = 0;
+    MEMORY_BASIC_INFORMATION mi{};
+    for (const char* p = nullptr; VirtualQuery(p, &mi, sizeof mi) == sizeof mi;)
+    {
+        if (mi.State == MEM_FREE) largest = std::max(largest, (size_t)mi.RegionSize);
+        const char* next = (const char*)mi.BaseAddress + mi.RegionSize;
+        if (next <= p) break;
+        p = next;
+    }
+    printf("memory %s: private %.1f MB, largest free block %.1f MB\n", when, pmc.PrivateUsage / 1048576.0, largest / 1048576.0);
+}
 static void Check(bool ok, const std::string& what)
 {
     ++g_checks;
@@ -77,7 +111,7 @@ static void CatalogChecks(IDirect3DDevice9* dev)
         else if (!strcmp(d.params[i].key, "framecount")) Check(d.params[i].kind == LooksParamKind::Source, "framecount is a source");
     Check(found, "fBlackLineMultiply is a parameter");
     int listed = 0, hiddenReasons = 0;
-    for (const Listed& l : List()) { ++listed; hiddenReasons += l.index < 0; }
+    for (const Listed& l : List()) { ++listed; hiddenReasons += l.index < 0 && !IsChecked(l); }
     printf("catalog: %d listed, %d can't run\n", listed, hiddenReasons);
     if (dev)
     {
@@ -99,33 +133,71 @@ static void CatalogChecks(IDirect3DDevice9* dev)
 
 static std::string Narrow(const std::wstring& w);
 
-// --packs <Apex Radiance folder with Shaders\Packs\<pack>\ inside>: a pack's files are not compiled until wanted, then
-// the scan lists their techniques under the pack and counts what runs
+// --packs <Apex Radiance folder with Shaders\Packs\<pack>\ inside>: a pack's files are not compiled until wanted; browsing
+// fills "<x> of <y> run here" and the Add a shader list from the check cache (Shaders\.cache), checking the files it does
+// not know in the background and letting each effect go; a file a look wants compiles. Writes Shaders\.cache in that
+// folder (use a scratch copy). The memory lines measure the browse.
 static void PackChecks()
 {
     auto settle = [] {
         const DWORD t0 = GetTickCount();
-        do { Poll(1920, 1080); Sleep(50); } while ((Scanning() || !Scanned()) && GetTickCount() - t0 < 600000);
+        do { Poll(1920, 1080); Sleep(50); } while ((Scanning() || !Scanned()) && GetTickCount() - t0 < 1800000);
         Poll(1920, 1080);
     };
+    Memory("at start");
+    DWORD t0 = GetTickCount();
     RequestScan();
     settle();
+    printf("scan: %lu ms\n", GetTickCount() - t0);
+    Memory("after the scan");
     const std::vector<std::string> packs = PackFolders();
     Check(!packs.empty(), "packs found in Shaders\\Packs");
     int before = 0;
-    for (const Listed& l : List()) before += !l.pack.empty();
+    for (const Listed& l : List()) before += !l.pack.empty() && l.index >= 0;
     Check(before == 0, "pack files are not compiled before they are wanted");
+    t0 = GetTickCount();
     BrowsePacks();
     settle();
+    printf("browse: %lu ms\n", GetTickCount() - t0);
+    Memory("after browsing every pack");
+    int compiled = 0, listedAll = 0;
+    for (const Listed& l : List()) { compiled += !l.pack.empty() && l.index >= 0; listedAll += !l.pack.empty() && (l.index >= 0 || IsChecked(l)); }
+#ifndef LOOKS_FX_CHECK_BASELINE
+    printf("browse: %d pack files checked in the background this run, %d pack techniques listed, %d compiled and kept\n", CheckedThisSession(), listedAll, compiled);
+    Check(compiled == 0, "browsing keeps no pack effect compiled");
+#else
+    printf("browse: %d pack techniques listed, %d compiled and kept\n", listedAll, compiled);
+#endif
     for (const std::string& p : packs)
     {
         const PackCount n = CountPack(p);
         int listed = 0;
-        for (const Listed& l : List()) listed += l.pack == p;
-        printf("pack %s: %d of %d run here (%s)\n", p.c_str(), n.runnable, n.total, n.checked ? "all compiled" : "not all compiled");
-        Check(n.checked, p + ": every file compiled after BrowsePacks");
-        Check(listed >= n.runnable, p + ": its techniques are listed under the pack");
+        for (const Listed& l : List()) listed += l.pack == p && (l.index >= 0 || IsChecked(l));
+        printf("pack %s: %d of %d run here (%s), %d listed\n", p.c_str(), n.runnable, n.total, n.checked ? "all checked" : "not all checked", listed);
+        Check(n.checked, p + ": every file checked after BrowsePacks");
+        Check(listed >= 1 || n.runnable == 0, p + ": its techniques are listed under the pack");
     }
+#ifndef LOOKS_FX_CHECK_BASELINE
+    // a look that names a pack file: that file compiles, the others stay as they were
+    std::string file;
+    for (const Listed& l : List()) if (IsChecked(l)) { file = l.file; break; }
+    if (!file.empty())
+    {
+        t0 = GetTickCount();
+        WantFiles({ file });
+        settle();
+        int now = 0;
+        for (const Listed& l : List()) now += l.index >= 0 && !l.pack.empty() && _stricmp(l.file.c_str(), file.c_str()) == 0;
+        printf("want %s: compiled in %lu ms\n", file.c_str(), GetTickCount() - t0);
+        Check(now >= 1, "a wanted pack file compiles and its techniques run");
+        // what a preset export names: read from the folders (also while Looks is off)
+        const auto where = FindFiles({ file, "NoSuchFile.fx" });
+        Check(where.size() == 1 && !where.begin()->second.empty(), "FindFiles: the pack that has the file, nothing for a missing one");
+    }
+    int hits = 0, misses = 0;
+    CacheCounts(&hits, &misses);
+    printf("compile cache: %d effects read from it, %d compiled and written\n", hits, misses);
+#endif
 }
 
 // --compare <folder>: each built-in port (third_party/reshade_shaders) against its author's original .fx in <folder>
@@ -275,6 +347,8 @@ static int ComparePorts(IDirect3DDevice9* dev, const std::wstring& root, UINT W,
                     }
                 // Levels with the black point on the white point scales by 255 / 0.00025 (the .fx avoids a division by
                 // zero so): a last-bit difference of the two compilers shows there, so that case is reported, not counted
+                if (g_hashes)
+                    printf("hash port %s | %s | %s %016llx original %016llx\n", d.technique, setName.c_str(), picName.c_str(), PictureHash(a.data(), a.size()), PictureHash(b.data(), b.size()));
                 const bool degenerate = !strcmp(d.technique, "Levels") && d.paramCount >= 2 && vals[0] == vals[4];
                 const bool bad = !ranPort || !ranFx || (mx > 1 && !degenerate);
                 problems += bad;
@@ -288,6 +362,322 @@ static int ComparePorts(IDirect3DDevice9* dev, const std::wstring& root, UINT W,
     printf("compare: %d problems\n", problems);
     return problems;
 }
+
+#ifndef LOOKS_FX_CHECK_BASELINE
+// ---- --state: what the passes change on the device, against what patches/looks_patch.cpp (SavedState) puts back by hand
+struct Snap
+{
+    DWORD rs[256] = {}; bool rsOk[256] = {};
+    DWORD ss[20][14] = {}; IDirect3DBaseTexture9* tex[20] = {};
+    float psc[224 * 4] = {}, vsc[256 * 4] = {};
+    int psi[16 * 4] = {}, vsi[16 * 4] = {}; BOOL psb[16] = {}, vsb[16] = {};
+    DWORD tss[8][33] = {};
+    IDirect3DPixelShader9* ps = nullptr; IDirect3DVertexShader9* vs = nullptr; IDirect3DVertexDeclaration9* decl = nullptr; DWORD fvf = 0;
+    IDirect3DVertexBuffer9* vb[16] = {}; UINT off[16] = {}, stride[16] = {}, freq[16] = {};
+    IDirect3DIndexBuffer9* ib = nullptr;
+    IDirect3DSurface9* rt[4] = {}; IDirect3DSurface9* ds = nullptr;
+    D3DVIEWPORT9 vp{}; RECT sc{};
+    float clip[6][4] = {};
+};
+static DWORD SamplerStage(int i) { return i < 16 ? (DWORD)i : D3DVERTEXTEXTURESAMPLER0 + (DWORD)(i - 16); }
+static void Take(IDirect3DDevice9* dev, Snap& s)
+{
+    for (int r = 0; r < 256; ++r) s.rsOk[r] = SUCCEEDED(dev->GetRenderState((D3DRENDERSTATETYPE)r, &s.rs[r]));
+    for (int i = 0; i < 20; ++i)
+    {
+        for (int t = 1; t < 14; ++t) dev->GetSamplerState(SamplerStage(i), (D3DSAMPLERSTATETYPE)t, &s.ss[i][t]);
+        dev->GetTexture(SamplerStage(i), &s.tex[i]);
+        if (s.tex[i]) s.tex[i]->Release(); // identity only
+    }
+    dev->GetPixelShaderConstantF(0, s.psc, 224); dev->GetVertexShaderConstantF(0, s.vsc, 256);
+    dev->GetPixelShaderConstantI(0, s.psi, 16); dev->GetVertexShaderConstantI(0, s.vsi, 16);
+    dev->GetPixelShaderConstantB(0, s.psb, 16); dev->GetVertexShaderConstantB(0, s.vsb, 16);
+    for (int st = 0; st < 8; ++st) for (int t = 1; t < 33; ++t) dev->GetTextureStageState(st, (D3DTEXTURESTAGESTATETYPE)t, &s.tss[st][t]);
+    auto rel = [](auto*& p) { if (p) p->Release(); };
+    dev->GetPixelShader(&s.ps); rel(s.ps); dev->GetVertexShader(&s.vs); rel(s.vs); dev->GetVertexDeclaration(&s.decl); rel(s.decl); dev->GetFVF(&s.fvf);
+    for (UINT i = 0; i < 16; ++i) { dev->GetStreamSource(i, &s.vb[i], &s.off[i], &s.stride[i]); rel(s.vb[i]); dev->GetStreamSourceFreq(i, &s.freq[i]); }
+    dev->GetIndices(&s.ib); rel(s.ib);
+    for (DWORD i = 0; i < 4; ++i) { s.rt[i] = nullptr; dev->GetRenderTarget(i, &s.rt[i]); rel(s.rt[i]); }
+    s.ds = nullptr; dev->GetDepthStencilSurface(&s.ds); rel(s.ds);
+    dev->GetViewport(&s.vp); dev->GetScissorRect(&s.sc);
+    for (DWORD i = 0; i < 6; ++i) dev->GetClipPlane(i, s.clip[i]);
+}
+// Every difference must be one the hand restore covers: full = a player's effect ran
+static int Uncovered(const Snap& a, const Snap& b, bool full, int psConsts, std::vector<std::string>& changed)
+{
+    int bad = 0;
+    auto note = [&](bool covered, const std::string& what) { changed.push_back(what); if (!covered) { ++bad; printf("  not put back: %s\n", what.c_str()); } };
+    const int rsN = full ? Looks::kSavedRenderStateCount : Looks::kBuiltInRenderStates;
+    const int ssN = full ? Looks::kSavedSamplerStateCount : Looks::kBuiltInSamplerStates;
+    const int stages = full ? 16 : Looks::kBuiltInSamplers;
+    for (int r = 0; r < 256; ++r)
+        if (a.rsOk[r] && a.rs[r] != b.rs[r])
+        {
+            bool in = false;
+            for (int i = 0; i < rsN; ++i) in |= Looks::kSavedRenderStates[i] == r;
+            note(in, "render state " + std::to_string(r));
+        }
+    for (int i = 0; i < 20; ++i)
+    {
+        for (int t = 1; t < 14; ++t)
+            if (a.ss[i][t] != b.ss[i][t])
+            {
+                bool in = false;
+                for (int k = 0; k < ssN; ++k) in |= Looks::kSavedSamplerStates[k] == t;
+                note(in && i < stages, "sampler " + std::to_string(i) + " state " + std::to_string(t));
+            }
+        if (a.tex[i] != b.tex[i]) note(i < stages, "texture " + std::to_string(i));
+    }
+    for (int c = 0; c < 224 * 4; ++c) if (memcmp(&a.psc[c], &b.psc[c], 4)) { note(c / 4 < psConsts, "PS constant c" + std::to_string(c / 4)); c = c / 4 * 4 + 3; }
+    for (int c = 0; c < 256 * 4; ++c) if (memcmp(&a.vsc[c], &b.vsc[c], 4)) { note(full, "VS constant c" + std::to_string(c / 4)); c = c / 4 * 4 + 3; }
+    if (memcmp(a.psi, b.psi, sizeof a.psi) || memcmp(a.vsi, b.vsi, sizeof a.vsi) || memcmp(a.psb, b.psb, sizeof a.psb) || memcmp(a.vsb, b.vsb, sizeof a.vsb)) note(false, "integer or bool constants");
+    if (memcmp(a.tss, b.tss, sizeof a.tss)) note(false, "texture stage states");
+    if (memcmp(a.clip, b.clip, sizeof a.clip)) note(false, "clip planes");
+    for (int i = 1; i < 16; ++i) if (a.vb[i] != b.vb[i] || a.off[i] != b.off[i] || a.stride[i] != b.stride[i]) note(false, "stream " + std::to_string(i));
+    for (int i = 0; i < 16; ++i) if (a.freq[i] != b.freq[i]) note(false, "stream frequency " + std::to_string(i));
+    if (a.ib != b.ib) note(false, "index buffer");
+    // put back by hand in every run: shaders, declaration / FVF, stream 0, render target 0, viewport, scissor; depth-stencil
+    // (unbound by the caller around every run); render targets 1..3 when a player's effect runs
+    if (a.ps != b.ps) note(true, "pixel shader");
+    if (a.vs != b.vs) note(true, "vertex shader");
+    if (a.decl != b.decl || a.fvf != b.fvf) note(true, "vertex declaration / FVF");
+    if (a.vb[0] != b.vb[0] || a.off[0] != b.off[0] || a.stride[0] != b.stride[0]) note(true, "stream 0");
+    if (a.rt[0] != b.rt[0]) note(true, "render target 0");
+    for (int i = 1; i < 4; ++i) if (a.rt[i] != b.rt[i]) note(full, "render target " + std::to_string(i));
+    if (a.ds != b.ds) note(true, "depth-stencil");
+    if (memcmp(&a.vp, &b.vp, sizeof a.vp)) note(true, "viewport");
+    if (memcmp(&a.sc, &b.sc, sizeof a.sc)) note(true, "scissor rect");
+    return bad;
+}
+
+// A game-like device state with a distinct value in everything a pass could touch
+static void GameState(IDirect3DDevice9* dev, IDirect3DTexture9* dummy, IDirect3DVertexBuffer9* vb)
+{
+    for (int r = 7; r < 210; ++r) { DWORD v = 0; if (SUCCEEDED(dev->GetRenderState((D3DRENDERSTATETYPE)r, &v))) dev->SetRenderState((D3DRENDERSTATETYPE)r, v); }
+    dev->SetRenderState(D3DRS_ZENABLE, D3DZB_TRUE); dev->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE); dev->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+    dev->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA); dev->SetRenderState(D3DRS_CULLMODE, D3DCULL_CW); dev->SetRenderState(D3DRS_COLORWRITEENABLE, 7);
+    dev->SetRenderState(D3DRS_STENCILREF, 3); dev->SetRenderState(D3DRS_FOGENABLE, TRUE); dev->SetRenderState(D3DRS_BLENDFACTOR, 0x80402010);
+    dev->SetRenderState(D3DRS_SRGBWRITEENABLE, FALSE); dev->SetRenderState(D3DRS_SCISSORTESTENABLE, TRUE);
+    for (int i = 0; i < 20; ++i)
+    {
+        const DWORD st = SamplerStage(i);
+        dev->SetTexture(st, dummy);
+        dev->SetSamplerState(st, D3DSAMP_ADDRESSU, D3DTADDRESS_WRAP); dev->SetSamplerState(st, D3DSAMP_ADDRESSV, D3DTADDRESS_MIRROR);
+        dev->SetSamplerState(st, D3DSAMP_ADDRESSW, D3DTADDRESS_BORDER); dev->SetSamplerState(st, D3DSAMP_BORDERCOLOR, 0x11223344);
+        dev->SetSamplerState(st, D3DSAMP_MINFILTER, D3DTEXF_ANISOTROPIC); dev->SetSamplerState(st, D3DSAMP_MAXANISOTROPY, 4);
+        dev->SetSamplerState(st, D3DSAMP_MAXMIPLEVEL, 1); dev->SetSamplerState(st, D3DSAMP_SRGBTEXTURE, TRUE);
+    }
+    std::vector<float> c(256 * 4);
+    for (size_t i = 0; i < c.size(); ++i) c[i] = 1000.0f + (float)i;
+    dev->SetPixelShaderConstantF(0, c.data(), 224); dev->SetVertexShaderConstantF(0, c.data(), 256);
+    dev->SetStreamSource(0, vb, 0, 16); dev->SetStreamSource(1, vb, 16, 16);
+    RECT sc{ 1, 2, 300, 200 }; dev->SetScissorRect(&sc);
+    D3DVIEWPORT9 vp{ 3, 4, 500, 400, 0.1f, 0.9f }; dev->SetViewport(&vp);
+}
+
+static double Now() { LARGE_INTEGER f, t; QueryPerformanceFrequency(&f); QueryPerformanceCounter(&t); return (double)t.QuadPart * 1000.0 / f.QuadPart; }
+
+static int StateChecks(IDirect3DDevice9* dev, const std::wstring& root, UINT W, UINT H)
+{
+    int problems = 0;
+    IDirect3DTexture9* picTex = nullptr; IDirect3DSurface9* pic = nullptr; IDirect3DTexture9* dummy = nullptr; IDirect3DVertexBuffer9* vb = nullptr;
+    dev->CreateTexture(W, H, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &picTex, nullptr);
+    if (picTex) picTex->GetSurfaceLevel(0, &pic);
+    dev->CreateTexture(4, 4, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &dummy, nullptr);
+    dev->CreateVertexBuffer(256, 0, 0, D3DPOOL_MANAGED, &vb, nullptr);
+    if (!pic || !dummy || !vb) { printf("state: no picture\n"); return 1; }
+    dev->SetRenderTarget(0, pic);
+    Looks::Runner runner;
+    runner.SetFactory([](IDirect3DDevice9* d, int shader, int entry) -> IDirect3DPixelShader9* {
+        const std::string src = Looks::FullSource(shader);
+        const char* name = shader < 0 ? "gs_copy" : Looks::Shader(shader).entries[entry];
+        ID3DBlob* blob = nullptr; IDirect3DPixelShader9* ps = nullptr;
+        if (SUCCEEDED(D3DCompile(src.data(), src.size(), nullptr, nullptr, nullptr, name, "ps_3_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &blob, nullptr)))
+            d->CreatePixelShader((const DWORD*)blob->GetBufferPointer(), &ps);
+        if (blob) blob->Release();
+        return ps;
+    });
+    // every built-in port with its defaults, in one run
+    std::vector<std::vector<float>> defs(Looks::ShaderCount());
+    std::vector<Looks::Step> all;
+    for (int s = 0; s < Looks::ShaderCount(); ++s)
+    {
+        const LooksShader& d = Looks::Shader(s);
+        for (int i = 0; i < d.paramCount; ++i) defs[s].insert(defs[s].end(), d.params[i].def, d.params[i].def + 4);
+        if (defs[s].empty()) defs[s].push_back(0.0f);
+        all.push_back({ s, defs[s].data() });
+    }
+    Looks::Frame f; f.dev = dev; f.target = pic; f.width = W; f.height = H; f.frame = 1;
+    for (float mix : { 1.0f, 0.5f })
+    {
+        f.mix = mix;
+        GameState(dev, dummy, vb);
+        Snap a, b;
+        Take(dev, a);
+        dev->BeginScene(); const bool drew = runner.Run(f, all); dev->EndScene();
+        Take(dev, b);
+        std::vector<std::string> changed;
+        const int bad = Uncovered(a, b, false, Looks::PsConstsUsed(all), changed);
+        int above31 = 0; // a hand restore of c0..c31 alone (as before PsConstsUsed) left these to the state block
+        for (const std::string& c : changed) above31 += c.rfind("PS constant c", 0) == 0 && atoi(c.c_str() + 13) >= 32;
+        printf("state: the 17 built-in ports (mix %.0f%%): %zu device states changed, %d not put back by hand; PS constants saved c0..c%d (%d changed above c31)\n",
+               mix * 100.0f, changed.size(), bad, Looks::PsConstsUsed(all) - 1, above31);
+        problems += bad + !drew;
+    }
+    // with players' effects after them (full: a run with a user effect)
+    Folders fo; fo.root = root; fo.includeDirs = { root + L"Shaders\\", root }; fo.textureDirs = { root + L"Textures\\", root };
+    std::vector<std::wstring> files;
+    extern void ListFxPublic(const std::wstring&, int, std::vector<std::wstring>&);
+    ListFxPublic(root, 0, files); ListFxPublic(root + L"Shaders\\", 3, files);
+    std::sort(files.begin(), files.end());
+    std::vector<std::unique_ptr<Instance>> insts;
+    std::vector<std::pair<Instance*, size_t>> techs;
+    for (const std::wstring& path : files)
+    {
+        if (techs.size() >= 24) break;
+        auto fx = std::make_shared<Effect>();
+        if (!Compile(path, fo, W, H, *fx)) continue;
+        auto inst = std::make_unique<Instance>();
+        std::string err;
+        if (!inst->Create(dev, fx, &err)) continue;
+        for (size_t t = 0; t < fx->techniques.size() && techs.size() < 24; ++t) if (fx->techniques[t].reason.empty()) techs.push_back({ inst.get(), t });
+        insts.push_back(std::move(inst));
+    }
+    if (!techs.empty())
+    {
+        f.mix = 1.0f;
+        GameState(dev, dummy, vb);
+        Snap a, b;
+        Take(dev, a);
+        dev->BeginScene();
+        runner.Run(f, all);
+        for (auto& [inst, t] : techs)
+        {
+            std::vector<float> regs;
+            DefaultValues(*inst->Fx(), regs);
+            inst->Run(dev, t, pic, nullptr, regs);
+        }
+        dev->EndScene();
+        Take(dev, b);
+        std::vector<std::string> changed;
+        const int bad = Uncovered(a, b, true, 224, changed);
+        printf("state: the ports and %zu techniques of players' effects: %zu device states changed, %d not put back by hand\n", techs.size(), changed.size(), bad);
+        problems += bad;
+    }
+    insts.clear();
+
+    // costs on this device: the D3DSBT_ALL state block (captured and applied around every run before), and the chain that
+    // Strength 0 no longer runs
+    IDirect3DStateBlock9* sb = nullptr;
+    dev->CreateStateBlock(D3DSBT_ALL, &sb);
+    if (sb)
+    {
+        GameState(dev, dummy, vb);
+        for (int i = 0; i < 50; ++i) { sb->Capture(); sb->Apply(); }
+        const int n = 2000;
+        const double t0 = Now();
+        for (int i = 0; i < n; ++i) { sb->Capture(); sb->Apply(); }
+        printf("cost: D3DSBT_ALL Capture + Apply %.1f us each (CPU)\n", (Now() - t0) * 1000.0 / n);
+        sb->Release();
+    }
+    IDirect3DQuery9* q = nullptr;
+    dev->CreateQuery(D3DQUERYTYPE_EVENT, &q);
+    auto timeRun = [&](const char* what, const std::vector<Looks::Step>& steps, float mix) {
+        f.mix = mix;
+        auto once = [&] { dev->BeginScene(); runner.Run(f, steps); dev->EndScene(); if (q) { q->Issue(D3DISSUE_END); while (q->GetData(nullptr, 0, D3DGETDATA_FLUSH) == S_FALSE) {} } };
+        for (int i = 0; i < 5; ++i) once();
+        const int n = 40;
+        const double t0 = Now();
+        for (int i = 0; i < n; ++i) once();
+        printf("cost: %s at %ux%u, Strength %.0f%%: %.2f ms a frame (CPU + GPU, flushed); Strength 0 skips it\n", what, W, H, mix * 100.0f, (Now() - t0) / n);
+    };
+    std::vector<Looks::Step> natural;
+    for (const char* t : { "Levels", "Vibrance", "LumaSharpen" })
+        for (int s = 0; s < Looks::ShaderCount(); ++s) if (!strcmp(Looks::Shader(s).technique, t)) natural.push_back(all[s]);
+    timeRun("Natural (Levels, Vibrance, LumaSharpen)", natural, 0.5f);
+    timeRun("every built-in port", all, 0.5f);
+    if (q) q->Release();
+    runner.Release();
+    vb->Release(); dummy->Release(); pic->Release(); picTex->Release();
+    printf("state: %d problems\n", problems);
+    return problems;
+}
+
+// ---- --cache <Shaders folder>: the compile cache (Folders::cacheDir, under <folder>\.cache-check\, written): every .fx
+// compiled cold, then warm from the cache; the bytecode, notes and reasons must be the same as without a cache; a change
+// in the .fx or in an .fxh it includes must compile again
+static bool SameEffect(const Effect& a, const Effect& b)
+{
+    if (a.error != b.error || a.notes != b.notes || a.shaders.size() != b.shaders.size() || a.techniques.size() != b.techniques.size()) return false;
+    for (size_t i = 0; i < a.shaders.size(); ++i) if (a.shaders[i].code != b.shaders[i].code || a.shaders[i].error != b.shaders[i].error) return false;
+    for (size_t i = 0; i < a.techniques.size(); ++i) if (a.techniques[i].reason != b.techniques[i].reason) return false;
+    return true;
+}
+static int CacheChecks(const std::wstring& root, const std::vector<std::wstring>& files, UINT W, UINT H)
+{
+    int problems = 0;
+    Folders plain; plain.root = root; plain.includeDirs = { root + L"Shaders\\", root }; plain.textureDirs = { root + L"Textures\\", root };
+    Folders cached = plain;
+    cached.cacheDir = root + L".cache-check\\";
+    double tPlain = 0, tCold = 0, tWarm = 0, worstCold = 0, worstWarm = 0;
+    std::string worst;
+    int same = 0;
+    for (const std::wstring& path : files)
+    {
+        Effect a, b, c;
+        double t0 = Now();
+        Compile(path, plain, W, H, a);
+        double t1 = Now();
+        Compile(path, cached, W, H, b); // cold: compiles and writes (or reads an entry an earlier run wrote)
+        double t2 = Now();
+        Compile(path, cached, W, H, c); // warm: from the cache
+        double t3 = Now();
+        tPlain += t1 - t0; tCold += t2 - t1; tWarm += t3 - t2;
+        if (t1 - t0 > worstCold) { worstCold = t1 - t0; worstWarm = t3 - t2; worst = Narrow(path.substr(root.size())); }
+        const bool ok = SameEffect(a, b) && SameEffect(a, c);
+        same += ok;
+        if (!ok) { ++problems; printf("cache: %s differs from a compile without the cache\n", Narrow(path).c_str()); }
+    }
+    int hits = 0, misses = 0;
+    CacheCounts(&hits, &misses);
+    printf("cache: %zu files, %d the same with and without the cache; no cache %.0f ms, first %.0f ms, again %.0f ms; slowest %s %.0f ms -> %.0f ms\n",
+           files.size(), same, tPlain, tCold, tWarm, worst.c_str(), worstCold, worstWarm);
+    // invalidation: a test effect and its include, in the cache folder's own subfolder
+    const std::wstring dir = cached.cacheDir + L"src\\";
+    CreateDirectoryW(cached.cacheDir.c_str(), nullptr); CreateDirectoryW(dir.c_str(), nullptr);
+    auto write = [](const std::wstring& p, const std::string& text) { FILE* fp = nullptr; if (_wfopen_s(&fp, p.c_str(), L"wb") == 0 && fp) { fwrite(text.data(), 1, text.size(), fp); fclose(fp); } };
+    const std::wstring fx = dir + L"cache_test.fx", fxh = dir + L"cache_test.fxh";
+    auto source = [](float k) { return "#include \"cache_test.fxh\"\nfloat4 PS(float4 p : SV_Position, float2 uv : TEXCOORD) : SV_Target { return float4(uv * " + std::to_string(k) + " * KVALUE, 0, 1); }\n"
+                                      "void VS(in uint id : SV_VertexID, out float4 p : SV_Position, out float2 uv : TEXCOORD) { uv = float2((id == 2) ? 2.0 : 0.0, (id == 1) ? 2.0 : 0.0); p = float4(uv * float2(2, -2) + float2(-1, 1), 0, 1); }\n"
+                                      "technique CacheTest { pass { VertexShader = VS; PixelShader = PS; } }\n"; };
+    write(fx, source(0.5f)); write(fxh, "#define KVALUE 0.25\n");
+    Folders t = cached; t.root = cached.cacheDir; t.includeDirs = { dir };
+    auto run = [&](const char* what, bool expectHit) {
+        int h0, m0; CacheCounts(&h0, &m0);
+        Effect e, ref;
+        Compile(fx, t, W, H, e);
+        Folders noCache = t; noCache.cacheDir.clear();
+        Compile(fx, noCache, W, H, ref);
+        int h1, m1; CacheCounts(&h1, &m1);
+        const bool hit = h1 > h0;
+        const bool ok = hit == expectHit && SameEffect(e, ref) && e.techniques.size() == 1 && e.techniques[0].reason.empty();
+        printf("cache: %s: %s%s\n", what, hit ? "read from the cache" : "compiled", ok ? "" : " (PROBLEM)");
+        problems += !ok;
+    };
+    run("a new file", false);
+    run("the same file again", true);
+    Sleep(20);
+    write(fxh, "#define KVALUE 0.75\n");
+    run("its .fxh changed", false);
+    run("again", true);
+    write(fx, source(0.6f));
+    run("the .fx changed", false);
+    run("another picture size", (W = W / 2, false));
+    DeleteFileW(fx.c_str()); DeleteFileW(fxh.c_str()); RemoveDirectoryW(dir.c_str());
+    printf("cache: %d problems\n", problems);
+    return problems;
+}
+#endif
 
 static void ListFx(const std::wstring& dir, int depth, std::vector<std::wstring>& out)
 {
@@ -303,6 +693,8 @@ static void ListFx(const std::wstring& dir, int depth, std::vector<std::wstring>
     } while (FindNextFileW(h, &fd));
     FindClose(h);
 }
+
+void ListFxPublic(const std::wstring& dir, int depth, std::vector<std::wstring>& out) { ListFx(dir, depth, out); }
 
 static std::string Narrow(const std::wstring& w)
 {
@@ -323,17 +715,20 @@ static std::string Category(const std::string& r)
 
 int main(int argc, char** argv)
 {
-    if (argc < 2) { printf("usage: looks_fx_check <Shaders folder> [--run] [WxH] [--catalog <Apex Radiance folder>] [--compare [--image <file>]...]\n"); return 2; }
+    if (argc < 2) { printf("usage: looks_fx_check <Shaders folder> [--run] [WxH] [--catalog <Apex Radiance folder>] [--compare [--image <file>]...] [--hashes] [--state] [--cache] [--packs <Apex Radiance folder>]\n"); return 2; }
     wchar_t full[MAX_PATH];
     GetFullPathNameW(std::wstring(argv[1], argv[1] + strlen(argv[1])).c_str(), MAX_PATH, full, nullptr);
     std::wstring root = full;
     if (root.back() != L'\\') root += L'\\';
-    bool run = false, compare = false;
+    bool run = false, compare = false, state = false, cache = false;
     std::vector<std::wstring> images;
     UINT W = 1920, H = 1080;
     for (int i = 2; i < argc; ++i)
     {
         if (!strcmp(argv[i], "--run")) run = true;
+        else if (!strcmp(argv[i], "--hashes")) g_hashes = true;
+        else if (!strcmp(argv[i], "--state")) run = state = true;
+        else if (!strcmp(argv[i], "--cache")) cache = true;
         else if (!strcmp(argv[i], "--compare")) run = compare = true;
         else if (!strcmp(argv[i], "--packs") && i + 1 < argc)
         {
@@ -383,6 +778,21 @@ int main(int argc, char** argv)
             dev->CreateOffscreenPlainSurface(W, H, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &sys, nullptr);
         }
     }
+#ifndef LOOKS_FX_CHECK_BASELINE
+    if (state || cache)
+    {
+        int problems = 0;
+        if (state) problems += dev ? StateChecks(dev, root, W, H) : 1;
+        if (cache) problems += CacheChecks(root, files, W, H);
+        if (pic) pic->Release();
+        if (picTex) picTex->Release();
+        if (sys) sys->Release();
+        if (dev) dev->Release();
+        if (d3d) d3d->Release();
+        printf(problems ? "PROBLEMS\n" : "OK\n");
+        return problems ? 1 : 0;
+    }
+#endif
     if (compare)
     {
         const int problems = dev ? ComparePorts(dev, root, W, H, images) : 1;
@@ -467,6 +877,17 @@ int main(int argc, char** argv)
                         dev->EndScene();
                         const HRESULT lost = dev->TestCooperativeLevel();
                         const int ch = changed();
+                        if (g_hashes)
+                        {
+                            std::vector<uint32_t> px((size_t)W * H);
+                            D3DLOCKED_RECT lr;
+                            if (SUCCEEDED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY)))
+                            {
+                                for (UINT y = 0; y < H; ++y) memcpy(px.data() + (size_t)y * W, (char*)lr.pBits + (size_t)y * lr.Pitch, W * 4);
+                                sys->UnlockRect();
+                            }
+                            printf("hash run %s | %s %016llx\n", name.c_str(), tq.name.c_str(), PictureHash(px.data(), px.size()));
+                        }
                         if (r && SUCCEEDED(lost)) { ++ran; res += ch > 0 ? ", ran (picture changed)" : ", ran (picture unchanged with the defaults)"; }
                         else { ++runFailed; res += ", run FAILED"; }
                     }

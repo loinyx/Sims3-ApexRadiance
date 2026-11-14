@@ -90,6 +90,7 @@ Settings Clamped(Settings s) {
 
 std::mutex g_lock;
 Settings g_s;
+std::atomic<unsigned> g_sVersion{1}; // changes with g_s (under g_lock): VideoNow copies the settings again
 
 // %Counter%: the next number, then one more (saved with the settings)
 int NextCounter() {
@@ -116,6 +117,21 @@ void EnsureLoadedLocked() {
     toml::table root;
     ApexConfig::ReadRoot(root);
     g_s = FromToml(root);
+    ++g_sVersion;
+}
+
+// The video settings for the render thread's reads at every frame while recording (Present, the timer): copied again only
+// when they changed, so a frame does not copy their strings
+const VideoSettings& VideoNow() {
+    static VideoSettings v;
+    static unsigned seen = 0;
+    if (g_sVersion.load() != seen) {
+        std::lock_guard<std::mutex> lk(g_lock);
+        EnsureLoadedLocked();
+        v = g_s.video;
+        seen = g_sVersion.load();
+    }
+    return v;
 }
 
 ApexConfig::KeyChord RecordKey() {
@@ -428,7 +444,7 @@ void OnPresent(IDirect3DDevice9* dev) {
     if (!g_bbH && dev) { IDirect3DSurface9* bb = nullptr; if (SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb) { D3DSURFACE_DESC d{}; bb->GetDesc(&d); g_bbW = static_cast<int>(d.Width); g_bbH = static_cast<int>(d.Height); bb->Release(); } }
     if (g_toggle.exchange(false)) { if (Recording()) StopRecording(); else StartRecording(dev); }
     if (VideoMp4::Active()) {
-        const VideoSettings v = Get().video; // limits follow the menu while recording
+        const VideoSettings& v = VideoNow(); // limits follow the menu while recording
         if (VideoMp4::Failed()) StopRecording();
         else if ((v.stopAfterS > 0 && g_clipBaseSec + VideoMp4::Seconds() >= v.stopAfterS) ||
                  (v.newClipMb <= 0 && v.stopAtMb > 0 && VideoMp4::BytesWritten() >= (static_cast<unsigned long long>(v.stopAtMb) << 20))) {
@@ -797,6 +813,7 @@ void LoadFromToml(const toml::table& root) {
         std::lock_guard<std::mutex> lk(g_lock);
         g_s = std::move(s);
         g_loaded = true;
+        ++g_sVersion;
     }
     if (saveName) RefreshSaveName(); // ready before the first capture
 }
@@ -814,6 +831,7 @@ void Set(const Settings& s) {
         std::lock_guard<std::mutex> lk(g_lock);
         g_loaded = true;
         g_s = c;
+        ++g_sVersion;
     }
     if (saveName) RefreshSaveName();
     ApexConfig::RequestSave();
@@ -1074,7 +1092,7 @@ int RecordingSeconds() { // all clips of the recording; the other app's since it
 bool DrawTimer() {
     try {
         if (!Recording() || Captures::ScreenshotPending()) return false;
-        const VideoSettings s = Get().video;
+        const VideoSettings& s = VideoNow();
         if (!s.timer && !s.redFrame) return false;
         if (s.includeMenu && !s.timerInVideo && VideoMp4::Active()) return false;
         const bool builtin = VideoMp4::Active();
@@ -1107,11 +1125,22 @@ bool DrawTimer() {
                         ImGui::GetColorU32(VioletTheme::Col(tint, 0.85f * alpha)), 0.0f, 0, t);
         }
         if (!s.timer) return true;
-        const std::string text = Clock(sec, s.timerHours);
-        std::string extra;
-        if (s.timerFileSize && builtin) extra += std::format("  \xC2\xB7  {} MB", bytes >> 20);
-        if (warn) extra += std::string("  \xC2\xB7  ") + I18n::Trf("{} left", Clock(left, false));
-        else if (s.timerStopKey) extra += std::string("  \xC2\xB7  ") + I18n::Trf("{} stops", ApexConfig::KeyChordText(s.recordKey));
+        // the pill's text changes about once a second: built again only then, not at every frame
+        struct TextKey {
+            int sec, left; unsigned long long mb; bool builtin; unsigned version; I18n::Lang lang;
+            bool operator==(const TextKey&) const = default;
+        };
+        static TextKey shownKey{-1, -1, 0, false, 0, I18n::Lang{}};
+        static std::string text, extra;
+        const TextKey key{sec, left, bytes >> 20, builtin, g_sVersion.load(), I18n::Current()};
+        if (!(key == shownKey)) {
+            shownKey = key;
+            text = Clock(sec, s.timerHours);
+            extra.clear();
+            if (s.timerFileSize && builtin) extra += std::format("  \xC2\xB7  {} MB", bytes >> 20);
+            if (warn) extra += std::string("  \xC2\xB7  ") + I18n::Trf("{} left", Clock(left, false));
+            else if (s.timerStopKey) extra += std::string("  \xC2\xB7  ") + I18n::Trf("{} stops", ApexConfig::KeyChordText(s.recordKey));
+        }
         ImFont* font = ImGui::GetFont();
         const float fs = ImGui::GetFontSize() * scale;
         const ImVec2 t1 = font->CalcTextSizeA(fs, FLT_MAX, 0.0f, text.c_str());

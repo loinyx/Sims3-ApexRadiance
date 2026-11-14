@@ -27,7 +27,10 @@ The feature is described in [features/looks.md](../features/looks.md). It must:
 | `tools/looks_shaders_gen.py` | Every built-in port compiles for ps_3_0 with fxc; regenerates `reshade_shaders_hlsl.h` | `python -I tools/looks_shaders_gen.py` | fxc from the Windows SDK (or `FXC`) |
 | `tools/looks_fx_check` | The player's .fx: real compile path on a folder of packs, per technique OK or the reason; with `--run` each runnable technique created and run on a Direct3D 9 device; `--catalog` the background scan, preset lookup, built-in priority, missing / refused files; the About licence text | see its README | MSVC, a Direct3D 9 device for `--run`, a folder of packs |
 | `tools/looks_fx_check --compare` | Each built-in port against its author's original compiled by the real path, on four pictures and four value sets: max and mean channel difference | see its README | MSVC, a Direct3D 9 device, the originals |
-| `tools/looks_fx_check --packs` | Downloaded packs: not compiled before they are wanted, then counted per pack | see its README | MSVC, a folder with `Shaders\Packs\` |
+| `tools/looks_fx_check --packs` | Downloaded packs: not compiled before they are wanted, browsing keeps none compiled, counted per pack from the check cache; memory | see its README | MSVC, a scratch folder with `Shaders\Packs\` |
+| `tools/looks_fx_check --state` | Device state the passes change is all put back by hand; state block and Strength 0 costs | see its README | MSVC, a Direct3D 9 device |
+| `tools/looks_fx_check --cache` | Compile cache: same bytecode as without it, compiled again after a `.fx`, `.fxh` or size change | see its README | MSVC, a scratch folder of packs |
+| `tools/looks_fx_check --hashes` | Pictures of two builds (`--compare`, `--run`) the same to the level | see its README | MSVC, a Direct3D 9 device |
 | `tools/looks_packs_test` | Pack downloads: allowed hosts, HTTP failures, unpacking (layout, caps, unsafe paths), the list joined with the index and the downloaded folders, the queue with simulated answers (gone, busy, offline, a failed update, Stop the rest), which pack has a missing file; `--real` one real download | see its README | MSVC; network only with `--real` |
 | `tools/looks_packs_index.py` | Regenerates `features/looks_packs_index.h` from ReShade's list and GitHub | `python -I tools/looks_packs_index.py` | `gh` signed in |
 | `tools/looks_test` | Built-in looks against the shader table; licence texts | see its README | MSVC |
@@ -46,6 +49,10 @@ The feature is described in [features/looks.md](../features/looks.md). It must:
 | 2026-11-14 | PR branch | `looks_fx_check --run` on the 17 originals | 17 of 17 run | Direct3D 9 HAL |
 | 2026-11-14 | PR branch | `looks_fx_check --run --catalog` (dh_anime, dh_ahoh, Vibrance) | 15 catalog checks, 0 failures | Direct3D 9 HAL |
 | 2026-11-14 | PR branch | `looks_fx_check --packs` (Ptho-FX, standard effects, a test pack) | 8 checks, 0 failures | None |
+| 2026-11-14 | PR branch | `looks_fx_check --state` (17 ports, 24 user techniques) | 0 changed states not put back by hand | Direct3D 9 HAL |
+| 2026-11-14 | PR branch | `looks_fx_check --cache` (131 .fx) | 131 the same with and without the cache; invalidation 6 of 6 | None |
+| 2026-11-14 | PR branch | `looks_fx_check --compare/--run --hashes`, before and after the performance pass | 272 + 146 pictures, the same hashes | Direct3D 9 HAL |
+| 2026-11-14 | PR branch | `looks_fx_check --packs` (six packs, three runs) | 17 checks, 0 failures; no pack effect kept | None |
 | 2026-11-14 | PR branch | `looks_packs_test --real` | 54 checks, 0 failures; Ptho-FX downloaded through WinHTTP | Network (one pack) |
 
 ## In-game test plan

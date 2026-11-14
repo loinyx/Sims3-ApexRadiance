@@ -65,21 +65,17 @@ std::string FullSource(int shader)
 }
 
 // ============================================================================================== runner
-// Device state the runner changes. The caller saves these before Run and restores them after.
-const D3DRENDERSTATETYPE kTouchedRenderStates[] = {
-    D3DRS_ZENABLE, D3DRS_ZWRITEENABLE, D3DRS_ALPHABLENDENABLE, D3DRS_ALPHATESTENABLE, D3DRS_STENCILENABLE,
-    D3DRS_CULLMODE, D3DRS_SCISSORTESTENABLE, D3DRS_FOGENABLE, D3DRS_SRGBWRITEENABLE, D3DRS_CLIPPLANEENABLE,
-    D3DRS_COLORWRITEENABLE, D3DRS_SRCBLEND, D3DRS_DESTBLEND, D3DRS_BLENDOP, D3DRS_BLENDFACTOR,
-    D3DRS_SEPARATEALPHABLENDENABLE,
-};
-const int kTouchedRenderStateCount = sizeof(kTouchedRenderStates) / sizeof(kTouchedRenderStates[0]);
-const int kTouchedSamplers = 6; // s0..s5: texture + the sampler states below
-const D3DSAMPLERSTATETYPE kTouchedSamplerStates[] = {
-    D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV,
-    D3DSAMP_SRGBTEXTURE, D3DSAMP_MAXMIPLEVEL, D3DSAMP_MIPMAPLODBIAS,
-};
-const int kTouchedSamplerStateCount = sizeof(kTouchedSamplerStates) / sizeof(kTouchedSamplerStates[0]);
-// Also: pixel shader, vertex shader (null), FVF, render target 0 (and its viewport), PS constants c0..c31.
+int PsConstsUsed(const std::vector<Step>& steps)
+{
+    int n = 3; // c0 picture size, c1 pass data, c2 depth
+    for (const Step& s : steps)
+    {
+        if (IsUserShader(s.shader) || !ValidShader(s.shader)) continue;
+        const LooksShader& d = Shader(s.shader);
+        for (int i = 0; i < d.paramCount; ++i) n = (std::max)(n, d.params[i].reg + 1);
+    }
+    return n;
+}
 
 static size_t BytesPerPixel(D3DFORMAT f)
 {
@@ -232,7 +228,7 @@ static void SetSampler(IDirect3DDevice9* dev, int stage, bool point)
 
 void Runner::UnbindAll(IDirect3DDevice9* dev)
 {
-    for (int s = 0; s < kTouchedSamplers; ++s) BindTex(dev, s, nullptr);
+    for (int s = 0; s < kBuiltInSamplers; ++s) BindTex(dev, s, nullptr);
 }
 
 // AdaptiveSharpen: pass 0 writes edge data to an RG16F texture, pass 1 sharpens.
@@ -256,7 +252,7 @@ bool Runner::RunAdaptiveSharpen(const Frame& f, const Step& s)
 void Runner::FixedState(IDirect3DDevice9* dev)
 {
     curRt_ = nullptr; curPs_ = nullptr; constsSent_ = false;
-    for (int st = 0; st < kTouchedSamplers; ++st) boundTex_[st] = nullptr; // the effect unbinds what it bound
+    for (int st = 0; st < kBuiltInSamplers; ++st) boundTex_[st] = nullptr; // the effect unbinds what it bound
     dev->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
     dev->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
     dev->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
@@ -271,7 +267,7 @@ void Runner::FixedState(IDirect3DDevice9* dev)
     dev->SetRenderState(D3DRS_COLORWRITEENABLE, 0xF);
     dev->SetVertexShader(nullptr);
     dev->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX1);
-    for (int st = 0; st < kTouchedSamplers; ++st) SetSampler(dev, st, false);
+    for (int st = 0; st < kBuiltInSamplers; ++st) SetSampler(dev, st, false);
 }
 
 bool Runner::Run(const Frame& f, const std::vector<Step>& steps)
@@ -288,7 +284,7 @@ bool Runner::Run(const Frame& f, const std::vector<Step>& steps)
     if (!copy) { skipped_.push_back("copy shader"); return false; }
 
     curRt_ = nullptr; curPs_ = nullptr; constsSent_ = false; target_ = f.target;
-    for (int st = 0; st < kTouchedSamplers; ++st) { dev->SetTexture(st, nullptr); boundTex_[st] = nullptr; }
+    for (int st = 0; st < kBuiltInSamplers; ++st) { dev->SetTexture(st, nullptr); boundTex_[st] = nullptr; }
     buf_[0] = 1.0f / f.width; buf_[1] = 1.0f / f.height; buf_[2] = (float)f.width; buf_[3] = (float)f.height;
     aux_[0] = aux_[1] = aux_[2] = aux_[3] = 0.0f;
     if (f.frame == 0 || f.frame != lastFrame_) // a run point later in the same frame keeps the frame's count and time

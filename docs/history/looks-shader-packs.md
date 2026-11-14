@@ -93,3 +93,33 @@ they are wanted, then counted per pack.
 **ASI size:** 15 368 192 bytes before, 15 552 000 after (+180 KB: miniz, the downloads, the index, the menu and its 48 texts in 21 languages).
 
 **Outcome:** built; offline checks pass; nothing was checked in the game.
+
+### 2026-11-14: browsing packs compiles nothing
+
+**Context:** opening *Add a shader* or the Get shader packs card compiled every downloaded pack's `.fx` once a session
+and kept them all in memory; with Looks off, the card's visit was remembered and the compile ran at the next turn-on.
+`Looks::NeededPacks` read the run list, which is empty while Looks is off, so a preset exported then named no pack.
+
+**Design:** a pack's `.fx` compiles only when a look names it or the player adds one of its shaders. The check cache
+(`Shaders\.cache\checked.txt`: per file its size, time and techniques, with run here / hidden) fills the list and
+"<x> of <y> run here"; while the player browses, the files it does not know are checked once in the background (one at a
+time, below normal priority, 20 ms apart, stopping for any new scan request), and each effect is let go. A shader added
+from the list joins the run list at once and compiles (its file is asked for). *Check again* checks the packs again.
+`NeededPacks` reads the look's .ini and the folders (`Fx::FindFiles`). *Add a shader* recomputes its filtered list only
+when its inputs change and lays out only the rows in view (`ApexUi::SkipControlRow` keeps the others' height).
+
+**Measured** (`tools/looks_fx_check --packs` on six packs, 131 `.fx`, 146 listed techniques):
+
+| | Before | After, first browse | After, next sessions |
+|---|---|---|---|
+| Browse time | 76.0 s (compiles) | 79.1 s (background check) | 62 ms |
+| Pack effects kept compiled | 146 techniques | 0 | 0 |
+| Private bytes after browsing | 7.1 MB | 4.2 MB | 3.2 MB |
+| Largest free block after browsing (from 1205 MB) | 806 MB | 799 MB | 1203 MB |
+| A wanted pack file | compiled | | 62 ms (compile cache) |
+
+The largest free block falls by about 400 MB in both first browses (the compiler's own allocations); a later session
+does not compile, so it keeps its address space. Not measured: the menu's frame time with hundreds of rows (no ImGui
+harness times it).
+
+**Outcome:** kept; offline checks pass; not checked in the game.
