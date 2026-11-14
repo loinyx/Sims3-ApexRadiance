@@ -565,6 +565,35 @@ finally
     Directory.Delete(Path.GetFullPath(Path.Combine(bin2, "..", "..", "..")), true);
 }
 
+// A game folder copied elsewhere brings the old setup.json: uninstalling the copy changes only the copy, never the original
+{
+    var top = Path.Combine(Path.GetTempPath(), "ApexSetupCopy-" + Guid.NewGuid().ToString("N")[..8]);
+    string BinOf(string n) => Path.Combine(top, n, "The Sims 3", "Game", "Bin");
+    var (orig, copy, docsC) = (BinOf("orig"), BinOf("copy"), Path.Combine(top, "docs"));
+    Directory.CreateDirectory(docsC);
+    foreach (var b in new[] { orig, copy })
+    {
+        Directory.CreateDirectory(Manifest.DirOf(b));
+        File.WriteAllText(Path.Combine(b, "ApexRadiance.asi"), "apex");
+        File.WriteAllText(Path.Combine(b, "d3d9.dll"), "bridge");
+        File.WriteAllText(Path.Combine(Manifest.DirOf(b), "Options.ini.bak"), "options");
+    }
+    var m = new Manifest { OptionsBackup = Path.Combine(Manifest.DirOf(orig), "Options.ini.bak") };
+    m.Files.Add(new ManifestFile { Component = Components.Apex, Path = Path.Combine(orig, "ApexRadiance.asi") });
+    m.Files.Add(new ManifestFile { Component = Components.Bridge, Path = Path.Combine(orig, "d3d9.dll") });
+    m.Versions[Components.Apex] = "3.2.2"; m.Versions[Components.Bridge] = "3.2.2";
+    var json = System.Text.Json.JsonSerializer.Serialize(m, SetupJson.Default.Manifest);
+    foreach (var b in new[] { orig, copy }) File.WriteAllText(Path.Combine(Manifest.DirOf(b), "setup.json"), json);
+    var loaded = Manifest.Load(copy);
+    Check(loaded.Files.All(f => f.Path.StartsWith(copy)) && loaded.OptionsBackup == Path.Combine(Manifest.DirOf(copy), "Options.ini.bak"),
+        "a copied game's setup.json points at the copy");
+    Engine.RemoveAll(new Game(Path.Combine(top, "copy", "The Sims 3"), copy, "TS3W.exe", Edition.Steam, "1.67.2"), docsC);
+    Check(!File.Exists(Path.Combine(copy, "ApexRadiance.asi")) && !File.Exists(Path.Combine(copy, "d3d9.dll")), "uninstalling the copy removes its files");
+    Check(new[] { Path.Combine(orig, "ApexRadiance.asi"), Path.Combine(orig, "d3d9.dll"), Path.Combine(Manifest.DirOf(orig), "Options.ini.bak") }.All(File.Exists)
+        && File.ReadAllText(Path.Combine(Manifest.DirOf(orig), "setup.json")) == json, "uninstalling the copy leaves the original game untouched");
+    Directory.Delete(top, true);
+}
+
 // Sims 3 Modernization: a release without this edition's build is not taken for it (v0.2.11 had no ts3native-ea169)
 {
     var steamOnly = new Release("rodneypantonial/sims3-modernization", "v0.2.11", new[] { new Asset("ts3fixes.package", "x", null), new Asset("ts3native-v0.2.11.zip", "x", null) });
@@ -648,6 +677,30 @@ Check(Gpu.Decode((1u << 22) | (3u << 12) | 280) == new Version(1, 3) && Gpu.Deco
       "Vulkan 1.3 passes and 1.2 does not");
 try { var (vk, card, missing) = Gpu.Vulkan(); Console.WriteLine($"info this PC: {card ?? "no Vulkan card"} Vulkan {vk?.ToString() ?? "-"}, DXVK extensions missing: {(missing.Length == 0 ? "none" : string.Join(", ", missing))}"); }
 catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: " + e.Message); }
+
+// the generated JSON writes and reads exactly what the reflection serializer did: players' setup.json and restore points
+{
+    var legacy = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
+    var m = new Manifest { OptionsBackup = "Options.ini.bak" };
+    m.Files.Add(new ManifestFile { Component = Components.Bridge, Path = @"C:\Game\Bin\d3d9.dll", Backup = "d3d9.dll.bak" });
+    m.Files.Add(new ManifestFile { Component = Components.Apex, Path = @"C:\Game\Bin\ApexRadiance.asi" });
+    m.Versions[Components.Apex] = "3.2.3"; m.Versions[Components.Bridge] = "1.0 ü \"quoted\" <tag>";
+    var oldManifest = System.Text.Json.JsonSerializer.Serialize(m, legacy);
+    Check(oldManifest == System.Text.Json.JsonSerializer.Serialize(m, SetupJson.Default.Manifest), "setup.json is written as before");
+    var mBack = System.Text.Json.JsonSerializer.Deserialize(oldManifest, SetupJson.Default.Manifest)!;
+    Check(mBack.Files.Count == 2 && mBack.Files[0].Backup == "d3d9.dll.bak" && mBack.Files[1].Backup is null
+        && mBack.Versions[Components.Bridge] == m.Versions[Components.Bridge] && mBack.OptionsBackup == "Options.ini.bak", "setup.json written by older Setups reads back");
+
+    var point = new RestorePoint { Created = new DateTime(2026, 11, 14, 12, 0, 0, DateTimeKind.Utc), CreatedLocal = "14/11/2026 09:00",
+        Label = "Installed {0}", Args = new[] { "Apex Radiance" }, SetupVersion = "1.1.3", Bin = @"C:\Game\Bin" };
+    point.Entries.Add(new RestoreEntry { Path = @"C:\Game\Bin.dll", Existed = true, Copy = "a.dll" });
+    point.Entries.Add(new RestoreEntry { Path = @"C:\Game\Bin\Mods", Dir = true });
+    var oldPoint = System.Text.Json.JsonSerializer.Serialize(point, legacy);
+    Check(oldPoint == System.Text.Json.JsonSerializer.Serialize(point, SetupJson.Default.RestorePoint), "restore points are written as before");
+    var pBack = System.Text.Json.JsonSerializer.Deserialize(oldPoint, SetupJson.Default.RestorePoint)!;
+    Check(pBack.Created == point.Created && pBack.Args[0] == "Apex Radiance" && pBack.Entries.Count == 2 && pBack.Entries[0].Copy == "a.dll"
+        && pBack.Entries[1].Dir && pBack.FileCount == 1, "restore points written by older Setups read back");
+}
 
 Console.WriteLine(failures == 0 ? "ALL PASSED" : failures + " FAILED");
 return failures == 0 ? 0 : 1;
