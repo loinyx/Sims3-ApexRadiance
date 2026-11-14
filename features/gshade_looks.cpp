@@ -874,7 +874,7 @@ void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask)
     if (FAILED(dev->GetRenderTarget(0, &rt)) || !rt) { PartWhy("stopped: GetRenderTarget failed"); return; }
     D3DSURFACE_DESC rd{};
     rt->GetDesc(&rd);
-    if (!g_beforeLookDone) ApexCapture::BeforeLook(dev, rt); // ApexCapture.ini SaveBeforeShot: the frame before the look (only while a screenshot wants it); once a frame
+    if (!g_beforeLookDone) ApexCapture::BeforeLook(dev, rt); // [capture] look = without | both: the frame before the look (only while a capture wants it); once a frame
     g_beforeLookDone = true;
 
     // Depth only when it is the scene's own depth bound right now (not a reflection or UI pass)

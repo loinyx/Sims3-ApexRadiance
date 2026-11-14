@@ -72,7 +72,8 @@ struct Session {
 
 struct Slot { IDirect3DSurface9* rt = nullptr; IDirect3DSurface9* sys = nullptr; IDirect3DQuery9* q = nullptr; int state = 0; LONGLONG t = 0; };
 Slot g_slots[kSlots];
-std::shared_ptr<Session> g_s;       // the recording (render thread)
+std::shared_ptr<Session> g_s;       // the recording (render thread; set under g_sLock, read by StopAndWait)
+std::mutex g_sLock;
 std::atomic<bool> g_active{false};
 std::atomic<int> g_finishing{0}; // clips still being saved (a new clip may start while the last one is)
 LONGLONG g_nextDue = 0, g_period = 1;
@@ -324,8 +325,14 @@ void Worker(std::shared_ptr<Session> sp) {
         Finish(s, false, "The video could not be recorded: " + s.error);
         return;
     }
-    std::thread audio;
-    if (s.hasAudio) audio = std::thread(AudioLoop, sp);
+    HANDLE audioDone = s.hasAudio ? CreateEventW(nullptr, TRUE, FALSE, nullptr) : nullptr;
+    if (audioDone && !HookGuard::StartDetached("Video: game sound", [sp, audioDone] {
+            struct Done { HANDLE h; ~Done() { SetEvent(h); } } done{audioDone};
+            AudioLoop(sp);
+        })) {
+        CloseHandle(audioDone);
+        audioDone = nullptr;
+    }
     const LONGLONG dur = kHns / std::max(1, s.o.fps);
     unsigned long long lastSize = 0;
     for (;;) {
@@ -370,12 +377,15 @@ void Worker(std::shared_ptr<Session> sp) {
         }
     }
     s.audioStop = true;
-    if (audio.joinable()) audio.join();
+    const bool audioEnded = !audioDone || WaitForSingleObject(audioDone, 5000) == WAIT_OBJECT_0;
+    if (audioEnded && audioDone) CloseHandle(audioDone);
     const HRESULT fin = s.writer->Finalize();
     SafeRelease(s.writer);
-    SafeRelease(s.capture);
-    SafeRelease(s.audio);
-    if (s.audioEvent) CloseHandle(s.audioEvent);
+    if (audioEnded) { // else the sound thread may still use them: left to the process
+        SafeRelease(s.capture);
+        SafeRelease(s.audio);
+        if (s.audioEvent) CloseHandle(s.audioEvent);
+    }
     MFShutdown();
     if (SUCCEEDED(com)) CoUninitialize();
     WIN32_FILE_ATTRIBUTE_DATA d{};
@@ -432,6 +442,8 @@ bool Start(IDirect3DDevice9* dev, const std::filesystem::path& file, const Optio
     if (g_active.load()) { why = "a video is already recording"; return false; }
     if (g_finishing.load() > 0 && !o.nextClip) { why = "the last video is still being saved"; return false; }
     if (!dev) { why = "no device"; return false; }
+    if (g_s) { std::lock_guard<std::mutex> lk(g_sLock); g_s.reset(); } // a session ended by StopAndWait
+    ReleaseSlots();
     const size_t freeBlock = LargestFree();
     if (freeBlock < (192u << 20)) { why = std::format("the game has too little free memory for a video ({} MB in one block, 192 MB needed); save and restart the game", freeBlock >> 20); return false; }
     IDirect3DSurface9* bb = nullptr;
@@ -459,7 +471,7 @@ bool Start(IDirect3DDevice9* dev, const std::filesystem::path& file, const Optio
     s->qpc0 = Qpc();
     g_period = std::max<LONGLONG>(1, QpcFreq() / s->o.fps);
     g_nextDue = s->qpc0;
-    g_s = s;
+    { std::lock_guard<std::mutex> lk(g_sLock); g_s = s; }
     g_active = true;
     g_finishing++;
     if (!o.nextClip) { std::lock_guard<std::mutex> lk(g_resultLock); g_result.clear(); }
@@ -469,29 +481,38 @@ bool Start(IDirect3DDevice9* dev, const std::filesystem::path& file, const Optio
     return true;
 }
 
-void Grab(IDirect3DDevice9* dev) {
-    if (!g_active.load() || !dev || g_grabbedThisFrame || !g_s) return;
+bool Grab(IDirect3DDevice9* dev, IDirect3DSurface9* src) {
+    if (!g_active.load() || !dev || g_grabbedThisFrame || !g_s) return true;
     const LONGLONG now = Qpc();
-    if (now < g_nextDue - g_period / 8) return;
-    if (g_s->failed.load()) return;
+    if (now < g_nextDue - g_period / 8) return true;
+    if (g_s->failed.load()) return true;
     IDirect3DSurface9* bb = nullptr;
-    if (!OnBackBuffer(dev, bb)) return; // an off-screen pass: wait for the frame's own end
+    if (src) { bb = src; bb->AddRef(); }
+    else if (!OnBackBuffer(dev, bb)) return true; // an off-screen pass: wait for the frame's own end
     g_grabbedThisFrame = true;
     g_nextDue = g_s->qpc0 + ((now - g_s->qpc0) / g_period + 1) * g_period;
     Slot* slot = nullptr;
     for (auto& sl : g_slots) if (sl.state == 0) { slot = &sl; break; }
-    if (!slot) { g_s->dropped++; bb->Release(); return; }
-    if (SUCCEEDED(dev->StretchRect(bb, nullptr, slot->rt, nullptr, D3DTEXF_LINEAR))) {
+    if (!slot) { g_s->dropped++; bb->Release(); return true; }
+    const bool copied = SUCCEEDED(dev->StretchRect(bb, nullptr, slot->rt, nullptr, D3DTEXF_LINEAR));
+    if (copied) {
         slot->q->Issue(D3DISSUE_END);
         slot->state = 1;
         slot->t = (now - g_s->qpc0) * kHns / QpcFreq();
     }
     bb->Release();
+    return copied || !src;
 }
 
 void Pump(IDirect3DDevice9* dev) {
     g_grabbedThisFrame = false;
     if (!g_s || !dev) return;
+    if (!g_active.load()) { // stopped by StopAndWait (the game was closing, then did not close)
+        ReleaseSlots();
+        std::lock_guard<std::mutex> lk(g_sLock);
+        g_s.reset();
+        return;
+    }
     // oldest first
     Slot* order[kSlots];
     for (int i = 0; i < kSlots; i++) order[i] = &g_slots[i];
@@ -535,7 +556,21 @@ void Stop() {
         g_s->stopping = true;
         g_s->cv.notify_one();
     }
+    std::lock_guard<std::mutex> lk(g_sLock);
     g_s.reset();
+}
+
+bool StopAndWait(unsigned ms) {
+    std::shared_ptr<Session> s;
+    { std::lock_guard<std::mutex> lk(g_sLock); s = g_s; }
+    if (g_active.exchange(false) && s) {
+        std::lock_guard<std::mutex> lk(s->m);
+        s->stopping = true;
+        s->cv.notify_one();
+    }
+    const unsigned long long until = GetTickCount64() + ms;
+    while (g_finishing.load() > 0 && GetTickCount64() < until) Sleep(20);
+    return g_finishing.load() <= 0;
 }
 
 void Release() { Stop(); ReleaseSlots(); }

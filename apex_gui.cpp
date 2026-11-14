@@ -2275,7 +2275,6 @@ void ResetAllRow() {
             uiDefaults.s3ppSpinAsked = previousUi.s3ppSpinAsked; // nor the Sims 3 Performance Patch one
             ApexConfig::SetUi(uiDefaults);
             Screen::ResetDefaults(); // System > Display (not part of the undo: a device reset follows)
-            ApexCapture::Set(ApexCapture::Settings{}); // ApexCapture.ini (screenshot and video options; not part of the undo)
             OverviewRestore::Forget(OverviewRestore::Scope::Display); // (its switch has nothing to put back)
             LOG_INFO("[Menu] All settings reset to their defaults");
             ShowToast(I18n::Tr("All settings reset"), std::move(before), "All settings reset");
@@ -2384,7 +2383,6 @@ void MenuTab() {
         }
     }
     ApexUi::EndCard();
-    ApexCapture::ProfileCard(); // capture profiles: which settings the two capture cards show
     ScreenshotCaptureCard();
     if (ApexUi::BeginCard("##Maintenance")) {
         ApexUi::CardHeader(IconId::Wrench, "Settings and maintenance", "Saving, reset and recovery", nullptr, nullptr);
@@ -5006,19 +5004,10 @@ bool CaptureHoldKey(ApexConfig::KeyChord& out) {
 // Sims3SettingsSetter's menu (Insert alone), or a bare letter, digit or Space (it would stop that key from typing in the game).
 enum ShortcutRow : int {
     RowMenu, RowCompare, RowRefresh, RowScreenshot, RowRecorder, RowProbe, RowDiagnostics, RowFrameCapture,
-    RowSearch, RowPeek, RowPictureCompare, RowVideo, RowLooks,
-    RowProfileKey, RowProfileShot, RowProfileNext, RowExternalKey, RowCount
+    RowSearch, RowPeek, RowPictureCompare, RowVideo, RowLooks, RowExternalKey, RowCount
 };
-// Capture profile rows: their keys are text in ApexCapture.ini / the profile file (Win+ allowed on the other app's key)
-bool IsCaptureKeyRow(int row) { return row == RowProfileKey || row == RowProfileShot || row == RowProfileNext || row == RowExternalKey; }
-std::string& CaptureKeyRef(ApexCapture::Settings& s, int row) {
-    switch (row) {
-    case RowProfileKey: return s.profileKey;
-    case RowProfileShot: return s.profileShotKey;
-    case RowProfileNext: return s.keyNextProfile;
-    default: return s.externalKey;
-    }
-}
+// The other recorder's key: text in [capture.video] external_key (Win+ allowed)
+bool IsCaptureKeyRow(int row) { return row == RowExternalKey; }
 UINT g_recHeldVk = 0;       // a refused key still held: ignored until released
 bool g_recWaitRelease = false; // recording starts only once every key is up (the click's Enter, a held chord)
 int g_recSeenFrame = -1;       // the last frame the editor was drawn: recording stops when it is not (menu closed, page left)
@@ -5037,15 +5026,10 @@ ApexConfig::KeyChord RowKey(int row) {
     case RowSearch: return ApexConfig::GetUi().searchKey;
     case RowPeek: return ApexConfig::GetUi().peekKey;
     case RowLooks: return ApexConfig::GetUi().looksKey;
-    case RowVideo: { // ApexCapture.ini KeyRecord
+    case RowVideo: return ApexCapture::Get().video.recordKey;
+    case RowExternalKey: { // text; a Win+ key never clashes
         UINT vk = 0; bool c = false, s = false, a = false, w = false;
-        if (!ApexCapture::ParseKey(ApexCapture::Get().keyRecord, vk, c, s, a, w) || w) return {};
-        return {vk, c, s, a};
-    }
-    case RowProfileKey: case RowProfileShot: case RowProfileNext: case RowExternalKey: { // text keys; a Win+ key never clashes
-        ApexCapture::Settings cs = ApexCapture::Get();
-        UINT vk = 0; bool c = false, s = false, a = false, w = false;
-        if (!ApexCapture::ParseKey(CaptureKeyRef(cs, row), vk, c, s, a, w) || w) return {0, false, false, false};
+        if (!ApexCapture::ParseExternalKey(ApexCapture::Get().video.externalKey, vk, c, s, a, w) || w) return {0, false, false, false};
         return {vk, c, s, a};
     }
     default: return ApexConfig::GetUi().pictureCompareKey;
@@ -5065,9 +5049,6 @@ const char* RowName(int row) {
     case RowPeek: return "Hide the menu while held";
     case RowVideo: return "Record a video";
     case RowLooks: return "ReShade/GShade looks on or off";
-    case RowProfileKey: return "Key for this profile";
-    case RowProfileShot: return "One picture with this profile";
-    case RowProfileNext: return "Next profile key";
     case RowExternalKey: return "The other app's key";
     default: return "Compare the picture without its filters";
     }
@@ -5086,9 +5067,6 @@ const char* RowText(int row) {
     case RowPeek: return "Hold the key over the menu to hide it and see the game";
     case RowVideo: return "Press once to start, again to stop";
     case RowLooks: return "Switches the ReShade/GShade preset off (no GPU cost) and back on";
-    case RowProfileKey: return "Switches to the profile in use from the game; each profile has its own key";
-    case RowProfileShot: return "Takes a picture with this profile without switching to it";
-    case RowProfileNext: return "Goes through the profiles in game; the same for every profile";
     case RowExternalKey: return "Only with Recorder set to Another app: Apex presses it to start Xbox Game Bar, OBS or ShadowPlay";
     default: return "Hold the key over the menu to bypass Picture";
     }
@@ -5116,20 +5094,20 @@ std::string ChordProblem(const ApexConfig::KeyChord& c, int row) {
     }
     return {};
 }
-// Capture profile rows: the text kept in ApexCapture.ini or the profile file ("" removes the key)
+// The other app's key: the text kept in [capture.video] external_key ("" removes the key)
 void StoreCaptureKey(int row, const std::string& text) {
     ApexCapture::Settings s = ApexCapture::Get();
-    CaptureKeyRef(s, row) = text;
+    s.video.externalKey = text;
     ApexCapture::Set(s);
     LOG_INFO(std::format("[Menu] {}: {}", RowName(row), text.empty() ? std::string("none") : text));
 }
 void StoreRowKey(int row, const ApexConfig::KeyChord& c) {
     if (IsCaptureKeyRow(row)) { StoreCaptureKey(row, ApexConfig::KeyChordText(c)); return; }
-    if (row == RowVideo) { // kept in ApexCapture.ini (KeyRecord), not in the shortcut presets
+    if (row == RowVideo) { // kept in [capture.video] record_key, not in the shortcut presets
         ApexCapture::Settings s = ApexCapture::Get();
-        s.keyRecord = ApexConfig::KeyChordText(c);
+        s.video.recordKey = c;
         ApexCapture::Set(s);
-        LOG_INFO(std::format("[Menu] {}: {}", RowName(row), s.keyRecord));
+        LOG_INFO(std::format("[Menu] {}: {}", RowName(row), ApexConfig::KeyChordText(c)));
         return;
     }
     ApexConfig::UiSettings ui = ApexConfig::GetUi();
@@ -5194,7 +5172,13 @@ void RecordStep() {
     // the other app's key may use the Windows key (Win+Alt+R = Xbox Game Bar); no Apex key uses it, so it never clashes
     const bool win = g_recRow == RowExternalKey && ((GetAsyncKeyState(VK_LWIN) & 0x8000) || (GetAsyncKeyState(VK_RWIN) & 0x8000));
     if (win) {
-        StoreCaptureKey(g_recRow, "Win+" + ApexConfig::KeyChordText(c));
+        const std::string text = "Win+" + ApexConfig::KeyChordText(c);
+        if (!ApexCapture::ExternalKeyAllowed(text)) {
+            g_recNote = text + ": " + I18n::Tr("That combination belongs to Windows");
+            g_recHeldVk = c.vk;
+            return;
+        }
+        StoreCaptureKey(g_recRow, text);
         g_recRow = -1;
         g_recNote.clear();
         return;
@@ -5222,11 +5206,8 @@ void ApplyPreset(int preset) {
 
 std::string KeyChipText(int row) {
     if (g_recRow == row) return std::string(I18n::Tr("Press the keys\xE2\x80\xA6"));
-    if (IsCaptureKeyRow(row)) { // as written in the file (Win+ included); empty = none
-        ApexCapture::Settings cs = ApexCapture::Get();
-        std::string t = CaptureKeyRef(cs, row);
-        while (!t.empty() && (t.back() == ' ' || t.back() == '\t')) t.pop_back();
-        while (!t.empty() && (t.front() == ' ' || t.front() == '\t')) t.erase(t.begin());
+    if (IsCaptureKeyRow(row)) { // as written in the file (Win+ included, trimmed); empty = none
+        const std::string t = ApexCapture::Get().video.externalKey;
         return t.empty() ? std::string(I18n::Tr("No key")) : t;
     }
     return ApexConfig::KeyChordText(RowKey(row));
@@ -5291,12 +5272,6 @@ void ShortcutsContent() {
         KeyChip(row);
         ApexUi::EndControlRow();
     }
-    ApexUi::GroupLabel("CAPTURE PROFILES");
-    for (int row : {RowProfileKey, RowProfileShot, RowProfileNext, RowExternalKey}) {
-        if (!ApexUi::BeginControlRow(RowName(row), RowText(row), KeyChipWidth(row))) continue;
-        KeyChip(row);
-        ApexUi::EndControlRow();
-    }
     ApexUi::GroupLabel("REPORT A PROBLEM");
     for (int row : {RowRecorder, RowProbe, RowDiagnostics}) {
         if (!ApexUi::BeginControlRow(RowName(row), RowText(row), KeyChipWidth(row))) continue;
@@ -5326,8 +5301,7 @@ void ScreenshotCaptureCard() {
         int folder = std::clamp(ui.screenshotFolder, 0, 2);
         if (ApexUi::SegmentedRow("Save screenshots to", "Where the filtered screenshots are saved", "##ShotFolder", &folder, kFolders, 3, kFolderTips, nullptr, 0)) {
             if (folder == 2 && ui.screenshotCustomFolder.empty()) { // start from the folder in use; type over it or press Change
-                std::string why;
-                ui.screenshotCustomFolder = ApexUtil::ToUtf8(ApexCapture::ResolveFolder(ui.screenshotFolder == 1 ? "%ApexFolder%\\Screenshots" : "%GameScreenshots%", why).wstring());
+                ui.screenshotCustomFolder = ApexUtil::ToUtf8(ApexCapture::DefaultFolder(ui.screenshotFolder, false).wstring());
             }
             if (folder != 2 || !ui.screenshotCustomFolder.empty()) {
                 ui.screenshotFolder = folder;
@@ -5342,17 +5316,15 @@ void ScreenshotCaptureCard() {
             }
         }
         // (its key is set once, on the Shortcuts tab)
-        ApexCapture::ScreenshotRows(); // file name, type, size, Hide game UI, burst ... (ApexCapture.ini)
+        ApexCapture::ScreenshotRows(); // file name, type, size, Hide game UI, burst ... ([capture.screenshot])
     }
     ApexUi::EndCard();
 
-    // Settings > Menu: video recording (ApexCapture.ini); its key is on the Shortcuts tab
+    // Settings > Menu: video recording ([capture.video]); its key is on the Shortcuts tab
     if (ApexUi::BeginCard("##VideoRecording")) {
         ApexUi::CardHeader(IconId::Video, "Video recording", "Records the game with your look as an MP4", nullptr, nullptr);
         ApexUi::CardDivider();
         ApexCapture::VideoRows();
-        ApexUi::GroupLabel("SETTINGS FILE");
-        ApexCapture::FileRows();
     }
     ApexUi::EndCard();
 }
@@ -5404,26 +5376,14 @@ void ShortcutsTab() {
             }
             ImGui::EndDisabled();
         }
-        RecordNote(false);
-        ApexUi::Gap(ApexUi::kSpace1);
-        ApexUi::MutedText("F10 always hides the game interface");
-    }
-    ApexUi::EndCard();
-
-    // Capture profiles (ApexCapture.ini / the profile in use): the same key chips; the profile itself is on Settings > Menu
-    if (ApexUi::BeginCard("##CaptureProfileKeys")) {
-        ApexUi::CardHeader(IconId::Settings2, "Capture profiles", "Keys for the capture profiles; set the profiles up on the Menu tab", nullptr, nullptr);
-        ApexUi::CardDivider();
-        for (int row : {RowProfileKey, RowProfileShot, RowProfileNext, RowExternalKey}) {
-            std::string text = RowText(row);
-            if (row == RowProfileKey || row == RowProfileShot) // per profile: name the one in use
-                text = I18n::Trf("{} (now: {})", I18n::Tr(RowText(row)), ApexCapture::Get().profileActive);
-            ApexUi::SetNextRowUntranslated();
-            if (!ApexUi::BeginControlRow(I18n::Tr(RowName(row)), text.c_str(), KeyChipWidth(row))) continue;
-            KeyChip(row);
+        if (ApexUi::BeginControlRow(RowName(RowExternalKey), RowText(RowExternalKey), KeyChipWidth(RowExternalKey))) { // [capture.video] external_key
+            KeyChip(RowExternalKey);
             ApexUi::EndControlRow();
         }
+        RecordNote(false);
         RecordNote(true);
+        ApexUi::Gap(ApexUi::kSpace1);
+        ApexUi::MutedText("F10 always hides the game interface");
     }
     ApexUi::EndCard();
 
@@ -5562,6 +5522,7 @@ void ToggleFeatureByKey(const char* patchName, const char* shown, IconId icon) {
 // Render thread, every frame: the shortcuts that are not the menu key
 void RunShortcuts() {
     RecordStep();
+    ApexCapture::Poll(); // a recording asked for by its key or the menu
     if (Hotkeys::Take(Hotkeys::Action::Compare)) ToggleCompare();
     if (Hotkeys::Take(Hotkeys::Action::Refresh)) NightLighting::RefreshAll();
     if (Hotkeys::Take(Hotkeys::Action::Screenshot))
@@ -5678,7 +5639,7 @@ class GuiClient final : public Overlay::Client {
         if (!Captures::ScreenshotPending()) {
             CaptureTarget();
         }
-        ApexCapture::DrawTimer(); // ApexCapture.ini [VIDEO] timer and red frame while a video records
+        ApexCapture::DrawTimer(); // [capture.video] timer and red frame while a video records
         noticeShown = CaptureNote(noticesAllowed); // never in the capture's own screenshot
         const bool compareShown = CompareNote(noticesAllowed && !noticeShown);
         if (!noticeShown) noticeShown = compareShown;
@@ -5730,6 +5691,7 @@ class GuiClient final : public Overlay::Client {
 
     bool OnWindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, LRESULT* result) override {
         if (Screen::OnWindowMessage(hwnd, msg, wp, lp, result)) return true; // Settings > Display: the window's style and position
+        if (msg == WM_CLOSE || msg == WM_DESTROY || (msg == WM_ENDSESSION && wp)) ApexCapture::OnGameClosing(); // a playable video file
         if (msg == WM_KILLFOCUS || (msg == WM_ACTIVATEAPP && !wp)) {
             eatProbeMouseUp = false;
             cheatConsoleGuess = false;
@@ -5797,7 +5759,7 @@ class GuiClient final : public Overlay::Client {
         if (g_recRow < 0 && Overlay::IsVisible() && g_menuTextInput.load() && screenshot.vk == vk &&
             !screenshot.ctrl && !screenshot.shift && !screenshot.alt)
             return false; // let ImGui handle typing; its keyboard capture still keeps the key from reaching the game
-        if (g_recRow < 0 && !g_menuTextInput.load() && ApexCapture::KeyDown(vk, repeat)) return true; // ApexCapture.ini KeyRecord
+        if (g_recRow < 0 && !g_menuTextInput.load() && ApexCapture::KeyDown(vk, repeat)) return true; // [capture.video] record_key
         const bool aiming = LightProbe::Aiming();
         const bool handled = g_recRow >= 0 || Hotkeys::OnKeyDown(vk, repeat) ||
             ((!Overlay::IsVisible() || !g_menuTextInput.load()) && PresetKeyDown(vk, repeat));

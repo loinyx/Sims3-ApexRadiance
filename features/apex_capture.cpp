@@ -1,21 +1,18 @@
-// Screenshots and videos with Apex's effects, and the player's settings file ApexCapture.ini (see apex_capture.h).
+// Screenshots and videos with Apex's effects, and their [capture] settings in ApexRadiance.toml (see apex_capture.h).
 #include "apex_capture.h"
 #include "captures.h"
 #include "video_mp4.h"
-#include "patch_base.h"
-#include "apex_config.h"
 #include "apex_log.h"
 #include "apex_paths.h"
 #include "apex_util.h"
-#include "memory_patch.h"
 #include "d3d9_hooks.h"
 #include "render_callbacks.h"
-#include "overlay.h"
 #include "imgui.h"
 #include "ui/widgets.h"
 #include "ui/i18n.h"
 #include "ui/violet_theme.h"
 #include "hook_guard.h"
+#include <toml++/toml.hpp>
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -25,11 +22,9 @@
 #include <atomic>
 #include <cmath>
 #include <format>
-#include <fstream>
 #include <map>
 #include <mutex>
 #include <optional>
-#include <sstream>
 
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "shell32.lib")
@@ -41,347 +36,106 @@ namespace ApexCapture {
 using ApexUi::IconId;
 namespace {
 
-// ---------------------------------------------------------------------------------------------- the file's keys
-enum class Kind { Bool, Int, Text, Pick };
-struct Key {
-    const char* section;
-    const char* name;
-    const char* note;
-    Kind kind;
-    bool Settings::* b = nullptr;
-    int Settings::* i = nullptr;
-    std::string Settings::* s = nullptr;
-    int lo = 0, hi = 0;
-    const char* off = nullptr; // Pick: the value when b is false / true
-    const char* on = nullptr;
-};
-Key B(const char* sec, const char* n, bool Settings::* m, const char* note) { Key k{sec, n, note, Kind::Bool}; k.b = m; return k; }
-Key I(const char* sec, const char* n, int Settings::* m, int lo, int hi, const char* note) { Key k{sec, n, note, Kind::Int}; k.i = m; k.lo = lo; k.hi = hi; return k; }
-Key T(const char* sec, const char* n, std::string Settings::* m, const char* note) { Key k{sec, n, note, Kind::Text}; k.s = m; return k; }
-Key P(const char* sec, const char* n, bool Settings::* m, const char* off, const char* on, const char* note) { Key k{sec, n, note, Kind::Pick}; k.b = m; k.off = off; k.on = on; return k; }
-
-const std::vector<Key>& Keys() {
-    static const std::vector<Key> k = {
-        B("GENERAL", "ReloadOnChange", &Settings::reloadOnChange, "1 = Apex re-reads this file a moment after you save it (no restart needed). The menu tab writes here too."),
-        B("GENERAL", "ShowNotice", &Settings::showNotice, "1 = a short note at the top of the screen when a picture or video is saved. Notes are never in the picture or the video."),
-        T("GENERAL", "SoundPath", &Settings::soundPath, "Played for every screenshot and at the start and stop of a video: camera (a camera shutter, built in), gshade (GShade's notification.wav when GShade is installed), a .wav file, or empty = silent."),
-
-        T("SCREENSHOT", "KeyScreenshot", &Settings::keyScreenshot, "Screenshot key: F8, Ctrl+F8, Shift+F12 ... GShade's numbers work too (107,0,1,0 = Shift+Num +). A bare letter or digit is refused (it would fire while typing names)."),
-        T("SCREENSHOT", "SavePath", &Settings::shotPath, "Folder for screenshots. Tokens: %GameScreenshots% (Documents\\Electronic Arts\\The Sims 3\\Screenshots), %ApexFolder%, %Pictures%, %Videos%, %Documents%, and the date, time and save tokens of FileNaming (for example F:\\Pictures\\TS3W\\%Day%-%Month%-%Year%). Made when missing."),
-        T("SCREENSHOT", "FileNaming", &Settings::shotNaming, "File name. Tokens as in GShade: %Date% %TimeHour% %TimeMinute% %TimeSecond% %TimeMS% %PresetName%, plus %Day% %Month% %Year% %YearShort% %MonthName% %MonthShort% %Weekday% %WeekdayShort% %Hour12% %AmPm%, %SaveName% (the save in play), %Type% (Screenshot/Video), %Part% (the clip number with NewClipEveryMB), %Width% %Height%, %Counter% (a running number) and %Look% (on/off). They work in SavePath too."),
-        I("SCREENSHOT", "CounterDigits", &Settings::counterDigits, 1, 8, "How many digits %Counter% has (4 = 0001). The counter carries on across game sessions."),
-        P("SCREENSHOT", "FileFormat", &Settings::jpg, "png", "jpg", "png = lossless (about 6-9 MB at 2560x1440), jpg = small. GShade wrote a number here; Apex takes the name. (png | jpg)"),
-        I("SCREENSHOT", "JPEGQuality", &Settings::jpegQuality, 1, 100, "JPEG quality, 1-100. Only for FileFormat=jpg."),
-        I("SCREENSHOT", "ResolutionScale", &Settings::shotScale, 10, 100, "Picture size in % of the screen. 100 = the game's own size; 50 = half."),
-        B("SCREENSHOT", "IncludeGameUI", &Settings::shotGameUi, "1 = the game's UI is in the picture. 0 = Apex hides it for one frame (F10) and brings it back. Loading and menu screens always keep theirs."),
-        B("SCREENSHOT", "IncludeApexMenu", &Settings::shotApexMenu, "1 = the Apex menu is in the picture when it is open. 0 = never."),
-        B("SCREENSHOT", "SaveBeforeShot", &Settings::saveBefore, "1 = also save the same frame without the GShade look, as <name>_before (as GShade does)."),
-        B("SCREENSHOT", "SavePresetFile", &Settings::savePreset, "1 = also save a copy of the preset .ini next to the picture, so the look can be found again (as GShade does)."),
-        B("SCREENSHOT", "IncludeMouse", &Settings::shotMouse, "1 = the mouse pointer is in the picture, where it was on screen. 0 = never."),
-        I("SCREENSHOT", "BatchQuantity", &Settings::batchQuantity, 1, 50, "Pictures per key press. 1 = one; more = a burst (GShade's Batch)."),
-        I("SCREENSHOT", "BatchInterval", &Settings::batchInterval, 50, 10000, "Milliseconds between the pictures of a burst."),
-
-        B("VIDEO", "Enabled", &Settings::videoEnabled, "1 = the record key works. 0 = it does nothing."),
-        P("VIDEO", "Engine", &Settings::external, "builtin", "external", "builtin = Apex writes the MP4 itself. external = Apex presses ExternalKey for Xbox Game Bar, ShadowPlay or OBS; they save in their own folder. (builtin | external)"),
-        T("VIDEO", "KeyRecord", &Settings::keyRecord, "Start / stop key: press once to start, again to stop."),
-        T("VIDEO", "SavePath", &Settings::videoPath, "Folder for videos. Same tokens as screenshots."),
-        T("VIDEO", "FileNaming", &Settings::videoNaming, "File name. Same tokens as screenshots."),
-        P("VIDEO", "Container", &Settings::fragmented, "mp4", "mp4-safe", "mp4 = plays everywhere. mp4-safe = fragmented MP4: a crash mid-recording keeps what was recorded. mkv = recorded as mp4-safe, then copied into an MKV when it stops (no quality loss). (mp4 | mp4-safe | mkv)"),
-        B("VIDEO", "KeepMp4", &Settings::keepMp4, "With Container=mkv: 1 = keep the MP4 next to the MKV. 0 = only the MKV."),
-        I("VIDEO", "NewClipEveryMB", &Settings::newClipMB, 0, 100000, "While recording, save the clip and go on in a new file at this size in MB (1024 = 1 GB). 0 = one file. %Part% numbers the clips."),
-        P("VIDEO", "Codec", &Settings::hevc, "h264", "hevc", "hevc = smaller files, only with a graphics card that encodes HEVC; else Apex falls back to h264. (h264 | hevc)"),
-        I("VIDEO", "FPS", &Settings::fps, 10, 60, "Frames per second (24, 30 or 60). 60 costs twice the readback of 30."),
-        P("VIDEO", "RateControl", &Settings::bitrateMode, "quality", "bitrate", "quality = Quality below sets the size. bitrate = a fixed BitrateMbps. (quality | bitrate)"),
-        I("VIDEO", "Quality", &Settings::quality, 1, 100, "Quality 1-100 (RateControl=quality). 80 = about 16 Mbit/s at 1080p30."),
-        I("VIDEO", "BitrateMbps", &Settings::bitrateMbps, 1, 200, "Mbit/s (RateControl=bitrate)."),
-        I("VIDEO", "MaxHeight", &Settings::maxHeight, 360, 2160, "Video height in lines (720, 1080, 1440). Scaled on the graphics card before the readback; the game's own height is the most it takes. Higher costs more bridge memory."),
-        P("VIDEO", "Audio", &Settings::audio, "off", "game", "game = The Sims 3's own sound only (Windows 10 2004 or later), not Discord or music players. off = silent. (game | off)"),
-        B("VIDEO", "IncludeGameUI", &Settings::videoGameUi, "1 = the game's UI is in the video. 0 = hidden (F10) while recording."),
-        B("VIDEO", "IncludeApexMenu", &Settings::videoApexMenu, "1 = the Apex menu (and its notes) is in the video when open. 0 = never."),
-        B("VIDEO", "IncludeMouse", &Settings::videoMouse, "1 = the mouse pointer moves in the video as on screen. 0 = never."),
-        I("VIDEO", "MaxLength", &Settings::maxLength, 0, 36000, "Stop after this many seconds (0 = never)."),
-        I("VIDEO", "MaxFileMB", &Settings::maxFileMB, 0, 100000, "Stop at this file size in MB (0 = never)."),
-        B("VIDEO", "ShowRecordingDot", &Settings::recordingDot, "1 = a recording timer on screen while a video records: a red dot, the time and the file size."),
-        T("VIDEO", "TimerPosition", &Settings::timerPos, "Where the timer sits: top-left | top-center | top-right | bottom-left | bottom-right."),
-        I("VIDEO", "TimerSize", &Settings::timerSize, 70, 160, "Timer size in % (100 = the size of Apex notes)."),
-        I("VIDEO", "TimerOpacity", &Settings::timerOpacity, 30, 100, "Timer opacity in %."),
-        B("VIDEO", "TimerBlink", &Settings::timerBlink, "1 = the red dot pulses."),
-        B("VIDEO", "TimerHours", &Settings::timerHours, "1 = always show hours (0:02:15). 0 = hours only from one hour on."),
-        B("VIDEO", "TimerStopKey", &Settings::timerKey, "1 = the timer shows the key that stops the video."),
-        B("VIDEO", "TimerFileSize", &Settings::timerFileSize, "1 = the timer shows the file size so far (built-in recorder only)."),
-        B("VIDEO", "TimerInVideo", &Settings::timerInVideo, "1 = the timer and the red frame are in the video too (the video is then taken after Apex draws, so an open Apex menu and its notes are in it as well). 0 = on screen only."),
-        B("VIDEO", "RedFrame", &Settings::redFrame, "1 = a thin red frame around the screen while recording."),
-        I("VIDEO", "WarnBefore", &Settings::warnBefore, 0, 600, "Seconds before MaxLength or MaxFileMB stops the video: the timer turns amber and shows the time left. 0 = no warning."),
-        B("VIDEO", "SavedNote", &Settings::savedNote, "1 = a short note when the video is saved: its length and size."),
-        T("VIDEO", "ExternalKey", &Settings::externalKey, "Engine=external only: the recorder's start/stop key. Win+Alt+R = Xbox Game Bar."),
-
-        T("PROFILES", "Active", &Settings::profileActive, "The capture profile in use. Every value in this file is saved into it (Capture profiles\\<name>.ini next to this file), except the keys and this section, which every profile shares. Type another profile's name here to switch."),
-        T("PROFILES", "KeyNext", &Settings::keyNextProfile, "Switches to the next capture profile (in name order). Empty = no key."),
-        B("PROFILES", "ShowNote", &Settings::profileNote, "1 = a short note with the profile's name when it switches. Never in pictures or videos."),
-        T("PROFILE", "Key", &Settings::profileKey, "This profile's own key: switches to it (Ctrl+1, Ctrl+2 ...). Empty = none."),
-        T("PROFILE", "ShotKey", &Settings::profileShotKey, "Takes one picture (or burst) with this profile without switching to it, for example a clean shot while recording with the UI. Empty = none."),
-    };
-    return k;
-}
-
 std::string Lower(std::string s) { for (auto& c : s) c = static_cast<char>(tolower(static_cast<unsigned char>(c))); return s; }
 std::string Trim(const std::string& s) {
     const size_t a = s.find_first_not_of(" \t\r\n"), b = s.find_last_not_of(" \t\r\n");
     return a == std::string::npos ? std::string() : s.substr(a, b - a + 1);
 }
 
-std::string ValueOf(const Settings& st, const Key& k) {
-    switch (k.kind) {
-    case Kind::Bool: return st.*k.b ? "1" : "0";
-    case Kind::Int: return std::to_string(st.*k.i);
-    case Kind::Text: return st.*k.s;
-    case Kind::Pick: return k.b == &Settings::fragmented && st.mkv ? "mkv" : st.*k.b ? k.on : k.off;
-    }
-    return {};
+// ---------------------------------------------------------------------------------------------- [capture] in the TOML
+const char* const kLookNames[] = {"with", "without", "both"};
+const char* const kFolderNames[] = {"game", "apex", "custom"};
+const char* const kQualityNames[] = {"smaller", "balanced", "best", "custom"};
+const char* const kContainerNames[] = {"mp4", "mp4-safe", "mkv"};
+const char* const kPosNames[] = {"top-left", "top-center", "top-right", "bottom-left", "bottom-right"};
+
+template <size_t N> int NameIndex(const toml::node_view<const toml::node>& n, const char* const (&names)[N], int def) {
+    const std::string v = Lower(Trim(n.value_or(std::string())));
+    for (size_t i = 0; i < N; i++) if (v == names[i]) return static_cast<int>(i);
+    return def;
+}
+int Int(const toml::node_view<const toml::node>& n, int def) { return static_cast<int>(n.value_or(static_cast<int64_t>(def))); }
+
+Settings Clamped(Settings s) {
+    s.sound = Trim(s.sound);
+    if (Lower(s.sound) == "off") s.sound.clear();
+    ScreenshotSettings& t = s.shot;
+    if (Trim(t.fileName).empty()) t.fileName = kDefaultShotName;
+    t.look = std::clamp(t.look, 0, 2);
+    t.jpgQuality = std::clamp(t.jpgQuality, 1, 100);
+    t.sizePercent = std::clamp(t.sizePercent, 10, 100);
+    t.burstCount = std::clamp(t.burstCount, 1, kMaxBurst);
+    t.burstIntervalMs = std::clamp(t.burstIntervalMs, 50, 10000);
+    if (t.burstCount > 1) t.burstIntervalMs = std::min(t.burstIntervalMs, kMaxBurstMs / (t.burstCount - 1)); // the whole burst within 30 s
+    VideoSettings& v = s.video;
+    const VideoSettings def;
+    if (Trim(v.fileName).empty()) v.fileName = def.fileName;
+    v.folder = std::clamp(v.folder, 0, 2);
+    v.look = std::clamp(v.look, 0, 1);
+    v.size = v.size >= 1300 ? 1440 : v.size >= 900 ? 1080 : 720;
+    v.fps = v.fps >= 50 ? 60 : v.fps >= 27 ? 30 : 24;
+    v.quality = std::clamp(v.quality, 0, 3);
+    v.customMbps = std::clamp(v.customMbps, 1, 200);
+    v.container = std::clamp(v.container, 0, 2);
+    v.newClipMb = std::clamp(v.newClipMb, 0, 100000);
+    v.stopAfterS = std::clamp(v.stopAfterS, 0, 36000);
+    v.stopAtMb = std::clamp(v.stopAtMb, 0, 100000);
+    v.warnBeforeS = std::clamp(v.warnBeforeS, 0, 600);
+    v.timerPosition = std::clamp(v.timerPosition, 0, 4);
+    v.timerSize = std::clamp(v.timerSize, 70, 160);
+    v.timerOpacity = std::clamp(v.timerOpacity, 30, 100);
+    v.externalKey = Trim(v.externalKey);
+    if (!v.recordKey.vk) v.recordKey = def.recordKey;
+    return s;
 }
 
-// false = the value was not understood (the default stays)
-bool Assign(Settings& st, const Key& k, const std::string& raw) {
-    const std::string v = Lower(Trim(raw));
-    switch (k.kind) {
-    case Kind::Bool:
-        if (v == "1" || v == "true" || v == "on" || v == "yes") { st.*k.b = true; return true; }
-        if (v == "0" || v == "false" || v == "off" || v == "no") { st.*k.b = false; return true; }
-        return false;
-    case Kind::Int: {
-        char* end = nullptr;
-        const long n = strtol(v.c_str(), &end, 10);
-        if (v.empty() || (end && *end)) return false;
-        st.*k.i = std::clamp(static_cast<int>(n), k.lo, k.hi);
-        return true;
-    }
-    case Kind::Text: st.*k.s = Trim(raw); return true;
-    case Kind::Pick:
-        if (k.b == &Settings::fragmented) st.mkv = v == "mkv";
-        if (v == k.on || (k.b == &Settings::fragmented && v == "mkv")) { st.*k.b = true; return true; }
-        if (v == k.off) { st.*k.b = false; return true; }
-        if (k.b == &Settings::jpg && (v == "2" || v == "jpeg")) { st.*k.b = true; return true; }   // GShade: 0 bmp, 1 png, 2 jpg
-        if (k.b == &Settings::jpg && (v == "0" || v == "1" || v == "bmp")) { st.*k.b = false; return true; }
-        return false;
-    }
-    return false;
-}
-
-// ---------------------------------------------------------------------------------------------- state
 std::mutex g_lock;
 Settings g_s;
-bool g_loaded = false;
-std::vector<std::tuple<std::string, std::string, std::string>> g_unknown; // section, key, value: kept when writing
-FILETIME g_seen{};
-unsigned long long g_dirtyAt = 0, g_lastCheck = 0;
-bool g_dirty = false;
-std::string g_lastError;
-struct UiSeen { ApexConfig::KeyChord key; bool hide = true; int folder = 0; std::string custom; } g_uiSeen;
-bool g_uiSeenSet = false;
 
-FILETIME WriteTime(const std::filesystem::path& p) {
-    WIN32_FILE_ATTRIBUTE_DATA d{};
-    if (!GetFileAttributesExW(p.c_str(), GetFileExInfoStandard, &d)) return {};
-    return d.ftLastWriteTime;
-}
-bool SameTime(const FILETIME& a, const FILETIME& b) { return a.dwLowDateTime == b.dwLowDateTime && a.dwHighDateTime == b.dwHighDateTime; }
-
-std::string Render(const Settings& st, bool profileFile = false) {
-    std::string t = profileFile ?
-        "; Apex Radiance capture profile \"" + st.profileActive + "\". Switch to it in Settings > Menu, with KeyNext, or with\n"
-        "; [PROFILE] Key below. While it is in use, ApexCapture.ini holds these values and saves them back here; edit it there.\n"
-        "; The keys (KeyScreenshot, KeyRecord, [PROFILES]) come from ApexCapture.ini and are shared by every profile.\n" :
-        "; ApexCapture.ini - how Apex Radiance saves screenshots and videos.\n"
-        "; Edit freely: lines starting with ; are notes. Apex re-reads this file when you save it, and the\n"
-        "; Screenshot capture and Video recording cards (Settings > Menu) edit this same file.\n"
-        "; A value Apex does not understand keeps its default (noted in ApexRadiance_LOG.txt). Unknown keys are kept.\n"
-        "; Delete the file to get every default back.\n";
-    std::string sec;
-    for (const Key& k : Keys()) {
-        if (sec != k.section) {
-            if (!sec.empty())
-                for (const auto& [s, n, v] : g_unknown) if (s == sec) t += n + "=" + v + "\n";
-            sec = k.section;
-            t += "\n[" + sec + "]\n";
-        }
-        t += std::string("; ") + k.note + (k.kind == Kind::Bool ? "  (1 | 0)" : "") + "\n" + k.name + "=" + ValueOf(st, k) + "\n";
-    }
-    for (const auto& [s, n, v] : g_unknown) if (s == sec) t += n + "=" + v + "\n";
-    std::string other;
-    for (const auto& [s, n, v] : g_unknown) {
-        if (s == "GENERAL" || s == "SCREENSHOT" || s == "VIDEO" || s == "PROFILES" || s == "PROFILE") continue;
-        if (other != s) { other = s; t += "\n[" + s + "]\n"; }
-        t += n + "=" + v + "\n";
-    }
-    return t;
-}
-
-bool WriteText(const std::filesystem::path& file, const std::string& text);
-void WriteProfileLocked();
-
-bool WriteLocked() {
-    const auto file = File();
-    if (!WriteText(file, Render(g_s))) { LOG_WARNING("[Capture] ApexCapture.ini could not be written"); return false; }
-    g_seen = WriteTime(file);
-    WriteProfileLocked(); // auto-save into the profile in use
-    return true;
-}
-
-// One settings file into st (defaults first). false = it cannot be opened.
-bool ParseFile(const std::filesystem::path& file, Settings& st, std::vector<std::tuple<std::string, std::string, std::string>>* unknown, std::string& bad) {
-    std::ifstream in(file, std::ios::binary);
-    if (!in) return false;
-    st = Settings{};
-    if (unknown) unknown->clear();
-    std::string line, sec;
-    while (std::getline(in, line)) {
-        if (line.size() >= 3 && static_cast<unsigned char>(line[0]) == 0xEF && static_cast<unsigned char>(line[1]) == 0xBB) line = line.substr(3);
-        line = Trim(line);
-        if (line.empty() || line[0] == ';' || line[0] == '#') continue;
-        if (line.front() == '[' && line.back() == ']') { sec = Trim(line.substr(1, line.size() - 2)); for (auto& c : sec) c = static_cast<char>(toupper(static_cast<unsigned char>(c))); continue; }
-        const size_t eq = line.find('=');
-        if (eq == std::string::npos) continue;
-        const std::string name = Trim(line.substr(0, eq)), value = line.substr(eq + 1);
-        const Key* key = nullptr;
-        for (const Key& k : Keys()) if (sec == k.section && _stricmp(name.c_str(), k.name) == 0) { key = &k; break; }
-        if (!key) { if (unknown) unknown->emplace_back(sec, name, Trim(value)); continue; }
-        if (!Assign(st, *key, value)) bad += std::string(bad.empty() ? "" : ", ") + key->name + "=" + Trim(value);
-    }
-    return true;
-}
-
-// ---------------------------------------------------------------------------------------------- capture profiles
-struct Profile { std::string name; Settings s; };
-std::vector<Profile> g_profiles;          // sorted by name; the one in use is g_s (live)
-unsigned long long g_profilesScanned = 0;
-bool g_hadLoad = false;                  // LoadLocked ran once (a later read may switch by Active=)
-std::string g_wantProfile, g_wantShot;    // set by the key hook, done in Tick (render thread)
-bool g_wantNext = false;
-std::atomic<DWORD> g_overrideThread{0};   // Get() on this thread returns g_override (one picture with another profile)
-Settings g_override;
-
-std::filesystem::path ProfileDir() { return std::filesystem::path(ApexPaths::ApexDirectory()) / L"Capture profiles"; }
-std::string CleanName(std::string n) {
-    for (auto& c : n) if (strchr("<>:\"/\\|?*", c) || static_cast<unsigned char>(c) < 32) c = '-';
-    n = Trim(n);
-    while (!n.empty() && (n.back() == '.' || n.back() == ' ')) n.pop_back();
-    return n.empty() ? std::string("Default") : n.substr(0, 60);
-}
-std::filesystem::path ProfilePath(const std::string& name) { return ProfileDir() / (ApexUtil::ToWide(CleanName(name)) + L".ini"); }
-
-bool WriteText(const std::filesystem::path& file, const std::string& text) {
-    std::error_code ec;
-    std::filesystem::create_directories(file.parent_path(), ec);
-    const auto tmp = std::filesystem::path(file).concat(L".tmp");
+// %Counter%: the next number, then one more (saved with the settings)
+int NextCounter() {
+    int n = 1;
     {
-        std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-        if (!out) return false;
-        std::string crlf; // Windows line ends: it is opened in Notepad
-        crlf.reserve(text.size() + 200);
-        for (char c : text) { if (c == '\n') crlf += '\r'; crlf += c; }
-        out << crlf;
+        std::lock_guard<std::mutex> lk(g_lock);
+        n = g_s.counter;
+        g_s.counter = n >= 99999999 ? 1 : n + 1;
     }
-    if (!MoveFileExW(tmp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING)) { DeleteFileW(tmp.c_str()); return false; }
-    return true;
+    ApexConfig::RequestSave();
+    return n;
+}
+bool g_loaded = false;
+
+void RefreshSaveName();
+bool WantsSaveName(const Settings& s) {
+    auto has = [](const std::string& t) { return Lower(t).find("%savename%") != std::string::npos; };
+    return has(s.shot.fileName) || has(s.video.fileName) || has(s.video.customFolder) || has(ApexConfig::GetUi().screenshotCustomFolder);
 }
 
-// the profile in use, saved from g_s
-void WriteProfileLocked() {
-    g_s.profileActive = CleanName(g_s.profileActive);
-    if (!WriteText(ProfilePath(g_s.profileActive), Render(g_s, true)))
-        LOG_WARNING("[Capture] Capture profile could not be written: " + g_s.profileActive);
-}
-
-// The values every profile shares come from the one in use
-void KeepShared(Settings& st, const Settings& from) {
-    st.reloadOnChange = from.reloadOnChange;
-    st.keyScreenshot = from.keyScreenshot;
-    st.keyRecord = from.keyRecord;
-    st.keyNextProfile = from.keyNextProfile;
-    st.profileNote = from.profileNote;
-}
-
-void ScanProfilesLocked() {
-    g_profilesScanned = GetTickCount64();
-    std::vector<Profile> list;
-    std::error_code ec;
-    for (const auto& e : std::filesystem::directory_iterator(ProfileDir(), ec)) {
-        if (!e.is_regular_file(ec) || _wcsicmp(e.path().extension().c_str(), L".ini") != 0) continue;
-        Profile p;
-        p.name = ApexUtil::ToUtf8(e.path().stem().wstring());
-        std::string bad;
-        if (!ParseFile(e.path(), p.s, nullptr, bad)) continue;
-        p.s.profileActive = p.name;
-        list.push_back(std::move(p));
-    }
-    std::sort(list.begin(), list.end(), [](const Profile& a, const Profile& b) { return _stricmp(a.name.c_str(), b.name.c_str()) < 0; });
-    g_profiles = std::move(list);
-}
-
-// Reads the file into g_s (defaults first). Missing: written with the defaults.
-void LoadLocked() {
-    const auto file = File();
+void EnsureLoadedLocked() {
+    if (g_loaded) return;
     g_loaded = true;
-    Settings st;
-    std::string bad;
-    if (!ParseFile(file, st, &g_unknown, bad)) {
-        g_s = Settings{};
-        g_unknown.clear();
-        // first time: the screenshot settings the player already had ([ui] screenshot_*)
-        const ApexConfig::UiSettings ui = ApexConfig::GetUi();
-        if (ui.screenshotKey.vk) g_s.keyScreenshot = ApexConfig::KeyChordText(ui.screenshotKey);
-        g_s.shotGameUi = !ui.screenshotHideGameUi;
-        if (ui.screenshotFolder == 1) g_s.shotPath = "%ApexFolder%\\Screenshots";
-        else if (ui.screenshotFolder == 2 && !ui.screenshotCustomFolder.empty()) g_s.shotPath = ui.screenshotCustomFolder;
-        WriteLocked();
-        ScanProfilesLocked();
-        LOG_INFO("[Capture] ApexCapture.ini written with the defaults: " + ApexUtil::ToUtf8(file.wstring()));
-        return;
-    }
-    // Active typed to another existing profile in the file: switch to it (its values, the shared ones from here)
-    const std::string active = CleanName(st.profileActive);
-    if (g_hadLoad && !g_s.profileActive.empty() && _stricmp(active.c_str(), CleanName(g_s.profileActive).c_str()) != 0 &&
-        std::filesystem::exists(ProfilePath(active))) {
-        Settings other;
-        std::string bad2;
-        if (ParseFile(ProfilePath(active), other, nullptr, bad2)) {
-            KeepShared(other, st);
-            other.profileActive = active;
-            st = other;
-        }
-    }
-    g_s = st;
-    g_seen = WriteTime(file);
-    g_lastError = bad.empty() ? std::string() : "Not understood (defaults kept): " + bad;
-    WriteProfileLocked(); // the profile in use follows the file
-    ScanProfilesLocked();
-    g_hadLoad = true;
-    LOG_INFO("[Capture] ApexCapture.ini read (profile " + g_s.profileActive + ")" + (bad.empty() ? std::string() : "; " + g_lastError));
+    toml::table root;
+    ApexConfig::ReadRoot(root);
+    g_s = FromToml(root);
 }
 
-// Switch: the one in use is saved first; the new one's values with the shared ones kept
-bool SwitchProfileLocked(const std::string& want) {
-    const std::string name = CleanName(want);
-    if (_stricmp(name.c_str(), g_s.profileActive.c_str()) == 0) return false;
-    Settings st;
-    std::string bad;
-    if (!ParseFile(ProfilePath(name), st, nullptr, bad)) return false;
-    WriteProfileLocked();
-    KeepShared(st, g_s);
-    st.profileActive = name;
-    g_s = st;
-    g_dirty = false;
-    WriteLocked();
-    ScanProfilesLocked();
-    LOG_INFO("[Capture] Capture profile: " + name);
-    return true;
+ApexConfig::KeyChord RecordKey() {
+    std::lock_guard<std::mutex> lk(g_lock);
+    EnsureLoadedLocked();
+    return g_s.video.recordKey;
 }
 
-void EnsureLoaded() { if (!g_loaded) LoadLocked(); }
-
+// ---------------------------------------------------------------------------------------------- paths and names
 std::wstring KnownFolder(int csidl) {
     wchar_t buf[MAX_PATH]{};
     return SUCCEEDED(SHGetFolderPathW(nullptr, csidl, nullptr, SHGFP_TYPE_CURRENT, buf)) ? std::wstring(buf) : std::wstring();
+}
+
+bool HasToken(const std::wstring& s, const std::wstring& token) {
+    std::wstring lower = s, lt = token;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
+    std::transform(lt.begin(), lt.end(), lt.begin(), ::towlower);
+    return lower.find(lt) != std::wstring::npos;
 }
 
 std::wstring Replace(std::wstring s, const std::wstring& token, const std::wstring& with) {
@@ -397,20 +151,118 @@ std::wstring Replace(std::wstring s, const std::wstring& token, const std::wstri
 
 std::wstring StripSlash(std::wstring s) { while (!s.empty() && (s.back() == L'\\' || s.back() == L'/')) s.pop_back(); return s; }
 
-std::filesystem::path CounterFile() { return std::filesystem::path(ApexPaths::ApexDirectory()) / L"ApexCapture_counter.txt"; }
-unsigned NextCounter() {
-    static std::mutex m;
-    std::lock_guard<std::mutex> lk(m);
-    unsigned n = 0;
-    { std::ifstream in(CounterFile()); in >> n; }
-    ++n;
-    { std::ofstream out(CounterFile(), std::ios::trunc); out << n; }
-    return n;
-}
-
 std::wstring SafeName(std::wstring s) {
     for (auto& c : s) if (wcschr(L"\\/:*?\"<>|", c) || c < 32) c = L'_';
     return s;
+}
+
+// ---- %SaveName%: the most recently written Saves\*.sims3 folder, found on a worker; the render thread reads the cache
+std::mutex g_saveNameLock;
+std::wstring g_saveName;
+unsigned long long g_saveNameAt = 0;
+std::atomic<bool> g_saveNameBusy{false};
+
+std::wstring NewestSaveName() {
+    std::wstring best;
+    std::error_code ec;
+    std::filesystem::file_time_type bestTime{};
+    for (const auto& e : std::filesystem::directory_iterator(std::filesystem::path(StripSlash(ApexPaths::GameDocumentsDirectory())) / L"Saves", ec)) {
+        const auto& p = e.path();
+        if (_wcsicmp(p.extension().c_str(), L".sims3") != 0 || !e.is_directory(ec)) continue;
+        const auto t = e.last_write_time(ec);
+        if (ec) continue;
+        if (best.empty() || t > bestTime) { bestTime = t; best = p.stem().wstring(); }
+    }
+    return best;
+}
+
+void RefreshSaveName() {
+    if (g_saveNameBusy.exchange(true)) return;
+    { std::lock_guard<std::mutex> lk(g_saveNameLock); g_saveNameAt = GetTickCount64(); }
+    if (!HookGuard::StartDetached("Capture: save name", [] {
+            struct Done { ~Done() { g_saveNameBusy = false; } } done;
+            std::wstring n = NewestSaveName();
+            std::lock_guard<std::mutex> lk(g_saveNameLock);
+            g_saveName = std::move(n);
+        }))
+        g_saveNameBusy = false;
+}
+
+// shortcut: the newest save folder, not the one loaded; a loaded save counts once the game writes it
+std::wstring CurrentSaveName() {
+    std::wstring n;
+    bool stale = false;
+    {
+        std::lock_guard<std::mutex> lk(g_saveNameLock);
+        n = g_saveName;
+        stale = GetTickCount64() - g_saveNameAt > 10000;
+    }
+    if (stale) RefreshSaveName();
+    return n.empty() ? std::wstring(L"The Sims 3") : n;
+}
+
+// Date, time and save tokens, shared by folder paths and file names
+std::wstring TimeTokens(std::wstring n, const SYSTEMTIME& t) {
+    if (n.find(L'%') == std::wstring::npos) return n;
+    n = Replace(n, L"%Date%", std::format(L"{:04}-{:02}-{:02}", t.wYear, t.wMonth, t.wDay));
+    n = Replace(n, L"%Year%", std::format(L"{:04}", t.wYear));
+    n = Replace(n, L"%Month%", std::format(L"{:02}", t.wMonth));
+    n = Replace(n, L"%Day%", std::format(L"{:02}", t.wDay));
+    n = Replace(n, L"%TimeHour%", std::format(L"{:02}", t.wHour));
+    n = Replace(n, L"%TimeMinute%", std::format(L"{:02}", t.wMinute));
+    n = Replace(n, L"%TimeSecond%", std::format(L"{:02}", t.wSecond));
+    n = Replace(n, L"%TimeMS%", std::format(L"{:03}", t.wMilliseconds));
+    n = Replace(n, L"%YearShort%", std::format(L"{:02}", t.wYear % 100));
+    n = Replace(n, L"%Hour12%", std::format(L"{:02}", t.wHour % 12 ? t.wHour % 12 : 12));
+    n = Replace(n, L"%AmPm%", t.wHour < 12 ? L"AM" : L"PM");
+    auto dateText = [&t](const wchar_t* fmt) { // month and day names in Windows' language
+        wchar_t b[64]{};
+        return GetDateFormatW(LOCALE_USER_DEFAULT, 0, &t, fmt, b, 64) ? std::wstring(b) : std::wstring();
+    };
+    if (HasToken(n, L"%MonthName%")) n = Replace(n, L"%MonthName%", dateText(L"MMMM"));
+    if (HasToken(n, L"%MonthShort%")) n = Replace(n, L"%MonthShort%", dateText(L"MMM"));
+    if (HasToken(n, L"%WeekdayShort%")) n = Replace(n, L"%WeekdayShort%", dateText(L"ddd"));
+    if (HasToken(n, L"%Weekday%")) n = Replace(n, L"%Weekday%", dateText(L"dddd"));
+    if (HasToken(n, L"%SaveName%")) n = Replace(n, L"%SaveName%", SafeName(CurrentSaveName()));
+    return n;
+}
+
+// A typed folder (tokens allowed) -> the full path; not made
+std::filesystem::path ExpandFolder(const std::string& path) {
+    std::wstring p = ApexUtil::ToWide(Trim(path));
+    if (p.empty()) return {};
+    { SYSTEMTIME t{}; GetLocalTime(&t); p = TimeTokens(p, t); } // %Day%-%Month%-%Year%, %SaveName% ...: one folder per day or save
+    p = Replace(p, L"%GameScreenshots%", StripSlash(ApexPaths::GameDocumentsDirectory()) + L"\\Screenshots");
+    p = Replace(p, L"%ApexFolder%", StripSlash(ApexPaths::ApexDirectory()));
+    if (HasToken(p, L"%Pictures%")) p = Replace(p, L"%Pictures%", KnownFolder(CSIDL_MYPICTURES));
+    if (HasToken(p, L"%Videos%")) p = Replace(p, L"%Videos%", KnownFolder(CSIDL_MYVIDEO));
+    if (HasToken(p, L"%Documents%")) p = Replace(p, L"%Documents%", KnownFolder(CSIDL_PERSONAL));
+    wchar_t env[MAX_PATH * 2]{};
+    if (ExpandEnvironmentStringsW(p.c_str(), env, MAX_PATH * 2)) p = env;
+    std::filesystem::path f(p);
+    if (f.is_relative()) f = std::filesystem::path(StripSlash(ApexPaths::GameDocumentsDirectory())) / f;
+    return f;
+}
+
+// The last folder made per kind (0 screenshots, 1 videos): the same path again is only checked, not made again
+std::mutex g_folderLock;
+std::wstring g_folderMade[2];
+
+bool MakeFolder(const std::filesystem::path& f, int slot) {
+    if (f.empty()) return false;
+    {
+        std::lock_guard<std::mutex> lk(g_folderLock);
+        if (g_folderMade[slot] == f.wstring()) {
+            const DWORD a = GetFileAttributesW(f.c_str());
+            if (a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY)) return true;
+        }
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(f, ec);
+    if (!std::filesystem::is_directory(f, ec)) return false;
+    std::lock_guard<std::mutex> lk(g_folderLock);
+    g_folderMade[slot] = f.wstring();
+    return true;
 }
 
 // ---------------------------------------------------------------------------------------------- "before" picture
@@ -421,24 +273,44 @@ void ReleaseBefore() { if (g_beforeRt) { g_beforeRt->Release(); g_beforeRt = nul
 
 // ---------------------------------------------------------------------------------------------- video control
 std::atomic<bool> g_toggle{false};
-bool g_externalOn = false;
+std::atomic<bool> g_hooks{false};
+std::atomic<bool> g_externalOn{false};
 bool g_videoHidUi = false;
-unsigned long long g_lastDotNote = 0;
-int g_clipPart = 1;                       // %Part%: the clip of the running recording (NewClipEveryMB)
+int g_clipPart = 1;                       // %Part%: the clip of the running recording (new_clip_mb)
 double g_clipBaseSec = 0.0;               // seconds of the clips already saved in this recording
 unsigned long long g_externalStart = 0;   // GetTickCount64 when the external recorder's key was sent
 double g_lastSec = 0.0;                   // the running video's length and size, kept for the "saved" note
 unsigned long long g_lastBytes = 0;
+Settings g_rec;                           // render thread: the settings the running recording started with
+bool g_lookSeen = false;                  // look = without: this frame was taken before the look (BeforeLook)
+bool g_withoutFailed = false;             // ... and that copy failed once: the rest of the recording keeps the look
+int g_bbH = 0, g_bbW = 0;                 // the back buffer, for %Width% %Height%
+
 // The video is read at Present (after Apex draws) when the menu or the timer has to be in it
-bool GrabAtPresent(const Settings& s) { return s.videoApexMenu || (s.timerInVideo && (s.recordingDot || s.redFrame)); }
+bool GrabAtPresent(const VideoSettings& v) { return v.includeMenu || (v.timerInVideo && (v.timer || v.redFrame)); }
 std::string Clock(int sec, bool hours) {
     sec = std::max(0, sec);
     if (hours || sec >= 3600) return std::format("{}:{:02}:{:02}", sec / 3600, sec / 60 % 60, sec % 60);
     return std::format("{:02}:{:02}", sec / 60, sec % 60);
 }
-int g_bbH = 0, g_bbW = 0; // the back buffer, for the menu's estimate
 
-void SendChord(UINT vk, bool ctrl, bool shift, bool alt, bool win) {
+bool GameForeground() {
+    DWORD pid = 0;
+    const HWND fg = GetForegroundWindow();
+    return fg && GetWindowThreadProcessId(fg, &pid) && pid == GetCurrentProcessId();
+}
+
+// The other recorder's chord, only into the game's own foreground window and only an allowed chord
+bool SendExternalKey(const std::string& text) {
+    UINT vk = 0; bool ctrl = false, shift = false, alt = false, win = false;
+    if (!ExternalKeyAllowed(text) || !ParseExternalKey(text, vk, ctrl, shift, alt, win)) {
+        LOG_WARNING("[Video] The other app's key is not allowed: " + text);
+        return false;
+    }
+    if (!GameForeground()) {
+        LOG_WARNING("[Video] The other app's key was not sent: the game is not the foreground window");
+        return false;
+    }
     std::vector<INPUT> in;
     auto key = [&](WORD k, bool up) { INPUT i{}; i.type = INPUT_KEYBOARD; i.ki.wVk = k; i.ki.dwFlags = up ? KEYEVENTF_KEYUP : 0; in.push_back(i); };
     if (win) key(VK_LWIN, false);
@@ -451,124 +323,146 @@ void SendChord(UINT vk, bool ctrl, bool shift, bool alt, bool win) {
     if (shift) key(VK_SHIFT, true);
     if (ctrl) key(VK_CONTROL, true);
     if (win) key(VK_LWIN, true);
-    SendInput(static_cast<UINT>(in.size()), in.data(), sizeof(INPUT));
+    return SendInput(static_cast<UINT>(in.size()), in.data(), sizeof(INPUT)) == in.size();
 }
 
-int KbpsFor(const Settings& s) {
-    if (s.bitrateMode) return s.bitrateMbps * 1000;
-    const double base = s.maxHeight <= 720 ? 8000.0 : s.maxHeight <= 1080 ? 16000.0 : 28000.0; // kbit/s at 30 fps, Quality 80
-    const double fps = s.fps >= 50 ? 1.6 : s.fps / 30.0;
-    return std::clamp(static_cast<int>(base * fps * s.quality / 80.0), 1000, 200000);
+// The quality presets are Quality 60 / 80 / 95 of the rate below; custom is a fixed rate
+int KbpsFor(const VideoSettings& v) {
+    if (v.quality == kQualityCustom) return v.customMbps * 1000;
+    static const int kQuality[] = {60, 80, 95};
+    const int q = kQuality[std::clamp(v.quality, 0, 2)];
+    const double base = v.size <= 720 ? 8000.0 : v.size <= 1080 ? 16000.0 : 28000.0; // kbit/s at 30 fps, Quality 80
+    const double fps = v.fps >= 50 ? 1.6 : v.fps / 30.0;
+    return std::clamp(static_cast<int>(base * fps * q / 80.0), 1000, 200000);
 }
 
-void Note(const std::string& text, int seconds, Captures::NoteKind kind) {
-    if (Get().showNotice || kind == Captures::NoteKind::Warning) Captures::Notify(text, seconds, kind);
+void Note(const char* text, int seconds, Captures::NoteKind kind) {
+    if (kind == Captures::NoteKind::Warning || Get().notes) Captures::Notify(text, seconds, kind);
+}
+void Note(const std::string& text, int seconds, Captures::NoteKind kind) { Note(text.c_str(), seconds, kind); }
+
+void CopyPresetNextTo(const std::filesystem::path& file) {
+    std::wstring preset = PresetFile();
+    if (preset.empty()) return;
+    std::filesystem::path ini = file;
+    ini.replace_extension(L".ini");
+    HookGuard::StartDetached("Capture: preset copy", [preset = std::move(preset), ini = std::move(ini)] {
+        if (!CopyFileW(preset.c_str(), ini.c_str(), FALSE)) LOG_WARNING("[Video] The preset could not be copied: " + ApexUtil::ToUtf8(ini.wstring()));
+    });
 }
 
 void StartRecording(IDirect3DDevice9* dev, bool nextClip = false) {
-    const Settings s = Get();
-    if (!s.videoEnabled) return;
-    if (s.external) {
-        UINT vk = 0; bool c = false, sh = false, a = false, w = false;
-        if (!ParseKey(s.externalKey, vk, c, sh, a, w)) { Note("ExternalKey in ApexCapture.ini is not a key: " + s.externalKey, 5, Captures::NoteKind::Warning); return; }
-        SendChord(vk, c, sh, a, w);
+    if (!nextClip) {
+        g_rec = Get();
+        g_lookSeen = g_withoutFailed = false;
+    }
+    const VideoSettings& v = g_rec.video;
+    if (v.external) {
+        if (!SendExternalKey(v.externalKey)) {
+            Note(I18n::Tr("The other app's key is not allowed or the game is not in front; choose a key with Ctrl, Alt, Shift or Win"), 6,
+                 Captures::NoteKind::Warning);
+            return;
+        }
         g_externalOn = true;
         g_externalStart = GetTickCount64();
         PlaySoundFile();
-        Note("External recorder started (" + s.externalKey + ")", 3, Captures::NoteKind::Info);
+        Note(I18n::Trf("The other app is recording ({})", v.externalKey), 3, Captures::NoteKind::Info);
         return;
     }
-    std::string why;
-    const auto folder = ResolveFolder(s.videoPath, why);
-    if (folder.empty()) { Note("No video: " + why, 6, Captures::NoteKind::Warning); return; }
+    FolderResult fr = FolderResult::Ok;
+    const auto folder = CaptureFolder(true, fr);
+    if (fr == FolderResult::FellBack && !nextClip)
+        Note(I18n::Tr("The chosen videos folder is not available; saved in the game's videos folder"), 5, Captures::NoteKind::Warning);
+    if (folder.empty()) { Note(I18n::Tr("Could not create the videos folder"), 5, Captures::NoteKind::Warning); return; }
     g_clipPart = nextClip ? g_clipPart + 1 : 1;
-    auto file = NewFile(folder, s.videoNaming, s.mkv ? "mkv" : "mp4");
-    if (s.mkv) { // recorded as <name>.mp4 next to the free <name>.mkv
+    const bool mkv = v.container == kContainerMkv;
+    auto file = NewFile(folder, v.fileName, mkv ? "mkv" : "mp4", true);
+    if (mkv) { // recorded as <name>.mp4 next to the free <name>.mkv
         file.replace_extension(L".mp4");
         std::error_code ec;
         for (unsigned k = 2; std::filesystem::exists(file, ec) && k < 1000; ++k) {
-            file = NewFile(folder, s.videoNaming + std::format("_{}", k), "mkv");
+            file = NewFile(folder, v.fileName + std::format("_{}", k), "mkv", true);
             file.replace_extension(L".mp4");
         }
     }
     VideoMp4::Options o;
-    o.fps = s.fps;
-    o.maxHeight = s.maxHeight;
-    o.hevc = s.hevc;
-    o.fragmented = s.fragmented;
-    o.bitrateKbps = KbpsFor(s);
-    o.audio = s.audio;
-    o.mouse = s.videoMouse;
-    o.fragmented = s.fragmented || s.mkv;
-    o.mkv = s.mkv;
-    o.keepMp4 = s.keepMp4;
+    o.fps = v.fps;
+    o.maxHeight = v.size;
+    o.hevc = v.hevc;
+    o.bitrateKbps = KbpsFor(v);
+    o.audio = v.gameSound;
+    o.mouse = v.includePointer;
+    o.fragmented = v.container != kContainerMp4;
+    o.mkv = mkv;
+    o.keepMp4 = v.keepMp4;
     o.nextClip = nextClip;
-    if (!VideoMp4::Start(dev, file, o, why)) { Note("No video: " + why, 6, Captures::NoteKind::Warning); return; }
-    if (nextClip) { LOG_INFO(std::format("[Video] New clip {} at the NewClipEveryMB size", g_clipPart)); return; } // UI, sound and timer carry on
+    std::string why;
+    if (!VideoMp4::Start(dev, file, o, why)) {
+        LOG_WARNING("[Video] Not started: " + why);
+        Note(I18n::Tr("The video could not start; the reason is in the log"), 6, Captures::NoteKind::Warning);
+        return;
+    }
+    if (v.savePreset) CopyPresetNextTo(file);
+    if (nextClip) { LOG_INFO(std::format("[Video] New clip {} at the new_clip_mb size", g_clipPart)); return; } // UI, sound and timer carry on
     g_clipBaseSec = 0.0;
-    g_videoHidUi = !s.videoGameUi && Captures::HideGameUiForVideo(true);
+    g_videoHidUi = v.hideGameUi && Captures::HideGameUiForVideo(true);
     PlaySoundFile();
-    g_lastDotNote = 0;
 }
 
 void StopRecording() {
-    const Settings s = Get();
     if (g_externalOn) {
-        UINT vk = 0; bool c = false, sh = false, a = false, w = false;
-        if (ParseKey(s.externalKey, vk, c, sh, a, w)) SendChord(vk, c, sh, a, w);
+        SendExternalKey(g_rec.video.externalKey);
         g_externalOn = false;
         PlaySoundFile();
-        Note("External recorder stopped; the video is in its own folder", 4, Captures::NoteKind::Info);
+        Note(I18n::Tr("The other app stopped recording; the video is in its own folder"), 4, Captures::NoteKind::Info);
         return;
     }
     if (!VideoMp4::Active()) return;
     VideoMp4::Stop();
-    if (g_videoHidUi) Captures::HideGameUiForVideo(false);
+    if (g_videoHidUi) Captures::HideGameUiForVideo(false); // only when the game's UI is still hidden (Captures tracks F10)
     g_videoHidUi = false;
     PlaySoundFile();
-    Note("Saving the video...", 4, Captures::NoteKind::Saving);
+    Note(I18n::Tr("Saving the video..."), 4, Captures::NoteKind::Saving);
 }
 
 void OnPresent(IDirect3DDevice9* dev) {
-    Tick();
     if (!g_bbH && dev) { IDirect3DSurface9* bb = nullptr; if (SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb) { D3DSURFACE_DESC d{}; bb->GetDesc(&d); g_bbW = static_cast<int>(d.Width); g_bbH = static_cast<int>(d.Height); bb->Release(); } }
     if (g_toggle.exchange(false)) { if (Recording()) StopRecording(); else StartRecording(dev); }
     if (VideoMp4::Active()) {
-        const Settings s = Get();
+        const VideoSettings v = Get().video; // limits follow the menu while recording
         if (VideoMp4::Failed()) StopRecording();
-        else if ((s.maxLength > 0 && g_clipBaseSec + VideoMp4::Seconds() >= s.maxLength) ||
-                 (s.newClipMB <= 0 && s.maxFileMB > 0 && VideoMp4::BytesWritten() >= (static_cast<unsigned long long>(s.maxFileMB) << 20))) {
-            LOG_INFO("[Video] Stopped at the MaxLength / MaxFileMB limit");
+        else if ((v.stopAfterS > 0 && g_clipBaseSec + VideoMp4::Seconds() >= v.stopAfterS) ||
+                 (v.newClipMb <= 0 && v.stopAtMb > 0 && VideoMp4::BytesWritten() >= (static_cast<unsigned long long>(v.stopAtMb) << 20))) {
+            LOG_INFO("[Video] Stopped at the stop_after_s / stop_at_mb limit");
             StopRecording();
-        } else if (s.newClipMB > 0 && VideoMp4::BytesWritten() >= (static_cast<unsigned long long>(s.newClipMB) << 20)) {
+        } else if (v.newClipMb > 0 && VideoMp4::BytesWritten() >= (static_cast<unsigned long long>(v.newClipMb) << 20)) {
             // the clip is saved and the recording goes on in a new file (a frame or two between them)
             g_clipBaseSec += VideoMp4::Seconds();
             VideoMp4::Stop();
             StartRecording(dev, true);
-            if (!VideoMp4::Active()) { // the new clip could not start: end the recording as the key would
-                if (g_videoHidUi) Captures::HideGameUiForVideo(false);
-                g_videoHidUi = false;
-                PlaySoundFile();
-            }
         } else {
-            if (GrabAtPresent(s)) VideoMp4::Grab(dev); // the Apex menu / the timer is drawn by now
+            if (GrabAtPresent(g_rec.video) && !g_lookSeen) VideoMp4::Grab(dev); // the Apex menu / the timer is drawn by now
             g_lastSec = VideoMp4::Seconds();
             g_lastBytes = VideoMp4::BytesWritten();
         }
     }
+    if (g_videoHidUi && !VideoMp4::Active()) { // ended without StopRecording (a new clip failed, the game closing was cancelled)
+        Captures::HideGameUiForVideo(false);
+        g_videoHidUi = false;
+    }
+    g_lookSeen = false;
     VideoMp4::Pump(dev);
     bool ok = false;
-    const std::string result = VideoMp4::TakeResult(ok);
-    if (!result.empty()) {
-        LOG_INFO("[Video] " + result);
-        if (!ok) Note(result, 8, Captures::NoteKind::Warning);
-        else if (Get().savedNote) Note(I18n::Trf("Video saved: {} \xC2\xB7 {} MB", Clock(static_cast<int>(g_lastSec), false),
-                                                  static_cast<int>(g_lastBytes / (1024ull * 1024ull) + 1)), 5, Captures::NoteKind::Success);
+    if (!VideoMp4::TakeResult(ok).empty()) {
+        if (!ok) Note(I18n::Tr("The video could not be saved; the reason is in the log"), 8, Captures::NoteKind::Warning);
+        else Note(I18n::Trf("Video saved: {} \xC2\xB7 {} MB", Clock(static_cast<int>(g_clipBaseSec + g_lastSec), false),
+                            static_cast<int>(g_lastBytes / (1024ull * 1024ull) + 1)), 5, Captures::NoteKind::Success);
     }
 }
 
 void BeforeOverlay(IDirect3DDevice9* dev) {
-    if (VideoMp4::Active() && !GrabAtPresent(Get())) VideoMp4::Grab(dev); // look + colour done, Apex menu and notes not yet drawn
+    // look + colour done, Apex menu and notes not yet drawn
+    if (VideoMp4::Active() && !GrabAtPresent(g_rec.video) && !g_lookSeen) VideoMp4::Grab(dev);
 }
 
 void OnPreReset(IDirect3DDevice9*) {
@@ -578,10 +472,20 @@ void OnPreReset(IDirect3DDevice9*) {
     ReleaseBefore();
 }
 
+// Hooked once, at the first capture that needs it (a recording, a picture without the look); idle afterwards
+void EnsureHooks() {
+    if (g_hooks.exchange(true)) return;
+    RenderCallbacks::Add(RenderCallbacks::filteredSceneBeforeOverlay, BeforeOverlay);
+    RenderCallbacks::Add(RenderCallbacks::preReset, OnPreReset);
+    D3D9Hooks::RegisterPresent("ApexCapture", [](D3D9Hooks::DeviceContext& ctx, const RECT*, const RECT*, HWND, const RGNDATA*) {
+        OnPresent(ctx.device);
+        return D3D9Hooks::HookAction::Continue;
+    }, D3D9Hooks::Priority::Early);
+    LOG_INFO("[Capture] Frame hooks installed");
+}
+
 // ---------------------------------------------------------------------------------------------- menu helpers
-// The rows themselves are drawn by the Settings page (apex_gui.cpp): Settings > Menu "Screenshot capture" and
-// "Video recording", keys on Settings > Shortcuts. Labels and descriptions are translated by the widgets.
-// The tokens of the folder and file-name boxes: Apex's tooltip (wrapped, 28 font sizes) while the box is hovered or typed in
+// The tokens of the folder and file-name boxes: Apex's tooltip while the box is hovered or typed in
 void TokenTooltip() {
     if (!ImGui::IsItemActive() && !ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) return;
     static const char* const kTokens[][2] = {
@@ -592,7 +496,7 @@ void TokenTooltip() {
         {"%AmPm%", "AM or PM"},                   {"%TimeMinute%", "Minute"},                {"%TimeSecond%", "Second"},
         {"%TimeMS%", "Milliseconds"},             {"%PresetName%", "The look's preset name"}, {"%Look%", "Look on or off"},
         {"%Type%", "Screenshot or Video"},        {"%Part%", "Clip number of a long video"}, {"%Width%", "Picture width"},
-        {"%Height%", "Picture height"},           {"%Counter%", "A running number"}};
+        {"%Height%", "Picture height"}, {"%Counter%", "A number that goes up by one with each file"}};
     if (!ImGui::BeginTooltip()) return;
     ImGui::TextUnformatted(I18n::Tr("Tokens for the folder and the file name"));
     ImGui::Spacing();
@@ -651,172 +555,18 @@ bool Pick(const char* label, const char* desc, const char* id, int& v, const cha
     return true;
 }
 
-void OpenPath(const std::wstring& path, bool select) {
-    if (select) ShellExecuteW(nullptr, L"open", L"explorer.exe", (L"/select,\"" + path + L"\"").c_str(), nullptr, SW_SHOWNORMAL);
-    else ShellExecuteW(nullptr, L"open", path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-}
-
 void OpenFolderOf(const std::string& path) {
-    std::string why;
-    const auto f = ResolveFolder(path, why);
-    if (!f.empty()) OpenPath(f.wstring(), false);
-}
-
-// Keeps [ui] screenshot_* (the existing screenshot key and its Shortcuts rows) and the file the same, both ways
-void SyncUi() {
-    ApexConfig::UiSettings ui = ApexConfig::GetUi();
-    Settings s;
-    { std::lock_guard<std::mutex> lk(g_lock); s = g_s; }
-    auto folderOf = [](const std::string& path, int& mode, std::string& custom) {
-        const std::string p = Lower(Trim(path));
-        if (p == "%gamescreenshots%") { mode = 0; custom.clear(); }
-        else if (p == "%apexfolder%\\screenshots" || p == "%apexfolder%/screenshots") { mode = 1; custom.clear(); }
-        else if (p.find('%') != std::string::npos) { mode = 2; custom = Trim(path); } // tokens stay as typed (not today's folder)
-        else { mode = 2; std::string why; custom = ApexUtil::ToUtf8(ResolveFolder(path, why).wstring()); if (custom.empty()) custom = path; }
-    };
-    const bool uiChanged = g_uiSeenSet && (ui.screenshotKey.vk != g_uiSeen.key.vk || ui.screenshotKey.ctrl != g_uiSeen.key.ctrl || ui.screenshotKey.shift != g_uiSeen.key.shift ||
-                           ui.screenshotKey.alt != g_uiSeen.key.alt || ui.screenshotHideGameUi != g_uiSeen.hide || ui.screenshotFolder != g_uiSeen.folder ||
-                           ui.screenshotCustomFolder != g_uiSeen.custom);
-    if (uiChanged) { // changed on the Shortcuts tab: into the file
-        s.keyScreenshot = ApexConfig::KeyChordText(ui.screenshotKey);
-        s.shotGameUi = !ui.screenshotHideGameUi;
-        s.shotPath = ui.screenshotFolder == 0 ? "%GameScreenshots%" : ui.screenshotFolder == 1 ? "%ApexFolder%\\Screenshots" : ui.screenshotCustomFolder;
-        Set(s);
-    } else { // the file into [ui]
-        UINT vk = 0; bool c = false, sh = false, a = false, w = false;
-        ApexConfig::UiSettings want = ui;
-        if (ParseKey(s.keyScreenshot, vk, c, sh, a, w) && !w) {
-            const bool bareTyping = !c && !sh && !a && ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9') || vk == VK_SPACE);
-            if (!bareTyping) want.screenshotKey = {vk, c, sh, a};
-        }
-        want.screenshotHideGameUi = !s.shotGameUi;
-        folderOf(s.shotPath, want.screenshotFolder, want.screenshotCustomFolder);
-        if (!want.screenshotShortcutEnabled) want.screenshotShortcutEnabled = true;
-        const bool differs = want.screenshotKey.vk != ui.screenshotKey.vk || want.screenshotKey.ctrl != ui.screenshotKey.ctrl || want.screenshotKey.shift != ui.screenshotKey.shift ||
-                             want.screenshotKey.alt != ui.screenshotKey.alt || want.screenshotHideGameUi != ui.screenshotHideGameUi || want.screenshotFolder != ui.screenshotFolder ||
-                             want.screenshotCustomFolder != ui.screenshotCustomFolder || want.screenshotShortcutEnabled != ui.screenshotShortcutEnabled;
-        if (differs) ApexConfig::SetUi(want);
-        ui = want;
-    }
-    g_uiSeen = {ui.screenshotKey, ui.screenshotHideGameUi, ui.screenshotFolder, ui.screenshotCustomFolder};
-    g_uiSeenSet = true;
-}
-
-// ---------------------------------------------------------------------------------------------- current save (%SaveName%)
-// The game keeps each save as a folder Saves\<name>.sims3. A CreateFileW hook remembers the last such folder the game
-// opens: loading reads it, saving (also "Save As" under a new name) writes it. Unverified in game: whether the main
-// menu's save list opens every save (then the name is the last one listed until a save is loaded). Before any save is
-// seen, the most recently written save folder is used.
-SRWLOCK g_saveLock = SRWLOCK_INIT;
-wchar_t g_saveName[MAX_PATH]{};
-using CreateFileWFn = HANDLE(WINAPI*)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
-CreateFileWFn g_realCreateFileW = nullptr;
-bool g_saveWatchTried = false;
-
-// "...\Saves\Medieval Kingdom.sims3\..." -> "Medieval Kingdom". No allocation, no file calls (runs inside CreateFileW).
-void NoteSavePath(const wchar_t* p) noexcept {
-    if (!p) return;
-    const wchar_t* name = nullptr;
-    for (const wchar_t* s = p; *s; ++s) {
-        if ((s[0] == L'\\' || s[0] == L'/') && (s[1] | 0x20) == L's' && (s[2] | 0x20) == L'a' && (s[3] | 0x20) == L'v' &&
-            (s[4] | 0x20) == L'e' && (s[5] | 0x20) == L's' && (s[6] == L'\\' || s[6] == L'/'))
-            name = s + 7;
-    }
-    if (!name) return;
-    const wchar_t* end = name;
-    while (*end && *end != L'\\' && *end != L'/') ++end;
-    const size_t len = static_cast<size_t>(end - name);
-    if (len <= 6 || len >= MAX_PATH || _wcsnicmp(end - 6, L".sims3", 6) != 0) return; // not *.sims3.backup or loose files
-    const size_t n = len - 6;
-    AcquireSRWLockExclusive(&g_saveLock);
-    if (wcsncmp(g_saveName, name, n) != 0 || g_saveName[n] != 0) {
-        wmemcpy(g_saveName, name, n);
-        g_saveName[n] = 0;
-    }
-    ReleaseSRWLockExclusive(&g_saveLock);
-}
-
-HANDLE WINAPI HookCreateFileW(LPCWSTR file, DWORD access, DWORD share, LPSECURITY_ATTRIBUTES sa, DWORD disposition, DWORD flags, HANDLE tmpl) {
-    NoteSavePath(file);
-    return g_realCreateFileW(file, access, share, sa, disposition, flags, tmpl);
-}
-
-void InstallSaveWatch() {
-    g_saveWatchTried = true;
-    HMODULE mod = GetModuleHandleW(L"kernelbase.dll");
-    FARPROC target = mod ? GetProcAddress(mod, "CreateFileW") : nullptr;
-    if (!target && (mod = GetModuleHandleW(L"kernel32.dll")) != nullptr) target = GetProcAddress(mod, "CreateFileW");
-    if (!target) { LOG_WARNING("[Capture] %SaveName%: CreateFileW not found; the newest save folder is used"); return; }
-    g_realCreateFileW = reinterpret_cast<CreateFileWFn>(target);
-    if (DetourBatch::InstallHooks({{reinterpret_cast<void**>(&g_realCreateFileW), reinterpret_cast<void*>(&HookCreateFileW)}}))
-        LOG_INFO("[Capture] %SaveName%: watching which save the game opens");
-    else {
-        g_realCreateFileW = nullptr;
-        LOG_WARNING("[Capture] %SaveName%: hook failed; the newest save folder is used");
-    }
-}
-
-// The newest Saves\*.sims3 folder (by last write), checked at most every 2 s
-std::wstring NewestSaveName() {
-    static std::mutex m;
-    static std::wstring cached;
-    static unsigned long long at = 0;
-    std::lock_guard<std::mutex> lk(m);
-    const unsigned long long now = GetTickCount64();
-    if (at && now - at < 2000) return cached;
-    at = now;
-    cached.clear();
+    const auto f = ExpandFolder(path);
     std::error_code ec;
-    std::filesystem::file_time_type best{};
-    for (const auto& e : std::filesystem::directory_iterator(std::filesystem::path(StripSlash(ApexPaths::GameDocumentsDirectory())) / L"Saves", ec)) {
-        const auto& p = e.path();
-        if (_wcsicmp(p.extension().c_str(), L".sims3") != 0 || !e.is_directory(ec)) continue;
-        const auto t = e.last_write_time(ec);
-        if (ec) continue;
-        if (cached.empty() || t > best) { best = t; cached = p.stem().wstring(); }
-    }
-    return cached;
-}
-
-std::wstring CurrentSaveName() {
-    std::wstring n;
-    AcquireSRWLockShared(&g_saveLock);
-    n = g_saveName;
-    ReleaseSRWLockShared(&g_saveLock);
-    if (n.empty()) n = NewestSaveName();
-    return n.empty() ? std::wstring(L"The Sims 3") : n;
-}
-
-// Date, time and save tokens, shared by folder paths and file names
-std::wstring TimeTokens(std::wstring n, const SYSTEMTIME& t) {
-    n = Replace(n, L"%Date%", std::format(L"{:04}-{:02}-{:02}", t.wYear, t.wMonth, t.wDay));
-    n = Replace(n, L"%Year%", std::format(L"{:04}", t.wYear));
-    n = Replace(n, L"%Month%", std::format(L"{:02}", t.wMonth));
-    n = Replace(n, L"%Day%", std::format(L"{:02}", t.wDay));
-    n = Replace(n, L"%TimeHour%", std::format(L"{:02}", t.wHour));
-    n = Replace(n, L"%TimeMinute%", std::format(L"{:02}", t.wMinute));
-    n = Replace(n, L"%TimeSecond%", std::format(L"{:02}", t.wSecond));
-    n = Replace(n, L"%TimeMS%", std::format(L"{:03}", t.wMilliseconds));
-    n = Replace(n, L"%YearShort%", std::format(L"{:02}", t.wYear % 100));
-    n = Replace(n, L"%Hour12%", std::format(L"{:02}", t.wHour % 12 ? t.wHour % 12 : 12));
-    n = Replace(n, L"%AmPm%", t.wHour < 12 ? L"AM" : L"PM");
-    auto dateText = [&t](const wchar_t* fmt) { // month and day names in Windows' language
-        wchar_t b[64]{};
-        return GetDateFormatW(LOCALE_USER_DEFAULT, 0, &t, fmt, b, 64) ? std::wstring(b) : std::wstring();
-    };
-    if (n.find(L"%MonthName%") != std::wstring::npos || n.find(L"%monthname%") != std::wstring::npos) n = Replace(n, L"%MonthName%", dateText(L"MMMM"));
-    n = Replace(n, L"%MonthShort%", dateText(L"MMM"));
-    n = Replace(n, L"%WeekdayShort%", dateText(L"ddd"));
-    n = Replace(n, L"%Weekday%", dateText(L"dddd"));
-    if (n.find(L'%') != std::wstring::npos) n = Replace(n, L"%SaveName%", SafeName(CurrentSaveName()));
-    return n;
+    if (f.empty() || !(std::filesystem::create_directories(f, ec), std::filesystem::is_directory(f, ec))) return;
+    ShellExecuteW(nullptr, L"open", f.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 
 } // namespace
 
 // ---------------------------------------------------------------------------------------------- folder rows
-// Windows' folder dialog on its own thread (as the profile file dialog); the chosen path is taken by FolderRow on a
-// later frame, nothing when cancelled. One dialog at a time; slot says which row asked.
+// Windows' folder dialog on its own thread; the chosen path is taken by FolderRow on a later frame, nothing when
+// cancelled. One dialog at a time; slot says which row asked.
 namespace {
 std::mutex g_pickLock;
 std::optional<std::wstring> g_pickResult;
@@ -891,11 +641,8 @@ bool FolderRow(const char* label, const char* id, std::string& value, int slot, 
     // the row's description is the folder itself (as set: tokens such as %Day% stay visible)
     if (ApexUi::BeginControlRow(label, value.empty() ? "No folder set" : value.c_str(), w)) {
         ImGui::BeginDisabled(g_pickBusy.load());
-        if (ApexUi::IconTextButton(change, IconId::FolderOpen, pickTip)) {
-            std::string why, start = value;
-            if (start.find('%') != std::string::npos) start = ApexUtil::ToUtf8(ResolveFolder(value, why).wstring());
-            PickFolder(slot, start, slot == 0 ? "Choose a folder for the screenshots" : "Choose a folder for the videos");
-        }
+        if (ApexUi::IconTextButton(change, IconId::FolderOpen, pickTip))
+            PickFolder(slot, ApexUtil::ToUtf8(ExpandFolder(value).wstring()), slot == 0 ? "Choose a folder for the screenshots" : "Choose a folder for the videos");
         ImGui::EndDisabled();
         ImGui::SameLine(0.0f, ApexUi::kSpace3 * u);
         if (ApexUi::IconTextButton(open, IconId::ExternalLink, "Opens this folder in Explorer")) OpenFolderOf(value);
@@ -930,122 +677,203 @@ bool FolderRow(const char* label, const char* id, std::string& value, int slot, 
     return changed;
 }
 
-// ---------------------------------------------------------------------------------------------- public
-std::filesystem::path File() { return std::filesystem::path(ApexPaths::ApexDirectory()) / L"ApexCapture.ini"; }
+// ---------------------------------------------------------------------------------------------- settings (public)
+Settings FromToml(const toml::table& root) {
+    Settings s;
+    const auto c = root["capture"];
+    s.sound = c["sound"].value_or(std::string());
+    s.notes = c["notes"].value_or(s.notes);
+    s.counter = std::clamp(static_cast<int>(c["counter"].value_or(int64_t{s.counter})), 1, 99999999);
+    const auto t = c["screenshot"];
+    ScreenshotSettings& sh = s.shot;
+    sh.fileName = t["file_name"].value_or(sh.fileName);
+    sh.includeMenu = t["include_menu"].value_or(sh.includeMenu);
+    sh.includePointer = t["include_pointer"].value_or(sh.includePointer);
+    sh.look = NameIndex(t["look"], kLookNames, sh.look);
+    sh.savePreset = t["save_preset"].value_or(sh.savePreset);
+    sh.jpg = Lower(t["file_type"].value_or(std::string("png"))) == "jpg";
+    sh.jpgQuality = Int(t["jpg_quality"], sh.jpgQuality);
+    sh.sizePercent = Int(t["size_percent"], sh.sizePercent);
+    sh.burstCount = Int(t["burst_count"], sh.burstCount);
+    sh.burstIntervalMs = Int(t["burst_interval_ms"], sh.burstIntervalMs);
+    const auto vt = c["video"];
+    VideoSettings& v = s.video;
+    v.folder = NameIndex(vt["folder"], kFolderNames, v.folder);
+    v.customFolder = vt["custom_folder"].value_or(v.customFolder);
+    v.fileName = vt["file_name"].value_or(v.fileName);
+    v.hideGameUi = vt["hide_game_ui"].value_or(v.hideGameUi);
+    v.includeMenu = vt["include_menu"].value_or(v.includeMenu);
+    v.includePointer = vt["include_pointer"].value_or(v.includePointer);
+    v.look = NameIndex(vt["look"], kLookNames, v.look);
+    v.savePreset = vt["save_preset"].value_or(v.savePreset);
+    v.size = Int(vt["size"], v.size);
+    v.fps = Int(vt["fps"], v.fps);
+    v.quality = NameIndex(vt["quality"], kQualityNames, v.quality);
+    v.customMbps = Int(vt["custom_mbps"], v.customMbps);
+    v.container = NameIndex(vt["container"], kContainerNames, v.container);
+    v.keepMp4 = vt["keep_mp4"].value_or(v.keepMp4);
+    v.hevc = Lower(vt["codec"].value_or(std::string("h264"))) == "hevc";
+    v.gameSound = vt["game_sound"].value_or(v.gameSound);
+    v.newClipMb = Int(vt["new_clip_mb"], v.newClipMb);
+    v.stopAfterS = Int(vt["stop_after_s"], v.stopAfterS);
+    v.stopAtMb = Int(vt["stop_at_mb"], v.stopAtMb);
+    v.warnBeforeS = Int(vt["warn_before_s"], v.warnBeforeS);
+    v.timer = vt["timer"].value_or(v.timer);
+    v.timerPosition = NameIndex(vt["timer_position"], kPosNames, v.timerPosition);
+    v.timerSize = Int(vt["timer_size"], v.timerSize);
+    v.timerOpacity = Int(vt["timer_opacity"], v.timerOpacity);
+    v.timerBlink = vt["timer_blink"].value_or(v.timerBlink);
+    v.timerFileSize = vt["timer_file_size"].value_or(v.timerFileSize);
+    v.timerStopKey = vt["timer_stop_key"].value_or(v.timerStopKey);
+    v.timerHours = vt["timer_hours"].value_or(v.timerHours);
+    v.redFrame = vt["red_frame"].value_or(v.redFrame);
+    v.timerInVideo = vt["timer_in_video"].value_or(v.timerInVideo);
+    v.external = Lower(vt["recorder"].value_or(std::string("apex"))) == "external";
+    v.externalKey = vt["external_key"].value_or(v.externalKey);
+    ApexConfig::KeyChord k;
+    if (ApexConfig::ParseKeyChord(vt["record_key"].value_or(std::string()), k) && k.vk) v.recordKey = k;
+    return Clamped(s);
+}
+
+void ToToml(const Settings& in, toml::table& root) {
+    const Settings s = Clamped(in);
+    toml::table shot;
+    shot.insert("file_name", s.shot.fileName);
+    shot.insert("include_menu", s.shot.includeMenu);
+    shot.insert("include_pointer", s.shot.includePointer);
+    shot.insert("look", kLookNames[s.shot.look]);
+    shot.insert("save_preset", s.shot.savePreset);
+    shot.insert("file_type", s.shot.jpg ? "jpg" : "png");
+    shot.insert("jpg_quality", static_cast<int64_t>(s.shot.jpgQuality));
+    shot.insert("size_percent", static_cast<int64_t>(s.shot.sizePercent));
+    shot.insert("burst_count", static_cast<int64_t>(s.shot.burstCount));
+    shot.insert("burst_interval_ms", static_cast<int64_t>(s.shot.burstIntervalMs));
+    const VideoSettings& v = s.video;
+    toml::table video;
+    video.insert("folder", kFolderNames[v.folder]);
+    video.insert("custom_folder", v.customFolder);
+    video.insert("file_name", v.fileName);
+    video.insert("hide_game_ui", v.hideGameUi);
+    video.insert("include_menu", v.includeMenu);
+    video.insert("include_pointer", v.includePointer);
+    video.insert("look", kLookNames[v.look]);
+    video.insert("save_preset", v.savePreset);
+    video.insert("size", static_cast<int64_t>(v.size));
+    video.insert("fps", static_cast<int64_t>(v.fps));
+    video.insert("quality", kQualityNames[v.quality]);
+    video.insert("custom_mbps", static_cast<int64_t>(v.customMbps));
+    video.insert("container", kContainerNames[v.container]);
+    video.insert("keep_mp4", v.keepMp4);
+    video.insert("codec", v.hevc ? "hevc" : "h264");
+    video.insert("game_sound", v.gameSound);
+    video.insert("new_clip_mb", static_cast<int64_t>(v.newClipMb));
+    video.insert("stop_after_s", static_cast<int64_t>(v.stopAfterS));
+    video.insert("stop_at_mb", static_cast<int64_t>(v.stopAtMb));
+    video.insert("warn_before_s", static_cast<int64_t>(v.warnBeforeS));
+    video.insert("timer", v.timer);
+    video.insert("timer_position", kPosNames[v.timerPosition]);
+    video.insert("timer_size", static_cast<int64_t>(v.timerSize));
+    video.insert("timer_opacity", static_cast<int64_t>(v.timerOpacity));
+    video.insert("timer_blink", v.timerBlink);
+    video.insert("timer_file_size", v.timerFileSize);
+    video.insert("timer_stop_key", v.timerStopKey);
+    video.insert("timer_hours", v.timerHours);
+    video.insert("red_frame", v.redFrame);
+    video.insert("timer_in_video", v.timerInVideo);
+    video.insert("recorder", v.external ? "external" : "apex");
+    video.insert("external_key", v.externalKey);
+    video.insert("record_key", ApexConfig::KeyChordText(v.recordKey));
+    toml::table t;
+    t.insert("sound", s.sound.empty() ? std::string("off") : s.sound);
+    t.insert("notes", s.notes);
+    t.insert("counter", static_cast<int64_t>(s.counter));
+    t.insert("screenshot", std::move(shot));
+    t.insert("video", std::move(video));
+    root.insert_or_assign("capture", std::move(t));
+}
+
+void LoadFromToml(const toml::table& root) {
+    Settings s = FromToml(root);
+    const bool saveName = WantsSaveName(s);
+    {
+        std::lock_guard<std::mutex> lk(g_lock);
+        g_s = std::move(s);
+        g_loaded = true;
+    }
+    if (saveName) RefreshSaveName(); // ready before the first capture
+}
 
 Settings Get() {
-    if (g_overrideThread.load() == GetCurrentThreadId()) return g_override; // one picture with another profile
     std::lock_guard<std::mutex> lk(g_lock);
-    EnsureLoaded();
+    EnsureLoadedLocked();
     return g_s;
 }
 
 void Set(const Settings& s) {
-    std::lock_guard<std::mutex> lk(g_lock);
-    EnsureLoaded();
-    g_s = s;
-    g_dirty = true;
-    g_dirtyAt = GetTickCount64();
-}
-
-void Tick() {
-    if (!g_saveWatchTried) InstallSaveWatch(); // first frame (main menu), before any save loads
-    const unsigned long long now = GetTickCount64();
-    bool reloaded = false;
-    // capture profiles: keys pressed (switch, next, one picture), and the list kept fresh (files edited by hand)
-    std::string switched;
-    bool note = false, shot = false;
-    Settings shotWith;
+    const Settings c = Clamped(s);
+    const bool saveName = WantsSaveName(c);
     {
         std::lock_guard<std::mutex> lk(g_lock);
-        EnsureLoaded();
-        if (now - g_profilesScanned > 3000) ScanProfilesLocked();
-        if (g_wantNext && !g_profiles.empty()) {
-            size_t i = 0;
-            for (; i < g_profiles.size(); i++) if (_stricmp(g_profiles[i].name.c_str(), g_s.profileActive.c_str()) == 0) break;
-            g_wantProfile = g_profiles[i >= g_profiles.size() ? 0 : (i + 1) % g_profiles.size()].name;
-        }
-        g_wantNext = false;
-        if (!g_wantProfile.empty() && SwitchProfileLocked(g_wantProfile)) { switched = g_s.profileActive; note = g_s.profileNote; }
-        g_wantProfile.clear();
-        if (!g_wantShot.empty()) {
-            for (const Profile& p : g_profiles)
-                if (_stricmp(p.name.c_str(), g_wantShot.c_str()) == 0) { shotWith = p.s; shot = true; }
-            if (_stricmp(g_wantShot.c_str(), g_s.profileActive.c_str()) == 0) { shotWith = g_s; shot = true; }
-            KeepShared(shotWith, g_s);
-            g_wantShot.clear();
-        }
+        g_loaded = true;
+        g_s = c;
     }
-    if (!switched.empty()) {
-        SyncUi();
-        if (note) Note(I18n::Trf("Capture profile: {}", switched), 2, Captures::NoteKind::Info);
-    }
-    if (shot) { // the queued picture copies its settings now; the sound and the "before" frame too
-        g_override = shotWith;
-        g_overrideThread = GetCurrentThreadId();
-        Captures::RequestPlayerScreenshot(!shotWith.shotGameUi);
-        g_overrideThread = 0;
-        LOG_INFO("[Capture] One picture with profile " + shotWith.profileActive);
-    }
-    {
-        std::lock_guard<std::mutex> lk(g_lock);
-        EnsureLoaded();
-        if (g_dirty && now - g_dirtyAt >= 500) { g_dirty = false; WriteLocked(); }
-        if (now - g_lastCheck < 1000) return;
-        g_lastCheck = now;
-        const FILETIME t = WriteTime(File());
-        if (!t.dwLowDateTime && !t.dwHighDateTime) { WriteLocked(); } // deleted: the current values again
-        else if (!g_dirty && g_s.reloadOnChange && !SameTime(t, g_seen)) { LoadLocked(); reloaded = true; }
-    }
-    SyncUi();
-    if (reloaded) {
-        std::string err;
-        { std::lock_guard<std::mutex> lk(g_lock); err = g_lastError; }
-        Note(err.empty() ? "Capture settings read from ApexCapture.ini" : "ApexCapture.ini: " + err, 4,
-             err.empty() ? Captures::NoteKind::Info : Captures::NoteKind::Warning);
-    }
+    if (saveName) RefreshSaveName();
+    ApexConfig::RequestSave();
 }
 
-std::filesystem::path ResolveFolder(const std::string& path, std::string& why) {
-    std::wstring p = ApexUtil::ToWide(Trim(path));
-    if (p.empty()) p = L"%GameScreenshots%";
-    { SYSTEMTIME t{}; GetLocalTime(&t); p = TimeTokens(p, t); } // %Day%-%Month%-%Year%, %SaveName% ...: one folder per day or save
-    p = Replace(p, L"%GameScreenshots%", StripSlash(ApexPaths::GameDocumentsDirectory()) + L"\\Screenshots");
-    p = Replace(p, L"%ApexFolder%", StripSlash(ApexPaths::ApexDirectory()));
-    p = Replace(p, L"%Pictures%", KnownFolder(CSIDL_MYPICTURES));
-    p = Replace(p, L"%Videos%", KnownFolder(CSIDL_MYVIDEO));
-    p = Replace(p, L"%Documents%", KnownFolder(CSIDL_PERSONAL));
-    wchar_t env[MAX_PATH * 2]{};
-    if (ExpandEnvironmentStringsW(p.c_str(), env, MAX_PATH * 2)) p = env;
-    std::filesystem::path f(p);
-    if (f.is_relative()) f = std::filesystem::path(StripSlash(ApexPaths::GameDocumentsDirectory())) / f;
-    std::error_code ec;
-    std::filesystem::create_directories(f, ec);
-    if (!std::filesystem::is_directory(f, ec)) { why = "the folder cannot be made: " + ApexUtil::ToUtf8(f.wstring()); return {}; }
-    return f;
+std::filesystem::path DefaultFolder(int mode, bool video) {
+    const std::wstring base = mode == kFolderApex ? ApexPaths::ApexDirectory() : ApexPaths::GameDocumentsDirectory();
+    if (base.empty()) return {};
+    // the game's own folders: Screenshots, and Recorded Videos (where the game's video capture saves)
+    const wchar_t* sub = !video ? L"Screenshots" : mode == kFolderApex ? L"Videos" : L"Recorded Videos";
+    return std::filesystem::path(base) / sub;
 }
 
-std::filesystem::path NewFile(const std::filesystem::path& folder, const std::string& pattern, const char* ext) {
+std::filesystem::path CaptureFolder(bool video, FolderResult& r) {
+    int mode = kFolderGame;
+    std::string custom;
+    if (video) {
+        const Settings s = Get();
+        mode = s.video.folder;
+        custom = s.video.customFolder;
+    } else {
+        const ApexConfig::UiSettings ui = ApexConfig::GetUi();
+        mode = ui.screenshotFolder;
+        custom = ui.screenshotCustomFolder;
+    }
+    const int slot = video ? 1 : 0;
+    r = FolderResult::Ok;
+    if (mode == kFolderCustom && !Trim(custom).empty()) {
+        const auto f = ExpandFolder(custom);
+        if (MakeFolder(f, slot)) return f;
+        LOG_WARNING(std::string("[Captures] The chosen ") + (video ? "videos" : "screenshots") + " folder is not available: " + custom);
+        r = FolderResult::FellBack;
+    }
+    const auto f = DefaultFolder(mode == kFolderApex ? kFolderApex : kFolderGame, video);
+    if (MakeFolder(f, slot)) return f;
+    r = FolderResult::Failed;
+    return {};
+}
+
+std::filesystem::path NewFile(const std::filesystem::path& folder, const std::string& pattern, const char* ext, bool video, int width, int height) {
     SYSTEMTIME t{};
     GetLocalTime(&t);
-    std::wstring preset;
-    const bool look = GShadeLooksPresetInUse(preset);
-    std::wstring presetName = std::filesystem::path(preset).stem().wstring();
-    if (presetName.empty()) presetName = L"Apex";
-    std::wstring n = ApexUtil::ToWide(pattern.empty() ? std::string("%Date%_%TimeHour%-%TimeMinute%-%TimeSecond%-%TimeMS%_%PresetName%") : pattern);
+    std::wstring n = ApexUtil::ToWide(pattern.empty() ? std::string(kDefaultShotName) : pattern);
     n = TimeTokens(n, t);
-    const bool video = _stricmp(ext, "mp4") == 0;
-    int w = g_bbW, h = g_bbH;
-    if (!video) { const int sc = std::clamp(Get().shotScale, 10, 100); w = w * sc / 100; h = h * sc / 100; }
-    n = Replace(n, L"%Type%", video ? L"Video" : L"Screenshot");
-    n = Replace(n, L"%Part%", std::format(L"{:02}", video ? std::max(1, g_clipPart) : 1));
-    n = Replace(n, L"%Width%", std::to_wstring(w));
-    n = Replace(n, L"%Height%", std::to_wstring(h));
-    n = Replace(n, L"%PresetName%", presetName);
-    n = Replace(n, L"%Look%", look ? L"on" : L"off");
-    if (n.find(L"%Counter%") != std::wstring::npos || n.find(L"%counter%") != std::wstring::npos) {
-        const int digits = std::clamp(Get().counterDigits, 1, 8);
-        n = Replace(n, L"%Counter%", folder.empty() ? std::wstring(digits, L'#') : std::format(L"{:0{}}", NextCounter(), digits));
+    if (n.find(L'%') != std::wstring::npos) {
+        std::wstring preset;
+        const bool look = GShadeLooksPresetInUse(preset);
+        std::wstring presetName = std::filesystem::path(preset).stem().wstring();
+        if (presetName.empty()) presetName = L"Apex";
+        int w = width ? width : g_bbW, h = height ? height : g_bbH; // screenshots pass the back buffer's size
+        if (n.find(L"%Counter%") != std::wstring::npos) n = Replace(n, L"%Counter%", std::format(L"{:04}", NextCounter()));
+        if (!video) { const int sc = Get().shot.sizePercent; w = w * sc / 100; h = h * sc / 100; }
+        n = Replace(n, L"%Type%", video ? L"Video" : L"Screenshot");
+        n = Replace(n, L"%Part%", std::format(L"{:02}", video ? std::max(1, g_clipPart) : 1));
+        n = Replace(n, L"%Width%", std::to_wstring(w));
+        n = Replace(n, L"%Height%", std::to_wstring(h));
+        n = Replace(n, L"%PresetName%", presetName);
+        n = Replace(n, L"%Look%", look ? L"on" : L"off");
     }
     n = SafeName(n);
     if (n.empty()) n = L"Apex";
@@ -1061,7 +889,7 @@ std::wstring PresetFile() {
     return GShadeLooksPresetInUse(f) ? f : std::wstring();
 }
 
-// SoundPath "camera": a mechanical shutter made here (two curtain clicks and the mirror's thump), 16-bit mono WAV
+// sound = camera: a mechanical shutter made here (two curtain clicks and the mirror's thump), 16-bit mono WAV
 const std::vector<BYTE>& CameraShutterWav() {
     static const std::vector<BYTE> wav = [] {
         constexpr int rate = 44100, count = rate * 22 / 100;
@@ -1099,22 +927,12 @@ const std::vector<BYTE>& CameraShutterWav() {
     return wav;
 }
 
-std::wstring GShadeSound() {
-    // 64-bit Program Files first (the game is 32-bit, so its %ProgramFiles% is Program Files (x86))
-    for (const wchar_t* at : {L"%ProgramW6432%\\GShade\\notification.wav", L"%ProgramFiles%\\GShade\\notification.wav"}) {
-        wchar_t pf[MAX_PATH]{};
-        std::error_code ec;
-        if (ExpandEnvironmentStringsW(at, pf, MAX_PATH) && !wcschr(pf, L'%') && std::filesystem::exists(pf, ec)) return pf;
-    }
-    return {};
-}
-
 void PlaySoundFile() {
-    const std::string p = Trim(Get().soundPath);
+    const std::string p = Get().sound;
     if (p.empty()) return;
-    std::wstring file = Lower(p) == "gshade" ? GShadeSound() : Lower(p) == "camera" ? std::wstring() : ApexUtil::ToWide(p);
-    if (!file.empty()) {
+    if (Lower(p) != "camera") {
         wchar_t env[MAX_PATH * 2]{};
+        std::wstring file = ApexUtil::ToWide(p);
         if (ExpandEnvironmentStringsW(file.c_str(), env, MAX_PATH * 2)) file = env;
         std::error_code ec;
         if (std::filesystem::exists(file, ec)) { PlaySoundW(file.c_str(), nullptr, SND_FILENAME | SND_ASYNC | SND_NODEFAULT); return; }
@@ -1122,19 +940,10 @@ void PlaySoundFile() {
     PlaySoundW(reinterpret_cast<LPCWSTR>(CameraShutterWav().data()), nullptr, SND_MEMORY | SND_ASYNC | SND_NODEFAULT); // camera, or a missing file
 }
 
-bool ParseKey(const std::string& text, UINT& vk, bool& ctrl, bool& shift, bool& alt, bool& win) {
-    const std::string t = Trim(text);
+bool ParseExternalKey(const std::string& text, UINT& vk, bool& ctrl, bool& shift, bool& alt, bool& win) {
     ctrl = shift = alt = win = false;
     vk = 0;
-    if (t.empty()) return false;
-    if (isdigit(static_cast<unsigned char>(t[0]))) { // GShade: vk,ctrl,shift,alt
-        int v[4]{};
-        if (sscanf_s(t.c_str(), "%d,%d,%d,%d", &v[0], &v[1], &v[2], &v[3]) < 1 || v[0] <= 0 || v[0] > 255) return false;
-        vk = static_cast<UINT>(v[0]);
-        ctrl = v[1] != 0; shift = v[2] != 0; alt = v[3] != 0;
-        return true;
-    }
-    std::string rest = t;
+    std::string rest = Trim(text);
     // "Win+" is not an Apex key name: taken off first
     for (;;) {
         const size_t plus = rest.find('+');
@@ -1144,18 +953,46 @@ bool ParseKey(const std::string& text, UINT& vk, bool& ctrl, bool& shift, bool& 
         break;
     }
     ApexConfig::KeyChord c;
-    if (!ApexConfig::ParseKeyChord(rest, c) || !c.vk) return false;
+    if (rest.empty() || !ApexConfig::ParseKeyChord(rest, c) || !c.vk) return false;
     vk = c.vk; ctrl = c.ctrl; shift = c.shift; alt = c.alt;
+    return true;
+}
+
+bool ExternalKeyAllowed(const std::string& text) {
+    UINT vk = 0; bool c = false, s = false, a = false, w = false;
+    if (!ParseExternalKey(text, vk, c, s, a, w)) return false;
+    if (!c && !s && !a && !w) return false; // a bare key
+    switch (vk) {
+    case VK_SHIFT: case VK_CONTROL: case VK_MENU: case VK_LWIN: case VK_RWIN: case VK_APPS:
+    case VK_LSHIFT: case VK_RSHIFT: case VK_LCONTROL: case VK_RCONTROL: case VK_LMENU: case VK_RMENU:
+        return false; // a modifier alone
+    default: break;
+    }
+    if (a && (vk == VK_F4 || vk == VK_TAB || vk == VK_ESCAPE || vk == VK_SPACE)) return false; // close, switch, window menu
+    if (c && vk == VK_ESCAPE) return false;                                                    // Start menu, Task Manager
+    if (c && a && (vk == VK_DELETE || vk == VK_END)) return false;                             // the secure attention keys
+    if (w && (vk == 'L' || vk == 'D' || vk == 'M' || vk == VK_TAB)) return false;               // lock, desktop, minimise, task view
     return true;
 }
 
 void WantBefore(bool on) {
     g_wantBefore = on;
-    if (!on) ReleaseBefore();
+    if (on) EnsureHooks(); // its render target is released at a device reset
+    else ReleaseBefore();
 }
 
 void BeforeLook(IDirect3DDevice9* dev, IDirect3DSurface9* src) {
-    if (!g_wantBefore || !dev || !src) return;
+    if (!dev || !src) return;
+    // a video without the look: this frame is taken here, before the look draws it
+    if (VideoMp4::Active() && g_rec.video.look == kLookWithout && !g_withoutFailed) {
+        g_lookSeen = true;
+        if (!VideoMp4::Grab(dev, src)) {
+            g_lookSeen = false;
+            g_withoutFailed = true;
+            LOG_WARNING("[Video] The frame before the look could not be copied; the video keeps the look");
+        }
+    }
+    if (!g_wantBefore) return;
     D3DSURFACE_DESC d{};
     src->GetDesc(&d);
     if (g_beforeRt && (g_beforeW != d.Width || g_beforeH != d.Height)) ReleaseBefore();
@@ -1202,25 +1039,11 @@ bool ReadBefore(IDirect3DDevice9* dev, std::vector<BYTE>& bgr, UINT& w, UINT& h)
 bool KeyDown(WPARAM vk, bool repeat) noexcept {
     if (repeat) return false;
     try {
-        const Settings s = Get();
+        const ApexConfig::KeyChord k = RecordKey();
+        if (!k.vk || k.vk != vk) return false;
+        if (!k.ctrl && !k.shift && !k.alt && ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9') || vk == VK_SPACE)) return false; // typing
         const bool ctrl = GetKeyState(VK_CONTROL) < 0, shift = GetKeyState(VK_SHIFT) < 0, alt = GetKeyState(VK_MENU) < 0;
-        auto is = [&](const std::string& text) {
-            UINT k = 0; bool c = false, sh = false, a = false, w = false;
-            if (Trim(text).empty() || !ParseKey(text, k, c, sh, a, w) || w || k != vk) return false;
-            if (!c && !sh && !a && ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9') || vk == VK_SPACE)) return false; // typing
-            return ctrl == c && shift == sh && alt == a;
-        };
-        { // capture profiles
-            std::lock_guard<std::mutex> lk(g_lock);
-            if (is(s.keyNextProfile)) { g_wantNext = true; return true; }
-            for (const Profile& p : g_profiles) {
-                const bool live = _stricmp(p.name.c_str(), g_s.profileActive.c_str()) == 0;
-                const Settings& ps = live ? g_s : p.s;
-                if (is(ps.profileShotKey)) { g_wantShot = p.name; return true; }
-                if (is(ps.profileKey)) { if (!live) g_wantProfile = p.name; return true; }
-            }
-        }
-        if (!s.videoEnabled || !is(s.keyRecord)) return false;
+        if (ctrl != k.ctrl || shift != k.shift || alt != k.alt) return false;
         ToggleRecording();
         return true;
     } catch (const std::exception& e) {
@@ -1232,38 +1055,47 @@ bool KeyDown(WPARAM vk, bool repeat) noexcept {
 }
 
 void ToggleRecording() { g_toggle = true; }
+void Poll() { if (g_toggle.load()) EnsureHooks(); }
+
+void OnGameClosing() {
+    if (g_externalOn.exchange(false)) SendExternalKey(g_rec.video.externalKey);
+    if (!VideoMp4::Active() && !VideoMp4::Finishing()) return;
+    LOG_INFO("[Video] The game is closing: finishing the video");
+    if (!VideoMp4::StopAndWait(5000)) LOG_WARNING("[Video] The video was still being written when the game closed");
+}
+
 bool Recording() { return VideoMp4::Active() || g_externalOn; }
 int RecordingSeconds() { return static_cast<int>(g_clipBaseSec + VideoMp4::Seconds()); } // all clips of the recording
 
-// The recording timer: a pill in the Apex note style (red dot, time, file size, stop key) at TimerPosition, and the
-// optional red frame. Drawn on the foreground list, no input. Kept out of the video unless TimerInVideo (GrabAtPresent),
+// The recording timer: a pill in the Apex note style (red dot, time, file size, stop key) at timer_position, and the
+// optional red frame. Drawn on the foreground list, no input. Kept out of the video unless timer_in_video (GrabAtPresent),
 // out of screenshots, and hidden when the menu is recorded but the timer is not (it would be in the video).
 bool DrawTimer() {
     try {
         if (!Recording() || Captures::ScreenshotPending()) return false;
-        const Settings s = Get();
-        if (!s.recordingDot && !s.redFrame) return false;
-        if (s.videoApexMenu && !s.timerInVideo && VideoMp4::Active()) return false;
+        const VideoSettings s = Get().video;
+        if (!s.timer && !s.redFrame) return false;
+        if (s.includeMenu && !s.timerInVideo && VideoMp4::Active()) return false;
         const bool builtin = VideoMp4::Active();
-        const int sec = builtin ? static_cast<int>(VideoMp4::Seconds())
-                                : static_cast<int>((GetTickCount64() - g_externalStart) / 1000ull);
+        const int sec = builtin ? RecordingSeconds() : static_cast<int>((GetTickCount64() - g_externalStart) / 1000ull);
         const unsigned long long bytes = builtin ? VideoMp4::BytesWritten() : 0ull;
-        // time left before MaxLength / MaxFileMB (built-in only; the size estimate uses the rate so far)
+        // time left before stop_after_s / stop_at_mb (built-in only; the size estimate uses the rate so far)
         int left = -1;
-        if (builtin && s.warnBefore > 0) {
-            if (s.maxLength > 0) left = s.maxLength - sec;
-            if (s.maxFileMB > 0 && sec >= 3 && bytes > 0) {
-                const double rate = static_cast<double>(bytes) / std::max(1, sec);
-                const double room = static_cast<double>(static_cast<unsigned long long>(s.maxFileMB) << 20) - static_cast<double>(bytes);
+        if (builtin && s.warnBeforeS > 0) {
+            if (s.stopAfterS > 0) left = s.stopAfterS - sec;
+            const int clipSec = static_cast<int>(VideoMp4::Seconds());
+            if (s.newClipMb <= 0 && s.stopAtMb > 0 && clipSec >= 3 && bytes > 0) {
+                const double rate = static_cast<double>(bytes) / std::max(1, clipSec);
+                const double room = static_cast<double>(static_cast<unsigned long long>(s.stopAtMb) << 20) - static_cast<double>(bytes);
                 const int bySize = static_cast<int>(std::max(0.0, room) / rate);
                 left = left < 0 ? bySize : std::min(left, bySize);
             }
-            if (left > s.warnBefore) left = -1;
+            if (left > s.warnBeforeS) left = -1;
         }
         const bool warn = left >= 0;
         const float u = ApexUi::Unit();
-        const float scale = static_cast<float>(std::clamp(s.timerSize, 70, 160)) / 100.0f;
-        const float alpha = static_cast<float>(std::clamp(s.timerOpacity, 30, 100)) / 100.0f;
+        const float scale = static_cast<float>(s.timerSize) / 100.0f;
+        const float alpha = static_cast<float>(s.timerOpacity) / 100.0f;
         const auto* vp = ImGui::GetMainViewport();
         ImDrawList* dl = ImGui::GetForegroundDrawList();
         const unsigned tint = warn ? VioletTheme::kWarning : VioletTheme::kError;
@@ -1273,12 +1105,12 @@ bool DrawTimer() {
                         ImVec2(vp->Pos.x + vp->Size.x - t * 0.5f, vp->Pos.y + vp->Size.y - t * 0.5f),
                         ImGui::GetColorU32(VioletTheme::Col(tint, 0.85f * alpha)), 0.0f, 0, t);
         }
-        if (!s.recordingDot) return true;
+        if (!s.timer) return true;
         const std::string text = Clock(sec, s.timerHours);
         std::string extra;
         if (s.timerFileSize && builtin) extra += std::format("  \xC2\xB7  {} MB", bytes >> 20);
         if (warn) extra += std::string("  \xC2\xB7  ") + I18n::Trf("{} left", Clock(left, false));
-        else if (s.timerKey) extra += std::string("  \xC2\xB7  ") + I18n::Trf("{} stops", s.keyRecord);
+        else if (s.timerStopKey) extra += std::string("  \xC2\xB7  ") + I18n::Trf("{} stops", ApexConfig::KeyChordText(s.recordKey));
         ImFont* font = ImGui::GetFont();
         const float fs = ImGui::GetFontSize() * scale;
         const ImVec2 t1 = font->CalcTextSizeA(fs, FLT_MAX, 0.0f, text.c_str());
@@ -1287,9 +1119,9 @@ bool DrawTimer() {
         const float h = std::max(40.0f * u * scale, fs + 16.0f * u * scale);
         const float w = pad + 2.0f * dotR + gap + t1.x + t2.x + pad;
         const float margin = (ApexUi::kSpace4 + ApexUi::kSpace1) * u;
-        const std::string pos = Lower(Trim(s.timerPos));
-        const bool bottom = pos.rfind("bottom", 0) == 0;
-        const bool atLeft = pos.find("left") != std::string::npos, atRight = pos.find("right") != std::string::npos;
+        const bool bottom = s.timerPosition >= kBottomLeft;
+        const bool atLeft = s.timerPosition == kTopLeft || s.timerPosition == kBottomLeft;
+        const bool atRight = s.timerPosition == kTopRight || s.timerPosition == kBottomRight;
         float x = vp->Pos.x + (vp->Size.x - w) * 0.5f;
         if (atLeft) x = vp->Pos.x + margin;
         if (atRight) x = vp->Pos.x + vp->Size.x - margin - w;
@@ -1312,52 +1144,56 @@ bool DrawTimer() {
     }
 }
 
-bool NeedsGradeBeforeOverlay() { return VideoMp4::Active() && !GrabAtPresent(Get()); }
+bool NeedsGradeBeforeOverlay() { return VideoMp4::Active() && !GrabAtPresent(g_rec.video); }
 
 // ---------------------------------------------------------------------------------------------- Settings > Menu rows
-// Inside the "Screenshot capture" card, after its folder and "Hide game UI" rows (which stay [ui]'s and are synced)
+// Inside the "Screenshot capture" card, after its folder rows ([ui] screenshot_folder)
 void ScreenshotRows() {
     const Settings def;
     Settings s = Get();
     bool ch = false;
-    ch |= TextRow("File name", "Date, time and look name; hover the box for the tokens", s.shotNaming, 300.0f, true);
+    ch |= TextRow("File name", "Date, time and look name; hover the box for the tokens", s.shot.fileName, 300.0f, true);
     static const char* const kFormat[] = {"PNG", "JPG"};
-    int fmt = s.jpg ? 1 : 0;
-    if (Pick("File type", "PNG keeps every detail; JPG files are smaller", "##CapFormat", fmt, kFormat, 2, def.jpg ? 1 : 0)) { s.jpg = fmt == 1; ch = true; }
-    if (s.jpg) ch |= IntSlider("JPG quality", "Higher keeps more detail and makes larger files", s.jpegQuality, 1, 100, def.jpegQuality, "%.0f%%");
-    ch |= IntSlider("Picture size", "Of the game's screen size", s.shotScale, 10, 100, def.shotScale, "%.0f%%");
-    { // [ui] screenshot_hide_game_ui (synced with IncludeGameUI); shown here, under Picture size
+    int fmt = s.shot.jpg ? 1 : 0;
+    if (Pick("File type", "PNG keeps every detail; JPG files are smaller", "##CapFormat", fmt, kFormat, 2, 0)) { s.shot.jpg = fmt == 1; ch = true; }
+    if (s.shot.jpg) ch |= IntSlider("JPG quality", "Higher keeps more detail and makes larger files", s.shot.jpgQuality, 1, 100, def.shot.jpgQuality, "%.0f%%");
+    ch |= IntSlider("Picture size", "Of the game's screen size", s.shot.sizePercent, 10, 100, def.shot.sizePercent, "%.0f%%");
+    { // [ui] screenshot_hide_game_ui
         ApexConfig::UiSettings ui = ApexConfig::GetUi();
         if (ApexUi::SwitchRow("Hide game UI in screenshots", &ui.screenshotHideGameUi,
                               "Hides the game interface for the photo, then restores it; turn off to include it", true)) ApexConfig::SetUi(ui);
     }
-    ch |= ApexUi::SwitchRow("Include the Apex menu", &s.shotApexMenu, "When the menu is open, it is in the picture", def.shotApexMenu);
-    ch |= ApexUi::SwitchRow("Save a copy without ReShade/GShade", &s.saveBefore, "The same moment without ReShade/GShade, ending in _before", def.saveBefore);
-    ch |= ApexUi::SwitchRow("Save the ReShade/GShade preset with it", &s.savePreset, "A copy of the ReShade/GShade preset file next to the picture", def.savePreset);
-    ch |= IntSlider("Pictures per key press", "More than one takes a quick series", s.batchQuantity, 1, 50, def.batchQuantity);
-    if (s.batchQuantity > 1) ch |= IntSlider("Time between pictures", "In milliseconds", s.batchInterval, 50, 5000, def.batchInterval, "%.0f ms");
-    ch |= ApexUi::SwitchRow("Include the mouse pointer", &s.shotMouse, "Where it was on screen, at the picture's size", def.shotMouse);
+    ch |= ApexUi::SwitchRow("Include the Apex menu", &s.shot.includeMenu, "When the menu is open, it is in the picture", def.shot.includeMenu);
+    bool both = s.shot.look == kLookBoth;
+    if (ApexUi::SwitchRow("Save a copy without ReShade/GShade", &both, "The same moment without ReShade/GShade, ending in _before", false)) {
+        s.shot.look = both ? kLookBoth : kLookWith;
+        ch = true;
+    }
+    ch |= ApexUi::SwitchRow("Save the ReShade/GShade preset with it", &s.shot.savePreset, "A copy of the ReShade/GShade preset file next to the picture", def.shot.savePreset);
+    ch |= IntSlider("Pictures per key press", "More than one takes a quick series", s.shot.burstCount, 1, kMaxBurst, def.shot.burstCount);
+    if (s.shot.burstCount > 1) ch |= IntSlider("Time between pictures", "In milliseconds", s.shot.burstIntervalMs, 50, 5000, def.shot.burstIntervalMs, "%.0f ms");
+    ch |= ApexUi::SwitchRow("Include the mouse pointer", &s.shot.includePointer, "Where it was on screen, at the picture's size", def.shot.includePointer);
     {
-        static const char* const kSound[] = {"Off", "Camera", "GShade", "Own file"};
-        const std::string low = Lower(Trim(s.soundPath));
-        int mode = low.empty() ? 0 : low == "camera" ? 1 : low == "gshade" ? 2 : 3;
+        static const char* const kSound[] = {"Off", "Camera", "Own file"};
+        const std::string low = Lower(s.sound);
+        int mode = low.empty() ? 0 : low == "camera" ? 1 : 2;
         static int ownMode = -1; // "Own file" chosen with no file typed yet
-        if (ownMode == 3 && mode == 0) mode = 3;
-        if (Pick("Shutter sound", "Plays with each picture and when a video starts and stops", "##CapSound", mode, kSound, 4, 0)) {
+        if (ownMode == 2 && mode == 0) mode = 2;
+        if (Pick("Shutter sound", "Plays with each picture and when a video starts and stops", "##CapSound", mode, kSound, 3, 0)) {
             ownMode = mode;
-            if (mode != 3) {
-                s.soundPath = mode == 0 ? "" : mode == 1 ? "camera" : "gshade";
-                ch = true;
+            if (mode != 2) {
+                s.sound = mode == 0 ? "" : "camera";
                 Set(s);
                 PlaySoundFile(); // hear the choice
+                ch = false;
             }
         }
-        if (mode == 3) {
-            std::string file = low == "camera" || low == "gshade" ? std::string() : s.soundPath;
-            if (TextRow("Sound file", "Full path of a .wav file", file)) { s.soundPath = file; ch = true; Set(s); PlaySoundFile(); }
+        if (mode == 2) {
+            std::string file = low == "camera" ? std::string() : s.sound;
+            if (TextRow("Sound file", "Full path of a .wav file", file)) { s.sound = file; Set(s); PlaySoundFile(); ch = false; }
         }
-        if (mode == 2 && GShadeSound().empty()) ApexUi::IconNote(IconId::Info, I18n::Tr("GShade is not installed here; the camera sound plays instead"));
     }
+    ch |= ApexUi::SwitchRow("Show a note when saved", &s.notes, "A short note when a picture or video is saved", def.notes);
     if (ch) Set(s);
 }
 
@@ -1365,6 +1201,8 @@ void ScreenshotRows() {
 void VideoRows() {
     const Settings def;
     Settings s = Get();
+    VideoSettings& v = s.video;
+    const VideoSettings& dv = def.video;
     bool ch = false;
     {
         const bool rec = Recording();
@@ -1375,324 +1213,82 @@ void VideoRows() {
                                 : VideoMp4::Finishing() ? std::string(I18n::Tr("Saving the last video"))
                                                         : std::string(I18n::Tr("Or press the key set on the Shortcuts tab"));
         if (ApexUi::BeginControlRow("Record now", state.c_str(), w)) {
-            ImGui::BeginDisabled(!rec && (!s.videoEnabled || VideoMp4::Finishing()));
+            ImGui::BeginDisabled(!rec && VideoMp4::Finishing());
             if (ApexUi::IconTextButton(button, rec ? IconId::X : IconId::Video)) ToggleRecording();
             ImGui::EndDisabled();
             ApexUi::EndControlRow();
         }
     }
-    ch |= ApexUi::SwitchRow("Allow video recording", &s.videoEnabled, "Turn off to make the record key do nothing", def.videoEnabled);
     static const char* const kEngine[] = {"Apex", "Another app"};
-    int eng = s.external ? 1 : 0;
-    if (Pick("Recorder", "Another app: Apex presses its key (Xbox Game Bar, OBS)", "##CapEngine", eng, kEngine, 2, def.external ? 1 : 0)) { s.external = eng == 1; ch = true; }
-    if (s.external) {
-        // its key ("The other app's key", Win+ allowed) is on Settings > Shortcuts > Capture profiles
+    int eng = v.external ? 1 : 0;
+    if (Pick("Recorder", "Another app: Apex presses its key (Xbox Game Bar, OBS)", "##CapEngine", eng, kEngine, 2, 0)) { v.external = eng == 1; ch = true; }
+    if (v.external) {
         ApexUi::MutedText("The other app's key is set on the Shortcuts tab");
         if (ch) Set(s);
         return;
     }
-    ch |= FolderRow("Videos folder", "VideoFolder", s.videoPath, 1, "Choose another folder for the videos");
-    ch |= TextRow("File name##Video", "Date, time and look name; hover the box for the tokens", s.videoNaming, 300.0f, true);
-    static const char* const kSize[] = {"720p", "1080p", "1440p"};
-    static const int kSizeV[] = {720, 1080, 1440};
-    int si = s.maxHeight >= 1300 ? 2 : s.maxHeight >= 900 ? 1 : 0;
-    if (Pick("Video size", "Larger looks sharper and costs more speed", "##CapSize", si, kSize, 3, 1)) { s.maxHeight = kSizeV[si]; ch = true; }
-    static const char* const kFps[] = {"24", "30", "60"};
-    static const int kFpsV[] = {24, 30, 60};
-    int fi = s.fps >= 50 ? 2 : s.fps >= 27 ? 1 : 0;
-    if (Pick("Frames per second", "60 is smoothest and costs the most speed", "##CapFps", fi, kFps, 3, 1)) { s.fps = kFpsV[fi]; ch = true; }
-    static const char* const kRate[] = {"By quality", "Fixed size"};
-    int rc = s.bitrateMode ? 1 : 0;
-    if (Pick("Quality mode", "Fixed size keeps every minute about the same size", "##CapRate", rc, kRate, 2, def.bitrateMode ? 1 : 0)) { s.bitrateMode = rc == 1; ch = true; }
-    if (s.bitrateMode) ch |= IntSlider("Megabits per second", "Higher keeps more detail and makes larger files", s.bitrateMbps, 1, 100, def.bitrateMbps);
-    else ch |= IntSlider("Video quality", "Higher keeps more detail and makes larger files", s.quality, 1, 100, def.quality, "%.0f%%");
-    static const char* const kCont[] = {"MP4", "Crash-safe MP4", "MKV"};
-    int cont = s.mkv ? 2 : s.fragmented ? 1 : 0;
-    if (Pick("File type##Video", "Crash-safe keeps the video if the game crashes; MKV is made from it when the video stops", "##CapCont", cont, kCont, 3, def.fragmented ? 1 : 0)) {
-        s.fragmented = cont >= 1;
-        s.mkv = cont == 2;
+    static const char* const kFolders[] = {"Game's videos folder", "Apex Radiance folder", "Another folder"};
+    int folder = v.folder;
+    if (Pick("Save videos to", "Where the videos are saved", "##VideoFolder", folder, kFolders, 3, 0)) {
+        if (folder == kFolderCustom && Trim(v.customFolder).empty()) v.customFolder = ApexUtil::ToUtf8(DefaultFolder(v.folder, true).wstring());
+        v.folder = folder;
         ch = true;
     }
-    if (s.mkv) ch |= ApexUi::SwitchRow("Keep the MP4 too", &s.keepMp4, "Saves the same video as MP4 next to the MKV", def.keepMp4);
+    if (v.folder == kFolderCustom) ch |= FolderRow("Videos folder", "VideoFolder", v.customFolder, 1, "Choose another folder for the videos");
+    ch |= TextRow("File name##Video", "Date, time and look name; hover the box for the tokens", v.fileName, 300.0f, true);
+    static const char* const kSize[] = {"720p", "1080p", "1440p"};
+    static const int kSizeV[] = {720, 1080, 1440};
+    int si = v.size >= 1440 ? 2 : v.size >= 1080 ? 1 : 0;
+    if (Pick("Video size", "Larger looks sharper and costs more speed", "##CapSize", si, kSize, 3, 1)) { v.size = kSizeV[si]; ch = true; }
+    static const char* const kFps[] = {"24", "30", "60"};
+    static const int kFpsV[] = {24, 30, 60};
+    int fi = v.fps >= 60 ? 2 : v.fps >= 30 ? 1 : 0;
+    if (Pick("Frames per second", "60 is smoothest and costs the most speed", "##CapFps", fi, kFps, 3, 1)) { v.fps = kFpsV[fi]; ch = true; }
+    static const char* const kQuality[] = {"Smaller", "Balanced", "Best", "Custom"};
+    ch |= Pick("Video quality", "Higher keeps more detail and makes larger files", "##CapQuality", v.quality, kQuality, 4, dv.quality);
+    if (v.quality == kQualityCustom) ch |= IntSlider("Megabits per second", "Higher keeps more detail and makes larger files", v.customMbps, 1, 100, dv.customMbps);
+    static const char* const kCont[] = {"MP4", "Crash-safe MP4", "MKV"};
+    ch |= Pick("File type##Video", "Crash-safe keeps the video if the game crashes; MKV is made from it when the video stops", "##CapCont", v.container, kCont, 3, dv.container);
+    if (v.container == kContainerMkv) ch |= ApexUi::SwitchRow("Keep the MP4 too", &v.keepMp4, "Saves the same video as MP4 next to the MKV", dv.keepMp4);
     {
         static const int kClipMB[] = {0, 500, 1024, 2048, 4096, 8192};
         static const char* const kClip[] = {"Off", "500 MB", "1 GB", "2 GB", "4 GB", "8 GB"};
         int clip = -1;
-        for (int k = 0; k < 6; k++) if (s.newClipMB == kClipMB[k]) clip = k;
+        for (int k = 0; k < 6; k++) if (v.newClipMb == kClipMB[k]) clip = k;
         int pick = clip < 0 ? 0 : clip;
         if (Pick("New clip every", "Saves the clip at this size and records on in a new file", "##CapClip", pick, kClip, 6, 0) || (clip < 0 && pick != 0)) {
-            s.newClipMB = kClipMB[pick];
+            v.newClipMb = kClipMB[pick];
             ch = true;
         }
-        if (clip < 0) ApexUi::IconNote(IconId::Info, I18n::Trf("Set in the settings file: {} MB", s.newClipMB).c_str());
+        if (clip < 0) ApexUi::IconNote(IconId::Info, I18n::Trf("Set in the settings file: {} MB", v.newClipMb).c_str());
     }
     static const char* const kCodec[] = {"H.264", "HEVC"};
-    int codec = s.hevc ? 1 : 0;
-    if (Pick("Compression", "HEVC files are smaller; it needs a newer graphics card", "##CapCodec", codec, kCodec, 2, def.hevc ? 1 : 0)) { s.hevc = codec == 1; ch = true; }
-    ch |= ApexUi::SwitchRow("Record the game's sound", &s.audio, "Only The Sims 3, not music or chat apps", def.audio);
-    bool hideUi = !s.videoGameUi;
-    if (ApexUi::SwitchRow("Hide game UI while recording", &hideUi, "Hides the game interface until the video stops", !def.videoGameUi)) { s.videoGameUi = !hideUi; ch = true; }
-    ch |= ApexUi::SwitchRow("Include the Apex menu##Video", &s.videoApexMenu, "When the menu is open, it is in the video", def.videoApexMenu);
-    ch |= ApexUi::SwitchRow("Include the mouse pointer##Video", &s.videoMouse, "The pointer moves in the video as on screen", def.videoMouse);
-    ch |= ApexUi::SwitchRow("Show a recording timer", &s.recordingDot, "Time and file size on screen while recording", def.recordingDot);
-    if (s.recordingDot) {
+    int codec = v.hevc ? 1 : 0;
+    if (Pick("Compression", "HEVC files are smaller; it needs a newer graphics card", "##CapCodec", codec, kCodec, 2, 0)) { v.hevc = codec == 1; ch = true; }
+    ch |= ApexUi::SwitchRow("Record the game's sound", &v.gameSound, "Only The Sims 3, not music or chat apps", dv.gameSound);
+    ch |= ApexUi::SwitchRow("Hide game UI while recording", &v.hideGameUi, "Hides the game interface until the video stops", dv.hideGameUi);
+    ch |= ApexUi::SwitchRow("Include the Apex menu##Video", &v.includeMenu, "When the menu is open, it is in the video", dv.includeMenu);
+    ch |= ApexUi::SwitchRow("Include the mouse pointer##Video", &v.includePointer, "The pointer moves in the video as on screen", dv.includePointer);
+    ch |= ApexUi::SwitchRow("Show a recording timer", &v.timer, "Time and file size on screen while recording", dv.timer);
+    if (v.timer) {
         static const char* const kPos[] = {"Top left", "Top centre", "Top right", "Bottom left", "Bottom right"};
-        static const char* const kPosKey[] = {"top-left", "top-center", "top-right", "bottom-left", "bottom-right"};
-        int pos = 1;
-        for (int i = 0; i < 5; ++i) if (Lower(Trim(s.timerPos)) == kPosKey[i]) pos = i;
-        if (Pick("Timer position", "Where the timer sits on the screen", "##CapTimerPos", pos, kPos, 5, 1)) { s.timerPos = kPosKey[pos]; ch = true; }
-        ch |= IntSlider("Timer size", "100 is the size of Apex notes", s.timerSize, 70, 160, def.timerSize, "%.0f%%");
-        ch |= IntSlider("Timer opacity", "Lower lets more of the game show through", s.timerOpacity, 30, 100, def.timerOpacity, "%.0f%%");
-        ch |= ApexUi::SwitchRow("Pulse the red dot", &s.timerBlink, "The dot fades in and out while recording", def.timerBlink);
-        ch |= ApexUi::SwitchRow("Show the file size", &s.timerFileSize, "How large the video is so far", def.timerFileSize);
-        ch |= ApexUi::SwitchRow("Show the stop key", &s.timerKey, "The key that stops the video", def.timerKey);
-        ch |= ApexUi::SwitchRow("Always show hours", &s.timerHours, "0:02:15 instead of 02:15", def.timerHours);
+        ch |= Pick("Timer position", "Where the timer sits on the screen", "##CapTimerPos", v.timerPosition, kPos, 5, dv.timerPosition);
+        ch |= IntSlider("Timer size", "100 is the size of Apex notes", v.timerSize, 70, 160, dv.timerSize, "%.0f%%");
+        ch |= IntSlider("Timer opacity", "Lower lets more of the game show through", v.timerOpacity, 30, 100, dv.timerOpacity, "%.0f%%");
+        ch |= ApexUi::SwitchRow("Pulse the red dot", &v.timerBlink, "The dot fades in and out while recording", dv.timerBlink);
+        ch |= ApexUi::SwitchRow("Show the file size", &v.timerFileSize, "How large the video is so far", dv.timerFileSize);
+        ch |= ApexUi::SwitchRow("Show the stop key", &v.timerStopKey, "The key that stops the video", dv.timerStopKey);
+        ch |= ApexUi::SwitchRow("Always show hours", &v.timerHours, "0:02:15 instead of 02:15", dv.timerHours);
     }
-    ch |= ApexUi::SwitchRow("Red frame while recording", &s.redFrame, "A thin red border around the screen", def.redFrame);
-    if (s.recordingDot || s.redFrame)
-        ch |= ApexUi::SwitchRow("Timer in the video too", &s.timerInVideo, "An open Apex menu is then in the video too", def.timerInVideo);
-    ch |= IntSlider("Stop after", "0 records until you stop it", s.maxLength, 0, 3600, def.maxLength, "%.0f s");
-    ch |= IntSlider("Stop at file size", "0 has no limit", s.maxFileMB, 0, 16000, def.maxFileMB, "%.0f MB");
-    ch |= IntSlider("Warn before the limit", "The timer turns amber and shows the time left; 0 is off", s.warnBefore, 0, 600, def.warnBefore, "%.0f s");
-    ch |= ApexUi::SwitchRow("Short note when saved", &s.savedNote, "Length and size of the saved video", def.savedNote);
+    ch |= ApexUi::SwitchRow("Red frame while recording", &v.redFrame, "A thin red border around the screen", dv.redFrame);
+    if (v.timer || v.redFrame)
+        ch |= ApexUi::SwitchRow("Timer in the video too", &v.timerInVideo, "An open Apex menu is then in the video too", dv.timerInVideo);
+    ch |= IntSlider("Stop after", "0 records until you stop it", v.stopAfterS, 0, 3600, dv.stopAfterS, "%.0f s");
+    ch |= IntSlider("Stop at file size", "0 has no limit", v.stopAtMb, 0, 16000, dv.stopAtMb, "%.0f MB");
+    ch |= IntSlider("Warn before the limit", "The timer turns amber and shows the time left; 0 is off", v.warnBeforeS, 0, 600, dv.warnBeforeS, "%.0f s");
     ApexUi::IconNote(IconId::Info, I18n::Trf("About {} MB per minute; if the game stutters, lower the video size or frames per second",
-                                             static_cast<int>(KbpsFor(s) * 60.0 / 8.0 / 1024.0 + 0.5)).c_str());
+                                             static_cast<int>(KbpsFor(v) * 60.0 / 8.0 / 1024.0 + 0.5)).c_str());
     if (ch) Set(s);
-}
-
-// The settings file group at the end of the "Video recording" card
-void FileRows() {
-    const Settings def;
-    Settings s = Get();
-    bool ch = false;
-    const std::wstring file = File().wstring();
-    const std::string fileUtf8 = ApexUtil::ToUtf8(file);
-    {
-        const float w = ApexUi::ButtonWidth("Open in Notepad", true) + ApexUi::kSpace3 * ApexUi::Unit() + ApexUi::ButtonWidth("Read again", true);
-        if (ApexUi::BeginControlRow("Settings file", "Screenshots and videos follow ApexCapture.ini; you can edit it yourself", w)) {
-            if (ApexUi::IconTextButton("Open in Notepad", IconId::ExternalLink, fileUtf8.c_str()))
-                ShellExecuteW(nullptr, L"open", L"notepad.exe", (L"\"" + file + L"\"").c_str(), nullptr, SW_SHOWNORMAL);
-            ImGui::SameLine(0.0f, ApexUi::kSpace3 * ApexUi::Unit());
-            if (ApexUi::IconTextButton("Read again", IconId::RotateCcw, "Reads the file now")) {
-                std::lock_guard<std::mutex> lk(g_lock);
-                LoadLocked();
-                s = g_s;
-            }
-            ApexUi::EndControlRow();
-        }
-    }
-    ch |= ApexUi::SwitchRow("Read changes automatically", &s.reloadOnChange, "Edit the file while the game runs", def.reloadOnChange);
-    ch |= ApexUi::SwitchRow("Show a note when saved", &s.showNotice, "A short note when a picture or video is saved", def.showNotice);
-    {
-        std::lock_guard<std::mutex> lk(g_lock);
-        if (!g_lastError.empty()) ApexUi::IconNote(IconId::TriangleAlert, g_lastError.c_str(), VioletTheme::kWarning);
-    }
-    if (ch) Set(s);
-}
-
-// ---------------------------------------------------------------------------------------------- the feature
-namespace {
-class ApexCapturePatch final : public ApexPatch {
-  public:
-    ApexCapturePatch() : ApexPatch("ApexCapture", nullptr) {}
-    bool Install() override {
-        if (isEnabled) return true;
-        Get(); // reads (or writes) the file now
-        RenderCallbacks::Add(RenderCallbacks::filteredSceneBeforeOverlay, BeforeOverlay);
-        RenderCallbacks::Add(RenderCallbacks::preReset, OnPreReset);
-        D3D9Hooks::RegisterPresent("ApexCapture", [](D3D9Hooks::DeviceContext& ctx, const RECT*, const RECT*, HWND, const RGNDATA*) {
-            OnPresent(ctx.device);
-            return D3D9Hooks::HookAction::Continue;
-        }, D3D9Hooks::Priority::Early);
-        isEnabled = true;
-        LOG_INFO("[Capture] Installed; settings: " + ApexUtil::ToUtf8(File().wstring()));
-        return true;
-    }
-    bool Uninstall() override {
-        if (!isEnabled) return true;
-        if (Recording()) StopRecording();
-        RenderCallbacks::Remove(RenderCallbacks::filteredSceneBeforeOverlay, BeforeOverlay);
-        RenderCallbacks::Remove(RenderCallbacks::preReset, OnPreReset);
-        D3D9Hooks::UnregisterAll("ApexCapture");
-        isEnabled = false;
-        return true;
-    }
-    // its rows are on Settings > Menu (ScreenshotRows, VideoRows), not on a feature card
-};
-} // namespace
-
-// ---------------------------------------------------------------------------------------------- capture profiles (public)
-std::vector<std::string> Profiles() {
-    std::lock_guard<std::mutex> lk(g_lock);
-    EnsureLoaded();
-    std::vector<std::string> names;
-    for (const Profile& p : g_profiles) names.push_back(p.name);
-    return names;
-}
-
-bool SwitchProfile(const std::string& name) {
-    bool ok = false, note = false;
-    {
-        std::lock_guard<std::mutex> lk(g_lock);
-        EnsureLoaded();
-        if (g_dirty) { g_dirty = false; WriteLocked(); }
-        ok = SwitchProfileLocked(name);
-        note = g_s.profileNote;
-    }
-    if (ok) {
-        SyncUi();
-        if (note) Note(I18n::Trf("Capture profile: {}", CleanName(name)), 2, Captures::NoteKind::Info);
-    }
-    return ok;
-}
-
-namespace {
-// What a profile changes, as short chips: UI, pointer, sound, picture type, video type
-std::vector<std::pair<const char*, bool>> ProfileChips(const Settings& p) {
-    const std::string snd = Lower(Trim(p.soundPath));
-    return {{p.shotGameUi ? "UI" : "No UI", p.shotGameUi},
-            {p.shotMouse ? "Pointer" : "No pointer", p.shotMouse},
-            {snd.empty() ? "Silent" : snd == "camera" ? "Camera" : snd == "gshade" ? "GShade" : "Own sound", !snd.empty()},
-            {p.jpg ? "JPG" : "PNG", false},
-            {p.mkv ? "MKV" : p.fragmented ? "Crash-safe MP4" : "MP4", false}};
-}
-
-// One profile row: a dot, the name, the chips and its key. true = clicked.
-bool ProfileRow(const std::string& name, const Settings& p, bool active) {
-    const float u = ApexUi::Unit();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImVec2 p0 = ImGui::GetCursorScreenPos();
-    const float w = ImGui::GetContentRegionAvail().x, h = 34.0f * u;
-    ImGui::PushID(name.c_str());
-    const bool clicked = ImGui::InvisibleButton("##profile", ImVec2(w, h));
-    const bool hover = ImGui::IsItemHovered();
-    ImGui::PopID();
-    const ImVec2 p1(p0.x + w, p0.y + h);
-    dl->AddRectFilled(p0, p1, ImGui::GetColorU32(VioletTheme::Col(active ? VioletTheme::kAccentDark : VioletTheme::kSelectedBg, active ? 0.28f : hover ? 1.0f : 0.6f)), 8.0f * u);
-    if (active) dl->AddRect(p0, p1, ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kAccent, 0.9f)), 8.0f * u, 0, 1.0f * u);
-    const float cy = p0.y + h * 0.5f;
-    const ImVec2 dot(p0.x + 14.0f * u, cy);
-    if (active) dl->AddCircleFilled(dot, 4.5f * u, ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kAccent)), 16);
-    else dl->AddCircle(dot, 4.5f * u, ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kTextMuted)), 16, 1.5f * u);
-    const float fs = ImGui::GetFontSize();
-    ImFont* font = ImGui::GetFont();
-    float x = p0.x + 28.0f * u;
-    const float nameW = 150.0f * u;
-    ImGui::PushClipRect(ImVec2(x, p0.y), ImVec2(x + nameW - 6.0f * u, p1.y), true);
-    dl->AddText(ImVec2(x, cy - fs * 0.5f), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kText)), name.c_str());
-    ImGui::PopClipRect();
-    x += nameW;
-    // key on the right
-    const std::string key = Trim(p.profileKey);
-    const char* keyText = key.empty() ? I18n::Tr("No key") : key.c_str();
-    const float kw = font->CalcTextSizeA(fs * 0.9f, FLT_MAX, 0.0f, keyText).x + 14.0f * u;
-    const float kx = p1.x - 10.0f * u - kw;
-    dl->AddRect(ImVec2(kx, cy - 10.0f * u), ImVec2(kx + kw, cy + 10.0f * u), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kTextMuted, 0.4f)), 5.0f * u);
-    dl->AddText(font, fs * 0.9f, ImVec2(kx + 7.0f * u, cy - fs * 0.45f), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kTextMuted)), keyText);
-    // chips, as many as fit
-    for (const auto& [label, on] : ProfileChips(p)) {
-        const char* t = I18n::Tr(label);
-        const float cw = font->CalcTextSizeA(fs * 0.85f, FLT_MAX, 0.0f, t).x + 12.0f * u;
-        if (x + cw > kx - 8.0f * u) break;
-        const unsigned rgb = on ? VioletTheme::kAccentLight : VioletTheme::kTextMuted;
-        dl->AddRectFilled(ImVec2(x, cy - 9.0f * u), ImVec2(x + cw, cy + 9.0f * u), ImGui::GetColorU32(VioletTheme::Col(on ? VioletTheme::kAccent : VioletTheme::kTextMuted, on ? 0.22f : 0.12f)), 9.0f * u);
-        dl->AddText(font, fs * 0.85f, ImVec2(x + 6.0f * u, cy - fs * 0.425f), ImGui::GetColorU32(VioletTheme::Col(rgb)), t);
-        x += cw + 4.0f * u;
-    }
-    if (hover && !active) ImGui::SetTooltip("%s", I18n::Tr("Click to use this profile"));
-    ImGui::Dummy(ImVec2(0.0f, 4.0f * u));
-    return clicked;
-}
-} // namespace
-
-void ProfileCard() {
-    if (ApexUi::BeginCard("##CaptureProfiles")) {
-        ApexUi::CardHeader(IconId::Settings2, "Capture profiles", "Every screenshot and video setting below belongs to the profile in use", nullptr, nullptr);
-        ApexUi::CardDivider();
-        ApexUi::IconNote(IconId::Info, I18n::Tr("Keys for capture are on the Shortcuts tab"), VioletTheme::kAccent);
-        Settings s;
-        std::vector<Profile> list;
-        {
-            std::lock_guard<std::mutex> lk(g_lock);
-            EnsureLoaded();
-            s = g_s;
-            list = g_profiles;
-        }
-        std::string pick;
-        for (const Profile& p : list) {
-            const bool active = _stricmp(p.name.c_str(), s.profileActive.c_str()) == 0;
-            if (ProfileRow(p.name, active ? s : p.s, active) && !active) pick = p.name;
-        }
-        if (!pick.empty()) SwitchProfile(pick);
-
-        const float u = ApexUi::Unit();
-        const float bw = ApexUi::ButtonWidth("New profile", true) + ApexUi::ButtonWidth("Delete##Profile", true) + ApexUi::kSpace3 * u;
-        if (ApexUi::BeginControlRow("Profiles", "New copies the profile in use; Delete removes it", bw)) {
-            if (ApexUi::IconTextButton("New profile", IconId::Bookmark, "A copy of the profile in use, under a new name")) {
-                std::string name;
-                for (int n = static_cast<int>(list.size()) + 1; n < 1000; n++) {
-                    name = std::format("Profile {}", n);
-                    if (!std::filesystem::exists(ProfilePath(name))) break;
-                }
-                {
-                    std::lock_guard<std::mutex> lk(g_lock);
-                    Settings copy = g_s;
-                    copy.profileActive = name;
-                    copy.profileKey.clear();
-                    copy.profileShotKey.clear();
-                    WriteText(ProfilePath(name), Render(copy, true));
-                    ScanProfilesLocked();
-                }
-                SwitchProfile(name);
-            }
-            ImGui::SameLine(0.0f, ApexUi::kSpace3 * u);
-            ImGui::BeginDisabled(list.size() < 2);
-            if (ApexUi::IconTextButton("Delete##Profile", IconId::Trash2, "Deletes the profile in use and switches to the next one")) {
-                const std::string gone = s.profileActive;
-                std::string next;
-                for (const Profile& p : list) if (_stricmp(p.name.c_str(), gone.c_str()) != 0) { next = p.name; break; }
-                if (!next.empty() && SwitchProfile(next)) {
-                    std::error_code ec;
-                    std::filesystem::remove(ProfilePath(gone), ec);
-                    std::lock_guard<std::mutex> lk(g_lock);
-                    ScanProfilesLocked();
-                    LOG_INFO("[Capture] Capture profile deleted: " + gone);
-                }
-            }
-            ImGui::EndDisabled();
-            ApexUi::EndControlRow();
-        }
-        // the profile in use: its name and keys
-        std::string name = s.profileActive;
-        if (TextRow("Profile name", "The name of the profile in use", name, 200.0f)) {
-            const std::string clean = CleanName(name);
-            if (_stricmp(clean.c_str(), s.profileActive.c_str()) != 0 && !std::filesystem::exists(ProfilePath(clean))) {
-                std::lock_guard<std::mutex> lk(g_lock);
-                std::error_code ec;
-                std::filesystem::remove(ProfilePath(g_s.profileActive), ec);
-                g_s.profileActive = clean;
-                WriteLocked();
-                ScanProfilesLocked();
-            }
-        }
-        // the keys (this profile's, one picture, next profile, the other app's) are key chips on Settings > Shortcuts
-        if (ApexUi::SwitchRow("Show the name when switching", &s.profileNote, "A short note on screen, never in pictures or videos", true)) {
-            Settings cur = Get();
-            cur.profileNote = s.profileNote;
-            Set(cur);
-        }
-    }
-    ApexUi::EndCard();
 }
 
 } // namespace ApexCapture
-
-using ApexCapture::ApexCapturePatch;
-APEX_REGISTER_FEATURE(ApexCapturePatch, { .displayName = "Screenshots & video",
-                                                       .description = "Screenshots and MP4 videos with Apex's effects, saved the way ApexCapture.ini says.",
-                                                       .category = "Graphics",
-                                                       .experimental = true,
-                                                       .enabledByDefault = true,
-                                                       .supportedVersions = VERSION_ALL,
-                                                       .technicalDetails = { "Settings: Documents\\...\\Apex Radiance\\ApexCapture.ini (re-read when saved).",
-                                                                             "Video: Media Foundation H.264/HEVC + game sound (process loopback)." } })

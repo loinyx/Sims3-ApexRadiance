@@ -23,15 +23,18 @@ struct Options {
 };
 // Render thread. false + why when it cannot start (nothing left open)
 bool Start(IDirect3DDevice9* dev, const std::filesystem::path& file, const Options& o, std::string& why);
-void Grab(IDirect3DDevice9* dev);   // render thread, with the frame finished; takes it when it is due
+// Render thread, with the frame finished (or src: that surface, e.g. the frame before the look); takes it when it is
+// due. False only when src could not be copied.
+bool Grab(IDirect3DDevice9* dev, IDirect3DSurface9* src = nullptr);
 void Pump(IDirect3DDevice9* dev);   // render thread, every Present: moves the ring on, never waits
-void Stop();                        // render thread: the file is finished on the worker; Done() tells when
+void Stop();                        // render thread: the file is finished on the worker; Finishing() tells when
+// Any thread (the game closing): tells the writer to finish without device calls and waits up to ms; true when done
+bool StopAndWait(unsigned ms);
 void Release();                     // device reset: stops and frees the GPU objects
 bool Active();                      // recording (Start .. Stop)
 bool Finishing();                   // stopped, the worker still writes
 double Seconds();
 unsigned long long BytesWritten();  // the file's size so far (checked every second)
-// The last finished recording: "" while none; result line for the note and log
 bool Failed();                      // the encoder could not start: Stop and read TakeResult
-std::string TakeResult(bool& ok);
+std::string TakeResult(bool& ok);   // the last finished clip: "" while none, else its log line (English)
 } // namespace VideoMp4

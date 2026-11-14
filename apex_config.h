@@ -5,6 +5,7 @@
 //   [qol.picture]        Picture filters (same keys as the combined build)
 //   [qol.frame_profiler] Frame Profiler (development build)
 //   [patches.<Name>]     one table per feature: enabled + its settings (same keys as before the split)
+//   [capture]            screenshots and videos: sound, notes, [capture.screenshot], [capture.video] (apex_capture.h)
 // Writes are atomic (temporary file + replace) and debounced: RequestSave marks the file dirty, the pump thread writes it
 // a second later.
 #include <windows.h>

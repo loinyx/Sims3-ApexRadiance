@@ -10,6 +10,7 @@
 #include "picture.h"
 #include "screen_control.h"
 #include "overview_restore.h"
+#include "apex_capture.h"
 #include "frame_profiler.h"
 #include "performance.h"
 #include "profile_package.h"
@@ -439,6 +440,7 @@ void LoadSettings() {
         if (auto* p = profilerPreferences["frame_profiler"].as_table()) p->insert_or_assign("enabled", false);
         FrameProfiler::LoadFromToml(profilerPreferences); // always start measurements manually
     }
+    ApexCapture::LoadFromToml(root); // [capture]: screenshots and videos
     LOG_INFO("[Config] Settings loaded from ApexRadiance.toml");
 }
 
@@ -553,6 +555,7 @@ bool Save(std::string* error) {
         }
         PatchManager::Get().SaveToToml(root);
         Screen::SaveToToml(root); // [screen]: System > Display
+        ApexCapture::ToToml(ApexCapture::Get(), root); // [capture]: screenshots and videos
         OverviewRestore::SaveToToml(root); // [overview_restore]: what the Overview's page switches turned off
         if (toml::table* saved = root["patches"].as_table()) // compared features: saved as on (review H2)
             for (const std::string& n : g_compareOff)
@@ -641,6 +644,7 @@ void CaptureFeatureState(toml::table& out, bool profileFeaturesOnly) {
     toml::table qol;
     Picture::Get().SaveToToml(qol);
     out.insert_or_assign("qol", std::move(qol));
+    if (!profileFeaturesOnly) ApexCapture::ToToml(ApexCapture::Get(), out); // [capture]: undo and Reset all, never profiles
     if (!profileFeaturesOnly || !kPublicBuild || GetUi().developerMode) {
         toml::table d;
         if (kPublicBuild) {
@@ -680,6 +684,7 @@ void DefaultFeatureState(toml::table& out) {
     toml::table qol;
     Picture::ParamsToToml(PictureParams{}, qol);
     out.insert_or_assign("qol", std::move(qol));
+    ApexCapture::ToToml(ApexCapture::Settings{}, out);
 }
 
 void ApplyFeatureState(const toml::table& state) {
@@ -763,6 +768,13 @@ void ApplyFeatureState(const toml::table& state) {
                 any = true;
             }
         }
+    }
+    if (state["capture"].as_table()) { // screenshots and videos (undo, Reset all)
+        toml::table current, wanted;
+        ApexCapture::ToToml(ApexCapture::Get(), current);
+        const ApexCapture::Settings target = ApexCapture::FromToml(state);
+        ApexCapture::ToToml(target, wanted);
+        if (current != wanted) ApexCapture::Set(target);
     }
     if (any) {
         PatchManager::Get().SetUnsavedChanges(true);
