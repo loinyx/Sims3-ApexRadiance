@@ -97,6 +97,7 @@ const I18n::Pair kPairs[] = {
     {"Performance: trees and plants near lamps cost half as much to draw at night", "성능: 밤에 램프 근처의 나무와 식물을 그리는 비용이 절반으로 줄었습니다"},
     {"No crash after deleting lamps", "램프를 삭제한 뒤에도 충돌하지 않습니다"},
     {"RTX Remix bridge: some lots no longer draw their ground black", "RTX Remix bridge: 일부 부지가 더 이상 바닥을 검게 그리지 않습니다"},
+    {"RTX Remix bridge: no longer freezes at start with Turbo Simulation Engine installed", "RTX Remix bridge: Turbo Simulation Engine이 설치되어 있어도 시작할 때 더 이상 멈추지 않음"},
     {"Apex Radiance Setup: no longer offers DXVK when the graphics driver cannot run it", "Apex Radiance Setup: 그래픽 드라이버가 실행할 수 없을 때 더 이상 DXVK를 제안하지 않음"},
     {"Display: a switch to turn off G-SYNC for the game", "디스플레이: 게임의 G-SYNC를 끄는 스위치"},
     {"Night Lights: new option Light bounces between rooms, on by default", "야간 조명: 새 옵션 방 사이 빛 반사, 기본으로 켜져 있어요"},

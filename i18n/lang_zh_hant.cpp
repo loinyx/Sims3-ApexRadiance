@@ -97,6 +97,7 @@ const I18n::Pair kPairs[] = {
     {"Performance: trees and plants near lamps cost half as much to draw at night", "效能：夜間燈具附近的樹木和植物繪製開銷減半"},
     {"No crash after deleting lamps", "刪除燈具後不再當機"},
     {"RTX Remix bridge: some lots no longer draw their ground black", "RTX Remix bridge：部分地塊的地面不再顯示為黑色"},
+    {"RTX Remix bridge: no longer freezes at start with Turbo Simulation Engine installed", "RTX Remix bridge：安裝了 Turbo Simulation Engine 時，啟動不再卡住"},
     {"Apex Radiance Setup: no longer offers DXVK when the graphics driver cannot run it", "Apex Radiance Setup：顯示卡驅動程式無法執行 DXVK 時不再提供 DXVK"},
     {"Display: a switch to turn off G-SYNC for the game", "顯示：關閉遊戲 G-SYNC 的開關"},
     {"Night Lights: new option Light bounces between rooms, on by default", "夜間燈光：新選項「光在房間之間反射」，預設開啟"},

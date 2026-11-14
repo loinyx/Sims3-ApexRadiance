@@ -120,6 +120,9 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
 | | Apex 2.18.3 with patch 0010 (al361, 14.2 min) | Apex's picture gates | every gate open until the save (`applied at the scene end yes`, `RT0 back buffer`), no warning or error; the window showed the picture |
 | 2026-11-09 | 3.0.0 release tree, Steam 1.67.2 | Day/night switch, a neighbouring lot's 6:00 lamp switch | without the earlier pauses |
 | 2026-11-09 | 3.0.0 with the new `dxvk.conf` | A switch to exclusive fullscreen | no freeze (before: Reset refused, "alive losable resources: 1") |
+| 2026-11-13 | 3.2.1 (published) | Turbo Simulation Engine V3.4 (`Turbo.asi` and its split packages), no Sims3SettingsSetter, in-game runner on a town save | hang at start: the client logged `no response from server` right after Turbo's second device, then `Still waiting on the Present semaphore`; the save never loaded |
+| 2026-11-13 | release/3.2.2 c2697794, standard flavour | The same with Sims3SettingsSetter, the whole route (orbits, a pan over 8 lots, 7 min) | pass, no error in the log; `Second device asked with Turbo.asi loaded` once; 107 shaders from the ASI, 0 to compile |
+| 2026-11-13 | release/3.2.2 c2697794, standard flavour | Without Turbo, same route | pass, no error, one device as before |
 
 ## In-game test plan
 

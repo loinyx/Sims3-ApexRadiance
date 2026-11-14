@@ -56,6 +56,7 @@ std::atomic<bool> g_deviceHooked{false};
 std::once_flag g_createDeviceOnce;
 
 std::atomic<IDirect3DDevice9*> g_device{nullptr};
+std::atomic<IDirect3DDevice9*> g_gameDevice{nullptr}; // the first HAL device, from CreateDevice (g_device waits for its first EndScene)
 std::atomic<HWND> g_window{nullptr};
 std::atomic<bool> g_frameInit{false};
 std::atomic<bool> g_restartEffects{false};
@@ -249,6 +250,7 @@ void HookDevice(IDirect3DDevice9* dev) {
         LOG_INFO(std::format("[D3D] Another HAL device created (EndScene {}): Apex stays on the first one", HookChain::AddressText(vt[kEndSceneSlot])));
         return;
     }
+    g_gameDevice.store(dev);
     void** vt = *reinterpret_cast<void***>(dev);
     o_endScene = reinterpret_cast<EndScene_t>(vt[kEndSceneSlot]);
     o_reset = reinterpret_cast<Reset_t>(vt[kResetSlot]);
@@ -259,6 +261,20 @@ void HookDevice(IDirect3DDevice9* dev) {
 }
 
 HRESULT STDMETHODCALLTYPE Hooked_CreateDevice(IDirect3D9* self, UINT adapter, D3DDEVTYPE type, HWND focus, DWORD flags, D3DPRESENT_PARAMETERS* pp, IDirect3DDevice9** out) {
+    // Turbo Simulation Engine (Turbo.asi) makes a throwaway device after the game's, to read the device functions'
+    // addresses, then releases it. A second device stops the RTX Remix bridge's server and the game hangs at its next
+    // Present, so under the bridge Turbo's request gets the game's device (the same functions; the AddRef balances the
+    // Release). Its request: HAL, a 0x0 back buffer, its own hidden window. The caller is not checked:
+    // Sims3SettingsSetter's CreateDevice hook can sit between Turbo and this one.
+    const HWND asking = pp && pp->hDeviceWindow ? pp->hDeviceWindow : focus;
+    if (IDirect3DDevice9* game = g_gameDevice.load(); game && out && pp && type == D3DDEVTYPE_HAL && pp->BackBufferWidth == 0 &&
+                                                      pp->BackBufferHeight == 0 && asking != g_window.load() &&
+                                                      GetModuleHandleW(L"Turbo.asi") && Platform::RemixBridge()) {
+        game->AddRef();
+        *out = game;
+        LOG_INFO("[D3D] Second device asked with Turbo.asi loaded: the game's is given (a second one would stop the RTX Remix bridge)");
+        return D3D_OK;
+    }
     const bool hal = type == D3DDEVTYPE_HAL;
     // Window mode and resolution (System > Display); the game's own request again when the device refuses Apex's
     const D3DPRESENT_PARAMETERS asked = pp ? *pp : D3DPRESENT_PARAMETERS{};
