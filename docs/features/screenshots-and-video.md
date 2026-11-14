@@ -20,7 +20,8 @@ the card is narrow.
 
 Record is greyed out, with one warning note under the card, while a video cannot start (`ApexCapture::CannotRecord`):
 the game's own Edge Smoothing (multisampling) is on, or the game has no free 192 MB block of addresses (checked at most
-once a second). Media Foundation is linked when Apex loads, so it is not checked here.
+once a second), or Media Foundation is missing (Windows N without the Media Feature Pack; its DLLs are delay-loaded, so
+Apex still loads without them).
 
 The card body, in this order. Both tabs use the same group names; the rows are the menu's row widgets, so search, the
 changed dot, per-row Reset and Undo work.
