@@ -484,6 +484,15 @@ void AtEndScene(IDirect3DDevice9* dev)
     EffectImpl(dev, true, 1u << kEndOfFrame);
 }
 
+// The scene depth (DepthBlur's INTZ copy) is asked for only while a shader that is on reads it
+bool g_depthHeld = false;
+void SyncDepth(bool installed)
+{
+    bool want = false;
+    for (size_t i = 0; installed && !want && i < g.order.size(); ++i) want = Runnable(i) && !IsOff(i) && Looks::Shader(g.order[i].shader).needsDepth;
+    if (want != g_depthHeld) { DepthShare::Request(want); g_depthHeld = want; }
+}
+
 void OnPresent(IDirect3DDevice9* dev)
 {
     if (!g_frameWhy.empty()) Why(g_frameWhy);
@@ -498,6 +507,7 @@ void OnPresent(IDirect3DDevice9* dev)
     D3DSURFACE_DESC bd{};
     if (dev && SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &s)) && s) { g_backBuffer = s; s->GetDesc(&bd); s->Release(); }
     if (Looks::Fx::Poll(bd.Width, bd.Height)) ResolveShaders(); // a scan of the Shaders folder finished (part of it)
+    SyncDepth(g.active);
     if (dev && SUCCEEDED(dev->GetRenderTarget(0, &s)) && s) { g_curRT0 = s; s->Release(); }
 }
 
@@ -2271,7 +2281,6 @@ public:
         Looks::Fx::SetBindFunctions(D3D9Hooks::CallOriginalSetRenderTarget, ExtraHooks::RawSetDepthStencilSurface);
         Looks::Fx::RequestScan(); // the player's .fx files compile in the background (unchanged ones are kept)
         LoadPreset();
-        DepthShare::Request(true); // shaders that use depth read the scene depth
         PostScene::WantCamera(true, /*plain*/ false);
         RenderCallbacks::Add(RenderCallbacks::preReset, OnPreReset);
         RenderCallbacks::Add(RenderCallbacks::restartEffects, RestartEffects);
@@ -2312,7 +2321,7 @@ public:
         RenderCallbacks::Remove(RenderCallbacks::restartEffects, RestartEffects);
         ReleaseGpu();
         PostScene::WantCamera(false, /*plain*/ false);
-        DepthShare::Request(false);
+        SyncDepth(false);
         g.status = "Off";
         isEnabled = false;
         LOG_INFO("[Looks] Uninstalled");

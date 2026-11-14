@@ -149,9 +149,32 @@ DWORD WINAPI JobThread(void* p)
     return 0;
 }
 
+// The largest free block of this process's addresses
+size_t LargestFreeBlock()
+{
+    size_t best = 0;
+    MEMORY_BASIC_INFORMATION m{};
+    for (uintptr_t p = 0x10000; VirtualQuery(reinterpret_cast<void*>(p), &m, sizeof m) == sizeof m; p = reinterpret_cast<uintptr_t>(m.BaseAddress) + m.RegionSize)
+    {
+        if (m.State == MEM_FREE && m.RegionSize > best) best = m.RegionSize;
+        if (reinterpret_cast<uintptr_t>(m.BaseAddress) + m.RegionSize < p) break; // wrapped
+    }
+    return best;
+}
+
 // Compiles one file on its own thread (16 MB stack). A file that takes too long is refused and its thread left behind.
 std::shared_ptr<const Effect> CompileGuarded(const std::wstring& path, const Folders& folders, UINT w, UINT h)
 {
+    // The compiler's own heap takes hundreds of MB for a few large shaders while it runs; the process heap growing beside it
+    // then lands its new segments in the middle of the largest free block for good (measured: 1202 MB -> 794 MB after the
+    // first pack check). Growing the process heap by 40 MB once, before the first compile, keeps them at the bottom
+    // (1202 -> 1154 MB). 256 KB blocks: larger ones skip the heap segments and go straight to VirtualAlloc.
+    static std::once_flag grown;
+    std::call_once(grown, [] {
+        void* blocks[160];
+        for (void*& b : blocks) b = HeapAlloc(GetProcessHeap(), 0, 256u << 10);
+        for (void* b : blocks) if (b) HeapFree(GetProcessHeap(), 0, b);
+    });
     auto job = std::make_shared<Job>();
     job->path = path; job->folders = folders; job->w = w; job->h = h;
     auto* holder = new std::shared_ptr<Job>(job);
@@ -512,6 +535,12 @@ void ScanOnce(UINT W, UINT H, bool force)
         {
             std::lock_guard<std::mutex> lock(g_lock);
             if (g_again || g_requested) break;
+        }
+        // a large shader's compile briefly needs up to ~420 MB: background checks wait for room rather than risk the game
+        if (LargestFreeBlock() < (size_t(768) << 20))
+        {
+            LOG_INFO("[Looks] Shader packs: background checks paused, little free memory left");
+            break;
         }
         const std::shared_ptr<const Effect> fx = CompileGuarded(files[i].path, folders[files[i].folders], W, H);
         RecordChecked(files[i].path, attrs[i], *fx);
@@ -884,6 +913,7 @@ AddResult AddFiles(const std::vector<std::wstring>& paths)
 namespace {
 struct Live
 {
+    unsigned lastFrame = 0; // the last frame it ran: an instance not run for a while gives its GPU memory back
     Instance inst;
     SourceState sources;
     std::vector<float> regs;
@@ -919,11 +949,16 @@ bool Run(const RunFrame& f, int index, const float* values, std::string* why)
     const size_t passes = fx.techniques[u.tech].passes.size();
     if (g_framePasses + (int)passes > kMaxFramePasses) return fail("over the frame's limit of 256 passes");
 
-    // drop instances of effects no longer in the table
+    // drop instances of effects no longer in the table, or not run for 120 frames (switched off, out of the look): their
+    // render targets would otherwise stay until a device reset and count against the 384 MB
     for (auto it = g_live.begin(); it != g_live.end();)
     {
-        bool used = false;
-        for (const auto& t : g_current->techs) if (t->fx.get() == it->first) { used = true; break; }
+        bool used = it->first == &fx || (unsigned)f.frame - it->second->lastFrame < 120u;
+        if (used)
+        {
+            used = false;
+            for (const auto& t : g_current->techs) if (t->fx.get() == it->first) { used = true; break; }
+        }
         it = used ? std::next(it) : g_live.erase(it);
     }
     std::unique_ptr<Live>& live = g_live[&fx];
@@ -934,6 +969,7 @@ bool Run(const RunFrame& f, int index, const float* values, std::string* why)
         else if (!live->inst.Create(f.dev, u.fx, &live->error) && live->error.empty()) live->error = "could not be created";
         if (!live->error.empty()) LOG_WARNING("[Looks] " + u.file + ": " + live->error);
     }
+    live->lastFrame = (unsigned)f.frame; // a failed one too: not created again every 120 frames
     if (!live->error.empty()) return fail(live->error);
 
     DefaultValues(fx, live->regs);
