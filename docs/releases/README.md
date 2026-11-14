@@ -5,7 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
-- [3.3.0](3.3.0.md): a Shaders page that runs ReShade and GShade looks inside Apex, with the player's own .fx files and ReShade's shader packs downloaded from the menu; a Capture page for screenshots and videos with Apex's effects, contributed by @ModestPixels; Capture and Shaders preset parts.
+- [4.0.0](4.0.0.md): a Shaders page that runs ReShade and GShade looks inside Apex, with the player's own .fx files and ReShade's shader packs downloaded from the menu; a Capture page for screenshots and videos with Apex's effects, contributed by @ModestPixels; Capture and Shaders preset parts.
 - [3.2.3](3.2.3.md): no solid blue frames on loading and save screens under the RTX Remix bridge; Display's Turn off G-SYNC removed.
 - [3.2.2](3.2.2.md): no freeze at start with Turbo Simulation Engine under the RTX Remix bridge.
 - [3.2.1](3.2.1.md): Apex Radiance Setup offers DXVK and the RTX Remix bridge only when the graphics driver can run them; developer mode keeps its per-session files in Diagnostics, newest 10 of each.

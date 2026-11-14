@@ -6,7 +6,7 @@ Presets save a chosen set of Apex settings so it can be applied again or shared.
 
 | | |
 |---|---|
-| Availability | Dedicated page and portable ZIP packages: 2.12.0; shortcuts: Released in 2.12.2 Applied chip: Released in 2.18.0. One look on all three built-in presets, which differ only in what is on and in quality levels: Released in 3.0.0. Capture (bit 9, opt-in) and Shaders (bit 10) parts, packs a look needs named and offered on import: Released in 3.3.0. |
+| Availability | Dedicated page and portable ZIP packages: 2.12.0; shortcuts: Released in 2.12.2 Applied chip: Released in 2.18.0. One look on all three built-in presets, which differ only in what is on and in quality levels: Released in 3.0.0. Capture (bit 9, opt-in) and Shaders (bit 10) parts, packs a look needs named and offered on import: Released in 4.0.0. |
 | Default | Current settings; importing does not automatically apply a preset |
 | Menu | Presets, below Overview |
 | Configuration | TOML files in `Apex Radiance\Profiles\`; LUTs in `Apex Radiance\LUTs\`; looks in `Apex Radiance\Looks\`; shortcuts in `[ui.profile_shortcuts]` |

@@ -8,7 +8,7 @@ and can switch, reorder and tune the preset's shaders, then save the result as a
 
 | | |
 |---|---|
-| Availability | Released in 3.3.0, Experimental |
+| Availability | Released in 4.0.0, Experimental |
 | Default | Off |
 | Menu | Image > Shaders (Lucide `swatch-book`, after Color), the switch beside the page title; tab *Look*: the look card, then *Shaders in this look*; tab *Library*: *Your library* (Lucide `library`), then *Get shader packs*. The Overview's Effects card has a Shaders row |
 | Configuration | `[patches.Looks]` in `ApexRadiance.toml` (an older `[patches.GShadeLooks]` is read once and written under the new name) |
