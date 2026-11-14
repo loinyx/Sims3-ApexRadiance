@@ -515,7 +515,7 @@ void TokenTooltip() {
 bool TextRow(const char* label, const char* desc, std::string& value, float width = 300.0f, bool tokens = false) {
     static std::map<const void*, std::string> editing;
     bool changed = false;
-    const float w = width * ApexUi::Unit();
+    const float w = std::fmin(width * ApexUi::Unit(), ImGui::GetContentRegionAvail().x); // never past the card when narrow
     if (ApexUi::BeginControlRow(label, desc, w)) {
         const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
         char buf[512];
@@ -649,7 +649,7 @@ bool FolderRow(const char* label, const char* id, std::string& value, int slot, 
     // the plain text box, for typing a path or tokens, behind its own arrow
     if (ApexUi::BeginAdvanced("##TypeFolder", "Type a folder")) {
         static std::map<ImGuiID, std::string> editing;
-        const float bw = 300.0f * u;
+        const float bw = std::fmin(300.0f * u, ImGui::GetContentRegionAvail().x);
         if (ApexUi::BeginControlRow("Folder path", "Hover the box for the tokens; applies when you leave the box", bw)) {
             const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
             const ImGuiID key = ImGui::GetID("##Path");
@@ -1402,7 +1402,7 @@ void VideoCard(bool lookOn, bool gameAa) {
             static const char* const kEngine[] = {"Apex", "Another app"};
             int eng = v.external ? 1 : 0;
             if (Pick("Recorder", "Another app: Apex presses its key (Xbox Game Bar, OBS)", "##CapEngine", eng, kEngine, 2, 0)) { v.external = eng == 1; ch = true; }
-            if (v.external) ApexUi::MutedText("The other app's key is set on the Shortcuts tab");
+            if (v.external) ApexUi::IconNote(IconId::Info, "The other app's key is set on the Shortcuts tab"); // spaced from the row above, as notes are
             ch |= WhenSavedRows(s, play);
             ApexUi::EndAdvanced();
         }

@@ -500,10 +500,11 @@ credited in Settings > About.
 Timothy Lottes (NVIDIA)."; "FidelityFX CAS: AMD (MIT)."; "Upper-floor ground light: Arro's technique, adapted in Apex
 Radiance."; "Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga."; "Thanks to @boringbones
 for testing every build."; "Looks and Capture: contributed by @ModestPixels."; "ReShade shaders in Looks: CeeJay.dk
-(SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint)."; "RTX Remix bridge: NVIDIA (MIT), ported to The Sims 3 by dalexlol and alexvixell35-stack in
+(SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint)."; "ReShade FX compiler: crosire (BSD-3-Clause)."; "RTX Remix bridge: NVIDIA (MIT), ported to The Sims 3 by dalexlol and alexvixell35-stack in
 sims3-modernization; DXVK by Philip Rebohle (zlib)."; "Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et
 al. (MIT), Lucide icons (ISC)." Under them, a folded *Third-party licenses* section shows the full licence texts of
-the ReShade shaders (`third_party/reshade_shaders/reshade_licenses.h`, from `LICENSES.md`) as wrapped muted text, untranslated.
+the ReShade shaders (`third_party/reshade_shaders/reshade_licenses.h`, from `LICENSES.md`) and of the ReShade FX compiler
+(`third_party/reshadefx/reshadefx_license.h`) as wrapped muted text under wrapped titles, untranslated.
 Arro's technique is also credited in the README. Functional notices about official
 S3SS's own fix ("Already handled by Sims3SettingsSetter (its Split-Level Lighting Fix is on)") are shown where relevant;
 Sims3SettingsSetter also appears in compatibility notices, detection, the recommendation card and the settings migration.

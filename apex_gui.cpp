@@ -3422,21 +3422,19 @@ void AboutTab() {
         CreditLine("Thanks to @boringbones for testing every build.");
         CreditLine("RTX Remix bridge: NVIDIA (MIT), ported to The Sims 3 by dalexlol and alexvixell35-stack in sims3-modernization; DXVK by Philip Rebohle (zlib).");
         CreditLine("ReShade shaders in Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).");
-        CreditLine("ReShade FX compiler by crosire, BSD-3-Clause.");
+        CreditLine("ReShade FX compiler: crosire (BSD-3-Clause).");
         CreditLine("Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC).");
         if (ApexUi::BeginAdvanced("Licenses##About", "Third-party licenses")) {
-            // Licence texts stay as written (untranslated)
-            for (const auto& l : ReShadeShaders::kLicenses) {
-                ImGui::TextUnformatted(l.title);
+            // Licence texts stay as written (untranslated); each title wraps too (narrow window, large text)
+            auto licence = [](const char* title, const char* text, bool last) {
+                ImGui::TextWrapped("%s", title);
                 ImGui::PushStyleColor(ImGuiCol_Text, Col(VioletTheme::kTextMuted));
-                ImGui::TextWrapped("%s", l.text);
+                ImGui::TextWrapped("%s", text);
                 ImGui::PopStyleColor();
-                ApexUi::Gap(ApexUi::kSpace2);
-            }
-            ImGui::TextUnformatted(ReShadeFx::kLicenseTitle);
-            ImGui::PushStyleColor(ImGuiCol_Text, Col(VioletTheme::kTextMuted));
-            ImGui::TextWrapped("%s", ReShadeFx::kLicense);
-            ImGui::PopStyleColor();
+                if (!last) ApexUi::Gap(ApexUi::kSpace2);
+            };
+            for (const auto& l : ReShadeShaders::kLicenses) licence(l.title, l.text, false);
+            licence(ReShadeFx::kLicenseTitle, ReShadeFx::kLicense, true);
             ApexUi::EndAdvanced();
         }
     }

@@ -73,12 +73,14 @@ is missing, a row of compact buttons that wraps when narrow follows: *Add .fx fi
 *Add a shader* opens a modal with every shader that runs here, grouped by source under collapsible headers with their
 count ("Apex · 17", "Your shaders · <n>", with the folder button); a source with nothing to show is hidden. A search
 field matches shader, description, source or author; the Kind filter (Color, Sharpen, Light, Film & camera, Stylized)
-applies to the built-in ports. The list spans the modal edge to edge; under it, "Missing something? Get more packs or
-add your own .fx files." and *Add .fx files…*. Shaders that cannot run here are never listed.
+applies to the built-in ports. The list spans the modal edge to edge between two hairlines; under it, "Missing a
+shader? Add your own .fx files" with *Add .fx files…* at its right (under the line when they do not fit). A long group
+title is cut with "…" before the folder button. Shaders that cannot run here are never listed.
 
 **Shader library** card: "<n> shaders" (only what runs here), one row per source: *Built into Apex* ("17 shaders") and
 *Your shaders* (".fx files in the Shaders folder", "Checking your shaders…" while it compiles; its count, *Add .fx
-files…* and the folder button). Its controls go under the text when narrow. The sources are a list in the code
+files…* and the folder button). Its controls go under the text when narrow and wrap onto a second line when even that
+is too narrow; the Look row's Import button and the open shader's footer wrap the same way. The sources are a list in the code
 (`ShaderSources`, name, author, licence, folder), so downloaded packs can join it later.
 
 *Import* opens the Windows file picker (off the render thread) and copies the .ini into Looks\: a different

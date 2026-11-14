@@ -921,6 +921,7 @@ FidelityFX CAS: AMD (MIT).	tr_menu.cpp:kEntries	FidelityFX CAS: AMD (MIT).	Fidel
 Upper-floor ground light: Arro's technique, adapted in Apex Radiance.	tr_menu.cpp:kEntries	Luz dos andares superiores no chão: técnica de Arro, adaptada no Apex Radiance.	Luz de los pisos superiores en el suelo: técnica de Arro, adaptada en Apex Radiance.	Lumière des étages supérieurs au sol : technique d'Arro, adaptée dans Apex Radiance.	
 Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC).	tr_menu.cpp:kEntries	Bibliotecas e licenças: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), ícones Lucide (ISC).	Bibliotecas y licencias: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), iconos Lucide (ISC).	Bibliothèques et licences : Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), icônes Lucide (ISC).	
 ReShade shaders in Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).	tr_menu.cpp:kEntries	Shaders do ReShade em Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).	Shaders de ReShade en Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).	Shaders ReShade de Looks : CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).	
+ReShade FX compiler: crosire (BSD-3-Clause).	tr_menu.cpp:kEntries	Compilador ReShade FX: crosire (BSD-3-Clause).	Compilador ReShade FX: crosire (BSD-3-Clause).	Compilateur ReShade FX : crosire (BSD-3-Clause).	
 Looks and Capture: contributed by @ModestPixels.	tr_menu.cpp:kEntries	Looks e Capture: contribuição de @ModestPixels.	Looks y Capture: contribución de @ModestPixels.	Looks et Capture : contribution de @ModestPixels.	
 Third-party licenses	tr_menu.cpp:kEntries	Licenças de terceiros	Licencias de terceros	Licences tierces	
 Welcome · step {} of {}	tr_menu.cpp:kEntries	Boas-vindas · passo {} de {}	Bienvenida · paso {} de {}	Bienvenue · étape {} sur {}	{} {}
@@ -1124,8 +1125,6 @@ Set in the settings file: {} MB	tr_menu.cpp:kEntries	Definido no arquivo de conf
 2 GB	tr_menu.cpp:kEntries	2 GB	2 GB	2 Go	
 4 GB	tr_menu.cpp:kEntries	4 GB	4 GB	4 Go	
 8 GB	tr_menu.cpp:kEntries	8 GB	8 GB	8 Go	
-UI	tr_menu.cpp:kEntries	Interface	Interfaz	Interface	
-Pointer	tr_menu.cpp:kEntries	Cursor	Puntero	Pointeur	
 JPG	tr_menu.cpp:kEntries	JPG	JPG	JPG	
 PNG	tr_menu.cpp:kEntries	PNG	PNG	PNG	
 MP4	tr_menu.cpp:kEntries	MP4	MP4	MP4	
@@ -1146,9 +1145,7 @@ The other app's key is set on the Shortcuts tab	tr_menu.cpp:kEntries	A tecla do 
 Larger looks sharper and costs more speed	tr_menu.cpp:kEntries	Maior fica mais nítido e pesa mais no jogo	Más grande se ve más nítido y cuesta más rendimiento	Plus grand est plus net et coûte plus de fluidité	
 Frames per second	tr_menu.cpp:kEntries	Quadros por segundo	Fotogramas por segundo	Images par seconde	
 60 is smoothest and costs the most speed	tr_menu.cpp:kEntries	60 é o mais fluido e o que mais pesa	60 es lo más fluido y lo que más cuesta	60 est le plus fluide et coûte le plus	
-Megabits per second	tr_menu.cpp:kEntries	Megabits por segundo	Megabits por segundo	Mégabits par seconde	
 Crash-safe MP4	tr_menu.cpp:kEntries	MP4 seguro contra travamentos	MP4 a prueba de cierres	MP4 protégé des plantages	
-Crash-safe keeps the video if the game crashes	tr_menu.cpp:kEntries	O seguro mantém o vídeo se o jogo travar	A prueba de cierres conserva el vídeo si el juego se cierra	La version protégée garde la vidéo si le jeu plante	
 Compression	tr_menu.cpp:kEntries	Compressão	Compresión	Compression	
 HEVC files are smaller; it needs a newer graphics card	tr_menu.cpp:kEntries	Arquivos HEVC são menores; exige uma placa de vídeo mais nova	Los archivos HEVC son más pequeños; necesita una tarjeta gráfica reciente	Les fichiers HEVC sont plus petits ; il faut une carte graphique récente	
 Only The Sims 3, not music or chat apps	tr_menu.cpp:kEntries	Só The Sims 3, sem música ou apps de chat	Solo The Sims 3, sin música ni apps de chat	Seulement Les Sims 3, sans musique ni applis de discussion	
@@ -2511,8 +2508,6 @@ Unavailable with the game's screen format	tr_image.cpp:kEntries	Indisponível co
 Unavailable: not enough video memory	tr_image.cpp:kEntries	Indisponível: memória de vídeo insuficiente	No disponible: memoria de video insuficiente	Indisponible : mémoire vidéo insuffisante	
 Unavailable on this graphics card	tr_image.cpp:kEntries	Indisponível nesta placa de vídeo	No disponible en esta tarjeta gráfica	Indisponible sur cette carte graphique	
 Preset	tr_image.cpp:kEntries	Preset	Preajuste	Préréglage	
-Runs	tr_image.cpp:kEntries	Onde roda	Dónde se aplica	Position	
-{} edited	tr_image.cpp:kEntries	{} editados	{} editados	{} modifiés	{}
 Run earlier	tr_image.cpp:kEntries	Rodar antes	Ejecutar antes	Exécuter plus tôt	
 Run later	tr_image.cpp:kEntries	Rodar depois	Ejecutar después	Exécuter plus tard	
 Kind	tr_image.cpp:kEntries	Tipo	Tipo	Type	
@@ -2524,13 +2519,7 @@ Stylized	tr_image.cpp:kEntries	Estilizado	Estilizado	Stylisé
 All	tr_image.cpp:kEntries	Todos	Todos	Tous	
 On	tr_image.cpp:kEntries	Ligados	Activados	Activés	
 No shader matches	tr_image.cpp:kEntries	Nenhum shader corresponde	Ningún shader coincide	Aucun shader ne correspond	
-Engine	tr_image.cpp:kEntries	Motor	Motor	Moteur	
-Mode	tr_image.cpp:kEntries	Modo	Modo	Mode	
-Model	tr_image.cpp:kEntries	Modelo	Modelo	Modèle	
 Style	tr_image.cpp:kEntries	Estilo	Estilo	Style	
-Intensity	tr_image.cpp:kEntries	Intensidade	Intensidad	Intensité	
-Automatic	tr_image.cpp:kEntries	Automático	Automático	Automatique	
-Always	tr_image.cpp:kEntries	Sempre	Siempre	Toujours	
 Warm evening	tr_image.cpp:kEntries	Fim de tarde quente	Atardecer cálido	Soirée chaleureuse	
 Cinematic	tr_image.cpp:kEntries	Cinematográfico	Cinematográfico	Cinématographique	
 Soft vintage	tr_image.cpp:kEntries	Vintage suave	Vintage suave	Vintage doux	
@@ -2565,7 +2554,6 @@ Put back the look's values	tr_image.cpp:kEntries	Restaurar os valores do visual	
 Changed from the look	tr_image.cpp:kEntries	Alterado em relação ao visual	Cambiado respecto al estilo	Modifié par rapport au rendu	
 Close	tr_image.cpp:kEntries	Fechar	Cerrar	Fermer	
 Add a shader	tr_image.cpp:kEntries	Adicionar um shader	Añadir un shader	Ajouter un shader	
-Built-in shaders you can add to this look	tr_image.cpp:kEntries	Shaders embutidos que você pode adicionar a este visual	Shaders integrados que puedes añadir a este estilo	Shaders intégrés que vous pouvez ajouter à ce rendu	
 Search shaders	tr_image.cpp:kEntries	Buscar shaders	Buscar shaders	Rechercher des shaders	
 Added	tr_image.cpp:kEntries	Adicionado	Añadido	Ajouté	
 Add	tr_image.cpp:kEntries	Adicionar	Añadir	Ajouter	
@@ -2596,14 +2584,40 @@ Back to the look's list	tr_image.cpp:kEntries	Voltar à lista do visual	Volver a
 No shader of this look can run here	tr_image.cpp:kEntries	Nenhum shader deste visual pode rodar aqui	Ningún shader de este estilo puede ejecutarse aquí	Aucun shader de ce rendu ne peut s'exécuter ici	
 Choose a look to see its shaders	tr_image.cpp:kEntries	Escolha um visual para ver os shaders dele	Elige un estilo para ver sus shaders	Choisissez un rendu pour voir ses shaders	
 {} can't run here	tr_image.cpp:kEntries	{} não podem rodar aqui	{} no pueden ejecutarse aquí	{} ne peuvent pas s'exécuter ici	{}
-{} ({}): not built into Apex	tr_image.cpp:kEntries	{} ({}): não incluído no Apex	{} ({}): no incluido en Apex	{} ({}) : non intégré à Apex	{} {}
-Add one of Apex's built-in shaders to this look	tr_image.cpp:kEntries	Adiciona um dos shaders embutidos do Apex a este visual	Añade uno de los shaders integrados de Apex a este estilo	Ajoute un des shaders intégrés d'Apex à ce rendu	
 No look chosen	tr_image.cpp:kEntries	Nenhum visual escolhido	Ningún estilo elegido	Aucun rendu choisi	
 {} · can't be read	tr_image.cpp:kEntries	{} · não pode ser lido	{} · no se puede leer	{} · illisible	{}
 {} · 1 shader	tr_image.cpp:kEntries	{} · 1 shader	{} · 1 shader	{} · 1 shader	{}
 {} · {} shaders	tr_image.cpp:kEntries	{} · {} shaders	{} · {} shaders	{} · {} shaders	{} {}
 Reload	tr_image.cpp:kEntries	Recarregar	Recargar	Recharger	
-Read the look's .ini again	tr_image.cpp:kEntries	Lê o .ini do visual de novo	Vuelve a leer el .ini del estilo	Relit le .ini du rendu	
+Shader library	tr_image.cpp:kEntries	Biblioteca de shaders	Biblioteca de shaders	Bibliothèque de shaders	
+Every shader you can add to a look	tr_image.cpp:kEntries	Todos os shaders que você pode adicionar a um visual	Todos los shaders que puedes añadir a un estilo	Tous les shaders que vous pouvez ajouter à un rendu	
+1 shader	tr_image.cpp:kEntries	1 shader	1 shader	1 shader	
+{} shaders	tr_image.cpp:kEntries	{} shaders	{} shaders	{} shaders	{}
+Built into Apex	tr_image.cpp:kEntries	Incluídos no Apex	Incluidos en Apex	Intégrés à Apex	
+Ports of ReShade shaders that come with Apex	tr_image.cpp:kEntries	Shaders do ReShade adaptados que já vêm com o Apex	Versiones de shaders de ReShade que vienen con Apex	Adaptations de shaders ReShade fournies avec Apex	
+Your shaders	tr_image.cpp:kEntries	Seus shaders	Tus shaders	Vos shaders	
+.fx files in the Shaders folder	tr_image.cpp:kEntries	Arquivos .fx na pasta Shaders	Archivos .fx de la carpeta Shaders	Fichiers .fx du dossier Shaders	
+Add .fx files…	tr_image.cpp:kEntries	Adicionar arquivos .fx…	Añadir archivos .fx…	Ajouter des fichiers .fx…	
+Copy .fx, .fxh and texture files into the Shaders folder	tr_image.cpp:kEntries	Copia arquivos .fx, .fxh e de textura para a pasta Shaders	Copia archivos .fx, .fxh y de texturas a la carpeta Shaders	Copie des fichiers .fx, .fxh et de textures dans le dossier Shaders	
+Open the Shaders folder	tr_image.cpp:kEntries	Abrir a pasta Shaders	Abrir la carpeta Shaders	Ouvrir le dossier Shaders	
+ReShade shaders and textures	tr_image.cpp:kEntries	Shaders e texturas do ReShade	Shaders y texturas de ReShade	Shaders et textures ReShade	
+Checking your shaders…	tr_image.cpp:kEntries	Verificando seus shaders…	Comprobando tus shaders…	Vérification de vos shaders…	
+{} shaders run in The Sims 3	tr_image.cpp:kEntries	{} shaders funcionam no The Sims 3	{} shaders funcionan en The Sims 3	{} shaders fonctionnent dans Les Sims 3	{}
+Missing a shader? Add your own .fx files	tr_image.cpp:kEntries	Falta algum shader? Adicione seus próprios arquivos .fx	¿Falta algún shader? Añade tus propios archivos .fx	Il manque un shader ? Ajoutez vos propres fichiers .fx	
+Add a built-in shader or one of your own .fx files to this look	tr_image.cpp:kEntries	Adiciona a este visual um shader do Apex ou um dos seus arquivos .fx	Añade a este estilo un shader integrado o uno de tus archivos .fx	Ajoute à ce rendu un shader intégré ou l'un de vos fichiers .fx	
+{} of {} on · {} missing	tr_image.cpp:kEntries	{} de {} ligados · {} faltando	{} de {} activados · faltan {}	{} sur {} activés · {} manquants	{} {} {}
+{} ({}): checking the file…	tr_image.cpp:kEntries	{} ({}): verificando o arquivo…	{} ({}): comprobando el archivo…	{} ({}) : vérification du fichier…	{} {}
+{} ({}): add this file to the Shaders folder	tr_image.cpp:kEntries	{} ({}): coloque este arquivo na pasta Shaders	{} ({}): añade este archivo a la carpeta Shaders	{} ({}) : ajoutez ce fichier au dossier Shaders	{} {}
+{} doesn't run in The Sims 3	tr_image.cpp:kEntries	{} não funciona no The Sims 3	{} no funciona en The Sims 3	{} ne fonctionne pas dans Les Sims 3	{}
+Check again	tr_image.cpp:kEntries	Verificar de novo	Comprobar de nuevo	Vérifier à nouveau	
+Look in the Shaders folder again and compile what changed	tr_image.cpp:kEntries	Olha a pasta Shaders de novo e compila o que mudou	Vuelve a mirar la carpeta Shaders y compila lo que cambió	Réexamine le dossier Shaders et compile ce qui a changé	
+1 file added	tr_image.cpp:kEntries	1 arquivo adicionado	1 archivo añadido	1 fichier ajouté	
+{} files added	tr_image.cpp:kEntries	{} arquivos adicionados	{} archivos añadidos	{} fichiers ajoutés	{}
+{} files added; {} refused (only .fx, .fxh and images)	tr_image.cpp:kEntries	{} arquivos adicionados; {} recusados (só .fx, .fxh e imagens)	{} archivos añadidos; {} rechazados (solo .fx, .fxh e imágenes)	{} fichiers ajoutés ; {} refusés (seulement .fx, .fxh et images)	{} {}
+All shaders found	tr_image.cpp:kEntries	Todos os shaders encontrados	Se encontraron todos los shaders	Tous les shaders ont été trouvés	
+{} still missing	tr_image.cpp:kEntries	Ainda faltam {}	Aún faltan {}	Il en manque encore {}	{}
+My look	tr_image.cpp:kEntries	Meu visual	Mi estilo	Mon rendu	
+Read the look's .ini again and compile the Shaders folder again	tr_image.cpp:kEntries	Lê o .ini do visual de novo e compila a pasta Shaders outra vez	Vuelve a leer el .ini del estilo y compila otra vez la carpeta Shaders	Relit le .ini du rendu et recompile le dossier Shaders	
 Choose the intensity	tr_lighting.cpp:kEntries	Escolha a intensidade	Elige la intensidad	Choisissez l’intensité	
 Ground, objects and buildings are already balanced together	tr_lighting.cpp:kEntries	Chão, objetos e construções já estão equilibrados entre si	El suelo, los objetos y los edificios ya están equilibrados	Le sol, les objets et les bâtiments sont déjà équilibrés ensemble	
 Less light, more contrast at night	tr_lighting.cpp:kEntries	Menos luz, mais contraste à noite	Menos luz, más contraste por la noche	Moins de lumière, plus de contraste la nuit	

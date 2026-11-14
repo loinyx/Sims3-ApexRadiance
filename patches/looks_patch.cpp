@@ -926,6 +926,7 @@ void FxMessages(int missingFiles)
         const int copied = added->added + added->reused;
         g_fxMessageError = added->refused > 0;
         g_fxMessage = added->refused ? I18n::Trf("{} files added; {} refused (only .fx, .fxh and images)", copied, added->refused)
+                      : copied == 1  ? std::string(I18n::Tr("1 file added"))
                                      : I18n::Trf("{} files added", copied);
         g_checkPending = true;
     }
@@ -935,6 +936,26 @@ void FxMessages(int missingFiles)
         if (!added && missingFiles == 0) { g_fxMessage = I18n::Tr("All shaders found"); g_fxMessageError = false; }
         else if (!added && missingFiles > 0) { g_fxMessage = I18n::Trf("{} still missing", missingFiles); g_fxMessageError = true; }
     }
+}
+
+// ---------------------------------------------------------------------------------------------- menu: wrapping controls
+// The lines a group of controls takes at `avail` (widths in order, `gap` apart), wrapping as SameLineIfFits does
+int WrapLines(std::initializer_list<float> widths, float avail, float gap)
+{
+    int lines = 1;
+    float x = -gap;
+    for (float w : widths)
+    {
+        if (x > 0.0f && x + gap + w > avail + 1.0f) { ++lines; x = w; }
+        else x += gap + w;
+    }
+    return lines;
+}
+
+// Before the next control of such a group: on the same line when it still ends before `right` (screen x), else on the next
+void SameLineIfFits(float w, float gap, float right)
+{
+    if (ImGui::GetItemRectMax().x + gap + w <= right + 1.0f) ImGui::SameLine(0.0f, gap); // 1 px: rounding of measured widths
 }
 
 // ---------------------------------------------------------------------------------------------- menu: the Look row
@@ -964,9 +985,20 @@ const char* SourceLabel(Looks::Source s)
 bool LookRow()
 {
     const float u = ApexUi::Unit();
+    const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact); // the list and Import share one height
     const float importW = ApexUi::ButtonWidth(I18n::Tr("Import"), true);
-    const float comboW = std::fmin(220.0f * u, std::fmax(120.0f * u, ImGui::GetContentRegionAvail().x * 0.5f - importW));
-    if (!ApexUi::BeginControlRow("Look", "Pick one, or import a ReShade or GShade preset (.ini)", comboW + ApexUi::kSpace2 * u + importW))
+    const float gap = ApexUi::kSpace2 * u;
+    const float avail = ImGui::GetContentRegionAvail().x;
+    float comboW = std::fmin(220.0f * u, std::fmax(120.0f * u, avail * 0.5f - importW));
+    bool importBelow = false;
+    if (avail - (comboW + gap + importW) - ApexUi::kSpace3 * u < 120.0f * u) // under the label (BeginControlRow): the list takes the row
+    {
+        comboW = avail - gap - importW;
+        if (comboW < 120.0f * u) { comboW = avail; importBelow = true; } // too narrow for both: Import on its own line
+    }
+    const float fh = ImGui::GetFrameHeight();
+    if (!ApexUi::BeginControlRow("Look", "Pick one, or import a ReShade or GShade preset (.ini)", importBelow ? avail : comboW + gap + importW, IconId::None,
+                                 importBelow ? 2.0f * fh + ImGui::GetStyle().ItemSpacing.y : 0.0f))
         return false;
     bool changed = false;
     const std::string current = g.preset.empty() ? std::string(I18n::Tr("Choose a look")) : ShownName(g.preset);
@@ -1028,11 +1060,8 @@ bool LookRow()
         ImGui::EndCombo();
     }
     wasOpen = open;
-    ImGui::SameLine(0.0f, ApexUi::kSpace2 * u);
-    {
-        const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
-        if (ApexUi::IconTextButton("Import", IconId::Download, "Copy a ReShade or GShade preset (.ini) into the Looks folder and choose it")) PickPreset();
-    }
+    if (!importBelow) ImGui::SameLine(0.0f, gap);
+    if (ApexUi::IconTextButton("Import", IconId::Download, "Copy a ReShade or GShade preset (.ini) into the Looks folder and choose it")) PickPreset();
     ApexUi::EndControlRow();
     if (changed) ApexUi::ReportChange("Look changed");
     return changed;
@@ -1087,34 +1116,31 @@ bool ShaderActions(size_t i, int pos, int count, bool& reorder)
     w->DrawList->AddLine(ImVec2(w->Pos.x, lineY), ImVec2(w->Pos.x + w->Size.x, lineY), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kCardBorder)), 1.0f);
     ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, lineY + ApexUi::kSpace2 * u));
     ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
-    const float avail = ImGui::GetContentRegionAvail().x, startX = ImGui::GetCursorPosX(), gap = ApexUi::kSpace2 * u;
+    // every part wraps onto the next line when the panel is narrow (400-unit window, large text)
+    const float gap = ApexUi::kSpace2 * u, right = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
     const char* earlier = I18n::Tr("Run earlier");
     const char* later = I18n::Tr("Run later");
     const std::string place = I18n::Trf("{} of {}", pos, count);
     const char* reset = I18n::Tr("Put back the look's values");
-    float leftW = ImGui::CalcTextSize(place.c_str()).x;
-    if (pos > 1) leftW += ApexUi::ButtonWidth(earlier, true) + gap;
-    if (pos < count) leftW += ApexUi::ButtonWidth(later, true) + gap;
     const float resetW = ApexUi::ButtonWidth(reset, false);
-    const float textDy = (ImGui::GetFrameHeight() - ImGui::GetTextLineHeight()) * 0.5f;
-    const float rowY = ImGui::GetCursorPosY();
+    bool first = true;
+    auto next = [&](float w) { if (!first) SameLineIfFits(w, gap, right); first = false; };
     if (pos > 1)
     {
+        next(ApexUi::ButtonWidth(earlier, true));
         if (ApexUi::IconTextButton(earlier, IconId::ChevronUp)) { Move(i, -1); reorder = changed = true; }
-        ImGui::SameLine(0.0f, gap);
     }
     if (pos < count)
     {
+        next(ApexUi::ButtonWidth(later, true));
         if (ApexUi::IconTextButton(later, IconId::ChevronDown)) { Move(i, 1); reorder = changed = true; }
-        ImGui::SameLine(0.0f, gap);
     }
-    ImGui::SetCursorPosY(rowY + textDy);
+    next(ImGui::CalcTextSize(place.c_str()).x);
+    ImGui::AlignTextToFramePadding(); // centred on the buttons' line
     ImGui::TextDisabled("%s", place.c_str());
-    if (leftW + ApexUi::kSpace3 * u + resetW <= avail)
-    {
-        ImGui::SameLine(startX + avail - resetW);
-        ImGui::SetCursorPosY(rowY);
-    }
+    // the reset on the right: on this line when it fits, else alone under it
+    if (ImGui::GetItemRectMax().x + ApexUi::kSpace3 * u + resetW <= right) ImGui::SameLine(right - resetW - ImGui::GetWindowPos().x);
+    else ImGui::SetCursorScreenPos(ImVec2(std::fmax(ImGui::GetCursorScreenPos().x, right - resetW), ImGui::GetCursorScreenPos().y));
     ImGui::BeginDisabled(!EditedValues(i));
     if (ApexUi::TextButton(reset))
     {
@@ -1259,14 +1285,18 @@ bool GroupHeader(const ShaderSource& src, int count, bool searching)
     ImGui::RenderNavCursor(ImGui::GetCurrentContext()->LastItemData.Rect, ImGui::GetItemID());
     if (hovered) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
     const bool open = searching || !isClosed;
-    const float icon = 12.0f * u;
+    const float icon = ApexUi::kIconSmall * u; // as the Advanced disclosures
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImU32 col = ImGui::GetColorU32(VioletTheme::Col(hovered ? VioletTheme::kText : VioletTheme::kTextMuted));
     ApexUi::DrawIcon(dl, open ? IconId::ChevronDown : IconId::ChevronRight, ImVec2(start.x, start.y + (h - icon) * 0.5f), icon, col);
     std::string title = std::string(I18n::Tr(src.name)) + "  \xC2\xB7  " + std::to_string(count);
     if (!src.author.empty()) title += "  \xC2\xB7  " + src.author;
     if (!src.licence.empty()) title += "  \xC2\xB7  " + src.licence;
-    dl->AddText(ImVec2(start.x + icon + ApexUi::kSpace2 * u, start.y + (h - ImGui::GetTextLineHeight()) * 0.5f), col, title.c_str());
+    // cut with "…" short of the folder button, whole on hover
+    std::string shown;
+    const float textX = start.x + icon + ApexUi::kSpace2 * u;
+    if (ApexUi::FitClosedText(title, std::max(1.0f, start.x + w - folderW - textX), shown) && hovered) ApexUi::ShowFullText(title);
+    dl->AddText(ImVec2(textX, start.y + (h - ImGui::GetTextLineHeight()) * 0.5f), col, shown.c_str());
     if (src.mine)
     {
         ImGui::SameLine(0.0f, ApexUi::kSpace2 * u);
@@ -1301,7 +1331,7 @@ bool AddShaderModal(bool openNow)
             ApexUi::CardDivider();
             if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
             ImGui::SetNextItemWidth(-1.0f);
-            ImGui::InputTextWithHint("##ShaderSearch", I18n::Tr("Search shaders, packs or authors"), query, sizeof(query));
+            ImGui::InputTextWithHint("##ShaderSearch", I18n::Tr("Search shaders"), query, sizeof(query));
             ApexUi::Gap(ApexUi::kSpace2);
             static const char* const kKinds[] = { "All kinds", "Color", "Sharpen", "Light", "Film & camera", "Stylized" };
             ApexUi::SelectRow("Kind", "Only shaders of this kind", "##ShaderKind", &kind, kKinds, IM_COUNTOF(kKinds));
@@ -1310,6 +1340,10 @@ bool AddShaderModal(bool openNow)
             // the list spans the modal edge to edge, so its scrollbar sits on the modal's border as on the main window;
             // its own padding keeps the rows where the modal's padding had them
             const float padX = ImGui::GetStyle().WindowPadding.x;
+            ImGuiWindow* modal = ImGui::GetCurrentWindow();
+            const ImU32 hairline = ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kCardBorder));
+            auto edgeLine = [&](float y) { modal->DrawList->AddLine(ImVec2(modal->Pos.x, y), ImVec2(modal->Pos.x + modal->Size.x, y), hairline, 1.0f); };
+            edgeLine(ImGui::GetCursorScreenPos().y); // the list between two hairlines, edge to edge
             ImGui::SetCursorPosX(0.0f);
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(padX, 0.0f));
             ImGui::BeginChild("##ShaderList", ImVec2(ImGui::GetWindowWidth(), std::min(360.0f * u, ImGui::GetIO().DisplaySize.y * 0.5f)), ImGuiChildFlags_AlwaysUseWindowPadding);
@@ -1353,13 +1387,27 @@ bool AddShaderModal(bool openNow)
             }
             if (!shown && !q.empty()) ApexUi::MutedText(I18n::Tr("No shader matches"));
             ImGui::EndChild();
-            // footer: where more shaders come from
+            edgeLine(ImGui::GetItemRectMax().y);
+            // footer: where more shaders come from, the line left of its button (above it when they don't fit)
             ApexUi::Gap(ApexUi::kSpace2);
             if (Looks::Fx::Scanning()) ApexUi::MutedText(I18n::Tr("Checking your shaders\xE2\x80\xA6"));
-            ApexUi::MutedText(I18n::Tr("Missing something? Get more packs or add your own .fx files."));
             const char* addFx = "Add .fx files\xE2\x80\xA6";
+            const char* lead = I18n::Tr("Missing a shader? Add your own .fx files");
             const float addW = ApexUi::ButtonWidth(I18n::Tr(addFx), true);
-            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - addW));
+            const float avail = ImGui::GetContentRegionAvail().x, startX = ImGui::GetCursorPosX();
+            if (ImGui::CalcTextSize(lead).x + ApexUi::kSpace3 * u + addW <= avail)
+            {
+                ImGui::AlignTextToFramePadding();
+                ImGui::PushStyleColor(ImGuiCol_Text, VioletTheme::Col(VioletTheme::kTextMuted));
+                ImGui::TextUnformatted(lead);
+                ImGui::PopStyleColor();
+                ImGui::SameLine(startX + avail - addW);
+            }
+            else
+            {
+                ApexUi::MutedText(lead);
+                ImGui::SetCursorPosX(startX + std::max(0.0f, avail - addW));
+            }
             if (ApexUi::IconTextButton(addFx, IconId::Plus, "Copy .fx, .fxh and texture files into the Shaders folder")) PickFxFiles();
             if (!g_fxMessage.empty()) ApexUi::IconNote(g_fxMessageError ? IconId::TriangleAlert : IconId::Info, g_fxMessage.c_str(), g_fxMessageError ? VioletTheme::kWarning : VioletTheme::kTextMuted);
             if (close) ImGui::CloseCurrentPopup();
@@ -1376,7 +1424,7 @@ bool SaveLookModal(bool openNow)
     static std::string error;
     if (openNow)
     {
-        const std::string stem = g.preset.empty() ? std::string("My look") : ShownName(g.preset);
+        const std::string stem = g.preset.empty() ? std::string(I18n::Tr("My look")) : ShownName(g.preset);
         snprintf(name, sizeof(name), "%s", I18n::Trf("{} (mine)", stem.substr(stem.find_last_of("\\/") == std::string::npos ? 0 : stem.find_last_of("\\/") + 1)).c_str());
         error.clear();
         ImGui::OpenPopup("##SaveLook");
@@ -1734,9 +1782,7 @@ public:
                         const float gap = ApexUi::kSpace2 * ApexUi::Unit();
                         const float right = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
                         // a row of buttons that wraps when narrow
-                        auto next = [&](const char* label, bool icon) {
-                            if (ImGui::GetItemRectMax().x + gap + ApexUi::ButtonWidth(I18n::Tr(label), icon) <= right) ImGui::SameLine(0.0f, gap);
-                        };
+                        auto next = [&](const char* label, bool icon) { SameLineIfFits(ApexUi::ButtonWidth(I18n::Tr(label), icon), gap, right); };
                         const char* addFx = "Add .fx files\xE2\x80\xA6";
                         if (ApexUi::IconTextButton(addFx, IconId::Plus, "Copy .fx, .fxh and texture files into the Shaders folder")) PickFxFiles();
                         next("Open the Shaders folder", true);
@@ -1757,11 +1803,11 @@ public:
             if (!ApexUi::FilterActive() && g.loaded)
             {
                 ApexUi::Gap(ApexUi::kSpace2);
+                const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
                 if (ApexUi::IconTextButton("Add a shader", IconId::Plus, "Add a built-in shader or one of your own .fx files to this look")) openAdd = true;
                 // saving is a visible action, not only in the menu: the list and its values as a .ini in the Looks folder
                 const char* save = "Save as a new look\xE2\x80\xA6";
-                if (ImGui::GetItemRectMax().x + ApexUi::kSpace2 * ApexUi::Unit() + ApexUi::ButtonWidth(I18n::Tr(save), true) <= ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x)
-                    ImGui::SameLine(0.0f, ApexUi::kSpace2 * ApexUi::Unit());
+                SameLineIfFits(ApexUi::ButtonWidth(I18n::Tr(save), true), ApexUi::kSpace2 * ApexUi::Unit(), ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x);
                 if (ApexUi::IconTextButton(save, IconId::Save, "Save this list and its values as a .ini of your own in the Looks folder")) openSave = true;
             }
         }
@@ -1791,21 +1837,24 @@ public:
                 const char* note = src.mine && Looks::Fx::Scanning() ? "Checking your shaders\xE2\x80\xA6" : src.rowNote;
                 const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
                 const char* addFx = "Add .fx files\xE2\x80\xA6";
-                const float gap = ApexUi::kSpace2 * u;
-                const float countW = ImGui::CalcTextSize(count.c_str()).x;
-                const float width = countW + (src.mine ? gap + ApexUi::ButtonWidth(I18n::Tr(addFx), true) + gap + ImGui::GetFrameHeight() : 0.0f);
-                if (ApexUi::BeginControlRow(src.row, I18n::Tr(note), width))
+                const float gap = ApexUi::kSpace2 * u, fh = ImGui::GetFrameHeight();
+                const float countW = ImGui::CalcTextSize(count.c_str()).x, addW = ApexUi::ButtonWidth(I18n::Tr(addFx), true);
+                float width = countW + (src.mine ? gap + addW + gap + fh : 0.0f);
+                // under the text when narrow (BeginControlRow), wrapping onto more lines when even the row is too narrow
+                const float avail = ImGui::GetContentRegionAvail().x;
+                const int lines = src.mine ? WrapLines({ countW, addW, fh }, avail, gap) : 1;
+                if (lines > 1) width = avail;
+                if (ApexUi::BeginControlRow(src.row, I18n::Tr(note), width, IconId::None, lines > 1 ? lines * fh + (lines - 1) * ImGui::GetStyle().ItemSpacing.y : 0.0f))
                 {
-                    const float y = ImGui::GetCursorPosY();
-                    ImGui::SetCursorPosY(y + (ImGui::GetFrameHeight() - ImGui::GetTextLineHeight()) * 0.5f);
+                    const float right = ImGui::GetCursorScreenPos().x + width;
+                    ImGui::AlignTextToFramePadding(); // centred on the buttons' line
                     ImGui::TextDisabled("%s", count.c_str());
                     if (src.mine)
                     {
-                        ImGui::SameLine(0.0f, gap);
-                        ImGui::SetCursorPosY(y);
+                        SameLineIfFits(addW, gap, right);
                         if (ApexUi::IconTextButton(addFx, IconId::Plus, "Copy .fx, .fxh and texture files into the Shaders folder")) PickFxFiles();
-                        ImGui::SameLine(0.0f, gap);
-                        if (ApexUi::IconButton("##Folder", IconId::FolderOpen, "Open the Shaders folder", false, ImGui::GetFrameHeight() / u)) ShowShadersFolder();
+                        SameLineIfFits(fh, gap, right);
+                        if (ApexUi::IconButton("##Folder", IconId::FolderOpen, "Open the Shaders folder", false, fh / u)) ShowShadersFolder();
                     }
                     ApexUi::EndControlRow();
                 }
