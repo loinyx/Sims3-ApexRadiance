@@ -146,7 +146,8 @@ patches in order and builds x86 and x64 with meson; `package.ps1` makes the zip.
   then each `SetRenderTarget(0)`, `SetViewport`, `StretchRect` or `ColorFill` into the back buffer, back-buffer
   `Clear` and back-buffer draw with the viewport, scissor, FVF or vertex declaration (with its position element,
   `POSITIONT` or `POSITION`), shaders and, for `DrawPrimitiveUP` / `DrawIndexedPrimitiveUP`, the first vertex and the
-  x / y / 4th-float range of all vertices. The values are those set through Apex's detours (`D3D9Hooks::Trace`; FVF,
+  x / y / 4th-float range of all vertices, each `SetFVF` and `SetVertexDeclaration`, and each draw into another target,
+  with the caller of each call and draw (module and offset of its return address, `D3D9Hooks::g_traceCaller`). The values are those set through Apex's detours (`D3D9Hooks::Trace`; FVF,
   declaration and scissor through `ExtraHooks::EnsureTraceHooks`), not the client's `Get*` answers, which can be stale
   (patch 0011). Each Apex pass that reads the vertex input and viewport back to restore them reports through
   `NoSceneTrace::Saved`; *STALE* marks a declaration read back although the last call was `SetFVF`, *STALE vp* a

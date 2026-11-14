@@ -228,6 +228,7 @@ struct Trace {
     void (*present)(IDirect3DDevice9*);
 };
 inline std::atomic<const Trace*> g_trace{nullptr};
+inline void* g_traceCaller = nullptr; // the return address of the call being traced (set just before the callback)
 inline const Trace* CurrentTrace() { return g_trace.load(std::memory_order_relaxed); }
 inline void SetTrace(const Trace* trace) { g_trace.store(trace); } // nullptr = off
 

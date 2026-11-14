@@ -18,7 +18,7 @@ namespace {
 
 constexpr int kMinSceneDraws = 4;   // depth-tested back-buffer draws of a scene frame (as Picture and PostScene)
 constexpr int kMaxFrames = 300;     // no-scene frames written per recording
-constexpr int kMaxEvents = 48;      // lines per frame
+constexpr int kMaxEvents = 160;     // lines per frame
 
 // Render thread only (Mine)
 bool g_on = false;
@@ -73,6 +73,20 @@ bool Mine(IDirect3DDevice9* dev) {
 bool OnBackBuffer() { return g_rt0Known && g_bb && g_rt0 == g_bb; }
 
 std::string Ptr(const void* p) { return p ? std::format("@{:08X}", reinterpret_cast<uintptr_t>(p)) : std::string("null"); }
+
+// Who made the traced call: module+offset of its return address (D3D9Hooks::g_traceCaller)
+std::string Caller() {
+    const void* a = D3D9Hooks::g_traceCaller;
+    HMODULE m = nullptr;
+    if (!a || !GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, static_cast<LPCWSTR>(a), &m))
+        return Ptr(a);
+    wchar_t path[MAX_PATH]{};
+    GetModuleFileNameW(m, path, MAX_PATH);
+    const wchar_t* name = wcsrchr(path, L'\\');
+    std::string out;
+    for (const wchar_t* c = name ? name + 1 : path; *c; c++) out += static_cast<char>(*c < 128 ? *c : '?');
+    return std::format("{}+{:#x}", out, reinterpret_cast<uintptr_t>(a) - reinterpret_cast<uintptr_t>(m));
+}
 
 std::string Input() {
     switch (g_input) {
@@ -145,12 +159,18 @@ void OnSetFvf(IDirect3DDevice9* dev, DWORD fvf) {
     if (!Mine(dev)) return;
     g_input = 'F';
     g_fvf = fvf;
+    Event(std::format("SetFVF {:#x} by {}", fvf, Caller()));
 }
 
 void OnSetDecl(IDirect3DDevice9* dev, IDirect3DVertexDeclaration9* decl) {
     if (!Mine(dev)) return;
     g_input = 'D';
     g_decl = decl;
+    const std::string by = Caller();
+    struct Log {
+        const std::string& by;
+        ~Log() { Event(std::format("SetVertexDeclaration {} by {}", Input(), by)); } // (after the layout is known)
+    } log{by};
     if (!decl || g_declPos.count(decl)) return;
     D3DVERTEXELEMENT9 el[MAXD3DDECLLENGTH + 1]{};
     UINT n = MAXD3DDECLLENGTH + 1;
@@ -199,6 +219,7 @@ void OnDraw(IDirect3DDevice9* dev, const char* kind, D3DPRIMITIVETYPE type, UINT
     if (!Mine(dev) || g_scene) return;
     if (!OnBackBuffer()) {
         g_otherDraws++;
+        Event(std::format("{} {} x{} to {} | {} by {}", kind, Prim(type), prims, Ptr(g_rt0), State(dev), Caller()));
         return;
     }
     if (!std::strcmp(kind, "DIP") || !std::strcmp(kind, "DP")) { // as Picture counts the scene (not the UP draws)
@@ -224,7 +245,7 @@ void OnDraw(IDirect3DDevice9* dev, const char* kind, D3DPRIMITIVETYPE type, UINT
         v0 = std::format(" v0=({:.1f}, {:.1f}, {:.4f}, {:.4f}) {} vert(s) x {:.1f}..{:.1f} y {:.1f}..{:.1f} 4th {:.4f}..{:.4f} stride {}", f[0], f[1], f[2],
                          f[3], n, x0, x1, y0, y1, w0, w1, stride);
     }
-    Event(std::format("{} {} x{} | {}{}", kind, Prim(type), prims, State(dev), v0));
+    Event(std::format("{} {} x{} | {}{} by {}", kind, Prim(type), prims, State(dev), v0, Caller()));
 }
 
 void OnCopy(IDirect3DDevice9* dev, const char* kind, IDirect3DSurface9* dst, const RECT* r) {

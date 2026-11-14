@@ -220,13 +220,13 @@ HRESULT __stdcall HookedSetScissorRect(IDirect3DDevice9* dev, const RECT* r) {
 }
 HRESULT __stdcall HookedSetVertexDeclaration(IDirect3DDevice9* dev, IDirect3DVertexDeclaration9* decl) {
     g_fvfLast.store(false, std::memory_order_relaxed);
-    if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->setDecl) tr->setDecl(dev, decl);
+    if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->setDecl) D3D9Hooks::g_traceCaller = _ReturnAddress(), tr->setDecl(dev, decl);
     return oSetVertexDeclaration(dev, decl);
 }
 HRESULT __stdcall HookedSetFVF(IDirect3DDevice9* dev, DWORD fvf) {
     g_lastFvf.store(fvf, std::memory_order_relaxed);
     g_fvfLast.store(true, std::memory_order_relaxed);
-    if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->setFvf) tr->setFvf(dev, fvf);
+    if (const auto* tr = D3D9Hooks::CurrentTrace(); tr && tr->setFvf) D3D9Hooks::g_traceCaller = _ReturnAddress(), tr->setFvf(dev, fvf);
     return oSetFVF(dev, fvf);
 }
 

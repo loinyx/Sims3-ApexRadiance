@@ -613,14 +613,14 @@ inline void TakeBoundDevice(IDirect3DDevice9* d) {
 HRESULT STDMETHODCALLTYPE H_DrawIndexedPrimitive(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, INT bv, UINT mv, UINT nv, UINT si, UINT pc) {
     HRESULT hr = S_OK;
     if (!Run(g_dip, d, hr, t, bv, mv, nv, si, pc)) return hr;
-    if (const Trace* tr = CurrentTrace(); tr && tr->draw) tr->draw(d, "DIP", t, pc, nullptr, 0, 0);
+    if (const Trace* tr = CurrentTrace(); tr && tr->draw) g_traceCaller = _ReturnAddress(), tr->draw(d, "DIP", t, pc, nullptr, 0, 0);
     if (!kPublicBuild && t_reissue) return TimedReissueDraw([&] { return o_dip(d, t, bv, mv, nv, si, pc); });
     return o_dip(d, t, bv, mv, nv, si, pc);
 }
 HRESULT STDMETHODCALLTYPE H_DrawPrimitive(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, UINT sv, UINT pc) {
     HRESULT hr = S_OK;
     if (!Run(g_dp, d, hr, t, sv, pc)) return hr;
-    if (const Trace* tr = CurrentTrace(); tr && tr->draw) tr->draw(d, "DP", t, pc, nullptr, 0, 0);
+    if (const Trace* tr = CurrentTrace(); tr && tr->draw) g_traceCaller = _ReturnAddress(), tr->draw(d, "DP", t, pc, nullptr, 0, 0);
     if (!kPublicBuild && t_reissue) return TimedReissueDraw([&] { return o_dp(d, t, sv, pc); });
     return o_dp(d, t, sv, pc);
 }
@@ -843,13 +843,13 @@ HRESULT CallOriginalSetViewport(IDirect3DDevice9* d, const D3DVIEWPORT9* v) {
 }
 HRESULT CallOriginalDrawIndexedPrimitive(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, INT bv, UINT mv, UINT nv, UINT si, UINT pc) {
     ++t_origCalls[kOrigDIP];
-    if (const Trace* tr = CurrentTrace(); tr && tr->draw) tr->draw(d, "DIP", t, pc, nullptr, 0, 0);
+    if (const Trace* tr = CurrentTrace(); tr && tr->draw) g_traceCaller = _ReturnAddress(), tr->draw(d, "DIP", t, pc, nullptr, 0, 0);
     if (!kPublicBuild && t_dispatchDepth > 0) return TimedReissueDraw([&] { return o_dip ? o_dip(d, t, bv, mv, nv, si, pc) : d->DrawIndexedPrimitive(t, bv, mv, nv, si, pc); });
     return o_dip ? o_dip(d, t, bv, mv, nv, si, pc) : d->DrawIndexedPrimitive(t, bv, mv, nv, si, pc);
 }
 HRESULT CallOriginalDrawPrimitive(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, UINT sv, UINT pc) {
     ++t_origCalls[kOrigDP];
-    if (const Trace* tr = CurrentTrace(); tr && tr->draw) tr->draw(d, "DP", t, pc, nullptr, 0, 0);
+    if (const Trace* tr = CurrentTrace(); tr && tr->draw) g_traceCaller = _ReturnAddress(), tr->draw(d, "DP", t, pc, nullptr, 0, 0);
     if (!kPublicBuild && t_dispatchDepth > 0) return TimedReissueDraw([&] { return o_dp ? o_dp(d, t, sv, pc) : d->DrawPrimitive(t, sv, pc); });
     return o_dp ? o_dp(d, t, sv, pc) : d->DrawPrimitive(t, sv, pc);
 }
