@@ -59,7 +59,7 @@ public static class RestorePoints
     static void Save(RestorePoint p)
     {
         var json = Path.Combine(p.Dir, "point.json");
-        File.WriteAllText(json + ".tmp", JsonSerializer.Serialize(p, new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(json + ".tmp", JsonSerializer.Serialize(p, SetupJson.Default.RestorePoint));
         File.Move(json + ".tmp", json, true);
     }
 
@@ -67,7 +67,7 @@ public static class RestorePoints
     {
         try
         {
-            var p = JsonSerializer.Deserialize<RestorePoint>(File.ReadAllText(Path.Combine(dir, "point.json")));
+            var p = JsonSerializer.Deserialize(File.ReadAllText(Path.Combine(dir, "point.json")), SetupJson.Default.RestorePoint);
             if (p is not null) p.Dir = dir;
             return p;
         }

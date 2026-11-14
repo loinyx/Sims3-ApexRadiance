@@ -649,6 +649,30 @@ Check(Gpu.Decode((1u << 22) | (3u << 12) | 280) == new Version(1, 3) && Gpu.Deco
 try { var (vk, card, missing) = Gpu.Vulkan(); Console.WriteLine($"info this PC: {card ?? "no Vulkan card"} Vulkan {vk?.ToString() ?? "-"}, DXVK extensions missing: {(missing.Length == 0 ? "none" : string.Join(", ", missing))}"); }
 catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: " + e.Message); }
 
+// the generated JSON writes and reads exactly what the reflection serializer did: players' setup.json and restore points
+{
+    var legacy = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
+    var m = new Manifest { OptionsBackup = "Options.ini.bak" };
+    m.Files.Add(new ManifestFile { Component = Components.Bridge, Path = @"C:\Game\Bin\d3d9.dll", Backup = "d3d9.dll.bak" });
+    m.Files.Add(new ManifestFile { Component = Components.Apex, Path = @"C:\Game\Bin\ApexRadiance.asi" });
+    m.Versions[Components.Apex] = "3.2.3"; m.Versions[Components.Bridge] = "1.0 ü \"quoted\" <tag>";
+    var oldManifest = System.Text.Json.JsonSerializer.Serialize(m, legacy);
+    Check(oldManifest == System.Text.Json.JsonSerializer.Serialize(m, SetupJson.Default.Manifest), "setup.json is written as before");
+    var mBack = System.Text.Json.JsonSerializer.Deserialize(oldManifest, SetupJson.Default.Manifest)!;
+    Check(mBack.Files.Count == 2 && mBack.Files[0].Backup == "d3d9.dll.bak" && mBack.Files[1].Backup is null
+        && mBack.Versions[Components.Bridge] == m.Versions[Components.Bridge] && mBack.OptionsBackup == "Options.ini.bak", "setup.json written by older Setups reads back");
+
+    var point = new RestorePoint { Created = new DateTime(2026, 11, 14, 12, 0, 0, DateTimeKind.Utc), CreatedLocal = "14/11/2026 09:00",
+        Label = "Installed {0}", Args = new[] { "Apex Radiance" }, SetupVersion = "1.1.3", Bin = @"C:\Game\Bin" };
+    point.Entries.Add(new RestoreEntry { Path = @"C:\Game\Bin.dll", Existed = true, Copy = "a.dll" });
+    point.Entries.Add(new RestoreEntry { Path = @"C:\Game\Bin\Mods", Dir = true });
+    var oldPoint = System.Text.Json.JsonSerializer.Serialize(point, legacy);
+    Check(oldPoint == System.Text.Json.JsonSerializer.Serialize(point, SetupJson.Default.RestorePoint), "restore points are written as before");
+    var pBack = System.Text.Json.JsonSerializer.Deserialize(oldPoint, SetupJson.Default.RestorePoint)!;
+    Check(pBack.Created == point.Created && pBack.Args[0] == "Apex Radiance" && pBack.Entries.Count == 2 && pBack.Entries[0].Copy == "a.dll"
+        && pBack.Entries[1].Dir && pBack.FileCount == 1, "restore points written by older Setups read back");
+}
+
 Console.WriteLine(failures == 0 ? "ALL PASSED" : failures + " FAILED");
 return failures == 0 ? 0 : 1;
 

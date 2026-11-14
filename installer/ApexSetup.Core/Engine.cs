@@ -37,7 +37,7 @@ public sealed class Manifest
     public static Manifest Load(string bin)
     {
         var p = System.IO.Path.Combine(DirOf(bin), "setup.json");
-        var m = File.Exists(p) ? JsonSerializer.Deserialize<Manifest>(File.ReadAllText(p)) ?? new() : new();
+        var m = File.Exists(p) ? JsonSerializer.Deserialize(File.ReadAllText(p), SetupJson.Default.Manifest) ?? new() : new();
         m.Bin = bin;
         return m;
     }
@@ -45,7 +45,7 @@ public sealed class Manifest
     public void Save()
     {
         Fs.CreateDir(DirOf(Bin));
-        Fs.Write(FilePath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+        Fs.Write(FilePath, JsonSerializer.Serialize(this, SetupJson.Default.Manifest));
     }
 }
 
