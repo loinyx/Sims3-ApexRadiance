@@ -143,8 +143,9 @@ enum ProfilePart : unsigned {
     kPartDeveloper = 1u << 8, // advanced settings, opt-in and hidden in normal mode
     kPartAmbientOcclusion = 1u << 7, // Ambient Occlusion (after Shortcuts: older saved part masks keep their bits)
     kPartCapture = 1u << 9,       // [capture]: screenshot and video options; not saved by default
+    kPartShaders = 1u << 10,      // Image > Shaders: the ReShade look ([patches.Looks]; Color carried it in 3.3.0 development builds)
 };
-inline constexpr int kProfilePartCount = 10;
+inline constexpr int kProfilePartCount = 11;
 // Parts a preset carries only when picked: unchecked when saving, left out of a one-click Apply
 inline constexpr unsigned kPartsOptIn = kPartShortcuts | kPartCapture;
 inline constexpr unsigned kProfilePartsAll = ((1u << kProfilePartCount) - 1) & ~(1u << 4);
@@ -156,15 +157,22 @@ bool SaveProfile(const std::string& name, unsigned parts = kProfilePartsAll, std
 // Parses the profile (does not apply it: see ApplyFeatureState)
 bool ReadProfile(const std::string& name, toml::table& out, std::string* error = nullptr);
 struct ProfileImport {
+    struct File { std::string name, bytes; };
     toml::table state;
     std::string lutName, lutBytes;
-    std::string lookName, lookBytes; // Looks/<file name>: the Color part's ReShade look
+    std::string lookName, lookBytes; // Looks/<file name>: the Shaders part's ReShade look
+    std::vector<File> shaderFiles;   // Shaders/<name>: the player's own shader files the look uses (name as Looks::ValidShaderFileName)
 };
 // Sharing retains the legacy TOML schema; ZIP adds its referenced LUT as a separate payload.
 bool ProfileUsesLut(const toml::table& state);
-bool ProfileUsesLook(const toml::table& state);    // the Color part's look is a file (looks: or gshade:)
-bool ProfileUsesPackage(const toml::table& state); // a LUT or a look file goes with it: exported as a ZIP
-bool ExportProfileFile(const std::wstring& path, const toml::table& state, std::string* error = nullptr);
+bool ProfileUsesLook(const toml::table& state);    // the Shaders part's look is a file (looks: or gshade:)
+// The player's own shader files the Shaders part's look uses (names relative to the Shaders folder; empty without it)
+std::vector<std::string> ProfileShaderFiles(const toml::table& state);
+// The packs the Shaders part's look needs ([patches.Looks] packs: pack names)
+std::vector<std::string> ProfilePacks(const toml::table& state);
+// A LUT or a look file goes with it (or the player's shader files, when withMyShaders and the look has some): a ZIP
+bool ProfileUsesPackage(const toml::table& state, bool withMyShaders = false);
+bool ExportProfileFile(const std::wstring& path, const toml::table& state, std::string* error = nullptr, bool withMyShaders = false);
 bool ReadProfileImport(const std::wstring& path, ProfileImport& out, std::string* error = nullptr);
 bool SaveImportedProfile(const std::string& name, const ProfileImport& input, unsigned parts, const std::string& icon,
                          std::string* error = nullptr);

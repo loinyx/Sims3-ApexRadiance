@@ -79,4 +79,22 @@ bool ValidLookFileName(const std::string& name);
 // a numbered name ("Name-1.ini"). stored = the file name used; created = the file written ("" when one was reused).
 bool StoreLook(const std::string& fileName, const std::string& bytes, std::string& stored, std::wstring* created, std::string* error);
 
+// ---------------------------------------------------------------------------------------------- the player's shaders in presets
+// A preset ZIP may carry the player's own shader files a look uses, as Shaders/<relative name> (see apex_config.cpp)
+inline constexpr size_t kMaxSharedShaderFiles = 64;          // files of one look
+inline constexpr size_t kMaxSharedFxBytes = 2u << 20;        // one .fx or .fxh (the effect compiler's own cap)
+inline constexpr size_t kMaxSharedTextureBytes = 16u << 20;  // one texture
+std::wstring PlayerShadersFolder(); // Apex Radiance\Shaders\ (trailing backslash): Shaders\ holds .fx and .fxh, Textures\ images
+// "Shaders/<name>.fx" or ".fxh", "Textures/<name>.png|.jpg|.jpeg|.bmp|.dds": one file name, no further folder
+bool ValidShaderFileName(const std::string& rel);
+// The player's files the named .fx files use (relative names as above): each .fx found in Shaders\, the .fxh files they
+// #include (followed through) and the textures they name (source = "..."), only those in the player's folder (a pack's
+// files are not), at most kMaxSharedShaderFiles
+std::vector<std::string> PlayerShaderFiles(const std::vector<std::string>& fxFiles);
+// The bytes of one of them (false when missing, unsafe or over its cap)
+bool ReadShaderFile(const std::string& rel, std::string& bytes);
+// Stores bytes in the player's folder with StoreLook's rules (identical bytes reused, a numbered name on a clash, never
+// overwritten); stored = the relative name used
+bool StoreShaderFile(const std::string& rel, const std::string& bytes, std::string& stored, std::wstring* created, std::string* error);
+
 } // namespace Looks

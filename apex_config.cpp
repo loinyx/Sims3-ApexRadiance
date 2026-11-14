@@ -619,7 +619,7 @@ unsigned FeaturePart(const std::string& name) {
     if (name == "NightTerrainRelight" || name == "SplitLevelGroundLight") return kPartNightLights;
     if (name == "AmbientOcclusion") return kPartAmbientOcclusion;
     if (name == "SceneDither") return kPartColor; // the Color page's Banding Fix
-    if (name == "Looks") return kPartColor; // the Color page's Looks tab
+    if (name == "Looks") return kPartShaders; // Image > Shaders (KeepProfileParts: older presets' Color part too)
     if (name == "DepthBlur") return kPartDepthBlur;
     if (name == "EdgeSmoothing") return kPartEdgeSmoothing;
     for (const char* p : {Performance::kResourceCacheName, Performance::kLookupMissesName, Performance::kFileListName, Performance::kLotLightingName,
@@ -802,7 +802,7 @@ void ApplyFeatureState(const toml::table& state) {
 // ---- profiles ----
 
 const char* ProfilePartName(int index) {
-    static const char* const kNames[kProfilePartCount] = {"Lighting", "Color", "Depth Blur", "Edge Smoothing", "", "Performance", "Shortcuts", "Ambient Occlusion", "Developer", "Capture"};
+    static const char* const kNames[kProfilePartCount] = {"Lighting", "Color", "Depth Blur", "Edge Smoothing", "", "Performance", "Shortcuts", "Ambient Occlusion", "Developer", "Capture", "Shaders"};
     return index >= 0 && index < kProfilePartCount ? kNames[index] : "";
 }
 
@@ -842,6 +842,8 @@ void KeepProfileParts(toml::table& state, unsigned parts) {
         for (auto&& [key, value] : *patches)
             if (!(FeaturePart(std::string(key.str())) & parts)) {
                 const toml::table* vt = value.as_table();
+                // the look of a 3.3.0 development preset (no "packs" key: its Color part carried it) goes with Color too
+                if (key.str() == Looks::kPatchName && vt && !vt->contains("packs") && (parts & kPartColor)) continue;
                 if (!(key.str() == kLampModeFeature && (parts & kPartPerformance) && vt && !vt->empty())) drop.emplace_back(key.str());
             }
         for (const std::string& k : drop) patches->erase(k);
@@ -931,6 +933,12 @@ void CaptureProfileState(toml::table& root) {
             sc.insert("screenshot_hide_game_ui", u.screenshotHideGameUi);
             sc.insert("screenshot_folder", std::string(ScreenshotFolderName(u.screenshotFolder)));
             root.insert_or_assign("shortcuts", std::move(sc));
+        }
+        // the packs the look needs, by name, so an import can offer them (its presence marks the Shaders part's table)
+        if (toml::table* looks = root["patches"][Looks::kPatchName].as_table()) {
+            toml::array packs;
+            for (const std::string& name : Looks::NeededPacks()) packs.push_back(name);
+            looks->insert_or_assign("packs", std::move(packs));
         }
         { // the capture options (Image > Capture), removed below unless picked; never a folder path or the file counter
             ApexCapture::ToToml(ApexCapture::Get(), root);
@@ -1030,10 +1038,31 @@ bool ProfileUsesLut(const toml::table& state) {
 // A look whose .ini travels with the profile (built-in Apex looks need no file)
 bool ProfileUsesLook(const toml::table& state) {
     const auto source=Looks::RefSource(LookRef(state));
-    return (ProfilePartsOf(state)&kPartColor) && (source==Looks::Source::Mine || source==Looks::Source::GShade);
+    return (ProfilePartsOf(state)&kPartShaders) && (source==Looks::Source::Mine || source==Looks::Source::GShade);
 }
-bool ProfileUsesPackage(const toml::table& state) { return ProfileUsesLut(state) || ProfileUsesLook(state); }
-bool ExportProfileFile(const std::wstring& path, const toml::table& state, std::string* error) {
+std::vector<std::string> ProfileShaderFiles(const toml::table& state) {
+    if(!(ProfilePartsOf(state)&kPartShaders)) return {};
+    std::vector<std::string> files;
+    std::string text;
+    Looks::Preset preset;
+    if(Looks::LookText(LookRef(state),text) && Looks::ParsePreset(text,preset))
+        for(const auto& e:preset.order) files.push_back(e.file);
+    if(const toml::array* extra=state["patches"][Looks::kPatchName]["extra"].as_array()) // "Technique@File.fx" added in the menu
+        for(const auto& v:*extra)
+            if(auto t=v.value<std::string>(); t && t->find('@')!=std::string::npos && files.size()<Looks::kMaxTechniques) files.push_back(t->substr(t->find('@')+1));
+    return Looks::PlayerShaderFiles(files);
+}
+std::vector<std::string> ProfilePacks(const toml::table& state) {
+    std::vector<std::string> packs;
+    if(const toml::array* a=state["patches"][Looks::kPatchName]["packs"].as_array())
+        for(const auto& v:*a)
+            if(auto n=v.value<std::string>(); n && !n->empty() && n->size()<=100 && packs.size()<32) packs.push_back(*n);
+    return packs;
+}
+bool ProfileUsesPackage(const toml::table& state, bool withMyShaders) {
+    return ProfileUsesLut(state) || ProfileUsesLook(state) || (withMyShaders && !ProfileShaderFiles(state).empty());
+}
+bool ExportProfileFile(const std::wstring& path, const toml::table& state, std::string* error, bool withMyShaders) {
     try {
         toml::table out=state;
         std::vector<ProfilePackage::Entry> files;
@@ -1050,6 +1079,12 @@ bool ExportProfileFile(const std::wstring& path, const toml::table& state, std::
             files.push_back({"Looks/"+name,ReadBounded(file,Looks::kMaxPresetBytes)});
             SetLookRef(out,"looks:"+name);
         }
+        if(withMyShaders) // the player's own .fx, .fxh and textures the look uses, as Shaders/<name>
+            for(const std::string& rel:ProfileShaderFiles(state)) {
+                std::string bytes;
+                if(!Looks::ReadShaderFile(rel,bytes)) throw std::runtime_error("A shader file could not be read");
+                files.push_back({"Shaders/"+rel,std::move(bytes)});
+            }
         std::string bytes=Serialize(out);
         if(!files.empty()) {
             files.insert(files.begin(),{"profile.toml",std::move(bytes)});
@@ -1073,11 +1108,15 @@ bool ReadProfileImport(const std::wstring& path, ProfileImport& out, std::string
                 } else if(entry.name.starts_with("Looks/") && Looks::ValidLookFileName(entry.name.substr(6)) && entry.bytes.size()<=Looks::kMaxPresetBytes) {
                     if(!result.lookName.empty()) throw std::runtime_error("Invalid profile package");
                     result.lookName=entry.name.substr(6); result.lookBytes=entry.bytes;
+                } else if(entry.name.starts_with("Shaders/") && Looks::ValidShaderFileName(entry.name.substr(8)) && result.shaderFiles.size()<Looks::kMaxSharedShaderFiles &&
+                          entry.bytes.size()<=(entry.name.starts_with("Shaders/Shaders/")?Looks::kMaxSharedFxBytes:Looks::kMaxSharedTextureBytes)) {
+                    result.shaderFiles.push_back({entry.name.substr(8),entry.bytes});
                 } else throw std::runtime_error("Invalid profile package");
             }
-            // every file in the package is the one its profile names
-            if(!found || (result.lutName.empty() && result.lookName.empty()) || (!result.lutName.empty() && LutName(result.state)!=result.lutName) ||
-               (!result.lookName.empty() && LookRef(result.state)!="looks:"+result.lookName)) throw std::runtime_error("Invalid profile package");
+            // every file in the package is the one its profile names (shader files: the profile has a look)
+            if(!found || (result.lutName.empty() && result.lookName.empty() && result.shaderFiles.empty()) || (!result.lutName.empty() && LutName(result.state)!=result.lutName) ||
+               (!result.lookName.empty() && LookRef(result.state)!="looks:"+result.lookName) ||
+               (!result.shaderFiles.empty() && !result.state["patches"][Looks::kPatchName].as_table())) throw std::runtime_error("Invalid profile package");
         } else {if(bytes.size()>2u*1024u*1024u) throw std::runtime_error("The preset is too large"); result.state=toml::parse(bytes);}
         if(!ProfilePartsOf(result.state)) throw std::runtime_error("No supported settings in this profile");
         out=std::move(result); return true;
@@ -1085,6 +1124,7 @@ bool ReadProfileImport(const std::wstring& path, ProfileImport& out, std::string
 }
 bool SaveImportedProfile(const std::string& name, const ProfileImport& input, unsigned parts, const std::string& icon, std::string* error) {
     std::wstring createdLut, createdLook, temporaryProfile;
+    std::vector<std::wstring> createdShaders;
     try {
         if(name.empty() || SanitizeProfileName(name)!=name || ProfileExists(name)) throw std::runtime_error("Choose a new profile name");
         auto state=input.state; KeepProfileParts(state,parts);
@@ -1116,11 +1156,18 @@ bool SaveImportedProfile(const std::string& name, const ProfileImport& input, un
             if(!filters) throw std::runtime_error("Invalid LUT settings");
             filters->insert_or_assign("lut_file",chosen);
         }
-        if((parts&kPartColor) && !input.lookName.empty()) { // same rules as the LUT: identical bytes reuse the file, a clash gets a number
+        const bool withLook=state["patches"][Looks::kPatchName].as_table()!=nullptr; // the Shaders part (or an older preset's Color part)
+        if(withLook && !input.lookName.empty()) { // same rules as the LUT: identical bytes reuse the file, a clash gets a number
             std::string stored, why;
             if(!Looks::StoreLook(input.lookName,input.lookBytes,stored,&createdLook,&why)) throw std::runtime_error("The look could not be saved");
             SetLookRef(state,"looks:"+stored);
         }
+        if(withLook) // the player's shader files into Apex Radiance\Shaders\ (the same rules: a different file of that name stays, the copy gets a numbered name)
+            for(const auto& f:input.shaderFiles) {
+                std::string stored, why; std::wstring created;
+                if(!Looks::StoreShaderFile(f.name,f.bytes,stored,&created,&why)) throw std::runtime_error("A shader file could not be saved");
+                if(!created.empty()) createdShaders.push_back(created);
+            }
         toml::table meta;
         meta.insert("profile",name); meta.insert("icon",icon); meta.insert("written_by",APEX_PRODUCT_NAME " " APEX_VERSION_STRING);
         state.insert_or_assign("meta",std::move(meta));
@@ -1130,7 +1177,7 @@ bool SaveImportedProfile(const std::string& name, const ProfileImport& input, un
         if(!ApexUtil::WriteFileAtomic(temporaryProfile,Serialize(state),&err)) throw std::runtime_error(err.empty()?"The profile could not be saved":err);
         if(!MoveFileExW(temporaryProfile.c_str(),ProfileFile(name).c_str(),MOVEFILE_WRITE_THROUGH)) throw std::runtime_error("The preset already exists or could not be saved");
         return true;
-    } catch(const std::exception& e) {if(!temporaryProfile.empty()) DeleteFileW(temporaryProfile.c_str()); if(!createdLut.empty()) DeleteFileW(createdLut.c_str()); if(!createdLook.empty()) DeleteFileW(createdLook.c_str()); if(error) *error=e.what(); return false;}
+    } catch(const std::exception& e) {if(!temporaryProfile.empty()) DeleteFileW(temporaryProfile.c_str()); if(!createdLut.empty()) DeleteFileW(createdLut.c_str()); if(!createdLook.empty()) DeleteFileW(createdLook.c_str()); for(const auto& f:createdShaders) DeleteFileW(f.c_str()); if(error) *error=e.what(); return false;}
 }
 
 std::wstring ProfilesFolder() { return ProfilesDirectory(); }

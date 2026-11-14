@@ -60,7 +60,7 @@ bool SafeRelative(const std::string& rel)
     return true;
 }
 
-bool ReadBounded(const std::wstring& path, std::string& text, std::string* error)
+bool ReadBounded(const std::wstring& path, std::string& text, std::string* error, size_t cap = kMaxPresetBytes)
 {
     WIN32_FILE_ATTRIBUTE_DATA info{};
     if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &info) || (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
@@ -68,12 +68,12 @@ bool ReadBounded(const std::wstring& path, std::string& text, std::string* error
         if (error) *error = "the file is missing";
         return false;
     }
-    if (info.nFileSizeHigh || info.nFileSizeLow > kMaxPresetBytes)
+    if (info.nFileSizeHigh || info.nFileSizeLow > cap)
     {
         if (error) *error = "the file is too large for a preset";
         return false;
     }
-    if (!ApexUtil::ReadFileBytes(path, text) || text.size() > kMaxPresetBytes)
+    if (!ApexUtil::ReadFileBytes(path, text) || text.size() > cap)
     {
         if (error) *error = "the file could not be read";
         return false;
@@ -332,16 +332,91 @@ const char* BuiltInLookText(const std::string& name)
 }
 
 // ============================================================================================== storing
-bool ValidLookFileName(const std::string& name)
+namespace {
+
+// One file name (no folder) that ends in one of exts (lower case, with the dot), without reserved or unsafe characters
+bool ValidFileName(const std::string& name, std::initializer_list<const char*> exts)
 {
-    if (name.size() < 5 || name.size() > 200 || name.find_first_of("\\/") != std::string::npos || !SafeRelative(name)) return false;
-    if (_stricmp(name.c_str() + name.size() - 4, ".ini") != 0) return false;
+    if (name.size() < 2 || name.size() > 200 || name.find_first_of("\\/") != std::string::npos || !SafeRelative(name)) return false;
+    const size_t dot = name.rfind('.');
+    if (dot == std::string::npos || !dot) return false;
+    if (std::none_of(exts.begin(), exts.end(), [&](const char* e) { return _stricmp(name.c_str() + dot, e) == 0; })) return false;
     std::string stem = name.substr(0, name.find('.'));
     for (char& c : stem) c = (char)toupper((unsigned char)c);
     static const char* const kReserved[] = { "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
                                              "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9" };
     for (const char* r : kReserved) if (stem == r) return false;
     return true;
+}
+
+// Stores bytes as dir\<fileName>: identical bytes already there reuse that file; a different file with the name gets a
+// numbered name ("Name-1.ext"); nothing is ever overwritten
+bool StoreIn(const std::wstring& dir, const std::string& fileName, const std::string& bytes, size_t cap, std::string& stored, std::wstring* created,
+             std::string* error, const char* failure)
+{
+    const size_t dot = fileName.rfind('.');
+    const std::string stem = fileName.substr(0, dot), ext = fileName.substr(dot);
+    for (unsigned n = 0; n < 10000; ++n)
+    {
+        const std::string chosen = n ? stem + "-" + std::to_string(n) + ext : fileName;
+        const std::wstring target = dir + ApexUtil::ToWide(chosen);
+        if (ApexUtil::FileExists(target))
+        {
+            std::string existing;
+            if (ReadBounded(target, existing, nullptr, cap) && existing == bytes) { stored = chosen; return true; }
+            continue;
+        }
+        const HANDLE file = CreateFileW(target.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE)
+        {
+            if (GetLastError() == ERROR_FILE_EXISTS) continue;
+            if (error) *error = failure;
+            return false;
+        }
+        DWORD written = 0;
+        const bool ok = WriteFile(file, bytes.data(), (DWORD)bytes.size(), &written, nullptr) && written == bytes.size();
+        CloseHandle(file);
+        if (!ok) { DeleteFileW(target.c_str()); if (error) *error = failure; return false; }
+        stored = chosen;
+        if (created) *created = target;
+        return true;
+    }
+    if (error) *error = failure;
+    return false;
+}
+
+bool IsCode(const std::string& rel) { return rel.rfind("Shaders/", 0) == 0; }
+std::wstring ShaderPath(const std::string& rel)
+{
+    std::wstring w = ApexUtil::ToWide(rel);
+    std::replace(w.begin(), w.end(), L'/', L'\\');
+    return PlayerShadersFolder() + w;
+}
+
+// The quoted names after #include and after "source =" (a texture annotation) in effect source text
+void QuotedRefs(const std::string& text, std::vector<std::string>& includes, std::vector<std::string>& sources)
+{
+    auto quoted = [&](size_t q, std::vector<std::string>& out) {
+        if (q == std::string::npos || text[q] != '"') return;
+        const size_t e = text.find('"', q + 1);
+        if (e != std::string::npos && e - q - 1 <= 200) out.push_back(text.substr(q + 1, e - q - 1));
+    };
+    for (size_t p = text.find("#include"); p != std::string::npos; p = text.find("#include", p + 8))
+        quoted(text.find_first_not_of(" \t", p + 8), includes);
+    for (size_t p = text.find("source"); p != std::string::npos; p = text.find("source", p + 6))
+    {
+        if (p && (isalnum((unsigned char)text[p - 1]) || text[p - 1] == '_')) continue;
+        size_t q = text.find_first_not_of(" \t\r\n", p + 6);
+        if (q == std::string::npos || text[q] != '=') continue;
+        quoted(text.find_first_not_of(" \t\r\n", q + 1), sources);
+    }
+}
+
+} // namespace
+
+bool ValidLookFileName(const std::string& name)
+{
+    return name.size() >= 5 && ValidFileName(name, { ".ini" });
 }
 
 bool StoreLook(const std::string& fileName, const std::string& bytes, std::string& stored, std::wstring* created, std::string* error)
@@ -351,33 +426,75 @@ bool StoreLook(const std::string& fileName, const std::string& bytes, std::strin
     if (!ValidLookFileName(fileName)) return fail("the look's file name is not valid");
     if (bytes.size() > kMaxPresetBytes) return fail("the file is too large for a preset");
     if (!EnsureLooksFolder()) return fail("the Looks folder could not be created");
-    const std::wstring dir = LooksFolder();
-    const std::string stem = fileName.substr(0, fileName.size() - 4), ext = fileName.substr(fileName.size() - 4);
-    for (unsigned n = 0; n < 10000; ++n)
+    return StoreIn(LooksFolder(), fileName, bytes, kMaxPresetBytes, stored, created, error, "the look could not be saved");
+}
+
+// ============================================================================================== the player's shader files
+std::wstring PlayerShadersFolder()
+{
+    const std::wstring& apex = ApexPaths::ApexDirectory();
+    return apex.empty() ? std::wstring() : apex + L"Shaders\\";
+}
+
+bool ValidShaderFileName(const std::string& rel)
+{
+    if (IsCode(rel)) return ValidFileName(rel.substr(8), { ".fx", ".fxh" });
+    return rel.rfind("Textures/", 0) == 0 && ValidFileName(rel.substr(9), { ".png", ".jpg", ".jpeg", ".bmp", ".dds" });
+}
+
+bool ReadShaderFile(const std::string& rel, std::string& bytes)
+{
+    return ValidShaderFileName(rel) && !PlayerShadersFolder().empty() &&
+           ReadBounded(ShaderPath(rel), bytes, nullptr, IsCode(rel) ? kMaxSharedFxBytes : kMaxSharedTextureBytes);
+}
+
+std::vector<std::string> PlayerShaderFiles(const std::vector<std::string>& fxFiles)
+{
+    std::vector<std::string> out, queue;
+    std::set<std::string> seen;
+    for (const std::string& f : fxFiles) queue.push_back("Shaders/" + f);
+    for (size_t next = 0; next < queue.size() && out.size() < kMaxSharedShaderFiles && next < 4 * kMaxSharedShaderFiles; ++next)
     {
-        const std::string chosen = n ? stem + "-" + std::to_string(n) + ext : fileName;
-        const std::wstring target = dir + ApexUtil::ToWide(chosen);
-        if (ApexUtil::FileExists(target))
+        const std::string rel = queue[next];
+        std::string key = rel;
+        for (char& c : key) c = (char)tolower((unsigned char)c);
+        if (!seen.insert(key).second || !ValidShaderFileName(rel)) continue;
+        if (!IsCode(rel)) // a texture: only whether it is there and within its cap
         {
-            std::string existing;
-            if (ReadBounded(target, existing, nullptr) && existing == bytes) { stored = chosen; return true; }
+            WIN32_FILE_ATTRIBUTE_DATA a{};
+            if (GetFileAttributesExW(ShaderPath(rel).c_str(), GetFileExInfoStandard, &a) && !(a.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+                !a.nFileSizeHigh && a.nFileSizeLow <= kMaxSharedTextureBytes)
+                out.push_back(rel);
             continue;
         }
-        const HANDLE file = CreateFileW(target.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (file == INVALID_HANDLE_VALUE)
-        {
-            if (GetLastError() == ERROR_FILE_EXISTS) continue;
-            return fail("the look could not be saved");
-        }
-        DWORD written = 0;
-        const bool ok = WriteFile(file, bytes.data(), (DWORD)bytes.size(), &written, nullptr) && written == bytes.size();
-        CloseHandle(file);
-        if (!ok) { DeleteFileW(target.c_str()); return fail("the look could not be saved"); }
-        stored = chosen;
-        if (created) *created = target;
-        return true;
+        std::string text;
+        if (!ReadShaderFile(rel, text)) continue; // not the player's (a pack's, or missing)
+        out.push_back(rel);
+        std::vector<std::string> includes, sources;
+        QuotedRefs(text, includes, sources);
+        for (const std::string& i : includes) queue.push_back("Shaders/" + i); // names with a folder fail ValidShaderFileName
+        for (const std::string& t : sources) queue.push_back("Textures/" + t);
     }
-    return fail("the look could not be saved");
+    return out;
+}
+
+bool StoreShaderFile(const std::string& rel, const std::string& bytes, std::string& stored, std::wstring* created, std::string* error)
+{
+    auto fail = [&](const char* why) { if (error) *error = why; return false; };
+    if (created) created->clear();
+    if (!ValidShaderFileName(rel)) return fail("the shader file name is not valid");
+    if (bytes.size() > (IsCode(rel) ? kMaxSharedFxBytes : kMaxSharedTextureBytes)) return fail("the shader file is too large");
+    const std::wstring root = PlayerShadersFolder();
+    if (root.empty() || !ApexPaths::EnsureApexDirectory()) return fail("the Shaders folder could not be created");
+    for (const std::wstring& d : { root, root + L"Shaders\\", root + L"Textures\\" })
+        if (!CreateDirectoryW(d.c_str(), nullptr) && GetLastError() != ERROR_ALREADY_EXISTS) return fail("the Shaders folder could not be created");
+    const size_t slash = rel.find('/');
+    std::string name;
+    if (!StoreIn(root + ApexUtil::ToWide(rel.substr(0, slash)) + L"\\", rel.substr(slash + 1), bytes, IsCode(rel) ? kMaxSharedFxBytes : kMaxSharedTextureBytes, name,
+                 created, error, "the shader file could not be saved"))
+        return false;
+    stored = rel.substr(0, slash + 1) + name;
+    return true;
 }
 
 } // namespace Looks

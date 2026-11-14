@@ -27,6 +27,7 @@ void CaptureProfileState(toml::table& out) {
     out=toml::parse("[qol.picture]\nenabled=true\n[qol.picture.filters]\nlut=true\nlut_file='An unusually long cinematic color treatment.cube'\n[patches.AmbientOcclusion]\nenabled=true\n[patches.NightTerrainRelight]\nenabled=true\n[patches.DepthBlur]\nenabled=true\n[patches.EdgeSmoothing]\nenabled=true\n[patches.ResourceLookupCache]\nenabled=true\n[shortcuts]\nmenu_key='F11'\n");
 }
 }
+namespace Looks {void OfferCard() {} void OfferPresetPacks(const std::string&,const std::vector<std::string>&) {}}
 using ApexUi::IconId;
 using ApexUi::ButtonKind;
 using VioletTheme::Col;

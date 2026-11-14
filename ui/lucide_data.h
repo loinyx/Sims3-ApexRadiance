@@ -804,6 +804,20 @@ inline constexpr Element kSettings2[] = {
 };
 // plus.svg (Lucide, ISC)
 inline constexpr Element kPlus[] = {{Kind::Path, "M5 12h14", {}, false}, {Kind::Path, "M12 5v14", {}, false}};
+// package.svg (Lucide, ISC)
+inline constexpr Element kPackage[] = {
+    {Kind::Path, "M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z", {}, false},
+    {Kind::Path, "M12 22V12", {}, false},
+    {Kind::Path, "M3.29 7 12 12 20.71 7", {}, false},
+    {Kind::Path, "m7.5 4.27 9 5.15", {}, false},
+};
+// library.svg (Lucide, ISC)
+inline constexpr Element kLibrary[] = {
+    {Kind::Path, "m16 6 4 14", {}, false},
+    {Kind::Path, "M12 6v14", {}, false},
+    {Kind::Path, "M8 8v12", {}, false},
+    {Kind::Path, "M4 4v16", {}, false},
+};
 
 inline constexpr IconData kIcons[] = {
     {"activity", kActivity, static_cast<int>(sizeof(kActivity) / sizeof(kActivity[0]))},
@@ -929,6 +943,8 @@ inline constexpr IconData kIcons[] = {
     {"swatch-book", kSwatchBook, static_cast<int>(sizeof(kSwatchBook) / sizeof(kSwatchBook[0]))},
     {"settings-2", kSettings2, static_cast<int>(sizeof(kSettings2) / sizeof(kSettings2[0]))},
     {"plus", kPlus, static_cast<int>(sizeof(kPlus) / sizeof(kPlus[0]))},
+    {"package", kPackage, static_cast<int>(sizeof(kPackage) / sizeof(kPackage[0]))},
+    {"library", kLibrary, static_cast<int>(sizeof(kLibrary) / sizeof(kLibrary[0]))},
 };
 
 } // namespace ApexUi::LucideData

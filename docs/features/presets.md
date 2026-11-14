@@ -18,7 +18,7 @@ A preset referencing a local LUT cannot reproduce its look on another computer u
 
 ## How Apex Radiance solves it
 
-Export packages the selected preset and its LUT in one ZIP when Color is included and a LUT is selected; a ReShade look from a file (Color > Shaders) goes in the same way, as `Looks/<filename>`. Otherwise, the preset can be shared as TOML. Import reads the original Apex ZIP directly; manual extraction is unnecessary. A conflicting LUT or look filename is resolved without overwriting a different existing file, and the imported preset references the chosen local filename.
+Export packages the selected preset and its LUT in one ZIP when Color is included and a LUT is selected; a ReShade look from a file (the Shaders part, Image > Shaders) goes in the same way, as `Looks/<filename>`, with the player's own .fx files the look uses as `Shaders/...` when *Include my own .fx files* is ticked; the preset names the shader packs the look needs, and importing it offers to download those that are missing. Otherwise, the preset can be shared as TOML. Import reads the original Apex ZIP directly; manual extraction is unnecessary. A conflicting LUT or look filename is resolved without overwriting a different existing file, and the imported preset references the chosen local filename.
 
 ## Settings
 
@@ -59,7 +59,7 @@ Import accepts TOML or the stored ZIP format exported by Apex, not arbitrary com
 
 ## Technical reference
 
-Packages contain `profile.toml`, at most one `LUTs/<filename>` entry and at most one `Looks/<filename>` entry, each the file its profile names. Import checks entry names, sizes, duplicate entries and CRC before writing. Preset writes use exclusive temporary files followed by replacement. Imported LUT and look creation is exclusive, and a failed import rolls back the files it created.
+Packages contain `profile.toml`, at most one `LUTs/<filename>` entry, at most one `Looks/<filename>` entry, each the file its profile names, and up to 64 `Shaders/Shaders/<name>.fx|.fxh` and `Shaders/Textures/<image>` entries when the profile has a look (72 entries at most). The Shaders part is bit 10; a 3.3.0 development preset whose Color part carried `[patches.Looks]` (no `packs` key) applies it with Color or Shaders. Import checks entry names, sizes, duplicate entries and CRC before writing. Preset writes use exclusive temporary files followed by replacement. Imported LUT, look and shader file creation is exclusive, and a failed import rolls back the files it created.
 
 ## Rejected approaches
 

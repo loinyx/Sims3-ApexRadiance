@@ -139,6 +139,8 @@ enum class IconId : int {
     SwatchBook, // swatch-book
     Settings2, // settings-2
     Plus, // plus
+    Package, // package
+    Library, // library
     Count,
     None = Count, // "no icon" for widgets that take an optional one
 };

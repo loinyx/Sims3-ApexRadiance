@@ -2585,11 +2585,7 @@ No shader of this look can run here	tr_image.cpp:kEntries	Nenhum shader deste vi
 Choose a look to see its shaders	tr_image.cpp:kEntries	Escolha um visual para ver os shaders dele	Elige un estilo para ver sus shaders	Choisissez un rendu pour voir ses shaders	
 {} can't run here	tr_image.cpp:kEntries	{} não podem rodar aqui	{} no pueden ejecutarse aquí	{} ne peuvent pas s'exécuter ici	{}
 No look chosen	tr_image.cpp:kEntries	Nenhum visual escolhido	Ningún estilo elegido	Aucun rendu choisi	
-{} · can't be read	tr_image.cpp:kEntries	{} · não pode ser lido	{} · no se puede leer	{} · illisible	{}
-{} · 1 shader	tr_image.cpp:kEntries	{} · 1 shader	{} · 1 shader	{} · 1 shader	{}
-{} · {} shaders	tr_image.cpp:kEntries	{} · {} shaders	{} · {} shaders	{} · {} shaders	{} {}
 Reload	tr_image.cpp:kEntries	Recarregar	Recargar	Recharger	
-Shader library	tr_image.cpp:kEntries	Biblioteca de shaders	Biblioteca de shaders	Bibliothèque de shaders	
 Every shader you can add to a look	tr_image.cpp:kEntries	Todos os shaders que você pode adicionar a um visual	Todos los shaders que puedes añadir a un estilo	Tous les shaders que vous pouvez ajouter à un rendu	
 1 shader	tr_image.cpp:kEntries	1 shader	1 shader	1 shader	
 {} shaders	tr_image.cpp:kEntries	{} shaders	{} shaders	{} shaders	{}
@@ -2649,6 +2645,15 @@ Download 1 pack	tr_image.cpp:kEntries	Baixar 1 pacote	Descargar 1 paquete	Télé
 Download {} packs	tr_image.cpp:kEntries	Baixar {} pacotes	Descargar {} paquetes	Télécharger {} packs	{}
 Imported: {}	tr_image.cpp:kEntries	Importado: {}	Importado: {}	Importé : {}	{}
 This look uses {} shaders from {}, which you don't have yet	tr_image.cpp:kEntries	Este visual usa {} shaders de {}, que você ainda não tem	Este estilo usa {} shaders de {}, que aún no tienes	Ce rendu utilise {} shaders de {}, que vous n'avez pas encore	{} {}
+ReShade looks and shaders on the game's picture	tr_image.cpp:kEntries	Visuais e shaders do ReShade na imagem do jogo	Estilos y shaders de ReShade en la imagen del juego	Rendus et shaders ReShade sur l'image du jeu	
+Library	tr_image.cpp:kEntries	Biblioteca	Biblioteca	Bibliothèque	
+Shaders turned on	tr_image.cpp:kEntries	Shaders ligados	Shaders activados	Shaders activés	
+Shaders turned off	tr_image.cpp:kEntries	Shaders desligados	Shaders desactivados	Shaders désactivés	
+This look can't be read	tr_image.cpp:kEntries	Não foi possível ler este visual	No se puede leer este estilo	Ce rendu ne peut pas être lu	
+Your library	tr_image.cpp:kEntries	Sua biblioteca	Tu biblioteca	Votre bibliothèque	
+{} shaders from {} sources	tr_image.cpp:kEntries	{} shaders de {} fontes	{} shaders de {} fuentes	{} shaders de {} sources	{} {}
+This preset uses shaders from {}, which you don't have yet	tr_image.cpp:kEntries	Este preset usa shaders de {}, que você ainda não tem	Este preajuste usa shaders de {}, que aún no tienes	Ce préréglage utilise des shaders de {}, que vous n'avez pas encore	{}
+Include my own .fx files	tr_image.cpp:kEntries	Incluir meus próprios arquivos .fx	Incluir mis propios archivos .fx	Inclure mes propres fichiers .fx	
 {} ({}): downloading {}…	tr_image.cpp:kEntries	{} ({}): baixando {}…	{} ({}): descargando {}…	{} ({}) : téléchargement de {}…	{} {} {}
 {} ({}): in {}, not downloaded	tr_image.cpp:kEntries	{} ({}): está em {}, ainda não baixado	{} ({}): en {}, no descargado	{} ({}) : dans {}, non téléchargé	{} {} {}
 Get {}	tr_image.cpp:kEntries	Baixar {}	Descargar {}	Obtenir {}	{}

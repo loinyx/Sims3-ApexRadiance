@@ -92,14 +92,14 @@ std::atomic<bool> g_oldStandalone{false}; // an older S3SSApex.asi is loaded too
 std::string g_oldStandaloneModule;        // under g_detailLock
 
 // Sidebar pages and the tabs of each page. The selected page and tabs are kept while the game runs (not saved).
-enum Page : int { PageOverview, PageLighting, PageWaterSnow, PageColor, PageAmbientOcclusion, PageDepthBlur, PageEdgeSmoothing, PagePerformance, PageDeveloper, PageSettings, PageReport, PageConflicts, PageBanding, PageLotStreaming, PageProfiles, PageDisplay, PageCapture };
+enum Page : int { PageOverview, PageLighting, PageWaterSnow, PageColor, PageAmbientOcclusion, PageDepthBlur, PageEdgeSmoothing, PagePerformance, PageDeveloper, PageSettings, PageReport, PageConflicts, PageBanding, PageLotStreaming, PageProfiles, PageDisplay, PageCapture, PageShaders };
 enum LightingTab : int { LightingLamps, LightingOutside, LightingInside, LightingFixes };
 enum SettingsTab : int { SettingsMenu, SettingsShortcuts, SettingsProfiles, SettingsCompatibility, SettingsAbout };
 int g_page = PageOverview;
 int g_lightingTab = LightingLamps;
 int g_colorTab = Picture::TabOverview;
-// The Color page's Looks tab: a g_colorTab value after Picture's own tabs (Go and the overview rows keep working)
-constexpr int kColorTabLooks = Picture::TabCount;
+enum ShadersTab : int { ShadersLook, ShadersLibrary };
+int g_shadersTab = ShadersLook;
 int g_settingsTab = SettingsMenu;
 enum CaptureTab : int { CaptureShots, CaptureVideo };
 int g_captureTab = CaptureShots;
@@ -448,7 +448,7 @@ void RecommendS3SSCard() {
 bool g_menuGameAaOn = false;
 
 constexpr const char* kOverviewMainPatches[] = {
-    kNightLighting, "AmbientOcclusion", "SceneDither", "DepthBlur", "EdgeSmoothing",
+    kNightLighting, "AmbientOcclusion", "SceneDither", "DepthBlur", "EdgeSmoothing", Looks::kPatchName,
 };
 bool Comparing(); // the Compare shortcut has the effects off (defined with ToggleCompare)
 void ToggleCompare();
@@ -606,12 +606,26 @@ void LotSet(bool on) { SetGroup(kOverviewLotPatches, OverviewRestore::Scope::Lot
 bool LotSwitchable() { return GroupSwitchable(kOverviewLotPatches); }
 std::string LotDetail() { return GroupCountText(kOverviewLotPatches); }
 std::string DisplayDetail() { return Screen::Summary(); }
+bool ShadersOn() { const ApexPatch* p = Find(Looks::kPatchName); return p && p->IsEnabled(); }
+void ShadersSet(bool on) { if (ApexPatch* p = Find(Looks::kPatchName); p && Switchable(p)) SetPatch(p, on); }
+bool ShadersSwitchable() { return Switchable(Find(Looks::kPatchName)); }
+// The Shaders row: the look's name and its cost while on ("Off" is the row's phrase)
+std::string ShadersLookDetail() {
+    const ApexPatch* patch = Find(Looks::kPatchName);
+    if (!patch || !patch->IsEnabled()) return {};
+    std::string s = Looks::LookName();
+    if (s.empty()) return I18n::Tr("No look chosen");
+    char buf[24];
+    if (CostChip(patch->GpuCostMs(), buf)) s += " \xC2\xB7 " + std::string(buf);
+    return s;
+}
 
 const OverviewTile* OverviewTiles(int& count) {
     static const OverviewTile kTiles[] = {
         {"Lighting", IconId::MoonStar, "Lighting", "Lamps light up your neighborhood at night", PageLighting, &g_lightingTab, LightingLamps, LightsOn, LightsSet, LightsSwitchable, LightsDetail, true},
         {"WaterSnow", IconId::WavesHorizontal, "Water & Snow", "Ponds mirror their shore", PageWaterSnow, nullptr, 0, ShoreOn, SetShore, WaterSwitchable, WaterDetail, true},
         {"Color", IconId::Palette, "Color", "Adjustments, filters and LUTs", PageColor, nullptr, 0, ColorOn, ColorSet, AlwaysSwitchable, ColorDetail, true},
+        {"Shaders", IconId::SwatchBook, "Shaders", "Off", PageShaders, &g_shadersTab, ShadersLook, ShadersOn, ShadersSet, ShadersSwitchable, ShadersLookDetail, true},
         {"Banding", IconId::Blend, "Banding Fix", "No color steps in light and shadows", PageBanding, nullptr, 0, BandingOn, BandingSet, BandingSwitchable, BandingDetail, true},
         {"Occlusion", IconId::Contrast, "Ambient Occlusion", "Soft shade where things meet", PageAmbientOcclusion, nullptr, 0, OcclusionOn, OcclusionSet, OcclusionSwitchable, OcclusionDetail, true},
         {"Blur", IconId::Aperture, "Depth Blur", "Softly blurs the distant background", PageDepthBlur, nullptr, 0, BlurOn, BlurSet, BlurSwitchable, BlurDetail, true},
@@ -1211,20 +1225,53 @@ void ColorOverview() {
     }
     ApexUi::EndCard();if(changed) Picture::Get().SetParams(p,true);
 }
-// Image > Color > Looks: the ReShade look card (hold the eye to see the game without the look), a note while a LUT is
-// also on, then the Shaders card
-void LooksContent() {
+void ColorPage() {
+    ApexUi::PageTitle("Color", "How the game's picture looks");
+    static const char* const kTabs[] = {"Overview","Basic", "Tones", "Color", "Detail", "Filters", "LUTs"};
+    if (g_colorTab < 0 || g_colorTab >= Picture::TabCount) g_colorTab = Picture::TabOverview;
+    int selected=g_colorTab==Picture::TabOverview ? 0 : g_colorTab==Picture::TabLuts ? 6 : g_colorTab+1;
+    ApexUi::TabBar("##ColorTabs", &selected, kTabs, IM_COUNTOF(kTabs));
+    g_colorTab=selected==0 ? Picture::TabOverview : selected==6 ? Picture::TabLuts : selected-1;
+    if(g_colorTab==Picture::TabOverview) {ColorOverview();return;}
+    if(g_colorTab==Picture::TabLuts) {Picture::Get().RenderFiltersUI(true);return;}
+    ColorGroupHeader(g_colorTab);
+    if (g_colorTab == Picture::TabFilters) Picture::Get().RenderFiltersUI();
+}
+
+// ---- Image > Shaders ----
+
+// Tab Look: the look card (titled with the look; hold the eye to see the game without it), a note while a LUT is also
+// on, then the import note and the shaders of the look. The area's switch is beside the page title; in the search
+// results the card header is that switch, as "Shaders".
+void ShadersLookContent() {
     ApexPatch* patch = Find(Looks::kPatchName);
     if (!patch) return;
-    const std::string status = Looks::StatusLine();
+    const bool search = ApexUi::FilterActive();
     ApexUi::HeaderExtra extra;
-    extra.holdIcon = IconId::Eye;
-    extra.holdTooltip = "Hold to see the game without the look";
-    extra.enabled = patch->IsEnabled();
-    FeatureCardWith(Looks::kPatchName, IconId::SwatchBook, "ReShade look", status.c_str(), [](ApexPatch* p) { p->RenderCustomUI(); }, true, false, &extra);
+    ImGui::PushID(Looks::kPatchName);
+    if (ApexUi::BeginCard("##Card")) {
+        bool on = patch->IsEnabled();
+        char chip[24];
+        const std::string name = Looks::LookName();
+        const std::string status = Looks::StatusLine(on ? CostChip(patch->GpuCostMs(), chip) : nullptr);
+        extra.holdIcon = IconId::Eye;
+        extra.holdTooltip = "Hold to see the game without the look";
+        extra.enabled = on;
+        if (search) {
+            if (ApexUi::CardHeader(IconId::WandSparkles, "Shaders", "ReShade looks and shaders on the game's picture", Description(patch), &on, Switchable(patch)))
+                SetPatch(patch, on);
+        } else {
+            ApexUi::CardHeader(IconId::WandSparkles, name.empty() ? "ReShade look" : name.c_str(), status.c_str(), Description(patch), nullptr, true, &extra);
+        }
+        if (patch->IsEnabled() || HasStateNotes(patch)) ApexUi::CardDivider();
+        StateNotes(patch);
+        if (patch->IsEnabled() || search) patch->RenderCustomUI();
+    }
+    ApexUi::EndCard();
+    ImGui::PopID();
     if (extra.held) Looks::HoldBypass();
     PictureParams pp = Picture::Get().GetParams();
-    if (patch->IsEnabled() && pp.enabled && pp.lut && !pp.lutFile.empty() && !ApexUi::FilterActive()) {
+    if (patch->IsEnabled() && pp.enabled && pp.lut && !pp.lutFile.empty() && !search) {
         ApexUi::IconNote(IconId::Info, "A LUT is also on; both change color, so the picture may look too strong");
         const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
         if (ApexUi::TextButton("Turn off the LUT")) {
@@ -1234,21 +1281,36 @@ void LooksContent() {
         }
         ApexUi::Gap(ApexUi::kSpace3);
     }
-    if (patch->IsEnabled() || ApexUi::FilterActive()) Looks::ShadersCard();
+    if (patch->IsEnabled() || search) Looks::ShadersCard();
 }
 
-void ColorPage() {
-    ApexUi::PageTitle("Color", "How the game's picture looks");
-    static const char* const kTabs[] = {"Overview","Basic", "Tones", "Color", "Detail", "Filters", "LUTs", "Shaders"};
-    if (g_colorTab < 0 || g_colorTab > kColorTabLooks) g_colorTab = Picture::TabOverview;
-    int selected=g_colorTab==kColorTabLooks ? 7 : g_colorTab==Picture::TabOverview ? 0 : g_colorTab==Picture::TabLuts ? 6 : g_colorTab+1;
-    ApexUi::TabBar("##ColorTabs", &selected, kTabs, IM_COUNTOF(kTabs));
-    g_colorTab=selected==7 ? kColorTabLooks : selected==0 ? Picture::TabOverview : selected==6 ? Picture::TabLuts : selected-1;
-    if (g_colorTab == kColorTabLooks) { LooksContent(); return; }
-    if(g_colorTab==Picture::TabOverview) {ColorOverview();return;}
-    if(g_colorTab==Picture::TabLuts) {Picture::Get().RenderFiltersUI(true);return;}
-    ColorGroupHeader(g_colorTab);
-    if (g_colorTab == Picture::TabFilters) Picture::Get().RenderFiltersUI();
+// Tab Library: Your library (where shaders come from), then Get shader packs
+void ShadersLibraryContent() { Looks::LibraryCards(); }
+
+void ShadersPage() {
+    ApexPatch* patch = Find(Looks::kPatchName);
+    const float titleTop = ImGui::GetCursorPosY();
+    const float titleLine = ImGui::GetFontSize() * ApexUi::kPageTitleScale;
+    ApexUi::PageTitle("Shaders", "ReShade looks and shaders on the game's picture");
+    if (patch) { // the area's switch at the right of the title line
+        const float after = ImGui::GetCursorPosY();
+        const ImVec2 sw = ApexUi::ToggleSwitchSize();
+        ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - sw.x, titleTop + std::max(0.0f, (titleLine - sw.y) * 0.5f)));
+        bool on = patch->IsEnabled();
+        ImGui::BeginDisabled(!Switchable(patch));
+        if (ApexUi::ToggleSwitch("##ShadersOn", &on)) {
+            SetPatch(patch, on);
+            ApexUi::ReportChange(patch->IsEnabled() ? "Shaders turned on" : "Shaders turned off");
+        }
+        ImGui::EndDisabled();
+        ApexUi::Tooltip(Description(patch));
+        ImGui::SetCursorPosY(after);
+    }
+    if (Looks::WantsLibrary()) g_shadersTab = ShadersLibrary; // Get shader packs, Get <pack>: the list is on Library
+    static const char* const kTabs[] = {"Look", "Library"};
+    ApexUi::TabBar("##ShadersTabs", &g_shadersTab, kTabs, IM_COUNTOF(kTabs));
+    if (g_shadersTab == ShadersLibrary) ShadersLibraryContent();
+    else ShadersLookContent();
 }
 
 // Depth Blur and Edge Smoothing both need the game's own (multisampled) Edge Smoothing off
@@ -2485,6 +2547,8 @@ struct ProfilesState {
     unsigned available = 0;
     ProfileItem selected;
     int exportSource = 0;
+    bool withMyShaders = false; // Export: "Include my own .fx files"
+    int myShaderFiles = -1;     // the player's shader files the export source's look uses (-1 = not counted yet)
 };
 ProfilesState g_profiles;
 struct ProfilePickerResult { bool save=false; std::wstring path; HRESULT status=S_OK; };
@@ -2574,8 +2638,8 @@ std::string ProfilePartsText(unsigned parts) {
 void ProfilePartChecks(const char* id, unsigned* parts, unsigned available) {
     ImGui::PushID(id);
     const float u = ApexUi::Unit();
-    static constexpr int order[] = {0, 1, 7, 2, 3, 5, 6, 9, 8};
-    static constexpr IconId icons[] = {IconId::MoonStar, IconId::Palette, IconId::Contrast, IconId::Aperture,
+    static constexpr int order[] = {0, 1, 10, 7, 2, 3, 5, 6, 9, 8};
+    static constexpr IconId icons[] = {IconId::MoonStar, IconId::Palette, IconId::SwatchBook, IconId::Contrast, IconId::Aperture,
                                       IconId::Spline, IconId::Gauge, IconId::Keyboard, IconId::Camera, IconId::Wrench};
     float longest = 0.0f;
     for (int i : order) if (available & (1u << i))
@@ -2752,7 +2816,7 @@ void StartPresetDialog(ProfilesState::Dialog dialog, const ProfileItem* item=nul
     auto& s=g_profiles;
     s.dialog=dialog; s.openDialog=true; s.message.clear(); s.confirmReplace.clear();
     s.applyAfterImport=false; s.importPath.clear(); s.imported={};
-    s.exportSource=0;
+    s.exportSource=0; s.withMyShaders=false; s.myShaderFiles=-1;
     if(item) {
         s.selected=*item;
         for(size_t i=0;i<s.list.size();++i) if(s.list[i].Key()==item->Key()) s.exportSource=int(i)+1;
@@ -2784,12 +2848,13 @@ void PresetDialog() {
             meta.insert("profile",ApexConfig::SanitizeProfileName(s.name)); meta.insert("icon",ApexUi::IconName(s.icon));
             meta.insert("written_by",APEX_PRODUCT_NAME " " APEX_VERSION_STRING);
             state.insert_or_assign("meta",std::move(meta));
-            const std::wstring extension=ApexConfig::ProfileUsesPackage(state)?L".zip":L".toml";
+            const bool withMyShaders=s.withMyShaders && (s.saveParts&ApexConfig::kPartShaders);
+            const std::wstring extension=ApexConfig::ProfileUsesPackage(state,withMyShaders)?L".zip":L".toml";
             const auto& path=picked->path;
             // Never change the destination after Windows has confirmed replacement.
             const bool matchingExtension=path.size()>=extension.size() &&
                 _wcsicmp(path.substr(path.size()-extension.size()).c_str(),extension.c_str())==0;
-            if(matchingExtension && ApexConfig::ExportProfileFile(path,state,&error)) {
+            if(matchingExtension && ApexConfig::ExportProfileFile(path,state,&error,withMyShaders)) {
                 ProfileMessage(I18n::Tr("Preset exported"),false); s.dialog=ProfilesState::None;
             } else {LOG_ERROR("[Profiles] Export: "+error); ProfileMessage(I18n::Tr("Could not export the preset. Check the selected LUT and folder access."),true);}
         } else if(ApexConfig::ReadProfileImport(picked->path,s.imported,&error)) {
@@ -2837,7 +2902,7 @@ void PresetDialog() {
                         const bool ok=!item || (item->builtin>=0 ? ApexPresets::Read(item->builtin,state,&error) : ApexConfig::ReadProfile(item->name,state,&error));
                         if(ok) {
                             if(!item) ApexConfig::CaptureProfileState(state);
-                            s.exportSource=chosen; s.exportState=std::move(state);
+                            s.exportSource=chosen; s.exportState=std::move(state); s.myShaderFiles=-1;
                             s.available=ApexConfig::ProfilePartsOf(s.exportState);
                             if(!kDevToolsBuild) s.available&=~ApexConfig::kPartDeveloper;
                             s.saveParts=s.available & ~(ApexConfig::kPartsOptIn|ApexConfig::kPartDeveloper);
@@ -2866,7 +2931,11 @@ void PresetDialog() {
                     ApexUi::MutedText("Shortcuts are optional and start unchecked.");
                     if(exporting) {
                         auto state=s.exportState; ApexConfig::KeepProfileParts(state,s.saveParts);
-                        ApexUi::IconNote(IconId::Info,!ApexConfig::ProfileUsesPackage(state)?"This preset is exported as a TOML file.":ApexConfig::ProfileUsesLut(state)&&!ApexConfig::ProfileUsesLook(state)?"The preset and its LUT are exported together as one ZIP file.":"The preset and its files are exported together as one ZIP file.");
+                        if(s.myShaderFiles<0) s.myShaderFiles=int(ApexConfig::ProfileShaderFiles(s.exportState).size());
+                        // the player's own .fx files go in only when asked (shown when the look uses some)
+                        if(s.myShaderFiles>0 && (s.saveParts&ApexConfig::kPartShaders)) ApexUi::Checkbox(I18n::Tr("Include my own .fx files"),&s.withMyShaders);
+                        const bool withMyShaders=s.withMyShaders && s.myShaderFiles>0 && (s.saveParts&ApexConfig::kPartShaders);
+                        ApexUi::IconNote(IconId::Info,!ApexConfig::ProfileUsesPackage(state,withMyShaders)?"This preset is exported as a TOML file.":ApexConfig::ProfileUsesLut(state)&&!ApexConfig::ProfileUsesLook(state)?"The preset and its LUT are exported together as one ZIP file.":"The preset and its files are exported together as one ZIP file.");
                     }
                     if(importing) ApexUi::Checkbox(I18n::Tr("Apply after import"),&s.applyAfterImport);
                 }
@@ -2883,11 +2952,13 @@ void PresetDialog() {
                 const bool valid=s.saveParts && !Loading() && (applying || (!name.empty() && (!importing || (!s.importPath.empty() && !ApexConfig::ProfileExists(name)))));
                 ImGui::BeginDisabled(!valid);
                 if(ApexUi::IconTextButton(action,exporting?IconId::ExternalLink:importing||applying?IconId::Download:IconId::Save,nullptr,ButtonKind::Primary)) {
-                    if(exporting) {auto state=s.exportState;ApexConfig::KeepProfileParts(state,s.saveParts);PickProfileFile(true,ApexConfig::ProfileUsesPackage(state),s.name);}
+                    if(exporting) {auto state=s.exportState;ApexConfig::KeepProfileParts(state,s.saveParts);PickProfileFile(true,ApexConfig::ProfileUsesPackage(state,s.withMyShaders && (s.saveParts&ApexConfig::kPartShaders)),s.name);}
                     else if(applying) {LoadProfileItem(s.selected,s.saveParts);s.dialog=ProfilesState::None;ImGui::CloseCurrentPopup();}
                     else if(importing) {
                         std::string error;
                         if(ApexConfig::SaveImportedProfile(name,s.imported,s.saveParts,ApexUi::IconName(s.icon),&error)) {
+                            // packs the preset's look needs that are not here: the same offer as after a look import
+                            if(s.saveParts&ApexConfig::kPartShaders) Looks::OfferPresetPacks(name,ApexConfig::ProfilePacks(s.imported.state));
                             if(s.applyAfterImport) LoadProfileNow(name,s.saveParts);
                             else ProfileMessage(I18n::Trf("Saved \"{}\"",name),false);
                             s.listDirty=true; s.dialog=ProfilesState::None; ImGui::CloseCurrentPopup();
@@ -3176,6 +3247,7 @@ void ProfilesTab() {
         s.matchedAt=-1.0;
     }
     UpdatePresetMatches(s);
+    Looks::OfferCard(); // after importing a preset whose look needs packs that are not here: Download or Not now
     ImGui::PushID("Profiles");
     {
         const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
@@ -3492,7 +3564,8 @@ const SearchPart* SearchParts(int& count) {
         {"Color", "Tones", PageColor, &g_colorTab, Picture::TabTones, [] { PictureRows(Picture::TabTones); }},
         {"Color", "Color", PageColor, &g_colorTab, Picture::TabColor, [] { PictureRows(Picture::TabColor); }},
         {"Color", "Detail", PageColor, &g_colorTab, Picture::TabDetail, [] { PictureRows(Picture::TabDetail); }},
-        {"Color", "Shaders", PageColor, &g_colorTab, kColorTabLooks, LooksContent},
+        {"Shaders", "Look", PageShaders, &g_shadersTab, ShadersLook, ShadersLookContent},
+        {"Shaders", "Library", PageShaders, &g_shadersTab, ShadersLibrary, ShadersLibraryContent},
         {"Ambient Occlusion", nullptr, PageAmbientOcclusion, nullptr, 0, AmbientOcclusionContent},
         {"Depth Blur", nullptr, PageDepthBlur, nullptr, 0, DepthBlurContent},
         {"Edge Smoothing", nullptr, PageEdgeSmoothing, nullptr, 0, AntiAliasingContent},
@@ -3706,6 +3779,7 @@ void Sidebar(bool collapsed) {
         {PageLighting, IconId::MoonStar, "Lighting", "WORLD"},
         {PageWaterSnow, IconId::WavesHorizontal, "Water & Snow", nullptr},
         {PageColor, IconId::Palette, "Color", "IMAGE"},
+        {PageShaders, IconId::SwatchBook, "Shaders", nullptr},
         {PageBanding, IconId::Blend, "Banding Fix", nullptr},
         {PageAmbientOcclusion, IconId::Contrast, "Ambient Occlusion", nullptr},
         {PageDepthBlur, IconId::Aperture, "Depth Blur", nullptr},
@@ -3936,6 +4010,7 @@ void DrawPage() {
     case PageLighting: LightingPage(); break;
     case PageWaterSnow: WaterSnowPage(); break;
     case PageColor: ColorPage(); break;
+    case PageShaders: ShadersPage(); break;
     case PageAmbientOcclusion: AmbientOcclusionPage(); break;
     case PageBanding: BandingPage(); break;
     case PageDepthBlur: DepthBlurPage(); break;
