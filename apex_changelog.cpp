@@ -6,6 +6,14 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k323Improved[] = {
+    "Display: Turn off G-SYNC removed, and the NVIDIA setting it changed put back",
+    nullptr};
+
+constexpr const char* k323Fixed[] = {
+    "RTX Remix bridge: no more solid blue frames on loading and save screens",
+    nullptr};
+
 constexpr const char* k322Fixed[] = {
     "RTX Remix bridge: no longer freezes at start with Turbo Simulation Engine installed",
     nullptr};
@@ -608,6 +616,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"3.2.3", "2026-11-14", nullptr, k323Improved, k323Fixed},
     {"3.2.2", "2026-11-13", nullptr, nullptr, k322Fixed},
     {"3.2.1", "2026-11-13", nullptr, nullptr, k321Fixed},
     {"3.2.0", "2026-11-13", nullptr, k320Improved, k320Fixed, "Instant lamp light arrives much sooner, the game runs faster, and no black lot ground on the bridge"},
