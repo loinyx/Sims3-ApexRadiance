@@ -22,6 +22,11 @@ The feature is described in [features/screenshots-and-video.md](../features/scre
 
 ## In-game test plan
 
+The in-game runner's `capture` job covers steps 1 and 4 without a person: F8 and a 12-second video (record key set to
+F12 for the run) into the load's own folder, a non-empty PNG and MP4 and `[Video] Video saved` in the log. Run it with
+the 4.0.0 queue ([tools/ingame_runner/README.md](../../tools/ingame_runner/README.md#shaders-and-capture-jobs)); whether
+the picture and video look right, and the sound, stay manual checks.
+
 1. F8 in a world with a look on. **Expected:** a PNG with the look in the screenshot folder, named as FileNaming says.
 2. *Look* set to Both, F8. **Expected:** a second picture ending in `_before` without the look.
 3. Burst of 5 at 500 ms. **Expected:** five pictures, about half a second apart.

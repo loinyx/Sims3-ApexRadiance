@@ -1,0 +1,45 @@
+{
+  "id": "looks-builtin",
+  "description": "Each of the five built-in looks in turn, one game start each, over a short night pan. Pass: no crash, Shaders installs, the look loads with every shader built in and draws, no [Looks] warning or error, nothing skipped. Notes: the largest free block after the pan. How each look looks is for a person to judge (-Grab records the window).",
+  "save": "ApexTest-Night",
+  "toml": { "patches.Looks": { "enabled": true, "mix": 1.0, "onUi": false } },
+  "order": ["natural", "warm-evening", "cinematic", "soft-vintage", "vivid"],
+  "variants": {
+    "natural": {
+      "toml": { "patches.Looks": { "preset": "apex:Natural" } },
+      "expect": ["\\[Looks\\] preset loaded: Natural: (\\d+) of \\1 shaders built in"]
+    },
+    "warm-evening": {
+      "toml": { "patches.Looks": { "preset": "apex:Warm evening" } },
+      "expect": ["\\[Looks\\] preset loaded: Warm evening: (\\d+) of \\1 shaders built in"]
+    },
+    "cinematic": {
+      "toml": { "patches.Looks": { "preset": "apex:Cinematic" } },
+      "expect": ["\\[Looks\\] preset loaded: Cinematic: (\\d+) of \\1 shaders built in"]
+    },
+    "soft-vintage": {
+      "toml": { "patches.Looks": { "preset": "apex:Soft vintage" } },
+      "expect": ["\\[Looks\\] preset loaded: Soft vintage: (\\d+) of \\1 shaders built in"]
+    },
+    "vivid": {
+      "toml": { "patches.Looks": { "preset": "apex:Vivid" } },
+      "expect": ["\\[Looks\\] preset loaded: Vivid: (\\d+) of \\1 shaders built in"]
+    }
+  },
+  "expect": [
+    "\\[Looks\\] Installed",
+    "\\[Looks\\] drawing at .*\\d+ shaders, drew, mix"
+  ],
+  "fail": [
+    "\\[(WARN|ERROR)\\] \\[Looks\\]",
+    "\\[Looks\\] stopped:",
+    "\\[Looks\\] nothing to run",
+    "\\[Looks\\] drawing at .*; skipped:"
+  ],
+  "steps": [
+    { "do": "speed", "speed": "normal" },
+    { "do": "camera_pan", "lots": 8, "seconds": 40, "passes": 4 },
+    { "do": "wait", "minutes": 3 },
+    { "do": "memory", "label": "after the pan" }
+  ]
+}

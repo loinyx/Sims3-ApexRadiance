@@ -26,7 +26,7 @@ function Get-UntilCommand([string]$Field) {
 }
 function Format-Until($Until) { $p = @($Until.PSObject.Properties)[0]; return "$($p.Value) $($p.Name)" }
 # Every step run.ps1 knows.
-$script:KnownSteps = @('speed', 'wait', 'profile', 'camera', 'camera_pan', 'save', 'reload', 'camera_jumps', 'vfx_burst', 'mode', 'stop_repros', 'key', 'camera_orbit', 'lots', 'lights_on', 'lamp_drag', 'wait_file', 'camera_read', 'camera_goto', 'lamp_edit', 'track_record', 'track_play', 'input_record', 'input_play', 'clip_session', 'floor')
+$script:KnownSteps = @('speed', 'wait', 'profile', 'camera', 'camera_pan', 'save', 'reload', 'camera_jumps', 'vfx_burst', 'mode', 'stop_repros', 'key', 'camera_orbit', 'lots', 'lights_on', 'lamp_drag', 'wait_file', 'camera_read', 'camera_goto', 'lamp_edit', 'track_record', 'track_play', 'input_record', 'input_play', 'clip_session', 'floor', 'memory', 'check_files')
 
 function ConvertTo-TomlLiteral($Value) {
     if ($Value -is [bool]) { if ($Value) { return 'true' } else { return 'false' } }
@@ -538,6 +538,7 @@ function Format-Results($Results, [string]$Title) {
         $f = $r.Frames; $s = $r.Sim; $m = $r.M
         $notes = @($r.Notes | ForEach-Object { $_ -replace '\|', '/' })
         if ($r.PSObject.Properties['Events'] -and $r.Events) { $notes = @("repro events: $($r.Events)") + $notes }
+        if ($r.PSObject.Properties['Info'] -and $r.Info) { $notes = @($r.Info | ForEach-Object { $_ -replace '\|', '/' }) + $notes } # memory and check_files readings
         if ($m -and $m.Invalid) { $notes = @("INVALID: $($m.Invalid)") + $notes }
         $cells = @($r.Name, $(if ($r.Ok) { 'pass' } else { 'FAIL' }), $r.Closed, $(if ($m) { $m.RealMin } else { '' }))
         if ($f -and $f.Frames -gt 0) { $cells += @($f.Fps, $f.P50, $f.P95, $f.P99, $f.Max, $f.Over50PerMin) } else { $cells += @('', '', '', '', '', '') }
@@ -551,15 +552,16 @@ function Format-Results($Results, [string]$Title) {
         $order = @($group.Group | ForEach-Object { $_.Variant } | Select-Object -Unique)
         $out.Add(''); $out.Add("## $($group.Name): A/B")
         $out.Add(''); $out.Add('Order: ' + (($group.Group | ForEach-Object { $_.Variant }) -join ', '))
-        $out.Add(''); $out.Add('| Variant | Loads | Passed | p50 ms | p99 ms | >50 ms/min | Sim hitches/min |')
-        $out.Add('|---|---|---|---|---|---|---|')
+        $out.Add(''); $out.Add('| Variant | Loads | Passed | p50 ms | p99 ms | >50 ms/min | Sim hitches/min | Largest free block MB |')
+        $out.Add('|---|---|---|---|---|---|---|---|')
         foreach ($v in $variants) {
             $g = @($v.Group | Where-Object { -not ($_.M -and $_.M.Invalid) })
-            $out.Add(('| {0} | {1} | {2} | {3} | {4} | {5} | {6} |' -f $v.Name, $g.Count, @($g | Where-Object Ok).Count,
+            $out.Add(('| {0} | {1} | {2} | {3} | {4} | {5} | {6} | {7} |' -f $v.Name, $g.Count, @($g | Where-Object Ok).Count,
                 (Get-Mean @($g | ForEach-Object { if ($_.Frames) { $_.Frames.P50 } })),
                 (Get-Mean @($g | ForEach-Object { if ($_.Frames) { $_.Frames.P99 } })),
                 (Get-Mean @($g | ForEach-Object { if ($_.Frames) { $_.Frames.Over50PerMin } })),
-                (Get-Mean @($g | ForEach-Object { if ($_.Sim) { $_.Sim.HitchesPerMin } }))))
+                (Get-Mean @($g | ForEach-Object { if ($_.Sim) { $_.Sim.HitchesPerMin } })),
+                (Get-Mean @($g | ForEach-Object { if ($_.PSObject.Properties['FreeMB']) { $_.FreeMB } }))))
         }
         foreach ($l in (Format-PairRows $group.Group $order)) { $out.Add($l) }
     }

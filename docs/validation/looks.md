@@ -57,6 +57,12 @@ The feature is described in [features/looks.md](../features/looks.md). It must:
 
 ## In-game test plan
 
+The in-game runner covers the start-up part without a person: `looks-off-on` (Shaders off against on with
+`apex:Cinematic`, frame times and the largest free block, ABBA) and `looks-builtin` (each built-in look loads with every
+shader built in and draws, no `[Looks]` warning or error). Run them with the 4.0.0 queue
+([tools/ingame_runner/README.md](../../tools/ingame_runner/README.md#shaders-and-capture-jobs)); how a look looks stays a
+manual check below.
+
 1. Image > Color > Shaders, switch on, pick a look from GShade's folder. **Expected:** the status shows its name and
    shader count; the look shows on the scene and on menus.
 2. *Applies to* World only. **Expected:** the HUD and menus keep their own look.
