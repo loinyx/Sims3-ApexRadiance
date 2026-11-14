@@ -284,5 +284,11 @@ public static partial class Strings
         ["A new Setup is available"] = "Új Setup érhető el",
         ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Az Apex Radiance Setup {0} letöltve és ellenőrizve. Frissítsd a Setupot, utána újra megnyílik.",
         ["Update Setup"] = "Setup frissítése",
+        // restart host (experimental)
+        ["Restart host"] = "Játék újraindítása",
+        ["Experimental"] = "Kísérleti",
+        ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Kevés memóriával történt mentés után kilépéskor felajánlja, hogy a játék újrainduljon ezzel a mentéssel.",
+        ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Indítsd el egyszer a játékot az Apex Radiance-szel, majd itt kapcsold be a játék újraindítását.",
+        ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "Eltávolítja a ts3wrap.exe fájlt, és kikapcsolja a játék újraindítását az ApexRadiance.toml fájlban.",
     };
 }

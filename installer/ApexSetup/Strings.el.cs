@@ -282,5 +282,11 @@ public static partial class Strings
         ["A new Setup is available"] = "Υπάρχει νέο Setup",
         ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Το Apex Radiance Setup {0} κατέβηκε και ελέγχθηκε. Ενημέρωσε το Setup και θα ανοίξει ξανά.",
         ["Update Setup"] = "Ενημέρωση Setup",
+        // restart host (experimental)
+        ["Restart host"] = "Επανεκκίνηση παιχνιδιού",
+        ["Experimental"] = "Πειραματικό",
+        ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Μετά από αποθήκευση με λίγη μνήμη, προτείνει να ξεκινήσει ξανά το παιχνίδι σε αυτή την αποθήκευση όταν βγείτε.",
+        ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Ξεκινήστε το παιχνίδι μία φορά με το Apex Radiance και μετά ενεργοποιήστε εδώ την επανεκκίνηση παιχνιδιού.",
+        ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "Αφαιρεί το ts3wrap.exe και απενεργοποιεί την επανεκκίνηση παιχνιδιού στο ApexRadiance.toml.",
     };
 }

@@ -281,5 +281,11 @@ public static partial class Strings
         ["A new Setup is available"] = "Un nouveau Setup est disponible",
         ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Apex Radiance Setup {0} a été téléchargé et vérifié. Mettez Setup à jour, il se rouvrira.",
         ["Update Setup"] = "Mettre Setup à jour",
+        // restart host (experimental)
+        ["Restart host"] = "Relance du jeu",
+        ["Experimental"] = "Expérimental",
+        ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Après une sauvegarde faite avec peu de mémoire, propose de relancer le jeu sur cette sauvegarde quand vous quittez.",
+        ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Lancez le jeu une fois avec Apex Radiance, puis activez ici la relance du jeu.",
+        ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "Supprime ts3wrap.exe et désactive la relance du jeu dans ApexRadiance.toml.",
     };
 }

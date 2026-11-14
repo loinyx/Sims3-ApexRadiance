@@ -19,6 +19,7 @@ public sealed record State(
     bool Ts3Native,
     bool Ts3Fixes,
     bool Ts3NativeWrongBuild,     // ts3native.log says it skipped itself: the other edition's build
+    bool RestartHost,             // ts3wrap.exe next to the ASI and [ui] restart_host = true (Engine.RestartHostOn)
     Manifest Manifest)
 {
     public bool Modernization => Ts3Native || Ts3Fixes;
@@ -133,7 +134,7 @@ public static class Scan
 
         return new State(apex, layer, loader, loader == "d3d9.dll", FindAsi(bin, "Sims3SettingsSetter.asi") is not null, FindAsi(bin, "MonoPatcher.asi") is not null,
             ts3native is not null, File.Exists(Path.Combine(Packages(docs), "ts3fixes.package")), wrong,
-            Manifest.Load(bin));
+            Engine.RestartHostOn(bin, docs), Manifest.Load(bin));
     }
 
     public static List<string> Loaders(string bin) =>

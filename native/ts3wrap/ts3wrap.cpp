@@ -33,7 +33,9 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR args, int) {
     static wchar_t cmd[_countof(c.cmd) + MAX_PATH + 16];
     STARTUPINFOW si{sizeof si};
     PROCESS_INFORMATION pi{};
-    // the game started this host from its own start folder and environment: inherited, so the relaunch has both
+    // Apex starts this host in the game's start folder (read when the ASI loaded) with the game's environment: null folder and
+    // environment here pass both on, so DXVK finds the same dxvk.conf and DXVK_* variables, the bridge server starts in the
+    // same folder, and d3d9.dll still comes from the exe's own folder
     if (!RhBuildCommand(c.cmd, save, cmd, _countof(cmd)) || !CreateProcessW(c.exe, cmd, nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
         MessageBoxW(nullptr, L"The game could not be started again. Your game was saved: start The Sims 3 as usual.", kTitle, MB_OK | MB_ICONWARNING);
         return 4;

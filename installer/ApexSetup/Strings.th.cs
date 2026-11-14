@@ -237,5 +237,11 @@ public static partial class Strings
         ["A new Setup is available"] = "มีตัวติดตั้งใหม่",
         ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "ดาวน์โหลดและตรวจสอบ Apex Radiance Setup {0} แล้ว อัปเดตตัวติดตั้ง แล้วมันจะเปิดขึ้นใหม่",
         ["Update Setup"] = "อัปเดตตัวติดตั้ง",
+        // restart host (experimental)
+        ["Restart host"] = "เริ่มเกมใหม่",
+        ["Experimental"] = "ทดลอง",
+        ["After a save made low on memory, offers to start the game again into that save when you quit."] = "หลังจากเซฟขณะหน่วยความจำเหลือน้อย เมื่อคุณออกจากเกมจะเสนอให้เปิดเกมใหม่ที่เซฟนั้น",
+        ["Start the game once with Apex Radiance, then turn on the restart host here."] = "เปิดเกมหนึ่งครั้งพร้อม Apex Radiance แล้วจึงเปิดการเริ่มเกมใหม่ที่นี่",
+        ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "ลบ ts3wrap.exe และปิดการเริ่มเกมใหม่ใน ApexRadiance.toml",
     };
 }

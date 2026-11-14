@@ -269,5 +269,11 @@ public static partial class Strings
         ["A new Setup is available"] = "새 Setup이 있습니다",
         ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Apex Radiance Setup {0}을(를) 다운로드하고 확인했습니다. Setup을 업데이트하면 다시 열립니다.",
         ["Update Setup"] = "Setup 업데이트",
+        // restart host (experimental)
+        ["Restart host"] = "게임 다시 시작",
+        ["Experimental"] = "실험적",
+        ["After a save made low on memory, offers to start the game again into that save when you quit."] = "메모리가 부족한 상태에서 저장한 뒤 게임을 끄면 그 저장 파일로 게임을 다시 시작할지 묻습니다.",
+        ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Apex Radiance로 게임을 한 번 실행한 다음 여기에서 게임 다시 시작을 켜세요.",
+        ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "ts3wrap.exe를 제거하고 ApexRadiance.toml에서 게임 다시 시작을 끕니다.",
     };
 }

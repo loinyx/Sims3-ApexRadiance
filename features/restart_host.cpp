@@ -15,6 +15,15 @@ namespace {
 constexpr uint64_t kLowBytes = 320ull << 20;  // Room to save's own "low" line (memory_guard.cpp)
 RestartChannel* g_chan = nullptr;
 
+// The game's start folder, read when the ASI loads (before the game runs): DXVK reads dxvk.conf from the working folder
+// (unless DXVK_CONFIG_FILE says otherwise), and the bridge server starts in it. ts3wrap.exe is started in this folder, so
+// the relaunch it makes inherits it. Empty when it could not be read: the folder of the moment, as before.
+const std::wstring g_startDir = [] {
+    wchar_t dir[MAX_PATH];
+    const DWORD n = GetCurrentDirectoryW(MAX_PATH, dir);
+    return n && n < MAX_PATH ? std::wstring(dir, n) : std::wstring();
+}();
+
 } // namespace
 
 void Start() {
@@ -45,7 +54,8 @@ void Start() {
     swprintf_s(line, L"\"%s\" %lu", host, GetCurrentProcessId());
     STARTUPINFOW si{sizeof si};
     PROCESS_INFORMATION pi{};
-    if (!CreateProcessW(host, line, nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {  // the game's folder and environment
+    // the game's start folder and its environment (DXVK_* and Steam's variables included), both inherited by the relaunch
+    if (!CreateProcessW(host, line, nullptr, nullptr, FALSE, 0, nullptr, g_startDir.empty() ? nullptr : g_startDir.c_str(), &si, &pi)) {
         LOG_WARNING("[RestartHost] ts3wrap.exe did not start (error " + std::to_string(GetLastError()) + "): no restart offers");
         UnmapViewOfFile(c);
         CloseHandle(map);

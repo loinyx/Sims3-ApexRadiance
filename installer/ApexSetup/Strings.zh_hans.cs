@@ -265,5 +265,11 @@ public static partial class Strings
         ["A new Setup is available"] = "有新的安装程序",
         ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Apex Radiance Setup {0} 已下载并校验。更新安装程序后它会重新打开。",
         ["Update Setup"] = "更新安装程序",
+        // restart host (experimental)
+        ["Restart host"] = "重新启动游戏",
+        ["Experimental"] = "实验性",
+        ["After a save made low on memory, offers to start the game again into that save when you quit."] = "在内存不足时存档后，退出游戏时会询问是否用该存档重新启动游戏。",
+        ["Start the game once with Apex Radiance, then turn on the restart host here."] = "请先用 Apex Radiance 启动一次游戏，然后在这里打开重新启动游戏。",
+        ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "删除 ts3wrap.exe，并在 ApexRadiance.toml 中关闭重新启动游戏。",
     };
 }
