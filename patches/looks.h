@@ -13,7 +13,7 @@ bool PresetInUse(std::wstring& file);
 std::string StatusLine();
 // Skips the look for the next 0.15 s (hold to compare); call it every frame while held
 void HoldBypass();
-// The Shaders card under the ReShade look card (Image > Color > Looks)
+// The Shaders card under the ReShade look card, then the Shader library card (Image > Color > Shaders)
 void ShadersCard();
 
 } // namespace Looks

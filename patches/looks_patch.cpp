@@ -24,6 +24,7 @@
 #include "ui/widgets.h"
 #include "looks_runner.h"
 #include "looks_preset.h"
+#include "looks_fx.h"
 #include "apex_capture.h"
 #include "apex_version.h"
 
@@ -154,6 +155,13 @@ int RunnableCount(bool onlyOn)
     return n;
 }
 
+// A shader's one-line description: built-in ones are translated menu texts, a player's .fx shows its file name
+const char* Describe(int shader)
+{
+    const LooksShader& d = Looks::Shader(shader);
+    return Looks::IsUserShader(shader) ? d.description : I18n::Tr(d.description);
+}
+
 // The run list = the .ini's enabled techniques + the ones switched on here (at their TechniqueSorting place, like
 // ReShade would run them), then my own order on top. Values: the .ini's section if it has one, else the .fx defaults.
 void RebuildOrder()
@@ -232,6 +240,14 @@ void LoadPreset()
     }
 }
 
+// The Shaders folder was compiled again: user shader indices changed, so every entry is looked up again
+void ResolveShaders()
+{
+    for (auto& e : g.ini.order) e.shader = Looks::FindShader(e.technique, e.file);
+    for (auto& e : g.iniOrder) e.shader = Looks::FindShader(e.technique, e.file);
+    RebuildOrder();
+}
+
 const float* ValuesFor(size_t entry)
 {
     auto it = g.tweaks.find(g.order[entry].technique);
@@ -240,31 +256,43 @@ const float* ValuesFor(size_t entry)
 }
 
 // ---------------------------------------------------------------------------------------------- device state
+// The first kRSBuiltIn render states, kSamplers samplers and kPSConsts constants are what the built-in passes change; a
+// run with a player's effect (Fx::Instance::Run) changes all of these lists, every sampler, more PS constants, the VS
+// constants and render targets 1..3.
 constexpr D3DRENDERSTATETYPE kRS[] = { D3DRS_ZENABLE, D3DRS_ZWRITEENABLE, D3DRS_ALPHABLENDENABLE, D3DRS_SEPARATEALPHABLENDENABLE,
     D3DRS_SRCBLEND, D3DRS_DESTBLEND, D3DRS_BLENDOP, D3DRS_BLENDFACTOR, D3DRS_ALPHATESTENABLE, D3DRS_STENCILENABLE, D3DRS_CULLMODE,
-    D3DRS_SCISSORTESTENABLE, D3DRS_FOGENABLE, D3DRS_SRGBWRITEENABLE, D3DRS_CLIPPLANEENABLE, D3DRS_COLORWRITEENABLE };
+    D3DRS_SCISSORTESTENABLE, D3DRS_FOGENABLE, D3DRS_SRGBWRITEENABLE, D3DRS_CLIPPLANEENABLE, D3DRS_COLORWRITEENABLE,
+    D3DRS_SRCBLENDALPHA, D3DRS_DESTBLENDALPHA, D3DRS_BLENDOPALPHA, D3DRS_COLORWRITEENABLE1, D3DRS_COLORWRITEENABLE2, D3DRS_COLORWRITEENABLE3,
+    D3DRS_STENCILFUNC, D3DRS_STENCILPASS, D3DRS_STENCILFAIL, D3DRS_STENCILZFAIL, D3DRS_STENCILREF, D3DRS_STENCILMASK, D3DRS_STENCILWRITEMASK };
 constexpr D3DSAMPLERSTATETYPE kSS[] = { D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV,
-    D3DSAMP_SRGBTEXTURE, D3DSAMP_MAXMIPLEVEL, D3DSAMP_MIPMAPLODBIAS };
+    D3DSAMP_SRGBTEXTURE, D3DSAMP_MAXMIPLEVEL, D3DSAMP_MIPMAPLODBIAS, D3DSAMP_ADDRESSW, D3DSAMP_BORDERCOLOR };
 constexpr int kRSCount = (int)(sizeof(kRS) / sizeof(kRS[0]));
 constexpr int kSSCount = (int)(sizeof(kSS) / sizeof(kSS[0]));
-constexpr DWORD kSamplers = 6;
-constexpr UINT kPSConsts = 32;
+constexpr int kRSBuiltIn = 16, kSSBuiltIn = 8;
+constexpr DWORD kSamplers = 6, kAllSamplers = 16;
+constexpr UINT kPSConsts = 32, kAllPSConsts = 224, kVSConsts = 256;
 
 struct SavedState
 {
     IDirect3DSurface9* rt0 = nullptr; IDirect3DSurface9* ds = nullptr;
     IDirect3DPixelShader9* ps = nullptr; IDirect3DVertexShader9* vs = nullptr; IDirect3DVertexDeclaration9* decl = nullptr; DWORD fvf = 0;
     IDirect3DVertexBuffer9* stream0 = nullptr; UINT stream0Offset = 0, stream0Stride = 0;
-    IDirect3DBaseTexture9* tex[kSamplers] = {}; DWORD rs[kRSCount] = {}; DWORD ss[kSamplers][kSSCount] = {};
-    float psConst[kPSConsts * 4] = {}; D3DVIEWPORT9 viewport{}; RECT scissor{};
+    IDirect3DBaseTexture9* tex[kAllSamplers] = {}; DWORD rs[kRSCount] = {}; DWORD ss[kAllSamplers][kSSCount] = {};
+    float psConst[kAllPSConsts * 4] = {}; D3DVIEWPORT9 viewport{}; RECT scissor{};
+    std::vector<float> vsConst;              // full only
+    IDirect3DSurface9* rtN[3] = {};          // render targets 1..3, full only
+    bool full = false;                       // a player's effect runs: everything it changes is kept
+    DWORD samplers = kSamplers; int rsCount = kRSBuiltIn, ssCount = kSSBuiltIn; UINT psConsts = kPSConsts;
     IDirect3DDevice9* captured = nullptr;
     std::string failed; // the getters that failed (a D3D9 wrapper such as the RTX Remix bridge may not answer all of them)
     bool okConst = false, okView = false, okScissor = false, okStream = false, okFvf = false;
     bool okSamplerStates = false, okRenderStates = false;
 
     ~SavedState() { if (captured) Restore(captured); else Release(); }
-    bool Capture(IDirect3DDevice9* dev)
+    bool Capture(IDirect3DDevice9* dev, bool all)
     {
+        full = all;
+        if (full) { samplers = kAllSamplers; rsCount = kRSCount; ssCount = kSSCount; psConsts = kAllPSConsts; }
         auto note = [&](bool good, const char* name) { if (!good) failed += failed.empty() ? name : std::string(", ") + name; return good; };
         // Only the render target is required. Everything else is also kept by the D3DSBT_ALL state block around the
         // runs; a getter that fails is noted and its value is simply not put back here.
@@ -280,14 +308,20 @@ struct SavedState
         if (okFvf) ExtraHooks::UseVertexInputSetLast(decl, fvf);
         okStream = note(SUCCEEDED(dev->GetStreamSource(0, &stream0, &stream0Offset, &stream0Stride)), "GetStreamSource");
         bool okTex = true, okSS = true, okRS = true;
-        for (DWORD s = 0; s < kSamplers; ++s)
+        for (DWORD s = 0; s < samplers; ++s)
         {
             if (FAILED(dev->GetTexture(s, &tex[s]))) { tex[s] = nullptr; okTex = false; }
-            for (int i = 0; i < kSSCount; ++i) okSS &= SUCCEEDED(dev->GetSamplerState(s, kSS[i], &ss[s][i]));
+            for (int i = 0; i < ssCount; ++i) okSS &= SUCCEEDED(dev->GetSamplerState(s, kSS[i], &ss[s][i]));
         }
-        for (int i = 0; i < kRSCount; ++i) okRS &= SUCCEEDED(dev->GetRenderState(kRS[i], &rs[i]));
+        for (int i = 0; i < rsCount; ++i) okRS &= SUCCEEDED(dev->GetRenderState(kRS[i], &rs[i]));
         note(okTex, "GetTexture"); note(okSS, "GetSamplerState"); note(okRS, "GetRenderState");
-        okConst = note(SUCCEEDED(dev->GetPixelShaderConstantF(0, psConst, kPSConsts)), "GetPixelShaderConstantF");
+        okConst = note(SUCCEEDED(dev->GetPixelShaderConstantF(0, psConst, psConsts)), "GetPixelShaderConstantF");
+        if (full)
+        {
+            vsConst.resize(kVSConsts * 4);
+            if (!note(SUCCEEDED(dev->GetVertexShaderConstantF(0, vsConst.data(), kVSConsts)), "GetVertexShaderConstantF")) vsConst.clear();
+            for (DWORD r = 0; r < 3; ++r) if (FAILED(dev->GetRenderTarget(r + 1, &rtN[r]))) rtN[r] = nullptr; // NOTFOUND: none bound
+        }
         okView = note(SUCCEEDED(dev->GetViewport(&viewport)), "GetViewport");
         okScissor = note(SUCCEEDED(dev->GetScissorRect(&scissor)), "GetScissorRect");
         if (!failed.empty()) { static bool once = false; if (!once) { once = true; LOG_WARNING("[Looks] device getters that failed (not restored by hand): " + failed); } }
@@ -300,14 +334,16 @@ struct SavedState
     {
         captured = nullptr;
         D3D9Hooks::CallOriginalSetRenderTarget(dev, 0, rt0); // resets the viewport, so it goes first
+        if (full) for (DWORD r = 0; r < 3; ++r) D3D9Hooks::CallOriginalSetRenderTarget(dev, r + 1, rtN[r]);
         ExtraHooks::RawSetDepthStencilSurface(dev, ds);
-        for (DWORD s = 0; s < kSamplers; ++s)
+        for (DWORD s = 0; s < samplers; ++s)
         {
             dev->SetTexture(s, tex[s]);
-            if (okSamplerStates) for (int i = 0; i < kSSCount; ++i) dev->SetSamplerState(s, kSS[i], ss[s][i]);
+            if (okSamplerStates) for (int i = 0; i < ssCount; ++i) dev->SetSamplerState(s, kSS[i], ss[s][i]);
         }
-        if (okRenderStates) for (int i = 0; i < kRSCount; ++i) dev->SetRenderState(kRS[i], rs[i]);
-        if (okConst) dev->SetPixelShaderConstantF(0, psConst, kPSConsts);
+        if (okRenderStates) for (int i = 0; i < rsCount; ++i) dev->SetRenderState(kRS[i], rs[i]);
+        if (okConst) dev->SetPixelShaderConstantF(0, psConst, psConsts);
+        if (!vsConst.empty()) dev->SetVertexShaderConstantF(0, vsConst.data(), kVSConsts);
         dev->SetPixelShader(ps);
         dev->SetVertexShader(vs);
         if (decl) dev->SetVertexDeclaration(decl); else if (okFvf) dev->SetFVF(fvf);
@@ -320,6 +356,7 @@ struct SavedState
     {
         for (IUnknown* u : std::initializer_list<IUnknown*>{ rt0, ds, ps, vs, decl, stream0 }) if (u) u->Release();
         for (auto*& t : tex) if (t) { t->Release(); t = nullptr; }
+        for (auto*& r : rtN) if (r) { r->Release(); r = nullptr; }
         rt0 = nullptr; ds = nullptr; ps = nullptr; vs = nullptr; decl = nullptr; stream0 = nullptr;
     }
 };
@@ -430,7 +467,9 @@ void OnPresent(IDirect3DDevice9* dev)
     g_ranThisFrame = g_boundaryThisFrame = g_afterBloomDone = g_beforeLookDone = g_frameTicked = false;
     IDirect3DSurface9* s = nullptr;
     g_backBuffer = nullptr;
-    if (dev && SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &s)) && s) { g_backBuffer = s; s->Release(); }
+    D3DSURFACE_DESC bd{};
+    if (dev && SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &s)) && s) { g_backBuffer = s; s->GetDesc(&bd); s->Release(); }
+    if (Looks::Fx::Poll(bd.Width, bd.Height)) ResolveShaders(); // a scan of the Shaders folder finished (part of it)
     if (dev && SUCCEEDED(dev->GetRenderTarget(0, &s)) && s) { g_curRT0 = s; s->Release(); }
 }
 
@@ -445,11 +484,13 @@ void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask)
 
     std::vector<Looks::Step> steps; // in the run list's order
     int keptOffUi = 0;
+    bool userFx = false;
     for (size_t i = 0; i < g.order.size(); ++i)
     {
         if (!Runnable(i) || IsOff(i)) continue;
         if (!inPart(i)) { if (atEndScene) ++keptOffUi; continue; } // depth shaders: world only, never over the UI
         steps.push_back({ g.order[i].shader, ValuesFor(i) });
+        userFx |= Looks::IsUserShader(g.order[i].shader);
     }
     if (steps.empty()) return; // nothing of this part is on
 
@@ -472,7 +513,7 @@ void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask)
 
     {
         SavedState saved;
-        if (!saved.Capture(dev)) { PartWhy("stopped: device state could not be read (" + saved.failed + ")"); rt->Release(); return; }
+        if (!saved.Capture(dev, userFx)) { PartWhy("stopped: device state could not be read (" + saved.failed + ")"); rt->Release(); return; }
         ExtraHooks::RawSetDepthStencilSurface(dev, nullptr); // depth is sampled, so it must not be bound
         if (!g_sb) dev->CreateStateBlock(D3DSBT_ALL, &g_sb);
         if (g_sb) g_sb->Capture();
@@ -517,6 +558,7 @@ void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask)
 void ReleaseGpu()
 {
     g.runner.Release();
+    Looks::Fx::ReleaseGpu();
     if (g_sb) g_sb->Release(), g_sb = nullptr;
 }
 
@@ -802,6 +844,99 @@ void ShowLooksFolder()
     });
 }
 
+// ---------------------------------------------------------------------------------------------- the player's .fx files
+std::string g_fxMessage; // translated, under the Shader library rows and the can't-run list
+bool g_fxMessageError = false;
+bool g_checkPending = false; // "Check again" waits for the scan, then says whether anything is still missing
+std::atomic<bool> g_addBusy{ false };
+std::mutex g_addLock;
+std::optional<Looks::Fx::AddResult> g_added;
+
+// Explorer on the Shaders folder (created with its Shaders and Textures subfolders), off the render thread
+void ShowShadersFolder()
+{
+    HookGuard::StartDetached("Looks: open the Shaders folder", [] {
+        Looks::Fx::EnsureShadersFolder();
+        const std::wstring folder = Looks::Fx::ShadersFolder();
+        const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+        if (!folder.empty()) ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+        if (SUCCEEDED(com)) CoUninitialize();
+    });
+}
+
+// "Add .fx files…": the native picker (several files), then the copy into the Shaders folder, all off the render thread
+void PickFxFiles()
+{
+    if (g_addBusy.exchange(true)) return;
+    std::wstring label = ApexUtil::ToWide(I18n::Tr("ReShade shaders and textures"));
+    if (!HookGuard::StartDetached("Looks: add .fx files", [label = std::move(label)] {
+        std::vector<std::wstring> picked;
+        struct Finish
+        {
+            std::vector<std::wstring>& picked;
+            ~Finish()
+            {
+                std::optional<Looks::Fx::AddResult> r;
+                if (!picked.empty()) r = Looks::Fx::AddFiles(picked);
+                std::lock_guard<std::mutex> lock(g_addLock);
+                g_added = r;
+                g_addBusy = false;
+            }
+        } finish{ picked };
+        const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        if (FAILED(com)) return;
+        IFileOpenDialog* dialog = nullptr;
+        if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog))))
+        {
+            const COMDLG_FILTERSPEC types[] = { { label.c_str(), L"*.fx;*.fxh;*.png;*.jpg;*.jpeg;*.bmp;*.dds" } };
+            dialog->SetFileTypes(1, types);
+            DWORD options = 0;
+            dialog->GetOptions(&options);
+            dialog->SetOptions(options | FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR | FOS_FILEMUSTEXIST | FOS_ALLOWMULTISELECT);
+            if (SUCCEEDED(dialog->Show(nullptr)))
+            {
+                IShellItemArray* items = nullptr;
+                if (SUCCEEDED(dialog->GetResults(&items)))
+                {
+                    DWORD n = 0;
+                    items->GetCount(&n);
+                    for (DWORD k = 0; k < n && k < 500; ++k)
+                    {
+                        IShellItem* item = nullptr;
+                        PWSTR path = nullptr;
+                        if (SUCCEEDED(items->GetItemAt(k, &item)) && SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) { picked.push_back(path); CoTaskMemFree(path); }
+                        if (item) item->Release();
+                    }
+                    items->Release();
+                }
+            }
+            dialog->Release();
+        }
+        CoUninitialize();
+    })) g_addBusy = false;
+}
+
+// Menu frame: the result of an "Add .fx files…" copy, and of a "Check again" scan, as one translated line
+void FxMessages(int missingFiles)
+{
+    std::optional<Looks::Fx::AddResult> added;
+    { std::lock_guard<std::mutex> lock(g_addLock); added.swap(g_added); }
+    if (added)
+    {
+        const int copied = added->added + added->reused;
+        g_fxMessageError = added->refused > 0;
+        g_fxMessage = added->refused ? I18n::Trf("{} files added; {} refused (only .fx, .fxh and images)", copied, added->refused)
+                                     : I18n::Trf("{} files added", copied);
+        g_checkPending = true;
+    }
+    if (g_checkPending && !Looks::Fx::Scanning())
+    {
+        g_checkPending = false;
+        if (!added && missingFiles == 0) { g_fxMessage = I18n::Tr("All shaders found"); g_fxMessageError = false; }
+        else if (!added && missingFiles > 0) { g_fxMessage = I18n::Trf("{} still missing", missingFiles); g_fxMessageError = true; }
+    }
+}
+
 // ---------------------------------------------------------------------------------------------- menu: the Look row
 std::vector<Looks::LookItem> g_list;
 bool g_listDirty = true;
@@ -1007,7 +1142,7 @@ bool ShaderRow(size_t i, int pos, int count, bool& reorder)
     if (EditedValues(i)) ApexUi::SetNextRowChangedDot("Changed from the look");
     ApexUi::SetNextRowUntranslated(); // the shader's own name
     const std::string label = e.technique;
-    if (ApexUi::BeginControlRow(label.c_str(), I18n::Tr(d.description), ApexUi::ToggleSwitchSize().x, open ? IconId::ChevronDown : IconId::ChevronRight))
+    if (ApexUi::BeginControlRow(label.c_str(), Describe(e.shader), ApexUi::ToggleSwitchSize().x, open ? IconId::ChevronDown : IconId::ChevronRight))
     {
         bool on = !IsOff(i);
         if (ApexUi::ToggleSwitch("##On", &on))
@@ -1066,7 +1201,82 @@ bool ShaderRow(size_t i, int pos, int count, bool& reorder)
     return changed;
 }
 
-// "Add a shader": every built-in shader, with a search field and the Kind filter
+// Where shaders come from, in the order the menu lists them: Apex's ports, then the player's Shaders folder. Downloaded
+// packs join this list as further sources (name, author, licence, folder). Only shaders that run here are listed.
+struct ShaderSource
+{
+    const char* name;        // group name in Add a shader (English, translated)
+    const char* row;         // its row in the Shader library card (English, translated)
+    const char* rowNote;     // the row's description (English, translated)
+    std::string author, licence;
+    std::wstring folder;     // where its files are ("" = inside Apex)
+    bool mine = false;       // the player's folder: Add .fx files… and the folder button
+    std::vector<int> shaders; // runnable shader indices
+};
+
+// Rebuilt when the Shaders folder was compiled again
+const std::vector<ShaderSource>& ShaderSources()
+{
+    static std::vector<ShaderSource> cache;
+    static int generation = -1;
+    if (generation == Looks::Fx::Generation() && !cache.empty()) return cache;
+    generation = Looks::Fx::Generation();
+    cache.clear();
+    ShaderSource apex{ "Apex", "Built into Apex", "Ports of ReShade shaders that come with Apex" };
+    for (int s = 0; s < Looks::ShaderCount(); ++s) apex.shaders.push_back(s);
+    cache.push_back(std::move(apex));
+    ShaderSource mine{ "Your shaders", "Your shaders", ".fx files in the Shaders folder" };
+    mine.folder = Looks::Fx::ShadersFolder();
+    mine.mine = true;
+    for (const auto& l : Looks::Fx::List())
+        if (l.index >= 0 && Looks::FindShader(l.technique, l.file) == Looks::kUserShaderBase + l.index) // a built-in port of that name wins
+            mine.shaders.push_back(Looks::kUserShaderBase + l.index);
+    cache.push_back(std::move(mine));
+    return cache;
+}
+
+int ShaderTotal()
+{
+    int n = 0;
+    for (const auto& s : ShaderSources()) n += (int)s.shaders.size();
+    return n;
+}
+
+// A collapsible group header inside the Add a shader list: chevron, "<name> · <count>", and for the player's folder the
+// folder button at the right. True when it is open (always while searching).
+bool GroupHeader(const ShaderSource& src, int count, bool searching)
+{
+    static std::map<std::string, bool> closed;
+    const float u = ApexUi::Unit();
+    const float h = ImGui::GetFrameHeight();
+    const float folderW = src.mine ? h + ApexUi::kSpace2 * u : 0.0f;
+    const ImVec2 start = ImGui::GetCursorScreenPos();
+    const float w = ImGui::GetContentRegionAvail().x;
+    bool& isClosed = closed[src.name];
+    ImGui::PushID(src.name);
+    if (ImGui::InvisibleButton("##Group", ImVec2(std::max(1.0f, w - folderW), h), ImGuiButtonFlags_EnableNav)) isClosed = !isClosed;
+    const bool hovered = ImGui::IsItemHovered();
+    ImGui::RenderNavCursor(ImGui::GetCurrentContext()->LastItemData.Rect, ImGui::GetItemID());
+    if (hovered) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    const bool open = searching || !isClosed;
+    const float icon = 12.0f * u;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImU32 col = ImGui::GetColorU32(VioletTheme::Col(hovered ? VioletTheme::kText : VioletTheme::kTextMuted));
+    ApexUi::DrawIcon(dl, open ? IconId::ChevronDown : IconId::ChevronRight, ImVec2(start.x, start.y + (h - icon) * 0.5f), icon, col);
+    std::string title = std::string(I18n::Tr(src.name)) + "  \xC2\xB7  " + std::to_string(count);
+    if (!src.author.empty()) title += "  \xC2\xB7  " + src.author;
+    if (!src.licence.empty()) title += "  \xC2\xB7  " + src.licence;
+    dl->AddText(ImVec2(start.x + icon + ApexUi::kSpace2 * u, start.y + (h - ImGui::GetTextLineHeight()) * 0.5f), col, title.c_str());
+    if (src.mine)
+    {
+        ImGui::SameLine(0.0f, ApexUi::kSpace2 * u);
+        if (ApexUi::IconButton("##ShadersFolder", IconId::FolderOpen, "Open the Shaders folder", false, h / u)) ShowShadersFolder();
+    }
+    ImGui::PopID();
+    return open;
+}
+
+// "Add a shader": every shader that runs here, grouped by source, with a search field and the Kind filter
 bool AddShaderModal(bool openNow)
 {
     static char query[96] = {};
@@ -1086,11 +1296,12 @@ bool AddShaderModal(bool openNow)
             extra.iconOff = extra.iconOn = IconId::X;
             extra.value = &close;
             extra.tooltip = "Close";
-            ApexUi::CardHeader(IconId::Plus, "Add a shader", "Built-in shaders you can add to this look", nullptr, nullptr, true, &extra);
+            const std::string sub = I18n::Trf("{} shaders run in The Sims 3", ShaderTotal());
+            ApexUi::CardHeader(IconId::Plus, "Add a shader", sub.c_str(), nullptr, nullptr, true, &extra);
             ApexUi::CardDivider();
             if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
             ImGui::SetNextItemWidth(-1.0f);
-            ImGui::InputTextWithHint("##ShaderSearch", I18n::Tr("Search shaders"), query, sizeof(query));
+            ImGui::InputTextWithHint("##ShaderSearch", I18n::Tr("Search shaders, packs or authors"), query, sizeof(query));
             ApexUi::Gap(ApexUi::kSpace2);
             static const char* const kKinds[] = { "All kinds", "Color", "Sharpen", "Light", "Film & camera", "Stylized" };
             ApexUi::SelectRow("Kind", "Only shaders of this kind", "##ShaderKind", &kind, kKinds, IM_COUNTOF(kKinds));
@@ -1104,32 +1315,53 @@ bool AddShaderModal(bool openNow)
             ImGui::BeginChild("##ShaderList", ImVec2(ImGui::GetWindowWidth(), std::min(360.0f * u, ImGui::GetIO().DisplaySize.y * 0.5f)), ImGuiChildFlags_AlwaysUseWindowPadding);
             ImGui::PopStyleVar();
             int shown = 0;
-            for (int s = 0; s < Looks::ShaderCount(); ++s)
+            for (const ShaderSource& src : ShaderSources())
             {
-                const LooksShader& d = Looks::Shader(s);
-                if (kind && (int)d.kind != kind) continue;
-                if (!q.empty() && Lower(std::string(d.technique) + " " + I18n::Tr(d.description) + " " + d.description).find(q) == std::string::npos) continue;
-                ++shown;
-                ImGui::PushID(s);
-                const bool added = InRunList(s);
-                const char* button = added ? "Added" : "Add";
-                ApexUi::SetNextRowUntranslated();
-                if (ApexUi::BeginControlRow(d.technique, I18n::Tr(d.description), ApexUi::ButtonWidth(I18n::Tr(button), false)))
+                std::vector<int> match;
+                const std::string srcText = Lower(std::string(src.name) + " " + I18n::Tr(src.name) + " " + src.author);
+                for (int s : src.shaders)
                 {
-                    ImGui::BeginDisabled(added);
-                    if (ApexUi::TextButton(button))
-                    {
-                        AddShader(s);
-                        ApexUi::ReportChange(I18n::Trf("{} added", d.technique).c_str());
-                        changed = true;
-                    }
-                    ImGui::EndDisabled();
-                    ApexUi::EndControlRow();
+                    const LooksShader& d = Looks::Shader(s);
+                    if (kind && (int)d.kind != kind) continue;
+                    if (!q.empty() && Lower(std::string(d.technique) + " " + Describe(s) + " " + d.description + " " + srcText).find(q) == std::string::npos) continue;
+                    match.push_back(s);
                 }
-                ImGui::PopID();
+                if (match.empty()) continue; // a source with nothing to show is hidden
+                if (!GroupHeader(src, (int)match.size(), !q.empty())) continue;
+                for (int s : match)
+                {
+                    const LooksShader& d = Looks::Shader(s);
+                    ++shown;
+                    ImGui::PushID(s);
+                    const bool added = InRunList(s);
+                    const char* button = added ? "Added" : "Add";
+                    ApexUi::SetNextRowUntranslated();
+                    if (ApexUi::BeginControlRow(d.technique, Describe(s), ApexUi::ButtonWidth(I18n::Tr(button), false)))
+                    {
+                        ImGui::BeginDisabled(added);
+                        if (ApexUi::TextButton(button))
+                        {
+                            AddShader(s);
+                            ApexUi::ReportChange(I18n::Trf("{} added", d.technique).c_str());
+                            changed = true;
+                        }
+                        ImGui::EndDisabled();
+                        ApexUi::EndControlRow();
+                    }
+                    ImGui::PopID();
+                }
             }
-            if (!shown) ApexUi::MutedText(I18n::Tr("No shader matches"));
+            if (!shown && !q.empty()) ApexUi::MutedText(I18n::Tr("No shader matches"));
             ImGui::EndChild();
+            // footer: where more shaders come from
+            ApexUi::Gap(ApexUi::kSpace2);
+            if (Looks::Fx::Scanning()) ApexUi::MutedText(I18n::Tr("Checking your shaders\xE2\x80\xA6"));
+            ApexUi::MutedText(I18n::Tr("Missing something? Get more packs or add your own .fx files."));
+            const char* addFx = "Add .fx files\xE2\x80\xA6";
+            const float addW = ApexUi::ButtonWidth(I18n::Tr(addFx), true);
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - addW));
+            if (ApexUi::IconTextButton(addFx, IconId::Plus, "Copy .fx, .fxh and texture files into the Shaders folder")) PickFxFiles();
+            if (!g_fxMessage.empty()) ApexUi::IconNote(g_fxMessageError ? IconId::TriangleAlert : IconId::Info, g_fxMessage.c_str(), g_fxMessageError ? VioletTheme::kWarning : VioletTheme::kTextMuted);
             if (close) ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
@@ -1220,6 +1452,8 @@ public:
         RegisterShaders();
         g.runner.SetFactory(CreatePs);
         g.runner.SetRenderTargetFn(D3D9Hooks::CallOriginalSetRenderTarget);
+        Looks::Fx::SetBindFunctions(D3D9Hooks::CallOriginalSetRenderTarget, ExtraHooks::RawSetDepthStencilSurface);
+        Looks::Fx::RequestScan(); // the player's .fx files compile in the background (unchanged ones are kept)
         LoadPreset();
         DepthShare::Request(true); // shaders that use depth read the scene depth
         PostScene::WantCamera(true, /*plain*/ false);
@@ -1403,8 +1637,17 @@ public:
                 for (auto& k : g.skipped) s += k + "  ";
                 ApexUi::IconNote(IconId::Info, s.c_str(), VioletTheme::kWarning);
             }
-            if (ApexUi::TextButton("Reload", "Read the look's .ini again")) { LoadPreset(); g.runner.Release(); }
-            if (g.runner.GpuBytes()) ImGui::TextDisabled("GPU memory: %.0f MB", g.runner.GpuBytes() / 1048576.0);
+            if (ApexUi::TextButton("Reload", "Read the look's .ini again and compile the Shaders folder again"))
+            {
+                LoadPreset();
+                ReleaseGpu();
+                Looks::Fx::RequestScan(true);
+            }
+            const uint64_t gpu = g.runner.GpuBytes() + Looks::Fx::GpuBytes();
+            if (gpu) ImGui::TextDisabled("GPU memory: %.0f MB", gpu / 1048576.0);
+            // why the player's .fx techniques that do not run were refused (the public menu lists only what runs)
+            for (const auto& l : Looks::Fx::List())
+                if (l.index < 0) ImGui::TextDisabled("%s (%s): %s", l.technique.c_str(), l.file.c_str(), l.reason.c_str());
             ApexUi::EndAdvanced();
         }
         if (changed) NotifySettingChanged();
@@ -1415,10 +1658,20 @@ public:
     {
         bool changed = false, openSave = false, openAdd = false, reorder = false;
         const int total = RunnableCount(false), onN = RunnableCount(true);
+        // Shaders the look names that Apex can't run: a missing .fx file, one being compiled, or one that can't run here
+        std::vector<size_t> cant;
+        int missingFiles = 0;
+        for (size_t i = 0; i < g.order.size(); ++i)
+            if (!Runnable(i))
+            {
+                cant.push_back(i);
+                missingFiles += !Looks::Fx::HasFile(g.order[i].file) && !Looks::Fx::Pending(g.order[i].file);
+            }
+        FxMessages(missingFiles);
         ImGui::PushID("LooksShaders");
         if (ApexUi::BeginCard("##Card"))
         {
-            const std::string sub = I18n::Trf("{} of {} on", onN, total);
+            const std::string sub = cant.empty() ? I18n::Trf("{} of {} on", onN, total) : I18n::Trf("{} of {} on \xC2\xB7 {} missing", onN, total, cant.size());
             bool more = false;
             ApexUi::HeaderExtra extra;
             extra.iconOff = extra.iconOn = IconId::Ellipsis;
@@ -1458,23 +1711,53 @@ public:
                 if (!Runnable(i)) continue;
                 changed |= ShaderRow(i, ++pos, total, reorder); // a move changes the list: drawn again next frame
             }
-            // Shaders the look names that Apex can't run: one line, opened to list them
-            std::vector<size_t> cant;
-            for (size_t i = 0; i < g.order.size(); ++i) if (!Runnable(i)) cant.push_back(i);
+            // ... one line, opened to list them, each saying what to do; the folder actions when a file is missing
             if (!cant.empty() && !ApexUi::FilterActive())
             {
                 const std::string label = I18n::Trf("{} can't run here", cant.size());
                 if (ApexUi::BeginAdvanced("##CantRun", label.c_str()))
                 {
                     for (size_t i : cant)
-                        ApexUi::MutedText(I18n::Trf("{} ({}): not built into Apex", g.order[i].technique, g.order[i].file).c_str());
+                    {
+                        const auto& e = g.order[i];
+                        if (Looks::Fx::Pending(e.file))
+                            ApexUi::MutedText(I18n::Trf("{} ({}): checking the file\xE2\x80\xA6", e.technique, e.file).c_str());
+                        else if (!Looks::Fx::HasFile(e.file))
+                            ApexUi::MutedText(I18n::Trf("{} ({}): add this file to the Shaders folder", e.technique, e.file).c_str());
+                        else
+                            ApexUi::MutedText(I18n::Trf("{} doesn't run in The Sims 3", e.technique).c_str());
+                    }
+                    if (missingFiles)
+                    {
+                        ApexUi::Gap(ApexUi::kSpace2);
+                        const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+                        const float gap = ApexUi::kSpace2 * ApexUi::Unit();
+                        const float right = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+                        // a row of buttons that wraps when narrow
+                        auto next = [&](const char* label, bool icon) {
+                            if (ImGui::GetItemRectMax().x + gap + ApexUi::ButtonWidth(I18n::Tr(label), icon) <= right) ImGui::SameLine(0.0f, gap);
+                        };
+                        const char* addFx = "Add .fx files\xE2\x80\xA6";
+                        if (ApexUi::IconTextButton(addFx, IconId::Plus, "Copy .fx, .fxh and texture files into the Shaders folder")) PickFxFiles();
+                        next("Open the Shaders folder", true);
+                        if (ApexUi::IconTextButton("Open the Shaders folder", IconId::FolderOpen)) ShowShadersFolder();
+                        next("Check again", true);
+                        if (ApexUi::IconTextButton("Check again", IconId::RotateCcw, "Look in the Shaders folder again and compile what changed"))
+                        {
+                            Looks::Fx::RequestScan(true);
+                            g_checkPending = true;
+                            g_fxMessage.clear();
+                        }
+                    }
+                    if (!g_fxMessage.empty())
+                        ApexUi::IconNote(g_fxMessageError ? IconId::TriangleAlert : IconId::Info, g_fxMessage.c_str(), g_fxMessageError ? VioletTheme::kWarning : VioletTheme::kTextMuted);
                     ApexUi::EndAdvanced();
                 }
             }
             if (!ApexUi::FilterActive() && g.loaded)
             {
                 ApexUi::Gap(ApexUi::kSpace2);
-                if (ApexUi::IconTextButton("Add a shader", IconId::Plus, "Add one of Apex's built-in shaders to this look")) openAdd = true;
+                if (ApexUi::IconTextButton("Add a shader", IconId::Plus, "Add a built-in shader or one of your own .fx files to this look")) openAdd = true;
                 // saving is a visible action, not only in the menu: the list and its values as a .ini in the Looks folder
                 const char* save = "Save as a new look\xE2\x80\xA6";
                 if (ImGui::GetItemRectMax().x + ApexUi::kSpace2 * ApexUi::Unit() + ApexUi::ButtonWidth(I18n::Tr(save), true) <= ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x)
@@ -1487,6 +1770,52 @@ public:
         changed |= AddShaderModal(openAdd);
         ImGui::PopID();
         if (changed) NotifySettingChanged();
+    }
+
+    // The Shader library card, under the look's cards: where shaders come from, one row per source
+    void LibraryCard()
+    {
+        ImGui::PushID("LooksLibrary");
+        if (ApexUi::BeginCard("##Card"))
+        {
+            const int total = ShaderTotal();
+            const std::string sub = total == 1 ? std::string(I18n::Tr("1 shader")) : I18n::Trf("{} shaders", total);
+            ApexUi::CardHeader(IconId::Layers, "Shader library", sub.c_str(), "Every shader you can add to a look", nullptr, true);
+            if (!ApexUi::FilterActive()) ApexUi::CardDivider();
+            const float u = ApexUi::Unit();
+            for (const ShaderSource& src : ShaderSources())
+            {
+                ImGui::PushID(src.name);
+                const int n = (int)src.shaders.size();
+                const std::string count = n == 1 ? std::string(I18n::Tr("1 shader")) : I18n::Trf("{} shaders", n);
+                const char* note = src.mine && Looks::Fx::Scanning() ? "Checking your shaders\xE2\x80\xA6" : src.rowNote;
+                const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+                const char* addFx = "Add .fx files\xE2\x80\xA6";
+                const float gap = ApexUi::kSpace2 * u;
+                const float countW = ImGui::CalcTextSize(count.c_str()).x;
+                const float width = countW + (src.mine ? gap + ApexUi::ButtonWidth(I18n::Tr(addFx), true) + gap + ImGui::GetFrameHeight() : 0.0f);
+                if (ApexUi::BeginControlRow(src.row, I18n::Tr(note), width))
+                {
+                    const float y = ImGui::GetCursorPosY();
+                    ImGui::SetCursorPosY(y + (ImGui::GetFrameHeight() - ImGui::GetTextLineHeight()) * 0.5f);
+                    ImGui::TextDisabled("%s", count.c_str());
+                    if (src.mine)
+                    {
+                        ImGui::SameLine(0.0f, gap);
+                        ImGui::SetCursorPosY(y);
+                        if (ApexUi::IconTextButton(addFx, IconId::Plus, "Copy .fx, .fxh and texture files into the Shaders folder")) PickFxFiles();
+                        ImGui::SameLine(0.0f, gap);
+                        if (ApexUi::IconButton("##Folder", IconId::FolderOpen, "Open the Shaders folder", false, ImGui::GetFrameHeight() / u)) ShowShadersFolder();
+                    }
+                    ApexUi::EndControlRow();
+                }
+                ImGui::PopID();
+            }
+            if (!g_fxMessage.empty() && !ApexUi::FilterActive())
+                ApexUi::IconNote(g_fxMessageError ? IconId::TriangleAlert : IconId::Info, g_fxMessage.c_str(), g_fxMessageError ? VioletTheme::kWarning : VioletTheme::kTextMuted);
+        }
+        ApexUi::EndCard();
+        ImGui::PopID();
     }
 };
 
@@ -1515,7 +1844,9 @@ void HoldBypass() { g_holdUntil = GetTickCount64() + 150; }
 
 void ShadersCard()
 {
-    if (g_patch) g_patch->ShadersCard();
+    if (!g_patch) return;
+    g_patch->ShadersCard();
+    g_patch->LibraryCard();
 }
 
 } // namespace Looks

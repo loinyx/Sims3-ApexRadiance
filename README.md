@@ -239,6 +239,7 @@ Follow the [build workflow](docs/workflow.md#1-build) for dependency paths, publ
 - The restart host (`ts3wrap.exe`) is adapted from Dalexlol's wrapper in [sims3-modernization](https://github.com/rodneypantonial/sims3-modernization).
 - Looks and Capture: contributed by [@ModestPixels](https://github.com/ModestPixels).
 - ReShade shaders in Looks: [CeeJay.dk](https://github.com/CeeJayDK/SweetFX) (SweetFX, MIT), bacondither (AdaptiveSharpen and Colourfulness, BSD 2-Clause style, from [reshade-shaders](https://github.com/crosire/reshade-shaders/tree/legacy)), [prod80](https://github.com/prod80/prod80-ReShade-Repository) (MIT), AMD (FidelityFX CAS, MIT), [Daodan317081](https://github.com/Daodan317081/reshade-shaders) (RetroTint, BSD 3-Clause); see `third_party/reshade_shaders/LICENSES.md`.
+- ReShade FX compiler by [crosire](https://github.com/crosire/reshade), BSD-3-Clause: it compiles the players' own .fx shaders in Looks; see `third_party/reshadefx/LICENSE.md`.
 - Thanks to @boringbones for testing every build.
 - The optional RTX Remix bridge download is [NVIDIA's RTX Remix bridge](https://github.com/NVIDIAGameWorks/dxvk-remix) (MIT), ported to The Sims 3 by dalexlol and alexvixell35-stack in sims3-modernization, with [DXVK](https://github.com/doitsujin/dxvk) by Philip Rebohle (zlib).
 - The in-game test runner (`tools/ingame_runner/`) is adapted from [sims3-modernization](https://github.com/rodneypantonial/sims3-modernization) (MIT), its test agent forked from [Sims3-MCP](https://github.com/Critical-Reynolds/Sims3-MCP) (MIT).

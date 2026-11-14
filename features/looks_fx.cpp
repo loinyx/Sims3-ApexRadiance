@@ -1,0 +1,966 @@
+// Looks: compile and run the player's own ReShade FX effects (see looks_fx.h). The GPU side mirrors ReShade 6.7.3's
+// Direct3D 9 runtime for one technique: COLOR is copied from the picture at the technique's start and after any pass that
+// wrote the picture; render targets are cleared to zero when created; stencil only for full-size passes, cleared at first
+// use; auto-generated mips; vertex ids in a float TEXCOORD0 stream; __TEXEL_SIZE__ at VS c255; uniforms in PS and VS
+// constants from c0.
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <wincodec.h>
+#pragma comment(lib, "windowscodecs.lib")
+#pragma comment(lib, "ole32.lib")
+#include "looks_fx.h"
+#include "third_party/reshadefx/effect_parser.hpp"
+#include "third_party/reshadefx/effect_codegen.hpp"
+#include "third_party/reshadefx/effect_preprocessor.hpp"
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <functional>
+#include <map>
+#include <d3dcompiler.h>
+#pragma comment(lib, "d3dcompiler.lib")
+
+namespace Looks::Fx {
+
+const Ann* FindAnn(const std::vector<Ann>& as, const char* name)
+{
+    for (const Ann& a : as) if (a.name == name) return &a;
+    return nullptr;
+}
+
+// ============================================================================================== files
+namespace {
+
+std::wstring Lower(std::wstring s)
+{
+    for (wchar_t& c : s) c = (wchar_t)towlower(c);
+    return s;
+}
+
+std::wstring FullPath(const std::wstring& p)
+{
+    wchar_t buf[MAX_PATH * 2];
+    const DWORD n = GetFullPathNameW(p.c_str(), (DWORD)std::size(buf), buf, nullptr);
+    return n && n < std::size(buf) ? std::wstring(buf, n) : std::wstring();
+}
+
+bool FileSize(const std::wstring& path, uint64_t& size)
+{
+    WIN32_FILE_ATTRIBUTE_DATA a{};
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &a) || (a.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) return false;
+    size = ((uint64_t)a.nFileSizeHigh << 32) | a.nFileSizeLow;
+    return true;
+}
+
+bool ReadCapped(const std::wstring& path, size_t cap, std::string& out)
+{
+    uint64_t size = 0;
+    if (!FileSize(path, size) || size > cap) return false;
+    HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    out.resize((size_t)size);
+    DWORD got = 0;
+    const bool ok = size == 0 || (ReadFile(h, out.data(), (DWORD)size, &got, nullptr) && got == size);
+    CloseHandle(h);
+    return ok;
+}
+
+std::string Utf8(const std::wstring& w)
+{
+    if (w.empty()) return {};
+    const int n = WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), nullptr, 0, nullptr, nullptr);
+    std::string s(n > 0 ? n : 0, '\0');
+    if (n > 0) WideCharToMultiByte(CP_UTF8, 0, w.data(), (int)w.size(), s.data(), n, nullptr, nullptr);
+    return s;
+}
+
+std::wstring Wide(const std::string& s)
+{
+    if (s.empty()) return {};
+    const int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), nullptr, 0);
+    std::wstring w(n > 0 ? n : 0, L'\0');
+    if (n > 0) MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), w.data(), n);
+    return w;
+}
+
+// Finds a texture file by name under the texture folders (and up to three levels of subfolders), inside root
+std::wstring FindTextureFile(const Folders& f, const std::string& name)
+{
+    std::wstring n = Wide(name);
+    std::replace(n.begin(), n.end(), L'/', L'\\');
+    if (n.empty() || n.find(L':') != std::wstring::npos || n[0] == L'\\') return {};
+    if (n.find(L"..") != std::wstring::npos) return {};
+    std::function<std::wstring(const std::wstring&, int)> search = [&](const std::wstring& dir, int depth) -> std::wstring {
+        uint64_t size = 0;
+        const std::wstring direct = dir + n;
+        if (FileSize(direct, size) && InsideRoot(f.root, FullPath(direct))) return FullPath(direct);
+        if (depth == 0) return {};
+        WIN32_FIND_DATAW fd;
+        HANDLE h = FindFirstFileW((dir + L"*").c_str(), &fd);
+        if (h == INVALID_HANDLE_VALUE) return {};
+        std::wstring found;
+        int dirs = 0;
+        do
+        {
+            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) || (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) || fd.cFileName[0] == L'.') continue;
+            if (++dirs > 200) break;
+            found = search(dir + fd.cFileName + L"\\", depth - 1);
+        } while (found.empty() && FindNextFileW(h, &fd));
+        FindClose(h);
+        return found;
+    };
+    for (const std::wstring& d : f.textureDirs)
+        if (std::wstring p = search(d, 3); !p.empty()) return p;
+    return {};
+}
+
+struct IncludeContext
+{
+    std::wstring root;
+    size_t count = 0;
+};
+
+bool IncludeFilter(void* context, const std::filesystem::path& path)
+{
+    IncludeContext& c = *static_cast<IncludeContext*>(context);
+    if (++c.count > kMaxIncludes) return false;
+    const std::wstring full = FullPath(path.wstring());
+    if (path.wstring().find(L"..") != std::wstring::npos || !InsideRoot(c.root, full)) return false;
+    uint64_t size = 0;
+    return !FileSize(full, size) || size <= kMaxFxBytes; // a missing file is the preprocessor's own error
+}
+
+// Short, path-free reason from compiler output: the first error line, without the folder and the error code
+std::string ReasonFrom(const std::string& text, const std::wstring& root)
+{
+    std::string line;
+    for (size_t pos = 0; pos < text.size();)
+    {
+        size_t e = text.find('\n', pos);
+        if (e == std::string::npos) e = text.size();
+        std::string l = text.substr(pos, e - pos);
+        pos = e + 1;
+        if (l.find("error") != std::string::npos) { line = l; break; }
+        if (line.empty()) line = l;
+    }
+    while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+    const std::string r = Utf8(root);
+    for (size_t p; !r.empty() && (p = line.find(r)) != std::string::npos;) line.erase(p, r.size());
+    const size_t err = line.find("error X");
+    if (err != std::string::npos)
+    {
+        const std::string code = line.substr(err + 6, 5);
+        const size_t colon = line.find(": ", err);
+        const std::string msg = colon == std::string::npos ? line.substr(err) : line.substr(colon + 2);
+        if (code == "X5608" || code == "X5609") return "too many instructions for shader model 3.0";
+        if (code == "X4505" || code == "X5589") return "uses more registers than shader model 3.0 has";
+        if (code == "X3511") return "has a loop shader model 3.0 cannot unroll";
+        if (code == "X4014" || code == "X4121") return "has a loop shader model 3.0 cannot run (gradients in a loop)";
+        if (code == "X3004" || code == "X3013" || code == "X3018") return "the shader code does not compile: " + msg;
+        line = msg;
+    }
+    if (line.size() > 200) line = line.substr(0, 200) + "...";
+    return line;
+}
+
+std::vector<float> Floats(const reshadefx::type& t, const reshadefx::constant& c, unsigned n)
+{
+    std::vector<float> v(n, 0.0f);
+    for (unsigned i = 0; i < n && i < 16; ++i)
+    {
+        switch (t.base)
+        {
+        case reshadefx::type::t_float: case reshadefx::type::t_min16float: v[i] = c.as_float[i]; break;
+        case reshadefx::type::t_int: case reshadefx::type::t_min16int: v[i] = (float)c.as_int[i]; break;
+        default: v[i] = (float)c.as_uint[i]; break;
+        }
+    }
+    return v;
+}
+
+std::vector<Ann> Anns(const std::vector<reshadefx::annotation>& in)
+{
+    std::vector<Ann> out;
+    for (const auto& a : in)
+    {
+        Ann x;
+        x.name = a.name;
+        x.isString = a.type.base == reshadefx::type::t_string;
+        if (x.isString) x.s = a.value.string_data;
+        else { auto f = Floats(a.type, a.value, std::min(4u, a.type.components())); std::copy(f.begin(), f.end(), x.f); }
+        out.push_back(std::move(x));
+    }
+    return out;
+}
+
+// reshadefx texture format -> Direct3D 9. Formats D3D9 does not have are lowered to the nearest one that holds the same
+// values (*lowered names the fallback, for the log and tools/looks_fx_check). Shader model 3.0 reads every texture as
+// float, so integer textures become 32-bit float ones (exact up to 2^24).
+D3DFORMAT Format(reshadefx::texture_format f, const char** lowered)
+{
+    using tf = reshadefx::texture_format;
+    *lowered = "";
+    switch (f)
+    {
+    case tf::unknown: case tf::rgba8: return D3DFMT_A8R8G8B8;
+    case tf::r8: return D3DFMT_L8;
+    case tf::r16: return D3DFMT_L16;
+    case tf::r16f: return D3DFMT_R16F;
+    case tf::r32f: return D3DFMT_R32F;
+    case tf::rg8: *lowered = "RG8 as RGBA8"; return D3DFMT_A8R8G8B8; // no two-channel 8-bit render target format
+    case tf::rg16: return D3DFMT_G16R16;
+    case tf::rg16f: return D3DFMT_G16R16F;
+    case tf::rg32f: return D3DFMT_G32R32F;
+    case tf::rgba16: return D3DFMT_A16B16G16R16;
+    case tf::rgba16f: return D3DFMT_A16B16G16R16F;
+    case tf::rgba32f: return D3DFMT_A32B32G32R32F;
+    case tf::rgb10a2: return D3DFMT_A2B10G10R10;
+    case tf::rg11b10f: *lowered = "RG11B10F as RGBA16F"; return D3DFMT_A16B16G16R16F;
+    case tf::r32i: *lowered = "R32I as R32F"; return D3DFMT_R32F;
+    case tf::r32u: *lowered = "R32U as R32F"; return D3DFMT_R32F;
+    case tf::rgba32i: *lowered = "RGBA32I as RGBA32F"; return D3DFMT_A32B32G32R32F;
+    case tf::rgba32u: *lowered = "RGBA32U as RGBA32F"; return D3DFMT_A32B32G32R32F;
+    }
+    return D3DFMT_A8R8G8B8;
+}
+
+// D3DCompile of one entry point's shader model 3.0 HLSL. ReShade compiles with optimisation level 3 (performance mode)
+// or 1; when that fails here the other flag sets D3D9 offers are tried in turn: flow control kept (loops it cannot unroll,
+// fewer instruction slots), flow control avoided (gradients inside loops), then no optimisation. *used names the set that
+// worked when it was not the first.
+bool CompileSm3(const std::string& hlsl, const std::string& entry, bool vs, std::vector<uint8_t>& code, std::string& errors, std::string* used)
+{
+    struct Try { UINT flags; const char* name; };
+    static const Try kTries[] = {
+        { D3DCOMPILE_OPTIMIZATION_LEVEL3, "" },
+        { D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_PREFER_FLOW_CONTROL, "flow control kept" },
+        { D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_AVOID_FLOW_CONTROL, "flow control avoided" },
+        { D3DCOMPILE_OPTIMIZATION_LEVEL1, "optimisation level 1" },
+        { D3DCOMPILE_SKIP_OPTIMIZATION, "no optimisation" },
+    };
+    for (const Try& t : kTries)
+    {
+        ID3DBlob* blob = nullptr; ID3DBlob* err = nullptr;
+        const HRESULT hr = D3DCompile(hlsl.data(), hlsl.size(), nullptr, nullptr, nullptr, entry.c_str(), vs ? "vs_3_0" : "ps_3_0", t.flags, 0, &blob, &err);
+        if (err)
+        {
+            if (&t == kTries) errors.assign((const char*)err->GetBufferPointer(), err->GetBufferSize());
+            err->Release();
+        }
+        if (SUCCEEDED(hr) && blob && blob->GetBufferSize() >= 8)
+        {
+            code.assign((const uint8_t*)blob->GetBufferPointer(), (const uint8_t*)blob->GetBufferPointer() + blob->GetBufferSize());
+            blob->Release();
+            if (used) *used = t.name;
+            return true;
+        }
+        if (blob) blob->Release();
+    }
+    return false;
+}
+
+uint32_t BytesPerPixel(D3DFORMAT f)
+{
+    switch (f)
+    {
+    case D3DFMT_L8: return 1;
+    case D3DFMT_L16: case D3DFMT_R16F: return 2;
+    case D3DFMT_A16B16G16R16: case D3DFMT_A16B16G16R16F: case D3DFMT_G32R32F: return 8;
+    case D3DFMT_A32B32G32R32F: return 16;
+    default: return 4;
+    }
+}
+
+uint32_t Blend(reshadefx::blend_factor f)
+{
+    using bf = reshadefx::blend_factor;
+    switch (f)
+    {
+    case bf::zero: return D3DBLEND_ZERO;
+    case bf::one: return D3DBLEND_ONE;
+    case bf::source_color: return D3DBLEND_SRCCOLOR;
+    case bf::one_minus_source_color: return D3DBLEND_INVSRCCOLOR;
+    case bf::dest_color: return D3DBLEND_DESTCOLOR;
+    case bf::one_minus_dest_color: return D3DBLEND_INVDESTCOLOR;
+    case bf::source_alpha: return D3DBLEND_SRCALPHA;
+    case bf::one_minus_source_alpha: return D3DBLEND_INVSRCALPHA;
+    case bf::dest_alpha: return D3DBLEND_DESTALPHA;
+    case bf::one_minus_dest_alpha: return D3DBLEND_INVDESTALPHA;
+    }
+    return D3DBLEND_ONE;
+}
+
+uint32_t StencilOp(reshadefx::stencil_op o)
+{
+    using so = reshadefx::stencil_op;
+    switch (o)
+    {
+    case so::zero: return D3DSTENCILOP_ZERO;
+    case so::keep: return D3DSTENCILOP_KEEP;
+    case so::replace: return D3DSTENCILOP_REPLACE;
+    case so::increment_saturate: return D3DSTENCILOP_INCRSAT;
+    case so::decrement_saturate: return D3DSTENCILOP_DECRSAT;
+    case so::invert: return D3DSTENCILOP_INVERT;
+    case so::increment: return D3DSTENCILOP_INCR;
+    case so::decrement: return D3DSTENCILOP_DECR;
+    }
+    return D3DSTENCILOP_KEEP;
+}
+
+uint32_t Filter(int bits) { return bits ? D3DTEXF_LINEAR : D3DTEXF_POINT; }
+
+bool CompileImpl(const std::wstring& fxPath, const Folders& folders, UINT W, UINT H, Effect& out)
+{
+    out = Effect{};
+    out.path = fxPath;
+    out.file = Utf8(fxPath.substr(fxPath.find_last_of(L"\\/") + 1));
+    out.width = W; out.height = H;
+    auto fail = [&](std::string why) { out.error = std::move(why); return false; };
+    if (!InsideRoot(folders.root, FullPath(fxPath))) return fail("the file is outside the Shaders folder");
+
+    std::string source;
+    uint64_t size = 0;
+    if (!FileSize(fxPath, size)) return fail("the file can't be read");
+    if (size > kMaxFxBytes) return fail("the file is larger than 2 MB");
+    if (!ReadCapped(fxPath, kMaxFxBytes, source)) return fail("the file can't be read");
+    if (source.size() >= 3 && (unsigned char)source[0] == 0xEF && (unsigned char)source[1] == 0xBB && (unsigned char)source[2] == 0xBF) source.erase(0, 3);
+    source += '\n';
+
+    // ---- preprocess, with the macros ReShade 6.7.3 defines on Direct3D 9
+    reshadefx::preprocessor pp;
+    IncludeContext inc{ folders.root };
+    pp.include_filter = IncludeFilter;
+    pp.include_filter_context = &inc;
+    pp.max_output_size = kMaxPreprocessedBytes;
+    pp.max_tokens = 20u << 20; // a large real effect reads well under a million
+    pp.add_macro_definition("__RESHADE__", "60703");
+    pp.add_macro_definition("__RESHADE_PERMUTATION__", "0");
+    pp.add_macro_definition("__RESHADE_PERFORMANCE_MODE__", "0");
+    pp.add_macro_definition("__VENDOR__", "0");
+    pp.add_macro_definition("__DEVICE__", "0");
+    pp.add_macro_definition("__RENDERER__", "36864"); // 0x9000: Direct3D 9
+    pp.add_macro_definition("__APPLICATION__", std::to_string(std::hash<std::string>()("TS3W") & 0xFFFFFFFF));
+    pp.add_macro_definition("BUFFER_WIDTH", std::to_string(W));
+    pp.add_macro_definition("BUFFER_HEIGHT", std::to_string(H));
+    pp.add_macro_definition("BUFFER_RCP_WIDTH", "(1.0 / BUFFER_WIDTH)");
+    pp.add_macro_definition("BUFFER_RCP_HEIGHT", "(1.0 / BUFFER_HEIGHT)");
+    pp.add_macro_definition("BUFFER_COLOR_SPACE", "1");   // sRGB
+    pp.add_macro_definition("BUFFER_COLOR_FORMAT", "88"); // B8G8R8X8 (the game's back buffer)
+    pp.add_macro_definition("BUFFER_COLOR_BIT_DEPTH", "8");
+    for (const std::wstring& d : folders.includeDirs) pp.add_include_path(d);
+    pp.append_string(
+        "#define tex2Doffset(s, coords, offset) tex2D(s, coords, offset)\n"
+        "#define tex2Dlodoffset(s, coords, offset) tex2Dlod(s, coords, offset)\n"
+        "#define tex2Dgather(s, t, c) tex2Dgather##c(s, t)\n"
+        "#define tex2Dgatheroffset(s, t, o, c) tex2Dgather##c(s, t, o)\n"
+        "#define tex2Dgather0 tex2DgatherR\n"
+        "#define tex2Dgather1 tex2DgatherG\n"
+        "#define tex2Dgather2 tex2DgatherB\n"
+        "#define tex2Dgather3 tex2DgatherA\n");
+    if (!pp.append_string(std::move(source), std::filesystem::path(fxPath)))
+        return fail(ReasonFrom(pp.errors(), folders.root));
+    if (pp.output().size() > kMaxPreprocessedBytes) return fail("the file expands to more than 16 MB of code");
+
+    // ---- parse and generate shader model 3.0 HLSL
+    std::unique_ptr<reshadefx::codegen> cg(reshadefx::create_codegen_hlsl(30, false, false));
+    reshadefx::parser parser;
+    if (!parser.parse(pp.output(), cg.get())) return fail(ReasonFrom(parser.errors(), folders.root));
+    const reshadefx::effect_module& m = cg->module();
+
+    // ---- uniforms
+    for (const reshadefx::uniform& u : m.uniforms)
+    {
+        Uniform x;
+        x.name = u.name;
+        x.base = u.type.is_boolean() ? kBool : u.type.is_floating_point() ? kFloat : u.type.is_signed() ? kInt : kUint;
+        x.rows = (uint8_t)u.type.rows; x.cols = (uint8_t)u.type.cols;
+        x.array = u.type.is_array() ? u.type.array_length : 0;
+        x.offset = u.offset;
+        if (u.has_initializer_value)
+        {
+            if (x.array)
+                for (const auto& el : u.initializer_value.array_data) { auto f = Floats(u.type, el, x.Comps()); x.init.insert(x.init.end(), f.begin(), f.end()); }
+            else x.init = Floats(u.type, u.initializer_value, x.Comps());
+        }
+        x.init.resize((size_t)x.Comps() * std::max(1u, x.array), 0.0f);
+        x.ann = Anns(u.annotations);
+        const uint32_t regs = (u.type.is_matrix() ? x.rows : 1u) * std::max(1u, x.array);
+        out.constRegs = std::max(out.constRegs, u.offset / 16 + regs);
+        out.uniforms.push_back(std::move(x));
+    }
+    if (m.uniforms.size() > 256) return fail("has more than 256 settings");
+
+    // ---- textures
+    if (m.textures.size() > kMaxTextures) return fail("uses more than " + std::to_string(kMaxTextures) + " textures");
+    for (const reshadefx::texture& t : m.textures)
+    {
+        Texture x;
+        x.name = t.name; x.unique = t.unique_name; x.semantic = t.semantic;
+        x.w = t.width; x.h = t.height; x.levels = t.levels;
+        if (!t.semantic.empty() && t.semantic_binding != 0xFFFFFFFF) x.semReg = (int32_t)t.semantic_binding;
+        if (t.semantic.empty())
+        {
+            const char* lowered = "";
+            x.format = Format(t.format, &lowered);
+            if (*lowered) out.notes.push_back(std::string("texture ") + t.name + ": " + lowered);
+            if (t.type == reshadefx::texture_type::texture_3d) x.error = "uses a 3D texture, which Direct3D 9 cannot draw to";
+            else if (t.type == reshadefx::texture_type::texture_1d) { x.h = 1; out.notes.push_back("texture " + t.name + ": 1D as 2D (height 1)"); }
+            else if (x.w > 8192 || x.h > 8192) x.error = "uses a texture larger than 8192 pixels";
+            for (const auto& a : t.annotations)
+                if (a.name == "source" && a.type.base == reshadefx::type::t_string)
+                {
+                    x.format = D3DFMT_A8R8G8B8; // images are uploaded as 8-bit BGRA
+                    x.image = FindTextureFile(folders, a.value.string_data);
+                    uint64_t isz = 0;
+                    if (x.image.empty()) x.error = "needs the texture file " + a.value.string_data + ", which is not in the Textures folder";
+                    else if (!FileSize(x.image, isz) || isz > kMaxTextureFileBytes) x.error = "its texture " + a.value.string_data + " is larger than 64 MB";
+                }
+            if (x.error.empty())
+            {
+                x.bytes = (uint64_t)x.w * x.h * BytesPerPixel(x.format);
+                if (x.levels > 1) x.bytes = x.bytes * 4 / 3;
+                out.gpuBytes += x.bytes;
+            }
+        }
+        else if (t.semantic != "COLOR" && t.semantic != "DEPTH")
+            x.error = "needs the game's " + t.semantic + " texture, which Apex does not provide";
+        out.textures.push_back(std::move(x));
+    }
+    if (out.gpuBytes > kMaxEffectGpuBytes) return fail("needs more than 256 MB of textures");
+    for (const auto& t : out.textures) if (t.semReg >= 0 && (uint32_t)t.semReg < out.constRegs) return fail("uses too many settings for shader model 3.0");
+    if (out.constRegs > (uint32_t)kConstRegs) return fail("uses too many settings for shader model 3.0");
+    auto texIndex = [&](const std::string& unique) {
+        for (size_t i = 0; i < out.textures.size(); ++i) if (out.textures[i].unique == unique) return (int)i;
+        return -1;
+    };
+
+    // ---- samplers
+    for (const reshadefx::sampler& s : m.samplers)
+    {
+        Sampler x;
+        const int ti = texIndex(s.texture_name);
+        x.texture = ti < 0 ? 0 : (uint32_t)ti;
+        const int f = (int)s.filter;
+        if (s.filter == reshadefx::filter_mode::anisotropic) x.minF = x.magF = D3DTEXF_ANISOTROPIC, x.mipF = D3DTEXF_LINEAR;
+        else { x.minF = Filter((f >> 4) & 3); x.magF = Filter((f >> 2) & 3); x.mipF = Filter(f & 3); }
+        x.addrU = (uint32_t)s.address_u; x.addrV = (uint32_t)s.address_v; x.addrW = (uint32_t)s.address_w; // same values as D3DTADDRESS_*
+        x.lodBias = s.lod_bias;
+        x.minLod = std::isfinite(s.min_lod) ? std::max(0.0f, s.min_lod) : 0.0f;
+        out.samplers.push_back(x);
+    }
+
+    // ---- techniques and passes
+    std::map<std::string, int> shaderOf;
+    auto shaderIndex = [&](const std::string& entry, bool vs) {
+        auto it = shaderOf.find(entry);
+        if (it != shaderOf.end()) return it->second;
+        Shader s;
+        s.entry = entry; s.vs = vs;
+        out.shaders.push_back(std::move(s));
+        return shaderOf[entry] = (int)out.shaders.size() - 1;
+    };
+    for (const reshadefx::technique& t : m.techniques)
+    {
+        Technique x;
+        x.name = t.name;
+        x.ann = Anns(t.annotations);
+        if (const Ann* h = FindAnn(x.ann, "hidden")) x.hidden = !h->isString && h->f[0] != 0.0f;
+        auto refuse = [&](std::string why) { if (x.reason.empty()) x.reason = std::move(why); };
+        if (t.passes.size() > kMaxPasses) refuse("has more than 64 passes");
+        for (const reshadefx::pass& p : t.passes)
+        {
+            Pass y;
+            if (!p.cs_entry_point.empty()) { refuse("uses compute shaders, which need Direct3D 11 or later"); continue; }
+            y.vs = shaderIndex(p.vs_entry_point, true);
+            y.ps = p.ps_entry_point.empty() ? -1 : shaderIndex(p.ps_entry_point, false);
+            if (y.ps < 0) refuse("has a pass without a pixel shader");
+            int rts = 0;
+            for (int r = 0; r < 8; ++r)
+            {
+                if (p.render_target_names[r].empty()) continue;
+                if (r >= kMaxRenderTargets) { refuse("draws to more than 4 textures in one pass (Direct3D 9 allows 4)"); break; }
+                y.rt[r] = texIndex(p.render_target_names[r]);
+                ++rts;
+            }
+            y.clear = p.clear_render_targets; y.mips = p.generate_mipmaps; y.srgbWrite = p.srgb_write_enable; y.blend = p.blend_enable[0];
+            y.src = Blend(p.source_color_blend_factor[0]); y.dst = Blend(p.dest_color_blend_factor[0]); y.op = (uint32_t)p.color_blend_op[0];
+            y.srcA = Blend(p.source_alpha_blend_factor[0]); y.dstA = Blend(p.dest_alpha_blend_factor[0]); y.opA = (uint32_t)p.alpha_blend_op[0];
+            for (int r = 0; r < 4; ++r) y.mask[r] = p.render_target_write_mask[r];
+            y.stencil = p.stencil_enable;
+            y.sRef = p.stencil_reference_value; y.sRead = p.stencil_read_mask; y.sWrite = p.stencil_write_mask;
+            y.sFunc = (uint32_t)p.stencil_comparison_func + 1; // never..always -> D3DCMP_NEVER..ALWAYS
+            y.sPass = StencilOp(p.stencil_pass_op); y.sFail = StencilOp(p.stencil_fail_op); y.sZFail = StencilOp(p.stencil_depth_fail_op);
+            y.prim = (uint32_t)p.topology; // same values as D3DPRIMITIVETYPE
+            y.vertices = p.num_vertices;
+            if (y.vertices > kMaxVertices) refuse("draws more than a million vertices in one pass");
+            for (size_t b = 0; b < p.sampler_bindings.size(); ++b)
+            {
+                Binding bd;
+                bd.sampler = (uint32_t)p.sampler_bindings[b].index;
+                bd.reg = p.sampler_bindings[b].entry_point_binding;
+                bd.srgb = b < p.texture_bindings.size() && p.texture_bindings[b].srgb;
+                if (bd.reg >= 16 || bd.sampler >= out.samplers.size()) { refuse("uses more than 16 textures in one pass"); continue; }
+                y.bind.push_back(bd);
+            }
+            // the textures this pass touches
+            auto use = [&](int ti) {
+                if (ti < 0 || ti >= (int)out.textures.size()) return;
+                const Texture& tx = out.textures[ti];
+                if (!tx.error.empty()) refuse(tx.error);
+                if (tx.semantic == "DEPTH") x.needsDepth = true;
+            };
+            for (int r = 0; r < rts; ++r) use(y.rt[r]);
+            for (const Binding& bd : y.bind) use((int)out.samplers[bd.sampler].texture);
+            x.passes.push_back(std::move(y));
+        }
+        out.techniques.push_back(std::move(x));
+    }
+
+    // ---- D3DCompile each entry point a runnable technique uses (vs_3_0 / ps_3_0)
+    std::vector<bool> wanted(out.shaders.size(), false);
+    for (const Technique& t : out.techniques)
+        if (t.reason.empty())
+            for (const Pass& p : t.passes) { if (p.vs >= 0) wanted[p.vs] = true; if (p.ps >= 0) wanted[p.ps] = true; }
+    for (size_t i = 0; i < out.shaders.size(); ++i)
+    {
+        if (!wanted[i]) continue;
+        Shader& s = out.shaders[i];
+        std::string hlsl, unused, errors, used;
+        if (!cg->assemble_code_for_entry_point(s.entry, hlsl, unused, unused)) { s.error = "the shader does not compile"; continue; }
+        if (CompileSm3(hlsl, s.entry, s.vs != 0, s.code, errors, &used)) { if (!used.empty()) out.notes.push_back("shader " + s.entry + ": " + used); }
+        else s.error = ReasonFrom(errors.empty() ? std::string("the shader does not compile") : errors, folders.root);
+    }
+    for (Technique& t : out.techniques)
+        for (const Pass& p : t.passes)
+            for (int si : { p.vs, p.ps })
+                if (si >= 0 && t.reason.empty() && !out.shaders[si].error.empty()) t.reason = out.shaders[si].error;
+    return true;
+}
+
+} // namespace
+
+bool InsideRoot(const std::wstring& root, const std::wstring& path)
+{
+    if (root.empty() || path.size() <= root.size()) return false;
+    std::wstring p = path;
+    std::replace(p.begin(), p.end(), L'/', L'\\');
+    for (size_t s = 0; s <= p.size();)
+    {
+        size_t e = p.find(L'\\', s);
+        if (e == std::wstring::npos) e = p.size();
+        if (p.compare(s, e - s, L"..") == 0) return false;
+        s = e + 1;
+    }
+    return Lower(p.substr(0, root.size())) == Lower(root);
+}
+
+bool Compile(const std::wstring& fxPath, const Folders& folders, UINT width, UINT height, Effect& out)
+{
+    try
+    {
+        return CompileImpl(fxPath, folders, width, height, out);
+    }
+    catch (const std::exception& e)
+    {
+        out.error = std::string("the compiler stopped: ") + e.what();
+    }
+    catch (...)
+    {
+        out.error = "the compiler stopped";
+    }
+    out.techniques.clear();
+    return false;
+}
+
+// ============================================================================================== uniforms
+void SetUniform(const Effect& fx, size_t index, const float* comps, size_t count, std::vector<float>& regs)
+{
+    if (index >= fx.uniforms.size()) return;
+    const Uniform& u = fx.uniforms[index];
+    const bool mat = u.cols > 1;
+    const unsigned rows = mat ? u.rows : 1u, cols = mat ? u.cols : u.Comps();
+    const unsigned per = u.Comps(), elems = std::max(1u, u.array);
+    const size_t base = u.offset / 4; // one float4 register per vector, matrix row and array element
+    for (unsigned e = 0; e < elems; ++e)
+        for (unsigned r = 0; r < rows; ++r)
+            for (unsigned c = 0; c < cols; ++c)
+            {
+                const size_t src = (size_t)e * per + r * cols + c;
+                const size_t dst = base + ((size_t)e * rows + r) * 4 + c;
+                if (src < count && dst < regs.size()) regs[dst] = comps[src];
+            }
+}
+
+void DefaultValues(const Effect& fx, std::vector<float>& regs)
+{
+    regs.assign(std::max<size_t>(4, (size_t)fx.constRegs * 4), 0.0f);
+    for (size_t i = 0; i < fx.uniforms.size(); ++i)
+        SetUniform(fx, i, fx.uniforms[i].init.data(), fx.uniforms[i].init.size(), regs);
+}
+
+void UpdateSources(const Effect& fx, std::vector<float>& regs, SourceState& st)
+{
+    if (st.pingpong.size() != fx.uniforms.size() * 2) st.pingpong.assign(fx.uniforms.size() * 2, 0.0f);
+    for (size_t i = 0; i < fx.uniforms.size(); ++i)
+    {
+        const Uniform& u = fx.uniforms[i];
+        const Ann* src = FindAnn(u.ann, "source");
+        if (!src || !src->isString) continue;
+        const std::string& n = src->s;
+        float v[4] = { 0, 0, 0, 0 };
+        if (n == "timer") v[0] = st.timerMs;
+        else if (n == "frametime") v[0] = st.frametimeMs;
+        else if (n == "framecount") v[0] = (float)st.frame;
+        else if (n == "random")
+        {
+            const Ann* mn = FindAnn(u.ann, "min"); const Ann* mx = FindAnn(u.ann, "max");
+            const int lo = mn ? (int)mn->f[0] : 0, hi = mx ? (int)mx->f[0] : 32767;
+            st.rng = st.rng * 1664525u + 1013904223u;
+            v[0] = (float)(lo + (hi > lo ? (int)((st.rng >> 8) % (uint32_t)(hi - lo + 1)) : 0));
+        }
+        else if (n == "pingpong")
+        {
+            const Ann* mn = FindAnn(u.ann, "min"); const Ann* mx = FindAnn(u.ann, "max"); const Ann* sp = FindAnn(u.ann, "step");
+            const float lo = mn ? mn->f[0] : 0.0f, hi = mx ? mx->f[0] : 1.0f, step = sp ? sp->f[0] : 1.0f;
+            float& val = st.pingpong[i * 2]; float& dir = st.pingpong[i * 2 + 1];
+            if (dir == 0) { dir = 1; val = lo; }
+            val += dir * step * st.frametimeMs * 0.001f;
+            if (val >= hi) { val = hi; dir = -1; } else if (val <= lo) { val = lo; dir = 1; }
+            v[0] = val; v[1] = dir;
+        }
+        else if (n == "date")
+        {
+            SYSTEMTIME t; GetLocalTime(&t);
+            v[0] = t.wYear; v[1] = t.wMonth; v[2] = t.wDay; v[3] = (float)(t.wHour * 3600 + t.wMinute * 60 + t.wSecond);
+        }
+        else if (n == "bufready_depth") v[0] = st.depthReady ? 1.0f : 0.0f;
+        SetUniform(fx, i, v, std::min<size_t>(4, u.Comps()), regs);
+    }
+}
+
+// ============================================================================================== GPU
+namespace {
+
+SetRenderTargetFn g_setRT = nullptr;
+SetDepthStencilFn g_setDS = nullptr;
+void BindRT(IDirect3DDevice9* dev, DWORD i, IDirect3DSurface9* s) { if (g_setRT) g_setRT(dev, i, s); else dev->SetRenderTarget(i, s); }
+void BindDS(IDirect3DDevice9* dev, IDirect3DSurface9* s) { if (g_setDS) g_setDS(dev, s); else dev->SetDepthStencilSurface(s); }
+
+// An image file -> BGRA at w x h (WIC; COM is initialised here when the thread has not done it)
+bool DecodeImage(const std::wstring& path, UINT w, UINT h, std::vector<uint8_t>& bgra)
+{
+    std::string bytes;
+    if (!ReadCapped(path, kMaxTextureFileBytes, bytes)) return false;
+    const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    IWICImagingFactory* f = nullptr; IWICStream* st = nullptr; IWICBitmapDecoder* dec = nullptr;
+    IWICBitmapFrameDecode* fr = nullptr; IWICFormatConverter* conv = nullptr; IWICBitmapScaler* sc = nullptr;
+    UINT iw = 0, ih = 0;
+    bool ok = SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f)))
+        && SUCCEEDED(f->CreateStream(&st)) && SUCCEEDED(st->InitializeFromMemory((BYTE*)bytes.data(), (DWORD)bytes.size()))
+        && SUCCEEDED(f->CreateDecoderFromStream(st, nullptr, WICDecodeMetadataCacheOnDemand, &dec))
+        && SUCCEEDED(dec->GetFrame(0, &fr)) && SUCCEEDED(f->CreateFormatConverter(&conv))
+        && SUCCEEDED(conv->Initialize(fr, GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom))
+        && SUCCEEDED(conv->GetSize(&iw, &ih)) && iw && ih && iw <= 16384 && ih <= 16384;
+    IWICBitmapSource* src = conv;
+    if (ok && (iw != w || ih != h)) // ReShade resizes an image to its texture's size too
+    {
+        ok = SUCCEEDED(f->CreateBitmapScaler(&sc)) && SUCCEEDED(sc->Initialize(conv, w, h, WICBitmapInterpolationModeFant));
+        src = sc;
+    }
+    if (ok) { bgra.resize((size_t)w * h * 4); ok = SUCCEEDED(src->CopyPixels(nullptr, w * 4, (UINT)bgra.size(), bgra.data())); }
+    for (IUnknown* u : std::initializer_list<IUnknown*>{ sc, conv, fr, dec, st, f }) if (u) u->Release();
+    if (SUCCEEDED(com)) CoUninitialize();
+    return ok;
+}
+
+} // namespace
+
+void SetBindFunctions(SetRenderTargetFn rt, SetDepthStencilFn ds) { g_setRT = rt; g_setDS = ds; }
+
+void Instance::Release()
+{
+    for (IDirect3DTexture9* t : tex_) if (t && t != colorTex_) t->Release();
+    tex_.clear();
+    for (IUnknown* s : shaders_) if (s) s->Release();
+    shaders_.clear();
+    if (colorSurf_) colorSurf_->Release(), colorSurf_ = nullptr;
+    if (colorTex_) colorTex_->Release(), colorTex_ = nullptr;
+    if (stencil_) stencil_->Release(), stencil_ = nullptr;
+    if (decl_) decl_->Release(), decl_ = nullptr;
+    if (vb_) vb_->Release(), vb_ = nullptr;
+    fx_.reset();
+    gpuBytes_ = 0;
+}
+
+bool Instance::Create(IDirect3DDevice9* dev, std::shared_ptr<const Effect> fxp, std::string* err)
+{
+    Release();
+    if (!fxp) return false;
+    const Effect& fx = *fxp;
+    auto fail = [&](const std::string& m) { if (err) *err = m; Release(); return false; };
+    const UINT W = fx.width, H = fx.height;
+    if (FAILED(dev->CreateTexture(W, H, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &colorTex_, nullptr)))
+        return fail("could not create the picture copy");
+    colorTex_->GetSurfaceLevel(0, &colorSurf_);
+    gpuBytes_ = (uint64_t)W * H * 4;
+    IDirect3D9* d3d = nullptr;
+    dev->GetDirect3D(&d3d);
+    D3DDEVICE_CREATION_PARAMETERS cp{};
+    dev->GetCreationParameters(&cp);
+
+    tex_.assign(fx.textures.size(), nullptr);
+    for (size_t i = 0; i < fx.textures.size(); ++i)
+    {
+        const Texture& t = fx.textures[i];
+        if (t.semantic == "COLOR") { tex_[i] = colorTex_; continue; }
+        if (!t.semantic.empty() || !t.error.empty()) continue; // DEPTH (bound at Run) / refused: its techniques do not run
+        const DWORD usage = D3DUSAGE_RENDERTARGET | (t.levels > 1 ? D3DUSAGE_AUTOGENMIPMAP : 0);
+        D3DFORMAT fmt = t.format;
+        // L8 / L16 render targets are optional in D3D9: the next wider format samples the same red channel
+        if (d3d && FAILED(d3d->CheckDeviceFormat(cp.AdapterOrdinal, cp.DeviceType, D3DFMT_X8R8G8B8, D3DUSAGE_RENDERTARGET, D3DRTYPE_TEXTURE, fmt)))
+            fmt = fmt == D3DFMT_L8 ? D3DFMT_A8R8G8B8 : fmt == D3DFMT_L16 ? D3DFMT_G16R16 : fmt;
+        if (FAILED(dev->CreateTexture(t.w, t.h, t.levels > 1 ? 0 : 1, usage, fmt, D3DPOOL_DEFAULT, &tex_[i], nullptr)))
+        {
+            if (d3d) d3d->Release();
+            return fail("this graphics card can't create the texture " + t.name);
+        }
+        gpuBytes_ += t.bytes;
+        IDirect3DSurface9* s0 = nullptr;
+        tex_[i]->GetSurfaceLevel(0, &s0);
+        dev->ColorFill(s0, nullptr, 0); // ReShade clears new textures to zero
+        if (!t.image.empty())
+        {
+            std::vector<uint8_t> img;
+            if (!DecodeImage(t.image, t.w, t.h, img)) { s0->Release(); if (d3d) d3d->Release(); return fail("the texture file of " + t.name + " can't be read"); }
+            IDirect3DSurface9* sys = nullptr;
+            if (SUCCEEDED(dev->CreateOffscreenPlainSurface(t.w, t.h, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &sys, nullptr)))
+            {
+                D3DLOCKED_RECT lr;
+                if (SUCCEEDED(sys->LockRect(&lr, nullptr, 0)))
+                {
+                    for (UINT y = 0; y < t.h; ++y) memcpy((char*)lr.pBits + (size_t)y * lr.Pitch, &img[(size_t)y * t.w * 4], (size_t)t.w * 4);
+                    sys->UnlockRect();
+                    dev->UpdateSurface(sys, nullptr, s0, nullptr);
+                }
+                sys->Release();
+            }
+            if (t.levels > 1) { tex_[i]->SetAutoGenFilterType(D3DTEXF_LINEAR); tex_[i]->GenerateMipSubLevels(); }
+        }
+        s0->Release();
+    }
+    if (d3d) d3d->Release();
+
+    shaders_.assign(fx.shaders.size(), nullptr);
+    for (size_t i = 0; i < fx.shaders.size(); ++i)
+    {
+        const Shader& s = fx.shaders[i];
+        if (s.code.size() < 8) continue; // not compiled: its techniques have a reason and do not run
+        HRESULT hr;
+        if (s.vs) { IDirect3DVertexShader9* v = nullptr; hr = dev->CreateVertexShader((const DWORD*)s.code.data(), &v); shaders_[i] = v; }
+        else { IDirect3DPixelShader9* p = nullptr; hr = dev->CreatePixelShader((const DWORD*)s.code.data(), &p); shaders_[i] = p; }
+        if (FAILED(hr)) return fail("the graphics card refused the shader " + s.entry);
+    }
+
+    bool needStencil = false;
+    UINT maxVerts = 3;
+    for (const Technique& t : fx.techniques)
+        for (const Pass& p : t.passes) { needStencil |= p.stencil != 0; maxVerts = std::max(maxVerts, p.vertices); }
+    if (needStencil && FAILED(dev->CreateDepthStencilSurface(W, H, D3DFMT_D24S8, D3DMULTISAMPLE_NONE, 0, FALSE, &stencil_, nullptr)))
+        return fail("could not create the stencil buffer");
+    const D3DVERTEXELEMENT9 el[] = { { 0, 0, D3DDECLTYPE_FLOAT1, D3DDECLMETHOD_DEFAULT, D3DDECLUSAGE_TEXCOORD, 0 }, D3DDECL_END() };
+    if (FAILED(dev->CreateVertexDeclaration(el, &decl_))) return fail("could not create the vertex declaration");
+    if (FAILED(dev->CreateVertexBuffer(maxVerts * sizeof(float), D3DUSAGE_WRITEONLY, 0, D3DPOOL_DEFAULT, &vb_, nullptr))) return fail("could not create the vertex buffer");
+    {
+        void* data = nullptr;
+        if (FAILED(vb_->Lock(0, 0, &data, 0))) return fail("could not fill the vertex buffer");
+        float* f = (float*)data;
+        for (UINT i = 0; i < maxVerts; ++i) f[i] = (float)i;
+        vb_->Unlock();
+    }
+    { D3DCAPS9 caps{}; maxPrims_ = SUCCEEDED(dev->GetDeviceCaps(&caps)) ? std::max<UINT>(1, std::min<UINT>(caps.MaxPrimitiveCount, 0x7FFFFF)) : 0xFFFF; }
+    fx_ = std::move(fxp);
+    return true;
+}
+
+bool Instance::Run(IDirect3DDevice9* dev, size_t technique, IDirect3DSurface9* target, IDirect3DTexture9* depth, const std::vector<float>& regs)
+{
+    if (!fx_ || technique >= fx_->techniques.size() || !target) return false;
+    const Effect& fx = *fx_;
+    const Technique& tech = fx.techniques[technique];
+    if (!tech.reason.empty()) return false;
+    const UINT W = fx.width, H = fx.height;
+
+    // constants: uniforms + semantic pixel sizes (PS c0..223, VS c0..255 with __TEXEL_SIZE__ at c255)
+    std::vector<float>& c = c_;
+    c.assign(256 * 4, 0.0f);
+    std::copy(regs.begin(), regs.begin() + std::min(regs.size(), (size_t)kConstRegs * 4), c.begin());
+    for (const Texture& t : fx.textures)
+        if (t.semReg >= 0 && t.semReg < kConstRegs)
+        {
+            c[t.semReg * 4 + 0] = 1.0f / W; c[t.semReg * 4 + 1] = 1.0f / H; // COLOR and DEPTH are the picture's size here
+        }
+
+    auto texOf = [&](size_t i) { return fx.textures[i].semantic == "DEPTH" ? depth : tex_[i]; };
+    auto texSize = [&](size_t i, UINT& w, UINT& h) {
+        if (!fx.textures[i].semantic.empty()) { w = W; h = H; } else { w = fx.textures[i].w; h = fx.textures[i].h; }
+    };
+
+    // States, samplers and textures are sent only when they change within the technique
+    std::vector<std::pair<DWORD, DWORD>> rsCache;
+    rsCache.reserve(40);
+    auto RS = [&](D3DRENDERSTATETYPE st, DWORD v) {
+        for (auto& e : rsCache) if (e.first == (DWORD)st) { if (e.second != v) { e.second = v; dev->SetRenderState(st, v); } return; }
+        rsCache.push_back({ (DWORD)st, v }); dev->SetRenderState(st, v);
+    };
+    DWORD ssVal[16][14]; bool ssSet[16][14] = {};
+    auto SS = [&](DWORD stage, D3DSAMPLERSTATETYPE st, DWORD v) {
+        if (ssSet[stage][st] && ssVal[stage][st] == v) return;
+        ssSet[stage][st] = true; ssVal[stage][st] = v; dev->SetSamplerState(stage, st, v);
+    };
+    IDirect3DBaseTexture9* bound[16] = {};
+    for (DWORD st = 0; st < 16; ++st) dev->SetTexture(st, nullptr);
+    IDirect3DSurface9* boundRt[4] = { (IDirect3DSurface9*)1, nullptr, nullptr, nullptr }; // RT0 unknown; RT1-3 cleared here
+    for (DWORD r = 1; r < 4; ++r) BindRT(dev, r, nullptr);
+    bool dsKnown = false; IDirect3DSurface9* boundDs = nullptr;
+    bool constsSent = false;
+    IUnknown* curVs = nullptr; IUnknown* curPs = nullptr;
+    dev->SetVertexDeclaration(decl_);
+
+    dev->StretchRect(target, nullptr, colorSurf_, nullptr, D3DTEXF_NONE); // technique start: picture -> COLOR
+    bool dirty = false, stencilCleared = false;
+    for (const Pass& pass : tech.passes)
+    {
+        if (dirty) { dev->StretchRect(target, nullptr, colorSurf_, nullptr, D3DTEXF_NONE); dirty = false; }
+
+        IDirect3DSurface9* rts[4] = {};
+        IDirect3DTexture9* rtTex[4] = {};
+        const bool toPicture = pass.rt[0] < 0;
+        UINT vpw = W, vph = H;
+        if (toPicture) { rts[0] = target; target->AddRef(); }
+        else
+        {
+            for (int r = 0; r < 4 && pass.rt[r] >= 0; ++r)
+            {
+                rtTex[r] = texOf(pass.rt[r]);
+                if (rtTex[r]) rtTex[r]->GetSurfaceLevel(0, &rts[r]);
+            }
+            if (!rts[0]) { for (auto* s : rts) if (s) s->Release(); continue; }
+            texSize(pass.rt[0], vpw, vph);
+        }
+        for (DWORD r = 0; r < 4; ++r) if (boundRt[r] != rts[r]) { BindRT(dev, r, rts[r]); boundRt[r] = rts[r]; }
+        if (pass.clear) for (auto* s : rts) if (s) dev->ColorFill(s, nullptr, 0);
+        D3DVIEWPORT9 vp{ 0, 0, vpw, vph, 0.0f, 1.0f };
+        dev->SetViewport(&vp); // always: a SetRenderTarget(0) resets it
+
+        const bool useStencil = pass.stencil && stencil_ && vpw == W && vph == H;
+        IDirect3DSurface9* wantDs = useStencil ? stencil_ : nullptr;
+        if (!dsKnown || boundDs != wantDs) { BindDS(dev, wantDs); boundDs = wantDs; dsKnown = true; }
+        if (useStencil && !stencilCleared) { dev->Clear(0, nullptr, D3DCLEAR_STENCIL, 0, 1.0f, 0); stencilCleared = true; }
+        RS(D3DRS_ZENABLE, FALSE);
+        RS(D3DRS_ZWRITEENABLE, FALSE);
+        RS(D3DRS_ALPHATESTENABLE, FALSE);
+        RS(D3DRS_FOGENABLE, FALSE);
+        RS(D3DRS_STENCILENABLE, useStencil);
+        if (useStencil)
+        {
+            RS(D3DRS_STENCILFUNC, pass.sFunc);
+            RS(D3DRS_STENCILPASS, pass.sPass);
+            RS(D3DRS_STENCILFAIL, pass.sFail);
+            RS(D3DRS_STENCILZFAIL, pass.sZFail);
+            RS(D3DRS_STENCILREF, pass.sRef);
+            RS(D3DRS_STENCILMASK, pass.sRead);
+            RS(D3DRS_STENCILWRITEMASK, pass.sWrite);
+        }
+        RS(D3DRS_ALPHABLENDENABLE, pass.blend);
+        RS(D3DRS_SEPARATEALPHABLENDENABLE, TRUE);
+        RS(D3DRS_SRCBLEND, pass.src);
+        RS(D3DRS_DESTBLEND, pass.dst);
+        RS(D3DRS_BLENDOP, pass.op);
+        RS(D3DRS_SRCBLENDALPHA, pass.srcA);
+        RS(D3DRS_DESTBLENDALPHA, pass.dstA);
+        RS(D3DRS_BLENDOPALPHA, pass.opA);
+        RS(D3DRS_COLORWRITEENABLE, pass.mask[0]);
+        RS(D3DRS_COLORWRITEENABLE1, pass.mask[1]);
+        RS(D3DRS_COLORWRITEENABLE2, pass.mask[2]);
+        RS(D3DRS_COLORWRITEENABLE3, pass.mask[3]);
+        RS(D3DRS_SRGBWRITEENABLE, pass.srgbWrite);
+        RS(D3DRS_CULLMODE, D3DCULL_NONE);
+        RS(D3DRS_SCISSORTESTENABLE, FALSE);
+        RS(D3DRS_CLIPPLANEENABLE, 0);
+
+        // textures: this pass's bindings; a stage bound earlier and unused now is cleared
+        IDirect3DBaseTexture9* want[16] = {};
+        for (const Binding& bd : pass.bind)
+        {
+            const Sampler& s = fx.samplers[bd.sampler];
+            IDirect3DTexture9* t = texOf(s.texture);
+            for (auto* rt : rtTex) if (rt && rt == t) t = nullptr; // a render target is never sampled in the same pass
+            want[bd.reg] = t;
+            SS(bd.reg, D3DSAMP_MINFILTER, s.minF);
+            SS(bd.reg, D3DSAMP_MAGFILTER, s.magF);
+            SS(bd.reg, D3DSAMP_MIPFILTER, s.mipF);
+            SS(bd.reg, D3DSAMP_ADDRESSU, s.addrU);
+            SS(bd.reg, D3DSAMP_ADDRESSV, s.addrV);
+            SS(bd.reg, D3DSAMP_ADDRESSW, s.addrW);
+            SS(bd.reg, D3DSAMP_BORDERCOLOR, 0);
+            SS(bd.reg, D3DSAMP_SRGBTEXTURE, bd.srgb);
+            float bias = s.lodBias; DWORD biasBits; memcpy(&biasBits, &bias, 4);
+            SS(bd.reg, D3DSAMP_MIPMAPLODBIAS, biasBits);
+            SS(bd.reg, D3DSAMP_MAXMIPLEVEL, (DWORD)s.minLod);
+        }
+        for (DWORD st = 0; st < 16; ++st) if (bound[st] != want[st]) { dev->SetTexture(st, want[st]); bound[st] = want[st]; }
+
+        // the uniforms are the same in every pass, so they go once; only the VS pixel size (c255) follows the viewport
+        const float px0 = -1.0f / vpw, px1 = 1.0f / vph;
+        if (!constsSent)
+        {
+            dev->SetPixelShaderConstantF(0, c.data(), kConstRegs);
+            c[255 * 4 + 0] = px0; c[255 * 4 + 1] = px1;
+            dev->SetVertexShaderConstantF(0, c.data(), 256);
+            constsSent = true;
+        }
+        else if (c[255 * 4 + 0] != px0 || c[255 * 4 + 1] != px1)
+        {
+            c[255 * 4 + 0] = px0; c[255 * 4 + 1] = px1;
+            dev->SetVertexShaderConstantF(255, &c[255 * 4], 1);
+        }
+
+        if (curVs != shaders_[pass.vs]) { curVs = shaders_[pass.vs]; dev->SetVertexShader((IDirect3DVertexShader9*)curVs); }
+        if (curPs != shaders_[pass.ps]) { curPs = shaders_[pass.ps]; dev->SetPixelShader((IDirect3DPixelShader9*)curPs); }
+        UINT prims = pass.vertices / 3;
+        switch (pass.prim)
+        {
+        case D3DPT_POINTLIST: prims = pass.vertices; break;
+        case D3DPT_LINELIST: prims = pass.vertices / 2; break;
+        case D3DPT_LINESTRIP: prims = pass.vertices > 1 ? pass.vertices - 1 : 0; break;
+        case D3DPT_TRIANGLESTRIP: prims = pass.vertices > 2 ? pass.vertices - 2 : 0; break;
+        default: break;
+        }
+        if (prims && curVs && curPs)
+        {
+            // one draw where the device allows it; lists split into chunks otherwise (ids stay absolute through StartVertex)
+            const UINT perPrim = pass.prim == D3DPT_POINTLIST ? 1 : pass.prim == D3DPT_LINELIST ? 2 : pass.prim == D3DPT_TRIANGLELIST ? 3 : 0;
+            dev->SetStreamSource(0, vb_, 0, sizeof(float));
+            if (prims <= maxPrims_ || !perPrim) dev->DrawPrimitive((D3DPRIMITIVETYPE)pass.prim, 0, std::min(prims, maxPrims_));
+            else for (UINT first = 0; first < prims; first += maxPrims_) dev->DrawPrimitive((D3DPRIMITIVETYPE)pass.prim, first * perPrim, std::min(maxPrims_, prims - first));
+        }
+        if (toPicture) dirty = true;
+        else if (pass.mips)
+            for (auto* t : rtTex) if (t && t->GetLevelCount() > 1) { t->SetAutoGenFilterType(D3DTEXF_LINEAR); t->GenerateMipSubLevels(); }
+        for (auto* s : rts) if (s) s->Release();
+    }
+    dev->SetStreamSource(0, nullptr, 0, 0);
+    for (DWORD r = 1; r < 4; ++r) if (boundRt[r]) BindRT(dev, r, nullptr);
+    if (boundRt[0] != target) BindRT(dev, 0, target);
+    if (!dsKnown || boundDs) BindDS(dev, nullptr);
+    for (DWORD st = 0; st < 16; ++st) if (bound[st]) dev->SetTexture(st, nullptr);
+    return true;
+}
+
+} // namespace Looks::Fx

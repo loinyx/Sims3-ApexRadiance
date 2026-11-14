@@ -10,13 +10,14 @@ and can switch, reorder and tune the preset's shaders, then save the result as a
 |---|---|
 | Availability | In development (3.3.0), Experimental |
 | Default | Off |
-| Menu | Image > Color, tab *Shaders* (Lucide `swatch-book`): the *ReShade look* card, then the *Shaders in this look* card |
+| Menu | Image > Color, tab *Shaders* (Lucide `swatch-book`): the *ReShade look* card, the *Shaders in this look* card, then the *Shader library* card (Lucide `layers`) |
 | Configuration | `[patches.Looks]` in `ApexRadiance.toml` (an older `[patches.GShadeLooks]` is read once and written under the new name) |
-| Folders | `Documents\Electronic Arts\The Sims 3\Apex Radiance\Looks\` (the player's looks; created on first use); `Game\Bin\1. Shader Presets\` (GShade's, read-only, listed only when it exists) |
+| Folders | `Documents\Electronic Arts\The Sims 3\Apex Radiance\Looks\` (the player's looks; created on first use); `Game\Bin\1. Shader Presets\` (GShade's, read-only, listed only when it exists); `Documents\Electronic Arts\The Sims 3\Apex Radiance\Shaders\` (the player's .fx files, see [Your shaders](#your-shaders)) |
 | Presets | Part of the Color part; the look's .ini travels in an exported ZIP |
 | Shortcut | *Looks on or off*, `[ui] looks_key` (Ctrl+Shift+L) |
-| Source | [`patches/looks_patch.cpp`](../../patches/looks_patch.cpp) (feature, menu), [`features/looks_preset.cpp`](../../features/looks_preset.cpp) (.ini files, sources), [`features/looks_runner.cpp`](../../features/looks_runner.cpp) (passes), [`features/looks_shaders.h`](../../features/looks_shaders.h), [`shaders/looks_common.hlsl`](../../shaders/looks_common.hlsl), [`third_party/reshade_shaders/`](../../third_party/reshade_shaders/LICENSES.md), [`tools/looks_shaders_gen.py`](../../tools/looks_shaders_gen.py) |
+| Source | [`patches/looks_patch.cpp`](../../patches/looks_patch.cpp) (feature, menu), [`features/looks_preset.cpp`](../../features/looks_preset.cpp) (.ini files, sources), [`features/looks_runner.cpp`](../../features/looks_runner.cpp) (passes), [`features/looks_shaders.h`](../../features/looks_shaders.h), [`shaders/looks_common.hlsl`](../../shaders/looks_common.hlsl), [`third_party/reshade_shaders/`](../../third_party/reshade_shaders/LICENSES.md), [`tools/looks_shaders_gen.py`](../../tools/looks_shaders_gen.py); the player's .fx: [`features/looks_fx.cpp`](../../features/looks_fx.cpp) (compile, GPU run), [`features/looks_fx_catalog.cpp`](../../features/looks_fx_catalog.cpp) (Shaders folder, background scan), [`third_party/reshadefx/`](../../third_party/reshadefx/LICENSE.md) (ReShade's effect compiler) |
 | Validation | [validation/looks.md](../validation/looks.md) |
+| History | [history/looks-fx-loading.md](../history/looks-fx-loading.md) (the player's .fx files) |
 
 ## The problem
 
@@ -37,8 +38,9 @@ order with its values, and blends the result over the picture by *Strength*.
    [Built-in looks](#built-in-looks)). Apex never
    stores an absolute path and never writes in GShade's folder.
 2. The run list is the preset's enabled techniques, plus shaders added here (at the end), in the player's own order
-   when one was set. Techniques Apex has no port for are listed as *can't run here*.
-3. Each built-in shader's values are the .ini's (or the .fx default when the .ini has none) unless edited here.
+   when one was set. A technique runs from a built-in port or, when Apex has none, from the player's Shaders folder
+   ([Your shaders](#your-shaders)); the others are listed as *can't run here*.
+3. Each shader's values are the .ini's (or the .fx default when the .ini has none) unless edited here.
 4. The passes run in Apex's post-scene chain: after Apex's Color (order 45) or before it (35). With *World and menus*
    they run at the end of the frame, like GShade, over menus and loading screens; with *World only* they run on the
    first back-buffer draw after the game's bloom, before the interface.
@@ -60,14 +62,60 @@ look's list*). One row per built-in shader of the run list: a chevron, the name 
 from the .ini) over one short description, the switch. The name side opens its sliders (one per parameter component,
 the .ini's value as each slider's default, so the changed dot and Reset work) in a rounded panel set into the card;
 the panel's footer, under a line, has the bordered buttons Run earlier / Run later, "<pos> of <n>" and *Put back the
-look's values* (under them when narrow). Shaders the look names but Apex cannot run are one line, "<n> can't run here",
-that opens to their names. *Add a shader* opens a list of every built-in shader with a search field and a Kind filter
-(Color, Sharpen, Light, Film & camera, Stylized).
+look's values* (under them when narrow). A shader from the player's folder has the same row, its description being its
+.fx file name. When some shaders of the look cannot run, the subtitle reads "<on> of <total> on · <n> missing" and one
+line, "<n> can't run here", opens to one line per shader that says what to do: "<Technique> (<file>.fx): add this file
+to the Shaders folder" for a missing file, "<Technique> (<file>.fx): checking the file…" while it compiles, and
+"<Technique> doesn't run in The Sims 3" for a file that is there but cannot run on Direct3D 9 (no detail). When a file
+is missing, a row of compact buttons that wraps when narrow follows: *Add .fx files…*, *Open the Shaders folder* and
+*Check again* (compiles the folder again, then "All shaders found" or "<n> still missing"). No modal opens on its own.
+
+*Add a shader* opens a modal with every shader that runs here, grouped by source under collapsible headers with their
+count ("Apex · 17", "Your shaders · <n>", with the folder button); a source with nothing to show is hidden. A search
+field matches shader, description, source or author; the Kind filter (Color, Sharpen, Light, Film & camera, Stylized)
+applies to the built-in ports. The list spans the modal edge to edge; under it, "Missing something? Get more packs or
+add your own .fx files." and *Add .fx files…*. Shaders that cannot run here are never listed.
+
+**Shader library** card: "<n> shaders" (only what runs here), one row per source: *Built into Apex* ("17 shaders") and
+*Your shaders* (".fx files in the Shaders folder", "Checking your shaders…" while it compiles; its count, *Add .fx
+files…* and the folder button). Its controls go under the text when narrow. The sources are a list in the code
+(`ShaderSources`, name, author, licence, folder), so downloaded packs can join it later.
 
 *Import* opens the Windows file picker (off the render thread) and copies the .ini into Looks\: a different
 file with the same name gets a numbered name ("Name-1.ini"), the same file is reused; a file without `Techniques=` or
 `TechniqueSorting=` is refused. *Save as a new look…* writes Looks\<name>.ini (replacing a look of that name after a
 note) with the run list, the switches and the edited values, then selects it.
+
+## Your shaders
+
+The player's own ReShade or GShade effects run too. They go in `Documents\Electronic Arts\The Sims 3\Apex Radiance\Shaders\`,
+laid out as ReShade lays out `reshade-shaders`: `.fx` and `.fxh` files in `Shaders\` (subfolders allowed, three deep) or
+directly in the folder, textures in `Textures\`. *Add .fx files…* copies picked files there (off the render thread):
+`.fx` and `.fxh` into `Shaders\`, images (`.png`, `.jpg`, `.jpeg`, `.bmp`, `.dds`) into `Textures\`, anything else is
+refused; the same file is reused and a different file of that name gets a numbered name ("Name-1.fx").
+
+- When Looks is turned on, every `.fx` compiles on a background thread with ReShade's own effect compiler (vendored,
+  BSD 3-Clause) and its shader model 3.0 code generator, the path ReShade itself uses on Direct3D 9, for the picture's
+  size. Shaders appear in the menu as they compile; unchanged files are not compiled again in the session.
+- A preset that names a technique of those files runs it in its place in the run list, with the .ini's values, beside the
+  built-in ports. A built-in port of the same technique and file wins.
+- What runs: vertex and pixel shader passes with their render targets (up to 4 per pass), blending, stencil, sRGB
+  reads and writes, mipmaps, clears, texture files, ReShade's uniform sources (timer, frame time, frame count, random,
+  ping-pong, date, depth ready; keys and mouse stay 0), the `COLOR` and `DEPTH` textures (depth from the scene, so depth
+  shaders run on the world, never over the interface).
+- Direct3D 9 fallbacks before a shader is refused: formats D3D9 does not have are lowered to the nearest one (RG8 to
+  RGBA8, RG11B10F to RGBA16F, integer textures to 32-bit float, 1D to 2D); other compile flags are tried when the first
+  set fails.
+- What does not run: compute shaders, more than 4 render targets in one pass, 3D render targets, integer bitwise
+  operators, other texture semantics, missing texture files; the log and the developer build's *Live counters* give
+  the reason.
+- Limits: 2 MB per .fx or included file, 64 includes, 16 MB of preprocessed code, 64 MB per texture file, 64 textures and
+  256 MB of textures per effect, 384 MB for every user effect running, 64 passes per technique, 256 user passes per frame,
+  two minutes of compile time per file. Includes and textures must stay inside the Shaders folder (`..` and absolute
+  paths are refused). A file that crashes or hangs the compiler is refused, not the game.
+
+Measured offline over six common packs (AlucardDH, SweetFX, reshade-shaders slim and legacy, prod80, FXShaders): 146 of
+148 techniques run on Direct3D 9 ([history](../history/looks-fx-loading.md)).
 
 ## Built-in looks
 
@@ -91,7 +139,8 @@ Each port is the author's `.fx` from the author's public repository, with only m
 constant registers, includes and techniques replaced, ReShade's sampler names mapped to Apex's). The table of files,
 repositories, authors and licences, and the licence texts, are in
 [third_party/reshade_shaders/LICENSES.md](../../third_party/reshade_shaders/LICENSES.md); Settings > About shows the
-texts under *Third-party licenses*.
+texts under *Third-party licenses*, with the licence of ReShade's effect compiler (crosire, BSD 3-Clause,
+[third_party/reshadefx/LICENSE.md](../../third_party/reshadefx/LICENSE.md)), which compiles the player's own .fx files.
 
 | Source | Shaders | Licence |
 |---|---|---|
@@ -124,7 +173,7 @@ The earlier ports came from GShade's copies, which differ from the authors' code
 | Applies to | `onUi` | bool | off (World only) | | On: World and menus, the interface, menus and loading screens get the look too |
 | Advanced > Order | `beforeColor` | bool | off (After Apex Color) | | Runs the look before Apex's Color instead of after it |
 | Shader switches | `off` | array of technique names | empty | at most 256 read | The look's shaders switched off here |
-| Add a shader | `extra` | array of `Tech@File.fx` | empty | at most 256 read | Built-in shaders added to the look |
+| Add a shader | `extra` | array of `Tech@File.fx` | empty | at most 256 read | Shaders added to the look (built-in or from the Shaders folder) |
 | Run earlier / Run later | `runOrder` | array of `Tech@File.fx` | empty (the .ini's order) | at most 256 read | The run order |
 | Shader sliders | `tweaks` | table: technique = 4 floats per parameter | empty | at most 64 shaders, 256 values each | Edited values; a shader back at the .ini's values is dropped |
 
@@ -152,9 +201,12 @@ refused. Built-in looks (`apex:`) need no file.
 
 ## Limitations
 
-- Only the 17 ported shaders run (Levels, Technicolor2, RetroTint, DPX, AdaptiveSharpen, Vibrance, Tint (Sepia),
+- Built in: the 17 ported shaders (Levels, Technicolor2, RetroTint, DPX, AdaptiveSharpen, Vibrance, Tint (Sepia),
   Tonemap, Colourfulness, LumaSharpen, CAS, Curves, Vignette, Technicolor, HDR (FakeHDR), PD80 Selective Color,
-  LiftGammaGain); other techniques of a preset are listed as *can't run here*.
+  LiftGammaGain); other techniques run from the player's Shaders folder or are listed as *can't run here*.
+- The player's effects compile for the picture's size (`BUFFER_WIDTH` is a constant in ReShade): after a resolution
+  change they wait while the folder compiles again. A changed `.fxh` alone is noticed by *Check again*, not by the
+  automatic scan.
 - `PreprocessorDefinitions` of a preset are not applied: the ports are compiled with the .fx defaults.
 - *Reset all settings* resets the switch, Strength, Applies to and Order; the chosen look and its edits stay.
 
@@ -168,6 +220,10 @@ refused. Built-in looks (`apex:`) need no file.
   at full strength.
 - Constants: c0 `1/W, 1/H, W, H`, c1 pass data, c2 depth far plane; parameters from c8 (PD80 Selective Color uses up to
   c63). ReShade's uniform sources timer, frametime, framecount and random are filled once per frame.
+- The player's effects: compiled by `third_party/reshadefx` (shader model 3.0) and `D3DCompile`; each runs in place on
+  the ping texture as ReShade runs it on the back buffer (uniforms from PS/VS `c0`, `__TEXEL_SIZE__` at VS `c255`), and
+  the device state around a run with one is saved in full (render states, 16 samplers, PS and VS constants, render
+  targets 1 to 3). Textures and render targets are released before a device Reset and created again at the next run.
 - Shader registration is lazy (`RegisterShaders` on the first Install); the cache compiles them on a new worker run.
 - Everything read from files is bounded: a preset over 1 MB is refused, at most 256 techniques are kept, at most 2000
   files are listed per source, and non-finite values are ignored.
@@ -187,5 +243,6 @@ refused. Built-in looks (`apex:`) need no file.
 ## See also
 
 - [validation/looks.md](../validation/looks.md)
+- [history/looks-fx-loading.md](../history/looks-fx-loading.md)
 - [picture-filters.md](picture-filters.md) (Color, LUTs), [screenshots-and-video.md](screenshots-and-video.md), [presets.md](presets.md)
 - [ui.md](../ui.md#presets)

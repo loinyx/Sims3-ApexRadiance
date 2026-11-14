@@ -40,6 +40,7 @@
 #include "scene_dither.h"
 #include "scene_target.h"
 #include "third_party/reshade_shaders/reshade_licenses.h"
+#include "third_party/reshadefx/reshadefx_license.h"
 #include "sim_occlusion.h"
 #include "ui/i18n.h"
 #include "looks.h"
@@ -3421,6 +3422,7 @@ void AboutTab() {
         CreditLine("Thanks to @boringbones for testing every build.");
         CreditLine("RTX Remix bridge: NVIDIA (MIT), ported to The Sims 3 by dalexlol and alexvixell35-stack in sims3-modernization; DXVK by Philip Rebohle (zlib).");
         CreditLine("ReShade shaders in Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).");
+        CreditLine("ReShade FX compiler by crosire, BSD-3-Clause.");
         CreditLine("Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC).");
         if (ApexUi::BeginAdvanced("Licenses##About", "Third-party licenses")) {
             // Licence texts stay as written (untranslated)
@@ -3431,6 +3433,10 @@ void AboutTab() {
                 ImGui::PopStyleColor();
                 ApexUi::Gap(ApexUi::kSpace2);
             }
+            ImGui::TextUnformatted(ReShadeFx::kLicenseTitle);
+            ImGui::PushStyleColor(ImGuiCol_Text, Col(VioletTheme::kTextMuted));
+            ImGui::TextWrapped("%s", ReShadeFx::kLicense);
+            ImGui::PopStyleColor();
             ApexUi::EndAdvanced();
         }
     }

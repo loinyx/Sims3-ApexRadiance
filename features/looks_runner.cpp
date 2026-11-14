@@ -1,6 +1,7 @@
 // Looks: the D3D9 runner of the ported ReShade shaders (third_party/reshade_shaders). Pure D3D9 + STL.
 
 #include "looks_runner.h"
+#include "looks_fx.h"
 #include "third_party/reshade_shaders/reshade_shaders_hlsl.h"
 
 #include <algorithm>
@@ -10,7 +11,21 @@ namespace Looks {
 
 // ============================================================================================== table
 int ShaderCount() { return ReShadeShaders::kShaderCount; }
-const LooksShader& Shader(int index) { return ReShadeShaders::kShaders[index]; }
+const LooksShader& Shader(int index)
+{
+    if (IsUserShader(index))
+    {
+        static const LooksShader kGone{ "", "", nullptr, nullptr, nullptr, 0, false, false, "", (LooksShaderKind)0 };
+        const LooksShader* u = Fx::UserShader(index - kUserShaderBase);
+        return u ? *u : kGone;
+    }
+    return ReShadeShaders::kShaders[index];
+}
+
+bool ValidShader(int index)
+{
+    return IsUserShader(index) ? Fx::UserShader(index - kUserShaderBase) != nullptr : index >= 0 && index < ShaderCount();
+}
 
 static bool IEquals(const std::string& a, const std::string& b)
 {
@@ -26,7 +41,8 @@ int FindShader(const std::string& technique, const std::string& file)
     const std::string& t = technique == "FakeHDR" && IEquals(file, "FakeHDR.fx") ? std::string("HDR") : technique;
     for (int i = 0; i < ShaderCount(); ++i)
         if (t == Shader(i).technique && IEquals(file, Shader(i).file)) return i;
-    return -1;
+    const int user = Fx::FindUser(technique, file);
+    return user < 0 ? -1 : kUserShaderBase + user;
 }
 
 static void Append(std::string& out, const char* const* pieces)
@@ -235,6 +251,29 @@ bool Runner::RunAdaptiveSharpen(const Frame& f, const Step& s)
     return true;
 }
 
+// The fixed state of the built-in passes; also put back after a player's effect ran (it sets its own), with what this
+// Run has sent forgotten
+void Runner::FixedState(IDirect3DDevice9* dev)
+{
+    curRt_ = nullptr; curPs_ = nullptr; constsSent_ = false;
+    for (int st = 0; st < kTouchedSamplers; ++st) boundTex_[st] = nullptr; // the effect unbinds what it bound
+    dev->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
+    dev->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
+    dev->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
+    dev->SetRenderState(D3DRS_SEPARATEALPHABLENDENABLE, FALSE);
+    dev->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
+    dev->SetRenderState(D3DRS_STENCILENABLE, FALSE);
+    dev->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+    dev->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+    dev->SetRenderState(D3DRS_FOGENABLE, FALSE);
+    dev->SetRenderState(D3DRS_SRGBWRITEENABLE, FALSE);
+    dev->SetRenderState(D3DRS_CLIPPLANEENABLE, 0);
+    dev->SetRenderState(D3DRS_COLORWRITEENABLE, 0xF);
+    dev->SetVertexShader(nullptr);
+    dev->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX1);
+    for (int st = 0; st < kTouchedSamplers; ++st) SetSampler(dev, st, false);
+}
+
 bool Runner::Run(const Frame& f, const std::vector<Step>& steps)
 {
     skipped_.clear();
@@ -263,24 +302,10 @@ bool Runner::Run(const Frame& f, const std::vector<Step>& steps)
     }
     depthC_[0] = f.farPlane; depthC_[1] = depthC_[2] = depthC_[3] = 0.0f; // not reversed
 
-    // Fixed state for every pass
-    dev->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
-    dev->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
-    dev->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
-    dev->SetRenderState(D3DRS_SEPARATEALPHABLENDENABLE, FALSE);
-    dev->SetRenderState(D3DRS_ALPHATESTENABLE, FALSE);
-    dev->SetRenderState(D3DRS_STENCILENABLE, FALSE);
-    dev->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
-    dev->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
-    dev->SetRenderState(D3DRS_FOGENABLE, FALSE);
-    dev->SetRenderState(D3DRS_SRGBWRITEENABLE, FALSE);
-    dev->SetRenderState(D3DRS_CLIPPLANEENABLE, 0);
-    dev->SetRenderState(D3DRS_COLORWRITEENABLE, 0xF);
-    dev->SetVertexShader(nullptr);
-    dev->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX1);
-    for (int st = 0; st < kTouchedSamplers; ++st) SetSampler(dev, st, false);
+    FixedState(dev);
 
     dev->StretchRect(f.target, nullptr, ping_.surf, nullptr, D3DTEXF_NONE);
+
 
     // The last step draws straight into the target (no write-back pass) when that gives the same pixels: full mix, an
     // 8-bit target like the ping-pong textures, and no sRGB write (not every target format takes it)
@@ -290,18 +315,31 @@ bool Runner::Run(const Frame& f, const std::vector<Step>& steps)
         D3DSURFACE_DESC td{};
         const bool same = SUCCEEDED(f.target->GetDesc(&td)) && (td.Format == D3DFMT_A8R8G8B8 || td.Format == D3DFMT_X8R8G8B8);
         for (const Step& s : steps)
-            if (s.shader >= 0 && s.shader < ShaderCount() && s.values && !(Shader(s.shader).needsDepth && !f.depth)) direct = &s;
-        if (direct && (!same || Shader(direct->shader).srgb)) direct = nullptr;
+            if (ValidShader(s.shader) && s.values && !(Shader(s.shader).needsDepth && !f.depth)) direct = &s;
+        if (direct && (!same || IsUserShader(direct->shader) || Shader(direct->shader).srgb)) direct = nullptr;
     }
     bool wroteTarget = false;
 
     bool drew = false;
     for (const Step& s : steps)
     {
-        if (s.shader < 0 || s.shader >= ShaderCount() || !s.values) continue;
+        if (!ValidShader(s.shader) || !s.values) continue;
         out_ = &s == direct ? f.target : pong_.surf;
         const LooksShader& d = Shader(s.shader);
         if (d.needsDepth && !f.depth) { skipped_.push_back(std::string(d.technique) + " (no depth)"); continue; }
+        if (IsUserShader(s.shader))
+        {
+            // a player's .fx: its technique runs in place on the ping texture, as ReShade runs it on the back buffer
+            Fx::RunFrame uf;
+            uf.dev = dev; uf.target = ping_.surf; uf.depth = f.depth; uf.width = f.width; uf.height = f.height;
+            uf.timerMs = (float)(lastMs_ - startMs_); uf.frametimeMs = frameTimeMs_; uf.frame = frameCount_;
+            std::string why;
+            const bool ran = Fx::Run(uf, s.shader - kUserShaderBase, s.values, &why);
+            FixedState(dev); // the effect changed render states, samplers, shaders and the render target
+            if (!ran) { skipped_.push_back(std::string(d.technique) + " (" + why + ")"); continue; }
+            drew = true;
+            continue;
+        }
 
         SetParams(dev, s.shader, s.values);
         bool ok;

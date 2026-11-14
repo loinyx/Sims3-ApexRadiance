@@ -12,14 +12,21 @@
 
 namespace Looks {
 
-// The generated table (third_party/reshade_shaders/reshade_shaders_hlsl.h)
+// The generated table (third_party/reshade_shaders/reshade_shaders_hlsl.h): indices 0..ShaderCount()-1. The player's
+// own .fx techniques (looks_fx.h) follow from kUserShaderBase; their indices change when the Shaders folder is scanned
+// again (Fx::Poll returns true), so callers look them up again then.
+inline constexpr int kUserShaderBase = 1 << 16;
+inline bool IsUserShader(int index) { return index >= kUserShaderBase; }
 int ShaderCount();
-const LooksShader& Shader(int index);
-int FindShader(const std::string& technique, const std::string& file); // -1 if not built in
+const LooksShader& Shader(int index); // a user index no longer in the table gives an empty entry (no parameters)
+bool ValidShader(int index);
+// A built-in port first (they keep priority), then a runnable user technique; -1 if neither
+int FindShader(const std::string& technique, const std::string& file);
 std::string FullSource(int shader);                                     // prelude + body, ready for D3DCompile
 
 // Device state Run() changes; the caller saves it before Run and restores it after.
-// Also: pixel shader, vertex shader (null), FVF, render target 0 (+ viewport), PS constants.
+// Also: pixel shader, vertex shader (null), FVF, render target 0 (+ viewport), PS constants. A step with a player's
+// effect (looks_fx.h) changes more: see Fx::Instance::Run.
 extern const D3DRENDERSTATETYPE kTouchedRenderStates[];
 extern const int kTouchedRenderStateCount;
 extern const int kTouchedSamplers; // s0..s5
@@ -69,6 +76,7 @@ private:
     void SetParams(IDirect3DDevice9* dev, int shader, const float* values);
     void BindTex(IDirect3DDevice9* dev, int stage, IDirect3DBaseTexture9* tex);
     void UnbindAll(IDirect3DDevice9* dev);
+    void FixedState(IDirect3DDevice9* dev);
     bool RunAdaptiveSharpen(const Frame& f, const Step& s);
 
     PsFactory factory_;
