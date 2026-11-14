@@ -49,8 +49,8 @@ order with its values, and blends the result over the picture by *Strength*.
 
 **ReShade look** card: header with the status ("<look> · <n> shaders", or "Off"), the GPU cost chip, a hold-to-compare
 eye ("Hold to see the game without the look") and the switch. Rows: *Look*, a dropdown grouped as Apex looks, My looks
-and GShade (a search field above the list once it has more than 10 looks; *Import a preset…* last) with the Looks
-folder button beside it; *Strength*; *Applies to* (World and menus / World only); under Advanced, *Order* (After Apex
+and GShade (a search field above the list once it has more than 10 looks; *Open the Looks folder* last) with an
+*Import* button beside it; *Strength*; *Applies to* (World and menus / World only); under Advanced, *Order* (After Apex
 Color / Before Apex Color). In developer mode a *Live counters* disclosure shows the status, the last frame's run,
 skipped shaders, Reload and the GPU memory. While a LUT is also on (Color > LUTs), a note under the card says both
 change the color, with *Turn off the LUT* (undoable).
@@ -64,7 +64,7 @@ look's values* (under them when narrow). Shaders the look names but Apex cannot 
 that opens to their names. *Add a shader* opens a list of every built-in shader with a search field and a Kind filter
 (Color, Sharpen, Light, Film & camera, Stylized).
 
-*Import a preset…* opens the Windows file picker (off the render thread) and copies the .ini into Looks\: a different
+*Import* opens the Windows file picker (off the render thread) and copies the .ini into Looks\: a different
 file with the same name gets a numbered name ("Name-1.ini"), the same file is reused; a file without `Techniques=` or
 `TechniqueSorting=` is refused. *Save as a new look…* writes Looks\<name>.ini (replacing a look of that name after a
 note) with the run list, the switches and the edited values, then selects it.

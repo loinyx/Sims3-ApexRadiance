@@ -722,7 +722,7 @@ std::atomic<bool> g_pickBusy{ false };
 std::string g_message;     // translated, under the Look row
 bool g_messageError = false;
 
-// The native file picker for "Import a preset…", off the render thread (it pumps the game window's messages)
+// The native file picker for the Import button, off the render thread (it pumps the game window's messages)
 void PickPreset()
 {
     if (g_pickBusy.exchange(true)) return;
@@ -824,14 +824,14 @@ const char* SourceLabel(Looks::Source s)
     }
 }
 
-// "Look": a dropdown of every look by source (a search field once there are more than 10), "Import a preset…" last,
-// and the Looks folder button at its right. True when another look was chosen.
+// "Look": a dropdown of every look by source (a search field once there are more than 10), "Open the Looks folder" last,
+// and an Import button at its right (the native picker; the .ini is copied into Looks). True when another look was chosen.
 bool LookRow()
 {
     const float u = ApexUi::Unit();
-    const float iconW = ImGui::GetFrameHeight();
-    const float comboW = std::fmin(220.0f * u, std::fmax(120.0f * u, ImGui::GetContentRegionAvail().x * 0.5f));
-    if (!ApexUi::BeginControlRow("Look", "Add .ini presets to the Looks folder, or import one from the list", comboW + ApexUi::kSpace2 * u + iconW))
+    const float importW = ApexUi::ButtonWidth(I18n::Tr("Import"), true);
+    const float comboW = std::fmin(220.0f * u, std::fmax(120.0f * u, ImGui::GetContentRegionAvail().x * 0.5f - importW));
+    if (!ApexUi::BeginControlRow("Look", "Pick one, or import a ReShade or GShade preset (.ini)", comboW + ApexUi::kSpace2 * u + importW))
         return false;
     bool changed = false;
     const std::string current = g.preset.empty() ? std::string(I18n::Tr("Choose a look")) : ShownName(g.preset);
@@ -880,12 +880,15 @@ bool LookRow()
         }
         if (!shown) ImGui::TextDisabled("%s", I18n::Tr(g_list.empty() ? "No looks yet" : "No look matches"));
         ImGui::Separator();
-        if (ImGui::Selectable(I18n::Tr("Import a preset\xE2\x80\xA6"))) PickPreset();
+        if (ImGui::Selectable(I18n::Tr("Open the Looks folder"))) ShowLooksFolder();
         ImGui::EndCombo();
     }
     wasOpen = open;
     ImGui::SameLine(0.0f, ApexUi::kSpace2 * u);
-    if (ApexUi::IconButton("##LooksFolder", IconId::FolderOpen, "Open the Looks folder", false, iconW / u)) ShowLooksFolder();
+    {
+        const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+        if (ApexUi::IconTextButton("Import", IconId::Download, "Copy a ReShade or GShade preset (.ini) into the Looks folder and choose it")) PickPreset();
+    }
     ApexUi::EndControlRow();
     if (changed) ApexUi::ReportChange("Look changed");
     return changed;

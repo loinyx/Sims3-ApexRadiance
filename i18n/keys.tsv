@@ -2535,6 +2535,8 @@ Warm evening	tr_image.cpp:kEntries	Fim de tarde quente	Atardecer cálido	Soirée
 Cinematic	tr_image.cpp:kEntries	Cinematográfico	Cinematográfico	Cinématographique	
 Soft vintage	tr_image.cpp:kEntries	Vintage suave	Vintage suave	Vintage doux	
 Save this list and its values as a .ini of your own in the Looks folder	tr_image.cpp:kEntries	Salva esta lista e seus valores como um .ini seu na pasta Looks	Guarda esta lista y sus valores como un .ini propio en la carpeta Looks	Enregistre cette liste et ses valeurs dans un .ini à vous, dans le dossier Looks	
+Pick one, or import a ReShade or GShade preset (.ini)	tr_image.cpp:kEntries	Escolha um ou importe um preset do ReShade ou GShade (.ini)	Elige uno o importa un preajuste de ReShade o GShade (.ini)	Choisissez-en un ou importez un préréglage ReShade ou GShade (.ini)	
+Copy a ReShade or GShade preset (.ini) into the Looks folder and choose it	tr_image.cpp:kEntries	Copia um preset do ReShade ou GShade (.ini) para a pasta Looks e o escolhe	Copia un preajuste de ReShade o GShade (.ini) a la carpeta Looks y lo elige	Copie un préréglage ReShade ou GShade (.ini) dans le dossier Looks et le choisit	
 Shaders in this look	tr_image.cpp:kEntries	Shaders deste visual	Shaders de este estilo	Shaders de ce rendu	
 ReShade look	tr_image.cpp:kEntries	Visual do ReShade	Estilo de ReShade	Rendu ReShade	
 Hold to see the game without the look	tr_image.cpp:kEntries	Segure para ver o jogo sem o visual	Mantén pulsado para ver el juego sin el estilo	Maintenez pour voir le jeu sans le rendu	
@@ -2551,12 +2553,10 @@ The preset could not be copied to the Looks folder	tr_image.cpp:kEntries	Não fo
 Imported as {}	tr_image.cpp:kEntries	Importado como {}	Importado como {}	Importé sous {}	{}
 Apex looks	tr_image.cpp:kEntries	Visuais do Apex	Estilos de Apex	Rendus d'Apex	
 My looks	tr_image.cpp:kEntries	Meus visuais	Mis estilos	Mes rendus	
-Add .ini presets to the Looks folder, or import one from the list	tr_image.cpp:kEntries	Coloque presets .ini na pasta Looks ou importe um pela lista	Añade preajustes .ini a la carpeta Looks o importa uno desde la lista	Ajoutez des préréglages .ini au dossier Looks ou importez-en un depuis la liste	
 Choose a look	tr_image.cpp:kEntries	Escolha um visual	Elige un estilo	Choisissez un rendu	
 Search looks	tr_image.cpp:kEntries	Buscar visuais	Buscar estilos	Rechercher des rendus	
 No looks yet	tr_image.cpp:kEntries	Nenhum visual ainda	Aún no hay estilos	Aucun rendu pour l'instant	
 No look matches	tr_image.cpp:kEntries	Nenhum visual encontrado	Ningún estilo coincide	Aucun rendu ne correspond	
-Import a preset…	tr_image.cpp:kEntries	Importar um preset…	Importar un preajuste…	Importer un préréglage…	
 Open the Looks folder	tr_image.cpp:kEntries	Abrir a pasta Looks	Abrir la carpeta Looks	Ouvrir le dossier Looks	
 Look changed	tr_image.cpp:kEntries	Visual alterado	Estilo cambiado	Rendu changé	
 {} of {}	tr_image.cpp:kEntries	{} de {}	{} de {}	{} sur {}	{} {}
