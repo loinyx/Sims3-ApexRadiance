@@ -1647,6 +1647,14 @@ bool Slider(const char* label, float* v, float min, float max, const SliderOptio
     LabelInfo li;
     {
         const std::string_view shown = g_rowRaw ? std::string_view(label, VisibleEnd(label) - label) : I18n::TrLabel(label);
+        // A label with no description, shorter than the track beside it, is centred on the track (it sat on the row's top
+        // with the track centred below it)
+        if (inl && (!o.tooltip || !*o.tooltip)) {
+            const float wrapW = std::fmax(textRight - DecorWidth(d) - textX, 40.0f * u);
+            const float labelH = ImGui::CalcTextSize(shown.data(), shown.data() + shown.size(), false, wrapW).y;
+            const float frameH = ImGui::GetFrameHeight();
+            if (labelH < frameH) ImGui::SetCursorPosY(top + (frameH - labelH) * 0.5f);
+        }
         ImGui::BeginGroup();
         ImGui::PushStyleVarY(ImGuiStyleVar_ItemSpacing, 2.0f * u);
         ImGui::PushTextWrapPos(std::fmax(inl ? textRight - DecorWidth(d) : startX + width - valueW - swatchW - kSpace3 * u - DecorWidth(d), textX + 40.0f * u));
