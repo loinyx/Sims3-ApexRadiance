@@ -14,6 +14,10 @@
 #include "apex_version.h"
 #include "apex_log.h"
 #include "apex_util.h"
+#include "build_flavor.h"
+#include "hotkeys.h"
+#include "framework/overlay.h"
+#include "features/captures.h"
 #include "ui/widgets.h"
 #include "ui/violet_theme.h"
 #include "ui/i18n.h"
@@ -23,11 +27,18 @@ std::wstring testRoot;
 namespace ApexPaths {const std::wstring& ApexDirectory(){return testRoot;} bool EnsureApexDirectory(){std::filesystem::create_directories(testRoot);return true;}}
 namespace ApexConfig {
 UiSettings GetUi(){return {};}
+void SetUi(const UiSettings&) {}
+bool SaveProfile(const std::string&,unsigned,std::string*,const std::string&) {return true;}
 void CaptureProfileState(toml::table& out) {
-    out=toml::parse("[qol.picture]\nenabled=true\n[qol.picture.filters]\nlut=true\nlut_file='An unusually long cinematic color treatment.cube'\n[patches.AmbientOcclusion]\nenabled=true\n[patches.NightTerrainRelight]\nenabled=true\n[patches.DepthBlur]\nenabled=true\n[patches.EdgeSmoothing]\nenabled=true\n[patches.ResourceLookupCache]\nenabled=true\n[shortcuts]\nmenu_key='F11'\n");
+    out=toml::parse("[qol.picture]\nenabled=true\n[qol.picture.filters]\nlut=true\nlut_file='An unusually long cinematic color treatment.cube'\n[patches.AmbientOcclusion]\nenabled=true\n[patches.NightTerrainRelight]\nenabled=true\n[patches.DepthBlur]\nenabled=true\n[patches.EdgeSmoothing]\nenabled=true\n[patches.ResourceLookupCache]\nenabled=true\n[patches.Looks]\nenabled=true\npreset='looks:Cinema.ini'\npacks=['qUINT']\n[shortcuts]\nmenu_key='F11'\n");
 }
 }
-namespace Looks {void OfferCard() {} void OfferPresetPacks(const std::string&,const std::vector<std::string>&) {}}
+namespace Looks {void OfferCard() {} void OfferPresetPacks(const std::string&,const std::vector<std::string>&) {}
+std::vector<std::string> MissingPresetPacks(const std::vector<std::string>& p,std::string* s=nullptr) {if(s&&!p.empty())*s="This preset needs a pack (1.0 MB)";return p;}
+void DownloadPresetPacks(const std::vector<std::string>&) {}}
+namespace Overlay {bool IsVisible() {return true;}}
+namespace Captures {void Notify(const std::string&,int,NoteKind) {}}
+namespace Hotkeys {std::string ComboText(const KeyCombo&) {return "Ctrl+Shift+P";} KeyCombo HeldCombo() {return {};} bool ComboReserved(const KeyCombo&) {return false;}}
 using ApexUi::IconId;
 using ApexUi::ButtonKind;
 using VioletTheme::Col;
@@ -48,6 +59,7 @@ void PickProfileFile(bool,bool,std::string) {}
 void SaveProfileNow(const std::string&) {}
 void LoadProfileItem(const ProfileItem&,unsigned) {}
 void LoadProfileNow(const std::string&,unsigned) {}
+void ApplyProfileState(const std::string&,const std::string&,const std::string&,toml::table,unsigned) {}
 void OpenProfilesFolder() {}
 #include "preset_page.inc"
 #include "preset_raster.inc"

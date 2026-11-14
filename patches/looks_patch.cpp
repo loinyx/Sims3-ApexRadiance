@@ -2811,19 +2811,37 @@ void OfferCard()
     ImGui::PopID();
 }
 
+std::vector<std::string> MissingPresetPacks(const std::vector<std::string>& packNames, std::string* sentence)
+{
+    std::vector<std::string> folders;
+    uint32_t kb = 0;
+    bool sized = true;
+    for (const std::string& name : packNames)
+        for (const Looks::Packs::Pack& p : Looks::Packs::List())
+            if ((_stricmp(p.name.c_str(), name.c_str()) == 0 || _stricmp(p.folder.c_str(), name.c_str()) == 0) && p.inList && !Looks::Packs::Downloaded(p.folder) &&
+                std::find(folders.begin(), folders.end(), p.folder) == folders.end())
+            {
+                folders.push_back(p.folder);
+                kb += p.downloadKB;
+                sized &= p.downloadKB != 0;
+                break;
+            }
+    if (sentence && !folders.empty())
+        *sentence = sized ? I18n::Trf("This preset needs {} ({})", PackNames(folders), SizeText(kb)) : I18n::Trf("This preset needs {}", PackNames(folders));
+    return folders;
+}
+
+void DownloadPresetPacks(const std::vector<std::string>& folders)
+{
+    if (!folders.empty()) DownloadPacks(folders);
+}
+
 void OfferPresetPacks(const std::string& preset, const std::vector<std::string>& packNames)
 {
     ImportOffer offer;
     offer.look = preset;
     offer.preset = true;
-    for (const std::string& name : packNames)
-        for (const Looks::Packs::Pack& p : Looks::Packs::List())
-            if ((_stricmp(p.name.c_str(), name.c_str()) == 0 || _stricmp(p.folder.c_str(), name.c_str()) == 0) && p.inList && !Looks::Packs::Downloaded(p.folder) &&
-                std::find(offer.packs.begin(), offer.packs.end(), p.folder) == offer.packs.end())
-            {
-                offer.packs.push_back(p.folder);
-                break;
-            }
+    offer.packs = MissingPresetPacks(packNames);
     if (!offer.packs.empty()) g_offer = std::move(offer);
 }
 

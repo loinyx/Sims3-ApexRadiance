@@ -2540,7 +2540,7 @@ struct ProfilesState {
     unsigned loadParts = 0;
     double applyOpenedAt = 0.0;
     enum Dialog { None, Save, Import, Export, Apply } dialog = None;
-    bool openDialog = false, applyAfterImport = false;
+    bool openDialog = false, applyAfterImport = false, downloadPacks = true; // downloadPacks: the import's "Download them now"
     ApexConfig::ProfileImport imported;
     toml::table exportState;
     std::wstring importPath;
@@ -2815,7 +2815,7 @@ void ProfileIconPicker(IconId& selected) {
 void StartPresetDialog(ProfilesState::Dialog dialog, const ProfileItem* item=nullptr) {
     auto& s=g_profiles;
     s.dialog=dialog; s.openDialog=true; s.message.clear(); s.confirmReplace.clear();
-    s.applyAfterImport=false; s.importPath.clear(); s.imported={};
+    s.applyAfterImport=false; s.downloadPacks=true; s.importPath.clear(); s.imported={};
     s.exportSource=0; s.withMyShaders=false; s.myShaderFiles=-1;
     if(item) {
         s.selected=*item;
@@ -2878,7 +2878,7 @@ void PresetDialog() {
     const float width=std::max(1.0f,std::min(500.0f*ApexUi::Unit(),ImGui::GetIO().DisplaySize.x-32.0f));
     ImGui::SetNextWindowSizeConstraints(ImVec2(width,0),ImVec2(width,std::max(1.0f,ImGui::GetIO().DisplaySize.y-32.0f)));
     ImGui::SetNextWindowSize(ImVec2(width,0),ImGuiCond_Always);
-    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),ImGuiCond_Appearing,ImVec2(.5f,.5f));
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),ImGuiCond_Always,ImVec2(.5f,.5f)); // centred as its body grows (no title bar: never moved)
     if(ImGui::BeginPopupModal("PresetDialog",nullptr,ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_AlwaysAutoResize)) {
         if(s.dialog==ProfilesState::None) ImGui::CloseCurrentPopup();
         else {
@@ -2890,6 +2890,13 @@ void PresetDialog() {
             {
                 const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
                 ImGui::BeginDisabled(g_profilePickerBusy);
+                // the body scrolls when the screen is too short for it; the divider and the actions under it stay in view
+                {
+                    const float footer=2.0f*ImGui::GetFrameHeightWithSpacing()+ApexUi::kSpace4*ApexUi::Unit();
+                    const float maxBody=std::max(4.0f*ImGui::GetFrameHeight(),ImGui::GetIO().DisplaySize.y-32.0f-ImGui::GetCursorPosY()-footer-ImGui::GetStyle().WindowPadding.y);
+                    ImGui::SetNextWindowSizeConstraints(ImVec2(0,0),ImVec2(FLT_MAX,maxBody));
+                }
+                ImGui::BeginChild("##Body",ImVec2(0,0),ImGuiChildFlags_AutoResizeY);
                 if(exporting) {
                     std::vector<const char*> sources{I18n::Tr("Current settings")};
                     for(const auto& item:s.list) sources.push_back(item.builtin>=0?I18n::Tr(item.name.c_str()):item.name.c_str());
@@ -2938,11 +2945,20 @@ void PresetDialog() {
                         ApexUi::IconNote(IconId::Info,!ApexConfig::ProfileUsesPackage(state,withMyShaders)?"This preset is exported as a TOML file.":ApexConfig::ProfileUsesLut(state)&&!ApexConfig::ProfileUsesLook(state)?"The preset and its LUT are exported together as one ZIP file.":"The preset and its files are exported together as one ZIP file.");
                     }
                     if(importing) ApexUi::Checkbox(I18n::Tr("Apply after import"),&s.applyAfterImport);
+                    if(importing && (s.saveParts&ApexConfig::kPartShaders)) { // shader packs the preset's look needs: downloaded on Import unless unchecked
+                        std::string needs;
+                        if(!Looks::MissingPresetPacks(ApexConfig::ProfilePacks(s.imported.state),&needs).empty()) {
+                            ApexUi::Gap(ApexUi::kSpace2);
+                            ApexUi::IconNote(IconId::Download,needs.c_str());
+                            ApexUi::Checkbox(I18n::Tr("Download them now"),&s.downloadPacks);
+                        }
+                    }
                 }
                 if(importing && !s.importPath.empty() && ApexConfig::ProfileExists(ApexConfig::SanitizeProfileName(s.name))) ApexUi::IconNote(IconId::Info,"Choose a new preset name");
                 if(!s.confirmReplace.empty() && s.confirmReplace!=ApexConfig::SanitizeProfileName(s.name)) s.confirmReplace.clear();
                 if(!s.confirmReplace.empty()) ApexUi::IconNote(IconId::TriangleAlert,I18n::Trf("\"{}\" already exists; replace it?",s.confirmReplace).c_str());
                 if(!s.message.empty()) ApexUi::IconNote(s.messageError?IconId::TriangleAlert:IconId::CircleCheck,s.message.c_str());
+                ImGui::EndChild();
                 ApexUi::CardDivider();
                 const char* action=importing?"Import":exporting?"Export":applying?"Apply":s.confirmReplace.empty()?"Save":"Replace";
                 const bool row=ReportDialogActions("Cancel",false,action,true);
@@ -2958,7 +2974,11 @@ void PresetDialog() {
                         std::string error;
                         if(ApexConfig::SaveImportedProfile(name,s.imported,s.saveParts,ApexUi::IconName(s.icon),&error)) {
                             // packs the preset's look needs that are not here: the same offer as after a look import
-                            if(s.saveParts&ApexConfig::kPartShaders) Looks::OfferPresetPacks(name,ApexConfig::ProfilePacks(s.imported.state));
+                            if(s.saveParts&ApexConfig::kPartShaders) {
+                                const auto packs=ApexConfig::ProfilePacks(s.imported.state);
+                                if(s.downloadPacks) Looks::DownloadPresetPacks(Looks::MissingPresetPacks(packs));
+                                else Looks::OfferPresetPacks(name,packs);
+                            }
                             if(s.applyAfterImport) LoadProfileNow(name,s.saveParts);
                             else ProfileMessage(I18n::Trf("Saved \"{}\"",name),false);
                             s.listDirty=true; s.dialog=ProfilesState::None; ImGui::CloseCurrentPopup();

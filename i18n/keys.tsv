@@ -2662,6 +2662,9 @@ This look can't be read	tr_image.cpp:kEntries	Não foi possível ler este visual
 Your library	tr_image.cpp:kEntries	Sua biblioteca	Tu biblioteca	Votre bibliothèque	
 {} shaders from {} sources	tr_image.cpp:kEntries	{} shaders de {} fontes	{} shaders de {} fuentes	{} shaders de {} sources	{} {}
 This preset uses shaders from {}, which you don't have yet	tr_image.cpp:kEntries	Este preset usa shaders de {}, que você ainda não tem	Este preajuste usa shaders de {}, que aún no tienes	Ce préréglage utilise des shaders de {}, que vous n'avez pas encore	{}
+This preset needs {} ({})	tr_image.cpp:kEntries	Este preset precisa de {} ({})	Este preajuste necesita {} ({})	Ce préréglage a besoin de {} ({})	{} {}
+This preset needs {}	tr_image.cpp:kEntries	Este preset precisa de {}	Este preajuste necesita {}	Ce préréglage a besoin de {}	{}
+Download them now	tr_image.cpp:kEntries	Baixar agora	Descargarlos ahora	Les télécharger maintenant	
 Include my own .fx files	tr_image.cpp:kEntries	Incluir meus próprios arquivos .fx	Incluir mis propios archivos .fx	Inclure mes propres fichiers .fx	
 {} ({}): downloading {}…	tr_image.cpp:kEntries	{} ({}): baixando {}…	{} ({}): descargando {}…	{} ({}) : téléchargement de {}…	{} {} {}
 {} ({}): in {}, not downloaded	tr_image.cpp:kEntries	{} ({}): está em {}, ainda não baixado	{} ({}): en {}, no descargado	{} ({}) : dans {}, non téléchargé	{} {} {}

@@ -10,6 +10,6 @@ in the ZIP (`Shaders/Shaders/`, `Shaders/Textures/`: layout, opt-in, reuse, numb
 
 `extract_ui.py` copies the production preset page and modals and instruments shared widgets. Build `menu.cpp` with
 those generated includes, the real theme, icons, translations, ImGui, preset backend and `apex_presets.cpp`.
-It exercises 588 cases across 21 languages, two widths, two scales and seven dialog states, four frames each.
+It exercises 840 cases across 21 languages, two widths, two scales and ten dialog states, four frames each; the imported preset needs a shader pack, so the "Download them now" box is drawn.
 Native file pickers and game application are stubbed. CPU previews and layout checks do not establish gameplay,
 GPU, file-picker interaction or visual parity in the game.

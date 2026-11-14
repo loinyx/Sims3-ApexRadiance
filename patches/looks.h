@@ -27,6 +27,11 @@ bool WantsLibrary();
 void OfferCard();
 // After a preset import: offers the packs it names (pack names or folders) that are on ReShade's list and not downloaded
 void OfferPresetPacks(const std::string& preset, const std::vector<std::string>& packNames);
+// The packs of a preset's "packs" list (names or folders) that are on ReShade's list and not downloaded, as folders;
+// sentence: "This preset needs <packs> (<size>)" for the import window
+std::vector<std::string> MissingPresetPacks(const std::vector<std::string>& packNames, std::string* sentence = nullptr);
+// Starts those downloads (progress in Shaders > Library > Get shader packs)
+void DownloadPresetPacks(const std::vector<std::string>& folders);
 // The names of the packs whose shaders the look's run list uses (downloaded or not), for a preset's [patches.Looks] packs
 std::vector<std::string> NeededPacks();
 
