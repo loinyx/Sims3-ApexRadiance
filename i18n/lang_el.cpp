@@ -103,6 +103,7 @@ const I18n::Pair kPairs[] = {
     {"Capture: screenshots and videos with your effects, on a page of their own", "Λήψη: στιγμιότυπα και βίντεο με τα εφέ σου, σε δική τους σελίδα"},
     {"Presets: Capture and Shaders parts, and shared presets fetch the packs they need", "Προρυθμίσεις: μέρη Λήψη και Shaders, και οι κοινόχρηστες προρυθμίσεις κατεβάζουν τα πακέτα που χρειάζονται"},
     {"Shaders: every setting of a ReShade shader gets its own control", "Shaders: κάθε ρύθμιση ενός shader του ReShade έχει δικό της χειριστήριο"},
+    {"Apex Radiance Setup: under half the download size, and an experimental restart host", "Apex Radiance Setup: λήψη κάτω από το μισό μέγεθος και πειραματικό restart host"},
     {"Presets: the import and export window scrolls on short screens", "Προρυθμίσεις: το παράθυρο εισαγωγής και εξαγωγής κυλά σε χαμηλές οθόνες"},
     {"ReShade looks inside Apex, and screenshots and videos with your effects", "Looks του ReShade μέσα στο Apex, και στιγμιότυπα και βίντεο με τα εφέ σου"},
     {"ReShade and GShade looks in Apex", "Looks του ReShade και του GShade στο Apex"},

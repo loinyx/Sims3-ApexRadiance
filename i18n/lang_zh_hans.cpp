@@ -103,6 +103,7 @@ const I18n::Pair kPairs[] = {
     {"Capture: screenshots and videos with your effects, on a page of their own", "捕获：带有你的效果的截图和视频，有单独的页面"},
     {"Presets: Capture and Shaders parts, and shared presets fetch the packs they need", "预设：新增捕获和着色器部分，分享的预设会下载所需的包"},
     {"Shaders: every setting of a ReShade shader gets its own control", "着色器：ReShade 着色器的每项设置都有自己的控件"},
+    {"Apex Radiance Setup: under half the download size, and an experimental restart host", "Apex Radiance Setup：下载大小不到原来的一半，并新增实验性的 restart host"},
     {"Presets: the import and export window scrolls on short screens", "预设：导入和导出窗口在较矮的屏幕上可以滚动"},
     {"ReShade looks inside Apex, and screenshots and videos with your effects", "Apex 中的 ReShade 外观，以及带有你的效果的截图和视频"},
     {"ReShade and GShade looks in Apex", "在 Apex 中使用 ReShade 和 GShade 外观"},

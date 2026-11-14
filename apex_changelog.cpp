@@ -15,6 +15,7 @@ constexpr const char* k400Added[] = {
 constexpr const char* k400Improved[] = {
     "Presets: Capture and Shaders parts, and shared presets fetch the packs they need",
     "Shaders: every setting of a ReShade shader gets its own control",
+    "Apex Radiance Setup: under half the download size, and an experimental restart host",
     nullptr};
 constexpr const char* k400Fixed[] = {
     "Presets: the import and export window scrolls on short screens",

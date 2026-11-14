@@ -103,6 +103,7 @@ const I18n::Pair kPairs[] = {
     {"Capture: screenshots and videos with your effects, on a page of their own", "Aufnahme: Screenshots und Videos mit deinen Effekten, auf einer eigenen Seite"},
     {"Presets: Capture and Shaders parts, and shared presets fetch the packs they need", "Voreinstellungen: Teile Aufnahme und Shader, geteilte Voreinstellungen laden die nötigen Pakete"},
     {"Shaders: every setting of a ReShade shader gets its own control", "Shader: jede Einstellung eines ReShade-Shaders bekommt ein eigenes Steuerelement"},
+    {"Apex Radiance Setup: under half the download size, and an experimental restart host", "Apex Radiance Setup: weniger als halb so großer Download und ein experimenteller Restart-Host"},
     {"Presets: the import and export window scrolls on short screens", "Voreinstellungen: das Fenster zum Import und Export scrollt auf niedrigen Bildschirmen"},
     {"ReShade looks inside Apex, and screenshots and videos with your effects", "ReShade-Looks in Apex, dazu Screenshots und Videos mit deinen Effekten"},
     {"ReShade and GShade looks in Apex", "ReShade- und GShade-Looks in Apex"},
