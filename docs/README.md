@@ -71,7 +71,7 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 | [Edge Smoothing](features/edge-smoothing.md): SMAA and FXAA | Released; Released in 3.0.0: sharpening skips flat areas |
 | [Depth Blur](features/depth-blur.md): depth of field | Released |
 | [Banding Fix](features/banding-fix.md): dither against colour banding | Experimental (released in 2.2.0); Released in 2.16.0: High-precision scene on by default, redesigned card; Released in 3.2.3: frames without a 3D scene drawn straight into the back buffer |
-| [ReShade/GShade looks](features/gshade-looks.md): runs a ReShade or GShade preset (.ini) inside Apex, 20 shaders built in | Unreleased, Experimental |
+| [Looks](features/looks.md): runs a ReShade or GShade preset (.ini) inside Apex, 17 shaders built in | In development (3.3.0), Experimental |
 | [Screenshots and video](features/screenshots-and-video.md): screenshots and MP4 videos with Apex's effects, capture profiles, ApexCapture.ini | Unreleased |
 
 ### Performance

@@ -1,0 +1,326 @@
+// Looks: ReShade preset files (.ini) and their sources (see looks_preset.h).
+
+#include "looks_preset.h"
+#include "apex_paths.h"
+#include "apex_util.h"
+
+#include <windows.h>
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <filesystem>
+#include <set>
+
+namespace Looks {
+
+namespace {
+
+std::string Trim(const std::string& s)
+{
+    const size_t a = s.find_first_not_of(" \t\r\n"), b = s.find_last_not_of(" \t\r\n");
+    return a == std::string::npos ? std::string() : s.substr(a, b - a + 1);
+}
+
+bool IEquals(const std::string& a, const std::string& b) { return _stricmp(a.c_str(), b.c_str()) == 0; }
+
+const std::map<std::string, std::string>* FindSection(const Preset& preset, const std::string& file)
+{
+    for (auto& kv : preset.sections)
+        if (IEquals(kv.first, file)) return &kv.second;
+    return nullptr;
+}
+
+std::string TopValue(const Preset& preset, const char* key)
+{
+    const auto top = preset.sections.find("");
+    if (top == preset.sections.end()) return {};
+    const auto it = top->second.find(key);
+    return it == top->second.end() ? std::string() : it->second;
+}
+
+bool StartsWithI(const std::wstring& s, const std::wstring& prefix)
+{
+    return !prefix.empty() && s.size() >= prefix.size() && _wcsnicmp(s.c_str(), prefix.c_str(), prefix.size()) == 0;
+}
+
+// A relative path inside a source folder: no drive, root, ".." or empty part, no wildcard or device characters
+bool SafeRelative(const std::string& rel)
+{
+    if (rel.empty() || rel.size() > 400 || rel.find_first_of(":*?\"<>|") != std::string::npos) return false;
+    for (unsigned char c : rel) if (c < 32) return false;
+    size_t start = 0;
+    for (;;)
+    {
+        const size_t end = rel.find_first_of("\\/", start);
+        const std::string part = rel.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        if (part.empty() || part == "." || part == ".." || part.back() == ' ' || part.back() == '.') return false;
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    return true;
+}
+
+bool ReadBounded(const std::wstring& path, std::string& text, std::string* error)
+{
+    WIN32_FILE_ATTRIBUTE_DATA info{};
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &info) || (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+    {
+        if (error) *error = "the file is missing";
+        return false;
+    }
+    if (info.nFileSizeHigh || info.nFileSizeLow > kMaxPresetBytes)
+    {
+        if (error) *error = "the file is too large for a preset";
+        return false;
+    }
+    if (!ApexUtil::ReadFileBytes(path, text) || text.size() > kMaxPresetBytes)
+    {
+        if (error) *error = "the file could not be read";
+        return false;
+    }
+    return true;
+}
+
+void ListFolder(const std::wstring& root, const char* prefix, Source source, std::vector<LookItem>& out)
+{
+    std::error_code ec;
+    if (root.empty() || !std::filesystem::is_directory(root, ec)) return;
+    std::vector<LookItem> found;
+    for (auto it = std::filesystem::recursive_directory_iterator(root, std::filesystem::directory_options::skip_permission_denied, ec);
+         !ec && it != std::filesystem::recursive_directory_iterator() && found.size() < kMaxLooks; it.increment(ec))
+    {
+        if (!it->is_regular_file(ec) || _wcsicmp(it->path().extension().c_str(), L".ini") != 0) continue;
+        const std::wstring full = it->path().wstring();
+        if (!StartsWithI(full, root)) continue;
+        const std::string rel = ApexUtil::ToUtf8(full.substr(root.size()));
+        if (!SafeRelative(rel)) continue;
+        const std::string ref = std::string(prefix) + rel;
+        found.push_back({ ref, RefName(ref), source });
+    }
+    std::sort(found.begin(), found.end(), [](const LookItem& a, const LookItem& b) { return _stricmp(a.name.c_str(), b.name.c_str()) < 0; });
+    out.insert(out.end(), found.begin(), found.end());
+}
+
+} // namespace
+
+// ============================================================================================== .ini
+std::vector<std::string> SplitList(const std::string& s)
+{
+    std::vector<std::string> out;
+    size_t start = 0;
+    while (out.size() < kMaxTechniques)
+    {
+        const size_t p = s.find(',', start);
+        std::string part = Trim(s.substr(start, p == std::string::npos ? std::string::npos : p - start));
+        if (!part.empty()) out.push_back(std::move(part));
+        if (p == std::string::npos) break;
+        start = p + 1;
+    }
+    return out;
+}
+
+bool ParsePreset(const std::string& raw, Preset& out)
+{
+    out = Preset{};
+    if (raw.size() > kMaxPresetBytes) { out.error = "the file is too large for a preset"; return false; }
+    std::string_view text(raw);
+    if (text.size() >= 3 && (unsigned char)text[0] == 0xEF && (unsigned char)text[1] == 0xBB && (unsigned char)text[2] == 0xBF) text.remove_prefix(3);
+    std::string section; // "" = top of the file
+    size_t pos = 0;
+    while (pos < text.size())
+    {
+        const size_t eol = text.find('\n', pos);
+        const std::string line = Trim(std::string(text.substr(pos, eol == std::string::npos ? std::string::npos : eol - pos)));
+        pos = eol == std::string::npos ? text.size() : eol + 1;
+        if (line.empty() || line[0] == ';' || line[0] == '#') continue;
+        if (line[0] == '[' && line.back() == ']') { section = Trim(line.substr(1, line.size() - 2)); continue; }
+        const size_t eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        out.sections[section][Trim(line.substr(0, eq))] = Trim(line.substr(eq + 1));
+    }
+
+    const std::vector<std::string> enabled = SplitList(TopValue(out, "Techniques"));
+    const std::vector<std::string> sorting = PresetSorting(out);
+    const std::set<std::string> enabledSet(enabled.begin(), enabled.end());
+    // ReShade runs the enabled techniques in TechniqueSorting order; enabled ones missing from the sorting run last.
+    std::vector<std::string> order;
+    for (auto& t : sorting) if (enabledSet.count(t) && std::find(order.begin(), order.end(), t) == order.end()) order.push_back(t);
+    for (auto& t : enabled) if (std::find(order.begin(), order.end(), t) == order.end()) order.push_back(t);
+    for (auto& t : order)
+    {
+        PresetEntry e;
+        const size_t at = t.find('@');
+        e.technique = at == std::string::npos ? t : t.substr(0, at);
+        e.file = at == std::string::npos ? std::string() : t.substr(at + 1);
+        out.order.push_back(std::move(e));
+    }
+    return true;
+}
+
+std::vector<std::string> PresetSorting(const Preset& preset) { return SplitList(TopValue(preset, "TechniqueSorting")); }
+
+std::vector<float> PresetValues(const Preset& preset, const LooksShader& d)
+{
+    std::vector<float> v((size_t)d.paramCount * 4, 0.0f);
+    const auto* sec = FindSection(preset, d.file);
+    for (int i = 0; i < d.paramCount; ++i)
+    {
+        const LooksParam& p = d.params[i];
+        for (int c = 0; c < 4; ++c) v[i * 4 + c] = p.def[c];
+        if (!sec) continue;
+        const auto it = sec->find(p.key);
+        if (it == sec->end()) continue;
+        const std::vector<std::string> parts = SplitList(it->second);
+        for (int c = 0; c < p.comps && c < (int)parts.size(); ++c)
+        {
+            const float x = (float)atof(parts[c].c_str());
+            if (std::isfinite(x)) v[i * 4 + c] = x;
+        }
+    }
+    return v;
+}
+
+// ============================================================================================== sources
+std::wstring LooksFolder()
+{
+    const std::wstring& apex = ApexPaths::ApexDirectory();
+    return apex.empty() ? std::wstring() : apex + L"Looks\\";
+}
+
+bool EnsureLooksFolder()
+{
+    const std::wstring dir = LooksFolder();
+    return !dir.empty() && ApexPaths::EnsureApexDirectory() && (CreateDirectoryW(dir.c_str(), nullptr) || GetLastError() == ERROR_ALREADY_EXISTS);
+}
+
+std::wstring GShadeFolder()
+{
+    wchar_t path[MAX_PATH] = {};
+    const DWORD n = GetModuleFileNameW(nullptr, path, MAX_PATH);
+    if (!n || n >= MAX_PATH) return {};
+    std::wstring p(path, n);
+    const size_t slash = p.find_last_of(L"\\/");
+    return slash == std::wstring::npos ? std::wstring() : p.substr(0, slash + 1) + L"1. Shader Presets\\";
+}
+
+Source RefSource(const std::string& ref)
+{
+    if (ref.rfind("looks:", 0) == 0) return Source::Mine;
+    if (ref.rfind("gshade:", 0) == 0) return Source::GShade;
+    if (ref.rfind("apex:", 0) == 0) return Source::Apex;
+    return Source::None;
+}
+
+std::wstring RefPath(const std::string& ref)
+{
+    const Source s = RefSource(ref);
+    if (s != Source::Mine && s != Source::GShade) return {};
+    const std::string rel = ref.substr(ref.find(':') + 1);
+    const std::wstring root = s == Source::Mine ? LooksFolder() : GShadeFolder();
+    if (root.empty() || !SafeRelative(rel)) return {};
+    std::wstring w = ApexUtil::ToWide(rel);
+    std::replace(w.begin(), w.end(), L'/', L'\\');
+    return root + w;
+}
+
+std::string RefName(const std::string& ref)
+{
+    if (RefSource(ref) == Source::None) return {};
+    std::string name = ref.substr(ref.find(':') + 1);
+    if (name.size() > 4 && _stricmp(name.c_str() + name.size() - 4, ".ini") == 0) name.resize(name.size() - 4);
+    return name;
+}
+
+bool LookText(const std::string& ref, std::string& text, std::string* error)
+{
+    text.clear();
+    if (RefSource(ref) == Source::Apex)
+    {
+        const char* t = BuiltInLookText(ref.substr(5));
+        if (!t) { if (error) *error = "this built-in look is not in this version"; return false; }
+        text = t;
+        return true;
+    }
+    const std::wstring path = RefPath(ref);
+    if (path.empty()) { if (error) *error = "no look chosen"; return false; }
+    return ReadBounded(path, text, error);
+}
+
+std::string MigrateRef(const std::string& absolutePath)
+{
+    if (absolutePath.empty()) return "gshade:[Amelie] Serene 2.0.ini";
+    const std::wstring path = ApexUtil::ToWide(absolutePath);
+    for (const auto& [root, prefix] : { std::pair{ GShadeFolder(), "gshade:" }, std::pair{ LooksFolder(), "looks:" } })
+        if (StartsWithI(path, root))
+        {
+            const std::string rel = ApexUtil::ToUtf8(path.substr(root.size()));
+            if (SafeRelative(rel)) return prefix + rel;
+        }
+    const size_t slash = absolutePath.find_last_of("\\/");
+    const std::string name = slash == std::string::npos ? absolutePath : absolutePath.substr(slash + 1);
+    return SafeRelative(name) ? "looks:" + name : std::string();
+}
+
+std::vector<LookItem> ListLooks()
+{
+    std::vector<LookItem> out;
+    for (const std::string& name : BuiltInLooks()) out.push_back({ "apex:" + name, name, Source::Apex });
+    ListFolder(LooksFolder(), "looks:", Source::Mine, out);
+    ListFolder(GShadeFolder(), "gshade:", Source::GShade, out);
+    return out;
+}
+
+// The built-in looks are added in a later step (embedded .ini text, one entry per look)
+std::vector<std::string> BuiltInLooks() { return {}; }
+const char* BuiltInLookText(const std::string&) { return nullptr; }
+
+// ============================================================================================== storing
+bool ValidLookFileName(const std::string& name)
+{
+    if (name.size() < 5 || name.size() > 200 || name.find_first_of("\\/") != std::string::npos || !SafeRelative(name)) return false;
+    if (_stricmp(name.c_str() + name.size() - 4, ".ini") != 0) return false;
+    std::string stem = name.substr(0, name.find('.'));
+    for (char& c : stem) c = (char)toupper((unsigned char)c);
+    static const char* const kReserved[] = { "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+                                             "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9" };
+    for (const char* r : kReserved) if (stem == r) return false;
+    return true;
+}
+
+bool StoreLook(const std::string& fileName, const std::string& bytes, std::string& stored, std::wstring* created, std::string* error)
+{
+    auto fail = [&](const char* why) { if (error) *error = why; return false; };
+    if (created) created->clear();
+    if (!ValidLookFileName(fileName)) return fail("the look's file name is not valid");
+    if (bytes.size() > kMaxPresetBytes) return fail("the file is too large for a preset");
+    if (!EnsureLooksFolder()) return fail("the Looks folder could not be created");
+    const std::wstring dir = LooksFolder();
+    const std::string stem = fileName.substr(0, fileName.size() - 4), ext = fileName.substr(fileName.size() - 4);
+    for (unsigned n = 0; n < 10000; ++n)
+    {
+        const std::string chosen = n ? stem + "-" + std::to_string(n) + ext : fileName;
+        const std::wstring target = dir + ApexUtil::ToWide(chosen);
+        if (ApexUtil::FileExists(target))
+        {
+            std::string existing;
+            if (ReadBounded(target, existing, nullptr) && existing == bytes) { stored = chosen; return true; }
+            continue;
+        }
+        const HANDLE file = CreateFileW(target.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE)
+        {
+            if (GetLastError() == ERROR_FILE_EXISTS) continue;
+            return fail("the look could not be saved");
+        }
+        DWORD written = 0;
+        const bool ok = WriteFile(file, bytes.data(), (DWORD)bytes.size(), &written, nullptr) && written == bytes.size();
+        CloseHandle(file);
+        if (!ok) { DeleteFileW(target.c_str()); return fail("the look could not be saved"); }
+        stored = chosen;
+        if (created) *created = target;
+        return true;
+    }
+    return fail("the look could not be saved");
+}
+
+} // namespace Looks

@@ -802,6 +802,8 @@ inline constexpr Element kSettings2[] = {
     {Kind::Circle, nullptr, {17.0f, 17.0f, 3.0f}, false},
     {Kind::Circle, nullptr, {7.0f, 7.0f, 3.0f}, false},
 };
+// plus.svg (Lucide, ISC)
+inline constexpr Element kPlus[] = {{Kind::Path, "M5 12h14", {}, false}, {Kind::Path, "M12 5v14", {}, false}};
 
 inline constexpr IconData kIcons[] = {
     {"activity", kActivity, static_cast<int>(sizeof(kActivity) / sizeof(kActivity[0]))},
@@ -926,6 +928,7 @@ inline constexpr IconData kIcons[] = {
     {"video", kVideo, static_cast<int>(sizeof(kVideo) / sizeof(kVideo[0]))},
     {"swatch-book", kSwatchBook, static_cast<int>(sizeof(kSwatchBook) / sizeof(kSwatchBook[0]))},
     {"settings-2", kSettings2, static_cast<int>(sizeof(kSettings2) / sizeof(kSettings2[0]))},
+    {"plus", kPlus, static_cast<int>(sizeof(kPlus) / sizeof(kPlus[0]))},
 };
 
 } // namespace ApexUi::LucideData

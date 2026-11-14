@@ -1,5 +1,5 @@
-// GShade looks: ReShade -> ps_3_0 compatibility layer. Prepended to every ported shader.
-// Only declarations live here; the shaders' maths stay as written in the GShade .fx files.
+// Looks: Apex's ReShade -> ps_3_0 compatibility layer, prepended to every ported shader (third_party/reshade_shaders).
+// Only declarations live here; the shaders' maths stay as written in their .fx files.
 #define GSHADE_DITHER 0 // GShade.ini UseDithering=0
 #define __RENDERER__ 0x9000 // D3D9, as GShade sees TS3: shaders take their D3D9 branches
 #define __RESHADE__ 60703   // GShade 5.2.4 is based on ReShade 6.7.3

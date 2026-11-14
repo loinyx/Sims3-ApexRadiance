@@ -1,5 +1,6 @@
 // Screenshots and videos with Apex's effects, and their [capture] settings in ApexRadiance.toml (see apex_capture.h).
 #include "apex_capture.h"
+#include "looks.h"
 #include "captures.h"
 #include "video_mp4.h"
 #include "apex_log.h"
@@ -29,8 +30,6 @@
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "shell32.lib")
 
-// gshade_looks.cpp: the preset in use (false while the look is off)
-bool GShadeLooksPresetInUse(std::wstring& file);
 
 namespace ApexCapture {
 using ApexUi::IconId;
@@ -861,7 +860,7 @@ std::filesystem::path NewFile(const std::filesystem::path& folder, const std::st
     n = TimeTokens(n, t);
     if (n.find(L'%') != std::wstring::npos) {
         std::wstring preset;
-        const bool look = GShadeLooksPresetInUse(preset);
+        const bool look = Looks::PresetInUse(preset);
         std::wstring presetName = std::filesystem::path(preset).stem().wstring();
         if (presetName.empty()) presetName = L"Apex";
         int w = width ? width : g_bbW, h = height ? height : g_bbH; // screenshots pass the back buffer's size
@@ -885,7 +884,7 @@ std::filesystem::path NewFile(const std::filesystem::path& folder, const std::st
 
 std::wstring PresetFile() {
     std::wstring f;
-    return GShadeLooksPresetInUse(f) ? f : std::wstring();
+    return Looks::PresetInUse(f) ? f : std::wstring();
 }
 
 // sound = camera: a mechanical shutter made here (two curtain clicks and the mirror's thump), 16-bit mono WAV

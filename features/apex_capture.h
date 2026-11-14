@@ -98,7 +98,7 @@ void PlaySoundFile();            // [capture] sound, asynchronous; nothing when 
 
 // The frame copied just before the ReShade/GShade look draws it (screenshot look = without | both)
 void WantBefore(bool on);                                         // render thread
-void BeforeLook(IDirect3DDevice9* dev, IDirect3DSurface9* src);   // gshade_looks.cpp, right before the look runs
+void BeforeLook(IDirect3DDevice9* dev, IDirect3DSurface9* src);   // patches/looks_patch.cpp, right before the look runs
 bool ReadBefore(IDirect3DDevice9* dev, std::vector<BYTE>& bgr, UINT& w, UINT& h); // render thread at Present: B G R, this frame only
 
 // Video

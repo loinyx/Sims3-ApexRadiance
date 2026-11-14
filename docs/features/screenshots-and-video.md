@@ -28,7 +28,7 @@ changed dot, per-row Reset and Undo work.
 | Group | Screenshots | Video |
 |---|---|---|
 | Where | Save to (Game / Apex / Other; the folder in use as its description; an Open the folder icon button beside the choices); with Other, Folder (Change: Windows' folder dialog; the typed path, with tokens, under a *Type a folder* arrow) | the same |
-| In the picture / In the video | Hide game UI; Look (With / Without / Both, only while a ReShade/GShade look is on) | Hide game UI, Game sound, Look (With / Without, only while a look is on) |
+| In the picture / In the video | Hide game UI; Look (With / Without / Both, only while a ReShade look is on) | Hide game UI, Game sound, Look (With / Without, only while a look is on) |
 | Quality | File type (PNG / JPG) | Quality (Smaller / Balanced / Best / Custom; description "<size>p · <fps> fps · about N MB a minute") |
 | Advanced: File / Picture | File: JPG quality (JPG only), Size (%), File name (token help on hover) | Picture: Size (720p / 1080p / 1440p), Frames per second (24 / 30 / 60), Custom bitrate (Custom only); File: File type (MP4 / Crash-safe MP4 / MKV), Keep the MP4 too (MKV only), Compression (H.264 / HEVC), File name |
 | Advanced: Also in the picture / video | Include the Apex menu, Include the mouse pointer, Save the look's preset too | the same |
@@ -94,11 +94,11 @@ true; see [ui.md](../ui.md#shortcuts)). Every value is clamped when read; missin
 
 ## How the pictures get the look
 
-Screenshots are read at Present (menu closed or hidden for the shot), after the GShade look and Apex colour, or at
+Screenshots are read at Present (menu closed or hidden for the shot), after the ReShade look and Apex colour, or at
 Present with the menu when include_menu is on. Video frames are grabbed at `filteredSceneBeforeOverlay`; while recording,
 the bootstrap runs Picture before the overlay (`ApexCapture::NeedsGradeBeforeOverlay`), so the frame has the look and the
 colour but not the menu or the notes (include_menu grabs at Present instead). The "before" copy is taken in
-`gshade_looks.cpp` right before the look runs (once per frame, at the first part when the look is split in a world),
+`patches/looks_patch.cpp` right before the look runs (once per frame, at the first part when the look is split in a world),
 only while a screenshot asks for it. With "Keep UI text sharp" on in a world that first part runs before the HUD, so
 the "before" picture has no HUD; this only shows when Hide game UI is off.
 

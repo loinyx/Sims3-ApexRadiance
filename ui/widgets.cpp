@@ -493,6 +493,8 @@ void SectionLabelText(const char* text, float indent, float extraBelow) {
 // Control rows (BeginControlRow / EndControlRow)
 float g_ctrlStartX = 0.0f;
 float g_ctrlBottom = 0.0f;
+float g_ctrlTopScreen = 0.0f; // LastControlRow
+bool g_ctrlStacked = false;
 
 } // namespace
 
@@ -806,10 +808,17 @@ bool BeginControlRow(const char* label, const char* description, float controlsW
                  ToScreen(startX + (iconBox - size) * 0.5f, top + (rowH - size) * 0.5f), size, U32(VioletTheme::kAccent));
     }
     g_ctrlStartX = startX;
+    g_ctrlTopScreen = ToScreen(startX, top).y;
+    g_ctrlStacked = stacked;
     const float controlsTop = stacked ? top + rowH + kSpace2 * u : top + (rowH - frameH) * 0.5f;
     g_ctrlBottom = stacked ? controlsTop + frameH : top + rowH;
     ImGui::SetCursorPos(ImVec2(startX + std::fmax(0.0f, width - controlsWidth), controlsTop));
     return true;
+}
+
+void LastControlRow(float* topScreenY, bool* stacked) {
+    if (topScreenY) *topScreenY = g_ctrlTopScreen;
+    if (stacked) *stacked = g_ctrlStacked;
 }
 
 void EndControlRow() {

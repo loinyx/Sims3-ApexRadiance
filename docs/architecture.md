@@ -415,7 +415,7 @@ One shared trigger runs effects on the finished 3D scene, before any game UI
 ([features/post_scene.cpp](../features/post_scene.cpp)).
 
 - **Order:** `PostScene::Add(order, fn)` keeps effects sorted: Ambient Occlusion 10 (`kAmbientOcclusion`), Edge
-  Smoothing 20 (`kEdgeSmoothing`), Depth Blur 30 (`kDepthBlur`). The first `Add` registers the hooks under
+  Smoothing 20 (`kEdgeSmoothing`), Depth Blur 30 (`kDepthBlur`), Looks 35 or 45 (before or after Picture's 40). The first `Add` registers the hooks under
   `"PostScene"` (Present, SetRenderTarget, DIP, DP, all `First`) and the `endSceneBeforeOverlay` / `preReset` callbacks;
   `Remove` of the last effect unregisters them.
 - **Trigger:**
@@ -469,7 +469,9 @@ Night Lighting's lot pass and light map smoothing (`lot_light_bridge.cpp`, `ligh
 - **Registration:** each feature adds every variant it can use (all qualities and modes) with `ShaderCache::Add` from
   namespace-scope initialisers in its own `.cpp`, so the list is complete before the init thread runs. A `Desc` keeps
   the exact `D3DCompile` inputs (source, source name, entry, target, flags, macros), so the bytecode is what the feature
-  would compile; `priority` 0 is the feature's default quality or mode, compiled first.
+  would compile; `priority` 0 is the feature's default quality or mode, compiled first. Looks registers its shaders
+  only when it is first turned on ([looks.md](features/looks.md)); a variant added after the precompile starts a new
+  worker run.
 - **Compile:** `ShaderCache::Start()` (init thread, right after the log opens, before the device exists) starts one
   below-normal-priority worker that compiles every variant and keeps the bytecode for the session (the source string is
   freed after its compile). Log: `[ShaderCache] Precompiling N Apex shaders on a background thread`, then

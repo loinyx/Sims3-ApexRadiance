@@ -11,6 +11,8 @@
 #include "screen_control.h"
 #include "overview_restore.h"
 #include "apex_capture.h"
+#include "looks.h"
+#include "looks_preset.h"
 #include "frame_profiler.h"
 #include "performance.h"
 #include "profile_package.h"
@@ -346,7 +348,14 @@ std::string MigrationNote() {
 bool ReadRoot(toml::table& out) {
     std::lock_guard<std::mutex> lock(g_fileLock);
     std::string error;
-    if (ParseFile(ApexPaths::ConfigFile(), out, &error)) return true;
+    if (ParseFile(ApexPaths::ConfigFile(), out, &error)) {
+        // [patches.GShadeLooks] became [patches.Looks]: read once, written only under the new name
+        if (toml::table* patches = out["patches"].as_table(); patches && patches->contains("GShadeLooks")) {
+            if (!patches->contains("Looks")) patches->insert("Looks", *patches->get("GShadeLooks"));
+            patches->erase("GShadeLooks");
+        }
+        return true;
+    }
     if (!error.empty()) LOG_ERROR("[Config] ApexRadiance.toml: " + error);
     out = toml::table{};
     return false;
@@ -610,7 +619,7 @@ unsigned FeaturePart(const std::string& name) {
     if (name == "NightTerrainRelight" || name == "SplitLevelGroundLight") return kPartNightLights;
     if (name == "AmbientOcclusion") return kPartAmbientOcclusion;
     if (name == "SceneDither") return kPartColor; // the Color page's Banding Fix
-    if (name == "GShadeLooks") return kPartColor; // the Color page's ReShade/GShade tab
+    if (name == "Looks") return kPartColor; // the Color page's Looks tab
     if (name == "DepthBlur") return kPartDepthBlur;
     if (name == "EdgeSmoothing") return kPartEdgeSmoothing;
     for (const char* p : {Performance::kResourceCacheName, Performance::kLookupMissesName, Performance::kFileListName, Performance::kLotLightingName,
@@ -769,10 +778,18 @@ void ApplyFeatureState(const toml::table& state) {
             }
         }
     }
-    if (state["capture"].as_table()) { // screenshots and videos (undo, Reset all)
+    if (const toml::table* capture = state["capture"].as_table()) { // screenshots and videos (undo, Reset all, presets)
         toml::table current, wanted;
         ApexCapture::ToToml(ApexCapture::Get(), current);
-        const ApexCapture::Settings target = ApexCapture::FromToml(state);
+        // keys the table leaves out (a preset carries no folder path or counter) keep their current values
+        toml::table merged = current;
+        toml::table& into = *merged["capture"].as_table();
+        for (auto&& [key, value] : *capture) {
+            if (const toml::table* sub = value.as_table(); sub && into[key.str()].as_table())
+                for (auto&& [k, v] : *sub) into[key.str()].as_table()->insert_or_assign(k, v);
+            else into.insert_or_assign(key, value);
+        }
+        const ApexCapture::Settings target = ApexCapture::FromToml(merged);
         ApexCapture::ToToml(target, wanted);
         if (current != wanted) ApexCapture::Set(target);
     }
@@ -785,7 +802,7 @@ void ApplyFeatureState(const toml::table& state) {
 // ---- profiles ----
 
 const char* ProfilePartName(int index) {
-    static const char* const kNames[kProfilePartCount] = {"Lighting", "Color", "Depth Blur", "Edge Smoothing", "", "Performance", "Shortcuts", "Ambient Occlusion", "Developer"};
+    static const char* const kNames[kProfilePartCount] = {"Lighting", "Color", "Depth Blur", "Edge Smoothing", "", "Performance", "Shortcuts", "Ambient Occlusion", "Developer", "Capture"};
     return index >= 0 && index < kProfilePartCount ? kNames[index] : "";
 }
 
@@ -803,6 +820,7 @@ unsigned ProfilePartsOf(const toml::table& state) {
     if (const toml::table* qol = state["qol"].as_table(); qol && !qol->empty()) parts |= kPartColor;
     if (state["shortcuts"].as_table()) parts |= kPartShortcuts;
     if (state["developer"].as_table()) parts |= kPartDeveloper;
+    if (state["capture"].as_table()) parts |= kPartCapture;
     return parts;
 }
 
@@ -832,6 +850,7 @@ void KeepProfileParts(toml::table& state, unsigned parts) {
     state.erase("display"); // obsolete controller table is never applied/exported
     if (!(parts & kPartShortcuts)) state.erase("shortcuts");
     if (!(parts & kPartDeveloper)) state.erase("developer");
+    if (!(parts & kPartCapture)) state.erase("capture");
 }
 
 namespace {
@@ -913,6 +932,13 @@ void CaptureProfileState(toml::table& root) {
             sc.insert("screenshot_folder", std::string(ScreenshotFolderName(u.screenshotFolder)));
             root.insert_or_assign("shortcuts", std::move(sc));
         }
+        { // the capture options (Image > Capture), removed below unless picked; never a folder path or the file counter
+            ApexCapture::ToToml(ApexCapture::Get(), root);
+            if (toml::table* capture = root["capture"].as_table()) {
+                capture->erase("counter");
+                if (toml::table* video = (*capture)["video"].as_table()) video->erase("custom_folder");
+            }
+        }
 }
 
 bool SaveProfile(const std::string& name, unsigned parts, std::string* error, const std::string& icon) {
@@ -980,6 +1006,13 @@ bool ValidLutName(const std::string& name) {
     std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return char(std::tolower(c));});
     return ext==".cube" || ext==".png";
 }
+// The look of a profile's Looks table ("looks:<file>", "gshade:<file>", "apex:<name>" or "")
+std::string LookRef(const toml::table& state) {
+    return state["patches"][Looks::kPatchName]["preset"].value_or(std::string());
+}
+void SetLookRef(toml::table& state, const std::string& ref) {
+    if(auto* t=state["patches"][Looks::kPatchName].as_table()) t->insert_or_assign("preset",ref);
+}
 std::string ReadBounded(const std::wstring& path, size_t maximum) {
     WIN32_FILE_ATTRIBUTE_DATA info{};
     if(!GetFileAttributesExW(path.c_str(),GetFileExInfoStandard,&info) || (info.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY) || info.nFileSizeHigh || info.nFileSizeLow>maximum)
@@ -994,14 +1027,33 @@ bool ProfileUsesLut(const toml::table& state) {
     // Include a selected LUT even when its switch is temporarily off: the saved look remains portable.
     return (ProfilePartsOf(state)&kPartColor) && !LutName(state).empty();
 }
+// A look whose .ini travels with the profile (built-in Apex looks need no file)
+bool ProfileUsesLook(const toml::table& state) {
+    const auto source=Looks::RefSource(LookRef(state));
+    return (ProfilePartsOf(state)&kPartColor) && (source==Looks::Source::Mine || source==Looks::Source::GShade);
+}
+bool ProfileUsesPackage(const toml::table& state) { return ProfileUsesLut(state) || ProfileUsesLook(state); }
 bool ExportProfileFile(const std::wstring& path, const toml::table& state, std::string* error) {
     try {
-        std::string bytes=Serialize(state);
+        toml::table out=state;
+        std::vector<ProfilePackage::Entry> files;
         if(ProfileUsesLut(state)) {
             const auto name=LutName(state);
             if(!ValidLutName(name)) throw std::runtime_error("The selected LUT filename is invalid");
-            const auto lut=ReadBounded(ApexPaths::ApexDirectory()+L"LUTs\\"+ApexUtil::ToWide(name),32u*1024u*1024u);
-            bytes=ProfilePackage::Write({{"profile.toml",std::move(bytes)},{"LUTs/"+name,lut}});
+            files.push_back({"LUTs/"+name,ReadBounded(ApexPaths::ApexDirectory()+L"LUTs\\"+ApexUtil::ToWide(name),32u*1024u*1024u)});
+        }
+        if(ProfileUsesLook(state)) { // the .ini goes in as Looks/<file name>, and the profile points at it in the Looks folder (looks:<file name>)
+            const auto ref=LookRef(state);
+            const auto file=Looks::RefPath(ref);
+            const auto name=ApexUtil::ToUtf8(file.substr(file.find_last_of(L'\\')+1));
+            if(file.empty() || !Looks::ValidLookFileName(name)) throw std::runtime_error("The look's filename is invalid");
+            files.push_back({"Looks/"+name,ReadBounded(file,Looks::kMaxPresetBytes)});
+            SetLookRef(out,"looks:"+name);
+        }
+        std::string bytes=Serialize(out);
+        if(!files.empty()) {
+            files.insert(files.begin(),{"profile.toml",std::move(bytes)});
+            bytes=ProfilePackage::Write(files);
         }
         return ApexUtil::WriteFileAtomic(path,bytes,error);
     } catch(const std::exception& e) {if(error) *error=e.what(); return false;}
@@ -1018,16 +1070,21 @@ bool ReadProfileImport(const std::wstring& path, ProfileImport& out, std::string
                 else if(entry.name.starts_with("LUTs/") && ValidLutName(entry.name.substr(5))) {
                     if(!result.lutName.empty()) throw std::runtime_error("Invalid profile package");
                     result.lutName=entry.name.substr(5); result.lutBytes=entry.bytes;
+                } else if(entry.name.starts_with("Looks/") && Looks::ValidLookFileName(entry.name.substr(6)) && entry.bytes.size()<=Looks::kMaxPresetBytes) {
+                    if(!result.lookName.empty()) throw std::runtime_error("Invalid profile package");
+                    result.lookName=entry.name.substr(6); result.lookBytes=entry.bytes;
                 } else throw std::runtime_error("Invalid profile package");
             }
-            if(!found || result.lutName.empty() || LutName(result.state)!=result.lutName) throw std::runtime_error("Invalid profile package");
+            // every file in the package is the one its profile names
+            if(!found || (result.lutName.empty() && result.lookName.empty()) || (!result.lutName.empty() && LutName(result.state)!=result.lutName) ||
+               (!result.lookName.empty() && LookRef(result.state)!="looks:"+result.lookName)) throw std::runtime_error("Invalid profile package");
         } else {if(bytes.size()>2u*1024u*1024u) throw std::runtime_error("The preset is too large"); result.state=toml::parse(bytes);}
         if(!ProfilePartsOf(result.state)) throw std::runtime_error("No supported settings in this profile");
         out=std::move(result); return true;
     } catch(const std::exception& e) {if(error) *error=e.what(); return false;}
 }
 bool SaveImportedProfile(const std::string& name, const ProfileImport& input, unsigned parts, const std::string& icon, std::string* error) {
-    std::wstring createdLut, temporaryProfile;
+    std::wstring createdLut, createdLook, temporaryProfile;
     try {
         if(name.empty() || SanitizeProfileName(name)!=name || ProfileExists(name)) throw std::runtime_error("Choose a new profile name");
         auto state=input.state; KeepProfileParts(state,parts);
@@ -1059,6 +1116,11 @@ bool SaveImportedProfile(const std::string& name, const ProfileImport& input, un
             if(!filters) throw std::runtime_error("Invalid LUT settings");
             filters->insert_or_assign("lut_file",chosen);
         }
+        if((parts&kPartColor) && !input.lookName.empty()) { // same rules as the LUT: identical bytes reuse the file, a clash gets a number
+            std::string stored, why;
+            if(!Looks::StoreLook(input.lookName,input.lookBytes,stored,&createdLook,&why)) throw std::runtime_error("The look could not be saved");
+            SetLookRef(state,"looks:"+stored);
+        }
         toml::table meta;
         meta.insert("profile",name); meta.insert("icon",icon); meta.insert("written_by",APEX_PRODUCT_NAME " " APEX_VERSION_STRING);
         state.insert_or_assign("meta",std::move(meta));
@@ -1068,7 +1130,7 @@ bool SaveImportedProfile(const std::string& name, const ProfileImport& input, un
         if(!ApexUtil::WriteFileAtomic(temporaryProfile,Serialize(state),&err)) throw std::runtime_error(err.empty()?"The profile could not be saved":err);
         if(!MoveFileExW(temporaryProfile.c_str(),ProfileFile(name).c_str(),MOVEFILE_WRITE_THROUGH)) throw std::runtime_error("The preset already exists or could not be saved");
         return true;
-    } catch(const std::exception& e) {if(!temporaryProfile.empty()) DeleteFileW(temporaryProfile.c_str()); if(!createdLut.empty()) DeleteFileW(createdLut.c_str()); if(error) *error=e.what(); return false;}
+    } catch(const std::exception& e) {if(!temporaryProfile.empty()) DeleteFileW(temporaryProfile.c_str()); if(!createdLut.empty()) DeleteFileW(createdLut.c_str()); if(!createdLook.empty()) DeleteFileW(createdLook.c_str()); if(error) *error=e.what(); return false;}
 }
 
 std::wstring ProfilesFolder() { return ProfilesDirectory(); }

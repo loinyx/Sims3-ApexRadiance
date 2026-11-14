@@ -142,8 +142,11 @@ enum ProfilePart : unsigned {
     kPartShortcuts = 1u << 6,     // keyboard and screenshot shortcut settings; not saved by default
     kPartDeveloper = 1u << 8, // advanced settings, opt-in and hidden in normal mode
     kPartAmbientOcclusion = 1u << 7, // Ambient Occlusion (after Shortcuts: older saved part masks keep their bits)
+    kPartCapture = 1u << 9,       // [capture]: screenshot and video options; not saved by default
 };
-inline constexpr int kProfilePartCount = 9;
+inline constexpr int kProfilePartCount = 10;
+// Parts a preset carries only when picked: unchecked when saving, left out of a one-click Apply
+inline constexpr unsigned kPartsOptIn = kPartShortcuts | kPartCapture;
 inline constexpr unsigned kProfilePartsAll = ((1u << kProfilePartCount) - 1) & ~(1u << 4);
 const char* ProfilePartName(int index); // English, for the menu ("Night Lights")
 unsigned ProfilePartsOf(const toml::table& state);         // the parts a profile table has
@@ -155,9 +158,12 @@ bool ReadProfile(const std::string& name, toml::table& out, std::string* error =
 struct ProfileImport {
     toml::table state;
     std::string lutName, lutBytes;
+    std::string lookName, lookBytes; // Looks/<file name>: the Color part's ReShade look
 };
 // Sharing retains the legacy TOML schema; ZIP adds its referenced LUT as a separate payload.
 bool ProfileUsesLut(const toml::table& state);
+bool ProfileUsesLook(const toml::table& state);    // the Color part's look is a file (looks: or gshade:)
+bool ProfileUsesPackage(const toml::table& state); // a LUT or a look file goes with it: exported as a ZIP
 bool ExportProfileFile(const std::wstring& path, const toml::table& state, std::string* error = nullptr);
 bool ReadProfileImport(const std::wstring& path, ProfileImport& out, std::string* error = nullptr);
 bool SaveImportedProfile(const std::string& name, const ProfileImport& input, unsigned parts, const std::string& icon,

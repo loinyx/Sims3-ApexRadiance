@@ -2,7 +2,7 @@
 
 The feature is described in [features/screenshots-and-video.md](../features/screenshots-and-video.md). It must:
 
-- Save screenshots with Apex's effects and the ReShade/GShade look, in the format, size and folder ApexCapture.ini says.
+- Save screenshots with Apex's effects and the ReShade look, in the format, size and folder ApexCapture.ini says.
 - Keep the menu, ApexCapture.ini and the `[ui]` screenshot keys in step both ways.
 - Record MP4 video with the look and Apex colour, without the Apex menu or notes unless asked for.
 - Stop cleanly at the length and size limits, on a device reset, and when the game closes, leaving a playable file.

@@ -156,6 +156,8 @@ bool SwitchRow(const char* label, bool* v, const char* tooltip = nullptr, BoolDe
 // nestable.
 bool BeginControlRow(const char* label, const char* description, float controlsWidth, IconId icon = IconId::None, float controlsHeight = 0.0f);
 void EndControlRow();
+// The last control row: its top (screen y) and whether its controls went under the text (narrow)
+void LastControlRow(float* topScreenY, bool* stacked);
 // A small muted chip ("~0.4 ms"); submitted as an item (hover it for a tooltip)
 ImVec2 ChipSize(const char* text);
 void Chip(const char* text, unsigned rgb = 0x8B8C96);
@@ -248,7 +250,7 @@ struct SliderOptions {
     float defaultValue = kNoDefault;
     ImU32 trackFrom = 0, trackTo = 0; // both set = gradient track
     bool hueTrack = false;
-    bool markDefault = false; // a small amber tick on the track at defaultValue (GShade looks: the .ini's value)
+    bool markDefault = false; // a small amber tick on the track at defaultValue (Looks: the .ini's value)
     // > 0: the track takes the column of a SelectRow with this controlWidth (aligned with the select above or below
     // it) and the value moves to the track's left
     float alignWidth = 0.0f;

@@ -1,51 +1,25 @@
 #pragma once
-// GShade looks: runs ported ReShade/GShade shaders on a D3D9 render target.
-// No Apex dependencies: used by Apex (features/gshade_looks.cpp) and by the offline comparison bench.
+// Looks: runs the ported ReShade shaders (third_party/reshade_shaders) on a D3D9 render target, in a given order with
+// given parameter values. Pure D3D9 + STL; the preset (.ini) side is in looks_preset.h, the feature in
+// patches/looks_patch.cpp.
 
 #include <d3d9.h>
 #include <functional>
 #include <map>
 #include <string>
 #include <vector>
-#include "gs_types.h"
+#include "looks_shaders.h"
 
-namespace GShade {
+namespace Looks {
 
-// The generated table (gs_generated.h)
+// The generated table (third_party/reshade_shaders/reshade_shaders_hlsl.h)
 int ShaderCount();
-const GsShaderDesc& Shader(int index);
-int FindShader(const std::string& technique, const std::string& file); // -1 if not ported
+const LooksShader& Shader(int index);
+int FindShader(const std::string& technique, const std::string& file); // -1 if not built in
 std::string FullSource(int shader);                                     // prelude + body, ready for D3DCompile
 
-// ---------------------------------------------------------------------------------------------- presets (.ini)
-struct PresetEntry
-{
-    std::string technique; // "FilmicPass"
-    std::string file;      // "FilmicPass.fx"
-    int shader = -1;       // index into the table, -1 = not ported yet
-};
-
-struct Preset
-{
-    std::wstring path;
-    std::vector<PresetEntry> order; // Techniques= in TechniqueSorting order
-    std::map<std::string, std::map<std::string, std::string>> sections; // [File.fx] key=value
-    std::string error;
-};
-
-bool LoadPreset(const std::wstring& path, Preset& out);
-// Values of one shader as the .ini sets them (keys missing in the .ini keep the .fx default). 4 floats per param.
-std::vector<float> PresetValues(const Preset& preset, int shader);
-// PreprocessorDefinitions of a .fx section ("" if none); the port is compiled with the .fx defaults only.
-std::string PresetDefines(const Preset& preset, const std::string& file);
-
-// Depth settings from GShade.ini [GENERAL] PreprocessorDefinitions (defaults: far 1000, not reversed)
-struct DepthSettings { float farPlane = 1000.0f; bool reversed = false; bool upsideDown = false; bool logarithmic = false; };
-DepthSettings LoadDepthSettings(const std::wstring& gshadeIni);
-
-// ---------------------------------------------------------------------------------------------- runner
 // Device state Run() changes; the caller saves it before Run and restores it after.
-// Also: pixel shader, vertex shader (null), FVF, render target 0 (+ viewport), PS constants c0..c31.
+// Also: pixel shader, vertex shader (null), FVF, render target 0 (+ viewport), PS constants.
 extern const D3DRENDERSTATETYPE kTouchedRenderStates[];
 extern const int kTouchedRenderStateCount;
 extern const int kTouchedSamplers; // s0..s5
@@ -67,7 +41,7 @@ struct Frame
     IDirect3DSurface9* target = nullptr; // read and written (RGB only); must not be bound as a texture
     UINT width = 0, height = 0;
     IDirect3DTexture9* depth = nullptr;  // raw device depth in .x (Apex: INTZ), or nullptr
-    DepthSettings depthSettings;
+    float farPlane = 1000.0f;            // ReShade's RESHADE_DEPTH_LINEARIZATION_FAR_PLANE default
     float mix = 1.0f;                    // 0..1, blend of the stage over the input
     unsigned frame = 0;                  // the caller's frame number (framecount/frametime tick once per new value); 0 = every Run is a frame
 };
@@ -78,19 +52,16 @@ public:
     void SetFactory(PsFactory f) { factory_ = std::move(f); }
     // Optional: how render targets are bound (Apex passes its un-hooked SetRenderTarget). Default: dev->SetRenderTarget.
     void SetRenderTargetFn(std::function<HRESULT(IDirect3DDevice9*, DWORD, IDirect3DSurface9*)> f) { setRT_ = std::move(f); }
-    // Runs the steps in order. Changes device state (see gs_runner.cpp: StatesTouched); the caller saves/restores.
+    // Runs the steps in order. Changes device state (see kTouched*); the caller saves/restores.
     // Returns false if nothing was drawn (missing shader, resource failure); skipped steps are listed in skipped().
     bool Run(const Frame& frame, const std::vector<Step>& steps);
-#ifdef GS_PERF
-    std::function<void(int)> stepHook; // bench only (tools/bench/gs_perf.cpp): step index at its start, -1 before the write-back
-#endif
     const std::vector<std::string>& skipped() const { return skipped_; }
     void Release(); // before device Reset / on shutdown
     size_t GpuBytes() const { return gpuBytes_; }
 
 private:
-    struct Tex { IDirect3DTexture9* tex = nullptr; IDirect3DSurface9* surf = nullptr; UINT w = 0, h = 0; D3DFORMAT fmt = D3DFMT_UNKNOWN; UINT levels = 1; };
-    bool Ensure(IDirect3DDevice9* dev, Tex& t, UINT w, UINT h, D3DFORMAT fmt, UINT levels = 1);
+    struct Tex { IDirect3DTexture9* tex = nullptr; IDirect3DSurface9* surf = nullptr; UINT w = 0, h = 0; D3DFORMAT fmt = D3DFMT_UNKNOWN; };
+    bool Ensure(IDirect3DDevice9* dev, Tex& t, UINT w, UINT h, D3DFORMAT fmt);
     void Free(Tex& t);
     IDirect3DPixelShader9* Ps(IDirect3DDevice9* dev, int shader, int entry);
     IDirect3DPixelShader9* CopyPs(IDirect3DDevice9* dev);
@@ -98,14 +69,13 @@ private:
     void SetParams(IDirect3DDevice9* dev, int shader, const float* values);
     void BindTex(IDirect3DDevice9* dev, int stage, IDirect3DBaseTexture9* tex);
     void UnbindAll(IDirect3DDevice9* dev);
-    bool RunClarity(const Frame& f, const Step& s);
     bool RunAdaptiveSharpen(const Frame& f, const Step& s);
 
     PsFactory factory_;
     std::function<HRESULT(IDirect3DDevice9*, DWORD, IDirect3DSurface9*)> setRT_;
     std::map<long long, IDirect3DPixelShader9*> ps_;
     IDirect3DPixelShader9* copyPs_ = nullptr;
-    Tex ping_, pong_, half1_, half2_, quarter_, asTex_;
+    Tex ping_, pong_, asTex_;
     std::vector<std::string> skipped_;
     size_t gpuBytes_ = 0;
     // what the current Run has set (the RTX Remix bridge sends each call across processes)
@@ -126,4 +96,4 @@ private:
     unsigned int rng_ = 0x9E3779B9u;              // uniform source: random
 };
 
-} // namespace GShade
+} // namespace Looks

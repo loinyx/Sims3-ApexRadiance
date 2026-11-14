@@ -68,6 +68,29 @@ int wmain(int argc,wchar_t** argv) {
     Check(ApexConfig::ExportProfileFile(testRoot+L"plain.toml",noLut,&error),"no-LUT export");
     std::string plain;ApexUtil::ReadFileBytes(testRoot+L"plain.toml",plain);
     Check(!plain.starts_with("PK") && toml::parse(plain)==noLut,"no-LUT export stays TOML");
+    // Looks: the look's .ini travels as Looks/<file name>, with the same reuse and numbering rules as LUTs
+    std::filesystem::create_directories(testRoot+L"Looks");
+    const std::string ini="Techniques=Vibrance@Vibrance.fx\n[Vibrance.fx]\nVibrance=0.300000\n";
+    ApexUtil::WriteFileAtomic(testRoot+L"Looks\\Warm.ini",ini,&error);
+    auto withLook=toml::parse("[patches.Looks]\nenabled=true\npreset='looks:Warm.ini'\n");
+    Check(ApexConfig::ProfileUsesPackage(withLook),"a look file makes a package");
+    Check(ApexConfig::ExportProfileFile(testRoot+L"look.zip",withLook,&error),"export look bundle");
+    ApexConfig::ProfileImport look;
+    Check(ApexConfig::ReadProfileImport(testRoot+L"look.zip",look,&error) && look.lookName=="Warm.ini" && look.lookBytes==ini && look.lutName.empty(),"look bundle reads back");
+    Check(ApexConfig::SaveImportedProfile("Warm",look,ApexConfig::kPartColor,"bookmark",&error),"import preset plus look");
+    Check(!std::filesystem::exists(testRoot+L"Looks\\Warm-1.ini"),"identical look reused");
+    auto otherLook=look;otherLook.lookBytes+="; changed\n";
+    Check(ApexConfig::SaveImportedProfile("Warm 2",otherLook,ApexConfig::kPartColor,"bookmark",&error) && ApexConfig::ReadProfile("Warm 2",loaded,&error) &&
+          loaded["patches"]["Looks"]["preset"].value_or(std::string())=="looks:Warm-1.ini","look collision rewritten");
+    std::string kept;ApexUtil::ReadFileBytes(testRoot+L"Looks\\Warm.ini",kept);Check(kept==ini,"original look untouched");
+    const auto badLook=ProfilePackage::Write({{"profile.toml","[patches.Looks]\npreset='looks:Other.ini'\n"},{"Looks/Warm.ini",ini}});
+    ApexUtil::WriteFileAtomic(testRoot+L"badlook.zip",badLook,&error);
+    Check(!ApexConfig::ReadProfileImport(testRoot+L"badlook.zip",again,&error),"mismatched look reference refused");
+    auto builtIn=toml::parse("[patches.Looks]\nenabled=true\npreset='apex:Soft'\n");
+    Check(!ApexConfig::ProfileUsesPackage(builtIn),"a built-in look needs no file");
+    auto capture=toml::parse("[capture]\nnotes=true\n");
+    Check(ApexConfig::ProfilePartsOf(capture)==ApexConfig::kPartCapture,"capture part found");
+    ApexConfig::KeepProfileParts(capture,ApexConfig::kPartColor);Check(!capture.contains("capture"),"capture part dropped unless picked");
     printf("%d checks, %d failures\n",checks,failures);return failures?1:0;
 }
 

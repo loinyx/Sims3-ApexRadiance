@@ -1,20 +1,16 @@
-// GShade looks: preset parser and D3D9 runner for the ported ReShade/GShade shaders.
-// Pure D3D9 + STL, shared by Apex and the offline bench. See docs/PLAN.md for the pass layout.
+// Looks: the D3D9 runner of the ported ReShade shaders (third_party/reshade_shaders). Pure D3D9 + STL.
 
-#include "gs_runner.h"
-#include "gs_generated.h"
+#include "looks_runner.h"
+#include "third_party/reshade_shaders/reshade_shaders_hlsl.h"
 
 #include <algorithm>
-#include <cstdio>
-#include <cstdlib>
 #include <cstring>
-#include <set>
 
-namespace GShade {
+namespace Looks {
 
 // ============================================================================================== table
-int ShaderCount() { return GShadeGen::kShaderCount; }
-const GsShaderDesc& Shader(int index) { return GShadeGen::kShaders[index]; }
+int ShaderCount() { return ReShadeShaders::kShaderCount; }
+const LooksShader& Shader(int index) { return ReShadeShaders::kShaders[index]; }
 
 static bool IEquals(const std::string& a, const std::string& b)
 {
@@ -39,7 +35,7 @@ static void Append(std::string& out, const char* const* pieces)
 std::string FullSource(int shader)
 {
     std::string s;
-    Append(s, GShadeGen::kCommon);
+    Append(s, ReShadeShaders::kCommon);
     if (shader < 0)
     {
         // The runner's own copy / mix pass
@@ -47,138 +43,6 @@ std::string FullSource(int shader)
         return s;
     }
     Append(s, Shader(shader).src);
-    return s;
-}
-
-// ============================================================================================== .ini
-static std::string Trim(const std::string& s)
-{
-    size_t a = s.find_first_not_of(" \t\r\n"), b = s.find_last_not_of(" \t\r\n");
-    return a == std::string::npos ? std::string() : s.substr(a, b - a + 1);
-}
-
-static std::vector<std::string> Split(const std::string& s, char sep)
-{
-    std::vector<std::string> out;
-    size_t start = 0;
-    for (;;)
-    {
-        size_t p = s.find(sep, start);
-        std::string part = Trim(s.substr(start, p == std::string::npos ? std::string::npos : p - start));
-        if (!part.empty()) out.push_back(part);
-        if (p == std::string::npos) break;
-        start = p + 1;
-    }
-    return out;
-}
-
-static bool ReadIni(const std::wstring& path, std::map<std::string, std::map<std::string, std::string>>& sections)
-{
-    FILE* f = _wfopen(path.c_str(), L"rb");
-    if (!f) return false;
-    std::string text;
-    char buf[8192];
-    size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) text.append(buf, n);
-    fclose(f);
-    if (text.size() >= 3 && (unsigned char)text[0] == 0xEF && (unsigned char)text[1] == 0xBB && (unsigned char)text[2] == 0xBF)
-        text.erase(0, 3);
-
-    std::string section; // "" = top of the file
-    size_t pos = 0;
-    while (pos < text.size())
-    {
-        size_t eol = text.find('\n', pos);
-        std::string line = Trim(text.substr(pos, eol == std::string::npos ? std::string::npos : eol - pos));
-        pos = eol == std::string::npos ? text.size() : eol + 1;
-        if (line.empty() || line[0] == ';' || line[0] == '#') continue;
-        if (line[0] == '[' && line.back() == ']') { section = Trim(line.substr(1, line.size() - 2)); continue; }
-        size_t eq = line.find('=');
-        if (eq == std::string::npos) continue;
-        sections[section][Trim(line.substr(0, eq))] = Trim(line.substr(eq + 1));
-    }
-    return true;
-}
-
-bool LoadPreset(const std::wstring& path, Preset& out)
-{
-    out = Preset{};
-    out.path = path;
-    if (!ReadIni(path, out.sections)) { out.error = "cannot read the preset file"; return false; }
-
-    auto& top = out.sections[""];
-    std::vector<std::string> enabled = Split(top["Techniques"], ',');
-    std::vector<std::string> sorting = Split(top["TechniqueSorting"], ',');
-    std::set<std::string> enabledSet(enabled.begin(), enabled.end());
-
-    // ReShade runs the enabled techniques in TechniqueSorting order; enabled ones missing from the sorting run last.
-    std::vector<std::string> order;
-    for (auto& t : sorting) if (enabledSet.count(t)) order.push_back(t);
-    for (auto& t : enabled) if (std::find(order.begin(), order.end(), t) == order.end()) order.push_back(t);
-
-    for (auto& t : order)
-    {
-        PresetEntry e;
-        size_t at = t.find('@');
-        e.technique = at == std::string::npos ? t : t.substr(0, at);
-        e.file = at == std::string::npos ? std::string() : t.substr(at + 1);
-        e.shader = FindShader(e.technique, e.file);
-        out.order.push_back(e);
-    }
-    if (out.order.empty()) out.error = "the preset enables no techniques";
-    return out.error.empty();
-}
-
-static const std::map<std::string, std::string>* FindSection(const Preset& preset, const std::string& file)
-{
-    for (auto& kv : preset.sections)
-        if (IEquals(kv.first, file)) return &kv.second;
-    return nullptr;
-}
-
-std::vector<float> PresetValues(const Preset& preset, int shader)
-{
-    const GsShaderDesc& d = Shader(shader);
-    std::vector<float> v(d.paramCount * 4, 0.0f);
-    const auto* sec = FindSection(preset, d.file);
-    for (int i = 0; i < d.paramCount; ++i)
-    {
-        const GsParamDesc& p = d.params[i];
-        for (int c = 0; c < 4; ++c) v[i * 4 + c] = p.def[c];
-        if (!sec) continue;
-        auto it = sec->find(p.key);
-        if (it == sec->end()) continue;
-        std::vector<std::string> parts = Split(it->second, ',');
-        for (int c = 0; c < p.comps && c < (int)parts.size(); ++c)
-            v[i * 4 + c] = (float)atof(parts[c].c_str());
-    }
-    return v;
-}
-
-std::string PresetDefines(const Preset& preset, const std::string& file)
-{
-    const auto* sec = FindSection(preset, file);
-    if (!sec) return {};
-    auto it = sec->find("PreprocessorDefinitions");
-    return it == sec->end() ? std::string() : it->second;
-}
-
-DepthSettings LoadDepthSettings(const std::wstring& gshadeIni)
-{
-    DepthSettings s;
-    std::map<std::string, std::map<std::string, std::string>> sections;
-    if (!ReadIni(gshadeIni, sections)) return s;
-    for (auto& def : Split(sections["GENERAL"]["PreprocessorDefinitions"], ','))
-    {
-        size_t eq = def.find('=');
-        if (eq == std::string::npos) continue;
-        std::string k = Trim(def.substr(0, eq));
-        float val = (float)atof(def.c_str() + eq + 1);
-        if (k == "RESHADE_DEPTH_LINEARIZATION_FAR_PLANE" && val > 1.0f) s.farPlane = val;
-        else if (k == "RESHADE_DEPTH_INPUT_IS_REVERSED") s.reversed = val != 0.0f;
-        else if (k == "RESHADE_DEPTH_INPUT_IS_UPSIDE_DOWN") s.upsideDown = val != 0.0f;
-        else if (k == "RESHADE_DEPTH_INPUT_IS_LOGARITHMIC") s.logarithmic = val != 0.0f;
-    }
     return s;
 }
 
@@ -210,19 +74,19 @@ static size_t BytesPerPixel(D3DFORMAT f)
     }
 }
 
-bool Runner::Ensure(IDirect3DDevice9* dev, Tex& t, UINT w, UINT h, D3DFORMAT fmt, UINT levels)
+bool Runner::Ensure(IDirect3DDevice9* dev, Tex& t, UINT w, UINT h, D3DFORMAT fmt)
 {
-    if (t.tex && t.w == w && t.h == h && t.fmt == fmt && t.levels == levels) return true;
+    if (t.tex && t.w == w && t.h == h && t.fmt == fmt) return true;
     Free(t);
-    if (FAILED(dev->CreateTexture(w, h, levels, D3DUSAGE_RENDERTARGET, fmt, D3DPOOL_DEFAULT, &t.tex, nullptr)))
+    if (FAILED(dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, fmt, D3DPOOL_DEFAULT, &t.tex, nullptr)))
     {
         t.tex = nullptr;
         return false;
     }
     t.tex->GetSurfaceLevel(0, &t.surf);
-    t.w = w; t.h = h; t.fmt = fmt; t.levels = levels;
+    t.w = w; t.h = h; t.fmt = fmt;
     size_t bytes = (size_t)w * h * BytesPerPixel(fmt);
-    gpuBytes_ += levels > 1 ? bytes * 4 / 3 : bytes;
+    gpuBytes_ += bytes;
     return t.surf != nullptr;
 }
 
@@ -230,8 +94,7 @@ void Runner::Free(Tex& t)
 {
     if (t.tex)
     {
-        size_t bytes = (size_t)t.w * t.h * BytesPerPixel(t.fmt);
-        size_t used = t.levels > 1 ? bytes * 4 / 3 : bytes;
+        const size_t used = (size_t)t.w * t.h * BytesPerPixel(t.fmt);
         gpuBytes_ = gpuBytes_ >= used ? gpuBytes_ - used : 0;
     }
     if (t.surf) t.surf->Release();
@@ -241,7 +104,7 @@ void Runner::Free(Tex& t)
 
 void Runner::Release()
 {
-    for (Tex* t : { &ping_, &pong_, &half1_, &half2_, &quarter_, &asTex_ })
+    for (Tex* t : { &ping_, &pong_, &asTex_ })
         Free(*t);
     for (auto& kv : ps_) if (kv.second) kv.second->Release();
     ps_.clear();
@@ -301,16 +164,16 @@ void Runner::Draw(IDirect3DDevice9* dev, IDirect3DPixelShader9* ps, IDirect3DSur
 
 void Runner::SetParams(IDirect3DDevice9* dev, int shader, const float* values)
 {
-    const GsShaderDesc& d = Shader(shader);
+    const LooksShader& d = Shader(shader);
     const unsigned long long now = GetTickCount64();
     for (int i = 0; i < d.paramCount; ++i)
     {
-        const GsParamDesc& p = d.params[i];
-        if (p.kind != GsKind::Source)
+        const LooksParam& p = d.params[i];
+        if (p.kind != LooksParamKind::Source)
         {
             // consecutive registers with consecutive values go in one call
             int n = 1;
-            while (i + n < d.paramCount && d.params[i + n].kind != GsKind::Source && d.params[i + n].reg == p.reg + n) ++n;
+            while (i + n < d.paramCount && d.params[i + n].kind != LooksParamKind::Source && d.params[i + n].reg == p.reg + n) ++n;
             dev->SetPixelShaderConstantF(p.reg, values + i * 4, n);
             i += n - 1;
             continue;
@@ -352,30 +215,6 @@ static void SetSampler(IDirect3DDevice9* dev, int stage, bool point)
 void Runner::UnbindAll(IDirect3DDevice9* dev)
 {
     for (int s = 0; s < kTouchedSamplers; ++s) BindTex(dev, s, nullptr);
-}
-
-// Clarity: three R8 blur passes at 1/2, 1/2, 1/4 size (A8R8G8B8 here, same 8-bit precision), then the full-size blend.
-bool Runner::RunClarity(const Frame& f, const Step& s)
-{
-    IDirect3DDevice9* dev = f.dev;
-    const UINT hw = (std::max)(1u, f.width / 2), hh = (std::max)(1u, f.height / 2);
-    const UINT qw = (std::max)(1u, f.width / 4), qh = (std::max)(1u, f.height / 4);
-    if (!Ensure(dev, half1_, hw, hh, D3DFMT_A8R8G8B8) || !Ensure(dev, half2_, hw, hh, D3DFMT_A8R8G8B8)
-        || !Ensure(dev, quarter_, qw, qh, D3DFMT_A8R8G8B8))
-        return false;
-    IDirect3DPixelShader9* p[4];
-    for (int i = 0; i < 4; ++i) if (!(p[i] = Ps(dev, s.shader, i))) return false;
-
-    UnbindAll(dev);
-    BindTex(dev, 0, ping_.tex);
-    Draw(dev, p[0], half1_.surf, hw, hh);   // ClarityTex
-    BindTex(dev, 1, half1_.tex);
-    Draw(dev, p[1], half2_.surf, hw, hh);   // ClarityTex2
-    BindTex(dev, 2, half2_.tex);
-    Draw(dev, p[2], quarter_.surf, qw, qh); // ClarityTex3
-    BindTex(dev, 3, quarter_.tex);
-    Draw(dev, p[3], out_, f.width, f.height);
-    return true;
 }
 
 // AdaptiveSharpen: pass 0 writes edge data to an RG16F texture, pass 1 sharpens.
@@ -420,7 +259,7 @@ bool Runner::Run(const Frame& f, const std::vector<Step>& steps)
         frameTimeMs_ = (float)(now - lastMs_);
         lastMs_ = now;
     }
-    depthC_[0] = f.depthSettings.farPlane; depthC_[1] = f.depthSettings.reversed ? 1.0f : 0.0f; depthC_[2] = depthC_[3] = 0.0f;
+    depthC_[0] = f.farPlane; depthC_[1] = depthC_[2] = depthC_[3] = 0.0f; // not reversed
 
     // Fixed state for every pass
     dev->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
@@ -459,16 +298,12 @@ bool Runner::Run(const Frame& f, const std::vector<Step>& steps)
     {
         if (s.shader < 0 || s.shader >= ShaderCount() || !s.values) continue;
         out_ = &s == direct ? f.target : pong_.surf;
-        const GsShaderDesc& d = Shader(s.shader);
-#ifdef GS_PERF
-        if (stepHook) stepHook((int)(&s - steps.data()));
-#endif
+        const LooksShader& d = Shader(s.shader);
         if (d.needsDepth && !f.depth) { skipped_.push_back(std::string(d.technique) + " (no depth)"); continue; }
 
         SetParams(dev, s.shader, s.values);
         bool ok;
-        if (!strcmp(d.technique, "Clarity")) ok = RunClarity(f, s);
-        else if (!strcmp(d.technique, "AdaptiveSharpen")) ok = RunAdaptiveSharpen(f, s);
+        if (!strcmp(d.technique, "AdaptiveSharpen")) ok = RunAdaptiveSharpen(f, s);
         else
         {
             IDirect3DPixelShader9* ps = Ps(dev, s.shader, 0);
@@ -496,9 +331,6 @@ bool Runner::Run(const Frame& f, const std::vector<Step>& steps)
         std::swap(ping_, pong_);
     }
 
-#ifdef GS_PERF
-    if (stepHook) stepHook(-1);
-#endif
     UnbindAll(dev);
     SetSampler(dev, 4, false);
     if (drew && !wroteTarget)
@@ -522,4 +354,4 @@ bool Runner::Run(const Frame& f, const std::vector<Step>& steps)
     return drew;
 }
 
-} // namespace GShade
+} // namespace Looks
