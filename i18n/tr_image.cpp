@@ -765,7 +765,7 @@ const I18n::Entry kEntries[] = {
     {"Cinematic", "Cinematográfico", "Cinematográfico", "Cinématographique"},
     {"Soft vintage", "Vintage suave", "Vintage suave", "Vintage doux"},
     // ---- Color > Looks (patches/looks_patch.cpp, apex_gui.cpp) ----
-    {"Looks", "Visuais", "Estilos", "Rendus"},
+    {"Shaders in this look", "Shaders deste visual", "Shaders de este estilo", "Shaders de ce rendu"},
     {"ReShade look", "Visual do ReShade", "Estilo de ReShade", "Rendu ReShade"},
     {"Hold to see the game without the look", "Segure para ver o jogo sem o visual", "Mantén pulsado para ver el juego sin el estilo", "Maintenez pour voir le jeu sans le rendu"},
     {"A LUT is also on; both change color, so the picture may look too strong", "Um LUT também está ligado; os dois mudam a cor, então a imagem pode ficar forte demais", "También hay un LUT activado; ambos cambian el color, así que la imagen puede verse demasiado intensa", "Un LUT est aussi activé ; les deux changent la couleur, l'image peut donc paraître trop forte"},

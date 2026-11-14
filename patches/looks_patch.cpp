@@ -1382,9 +1382,9 @@ public:
             extra.iconOff = extra.iconOn = IconId::Ellipsis;
             extra.value = &more;
             extra.tooltip = "More options";
-            ApexUi::CardHeader(IconId::SlidersHorizontal, "Shaders", sub.c_str(), nullptr, nullptr, true, &extra);
+            ApexUi::CardHeader(IconId::SlidersHorizontal, "Shaders in this look", sub.c_str(), nullptr, nullptr, true, &extra);
             if (extra.clicked) ImGui::OpenPopup("LooksActions");
-            if (ApexUi::BeginActionMenu("LooksActions", I18n::Tr("Shaders")))
+            if (ApexUi::BeginActionMenu("LooksActions", I18n::Tr("Shaders in this look")))
             {
                 {
                     const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);

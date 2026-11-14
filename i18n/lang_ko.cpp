@@ -2801,7 +2801,7 @@ const I18n::Pair kPairs[] = {
     {"Warm evening", "따뜻한 저녁"},
     {"Cinematic", "시네마틱"},
     {"Soft vintage", "부드러운 빈티지"},
-    {"Looks", "룩"},
+    {"Shaders in this look", "이 룩의 셰이더"},
     {"ReShade look", "ReShade 룩"},
     {"Hold to see the game without the look", "누르고 있으면 룩 없는 게임을 보여 줘요"},
     {"A LUT is also on; both change color, so the picture may look too strong", "LUT도 켜져 있어요. 둘 다 색을 바꾸므로 화면이 너무 강해 보일 수 있어요"},

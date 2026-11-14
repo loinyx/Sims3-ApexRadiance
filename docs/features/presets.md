@@ -18,7 +18,7 @@ A preset referencing a local LUT cannot reproduce its look on another computer u
 
 ## How Apex Radiance solves it
 
-Export packages the selected preset and its LUT in one ZIP when Color is included and a LUT is selected; a ReShade look from a file (Color > Looks) goes in the same way, as `Looks/<filename>`. Otherwise, the preset can be shared as TOML. Import reads the original Apex ZIP directly; manual extraction is unnecessary. A conflicting LUT or look filename is resolved without overwriting a different existing file, and the imported preset references the chosen local filename.
+Export packages the selected preset and its LUT in one ZIP when Color is included and a LUT is selected; a ReShade look from a file (Color > Shaders) goes in the same way, as `Looks/<filename>`. Otherwise, the preset can be shared as TOML. Import reads the original Apex ZIP directly; manual extraction is unnecessary. A conflicting LUT or look filename is resolved without overwriting a different existing file, and the imported preset references the chosen local filename.
 
 ## Settings
 

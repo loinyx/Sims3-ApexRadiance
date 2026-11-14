@@ -2801,7 +2801,7 @@ const I18n::Pair kPairs[] = {
     {"Warm evening", "Тёплый вечер"},
     {"Cinematic", "Кинематографичный"},
     {"Soft vintage", "Мягкий винтаж"},
-    {"Looks", "Образы"},
+    {"Shaders in this look", "Шейдеры этого образа"},
     {"ReShade look", "Образ ReShade"},
     {"Hold to see the game without the look", "Удерживайте, чтобы увидеть игру без образа"},
     {"A LUT is also on; both change color, so the picture may look too strong", "Также включён LUT; оба меняют цвет, поэтому картинка может быть слишком насыщенной"},

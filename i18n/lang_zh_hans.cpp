@@ -2801,7 +2801,7 @@ const I18n::Pair kPairs[] = {
     {"Warm evening", "温暖傍晚"},
     {"Cinematic", "电影感"},
     {"Soft vintage", "柔和复古"},
-    {"Looks", "画面风格"},
+    {"Shaders in this look", "此画面风格的着色器"},
     {"ReShade look", "ReShade 画面风格"},
     {"Hold to see the game without the look", "按住可查看没有画面风格的游戏"},
     {"A LUT is also on; both change color, so the picture may look too strong", "LUT 也已开启；两者都会改变颜色，画面可能显得过重"},

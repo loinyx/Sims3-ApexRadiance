@@ -243,7 +243,7 @@ and the code (`SaveProfile`, `ReadProfile`) keep the older name "profile". A pre
 | Bit | Part | Contents | Default when saving |
 |---|---|---|---|
 | 0 | Lighting | `NightTerrainRelight`, `SplitLevelGroundLight` (Night Lights, Every-Story Ground Light, Water & Snow) | Checked |
-| 1 | Color | `[qol]` Picture, `SceneDither` (Banding Fix) and `Looks` (Looks tab; its .ini goes in an exported ZIP) | Checked |
+| 1 | Color | `[qol]` Picture, `SceneDither` (Banding Fix) and `Looks` (Shaders tab; its .ini goes in an exported ZIP) | Checked |
 | 2 | Depth Blur | `DepthBlur` | Checked |
 | 3 | Edge Smoothing | `EdgeSmoothing` | Checked |
 | 4 | Reserved | Former window mode; unused so later bits do not shift | - |

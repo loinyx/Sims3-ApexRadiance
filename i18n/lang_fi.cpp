@@ -2801,7 +2801,7 @@ const I18n::Pair kPairs[] = {
     {"Warm evening", "Lämmin ilta"},
     {"Cinematic", "Elokuvamainen"},
     {"Soft vintage", "Pehmeä vintage"},
-    {"Looks", "Lookit"},
+    {"Shaders in this look", "Tämän lookin varjostimet"},
     {"ReShade look", "ReShade-look"},
     {"Hold to see the game without the look", "Pidä painettuna nähdäksesi pelin ilman lookia"},
     {"A LUT is also on; both change color, so the picture may look too strong", "Myös LUT on päällä; molemmat muuttavat värejä, joten kuva voi näyttää liian voimakkaalta"},

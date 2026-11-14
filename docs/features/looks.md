@@ -10,7 +10,7 @@ and can switch, reorder and tune the preset's shaders, then save the result as a
 |---|---|
 | Availability | In development (3.3.0), Experimental |
 | Default | Off |
-| Menu | Image > Color, tab *Looks* (Lucide `swatch-book`): the *ReShade look* card, then the *Shaders* card |
+| Menu | Image > Color, tab *Shaders* (Lucide `swatch-book`): the *ReShade look* card, then the *Shaders in this look* card |
 | Configuration | `[patches.Looks]` in `ApexRadiance.toml` (an older `[patches.GShadeLooks]` is read once and written under the new name) |
 | Folders | `Documents\Electronic Arts\The Sims 3\Apex Radiance\Looks\` (the player's looks; created on first use); `Game\Bin\1. Shader Presets\` (GShade's, read-only, listed only when it exists) |
 | Presets | Part of the Color part; the look's .ini travels in an exported ZIP |

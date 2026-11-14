@@ -2801,7 +2801,7 @@ const I18n::Pair kPairs[] = {
     {"Warm evening", "Meleg este"},
     {"Cinematic", "Filmes"},
     {"Soft vintage", "Lágy vintage"},
-    {"Looks", "Lookok"},
+    {"Shaders in this look", "A look shaderei"},
     {"ReShade look", "ReShade-look"},
     {"Hold to see the game without the look", "Tartsd lenyomva a játék look nélküli nézetéhez"},
     {"A LUT is also on; both change color, so the picture may look too strong", "Egy LUT is be van kapcsolva; mindkettő a színt módosítja, ezért a kép túl erős lehet"},

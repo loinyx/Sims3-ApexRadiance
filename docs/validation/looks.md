@@ -29,7 +29,7 @@ The feature is described in [features/looks.md](../features/looks.md). It must:
 
 ## In-game test plan
 
-1. Image > Color > Looks, switch on, pick a look from GShade's folder. **Expected:** the status shows its name and
+1. Image > Color > Shaders, switch on, pick a look from GShade's folder. **Expected:** the status shows its name and
    shader count; the look shows on the scene and on menus.
 2. *Applies to* World only. **Expected:** the HUD and menus keep their own look.
 3. Hold the card's eye, then B over the menu. **Expected:** the game without the look while held.

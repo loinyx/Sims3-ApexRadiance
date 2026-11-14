@@ -2534,7 +2534,7 @@ Always	tr_image.cpp:kEntries	Sempre	Siempre	Toujours
 Warm evening	tr_image.cpp:kEntries	Fim de tarde quente	Atardecer cálido	Soirée chaleureuse	
 Cinematic	tr_image.cpp:kEntries	Cinematográfico	Cinematográfico	Cinématographique	
 Soft vintage	tr_image.cpp:kEntries	Vintage suave	Vintage suave	Vintage doux	
-Looks	tr_image.cpp:kEntries	Visuais	Estilos	Rendus	
+Shaders in this look	tr_image.cpp:kEntries	Shaders deste visual	Shaders de este estilo	Shaders de ce rendu	
 ReShade look	tr_image.cpp:kEntries	Visual do ReShade	Estilo de ReShade	Rendu ReShade	
 Hold to see the game without the look	tr_image.cpp:kEntries	Segure para ver o jogo sem o visual	Mantén pulsado para ver el juego sin el estilo	Maintenez pour voir le jeu sans le rendu	
 A LUT is also on; both change color, so the picture may look too strong	tr_image.cpp:kEntries	Um LUT também está ligado; os dois mudam a cor, então a imagem pode ficar forte demais	También hay un LUT activado; ambos cambian el color, así que la imagen puede verse demasiado intensa	Un LUT est aussi activé ; les deux changent la couleur, l'image peut donc paraître trop forte	

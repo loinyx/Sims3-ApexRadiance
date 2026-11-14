@@ -1237,7 +1237,7 @@ void LooksContent() {
 
 void ColorPage() {
     ApexUi::PageTitle("Color", "How the game's picture looks");
-    static const char* const kTabs[] = {"Overview","Basic", "Tones", "Color", "Detail", "Filters", "LUTs", "Looks"};
+    static const char* const kTabs[] = {"Overview","Basic", "Tones", "Color", "Detail", "Filters", "LUTs", "Shaders"};
     if (g_colorTab < 0 || g_colorTab > kColorTabLooks) g_colorTab = Picture::TabOverview;
     int selected=g_colorTab==kColorTabLooks ? 7 : g_colorTab==Picture::TabOverview ? 0 : g_colorTab==Picture::TabLuts ? 6 : g_colorTab+1;
     ApexUi::TabBar("##ColorTabs", &selected, kTabs, IM_COUNTOF(kTabs));
@@ -3485,7 +3485,7 @@ const SearchPart* SearchParts(int& count) {
         {"Color", "Tones", PageColor, &g_colorTab, Picture::TabTones, [] { PictureRows(Picture::TabTones); }},
         {"Color", "Color", PageColor, &g_colorTab, Picture::TabColor, [] { PictureRows(Picture::TabColor); }},
         {"Color", "Detail", PageColor, &g_colorTab, Picture::TabDetail, [] { PictureRows(Picture::TabDetail); }},
-        {"Color", "Looks", PageColor, &g_colorTab, kColorTabLooks, LooksContent},
+        {"Color", "Shaders", PageColor, &g_colorTab, kColorTabLooks, LooksContent},
         {"Ambient Occlusion", nullptr, PageAmbientOcclusion, nullptr, 0, AmbientOcclusionContent},
         {"Depth Blur", nullptr, PageDepthBlur, nullptr, 0, DepthBlurContent},
         {"Edge Smoothing", nullptr, PageEdgeSmoothing, nullptr, 0, AntiAliasingContent},
