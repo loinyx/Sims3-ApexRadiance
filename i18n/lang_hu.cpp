@@ -2801,6 +2801,7 @@ const I18n::Pair kPairs[] = {
     {"Warm evening", "Meleg este"},
     {"Cinematic", "Filmes"},
     {"Soft vintage", "Lágy vintage"},
+    {"Save this list and its values as a .ini of your own in the Looks folder", "Elmenti ezt a listát és az értékeit saját .ini fájlként a Looks mappába"},
     {"Shaders in this look", "A look shaderei"},
     {"ReShade look", "ReShade-look"},
     {"Hold to see the game without the look", "Tartsd lenyomva a játék look nélküli nézetéhez"},

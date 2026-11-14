@@ -112,7 +112,7 @@ struct State
     // settings
     std::string preset;        // "looks:<file>", "gshade:<file>", "apex:<name>"; empty = none chosen
     bool beforeColor = false;  // run before Apex's colour (Picture) instead of after
-    bool onUi = true;          // also shade the game's UI, menus and loading screens (end of frame, like GShade)
+    bool onUi = false;         // also shade the game's UI, menus and loading screens (end of frame, like GShade)
     float mix = 1.0f;
     std::set<std::string> off; // techniques switched off here (still enabled in the .ini)
     std::map<std::string, std::vector<float>> tweaks; // technique -> 4 floats per param
@@ -929,39 +929,47 @@ bool ValuesUi(size_t i)
     return changed;
 }
 
-// Under an open shader's sliders: Run earlier / Run later and "<pos> of <n>" on the left, the reset link on the right
-// (under them when the row is too narrow)
+// The open shader's footer, under a line across its panel: Run earlier / Run later (bordered buttons) and "<pos> of <n>" on
+// the left, "Put back the look's values" on the right; the right button moves under them when the panel is too narrow
 bool ShaderActions(size_t i, int pos, int count, bool& reorder)
 {
     const float u = ApexUi::Unit();
     bool changed = false;
-    ApexUi::Gap(ApexUi::kSpace2);
-    const float bs = ImGui::GetFrameHeight();
-    const float startX = ImGui::GetCursorPosX(), avail = ImGui::GetContentRegionAvail().x;
-    const float textDy = (bs - ImGui::GetTextLineHeight()) * 0.5f;
-    ImGui::BeginGroup();
+    ImGuiWindow* w = ImGui::GetCurrentWindow();
+    const float lineY = ImGui::GetCursorScreenPos().y + ApexUi::kSpace1 * u;
+    w->DrawList->AddLine(ImVec2(w->Pos.x, lineY), ImVec2(w->Pos.x + w->Size.x, lineY), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kCardBorder)), 1.0f);
+    ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, lineY + ApexUi::kSpace2 * u));
+    ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+    const float avail = ImGui::GetContentRegionAvail().x, startX = ImGui::GetCursorPosX(), gap = ApexUi::kSpace2 * u;
+    const char* earlier = I18n::Tr("Run earlier");
+    const char* later = I18n::Tr("Run later");
+    const std::string place = I18n::Trf("{} of {}", pos, count);
+    const char* reset = I18n::Tr("Put back the look's values");
+    float leftW = ImGui::CalcTextSize(place.c_str()).x;
+    if (pos > 1) leftW += ApexUi::ButtonWidth(earlier, true) + gap;
+    if (pos < count) leftW += ApexUi::ButtonWidth(later, true) + gap;
+    const float resetW = ApexUi::ButtonWidth(reset, false);
+    const float textDy = (ImGui::GetFrameHeight() - ImGui::GetTextLineHeight()) * 0.5f;
+    const float rowY = ImGui::GetCursorPosY();
     if (pos > 1)
     {
-        if (ApexUi::IconButton("##Earlier", IconId::ChevronUp, "Run earlier", false, bs / u)) { Move(i, -1); reorder = changed = true; }
-        ImGui::SameLine(0.0f, ApexUi::kSpace1 * u);
+        if (ApexUi::IconTextButton(earlier, IconId::ChevronUp)) { Move(i, -1); reorder = changed = true; }
+        ImGui::SameLine(0.0f, gap);
     }
     if (pos < count)
     {
-        if (ApexUi::IconButton("##Later", IconId::ChevronDown, "Run later", false, bs / u)) { Move(i, 1); reorder = changed = true; }
-        ImGui::SameLine(0.0f, ApexUi::kSpace2 * u);
+        if (ApexUi::IconTextButton(later, IconId::ChevronDown)) { Move(i, 1); reorder = changed = true; }
+        ImGui::SameLine(0.0f, gap);
     }
-    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + textDy);
-    ImGui::TextDisabled("%s", I18n::Trf("{} of {}", pos, count).c_str());
-    ImGui::EndGroup();
-    const char* link = I18n::Tr("Put back the look's values");
-    const float linkW = ImGui::CalcTextSize(link).x;
-    if (ImGui::GetItemRectSize().x + ApexUi::kSpace3 * u + linkW <= avail)
+    ImGui::SetCursorPosY(rowY + textDy);
+    ImGui::TextDisabled("%s", place.c_str());
+    if (leftW + ApexUi::kSpace3 * u + resetW <= avail)
     {
-        ImGui::SameLine(startX + avail - linkW);
-        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + textDy);
+        ImGui::SameLine(startX + avail - resetW);
+        ImGui::SetCursorPosY(rowY);
     }
     ImGui::BeginDisabled(!EditedValues(i));
-    if (ImGui::TextLink(link))
+    if (ApexUi::TextButton(reset))
     {
         g.tweaks.erase(g.order[i].technique);
         ApexUi::ReportChange(I18n::Trf("{} values put back", g.order[i].technique).c_str());
@@ -1020,12 +1028,27 @@ bool ShaderRow(size_t i, int pos, int count, bool& reorder)
     }
     if (open || ApexUi::FilterActive())
     {
+        // the values in a rounded panel set into the card, the order and reset actions in its footer
         ImGui::Indent(ApexUi::kSpace4 * u);
-        ImGui::BeginDisabled(IsOff(i));
-        changed |= ValuesUi(i);
-        ImGui::EndDisabled();
-        if (!ApexUi::FilterActive()) changed |= ShaderActions(i, pos, count, reorder);
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, VioletTheme::Col(VioletTheme::kWindowBg));
+        ImGui::PushStyleColor(ImGuiCol_Border, VioletTheme::Col(VioletTheme::kCardBorder));
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 10.0f * u);
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildBorderSize, 1.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ApexUi::kSpace3 * u, ApexUi::kSpace2 * u));
+        const bool visible = ImGui::BeginChild("##Values", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding,
+                                               ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        ImGui::PopStyleVar(3);
+        ImGui::PopStyleColor(2);
+        if (visible)
+        {
+            ImGui::BeginDisabled(IsOff(i));
+            changed |= ValuesUi(i);
+            ImGui::EndDisabled();
+            if (!ApexUi::FilterActive()) changed |= ShaderActions(i, pos, count, reorder);
+        }
+        ImGui::EndChild();
         ImGui::Unindent(ApexUi::kSpace4 * u);
+        ApexUi::Gap(ApexUi::kSpace2);
     }
     ImGui::PopID();
     return changed;
@@ -1060,7 +1083,14 @@ bool AddShaderModal(bool openNow)
             static const char* const kKinds[] = { "All kinds", "Color", "Sharpen", "Light", "Film & camera", "Stylized" };
             ApexUi::SelectRow("Kind", "Only shaders of this kind", "##ShaderKind", &kind, kKinds, IM_COUNTOF(kKinds));
             const std::string q = Lower(query);
-            ImGui::BeginChild("##ShaderList", ImVec2(0.0f, std::min(360.0f * u, ImGui::GetIO().DisplaySize.y * 0.5f)), ImGuiChildFlags_None);
+            ApexUi::Gap(ApexUi::kSpace2);
+            // the list spans the modal edge to edge, so its scrollbar sits on the modal's border as on the main window;
+            // its own padding keeps the rows where the modal's padding had them
+            const float padX = ImGui::GetStyle().WindowPadding.x;
+            ImGui::SetCursorPosX(0.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(padX, 0.0f));
+            ImGui::BeginChild("##ShaderList", ImVec2(ImGui::GetWindowWidth(), std::min(360.0f * u, ImGui::GetIO().DisplaySize.y * 0.5f)), ImGuiChildFlags_AlwaysUseWindowPadding);
+            ImGui::PopStyleVar();
             int shown = 0;
             for (int s = 0; s < Looks::ShaderCount(); ++s)
             {
@@ -1167,7 +1197,7 @@ public:
     {
         g_patch = this;
         RegisterBoolSetting(&g.beforeColor, "beforeColor", false, "Run before Apex's color instead of after it");
-        RegisterBoolSetting(&g.onUi, "onUi", true, "Also shade the game's UI, menus and loading screens");
+        RegisterBoolSetting(&g.onUi, "onUi", false, "Also shade the game's UI, menus and loading screens");
         RegisterFloatSetting(&g.mix, "mix", SettingWidget::Slider, 1.0f, 0.0f, 1.0f, "How much of the look is applied");
     }
 
@@ -1388,7 +1418,6 @@ public:
             {
                 {
                     const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
-                    if (ApexUi::ActionMenuItem("Save as a new look\xE2\x80\xA6", IconId::Save)) { openSave = true; ImGui::CloseCurrentPopup(); }
                     if (ApexUi::ActionMenuItem("Put every value back", IconId::RotateCcw, AnyEdited()))
                     {
                         g.tweaks.clear();
@@ -1434,6 +1463,11 @@ public:
             {
                 ApexUi::Gap(ApexUi::kSpace2);
                 if (ApexUi::IconTextButton("Add a shader", IconId::Plus, "Add one of Apex's built-in shaders to this look")) openAdd = true;
+                // saving is a visible action, not only in the menu: the list and its values as a .ini in the Looks folder
+                const char* save = "Save as a new look\xE2\x80\xA6";
+                if (ImGui::GetItemRectMax().x + ApexUi::kSpace2 * ApexUi::Unit() + ApexUi::ButtonWidth(I18n::Tr(save), true) <= ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x)
+                    ImGui::SameLine(0.0f, ApexUi::kSpace2 * ApexUi::Unit());
+                if (ApexUi::IconTextButton(save, IconId::Save, "Save this list and its values as a .ini of your own in the Looks folder")) openSave = true;
             }
         }
         ApexUi::EndCard();

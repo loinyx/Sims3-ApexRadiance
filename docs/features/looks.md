@@ -58,8 +58,9 @@ change the color, with *Turn off the LUT* (undoable).
 **Shaders** card: "<on> of <total> on" and an ellipsis menu (*Save as a new look…*, *Put every value back*, *Back to the
 look's list*). One row per built-in shader of the run list: a chevron, the name (changed dot while its values differ
 from the .ini) over one short description, the switch. The name side opens its sliders (one per parameter component,
-the .ini's value as each slider's default, so the changed dot and Reset work), then Run earlier / Run later, "<pos> of
-<n>" and *Put back the look's values*. Shaders the look names but Apex cannot run are one line, "<n> can't run here",
+the .ini's value as each slider's default, so the changed dot and Reset work) in a rounded panel set into the card;
+the panel's footer, under a line, has the bordered buttons Run earlier / Run later, "<pos> of <n>" and *Put back the
+look's values* (under them when narrow). Shaders the look names but Apex cannot run are one line, "<n> can't run here",
 that opens to their names. *Add a shader* opens a list of every built-in shader with a search field and a Kind filter
 (Color, Sharpen, Light, Film & camera, Stylized).
 
@@ -120,7 +121,7 @@ The earlier ports came from GShade's copies, which differ from the authors' code
 | ReShade look (card switch) | `enabled` | bool | off | | Turns the look on |
 | Look | `preset` | string | empty (none chosen) | `looks:`, `gshade:` or `apex:` reference | The look that runs. An older absolute `presetPath` becomes `gshade:` under GShade's folder, `looks:` under Looks\, else `looks:<file name>`; an older empty one, `gshade:[Amelie] Serene 2.0.ini` |
 | Strength | `mix` | float | 100% | 0 to 100% | How much of the look is blended over the game |
-| Applies to | `onUi` | bool | on (World and menus) | | Off: World only, the interface keeps its own look |
+| Applies to | `onUi` | bool | off (World only) | | On: World and menus, the interface, menus and loading screens get the look too |
 | Advanced > Order | `beforeColor` | bool | off (After Apex Color) | | Runs the look before Apex's Color instead of after it |
 | Shader switches | `off` | array of technique names | empty | at most 256 read | The look's shaders switched off here |
 | Add a shader | `extra` | array of `Tech@File.fx` | empty | at most 256 read | Built-in shaders added to the look |

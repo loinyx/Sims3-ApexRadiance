@@ -2801,6 +2801,7 @@ const I18n::Pair kPairs[] = {
     {"Warm evening", "温暖傍晚"},
     {"Cinematic", "电影感"},
     {"Soft vintage", "柔和复古"},
+    {"Save this list and its values as a .ini of your own in the Looks folder", "将此列表及其数值保存为你自己的 .ini，放在 Looks 文件夹中"},
     {"Shaders in this look", "此画面风格的着色器"},
     {"ReShade look", "ReShade 画面风格"},
     {"Hold to see the game without the look", "按住可查看没有画面风格的游戏"},

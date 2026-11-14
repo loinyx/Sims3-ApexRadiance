@@ -765,6 +765,7 @@ const I18n::Entry kEntries[] = {
     {"Cinematic", "Cinematográfico", "Cinematográfico", "Cinématographique"},
     {"Soft vintage", "Vintage suave", "Vintage suave", "Vintage doux"},
     // ---- Color > Looks (patches/looks_patch.cpp, apex_gui.cpp) ----
+    {"Save this list and its values as a .ini of your own in the Looks folder", "Salva esta lista e seus valores como um .ini seu na pasta Looks", "Guarda esta lista y sus valores como un .ini propio en la carpeta Looks", "Enregistre cette liste et ses valeurs dans un .ini à vous, dans le dossier Looks"},
     {"Shaders in this look", "Shaders deste visual", "Shaders de este estilo", "Shaders de ce rendu"},
     {"ReShade look", "Visual do ReShade", "Estilo de ReShade", "Rendu ReShade"},
     {"Hold to see the game without the look", "Segure para ver o jogo sem o visual", "Mantén pulsado para ver el juego sin el estilo", "Maintenez pour voir le jeu sans le rendu"},

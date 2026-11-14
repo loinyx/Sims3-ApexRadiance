@@ -2801,6 +2801,7 @@ const I18n::Pair kPairs[] = {
     {"Warm evening", "따뜻한 저녁"},
     {"Cinematic", "시네마틱"},
     {"Soft vintage", "부드러운 빈티지"},
+    {"Save this list and its values as a .ini of your own in the Looks folder", "이 목록과 값을 Looks 폴더에 나만의 .ini로 저장합니다"},
     {"Shaders in this look", "이 룩의 셰이더"},
     {"ReShade look", "ReShade 룩"},
     {"Hold to see the game without the look", "누르고 있으면 룩 없는 게임을 보여 줘요"},

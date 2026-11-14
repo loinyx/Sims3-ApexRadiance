@@ -2534,6 +2534,7 @@ Always	tr_image.cpp:kEntries	Sempre	Siempre	Toujours
 Warm evening	tr_image.cpp:kEntries	Fim de tarde quente	Atardecer cálido	Soirée chaleureuse	
 Cinematic	tr_image.cpp:kEntries	Cinematográfico	Cinematográfico	Cinématographique	
 Soft vintage	tr_image.cpp:kEntries	Vintage suave	Vintage suave	Vintage doux	
+Save this list and its values as a .ini of your own in the Looks folder	tr_image.cpp:kEntries	Salva esta lista e seus valores como um .ini seu na pasta Looks	Guarda esta lista y sus valores como un .ini propio en la carpeta Looks	Enregistre cette liste et ses valeurs dans un .ini à vous, dans le dossier Looks	
 Shaders in this look	tr_image.cpp:kEntries	Shaders deste visual	Shaders de este estilo	Shaders de ce rendu	
 ReShade look	tr_image.cpp:kEntries	Visual do ReShade	Estilo de ReShade	Rendu ReShade	
 Hold to see the game without the look	tr_image.cpp:kEntries	Segure para ver o jogo sem o visual	Mantén pulsado para ver el juego sin el estilo	Maintenez pour voir le jeu sans le rendu	

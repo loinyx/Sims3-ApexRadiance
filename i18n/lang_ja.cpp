@@ -2801,6 +2801,7 @@ const I18n::Pair kPairs[] = {
     {"Warm evening", "暖かな夕暮れ"},
     {"Cinematic", "シネマティック"},
     {"Soft vintage", "ソフトビンテージ"},
+    {"Save this list and its values as a .ini of your own in the Looks folder", "このリストと値を自分の .ini として Looks フォルダーに保存します"},
     {"Shaders in this look", "このルックのシェーダー"},
     {"ReShade look", "ReShade ルック"},
     {"Hold to see the game without the look", "押している間、ルックなしのゲームを表示"},

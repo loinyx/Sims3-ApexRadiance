@@ -4689,7 +4689,14 @@ void MainWindow() {
         ImGui::EndChild();
         ImGui::SetCursorScreenPos(ImVec2(wp.x + sidebarW + 1.0f, bodyTop));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ApexUi::kSpace4 * u, ApexUi::kSpace3 * u));
-        ImGui::BeginChild("##Content", ImVec2(ws.x - sidebarW - 1.0f, bodyH), ImGuiChildFlags_AlwaysUseWindowPadding, 0);
+        // The scrollbar's width is always kept, so a page that grows past the window (a longer list, an opened Advanced)
+        // does not narrow every row; its grab shows only while there is something to scroll (last frame's answer)
+        static bool s_contentScrolls = false;
+        if (!s_contentScrolls)
+            for (ImGuiCol c : {ImGuiCol_ScrollbarGrab, ImGuiCol_ScrollbarGrabHovered, ImGuiCol_ScrollbarGrabActive}) ImGui::PushStyleColor(c, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui::BeginChild("##Content", ImVec2(ws.x - sidebarW - 1.0f, bodyH), ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+        if (!s_contentScrolls) ImGui::PopStyleColor(3);
+        s_contentScrolls = ImGui::GetScrollMaxY() > 0.0f;
         ImGui::PopStyleVar();
         if (g_search[0]) {
             SearchResults();
