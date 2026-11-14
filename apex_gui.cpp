@@ -88,7 +88,7 @@ std::atomic<bool> g_oldStandalone{false}; // an older S3SSApex.asi is loaded too
 std::string g_oldStandaloneModule;        // under g_detailLock
 
 // Sidebar pages and the tabs of each page. The selected page and tabs are kept while the game runs (not saved).
-enum Page : int { PageOverview, PageLighting, PageWaterSnow, PageColor, PageAmbientOcclusion, PageDepthBlur, PageEdgeSmoothing, PagePerformance, PageDeveloper, PageSettings, PageReport, PageConflicts, PageBanding, PageLotStreaming, PageProfiles, PageDisplay };
+enum Page : int { PageOverview, PageLighting, PageWaterSnow, PageColor, PageAmbientOcclusion, PageDepthBlur, PageEdgeSmoothing, PagePerformance, PageDeveloper, PageSettings, PageReport, PageConflicts, PageBanding, PageLotStreaming, PageProfiles, PageDisplay, PageCapture };
 enum LightingTab : int { LightingLamps, LightingOutside, LightingInside, LightingFixes };
 enum SettingsTab : int { SettingsMenu, SettingsShortcuts, SettingsProfiles, SettingsCompatibility, SettingsAbout };
 int g_page = PageOverview;
@@ -97,6 +97,9 @@ int g_colorTab = Picture::TabOverview;
 // The Color page's ReShade/GShade tab: a g_colorTab value after Picture's own tabs (Go and the overview rows keep working)
 constexpr int kColorTabLooks = Picture::TabCount;
 int g_settingsTab = SettingsMenu;
+enum CaptureTab : int { CaptureShots, CaptureVideo };
+int g_captureTab = CaptureShots;
+bool g_takeShot = false; // Image > Capture: "Take one" was clicked (taken by RunShortcuts at the next frame)
 
 // ---- menu state (render thread, inside the overlay's ImGui frame) ----
 char g_search[96] = {};           // the header's search query; non-empty = the content shows the results
@@ -117,7 +120,6 @@ double g_whatsNewOpenedAt = -1.0; // when the What's new popover opened (its ris
 // list), the release list's content and the footer below the list
 float g_whatsNewHeadH = 0.0f, g_whatsNewListH = 0.0f, g_whatsNewFooterH = 0.0f;
 int g_whatsNewSettle = 0; // frames the popover is laid out unseen after it opens, while its height settles
-void ScreenshotCaptureCard();
 void RecoveryRow();
 
 // Undo: the feature state at the last click / key activation in the menu (before any widget saw it), and the toast
@@ -1507,6 +1509,27 @@ void DisplayPage() {
     DisplayContent();
 }
 
+// Image > Capture: screenshots and videos (features/apex_capture.cpp)
+bool LooksOn() { const ApexPatch* looks = Find("GShadeLooks"); return looks && looks->IsEnabled(); }
+void CaptureShotsContent() {
+    ImGui::PushID("CaptureShots");
+    if (ApexCapture::ScreenshotCard(LooksOn())) g_takeShot = true;
+    ImGui::PopID();
+}
+void CaptureVideoContent() {
+    ImGui::PushID("CaptureVideo");
+    ApexCapture::VideoCard(LooksOn(), g_menuGameAaOn);
+    ImGui::PopID();
+}
+
+void CapturePage() {
+    ApexUi::PageTitle("Capture", "Screenshots and videos with your effects");
+    static const char* const kTabs[] = {"Screenshots", "Video"};
+    ApexUi::TabBar("##CaptureTabs", &g_captureTab, kTabs, IM_COUNTOF(kTabs));
+    if (g_captureTab == CaptureVideo) CaptureVideoContent();
+    else CaptureShotsContent();
+}
+
 void LotStreamingPage() {
     ApexUi::PageTitle("Lot Streaming", "How far lots show in full detail");
     LotStreamingCards();
@@ -2383,7 +2406,6 @@ void MenuTab() {
         }
     }
     ApexUi::EndCard();
-    ScreenshotCaptureCard();
     if (ApexUi::BeginCard("##Maintenance")) {
         ApexUi::CardHeader(IconId::Wrench, "Settings and maintenance", "Saving, reset and recovery", nullptr, nullptr);
         ApexUi::CardDivider();
@@ -3427,6 +3449,8 @@ const SearchPart* SearchParts(int& count) {
         {"Depth Blur", nullptr, PageDepthBlur, nullptr, 0, DepthBlurContent},
         {"Edge Smoothing", nullptr, PageEdgeSmoothing, nullptr, 0, AntiAliasingContent},
         {"Display", nullptr, PageDisplay, nullptr, 0, DisplayContent},
+        {"Capture", "Screenshots", PageCapture, &g_captureTab, CaptureShots, CaptureShotsContent},
+        {"Capture", "Video", PageCapture, &g_captureTab, CaptureVideo, CaptureVideoContent},
         {"Performance", nullptr, PagePerformance, nullptr, 0, PerformanceCard},
         {"Lot Streaming", nullptr, PageLotStreaming, nullptr, 0, LotStreamingCards},
         {"Settings", "Menu", PageSettings, &g_settingsTab, SettingsMenu, MenuTab},
@@ -3639,6 +3663,7 @@ void Sidebar(bool collapsed) {
         {PageDepthBlur, IconId::Aperture, "Depth Blur", nullptr},
         {PageEdgeSmoothing, IconId::Spline, "Edge Smoothing", nullptr},
         {PageDisplay, IconId::Monitor, "Display", nullptr},
+        {PageCapture, IconId::Camera, "Capture", nullptr},
         {PagePerformance, IconId::Gauge, "Performance", "SYSTEM"},
         {PageLotStreaming, IconId::Layers, "Lot Streaming", nullptr},
         {PageConflicts, IconId::TriangleAlert, "Attention", nullptr},
@@ -3870,6 +3895,7 @@ void DrawPage() {
     case PageConflicts: ConflictsPage(); break;
     case PagePerformance: PerformancePage(); break;
     case PageDisplay: DisplayPage(); break;
+    case PageCapture: CapturePage(); break;
     case PageLotStreaming: LotStreamingPage(); break;
     case PageDeveloper:
         if (!kPublicBuild) {
@@ -5287,48 +5313,6 @@ void ShortcutsContent() {
     }
 }
 
-// Settings > Menu: screenshot settings and the existing validated shortcut recorder.
-void ScreenshotCaptureCard() {
-    g_recSeenFrame = ImGui::GetFrameCount();
-    if (ApexUi::BeginCard("##ScreenshotCapture")) {
-        ApexConfig::UiSettings ui = ApexConfig::GetUi();
-        ApexUi::CardHeader(IconId::Camera, "Screenshot capture", "Save the finished game image with Apex's active effects", nullptr, nullptr);
-        ApexUi::CardDivider();
-        static const char* const kFolders[] = {"Game's Screenshots folder", "Apex Radiance folder", "Another folder"};
-        static const char* const kFolderTips[] = {"Next to the photos the game takes, in Documents > Electronic Arts > The Sims 3 > Screenshots",
-                                                  "Kept apart from the game's photos, in Documents > Electronic Arts > The Sims 3 > Apex Radiance > Screenshots",
-                                                  "Any folder you choose, for example on another drive"};
-        int folder = std::clamp(ui.screenshotFolder, 0, 2);
-        if (ApexUi::SegmentedRow("Save screenshots to", "Where the filtered screenshots are saved", "##ShotFolder", &folder, kFolders, 3, kFolderTips, nullptr, 0)) {
-            if (folder == 2 && ui.screenshotCustomFolder.empty()) { // start from the folder in use; type over it or press Change
-                ui.screenshotCustomFolder = ApexUtil::ToUtf8(ApexCapture::DefaultFolder(ui.screenshotFolder, false).wstring());
-            }
-            if (folder != 2 || !ui.screenshotCustomFolder.empty()) {
-                ui.screenshotFolder = folder;
-                ApexConfig::SetUi(ui);
-            }
-        }
-        if (ui.screenshotFolder == 2) { // the folder in Apex row style; the typed path is under "Type a folder"
-            std::string v = ui.screenshotCustomFolder;
-            if (ApexCapture::FolderRow("Screenshots folder", "ShotFolder", v, 0, "Choose another folder for the screenshots") && !v.empty()) {
-                ui.screenshotCustomFolder = v;
-                ApexConfig::SetUi(ui);
-            }
-        }
-        // (its key is set once, on the Shortcuts tab)
-        ApexCapture::ScreenshotRows(); // file name, type, size, Hide game UI, burst ... ([capture.screenshot])
-    }
-    ApexUi::EndCard();
-
-    // Settings > Menu: video recording ([capture.video]); its key is on the Shortcuts tab
-    if (ApexUi::BeginCard("##VideoRecording")) {
-        ApexUi::CardHeader(IconId::Video, "Video recording", "Records the game with your look as an MP4", nullptr, nullptr);
-        ApexUi::CardDivider();
-        ApexCapture::VideoRows();
-    }
-    ApexUi::EndCard();
-}
-
 // Settings > Shortcuts
 void ShortcutsTab() {
     ImGui::PushID("Shortcuts");
@@ -5525,7 +5509,8 @@ void RunShortcuts() {
     ApexCapture::Poll(); // a recording asked for by its key or the menu
     if (Hotkeys::Take(Hotkeys::Action::Compare)) ToggleCompare();
     if (Hotkeys::Take(Hotkeys::Action::Refresh)) NightLighting::RefreshAll();
-    if (Hotkeys::Take(Hotkeys::Action::Screenshot))
+    const bool menuShot = std::exchange(g_takeShot, false); // Image > Capture's "Take one" (the F8 path)
+    if (Hotkeys::Take(Hotkeys::Action::Screenshot) || menuShot)
         Captures::RequestPlayerScreenshot(ApexConfig::GetUi().screenshotHideGameUi);
     if (Hotkeys::Take(Hotkeys::Action::LooksToggle)) ToggleFeatureByKey("GShadeLooks", "ReShade/GShade", IconId::SwatchBook); // the card's title and icon
     RunPresetShortcut();

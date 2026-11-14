@@ -81,6 +81,7 @@ bool g_grabbedThisFrame = false;
 std::mutex g_resultLock;
 std::string g_result;
 bool g_resultOk = false;
+std::filesystem::path g_resultFile;
 
 void ReleaseSlots() {
     for (auto& s : g_slots) { SafeRelease(s.rt); SafeRelease(s.sys); SafeRelease(s.q); s.state = 0; }
@@ -289,6 +290,7 @@ void Finish(Session& s, bool ok, const std::string& line) {
         std::lock_guard<std::mutex> lk(g_resultLock);
         g_result = line;
         g_resultOk = ok;
+        g_resultFile = s.file;
     }
     (ok ? LOG_INFO("[Video] " + line) : LOG_WARNING("[Video] " + line));
     g_finishing--;
@@ -403,6 +405,7 @@ void Worker(std::shared_ptr<Session> sp) {
         std::string mkvWhy;
         if (MkvRemux::Mp4ToMkv(s.file, mkv, mkvWhy)) {
             if (!s.o.keepMp4) DeleteFileW(s.file.c_str());
+            s.file = mkv; // the saved video (Finish)
             if (GetFileAttributesExW(mkv.c_str(), GetFileExInfoStandard, &d)) size = (static_cast<unsigned long long>(d.nFileSizeHigh) << 32) | d.nFileSizeLow;
             name = ApexUtil::ToUtf8(mkv.filename().wstring()) + (s.o.keepMp4 ? " + .mp4" : "");
         } else {
@@ -438,7 +441,18 @@ bool OnBackBuffer(IDirect3DDevice9* dev, IDirect3DSurface9*& bb) {
 
 } // namespace
 
+bool MediaFoundationAvailable() {
+    // mfplat and mfreadwrite are delay-loaded (ApexRadiance.vcxproj): no Media Foundation call may run without them
+    static const bool ok = [] {
+        for (const wchar_t* dll : {L"mfplat.dll", L"mfreadwrite.dll"})
+            if (!LoadLibraryExW(dll, nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32)) return false;
+        return true;
+    }();
+    return ok;
+}
+
 bool Start(IDirect3DDevice9* dev, const std::filesystem::path& file, const Options& o, std::string& why) {
+    if (!MediaFoundationAvailable()) { why = "Media Foundation is not available"; return false; }
     if (g_active.load()) { why = "a video is already recording"; return false; }
     if (g_finishing.load() > 0 && !o.nextClip) { why = "the last video is still being saved"; return false; }
     if (!dev) { why = "no device"; return false; }
@@ -580,12 +594,15 @@ double Seconds() { return g_active.load() && g_s ? static_cast<double>(Qpc() - g
 unsigned long long BytesWritten() { return g_s ? g_s->bytes.load() : 0; }
 bool Failed() { return g_s && g_s->failed.load(); }
 
-std::string TakeResult(bool& ok) {
+std::string TakeResult(bool& ok, std::filesystem::path* file) {
     std::lock_guard<std::mutex> lk(g_resultLock);
     std::string r = std::move(g_result);
     g_result.clear();
     ok = g_resultOk;
+    if (file) *file = g_resultFile;
     return r;
 }
+
+size_t LargestFreeBlock() { return LargestFree(); }
 
 } // namespace VideoMp4

@@ -114,10 +114,18 @@ bool NeedsGradeBeforeOverlay();         // the bootstrap runs Apex colour before
 bool ParseExternalKey(const std::string& text, UINT& vk, bool& ctrl, bool& shift, bool& alt, bool& win);
 bool ExternalKeyAllowed(const std::string& text);
 
-// Settings > Menu (apex_gui.cpp): rows inside "Screenshot capture" and the "Video recording" card
-void ScreenshotRows();
-void VideoRows();
-// A folder row in Apex style: the folder as its description, Change (folder dialog) and Open; the typed path is under a
+// Image > Capture (apex_gui.cpp): one card per tab. lookOn: a ReShade/GShade look is on (the Look rows show).
+// ScreenshotCard returns true when "Take one" was clicked (the menu asks for the picture at its next frame). gameAa:
+// the game's multisampled anti-aliasing is on (Record is off and a note under the card says why).
+bool ScreenshotCard(bool lookOn);
+void VideoCard(bool lookOn, bool gameAa);
+// This session's last saved screenshot / video ("" none); set by the writers (any thread)
+std::filesystem::path LastSaved(bool video);
+void SetLastSaved(bool video, const std::filesystem::path& file);
+// Why a video cannot start now (English, shown through I18n::Tr), nullptr when it can (or the other app records);
+// the memory check runs at most once a second
+const char* CannotRecord(bool gameAa);
+// The "Other" folder row: the folder as its description and Change (folder dialog); the typed path is under a
 // "Type a folder" arrow. slot: 0 screenshots, 1 videos. True when the folder changed.
 bool FolderRow(const char* label, const char* id, std::string& value, int slot, const char* pickTip);
 

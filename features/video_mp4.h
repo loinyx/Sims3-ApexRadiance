@@ -22,6 +22,7 @@ struct Options {
     bool nextClip = false; // a new clip of a running recording: may start while the previous clip is still saved
 };
 // Render thread. false + why when it cannot start (nothing left open)
+bool MediaFoundationAvailable(); // Windows' Media Foundation is installed (missing on Windows N without the Media Feature Pack)
 bool Start(IDirect3DDevice9* dev, const std::filesystem::path& file, const Options& o, std::string& why);
 // Render thread, with the frame finished (or src: that surface, e.g. the frame before the look); takes it when it is
 // due. False only when src could not be copied.
@@ -36,5 +37,7 @@ bool Finishing();                   // stopped, the worker still writes
 double Seconds();
 unsigned long long BytesWritten();  // the file's size so far (checked every second)
 bool Failed();                      // the encoder could not start: Stop and read TakeResult
-std::string TakeResult(bool& ok);   // the last finished clip: "" while none, else its log line (English)
+// The last finished clip: "" while none, else its log line (English); file: the saved video (the .mkv when made)
+std::string TakeResult(bool& ok, std::filesystem::path* file = nullptr);
+size_t LargestFreeBlock();          // the largest free block of the game's addresses (Start needs 192 MB); walks them
 } // namespace VideoMp4

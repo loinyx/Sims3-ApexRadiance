@@ -67,6 +67,8 @@
       <EnableUAC>false</EnableUAC>
       <AdditionalDependencies>imgui.lib;detours.lib;d3d9.lib;d3dcompiler.lib;dxguid.lib;psapi.lib;shell32.lib;delayimp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(ApexVcpkgRoot)lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <!-- Media Foundation (video recording) is missing on Windows N editions: loaded at the first recording, never at start -->
+      <DelayLoadDLLs>mfplat.dll;mfreadwrite.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">

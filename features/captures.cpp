@@ -476,7 +476,10 @@ void WritePng(ShotJob job, std::vector<BYTE> bgr, UINT w, UINT h, std::vector<BY
         if (!ok) LOG_WARNING("[Captures] The screenshot could not be written: " + ApexUtil::ToUtf8(file.wstring()));
         if (job.report) CompleteShot(job.reportFolder, ok);
         else if (!ok) Notify(I18n::Tr("The screenshot could not be saved"), 4, NoteKind::Warning);
-        else if (job.last && ApexCapture::Get().notes) Notify(I18n::Tr("Screenshot saved"), 4, NoteKind::Screenshot);
+        else {
+            ApexCapture::SetLastSaved(false, file); // Image > Capture: "Last: <name>" and Show
+            if (job.last && ApexCapture::Get().notes) Notify(I18n::Tr("Screenshot saved"), 4, NoteKind::Screenshot);
+        }
     });
 }
 

@@ -115,6 +115,10 @@ const char* g_nextBadge = nullptr;
 const char* g_nextBadgeTip = nullptr;
 unsigned g_nextBadgeRgb = VioletTheme::kWarning;
 const char* g_nextDotTip = nullptr;
+IconId g_nextAction = IconId::None;     // SetNextRowAction
+const char* g_nextActionTip = nullptr;
+bool g_actionClicked = false;           // RowActionClicked
+float g_segReserve = 0.0f;              // Segmented leaves this much room on its right (the row's action button)
 
 // ---- slider drag state ----
 int g_sliderActiveFrame = -10;
@@ -508,6 +512,8 @@ void SetNextRowBadge(const char* text, const char* tooltip, unsigned rgb) {
 }
 
 void SetNextRowChangedDot(const char* tooltip) { g_nextDotTip = tooltip; }
+void SetNextRowAction(IconId icon, const char* tooltip) { g_nextAction = icon; g_nextActionTip = tooltip; }
+bool RowActionClicked() { return g_actionClicked; }
 
 void BeginFilter(const char* query) {
     g_filter.active = true;
@@ -1299,7 +1305,7 @@ bool Segmented(const char* id, int* current, const char* const* labels, int coun
     if (count <= 0) return false;
     const float u = Unit();
     ImGui::PushID(id);
-    const float avail = ImGui::GetContentRegionAvail().x;
+    const float avail = std::fmax(1.0f, ImGui::GetContentRegionAvail().x - g_segReserve);
     const float padX = ImGui::GetStyle().FramePadding.x;
     const float h = ImGui::GetFrameHeight();
     const float is = VioletTheme::kControlIcon * u, iconGap = VioletTheme::kControlIconGap * u;
@@ -1391,6 +1397,11 @@ bool Segmented(const char* id, int* current, const char* const* labels, int coun
 bool SegmentedRow(const char* label, const char* description, const char* id, int* current, const char* const* labels, int count,
                   const char* const* tooltips, const IconId* icons, int defaultIndex) {
     RowDecor d = TakeDecor();
+    const IconId action = g_nextAction;
+    const char* actionTip = g_nextActionTip;
+    g_nextAction = IconId::None;
+    g_nextActionTip = nullptr;
+    g_actionClicked = false;
     if (!RowVisible(label, description)) return false;
     d.hasDefault = defaultIndex != kNoDefaultIndex;
     d.changed = d.hasDefault && *current != defaultIndex;
@@ -1398,6 +1409,9 @@ bool SegmentedRow(const char* label, const char* description, const char* id, in
     const float startX = ImGui::GetCursorPosX();
     const float width = ImGui::GetContentRegionAvail().x;
     const float top = RowTop();
+    // the action button: one frame high and wide, kSpace2 right of the choices
+    const float actionW = action != IconId::None ? ImGui::GetFrameHeight() : 0.0f;
+    const float reserve = actionW > 0.0f ? actionW + kSpace2 * u : 0.0f;
     // On the right of the label when the choices fit the control column at their natural width
     float ctrlW = InlineControlWidth(width);
     if (ctrlW > 0.0f) {
@@ -1406,7 +1420,7 @@ bool SegmentedRow(const char* label, const char* description, const char* id, in
         for (int i = 0; i < count; i++)
             natural += ImGui::CalcTextSize(T(labels[i])).x + 2.0f * padX +
                        (icons && icons[i] != IconId::None ? (VioletTheme::kControlIcon + VioletTheme::kControlIconGap) * u : 0.0f);
-        if (natural > ctrlW) ctrlW = 0.0f;
+        if (natural > ctrlW - reserve) ctrlW = 0.0f;
     }
     const float textRight = ctrlW > 0.0f ? startX + width - ctrlW - kSpace4 * u : startX + width;
     ImGui::SetCursorPos(ImVec2(startX, top));
@@ -1419,8 +1433,17 @@ bool SegmentedRow(const char* label, const char* description, const char* id, in
         ImGui::SetCursorPos(ImVec2(startX + width - ctrlW, top + (rowH - ImGui::GetFrameHeight()) * 0.5f));
         rowBottom = top + rowH;
     }
+    const ImVec2 segOrigin = ImGui::GetCursorScreenPos();
+    const float segRight = segOrigin.x + ImGui::GetContentRegionAvail().x;
+    g_segReserve = reserve;
     bool changed = Segmented(id, current, labels, count, tooltips, false, icons);
-    const float bottom = std::fmax(LocalY(ImGui::GetItemRectMax().y), rowBottom);
+    g_segReserve = 0.0f;
+    float bottom = std::fmax(LocalY(ImGui::GetItemRectMax().y), rowBottom);
+    if (actionW > 0.0f) { // beside the first line of the choices (a vertical list keeps it on its first line too)
+        ImGui::SetCursorScreenPos(ImVec2(segRight - actionW, segOrigin.y));
+        g_actionClicked = IconButtonImpl("##RowAction", action, actionTip, false, actionW / u);
+        bottom = std::fmax(bottom, LocalY(ImGui::GetItemRectMax().y));
+    }
     const ImVec2 rowMin = ToScreen(startX, top);
     if (RowDecorations(d, li, rowMin, ImVec2(rowMin.x + width, ToScreen(startX, bottom).y))) {
         *current = defaultIndex;
@@ -1931,6 +1954,83 @@ bool CardHeader(IconId icon, const char* title, const char* subtitle, const char
     ImGui::SetCursorPos(ImVec2(startX, startY + rowH));
     ImGui::Dummy(ImVec2(0.0f, 0.0f));
     return clicked;
+}
+
+int CardStatusHeader(IconId icon, const char* title, const char* status, unsigned statusRgb, bool dot, const char* link, const char* action,
+                     IconId actionIcon, ButtonKind kind, bool actionEnabled) {
+    if (Hidden()) return 0;
+    const float u = Unit();
+    const ControlSizeScope size(ControlSize::Compact);
+    const float startX = ImGui::GetCursorPosX();
+    const float startY = ImGui::GetCursorPosY();
+    const ImVec2 rowScreen = ImGui::GetCursorScreenPos();
+    const float width = ImGui::GetContentRegionAvail().x;
+    const float iconBox = 22.0f * u, textX = startX + iconBox + 10.0f * u;
+    const float bw = action ? ButtonWidth(action, actionIcon != IconId::None) : 0.0f;
+    // the button drops under the text when the text column would get narrower than 160 units
+    const bool below = action && startX + width - bw - kSpace3 * u - textX < 160.0f * u;
+    const float wrapX = action && !below ? startX + width - bw - kSpace3 * u : startX + width;
+    int result = 0;
+    ImGui::SetCursorPos(ImVec2(textX, startY));
+    ImGui::BeginGroup();
+    ImGui::PushStyleVarY(ImGuiStyleVar_ItemSpacing, 1.0f * u);
+    PushSized(VioletTheme::BoldFont(), kCardTitleScale);
+    ImGui::PushTextWrapPos(wrapX);
+    ImGui::TextUnformatted(T(title));
+    ImGui::PopTextWrapPos();
+    ImGui::PopFont();
+    if (status && *status) {
+        const float r = 4.0f * u, lineH = ImGui::GetTextLineHeight();
+        if (dot) {
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(p.x + r, p.y + lineH * 0.5f), r, U32(statusRgb));
+            ImGui::Dummy(ImVec2(2.0f * r, lineH));
+            ImGui::SameLine(0.0f, 6.0f * u);
+        }
+        ImGui::PushTextWrapPos(wrapX);
+        ImGui::PushStyleColor(ImGuiCol_Text, Col(statusRgb));
+        ImGui::TextWrapped("%s", status);
+        ImGui::PopStyleColor();
+        ImGui::PopTextWrapPos();
+        if (link && *link) {
+            // a text link after the status, or on its own line when it does not fit there
+            const char* shown = T(link);
+            const ImVec2 ls = ImGui::CalcTextSize(shown);
+            const float lineEnd = ImGui::GetItemRectMax().x;
+            const bool oneLine = ImGui::GetItemRectSize().y < lineH * 1.5f;
+            if (oneLine && lineEnd + kSpace2 * u + ls.x <= ImGui::GetWindowPos().x - ImGui::GetScrollX() + wrapX)
+                ImGui::SameLine(0.0f, kSpace2 * u);
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            if (ImGui::InvisibleButton("##HeaderLink", ls, ImGuiButtonFlags_EnableNav)) result = 2;
+            const bool hovered = ImGui::IsItemHovered();
+            if (hovered) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            const ImU32 col = hovered ? U32(VioletTheme::kAccentLight) : U32(VioletTheme::kAccent);
+            dl->AddText(p, col, shown);
+            dl->AddLine(ImVec2(p.x, p.y + ls.y), ImVec2(p.x + ls.x, p.y + ls.y), col, 1.0f);
+            ImGui::RenderNavCursor(ImGui::GetCurrentContext()->LastItemData.Rect, ImGui::GetItemID());
+        }
+    }
+    ImGui::PopStyleVar();
+    ImGui::EndGroup();
+    const float textH = ImGui::GetItemRectMax().y - rowScreen.y;
+    if (icon != IconId::None) {
+        const float s = kIconMedium * u;
+        DrawIcon(ImGui::GetWindowDrawList(), icon, ImVec2(rowScreen.x + (iconBox - s) * 0.5f, rowScreen.y + (textH - s) * 0.5f), s, U32(VioletTheme::kAccent));
+    }
+    float rowH = textH;
+    if (action) {
+        const float fh = ImGui::GetFrameHeight();
+        const float y = below ? startY + textH + kSpace2 * u : startY + std::fmax(0.0f, (textH - fh) * 0.5f);
+        ImGui::SetCursorPos(ImVec2(below ? textX : startX + width - bw, y));
+        ImGui::BeginDisabled(!actionEnabled);
+        if (DrawButton(action, actionIcon, nullptr, kind, 0.0f)) result = 1;
+        ImGui::EndDisabled();
+        rowH = std::fmax(rowH, y + fh - startY);
+    }
+    ImGui::SetCursorPos(ImVec2(startX, startY + rowH));
+    ImGui::Dummy(ImVec2(0.0f, 0.0f));
+    return result;
 }
 
 bool OverviewRow(const char* id, IconId icon, const char* name, const char* phrase, const char* tooltip, bool* on, bool enabled, const char* rightText,

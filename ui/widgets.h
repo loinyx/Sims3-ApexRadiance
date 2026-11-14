@@ -207,6 +207,10 @@ bool Segmented(const char* id, int* current, const char* const* labels, int coun
 // by its Reset button). defaultIndex = the default choice (changed dot + Reset), kNoDefaultIndex = none.
 bool SegmentedRow(const char* label, const char* description, const char* id, int* current, const char* const* labels, int count,
                   const char* const* tooltips = nullptr, const IconId* icons = nullptr, int defaultIndex = kNoDefaultIndex);
+// The next SegmentedRow gets a small icon button right of its choices, one frame high (Capture's "Open the folder");
+// consumed by that row, drawn or not. RowActionClicked: it was clicked in the last SegmentedRow.
+void SetNextRowAction(IconId icon, const char* tooltip);
+bool RowActionClicked();
 // Standard single-choice row: label and description on the left, a dropdown on the right, with the same changed
 // marker, hover Reset and search behavior as other setting rows. defaultIndex = the default choice.
 // stacked puts the same selector below its label at full width for file and preset dialogs.
@@ -288,6 +292,13 @@ inline constexpr const char* kCostChipTooltip = "Measured cost on your GPU per f
 // (optional) draws a warning-colour label immediately left of the switch. True on the frame the switch was clicked.
 bool CardHeader(IconId icon, const char* title, const char* subtitle, const char* tooltip, bool* toggle, bool toggleEnabled = true,
                 HeaderExtra* extra = nullptr, const char* chip = nullptr);
+// A card header with a live status and one action (Image > Capture): violet icon, bold title (translated), the status
+// line under it as given (already translated) in statusRgb, with a small dot of that colour before it when dot, an
+// optional text link after it (translated; on its own line when it does not fit), and a compact button on the right
+// (under the text when the card is narrow; greyed out when !actionEnabled). Draws nothing in the search results.
+// Returns 1 when the button was clicked, 2 when the link was, else 0.
+int CardStatusHeader(IconId icon, const char* title, const char* status, unsigned statusRgb, bool dot, const char* link, const char* action,
+                     IconId actionIcon, ButtonKind kind, bool actionEnabled);
 // An overview row (Overview page, a list inside one card): icon, name (clickable: *nameClicked), muted phrase under it,
 // and on the right the switch (when on is not null) or a pill with rightText; chip (optional) left of them. Consecutive
 // rows get dividers. True on the frame the switch was clicked (it reports "<name> turned on/off").

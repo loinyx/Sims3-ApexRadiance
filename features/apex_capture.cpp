@@ -453,7 +453,9 @@ void OnPresent(IDirect3DDevice9* dev) {
     g_lookSeen = false;
     VideoMp4::Pump(dev);
     bool ok = false;
-    if (!VideoMp4::TakeResult(ok).empty()) {
+    std::filesystem::path saved;
+    if (!VideoMp4::TakeResult(ok, &saved).empty()) {
+        if (ok) SetLastSaved(true, saved);
         if (!ok) Note(I18n::Tr("The video could not be saved; the reason is in the log"), 8, Captures::NoteKind::Warning);
         else Note(I18n::Trf("Video saved: {} \xC2\xB7 {} MB", Clock(static_cast<int>(g_clipBaseSec + g_lastSec), false),
                             static_cast<int>(g_lastBytes / (1024ull * 1024ull) + 1)), 5, Captures::NoteKind::Success);
@@ -636,16 +638,13 @@ bool FolderRow(const char* label, const char* id, std::string& value, int slot, 
     ImGui::PushID(id);
     const float u = ApexUi::Unit();
     const char* change = "Change##FolderPick";
-    const char* open = "Open##FolderOpen";
-    const float w = ApexUi::ButtonWidth(change, true) + ApexUi::kSpace3 * u + ApexUi::ButtonWidth(open, true);
+    const float w = ApexUi::ButtonWidth(change, true);
     // the row's description is the folder itself (as set: tokens such as %Day% stay visible)
     if (ApexUi::BeginControlRow(label, value.empty() ? "No folder set" : value.c_str(), w)) {
         ImGui::BeginDisabled(g_pickBusy.load());
         if (ApexUi::IconTextButton(change, IconId::FolderOpen, pickTip))
             PickFolder(slot, ApexUtil::ToUtf8(ExpandFolder(value).wstring()), slot == 0 ? "Choose a folder for the screenshots" : "Choose a folder for the videos");
         ImGui::EndDisabled();
-        ImGui::SameLine(0.0f, ApexUi::kSpace3 * u);
-        if (ApexUi::IconTextButton(open, IconId::ExternalLink, "Opens this folder in Explorer")) OpenFolderOf(value);
         ApexUi::EndControlRow();
     }
     // the plain text box, for typing a path or tokens, behind its own arrow
@@ -1065,7 +1064,10 @@ void OnGameClosing() {
 }
 
 bool Recording() { return VideoMp4::Active() || g_externalOn; }
-int RecordingSeconds() { return static_cast<int>(g_clipBaseSec + VideoMp4::Seconds()); } // all clips of the recording
+int RecordingSeconds() { // all clips of the recording; the other app's since its key was sent
+    if (g_externalOn) return static_cast<int>((GetTickCount64() - g_externalStart) / 1000ull);
+    return static_cast<int>(g_clipBaseSec + VideoMp4::Seconds());
+}
 
 // The recording timer: a pill in the Apex note style (red dot, time, file size, stop key) at timer_position, and the
 // optional red frame. Drawn on the foreground list, no input. Kept out of the video unless timer_in_video (GrabAtPresent),
@@ -1077,7 +1079,7 @@ bool DrawTimer() {
         if (!s.timer && !s.redFrame) return false;
         if (s.includeMenu && !s.timerInVideo && VideoMp4::Active()) return false;
         const bool builtin = VideoMp4::Active();
-        const int sec = builtin ? RecordingSeconds() : static_cast<int>((GetTickCount64() - g_externalStart) / 1000ull);
+        const int sec = RecordingSeconds();
         const unsigned long long bytes = builtin ? VideoMp4::BytesWritten() : 0ull;
         // time left before stop_after_s / stop_at_mb (built-in only; the size estimate uses the rate so far)
         int left = -1;
@@ -1146,149 +1148,270 @@ bool DrawTimer() {
 
 bool NeedsGradeBeforeOverlay() { return VideoMp4::Active() && !GrabAtPresent(g_rec.video); }
 
-// ---------------------------------------------------------------------------------------------- Settings > Menu rows
-// Inside the "Screenshot capture" card, after its folder rows ([ui] screenshot_folder)
-void ScreenshotRows() {
-    const Settings def;
-    Settings s = Get();
-    bool ch = false;
-    ch |= TextRow("File name", "Date, time and look name; hover the box for the tokens", s.shot.fileName, 300.0f, true);
-    static const char* const kFormat[] = {"PNG", "JPG"};
-    int fmt = s.shot.jpg ? 1 : 0;
-    if (Pick("File type", "PNG keeps every detail; JPG files are smaller", "##CapFormat", fmt, kFormat, 2, 0)) { s.shot.jpg = fmt == 1; ch = true; }
-    if (s.shot.jpg) ch |= IntSlider("JPG quality", "Higher keeps more detail and makes larger files", s.shot.jpgQuality, 1, 100, def.shot.jpgQuality, "%.0f%%");
-    ch |= IntSlider("Picture size", "Of the game's screen size", s.shot.sizePercent, 10, 100, def.shot.sizePercent, "%.0f%%");
-    { // [ui] screenshot_hide_game_ui
-        ApexConfig::UiSettings ui = ApexConfig::GetUi();
-        if (ApexUi::SwitchRow("Hide game UI in screenshots", &ui.screenshotHideGameUi,
-                              "Hides the game interface for the photo, then restores it; turn off to include it", true)) ApexConfig::SetUi(ui);
-    }
-    ch |= ApexUi::SwitchRow("Include the Apex menu", &s.shot.includeMenu, "When the menu is open, it is in the picture", def.shot.includeMenu);
-    bool both = s.shot.look == kLookBoth;
-    if (ApexUi::SwitchRow("Save a copy without ReShade/GShade", &both, "The same moment without ReShade/GShade, ending in _before", false)) {
-        s.shot.look = both ? kLookBoth : kLookWith;
-        ch = true;
-    }
-    ch |= ApexUi::SwitchRow("Save the ReShade/GShade preset with it", &s.shot.savePreset, "A copy of the ReShade/GShade preset file next to the picture", def.shot.savePreset);
-    ch |= IntSlider("Pictures per key press", "More than one takes a quick series", s.shot.burstCount, 1, kMaxBurst, def.shot.burstCount);
-    if (s.shot.burstCount > 1) ch |= IntSlider("Time between pictures", "In milliseconds", s.shot.burstIntervalMs, 50, 5000, def.shot.burstIntervalMs, "%.0f ms");
-    ch |= ApexUi::SwitchRow("Include the mouse pointer", &s.shot.includePointer, "Where it was on screen, at the picture's size", def.shot.includePointer);
-    {
-        static const char* const kSound[] = {"Off", "Camera", "Own file"};
-        const std::string low = Lower(s.sound);
-        int mode = low.empty() ? 0 : low == "camera" ? 1 : 2;
-        static int ownMode = -1; // "Own file" chosen with no file typed yet
-        if (ownMode == 2 && mode == 0) mode = 2;
-        if (Pick("Shutter sound", "Plays with each picture and when a video starts and stops", "##CapSound", mode, kSound, 3, 0)) {
-            ownMode = mode;
-            if (mode != 2) {
-                s.sound = mode == 0 ? "" : "camera";
-                Set(s);
-                PlaySoundFile(); // hear the choice
-                ch = false;
-            }
-        }
-        if (mode == 2) {
-            std::string file = low == "camera" ? std::string() : s.sound;
-            if (TextRow("Sound file", "Full path of a .wav file", file)) { s.sound = file; Set(s); PlaySoundFile(); ch = false; }
-        }
-    }
-    ch |= ApexUi::SwitchRow("Show a note when saved", &s.notes, "A short note when a picture or video is saved", def.notes);
-    if (ch) Set(s);
+// ---------------------------------------------------------------------------------------------- Image > Capture
+namespace {
+std::mutex g_lastLock;
+std::filesystem::path g_lastSaved[2]; // this session's last screenshot / video
+
+// Explorer with the file selected
+void ShowInExplorer(const std::filesystem::path& file) {
+    const std::wstring args = L"/select,\"" + file.wstring() + L"\"";
+    ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
 }
 
-// The "Video recording" card's rows
-void VideoRows() {
-    const Settings def;
-    Settings s = Get();
-    VideoSettings& v = s.video;
-    const VideoSettings& dv = def.video;
+std::string MinSec(int sec) { sec = std::max(0, sec); return std::format("{}:{:02}", sec / 60, sec % 60); }
+int MbPerMinute(const VideoSettings& v) { return static_cast<int>(KbpsFor(v) * 60.0 / 8.0 / 1024.0 + 0.5); }
+
+// "<key> · Last: <name>" (the name only when one was saved this session)
+std::string WithLast(std::string status, const std::filesystem::path& last) {
+    if (!last.empty()) status += " \xC2\xB7 " + I18n::Trf("Last: {}", ApexUtil::ToUtf8(last.filename().wstring()));
+    return status;
+}
+
+// "Where": Save to (the folder in use as its description, Open the folder beside it) and, with Other, the Folder row
+bool WhereRows(bool video, int& mode, std::string& custom) {
+    static const char* const kWhere[] = {"Game", "Apex", "Other"};
+    static const char* const kShotTips[] = {"Next to the photos the game takes, in Documents > Electronic Arts > The Sims 3 > Screenshots",
+                                            "Kept apart from the game's photos, in Documents > Electronic Arts > The Sims 3 > Apex Radiance > Screenshots",
+                                            "Any folder you choose, for example on another drive"};
     bool ch = false;
-    {
-        const bool rec = Recording();
-        const char* button = rec ? "Stop recording" : "Start recording";
-        const float w = ApexUi::ButtonWidth(button, true);
-        const int sec = RecordingSeconds();
-        const std::string state = rec ? I18n::Trf("Recording: {}:{:02}", sec / 60, sec % 60)
-                                : VideoMp4::Finishing() ? std::string(I18n::Tr("Saving the last video"))
-                                                        : std::string(I18n::Tr("Or press the key set on the Shortcuts tab"));
-        if (ApexUi::BeginControlRow("Record now", state.c_str(), w)) {
-            ImGui::BeginDisabled(!rec && VideoMp4::Finishing());
-            if (ApexUi::IconTextButton(button, rec ? IconId::X : IconId::Video)) ToggleRecording();
-            ImGui::EndDisabled();
-            ApexUi::EndControlRow();
-        }
+    ApexUi::CardGroup("Where");
+    int m = std::clamp(mode, 0, 2);
+    const std::string where = m == kFolderCustom && !Trim(custom).empty()
+        ? custom : ApexUtil::ToUtf8(DefaultFolder(m == kFolderApex ? kFolderApex : kFolderGame, video).wstring());
+    ApexUi::SetNextRowAction(IconId::FolderOpen, "Open the folder");
+    if (ApexUi::SegmentedRow("Save to", where.c_str(), video ? "##VideoWhere" : "##ShotWhere", &m, kWhere, 3, video ? nullptr : kShotTips, nullptr, kFolderGame)) {
+        // Other starts from the folder in use; type over it or press Change
+        if (m == kFolderCustom && Trim(custom).empty()) custom = ApexUtil::ToUtf8(DefaultFolder(mode == kFolderApex ? kFolderApex : kFolderGame, video).wstring());
+        if (m != kFolderCustom || !Trim(custom).empty()) { mode = m; ch = true; }
     }
-    static const char* const kEngine[] = {"Apex", "Another app"};
-    int eng = v.external ? 1 : 0;
-    if (Pick("Recorder", "Another app: Apex presses its key (Xbox Game Bar, OBS)", "##CapEngine", eng, kEngine, 2, 0)) { v.external = eng == 1; ch = true; }
-    if (v.external) {
-        ApexUi::MutedText("The other app's key is set on the Shortcuts tab");
+    if (ApexUi::RowActionClicked()) OpenFolderOf(where);
+    if (mode == kFolderCustom)
+        ch |= FolderRow("Folder", video ? "VideoFolder" : "ShotFolder", custom, video ? 1 : 0,
+                        video ? "Choose another folder for the videos" : "Choose another folder for the screenshots");
+    return ch;
+}
+
+// [capture] sound and notes (both tabs). play: the sound choice changed (heard once it is saved)
+bool WhenSavedRows(Settings& s, bool& play) {
+    const Settings def;
+    bool ch = false;
+    ApexUi::CardGroup("When saved");
+    static const char* const kSound[] = {"Off", "Camera", "Own file"};
+    const std::string low = Lower(s.sound);
+    int mode = low.empty() ? 0 : low == "camera" ? 1 : 2;
+    static int ownMode = -1; // "Own file" chosen with no file typed yet
+    if (ownMode == 2 && mode == 0) mode = 2;
+    if (Pick("Sound", "Plays with each picture and when a video starts and stops", "##CapSound", mode, kSound, 3, 0)) {
+        ownMode = mode;
+        if (mode != 2) { s.sound = mode == 0 ? "" : "camera"; ch = play = true; }
+    }
+    if (mode == 2) {
+        std::string file = low == "camera" ? std::string() : s.sound;
+        if (TextRow("Sound file", "Full path of a .wav file", file)) { s.sound = file; ch = play = true; }
+    }
+    ch |= ApexUi::SwitchRow("Note when saved", &s.notes, "A short note when a picture or video is saved", def.notes);
+    return ch;
+}
+
+constexpr const char* kFileNameDesc = "Date, time and look name; hover the box for the tokens";
+} // namespace
+
+std::filesystem::path LastSaved(bool video) {
+    std::lock_guard<std::mutex> lk(g_lastLock);
+    return g_lastSaved[video ? 1 : 0];
+}
+
+void SetLastSaved(bool video, const std::filesystem::path& file) {
+    std::lock_guard<std::mutex> lk(g_lastLock);
+    g_lastSaved[video ? 1 : 0] = file;
+}
+
+const char* CannotRecord(bool gameAa) {
+    if (Get().video.external) return nullptr; // the other app records
+    if (!VideoMp4::MediaFoundationAvailable()) return "Videos need Windows' Media Feature Pack, which this Windows does not have";
+    if (gameAa) return "The game's own Edge Smoothing is on; turn it off to record (Options \xE2\x80\xBA Graphics)";
+    // the recorder needs one 192 MB block of the game's addresses (VideoMp4::Start); walked at most once a second
+    static unsigned long long checkedAt = 0;
+    static bool low = false;
+    const unsigned long long now = GetTickCount64();
+    if (!checkedAt || now - checkedAt >= 1000) { checkedAt = now; low = VideoMp4::LargestFreeBlock() < (192u << 20); }
+    if (low) return "The game is low on free memory for a video; save and restart the game";
+    return nullptr;
+}
+
+bool ScreenshotCard(bool lookOn) {
+    bool take = false;
+    if (ApexUi::BeginCard("##CaptureShots")) {
+        const Settings def;
+        Settings s = Get();
+        ApexConfig::UiSettings ui = ApexConfig::GetUi(); // [ui] screenshot_folder, _custom_folder, _hide_game_ui
+        bool ch = false, uiCh = false, play = false;
+        const std::filesystem::path last = LastSaved(false);
+        const std::string status = WithLast(ApexConfig::KeyChordText(ui.screenshotKey), last);
+        const int hit = ApexUi::CardStatusHeader(IconId::Camera, "Screenshots", status.c_str(), VioletTheme::kTextMuted, false,
+                                                 last.empty() ? nullptr : "Show", "Take one", IconId::Camera, ApexUi::ButtonKind::Primary, true);
+        if (hit == 1) take = true;
+        if (hit == 2) ShowInExplorer(last);
+        ApexUi::CardDivider();
+
+        uiCh |= WhereRows(false, ui.screenshotFolder, ui.screenshotCustomFolder);
+        ApexUi::CardGroup("In the picture");
+        uiCh |= ApexUi::SwitchRow("Hide game UI", &ui.screenshotHideGameUi, "Hides the game interface for the photo, then restores it", true);
+        if (lookOn) {
+            static const char* const kLook[] = {"With", "Without", "Both"};
+            ch |= Pick("Look", "Both also saves the picture without it", "##ShotLook", s.shot.look, kLook, 3, def.shot.look);
+        }
+        ApexUi::CardGroup("Quality");
+        static const char* const kFormat[] = {"PNG", "JPG"};
+        int fmt = s.shot.jpg ? 1 : 0;
+        if (Pick("File type", "PNG keeps every detail; JPG files are smaller", "##CapFormat", fmt, kFormat, 2, 0)) { s.shot.jpg = fmt == 1; ch = true; }
+
+        if (ApexUi::BeginAdvanced("##ShotAdvanced")) {
+            ApexUi::CardGroup("File");
+            if (s.shot.jpg) ch |= IntSlider("JPG quality", "Higher keeps more detail and makes larger files", s.shot.jpgQuality, 1, 100, def.shot.jpgQuality, "%.0f%%");
+            ch |= IntSlider("Size", "Of the game's screen size", s.shot.sizePercent, 10, 100, def.shot.sizePercent, "%.0f%%");
+            ch |= TextRow("File name", kFileNameDesc, s.shot.fileName, 300.0f, true);
+            ApexUi::CardGroup("Also in the picture");
+            ch |= ApexUi::SwitchRow("Include the Apex menu", &s.shot.includeMenu, "When the menu is open, it is in the picture", def.shot.includeMenu);
+            ch |= ApexUi::SwitchRow("Include the mouse pointer", &s.shot.includePointer, "Where it was on screen, at the picture's size", def.shot.includePointer);
+            ch |= ApexUi::SwitchRow("Save the look's preset too", &s.shot.savePreset, "A copy of the ReShade/GShade preset file next to the picture", def.shot.savePreset);
+            ApexUi::CardGroup("Series");
+            ch |= IntSlider("Pictures per press", "More than one takes a quick series", s.shot.burstCount, 1, kMaxBurst, def.shot.burstCount);
+            if (s.shot.burstCount > 1) ch |= IntSlider("Time between pictures", "In milliseconds", s.shot.burstIntervalMs, 50, 5000, def.shot.burstIntervalMs, "%.0f ms");
+            ch |= WhenSavedRows(s, play);
+            ApexUi::EndAdvanced();
+        }
+        if (uiCh) ApexConfig::SetUi(ui);
         if (ch) Set(s);
-        return;
+        if (play) PlaySoundFile(); // hear the choice
     }
-    static const char* const kFolders[] = {"Game's videos folder", "Apex Radiance folder", "Another folder"};
-    int folder = v.folder;
-    if (Pick("Save videos to", "Where the videos are saved", "##VideoFolder", folder, kFolders, 3, 0)) {
-        if (folder == kFolderCustom && Trim(v.customFolder).empty()) v.customFolder = ApexUtil::ToUtf8(DefaultFolder(v.folder, true).wstring());
-        v.folder = folder;
-        ch = true;
-    }
-    if (v.folder == kFolderCustom) ch |= FolderRow("Videos folder", "VideoFolder", v.customFolder, 1, "Choose another folder for the videos");
-    ch |= TextRow("File name##Video", "Date, time and look name; hover the box for the tokens", v.fileName, 300.0f, true);
-    static const char* const kSize[] = {"720p", "1080p", "1440p"};
-    static const int kSizeV[] = {720, 1080, 1440};
-    int si = v.size >= 1440 ? 2 : v.size >= 1080 ? 1 : 0;
-    if (Pick("Video size", "Larger looks sharper and costs more speed", "##CapSize", si, kSize, 3, 1)) { v.size = kSizeV[si]; ch = true; }
-    static const char* const kFps[] = {"24", "30", "60"};
-    static const int kFpsV[] = {24, 30, 60};
-    int fi = v.fps >= 60 ? 2 : v.fps >= 30 ? 1 : 0;
-    if (Pick("Frames per second", "60 is smoothest and costs the most speed", "##CapFps", fi, kFps, 3, 1)) { v.fps = kFpsV[fi]; ch = true; }
-    static const char* const kQuality[] = {"Smaller", "Balanced", "Best", "Custom"};
-    ch |= Pick("Video quality", "Higher keeps more detail and makes larger files", "##CapQuality", v.quality, kQuality, 4, dv.quality);
-    if (v.quality == kQualityCustom) ch |= IntSlider("Megabits per second", "Higher keeps more detail and makes larger files", v.customMbps, 1, 100, dv.customMbps);
-    static const char* const kCont[] = {"MP4", "Crash-safe MP4", "MKV"};
-    ch |= Pick("File type##Video", "Crash-safe keeps the video if the game crashes; MKV is made from it when the video stops", "##CapCont", v.container, kCont, 3, dv.container);
-    if (v.container == kContainerMkv) ch |= ApexUi::SwitchRow("Keep the MP4 too", &v.keepMp4, "Saves the same video as MP4 next to the MKV", dv.keepMp4);
-    {
-        static const int kClipMB[] = {0, 500, 1024, 2048, 4096, 8192};
-        static const char* const kClip[] = {"Off", "500 MB", "1 GB", "2 GB", "4 GB", "8 GB"};
-        int clip = -1;
-        for (int k = 0; k < 6; k++) if (v.newClipMb == kClipMB[k]) clip = k;
-        int pick = clip < 0 ? 0 : clip;
-        if (Pick("New clip every", "Saves the clip at this size and records on in a new file", "##CapClip", pick, kClip, 6, 0) || (clip < 0 && pick != 0)) {
-            v.newClipMb = kClipMB[pick];
-            ch = true;
+    ApexUi::EndCard();
+    return take;
+}
+
+void VideoCard(bool lookOn, bool gameAa) {
+    const char* why = nullptr;
+    if (ApexUi::BeginCard("##CaptureVideo")) {
+        const Settings def;
+        Settings s = Get();
+        VideoSettings& v = s.video;
+        const VideoSettings& dv = def.video;
+        bool ch = false, play = false;
+        const bool rec = Recording();
+        const bool finishing = !rec && VideoMp4::Finishing();
+        why = rec || finishing ? nullptr : CannotRecord(gameAa);
+        const std::filesystem::path last = LastSaved(true);
+        std::string status;
+        if (rec) {
+            status = VideoMp4::Active() ? I18n::Trf("Recording {} \xC2\xB7 {} MB", MinSec(RecordingSeconds()), static_cast<int>(VideoMp4::BytesWritten() >> 20))
+                                        : I18n::Trf("Recording {}", MinSec(RecordingSeconds()));
+        } else if (finishing) {
+            status = I18n::Tr("Saving the video\xE2\x80\xA6");
+        } else {
+            status = ApexConfig::KeyChordText(v.recordKey);
+            if (!v.external) status += " \xC2\xB7 " + I18n::Trf("about {} MB a minute", MbPerMinute(v));
+            status = WithLast(status, last);
         }
-        if (clip < 0) ApexUi::IconNote(IconId::Info, I18n::Trf("Set in the settings file: {} MB", v.newClipMb).c_str());
+        const bool showLink = !rec && !finishing && !last.empty();
+        const int hit = ApexUi::CardStatusHeader(IconId::Video, "Video", status.c_str(), rec ? VioletTheme::kError : VioletTheme::kTextMuted, rec,
+                                                 showLink ? "Show" : nullptr, rec ? "Stop" : "Record", rec ? IconId::X : IconId::Video,
+                                                 rec ? ApexUi::ButtonKind::Secondary : ApexUi::ButtonKind::Primary, rec || (!finishing && !why));
+        if (hit == 1) ToggleRecording();
+        if (hit == 2) ShowInExplorer(last);
+        ApexUi::CardDivider();
+
+        const bool own = !v.external; // Apex records; with another app, Apex only presses its key and the rest is that app's
+        if (!own) ApexUi::IconNote(IconId::Info, "Another app records these videos; Apex presses its key. Its folder and quality are set in that app");
+        if (own) ch |= WhereRows(true, v.folder, v.customFolder);
+        ApexUi::CardGroup("In the video");
+        ch |= ApexUi::SwitchRow("Hide game UI", &v.hideGameUi, "Hides the game interface until the video stops", dv.hideGameUi);
+        if (own) ch |= ApexUi::SwitchRow("Game sound", &v.gameSound, "Only The Sims 3, not music or chat apps", dv.gameSound);
+        if (own && lookOn) {
+            static const char* const kLook[] = {"With", "Without"};
+            int look = v.look == kLookWithout ? 1 : 0;
+            if (Pick("Look", "Without records the game without the ReShade/GShade look", "##VideoLook", look, kLook, 2, 0)) {
+                v.look = look ? kLookWithout : kLookWith;
+                ch = true;
+            }
+        }
+        if (own) {
+        ApexUi::CardGroup("Quality");
+        static const char* const kQuality[] = {"Smaller", "Balanced", "Best", "Custom"};
+        const std::string qualityDesc = I18n::Trf("{}p \xC2\xB7 {} fps \xC2\xB7 about {} MB a minute", v.size, v.fps, MbPerMinute(v));
+        ch |= Pick("Quality", qualityDesc.c_str(), "##CapQuality", v.quality, kQuality, 4, dv.quality);
+        }
+
+        if (ApexUi::BeginAdvanced("##VideoAdvanced")) {
+          if (own) { // what only Apex's own recorder uses
+            ApexUi::CardGroup("Picture");
+            static const char* const kSize[] = {"720p", "1080p", "1440p"};
+            static const int kSizeV[] = {720, 1080, 1440};
+            int si = v.size >= 1440 ? 2 : v.size >= 1080 ? 1 : 0;
+            if (Pick("Size", "Larger looks sharper and costs more speed", "##CapSize", si, kSize, 3, 1)) { v.size = kSizeV[si]; ch = true; }
+            static const char* const kFps[] = {"24", "30", "60"};
+            static const int kFpsV[] = {24, 30, 60};
+            int fi = v.fps >= 60 ? 2 : v.fps >= 30 ? 1 : 0;
+            if (Pick("Frames per second", "60 is smoothest and costs the most speed", "##CapFps", fi, kFps, 3, 1)) { v.fps = kFpsV[fi]; ch = true; }
+            if (v.quality == kQualityCustom)
+                ch |= IntSlider("Custom bitrate", "Megabits per second; higher keeps more detail and makes larger files", v.customMbps, 1, 100, dv.customMbps);
+            ApexUi::CardGroup("File");
+            static const char* const kCont[] = {"MP4", "Crash-safe MP4", "MKV"};
+            ch |= Pick("File type", "Crash-safe keeps the video if the game crashes; MKV is made from it when the video stops", "##CapCont", v.container, kCont, 3, dv.container);
+            if (v.container == kContainerMkv) ch |= ApexUi::SwitchRow("Keep the MP4 too", &v.keepMp4, "Saves the same video as MP4 next to the MKV", dv.keepMp4);
+            static const char* const kCodec[] = {"H.264", "HEVC"};
+            int codec = v.hevc ? 1 : 0;
+            if (Pick("Compression", "HEVC files are smaller; it needs a newer graphics card", "##CapCodec", codec, kCodec, 2, 0)) { v.hevc = codec == 1; ch = true; }
+            ch |= TextRow("File name", kFileNameDesc, v.fileName, 300.0f, true);
+            ApexUi::CardGroup("Also in the video");
+            ch |= ApexUi::SwitchRow("Include the Apex menu", &v.includeMenu, "When the menu is open, it is in the video", dv.includeMenu);
+            ch |= ApexUi::SwitchRow("Include the mouse pointer", &v.includePointer, "The pointer moves in the video as on screen", dv.includePointer);
+            ch |= ApexUi::SwitchRow("Save the look's preset too", &v.savePreset, "A copy of the ReShade/GShade preset file next to the video", dv.savePreset);
+            ApexUi::CardGroup("Length");
+            {
+                static const int kClipMB[] = {0, 500, 1024, 2048, 4096, 8192};
+                static const char* const kClip[] = {"Off", "500 MB", "1 GB", "2 GB", "4 GB", "8 GB"};
+                int clip = -1;
+                for (int k = 0; k < 6; k++) if (v.newClipMb == kClipMB[k]) clip = k;
+                int pick = clip < 0 ? 0 : clip;
+                if (Pick("New clip every", "Saves the clip at this size and records on in a new file", "##CapClip", pick, kClip, 6, 0) || (clip < 0 && pick != 0)) {
+                    v.newClipMb = kClipMB[pick];
+                    ch = true;
+                }
+                if (clip < 0) ApexUi::IconNote(IconId::Info, I18n::Trf("Set in the settings file: {} MB", v.newClipMb).c_str());
+            }
+            ch |= IntSlider("Stop after", "0 records until you stop it", v.stopAfterS, 0, 3600, dv.stopAfterS, "%.0f s");
+            ch |= IntSlider("Stop at file size", "0 has no limit", v.stopAtMb, 0, 16000, dv.stopAtMb, "%.0f MB");
+            ch |= IntSlider("Warn before the limit", "The timer turns amber and shows the time left; 0 is off", v.warnBeforeS, 0, 600, dv.warnBeforeS, "%.0f s");
+          }
+            ApexUi::CardGroup("Timer on screen");
+            ch |= ApexUi::SwitchRow("Show a recording timer", &v.timer, "Time and file size on screen while recording", dv.timer);
+            if (v.timer) {
+                static const char* const kPos[] = {"Top left", "Top centre", "Top right", "Bottom left", "Bottom right"};
+                ch |= Pick("Timer position", "Where the timer sits on the screen", "##CapTimerPos", v.timerPosition, kPos, 5, dv.timerPosition);
+                ch |= IntSlider("Timer size", "100 is the size of Apex notes", v.timerSize, 70, 160, dv.timerSize, "%.0f%%");
+                ch |= IntSlider("Timer opacity", "Lower lets more of the game show through", v.timerOpacity, 30, 100, dv.timerOpacity, "%.0f%%");
+                ch |= ApexUi::SwitchRow("Pulse the red dot", &v.timerBlink, "The dot fades in and out while recording", dv.timerBlink);
+                ch |= ApexUi::SwitchRow("Show the file size", &v.timerFileSize, "How large the video is so far", dv.timerFileSize);
+                ch |= ApexUi::SwitchRow("Show the stop key", &v.timerStopKey, "The key that stops the video", dv.timerStopKey);
+                ch |= ApexUi::SwitchRow("Always show hours", &v.timerHours, "0:02:15 instead of 02:15", dv.timerHours);
+            }
+            ch |= ApexUi::SwitchRow("Red frame while recording", &v.redFrame, "A thin red border around the screen", dv.redFrame);
+            if (v.timer || v.redFrame)
+                ch |= ApexUi::SwitchRow("Timer in the video too", &v.timerInVideo, "An open Apex menu is then in the video too", dv.timerInVideo);
+            ApexUi::CardGroup("Recorder");
+            static const char* const kEngine[] = {"Apex", "Another app"};
+            int eng = v.external ? 1 : 0;
+            if (Pick("Recorder", "Another app: Apex presses its key (Xbox Game Bar, OBS)", "##CapEngine", eng, kEngine, 2, 0)) { v.external = eng == 1; ch = true; }
+            if (v.external) ApexUi::MutedText("The other app's key is set on the Shortcuts tab");
+            ch |= WhenSavedRows(s, play);
+            ApexUi::EndAdvanced();
+        }
+        if (ch) Set(s);
+        if (play) PlaySoundFile(); // hear the choice
     }
-    static const char* const kCodec[] = {"H.264", "HEVC"};
-    int codec = v.hevc ? 1 : 0;
-    if (Pick("Compression", "HEVC files are smaller; it needs a newer graphics card", "##CapCodec", codec, kCodec, 2, 0)) { v.hevc = codec == 1; ch = true; }
-    ch |= ApexUi::SwitchRow("Record the game's sound", &v.gameSound, "Only The Sims 3, not music or chat apps", dv.gameSound);
-    ch |= ApexUi::SwitchRow("Hide game UI while recording", &v.hideGameUi, "Hides the game interface until the video stops", dv.hideGameUi);
-    ch |= ApexUi::SwitchRow("Include the Apex menu##Video", &v.includeMenu, "When the menu is open, it is in the video", dv.includeMenu);
-    ch |= ApexUi::SwitchRow("Include the mouse pointer##Video", &v.includePointer, "The pointer moves in the video as on screen", dv.includePointer);
-    ch |= ApexUi::SwitchRow("Show a recording timer", &v.timer, "Time and file size on screen while recording", dv.timer);
-    if (v.timer) {
-        static const char* const kPos[] = {"Top left", "Top centre", "Top right", "Bottom left", "Bottom right"};
-        ch |= Pick("Timer position", "Where the timer sits on the screen", "##CapTimerPos", v.timerPosition, kPos, 5, dv.timerPosition);
-        ch |= IntSlider("Timer size", "100 is the size of Apex notes", v.timerSize, 70, 160, dv.timerSize, "%.0f%%");
-        ch |= IntSlider("Timer opacity", "Lower lets more of the game show through", v.timerOpacity, 30, 100, dv.timerOpacity, "%.0f%%");
-        ch |= ApexUi::SwitchRow("Pulse the red dot", &v.timerBlink, "The dot fades in and out while recording", dv.timerBlink);
-        ch |= ApexUi::SwitchRow("Show the file size", &v.timerFileSize, "How large the video is so far", dv.timerFileSize);
-        ch |= ApexUi::SwitchRow("Show the stop key", &v.timerStopKey, "The key that stops the video", dv.timerStopKey);
-        ch |= ApexUi::SwitchRow("Always show hours", &v.timerHours, "0:02:15 instead of 02:15", dv.timerHours);
-    }
-    ch |= ApexUi::SwitchRow("Red frame while recording", &v.redFrame, "A thin red border around the screen", dv.redFrame);
-    if (v.timer || v.redFrame)
-        ch |= ApexUi::SwitchRow("Timer in the video too", &v.timerInVideo, "An open Apex menu is then in the video too", dv.timerInVideo);
-    ch |= IntSlider("Stop after", "0 records until you stop it", v.stopAfterS, 0, 3600, dv.stopAfterS, "%.0f s");
-    ch |= IntSlider("Stop at file size", "0 has no limit", v.stopAtMb, 0, 16000, dv.stopAtMb, "%.0f MB");
-    ch |= IntSlider("Warn before the limit", "The timer turns amber and shows the time left; 0 is off", v.warnBeforeS, 0, 600, dv.warnBeforeS, "%.0f s");
-    ApexUi::IconNote(IconId::Info, I18n::Trf("About {} MB per minute; if the game stutters, lower the video size or frames per second",
-                                             static_cast<int>(KbpsFor(v) * 60.0 / 8.0 / 1024.0 + 0.5)).c_str());
-    if (ch) Set(s);
+    ApexUi::EndCard();
+    if (why) ApexUi::IconNote(IconId::TriangleAlert, why, VioletTheme::kWarning); // (translated by the note)
 }
 
 } // namespace ApexCapture
