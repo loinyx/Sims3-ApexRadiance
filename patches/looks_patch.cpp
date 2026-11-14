@@ -1486,6 +1486,7 @@ bool DefinesUi(size_t i, const Looks::Fx::Effect& fx)
         const char* status = I18n::Tr("Compiling the new settings\xE2\x80\xA6");
         if (compiling)
         {
+            ApexUi::BusySpinner(true);
             ImGui::AlignTextToFramePadding();
             ImGui::TextColored(VioletTheme::Col(VioletTheme::kAccentLight), "%s", status);
             if (ImGui::GetItemRectMax().x + ApexUi::kSpace3 * u + resetW <= right) ImGui::SameLine(right - resetW - ImGui::GetWindowPos().x);
@@ -1906,6 +1907,7 @@ bool AddShaderModal(bool openNow)
             edgeLine(ImGui::GetItemRectMax().y);
             // footer: where more shaders come from, the line left of its button (above it when they don't fit)
             ApexUi::Gap(ApexUi::kSpace2);
+            if (g.active && Looks::Fx::Scanning()) ApexUi::BusySpinner();
             if (g.active && Looks::Fx::Scanning()) ApexUi::MutedText(I18n::Tr("Checking your shaders\xE2\x80\xA6")); // nothing compiles while Looks is off
             const char* getPacks = "Get shader packs";
             const char* lead = I18n::Tr("Missing something? Get more packs or add your own .fx files.");

@@ -616,6 +616,20 @@ void MutedText(const char* text) {
     ImGui::PopStyleColor();
 }
 
+void BusySpinner(bool frameLine) {
+    if (Hidden()) return;
+    const float u = Unit(), r = 6.0f * u, h = frameLine ? ImGui::GetFrameHeight() : ImGui::GetTextLineHeight();
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    ImGui::Dummy(ImVec2(2.0f * r, h));
+    const ImVec2 c(p.x + r, p.y + h * 0.5f);
+    const float a = (float)ImGui::GetTime() * 6.0f;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddCircle(c, r - u, ImGui::GetColorU32(Col(VioletTheme::kAccentLight, 0.25f)), 24, 2.0f * u);
+    dl->PathArcTo(c, r - u, a, a + 1.6f, 12);
+    dl->PathStroke(ImGui::GetColorU32(Col(VioletTheme::kAccentLight)), 0, 2.0f * u);
+    ImGui::SameLine(0.0f, kSpace2 * u);
+}
+
 void SectionLabel(const char* text) {
     // Headings above cards share the Overview / Lighting group treatment.
     GroupLabel(text);

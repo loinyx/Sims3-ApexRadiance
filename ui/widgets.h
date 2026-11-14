@@ -106,6 +106,8 @@ void Tooltip(const char* text);
 void PageTitle(const char* title, const char* subtitle);
 // Muted wrapped text
 void MutedText(const char* text);
+// A small turning arc on the text line, for work that is still running; the next item goes on the same line
+void BusySpinner(bool frameLine = false); // frameLine: centred on a line of buttons, else on a line of text
 // Small bold section label inside a card or page (kept for older callers; cards use GroupLabel)
 void SectionLabel(const char* text);
 // Group label inside a card: regular menu font, muted, without letter spacing
