@@ -159,18 +159,19 @@ void OnSetFvf(IDirect3DDevice9* dev, DWORD fvf) {
     if (!Mine(dev)) return;
     g_input = 'F';
     g_fvf = fvf;
-    Event(std::format("SetFVF {:#x} by {}", fvf, Caller()));
+    if (!g_scene) Event(std::format("SetFVF {:#x} by {}", fvf, Caller()));
 }
 
 void OnSetDecl(IDirect3DDevice9* dev, IDirect3DVertexDeclaration9* decl) {
     if (!Mine(dev)) return;
     g_input = 'D';
     g_decl = decl;
-    const std::string by = Caller();
     struct Log {
-        const std::string& by;
-        ~Log() { Event(std::format("SetVertexDeclaration {} by {}", Input(), by)); } // (after the layout is known)
-    } log{by};
+        const std::string by;
+        ~Log() {
+            if (!by.empty()) Event(std::format("SetVertexDeclaration {} by {}", Input(), by)); // (after the layout is known)
+        }
+    } log{g_scene ? std::string() : Caller()};
     if (!decl || g_declPos.count(decl)) return;
     D3DVERTEXELEMENT9 el[MAXD3DDECLLENGTH + 1]{};
     UINT n = MAXD3DDECLLENGTH + 1;
@@ -219,7 +220,7 @@ void OnDraw(IDirect3DDevice9* dev, const char* kind, D3DPRIMITIVETYPE type, UINT
     if (!Mine(dev) || g_scene) return;
     if (!OnBackBuffer()) {
         g_otherDraws++;
-        Event(std::format("{} {} x{} to {} | {} by {}", kind, Prim(type), prims, Ptr(g_rt0), State(dev), Caller()));
+        if (g_events < kMaxEvents) Event(std::format("{} {} x{} to {} | {} by {}", kind, Prim(type), prims, Ptr(g_rt0), State(dev), Caller()));
         return;
     }
     if (!std::strcmp(kind, "DIP") || !std::strcmp(kind, "DP")) { // as Picture counts the scene (not the UP draws)
