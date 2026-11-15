@@ -19,6 +19,7 @@ The feature is described in [features/screenshots-and-video.md](../features/scre
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
 | 2026-11-14 | PR branch | Smoke suite | Passed | None |
+| 2026-11-14 | 6756d30f | In-game runner `capture` (F8, a bare F12 as the record key) | 3840x2160 PNG (14.0 MB) and a 12 s MP4 (22.6 MB) written to the run folder | RTX Remix bridge (tester's game) |
 
 ## In-game test plan
 

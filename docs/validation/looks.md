@@ -54,6 +54,9 @@ The feature is described in [features/looks.md](../features/looks.md). It must:
 | 2026-11-14 | PR branch | `looks_fx_check --compare/--run --hashes`, before and after the performance pass | 272 + 146 pictures, the same hashes | Direct3D 9 HAL |
 | 2026-11-14 | PR branch | `looks_fx_check --packs` (six packs, three runs) | 17 checks, 0 failures; no pack effect kept | None |
 | 2026-11-14 | PR branch | `looks_packs_test --real` | 54 checks, 0 failures; Ptho-FX downloaded through WinHTTP | Network (one pack) |
+| 2026-11-14 | 6756d30f | `shaders_menu_test` (Shaders and Capture pages) | 924 cases, 0 layout findings, 0 missing translations | None |
+| 2026-11-14 | 6756d30f | In-game runner `looks-off-on` (Cinematic, night save, ABBA, 8.8 min each) | off 44.4 / 43.8 fps, on 45.0 / 44.3; p99 54.9 / 56.0 ms off, 54.4 / 55.8 on; largest free block after the pan 604 / 632 MB off, 689 / 736 on | RTX Remix bridge (tester's game) |
+| 2026-11-14 | 6756d30f | In-game runner `looks-builtin` (five looks) | 5 of 5 load, draw and log no Looks warning (Vivid on a second start: the first froze on the main menu before the world, no Looks line after start-up); largest free block 1398-1485 MB | RTX Remix bridge (tester's game) |
 
 ## In-game test plan
 
