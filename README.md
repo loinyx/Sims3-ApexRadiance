@@ -768,9 +768,3 @@ The in-game test runner (`tools/ingame_runner/`) is adapted from [sims3-moderniz
 ## License
 
 [MIT](LICENSE)
-
-out = Path("/mnt/data/README_Apex_Radiance_4.0.1.md")
-out.write_text(readme, encoding="utf-8")
-print(f"Arquivo criado: {out.name}")
-print(f"Linhas: {len(readme.splitlines())} | Caracteres: {len(readme):,}")
-print(f"Tamanho: {out.stat().st_size:,} bytes")
