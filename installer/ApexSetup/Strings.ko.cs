@@ -241,7 +241,7 @@ public static partial class Strings
         ["{0} → updates to {1}"] = "{0} → {1}(으)로 업데이트",
         ["{0} updates for The Sims 3 · {1}"] = "The Sims 3 · {1} 업데이트 {0}개",
         ["Windows default (Direct3D 9)"] = "Windows 기본값 (Direct3D 9)",
-        ["Fewer stutters; Apex Radiance is made and tested with it."] = "끊김이 줄어요. Apex Radiance는 이것으로 만들고 테스트했어요.",
+        ["Fewer stutters; choose it if the game misbehaves with the bridge."] = "끊김이 줄어듭니다. 브리지로 게임이 제대로 작동하지 않으면 이것을 선택하세요.",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
             "큰 월드를 위해 약 600 MB의 메모리를 더 비워 둬요. Vulkan을 지원하는 그래픽 카드가 필요해요. 게임에 문제가 생기면 DXVK를 선택하세요.",
         ["Works, but Apex Radiance is tested with DXVK."] = "작동하지만 Apex Radiance는 DXVK로 테스트했어요.",

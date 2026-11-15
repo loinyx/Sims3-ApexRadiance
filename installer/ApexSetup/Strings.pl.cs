@@ -214,7 +214,7 @@ public static partial class Strings
         ["{0} → updates to {1}"] = "{0} → aktualizacja do {1}",
         ["{0} updates for The Sims 3 · {1}"] = "Aktualizacje dla The Sims 3 · {1}: {0}",
         ["Windows default (Direct3D 9)"] = "Domyślne w Windows (Direct3D 9)",
-        ["Fewer stutters; Apex Radiance is made and tested with it."] = "Mniej przycięć; Apex Radiance jest tworzony i testowany właśnie z nim.",
+        ["Fewer stutters; choose it if the game misbehaves with the bridge."] = "Mniej zacięć; wybierz go, jeśli gra działa źle z mostem.",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] = "Zostawia około 600 MB więcej wolnej pamięci dla dużych światów. Wymaga karty graficznej z obsługą Vulkan. Jeśli gra działa z tym źle, wybierz DXVK.",
         ["Works, but Apex Radiance is tested with DXVK."] = "Działa, ale Apex Radiance jest testowany z DXVK.",
         ["Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."] = "Ustawienia grafiki w grze mogą się raz zresetować. Instalator zachowuje kopię i przywraca ją, jeśli wrócisz do poprzedniej opcji.",

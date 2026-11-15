@@ -249,8 +249,8 @@ public static partial class Strings
         ["{0} → updates to {1}"] = "{0} → se actualiza a {1}",
         ["{0} updates for The Sims 3 · {1}"] = "{0} actualizaciones para The Sims 3 · {1}",
         ["Windows default (Direct3D 9)"] = "Predeterminado de Windows (Direct3D 9)",
-        ["Fewer stutters; Apex Radiance is made and tested with it."] =
-            "Menos tirones; Apex Radiance se hace y se prueba con él.",
+        ["Fewer stutters; choose it if the game misbehaves with the bridge."] =
+            "Menos tirones; elígelo si el juego falla con el puente.",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
             "Deja unos 600 MB más de memoria libre para mundos grandes. Necesita una tarjeta gráfica con Vulkan. Si el juego da problemas con él, elige DXVK.",
         ["Works, but Apex Radiance is tested with DXVK."] = "Funciona, pero Apex Radiance se prueba con DXVK.",

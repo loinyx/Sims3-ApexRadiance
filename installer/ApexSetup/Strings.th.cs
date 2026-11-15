@@ -214,7 +214,7 @@ public static partial class Strings
         ["{0} → updates to {1}"] = "{0} → อัปเดตเป็น {1}",
         ["{0} updates for The Sims 3 · {1}"] = "The Sims 3 · {1} มีอัปเดต {0} รายการ",
         ["Windows default (Direct3D 9)"] = "ค่าเริ่มต้นของ Windows (Direct3D 9)",
-        ["Fewer stutters; Apex Radiance is made and tested with it."] = "กระตุกน้อยลง Apex Radiance สร้างและทดสอบด้วยตัวนี้",
+        ["Fewer stutters; choose it if the game misbehaves with the bridge."] = "กระตุกน้อยลง เลือกตัวนี้หากเกมทำงานผิดปกติกับบริดจ์",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] = "มีหน่วยความจำว่างเพิ่มราว 600 MB สำหรับโลกขนาดใหญ่ ต้องใช้การ์ดจอที่รองรับ Vulkan หากเกมทำงานผิดปกติ ให้เลือก DXVK",
         ["Works, but Apex Radiance is tested with DXVK."] = "ใช้งานได้ แต่ Apex Radiance ทดสอบกับ DXVK",
         ["Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."] = "การตั้งค่ากราฟิกในเกมอาจรีเซ็ตหนึ่งครั้ง ตัวติดตั้งเก็บสำเนาไว้และจะคืนให้หากคุณเปลี่ยนกลับ",

@@ -263,6 +263,11 @@ public static class Engine
 
     public static string OptionsIni(string docs) => Path.Combine(docs, "Options.ini");
 
+    // A first install on the game's own D3D9 takes the RTX Remix bridge, DXVK when the card or driver cannot run it;
+    // an installed renderer stays (a player on DXVK is not switched).
+    public static Layer DefaultLayer(State s, bool bridgeBlocked) =>
+        s.ApexVersion is null && s.Layer == Layer.Native ? (bridgeBlocked ? Layer.Dxvk : Layer.Bridge) : s.Layer;
+
     // The loader goes in when there is none, or when the only one is d3d9.dll and the bridge takes that name.
     public static bool NeedsLoader(State s, bool replacesD3d9) => s.Loader is null || (replacesD3d9 && s.LoaderIsD3d9);
 

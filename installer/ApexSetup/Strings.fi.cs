@@ -240,7 +240,7 @@ public static partial class Strings
         ["{0} → updates to {1}"] = "{0} → päivittyy versioon {1}",
         ["{0} updates for The Sims 3 · {1}"] = "{0} päivitystä pelille The Sims 3 · {1}",
         ["Windows default (Direct3D 9)"] = "Windowsin oletus (Direct3D 9)",
-        ["Fewer stutters; Apex Radiance is made and tested with it."] = "Vähemmän nykimistä; Apex Radiance on tehty ja testattu sen kanssa.",
+        ["Fewer stutters; choose it if the game misbehaves with the bridge."] = "Vähemmän nykimistä; valitse se, jos peli toimii huonosti sillan kanssa.",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
             "Jättää noin 600 Mt enemmän muistia vapaaksi suurille maailmoille. Vaatii Vulkania tukevan näytönohjaimen. Jos peli toimii sen kanssa huonosti, valitse DXVK.",
         ["Works, but Apex Radiance is tested with DXVK."] = "Toimii, mutta Apex Radiance on testattu DXVK:n kanssa.",

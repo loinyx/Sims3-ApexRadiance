@@ -214,7 +214,7 @@ public static partial class Strings
         ["{0} → updates to {1}"] = "{0} → 更新到 {1}",
         ["{0} updates for The Sims 3 · {1}"] = "The Sims 3 · {1} 有 {0} 個更新",
         ["Windows default (Direct3D 9)"] = "Windows 預設（Direct3D 9）",
-        ["Fewer stutters; Apex Radiance is made and tested with it."] = "卡頓更少；Apex Radiance 以它開發和測試。",
+        ["Fewer stutters; choose it if the game misbehaves with the bridge."] = "減少卡頓；如果遊戲在橋接下運作異常，請選擇它。",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] = "為大型世界多保留約 600 MB 可用記憶體。需要支援 Vulkan 的顯示卡。如果遊戲使用它時出現問題，請選擇 DXVK。",
         ["Works, but Apex Radiance is tested with DXVK."] = "可以運作，但 Apex Radiance 是以 DXVK 測試的。",
         ["Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."] = "遊戲內的圖形設定可能會重設一次。安裝程式會保留副本，並在你切換回來時還原。",

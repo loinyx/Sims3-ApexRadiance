@@ -237,7 +237,7 @@ public static partial class Strings
         ["{0} → updates to {1}"] = "{0} → 更新到 {1}",
         ["{0} updates for The Sims 3 · {1}"] = "The Sims 3 · {1} 有 {0} 个更新",
         ["Windows default (Direct3D 9)"] = "Windows 默认（Direct3D 9）",
-        ["Fewer stutters; Apex Radiance is made and tested with it."] = "卡顿更少；Apex Radiance 就是用它开发和测试的。",
+        ["Fewer stutters; choose it if the game misbehaves with the bridge."] = "减少卡顿；如果游戏在桥接下运行异常，请选择它。",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
             "为大型世界多留出约 600 MB 空闲内存。需要支持 Vulkan 的显卡。如果游戏使用它时出现问题，请选择 DXVK。",
         ["Works, but Apex Radiance is tested with DXVK."] = "可以使用，但 Apex Radiance 是用 DXVK 测试的。",

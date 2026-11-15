@@ -253,8 +253,8 @@ public static partial class Strings
         ["{0} → updates to {1}"] = "{0} → frissül erre: {1}",
         ["{0} updates for The Sims 3 · {1}"] = "{0} frissítés a The Sims 3-hoz · {1}",
         ["Windows default (Direct3D 9)"] = "Windows alapértelmezett (Direct3D 9)",
-        ["Fewer stutters; Apex Radiance is made and tested with it."] =
-            "Kevesebb akadozás; az Apex Radiance ezzel készül, és ezzel tesztelik.",
+        ["Fewer stutters; choose it if the game misbehaves with the bridge."] =
+            "Kevesebb akadás; válaszd ezt, ha a játék rosszul működik a híddal.",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
             "Kb. 600 MB-tal több memóriát hagy szabadon a nagy világokhoz. Vulkant támogató videokártya kell hozzá. Ha a játék hibásan működik vele, válaszd a DXVK-t.",
         ["Works, but Apex Radiance is tested with DXVK."] = "Működik, de az Apex Radiance-t a DXVK-val tesztelik.",

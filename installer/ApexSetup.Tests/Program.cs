@@ -23,6 +23,11 @@ try
     var s = Scan.Run(g, docs);
     Check(s.Layer == Layer.Native && s.Loader is null && s.ApexVersion is null, "fresh game scans as native, no loader, no Apex");
     Check(Engine.NeedsLoader(s, true), "a loader is needed");
+    Check(Engine.DefaultLayer(s, false) == Layer.Bridge && Engine.DefaultLayer(s, true) == Layer.Dxvk,
+        "first install: the bridge by default, DXVK when the card or driver cannot run it");
+    Check(Engine.DefaultLayer(s with { ApexVersion = "4.0.0", Layer = Layer.Dxvk }, false) == Layer.Dxvk
+        && Engine.DefaultLayer(s with { ApexVersion = "4.0.0" }, false) == Layer.Native
+        && Engine.DefaultLayer(s with { Layer = Layer.Dxvk }, false) == Layer.Dxvk, "an installed renderer is kept");
     await Engine.InstallAsync(g, new[] { Components.Apex, Components.Bridge, Components.Loader }, src, null, docs);
     Check(Read(B("ApexRadiance.asi")) == "apex 3.1.1", "ApexRadiance.asi installed");
     Check(!File.Exists(B("ts3wrap.exe")) && !File.Exists(Engine.ApexToml(docs)), "Apex alone installs no ts3wrap.exe and writes no ApexRadiance.toml");
