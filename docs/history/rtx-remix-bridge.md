@@ -66,3 +66,14 @@ everything else, the client never saw it, and the game hung in its next call unt
 state now lives where a restore is the signal: a spare word in the client's channel mapping that the server sets and
 the host's restore clears. A `Present` that waits for the server also answers a park request now, since a host
 that cannot park the game cannot tell a slow server from a stopped one.
+
+### 2026-11-16: a new device with no reference of its own
+
+One game start crashed while the device was made: an access violation reading 0 in the client's `GetBackBuffer`,
+called from a mod's `CreateDevice` hook. The server's log showed the client destroying the implicit depth surface and
+swapchain right after `CreateDevice`. Patch 0010 had made render target 0 the swapchain's back buffer but still
+counted it among the references the implicit objects hold on the device, and a back buffer references its swapchain.
+So the device read its creator's reference as an implicit one: `AddRef` returned 1, and the matching `Release` found
+the count at the implicit references and tore the device's implicit objects down. Code that already holds a second
+reference does not trigger it. Why only some starts took and returned a reference that early is not established.
+Patch 0016 takes the render target out of the count.

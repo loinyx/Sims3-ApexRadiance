@@ -134,6 +134,7 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
 | 2026-11-15 | the same pair | `test_rewind_device`, mode on and off, 12 runs each | pass: park, snapshot, plan (1 object to revive, 1 to drop), drop; a second thread's command waits for the whole park; with the mode off no cooperation block |
 | 2026-11-15 | the pair of commit 8caad90, Apex Radiance 4.0.1, Steam 1.67.2, bridge with DXVK 3.1.1, a loaded world at 1024x768 | In game: the first snapshot | refused, nothing changed: `a 1024x768 depth surface of format 75 could not be copied (0x8876086c)`. The surface is one the game makes with Discard, which `StretchRect` does not copy; the test above reproduces the code. Such surfaces are no longer copied (feature page, Rewind mode) |
 | 2026-11-16 | the pair of commit a358170, the same setup | In game: snapshot, plan and one rewind with the host tool | the snapshot kept 25,497 objects, 339 surfaces and 448 MB, with 5 depth surfaces made with Discard left out; the plan counted 166 objects to revive and 694 to drop; the rewind was applied and the game process came back equal to its snapshot. The server then read no command for 60 s (`The client did not come back within 60 s of a rewind`), so the game stopped presenting and the next park request timed out. Cause: the host sets events back to their state at the snapshot, which unset the event that told the client about the rewind. The server now reads the client's return from shared memory, and the client also parks from the semaphore wait |
+| 2026-11-16 | the pair of commit 3eea11c, the same setup | In game: start of a session | one start in two crashed when the device was made: access violation reading 0 in the client's `GetBackBuffer`, called from a mod's `CreateDevice` hook, right after the client had destroyed the implicit swapchain. Cause: patch 0010's count of implicit references (patch 0016). `test_rewind_device` now takes and returns a reference on a new device: it failed on the pair before 0016 with `AddRef` 1 and `Release` 0, and passes with it |
 | 2026-11-16 | this pair | In game | not run yet, see Open checks |
 
 ## In-game test plan
@@ -168,8 +169,10 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
   and one rewind. The rewind Op itself (queue positions, the server's wait for the client) has no offline test:
   it needs a host that puts the game process back.
 - The 32-bit test apps that run through the bridge (`test_rewind_device`, and upstream's `test_sent_state_device`)
-  ended with an access violation in the client at the first `Present` in their first runs on the test machine,
-  also with the pair built before this change. Every later run passed. The cause is not found.
+  ended with an access violation in the client at the first `Present` in some early runs on the test machine, after
+  the client had destroyed its implicit swapchain right after `CreateDevice`. That is the signature of patch 0016's
+  fault, which needs something in the process to take and return a reference on the new device. What did so in the
+  test apps is not found (an injected overlay is the guess), and the runs are not repeated since the fix.
 - Release 3.1.0 (commit `release: 3.1.0`): the release candidate ran under the bridge in game with Display set to Fullscreen as Borderless; the update card, the bridge guide and the uncompressed-textures card were not each exercised under the bridge on this machine.
 - A report of walls flickering under the bridge with *Street lamps light lots* on (Steam 1.67.2, 3.0.0, session 2026-11-10 10-49-24); not reproduced or explained yet.
 
