@@ -19,7 +19,8 @@ constexpr const char* k400Improved[] = {
     nullptr};
 constexpr const char* k400Fixed[] = {
     "Presets: the import and export window scrolls on short screens",
-    "Shaders: World only keeps a look's full colours in the world",
+    "Shaders: Interface without shaders keeps a look's full colors in the world",
+    "Shaders: MXAO and other depth shaders see depth the right way up",
     nullptr};
 constexpr const char* k400Highlights[] = {
     "ReShade and GShade looks in Apex",
