@@ -761,7 +761,7 @@ const I18n::Pair kPairs[] = {
     {"Choose your shortcuts", "選擇你的快速鍵"},
     {"Recommended for Apex Radiance", "Apex Radiance 推薦"},
     {"For the mod to work at its best", "讓模組發揮最佳效果"},
-    {"Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it.", "讓遊戲以 Vulkan 執行：卡頓更少，而且 Apex Radiance 就是以它開發與測試的。"},
+    {"Runs the game on Vulkan through the RTX Remix bridge: fewer stutters and about 600 MB more free memory for big worlds. If the game misbehaves with it or your graphics card cannot run it, use DXVK.", "透過 RTX Remix bridge 讓遊戲以 Vulkan 執行：卡頓更少，大型世界可多出約 600 MB 可用記憶體。如果遊戲運作異常或你的顯示卡無法執行它，請使用 DXVK。"},
     {"Opens the DXVK releases page on GitHub in your browser", "在瀏覽器中開啟 GitHub 上的 DXVK 發行頁面"},
     {"Choose keys for the menu and Apex actions", "選擇選單與 Apex 動作的按鍵"},
     {"Choose a preset or click a shortcut to edit it", "選擇預設組合，或點選快速鍵進行編輯"},

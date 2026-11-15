@@ -528,10 +528,10 @@ try
         File.Delete(B6("OldApex.asi"));
 
         // the components Apex recommends: pointers only, no fix
-        Check(Named("DXVK") is { Fix: null } && Named("Sims3SettingsSetter") is { Fix: null } && Named("RTX Remix bridge") is null,
-              "the game's own D3D9 and no S3SS: DXVK and S3SS suggested, nothing to apply");
+        Check(Named("RTX Remix bridge") is { Fix: null } && Named("Sims3SettingsSetter") is { Fix: null } && Named("DXVK") is null,
+              "the game's own D3D9 and no S3SS: the bridge and S3SS suggested, nothing to apply");
         File.WriteAllText(B6("d3d9.dll"), "some other wrapper");
-        Check(Named("DXVK") is not null, "an unknown d3d9.dll: DXVK suggested");
+        Check(Named("RTX Remix bridge") is not null, "an unknown d3d9.dll: the bridge suggested");
         File.WriteAllText(B6("d3d9.dll"), "dxvk d3d9");
         File.WriteAllText(B6("Sims3SettingsSetter.asi"), "s3ss");
         Check(Named("DXVK") is null && Named("Sims3SettingsSetter") is null && Named("RTX Remix bridge") is { Fix: null }, "DXVK and S3SS in: the bridge offered");

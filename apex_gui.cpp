@@ -296,12 +296,13 @@ void SetShore(bool on) {
     }
 }
 
-// ---- recommendations: DXVK and official Sims3SettingsSetter (DXVK helps the mod work well; both are suggested at the
-// start when missing; when installed, only Settings shows them) ----
+// ---- recommendations: the RTX Remix bridge (DXVK as its fallback) and official Sims3SettingsSetter (Vulkan helps the mod
+// work well; both are suggested at the start when missing; when installed, only Settings shows them) ----
 
 constexpr const char* kRecommendText = APEX_PRODUCT_NAME " works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame "
                                        "rate limiter, fewer stutters and many extra game settings.";
-constexpr const char* kDxvkText = "Runs the game on Vulkan: fewer stutters, and " APEX_PRODUCT_NAME " is made and tested with it.";
+constexpr const char* kVulkanText = "Runs the game on Vulkan through the RTX Remix bridge: fewer stutters and about 600 MB more free memory for big worlds. "
+                                    "If the game misbehaves with it or your graphics card cannot run it, use DXVK.";
 constexpr const char* kBridgeText = "Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds.";
 constexpr const char* kS3PPText = "With Sims 3 Modernization installed, Short Wait Spin and Thread Stack Diet can freeze your Sims for minutes.";
 constexpr const wchar_t* kS3SSReleasesUrl = L"https://github.com/sims3fiend/Sims3SettingsSetter/releases";
@@ -397,15 +398,19 @@ void S3PPItem() {
     if (ApexUi::IconTextButton("Open Sims3Performance.ini", IconId::ExternalLink, "Opens the file in your text editor")) OpenPage(s3pp.ini.c_str());
 }
 void DownloadDxvkButton() {
-    if (ApexUi::IconTextButton("Download##DXVK", IconId::Download, "Opens the DXVK releases page on GitHub in your browser", ButtonKind::Primary))
+    if (ApexUi::IconTextButton("Download##DXVK", IconId::Download, "Opens the DXVK releases page on GitHub in your browser"))
         OpenPage(kDxvkReleasesUrl);
 }
 
 // The missing ones, each with its line and Download (Overview and Compatibility settings)
 void RecommendedItems() {
     if (DxvkMissing()) {
+        ImGui::TextUnformatted("RTX Remix bridge");
+        ApexUi::MutedText(kVulkanText);
+        if (ApexUi::IconTextButton("Download##Bridge", IconId::Download, "Opens the Apex Radiance releases page on GitHub, where the bridge is a separate download",
+                                   ButtonKind::Primary))
+            OpenPage(kApexReleasesUrl);
         ImGui::TextUnformatted("DXVK");
-        ApexUi::MutedText(kDxvkText);
         DownloadDxvkButton();
         ApexUi::Gap(ApexUi::kSpace2);
     }

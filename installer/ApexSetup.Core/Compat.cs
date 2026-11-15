@@ -186,7 +186,8 @@ public static class Compat
         }
         // the renderer and S3SS Apex recommends (apex_gui.cpp kRecommend*): components, so a pointer to Components only
         if (s.Layer is Layer.Native or Layer.Other)
-            f.Add(new(Severity.Info, "Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it.", Array.Empty<string>(), Suggest: "DXVK"));
+            f.Add(new(Severity.Info, "Runs the game on Vulkan through the RTX Remix bridge: fewer stutters and about 600 MB more free memory for big worlds. If the game misbehaves with it or your graphics card cannot run it, use DXVK.",
+                Array.Empty<string>(), Suggest: "RTX Remix bridge"));
         if (!s.S3ss && !combined)
             f.Add(new(Severity.Info, "Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings.",
                 Array.Empty<string>(), Suggest: "Sims3SettingsSetter"));

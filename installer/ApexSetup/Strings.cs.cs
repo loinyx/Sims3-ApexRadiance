@@ -168,7 +168,7 @@ public static partial class Strings
         ["Depth Blur"] = "Rozostření hloubky",
         ["Ambient Occlusion"] = "Ambientní okluze",
         ["Water Reflections"] = "Odrazy na vodě",
-        ["Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it."] = "Spouští hru přes Vulkan: méně zasekávání a Apex Radiance je s ním vyvíjen a testován.",
+        ["Runs the game on Vulkan through the RTX Remix bridge: fewer stutters and about 600 MB more free memory for big worlds. If the game misbehaves with it or your graphics card cannot run it, use DXVK."] = "Spouští hru přes Vulkan pomocí RTX Remix bridge: méně zasekávání a asi o 600 MB více volné paměti pro velké světy. Pokud hra s ním nefunguje správně nebo ho vaše grafická karta nezvládne, použijte DXVK.",
         ["Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings."] = "Apex Radiance funguje samostatně, ale dobře se doplňuje se Sims3SettingsSetter od sims3fiend: omezovač snímkové frekvence, méně zasekávání a spousta dalších nastavení hry.",
         ["Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds."] = "Přesune DXVK do vlastního 64bitového procesu: hra si ponechá asi o 600 MB více volné paměti pro dlouhé hraní a velké světy.",
         ["{0} has {1} = {2}, which Setup cannot read. Setup leaves the file as it is."] = "{0} má {1} = {2}, což instalátor neumí přečíst. Instalátor soubor nechá, jak je.",
@@ -248,7 +248,7 @@ public static partial class Strings
             "Méně záseků; zvolte ji, pokud hra s mostem nefunguje správně.",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
             "Uvolní asi o 600 MB víc paměti pro velké světy. Vyžaduje grafickou kartu s Vulkan. Pokud s ním hra nefunguje správně, zvolte DXVK.",
-        ["Works, but Apex Radiance is tested with DXVK."] = "Funguje, ale Apex Radiance je testován s DXVK.",
+        ["Works, but the RTX Remix bridge or DXVK run Apex Radiance better."] = "Funguje, ale s RTX Remix bridge nebo DXVK běží Apex Radiance lépe.",
         ["Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."] =
             "Grafická nastavení ve hře se mohou jednou resetovat. Instalátor uchová kopii a vrátí ji, pokud přepnete zpět.",
         ["Fixes for game and graphics settings."] = "Opravy nastavení hry a grafiky.",

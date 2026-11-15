@@ -165,7 +165,7 @@ public static partial class Strings
         ["Depth Blur"] = "Dieptevervaging",
         ["Ambient Occlusion"] = "Ambient Occlusion",
         ["Water Reflections"] = "Waterreflecties",
-        ["Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it."] = "Laat het spel op Vulkan draaien: minder haperingen, en Apex Radiance is ermee gemaakt en getest.",
+        ["Runs the game on Vulkan through the RTX Remix bridge: fewer stutters and about 600 MB more free memory for big worlds. If the game misbehaves with it or your graphics card cannot run it, use DXVK."] = "Laat het spel via de RTX Remix bridge op Vulkan draaien: minder haperingen en ongeveer 600 MB meer vrij geheugen voor grote werelden. Als het spel zich ermee misdraagt of je videokaart het niet kan draaien, gebruik dan DXVK.",
         ["Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings."] = "Apex Radiance werkt op zichzelf, maar gaat goed samen met Sims3SettingsSetter van sims3fiend: een framerate-limiet, minder haperingen en veel extra spelinstellingen.",
         ["Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds."] = "Zet DXVK in een eigen 64-bitsproces: het spel houdt ongeveer 600 MB meer vrij geheugen over voor lange sessies en grote werelden.",
         ["{0} has {1} = {2}, which Setup cannot read. Setup leaves the file as it is."] = "{0} heeft {1} = {2}, wat Setup niet kan lezen. Setup laat het bestand zoals het is.",
@@ -243,7 +243,7 @@ public static partial class Strings
         ["Fewer stutters; choose it if the game misbehaves with the bridge."] = "Minder haperingen; kies het als het spel zich misdraagt met de bridge.",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
             "Houdt ongeveer 600 MB meer geheugen vrij voor grote werelden. Vereist een videokaart met Vulkan. Doet het spel er raar mee, kies dan DXVK.",
-        ["Works, but Apex Radiance is tested with DXVK."] = "Werkt, maar Apex Radiance is getest met DXVK.",
+        ["Works, but the RTX Remix bridge or DXVK run Apex Radiance better."] = "Werkt, maar Apex Radiance draait beter met de RTX Remix bridge of DXVK.",
         ["Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."] =
             "Je grafische instellingen in het spel kunnen één keer worden teruggezet. Setup bewaart een kopie en zet die terug als je terugschakelt.",
         ["Fixes for game and graphics settings."] = "Oplossingen voor spel- en grafische instellingen.",

@@ -163,7 +163,7 @@ public static partial class Strings
         ["Depth Blur"] = "景深模糊",
         ["Ambient Occlusion"] = "环境光遮蔽",
         ["Water Reflections"] = "水面反射",
-        ["Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it."] = "让游戏在 Vulkan 上运行：卡顿更少，且 Apex Radiance 正是基于它开发和测试的。",
+        ["Runs the game on Vulkan through the RTX Remix bridge: fewer stutters and about 600 MB more free memory for big worlds. If the game misbehaves with it or your graphics card cannot run it, use DXVK."] = "通过 RTX Remix bridge 让游戏在 Vulkan 上运行：卡顿更少，大型世界可多出约 600 MB 空闲内存。如果游戏运行异常或你的显卡无法运行它，请使用 DXVK。",
         ["Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings."] = "Apex Radiance 可以单独使用，但与 sims3fiend 的 Sims3SettingsSetter 搭配更好：帧率限制、更少卡顿以及许多额外的游戏设置。",
         ["Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds."] = "将 DXVK 移到独立的 64 位进程中：游戏可多出约 600 MB 空闲内存，适合长时间游玩和大型世界。",
         ["{0} has {1} = {2}, which Setup cannot read. Setup leaves the file as it is."] = "{0} 中 {1} = {2}，安装程序无法读取。安装程序会保持该文件不变。",
@@ -240,7 +240,7 @@ public static partial class Strings
         ["Fewer stutters; choose it if the game misbehaves with the bridge."] = "减少卡顿；如果游戏在桥接下运行异常，请选择它。",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
             "为大型世界多留出约 600 MB 空闲内存。需要支持 Vulkan 的显卡。如果游戏使用它时出现问题，请选择 DXVK。",
-        ["Works, but Apex Radiance is tested with DXVK."] = "可以使用，但 Apex Radiance 是用 DXVK 测试的。",
+        ["Works, but the RTX Remix bridge or DXVK run Apex Radiance better."] = "可以运行，但 RTX Remix bridge 或 DXVK 能让 Apex Radiance 运行得更好。",
         ["Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."] =
             "游戏内的图形设置可能会重置一次。安装程序会保留副本，切换回来时会将其还原。",
         ["Fixes for game and graphics settings."] = "修复游戏和图形设置。",

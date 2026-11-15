@@ -173,7 +173,7 @@ public static partial class Strings
         ["Depth Blur"] = "Flou de Profondeur",
         ["Ambient Occlusion"] = "Occlusion Ambiante",
         ["Water Reflections"] = "Reflets dans l'Eau",
-        ["Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it."] = "Fait tourner le jeu sur Vulkan : moins d'à-coups, et Apex Radiance est conçu et testé avec.",
+        ["Runs the game on Vulkan through the RTX Remix bridge: fewer stutters and about 600 MB more free memory for big worlds. If the game misbehaves with it or your graphics card cannot run it, use DXVK."] = "Fait tourner le jeu sur Vulkan via le RTX Remix bridge : moins d'à-coups et environ 600 Mo de mémoire libre en plus pour les grands mondes. Si le jeu se comporte mal avec lui ou si votre carte graphique ne peut pas le faire tourner, utilisez DXVK.",
         ["Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings."] = "Apex Radiance fonctionne seul, mais s'associe bien à Sims3SettingsSetter de sims3fiend : limiteur d'images par seconde, moins de saccades et de nombreux réglages de jeu en plus.",
         ["Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds."] = "Place DXVK dans son propre processus 64 bits : le jeu garde environ 600 Mo de mémoire libre en plus pour les longues sessions et les grands mondes.",
         ["{0} has {1} = {2}, which Setup cannot read. Setup leaves the file as it is."] = "{0} contient {1} = {2}, que l'installateur ne sait pas lire. L'installateur laisse le fichier tel quel.",
@@ -254,7 +254,7 @@ public static partial class Strings
             "Moins de saccades ; choisissez-le si le jeu se comporte mal avec le pont.",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
             "Garde environ 600 Mo de mémoire libre en plus pour les grands mondes. Nécessite une carte graphique compatible Vulkan. Si le jeu fonctionne mal avec, choisissez DXVK.",
-        ["Works, but Apex Radiance is tested with DXVK."] = "Fonctionne, mais Apex Radiance est testé avec DXVK.",
+        ["Works, but the RTX Remix bridge or DXVK run Apex Radiance better."] = "Fonctionne, mais le RTX Remix bridge ou DXVK font mieux tourner Apex Radiance.",
         ["Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."] =
             "Vos paramètres graphiques en jeu peuvent être réinitialisés une fois. L'installateur en garde une copie et la remet si vous revenez en arrière.",
         ["Fixes for game and graphics settings."] = "Corrections des paramètres du jeu et des graphismes.",

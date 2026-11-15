@@ -831,7 +831,7 @@ public sealed partial class MainWindow : Window
         {
             RDxvk => (T("Vulkan, DXVK"), T("Fewer stutters; choose it if the game misbehaves with the bridge.")),
             RBridge => (T("Vulkan with more memory (RTX Remix bridge, recommended)"), T("Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK.")),
-            RNative => (T("Windows default (Direct3D 9)"), T("Works, but Apex Radiance is tested with DXVK.")),
+            RNative => (T("Windows default (Direct3D 9)"), T("Works, but the RTX Remix bridge or DXVK run Apex Radiance better.")),
             _ => (T("Keep my d3d9.dll"), T("Your d3d9.dll stays as it is.")),
         };
         var item = new StackPanel { Spacing = 4, Margin = new Thickness(4, 0, 0, 0) };
@@ -863,7 +863,7 @@ public sealed partial class MainWindow : Window
         SetState(RendererState, changed ? (T("Replaces {0}", LayerName(s.Layer)), "ApexAccentBrush")
             : _renderer == RDxvk ? StateLine(Components.Dxvk, true, true, false)
             : _renderer == RBridge ? StateLine(Components.Bridge, true, true, false)
-            : _renderer == RNative ? (T("Works, but Apex Radiance is tested with DXVK."), "ApexMutedBrush")
+            : _renderer == RNative ? (T("Works, but the RTX Remix bridge or DXVK run Apex Radiance better."), "ApexMutedBrush")
             : (T("Your d3d9.dll stays as it is."), "ApexMutedBrush"));
         GpuLine.Text = _vulkan is { } gpu && gpu.Card is not null ? T("Your graphics card: {0}", $"{gpu.Card} \u00b7 Vulkan {gpu.Version}") : "";
         BridgeDetail.Text = "";

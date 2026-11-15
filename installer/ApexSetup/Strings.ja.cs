@@ -167,7 +167,7 @@ public static partial class Strings
         ["Depth Blur"] = "深度ぼかし",
         ["Ambient Occlusion"] = "アンビエントオクルージョン",
         ["Water Reflections"] = "水面の反射",
-        ["Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it."] = "ゲームをVulkanで動かします。カクつきが減り、Apex Radianceもこの環境で開発・テストされています。",
+        ["Runs the game on Vulkan through the RTX Remix bridge: fewer stutters and about 600 MB more free memory for big worlds. If the game misbehaves with it or your graphics card cannot run it, use DXVK."] = "RTX Remix bridge を通してゲームを Vulkan で動かします。カクつきが減り、大きな世界のための空きメモリが約600MB増えます。ゲームの動作がおかしい場合やグラフィックカードが対応していない場合は、DXVK を使ってください。",
         ["Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings."] = "Apex Radianceは単体でも動きますが、sims3fiend作のSims3SettingsSetterとの相性が抜群です。フレームレート制限、カクつきの削減、多数の追加ゲーム設定があります。",
         ["Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds."] = "DXVKを専用の64ビットプロセスに移します。ゲームの空きメモリが約600MB増え、長時間のプレイや大きな世界に役立ちます。",
         ["{0} has {1} = {2}, which Setup cannot read. Setup leaves the file as it is."] = "{0} の {1} = {2} はセットアップが読み取れません。セットアップはファイルをそのままにします。",
@@ -245,7 +245,7 @@ public static partial class Strings
         ["Fewer stutters; choose it if the game misbehaves with the bridge."] = "カクつきが減ります。ブリッジでゲームの動作がおかしい場合はこちらを選んでください。",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
             "大きなワールド向けに空きメモリを約 600 MB 増やします。Vulkan 対応のグラフィックカードが必要です。ゲームの動作がおかしい場合は DXVK を選んでください。",
-        ["Works, but Apex Radiance is tested with DXVK."] = "動作しますが、Apex Radiance は DXVK でテストされています。",
+        ["Works, but the RTX Remix bridge or DXVK run Apex Radiance better."] = "動作しますが、RTX Remix bridge か DXVK のほうが Apex Radiance はよく動きます。",
         ["Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."] =
             "ゲーム内のグラフィック設定が一度リセットされることがあります。セットアップがコピーを保存し、元に戻したときに復元します。",
         ["Fixes for game and graphics settings."] = "ゲームとグラフィックの設定の修正。",

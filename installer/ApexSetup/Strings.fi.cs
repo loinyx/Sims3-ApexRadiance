@@ -165,7 +165,7 @@ public static partial class Strings
         ["Depth Blur"] = "Syvyyssumennus",
         ["Ambient Occlusion"] = "Ambient Occlusion",
         ["Water Reflections"] = "Veden heijastukset",
-        ["Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it."] = "Ajaa pelin Vulkanilla: vähemmän nykimistä, ja Apex Radiance on tehty ja testattu sen kanssa.",
+        ["Runs the game on Vulkan through the RTX Remix bridge: fewer stutters and about 600 MB more free memory for big worlds. If the game misbehaves with it or your graphics card cannot run it, use DXVK."] = "Ajaa pelin Vulkanilla RTX Remix bridgen kautta: vähemmän nykimistä ja noin 600 Mt enemmän vapaata muistia suuriin maailmoihin. Jos peli toimii sen kanssa huonosti tai näytönohjaimesi ei pysty ajamaan sitä, käytä DXVK:ta.",
         ["Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings."] = "Apex Radiance toimii yksinäänkin, mutta se sopii hyvin yhteen sims3fiendin Sims3SettingsSetterin kanssa: ruudunpäivityksen rajoitin, vähemmän nykimistä ja paljon lisäasetuksia peliin.",
         ["Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds."] = "Siirtää DXVK:n omaan 64-bittiseen prosessiinsa: pelille jää noin 600 Mt enemmän vapaata muistia pitkiin pelikertoihin ja suuriin maailmoihin.",
         ["{0} has {1} = {2}, which Setup cannot read. Setup leaves the file as it is."] = "Tiedostossa {0} on {1} = {2}, jota asennusohjelma ei osaa lukea. Asennusohjelma jättää tiedoston ennalleen.",
@@ -243,7 +243,7 @@ public static partial class Strings
         ["Fewer stutters; choose it if the game misbehaves with the bridge."] = "Vähemmän nykimistä; valitse se, jos peli toimii huonosti sillan kanssa.",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
             "Jättää noin 600 Mt enemmän muistia vapaaksi suurille maailmoille. Vaatii Vulkania tukevan näytönohjaimen. Jos peli toimii sen kanssa huonosti, valitse DXVK.",
-        ["Works, but Apex Radiance is tested with DXVK."] = "Toimii, mutta Apex Radiance on testattu DXVK:n kanssa.",
+        ["Works, but the RTX Remix bridge or DXVK run Apex Radiance better."] = "Toimii, mutta Apex Radiance toimii paremmin RTX Remix bridgen tai DXVK:n kanssa.",
         ["Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."] =
             "Pelin grafiikka-asetukset voivat palautua oletuksiin kerran. Asennusohjelma säilyttää kopion ja palauttaa sen, jos vaihdat takaisin.",
         ["Fixes for game and graphics settings."] = "Korjauksia pelin ja grafiikan asetuksiin.",

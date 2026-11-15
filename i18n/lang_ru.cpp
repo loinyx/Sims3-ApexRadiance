@@ -761,7 +761,7 @@ const I18n::Pair kPairs[] = {
     {"Choose your shortcuts", "Выберите сочетания клавиш"},
     {"Recommended for Apex Radiance", "Рекомендуется для Apex Radiance"},
     {"For the mod to work at its best", "Чтобы мод работал наилучшим образом"},
-    {"Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it.", "Запускает игру на Vulkan: меньше рывков, а Apex Radiance создаётся и тестируется именно с ним."},
+    {"Runs the game on Vulkan through the RTX Remix bridge: fewer stutters and about 600 MB more free memory for big worlds. If the game misbehaves with it or your graphics card cannot run it, use DXVK.", "Запускает игру на Vulkan через RTX Remix bridge: меньше рывков и примерно на 600 МБ больше свободной памяти для больших миров. Если игра работает с ним неправильно или ваша видеокарта не может его запустить, используйте DXVK."},
     {"Opens the DXVK releases page on GitHub in your browser", "Открывает страницу релизов DXVK на GitHub в браузере"},
     {"Choose keys for the menu and Apex actions", "Выберите клавиши для меню и действий Apex"},
     {"Choose a preset or click a shortcut to edit it", "Выберите набор или нажмите на сочетание, чтобы изменить его"},

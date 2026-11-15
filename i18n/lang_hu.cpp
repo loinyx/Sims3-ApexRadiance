@@ -761,7 +761,7 @@ const I18n::Pair kPairs[] = {
     {"Choose your shortcuts", "Válaszd ki a gyorsbillentyűidet"},
     {"Recommended for Apex Radiance", "Ajánlott az Apex Radiance-hez"},
     {"For the mod to work at its best", "Hogy a mod a legjobban működjön"},
-    {"Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it.", "Vulkanon futtatja a játékot: kevesebb akadás, és az Apex Radiance ezzel készül és ezzel van tesztelve."},
+    {"Runs the game on Vulkan through the RTX Remix bridge: fewer stutters and about 600 MB more free memory for big worlds. If the game misbehaves with it or your graphics card cannot run it, use DXVK.", "Az RTX Remix bridge-en keresztül Vulkanon futtatja a játékot: kevesebb akadás és kb. 600 MB-tal több szabad memória a nagy világokhoz. Ha a játék rosszul működik vele, vagy a videokártyád nem tudja futtatni, használd a DXVK-t."},
     {"Opens the DXVK releases page on GitHub in your browser", "Megnyitja a böngészőben a DXVK kiadási oldalát a GitHubon"},
     {"Choose keys for the menu and Apex actions", "Gombok kiválasztása a menühöz és az Apex műveletekhez"},
     {"Choose a preset or click a shortcut to edit it", "Válassz egy előbeállítást, vagy kattints egy gyorsbillentyűre a szerkesztéshez"},

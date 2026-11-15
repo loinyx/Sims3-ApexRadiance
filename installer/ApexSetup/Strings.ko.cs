@@ -166,7 +166,7 @@ public static partial class Strings
         ["Depth Blur"] = "심도 흐림",
         ["Ambient Occlusion"] = "앰비언트 오클루전",
         ["Water Reflections"] = "물 반사",
-        ["Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it."] = "게임을 Vulkan으로 실행해요: 끊김이 줄고, Apex Radiance는 이것으로 만들고 테스트했어요.",
+        ["Runs the game on Vulkan through the RTX Remix bridge: fewer stutters and about 600 MB more free memory for big worlds. If the game misbehaves with it or your graphics card cannot run it, use DXVK."] = "RTX Remix bridge를 통해 게임을 Vulkan으로 실행해요: 끊김이 줄고 큰 월드를 위한 여유 메모리가 약 600MB 늘어나요. 게임이 제대로 작동하지 않거나 그래픽 카드가 실행할 수 없다면 DXVK를 사용하세요.",
         ["Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings."] = "Apex Radiance는 단독으로 작동하지만 sims3fiend의 Sims3SettingsSetter와 함께 쓰면 좋아요: 프레임 제한, 끊김 감소, 다양한 추가 게임 설정.",
         ["Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds."] = "DXVK를 별도의 64비트 프로세스로 옮겨요. 게임의 여유 메모리가 약 600MB 늘어나 긴 플레이와 큰 월드에 도움이 돼요.",
         ["{0} has {1} = {2}, which Setup cannot read. Setup leaves the file as it is."] = "{0}의 {1} = {2} 값을 설치 프로그램이 읽을 수 없어요. 설치 프로그램은 파일을 그대로 둬요.",
@@ -244,7 +244,7 @@ public static partial class Strings
         ["Fewer stutters; choose it if the game misbehaves with the bridge."] = "끊김이 줄어듭니다. 브리지로 게임이 제대로 작동하지 않으면 이것을 선택하세요.",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
             "큰 월드를 위해 약 600 MB의 메모리를 더 비워 둬요. Vulkan을 지원하는 그래픽 카드가 필요해요. 게임에 문제가 생기면 DXVK를 선택하세요.",
-        ["Works, but Apex Radiance is tested with DXVK."] = "작동하지만 Apex Radiance는 DXVK로 테스트했어요.",
+        ["Works, but the RTX Remix bridge or DXVK run Apex Radiance better."] = "작동하지만 RTX Remix bridge나 DXVK에서 Apex Radiance가 더 잘 실행돼요.",
         ["Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."] =
             "게임 내 그래픽 설정이 한 번 초기화될 수 있어요. 설치 프로그램이 사본을 보관했다가 다시 바꾸면 되돌려요.",
         ["Fixes for game and graphics settings."] = "게임 및 그래픽 설정 수정.",

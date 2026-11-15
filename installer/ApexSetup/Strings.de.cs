@@ -171,7 +171,7 @@ public static partial class Strings
         ["Depth Blur"] = "Tiefenunschärfe",
         ["Ambient Occlusion"] = "Umgebungsverdeckung",
         ["Water Reflections"] = "Wasserspiegelungen",
-        ["Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it."] = "Lässt das Spiel über Vulkan laufen: weniger Ruckler, und Apex Radiance wird damit entwickelt und getestet.",
+        ["Runs the game on Vulkan through the RTX Remix bridge: fewer stutters and about 600 MB more free memory for big worlds. If the game misbehaves with it or your graphics card cannot run it, use DXVK."] = "Lässt das Spiel über die RTX Remix bridge auf Vulkan laufen: weniger Ruckler und etwa 600 MB mehr freier Speicher für große Welten. Wenn das Spiel damit Probleme macht oder deine Grafikkarte sie nicht ausführen kann, nutze DXVK.",
         ["Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings."] = "Apex Radiance funktioniert allein, passt aber gut zu Sims3SettingsSetter von sims3fiend: ein Framerate-Limiter, weniger Ruckler und viele zusätzliche Spieleinstellungen.",
         ["Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds."] = "Verlegt DXVK in einen eigenen 64-Bit-Prozess: das Spiel behält etwa 600 MB mehr freien Speicher für lange Sitzungen und große Welten.",
         ["{0} has {1} = {2}, which Setup cannot read. Setup leaves the file as it is."] = "{0} hat {1} = {2}, was Setup nicht lesen kann. Setup lässt die Datei, wie sie ist.",
@@ -253,7 +253,7 @@ public static partial class Strings
             "Weniger Ruckler; wähle es, wenn das Spiel mit der Bridge Probleme macht.",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
             "Hält etwa 600 MB mehr Speicher für große Welten frei. Braucht eine Grafikkarte mit Vulkan. Läuft das Spiel damit nicht rund, wähle DXVK.",
-        ["Works, but Apex Radiance is tested with DXVK."] = "Funktioniert, aber Apex Radiance wird mit DXVK getestet.",
+        ["Works, but the RTX Remix bridge or DXVK run Apex Radiance better."] = "Funktioniert, aber mit der RTX Remix bridge oder DXVK läuft Apex Radiance besser.",
         ["Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."] =
             "Deine Grafikeinstellungen im Spiel werden eventuell einmal zurückgesetzt. Setup bewahrt eine Kopie auf und stellt sie wieder her, wenn du zurückwechselst.",
         ["Fixes for game and graphics settings."] = "Korrekturen für Spiel- und Grafikeinstellungen.",

@@ -761,7 +761,7 @@ const I18n::Pair kPairs[] = {
     {"Choose your shortcuts", "เลือกปุ่มลัดของคุณ"},
     {"Recommended for Apex Radiance", "แนะนำสำหรับ Apex Radiance"},
     {"For the mod to work at its best", "เพื่อให้ม็อดทำงานได้ดีที่สุด"},
-    {"Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it.", "รันเกมบน Vulkan: กระตุกน้อยลง และ Apex Radiance สร้างและทดสอบกับสิ่งนี้"},
+    {"Runs the game on Vulkan through the RTX Remix bridge: fewer stutters and about 600 MB more free memory for big worlds. If the game misbehaves with it or your graphics card cannot run it, use DXVK.", "รันเกมบน Vulkan ผ่าน RTX Remix bridge: กระตุกน้อยลงและมีหน่วยความจำว่างเพิ่มราว 600 MB สำหรับโลกขนาดใหญ่ หากเกมทำงานผิดปกติหรือการ์ดจอของคุณรันไม่ได้ ให้ใช้ DXVK"},
     {"Opens the DXVK releases page on GitHub in your browser", "เปิดหน้ารุ่นของ DXVK บน GitHub ในเบราว์เซอร์"},
     {"Choose keys for the menu and Apex actions", "เลือกปุ่มสำหรับเมนูและการกระทำของ Apex"},
     {"Choose a preset or click a shortcut to edit it", "เลือกชุดปุ่มสำเร็จรูปหรือคลิกปุ่มลัดเพื่อแก้ไข"},
