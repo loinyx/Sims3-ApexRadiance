@@ -2951,7 +2951,7 @@ public:
                     if (ApexUi::ActionMenuItem("Open the Shaders folder", IconId::FolderOpen)) { ShowShadersFolder(); ImGui::CloseCurrentPopup(); }
                     if (ApexUi::ActionMenuItem("Check again", IconId::RotateCcw))
                     {
-                        Looks::Fx::RequestScan(true); // look in the Shaders folder again and compile what changed
+                        Looks::Fx::RequestScan(); // look in the Shaders folder again and compile what changed
                         g_checkPending = true;
                         g_fxMessage.clear();
                         g_fxMessagePacks = false;
@@ -3069,7 +3069,7 @@ public:
             ApexUi::CardHeader(IconId::Package, "Installed packs", sub.c_str(), nullptr, nullptr, true, &extra);
             if (extra.clicked)
             {
-                Looks::Fx::RequestScan(true); // the Shaders folder and the packs, compiled again where they changed
+                Looks::Fx::RequestScan(); // the Shaders folder and the packs, compiled again where they changed
                 g_checkPending = true;
                 g_fxMessage.clear();
                 g_fxMessagePacks = true;
