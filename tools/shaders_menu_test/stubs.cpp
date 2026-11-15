@@ -38,6 +38,7 @@ namespace D3D9Hooks {
 bool RegisterDrawIndexedPrimitive(const std::string&, DrawIndexedPrimitiveHook, Priority) { return true; }
 bool RegisterDrawPrimitive(const std::string&, DrawPrimitiveHook, Priority) { return true; }
 bool RegisterSetRenderTarget(const std::string&, SetRenderTargetHook, Priority) { return true; }
+bool RegisterSetViewport(const std::string&, SetViewportHook, Priority) { return true; }
 bool RegisterPresent(const std::string&, PresentHook, Priority) { return true; }
 void UnregisterAll(const std::string&) {}
 HRESULT CallOriginalSetRenderTarget(IDirect3DDevice9*, DWORD, IDirect3DSurface9*) { return S_OK; }

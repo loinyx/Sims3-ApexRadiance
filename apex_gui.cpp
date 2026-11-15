@@ -1282,6 +1282,36 @@ void ShadersLookContent() {
         }
         ApexUi::Gap(ApexUi::kSpace3);
     }
+    // a look shader that does what an Apex feature already does (ambient shade, depth blur, edge smoothing): applied twice,
+    // darker or softer than the preset was made for, and twice the cost; one note, with the Apex feature's switch
+    if (patch->IsEnabled() && !search) {
+        struct Twin { const char* feature; const char* shown; const char* note; std::vector<const char*> words; };
+        static const Twin kTwins[] = {
+            {"AmbientOcclusion", "Ambient Occlusion", "{} adds its own ambient shade; Apex's Ambient Occlusion is on too", {"mxao", "ssao", "ssdo", "hbao", "gtao", "ambientocclusion"}},
+            {"DepthBlur", "Depth Blur", "{} adds its own depth blur; Apex's Depth Blur is on too", {"dof", "bokeh", "depthoffield"}},
+            {"EdgeSmoothing", "Edge Smoothing", "{} smooths edges too; Apex's Edge Smoothing is on too", {"smaa", "fxaa"}},
+        };
+        const std::vector<std::string> running = Looks::RunningTechniques();
+        for (const Twin& t : kTwins) {
+            ApexPatch* apex = Find(t.feature);
+            if (!apex || !apex->IsEnabled()) continue;
+            auto it = std::find_if(running.begin(), running.end(), [&](const std::string& tech) {
+                std::string low = tech;
+                for (char& c : low) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+                return std::any_of(t.words.begin(), t.words.end(), [&](const char* w) { return low.find(w) != std::string::npos; });
+            });
+            if (it == running.end()) continue;
+            ImGui::PushID(t.feature);
+            ApexUi::IconNote(IconId::Info, I18n::Trf(t.note, *it).c_str());
+            const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+            if (ApexUi::TextButton(I18n::Trf("Turn off {}", I18n::Tr(t.shown)).c_str())) {
+                SetPatch(apex, false);
+                ApexUi::ReportChange(I18n::Trf("{} turned off", I18n::Tr(t.shown)).c_str());
+            }
+            ImGui::PopID();
+            ApexUi::Gap(ApexUi::kSpace3);
+        }
+    }
     if (patch->IsEnabled() || search) Looks::ShadersCard();
 }
 

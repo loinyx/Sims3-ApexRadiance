@@ -2681,6 +2681,11 @@ Checking the file…	tr_image.cpp:kEntries	Verificando o arquivo…	Comprobando 
 Not in your Shaders folder	tr_image.cpp:kEntries	Não está na sua pasta Shaders	No está en tu carpeta Shaders	Absent de votre dossier Shaders	
 Doesn't run in The Sims 3	tr_image.cpp:kEntries	Não roda no The Sims 3	No funciona en The Sims 3	Ne fonctionne pas dans Les Sims 3	
 Beta	tr_image.cpp:kEntries	Beta	Beta	Bêta	
+{} measures the whole picture: with World only its tone differs from ReShade; World and menus matches it	tr_image.cpp:kEntries	{} mede a imagem inteira: com Só o mundo o tom fica diferente do ReShade; Mundo e menus fica igual	{} mide la imagen entera: con Solo el mundo el tono difiere de ReShade; Mundo y menús coincide	{} mesure toute l'image : avec Monde seulement, la teinte diffère de ReShade ; Monde et menus lui correspond	{}
+{} adds its own ambient shade; Apex's Ambient Occlusion is on too	tr_image.cpp:kEntries	{} adiciona a própria sombra ambiente; a Oclusão de Ambiente do Apex também está ligada	{} añade su propia sombra ambiental; la Oclusión Ambiental de Apex también está activada	{} ajoute sa propre ombre ambiante ; l'Occlusion Ambiante d'Apex est aussi activée	{}
+{} adds its own depth blur; Apex's Depth Blur is on too	tr_image.cpp:kEntries	{} adiciona o próprio desfoque de profundidade; o Desfoque de Profundidade do Apex também está ligado	{} añade su propio desenfoque de profundidad; el Desenfoque de Profundidad de Apex también está activado	{} ajoute son propre flou de profondeur ; le Flou de Profondeur d'Apex est aussi activé	{}
+{} smooths edges too; Apex's Edge Smoothing is on too	tr_image.cpp:kEntries	{} também suaviza as bordas; a Suavização de Bordas do Apex também está ligada	{} también suaviza los bordes; el Suavizado de Bordes de Apex también está activado	{} lisse aussi les contours ; le Lissage des Bords d'Apex est aussi activé	{}
+Turn off {}	tr_image.cpp:kEntries	Desligar {}	Desactivar {}	Désactiver {}	{}
 This preset needs {} ({})	tr_image.cpp:kEntries	Este preset precisa de {} ({})	Este preajuste necesita {} ({})	Ce préréglage a besoin de {} ({})	{} {}
 This preset needs {}	tr_image.cpp:kEntries	Este preset precisa de {}	Este preajuste necesita {}	Ce préréglage a besoin de {}	{}
 Download them now	tr_image.cpp:kEntries	Baixar agora	Descargarlos ahora	Les télécharger maintenant	

@@ -311,6 +311,8 @@ constexpr int kRSCount = Looks::kSavedRenderStateCount, kSSCount = Looks::kSaved
 constexpr DWORD kSamplers = Looks::kBuiltInSamplers, kAllSamplers = 16;
 constexpr UINT kAllPSConsts = 224, kVSConsts = 256;
 
+bool g_viewportSetSinceRt0 = true; // a SetViewport came after the last SetRenderTarget(0) through the hooks
+
 struct SavedState
 {
     IDirect3DSurface9* rt0 = nullptr; IDirect3DSurface9* ds = nullptr;
@@ -326,6 +328,7 @@ struct SavedState
     std::string failed; // the getters that failed (a D3D9 wrapper such as the RTX Remix bridge may not answer all of them)
     bool okConst = false, okVsConst = false, okView = false, okScissor = false, okStream = false, okFvf = false;
     bool okSamplerStates = false, okRenderStates = false;
+    bool gameViewport = true; // the game set a viewport after binding render target 0 (g_viewportSetSinceRt0 at Capture)
 
     ~SavedState() { if (captured) Restore(captured); else Release(); }
     // builtInConsts: the PS constants the built-in steps write (Looks::PsConstsUsed)
@@ -362,6 +365,7 @@ struct SavedState
             okVsConst = note(SUCCEEDED(dev->GetVertexShaderConstantF(0, vsConst, kVSConsts)), "GetVertexShaderConstantF");
             for (DWORD r = 0; r < 3; ++r) if (FAILED(dev->GetRenderTarget(r + 1, &rtN[r]))) rtN[r] = nullptr; // NOTFOUND: none bound
         }
+        gameViewport = g_viewportSetSinceRt0;
         okView = note(SUCCEEDED(dev->GetViewport(&viewport)), "GetViewport");
         okScissor = note(SUCCEEDED(dev->GetScissorRect(&scissor)), "GetScissorRect");
         if (!failed.empty()) { static bool once = false; if (!once) { once = true; LOG_WARNING("[Looks] device getters that failed (not restored by hand): " + failed); } }
@@ -388,8 +392,16 @@ struct SavedState
         dev->SetVertexShader(vs);
         if (decl) dev->SetVertexDeclaration(decl); else if (okFvf) dev->SetFVF(fvf);
         if (okStream) dev->SetStreamSource(0, stream0, stream0Offset, stream0Stride); // DrawPrimitiveUP clears stream 0
-        if (okView) dev->SetViewport(&viewport);
-        if (okScissor) dev->SetScissorRect(&scissor);
+        // Untouched since render target 0 was bound: SetRenderTarget(rt0) above already gave the whole target. An RTX Remix
+        // client without bridge patch 0011 answers the bloom's small viewport there; putting it back drew the game's next
+        // back-buffer draws into the top-left corner (dark squares with the look after the bloom)
+        // shortcut: the scissor follows the viewport flag (SetScissorRect is not hooked in public builds)
+        g_viewportSetSinceRt0 = gameViewport; // (a player's pass sets its own viewport through the hooks)
+        if (gameViewport)
+        {
+            if (okView) dev->SetViewport(&viewport);
+            if (okScissor) dev->SetScissorRect(&scissor);
+        }
         Release();
     }
     void Release()
@@ -2465,7 +2477,11 @@ public:
             return D3D9Hooks::HookAction::Continue;
         }, D3D9Hooks::Priority::First);
         D3D9Hooks::RegisterSetRenderTarget("Looks", [](D3D9Hooks::DeviceContext&, DWORD index, IDirect3DSurface9* rt) {
-            if (index == 0) g_curRT0 = rt;
+            if (index == 0) g_curRT0 = rt, g_viewportSetSinceRt0 = false;
+            return D3D9Hooks::HookAction::Continue;
+        }, D3D9Hooks::Priority::First);
+        D3D9Hooks::RegisterSetViewport("Looks", [](D3D9Hooks::DeviceContext&, const D3DVIEWPORT9*) {
+            g_viewportSetSinceRt0 = true;
             return D3D9Hooks::HookAction::Continue;
         }, D3D9Hooks::Priority::First);
         // after PostScene's draw hooks (Priority::First), which run the scene boundary on the same draw
@@ -2632,6 +2648,20 @@ public:
             g.onUi = applies == 0;
             changed = true;
         }
+        // a shader that measures the whole picture (reduces it to a few pixels: auto colour, exposure, levels) sees the menus
+        // in ReShade and in World and menus, not in World only: there its tone differs, and the player is told which mode
+        // matches ReShade
+        if (!g.onUi && !ApexUi::FilterActive())
+            for (size_t i = 0; i < g.order.size(); ++i)
+            {
+                if (!Runnable(i) || IsOff(i) || !Looks::IsUserShader(g.order[i].shader)) continue;
+                const Looks::Fx::Effect* fx = Looks::Fx::UserEffect(g.order[i].shader - Looks::kUserShaderBase);
+                if (!fx || std::none_of(fx->textures.begin(), fx->textures.end(), [](const Looks::Fx::Texture& t) {
+                        return t.image.empty() && t.semantic.empty() && t.w * t.h <= 64; })) continue;
+                ApexUi::IconNote(IconId::Info, I18n::Trf("{} measures the whole picture: with World only its tone differs from ReShade; World and menus matches it",
+                                                         g.order[i].technique).c_str());
+                break;
+            }
         if (ApexUi::BeginAdvanced("##LooksAdvanced"))
         {
             static const char* const kOrder[] = { "After Apex Color", "Before Apex Color" };
@@ -2983,6 +3013,15 @@ void OfferPresetPacks(const std::string& preset, const std::vector<std::string>&
     offer.preset = true;
     offer.packs = MissingPresetPacks(packNames);
     if (!offer.packs.empty()) g_offer = std::move(offer);
+}
+
+std::vector<std::string> RunningTechniques()
+{
+    std::vector<std::string> out;
+    if (!g.active) return out;
+    for (size_t i = 0; i < g.order.size(); ++i)
+        if (Runnable(i) && !IsOff(i)) out.push_back(g.order[i].technique);
+    return out;
 }
 
 std::vector<std::string> NeededPacks()

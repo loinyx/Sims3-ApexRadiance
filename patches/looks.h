@@ -34,5 +34,7 @@ std::vector<std::string> MissingPresetPacks(const std::vector<std::string>& pack
 void DownloadPresetPacks(const std::vector<std::string>& folders);
 // The names of the packs whose shaders the look's run list uses (downloaded or not), for a preset's [patches.Looks] packs
 std::vector<std::string> NeededPacks();
+// The techniques of the look that run now (switched on and runnable), for the Shaders page's notes
+std::vector<std::string> RunningTechniques();
 
 } // namespace Looks
