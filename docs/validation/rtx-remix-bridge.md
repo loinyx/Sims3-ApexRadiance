@@ -15,6 +15,8 @@ before its hand-over to Apex Radiance (rodneypantonial/sims3-modernization#316).
 | `render-still` | Fixed scene: 90 s still at the save's camera, then 90 s at a town overview, ABBA | the same harness | The game, a GPU |
 | `dxvkx` (scratch test app: an x86 window process and an x64 Desktop Duplication probe) | Present-to-desktop and key-to-desktop latency, 20 s runs, ABBA x2, V-Sync at 240 Hz | | A GPU |
 | `tools/memory/nt-heap.py` (read-only heap walk) | The client's process heap by bucket | every 10 min in al325 | |
+| `test_rewind_server` (patch 0015) | Rewind mode, server side, on a D3D9 device without a client: handle tables, deferred destroys, kept contents, render target and depth contents, device state, query answers, the memory limit, every refusal, a rewind that fails part-way, no reference left on the device | `native\remix-bridge\test-rewind.cmd` | A GPU |
+| `test_rewind_device` (patch 0015) | Rewind mode through the built bridge pair from a 32-bit test app: the park at `Present`, snapshot, plan and drop, another thread kept from sending while parked; and with the mode off, that nothing is published | the same | A GPU |
 
 ## Latest results
 
@@ -124,6 +126,14 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
 | 2026-11-13 | release/3.2.2 c2697794, standard flavour | The same with Sims3SettingsSetter, the whole route (orbits, a pan over 8 lots, 7 min) | pass, no error in the log; `Second device asked with Turbo.asi loaded` once; 107 shaders from the ASI, 0 to compile |
 | 2026-11-13 | release/3.2.2 c2697794, standard flavour | Without Turbo, same route | pass, no error, one device as before |
 
+### Rewind mode (patch 0015)
+
+| Date | Build | Check | Result |
+|---|---|---|---|
+| 2026-11-15 | patch 0015 on f35b86a with 0001 to 0014, `build.cmd` from a fresh fetch | `test_rewind_server` on the system's d3d9.dll and on DXVK (`d3d9vk_x64.dll` of the 4.0.1 package), NVIDIA GPU | 49 checks pass on each: tables and a reused id, contents of buffers, textures, render targets, the back buffer and the depth surface, device state, query answers, two rewinds to one snapshot, the memory limit, the refusals, `E_ABORT` after a failed write-back, no reference left on the device |
+| 2026-11-15 | the same pair | `test_rewind_device`, mode on and off, 12 runs each | pass: park, snapshot, plan (1 object to revive, 1 to drop), drop; a second thread's command waits for the whole park; with the mode off no cooperation block |
+| 2026-11-15 | the same pair | In game | not run yet, see Open checks |
+
 ## In-game test plan
 
 1. Install the zip into `Game\Bin`, start the game. **Expected:** `Options.ini` kept; Apex's log says `d3d9: RTX Remix
@@ -140,6 +150,10 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
    black quarter on the loading screen; in `Recording.txt`, `scene_target.cpp Resolve: N save(s), 0 STALE` (every
    other pass 0 STALE too). With an older bridge and Apex 3.1.1 STALE can still be counted (it is the client's answer),
    but the quarter stays drawn: the pass restores the FVF set last.
+7. Rewind mode (test harnesses only): add `rewindMode = True` to both `bridge.conf` copies and play. **Expected:** no
+   difference; `bridge32.log` has one `[Rewind] Rewind mode is on` line and `bridge64.log` no `[Rewind]` line until a
+   host asks. With a host tool: snapshot in a loaded world, play 20 s, rewind. **Expected:** the game is back at the
+   moment of the snapshot with the right picture and plays on, or the tool reports a refusal and nothing changed.
 
 ## Confirmed in game
 
@@ -148,6 +162,12 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
 
 ## Open checks
 
+- Rewind mode (patch 0015) in game: the mode on and idle for a session, the numbers of a plan in a loaded world,
+  and one rewind. The rewind Op itself (queue positions, the server's wait for the client) has no offline test:
+  it needs a host that puts the game process back.
+- The 32-bit test apps that run through the bridge (`test_rewind_device`, and upstream's `test_sent_state_device`)
+  ended with an access violation in the client at the first `Present` in their first runs on the test machine,
+  also with the pair built before this change. Every later run passed. The cause is not found.
 - Release 3.1.0 (commit `release: 3.1.0`): the release candidate ran under the bridge in game with Display set to Fullscreen as Borderless; the update card, the bridge guide and the uncompressed-textures card were not each exercised under the bridge on this machine.
 - A report of walls flickering under the bridge with *Street lamps light lots* on (Steam 1.67.2, 3.0.0, session 2026-11-10 10-49-24); not reproduced or explained yet.
 

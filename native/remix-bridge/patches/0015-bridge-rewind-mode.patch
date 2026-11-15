@@ -1,24 +1,44 @@
-0015: rewind mode for test harnesses, off unless bridge.conf sets rewindMode = True in both copies. A test host snapshots the game process and later puts its memory back; the server then returns to the D3D9 state of the snapshot. At the end of a Present the client sends one synchronous Bridge_Rewind command, which leaves both command queues empty, and parks. While a snapshot is held the server defers destroys of the objects alive at it, keeps the old contents of a buffer or surface before the first upload, and on a rewind brings back destroyed objects, lets go of new ones, puts contents, device state and data queue positions back. With the option off no code path changes: the client makes no cooperation block and the server takes no snapshot.
+0015: rewind mode for test harnesses, off unless bridge.conf sets rewindMode = True in both copies. A test host snapshots the game process and later puts its memory back; the server then returns to the D3D9 state of the snapshot, exactly or not at all. At the end of a Present the client parks with the send locks of both channels held, so no other thread of the game can send, and passes each request of the host on as one synchronous Bridge_Rewind command. At a snapshot the server copies its handle tables, the device state and every render target and depth surface. While the snapshot is held it defers destroys of the objects alive at it and keeps the old contents of a buffer or surface before the first write, up to rewindMaxKeptMB. On a rewind it brings back destroyed objects, lets go of new ones, puts contents, device state and data queue positions back, and reads no command until the client's process is back at the snapshot. What it cannot put back exactly makes it give the snapshot up and refuse (server/rewind_mode.h). With the option off the client makes no cooperation block, the server takes no snapshot, and each hook is one test of a flag that is never set. Tests: test/rtx/unit/test_rewind_server.cpp and test_rewind_device.cpp (native/remix-bridge/test-rewind.cmd).
 Applies after 0001-0014 on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only).
 diff --git a/bridge/src/client/d3d9_swapchain.cpp b/bridge/src/client/d3d9_swapchain.cpp
-index a43dd2e4..3d244712 100644
+index a43dd2e4..e6167ef6 100644
 --- a/bridge/src/client/d3d9_swapchain.cpp
 +++ b/bridge/src/client/d3d9_swapchain.cpp
-@@ -26,6 +26,8 @@
+@@ -26,6 +26,9 @@
  #include "d3d9_surfacebuffer_helper.h"
  #include "swapchain_map.h"
  
++#include "util_modulecommand.h"
 +#include "util_rewind.h"
 +
  extern std::mutex gSwapChainMapMutex;
  extern SwapChainMap gSwapChainMap;
  
-@@ -150,6 +152,58 @@ void Direct3DSwapChain9_LSS::onDestroy() {
+@@ -150,6 +153,121 @@ void Direct3DSwapChain9_LSS::onDestroy() {
    ClientMessage c(Commands::IDirect3DSwapChain9_Destroy, getId());
  }
  
++// Returns true once the server has run every command of the bridge and every answer has been read.
++// Waits a moment for another thread that is still reading its answer.
++template<typename BridgeT>
++static bool isQuiet() {
++  const auto& writer = BridgeT::getWriterChannel();
++  for (uint32_t i = 0; i < 250; i++) {
++    if (writer.commands->isEmpty() && BridgeT::getReaderChannel().commands->isEmpty() &&
++        writer.serverDataPos->load() == static_cast<int64_t>(writer.data->get_abs_pos())) {
++      return true;
++    }
++    Sleep(1);
++  }
++  return false;
++}
++
 +// Rewind mode (util_rewind.h). Runs at the end of a Present with gPresentMutex held.
-+// Each op the host writes is sent to the server and waited for, then op is cleared as the acknowledgement.
++//
++// Nothing limits D3D9 calls to this thread: each command only takes its channel's send lock, and Present does not take
++// the device lock. So the park holds the send locks of both bridges, which stops every other sender at its next command.
++// It lets go of the device bridge's lock only to send its own command, and checks afterwards that no other thread sent.
++// Each Op the host writes is sent to the server and waited for, then op is cleared as the acknowledgement.
 +static void parkForRewind() {
 +  using namespace bridge_util::rewind;
 +  static Coop* const pCoop = createCoop();
@@ -29,50 +49,94 @@ index a43dd2e4..3d244712 100644
 +  const auto wanted = [&]() {
 +    return pCoop->request || (pCoop->parkAtTick && tick >= pCoop->parkAtTick);
 +  };
++  if (!wanted()) {
++    return;
++  }
++
++  std::unique_lock moduleLock(ModuleBridge::getWriterChannel().m_mutex);
++  std::unique_lock deviceLock(DeviceBridge::getWriterChannel().m_mutex);
++  // True in the run that asked for a rewind. A process put back to its snapshot holds false again.
++  bool rewound = false;
++
++  // Sends one Op and returns the server's answer, or a negative number when none came.
++  const auto send = [&](const uint32_t op, UID& uid) {
++    int32_t result = -1;
++    {
++      ClientMessage c(Commands::Bridge_Rewind, 0);
++      uid = c.get_uid();
++      c.send_data(op);
++    }
++    if (Result::Success == DeviceBridge::waitForCommand(Commands::Bridge_Response, GlobalOptions::getCommandTimeout(), nullptr, true, uid)) {
++      result = static_cast<int32_t>(DeviceBridge::get_data());
++      for (uint32_t i = 0; i < kStatCount; i++) {
++        pCoop->bridgeStats[i] = static_cast<uint32_t>(DeviceBridge::get_data());
++      }
++      DeviceBridge::consumeResponse();
++      // The server sets its queue positions after its answer.
++      if (WaitForSingleObject(events().done, 15'000) != WAIT_OBJECT_0) {
++        result = -2;
++      }
++    }
++    return result;
++  };
++
 +  const auto runOp = [&]() {
 +    const uint32_t op = pCoop->op;
 +    if (!op) {
 +      return;
 +    }
 +    int32_t result = -1;
-+    if (gbBridgeRunning) {
-+      UID currentUID = 0;
-+      {
-+        ClientMessage c(Commands::Bridge_Rewind, 0);
-+        currentUID = c.get_uid();
-+        c.send_data(op);
-+      }
-+      if (Result::Success == DeviceBridge::waitForCommand(Commands::Bridge_Response, GlobalOptions::getCommandTimeout(), nullptr, true, currentUID)) {
-+        result = (int32_t) DeviceBridge::get_data();
-+        for (uint32_t i = 0; i < kStatCount; i++) {
-+          pCoop->bridgeStats[i] = (uint32_t) DeviceBridge::get_data();
-+        }
-+        DeviceBridge::consumeResponse();
-+        // The server moves its queue positions only after its answer has left the queue.
-+        if (WaitForSingleObject(doneEvent(), 15'000) != WAIT_OBJECT_0) {
-+          result = -2;
++    if (!gbBridgeRunning) {
++      Logger::warn(format_string("[Rewind] Op %u is not sent: the bridge is off.", op));
++    } else if (!isQuiet<ModuleBridge>()) {
++      result = E_FAIL;
++      Logger::warn(format_string("[Rewind] Op %u is refused, nothing was changed: another thread is waiting for a module command.", op));
++    } else {
++      deviceLock.unlock();
++      UID uid = 0;
++      result = send(op, uid);
++      deviceLock.lock();
++      if (op == kRewind) {
++        // What another thread sent since is undone with this process, and the server reads nothing until then.
++        rewound = rewound || result == S_OK;
++      } else if (result == S_OK && (DeviceBridge::Command::get_uid() != uid + 1 || !isQuiet<DeviceBridge>())) {
++        result = E_FAIL;
++        Logger::warn(format_string("[Rewind] Op %u is refused: another thread sent D3D9 commands during the park.", op));
++        if (op == kSnapshot) {
++          // The server's snapshot no longer matches this process.
++          deviceLock.unlock();
++          send(kDrop, uid);
++          deviceLock.lock();
 +        }
 +      }
 +    }
 +    pCoop->bridgeResult = result;
 +    pCoop->op = 0;
 +  };
-+  if (!wanted()) {
-+    return;
-+  }
++
++  // Lets the server read commands again after a rewind. Only a process that was put back to its snapshot gets here
++  // with the event set, and the server waits for it.
++  const auto resume = [&]() {
++    if (!rewound && WaitForSingleObject(events().applied, 0) == WAIT_OBJECT_0) {
++      SetEvent(events().resume);
++    }
++  };
++
 +  runOp();
 +  pCoop->parked = 1;
 +  while (wanted()) {
 +    runOp();
++    resume();
 +    Sleep(1);
 +  }
++  resume();
 +  pCoop->parked = 0;
 +}
 +
  HRESULT Direct3DSwapChain9_LSS::Present(CONST RECT* pSourceRect, CONST RECT* pDestRect,
                                          HWND hDestWindowOverride, CONST RGNDATA* pDirtyRegion,
                                          DWORD dwFlags) {
-@@ -193,6 +247,8 @@ HRESULT Direct3DSwapChain9_LSS::Present(CONST RECT* pSourceRect, CONST RECT* pDe
+@@ -193,6 +311,8 @@ HRESULT Direct3DSwapChain9_LSS::Present(CONST RECT* pSourceRect, CONST RECT* pDe
      return ERROR_SEM_TIMEOUT;
    }
  
@@ -82,17 +146,17 @@ index a43dd2e4..3d244712 100644
  
    FrameMark;
 diff --git a/bridge/src/server/main.cpp b/bridge/src/server/main.cpp
-index fb6c57f4..275c0230 100644
+index fb6c57f4..a4495254 100644
 --- a/bridge/src/server/main.cpp
 +++ b/bridge/src/server/main.cpp
-@@ -20,6 +20,7 @@
-  * DEALINGS IN THE SOFTWARE.
-  */
- #include <windows.h>
-+#include <unordered_set>
- 
+@@ -24,6 +24,7 @@
  #include "version.h"
  #include "module_processing.h"
+ #include "remix_api.h"
++#include "rewind_mode.h"
+ 
+ #include "util_bridge_assert.h"
+ #include "util_circularbuffer.h"
 @@ -38,6 +39,7 @@
  #include "util_perfcounters.h"
  #include "util_process.h"
@@ -101,31 +165,333 @@ index fb6c57f4..275c0230 100644
  #include "util_seh.h"
  #include "util_semaphore.h"
  #include "util_sharedheap.h"
-@@ -182,6 +184,369 @@ static void deserializeFromQueue(SerializableT& serializableT) {
+@@ -182,6 +184,51 @@ static void deserializeFromQueue(SerializableT& serializableT) {
  }
  }
  
-+// Rewind mode (util_rewind.h). Nothing here acts unless a snapshot is held, and none is taken while the mode is off.
-+namespace rewind_mode {
-+  // Contents kept past this size make the snapshot refuse a rewind.
-+  constexpr size_t kMaxSavedBytes = size_t(1) << 30;
++// Rewind mode (util_rewind.h, rewind_mode.h): the Op whose answer was sent. It is finished after its command, once the
++// command's data position has been checked and published.
++static uint32_t gRewindOp = 0;
++static bool gRewindOpSucceeded = false;
 +
-+  enum class Kind { VertexBuffer, IndexBuffer, Surface };
++static void finishRewind() {
++  using namespace bridge_util::rewind;
++  // Data queue positions at the snapshot of the device and module bridges, reader then writer.
++  static size_t pos[4] = {};
++  static uint64_t absPos[4] = {};
++  bridge_util::DataQueue* const queues[4] = {
++    DeviceBridge::getReaderChannel().data, DeviceBridge::getWriterChannel().data,
++    ModuleBridge::getReaderChannel().data, ModuleBridge::getWriterChannel().data,
++  };
++  const uint32_t op = gRewindOp;
++  const bool rewound = op == kRewind && gRewindOpSucceeded;
++  gRewindOp = 0;
++  for (size_t i = 0; i < 4; i++) {
++    if (op == kSnapshot && gRewindOpSucceeded) {
++      pos[i] = queues[i]->get_pos();
++      absPos[i] = queues[i]->get_abs_pos();
++    } else if (rewound) {
++      queues[i]->set_pos(pos[i], absPos[i]);
++    }
++  }
++  if (rewound) {
++    DeviceBridge::publishReadPos();
++    ResetEvent(events().resume);
++    SetEvent(events().applied);
++  }
++  SetEvent(events().done);
++  if (!rewound) {
++    return;
++  }
++  // The client's process is still the abandoned run until its host has put it back to the snapshot.
++  // A command read before that would be run against the wrong state, so the next one is read after the client's signal.
++  const ULONGLONG start = GetTickCount64();
++  while (gbBridgeRunning && WaitForSingleObject(events().resume, 50) != WAIT_OBJECT_0) {
++    if (GetTickCount64() - start >= kResumeTimeoutMs) {
++      Logger::err(format_string("[Rewind] The client did not come back within %lu s of a rewind. Reading commands again.", kResumeTimeoutMs / 1000));
++      break;
++    }
++  }
++}
++
+ static inline void safeDestroy(IUnknown* obj, uint32_t x86handle) {
+   // Note: in DXVK the refcounts of non-standalone objects may go negative!
+   // We need to handle such objects appropriately, even though this is not
+@@ -197,6 +244,9 @@ static inline void safeDestroy(IUnknown* obj, uint32_t x86handle) {
+   }
+ #endif
+ 
++  if (rewind_mode::keeps(obj, x86handle)) {
++    return;
++  }
+   while (obj && static_cast<LONG>(obj->Release()) > 0);
+ }
+ 
+@@ -360,6 +410,7 @@ void ProcessDeviceCommandQueue() {
+ #endif
+       // A Bridge_StatePacket runs this once per record with the packet's device handle and UID.
+       const auto dispatch = [&](const Header& rpcHeader, const uint32_t currentUID) {
++      rewind_mode::note(rpcHeader.command);
+       // The mother of all switch statements - every call in the D3D9 interface is mapped here...
+       switch (rpcHeader.command) {
+       case IDirect3D9Ex_CreateDeviceEx:
+@@ -960,6 +1011,7 @@ void ProcessDeviceCommandQueue() {
+         const auto& pDestinationSurface = (IDirect3DSurface9*) gpD3DResources[pDestHandle];
+         assert(pDestinationSurface != nullptr);
+         if (pSourceSurface != nullptr && pDestinationSurface != nullptr) {
++          rewind_mode::keepSurface(pDestinationSurface);
+           hresult = pD3DDevice->UpdateSurface(IN pSourceSurface, IN pSourceRect, IN pDestinationSurface, IN pDestPoint);
+           assert(SUCCEEDED(hresult));
+         }
+@@ -977,6 +1029,7 @@ void ProcessDeviceCommandQueue() {
+         const auto& pDestinationTexture = (IDirect3DBaseTexture9*) gpD3DResources[pDestinationTextureHandle];
+         assert(pDestinationTexture != nullptr);
+         if (pSourceTexture != nullptr && pDestinationTexture != nullptr) {
++          rewind_mode::keepTexture(pDestinationTexture);
+           hresult = pD3DDevice->UpdateTexture(IN pSourceTexture, IN pDestinationTexture);
+           assert(SUCCEEDED(hresult));
+         }
+@@ -990,6 +1043,7 @@ void ProcessDeviceCommandQueue() {
+         PULL_HND(pDestSurfaceHandle);
+         const auto& pRenderTarget = (IDirect3DSurface9*) gpD3DResources[pRenderTargetHandle];
+         const auto& pDestSurface = (IDirect3DSurface9*) gpD3DResources[pDestSurfaceHandle];
++        rewind_mode::keepSurface(pDestSurface);
+         auto hresult = pD3DDevice->GetRenderTargetData(IN pRenderTarget, IN pDestSurface);
+         hresult = ReturnSurfaceDataToClient(pDestSurface, hresult, currentUID);
+         assert(SUCCEEDED(hresult));
+@@ -1002,6 +1056,7 @@ void ProcessDeviceCommandQueue() {
+         PULL_HND(pDestSurfaceHandle);
+         const auto& pDestSurface = (IDirect3DSurface9*) gpD3DResources[pDestSurfaceHandle];
+         IDirect3DSurface9* pBackbuffer = nullptr;
++        rewind_mode::keepSurface(pDestSurface);
+         auto hresult = pD3DDevice->GetFrontBufferData(IN iSwapChain, IN pDestSurface);
+         hresult = ReturnSurfaceDataToClient(pDestSurface, hresult, currentUID);
+         assert(SUCCEEDED(hresult));
+@@ -1017,6 +1072,7 @@ void ProcessDeviceCommandQueue() {
+         PULL(D3DTEXTUREFILTERTYPE, Filter);
+         const auto& pSourceSurface = (IDirect3DSurface9*) gpD3DResources[pSourceHandle];
+         const auto& pDestSurface = (IDirect3DSurface9*) gpD3DResources[pDestHandle];
++        rewind_mode::keepSurface(pDestSurface);
+         const auto hresult = pD3DDevice->StretchRect(IN pSourceSurface, IN pSourceRect, IN pDestSurface, IN pDestRect, IN Filter);
+         assert(SUCCEEDED(hresult));
+         SEND_OPTIONAL_SERVER_RESPONSE(hresult, currentUID);
+@@ -1029,6 +1085,7 @@ void ProcessDeviceCommandQueue() {
+         PULL_OBJ(RECT, pRect);
+         PULL_OBJ(D3DCOLOR, color);
+         const auto& pSurface = (IDirect3DSurface9*) gpD3DResources[pHandle];
++        rewind_mode::keepSurface(pSurface);
+         const auto hresult = pD3DDevice->ColorFill(IN pSurface, IN pRect, IN * color);
+         assert(SUCCEEDED(hresult));
+         SEND_OPTIONAL_SERVER_RESPONSE(hresult, currentUID);
+@@ -2019,6 +2076,7 @@ void ProcessDeviceCommandQueue() {
+         PULL(DWORD, LODNew);
+         const auto& pResource = gpD3DResources[pHandle];
+         if (pResource != nullptr) {
++          rewind_mode::keepLod((IDirect3DBaseTexture9*) pResource);
+           ((IDirect3DBaseTexture9*) pResource)->SetLOD(LODNew);
+         }
+         assert(pResource != nullptr);
+@@ -2249,6 +2307,7 @@ void ProcessDeviceCommandQueue() {
+         const auto& pVolumeTexture = (IDirect3DVolumeTexture9*) gpD3DResources[pHandle];
+         // Now lock the box so we can copy the data into it
+         D3DLOCKED_BOX pLockedVolume;
++        rewind_mode::noteVolumeWrite(pVolumeTexture);
+         auto hresult = pVolumeTexture->LockBox(IN Level, IN & pLockedVolume, IN pBox, IN Flags);
+         assert(S_OK == hresult);
+         // Copy the data over
+@@ -2473,6 +2532,7 @@ void ProcessDeviceCommandQueue() {
+ 
+         // Now lock the buffer so we can copy the data into it
+         void* pbData = nullptr;
++        rewind_mode::keepBuffer<IDirect3DVertexBuffer9, D3DVERTEXBUFFER_DESC>(pVertexBuffer, rewind_mode::Kind::VertexBuffer);
+         auto hresult = pVertexBuffer->Lock(IN OffsetToLock, IN SizeToLock, IN & pbData, IN Flags);
+         assert(S_OK == hresult);
+         if (SUCCEEDED(hresult) && pbData != nullptr) {
+@@ -2573,6 +2633,7 @@ void ProcessDeviceCommandQueue() {
+ 
+         // Now lock the buffer so we can copy the data into it
+         void* pbData = nullptr;
++        rewind_mode::keepBuffer<IDirect3DIndexBuffer9, D3DINDEXBUFFER_DESC>(pIndexBuffer, rewind_mode::Kind::IndexBuffer);
+         auto hresult = pIndexBuffer->Lock(IN OffsetToLock, IN SizeToLock, IN & pbData, IN Flags);
+         assert(S_OK == hresult);
+         if (SUCCEEDED(hresult) && pbData != nullptr) {
+@@ -2676,6 +2737,7 @@ void ProcessDeviceCommandQueue() {
+           if (pSurface == nullptr) {
+             break;
+           }
++          rewind_mode::keepSurface(pSurface);
+           D3DLOCKED_RECT lockedRect;
+           auto hresult = pSurface->LockRect(OUT & lockedRect, IN pRect, IN Flags);
+           assert(S_OK == hresult);
+@@ -2707,6 +2769,7 @@ void ProcessDeviceCommandQueue() {
+             gPendingSurfaceLocks.erase(stale);
+           }
+           if (pSurface != nullptr) {
++            rewind_mode::keepSurface(pSurface);
+             D3DLOCKED_RECT lockedRect;
+             const auto hresult = pSurface->LockRect(OUT & lockedRect, IN pRect, IN Flags);
+             assert(S_OK == hresult);
+@@ -2810,6 +2873,7 @@ void ProcessDeviceCommandQueue() {
+         const auto& pVolume = gpD3DVolumes[pHandle];
+         // Now lock the box so we can copy the data into it
+         D3DLOCKED_BOX pLockedVolume;
++        rewind_mode::noteVolumeWrite(pVolume);
+         auto hresult = pVolume->LockBox(IN & pLockedVolume, IN pBox, IN Flags);
+         assert(S_OK == hresult);
+         // Copy the data over
+@@ -2870,6 +2934,7 @@ void ProcessDeviceCommandQueue() {
+         GET_HND(pHandle);
+         PULL(DWORD, dwIssueFlags);
+         const auto pQuery = gpD3DQuery[pHandle];
++        rewind_mode::noteIssue(pQuery);
+         const HRESULT hresult = (pQuery != nullptr) ? pQuery->Issue(dwIssueFlags) : D3DERR_INVALIDCALL;
+         SEND_OPTIONAL_SERVER_RESPONSE(hresult, currentUID);
+         break;
+@@ -2882,7 +2947,8 @@ void ProcessDeviceCommandQueue() {
+         const auto pQuery = gpD3DQuery[pHandle];
+         std::vector<uint8_t> data(dwSize);
+         void* pData = dwSize > 0 ? data.data() : nullptr;
+-        const HRESULT hresult = (pQuery != nullptr) ? pQuery->GetData(pData, dwSize, dwGetDataFlags) : D3DERR_INVALIDCALL;
++        const HRESULT hresult = rewind_mode::queryData(pQuery, pData, dwSize,
++          (pQuery != nullptr) ? pQuery->GetData(pData, dwSize, dwGetDataFlags) : D3DERR_INVALIDCALL);
+ 
+         if (Commands::IsAsyncResult(rpcHeader.flags)) {
+           // The sequence number is published after the result.
+@@ -2954,6 +3020,34 @@ void ProcessDeviceCommandQueue() {
+         SharedHeap::deallocate(allocId);
+         break;
+       }
++      case Bridge_Rewind:
++      {
++        PULL_U(op);
++        uint32_t stats[bridge_util::rewind::kStatCount] = {};
++        HRESULT hresult = E_NOTIMPL;
++        if (bridge_util::rewind::enabled()) {
++          const char* pBusy = nullptr;
++          if (!gPendingSurfaceLocks.empty()) {
++            pBusy = "a surface upload is in progress";
++          } else if (GlobalOptions::getUseSharedHeap()) {
++            pBusy = "the shared heap (useSharedHeap) is not covered";
++          } else if (!gMapRemixApi.empty()) {
++            pBusy = "Remix API objects are not covered";
++          }
++          rewind_mode::gMaxKeptBytes = size_t(GlobalOptions::getRewindMaxKeptMB()) << 20;
++          hresult = rewind_mode::run(op, stats, pBusy);
++        }
++        {
++          ServerMessage c(Commands::Bridge_Response, currentUID);
++          c.send_data(hresult);
++          for (const uint32_t stat : stats) {
++            c.send_data(stat);
++          }
++        }
++        gRewindOp = op;
++        gRewindOpSucceeded = hresult == S_OK;
++        break;
++      }
+       case Bridge_UnlinkResource:
+       {
+         GET_HND(pHandle);
+@@ -3400,6 +3494,10 @@ void ProcessDeviceCommandQueue() {
+       }
+     }
+ 
++    if (gRewindOp) {
++      finishRewind();
++    }
++
+     const auto count = DeviceBridge::end_read_data();
+ 
+     if (perfStart != 0) {
+diff --git a/bridge/src/server/meson.build b/bridge/src/server/meson.build
+index 908d93fb..4d418be8 100644
+--- a/bridge/src/server/meson.build
++++ b/bridge/src/server/meson.build
+@@ -28,6 +28,7 @@ server_src = files([
+ 
+ server_header = files([
+ 	'module_processing.h',
++	'rewind_mode.h',
+ 	'server_options.h',
+ 	'remix_api.h'
+ ])
+diff --git a/bridge/src/server/rewind_mode.h b/bridge/src/server/rewind_mode.h
+new file mode 100644
+index 00000000..376102b8
+--- /dev/null
++++ b/bridge/src/server/rewind_mode.h
+@@ -0,0 +1,845 @@
++#pragma once
++
++// Rewind mode, server side (util_rewind.h): what the server keeps while a snapshot is held and how it returns to it.
++// The code lives in this header so that test/rtx/unit/test_rewind_server.cpp runs it on a D3D9 device without a client.
++//
++// Every function returns at its first test unless a snapshot is held, and none is taken while the mode is off.
++// A rewind is exact or it does not happen: whatever cannot be put back makes the snapshot refuse, before anything changes.
++
++#include <d3d9.h>
++
++#include <algorithm>
++#include <string>
++#include <unordered_map>
++#include <unordered_set>
++#include <vector>
++
++#include "log/log.h"
++#include "util_commands.h"
++#include "util_rewind.h"
++#include "util_texture_and_volume.h"
++
++// The handle tables of main.cpp.
++extern std::unordered_map<uint32_t, IDirect3DDevice9*> gpD3DDevices;
++extern std::unordered_map<uint32_t, IDirect3DResource9*> gpD3DResources;
++extern std::unordered_map<uint32_t, IDirect3DVolume9*> gpD3DVolumes;
++extern std::unordered_map<uint32_t, IDirect3DVertexDeclaration9*> gpD3DVertexDeclarations;
++extern std::unordered_map<uint32_t, IDirect3DStateBlock9*> gpD3DStateBlocks;
++extern std::unordered_map<uint32_t, IDirect3DVertexShader9*> gpD3DVertexShaders;
++extern std::unordered_map<uint32_t, IDirect3DPixelShader9*> gpD3DPixelShaders;
++extern std::unordered_map<uint32_t, IDirect3DSwapChain9*> gpD3DSwapChains;
++extern std::unordered_map<uint32_t, IDirect3DQuery9*> gpD3DQuery;
++
++namespace rewind_mode {
++  using bridge_util::Logger;
++  using bridge_util::format_string;
++
++  // Bytes a held snapshot may keep alive: kept contents and destroyed objects. Past it the snapshot is given up.
++  inline size_t gMaxKeptBytes = size_t(1) << 30;
++  // The kept bytes are logged each time they grow by this much.
++  constexpr size_t kLogStepBytes = size_t(128) << 20;
++  // Time a snapshot waits for the results of the queries in flight.
++  constexpr ULONGLONG kQueryWaitMs = 500;
++
++  enum class State {
++    None,
++    Held,
++    Refused, // the snapshot was given up: nothing is kept, and each Op answers with the reason
++    Failed,  // a rewind failed part-way: the D3D9 state is undefined
++  };
++
++  enum class Kind { VertexBuffer, IndexBuffer, Surface, Target };
 +
 +  struct Saved {
 +    Kind kind;
-+    std::vector<uint8_t> bytes;
++    std::vector<uint8_t> bytes;         // what a locked buffer or surface held
++    IDirect3DSurface9* pCopy = nullptr; // Kind::Target: a surface on the device with the contents
++    size_t size = 0;
 +  };
 +
 +  struct DeviceState {
 +    IDirect3DStateBlock9* pBlock = nullptr;
 +    IDirect3DSurface9* pTargets[4] = {};
 +    IDirect3DSurface9* pDepthStencil = nullptr;
++    DWORD targetCount = 0;
++    D3DGAMMARAMP gamma = {};
++    BOOL softwareVertexProcessing = FALSE;
 +  };
 +
 +  struct Snapshot {
-+    bool held = false;
-+    std::string refused;
++    State state = State::None;
++    std::string reason;
 +    decltype(gpD3DDevices) devices;
 +    decltype(gpD3DResources) resources;
 +    decltype(gpD3DVolumes) volumes;
@@ -137,21 +503,36 @@ index fb6c57f4..275c0230 100644
 +    decltype(gpD3DQuery) queries;
 +    // Every object alive at the snapshot. A destroy of one of them is deferred, so a rewind can bring it back.
 +    std::unordered_set<IUnknown*> objects;
-+    std::unordered_set<IUnknown*> tombstones;
-+    // What a buffer or surface held at the snapshot, taken before the first upload after it. Each entry holds a reference.
++    // Deferred destroys, with the size each one keeps alive.
++    std::unordered_map<IUnknown*, size_t> tombstones;
++    // What a buffer or surface held at the snapshot. Each entry holds a reference.
++    // Render targets and depth surfaces are copied at the snapshot, the rest before the first write after it.
 +    std::unordered_map<IUnknown*, Saved> saved;
++    // Back buffers of swap chains that discard: D3D9 leaves their contents undefined after a Present, so none are kept.
++    std::unordered_set<IDirect3DSurface9*> discarded;
 +    std::unordered_map<uint32_t, DeviceState> deviceStates;
++    // SetLOD values at the snapshot of the textures whose value changed after it.
++    std::unordered_map<IDirect3DBaseTexture9*, DWORD> lods;
++    // Results at the snapshot of the queries that had one, and the queries whose result was still on its way.
++    std::unordered_map<IDirect3DQuery9*, std::vector<uint8_t>> queryResults;
++    std::unordered_set<IDirect3DQuery9*> queriesPending;
++    // Queries issued again since the snapshot. After a rewind queryAnswers gives them their old result back.
++    std::unordered_set<IDirect3DQuery9*> queriesIssued;
++    std::unordered_map<IDirect3DQuery9*, std::vector<uint8_t>> queryAnswers;
 +    size_t savedBytes = 0;
++    size_t tombstoneBytes = 0;
++    size_t loggedBytes = 0;
 +    uint32_t notRestored = 0;
-+    // Data queue positions of the device and module bridges, reader then writer.
-+    size_t pos[4] = {};
-+    uint64_t absPos[4] = {};
 +  };
 +
-+  static Snapshot gSnapshot;
++  inline Snapshot gSnapshot;
++
++  inline bool held() {
++    return gSnapshot.state == State::Held;
++  }
 +
 +  template<typename Fn>
-+  static void forEachMap(Fn&& fn) {
++  inline void forEachMap(Fn&& fn) {
 +    fn(gpD3DDevices, gSnapshot.devices);
 +    fn(gpD3DResources, gSnapshot.resources);
 +    fn(gpD3DVolumes, gSnapshot.volumes);
@@ -163,164 +544,12 @@ index fb6c57f4..275c0230 100644
 +    fn(gpD3DQuery, gSnapshot.queries);
 +  }
 +
-+  static void refuse(const char* reason) {
-+    if (gSnapshot.refused.empty()) {
-+      gSnapshot.refused = reason;
-+      Logger::warn(format_string("[Rewind] the snapshot can no longer be returned to: %s", reason));
-+    }
-+  }
-+
-+  // Returns true when the object was alive at the snapshot. Its destroy is then deferred.
-+  static bool keeps(IUnknown* pObj) {
-+    if (!gSnapshot.held || pObj == nullptr || gSnapshot.objects.count(pObj) == 0) {
-+      return false;
-+    }
-+    gSnapshot.tombstones.insert(pObj);
-+    return true;
-+  }
-+
-+  // Counts the writes whose old contents are not kept, and the events no rewind can cross.
-+  static void note(const Commands::D3D9Command command) {
-+    if (!gSnapshot.held) {
-+      return;
-+    }
-+    switch (command) {
-+    case IDirect3DDevice9Ex_UpdateSurface:
-+    case IDirect3DDevice9Ex_UpdateTexture:
-+    case IDirect3DDevice9Ex_StretchRect:
-+    case IDirect3DDevice9Ex_ColorFill:
-+    case IDirect3DBaseTexture9_GenerateMipSubLevels:
-+    case IDirect3DSurface9_GetDC:
-+    case IDirect3DVolume9_UnlockBox:
-+      ++gSnapshot.notRestored;
-+      break;
-+    case IDirect3D9Ex_CreateDevice:
-+    case IDirect3D9Ex_CreateDeviceEx:
-+    case IDirect3DDevice9Ex_Reset:
-+    case IDirect3DDevice9Ex_ResetEx:
-+    case IDirect3DDevice9Ex_Destroy:
-+      refuse("a device was made, reset or destroyed after the snapshot");
-+      break;
-+    default:
-+      break;
-+    }
-+  }
-+
-+  static void store(IUnknown* pObj, const Kind kind, const void* pData, const size_t size) {
-+    if (pData == nullptr || gSnapshot.savedBytes + size > kMaxSavedBytes) {
-+      ++gSnapshot.notRestored;
-+      if (pData != nullptr) {
-+        refuse("the contents kept since the snapshot passed 1 GB");
-+      }
-+      return;
-+    }
-+    Saved& saved = gSnapshot.saved[pObj];
-+    saved.kind = kind;
-+    saved.bytes.assign(static_cast<const uint8_t*>(pData), static_cast<const uint8_t*>(pData) + size);
-+    gSnapshot.savedBytes += size;
-+    pObj->AddRef();
-+  }
-+
-+  // Keeps what a buffer holds before the first upload after the snapshot.
-+  template<typename BufferT, typename DescT>
-+  static void keepBuffer(BufferT* pBuffer, const Kind kind) {
-+    if (!gSnapshot.held || pBuffer == nullptr || gSnapshot.objects.count(pBuffer) == 0 || gSnapshot.saved.count(pBuffer) != 0) {
-+      return;
-+    }
-+    DescT desc;
-+    void* pData = nullptr;
-+    if (FAILED(pBuffer->GetDesc(&desc)) || FAILED(pBuffer->Lock(0, 0, &pData, D3DLOCK_READONLY))) {
-+      ++gSnapshot.notRestored;
-+      return;
-+    }
-+    store(pBuffer, kind, pData, desc.Size);
-+    pBuffer->Unlock();
-+  }
-+
-+  // Keeps what a surface holds before the first upload after the snapshot.
-+  // A texture level counts as alive at the snapshot when its texture was.
-+  static void keepSurface(IDirect3DSurface9* pSurface) {
-+    if (!gSnapshot.held || pSurface == nullptr || gSnapshot.saved.count(pSurface) != 0) {
-+      return;
-+    }
-+    IUnknown* pOwner = pSurface;
-+    IDirect3DBaseTexture9* pTexture = nullptr;
-+    if (SUCCEEDED(pSurface->GetContainer(__uuidof(IDirect3DBaseTexture9), reinterpret_cast<void**>(&pTexture))) && pTexture != nullptr) {
-+      pOwner = pTexture;
-+      pTexture->Release();
-+    }
-+    if (gSnapshot.objects.count(pOwner) == 0) {
-+      return;
-+    }
-+    D3DSURFACE_DESC desc;
-+    D3DLOCKED_RECT lockedRect;
-+    if (FAILED(pSurface->GetDesc(&desc)) || FAILED(pSurface->LockRect(&lockedRect, nullptr, D3DLOCK_READONLY))) {
-+      ++gSnapshot.notRestored;
-+      return;
-+    }
-+    store(pSurface, Kind::Surface, lockedRect.pBits, size_t(lockedRect.Pitch) * bridge_util::calcStride(desc.Height, desc.Format));
-+    pSurface->UnlockRect();
-+  }
-+
-+  static void putBack(IUnknown* pObj, const Saved& saved) {
-+    void* pData = nullptr;
-+    switch (saved.kind) {
-+    case Kind::VertexBuffer:
-+    {
-+      const auto pBuffer = static_cast<IDirect3DVertexBuffer9*>(pObj);
-+      if (SUCCEEDED(pBuffer->Lock(0, 0, &pData, 0)) && pData != nullptr) {
-+        memcpy(pData, saved.bytes.data(), saved.bytes.size());
-+        pBuffer->Unlock();
-+      }
-+      break;
-+    }
-+    case Kind::IndexBuffer:
-+    {
-+      const auto pBuffer = static_cast<IDirect3DIndexBuffer9*>(pObj);
-+      if (SUCCEEDED(pBuffer->Lock(0, 0, &pData, 0)) && pData != nullptr) {
-+        memcpy(pData, saved.bytes.data(), saved.bytes.size());
-+        pBuffer->Unlock();
-+      }
-+      break;
-+    }
-+    case Kind::Surface:
-+    {
-+      const auto pSurface = static_cast<IDirect3DSurface9*>(pObj);
-+      D3DLOCKED_RECT lockedRect;
-+      if (SUCCEEDED(pSurface->LockRect(&lockedRect, nullptr, 0)) && lockedRect.pBits != nullptr) {
-+        memcpy(lockedRect.pBits, saved.bytes.data(), saved.bytes.size());
-+        pSurface->UnlockRect();
-+      }
-+      break;
-+    }
-+    }
-+  }
-+
-+  // Lets go of an object made after the snapshot. One Release matches the reference its create left in the map.
-+  // Too few releases leak the object. Too many would free an object the snapshot still needs.
-+  static void drop(IUnknown* pObj) {
-+    pObj->Release();
-+  }
-+
-+  // A texture level belongs to its texture, as with Bridge_UnlinkResource.
-+  static void drop(IDirect3DResource9* pResource) {
-+    if (pResource->GetType() == D3DRTYPE_SURFACE) {
-+      IDirect3DBaseTexture9* pTexture = nullptr;
-+      if (SUCCEEDED(static_cast<IDirect3DSurface9*>(pResource)->GetContainer(__uuidof(IDirect3DBaseTexture9), reinterpret_cast<void**>(&pTexture))) && pTexture != nullptr) {
-+        pTexture->Release();
-+        return;
-+      }
-+    }
-+    pResource->Release();
-+  }
-+
-+  // A volume belongs to its volume texture, as with Bridge_UnlinkVolumeResource.
-+  static void drop(IDirect3DVolume9*) {
-+  }
-+
-+  // Frees what the held snapshot kept alive.
-+  static void release() {
++  // Frees everything the snapshot keeps alive, the deferred destroys included, and forgets the snapshot.
++  inline void release() {
 +    for (auto& [pObj, saved] : gSnapshot.saved) {
++      if (saved.pCopy != nullptr) {
++        saved.pCopy->Release();
++      }
 +      pObj->Release();
 +    }
 +    for (auto& [handle, state] : gSnapshot.deviceStates) {
@@ -336,13 +565,491 @@ index fb6c57f4..275c0230 100644
 +        state.pDepthStencil->Release();
 +      }
 +    }
-+    for (IUnknown* pObj : gSnapshot.tombstones) {
++    for (auto& [pObj, size] : gSnapshot.tombstones) {
 +      while (static_cast<LONG>(pObj->Release()) > 0);
 +    }
 +    gSnapshot = Snapshot();
 +  }
 +
-+  static void take() {
++  // Gives the snapshot up. Callers must not touch what the snapshot kept afterwards.
++  inline void refuse(const std::string& reason) {
++    if (!held()) {
++      return;
++    }
++    release();
++    gSnapshot.state = State::Refused;
++    gSnapshot.reason = reason;
++    Logger::warn(format_string("[Rewind] The snapshot is given up, a rewind to it is refused: %s", reason.c_str()));
++  }
++
++  // Sizes are estimates for the memory limit.
++  inline size_t approxSize(const UINT width, const UINT height, const D3DFORMAT format) {
++    const size_t pixels = size_t(width) * height;
++    switch (static_cast<DWORD>(format)) {
++    case D3DFMT_DXT1:
++    case MAKEFOURCC('A', 'T', 'I', '1'):
++      return pixels / 2;
++    case D3DFMT_DXT2:
++    case D3DFMT_DXT3:
++    case D3DFMT_DXT4:
++    case D3DFMT_DXT5:
++    case MAKEFOURCC('A', 'T', 'I', '2'):
++    case D3DFMT_A8:
++    case D3DFMT_L8:
++    case D3DFMT_P8:
++      return pixels;
++    case D3DFMT_R5G6B5:
++    case D3DFMT_X1R5G5B5:
++    case D3DFMT_A1R5G5B5:
++    case D3DFMT_A4R4G4B4:
++    case D3DFMT_A8L8:
++    case D3DFMT_V8U8:
++    case D3DFMT_L16:
++    case D3DFMT_D16:
++    case D3DFMT_D16_LOCKABLE:
++    case D3DFMT_R16F:
++      return pixels * 2;
++    case D3DFMT_A16B16G16R16:
++    case D3DFMT_A16B16G16R16F:
++    case D3DFMT_G32R32F:
++      return pixels * 8;
++    case D3DFMT_A32B32G32R32F:
++      return pixels * 16;
++    default:
++      return pixels * 4;
++    }
++  }
++
++  inline size_t approxSize(IDirect3DResource9* pResource) {
++    size_t size = 0;
++    switch (pResource->GetType()) {
++    case D3DRTYPE_SURFACE:
++    {
++      D3DSURFACE_DESC desc;
++      if (SUCCEEDED(static_cast<IDirect3DSurface9*>(pResource)->GetDesc(&desc))) {
++        size = approxSize(desc.Width, desc.Height, desc.Format) * std::max<DWORD>(1, desc.MultiSampleType);
++      }
++      break;
++    }
++    case D3DRTYPE_TEXTURE:
++    case D3DRTYPE_CUBETEXTURE:
++    {
++      const bool cube = pResource->GetType() == D3DRTYPE_CUBETEXTURE;
++      const DWORD levels = static_cast<IDirect3DBaseTexture9*>(pResource)->GetLevelCount();
++      for (DWORD level = 0; level < levels; level++) {
++        D3DSURFACE_DESC desc;
++        const HRESULT hresult = cube
++          ? static_cast<IDirect3DCubeTexture9*>(pResource)->GetLevelDesc(level, &desc)
++          : static_cast<IDirect3DTexture9*>(pResource)->GetLevelDesc(level, &desc);
++        if (SUCCEEDED(hresult)) {
++          size += approxSize(desc.Width, desc.Height, desc.Format) * (cube ? 6 : 1);
++        }
++      }
++      break;
++    }
++    case D3DRTYPE_VOLUMETEXTURE:
++    {
++      D3DVOLUME_DESC desc;
++      if (SUCCEEDED(static_cast<IDirect3DVolumeTexture9*>(pResource)->GetLevelDesc(0, &desc))) {
++        size = approxSize(desc.Width, desc.Height, desc.Format) * desc.Depth;
++      }
++      break;
++    }
++    case D3DRTYPE_VERTEXBUFFER:
++    {
++      D3DVERTEXBUFFER_DESC desc;
++      if (SUCCEEDED(static_cast<IDirect3DVertexBuffer9*>(pResource)->GetDesc(&desc))) {
++        size = desc.Size;
++      }
++      break;
++    }
++    case D3DRTYPE_INDEXBUFFER:
++    {
++      D3DINDEXBUFFER_DESC desc;
++      if (SUCCEEDED(static_cast<IDirect3DIndexBuffer9*>(pResource)->GetDesc(&desc))) {
++        size = desc.Size;
++      }
++      break;
++    }
++    default:
++      break;
++    }
++    return size;
++  }
++
++  // Applies the memory limit after the kept bytes grew.
++  inline void account() {
++    const size_t kept = gSnapshot.savedBytes + gSnapshot.tombstoneBytes;
++    if (kept > gMaxKeptBytes) {
++      refuse(format_string("it keeps %zu MB alive (%zu MB of contents, %zu MB of destroyed objects), the limit is %zu MB (rewindMaxKeptMB)",
++                           kept >> 20, gSnapshot.savedBytes >> 20, gSnapshot.tombstoneBytes >> 20, gMaxKeptBytes >> 20));
++    } else if (kept >= gSnapshot.loggedBytes + kLogStepBytes) {
++      gSnapshot.loggedBytes = kept;
++      Logger::info(format_string("[Rewind] The snapshot keeps %zu MB of contents and %zu MB of destroyed objects alive, the limit is %zu MB.",
++                                 gSnapshot.savedBytes >> 20, gSnapshot.tombstoneBytes >> 20, gMaxKeptBytes >> 20));
++    }
++  }
++
++  // Returns true when the object was alive at the snapshot. Its destroy is then deferred, and the caller leaves it alone.
++  inline bool keeps(IUnknown* pObj, const uint32_t handle) {
++    if (!held() || pObj == nullptr || gSnapshot.objects.count(pObj) == 0) {
++      return false;
++    }
++    size_t size = 0;
++    const auto resource = gpD3DResources.find(handle);
++    if (resource != gpD3DResources.end() && resource->second == pObj) {
++      size = approxSize(resource->second);
++    }
++    if (gSnapshot.tombstones.emplace(pObj, size).second) {
++      gSnapshot.tombstoneBytes += size;
++      account();
++    }
++    return true;
++  }
++
++  // Runs before each device command. Gives the snapshot up at a command that no rewind can cross.
++  inline void note(const Commands::D3D9Command command) {
++    if (!held()) {
++      return;
++    }
++    using namespace Commands;
++    switch (command) {
++    case IDirect3D9Ex_CreateDevice:
++    case IDirect3D9Ex_CreateDeviceEx:
++    case IDirect3DDevice9Ex_Reset:
++    case IDirect3DDevice9Ex_ResetEx:
++    case IDirect3DDevice9Ex_Destroy:
++      refuse("a device was made, reset or destroyed after the snapshot");
++      break;
++    case IDirect3DDevice9Ex_SetDialogBoxMode:
++    case IDirect3DBaseTexture9_SetAutoGenFilterType:
++      refuse(format_string("%s after the snapshot is not put back", toString(command).c_str()));
++      break;
++    case IDirect3DDevice9Ex_SetCursorProperties:
++    case IDirect3DDevice9Ex_SetCursorPosition:
++    case IDirect3DDevice9Ex_ShowCursor:
++      // The cursor follows the mouse, which no rewind moves back. Counted for the host.
++      ++gSnapshot.notRestored;
++      break;
++    default:
++      if (command >= RemixApi_CreateMaterial && command <= Bridge_SharedHeap_Dealloc) {
++        refuse(format_string("%s after the snapshot: Remix API objects and the shared heap are not covered", toString(command).c_str()));
++      }
++      break;
++    }
++  }
++
++  inline void store(IUnknown* pObj, const Kind kind, const void* pData, const size_t size) {
++    Saved& saved = gSnapshot.saved[pObj];
++    saved.kind = kind;
++    saved.size = size;
++    saved.bytes.assign(static_cast<const uint8_t*>(pData), static_cast<const uint8_t*>(pData) + size);
++    gSnapshot.savedBytes += size;
++    pObj->AddRef();
++    account();
++  }
++
++  // Keeps what a buffer holds before the first upload after the snapshot.
++  template<typename BufferT, typename DescT>
++  inline void keepBuffer(BufferT* pBuffer, const Kind kind) {
++    if (!held() || pBuffer == nullptr || gSnapshot.objects.count(pBuffer) == 0 || gSnapshot.saved.count(pBuffer) != 0) {
++      return;
++    }
++    DescT desc;
++    void* pData = nullptr;
++    if (FAILED(pBuffer->GetDesc(&desc)) || FAILED(pBuffer->Lock(0, 0, &pData, D3DLOCK_READONLY)) || pData == nullptr) {
++      refuse("a buffer written after the snapshot could not be read first");
++      return;
++    }
++    store(pBuffer, kind, pData, desc.Size);
++    pBuffer->Unlock();
++  }
++
++  // Copies a render target or depth surface on the device. Runs at the snapshot only: later the contents are no longer the snapshot's.
++  inline void keepTarget(IDirect3DSurface9* pSurface) {
++    if (!held() || pSurface == nullptr || gSnapshot.saved.count(pSurface) != 0 || gSnapshot.discarded.count(pSurface) != 0) {
++      return;
++    }
++    D3DSURFACE_DESC desc = {};
++    IDirect3DDevice9* pDevice = nullptr;
++    IDirect3DSurface9* pCopy = nullptr;
++    HRESULT hresult = pSurface->GetDesc(&desc);
++    if (SUCCEEDED(hresult) && desc.MultiSampleType != D3DMULTISAMPLE_NONE) {
++      // A copy between multisampled surfaces may resolve them, which loses the samples.
++      refuse(format_string("a multisampled %ux%u %s cannot be copied exactly", desc.Width, desc.Height,
++                           (desc.Usage & D3DUSAGE_DEPTHSTENCIL) ? "depth surface" : "render target"));
++      return;
++    }
++    if (SUCCEEDED(hresult)) {
++      hresult = pSurface->GetDevice(&pDevice);
++    }
++    if (SUCCEEDED(hresult)) {
++      hresult = (desc.Usage & D3DUSAGE_DEPTHSTENCIL)
++        ? pDevice->CreateDepthStencilSurface(desc.Width, desc.Height, desc.Format, desc.MultiSampleType, desc.MultiSampleQuality, FALSE, &pCopy, nullptr)
++        : pDevice->CreateRenderTarget(desc.Width, desc.Height, desc.Format, desc.MultiSampleType, desc.MultiSampleQuality, FALSE, &pCopy, nullptr);
++    }
++    if (SUCCEEDED(hresult)) {
++      hresult = pDevice->StretchRect(pSurface, nullptr, pCopy, nullptr, D3DTEXF_NONE);
++    }
++    if (pDevice != nullptr) {
++      pDevice->Release();
++    }
++    if (FAILED(hresult)) {
++      if (pCopy != nullptr) {
++        pCopy->Release();
++      }
++      refuse(format_string("a %ux%u %s of format %d could not be copied (0x%08lx)", desc.Width, desc.Height,
++                           (desc.Usage & D3DUSAGE_DEPTHSTENCIL) ? "depth surface" : "render target",
++                           static_cast<int>(desc.Format), static_cast<unsigned long>(hresult)));
++      return;
++    }
++    Saved& saved = gSnapshot.saved[pSurface];
++    saved.kind = Kind::Target;
++    saved.pCopy = pCopy;
++    saved.size = approxSize(desc.Width, desc.Height, desc.Format);
++    gSnapshot.savedBytes += saved.size;
++    pSurface->AddRef();
++    account();
++  }
++
++  // Copies the surfaces of a resource that the device draws into.
++  inline void keepTargets(IDirect3DResource9* pResource) {
++    constexpr DWORD kTargetUsage = D3DUSAGE_RENDERTARGET | D3DUSAGE_DEPTHSTENCIL;
++    D3DSURFACE_DESC desc;
++    switch (pResource->GetType()) {
++    case D3DRTYPE_SURFACE:
++    {
++      const auto pSurface = static_cast<IDirect3DSurface9*>(pResource);
++      if (SUCCEEDED(pSurface->GetDesc(&desc)) && (desc.Usage & kTargetUsage) != 0) {
++        keepTarget(pSurface);
++      }
++      break;
++    }
++    case D3DRTYPE_TEXTURE:
++    {
++      const auto pTexture = static_cast<IDirect3DTexture9*>(pResource);
++      if (FAILED(pTexture->GetLevelDesc(0, &desc)) || (desc.Usage & kTargetUsage) == 0) {
++        break;
++      }
++      for (DWORD level = 0; level < pTexture->GetLevelCount() && held(); level++) {
++        IDirect3DSurface9* pSurface = nullptr;
++        if (SUCCEEDED(pTexture->GetSurfaceLevel(level, &pSurface))) {
++          keepTarget(pSurface);
++          pSurface->Release();
++        }
++      }
++      break;
++    }
++    case D3DRTYPE_CUBETEXTURE:
++    {
++      const auto pTexture = static_cast<IDirect3DCubeTexture9*>(pResource);
++      if (FAILED(pTexture->GetLevelDesc(0, &desc)) || (desc.Usage & kTargetUsage) == 0) {
++        break;
++      }
++      for (DWORD level = 0; level < pTexture->GetLevelCount(); level++) {
++        for (int face = D3DCUBEMAP_FACE_POSITIVE_X; face <= D3DCUBEMAP_FACE_NEGATIVE_Z && held(); face++) {
++          IDirect3DSurface9* pSurface = nullptr;
++          if (SUCCEEDED(pTexture->GetCubeMapSurface(static_cast<D3DCUBEMAP_FACES>(face), level, &pSurface))) {
++            keepTarget(pSurface);
++            pSurface->Release();
++          }
++        }
++      }
++      break;
++    }
++    default:
++      break;
++    }
++  }
++
++  // Keeps what a surface holds before the first write after the snapshot.
++  // A texture level counts as alive at the snapshot when its texture was.
++  inline void keepSurface(IDirect3DSurface9* pSurface) {
++    if (!held() || pSurface == nullptr || gSnapshot.saved.count(pSurface) != 0) {
++      return;
++    }
++    IUnknown* pOwner = pSurface;
++    IDirect3DBaseTexture9* pTexture = nullptr;
++    if (SUCCEEDED(pSurface->GetContainer(__uuidof(IDirect3DBaseTexture9), reinterpret_cast<void**>(&pTexture))) && pTexture != nullptr) {
++      pOwner = pTexture;
++      pTexture->Release();
++    }
++    if (gSnapshot.objects.count(pOwner) == 0 || gSnapshot.discarded.count(pSurface) != 0) {
++      return;
++    }
++    D3DSURFACE_DESC desc;
++    D3DLOCKED_RECT lockedRect;
++    if (FAILED(pSurface->GetDesc(&desc))) {
++      refuse("a surface written after the snapshot could not be described");
++      return;
++    }
++    if ((desc.Usage & (D3DUSAGE_RENDERTARGET | D3DUSAGE_DEPTHSTENCIL)) != 0) {
++      refuse("a render target or depth surface was not copied at the snapshot");
++      return;
++    }
++    if (FAILED(pSurface->LockRect(&lockedRect, nullptr, D3DLOCK_READONLY)) || lockedRect.pBits == nullptr) {
++      refuse(format_string("a %ux%u surface of format %d written after the snapshot could not be read first",
++                           desc.Width, desc.Height, static_cast<int>(desc.Format)));
++      return;
++    }
++    store(pSurface, Kind::Surface, lockedRect.pBits, size_t(lockedRect.Pitch) * bridge_util::calcStride(desc.Height, desc.Format));
++    pSurface->UnlockRect();
++  }
++
++  // Keeps every level of a texture that UpdateTexture is about to write.
++  inline void keepTexture(IDirect3DBaseTexture9* pTexture) {
++    if (!held() || pTexture == nullptr || gSnapshot.objects.count(pTexture) == 0) {
++      return;
++    }
++    const D3DRESOURCETYPE type = pTexture->GetType();
++    if (type != D3DRTYPE_TEXTURE && type != D3DRTYPE_CUBETEXTURE) {
++      refuse("a volume texture from before the snapshot was written");
++      return;
++    }
++    const DWORD faces = type == D3DRTYPE_CUBETEXTURE ? 6 : 1;
++    for (DWORD level = 0; level < pTexture->GetLevelCount(); level++) {
++      for (DWORD face = 0; face < faces && held(); face++) {
++        IDirect3DSurface9* pSurface = nullptr;
++        const HRESULT hresult = type == D3DRTYPE_CUBETEXTURE
++          ? static_cast<IDirect3DCubeTexture9*>(pTexture)->GetCubeMapSurface(static_cast<D3DCUBEMAP_FACES>(face), level, &pSurface)
++          : static_cast<IDirect3DTexture9*>(pTexture)->GetSurfaceLevel(level, &pSurface);
++        if (SUCCEEDED(hresult)) {
++          keepSurface(pSurface);
++          pSurface->Release();
++        }
++      }
++    }
++  }
++
++  // Volume contents are not kept, so a write into one from before the snapshot gives the snapshot up.
++  inline void noteVolumeWrite(IUnknown* pVolumeOrTexture) {
++    if (!held() || pVolumeOrTexture == nullptr) {
++      return;
++    }
++    IUnknown* pOwner = pVolumeOrTexture;
++    IDirect3DVolume9* pVolume = nullptr;
++    IDirect3DBaseTexture9* pTexture = nullptr;
++    if (SUCCEEDED(pVolumeOrTexture->QueryInterface(__uuidof(IDirect3DVolume9), reinterpret_cast<void**>(&pVolume))) && pVolume != nullptr) {
++      if (SUCCEEDED(pVolume->GetContainer(__uuidof(IDirect3DBaseTexture9), reinterpret_cast<void**>(&pTexture))) && pTexture != nullptr) {
++        pOwner = pTexture;
++        pTexture->Release();
++      }
++      pVolume->Release();
++    }
++    if (gSnapshot.objects.count(pOwner) != 0 || gSnapshot.objects.count(pVolumeOrTexture) != 0) {
++      refuse("a volume texture from before the snapshot was written");
++    }
++  }
++
++  // Keeps the SetLOD value of a texture before the first change after the snapshot.
++  inline void keepLod(IDirect3DBaseTexture9* pTexture) {
++    if (!held() || pTexture == nullptr || gSnapshot.objects.count(pTexture) == 0) {
++      return;
++    }
++    gSnapshot.lods.emplace(pTexture, pTexture->GetLOD());
++  }
++
++  // Runs before a query is issued.
++  inline void noteIssue(IDirect3DQuery9* pQuery) {
++    if (!held() || pQuery == nullptr) {
++      return;
++    }
++    gSnapshot.queryAnswers.erase(pQuery);
++    if (gSnapshot.objects.count(pQuery) == 0) {
++      return;
++    }
++    if (gSnapshot.queriesPending.count(pQuery) != 0) {
++      refuse("a query whose result was not ready at the snapshot was issued again");
++      return;
++    }
++    gSnapshot.queriesIssued.insert(pQuery);
++  }
++
++  // After a rewind a query that was issued again in the meantime answers with its result at the snapshot,
++  // until the game issues it again.
++  inline HRESULT queryData(IDirect3DQuery9* pQuery, void* pData, const DWORD size, const HRESULT hresult) {
++    if (!held()) {
++      return hresult;
++    }
++    const auto answer = gSnapshot.queryAnswers.find(pQuery);
++    if (answer == gSnapshot.queryAnswers.end()) {
++      return hresult;
++    }
++    if (pData != nullptr) {
++      memcpy(pData, answer->second.data(), std::min<size_t>(size, answer->second.size()));
++    }
++    return S_OK;
++  }
++
++  inline bool putBack(IUnknown* pObj, const Saved& saved) {
++    void* pData = nullptr;
++    switch (saved.kind) {
++    case Kind::VertexBuffer:
++    {
++      const auto pBuffer = static_cast<IDirect3DVertexBuffer9*>(pObj);
++      if (FAILED(pBuffer->Lock(0, 0, &pData, 0)) || pData == nullptr) {
++        return false;
++      }
++      memcpy(pData, saved.bytes.data(), saved.bytes.size());
++      return SUCCEEDED(pBuffer->Unlock());
++    }
++    case Kind::IndexBuffer:
++    {
++      const auto pBuffer = static_cast<IDirect3DIndexBuffer9*>(pObj);
++      if (FAILED(pBuffer->Lock(0, 0, &pData, 0)) || pData == nullptr) {
++        return false;
++      }
++      memcpy(pData, saved.bytes.data(), saved.bytes.size());
++      return SUCCEEDED(pBuffer->Unlock());
++    }
++    case Kind::Surface:
++    {
++      const auto pSurface = static_cast<IDirect3DSurface9*>(pObj);
++      D3DLOCKED_RECT lockedRect;
++      if (FAILED(pSurface->LockRect(&lockedRect, nullptr, 0)) || lockedRect.pBits == nullptr) {
++        return false;
++      }
++      memcpy(lockedRect.pBits, saved.bytes.data(), saved.bytes.size());
++      return SUCCEEDED(pSurface->UnlockRect());
++    }
++    case Kind::Target:
++    {
++      const auto pSurface = static_cast<IDirect3DSurface9*>(pObj);
++      IDirect3DDevice9* pDevice = nullptr;
++      if (FAILED(pSurface->GetDevice(&pDevice))) {
++        return false;
++      }
++      const HRESULT hresult = pDevice->StretchRect(saved.pCopy, nullptr, pSurface, nullptr, D3DTEXF_NONE);
++      pDevice->Release();
++      return SUCCEEDED(hresult);
++    }
++    }
++    return false;
++  }
++
++  // Lets go of an object made after the snapshot. One Release matches the reference its create left in the table.
++  // Too few releases leak the object. Too many would free an object the snapshot still needs.
++  inline void drop(IUnknown* pObj) {
++    pObj->Release();
++  }
++
++  // A texture level belongs to its texture, as with Bridge_UnlinkResource.
++  inline void drop(IDirect3DResource9* pResource) {
++    if (pResource->GetType() == D3DRTYPE_SURFACE) {
++      IDirect3DBaseTexture9* pTexture = nullptr;
++      if (SUCCEEDED(static_cast<IDirect3DSurface9*>(pResource)->GetContainer(__uuidof(IDirect3DBaseTexture9), reinterpret_cast<void**>(&pTexture))) && pTexture != nullptr) {
++        pTexture->Release();
++        return;
++      }
++    }
++    pResource->Release();
++  }
++
++  // A volume belongs to its volume texture, as with Bridge_UnlinkVolumeResource.
++  inline void drop(IDirect3DVolume9*) {
++  }
++
++  inline void take() {
 +    release();
 +    forEachMap([](auto& live, auto& kept) {
 +      kept = live;
@@ -352,28 +1059,100 @@ index fb6c57f4..275c0230 100644
 +        }
 +      }
 +    });
-+    gSnapshot.held = true;
++    gSnapshot.state = State::Held;
++
 +    for (const auto& [handle, pDevice] : gpD3DDevices) {
 +      if (pDevice == nullptr) {
 +        continue;
 +      }
-+      DeviceState& state = gSnapshot.deviceStates[handle];
-+      if (FAILED(pDevice->CreateStateBlock(D3DSBT_ALL, &state.pBlock))) {
-+        refuse("the device state could not be captured");
-+      }
-+      for (DWORD i = 0; i < 4; i++) {
++      D3DCAPS9 caps = {};
++      DeviceState state;
++      pDevice->GetDeviceCaps(&caps);
++      state.targetCount = std::min<DWORD>(4, caps.NumSimultaneousRTs);
++      state.softwareVertexProcessing = pDevice->GetSoftwareVertexProcessing();
++      pDevice->GetGammaRamp(0, &state.gamma);
++      const HRESULT hresult = pDevice->CreateStateBlock(D3DSBT_ALL, &state.pBlock);
++      for (DWORD i = 0; i < state.targetCount; i++) {
 +        pDevice->GetRenderTarget(i, &state.pTargets[i]);
 +      }
 +      pDevice->GetDepthStencilSurface(&state.pDepthStencil);
++      gSnapshot.deviceStates[handle] = state;
++      if (FAILED(hresult)) {
++        refuse(format_string("the device state could not be captured (0x%08lx)", static_cast<unsigned long>(hresult)));
++        return;
++      }
++      // The back buffers and the bound surfaces can be missing from the tables, like a depth surface the game never asked for.
++      for (UINT i = 0; i < pDevice->GetNumberOfSwapChains() && held(); i++) {
++        IDirect3DSwapChain9* pSwapChain = nullptr;
++        D3DPRESENT_PARAMETERS parameters = {};
++        if (FAILED(pDevice->GetSwapChain(i, &pSwapChain))) {
++          continue;
++        }
++        pSwapChain->GetPresentParameters(&parameters);
++        for (UINT buffer = 0; buffer < std::max<UINT>(1, parameters.BackBufferCount); buffer++) {
++          IDirect3DSurface9* pBackBuffer = nullptr;
++          if (FAILED(pSwapChain->GetBackBuffer(buffer, D3DBACKBUFFER_TYPE_MONO, &pBackBuffer))) {
++            continue;
++          }
++          if (parameters.SwapEffect == D3DSWAPEFFECT_DISCARD) {
++            gSnapshot.discarded.insert(pBackBuffer);
++          } else {
++            keepTarget(pBackBuffer);
++          }
++          pBackBuffer->Release();
++        }
++        pSwapChain->Release();
++      }
++      for (DWORD i = 0; i < state.targetCount && held(); i++) {
++        keepTarget(state.pTargets[i]);
++      }
++      keepTarget(state.pDepthStencil);
++      if (!held()) {
++        return;
++      }
 +    }
-+    if (!gPendingSurfaceLocks.empty()) {
-+      refuse("a surface upload was in progress at the snapshot");
++
++    for (const auto& [handle, pResource] : gpD3DResources) {
++      if (pResource != nullptr) {
++        keepTargets(pResource);
++      }
++      if (!held()) {
++        return;
++      }
++    }
++
++    const ULONGLONG start = GetTickCount64();
++    for (const auto& [handle, pQuery] : gpD3DQuery) {
++      // An event query has one possible result.
++      if (pQuery == nullptr || pQuery->GetType() == D3DQUERYTYPE_EVENT) {
++        continue;
++      }
++      std::vector<uint8_t> data(pQuery->GetDataSize());
++      HRESULT hresult = S_FALSE;
++      do {
++        hresult = pQuery->GetData(data.empty() ? nullptr : data.data(), static_cast<DWORD>(data.size()), D3DGETDATA_FLUSH);
++      } while (hresult == S_FALSE && GetTickCount64() - start < kQueryWaitMs);
++      if (hresult == S_OK) {
++        gSnapshot.queryResults.emplace(pQuery, std::move(data));
++      } else if (hresult == S_FALSE) {
++        gSnapshot.queriesPending.insert(pQuery);
++      }
 +    }
 +  }
 +
-+  static void apply() {
-+    for (const auto& [pObj, saved] : gSnapshot.saved) {
-+      putBack(pObj, saved);
++  // Returns the D3D9 objects to the snapshot. Returns false when a step failed, which leaves the state undefined.
++  inline bool apply() {
++    bool succeeded = true;
++    for (auto contents = gSnapshot.saved.begin(); contents != gSnapshot.saved.end();) {
++      succeeded &= putBack(contents->first, contents->second);
++      // A locked copy has done its work: the object holds the snapshot's contents again, and the next write keeps them anew.
++      if (contents->second.kind == Kind::Target) {
++        ++contents;
++      } else {
++        gSnapshot.savedBytes -= contents->second.size;
++        contents->first->Release();
++        contents = gSnapshot.saved.erase(contents);
++      }
 +    }
 +    forEachMap([](auto& live, auto& kept) {
 +      for (const auto& [handle, pObj] : live) {
@@ -384,32 +1163,76 @@ index fb6c57f4..275c0230 100644
 +      live = kept;
 +    });
 +    gSnapshot.tombstones.clear();
-+    gPendingSurfaceLocks.clear();
++    gSnapshot.tombstoneBytes = 0;
 +    for (const auto& [handle, state] : gSnapshot.deviceStates) {
 +      const auto pDevice = gpD3DDevices[handle];
-+      for (DWORD i = 0; i < 4; i++) {
++      for (DWORD i = 0; i < state.targetCount; i++) {
 +        if (i != 0 || state.pTargets[i] != nullptr) {
-+          pDevice->SetRenderTarget(i, state.pTargets[i]);
++          succeeded &= SUCCEEDED(pDevice->SetRenderTarget(i, state.pTargets[i]));
 +        }
 +      }
-+      pDevice->SetDepthStencilSurface(state.pDepthStencil);
-+      if (state.pBlock != nullptr) {
-+        state.pBlock->Apply();
++      succeeded &= SUCCEEDED(pDevice->SetDepthStencilSurface(state.pDepthStencil));
++      succeeded &= SUCCEEDED(state.pBlock->Apply());
++      // Only a mixed device takes another value than its own, so the result says nothing here.
++      pDevice->SetSoftwareVertexProcessing(state.softwareVertexProcessing);
++      pDevice->SetGammaRamp(0, D3DSGR_NO_CALIBRATION, &state.gamma);
++    }
++    for (const auto& [pTexture, lod] : gSnapshot.lods) {
++      pTexture->SetLOD(lod);
++    }
++    gSnapshot.lods.clear();
++    for (IDirect3DQuery9* pQuery : gSnapshot.queriesIssued) {
++      const auto result = gSnapshot.queryResults.find(pQuery);
++      if (result != gSnapshot.queryResults.end()) {
++        gSnapshot.queryAnswers[pQuery] = result->second;
 +      }
 +    }
++    gSnapshot.queriesIssued.clear();
++    gSnapshot.notRestored = 0;
++    return succeeded;
 +  }
 +
-+  // Runs one Op and fills the Stat numbers. The numbers describe the time before a rewind was applied.
-+  static HRESULT run(const uint32_t op, uint32_t* pStats) {
++  // Runs one Op and fills the Stat numbers, which describe the time before a rewind is applied.
++  // A non-null pBusy is the reason why the server cannot snapshot or rewind right now.
++  // Returns S_OK when the Op is done.
++  // Returns E_FAIL when it is refused: nothing was changed.
++  // Returns E_ABORT when a rewind failed part-way: the D3D9 state is undefined and the host has to end the game.
++  inline HRESULT run(const uint32_t op, uint32_t* pStats, const char* pBusy) {
 +    using namespace bridge_util::rewind;
-+    if (!enabled()) {
-+      return E_NOTIMPL;
++    if (gSnapshot.state == State::Failed) {
++      pStats[kStatRefused] = 1;
++      Logger::err(format_string("[Rewind] Op %u is refused: %s", op, gSnapshot.reason.c_str()));
++      return E_ABORT;
++    }
++    if (op == kDrop) {
++      release();
++      Logger::info("[Rewind] Op 4: the snapshot is let go.");
++      return S_OK;
++    }
++    if (op != kSnapshot && op != kRewind && op != kPlan) {
++      pStats[kStatRefused] = 1;
++      return E_FAIL;
++    }
++    if (pBusy != nullptr) {
++      pStats[kStatRefused] = 1;
++      Logger::warn(format_string("[Rewind] Op %u is refused for now, nothing was changed: %s", op, pBusy));
++      return E_FAIL;
 +    }
 +    if (op == kSnapshot) {
 +      take();
++    } else if (held()) {
++      for (const auto& [handle, pDevice] : gpD3DDevices) {
++        if (pDevice != nullptr && pDevice->TestCooperativeLevel() != D3D_OK) {
++          pStats[kStatRefused] = 1;
++          Logger::warn(format_string("[Rewind] Op %u is refused for now, nothing was changed: the device is lost", op));
++          return E_FAIL;
++        }
++      }
 +    }
-+    if (!gSnapshot.held) {
++    if (!held()) {
 +      pStats[kStatRefused] = 1;
++      Logger::warn(format_string("[Rewind] Op %u is refused, nothing was changed: %s", op,
++                                 gSnapshot.state == State::Refused ? gSnapshot.reason.c_str() : "no snapshot is held"));
 +      return E_FAIL;
 +    }
 +    uint32_t dropped = 0;
@@ -420,129 +1243,71 @@ index fb6c57f4..275c0230 100644
 +      }
 +    });
 +    for (const auto& [pObj, saved] : gSnapshot.saved) {
-+      buffers += saved.kind != Kind::Surface;
++      buffers += saved.kind == Kind::VertexBuffer || saved.kind == Kind::IndexBuffer;
 +    }
 +    pStats[kStatKept] = static_cast<uint32_t>(gSnapshot.objects.size());
 +    pStats[kStatRevived] = static_cast<uint32_t>(gSnapshot.tombstones.size());
 +    pStats[kStatDropped] = dropped;
 +    pStats[kStatBuffers] = buffers;
 +    pStats[kStatSurfaces] = static_cast<uint32_t>(gSnapshot.saved.size()) - buffers;
-+    pStats[kStatSavedKB] = static_cast<uint32_t>(gSnapshot.savedBytes >> 10);
++    pStats[kStatSavedKB] = static_cast<uint32_t>((gSnapshot.savedBytes + gSnapshot.tombstoneBytes) >> 10);
 +    pStats[kStatNotRestored] = gSnapshot.notRestored;
-+    pStats[kStatRefused] = !gSnapshot.refused.empty();
-+    Logger::info(format_string("[Rewind] op %u: kept %u, revive %u, drop %u, buffers %u, surfaces %u, saved %u KB, not restored %u%s%s",
++    Logger::info(format_string("[Rewind] Op %u: kept %u, revive %u, drop %u, buffers %u, surfaces %u, kept alive %u KB, cursor commands %u",
 +                               op, pStats[kStatKept], pStats[kStatRevived], pStats[kStatDropped], pStats[kStatBuffers],
-+                               pStats[kStatSurfaces], pStats[kStatSavedKB], pStats[kStatNotRestored],
-+                               gSnapshot.refused.empty() ? "" : ", refused: ", gSnapshot.refused.c_str()));
-+    if (!gSnapshot.refused.empty()) {
-+      return E_FAIL;
-+    }
-+    if (op == kRewind) {
-+      apply();
-+      gSnapshot.notRestored = 0;
++                               pStats[kStatSurfaces], pStats[kStatSavedKB], pStats[kStatNotRestored]));
++    if (op == kRewind && !apply()) {
++      release();
++      gSnapshot.state = State::Failed;
++      gSnapshot.reason = "a rewind failed part-way, the D3D9 state is undefined and the game has to be ended";
++      pStats[kStatRefused] = 1;
++      Logger::err(format_string("[Rewind] Op 2: %s", gSnapshot.reason.c_str()));
++      return E_ABORT;
 +    }
 +    return S_OK;
 +  }
-+
-+  // Runs after the answer was sent. The client waits for the done event before its host touches the game process.
-+  static void finish(const uint32_t op, const bool succeeded) {
-+    using namespace bridge_util::rewind;
-+    const ULONGLONG start = GetTickCount64();
-+    while (!DeviceBridge::getWriterChannel().commands->isEmpty() && GetTickCount64() - start < 10'000) {
-+      Sleep(0);
-+    }
-+    bridge_util::DataQueue* const queues[4] = {
-+      DeviceBridge::getReaderChannel().data, DeviceBridge::getWriterChannel().data,
-+      ModuleBridge::getReaderChannel().data, ModuleBridge::getWriterChannel().data,
-+    };
-+    for (size_t i = 0; i < 4; i++) {
-+      if (op == kSnapshot && succeeded) {
-+        gSnapshot.pos[i] = queues[i]->get_pos();
-+        gSnapshot.absPos[i] = queues[i]->get_abs_pos();
-+      } else if (op == kRewind && succeeded) {
-+        queues[i]->set_pos(gSnapshot.pos[i], gSnapshot.absPos[i]);
-+      }
-+    }
-+    DeviceBridge::publishReadPos();
-+    SetEvent(doneEvent());
-+  }
 +}
-+
- static inline void safeDestroy(IUnknown* obj, uint32_t x86handle) {
-   // Note: in DXVK the refcounts of non-standalone objects may go negative!
-   // We need to handle such objects appropriately, even though this is not
-@@ -197,6 +562,9 @@ static inline void safeDestroy(IUnknown* obj, uint32_t x86handle) {
+diff --git a/bridge/src/util/config/global_options.h b/bridge/src/util/config/global_options.h
+index 6bb72ed4..a595ff82 100644
+--- a/bridge/src/util/config/global_options.h
++++ b/bridge/src/util/config/global_options.h
+@@ -196,6 +196,14 @@ public:
+     return get().ipcSpinMicroseconds;
    }
- #endif
  
-+  if (rewind_mode::keeps(obj)) {
-+    return;
++  static bool getRewindMode() {
++    return get().rewindMode;
 +  }
-   while (obj && static_cast<LONG>(obj->Release()) > 0);
- }
++
++  static uint32_t getRewindMaxKeptMB() {
++    return get().rewindMaxKeptMB;
++  }
++
+   static bool getUseSharedHeap() {
+     return get().useSharedHeap;
+   }
+@@ -421,6 +429,13 @@ private:
+     // A command queue wait spins this long before it blocks on its wake event.
+     ipcSpinMicroseconds = bridge_util::Config::getOption<uint32_t>("ipcSpinMicroseconds", 100);
  
-@@ -360,6 +728,7 @@ void ProcessDeviceCommandQueue() {
- #endif
-       // A Bridge_StatePacket runs this once per record with the packet's device handle and UID.
-       const auto dispatch = [&](const Header& rpcHeader, const uint32_t currentUID) {
-+      rewind_mode::note(rpcHeader.command);
-       // The mother of all switch statements - every call in the D3D9 interface is mapped here...
-       switch (rpcHeader.command) {
-       case IDirect3D9Ex_CreateDeviceEx:
-@@ -2473,6 +2842,7 @@ void ProcessDeviceCommandQueue() {
- 
-         // Now lock the buffer so we can copy the data into it
-         void* pbData = nullptr;
-+        rewind_mode::keepBuffer<IDirect3DVertexBuffer9, D3DVERTEXBUFFER_DESC>(pVertexBuffer, rewind_mode::Kind::VertexBuffer);
-         auto hresult = pVertexBuffer->Lock(IN OffsetToLock, IN SizeToLock, IN & pbData, IN Flags);
-         assert(S_OK == hresult);
-         if (SUCCEEDED(hresult) && pbData != nullptr) {
-@@ -2573,6 +2943,7 @@ void ProcessDeviceCommandQueue() {
- 
-         // Now lock the buffer so we can copy the data into it
-         void* pbData = nullptr;
-+        rewind_mode::keepBuffer<IDirect3DIndexBuffer9, D3DINDEXBUFFER_DESC>(pIndexBuffer, rewind_mode::Kind::IndexBuffer);
-         auto hresult = pIndexBuffer->Lock(IN OffsetToLock, IN SizeToLock, IN & pbData, IN Flags);
-         assert(S_OK == hresult);
-         if (SUCCEEDED(hresult) && pbData != nullptr) {
-@@ -2676,6 +3047,7 @@ void ProcessDeviceCommandQueue() {
-           if (pSurface == nullptr) {
-             break;
-           }
-+          rewind_mode::keepSurface(pSurface);
-           D3DLOCKED_RECT lockedRect;
-           auto hresult = pSurface->LockRect(OUT & lockedRect, IN pRect, IN Flags);
-           assert(S_OK == hresult);
-@@ -2707,6 +3079,7 @@ void ProcessDeviceCommandQueue() {
-             gPendingSurfaceLocks.erase(stale);
-           }
-           if (pSurface != nullptr) {
-+            rewind_mode::keepSurface(pSurface);
-             D3DLOCKED_RECT lockedRect;
-             const auto hresult = pSurface->LockRect(OUT & lockedRect, IN pRect, IN Flags);
-             assert(S_OK == hresult);
-@@ -2954,6 +3327,21 @@ void ProcessDeviceCommandQueue() {
-         SharedHeap::deallocate(allocId);
-         break;
-       }
-+      case Bridge_Rewind:
-+      {
-+        PULL_U(op);
-+        uint32_t stats[bridge_util::rewind::kStatCount] = {};
-+        const HRESULT hresult = rewind_mode::run(op, stats);
-+        {
-+          ServerMessage c(Commands::Bridge_Response, currentUID);
-+          c.send_data(hresult);
-+          for (const uint32_t stat : stats) {
-+            c.send_data(stat);
-+          }
-+        }
-+        rewind_mode::finish(op, SUCCEEDED(hresult));
-+        break;
-+      }
-       case Bridge_UnlinkResource:
-       {
-         GET_HND(pHandle);
++    // Rewind mode for test harnesses (util_rewind.h). Both sides need the same value. Leave it off for play.
++    rewindMode = bridge_util::Config::getOption<bool>("rewindMode", false);
++
++    // Megabytes a rewind snapshot may keep alive on the server: contents written over and objects destroyed since.
++    // Past it the snapshot is given up and its memory freed.
++    rewindMaxKeptMB = bridge_util::Config::getOption<uint32_t>("rewindMaxKeptMB", 1024);
++
+     // If this is enabled, timeouts will be set to their maximum value (INFINITE which is the max uint32_t) 
+     // and retries will be set to 1 while the application is being launched with or attached to by a debugger
+     disableTimeoutsWhenDebugging = bridge_util::Config::getOption<bool>("disableTimeoutsWhenDebugging", false);
+@@ -499,6 +514,8 @@ private:
+   bool commandBatchingEnabled;
+   uint32_t perfLogIntervalFrames;
+   uint32_t ipcSpinMicroseconds;
++  bool rewindMode;
++  uint32_t rewindMaxKeptMB;
+   bool disableTimeoutsWhenDebugging;
+   bool disableTimeouts;
+   bool useSharedHeap;
 diff --git a/bridge/src/util/util_circularqueue.h b/bridge/src/util/util_circularqueue.h
 index 69d21256..9eb2e611 100644
 --- a/bridge/src/util/util_circularqueue.h
@@ -584,10 +1349,10 @@ index 0cd4d6e7..111dff30 100644
      case IDirect3DDevice9Ex_LinkBackBuffer: return "IDirect3DDevice9Ex_LinkBackBuffer";
 diff --git a/bridge/src/util/util_rewind.h b/bridge/src/util/util_rewind.h
 new file mode 100644
-index 00000000..fdde3286
+index 00000000..da887f52
 --- /dev/null
 +++ b/bridge/src/util/util_rewind.h
-@@ -0,0 +1,91 @@
+@@ -0,0 +1,118 @@
 +#pragma once
 +
 +// Rewind mode, for test harnesses only. Off unless bridge.conf sets rewindMode = True on both sides.
@@ -595,14 +1360,16 @@ index 00000000..fdde3286
 +// A test host snapshots the 32-bit game process and later puts its memory back, so one world load serves many test
 +// runs that start from the same state. The game then holds the D3D9 state of the snapshot again, and the server has to
 +// return to that state too. The host asks through the cooperation block below. The client answers at the end of a
-+// Present: it sends one synchronous Bridge_Rewind command, which leaves both command queues empty, and then parks its
-+// thread until the host is done.
++// Present: it sends one synchronous Bridge_Rewind command and parks its thread until the host is done. While parked it
++// holds the send locks of both channels, so no other thread of the game can send (client/d3d9_swapchain.cpp).
++// The server side is server/rewind_mode.h.
 +
 +#include <windows.h>
 +#include <cstdint>
 +#include <cstdio>
 +
-+#include "config/config.h"
++#include "config/global_options.h"
++#include "log/log.h"
 +#include "util_guid.h"
 +
 +extern bridge_util::Guid gUniqueIdentifier;
@@ -613,7 +1380,15 @@ index 00000000..fdde3286
 +    kSnapshot = 1, // the server remembers its state as of this command
 +    kRewind = 2,   // the server returns to the remembered state
 +    kPlan = 3,     // the server only reports what a rewind would do now
++    kDrop = 4,     // the server lets the remembered state go
 +  };
++
++  // The answer to an Op is an HRESULT:
++  //   S_OK       done
++  //   E_FAIL     refused, nothing was changed (the reason is in the log of the side that refused)
++  //   E_NOTIMPL  the mode is off on the server, nothing was changed
++  //   E_ABORT    a rewind failed part-way: the D3D9 state is undefined and the host has to end the game
++  // The client reports -1 when no answer came and -2 when the server did not finish. The host treats both as E_ABORT.
 +
 +  // Numbers the server returns with each answer.
 +  enum Stat : uint32_t {
@@ -621,9 +1396,9 @@ index 00000000..fdde3286
 +    kStatRevived,       // objects destroyed since the snapshot that a rewind brings back
 +    kStatDropped,       // objects created since the snapshot that a rewind lets go of
 +    kStatBuffers,       // vertex and index buffers whose contents at the snapshot are kept
-+    kStatSurfaces,      // surfaces whose contents at the snapshot are kept
-+    kStatSavedKB,       // size of those kept contents
-+    kStatNotRestored,   // writes since the snapshot whose old contents were not kept
++    kStatSurfaces,      // surfaces whose contents at the snapshot are kept, render targets and depth surfaces included
++    kStatSavedKB,       // memory the snapshot keeps alive: kept contents and destroyed objects
++    kStatNotRestored,   // cursor commands since the snapshot, which a rewind does not undo
 +    kStatRefused,       // 1: the server refuses a rewind to this snapshot
 +    kStatCount
 +  };
@@ -635,23 +1410,41 @@ index 00000000..fdde3286
 +    uint32_t magic, version;       // 'RWND', 1
 +    uint32_t self;                 // address of this block in the client process
 +    volatile int32_t request;      // host -> client: 1 = park at the end of the next Present
-+    volatile int32_t parked;       // client -> host: 1 = parked, both command queues are empty
++    volatile int32_t parked;       // client -> host: 1 = parked, no thread can send
 +    volatile int32_t audioOn;      // unused here
 +    volatile uint32_t tick;        // presents so far
 +    volatile uint32_t parkAtTick;  // host -> client: park when tick reaches this (0 = off)
 +    volatile int64_t skewQpc;      // unused here
-+    volatile uint32_t op;          // host -> client: the Op this park is for (0 = park only)
++    volatile uint32_t op;          // host -> client: the Op this park is for (0 = park only); the client clears it
 +    volatile int32_t bridge;       // client -> host: 1 = a bridge client answers here
-+    volatile int32_t bridgeResult; // client -> host: the server's HRESULT for op, or a negative client error
++    volatile int32_t bridgeResult; // client -> host: the answer to op
 +    volatile uint32_t bridgeStats[kStatCount];
 +  };
 +#pragma pack(pop)
 +
 +  constexpr uint32_t kCoopMagic = 0x444E5752; // 'RWND'
 +
++  // Time the server waits after a rewind for the client to be back at the snapshot.
++  constexpr DWORD kResumeTimeoutMs = 60'000;
++
 +  inline bool enabled() {
-+    static const bool on = bridge_util::Config::getOption<bool>("rewindMode", false);
-+    return on;
++    return GlobalOptions::getRewindMode();
++  }
++
++  // Auto-reset events shared by the client and the server.
++  struct Events {
++    HANDLE done;    // server: the Op is finished and its queue positions are final
++    HANDLE applied; // server: a rewind was applied; seen by the client only once its process is back at the snapshot
++    HANDLE resume;  // client: back at the snapshot; the server reads no command between a rewind and this
++  };
++
++  inline const Events& events() {
++    static const Events events = {
++      CreateEventA(nullptr, FALSE, FALSE, gUniqueIdentifier.toString("RewindDone").c_str()),
++      CreateEventA(nullptr, FALSE, FALSE, gUniqueIdentifier.toString("RewindApplied").c_str()),
++      CreateEventA(nullptr, FALSE, FALSE, gUniqueIdentifier.toString("RewindResume").c_str()),
++    };
++    return events;
 +  }
 +
 +  // Null when the mode is off or the block cannot be made.
@@ -663,19 +1456,750 @@ index 00000000..fdde3286
 +    sprintf_s(name, "Local\\rewind-coop-%lu", GetCurrentProcessId());
 +    const HANDLE hMap = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 4096, name);
 +    Coop* const coop = hMap ? static_cast<Coop*>(MapViewOfFile(hMap, FILE_MAP_WRITE, 0, 0, 0)) : nullptr;
-+    if (coop != nullptr) {
-+      coop->version = 1;
-+      coop->self = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(coop));
-+      coop->bridge = 1;
-+      coop->magic = kCoopMagic;
++    if (coop == nullptr) {
++      Logger::err(format_string("[Rewind] The cooperation block %s could not be made (error %lu), so rewind mode stays off.", name, GetLastError()));
++      return nullptr;
 +    }
++    // The events exist before any snapshot, so a process put back to one still holds them.
++    events();
++    coop->version = 1;
++    coop->self = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(coop));
++    coop->bridge = 1;
++    coop->magic = kCoopMagic;
++    Logger::info(format_string("[Rewind] Rewind mode is on. Cooperation block: %s", name));
 +    return coop;
 +  }
 +
-+  // Set by the server once an answer has left the queue and its queue positions are final. Auto-reset.
-+  inline HANDLE doneEvent() {
-+    static const HANDLE hEvent = CreateEventA(nullptr, FALSE, FALSE, gUniqueIdentifier.toString("RewindDone").c_str());
-+    return hEvent;
++}
+diff --git a/bridge/test/rtx/unit/meson.build b/bridge/test/rtx/unit/meson.build
+index 25ceb3b0..26a8f160 100644
+--- a/bridge/test/rtx/unit/meson.build
++++ b/bridge/test/rtx/unit/meson.build
+@@ -45,6 +45,23 @@ foreach name : logic_tests
+   tests += logic_exe
+ endforeach
+ 
++# Rewind mode: the server side on a D3D9 device (x64), and the client's park through the bridge (x86 app).
++if (cpu_family == 'x86_64')
++rewind_server_exe = executable(
++    'test_rewind_server_x64',  files('test_rewind_server.cpp'),
++    include_directories : [ util_include_path, public_include_path, include_directories('../../../src/server') ],
++    dependencies : util_dep,
++    win_subsystem : 'console')
++test('rewind_server', rewind_server_exe, is_parallel : false)
++tests += rewind_server_exe
++else
++tests += executable(
++    'test_rewind_device_x86',  files('test_rewind_device.cpp'),
++    include_directories : [ util_include_path, public_include_path ],
++    dependencies : util_dep,
++    win_subsystem : 'console')
++endif
++
+ if (cpu_family == 'x86_64')
+ python = find_program('python')
+ remix_api_test_script = join_paths(meson.current_source_dir(), 'test_remix_api.py')
+@@ -88,6 +105,19 @@ foreach name : bridge_app_tests
+        is_parallel : name != 'shared_heap_upload_device',
+        timeout : 300)
+ endforeach
++foreach mode : [ 'on', 'off' ]
++  name = 'rewind_device_' + mode
++  test(name,
++       python,
++       args : [join_paths(meson.current_source_dir(), 'test_remix_api_bridge_app.py'),
++               '--testExe', 'test_rewind_device_x86.exe',
++               '--executablesDir', meson.current_build_dir(),
++               '--bridgeDir', join_paths(meson.global_source_root(), '_output'),
++               '--artifactDir', join_paths(meson.global_build_root(), 'test_artifacts', name) ],
++       env : { 'REMIX_REWIND_TEST_CASE' : mode },
++       is_parallel : false,
++       timeout : 300)
++endforeach
+ foreach resource : [ 'surface', 'vb', 'ib' ]
+   name = 'shared_heap_upload_device_oom_' + resource
+   test(name,
+diff --git a/bridge/test/rtx/unit/test_rewind_device.cpp b/bridge/test/rtx/unit/test_rewind_device.cpp
+new file mode 100644
+index 00000000..ce540826
+--- /dev/null
++++ b/bridge/test/rtx/unit/test_rewind_device.cpp
+@@ -0,0 +1,213 @@
++// Drives rewind mode through the bridge as a test host does, as far as that goes without putting this process back to
++// a snapshot: the park at the end of Present, the Ops that change nothing on the server (snapshot, plan, drop), and the
++// send locks that stop the other threads of the game while the client is parked.
++// With REMIX_REWIND_TEST_CASE=off the mode stays off, and the test checks that the client then publishes nothing.
++// The rewind itself is covered on the server side by test_rewind_server.cpp.
++
++#include <atomic>
++#include <cstdio>
++#include <cstring>
++#include <fstream>
++#include <stdexcept>
++#include <thread>
++
++#include <wrl/client.h>
++
++#include "test_remix_api_bridge_app.h"
++#include "../../../src/util/util_rewind.h"
++
++using Microsoft::WRL::ComPtr;
++using namespace bridge_app_test;
++using namespace bridge_util::rewind;
++
++// util_rewind.h names its events with the bridge's identifier, which this test never uses.
++bridge_util::Guid gUniqueIdentifier;
++
++namespace {
++  constexpr UINT kSize = 64;
++
++  void check(const HRESULT result, const char* pCall) {
++    if (FAILED(result)) {
++      std::printf("FAILED: %s returned 0x%08lX.\n", pCall, static_cast<unsigned long>(result));
++      throw std::runtime_error(pCall);
++    }
 +  }
 +
++  void expect(const bool condition, const char* pWhat) {
++    std::printf("%s: %s\n", condition ? "ok" : "FAILED", pWhat);
++    if (!condition) {
++      throw std::runtime_error(pWhat);
++    }
++  }
++
++  bool waitFor(const volatile int32_t& value, const int32_t wanted) {
++    const ULONGLONG deadline = GetTickCount64() + 10000;
++    while (value != wanted && GetTickCount64() < deadline) {
++      Sleep(1);
++    }
++    return value == wanted;
++  }
++
++  // Writes one Op as the host and returns the client's answer.
++  int32_t runOp(Coop* pCoop, const uint32_t op) {
++    pCoop->bridgeResult = 0x7fffffff;
++    pCoop->op = op;
++    const ULONGLONG deadline = GetTickCount64() + 20000;
++    while (pCoop->op != 0 && GetTickCount64() < deadline) {
++      Sleep(1);
++    }
++    if (pCoop->op != 0) {
++      throw std::runtime_error("the client did not acknowledge the Op");
++    }
++    return pCoop->bridgeResult;
++  }
++
++  Coop* openCoop() {
++    char name[64];
++    sprintf_s(name, "Local\\rewind-coop-%lu", GetCurrentProcessId());
++    const HANDLE hMap = OpenFileMappingA(FILE_MAP_WRITE, FALSE, name);
++    return hMap != nullptr ? static_cast<Coop*>(MapViewOfFile(hMap, FILE_MAP_WRITE, 0, 0, 0)) : nullptr;
++  }
++}
++
++int main() {
++  std::setvbuf(stdout, nullptr, _IONBF, 0);
++  char testCase[8] = {};
++  GetEnvironmentVariableA("REMIX_REWIND_TEST_CASE", testCase, sizeof(testCase));
++  const bool modeOn = strcmp(testCase, "off") != 0;
++  std::printf("TEST: rewind mode through the bridge, mode %s\n", modeOn ? "on" : "off");
++
++  WNDCLASSW windowClass = {};
++  windowClass.lpfnWndProc = DefWindowProcW;
++  windowClass.hInstance = GetModuleHandleW(nullptr);
++  windowClass.lpszClassName = L"BridgeRewindTest";
++  RegisterClassW(&windowClass);
++  const HWND hWnd = CreateWindowExW(0, windowClass.lpszClassName, L"", WS_OVERLAPPEDWINDOW, 0, 0, kSize, kSize,
++                                    nullptr, nullptr, windowClass.hInstance, nullptr);
++  if (hWnd == nullptr) {
++    return 1;
++  }
++
++  bool passed = false;
++  std::atomic<bool> hostFailed { false };
++  std::atomic<int> stage { 0 };
++  std::thread host;
++  try {
++    if (modeOn) {
++      std::ofstream config(".trex/bridge.conf", std::ios::app);
++      config << "rewindMode = True\n";
++    }
++    const HMODULE hClient = loadBridgeClient();
++    if (hClient == nullptr) {
++      throw std::runtime_error("loadBridgeClient");
++    }
++    const auto pfnCreate = reinterpret_cast<PFN_Direct3DCreate9>(GetProcAddress(hClient, "Direct3DCreate9"));
++    ComPtr<IDirect3D9> pD3D;
++    pD3D.Attach(pfnCreate != nullptr ? pfnCreate(D3D_SDK_VERSION) : nullptr);
++    if (pD3D == nullptr) {
++      throw std::runtime_error("Direct3DCreate9");
++    }
++    D3DPRESENT_PARAMETERS present = {};
++    present.Windowed = TRUE;
++    present.SwapEffect = D3DSWAPEFFECT_DISCARD;
++    present.BackBufferFormat = D3DFMT_UNKNOWN;
++    present.BackBufferWidth = kSize;
++    present.BackBufferHeight = kSize;
++    present.hDeviceWindow = hWnd;
++    ComPtr<IDirect3DDevice9> pDevice;
++    check(pD3D->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hWnd,
++                              D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_MULTITHREADED,
++                              &present, &pDevice), "CreateDevice");
++    ComPtr<IDirect3DTexture9> pOldTexture;
++    // Made by the second thread while the client is parked, released by this one.
++    ComPtr<IDirect3DSurface9> pNewSurface;
++    check(pDevice->CreateTexture(16, 16, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &pOldTexture, nullptr), "CreateTexture");
++    const auto frame = [&]() {
++      check(pDevice->Clear(0, nullptr, D3DCLEAR_TARGET, 0xff102030, 1.0f, 0), "Clear");
++      check(pDevice->Present(nullptr, nullptr, nullptr, nullptr), "Present");
++    };
++    frame();
++    frame();
++
++    Coop* const pCoop = openCoop();
++    if (!modeOn) {
++      expect(pCoop == nullptr, "mode off: the client publishes no cooperation block");
++      for (int i = 0; i < 20; i++) {
++        frame();
++      }
++      passed = true;
++    } else {
++      expect(pCoop != nullptr && pCoop->magic == kCoopMagic && pCoop->bridge == 1, "mode on: the client publishes its cooperation block");
++      const uint32_t* const pStats = const_cast<const uint32_t*>(pCoop->bridgeStats);
++
++      // The host. The main thread below keeps presenting, and stops inside Present while the host asks for it.
++      host = std::thread([&]() {
++        try {
++          pCoop->request = 1;
++          expect(waitFor(pCoop->parked, 1), "the client parks at the end of a Present");
++          expect(runOp(pCoop, kPlan) == E_FAIL, "plan without a snapshot is refused");
++          expect(runOp(pCoop, kSnapshot) == S_OK, "snapshot");
++          expect(pStats[kStatKept] > 0 && pStats[kStatRefused] == 0, "snapshot: the server kept its objects");
++
++          // Another thread of the game cannot send while the client is parked.
++          std::atomic<bool> sent { false };
++          std::thread sender([&]() {
++            pDevice->CreateOffscreenPlainSurface(8, 8, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &pNewSurface, nullptr);
++            sent = true;
++          });
++          Sleep(500);
++          expect(!sent, "a command of another thread waits while the client is parked");
++          pCoop->request = 0;
++          sender.join();
++          expect(waitFor(pCoop->parked, 0) && pNewSurface != nullptr, "after the park the other thread's command goes through");
++
++          // The main thread destroys a texture from before the snapshot.
++          stage = 1;
++          while (stage != 2) {
++            Sleep(1);
++          }
++
++          pCoop->request = 1;
++          expect(waitFor(pCoop->parked, 1), "the client parks again");
++          expect(runOp(pCoop, kPlan) == S_OK, "plan");
++          expect(pStats[kStatRevived] == 1, "plan: the destroyed texture would come back");
++          expect(pStats[kStatDropped] >= 1, "plan: the new surface would be let go");
++          expect(runOp(pCoop, kDrop) == S_OK, "drop");
++          expect(runOp(pCoop, kPlan) == E_FAIL, "plan after the drop is refused");
++          pCoop->request = 0;
++          expect(waitFor(pCoop->parked, 0), "the client runs on");
++        } catch (const std::exception&) {
++          hostFailed = true;
++          pCoop->request = 0;
++        }
++        stage = 3;
++      });
++
++      while (stage != 3) {
++        if (stage == 1) {
++          pOldTexture.Reset();
++          stage = 2;
++        }
++        frame();
++      }
++      host.join();
++      for (int i = 0; i < 20; i++) {
++        frame();
++      }
++      passed = !hostFailed;
++    }
++  } catch (const std::exception& error) {
++    std::printf("FAILED: %s\n", error.what());
++    if (host.joinable()) {
++      host.detach();
++    }
++  }
++  if (!passed) {
++    // A failed run can leave a thread waiting on the bridge, so it does not unwind.
++    std::printf("FAILED\n");
++    TerminateProcess(GetCurrentProcess(), 1);
++  }
++  DestroyWindow(hWnd);
++  std::printf("PASSED\n");
++  return 0;
++}
+diff --git a/bridge/test/rtx/unit/test_rewind_server.cpp b/bridge/test/rtx/unit/test_rewind_server.cpp
+new file mode 100644
+index 00000000..edc731c6
+--- /dev/null
++++ b/bridge/test/rtx/unit/test_rewind_server.cpp
+@@ -0,0 +1,459 @@
++// Runs the server side of rewind mode (src/server/rewind_mode.h) on a D3D9 device, without a client or a game.
++// The tables below stand in for the server's, and destroy() for its destroy commands.
++// The device comes from the system's d3d9.dll, or from the library named by REWIND_TEST_D3D9 (a DXVK build, as the
++// server uses with server.useVanillaDxvk).
++
++#include <windows.h>
++#include <d3d9.h>
++
++#include <cstdio>
++#include <cstring>
++#include <vector>
++
++#include "rewind_mode.h"
++
++std::unordered_map<uint32_t, IDirect3DDevice9*> gpD3DDevices;
++std::unordered_map<uint32_t, IDirect3DResource9*> gpD3DResources;
++std::unordered_map<uint32_t, IDirect3DVolume9*> gpD3DVolumes;
++std::unordered_map<uint32_t, IDirect3DVertexDeclaration9*> gpD3DVertexDeclarations;
++std::unordered_map<uint32_t, IDirect3DStateBlock9*> gpD3DStateBlocks;
++std::unordered_map<uint32_t, IDirect3DVertexShader9*> gpD3DVertexShaders;
++std::unordered_map<uint32_t, IDirect3DPixelShader9*> gpD3DPixelShaders;
++std::unordered_map<uint32_t, IDirect3DSwapChain9*> gpD3DSwapChains;
++std::unordered_map<uint32_t, IDirect3DQuery9*> gpD3DQuery;
++bridge_util::Guid gUniqueIdentifier;
++bool gbBridgeRunning = true;
++
++using namespace bridge_util::rewind;
++
++namespace {
++  constexpr UINT kSize = 64;
++  constexpr uint32_t kDevice = 1;
++
++  int gFailures = 0;
++
++  void expect(const bool condition, const char* pWhat) {
++    std::printf("%s: %s\n", condition ? "ok" : "FAILED", pWhat);
++    std::fflush(stdout);
++    gFailures += !condition;
++  }
++
++  struct Vertex {
++    float x, y, z, rhw;
++    D3DCOLOR color;
++  };
++
++  HRESULT run(const uint32_t op, uint32_t* pStats = nullptr, const char* pBusy = nullptr) {
++    uint32_t stats[kStatCount] = {};
++    const HRESULT hresult = rewind_mode::run(op, stats, pBusy);
++    if (pStats != nullptr) {
++      memcpy(pStats, stats, sizeof(stats));
++    }
++    return hresult;
++  }
++
++  // As safeDestroy and a destroy command of the server.
++  void destroy(const uint32_t handle) {
++    IDirect3DResource9* const pResource = gpD3DResources[handle];
++    if (!rewind_mode::keeps(pResource, handle)) {
++      while (static_cast<LONG>(pResource->Release()) > 0);
++    }
++    gpD3DResources.erase(handle);
++  }
++
++  // As a vertex buffer upload of the server.
++  void fill(IDirect3DVertexBuffer9* pBuffer, const uint8_t value) {
++    D3DVERTEXBUFFER_DESC desc;
++    void* pData = nullptr;
++    pBuffer->GetDesc(&desc);
++    rewind_mode::keepBuffer<IDirect3DVertexBuffer9, D3DVERTEXBUFFER_DESC>(pBuffer, rewind_mode::Kind::VertexBuffer);
++    pBuffer->Lock(0, 0, &pData, 0);
++    memset(pData, value, desc.Size);
++    pBuffer->Unlock();
++  }
++
++  bool holds(IDirect3DVertexBuffer9* pBuffer, const uint8_t value) {
++    D3DVERTEXBUFFER_DESC desc;
++    void* pData = nullptr;
++    pBuffer->GetDesc(&desc);
++    if (FAILED(pBuffer->Lock(0, 0, &pData, D3DLOCK_READONLY))) {
++      return false;
++    }
++    bool same = true;
++    for (UINT i = 0; i < desc.Size; i++) {
++      same &= static_cast<const uint8_t*>(pData)[i] == value;
++    }
++    pBuffer->Unlock();
++    return same;
++  }
++
++  // As a surface upload of the server.
++  void fill(IDirect3DSurface9* pSurface, const D3DCOLOR color) {
++    D3DSURFACE_DESC desc;
++    D3DLOCKED_RECT lockedRect;
++    pSurface->GetDesc(&desc);
++    rewind_mode::keepSurface(pSurface);
++    pSurface->LockRect(&lockedRect, nullptr, 0);
++    for (UINT y = 0; y < desc.Height; y++) {
++      for (UINT x = 0; x < desc.Width; x++) {
++        reinterpret_cast<D3DCOLOR*>(static_cast<uint8_t*>(lockedRect.pBits) + y * lockedRect.Pitch)[x] = color;
++      }
++    }
++    pSurface->UnlockRect();
++  }
++
++  D3DCOLOR pixel(IDirect3DSurface9* pSurface) {
++    D3DLOCKED_RECT lockedRect;
++    if (FAILED(pSurface->LockRect(&lockedRect, nullptr, D3DLOCK_READONLY))) {
++      return 0xdeadbeef;
++    }
++    const D3DCOLOR color = *static_cast<D3DCOLOR*>(lockedRect.pBits);
++    pSurface->UnlockRect();
++    return color;
++  }
++
++  // Reads the middle pixel of a render target.
++  D3DCOLOR targetPixel(IDirect3DDevice9* pDevice, IDirect3DSurface9* pTarget) {
++    D3DSURFACE_DESC desc;
++    IDirect3DSurface9* pCopy = nullptr;
++    D3DLOCKED_RECT lockedRect;
++    D3DCOLOR color = 0xdeadbeef;
++    pTarget->GetDesc(&desc);
++    if (FAILED(pDevice->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format, D3DPOOL_SYSTEMMEM, &pCopy, nullptr))) {
++      return color;
++    }
++    if (SUCCEEDED(pDevice->GetRenderTargetData(pTarget, pCopy)) && SUCCEEDED(pCopy->LockRect(&lockedRect, nullptr, D3DLOCK_READONLY))) {
++      color = reinterpret_cast<D3DCOLOR*>(static_cast<uint8_t*>(lockedRect.pBits) + (desc.Height / 2) * lockedRect.Pitch)[desc.Width / 2] | 0xff000000;
++      pCopy->UnlockRect();
++    }
++    pCopy->Release();
++    return color;
++  }
++
++  void drawQuad(IDirect3DDevice9* pDevice, const float size, const float z, const D3DCOLOR color) {
++    const Vertex quad[4] = {
++      { 0.0f, 0.0f, z, 1.0f, color }, { size, 0.0f, z, 1.0f, color },
++      { 0.0f, size, z, 1.0f, color }, { size, size, z, 1.0f, color },
++    };
++    pDevice->BeginScene();
++    pDevice->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
++    pDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(Vertex));
++    pDevice->EndScene();
++  }
++
++  DWORD wait(IDirect3DQuery9* pQuery) {
++    DWORD pixels = 0;
++    const ULONGLONG start = GetTickCount64();
++    while (pQuery->GetData(&pixels, sizeof(pixels), D3DGETDATA_FLUSH) == S_FALSE && GetTickCount64() - start < 5000) {
++      Sleep(1);
++    }
++    return pixels;
++  }
++
++  IDirect3DDevice9* createDevice(IDirect3D9* pD3D, const HWND hWnd, const D3DSWAPEFFECT swapEffect, const bool depth) {
++    D3DPRESENT_PARAMETERS parameters = {};
++    parameters.Windowed = TRUE;
++    parameters.SwapEffect = swapEffect;
++    parameters.BackBufferWidth = kSize;
++    parameters.BackBufferHeight = kSize;
++    parameters.BackBufferFormat = D3DFMT_X8R8G8B8;
++    parameters.BackBufferCount = 1;
++    parameters.hDeviceWindow = hWnd;
++    parameters.EnableAutoDepthStencil = depth;
++    parameters.AutoDepthStencilFormat = D3DFMT_D24S8;
++    parameters.PresentationInterval = D3DPRESENT_INTERVAL_IMMEDIATE;
++    IDirect3DDevice9* pDevice = nullptr;
++    const HRESULT hresult = pD3D->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hWnd, D3DCREATE_HARDWARE_VERTEXPROCESSING, &parameters, &pDevice);
++    if (FAILED(hresult)) {
++      std::printf("FAILED: CreateDevice returned 0x%08lx.\n", static_cast<unsigned long>(hresult));
++    }
++    return pDevice;
++  }
++
++  void clearTables() {
++    rewind_mode::forEachMap([](auto& live, auto&) {
++      live.clear();
++    });
++    rewind_mode::gSnapshot = rewind_mode::Snapshot();
++  }
++
++  // Tables, tombstones, kept contents, render targets, device state, queries, the memory limit and the failure paths.
++  void testObjects(IDirect3D9* pD3D, const HWND hWnd) {
++    IDirect3DDevice9* const pDevice = createDevice(pD3D, hWnd, D3DSWAPEFFECT_COPY, false);
++    if (pDevice == nullptr) {
++      gFailures++;
++      return;
++    }
++    gpD3DDevices[kDevice] = pDevice;
++
++    IDirect3DVertexBuffer9* pBuffer = nullptr;
++    IDirect3DTexture9* pTexture = nullptr;
++    IDirect3DTexture9* pTargetTexture = nullptr;
++    IDirect3DSurface9* pTextureLevel = nullptr;
++    IDirect3DSurface9* pTargetLevel = nullptr;
++    IDirect3DSurface9* pPlain = nullptr;
++    IDirect3DSurface9* pTarget = nullptr;
++    IDirect3DSurface9* pBackBuffer = nullptr;
++    IDirect3DQuery9* pQuery = nullptr;
++    pDevice->CreateVertexBuffer(256, 0, 0, D3DPOOL_MANAGED, &pBuffer, nullptr);
++    pDevice->CreateTexture(16, 16, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &pTexture, nullptr);
++    pDevice->CreateTexture(32, 32, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &pTargetTexture, nullptr);
++    pDevice->CreateOffscreenPlainSurface(32, 32, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &pPlain, nullptr);
++    pDevice->CreateRenderTarget(32, 32, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE, &pTarget, nullptr);
++    pDevice->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pBackBuffer);
++    const bool hasQuery = SUCCEEDED(pDevice->CreateQuery(D3DQUERYTYPE_OCCLUSION, &pQuery));
++    if (pBuffer == nullptr || pTexture == nullptr || pTargetTexture == nullptr || pPlain == nullptr || pTarget == nullptr || pBackBuffer == nullptr) {
++      expect(false, "the test objects were made");
++      return;
++    }
++    pTexture->GetSurfaceLevel(0, &pTextureLevel);
++    pTargetTexture->GetSurfaceLevel(0, &pTargetLevel);
++    gpD3DResources[10] = pBuffer;
++    gpD3DResources[11] = pTexture;
++    gpD3DResources[12] = pTargetTexture;
++    gpD3DResources[13] = pTargetLevel;
++    gpD3DResources[14] = pPlain;
++    gpD3DResources[15] = pTarget;
++    gpD3DResources[16] = pBackBuffer;
++    if (hasQuery) {
++      gpD3DQuery[20] = pQuery;
++    }
++
++    // The state to return to.
++    fill(pBuffer, 0xa1);
++    fill(pTextureLevel, 0xff111111);
++    fill(pPlain, 0xff222222);
++    pDevice->ColorFill(pTarget, nullptr, 0xffff0000);
++    pDevice->ColorFill(pTargetLevel, nullptr, 0xff00ff00);
++    pDevice->Clear(0, nullptr, D3DCLEAR_TARGET, 0xff0000ff, 1.0f, 0);
++    pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
++    pDevice->SetRenderState(D3DRS_ZENABLE, FALSE);
++    pTexture->SetLOD(0);
++    DWORD pixelsAtSnapshot = 0;
++    if (hasQuery) {
++      pQuery->Issue(D3DISSUE_BEGIN);
++      drawQuad(pDevice, 32.0f, 0.5f, 0xff0000ff);
++      pQuery->Issue(D3DISSUE_END);
++      pixelsAtSnapshot = wait(pQuery);
++      expect(pixelsAtSnapshot > 0, "the occlusion query counted pixels before the snapshot");
++    }
++
++    // With no snapshot every hook does nothing.
++    expect(!rewind_mode::keeps(pBuffer, 10), "no snapshot: a destroy is not deferred");
++    rewind_mode::note(Commands::IDirect3DDevice9Ex_Reset);
++    expect(rewind_mode::gSnapshot.state == rewind_mode::State::None && rewind_mode::gSnapshot.saved.empty(), "no snapshot: nothing is kept");
++    expect(run(kRewind) == E_FAIL && run(kPlan) == E_FAIL, "no snapshot: rewind and plan are refused");
++
++    uint32_t stats[kStatCount] = {};
++    expect(run(kSnapshot, stats) == S_OK, "snapshot");
++    expect(stats[kStatKept] == 8 + (hasQuery ? 1 : 0), "snapshot: every object in the tables is kept");
++    // The two render targets, the level of the render target texture and the back buffer (the swap chain copies).
++    expect(stats[kStatSurfaces] == 3, "snapshot: render targets are copied at once");
++
++    // Everything below happens after the snapshot and has to be undone.
++    fill(pBuffer, 0xb2);
++    fill(pTextureLevel, 0xff333333);
++    rewind_mode::keepSurface(pPlain);
++    pDevice->GetRenderTargetData(pTarget, pPlain);
++    rewind_mode::keepSurface(pTarget);
++    pDevice->ColorFill(pTarget, nullptr, 0xff00ffff);
++    pDevice->SetRenderTarget(0, pTargetLevel);
++    pDevice->Clear(0, nullptr, D3DCLEAR_TARGET, 0xffffffff, 1.0f, 0);
++    pDevice->SetRenderState(D3DRS_LIGHTING, TRUE);
++    rewind_mode::keepLod(pTexture);
++    pTexture->SetLOD(0);
++    destroy(10);
++    expect(holds(pBuffer, 0xb2), "a destroyed vertex buffer from before the snapshot stays alive");
++    IDirect3DIndexBuffer9* pNewBuffer = nullptr;
++    IDirect3DTexture9* pNewTexture = nullptr;
++    pDevice->CreateIndexBuffer(64, 0, D3DFMT_INDEX16, D3DPOOL_MANAGED, &pNewBuffer, nullptr);
++    pDevice->CreateTexture(8, 8, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &pNewTexture, nullptr);
++    // The client hands the freed id out again.
++    gpD3DResources[10] = pNewBuffer;
++    gpD3DResources[30] = pNewTexture;
++    pNewBuffer->AddRef();
++    if (hasQuery) {
++      rewind_mode::noteIssue(pQuery);
++      pQuery->Issue(D3DISSUE_BEGIN);
++      pQuery->Issue(D3DISSUE_END);
++      expect(wait(pQuery) == 0, "the occlusion query counts nothing after the snapshot");
++    }
++    rewind_mode::note(Commands::IDirect3DDevice9Ex_ShowCursor);
++
++    expect(run(kPlan, stats) == S_OK, "plan");
++    expect(stats[kStatRevived] == 1 && stats[kStatDropped] == 2, "plan: one object to revive, two to drop");
++    expect(stats[kStatBuffers] == 1 && stats[kStatSurfaces] == 5, "plan: the written buffer and surfaces are kept");
++    expect(stats[kStatNotRestored] == 1 && stats[kStatRefused] == 0, "plan: one cursor command, not refused");
++    expect(holds(pBuffer, 0xb2) && pixel(pTextureLevel) == 0xff333333, "plan: nothing was changed");
++
++    // A reason that only holds for now refuses the Op and leaves the snapshot alone.
++    expect(run(kRewind, nullptr, "test") == E_FAIL && rewind_mode::held() && holds(pBuffer, 0xb2), "a busy server refuses for now and changes nothing");
++
++    expect(run(kRewind) == S_OK, "rewind");
++    expect(gpD3DResources.size() == 7 && gpD3DResources[10] == pBuffer && gpD3DResources.count(30) == 0, "rewind: the tables are back, the reused id names the old buffer");
++    expect(holds(pBuffer, 0xa1), "rewind: vertex buffer contents");
++    expect(pixel(pTextureLevel) == 0xff111111, "rewind: texture contents");
++    expect(pixel(pPlain) == 0xff222222, "rewind: contents of a surface written by GetRenderTargetData");
++    expect(targetPixel(pDevice, pTarget) == 0xffff0000, "rewind: render target contents");
++    expect(targetPixel(pDevice, pTargetLevel) == 0xff00ff00, "rewind: render target texture contents");
++    expect(targetPixel(pDevice, pBackBuffer) == 0xff0000ff, "rewind: back buffer contents");
++    IDirect3DSurface9* pBound = nullptr;
++    DWORD lighting = TRUE;
++    pDevice->GetRenderTarget(0, &pBound);
++    pDevice->GetRenderState(D3DRS_LIGHTING, &lighting);
++    expect(pBound == pBackBuffer && lighting == FALSE, "rewind: the bound render target and the render states");
++    if (pBound != nullptr) {
++      pBound->Release();
++    }
++    expect(pNewBuffer->Release() == 0, "rewind: an object made after the snapshot is released once");
++    if (hasQuery) {
++      DWORD pixels = 0;
++      const HRESULT hresult = rewind_mode::queryData(pQuery, &pixels, sizeof(pixels), pQuery->GetData(&pixels, sizeof(pixels), 0));
++      expect(hresult == S_OK && pixels == pixelsAtSnapshot, "rewind: a query issued again answers with its result at the snapshot");
++      rewind_mode::noteIssue(pQuery);
++      pQuery->Issue(D3DISSUE_BEGIN);
++      pQuery->Issue(D3DISSUE_END);
++      expect(wait(pQuery) == 0 && rewind_mode::queryData(pQuery, &pixels, sizeof(pixels), S_FALSE) == S_FALSE, "the next issue ends that answer");
++    }
++
++    // The snapshot is still held, so the same state can be returned to again.
++    fill(pBuffer, 0xc3);
++    pDevice->ColorFill(pTarget, nullptr, 0xff123456);
++    expect(run(kRewind) == S_OK && holds(pBuffer, 0xa1) && targetPixel(pDevice, pTarget) == 0xffff0000, "a second rewind to the same snapshot");
++
++    // The memory limit: past it the snapshot is given up and frees what it kept.
++    const size_t limit = rewind_mode::gMaxKeptBytes;
++    rewind_mode::gMaxKeptBytes = rewind_mode::gSnapshot.savedBytes + 100;
++    fill(pBuffer, 0xd4);
++    rewind_mode::gMaxKeptBytes = limit;
++    expect(rewind_mode::gSnapshot.state == rewind_mode::State::Refused && rewind_mode::gSnapshot.saved.empty(), "past the memory limit the snapshot is given up and keeps nothing");
++    expect(run(kRewind, stats) == E_FAIL && stats[kStatRefused] == 1 && holds(pBuffer, 0xd4), "a rewind to it is refused and changes nothing");
++    expect(run(kPlan) == E_FAIL, "a plan for it is refused too");
++
++    // Destroyed objects count towards the limit and are freed with the snapshot.
++    expect(run(kSnapshot) == S_OK, "a new snapshot replaces the refused one");
++    rewind_mode::gMaxKeptBytes = rewind_mode::gSnapshot.savedBytes + 100;
++    destroy(11);
++    rewind_mode::gMaxKeptBytes = limit;
++    expect(rewind_mode::gSnapshot.state == rewind_mode::State::Refused && rewind_mode::gSnapshot.tombstones.empty(), "a destroyed object past the limit is freed with the snapshot");
++    pTextureLevel = nullptr;
++    pTexture = nullptr;
++
++    // A device reset cannot be crossed. The snapshot lets go of its copies before the reset runs.
++    expect(run(kSnapshot) == S_OK, "snapshot before a reset");
++    rewind_mode::note(Commands::IDirect3DDevice9Ex_Reset);
++    expect(rewind_mode::gSnapshot.state == rewind_mode::State::Refused && rewind_mode::gSnapshot.saved.empty() && run(kRewind) == E_FAIL, "a reset gives the snapshot up");
++
++    // Dropping a snapshot frees the destroyed objects it kept alive.
++    expect(run(kSnapshot) == S_OK, "snapshot before a drop");
++    destroy(14);
++    expect(rewind_mode::gSnapshot.tombstones.size() == 1, "the destroyed surface is kept alive");
++    expect(run(kDrop) == S_OK && rewind_mode::gSnapshot.state == rewind_mode::State::None, "drop");
++    pPlain = nullptr;
++
++    // A multisampled render target cannot be copied exactly, so a snapshot with one is refused.
++    IDirect3DSurface9* pMultisampled = nullptr;
++    if (SUCCEEDED(pDevice->CreateRenderTarget(32, 32, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_4_SAMPLES, 0, FALSE, &pMultisampled, nullptr))) {
++      gpD3DResources[40] = pMultisampled;
++      expect(run(kSnapshot) == E_FAIL && rewind_mode::gSnapshot.saved.empty(), "a multisampled render target refuses the snapshot");
++      gpD3DResources.erase(40);
++      pMultisampled->Release();
++    } else {
++      std::printf("skipped: no 4x multisampled render target on this device\n");
++    }
++
++    // A rewind that fails part-way reports it, and every later Op does too.
++    IDirect3DSurface9* pLocked = nullptr;
++    D3DLOCKED_RECT lockedRect;
++    pDevice->CreateOffscreenPlainSurface(8, 8, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &pLocked, nullptr);
++    gpD3DResources[41] = pLocked;
++    expect(run(kSnapshot) == S_OK, "snapshot before a failing rewind");
++    fill(pLocked, 0xff444444);
++    pLocked->LockRect(&lockedRect, nullptr, 0);
++    expect(run(kRewind, stats) == E_ABORT && stats[kStatRefused] == 1, "a rewind that cannot write a surface back fails with E_ABORT");
++    pLocked->UnlockRect();
++    expect(run(kPlan) == E_ABORT && run(kSnapshot) == E_ABORT, "after a failed rewind every Op answers E_ABORT");
++    expect(rewind_mode::gSnapshot.saved.empty() && rewind_mode::gSnapshot.tombstones.empty(), "after a failed rewind nothing is kept alive");
++
++    clearTables();
++    pLocked->Release();
++    pBackBuffer->Release();
++    pTarget->Release();
++    pTargetLevel->Release();
++    pTargetTexture->Release();
++    pBuffer->Release();
++    if (pQuery != nullptr) {
++      pQuery->Release();
++    }
++    expect(pDevice->Release() == 0, "the device has no references left: nothing leaked");
++  }
++
++  // Depth contents, and a swap chain that discards its back buffer.
++  void testDepth(IDirect3D9* pD3D, const HWND hWnd) {
++    IDirect3DDevice9* const pDevice = createDevice(pD3D, hWnd, D3DSWAPEFFECT_DISCARD, true);
++    if (pDevice == nullptr) {
++      gFailures++;
++      return;
++    }
++    gpD3DDevices[kDevice] = pDevice;
++    IDirect3DSurface9* pBackBuffer = nullptr;
++    pDevice->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pBackBuffer);
++    gpD3DResources[16] = pBackBuffer;
++    pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
++    pDevice->SetRenderState(D3DRS_ZENABLE, TRUE);
++    pDevice->SetRenderState(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
++    pDevice->Clear(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER | D3DCLEAR_STENCIL, 0xff000000, 0.25f, 0);
++
++    uint32_t stats[kStatCount] = {};
++    const HRESULT hresult = run(kSnapshot, stats);
++    if (hresult == S_OK) {
++      expect(rewind_mode::gSnapshot.discarded.count(pBackBuffer) == 1 && stats[kStatSurfaces] == 1, "a discarded back buffer is not kept, the depth surface is");
++      pDevice->Clear(0, nullptr, D3DCLEAR_ZBUFFER, 0, 1.0f, 0);
++      expect(run(kRewind) == S_OK, "rewind with a depth surface");
++      // The quad lies behind the depth of the snapshot and in front of the later one.
++      pDevice->Clear(0, nullptr, D3DCLEAR_TARGET, 0xff000000, 1.0f, 0);
++      drawQuad(pDevice, static_cast<float>(kSize), 0.5f, 0xffffffff);
++      expect(targetPixel(pDevice, pBackBuffer) == 0xff000000, "rewind: depth contents");
++      expect(run(kDrop) == S_OK, "drop");
++    } else {
++      // This D3D9 does not copy the depth surface. Then the snapshot has to refuse and keep nothing.
++      expect(hresult == E_FAIL && rewind_mode::gSnapshot.state == rewind_mode::State::Refused && rewind_mode::gSnapshot.saved.empty(),
++             "a depth surface that cannot be copied refuses the snapshot");
++      std::printf("note: %s\n", rewind_mode::gSnapshot.reason.c_str());
++    }
++
++    clearTables();
++    pBackBuffer->Release();
++    expect(pDevice->Release() == 0, "the device has no references left: nothing leaked");
++  }
++}
++
++int main() {
++  char library[MAX_PATH] = "d3d9.dll";
++  GetEnvironmentVariableA("REWIND_TEST_D3D9", library, sizeof(library));
++  const HMODULE hD3D9 = LoadLibraryA(library);
++  const auto pfnCreate = hD3D9 != nullptr
++    ? reinterpret_cast<IDirect3D9* (WINAPI*)(UINT)>(GetProcAddress(hD3D9, "Direct3DCreate9"))
++    : nullptr;
++  IDirect3D9* const pD3D = pfnCreate != nullptr ? pfnCreate(D3D_SDK_VERSION) : nullptr;
++  if (pD3D == nullptr) {
++    std::printf("FAILED: no Direct3D 9 from %s (error %lu).\n", library, GetLastError());
++    return 1;
++  }
++  std::printf("TEST: rewind mode, server side, on %s\n", library);
++
++  WNDCLASSW windowClass = {};
++  windowClass.lpfnWndProc = DefWindowProcW;
++  windowClass.hInstance = GetModuleHandleW(nullptr);
++  windowClass.lpszClassName = L"BridgeRewindServerTest";
++  RegisterClassW(&windowClass);
++  const HWND hWnd = CreateWindowExW(0, windowClass.lpszClassName, L"", WS_OVERLAPPEDWINDOW, 0, 0, kSize, kSize, nullptr, nullptr, windowClass.hInstance, nullptr);
++
++  testObjects(pD3D, hWnd);
++  testDepth(pD3D, hWnd);
++
++  pD3D->Release();
++  DestroyWindow(hWnd);
++  std::printf(gFailures ? "FAILED: %d checks failed.\n" : "PASSED\n", gFailures);
++  return gFailures ? 1 : 0;
 +}

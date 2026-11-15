@@ -72,6 +72,7 @@ Shipped in the package; players do not need to change them.
 | `bridge.conf` | `perfLogIntervalFrames` | `0` | Diagnostics off: with them on, their tables fragment the process heap |
 | `bridge.conf` | `serverChannelMemSize` | `72MB` | The server's channel |
 | `bridge.conf` | `rewindMode` | not set | Rewind mode for test harnesses (patch 0015); off for play |
+| `bridge.conf` | `rewindMaxKeptMB` | not set (1024) | With rewind mode: megabytes a snapshot may keep alive on the server before it is given up |
 | `dxvk.conf` | `d3d9.customVendorId`, `d3d9.customDeviceId`, `d3d9.customDeviceDesc` | `10de`, `1080`, `Geforce GTX 580` | DXVK's TS3W profile, so `Options.ini` is kept |
 | `dxvk.conf` | `d3d9.countLosableResources` | `False` | A Reset succeeds although one losable resource is still alive |
 
@@ -186,25 +187,45 @@ patches in order and builds x86 and x64 with meson; `package.ps1` makes the zip.
 A test harness can snapshot the game process after a world load and later put its memory back, so one load serves many
 test runs that start from the same state. The game then holds the D3D9 state of the snapshot again, and the server has
 to return to it too. `rewindMode = True` in both copies of `bridge.conf` adds that. Without the option nothing changes:
-the client makes no cooperation block and the server takes no snapshot.
+the client makes no cooperation block, the server takes no snapshot, and each added hook is one test of a flag that is
+never set.
+
+A rewind is exact or it does not happen. What the server cannot put back makes it give the snapshot up, free what it
+kept and refuse every rewind to it, before anything changes.
 
 - **Quiet point.** The client publishes a cooperation block, the named mapping `Local\rewind-coop-<client pid>`. When
-  the host sets `request` there, the client stops at the end of the next `Present`. For each `op` the host writes
-  (1 snapshot, 2 rewind, 3 report only) it sends one synchronous `Bridge_Rewind` command, so both command queues are
-  empty once the answer is read. It then sets `parked` and sleeps until the host clears `request`.
-- **Snapshot.** The server copies its handle tables, takes a state block and the render targets of each device, and
-  records the data queue positions of both bridges.
-- **While a snapshot is held.** A destroy of an object alive at the snapshot is deferred. Before the first upload into
-  such a vertex buffer, index buffer or surface, the server keeps the old contents, up to 1 GB in total.
-- **Rewind.** The server puts the kept contents back, releases the objects made since the snapshot, restores the handle
-  tables, the render targets, the device state and the data queue positions, and then signals the client.
-- **Answer.** Each answer carries eight numbers: objects kept, to revive, to drop, buffers and surfaces with kept
-  contents, their size in KB, writes whose old contents were not kept, and whether the server refuses a rewind.
+  the host sets `request` there, the client stops at the end of the next `Present`. Other threads of the game can send
+  commands too (a command only takes its channel's send lock, and `Present` does not take the device lock), so the
+  parked client holds the send locks of both channels. For each `op` the host writes (1 snapshot, 2 rewind, 3 report
+  only, 4 let the snapshot go) it sends one synchronous `Bridge_Rewind` command, then checks that no other thread sent
+  in between and that every answer was read. If not, the Op is refused.
+- **Snapshot.** The server copies its handle tables and takes each device's state block, bound render targets, gamma
+  ramp and query results. It copies every render target and depth surface on the device, except the back buffers of a
+  swap chain that discards (D3D9 leaves their contents undefined after a `Present`), and records the data queue
+  positions of both bridges.
+- **While a snapshot is held.** A destroy of an object alive at the snapshot is deferred. Before the first write into
+  such a vertex buffer, index buffer or surface (an upload, `UpdateSurface`, `UpdateTexture`, `StretchRect`,
+  `ColorFill`, `GetRenderTargetData`, `GetFrontBufferData`) the server keeps the old contents, and before the first
+  `SetLOD` the old value. Kept contents and deferred objects together stay under `rewindMaxKeptMB` (1024). The log
+  reports them every 128 MB; past the limit the snapshot is given up.
+- **Rewind.** The server puts the kept contents back, releases the objects made since the snapshot, and restores the
+  handle tables, render targets, device state and data queue positions. A query issued again since the snapshot answers
+  with its result at the snapshot until the game issues it once more. The server then signals the client and reads no
+  command until the client's process is back at the snapshot, so a command of the abandoned run is never executed.
+- **Answer.** `S_OK`, or `E_FAIL` (refused, nothing was changed; the reason is in the log), or `E_ABORT` (a rewind
+  failed part-way: the D3D9 state is undefined, the host ends the game, and every later Op answers the same). Each
+  answer carries eight numbers: objects kept, to revive, to drop, buffers and surfaces with kept contents, the memory
+  kept alive in KB, cursor commands since the snapshot, and whether the server refuses a rewind.
 
-Limits: render target contents are not put back, so a rewind is exact only for what the game redraws each frame.
-`UpdateSurface`, `UpdateTexture`, `StretchRect`, `ColorFill`, `GetDC`, `GenerateMipSubLevels` and volume uploads are
-counted, not undone. A device reset, creation or destruction after the snapshot makes the server refuse the rewind.
-The shared heap (`useSharedHeap`, off here) is not covered. Not yet validated in game.
+Refused by design, with the reason in `bridge64.log`: a multisampled render target or depth surface (a copy may
+resolve its samples), a depth surface the D3D9 library does not copy, a write into a volume texture from before the
+snapshot, a query whose result was not ready at the snapshot and is issued again, a device reset, creation or
+destruction, `SetDialogBoxMode`, `SetAutoGenFilterType`, Remix API and shared heap commands, and an upload in progress.
+Cursor commands are not undone; they are counted for the host.
+
+`native\remix-bridge\test-rewind.cmd` runs the offline tests after `build.cmd`: the server side on a D3D9 device
+(system d3d9 and DXVK), and a 32-bit test app through the built bridge pair with the mode on and off. The rewind of a
+whole game process needs the host tool and is validated in game ([validation](../validation/rtx-remix-bridge.md)).
 
 ## Rejected approaches
 

@@ -36,3 +36,17 @@ DXVK refusing each `Reset` ("device still has alive losable resources: Remaining
 Reset again every frame. DXVK's resources are not lost on a Reset, so the package's `dxvk.conf` sets
 `d3d9.countLosableResources = False`: DXVK resets anyway and the one resource left alive stays valid. Confirmed in game
 the same day; the zip was published again. Which resource stays alive was not found.
+
+### 2026-11-15: rewind mode for test harnesses
+
+A world load takes minutes, and a test that needs the same start state pays it every time. A harness that snapshots
+the game process and puts its memory back avoids the load, but under the bridge the renderer lives in the server,
+which a rewind of the game alone leaves in the later state: other data queue positions, ids handed out twice,
+destroyed objects the game uses again. Patch 0015 adds the server's side, off unless `rewindMode = True`.
+
+The first version left render target contents alone and counted the writes it could not undo. That is a silent
+difference in the picture, so the patch now copies render targets and depth surfaces at the snapshot and refuses
+what it cannot put back exactly (multisampled targets, volume writes). The client code showed that nothing limits
+D3D9 calls to one thread: a command takes only its channel's send lock and `Present` does not take the device
+lock. The parked client therefore holds both send locks, and the server reads no command between a rewind and the
+client's return to the snapshot.
