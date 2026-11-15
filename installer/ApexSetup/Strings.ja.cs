@@ -212,7 +212,7 @@ public static partial class Strings
         ["Your Apex Radiance settings are always kept."] = "Apex Radiance の設定は常に保持されます。",
         ["No internet connection"] = "インターネットに接続されていません",
         ["Vulkan, DXVK (recommended)"] = "Vulkan、DXVK（推奨）",
-        ["Vulkan with more memory (RTX Remix bridge, experimental)"] = "Vulkan、空きメモリ多め（RTX Remix bridge、試験的）",
+        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan、空きメモリ多め（RTX Remix bridge）",
         ["DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0})."] = "DXVK と RTX Remix bridge には Vulkan 1.3 対応のグラフィックカードが必要です（検出：{0}）。",
         ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again."] = "グラフィックドライバーが古いため、DXVK と RTX Remix bridge を使えません（不足：{0}）。グラフィックドライバーを更新してから、Setup をもう一度開いてください。",
         ["{0} cannot start with this graphics driver (missing: {1}), so the game closes at start. Update the graphics driver, or choose Windows default (Direct3D 9) in Change components."] = "{0} はこのグラフィックドライバーでは起動できません（不足：{1}）。そのためゲームは起動時に終了します。グラフィックドライバーを更新するか、コンポーネントを変更 で Windows 標準（Direct3D 9） を選んでください。",

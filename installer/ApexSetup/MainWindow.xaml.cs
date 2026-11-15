@@ -831,7 +831,7 @@ public sealed partial class MainWindow : Window
         var (title, desc) = r switch
         {
             RDxvk => (T("Vulkan, DXVK (recommended)"), T("Fewer stutters; Apex Radiance is made and tested with it.")),
-            RBridge => (T("Vulkan with more memory (RTX Remix bridge, experimental)"), T("Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK.")),
+            RBridge => (T("Vulkan with more memory (RTX Remix bridge)"), T("Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK.")),
             RNative => (T("Windows default (Direct3D 9)"), T("Works, but Apex Radiance is tested with DXVK.")),
             _ => (T("Keep my d3d9.dll"), T("Your d3d9.dll stays as it is.")),
         };

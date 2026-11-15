@@ -223,7 +223,7 @@ public static partial class Strings
         ["Your Apex Radiance settings are always kept."] = "Az Apex Radiance beállításaid mindig megmaradnak.",
         ["No internet connection"] = "Nincs internetkapcsolat",
         ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (ajánlott)",
-        ["Vulkan with more memory (RTX Remix bridge, experimental)"] = "Vulkan több memóriával (RTX Remix bridge, kísérleti)",
+        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan több memóriával (RTX Remix bridge)",
         ["DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0})."] = "A DXVK-hoz és az RTX Remix bridge-hez Vulkan 1.3-at támogató videokártya kell (talált: {0}).",
         ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again."] = "A videokártya-illesztőprogram túl régi a DXVK-hoz és az RTX Remix bridge-hez (hiányzik: {0}). Frissítse az illesztőprogramot, majd nyissa meg újra a Setupot.",
         ["{0} cannot start with this graphics driver (missing: {1}), so the game closes at start. Update the graphics driver, or choose Windows default (Direct3D 9) in Change components."] = "A(z) {0} nem indul el ezzel a videokártya-illesztőprogrammal (hiányzik: {1}), ezért a játék induláskor bezáródik. Frissítse az illesztőprogramot, vagy válassza a(z) Windows alapértelmezett (Direct3D 9) lehetőséget itt: Összetevők módosítása.",
