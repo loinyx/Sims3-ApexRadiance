@@ -6,6 +6,10 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k401Improved[] = {
+    "Apex Radiance Setup: the RTX Remix bridge is now the recommended renderer",
+    nullptr};
+
 constexpr const char* k400Added[] = {
     "Shaders: run ReShade and GShade looks in Apex, without either installed",
     "Shaders: five built-in looks to start from, and your own .fx files",
@@ -638,6 +642,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"4.0.1", "2026-11-15", nullptr, k401Improved, nullptr},
     {"4.0.0", "2026-11-14", k400Added, k400Improved, k400Fixed,
      "ReShade looks inside Apex, and screenshots and videos with your effects", k400Highlights},
     {"3.2.3", "2026-11-14", nullptr, k323Improved, k323Fixed},

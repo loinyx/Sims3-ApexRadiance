@@ -97,6 +97,7 @@ const I18n::Pair kPairs[] = {
     {"Performance: trees and plants near lamps cost half as much to draw at night", "效能：夜間燈具附近的樹木和植物繪製開銷減半"},
     {"No crash after deleting lamps", "刪除燈具後不再當機"},
     {"RTX Remix bridge: some lots no longer draw their ground black", "RTX Remix bridge：部分地塊的地面不再顯示為黑色"},
+    {"Apex Radiance Setup: the RTX Remix bridge is now the recommended renderer", "Apex Radiance Setup：現在推薦使用 RTX Remix bridge 渲染器"},
     {"Shaders: run ReShade and GShade looks in Apex, without either installed", "著色器：在 Apex 中使用 ReShade 和 GShade 外觀，無需安裝它們"},
     {"Shaders: five built-in looks to start from, and your own .fx files", "著色器：五個內建外觀可直接使用，也能用你自己的 .fx 檔案"},
     {"Shaders: download ReShade's shader packs from the menu, choosing which ones", "著色器：在選單中下載 ReShade 的著色器包，自選需要的"},

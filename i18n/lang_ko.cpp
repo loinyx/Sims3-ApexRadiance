@@ -97,6 +97,7 @@ const I18n::Pair kPairs[] = {
     {"Performance: trees and plants near lamps cost half as much to draw at night", "성능: 밤에 램프 근처의 나무와 식물을 그리는 비용이 절반으로 줄었습니다"},
     {"No crash after deleting lamps", "램프를 삭제한 뒤에도 충돌하지 않습니다"},
     {"RTX Remix bridge: some lots no longer draw their ground black", "RTX Remix bridge: 일부 부지가 더 이상 바닥을 검게 그리지 않습니다"},
+    {"Apex Radiance Setup: the RTX Remix bridge is now the recommended renderer", "Apex Radiance Setup: 이제 RTX Remix bridge가 권장 렌더러입니다"},
     {"Shaders: run ReShade and GShade looks in Apex, without either installed", "셰이더: ReShade와 GShade 룩을 Apex에서 사용, 둘 다 설치할 필요 없음"},
     {"Shaders: five built-in looks to start from, and your own .fx files", "셰이더: 바로 쓸 수 있는 기본 룩 5개와 내 .fx 파일"},
     {"Shaders: download ReShade's shader packs from the menu, choosing which ones", "셰이더: 메뉴에서 ReShade 셰이더 팩을 골라서 다운로드"},

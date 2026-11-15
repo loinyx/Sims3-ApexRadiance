@@ -97,6 +97,7 @@ const I18n::Pair kPairs[] = {
     {"Performance: trees and plants near lamps cost half as much to draw at night", "Prestazioni: alberi e piante vicino alle lampade costano la metà da disegnare di notte"},
     {"No crash after deleting lamps", "Nessun crash dopo aver eliminato delle lampade"},
     {"RTX Remix bridge: some lots no longer draw their ground black", "RTX Remix bridge: alcuni lotti non disegnano più il terreno nero"},
+    {"Apex Radiance Setup: the RTX Remix bridge is now the recommended renderer", "Apex Radiance Setup: il RTX Remix bridge è ora il renderer consigliato"},
     {"Shaders: run ReShade and GShade looks in Apex, without either installed", "Shader: i look di ReShade e GShade in Apex, senza installare nessuno dei due"},
     {"Shaders: five built-in looks to start from, and your own .fx files", "Shader: cinque look integrati per iniziare e i tuoi file .fx"},
     {"Shaders: download ReShade's shader packs from the menu, choosing which ones", "Shader: scarica i pacchetti di shader di ReShade dal menu, scegliendo quali"},
