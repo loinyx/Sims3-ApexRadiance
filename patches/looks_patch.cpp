@@ -1812,6 +1812,7 @@ bool ShaderRow(size_t i, int pos, int count, bool& reorder)
                 ImGui::SameLine(0.0f, ApexUi::kSpace3 * u);
             }
             bool on = !IsOff(i);
+            ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (h - ApexUi::ToggleSwitchSize().y) * 0.5f); // centred on the row's controls line
             if (ApexUi::ToggleSwitch("##On", &on))
             {
                 SwitchEntry(i, on);
@@ -2207,7 +2208,7 @@ void PackRow(const Looks::Packs::Pack& p, bool* pick, const std::string& line, c
     const float pad = ApexUi::kSpace1 * u; // above and below each row, so rows read apart
     const ImVec2 start(ImGui::GetCursorScreenPos().x, ImGui::GetCursorScreenPos().y + pad);
     const float avail = ImGui::GetContentRegionAvail().x;
-    const float textX = start.x + box + gap;
+    const float textX = start.x + ((pick || busy) ? box + gap + ApexUi::kSpace1 * u : 0.0f);
     const float menuW = fh;
     const float icon = ApexUi::kIconSmall * u;
     const float statusW = status.empty() ? 0.0f : ImGui::CalcTextSize(status.c_str()).x + (statusIcon != IconId::None ? icon + ApexUi::kSpace1 * u : 0.0f);
@@ -2217,8 +2218,17 @@ void PackRow(const Looks::Packs::Pack& p, bool* pick, const std::string& line, c
     const int lines = 2 + (!status.empty() && !statusRight);
     const float rowH = std::max(fh, lines * lh + (lines - 1) * ApexUi::kSpace1 * u);
     ImDrawList* dl = ImGui::GetWindowDrawList();
+    // a hairline between rows, as the Library's; a pickable row is clicked anywhere left of its buttons, lit while picked
+    dl->AddLine(ImVec2(start.x, start.y - pad), ImVec2(start.x + avail, start.y - pad), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kCardBorder)), 1.0f);
+    const float slotX = start.x + avail - menuW;
     if (pick)
     {
+        ImGui::SetCursorScreenPos(ImVec2(textX, start.y - pad));
+        if (ImGui::InvisibleButton("##Row", ImVec2(std::max(1.0f, slotX - gap - textX), rowH + 2.0f * pad))) *pick = !*pick;
+        if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+        if (*pick)
+            dl->AddRectFilled(ImVec2(start.x - gap, start.y - pad + 1.0f), ImVec2(start.x + avail + gap, start.y + rowH + pad),
+                              ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kAccent, 0.10f)), 6.0f * u);
         ImGui::SetCursorScreenPos(ImVec2(start.x, start.y + (rowH - box) * 0.5f));
         ApexUi::Checkbox("##Pick", pick);
     }
@@ -2236,7 +2246,7 @@ void PackRow(const Looks::Packs::Pack& p, bool* pick, const std::string& line, c
         if (cut && ImGui::IsMouseHoveringRect(ImVec2(x, y), ImVec2(right, y + lh))) ApexUi::ShowFullText(s);
     };
     const float y0 = start.y + (rowH - (lines * lh + (lines - 1) * ApexUi::kSpace1 * u)) * 0.5f;
-    text(textX, y0, nameRight, p.name, VioletTheme::kText, true);
+    text(textX, y0, nameRight, p.name, VioletTheme::kText, false);
     text(textX, y0 + lh + ApexUi::kSpace1 * u, textRight, line, lineRgb, false);
     if (!status.empty())
     {
@@ -2249,7 +2259,7 @@ void PackRow(const Looks::Packs::Pack& p, bool* pick, const std::string& line, c
         }
         text(sx, sy, textRight, status, statusRgb, false);
     }
-    ImGui::SetCursorScreenPos(ImVec2(start.x + avail - menuW, start.y + (rowH - fh) * 0.5f));
+    ImGui::SetCursorScreenPos(ImVec2(start.x + avail - fh, start.y + (rowH - fh) * 0.5f));
     PackMenu(p, downloaded);
     ImGui::SetCursorScreenPos(ImVec2(start.x, start.y - pad));
     ImGui::Dummy(ImVec2(avail, rowH + 2.0f * pad));
