@@ -447,7 +447,7 @@ void Effect(IDirect3DDevice9* dev)
     g_boundaryThisFrame = true;
     unsigned mask = 1u << kBoundary;
     if (!g_stripExpected) { mask |= 1u << kAfterBloom; g_afterBloomDone = true; }
-    g_mode = "scene boundary";
+    g_mode = "at the scene boundary";
     EffectImpl(dev, false, mask);
 }
 
@@ -490,7 +490,7 @@ void AtEndScene(IDirect3DDevice9* dev)
     if (g_boundaryThisFrame && !g_afterBloomDone)
         PartWhy("no bloom strip came after the scene boundary (the after-bloom shaders run at the boundary next frame)");
     if (!g.onUi) return; // UI left clean: nothing at the end of frame
-    g_mode = "end of frame";
+    g_mode = "at the end of frame";
     EffectImpl(dev, true, 1u << kEndOfFrame);
 }
 
@@ -603,7 +603,7 @@ void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask)
             const int slot = atEndScene ? 2 : (mask & (1u << kBoundary)) ? 0 : 1;
             if (lastLine[slot].empty() || !(k == lastKey[slot]) || skipped != lastSkipped[slot])
             {
-                std::string s = std::format("drawing at the {} on {}x{} (format {}), depth {}: {} shaders, {}, mix {:.0f}%",
+                std::string s = std::format("drawing {} on {}x{} (format {}), depth {}: {} shaders, {}, mix {:.0f}%",
                     g_mode, rd.Width, rd.Height, (int)rd.Format, depth ? "yes" : "no", steps.size(), drew ? "drew" : "nothing drawn", g.mix * 100.0f);
                 if (keptOffUi) s += std::format("; {} kept off the UI (depth{})", keptOffUi, g_boundaryThisFrame ? ", run on the world before it" : "");
                 if (!skipped.empty()) { s += "; skipped:"; for (auto& sk : skipped) s += " " + sk; }

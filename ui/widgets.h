@@ -214,7 +214,8 @@ bool FitClosedText(std::string_view text, float maxW, std::string& out);
 void ShowFullText(std::string_view text);
 // Sidebar entry: icon + label, filled background and a violet bar when selected. True when clicked. collapsed = the
 // icon-only rail (the label becomes the hover tooltip).
-bool SidebarItem(IconId icon, const char* label, bool selected, bool collapsed = false);
+// badge: a small chip at the item's right ("Beta"); with the sidebar collapsed it joins the tooltip
+bool SidebarItem(IconId icon, const char* label, bool selected, bool collapsed = false, const char* badge = nullptr);
 // Sidebar group label ("WORLD"): the GroupLabel look, aligned with the items' icons, with kSpace3 above it; collapsed =
 // a short hairline instead of the text
 void SidebarGroup(const char* text, bool collapsed = false);

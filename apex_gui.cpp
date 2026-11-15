@@ -3825,7 +3825,7 @@ void Sidebar(bool collapsed) {
         if (kPublicBuild && item.page == PageDeveloper) continue;
         if (item.page == PageConflicts && !HasAttentionItems() && g_page != PageConflicts) continue;
         if (item.group) ApexUi::SidebarGroup(item.group, collapsed);
-        if (ApexUi::SidebarItem(item.icon, item.label, g_page == item.page && !searching && !WelcomeActive(), collapsed)) {
+        if (ApexUi::SidebarItem(item.icon, item.label, g_page == item.page && !searching && !WelcomeActive(), collapsed, item.page == PageShaders ? "Beta" : nullptr)) {
             g_page = item.page;
             HideWelcome(); // another page: the welcome is not shown again
             g_search[0] = '\0'; // leaving the search results

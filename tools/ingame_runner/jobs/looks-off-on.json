@@ -13,7 +13,7 @@
       "expect": [
         "\\[Looks\\] Installed",
         "\\[Looks\\] preset loaded: Cinematic: (\\d+) of \\1 shaders built in",
-        "\\[Looks\\] drawing at .*\\d+ shaders, drew, mix"
+        "\\[Looks\\] drawing (at|after) .*\\d+ shaders, drew, mix"
       ]
     }
   },
@@ -21,7 +21,7 @@
     "\\[(WARN|ERROR)\\] \\[Looks\\]",
     "\\[Looks\\] stopped:",
     "\\[Looks\\] nothing to run",
-    "\\[Looks\\] drawing at .*; skipped:"
+    "\\[Looks\\] drawing (at|after) .*; skipped:"
   ],
   "steps": [
     { "do": "speed", "speed": "normal" },

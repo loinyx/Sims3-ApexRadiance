@@ -68,6 +68,10 @@ struct Session {
     HANDLE audioEvent = nullptr;
     std::atomic<bool> audioStop{false};
     LONGLONG lastVideoT = -1;
+    // for the log: samples the encoder refused (and the first error), game sound written and filled with silence
+    std::atomic<unsigned> videoFails{0}, audioFails{0};
+    std::atomic<long> firstVideoHr{S_OK}, firstAudioHr{S_OK};
+    std::atomic<unsigned long long> audioFrames{0}, silentFrames{0};
 };
 
 struct Slot { IDirect3DSurface9* rt = nullptr; IDirect3DSurface9* sys = nullptr; IDirect3DQuery9* q = nullptr; int state = 0; LONGLONG t = 0; };
@@ -172,7 +176,12 @@ bool WriteAudio(Session& s, const BYTE* data, UINT32 frames, LONGLONG t) {
         buf->SetCurrentLength(bytes);
         ok = SUCCEEDED(MFCreateSample(&smp)) && SUCCEEDED(smp->AddBuffer(buf)) && SUCCEEDED(smp->SetSampleTime(t)) &&
              SUCCEEDED(smp->SetSampleDuration(frames * kHns / kRate));
-        if (ok) { std::lock_guard<std::mutex> lk(s.writerLock); ok = s.writer && SUCCEEDED(s.writer->WriteSample(s.as, smp)); } // null once finalized
+        if (ok) {
+            std::lock_guard<std::mutex> lk(s.writerLock); // null once finalized
+            const HRESULT hr = s.writer ? s.writer->WriteSample(s.as, smp) : E_POINTER;
+            ok = SUCCEEDED(hr);
+            if (!ok && s.audioFails++ == 0) s.firstAudioHr = hr;
+        }
     }
     SafeRelease(smp);
     SafeRelease(buf);
@@ -184,7 +193,11 @@ bool WriteAudio(Session& s, const BYTE* data, UINT32 frames, LONGLONG t) {
 void AudioLoop(std::shared_ptr<Session> sp) {
     Session& s = *sp;
     const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    if (FAILED(s.audio->Start())) { if (SUCCEEDED(com)) CoUninitialize(); return; }
+    if (const HRESULT hr = s.audio->Start(); FAILED(hr)) {
+        LOG_WARNING(std::format("[Video] Game sound did not start ({:#x}): the video has no sound", static_cast<unsigned>(hr)));
+        if (SUCCEEDED(com)) CoUninitialize();
+        return;
+    }
     const LONGLONG freq = QpcFreq();
     const LONGLONG start = (Qpc() - s.qpc0) * kHns / freq;
     LONGLONG frames = 0;
@@ -200,6 +213,7 @@ void AudioLoop(std::shared_ptr<Session> sp) {
             if (n) {
                 WriteAudio(s, (flags & AUDCLNT_BUFFERFLAGS_SILENT) ? nullptr : data, n, timeAt(frames));
                 frames += n;
+                s.audioFrames += n;
             }
             s.capture->ReleaseBuffer(n);
         }
@@ -210,10 +224,40 @@ void AudioLoop(std::shared_ptr<Session> sp) {
             const UINT32 n = static_cast<UINT32>(std::min<LONGLONG>(behind * kRate / kHns, kRate));
             WriteAudio(s, nullptr, n, timeAt(frames));
             frames += n;
+            s.audioFrames += n;
+            s.silentFrames += n;
         }
     }
     s.audio->Stop();
     if (SUCCEEDED(com)) CoUninitialize();
+}
+
+// The video encoder Media Foundation picked (its friendly name; hardware encoders name the GPU), for the log
+std::string EncoderName(Session& s) {
+    std::string name = "unknown";
+    IMFSinkWriterEx* ex = nullptr;
+    if (SUCCEEDED(s.writer->QueryInterface(IID_PPV_ARGS(&ex)))) {
+        for (DWORD i = 0;; ++i) {
+            GUID category{};
+            IMFTransform* t = nullptr;
+            if (FAILED(ex->GetTransformForStream(s.vs, i, &category, &t))) break;
+            if (category == MFT_CATEGORY_VIDEO_ENCODER) {
+                IMFAttributes* a = nullptr;
+                wchar_t* w = nullptr;
+                UINT32 n = 0;
+                if (SUCCEEDED(t->GetAttributes(&a)) && a && SUCCEEDED(a->GetAllocatedString(MFT_FRIENDLY_NAME_Attribute, &w, &n))) {
+                    name = ApexUtil::ToUtf8(w);
+                    CoTaskMemFree(w);
+                }
+                UINT32 hw = 0;
+                if (a && SUCCEEDED(a->GetUINT32(MFT_ENUM_HARDWARE_URL_Attribute, &hw))) name += " (hardware)";
+                SafeRelease(a);
+            }
+            SafeRelease(t);
+        }
+        SafeRelease(ex);
+    }
+    return name;
 }
 
 // ---- the encoder (worker thread) ----
@@ -318,7 +362,11 @@ void Worker(std::shared_ptr<Session> sp) {
             if (s.audioEvent) { CloseHandle(s.audioEvent); s.audioEvent = nullptr; }
         }
     }
-    if (ok && FAILED(s.writer->BeginWriting())) { ok = false; why = "the MP4 file could not be started"; }
+    if (ok) {
+        if (const HRESULT hr = s.writer->BeginWriting(); FAILED(hr)) { ok = false; why = std::format("the MP4 file could not be started ({:#x})", static_cast<unsigned>(hr)); }
+        else LOG_INFO(std::format("[Video] Writer started: {} encoder \"{}\", {}{}", s.o.hevc && s.notes.find("HEVC not available") == std::string::npos ? "HEVC" : "H.264",
+                                  EncoderName(s), s.hasAudio ? "game sound 48 kHz stereo" : "no sound", s.notes.empty() ? "" : "; " + s.notes));
+    }
     if (!ok) {
         s.error = mf ? why : "Media Foundation is not available";
         s.failed = true;
@@ -367,7 +415,9 @@ void Worker(std::shared_ptr<Session> sp) {
                 buf->SetCurrentLength(bytes);
                 if (SUCCEEDED(MFCreateSample(&smp)) && SUCCEEDED(smp->AddBuffer(buf)) && SUCCEEDED(smp->SetSampleTime(t)) && SUCCEEDED(smp->SetSampleDuration(dur))) {
                     std::lock_guard<std::mutex> lk(s.writerLock);
-                    if (SUCCEEDED(s.writer->WriteSample(s.vs, smp))) s.written++;
+                    const HRESULT hr = s.writer->WriteSample(s.vs, smp);
+                    if (SUCCEEDED(hr)) s.written++;
+                    else if (s.videoFails++ == 0) { s.firstVideoHr = hr; LOG_WARNING(std::format("[Video] The encoder refused a frame ({:#x}); later refusals are counted", static_cast<unsigned>(hr))); }
                 }
             }
             SafeRelease(smp);
@@ -387,10 +437,21 @@ void Worker(std::shared_ptr<Session> sp) {
     const bool audioEnded = !audioDone || WaitForSingleObject(audioDone, 5000) == WAIT_OBJECT_0;
     if (audioEnded && audioDone) CloseHandle(audioDone);
     HRESULT fin;
+    const ULONGLONG finStart = GetTickCount64();
     { // under the lock: a sound thread that missed the wait finds no writer instead of a released one
         std::lock_guard<std::mutex> lk(s.writerLock);
         fin = s.writer->Finalize();
         SafeRelease(s.writer);
+    }
+    {
+        const double secs = s.lastVideoT > 0 ? s.lastVideoT / static_cast<double>(kHns) : 0.0;
+        LOG_INFO(std::format("[Video] Encoder done: {} frames written over {:.1f} s ({:.1f} fps of {} asked), {} dropped (encoder behind), {} refused{}; "
+                             "sound {}: {:.1f} s, {:.1f} s of it silence, {} refused{}; finalize {} ms ({:#x}){}",
+                             s.written.load(), secs, secs > 0 ? s.written.load() / secs : 0.0, s.o.fps, s.dropped.load(), s.videoFails.load(),
+                             s.videoFails ? std::format(" (first {:#x})", static_cast<unsigned>(s.firstVideoHr.load())) : "",
+                             s.hasAudio ? "on" : "off", s.audioFrames.load() / static_cast<double>(kRate), s.silentFrames.load() / static_cast<double>(kRate),
+                             s.audioFails.load(), s.audioFails ? std::format(" (first {:#x})", static_cast<unsigned>(s.firstAudioHr.load())) : "",
+                             GetTickCount64() - finStart, static_cast<unsigned>(fin), audioEnded ? "" : "; the sound thread did not stop within 5 s"));
     }
     if (audioEnded) { // else the sound thread may still use them: left to the process
         SafeRelease(s.capture);
@@ -412,7 +473,11 @@ void Worker(std::shared_ptr<Session> sp) {
         std::filesystem::path mkv = s.file;
         mkv.replace_extension(L".mkv");
         std::string mkvWhy;
-        if (MkvRemux::Mp4ToMkv(s.file, mkv, mkvWhy)) {
+        const ULONGLONG remuxStart = GetTickCount64();
+        const bool remuxed = MkvRemux::Mp4ToMkv(s.file, mkv, mkvWhy);
+        LOG_INFO(remuxed ? std::format("[Video] MKV made from the MP4 in {} ms", GetTickCount64() - remuxStart)
+                         : std::format("[Video] MKV not made after {} ms: {}", GetTickCount64() - remuxStart, mkvWhy));
+        if (remuxed) {
             if (!s.o.keepMp4) DeleteFileW(s.file.c_str());
             s.file = mkv; // the saved video (Finish)
             if (GetFileAttributesExW(mkv.c_str(), GetFileExInfoStandard, &d)) size = (static_cast<unsigned long long>(d.nFileSizeHigh) << 32) | d.nFileSizeLow;

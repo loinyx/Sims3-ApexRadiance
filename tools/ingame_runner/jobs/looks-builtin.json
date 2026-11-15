@@ -28,13 +28,13 @@
   },
   "expect": [
     "\\[Looks\\] Installed",
-    "\\[Looks\\] drawing at .*\\d+ shaders, drew, mix"
+    "\\[Looks\\] drawing (at|after) .*\\d+ shaders, drew, mix"
   ],
   "fail": [
     "\\[(WARN|ERROR)\\] \\[Looks\\]",
     "\\[Looks\\] stopped:",
     "\\[Looks\\] nothing to run",
-    "\\[Looks\\] drawing at .*; skipped:"
+    "\\[Looks\\] drawing (at|after) .*; skipped:"
   ],
   "steps": [
     { "do": "speed", "speed": "normal" },

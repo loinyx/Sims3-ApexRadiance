@@ -1,0 +1,7 @@
+{
+  "description": "Shaders \"World only\" against \"World and menus\" on the night save: where the look draws, and a paused F8 screenshot of each to compare with profilers/compare_pngs.py. 2 game starts.",
+  "ab": true,
+  "jobs": [
+    "../jobs/looks-world-only.json"
+  ]
+}

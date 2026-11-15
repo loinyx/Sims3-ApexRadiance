@@ -329,6 +329,21 @@ loads (the last column says how many) rather than reading the means.
 | `looks-builtin` | one start per built-in look: Natural, Warm evening, Cinematic, Soft vintage, Vivid | the same log checks for each look, and no crash | pass or fail per look; the largest free block per look in the notes |
 | `capture` | one start | F8 takes a filtered screenshot; F12 (set as the record key for the run) starts a video, again after 12 s stops it; a non-empty PNG and MP4 in the load's `captures` folder, `[Video] Video saved` in the log | the files, their sizes and the MP4's length (with `ffprobe` on PATH) in the notes; the files are in `<load>\captures` |
 
+`queues/world-only.json` runs `looks-world-only`: `apex:Cinematic` at full strength, one start with "World only"
+(`onUi = false`) and one with "World and menus" (`onUi = true`), each paused for a minute and then an F8 screenshot
+with the game UI hidden into the load's `captures` folder. Checks: world-only has a `drawing at the after the game's
+bloom ... drew` line (a load that only ever draws at the scene boundary fails it) and never draws at the end of frame;
+world-and-menus has a `drawing at the end of frame ... drew` line; the screenshot is written. Then compare the two
+screenshots (the newest PNG under each folder):
+
+```powershell
+python -I tools/ingame_runner/profilers/compare_pngs.py outputs/ingame/<run>/looks-world-only-1-world-only/captures outputs/ingame/<run>/looks-world-only-2-world-and-menus/captures
+```
+
+It prints each picture's mean RGB, saturation and luminance and their differences, and `PASS` (exit 0) when the mean
+luminance is within 2 levels and the mean saturation within 2 points (`--lum`, `--sat`): the same look on the world
+in both modes. Sims and effects still differ between game starts, so only the means are compared.
+
 Limits: how a look looks, and whether the screenshot and video show it, is for a person to judge (open the captures,
 or add `-Grab` to record the window in a separate run). The looks jobs keep the tester's own per-shader edits and
 switched-off shaders of `[patches.Looks]` (`tweaks`, `off`: arrays the runner does not write); a switched-off shader

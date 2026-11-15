@@ -474,6 +474,11 @@ void WritePng(ShotJob job, std::vector<BYTE> bgr, UINT w, UINT h, std::vector<BY
         }
         if (SUCCEEDED(com)) CoUninitialize();
         if (!ok) LOG_WARNING("[Captures] The screenshot could not be written: " + ApexUtil::ToUtf8(file.wstring()));
+        else {
+            std::error_code ec;
+            const auto bytes = std::filesystem::file_size(file, ec);
+            LOG_INFO(std::format("[Captures] Screenshot saved: {} ({} KB)", ApexUtil::ToUtf8(file.wstring()), ec ? 0 : bytes / 1024));
+        }
         if (job.report) CompleteShot(job.reportFolder, ok);
         else if (!ok) Notify(I18n::Tr("The screenshot could not be saved"), 4, NoteKind::Warning);
         else {

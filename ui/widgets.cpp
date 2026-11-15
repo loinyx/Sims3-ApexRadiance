@@ -1312,7 +1312,7 @@ bool IconTextButton(const char* label, IconId icon, const char* tooltip, ButtonK
 
 bool TextButton(const char* label, const char* tooltip, ButtonKind kind, float minWidth) { return DrawButton(label, IconId::None, tooltip, kind, minWidth); }
 
-bool SidebarItem(IconId icon, const char* label, bool selected, bool collapsed) {
+bool SidebarItem(IconId icon, const char* label, bool selected, bool collapsed, const char* badge) {
     const float u = Unit();
     const ImVec2 size(ImGui::GetContentRegionAvail().x, 32.0f * u);
     const ImVec2 p = ImGui::GetCursorScreenPos();
@@ -1321,8 +1321,11 @@ bool SidebarItem(IconId icon, const char* label, bool selected, bool collapsed) 
     ImGui::PopID();
     const bool hovered = ImGui::IsItemHovered();
     if (collapsed) {
-        // Icon-only rail: the label is the tooltip
-        Tooltip(label);
+        // Icon-only rail: the label is the tooltip (with its badge)
+        if (badge && ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) {
+            const std::string tip = std::string(T(label)) + "  \xC2\xB7  " + T(badge);
+            ImGui::SetTooltip("%s", tip.c_str());
+        } else Tooltip(label);
         ImDrawList* dl = ImGui::GetWindowDrawList();
         const ImVec2 q(p.x + size.x, p.y + size.y);
         const float rounding = 10.0f * u;
@@ -1356,9 +1359,20 @@ bool SidebarItem(IconId icon, const char* label, bool selected, bool collapsed) 
         DrawIcon(dl, icon, ImVec2(x, p.y + (size.y - s) * 0.5f), s, selected ? U32(VioletTheme::kAccent) : textCol);
         x += s + 10.0f * u;
     }
+    // the badge at the right, drawn as a row's chip (not an item: the whole row stays one button)
+    float right = q.x - kSpace2 * u;
+    if (badge) {
+        const ImVec2 cs = ChipSize(badge);
+        const ImVec2 c(right - cs.x, p.y + (size.y - cs.y) * 0.5f);
+        dl->AddRectFilled(c, ImVec2(c.x + cs.x, c.y + cs.y), U32(VioletTheme::kAccentLight, 0.14f), cs.y * 0.5f);
+        PushSized(nullptr, kGroupScale);
+        DrawFitted(dl, ImVec2(c.x + kChipPadX * u, c.y + (cs.y - ImGui::GetFontSize()) * 0.5f), U32(VioletTheme::kAccentLight), T(badge), cs.x - 2.0f * kChipPadX * u);
+        ImGui::PopFont();
+        right = c.x - kSpace2 * u;
+    }
     // A label longer than the sidebar is cut with "…" (full name on hover) instead of running into the page
     const char* shown = T(label);
-    if (DrawFitted(dl, ImVec2(x, p.y + (size.y - ImGui::GetFontSize()) * 0.5f), textCol, shown, q.x - kSpace2 * u - x) &&
+    if (DrawFitted(dl, ImVec2(x, p.y + (size.y - ImGui::GetFontSize()) * 0.5f), textCol, shown, right - x) &&
         ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
         FullTextTooltip(shown);
     return clicked;
