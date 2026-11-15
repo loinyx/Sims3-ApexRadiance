@@ -100,6 +100,7 @@ struct Effect
     std::string error;          // why the whole file cannot run ("" = see each technique)
     std::vector<std::string> notes; // D3D9 fallbacks used (lowered texture formats, other compile flags)
     std::vector<Macro> macros;      // the definitions it tests (see Macro), by name
+    LooksDefines compiledWith;      // the definitions it was compiled with, as asked (MacrosMatch)
     uint64_t cacheKey = 0;          // the compile cache's key (generated code, compiler, definitions)
     uint64_t gpuBytes = 0;
 };
