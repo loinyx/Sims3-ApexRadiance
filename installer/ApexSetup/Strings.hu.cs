@@ -175,7 +175,7 @@ public static partial class Strings
         ["Depth Blur"] = "Mélységi elmosás",
         ["Ambient Occlusion"] = "Környezeti takarás",
         ["Water Reflections"] = "Víztükröződés",
-        ["Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it."] = "Vulkanon futtatja a játékot: kevesebb akadás, és az Apex Radiance ezzel készül és ezzel van tesztelve.",
+        ["Runs the game on Vulkan through the RTX Remix bridge: fewer stutters and about 600 MB more free memory for big worlds. If the game misbehaves with it or your graphics card cannot run it, use DXVK."] = "Az RTX Remix bridge-en keresztül Vulkanon futtatja a játékot: kevesebb akadás és kb. 600 MB-tal több szabad memória a nagy világokhoz. Ha a játék rosszul működik vele, vagy a videokártyád nem tudja futtatni, használd a DXVK-t.",
         ["Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings."] = "Az Apex Radiance önállóan is működik, de jól párosul a sims3fiend Sims3SettingsSetter moddal: képkockasebesség-korlát, kevesebb akadás és sok extra játékbeállítás.",
         ["Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds."] = "A DXVK-t saját 64 bites folyamatba helyezi: a játéknak kb. 600 MB-tal több szabad memóriája marad hosszú játékokhoz és nagy világokhoz.",
         ["{0} has {1} = {2}, which Setup cannot read. Setup leaves the file as it is."] = "A(z) {0} fájlban {1} = {2}, amit a telepítő nem tud beolvasni. A telepítő a fájlt változatlanul hagyja.",
@@ -253,11 +253,11 @@ public static partial class Strings
         ["{0} → updates to {1}"] = "{0} → frissül erre: {1}",
         ["{0} updates for The Sims 3 · {1}"] = "{0} frissítés a The Sims 3-hoz · {1}",
         ["Windows default (Direct3D 9)"] = "Windows alapértelmezett (Direct3D 9)",
-        ["Fewer stutters; Apex Radiance is made and tested with it."] =
-            "Kevesebb akadozás; az Apex Radiance ezzel készül, és ezzel tesztelik.",
+        ["Fewer stutters; choose it if the game misbehaves with the bridge."] =
+            "Kevesebb akadás; válaszd ezt, ha a játék rosszul működik a híddal.",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
             "Kb. 600 MB-tal több memóriát hagy szabadon a nagy világokhoz. Vulkant támogató videokártya kell hozzá. Ha a játék hibásan működik vele, válaszd a DXVK-t.",
-        ["Works, but Apex Radiance is tested with DXVK."] = "Működik, de az Apex Radiance-t a DXVK-val tesztelik.",
+        ["Works, but the RTX Remix bridge or DXVK run Apex Radiance better."] = "Működik, de az RTX Remix bridge-dzsel vagy a DXVK-val jobban fut az Apex Radiance.",
         ["Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."] =
             "A játékon belüli grafikai beállításaid egyszer visszaállhatnak. A telepítő másolatot tart róluk, és visszaállítja őket, ha visszaváltasz.",
         ["Fixes for game and graphics settings."] = "Javítások a játék és a grafika beállításaihoz.",

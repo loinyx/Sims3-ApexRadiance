@@ -174,7 +174,7 @@ public static partial class Strings
         ["Depth Blur"] = "Θόλωση Βάθους",
         ["Ambient Occlusion"] = "Ambient Occlusion",
         ["Water Reflections"] = "Αντανακλάσεις Νερού",
-        ["Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it."] = "Τρέχει το παιχνίδι σε Vulkan: λιγότερα κολλήματα, και το Apex Radiance φτιάχνεται και δοκιμάζεται με αυτό.",
+        ["Runs the game on Vulkan through the RTX Remix bridge: fewer stutters and about 600 MB more free memory for big worlds. If the game misbehaves with it or your graphics card cannot run it, use DXVK."] = "Τρέχει το παιχνίδι σε Vulkan μέσω του RTX Remix bridge: λιγότερα κολλήματα και περίπου 600 MB περισσότερη ελεύθερη μνήμη για μεγάλους κόσμους. Αν το παιχνίδι δυσλειτουργεί με αυτό ή η κάρτα γραφικών σας δεν μπορεί να το τρέξει, χρησιμοποιήστε το DXVK.",
         ["Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings."] = "Το Apex Radiance λειτουργεί μόνο του, αλλά ταιριάζει καλά με το Sims3SettingsSetter του sims3fiend: περιοριστής καρέ, λιγότερα κολλήματα και πολλές επιπλέον ρυθμίσεις παιχνιδιού.",
         ["Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds."] = "Μεταφέρει το DXVK σε δική του διεργασία 64 bit: το παιχνίδι κρατά περίπου 600 MB περισσότερη ελεύθερη μνήμη για μεγάλες συνεδρίες και μεγάλους κόσμους.",
         ["{0} has {1} = {2}, which Setup cannot read. Setup leaves the file as it is."] = "Το {0} έχει {1} = {2}, που το πρόγραμμα εγκατάστασης δεν μπορεί να διαβάσει. Το πρόγραμμα εγκατάστασης αφήνει το αρχείο ως έχει.",
@@ -251,11 +251,11 @@ public static partial class Strings
         ["{0} → updates to {1}"] = "{0} → ενημερώνεται σε {1}",
         ["{0} updates for The Sims 3 · {1}"] = "{0} ενημερώσεις για το The Sims 3 · {1}",
         ["Windows default (Direct3D 9)"] = "Προεπιλογή των Windows (Direct3D 9)",
-        ["Fewer stutters; Apex Radiance is made and tested with it."] =
-            "Λιγότερα κολλήματα· το Apex Radiance φτιάχνεται και δοκιμάζεται με αυτό.",
+        ["Fewer stutters; choose it if the game misbehaves with the bridge."] =
+            "Λιγότερα κολλήματα· επιλέξτε το αν το παιχνίδι δυσλειτουργεί με τη γέφυρα.",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
             "Κρατά περίπου 600 MB περισσότερη ελεύθερη μνήμη για μεγάλους κόσμους. Χρειάζεται κάρτα γραφικών με Vulkan. Αν το παιχνίδι δεν λειτουργεί σωστά με αυτό, διάλεξε DXVK.",
-        ["Works, but Apex Radiance is tested with DXVK."] = "Λειτουργεί, αλλά το Apex Radiance δοκιμάζεται με το DXVK.",
+        ["Works, but the RTX Remix bridge or DXVK run Apex Radiance better."] = "Λειτουργεί, αλλά με το RTX Remix bridge ή το DXVK το Apex Radiance τρέχει καλύτερα.",
         ["Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."] =
             "Οι ρυθμίσεις γραφικών του παιχνιδιού μπορεί να επανέλθουν μία φορά. Το πρόγραμμα εγκατάστασης κρατά αντίγραφο και το επαναφέρει αν γυρίσεις πίσω.",
         ["Fixes for game and graphics settings."] = "Διορθώσεις για τις ρυθμίσεις του παιχνιδιού και των γραφικών.",

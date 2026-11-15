@@ -758,9 +758,9 @@ public sealed partial class MainWindow : Window
 
     // ---------- components ----------
 
-    // the renderer choice: DXVK (Apex recommends it), the RTX Remix bridge, the game's own Direct3D 9, or another d3d9.dll kept as it is
+    // the renderer choice: the RTX Remix bridge (Apex recommends it), DXVK, the game's own Direct3D 9, or another d3d9.dll kept as it is
     const string RDxvk = "dxvk", RBridge = "bridge", RNative = "native", RKeep = "keep";
-    string _renderer = RDxvk;
+    string _renderer = RBridge;
 
     static string RendererOf(State s) => s.Layer switch { Layer.Dxvk => RDxvk, Layer.Bridge => RBridge, Layer.Native => RNative, _ => RKeep };
 
@@ -768,10 +768,9 @@ public sealed partial class MainWindow : Window
     {
         if (_state is not { } s || _defaultsFor == _game) return;
         _defaultsFor = _game;
-        // what is installed stays on; a first install takes what Apex recommends (DXVK, Sims3SettingsSetter); a game that already
-        // has Apex keeps its renderer and its choices
-        var first = s.ApexVersion is null;
-        _renderer = first && s.Layer == Layer.Native ? RDxvk : RendererOf(s);
+        // what is installed stays on; a first install takes what Apex recommends (the RTX Remix bridge, Sims3SettingsSetter); a
+        // game that already has Apex keeps its renderer and its choices (the card check, once known, moves a blocked bridge to DXVK)
+        _renderer = RendererOf(s with { Layer = Engine.DefaultLayer(s, VulkanBlocked) });
         S3ssToggle.IsOn = s.S3ss; // (optional mods start off unless installed)
         ModToggle.IsOn = s.Modernization;
         MonoToggle.IsOn = s.MonoPatcher;
@@ -830,9 +829,9 @@ public sealed partial class MainWindow : Window
     {
         var (title, desc) = r switch
         {
-            RDxvk => (T("Vulkan, DXVK"), T("Fewer stutters; Apex Radiance is made and tested with it.")),
+            RDxvk => (T("Vulkan, DXVK"), T("Fewer stutters; choose it if the game misbehaves with the bridge.")),
             RBridge => (T("Vulkan with more memory (RTX Remix bridge, recommended)"), T("Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK.")),
-            RNative => (T("Windows default (Direct3D 9)"), T("Works, but Apex Radiance is tested with DXVK.")),
+            RNative => (T("Windows default (Direct3D 9)"), T("Works, but the RTX Remix bridge or DXVK run Apex Radiance better.")),
             _ => (T("Keep my d3d9.dll"), T("Your d3d9.dll stays as it is.")),
         };
         var item = new StackPanel { Spacing = 4, Margin = new Thickness(4, 0, 0, 0) };
@@ -864,7 +863,7 @@ public sealed partial class MainWindow : Window
         SetState(RendererState, changed ? (T("Replaces {0}", LayerName(s.Layer)), "ApexAccentBrush")
             : _renderer == RDxvk ? StateLine(Components.Dxvk, true, true, false)
             : _renderer == RBridge ? StateLine(Components.Bridge, true, true, false)
-            : _renderer == RNative ? (T("Works, but Apex Radiance is tested with DXVK."), "ApexMutedBrush")
+            : _renderer == RNative ? (T("Works, but the RTX Remix bridge or DXVK run Apex Radiance better."), "ApexMutedBrush")
             : (T("Your d3d9.dll stays as it is."), "ApexMutedBrush"));
         GpuLine.Text = _vulkan is { } gpu && gpu.Card is not null ? T("Your graphics card: {0}", $"{gpu.Card} \u00b7 Vulkan {gpu.Version}") : "";
         BridgeDetail.Text = "";

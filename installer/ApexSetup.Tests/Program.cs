@@ -23,6 +23,11 @@ try
     var s = Scan.Run(g, docs);
     Check(s.Layer == Layer.Native && s.Loader is null && s.ApexVersion is null, "fresh game scans as native, no loader, no Apex");
     Check(Engine.NeedsLoader(s, true), "a loader is needed");
+    Check(Engine.DefaultLayer(s, false) == Layer.Bridge && Engine.DefaultLayer(s, true) == Layer.Dxvk,
+        "first install: the bridge by default, DXVK when the card or driver cannot run it");
+    Check(Engine.DefaultLayer(s with { ApexVersion = "4.0.0", Layer = Layer.Dxvk }, false) == Layer.Dxvk
+        && Engine.DefaultLayer(s with { ApexVersion = "4.0.0" }, false) == Layer.Native
+        && Engine.DefaultLayer(s with { Layer = Layer.Dxvk }, false) == Layer.Dxvk, "an installed renderer is kept");
     await Engine.InstallAsync(g, new[] { Components.Apex, Components.Bridge, Components.Loader }, src, null, docs);
     Check(Read(B("ApexRadiance.asi")) == "apex 3.1.1", "ApexRadiance.asi installed");
     Check(!File.Exists(B("ts3wrap.exe")) && !File.Exists(Engine.ApexToml(docs)), "Apex alone installs no ts3wrap.exe and writes no ApexRadiance.toml");
@@ -523,10 +528,10 @@ try
         File.Delete(B6("OldApex.asi"));
 
         // the components Apex recommends: pointers only, no fix
-        Check(Named("DXVK") is { Fix: null } && Named("Sims3SettingsSetter") is { Fix: null } && Named("RTX Remix bridge") is null,
-              "the game's own D3D9 and no S3SS: DXVK and S3SS suggested, nothing to apply");
+        Check(Named("RTX Remix bridge") is { Fix: null } && Named("Sims3SettingsSetter") is { Fix: null } && Named("DXVK") is null,
+              "the game's own D3D9 and no S3SS: the bridge and S3SS suggested, nothing to apply");
         File.WriteAllText(B6("d3d9.dll"), "some other wrapper");
-        Check(Named("DXVK") is not null, "an unknown d3d9.dll: DXVK suggested");
+        Check(Named("RTX Remix bridge") is not null, "an unknown d3d9.dll: the bridge suggested");
         File.WriteAllText(B6("d3d9.dll"), "dxvk d3d9");
         File.WriteAllText(B6("Sims3SettingsSetter.asi"), "s3ss");
         Check(Named("DXVK") is null && Named("Sims3SettingsSetter") is null && Named("RTX Remix bridge") is { Fix: null }, "DXVK and S3SS in: the bridge offered");

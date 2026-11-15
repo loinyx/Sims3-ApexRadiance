@@ -171,7 +171,7 @@ public static partial class Strings
         ["Depth Blur"] = "Dybdeuskarphet",
         ["Ambient Occlusion"] = "Ambient Occlusion",
         ["Water Reflections"] = "Vannrefleksjoner",
-        ["Runs the game on Vulkan: fewer stutters, and Apex Radiance is made and tested with it."] = "Kjører spillet på Vulkan: mindre hakking, og Apex Radiance er laget og testet med det.",
+        ["Runs the game on Vulkan through the RTX Remix bridge: fewer stutters and about 600 MB more free memory for big worlds. If the game misbehaves with it or your graphics card cannot run it, use DXVK."] = "Kjører spillet på Vulkan gjennom RTX Remix bridge: mindre hakking og rundt 600 MB mer ledig minne til store verdener. Hvis spillet oppfører seg feil med den eller grafikkortet ditt ikke kan kjøre den, bruk DXVK.",
         ["Apex Radiance works on its own, but it pairs well with Sims3SettingsSetter by sims3fiend: a frame rate limiter, fewer stutters and many extra game settings."] = "Apex Radiance fungerer alene, men passer godt sammen med Sims3SettingsSetter av sims3fiend: en bildefrekvensbegrenser, mindre hakking og mange ekstra spillinnstillinger.",
         ["Moves DXVK into its own 64-bit process: the game keeps about 600 MB more free memory for long sessions and big worlds."] = "Flytter DXVK til sin egen 64-biters prosess: spillet beholder rundt 600 MB mer ledig minne til lange økter og store verdener.",
         ["{0} has {1} = {2}, which Setup cannot read. Setup leaves the file as it is."] = "{0} har {1} = {2}, som installasjonsprogrammet ikke kan lese. Installasjonsprogrammet lar filen være som den er.",
@@ -247,11 +247,11 @@ public static partial class Strings
         ["{0} → updates to {1}"] = "{0} → oppdateres til {1}",
         ["{0} updates for The Sims 3 · {1}"] = "{0} oppdateringer for The Sims 3 · {1}",
         ["Windows default (Direct3D 9)"] = "Windows-standard (Direct3D 9)",
-        ["Fewer stutters; Apex Radiance is made and tested with it."] =
-            "Mindre hakking; Apex Radiance er laget og testet med det.",
+        ["Fewer stutters; choose it if the game misbehaves with the bridge."] =
+            "Færre hakk; velg den hvis spillet oppfører seg feil med broen.",
         ["Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK."] =
             "Holder rundt 600 MB mer minne ledig for store verdener. Krever et skjermkort med Vulkan. Hvis spillet oppfører seg rart med det, velger du DXVK.",
-        ["Works, but Apex Radiance is tested with DXVK."] = "Virker, men Apex Radiance er testet med DXVK.",
+        ["Works, but the RTX Remix bridge or DXVK run Apex Radiance better."] = "Fungerer, men Apex Radiance kjører bedre med RTX Remix bridge eller DXVK.",
         ["Your in-game graphics settings may reset once. Setup keeps a copy and puts it back if you switch back."] =
             "Grafikkinnstillingene i spillet kan bli tilbakestilt én gang. Installasjonsprogrammet tar vare på en kopi og legger den tilbake hvis du bytter tilbake.",
         ["Fixes for game and graphics settings."] = "Rettinger for spill- og grafikkinnstillinger.",
