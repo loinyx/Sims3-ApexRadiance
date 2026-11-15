@@ -1043,7 +1043,7 @@ void ShowShadersFolder()
 {
     HookGuard::StartDetached("Looks: open the Shaders folder", [] {
         Looks::Fx::EnsureShadersFolder();
-        const std::wstring folder = Looks::Fx::ShadersFolder();
+        const std::wstring folder = Looks::Fx::ShadersFolder() + L"Shaders\\"; // the player's own .fx (Textures beside it, Packs apart)
         const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
         if (!folder.empty()) ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
         if (SUCCEEDED(com)) CoUninitialize();
@@ -2217,7 +2217,10 @@ void PackRow(const Looks::Packs::Pack& p, bool* pick, const std::string& line, c
     const bool statusRight = !status.empty() && statusW <= (textRight - textX) * 0.45f; // else on its own line under the name
     const float nameRight = statusRight ? textRight - statusW - gap : textRight;
     const int lines = 2 + (!status.empty() && !statusRight);
-    const float rowH = std::max(fh, lines * lh + (lines - 1) * ApexUi::kSpace1 * u);
+    // as every control row: the name, 2 units, then the smaller muted line (and the status under it when narrow)
+    const float lhS = lh * ApexUi::kSmallScale, lineGap = 2.0f * u;
+    const float blockH = lh + (lines - 1) * (lineGap + lhS);
+    const float rowH = std::max(fh, blockH);
     ImDrawList* dl = ImGui::GetWindowDrawList();
     // a hairline between rows, as the Library's; a pickable row is clicked anywhere left of its buttons, lit while picked
     dl->AddLine(ImVec2(start.x, start.y - pad), ImVec2(start.x + avail, start.y - pad), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kCardBorder)), 1.0f);
@@ -2233,29 +2236,32 @@ void PackRow(const Looks::Packs::Pack& p, bool* pick, const std::string& line, c
         ImGui::SetCursorScreenPos(ImVec2(start.x, start.y + (rowH - box) * 0.5f));
         ApexUi::Checkbox("##Pick", pick);
     }
-    else if (downloaded && !busy) // in the box's place: the green check of a downloaded pack
-        ApexUi::DrawIcon(dl, IconId::CircleCheck, ImVec2(start.x + (box - ApexUi::kIconMedium * u) * 0.5f, start.y + (rowH - ApexUi::kIconMedium * u) * 0.5f),
-                         ApexUi::kIconMedium * u, ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kSuccess)));
+    else if (downloaded && !busy) // a downloaded pack: its box ticked and locked
+    {
+        const ImVec2 a(start.x, start.y + (rowH - box) * 0.5f);
+        dl->AddRectFilled(a, ImVec2(a.x + box, a.y + box), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kSuccess)), 4.0f * u);
+        ImGui::RenderCheckMark(dl, ImVec2(a.x + box * 0.2f, a.y + box * 0.2f), IM_COL32_WHITE, box * 0.6f);
+    }
     else if (busy)
     {
         ImGui::SetCursorScreenPos(ImVec2(start.x + (box - 12.0f * u) * 0.5f, start.y + (rowH - lh) * 0.5f)); // the spinner is 12 units wide
         ApexUi::BusySpinner();
     }
-    auto text =[&](float x, float y, float right, const std::string& s, unsigned rgb, bool bold) {
+    auto text =[&](float x, float y, float right, const std::string& s, unsigned rgb, bool smallText) {
         std::string shown;
-        if (bold) ImGui::PushFont(VioletTheme::BoldFont(), 0.0f);
+        if (smallText) ImGui::PushFont(nullptr, ImGui::GetFontSize() * ApexUi::kSmallScale);
         const bool cut = ApexUi::FitClosedText(s, std::max(1.0f, right - x), shown);
         dl->AddText(ImVec2(x, y), ImGui::GetColorU32(VioletTheme::Col(rgb)), shown.c_str());
-        if (bold) ImGui::PopFont();
+        if (smallText) ImGui::PopFont();
         if (cut && ImGui::IsMouseHoveringRect(ImVec2(x, y), ImVec2(right, y + lh))) ApexUi::ShowFullText(s);
     };
-    const float y0 = start.y + (rowH - (lines * lh + (lines - 1) * ApexUi::kSpace1 * u)) * 0.5f;
+    const float y0 = start.y + (rowH - blockH) * 0.5f;
     text(textX, y0, nameRight, p.name, VioletTheme::kText, false);
-    text(textX, y0 + lh + ApexUi::kSpace1 * u, textRight, line, lineRgb, false);
+    text(textX, y0 + lh + lineGap, textRight, line, lineRgb, true);
     if (!status.empty())
     {
         float sx = statusRight ? textRight - statusW : textX;
-        const float sy = statusRight ? y0 : y0 + 2 * (lh + ApexUi::kSpace1 * u);
+        const float sy = statusRight ? y0 : y0 + lh + 2.0f * (lineGap + lhS);
         if (statusIcon != IconId::None)
         {
             ApexUi::DrawIcon(dl, statusIcon, ImVec2(sx, sy + (lh - icon) * 0.5f), icon, ImGui::GetColorU32(VioletTheme::Col(statusRgb)));

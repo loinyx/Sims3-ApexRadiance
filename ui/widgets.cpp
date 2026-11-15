@@ -1178,8 +1178,8 @@ bool Checkbox(const char* label, bool* value) {
     const bool on = *value;
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f * Unit());
     ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
-    ImGui::PushStyleColor(ImGuiCol_Border, Col(on ? VioletTheme::kAccentLight : VioletTheme::kToggleOff));
-    ImGui::PushStyleColor(ImGuiCol_FrameBg, Col(on ? VioletTheme::kAccent : VioletTheme::kWindowBg));
+    ImGui::PushStyleColor(ImGuiCol_Border, Col(on ? VioletTheme::kAccentLight : 0x4A4B53));
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, Col(on ? VioletTheme::kAccent : VioletTheme::kCardBg, on ? 1.0f : 0.0f));
     ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, Col(on ? VioletTheme::kAccentLight : VioletTheme::kHoverBg));
     ImGui::PushStyleColor(ImGuiCol_FrameBgActive, Col(VioletTheme::kAccentDark));
     ImGui::PushStyleColor(ImGuiCol_CheckMark, Col(0xFFFFFF));
