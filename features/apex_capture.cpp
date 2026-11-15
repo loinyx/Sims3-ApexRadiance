@@ -575,11 +575,21 @@ bool Pick(const char* label, const char* desc, const char* id, int& v, const cha
     return true;
 }
 
+// ShellExecute runs off the render thread: it pumps the game window's messages while Explorer starts, which left the
+// overlay's input stuck (the menu no longer opened after "Open the folder")
+void ShellOpen(std::wstring file, std::wstring args) {
+    HookGuard::StartDetached("Capture: open a folder", [file = std::move(file), args = std::move(args)] {
+        const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+        ShellExecuteW(nullptr, L"open", file.c_str(), args.empty() ? nullptr : args.c_str(), nullptr, SW_SHOWNORMAL);
+        if (SUCCEEDED(com)) CoUninitialize();
+    });
+}
+
 void OpenFolderOf(const std::string& path) {
     const auto f = ExpandFolder(path);
     std::error_code ec;
     if (f.empty() || !(std::filesystem::create_directories(f, ec), std::filesystem::is_directory(f, ec))) return;
-    ShellExecuteW(nullptr, L"open", f.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    ShellOpen(f.wstring(), L"");
 }
 
 } // namespace
@@ -1200,8 +1210,7 @@ std::filesystem::path g_lastSaved[2]; // this session's last screenshot / video
 
 // Explorer with the file selected
 void ShowInExplorer(const std::filesystem::path& file) {
-    const std::wstring args = L"/select,\"" + file.wstring() + L"\"";
-    ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
+    ShellOpen(L"explorer.exe", L"/select,\"" + file.wstring() + L"\"");
 }
 
 std::string MinSec(int sec) {
