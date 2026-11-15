@@ -183,6 +183,10 @@ int main(int argc, char** argv)
         const Pack* q = PackForFile("qUINT_mxao.fx", "MXAO");
         Check(!q, "a file only in a pack that is gone: no pack (the add-this-file line)");
         Check(!PackForFile("NoSuchFile.fx", "X"), "an unknown file: no pack");
+        // a GShade preset's renamed file: another file of a pack with the same technique stands in
+        Check(FileForTechnique("LumaSharpen v2.fx", "LumaSharpen") == "LumaSharpen.fx", "a renamed file: the pack file with that technique");
+        Check(FileForTechnique("LumaSharpen.fx", "LumaSharpen").empty(), "a file a pack has: no stand-in");
+        Check(FileForTechnique("NoSuchFile.fx", "NoSuchTechnique").empty(), "an unknown technique: no stand-in");
     }
     // a pack already downloaded is never touched when its update fails
     {

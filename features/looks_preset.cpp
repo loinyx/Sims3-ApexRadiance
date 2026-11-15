@@ -193,10 +193,10 @@ LooksDefines PresetDefines(const Preset& preset, const std::string& file)
     return ParseDefines(all);
 }
 
-std::vector<float> PresetValues(const Preset& preset, const LooksShader& d)
+std::vector<float> PresetValues(const Preset& preset, const LooksShader& d, const char* section)
 {
     std::vector<float> v((size_t)d.paramCount * 4, 0.0f);
-    const auto* sec = FindSection(preset, d.file);
+    const auto* sec = FindSection(preset, section && *section ? section : d.file);
     for (int i = 0; i < d.paramCount; ++i)
     {
         const LooksParam& p = d.params[i];

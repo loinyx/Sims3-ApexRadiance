@@ -592,6 +592,33 @@ const Pack* PackForFile(const std::string& file, const std::string& technique)
     return best;
 }
 
+std::string FileForTechnique(const std::string& file, const std::string& technique)
+{
+    if (technique.empty()) return {};
+    std::string word; // the original name's first run of letters and digits, lower case ("mxao" of "MXAO 4.0.2 EX.fx")
+    for (char c : file)
+    {
+        if (isalnum((unsigned char)c)) word += (char)tolower((unsigned char)c);
+        else if (!word.empty()) break;
+    }
+    std::string best;
+    int bestScore = -1;
+    for (const Pack& p : List())
+    {
+        if (!p.index || Unavailable(p.folder)) continue;
+        for (uint16_t i = 0; i < p.index->fileCount; ++i)
+        {
+            const IndexFile& f = p.index->files[i];
+            if (IEq(f.file, file)) return {}; // a pack has the file itself: PackForFile finds it
+            if ((std::string(",") + f.techniques + ",").find("," + technique + ",") == std::string::npos) continue;
+            const bool similar = word.size() >= 3 && Lower(f.file).find(word) != std::string::npos;
+            const int score = (Downloaded(p.folder) ? 1000000 : 0) + (similar ? 100000 : 0) + (p.inList ? 10000 - p.rank : 0);
+            if (score > bestScore) { bestScore = score; best = f.file; }
+        }
+    }
+    return best;
+}
+
 // ============================================================================================== downloads
 void Download(const std::vector<std::string>& folders)
 {

@@ -109,6 +109,7 @@ const Pack* Find(const std::string& folder)
     return nullptr;
 }
 const Pack* PackForFile(const std::string& file, const std::string&) { return _stricmp(file.c_str(), "qUINT_mxao.fx") == 0 ? Find("qUINT") : nullptr; }
+std::string FileForTechnique(const std::string& file, const std::string& technique) { return technique == "MXAO" && _stricmp(file.c_str(), "qUINT_mxao.fx") != 0 ? "qUINT_mxao.fx" : ""; }
 std::string GitHubUrl(const Pack& p) { return "https://github.com/" + p.repo; }
 void Download(const std::vector<std::string>&) {}
 void StopRest() {}

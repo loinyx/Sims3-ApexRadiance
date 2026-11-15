@@ -44,6 +44,10 @@ ListState CurrentListState();
 const Pack* Find(const std::string& folder);
 // The pack (on the list, not known to be unavailable) that has a .fx of that name, preferring one with the technique; nullptr if none
 const Pack* PackForFile(const std::string& file, const std::string& technique);
+// When no pack of the list has a file of that name (a GShade preset's renamed file): a file of a pack that has the same
+// technique, preferring a downloaded pack, then a file whose name shares the original's first word ("mxao"), then
+// ReShade's order; "" when none
+std::string FileForTechnique(const std::string& file, const std::string& technique);
 std::wstring PacksFolder(); // Apex Radiance\Shaders\Packs\ (trailing backslash)
 std::string GitHubUrl(const Pack& p);
 

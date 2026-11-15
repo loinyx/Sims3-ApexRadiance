@@ -24,6 +24,8 @@ struct PresetEntry
     std::string technique; // "Vibrance"
     std::string file;      // "Vibrance.fx"
     int shader = -1;       // index into the shader table (set by the caller), -1 = not built in
+    std::string alt;       // the file used instead when no file of that name exists anywhere (a GShade preset's renamed
+                           // file, e.g. "MXAO 4.0.2 EX.fx"): another file with the same technique ("qUINT_mxao.fx")
 };
 
 using IniSections = std::map<std::string, std::map<std::string, std::string>>; // [File.fx] key=value ("" = top)
@@ -39,7 +41,8 @@ struct Preset
 bool ParsePreset(const std::string& text, Preset& out);
 // Values of one shader as the .ini sets them (missing keys keep the .fx default; non-finite numbers are ignored).
 // 4 floats per parameter.
-std::vector<float> PresetValues(const Preset& preset, const LooksShader& shader);
+// section: the preset's [File.fx] to read (default the shader's own file; a look's renamed file names its own section)
+std::vector<float> PresetValues(const Preset& preset, const LooksShader& shader, const char* section = nullptr);
 // One parameter's value as ReShade writes it in a preset: floats "%f" (0.500000), ints and bools as integers, the
 // components comma-separated
 std::string FormatValue(const LooksParam& param, const float* values);
