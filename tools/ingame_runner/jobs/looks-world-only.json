@@ -1,6 +1,6 @@
 {
   "id": "looks-world-only",
-  "description": "Shaders with apex:Cinematic at full strength, once \"World only\" (onUi false) and once \"World and menus\" (onUi true), one game start each, paused on the night save. Pass: world-only draws after the game's bloom (not only at the scene boundary) and never at the end of frame; world-and-menus draws at the end of frame; no [Looks] warning, error or skipped shader; each load writes an F8 screenshot with the game UI hidden. Afterwards profilers/compare_pngs.py compares the two screenshots: the world must look the same in both modes (mean luminance within 2 levels, mean saturation within 2 points).",
+  "description": "Shaders with apex:Cinematic at full strength, once \"World only\" (onUi false) and once \"World and menus\" (onUi true), one game start each, paused on the night save. Pass: world-only draws before the interface, under the game's colour curve, and never at the end of frame; world-and-menus draws at the end of frame; no [Looks] warning, error or skipped shader; each load writes an F8 screenshot with the game UI hidden. Afterwards profilers/compare_pngs.py compares the two screenshots: the world must look the same in both modes (mean luminance within 2 levels, mean saturation within 2 points).",
   "save": "ApexTest-Night",
   "toml": {
     "patches.Looks": { "enabled": true, "preset": "apex:Cinematic", "mix": 1.0 },
@@ -11,7 +11,7 @@
   "variants": {
     "world-only": {
       "toml": { "patches.Looks": { "onUi": false } },
-      "expect": ["\\[Looks\\] .*drawing after the game's bloom on \\d+x\\d+ .*\\d+ shaders, drew"],
+      "expect": ["\\[Looks\\] .*drawing before the interface, under the game's colour curve on \\d+x\\d+ .*\\d+ shaders, drew"],
       "fail": ["\\[Looks\\] .*drawing at the end of frame on"]
     },
     "world-and-menus": {

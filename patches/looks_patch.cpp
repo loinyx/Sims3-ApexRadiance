@@ -393,8 +393,8 @@ struct SavedState
         if (decl) dev->SetVertexDeclaration(decl); else if (okFvf) dev->SetFVF(fvf);
         if (okStream) dev->SetStreamSource(0, stream0, stream0Offset, stream0Stride); // DrawPrimitiveUP clears stream 0
         // Untouched since render target 0 was bound: SetRenderTarget(rt0) above already gave the whole target. An RTX Remix
-        // client without bridge patch 0011 answers the bloom's small viewport there; putting it back drew the game's next
-        // back-buffer draws into the top-left corner (dark squares with the look after the bloom)
+        // client without bridge patch 0011 answers the bloom's small viewport there, and putting it back would shrink the
+        // game's next back-buffer draws
         // shortcut: the scissor follows the viewport flag (SetScissorRect is not hooked in public builds)
         g_viewportSetSinceRt0 = gameViewport; // (a player's pass sets its own viewport through the hooks)
         if (gameViewport)
@@ -432,25 +432,29 @@ void PartWhy(std::string_view s) // appended in place: no allocation once the li
 }
 
 // Where each shader runs. The game's frame: its 3D scene, then Apex's scene boundary (first depth-off back-buffer draw,
-// Apex's post-scene effects), then the game's own bloom (one full-screen 2-primitive strip) and colour, then the UI.
+// Apex's post-scene effects; PostScene), then the UI, then the game's colour pass, which redraws the whole picture in
+// 256x256 tiles with x (1 + 0.4) / (x + 0.4) (PostScene::ColourCurveLastFrame).
 //  0 scene boundary   shaders that read depth: never over the UI
-//  1 after the bloom  first back-buffer draw after the bloom strip, before the UI: the look when "World only"
+//  1 world            the look when "World only": right after the boundary's own draw when that is the game's bloom (a
+//                     two-triangle strip), before the next back-buffer draw (the UI) or the colour pass's first copy,
+//                     else at the boundary. Never inside the colour pass: tiles copied before the look were drawn back
+//                     without it (two squares at the top left). The shaders are made for the picture after the game's
+//                     curve (what "World and menus" and ReShade see), so they get it applied and their result is written
+//                     back through its inverse (Frame::gameCurve)
 //  2 end of frame     the look when "World and menus" (HUD included, like GShade)
-// A frame whose previous frame had no bloom strip (bloom off, other views) runs point 1 at the scene boundary.
 // Outside a world only point 2 runs.
-enum Where { kBoundary = 0, kAfterBloom = 1, kEndOfFrame = 2 };
+enum Where { kBoundary = 0, kWorld = 1, kEndOfFrame = 2 };
 int WhereOf(size_t i)
 {
     if (Runnable(i) && Looks::Shader(g.order[i].shader).needsDepth) return kBoundary;
-    return g.onUi ? kEndOfFrame : kAfterBloom;
+    return g.onUi ? kEndOfFrame : kWorld;
 }
 bool g_ranThisFrame = false;      // end-of-frame part done
 bool g_boundaryThisFrame = false; // scene boundary seen this frame
-bool g_afterBloomDone = false;    // the after-bloom part ran (or was given to the boundary) this frame
-bool g_stripPending = false;      // the bloom strip has drawn: run at the next back-buffer draw
-bool g_stripThisFrame = false;    // a bloom strip after the boundary this frame
-bool g_stripExpected = false;     // ... and last frame (so this frame waits for it)
-bool g_boundaryDraw = false;      // the scene boundary just ran: the next draw seen is the one it ran on
+bool g_worldDone = false;         // the World only part ran this frame (PostScene can reach a second boundary)
+bool g_worldPending = false;      // ... waits for the boundary's draw (the bloom) to be drawn
+bool g_boundaryDraw = false;      // Looks' hook of the boundary's own draw comes next
+float g_curve = 0.0f;             // the World only run: the game's colour curve still to come (0: none)
 bool g_frameTicked = false;       // g_frame advanced this frame (framecount/frametime: once per frame, not per run point)
 bool g_beforeLookDone = false;    // ApexCapture::BeforeLook called this frame (a split frame draws more than once)
 unsigned g_frame = 0;
@@ -460,28 +464,29 @@ IDirect3DSurface9* g_backBuffer = nullptr; // identity only
 const char* g_mode = "";
 
 void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask);
+void World(IDirect3DDevice9* dev, bool curveAhead);
 void Effect(IDirect3DDevice9* dev)
 {
     g_boundaryThisFrame = true;
-    g_boundaryDraw = true;
-    unsigned mask = 1u << kBoundary;
-    if (!g_stripExpected) { mask |= 1u << kAfterBloom; g_afterBloomDone = true; }
     g_mode = "at the scene boundary";
-    EffectImpl(dev, false, mask);
+    EffectImpl(dev, false, 1u << kBoundary);
+    if (g.onUi || g_worldDone) return;
+    if (PostScene::BoundaryOnDraw()) { g_worldPending = g_boundaryDraw = true; return; } // decided at that draw (OnDraw)
+    World(dev, !PostScene::ColourTilesStarted());
 }
 
-void AfterBloom(IDirect3DDevice9* dev)
+// The World only part. curveAhead: the game's colour pass is still to come this frame (it came last frame)
+void World(IDirect3DDevice9* dev, bool curveAhead)
 {
-    g_afterBloomDone = true;
-    g_mode = "after the game's bloom";
-    EffectImpl(dev, false, 1u << kAfterBloom);
+    g_worldPending = g_boundaryDraw = false;
+    if (std::exchange(g_worldDone, true)) return;
+    g_curve = curveAhead ? PostScene::ColourCurveLastFrame() : 0.0f;
+    g_mode = g_curve > 0.0f ? "before the interface, under the game's colour curve" : "before the interface";
+    EffectImpl(dev, false, 1u << kWorld);
+    g_curve = 0.0f;
 }
 
-// The bloom strip and the draw after it. The strip is the first flat two-triangle back-buffer draw after the scene
-// boundary: usually the very draw the boundary (PostScene) ran on, else a later one (a frame whose boundary came on another
-// flat draw). Render target 0 is asked from the device, not tracked: the High-precision scene binds its 16-bit target
-// outside the hooks. The draw after the strip runs the after-bloom part.
-bool OnBackBuffer(IDirect3DDevice9* dev)
+bool OnBackBuffer(IDirect3DDevice9* dev) // asked, not tracked: the High-precision scene binds its target outside the hooks
 {
     IDirect3DSurface9* rt = nullptr;
     const bool on = SUCCEEDED(dev->GetRenderTarget(0, &rt)) && rt && rt == g_backBuffer;
@@ -489,33 +494,18 @@ bool OnBackBuffer(IDirect3DDevice9* dev)
     return on;
 }
 
-bool Flat(D3D9Hooks::DeviceContext& ctx)
-{
-    DWORD z = ctx.ZEnable();
-    if (z != D3DZB_FALSE && !ctx.ZWriteEnable() && ctx.ZFunc() == D3DCMP_ALWAYS) z = D3DZB_FALSE; // UI glass passes
-    return z == D3DZB_FALSE;
-}
-
 void OnDraw(D3D9Hooks::DeviceContext& ctx, bool isStripOfTwo)
 {
-    if (!g.active || DepthShare::InternalPass()) return;
-    const bool boundaryDraw = std::exchange(g_boundaryDraw, false);
-    if (!g_boundaryThisFrame || (g_afterBloomDone && g_stripThisFrame)) return;
-    if (!g_stripPending)
-    {
-        if (isStripOfTwo && !g_stripThisFrame && (boundaryDraw || (Flat(ctx) && OnBackBuffer(ctx.device))))
-            g_stripPending = g_stripThisFrame = true;
-        return;
-    }
-    if (!OnBackBuffer(ctx.device)) return; // the bloom chain's own targets, a reflection: not yet
-    g_stripPending = false;
-    if (!Flat(ctx)) return; // more scene (interiors): the after-bloom part runs at the end of the frame
-    if (!g_afterBloomDone) AfterBloom(ctx.device);
+    if (!g_worldPending || DepthShare::InternalPass()) return;
+    if (std::exchange(g_boundaryDraw, false)) { if (!isStripOfTwo) World(ctx.device, true); return; } // the bloom: after it
+    // the bloom chain's own targets, and more scene (interiors, a boundary inside the scene): not yet
+    DWORD z = ctx.ZEnable();
+    if (z != D3DZB_FALSE && !ctx.ZWriteEnable() && ctx.ZFunc() == D3DCMP_ALWAYS) z = D3DZB_FALSE; // UI glass passes
+    if (z == D3DZB_FALSE && OnBackBuffer(ctx.device)) World(ctx.device, true);
 }
 
 void AtEndScene(IDirect3DDevice9* dev)
 {
-    g_boundaryDraw = false; // a boundary run from EndScene has no draw of its own
     if (g_ranThisFrame || !g.active || !dev) return;
     IDirect3DSurface9* bb = nullptr; IDirect3DSurface9* rt = nullptr;
     const bool okBb = SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb;
@@ -525,15 +515,7 @@ void AtEndScene(IDirect3DDevice9* dev)
     if (rt) rt->Release();
     if (!onBackBuffer) return; // an off-screen pass (reflection, thumbnail): wait for the frame's own EndScene
     g_ranThisFrame = true;
-    // the after-bloom part waited for a strip and none came, or the frame ended on it (UI hidden): it runs here, so no
-    // frame goes without the look (a frame that alternated with the boundary made the tone shimmer between the two)
-    if (g_boundaryThisFrame && !g_afterBloomDone)
-    {
-        g_stripPending = false;
-        g_afterBloomDone = true;
-        g_mode = "at the end of frame (no bloom strip seen)";
-        EffectImpl(dev, false, 1u << kAfterBloom);
-    }
+    if (g_worldPending) World(dev, false); // the frame ended on the bloom (no UI, no colour pass)
     if (!g.onUi) return; // UI left clean: nothing at the end of frame
     g_mode = "at the end of frame";
     EffectImpl(dev, true, 1u << kEndOfFrame);
@@ -558,9 +540,7 @@ void OnPresent(IDirect3DDevice9* dev)
     else if (g_frameTried) { static const std::string kNothing = "nothing to run: every shader is switched off or not built in"; Why(kNothing); }
     g_frameWhy.clear();
     g_frameTried = false;
-    g_stripExpected = g_stripThisFrame;
-    g_stripThisFrame = g_stripPending = g_boundaryDraw = false;
-    g_ranThisFrame = g_boundaryThisFrame = g_afterBloomDone = g_beforeLookDone = g_frameTicked = false;
+    g_ranThisFrame = g_boundaryThisFrame = g_worldDone = g_worldPending = g_boundaryDraw = g_beforeLookDone = g_frameTicked = false;
     IDirect3DSurface9* s = nullptr;
     g_backBuffer = nullptr;
     D3DSURFACE_DESC bd{};
@@ -631,7 +611,7 @@ void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask)
 
         Looks::Frame f;
         f.dev = dev; f.target = rt; f.width = rd.Width; f.height = rd.Height;
-        f.depth = depth; f.mix = g.mix; f.frame = g_frame;
+        f.depth = depth; f.mix = g.mix; f.frame = g_frame; f.gameCurve = g_curve;
         const bool drew = g.runner.Run(f, steps);
         {
             // The line is only rebuilt when one of its parts changed, not at every run point
@@ -2493,6 +2473,7 @@ public:
             OnDraw(ctx, type == D3DPT_TRIANGLESTRIP && prims == 2);
             return D3D9Hooks::HookAction::Continue;
         }, static_cast<D3D9Hooks::Priority>(12));
+        PostScene::SetBeforeColourPass([](IDirect3DDevice9* dev) { if (g_worldPending) World(dev, true); });
         g.active = true;
         isEnabled = true;
         LOG_INFO("[Looks] Installed");
@@ -2505,6 +2486,7 @@ public:
         PostScene::Remove(Effect);
         RenderCallbacks::Remove(RenderCallbacks::endSceneBeforeOverlay, AtEndScene);
         D3D9Hooks::UnregisterAll("Looks");
+        PostScene::SetBeforeColourPass(nullptr);
         g.active = false;
         RenderCallbacks::Remove(RenderCallbacks::preReset, OnPreReset);
         RenderCallbacks::Remove(RenderCallbacks::restartEffects, RestartEffects);
@@ -2648,20 +2630,6 @@ public:
             g.onUi = applies == 0;
             changed = true;
         }
-        // a shader that measures the whole picture (reduces it to a few pixels: auto colour, exposure, levels) sees the menus
-        // in ReShade and in World and menus, not in World only: there its tone differs, and the player is told which mode
-        // matches ReShade
-        if (!g.onUi && !ApexUi::FilterActive())
-            for (size_t i = 0; i < g.order.size(); ++i)
-            {
-                if (!Runnable(i) || IsOff(i) || !Looks::IsUserShader(g.order[i].shader)) continue;
-                const Looks::Fx::Effect* fx = Looks::Fx::UserEffect(g.order[i].shader - Looks::kUserShaderBase);
-                if (!fx || std::none_of(fx->textures.begin(), fx->textures.end(), [](const Looks::Fx::Texture& t) {
-                        return t.image.empty() && t.semantic.empty() && t.w * t.h <= 64; })) continue;
-                ApexUi::IconNote(IconId::Info, I18n::Trf("{} measures the whole picture: with World only its tone differs from ReShade; World and menus matches it",
-                                                         g.order[i].technique).c_str());
-                break;
-            }
         if (ApexUi::BeginAdvanced("##LooksAdvanced"))
         {
             static const char* const kOrder[] = { "After Apex Color", "Before Apex Color" };

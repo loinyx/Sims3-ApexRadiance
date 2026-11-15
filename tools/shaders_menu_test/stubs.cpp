@@ -56,6 +56,10 @@ void WantCamera(bool, bool) {}
 int DepthWritesThisFrame() { return 0; }
 int DepthWritesLastFrame() { return 0; }
 bool Counting() { return false; }
+bool ColourTilesStarted() { return false; }
+float ColourCurveLastFrame() { return 0.0f; }
+void SetBeforeColourPass(Effect) {}
+bool BoundaryOnDraw() { return false; }
 }
 namespace DepthShare {
 IDirect3DTexture9* Texture() { return nullptr; }

@@ -56,8 +56,13 @@ std::string FullSource(int shader)
     Append(s, ReShadeShaders::kCommon);
     if (shader < 0)
     {
-        // The runner's own copy / mix pass
-        s += "\nfloat4 gs_copy(float2 uv : TEXCOORD0) : COLOR0 { return float4(tex2D(BackBuffer, uv).rgb, 1.0); }\n";
+        // The runner's own copy / mix pass; c3.x > 0 applies the game's later colour curve x (1 + c) / (x + c) (c3.y > 0) or
+        // its inverse (c3.y < 0), see Frame::gameCurve
+        s += "\nfloat4 gs_curve : register(c3);\n"
+             "float4 gs_copy(float2 uv : TEXCOORD0) : COLOR0 {\n"
+             "  float3 c = saturate(tex2D(BackBuffer, uv).rgb); float k = gs_curve.x;\n"
+             "  if (k > 0) c = gs_curve.y > 0 ? c * (1 + k) / (c + k) : k * c / (1 + k - c);\n"
+             "  return float4(c, 1.0); }\n";
         return s;
     }
     Append(s, Shader(shader).src);
@@ -67,7 +72,7 @@ std::string FullSource(int shader)
 // ============================================================================================== runner
 int PsConstsUsed(const std::vector<Step>& steps)
 {
-    int n = 3; // c0 picture size, c1 pass data, c2 depth
+    int n = 4; // c0 picture size, c1 pass data, c2 depth, c3 the copy's curve
     for (const Step& s : steps)
     {
         if (IsUserShader(s.shader) || !ValidShader(s.shader)) continue;
@@ -301,12 +306,22 @@ bool Runner::Run(const Frame& f, const std::vector<Step>& steps)
     FixedState(dev);
 
     dev->StretchRect(f.target, nullptr, ping_.surf, nullptr, D3DTEXF_NONE);
+    const bool curved = f.gameCurve > 0.0f;
+    if (curved) // the picture as it looks after the game's curve, which the shaders are made for
+    {
+        const float c3[4] = { f.gameCurve, 1.0f, 0.0f, 0.0f };
+        dev->SetPixelShaderConstantF(3, c3, 1);
+        BindTex(dev, 0, ping_.tex);
+        Draw(dev, copy, pong_.surf, f.width, f.height);
+        UnbindAll(dev);
+        std::swap(ping_, pong_);
+    }
 
 
     // The last step draws straight into the target (no write-back pass) when that gives the same pixels: full mix, an
     // 8-bit target like the ping-pong textures, and no sRGB write (not every target format takes it)
     const Step* direct = nullptr;
-    if (f.mix >= 0.999f)
+    if (f.mix >= 0.999f && !curved)
     {
         D3DSURFACE_DESC td{};
         const bool same = SUCCEEDED(f.target->GetDesc(&td)) && (td.Format == D3DFMT_A8R8G8B8 || td.Format == D3DFMT_X8R8G8B8);
@@ -383,6 +398,8 @@ bool Runner::Run(const Frame& f, const std::vector<Step>& steps)
             dev->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVBLENDFACTOR);
             dev->SetRenderState(D3DRS_BLENDFACTOR, D3DCOLOR_ARGB(m, m, m, m));
         }
+        const float c3[4] = { f.gameCurve, -1.0f, 0.0f, 0.0f }; // undone, so the game's curve gives the look's pixels
+        dev->SetPixelShaderConstantF(3, c3, 1);
         BindTex(dev, 0, ping_.tex);
         Draw(dev, copy, f.target, f.width, f.height);
         UnbindAll(dev);

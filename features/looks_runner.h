@@ -64,6 +64,8 @@ struct Frame
     float farPlane = 1000.0f;            // ReShade's RESHADE_DEPTH_LINEARIZATION_FAR_PLANE default
     float mix = 1.0f;                    // 0..1, blend of the stage over the input (0: the caller skips the run, same pixels)
     unsigned frame = 0;                  // the caller's frame number (framecount/frametime tick once per new value); 0 = every Run is a frame
+    float gameCurve = 0.0f;              // > 0: the game later applies x (1 + c) / (x + c) to the target; the stage sees it
+                                         // applied and writes its inverse, so the picture after the game's curve is the look's
 };
 
 class Runner
