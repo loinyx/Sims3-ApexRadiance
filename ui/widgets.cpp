@@ -1229,7 +1229,11 @@ bool DrawButton(const char* label, IconId icon, const char* tooltip, ButtonKind 
     const ImVec2 q(p.x + size.x, p.y + size.y);
     const float r = ImGui::GetStyle().FrameRounding;
     ImU32 textCol, iconCol;
-    if (kind == ButtonKind::Primary) {
+    if (kind == ButtonKind::Danger) {
+        dl->AddRectFilled(p, q, U32(VioletTheme::kError, held ? 0.7f : hovered ? 1.0f : 0.85f), r);
+        textCol = U32(0xFFFFFF);
+        iconCol = U32(0xFFFFFF);
+    } else if (kind == ButtonKind::Primary) {
         const ImVec4 fill = held ? Mix(Col(VioletTheme::kAccentDark), Col(VioletTheme::kAccent), 0.5f) : hovered ? Col(VioletTheme::kAccent) : Col(VioletTheme::kAccentDark);
         dl->AddRectFilled(p, q, ImGui::GetColorU32(fill), r);
         textCol = U32(0xFFFFFF);

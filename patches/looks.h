@@ -19,10 +19,19 @@ std::string StatusLine(const char* cost = nullptr);
 void HoldBypass();
 // Image > Shaders, tab Look: the import note card, then the Shaders in this look card
 void ShadersCard();
-// Image > Shaders, tab Library: Your library, then Get shader packs
+// Image > Shaders, tab Library: Installed packs, then Your shaders
 void LibraryCards();
-// A button asked for the Get shader packs card: the Shaders page opens its Library tab (the card scrolls into view)
-bool WantsLibrary();
+// Image > Shaders, tab Packs: a search, then ReShade's packs to pick (For this look, All packs); under the menu search, one
+// header row
+void PacksTab();
+// A button asked for the packs list: the Shaders page opens its Packs tab
+bool WantsPacks();
+// The floating download bar between left and right (screen x), its bottom kSpace2 above bottomY: choosing (packsTab:
+// the Packs tab is shown), downloading, or finished (it clears by itself after 4 s unless a pack failed). Returns its
+// top (bottomY when none).
+float PacksBar(float left, float right, float bottomY, bool packsTab);
+// The bar's last height with the gap under it (0 when it was not drawn): MainWindow keeps that room at the page's end
+float PacksBarHeight();
 // The note card offering the packs an imported look or preset misses (draws nothing when there is none)
 void OfferCard();
 // After a preset import: offers the packs it names (pack names or folders) that are on ReShade's list and not downloaded
@@ -30,7 +39,7 @@ void OfferPresetPacks(const std::string& preset, const std::vector<std::string>&
 // The packs of a preset's "packs" list (names or folders) that are on ReShade's list and not downloaded, as folders;
 // sentence: "This preset needs <packs> (<size>)" for the import window
 std::vector<std::string> MissingPresetPacks(const std::vector<std::string>& packNames, std::string* sentence = nullptr);
-// Starts those downloads (progress in Shaders > Library > Get shader packs)
+// Starts those downloads (progress in the download bar and Shaders > Packs)
 void DownloadPresetPacks(const std::vector<std::string>& folders);
 // The names of the packs whose shaders the look's run list uses (downloaded or not), for a preset's [patches.Looks] packs
 std::vector<std::string> NeededPacks();

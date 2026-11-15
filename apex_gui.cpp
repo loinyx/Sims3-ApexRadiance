@@ -99,7 +99,7 @@ enum SettingsTab : int { SettingsMenu, SettingsShortcuts, SettingsProfiles, Sett
 int g_page = PageOverview;
 int g_lightingTab = LightingLamps;
 int g_colorTab = Picture::TabOverview;
-enum ShadersTab : int { ShadersLook, ShadersLibrary };
+enum ShadersTab : int { ShadersLook, ShadersPacks, ShadersLibrary };
 int g_shadersTab = ShadersLook;
 int g_settingsTab = SettingsMenu;
 enum CaptureTab : int { CaptureShots, CaptureVideo };
@@ -1295,8 +1295,11 @@ void ShadersLookContent() {
     if (patch->IsEnabled() || search) Looks::ShadersCard();
 }
 
-// Tab Library: Your library (where shaders come from), then Get shader packs
+// Tab Library: Installed packs and Your shaders (where shaders come from)
 void ShadersLibraryContent() { Looks::LibraryCards(); }
+
+// Tab Packs: ReShade's packs to pick; the download bar floats over the page's end (MainWindow)
+void ShadersPacksContent() { Looks::PacksTab(); }
 
 // A look's shader that does what an Apex effect also does (MXAO and Apex's Ambient Occlusion): twice the shade or blur and
 // twice the cost. Its row in the look's list gets the amber line and the button that turns the Apex effect off
@@ -1344,10 +1347,11 @@ void ShadersPage() {
         ApexUi::Tooltip(Description(patch));
         ImGui::SetCursorPosY(after);
     }
-    if (Looks::WantsLibrary()) g_shadersTab = ShadersLibrary; // Get shader packs, Get <pack>: the list is on Library
-    static const char* const kTabs[] = {"Look", "Library"};
+    if (Looks::WantsPacks()) g_shadersTab = ShadersPacks; // Get shader packs, Get <pack>: the list is on Packs
+    static const char* const kTabs[] = {"Look", "Packs", "Library"};
     ApexUi::TabBar("##ShadersTabs", &g_shadersTab, kTabs, IM_COUNTOF(kTabs));
     if (g_shadersTab == ShadersLibrary) ShadersLibraryContent();
+    else if (g_shadersTab == ShadersPacks) ShadersPacksContent();
     else ShadersLookContent();
 }
 
@@ -3627,6 +3631,7 @@ const SearchPart* SearchParts(int& count) {
         {"Color", "Color", PageColor, &g_colorTab, Picture::TabColor, [] { PictureRows(Picture::TabColor); }},
         {"Color", "Detail", PageColor, &g_colorTab, Picture::TabDetail, [] { PictureRows(Picture::TabDetail); }},
         {"Shaders", "Look", PageShaders, &g_shadersTab, ShadersLook, ShadersLookContent},
+        {"Shaders", "Packs", PageShaders, &g_shadersTab, ShadersPacks, ShadersPacksContent},
         {"Shaders", "Library", PageShaders, &g_shadersTab, ShadersLibrary, ShadersLibraryContent},
         {"Ambient Occlusion", nullptr, PageAmbientOcclusion, nullptr, 0, AmbientOcclusionContent},
         {"Depth Blur", nullptr, PageDepthBlur, nullptr, 0, DepthBlurContent},
@@ -4690,7 +4695,8 @@ void StatusBar(ImVec2 origin, float w, float h, bool collapsed) {
 
 // The undo toast at the bottom right of the window, above the status bar: "<what changed>  Undo", about 4 s (fading;
 // the timer waits while the mouse is on it)
-void DrawToast(float bottomY) {
+// right: the screen x of its right edge (0: the window's)
+void DrawToast(float bottomY, float right = 0.0f) {
     if (!g_toast.active) return;
     const float u = ApexUi::Unit();
     const double now = ImGui::GetTime();
@@ -4709,7 +4715,8 @@ void DrawToast(float bottomY) {
     const ImVec2 size(padX + textSize.x + gap + undoW + padX, padY + lineH + padY);
     const ImVec2 winPos = ImGui::GetWindowPos();
     const ImVec2 winSize = ImGui::GetWindowSize();
-    const ImVec2 pos(std::fmax(winPos.x + ImGui::GetStyle().WindowPadding.x, winPos.x + winSize.x - ImGui::GetStyle().WindowPadding.x - size.x - ApexUi::kSpace2 * u),
+    const float rightX = right > 0.0f ? right : winPos.x + winSize.x - ImGui::GetStyle().WindowPadding.x - ApexUi::kSpace2 * u;
+    const ImVec2 pos(std::fmax(winPos.x + ImGui::GetStyle().WindowPadding.x, rightX - size.x),
                      bottomY - size.y - ApexUi::kSpace2 * u);
 
     ImGui::SetCursorScreenPos(pos);
@@ -4851,12 +4858,20 @@ void MainWindow() {
             DrawPage();
             ImGui::PopID();
         }
+        // room for the download bar, which floats over the page's end: the last row scrolls above it
+        if (const float barH = Looks::PacksBarHeight(); barH > 0.0f) ImGui::Dummy(ImVec2(0.0f, barH));
         ImGui::EndChild();
         StatusBar(ImVec2(wp.x, footerTop + 1.0f), ws.x, footerH - 1.0f, collapsed);
         // Leave the cursor at the window's end so ImGui does not grow the window
         ImGui::SetCursorScreenPos(ImVec2(wp.x, wp.y + ws.y - 1.0f));
         ImGui::Dummy(ImVec2(0.0f, 0.0f));
-        DrawToast(footerTop);
+        // The download bar floats over the content just above the footer (on the Packs tab, or while a download runs or
+        // has just finished); the undo toast goes above it
+        const bool packsTab = !g_search[0] && !WelcomeActive() && g_page == PageShaders && g_shadersTab == ShadersPacks;
+        const float barLeft = wp.x + sidebarW + 1.0f + ApexUi::kSpace4 * u;
+        const float barRight = wp.x + ws.x - ImGui::GetStyle().ScrollbarSize - ApexUi::kSpace4 * u;
+        const float barTop = Looks::PacksBar(barLeft, barRight, footerTop, packsTab);
+        DrawToast(barTop, barTop < footerTop ? barRight : 0.0f);
         DeveloperConfirmation();
         ImGui::EndDisabled();
         PublicTestWelcome();

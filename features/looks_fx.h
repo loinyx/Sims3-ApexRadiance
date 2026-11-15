@@ -218,6 +218,7 @@ void WantFiles(const std::vector<std::string>& files);
 void BrowsePacks();
 int CheckedThisSession(); // pack files checked in the background this session
 std::vector<std::string> PackFolders(); // folders in Shaders\Packs (complete downloads only), as the last scan found them
+std::vector<std::wstring> OwnFiles();   // the player's own .fx files (full paths, by name), as the last scan found them
 // Where .fx files of these names are, read from the folders now (also while Looks is off): per lower-case name, the first
 // downloaded pack that has it, or "" when only the player's own folder has it; a name found nowhere is left out
 std::map<std::string, std::string> FindFiles(const std::vector<std::string>& names);

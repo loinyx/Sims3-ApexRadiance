@@ -10,6 +10,7 @@
 #include <map>
 #include <mutex>
 #include <set>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -21,6 +22,8 @@
 #include "ui/i18n.h"
 #include "ui/widgets.h"
 #include "fixture.h"
+#include "patches/looks.h"
+#include "build_flavor.h"
 
 void ShadersPage();
 void CapturePage();
@@ -31,21 +34,25 @@ extern bool g_fixtureTwin;
 #include "raster.inc"
 
 namespace {
-struct State { const char* name; int page; int tab; bool compiling, edited, offer; int batch; int video, options; bool gameAa; bool openAll; bool twin = false; };
-// page 0 Shaders (tab 0 Look, 1 Library), 1 Capture (tab 0 Screenshots, 1 Video)
+struct State { const char* name; int page; int tab; bool compiling, edited, offer; int batch; int video, options; bool gameAa; bool openAll; bool twin = false; bool picks = false; int confirm = 0; };
+// page 0 Shaders (tab 0 Look, 1 Packs, 2 Library), 1 Capture (tab 0 Screenshots, 1 Video)
 const State kStates[] = {
     { "look", 0, 0, false, false, true, 0, 0, 0, false, false },
     { "look-open-compiling", 0, 0, true, false, false, 1, 0, 0, false, true },
     { "look-open-edited", 0, 0, false, true, true, 0, 0, 0, false, true },
     { "look-doubled-lut", 0, 0, false, false, false, 0, 0, 0, false, false, true },
-    { "library-downloading", 0, 1, false, false, false, 1, 0, 0, false, false },
-    { "library-list", 0, 1, false, false, false, 0, 0, 0, false, true },
-    { "library-finished", 0, 1, false, false, false, 2, 0, 0, false, false },
+    { "packs-downloading", 0, 1, false, false, false, 1, 0, 0, false, false },
+    { "packs-list", 0, 1, false, false, false, 0, 0, 0, false, true },
+    { "packs-finished", 0, 1, false, false, false, 2, 0, 0, false, false },
+    { "library", 0, 2, false, false, false, 0, 0, 0, false, true },
     { "shots", 1, 0, false, false, false, 0, 0, 0, false, false },
     { "shots-advanced", 1, 0, false, false, false, 0, 0, 1, false, true },
     { "video-idle-advanced", 1, 1, false, false, false, 0, 0, 1, true, true },
     { "video-recording", 1, 1, false, false, false, 0, 1, 0, false, true },
     { "video-saving", 1, 1, false, false, false, 0, 2, 1, false, false },
+    { "packs-choosing", 0, 1, false, false, false, 0, 0, 0, false, false, false, true },
+    { "library-remove-pack", 0, 2, false, false, false, 0, 0, 0, false, false, false, false, 1 },
+    { "library-remove-file", 0, 2, false, false, false, 0, 0, 0, false, false, false, false, 2 },
 };
 
 struct Run { ImRect r; std::string text; };
@@ -252,6 +259,7 @@ int main(int argc, char** argv)
     VioletTheme::ApplyStyle(ImGui::GetStyle());
     VioletTheme::LoadFonts(io);
     g_looksPatch = Fixture::StartLooks();
+    kPublicBuild = false; // I18n notes missing translations only in developer mode
     {
         // self-check: a frame with each fault must give each finding
         io.DisplaySize = ImVec2(400, 300);
@@ -304,6 +312,7 @@ int main(int argc, char** argv)
                     VioletTheme::UpdateFonts(io); // the language's script merged, as the menu does between frames
                     ImGui::GetStyle().FontScaleMain = scale;
                     Fixture::LooksState(s.compiling, s.edited, s.offer, s.batch, s.twin);
+                    Fixture::PacksState(s.picks, s.confirm);
                     g_fixtureTwin = s.twin;
                     Fixture::CaptureState(s.video, s.options);
                     g_menuGameAaOn = s.gameAa;
@@ -329,7 +338,17 @@ int main(int argc, char** argv)
                         ImGuiContext& g = *ImGui::GetCurrentContext();
                         const int vars = g.StyleVarStack.Size, cols = g.ColorStack.Size, ids = g.CurrentWindow->IDStack.Size;
                         if (s.page) CapturePage();
-                        else ShadersPage();
+                        else
+                        {
+                            ShadersPage();
+                            // the download bar as MainWindow floats it, here over the end of the page (MainWindow
+                            // leaves the bar's last height free there)
+                            if (const float barH = Looks::PacksBarHeight(); barH > 0.0f) ImGui::Dummy(ImVec2(0.0f, barH));
+                            const float left = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMin().x;
+                            const float right = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+                            const float end = ImGui::GetCursorScreenPos().y;
+                            Looks::PacksBar(left, right, end, s.tab == 1);
+                        }
                         if (g.StyleVarStack.Size != vars || g.ColorStack.Size != cols || g.CurrentWindow->IDStack.Size != ids)
                         {
                             printf("FAIL stack %s %s frame %d: style vars %d->%d, colours %d->%d, ids %d->%d\n", s.name, where, frame, vars, g.StyleVarStack.Size, cols,
@@ -365,7 +384,7 @@ int main(int argc, char** argv)
                         {
                             const int before = g_newFindings;
                             CheckLayout(std::string(s.page ? "capture " : "shaders ") + s.name, where);
-                            const bool preview = g_newFindings != before || ((lang == 0 || lang == 1) && (st == 1 || st == 3 || st == 4 || st == 7 || st == 9) && (scale == 1.0f || (lang == 1 && units == 400)));
+                            const bool preview = g_newFindings != before || ((lang == 0 || lang == 1) && (st == 1 || st == 3 || st == 4 || st == 7 || st == 9 || st >= 13) && (scale == 1.0f || (lang == 1 && units == 400)));
                             if (preview)
                             {
                                 const auto file = out / (std::string(kCodes[lang]) + "-" + std::to_string(units) + "-" + std::to_string((int)(scale * 100)) + "-" + s.name + ".ppm");
@@ -373,7 +392,23 @@ int main(int argc, char** argv)
                             }
                         }
                     }
-                    if (I18n::MissingCount()) missing.insert(I18n::MissingList(40));
+                    if (I18n::MissingCount())
+                    {
+                        // Skip a text that is already a translation (a caller translates before a widget does) and the
+                        // fixture's .fx author data (heap strings in the game, so never noted there)
+                        std::set<std::string_view> values;
+                        for (std::string_view k : I18n::AllKeys()) values.insert(I18n::Tr(k));
+                        static const std::set<std::string_view> kFixtureText = { "Film print colors", "Exposure and saturation", "Black and white points",
+                            "Where the effect is centred on the screen", "Screen", "Overlay", "Multiply", "Linear dodge (add)", "Off also shades the sky and far mountains",
+                            "Multiplied into the highlights", "More samples look smoother", "Made by the author of this shader. Higher values of the radius cost more speed.",
+                            "How strongly the shader mixes into the picture", "Each sample costs a little speed; most looks use between 8 and 32 samples.", "Any whole number",
+                            "A long tooltip from the .fx file that explains every detail of what this value changes in the picture", "Apex", "HEVC", "H.264" };
+                        std::string list, line;
+                        std::istringstream lines(I18n::MissingList(4000));
+                        while (std::getline(lines, line))
+                            if (!line.empty() && !values.count(line) && !kFixtureText.count(line)) list += line + "\n";
+                        if (!list.empty()) missing.insert(std::string(kCodes[lang]) + ":\n" + list);
+                    }
                     ++cases;
                 }
     for (const std::string& m : missing) printf("Missing translations:\n%s\n", m.c_str());

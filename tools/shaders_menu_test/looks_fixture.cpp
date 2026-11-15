@@ -51,6 +51,7 @@ const std::vector<Looks::Packs::Pack>& FakePacks()
         MakePack("SweetFX", "CeeJay.dk", "SweetFX", 900, 30), MakePack("AstrayFX", "BlueSkyDefender", "AstrayFX", 25000, 22),
         MakePack("Insane Shaders", "Lord of Lunacy", "Insane-Shaders", 800, 9), MakePack("Daodan's shaders", "Daodan317081", "Daodan", 150, 4),
         MakePack("An old pack with a rather long name", "Somebody", "OldPack", 0, 0, false), MakePack("Gone pack", "Nobody", "GonePack", 50, 2),
+        MakePack("ReShade standard effects", "crosire", kStandardPack, 600, 50),
     };
     return v;
 }
@@ -77,6 +78,7 @@ std::vector<Listed> List()
     return v;
 }
 std::vector<std::string> PackFolders() { return { "prod80", "OldPack" }; }
+std::vector<std::wstring> OwnFiles() { return { L"C:\\Shaders\\Shaders\\MyFilmGrain.fx" }; }
 PackCount CountPack(const std::string&) { return { 31, 40, true }; }
 int Generation() { return 1; }
 bool Scanned() { return true; }
@@ -180,5 +182,12 @@ void LooksState(bool compiling, bool edited, bool offer, int batch, bool twin)
     if (offer) g_offer = ImportOffer{ "Cinema suave", 2, { "qUINT", "AstrayFX" } };
     g_message.clear();
     g_fxMessage.clear();
+}
+
+void PacksState(bool picks, int confirm)
+{
+    g_packPicks.clear();
+    if (picks) g_packPicks = { "qUINT", "SweetFX", "AstrayFX" }; // with the For this look pack; Download adds the standard effects
+    g_libraryConfirm = confirm == 1 ? "p:prod80" : confirm == 2 ? "f:C:\\Shaders\\Shaders\\MyFilmGrain.fx" : "";
 }
 } // namespace Fixture

@@ -2678,6 +2678,40 @@ Imported: {}	tr_image.cpp:kEntries	Importado: {}	Importado: {}	Importé : {}	{}
 This look uses {} shaders from {}, which you don't have yet	tr_image.cpp:kEntries	Este visual usa {} shaders de {}, que você ainda não tem	Este estilo usa {} shaders de {}, que aún no tienes	Ce rendu utilise {} shaders de {}, que vous n'avez pas encore	{} {}
 ReShade looks and shaders on the game's picture	tr_image.cpp:kEntries	Visuais e shaders do ReShade na imagem do jogo	Estilos y shaders de ReShade en la imagen del juego	Rendus et shaders ReShade sur l'image du jeu	
 Library	tr_image.cpp:kEntries	Biblioteca	Biblioteca	Bibliothèque	
+Packs	tr_image.cpp:kEntries	Pacotes	Paquetes	Packs	
+Search packs or shaders	tr_image.cpp:kEntries	Buscar pacotes ou shaders	Buscar paquetes o shaders	Rechercher des packs ou des shaders	
+For this look	tr_image.cpp:kEntries	Para este visual	Para este estilo	Pour ce rendu	
+Select these	tr_image.cpp:kEntries	Selecionar estes	Seleccionar estos	Sélectionner ceux-ci	
+All packs · {}	tr_image.cpp:kEntries	Todos os pacotes · {}	Todos los paquetes · {}	Tous les packs · {}	{}
+used by {}	tr_image.cpp:kEntries	usado por {}	usado por {}	utilisé par {}	{}
+Needed	tr_image.cpp:kEntries	Necessário	Necesario	Requis	
+{} selected + 1 needed · {}	tr_image.cpp:kEntries	{} selecionados + 1 necessário · {}	{} seleccionados + 1 necesario · {}	{} sélectionnés + 1 requis · {}	{} {}
+Downloading {} of {} · {}	tr_image.cpp:kEntries	Baixando {} de {} · {}	Descargando {} de {} · {}	Téléchargement {} sur {} · {}	{} {} {}
+{} downloaded	tr_image.cpp:kEntries	{} baixados	{} descargados	{} téléchargés	{}
+{} of {} downloaded	tr_image.cpp:kEntries	{} de {} baixados	{} de {} descargados	{} sur {} téléchargés	{} {}
+Try again	tr_image.cpp:kEntries	Tentar de novo	Reintentar	Réessayer	
+Installed packs	tr_image.cpp:kEntries	Pacotes instalados	Paquetes instalados	Packs installés	
+No packs yet	tr_image.cpp:kEntries	Nenhum pacote ainda	Aún no hay paquetes	Aucun pack pour l'instant	
+1 pack	tr_image.cpp:kEntries	1 pacote	1 paquete	1 pack	
+{} leaves the look	tr_image.cpp:kEntries	{} sai do visual	{} sale del estilo	{} quitte le rendu	{}
+{} shaders leave the look	tr_image.cpp:kEntries	{} shaders saem do visual	{} shaders salen del estilo	{} shaders quittent le rendu	{}
+Remove {}?	tr_image.cpp:kEntries	Remover {}?	¿Quitar {}?	Retirer {} ?	{}
+Other packs need it	tr_image.cpp:kEntries	Outros pacotes precisam dele	Otros paquetes lo necesitan	D'autres packs en ont besoin	
+other packs need it	tr_image.cpp:kEntries	outros pacotes precisam dele	otros paquetes lo necesitan	d'autres packs en ont besoin	
+Import your own .fx files	tr_image.cpp:kEntries	Importe seus próprios arquivos .fx	Importa tus propios archivos .fx	Importez vos propres fichiers .fx	
+1 file in the Shaders folder	tr_image.cpp:kEntries	1 arquivo na pasta Shaders	1 archivo en la carpeta Shaders	1 fichier dans le dossier Shaders	
+{} files in the Shaders folder	tr_image.cpp:kEntries	{} arquivos na pasta Shaders	{} archivos en la carpeta Shaders	{} fichiers dans le dossier Shaders	{}
+It goes to the Recycle Bin	tr_image.cpp:kEntries	Ele vai para a Lixeira	Va a la Papelera de reciclaje	Il va dans la Corbeille	
+{} moved to the Recycle Bin	tr_image.cpp:kEntries	{} foi para a Lixeira	{} se movió a la Papelera de reciclaje	{} placé dans la Corbeille	{}
+{} could not be moved to the Recycle Bin	tr_image.cpp:kEntries	Não foi possível mover {} para a Lixeira	No se pudo mover {} a la Papelera de reciclaje	Impossible de placer {} dans la Corbeille	{}
+{} runs here	tr_image.cpp:kEntries	{} funciona aqui	{} funciona aquí	{} fonctionne ici	{}
+{} shaders run here	tr_image.cpp:kEntries	{} shaders funcionam aqui	{} shaders funcionan aquí	{} shaders fonctionnent ici	{}
+Needs {}, which is in {}	tr_image.cpp:kEntries	Precisa de {}, que está em {}	Necesita {}, que está en {}	Nécessite {}, qui se trouve dans {}	{} {}
+Needs {}	tr_image.cpp:kEntries	Precisa de {}	Necesita {}	Nécessite {}	{}
+Move to the Recycle Bin	tr_image.cpp:kEntries	Mover para a Lixeira	Mover a la Papelera de reciclaje	Placer dans la Corbeille	
+Import .fx…	tr_image.cpp:kEntries	Importar .fx…	Importar .fx…	Importer .fx…	
+{} shaders built into Apex, always available	tr_image.cpp:kEntries	{} shaders embutidos no Apex, sempre disponíveis	{} shaders integrados en Apex, siempre disponibles	{} shaders intégrés à Apex, toujours disponibles	{}
+Get more packs ›	tr_image.cpp:kEntries	Baixar mais pacotes ›	Descargar más paquetes ›	Obtenir d'autres packs ›	
 Shaders turned on	tr_image.cpp:kEntries	Shaders ligados	Shaders activados	Shaders activés	
 Shaders turned off	tr_image.cpp:kEntries	Shaders desligados	Shaders desactivados	Shaders désactivés	
 This look can't be read	tr_image.cpp:kEntries	Não foi possível ler este visual	No se puede leer este estilo	Ce rendu ne peut pas être lu	

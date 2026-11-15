@@ -73,6 +73,7 @@ struct Catalog
     std::vector<CheckedTech> checked;                            // runnable, not hidden, of files not compiled
     std::vector<std::pair<std::string, std::string>> fileErrors; // file, reason
     std::vector<std::string> files;                              // lower-case .fx names in the folder
+    std::vector<std::wstring> own;                               // the player's own .fx files (full paths)
     std::vector<std::string> pending;                            // ... of those not compiled yet
     std::vector<std::string> lazy;                               // ... pack files left uncompiled (not wanted)
     std::vector<std::string> packs;                              // pack folders
@@ -325,6 +326,7 @@ std::shared_ptr<Catalog> Build(const std::vector<std::shared_ptr<const Effect>>&
     {
         c->files.push_back(LowerA(Utf8(files[i].path.substr(files[i].path.find_last_of(L'\\') + 1))));
         if (!effects[i]) (lazy[i] ? c->lazy : c->pending).push_back(c->files.back());
+        if (files[i].pack.empty()) c->own.push_back(files[i].path);
         if (!files[i].pack.empty())
         {
             PackCount& n = c->counts[files[i].pack];
@@ -799,6 +801,7 @@ std::map<std::string, std::string> FindFiles(const std::vector<std::string>& nam
 }
 
 std::vector<std::string> PackFolders() { return g_current ? g_current->packs : std::vector<std::string>(); }
+std::vector<std::wstring> OwnFiles() { return g_current ? g_current->own : std::vector<std::wstring>(); }
 
 PackCount CountPack(const std::string& folder)
 {

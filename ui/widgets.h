@@ -207,7 +207,8 @@ void Pill(const char* text, bool highlighted, IconId icon = IconId::None);
 bool IconButton(const char* id, IconId icon, const char* tooltip = nullptr, bool active = false, float sizeUnits = 24.0f);
 // Buttons use the active compact/primary group frame height. Secondary = neutral fill with a border that turns violet on hover (Reset, Save, Change);
 // Primary = violet fill with white text, for the key action of a card (Turn on ..., Download).
-enum class ButtonKind { Secondary, Primary };
+// Danger = red fill with white text, only for the confirming button of a removal.
+enum class ButtonKind { Secondary, Primary, Danger };
 // A button with a 20-unit icon before its label; true when clicked. "Label##id" hides the ##id part.
 bool IconTextButton(const char* label, IconId icon, const char* tooltip = nullptr, ButtonKind kind = ButtonKind::Secondary);
 // The same without an icon; minWidth (pixels, already x Unit()) for equal-width buttons like - / +.
