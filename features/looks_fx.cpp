@@ -536,6 +536,9 @@ bool CompileImpl(const std::wstring& fxPath, const Folders& folders, UINT W, UIN
     pp.add_macro_definition("BUFFER_COLOR_BIT_DEPTH", "8");
     for (const auto& [name, value] : folders.defines) // the look's PreprocessorDefinitions: before the file, as ReShade adds them
         if (!name.empty()) pp.add_macro_definition(name, value);
+    // ReShade's global depth setting for this game: the INTZ depth is 0 near .. 1 far, as the runner's "not reversed";
+    // ReShade.fxh and qUINT_common.fxh default to reversed. After the look's own, so a look that names it still wins
+    pp.add_macro_definition("RESHADE_DEPTH_INPUT_IS_REVERSED", "0");
     for (const std::wstring& d : folders.includeDirs) pp.add_include_path(d);
     pp.append_string(
         "#define tex2Doffset(s, coords, offset) tex2D(s, coords, offset)\n"
