@@ -296,11 +296,28 @@ void ResolveShaders()
     RebuildOrder();
 }
 
+// The .ini's values of run-list entry i, read again when the shader's parameters changed since the look was loaded (a
+// shader compiled or recompiled later: its list was empty or of another size, and its rows read past it)
+std::vector<float>& IniValues(size_t i)
+{
+    if (g.iniValues.size() < g.order.size()) g.iniValues.resize(g.order.size());
+    std::vector<float>& v = g.iniValues[i];
+    if (!Runnable(i)) return v;
+    const LooksShader& d = Looks::Shader(g.order[i].shader);
+    if (v.size() != (size_t)d.paramCount * 4)
+    {
+        v = Looks::PresetValues(g.ini, d, (g.order[i].alt.empty() ? g.order[i].file : g.order[i].alt).c_str());
+        v.resize((size_t)d.paramCount * 4, 0.0f);
+    }
+    return v;
+}
+
 const float* ValuesFor(size_t entry)
 {
     auto it = g.tweaks.find(g.order[entry].technique);
-    if (it != g.tweaks.end() && it->second.size() == g.iniValues[entry].size()) return it->second.data();
-    return g.iniValues[entry].data();
+    std::vector<float>& ini = IniValues(entry);
+    if (it != g.tweaks.end() && it->second.size() == ini.size()) return it->second.data();
+    return ini.data();
 }
 
 // ---------------------------------------------------------------------------------------------- device state
@@ -740,7 +757,7 @@ int Diffs(const std::vector<float>& a, const std::vector<float>& b)
 int EditedValues(size_t i)
 {
     auto it = g.tweaks.find(g.order[i].technique);
-    return it == g.tweaks.end() || !Runnable(i) ? 0 : Diffs(it->second, g.iniValues[i]);
+    return it == g.tweaks.end() || !Runnable(i) ? 0 : Diffs(it->second, IniValues(i));
 }
 
 // Run-list entry i's file has quality settings (definitions) edited here
@@ -1620,8 +1637,9 @@ bool ValuesUi(size_t i)
     bool changed = false;
     const auto& e = g.order[i];
     const LooksShader& d = Looks::Shader(e.shader);
+    std::vector<float>& ini = IniValues(i);
     auto& tv = g.tweaks[e.technique];
-    if (tv.size() != g.iniValues[i].size()) tv = g.iniValues[i];
+    if (tv.size() != ini.size()) tv = ini;
     std::string category;
     bool open = true;
     for (int p = 0; p < d.paramCount; ++p)
@@ -1637,7 +1655,7 @@ bool ValuesUi(size_t i)
         if (!open) continue;
         ImGui::PushID(p);
         if (pd.text && !ApexUi::FilterActive()) ApexUi::IconNote(IconId::Info, pd.text);
-        changed |= ParamRow(pd, &tv[(size_t)p * 4], &g.iniValues[i][(size_t)p * 4]);
+        changed |= ParamRow(pd, &tv[(size_t)p * 4], &ini[(size_t)p * 4]);
         ImGui::PopID();
     }
     if (!EditedValues(i) && !ImGui::IsAnyItemActive()) g.tweaks.erase(e.technique); // back at the .ini: not "edited"
