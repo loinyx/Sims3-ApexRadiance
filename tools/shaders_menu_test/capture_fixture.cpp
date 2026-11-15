@@ -37,7 +37,7 @@ void CaptureState(int video, int options)
     Settings s; // the defaults
     if (options)
     {
-        s.sound = "C:\\Users\\Player\\Music\\A rather long sound file name for the camera.wav";
+        s.sound = "C:\\Example\\Music\\A rather long sound file name for the camera.wav";
         s.shot.jpg = true;
         s.shot.burstCount = 5;
         s.video.folder = kFolderCustom;
@@ -47,7 +47,7 @@ void CaptureState(int video, int options)
         s.video.newClipMb = 300; // not one of the choices: the note under the row
     }
     Set(s);
-    SetLastSaved(false, options ? "C:\\Users\\Player\\Documents\\Electronic Arts\\The Sims 3\\Screenshots\\Screenshot_2026-11-14_12-03-56_123.png" : "");
-    SetLastSaved(true, options ? "C:\\Users\\Player\\Videos\\Video_2026-11-14_12-03-56.mp4" : "");
+    SetLastSaved(false, options ? "C:\\Example\\Documents\\Electronic Arts\\The Sims 3\\Screenshots\\Screenshot_2026-11-14_12-03-56_123.png" : "");
+    SetLastSaved(true, options ? "C:\\Example\\Videos\\Video_2026-11-14_12-03-56.mp4" : "");
 }
 } // namespace Fixture

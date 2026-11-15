@@ -78,7 +78,7 @@ namespace GameAddr { uintptr_t Get(Id) { return 0; } }
 std::wstring g_root = std::filesystem::temp_directory_path().wstring() + L"apex-shaders-menu-test\\";
 namespace ApexPaths {
 const std::wstring& ApexDirectory() { return g_root; }
-const std::wstring& GameDocumentsDirectory() { static const std::wstring d = LR"(C:\Users\Player\Documents\Electronic Arts\The Sims 3\)"; return d; }
+const std::wstring& GameDocumentsDirectory() { static const std::wstring d = LR"(C:\Example\Documents\Electronic Arts\The Sims 3\)"; return d; }
 bool EnsureApexDirectory() { return true; }
 }
 
