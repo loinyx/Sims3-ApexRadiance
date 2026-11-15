@@ -187,7 +187,7 @@ void PushDefines()
 {
     std::map<std::string, LooksDefines> files;
     for (const auto& e : g.order)
-        if (LooksDefines d = DefinesFor(e.file); !d.empty()) files[Lower(e.alt.empty() ? e.file : e.alt)] = std::move(d); // the file that compiles
+        if (LooksDefines d = DefinesFor(e.alt.empty() ? e.file : e.alt); !d.empty()) files[Lower(e.alt.empty() ? e.file : e.alt)] = std::move(d); // the file that compiles (a stand-in: the global definitions only)
     Looks::Fx::SetDefines(files);
 }
 
@@ -243,7 +243,9 @@ void RebuildOrder()
     g.iniValues.assign(g.order.size(), {});
     std::vector<std::string> missing; // a downloaded pack's file compiles only once a look asks for it
     for (size_t i = 0; i < g.order.size(); ++i)
-        if (g.order[i].shader >= 0) g.iniValues[i] = Looks::PresetValues(g.ini, Looks::Shader(g.order[i].shader), g.order[i].file.c_str());
+        // a stand-in (another file with the technique) keeps its own defaults: the look's values were set for another version
+        // of the shader (MXAO 4.0.2 EX's amount 4.25 and fade to 1.0 darkened qUINT's MXAO and the sky)
+        if (g.order[i].shader >= 0) g.iniValues[i] = Looks::PresetValues(g.ini, Looks::Shader(g.order[i].shader), (g.order[i].alt.empty() ? g.order[i].file : g.order[i].alt).c_str());
         else missing.push_back(g.order[i].alt.empty() ? g.order[i].file : g.order[i].alt);
     if (!missing.empty()) Looks::Fx::WantFiles(missing);
     PushDefines();
@@ -747,7 +749,7 @@ int EditedValues(size_t i)
 }
 
 // Run-list entry i's file has quality settings (definitions) edited here
-bool DefsEdited(size_t i) { return g.defs.count(Lower(g.order[i].file)) != 0; }
+bool DefsEdited(size_t i) { return g.defs.count(Lower(g.order[i].alt.empty() ? g.order[i].file : g.order[i].alt)) != 0; }
 
 bool AnyEdited()
 {
@@ -1482,7 +1484,7 @@ bool DefinesUi(size_t i, const Looks::Fx::Effect& fx)
 {
     if (fx.macros.empty()) return false;
     const float u = ApexUi::Unit();
-    const std::string& file = g.order[i].file;
+    const std::string& file = g.order[i].alt.empty() ? g.order[i].file : g.order[i].alt; // a stand-in: its own definitions
     const std::string key = Lower(file);
     const LooksDefines look = Looks::PresetDefines(g.ini, file);
     const std::string title = I18n::Trf("Quality settings ({})", fx.macros.size());
