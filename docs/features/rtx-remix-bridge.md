@@ -218,6 +218,12 @@ kept and refuse every rewind to it, before anything changes.
   handle tables, render targets, device state and data queue positions. A query issued again since the snapshot answers
   with its result at the snapshot until the game issues it once more. The server then signals the client and reads no
   command until the client's process is back at the snapshot, so a command of the abandoned run is never executed.
+- **What the host puts back.** The memory of the game process, with the client's views of the bridge's shared
+  memory: the four channel mappings (`...Channel_<guid>`) and the query results block (`QueryResults_<guid>`, 4096
+  slots). The server writes neither while the client is parked, nor between a rewind and the client's signal, and it
+  keeps no state of its own about the query results block, so the client's views are all of it. The block has to come
+  back: a query whose answer was in its slot at the snapshot is not asked again by the client, which would wait for
+  that answer forever once a later answer has taken the slot.
 - **Answer.** `S_OK`, or `E_FAIL` (refused, nothing was changed; the reason is in the log), or `E_ABORT` (a rewind
   failed part-way: the D3D9 state is undefined, the host ends the game, and every later Op answers the same). Each
   answer carries eight numbers: objects kept, to revive, to drop, buffers and surfaces with kept contents, the memory
