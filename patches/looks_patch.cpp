@@ -187,7 +187,7 @@ void PushDefines()
 {
     std::map<std::string, LooksDefines> files;
     for (const auto& e : g.order)
-        if (LooksDefines d = DefinesFor(e.file); !d.empty()) files[Lower(e.file)] = std::move(d);
+        if (LooksDefines d = DefinesFor(e.file); !d.empty()) files[Lower(e.alt.empty() ? e.file : e.alt)] = std::move(d); // the file that compiles
     Looks::Fx::SetDefines(files);
 }
 
@@ -251,6 +251,17 @@ void RebuildOrder()
         g.status = std::format("{}: {} of {} shaders built in", Looks::RefName(g.preset), RunnableCount(false), g.order.size());
 }
 
+// A look entry's shader; a file found nowhere (a GShade preset's renamed file) runs from another file with the same
+// technique (e.alt), when a pack of ReShade's list has one
+void ResolveEntry(Looks::PresetEntry& e)
+{
+    e.shader = Looks::FindShader(e.technique, e.file);
+    e.alt.clear();
+    if (e.shader >= 0 || Looks::Fx::HasFile(e.file)) return;
+    e.alt = Looks::Packs::FileForTechnique(e.file, e.technique);
+    if (!e.alt.empty()) e.shader = Looks::FindShader(e.technique, e.alt);
+}
+
 void LoadPreset()
 {
     g.ini = {};
@@ -260,7 +271,7 @@ void LoadPreset()
     else if (Looks::LookText(g.preset, text, &g.error)) Looks::ParsePreset(text, g.ini);
     g.loaded = g.error.empty() && g.ini.error.empty();
     if (!g.ini.error.empty()) g.error = g.ini.error;
-    for (auto& e : g.ini.order) e.shader = Looks::FindShader(e.technique, e.file);
+    for (auto& e : g.ini.order) ResolveEntry(e);
     g.iniOrder = g.ini.order;
     g.iniKeys.clear();
     for (auto& e : g.iniOrder) g.iniKeys.insert(Lower(EntryKey(e)));
@@ -276,16 +287,8 @@ void LoadPreset()
 // The Shaders folder was compiled again: user shader indices changed, so every entry is looked up again
 void ResolveShaders()
 {
-    // a file found nowhere (a GShade preset's renamed file) runs from another file with the same technique
-    auto resolve = [](Looks::PresetEntry& e) {
-        e.shader = Looks::FindShader(e.technique, e.file);
-        e.alt.clear();
-        if (e.shader >= 0 || Looks::Fx::HasFile(e.file)) return;
-        e.alt = Looks::Packs::FileForTechnique(e.file, e.technique);
-        if (!e.alt.empty()) e.shader = Looks::FindShader(e.technique, e.alt);
-    };
-    for (auto& e : g.ini.order) resolve(e);
-    for (auto& e : g.iniOrder) resolve(e);
+    for (auto& e : g.ini.order) ResolveEntry(e);
+    for (auto& e : g.iniOrder) ResolveEntry(e);
     RebuildOrder();
 }
 
@@ -433,6 +436,7 @@ bool g_afterBloomDone = false;    // the after-bloom part ran (or was given to t
 bool g_stripPending = false;      // the bloom strip has drawn: run at the next back-buffer draw
 bool g_stripThisFrame = false;    // a bloom strip after the boundary this frame
 bool g_stripExpected = false;     // ... and last frame (so this frame waits for it)
+bool g_lastWasScene = false;      // the last back-buffer draw after the boundary tested depth (scene, not UI)
 bool g_frameTicked = false;       // g_frame advanced this frame (framecount/frametime: once per frame, not per run point)
 bool g_beforeLookDone = false;    // ApexCapture::BeforeLook called this frame (a split frame draws more than once)
 unsigned g_frame = 0;
@@ -467,9 +471,11 @@ void OnDraw(D3D9Hooks::DeviceContext& ctx, bool isStripOfTwo)
     if (!g_curRT0 || g_curRT0 != g_backBuffer) return;
     DWORD z = ctx.ZEnable();
     if (z != D3DZB_FALSE && !ctx.ZWriteEnable() && ctx.ZFunc() == D3DCMP_ALWAYS) z = D3DZB_FALSE; // UI glass passes
-    if (z != D3DZB_FALSE) { g_stripPending = false; return; } // more scene (interiors): wait for its own strip
+    if (z != D3DZB_FALSE) { g_stripPending = false; g_lastWasScene = true; return; } // more scene (interiors): wait for its own strip
+    const bool afterScene = std::exchange(g_lastWasScene, false);
     if (!g_stripPending) {
-        if (isStripOfTwo) { g_stripPending = true; g_stripThisFrame = true; }
+        // the bloom composite is the first flat draw after scene draws (as Picture finds it); a UI quad later is not
+        if (isStripOfTwo && afterScene) { g_stripPending = true; g_stripThisFrame = true; }
         return;
     }
     g_stripPending = false;
@@ -514,7 +520,7 @@ void OnPresent(IDirect3DDevice9* dev)
     g_frameWhy.clear();
     g_frameTried = false;
     g_stripExpected = g_stripThisFrame;
-    g_stripThisFrame = g_stripPending = false;
+    g_stripThisFrame = g_stripPending = g_lastWasScene = false;
     g_ranThisFrame = g_boundaryThisFrame = g_afterBloomDone = g_beforeLookDone = g_frameTicked = false;
     IDirect3DSurface9* s = nullptr;
     g_backBuffer = nullptr;
@@ -2972,15 +2978,16 @@ std::vector<std::string> NeededPacks()
             entries.push_back(e);
         }
     }
-    for (auto& e : entries) // a file found nowhere: its stand-in with the same technique (as ResolveShaders)
-    {
-        if (!e.alt.empty()) e.file = e.alt;
-        else if (Looks::FindShader(e.technique, e.file) < 0 && !Looks::Fx::HasFile(e.file))
-            if (std::string alt = Looks::Packs::FileForTechnique(e.file, e.technique); !alt.empty()) e.file = alt;
-    }
     std::vector<std::string> files;
     for (const auto& e : entries) files.push_back(e.file);
-    const std::map<std::string, std::string> where = Looks::Fx::FindFiles(files); // read from the folders, not this session's compiles
+    const std::map<std::string, std::string> owned = Looks::Fx::FindFiles(files); // read from the folders, not this session's compiles
+    // a file found nowhere, not even in the folders: its stand-in with the same technique (as ResolveEntry)
+    for (auto& e : entries)
+        if (!owned.count(Lower(e.file)) && Looks::FindShader(e.technique, e.file) < 0)
+            if (std::string alt = e.alt.empty() ? Looks::Packs::FileForTechnique(e.file, e.technique) : e.alt; !alt.empty()) e.file = alt;
+    files.clear();
+    for (const auto& e : entries) files.push_back(e.file);
+    const std::map<std::string, std::string> where = Looks::Fx::FindFiles(files);
     std::vector<std::string> names;
     for (const auto& e : entries)
     {

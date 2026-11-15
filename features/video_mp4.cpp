@@ -249,8 +249,7 @@ std::string EncoderName(Session& s) {
                     name = ApexUtil::ToUtf8(w);
                     CoTaskMemFree(w);
                 }
-                UINT32 hw = 0;
-                if (a && SUCCEEDED(a->GetUINT32(MFT_ENUM_HARDWARE_URL_Attribute, &hw))) name += " (hardware)";
+                if (a && SUCCEEDED(a->GetItem(MFT_ENUM_HARDWARE_URL_Attribute, nullptr))) name += " (hardware)"; // a string: present on hardware encoders
                 SafeRelease(a);
             }
             SafeRelease(t);
@@ -365,7 +364,8 @@ void Worker(std::shared_ptr<Session> sp) {
     if (ok) {
         if (const HRESULT hr = s.writer->BeginWriting(); FAILED(hr)) { ok = false; why = std::format("the MP4 file could not be started ({:#x})", static_cast<unsigned>(hr)); }
         else LOG_INFO(std::format("[Video] Writer started: {} encoder \"{}\", {}{}", s.o.hevc && s.notes.find("HEVC not available") == std::string::npos ? "HEVC" : "H.264",
-                                  EncoderName(s), s.hasAudio ? "game sound 48 kHz stereo" : "no sound", s.notes.empty() ? "" : "; " + s.notes));
+                                  EncoderName(s), s.hasAudio ? "game sound 48 kHz stereo" : "no sound",
+                                  s.notes.empty() ? "" : "; " + s.notes.substr(0, s.notes.size() - 2))); // notes end in "; "
     }
     if (!ok) {
         s.error = mf ? why : "Media Foundation is not available";
