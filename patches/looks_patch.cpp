@@ -462,17 +462,20 @@ void AfterBloom(IDirect3DDevice9* dev)
     EffectImpl(dev, false, 1u << kAfterBloom);
 }
 
-// Back-buffer draws after the scene boundary: the bloom strip, then the first draw after it (the UI starts)
+// Back-buffer draws: the scene, the bloom strip after the boundary, then the first draw after it (the UI starts)
 void OnDraw(D3D9Hooks::DeviceContext& ctx, bool isStripOfTwo)
 {
     // the strip is watched for even when this frame's after-bloom part already ran at the boundary (no strip last frame):
     // else a frame that once missed it would run every later frame at the boundary, under the game's bloom
-    if (!g.active || !g_boundaryThisFrame || DepthShare::InternalPass() || (g_afterBloomDone && g_stripThisFrame)) return;
+    if (!g.active || DepthShare::InternalPass() || (g_afterBloomDone && g_stripThisFrame)) return;
     if (!g_curRT0 || g_curRT0 != g_backBuffer) return;
     DWORD z = ctx.ZEnable();
     if (z != D3DZB_FALSE && !ctx.ZWriteEnable() && ctx.ZFunc() == D3DCMP_ALWAYS) z = D3DZB_FALSE; // UI glass passes
     if (z != D3DZB_FALSE) { g_stripPending = false; g_lastWasScene = true; return; } // more scene (interiors): wait for its own strip
     const bool afterScene = std::exchange(g_lastWasScene, false);
+    // scene draws are tracked before the boundary too: the boundary's own draw is usually the bloom strip, and without
+    // them it was never seen, so "World only" ran under the game's bloom (and before Color with that order)
+    if (!g_boundaryThisFrame) return;
     if (!g_stripPending) {
         // the bloom composite is the first flat draw after scene draws (as Picture finds it); a UI quad later is not
         if (isStripOfTwo && afterScene) { g_stripPending = true; g_stripThisFrame = true; }
@@ -493,6 +496,8 @@ void AtEndScene(IDirect3DDevice9* dev)
     if (rt) rt->Release();
     if (!onBackBuffer) return; // an off-screen pass (reflection, thumbnail): wait for the frame's own EndScene
     g_ranThisFrame = true;
+    // the frame ended on the strip (UI hidden): nothing was drawn over the world after it
+    if (g_stripPending && !g_afterBloomDone) { g_stripPending = false; AfterBloom(dev); }
     if (g_boundaryThisFrame && !g_afterBloomDone)
         PartWhy("no bloom strip came after the scene boundary (the after-bloom shaders run at the boundary next frame)");
     if (!g.onUi) return; // UI left clean: nothing at the end of frame
