@@ -146,7 +146,7 @@ index a43dd2e4..e6167ef6 100644
  
    FrameMark;
 diff --git a/bridge/src/server/main.cpp b/bridge/src/server/main.cpp
-index fb6c57f4..a4495254 100644
+index fb6c57f4..f227d895 100644
 --- a/bridge/src/server/main.cpp
 +++ b/bridge/src/server/main.cpp
 @@ -24,6 +24,7 @@
@@ -206,7 +206,7 @@ index fb6c57f4..a4495254 100644
 +  // The client's process is still the abandoned run until its host has put it back to the snapshot.
 +  // A command read before that would be run against the wrong state, so the next one is read after the client's signal.
 +  const ULONGLONG start = GetTickCount64();
-+  while (gbBridgeRunning && WaitForSingleObject(events().resume, 50) != WAIT_OBJECT_0) {
++  while (gbBridgeRunning && WaitForSingleObject(events().resume, 50) == WAIT_TIMEOUT) {
 +    if (GetTickCount64() - start >= kResumeTimeoutMs) {
 +      Logger::err(format_string("[Rewind] The client did not come back within %lu s of a rewind. Reading commands again.", kResumeTimeoutMs / 1000));
 +      break;
@@ -287,11 +287,19 @@ index fb6c57f4..a4495254 100644
          PULL(DWORD, LODNew);
          const auto& pResource = gpD3DResources[pHandle];
          if (pResource != nullptr) {
-+          rewind_mode::keepLod((IDirect3DBaseTexture9*) pResource);
++          rewind_mode::keepSettings((IDirect3DBaseTexture9*) pResource);
            ((IDirect3DBaseTexture9*) pResource)->SetLOD(LODNew);
          }
          assert(pResource != nullptr);
-@@ -2249,6 +2307,7 @@ void ProcessDeviceCommandQueue() {
+@@ -2035,6 +2093,7 @@ void ProcessDeviceCommandQueue() {
+         PULL(D3DTEXTUREFILTERTYPE, FilterType);
+         const auto& pResource = gpD3DResources[pHandle];
+         if (pResource != nullptr) {
++          rewind_mode::keepSettings((IDirect3DBaseTexture9*) pResource);
+           hresult = ((IDirect3DBaseTexture9*) pResource)->SetAutoGenFilterType(FilterType);
+           SEND_OPTIONAL_SERVER_RESPONSE(hresult, currentUID);
+         }
+@@ -2249,6 +2308,7 @@ void ProcessDeviceCommandQueue() {
          const auto& pVolumeTexture = (IDirect3DVolumeTexture9*) gpD3DResources[pHandle];
          // Now lock the box so we can copy the data into it
          D3DLOCKED_BOX pLockedVolume;
@@ -299,7 +307,7 @@ index fb6c57f4..a4495254 100644
          auto hresult = pVolumeTexture->LockBox(IN Level, IN & pLockedVolume, IN pBox, IN Flags);
          assert(S_OK == hresult);
          // Copy the data over
-@@ -2473,6 +2532,7 @@ void ProcessDeviceCommandQueue() {
+@@ -2473,6 +2533,7 @@ void ProcessDeviceCommandQueue() {
  
          // Now lock the buffer so we can copy the data into it
          void* pbData = nullptr;
@@ -307,7 +315,7 @@ index fb6c57f4..a4495254 100644
          auto hresult = pVertexBuffer->Lock(IN OffsetToLock, IN SizeToLock, IN & pbData, IN Flags);
          assert(S_OK == hresult);
          if (SUCCEEDED(hresult) && pbData != nullptr) {
-@@ -2573,6 +2633,7 @@ void ProcessDeviceCommandQueue() {
+@@ -2573,6 +2634,7 @@ void ProcessDeviceCommandQueue() {
  
          // Now lock the buffer so we can copy the data into it
          void* pbData = nullptr;
@@ -315,7 +323,7 @@ index fb6c57f4..a4495254 100644
          auto hresult = pIndexBuffer->Lock(IN OffsetToLock, IN SizeToLock, IN & pbData, IN Flags);
          assert(S_OK == hresult);
          if (SUCCEEDED(hresult) && pbData != nullptr) {
-@@ -2676,6 +2737,7 @@ void ProcessDeviceCommandQueue() {
+@@ -2676,6 +2738,7 @@ void ProcessDeviceCommandQueue() {
            if (pSurface == nullptr) {
              break;
            }
@@ -323,7 +331,7 @@ index fb6c57f4..a4495254 100644
            D3DLOCKED_RECT lockedRect;
            auto hresult = pSurface->LockRect(OUT & lockedRect, IN pRect, IN Flags);
            assert(S_OK == hresult);
-@@ -2707,6 +2769,7 @@ void ProcessDeviceCommandQueue() {
+@@ -2707,6 +2770,7 @@ void ProcessDeviceCommandQueue() {
              gPendingSurfaceLocks.erase(stale);
            }
            if (pSurface != nullptr) {
@@ -331,7 +339,7 @@ index fb6c57f4..a4495254 100644
              D3DLOCKED_RECT lockedRect;
              const auto hresult = pSurface->LockRect(OUT & lockedRect, IN pRect, IN Flags);
              assert(S_OK == hresult);
-@@ -2810,6 +2873,7 @@ void ProcessDeviceCommandQueue() {
+@@ -2810,6 +2874,7 @@ void ProcessDeviceCommandQueue() {
          const auto& pVolume = gpD3DVolumes[pHandle];
          // Now lock the box so we can copy the data into it
          D3DLOCKED_BOX pLockedVolume;
@@ -339,7 +347,7 @@ index fb6c57f4..a4495254 100644
          auto hresult = pVolume->LockBox(IN & pLockedVolume, IN pBox, IN Flags);
          assert(S_OK == hresult);
          // Copy the data over
-@@ -2870,6 +2934,7 @@ void ProcessDeviceCommandQueue() {
+@@ -2870,6 +2935,7 @@ void ProcessDeviceCommandQueue() {
          GET_HND(pHandle);
          PULL(DWORD, dwIssueFlags);
          const auto pQuery = gpD3DQuery[pHandle];
@@ -347,7 +355,7 @@ index fb6c57f4..a4495254 100644
          const HRESULT hresult = (pQuery != nullptr) ? pQuery->Issue(dwIssueFlags) : D3DERR_INVALIDCALL;
          SEND_OPTIONAL_SERVER_RESPONSE(hresult, currentUID);
          break;
-@@ -2882,7 +2947,8 @@ void ProcessDeviceCommandQueue() {
+@@ -2882,7 +2948,8 @@ void ProcessDeviceCommandQueue() {
          const auto pQuery = gpD3DQuery[pHandle];
          std::vector<uint8_t> data(dwSize);
          void* pData = dwSize > 0 ? data.data() : nullptr;
@@ -357,7 +365,7 @@ index fb6c57f4..a4495254 100644
  
          if (Commands::IsAsyncResult(rpcHeader.flags)) {
            // The sequence number is published after the result.
-@@ -2954,6 +3020,34 @@ void ProcessDeviceCommandQueue() {
+@@ -2954,6 +3021,34 @@ void ProcessDeviceCommandQueue() {
          SharedHeap::deallocate(allocId);
          break;
        }
@@ -392,7 +400,7 @@ index fb6c57f4..a4495254 100644
        case Bridge_UnlinkResource:
        {
          GET_HND(pHandle);
-@@ -3400,6 +3494,10 @@ void ProcessDeviceCommandQueue() {
+@@ -3400,6 +3495,10 @@ void ProcessDeviceCommandQueue() {
        }
      }
  
@@ -417,10 +425,10 @@ index 908d93fb..4d418be8 100644
  ])
 diff --git a/bridge/src/server/rewind_mode.h b/bridge/src/server/rewind_mode.h
 new file mode 100644
-index 00000000..376102b8
+index 00000000..242a845d
 --- /dev/null
 +++ b/bridge/src/server/rewind_mode.h
-@@ -0,0 +1,845 @@
+@@ -0,0 +1,850 @@
 +#pragma once
 +
 +// Rewind mode, server side (util_rewind.h): what the server keeps while a snapshot is held and how it returns to it.
@@ -435,6 +443,7 @@ index 00000000..376102b8
 +#include <string>
 +#include <unordered_map>
 +#include <unordered_set>
++#include <utility>
 +#include <vector>
 +
 +#include "log/log.h"
@@ -511,8 +520,8 @@ index 00000000..376102b8
 +    // Back buffers of swap chains that discard: D3D9 leaves their contents undefined after a Present, so none are kept.
 +    std::unordered_set<IDirect3DSurface9*> discarded;
 +    std::unordered_map<uint32_t, DeviceState> deviceStates;
-+    // SetLOD values at the snapshot of the textures whose value changed after it.
-+    std::unordered_map<IDirect3DBaseTexture9*, DWORD> lods;
++    // SetLOD and SetAutoGenFilterType values at the snapshot of the textures that had one set after it.
++    std::unordered_map<IDirect3DBaseTexture9*, std::pair<DWORD, D3DTEXTUREFILTERTYPE>> textureSettings;
 +    // Results at the snapshot of the queries that had one, and the queries whose result was still on its way.
 +    std::unordered_map<IDirect3DQuery9*, std::vector<uint8_t>> queryResults;
 +    std::unordered_set<IDirect3DQuery9*> queriesPending;
@@ -722,7 +731,6 @@ index 00000000..376102b8
 +      refuse("a device was made, reset or destroyed after the snapshot");
 +      break;
 +    case IDirect3DDevice9Ex_SetDialogBoxMode:
-+    case IDirect3DBaseTexture9_SetAutoGenFilterType:
 +      refuse(format_string("%s after the snapshot is not put back", toString(command).c_str()));
 +      break;
 +    case IDirect3DDevice9Ex_SetCursorProperties:
@@ -774,6 +782,10 @@ index 00000000..376102b8
 +    IDirect3DDevice9* pDevice = nullptr;
 +    IDirect3DSurface9* pCopy = nullptr;
 +    HRESULT hresult = pSurface->GetDesc(&desc);
++    if (SUCCEEDED(hresult) && static_cast<DWORD>(desc.Format) == MAKEFOURCC('N', 'U', 'L', 'L')) {
++      // A render target of this format has no contents.
++      return;
++    }
 +    if (SUCCEEDED(hresult) && desc.MultiSampleType != D3DMULTISAMPLE_NONE) {
 +      // A copy between multisampled surfaces may resolve them, which loses the samples.
 +      refuse(format_string("a multisampled %ux%u %s cannot be copied exactly", desc.Width, desc.Height,
@@ -941,12 +953,12 @@ index 00000000..376102b8
 +    }
 +  }
 +
-+  // Keeps the SetLOD value of a texture before the first change after the snapshot.
-+  inline void keepLod(IDirect3DBaseTexture9* pTexture) {
++  // Keeps the SetLOD and SetAutoGenFilterType values of a texture before the first change after the snapshot.
++  inline void keepSettings(IDirect3DBaseTexture9* pTexture) {
 +    if (!held() || pTexture == nullptr || gSnapshot.objects.count(pTexture) == 0) {
 +      return;
 +    }
-+    gSnapshot.lods.emplace(pTexture, pTexture->GetLOD());
++    gSnapshot.textureSettings.emplace(pTexture, std::make_pair(pTexture->GetLOD(), pTexture->GetAutoGenFilterType()));
 +  }
 +
 +  // Runs before a query is issued.
@@ -1177,10 +1189,11 @@ index 00000000..376102b8
 +      pDevice->SetSoftwareVertexProcessing(state.softwareVertexProcessing);
 +      pDevice->SetGammaRamp(0, D3DSGR_NO_CALIBRATION, &state.gamma);
 +    }
-+    for (const auto& [pTexture, lod] : gSnapshot.lods) {
-+      pTexture->SetLOD(lod);
++    for (const auto& [pTexture, settings] : gSnapshot.textureSettings) {
++      pTexture->SetLOD(settings.first);
++      pTexture->SetAutoGenFilterType(settings.second);
 +    }
-+    gSnapshot.lods.clear();
++    gSnapshot.textureSettings.clear();
 +    for (IDirect3DQuery9* pQuery : gSnapshot.queriesIssued) {
 +      const auto result = gSnapshot.queryResults.find(pQuery);
 +      if (result != gSnapshot.queryResults.end()) {
@@ -1740,10 +1753,10 @@ index 00000000..ce540826
 +}
 diff --git a/bridge/test/rtx/unit/test_rewind_server.cpp b/bridge/test/rtx/unit/test_rewind_server.cpp
 new file mode 100644
-index 00000000..edc731c6
+index 00000000..94356f05
 --- /dev/null
 +++ b/bridge/test/rtx/unit/test_rewind_server.cpp
-@@ -0,0 +1,459 @@
+@@ -0,0 +1,460 @@
 +// Runs the server side of rewind mode (src/server/rewind_mode.h) on a D3D9 device, without a client or a game.
 +// The tables below stand in for the server's, and destroy() for its destroy commands.
 +// The device comes from the system's d3d9.dll, or from the library named by REWIND_TEST_D3D9 (a DXVK build, as the
@@ -1974,7 +1987,7 @@ index 00000000..edc731c6
 +    pDevice->Clear(0, nullptr, D3DCLEAR_TARGET, 0xff0000ff, 1.0f, 0);
 +    pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
 +    pDevice->SetRenderState(D3DRS_ZENABLE, FALSE);
-+    pTexture->SetLOD(0);
++    const D3DTEXTUREFILTERTYPE filterAtSnapshot = pTexture->GetAutoGenFilterType();
 +    DWORD pixelsAtSnapshot = 0;
 +    if (hasQuery) {
 +      pQuery->Issue(D3DISSUE_BEGIN);
@@ -2006,8 +2019,8 @@ index 00000000..edc731c6
 +    pDevice->SetRenderTarget(0, pTargetLevel);
 +    pDevice->Clear(0, nullptr, D3DCLEAR_TARGET, 0xffffffff, 1.0f, 0);
 +    pDevice->SetRenderState(D3DRS_LIGHTING, TRUE);
-+    rewind_mode::keepLod(pTexture);
-+    pTexture->SetLOD(0);
++    rewind_mode::keepSettings(pTexture);
++    pTexture->SetAutoGenFilterType(D3DTEXF_POINT);
 +    destroy(10);
 +    expect(holds(pBuffer, 0xb2), "a destroyed vertex buffer from before the snapshot stays alive");
 +    IDirect3DIndexBuffer9* pNewBuffer = nullptr;
@@ -2048,6 +2061,7 @@ index 00000000..edc731c6
 +    pDevice->GetRenderTarget(0, &pBound);
 +    pDevice->GetRenderState(D3DRS_LIGHTING, &lighting);
 +    expect(pBound == pBackBuffer && lighting == FALSE, "rewind: the bound render target and the render states");
++    expect(pTexture->GetAutoGenFilterType() == filterAtSnapshot, "rewind: a texture's filter setting");
 +    if (pBound != nullptr) {
 +      pBound->Release();
 +    }

@@ -206,7 +206,7 @@ kept and refuse every rewind to it, before anything changes.
 - **While a snapshot is held.** A destroy of an object alive at the snapshot is deferred. Before the first write into
   such a vertex buffer, index buffer or surface (an upload, `UpdateSurface`, `UpdateTexture`, `StretchRect`,
   `ColorFill`, `GetRenderTargetData`, `GetFrontBufferData`) the server keeps the old contents, and before the first
-  `SetLOD` the old value. Kept contents and deferred objects together stay under `rewindMaxKeptMB` (1024). The log
+  `SetLOD` or `SetAutoGenFilterType` the old value. Kept contents and deferred objects together stay under `rewindMaxKeptMB` (1024). The log
   reports them every 128 MB; past the limit the snapshot is given up.
 - **Rewind.** The server puts the kept contents back, releases the objects made since the snapshot, and restores the
   handle tables, render targets, device state and data queue positions. A query issued again since the snapshot answers
@@ -220,7 +220,7 @@ kept and refuse every rewind to it, before anything changes.
 Refused by design, with the reason in `bridge64.log`: a multisampled render target or depth surface (a copy may
 resolve its samples), a depth surface the D3D9 library does not copy, a write into a volume texture from before the
 snapshot, a query whose result was not ready at the snapshot and is issued again, a device reset, creation or
-destruction, `SetDialogBoxMode`, `SetAutoGenFilterType`, Remix API and shared heap commands, and an upload in progress.
+destruction, `SetDialogBoxMode`, Remix API and shared heap commands, and an upload in progress.
 Cursor commands are not undone; they are counted for the host.
 
 `native\remix-bridge\test-rewind.cmd` runs the offline tests after `build.cmd`: the server side on a D3D9 device

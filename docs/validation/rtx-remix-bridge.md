@@ -130,7 +130,7 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
 
 | Date | Build | Check | Result |
 |---|---|---|---|
-| 2026-11-15 | patch 0015 on f35b86a with 0001 to 0014, `build.cmd` from a fresh fetch | `test_rewind_server` on the system's d3d9.dll and on DXVK (`d3d9vk_x64.dll` of the 4.0.1 package), NVIDIA GPU | 49 checks pass on each: tables and a reused id, contents of buffers, textures, render targets, the back buffer and the depth surface, device state, query answers, two rewinds to one snapshot, the memory limit, the refusals, `E_ABORT` after a failed write-back, no reference left on the device |
+| 2026-11-15 | patch 0015 on f35b86a with 0001 to 0014, `build.cmd` from a fresh fetch | `test_rewind_server` on the system's d3d9.dll and on DXVK (`d3d9vk_x64.dll` of the 4.0.1 package), NVIDIA GPU | 50 checks pass on each: tables and a reused id, contents of buffers, textures, render targets, the back buffer and the depth surface, device state, query answers, two rewinds to one snapshot, the memory limit, the refusals, `E_ABORT` after a failed write-back, no reference left on the device |
 | 2026-11-15 | the same pair | `test_rewind_device`, mode on and off, 12 runs each | pass: park, snapshot, plan (1 object to revive, 1 to drop), drop; a second thread's command waits for the whole park; with the mode off no cooperation block |
 | 2026-11-15 | the same pair | In game | not run yet, see Open checks |
 
