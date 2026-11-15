@@ -1,0 +1,681 @@
+0015: rewind mode for test harnesses, off unless bridge.conf sets rewindMode = True in both copies. A test host snapshots the game process and later puts its memory back; the server then returns to the D3D9 state of the snapshot. At the end of a Present the client sends one synchronous Bridge_Rewind command, which leaves both command queues empty, and parks. While a snapshot is held the server defers destroys of the objects alive at it, keeps the old contents of a buffer or surface before the first upload, and on a rewind brings back destroyed objects, lets go of new ones, puts contents, device state and data queue positions back. With the option off no code path changes: the client makes no cooperation block and the server takes no snapshot.
+Applies after 0001-0014 on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only).
+diff --git a/bridge/src/client/d3d9_swapchain.cpp b/bridge/src/client/d3d9_swapchain.cpp
+index a43dd2e4..3d244712 100644
+--- a/bridge/src/client/d3d9_swapchain.cpp
++++ b/bridge/src/client/d3d9_swapchain.cpp
+@@ -26,6 +26,8 @@
+ #include "d3d9_surfacebuffer_helper.h"
+ #include "swapchain_map.h"
+ 
++#include "util_rewind.h"
++
+ extern std::mutex gSwapChainMapMutex;
+ extern SwapChainMap gSwapChainMap;
+ 
+@@ -150,6 +152,58 @@ void Direct3DSwapChain9_LSS::onDestroy() {
+   ClientMessage c(Commands::IDirect3DSwapChain9_Destroy, getId());
+ }
+ 
++// Rewind mode (util_rewind.h). Runs at the end of a Present with gPresentMutex held.
++// Each op the host writes is sent to the server and waited for, then op is cleared as the acknowledgement.
++static void parkForRewind() {
++  using namespace bridge_util::rewind;
++  static Coop* const pCoop = createCoop();
++  if (pCoop == nullptr) {
++    return;
++  }
++  const uint32_t tick = ++pCoop->tick;
++  const auto wanted = [&]() {
++    return pCoop->request || (pCoop->parkAtTick && tick >= pCoop->parkAtTick);
++  };
++  const auto runOp = [&]() {
++    const uint32_t op = pCoop->op;
++    if (!op) {
++      return;
++    }
++    int32_t result = -1;
++    if (gbBridgeRunning) {
++      UID currentUID = 0;
++      {
++        ClientMessage c(Commands::Bridge_Rewind, 0);
++        currentUID = c.get_uid();
++        c.send_data(op);
++      }
++      if (Result::Success == DeviceBridge::waitForCommand(Commands::Bridge_Response, GlobalOptions::getCommandTimeout(), nullptr, true, currentUID)) {
++        result = (int32_t) DeviceBridge::get_data();
++        for (uint32_t i = 0; i < kStatCount; i++) {
++          pCoop->bridgeStats[i] = (uint32_t) DeviceBridge::get_data();
++        }
++        DeviceBridge::consumeResponse();
++        // The server moves its queue positions only after its answer has left the queue.
++        if (WaitForSingleObject(doneEvent(), 15'000) != WAIT_OBJECT_0) {
++          result = -2;
++        }
++      }
++    }
++    pCoop->bridgeResult = result;
++    pCoop->op = 0;
++  };
++  if (!wanted()) {
++    return;
++  }
++  runOp();
++  pCoop->parked = 1;
++  while (wanted()) {
++    runOp();
++    Sleep(1);
++  }
++  pCoop->parked = 0;
++}
++
+ HRESULT Direct3DSwapChain9_LSS::Present(CONST RECT* pSourceRect, CONST RECT* pDestRect,
+                                         HWND hDestWindowOverride, CONST RGNDATA* pDirtyRegion,
+                                         DWORD dwFlags) {
+@@ -193,6 +247,8 @@ HRESULT Direct3DSwapChain9_LSS::Present(CONST RECT* pSourceRect, CONST RECT* pDe
+     return ERROR_SEM_TIMEOUT;
+   }
+ 
++  parkForRewind();
++
+   DeviceBridge::perfOnFrame();
+ 
+   FrameMark;
+diff --git a/bridge/src/server/main.cpp b/bridge/src/server/main.cpp
+index fb6c57f4..275c0230 100644
+--- a/bridge/src/server/main.cpp
++++ b/bridge/src/server/main.cpp
+@@ -20,6 +20,7 @@
+  * DEALINGS IN THE SOFTWARE.
+  */
+ #include <windows.h>
++#include <unordered_set>
+ 
+ #include "version.h"
+ #include "module_processing.h"
+@@ -38,6 +39,7 @@
+ #include "util_perfcounters.h"
+ #include "util_process.h"
+ #include "util_remixapi.h"
++#include "util_rewind.h"
+ #include "util_seh.h"
+ #include "util_semaphore.h"
+ #include "util_sharedheap.h"
+@@ -182,6 +184,369 @@ static void deserializeFromQueue(SerializableT& serializableT) {
+ }
+ }
+ 
++// Rewind mode (util_rewind.h). Nothing here acts unless a snapshot is held, and none is taken while the mode is off.
++namespace rewind_mode {
++  // Contents kept past this size make the snapshot refuse a rewind.
++  constexpr size_t kMaxSavedBytes = size_t(1) << 30;
++
++  enum class Kind { VertexBuffer, IndexBuffer, Surface };
++
++  struct Saved {
++    Kind kind;
++    std::vector<uint8_t> bytes;
++  };
++
++  struct DeviceState {
++    IDirect3DStateBlock9* pBlock = nullptr;
++    IDirect3DSurface9* pTargets[4] = {};
++    IDirect3DSurface9* pDepthStencil = nullptr;
++  };
++
++  struct Snapshot {
++    bool held = false;
++    std::string refused;
++    decltype(gpD3DDevices) devices;
++    decltype(gpD3DResources) resources;
++    decltype(gpD3DVolumes) volumes;
++    decltype(gpD3DVertexDeclarations) vertexDeclarations;
++    decltype(gpD3DStateBlocks) stateBlocks;
++    decltype(gpD3DVertexShaders) vertexShaders;
++    decltype(gpD3DPixelShaders) pixelShaders;
++    decltype(gpD3DSwapChains) swapChains;
++    decltype(gpD3DQuery) queries;
++    // Every object alive at the snapshot. A destroy of one of them is deferred, so a rewind can bring it back.
++    std::unordered_set<IUnknown*> objects;
++    std::unordered_set<IUnknown*> tombstones;
++    // What a buffer or surface held at the snapshot, taken before the first upload after it. Each entry holds a reference.
++    std::unordered_map<IUnknown*, Saved> saved;
++    std::unordered_map<uint32_t, DeviceState> deviceStates;
++    size_t savedBytes = 0;
++    uint32_t notRestored = 0;
++    // Data queue positions of the device and module bridges, reader then writer.
++    size_t pos[4] = {};
++    uint64_t absPos[4] = {};
++  };
++
++  static Snapshot gSnapshot;
++
++  template<typename Fn>
++  static void forEachMap(Fn&& fn) {
++    fn(gpD3DDevices, gSnapshot.devices);
++    fn(gpD3DResources, gSnapshot.resources);
++    fn(gpD3DVolumes, gSnapshot.volumes);
++    fn(gpD3DVertexDeclarations, gSnapshot.vertexDeclarations);
++    fn(gpD3DStateBlocks, gSnapshot.stateBlocks);
++    fn(gpD3DVertexShaders, gSnapshot.vertexShaders);
++    fn(gpD3DPixelShaders, gSnapshot.pixelShaders);
++    fn(gpD3DSwapChains, gSnapshot.swapChains);
++    fn(gpD3DQuery, gSnapshot.queries);
++  }
++
++  static void refuse(const char* reason) {
++    if (gSnapshot.refused.empty()) {
++      gSnapshot.refused = reason;
++      Logger::warn(format_string("[Rewind] the snapshot can no longer be returned to: %s", reason));
++    }
++  }
++
++  // Returns true when the object was alive at the snapshot. Its destroy is then deferred.
++  static bool keeps(IUnknown* pObj) {
++    if (!gSnapshot.held || pObj == nullptr || gSnapshot.objects.count(pObj) == 0) {
++      return false;
++    }
++    gSnapshot.tombstones.insert(pObj);
++    return true;
++  }
++
++  // Counts the writes whose old contents are not kept, and the events no rewind can cross.
++  static void note(const Commands::D3D9Command command) {
++    if (!gSnapshot.held) {
++      return;
++    }
++    switch (command) {
++    case IDirect3DDevice9Ex_UpdateSurface:
++    case IDirect3DDevice9Ex_UpdateTexture:
++    case IDirect3DDevice9Ex_StretchRect:
++    case IDirect3DDevice9Ex_ColorFill:
++    case IDirect3DBaseTexture9_GenerateMipSubLevels:
++    case IDirect3DSurface9_GetDC:
++    case IDirect3DVolume9_UnlockBox:
++      ++gSnapshot.notRestored;
++      break;
++    case IDirect3D9Ex_CreateDevice:
++    case IDirect3D9Ex_CreateDeviceEx:
++    case IDirect3DDevice9Ex_Reset:
++    case IDirect3DDevice9Ex_ResetEx:
++    case IDirect3DDevice9Ex_Destroy:
++      refuse("a device was made, reset or destroyed after the snapshot");
++      break;
++    default:
++      break;
++    }
++  }
++
++  static void store(IUnknown* pObj, const Kind kind, const void* pData, const size_t size) {
++    if (pData == nullptr || gSnapshot.savedBytes + size > kMaxSavedBytes) {
++      ++gSnapshot.notRestored;
++      if (pData != nullptr) {
++        refuse("the contents kept since the snapshot passed 1 GB");
++      }
++      return;
++    }
++    Saved& saved = gSnapshot.saved[pObj];
++    saved.kind = kind;
++    saved.bytes.assign(static_cast<const uint8_t*>(pData), static_cast<const uint8_t*>(pData) + size);
++    gSnapshot.savedBytes += size;
++    pObj->AddRef();
++  }
++
++  // Keeps what a buffer holds before the first upload after the snapshot.
++  template<typename BufferT, typename DescT>
++  static void keepBuffer(BufferT* pBuffer, const Kind kind) {
++    if (!gSnapshot.held || pBuffer == nullptr || gSnapshot.objects.count(pBuffer) == 0 || gSnapshot.saved.count(pBuffer) != 0) {
++      return;
++    }
++    DescT desc;
++    void* pData = nullptr;
++    if (FAILED(pBuffer->GetDesc(&desc)) || FAILED(pBuffer->Lock(0, 0, &pData, D3DLOCK_READONLY))) {
++      ++gSnapshot.notRestored;
++      return;
++    }
++    store(pBuffer, kind, pData, desc.Size);
++    pBuffer->Unlock();
++  }
++
++  // Keeps what a surface holds before the first upload after the snapshot.
++  // A texture level counts as alive at the snapshot when its texture was.
++  static void keepSurface(IDirect3DSurface9* pSurface) {
++    if (!gSnapshot.held || pSurface == nullptr || gSnapshot.saved.count(pSurface) != 0) {
++      return;
++    }
++    IUnknown* pOwner = pSurface;
++    IDirect3DBaseTexture9* pTexture = nullptr;
++    if (SUCCEEDED(pSurface->GetContainer(__uuidof(IDirect3DBaseTexture9), reinterpret_cast<void**>(&pTexture))) && pTexture != nullptr) {
++      pOwner = pTexture;
++      pTexture->Release();
++    }
++    if (gSnapshot.objects.count(pOwner) == 0) {
++      return;
++    }
++    D3DSURFACE_DESC desc;
++    D3DLOCKED_RECT lockedRect;
++    if (FAILED(pSurface->GetDesc(&desc)) || FAILED(pSurface->LockRect(&lockedRect, nullptr, D3DLOCK_READONLY))) {
++      ++gSnapshot.notRestored;
++      return;
++    }
++    store(pSurface, Kind::Surface, lockedRect.pBits, size_t(lockedRect.Pitch) * bridge_util::calcStride(desc.Height, desc.Format));
++    pSurface->UnlockRect();
++  }
++
++  static void putBack(IUnknown* pObj, const Saved& saved) {
++    void* pData = nullptr;
++    switch (saved.kind) {
++    case Kind::VertexBuffer:
++    {
++      const auto pBuffer = static_cast<IDirect3DVertexBuffer9*>(pObj);
++      if (SUCCEEDED(pBuffer->Lock(0, 0, &pData, 0)) && pData != nullptr) {
++        memcpy(pData, saved.bytes.data(), saved.bytes.size());
++        pBuffer->Unlock();
++      }
++      break;
++    }
++    case Kind::IndexBuffer:
++    {
++      const auto pBuffer = static_cast<IDirect3DIndexBuffer9*>(pObj);
++      if (SUCCEEDED(pBuffer->Lock(0, 0, &pData, 0)) && pData != nullptr) {
++        memcpy(pData, saved.bytes.data(), saved.bytes.size());
++        pBuffer->Unlock();
++      }
++      break;
++    }
++    case Kind::Surface:
++    {
++      const auto pSurface = static_cast<IDirect3DSurface9*>(pObj);
++      D3DLOCKED_RECT lockedRect;
++      if (SUCCEEDED(pSurface->LockRect(&lockedRect, nullptr, 0)) && lockedRect.pBits != nullptr) {
++        memcpy(lockedRect.pBits, saved.bytes.data(), saved.bytes.size());
++        pSurface->UnlockRect();
++      }
++      break;
++    }
++    }
++  }
++
++  // Lets go of an object made after the snapshot. One Release matches the reference its create left in the map.
++  // Too few releases leak the object. Too many would free an object the snapshot still needs.
++  static void drop(IUnknown* pObj) {
++    pObj->Release();
++  }
++
++  // A texture level belongs to its texture, as with Bridge_UnlinkResource.
++  static void drop(IDirect3DResource9* pResource) {
++    if (pResource->GetType() == D3DRTYPE_SURFACE) {
++      IDirect3DBaseTexture9* pTexture = nullptr;
++      if (SUCCEEDED(static_cast<IDirect3DSurface9*>(pResource)->GetContainer(__uuidof(IDirect3DBaseTexture9), reinterpret_cast<void**>(&pTexture))) && pTexture != nullptr) {
++        pTexture->Release();
++        return;
++      }
++    }
++    pResource->Release();
++  }
++
++  // A volume belongs to its volume texture, as with Bridge_UnlinkVolumeResource.
++  static void drop(IDirect3DVolume9*) {
++  }
++
++  // Frees what the held snapshot kept alive.
++  static void release() {
++    for (auto& [pObj, saved] : gSnapshot.saved) {
++      pObj->Release();
++    }
++    for (auto& [handle, state] : gSnapshot.deviceStates) {
++      if (state.pBlock != nullptr) {
++        state.pBlock->Release();
++      }
++      for (IDirect3DSurface9* pTarget : state.pTargets) {
++        if (pTarget != nullptr) {
++          pTarget->Release();
++        }
++      }
++      if (state.pDepthStencil != nullptr) {
++        state.pDepthStencil->Release();
++      }
++    }
++    for (IUnknown* pObj : gSnapshot.tombstones) {
++      while (static_cast<LONG>(pObj->Release()) > 0);
++    }
++    gSnapshot = Snapshot();
++  }
++
++  static void take() {
++    release();
++    forEachMap([](auto& live, auto& kept) {
++      kept = live;
++      for (const auto& [handle, pObj] : live) {
++        if (pObj != nullptr) {
++          gSnapshot.objects.insert(pObj);
++        }
++      }
++    });
++    gSnapshot.held = true;
++    for (const auto& [handle, pDevice] : gpD3DDevices) {
++      if (pDevice == nullptr) {
++        continue;
++      }
++      DeviceState& state = gSnapshot.deviceStates[handle];
++      if (FAILED(pDevice->CreateStateBlock(D3DSBT_ALL, &state.pBlock))) {
++        refuse("the device state could not be captured");
++      }
++      for (DWORD i = 0; i < 4; i++) {
++        pDevice->GetRenderTarget(i, &state.pTargets[i]);
++      }
++      pDevice->GetDepthStencilSurface(&state.pDepthStencil);
++    }
++    if (!gPendingSurfaceLocks.empty()) {
++      refuse("a surface upload was in progress at the snapshot");
++    }
++  }
++
++  static void apply() {
++    for (const auto& [pObj, saved] : gSnapshot.saved) {
++      putBack(pObj, saved);
++    }
++    forEachMap([](auto& live, auto& kept) {
++      for (const auto& [handle, pObj] : live) {
++        if (pObj != nullptr && gSnapshot.objects.count(pObj) == 0) {
++          drop(pObj);
++        }
++      }
++      live = kept;
++    });
++    gSnapshot.tombstones.clear();
++    gPendingSurfaceLocks.clear();
++    for (const auto& [handle, state] : gSnapshot.deviceStates) {
++      const auto pDevice = gpD3DDevices[handle];
++      for (DWORD i = 0; i < 4; i++) {
++        if (i != 0 || state.pTargets[i] != nullptr) {
++          pDevice->SetRenderTarget(i, state.pTargets[i]);
++        }
++      }
++      pDevice->SetDepthStencilSurface(state.pDepthStencil);
++      if (state.pBlock != nullptr) {
++        state.pBlock->Apply();
++      }
++    }
++  }
++
++  // Runs one Op and fills the Stat numbers. The numbers describe the time before a rewind was applied.
++  static HRESULT run(const uint32_t op, uint32_t* pStats) {
++    using namespace bridge_util::rewind;
++    if (!enabled()) {
++      return E_NOTIMPL;
++    }
++    if (op == kSnapshot) {
++      take();
++    }
++    if (!gSnapshot.held) {
++      pStats[kStatRefused] = 1;
++      return E_FAIL;
++    }
++    uint32_t dropped = 0;
++    uint32_t buffers = 0;
++    forEachMap([&](auto& live, auto&) {
++      for (const auto& [handle, pObj] : live) {
++        dropped += pObj != nullptr && gSnapshot.objects.count(pObj) == 0;
++      }
++    });
++    for (const auto& [pObj, saved] : gSnapshot.saved) {
++      buffers += saved.kind != Kind::Surface;
++    }
++    pStats[kStatKept] = static_cast<uint32_t>(gSnapshot.objects.size());
++    pStats[kStatRevived] = static_cast<uint32_t>(gSnapshot.tombstones.size());
++    pStats[kStatDropped] = dropped;
++    pStats[kStatBuffers] = buffers;
++    pStats[kStatSurfaces] = static_cast<uint32_t>(gSnapshot.saved.size()) - buffers;
++    pStats[kStatSavedKB] = static_cast<uint32_t>(gSnapshot.savedBytes >> 10);
++    pStats[kStatNotRestored] = gSnapshot.notRestored;
++    pStats[kStatRefused] = !gSnapshot.refused.empty();
++    Logger::info(format_string("[Rewind] op %u: kept %u, revive %u, drop %u, buffers %u, surfaces %u, saved %u KB, not restored %u%s%s",
++                               op, pStats[kStatKept], pStats[kStatRevived], pStats[kStatDropped], pStats[kStatBuffers],
++                               pStats[kStatSurfaces], pStats[kStatSavedKB], pStats[kStatNotRestored],
++                               gSnapshot.refused.empty() ? "" : ", refused: ", gSnapshot.refused.c_str()));
++    if (!gSnapshot.refused.empty()) {
++      return E_FAIL;
++    }
++    if (op == kRewind) {
++      apply();
++      gSnapshot.notRestored = 0;
++    }
++    return S_OK;
++  }
++
++  // Runs after the answer was sent. The client waits for the done event before its host touches the game process.
++  static void finish(const uint32_t op, const bool succeeded) {
++    using namespace bridge_util::rewind;
++    const ULONGLONG start = GetTickCount64();
++    while (!DeviceBridge::getWriterChannel().commands->isEmpty() && GetTickCount64() - start < 10'000) {
++      Sleep(0);
++    }
++    bridge_util::DataQueue* const queues[4] = {
++      DeviceBridge::getReaderChannel().data, DeviceBridge::getWriterChannel().data,
++      ModuleBridge::getReaderChannel().data, ModuleBridge::getWriterChannel().data,
++    };
++    for (size_t i = 0; i < 4; i++) {
++      if (op == kSnapshot && succeeded) {
++        gSnapshot.pos[i] = queues[i]->get_pos();
++        gSnapshot.absPos[i] = queues[i]->get_abs_pos();
++      } else if (op == kRewind && succeeded) {
++        queues[i]->set_pos(gSnapshot.pos[i], gSnapshot.absPos[i]);
++      }
++    }
++    DeviceBridge::publishReadPos();
++    SetEvent(doneEvent());
++  }
++}
++
+ static inline void safeDestroy(IUnknown* obj, uint32_t x86handle) {
+   // Note: in DXVK the refcounts of non-standalone objects may go negative!
+   // We need to handle such objects appropriately, even though this is not
+@@ -197,6 +562,9 @@ static inline void safeDestroy(IUnknown* obj, uint32_t x86handle) {
+   }
+ #endif
+ 
++  if (rewind_mode::keeps(obj)) {
++    return;
++  }
+   while (obj && static_cast<LONG>(obj->Release()) > 0);
+ }
+ 
+@@ -360,6 +728,7 @@ void ProcessDeviceCommandQueue() {
+ #endif
+       // A Bridge_StatePacket runs this once per record with the packet's device handle and UID.
+       const auto dispatch = [&](const Header& rpcHeader, const uint32_t currentUID) {
++      rewind_mode::note(rpcHeader.command);
+       // The mother of all switch statements - every call in the D3D9 interface is mapped here...
+       switch (rpcHeader.command) {
+       case IDirect3D9Ex_CreateDeviceEx:
+@@ -2473,6 +2842,7 @@ void ProcessDeviceCommandQueue() {
+ 
+         // Now lock the buffer so we can copy the data into it
+         void* pbData = nullptr;
++        rewind_mode::keepBuffer<IDirect3DVertexBuffer9, D3DVERTEXBUFFER_DESC>(pVertexBuffer, rewind_mode::Kind::VertexBuffer);
+         auto hresult = pVertexBuffer->Lock(IN OffsetToLock, IN SizeToLock, IN & pbData, IN Flags);
+         assert(S_OK == hresult);
+         if (SUCCEEDED(hresult) && pbData != nullptr) {
+@@ -2573,6 +2943,7 @@ void ProcessDeviceCommandQueue() {
+ 
+         // Now lock the buffer so we can copy the data into it
+         void* pbData = nullptr;
++        rewind_mode::keepBuffer<IDirect3DIndexBuffer9, D3DINDEXBUFFER_DESC>(pIndexBuffer, rewind_mode::Kind::IndexBuffer);
+         auto hresult = pIndexBuffer->Lock(IN OffsetToLock, IN SizeToLock, IN & pbData, IN Flags);
+         assert(S_OK == hresult);
+         if (SUCCEEDED(hresult) && pbData != nullptr) {
+@@ -2676,6 +3047,7 @@ void ProcessDeviceCommandQueue() {
+           if (pSurface == nullptr) {
+             break;
+           }
++          rewind_mode::keepSurface(pSurface);
+           D3DLOCKED_RECT lockedRect;
+           auto hresult = pSurface->LockRect(OUT & lockedRect, IN pRect, IN Flags);
+           assert(S_OK == hresult);
+@@ -2707,6 +3079,7 @@ void ProcessDeviceCommandQueue() {
+             gPendingSurfaceLocks.erase(stale);
+           }
+           if (pSurface != nullptr) {
++            rewind_mode::keepSurface(pSurface);
+             D3DLOCKED_RECT lockedRect;
+             const auto hresult = pSurface->LockRect(OUT & lockedRect, IN pRect, IN Flags);
+             assert(S_OK == hresult);
+@@ -2954,6 +3327,21 @@ void ProcessDeviceCommandQueue() {
+         SharedHeap::deallocate(allocId);
+         break;
+       }
++      case Bridge_Rewind:
++      {
++        PULL_U(op);
++        uint32_t stats[bridge_util::rewind::kStatCount] = {};
++        const HRESULT hresult = rewind_mode::run(op, stats);
++        {
++          ServerMessage c(Commands::Bridge_Response, currentUID);
++          c.send_data(hresult);
++          for (const uint32_t stat : stats) {
++            c.send_data(stat);
++          }
++        }
++        rewind_mode::finish(op, SUCCEEDED(hresult));
++        break;
++      }
+       case Bridge_UnlinkResource:
+       {
+         GET_HND(pHandle);
+diff --git a/bridge/src/util/util_circularqueue.h b/bridge/src/util/util_circularqueue.h
+index 69d21256..9eb2e611 100644
+--- a/bridge/src/util/util_circularqueue.h
++++ b/bridge/src/util/util_circularqueue.h
+@@ -164,6 +164,12 @@ namespace bridge_util {
+       return m_absPos;
+     }
+ 
++    // Rewind mode returns to the position of a snapshot (util_rewind.h).
++    void set_pos(const size_t pos, const uint64_t absPos) {
++      m_pos = pos;
++      m_absPos = absPos;
++    }
++
+   private:
+     template<bool BatchInProgress>
+     Result pushImpl(const T obj) {
+diff --git a/bridge/src/util/util_commands.h b/bridge/src/util/util_commands.h
+index 0cd4d6e7..111dff30 100644
+--- a/bridge/src/util/util_commands.h
++++ b/bridge/src/util/util_commands.h
+@@ -446,6 +446,9 @@ namespace Commands {
+     IDirect3DQuery9_GetDataSize,
+     IDirect3DQuery9_Issue,
+     IDirect3DQuery9_GetData,
++
++    // Rewind mode (util_rewind.h). Last, so the other commands keep their numbers.
++    Bridge_Rewind,
+   };
+ 
+   // Maybe this will be useful...  
+@@ -499,6 +502,7 @@ namespace Commands {
+     
+     case Bridge_UnlinkResource: return "Bridge_UnlinkResource";
+     case Bridge_UnlinkVolumeResource: return "Bridge_UnlinkVolumeResource";
++    case Bridge_Rewind: return "Bridge_Rewind";
+ 
+     case IDirect3DDevice9Ex_LinkSwapchain: return "IDirect3DDevice9Ex_LinkSwapchain";
+     case IDirect3DDevice9Ex_LinkBackBuffer: return "IDirect3DDevice9Ex_LinkBackBuffer";
+diff --git a/bridge/src/util/util_rewind.h b/bridge/src/util/util_rewind.h
+new file mode 100644
+index 00000000..fdde3286
+--- /dev/null
++++ b/bridge/src/util/util_rewind.h
+@@ -0,0 +1,91 @@
++#pragma once
++
++// Rewind mode, for test harnesses only. Off unless bridge.conf sets rewindMode = True on both sides.
++//
++// A test host snapshots the 32-bit game process and later puts its memory back, so one world load serves many test
++// runs that start from the same state. The game then holds the D3D9 state of the snapshot again, and the server has to
++// return to that state too. The host asks through the cooperation block below. The client answers at the end of a
++// Present: it sends one synchronous Bridge_Rewind command, which leaves both command queues empty, and then parks its
++// thread until the host is done.
++
++#include <windows.h>
++#include <cstdint>
++#include <cstdio>
++
++#include "config/config.h"
++#include "util_guid.h"
++
++extern bridge_util::Guid gUniqueIdentifier;
++
++namespace bridge_util::rewind {
++
++  enum Op : uint32_t {
++    kSnapshot = 1, // the server remembers its state as of this command
++    kRewind = 2,   // the server returns to the remembered state
++    kPlan = 3,     // the server only reports what a rewind would do now
++  };
++
++  // Numbers the server returns with each answer.
++  enum Stat : uint32_t {
++    kStatKept,          // objects alive at the snapshot
++    kStatRevived,       // objects destroyed since the snapshot that a rewind brings back
++    kStatDropped,       // objects created since the snapshot that a rewind lets go of
++    kStatBuffers,       // vertex and index buffers whose contents at the snapshot are kept
++    kStatSurfaces,      // surfaces whose contents at the snapshot are kept
++    kStatSavedKB,       // size of those kept contents
++    kStatNotRestored,   // writes since the snapshot whose old contents were not kept
++    kStatRefused,       // 1: the server refuses a rewind to this snapshot
++    kStatCount
++  };
++
++#pragma pack(push, 4)
++  // Named mapping "Local\rewind-coop-<client pid>", created by the client. The first 40 bytes are the layout the host
++  // tool also uses for other test targets.
++  struct Coop {
++    uint32_t magic, version;       // 'RWND', 1
++    uint32_t self;                 // address of this block in the client process
++    volatile int32_t request;      // host -> client: 1 = park at the end of the next Present
++    volatile int32_t parked;       // client -> host: 1 = parked, both command queues are empty
++    volatile int32_t audioOn;      // unused here
++    volatile uint32_t tick;        // presents so far
++    volatile uint32_t parkAtTick;  // host -> client: park when tick reaches this (0 = off)
++    volatile int64_t skewQpc;      // unused here
++    volatile uint32_t op;          // host -> client: the Op this park is for (0 = park only)
++    volatile int32_t bridge;       // client -> host: 1 = a bridge client answers here
++    volatile int32_t bridgeResult; // client -> host: the server's HRESULT for op, or a negative client error
++    volatile uint32_t bridgeStats[kStatCount];
++  };
++#pragma pack(pop)
++
++  constexpr uint32_t kCoopMagic = 0x444E5752; // 'RWND'
++
++  inline bool enabled() {
++    static const bool on = bridge_util::Config::getOption<bool>("rewindMode", false);
++    return on;
++  }
++
++  // Null when the mode is off or the block cannot be made.
++  inline Coop* createCoop() {
++    if (!enabled()) {
++      return nullptr;
++    }
++    char name[64];
++    sprintf_s(name, "Local\\rewind-coop-%lu", GetCurrentProcessId());
++    const HANDLE hMap = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 4096, name);
++    Coop* const coop = hMap ? static_cast<Coop*>(MapViewOfFile(hMap, FILE_MAP_WRITE, 0, 0, 0)) : nullptr;
++    if (coop != nullptr) {
++      coop->version = 1;
++      coop->self = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(coop));
++      coop->bridge = 1;
++      coop->magic = kCoopMagic;
++    }
++    return coop;
++  }
++
++  // Set by the server once an answer has left the queue and its queue positions are final. Auto-reset.
++  inline HANDLE doneEvent() {
++    static const HANDLE hEvent = CreateEventA(nullptr, FALSE, FALSE, gUniqueIdentifier.toString("RewindDone").c_str());
++    return hEvent;
++  }
++
++}

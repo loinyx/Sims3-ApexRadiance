@@ -71,6 +71,7 @@ Shipped in the package; players do not need to change them.
 | `bridge.conf` | `client.freeIdleBufferCopiesSec` | `2` | The same for static vertex and index buffers of 64 KB to 4 MB (patch 0008) |
 | `bridge.conf` | `perfLogIntervalFrames` | `0` | Diagnostics off: with them on, their tables fragment the process heap |
 | `bridge.conf` | `serverChannelMemSize` | `72MB` | The server's channel |
+| `bridge.conf` | `rewindMode` | not set | Rewind mode for test harnesses (patch 0015); off for play |
 | `dxvk.conf` | `d3d9.customVendorId`, `d3d9.customDeviceId`, `d3d9.customDeviceDesc` | `10de`, `1080`, `Geforce GTX 580` | DXVK's TS3W profile, so `Options.ini` is kept |
 | `dxvk.conf` | `d3d9.countLosableResources` | `False` | A Reset succeeds although one losable resource is still alive |
 
@@ -132,6 +133,7 @@ patches in order and builds x86 and x64 with meson; `package.ps1` makes the zip.
 | 0012 | `SetFVF` and `SetVertexDeclaration` replace each other in the client's copy: `SetFVF` kept the previous declaration, so `GetVertexDeclaration` returned it while an FVF was in use. The High-precision scene's resolve saves the vertex input and restores "declaration if any, else FVF": on loading screens it put a game shader's declaration (`POSITION` float2) back, and the game drew its fixed-function UI (FVF `0x142`) with it, a black top-right quarter (248 of 249 no-scene frames STALE in the trace). Now `SetFVF` clears the declaration and `SetVertexDeclaration` sets the FVF to 0, under the device lock. d3d9 returns a declaration made for the FVF after `SetFVF`; the client returns none, and restoring the FVF gives the same result. The FVF also moved into the client's state, so a state block captures and applies it with the declaration (before, `Apply` put the declaration back and left the FVF of the last call). Apex 3.1.1 also handles the old client (below) |
 | 0013 | Idle copy fetches: under the bridge, small parts of the picture (a lamp's sprite, pieces of objects or pillars) blinked now and then with the lot left still, and stopped with `freeIdle*Sec = 0`. The fetch of a freed copy now fails the lock when the server sends no whole copy (before, the lock went on and the next `Unlock` uploaded an unfetched copy over the server's); a freed MANAGED level is always fetched (`DISCARD`, which MANAGED ignores, skipped the fetch and left the rest of the copy undefined); a texture fetch is checked by a CRC32C like a buffer's; and only copies of 64 KB and more, which come from `VirtualAlloc`, are freed (a heap copy gives back almost no address space). Which of these caused the blinking is unverified |
 | 0014 | A new client copy starts zeroed: the client made a texture level's CPU copy under 64 KB with `new[]` and left it uninitialized, while a new d3d9 or DXVK texture starts zeroed. The game writes part of a lot's terrain overlay weights (64x64 A8R8G8B8) and uploads the rest as it is, so the rest held heap leftovers and some lots drew their ground black on some loads (painting the terrain there painted black). Measured with the in-game runner on the save that opens on such a lot: black on 4 of 4 loads before, right on 4 of 4 after |
+| 0015 | `rewindMode` (off): rewind mode for test harnesses, see below |
 
 ### Diagnostics
 
@@ -178,6 +180,31 @@ patches in order and builds x86 and x64 with meson; `package.ps1` makes the zip.
 | `0x732E90` | `ResourceCache_Trim` (via `ResourceManager_Update`): destroys about 2,300 textures per 600 frames; about 70% come back within minutes |
 | `0x619DB0` | `Texture_CacheSizeBytes`: counts a MANAGED texture's pixels in full against `CacheBudget` |
 | `0x5FBCE0` | The CAS compositor's 256 x 256 readback (`GetRenderTargetData`), called only from `0x5FDBF0` |
+
+### Rewind mode (patch 0015)
+
+A test harness can snapshot the game process after a world load and later put its memory back, so one load serves many
+test runs that start from the same state. The game then holds the D3D9 state of the snapshot again, and the server has
+to return to it too. `rewindMode = True` in both copies of `bridge.conf` adds that. Without the option nothing changes:
+the client makes no cooperation block and the server takes no snapshot.
+
+- **Quiet point.** The client publishes a cooperation block, the named mapping `Local\rewind-coop-<client pid>`. When
+  the host sets `request` there, the client stops at the end of the next `Present`. For each `op` the host writes
+  (1 snapshot, 2 rewind, 3 report only) it sends one synchronous `Bridge_Rewind` command, so both command queues are
+  empty once the answer is read. It then sets `parked` and sleeps until the host clears `request`.
+- **Snapshot.** The server copies its handle tables, takes a state block and the render targets of each device, and
+  records the data queue positions of both bridges.
+- **While a snapshot is held.** A destroy of an object alive at the snapshot is deferred. Before the first upload into
+  such a vertex buffer, index buffer or surface, the server keeps the old contents, up to 1 GB in total.
+- **Rewind.** The server puts the kept contents back, releases the objects made since the snapshot, restores the handle
+  tables, the render targets, the device state and the data queue positions, and then signals the client.
+- **Answer.** Each answer carries eight numbers: objects kept, to revive, to drop, buffers and surfaces with kept
+  contents, their size in KB, writes whose old contents were not kept, and whether the server refuses a rewind.
+
+Limits: render target contents are not put back, so a rewind is exact only for what the game redraws each frame.
+`UpdateSurface`, `UpdateTexture`, `StretchRect`, `ColorFill`, `GetDC`, `GenerateMipSubLevels` and volume uploads are
+counted, not undone. A device reset, creation or destruction after the snapshot makes the server refuse the rewind.
+The shared heap (`useSharedHeap`, off here) is not covered. Not yet validated in game.
 
 ## Rejected approaches
 
