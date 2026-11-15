@@ -200,9 +200,15 @@ kept and refuse every rewind to it, before anything changes.
   only, 4 let the snapshot go) it sends one synchronous `Bridge_Rewind` command, then checks that no other thread sent
   in between and that every answer was read. If not, the Op is refused.
 - **Snapshot.** The server copies its handle tables and takes each device's state block, bound render targets, gamma
-  ramp and query results. It copies every render target and depth surface on the device, except the back buffers of a
-  swap chain that discards (D3D9 leaves their contents undefined after a `Present`), and records the data queue
-  positions of both bridges.
+  ramp and query results. It copies every render target and depth surface on the device (a scene left open is closed
+  for the copies and opened again) and records the data queue positions of both bridges. Two kinds are not copied,
+  because D3D9 leaves their contents undefined after a `Present`: the back buffers of a swap chain that discards, and
+  the depth surfaces made with Discard, which `StretchRect` refuses to copy in d3d9 and in DXVK. The game makes its
+  depth surfaces that way (`CreateDepthStencilSurface` with Discard at `0x617C5F`).
+- **Depth surfaces made with Discard.** Instead of a copy, the server lets the command stream show that the game does
+  not need one. It follows each such surface until a `Clear` without rectangles has covered it. A draw with the depth
+  test on outside the cleared part, or with the stencil test on before a whole `Clear` of the stencil, could read
+  what the snapshot does not hold, so it gives the snapshot up. After a rewind the surfaces count as undefined again.
 - **While a snapshot is held.** A destroy of an object alive at the snapshot is deferred. Before the first write into
   such a vertex buffer, index buffer or surface (an upload, `UpdateSurface`, `UpdateTexture`, `StretchRect`,
   `ColorFill`, `GetRenderTargetData`, `GetFrontBufferData`) the server keeps the old contents, and before the first
@@ -218,7 +224,8 @@ kept and refuse every rewind to it, before anything changes.
   kept alive in KB, cursor commands since the snapshot, and whether the server refuses a rewind.
 
 Refused by design, with the reason in `bridge64.log`: a multisampled render target or depth surface (a copy may
-resolve its samples), a depth surface the D3D9 library does not copy, a write into a volume texture from before the
+resolve its samples), a depth surface the D3D9 library does not copy, a draw that reads a depth surface made with
+Discard before the game cleared it, a write into a volume texture from before the
 snapshot, a query whose result was not ready at the snapshot and is issued again, a device reset, creation or
 destruction, `SetDialogBoxMode`, Remix API and shared heap commands, and an upload in progress.
 Cursor commands are not undone; they are counted for the host.

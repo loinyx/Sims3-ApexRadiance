@@ -50,3 +50,9 @@ what it cannot put back exactly (multisampled targets, volume writes). The clien
 D3D9 calls to one thread: a command takes only its channel's send lock and `Present` does not take the device
 lock. The parked client therefore holds both send locks, and the server reads no command between a rewind and the
 client's return to the snapshot.
+
+The first run in game refused its snapshot: the copy of a 1024x768 D24S8 depth surface failed with
+`D3DERR_INVALIDCALL`. The game makes its depth surfaces with Discard (`0x617C5F` passes TRUE), and `StretchRect`
+refuses such a source in d3d9 and in DXVK. D3D9 also leaves a Discard surface undefined after a `Present`, which is
+where a snapshot is taken, so there is nothing to keep as long as the game clears the surface before it draws with
+it. The server now checks exactly that in the command stream and gives the snapshot up when a draw comes first.

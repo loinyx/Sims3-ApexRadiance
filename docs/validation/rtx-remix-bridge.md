@@ -130,9 +130,10 @@ scene differs: 800-1,040 vs 360-440 draws a frame in al284 vs al285).
 
 | Date | Build | Check | Result |
 |---|---|---|---|
-| 2026-11-15 | patch 0015 on f35b86a with 0001 to 0014, `build.cmd` from a fresh fetch | `test_rewind_server` on the system's d3d9.dll and on DXVK (`d3d9vk_x64.dll` of the 4.0.1 package), NVIDIA GPU | 50 checks pass on each: tables and a reused id, contents of buffers, textures, render targets, the back buffer and the depth surface, device state, query answers, two rewinds to one snapshot, the memory limit, the refusals, `E_ABORT` after a failed write-back, no reference left on the device |
+| 2026-11-15 | patch 0015 on f35b86a with 0001 to 0014, `build.cmd` from a fresh fetch | `test_rewind_server` on the system's d3d9.dll and on DXVK (`d3d9vk_x64.dll` of the 4.0.1 package), NVIDIA GPU | 63 checks pass on each: tables and a reused id, contents of buffers, textures, render targets, the back buffer and the depth surface, device state, query answers, two rewinds to one snapshot, the memory limit, the refusals, `E_ABORT` after a failed write-back, no reference left on the device; a snapshot taken inside a scene; the game's 1024x768 D24S8 depth surface made with Discard: not copied, kept while each frame clears it first, given up at a draw before the `Clear` |
 | 2026-11-15 | the same pair | `test_rewind_device`, mode on and off, 12 runs each | pass: park, snapshot, plan (1 object to revive, 1 to drop), drop; a second thread's command waits for the whole park; with the mode off no cooperation block |
-| 2026-11-15 | the same pair | In game | not run yet, see Open checks |
+| 2026-11-15 | the pair of commit 8caad90, Apex Radiance 4.0.1, Steam 1.67.2, bridge with DXVK 3.1.1, a loaded world at 1024x768 | In game: the first snapshot | refused, nothing changed: `a 1024x768 depth surface of format 75 could not be copied (0x8876086c)`. The surface is one the game makes with Discard, which `StretchRect` does not copy; the test above reproduces the code. Such surfaces are no longer copied (feature page, Rewind mode) |
+| 2026-11-15 | this pair | In game | not run yet, see Open checks |
 
 ## In-game test plan
 
