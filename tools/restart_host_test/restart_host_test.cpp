@@ -1,6 +1,8 @@
-// The restart host's decision, relaunch command line and save pick (native/ts3wrap/restart_channel.h). Writes three small
-// files under the given folder.
+// The restart host's decision, relaunch command line and save pick (native/ts3wrap/restart_channel.h), and its relaunch
+// rules: Steam and EA app starts, the Steam URL, the bridge wait (relaunch_rules.h). Writes three small files under the
+// given folder.
 #include "restart_channel.h"
+#include "relaunch_rules.h"
 #include <cstdio>
 #include <string>
 
@@ -45,6 +47,38 @@ int wmain(int argc, wchar_t** argv) {
     Check(!RhShouldOffer(0, c), "no offer without the executable");
     wchar_t name[64];
     Check(RhName(name, 64, 1234) && !wcscmp(name, L"Local\\ApexRestartHost-1234"), "channel name");
+
+    const wchar_t steamEnv[] = L"=C:=C:\\\0PATH=C:\\W\0SteamGameId=47890\0SteamAppId=47890\0\0";
+    const wchar_t eaEnv[] = L"PATH=C:\\W\0EALaunchCode=x\0\0";
+    const wchar_t plainEnv[] = L"PATH=C:\\W\0SteamAppIdX=1\0\0";
+    wchar_t app[16], url[512];
+    Check(RhSteamAppId(steamEnv, app, 16) && !wcscmp(app, L"47890"), "Steam start: app id from SteamAppId");
+    Check(RhSteamAppId(L"steamgameid=47890\0\0", app, 16) && !wcscmp(app, L"47890"), "Steam start: SteamGameId alone, any case");
+    Check(!RhSteamAppId(plainEnv, app, 16) && !RhSteamAppId(L"SteamAppId=47890&x\0\0", app, 16) &&
+              !RhSteamAppId(L"SteamGameId=12345678901234567890\0\0", app, 16) && !RhSteamAppId(L"SteamAppId=\0\0", app, 16),
+          "no Steam start: absent, not digits, a shortcut's 64-bit id, empty");
+    Check(RhEaStart(eaEnv, L"C:\\G\\TS3W.exe") && RhEaStart(L"contentid=1\0\0", L"") &&
+              RhEaStart(plainEnv, L"C:\\Program Files\\EA Games\\The Sims 3\\Game\\Bin\\TS3W.exe"),
+          "EA app start: by its variables or its library folder");
+    Check(!RhEaStart(steamEnv, L"C:\\Steam\\steamapps\\common\\The Sims 3\\Game\\Bin\\TS3W.exe") && !RhEaStart(plainEnv, L"C:\\MyEA Games\\TS3W.exe"),
+          "no EA app start for Steam or a look-alike folder");
+    Check(RhSteamUrl(L"47890", L"My Town.sims3", url, 512) && !wcscmp(url, L"steam://run/47890//-worldFile%3A%22My%20Town.sims3%22"),
+          "Steam URL: arguments after the double slash, percent-encoded");
+    Check(RhSteamUrl(L"47890", L"Caf\u00e9.sims3", url, 512) && !wcscmp(url, L"steam://run/47890//-worldFile%3A%22Caf%C3%A9.sims3%22"),
+          "Steam URL: a non-ASCII name as UTF-8");
+    Check(!RhSteamUrl(L"47890", L"Bad\".sims3", url, 512) && !RhSteamUrl(L"47890", L"A.sims3", url, 30), "Steam URL: a quote or overflow refused");
+
+    const wchar_t* dir = L"C:\\G\\Game\\Bin";
+    struct { const wchar_t* name; DWORD parent; const wchar_t* path; bool old; } procs[] = {
+        {L"NvRemixBridge.exe", 1234, L"", true},                                            // started by the old game, path unread
+        {L"nvremixbridge.exe", 4, L"C:\\G\\Game\\Bin\\.trex\\NvRemixBridge.exe", true},     // reparented, in the game's folder
+        {L"NvRemixBridge.exe", 4, L"C:\\Other\\.trex\\NvRemixBridge.exe", false},           // another game's bridge
+        {L"NvRemixBridge.exe", 4, L"C:\\G\\Game\\Bin2\\NvRemixBridge.exe", false},          // a folder that only starts the same
+        {L"TS3W.exe", 1234, L"C:\\G\\Game\\Bin\\TS3W.exe", false},                          // not a bridge server
+    };
+    bool bridgeOk = true;
+    for (const auto& p : procs) bridgeOk &= RhIsOldBridge(p.name, p.parent, p.path, 1234, dir) == p.old;
+    Check(bridgeOk, "bridge wait: only the old game's NvRemixBridge.exe, by parent or folder");
 
     const std::wstring root = argc > 1 ? argv[1] : L".";
     const std::wstring saves = root + L"\\Saves";

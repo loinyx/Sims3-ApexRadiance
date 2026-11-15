@@ -13,7 +13,7 @@ option; Setup turns it on with its *Restart host (Experimental)* component.
 | Default | Off |
 | Menu | None in game; Setup > Components > *Restart host* (Experimental) |
 | Configuration | `[ui] restart_host` in `ApexRadiance.toml`, and `ts3wrap.exe` next to `ApexRadiance.asi` |
-| Source | [`features/restart_host.cpp`](../../../features/restart_host.cpp), [`native/ts3wrap/ts3wrap.cpp`](../../../native/ts3wrap/ts3wrap.cpp), [`native/ts3wrap/restart_channel.h`](../../../native/ts3wrap/restart_channel.h) |
+| Source | [`features/restart_host.cpp`](../../../features/restart_host.cpp), [`native/ts3wrap/ts3wrap.cpp`](../../../native/ts3wrap/ts3wrap.cpp), [`native/ts3wrap/restart_channel.h`](../../../native/ts3wrap/restart_channel.h), [`native/ts3wrap/relaunch_rules.h`](../../../native/ts3wrap/relaunch_rules.h) |
 
 ## The problem
 
@@ -34,9 +34,18 @@ The design is adapted from Dalexlol's wrapper in sims3-modernization (PRs #360 a
    save's reserve held) is under 320 MB, Room to save's own low line.
 3. When the game ends with a normal exit code and the last save was low, the host picks the `.sims3` save folder with
    the newest file and asks the player.
-4. On Yes, it starts the same executable with the same command line plus `-worldFile:"<save>.sims3"`. A
-   `-worldFile` switch already on the line is replaced, so a relaunched game can be relaunched again. The host then
-   ends, and the new game starts its own host.
+4. On Yes, it first waits until the old game's RTX Remix bridge server has ended (at most 20 s; see below).
+5. It starts the same executable with the same command line plus `-worldFile:"<save>.sims3"`. A `-worldFile` switch
+   already on the line is replaced, so a relaunched game can be relaunched again. The new game starts its own host.
+6. The host watches the new game for 15 s. When it crashes in that time (an `0xC…` exit code), the player gets the
+   message that the game could not be started again. When it ends otherwise, the host waits up to 10 s for another copy
+   of the game's executable (a launcher restarting the game itself); if none starts, it follows how the first game was
+   started:
+   - Steam: it retries once through Steam with `steam://run/<appid>//-worldFile%3A%22<save>%22` (the arguments after
+     the double slash, percent-encoded as UTF-8). When no `steam:` handler is registered, the message below.
+   - EA app: it does not retry. A message tells the player that the game was saved and to start The Sims 3 from the
+     EA app, naming the newest save.
+   - Anything else: the message that the game could not be started again and was saved.
 
 ## Settings
 
@@ -63,30 +72,44 @@ The design is adapted from Dalexlol's wrapper in sims3-modernization (PRs #360 a
     sets for a game it starts). Variables the game process itself set before Apex started the host are inherited too.
   - `d3d9.dll`: the same executable path is started, and Windows looks for DLLs in the exe's own folder first, so the
     same DXVK or bridge client loads, whatever the working folder.
-  - Bridge: the new client starts its own server; `bridge.conf` and `.trex` are found as at a normal start.
+  - Bridge: the new client starts its own server; `bridge.conf` and `.trex` are found as at a normal start. Before
+    the relaunch the host polls every 250 ms, for at most 20 s, until no `NvRemixBridge.exe` of the old game runs: one
+    whose parent is the old game's process, or whose image path is under the game executable's folder
+    (`Game\Bin\.trex`). It never ends a process; after 20 s it starts the game anyway.
   - DXVK's state cache is gone since DXVK 2.0; its logs follow `DXVK_LOG_PATH` (inherited) or its default.
   - Steam and the EA app: the relaunch starts the exe directly, not through the launcher, with the launcher's
-    variables inherited from the first start.
-  Unverified: an actual relaunch under DXVK, under the bridge (the old server ending before the new one starts), from
-  Steam and from the EA app, until tested in game ([validation](../../validation/performance-restart-host.md#open-checks)).
+    variables inherited from the first start. A Steam start is recognised by `SteamAppId` (else `SteamGameId`), digits
+    only, at most 10 (an app id; The Sims 3 is 47890); the retry uses the id from the environment. An EA app start is
+    recognised by `EALaunchCode`, `ContentId` or `OriginSessionKey`, or the executable under an `EA Games` folder
+    (the EA app's default library). These variable names are the ones the EA app and Origin are reported to set:
+    unverified.
+  Unverified: an actual relaunch under DXVK, under the bridge (the old server ending within the wait), from Steam
+  (whether the direct start works, and whether the `steam://run` arguments reach `TS3W.exe` through the launcher) and
+  from the EA app (its detection and the message), until tested in game ([validation](../../validation/performance-restart-host.md#open-checks)).
 
 ## Limitations
 
 - The question comes only after the player quits the game. The game does not quit by itself.
 - Nothing beyond the save is restored: game speed, the selected Sim and the camera start as the save loads them.
   sims3-modernization restores them with its script mod (`Restart.cs`), which Apex does not have.
-- The relaunch is started directly, not through Steam or the EA app. Starting the game from Steam, running under the
-  RTX Remix bridge, and window focus after the relaunch are *Unverified* ([validation](../../validation/performance-restart-host.md#open-checks)).
-- The question is in English only.
+- The relaunch is started directly. Only when it ends within 15 s without a crash, and the game does not start again
+  within 10 s, does Steam start it (one retry); a launcher that takes longer than 10 s to restart the game itself gets
+  a second start. That a DRM handoff never exits with an `0xC…` code is *Unverified*; Steam may ask the
+  player to allow a start with custom arguments. The EA app gets no retry, only the message. Starting the game from
+  Steam, the EA app detection, running under the RTX Remix bridge, and window focus after the relaunch are *Unverified* ([validation](../../validation/performance-restart-host.md#open-checks)).
+- The question and the messages are in English only.
+- A game the player quits within 15 s of the relaunch counts as a failed start.
 
 ## Technical reference
 
 - Shared block: `RestartChannel` (fixed-width fields, one layout for the 32-bit game and the 64-bit host,
   `static_assert`). The host keeps it mapped past the game's end and checks its magic, version and mapped size.
 - Normal exit: exit code 0 (a crash, or Task Manager's End task with code 1, brings no question).
+- Relaunch rules (`relaunch_rules.h`, pure, checked offline): reading a variable from the environment block, the
+  Steam app id, the EA app start, the Steam URL, and which `NvRemixBridge.exe` belongs to the old game.
 - Save pick: the newest last-write time of a file inside each `*.sims3` folder, because a folder's own time misses
   files rewritten in place. `.backup` folders are ignored.
-- Build: `native/ts3wrap/ts3wrap.vcxproj` (x64, static CRT) is part of `ApexRadiance.sln`; the solution's `Release|x86`
+- Build: `native/ts3wrap/ts3wrap.vcxproj` (x64, static CRT, links `shell32` for `ShellExecuteW`) is part of `ApexRadiance.sln`; the solution's `Release|x86`
   builds it into the same output folder as the ASI.
 
 ## Rejected approaches

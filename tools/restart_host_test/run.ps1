@@ -1,5 +1,5 @@
 param([string]$OutDir=(Join-Path $env:TEMP 'ApexRestartHostChecks'))
-# The restart host's decision, relaunch command line and save pick (native/ts3wrap/restart_channel.h)
+# The restart host's decision, relaunch command line and save pick (native/ts3wrap/restart_channel.h), and its relaunch rules (relaunch_rules.h)
 $ErrorActionPreference='Stop'
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
