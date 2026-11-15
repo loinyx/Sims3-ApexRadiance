@@ -183,8 +183,8 @@ public static partial class Strings
         ["Keeps a copy of every file it changes, so you can undo everything."] = "เก็บสำเนาของทุกไฟล์ที่เปลี่ยน คุณจึงย้อนกลับได้ทั้งหมด",
         ["Your Apex Radiance settings are always kept."] = "การตั้งค่า Apex Radiance ของคุณจะถูกเก็บไว้เสมอ",
         ["No internet connection"] = "ไม่มีการเชื่อมต่ออินเทอร์เน็ต",
-        ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (แนะนำ)",
-        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan, หน่วยความจำว่างมากขึ้น (RTX Remix bridge)",
+        ["Vulkan, DXVK"] = "Vulkan, DXVK",
+        ["Vulkan with more memory (RTX Remix bridge, recommended)"] = "Vulkan, หน่วยความจำว่างมากขึ้น (RTX Remix bridge, แนะนำ)",
         ["DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0})."] = "DXVK และ RTX Remix bridge ต้องใช้การ์ดจอที่รองรับ Vulkan 1.3 (พบ: {0})",
         ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again."] = "ไดรเวอร์การ์ดจอเก่าเกินไปสำหรับ DXVK และ RTX Remix bridge (ขาด: {0}) อัปเดตไดรเวอร์การ์ดจอ แล้วเปิด Setup อีกครั้ง",
         ["{0} cannot start with this graphics driver (missing: {1}), so the game closes at start. Update the graphics driver, or choose Windows default (Direct3D 9) in Change components."] = "{0} เริ่มทำงานกับไดรเวอร์การ์ดจอนี้ไม่ได้ (ขาด: {1}) เกมจึงปิดตัวตอนเริ่ม อัปเดตไดรเวอร์การ์ดจอ หรือเลือก ค่าเริ่มต้นของ Windows (Direct3D 9) ใน เปลี่ยนส่วนประกอบ",
@@ -237,5 +237,11 @@ public static partial class Strings
         ["A new Setup is available"] = "มีตัวติดตั้งใหม่",
         ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "ดาวน์โหลดและตรวจสอบ Apex Radiance Setup {0} แล้ว อัปเดตตัวติดตั้ง แล้วมันจะเปิดขึ้นใหม่",
         ["Update Setup"] = "อัปเดตตัวติดตั้ง",
+        // restart host (experimental)
+        ["Restart host"] = "เริ่มเกมใหม่",
+        ["Experimental"] = "ทดลอง",
+        ["After a save made low on memory, offers to start the game again into that save when you quit."] = "หลังจากเซฟขณะหน่วยความจำเหลือน้อย เมื่อคุณออกจากเกมจะเสนอให้เปิดเกมใหม่ที่เซฟนั้น",
+        ["Start the game once with Apex Radiance, then turn on the restart host here."] = "เปิดเกมหนึ่งครั้งพร้อม Apex Radiance แล้วจึงเปิดการเริ่มเกมใหม่ที่นี่",
+        ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "ลบ ts3wrap.exe และปิดการเริ่มเกมใหม่ใน ApexRadiance.toml",
     };
 }

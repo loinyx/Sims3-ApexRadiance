@@ -116,6 +116,25 @@ namespace ApexIngame
             return false;
         }
 
+        // The largest free block of the game's 32-bit address space in bytes, the number Apex's memory meter shows. Read from
+        // this 64-bit process, so the walk stops at 4 GB: above it a WOW64 process only has the system's own reservations.
+        public long LargestFree()
+        {
+            const long End = 0xFFFF0000L; // the top of a large-address-aware 32-bit process on 64-bit Windows
+            const uint MemFree = 0x10000;
+            long best = 0, addr = 0x10000;
+            MemoryBasicInformation mbi;
+            IntPtr mbiSize = new IntPtr(Marshal.SizeOf(typeof(MemoryBasicInformation)));
+            while (addr < End && VirtualQueryEx(mProcess, new IntPtr(addr), out mbi, mbiSize) != IntPtr.Zero)
+            {
+                long size = mbi.RegionSize.ToInt64();
+                if (size <= 0) break;
+                if (mbi.State == MemFree) best = Math.Max(best, Math.Min(size, End - addr));
+                addr += size;
+            }
+            return best;
+        }
+
         static int IndexOf(byte[] buf, int len, int start)
         {
             for (int i = start; i <= len - Magic.Length; i++)

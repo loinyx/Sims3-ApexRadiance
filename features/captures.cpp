@@ -14,6 +14,7 @@
 #include "d3d9_hooks.h"
 #include "overlay.h"
 #include "f10_study.h"
+#include "apex_capture.h"
 #include <windows.h>
 #include <shellapi.h>
 #include <wincodec.h>
@@ -122,6 +123,50 @@ bool EncodePng(const std::filesystem::path& file, const BYTE* pixels, size_t siz
     if (frame) frame->Release();
     if (enc) enc->Release();
     if (stream) stream->Release();
+    if (factory) factory->Release();
+    return ok;
+}
+
+// A player screenshot ([capture.screenshot]): B G R rows -> PNG or JPEG (quality 1-100), scaled to scale % (Fant) first
+bool EncodePicture(const std::filesystem::path& file, const BYTE* bgr, size_t size, UINT w, UINT h, bool jpg, int quality, int scale) {
+    if (!jpg && scale >= 100) return EncodePng(file, bgr, size, w, h, 3, GUID_WICPixelFormat24bppBGR);
+    IWICImagingFactory* factory = nullptr;
+    IWICBitmap* bmp = nullptr;
+    IWICBitmapScaler* scaler = nullptr;
+    IWICStream* stream = nullptr;
+    IWICBitmapEncoder* enc = nullptr;
+    IWICBitmapFrameEncode* frame = nullptr;
+    IPropertyBag2* props = nullptr;
+    const UINT ow = scale >= 100 ? w : std::max(1u, static_cast<UINT>(w * static_cast<unsigned long long>(scale) / 100));
+    const UINT oh = scale >= 100 ? h : std::max(1u, static_cast<UINT>(h * static_cast<unsigned long long>(scale) / 100));
+    bool ok = SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory))) &&
+              SUCCEEDED(factory->CreateBitmapFromMemory(w, h, GUID_WICPixelFormat24bppBGR, w * 3, static_cast<UINT>(size), const_cast<BYTE*>(bgr), &bmp));
+    IWICBitmapSource* src = bmp;
+    if (ok && (ow != w || oh != h)) {
+        ok = SUCCEEDED(factory->CreateBitmapScaler(&scaler)) && SUCCEEDED(scaler->Initialize(bmp, ow, oh, WICBitmapInterpolationModeFant));
+        src = scaler;
+    }
+    ok = ok && SUCCEEDED(factory->CreateStream(&stream)) && SUCCEEDED(stream->InitializeFromFilename(file.c_str(), GENERIC_WRITE)) &&
+         SUCCEEDED(factory->CreateEncoder(jpg ? GUID_ContainerFormatJpeg : GUID_ContainerFormatPng, nullptr, &enc)) &&
+         SUCCEEDED(enc->Initialize(stream, WICBitmapEncoderNoCache)) && SUCCEEDED(enc->CreateNewFrame(&frame, &props));
+    if (ok && jpg && props) {
+        PROPBAG2 opt{};
+        opt.pstrName = const_cast<LPOLESTR>(L"ImageQuality");
+        VARIANT v;
+        VariantInit(&v);
+        v.vt = VT_R4;
+        v.fltVal = std::clamp(quality, 1, 100) / 100.0f;
+        props->Write(1, &opt, &v);
+    }
+    WICPixelFormatGUID fmt = GUID_WICPixelFormat24bppBGR;
+    ok = ok && SUCCEEDED(frame->Initialize(props)) && SUCCEEDED(frame->SetSize(ow, oh)) && SUCCEEDED(frame->SetPixelFormat(&fmt)) &&
+         SUCCEEDED(frame->WriteSource(src, nullptr)) && SUCCEEDED(frame->Commit()) && SUCCEEDED(enc->Commit());
+    if (props) props->Release();
+    if (frame) frame->Release();
+    if (enc) enc->Release();
+    if (stream) stream->Release();
+    if (scaler) scaler->Release();
+    if (bmp) bmp->Release();
     if (factory) factory->Release();
     return ok;
 }
@@ -244,6 +289,118 @@ uint64_t FolderSize(const std::filesystem::path& path) {
     return bytes;
 }
 
+// ---- Mouse pointer ([capture] include_pointer) ----
+// Windows draws the game's pointer on top of the finished frame, so the back buffer never has it. It is drawn into the
+// picture or video frame here: the current cursor image (drawn once on black and once on white to get its alpha), at
+// its hotspot, scaled from the window's client size to the image size.
+struct PointerImage {
+    HCURSOR cursor = nullptr;
+    int w = 0, h = 0, hotX = 0, hotY = 0;
+    std::vector<BYTE> bgra; // colour drawn on black (premultiplied) + alpha
+};
+std::mutex g_pointerLock;
+PointerImage g_pointer;
+
+bool RenderPointer(HCURSOR cur, PointerImage& out) {
+    ICONINFO ii{};
+    if (!GetIconInfo(cur, &ii)) return false;
+    BITMAP bm{};
+    int w = 0, h = 0;
+    if (ii.hbmColor && GetObjectW(ii.hbmColor, sizeof(bm), &bm)) { w = bm.bmWidth; h = bm.bmHeight; }
+    else if (ii.hbmMask && GetObjectW(ii.hbmMask, sizeof(bm), &bm)) { w = bm.bmWidth; h = bm.bmHeight / 2; } // AND + XOR halves
+    const int hotX = static_cast<int>(ii.xHotspot), hotY = static_cast<int>(ii.yHotspot);
+    if (ii.hbmColor) DeleteObject(ii.hbmColor);
+    if (ii.hbmMask) DeleteObject(ii.hbmMask);
+    if (w <= 0 || h <= 0 || w > 256 || h > 256) return false;
+    HDC screen = GetDC(nullptr);
+    HDC dc = screen ? CreateCompatibleDC(screen) : nullptr;
+    BITMAPINFO bi{};
+    bi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bi.bmiHeader.biWidth = w;
+    bi.bmiHeader.biHeight = -h;
+    bi.bmiHeader.biPlanes = 1;
+    bi.bmiHeader.biBitCount = 32;
+    bi.bmiHeader.biCompression = BI_RGB;
+    void* bits[2]{};
+    HBITMAP bmp[2]{};
+    bool ok = dc != nullptr;
+    for (int k = 0; ok && k < 2; k++) {
+        bmp[k] = CreateDIBSection(screen, &bi, DIB_RGB_COLORS, &bits[k], nullptr, 0);
+        if (!bmp[k] || !bits[k]) { ok = false; break; }
+        memset(bits[k], k ? 0xFF : 0x00, static_cast<size_t>(w) * h * 4);
+        HGDIOBJ old = SelectObject(dc, bmp[k]);
+        ok = DrawIconEx(dc, 0, 0, cur, w, h, 0, nullptr, DI_NORMAL) != FALSE;
+        GdiFlush();
+        SelectObject(dc, old);
+    }
+    if (ok) {
+        out.bgra.resize(static_cast<size_t>(w) * h * 4);
+        const BYTE* b = static_cast<const BYTE*>(bits[0]);
+        const BYTE* wh = static_cast<const BYTE*>(bits[1]);
+        for (size_t i = 0; i < static_cast<size_t>(w) * h; i++) {
+            const int diff = (wh[4 * i] - b[4 * i] + wh[4 * i + 1] - b[4 * i + 1] + wh[4 * i + 2] - b[4 * i + 2]) / 3;
+            out.bgra[4 * i] = b[4 * i];
+            out.bgra[4 * i + 1] = b[4 * i + 1];
+            out.bgra[4 * i + 2] = b[4 * i + 2];
+            out.bgra[4 * i + 3] = static_cast<BYTE>(std::clamp(255 - diff, 0, 255)); // inverting cursors come out solid
+        }
+        out.cursor = cur;
+        out.w = w;
+        out.h = h;
+        out.hotX = hotX;
+        out.hotY = hotY;
+    }
+    for (HBITMAP x : bmp) if (x) DeleteObject(x);
+    if (dc) DeleteDC(dc);
+    if (screen) ReleaseDC(nullptr, screen);
+    return ok;
+}
+
+HWND GameWindow(IDirect3DDevice9* dev) {
+    HWND wnd = nullptr;
+    IDirect3DSwapChain9* sc = nullptr;
+    if (SUCCEEDED(dev->GetSwapChain(0, &sc)) && sc) {
+        D3DPRESENT_PARAMETERS pp{};
+        if (SUCCEEDED(sc->GetPresentParameters(&pp))) wnd = pp.hDeviceWindow;
+        sc->Release();
+    }
+    if (!wnd) {
+        D3DDEVICE_CREATION_PARAMETERS cp{};
+        if (SUCCEEDED(dev->GetCreationParameters(&cp))) wnd = cp.hFocusWindow;
+    }
+    return wnd;
+}
+
+void DrawPointerInto(IDirect3DDevice9* dev, BYTE* px, UINT w, UINT h, UINT bytesPerPixel) {
+    if (!dev || !px || !w || !h || bytesPerPixel < 3) return;
+    CURSORINFO ci{};
+    ci.cbSize = sizeof(ci);
+    if (!GetCursorInfo(&ci) || !(ci.flags & CURSOR_SHOWING) || !ci.hCursor) return;
+    const HWND wnd = GameWindow(dev);
+    POINT p = ci.ptScreenPos;
+    RECT client{};
+    if (!wnd || !ScreenToClient(wnd, &p) || !GetClientRect(wnd, &client)) return;
+    const int cw = client.right - client.left, ch = client.bottom - client.top;
+    if (cw <= 0 || ch <= 0 || p.x < 0 || p.y < 0 || p.x >= cw || p.y >= ch) return; // outside the game: not in the picture
+    std::lock_guard<std::mutex> lk(g_pointerLock);
+    if (g_pointer.cursor != ci.hCursor && !RenderPointer(ci.hCursor, g_pointer)) return;
+    const double sx = static_cast<double>(w) / cw, sy = static_cast<double>(h) / ch;
+    const int x0 = static_cast<int>((p.x - g_pointer.hotX) * sx), y0 = static_cast<int>((p.y - g_pointer.hotY) * sy);
+    const int dw = std::max(1, static_cast<int>(g_pointer.w * sx + 0.5)), dh = std::max(1, static_cast<int>(g_pointer.h * sy + 0.5));
+    for (int y = std::max(0, y0); y < std::min(static_cast<int>(h), y0 + dh); y++) {
+        const int srcY = std::min(g_pointer.h - 1, (y - y0) * g_pointer.h / dh);
+        BYTE* row = px + static_cast<size_t>(y) * w * bytesPerPixel;
+        for (int x = std::max(0, x0); x < std::min(static_cast<int>(w), x0 + dw); x++) {
+            const int srcX = std::min(g_pointer.w - 1, (x - x0) * g_pointer.w / dw);
+            const BYTE* s = g_pointer.bgra.data() + (static_cast<size_t>(srcY) * g_pointer.w + srcX) * 4;
+            const int a = s[3];
+            if (!a) continue;
+            BYTE* d = row + static_cast<size_t>(x) * bytesPerPixel;
+            for (int c = 0; c < 3; c++) d[c] = static_cast<BYTE>(std::min(255, s[c] + d[c] * (255 - a) / 255));
+        }
+    }
+}
+
 // ---- Screenshots (every capture also saves what the screen showed) ----
 // Finish queues the capture folder; the next frame's picture is copied from the back buffer and written as
 // Screenshot.png on a short-lived thread (WIC). Menu closed: at Present, so the picture has everything the player sees
@@ -254,6 +411,19 @@ struct ShotJob {
     std::filesystem::path reportFolder;
     bool report = true;
     int skipPresents = 0;
+    // player screenshots ([capture.screenshot]); file empty: named when taken (folder + naming)
+    std::filesystem::path folder;
+    std::string naming;
+    bool jpg = false;
+    int quality = 95;
+    int scale = 100;
+    bool menu = false;                 // the Apex menu stays in: taken at Present only
+    unsigned long long due = 0;        // burst: not before this tick
+    bool before = false;               // also <name>_before (the frame without the GShade look)
+    bool onlyBefore = false;           // look = without: the frame without the look is the picture
+    bool presetCopy = false;           // also the preset .ini next to it
+    bool last = true;                  // the last of its burst
+    bool mouse = false;                // the mouse pointer drawn in (IncludeMouse)
 };
 std::vector<ShotJob> g_shots; // render-thread requests; report shots and standalone player photos
 std::filesystem::path g_shotTaken; // ScreenshotNow: its Finish takes no other
@@ -281,41 +451,96 @@ void RestorePlayerPhoto() {
     g_playerPhoto = {};
 }
 
-void WritePng(ShotJob job, std::vector<BYTE> bgr, UINT w, UINT h) {
-    HookGuard::StartDetached("Captures: screenshot writer", [job = std::move(job), bgr = std::move(bgr), w, h] {
+void WritePng(ShotJob job, std::vector<BYTE> bgr, UINT w, UINT h, std::vector<BYTE> before = {}, UINT bw = 0, UINT bh = 0) {
+    std::wstring preset = job.presetCopy ? ApexCapture::PresetFile() : std::wstring();
+    HookGuard::StartDetached("Captures: screenshot writer", [job = std::move(job), bgr = std::move(bgr), w, h, before = std::move(before), bw, bh,
+                                                             preset = std::move(preset)] {
         const auto& file = job.file;
         const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-        const bool ok = EncodePng(file, bgr.data(), bgr.size(), w, h, 3, GUID_WICPixelFormat24bppBGR);
+        const bool ok = job.report ? EncodePng(file, bgr.data(), bgr.size(), w, h, 3, GUID_WICPixelFormat24bppBGR)
+                                   : EncodePicture(file, bgr.data(), bgr.size(), w, h, job.jpg, job.quality, job.scale);
+        if (ok && !before.empty()) {
+            std::filesystem::path b = file;
+            b.replace_filename(file.stem().wstring() + L"_before" + file.extension().wstring());
+            if (!EncodePicture(b, before.data(), before.size(), bw, bh, job.jpg, job.quality, job.scale))
+                LOG_WARNING("[Captures] The \"before\" picture could not be written: " + ApexUtil::ToUtf8(b.wstring()));
+        } else if (ok && job.before) {
+            LOG_INFO("[Captures] No \"before\" picture: the look was off");
+        }
+        if (ok && !preset.empty()) {
+            std::filesystem::path p = file;
+            p.replace_extension(L".ini");
+            if (!CopyFileW(preset.c_str(), p.c_str(), FALSE)) LOG_WARNING("[Captures] The preset could not be copied: " + ApexUtil::ToUtf8(p.wstring()));
+        }
         if (SUCCEEDED(com)) CoUninitialize();
         if (!ok) LOG_WARNING("[Captures] The screenshot could not be written: " + ApexUtil::ToUtf8(file.wstring()));
+        else {
+            std::error_code ec;
+            const auto bytes = std::filesystem::file_size(file, ec);
+            LOG_INFO(std::format("[Captures] Screenshot saved: {} ({} KB)", ApexUtil::ToUtf8(file.wstring()), ec ? 0 : bytes / 1024));
+        }
         if (job.report) CompleteShot(job.reportFolder, ok);
-        else Notify(I18n::Tr(ok ? "Screenshot saved" : "The screenshot could not be saved"), 4,
-                    ok ? NoteKind::Screenshot : NoteKind::Warning);
+        else if (!ok) Notify(I18n::Tr("The screenshot could not be saved"), 4, NoteKind::Warning);
+        else {
+            ApexCapture::SetLastSaved(false, file); // Image > Capture: "Last: <name>" and Show
+            if (job.last && ApexCapture::Get().notes) Notify(I18n::Tr("Screenshot saved"), 4, NoteKind::Screenshot);
+        }
     });
 }
 
 // Render thread: the finished back buffer (including post-scene and Picture passes) -> queued PNGs.
-void TakeShots(IDirect3DDevice9* dev) {
+bool PlayerJobsLeft() { return std::any_of(g_shots.begin(), g_shots.end(), [](const ShotJob& j) { return !j.report; }); }
+bool BeforeJobsLeft() { return std::any_of(g_shots.begin(), g_shots.end(), [](const ShotJob& j) { return !j.report && j.before; }); }
+
+// atPresent false: before the Apex menu draws (filteredSceneBeforeOverlay); jobs that keep the menu wait for Present
+void TakeShots(IDirect3DDevice9* dev, bool atPresent) {
+    // a burst that cannot finish (at most 30 s by its settings): the rest dropped, the UI and the menu back
+    if (g_playerPhoto.active && (!PlayerJobsLeft() || GetTickCount64() - g_playerPhoto.requestedAt > ApexCapture::kMaxBurstMs + 5000)) {
+        if (PlayerJobsLeft()) LOG_WARNING("[Captures] Screenshot burst stopped: it took too long");
+        std::erase_if(g_shots, [](const ShotJob& job) { return !job.report; });
+        ApexCapture::WantBefore(false);
+        RestorePlayerPhoto();
+    }
     if (g_shots.empty() || !dev) return;
+    struct BeforeOff { ~BeforeOff() { if (!BeforeJobsLeft()) ApexCapture::WantBefore(false); } } beforeOff;
     // Wait for the posted hide key to pass through the game procedure before counting a clean frame.
     if (g_playerPhoto.active && g_playerPhoto.toggledGameUi && !g_gameUiHidden.load()) {
         if (GetTickCount64() - g_playerPhoto.requestedAt < 2000) return;
         LOG_WARNING("[Captures] Screenshot cancelled: the UI hide key was not processed in time");
+        ApexCapture::WantBefore(false);
         std::erase_if(g_shots, [](const ShotJob& job) { return !job.report; });
         RestorePlayerPhoto();
         return;
     }
     std::vector<ShotJob> jobs;
+    const unsigned long long now = GetTickCount64();
+    bool tookBurst = false; // one burst picture per frame
     for (auto it = g_shots.begin(); it != g_shots.end();) {
-        if (it->skipPresents > 0) { --it->skipPresents; ++it; }
-        else { jobs.push_back(std::move(*it)); it = g_shots.erase(it); }
+        if (!atPresent && it->menu) { ++it; continue; }
+        if (it->skipPresents > 0) { if (atPresent) --it->skipPresents; ++it; continue; }
+        if (!it->report && (it->due > now || tookBurst)) { ++it; continue; }
+        if (!it->report) tookBurst = true;
+        jobs.push_back(std::move(*it));
+        it = g_shots.erase(it);
     }
     if (jobs.empty()) return;
+    // the player's settings were kept while more pictures of the burst wait
+    auto restore = [] { if (!PlayerJobsLeft()) RestorePlayerPhoto(); };
     const bool hasPlayerPhoto = std::any_of(jobs.begin(), jobs.end(), [](const ShotJob& j) { return !j.report; });
+    std::vector<BYTE> before;
+    UINT bw = 0, bh = 0;
+    if (hasPlayerPhoto && std::any_of(jobs.begin(), jobs.end(), [](const ShotJob& j) { return j.before; }))
+        ApexCapture::ReadBefore(dev, before, bw, bh);
+    D3DSURFACE_DESC shotDesc{}; // for %Width% %Height%
+    if (IDirect3DSurface9* s = nullptr; SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &s)) && s) s->GetDesc(&shotDesc), s->Release();
+    for (auto& j : jobs) {
+        if (j.report || !j.file.empty()) continue;
+        j.file = ApexCapture::NewFile(j.folder, j.naming, j.jpg ? "jpg" : "png", false, static_cast<int>(shotDesc.Width), static_cast<int>(shotDesc.Height));
+    }
     IDirect3DSurface9 *bb = nullptr, *resolved = nullptr, *sys = nullptr;
     if (FAILED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) || !bb) {
         for (const auto& job : jobs) if (job.report) CompleteShot(job.reportFolder, false);
-        if (hasPlayerPhoto) RestorePlayerPhoto();
+        if (hasPlayerPhoto) restore();
         return;
     }
     D3DSURFACE_DESC d{};
@@ -350,18 +575,36 @@ void TakeShots(IDirect3DDevice9* dev) {
     if (bgr.empty()) {
         LOG_WARNING("[Captures] No screenshot: the screen format could not be read");
         for (const auto& job : jobs) if (job.report) CompleteShot(job.reportFolder, false);
-        if (hasPlayerPhoto) RestorePlayerPhoto();
+        if (hasPlayerPhoto) restore();
         return;
     }
 #ifdef APEX_F10_STUDY
     if (hasPlayerPhoto) F10Study::PhotoReceipt(d.Width, d.Height, g_playerPhoto.toggledGameUi);
 #endif
-    for (size_t i = 0; i < jobs.size(); i++) WritePng(std::move(jobs[i]), i + 1 < jobs.size() ? bgr : std::move(bgr), d.Width, d.Height);
-    if (hasPlayerPhoto) RestorePlayerPhoto();
+    std::vector<BYTE> withMouse; // player pictures with the pointer drawn in; report shots keep the plain frame
+    if (std::any_of(jobs.begin(), jobs.end(), [](const ShotJob& j) { return !j.report && j.mouse; })) {
+        withMouse = bgr;
+        DrawPointerInto(dev, withMouse.data(), d.Width, d.Height, 3);
+    }
+    for (size_t i = 0; i < jobs.size(); i++) {
+        const bool lastJob = i + 1 == jobs.size();
+        const bool mouse = !jobs[i].report && jobs[i].mouse;
+        if (!jobs[i].report && jobs[i].onlyBefore && !before.empty()) { // look = without: the frame before the look alone
+            std::vector<BYTE> plain = before;
+            if (mouse) DrawPointerInto(dev, plain.data(), bw, bh, 3);
+            WritePng(std::move(jobs[i]), std::move(plain), bw, bh);
+            continue;
+        }
+        std::vector<BYTE> b = !jobs[i].report && jobs[i].before && !jobs[i].onlyBefore ? before : std::vector<BYTE>();
+        WritePng(std::move(jobs[i]), mouse ? withMouse : lastJob ? std::move(bgr) : bgr, d.Width, d.Height, std::move(b), bw, bh);
+    }
+    if (hasPlayerPhoto) restore();
 }
 
+void TakeShots(IDirect3DDevice9* dev) { TakeShots(dev, true); }
+
 void ShotAtSceneEnd(IDirect3DDevice9* dev) {
-    if (Overlay::IsVisible()) TakeShots(dev); // the menu is about to be drawn: the picture before it
+    if (Overlay::IsVisible()) TakeShots(dev, false); // the menu is about to be drawn: the picture before it
 }
 
 void QueueShot(const std::filesystem::path& folder) {
@@ -377,13 +620,18 @@ void QueueShot(const std::filesystem::path& folder) {
     }, D3D9Hooks::Priority::First);
 }
 
-bool QueuePlayerPhoto(const std::filesystem::path& file, bool hideGameUi) {
+// [capture.screenshot] decides the rest: format, size, burst, the Apex menu, the look, the preset copy
+bool QueuePlayerPhoto(const std::filesystem::path& folder, bool hideGameUi) {
+    const ApexCapture::ScreenshotSettings s = ApexCapture::Get().shot;
     g_playerPhoto.active = true;
     g_playerPhoto.requestedAt = GetTickCount64();
     g_playerPhoto.restoreOverlay = Overlay::IsVisible();
     g_playerPhoto.toggledGameUi = hideGameUi && !g_gameUiHidden.load();
-    Overlay::SetVisible(false);
-    Overlay::SetCaptureSuppressed(true);
+    const bool keepMenu = s.includeMenu && g_playerPhoto.restoreOverlay;
+    if (!keepMenu) {
+        Overlay::SetVisible(false);
+        Overlay::SetCaptureSuppressed(true);
+    }
     if (g_playerPhoto.toggledGameUi && !PostGameUiToggle()) {
         LOG_WARNING("[Captures] Could not hide the game's UI; screenshot cancelled");
         Overlay::SetCaptureSuppressed(false);
@@ -391,7 +639,26 @@ bool QueuePlayerPhoto(const std::filesystem::path& file, bool hideGameUi) {
         g_playerPhoto = {};
         return false;
     }
-    g_shots.push_back({file, {}, false, 1}); // allow the posted F10 toggle to reach the game before reading the back buffer
+    const int n = std::clamp(s.burstCount, 1, ApexCapture::kMaxBurst);
+    const int interval = n > 1 ? std::clamp(s.burstIntervalMs, 50, ApexCapture::kMaxBurstMs / (n - 1)) : 0;
+    const unsigned long long now = GetTickCount64();
+    for (int i = 0; i < n; i++) {
+        ShotJob j{{}, {}, false, 1}; // allow the posted F10 toggle to reach the game before reading the back buffer
+        j.folder = folder;
+        j.naming = s.fileName;
+        j.jpg = s.jpg;
+        j.quality = s.jpgQuality;
+        j.scale = s.sizePercent;
+        j.menu = keepMenu;
+        j.due = now + static_cast<unsigned long long>(i) * interval;
+        j.before = s.look != ApexCapture::kLookWith;
+        j.onlyBefore = s.look == ApexCapture::kLookWithout;
+        j.presetCopy = s.savePreset;
+        j.last = i + 1 == n;
+        j.mouse = s.includePointer;
+        g_shots.push_back(std::move(j));
+    }
+    if (s.look != ApexCapture::kLookWith) ApexCapture::WantBefore(true);
     if (g_shotHooks) return true;
     g_shotHooks = true; // once; the callbacks do nothing while nothing is queued
     RenderCallbacks::filteredSceneBeforeOverlay.Add(ShotAtSceneEnd);
@@ -482,6 +749,8 @@ void PruneLater() {
 }
 
 } // namespace
+
+void DrawMousePointer(IDirect3DDevice9* dev, BYTE* px, UINT w, UINT h, UINT bytesPerPixel) { DrawPointerInto(dev, px, w, h, bytesPerPixel); }
 
 void Prune() { PruneLater(); }
 
@@ -830,49 +1099,34 @@ void OnWorldSessionChanged() {
 
 bool RequestPlayerScreenshot(bool hideGameUi) {
     if (g_playerPhoto.active) return false;
-    std::error_code ec;
-    const ApexConfig::UiSettings ui = ApexConfig::GetUi();
-    std::filesystem::path folder;
-    if (ui.screenshotFolder == 2 && !ui.screenshotCustomFolder.empty()) { // the folder the player chose
-        folder = std::filesystem::path(ApexUtil::ToWide(ui.screenshotCustomFolder));
-        std::filesystem::create_directories(folder, ec);
-        if (ec || !std::filesystem::is_directory(folder, ec)) {
-            LOG_WARNING("[Captures] The chosen screenshots folder is not available: " + ui.screenshotCustomFolder);
-            Notify(I18n::Tr("The chosen screenshots folder is not available; saved in the game's Screenshots folder"), 5, NoteKind::Warning);
-            folder.clear();
-            ec.clear();
-        }
-    }
+    ApexCapture::FolderResult fr = ApexCapture::FolderResult::Ok;
+    const std::filesystem::path folder = ApexCapture::CaptureFolder(false, fr); // [ui] screenshot_folder
+    if (fr == ApexCapture::FolderResult::FellBack)
+        Notify(I18n::Tr("The chosen screenshots folder is not available; saved in the game's Screenshots folder"), 5, NoteKind::Warning);
     if (folder.empty()) {
-        const std::wstring& gameDir = ui.screenshotFolder == 1 ? ApexPaths::ApexDirectory() : ApexPaths::GameDocumentsDirectory();
-        if (gameDir.empty()) {
-            Notify(I18n::Tr("Could not create the screenshots folder"), 5, NoteKind::Warning);
-            return false;
-        }
-        folder = std::filesystem::path(gameDir) / L"Screenshots";
-        std::filesystem::create_directories(folder, ec);
-        if (ec) {
-            Notify(I18n::Tr("Could not create the screenshots folder"), 5, NoteKind::Warning);
-            return false;
-        }
-    }
-    SYSTEMTIME t{};
-    GetLocalTime(&t);
-    const std::string base = std::format("Screenshot_{:04}-{:02}-{:02}_{:02}-{:02}-{:02}_{:03}",
-                                         t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond, t.wMilliseconds);
-    std::filesystem::path file = folder / (base + ".png");
-    for (unsigned suffix = 2; std::filesystem::exists(file, ec) && !ec; ++suffix)
-        file = folder / (base + std::format(" ({})", suffix) + ".png");
-    if (ec) {
         Notify(I18n::Tr("Could not create the screenshots folder"), 5, NoteKind::Warning);
         return false;
     }
-    if (!QueuePlayerPhoto(file, hideGameUi)) {
+    if (!QueuePlayerPhoto(folder, hideGameUi)) {
         Notify(I18n::Tr("Could not hide the game interface; screenshot was not taken"), 5, NoteKind::Warning);
         return false;
     }
-    LOG_INFO("[Captures] Filtered screenshot requested: " + ApexUtil::ToUtf8(file.wstring()));
+    ApexCapture::PlaySoundFile();
+    const ApexCapture::ScreenshotSettings s = ApexCapture::Get().shot;
+    LOG_INFO("[Captures] Filtered screenshot requested into " + ApexUtil::ToUtf8(folder.wstring()) +
+             std::format(" ({} {}%, {} picture(s))", s.jpg ? "jpg" : "png", s.sizePercent, s.burstCount));
     return true;
+}
+
+// The video's "no game UI": F10 while it records. The F10 state is the one ObserveGameUiKey tracks, so an F10 the player
+// pressed meanwhile is respected: nothing is toggled when the UI is already as wanted.
+bool HideGameUiForVideo(bool hide) {
+    if (hide) {
+        if (g_gameUiHidden.load()) return false; // already hidden by the player: nothing to undo later
+        return PostGameUiToggle();
+    }
+    if (!g_gameUiHidden.load()) return false;
+    return PostGameUiToggle();
 }
 
 void SaveReport() { Finish(NewFolder("Report"), "a report: the log and the settings"); }

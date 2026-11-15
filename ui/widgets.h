@@ -50,6 +50,11 @@ void SetNextRowBadge(const char* text, const char* tooltip, unsigned rgb = 0xE0A
 void SetNextRowChangedDot(const char* tooltip);
 // The next row's label is user data (a profile name): shown and searched as it is, never translated
 void SetNextRowUntranslated();
+// The next row's description in amber: something about that row needs the player (a doubled effect, a missing file)
+void SetNextRowWarning();
+// The next BeginControlRow's leading icon in another colour than the accent (a muted drag grip)
+void SetNextRowIconColor(unsigned rgb);
+inline constexpr float kRowIconBox = 22.0f; // the leading icon's box of a control row (units)
 
 // ---- search filter (the menu's search results) ----
 // While a filter is on, the rows draw only when every word of the query (case-insensitive) appears in their label or
@@ -106,6 +111,8 @@ void Tooltip(const char* text);
 void PageTitle(const char* title, const char* subtitle);
 // Muted wrapped text
 void MutedText(const char* text);
+// A small turning arc on the text line, for work that is still running; the next item goes on the same line
+void BusySpinner(bool frameLine = false); // frameLine: centred on a line of buttons, else on a line of text
 // Small bold section label inside a card or page (kept for older callers; cards use GroupLabel)
 void SectionLabel(const char* text);
 // Group label inside a card: regular menu font, muted, without letter spacing
@@ -113,6 +120,10 @@ void GroupLabel(const char* text);
 // A quiet label that opens a group of rows inside a card ("What stays sharp"): the row divider above it when it follows
 // a row, small muted text, and no divider between it and the group's first row
 void CardGroup(const char* text);
+// The same quiet label with a small chevron that collapses its group (open unless openByDefault is false; the state is
+// kept per id while the game runs). True when open: submit the group's rows. The search results draw no label and
+// return true.
+bool CardGroupToggle(const char* id, const char* text, bool openByDefault = true);
 // A note: a small icon and wrapped text in a subtly tinted rounded box, in the given colour (0xRRGGBB). Info notes use
 // IconId::Info and the default muted colour, warnings IconId::TriangleAlert and VioletTheme::kWarning, errors
 // IconId::TriangleAlert and VioletTheme::kError. The box is one item: hover it for a Tooltip.
@@ -156,6 +167,22 @@ bool SwitchRow(const char* label, bool* v, const char* tooltip = nullptr, BoolDe
 // nestable.
 bool BeginControlRow(const char* label, const char* description, float controlsWidth, IconId icon = IconId::None, float controlsHeight = 0.0f);
 void EndControlRow();
+// The next BeginControlRow has a default: the changed dot while `changed`, and on hover the row's Reset button.
+// ControlRowReset(): that Reset was clicked (read between BeginControlRow and EndControlRow; the caller puts the value
+// back and reports it). The caller gives the row a unique ID scope (PushID).
+void SetNextRowDefault(bool changed);
+bool ControlRowReset();
+// A colour row (a control row): a swatch with the colour's 0..255 values beside it; clicking the swatch opens a colour
+// picker (with an alpha bar when comps is 4). rgba holds comps floats in 0..1; def (optional) = the default (changed
+// dot + Reset). True when the colour changed.
+bool ColorRow(const char* label, const char* description, float* rgba, int comps, const float* def = nullptr);
+// A long list draws only the rows it shows: a row outside the view advances the layout exactly as BeginControlRow +
+// EndControlRow did with the same label and description, by its height measured then (ControlRowHeight, read before
+// EndControlRow), without drawing it.
+void SkipControlRow(const char* label, const char* description, float height);
+float ControlRowHeight();
+// The last control row: its top (screen y) and whether its controls went under the text (narrow)
+void LastControlRow(float* topScreenY, bool* stacked);
 // A small muted chip ("~0.4 ms"); submitted as an item (hover it for a tooltip)
 ImVec2 ChipSize(const char* text);
 void Chip(const char* text, unsigned rgb = 0x8B8C96);
@@ -180,16 +207,21 @@ void Pill(const char* text, bool highlighted, IconId icon = IconId::None);
 bool IconButton(const char* id, IconId icon, const char* tooltip = nullptr, bool active = false, float sizeUnits = 24.0f);
 // Buttons use the active compact/primary group frame height. Secondary = neutral fill with a border that turns violet on hover (Reset, Save, Change);
 // Primary = violet fill with white text, for the key action of a card (Turn on ..., Download).
-enum class ButtonKind { Secondary, Primary };
+// Danger = red fill with white text, only for the confirming button of a removal.
+enum class ButtonKind { Secondary, Primary, Danger };
 // A button with a 20-unit icon before its label; true when clicked. "Label##id" hides the ##id part.
 bool IconTextButton(const char* label, IconId icon, const char* tooltip = nullptr, ButtonKind kind = ButtonKind::Secondary);
 // The same without an icon; minWidth (pixels, already x Unit()) for equal-width buttons like - / +.
 bool TextButton(const char* label, const char* tooltip = nullptr, ButtonKind kind = ButtonKind::Secondary, float minWidth = 0.0f);
 // Width of those buttons (for BeginControlRow)
 float ButtonWidth(const char* label, bool withIcon, float minWidth = 0.0f);
+// A custom control's closed text cut with "…" to maxW like the select rows (true when cut), and the full-text tooltip
+bool FitClosedText(std::string_view text, float maxW, std::string& out);
+void ShowFullText(std::string_view text);
 // Sidebar entry: icon + label, filled background and a violet bar when selected. True when clicked. collapsed = the
 // icon-only rail (the label becomes the hover tooltip).
-bool SidebarItem(IconId icon, const char* label, bool selected, bool collapsed = false);
+// badge: a small chip at the item's right ("Beta"); with the sidebar collapsed it joins the tooltip
+bool SidebarItem(IconId icon, const char* label, bool selected, bool collapsed = false, const char* badge = nullptr);
 // Sidebar group label ("WORLD"): the GroupLabel look, aligned with the items' icons, with kSpace3 above it; collapsed =
 // a short hairline instead of the text
 void SidebarGroup(const char* text, bool collapsed = false);
@@ -207,6 +239,10 @@ bool Segmented(const char* id, int* current, const char* const* labels, int coun
 // by its Reset button). defaultIndex = the default choice (changed dot + Reset), kNoDefaultIndex = none.
 bool SegmentedRow(const char* label, const char* description, const char* id, int* current, const char* const* labels, int count,
                   const char* const* tooltips = nullptr, const IconId* icons = nullptr, int defaultIndex = kNoDefaultIndex);
+// The next SegmentedRow gets a small icon button right of its choices, one frame high (Capture's "Open the folder");
+// consumed by that row, drawn or not. RowActionClicked: it was clicked in the last SegmentedRow.
+void SetNextRowAction(IconId icon, const char* tooltip);
+bool RowActionClicked();
 // Standard single-choice row: label and description on the left, a dropdown on the right, with the same changed
 // marker, hover Reset and search behavior as other setting rows. defaultIndex = the default choice.
 // stacked puts the same selector below its label at full width for file and preset dialogs.
@@ -218,7 +254,8 @@ bool SelectRowOpen();
 // "Advanced" section: a hairline, then a violet chevron row, collapsed by default (the state is kept per id while the
 // game runs). The contents are not indented and use the same rows. When it returns true, submit the contents and call
 // EndAdvanced().
-bool BeginAdvanced(const char* id, const char* label = "Advanced");
+// summary (optional, already translated): what is chosen inside, muted after the label ("Advanced  ·  PNG, 100%")
+bool BeginAdvanced(const char* id, const char* label = "Advanced", const char* summary = nullptr);
 void EndAdvanced();
 // The old tree-node look (still used by the Frame Profiler); same contract as ImGui::TreeNode (TreePop when true).
 bool AdvancedNode(const char* label);
@@ -244,6 +281,7 @@ struct SliderOptions {
     float defaultValue = kNoDefault;
     ImU32 trackFrom = 0, trackTo = 0; // both set = gradient track
     bool hueTrack = false;
+    bool markDefault = false; // a small amber tick on the track at defaultValue (Looks: the .ini's value)
     // > 0: the track takes the column of a SelectRow with this controlWidth (aligned with the select above or below
     // it) and the value moves to the track's left
     float alignWidth = 0.0f;
@@ -287,6 +325,13 @@ inline constexpr const char* kCostChipTooltip = "Measured cost on your GPU per f
 // (optional) draws a warning-colour label immediately left of the switch. True on the frame the switch was clicked.
 bool CardHeader(IconId icon, const char* title, const char* subtitle, const char* tooltip, bool* toggle, bool toggleEnabled = true,
                 HeaderExtra* extra = nullptr, const char* chip = nullptr);
+// A card header with a live status and one action (Image > Capture): violet icon, bold title (translated), the status
+// line under it as given (already translated) in statusRgb, with a small dot of that colour before it when dot, an
+// optional text link after it (translated; on its own line when it does not fit), and a compact button on the right
+// (under the text when the card is narrow; greyed out when !actionEnabled). Draws nothing in the search results.
+// Returns 1 when the button was clicked, 2 when the link was, else 0.
+int CardStatusHeader(IconId icon, const char* title, const char* status, unsigned statusRgb, bool dot, const char* link, const char* action,
+                     IconId actionIcon, ButtonKind kind, bool actionEnabled);
 // An overview row (Overview page, a list inside one card): icon, name (clickable: *nameClicked), muted phrase under it,
 // and on the right the switch (when on is not null) or a pill with rightText; chip (optional) left of them. Consecutive
 // rows get dividers. True on the frame the switch was clicked (it reports "<name> turned on/off").

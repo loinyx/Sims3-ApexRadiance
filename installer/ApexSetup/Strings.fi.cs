@@ -209,8 +209,8 @@ public static partial class Strings
             "Säilyttää kopion jokaisesta muuttamastaan tiedostosta, joten voit perua kaiken.",
         ["Your Apex Radiance settings are always kept."] = "Apex Radiance -asetuksesi säilyvät aina.",
         ["No internet connection"] = "Ei internetyhteyttä",
-        ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (suositus)",
-        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan, enemmän muistia (RTX Remix bridge)",
+        ["Vulkan, DXVK"] = "Vulkan, DXVK",
+        ["Vulkan with more memory (RTX Remix bridge, recommended)"] = "Vulkan, enemmän muistia (RTX Remix bridge, suositus)",
         ["DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0})."] = "DXVK ja RTX Remix bridge vaativat näytönohjaimen, jossa on Vulkan 1.3 (löytyi: {0}).",
         ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again."] = "Näytönohjaimen ajuri on liian vanha DXVK:lle ja RTX Remix bridgelle (puuttuu: {0}). Päivitä näytönohjaimen ajuri ja avaa Setup sitten uudelleen.",
         ["{0} cannot start with this graphics driver (missing: {1}), so the game closes at start. Update the graphics driver, or choose Windows default (Direct3D 9) in Change components."] = "{0} ei käynnisty tällä näytönohjaimen ajurilla (puuttuu: {1}), joten peli sulkeutuu heti käynnistyessä. Päivitä ajuri tai valitse Windowsin oletus (Direct3D 9) kohdassa Muuta komponentteja.",
@@ -269,5 +269,11 @@ public static partial class Strings
         ["A new Setup is available"] = "Uusi Setup on saatavilla",
         ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Apex Radiance Setup {0} on ladattu ja tarkistettu. Päivitä Setup, niin se avautuu uudelleen.",
         ["Update Setup"] = "Päivitä Setup",
+        // restart host (experimental)
+        ["Restart host"] = "Pelin uudelleenkäynnistys",
+        ["Experimental"] = "Kokeellinen",
+        ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Kun tallennat muistin ollessa vähissä, se tarjoaa lopettaessasi pelin käynnistämistä uudelleen siihen tallennukseen.",
+        ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Käynnistä peli kerran Apex Radiancen kanssa ja ota sitten pelin uudelleenkäynnistys käyttöön tästä.",
+        ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "Poistaa ts3wrap.exe-tiedoston ja poistaa pelin uudelleenkäynnistyksen käytöstä ApexRadiance.toml-tiedostossa.",
     };
 }

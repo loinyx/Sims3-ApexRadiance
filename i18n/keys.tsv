@@ -30,6 +30,7 @@ Measured cost on your GPU per frame	tr_widgets.cpp:kEntries	Custo medido na sua 
 {} turned off	tr_widgets.cpp:kEntries	{} desligado	{} desactivado	{} désactivé	{}
 {} reset	tr_widgets.cpp:kEntries	{} voltou ao padrão	{} restablecido	{} réinitialisé	{}
 {} changed	tr_widgets.cpp:kEntries	{} alterado	{} cambiado	{} modifié	{}
+Pick a color	tr_widgets.cpp:kEntries	Escolher uma cor	Elegir un color	Choisir une couleur	
 Automatic ({})	tr_widgets.cpp:kEntries	Automático ({})	Automático ({})	Automatique ({})	{}
 Language	tr_widgets.cpp:kEntries	Idioma	Idioma	Langue	
 The language of this menu	tr_widgets.cpp:kEntries	O idioma deste menu	El idioma de este menú	La langue de ce menu	
@@ -122,6 +123,19 @@ Performance: higher frame rate at night and fewer hitches with a fast camera	tr_
 Performance: trees and plants near lamps cost half as much to draw at night	tr_menu.cpp:kEntries	Desempenho: árvores e plantas perto de lâmpadas custam metade para desenhar à noite	Rendimiento: árboles y plantas cerca de lámparas cuestan la mitad de dibujar de noche	Performances : les arbres et plantes près des lampes coûtent moitié moins à dessiner la nuit	
 No crash after deleting lamps	tr_menu.cpp:kEntries	Sem travamento depois de apagar lâmpadas	Sin cierres después de borrar lámparas	Plus de plantage après la suppression de lampes	
 RTX Remix bridge: some lots no longer draw their ground black	tr_menu.cpp:kEntries	RTX Remix bridge: alguns lotes não desenham mais o chão preto	RTX Remix bridge: algunos solares ya no dibujan el suelo negro	RTX Remix bridge : certains terrains n'affichent plus leur sol en noir	
+Shaders: run ReShade and GShade looks in Apex, without either installed	tr_menu.cpp:kEntries	Shaders: rode looks do ReShade e do GShade no Apex, sem instalar nenhum dos dois	Shaders: usa looks de ReShade y GShade en Apex, sin instalar ninguno	Shaders : les looks ReShade et GShade dans Apex, sans installer ni l'un ni l'autre	
+Shaders: five built-in looks to start from, and your own .fx files	tr_menu.cpp:kEntries	Shaders: cinco looks prontos para começar, e seus próprios arquivos .fx	Shaders: cinco looks incluidos para empezar, y tus propios archivos .fx	Shaders : cinq looks intégrés pour commencer, et vos propres fichiers .fx	
+Shaders: download ReShade's shader packs from the menu, choosing which ones	tr_menu.cpp:kEntries	Shaders: baixe os pacotes de shaders do ReShade pelo menu, escolhendo quais	Shaders: descarga los paquetes de shaders de ReShade desde el menú, eligiendo cuáles	Shaders : téléchargez les packs de shaders de ReShade depuis le menu, au choix	
+Capture: screenshots and videos with your effects, on a page of their own	tr_menu.cpp:kEntries	Captura: screenshots e vídeos com seus efeitos, numa página própria	Captura: capturas y vídeos con tus efectos, en su propia página	Capture : captures d'écran et vidéos avec vos effets, sur une page à part	
+Presets: Capture and Shaders parts, and shared presets fetch the packs they need	tr_menu.cpp:kEntries	Presets: partes Captura e Shaders, e presets compartilhados baixam os pacotes que precisam	Preajustes: partes Captura y Shaders, y los preajustes compartidos descargan los paquetes que necesitan	Préréglages : parties Capture et Shaders, et les préréglages partagés récupèrent les packs nécessaires	
+Shaders: every setting of a ReShade shader gets its own control	tr_menu.cpp:kEntries	Shaders: cada ajuste de um shader do ReShade ganha seu próprio controle	Shaders: cada ajuste de un shader de ReShade tiene su propio control	Shaders : chaque réglage d'un shader ReShade a sa propre commande	
+Apex Radiance Setup: under half the download size, and an experimental restart host	tr_menu.cpp:kEntries	Apex Radiance Setup: download com menos da metade do tamanho, e um restart host experimental	Apex Radiance Setup: una descarga de menos de la mitad, y un restart host experimental	Apex Radiance Setup : un téléchargement deux fois plus léger, et un restart host expérimental	
+Presets: the import and export window scrolls on short screens	tr_menu.cpp:kEntries	Presets: a janela de importar e exportar rola em telas baixas	Preajustes: la ventana de importar y exportar se desplaza en pantallas bajas	Préréglages : la fenêtre d'import et d'export défile sur les petits écrans	
+Shaders: Interface without shaders keeps a look's full colors in the world	tr_menu.cpp:kEntries	Shaders: Interface sem shaders mantém as cores completas do look no mundo	Shaders: Interfaz sin shaders mantiene los colores completos del look en el mundo	Shaders : Interface sans shaders garde toutes les couleurs du look dans le monde	
+Shaders: MXAO and other depth shaders see depth the right way up	tr_menu.cpp:kEntries	Shaders: MXAO e outros shaders de profundidade veem a profundidade do jeito certo	Shaders: MXAO y otros shaders de profundidad ven la profundidad en la orientación correcta	Shaders : MXAO et les autres shaders de profondeur voient la profondeur dans le bon sens	
+ReShade looks inside Apex, and screenshots and videos with your effects	tr_menu.cpp:kEntries	Looks do ReShade dentro do Apex, e screenshots e vídeos com seus efeitos	Looks de ReShade dentro de Apex, y capturas y vídeos con tus efectos	Les looks ReShade dans Apex, et des captures et vidéos avec vos effets	
+ReShade and GShade looks in Apex	tr_menu.cpp:kEntries	Looks do ReShade e do GShade no Apex	Looks de ReShade y GShade en Apex	Looks ReShade et GShade dans Apex	
+Shader packs from the menu	tr_menu.cpp:kEntries	Pacotes de shaders pelo menu	Paquetes de shaders desde el menú	Packs de shaders depuis le menu	
 RTX Remix bridge: no more solid blue frames on loading and save screens	tr_menu.cpp:kEntries	RTX Remix bridge: sem quadros azuis nas telas de carregamento e de salvar	RTX Remix bridge: sin fotogramas azules en las pantallas de carga y de guardado	RTX Remix bridge : plus d'images bleues sur les écrans de chargement et de sauvegarde	
 Display: Turn off G-SYNC removed, and the NVIDIA setting it changed put back	tr_menu.cpp:kEntries	Tela: Desligar G-SYNC removido, e a configuração da NVIDIA que ele mudou volta ao original	Pantalla: se quita Desactivar G-SYNC y se restaura el ajuste de NVIDIA que cambió	Affichage : Désactiver G-SYNC retiré, le réglage NVIDIA qu'il modifiait est rétabli	
 RTX Remix bridge: no longer freezes at start with Turbo Simulation Engine installed	tr_menu.cpp:kEntries	RTX Remix bridge: não trava mais ao abrir com o Turbo Simulation Engine instalado	RTX Remix bridge: ya no se congela al iniciar con Turbo Simulation Engine instalado	RTX Remix bridge : ne se fige plus au démarrage avec Turbo Simulation Engine installé	
@@ -404,19 +418,43 @@ Enter a title to finish. The description is optional; your capture files are alr
 Image	tr_menu.cpp:kEntries	Imagem	Imagen	Image	
 Your individual lighting settings are active	tr_menu.cpp:kEntries	Seus ajustes individuais de iluminação estão ativos	Tus ajustes individuales de iluminación están activos	Vos réglages d'éclairage individuels sont actifs	
 Press {} to save one screenshot with Apex's effects	tr_menu.cpp:kEntries	Aperte {} para salvar uma captura com os efeitos do Apex	Pulsa {} para guardar una captura con los efectos de Apex	Appuyez sur {} pour enregistrer une capture avec les effets d'Apex	{}
-Save screenshots to	tr_menu.cpp:kEntries	Salvar capturas em	Guardar capturas en	Enregistrer les captures dans	
-Where the filtered screenshots are saved	tr_menu.cpp:kEntries	Onde as capturas com filtros são salvas	Dónde se guardan las capturas con filtros	Où les captures filtrées sont enregistrées	
-Game's Screenshots folder	tr_menu.cpp:kEntries	Pasta de capturas do jogo	Carpeta de capturas del juego	Dossier de captures du jeu	
 Apex Radiance folder	tr_menu.cpp:kEntries	Pasta do Apex Radiance	Carpeta de Apex Radiance	Dossier d'Apex Radiance	
-Another folder	tr_menu.cpp:kEntries	Outra pasta	Otra carpeta	Autre dossier	
 Any folder you choose, for example on another drive	tr_menu.cpp:kEntries	Qualquer pasta que você escolher, por exemplo em outro disco	Cualquier carpeta que elijas, por ejemplo en otra unidad	N'importe quel dossier de votre choix, par exemple sur un autre disque	
 Screenshots folder	tr_menu.cpp:kEntries	Pasta dos prints	Carpeta de capturas	Dossier des captures	
+Tokens for the folder and the file name	tr_menu.cpp:kEntries	Códigos para a pasta e o nome do arquivo	Códigos para la carpeta y el nombre del archivo	Codes pour le dossier et le nom du fichier	
+The save in play	tr_menu.cpp:kEntries	O jogo salvo em uso	La partida en juego	La sauvegarde en cours	
+Date, as 2026-11-14	tr_menu.cpp:kEntries	Data, como 2026-11-14	Fecha, como 2026-11-14	Date, comme 2026-11-14	
+Day, 01 to 31	tr_menu.cpp:kEntries	Dia, 01 a 31	Día, 01 a 31	Jour, 01 à 31	
+Month, 01 to 12	tr_menu.cpp:kEntries	Mês, 01 a 12	Mes, 01 a 12	Mois, 01 à 12	
+Year, as 2026	tr_menu.cpp:kEntries	Ano, como 2026	Año, como 2026	Année, comme 2026	
+Year, as 26	tr_menu.cpp:kEntries	Ano, como 26	Año, como 26	Année, comme 26	
+Month name	tr_menu.cpp:kEntries	Nome do mês	Nombre del mes	Nom du mois	
+Short month name	tr_menu.cpp:kEntries	Nome curto do mês	Nombre corto del mes	Nom court du mois	
+Weekday name	tr_menu.cpp:kEntries	Dia da semana	Día de la semana	Jour de la semaine	
+Short weekday name	tr_menu.cpp:kEntries	Dia da semana abreviado	Día de la semana abreviado	Jour de la semaine abrégé	
+Hour, 00 to 23	tr_menu.cpp:kEntries	Hora, 00 a 23	Hora, 00 a 23	Heure, 00 à 23	
+Hour, 01 to 12	tr_menu.cpp:kEntries	Hora, 01 a 12	Hora, 01 a 12	Heure, 01 à 12	
+AM or PM	tr_menu.cpp:kEntries	AM ou PM	AM o PM	AM ou PM	
+Minute	tr_menu.cpp:kEntries	Minuto	Minuto	Minute	
+Second	tr_menu.cpp:kEntries	Segundo	Segundo	Seconde	
+Milliseconds	tr_menu.cpp:kEntries	Milissegundos	Milisegundos	Millisecondes	
+The look's preset name	tr_menu.cpp:kEntries	Nome do preset do visual	Nombre del preajuste del estilo	Nom du préréglage du rendu	
+Look on or off	tr_menu.cpp:kEntries	Visual ligado ou desligado	Estilo activado o desactivado	Rendu activé ou désactivé	
+Screenshot or Video	tr_menu.cpp:kEntries	Print ou vídeo	Captura o vídeo	Capture ou vidéo	
+Clip number of a long video	tr_menu.cpp:kEntries	Número do trecho de um vídeo longo	Número de fragmento de un vídeo largo	Numéro de segment d'une longue vidéo	
+Picture width	tr_menu.cpp:kEntries	Largura da imagem	Ancho de la imagen	Largeur de l'image	
+Picture height	tr_menu.cpp:kEntries	Altura da imagem	Alto de la imagen	Hauteur de l'image	
 Choose a folder for the screenshots	tr_menu.cpp:kEntries	Escolha uma pasta para os prints	Elige una carpeta para las capturas	Choisissez un dossier pour les captures	
 Choose another folder for the screenshots	tr_menu.cpp:kEntries	Escolher outra pasta para os prints	Elegir otra carpeta para las capturas	Choisir un autre dossier pour les captures	
+Choose another folder for the videos	tr_menu.cpp:kEntries	Escolher outra pasta para os vídeos	Elegir otra carpeta para los vídeos	Choisir un autre dossier pour les vidéos	
+Choose a folder for the videos	tr_menu.cpp:kEntries	Escolha uma pasta para os vídeos	Elige una carpeta para los vídeos	Choisissez un dossier pour les vidéos	
+No folder set	tr_menu.cpp:kEntries	Nenhuma pasta definida	Ninguna carpeta definida	Aucun dossier défini	
+Type a folder	tr_menu.cpp:kEntries	Digitar uma pasta	Escribir una carpeta	Saisir un dossier	
+Folder path	tr_menu.cpp:kEntries	Caminho da pasta	Ruta de la carpeta	Chemin du dossier	
+Hover the box for the tokens; applies when you leave the box	tr_menu.cpp:kEntries	Passe o mouse na caixa para ver os códigos; vale quando você sai da caixa	Pasa el ratón por el cuadro para ver los códigos; se aplica al salir del cuadro	Survolez le champ pour voir les codes ; s'applique quand vous quittez le champ	
 The chosen screenshots folder is not available; saved in the game's Screenshots folder	tr_menu.cpp:kEntries	A pasta escolhida para os prints não está disponível; salvo na pasta Screenshots do jogo	La carpeta elegida para las capturas no está disponible; guardada en la carpeta Screenshots del juego	Le dossier choisi pour les captures n'est pas disponible ; enregistrée dans le dossier Screenshots du jeu	
 Next to the photos the game takes, in Documents > Electronic Arts > The Sims 3 > Screenshots	tr_menu.cpp:kEntries	Junto às fotos do jogo, em Documentos > Electronic Arts > The Sims 3 > Screenshots	Junto a las fotos del juego, en Documentos > Electronic Arts > The Sims 3 > Screenshots	À côté des photos du jeu, dans Documents > Electronic Arts > The Sims 3 > Screenshots	
 Kept apart from the game's photos, in Documents > Electronic Arts > The Sims 3 > Apex Radiance > Screenshots	tr_menu.cpp:kEntries	Separadas das fotos do jogo, em Documentos > Electronic Arts > The Sims 3 > Apex Radiance > Screenshots	Separadas de las fotos del juego, en Documentos > Electronic Arts > The Sims 3 > Apex Radiance > Screenshots	À part des photos du jeu, dans Documents > Electronic Arts > The Sims 3 > Apex Radiance > Screenshots	
-Hides the game interface for the photo, then restores it; turn off to include it	tr_menu.cpp:kEntries	Esconde a interface do jogo durante a foto e a restaura depois; desative para incluí-la	Oculta la interfaz del juego durante la foto y la restaura después; desactiva para incluirla	Masque l'interface du jeu pour la photo, puis la rétablit ; désactivez pour l'inclure	
 Escape cancels the current action	tr_menu.cpp:kEntries	Esc cancela a ação atual	Esc cancela la acción actual	Échap annule l'action en cours	
 Diagnostic: dumps the draw calls of 2 frames to ApexRadiance_FrameCapture.txt (shortcut in Settings > Shortcuts).	tr_menu.cpp:kEntries	Diagnóstico: grava as chamadas de desenho de 2 quadros em ApexRadiance_FrameCapture.txt (atalho em Configurações > Atalhos).	Diagnóstico: vuelca las llamadas de dibujo de 2 fotogramas a ApexRadiance_FrameCapture.txt (atajo en Ajustes > Atajos).	Diagnostic : enregistre les appels de rendu de 2 images dans ApexRadiance_FrameCapture.txt (raccourci dans Paramètres > Raccourcis).	
 Some space around the focus stays sharp	tr_menu.cpp:kEntries	Um pouco ao redor do foco fica nítido	Un poco alrededor del enfoque queda nítido	Un peu d'espace autour du point net reste net	
@@ -424,7 +462,6 @@ The default; a wide sharp zone around the focus	tr_menu.cpp:kEntries	O padrão; 
 The blur starts at a middle distance	tr_menu.cpp:kEntries	O desfoque começa a uma distância média	El desenfoque empieza a una distancia media	Le flou commence à mi-distance	
 The default; smoother	tr_menu.cpp:kEntries	O padrão; mais suave	El predeterminado; más suave	Par défaut ; plus doux	
 Smoother still	tr_menu.cpp:kEntries	Ainda mais suave	Aún más suave	Encore plus doux	
-Hide game UI in screenshots	tr_menu.cpp:kEntries	Ocultar a interface do jogo nas fotos	Ocultar la interfaz del juego en las fotos	Masquer l'interface du jeu dans les photos	
 SCREENSHOTS	tr_menu.cpp:kEntries	CAPTURAS	CAPTURAS	CAPTURES	
 Take a filtered screenshot	tr_menu.cpp:kEntries	Tirar uma captura com filtros	Tomar una captura con filtros	Prendre une capture avec les filtres	
 Saves the finished game image after Apex's visual effects	tr_menu.cpp:kEntries	Salva a imagem final do jogo após os efeitos visuais do Apex	Guarda la imagen final del juego después de los efectos visuales de Apex	Enregistre l'image finale du jeu après les effets visuels d'Apex	
@@ -718,8 +755,6 @@ Assigned by the selected preset	tr_menu.cpp:kEntries	Definido pelo preset seleci
 No Apex shortcut assigned	tr_menu.cpp:kEntries	Nenhum atalho do Apex atribuído	No hay ningún atajo de Apex asignado	Aucun raccourci Apex attribué	
 Core actions	tr_menu.cpp:kEntries	Ações principais	Acciones principales	Actions principales	
 Shortcuts used most often	tr_menu.cpp:kEntries	Atalhos usados com mais frequência	Atajos más utilizados	Raccourcis les plus utilisés	
-Screenshot capture	tr_menu.cpp:kEntries	Captura de tela	Captura de pantalla	Capture d'écran	
-Save the finished game image with Apex's active effects	tr_menu.cpp:kEntries	Salva a imagem final do jogo com os efeitos ativos do Apex	Guarda la imagen final del juego con los efectos activos de Apex	Enregistre l'image finale du jeu avec les effets actifs d'Apex	
 Saves one filtered PNG in the game's Documents > Electronic Arts > The Sims 3 > Screenshots folder	tr_menu.cpp:kEntries	Salva um PNG com filtros na pasta Documentos > Electronic Arts > The Sims 3 > Screenshots do jogo	Guarda un PNG con filtros en la carpeta Documentos > Electronic Arts > The Sims 3 > Screenshots del juego	Enregistre un PNG filtré dans le dossier Documents > Electronic Arts > The Sims 3 > Screenshots du jeu	
 F10 hides the game UI for the shot; Ctrl+Shift+F10 still compares Apex effects	tr_menu.cpp:kEntries	F10 oculta a interface do jogo na captura; Ctrl+Shift+F10 continua comparando os efeitos do Apex	F10 oculta la interfaz del juego en la captura; Ctrl+Shift+F10 sigue comparando los efectos de Apex	F10 masque l'interface du jeu pour la capture ; Ctrl+Shift+F10 compare toujours les effets d'Apex	
 While Apex is open	tr_menu.cpp:kEntries	Com o Apex aberto	Con Apex abierto	Quand Apex est ouvert	
@@ -745,6 +780,8 @@ Windows keys are reserved by Windows	tr_menu.cpp:kEntries	As teclas Windows são
 Press the keys…	tr_menu.cpp:kEntries	Aperte as teclas…	Pulsa las teclas…	Appuyez sur les touches…	
 Click, then press the new combination (Esc cancels)	tr_menu.cpp:kEntries	Clique e aperte a nova combinação (Esc cancela)	Haz clic y pulsa la nueva combinación (Esc cancela)	Cliquez, puis appuyez sur la nouvelle combinaison (Esc annule)	
 Press the new combination now; Esc cancels	tr_menu.cpp:kEntries	Aperte a nova combinação agora; Esc cancela	Pulsa la nueva combinación ahora; Esc cancela	Appuyez maintenant sur la nouvelle combinaison ; Esc annule	
+Press the new combination now; Esc cancels, Delete removes the key	tr_menu.cpp:kEntries	Aperte a nova combinação agora; Esc cancela, Delete remove a tecla	Pulsa la nueva combinación ahora; Esc cancela, Delete quita la tecla	Appuyez maintenant sur la nouvelle combinaison ; Esc annule, Delete retire la touche	
+Only with Recorder set to Another app: Apex presses it to start Xbox Game Bar, OBS or ShadowPlay	tr_menu.cpp:kEntries	Só com Gravador em Outro aplicativo: o Apex aperta esta tecla para iniciar o Xbox Game Bar, o OBS ou o ShadowPlay	Solo con Grabador en Otra aplicación: Apex la pulsa para iniciar Xbox Game Bar, OBS o ShadowPlay	Seulement avec Enregistreur sur Une autre application : Apex appuie dessus pour lancer la Xbox Game Bar, OBS ou ShadowPlay	
 Insert alone opens Sims3SettingsSetter's menu	tr_menu.cpp:kEntries	Insert sozinho abre o menu do Sims3SettingsSetter	Insert solo abre el menú de Sims3SettingsSetter	Insert seul ouvre le menu de Sims3SettingsSetter	
 Ctrl+Shift+C is the game's cheat console	tr_menu.cpp:kEntries	Ctrl+Shift+C é o console de cheats do jogo	Ctrl+Shift+C es la consola de trucos del juego	Ctrl+Maj+C est la console de triche du jeu	
 That combination belongs to Windows	tr_menu.cpp:kEntries	Essa combinação é do Windows	Esa combinación es de Windows	Cette combinaison appartient à Windows	
@@ -896,7 +933,11 @@ Restart host: adapted from Dalexlol's wrapper in sims3-modernization.	tr_menu.cp
 Thanks to @boringbones for testing every build.	tr_menu.cpp:kEntries	Obrigado a @boringbones por testar cada build.	Gracias a @boringbones por probar cada build.	Merci à @boringbones d'avoir testé chaque build.	
 FidelityFX CAS: AMD (MIT).	tr_menu.cpp:kEntries	FidelityFX CAS: AMD (MIT).	FidelityFX CAS: AMD (MIT).	FidelityFX CAS : AMD (MIT).	
 Upper-floor ground light: Arro's technique, adapted in Apex Radiance.	tr_menu.cpp:kEntries	Luz dos andares superiores no chão: técnica de Arro, adaptada no Apex Radiance.	Luz de los pisos superiores en el suelo: técnica de Arro, adaptada en Apex Radiance.	Lumière des étages supérieurs au sol : technique d'Arro, adaptée dans Apex Radiance.	
-Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC).	tr_menu.cpp:kEntries	Bibliotecas e licenças: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), ícones Lucide (ISC).	Bibliotecas y licencias: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), iconos Lucide (ISC).	Bibliothèques et licences : Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), icônes Lucide (ISC).	
+Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), miniz (MIT), Lucide icons (ISC).	tr_menu.cpp:kEntries	Bibliotecas e licenças: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), miniz (MIT), ícones Lucide (ISC).	Bibliotecas y licencias: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), miniz (MIT), iconos Lucide (ISC).	Bibliothèques et licences : Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), miniz (MIT), icônes Lucide (ISC).	
+ReShade shaders in Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).	tr_menu.cpp:kEntries	Shaders do ReShade em Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).	Shaders de ReShade en Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).	Shaders ReShade de Looks : CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).	
+ReShade FX compiler: crosire (BSD-3-Clause).	tr_menu.cpp:kEntries	Compilador ReShade FX: crosire (BSD-3-Clause).	Compilador ReShade FX: crosire (BSD-3-Clause).	Compilateur ReShade FX : crosire (BSD-3-Clause).	
+Looks and Capture: contributed by @ModestPixels.	tr_menu.cpp:kEntries	Looks e Capture: contribuição de @ModestPixels.	Looks y Capture: contribución de @ModestPixels.	Looks et Capture : contribution de @ModestPixels.	
+Third-party licenses	tr_menu.cpp:kEntries	Licenças de terceiros	Licencias de terceros	Licences tierces	
 Welcome · step {} of {}	tr_menu.cpp:kEntries	Boas-vindas · passo {} de {}	Bienvenida · paso {} de {}	Bienvenue · étape {} sur {}	{} {}
 A companion mod by sims3fiend	tr_menu.cpp:kEntries	Um mod parceiro do sims3fiend	Un mod complementario de sims3fiend	Un mod compagnon de sims3fiend	
 Installed; you're all set	tr_menu.cpp:kEntries	Instalado; está tudo pronto	Instalado; todo listo	Installé ; tout est prêt	
@@ -1072,6 +1113,154 @@ Effects	tr_menu.cpp:kEntries	Efeitos	Efectos	Effets
 Turns every page below on or off; each page remembers its own options	tr_menu.cpp:kEntries	Liga ou desliga todas as páginas abaixo; cada uma lembra suas opções	Activa o desactiva todas las páginas de abajo; cada una recuerda sus opciones	Active ou désactive toutes les pages ci-dessous ; chacune garde ses options	
 You can turn this note off in Performance › Memory handling	tr_menu.cpp:kEntries	Você pode desligar este aviso em Desempenho › Gerenciamento de memória	Puedes desactivar este aviso en Rendimiento › Gestión de memoria	Vous pouvez désactiver cet avis dans Performances › Gestion de la mémoire	
 With the RTX Remix bridge, fullscreen runs as Borderless	tr_menu.cpp:kEntries	Com o bridge do RTX Remix, a tela cheia roda como Sem bordas	Con el puente RTX Remix, la pantalla completa funciona como Sin bordes	Avec le pont RTX Remix, le plein écran fonctionne en mode Sans bordure	
+Record a video	tr_menu.cpp:kEntries	Gravar um vídeo	Grabar un vídeo	Enregistrer une vidéo	
+Press once to start, again to stop	tr_menu.cpp:kEntries	Pressione uma vez para iniciar e de novo para parar	Pulsa una vez para empezar y otra para parar	Appuyez une fois pour démarrer, à nouveau pour arrêter	
+File name	tr_menu.cpp:kEntries	Nome do arquivo	Nombre del archivo	Nom du fichier	
+Date, time and look name; hover the box for the tokens	tr_menu.cpp:kEntries	Data, hora e nome do visual; passe o mouse na caixa para ver os códigos	Fecha, hora y nombre del estilo; pasa el ratón por el cuadro para ver los códigos	Date, heure et nom du rendu ; survolez le champ pour voir les codes	
+File type	tr_menu.cpp:kEntries	Tipo de arquivo	Tipo de archivo	Type de fichier	
+Format	tr_menu.cpp:kEntries	Formato	Formato	Format	
+{}% size	tr_menu.cpp:kEntries	{}% do tamanho	{}% del tamaño	{} % de la taille	{}
+{} per press	tr_menu.cpp:kEntries	{} por toque	{} por pulsación	{} par appui	{}
+timer on screen	tr_menu.cpp:kEntries	cronômetro na tela	temporizador en pantalla	minuteur à l'écran	
+PNG keeps every detail; JPG files are smaller	tr_menu.cpp:kEntries	PNG mantém todos os detalhes; arquivos JPG são menores	PNG conserva todos los detalles; los archivos JPG son más pequeños	Le PNG garde tous les détails ; les fichiers JPG sont plus petits	
+JPG quality	tr_menu.cpp:kEntries	Qualidade do JPG	Calidad del JPG	Qualité du JPG	
+Higher keeps more detail and makes larger files	tr_menu.cpp:kEntries	Mais alto mantém mais detalhes e gera arquivos maiores	Más alto conserva más detalle y crea archivos más grandes	Plus haut garde plus de détails et crée des fichiers plus lourds	
+Of the game's screen size	tr_menu.cpp:kEntries	Do tamanho da tela do jogo	Del tamaño de la pantalla del juego	De la taille de l'écran du jeu	
+Include the Apex menu	tr_menu.cpp:kEntries	Incluir o menu do Apex	Incluir el menú de Apex	Inclure le menu Apex	
+When the menu is open, it is in the picture	tr_menu.cpp:kEntries	Com o menu aberto, ele aparece na foto	Con el menú abierto, aparece en la imagen	Quand le menu est ouvert, il est sur l'image	
+More than one takes a quick series	tr_menu.cpp:kEntries	Mais de uma tira uma sequência rápida	Más de una toma una serie rápida	Plus d'une prend une rafale	
+Time between pictures	tr_menu.cpp:kEntries	Tempo entre as fotos	Tiempo entre imágenes	Temps entre les images	
+In milliseconds	tr_menu.cpp:kEntries	Em milissegundos	En milisegundos	En millisecondes	
+Crash-safe keeps the video if the game crashes; MKV is made from it when the video stops	tr_menu.cpp:kEntries	O seguro contra falhas guarda o vídeo se o jogo travar; o MKV é feito dele quando o vídeo para	El seguro ante cierres conserva el vídeo si el juego se cierra; el MKV se crea a partir de él al parar	Le mode sans perte garde la vidéo si le jeu plante ; le MKV en est tiré à l'arrêt de la vidéo	
+MKV	tr_menu.cpp:kEntries	MKV	MKV	MKV	
+Keep the MP4 too	tr_menu.cpp:kEntries	Manter também o MP4	Conservar también el MP4	Garder aussi le MP4	
+Saves the same video as MP4 next to the MKV	tr_menu.cpp:kEntries	Salva o mesmo vídeo em MP4 ao lado do MKV	Guarda el mismo vídeo en MP4 junto al MKV	Enregistre la même vidéo en MP4 à côté du MKV	
+New clip every	tr_menu.cpp:kEntries	Novo clipe a cada	Nuevo clip cada	Nouveau clip tous les	
+Saves the clip at this size and records on in a new file	tr_menu.cpp:kEntries	Salva o clipe neste tamanho e continua gravando num novo arquivo	Guarda el clip a este tamaño y sigue grabando en un archivo nuevo	Enregistre le clip à cette taille et continue dans un nouveau fichier	
+Set in the settings file: {} MB	tr_menu.cpp:kEntries	Definido no arquivo de configurações: {} MB	Definido en el archivo de ajustes: {} MB	Défini dans le fichier de réglages : {} Mo	{}
+500 MB	tr_menu.cpp:kEntries	500 MB	500 MB	500 Mo	
+1 GB	tr_menu.cpp:kEntries	1 GB	1 GB	1 Go	
+2 GB	tr_menu.cpp:kEntries	2 GB	2 GB	2 Go	
+4 GB	tr_menu.cpp:kEntries	4 GB	4 GB	4 Go	
+8 GB	tr_menu.cpp:kEntries	8 GB	8 GB	8 Go	
+JPG	tr_menu.cpp:kEntries	JPG	JPG	JPG	
+PNG	tr_menu.cpp:kEntries	PNG	PNG	PNG	
+MP4	tr_menu.cpp:kEntries	MP4	MP4	MP4	
+No key	tr_menu.cpp:kEntries	Sem tecla	Sin tecla	Aucune touche	
+Include the mouse pointer	tr_menu.cpp:kEntries	Incluir o ponteiro do mouse	Incluir el puntero del ratón	Inclure le pointeur de la souris	
+Where it was on screen, at the picture's size	tr_menu.cpp:kEntries	Onde estava na tela, no tamanho da foto	Donde estaba en pantalla, al tamaño de la imagen	Là où il était à l'écran, à la taille de l'image	
+The pointer moves in the video as on screen	tr_menu.cpp:kEntries	O ponteiro se move no vídeo como na tela	El puntero se mueve en el vídeo como en pantalla	Le pointeur bouge dans la vidéo comme à l'écran	
+GShade	tr_menu.cpp:kEntries	GShade	GShade	GShade	
+Own file	tr_menu.cpp:kEntries	Arquivo próprio	Archivo propio	Fichier perso	
+Plays with each picture and when a video starts and stops	tr_menu.cpp:kEntries	Toca a cada foto e quando um vídeo começa e termina	Suena con cada imagen y al empezar y terminar un vídeo	Joué à chaque image et au début et à la fin d'une vidéo	
+Sound file	tr_menu.cpp:kEntries	Arquivo de som	Archivo de sonido	Fichier son	
+Full path of a .wav file	tr_menu.cpp:kEntries	Caminho completo de um arquivo .wav	Ruta completa de un archivo .wav	Chemin complet d'un fichier .wav	
+Recorder	tr_menu.cpp:kEntries	Gravador	Grabador	Enregistreur	
+Another app	tr_menu.cpp:kEntries	Outro aplicativo	Otra aplicación	Une autre application	
+Another app: Apex presses its key (Xbox Game Bar, OBS)	tr_menu.cpp:kEntries	Outro aplicativo: o Apex pressiona a tecla dele (Xbox Game Bar, OBS)	Otra aplicación: Apex pulsa su tecla (Xbox Game Bar, OBS)	Autre application : Apex appuie sur sa touche (Xbox Game Bar, OBS)	
+The other app's key	tr_menu.cpp:kEntries	Tecla do outro aplicativo	Tecla de la otra aplicación	Touche de l'autre application	
+The other app's key is set on the Shortcuts tab	tr_menu.cpp:kEntries	A tecla do outro aplicativo fica na aba Atalhos	La tecla de la otra aplicación se define en la pestaña Atajos	La touche de l'autre application se règle dans l'onglet Raccourcis	
+Larger looks sharper and costs more speed	tr_menu.cpp:kEntries	Maior fica mais nítido e pesa mais no jogo	Más grande se ve más nítido y cuesta más rendimiento	Plus grand est plus net et coûte plus de fluidité	
+Frames per second	tr_menu.cpp:kEntries	Quadros por segundo	Fotogramas por segundo	Images par seconde	
+60 is smoothest and costs the most speed	tr_menu.cpp:kEntries	60 é o mais fluido e o que mais pesa	60 es lo más fluido y lo que más cuesta	60 est le plus fluide et coûte le plus	
+Crash-safe MP4	tr_menu.cpp:kEntries	MP4 seguro contra travamentos	MP4 a prueba de cierres	MP4 protégé des plantages	
+Compression	tr_menu.cpp:kEntries	Compressão	Compresión	Compression	
+HEVC files are smaller; it needs a newer graphics card	tr_menu.cpp:kEntries	Arquivos HEVC são menores; exige uma placa de vídeo mais nova	Los archivos HEVC son más pequeños; necesita una tarjeta gráfica reciente	Les fichiers HEVC sont plus petits ; il faut une carte graphique récente	
+Only The Sims 3, not music or chat apps	tr_menu.cpp:kEntries	Só The Sims 3, sem música ou apps de chat	Solo The Sims 3, sin música ni apps de chat	Seulement Les Sims 3, sans musique ni applis de discussion	
+Hides the game interface until the video stops	tr_menu.cpp:kEntries	Oculta a interface do jogo até o vídeo parar	Oculta la interfaz del juego hasta que el vídeo termina	Masque l'interface du jeu jusqu'à l'arrêt de la vidéo	
+When the menu is open, it is in the video	tr_menu.cpp:kEntries	Com o menu aberto, ele aparece no vídeo	Con el menú abierto, aparece en el vídeo	Quand le menu est ouvert, il est dans la vidéo	
+Stop after	tr_menu.cpp:kEntries	Parar depois de	Parar después de	Arrêter après	
+0 records until you stop it	tr_menu.cpp:kEntries	0 grava até você parar	0 graba hasta que lo pares	0 enregistre jusqu'à ce que vous arrêtiez	
+Stop at file size	tr_menu.cpp:kEntries	Parar no tamanho de arquivo	Parar al llegar a un tamaño	Arrêter à une taille de fichier	
+0 has no limit	tr_menu.cpp:kEntries	0 não tem limite	0 no tiene límite	0 n'a pas de limite	
+A short note when a picture or video is saved	tr_menu.cpp:kEntries	Um aviso curto quando uma foto ou vídeo é salvo	Un aviso breve al guardar una imagen o un vídeo	Une courte note quand une image ou une vidéo est enregistrée	
+Show a recording timer	tr_menu.cpp:kEntries	Mostrar um cronômetro de gravação	Mostrar un temporizador de grabación	Afficher un minuteur d'enregistrement	
+Time and file size on screen while recording	tr_menu.cpp:kEntries	Tempo e tamanho do arquivo na tela durante a gravação	Tiempo y tamaño del archivo en pantalla mientras graba	Durée et taille du fichier à l'écran pendant l'enregistrement	
+Timer position	tr_menu.cpp:kEntries	Posição do cronômetro	Posición del temporizador	Position du minuteur	
+Where the timer sits on the screen	tr_menu.cpp:kEntries	Onde o cronômetro fica na tela	Dónde aparece el temporizador en la pantalla	Où le minuteur se place à l'écran	
+Top left	tr_menu.cpp:kEntries	Superior esquerdo	Arriba a la izquierda	En haut à gauche	
+Top center	tr_menu.cpp:kEntries	Superior central	Arriba en el centro	En haut au centre	
+Top right	tr_menu.cpp:kEntries	Superior direito	Arriba a la derecha	En haut à droite	
+Bottom left	tr_menu.cpp:kEntries	Inferior esquerdo	Abajo a la izquierda	En bas à gauche	
+Bottom right	tr_menu.cpp:kEntries	Inferior direito	Abajo a la derecha	En bas à droite	
+Timer size	tr_menu.cpp:kEntries	Tamanho do cronômetro	Tamaño del temporizador	Taille du minuteur	
+100 is the size of Apex notes	tr_menu.cpp:kEntries	100 é o tamanho das notas do Apex	100 es el tamaño de las notas de Apex	100 correspond à la taille des notes d'Apex	
+Timer opacity	tr_menu.cpp:kEntries	Opacidade do cronômetro	Opacidad del temporizador	Opacité du minuteur	
+Lower lets more of the game show through	tr_menu.cpp:kEntries	Menor deixa o jogo aparecer mais	Más bajo deja ver más el juego	Plus bas laisse mieux voir le jeu	
+Pulse the red dot	tr_menu.cpp:kEntries	Pulsar o ponto vermelho	Hacer latir el punto rojo	Faire pulser le point rouge	
+The dot fades in and out while recording	tr_menu.cpp:kEntries	O ponto aparece e some durante a gravação	El punto aparece y se desvanece mientras graba	Le point apparaît et s'estompe pendant l'enregistrement	
+Show the file size	tr_menu.cpp:kEntries	Mostrar o tamanho do arquivo	Mostrar el tamaño del archivo	Afficher la taille du fichier	
+How large the video is so far	tr_menu.cpp:kEntries	O tamanho do vídeo até agora	Lo que ocupa el vídeo hasta ahora	La taille actuelle de la vidéo	
+Show the stop key	tr_menu.cpp:kEntries	Mostrar a tecla de parar	Mostrar la tecla para detener	Afficher la touche d'arrêt	
+The key that stops the video	tr_menu.cpp:kEntries	A tecla que para o vídeo	La tecla que detiene el vídeo	La touche qui arrête la vidéo	
+Always show hours	tr_menu.cpp:kEntries	Sempre mostrar as horas	Mostrar siempre las horas	Toujours afficher les heures	
+0:02:15 instead of 02:15	tr_menu.cpp:kEntries	0:02:15 em vez de 02:15	0:02:15 en lugar de 02:15	0:02:15 au lieu de 02:15	
+Red frame while recording	tr_menu.cpp:kEntries	Moldura vermelha ao gravar	Marco rojo al grabar	Cadre rouge pendant l'enregistrement	
+A thin red border around the screen	tr_menu.cpp:kEntries	Uma borda vermelha fina ao redor da tela	Un borde rojo fino alrededor de la pantalla	Une fine bordure rouge autour de l'écran	
+Timer in the video too	tr_menu.cpp:kEntries	Cronômetro também no vídeo	Temporizador también en el vídeo	Minuteur aussi dans la vidéo	
+An open Apex menu is then in the video too	tr_menu.cpp:kEntries	Um menu do Apex aberto também aparece no vídeo	Un menú de Apex abierto también sale en el vídeo	Un menu Apex ouvert sera aussi dans la vidéo	
+Warn before the limit	tr_menu.cpp:kEntries	Avisar antes do limite	Avisar antes del límite	Avertir avant la limite	
+The timer turns amber and shows the time left; 0 is off	tr_menu.cpp:kEntries	O cronômetro fica âmbar e mostra o tempo restante; 0 desliga	El temporizador se vuelve ámbar y muestra el tiempo restante; 0 lo apaga	Le minuteur passe à l'ambre et affiche le temps restant ; 0 le désactive	
+Video saved: {} · {} MB	tr_menu.cpp:kEntries	Vídeo salvo: {} · {} MB	Vídeo guardado: {} · {} MB	Vidéo enregistrée : {} · {} Mo	{} {}
+{} left	tr_menu.cpp:kEntries	faltam {}	quedan {}	{} restantes	{}
+{} stops	tr_menu.cpp:kEntries	{} para	{} detiene	{} arrête	{}
+Screenshots and videos with your effects	tr_menu.cpp:kEntries	Capturas de tela e vídeos com seus efeitos	Capturas y vídeos con tus efectos	Captures et vidéos avec vos effets	
+Screenshots	tr_menu.cpp:kEntries	Capturas de tela	Capturas	Captures d'écran	
+Video	tr_menu.cpp:kEntries	Vídeo	Vídeo	Vidéo	
+Take one	tr_menu.cpp:kEntries	Tirar uma	Tomar una	En prendre une	
+The other app's key is not allowed or the game is not in front; choose a key with Ctrl, Alt, Shift or Win	tr_menu.cpp:kEntries	A tecla do outro app não é permitida ou o jogo não está em primeiro plano; escolha uma tecla com Ctrl, Alt, Shift ou Win	La tecla de la otra app no está permitida o el juego no está en primer plano; elige una tecla con Ctrl, Alt, Shift o Win	La touche de l'autre appli n'est pas autorisée ou le jeu n'est pas au premier plan ; choisissez une touche avec Ctrl, Alt, Shift ou Win	
+The other app is recording ({})	tr_menu.cpp:kEntries	O outro app está gravando ({})	La otra app está grabando ({})	L'autre appli enregistre ({})	{}
+The chosen videos folder is not available; saved in the game's videos folder	tr_menu.cpp:kEntries	A pasta de vídeos escolhida não está disponível; salvo na pasta de vídeos do jogo	La carpeta de vídeos elegida no está disponible; se guardó en la carpeta de vídeos del juego	Le dossier de vidéos choisi n'est pas disponible ; enregistrée dans le dossier de vidéos du jeu	
+Could not create the videos folder	tr_menu.cpp:kEntries	Não foi possível criar a pasta de vídeos	No se pudo crear la carpeta de vídeos	Impossible de créer le dossier de vidéos	
+The video could not start; the reason is in the log	tr_menu.cpp:kEntries	O vídeo não pôde começar; o motivo está no log	El vídeo no pudo empezar; el motivo está en el registro	La vidéo n'a pas pu démarrer ; la raison est dans le journal	
+The other app stopped recording; the video is in its own folder	tr_menu.cpp:kEntries	O outro app parou de gravar; o vídeo está na pasta dele	La otra app dejó de grabar; el vídeo está en su propia carpeta	L'autre appli a arrêté l'enregistrement ; la vidéo est dans son propre dossier	
+Saving the video...	tr_menu.cpp:kEntries	Salvando o vídeo...	Guardando el vídeo...	Enregistrement de la vidéo...	
+Saving the video…	tr_menu.cpp:kEntries	Salvando o vídeo…	Guardando el vídeo…	Enregistrement de la vidéo…	
+The video could not be saved; the reason is in the log	tr_menu.cpp:kEntries	Não foi possível salvar o vídeo; o motivo está no log	No se pudo guardar el vídeo; el motivo está en el registro	La vidéo n'a pas pu être enregistrée ; la raison est dans le journal	
+A number that goes up by one with each file	tr_menu.cpp:kEntries	Um número que aumenta em um a cada arquivo	Un número que sube de uno en uno con cada archivo	Un nombre qui augmente de un à chaque fichier	
+Last: {}	tr_menu.cpp:kEntries	Último: {}	Último: {}	Dernier : {}	{}
+Where	tr_menu.cpp:kEntries	Onde	Dónde	Emplacement	
+Other	tr_menu.cpp:kEntries	Outra	Otra	Autre	
+Open the folder	tr_menu.cpp:kEntries	Abrir a pasta	Abrir la carpeta	Ouvrir le dossier	
+Save to	tr_menu.cpp:kEntries	Salvar em	Guardar en	Enregistrer dans	
+Folder	tr_menu.cpp:kEntries	Pasta	Carpeta	Dossier	
+When saved	tr_menu.cpp:kEntries	Ao salvar	Al guardar	À l'enregistrement	
+Sound	tr_menu.cpp:kEntries	Som	Sonido	Son	
+Note when saved	tr_menu.cpp:kEntries	Aviso ao salvar	Aviso al guardar	Note à l'enregistrement	
+Videos need Windows' Media Feature Pack, which this Windows does not have	tr_menu.cpp:kEntries	Os vídeos precisam do Media Feature Pack do Windows, que este Windows não tem	Los vídeos necesitan el Media Feature Pack de Windows, que este Windows no tiene	Les vidéos nécessitent le Media Feature Pack de Windows, absent de ce Windows	
+The game's own Edge Smoothing is on; turn it off to record (Options › Graphics)	tr_menu.cpp:kEntries	A Suavização de Bordas do próprio jogo está ligada; desligue para gravar (Opções › Gráficos)	El Suavizado de Bordes del propio juego está activado; desactívalo para grabar (Opciones › Gráficos)	Le Lissage des Bords du jeu est activé ; désactivez-le pour enregistrer (Options › Graphismes)	
+The game is low on free memory for a video; save and restart the game	tr_menu.cpp:kEntries	O jogo está com pouca memória livre para um vídeo; salve e reinicie o jogo	Al juego le queda poca memoria libre para un vídeo; guarda y reinicia el juego	Le jeu manque de mémoire libre pour une vidéo ; sauvegardez et redémarrez le jeu	
+In the picture	tr_menu.cpp:kEntries	Na imagem	En la imagen	Dans l'image	
+Hides the game interface for the photo, then restores it	tr_menu.cpp:kEntries	Esconde a interface do jogo para a foto e depois a mostra de novo	Oculta la interfaz del juego para la foto y luego la restaura	Masque l'interface du jeu pour la photo, puis la rétablit	
+With	tr_menu.cpp:kEntries	Com	Con	Avec	
+Without	tr_menu.cpp:kEntries	Sem	Sin	Sans	
+Both	tr_menu.cpp:kEntries	Os dois	Ambas	Les deux	
+Look	tr_menu.cpp:kEntries	Visual	Estilo	Rendu	
+Both also saves the picture without it	tr_menu.cpp:kEntries	Os dois também salva a imagem sem o visual	Ambas también guarda la imagen sin el estilo	Les deux enregistre aussi l'image sans le rendu	
+Also in the picture	tr_menu.cpp:kEntries	Também na imagem	También en la imagen	Aussi dans l'image	
+Save the look's preset too	tr_menu.cpp:kEntries	Salvar também o preset do visual	Guardar también el preajuste del estilo	Enregistrer aussi le préréglage du rendu	
+A copy of the look's .ini next to the picture	tr_menu.cpp:kEntries	Uma cópia do .ini do visual ao lado da imagem	Una copia del .ini del estilo junto a la imagen	Une copie du .ini du rendu à côté de l'image	
+A copy of the look's .ini next to the video	tr_menu.cpp:kEntries	Uma cópia do .ini do visual ao lado do vídeo	Una copia del .ini del estilo junto al vídeo	Une copie du .ini du rendu à côté de la vidéo	
+Series	tr_menu.cpp:kEntries	Sequência	Ráfaga	Rafale	
+Pictures per press	tr_menu.cpp:kEntries	Fotos por toque	Imágenes por pulsación	Images par appui	
+Recording {} · {} MB	tr_menu.cpp:kEntries	Gravando {} · {} MB	Grabando {} · {} MB	Enregistrement {} · {} Mo	{} {}
+Recording {}	tr_menu.cpp:kEntries	Gravando {}	Grabando {}	Enregistrement {}	{}
+about {} MB a minute	tr_menu.cpp:kEntries	cerca de {} MB por minuto	unos {} MB por minuto	environ {} Mo par minute	{}
+Another app records these videos; set their folder and quality in that app	tr_menu.cpp:kEntries	Outro app grava estes vídeos; a pasta e a qualidade são definidas nele	Otra app graba estos vídeos; la carpeta y la calidad se eligen en ella	Une autre appli enregistre ces vidéos ; réglez leur dossier et leur qualité dans celle-ci	
+In the video	tr_menu.cpp:kEntries	No vídeo	En el vídeo	Dans la vidéo	
+Game sound	tr_menu.cpp:kEntries	Som do jogo	Sonido del juego	Son du jeu	
+Without records the game without your look	tr_menu.cpp:kEntries	Sem grava o jogo sem o seu visual	Sin graba el juego sin tu estilo	Sans enregistre le jeu sans votre rendu	
+Best	tr_menu.cpp:kEntries	Melhor	Mejor	Meilleure	
+{}p · {} fps · about {} MB a minute	tr_menu.cpp:kEntries	{}p · {} fps · cerca de {} MB por minuto	{}p · {} fps · unos {} MB por minuto	{}p · {} i/s · environ {} Mo par minute	{} {} {}
+Custom bitrate	tr_menu.cpp:kEntries	Taxa de bits personalizada	Tasa de bits personalizada	Débit personnalisé	
+Megabits per second; higher keeps more detail and makes larger files	tr_menu.cpp:kEntries	Megabits por segundo; mais alto guarda mais detalhes e gera arquivos maiores	Megabits por segundo; más alto conserva más detalle y crea archivos más grandes	Mégabits par seconde ; plus haut garde plus de détails et donne des fichiers plus lourds	
+Also in the video	tr_menu.cpp:kEntries	Também no vídeo	También en el vídeo	Aussi dans la vidéo	
+Length	tr_menu.cpp:kEntries	Duração	Duración	Durée	
+Timer on screen	tr_menu.cpp:kEntries	Cronômetro na tela	Temporizador en pantalla	Minuteur à l'écran	
+Looks on or off	tr_menu.cpp:kEntries	Ligar ou desligar o visual	Activar o desactivar el estilo	Activer ou désactiver le rendu	
+Switches the look off (no GPU cost) and back on	tr_menu.cpp:kEntries	Desliga o visual (sem custo na GPU) e liga de novo	Desactiva el estilo (sin coste de GPU) y lo vuelve a activar	Désactive le rendu (sans coût GPU) puis le réactive	
+The preset and its files are exported together as one ZIP file.	tr_menu.cpp:kEntries	O preset e os arquivos dele são exportados juntos em um arquivo ZIP.	El preajuste y sus archivos se exportan juntos en un archivo ZIP.	Le préréglage et ses fichiers sont exportés ensemble dans un fichier ZIP.	
+Licenses	tr_menu.cpp:kEntries	Licenças	Licencias	Licences	
 Developer	tr_developer.inc:kDeveloperEntries	Desenvolvimento	Desarrollo	Développement	
 Start here	tr_developer.inc:kDeveloperEntries	Comece aqui	Empieza aquí	Commencer ici	
 Captures	tr_developer.inc:kDeveloperEntries	Capturas	Capturas	Captures	
@@ -2336,6 +2525,235 @@ Unavailable while the game's own Edge Smoothing is on	tr_image.cpp:kEntries	Indi
 Unavailable with the game's screen format	tr_image.cpp:kEntries	Indisponível com o formato de tela do jogo	No disponible con el formato de pantalla del juego	Indisponible avec le format d'écran du jeu	
 Unavailable: not enough video memory	tr_image.cpp:kEntries	Indisponível: memória de vídeo insuficiente	No disponible: memoria de video insuficiente	Indisponible : mémoire vidéo insuffisante	
 Unavailable on this graphics card	tr_image.cpp:kEntries	Indisponível nesta placa de vídeo	No disponible en esta tarjeta gráfica	Indisponible sur cette carte graphique	
+Preset	tr_image.cpp:kEntries	Preset	Preajuste	Préréglage	
+Run earlier	tr_image.cpp:kEntries	Rodar antes	Ejecutar antes	Exécuter plus tôt	
+Run later	tr_image.cpp:kEntries	Rodar depois	Ejecutar después	Exécuter plus tard	
+Kind	tr_image.cpp:kEntries	Tipo	Tipo	Type	
+Only shaders of this kind	tr_image.cpp:kEntries	Só shaders deste tipo	Solo shaders de este tipo	Seulement les shaders de ce type	
+All kinds	tr_image.cpp:kEntries	Todos os tipos	Todos los tipos	Tous les types	
+Sharpen	tr_image.cpp:kEntries	Nitidez	Nitidez	Netteté	
+Film & camera	tr_image.cpp:kEntries	Filme e câmera	Película y cámara	Film et caméra	
+Stylized	tr_image.cpp:kEntries	Estilizado	Estilizado	Stylisé	
+All	tr_image.cpp:kEntries	Todos	Todos	Tous	
+On	tr_image.cpp:kEntries	Ligados	Activados	Activés	
+No shader matches	tr_image.cpp:kEntries	Nenhum shader corresponde	Ningún shader coincide	Aucun shader ne correspond	
+Style	tr_image.cpp:kEntries	Estilo	Estilo	Style	
+Warm evening	tr_image.cpp:kEntries	Fim de tarde quente	Atardecer cálido	Soirée chaleureuse	
+Cinematic	tr_image.cpp:kEntries	Cinematográfico	Cinematográfico	Cinématographique	
+Soft vintage	tr_image.cpp:kEntries	Vintage suave	Vintage suave	Vintage doux	
+Save this list and its values as a .ini of your own in the Looks folder	tr_image.cpp:kEntries	Salva esta lista e seus valores como um .ini seu na pasta Looks	Guarda esta lista y sus valores como un .ini propio en la carpeta Looks	Enregistre cette liste et ses valeurs dans un .ini à vous, dans le dossier Looks	
+Pick one, or import a ReShade or GShade preset	tr_image.cpp:kEntries	Escolha um ou importe um preset do ReShade ou GShade	Elige uno o importa un preajuste de ReShade o GShade	Choisissez-en un ou importez un préréglage ReShade ou GShade	
+Copy a ReShade or GShade preset (.ini) into the Looks folder and choose it	tr_image.cpp:kEntries	Copia um preset do ReShade ou GShade (.ini) para a pasta Looks e o escolhe	Copia un preajuste de ReShade o GShade (.ini) a la carpeta Looks y lo elige	Copie un préréglage ReShade ou GShade (.ini) dans le dossier Looks et le choisit	
+Shaders in this look	tr_image.cpp:kEntries	Shaders deste visual	Shaders de este estilo	Shaders de ce rendu	
+ReShade look	tr_image.cpp:kEntries	Visual do ReShade	Estilo de ReShade	Rendu ReShade	
+Hold to see the game without the look	tr_image.cpp:kEntries	Segure para ver o jogo sem o visual	Mantén pulsado para ver el juego sin el estilo	Maintenez pour voir le jeu sans le rendu	
+A LUT is also on; both change color, so the picture may look too strong	tr_image.cpp:kEntries	Um LUT também está ligado; os dois mudam a cor, então a imagem pode ficar forte demais	También hay un LUT activado; ambos cambian el color, así que la imagen puede verse demasiado intensa	Un LUT est aussi activé ; les deux changent la couleur, l'image peut donc paraître trop forte	
+A LUT is on too	tr_image.cpp:kEntries	Um LUT também está ligado	También hay un LUT activado	Un LUT est aussi activé	
+Both change color, so the picture may look too strong	tr_image.cpp:kEntries	Os dois mudam a cor, então a imagem pode ficar forte demais	Ambos cambian el color, así que la imagen puede verse demasiado intensa	Les deux changent la couleur, l'image peut donc paraître trop forte	
+Turn off the LUT	tr_image.cpp:kEntries	Desligar o LUT	Desactivar el LUT	Désactiver le LUT	
+LUT turned off	tr_image.cpp:kEntries	LUT desligado	LUT desactivado	LUT désactivé	
+Use letters, digits and spaces for the name	tr_image.cpp:kEntries	Use letras, números e espaços no nome	Usa letras, números y espacios en el nombre	Utilisez des lettres, des chiffres et des espaces pour le nom	
+The Looks folder could not be created	tr_image.cpp:kEntries	Não foi possível criar a pasta Looks	No se pudo crear la carpeta Looks	Impossible de créer le dossier Looks	
+Could not save {}	tr_image.cpp:kEntries	Não foi possível salvar {}	No se pudo guardar {}	Impossible d'enregistrer {}	{}
+ReShade presets	tr_image.cpp:kEntries	Presets do ReShade	Preajustes de ReShade	Préréglages ReShade	
+This file can't be read as a preset	tr_image.cpp:kEntries	Este arquivo não pode ser lido como preset	Este archivo no se puede leer como preajuste	Ce fichier ne peut pas être lu comme préréglage	
+This file is not a ReShade preset	tr_image.cpp:kEntries	Este arquivo não é um preset do ReShade	Este archivo no es un preajuste de ReShade	Ce fichier n'est pas un préréglage ReShade	
+The preset could not be copied to the Looks folder	tr_image.cpp:kEntries	Não foi possível copiar o preset para a pasta Looks	No se pudo copiar el preajuste a la carpeta Looks	Impossible de copier le préréglage dans le dossier Looks	
+Imported as {}	tr_image.cpp:kEntries	Importado como {}	Importado como {}	Importé sous {}	{}
+Apex looks	tr_image.cpp:kEntries	Visuais do Apex	Estilos de Apex	Rendus d'Apex	
+My looks	tr_image.cpp:kEntries	Meus visuais	Mis estilos	Mes rendus	
+Choose a look	tr_image.cpp:kEntries	Escolha um visual	Elige un estilo	Choisissez un rendu	
+Search looks	tr_image.cpp:kEntries	Buscar visuais	Buscar estilos	Rechercher des rendus	
+No looks yet	tr_image.cpp:kEntries	Nenhum visual ainda	Aún no hay estilos	Aucun rendu pour l'instant	
+No look matches	tr_image.cpp:kEntries	Nenhum visual encontrado	Ningún estilo coincide	Aucun rendu ne correspond	
+Open the Looks folder	tr_image.cpp:kEntries	Abrir a pasta Looks	Abrir la carpeta Looks	Ouvrir le dossier Looks	
+Look changed	tr_image.cpp:kEntries	Visual alterado	Estilo cambiado	Rendu changé	
+{} of {}	tr_image.cpp:kEntries	{} de {}	{} de {}	{} sur {}	{} {}
+Put back the look's values	tr_image.cpp:kEntries	Restaurar os valores do visual	Restablecer los valores del estilo	Rétablir les valeurs du rendu	
+Quality settings ({})	tr_image.cpp:kEntries	Configurações de qualidade ({})	Ajustes de calidad ({})	Réglages de qualité ({})	{}
+0 or 1	tr_image.cpp:kEntries	0 ou 1	0 o 1	0 ou 1	
+{} to {}	tr_image.cpp:kEntries	{} a {}	{} a {}	{} à {}	{} {}
+A number	tr_image.cpp:kEntries	Um número	Un número	Un nombre	
+A value	tr_image.cpp:kEntries	Um valor	Un valor	Une valeur	
+Put back the look's settings	tr_image.cpp:kEntries	Restaurar as configurações do visual	Restablecer los ajustes del estilo	Rétablir les réglages du rendu	
+Compiling the new settings…	tr_image.cpp:kEntries	Compilando as novas configurações…	Compilando los nuevos ajustes…	Compilation des nouveaux réglages…	
+{} settings put back	tr_image.cpp:kEntries	Configurações de {} restauradas	Ajustes de {} restablecidos	Réglages de {} rétablis	{}
+{} values put back	tr_image.cpp:kEntries	Valores de {} restaurados	Valores de {} restablecidos	Valeurs de {} rétablies	{}
+Changed from the look	tr_image.cpp:kEntries	Alterado em relação ao visual	Cambiado respecto al estilo	Modifié par rapport au rendu	
+Close	tr_image.cpp:kEntries	Fechar	Cerrar	Fermer	
+Add a shader	tr_image.cpp:kEntries	Adicionar um shader	Añadir un shader	Ajouter un shader	
+Search shaders	tr_image.cpp:kEntries	Buscar shaders	Buscar shaders	Rechercher des shaders	
+Added	tr_image.cpp:kEntries	Adicionado	Añadido	Ajouté	
+Add	tr_image.cpp:kEntries	Adicionar	Añadir	Ajouter	
+{} added	tr_image.cpp:kEntries	{} adicionado	{} añadido	{} ajouté	{}
+{} (mine)	tr_image.cpp:kEntries	{} (meu)	{} (mío)	{} (le mien)	{}
+Save as a new look	tr_image.cpp:kEntries	Salvar como novo visual	Guardar como nuevo estilo	Enregistrer comme nouveau rendu	
+Save as a new look…	tr_image.cpp:kEntries	Salvar como novo visual…	Guardar como nuevo estilo…	Enregistrer comme nouveau rendu…	
+Saved in the Looks folder, then chosen	tr_image.cpp:kEntries	Salvo na pasta Looks e depois escolhido	Se guarda en la carpeta Looks y luego se elige	Enregistré dans le dossier Looks, puis choisi	
+Name of the look	tr_image.cpp:kEntries	Nome do visual	Nombre del estilo	Nom du rendu	
+A look with this name exists; saving replaces it	tr_image.cpp:kEntries	Já existe um visual com este nome; salvar vai substituí-lo	Ya existe un estilo con este nombre; guardar lo reemplaza	Un rendu porte déjà ce nom ; l'enregistrement le remplace	
+Saved as {}	tr_image.cpp:kEntries	Salvo como {}	Guardado como {}	Enregistré sous {}	{}
+Look saved	tr_image.cpp:kEntries	Visual salvo	Estilo guardado	Rendu enregistré	
+Look imported	tr_image.cpp:kEntries	Visual importado	Estilo importado	Rendu importé	
+This look can't be read: {}	tr_image.cpp:kEntries	Não foi possível ler este visual: {}	No se puede leer este estilo: {}	Ce rendu ne peut pas être lu : {}	{}
+How much of the look is applied	tr_image.cpp:kEntries	Quanto do visual é aplicado	Cuánto del estilo se aplica	Quelle part du rendu est appliquée	
+World and menus	tr_image.cpp:kEntries	Mundo e menus	Mundo y menús	Monde et menus	
+World only	tr_image.cpp:kEntries	Só o mundo	Solo el mundo	Monde seulement	
+Applies to	tr_image.cpp:kEntries	Aplica-se a	Se aplica a	S'applique à	
+Menus and loading screens can get the look too	tr_image.cpp:kEntries	Menus e telas de carregamento também podem receber o visual	Los menús y las pantallas de carga también pueden recibir el estilo	Les menus et écrans de chargement peuvent aussi recevoir le rendu	
+Interface without shaders	tr_image.cpp:kEntries	Interface sem shaders	Interfaz sin shaders	Interface sans shaders	
+Menus, the game's panels and loading screens keep their own colors	tr_image.cpp:kEntries	Menus, painéis do jogo e telas de carregamento mantêm as próprias cores	Los menús, los paneles del juego y las pantallas de carga mantienen sus colores	Les menus, les panneaux du jeu et les écrans de chargement gardent leurs couleurs	
+After Apex Color	tr_image.cpp:kEntries	Depois da Cor do Apex	Después del Color de Apex	Après la Couleur d'Apex	
+Before Apex Color	tr_image.cpp:kEntries	Antes da Cor do Apex	Antes del Color de Apex	Avant la Couleur d'Apex	
+Order	tr_image.cpp:kEntries	Ordem	Orden	Ordre	
+Where the look runs in the picture chain	tr_image.cpp:kEntries	Em que ponto da imagem o visual é aplicado	En qué punto de la imagen se aplica el estilo	À quelle étape de l'image le rendu s'applique	
+Shaders	tr_image.cpp:kEntries	Shaders	Shaders	Shaders	
+Put every value back	tr_image.cpp:kEntries	Restaurar todos os valores	Restablecer todos los valores	Rétablir toutes les valeurs	
+Every value put back	tr_image.cpp:kEntries	Todos os valores restaurados	Todos los valores restablecidos	Toutes les valeurs rétablies	
+Back to the look's list	tr_image.cpp:kEntries	Voltar à lista do visual	Volver a la lista del estilo	Revenir à la liste du rendu	
+No shader of this look can run here	tr_image.cpp:kEntries	Nenhum shader deste visual pode rodar aqui	Ningún shader de este estilo puede ejecutarse aquí	Aucun shader de ce rendu ne peut s'exécuter ici	
+Choose a look to see its shaders	tr_image.cpp:kEntries	Escolha um visual para ver os shaders dele	Elige un estilo para ver sus shaders	Choisissez un rendu pour voir ses shaders	
+{} can't run here	tr_image.cpp:kEntries	{} não podem rodar aqui	{} no pueden ejecutarse aquí	{} ne peuvent pas s'exécuter ici	{}
+No look chosen	tr_image.cpp:kEntries	Nenhum visual escolhido	Ningún estilo elegido	Aucun rendu choisi	
+Reload	tr_image.cpp:kEntries	Recarregar	Recargar	Recharger	
+Every shader you can add to a look	tr_image.cpp:kEntries	Todos os shaders que você pode adicionar a um visual	Todos los shaders que puedes añadir a un estilo	Tous les shaders que vous pouvez ajouter à un rendu	
+1 shader	tr_image.cpp:kEntries	1 shader	1 shader	1 shader	
+{} shaders	tr_image.cpp:kEntries	{} shaders	{} shaders	{} shaders	{}
+Built into Apex	tr_image.cpp:kEntries	Incluídos no Apex	Incluidos en Apex	Intégrés à Apex	
+Ports of ReShade shaders that come with Apex	tr_image.cpp:kEntries	Shaders do ReShade adaptados que já vêm com o Apex	Versiones de shaders de ReShade que vienen con Apex	Adaptations de shaders ReShade fournies avec Apex	
+Your shaders	tr_image.cpp:kEntries	Seus shaders	Tus shaders	Vos shaders	
+.fx files in the Shaders folder	tr_image.cpp:kEntries	Arquivos .fx na pasta Shaders	Archivos .fx de la carpeta Shaders	Fichiers .fx du dossier Shaders	
+Add .fx files…	tr_image.cpp:kEntries	Adicionar arquivos .fx…	Añadir archivos .fx…	Ajouter des fichiers .fx…	
+Copy .fx, .fxh and texture files into the Shaders folder	tr_image.cpp:kEntries	Copia arquivos .fx, .fxh e de textura para a pasta Shaders	Copia archivos .fx, .fxh y de texturas a la carpeta Shaders	Copie des fichiers .fx, .fxh et de textures dans le dossier Shaders	
+Open the Shaders folder	tr_image.cpp:kEntries	Abrir a pasta Shaders	Abrir la carpeta Shaders	Ouvrir le dossier Shaders	
+ReShade shaders and textures	tr_image.cpp:kEntries	Shaders e texturas do ReShade	Shaders y texturas de ReShade	Shaders et textures ReShade	
+Checking your shaders…	tr_image.cpp:kEntries	Verificando seus shaders…	Comprobando tus shaders…	Vérification de vos shaders…	
+{} shaders run in The Sims 3	tr_image.cpp:kEntries	{} shaders funcionam no The Sims 3	{} shaders funcionan en The Sims 3	{} shaders fonctionnent dans Les Sims 3	{}
+Add a built-in shader or one of your own .fx files to this look	tr_image.cpp:kEntries	Adiciona a este visual um shader do Apex ou um dos seus arquivos .fx	Añade a este estilo un shader integrado o uno de tus archivos .fx	Ajoute à ce rendu un shader intégré ou l'un de vos fichiers .fx	
+{} of {} on · {} missing	tr_image.cpp:kEntries	{} de {} ligados · {} faltando	{} de {} activados · faltan {}	{} sur {} activés · {} manquants	{} {} {}
+{} ({}): checking the file…	tr_image.cpp:kEntries	{} ({}): verificando o arquivo…	{} ({}): comprobando el archivo…	{} ({}) : vérification du fichier…	{} {}
+{} ({}): add this file to the Shaders folder	tr_image.cpp:kEntries	{} ({}): coloque este arquivo na pasta Shaders	{} ({}): añade este archivo a la carpeta Shaders	{} ({}) : ajoutez ce fichier au dossier Shaders	{} {}
+{} doesn't run in The Sims 3	tr_image.cpp:kEntries	{} não funciona no The Sims 3	{} no funciona en The Sims 3	{} ne fonctionne pas dans Les Sims 3	{}
+Check again	tr_image.cpp:kEntries	Verificar de novo	Comprobar de nuevo	Vérifier à nouveau	
+Look in the Shaders folder again and compile what changed	tr_image.cpp:kEntries	Olha a pasta Shaders de novo e compila o que mudou	Vuelve a mirar la carpeta Shaders y compila lo que cambió	Réexamine le dossier Shaders et compile ce qui a changé	
+1 file added	tr_image.cpp:kEntries	1 arquivo adicionado	1 archivo añadido	1 fichier ajouté	
+{} files added	tr_image.cpp:kEntries	{} arquivos adicionados	{} archivos añadidos	{} fichiers ajoutés	{}
+{} files added; {} refused (only .fx, .fxh and images)	tr_image.cpp:kEntries	{} arquivos adicionados; {} recusados (só .fx, .fxh e imagens)	{} archivos añadidos; {} rechazados (solo .fx, .fxh e imágenes)	{} fichiers ajoutés ; {} refusés (seulement .fx, .fxh et images)	{} {}
+All shaders found	tr_image.cpp:kEntries	Todos os shaders encontrados	Se encontraron todos los shaders	Tous les shaders ont été trouvés	
+{} still missing	tr_image.cpp:kEntries	Ainda faltam {}	Aún faltan {}	Il en manque encore {}	{}
+My look	tr_image.cpp:kEntries	Meu visual	Mi estilo	Mon rendu	
+Read the look's .ini again and compile the Shaders folder again	tr_image.cpp:kEntries	Lê o .ini do visual de novo e compila a pasta Shaders outra vez	Vuelve a leer el .ini del estilo y compila otra vez la carpeta Shaders	Relit le .ini du rendu et recompile le dossier Shaders	
+Get shader packs	tr_image.cpp:kEntries	Baixar pacotes de shaders	Descargar paquetes de shaders	Obtenir des packs de shaders	
+Download shader packs from ReShade's official list	tr_image.cpp:kEntries	Baixa pacotes de shaders da lista oficial do ReShade	Descarga paquetes de shaders de la lista oficial de ReShade	Télécharge des packs de shaders de la liste officielle de ReShade	
+Missing something? Get more packs or add your own .fx files.	tr_image.cpp:kEntries	Falta algo? Baixe mais pacotes ou adicione seus próprios arquivos .fx.	¿Falta algo? Descarga más paquetes o añade tus propios archivos .fx.	Il manque quelque chose ? Obtenez d'autres packs ou ajoutez vos propres fichiers .fx.	
+{} and {}	tr_image.cpp:kEntries	{} e {}	{} y {}	{} et {}	{} {}
+{} packs	tr_image.cpp:kEntries	{} pacotes	{} paquetes	{} packs	{}
+Download {}	tr_image.cpp:kEntries	Baixar {}	Descargar {}	Télécharger {}	{}
+Download both	tr_image.cpp:kEntries	Baixar os dois	Descargar ambos	Télécharger les deux	
+Download all	tr_image.cpp:kEntries	Baixar todos	Descargar todos	Tout télécharger	
+{} KB	tr_image.cpp:kEntries	{} KB	{} KB	{} KB	{}
+{:.1f} MB	tr_image.cpp:kEntries	{:.1f} MB	{:.1f} MB	{:.1f} MB	{:.1f}
+{} of {} run here	tr_image.cpp:kEntries	{} de {} funcionam aqui	{} de {} funcionan aquí	{} sur {} fonctionnent ici	{} {}
+Checking its shaders…	tr_image.cpp:kEntries	Verificando os shaders…	Comprobando sus shaders…	Vérification de ses shaders…	
+{} removed	tr_image.cpp:kEntries	{} removido	{} quitado	{} retiré	{}
+Open on GitHub	tr_image.cpp:kEntries	Abrir no GitHub	Abrir en GitHub	Ouvrir sur GitHub	
+Back to the list	tr_image.cpp:kEntries	Voltar à lista	Volver a la lista	Retour à la liste	
+No connection; the list may be out of date	tr_image.cpp:kEntries	Sem conexão; a lista pode estar desatualizada	Sin conexión; la lista puede estar desactualizada	Pas de connexion ; la liste n'est peut-être pas à jour	
+Downloaded	tr_image.cpp:kEntries	Baixado	Descargado	Téléchargé	
+Downloading {}%	tr_image.cpp:kEntries	Baixando {}%	Descargando {}%	Téléchargement {} %	{}
+Waiting	tr_image.cpp:kEntries	Aguardando	En espera	En attente	
+Stopped	tr_image.cpp:kEntries	Interrompido	Detenido	Arrêté	
+Not downloaded	tr_image.cpp:kEntries	Não baixado	No descargado	Non téléchargé	
+Needs the {} pack	tr_image.cpp:kEntries	Precisa do pacote {}	Necesita el paquete {}	Nécessite le pack {}	{}
+Stop the rest	tr_image.cpp:kEntries	Parar o restante	Detener el resto	Arrêter le reste	
+Search packs or authors	tr_image.cpp:kEntries	Buscar pacotes ou autores	Buscar paquetes o autores	Rechercher des packs ou des auteurs	
+Select all	tr_image.cpp:kEntries	Selecionar todos	Seleccionar todos	Tout sélectionner	
+no longer in ReShade's list	tr_image.cpp:kEntries	não está mais na lista do ReShade	ya no está en la lista de ReShade	n'est plus dans la liste de ReShade	
+No pack matches	tr_image.cpp:kEntries	Nenhum pacote corresponde	Ningún paquete coincide	Aucun pack ne correspond	
+{} selected · {}	tr_image.cpp:kEntries	{} selecionados · {}	{} seleccionados · {}	{} sélectionnés · {}	{} {}
+{} selected	tr_image.cpp:kEntries	{} selecionados	{} seleccionados	{} sélectionnés	{}
+Apex goes online only when you click Download. Each pack comes from its author's GitHub under its own licence; only .fx, .fxh and textures are kept.	tr_image.cpp:kEntries	O Apex só acessa a internet quando você clica em Baixar. Cada pacote vem do GitHub do autor, sob a licença dele; só os arquivos .fx, .fxh e as texturas são mantidos.	Apex solo se conecta a internet cuando pulsas Descargar. Cada paquete viene del GitHub de su autor, con su propia licencia; solo se conservan los .fx, .fxh y las texturas.	Apex ne se connecte que lorsque vous cliquez sur Télécharger. Chaque pack vient du GitHub de son auteur, sous sa propre licence ; seuls les .fx, .fxh et les textures sont conservés.	
+Download 1 pack	tr_image.cpp:kEntries	Baixar 1 pacote	Descargar 1 paquete	Télécharger 1 pack	
+Download {} packs	tr_image.cpp:kEntries	Baixar {} pacotes	Descargar {} paquetes	Télécharger {} packs	{}
+Imported: {}	tr_image.cpp:kEntries	Importado: {}	Importado: {}	Importé : {}	{}
+This look uses {} shaders from {}, which you don't have yet	tr_image.cpp:kEntries	Este visual usa {} shaders de {}, que você ainda não tem	Este estilo usa {} shaders de {}, que aún no tienes	Ce rendu utilise {} shaders de {}, que vous n'avez pas encore	{} {}
+ReShade looks and shaders on the game's picture	tr_image.cpp:kEntries	Visuais e shaders do ReShade na imagem do jogo	Estilos y shaders de ReShade en la imagen del juego	Rendus et shaders ReShade sur l'image du jeu	
+Library	tr_image.cpp:kEntries	Biblioteca	Biblioteca	Bibliothèque	
+Packs	tr_image.cpp:kEntries	Pacotes	Paquetes	Packs	
+Search packs or shaders	tr_image.cpp:kEntries	Buscar pacotes ou shaders	Buscar paquetes o shaders	Rechercher des packs ou des shaders	
+For this look	tr_image.cpp:kEntries	Para este visual	Para este estilo	Pour ce rendu	
+Select these	tr_image.cpp:kEntries	Selecionar estes	Seleccionar estos	Sélectionner ceux-ci	
+All packs · {}	tr_image.cpp:kEntries	Todos os pacotes · {}	Todos los paquetes · {}	Tous les packs · {}	{}
+used by {}	tr_image.cpp:kEntries	usado por {}	usado por {}	utilisé par {}	{}
+Needed	tr_image.cpp:kEntries	Necessário	Necesario	Requis	
+{} selected + 1 needed · {}	tr_image.cpp:kEntries	{} selecionados + 1 necessário · {}	{} seleccionados + 1 necesario · {}	{} sélectionnés + 1 requis · {}	{} {}
+Downloading {} of {} · {}	tr_image.cpp:kEntries	Baixando {} de {} · {}	Descargando {} de {} · {}	Téléchargement {} sur {} · {}	{} {} {}
+{} downloaded	tr_image.cpp:kEntries	{} baixados	{} descargados	{} téléchargés	{}
+{} of {} downloaded	tr_image.cpp:kEntries	{} de {} baixados	{} de {} descargados	{} sur {} téléchargés	{} {}
+Try again	tr_image.cpp:kEntries	Tentar de novo	Reintentar	Réessayer	
+Installed packs	tr_image.cpp:kEntries	Pacotes instalados	Paquetes instalados	Packs installés	
+No packs yet	tr_image.cpp:kEntries	Nenhum pacote ainda	Aún no hay paquetes	Aucun pack pour l'instant	
+1 pack	tr_image.cpp:kEntries	1 pacote	1 paquete	1 pack	
+{} leaves the look	tr_image.cpp:kEntries	{} sai do visual	{} sale del estilo	{} quitte le rendu	{}
+{} shaders leave the look	tr_image.cpp:kEntries	{} shaders saem do visual	{} shaders salen del estilo	{} shaders quittent le rendu	{}
+Remove {}?	tr_image.cpp:kEntries	Remover {}?	¿Quitar {}?	Retirer {} ?	{}
+Other packs need it	tr_image.cpp:kEntries	Outros pacotes precisam dele	Otros paquetes lo necesitan	D'autres packs en ont besoin	
+other packs need it	tr_image.cpp:kEntries	outros pacotes precisam dele	otros paquetes lo necesitan	d'autres packs en ont besoin	
+Import your own .fx files	tr_image.cpp:kEntries	Importe seus próprios arquivos .fx	Importa tus propios archivos .fx	Importez vos propres fichiers .fx	
+1 file in the Shaders folder	tr_image.cpp:kEntries	1 arquivo na pasta Shaders	1 archivo en la carpeta Shaders	1 fichier dans le dossier Shaders	
+{} files in the Shaders folder	tr_image.cpp:kEntries	{} arquivos na pasta Shaders	{} archivos en la carpeta Shaders	{} fichiers dans le dossier Shaders	{}
+It goes to the Recycle Bin	tr_image.cpp:kEntries	Ele vai para a Lixeira	Va a la Papelera de reciclaje	Il va dans la Corbeille	
+{} moved to the Recycle Bin	tr_image.cpp:kEntries	{} foi para a Lixeira	{} se movió a la Papelera de reciclaje	{} placé dans la Corbeille	{}
+{} could not be moved to the Recycle Bin	tr_image.cpp:kEntries	Não foi possível mover {} para a Lixeira	No se pudo mover {} a la Papelera de reciclaje	Impossible de placer {} dans la Corbeille	{}
+{} runs here	tr_image.cpp:kEntries	{} funciona aqui	{} funciona aquí	{} fonctionne ici	{}
+{} shaders run here	tr_image.cpp:kEntries	{} shaders funcionam aqui	{} shaders funcionan aquí	{} shaders fonctionnent ici	{}
+Needs {}, which is in {}	tr_image.cpp:kEntries	Precisa de {}, que está em {}	Necesita {}, que está en {}	Nécessite {}, qui se trouve dans {}	{} {}
+Needs {}	tr_image.cpp:kEntries	Precisa de {}	Necesita {}	Nécessite {}	{}
+Move to the Recycle Bin	tr_image.cpp:kEntries	Mover para a Lixeira	Mover a la Papelera de reciclaje	Placer dans la Corbeille	
+Import .fx…	tr_image.cpp:kEntries	Importar .fx…	Importar .fx…	Importer .fx…	
+{} shaders built into Apex, always available	tr_image.cpp:kEntries	{} shaders embutidos no Apex, sempre disponíveis	{} shaders integrados en Apex, siempre disponibles	{} shaders intégrés à Apex, toujours disponibles	{}
+Get more packs ›	tr_image.cpp:kEntries	Baixar mais pacotes ›	Descargar más paquetes ›	Obtenir d'autres packs ›	
+Shaders turned on	tr_image.cpp:kEntries	Shaders ligados	Shaders activados	Shaders activés	
+Shaders turned off	tr_image.cpp:kEntries	Shaders desligados	Shaders desactivados	Shaders désactivés	
+This look can't be read	tr_image.cpp:kEntries	Não foi possível ler este visual	No se puede leer este estilo	Ce rendu ne peut pas être lu	
+Your library	tr_image.cpp:kEntries	Sua biblioteca	Tu biblioteca	Votre bibliothèque	
+{} shaders from {} sources	tr_image.cpp:kEntries	{} shaders de {} fontes	{} shaders de {} fuentes	{} shaders de {} sources	{} {}
+This preset uses shaders from {}, which you don't have yet	tr_image.cpp:kEntries	Este preset usa shaders de {}, que você ainda não tem	Este preajuste usa shaders de {}, que aún no tienes	Ce préréglage utilise des shaders de {}, que vous n'avez pas encore	{}
+Turn on Shaders to check what changed	tr_image.cpp:kEntries	Ligue os Shaders para verificar o que mudou	Activa Shaders para revisar lo que cambió	Activez Shaders pour vérifier ce qui a changé	
+Your Shaders folder already has a different {}. Rename or move it, then import again	tr_image.cpp:kEntries	Sua pasta Shaders já tem outro {}. Renomeie ou mova esse arquivo e importe de novo	Tu carpeta Shaders ya tiene otro {}. Cámbiale el nombre o muévelo e importa de nuevo	Votre dossier Shaders contient déjà un autre {}. Renommez-le ou déplacez-le, puis importez à nouveau	{}
+Checking the file…	tr_image.cpp:kEntries	Verificando o arquivo…	Comprobando el archivo…	Vérification du fichier…	
+Not in your Shaders folder	tr_image.cpp:kEntries	Não está na sua pasta Shaders	No está en tu carpeta Shaders	Absent de votre dossier Shaders	
+Doesn't run in The Sims 3	tr_image.cpp:kEntries	Não roda no The Sims 3	No funciona en The Sims 3	Ne fonctionne pas dans Les Sims 3	
+Beta	tr_image.cpp:kEntries	Beta	Beta	Bêta	
+{} measures the whole picture: with World only its tone differs from ReShade; World and menus matches it	tr_image.cpp:kEntries	{} mede a imagem inteira: com Só o mundo o tom fica diferente do ReShade; Mundo e menus fica igual	{} mide la imagen entera: con Solo el mundo el tono difiere de ReShade; Mundo y menús coincide	{} mesure toute l'image : avec Monde seulement, la teinte diffère de ReShade ; Monde et menus lui correspond	{}
+{} adds its own ambient shade; Apex's Ambient Occlusion is on too	tr_image.cpp:kEntries	{} adiciona a própria sombra ambiente; a Oclusão de Ambiente do Apex também está ligada	{} añade su propia sombra ambiental; la Oclusión Ambiental de Apex también está activada	{} ajoute sa propre ombre ambiante ; l'Occlusion Ambiante d'Apex est aussi activée	{}
+{} adds its own depth blur; Apex's Depth Blur is on too	tr_image.cpp:kEntries	{} adiciona o próprio desfoque de profundidade; o Desfoque de Profundidade do Apex também está ligado	{} añade su propio desenfoque de profundidad; el Desenfoque de Profundidad de Apex también está activado	{} ajoute son propre flou de profondeur ; le Flou de Profondeur d'Apex est aussi activé	{}
+{} smooths edges too; Apex's Edge Smoothing is on too	tr_image.cpp:kEntries	{} também suaviza as bordas; a Suavização de Bordas do Apex também está ligada	{} también suaviza los bordes; el Suavizado de Bordes de Apex también está activado	{} lisse aussi les contours ; le Lissage des Bords d'Apex est aussi activé	{}
+Apex's Ambient Occlusion is on too: the shade is doubled	tr_image.cpp:kEntries	A Oclusão de Ambiente do Apex também está ligada: a sombra fica dobrada	La Oclusión Ambiental de Apex también está activada: la sombra se duplica	L'Occlusion Ambiante d'Apex est aussi activée : l'ombre est doublée	
+Apex's Depth Blur is on too: the blur is doubled	tr_image.cpp:kEntries	O Desfoque de Profundidade do Apex também está ligado: o desfoque fica dobrado	El Desenfoque de Profundidad de Apex también está activado: el desenfoque se duplica	Le Flou de Profondeur d'Apex est aussi activé : le flou est doublé	
+Apex's Edge Smoothing is on too: edges are smoothed twice	tr_image.cpp:kEntries	A Suavização de Bordas do Apex também está ligada: as bordas são suavizadas duas vezes	El Suavizado de Bordes de Apex también está activado: los bordes se suavizan dos veces	Le Lissage des Bords d'Apex est aussi activé : les bords sont lissés deux fois	
+Turn off Apex's	tr_image.cpp:kEntries	Desligar no Apex	Desactivar en Apex	Désactiver dans Apex	
+Turn off {}	tr_image.cpp:kEntries	Desligar {}	Desactivar {}	Désactiver {}	{}
+This preset needs {} ({})	tr_image.cpp:kEntries	Este preset precisa de {} ({})	Este preajuste necesita {} ({})	Ce préréglage a besoin de {} ({})	{} {}
+This preset needs {}	tr_image.cpp:kEntries	Este preset precisa de {}	Este preajuste necesita {}	Ce préréglage a besoin de {}	{}
+Download them now	tr_image.cpp:kEntries	Baixar agora	Descargarlos ahora	Les télécharger maintenant	
+Include my own .fx files	tr_image.cpp:kEntries	Incluir meus próprios arquivos .fx	Incluir mis propios archivos .fx	Inclure mes propres fichiers .fx	
+{} ({}): downloading {}…	tr_image.cpp:kEntries	{} ({}): baixando {}…	{} ({}): descargando {}…	{} ({}) : téléchargement de {}…	{} {} {}
+{} ({}): in {}, not downloaded	tr_image.cpp:kEntries	{} ({}): está em {}, ainda não baixado	{} ({}): en {}, no descargado	{} ({}) : dans {}, non téléchargé	{} {} {}
+Get {}	tr_image.cpp:kEntries	Baixar {}	Descargar {}	Obtenir {}	{}
+Downloading {} of {} · you can keep playing	tr_image.cpp:kEntries	Baixando {} de {} · você pode continuar jogando	Descargando {} de {} · puedes seguir jugando	Téléchargement {} sur {} · vous pouvez continuer à jouer	{} {}
+{} of {} done	tr_image.cpp:kEntries	{} de {} concluídos	{} de {} terminados	{} sur {} terminés	{} {}
+ReShade's official list · {} packs · {} downloaded	tr_image.cpp:kEntries	Lista oficial do ReShade · {} pacotes · {} baixados	Lista oficial de ReShade · {} paquetes · {} descargados	Liste officielle de ReShade · {} packs · {} téléchargés	{} {}
+Downloading {} of {}	tr_image.cpp:kEntries	Baixando {} de {}	Descargando {} de {}	Téléchargement {} sur {}	{} {}
+No connection to GitHub	tr_image.cpp:kEntries	Sem conexão com o GitHub	Sin conexión con GitHub	Pas de connexion à GitHub	
+This pack is no longer on GitHub	tr_image.cpp:kEntries	Este pacote não está mais no GitHub	Este paquete ya no está en GitHub	Ce pack n'est plus sur GitHub	
+GitHub is busy; try again in a few minutes	tr_image.cpp:kEntries	O GitHub está ocupado; tente de novo em alguns minutos	GitHub está ocupado; inténtalo de nuevo en unos minutos	GitHub est occupé ; réessayez dans quelques minutes	
+This pack is larger than Apex accepts	tr_image.cpp:kEntries	Este pacote é maior do que o Apex aceita	Este paquete es más grande de lo que Apex acepta	Ce pack est plus gros que ce qu'Apex accepte	
+GitHub sent the download somewhere else	tr_image.cpp:kEntries	O GitHub mandou o download para outro lugar	GitHub envió la descarga a otro sitio	GitHub a envoyé le téléchargement ailleurs	
+The pack could not be unpacked	tr_image.cpp:kEntries	Não foi possível descompactar o pacote	No se pudo descomprimir el paquete	Le pack n'a pas pu être décompressé	
+The pack could not be saved in the Shaders folder	tr_image.cpp:kEntries	Não foi possível salvar o pacote na pasta Shaders	No se pudo guardar el paquete en la carpeta Shaders	Le pack n'a pas pu être enregistré dans le dossier Shaders	
+The download failed	tr_image.cpp:kEntries	O download falhou	La descarga falló	Le téléchargement a échoué	
+Shader packs: downloaded from their authors' GitHub, under each author's licence.	tr_image.cpp:kEntries	Pacotes de shaders: baixados do GitHub dos autores, sob a licença de cada um.	Paquetes de shaders: descargados del GitHub de sus autores, con la licencia de cada uno.	Packs de shaders : téléchargés depuis le GitHub de leurs auteurs, sous la licence de chacun.	
 Choose the intensity	tr_lighting.cpp:kEntries	Escolha a intensidade	Elige la intensidad	Choisissez l’intensité	
 Ground, objects and buildings are already balanced together	tr_lighting.cpp:kEntries	Chão, objetos e construções já estão equilibrados entre si	El suelo, los objetos y los edificios ya están equilibrados	Le sol, les objets et les bâtiments sont déjà équilibrés ensemble	
 Less light, more contrast at night	tr_lighting.cpp:kEntries	Menos luz, mais contraste à noite	Menos luz, más contraste por la noche	Moins de lumière, plus de contraste la nuit	
@@ -2586,3 +3004,4 @@ official Sims3SettingsSetter loaded ({})	tr_features.cpp:kEntries	Sims3SettingsS
 official Sims3SettingsSetter not loaded	tr_features.cpp:kEntries	Sims3SettingsSetter oficial não carregado	Sims3SettingsSetter oficial no cargado	Sims3SettingsSetter officiel non chargé	
 ; OLD COMBINED BUILD loaded ({}): Apex Radiance's features stay off	tr_features.cpp:kEntries	; VERSÃO COMBINADA ANTIGA carregada ({}): os recursos do Apex Radiance ficam desligados	; VERSIÓN COMBINADA ANTIGUA cargada ({}): las funciones de Apex Radiance quedan desactivadas	; ANCIENNE VERSION COMBINÉE chargée ({}) : les fonctions d'Apex Radiance restent désactivées	{}
 ; an older {} is also installed (idle): delete it from Game\\Bin	tr_features.cpp:kEntries	; um {} mais antigo também está instalado (inativo): apague-o de Game\\Bin	; también hay un {} más antiguo instalado (inactivo): bórralo de Game\\Bin	; un ancien {} est aussi installé (inactif) : supprimez-le de Game\\Bin	{}
+Runs a ReShade or GShade preset (.ini) on the game's picture, with the same shader math. Part of Apex Radiance. Credits: @loinyx	tr_features.cpp:kEntries	Roda um preset do ReShade ou GShade (.ini) na imagem do jogo, com a mesma matemática dos shaders. Parte do Apex Radiance. Créditos: @loinyx	Aplica un preajuste de ReShade o GShade (.ini) a la imagen del juego, con las mismas matemáticas de los shaders. Parte de Apex Radiance. Créditos: @loinyx	Applique un préréglage ReShade ou GShade (.ini) à l'image du jeu, avec les mêmes calculs de shaders. Fait partie d'Apex Radiance. Crédits : @loinyx	

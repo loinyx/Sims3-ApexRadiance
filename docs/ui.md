@@ -25,7 +25,8 @@ Sims 3"); internal names keep "Apex". Visible text uses `APEX_PRODUCT_NAME`, nev
   field at least 120 units wide; below 60 units the field is not drawn.
 - **Sidebar:** 184 units wide, or a 56-unit icon rail when collapsed (`[ui] sidebar_collapsed`); group labels. The
   collapse button and the version are in the footer. Collapsed items show their name as a tooltip and group labels become
-  short hairlines.
+  short hairlines. An item can carry a small violet chip at its right (`SidebarItem`'s `badge`): Shaders shows "Beta";
+  collapsed, the chip joins the tooltip ("Shaders · Beta").
 - **Page:** a scrolling child with the page title, an optional underline tab bar and cards. The selected page and each
   page's tab live while the game runs and are not saved (`Go(page, &tab, n)` opens a page on a tab).
 - **Footer:** "All changes saved" (CircleCheck, muted green) or "Saving…" (Save icon) while `ApexConfig::SavePending()`,
@@ -40,7 +41,9 @@ Sims 3"); internal names keep "Apex". Visible text uses `APEX_PRODUCT_NAME`, nev
 | Overview (layout-dashboard) | Title "Overview", subtitle "How the game is running and what is in use" ("Apex is off; your settings are kept" while turned off); Refresh lighting and Turn off Apex / Turn Apex on beside the title (under it when narrow); the recommendation card when something is missing. **Status** card, two halves split by a hairline, vertical side by side and horizontal when stacked (below 560 units), drawn by the shared `ApexUi::Status*` rows so they line up: *Frame rate* (limit at the right, the rate large with a sparkline of the last 4 minutes, "1% low · varies · hitches in 4 min") and *Game memory* (health state with a dot, the game's use large in GB with two decimals "of 4.00 GB" (refreshed every second while shown), one thin bar in the state colour (violet, amber, red) with Room to save's reserve as a light grey hatched part and the session peak as a tick; "Largest free block · peak" in GB; clicking the half opens Performance). **Effects** card: All effects' switch in the header ("n of m on"), then one row per page in sidebar order, two columns (one when narrow): icon, name (opens the page) over its detail (cost or state; the page's phrase when off or nothing is measured), the page switch. A page switch is on while anything on its page is on; off remembers what was on, on restores exactly that ([overview_restore]). With the menu closed, a card "Memory is getting low: save your game soon" (or "almost full") stays until OK; its switch is in Performance > Memory handling |
 | WORLD > Lighting (moon-star) | Tabs **Overview** (Night Lights card; lighting balance Subtle / Soft / Natural / Custom with Undo choice, then *Realistic lamp reach*; Refresh lighting card), **Outside** (Ground & Lots card: group *Where the light goes* with *Lot lamps light the street* and *Walls shade lamp light near the ground*, group *Brightness* with *Ground light* (a note while *Street lamps light lots* is off); Buildings card: groups *Walls* and *Roofs*, each a switch and its brightness; Objects card: *Lamps light objects* and its brightness, *Buildings block lamp light on trees and objects*), **Inside & floors** (Stories card first: *Upper floors light the ground*, *Outdoor light between floors*, then *Indoor light between floors*, *Walls block light on floors* and *Light through doors and windows* (the last also needs *Walls block light on floors*), disabled with a note while *Outdoor light between floors* is off; Rooms at Night card: group *Background light*, group *Lamp light* with *Outdoor light through openings*, *Indoor light through openings*, *Indoor light adds to the ground* (disabled while the option above or *Walls block light on floors* is off), *Doors block light*, *Light bounces between rooms*, disabled with a note while *Outdoor light between floors* is off, then *Shadow softness* (cm) and Refresh the lighting; Light detail card, no badge), **Game fixes** (a muted line, then one card per area: Ground & Lots with *Street lamps light lots*, *Lamp colors stay near lamps*, *Smooth ground light*, *Update at dusk* and its delay; Objects with *Light stairs, railings, columns*, *Doors and windows stay lit*, *Windows take outdoor light*, *Seamless light on pieces* with *Seamless light brightness*, *Fences and stairs catch light* with *Fence brightness*, and *Smooth indoor light*; Stories with *Wall lamps at the right height*, *Seamless walls between floors*, *Every floor in full detail* and *Smooth light maps*, disabled with a note while *Outdoor light between floors* is off). The Game fixes correct game bugs: they are on by default and still switchable, so the other tabs show only the choices that change the look. While Night Lights is off, the other tabs show a note and "Turn on Night Lights". See [Night Lighting](features/night-lighting/README.md) |
 | WORLD > Water & Snow (waves-horizontal) | While Night Lights is off, one note "Lamp Glow, Water Reflections and Snow need Night Lights" with "Turn on Night Lights" above the cards, and only Water Reflections is drawn. Lamp Glow (header switch, then *Glow brightness*), Water Reflections (header switch; "Needs Depth Blur or Ambient Occlusion" with "Turn on Depth Blur"; *Reflection brightness*), Snow (*Sidewalk visibility*; while *Street lamps light lots* is off, a note naming it and "Turn it on"). See [reflections](features/reflections.md) |
-| IMAGE > Color (palette) | Overview: the **Color** card owns the master switch, measured GPU cost and comparison tools; below it, clickable overview rows lead to Basic, Tones, Color, Detail, Filters and LUTs, each with an independent group switch. Basic, Tones, Color and Detail are one card each: the group switch in its header, the rows under it (Color: Tint, Vibrance, then groups *Film tones* and *Color mixer*; Detail: *Vignette size* only while *Vignette* is above 0%). While Color is off, a note "Color is off; your adjustments are kept" and "Turn on Color". Filters: an **In use** card ("<n> of 24 on" or "No filter is on", the names as chips), then six family panels (Film looks, Color and mood, Light and detail, Camera, Retro and style, Accessibility; the label adds "(<n> on)") with down/up adjustment disclosures and switches; filters whose Advanced held one control show it directly. Master off disables and visually turns off dependent switches without clearing saved group preferences; shortcuts belong to presets. See [picture-filters.md](features/picture-filters.md) |
+| IMAGE > Color (palette) | Overview: the **Color** card owns the master switch, measured GPU cost and comparison tools; below it, clickable overview rows lead to Basic, Tones, Color, Detail, Filters and LUTs, each with an independent group switch. Basic, Tones, Color and Detail are one card each: the group switch in its header, the rows under it (Color: Tint, Vibrance, then groups *Film tones* and *Color mixer*; Detail: *Vignette size* only while *Vignette* is above 0%). While Color is off, a note "Color is off; your adjustments are kept" and "Turn on Color". Filters: an **In use** card ("<n> of 24 on" or "No filter is on", the names as chips), then six family panels (Film looks, Color and mood, Light and detail, Camera, Retro and style, Accessibility; the label adds "(<n> on)") with down/up adjustment disclosures and switches; filters whose Advanced held one control show it directly. Master off disables and visually turns off dependent switches without clearing saved group preferences; shortcuts belong to presets. See [picture-filters.md](features/picture-filters.md). |
+| IMAGE > Shaders (swatch-book; after Color; a "Beta" chip in the sidebar) | Page "Shaders", subtitle "ReShade looks and shaders on the game's picture", the Looks switch at the right of the title line (tooltip: the feature description; reports "Shaders turned on/off"); tabs **Look**, **Packs** and **Library** (`g_shadersTab`). **Look**: the look card (Lucide `wand-sparkles`; the title is the look's name, or "ReShade look" when none is chosen; subtitle "<n> shaders · ~<cost> ms", or "Off", "No look chosen", "This look can't be read"; a hold-to-compare eye "Hold to see the game without the look"; no switch of its own; rows *Look* (a grouped dropdown: Apex looks, My looks, GShade, a search field past 10 looks, *Open the Looks folder* last; *Import* beside it), *Strength*, *Interface without shaders* (on by default), Advanced *Order*, and while a LUT is also on an amber row "A LUT is on too" with *Turn off the LUT*), after an import a note card "Imported: <look>" with *Download <pack>* / *Download both* / *Download all* and *Not now*, then **Shaders in this look** (Lucide `sliders-horizontal`; "<on> of <total> on", an ellipsis menu with Put every value back, Back to the look's list, Open the Shaders folder and Check again; one row per shader with a chevron, name and description (a pack's or the player's .fx names its source: "qUINT · qUINT_mxao.fx", "Your shaders · Mine.fx"; a shader that doubles an Apex effect that is on gets an amber line instead, with *Turn off Apex's*) and its switch, opening to its parameters (each with the control its .fx asks for, in its groups; a player's .fx adds
+Advanced *Quality settings (<n>)*, its preprocessor definitions), Run earlier / Run later, "<pos> of <n>" and Put back the look's values; a shader that cannot run keeps its place in the list as a row with an amber line saying what is missing and *Download*, *Add .fx files…* or a spinner, and *Download both* / *Download all* under the list when two packs or more are missing; *Add a shader*, a modal grouped by source with collapsible headers whose footer *Get shader packs* closes it on Packs; *Save as a new look…*). **Packs**: a search ("Search packs or shaders"), then one card with *For this look* (*Select these*) and *All packs · <n>*: per pack a checkbox (a spinner while it downloads), name, "<author> · <n> shaders · <size>", a status (Downloaded, Downloading <n>%, Waiting, Needed, or the failure in amber) and a ⋯ menu (Update, Open on GitHub); the online note last; in the menu search one header, *Get shader packs*. **Download bar** (`Looks::PacksBar`, drawn by `MainWindow` above the footer on any page, with its height kept free at the page's end and the undo toast above it, right edges aligned): "<k> selected · <size>" with *Download <n> packs* while choosing on Packs, "Downloading <i> of <n> · <pack>" with *Stop* and a progress line, then "<n> downloaded" (or "<i> of <n> downloaded" with the first failure in amber, *Try again*) and *OK*; it clears after 4 s only when nothing failed; its buttons wrap one per line when narrow. **Library**: **Installed packs** (Lucide `package`; "<n> packs · <size>", *Check again* in the header with its result under it; per pack its name, "<x> of <y> run here · <size>", ⋯ and a trash button; a last quiet row "<n> shaders built into Apex, always available" with *Get more packs ›*), then **Your shaders** (`user-round`; the folder button; one row per .fx with what runs or what it needs, *Download* when a pack has the missing header, a trash button; *Import .fx…*). A trash button turns the row into "Remove <name>?" with what the look loses (amber), *Cancel* and a red *Remove* (closed while that pack downloads); the result is the card's quiet line, not the undo toast. Any button that opens the pack list switches to Packs (`Looks::WantsPacks`); a download started from the Look tab keeps the player there. Developer mode adds *Live counters* to the look card. On the Overview it is the Shaders row (detail: the look's name and cost, "Off" while off). See [looks.md](features/looks.md) |
 | IMAGE > Banding Fix (blend) | The Banding Fix card: under the header, a before / after picture (drawn with the draw list, hidden in search: an 8-bit stepped ramp over the ramp as it leaves now, stepped while off or at 0%, grained while on, rounded from the continuous ramp with the High-precision scene) and a one-line caption of the state; while on, the in-card groups *Grain* (Strength) and *Precision* (High-precision scene, with a chip after its label, Active, Starting or Unavailable, and the video memory or the reason in its description); the development build adds the resolves under *Live counters*. See [banding-fix.md](features/banding-fix.md) |
 | IMAGE > Ambient Occlusion (contrast) | Scene AO card (groups *How the shade looks*: Strength, Reach, Keep lamp light; *Distance and quality*: Distance, Quality; *Map view*: Also in map view; no Advanced section) and Sim Occlusion card. Scene AO runs at full resolution; the reduced-resolution and reconstruction controls were removed. See [ambient-occlusion.md](features/ambient-occlusion.md), [sim-occlusion.md](features/sim-occlusion.md) |
 | IMAGE > Depth Blur (aperture) | Depth Blur card; mode-specific rows are drawn and searchable only in their mode. See [depth-blur.md](features/depth-blur.md) |
@@ -51,16 +54,17 @@ Sims 3"); internal names keep "Apex". Visible text uses `APEX_PRODUCT_NAME`, nev
 | SYSTEM > Report a problem (bug) | Capture session, Save a capture, Your captures, How to report a problem. See [bug-reports.md](features/bug-reports.md) |
 | SYSTEM > Developer (wrench) | Developer mode only: tabs Lighting, Performance, Captures, Visual effects, Translations, Tester. Tester holds the always-on parts players have no switch for (fixes, drag measures, caches) and the sub-parts of player options, all on by default; *Restore defaults* turns every one on. See [developer-mode.md](features/developer-mode.md) and [tester.md](features/dev-tools/tester.md) |
 | IMAGE > Display (monitor; after Edge Smoothing) | Page "Display", subtitle "Window mode, resolution and frame-rate limit"; one card: Window mode (segmented: Game setting / Window / Borderless / Fullscreen), Resolution (select: Game setting, then the monitor's sizes), Frame-rate limit (select: Off, 30 to 240 fps, the monitor's rate minus 3 "(variable refresh)", Custom; Custom adds a *Custom limit* slider, 20 to 500), In the background (Same limit, 10, 15, 30, 60 fps), Show FPS (switch: a small counter in the top-left corner), Measured (fps and frame-time variation, once the limiter has data); notes when the graphics card refused a mode and when Sims3SettingsSetter's borderless window or limiter is overridden. [Display](features/display.md) |
+| IMAGE > Capture (camera; after Display) | Page "Capture", subtitle "Screenshots and videos with your effects"; tabs Screenshots and Video, one card each. The header shows one status line (the key, the size estimate for videos, "Last: <file>" with a **Show** link once something was saved this session; while recording "Recording m:ss · N MB" in red after a red dot) and one action (**Take one**, **Record** / **Stop**; under the text when narrow). Body, without group labels: Save to (Game / Apex / Other with the folder as its description and an Open the folder icon button; with Other, Folder with Change), Hide game UI, Game sound for videos, Look for screenshots only while a ReShade look is on, Format PNG / JPG or video Quality Smaller / Balanced / Best / Custom, then Advanced (with a summary such as "100% size" or "MP4, H.264") with every other option, the video Look included. While a video cannot start, Record is greyed out and the reason is the Video header's status line, in amber. No on/off switch, not on the Overview. See [screenshots-and-video.md](features/screenshots-and-video.md) |
 | SYSTEM > Settings (settings) | Tabs **Menu**, **Shortcuts**, **Compatibility**, **About** (below) |
 
 ### Settings tabs
 
 | Tab | Cards |
 |---|---|
-| Menu | **Menu**: Language (select, 220 units), Text size (- / value / + / Reset; 80, 90, 100, 115, 130, 150, 175, 200%), Startup menu hint (`[ui] start_note`). **Screenshot capture** ("Save the finished game image with Apex's active effects"): Save screenshots to (Game's Screenshots folder / Apex Radiance folder / Another folder; with Another folder, a *Screenshots folder* row shows the path with a Change button that opens Windows' folder dialog), Hide game UI in screenshots; the screenshot key is on the Shortcuts tab. The card has no on/off switch: the shortcut is always on, and `[ui] screenshot_shortcut_enabled` is still written but no longer read. **Settings and maintenance** ("Saving, reset and recovery"): Save now ("Changes also save by themselves after a second"), Enable developer mode, Reset all settings (inline confirmation and Undo; restores features, Picture and every `[ui]` preference; captures, reports and presets stay), Restart Apex ([Graphics recovery](#graphics-recovery)) |
-| Shortcuts | **Shortcuts**: Shortcut preset (Letters / Numbers / F keys / Custom, 180 units), Open the menu, Compare with the game, Refresh the lighting, Take a filtered screenshot, note "F10 always hides the game interface". **Report a problem**: Recording, Light capture, Lighting snapshot, and Frame Capture in developer mode. **While Apex is open**: Search the settings, Peek at the game behind the menu, Compare the picture without its filters. |
+| Menu | **Menu**: Language (select, 220 units), Text size (- / value / + / Reset; 80, 90, 100, 115, 130, 150, 175, 200%), Startup menu hint (`[ui] start_note`). **Settings and maintenance** ("Saving, reset and recovery"): Save now ("Changes also save by themselves after a second"), Enable developer mode, Reset all settings (inline confirmation and Undo; restores features, Picture and every `[ui]` preference; captures, reports and presets stay), Restart Apex ([Graphics recovery](#graphics-recovery)) |
+| Shortcuts | **Shortcuts**: Shortcut preset (Letters / Numbers / F keys / Custom, 180 units), Open the menu, Compare with the game, Refresh the lighting, Take a filtered screenshot, Record a video (`[capture.video] record_key`, not in the shortcut presets), Looks on or off (`looks_key`), The other app's key (`[capture.video] external_key`, the only key that may use Win, e.g. Win+Alt+R), note "F10 always hides the game interface"; the capture options themselves are on Image > Capture. **Report a problem**: Recording, Light capture, Lighting snapshot, and Frame Capture in developer mode. **While Apex is open**: Search the settings, Peek at the game behind the menu, Compare the picture without its filters. |
 | Compatibility | **Compatibility** card: Game version; Platform (Windows, Steam Deck (Proton), Linux (Proton), macOS (Wine) or Wine); Sims3SettingsSetter Installed / Not installed; DXVK Installed / Not in use (WineD3D) (under Wine without DXVK) / Not installed; Sims 3 Modernization Installed and Sims 3 Performance Patch Installed / Settings to change / Restart the game to apply, each only when loaded (see **Other performance mods** below); RTX Remix bridge Installed (only under the bridge); Features Running / Starting… / Off (old combined build found); on a Steam Deck, a *Steam Deck* group with a note and **Load Performance**, which loads the Performance preset without its lighting part; *Recommended* group while one is missing or the Sims 3 Performance Patch settings should change; an *Optional* group with the RTX Remix bridge (what it does and Download) while DXVK runs inside the game; on Windows, a folded *RTX Remix bridge: how to install* (the steps, the EA app step only under `TS3.exe`, Download and Open Game\Bin) or, once installed, *RTX Remix bridge: how to remove* (removal and where its logs are); Details (the raw S3SS summary and the settings migration note) |
-| About | "Apex Radiance for The Sims 3", "Version X" (or "Version X - Developer mode"), a *Credits* group, including the scene update safety contribution by @rodneypantonial |
+| About | "Apex Radiance for The Sims 3", "Version X" (or "Version X - Developer mode"), a *Credits* group, including the scene update safety contribution by @rodneypantonial, and the folded *Third-party licenses* section |
 
 There is no per-page or per-card reset. Each row with a default shows a changed dot and, on hover, its own Reset
 button; Settings > Menu has the whole-mod reset.
@@ -115,6 +119,9 @@ the overlay scales the style by `0.9 * pow(h / 1080, 0.8)` and the text size). N
   accent underline; wraps when narrow).
 - `BeginCard` / `EndCard` (always call EndCard); `CardHeader(icon, title, subtitle, tooltip, toggle, toggleEnabled,
   extra, chip)` with `HeaderExtra` for an icon toggle or a hold button (`holdIcon`, `holdTooltip`, `held`); `CardDivider()`.
+  `CardStatusHeader(icon, title, status, statusRgb, dot, link, action, actionIcon, kind, enabled)` (Image > Capture):
+  one status line (optional dot, optional text link) and one compact button, which moves under the text below a
+  160-unit text column; returns 1 for the button, 2 for the link.
 - Rows: `SwitchRow(label, v, description, default)`; `Slider(label, v, min, max, SliderOptions)` (format, scale, offset,
   fixed value text, end labels, colour swatch, `defaultValue`, gradient track `trackFrom`/`trackTo` or hue circle
   `hueTrack`); `SliderPercent`; `SegmentedRow(...)`; `SelectRow(label, description, id, current, labels, count, width,
@@ -122,14 +129,24 @@ the overlay scales the style by `0.9 * pow(h / 1080, 0.8)` and the text size). N
   controlHeight)` / `EndControlRow()` (returns false when search hides it: draw nothing and skip `EndControlRow`);
   `OverviewRow(...)`. Descriptions are always visible. `SliderCommitted()` = released after an edit or its Reset.
   `SetNextRowBadge(text, tooltip, rgb)` puts a chip (amber by default) after the next label, also on control rows;
-  `SetNextRowChangedDot(tooltip)` the changed dot without Reset; `SetNextRowUntranslated()` for user data.
+  `SetNextRowChangedDot(tooltip)` the changed dot without Reset; `SetNextRowUntranslated()` for user data;
+  `SetNextRowWarning()` draws the next row's description in amber (Shaders: a doubled effect, a missing shader, a LUT on too).
+  `SetNextRowAction(icon, tooltip)` gives the next `SegmentedRow` a one-frame square icon button right of its choices
+  (also beside the first line of a vertical list); `RowActionClicked()` reads it. `SetNextRowDefault(changed)` gives the
+  next control row the changed dot and the hover Reset; `ControlRowReset()` (between Begin and End) says it was clicked.
+  `ColorRow(label, description, rgba, comps, def)`: a control row with a colour swatch and its 0..255 values (widest
+  values measured, so the width stays); the swatch opens a colour picker (alpha bar for 4 components) (Shaders: a .fx
+  colour).
 - `Segmented(id, current, labels, count, tooltips, compact, icons)`: shared width (a vertical list when they do not
-  fit); `current = -1` = none selected.
-- `BeginAdvanced` / `EndAdvanced`: hairline (reused when right after `CardDivider`), accent chevron and "Advanced",
-  collapsed by default, contents not indented. `AdvancedNode` stays for the frame profiler.
+  fit); `current = -1` = none selected. The chosen option is a very dark violet (`kSegmentOn`) with white text.
+- `BeginAdvanced(id, label, summary)` / `EndAdvanced`: hairline (reused when right after `CardDivider`), accent chevron and "Advanced",
+  collapsed by default, contents not indented; an optional `summary` (already translated) follows the label, muted
+  ("Advanced  ·  MP4, H.264" on Capture). `AdvancedNode` stays for the frame profiler.
 - `SectionLabel` and `GroupLabel` share the Overview Lighting heading style above cards: regular Segoe UI at the
   base size, muted text color, no tracking, and identical shared spacing above/below. Card titles retain their hierarchy.
 - `CardGroup(text)`: a quiet small muted label that opens a group of rows inside a card (Depth Blur: What stays sharp, How the blur looks, Map view), with the row divider above it.
+  `CardGroupToggle(id, text, openByDefault)`: the same label with a small chevron that collapses its group (Shaders: a
+  .fx's `ui_category`); in the search results it draws nothing and the group's rows are searched.
 - `GroupLabel("Lighting")` (above cards); `IconNote(icon, text, rgb)`: info (Info, muted), warning (TriangleAlert, amber), error
   (TriangleAlert, red), in a 10% tinted box.
 - Buttons: `IconTextButton(label, icon, tooltip, ButtonKind)`, `TextButton(label, tooltip, kind, minWidth)`;
@@ -151,8 +168,9 @@ autosave works as usual.
   English or the shown language. Results are the live controls, each after a breadcrumb link ("Lighting › Ground");
   card headers with a switch become searchable switch rows; collapsed Advanced content is searched; feature bodies are
   searched while the feature is off. Searched, in order (`SearchParts`): the four Lighting tabs, Water & Snow, Banding
-  Fix, Color Overview, Color LUTs, Presets, Color Filters, Basic, Tones, Color and Detail, Ambient Occlusion, Depth
-  Blur, Edge Smoothing, Performance, Lot Streaming, Display, Settings > Menu and Settings > Shortcuts. Not searched: Overview,
+  Fix, Color Overview, Color LUTs, Presets, Color Filters, Basic, Tones, Color, Detail, Shaders › Look (the look card's header is the searchable Shaders switch, "ReShade looks and shaders on the game's picture", so "reshade" finds it; shader names and their sliders are searched too), Shaders › Packs (its *Get shader packs* header), Shaders › Library, Ambient Occlusion, Depth
+  Blur, Edge Smoothing, Display, Capture (Screenshots, Video), Performance, Lot Streaming, Settings > Menu and
+  Settings > Shortcuts. Not searched: Overview,
   Developer, Compatibility, About, Report a problem.
 - **Changed markers and per-setting Reset:** a dot after the label while the value differs from its default ("Changed
   from the default"); hovering shows a Reset button that restores that one setting through the row's normal change
@@ -167,8 +185,8 @@ autosave works as usual.
   eased to 0 over about 0.1 s) and makes it inert; the window stays under the pointer, so releasing the key brings it
   back. Not while typing or dragging. While a slider is dragged the window fades to 0.35 and the active row stays opaque.
 - **Hold to compare (Color):** the eye button in the Picture header, or holding the picture-compare key (default `B`,
-  `[ui] picture_compare_key`) over the menu, calls `Picture::HoldBypass()`; Picture is skipped for 0.15 s after the
-  last call and returns by itself.
+  `[ui] picture_compare_key`) over the menu, calls `Picture::HoldBypass()` and `Looks::HoldBypass()`; Picture and the ReShade look are skipped for 0.15 s after
+  the last call and return by themselves. The ReShade look card has its own eye that skips only the look.
 - **Hover key capture:** while the pointer is over the menu but the keyboard is not captured, `GuiClient::CaptureKey`
   claims the peek and picture-compare keys (not while typing); the overlay eats their key-down, key-up and character.
   Alt+Tab is handled by Windows first.
@@ -209,9 +227,10 @@ Not part of the presets:
 | Search the settings | `search_key` | Ctrl+F |
 | Peek at the game behind the menu | `peek_key` | Alt |
 | Compare the picture without its filters | `picture_compare_key` | B |
+| Looks on or off | `looks_key` | Ctrl+Shift+L |
 
 A per-action key of vk 0 means "use the preset", so older files keep working. Compare turns Night Lights, Ambient
-Occlusion, Depth Blur, Edge Smoothing and Picture off and back without saving, with a notice while off. Refresh runs
+Occlusion, Depth Blur, Edge Smoothing, the ReShade look and Picture off and back without saving, with a notice while off. Refresh runs
 `NightLighting::RefreshAll` (terrain, rooms, lots and object rigs).
 
 Recording a key (`ChordProblem`) waits until held keys are released; Esc cancels; recording stops when the editor is not
@@ -243,26 +262,36 @@ and the code (`SaveProfile`, `ReadProfile`) keep the older name "profile". A pre
 | 6 | Shortcuts | `[shortcuts]` (menu key, shortcut preset and its Custom base, action keys, search, peek, picture compare, and the screenshot key, its folder and Hide game UI) | Unchecked |
 | 7 | Ambient Occlusion | `AmbientOcclusion` | Checked |
 | 8 | Developer | `[developer]` ([developer-mode.md](features/developer-mode.md#profiles)) | Unchecked; shown only when developer mode is requested or active |
+| 9 | Capture | `[capture]` (Image > Capture: screenshot and video options), without the custom video folder and the file counter, which keep their current values when applied | Unchecked |
+| 10 | Shaders | `Looks` (Image > Shaders: the look, its strength and your changes) plus `packs`, the names of the packs the look needs (written by `CaptureProfileState` from `Looks::NeededPacks`). A `Looks` table without `packs` comes from a 3.3.0 development build, whose Color part carried it: it is kept when Color or Shaders is applied | Checked |
 
-Parts are shown in the order Lighting, Color, Ambient Occlusion, Depth Blur, Edge Smoothing, Performance, Shortcuts,
-Developer, in a two-column grid (icon and label left, 20-unit checkbox right) that falls back to one column when
+Parts are shown in the order Lighting, Color, Shaders (Lucide `swatch-book`), Ambient Occlusion, Depth Blur, Edge Smoothing, Performance, Shortcuts,
+Capture (Lucide `camera`), Developer, in a two-column grid (icon and label left, 20-unit checkbox right) that falls back to one column when
 translated labels do not fit.
 
 - A simple toolbar contains Save current, Import, Export and Open the presets folder, without an enclosing card or repeated descriptions.
   It wraps buttons when the available width is narrow. Save current is violet. All preset
   buttons, including modal footers and the folder action, use the compact 30-unit size, matching Apply.
 - Save current, Import, Export and Apply use native Violet modals: the existing card header, Lucide icon picker,
-  name field, category grid, notes and footer buttons. Shortcuts and Developer start unchecked. Names keep their
+  name field, category grid, notes and footer buttons. Shortcuts, Capture and Developer start unchecked. Names keep their
   original spelling. Save asks before replacing an existing preset; Import requires a new name.
 - Export keeps the source, name and category checklist visible in the original single form. Label-to-field and
   section spacing use shared tokens; the icon selector, name input and footer retain the compact shared size.
   Export uses current settings or an existing preset. If the selected Color part references a LUT, the output is one
-  ZIP containing `profile.toml` and `LUTs/<filename>`, including a currently disabled LUT. Otherwise it is a `.toml`.
-  There is no separate inclusion checkbox. The native file picker runs outside the render thread.
+  ZIP containing `profile.toml` and `LUTs/<filename>`, including a currently disabled LUT; a `looks:` or `gshade:` look
+  of the Shaders part adds `Looks/<filename>` and the exported reference becomes `looks:<filename>`. When the look uses
+  the player's own files (Apex Radiance\Shaders\Shaders and Textures), a checkbox "Include my own .fx files"
+  (unchecked) adds them as `Shaders/Shaders/<name>.fx|.fxh` and `Shaders/Textures/<image>`: the .fx files the look
+  names, the .fxh they `#include` and the textures they name (`source = "..."`), at most 64 files, 2 MB per .fx/.fxh and
+  16 MB per texture. Otherwise it is a `.toml`. The native file picker runs outside the render thread.
 - Import accepts legacy `.toml` or an unchanged ZIP exported by Apex. The ZIP uses stored entries, not compression;
   imports reject other archive layouts, traversal, unsupported entries and failed checksums. The preset is saved in
-  `Profiles`, the LUT in `LUTs`. Identical LUT bytes reuse the existing file; a different file with the same name gets
-  a numbered suffix and the preset reference changes with it. Existing presets are never overwritten by import.
+  `Profiles`, the LUT in `LUTs`, the look in `Looks`, shader files in `Shaders\Shaders` and `Shaders\Textures`. Identical LUT, look or
+  shader bytes reuse the existing file; a different file with the same name gets a numbered suffix (for a LUT or a look the
+  preset reference changes with it; a renamed shader file is not referenced by the look). Existing presets and files are
+  never overwritten by import. After the import, packs the preset names that are on ReShade's list and not downloaded are
+  offered in a note card "Imported: <preset>" / "This preset uses shaders from <packs>, which you don't have yet" with
+  *Download …* and *Not now*, on the Presets page and on Shaders > Look.
 - Ellipsis menus share the identified action popup: the preset/filter name appears in a muted header above a divider;
   actions are full-width compact rows with aligned Lucide icons and text, without individual button borders.
   Preset menus use this component, including disabled actions and keyboard navigation.
@@ -271,7 +300,7 @@ translated labels do not fit.
   preset shows a success-green "Applied" chip after its name; the last applied one, once changed, shows the changed dot
   ([presets.md](features/presets.md#settings)). An assigned shortcut shows as a tag left of the ellipsis; its modal uses the
   native card header, a full-width read-only key field and right-aligned Cancel then Save
-  ([presets.md](features/presets.md#shortcuts)). Apply applies every part the preset has except Shortcuts and Developer in one click (a preset with only those opens the category modal); "Apply some parts…", first in the ellipsis menu, opens the category modal. Import can
+  ([presets.md](features/presets.md#shortcuts)). Apply applies every part the preset has except Shortcuts, Capture and Developer in one click (a preset with only those opens the category modal); "Apply some parts…", first in the ellipsis menu, opens the category modal. Import can
   optionally apply the imported settings after saving. Developer activation still requires its existing confirmation.
 - Applying = `ReadProfile` + `KeepProfileParts` + `ApplyFeatureState` (live, autosaved), log
   `[Menu] Profile loaded: <name> (parts 0x..)`, and the undo toast "<name> applied". Names are sanitised
@@ -280,7 +309,7 @@ translated labels do not fit.
 
 ## Generated folders
 
-`Profiles`, `LUTs`, `Captures` and `Screenshots` keep their existing paths; internal profile keys and part bits are
+`Profiles`, `LUTs`, `Looks` (created on first use), `Captures` and `Screenshots` keep their existing paths; internal profile keys and part bits are
 unchanged. Player settings and logs stay at the root so older builds and report tools remain compatible.
 Developer mode writes its per-session files (`MemoryAnalysis`, `GameplayMemory`, `GameCategories`, `AddressOwners`,
 `LotLoadAnalysis`, `RoomLampProbe`, plus the `calib_*.bmp` map comparisons) to `Diagnostics\`
@@ -475,7 +504,7 @@ credited in Settings > About.
 - `ui/lucide_data.h`: each icon's SVG elements as data (path `d` strings, circles, rects, lines, `filled` dots). No
   build step: to add one, copy its elements from the `.svg`, append it to `kIcons` and to `ApexUi::IconId` in the same
   order (a `static_assert` checks the count). Ten icons (search, undo-2, chevron-left, chevrons-left, chevrons-right,
-  check, gauge, eye, bookmark, trash-2) were entered by hand from Lucide's published icons; if one looks off, replace
+  check, gauge, eye, bookmark, trash-2), and later package and library (Image > Shaders), were entered by hand from Lucide's published icons; if one looks off, replace
   its data from the downloaded `.svg`.
 - `ui/icons.cpp`: paths are parsed on first use (M L H V C S Q T A Z, absolute and relative; arcs by the SVG
   endpoint-to-centre conversion), flattened to polylines in the 24x24 viewBox and cached. Drawing uses
@@ -489,9 +518,13 @@ credited in Settings > About.
 "Apex Radiance by @loinyx."; "Sims3SettingsSetter by sims3fiend: project origin and framework reference."; "FXAA 3.11:
 Timothy Lottes (NVIDIA)."; "FidelityFX CAS: AMD (MIT)."; "Upper-floor ground light: Arro's technique, adapted in Apex
 Radiance."; "Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga."; "Thanks to @boringbones
-for testing every build."; "RTX Remix bridge: NVIDIA (MIT), ported to The Sims 3 by dalexlol and alexvixell35-stack in
+for testing every build."; "Looks and Capture: contributed by @ModestPixels."; "ReShade shaders in Looks: CeeJay.dk
+(SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint)."; "ReShade FX compiler: crosire (BSD-3-Clause)."; "Shader packs: downloaded from their authors' GitHub, under each author's licence."; "RTX Remix bridge: NVIDIA (MIT), ported to The Sims 3 by dalexlol and alexvixell35-stack in
 sims3-modernization; DXVK by Philip Rebohle (zlib)."; "Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et
-al. (MIT), Lucide icons (ISC)." Arro's technique is also credited in the README. Functional notices about official
+al. (MIT), miniz (MIT), Lucide icons (ISC)." Under them, a folded *Third-party licenses* section shows the full licence texts of
+the ReShade shaders (`third_party/reshade_shaders/reshade_licenses.h`, from `LICENSES.md`) and of the ReShade FX compiler
+(`third_party/reshadefx/reshadefx_license.h`) and of miniz (`third_party/miniz/miniz_license.h`) as wrapped muted text under wrapped titles, untranslated.
+Arro's technique is also credited in the README. Functional notices about official
 S3SS's own fix ("Already handled by Sims3SettingsSetter (its Split-Level Lighting Fix is on)") are shown where relevant;
 Sims3SettingsSetter also appears in compatibility notices, detection, the recommendation card and the settings migration.
 

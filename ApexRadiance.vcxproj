@@ -67,6 +67,8 @@
       <EnableUAC>false</EnableUAC>
       <AdditionalDependencies>imgui.lib;detours.lib;d3d9.lib;d3dcompiler.lib;dxguid.lib;psapi.lib;shell32.lib;delayimp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(ApexVcpkgRoot)lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <!-- Media Foundation (video recording) is missing on Windows N editions: loaded at the first recording, never at start -->
+      <DelayLoadDLLs>mfplat.dll;mfreadwrite.dll;%(DelayLoadDLLs)</DelayLoadDLLs>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -170,6 +172,43 @@
     <ClCompile Include="features\room_map_dither.cpp" />
     <ClCompile Include="features\picture.cpp" />
     <ClCompile Include="features\post_scene.cpp" />
+    <ClCompile Include="features\apex_capture.cpp" />
+    <ClCompile Include="features\mkv_remux.cpp" />
+    <ClCompile Include="features\video_mp4.cpp" />
+    <ClCompile Include="features\looks_runner.cpp" />
+    <ClCompile Include="features\looks_fx.cpp" />
+    <ClCompile Include="features\looks_fx_catalog.cpp" />
+    <ClCompile Include="features\looks_packs.cpp" />
+    <ClCompile Include="third_party\miniz\miniz.c" />
+    <ClCompile Include="third_party\reshadefx\effect_lexer.cpp">
+      <AdditionalOptions>/Zc:char8_t- %(AdditionalOptions)</AdditionalOptions>
+      <PreprocessorDefinitions>_SILENCE_CXX20_U8PATH_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="third_party\reshadefx\effect_preprocessor.cpp">
+      <AdditionalOptions>/Zc:char8_t- %(AdditionalOptions)</AdditionalOptions>
+      <PreprocessorDefinitions>_SILENCE_CXX20_U8PATH_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="third_party\reshadefx\effect_parser_exp.cpp">
+      <AdditionalOptions>/Zc:char8_t- %(AdditionalOptions)</AdditionalOptions>
+      <PreprocessorDefinitions>_SILENCE_CXX20_U8PATH_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="third_party\reshadefx\effect_parser_stmt.cpp">
+      <AdditionalOptions>/Zc:char8_t- %(AdditionalOptions)</AdditionalOptions>
+      <PreprocessorDefinitions>_SILENCE_CXX20_U8PATH_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="third_party\reshadefx\effect_symbol_table.cpp">
+      <AdditionalOptions>/Zc:char8_t- %(AdditionalOptions)</AdditionalOptions>
+      <PreprocessorDefinitions>_SILENCE_CXX20_U8PATH_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="third_party\reshadefx\effect_expression.cpp">
+      <AdditionalOptions>/Zc:char8_t- %(AdditionalOptions)</AdditionalOptions>
+      <PreprocessorDefinitions>_SILENCE_CXX20_U8PATH_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="third_party\reshadefx\effect_codegen_hlsl.cpp">
+      <AdditionalOptions>/Zc:char8_t- %(AdditionalOptions)</AdditionalOptions>
+      <PreprocessorDefinitions>_SILENCE_CXX20_U8PATH_DEPRECATION_WARNING;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <ClCompile Include="features\looks_preset.cpp" />
     <ClCompile Include="features\refpack_codec.cpp" />
     <ClCompile Include="features\resource_cache.cpp" />
     <ClCompile Include="features\rig_tracker.cpp" />
@@ -210,6 +249,7 @@
     <ClCompile Include="patches\depth_blur_patch.cpp" />
     <ClCompile Include="patches\edge_smoothing_patch.cpp" />
     <ClCompile Include="patches\frame_capture_patch.cpp" />
+    <ClCompile Include="patches\looks_patch.cpp" />
     <ClCompile Include="patches\night_terrain_relight_patch.cpp" />
     <ClCompile Include="patches\performance_patches.cpp" />
     <ClCompile Include="patches\split_level_ground_light_patch.cpp" />
@@ -275,6 +315,9 @@
     <ClInclude Include="features\render_object_map.h" />
     <ClInclude Include="features\tree_light_rig.h" />
     <ClInclude Include="features\captures.h" />
+    <ClInclude Include="features\apex_capture.h" />
+    <ClInclude Include="features\mkv_remux.h" />
+    <ClInclude Include="features\video_mp4.h" />
     <ClInclude Include="features\no_scene_trace.h" />
     <ClInclude Include="features\vulkan_driver_guard.h" />
     <ClInclude Include="features\address_space.h" />
@@ -356,6 +399,22 @@
     <ClInclude Include="features\object_light_bridge.h" />
     <ClInclude Include="features\room_map_dither.h" />
     <ClInclude Include="features\picture.h" />
+    <ClInclude Include="features\looks_runner.h" />
+    <ClInclude Include="features\looks_fx.h" />
+    <ClInclude Include="features\looks_packs.h" />
+    <ClInclude Include="features\looks_packs_index.h" />
+    <ClInclude Include="third_party\miniz\miniz.h" />
+    <ClInclude Include="third_party\miniz\miniz_license.h" />
+    <ClInclude Include="third_party\reshadefx\effect_codegen.hpp" />
+    <ClInclude Include="third_party\reshadefx\effect_expression.hpp" />
+    <ClInclude Include="third_party\reshadefx\effect_lexer.hpp" />
+    <ClInclude Include="third_party\reshadefx\effect_module.hpp" />
+    <ClInclude Include="third_party\reshadefx\effect_parser.hpp" />
+    <ClInclude Include="third_party\reshadefx\effect_preprocessor.hpp" />
+    <ClInclude Include="third_party\reshadefx\effect_symbol_table.hpp" />
+    <ClInclude Include="third_party\reshadefx\effect_token.hpp" />
+    <ClInclude Include="features\looks_preset.h" />
+    <ClInclude Include="features\looks_shaders.h" />
     <ClInclude Include="features\post_scene.h" />
     <ClInclude Include="features\refpack_codec.h" />
     <ClInclude Include="features\resource_cache.h" />
@@ -404,6 +463,7 @@
     <ClInclude Include="framework\scene_target_logic.h" />
     <ClInclude Include="framework\shader_cache.h" />
     <ClInclude Include="framework\slot_chain.h" />
+    <ClInclude Include="patches\looks.h" />
     <ClInclude Include="patches\night_lighting.h" />
     <ClInclude Include="patches\performance.h" />
     <ClInclude Include="shaders\floor_atlas_table.h" />
@@ -418,6 +478,9 @@
     <ClInclude Include="third_party\smaa\AreaTex.h" />
     <ClInclude Include="third_party\smaa\SearchTex.h" />
     <ClInclude Include="third_party\smaa\smaa_hlsl.h" />
+    <ClInclude Include="third_party\reshade_shaders\reshade_shaders_hlsl.h" />
+    <ClInclude Include="third_party\reshade_shaders\reshade_licenses.h" />
+    <ClInclude Include="third_party\reshadefx\reshadefx_license.h" />
     <ClInclude Include="ui\icons.h" />
     <ClInclude Include="ui\logo.h" />
     <ClInclude Include="ui\logo_data.h" />
@@ -432,8 +495,30 @@
     <None Include="shaders\roof_ps.hlsl" />
     <None Include="shaders\roof_snow_lamps_ps.hlsl" />
     <None Include="shaders\water_lamps_ps.hlsl" />
+    <None Include="shaders\looks_common.hlsl" />
     <None Include="third_party\smaa\SMAA.hlsl" />
     <None Include="third_party\smaa\LICENSE.txt" />
+    <None Include="third_party\reshade_shaders\AdaptiveSharpen.hlsl" />
+    <None Include="third_party\reshade_shaders\CAS.hlsl" />
+    <None Include="third_party\reshade_shaders\Colourfulness.hlsl" />
+    <None Include="third_party\reshade_shaders\Curves.hlsl" />
+    <None Include="third_party\reshade_shaders\DPX.hlsl" />
+    <None Include="third_party\reshade_shaders\FakeHDR.hlsl" />
+    <None Include="third_party\reshade_shaders\Levels.hlsl" />
+    <None Include="third_party\reshade_shaders\LiftGammaGain.hlsl" />
+    <None Include="third_party\reshade_shaders\LumaSharpen.hlsl" />
+    <None Include="third_party\reshade_shaders\PD80SelectiveColor.hlsl" />
+    <None Include="third_party\reshade_shaders\RetroTint.hlsl" />
+    <None Include="third_party\reshade_shaders\Technicolor.hlsl" />
+    <None Include="third_party\reshade_shaders\Technicolor2.hlsl" />
+    <None Include="third_party\reshade_shaders\Tint.hlsl" />
+    <None Include="third_party\reshade_shaders\Tonemap.hlsl" />
+    <None Include="third_party\reshade_shaders\Vibrance.hlsl" />
+    <None Include="third_party\reshade_shaders\Vignette.hlsl" />
+    <None Include="third_party\reshade_shaders\LICENSES.md" />
+    <None Include="third_party\reshadefx\LICENSE.md" />
+    <None Include="third_party\miniz\LICENSE" />
+    <None Include="third_party\reshadefx\effect_symbol_table_intrinsics.inl" />
     <None Include="third_party\lucide\LICENSE" />
     <None Include="vcpkg.json" />
   </ItemGroup>

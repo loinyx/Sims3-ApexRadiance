@@ -280,6 +280,29 @@
                                     </StackPanel>
                                 </StackPanel>
                             </Border>
+                            <Border Style="{StaticResource ApexCard}">
+                                <Grid ColumnSpacing="14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
+                                        <FontIcon Glyph="&#xE72C;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="Restart host" Style="{StaticResource ApexStrong}" />
+                                        <TextBlock Text="After a save made low on memory, offers to start the game again into that save when you quit." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="RestartPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <Border Grid.Column="2" Style="{StaticResource ApexPill}" VerticalAlignment="Center">
+                                        <TextBlock Text="Experimental" FontSize="11" Foreground="{StaticResource ApexMutedBrush}" />
+                                    </Border>
+                                    <ToggleSwitch x:Name="RestartToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnToggle"
+                                                  AutomationProperties.Name="Restart host" />
+                                </Grid>
+                            </Border>
                         </StackPanel>
 
                         <!-- 3 Install -->

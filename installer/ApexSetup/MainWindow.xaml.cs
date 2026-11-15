@@ -36,7 +36,7 @@ public sealed partial class MainWindow : Window
     static readonly Dictionary<string, string> Repo = new()
     {
         [Components.Apex] = Releases.Apex, [Components.Bridge] = Releases.Apex, [Components.Loader] = Releases.AsiLoader, [Components.Dxvk] = Releases.Dxvk, [Components.MonoPatcher] = Releases.MonoPatcher,
-        [Components.S3ss] = Releases.S3ss, [Components.Modernization] = Releases.Modernization,
+        [Components.S3ss] = Releases.S3ss, [Components.Modernization] = Releases.Modernization, [Components.RestartHost] = Releases.Apex,
     };
 
     public MainWindow()
@@ -203,6 +203,7 @@ public sealed partial class MainWindow : Window
             Components.Bridge => (s.Layer == Layer.Bridge, "", ""),
             Components.Dxvk => (s.Layer == Layer.Dxvk, "", ""),
             Components.MonoPatcher => (s.MonoPatcher, "", ""),
+            Components.RestartHost => (s.RestartHost, "", ""),
             _ => (s.ApexVersion is not null, "", ""),
         };
         if (!present) return null;
@@ -566,7 +567,8 @@ public sealed partial class MainWindow : Window
             CardRow(StatusList, new TextBlock { Text = name, FontSize = 14 }, value, good ? "ApexMutedBrush" : "ApexAccentBrush");
         Row("Apex Radiance", test ? T("{0} \u00b7 test build", s.ApexVersion!) : State(Components.Apex), !test && !Updates().Contains(Components.Apex));
         Row(T("Graphics"), LayerName(s.Layer), true);
-        foreach (var (c, name, present) in new[] { (Components.S3ss, "Sims3SettingsSetter", s.S3ss), (Components.Modernization, "Sims 3 Modernization", s.Modernization), (Components.MonoPatcher, "MonoPatcher", s.MonoPatcher) })
+        foreach (var (c, name, present) in new[] { (Components.S3ss, "Sims3SettingsSetter", s.S3ss), (Components.Modernization, "Sims 3 Modernization", s.Modernization), (Components.MonoPatcher, "MonoPatcher", s.MonoPatcher),
+                     (Components.RestartHost, T("Restart host"), s.RestartHost) })
             if (present) Row(name, State(c), !Updates().Contains(c));
 
         // the problems and suggestions, between the rows and the buttons
@@ -627,7 +629,7 @@ public sealed partial class MainWindow : Window
         if (s.ApexVersion is { } a && (a == "?" || Newer(Latest(Components.Apex), a) && !TestBuildNow())) l.Add(Components.Apex);
         if (s.Layer == Layer.Bridge && Newer(Latest(Components.Bridge), s.Installed(Components.Bridge) ?? "")) l.Add(Components.Bridge);
         if (s.Layer == Layer.Dxvk && s.Installed(Components.Dxvk) is { } d && Newer(Latest(Components.Dxvk), d)) l.Add(Components.Dxvk);
-        foreach (var c in new[] { Components.S3ss, Components.Modernization, Components.MonoPatcher })
+        foreach (var c in new[] { Components.S3ss, Components.Modernization, Components.MonoPatcher, Components.RestartHost })
             if (Known(c) is { Length: > 0 } v && Newer(Latest(c), v)) l.Add(c);
         return l;
     }
@@ -773,6 +775,7 @@ public sealed partial class MainWindow : Window
         S3ssToggle.IsOn = s.S3ss; // (optional mods start off unless installed)
         ModToggle.IsOn = s.Modernization;
         MonoToggle.IsOn = s.MonoPatcher;
+        RestartToggle.IsOn = s.RestartHost; // (experimental: off unless on already)
         // no longer offered (no mod Setup installs needs it, and it crashed the launcher on some PCs): shown only to keep or remove it
         MonoCard.Visibility = s.MonoPatcher ? Visibility.Visible : Visibility.Collapsed;
         S3ppToggle.IsOn = true;
@@ -827,8 +830,8 @@ public sealed partial class MainWindow : Window
     {
         var (title, desc) = r switch
         {
-            RDxvk => (T("Vulkan, DXVK (recommended)"), T("Fewer stutters; Apex Radiance is made and tested with it.")),
-            RBridge => (T("Vulkan with more memory (RTX Remix bridge)"), T("Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK.")),
+            RDxvk => (T("Vulkan, DXVK"), T("Fewer stutters; Apex Radiance is made and tested with it.")),
+            RBridge => (T("Vulkan with more memory (RTX Remix bridge, recommended)"), T("Keeps about 600 MB more memory free for big worlds. Needs a Vulkan graphics card. If the game misbehaves with it, choose DXVK.")),
             RNative => (T("Windows default (Direct3D 9)"), T("Works, but Apex Radiance is tested with DXVK.")),
             _ => (T("Keep my d3d9.dll"), T("Your d3d9.dll stays as it is.")),
         };
@@ -885,6 +888,11 @@ public sealed partial class MainWindow : Window
         SetState(S3ssPill, StateLine(Components.S3ss, S3ssToggle.IsOn, s.S3ss, false));
         SetState(ModPill, StateLine(Components.Modernization, ModToggle.IsOn, s.Modernization, s.Ts3NativeWrongBuild));
         SetState(MonoPill, StateLine(Components.MonoPatcher, MonoToggle.IsOn, s.MonoPatcher, false));
+        // Setup does not write Apex's settings before Apex has copied the older ones (Engine.RestartHostWaits)
+        var waits = !s.RestartHost && Engine.RestartHostWaits(Scan.DocumentsFor(g));
+        RestartToggle.IsEnabled = !waits;
+        if (waits) RestartToggle.IsOn = false;
+        SetState(RestartPill, waits ? (T(Engine.RestartHostWaitsText), "ApexMutedBrush") : StateLine(Components.RestartHost, RestartToggle.IsOn, s.RestartHost, false));
         SetState(S3ppPill, S3ppPresent ? (S3ppToggle.IsOn ? (T("Installed"), "ApexMutedBrush") : (T("Will be removed"), "ApexWarningBrush"))
             : _s3ppArchive is not null ? (T("Ready to install"), "ApexAccentBrush") : (T("Not installed"), "ApexMutedBrush"));
         S3ppToggle.Visibility = Visibility.Visible;
@@ -957,6 +965,7 @@ public sealed partial class MainWindow : Window
         }
         Optional(Components.S3ss, S3ssToggle.IsOn, s.S3ss, NeedsUpdate(Components.S3ss));
         Optional(Components.MonoPatcher, MonoToggle.IsOn, s.MonoPatcher, NeedsUpdate(Components.MonoPatcher));
+        Optional(Components.RestartHost, RestartToggle.IsOn, s.RestartHost, NeedsUpdate(Components.RestartHost));
         // Sims 3 Performance Patch: installed from the player's own download only
         if (S3ppPresent && !S3ppToggle.IsOn) del.Add(Components.S3pp);
         if (!S3ppPresent && _s3ppArchive is not null && _s3ppFor == g.Bin) add.Add(Components.S3pp);
@@ -1033,7 +1042,7 @@ public sealed partial class MainWindow : Window
         });
     }
 
-    static string Name(string c) => Components.Name(c);
+    static string Name(string c) => T(Components.Name(c));
 
     // ---------- install ----------
 
@@ -1095,8 +1104,8 @@ public sealed partial class MainWindow : Window
             await Task.Run(async () =>
             {
                 using (point = dels.Count == 0 && order.Count == 0 ? RestorePoints.Begin(g.Bin, "Fix incompatible settings")
-                    : dels.Count == 0 ? RestorePoints.Begin(g.Bin, "Install {0}", string.Join(", ", order.Select(Name)))
-                    : order.Count == 0 ? RestorePoints.Begin(g.Bin, "Remove {0}", string.Join(", ", dels.Select(Name)))
+                    : dels.Count == 0 ? RestorePoints.Begin(g.Bin, "Install {0}", string.Join(", ", order.Select(Components.Name)))
+                    : order.Count == 0 ? RestorePoints.Begin(g.Bin, "Remove {0}", string.Join(", ", dels.Select(Components.Name)))
                     : RestorePoints.Begin(g.Bin, "Change components"))
                 {
                     foreach (var c in dels) { touched = true; Engine.Remove(g, c); }
@@ -1203,6 +1212,7 @@ public sealed partial class MainWindow : Window
         if (S3ppPresent) ManageRow("Sims 3 Performance Patch", T("Removes Sims3Performance.asi and its .ini."), T("Remove"), () => RemoveAsync(Components.S3pp));
         if (s.MonoPatcher) ManageRow("MonoPatcher", T("Removes MonoPatcher.asi and its package."), T("Remove"), () => RemoveAsync(Components.MonoPatcher));
         if (s.S3ss) ManageRow("Sims3SettingsSetter", T("Removes Sims3SettingsSetter.asi."), T("Remove"), () => RemoveAsync(Components.S3ss));
+        if (s.RestartHost) ManageRow(T("Restart host"), T("Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."), T("Remove"), () => RemoveAsync(Components.RestartHost));
         if (s.Modernization) ManageRow("Sims 3 Modernization", T("Removes ts3native and ts3fixes.package."), T("Remove"), () => RemoveAsync(Components.Modernization));
         ManageRow(T("Uninstall everything"), T("Removes what Setup installed, and Apex Radiance, and puts back every file Setup replaced."), T("Uninstall"), UninstallAll, danger: true);
 
@@ -1262,7 +1272,7 @@ public sealed partial class MainWindow : Window
     {
         if (_game is not { } g || _busy || _running) return;
         if (!await Confirm(T("Remove {0}?", Name(c)), T("Close the game first. Setup removes the files and puts back the ones it replaced."), T("Remove"))) return;
-        await Guarded(() => Engine.Remove(g, c), T("{0} removed.", Name(c)), label: "Remove {0}", args: Name(c));
+        await Guarded(() => Engine.Remove(g, c), T("{0} removed.", Name(c)), label: "Remove {0}", args: Components.Name(c));
     }
 
     async Task UninstallAll()
@@ -1281,6 +1291,7 @@ public sealed partial class MainWindow : Window
         if (s.Layer == Layer.Dxvk && s.Installed(Components.Dxvk) is not null) l.Add(Components.Dxvk);
         if (s.S3ss) l.Add(Components.S3ss);
         if (s.MonoPatcher) l.Add(Components.MonoPatcher);
+        if (s.RestartHost) l.Add(Components.RestartHost);
         if (s.Modernization && _game!.ModernizationSupported) l.Add(Components.Modernization);
         if (Engine.NeedsLoader(s, false)) l.Add(Components.Loader);
         return InstallAsync(l);

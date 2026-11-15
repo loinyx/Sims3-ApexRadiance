@@ -16,7 +16,8 @@
 
 namespace Hotkeys {
 
-enum class Action : int { Compare, Refresh, Probe, Diagnostics, Recorder, Screenshot, FrameCapture, Count };
+// LooksToggle: a fixed key of its own ([ui] looks_key), not part of the presets
+enum class Action : int { Compare, Refresh, Probe, Diagnostics, Recorder, Screenshot, FrameCapture, LooksToggle, Count };
 enum class Preset : int { Letters, Numbers, FKeys, Count };
 inline constexpr int kMine = 3; // [ui] hotkey_preset "mine": the player's own keys (compare_key, refresh_key), the rest from mine_base
 

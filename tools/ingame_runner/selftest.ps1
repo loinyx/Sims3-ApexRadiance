@@ -129,6 +129,11 @@ $md = Format-Results $res 'Self-test'
 Check ($md -match '### x-1-off' -and $md -match '\| harness step \| 2 \|' -and $md -match '\| camera_pan \| 1 \|' -and $md -match '\| services \| 1 \|') 'load detail: excluded, harness cost, slow frames'
 Check ($md -match '\| iterations \| 300 \| 1, ' -and $md -match '\| visible freezes \| 300 \|' -and $md -match 'not enough events \(3 < 10\)') 'pair rows with intervals and the verdict rule'
 Check ($md -match 'Left out \(invalid\): x-3-on \(noisy machine' -and $md -match 'INVALID: noisy') 'invalid loads named and left out of the pair'
+$res = @([pscustomobject]@{ Name = 'y-1-off'; JobId = 'y'; Variant = 'off'; Ok = $true; Closed = 'quit'; Frames = $null; Sim = $null; Notes = @(); Info = @('largest free block 900 MB (after the pan)'); FreeMB = 900 },
+         [pscustomobject]@{ Name = 'y-2-on'; JobId = 'y'; Variant = 'on'; Ok = $true; Closed = 'quit'; Frames = $null; Sim = $null; Notes = @(); Info = @('1 *.mp4 in captures: a.mp4 1.50 MB'); FreeMB = 880 },
+         [pscustomobject]@{ Name = 'y-3-on'; JobId = 'y'; Variant = 'on'; Ok = $true; Closed = 'quit'; Frames = $null; Sim = $null; Notes = @(); FreeMB = 860 })
+$md = Format-Results $res 'Self-test'
+Check ($md -match '\| y-1-off \| pass \|.*largest free block 900 MB' -and $md -match 'a\.mp4 1\.50 MB' -and $md -match '\| on \| 2 \| 2 \| .* \| 870 \|') 'memory and file readings in the notes, free block mean per variant'
 
 # Results: progress lines go to the host, so a load returns exactly one row; exit code 0 / 1 / 2
 function Test-Load { Say 'starting the game'; Say '  test agent: 30 s'; [pscustomobject]@{ Name = 'x-1-on'; Ok = $false } }
@@ -299,6 +304,8 @@ try {
     Check ($reply.ok -and $reply.result.echo.cmd -eq 'game_state' -and $reply.result.echo.args.x -eq 1) 'request and reply round trip'
     $b1 = $client.Heartbeat; Start-Sleep -Milliseconds 100
     Check ($client.Heartbeat -ne $b1) 'heartbeat moves'
+    $free = $client.LargestFree()
+    Check ($free -gt 1MB -and $free -le 0xFFFF0000L) "largest free block read below 4 GB ($([math]::Round($free / 1MB)) MB)"
 } finally { $client.Dispose(); [FakeAgent]::Stop() }
 
 Write-Output "$($script:checks) checks, $($script:failures) failures"

@@ -237,10 +237,14 @@ Follow the [build workflow](docs/workflow.md#1-build) for dependency paths, publ
 - Lot Streaming and the daytime bloom fixes: research and code by [idavidveiga](https://github.com/idavidveiga).
 - Edge Smoothing's FXAA mode follows FXAA 3.11 by Timothy Lottes (NVIDIA).
 - The restart host (`ts3wrap.exe`) is adapted from Dalexlol's wrapper in [sims3-modernization](https://github.com/rodneypantonial/sims3-modernization).
+- Looks and Capture: contributed by [@ModestPixels](https://github.com/ModestPixels).
+- ReShade shaders in Looks: [CeeJay.dk](https://github.com/CeeJayDK/SweetFX) (SweetFX, MIT), bacondither (AdaptiveSharpen and Colourfulness, BSD 2-Clause style, from [reshade-shaders](https://github.com/crosire/reshade-shaders/tree/legacy)), [prod80](https://github.com/prod80/prod80-ReShade-Repository) (MIT), AMD (FidelityFX CAS, MIT), [Daodan317081](https://github.com/Daodan317081/reshade-shaders) (RetroTint, BSD 3-Clause); see `third_party/reshade_shaders/LICENSES.md`.
+- ReShade FX compiler by [crosire](https://github.com/crosire/reshade), BSD-3-Clause: it compiles the players' own .fx shaders in Looks; see `third_party/reshadefx/LICENSE.md`.
+- Shader packs in Looks: the packs of [ReShade's official list](https://github.com/crosire/reshade-shaders/tree/list), downloaded by the player from each author's GitHub, under each author's licence; Apex does not include them.
 - Thanks to @boringbones for testing every build.
 - The optional RTX Remix bridge download is [NVIDIA's RTX Remix bridge](https://github.com/NVIDIAGameWorks/dxvk-remix) (MIT), ported to The Sims 3 by dalexlol and alexvixell35-stack in sims3-modernization, with [DXVK](https://github.com/doitsujin/dxvk) by Philip Rebohle (zlib).
 - The in-game test runner (`tools/ingame_runner/`) is adapted from [sims3-modernization](https://github.com/rodneypantonial/sims3-modernization) (MIT), its test agent forked from [Sims3-MCP](https://github.com/Critical-Reynolds/Sims3-MCP) (MIT).
-- Third-party code: [Dear ImGui](https://github.com/ocornut/imgui) (MIT), [Microsoft Detours](https://github.com/microsoft/Detours) (MIT), [toml++](https://github.com/marzer/tomlplusplus) (MIT), [SMAA](https://github.com/iryoku/smaa) by Jorge Jimenez et al. (see `third_party/smaa/LICENSE.txt`), the texture sharpening after [AMD FidelityFX CAS](https://github.com/GPUOpen-Effects/FidelityFX-CAS) (MIT), [Lucide](https://lucide.dev) icons (ISC, see `third_party/lucide/LICENSE`).
+- Third-party code: [Dear ImGui](https://github.com/ocornut/imgui) (MIT), [Microsoft Detours](https://github.com/microsoft/Detours) (MIT), [toml++](https://github.com/marzer/tomlplusplus) (MIT), [SMAA](https://github.com/iryoku/smaa) by Jorge Jimenez et al. (see `third_party/smaa/LICENSE.txt`), [miniz](https://github.com/richgel999/miniz) (MIT, see `third_party/miniz/LICENSE`), the texture sharpening after [AMD FidelityFX CAS](https://github.com/GPUOpen-Effects/FidelityFX-CAS) (MIT), [Lucide](https://lucide.dev) icons (ISC, see `third_party/lucide/LICENSE`).
 
 ### Contributors
 

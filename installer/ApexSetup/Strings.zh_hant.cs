@@ -183,8 +183,8 @@ public static partial class Strings
         ["Keeps a copy of every file it changes, so you can undo everything."] = "為每個變更的檔案保留副本，讓你可以復原一切。",
         ["Your Apex Radiance settings are always kept."] = "一律保留你的 Apex Radiance 設定。",
         ["No internet connection"] = "沒有網際網路連線",
-        ["Vulkan, DXVK (recommended)"] = "Vulkan、DXVK（建議）",
-        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan，更多可用記憶體（RTX Remix bridge）",
+        ["Vulkan, DXVK"] = "Vulkan、DXVK",
+        ["Vulkan with more memory (RTX Remix bridge, recommended)"] = "Vulkan，更多可用記憶體（RTX Remix bridge、建議）",
         ["DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0})."] = "DXVK 和 RTX Remix bridge 需要支援 Vulkan 1.3 的顯示卡（偵測到：{0}）。",
         ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again."] = "顯示卡驅動程式太舊，無法使用 DXVK 和 RTX Remix bridge（缺少：{0}）。請更新顯示卡驅動程式，然後重新開啟 Setup。",
         ["{0} cannot start with this graphics driver (missing: {1}), so the game closes at start. Update the graphics driver, or choose Windows default (Direct3D 9) in Change components."] = "{0} 無法在此顯示卡驅動程式下啟動（缺少：{1}），因此遊戲會在啟動時關閉。請更新顯示卡驅動程式，或在「變更元件」中選擇「Windows 預設（Direct3D 9）」。",
@@ -237,5 +237,11 @@ public static partial class Strings
         ["A new Setup is available"] = "有新的安裝程式",
         ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Apex Radiance Setup {0} 已下載並驗證。更新安裝程式後它會重新開啟。",
         ["Update Setup"] = "更新安裝程式",
+        // restart host (experimental)
+        ["Restart host"] = "重新啟動遊戲",
+        ["Experimental"] = "實驗性",
+        ["After a save made low on memory, offers to start the game again into that save when you quit."] = "在記憶體不足時存檔後，離開遊戲時會詢問是否用該存檔重新啟動遊戲。",
+        ["Start the game once with Apex Radiance, then turn on the restart host here."] = "請先用 Apex Radiance 啟動一次遊戲，然後在這裡開啟重新啟動遊戲。",
+        ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "刪除 ts3wrap.exe，並在 ApexRadiance.toml 中關閉重新啟動遊戲。",
     };
 }

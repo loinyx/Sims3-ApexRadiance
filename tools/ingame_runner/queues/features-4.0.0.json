@@ -1,0 +1,9 @@
+{
+  "description": "The 4.0.0 features on the night save: Shaders off against on (ABBA, frame times and free memory), each built-in look once, and a screenshot and a short video. 10 game starts.",
+  "ab": true,
+  "jobs": [
+    "../jobs/looks-off-on.json",
+    "../jobs/looks-builtin.json",
+    "../jobs/capture.json"
+  ]
+}

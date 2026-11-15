@@ -213,8 +213,8 @@ public static partial class Strings
             "Uchová kopii každého souboru, který změní, takže můžete vše vrátit zpět.",
         ["Your Apex Radiance settings are always kept."] = "Vaše nastavení Apex Radiance se vždy zachová.",
         ["No internet connection"] = "Žádné připojení k internetu",
-        ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (doporučeno)",
-        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan s více pamětí (RTX Remix bridge)",
+        ["Vulkan, DXVK"] = "Vulkan, DXVK",
+        ["Vulkan with more memory (RTX Remix bridge, recommended)"] = "Vulkan s více pamětí (RTX Remix bridge, doporučeno)",
         ["DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0})."] = "DXVK a RTX Remix bridge vyžadují grafickou kartu s Vulkan 1.3 (nalezeno: {0}).",
         ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again."] = "Váš grafický ovladač je pro DXVK a RTX Remix bridge příliš starý (chybí: {0}). Aktualizujte grafický ovladač a pak znovu otevřete Setup.",
         ["{0} cannot start with this graphics driver (missing: {1}), so the game closes at start. Update the graphics driver, or choose Windows default (Direct3D 9) in Change components."] = "{0} se s tímto grafickým ovladačem nespustí (chybí: {1}), takže se hra hned při startu zavře. Aktualizujte grafický ovladač, nebo v Změnit komponenty zvolte Výchozí ve Windows (Direct3D 9).",
@@ -274,5 +274,11 @@ public static partial class Strings
         ["A new Setup is available"] = "Je k dispozici nový Setup",
         ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Apex Radiance Setup {0} byl stažen a ověřen. Aktualizuj Setup a znovu se otevře.",
         ["Update Setup"] = "Aktualizovat Setup",
+        // restart host (experimental)
+        ["Restart host"] = "Restart hry",
+        ["Experimental"] = "Experimentální",
+        ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Když uložíte hru s nedostatkem paměti, nabídne při ukončení spustit hru znovu s touto pozicí.",
+        ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Spusťte hru jednou s Apex Radiance a potom zde zapněte restart hry.",
+        ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "Odebere ts3wrap.exe a vypne restart hry v ApexRadiance.toml.",
     };
 }

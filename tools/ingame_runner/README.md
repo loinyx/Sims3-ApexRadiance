@@ -241,6 +241,12 @@ A job is a JSON file in `jobs/`, its `id` equal to the file name:
 | `vfx_burst` | `count` (16, at most 64), `radius` (8 m), `restartS` (4), `seconds` (600), `names` | Repro, in the background: see [Feature repros](#feature-repros) |
 | `mode` | `mode` (`build`, `buy`, `cas`, `edittown`, `live`), `seconds` (0) | Switches the world mode and waits for it, then stays `seconds` |
 | `stop_repros` | | Stops `camera_jumps` and `vfx_burst`, removes the spawned Sims and records the event counts in `results.md` |
+| `key` | `vk` (virtual-key code) | Posts one key press to the game window without focusing it: Apex's bare-key shortcuts. A modifier cannot be held this way (Apex reads Shift, Ctrl and Alt from the keyboard state), so a job sets a bare key for the shortcut it presses |
+| `memory` | `label` | Reads the game's largest free address block (below 4 GB) from outside the game; the reading goes into the load's notes and the last one into the A/B table |
+| `check_files` | `pattern`, `min` (1), `folder` (`captures`) | Counts the files matching `pattern` in the load folder's `folder`; fewer than `min` or an empty one fails the load. Sizes, and a video's length when `ffprobe` is on PATH, go into the notes |
+
+Each load sets the environment variable `APEX_RUNNER_CAPTURES` to its own `captures` folder before the game starts; a
+job that points Apex's screenshot or video folder at `%APEX_RUNNER_CAPTURES%` keeps its captures in the run's output.
 
 For a new feature: copy the closest job, set the `[patches.<Name>]` table (the feature's settings table names it),
 put the feature's start line in the `on` variant's `expect` (most features log `[<Tag>] On: ...` when they install)
@@ -308,6 +314,41 @@ pair rows for slow iterations and visible freezes. A feature that removes main-t
 led by its stage or service and a lower frames-over-50-ms rate with `on`; one that removes simulation work shows in
 the iteration and freeze rows. Below 10 events in both variants together the pair reads "not enough events": run more
 loads (the last column says how many) rather than reading the means.
+
+## Shaders and capture jobs
+
+`queues/features-4.0.0.json` runs the Shaders and capture jobs on the night save, 10 game starts of 4 to 15 minutes:
+
+```powershell
+./tools/ingame_runner/run.ps1 -GameBin '...\Game\Bin' -Queue tools/ingame_runner/queues/features-4.0.0.json -Save 'ApexTest-Night' -Profiler Frames
+```
+
+| Job | Loads | Checks | Read in `results.md` |
+|---|---|---|---|
+| `looks-off-on` | off, on, on, off: Shaders (`[patches.Looks]`) with `apex:Cinematic` at full strength, 10 measured minutes of night pan | on: `[Looks] Installed`, the look loaded with every shader built in, a `drawing ... drew` line; off: never installed; no `[Looks]` warning or error, no stopped or skipped shader | the A/B table: frame time p50 / p99 and frames over 50 ms per minute per variant (`-Profiler Frames`), and the largest free block after the pan |
+| `looks-builtin` | one start per built-in look: Natural, Warm evening, Cinematic, Soft vintage, Vivid | the same log checks for each look, and no crash | pass or fail per look; the largest free block per look in the notes |
+| `capture` | one start | F8 takes a filtered screenshot; F12 (set as the record key for the run) starts a video, again after 12 s stops it; a non-empty PNG and MP4 in the load's `captures` folder, `[Video] Video saved` in the log | the files, their sizes and the MP4's length (with `ffprobe` on PATH) in the notes; the files are in `<load>\captures` |
+
+`queues/world-only.json` runs `looks-world-only`: `apex:Cinematic` at full strength, one start with "World only"
+(`onUi = false`) and one with "World and menus" (`onUi = true`), each paused for a minute and then an F8 screenshot
+with the game UI hidden into the load's `captures` folder. Checks: world-only has a `drawing at the after the game's
+bloom ... drew` line (a load that only ever draws at the scene boundary fails it) and never draws at the end of frame;
+world-and-menus has a `drawing at the end of frame ... drew` line; the screenshot is written. Then compare the two
+screenshots (the newest PNG under each folder):
+
+```powershell
+python -I tools/ingame_runner/profilers/compare_pngs.py outputs/ingame/<run>/looks-world-only-1-world-only/captures outputs/ingame/<run>/looks-world-only-2-world-and-menus/captures
+```
+
+It prints each picture's mean RGB, saturation and luminance and their differences, and `PASS` (exit 0) when the mean
+luminance is within 2 levels and the mean saturation within 2 points (`--lum`, `--sat`): the same look on the world
+in both modes. Sims and effects still differ between game starts, so only the means are compared.
+
+Limits: how a look looks, and whether the screenshot and video show it, is for a person to judge (open the captures,
+or add `-Grab` to record the window in a separate run). The looks jobs keep the tester's own per-shader edits and
+switched-off shaders of `[patches.Looks]` (`tweaks`, `off`: arrays the runner does not write); a switched-off shader
+fails the load as skipped. The video is refused while the game's Edge Smoothing (multisampling) is on: the `capture`
+load then fails on `[Video] Not started`. The default record key Shift+F8 is not pressed: a posted key carries no Shift.
 
 ## Safety
 

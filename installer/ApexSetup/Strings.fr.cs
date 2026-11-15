@@ -219,8 +219,8 @@ public static partial class Strings
             "Garde une copie de chaque fichier modifié, pour que vous puissiez tout annuler.",
         ["Your Apex Radiance settings are always kept."] = "Vos paramètres Apex Radiance sont toujours conservés.",
         ["No internet connection"] = "Pas de connexion internet",
-        ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (recommandé)",
-        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan avec plus de mémoire (RTX Remix bridge)",
+        ["Vulkan, DXVK"] = "Vulkan, DXVK",
+        ["Vulkan with more memory (RTX Remix bridge, recommended)"] = "Vulkan avec plus de mémoire (RTX Remix bridge, recommandé)",
         ["DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0})."] = "DXVK et le RTX Remix bridge nécessitent une carte graphique compatible Vulkan 1.3 (trouvée : {0}).",
         ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again."] = "Votre pilote graphique est trop ancien pour DXVK et le RTX Remix bridge (manquant : {0}). Mettez à jour le pilote graphique, puis rouvrez Setup.",
         ["{0} cannot start with this graphics driver (missing: {1}), so the game closes at start. Update the graphics driver, or choose Windows default (Direct3D 9) in Change components."] = "{0} ne peut pas démarrer avec ce pilote graphique (manquant : {1}), donc le jeu se ferme au démarrage. Mettez à jour le pilote graphique ou choisissez Par défaut de Windows (Direct3D 9) dans Modifier les composants.",
@@ -281,5 +281,11 @@ public static partial class Strings
         ["A new Setup is available"] = "Un nouveau Setup est disponible",
         ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Apex Radiance Setup {0} a été téléchargé et vérifié. Mettez Setup à jour, il se rouvrira.",
         ["Update Setup"] = "Mettre Setup à jour",
+        // restart host (experimental)
+        ["Restart host"] = "Relance du jeu",
+        ["Experimental"] = "Expérimental",
+        ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Après une sauvegarde faite avec peu de mémoire, propose de relancer le jeu sur cette sauvegarde quand vous quittez.",
+        ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Lancez le jeu une fois avec Apex Radiance, puis activez ici la relance du jeu.",
+        ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "Supprime ts3wrap.exe et désactive la relance du jeu dans ApexRadiance.toml.",
     };
 }

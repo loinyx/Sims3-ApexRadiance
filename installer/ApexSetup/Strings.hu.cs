@@ -222,8 +222,8 @@ public static partial class Strings
             "Minden módosított fájlról másolatot készít, így mindent visszavonhatsz.",
         ["Your Apex Radiance settings are always kept."] = "Az Apex Radiance beállításaid mindig megmaradnak.",
         ["No internet connection"] = "Nincs internetkapcsolat",
-        ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (ajánlott)",
-        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan több memóriával (RTX Remix bridge)",
+        ["Vulkan, DXVK"] = "Vulkan, DXVK",
+        ["Vulkan with more memory (RTX Remix bridge, recommended)"] = "Vulkan több memóriával (RTX Remix bridge, ajánlott)",
         ["DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0})."] = "A DXVK-hoz és az RTX Remix bridge-hez Vulkan 1.3-at támogató videokártya kell (talált: {0}).",
         ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again."] = "A videokártya-illesztőprogram túl régi a DXVK-hoz és az RTX Remix bridge-hez (hiányzik: {0}). Frissítse az illesztőprogramot, majd nyissa meg újra a Setupot.",
         ["{0} cannot start with this graphics driver (missing: {1}), so the game closes at start. Update the graphics driver, or choose Windows default (Direct3D 9) in Change components."] = "A(z) {0} nem indul el ezzel a videokártya-illesztőprogrammal (hiányzik: {1}), ezért a játék induláskor bezáródik. Frissítse az illesztőprogramot, vagy válassza a(z) Windows alapértelmezett (Direct3D 9) lehetőséget itt: Összetevők módosítása.",
@@ -284,5 +284,11 @@ public static partial class Strings
         ["A new Setup is available"] = "Új Setup érhető el",
         ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Az Apex Radiance Setup {0} letöltve és ellenőrizve. Frissítsd a Setupot, utána újra megnyílik.",
         ["Update Setup"] = "Setup frissítése",
+        // restart host (experimental)
+        ["Restart host"] = "Játék újraindítása",
+        ["Experimental"] = "Kísérleti",
+        ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Kevés memóriával történt mentés után kilépéskor felajánlja, hogy a játék újrainduljon ezzel a mentéssel.",
+        ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Indítsd el egyszer a játékot az Apex Radiance-szel, majd itt kapcsold be a játék újraindítását.",
+        ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "Eltávolítja a ts3wrap.exe fájlt, és kikapcsolja a játék újraindítását az ApexRadiance.toml fájlban.",
     };
 }

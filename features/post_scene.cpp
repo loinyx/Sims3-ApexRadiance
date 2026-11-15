@@ -44,6 +44,13 @@ bool g_done = false;
 bool g_tileBoundary = false;
 IDirect3DSurface9* g_knownTileTarget = nullptr; // identity only, learned with UI visible; cleared at Reset
 bool g_rejectedBoundary = false; // no late composite over UI already drawn after an invalid boundary
+// The game's colour pass: after the scene it copies the back buffer in 256x256 tiles and draws each back with
+// x (1 + c0) / (x + c0) (c0 0.4 in every capture). Looks' World only runs before it and compensates (ColourCurveLastFrame)
+bool g_tilesStarted = false;  // this frame: the first tile was copied (set after that copy's boundary effects ran)
+float g_tileCurve = 0.0f;     // this frame's c0, read at the second tile copy (still bound from tile 0's redraw)
+float g_tileCurveLast = 0.0f; // the last complete frame's; 0 when it had no colour pass
+PostScene::Effect g_beforeColourPass = nullptr; // SetBeforeColourPass
+bool g_fromDraw = false;      // the effects run from a draw's hook (BoundaryOnDraw)
 
 bool SceneDepthReady(IDirect3DDevice9* dev) {
     IDirect3DSurface9* expected = DepthShare::Surface();
@@ -119,8 +126,8 @@ bool FirstColourTile(const RECT* src, const RECT* dst) {
            dst->left == 0 && dst->top == 0 && dst->right == 256 && dst->bottom == 256;
 }
 
-void BeforeColourTile(IDirect3DDevice9* dev, IDirect3DSurface9* src, const RECT* srcRect,
-                      IDirect3DSurface9* dst, const RECT* dstRect, D3DTEXTUREFILTERTYPE filter) {
+void BeforeColourTileImpl(IDirect3DDevice9* dev, IDirect3DSurface9* src, const RECT* srcRect,
+                          IDirect3DSurface9* dst, const RECT* dstRect, D3DTEXTUREFILTERTYPE filter) {
 #ifdef APEX_F10_STUDY
     if (dev && src == g_backBuffer) F10Study::Copy(dev, srcRect, dstRect, filter, dst, g_done, g_uiDrawSeen, dst == g_knownTileTarget);
 #endif
@@ -155,6 +162,23 @@ void BeforeColourTile(IDirect3DDevice9* dev, IDirect3DSurface9* src, const RECT*
     if (notes < 3) {
         ++notes;
         LOG_INFO("[PostScene] Effects applied before the game's colour-tile copy (hidden UI)");
+    }
+}
+
+void BeforeColourTile(IDirect3DDevice9* dev, IDirect3DSurface9* src, const RECT* srcRect,
+                      IDirect3DSurface9* dst, const RECT* dstRect, D3DTEXTUREFILTERTYPE filter) {
+    BeforeColourTileImpl(dev, src, srcRect, dst, dstRect, filter);
+    // noted after the effects of this copy ran: they are still before the colour pass
+    if (!dev || !src || src != g_backBuffer || filter != D3DTEXF_POINT || !srcRect || srcRect->top != 0 ||
+        srcRect->bottom != 256 || DepthShare::InternalPass()) return;
+    if (srcRect->left == 0 && srcRect->right == 256 && !g_tilesStarted) {
+        if (g_beforeColourPass) g_beforeColourPass(dev);
+        g_tilesStarted = true;
+    }
+    else if (g_tilesStarted && srcRect->left == 256 && srcRect->right == 512 && g_tileCurve == 0.0f) {
+        float c[4] = {};
+        const bool ok = SUCCEEDED(dev->GetPixelShaderConstantF(0, c, 1)) && c[0] > 0.01f && c[0] < 10.0f;
+        g_tileCurve = ok ? c[0] : 0.4f; // a getter that fails (a remote device) keeps the captured value
     }
 }
 
@@ -286,6 +310,9 @@ void OnFrameBoundary(IDirect3DDevice9* dev) {
 #endif
     ExtraHooks::EnsureInstalled(dev);
     g_tileBoundary = false;
+    g_tileCurveLast = g_tilesStarted ? (g_tileCurve > 0.0f ? g_tileCurve : 0.4f) : 0.0f;
+    g_tilesStarted = false;
+    g_tileCurve = 0.0f;
     IDirect3DSurface9* s = nullptr;
     if (SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &s)) && s) {
         g_backBuffer = s;
@@ -342,11 +369,13 @@ void OnGameDraw(D3D9Hooks::DeviceContext& ctx) {
         g_rejectedBoundary = true;
         // the others stay pending for a later boundary, not for the UI after this one. A scene drawn on the shared depth and a
         // boundary without it is a pass inside the scene (the lake pass, the game's own): nothing runs there, as before
-        if (!g_sceneOnSharedDepth) RunEffects(dev, false);
+        if (!g_sceneOnSharedDepth) { g_fromDraw = true; RunEffects(dev, false); g_fromDraw = false; }
         return;
     }
     g_done = true; // set first so a failure never retries within the frame
+    g_fromDraw = true;
     RunEffects(dev, true);
+    g_fromDraw = false;
 }
 
 // With the game's UI hidden there may be no depth-off UI draw to mark the end of the scene. In that case run the same
@@ -376,6 +405,8 @@ void AtEndSceneBeforeOverlay(IDirect3DDevice9* dev) {
 void OnPreReset(IDirect3DDevice9*) {
     g_knownTileTarget = nullptr;
     g_tileBoundary = false;
+    g_tilesStarted = false;
+    g_tileCurve = g_tileCurveLast = 0.0f;
     g_curRT0 = nullptr;
     g_backBuffer = nullptr;
     g_done = true;
@@ -479,6 +510,11 @@ std::string DiagText() {
 // does not copy the scene before them (06/10: since Picture took a depth test with ALWAYS and no depth write for the end of
 // the scene, it copied before these effects, which still count such draws as scene; every pixel they changed then differed
 // from the copy, its UI mask kept them as the game drew them, and the Color page did nothing visible). Render thread.
+bool ColourTilesStarted() { return g_tilesStarted; }
+void SetBeforeColourPass(Effect fn) { g_beforeColourPass = fn; }
+bool BoundaryOnDraw() { return g_fromDraw; }
+float ColourCurveLastFrame() { return g_tileCurveLast; }
+
 bool EffectsPending() {
     if (!g_hooks || g_done || g_rejectedBoundary || g_sceneDraws < kMinSceneDraws || !g_curRT0 || g_curRT0 != g_backBuffer ||
         !ShaderCache::PrecompileComplete())

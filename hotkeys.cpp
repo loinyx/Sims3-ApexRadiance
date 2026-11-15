@@ -21,9 +21,9 @@ KeyChord Chord(UINT vk) {
 
 // [preset][action]: Compare, Refresh, Probe, Diagnostics, Recorder, Screenshot (custom only), FrameCapture
 constexpr UINT kKeys[static_cast<int>(Preset::Count)][kActions] = {
-    {'T', 'G', 'V', 'B', 'X', 0, 'F'},
-    {'2', '3', '4', '5', '6', 0, '7'},
-    {VK_F10, VK_F9, VK_F7, VK_F8, VK_F6, 0, VK_F5},
+    {'T', 'G', 'V', 'B', 'X', 0, 'F', 0},
+    {'2', '3', '4', '5', '6', 0, '7', 0},
+    {VK_F10, VK_F9, VK_F7, VK_F8, VK_F6, 0, VK_F5, 0},
 };
 constexpr UINT kMenu[static_cast<int>(Preset::Count)] = {'R', '1', VK_F11};
 
@@ -61,6 +61,7 @@ const char* PresetDescription(Preset p) {
 KeyChord Key(Action a) {
     const ApexConfig::UiSettings ui = ApexConfig::GetUi();
     if (a == Action::Screenshot) return ui.screenshotKey;
+    if (a == Action::LooksToggle) return ui.looksKey;
     switch (a) {
     case Action::Compare: if (ui.compareKey.vk) return ui.compareKey; break;
     case Action::Refresh: if (ui.refreshKey.vk) return ui.refreshKey; break;
@@ -81,6 +82,7 @@ const char* ActionName(Action a) {
     case Action::Diagnostics: return "Lighting snapshot";
     case Action::Recorder: return "Recording";
     case Action::Screenshot: return "Take a filtered screenshot";
+    case Action::LooksToggle: return "Looks on or off";
     default: return "Frame Capture";
     }
 }

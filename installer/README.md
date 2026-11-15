@@ -8,8 +8,9 @@ only what differs from the player's choice.
 
 | Part | Source | Where |
 |---|---|---|
-| Apex Radiance (required) | `loinyx/Sims3-ApexRadiance` latest release | `Game\Bin\ApexRadiance.asi`, and `Game\Bin\ts3wrap.exe` (the restart host, off until `[ui] restart_host`) when the release has it |
-| Renderer: DXVK (recommended), RTX Remix bridge (DXVK and the bridge only with a Vulkan 1.3 graphics card whose driver has the extensions DXVK requires, asked from `vulkan-1.dll`), or the game's own Direct3D 9 | `doitsujin/dxvk` (x32 `d3d9.dll`); the bridge zip of the Apex release | `Game\Bin` (`client.targetProcess` set to the game's exe) |
+| Apex Radiance (required) | `loinyx/Sims3-ApexRadiance` latest release | `Game\Bin\ApexRadiance.asi` |
+| Restart host (experimental, off by default; Setup 1.1.5) | `ts3wrap.exe` of the same Apex release (its own asset in 3.1.3 and 3.1.4, inside the manual-install zip from 3.1.5) | `Game\Bin\ts3wrap.exe`, and `[ui] restart_host = true` in `Documents\...\Apex Radiance\ApexRadiance.toml` |
+| Renderer: DXVK, RTX Remix bridge (recommended; DXVK and the bridge only with a Vulkan 1.3 graphics card whose driver has the extensions DXVK requires, asked from `vulkan-1.dll`), or the game's own Direct3D 9 | `doitsujin/dxvk` (x32 `d3d9.dll`); the bridge zip of the Apex release | `Game\Bin` (`client.targetProcess` set to the game's exe) |
 | Sims3SettingsSetter | `sims3fiend/Sims3SettingsSetter` | `Game\Bin` |
 | Sims 3 Modernization | `rodneypantonial/sims3-modernization` (Steam or EA zip by edition; when the latest release lacks the edition's zip, the newest of the last 10 that has it, with its own `ts3fixes.package`, and no update is offered to a release without it) | `ts3native` in `Game\Bin`, `ts3fixes.package` in `Mods\Packages` |
 | MonoPatcher (no longer offered since Setup 1.1.3: no mod Setup installs needs it; an installed copy can still be kept, updated or removed) | `LazyDuchess/MonoPatcher` (its bundled loader is left out) | `MonoPatcher.asi` in `Game\Bin`, its package in `Mods\Packages\MonoPatcher` |
@@ -38,6 +39,15 @@ only what differs from the player's choice.
   player goes back to the game's own Direct3D 9.
 - The welcome page lists the updates for the installed components at every start, with *Update now*.
 - Setup refuses to change files while `TS3W.exe` or `TS3.exe` runs.
+- The restart host's switch (`Engine.SetRestartHost`) edits one line of `ApexRadiance.toml`: the key's value in place,
+  else a line added at the end of `[ui]`, else `[ui]` added at the end; every other line stays as it is. Off changes a key
+  that is there to `false` and adds nothing. When the game has not created the file yet, Setup writes `[ui]` with
+  `restart_host = true` and `start_profile_done = false` (Apex's welcome page still shows), but not while Apex still has
+  older settings to copy (`S3SS\Apex\Apex.toml`, or Apex's tables in `S3SS.toml`), which it copies only while the file
+  is missing: the switch then waits, with *Start the game once with Apex Radiance*. Its restore point keeps the key's old
+  value: *Restore* puts back only that key (or deletes the file Setup created when the game never wrote to it), so
+  settings the game saved since stay. Status: installed when `ts3wrap.exe` is next to the ASI and the key is `true`.
+  Removing Apex Radiance removes the restart host first.
 - Languages: the 21 of The Sims 3, as the menu (`Languages.cs`): Windows' display language, or the one picked with the
   title bar's language button (kept in `%LOCALAPPDATA%\Apex Radiance Setup\language.txt`). English text is the key;
   each language is a `Strings.<code>.cs` table, and `Strings.pt.cs` lists every key. A text without a pair shows in

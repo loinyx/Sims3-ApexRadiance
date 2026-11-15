@@ -7,7 +7,7 @@ def part(a,b):
 root=Path(sys.argv[1])
 root.joinpath('preset_state.inc').write_text(part('struct ProfileItem {','void PickProfileFile('),encoding='utf-8')
 root.joinpath('preset_helpers.inc').write_text(part('int ProfileNameFilter(','// Opens the Profiles folder')+part('void ProfileIconPicker(','void StartPresetDialog('),encoding='utf-8')
-root.joinpath('preset_page.inc').write_text(part('void StartPresetDialog(','void CompatibilityTab('),encoding='utf-8')
+root.joinpath('preset_page.inc').write_text(part('void StartPresetDialog(','void RecoveryRow('),encoding='utf-8')
 root.joinpath('preset_footer.inc').write_text(part('bool ReportDialogActions(','void ReportOptionalNotes('),encoding='utf-8')
 widgets=Path('ui/widgets.cpp').read_text(encoding='utf-8')
 root.joinpath('widgets_recorded.cpp').write_text(widgets.replace('bool IconTextButton(const char* label,','bool RecordedIconTextButton(const char* label,',1).replace('bool TextButton(const char* label,','bool RecordedTextButton(const char* label,',1),encoding='utf-8')

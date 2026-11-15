@@ -25,7 +25,7 @@ try
     Check(Engine.NeedsLoader(s, true), "a loader is needed");
     await Engine.InstallAsync(g, new[] { Components.Apex, Components.Bridge, Components.Loader }, src, null, docs);
     Check(Read(B("ApexRadiance.asi")) == "apex 3.1.1", "ApexRadiance.asi installed");
-    Check(Read(B("ts3wrap.exe")) == "wrap 3.1.1", "ts3wrap.exe installed with Apex");
+    Check(!File.Exists(B("ts3wrap.exe")) && !File.Exists(Engine.ApexToml(docs)), "Apex alone installs no ts3wrap.exe and writes no ApexRadiance.toml");
     Check(Read(B("wininet.dll")) == "loader", "loader installed as wininet.dll");
     Check(Read(B("bridge.conf")).Contains("client.targetProcess = TS3.exe") && Read(B(@".trex\bridge.conf")).Contains("client.targetProcess = TS3.exe"),
           "both bridge.conf target TS3.exe on the EA app");
@@ -66,7 +66,54 @@ try
     Check(!File.Exists(B("d3d9.dll")) && !Directory.Exists(B(".trex")) && !File.Exists(B("dxvk.conf")), "bridge files removed");
     Check(Read(Path.Combine(docs, "Options.ini")) == "gpu=real", "Options.ini restored when going back to native D3D9");
     Check(File.Exists(B("ApexRadiance.asi")), "Apex stays when only the bridge is removed");
-    Check(File.Exists(B("ts3wrap.exe")), "ts3wrap.exe stays with Apex");
+
+    // 2b. the restart host (experimental): ts3wrap.exe and [ui] restart_host; off again removes both, Apex's removal takes it along
+    {
+        Check(!Engine.RestartHostWaits(docs), "restart host: no older settings to copy, Setup may create ApexRadiance.apexToml");
+        await Engine.InstallAsync(g, new[] { Components.RestartHost }, src, null, docs);
+        var apexToml = Engine.ApexToml(docs);
+        Check(Read(B("ts3wrap.exe")) == "wrap 3.1.1" && Read(apexToml) == Engine.NewApexToml && Scan.Run(g, docs).RestartHost
+              && Scan.Run(g, docs).Installed(Components.RestartHost) == "3.1.1", "restart host: installed, a new ApexRadiance.apexToml keeps the welcome page");
+        var pt = RestorePoints.List(bin)[0];
+        Check(RestorePoints.Restore(bin, pt).Count == 0 && !File.Exists(apexToml) && !Directory.Exists(Path.GetDirectoryName(apexToml)) && !File.Exists(B("ts3wrap.exe")),
+              "restart host: undo before the game ran removes the file and folder Setup created");
+        // the game wrote its settings: Setup changes one line, undo puts back only that key
+        Directory.CreateDirectory(Path.GetDirectoryName(apexToml)!);
+        var game = "[meta]\r\nversion = 1\r\n\r\n[ui]\r\nfont_scale = 1.25\r\nlanguage = 'pt' # mine\r\n\r\n    [ui.profile_shortcuts]\r\n    Night = [ 17, 78 ]\r\n\r\n[patches.NightTerrainRelight]\r\nenabled = true\r\n";
+        File.WriteAllText(apexToml, game);
+        await Engine.InstallAsync(g, new[] { Components.RestartHost }, src, null, docs);
+        Check(Read(apexToml) == game.Replace("language = 'pt' # mine\r\n", "language = 'pt' # mine\r\nrestart_host = true\r\n"),
+              "restart host: the key added at the end of [ui], every other line kept");
+        File.WriteAllText(apexToml, Read(apexToml).Replace("font_scale = 1.25", "font_scale = 1.5")); // (changed in game since)
+        Check(RestorePoints.Restore(bin, RestorePoints.List(bin)[0]).Count == 0 && Read(apexToml) == game.Replace("font_scale = 1.25", "font_scale = 1.5")
+              && !File.Exists(B("ts3wrap.exe")), "restart host: undo takes the key out and keeps what the game saved since");
+        // removal: off, only the key changed; Remove Apex takes the host along
+        var off = game.Replace("font_scale = 1.25", "restart_host = false\r\nfont_scale = 1.25");
+        File.WriteAllText(apexToml, off);
+        await Engine.InstallAsync(g, new[] { Components.RestartHost }, src, null, docs);
+        Check(Read(apexToml) == game.Replace("font_scale = 1.25", "restart_host = true\r\nfont_scale = 1.25"), "restart host: an existing false turned true in place");
+        Engine.Remove(g, Components.RestartHost, docs);
+        Check(!File.Exists(B("ts3wrap.exe")) && Read(apexToml) == off && !Scan.Run(g, docs).RestartHost
+              && Scan.Run(g, docs).Installed(Components.RestartHost) is null, "restart host: removed, the key back to false");
+        await Engine.InstallAsync(g, new[] { Components.RestartHost }, src, null, docs);
+        Engine.Remove(g, Components.Apex, docs);
+        Check(!File.Exists(B("ts3wrap.exe")) && Engine.RestartHostKey(Read(apexToml)) == false && !File.Exists(B("ApexRadiance.asi")), "restart host: removing Apex removes it too");
+        await Engine.InstallAsync(g, new[] { Components.Apex }, src, null, docs);
+        // an older Setup put ts3wrap.exe in with Apex: an Apex update drops it while the host is off, keeps it while on
+        var mOld = Manifest.Load(bin); File.WriteAllText(B("ts3wrap.exe"), "wrap 3.1.0"); mOld.Files.Add(new ManifestFile { Component = Components.Apex, Path = B("ts3wrap.exe") }); mOld.Save();
+        await Engine.InstallAsync(g, new[] { Components.Apex }, src, null, docs);
+        Check(!File.Exists(B("ts3wrap.exe")) && !Manifest.Load(bin).Files.Any(f => f.Path.EndsWith("ts3wrap.exe")), "restart host: the off ts3wrap.exe of an older Setup removed on update");
+        File.Delete(apexToml);
+        Directory.Delete(Path.GetDirectoryName(apexToml)!);
+        // older settings Apex still has to copy: Setup waits, nothing changes
+        Directory.CreateDirectory(Path.Combine(docs, "S3SS"));
+        File.WriteAllText(Path.Combine(docs, "S3SS", "S3SS.toml"), "[general]\nx = 1\n");
+        Check(!Engine.RestartHostWaits(docs), "restart host: a plain S3SS.toml does not hold it back");
+        File.WriteAllText(Path.Combine(docs, "S3SS", "S3SS.toml"), "[general]\nx = 1\n[patches.NightTerrainRelight]\nenabled = true\n");
+        try { await Engine.InstallAsync(g, new[] { Components.RestartHost }, src, null, docs); Check(false, "restart host: waits for Apex's copy of older settings"); }
+        catch (InvalidOperationException e) { Check(e.Message == Engine.RestartHostWaitsText && !File.Exists(apexToml) && !File.Exists(B("ts3wrap.exe")), "restart host: waits for Apex's copy of older settings"); }
+        Directory.Delete(Path.Combine(docs, "S3SS"), true);
+    }
 
     // 3. DXVK installed by hand: the bridge backs it up and puts it back
     File.WriteAllText(B("d3d9.dll"), "... DXVK v2.7 ...");
@@ -540,8 +587,9 @@ finally
     var zg = new Game(Path.Combine(work), zbin, "TS3W.exe", Edition.Steam, "1.67.2");
     var (apexFiles, apexVer) = await gs.FetchAsync(Components.Apex, zg, work, default);
     string Body(List<(string, string)> l, string name) => l.FirstOrDefault(f => f.Item2.EndsWith(name)) is { Item1: { } src } ? File.ReadAllText(src) : "<missing>";
-    Check(apexVer == "9.9.9" && Body(apexFiles, "ApexRadiance.asi") == "apex 9.9.9" && Body(apexFiles, "ts3wrap.exe") == "wrap 9.9.9",
-          "a release with only Setup and the manual zip: Apex Radiance and ts3wrap.exe from the zip");
+    var (wrapFiles, wrapVer) = await gs.FetchAsync(Components.RestartHost, zg, work, default);
+    Check(apexVer == "9.9.9" && Body(apexFiles, "ApexRadiance.asi") == "apex 9.9.9" && apexFiles.Count == 1 && wrapVer == "9.9.9" && Body(wrapFiles, "ts3wrap.exe") == "wrap 9.9.9",
+          "a release with only Setup and the manual zip: Apex Radiance, and ts3wrap.exe for the restart host, from the zip");
     var (bridgeFiles, _) = await gs.FetchAsync(Components.Bridge, zg, work, default);
     Check(Body(bridgeFiles, "d3d9.dll") == "bridge d3d9" && bridgeFiles.Any(f => f.Item2 == Path.Combine(zbin, ".trex", "NvRemixBridge.exe")),
           "the bridge from the zip's RTX Remix bridge folder, .trex kept, into Game\\Bin");
@@ -563,6 +611,35 @@ finally
     File.Delete(Path.Combine(bin2, "TS3.exe"));
     Check(Games.FromFolder(bin2) is { Edition: Edition.Steam, Exe: "TS3W.exe" }, "a Steam install is still the Steam game");
     Directory.Delete(Path.GetFullPath(Path.Combine(bin2, "..", "..", "..")), true);
+}
+
+// A game folder copied elsewhere brings the old setup.json: uninstalling the copy changes only the copy, never the original
+{
+    var top = Path.Combine(Path.GetTempPath(), "ApexSetupCopy-" + Guid.NewGuid().ToString("N")[..8]);
+    string BinOf(string n) => Path.Combine(top, n, "The Sims 3", "Game", "Bin");
+    var (orig, copy, docsC) = (BinOf("orig"), BinOf("copy"), Path.Combine(top, "docs"));
+    Directory.CreateDirectory(docsC);
+    foreach (var b in new[] { orig, copy })
+    {
+        Directory.CreateDirectory(Manifest.DirOf(b));
+        File.WriteAllText(Path.Combine(b, "ApexRadiance.asi"), "apex");
+        File.WriteAllText(Path.Combine(b, "d3d9.dll"), "bridge");
+        File.WriteAllText(Path.Combine(Manifest.DirOf(b), "Options.ini.bak"), "options");
+    }
+    var m = new Manifest { OptionsBackup = Path.Combine(Manifest.DirOf(orig), "Options.ini.bak") };
+    m.Files.Add(new ManifestFile { Component = Components.Apex, Path = Path.Combine(orig, "ApexRadiance.asi") });
+    m.Files.Add(new ManifestFile { Component = Components.Bridge, Path = Path.Combine(orig, "d3d9.dll") });
+    m.Versions[Components.Apex] = "3.2.2"; m.Versions[Components.Bridge] = "3.2.2";
+    var json = System.Text.Json.JsonSerializer.Serialize(m, SetupJson.Default.Manifest);
+    foreach (var b in new[] { orig, copy }) File.WriteAllText(Path.Combine(Manifest.DirOf(b), "setup.json"), json);
+    var loaded = Manifest.Load(copy);
+    Check(loaded.Files.All(f => f.Path.StartsWith(copy)) && loaded.OptionsBackup == Path.Combine(Manifest.DirOf(copy), "Options.ini.bak"),
+        "a copied game's setup.json points at the copy");
+    Engine.RemoveAll(new Game(Path.Combine(top, "copy", "The Sims 3"), copy, "TS3W.exe", Edition.Steam, "1.67.2"), docsC);
+    Check(!File.Exists(Path.Combine(copy, "ApexRadiance.asi")) && !File.Exists(Path.Combine(copy, "d3d9.dll")), "uninstalling the copy removes its files");
+    Check(new[] { Path.Combine(orig, "ApexRadiance.asi"), Path.Combine(orig, "d3d9.dll"), Path.Combine(Manifest.DirOf(orig), "Options.ini.bak") }.All(File.Exists)
+        && File.ReadAllText(Path.Combine(Manifest.DirOf(orig), "setup.json")) == json, "uninstalling the copy leaves the original game untouched");
+    Directory.Delete(top, true);
 }
 
 // Sims 3 Modernization: a release without this edition's build is not taken for it (v0.2.11 had no ts3native-ea169)
@@ -649,6 +726,30 @@ Check(Gpu.Decode((1u << 22) | (3u << 12) | 280) == new Version(1, 3) && Gpu.Deco
 try { var (vk, card, missing) = Gpu.Vulkan(); Console.WriteLine($"info this PC: {card ?? "no Vulkan card"} Vulkan {vk?.ToString() ?? "-"}, DXVK extensions missing: {(missing.Length == 0 ? "none" : string.Join(", ", missing))}"); }
 catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: " + e.Message); }
 
+// the generated JSON writes and reads exactly what the reflection serializer did: players' setup.json and restore points
+{
+    var legacy = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
+    var m = new Manifest { OptionsBackup = "Options.ini.bak" };
+    m.Files.Add(new ManifestFile { Component = Components.Bridge, Path = @"C:\Game\Bin\d3d9.dll", Backup = "d3d9.dll.bak" });
+    m.Files.Add(new ManifestFile { Component = Components.Apex, Path = @"C:\Game\Bin\ApexRadiance.asi" });
+    m.Versions[Components.Apex] = "3.2.3"; m.Versions[Components.Bridge] = "1.0 ü \"quoted\" <tag>";
+    var oldManifest = System.Text.Json.JsonSerializer.Serialize(m, legacy);
+    Check(oldManifest == System.Text.Json.JsonSerializer.Serialize(m, SetupJson.Default.Manifest), "setup.json is written as before");
+    var mBack = System.Text.Json.JsonSerializer.Deserialize(oldManifest, SetupJson.Default.Manifest)!;
+    Check(mBack.Files.Count == 2 && mBack.Files[0].Backup == "d3d9.dll.bak" && mBack.Files[1].Backup is null
+        && mBack.Versions[Components.Bridge] == m.Versions[Components.Bridge] && mBack.OptionsBackup == "Options.ini.bak", "setup.json written by older Setups reads back");
+
+    var point = new RestorePoint { Created = new DateTime(2026, 11, 14, 12, 0, 0, DateTimeKind.Utc), CreatedLocal = "14/11/2026 09:00",
+        Label = "Installed {0}", Args = new[] { "Apex Radiance" }, SetupVersion = "1.1.3", Bin = @"C:\Game\Bin" };
+    point.Entries.Add(new RestoreEntry { Path = @"C:\Game\Bin.dll", Existed = true, Copy = "a.dll" });
+    point.Entries.Add(new RestoreEntry { Path = @"C:\Game\Bin\Mods", Dir = true });
+    var oldPoint = System.Text.Json.JsonSerializer.Serialize(point, legacy);
+    Check(oldPoint == System.Text.Json.JsonSerializer.Serialize(point, SetupJson.Default.RestorePoint), "restore points are written as before");
+    var pBack = System.Text.Json.JsonSerializer.Deserialize(oldPoint, SetupJson.Default.RestorePoint)!;
+    Check(pBack.Created == point.Created && pBack.Args[0] == "Apex Radiance" && pBack.Entries.Count == 2 && pBack.Entries[0].Copy == "a.dll"
+        && pBack.Entries[1].Dir && pBack.FileCount == 1, "restore points written by older Setups read back");
+}
+
 Console.WriteLine(failures == 0 ? "ALL PASSED" : failures + " FAILED");
 return failures == 0 ? 0 : 1;
 
@@ -685,7 +786,8 @@ sealed class FakeSource : ISource
         const string conf = "client.targetProcess = TS3W.exe\nserver.useVanillaDxvk = True\n";
         List<(string, string)> f = c switch
         {
-            Components.Apex => new() { (Make("ApexRadiance.asi", "apex 3.1.1"), Path.Combine(b, "ApexRadiance.asi")), (Make("ts3wrap.exe", "wrap 3.1.1"), Path.Combine(b, "ts3wrap.exe")) },
+            Components.Apex => new() { (Make("ApexRadiance.asi", "apex 3.1.1"), Path.Combine(b, "ApexRadiance.asi")) },
+            Components.RestartHost => new() { (Make("ts3wrap.exe", "wrap 3.1.1"), Path.Combine(b, "ts3wrap.exe")) },
             Components.Loader => new() { (Make("dinput8.dll", "loader"), Path.Combine(b, "wininet.dll")) },
             Components.Dxvk => new() { (Make(@"dxvk\d3d9.dll", "DXVK 3.1.1 d3d9"), Path.Combine(b, "d3d9.dll")) },
             Components.S3ss => new() { (Make("Sims3SettingsSetter.asi", "s3ss"), Path.Combine(b, "Sims3SettingsSetter.asi")) },

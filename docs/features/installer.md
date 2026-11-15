@@ -10,7 +10,7 @@ Setup makes can be undone from a restore point. It is optional: the manual insta
 
 | | |
 |---|---|
-| Availability | Released in 3.1.1; `ApexRadianceSetup.exe` is a release asset. Setup's own update: Released in 3.1.4 (Setup 1.1.0). Modernization from the newest release with the game's build, a moved EA app game: Released in 3.1.5 (Setup 1.1.1). Installs from the manual-install zip (the release's two files): Released in 3.1.6 (Setup 1.1.2). DXVK and the bridge offered only when the graphics driver has the extensions DXVK needs, MonoPatcher no longer offered (shown only where installed): Released in 3.2.1 (Setup 1.1.3) |
+| Availability | Released in 3.1.1; `ApexRadianceSetup.exe` is a release asset. Setup's own update: Released in 3.1.4 (Setup 1.1.0). Modernization from the newest release with the game's build, a moved EA app game: Released in 3.1.5 (Setup 1.1.1). Installs from the manual-install zip (the release's two files): Released in 3.1.6 (Setup 1.1.2). DXVK and the bridge offered only when the graphics driver has the extensions DXVK needs, MonoPatcher no longer offered (shown only where installed): Released in 3.2.1 (Setup 1.1.3). The restart host as an experimental component, off by default: Unreleased, planned for 4.0.0 (Setup 1.1.5) |
 | Default | Optional, a separate download |
 | Menu | None: a separate program, not part of the in-game menu |
 | Configuration | `Game\Bin\Apex Radiance backup\setup.json` (written by Setup); restore points in `Game\Bin\Apex Radiance backup\restore`; language in `%LOCALAPPDATA%\Apex Radiance Setup\language.txt` |
@@ -28,13 +28,16 @@ and a file overwritten by hand cannot be put back.
 Setup finds the game, compares what is installed with the player's choice and applies the difference:
 
 1. **Game.** It finds Steam 1.67.2 (`TS3W.exe`) and EA app 1.69.47 (`TS3.exe`) installs, or a folder the player picks.
-2. **Components.** Apex Radiance is required. The renderer is DXVK (recommended), the RTX Remix bridge zip of the Apex
+2. **Components.** Apex Radiance is required. The renderer is DXVK, the RTX Remix bridge (recommended) zip of the Apex
    release, or the game's own Direct3D 9. DXVK and the bridge are offered only when a graphics card has Vulkan 1.3 and the
    device extensions DXVK requires (`Gpu.DxvkExtensions`, from DXVK 3.1.1's required list); without them DXVK finds no adapter
    and the game closes at start. Vulkan 1.3 with an extension missing is an old driver, not an old card (an Intel Iris Xe on
    driver 101.4502 lacks `VK_KHR_load_store_op_none`, which Iris Xe drivers have from 101.6556): Setup then asks for a driver
    update, and when DXVK or the bridge is already installed the status shows the error with the vendor's driver page; Ultimate ASI Loader is added only when no loader is found; other mods that work
-   with Apex can be switched on. The full list, with sources and target folders, is in
+   with Apex can be switched on. The [restart host](performance/restart-host.md) is an *Experimental* switch, off by
+   default: on installs `ts3wrap.exe` next to the ASI and sets `[ui] restart_host = true` in `ApexRadiance.toml`; off
+   removes the exe and sets the key to `false` when it is there. Setup 1.1.4 and earlier copied `ts3wrap.exe` with Apex
+   and left it off; an Apex update now removes that copy unless the host is on. The full list, with sources and target folders, is in
    [installer/README.md](../../installer/README.md#what-it-does).
 3. **Install.** Every file is downloaded at install time from its author's GitHub release (never re-hosted) and checked
    against the release's SHA-256 digest when it has one. A file is copied only when it is missing or older than the

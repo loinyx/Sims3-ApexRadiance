@@ -1,0 +1,33 @@
+{
+  "id": "looks-off-on",
+  "description": "Shaders (Looks) off against on with the built-in Cinematic look over the night pan: frame time and the game's largest free address block. Pass: on logs Installed, loads every shader of the look and draws; off never installs. A/B metrics: frame time p50 / p99 and frames over 50 ms per minute (-Profiler Frames), largest free block after the pan.",
+  "save": "ApexTest-Night",
+  "toml": { "patches.Looks": { "preset": "apex:Cinematic", "mix": 1.0, "onUi": false } },
+  "variants": {
+    "off": {
+      "toml": { "patches.Looks": { "enabled": false } },
+      "fail": ["\\[Looks\\] Installed"]
+    },
+    "on": {
+      "toml": { "patches.Looks": { "enabled": true } },
+      "expect": [
+        "\\[Looks\\] Installed",
+        "\\[Looks\\] preset loaded: Cinematic: (\\d+) of \\1 shaders built in",
+        "\\[Looks\\] drawing (at|after) .*\\d+ shaders, drew, mix"
+      ]
+    }
+  },
+  "fail": [
+    "\\[(WARN|ERROR)\\] \\[Looks\\]",
+    "\\[Looks\\] stopped:",
+    "\\[Looks\\] nothing to run",
+    "\\[Looks\\] drawing (at|after) .*; skipped:"
+  ],
+  "steps": [
+    { "do": "speed", "speed": "normal" },
+    { "do": "memory", "label": "loaded" },
+    { "do": "camera_pan", "lots": 8, "seconds": 40, "passes": 15 },
+    { "do": "wait", "minutes": 10, "measure": true },
+    { "do": "memory", "label": "after the pan" }
+  ]
+}

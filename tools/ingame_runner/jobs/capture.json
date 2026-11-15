@@ -1,0 +1,38 @@
+{
+  "id": "capture",
+  "description": "A filtered screenshot (F8) and a 12-second video, both into the load's captures folder. The record key is set to a bare F12 for the run: the runner posts key messages to the unfocused window and cannot hold Shift for the default Shift+F8. Pass: the screenshot is requested and written, the video starts and is saved, a non-empty PNG and MP4 are in captures\\ (sizes, and the MP4's length with ffprobe on PATH, in the notes).",
+  "save": "ApexTest-Night",
+  "toml": {
+    "ui": { "screenshot_key": "F8", "screenshot_folder": "custom", "screenshot_custom_folder": "%APEX_RUNNER_CAPTURES%" },
+    "capture.screenshot": { "file_type": "png", "burst_count": 1 },
+    "capture.video": { "recorder": "apex", "folder": "custom", "custom_folder": "%APEX_RUNNER_CAPTURES%", "record_key": "F12", "container": "mp4-safe", "new_clip_mb": 0 }
+  },
+  "order": ["on"],
+  "variants": {
+    "on": {
+      "expect": [
+        "\\[Captures\\] Filtered screenshot requested into .*captures",
+        "\\[Video\\] Recording .*captures",
+        "\\[Video\\] Video saved: "
+      ]
+    }
+  },
+  "fail": [
+    "\\[Video\\] (Not started|The video could not)",
+    "\\[Video\\] The video was still being written",
+    "\\[Captures\\] (The chosen .* folder is not available|The screenshot could not be written|No screenshot|Could not hide|Screenshot cancelled)",
+    "\\[Capture\\] Record key check failed"
+  ],
+  "steps": [
+    { "do": "speed", "speed": "normal" },
+    { "do": "wait", "minutes": 1 },
+    { "do": "key", "vk": 119 },
+    { "do": "wait", "minutes": 0.25 },
+    { "do": "key", "vk": 123 },
+    { "do": "wait", "minutes": 0.2 },
+    { "do": "key", "vk": 123 },
+    { "do": "wait", "minutes": 0.5 },
+    { "do": "check_files", "pattern": "*.png", "min": 1 },
+    { "do": "check_files", "pattern": "*.mp4", "min": 1 }
+  ]
+}

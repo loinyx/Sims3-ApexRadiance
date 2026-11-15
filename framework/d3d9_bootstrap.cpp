@@ -13,6 +13,7 @@
 #include "scene_target_logic.h"
 #include "picture.h"
 #include "captures.h"
+#include "apex_capture.h"
 #include "screen_control.h"
 #include "vulkan_driver_guard.h"
 #include <detours/detours.h>
@@ -147,7 +148,8 @@ HRESULT STDMETHODCALLTYPE Hooked_EndScene(IDirect3DDevice9* dev) {
         const auto pictureEndScene = [dev] { Picture::Get().OnEndScene(dev); }; // one switch for both calls below
         RenderCallbacks::Fire(RenderCallbacks::endSceneBeforeOverlay, dev);
         HookGuard::Run("Picture before the overlay", [dev] { Picture::Get().BeforeOverlay(dev); });
-        if (Overlay::IsVisible() && Captures::ScreenshotPending()) {
+        if ((Overlay::IsVisible() && Captures::ScreenshotPending()) || ApexCapture::NeedsGradeBeforeOverlay()) {
+            // (and a video: grabbed at filteredSceneBeforeOverlay, so the grade must be in it)
             // A report photo needs the grade too, without photographing the Apex menu.
             // Picture consumes frameReady, so the normal call below will not grade twice.
             HookGuard::Run("Picture at EndScene", pictureEndScene);

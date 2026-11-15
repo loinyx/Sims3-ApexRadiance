@@ -5,14 +5,15 @@ namespace ApexSetup;
 
 public static class Components
 {
-    public const string Apex = "apex", Bridge = "bridge", Dxvk = "dxvk", Loader = "loader", S3ss = "s3ss", Modernization = "modernization", MonoPatcher = "monopatcher", S3pp = "s3pp";
+    public const string Apex = "apex", Bridge = "bridge", Dxvk = "dxvk", Loader = "loader", S3ss = "s3ss", Modernization = "modernization", MonoPatcher = "monopatcher", S3pp = "s3pp",
+        RestartHost = "restarthost";
     // removal order: what depends on the loader goes first (installs run in the reverse order)
-    public static readonly string[] All = { Bridge, Dxvk, Modernization, MonoPatcher, S3pp, S3ss, Apex, Loader };
+    public static readonly string[] All = { Bridge, Dxvk, Modernization, MonoPatcher, S3pp, S3ss, RestartHost, Apex, Loader };
 
     public static string Name(string c) => c switch
     {
         Apex => "Apex Radiance", Bridge => "RTX Remix bridge", Loader => "Ultimate ASI Loader", Dxvk => "DXVK", S3ss => "Sims3SettingsSetter",
-        MonoPatcher => "MonoPatcher", S3pp => "Sims 3 Performance Patch", _ => "Sims 3 Modernization",
+        MonoPatcher => "MonoPatcher", S3pp => "Sims 3 Performance Patch", RestartHost => "Restart host", _ => "Sims 3 Modernization",
     };
 }
 
@@ -37,15 +38,29 @@ public sealed class Manifest
     public static Manifest Load(string bin)
     {
         var p = System.IO.Path.Combine(DirOf(bin), "setup.json");
-        var m = File.Exists(p) ? JsonSerializer.Deserialize<Manifest>(File.ReadAllText(p)) ?? new() : new();
+        var m = File.Exists(p) ? JsonSerializer.Deserialize(File.ReadAllText(p), SetupJson.Default.Manifest) ?? new() : new();
         m.Bin = bin;
+        m.MoveTo(bin);
         return m;
+    }
+
+    // A game folder copied or moved keeps the old one's setup.json, whose paths are absolute: they are moved to this Bin, or
+    // removing or repairing here would change the files of the other folder.
+    void MoveTo(string bin)
+    {
+        if (Files.FirstOrDefault(f => System.IO.Path.GetFileName(f.Path).Equals("ApexRadiance.asi", StringComparison.OrdinalIgnoreCase)) is not { } apex) return;
+        var old = System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetDirectoryName(apex.Path)!) + System.IO.Path.DirectorySeparatorChar;
+        var now = System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(bin)) + System.IO.Path.DirectorySeparatorChar;
+        if (old.Equals(now, StringComparison.OrdinalIgnoreCase)) return;
+        string? Move(string? path) => path is not null && path.StartsWith(old, StringComparison.OrdinalIgnoreCase) ? now + path[old.Length..] : path;
+        foreach (var f in Files) { f.Path = Move(f.Path)!; f.Backup = Move(f.Backup); }
+        OptionsBackup = Move(OptionsBackup);
     }
 
     public void Save()
     {
         Fs.CreateDir(DirOf(Bin));
-        Fs.Write(FilePath, JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true }));
+        Fs.Write(FilePath, JsonSerializer.Serialize(this, SetupJson.Default.Manifest));
     }
 }
 
@@ -95,12 +110,16 @@ public sealed class GitHubSource : ISource
                 var asi = r.Assets.FirstOrDefault(a => a.Name == "ApexRadiance.asi") is { } own ? await Releases.DownloadAsync(own, _tmp, ct)
                     : await FromManual("ApexRadiance.asi") ?? throw new InvalidOperationException($"{r.Repo} {r.Tag}: asset not found");
                 files.Add((asi, Path.Combine(bin, "ApexRadiance.asi")));
-                // the restart host (Apex starts it only with [ui] restart_host on): a file of its own in 3.1.3 and 3.1.4, inside
-                // the manual-install zip from 3.1.5; releases before 3.1.3 have none
-                if (r.Assets.FirstOrDefault(a => a.Name == "ts3wrap.exe") is { } wrap)
-                    files.Add((await Releases.DownloadAsync(wrap, _tmp, ct), Path.Combine(bin, "ts3wrap.exe")));
-                else if (await FromManual("ts3wrap.exe") is { } inZip)
-                    files.Add((inZip, Path.Combine(bin, "ts3wrap.exe")));
+                return (files, r.Version);
+            }
+            case Components.RestartHost:
+            {
+                // ts3wrap.exe from Apex's release: a file of its own in 3.1.3 and 3.1.4, inside the manual-install zip from 3.1.5
+                var r = await Latest(Releases.Apex, ct);
+                var wrap = r.Assets.FirstOrDefault(a => a.Name == "ts3wrap.exe") is { } own ? await Releases.DownloadAsync(own, _tmp, ct)
+                    : await ManualDirAsync(r, ct) is { } d && Directory.EnumerateFiles(d, "ts3wrap.exe", SearchOption.AllDirectories).FirstOrDefault() is { } inZip ? inZip
+                    : throw new InvalidOperationException($"{r.Repo} {r.Tag}: asset not found");
+                files.Add((wrap, Path.Combine(bin, "ts3wrap.exe")));
                 return (files, r.Version);
             }
             case Components.Bridge:
@@ -225,6 +244,7 @@ public static class Engine
         [Components.S3pp] = Loadable("Sims3Performance.asi", "Sims3Performance.ini"),
         [Components.Modernization] = Loadable("ts3native.asi", "ts3native.ini", "ts3native.log"),
         [Components.Loader] = Array.Empty<string>(),
+        [Components.RestartHost] = new[] { "ts3wrap.exe" },
     };
 
     // in Game\Bin or the loader's scripts or plugins folder (Scan.FindAsi)
@@ -255,6 +275,10 @@ public static class Engine
         var s = Scan.Run(g, docs);
         var m = s.Manifest;
         var list = Components.All.Reverse().Where(components.Contains).ToList(); // loader first, bridge last
+        if (list.Contains(Components.RestartHost) && RestartHostWaits(docs)) throw new InvalidOperationException(RestartHostWaitsText);
+        // the restart host is started by Apex Radiance: never installed on its own
+        if (list.Contains(Components.RestartHost) && !list.Contains(Components.Apex) && !File.Exists(Path.Combine(g.Bin, "ApexRadiance.asi")))
+            throw new InvalidOperationException("Install Apex Radiance first: it starts the restart host");
         using var point = list.Count == 0 ? RestorePoints.Begin(g.Bin, "Fix incompatible settings")
             : RestorePoints.Begin(g.Bin, "Install {0}", string.Join(", ", list.Select(Components.Name)));
         // everything is downloaded before any file is placed: a network or checksum failure changes nothing
@@ -291,6 +315,14 @@ public static class Engine
                 // the log of a build that skipped itself would still say "wrong build" until the game runs
                 if (c == Components.Modernization) { EnsureResourceCfg(docs); Fs.Delete(Path.Combine(home, "ts3native.log")); }
                 if (c == Components.Apex) RemoveLeftovers(m, g.Bin);
+                // up to Setup 1.1.4 ts3wrap.exe came with Apex and stayed off: removed unless the restart host is on
+                if (c == Components.Apex && !list.Contains(Components.RestartHost) && !s.RestartHost)
+                    foreach (var f in m.Files.Where(f => f.Component == c && Path.GetFileName(f.Path).Equals("ts3wrap.exe", StringComparison.OrdinalIgnoreCase)).ToList())
+                    {
+                        Fs.Delete(f.Path);
+                        m.Files.Remove(f);
+                    }
+                if (c == Components.RestartHost) SetRestartHost(docs, true);
                 m.Versions[c] = version;
             }
             finally { m.Save(); } // also when a copy fails: the files placed and their backups stay removable
@@ -308,7 +340,13 @@ public static class Engine
         docs ??= Scan.DocumentsFor(g);
         CheckWritable();
         using var point = RestorePoints.Begin(g.Bin, "Remove {0}", Components.Name(c));
+        // the restart host is Apex's: it goes first, so its setting is turned off too
+        if (c == Components.Apex && (Manifest.Load(g.Bin).Versions.ContainsKey(Components.RestartHost) || Scan.Run(g, docs).RestartHost))
+            Remove(g, Components.RestartHost, docs);
         var m = Manifest.Load(g.Bin);
+        // (a ts3wrap.exe an older Setup installed with Apex is the restart host's)
+        if (c == Components.RestartHost)
+            foreach (var f in m.Files.Where(f => Path.GetFileName(f.Path).Equals("ts3wrap.exe", StringComparison.OrdinalIgnoreCase))) f.Component = c;
         var layerBefore = Scan.Run(g, docs).Layer;
         // hand-installed files first, so a backup restored below is never taken for one
         foreach (var rel in Known[c])
@@ -341,6 +379,7 @@ public static class Engine
             if (m.OptionsBackup is not null) Fs.Delete(m.OptionsBackup);
             m.OptionsBackup = null;
         }
+        if (c == Components.RestartHost) SetRestartHost(docs, false);
         m.Versions.Remove(c);
         m.Save();
         // the restored d3d9.dll is a loader again: the one Setup added for the bridge would load every mod twice
@@ -413,4 +452,107 @@ public static class Engine
     public const string ResourceCfg = "Priority 500\r\nPackedFile Packages/*.package\r\nPackedFile Packages/*/*.package\r\nPackedFile Packages/*/*/*.package\r\n";
 
     static bool Same(string a, string b) => string.Equals(Path.GetFullPath(a), Path.GetFullPath(b), StringComparison.OrdinalIgnoreCase);
+
+    // ---------- the restart host's switch: [ui] restart_host in Apex's own settings ----------
+
+    public static string ApexToml(string docs) => Path.Combine(docs, "Apex Radiance", "ApexRadiance.toml");
+
+    // What Setup writes when the game has not made the file yet. [ui] alone would read as an older install and skip Apex's
+    // welcome page (apex_config.cpp: a [ui] without start_profile_done counts as true).
+    public const string NewApexToml = "[ui]\nrestart_host = true\nstart_profile_done = false\n";
+
+    // Apex copies its older settings (S3SS\Apex\Apex.toml, or its tables in S3SS.toml) only while ApexRadiance.toml does not
+    // exist (apex_config.cpp DoMigrate): Setup does not create the file before that copy has run.
+    public static bool RestartHostWaits(string docs)
+    {
+        if (File.Exists(ApexToml(docs))) return false;
+        if (File.Exists(Path.Combine(docs, "S3SS", "Apex", "Apex.toml"))) return true;
+        var s3ss = Path.Combine(docs, "S3SS", "S3SS.toml");
+        try
+        {
+            return File.Exists(s3ss) && Regex.IsMatch(File.ReadAllText(s3ss),
+                @"(?m)^\s*\[\s*(qol\s*\.\s*(picture|hdr)|patches\s*\.\s*(NightTerrainRelight|EdgeSmoothing|DepthBlur|FrameCapture))\s*\]");
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return true; } // (unknown: the safe answer)
+    }
+    public const string RestartHostWaitsText = "Start the game once with Apex Radiance, then turn on the restart host here.";
+
+    // on: ts3wrap.exe next to the ASI and [ui] restart_host = true, what Apex checks before it starts the host
+    public static bool RestartHostOn(string bin, string docs)
+    {
+        try { return File.Exists(Path.Combine(bin, "ts3wrap.exe")) && File.Exists(ApexToml(docs)) && RestartHostKey(File.ReadAllText(ApexToml(docs))) == true; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
+    }
+
+    // On writes the key (and the file when the game has not made it yet); off changes only a key that is there. The restore
+    // point keeps the key's value: undoing it puts that value back and keeps what the game saved in the file since.
+    public static void SetRestartHost(string docs, bool on)
+    {
+        var f = ApexToml(docs);
+        if (!File.Exists(f))
+        {
+            if (!on) return;
+            Fs.CreateDir(Path.GetDirectoryName(f)!);
+            Fs.WriteKey(f, NewApexToml, null);
+            return;
+        }
+        var text = File.ReadAllText(f);
+        var was = RestartHostKey(text);
+        if (was == on || !on && was is null) return;
+        Fs.WriteKey(f, WithRestartHost(text, on), was);
+    }
+
+    static readonly Regex UiHeader = new(@"^\s*\[\s*ui\s*\]\s*(#.*)?\r?$");
+    // a table header line ([name], [a.b], [a."b c"], [[array]]); a value line never matches (a key and = come first)
+    static readonly Regex AnyHeader = new(@"^\s*\[\[?\s*[A-Za-z0-9_\-]+(\s*\.\s*([A-Za-z0-9_\-]+|""[^""]*""))*\s*\]\]?\s*(#.*)?\r?$");
+    static readonly Regex RestartKey = new(@"^(\s*restart_host\s*=\s*)(true|false)\b");
+
+    // the lines of the text, the [ui] header's index (-1 when there is none) and the index of the next table's header
+    static (string[] Lines, int At, int End) UiTable(string text)
+    {
+        var lines = text.Split('\n');
+        var at = Array.FindIndex(lines, l => UiHeader.IsMatch(l));
+        var end = at < 0 ? lines.Length : Array.FindIndex(lines, at + 1, l => AnyHeader.IsMatch(l)) is var n and >= 0 ? n : lines.Length;
+        return (lines, at, end);
+    }
+
+    // [ui] restart_host in the text of ApexRadiance.toml; null when the table or the key is missing
+    public static bool? RestartHostKey(string text)
+    {
+        var (lines, at, end) = UiTable(text);
+        for (int i = at + 1; at >= 0 && i < end; i++)
+            if (RestartKey.Match(lines[i]) is { Success: true } m) return m.Groups[2].Value == "true";
+        return null;
+    }
+
+    // The text with [ui] restart_host = on and every other line as it was: the value replaced in place, else the key added
+    // after the table's last line, else [ui] added at the end.
+    // shortcut: a [ui] written as dotted keys (ui.x = 1) or an inline table is not seen; Apex writes neither (toml++ tables)
+    public static string WithRestartHost(string text, bool on)
+    {
+        var cr = text.Contains("\r\n") ? "\r" : "";
+        var line = "restart_host = " + (on ? "true" : "false");
+        var (lines, at, end) = UiTable(text);
+        if (at < 0)
+            return text + (text.Length == 0 || text.EndsWith('\n') ? "" : cr + "\n") + (text.Length == 0 ? "" : cr + "\n") + $"[ui]{cr}\n{line}{cr}\n";
+        for (int i = at + 1; i < end; i++)
+            if (RestartKey.IsMatch(lines[i]))
+            {
+                lines[i] = RestartKey.Replace(lines[i], "${1}" + (on ? "true" : "false"), 1);
+                return string.Join('\n', lines);
+            }
+        var last = end - 1;
+        while (last > at && lines[last].Trim().Length == 0) last--;
+        var list = lines.ToList();
+        list.Insert(last + 1, line + cr);
+        return string.Join('\n', list);
+    }
+
+    // the text without [ui] restart_host (undo of a key Setup added)
+    public static string WithoutRestartHost(string text)
+    {
+        var (lines, at, end) = UiTable(text);
+        var i = at < 0 ? -1 : Array.FindIndex(lines, at + 1, end - at - 1, l => RestartKey.IsMatch(l));
+        return i < 0 ? text : string.Join('\n', lines.Where((_, n) => n != i));
+    }
 }

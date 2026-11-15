@@ -13,6 +13,8 @@ out = '''#include "apex_config.h"
 #include "apex_version.h"
 #include "profile_package.h"
 #include "performance.h"
+#include "looks.h"
+#include "looks_preset.h"
 #include <sstream>
 #include <algorithm>
 #include <cctype>
@@ -20,7 +22,7 @@ namespace ApexConfig { namespace {
 '''
 out += between('std::string Serialize(', '// Copies the keys')
 out += between('std::string Upper(', '} // namespace')
-out += between('unsigned FeaturePart(', 'bool IsProfileFeature(')
+out += between('constexpr const char* kLampModeFeature', 'bool IsProfileFeature(')
 out += '}\n'
 out += between('const char* ProfilePartName(', 'void CaptureProfileState(')
 out += s[s.index('bool ReadProfile('):]

@@ -14,6 +14,11 @@
 #include "apex_version.h"
 #include "apex_log.h"
 #include "apex_util.h"
+#include "build_flavor.h"
+#include "hotkeys.h"
+#include "looks_preset.h"
+#include "framework/overlay.h"
+#include "features/captures.h"
 #include "ui/widgets.h"
 #include "ui/violet_theme.h"
 #include "ui/i18n.h"
@@ -23,10 +28,18 @@ std::wstring testRoot;
 namespace ApexPaths {const std::wstring& ApexDirectory(){return testRoot;} bool EnsureApexDirectory(){std::filesystem::create_directories(testRoot);return true;}}
 namespace ApexConfig {
 UiSettings GetUi(){return {};}
+void SetUi(const UiSettings&) {}
+bool SaveProfile(const std::string&,unsigned,std::string*,const std::string&) {return true;}
 void CaptureProfileState(toml::table& out) {
-    out=toml::parse("[qol.picture]\nenabled=true\n[qol.picture.filters]\nlut=true\nlut_file='An unusually long cinematic color treatment.cube'\n[patches.AmbientOcclusion]\nenabled=true\n[patches.NightTerrainRelight]\nenabled=true\n[patches.DepthBlur]\nenabled=true\n[patches.EdgeSmoothing]\nenabled=true\n[patches.ResourceLookupCache]\nenabled=true\n[shortcuts]\nmenu_key='F11'\n");
+    out=toml::parse("[qol.picture]\nenabled=true\n[qol.picture.filters]\nlut=true\nlut_file='An unusually long cinematic color treatment.cube'\n[patches.AmbientOcclusion]\nenabled=true\n[patches.NightTerrainRelight]\nenabled=true\n[patches.DepthBlur]\nenabled=true\n[patches.EdgeSmoothing]\nenabled=true\n[patches.ResourceLookupCache]\nenabled=true\n[patches.Looks]\nenabled=true\npreset='looks:Cinema.ini'\npacks=['qUINT']\n[shortcuts]\nmenu_key='F11'\n");
 }
 }
+namespace Looks {void OfferCard() {} void OfferPresetPacks(const std::string&,const std::vector<std::string>&) {}
+std::vector<std::string> MissingPresetPacks(const std::vector<std::string>& p,std::string* s=nullptr) {if(s&&!p.empty())*s="This preset needs a pack (1.0 MB)";return p;}
+void DownloadPresetPacks(const std::vector<std::string>&) {}}
+namespace Overlay {bool IsVisible() {return true;}}
+namespace Captures {void Notify(const std::string&,int,NoteKind) {}}
+namespace Hotkeys {std::string ComboText(const KeyCombo&) {return "Ctrl+Shift+P";} KeyCombo HeldCombo() {return {};} bool ComboReserved(const KeyCombo&) {return false;}}
 using ApexUi::IconId;
 using ApexUi::ButtonKind;
 using VioletTheme::Col;
@@ -47,6 +60,7 @@ void PickProfileFile(bool,bool,std::string) {}
 void SaveProfileNow(const std::string&) {}
 void LoadProfileItem(const ProfileItem&,unsigned) {}
 void LoadProfileNow(const std::string&,unsigned) {}
+void ApplyProfileState(const std::string&,const std::string&,const std::string&,toml::table,unsigned) {}
 void OpenProfilesFolder() {}
 #include "preset_page.inc"
 #include "preset_raster.inc"
@@ -70,7 +84,7 @@ int main(int argc,char** argv) {
             ImGui::Begin("Presets",nullptr,ImGuiWindowFlags_NoTitleBar);
             if(frame==0 && mode && mode!=9) {
                 StartPresetDialog(mode==1?ProfilesState::Save:mode==2||mode==3?ProfilesState::Import:mode==4||mode>=6?ProfilesState::Export:ProfilesState::Apply,mode==5?&g_profiles.list[1]:nullptr);
-                if(mode==3){g_profiles.importPath=L"C:\\Cinema suave.zip";ApexConfig::CaptureProfileState(g_profiles.imported.state);g_profiles.available=ApexConfig::kProfilePartsAll&~ApexConfig::kPartDeveloper;g_profiles.saveParts=g_profiles.available&~ApexConfig::kPartShortcuts;std::snprintf(g_profiles.name,sizeof g_profiles.name,"Cinema suave");}
+                if(mode==3){g_profiles.importPath=L"C:\\Cinema suave.zip";ApexConfig::CaptureProfileState(g_profiles.imported.state);g_profiles.available=ApexConfig::kProfilePartsAll&~ApexConfig::kPartDeveloper;g_profiles.saveParts=g_profiles.available&~ApexConfig::kPartsOptIn;std::snprintf(g_profiles.name,sizeof g_profiles.name,"Cinema suave");}
                 if(mode==6)g_profilePickerBusy=true;
             }
             if(frame==0 && mode==9) {
@@ -93,7 +107,7 @@ int main(int argc,char** argv) {
                 auto action=std::find_if(buttons.rbegin(),buttons.rend(),[](const auto& r){return r.name=="Save"||r.name=="Import"||r.name=="Export"||r.name=="Apply";});
                 if(action==buttons.rend() || action->rect.Max.y>io.DisplaySize.y || action->rect.Max.x>io.DisplaySize.x || action->rect.Min.x<0 || action->rect.Max.y>action->clipBottom+1) {printf("Footer clipped lang=%d width=%d scale=%f mode=%d rect=%f,%f-%f,%f clip=%f\n",lang,width,scale,mode,action->rect.Min.x,action->rect.Min.y,action->rect.Max.x,action->rect.Max.y,action->clipBottom);return 12;}
                 if((mode==2||mode==6) && action->enabled) return 13;
-                if((mode==1||mode==3||mode==4) && (g_profiles.saveParts&ApexConfig::kPartShortcuts))return 14;
+                if((mode==1||mode==3||mode==4) && (g_profiles.saveParts&ApexConfig::kPartsOptIn))return 14;
             }
         }
         if(I18n::MissingCount()){printf("Missing translations: %s\n",I18n::MissingList(30).c_str());return 15;}

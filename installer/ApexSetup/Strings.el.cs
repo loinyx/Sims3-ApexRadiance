@@ -220,8 +220,8 @@ public static partial class Strings
             "Κρατά αντίγραφο κάθε αρχείου που αλλάζει, ώστε να μπορείς να τα αναιρέσεις όλα.",
         ["Your Apex Radiance settings are always kept."] = "Οι ρυθμίσεις σου στο Apex Radiance διατηρούνται πάντα.",
         ["No internet connection"] = "Δεν υπάρχει σύνδεση στο Internet",
-        ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (προτείνεται)",
-        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan με περισσότερη μνήμη (RTX Remix bridge)",
+        ["Vulkan, DXVK"] = "Vulkan, DXVK",
+        ["Vulkan with more memory (RTX Remix bridge, recommended)"] = "Vulkan με περισσότερη μνήμη (RTX Remix bridge, προτείνεται)",
         ["DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0})."] = "Το DXVK και το RTX Remix bridge χρειάζονται κάρτα γραφικών με Vulkan 1.3 (βρέθηκε: {0}).",
         ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again."] = "Το πρόγραμμα οδήγησης γραφικών είναι πολύ παλιό για το DXVK και το RTX Remix bridge (λείπει: {0}). Ενημερώστε το πρόγραμμα οδήγησης γραφικών και ανοίξτε ξανά το Setup.",
         ["{0} cannot start with this graphics driver (missing: {1}), so the game closes at start. Update the graphics driver, or choose Windows default (Direct3D 9) in Change components."] = "Το {0} δεν μπορεί να ξεκινήσει με αυτό το πρόγραμμα οδήγησης γραφικών (λείπει: {1}), οπότε το παιχνίδι κλείνει κατά την εκκίνηση. Ενημερώστε το πρόγραμμα οδήγησης ή επιλέξτε Προεπιλογή των Windows (Direct3D 9) στο Αλλαγή στοιχείων.",
@@ -282,5 +282,11 @@ public static partial class Strings
         ["A new Setup is available"] = "Υπάρχει νέο Setup",
         ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Το Apex Radiance Setup {0} κατέβηκε και ελέγχθηκε. Ενημέρωσε το Setup και θα ανοίξει ξανά.",
         ["Update Setup"] = "Ενημέρωση Setup",
+        // restart host (experimental)
+        ["Restart host"] = "Επανεκκίνηση παιχνιδιού",
+        ["Experimental"] = "Πειραματικό",
+        ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Μετά από αποθήκευση με λίγη μνήμη, προτείνει να ξεκινήσει ξανά το παιχνίδι σε αυτή την αποθήκευση όταν βγείτε.",
+        ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Ξεκινήστε το παιχνίδι μία φορά με το Apex Radiance και μετά ενεργοποιήστε εδώ την επανεκκίνηση παιχνιδιού.",
+        ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "Αφαιρεί το ts3wrap.exe και απενεργοποιεί την επανεκκίνηση παιχνιδιού στο ApexRadiance.toml.",
     };
 }

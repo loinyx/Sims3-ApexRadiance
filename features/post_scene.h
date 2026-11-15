@@ -46,6 +46,15 @@ bool Counting();
 std::string DiagText();
 // This frame's effects have not run yet but will at a later scene boundary (Picture waits for them before its scene copy)
 bool EffectsPending();
+// The game's colour pass (256x256 back-buffer tiles redrawn with x (1 + c) / (x + c), after its UI): whether it has started
+// this frame, and c of the last complete frame (0 when that frame had none). Render thread
+bool ColourTilesStarted();
+float ColourCurveLastFrame();
+// Called before the first tile copy of each frame's colour pass (one caller: Looks; nullptr removes it)
+void SetBeforeColourPass(Effect fn);
+// The effects running now run from the hook of the draw that marked the boundary (before it draws), not from a tile copy
+// or EndScene
+bool BoundaryOnDraw();
 // The camera's view-projection of the current frame (world -> clip, rows = c40..c43), false when not seen this frame
 bool CameraViewProj(float vp[4][4]);
 // The same, or the last frame's when this frame has none yet (at a Present: the frame just drawn); the unmirrored camera

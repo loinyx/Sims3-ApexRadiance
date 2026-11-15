@@ -14,6 +14,8 @@
 #include <vector>
 #include <windows.h>
 
+struct IDirect3DDevice9;
+
 namespace Captures {
 
 std::filesystem::path Root(); // ...\Apex Radiance\Captures
@@ -44,6 +46,8 @@ bool Saving(); // includes PNG encoding (screenshots and texture dumps), unlike 
 // A lossless PNG written on a background worker (one at a time, in order): channels 1 = 8-bit grey, 3 = B G R bytes, rows
 // top-down, w*channels bytes each. The capture folder counts as saving until its PNGs are done (call before Finish).
 // The render thread waits only when the queued pixels pass a memory cap (32-bit game).
+// The current mouse pointer drawn into B G R (3) or B G R X (4) pixels of the game image at w x h (render thread)
+void DrawMousePointer(IDirect3DDevice9* dev, BYTE* px, UINT w, UINT h, UINT bytesPerPixel);
 void WritePngAsync(const std::filesystem::path& folder, const std::filesystem::path& file, std::vector<BYTE> pixels, UINT w, UINT h, int channels);
 // Keeps Captures\ within [ui] capture_max_mb and capture_max_folders on a background thread, removing the oldest capture
 // folders first ("YYYY-MM-DD HH-MM-SS <kind>" direct children only; never the open session or a capture still being
@@ -59,6 +63,8 @@ bool ScreenshotPending(); // render thread: a screenshot is taken at the next Pr
 void ScreenshotNow(const std::filesystem::path& folder);
 // Captures the finished back buffer (all Apex passes included) into Screenshots, optionally hiding the game's F10 UI for one frame.
 bool RequestPlayerScreenshot(bool hideGameUi);
+// Video (ApexCapture): hide = F10 now when the game UI is shown (true: it was hidden, call again with false to bring it back)
+bool HideGameUiForVideo(bool hide);
 void ObserveGameUiKey(WPARAM vk, bool repeat); // call for game-window key-down messages to track the F10 visibility toggle
 void OnWorldSessionChanged(); // render thread: world loaded or left; the inferred F10 state goes back to "UI shown"
 // "<date time> Report": only the log, the settings and the crash report (for any problem, crashes included)

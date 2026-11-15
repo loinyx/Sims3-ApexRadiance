@@ -216,8 +216,8 @@ public static partial class Strings
             "Tar vare på en kopi av hver fil det endrer, så du kan angre alt.",
         ["Your Apex Radiance settings are always kept."] = "Apex Radiance-innstillingene dine beholdes alltid.",
         ["No internet connection"] = "Ingen internettforbindelse",
-        ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (anbefalt)",
-        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan med mer minne (RTX Remix bridge)",
+        ["Vulkan, DXVK"] = "Vulkan, DXVK",
+        ["Vulkan with more memory (RTX Remix bridge, recommended)"] = "Vulkan med mer minne (RTX Remix bridge, anbefalt)",
         ["DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0})."] = "DXVK og RTX Remix bridge krever et skjermkort med Vulkan 1.3 (funnet: {0}).",
         ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again."] = "Skjermkortdriveren er for gammel for DXVK og RTX Remix bridge (mangler: {0}). Oppdater skjermkortdriveren, og åpne Setup på nytt.",
         ["{0} cannot start with this graphics driver (missing: {1}), so the game closes at start. Update the graphics driver, or choose Windows default (Direct3D 9) in Change components."] = "{0} kan ikke starte med denne skjermkortdriveren (mangler: {1}), så spillet lukkes ved oppstart. Oppdater skjermkortdriveren, eller velg Windows-standard (Direct3D 9) under Endre komponenter.",
@@ -277,5 +277,11 @@ public static partial class Strings
         ["A new Setup is available"] = "Et nytt Setup er tilgjengelig",
         ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Apex Radiance Setup {0} er lastet ned og kontrollert. Oppdater Setup, så åpnes det igjen.",
         ["Update Setup"] = "Oppdater Setup",
+        // restart host (experimental)
+        ["Restart host"] = "Omstart av spillet",
+        ["Experimental"] = "Eksperimentell",
+        ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Etter en lagring med lite minne tilbyr den å starte spillet på nytt i den lagringen når du avslutter.",
+        ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Start spillet én gang med Apex Radiance, og slå deretter på omstart av spillet her.",
+        ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "Fjerner ts3wrap.exe og slår av omstart av spillet i ApexRadiance.toml.",
     };
 }

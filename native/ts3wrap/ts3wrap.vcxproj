@@ -42,14 +42,18 @@
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
-      <AdditionalDependencies>kernel32.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>kernel32.lib;user32.lib;shell32.lib;ole32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="ts3wrap.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ResourceCompile Include="ts3wrap.rc" />
+  </ItemGroup>
+  <ItemGroup>
     <ClInclude Include="restart_channel.h" />
+    <ClInclude Include="relaunch_rules.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

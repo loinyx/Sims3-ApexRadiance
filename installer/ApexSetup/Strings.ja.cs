@@ -211,8 +211,8 @@ public static partial class Strings
         ["Keeps a copy of every file it changes, so you can undo everything."] = "変更するファイルはすべてコピーを保存するので、いつでも元に戻せます。",
         ["Your Apex Radiance settings are always kept."] = "Apex Radiance の設定は常に保持されます。",
         ["No internet connection"] = "インターネットに接続されていません",
-        ["Vulkan, DXVK (recommended)"] = "Vulkan、DXVK（推奨）",
-        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan、空きメモリ多め（RTX Remix bridge）",
+        ["Vulkan, DXVK"] = "Vulkan、DXVK",
+        ["Vulkan with more memory (RTX Remix bridge, recommended)"] = "Vulkan、空きメモリ多め（RTX Remix bridge、推奨）",
         ["DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0})."] = "DXVK と RTX Remix bridge には Vulkan 1.3 対応のグラフィックカードが必要です（検出：{0}）。",
         ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again."] = "グラフィックドライバーが古いため、DXVK と RTX Remix bridge を使えません（不足：{0}）。グラフィックドライバーを更新してから、Setup をもう一度開いてください。",
         ["{0} cannot start with this graphics driver (missing: {1}), so the game closes at start. Update the graphics driver, or choose Windows default (Direct3D 9) in Change components."] = "{0} はこのグラフィックドライバーでは起動できません（不足：{1}）。そのためゲームは起動時に終了します。グラフィックドライバーを更新するか、コンポーネントを変更 で Windows 標準（Direct3D 9） を選んでください。",
@@ -271,5 +271,11 @@ public static partial class Strings
         ["A new Setup is available"] = "新しい Setup があります",
         ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Apex Radiance Setup {0} をダウンロードして確認しました。Setup を更新すると、もう一度開きます。",
         ["Update Setup"] = "Setup を更新",
+        // restart host (experimental)
+        ["Restart host"] = "ゲームの再起動",
+        ["Experimental"] = "試験的",
+        ["After a save made low on memory, offers to start the game again into that save when you quit."] = "メモリが少ない状態でセーブした後、終了時にそのセーブでゲームを再び起動するか尋ねます。",
+        ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Apex Radiance でゲームを一度起動してから、ここでゲームの再起動をオンにしてください。",
+        ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "ts3wrap.exe を削除し、ApexRadiance.toml でゲームの再起動をオフにします。",
     };
 }

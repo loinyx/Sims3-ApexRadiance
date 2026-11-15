@@ -206,8 +206,8 @@ public static partial class Strings
         ["Keeps a copy of every file it changes, so you can undo everything."] = "为每个更改的文件保留副本，让你可以撤销一切。",
         ["Your Apex Radiance settings are always kept."] = "始终保留你的 Apex Radiance 设置。",
         ["No internet connection"] = "没有网络连接",
-        ["Vulkan, DXVK (recommended)"] = "Vulkan，DXVK（推荐）",
-        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan，更多可用内存（RTX Remix bridge）",
+        ["Vulkan, DXVK"] = "Vulkan，DXVK",
+        ["Vulkan with more memory (RTX Remix bridge, recommended)"] = "Vulkan，更多可用内存（RTX Remix bridge、推荐）",
         ["DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0})."] = "DXVK 和 RTX Remix bridge 需要支持 Vulkan 1.3 的显卡（检测到：{0}）。",
         ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again."] = "显卡驱动太旧，无法使用 DXVK 和 RTX Remix bridge（缺少：{0}）。请更新显卡驱动，然后重新打开 Setup。",
         ["{0} cannot start with this graphics driver (missing: {1}), so the game closes at start. Update the graphics driver, or choose Windows default (Direct3D 9) in Change components."] = "{0} 无法在此显卡驱动下启动（缺少：{1}），因此游戏会在启动时关闭。请更新显卡驱动，或在“更改组件”中选择“Windows 默认（Direct3D 9）”。",
@@ -265,5 +265,11 @@ public static partial class Strings
         ["A new Setup is available"] = "有新的安装程序",
         ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Apex Radiance Setup {0} 已下载并校验。更新安装程序后它会重新打开。",
         ["Update Setup"] = "更新安装程序",
+        // restart host (experimental)
+        ["Restart host"] = "重新启动游戏",
+        ["Experimental"] = "实验性",
+        ["After a save made low on memory, offers to start the game again into that save when you quit."] = "在内存不足时存档后，退出游戏时会询问是否用该存档重新启动游戏。",
+        ["Start the game once with Apex Radiance, then turn on the restart host here."] = "请先用 Apex Radiance 启动一次游戏，然后在这里打开重新启动游戏。",
+        ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "删除 ts3wrap.exe，并在 ApexRadiance.toml 中关闭重新启动游戏。",
     };
 }

@@ -210,8 +210,8 @@ public static partial class Strings
         ["Keeps a copy of every file it changes, so you can undo everything."] = "변경하는 모든 파일의 사본을 보관해서 모두 되돌릴 수 있어요.",
         ["Your Apex Radiance settings are always kept."] = "Apex Radiance 설정은 항상 유지돼요.",
         ["No internet connection"] = "인터넷 연결 없음",
-        ["Vulkan, DXVK (recommended)"] = "Vulkan, DXVK (추천)",
-        ["Vulkan with more memory (RTX Remix bridge)"] = "Vulkan, 메모리 추가 확보 (RTX Remix bridge)",
+        ["Vulkan, DXVK"] = "Vulkan, DXVK",
+        ["Vulkan with more memory (RTX Remix bridge, recommended)"] = "Vulkan, 메모리 추가 확보 (RTX Remix bridge, 추천)",
         ["DXVK and the RTX Remix bridge need a graphics card with Vulkan 1.3 (found: {0})."] = "DXVK와 RTX Remix bridge에는 Vulkan 1.3을 지원하는 그래픽 카드가 필요합니다(감지됨: {0}).",
         ["Your graphics driver is too old for DXVK and the RTX Remix bridge (missing: {0}). Update the graphics driver, then open Setup again."] = "그래픽 드라이버가 너무 오래되어 DXVK와 RTX Remix bridge를 사용할 수 없습니다(누락: {0}). 그래픽 드라이버를 업데이트한 뒤 Setup을 다시 여세요.",
         ["{0} cannot start with this graphics driver (missing: {1}), so the game closes at start. Update the graphics driver, or choose Windows default (Direct3D 9) in Change components."] = "{0}은(는) 이 그래픽 드라이버로 시작할 수 없어(누락: {1}) 게임이 시작할 때 종료됩니다. 그래픽 드라이버를 업데이트하거나 구성 요소 변경에서 Windows 기본값 (Direct3D 9)을(를) 선택하세요.",
@@ -269,5 +269,11 @@ public static partial class Strings
         ["A new Setup is available"] = "새 Setup이 있습니다",
         ["Apex Radiance Setup {0} was downloaded and checked. Update Setup, then it opens again."] = "Apex Radiance Setup {0}을(를) 다운로드하고 확인했습니다. Setup을 업데이트하면 다시 열립니다.",
         ["Update Setup"] = "Setup 업데이트",
+        // restart host (experimental)
+        ["Restart host"] = "게임 다시 시작",
+        ["Experimental"] = "실험적",
+        ["After a save made low on memory, offers to start the game again into that save when you quit."] = "메모리가 부족한 상태에서 저장한 뒤 게임을 끄면 그 저장 파일로 게임을 다시 시작할지 묻습니다.",
+        ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Apex Radiance로 게임을 한 번 실행한 다음 여기에서 게임 다시 시작을 켜세요.",
+        ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "ts3wrap.exe를 제거하고 ApexRadiance.toml에서 게임 다시 시작을 끕니다.",
     };
 }

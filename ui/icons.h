@@ -135,6 +135,13 @@ enum class IconId : int {
     FlaskConical, // flask-conical
     FolderOpen, // folder-open
     Power, // power
+    Video, // video
+    SwatchBook, // swatch-book
+    Settings2, // settings-2
+    Plus, // plus
+    Package, // package
+    Library, // library
+    GripVertical, // grip-vertical
     Count,
     None = Count, // "no icon" for widgets that take an optional one
 };

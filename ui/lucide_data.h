@@ -783,6 +783,48 @@ inline constexpr Element kFlaskConical[] = {
     {Kind::Path, "M6.453 15h11.094", {}, false},
     {Kind::Path, "M8.5 2h7", {}, false},
 };
+// video.svg (Lucide, ISC)
+inline constexpr Element kVideo[] = {
+    {Kind::Path, "m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5", {}, false},
+    {Kind::Rect, nullptr, {2.0f, 6.0f, 14.0f, 12.0f, 2.0f}, false},
+};
+// swatch-book.svg (Lucide, ISC)
+inline constexpr Element kSwatchBook[] = {
+    {Kind::Path, "M11 17a4 4 0 0 1-8 0V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2Z", {}, false},
+    {Kind::Path, "M16.7 13H19a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H7", {}, false},
+    {Kind::Path, "M 7 17h.01", {}, false},
+    {Kind::Path, "m11 8 2.3-2.3a2.4 2.4 0 0 1 3.404.004L18.6 7.6a2.4 2.4 0 0 1 .026 3.434L9.9 19.8", {}, false},
+};
+// settings-2.svg (Lucide, ISC)
+inline constexpr Element kSettings2[] = {
+    {Kind::Path, "M14 17H5", {}, false},
+    {Kind::Path, "M19 7h-9", {}, false},
+    {Kind::Circle, nullptr, {17.0f, 17.0f, 3.0f}, false},
+    {Kind::Circle, nullptr, {7.0f, 7.0f, 3.0f}, false},
+};
+// plus.svg (Lucide, ISC)
+inline constexpr Element kPlus[] = {{Kind::Path, "M5 12h14", {}, false}, {Kind::Path, "M12 5v14", {}, false}};
+// package.svg (Lucide, ISC)
+inline constexpr Element kPackage[] = {
+    {Kind::Path, "M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z", {}, false},
+    {Kind::Path, "M12 22V12", {}, false},
+    {Kind::Path, "M3.29 7 12 12 20.71 7", {}, false},
+    {Kind::Path, "m7.5 4.27 9 5.15", {}, false},
+};
+// library.svg (Lucide, ISC)
+inline constexpr Element kLibrary[] = {
+    {Kind::Path, "m16 6 4 14", {}, false},
+    {Kind::Path, "M12 6v14", {}, false},
+    {Kind::Path, "M8 8v12", {}, false},
+    {Kind::Path, "M4 4v16", {}, false},
+};
+// grip-vertical.svg (Lucide, ISC)
+inline constexpr Element kGripVertical[] = {
+    {Kind::Circle, nullptr, {9.0f, 12.0f, 1.0f}, false}, {Kind::Circle, nullptr, {9.0f, 5.0f, 1.0f}, false},
+    {Kind::Circle, nullptr, {9.0f, 19.0f, 1.0f}, false}, {Kind::Circle, nullptr, {15.0f, 12.0f, 1.0f}, false},
+    {Kind::Circle, nullptr, {15.0f, 5.0f, 1.0f}, false}, {Kind::Circle, nullptr, {15.0f, 19.0f, 1.0f}, false},
+};
+
 inline constexpr IconData kIcons[] = {
     {"activity", kActivity, static_cast<int>(sizeof(kActivity) / sizeof(kActivity[0]))},
     {"aperture", kAperture, static_cast<int>(sizeof(kAperture) / sizeof(kAperture[0]))},
@@ -903,6 +945,13 @@ inline constexpr IconData kIcons[] = {
     {"flask-conical", kFlaskConical, static_cast<int>(sizeof(kFlaskConical) / sizeof(kFlaskConical[0]))},
     {"folder-open", kFolderOpen, static_cast<int>(sizeof(kFolderOpen) / sizeof(kFolderOpen[0]))},
     {"power", kPower, static_cast<int>(sizeof(kPower) / sizeof(kPower[0]))},
+    {"video", kVideo, static_cast<int>(sizeof(kVideo) / sizeof(kVideo[0]))},
+    {"swatch-book", kSwatchBook, static_cast<int>(sizeof(kSwatchBook) / sizeof(kSwatchBook[0]))},
+    {"settings-2", kSettings2, static_cast<int>(sizeof(kSettings2) / sizeof(kSettings2[0]))},
+    {"plus", kPlus, static_cast<int>(sizeof(kPlus) / sizeof(kPlus[0]))},
+    {"package", kPackage, static_cast<int>(sizeof(kPackage) / sizeof(kPackage[0]))},
+    {"library", kLibrary, static_cast<int>(sizeof(kLibrary) / sizeof(kLibrary[0]))},
+    {"grip-vertical", kGripVertical, static_cast<int>(sizeof(kGripVertical) / sizeof(kGripVertical[0]))},
 };
 
 } // namespace ApexUi::LucideData

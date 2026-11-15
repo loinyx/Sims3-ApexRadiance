@@ -6,6 +6,28 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k400Added[] = {
+    "Shaders: run ReShade and GShade looks in Apex, without either installed",
+    "Shaders: five built-in looks to start from, and your own .fx files",
+    "Shaders: download ReShade's shader packs from the menu, choosing which ones",
+    "Capture: screenshots and videos with your effects, on a page of their own",
+    nullptr};
+constexpr const char* k400Improved[] = {
+    "Presets: Capture and Shaders parts, and shared presets fetch the packs they need",
+    "Shaders: every setting of a ReShade shader gets its own control",
+    "Apex Radiance Setup: under half the download size, and an experimental restart host",
+    nullptr};
+constexpr const char* k400Fixed[] = {
+    "Presets: the import and export window scrolls on short screens",
+    "Shaders: Interface without shaders keeps a look's full colors in the world",
+    "Shaders: MXAO and other depth shaders see depth the right way up",
+    nullptr};
+constexpr const char* k400Highlights[] = {
+    "ReShade and GShade looks in Apex",
+    "Shader packs from the menu",
+    "Screenshots and videos with your effects",
+    nullptr};
+
 constexpr const char* k323Improved[] = {
     "Display: Turn off G-SYNC removed, and the NVIDIA setting it changed put back",
     nullptr};
@@ -616,6 +638,8 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"4.0.0", "2026-11-14", k400Added, k400Improved, k400Fixed,
+     "ReShade looks inside Apex, and screenshots and videos with your effects", k400Highlights},
     {"3.2.3", "2026-11-14", nullptr, k323Improved, k323Fixed},
     {"3.2.2", "2026-11-13", nullptr, nullptr, k322Fixed},
     {"3.2.1", "2026-11-13", nullptr, nullptr, k321Fixed},

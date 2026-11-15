@@ -9,6 +9,7 @@
 // Small, uncompressed ZIP packages. Only named payloads are returned; never extract paths.
 namespace ProfilePackage {
 inline constexpr size_t kLimit = 34u * 1024u * 1024u;
+inline constexpr size_t kMaxEntries = 72; // profile.toml, a LUT, a look and up to 64 shader files
 struct Entry { std::string name, bytes; };
 inline uint32_t Crc(std::string_view bytes) {
     static constexpr auto table=[] {
@@ -42,7 +43,7 @@ inline uint32_t Get(std::string_view in,size_t p,int count) {
     uint32_t n=0; for(int i=0;i<count;++i) n|=uint32_t(uint8_t(in[p+i]))<<(8*i); return n;
 }
 inline std::string Write(const std::vector<Entry>& entries) {
-    if(entries.empty() || entries.size()>2) throw std::runtime_error("Invalid profile package");
+    if(entries.empty() || entries.size()>kMaxEntries) throw std::runtime_error("Invalid profile package");
     std::string out, directory;
     for(const auto& e:entries) {
         if(!SafeName(e.name) || e.bytes.size()>kLimit || out.size()+e.bytes.size()>kLimit) throw std::runtime_error("Invalid profile package");
@@ -66,7 +67,7 @@ inline std::vector<Entry> Read(std::string_view in) {
     const size_t end=in.size()-22;
     if(Get(in,end,4)!=0x06054b50 || Get(in,end+4,2) || Get(in,end+6,2) || Get(in,end+20,2)) throw std::runtime_error("Invalid profile package");
     const auto count=Get(in,end+10,2), dirSize=Get(in,end+12,4), dirOffset=Get(in,end+16,4);
-    if(!count || count>2 || count!=Get(in,end+8,2) || dirOffset>end || dirSize!=end-dirOffset) throw std::runtime_error("Invalid profile package");
+    if(!count || count>kMaxEntries || count!=Get(in,end+8,2) || dirOffset>end || dirSize!=end-dirOffset) throw std::runtime_error("Invalid profile package");
     std::vector<Entry> entries; size_t p=dirOffset, localEnd=0;
     for(uint32_t i=0;i<count;++i) {
         if(Get(in,p,4)!=0x02014b50) throw std::runtime_error("Invalid profile package");

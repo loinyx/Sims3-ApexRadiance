@@ -309,7 +309,8 @@ function Invoke-Load($Load, [string]$BaseToml) {
     $dir = Join-Path $OutDir $Load.Name
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
     $notes = New-Object System.Collections.Generic.List[string]
-    $result = [pscustomobject]@{ Name = $Load.Name; JobId = $jobDef.id; Variant = $Load.Variant; Ok = $false; Closed = ''; Frames = $null; Sim = $null; M = $null; Events = $null; Notes = $notes; Saves = @() }
+    $result = [pscustomobject]@{ Name = $Load.Name; JobId = $jobDef.id; Variant = $Load.Variant; Ok = $false; Closed = ''; Frames = $null; Sim = $null; M = $null; Events = $null; Notes = $notes; Saves = @()
+        Info = (New-Object System.Collections.Generic.List[string]); FreeMB = $null }
     $script:commands = New-Object System.Collections.Generic.List[object]
     $machine = New-Object System.Collections.Generic.List[object]
     $measured = $null # the measured window (a profile step or the first measured wait): base, seconds, profilers
@@ -340,6 +341,9 @@ function Invoke-Load($Load, [string]$BaseToml) {
     # would carry that sleep. -InactiveIdle keeps the game's default.
     if (-not $InactiveIdle) { $gameArgs += '-NoInactiveIdle' }
     $gameArgs += '-ApexTestAgent:1' # the run marker: without it the agent stays idle (agent/Agent.cs)
+    # the load's own capture folder: a job points Apex's screenshot and video folders at %APEX_RUNNER_CAPTURES% (Apex
+    # expands environment variables in them), so captures land in the run's output, never in the player's folders
+    $env:APEX_RUNNER_CAPTURES = Join-Path $dir 'captures'
     Say "$($Load.Name): starting the game"
     if ($gameArgs) { $script:proc = Start-Process -FilePath $exe -WorkingDirectory $GameBin -ArgumentList $gameArgs -PassThru }
     else { $script:proc = Start-Process -FilePath $exe -WorkingDirectory $GameBin -PassThru }
@@ -383,6 +387,27 @@ function Invoke-Load($Load, [string]$BaseToml) {
                     $null = [ApexIngame.Keys]::PostMessage($script:proc.MainWindowHandle, 0x100, [IntPtr][int]$step.vk, [IntPtr]1)
                     $null = [ApexIngame.Keys]::PostMessage($script:proc.MainWindowHandle, 0x101, [IntPtr][int]$step.vk, [IntPtr]0xC0000001)
                     Say "  step ${n}: key $($step.vk)"
+                }
+                'memory' { # the game's largest free address block, read from outside (no agent call, no game work)
+                    $mb = [math]::Round($script:mbox.LargestFree() / 1MB)
+                    $result.FreeMB = $mb # the last reading is the load's value in the A/B table
+                    $result.Info.Add("largest free block $mb MB$(if ($step.label) { " ($($step.label))" })")
+                    Say "  step ${n}: largest free block $mb MB"
+                }
+                'check_files' { # files a step made in the load folder (default captures\): at least `min` (1) matching `pattern`, none empty
+                    $folder = Join-Path $dir $(if ($step.folder) { $step.folder } else { 'captures' })
+                    $min = if ($null -ne $step.min) { [int]$step.min } else { 1 }
+                    $files = @(Get-ChildItem -LiteralPath $folder -Filter $step.pattern -File -Recurse -ErrorAction SilentlyContinue)
+                    $ff = Get-Command ffprobe -ErrorAction SilentlyContinue # a video's length when ffprobe is on PATH
+                    $each = @($files | ForEach-Object {
+                        $len = if ($ff -and $_.Extension -in '.mp4', '.mkv') { & $ff.Source -v error -show_entries format=duration -of csv=p=0 $_.FullName 2>$null }
+                        [string]::Format([Globalization.CultureInfo]::InvariantCulture, '{0} {1:N2} MB{2}', $_.Name, ($_.Length / 1MB),
+                            $(if ($len) { [string]::Format([Globalization.CultureInfo]::InvariantCulture, ', {0:N1} s', [double]$len) } else { '' }))
+                    })
+                    $text = "$($files.Count) $($step.pattern) in $(Split-Path $folder -Leaf)$(if ($each) { ': ' + ($each -join ', ') })"
+                    if ($files.Count -lt $min -or @($files | Where-Object Length -eq 0).Count) { $notes.Add("check_files: $text; expected at least $min, none empty") }
+                    else { $result.Info.Add($text) }
+                    Say "  step ${n}: $text"
                 }
                 'wait_file' { # waits (answering dialogs) until a file exists: the tester saying "ready", e.g. after placing the camera
                     $f = Join-Path $OutDir $step.file
@@ -732,7 +757,7 @@ try {
                 (($restored.Pending | ForEach-Object { "- $($_.path): $($_.error -replace '\|', '/')" }) -join "`r`n") + "`r`n"
         }
         [IO.File]::WriteAllText((Join-Path $OutDir 'results.md'), $md, (New-Object Text.UTF8Encoding($false)))
-        $results | Select-Object Name, JobId, Variant, Ok, Closed, Frames, Sim, Events, Notes | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $OutDir 'results.json') -Encoding UTF8
+        $results | Select-Object Name, JobId, Variant, Ok, Closed, Frames, Sim, Events, Info, FreeMB, Notes | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $OutDir 'results.json') -Encoding UTF8
         Say "results: $OutDir\results.md ($(@($results | Where-Object Ok).Count) of $($results.Count) loads passed)"
     }
 }

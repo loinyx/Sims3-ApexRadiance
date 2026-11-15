@@ -9,6 +9,8 @@ public sealed class RestoreEntry
     public bool Existed { get; set; }
     public string? Copy { get; set; }        // the original, a file in the point's folder
     public bool Dir { get; set; }
+    public bool RestartHostKey { get; set; } // ApexRadiance.toml: undone by putting back only [ui] restart_host (RestartHostWas)
+    public bool? RestartHostWas { get; set; } // its value before, null when the key was missing
 }
 
 // A copy of everything one action of Setup changed, taken as it changes it:
@@ -59,7 +61,7 @@ public static class RestorePoints
     static void Save(RestorePoint p)
     {
         var json = Path.Combine(p.Dir, "point.json");
-        File.WriteAllText(json + ".tmp", JsonSerializer.Serialize(p, new JsonSerializerOptions { WriteIndented = true }));
+        File.WriteAllText(json + ".tmp", JsonSerializer.Serialize(p, SetupJson.Default.RestorePoint));
         File.Move(json + ".tmp", json, true);
     }
 
@@ -67,7 +69,7 @@ public static class RestorePoints
     {
         try
         {
-            var p = JsonSerializer.Deserialize<RestorePoint>(File.ReadAllText(Path.Combine(dir, "point.json")));
+            var p = JsonSerializer.Deserialize(File.ReadAllText(Path.Combine(dir, "point.json")), SetupJson.Default.RestorePoint);
             if (p is not null) p.Dir = dir;
             return p;
         }
@@ -94,12 +96,12 @@ public static class RestorePoints
 
     // first touch wins: the path as it was before this action. All or nothing: the entry is kept only once its copy and
     // point.json are on disk (an action cut off after it can still be restored); otherwise it throws before the change
-    internal static void Touch(string path, bool dir = false)
+    internal static void Touch(string path, bool dir = false, bool key = false, bool? keyWas = null)
     {
         if (_open is not { } s) return;
         path = Path.GetFullPath(path);
         if (s.Seen.Contains(path)) return;
-        var e = new RestoreEntry { Path = path, Dir = dir, Existed = dir ? Directory.Exists(path) : File.Exists(path) };
+        var e = new RestoreEntry { Path = path, Dir = dir, Existed = dir ? Directory.Exists(path) : File.Exists(path), RestartHostKey = key, RestartHostWas = keyWas };
         Directory.CreateDirectory(s.Point.Dir);
         try
         {
@@ -166,6 +168,17 @@ public static class RestorePoints
             return;
         }
         if (File.Exists(e.Path)) File.SetAttributes(e.Path, File.GetAttributes(e.Path) & ~FileAttributes.ReadOnly);
+        if (e.RestartHostKey)
+        {
+            // the game may have saved other settings in the file since: only the key goes back (the whole file when the game
+            // never wrote it after Setup created it)
+            if (!File.Exists(e.Path)) return;
+            var text = File.ReadAllText(e.Path);
+            if (!e.Existed && text == Engine.NewApexToml) File.Delete(e.Path);
+            else if (Engine.RestartHostKey(text) != e.RestartHostWas)
+                File.WriteAllText(e.Path, e.RestartHostWas is { } was ? Engine.WithRestartHost(text, was) : Engine.WithoutRestartHost(text));
+            return;
+        }
         if (!e.Existed) { if (File.Exists(e.Path)) File.Delete(e.Path); return; }
         // through a temporary name: a failed copy never leaves half a file
         Directory.CreateDirectory(Path.GetDirectoryName(e.Path)!);
@@ -191,6 +204,8 @@ public static class Fs
     public static void Copy(string from, string to) { RestorePoints.Touch(to); File.Copy(from, to, true); }
     public static void Move(string from, string to) { RestorePoints.Touch(from); RestorePoints.Touch(to); File.Move(from, to, true); }
     public static void Write(string path, string text) { RestorePoints.Touch(path); File.WriteAllText(path, text); }
+    // ApexRadiance.toml with [ui] restart_host changed from keyWas: a restore point puts back only that key
+    public static void WriteKey(string path, string text, bool? keyWas) { RestorePoints.Touch(path, key: true, keyWas: keyWas); File.WriteAllText(path, text); }
     public static void Delete(string path) { if (!File.Exists(path)) return; RestorePoints.Touch(path); File.Delete(path); }
     public static void ClearReadOnly(string path)
     {

@@ -38,6 +38,7 @@ const I18n::Entry kEntries[] = {
     {"{} turned off", "{} desligado", "{} desactivado", "{} désactivé"},
     {"{} reset", "{} voltou ao padrão", "{} restablecido", "{} réinitialisé"},
     {"{} changed", "{} alterado", "{} cambiado", "{} modifié"},
+    {"Pick a color", "Escolher uma cor", "Elegir un color", "Choisir une couleur"},
     {"Automatic ({})", "Automático ({})", "Automático ({})", "Automatique ({})"},
     {"Language", "Idioma", "Idioma", "Langue"},
     {"The language of this menu", "O idioma deste menu", "El idioma de este menú", "La langue de ce menu"},

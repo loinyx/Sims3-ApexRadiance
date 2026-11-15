@@ -26,6 +26,8 @@
 #include "picture.h"
 #include "recorder.h"
 #include "captures.h"
+#include "apex_capture.h"
+#include "looks_preset.h"
 #include "light_diag.h"
 #include "light_probe.h"
 #include "hotkeys.h"
@@ -38,8 +40,12 @@
 #include "shader_cache.h"
 #include "scene_dither.h"
 #include "scene_target.h"
+#include "third_party/reshade_shaders/reshade_licenses.h"
+#include "third_party/reshadefx/reshadefx_license.h"
+#include "third_party/miniz/miniz_license.h"
 #include "sim_occlusion.h"
 #include "ui/i18n.h"
+#include "looks.h"
 #include <charconv>
 #include "ui/logo.h"
 #include "ui/violet_theme.h"
@@ -87,13 +93,18 @@ std::atomic<bool> g_oldStandalone{false}; // an older S3SSApex.asi is loaded too
 std::string g_oldStandaloneModule;        // under g_detailLock
 
 // Sidebar pages and the tabs of each page. The selected page and tabs are kept while the game runs (not saved).
-enum Page : int { PageOverview, PageLighting, PageWaterSnow, PageColor, PageAmbientOcclusion, PageDepthBlur, PageEdgeSmoothing, PagePerformance, PageDeveloper, PageSettings, PageReport, PageConflicts, PageBanding, PageLotStreaming, PageProfiles, PageDisplay };
+enum Page : int { PageOverview, PageLighting, PageWaterSnow, PageColor, PageAmbientOcclusion, PageDepthBlur, PageEdgeSmoothing, PagePerformance, PageDeveloper, PageSettings, PageReport, PageConflicts, PageBanding, PageLotStreaming, PageProfiles, PageDisplay, PageCapture, PageShaders };
 enum LightingTab : int { LightingLamps, LightingOutside, LightingInside, LightingFixes };
 enum SettingsTab : int { SettingsMenu, SettingsShortcuts, SettingsProfiles, SettingsCompatibility, SettingsAbout };
 int g_page = PageOverview;
 int g_lightingTab = LightingLamps;
 int g_colorTab = Picture::TabOverview;
+enum ShadersTab : int { ShadersLook, ShadersPacks, ShadersLibrary };
+int g_shadersTab = ShadersLook;
 int g_settingsTab = SettingsMenu;
+enum CaptureTab : int { CaptureShots, CaptureVideo };
+int g_captureTab = CaptureShots;
+bool g_takeShot = false; // Image > Capture: "Take one" was clicked (taken by RunShortcuts at the next frame)
 
 // ---- menu state (render thread, inside the overlay's ImGui frame) ----
 char g_search[96] = {};           // the header's search query; non-empty = the content shows the results
@@ -114,7 +125,6 @@ double g_whatsNewOpenedAt = -1.0; // when the What's new popover opened (its ris
 // list), the release list's content and the footer below the list
 float g_whatsNewHeadH = 0.0f, g_whatsNewListH = 0.0f, g_whatsNewFooterH = 0.0f;
 int g_whatsNewSettle = 0; // frames the popover is laid out unseen after it opens, while its height settles
-void ScreenshotCaptureCard();
 void RecoveryRow();
 
 // Undo: the feature state at the last click / key activation in the menu (before any widget saw it), and the toast
@@ -218,9 +228,10 @@ template <int N> const char* CostChip(float ms, char (&buf)[N]) { return ApexUi:
 // on/off switch and its GPU cost chip, then (below a divider) its state notes and body(patch) while it is on. In the
 // search results the body is searched even while the feature is off.
 // bodyWhenOff: the body is also called while the feature is off (it then draws only what it shows while off)
+// extra: header buttons (a hold-to-compare eye)
 template <typename Body>
 void FeatureCardWith(const char* patchName, IconId icon, const char* title, const char* subtitle, Body&& body, bool showDivider = true,
-                     bool bodyWhenOff = false) {
+                     bool bodyWhenOff = false, ApexUi::HeaderExtra* extra = nullptr) {
     ApexPatch* patch = Find(patchName);
     if (!patch) return;
     ImGui::PushID(patchName);
@@ -228,7 +239,7 @@ void FeatureCardWith(const char* patchName, IconId icon, const char* title, cons
         bool on = patch->IsEnabled();
         char chipBuf[24];
         const char* chip = on ? CostChip(patch->GpuCostMs(), chipBuf) : nullptr;
-        if (ApexUi::CardHeader(icon, title, subtitle, Description(patch), &on, Switchable(patch), nullptr, chip)) SetPatch(patch, on);
+        if (ApexUi::CardHeader(icon, title, subtitle, Description(patch), &on, Switchable(patch), extra, chip)) SetPatch(patch, on);
         const bool enabled = patch->IsEnabled();
         if (((enabled || bodyWhenOff) && showDivider) || HasStateNotes(patch)) ApexUi::CardDivider();
         StateNotes(patch);
@@ -438,7 +449,7 @@ void RecommendS3SSCard() {
 bool g_menuGameAaOn = false;
 
 constexpr const char* kOverviewMainPatches[] = {
-    kNightLighting, "AmbientOcclusion", "SceneDither", "DepthBlur", "EdgeSmoothing",
+    kNightLighting, "AmbientOcclusion", "SceneDither", "DepthBlur", "EdgeSmoothing", Looks::kPatchName,
 };
 bool Comparing(); // the Compare shortcut has the effects off (defined with ToggleCompare)
 void ToggleCompare();
@@ -596,12 +607,26 @@ void LotSet(bool on) { SetGroup(kOverviewLotPatches, OverviewRestore::Scope::Lot
 bool LotSwitchable() { return GroupSwitchable(kOverviewLotPatches); }
 std::string LotDetail() { return GroupCountText(kOverviewLotPatches); }
 std::string DisplayDetail() { return Screen::Summary(); }
+bool ShadersOn() { const ApexPatch* p = Find(Looks::kPatchName); return p && p->IsEnabled(); }
+void ShadersSet(bool on) { if (ApexPatch* p = Find(Looks::kPatchName); p && Switchable(p)) SetPatch(p, on); }
+bool ShadersSwitchable() { return Switchable(Find(Looks::kPatchName)); }
+// The Shaders row: the look's name and its cost while on ("Off" is the row's phrase)
+std::string ShadersLookDetail() {
+    const ApexPatch* patch = Find(Looks::kPatchName);
+    if (!patch || !patch->IsEnabled()) return {};
+    std::string s = Looks::LookName();
+    if (s.empty()) return I18n::Tr("No look chosen");
+    char buf[24];
+    if (CostChip(patch->GpuCostMs(), buf)) s += " \xC2\xB7 " + std::string(buf);
+    return s;
+}
 
 const OverviewTile* OverviewTiles(int& count) {
     static const OverviewTile kTiles[] = {
         {"Lighting", IconId::MoonStar, "Lighting", "Lamps light up your neighborhood at night", PageLighting, &g_lightingTab, LightingLamps, LightsOn, LightsSet, LightsSwitchable, LightsDetail, true},
         {"WaterSnow", IconId::WavesHorizontal, "Water & Snow", "Ponds mirror their shore", PageWaterSnow, nullptr, 0, ShoreOn, SetShore, WaterSwitchable, WaterDetail, true},
         {"Color", IconId::Palette, "Color", "Adjustments, filters and LUTs", PageColor, nullptr, 0, ColorOn, ColorSet, AlwaysSwitchable, ColorDetail, true},
+        {"Shaders", IconId::SwatchBook, "Shaders", "Off", PageShaders, &g_shadersTab, ShadersLook, ShadersOn, ShadersSet, ShadersSwitchable, ShadersLookDetail, true},
         {"Banding", IconId::Blend, "Banding Fix", "No color steps in light and shadows", PageBanding, nullptr, 0, BandingOn, BandingSet, BandingSwitchable, BandingDetail, true},
         {"Occlusion", IconId::Contrast, "Ambient Occlusion", "Soft shade where things meet", PageAmbientOcclusion, nullptr, 0, OcclusionOn, OcclusionSet, OcclusionSwitchable, OcclusionDetail, true},
         {"Blur", IconId::Aperture, "Depth Blur", "Softly blurs the distant background", PageDepthBlur, nullptr, 0, BlurOn, BlurSet, BlurSwitchable, BlurDetail, true},
@@ -1214,6 +1239,122 @@ void ColorPage() {
     if (g_colorTab == Picture::TabFilters) Picture::Get().RenderFiltersUI();
 }
 
+// ---- Image > Shaders ----
+
+bool LookTwin(const std::string& technique, Looks::Twin& out, bool act); // below
+
+// A LUT on too: both change color; an amber row of the look card, before its Advanced, with its one action
+void LookLutRow() {
+    PictureParams pp = Picture::Get().GetParams();
+    if (!pp.enabled || !pp.lut || pp.lutFile.empty() || ApexUi::FilterActive()) return;
+    const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+    const char* off = I18n::Tr("Turn off the LUT");
+    ApexUi::SetNextRowWarning();
+    if (ApexUi::BeginControlRow("A LUT is on too", "Both change color, so the picture may look too strong", ApexUi::ButtonWidth(off, false))) {
+        if (ApexUi::TextButton(off)) {
+            pp.lut = false;
+            Picture::Get().SetParams(pp, true);
+            ApexUi::ReportChange("LUT turned off");
+        }
+        ApexUi::EndControlRow();
+    }
+}
+
+// Tab Look: the look card (titled with the look; hold the eye to see the game without it; an amber row while a LUT is
+// also on), then the import note and the shaders of the look. The area's switch is beside the page title; in the search
+// results the card header is that switch, as "Shaders".
+void ShadersLookContent() {
+    ApexPatch* patch = Find(Looks::kPatchName);
+    if (!patch) return;
+    const bool search = ApexUi::FilterActive();
+    ApexUi::HeaderExtra extra;
+    ImGui::PushID(Looks::kPatchName);
+    if (ApexUi::BeginCard("##Card")) {
+        bool on = patch->IsEnabled();
+        char chip[24];
+        const std::string name = Looks::LookName();
+        const std::string status = Looks::StatusLine(on ? CostChip(patch->GpuCostMs(), chip) : nullptr);
+        extra.holdIcon = IconId::Eye;
+        extra.holdTooltip = "Hold to see the game without the look";
+        extra.enabled = on;
+        if (search) {
+            if (ApexUi::CardHeader(IconId::WandSparkles, "Shaders", "ReShade looks and shaders on the game's picture", Description(patch), &on, Switchable(patch)))
+                SetPatch(patch, on);
+        } else {
+            ApexUi::CardHeader(IconId::WandSparkles, name.empty() ? "ReShade look" : name.c_str(), status.c_str(), Description(patch), nullptr, true, &extra);
+        }
+        if (patch->IsEnabled() || HasStateNotes(patch)) ApexUi::CardDivider();
+        StateNotes(patch);
+        Looks::SetCardRows(LookLutRow);
+        if (patch->IsEnabled() || search) patch->RenderCustomUI();
+    }
+    ApexUi::EndCard();
+    ImGui::PopID();
+    if (extra.held) Looks::HoldBypass();
+    Looks::SetTwinCheck(LookTwin); // a shader doubling an Apex effect: an amber line on its row in the list
+    if (patch->IsEnabled() || search) Looks::ShadersCard();
+}
+
+// Tab Library: Installed packs and Your shaders (where shaders come from)
+void ShadersLibraryContent() { Looks::LibraryCards(); }
+
+// Tab Packs: ReShade's packs to pick; the download bar floats over the page's end (MainWindow)
+void ShadersPacksContent() { Looks::PacksTab(); }
+
+// A look's shader that does what an Apex effect also does (MXAO and Apex's Ambient Occlusion): twice the shade or blur and
+// twice the cost. Its row in the look's list gets the amber line and the button that turns the Apex effect off
+bool LookTwin(const std::string& technique, Looks::Twin& out, bool act) {
+    struct Twin { const char* feature; const char* shown; const char* note; std::vector<const char*> words; };
+    static const Twin kTwins[] = {
+        {"AmbientOcclusion", "Ambient Occlusion", "Apex's Ambient Occlusion is on too: the shade is doubled", {"mxao", "ssao", "ssdo", "hbao", "gtao", "ambientocclusion"}},
+        {"DepthBlur", "Depth Blur", "Apex's Depth Blur is on too: the blur is doubled", {"dof", "bokeh", "depthoffield"}},
+        {"EdgeSmoothing", "Edge Smoothing", "Apex's Edge Smoothing is on too: edges are smoothed twice", {"smaa", "fxaa"}},
+    };
+    std::string low = technique;
+    for (char& c : low) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    for (const Twin& t : kTwins) {
+        if (std::none_of(t.words.begin(), t.words.end(), [&](const char* w) { return low.find(w) != std::string::npos; })) continue;
+        ApexPatch* apex = Find(t.feature);
+        if (!apex || !apex->IsEnabled()) return false;
+        if (act) {
+            SetPatch(apex, false);
+            ApexUi::ReportChange(I18n::Trf("{} turned off", I18n::Tr(t.shown)).c_str());
+            return true;
+        }
+        out.note = I18n::Tr(t.note);
+        out.action = I18n::Tr("Turn off Apex's");
+        return true;
+    }
+    return false;
+}
+
+void ShadersPage() {
+    ApexPatch* patch = Find(Looks::kPatchName);
+    const float titleTop = ImGui::GetCursorPosY();
+    const float titleLine = ImGui::GetFontSize() * ApexUi::kPageTitleScale;
+    ApexUi::PageTitle("Shaders", "ReShade looks and shaders on the game's picture");
+    if (patch) { // the area's switch at the right of the title line
+        const float after = ImGui::GetCursorPosY();
+        const ImVec2 sw = ApexUi::ToggleSwitchSize();
+        ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - sw.x, titleTop + std::max(0.0f, (titleLine - sw.y) * 0.5f)));
+        bool on = patch->IsEnabled();
+        ImGui::BeginDisabled(!Switchable(patch));
+        if (ApexUi::ToggleSwitch("##ShadersOn", &on)) {
+            SetPatch(patch, on);
+            ApexUi::ReportChange(patch->IsEnabled() ? "Shaders turned on" : "Shaders turned off");
+        }
+        ImGui::EndDisabled();
+        ApexUi::Tooltip(Description(patch));
+        ImGui::SetCursorPosY(after);
+    }
+    if (Looks::WantsPacks()) g_shadersTab = ShadersPacks; // Get shader packs, Get <pack>: the list is on Packs
+    static const char* const kTabs[] = {"Look", "Packs", "Library"};
+    ApexUi::TabBar("##ShadersTabs", &g_shadersTab, kTabs, IM_COUNTOF(kTabs));
+    if (g_shadersTab == ShadersLibrary) ShadersLibraryContent();
+    else if (g_shadersTab == ShadersPacks) ShadersPacksContent();
+    else ShadersLookContent();
+}
+
 // Depth Blur and Edge Smoothing both need the game's own (multisampled) Edge Smoothing off
 void GameEdgeSmoothingNote(const char* forWhat) {
     if (!g_menuGameAaOn) return; // Show the prerequisite only while the conflict actually exists.
@@ -1501,6 +1642,27 @@ void DisplayContent() {
 void DisplayPage() {
     ApexUi::PageTitle("Display", "Window mode, resolution and frame-rate limit");
     DisplayContent();
+}
+
+// Image > Capture: screenshots and videos (features/apex_capture.cpp)
+bool LooksOn() { const ApexPatch* looks = Find(Looks::kPatchName); return looks && looks->IsEnabled(); }
+void CaptureShotsContent() {
+    ImGui::PushID("CaptureShots");
+    if (ApexCapture::ScreenshotCard(LooksOn())) g_takeShot = true;
+    ImGui::PopID();
+}
+void CaptureVideoContent() {
+    ImGui::PushID("CaptureVideo");
+    ApexCapture::VideoCard(LooksOn(), g_menuGameAaOn);
+    ImGui::PopID();
+}
+
+void CapturePage() {
+    ApexUi::PageTitle("Capture", "Screenshots and videos with your effects");
+    static const char* const kTabs[] = {"Screenshots", "Video"};
+    ApexUi::TabBar("##CaptureTabs", &g_captureTab, kTabs, IM_COUNTOF(kTabs));
+    if (g_captureTab == CaptureVideo) CaptureVideoContent();
+    else CaptureShotsContent();
 }
 
 void LotStreamingPage() {
@@ -2379,7 +2541,6 @@ void MenuTab() {
         }
     }
     ApexUi::EndCard();
-    ScreenshotCaptureCard();
     if (ApexUi::BeginCard("##Maintenance")) {
         ApexUi::CardHeader(IconId::Wrench, "Settings and maintenance", "Saving, reset and recovery", nullptr, nullptr);
         ApexUi::CardDivider();
@@ -2408,7 +2569,7 @@ struct ProfilesState {
     IconId icon = IconId::Bookmark;
     std::vector<ProfileItem> list;
     bool listDirty = true;
-    unsigned saveParts = ApexConfig::kProfilePartsAll & ~ApexConfig::kPartShortcuts; // what "Save" writes (shortcuts: only when picked, they belong to the keyboard)
+    unsigned saveParts = ApexConfig::kProfilePartsAll & ~ApexConfig::kPartsOptIn; // what "Save" writes (shortcuts and capture options: only when picked)
     std::string message; // the result of the last action
     bool messageError = false;
     std::string confirmDelete;  // a profile waiting for "Delete?"
@@ -2421,13 +2582,15 @@ struct ProfilesState {
     unsigned loadParts = 0;
     double applyOpenedAt = 0.0;
     enum Dialog { None, Save, Import, Export, Apply } dialog = None;
-    bool openDialog = false, applyAfterImport = false;
+    bool openDialog = false, applyAfterImport = false, downloadPacks = true; // downloadPacks: the import's "Download them now"
     ApexConfig::ProfileImport imported;
     toml::table exportState;
     std::wstring importPath;
     unsigned available = 0;
     ProfileItem selected;
     int exportSource = 0;
+    bool withMyShaders = false; // Export: "Include my own .fx files"
+    int myShaderFiles = -1;     // the player's shader files the export source's look uses (-1 = not counted yet)
 };
 ProfilesState g_profiles;
 struct ProfilePickerResult { bool save=false; std::wstring path; HRESULT status=S_OK; };
@@ -2517,9 +2680,9 @@ std::string ProfilePartsText(unsigned parts) {
 void ProfilePartChecks(const char* id, unsigned* parts, unsigned available) {
     ImGui::PushID(id);
     const float u = ApexUi::Unit();
-    static constexpr int order[] = {0, 1, 7, 2, 3, 5, 6, 8};
-    static constexpr IconId icons[] = {IconId::MoonStar, IconId::Palette, IconId::Contrast, IconId::Aperture,
-                                      IconId::Spline, IconId::Gauge, IconId::Keyboard, IconId::Wrench};
+    static constexpr int order[] = {0, 1, 10, 7, 2, 3, 5, 6, 9, 8};
+    static constexpr IconId icons[] = {IconId::MoonStar, IconId::Palette, IconId::SwatchBook, IconId::Contrast, IconId::Aperture,
+                                      IconId::Spline, IconId::Gauge, IconId::Keyboard, IconId::Camera, IconId::Wrench};
     float longest = 0.0f;
     for (int i : order) if (available & (1u << i))
         longest = std::max(longest, ImGui::CalcTextSize(I18n::Tr(ApexConfig::ProfilePartName(i))).x);
@@ -2694,14 +2857,14 @@ void ProfileIconPicker(IconId& selected) {
 void StartPresetDialog(ProfilesState::Dialog dialog, const ProfileItem* item=nullptr) {
     auto& s=g_profiles;
     s.dialog=dialog; s.openDialog=true; s.message.clear(); s.confirmReplace.clear();
-    s.applyAfterImport=false; s.importPath.clear(); s.imported={};
-    s.exportSource=0;
+    s.applyAfterImport=false; s.downloadPacks=true; s.importPath.clear(); s.imported={};
+    s.exportSource=0; s.withMyShaders=false; s.myShaderFiles=-1;
     if(item) {
         s.selected=*item;
         for(size_t i=0;i<s.list.size();++i) if(s.list[i].Key()==item->Key()) s.exportSource=int(i)+1;
     }
     s.available=ApexConfig::kProfilePartsAll & (ApexConfig::GetUi().developerMode ? ~0u : ~ApexConfig::kPartDeveloper);
-    s.saveParts=s.available & ~(ApexConfig::kPartShortcuts|ApexConfig::kPartDeveloper);
+    s.saveParts=s.available & ~(ApexConfig::kPartsOptIn|ApexConfig::kPartDeveloper);
     if(dialog==ProfilesState::Apply || dialog==ProfilesState::Export) {
         toml::table state;
         if(item) {
@@ -2711,7 +2874,7 @@ void StartPresetDialog(ProfilesState::Dialog dialog, const ProfileItem* item=nul
         } else {ApexConfig::CaptureProfileState(state);std::snprintf(s.name,sizeof s.name,"Preset");s.icon=IconId::Bookmark;}
         s.exportState=std::move(state); s.available=ApexConfig::ProfilePartsOf(s.exportState);
         if(!kDevToolsBuild) s.available&=~ApexConfig::kPartDeveloper;
-        s.saveParts=s.available & ~(ApexConfig::kPartShortcuts|ApexConfig::kPartDeveloper);
+        s.saveParts=s.available & ~(ApexConfig::kPartsOptIn|ApexConfig::kPartDeveloper);
     } else {s.name[0]=0; s.icon=IconId::Bookmark;}
 }
 
@@ -2727,19 +2890,20 @@ void PresetDialog() {
             meta.insert("profile",ApexConfig::SanitizeProfileName(s.name)); meta.insert("icon",ApexUi::IconName(s.icon));
             meta.insert("written_by",APEX_PRODUCT_NAME " " APEX_VERSION_STRING);
             state.insert_or_assign("meta",std::move(meta));
-            const std::wstring extension=ApexConfig::ProfileUsesLut(state)?L".zip":L".toml";
+            const bool withMyShaders=s.withMyShaders && (s.saveParts&ApexConfig::kPartShaders);
+            const std::wstring extension=ApexConfig::ProfileUsesPackage(state,withMyShaders)?L".zip":L".toml";
             const auto& path=picked->path;
             // Never change the destination after Windows has confirmed replacement.
             const bool matchingExtension=path.size()>=extension.size() &&
                 _wcsicmp(path.substr(path.size()-extension.size()).c_str(),extension.c_str())==0;
-            if(matchingExtension && ApexConfig::ExportProfileFile(path,state,&error)) {
+            if(matchingExtension && ApexConfig::ExportProfileFile(path,state,&error,withMyShaders)) {
                 ProfileMessage(I18n::Tr("Preset exported"),false); s.dialog=ProfilesState::None;
             } else {LOG_ERROR("[Profiles] Export: "+error); ProfileMessage(I18n::Tr("Could not export the preset. Check the selected LUT and folder access."),true);}
         } else if(ApexConfig::ReadProfileImport(picked->path,s.imported,&error)) {
             s.importPath=picked->path;
             s.available=ApexConfig::ProfilePartsOf(s.imported.state);
             if(!kDevToolsBuild) s.available&=~ApexConfig::kPartDeveloper;
-            s.saveParts=s.available & ~(ApexConfig::kPartShortcuts|ApexConfig::kPartDeveloper);
+            s.saveParts=s.available & ~(ApexConfig::kPartsOptIn|ApexConfig::kPartDeveloper);
             auto name=ApexConfig::SanitizeProfileName(s.imported.state["meta"]["profile"].value_or(std::string()));
             if(name.empty()) name="Imported";
             const auto base=name;
@@ -2756,7 +2920,7 @@ void PresetDialog() {
     const float width=std::max(1.0f,std::min(500.0f*ApexUi::Unit(),ImGui::GetIO().DisplaySize.x-32.0f));
     ImGui::SetNextWindowSizeConstraints(ImVec2(width,0),ImVec2(width,std::max(1.0f,ImGui::GetIO().DisplaySize.y-32.0f)));
     ImGui::SetNextWindowSize(ImVec2(width,0),ImGuiCond_Always);
-    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),ImGuiCond_Appearing,ImVec2(.5f,.5f));
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(),ImGuiCond_Always,ImVec2(.5f,.5f)); // centred as its body grows (no title bar: never moved)
     if(ImGui::BeginPopupModal("PresetDialog",nullptr,ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_AlwaysAutoResize)) {
         if(s.dialog==ProfilesState::None) ImGui::CloseCurrentPopup();
         else {
@@ -2768,6 +2932,13 @@ void PresetDialog() {
             {
                 const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
                 ImGui::BeginDisabled(g_profilePickerBusy);
+                // the body scrolls when the screen is too short for it; the divider and the actions under it stay in view
+                {
+                    const float footer=2.0f*ImGui::GetFrameHeightWithSpacing()+ApexUi::kSpace4*ApexUi::Unit();
+                    const float maxBody=std::max(4.0f*ImGui::GetFrameHeight(),ImGui::GetIO().DisplaySize.y-32.0f-ImGui::GetCursorPosY()-footer-ImGui::GetStyle().WindowPadding.y);
+                    ImGui::SetNextWindowSizeConstraints(ImVec2(0,0),ImVec2(FLT_MAX,maxBody));
+                }
+                ImGui::BeginChild("##Body",ImVec2(0,0),ImGuiChildFlags_AutoResizeY);
                 if(exporting) {
                     std::vector<const char*> sources{I18n::Tr("Current settings")};
                     for(const auto& item:s.list) sources.push_back(item.builtin>=0?I18n::Tr(item.name.c_str()):item.name.c_str());
@@ -2780,10 +2951,10 @@ void PresetDialog() {
                         const bool ok=!item || (item->builtin>=0 ? ApexPresets::Read(item->builtin,state,&error) : ApexConfig::ReadProfile(item->name,state,&error));
                         if(ok) {
                             if(!item) ApexConfig::CaptureProfileState(state);
-                            s.exportSource=chosen; s.exportState=std::move(state);
+                            s.exportSource=chosen; s.exportState=std::move(state); s.myShaderFiles=-1;
                             s.available=ApexConfig::ProfilePartsOf(s.exportState);
                             if(!kDevToolsBuild) s.available&=~ApexConfig::kPartDeveloper;
-                            s.saveParts=s.available & ~(ApexConfig::kPartShortcuts|ApexConfig::kPartDeveloper);
+                            s.saveParts=s.available & ~(ApexConfig::kPartsOptIn|ApexConfig::kPartDeveloper);
                             std::snprintf(s.name,sizeof s.name,"%s",item?item->name.c_str():"Preset"); s.icon=item?item->icon:IconId::Bookmark;
                         } else {LOG_ERROR("[Profiles] Export source: "+error);ProfileMessage(I18n::Tr("Could not export the preset. Check the selected LUT and folder access."),true);}
                     }
@@ -2809,14 +2980,27 @@ void PresetDialog() {
                     ApexUi::MutedText("Shortcuts are optional and start unchecked.");
                     if(exporting) {
                         auto state=s.exportState; ApexConfig::KeepProfileParts(state,s.saveParts);
-                        ApexUi::IconNote(IconId::Info,ApexConfig::ProfileUsesLut(state)?"The preset and its LUT are exported together as one ZIP file.":"This preset is exported as a TOML file.");
+                        if(s.myShaderFiles<0) s.myShaderFiles=int(ApexConfig::ProfileShaderFiles(s.exportState).size());
+                        // the player's own .fx files go in only when asked (shown when the look uses some)
+                        if(s.myShaderFiles>0 && (s.saveParts&ApexConfig::kPartShaders)) ApexUi::Checkbox(I18n::Tr("Include my own .fx files"),&s.withMyShaders);
+                        const bool withMyShaders=s.withMyShaders && s.myShaderFiles>0 && (s.saveParts&ApexConfig::kPartShaders);
+                        ApexUi::IconNote(IconId::Info,!ApexConfig::ProfileUsesPackage(state,withMyShaders)?"This preset is exported as a TOML file.":ApexConfig::ProfileUsesLut(state)&&!ApexConfig::ProfileUsesLook(state)?"The preset and its LUT are exported together as one ZIP file.":"The preset and its files are exported together as one ZIP file.");
                     }
                     if(importing) ApexUi::Checkbox(I18n::Tr("Apply after import"),&s.applyAfterImport);
+                    if(importing && (s.saveParts&ApexConfig::kPartShaders)) { // shader packs the preset's look needs: downloaded on Import unless unchecked
+                        std::string needs;
+                        if(!Looks::MissingPresetPacks(ApexConfig::ProfilePacks(s.imported.state),&needs).empty()) {
+                            ApexUi::Gap(ApexUi::kSpace2);
+                            ApexUi::IconNote(IconId::Download,needs.c_str());
+                            ApexUi::Checkbox(I18n::Tr("Download them now"),&s.downloadPacks);
+                        }
+                    }
                 }
                 if(importing && !s.importPath.empty() && ApexConfig::ProfileExists(ApexConfig::SanitizeProfileName(s.name))) ApexUi::IconNote(IconId::Info,"Choose a new preset name");
                 if(!s.confirmReplace.empty() && s.confirmReplace!=ApexConfig::SanitizeProfileName(s.name)) s.confirmReplace.clear();
                 if(!s.confirmReplace.empty()) ApexUi::IconNote(IconId::TriangleAlert,I18n::Trf("\"{}\" already exists; replace it?",s.confirmReplace).c_str());
                 if(!s.message.empty()) ApexUi::IconNote(s.messageError?IconId::TriangleAlert:IconId::CircleCheck,s.message.c_str());
+                ImGui::EndChild();
                 ApexUi::CardDivider();
                 const char* action=importing?"Import":exporting?"Export":applying?"Apply":s.confirmReplace.empty()?"Save":"Replace";
                 const bool row=ReportDialogActions("Cancel",false,action,true);
@@ -2826,15 +3010,25 @@ void PresetDialog() {
                 const bool valid=s.saveParts && !Loading() && (applying || (!name.empty() && (!importing || (!s.importPath.empty() && !ApexConfig::ProfileExists(name)))));
                 ImGui::BeginDisabled(!valid);
                 if(ApexUi::IconTextButton(action,exporting?IconId::ExternalLink:importing||applying?IconId::Download:IconId::Save,nullptr,ButtonKind::Primary)) {
-                    if(exporting) {auto state=s.exportState;ApexConfig::KeepProfileParts(state,s.saveParts);PickProfileFile(true,ApexConfig::ProfileUsesLut(state),s.name);}
+                    if(exporting) {auto state=s.exportState;ApexConfig::KeepProfileParts(state,s.saveParts);PickProfileFile(true,ApexConfig::ProfileUsesPackage(state,s.withMyShaders && (s.saveParts&ApexConfig::kPartShaders)),s.name);}
                     else if(applying) {LoadProfileItem(s.selected,s.saveParts);s.dialog=ProfilesState::None;ImGui::CloseCurrentPopup();}
                     else if(importing) {
                         std::string error;
                         if(ApexConfig::SaveImportedProfile(name,s.imported,s.saveParts,ApexUi::IconName(s.icon),&error)) {
+                            // packs the preset's look needs that are not here: the same offer as after a look import
+                            if(s.saveParts&ApexConfig::kPartShaders) {
+                                const auto packs=ApexConfig::ProfilePacks(s.imported.state);
+                                if(s.downloadPacks) Looks::DownloadPresetPacks(Looks::MissingPresetPacks(packs));
+                                else Looks::OfferPresetPacks(name,packs);
+                            }
                             if(s.applyAfterImport) LoadProfileNow(name,s.saveParts);
                             else ProfileMessage(I18n::Trf("Saved \"{}\"",name),false);
                             s.listDirty=true; s.dialog=ProfilesState::None; ImGui::CloseCurrentPopup();
-                        } else {LOG_ERROR("[Profiles] Import save: "+error);ProfileMessage(I18n::Tr("Could not save the imported preset"),true);}
+                        } else {
+                            LOG_ERROR("[Profiles] Import save: "+error);
+                            if(error.starts_with(Looks::kShaderNameTaken)) ProfileMessage(I18n::Trf("Your Shaders folder already has a different {}. Rename or move it, then import again",error.substr(std::strlen(Looks::kShaderNameTaken))),true);
+                            else ProfileMessage(I18n::Tr("Could not save the imported preset"),true);
+                        }
                     } else if(ApexConfig::ProfileExists(name) && s.confirmReplace!=name) s.confirmReplace=name;
                     else {SaveProfileNow(name);if(!s.messageError){s.dialog=ProfilesState::None;ImGui::CloseCurrentPopup();}}
                 }
@@ -2850,7 +3044,7 @@ void PresetDialog() {
 // Pressing it applies the preset's parts, never its keyboard shortcuts or developer settings. The window thread
 // records and matches the keys; the render thread applies (RunPresetShortcut). Replaces the
 // per-filter shortcuts of 2.11.0, in the same visual style.
-constexpr unsigned kPresetKeyParts = ~(ApexConfig::kPartShortcuts | ApexConfig::kPartDeveloper);
+constexpr unsigned kPresetKeyParts = ~(ApexConfig::kPartsOptIn | ApexConfig::kPartDeveloper);
 std::atomic<bool> g_presetKeyRecording{false}, g_presetKeyCancelled{false}, g_presetKeyPending{false};
 std::mutex g_presetKeyLock;
 KeyCombo g_presetKeyCaptured;   // the editor's keys (g_presetKeyLock)
@@ -3087,7 +3281,7 @@ void UpdatePresetMatches(ProfilesState& s) {
     s.matchedAt=now;
     toml::table current; ApexConfig::CaptureProfileState(current);
     for(auto& item:s.list) {
-        unsigned parts=item.parts & ~(ApexConfig::kPartShortcuts | ApexConfig::kPartDeveloper);
+        unsigned parts=item.parts & ~(ApexConfig::kPartsOptIn | ApexConfig::kPartDeveloper);
         if(item.Key()==s.appliedKey) parts&=s.appliedParts;
         toml::table state=item.state; ApexConfig::KeepProfileParts(state,parts);
         std::string mismatch;
@@ -3119,6 +3313,7 @@ void ProfilesTab() {
         s.matchedAt=-1.0;
     }
     UpdatePresetMatches(s);
+    Looks::OfferCard(); // after importing a preset whose look needs packs that are not here: Download or Not now
     ImGui::PushID("Profiles");
     {
         const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
@@ -3172,7 +3367,7 @@ void ProfilesTab() {
                     // One click applies the parts Apply would preselect (not Shortcuts or Developer); Undo is in the toast and
                     // "Apply some parts…" in the menu opens the category choice
                     if(ApexUi::IconTextButton("Apply",IconId::Download)) {
-                        const unsigned parts=item.parts & ~(ApexConfig::kPartShortcuts|ApexConfig::kPartDeveloper);
+                        const unsigned parts=item.parts & ~(ApexConfig::kPartsOptIn|ApexConfig::kPartDeveloper);
                         if(parts) LoadProfileItem(item,parts); else StartPresetDialog(ProfilesState::Apply,&item);
                     }
                     ImGui::EndDisabled();
@@ -3361,10 +3556,28 @@ void AboutTab() {
         CreditLine("Upper-floor ground light: Arro's technique, adapted in Apex Radiance.");
         CreditLine("Lot Streaming and the daytime bloom fixes: research and code by @idavidveiga.");
         CreditLine("Scene update safety: contribution by @rodneypantonial.");
+        CreditLine("Looks and Capture: contributed by @ModestPixels.");
         CreditLine("Restart host: adapted from Dalexlol's wrapper in sims3-modernization.");
         CreditLine("Thanks to @boringbones for testing every build.");
         CreditLine("RTX Remix bridge: NVIDIA (MIT), ported to The Sims 3 by dalexlol and alexvixell35-stack in sims3-modernization; DXVK by Philip Rebohle (zlib).");
-        CreditLine("Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), Lucide icons (ISC).");
+        CreditLine("ReShade shaders in Looks: CeeJay.dk (SweetFX), bacondither, prod80, AMD (FidelityFX CAS), Daodan317081 (RetroTint).");
+        CreditLine("ReShade FX compiler: crosire (BSD-3-Clause).");
+        CreditLine("Shader packs: downloaded from their authors' GitHub, under each author's licence.");
+        CreditLine("Libraries and licenses: Dear ImGui (MIT), Microsoft Detours (MIT), toml++ (MIT), SMAA - Jorge Jimenez et al. (MIT), miniz (MIT), Lucide icons (ISC).");
+        if (ApexUi::BeginAdvanced("Licenses##About", "Third-party licenses")) {
+            // Licence texts stay as written (untranslated); each title wraps too (narrow window, large text)
+            auto licence = [](const char* title, const char* text, bool last) {
+                ImGui::TextWrapped("%s", title);
+                ImGui::PushStyleColor(ImGuiCol_Text, Col(VioletTheme::kTextMuted));
+                ImGui::TextWrapped("%s", text);
+                ImGui::PopStyleColor();
+                if (!last) ApexUi::Gap(ApexUi::kSpace2);
+            };
+            for (const auto& l : ReShadeShaders::kLicenses) licence(l.title, l.text, false);
+            licence(ReShadeFx::kLicenseTitle, ReShadeFx::kLicense, false);
+            licence(Miniz::kLicenseTitle, Miniz::kLicense, true);
+            ApexUi::EndAdvanced();
+        }
     }
     ApexUi::EndCard();
     ImGui::PopID();
@@ -3417,10 +3630,15 @@ const SearchPart* SearchParts(int& count) {
         {"Color", "Tones", PageColor, &g_colorTab, Picture::TabTones, [] { PictureRows(Picture::TabTones); }},
         {"Color", "Color", PageColor, &g_colorTab, Picture::TabColor, [] { PictureRows(Picture::TabColor); }},
         {"Color", "Detail", PageColor, &g_colorTab, Picture::TabDetail, [] { PictureRows(Picture::TabDetail); }},
+        {"Shaders", "Look", PageShaders, &g_shadersTab, ShadersLook, ShadersLookContent},
+        {"Shaders", "Packs", PageShaders, &g_shadersTab, ShadersPacks, ShadersPacksContent},
+        {"Shaders", "Library", PageShaders, &g_shadersTab, ShadersLibrary, ShadersLibraryContent},
         {"Ambient Occlusion", nullptr, PageAmbientOcclusion, nullptr, 0, AmbientOcclusionContent},
         {"Depth Blur", nullptr, PageDepthBlur, nullptr, 0, DepthBlurContent},
         {"Edge Smoothing", nullptr, PageEdgeSmoothing, nullptr, 0, AntiAliasingContent},
         {"Display", nullptr, PageDisplay, nullptr, 0, DisplayContent},
+        {"Capture", "Screenshots", PageCapture, &g_captureTab, CaptureShots, CaptureShotsContent},
+        {"Capture", "Video", PageCapture, &g_captureTab, CaptureVideo, CaptureVideoContent},
         {"Performance", nullptr, PagePerformance, nullptr, 0, PerformanceCard},
         {"Lot Streaming", nullptr, PageLotStreaming, nullptr, 0, LotStreamingCards},
         {"Settings", "Menu", PageSettings, &g_settingsTab, SettingsMenu, MenuTab},
@@ -3628,11 +3846,13 @@ void Sidebar(bool collapsed) {
         {PageLighting, IconId::MoonStar, "Lighting", "WORLD"},
         {PageWaterSnow, IconId::WavesHorizontal, "Water & Snow", nullptr},
         {PageColor, IconId::Palette, "Color", "IMAGE"},
+        {PageShaders, IconId::SwatchBook, "Shaders", nullptr},
         {PageBanding, IconId::Blend, "Banding Fix", nullptr},
         {PageAmbientOcclusion, IconId::Contrast, "Ambient Occlusion", nullptr},
         {PageDepthBlur, IconId::Aperture, "Depth Blur", nullptr},
         {PageEdgeSmoothing, IconId::Spline, "Edge Smoothing", nullptr},
         {PageDisplay, IconId::Monitor, "Display", nullptr},
+        {PageCapture, IconId::Camera, "Capture", nullptr},
         {PagePerformance, IconId::Gauge, "Performance", "SYSTEM"},
         {PageLotStreaming, IconId::Layers, "Lot Streaming", nullptr},
         {PageConflicts, IconId::TriangleAlert, "Attention", nullptr},
@@ -3647,7 +3867,7 @@ void Sidebar(bool collapsed) {
         if (kPublicBuild && item.page == PageDeveloper) continue;
         if (item.page == PageConflicts && !HasAttentionItems() && g_page != PageConflicts) continue;
         if (item.group) ApexUi::SidebarGroup(item.group, collapsed);
-        if (ApexUi::SidebarItem(item.icon, item.label, g_page == item.page && !searching && !WelcomeActive(), collapsed)) {
+        if (ApexUi::SidebarItem(item.icon, item.label, g_page == item.page && !searching && !WelcomeActive(), collapsed, item.page == PageShaders ? "Beta" : nullptr)) {
             g_page = item.page;
             HideWelcome(); // another page: the welcome is not shown again
             g_search[0] = '\0'; // leaving the search results
@@ -3737,7 +3957,7 @@ void PreviewWelcomePreset(int index) {
         ProfileMessage(I18n::Trf("Could not load \"{}\": {}", I18n::Tr(ApexPresets::Get(index).name), err), true);
         return;
     }
-    ApexConfig::KeepProfileParts(state, ApexConfig::ProfilePartsOf(state) & ~(ApexConfig::kPartShortcuts | ApexConfig::kPartDeveloper));
+    ApexConfig::KeepProfileParts(state, ApexConfig::ProfilePartsOf(state) & ~(ApexConfig::kPartsOptIn | ApexConfig::kPartDeveloper));
     ApplyFeatureStateForgetting(state);
     g_welcomePreviewed = index;
     LOG_INFO(std::format("[Menu] Welcome: previewing {}", ApexPresets::Get(index).name));
@@ -3857,6 +4077,7 @@ void DrawPage() {
     case PageLighting: LightingPage(); break;
     case PageWaterSnow: WaterSnowPage(); break;
     case PageColor: ColorPage(); break;
+    case PageShaders: ShadersPage(); break;
     case PageAmbientOcclusion: AmbientOcclusionPage(); break;
     case PageBanding: BandingPage(); break;
     case PageDepthBlur: DepthBlurPage(); break;
@@ -3864,6 +4085,7 @@ void DrawPage() {
     case PageConflicts: ConflictsPage(); break;
     case PagePerformance: PerformancePage(); break;
     case PageDisplay: DisplayPage(); break;
+    case PageCapture: CapturePage(); break;
     case PageLotStreaming: LotStreamingPage(); break;
     case PageDeveloper:
         if (!kPublicBuild) {
@@ -4473,7 +4695,8 @@ void StatusBar(ImVec2 origin, float w, float h, bool collapsed) {
 
 // The undo toast at the bottom right of the window, above the status bar: "<what changed>  Undo", about 4 s (fading;
 // the timer waits while the mouse is on it)
-void DrawToast(float bottomY) {
+// right: the screen x of its right edge (0: the window's)
+void DrawToast(float bottomY, float right = 0.0f) {
     if (!g_toast.active) return;
     const float u = ApexUi::Unit();
     const double now = ImGui::GetTime();
@@ -4492,7 +4715,8 @@ void DrawToast(float bottomY) {
     const ImVec2 size(padX + textSize.x + gap + undoW + padX, padY + lineH + padY);
     const ImVec2 winPos = ImGui::GetWindowPos();
     const ImVec2 winSize = ImGui::GetWindowSize();
-    const ImVec2 pos(std::fmax(winPos.x + ImGui::GetStyle().WindowPadding.x, winPos.x + winSize.x - ImGui::GetStyle().WindowPadding.x - size.x - ApexUi::kSpace2 * u),
+    const float rightX = right > 0.0f ? right : winPos.x + winSize.x - ImGui::GetStyle().WindowPadding.x - ApexUi::kSpace2 * u;
+    const ImVec2 pos(std::fmax(winPos.x + ImGui::GetStyle().WindowPadding.x, rightX - size.x),
                      bottomY - size.y - ApexUi::kSpace2 * u);
 
     ImGui::SetCursorScreenPos(pos);
@@ -4616,7 +4840,14 @@ void MainWindow() {
         ImGui::EndChild();
         ImGui::SetCursorScreenPos(ImVec2(wp.x + sidebarW + 1.0f, bodyTop));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ApexUi::kSpace4 * u, ApexUi::kSpace3 * u));
-        ImGui::BeginChild("##Content", ImVec2(ws.x - sidebarW - 1.0f, bodyH), ImGuiChildFlags_AlwaysUseWindowPadding, 0);
+        // The scrollbar's width is always kept, so a page that grows past the window (a longer list, an opened Advanced)
+        // does not narrow every row; its grab shows only while there is something to scroll (last frame's answer)
+        static bool s_contentScrolls = false;
+        if (!s_contentScrolls)
+            for (ImGuiCol c : {ImGuiCol_ScrollbarGrab, ImGuiCol_ScrollbarGrabHovered, ImGuiCol_ScrollbarGrabActive}) ImGui::PushStyleColor(c, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+        ImGui::BeginChild("##Content", ImVec2(ws.x - sidebarW - 1.0f, bodyH), ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+        if (!s_contentScrolls) ImGui::PopStyleColor(3);
+        s_contentScrolls = ImGui::GetScrollMaxY() > 0.0f;
         ImGui::PopStyleVar();
         if (g_search[0]) {
             SearchResults();
@@ -4627,19 +4858,30 @@ void MainWindow() {
             DrawPage();
             ImGui::PopID();
         }
+        // room for the download bar, which floats over the page's end: the last row scrolls above it
+        if (const float barH = Looks::PacksBarHeight(); barH > 0.0f) ImGui::Dummy(ImVec2(0.0f, barH));
         ImGui::EndChild();
         StatusBar(ImVec2(wp.x, footerTop + 1.0f), ws.x, footerH - 1.0f, collapsed);
         // Leave the cursor at the window's end so ImGui does not grow the window
         ImGui::SetCursorScreenPos(ImVec2(wp.x, wp.y + ws.y - 1.0f));
         ImGui::Dummy(ImVec2(0.0f, 0.0f));
-        DrawToast(footerTop);
+        // The download bar floats over the content just above the footer (on the Packs tab, or while a download runs or
+        // has just finished); the undo toast goes above it
+        const bool packsTab = !g_search[0] && !WelcomeActive() && g_page == PageShaders && g_shadersTab == ShadersPacks;
+        const float barLeft = wp.x + sidebarW + 1.0f + ApexUi::kSpace4 * u;
+        const float barRight = wp.x + ws.x - ImGui::GetStyle().ScrollbarSize - ApexUi::kSpace4 * u;
+        const float barTop = Looks::PacksBar(barLeft, barRight, footerTop, packsTab);
+        DrawToast(barTop, barTop < footerTop ? barRight : 0.0f);
         DeveloperConfirmation();
         ImGui::EndDisabled();
         PublicTestWelcome();
 
         // Hold to compare: the eye button, or the configured key while the pointer is over the menu.
         const bool holdKey = g_menuHovered && !peek && !io.WantTextInput && HoldShortcutDown(uiKeys.pictureCompareKey);
-        if ((g_holdCompare || holdKey) && Picture::Get().GetParams().enabled) Picture::Get().HoldBypass();
+        if (g_holdCompare || holdKey) {
+            if (Picture::Get().GetParams().enabled) Picture::Get().HoldBypass();
+            Looks::HoldBypass(); // the ReShade look too
+        }
     }
     g_holdCompare = false;
     ImGui::End();
@@ -4998,8 +5240,10 @@ bool CaptureHoldKey(ApexConfig::KeyChord& out) {
 // Sims3SettingsSetter's menu (Insert alone), or a bare letter, digit or Space (it would stop that key from typing in the game).
 enum ShortcutRow : int {
     RowMenu, RowCompare, RowRefresh, RowScreenshot, RowRecorder, RowProbe, RowDiagnostics, RowFrameCapture,
-    RowSearch, RowPeek, RowPictureCompare, RowCount
+    RowSearch, RowPeek, RowPictureCompare, RowVideo, RowLooks, RowExternalKey, RowCount
 };
+// The other recorder's key: text in [capture.video] external_key (Win+ allowed)
+bool IsCaptureKeyRow(int row) { return row == RowExternalKey; }
 UINT g_recHeldVk = 0;       // a refused key still held: ignored until released
 bool g_recWaitRelease = false; // recording starts only once every key is up (the click's Enter, a held chord)
 int g_recSeenFrame = -1;       // the last frame the editor was drawn: recording stops when it is not (menu closed, page left)
@@ -5017,6 +5261,13 @@ ApexConfig::KeyChord RowKey(int row) {
     case RowFrameCapture: return Hotkeys::Key(Hotkeys::Action::FrameCapture);
     case RowSearch: return ApexConfig::GetUi().searchKey;
     case RowPeek: return ApexConfig::GetUi().peekKey;
+    case RowLooks: return ApexConfig::GetUi().looksKey;
+    case RowVideo: return ApexCapture::Get().video.recordKey;
+    case RowExternalKey: { // text; a Win+ key never clashes
+        UINT vk = 0; bool c = false, s = false, a = false, w = false;
+        if (!ApexCapture::ParseExternalKey(ApexCapture::Get().video.externalKey, vk, c, s, a, w) || w) return {0, false, false, false};
+        return {vk, c, s, a};
+    }
     default: return ApexConfig::GetUi().pictureCompareKey;
     }
 }
@@ -5032,6 +5283,9 @@ const char* RowName(int row) {
     case RowFrameCapture: return "Frame Capture";
     case RowSearch: return "Search the settings";
     case RowPeek: return "Hide the menu while held";
+    case RowVideo: return "Record a video";
+    case RowLooks: return "Looks on or off";
+    case RowExternalKey: return "The other app's key";
     default: return "Compare the picture without its filters";
     }
 }
@@ -5047,6 +5301,9 @@ const char* RowText(int row) {
     case RowFrameCapture: return "Records draw calls for troubleshooting";
     case RowSearch: return "Focuses the settings search field";
     case RowPeek: return "Hold the key over the menu to hide it and see the game";
+    case RowVideo: return "Press once to start, again to stop";
+    case RowLooks: return "Switches the look off (no GPU cost) and back on";
+    case RowExternalKey: return "Only with Recorder set to Another app: Apex presses it to start Xbox Game Bar, OBS or ShadowPlay";
     default: return "Hold the key over the menu to bypass Picture";
     }
 }
@@ -5073,7 +5330,22 @@ std::string ChordProblem(const ApexConfig::KeyChord& c, int row) {
     }
     return {};
 }
+// The other app's key: the text kept in [capture.video] external_key ("" removes the key)
+void StoreCaptureKey(int row, const std::string& text) {
+    ApexCapture::Settings s = ApexCapture::Get();
+    s.video.externalKey = text;
+    ApexCapture::Set(s);
+    LOG_INFO(std::format("[Menu] {}: {}", RowName(row), text.empty() ? std::string("none") : text));
+}
 void StoreRowKey(int row, const ApexConfig::KeyChord& c) {
+    if (IsCaptureKeyRow(row)) { StoreCaptureKey(row, ApexConfig::KeyChordText(c)); return; }
+    if (row == RowVideo) { // kept in [capture.video] record_key, not in the shortcut presets
+        ApexCapture::Settings s = ApexCapture::Get();
+        s.video.recordKey = c;
+        ApexCapture::Set(s);
+        LOG_INFO(std::format("[Menu] {}: {}", RowName(row), ApexConfig::KeyChordText(c)));
+        return;
+    }
     ApexConfig::UiSettings ui = ApexConfig::GetUi();
     const int base = ui.hotkeyPreset >= 0 && ui.hotkeyPreset < static_cast<int>(Hotkeys::Preset::Count) ? ui.hotkeyPreset : static_cast<int>(Hotkeys::Preset::FKeys);
     if (ui.hotkeyPreset != Hotkeys::kMine) ui.minePresetBase = base;
@@ -5089,6 +5361,7 @@ void StoreRowKey(int row, const ApexConfig::KeyChord& c) {
     case RowSearch: ui.searchKey = c; break;
     case RowPeek: ui.peekKey = c; break;
     case RowPictureCompare: ui.pictureCompareKey = c; break;
+    case RowLooks: ui.looksKey = c; break;
     default: break;
     }
     ui.hotkeyPreset = Hotkeys::kMine;
@@ -5122,9 +5395,30 @@ void RecordStep() {
         if (GetAsyncKeyState(static_cast<int>(g_recHeldVk)) & 0x8000) return;
         g_recHeldVk = 0;
     }
+    const bool modsDown = (GetAsyncKeyState(VK_CONTROL) & 0x8000) || (GetAsyncKeyState(VK_SHIFT) & 0x8000) || (GetAsyncKeyState(VK_MENU) & 0x8000);
+    if (IsCaptureKeyRow(g_recRow) && !modsDown && ((GetAsyncKeyState(VK_DELETE) & 0x8000) || (GetAsyncKeyState(VK_BACK) & 0x8000))) {
+        StoreCaptureKey(g_recRow, {}); // Delete or Backspace alone: no key
+        g_recRow = -1;
+        g_recNote.clear();
+        return;
+    }
     ApexConfig::KeyChord c;
     const bool holdKeyRow = g_recRow == RowPeek || g_recRow == RowPictureCompare;
     if (!(holdKeyRow ? CaptureHoldKey(c) : CaptureChordAny(c))) return;
+    // the other app's key may use the Windows key (Win+Alt+R = Xbox Game Bar); no Apex key uses it, so it never clashes
+    const bool win = g_recRow == RowExternalKey && ((GetAsyncKeyState(VK_LWIN) & 0x8000) || (GetAsyncKeyState(VK_RWIN) & 0x8000));
+    if (win) {
+        const std::string text = "Win+" + ApexConfig::KeyChordText(c);
+        if (!ApexCapture::ExternalKeyAllowed(text)) {
+            g_recNote = text + ": " + I18n::Tr("That combination belongs to Windows");
+            g_recHeldVk = c.vk;
+            return;
+        }
+        StoreCaptureKey(g_recRow, text);
+        g_recRow = -1;
+        g_recNote.clear();
+        return;
+    }
     const std::string problem = ChordProblem(c, g_recRow);
     if (!problem.empty()) {
         g_recNote = ApexConfig::KeyChordText(c) + ": " + I18n::Tr(problem.c_str()); // a text already translated comes back as it is
@@ -5147,7 +5441,19 @@ void ApplyPreset(int preset) {
 }
 
 std::string KeyChipText(int row) {
-    return g_recRow == row ? std::string(I18n::Tr("Press the keys\xE2\x80\xA6")) : ApexConfig::KeyChordText(RowKey(row));
+    if (g_recRow == row) return std::string(I18n::Tr("Press the keys\xE2\x80\xA6"));
+    if (IsCaptureKeyRow(row)) { // as written in the file (Win+ included, trimmed); empty = none
+        const std::string t = ApexCapture::Get().video.externalKey;
+        return t.empty() ? std::string(I18n::Tr("No key")) : t;
+    }
+    return ApexConfig::KeyChordText(RowKey(row));
+}
+// The note under a card while one of its rows records
+void RecordNote(bool captureCard) {
+    if (g_recRow < 0 || IsCaptureKeyRow(g_recRow) != captureCard) return;
+    const char* idle = captureCard ? I18n::Tr("Press the new combination now; Esc cancels, Delete removes the key")
+                                   : I18n::Tr("Press the new combination now; Esc cancels");
+    ApexUi::IconNote(IconId::Keyboard, g_recNote.empty() ? idle : g_recNote.c_str(), g_recNote.empty() ? VioletTheme::kAccent : VioletTheme::kWarning);
 }
 float KeyChipWidth(int row) {
     const std::string text = KeyChipText(row);
@@ -5217,104 +5523,6 @@ void ShortcutsContent() {
     }
 }
 
-// The screenshots folder picker (Windows' folder dialog on its own thread, as the profile file dialog): the chosen path is
-// taken by the card on a later frame; nothing when cancelled.
-std::mutex g_shotFolderLock;
-std::optional<std::wstring> g_shotFolderResult;
-std::atomic<bool> g_shotFolderBusy{false};
-void PickScreenshotFolder(std::string current) {
-    if (g_shotFolderBusy.exchange(true)) return;
-    std::wstring title = ApexUtil::ToWide(I18n::Tr("Choose a folder for the screenshots"));
-    if (!HookGuard::StartDetached("Screenshots: folder dialog", [current = std::move(current), title = std::move(title)] {
-        std::optional<std::wstring> picked;
-        struct Finish {
-            std::optional<std::wstring>& picked;
-            ~Finish() {
-                std::lock_guard<std::mutex> lock(g_shotFolderLock);
-                g_shotFolderResult = std::move(picked);
-                g_shotFolderBusy = false;
-            }
-        } finish{picked};
-        const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-        if (FAILED(com)) return;
-        IFileDialog* dialog = nullptr;
-        if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)))) {
-            DWORD options = 0;
-            dialog->GetOptions(&options);
-            dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_NOCHANGEDIR | FOS_PATHMUSTEXIST);
-            dialog->SetTitle(title.c_str());
-            if (!current.empty()) {
-                IShellItem* start = nullptr;
-                if (SUCCEEDED(SHCreateItemFromParsingName(ApexUtil::ToWide(current).c_str(), nullptr, IID_PPV_ARGS(&start)))) {
-                    dialog->SetFolder(start);
-                    start->Release();
-                }
-            }
-            if (SUCCEEDED(dialog->Show(nullptr))) {
-                IShellItem* item = nullptr;
-                if (SUCCEEDED(dialog->GetResult(&item))) {
-                    PWSTR path = nullptr;
-                    if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
-                        picked = path;
-                        CoTaskMemFree(path);
-                    }
-                    item->Release();
-                }
-            }
-            dialog->Release();
-        }
-        CoUninitialize();
-    })) g_shotFolderBusy = false;
-}
-
-// Settings > Menu: screenshot settings and the existing validated shortcut recorder.
-void ScreenshotCaptureCard() {
-    g_recSeenFrame = ImGui::GetFrameCount();
-    if (ApexUi::BeginCard("##ScreenshotCapture")) {
-        ApexConfig::UiSettings ui = ApexConfig::GetUi();
-        ApexUi::CardHeader(IconId::Camera, "Screenshot capture", "Save the finished game image with Apex's active effects", nullptr, nullptr);
-        ApexUi::CardDivider();
-        {
-            std::lock_guard<std::mutex> lock(g_shotFolderLock);
-            if (g_shotFolderResult) { // a folder was picked: it becomes the screenshots folder
-                ui.screenshotCustomFolder = ApexUtil::ToUtf8(*g_shotFolderResult);
-                ui.screenshotFolder = 2;
-                ApexConfig::SetUi(ui);
-                g_shotFolderResult.reset();
-            }
-        }
-        static const char* const kFolders[] = {"Game's Screenshots folder", "Apex Radiance folder", "Another folder"};
-        static const char* const kFolderTips[] = {"Next to the photos the game takes, in Documents > Electronic Arts > The Sims 3 > Screenshots",
-                                                  "Kept apart from the game's photos, in Documents > Electronic Arts > The Sims 3 > Apex Radiance > Screenshots",
-                                                  "Any folder you choose, for example on another drive"};
-        int folder = std::clamp(ui.screenshotFolder, 0, 2);
-        if (ApexUi::SegmentedRow("Save screenshots to", "Where the filtered screenshots are saved", "##ShotFolder", &folder, kFolders, 3, kFolderTips, nullptr, 0)) {
-            if (folder == 2 && ui.screenshotCustomFolder.empty()) PickScreenshotFolder({}); // the choice applies once a folder is picked
-            else {
-                ui.screenshotFolder = folder;
-                ApexConfig::SetUi(ui);
-            }
-        }
-        if (ui.screenshotFolder == 2) {
-            const bool busy = g_shotFolderBusy.load();
-            const char* button = "Change##ShotFolderPick";
-            ApexUi::SetNextRowUntranslated();
-            const std::string label = I18n::Tr("Screenshots folder");
-            if (ApexUi::BeginControlRow(label.c_str(), ui.screenshotCustomFolder.c_str(), ApexUi::ButtonWidth(I18n::Tr("Change"), true))) {
-                ImGui::BeginDisabled(busy);
-                if (ApexUi::IconTextButton(button, IconId::FolderOpen, "Choose another folder for the screenshots")) PickScreenshotFolder(ui.screenshotCustomFolder);
-                ImGui::EndDisabled();
-                ApexUi::EndControlRow();
-            }
-        }
-        // (its key is set once, on the Shortcuts tab)
-        if (ApexUi::SwitchRow("Hide game UI in screenshots", &ui.screenshotHideGameUi,
-                              "Hides the game interface for the photo, then restores it; turn off to include it", true)) ApexConfig::SetUi(ui);
-    }
-    ApexUi::EndCard();
-
-}
-
 // Settings > Shortcuts
 void ShortcutsTab() {
     ImGui::PushID("Shortcuts");
@@ -5354,7 +5562,7 @@ void ShortcutsTab() {
             }
             ApexUi::EndControlRow();
         }
-        for (int row : {RowMenu, RowCompare, RowRefresh, RowScreenshot}) {
+        for (int row : {RowMenu, RowCompare, RowRefresh, RowScreenshot, RowVideo, RowLooks}) {
             ImGui::BeginDisabled(row == RowScreenshot && !ApexConfig::GetUi().screenshotShortcutEnabled);
             if (ApexUi::BeginControlRow(RowName(row), nullptr, KeyChipWidth(row))) {
                 KeyChip(row);
@@ -5362,9 +5570,12 @@ void ShortcutsTab() {
             }
             ImGui::EndDisabled();
         }
-        if (g_recRow >= 0)
-            ApexUi::IconNote(IconId::Keyboard, g_recNote.empty() ? I18n::Tr("Press the new combination now; Esc cancels") : g_recNote.c_str(),
-                             g_recNote.empty() ? VioletTheme::kAccent : VioletTheme::kWarning);
+        if (ApexUi::BeginControlRow(RowName(RowExternalKey), RowText(RowExternalKey), KeyChipWidth(RowExternalKey))) { // [capture.video] external_key
+            KeyChip(RowExternalKey);
+            ApexUi::EndControlRow();
+        }
+        RecordNote(false);
+        RecordNote(true);
         ApexUi::Gap(ApexUi::kSpace1);
         ApexUi::MutedText("F10 always hides the game interface");
     }
@@ -5410,7 +5621,7 @@ bool Comparing() { return g_comparing; }
 void ToggleCompare() {
     if (!g_comparing) {
         g_comparePaused.clear();
-        for (const char* name : {"NightTerrainRelight", "AmbientOcclusion", "SceneDither", "DepthBlur", "EdgeSmoothing"})
+        for (const char* name : {"NightTerrainRelight", "AmbientOcclusion", "SceneDither", "DepthBlur", "EdgeSmoothing", Looks::kPatchName})
             if (ApexPatch* p = Find(name); p && p->IsEnabled() && p->Uninstall()) g_comparePaused.push_back(p);
         PictureParams pp = Picture::Get().GetParams();
         g_comparePicture = pp.enabled;
@@ -5488,13 +5699,30 @@ void MemoryCard() {
         g_memoryNoteNext = GetTickCount64() + 300000;
     }
 }
+// The looks key: the same as the feature card's switch (Install / Uninstall, saved by the autosave), with a short pill
+void ToggleFeatureByKey(const char* patchName, const char* shown, IconId icon) {
+    ApexPatch* patch = Find(patchName);
+    if (!patch || !Switchable(patch)) return;
+    const bool want = !patch->IsEnabled();
+    SetPatch(patch, want);
+    const bool now = patch->IsEnabled();
+    LOG_INFO(std::format("[Menu] Shortcut: {} {}", patchName, now ? "on" : "off"));
+    g_presetPillName = I18n::Trf(now ? "{} turned on" : "{} turned off", I18n::Tr(shown));
+    if (now != want && !patch->GetLastError().empty()) g_presetPillName += " \xC2\xB7 " + patch->GetLastError();
+    g_presetPillIcon = icon;
+    g_presetPillLeftMs = kPresetPillMs;
+    g_presetPillLastDraw = 0;
+}
 // Render thread, every frame: the shortcuts that are not the menu key
 void RunShortcuts() {
     RecordStep();
+    ApexCapture::Poll(); // a recording asked for by its key or the menu
     if (Hotkeys::Take(Hotkeys::Action::Compare)) ToggleCompare();
     if (Hotkeys::Take(Hotkeys::Action::Refresh)) NightLighting::RefreshAll();
-    if (Hotkeys::Take(Hotkeys::Action::Screenshot))
+    const bool menuShot = std::exchange(g_takeShot, false); // Image > Capture's "Take one" (the F8 path)
+    if (Hotkeys::Take(Hotkeys::Action::Screenshot) || menuShot)
         Captures::RequestPlayerScreenshot(ApexConfig::GetUi().screenshotHideGameUi);
+    if (Hotkeys::Take(Hotkeys::Action::LooksToggle)) ToggleFeatureByKey(Looks::kPatchName, "Look", IconId::SwatchBook); // "Look turned on", with the card's icon
     RunPresetShortcut();
 }
 
@@ -5606,6 +5834,7 @@ class GuiClient final : public Overlay::Client {
         if (!Captures::ScreenshotPending()) {
             CaptureTarget();
         }
+        ApexCapture::DrawTimer(); // [capture.video] timer and red frame while a video records
         noticeShown = CaptureNote(noticesAllowed); // never in the capture's own screenshot
         const bool compareShown = CompareNote(noticesAllowed && !noticeShown);
         if (!noticeShown) noticeShown = compareShown;
@@ -5639,7 +5868,7 @@ class GuiClient final : public Overlay::Client {
         if (PublicTestPending() && !BannerNeeded() && !Captures::ScreenshotPending()) Overlay::SetVisible(true);
         RunShortcuts();
         // the capture notes (recording, saved, an open session) show with the menu closed too
-        return MemoryNotePending() || Screen::FpsCounterShown() || BannerNeeded() || HintVisible() || RoomToSavePending() || S3PPQuestionPending() || S3SSTexturesQuestionPending() || PresetPillVisible() || g_comparing || Recorder::SecondsRecorded() >= 0 || Captures::CurrentNote().visible ||
+        return MemoryNotePending() || Screen::FpsCounterShown() || BannerNeeded() || HintVisible() || RoomToSavePending() || S3PPQuestionPending() || S3SSTexturesQuestionPending() || PresetPillVisible() || g_comparing || Recorder::SecondsRecorded() >= 0 || ApexCapture::Recording() || Captures::CurrentNote().visible ||
                NoticeAnimationsPending() || (!g_profiles.loading.empty() && ImGui::GetTime() - g_profiles.applyOpenedAt < 0.14) || LightProbe::Aiming() || g_returnFromProbe.load();
     }
 
@@ -5657,6 +5886,7 @@ class GuiClient final : public Overlay::Client {
 
     bool OnWindowMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, LRESULT* result) override {
         if (Screen::OnWindowMessage(hwnd, msg, wp, lp, result)) return true; // Settings > Display: the window's style and position
+        if (msg == WM_CLOSE || msg == WM_DESTROY || (msg == WM_ENDSESSION && wp)) ApexCapture::OnGameClosing(); // a playable video file
         if (msg == WM_KILLFOCUS || (msg == WM_ACTIVATEAPP && !wp)) {
             eatProbeMouseUp = false;
             cheatConsoleGuess = false;
@@ -5724,6 +5954,7 @@ class GuiClient final : public Overlay::Client {
         if (g_recRow < 0 && Overlay::IsVisible() && g_menuTextInput.load() && screenshot.vk == vk &&
             !screenshot.ctrl && !screenshot.shift && !screenshot.alt)
             return false; // let ImGui handle typing; its keyboard capture still keeps the key from reaching the game
+        if (g_recRow < 0 && !g_menuTextInput.load() && ApexCapture::KeyDown(vk, repeat)) return true; // [capture.video] record_key
         const bool aiming = LightProbe::Aiming();
         const bool handled = g_recRow >= 0 || Hotkeys::OnKeyDown(vk, repeat) ||
             ((!Overlay::IsVisible() || !g_menuTextInput.load()) && PresetKeyDown(vk, repeat));
