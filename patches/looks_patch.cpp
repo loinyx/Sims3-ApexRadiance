@@ -461,7 +461,9 @@ void AfterBloom(IDirect3DDevice9* dev)
 // Back-buffer draws after the scene boundary: the bloom strip, then the first draw after it (the UI starts)
 void OnDraw(D3D9Hooks::DeviceContext& ctx, bool isStripOfTwo)
 {
-    if (!g.active || !g_boundaryThisFrame || g_afterBloomDone || DepthShare::InternalPass()) return;
+    // the strip is watched for even when this frame's after-bloom part already ran at the boundary (no strip last frame):
+    // else a frame that once missed it would run every later frame at the boundary, under the game's bloom
+    if (!g.active || !g_boundaryThisFrame || DepthShare::InternalPass() || (g_afterBloomDone && g_stripThisFrame)) return;
     if (!g_curRT0 || g_curRT0 != g_backBuffer) return;
     DWORD z = ctx.ZEnable();
     if (z != D3DZB_FALSE && !ctx.ZWriteEnable() && ctx.ZFunc() == D3DCMP_ALWAYS) z = D3DZB_FALSE; // UI glass passes
@@ -471,7 +473,7 @@ void OnDraw(D3D9Hooks::DeviceContext& ctx, bool isStripOfTwo)
         return;
     }
     g_stripPending = false;
-    AfterBloom(ctx.device);
+    if (!g_afterBloomDone) AfterBloom(ctx.device);
 }
 
 void AtEndScene(IDirect3DDevice9* dev)
