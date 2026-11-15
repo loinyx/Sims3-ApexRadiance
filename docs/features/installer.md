@@ -28,7 +28,7 @@ and a file overwritten by hand cannot be put back.
 Setup finds the game, compares what is installed with the player's choice and applies the difference:
 
 1. **Game.** It finds Steam 1.67.2 (`TS3W.exe`) and EA app 1.69.47 (`TS3.exe`) installs, or a folder the player picks.
-2. **Components.** Apex Radiance is required. The renderer is DXVK (recommended), the RTX Remix bridge zip of the Apex
+2. **Components.** Apex Radiance is required. The renderer is DXVK, the RTX Remix bridge (recommended) zip of the Apex
    release, or the game's own Direct3D 9. DXVK and the bridge are offered only when a graphics card has Vulkan 1.3 and the
    device extensions DXVK requires (`Gpu.DxvkExtensions`, from DXVK 3.1.1's required list); without them DXVK finds no adapter
    and the game closes at start. Vulkan 1.3 with an extension missing is an old driver, not an old card (an Intel Iris Xe on
