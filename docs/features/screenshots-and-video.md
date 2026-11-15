@@ -116,3 +116,12 @@ centre moves under an Apex note when one shows. It is skipped while a screenshot
 recorded but timer_in_video is off (it would end up in the video). The external recorder gets the time only (from when Apex sent
 its key). The pill's text is built again only when it changes (about once a second), and the video settings the frame
 reads are copied only after the menu changed them, so a recording frame allocates nothing on the render thread for them.
+
+## Log lines
+
+Capture writes to Apex's log under `[Video]` (and `[Captures]`, with a line per saved screenshot: its file and size), so a bad recording can be diagnosed
+from the log alone. At the start: the codec, the encoder Media Foundation picked (hardware or not) and whether game
+sound is recorded. At the end, one summary: frames written over the recording time and the rate reached, frames
+dropped because the encoder was behind, frames and sound the encoder refused (with the first error), seconds of sound
+and how much of it was silence, and how long the file took to finish. With MKV, a last line says whether the MKV was
+made from the MP4 and how long it took, or why not.

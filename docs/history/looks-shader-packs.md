@@ -123,3 +123,19 @@ does not compile, so it keeps its address space. Not measured: the menu's frame 
 harness times it).
 
 **Outcome:** kept; offline checks pass; not checked in the game.
+
+### 2026-11-14: the missing shaders' block and renamed GShade files
+
+**Context:** the shaders a look could not run sat behind a "<n> can't run here" disclosure as text lines, with one row
+of buttons for all of them; every download button switched to the Library tab. A GShade preset can name a file that no
+pack publishes under that name (`MXAO@MXAO 4.0.2 EX.fx`), so `PackForFile` found nothing and the shader stayed missing
+although qUINT has the same technique in `qUINT_mxao.fx`.
+
+**Design:** a rounded block under the list, drawn like an open shader's values, with one row per shader and its own
+action (*Download*, *Add .fx files…* or a spinner) and a footer with the folder, *Check again* and *Download all*.
+Downloads stay on the Look tab; the rows show their progress. `Looks::Packs::FileForTechnique` picks a pack file with
+the same technique when no file of the original name exists anywhere: a downloaded pack first, then a file whose name
+shares the original's first word, then ReShade's order. The entry keeps its own name (`PresetEntry::alt` holds the
+stand-in), so its values come from the look's own section and an exported preset names the pack.
+
+**Outcome:** kept; offline checks (`looks_packs_test`, `shaders_menu_test`) updated; not checked in the game.

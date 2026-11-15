@@ -121,7 +121,7 @@ on a Direct3D 9 device; Phase 2 (runtime) and Phase 3 (menu) went ahead. Nothing
 - The state around a run with a user effect is saved in full (all render states it sets, 16 samplers, 224 PS and 256 VS
   constants, render targets 1 to 3), on top of the `D3DSBT_ALL` state block.
 
-**Menu (maintainer's approved design):** a *Shader library* card under the look's cards (Built into Apex, Your shaders
+**Menu (the chosen design):** a *Shader library* card under the look's cards (Built into Apex, Your shaders
 with *Add .fx files…* and the folder); *Add a shader* grouped by source with collapsible headers and counts, only
 shaders that run here; the *can't run here* lines say what to do (add the file, or "doesn't run in The Sims 3" without
 detail), with *Add .fx files…*, *Open the Shaders folder* and *Check again* when a file is missing. Reasons stay in the
@@ -170,3 +170,27 @@ the sources before the change (`/DLOOKS_FX_CHECK_BASELINE`) and after it: the sa
 
 **Outcome:** kept; built (0 errors, 0 warnings); offline checks pass; not checked in the game (the state block's share
 of the GPU driver's work and the frame time in the game are not measured).
+
+### 2026-11-14: a definition the file overrides recompiled it at every scan
+
+**Context:** `MacrosMatch` compared the values the compiler ended with. A look definition that the `.fx` overrides with
+its own `#define` never matched, so the file compiled again at every scan, and each new effect was created again (at
+4K while packs were checked in the background).
+
+**Finding:** the definitions asked for, not the ones the preprocessor ended with, decide whether a compiled effect is
+still current.
+
+**Outcome:** changed: an effect keeps the definitions it was compiled with (`Effect::compiledWith`), and those count as
+a match.
+
+### 2026-11-14: World only ran under the game's bloom
+
+**Context:** with *World only*, the world looked lighter and less saturated than with *World and menus*; session logs
+had no "after the game's bloom" line.
+
+**Finding:** a frame whose after-bloom part ran at the scene boundary (no bloom strip the frame before) also stopped
+watching for the strip, so the next frame expected none either. From the first such frame on, every look ran at the
+boundary, under the game's bloom.
+
+**Outcome:** changed: `OnDraw` watches for the strip in every frame and runs the look there when it has not run yet.
+Not yet checked in the game ([validation](../validation/looks.md#open-checks)).

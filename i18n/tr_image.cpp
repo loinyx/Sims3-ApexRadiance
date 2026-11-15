@@ -901,6 +901,7 @@ const I18n::Entry kEntries[] = {
     {"Checking the file…", "Verificando o arquivo…", "Comprobando el archivo…", "Vérification du fichier…"},
     {"Not in your Shaders folder", "Não está na sua pasta Shaders", "No está en tu carpeta Shaders", "Absent de votre dossier Shaders"},
     {"Doesn't run in The Sims 3", "Não roda no The Sims 3", "No funciona en The Sims 3", "Ne fonctionne pas dans Les Sims 3"},
+    {"Beta", "Beta", "Beta", "Bêta"},
     {"This preset needs {} ({})", "Este preset precisa de {} ({})", "Este preajuste necesita {} ({})", "Ce préréglage a besoin de {} ({})"},
     {"This preset needs {}", "Este preset precisa de {}", "Este preajuste necesita {}", "Ce préréglage a besoin de {}"},
     {"Download them now", "Baixar agora", "Descargarlos ahora", "Les télécharger maintenant"},

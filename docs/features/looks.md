@@ -39,7 +39,11 @@ order with its values, and blends the result over the picture by *Strength*.
    stores an absolute path and never writes in GShade's folder.
 2. The run list is the preset's enabled techniques, plus shaders added here (at the end), in the player's own order
    when one was set. A technique runs from a built-in port or, when Apex has none, from the player's Shaders folder
-   ([Your shaders](#your-shaders)); the others are listed as *can't run here*.
+   ([Your shaders](#your-shaders)); the others are listed as *can't run here*. A GShade preset can name a file that no
+   pack publishes under that name (MXAO in "MXAO 4.0.2 EX.fx"): when that file is nowhere, the technique runs from a
+   pack file that has it (`qUINT_mxao.fx`), chosen by `Looks::Packs::FileForTechnique`: a downloaded pack first, then a
+   file whose name shares the original's first word ("mxao"), then ReShade's list order. Its values still come from the
+   look's own section (`[MXAO 4.0.2 EX.fx]`), and an exported preset names the pack of that file.
 3. Each shader's values are the .ini's (or the .fx default when the .ini has none) unless edited here.
 4. The passes run in Apex's post-scene chain: after Apex's Color (order 45) or before it (35). With *World and menus*
    they run at the end of the frame, like GShade, over menus and loading screens; with *World only* they run on the
@@ -51,9 +55,10 @@ order with its values, and blends the result over the picture by *Strength*.
 ## Menu
 
 Page **Shaders**, subtitle "ReShade looks and shaders on the game's picture": the feature's switch sits at the right of
-the title line (the undo toast reads "Shaders turned on/off"); tabs *Look* and *Library*. A button that opens the pack
-list or starts a download from the Look tab (*Get shader packs* in Add a shader, *Get <pack>*, the import note's
-*Download*) switches to Library and scrolls to Get shader packs.
+the title line (the undo toast reads "Shaders turned on/off"); tabs *Look* and *Library*. The sidebar item carries a
+"Beta" chip ([ui.md](../ui.md#layout)). Only *Get shader packs* in Add a shader switches to Library (scrolled to Get
+shader packs); a download started from the Look tab keeps the player there and shows its progress in the rows that wait
+for it.
 
 **Look card** (tab Look, Lucide `wand-sparkles`): the title is the look's name ("ReShade look" when none is chosen), the
 subtitle "<n> shaders · ~<cost> ms" (or "Off", "No look chosen", "This look can't be read"), a hold-to-compare eye
@@ -71,20 +76,22 @@ from the .ini) over one short description, the switch. The name side opens its p
 the card, each with the control its .fx asks for and the .ini's value as its default (changed dot, Reset; see
 [Parameters and quality settings](#parameters-and-quality-settings)); the panel's footer, under a line, has the bordered
 buttons Run earlier / Run later, "<pos> of <n>" and *Put back the look's values* (under them when narrow). A shader from a downloaded pack or the player's folder has the same row, its
-description naming the source and the file ("qUINT · qUINT_mxao.fx", "Your shaders · Mine.fx"). When some shaders of the look cannot run, the subtitle reads "<on> of <total> on · <n> missing" and one
-line, "<n> can't run here", opens to one line per shader that says what to do: "<Technique> (<file>.fx): in <pack>,
-not downloaded" when a pack of ReShade's list has the file, "<Technique> (<file>.fx): downloading <pack>…" while it
-downloads, "<Technique> (<file>.fx): add this file to the Shaders folder" for any other missing file,
-"<Technique> (<file>.fx): checking the file…" while it compiles, and "<Technique> doesn't run in The Sims 3" for a file
-that is there but cannot run on Direct3D 9 (no detail). When a file is missing, a row of compact buttons that wraps
-when narrow follows: *Get <pack>* (primary, one per pack that has a missing file), *Add .fx files…*, *Open the Shaders
-folder* and *Check again* (compiles the folder again, then "All shaders found" or "<n> still missing"). No modal opens
+description naming the source and the file ("qUINT · qUINT_mxao.fx", "Your shaders · Mine.fx"). When some shaders of the look cannot run, the subtitle reads "<on> of <total> on · <n> missing" and a rounded block under the
+list, drawn like an open shader's values, lists them: a warning icon and the bold title "<n> can't run here", then one
+row per shader with the technique's name over where it comes from and what is missing, and one action at the right:
+"<pack> · Not downloaded · <size>" with *Download* (primary) when a pack of ReShade's list has the file (a failed
+download says why in the same row); "<pack> · Waiting" or "<pack> · Downloading <n>%" with a spinner while it
+downloads; "<file>.fx · Not in your Shaders folder" with *Add .fx files…* for any other missing file; "<file>.fx ·
+Checking the file…" with a spinner while it compiles; "<file>.fx · Doesn't run in The Sims 3" (no action) for a file
+that is there but cannot run on Direct3D 9. The block's footer, under a line, has *Open the Shaders folder* and *Check
+again* (compiles the folder again, then "All shaders found" or "<n> still missing") on the left and, when two packs or
+more are missing, *Download both* / *Download all* (primary) on the right; its parts wrap when narrow. No modal opens
 on its own.
 
 After *Import*, when packs of ReShade's list have shaders the look misses, a note card above the Shaders card reads
 "Imported: <look>" and "This look uses <n> shaders from <pack> (or "<pack> and <pack>", "<n> packs"), which you don't
 have yet", with *Download <pack>* / *Download both* / *Download all* (primary) and *Not now*. The download starts at
-once and shows in the Get shader packs card.
+once; its progress shows in the missing shaders' rows and in the Get shader packs card.
 
 *Add a shader* opens a modal with every shader that runs here, grouped by source under collapsible headers with their
 count ("Apex · 17", one group per downloaded pack, "Your shaders · <n>" with the folder button); a source with nothing
@@ -186,7 +193,9 @@ with `#ifdef` / `#ifndef` (ReShade's own list: not `BUFFER_*`, `RESHADE_*`, name
 each with the look's value (else the .fx's own `#define`) as its default: 0 or 1 a switch; an integer that the effect's
 `#if` / `#elif` lines compare with at most 8 values ("0 to 5") segmented; any other number or text a field that applies
 when it is left. A change compiles that effect again on the background compile thread; the old one keeps running and
-"Compiling the new settings…" shows beside *Put back the look's settings* until the new one replaces it. Edits are
+"Compiling the new settings…" shows beside *Put back the look's settings* until the new one replaces it. An effect
+keeps the definitions it was compiled with (`Effect::compiledWith`); `Looks::Fx::MacrosMatch` counts those as a match,
+so a look definition that the .fx overrides with its own `#define` does not compile it again at every scan. Edits are
 undoable, kept per .fx file in `defines`, written by *Save as a new look…* into the effect's section
 (`PreprocessorDefinitions=`) and carried by Apex presets in `[patches.Looks]`. The built-in ports have none. Measured
 over the same packs: 169 definitions in 52 files (94 switches, 4 segmented, 46 number fields, 25 text fields).
@@ -332,7 +341,10 @@ the copy gets a numbered name, which the look then does not use); names with a f
 
 - Post-scene order 45 (after Picture) or 35 (before); the end-of-frame part runs from `endSceneBeforeOverlay` on the
   back buffer; the after-bloom part waits for the game's bloom strip (one full-screen two-triangle strip) and runs at
-  the next back-buffer draw.
+  the next back-buffer draw. When the frame before had no strip, that part runs at the scene boundary instead; the strip
+  is still watched for in every frame (`OnDraw`), so the next frame with a strip runs after the bloom again. Running at
+  the boundary puts the look under the game's bloom: the world looks lighter and less saturated than with *World and
+  menus*.
 - Each run copies the target to an A8R8G8B8 ping texture, runs the steps through ping-pong targets (AdaptiveSharpen
   adds a G16R16F target), and writes RGB back, blended by *Strength*; the last step draws straight into an 8-bit target
   at full strength.

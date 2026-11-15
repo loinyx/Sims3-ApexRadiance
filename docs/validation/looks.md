@@ -68,7 +68,9 @@ manual check below.
 
 1. Image > Color > Shaders, switch on, pick a look from GShade's folder. **Expected:** the status shows its name and
    shader count; the look shows on the scene and on menus.
-2. *Applies to* World only. **Expected:** the HUD and menus keep their own look.
+2. *Applies to* World only. **Expected:** the HUD and menus keep their own look; the world looks the same as with
+   *World and menus* (not lighter or less saturated), also after a loading screen or a frame without the game's bloom,
+   and the log shows the look running after the game's bloom.
 3. Hold the card's eye, then B over the menu. **Expected:** the game without the look while held.
 4. Compare with the game (its shortcut). **Expected:** the look is off with the other effects and comes back.
 5. Open a shader, move a slider, restart the game. **Expected:** the changed dot and value are kept; *Put back the
@@ -85,9 +87,10 @@ manual check below.
 12. *Add a shader*, group *Your shaders*, add a technique. **Expected:** it runs, its row shows the .fx file name, its
     sliders change it; the setting survives a restart.
 13. Choose a look that names a technique of a file you do not have. **Expected:** "<n> missing" in the subtitle, the
-    line "add this file to the Shaders folder"; *Add .fx files…* with that file, or *Check again* after copying it,
-    makes it run ("All shaders found").
-14. A look with `DH_AhOh@dh_ahoh.fx`. **Expected:** "DH_AhOh doesn't run in The Sims 3"; the game does not crash.
+    block "<n> can't run here" under the list with the row "<file>.fx · Not in your Shaders folder" and *Add .fx
+    files…*; that button with the file, or *Check again* after copying it, makes it run ("All shaders found").
+14. A look with `DH_AhOh@dh_ahoh.fx`. **Expected:** the row "dh_ahoh.fx · Doesn't run in The Sims 3" with no action;
+    the game does not crash.
 15. A depth effect from the folder (for example DisplayDepth). **Expected:** it runs on the world only, never over the
     interface, with the same depth as the built-in ports.
 16. Change the game's resolution, and Alt+Tab out and back in full screen. **Expected:** user effects pause while the
@@ -100,7 +103,13 @@ manual check below.
 19. *Stop the rest* during a download. **Expected:** the current and the waiting packs stop; nothing half-written stays
     in `Shaders\Packs`.
 20. Import a preset that uses a pack you do not have (for example one with MXAO). **Expected:** the note card with
-    *Download <pack>*; after the download the shaders run without *Check again*.
+    *Download <pack>*; the page stays on the Look tab, the block's row shows "Waiting", then "Downloading <n>%" with a
+    spinner; after the download the shaders run without *Check again*.
+24. A GShade preset with `MXAO@MXAO 4.0.2 EX.fx` and qUINT not downloaded. **Expected:** the row names qUINT with
+    *Download*; after it, MXAO runs from `qUINT_mxao.fx` with the values of the preset's `[MXAO 4.0.2 EX.fx]` section;
+    *Export* names qUINT as the pack the preset needs.
+25. A look whose `PreprocessorDefinitions` sets a name that the .fx also `#define`s, with packs checking in the
+    background. **Expected:** the file compiles once; the log shows no new compile of it at each scan.
 21. A downloaded pack's ⋯: *Update*, then *Remove*. **Expected:** the pack is replaced, then gone from the card and from
     *Add a shader*.
 22. No network (cable out), *Download*. **Expected:** "No connection to GitHub", the note "No connection; the list may
@@ -115,6 +124,11 @@ manual check below.
 ## Open checks
 
 - Every step of the in-game test plan.
+- *World only* after the game's bloom (step 2): the fix of the after-bloom run point (a frame without a bloom strip no
+  longer moves every later frame to the scene boundary) is not yet checked in game; an in-game runner job for it is
+  in progress.
+- The missing shaders' block (steps 13, 14, 20) and the renamed-file lookup (step 24) are checked only by the offline
+  harnesses (`looks_packs_test`, `shaders_menu_test`), not in game.
 - The player's .fx effects have run only offline on a separate Direct3D 9 device, never in the game: the look of each
   effect, its cost per frame, depth through DepthShare, the state restore around it (and with the RTX Remix bridge),
   the menu layout at 400 units and 200% text, and the scan's effect on frame pacing are unverified.
