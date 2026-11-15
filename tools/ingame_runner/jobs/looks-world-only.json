@@ -12,7 +12,7 @@
     "world-only": {
       "toml": { "patches.Looks": { "onUi": false } },
       "expect": ["\\[Looks\\] .*drawing after the game's bloom on \\d+x\\d+ .*\\d+ shaders, drew"],
-      "fail": ["\\[Looks\\] .*drawing at the end of frame"]
+      "fail": ["\\[Looks\\] .*drawing at the end of frame on"]
     },
     "world-and-menus": {
       "toml": { "patches.Looks": { "onUi": true } },

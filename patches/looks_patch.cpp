@@ -436,7 +436,7 @@ bool g_afterBloomDone = false;    // the after-bloom part ran (or was given to t
 bool g_stripPending = false;      // the bloom strip has drawn: run at the next back-buffer draw
 bool g_stripThisFrame = false;    // a bloom strip after the boundary this frame
 bool g_stripExpected = false;     // ... and last frame (so this frame waits for it)
-bool g_lastWasScene = false;      // the last back-buffer draw after the boundary tested depth (scene, not UI)
+bool g_boundaryDraw = false;      // the scene boundary just ran: the next draw seen is the one it ran on
 bool g_frameTicked = false;       // g_frame advanced this frame (framecount/frametime: once per frame, not per run point)
 bool g_beforeLookDone = false;    // ApexCapture::BeforeLook called this frame (a split frame draws more than once)
 unsigned g_frame = 0;
@@ -449,6 +449,7 @@ void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask);
 void Effect(IDirect3DDevice9* dev)
 {
     g_boundaryThisFrame = true;
+    g_boundaryDraw = true;
     unsigned mask = 1u << kBoundary;
     if (!g_stripExpected) { mask |= 1u << kAfterBloom; g_afterBloomDone = true; }
     g_mode = "at the scene boundary";
@@ -462,31 +463,45 @@ void AfterBloom(IDirect3DDevice9* dev)
     EffectImpl(dev, false, 1u << kAfterBloom);
 }
 
-// Back-buffer draws: the scene, the bloom strip after the boundary, then the first draw after it (the UI starts)
-void OnDraw(D3D9Hooks::DeviceContext& ctx, bool isStripOfTwo)
+// The bloom strip and the draw after it. The strip is the first flat two-triangle back-buffer draw after the scene
+// boundary: usually the very draw the boundary (PostScene) ran on, else a later one (a frame whose boundary came on another
+// flat draw). Render target 0 is asked from the device, not tracked: the High-precision scene binds its 16-bit target
+// outside the hooks. The draw after the strip runs the after-bloom part.
+bool OnBackBuffer(IDirect3DDevice9* dev)
 {
-    // the strip is watched for even when this frame's after-bloom part already ran at the boundary (no strip last frame):
-    // else a frame that once missed it would run every later frame at the boundary, under the game's bloom
-    if (!g.active || DepthShare::InternalPass() || (g_afterBloomDone && g_stripThisFrame)) return;
-    if (!g_curRT0 || g_curRT0 != g_backBuffer) return;
+    IDirect3DSurface9* rt = nullptr;
+    const bool on = SUCCEEDED(dev->GetRenderTarget(0, &rt)) && rt && rt == g_backBuffer;
+    if (rt) rt->Release();
+    return on;
+}
+
+bool Flat(D3D9Hooks::DeviceContext& ctx)
+{
     DWORD z = ctx.ZEnable();
     if (z != D3DZB_FALSE && !ctx.ZWriteEnable() && ctx.ZFunc() == D3DCMP_ALWAYS) z = D3DZB_FALSE; // UI glass passes
-    if (z != D3DZB_FALSE) { g_stripPending = false; g_lastWasScene = true; return; } // more scene (interiors): wait for its own strip
-    const bool afterScene = std::exchange(g_lastWasScene, false);
-    // scene draws are tracked before the boundary too: the boundary's own draw is usually the bloom strip, and without
-    // them it was never seen, so "World only" ran under the game's bloom (and before Color with that order)
-    if (!g_boundaryThisFrame) return;
-    if (!g_stripPending) {
-        // the bloom composite is the first flat draw after scene draws (as Picture finds it); a UI quad later is not
-        if (isStripOfTwo && afterScene) { g_stripPending = true; g_stripThisFrame = true; }
+    return z == D3DZB_FALSE;
+}
+
+void OnDraw(D3D9Hooks::DeviceContext& ctx, bool isStripOfTwo)
+{
+    if (!g.active || DepthShare::InternalPass()) return;
+    const bool boundaryDraw = std::exchange(g_boundaryDraw, false);
+    if (!g_boundaryThisFrame || (g_afterBloomDone && g_stripThisFrame)) return;
+    if (!g_stripPending)
+    {
+        if (isStripOfTwo && !g_stripThisFrame && (boundaryDraw || (Flat(ctx) && OnBackBuffer(ctx.device))))
+            g_stripPending = g_stripThisFrame = true;
         return;
     }
+    if (!OnBackBuffer(ctx.device)) return; // the bloom chain's own targets, a reflection: not yet
     g_stripPending = false;
+    if (!Flat(ctx)) return; // more scene (interiors): the after-bloom part runs at the end of the frame
     if (!g_afterBloomDone) AfterBloom(ctx.device);
 }
 
 void AtEndScene(IDirect3DDevice9* dev)
 {
+    g_boundaryDraw = false; // a boundary run from EndScene has no draw of its own
     if (g_ranThisFrame || !g.active || !dev) return;
     IDirect3DSurface9* bb = nullptr; IDirect3DSurface9* rt = nullptr;
     const bool okBb = SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb;
@@ -496,10 +511,15 @@ void AtEndScene(IDirect3DDevice9* dev)
     if (rt) rt->Release();
     if (!onBackBuffer) return; // an off-screen pass (reflection, thumbnail): wait for the frame's own EndScene
     g_ranThisFrame = true;
-    // the frame ended on the strip (UI hidden): nothing was drawn over the world after it
-    if (g_stripPending && !g_afterBloomDone) { g_stripPending = false; AfterBloom(dev); }
+    // the after-bloom part waited for a strip and none came, or the frame ended on it (UI hidden): it runs here, so no
+    // frame goes without the look (a frame that alternated with the boundary made the tone shimmer between the two)
     if (g_boundaryThisFrame && !g_afterBloomDone)
-        PartWhy("no bloom strip came after the scene boundary (the after-bloom shaders run at the boundary next frame)");
+    {
+        g_stripPending = false;
+        g_afterBloomDone = true;
+        g_mode = "at the end of frame (no bloom strip seen)";
+        EffectImpl(dev, false, 1u << kAfterBloom);
+    }
     if (!g.onUi) return; // UI left clean: nothing at the end of frame
     g_mode = "at the end of frame";
     EffectImpl(dev, true, 1u << kEndOfFrame);
@@ -525,7 +545,7 @@ void OnPresent(IDirect3DDevice9* dev)
     g_frameWhy.clear();
     g_frameTried = false;
     g_stripExpected = g_stripThisFrame;
-    g_stripThisFrame = g_stripPending = g_lastWasScene = false;
+    g_stripThisFrame = g_stripPending = g_boundaryDraw = false;
     g_ranThisFrame = g_boundaryThisFrame = g_afterBloomDone = g_beforeLookDone = g_frameTicked = false;
     IDirect3DSurface9* s = nullptr;
     g_backBuffer = nullptr;
