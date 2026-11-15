@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <string_view>
 #include <vector>
 
@@ -207,11 +208,13 @@ float InlineControlWidth(float rowWidth) {
 }
 
 // The description under a row's label: smaller, muted, wrapped at wrapX (window coordinates)
+unsigned g_nextDescRgb = 0; // SetNextRowWarning: the next row's description colour (0: muted)
+unsigned g_nextIconRgb = 0; // SetNextRowIconColor: the next control row's leading icon (0: accent)
 void RowDescription(const char* text, float wrapX) {
     if (!text || !*text) return;
     PushSized(nullptr, kSmallScale);
     ImGui::PushTextWrapPos(wrapX);
-    ImGui::PushStyleColor(ImGuiCol_Text, Col(VioletTheme::kTextMuted));
+    ImGui::PushStyleColor(ImGuiCol_Text, Col(g_nextDescRgb ? g_nextDescRgb : VioletTheme::kTextMuted));
     ImGui::TextWrapped("%s", T(text));
     ImGui::PopStyleColor();
     ImGui::PopTextWrapPos();
@@ -336,6 +339,7 @@ float RowText(const char* label, const char* description, float wrapX, float lab
         info->lineH = ImGui::GetTextLineHeight();
     }
     RowDescription(description, wrapX);
+    g_nextDescRgb = 0;
     ImGui::PopStyleVar();
     ImGui::EndGroup();
     return ImGui::GetItemRectMax().y - top;
@@ -520,6 +524,8 @@ float Unit() {
 // ---- badges, search filter, change reports, slider drag state ----
 
 void SetNextRowUntranslated() { g_nextRaw = true; }
+void SetNextRowWarning() { g_nextDescRgb = VioletTheme::kWarning; }
+void SetNextRowIconColor(unsigned rgb) { g_nextIconRgb = rgb; }
 
 void SetNextRowBadge(const char* text, const char* tooltip, unsigned rgb) {
     g_nextBadge = text;
@@ -843,7 +849,8 @@ bool SwitchRow(const char* label, bool* v, const char* tooltip, BoolDefault def,
 
 bool BeginControlRow(const char* label, const char* description, float controlsWidth, IconId icon, float controlsHeight) {
     const RowDecor d = TakeDecor();
-    if (!RowVisible(label, description)) return false;
+    const unsigned iconRgb = std::exchange(g_nextIconRgb, 0u);
+    if (!RowVisible(label, description)) { g_nextDescRgb = 0; return false; }
     g_inControlRow = true;
     const float u = Unit();
     const float startX = ImGui::GetCursorPosX();
@@ -855,7 +862,7 @@ bool BeginControlRow(const char* label, const char* description, float controlsW
     const float wrapX = stacked ? startX + width : startX + width - controlsWidth - kSpace3 * u;
     // Keep the divider and right cluster anchored to the full row; only the text is indented.
     const bool hasIcon = icon != IconId::None;
-    const float iconBox = 22.0f * u;
+    const float iconBox = kRowIconBox * u;
     const float textX = startX + (hasIcon ? iconBox + kSpace3 * u : 0.0f);
     ImGui::SetCursorPos(ImVec2(textX, top));
     const float textWrapX = std::fmax(wrapX, textX + 40.0f * u);
@@ -866,7 +873,7 @@ bool BeginControlRow(const char* label, const char* description, float controlsW
     if (hasIcon) {
         const float size = kIconMedium * u;
         DrawIcon(ImGui::GetWindowDrawList(), icon,
-                 ToScreen(startX + (iconBox - size) * 0.5f, top + (rowH - size) * 0.5f), size, U32(VioletTheme::kAccent));
+                 ToScreen(startX + (iconBox - size) * 0.5f, top + (rowH - size) * 0.5f), size, U32(iconRgb ? iconRgb : VioletTheme::kAccent));
     }
     g_ctrlStartX = startX;
     g_ctrlTopScreen = ToScreen(startX, top).y;
@@ -1488,9 +1495,9 @@ bool Segmented(const char* id, int* current, const char* const* labels, int coun
         const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
         const bool selected = *current == i;
         const float inset = vertical ? 0.0f : 2.0f * u;
-        if (selected) dl->AddRectFilled(ImVec2(a.x + inset, a.y + inset), ImVec2(b.x - inset, b.y - inset), U32(VioletTheme::kAccentDark), rounding);
+        if (selected) dl->AddRectFilled(ImVec2(a.x + inset, a.y + inset), ImVec2(b.x - inset, b.y - inset), U32(VioletTheme::kSegmentOn), rounding);
         else if (hovered) dl->AddRectFilled(ImVec2(a.x + inset, a.y + inset), ImVec2(b.x - inset, b.y - inset), U32(VioletTheme::kHoverBg), rounding);
-        const ImU32 textCol = selected ? U32(VioletTheme::kAccentLight) : hovered ? U32(VioletTheme::kText) : U32(VioletTheme::kTextMuted);
+        const ImU32 textCol = selected ? U32(0xFFFFFF) : hovered ? U32(VioletTheme::kText) : U32(VioletTheme::kTextMuted);
         // A label longer than its segment (only possible one per line or as a lone pill wider than the line) is cut
         // with "…" and shown whole on hover
         std::string_view shown = T(labels[i]);
@@ -1687,7 +1694,7 @@ ImGuiID g_dividerWindow = 0;
 int g_dividerFrame = -1;
 float g_dividerBodyY = 0.0f;
 }
-bool BeginAdvanced(const char* id, const char* label) {
+bool BeginAdvanced(const char* id, const char* label, const char* summary) {
     if (Hidden()) return true; // search: the contents are searched too, without the header
     const float u = Unit();
     ImGui::PushID(id);
@@ -1723,9 +1730,18 @@ bool BeginAdvanced(const char* id, const char* label) {
     const ImU32 col = U32(hovered ? VioletTheme::kAccentLight : VioletTheme::kAccent);
     DrawIcon(dl, open ? IconId::ChevronDown : IconId::ChevronRight, ImVec2(p.x, p.y + (lineH - is) * 0.5f), is, col);
     const std::string_view shown = I18n::TrLabel(label);
-    if (DrawFitted(dl, ImVec2(p.x + is + gap, CenteredTextY(shown, p.y + lineH * 0.5f)), col, shown, width - is - gap) &&
-        ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
-        FullTextTooltip(shown);
+    const float textX = p.x + is + gap;
+    bool cut = DrawFitted(dl, ImVec2(textX, CenteredTextY(shown, p.y + lineH * 0.5f)), col, shown, width - is - gap);
+    std::string all(shown);
+    if (summary && *summary && !cut) {
+        const std::string tail = std::string("  \xC2\xB7  ") + summary;
+        const float sx = textX + ImGui::CalcTextSize(shown.data(), shown.data() + shown.size()).x;
+        const float room = p.x + width - sx;
+        all += tail;
+        if (room >= ImGui::CalcTextSize("  \xC2\xB7  Abc").x) cut = DrawFitted(dl, ImVec2(sx, CenteredTextY(tail, p.y + lineH * 0.5f)), U32(VioletTheme::kTextMuted), tail, room);
+        else cut = true; // too little room for any of it: whole in the tooltip
+    }
+    if (cut && ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) FullTextTooltip(all);
     ImGui::RenderNavCursor(ImGui::GetCurrentContext()->LastItemData.Rect, ImGui::GetItemID());
     return open;
 }

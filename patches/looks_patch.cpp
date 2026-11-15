@@ -36,6 +36,7 @@
 #include <shellapi.h>
 #include <shobjidl.h>
 #include <algorithm>
+#include <cfloat>
 #include <atomic>
 #include <climits>
 #include <cmath>
@@ -686,6 +687,18 @@ void SwitchEntry(size_t i, bool on)
 }
 
 // Swaps run-list entry i with the runnable entry before (dir -1) or after (dir +1) it
+// Moves a shader to another's place (dragged by its grip); the others keep their order
+void MoveTo(size_t from, size_t to)
+{
+    if (from == to || from >= g.order.size() || to >= g.order.size()) return;
+    g.runOrder.clear();
+    for (auto& e : g.order) g.runOrder.push_back(EntryKey(e));
+    const std::string key = g.runOrder[from];
+    g.runOrder.erase(g.runOrder.begin() + (ptrdiff_t)from);
+    g.runOrder.insert(g.runOrder.begin() + (ptrdiff_t)to, key);
+    RebuildOrder();
+}
+
 void Move(size_t i, int dir)
 {
     int j = (int)i;
@@ -938,6 +951,8 @@ std::optional<std::wstring> g_picked;
 std::atomic<bool> g_pickBusy{ false };
 std::string g_message;     // translated, under the Look row
 bool g_messageError = false;
+Looks::TwinFn g_twin = nullptr; // SetTwinCheck
+void (*g_cardRows)() = nullptr;  // SetCardRows
 
 // The native file picker for the Import button, off the render thread (it pumps the game window's messages)
 void PickPreset()
@@ -1667,110 +1682,59 @@ void PanelLine()
     ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, y + ApexUi::kSpace2 * u));
 }
 
-// The shaders of the look that can't run, in a block under the list: a warning title, then one row each (the technique;
-// where it comes from and what is wrong; its one action on the right: Download for a pack of ReShade's list, Add .fx
-// files for a file found nowhere, a spinner while it downloads or compiles), then Download all / the folder / Check again.
-// Downloading stays on this tab: the row shows the progress.
-bool MissingPanel(const std::vector<size_t>& cant)
+// A shader the look names that can't run here, in its place in the list: its name over what is wrong (amber) and the one
+// action (Download its pack, Add .fx files, or a spinner while it is checked or downloaded)
+void MissingRow(size_t i, const Looks::Packs::Batch& batch, std::vector<std::string>& getPacks)
 {
     const float u = ApexUi::Unit();
-    bool changed = false;
-    const Looks::Packs::Batch batch = Looks::Packs::Status();
-    std::vector<std::string> getPacks; // packs a Download would fetch (for Download all)
-    bool fileMissing = false;
-    ImGui::PushID("##Missing");
-    if (BeginInsetPanel("##MissingPanel"))
+    const auto& e = g.order[i];
+    const Looks::Packs::Pack* pack = PackFor(i);
+    const Looks::Packs::Row* row = nullptr;
+    if (pack)
+        for (const auto& r : batch.rows)
+            if (r.folder == pack->folder) row = &r;
+    const bool downloading = row && (row->state == Looks::Packs::RowState::Waiting || row->state == Looks::Packs::RowState::Downloading);
+    const bool gone = pack && row && row->state == Looks::Packs::RowState::Failed && row->failure == Looks::Packs::Failure::Gone;
+    const std::string& used = e.alt.empty() ? e.file : e.alt; // the file that would run (its GShade name's stand-in)
+    enum class Act { None, Spin, Download, AddFx } act = Act::None;
+    std::string desc;
+    if (Looks::Fx::Pending(used)) { desc = I18n::Tr("Checking the file\xE2\x80\xA6"); act = Act::Spin; }
+    else if (pack && downloading)
     {
-        // title: the warning icon and "<n> can't run here", on one text line
-        {
-            const float lh = ImGui::GetTextLineHeight(), icon = ApexUi::kIconSmall * u;
-            const ImVec2 at = ImGui::GetCursorScreenPos();
-            ApexUi::DrawIcon(ImGui::GetWindowDrawList(), IconId::TriangleAlert, ImVec2(at.x, at.y + (lh - icon) * 0.5f), icon, ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kWarning)));
-            ImGui::SetCursorScreenPos(ImVec2(at.x + icon + ApexUi::kSpace2 * u, at.y));
-            ImGui::PushFont(VioletTheme::BoldFont(), 0.0f);
-            ImGui::TextUnformatted(I18n::Trf("{} can't run here", cant.size()).c_str());
-            ImGui::PopFont();
-        }
-        ApexUi::Gap(ApexUi::kSpace1);
-        const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
-        const char* download = I18n::Tr("Download");
-        const char* addFx = I18n::Tr("Add .fx files\xE2\x80\xA6");
-        for (size_t i : cant)
-        {
-            const auto& e = g.order[i];
-            const Looks::Packs::Pack* pack = PackFor(i);
-            const Looks::Packs::Row* row = nullptr;
-            if (pack)
-                for (const auto& r : batch.rows)
-                    if (r.folder == pack->folder) row = &r;
-            const bool downloading = row && (row->state == Looks::Packs::RowState::Waiting || row->state == Looks::Packs::RowState::Downloading);
-            const bool gone = pack && row && row->state == Looks::Packs::RowState::Failed && row->failure == Looks::Packs::Failure::Gone;
-            const std::string& used = e.alt.empty() ? e.file : e.alt; // the file that would run (its GShade name's stand-in)
-            const bool checking = Looks::Fx::Pending(used);
-            enum class Act { None, Spin, Download, AddFx } act = Act::None;
-            std::string desc;
-            if (checking) { desc = e.file + "  \xC2\xB7  " + I18n::Tr("Checking the file\xE2\x80\xA6"); act = Act::Spin; }
-            else if (pack && downloading)
-            {
-                desc = pack->name + "  \xC2\xB7  " + (row->state == Looks::Packs::RowState::Waiting ? std::string(I18n::Tr("Waiting"))
-                                                                                                    : I18n::Trf("Downloading {}%", (int)(row->progress * 100.0f)));
-                act = Act::Spin;
-            }
-            else if (pack && !gone)
-            {
-                desc = pack->name + "  \xC2\xB7  " + I18n::Tr("Not downloaded");
-                if (pack->downloadKB) desc += "  \xC2\xB7  " + SizeText(pack->downloadKB);
-                if (row && row->state == Looks::Packs::RowState::Failed) desc = pack->name + "  \xC2\xB7  " + I18n::Tr(FailureText(row->failure));
-                act = Act::Download;
-                if (std::find(getPacks.begin(), getPacks.end(), pack->folder) == getPacks.end()) getPacks.push_back(pack->folder);
-            }
-            else if (!Looks::Fx::HasFile(used))
-            {
-                desc = e.file + "  \xC2\xB7  " + (gone ? I18n::Tr(FailureText(row->failure)) : I18n::Tr("Not in your Shaders folder"));
-                act = Act::AddFx;
-                fileMissing = true;
-            }
-            else desc = e.file + "  \xC2\xB7  " + I18n::Tr("Doesn't run in The Sims 3");
-            const float controlW = act == Act::Download ? ApexUi::ButtonWidth(download, true) : act == Act::AddFx ? ApexUi::ButtonWidth(addFx, true)
-                                 : act == Act::Spin   ? 12.0f * u : 0.0f;
-            ImGui::PushID((int)i);
-            ApexUi::SetNextRowUntranslated(); // the shader's own name; the description is already translated
-            if (ApexUi::BeginControlRow(e.technique.c_str(), desc.c_str(), controlW))
-            {
-                if (act == Act::Download && ApexUi::IconTextButton(download, IconId::Download, nullptr, ApexUi::ButtonKind::Primary)) DownloadPacks({ pack->folder });
-                else if (act == Act::AddFx && ApexUi::IconTextButton(addFx, IconId::Plus, "Copy .fx, .fxh and texture files into the Shaders folder")) PickFxFiles();
-                else if (act == Act::Spin) ApexUi::BusySpinner(true);
-                ApexUi::EndControlRow();
-            }
-            ImGui::PopID();
-        }
-        // footer: the folder and Check again on the left, Download all (when two packs or more wait) on the right
-        PanelLine();
-        const float gap = ApexUi::kSpace2 * u, right = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
-        if (ApexUi::IconTextButton("Open the Shaders folder", IconId::FolderOpen)) ShowShadersFolder();
-        SameLineIfFits(ApexUi::ButtonWidth(I18n::Tr("Check again"), true), gap, right);
-        if (ApexUi::IconTextButton("Check again", IconId::RotateCcw, "Look in the Shaders folder again and compile what changed"))
-        {
-            Looks::Fx::RequestScan(true);
-            g_checkPending = true;
-            g_fxMessage.clear();
-        }
-        if (getPacks.size() >= 2)
-        {
-            const std::string all = DownloadLabel(getPacks);
-            const float w = ApexUi::ButtonWidth(all.c_str(), true);
-            if (ImGui::GetItemRectMax().x + ApexUi::kSpace3 * u + w <= right) ImGui::SameLine(right - w - ImGui::GetWindowPos().x);
-            else ImGui::SetCursorScreenPos(ImVec2(std::fmax(ImGui::GetCursorScreenPos().x, right - w), ImGui::GetCursorScreenPos().y));
-            if (ApexUi::IconTextButton(all.c_str(), IconId::Download, nullptr, ApexUi::ButtonKind::Primary)) DownloadPacks(getPacks);
-        }
-        (void)fileMissing;
-        if (!g_fxMessage.empty())
-            ApexUi::IconNote(g_fxMessageError ? IconId::TriangleAlert : IconId::Info, g_fxMessage.c_str(), g_fxMessageError ? VioletTheme::kWarning : VioletTheme::kTextMuted);
+        desc = pack->name + "  \xC2\xB7  " + (row->state == Looks::Packs::RowState::Waiting ? std::string(I18n::Tr("Waiting"))
+                                                                                            : I18n::Trf("Downloading {}%", (int)(row->progress * 100.0f)));
+        act = Act::Spin;
     }
-    ImGui::EndChild();
+    else if (pack && !gone)
+    {
+        desc = row && row->state == Looks::Packs::RowState::Failed ? pack->name + "  \xC2\xB7  " + I18n::Tr(FailureText(row->failure))
+                                                                  : I18n::Trf("Needs the {} pack", pack->name);
+        if (pack->downloadKB && !(row && row->state == Looks::Packs::RowState::Failed)) desc += "  \xC2\xB7  " + SizeText(pack->downloadKB);
+        act = Act::Download;
+        if (std::find(getPacks.begin(), getPacks.end(), pack->folder) == getPacks.end()) getPacks.push_back(pack->folder);
+    }
+    else if (!Looks::Fx::HasFile(used))
+    {
+        desc = e.file + "  \xC2\xB7  " + (gone ? I18n::Tr(FailureText(row->failure)) : I18n::Tr("Not in your Shaders folder"));
+        act = Act::AddFx;
+    }
+    else desc = e.file + "  \xC2\xB7  " + I18n::Tr("Doesn't run in The Sims 3");
+    const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+    const char* download = I18n::Tr("Download");
+    const char* addFx = I18n::Tr("Add .fx files\xE2\x80\xA6");
+    const float controlW = act == Act::Download ? ApexUi::ButtonWidth(download, true) : act == Act::AddFx ? ApexUi::ButtonWidth(addFx, true)
+                         : act == Act::Spin   ? 12.0f * u : 0.0f;
+    ImGui::PushID((int)i);
+    ApexUi::SetNextRowUntranslated(); // the shader's own name; the description is already translated
+    if (act != Act::Spin) ApexUi::SetNextRowWarning();
+    if (ApexUi::BeginControlRow(e.technique.c_str(), desc.c_str(), controlW))
+    {
+        if (act == Act::Download && ApexUi::IconTextButton(download, IconId::Download)) DownloadPacks({ pack->folder });
+        else if (act == Act::AddFx && ApexUi::IconTextButton(addFx, IconId::Plus, "Copy .fx, .fxh and texture files into the Shaders folder")) PickFxFiles();
+        else if (act == Act::Spin) ApexUi::BusySpinner(true);
+        ApexUi::EndControlRow();
+    }
     ImGui::PopID();
-    ApexUi::Gap(ApexUi::kSpace2);
-    return changed;
 }
 
 std::string RowDescription(int shader); // below, with the shader sources
@@ -1791,35 +1755,87 @@ bool ShaderRow(size_t i, int pos, int count, bool& reorder)
     if (EditedValues(i) || DefsEdited(i)) ApexUi::SetNextRowChangedDot("Changed from the look");
     ApexUi::SetNextRowUntranslated(); // the shader's own name
     const std::string label = e.technique;
-    const std::string description = RowDescription(e.shader);
-    if (ApexUi::BeginControlRow(label.c_str(), description.c_str(), ApexUi::ToggleSwitchSize().x, open ? IconId::ChevronDown : IconId::ChevronRight))
+    Looks::Twin twin;
+    const bool doubled = g.active && g_twin && !IsOff(i) && g_twin(label, twin, false);
+    if (doubled) ApexUi::SetNextRowWarning();
+    const std::string description = doubled ? twin.note : RowDescription(e.shader);
     {
-        bool on = !IsOff(i);
-        if (ApexUi::ToggleSwitch("##On", &on))
+        // the grip (drag to reorder) on the left; the doubled effect's button, the switch and the chevron on the right
+        const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact); // (the values keep their own size)
+        const float h = ImGui::GetFrameHeight(), gap = ApexUi::kSpace2 * u;
+        const float twinW = doubled ? ApexUi::ButtonWidth(twin.action.c_str(), false) + ApexUi::kSpace3 * u : 0.0f;
+        ApexUi::SetNextRowIconColor(VioletTheme::kTextFaint);
+        if (ApexUi::BeginControlRow(label.c_str(), description.c_str(), twinW + ApexUi::ToggleSwitchSize().x + gap + h, IconId::GripVertical))
         {
-            SwitchEntry(i, on);
-            ApexUi::ReportChange(I18n::Trf(on ? "{} turned on" : "{} turned off", label).c_str());
-            changed = true;
-        }
-        const ImVec2 switchMin = ImGui::GetItemRectMin();
-        float top = 0.0f;
-        bool stacked = false;
-        ApexUi::LastControlRow(&top, &stacked);
-        ApexUi::EndControlRow();
-        // the name side (not the switch) opens and closes the values; a keyboard stop too
-        const ImVec2 after = ImGui::GetCursorScreenPos();
-        const float bottom = stacked ? switchMin.y - ApexUi::kSpace1 * u : after.y - ImGui::GetStyle().ItemSpacing.y;
-        const float right = stacked ? left + width : switchMin.x - ApexUi::kSpace3 * u;
-        if (right > left && bottom > top)
-        {
-            ImGui::SetCursorScreenPos(ImVec2(left, top));
-            if (ImGui::InvisibleButton("##Toggle", ImVec2(right - left, bottom - top), ImGuiButtonFlags_EnableNav))
+            float controlsLeft = 0.0f, controlsTop = FLT_MAX; // the controls' top (stacked under the text: the name side ends above)
+            if (doubled)
+            {
+                if (ApexUi::TextButton(twin.action.c_str())) { g_twin(label, twin, true); changed = true; }
+                controlsLeft = ImGui::GetItemRectMin().x;
+                controlsTop = ImGui::GetItemRectMin().y;
+                ImGui::SameLine(0.0f, ApexUi::kSpace3 * u);
+            }
+            bool on = !IsOff(i);
+            if (ApexUi::ToggleSwitch("##On", &on))
+            {
+                SwitchEntry(i, on);
+                ApexUi::ReportChange(I18n::Trf(on ? "{} turned on" : "{} turned off", label).c_str());
+                changed = true;
+            }
+            ImVec2 switchMin = ImGui::GetItemRectMin();
+            controlsTop = std::min(controlsTop, switchMin.y);
+            if (doubled) switchMin.x = controlsLeft; // the name side ends before the button
+            ImGui::SameLine(0.0f, gap);
+            ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, switchMin.y + (ApexUi::ToggleSwitchSize().y - h) * 0.5f));
+            if (ApexUi::IconButton("##Open", open ? IconId::ChevronDown : IconId::ChevronRight, nullptr, false, h / u))
             {
                 open = !open;
                 storage->SetBool(openId, open);
             }
-            ImGui::RenderNavCursor(ImGui::GetCurrentContext()->LastItemData.Rect, ImGui::GetItemID());
-            if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+            controlsTop = std::min(controlsTop, ImGui::GetItemRectMin().y);
+            float top = 0.0f;
+            bool stacked = false;
+            ApexUi::LastControlRow(&top, &stacked);
+            ApexUi::EndControlRow();
+            const ImVec2 after = ImGui::GetCursorScreenPos();
+            const float bottom = stacked ? controlsTop - ApexUi::kSpace1 * u : after.y - ImGui::GetStyle().ItemSpacing.y;
+            const float gripW = ApexUi::kRowIconBox * u + ApexUi::kSpace3 * u; // the leading icon's box and its gap
+            const float right = stacked ? left + width : switchMin.x - ApexUi::kSpace3 * u;
+            auto dropHere = [&] { // a shader dragged by its grip lands in this row's place
+                if (!ImGui::BeginDragDropTarget()) return;
+                if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("ApexLooksRow"))
+                {
+                    MoveTo(*static_cast<const size_t*>(p->Data), i);
+                    reorder = changed = true;
+                }
+                ImGui::EndDragDropTarget();
+            };
+            if (bottom > top && !ApexUi::FilterActive())
+            {
+                ImGui::SetCursorScreenPos(ImVec2(left, top));
+                ImGui::InvisibleButton("##Grip", ImVec2(gripW, bottom - top));
+                if (ImGui::IsItemHovered() || ImGui::IsItemActive()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+                if (ImGui::BeginDragDropSource())
+                {
+                    ImGui::SetDragDropPayload("ApexLooksRow", &i, sizeof i);
+                    ImGui::TextUnformatted(label.c_str());
+                    ImGui::EndDragDropSource();
+                }
+                dropHere();
+            }
+            // the name side (not the switch) opens and closes the values too; a keyboard stop
+            if (right > left + gripW && bottom > top)
+            {
+                ImGui::SetCursorScreenPos(ImVec2(left + gripW, top));
+                if (ImGui::InvisibleButton("##Toggle", ImVec2(right - left - gripW, bottom - top), ImGuiButtonFlags_EnableNav))
+                {
+                    open = !open;
+                    storage->SetBool(openId, open);
+                }
+                ImGui::RenderNavCursor(ImGui::GetCurrentContext()->LastItemData.Rect, ImGui::GetItemID());
+                if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                dropHere();
+            }
             ImGui::SetCursorScreenPos(after);
         }
     }
@@ -2408,9 +2424,8 @@ bool SaveLookModal(bool openNow)
             if ((ApexUi::TextButton("Save", nullptr, ApexUi::ButtonKind::Primary) || (enter && !file.empty())) && SaveAsNewLook(name, error))
             {
                 g_listDirty = true;
-                g_message = I18n::Trf("Saved as {}", Looks::RefName(g.preset));
-                g_messageError = false;
-                ApexUi::ReportChange("Look saved");
+                ApexUi::ReportChange(I18n::Trf("Saved as {}", Looks::RefName(g.preset)).c_str());
+                g_message.clear();
                 changed = true;
                 ImGui::CloseCurrentPopup();
             }
@@ -2614,7 +2629,13 @@ public:
         {
             std::optional<std::wstring> picked;
             { std::lock_guard<std::mutex> lock(g_pickLock); picked.swap(g_picked); }
-            if (picked && !picked->empty() && ImportPicked(*picked)) { g_listDirty = true; changed = true; ApexUi::ReportChange("Look imported"); }
+            if (picked && !picked->empty() && ImportPicked(*picked))
+            {
+                g_listDirty = true;
+                changed = true;
+                ApexUi::ReportChange(g_message.c_str()); // "Imported as <name>": the floating note with Undo, not a line in the card
+                g_message.clear();
+            }
         }
         changed |= LookRow();
         if (!g_message.empty() && !ApexUi::FilterActive())
@@ -2622,14 +2643,14 @@ public:
         else if (!g.preset.empty() && !g.error.empty() && !ApexUi::FilterActive())
             ApexUi::IconNote(IconId::TriangleAlert, I18n::Trf("This look can't be read: {}", g.error).c_str(), VioletTheme::kWarning);
 
-        changed |= ApexUi::SliderPercent("Strength", &g.mix, 0.0f, 1.0f, "How much of the look is applied", 1.0f);
-        static const char* const kApplies[] = { "World and menus", "World only" };
-        int applies = g.onUi ? 0 : 1;
-        if (ApexUi::SegmentedRow("Applies to", "Menus and loading screens can get the look too", "##LooksApplies", &applies, kApplies, 2, nullptr, nullptr, 0))
+        changed |= ApexUi::SliderPercent("Strength", &g.mix, 0.0f, 1.0f, nullptr, 1.0f);
+        bool clean = !g.onUi;
+        if (ApexUi::SwitchRow("Interface without shaders", &clean, "Menus, the game's panels and loading screens keep their own colors", true))
         {
-            g.onUi = applies == 0;
+            g.onUi = !clean;
             changed = true;
         }
+        if (g_cardRows) g_cardRows(); // the menu's amber rows (a LUT on too), before Advanced
         if (ApexUi::BeginAdvanced("##LooksAdvanced"))
         {
             static const char* const kOrder[] = { "After Apex Color", "Before Apex Color" };
@@ -2718,6 +2739,14 @@ public:
                         changed = true;
                         ImGui::CloseCurrentPopup();
                     }
+                    if (ApexUi::ActionMenuItem("Open the Shaders folder", IconId::FolderOpen)) { ShowShadersFolder(); ImGui::CloseCurrentPopup(); }
+                    if (ApexUi::ActionMenuItem("Check again", IconId::RotateCcw))
+                    {
+                        Looks::Fx::RequestScan(true); // look in the Shaders folder again and compile what changed
+                        g_checkPending = true;
+                        g_fxMessage.clear();
+                        ImGui::CloseCurrentPopup();
+                    }
                 }
                 ApexUi::EndActionMenu();
             }
@@ -2726,13 +2755,21 @@ public:
             if (total == 0 && !ApexUi::FilterActive())
                 ApexUi::MutedText(I18n::Tr(g.loaded ? "No shader of this look can run here" : "Choose a look to see its shaders"));
             int pos = 0;
+            std::vector<std::string> getPacks; // packs a Download of the missing rows would fetch (Download all)
+            const Looks::Packs::Batch batch = Looks::Packs::Status();
             for (size_t i = 0; i < g.order.size() && !reorder; ++i)
             {
-                if (!Runnable(i)) continue;
+                if (!Runnable(i)) { if (!ApexUi::FilterActive()) MissingRow(i, batch, getPacks); continue; } // in its place
                 changed |= ShaderRow(i, ++pos, total, reorder); // a move changes the list: drawn again next frame
             }
-            // ... in a rounded block under the list: one row per shader with what is wrong and its one action, then the folder actions
-            if (!cant.empty() && !ApexUi::FilterActive()) changed |= MissingPanel(cant);
+            if (getPacks.size() >= 2 && !ApexUi::FilterActive())
+            {
+                const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+                const std::string all = DownloadLabel(getPacks);
+                if (ApexUi::IconTextButton(all.c_str(), IconId::Download, nullptr, ApexUi::ButtonKind::Primary)) DownloadPacks(getPacks);
+            }
+            if (!g_fxMessage.empty() && !ApexUi::FilterActive())
+                ApexUi::IconNote(g_fxMessageError ? IconId::TriangleAlert : IconId::Info, g_fxMessage.c_str(), g_fxMessageError ? VioletTheme::kWarning : VioletTheme::kTextMuted);
             if (!ApexUi::FilterActive() && g.loaded)
             {
                 ApexUi::Gap(ApexUi::kSpace2);
@@ -2983,14 +3020,8 @@ void OfferPresetPacks(const std::string& preset, const std::vector<std::string>&
     if (!offer.packs.empty()) g_offer = std::move(offer);
 }
 
-std::vector<std::string> RunningTechniques()
-{
-    std::vector<std::string> out;
-    if (!g.active) return out;
-    for (size_t i = 0; i < g.order.size(); ++i)
-        if (Runnable(i) && !IsOff(i)) out.push_back(g.order[i].technique);
-    return out;
-}
+void SetTwinCheck(TwinFn fn) { g_twin = fn; }
+void SetCardRows(void (*fn)()) { g_cardRows = fn; }
 
 std::vector<std::string> NeededPacks()
 {

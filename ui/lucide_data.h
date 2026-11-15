@@ -818,6 +818,12 @@ inline constexpr Element kLibrary[] = {
     {Kind::Path, "M8 8v12", {}, false},
     {Kind::Path, "M4 4v16", {}, false},
 };
+// grip-vertical.svg (Lucide, ISC)
+inline constexpr Element kGripVertical[] = {
+    {Kind::Circle, nullptr, {9.0f, 12.0f, 1.0f}, false}, {Kind::Circle, nullptr, {9.0f, 5.0f, 1.0f}, false},
+    {Kind::Circle, nullptr, {9.0f, 19.0f, 1.0f}, false}, {Kind::Circle, nullptr, {15.0f, 12.0f, 1.0f}, false},
+    {Kind::Circle, nullptr, {15.0f, 5.0f, 1.0f}, false}, {Kind::Circle, nullptr, {15.0f, 19.0f, 1.0f}, false},
+};
 
 inline constexpr IconData kIcons[] = {
     {"activity", kActivity, static_cast<int>(sizeof(kActivity) / sizeof(kActivity[0]))},
@@ -945,6 +951,7 @@ inline constexpr IconData kIcons[] = {
     {"plus", kPlus, static_cast<int>(sizeof(kPlus) / sizeof(kPlus[0]))},
     {"package", kPackage, static_cast<int>(sizeof(kPackage) / sizeof(kPackage[0]))},
     {"library", kLibrary, static_cast<int>(sizeof(kLibrary) / sizeof(kLibrary[0]))},
+    {"grip-vertical", kGripVertical, static_cast<int>(sizeof(kGripVertical) / sizeof(kGripVertical[0]))},
 };
 
 } // namespace ApexUi::LucideData

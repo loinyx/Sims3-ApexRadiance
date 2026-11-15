@@ -1117,6 +1117,10 @@ Press once to start, again to stop	tr_menu.cpp:kEntries	Pressione uma vez para i
 File name	tr_menu.cpp:kEntries	Nome do arquivo	Nombre del archivo	Nom du fichier	
 Date, time and look name; hover the box for the tokens	tr_menu.cpp:kEntries	Data, hora e nome do visual; passe o mouse na caixa para ver os códigos	Fecha, hora y nombre del estilo; pasa el ratón por el cuadro para ver los códigos	Date, heure et nom du rendu ; survolez le champ pour voir les codes	
 File type	tr_menu.cpp:kEntries	Tipo de arquivo	Tipo de archivo	Type de fichier	
+Format	tr_menu.cpp:kEntries	Formato	Formato	Format	
+{}% size	tr_menu.cpp:kEntries	{}% do tamanho	{}% del tamaño	{} % de la taille	{}
+{} per press	tr_menu.cpp:kEntries	{} por toque	{} por pulsación	{} par appui	{}
+timer on screen	tr_menu.cpp:kEntries	cronômetro na tela	temporizador en pantalla	minuteur à l'écran	
 PNG keeps every detail; JPG files are smaller	tr_menu.cpp:kEntries	PNG mantém todos os detalhes; arquivos JPG são menores	PNG conserva todos los detalles; los archivos JPG son más pequeños	Le PNG garde tous les détails ; les fichiers JPG sont plus petits	
 JPG quality	tr_menu.cpp:kEntries	Qualidade do JPG	Calidad del JPG	Qualité du JPG	
 Higher keeps more detail and makes larger files	tr_menu.cpp:kEntries	Mais alto mantém mais detalhes e gera arquivos maiores	Más alto conserva más detalle y crea archivos más grandes	Plus haut garde plus de détails et crée des fichiers plus lourds	
@@ -2543,6 +2547,8 @@ Shaders in this look	tr_image.cpp:kEntries	Shaders deste visual	Shaders de este 
 ReShade look	tr_image.cpp:kEntries	Visual do ReShade	Estilo de ReShade	Rendu ReShade	
 Hold to see the game without the look	tr_image.cpp:kEntries	Segure para ver o jogo sem o visual	Mantén pulsado para ver el juego sin el estilo	Maintenez pour voir le jeu sans le rendu	
 A LUT is also on; both change color, so the picture may look too strong	tr_image.cpp:kEntries	Um LUT também está ligado; os dois mudam a cor, então a imagem pode ficar forte demais	También hay un LUT activado; ambos cambian el color, así que la imagen puede verse demasiado intensa	Un LUT est aussi activé ; les deux changent la couleur, l'image peut donc paraître trop forte	
+A LUT is on too	tr_image.cpp:kEntries	Um LUT também está ligado	También hay un LUT activado	Un LUT est aussi activé	
+Both change color, so the picture may look too strong	tr_image.cpp:kEntries	Os dois mudam a cor, então a imagem pode ficar forte demais	Ambos cambian el color, así que la imagen puede verse demasiado intensa	Les deux changent la couleur, l'image peut donc paraître trop forte	
 Turn off the LUT	tr_image.cpp:kEntries	Desligar o LUT	Desactivar el LUT	Désactiver le LUT	
 LUT turned off	tr_image.cpp:kEntries	LUT desligado	LUT desactivado	LUT désactivé	
 Use letters, digits and spaces for the name	tr_image.cpp:kEntries	Use letras, números e espaços no nome	Usa letras, números y espacios en el nombre	Utilisez des lettres, des chiffres et des espaces pour le nom	
@@ -2594,6 +2600,8 @@ World and menus	tr_image.cpp:kEntries	Mundo e menus	Mundo y menús	Monde et menu
 World only	tr_image.cpp:kEntries	Só o mundo	Solo el mundo	Monde seulement	
 Applies to	tr_image.cpp:kEntries	Aplica-se a	Se aplica a	S'applique à	
 Menus and loading screens can get the look too	tr_image.cpp:kEntries	Menus e telas de carregamento também podem receber o visual	Los menús y las pantallas de carga también pueden recibir el estilo	Les menus et écrans de chargement peuvent aussi recevoir le rendu	
+Interface without shaders	tr_image.cpp:kEntries	Interface sem shaders	Interfaz sin shaders	Interface sans shaders	
+Menus, the game's panels and loading screens keep their own colors	tr_image.cpp:kEntries	Menus, painéis do jogo e telas de carregamento mantêm as próprias cores	Los menús, los paneles del juego y las pantallas de carga mantienen sus colores	Les menus, les panneaux du jeu et les écrans de chargement gardent leurs couleurs	
 After Apex Color	tr_image.cpp:kEntries	Depois da Cor do Apex	Después del Color de Apex	Après la Couleur d'Apex	
 Before Apex Color	tr_image.cpp:kEntries	Antes da Cor do Apex	Antes del Color de Apex	Avant la Couleur d'Apex	
 Order	tr_image.cpp:kEntries	Ordem	Orden	Ordre	
@@ -2655,6 +2663,7 @@ Downloading {}%	tr_image.cpp:kEntries	Baixando {}%	Descargando {}%	Téléchargem
 Waiting	tr_image.cpp:kEntries	Aguardando	En espera	En attente	
 Stopped	tr_image.cpp:kEntries	Interrompido	Detenido	Arrêté	
 Not downloaded	tr_image.cpp:kEntries	Não baixado	No descargado	Non téléchargé	
+Needs the {} pack	tr_image.cpp:kEntries	Precisa do pacote {}	Necesita el paquete {}	Nécessite le pack {}	{}
 Stop the rest	tr_image.cpp:kEntries	Parar o restante	Detener el resto	Arrêter le reste	
 Search packs or authors	tr_image.cpp:kEntries	Buscar pacotes ou autores	Buscar paquetes o autores	Rechercher des packs ou des auteurs	
 Select all	tr_image.cpp:kEntries	Selecionar todos	Seleccionar todos	Tout sélectionner	
@@ -2685,6 +2694,10 @@ Beta	tr_image.cpp:kEntries	Beta	Beta	Bêta
 {} adds its own ambient shade; Apex's Ambient Occlusion is on too	tr_image.cpp:kEntries	{} adiciona a própria sombra ambiente; a Oclusão de Ambiente do Apex também está ligada	{} añade su propia sombra ambiental; la Oclusión Ambiental de Apex también está activada	{} ajoute sa propre ombre ambiante ; l'Occlusion Ambiante d'Apex est aussi activée	{}
 {} adds its own depth blur; Apex's Depth Blur is on too	tr_image.cpp:kEntries	{} adiciona o próprio desfoque de profundidade; o Desfoque de Profundidade do Apex também está ligado	{} añade su propio desenfoque de profundidad; el Desenfoque de Profundidad de Apex también está activado	{} ajoute son propre flou de profondeur ; le Flou de Profondeur d'Apex est aussi activé	{}
 {} smooths edges too; Apex's Edge Smoothing is on too	tr_image.cpp:kEntries	{} também suaviza as bordas; a Suavização de Bordas do Apex também está ligada	{} también suaviza los bordes; el Suavizado de Bordes de Apex también está activado	{} lisse aussi les contours ; le Lissage des Bords d'Apex est aussi activé	{}
+Apex's Ambient Occlusion is on too: the shade is doubled	tr_image.cpp:kEntries	A Oclusão de Ambiente do Apex também está ligada: a sombra fica dobrada	La Oclusión Ambiental de Apex también está activada: la sombra se duplica	L'Occlusion Ambiante d'Apex est aussi activée : l'ombre est doublée	
+Apex's Depth Blur is on too: the blur is doubled	tr_image.cpp:kEntries	O Desfoque de Profundidade do Apex também está ligado: o desfoque fica dobrado	El Desenfoque de Profundidad de Apex también está activado: el desenfoque se duplica	Le Flou de Profondeur d'Apex est aussi activé : le flou est doublé	
+Apex's Edge Smoothing is on too: edges are smoothed twice	tr_image.cpp:kEntries	A Suavização de Bordas do Apex também está ligada: as bordas são suavizadas duas vezes	El Suavizado de Bordes de Apex también está activado: los bordes se suavizan dos veces	Le Lissage des Bords d'Apex est aussi activé : les bords sont lissés deux fois	
+Turn off Apex's	tr_image.cpp:kEntries	Desligar no Apex	Desactivar en Apex	Désactiver dans Apex	
 Turn off {}	tr_image.cpp:kEntries	Desligar {}	Desactivar {}	Désactiver {}	{}
 This preset needs {} ({})	tr_image.cpp:kEntries	Este preset precisa de {} ({})	Este preajuste necesita {} ({})	Ce préréglage a besoin de {} ({})	{} {}
 This preset needs {}	tr_image.cpp:kEntries	Este preset precisa de {}	Este preajuste necesita {}	Ce préréglage a besoin de {}	{}

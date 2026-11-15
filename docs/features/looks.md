@@ -1,7 +1,7 @@
 # Looks
 
 Gives the game a ReShade look: Apex runs a ReShade or GShade preset (.ini) on the game's picture with the same shader
-maths, without ReShade or GShade installed. The player picks a look, sets its strength and whether menus get it too,
+maths, without ReShade or GShade installed. The player picks a look, sets its strength and whether the interface stays without it,
 and can switch, reorder and tune the preset's shaders, then save the result as a look of their own.
 
 ## Status
@@ -39,15 +39,17 @@ order with its values, and blends the result over the picture by *Strength*.
    stores an absolute path and never writes in GShade's folder.
 2. The run list is the preset's enabled techniques, plus shaders added here (at the end), in the player's own order
    when one was set. A technique runs from a built-in port or, when Apex has none, from the player's Shaders folder
-   ([Your shaders](#your-shaders)); the others are listed as *can't run here*. A GShade preset can name a file that no
+   ([Your shaders](#your-shaders)); the others stay in the list as amber rows with what is wrong. A GShade preset can name a file that no
    pack publishes under that name (MXAO in "MXAO 4.0.2 EX.fx"): when that file is nowhere, the technique runs from a
    pack file that has it (`qUINT_mxao.fx`), chosen by `Looks::Packs::FileForTechnique`: a downloaded pack first, then a
    file whose name shares the original's first word ("mxao"), then ReShade's list order. Its values still come from the
    look's own section (`[MXAO 4.0.2 EX.fx]`), and an exported preset names the pack of that file.
 3. Each shader's values are the .ini's (or the .fx default when the .ini has none) unless edited here.
-4. The passes run in Apex's post-scene chain: after Apex's Color (order 45) or before it (35). With *World and menus*
-   they run at the end of the frame, like GShade, over menus and loading screens; with *World only* they run on the
-   first back-buffer draw after the game's bloom, before the interface.
+4. The passes run in Apex's post-scene chain: after Apex's Color (order 45) or before it (35). With *Interface without
+   shaders* on (the default) they run right after the game's bloom, before the interface and the game's colour pass,
+   so menus, panels and loading screens keep their own colours; with it off they run at the end of the frame, like
+   GShade, over the interface too. Both give the world the same colours ([Technical reference](#technical-reference)).
+   Shaders that read depth always run at the scene boundary, never over the interface.
 5. Holding the card's eye, the picture-compare key (B) or the menu's eye in the Color header skips the look for as
    long as it is held; *Compare with the game* turns it off with the other Apex effects, and so do *Turn off Apex* and
    the Overview's *All effects* (both turn it back on with the rest).
@@ -65,33 +67,41 @@ subtitle "<n> shaders · ~<cost> ms" (or "Off", "No look chosen", "This look can
 ("Hold to see the game without the look") and no switch of its own; in the search results its header is the Shaders
 switch. Rows: *Look*, a dropdown grouped as Apex looks, My looks
 and GShade (a search field above the list once it has more than 10 looks; *Open the Looks folder* last) with an
-*Import* button beside it; *Strength*; *Applies to* (World and menus / World only); under Advanced, *Order* (After Apex
-Color / Before Apex Color). In developer mode a *Live counters* disclosure shows the status, the last frame's run,
-skipped shaders, Reload and the GPU memory. While a LUT is also on (Color > LUTs), a note under the card says both
-change the color, with *Turn off the LUT* (undoable).
+*Import* button beside it; *Strength*; *Interface without shaders* (a switch, on by default: "Menus, the game's panels
+and loading screens keep their own colors"); under Advanced, *Order* (After Apex Color / Before Apex Color). While a LUT
+is also on (Color > LUTs), a row "A LUT is on too" with an amber description ("Both change color, so the picture may
+look too strong") and *Turn off the LUT* (undoable) ends the card. In developer mode a *Live counters* disclosure shows
+the status, the last frame's run, skipped shaders, Reload and the GPU memory.
 
-**Shaders in this look** card: "<on> of <total> on" and an ellipsis menu (*Save as a new look…*, *Put every value back*, *Back to the
-look's list*). One row per built-in shader of the run list: a chevron, the name (changed dot while its values differ
-from the .ini) over one short description, the switch. The name side opens its parameters in a rounded panel set into
-the card, each with the control its .fx asks for and the .ini's value as its default (changed dot, Reset; see
-[Parameters and quality settings](#parameters-and-quality-settings)); the panel's footer, under a line, has the bordered
-buttons Run earlier / Run later, "<pos> of <n>" and *Put back the look's values* (under them when narrow). A shader from a downloaded pack or the player's folder has the same row, its
-description naming the source and the file ("qUINT · qUINT_mxao.fx", "Your shaders · Mine.fx"). When some shaders of the look cannot run, the subtitle reads "<on> of <total> on · <n> missing" and a rounded block under the
-list, drawn like an open shader's values, lists them: a warning icon and the bold title "<n> can't run here", then one
-row per shader with the technique's name over where it comes from and what is missing, and one action at the right:
-"<pack> · Not downloaded · <size>" with *Download* (primary) when a pack of ReShade's list has the file (a failed
-download says why in the same row); "<pack> · Waiting" or "<pack> · Downloading <n>%" with a spinner while it
-downloads; "<file>.fx · Not in your Shaders folder" with *Add .fx files…* for any other missing file; "<file>.fx ·
-Checking the file…" with a spinner while it compiles; "<file>.fx · Doesn't run in The Sims 3" (no action) for a file
-that is there but cannot run on Direct3D 9. The block's footer, under a line, has *Open the Shaders folder* and *Check
-again* (compiles the folder again, then "All shaders found" or "<n> still missing") on the left and, when two packs or
-more are missing, *Download both* / *Download all* (primary) on the right; its parts wrap when narrow. No modal opens
-on its own.
+**Shaders in this look** card: "<on> of <total> on" and an ellipsis menu (*Put every value back*, *Back to the look's
+list*, *Open the Shaders folder*, *Check again*: compiles the folder again, then "All shaders found" or "<n> still
+missing" under the list). One row per shader of the run list, in run order: a chevron, the name (changed dot while its
+values differ from the .ini) over one short description, the switch. The name side opens its parameters in a rounded
+panel set into the card, each with the control its .fx asks for and the .ini's value as its default (changed dot, Reset;
+see [Parameters and quality settings](#parameters-and-quality-settings)); the panel's footer, under a line, has the
+bordered buttons Run earlier / Run later, "<pos> of <n>" and *Put back the look's values* (under them when narrow). A
+shader from a downloaded pack or the player's folder has the same row, its description naming the source and the file
+("qUINT · qUINT_mxao.fx", "Your shaders · Mine.fx").
 
-After *Import*, when packs of ReShade's list have shaders the look misses, a note card above the Shaders card reads
-"Imported: <look>" and "This look uses <n> shaders from <pack> (or "<pack> and <pack>", "<n> packs"), which you don't
-have yet", with *Download <pack>* / *Download both* / *Download all* (primary) and *Not now*. The download starts at
-once; its progress shows in the missing shaders' rows and in the Get shader packs card.
+A shader that is on and doubles an Apex effect that is on (MXAO, SSAO, SSDO, HBAO, GTAO with Ambient Occlusion; DOF and
+bokeh shaders with Depth Blur; SMAA, FXAA with Edge Smoothing; matched by name in `LookTwin`, `apex_gui.cpp`) shows an
+amber description instead ("Apex's Ambient Occlusion is on too: the shade is doubled") and *Turn off Apex's* before its
+switch; the button turns that Apex feature off (undoable, "Ambient Occlusion turned off").
+
+A shader of the look that cannot run keeps its place in the list (`MissingRow`), its name over an amber description and
+one action at the right, and the subtitle reads "<on> of <total> on · <n> missing": "Needs the <pack> pack · <size>"
+with *Download* when a pack of ReShade's list has the file (a failed download says why in the same row); "<pack> ·
+Waiting" or "<pack> · Downloading <n>%" with a spinner while it downloads; "<file>.fx · Not in your Shaders folder" with
+*Add .fx files…* for any other missing file; "Checking the file…" with a spinner while it compiles; "<file>.fx · Doesn't
+run in The Sims 3" (no action) for a file that is there but cannot run on Direct3D 9. When two packs or more are
+missing, *Download both* / *Download all* (primary) follows the list. Under it, *Add a shader* and *Save as a new look…*.
+No modal opens on its own.
+
+After *Import*, the floating change note reads "Imported as <name>" (with Undo); when packs of ReShade's list have
+shaders the look misses, a note card above the Shaders card reads "Imported: <look>" and "This look uses <n> shaders
+from <pack> (or "<pack> and <pack>", "<n> packs"), which you don't have yet", with *Download <pack>* / *Download both* /
+*Download all* (primary) and *Not now*. The download starts at once; its progress shows in the missing shaders' rows and
+in the Get shader packs card.
 
 *Add a shader* opens a modal with every shader that runs here, grouped by source under collapsible headers with their
 count ("Apex · 17", one group per downloaded pack, "Your shaders · <n>" with the folder button); a source with nothing
@@ -101,7 +111,7 @@ hairlines; under it, "Missing something? Get more packs or add your own .fx file
 right (under the line when they do not fit; it closes the modal on Library's Get shader packs card). A long group title is
 cut with "…" before the folder button. Shaders that cannot run here are never listed. Opening it compiles nothing: a
 downloaded pack's shaders are listed from the check cache ([Shader packs](#shader-packs)), and adding one compiles its
-file (its row shows "checking the file…" under *can't run here* until then).
+file (its amber row shows "Checking the file…" until then).
 
 **Your library** card (tab Library): "<n> shaders from <k> sources" (only what runs here) and *Check again*
 (secondary: compiles the Shaders folder again and checks the packs again where they changed), one row per source with its icon:
@@ -128,7 +138,7 @@ shows when ReShade's list could not be read.
 *Import* opens the Windows file picker (off the render thread) and copies the .ini into Looks\: a different
 file with the same name gets a numbered name ("Name-1.ini"), the same file is reused; a file without `Techniques=` or
 `TechniqueSorting=` is refused. *Save as a new look…* writes Looks\<name>.ini (replacing a look of that name after a
-note) with the run list, the switches and the edited values, then selects it.
+note) with the run list, the switches and the edited values, then selects it; the change note reads "Saved as <name>".
 
 ## Your shaders
 
@@ -281,7 +291,7 @@ The earlier ports came from GShade's copies, which differ from the authors' code
 | ReShade look (card switch) | `enabled` | bool | off | | Turns the look on |
 | Look | `preset` | string | empty (none chosen) | `looks:`, `gshade:` or `apex:` reference | The look that runs. An older absolute `presetPath` becomes `gshade:` under GShade's folder, `looks:` under Looks\, else `looks:<file name>`; an older empty one, `gshade:[Amelie] Serene 2.0.ini` |
 | Strength | `mix` | float | 100% | 0 to 100% | How much of the look is blended over the game |
-| Applies to | `onUi` | bool | off (World only) | | On: World and menus, the interface, menus and loading screens get the look too |
+| Interface without shaders | `onUi` (inverted) | bool | on (`onUi` false) | | Off: menus, the game's panels and loading screens get the look too |
 | Advanced > Order | `beforeColor` | bool | off (After Apex Color) | | Runs the look before Apex's Color instead of after it |
 | Shader switches | `off` | array of technique names | empty | at most 256 read | The look's shaders switched off here |
 | Add a shader | `extra` | array of `Tech@File.fx` | empty | at most 256 read | Shaders added to the look (built-in or from the Shaders folder) |
@@ -315,7 +325,9 @@ the copy gets a numbered name, which the look then does not use); names with a f
 ## Compatibility and interactions
 
 - **Color (Picture):** *Order* puts the look after or before Apex's Color. A LUT that copies the same look grades the
-  picture twice; the card says so and offers to turn the LUT off.
+  picture twice; the look card's amber row says so and offers to turn the LUT off.
+- **Ambient Occlusion, Depth Blur, Edge Smoothing:** a look's shader doing the same job doubles the effect; its row says
+  so and offers to turn Apex's off.
 - **Captures:** `%PresetName%` in file names and *Save the look's preset too* use the look's .ini; *Look only while a
   look is on* captures the frame before the look (`ApexCapture::BeforeLook`).
 - **ReShade or GShade installed too:** both grade the picture; turn one off.
@@ -326,7 +338,7 @@ the copy gets a numbered name, which the look then does not use); names with a f
 
 - Built in: the 17 ported shaders (Levels, Technicolor2, RetroTint, DPX, AdaptiveSharpen, Vibrance, Tint (Sepia),
   Tonemap, Colourfulness, LumaSharpen, CAS, Curves, Vignette, Technicolor, HDR (FakeHDR), PD80 Selective Color,
-  LiftGammaGain); other techniques run from the player's Shaders folder or are listed as *can't run here*.
+  LiftGammaGain); other techniques run from the player's Shaders folder or stay in the list as amber rows.
 - The player's effects compile for the picture's size (`BUFFER_WIDTH` is a constant in ReShade): after a resolution
   change they wait while the folder compiles again. A changed `.fxh` alone is noticed by *Check again*, not by the
   automatic scan.
@@ -335,24 +347,32 @@ the copy gets a numbered name, which the look then does not use); names with a f
 - A definition change that adds or removes uniforms puts that shader's edited values back to the .ini's.
 - Downloaded packs compile for the picture's size like the player's files. The check cache knows only a file's own
   size and time: a pack's changed `.fxh` alone shows in "<x> of <y> run here" after *Check again*.
-- *Reset all settings* resets the switch, Strength, Applies to and Order; the chosen look and its edits stay.
+- *Reset all settings* resets the switch, Strength, Interface without shaders and Order; the chosen look and its edits stay.
 
 ## Technical reference
 
-- Post-scene order 45 (after Picture) or 35 (before); the end-of-frame part runs from `endSceneBeforeOverlay` on the
-  back buffer; the after-bloom part waits for the game's bloom strip (one full-screen two-triangle strip) and runs at
-  the next back-buffer draw. When the frame before had no strip, that part runs at the scene boundary instead; the strip
-  is still watched for in every frame (`OnDraw`), so the next frame with a strip runs after the bloom again. Running at
-  the boundary puts the look under the game's bloom: the world looks lighter and less saturated than with *World and
-  menus*.
+- Post-scene order 45 (after Picture) or 35 (before). Run points (`WhereOf` in `patches/looks_patch.cpp`): shaders
+  that read depth at the scene boundary; with *Interface without shaders* off, the rest at the end of the frame from
+  `endSceneBeforeOverlay` on the back buffer; with it on (`World`), right after the boundary's own draw when that draw
+  is the game's bloom (a full-screen two-triangle strip), before the next back-buffer draw (the UI) or the first copy
+  of the game's colour pass, else at the boundary.
+- The game's colour pass: after its UI the game copies the back buffer in 256x256 tiles and draws each back with
+  `x (1 + c) / (x + c)`, c = 0.4 in every capture (read from PS c0 at the second tile; `PostScene::ColourCurveLastFrame`).
+  ReShade shaders are made for the picture after that curve, so the World run first applies it in the runner's copy
+  pass (`Frame::gameCurve`, PS c3) and writes the result back through its inverse `c x / (1 + c - x)`: after the
+  game's curve the world shows the look's own pixels, the same as at the end of the frame. The look never runs inside
+  the colour pass ([history](../history/looks-fx-loading.md#2026-11-15-world-only-and-the-games-colour-pass)).
 - Each run copies the target to an A8R8G8B8 ping texture, runs the steps through ping-pong targets (AdaptiveSharpen
   adds a G16R16F target), and writes RGB back, blended by *Strength*; the last step draws straight into an 8-bit target
   at full strength.
-- Constants: c0 `1/W, 1/H, W, H`, c1 pass data, c2 depth far plane; parameters from c8 (PD80 Selective Color uses up to
+- Constants: c0 `1/W, 1/H, W, H`, c1 pass data, c2 depth far plane, c3 the copy pass's curve; parameters from c8 (PD80 Selective Color uses up to
   c63). ReShade's uniform sources timer, frametime, framecount and random are filled once per frame.
 - The player's effects: compiled by `third_party/reshadefx` (shader model 3.0) and `D3DCompile`; each runs in place on
   the ping texture as ReShade runs it on the back buffer (uniforms from PS/VS `c0`, `__TEXEL_SIZE__` at VS `c255`).
-  Textures and render targets are released before a device Reset and created again at the next run.
+  Textures and render targets are released before a device Reset and created again at the next run. Every .fx is
+  compiled with `RESHADE_DEPTH_INPUT_IS_REVERSED=0` after the look's own definitions (a look that sets it keeps its
+  value): the scene depth is 0 near to 1 far, while `ReShade.fxh` and `qUINT_common.fxh` default to reversed
+  ([history](../history/looks-fx-loading.md#2026-11-15-reshade-depth-is-not-reversed)).
 - Device state: around each run point (`SavedState` in `patches/looks_patch.cpp`) Apex reads and puts back by hand the
   state the passes change, listed in `Looks::kSavedRenderStates` / `kSavedSamplerStates` (`features/looks_runner.h`):
   for the built-in passes 16 render states, 8 sampler states of s0 to s5 and the PS constants up to the highest register

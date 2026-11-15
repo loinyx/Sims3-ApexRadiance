@@ -34,7 +34,12 @@ std::vector<std::string> MissingPresetPacks(const std::vector<std::string>& pack
 void DownloadPresetPacks(const std::vector<std::string>& folders);
 // The names of the packs whose shaders the look's run list uses (downloaded or not), for a preset's [patches.Looks] packs
 std::vector<std::string> NeededPacks();
-// The techniques of the look that run now (switched on and runnable), for the Shaders page's notes
-std::vector<std::string> RunningTechniques();
+// A shader that doubles an Apex effect (MXAO and Ambient Occlusion): the menu answers for each switched-on shader with
+// its row's amber line and the label of the button that turns the Apex effect off; act = true turns it off
+struct Twin { std::string note, action; };
+using TwinFn = bool (*)(const std::string& technique, Twin& out, bool act);
+void SetTwinCheck(TwinFn fn);
+// Rows the menu adds to the look card before its Advanced (an amber row while a LUT is on too)
+void SetCardRows(void (*fn)());
 
 } // namespace Looks

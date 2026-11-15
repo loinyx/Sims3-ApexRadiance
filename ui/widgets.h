@@ -50,6 +50,11 @@ void SetNextRowBadge(const char* text, const char* tooltip, unsigned rgb = 0xE0A
 void SetNextRowChangedDot(const char* tooltip);
 // The next row's label is user data (a profile name): shown and searched as it is, never translated
 void SetNextRowUntranslated();
+// The next row's description in amber: something about that row needs the player (a doubled effect, a missing file)
+void SetNextRowWarning();
+// The next BeginControlRow's leading icon in another colour than the accent (a muted drag grip)
+void SetNextRowIconColor(unsigned rgb);
+inline constexpr float kRowIconBox = 22.0f; // the leading icon's box of a control row (units)
 
 // ---- search filter (the menu's search results) ----
 // While a filter is on, the rows draw only when every word of the query (case-insensitive) appears in their label or
@@ -248,7 +253,8 @@ bool SelectRowOpen();
 // "Advanced" section: a hairline, then a violet chevron row, collapsed by default (the state is kept per id while the
 // game runs). The contents are not indented and use the same rows. When it returns true, submit the contents and call
 // EndAdvanced().
-bool BeginAdvanced(const char* id, const char* label = "Advanced");
+// summary (optional, already translated): what is chosen inside, muted after the label ("Advanced  ·  PNG, 100%")
+bool BeginAdvanced(const char* id, const char* label = "Advanced", const char* summary = nullptr);
 void EndAdvanced();
 // The old tree-node look (still used by the Frame Profiler); same contract as ImGui::TreeNode (TreePop when true).
 bool AdvancedNode(const char* label);

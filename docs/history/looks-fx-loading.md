@@ -194,3 +194,29 @@ boundary, under the game's bloom.
 
 **Outcome:** changed: `OnDraw` watches for the strip in every frame and runs the look there when it has not run yet.
 Not yet checked in the game ([validation](../validation/looks.md#open-checks)).
+
+### 2026-11-15: World only and the game's colour pass
+
+**Context:** with *World only*, two squares at the top left of the picture had no look, the rest of the world was
+brighter than with *World and menus*, and parts of the interface got the look.
+
+**Finding:** after its UI the game redraws the back buffer in 256x256 tiles (copy, then a draw with
+`x (1 + 0.4) / (x + 0.4)`, c0 = 0.4 in every capture). The square edges sat on the tile edges (x = 256 and 512, y = 256):
+World only ran inside that pass, so the tiles copied before it were drawn back without the look, and the others got the
+game's curve on top of it (the brighter tone). A UI quad taken for the bloom strip ran the look after some of the UI.
+The menu's "measures the whole picture" note did not explain it.
+
+**Outcome:** changed: World only runs right after the bloom, before the first UI draw or the colour pass's first copy;
+the runner applies the game's curve before the shaders and writes back through its inverse, so after the game's curve
+the world matches *World and menus*. The whole-picture note is removed.
+
+### 2026-11-15: ReShade depth is not reversed
+
+**Context:** MXAO and other depth shaders from packs spread their shade over the whole picture and the sky.
+
+**Finding:** `ReShade.fxh` and `qUINT_common.fxh` default `RESHADE_DEPTH_INPUT_IS_REVERSED` to 1; ReShade players of
+this game set it to 0 globally. The compiled MXAO shader read `1 - depth` (the subtraction is in its disassembly), while
+the depth Apex binds is 0 near to 1 far.
+
+**Outcome:** changed: every .fx compiles with `RESHADE_DEPTH_INPUT_IS_REVERSED=0` after the look's own definitions, so a
+look that names it keeps its value.

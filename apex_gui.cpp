@@ -1241,8 +1241,27 @@ void ColorPage() {
 
 // ---- Image > Shaders ----
 
-// Tab Look: the look card (titled with the look; hold the eye to see the game without it), a note while a LUT is also
-// on, then the import note and the shaders of the look. The area's switch is beside the page title; in the search
+bool LookTwin(const std::string& technique, Looks::Twin& out, bool act); // below
+
+// A LUT on too: both change color; an amber row of the look card, before its Advanced, with its one action
+void LookLutRow() {
+    PictureParams pp = Picture::Get().GetParams();
+    if (!pp.enabled || !pp.lut || pp.lutFile.empty() || ApexUi::FilterActive()) return;
+    const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+    const char* off = I18n::Tr("Turn off the LUT");
+    ApexUi::SetNextRowWarning();
+    if (ApexUi::BeginControlRow("A LUT is on too", "Both change color, so the picture may look too strong", ApexUi::ButtonWidth(off, false))) {
+        if (ApexUi::TextButton(off)) {
+            pp.lut = false;
+            Picture::Get().SetParams(pp, true);
+            ApexUi::ReportChange("LUT turned off");
+        }
+        ApexUi::EndControlRow();
+    }
+}
+
+// Tab Look: the look card (titled with the look; hold the eye to see the game without it; an amber row while a LUT is
+// also on), then the import note and the shaders of the look. The area's switch is beside the page title; in the search
 // results the card header is that switch, as "Shaders".
 void ShadersLookContent() {
     ApexPatch* patch = Find(Looks::kPatchName);
@@ -1266,57 +1285,45 @@ void ShadersLookContent() {
         }
         if (patch->IsEnabled() || HasStateNotes(patch)) ApexUi::CardDivider();
         StateNotes(patch);
+        Looks::SetCardRows(LookLutRow);
         if (patch->IsEnabled() || search) patch->RenderCustomUI();
     }
     ApexUi::EndCard();
     ImGui::PopID();
     if (extra.held) Looks::HoldBypass();
-    PictureParams pp = Picture::Get().GetParams();
-    if (patch->IsEnabled() && pp.enabled && pp.lut && !pp.lutFile.empty() && !search) {
-        ApexUi::IconNote(IconId::Info, "A LUT is also on; both change color, so the picture may look too strong");
-        const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
-        if (ApexUi::TextButton("Turn off the LUT")) {
-            pp.lut = false;
-            Picture::Get().SetParams(pp, true);
-            ApexUi::ReportChange("LUT turned off");
-        }
-        ApexUi::Gap(ApexUi::kSpace3);
-    }
-    // a look shader that does what an Apex feature already does (ambient shade, depth blur, edge smoothing): applied twice,
-    // darker or softer than the preset was made for, and twice the cost; one note, with the Apex feature's switch
-    if (patch->IsEnabled() && !search) {
-        struct Twin { const char* feature; const char* shown; const char* note; std::vector<const char*> words; };
-        static const Twin kTwins[] = {
-            {"AmbientOcclusion", "Ambient Occlusion", "{} adds its own ambient shade; Apex's Ambient Occlusion is on too", {"mxao", "ssao", "ssdo", "hbao", "gtao", "ambientocclusion"}},
-            {"DepthBlur", "Depth Blur", "{} adds its own depth blur; Apex's Depth Blur is on too", {"dof", "bokeh", "depthoffield"}},
-            {"EdgeSmoothing", "Edge Smoothing", "{} smooths edges too; Apex's Edge Smoothing is on too", {"smaa", "fxaa"}},
-        };
-        const std::vector<std::string> running = Looks::RunningTechniques();
-        for (const Twin& t : kTwins) {
-            ApexPatch* apex = Find(t.feature);
-            if (!apex || !apex->IsEnabled()) continue;
-            auto it = std::find_if(running.begin(), running.end(), [&](const std::string& tech) {
-                std::string low = tech;
-                for (char& c : low) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
-                return std::any_of(t.words.begin(), t.words.end(), [&](const char* w) { return low.find(w) != std::string::npos; });
-            });
-            if (it == running.end()) continue;
-            ImGui::PushID(t.feature);
-            ApexUi::IconNote(IconId::Info, I18n::Trf(t.note, *it).c_str());
-            const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
-            if (ApexUi::TextButton(I18n::Trf("Turn off {}", I18n::Tr(t.shown)).c_str())) {
-                SetPatch(apex, false);
-                ApexUi::ReportChange(I18n::Trf("{} turned off", I18n::Tr(t.shown)).c_str());
-            }
-            ImGui::PopID();
-            ApexUi::Gap(ApexUi::kSpace3);
-        }
-    }
+    Looks::SetTwinCheck(LookTwin); // a shader doubling an Apex effect: an amber line on its row in the list
     if (patch->IsEnabled() || search) Looks::ShadersCard();
 }
 
 // Tab Library: Your library (where shaders come from), then Get shader packs
 void ShadersLibraryContent() { Looks::LibraryCards(); }
+
+// A look's shader that does what an Apex effect also does (MXAO and Apex's Ambient Occlusion): twice the shade or blur and
+// twice the cost. Its row in the look's list gets the amber line and the button that turns the Apex effect off
+bool LookTwin(const std::string& technique, Looks::Twin& out, bool act) {
+    struct Twin { const char* feature; const char* shown; const char* note; std::vector<const char*> words; };
+    static const Twin kTwins[] = {
+        {"AmbientOcclusion", "Ambient Occlusion", "Apex's Ambient Occlusion is on too: the shade is doubled", {"mxao", "ssao", "ssdo", "hbao", "gtao", "ambientocclusion"}},
+        {"DepthBlur", "Depth Blur", "Apex's Depth Blur is on too: the blur is doubled", {"dof", "bokeh", "depthoffield"}},
+        {"EdgeSmoothing", "Edge Smoothing", "Apex's Edge Smoothing is on too: edges are smoothed twice", {"smaa", "fxaa"}},
+    };
+    std::string low = technique;
+    for (char& c : low) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    for (const Twin& t : kTwins) {
+        if (std::none_of(t.words.begin(), t.words.end(), [&](const char* w) { return low.find(w) != std::string::npos; })) continue;
+        ApexPatch* apex = Find(t.feature);
+        if (!apex || !apex->IsEnabled()) return false;
+        if (act) {
+            SetPatch(apex, false);
+            ApexUi::ReportChange(I18n::Trf("{} turned off", I18n::Tr(t.shown)).c_str());
+            return true;
+        }
+        out.note = I18n::Tr(t.note);
+        out.action = I18n::Tr("Turn off Apex's");
+        return true;
+    }
+    return false;
+}
 
 void ShadersPage() {
     ApexPatch* patch = Find(Looks::kPatchName);

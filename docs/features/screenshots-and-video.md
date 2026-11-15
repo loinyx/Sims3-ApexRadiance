@@ -18,20 +18,20 @@ the card is narrow.
 | Video, recording | "Recording m:ss · N MB" in the error colour after a red dot ("Recording m:ss" with the other app) | **Stop** |
 | Video, saving | "Saving the video…" | Record, greyed out |
 
-Record is greyed out, with one warning note under the card, while a video cannot start (`ApexCapture::CannotRecord`):
-the game's own Edge Smoothing (multisampling) is on, or the game has no free 192 MB block of addresses (checked at most
-once a second), or Media Foundation is missing (Windows N without the Media Feature Pack; its DLLs are delay-loaded, so
-Apex still loads without them).
+Record is greyed out while a video cannot start (`ApexCapture::CannotRecord`), and the reason replaces the Video card's
+status line, in amber: the game's own Edge Smoothing (multisampling) is on, or the game has no free 192 MB block of
+addresses (checked at most once a second), or Media Foundation is missing (Windows N without the Media Feature Pack;
+its DLLs are delay-loaded, so Apex still loads without them).
 
-The card body, in this order. Both tabs use the same group names; the rows are the menu's row widgets, so search, the
-changed dot, per-row Reset and Undo work.
+The card body, in this order. The visible part has no group labels; Advanced is collapsed and shows a muted summary of
+what is chosen inside (screenshots: "<n>% size", ", <n> per press" for a series; video: the format and compression,
+", timer on screen" while the timer is on). The rows are the menu's row widgets, so search, the changed dot, per-row
+Reset and Undo work.
 
-| Group | Screenshots | Video |
+| Part | Screenshots | Video |
 |---|---|---|
-| Where | Save to (Game / Apex / Other; the folder in use as its description; an Open the folder icon button beside the choices); with Other, Folder (Change: Windows' folder dialog; the typed path, with tokens, under a *Type a folder* arrow) | the same |
-| In the picture / In the video | Hide game UI; Look (With / Without / Both, only while a ReShade look is on) | Hide game UI, Game sound, Look (With / Without, only while a look is on) |
-| Quality | File type (PNG / JPG) | Quality (Smaller / Balanced / Best / Custom; description "<size>p · <fps> fps · about N MB a minute") |
-| Advanced: File / Picture | File: JPG quality (JPG only), Size (%), File name (token help on hover) | Picture: Size (720p / 1080p / 1440p), Frames per second (24 / 30 / 60), Custom bitrate (Custom only); File: File type (MP4 / Crash-safe MP4 / MKV), Keep the MP4 too (MKV only), Compression (H.264 / HEVC), File name |
+| Visible | Save to (Game / Apex / Other; the folder in use as its description; an Open the folder icon button beside the choices); with Other, Folder (Change: Windows' folder dialog; the typed path, with tokens, under a *Type a folder* arrow); Hide game UI; Look (With / Without / Both, only while a ReShade look is on); Format (PNG / JPG) | Save to and Folder as for screenshots; Hide game UI; Game sound; Quality (Smaller / Balanced / Best / Custom; description "<size>p · <fps> fps · about N MB a minute") |
+| Advanced: File / Picture | File: JPG quality (JPG only), Size (%), File name (token help on hover) | Picture: Look (With / Without, only while a look is on), Size (720p / 1080p / 1440p), Frames per second (24 / 30 / 60), Custom bitrate (Custom only); File: Format (MP4 / Crash-safe MP4 / MKV), Keep the MP4 too (MKV only), Compression (H.264 / HEVC), File name |
 | Advanced: Also in the picture / video | Include the Apex menu, Include the mouse pointer, Save the look's preset too | the same |
 | Advanced: Series / Length | Pictures per press, Time between pictures (more than one picture) | New clip every, Stop after, Stop at file size, Warn before the limit |
 | Advanced: Timer on screen | | Show a recording timer (then Timer position, Timer size, Timer opacity, Pulse the red dot, Show the file size, Show the stop key, Always show hours), Red frame while recording, Timer in the video too |

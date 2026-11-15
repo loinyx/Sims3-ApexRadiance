@@ -1232,7 +1232,6 @@ bool WhereRows(bool video, int& mode, std::string& custom) {
                                             "Kept apart from the game's photos, in Documents > Electronic Arts > The Sims 3 > Apex Radiance > Screenshots",
                                             "Any folder you choose, for example on another drive"};
     bool ch = false;
-    ApexUi::CardGroup("Where");
     int m = std::clamp(mode, 0, 2);
     const std::string where = m == kFolderCustom && !Trim(custom).empty()
         ? custom : ApexUtil::ToUtf8(DefaultFolder(m == kFolderApex ? kFolderApex : kFolderGame, video).wstring());
@@ -1313,18 +1312,18 @@ bool ScreenshotCard(bool lookOn) {
         ApexUi::CardDivider();
 
         uiCh |= WhereRows(false, ui.screenshotFolder, ui.screenshotCustomFolder);
-        ApexUi::CardGroup("In the picture");
         uiCh |= ApexUi::SwitchRow("Hide game UI", &ui.screenshotHideGameUi, "Hides the game interface for the photo, then restores it", true);
         if (lookOn) {
             static const char* const kLook[] = {"With", "Without", "Both"};
             ch |= Pick("Look", "Both also saves the picture without it", "##ShotLook", s.shot.look, kLook, 3, def.shot.look);
         }
-        ApexUi::CardGroup("Quality");
         static const char* const kFormat[] = {"PNG", "JPG"};
         int fmt = s.shot.jpg ? 1 : 0;
-        if (Pick("File type", "PNG keeps every detail; JPG files are smaller", "##CapFormat", fmt, kFormat, 2, 0)) { s.shot.jpg = fmt == 1; ch = true; }
+        if (Pick("Format", "PNG keeps every detail; JPG files are smaller", "##CapFormat", fmt, kFormat, 2, 0)) { s.shot.jpg = fmt == 1; ch = true; }
 
-        if (ApexUi::BeginAdvanced("##ShotAdvanced")) {
+        std::string summary = I18n::Trf("{}% size", s.shot.sizePercent);
+        if (s.shot.burstCount > 1) summary += ", " + I18n::Trf("{} per press", s.shot.burstCount);
+        if (ApexUi::BeginAdvanced("##ShotAdvanced", "Advanced", summary.c_str())) {
             ApexUi::CardGroup("File");
             if (s.shot.jpg) ch |= IntSlider("JPG quality", "Higher keeps more detail and makes larger files", s.shot.jpgQuality, 1, 100, def.shot.jpgQuality, "%.0f%%");
             ch |= IntSlider("Size", "Of the game's screen size", s.shot.sizePercent, 10, 100, def.shot.sizePercent, "%.0f%%");
@@ -1370,8 +1369,9 @@ void VideoCard(bool lookOn, bool gameAa) {
             if (!v.external) status += " \xC2\xB7 " + I18n::Trf("about {} MB a minute", MbPerMinute(v));
             status = WithLast(status, last);
         }
-        const bool showLink = !rec && !finishing && !last.empty();
-        const int hit = ApexUi::CardStatusHeader(IconId::Video, "Video", status.c_str(), rec ? VioletTheme::kError : VioletTheme::kTextMuted, rec,
+        if (why) status = I18n::Tr(why); // in the header, in amber, with Record off
+        const bool showLink = !rec && !finishing && !last.empty() && !why;
+        const int hit = ApexUi::CardStatusHeader(IconId::Video, "Video", status.c_str(), rec ? VioletTheme::kError : why ? VioletTheme::kWarning : VioletTheme::kTextMuted, rec,
                                                  showLink ? "Show" : nullptr, rec ? "Stop" : "Record", rec ? IconId::X : IconId::Video,
                                                  rec ? ApexUi::ButtonKind::Secondary : ApexUi::ButtonKind::Primary, rec || (!finishing && !why));
         if (hit == 1) ToggleRecording();
@@ -1381,7 +1381,6 @@ void VideoCard(bool lookOn, bool gameAa) {
         const bool own = !v.external; // Apex records; with another app, Apex only presses its key and the rest is that app's
         if (!own) ApexUi::IconNote(IconId::Info, "Another app records these videos; set their folder and quality in that app");
         if (own) ch |= WhereRows(true, v.folder, v.customFolder);
-        ApexUi::CardGroup("In the video");
         ch |= ApexUi::SwitchRow("Hide game UI", &v.hideGameUi, "Hides the game interface until the video stops", dv.hideGameUi);
         if (own) ch |= ApexUi::SwitchRow("Game sound", &v.gameSound, "Only The Sims 3, not music or chat apps", dv.gameSound);
         if (own && lookOn) {
@@ -1393,13 +1392,15 @@ void VideoCard(bool lookOn, bool gameAa) {
             }
         }
         if (own) {
-        ApexUi::CardGroup("Quality");
-        static const char* const kQuality[] = {"Smaller", "Balanced", "Best", "Custom"};
-        const std::string qualityDesc = I18n::Trf("{}p \xC2\xB7 {} fps \xC2\xB7 about {} MB a minute", v.size, v.fps, MbPerMinute(v));
-        ch |= Pick("Quality", qualityDesc.c_str(), "##CapQuality", v.quality, kQuality, 4, dv.quality);
+            static const char* const kQuality[] = {"Smaller", "Balanced", "Best", "Custom"};
+            const std::string qualityDesc = I18n::Trf("{}p \xC2\xB7 {} fps \xC2\xB7 about {} MB a minute", v.size, v.fps, MbPerMinute(v));
+            ch |= Pick("Quality", qualityDesc.c_str(), "##CapQuality", v.quality, kQuality, 4, dv.quality);
         }
 
-        if (ApexUi::BeginAdvanced("##VideoAdvanced")) {
+        static const char* const kContName[] = {"MP4", "Crash-safe MP4", "MKV"};
+        std::string summary = own ? std::string(I18n::Tr(kContName[std::clamp(v.container, 0, 2)])) + ", " + (v.hevc ? "HEVC" : "H.264") : std::string();
+        if (v.timer) summary += std::string(summary.empty() ? "" : ", ") + I18n::Tr("timer on screen");
+        if (ApexUi::BeginAdvanced("##VideoAdvanced", "Advanced", summary.c_str())) {
           if (own) { // what only Apex's own recorder uses
             ApexUi::CardGroup("Picture");
             static const char* const kSize[] = {"720p", "1080p", "1440p"};
@@ -1414,7 +1415,7 @@ void VideoCard(bool lookOn, bool gameAa) {
                 ch |= IntSlider("Custom bitrate", "Megabits per second; higher keeps more detail and makes larger files", v.customMbps, 1, 100, dv.customMbps);
             ApexUi::CardGroup("File");
             static const char* const kCont[] = {"MP4", "Crash-safe MP4", "MKV"};
-            ch |= Pick("File type", "Crash-safe keeps the video if the game crashes; MKV is made from it when the video stops", "##CapCont", v.container, kCont, 3, dv.container);
+            ch |= Pick("Format", "Crash-safe keeps the video if the game crashes; MKV is made from it when the video stops", "##CapCont", v.container, kCont, 3, dv.container);
             if (v.container == kContainerMkv) ch |= ApexUi::SwitchRow("Keep the MP4 too", &v.keepMp4, "Saves the same video as MP4 next to the MKV", dv.keepMp4);
             static const char* const kCodec[] = {"H.264", "HEVC"};
             int codec = v.hevc ? 1 : 0;
@@ -1468,7 +1469,6 @@ void VideoCard(bool lookOn, bool gameAa) {
         if (play) PlaySoundFile(); // hear the choice
     }
     ApexUi::EndCard();
-    if (why) ApexUi::IconNote(IconId::TriangleAlert, why, VioletTheme::kWarning); // (translated by the note)
 }
 
 } // namespace ApexCapture

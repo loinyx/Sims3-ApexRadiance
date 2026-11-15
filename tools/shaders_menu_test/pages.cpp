@@ -18,6 +18,11 @@ bool g_takeShot = false;
 bool g_menuGameAaOn = false;
 struct PictureParams { bool enabled = false, lut = false; std::string lutFile; };
 ApexPatch* g_looksPatch = nullptr;
-ApexPatch* Find(const char* name) { return !std::strcmp(name, Looks::kPatchName) ? g_looksPatch : nullptr; }
+bool g_fixtureTwin = false; // the twin state: Apex's Ambient Occlusion on (any switched-on patch stands in) and a LUT on
+ApexPatch* Find(const char* name)
+{
+    if (!std::strcmp(name, Looks::kPatchName)) return g_looksPatch;
+    return g_fixtureTwin && !std::strcmp(name, "AmbientOcclusion") ? g_looksPatch : nullptr;
+}
 bool Loading() { return false; }
 #include "pages.inc"

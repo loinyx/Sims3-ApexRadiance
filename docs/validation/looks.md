@@ -4,7 +4,7 @@ The feature is described in [features/looks.md](../features/looks.md). It must:
 
 - Run the built-in shaders of the chosen look in the look's order, with its values, and leave the picture unchanged
   when the card is off, while the eye or the picture-compare key is held, and while comparing with the game.
-- Keep the interface out of the look with *World only*; never run a depth shader over the interface.
+- Keep the interface out of the look with *Interface without shaders*; never run a depth shader over the interface.
 - Run once per game frame, also when the look is split around the scene boundary.
 - Store the look as a `looks:`, `gshade:` or `apex:` reference, never an absolute path, and never write in GShade's
   folder; read an older `[patches.GShadeLooks]` and `presetPath` once.
@@ -68,9 +68,10 @@ manual check below.
 
 1. Image > Color > Shaders, switch on, pick a look from GShade's folder. **Expected:** the status shows its name and
    shader count; the look shows on the scene and on menus.
-2. *Applies to* World only. **Expected:** the HUD and menus keep their own look; the world looks the same as with
-   *World and menus* (not lighter or less saturated), also after a loading screen or a frame without the game's bloom,
-   and the log shows the look running after the game's bloom.
+2. *Interface without shaders* on. **Expected:** the HUD and menus keep their own look; the whole world has the look
+   (no squares at the top left) and looks the same as with the switch off (not lighter, brighter or less saturated),
+   also after a loading screen or a frame without the game's bloom, and the log shows the look running "before the
+   interface, under the game's colour curve".
 3. Hold the card's eye, then B over the menu. **Expected:** the game without the look while held.
 4. Compare with the game (its shortcut). **Expected:** the look is off with the other effects and comes back.
 5. Open a shader, move a slider, restart the game. **Expected:** the changed dot and value are kept; *Put back the
@@ -124,10 +125,10 @@ manual check below.
 ## Open checks
 
 - Every step of the in-game test plan.
-- *World only* after the game's bloom (step 2): the fix of the after-bloom run point (a frame without a bloom strip no
-  longer moves every later frame to the scene boundary) is not yet checked in game; an in-game runner job for it is
+- *Interface without shaders* (step 2): the run point before the interface and the game's colour pass, with its curve
+  compensated, is not yet checked in game; an in-game runner job for it is
   in progress.
-- The missing shaders' block (steps 13, 14, 20) and the renamed-file lookup (step 24) are checked only by the offline
+- The missing shaders' rows (steps 13, 14, 20) and the renamed-file lookup (step 24) are checked only by the offline
   harnesses (`looks_packs_test`, `shaders_menu_test`), not in game.
 - The player's .fx effects have run only offline on a separate Direct3D 9 device, never in the game: the look of each
   effect, its cost per frame, depth through DepthShare, the state restore around it (and with the RTX Remix bridge),

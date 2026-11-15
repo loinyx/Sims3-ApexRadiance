@@ -141,6 +141,7 @@ enum class IconId : int {
     Plus, // plus
     Package, // package
     Library, // library
+    GripVertical, // grip-vertical
     Count,
     None = Count, // "no icon" for widgets that take an optional one
 };

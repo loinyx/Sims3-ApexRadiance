@@ -27,15 +27,17 @@ void CapturePage();
 extern int g_shadersTab, g_captureTab;
 extern bool g_menuGameAaOn;
 extern class ApexPatch* g_looksPatch;
+extern bool g_fixtureTwin;
 #include "raster.inc"
 
 namespace {
-struct State { const char* name; int page; int tab; bool compiling, edited, offer; int batch; int video, options; bool gameAa; bool openAll; };
+struct State { const char* name; int page; int tab; bool compiling, edited, offer; int batch; int video, options; bool gameAa; bool openAll; bool twin = false; };
 // page 0 Shaders (tab 0 Look, 1 Library), 1 Capture (tab 0 Screenshots, 1 Video)
 const State kStates[] = {
     { "look", 0, 0, false, false, true, 0, 0, 0, false, false },
     { "look-open-compiling", 0, 0, true, false, false, 1, 0, 0, false, true },
     { "look-open-edited", 0, 0, false, true, true, 0, 0, 0, false, true },
+    { "look-doubled-lut", 0, 0, false, false, false, 0, 0, 0, false, false, true },
     { "library-downloading", 0, 1, false, false, false, 1, 0, 0, false, false },
     { "library-list", 0, 1, false, false, false, 0, 0, 0, false, true },
     { "library-finished", 0, 1, false, false, false, 2, 0, 0, false, false },
@@ -301,7 +303,8 @@ int main(int argc, char** argv)
                     I18n::ClearMissing();
                     VioletTheme::UpdateFonts(io); // the language's script merged, as the menu does between frames
                     ImGui::GetStyle().FontScaleMain = scale;
-                    Fixture::LooksState(s.compiling, s.edited, s.offer, s.batch);
+                    Fixture::LooksState(s.compiling, s.edited, s.offer, s.batch, s.twin);
+                    g_fixtureTwin = s.twin;
                     Fixture::CaptureState(s.video, s.options);
                     g_menuGameAaOn = s.gameAa;
                     g_recOpenAll = s.openAll;

@@ -30,9 +30,11 @@ const LooksParam kGrain[] = {
 const LooksShader kUser[] = {
     { "Everything", "Everything.fx", nullptr, nullptr, kEvery, (int)IM_COUNTOF(kEvery), true, false, "Everything.fx", (LooksShaderKind)0 },
     { "FilmGrain", "MyFilmGrain.fx", nullptr, nullptr, kGrain, (int)IM_COUNTOF(kGrain), false, false, "MyFilmGrain.fx", (LooksShaderKind)0 },
+    { "MXAO", "qUINT_mxao.fx", nullptr, nullptr, kGrain, (int)IM_COUNTOF(kGrain), true, false, "qUINT_mxao.fx", (LooksShaderKind)0 }, // twin state only
 };
 Looks::Fx::Effect g_effect;
 bool g_compiling = false;
+bool g_twinState = false; // the twin state: qUINT downloaded, so MXAO runs (and Apex's Ambient Occlusion is on, pages.cpp)
 int g_batch = 0;
 
 Looks::Packs::Pack MakePack(const char* name, const char* author, const char* folder, uint32_t kb, int techniques, bool inList = true)
@@ -59,12 +61,13 @@ namespace Looks::Fx {
 const LooksShader* UserShader(int i) { return i >= 0 && i < (int)IM_COUNTOF(kUser) ? &kUser[i] : nullptr; }
 int FindUser(const std::string& t, const std::string& f)
 {
-    for (int i = 0; i < (int)IM_COUNTOF(kUser); ++i) if (t == kUser[i].technique && _stricmp(f.c_str(), kUser[i].file) == 0) return i;
+    for (int i = 0; i < (int)IM_COUNTOF(kUser); ++i)
+        if (t == kUser[i].technique && _stricmp(f.c_str(), kUser[i].file) == 0 && (i < 2 || g_twinState)) return i;
     return -1;
 }
 const Effect* UserEffect(int i) { return i == 0 ? &g_effect : nullptr; }
 bool MacrosMatch(const Effect&, const LooksDefines&) { return !g_compiling; }
-bool HasFile(const std::string& f) { return FindUser("Everything", f) >= 0 || FindUser("FilmGrain", f) >= 0; }
+bool HasFile(const std::string& f) { return FindUser("Everything", f) >= 0 || FindUser("FilmGrain", f) >= 0 || FindUser("MXAO", f) >= 0; }
 bool Pending(const std::string&) { return false; }
 std::vector<Listed> List()
 {
@@ -145,9 +148,10 @@ ApexPatch* StartLooks()
     return patch.get();
 }
 
-void LooksState(bool compiling, bool edited, bool offer, int batch)
+void LooksState(bool compiling, bool edited, bool offer, int batch, bool twin)
 {
     g_compiling = compiling;
+    g_twinState = twin;
     g_batch = batch;
     g.preset = "looks:Cinema suave with a long name.ini";
     g.off = { "FilmGrain" };
@@ -159,7 +163,7 @@ void LooksState(bool compiling, bool edited, bool offer, int batch)
     for (int s : { 0, 3, 7 }) g.iniOrder.push_back({ Looks::Shader(s).technique, Looks::Shader(s).file, s });
     g.iniOrder.push_back({ "Everything", "Everything.fx", Looks::kUserShaderBase });
     g.iniOrder.push_back({ "FilmGrain", "MyFilmGrain.fx", Looks::kUserShaderBase + 1 });
-    g.iniOrder.push_back({ "MXAO", "qUINT_mxao.fx", -1 });
+    g.iniOrder.push_back({ "MXAO", "qUINT_mxao.fx", g_twinState ? Looks::kUserShaderBase + 2 : -1 });
     g.iniKeys.clear();
     for (auto& e : g.iniOrder) g.iniKeys.insert(Lower(EntryKey(e)));
     g.loaded = true;
