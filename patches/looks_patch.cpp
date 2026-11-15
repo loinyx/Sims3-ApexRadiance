@@ -2219,7 +2219,7 @@ void PackRow(const Looks::Packs::Pack& p, bool* pick, const std::string& line, c
     const int lines = 2 + (!status.empty() && !statusRight);
     // as every control row: the name, 2 units, then the smaller muted line (and the status under it when narrow)
     const float lhS = lh * ApexUi::kSmallScale, lineGap = 2.0f * u;
-    const float blockH = lh + (lines - 1) * (lineGap + lhS);
+    const float blockH = lh + lineGap + lhS + (lines > 2 ? lineGap + lh : 0.0f); // a status under the line is full size
     const float rowH = std::max(fh, blockH);
     ImDrawList* dl = ImGui::GetWindowDrawList();
     // a hairline between rows, as the Library's; a pickable row is clicked anywhere left of its buttons, lit while picked
@@ -2228,7 +2228,7 @@ void PackRow(const Looks::Packs::Pack& p, bool* pick, const std::string& line, c
     if (pick)
     {
         ImGui::SetCursorScreenPos(ImVec2(textX, start.y - pad));
-        if (ImGui::InvisibleButton("##Row", ImVec2(std::max(1.0f, slotX - gap - textX), rowH + 2.0f * pad))) *pick = !*pick;
+        if (ImGui::InvisibleButton("##Row", ImVec2(std::max(1.0f, slotX - gap - textX), (statusRight || status.empty() ? rowH : rowH - lineGap - lh) + pad))) *pick = !*pick; // above a status under the line
         if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
         if (*pick)
             dl->AddRectFilled(ImVec2(start.x - gap, start.y - pad + 1.0f), ImVec2(start.x + avail + gap, start.y + rowH + pad),
@@ -2249,7 +2249,7 @@ void PackRow(const Looks::Packs::Pack& p, bool* pick, const std::string& line, c
     }
     auto text =[&](float x, float y, float right, const std::string& s, unsigned rgb, bool smallText) {
         std::string shown;
-        if (smallText) ImGui::PushFont(nullptr, ImGui::GetFontSize() * ApexUi::kSmallScale);
+        if (smallText) ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale); // as row descriptions (PushSized)
         const bool cut = ApexUi::FitClosedText(s, std::max(1.0f, right - x), shown);
         dl->AddText(ImVec2(x, y), ImGui::GetColorU32(VioletTheme::Col(rgb)), shown.c_str());
         if (smallText) ImGui::PopFont();
@@ -2261,7 +2261,7 @@ void PackRow(const Looks::Packs::Pack& p, bool* pick, const std::string& line, c
     if (!status.empty())
     {
         float sx = statusRight ? textRight - statusW : textX;
-        const float sy = statusRight ? y0 : y0 + lh + 2.0f * (lineGap + lhS);
+        const float sy = statusRight ? y0 : y0 + lh + lineGap + lhS + lineGap;
         if (statusIcon != IconId::None)
         {
             ApexUi::DrawIcon(dl, statusIcon, ImVec2(sx, sy + (lh - icon) * 0.5f), icon, ImGui::GetColorU32(VioletTheme::Col(statusRgb)));

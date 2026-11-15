@@ -1174,18 +1174,8 @@ ControlSizeScope::~ControlSizeScope() { ImGui::PopStyleVar(); }
 bool Checkbox(const char* label, bool* value) {
     const float padding = std::fmax(0.0f, (VioletTheme::kCheckboxSize * Unit() - ImGui::GetFontSize()) * 0.5f);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(ImGui::GetStyle().FramePadding.x, padding));
-    // a small square with softly rounded corners: a thin border when clear, violet with a white check when ticked
-    const bool on = *value;
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f * Unit());
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
-    ImGui::PushStyleColor(ImGuiCol_Border, Col(on ? VioletTheme::kAccentLight : 0x4A4B53));
-    ImGui::PushStyleColor(ImGuiCol_FrameBg, Col(on ? VioletTheme::kAccent : VioletTheme::kCardBg, on ? 1.0f : 0.0f));
-    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, Col(on ? VioletTheme::kAccentLight : VioletTheme::kHoverBg));
-    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, Col(VioletTheme::kAccentDark));
-    ImGui::PushStyleColor(ImGuiCol_CheckMark, Col(0xFFFFFF));
     const bool changed = ImGui::Checkbox(label, value);
-    ImGui::PopStyleColor(5);
-    ImGui::PopStyleVar(3);
+    ImGui::PopStyleVar();
     return changed;
 }
 
