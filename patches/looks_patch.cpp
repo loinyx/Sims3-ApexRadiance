@@ -688,18 +688,6 @@ void SwitchEntry(size_t i, bool on)
 }
 
 // Swaps run-list entry i with the runnable entry before (dir -1) or after (dir +1) it
-// Moves a shader to another's place (dragged by its grip); the others keep their order
-void MoveTo(size_t from, size_t to)
-{
-    if (from == to || from >= g.order.size() || to >= g.order.size()) return;
-    g.runOrder.clear();
-    for (auto& e : g.order) g.runOrder.push_back(EntryKey(e));
-    const std::string key = g.runOrder[from];
-    g.runOrder.erase(g.runOrder.begin() + (ptrdiff_t)from);
-    g.runOrder.insert(g.runOrder.begin() + (ptrdiff_t)to, key);
-    RebuildOrder();
-}
-
 void Move(size_t i, int dir)
 {
     int j = (int)i;
@@ -1849,27 +1837,22 @@ bool ShaderRow(size_t i, int pos, int count, bool& reorder)
             const float bottom = stacked ? controlsTop - ApexUi::kSpace1 * u : after.y - ImGui::GetStyle().ItemSpacing.y;
             const float gripW = ApexUi::kRowIconBox * u + ApexUi::kSpace3 * u; // the leading icon's box and its gap
             const float right = stacked ? left + width : switchMin.x - ApexUi::kSpace3 * u;
-            auto dropHere = [&] { // a shader dragged by its grip lands in this row's place
-                if (!ImGui::BeginDragDropTarget()) return;
-                if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("ApexLooksRow"))
-                {
-                    MoveTo(*static_cast<const size_t*>(p->Data), i);
-                    reorder = changed = true;
-                }
-                ImGui::EndDragDropTarget();
-            };
             if (bottom > top && !ApexUi::FilterActive())
             {
+                // held by its grip, the whole row follows the pointer: it swaps with the row it passes, lit while held
                 ImGui::SetCursorScreenPos(ImVec2(left, top));
                 ImGui::InvisibleButton("##Grip", ImVec2(gripW, bottom - top));
                 if (ImGui::IsItemHovered() || ImGui::IsItemActive()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
-                if (ImGui::BeginDragDropSource())
+                if (ImGui::IsItemActive())
                 {
-                    ImGui::SetDragDropPayload("ApexLooksRow", &i, sizeof i);
-                    ImGui::TextUnformatted(label.c_str());
-                    ImGui::EndDragDropSource();
+                    const float rowBottom = after.y - ImGui::GetStyle().ItemSpacing.y;
+                    ImDrawList* dl = ImGui::GetWindowDrawList();
+                    dl->AddRectFilled(ImVec2(left - ApexUi::kSpace2 * u, top - ApexUi::kSpace1 * u), ImVec2(left + width + ApexUi::kSpace2 * u, rowBottom + ApexUi::kSpace1 * u),
+                                      ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kAccent, 0.12f)), 8.0f * u);
+                    const float y = ImGui::GetIO().MousePos.y;
+                    const int dir = y < top ? -1 : y > rowBottom ? 1 : 0;
+                    if (dir) { Move(i, dir); reorder = changed = true; }
                 }
-                dropHere();
             }
             // the name side (not the switch) opens and closes the values too; a keyboard stop
             if (right > left + gripW && bottom > top)
@@ -1882,7 +1865,6 @@ bool ShaderRow(size_t i, int pos, int count, bool& reorder)
                 }
                 ImGui::RenderNavCursor(ImGui::GetCurrentContext()->LastItemData.Rect, ImGui::GetItemID());
                 if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-                dropHere();
             }
             ImGui::SetCursorScreenPos(after);
         }
