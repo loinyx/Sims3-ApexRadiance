@@ -1177,8 +1177,8 @@ bool Checkbox(const char* label, bool* value) {
     // a small square with softly rounded corners: a thin border when clear, violet with a white check when ticked
     const bool on = *value;
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f * Unit());
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, on ? 0.0f : 1.0f);
-    ImGui::PushStyleColor(ImGuiCol_Border, Col(VioletTheme::kToggleOff));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+    ImGui::PushStyleColor(ImGuiCol_Border, Col(on ? VioletTheme::kAccentLight : VioletTheme::kToggleOff));
     ImGui::PushStyleColor(ImGuiCol_FrameBg, Col(on ? VioletTheme::kAccent : VioletTheme::kWindowBg));
     ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, Col(on ? VioletTheme::kAccentLight : VioletTheme::kHoverBg));
     ImGui::PushStyleColor(ImGuiCol_FrameBgActive, Col(VioletTheme::kAccentDark));

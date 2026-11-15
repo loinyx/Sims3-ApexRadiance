@@ -688,6 +688,7 @@ void SwitchEntry(size_t i, bool on)
 }
 
 // Swaps run-list entry i with the runnable entry before (dir -1) or after (dir +1) it
+struct DragMove { size_t i = 0; int dir = 0; } g_dragMove; // a row held by its grip passed a neighbour
 void Move(size_t i, int dir)
 {
     int j = (int)i;
@@ -1852,7 +1853,7 @@ bool ShaderRow(size_t i, int pos, int count, bool& reorder)
                                       ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kAccent, 0.12f)), 8.0f * u);
                     const float y = ImGui::GetIO().MousePos.y;
                     const int dir = y < top ? -1 : y > rowBottom ? 1 : 0;
-                    if (dir) { Move(i, dir); reorder = changed = true; }
+                    if (dir) g_dragMove = { i, dir }; // after the whole list is drawn: no row skipped this frame
                 }
             }
             // the name side (not the switch) opens and closes the values too; a keyboard stop
@@ -2208,7 +2209,7 @@ void PackRow(const Looks::Packs::Pack& p, bool* pick, const std::string& line, c
     const float pad = ApexUi::kSpace1 * u; // above and below each row, so rows read apart
     const ImVec2 start(ImGui::GetCursorScreenPos().x, ImGui::GetCursorScreenPos().y + pad);
     const float avail = ImGui::GetContentRegionAvail().x;
-    const float textX = start.x + ((pick || busy) ? box + gap + ApexUi::kSpace1 * u : 0.0f);
+    const float textX = start.x + box + gap + ApexUi::kSpace1 * u; // every row's text in one column (box, spinner or check)
     const float menuW = fh;
     const float icon = ApexUi::kIconSmall * u;
     const float statusW = status.empty() ? 0.0f : ImGui::CalcTextSize(status.c_str()).x + (statusIcon != IconId::None ? icon + ApexUi::kSpace1 * u : 0.0f);
@@ -2232,6 +2233,9 @@ void PackRow(const Looks::Packs::Pack& p, bool* pick, const std::string& line, c
         ImGui::SetCursorScreenPos(ImVec2(start.x, start.y + (rowH - box) * 0.5f));
         ApexUi::Checkbox("##Pick", pick);
     }
+    else if (downloaded && !busy) // in the box's place: the green check of a downloaded pack
+        ApexUi::DrawIcon(dl, IconId::CircleCheck, ImVec2(start.x + (box - ApexUi::kIconMedium * u) * 0.5f, start.y + (rowH - ApexUi::kIconMedium * u) * 0.5f),
+                         ApexUi::kIconMedium * u, ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kSuccess)));
     else if (busy)
     {
         ImGui::SetCursorScreenPos(ImVec2(start.x + (box - 12.0f * u) * 0.5f, start.y + (rowH - lh) * 0.5f)); // the spinner is 12 units wide
@@ -2383,7 +2387,7 @@ void PacksTabBody()
             add(RunHere(p.folder));
             if (!p.inList) add(I18n::Tr("no longer in ReShade's list"));
             if (usedHere(p)) add(I18n::Trf("used by {}", look));
-            PackRow(p, nullptr, line, I18n::Tr("Downloaded"), VioletTheme::kSuccess, IconId::CircleCheck, true);
+            PackRow(p, nullptr, line, "", 0, IconId::None, true); // the green check in the box column says it
             return;
         }
         if (p.techniques) add(p.techniques == 1 ? std::string(I18n::Tr("1 shader")) : I18n::Trf("{} shaders", p.techniques));
@@ -2982,6 +2986,7 @@ public:
                 if (!Runnable(i)) { if (!ApexUi::FilterActive()) MissingRow(i, batch, getPacks); continue; } // in its place
                 changed |= ShaderRow(i, ++pos, total, reorder); // a move changes the list: drawn again next frame
             }
+            if (g_dragMove.dir) { Move(g_dragMove.i, g_dragMove.dir); g_dragMove = {}; changed = true; }
             if (getPacks.size() >= 2 && !ApexUi::FilterActive())
             {
                 const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
