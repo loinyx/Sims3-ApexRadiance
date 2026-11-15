@@ -194,7 +194,9 @@ A rewind is exact or it does not happen. What the server cannot put back makes i
 kept and refuse every rewind to it, before anything changes.
 
 - **Quiet point.** The client publishes a cooperation block, the named mapping `Local\rewind-coop-<client pid>`. When
-  the host sets `request` there, the client stops at the end of the next `Present`. Other threads of the game can send
+  the host sets `request` there, the client stops at the end of the next `Present`, on every way out of it, and also
+  while a `Present` waits for the server's present semaphore, one check each time the wait times out (1 s). Other
+  threads of the game can send
   commands too (a command only takes its channel's send lock, and `Present` does not take the device lock), so the
   parked client holds the send locks of both channels. For each `op` the host writes (1 snapshot, 2 rewind, 3 report
   only, 4 let the snapshot go) it sends one synchronous `Bridge_Rewind` command, then checks that no other thread sent
@@ -216,8 +218,12 @@ kept and refuse every rewind to it, before anything changes.
   reports them every 128 MB; past the limit the snapshot is given up.
 - **Rewind.** The server puts the kept contents back, releases the objects made since the snapshot, and restores the
   handle tables, render targets, device state and data queue positions. A query issued again since the snapshot answers
-  with its result at the snapshot until the game issues it once more. The server then signals the client and reads no
-  command until the client's process is back at the snapshot, so a command of the abandoned run is never executed.
+  with its result at the snapshot until the game issues it once more. The server then reads no command until the
+  client's process is back at the snapshot, so a command of the abandoned run is never executed. It learns that from
+  shared memory: it sets a spare word in the head of the client's channel mapping, which is 0 in every snapshot, and
+  the host's restore of that mapping clears it. A kernel object cannot carry this, because a host also sets events
+  and semaphores back to their state at the snapshot. After 60 s without the restore the server logs an error and
+  reads on.
 - **What the host puts back.** The memory of the game process, with the client's views of the bridge's shared
   memory: the four channel mappings (`...Channel_<guid>`) and the query results block (`QueryResults_<guid>`, 4096
   slots). The server writes neither while the client is parked, nor between a rewind and the client's signal, and it

@@ -56,3 +56,13 @@ The first run in game refused its snapshot: the copy of a 1024x768 D24S8 depth s
 refuses such a source in d3d9 and in DXVK. D3D9 also leaves a Discard surface undefined after a `Present`, which is
 where a snapshot is taken, so there is nothing to keep as long as the game clears the surface before it draws with
 it. The server now checks exactly that in the command stream and gives the snapshot up when a draw comes first.
+
+### 2026-11-16: the server waited for a client that could not answer
+
+The first rewind that went through in game left the server silent for 60 s. After a rewind the server reads no
+command until the client is back at its snapshot, and it waited for an event the client set once it saw another
+event from the server. The host tool puts kernel objects back as well as memory, so it unset the server's event with
+everything else, the client never saw it, and the game hung in its next call until the server's time limit. The
+state now lives where a restore is the signal: a spare word in the client's channel mapping that the server sets and
+the host's restore clears. A `Present` that waits for the server also answers a park request now, since a host
+that cannot park the game cannot tell a slow server from a stopped one.

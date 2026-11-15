@@ -1,7 +1,41 @@
 0015: rewind mode for test harnesses, off unless bridge.conf sets rewindMode = True in both copies. A test host snapshots the game process and later puts its memory back; the server then returns to the D3D9 state of the snapshot, exactly or not at all. At the end of a Present the client parks with the send locks of both channels held, so no other thread of the game can send, and passes each request of the host on as one synchronous Bridge_Rewind command. At a snapshot the server copies its handle tables, the device state and every render target and depth surface, except those D3D9 leaves undefined after a Present: the back buffers of a swap chain that discards, and the depth surfaces made with Discard, for which it checks in the command stream that the game clears them before it draws with them. While the snapshot is held it defers destroys of the objects alive at it and keeps the old contents of a buffer or surface before the first write, up to rewindMaxKeptMB. On a rewind it brings back destroyed objects, lets go of new ones, puts contents, device state and data queue positions back, and reads no command until the client's process is back at the snapshot. What it cannot put back exactly makes it give the snapshot up and refuse (server/rewind_mode.h). With the option off the client makes no cooperation block, the server takes no snapshot, and each hook is one test of a flag that is never set. Tests: test/rtx/unit/test_rewind_server.cpp and test_rewind_device.cpp (native/remix-bridge/test-rewind.cmd).
 Applies after 0001-0014 on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only).
+diff --git a/bridge/src/client/d3d9_device.cpp b/bridge/src/client/d3d9_device.cpp
+index 33e64036..796e9d65 100644
+--- a/bridge/src/client/d3d9_device.cpp
++++ b/bridge/src/client/d3d9_device.cpp
+@@ -464,7 +464,8 @@ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::Reset(D3DPRESENT_PARAMETERS* pPresent
+   return res;
+ }
+ 
+-HRESULT syncOnPresent() {
++// With parkWhileWaiting a caller inside a Present answers a rewind host (util_rewind.h) while the server holds the Present up.
++HRESULT syncOnPresent(const bool parkWhileWaiting) {
+ #ifdef ENABLE_PRESENT_SEMAPHORE_TRACE
+   Logger::trace("Client side Present call received, acquiring semaphore...");
+ #endif
+@@ -476,6 +477,10 @@ HRESULT syncOnPresent() {
+     const int64_t perfStart = bridge_util::perf::enabled() ? bridge_util::perf::now() : 0;
+     while (gbBridgeRunning && RESULT_FAILURE(gpPresent->wait()) && numRetries++ < maxRetries) {
+       Logger::warn("Still waiting on the Present semaphore to be released...");
++      if (parkWhileWaiting) {
++        extern void parkForRewind(bool atFrameEnd);
++        parkForRewind(false);
++      }
+     }
+     if (perfStart != 0) {
+       bridge_util::perf::notePresentWait(bridge_util::perf::now() - perfStart);
+@@ -505,7 +510,7 @@ HRESULT waitForPendingPresents() {
+   size_t acquiredCredits = 0;
+   HRESULT result = S_OK;
+   while (acquiredCredits < framesAhead) {
+-    result = syncOnPresent();
++    result = syncOnPresent(false);
+     if (result != S_OK) {
+       break;
+     }
 diff --git a/bridge/src/client/d3d9_swapchain.cpp b/bridge/src/client/d3d9_swapchain.cpp
-index a43dd2e4..e6167ef6 100644
+index a43dd2e4..57fffdd6 100644
 --- a/bridge/src/client/d3d9_swapchain.cpp
 +++ b/bridge/src/client/d3d9_swapchain.cpp
 @@ -26,6 +26,9 @@
@@ -14,7 +48,7 @@ index a43dd2e4..e6167ef6 100644
  extern std::mutex gSwapChainMapMutex;
  extern SwapChainMap gSwapChainMap;
  
-@@ -150,6 +153,121 @@ void Direct3DSwapChain9_LSS::onDestroy() {
+@@ -150,12 +153,122 @@ void Direct3DSwapChain9_LSS::onDestroy() {
    ClientMessage c(Commands::IDirect3DSwapChain9_Destroy, getId());
  }
  
@@ -33,19 +67,21 @@ index a43dd2e4..e6167ef6 100644
 +  return false;
 +}
 +
-+// Rewind mode (util_rewind.h). Runs at the end of a Present with gPresentMutex held.
++// Rewind mode (util_rewind.h). Runs with gPresentMutex held on every way out of a Present (atFrameEnd), and from the
++// wait for the present semaphore, so that a Present which the server holds up does not keep the host waiting.
 +//
 +// Nothing limits D3D9 calls to this thread: each command only takes its channel's send lock, and Present does not take
 +// the device lock. So the park holds the send locks of both bridges, which stops every other sender at its next command.
 +// It lets go of the device bridge's lock only to send its own command, and checks afterwards that no other thread sent.
 +// Each Op the host writes is sent to the server and waited for, then op is cleared as the acknowledgement.
-+static void parkForRewind() {
++void parkForRewind(const bool atFrameEnd) {
 +  using namespace bridge_util::rewind;
 +  static Coop* const pCoop = createCoop();
 +  if (pCoop == nullptr) {
 +    return;
 +  }
-+  const uint32_t tick = ++pCoop->tick;
++  // The tick counts Presents.
++  const uint32_t tick = atFrameEnd ? ++pCoop->tick : pCoop->tick;
 +  const auto wanted = [&]() {
 +    return pCoop->request || (pCoop->parkAtTick && tick >= pCoop->parkAtTick);
 +  };
@@ -55,8 +91,6 @@ index a43dd2e4..e6167ef6 100644
 +
 +  std::unique_lock moduleLock(ModuleBridge::getWriterChannel().m_mutex);
 +  std::unique_lock deviceLock(DeviceBridge::getWriterChannel().m_mutex);
-+  // True in the run that asked for a rewind. A process put back to its snapshot holds false again.
-+  bool rewound = false;
 +
 +  // Sends one Op and returns the server's answer, or a negative number when none came.
 +  const auto send = [&](const uint32_t op, UID& uid) {
@@ -73,7 +107,7 @@ index a43dd2e4..e6167ef6 100644
 +      }
 +      DeviceBridge::consumeResponse();
 +      // The server sets its queue positions after its answer.
-+      if (WaitForSingleObject(events().done, 15'000) != WAIT_OBJECT_0) {
++      if (WaitForSingleObject(doneEvent(), 15'000) != WAIT_OBJECT_0) {
 +        result = -2;
 +      }
 +    }
@@ -96,10 +130,9 @@ index a43dd2e4..e6167ef6 100644
 +      UID uid = 0;
 +      result = send(op, uid);
 +      deviceLock.lock();
-+      if (op == kRewind) {
-+        // What another thread sent since is undone with this process, and the server reads nothing until then.
-+        rewound = rewound || result == S_OK;
-+      } else if (result == S_OK && (DeviceBridge::Command::get_uid() != uid + 1 || !isQuiet<DeviceBridge>())) {
++      // After a rewind there is nothing to check: what another thread sent since is undone with this process, and the
++      // server reads no command until then.
++      if (op != kRewind && result == S_OK && (DeviceBridge::Command::get_uid() != uid + 1 || !isQuiet<DeviceBridge>())) {
 +        result = E_FAIL;
 +        Logger::warn(format_string("[Rewind] Op %u is refused: another thread sent D3D9 commands during the park.", op));
 +        if (op == kSnapshot) {
@@ -114,39 +147,43 @@ index a43dd2e4..e6167ef6 100644
 +    pCoop->op = 0;
 +  };
 +
-+  // Lets the server read commands again after a rewind. Only a process that was put back to its snapshot gets here
-+  // with the event set, and the server waits for it.
-+  const auto resume = [&]() {
-+    if (!rewound && WaitForSingleObject(events().applied, 0) == WAIT_OBJECT_0) {
-+      SetEvent(events().resume);
-+    }
-+  };
-+
 +  runOp();
 +  pCoop->parked = 1;
 +  while (wanted()) {
 +    runOp();
-+    resume();
 +    Sleep(1);
 +  }
-+  resume();
 +  pCoop->parked = 0;
 +}
 +
  HRESULT Direct3DSwapChain9_LSS::Present(CONST RECT* pSourceRect, CONST RECT* pDestRect,
                                          HWND hDestWindowOverride, CONST RGNDATA* pDirtyRegion,
                                          DWORD dwFlags) {
-@@ -193,6 +311,8 @@ HRESULT Direct3DSwapChain9_LSS::Present(CONST RECT* pSourceRect, CONST RECT* pDe
-     return ERROR_SEM_TIMEOUT;
+   ZoneScoped;
+   LogFunctionCall();
+   std::lock_guard presentLock(gPresentMutex);
++  // Rewind mode parks on every way out, also when the Present is given up.
++  const struct ParkAtExit {
++    ~ParkAtExit() {
++      parkForRewind(true);
++    }
++  } parkAtExit;
+   {
+     std::lock_guard mapLock(gSwapChainMapMutex);
+     const HWND targetWindow = hDestWindowOverride != nullptr ? hDestWindowOverride : m_window;
+@@ -187,8 +300,8 @@ HRESULT Direct3DSwapChain9_LSS::Present(CONST RECT* pSourceRect, CONST RECT* pDe
+     c.send_data(dwFlags);
    }
  
-+  parkForRewind();
-+
-   DeviceBridge::perfOnFrame();
- 
-   FrameMark;
+-  extern HRESULT syncOnPresent();
+-  const auto syncResult = syncOnPresent();
++  extern HRESULT syncOnPresent(bool parkWhileWaiting);
++  const auto syncResult = syncOnPresent(true);
+   if (syncResult == ERROR_SEM_TIMEOUT) {
+     return ERROR_SEM_TIMEOUT;
+   }
 diff --git a/bridge/src/server/main.cpp b/bridge/src/server/main.cpp
-index fb6c57f4..ea4806e9 100644
+index fb6c57f4..32762b83 100644
 --- a/bridge/src/server/main.cpp
 +++ b/bridge/src/server/main.cpp
 @@ -24,6 +24,7 @@
@@ -165,7 +202,7 @@ index fb6c57f4..ea4806e9 100644
  #include "util_seh.h"
  #include "util_semaphore.h"
  #include "util_sharedheap.h"
-@@ -182,6 +184,51 @@ static void deserializeFromQueue(SerializableT& serializableT) {
+@@ -182,6 +184,55 @@ static void deserializeFromQueue(SerializableT& serializableT) {
  }
  }
  
@@ -183,6 +220,8 @@ index fb6c57f4..ea4806e9 100644
 +    DeviceBridge::getReaderChannel().data, DeviceBridge::getWriterChannel().data,
 +    ModuleBridge::getReaderChannel().data, ModuleBridge::getWriterChannel().data,
 +  };
++  static_assert(ReaderChannel::kReservedSpace >= (kRestoredWord + 1) * sizeof(int64_t), "The channel head has no room for kRestoredWord.");
++  std::atomic<int64_t>& restored = DeviceBridge::getReaderChannel().serverDataPos[kRestoredWord];
 +  const uint32_t op = gRewindOp;
 +  const bool rewound = op == kRewind && gRewindOpSucceeded;
 +  gRewindOp = 0;
@@ -196,28 +235,30 @@ index fb6c57f4..ea4806e9 100644
 +  }
 +  if (rewound) {
 +    DeviceBridge::publishReadPos();
-+    ResetEvent(events().resume);
-+    SetEvent(events().applied);
++    restored.store(1, std::memory_order_seq_cst);
 +  }
-+  SetEvent(events().done);
++  SetEvent(doneEvent());
 +  if (!rewound) {
 +    return;
 +  }
 +  // The client's process is still the abandoned run until its host has put it back to the snapshot.
-+  // A command read before that would be run against the wrong state, so the next one is read after the client's signal.
++  // A command read before that would be run against the wrong state, so the next one is read once the word is clear:
++  // the host writes the client's view of this mapping back with the process (util_rewind.h, kRestoredWord).
 +  const ULONGLONG start = GetTickCount64();
-+  while (gbBridgeRunning && WaitForSingleObject(events().resume, 50) == WAIT_TIMEOUT) {
-+    if (GetTickCount64() - start >= kResumeTimeoutMs) {
-+      Logger::err(format_string("[Rewind] The client did not come back within %lu s of a rewind. Reading commands again.", kResumeTimeoutMs / 1000));
-+      break;
-+    }
++  while (gbBridgeRunning && restored.load(std::memory_order_seq_cst) != 0 && GetTickCount64() - start < kResumeTimeoutMs) {
++    Sleep(1);
++  }
++  if (restored.exchange(0, std::memory_order_seq_cst) != 0) {
++    Logger::err(format_string("[Rewind] The client's channel was not put back after a rewind (waited %llu ms). Reading commands again.", GetTickCount64() - start));
++  } else {
++    Logger::info(format_string("[Rewind] The client is back at the snapshot after %llu ms.", GetTickCount64() - start));
 +  }
 +}
 +
  static inline void safeDestroy(IUnknown* obj, uint32_t x86handle) {
    // Note: in DXVK the refcounts of non-standalone objects may go negative!
    // We need to handle such objects appropriately, even though this is not
-@@ -197,6 +244,10 @@ static inline void safeDestroy(IUnknown* obj, uint32_t x86handle) {
+@@ -197,6 +248,10 @@ static inline void safeDestroy(IUnknown* obj, uint32_t x86handle) {
    }
  #endif
  
@@ -228,7 +269,7 @@ index fb6c57f4..ea4806e9 100644
    while (obj && static_cast<LONG>(obj->Release()) > 0);
  }
  
-@@ -360,6 +411,7 @@ void ProcessDeviceCommandQueue() {
+@@ -360,6 +415,7 @@ void ProcessDeviceCommandQueue() {
  #endif
        // A Bridge_StatePacket runs this once per record with the packet's device handle and UID.
        const auto dispatch = [&](const Header& rpcHeader, const uint32_t currentUID) {
@@ -236,7 +277,7 @@ index fb6c57f4..ea4806e9 100644
        // The mother of all switch statements - every call in the D3D9 interface is mapped here...
        switch (rpcHeader.command) {
        case IDirect3D9Ex_CreateDeviceEx:
-@@ -504,6 +556,9 @@ void ProcessDeviceCommandQueue() {
+@@ -504,6 +560,9 @@ void ProcessDeviceCommandQueue() {
          const auto hresult = ((IDirect3DDevice9Ex*) pD3DDevice)->CreateDepthStencilSurfaceEx(IN Width, IN Height, IN Format, IN MultiSample, IN MultisampleQuality, IN Discard, OUT & pSurface, IN nullptr, IN Usage);
          if (SUCCEEDED(hresult)) {
            gpD3DResources[pHandle] = pSurface;
@@ -246,7 +287,7 @@ index fb6c57f4..ea4806e9 100644
          }
          assert(SUCCEEDED(hresult));
          SEND_OPTIONAL_CREATE_FUNCTION_SERVER_RESPONSE(hresult, currentUID);
-@@ -942,6 +997,9 @@ void ProcessDeviceCommandQueue() {
+@@ -942,6 +1001,9 @@ void ProcessDeviceCommandQueue() {
          const auto hresult = pD3DDevice->CreateDepthStencilSurface(IN Width, IN Height, IN Format, IN MultiSample, IN MultisampleQuality, IN Discard, OUT & pSurface, IN nullptr);
          if (SUCCEEDED(hresult)) {
            gpD3DResources[pHandle] = pSurface;
@@ -256,7 +297,7 @@ index fb6c57f4..ea4806e9 100644
          }
          assert(SUCCEEDED(hresult));
          SEND_OPTIONAL_CREATE_FUNCTION_SERVER_RESPONSE(hresult, currentUID);
-@@ -960,6 +1018,7 @@ void ProcessDeviceCommandQueue() {
+@@ -960,6 +1022,7 @@ void ProcessDeviceCommandQueue() {
          const auto& pDestinationSurface = (IDirect3DSurface9*) gpD3DResources[pDestHandle];
          assert(pDestinationSurface != nullptr);
          if (pSourceSurface != nullptr && pDestinationSurface != nullptr) {
@@ -264,7 +305,7 @@ index fb6c57f4..ea4806e9 100644
            hresult = pD3DDevice->UpdateSurface(IN pSourceSurface, IN pSourceRect, IN pDestinationSurface, IN pDestPoint);
            assert(SUCCEEDED(hresult));
          }
-@@ -977,6 +1036,7 @@ void ProcessDeviceCommandQueue() {
+@@ -977,6 +1040,7 @@ void ProcessDeviceCommandQueue() {
          const auto& pDestinationTexture = (IDirect3DBaseTexture9*) gpD3DResources[pDestinationTextureHandle];
          assert(pDestinationTexture != nullptr);
          if (pSourceTexture != nullptr && pDestinationTexture != nullptr) {
@@ -272,7 +313,7 @@ index fb6c57f4..ea4806e9 100644
            hresult = pD3DDevice->UpdateTexture(IN pSourceTexture, IN pDestinationTexture);
            assert(SUCCEEDED(hresult));
          }
-@@ -990,6 +1050,7 @@ void ProcessDeviceCommandQueue() {
+@@ -990,6 +1054,7 @@ void ProcessDeviceCommandQueue() {
          PULL_HND(pDestSurfaceHandle);
          const auto& pRenderTarget = (IDirect3DSurface9*) gpD3DResources[pRenderTargetHandle];
          const auto& pDestSurface = (IDirect3DSurface9*) gpD3DResources[pDestSurfaceHandle];
@@ -280,7 +321,7 @@ index fb6c57f4..ea4806e9 100644
          auto hresult = pD3DDevice->GetRenderTargetData(IN pRenderTarget, IN pDestSurface);
          hresult = ReturnSurfaceDataToClient(pDestSurface, hresult, currentUID);
          assert(SUCCEEDED(hresult));
-@@ -1002,6 +1063,7 @@ void ProcessDeviceCommandQueue() {
+@@ -1002,6 +1067,7 @@ void ProcessDeviceCommandQueue() {
          PULL_HND(pDestSurfaceHandle);
          const auto& pDestSurface = (IDirect3DSurface9*) gpD3DResources[pDestSurfaceHandle];
          IDirect3DSurface9* pBackbuffer = nullptr;
@@ -288,7 +329,7 @@ index fb6c57f4..ea4806e9 100644
          auto hresult = pD3DDevice->GetFrontBufferData(IN iSwapChain, IN pDestSurface);
          hresult = ReturnSurfaceDataToClient(pDestSurface, hresult, currentUID);
          assert(SUCCEEDED(hresult));
-@@ -1017,6 +1079,7 @@ void ProcessDeviceCommandQueue() {
+@@ -1017,6 +1083,7 @@ void ProcessDeviceCommandQueue() {
          PULL(D3DTEXTUREFILTERTYPE, Filter);
          const auto& pSourceSurface = (IDirect3DSurface9*) gpD3DResources[pSourceHandle];
          const auto& pDestSurface = (IDirect3DSurface9*) gpD3DResources[pDestHandle];
@@ -296,7 +337,7 @@ index fb6c57f4..ea4806e9 100644
          const auto hresult = pD3DDevice->StretchRect(IN pSourceSurface, IN pSourceRect, IN pDestSurface, IN pDestRect, IN Filter);
          assert(SUCCEEDED(hresult));
          SEND_OPTIONAL_SERVER_RESPONSE(hresult, currentUID);
-@@ -1029,6 +1092,7 @@ void ProcessDeviceCommandQueue() {
+@@ -1029,6 +1096,7 @@ void ProcessDeviceCommandQueue() {
          PULL_OBJ(RECT, pRect);
          PULL_OBJ(D3DCOLOR, color);
          const auto& pSurface = (IDirect3DSurface9*) gpD3DResources[pHandle];
@@ -304,7 +345,7 @@ index fb6c57f4..ea4806e9 100644
          const auto hresult = pD3DDevice->ColorFill(IN pSurface, IN pRect, IN * color);
          assert(SUCCEEDED(hresult));
          SEND_OPTIONAL_SERVER_RESPONSE(hresult, currentUID);
-@@ -1140,6 +1204,7 @@ void ProcessDeviceCommandQueue() {
+@@ -1140,6 +1208,7 @@ void ProcessDeviceCommandQueue() {
          PULL_DATA(sizeof(D3DRECT) * Count, pRects);
          D3DCOLOR* Color = nullptr;
          PULL_DATA(sizeof(D3DCOLOR), Color);
@@ -312,7 +353,7 @@ index fb6c57f4..ea4806e9 100644
          const auto hresult = pD3DDevice->Clear(Count, pRects, Flags, *Color, *Z, Stencil);
          assert(SUCCEEDED(hresult));
          SEND_OPTIONAL_SERVER_RESPONSE(hresult, currentUID);
-@@ -2019,6 +2084,7 @@ void ProcessDeviceCommandQueue() {
+@@ -2019,6 +2088,7 @@ void ProcessDeviceCommandQueue() {
          PULL(DWORD, LODNew);
          const auto& pResource = gpD3DResources[pHandle];
          if (pResource != nullptr) {
@@ -320,7 +361,7 @@ index fb6c57f4..ea4806e9 100644
            ((IDirect3DBaseTexture9*) pResource)->SetLOD(LODNew);
          }
          assert(pResource != nullptr);
-@@ -2035,6 +2101,7 @@ void ProcessDeviceCommandQueue() {
+@@ -2035,6 +2105,7 @@ void ProcessDeviceCommandQueue() {
          PULL(D3DTEXTUREFILTERTYPE, FilterType);
          const auto& pResource = gpD3DResources[pHandle];
          if (pResource != nullptr) {
@@ -328,7 +369,7 @@ index fb6c57f4..ea4806e9 100644
            hresult = ((IDirect3DBaseTexture9*) pResource)->SetAutoGenFilterType(FilterType);
            SEND_OPTIONAL_SERVER_RESPONSE(hresult, currentUID);
          }
-@@ -2249,6 +2316,7 @@ void ProcessDeviceCommandQueue() {
+@@ -2249,6 +2320,7 @@ void ProcessDeviceCommandQueue() {
          const auto& pVolumeTexture = (IDirect3DVolumeTexture9*) gpD3DResources[pHandle];
          // Now lock the box so we can copy the data into it
          D3DLOCKED_BOX pLockedVolume;
@@ -336,7 +377,7 @@ index fb6c57f4..ea4806e9 100644
          auto hresult = pVolumeTexture->LockBox(IN Level, IN & pLockedVolume, IN pBox, IN Flags);
          assert(S_OK == hresult);
          // Copy the data over
-@@ -2473,6 +2541,7 @@ void ProcessDeviceCommandQueue() {
+@@ -2473,6 +2545,7 @@ void ProcessDeviceCommandQueue() {
  
          // Now lock the buffer so we can copy the data into it
          void* pbData = nullptr;
@@ -344,7 +385,7 @@ index fb6c57f4..ea4806e9 100644
          auto hresult = pVertexBuffer->Lock(IN OffsetToLock, IN SizeToLock, IN & pbData, IN Flags);
          assert(S_OK == hresult);
          if (SUCCEEDED(hresult) && pbData != nullptr) {
-@@ -2573,6 +2642,7 @@ void ProcessDeviceCommandQueue() {
+@@ -2573,6 +2646,7 @@ void ProcessDeviceCommandQueue() {
  
          // Now lock the buffer so we can copy the data into it
          void* pbData = nullptr;
@@ -352,7 +393,7 @@ index fb6c57f4..ea4806e9 100644
          auto hresult = pIndexBuffer->Lock(IN OffsetToLock, IN SizeToLock, IN & pbData, IN Flags);
          assert(S_OK == hresult);
          if (SUCCEEDED(hresult) && pbData != nullptr) {
-@@ -2676,6 +2746,7 @@ void ProcessDeviceCommandQueue() {
+@@ -2676,6 +2750,7 @@ void ProcessDeviceCommandQueue() {
            if (pSurface == nullptr) {
              break;
            }
@@ -360,7 +401,7 @@ index fb6c57f4..ea4806e9 100644
            D3DLOCKED_RECT lockedRect;
            auto hresult = pSurface->LockRect(OUT & lockedRect, IN pRect, IN Flags);
            assert(S_OK == hresult);
-@@ -2707,6 +2778,7 @@ void ProcessDeviceCommandQueue() {
+@@ -2707,6 +2782,7 @@ void ProcessDeviceCommandQueue() {
              gPendingSurfaceLocks.erase(stale);
            }
            if (pSurface != nullptr) {
@@ -368,7 +409,7 @@ index fb6c57f4..ea4806e9 100644
              D3DLOCKED_RECT lockedRect;
              const auto hresult = pSurface->LockRect(OUT & lockedRect, IN pRect, IN Flags);
              assert(S_OK == hresult);
-@@ -2810,6 +2882,7 @@ void ProcessDeviceCommandQueue() {
+@@ -2810,6 +2886,7 @@ void ProcessDeviceCommandQueue() {
          const auto& pVolume = gpD3DVolumes[pHandle];
          // Now lock the box so we can copy the data into it
          D3DLOCKED_BOX pLockedVolume;
@@ -376,7 +417,7 @@ index fb6c57f4..ea4806e9 100644
          auto hresult = pVolume->LockBox(IN & pLockedVolume, IN pBox, IN Flags);
          assert(S_OK == hresult);
          // Copy the data over
-@@ -2870,6 +2943,7 @@ void ProcessDeviceCommandQueue() {
+@@ -2870,6 +2947,7 @@ void ProcessDeviceCommandQueue() {
          GET_HND(pHandle);
          PULL(DWORD, dwIssueFlags);
          const auto pQuery = gpD3DQuery[pHandle];
@@ -384,7 +425,7 @@ index fb6c57f4..ea4806e9 100644
          const HRESULT hresult = (pQuery != nullptr) ? pQuery->Issue(dwIssueFlags) : D3DERR_INVALIDCALL;
          SEND_OPTIONAL_SERVER_RESPONSE(hresult, currentUID);
          break;
-@@ -2882,7 +2956,8 @@ void ProcessDeviceCommandQueue() {
+@@ -2882,7 +2960,8 @@ void ProcessDeviceCommandQueue() {
          const auto pQuery = gpD3DQuery[pHandle];
          std::vector<uint8_t> data(dwSize);
          void* pData = dwSize > 0 ? data.data() : nullptr;
@@ -394,7 +435,7 @@ index fb6c57f4..ea4806e9 100644
  
          if (Commands::IsAsyncResult(rpcHeader.flags)) {
            // The sequence number is published after the result.
-@@ -2954,6 +3029,34 @@ void ProcessDeviceCommandQueue() {
+@@ -2954,6 +3033,34 @@ void ProcessDeviceCommandQueue() {
          SharedHeap::deallocate(allocId);
          break;
        }
@@ -429,7 +470,7 @@ index fb6c57f4..ea4806e9 100644
        case Bridge_UnlinkResource:
        {
          GET_HND(pHandle);
-@@ -3400,6 +3503,10 @@ void ProcessDeviceCommandQueue() {
+@@ -3400,6 +3507,10 @@ void ProcessDeviceCommandQueue() {
        }
      }
  
@@ -1558,7 +1599,7 @@ index 0cd4d6e7..111dff30 100644
      case IDirect3DDevice9Ex_LinkBackBuffer: return "IDirect3DDevice9Ex_LinkBackBuffer";
 diff --git a/bridge/src/util/util_rewind.h b/bridge/src/util/util_rewind.h
 new file mode 100644
-index 00000000..da887f52
+index 00000000..eaea0dff
 --- /dev/null
 +++ b/bridge/src/util/util_rewind.h
 @@ -0,0 +1,118 @@
@@ -1572,6 +1613,10 @@ index 00000000..da887f52
 +// Present: it sends one synchronous Bridge_Rewind command and parks its thread until the host is done. While parked it
 +// holds the send locks of both channels, so no other thread of the game can send (client/d3d9_swapchain.cpp).
 +// The server side is server/rewind_mode.h.
++//
++// A host puts more back than memory: it also sets events and semaphores to their state at the snapshot. So nothing
++// that has to outlast a rewind is kept in a kernel object, and the server learns from shared memory that the client
++// is back (kRestoredWord).
 +
 +#include <windows.h>
 +#include <cstdint>
@@ -1636,24 +1681,20 @@ index 00000000..da887f52
 +  // Time the server waits after a rewind for the client to be back at the snapshot.
 +  constexpr DWORD kResumeTimeoutMs = 60'000;
 +
++  // Index of a 64-bit word in the reserved head of the device bridge's client channel mapping, which nothing else uses.
++  // The server sets it after a rewind and reads no command while it is set. It is 0 in every snapshot, and the host
++  // puts the client's view of the mapping back with the process, so the word clears exactly when the client is back.
++  constexpr size_t kRestoredWord = 2;
++
 +  inline bool enabled() {
 +    return GlobalOptions::getRewindMode();
 +  }
 +
-+  // Auto-reset events shared by the client and the server.
-+  struct Events {
-+    HANDLE done;    // server: the Op is finished and its queue positions are final
-+    HANDLE applied; // server: a rewind was applied; seen by the client only once its process is back at the snapshot
-+    HANDLE resume;  // client: back at the snapshot; the server reads no command between a rewind and this
-+  };
-+
-+  inline const Events& events() {
-+    static const Events events = {
-+      CreateEventA(nullptr, FALSE, FALSE, gUniqueIdentifier.toString("RewindDone").c_str()),
-+      CreateEventA(nullptr, FALSE, FALSE, gUniqueIdentifier.toString("RewindApplied").c_str()),
-+      CreateEventA(nullptr, FALSE, FALSE, gUniqueIdentifier.toString("RewindResume").c_str()),
-+    };
-+    return events;
++  // Set by the server once an Op is finished and its queue positions are final. Auto-reset, and used up before the
++  // client acknowledges the Op, so its state is the same at every snapshot.
++  inline HANDLE doneEvent() {
++    static const HANDLE hEvent = CreateEventA(nullptr, FALSE, FALSE, gUniqueIdentifier.toString("RewindDone").c_str());
++    return hEvent;
 +  }
 +
 +  // Null when the mode is off or the block cannot be made.
@@ -1669,8 +1710,8 @@ index 00000000..da887f52
 +      Logger::err(format_string("[Rewind] The cooperation block %s could not be made (error %lu), so rewind mode stays off.", name, GetLastError()));
 +      return nullptr;
 +    }
-+    // The events exist before any snapshot, so a process put back to one still holds them.
-+    events();
++    // The event exists before any snapshot, so a process put back to one still holds it.
++    doneEvent();
 +    coop->version = 1;
 +    coop->self = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(coop));
 +    coop->bridge = 1;
