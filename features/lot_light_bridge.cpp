@@ -3605,7 +3605,7 @@ PsClass Classify(IDirect3DPixelShader9* ps) {
                 static bool logged = false;
                 if (!logged) { logged = true; LOG_INFO("[LotLightBridge] Water: sea without the game's reflection seen (gets the shore reflection pass)"); }
             }
-            else if (IsShader(kSnowLotPs, code.data(), size)) c = PsClass::LotLightSnow;
+            else if (IsShader(kSnowLotPs, code.data(), size) || IsShader(kSnowLotWrfPs, code.data(), size)) c = PsClass::LotLightSnow;
             else if (IsShader(kSnowLotCutPs, code.data(), size)) c = PsClass::LotLightSnowCut;
             else if (IsShader(kMeltLotPs, code.data(), size)) c = PsClass::LotLightMelt;
             else if (IsShader(kRoofSnowPs, code.data(), size)) c = PsClass::RoofSnow;
@@ -3797,7 +3797,7 @@ VsInfo* ClassifyVs(IDirect3DVertexShader9* vs) {
             else if (is(kLakeVs)) cls = 2;
             else if (is(kSeaNoReflVs)) cls = 12;
             else if (is(kLakeWeatherVs)) cls = 13;
-            else if (is(kSnowLotVs) || is(kSnowLotCutVs)) cls = 3;
+            else if (is(kSnowLotVs) || is(kSnowLotCutVs) || is(kSnowLotWrfVs)) cls = 3;
             else if (is(kFloorVs)) cls = 5;
             else {
                 std::vector<DWORD> t(size / 4);
@@ -7973,11 +7973,37 @@ int ArchRowsForImpl(IDirect3DDevice9* dev, const ShaderPatches::RoomMapPatch& ro
     // the room light map (its identity only): its story tells rooms with the same ambient apart
     IDirect3DBaseTexture9* const map = D3D9Hooks::BoundTexture(dev, room.sampler);
     if (!map) return 0;
+    const uintptr_t mapTex = reinterpret_cast<uintptr_t>(RtOutdoorLamps::GameMapOf(map)); // (a relit copy: its game map)
+    // (draw cost) the same floor's draws in one frame ask with the same inputs, and the answer holds for the frame (the rooms'
+    // ambients are read once a frame): kept for the frame, about 0.1 ms a call otherwise
+    struct Memo {
+        uint32_t frame = 0;
+        uintptr_t map = 0, basis = 0;
+        float own[3] = {};
+        int cells = 0;
+        void* cube = nullptr;
+        float rows[kArchRows * 4] = {};
+    };
+    static Memo s_memo[8];
+    static unsigned s_next = 0;
+    // (a reset frees the neighbours' cubes: the memo goes with them)
+    static const bool s_registered = (RenderCallbacks::preReset.Add([](IDirect3DDevice9*) { for (Memo& m : s_memo) m.frame = 0; }), true);
+    (void)s_registered;
+    for (const Memo& m : s_memo)
+        if (m.frame == g_roomMapFrame && m.map == mapTex && m.basis == basisTex && std::memcmp(m.own, own, sizeof m.own) == 0) {
+            std::memcpy(rows, m.rows, sizeof m.rows);
+            nbCube = static_cast<IDirect3DBaseTexture9*>(static_cast<IDirect3DCubeTexture9*>(m.cube));
+            return m.cells;
+        }
     void* cube = nullptr;
-    const int cells = LevelLightShare::ArchAmbientConsts(own, reinterpret_cast<uintptr_t>(RtOutdoorLamps::GameMapOf(map)), basisTex, rows, static_cast<int>(ShaderPatches::kArchCells), &cube); // (a relit copy: its game map)
+    const int cells = LevelLightShare::ArchAmbientConsts(own, mapTex, basisTex, rows, static_cast<int>(ShaderPatches::kArchCells), &cube);
     nbCube = static_cast<IDirect3DBaseTexture9*>(static_cast<IDirect3DCubeTexture9*>(cube));
     float* const scale = rows + 2 * ShaderPatches::kArchCells * 4;
     scale[0] = scale[1] = 64.0f, scale[2] = -1.0f / 16.0f, scale[3] = -1.0f / 8.0f;
+    Memo& m = s_memo[s_next++ % std::size(s_memo)];
+    m.frame = g_roomMapFrame, m.map = mapTex, m.basis = basisTex, m.cells = cells, m.cube = cube;
+    std::memcpy(m.own, own, sizeof m.own);
+    std::memcpy(m.rows, rows, sizeof m.rows);
     return cells;
 }
 // (arch_ambient) The arch copy of a room-map copy just made: none where it has no arch block (ps_2_x, no ambient constant),
@@ -9431,7 +9457,85 @@ inline D3D9Hooks::HookAction NoteClaim(ClaimSource source) {
     return D3D9Hooks::HookAction::Skip;
 }
 
+// A lot's ground drawn without its light maps: some frames the game binds no room light map (s2) nor its four lamp maps
+// (s7 to s10) for a lot's ground mesh, and the ground drew black for that frame (a dark patch coming and going as the
+// camera moved: in light captures, s2 and s7 to s10 empty where it was dark, bound where it was lit). Each ground mesh (its vertex and index buffers) keeps the maps it
+// was last drawn with; a draw that has none takes those back for the draw. Released at a device reset and when lots change
+constexpr DWORD kGroundMapStages[] = {2, 7, 8, 9, 10};
+struct GroundMaps { IDirect3DBaseTexture9* t[5] = {}; };
+std::unordered_map<uint64_t, GroundMaps> g_groundMaps;
+int s_fills = 0, s_misses = 0;
+void ForgetGroundMaps() {
+    for (auto& [k, m] : g_groundMaps)
+        for (auto*& t : m.t)
+            if (t) t->Release(), t = nullptr;
+    g_groundMaps.clear();
+}
+class GroundMapFill {
+public:
+    explicit GroundMapFill(IDirect3DDevice9* dev) : dev_(dev) {
+        static const bool s_registered = (RenderCallbacks::preReset.Add([](IDirect3DDevice9*) { ForgetGroundMaps(); }), true);
+        (void)s_registered;
+        static DWORD s_logAt = 0;
+        if (GetTickCount() - s_logAt > 5000 && Recorder::Verbose()) {
+            s_logAt = GetTickCount();
+            LOG_INFO(std::format("[LotLightBridge] Ground light maps: {} meshes kept, {} draws filled, {} with none kept (last 5 s)", g_groundMaps.size(), s_fills, s_misses));
+            s_fills = s_misses = 0;
+        }
+        IDirect3DVertexBuffer9* vb = nullptr;
+        UINT off = 0, stride = 0;
+        IDirect3DIndexBuffer9* ib = nullptr;
+        if (FAILED(dev->GetStreamSource(0, &vb, &off, &stride)) || !vb) return;
+        dev->GetIndices(&ib);
+        const uint64_t key = (static_cast<uint64_t>(reinterpret_cast<uintptr_t>(vb)) << 32) ^ reinterpret_cast<uintptr_t>(ib);
+        vb->Release();
+        if (ib) ib->Release();
+        IDirect3DBaseTexture9* now[5] = {};
+        for (int i = 0; i < 5; i++) dev->GetTexture(kGroundMapStages[i], &now[i]);
+        if (now[0]) { // drawn with its maps: kept for the frames without
+            // (the room map as the game's own: a relit copy is let go by its owner, and the swap binds the current one)
+            if (auto* game = static_cast<IDirect3DBaseTexture9*>(const_cast<void*>(RtOutdoorLamps::GameMapOf(now[0]))); game && game != now[0])
+                game->AddRef(), now[0]->Release(), now[0] = game;
+            if (g_groundMaps.size() > 256) ForgetGroundMaps();
+            GroundMaps& m = g_groundMaps[key];
+            for (int i = 0; i < 5; i++) {
+                if (m.t[i]) m.t[i]->Release();
+                m.t[i] = now[i]; // (the reference GetTexture added)
+            }
+            return;
+        }
+        for (auto* t : now)
+            if (t) t->Release();
+        const auto it = g_groundMaps.find(key);
+        // a map only this cache still holds: the game let it go (a lot or world unloaded, a buffer at the same address since)
+        const auto onlyOurs = [](IDirect3DBaseTexture9* t) { return t && (t->AddRef(), t->Release()) == 1; };
+        if (it != g_groundMaps.end() && onlyOurs(it->second.t[0])) {
+            for (auto*& t : it->second.t)
+                if (t) t->Release(), t = nullptr;
+            g_groundMaps.erase(it);
+            s_misses++;
+            return;
+        }
+        if (it == g_groundMaps.end()) { s_misses++; return; }
+        s_fills++;
+        for (int i = 0; i < 5; i++) {
+            IDirect3DBaseTexture9* const t = it->second.t[i];
+            if (!t || now[i]) continue;
+            if (!(i == 0 && RtOutdoorLamps::SwapTexture(dev, kGroundMapStages[i], t))) D3D9Hooks::CallOriginalSetTexture(dev, kGroundMapStages[i], t);
+            set_[i] = true;
+        }
+    }
+    ~GroundMapFill() {
+        for (int i = 0; i < 5; i++)
+            if (set_[i]) D3D9Hooks::CallOriginalSetTexture(dev_, kGroundMapStages[i], nullptr);
+    }
+private:
+    IDirect3DDevice9* dev_;
+    bool set_[5] = {};
+};
 template <typename DrawFn> D3D9Hooks::HookAction OnDrawInnerCore(IDirect3DDevice9* dev, DrawFn draw) {
+    std::optional<GroundMapFill> groundMaps;
+    if (g_curVsIsSnowLot || g_curVsIsFloor || g_curVsIsSnowFloor || g_curClass == PsClass::LotLight) groundMaps.emplace(dev);
     constexpr auto kSkip = D3D9Hooks::HookAction::Skip;
     constexpr auto kContinue = D3D9Hooks::HookAction::Continue;
     const bool terrainPair = g_curVsInfo && g_curVsInfo->worldMap >= 0 &&
@@ -11462,6 +11566,7 @@ void SetWaterFix(bool on, float strength, float reflection, bool filter, bool pr
 void SetSidewalkClear(float amount) { g_sidewalkClear = amount < 0 ? 0.0f : (amount > 1 ? 1.0f : amount); }
 
 void OnWorldChanged() {
+    ForgetGroundMaps(); // (keyed by the old world's buffers)
     ClearChunks();
     RoomMapPadding::Clear();
     g_rigRoomWaits.clear(); // (keyed by the old world's room addresses)

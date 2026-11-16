@@ -482,10 +482,21 @@ bool PatchRoad(std::vector<DWORD>& t, RoadPatch& out, bool shade) {
             if (uses || (m.len >= 1 && IsReg(t[m.at + 1], kTemp, X) && (WMask(t[m.at + 1]) & 0x7))) break; // rX.xyz overwritten (rX.w is fine)
         }
     }
-    if (light < 0 || u.maxSampler < 0 || u.maxSampler >= (shade ? 14 : 15) || !u.afterLastSamplerDcl) return false;
+    // the sampler(s) after the last one; a shader that uses s15 already (WinterRoadsFix's roads) gets the lowest free ones
+    const int need = shade ? 2 : 1;
+    int freeAt = u.maxSampler + 1;
+    if (freeAt + need > 16) {
+        bool used[16] = {};
+        for (const Ins& x : ins)
+            if (x.op == kDcl && x.len == 2 && IsReg(t[x.at + 2], kSampler, Num(t[x.at + 2]))) used[Num(t[x.at + 2]) & 15] = true;
+        freeAt = -1;
+        for (int e = 0; e + need <= 16 && freeAt < 0; e++)
+            if (!used[e] && (need == 1 || !used[e + 1])) freeAt = e;
+    }
+    if (light < 0 || u.maxSampler < 0 || freeAt < 0 || !u.afterLastSamplerDcl) return false;
     const Ins& L = ins[light];
     const DWORD X = Num(t[L.at + 1]);
-    const DWORD E = static_cast<DWORD>(u.maxSampler + 1);
+    const DWORD E = static_cast<DWORD>(freeAt);
     const DWORD T0 = static_cast<DWORD>(u.maxTemp + 1);
     out.lightSampler = Num(t[L.at + 3]);
     out.extraSampler = E;
@@ -4563,6 +4574,33 @@ bool PatchLotTerrainMax(std::vector<DWORD>& t, DWORD lastSampler, DWORD newSampl
     auto regNum = [](DWORD r) { return r & 0x7FF; };
     auto regType = [](DWORD r) { return ((r >> 28) & 7) | (((r >> 11) & 3) << 3); };
     if (exit && !mask) return false;
+    // A copy rewritten by another mod (WinterRoadsFix adds its road blend with r7, v7 = TEXCOORD1, s14 and s15): its r7 is
+    // renamed to a free temp, and a v7 that is already TEXCOORD1 (the terrain uv this patch reads) is used as it is
+    bool v7Declared = false;
+    {
+        DWORD top = 0;
+        bool r7Used = false;
+        for (int pass = 0; pass < 2; pass++)
+            for (size_t i = 1; i < t.size();) {
+                const DWORD tok = t[i];
+                if (tok == 0x0000FFFF) break;
+                if ((tok & 0xFFFF) == 0xFFFE) { i += 1 + ((tok >> 16) & 0x7FFF); continue; }
+                const size_t len = (tok >> 24) & 0xF, op = tok & 0xFFFF;
+                if (i + len >= t.size()) return false;
+                if (op == 0x1F && regType(t[i + 2]) == 1 && regNum(t[i + 2]) == 7) {
+                    if (t[i + 1] != 0x80010005) return false; // v7 is something else than TEXCOORD1
+                    v7Declared = true;
+                }
+                for (size_t k = 1; k <= len; k++) {
+                    DWORD& r = t[i + k];
+                    if ((op == 0x1F && k == 1) || (op == 0x51 && k > 1) || !(r & 0x80000000u) || regType(r) != 0) continue;
+                    if (pass == 0) { top = std::max(top, regNum(r)); r7Used |= regNum(r) == 7; }
+                    else if (r7Used && regNum(r) == 7) r = (r & ~0x7FFu) | (top + 1);
+                }
+                i += 1 + len;
+            }
+        if (r7Used && top + 1 > 28) return false; // the mask's temps come after it
+    }
     size_t dclEnd = 0, texldEnd = 0, texldAt = 0;
     DWORD maxTemp = 0;
     for (size_t i = 1; i < t.size();) {
@@ -4578,7 +4616,7 @@ bool PatchLotTerrainMax(std::vector<DWORD>& t, DWORD lastSampler, DWORD newSampl
             if (op == 0x51 && k > 1) continue;  // def values
             if (!(r & 0x80000000u)) continue;
             const DWORD ty = regType(r), n = regNum(r);
-            if ((ty == 0 && n == 7) || (ty == 1 && n == 7) || (ty == 10 && n == newSampler)) return false; // r7 / v7 / new sampler taken
+            if ((ty == 0 && n == 7) || (ty == 1 && n == 7 && !v7Declared) || (ty == 10 && n == newSampler)) return false; // r7 / v7 / new sampler taken
             if (mask && ((ty == 2 && (n == kLotMaskConst || n == kLotMaskConst + 1)) || (ty == 10 && n == newSampler + 1))) return false;
             if (exit && ty == 2 && n >= kLotMaskConst + 2 && n <= kLotMaskConst + 4) return false; // the gate and the defs
             if (ty == 0) maxTemp = std::max(maxTemp, n);
@@ -4646,7 +4684,7 @@ bool PatchLotTerrainMax(std::vector<DWORD>& t, DWORD lastSampler, DWORD newSampl
         t.insert(t.begin() + dclEnd, std::begin(mdecl), std::end(mdecl));
     }
     const DWORD decl[] = {0x0200001F, 0x80010005, 0x90230007, 0x0200001F, 0x90000000, 0xA00F0800 | newSampler}; // v7 = TEXCOORD1, s<new> 2D
-    t.insert(t.begin() + dclEnd, std::begin(decl), std::end(decl));
+    t.insert(t.begin() + dclEnd, std::begin(decl) + (v7Declared ? 3 : 0), std::end(decl));
     return true;
 }
 bool PatchLotTerrainEdges(std::vector<DWORD>& t, bool exit) {

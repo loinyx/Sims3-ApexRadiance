@@ -3,7 +3,9 @@
 // it has 4 GB of address space, but the game's saves and its script heap need room below 2 GB (a save fails with error 12
 // or 13 when the largest free block there is small). Apex's big buffers (room solve captures, kept parts) took 200 MB
 // and more of it. HighAllocator puts every allocation of 1 MB or more at the top of the address space (VirtualAlloc with
-// MEM_TOP_DOWN, above 2 GB when there is room), the smaller ones on the heap as usual.
+// MEM_TOP_DOWN, above 2 GB when there is room), the smaller ones on the heap 16-byte aligned: the game's SSE code reads some
+// of these buffers with aligned loads (the light evaluation at 0x006BE1CC does movaps on a 0x30 room solve sample), and plain
+// operator new gives only 8 bytes on 32-bit.
 #include <windows.h>
 #include <atomic>
 #include <cstddef>
@@ -12,6 +14,7 @@
 namespace ApexMem {
 
 constexpr size_t kHighFrom = size_t{1} << 20;
+constexpr std::align_val_t kHeapAlign{16};
 inline std::atomic<size_t> g_highBytes{0}, g_highLowFallback{0}; // bytes held high; allocations that landed below 2 GB anyway
 
 inline void* AllocHigh(size_t bytes) {
@@ -35,12 +38,12 @@ template <class T> struct HighAllocator {
         if (n > static_cast<size_t>(-1) / sizeof(T)) throw std::bad_alloc();
         const size_t bytes = n * sizeof(T);
         if (bytes >= kHighFrom) return static_cast<T*>(AllocHigh(bytes));
-        return static_cast<T*>(::operator new(bytes));
+        return static_cast<T*>(::operator new(bytes, kHeapAlign));
     }
     void deallocate(T* p, size_t n) noexcept {
         const size_t bytes = n * sizeof(T);
         if (bytes >= kHighFrom) FreeHigh(p, bytes);
-        else ::operator delete(p);
+        else ::operator delete(p, kHeapAlign);
     }
     template <class U> bool operator==(const HighAllocator<U>&) const noexcept { return true; }
     template <class U> bool operator!=(const HighAllocator<U>&) const noexcept { return false; }

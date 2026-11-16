@@ -14,6 +14,7 @@
 //
 // Part of Apex Radiance. Credits: @loinyx
 
+#include "recorder.h"
 #include "rt_outdoor_lamps.h"
 #include "build_flavor.h"
 #include "apex_paths.h"
@@ -86,6 +87,8 @@ constexpr DWORD kLeftLotGraceMs = 20000; // the lot left at a switch keeps its r
 // 3 s once, when a new lot waited 3 to 5 s for its maps; with its stories put first (0.1 to 0.7 s) the hold only kept the
 // lot arrived at on the game's dimmer light: a player's arrival at the town square waited the full 3 s, then brightened
 constexpr DWORD kActiveLotHoldMs = 800;
+constexpr DWORD kActiveLotDwellMs = 3000; // a lot just made active stays so this long (a pause in a pan switched back after 15 ms)
+DWORD g_activeSince = 0;
 constexpr DWORD kHoldQuietMs = 1500;     // the rooms that take room 0's lamps are sent this long after a story's last move
                                          // (a Build mode drag moves in grid steps with pauses of up to about a second)
 constexpr DWORD kCheckEveryMs = 2000;    // the consistency check of the GPU lamps' stories
@@ -1100,6 +1103,13 @@ void PublishNeighbours(uint64_t active, const std::vector<std::pair<uint64_t, ui
     bool same = active == g_nbActive && want.size() == g_nb.size();
     for (size_t i = 0; same && i < want.size(); i++) same = want[i].first == g_nb[i].lot && want[i].second == g_nb[i].tracker;
     if (same) return;
+    // (neighbour hold) the same active lot keeps its neighbours while the camera moves, as the active lot is held: the list
+    // follows the camera, and each lot joining or leaving gathered its outdoor rooms again, so a lot's ground flipped between
+    // the game's map and the relit copy as the camera panned (85 regathers in 15 s, a shadow coming and going). A neighbour
+    // the game no longer has leaves at once; the rest change once the camera is still
+    if (active == g_nbActive && regather && LotLightingMotion::SampleCameraMoving() &&
+        std::all_of(g_nb.begin(), g_nb.end(), [](const Neighbour& n) { return LevelLightShare::TrackerLive(n.tracker); }))
+        return;
     const auto had = [](const std::vector<Neighbour>& v, const Neighbour& m) {
         return std::any_of(v.begin(), v.end(), [&m](const Neighbour& n) { return n.lot == m.lot && n.tracker == m.tracker; });
     };
@@ -1904,6 +1914,8 @@ bool Watching() { return g_watch.load(std::memory_order_relaxed); }
 bool RetiredAny() { return g_retiredAny.load(std::memory_order_relaxed); }
 
 namespace {
+std::unordered_map<const void*, char> s_src; // (F9) the light maps' last source
+bool s_srcAny = false;
 // The SetTexture swap (render thread, lock-free chain): the game's map -> its copy
 HRESULT SwapCopy(IDirect3DDevice9* dev, DWORD stage, IDirect3DBaseTexture9* t, bool& swapped) {
     swapped = false;
@@ -1914,10 +1926,24 @@ HRESULT SwapCopy(IDirect3DDevice9* dev, DWORD stage, IDirect3DBaseTexture9* t, b
         if (const auto it = g_swap.find(t); it != g_swap.end()) s = it->second;
     if (!s && !g_swapRetired.empty() && a >= g_retiredLo && a <= g_retiredHi) // (the lots left at earlier switches)
         if (const auto it = g_swapRetired.find(t); it != g_swapRetired.end()) s = it->second;
-    if (!s) return S_OK;
+    IDirect3DTexture9* const copy = s ? (s->hiOk && s->hi ? s->hi : s->copy) : nullptr;
+    if (!Recorder::Active() && s_srcAny) s_src.clear(), s_srcAny = false; // (a recording's own: the next starts empty)
+    if (Recorder::Active() && (s || s_srcAny)) { // (F9) each light map's source when it changes: the game's, the relit copy, or a left lot's copy
+        const char src = !copy ? 'g' : g_swap.count(t) ? 'c' : 'r';
+        if (!s && !s_src.count(t)) {} // (any other texture)
+        else if (char& was = s_src[t]; was != src) {
+            s_srcAny = true;
+            was = src;
+            Recorder::Note(std::format("[ground] map {:08X} {} | story {} {}", static_cast<uint32_t>(a), src == 'g' ? "game" : src == 'c' ? "relit copy" : "left lot's copy",
+                                       s ? s->story : -1, s ? (s->mgr ? "neighbour" : "active") : "-"));
+        }
+    }
+    // (a slot whose copy is not made yet or was let go binds nothing in its place: the game's map stays, or a lot's ground
+    // drew with no light map at all, dark, while the camera made the next lot the active one)
+    if (!copy) return S_OK;
     s->binds++;
     swapped = true;
-    return D3D9Hooks::CallOriginalSetTexture(dev, stage, s->hiOk && s->hi ? s->hi : s->copy);
+    return D3D9Hooks::CallOriginalSetTexture(dev, stage, copy);
 }
 void OnPreReset(IDirect3DDevice9* dev) {
     ReleaseRetired(dev, "device reset"); // (DEFAULT render targets)
@@ -2167,8 +2193,8 @@ void Frame(IDirect3DDevice9* dev) {
     // one pan, each new lot waiting 3 to 5 s for its maps, so no lot was ever relit while the camera moved)
     const DWORD holdNow = std::max<DWORD>(GetTickCount(), 1);
     if (tracker == g_tracker || tracker != g_holdFor) g_holdFor = tracker, g_holdForAt = holdNow;
-    const bool hold = tracker != g_tracker && g_tracker && DevSwitches::ActiveLotHold() && holdNow - g_holdForAt < kActiveLotHoldMs &&
-                      LevelLightShare::TrackerLive(g_tracker) && LotLightingMotion::SampleCameraMoving();
+    const bool hold = tracker != g_tracker && g_tracker && DevSwitches::ActiveLotHold() && LevelLightShare::TrackerLive(g_tracker) &&
+                      ((holdNow - g_holdForAt < kActiveLotHoldMs && LotLightingMotion::SampleCameraMoving()) || holdNow - g_activeSince < kActiveLotDwellMs);
     if (hold && !g_holdAt) g_holdAt = holdNow;
     if (!hold && g_holdAt) {
         LOG_INFO(std::format("[RtOutdoorLamps] Active lot switch held {} ms while the camera moved ({})", holdNow - g_holdAt,
@@ -2177,6 +2203,7 @@ void Frame(IDirect3DDevice9* dev) {
     }
     if (hold) tracker = g_tracker;
     if (tracker != g_tracker) {
+        g_activeSince = holdNow;
         // the lot left keeps its room 0s' kept solves a while (a return reuses them instead of a full solve), and the new lot's
         // ground room 0 is solved first (lot grass reads story 0's room-0 map; the occluder send below regathers it)
         const void* left[8];
