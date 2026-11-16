@@ -105,12 +105,33 @@ lot). While the camera moves Apex lowers that slice to 6 ms; the loading screen'
 also starts the [shared lot build time](lot-streaming.md#shared-lot-build-time), which first caps each slice to what the
 frame's shared budget leaves.
 
+**Shared room solve time (off by default).** The budget above is per lot, and the lot lighting update solves at least
+one level of every lot with lighting work each frame. A pan over a town therefore adds up many small solves: a Frame
+Profiler recording of a far pan (Apex 4.0.1) showed about 27 "Lot room solve" calls and 9 ms per hitch frame, 2.8 ms per
+frame on average, and 81% of the moving hitches led by the solve. With `sharedSolveTime` on, the CALL of the level solve
+(0x00ADB9AD) goes through a gate (`RoomSolveShare`, the outer layer of a call chain) while the camera moves:
+
+- every lot's level solves share 4 ms per frame (`RoomSolveSharePolicy::kMovingMs`); the lot being played always runs,
+  and its time counts;
+- a level whose turn comes with less than 0.5 ms left is not solved this frame: the call is not made, so its rooms keep
+  their state and resume at their next solve, exactly as when the game's own budget ends the update before that level;
+- a level that has waited 4 frames and longest runs anyway (one per frame), and every level runs after 30 frames
+  (`kHardMaxSkips`), so no room waits longer than that;
+- only the lot pass's updates are gated (a layer on its CALL 0x00C7CEDF marks them); the lot impostor builder's updates,
+  budgets of 100 ms or more and the loading screen pass through. With the camera still every call runs.
+
+The light is the game's own: no solve is shortened, cut or skipped for good; only the frame it runs in moves. A single
+solve that does not stop at its budget (a level's room rebuild 0x006A7CF0, or the wall shading pass, which Wall shading
+waits while moving already holds) still runs whole. Offline checks: `tools/room_solve_share_test`
+([validation](../../validation/performance-lot-lighting-motion.md)).
+
 ## Settings
 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Spread lot lighting while moving | `[patches.LotLightingMotion] enabled` | bool | on | | Turns the budget scaling on |
 | Lot lighting time while moving (shown while the switch is on) | `[patches.LotLightingMotion] budgetWhileMovingMs` | int | 3 | 1 to 15 ms | The current lot's time per frame while moving; below 3 ms, loading lots keep the 3 ms share (6 / 2 ms). End labels "Smoother" / "Lights sooner"; 15 = the game's own. Applied at once (the hook reads it on every call; `Update` clears the reinstall request). The key is never renamed |
+| None (configuration file only) | `[patches.LotLightingMotion] sharedSolveTime` | bool | off | | While the camera moves, every lot's room solves share 4 ms per frame (*Shared room solve time* above). Applied at once |
 
 ## Compatibility and interactions
 
@@ -123,7 +144,10 @@ frame's shared budget leaves.
 - **Spread new objects over frames** and **Faster room lighting** use the same camera sampler.
 - **Frame Profiler:** keeps both its lot lighting targets (the entry of 0x00ADB8F0 with Detours; the CALL 0x00ADB9AD).
   Its "Lot room solve" calls receive the scaled budget; one call is one lot level. The report adds "Lot lighting while
-  moving: ...".
+  moving: ..." and "Shared room solve time: ...". The CALL 0x00ADB9AD is a call chain shared with the shared room solve
+  time (the gate outside, the profiler inside), so "Lot room solve" counts only the solves that run; the timeline's
+  `room_solve_waited` and `room_solve_longest_wait` columns give the solves that waited in each frame and the longest
+  wait then (frames).
 - **Official Sims3SettingsSetter:** its patterns overlap neither the budget call 0x00ADB95D / 0x00ADB120, the room solve
   0x006A8BA0 nor the camera read 0x00C6D5BD (its LSO detours WorldManager::Update at 0x00C6D570; the camera site is
   0x4D bytes later and only read).
@@ -229,6 +253,8 @@ Group `LotLightingMotion`.
 `SetBudgetMs`, `FloorMs`, `CameraMoving`, `SampleCameraMoving`, `EnsureCamera`, `PaceSettle`, `SettleScale`, `SteadyScale`,
 `SteadyDrainMs`, `DrainBudget`, `StatusText`, `RenderDeveloperUI`.
 `Performance::LotLightingBudgetMs` / `SetLotLightingBudgetMs` in [`patches/performance.h`](../../../patches/performance.h).
+Shared room solve time: [`features/room_solve_share.{h,cpp}`](../../../features/room_solve_share.cpp) (`Start`, `Stop`, `Hook`,
+`PassHook`, `StatusText`) and its decision [`features/room_solve_share_policy.h`](../../../features/room_solve_share_policy.h).
 
 Developer card *Lighting while the camera moves*: the call and camera addresses, "Camera moving" / "Camera still", the
 last camera move, frames sampled, lot build slices (shortened while moving, on / off), budget calls, calls scaled while

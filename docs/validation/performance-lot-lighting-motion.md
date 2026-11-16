@@ -12,7 +12,11 @@ It must:
 
 ## Automated tests
 
-None offline.
+`tools/room_solve_share_test` (in the Smoke suite of `tools/development/check.ps1`) checks the shared room solve time's
+decision and replays the lot lighting update's loop (levels from level 0, at least one per lot, each lot's budget) over a
+synthetic pan with and without the gate: no level waits more than 30 frames, the worst moving frame is not longer, and
+once the camera stops every level ends in the same state as without the gate. The budget hook itself has no offline
+harness.
 
 ## Latest results
 
@@ -20,6 +24,7 @@ None offline.
 |---|---|---|---|---|
 | 2026-10-22 | `0b6b5af` | None: no offline harness covers the budget hook or the steady pacing | Not measured | not run in game yet |
 | 2026-11-11 | branch `release/3.1.2` | None: no offline harness covers the loading floor | Not measured | not run in game yet |
+| 2026-11-17 | branch `feature/lot-room-solve-budget` | `tools/room_solve_share_test` (5 seeds, 9 lots x 3 levels, 120 moving frames; synthetic) | Moving solve time per frame mean 11.8-13.6 -> 5.9-6.3 ms, worst 29.9-62.1 -> 21.3-28.8 ms; longest wait 22 frames; every level ends as without the gate, 3 to 25 frames later | not run in game yet |
 
 ## In-game test plan
 
@@ -33,6 +38,15 @@ None offline.
    3 and 6 ms. At night with Night Lighting, lamps placed or removed still relight their rooms (a moment later while the
    camera moves).
 5. Build / Buy mode and Edit Town still relight at once when the camera is still.
+
+Shared room solve time (`sharedSolveTime = true`):
+
+6. Frame Profiler timing-run preset on a far pan over a town (the `night-lot-switch-pan` runner job), with the option off
+   and on. **Expected:** with it on, fewer moving hitches led by "Lot room solve", lower "Lot room solve" ms per hitch
+   frame, `room_solve_waited` above 0 only while `apex_moving` is 1, `room_solve_longest_wait` never above 30, and the
+   developer card's "longest wait" at most 30 frames.
+7. Stop the camera after the pan. **Expected:** the timeline's `room_solve_waited` is 0 from about 0.3 s after the stop,
+   and the lots' lights match a run with the option off (same scene, same time of day) once both have settled.
 
 ## Confirmed in game
 
