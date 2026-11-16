@@ -1,0 +1,243 @@
+{
+ "id": "night-lot-switch-pan",
+ "description": "Sunset Valley at night in winter: the camera moves slowly from the square to the police station and the school and back, an F8 every fourth stop. Pass: the active lot's outdoor ground keeps its own lamps when another lot becomes the active one (compare the screenshots with the [RtOutdoorLamps] Active lot tracker lines).",
+ "save": "Sunset Valley",
+ "toml": {
+  "ui": {
+   "screenshot_key": "F8",
+   "recorder_key": "F9"
+  }
+ },
+ "steps": [
+  {
+   "do": "speed",
+   "speed": "pause"
+  },
+  {
+   "do": "wait",
+   "minutes": 1.5
+  },
+  {
+   "do": "key",
+   "vk": 120
+  },
+  {
+   "do": "wait",
+   "minutes": 0.05
+  },
+  {
+   "do": "camera",
+   "pos": {
+    "x": 1073,
+    "y": 113,
+    "z": 1207
+   },
+   "target": {
+    "x": 1028,
+    "y": 43,
+    "z": 1162
+   }
+  },
+  {
+   "do": "wait",
+   "minutes": 0.15
+  },
+  {
+   "do": "camera",
+   "pos": {
+    "x": 1030,
+    "y": 113,
+    "z": 1164
+   },
+   "target": {
+    "x": 985,
+    "y": 43,
+    "z": 1119
+   }
+  },
+  {
+   "do": "wait",
+   "minutes": 0.02
+  },
+  {
+   "do": "key",
+   "vk": 119
+  },
+  {
+   "do": "wait",
+   "minutes": 0.15
+  },
+  {
+   "do": "key",
+   "vk": 119
+  },
+  {
+   "do": "wait",
+   "minutes": 0.05
+  },
+  {
+   "do": "camera",
+   "pos": {
+    "x": 1025,
+    "y": 113,
+    "z": 1119
+   },
+   "target": {
+    "x": 980,
+    "y": 43,
+    "z": 1074
+   }
+  },
+  {
+   "do": "wait",
+   "minutes": 0.15
+  },
+  {
+   "do": "camera",
+   "pos": {
+    "x": 1030,
+    "y": 113,
+    "z": 1164
+   },
+   "target": {
+    "x": 985,
+    "y": 43,
+    "z": 1119
+   }
+  },
+  {
+   "do": "wait",
+   "minutes": 0.02
+  },
+  {
+   "do": "key",
+   "vk": 119
+  },
+  {
+   "do": "wait",
+   "minutes": 0.15
+  },
+  {
+   "do": "key",
+   "vk": 119
+  },
+  {
+   "do": "wait",
+   "minutes": 0.05
+  },
+  {
+   "do": "camera",
+   "pos": {
+    "x": 1073,
+    "y": 113,
+    "z": 1207
+   },
+   "target": {
+    "x": 1028,
+    "y": 43,
+    "z": 1162
+   }
+  },
+  {
+   "do": "wait",
+   "minutes": 0.15
+  },
+  {
+   "do": "camera",
+   "pos": {
+    "x": 1030,
+    "y": 113,
+    "z": 1164
+   },
+   "target": {
+    "x": 985,
+    "y": 43,
+    "z": 1119
+   }
+  },
+  {
+   "do": "wait",
+   "minutes": 0.02
+  },
+  {
+   "do": "key",
+   "vk": 119
+  },
+  {
+   "do": "wait",
+   "minutes": 0.15
+  },
+  {
+   "do": "key",
+   "vk": 119
+  },
+  {
+   "do": "wait",
+   "minutes": 0.05
+  },
+  {
+   "do": "camera",
+   "pos": {
+    "x": 1025,
+    "y": 113,
+    "z": 1119
+   },
+   "target": {
+    "x": 980,
+    "y": 43,
+    "z": 1074
+   }
+  },
+  {
+   "do": "wait",
+   "minutes": 0.15
+  },
+  {
+   "do": "camera",
+   "pos": {
+    "x": 1030,
+    "y": 113,
+    "z": 1164
+   },
+   "target": {
+    "x": 985,
+    "y": 43,
+    "z": 1119
+   }
+  },
+  {
+   "do": "wait",
+   "minutes": 0.02
+  },
+  {
+   "do": "key",
+   "vk": 119
+  },
+  {
+   "do": "wait",
+   "minutes": 0.15
+  },
+  {
+   "do": "key",
+   "vk": 119
+  },
+  {
+   "do": "wait",
+   "minutes": 0.05
+  },
+  {
+   "do": "key",
+   "vk": 120
+  },
+  {
+   "do": "wait",
+   "minutes": 0.2
+  }
+ ],
+ "expect": [
+  "\\[RtOutdoorLamps\\] Active lot tracker"
+ ],
+ "fail": [
+  "\\[(ERROR)\\]"
+ ]
+}

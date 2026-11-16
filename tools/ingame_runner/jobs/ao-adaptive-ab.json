@@ -1,0 +1,106 @@
+{
+  "id": "ao-adaptive-ab",
+  "description": "Ambient Occlusion slices by reach: the same paused views (far, mid, near) photographed with F8 at High and Ultra; run once per ASI and compare the pictures.",
+  "save": "Sunset Valley",
+  "toml": {
+    "ui": {
+      "screenshot_key": "F8"
+    },
+    "patches.AmbientOcclusion": {
+      "enabled": true,
+      "qualidade": 2
+    }
+  },
+  "variants": {
+    "on": {}
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "pause"
+    },
+    {
+      "do": "wait",
+      "minutes": 1.5
+    },
+    {
+      "do": "mode",
+      "mode": "live"
+    },
+    {
+      "do": "camera",
+      "pos": {
+        "x": 1150,
+        "y": 200,
+        "z": 1290
+      },
+      "target": {
+        "x": 1000,
+        "y": 43,
+        "z": 1120
+      }
+    },
+    {
+      "do": "wait",
+      "minutes": 0.3
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "camera",
+      "pos": {
+        "x": 1030,
+        "y": 88,
+        "z": 1164
+      },
+      "target": {
+        "x": 985,
+        "y": 43,
+        "z": 1119
+      }
+    },
+    {
+      "do": "wait",
+      "minutes": 0.3
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "camera",
+      "pos": {
+        "x": 1005,
+        "y": 62,
+        "z": 1139
+      },
+      "target": {
+        "x": 985,
+        "y": 43,
+        "z": 1119
+      }
+    },
+    {
+      "do": "wait",
+      "minutes": 0.3
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    }
+  ]
+}
