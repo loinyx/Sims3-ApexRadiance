@@ -77,3 +77,12 @@ So the device read its creator's reference as an implicit one: `AddRef` returned
 the count at the implicit references and tore the device's implicit objects down. Code that already holds a second
 reference does not trigger it. Why only some starts took and returned a reference that early is not established.
 Patch 0016 takes the render target out of the count.
+
+### 2026-11-16: a texture that cannot be locked
+
+Fourteen seconds after a snapshot a 4096x1 A32B32G32R32F surface was written and the server gave the snapshot up:
+it keeps the old contents of a surface by locking it, and the lock failed. A level of a default pool texture that is
+not dynamic cannot be locked, in d3d9 and in DXVK; `UpdateTexture` and `UpdateSurface` are how such a texture is
+written. `StretchRect` does copy one into a render target of the same format, and a render target can be read, so
+the server takes that way round before the write and puts the contents back with `UpdateSurface`. Compressed
+formats have no render target and still give the snapshot up.

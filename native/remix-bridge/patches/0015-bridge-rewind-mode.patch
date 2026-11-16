@@ -183,7 +183,7 @@ index a43dd2e4..57fffdd6 100644
      return ERROR_SEM_TIMEOUT;
    }
 diff --git a/bridge/src/server/main.cpp b/bridge/src/server/main.cpp
-index fb6c57f4..32762b83 100644
+index fb6c57f4..c078c8d3 100644
 --- a/bridge/src/server/main.cpp
 +++ b/bridge/src/server/main.cpp
 @@ -24,6 +24,7 @@
@@ -309,7 +309,7 @@ index fb6c57f4..32762b83 100644
          const auto& pDestinationTexture = (IDirect3DBaseTexture9*) gpD3DResources[pDestinationTextureHandle];
          assert(pDestinationTexture != nullptr);
          if (pSourceTexture != nullptr && pDestinationTexture != nullptr) {
-+          rewind_mode::keepTexture(pDestinationTexture);
++          rewind_mode::noteUpdateTexture(pSourceTexture, pDestinationTexture);
            hresult = pD3DDevice->UpdateTexture(IN pSourceTexture, IN pDestinationTexture);
            assert(SUCCEEDED(hresult));
          }
@@ -495,10 +495,10 @@ index 908d93fb..4d418be8 100644
  ])
 diff --git a/bridge/src/server/rewind_mode.h b/bridge/src/server/rewind_mode.h
 new file mode 100644
-index 00000000..0f189a88
+index 00000000..4575246e
 --- /dev/null
 +++ b/bridge/src/server/rewind_mode.h
-@@ -0,0 +1,1017 @@
+@@ -0,0 +1,1108 @@
 +#pragma once
 +
 +// Rewind mode, server side (util_rewind.h): what the server keeps while a snapshot is held and how it returns to it.
@@ -550,12 +550,20 @@ index 00000000..0f189a88
 +    Failed,  // a rewind failed part-way: the D3D9 state is undefined
 +  };
 +
-+  enum class Kind { VertexBuffer, IndexBuffer, Surface, Target };
++  enum class Kind {
++    VertexBuffer,
++    IndexBuffer,
++    Surface,    // read and written back through a lock
++    Target,     // a render target or depth surface, copied on the device at the snapshot
++    Unlockable, // a surface that cannot be locked, like a level of a default pool texture: read through a render target
++  };
 +
 +  struct Saved {
 +    Kind kind;
 +    std::vector<uint8_t> bytes;         // what a locked buffer or surface held
-+    IDirect3DSurface9* pCopy = nullptr; // Kind::Target: a surface on the device with the contents
++    // Kind::Target: a surface of the same kind on the device with the contents.
++    // Kind::Unlockable: a system memory surface with the contents.
++    IDirect3DSurface9* pCopy = nullptr;
 +    size_t size = 0;
 +  };
 +
@@ -618,6 +626,9 @@ index 00000000..0f189a88
 +    std::unordered_set<IDirect3DQuery9*> queriesPending;
 +    // Queries issued again since the snapshot. After a rewind queryAnswers gives them their old result back.
 +    std::unordered_set<IDirect3DQuery9*> queriesIssued;
++    // Sources of UpdateTexture since the snapshot. UpdateTexture copies only what is marked dirty in its source and
++    // clears the marks, which a rewind cannot read or put back, so it marks these sources dirty as a whole.
++    std::unordered_set<IDirect3DBaseTexture9*> updateSources;
 +    std::unordered_map<IDirect3DQuery9*, std::vector<uint8_t>> queryAnswers;
 +    size_t savedBytes = 0;
 +    size_t tombstoneBytes = 0;
@@ -1076,6 +1087,39 @@ index 00000000..0f189a88
 +    }
 +  }
 +
++  // Reads a surface that cannot be locked: a copy on the device into a render target of the same format, which can be read.
++  // Returns a system memory surface with the contents.
++  // Returns null when the D3D9 library does not copy this surface, or has no render target of its format.
++  inline IDirect3DSurface9* readThroughTarget(IDirect3DSurface9* pSurface, const D3DSURFACE_DESC& desc) {
++    IDirect3DDevice9* pDevice = nullptr;
++    IDirect3DSurface9* pTarget = nullptr;
++    IDirect3DSurface9* pCopy = nullptr;
++    HRESULT hresult = pSurface->GetDevice(&pDevice);
++    if (SUCCEEDED(hresult)) {
++      hresult = pDevice->CreateRenderTarget(desc.Width, desc.Height, desc.Format, D3DMULTISAMPLE_NONE, 0, FALSE, &pTarget, nullptr);
++    }
++    if (SUCCEEDED(hresult)) {
++      hresult = pDevice->CreateOffscreenPlainSurface(desc.Width, desc.Height, desc.Format, D3DPOOL_SYSTEMMEM, &pCopy, nullptr);
++    }
++    if (SUCCEEDED(hresult)) {
++      hresult = pDevice->StretchRect(pSurface, nullptr, pTarget, nullptr, D3DTEXF_NONE);
++    }
++    if (SUCCEEDED(hresult)) {
++      hresult = pDevice->GetRenderTargetData(pTarget, pCopy);
++    }
++    if (pTarget != nullptr) {
++      pTarget->Release();
++    }
++    if (pDevice != nullptr) {
++      pDevice->Release();
++    }
++    if (FAILED(hresult) && pCopy != nullptr) {
++      pCopy->Release();
++      pCopy = nullptr;
++    }
++    return pCopy;
++  }
++
 +  // Keeps what a surface holds before the first write after the snapshot.
 +  // A texture level counts as alive at the snapshot when its texture was.
 +  inline void keepSurface(IDirect3DSurface9* pSurface) {
@@ -1102,8 +1146,20 @@ index 00000000..0f189a88
 +      return;
 +    }
 +    if (FAILED(pSurface->LockRect(&lockedRect, nullptr, D3DLOCK_READONLY)) || lockedRect.pBits == nullptr) {
-+      refuse(format_string("a %ux%u surface of format %d written after the snapshot could not be read first",
-+                           desc.Width, desc.Height, static_cast<int>(desc.Format)));
++      // A level of a default pool texture that is not dynamic cannot be locked. UpdateTexture and UpdateSurface write those.
++      IDirect3DSurface9* const pCopy = desc.Pool == D3DPOOL_DEFAULT ? readThroughTarget(pSurface, desc) : nullptr;
++      if (pCopy == nullptr) {
++        refuse(format_string("a %ux%u surface of format %d written after the snapshot could not be read first",
++                             desc.Width, desc.Height, static_cast<int>(desc.Format)));
++        return;
++      }
++      Saved& saved = gSnapshot.saved[pSurface];
++      saved.kind = Kind::Unlockable;
++      saved.pCopy = pCopy;
++      saved.size = approxSize(desc.Width, desc.Height, desc.Format);
++      gSnapshot.savedBytes += saved.size;
++      pSurface->AddRef();
++      account();
 +      return;
 +    }
 +    store(pSurface, Kind::Surface, lockedRect.pBits, size_t(lockedRect.Pitch) * bridge_util::calcStride(desc.Height, desc.Format));
@@ -1132,6 +1188,17 @@ index 00000000..0f189a88
 +          pSurface->Release();
 +        }
 +      }
++    }
++  }
++
++  // Runs before UpdateTexture.
++  inline void noteUpdateTexture(IDirect3DBaseTexture9* pSource, IDirect3DBaseTexture9* pDestination) {
++    if (!held()) {
++      return;
++    }
++    keepTexture(pDestination);
++    if (held() && pSource != nullptr && gSnapshot.objects.count(pSource) != 0) {
++      gSnapshot.updateSources.insert(pSource);
 +    }
 +  }
 +
@@ -1227,13 +1294,16 @@ index 00000000..0f189a88
 +      return SUCCEEDED(pSurface->UnlockRect());
 +    }
 +    case Kind::Target:
++    case Kind::Unlockable:
 +    {
 +      const auto pSurface = static_cast<IDirect3DSurface9*>(pObj);
 +      IDirect3DDevice9* pDevice = nullptr;
 +      if (FAILED(pSurface->GetDevice(&pDevice))) {
 +        return false;
 +      }
-+      const HRESULT hresult = pDevice->StretchRect(saved.pCopy, nullptr, pSurface, nullptr, D3DTEXF_NONE);
++      const HRESULT hresult = saved.kind == Kind::Target
++        ? pDevice->StretchRect(saved.pCopy, nullptr, pSurface, nullptr, D3DTEXF_NONE)
++        : pDevice->UpdateSurface(saved.pCopy, nullptr, pSurface, nullptr);
 +      pDevice->Release();
 +      return SUCCEEDED(hresult);
 +    }
@@ -1386,11 +1456,14 @@ index 00000000..0f189a88
 +    }
 +    for (auto contents = gSnapshot.saved.begin(); contents != gSnapshot.saved.end();) {
 +      succeeded &= putBack(contents->first, contents->second);
-+      // A locked copy has done its work: the object holds the snapshot's contents again, and the next write keeps them anew.
++      // A copy taken at a write has done its work: the object holds the snapshot's contents again, and the next write keeps them anew.
 +      if (contents->second.kind == Kind::Target) {
 +        ++contents;
 +      } else {
 +        gSnapshot.savedBytes -= contents->second.size;
++        if (contents->second.pCopy != nullptr) {
++          contents->second.pCopy->Release();
++        }
 +        contents->first->Release();
 +        contents = gSnapshot.saved.erase(contents);
 +      }
@@ -1438,6 +1511,24 @@ index 00000000..0f189a88
 +      }
 +    }
 +    gSnapshot.queriesIssued.clear();
++    for (IDirect3DBaseTexture9* pSource : gSnapshot.updateSources) {
++      switch (pSource->GetType()) {
++      case D3DRTYPE_TEXTURE:
++        static_cast<IDirect3DTexture9*>(pSource)->AddDirtyRect(nullptr);
++        break;
++      case D3DRTYPE_CUBETEXTURE:
++        for (int face = D3DCUBEMAP_FACE_POSITIVE_X; face <= D3DCUBEMAP_FACE_NEGATIVE_Z; face++) {
++          static_cast<IDirect3DCubeTexture9*>(pSource)->AddDirtyRect(static_cast<D3DCUBEMAP_FACES>(face), nullptr);
++        }
++        break;
++      case D3DRTYPE_VOLUMETEXTURE:
++        static_cast<IDirect3DVolumeTexture9*>(pSource)->AddDirtyBox(nullptr);
++        break;
++      default:
++        break;
++      }
++    }
++    gSnapshot.updateSources.clear();
 +    gSnapshot.notRestored = 0;
 +    return succeeded;
 +  }
@@ -1990,10 +2081,10 @@ index 00000000..ce540826
 +}
 diff --git a/bridge/test/rtx/unit/test_rewind_server.cpp b/bridge/test/rtx/unit/test_rewind_server.cpp
 new file mode 100644
-index 00000000..2990a091
+index 00000000..dd792621
 --- /dev/null
 +++ b/bridge/test/rtx/unit/test_rewind_server.cpp
-@@ -0,0 +1,561 @@
+@@ -0,0 +1,655 @@
 +// Runs the server side of rewind mode (src/server/rewind_mode.h) on a D3D9 device, without a client or a game.
 +// The tables below stand in for the server's, and destroy() for its destroy commands.
 +// The device comes from the system's d3d9.dll, or from the library named by REWIND_TEST_D3D9 (a DXVK build, as the
@@ -2523,6 +2614,99 @@ index 00000000..2990a091
 +    pBackBuffer->Release();
 +    expect(pDevice->Release() == 0, "the device has no references left: nothing leaked");
 +  }
++
++  // Reads a surface that cannot be locked, as rewind mode does.
++  std::vector<float> floats(IDirect3DSurface9* pSurface) {
++    D3DSURFACE_DESC desc;
++    D3DLOCKED_RECT lockedRect;
++    std::vector<float> values;
++    pSurface->GetDesc(&desc);
++    IDirect3DSurface9* const pCopy = rewind_mode::readThroughTarget(pSurface, desc);
++    if (pCopy != nullptr && SUCCEEDED(pCopy->LockRect(&lockedRect, nullptr, D3DLOCK_READONLY))) {
++      const float* const pFirst = static_cast<const float*>(lockedRect.pBits);
++      values.assign(pFirst, pFirst + size_t(desc.Width) * 4);
++      pCopy->UnlockRect();
++    }
++    if (pCopy != nullptr) {
++      pCopy->Release();
++    }
++    return values;
++  }
++
++  // A 4096x1 A32B32G32R32F texture in the default pool, written by UpdateTexture from a system memory texture, as the game
++  // writes one (The Sims 3 under Apex Radiance: such a surface was written 14 s after a snapshot). It cannot be locked, so
++  // its contents at the snapshot are read through a render target before the write and put back with UpdateSurface.
++  void testDefaultPoolTexture(IDirect3D9* pD3D, const HWND hWnd) {
++    constexpr UINT kWidth = 4096;
++    IDirect3DDevice9* const pDevice = createDevice(pD3D, hWnd, D3DSWAPEFFECT_DISCARD, false);
++    if (pDevice == nullptr) {
++      gFailures++;
++      return;
++    }
++    gpD3DDevices[kDevice] = pDevice;
++    IDirect3DTexture9* pSource = nullptr;
++    IDirect3DTexture9* pTexture = nullptr;
++    IDirect3DSurface9* pSourceLevel = nullptr;
++    IDirect3DSurface9* pLevel = nullptr;
++    if (FAILED(pDevice->CreateTexture(kWidth, 1, 1, 0, D3DFMT_A32B32G32R32F, D3DPOOL_SYSTEMMEM, &pSource, nullptr)) ||
++        FAILED(pDevice->CreateTexture(kWidth, 1, 1, 0, D3DFMT_A32B32G32R32F, D3DPOOL_DEFAULT, &pTexture, nullptr))) {
++      std::printf("skipped: no A32B32G32R32F texture on this device\n");
++      if (pSource != nullptr) {
++        pSource->Release();
++      }
++      clearTables();
++      pDevice->Release();
++      return;
++    }
++    pSource->GetSurfaceLevel(0, &pSourceLevel);
++    pTexture->GetSurfaceLevel(0, &pLevel);
++    gpD3DResources[50] = pSource;
++    gpD3DResources[51] = pTexture;
++
++    // As an upload into the source followed by the server's UpdateTexture command. Values leave [0, 1] on purpose.
++    const auto write = [&](const float base) {
++      D3DLOCKED_RECT lockedRect;
++      rewind_mode::keepSurface(pSourceLevel);
++      pSourceLevel->LockRect(&lockedRect, nullptr, 0);
++      for (UINT i = 0; i < kWidth * 4; i++) {
++        static_cast<float*>(lockedRect.pBits)[i] = base + 0.25f * static_cast<float>(i) - 1000.0f;
++      }
++      pSourceLevel->UnlockRect();
++      rewind_mode::noteUpdateTexture(pSource, pTexture);
++      return pDevice->UpdateTexture(pSource, pTexture);
++    };
++    const auto holds = [&](const float base) {
++      const std::vector<float> values = floats(pLevel);
++      bool same = values.size() == size_t(kWidth) * 4;
++      for (size_t i = 0; same && i < values.size(); i++) {
++        same = values[i] == base + 0.25f * static_cast<float>(i) - 1000.0f;
++      }
++      return same;
++    };
++
++    D3DLOCKED_RECT lockedRect;
++    expect(FAILED(pLevel->LockRect(&lockedRect, nullptr, D3DLOCK_READONLY)), "a level of a default pool texture cannot be locked");
++    expect(SUCCEEDED(write(1.0f)) && holds(1.0f), "the 4096x1 float texture holds what UpdateTexture wrote");
++
++    uint32_t stats[kStatCount] = {};
++    expect(run(kSnapshot) == S_OK, "snapshot with the default pool texture");
++    expect(SUCCEEDED(write(2.0f)) && rewind_mode::held(), "a write into it after the snapshot keeps the snapshot");
++    expect(holds(2.0f), "the write went through");
++    expect(run(kPlan, stats) == S_OK && stats[kStatSurfaces] == 2 && stats[kStatRefused] == 0, "plan: its contents and its source's are kept");
++    expect(run(kRewind) == S_OK, "rewind");
++    expect(holds(1.0f), "rewind: the default pool texture holds its contents at the snapshot, float for float");
++    expect(SUCCEEDED(write(3.0f)) && holds(3.0f) && run(kRewind) == S_OK && holds(1.0f), "a second write and a second rewind");
++    // The rewind marked the source dirty as a whole, so the game's next UpdateTexture copies all of it.
++    expect(SUCCEEDED(pDevice->UpdateTexture(pSource, pTexture)) && holds(1.0f), "the next UpdateTexture of the game finds source and texture alike");
++    expect(run(kDrop) == S_OK, "drop");
++
++    clearTables();
++    pLevel->Release();
++    pSourceLevel->Release();
++    pTexture->Release();
++    pSource->Release();
++    expect(pDevice->Release() == 0, "the device has no references left: nothing leaked");
++  }
 +}
 +
 +int main() {
@@ -2549,6 +2733,7 @@ index 00000000..2990a091
 +  testObjects(pD3D, hWnd);
 +  testDepth(pD3D, hWnd);
 +  testDiscardedDepth(pD3D, hWnd);
++  testDefaultPoolTexture(pD3D, hWnd);
 +
 +  pD3D->Release();
 +  DestroyWindow(hWnd);

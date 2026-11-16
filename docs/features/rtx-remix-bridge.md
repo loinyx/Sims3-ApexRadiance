@@ -215,8 +215,12 @@ kept and refuse every rewind to it, before anything changes.
 - **While a snapshot is held.** A destroy of an object alive at the snapshot is deferred. Before the first write into
   such a vertex buffer, index buffer or surface (an upload, `UpdateSurface`, `UpdateTexture`, `StretchRect`,
   `ColorFill`, `GetRenderTargetData`, `GetFrontBufferData`) the server keeps the old contents, and before the first
-  `SetLOD` or `SetAutoGenFilterType` the old value. Kept contents and deferred objects together stay under `rewindMaxKeptMB` (1024). The log
-  reports them every 128 MB; past the limit the snapshot is given up.
+  `SetLOD` or `SetAutoGenFilterType` the old value. A buffer or a lockable surface is read through a lock. A level of
+  a default pool texture cannot be locked, so the server copies it on the device into a render target of its format,
+  reads that into system memory, and puts it back with `UpdateSurface`. `UpdateTexture` copies only what is marked
+  dirty in its source and clears the marks, so a rewind marks the sources used since the snapshot dirty as a whole.
+  Kept contents and deferred objects together stay under `rewindMaxKeptMB` (1024). The log reports them every 128 MB;
+  past the limit the snapshot is given up.
 - **Rewind.** The server puts the kept contents back, releases the objects made since the snapshot, and restores the
   handle tables, render targets, device state and data queue positions. A query issued again since the snapshot answers
   with its result at the snapshot until the game issues it once more. The server then reads no command until the
