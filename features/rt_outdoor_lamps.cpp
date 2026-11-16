@@ -1100,6 +1100,13 @@ void PublishNeighbours(uint64_t active, const std::vector<std::pair<uint64_t, ui
     bool same = active == g_nbActive && want.size() == g_nb.size();
     for (size_t i = 0; same && i < want.size(); i++) same = want[i].first == g_nb[i].lot && want[i].second == g_nb[i].tracker;
     if (same) return;
+    // (neighbour hold) the same active lot keeps its neighbours while the camera moves, as the active lot is held: the list
+    // follows the camera, and each lot joining or leaving gathered its outdoor rooms again, so a lot's ground flipped between
+    // the game's map and the relit copy as the camera panned (85 regathers in 15 s, a shadow coming and going). A neighbour
+    // the game no longer has leaves at once; the rest change once the camera is still
+    if (active == g_nbActive && regather && LotLightingMotion::SampleCameraMoving() &&
+        std::all_of(g_nb.begin(), g_nb.end(), [](const Neighbour& n) { return LevelLightShare::TrackerLive(n.tracker); }))
+        return;
     const auto had = [](const std::vector<Neighbour>& v, const Neighbour& m) {
         return std::any_of(v.begin(), v.end(), [&m](const Neighbour& n) { return n.lot == m.lot && n.tracker == m.tracker; });
     };
