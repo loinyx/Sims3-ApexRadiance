@@ -241,3 +241,122 @@ if (mode === 'full') {
   const V = [...allVs.values()].map(x => stat(x.code)).filter(Boolean);
   console.log('all technique VS:', V.length, 'vs_3_0', V.filter(x => x.major === 3).length, 'vs_2_0', V.filter(x => x.major === 2).length, 'vs_1_1', V.filter(x => x.major === 1).length, '; slots max', Math.max(...V.map(x => x.slots)), '; rt const max idx', Math.max(...V.map(x => x.maxRt)), '; vs_3_0 outputs max', Math.max(...V.filter(x => x.major === 3).map(x => x.nIn)), ', with 12 outputs:', V.filter(x => x.major === 3 && x.nIn >= 12).length, ', 11:', V.filter(x => x.major === 3 && x.nIn === 11).length);
 }
+// ---- census mode (S0-04): per pass constant tables, LightmapSizeParameters readers, light-map coordinates and
+// directional-map weights. node precomp.cjs <precomp> census [techRegex] -> JSON on stdout (census-report.cjs makes the tables).
+// Pass layout (verified against decoded shaders): after the 'PASS' header come MRAP blocks (first = VS, second = PS):
+// 'MRAP', id, count, then count x (name, w1, w2); w1 = count<<24 | register<<14 | flags, so register = (w1>>>14)&0x3ff.
+function decodeShader(code) {
+  const ver = code.readUInt32LE(0), isPs = (ver >>> 16) === 0xffff;
+  const ins = [], defs = new Map(); let i = 4;
+  const P = v => ({ ty: ((v >>> 28) & 7) | ((v >>> 8) & 0x18), n: v & 0x7ff, sw: (v >>> 16) & 255, wm: (v >>> 16) & 15, mod: (v >>> 24) & 15, rel: (v >>> 13) & 1 });
+  while (i < code.length) {
+    const t = code.readUInt32LE(i), op = t & 0xffff;
+    if (op === 0xffff) break;
+    if (op === 0xfffe) { i += 4 + ((t >>> 16) & 0x7fff) * 4; continue; }
+    const len = (t >>> 24) & 15, ps = [];
+    for (let j = 0; j < len; j++) ps.push(code.readUInt32LE(i + 4 + j * 4));
+    if (op === 0x51) defs.set(ps[0] & 0x7ff, [1, 2, 3, 4].map(z => Math.round(code.readFloatLE(i + 4 + z * 4) * 1e4) / 1e4));
+    else if (op === 0x30 || op === 0x2f) defs.set(ps[0] & 0x7ff, null);
+    else if (op !== 0x1f && op !== 0 && len > 0) ins.push({ op, dst: P(ps[0]), src: ps.slice(1).map(P) });
+    i += 4 + len * 4;
+  }
+  return { isPs, ins, defs };
+}
+const OPN = { 1: 'mov', 2: 'add', 3: 'sub', 4: 'mad', 5: 'mul', 6: 'rcp', 7: 'rsq', 8: 'dp3', 9: 'dp4', 10: 'min', 11: 'max', 12: 'slt', 13: 'sge', 18: 'lrp', 19: 'frc', 0x20: 'pow', 0x23: 'abs', 0x24: 'nrm', 0x41: 'texkill', 0x42: 'texld', 0x58: 'cmp', 0x5a: 'dp2add', 0x5d: 'texldd', 0x5f: 'texldl' };
+const opn = o => OPN[o] || '0x' + o.toString(16);
+const swc = s => 'xyzw'[s & 3] + 'xyzw'[(s >> 2) & 3] + 'xyzw'[(s >> 4) & 3] + 'xyzw'[(s >> 6) & 3];
+if (mode === 'census') {
+  const re = new RegExp(arg || '.', 'i'), pop = v => { let c = 0; while (v) { c += v & 1; v >>>= 1; } return c; };
+  const dec = new Map(); const D = i => { if (!dec.has(i)) dec.set(i, decodeShader(blobs[i].code)); return dec.get(i); };
+  const isLmName = n => /^(LightMap|RoomLightMap|terrainLightMap|CASLightMap)$/.test(n);
+  const out = [];
+  for (let i = 0; i < techs.length; i++) {
+    const at = techs[i].index, end = i + 1 < techs.length ? techs[i + 1].index : k;
+    const name = names.get(b.readUInt32LE(at + 4)); if (!re.test(name)) continue;
+    const ps = [...text.slice(at + 12, end).matchAll(/PASS/g)].map(m => at + 12 + m.index);
+    ps.forEach((off, j) => {
+      const pend = j + 1 < ps.length ? ps[j + 1] : end;
+      const vi = b.readUInt32LE(off + 12) - 1, pi = b.readUInt32LE(off + 16) - 1;
+      const blocks = [];
+      for (let q = off + 20; q + 12 <= pend; q += 4) if (b.readUInt32LE(q) === 0x4d524150) {
+        const cnt = b.readUInt32LE(q + 8), ents = []; let r = q + 12, okb = true;
+        for (let e = 0; e < cnt; e++, r += 12) { const n = names.get(b.readUInt32LE(r)); if (!n || r + 12 > pend) { okb = false; break; } const w = b.readUInt32LE(r + 4); ents.push({ n, cnt: w >>> 24, reg: (w >>> 14) & 0x3ff }); }
+        if (okb) { blocks.push(ents); q = r - 4; }
+      }
+      let found = null;
+      for (let s = off + 24; s + 8 <= pend && !found; s += 4) {
+        const mask = b.readUInt32LE(s - 4); if (mask === 0 || mask > 0xffff) continue;
+        let n = 0; const list = [];
+        while (s + n * 8 + 8 <= pend && names.has(b.readUInt32LE(s + n * 8 + 4)) && b.readUInt32LE(s + n * 8) < 64) { list.push(names.get(b.readUInt32LE(s + n * 8 + 4))); n++; }
+        if (n && n === pop(mask)) found = { mask, list };
+      }
+      const samp = []; if (found) { let z = 0; for (let s = 0; s < 16; s++) if (found.mask >>> s & 1) samp.push([s, found.list[z++]]); }
+      const hasLsp = blocks.some(bl => bl.some(e => e.n === 'LightmapSizeParameters'));
+      const hasLm = samp.some(([, n]) => isLmName(n)), hasBasis = samp.some(([, n]) => /^LightBasisMap/.test(n));
+      if (!hasLsp && !hasLm && !hasBasis) return;
+      out.push({ tech: name, vi, pi, blocks, samp, hasLsp, hasLm, hasBasis });
+    });
+  }
+  const uniq = new Map();
+  for (const p of out) { const key = p.tech + '|' + p.vi + '|' + p.pi + '|' + JSON.stringify(p.samp); if (!uniq.has(key)) uniq.set(key, { ...p, count: 0 }); uniq.get(key).count++; }
+  const res = { passes: out.length, rows: [] };
+  // tokens that feed operand o (read by instruction `at`): ops in the expression tree, runtime constants, defs, inputs, texture reads
+  const desc = (d, at, o, set = new Set(), depth = 0) => {
+    const comp = o.sw & 3;
+    if (o.ty === 2) { const v = d.defs.get(o.n); set.add(v ? 'def' : `rtc${o.n}${o.rel ? '[a0]' : ''}`); }
+    else if (o.ty === 1 || o.ty === 3) set.add('in');
+    else if (o.ty === 0 && depth < 6) {
+      for (let z = at - 1; z >= 0; z--) {
+        const w = d.ins[z]; if (w.dst.ty !== 0 || w.dst.n !== o.n || !((w.dst.wm >> comp) & 1)) continue;
+        if (w.op === 0x42 || w.op === 0x5f) { set.add('tex'); break; }
+        set.add(opn(w.op)); w.src.forEach(x => desc(d, z, x, set, depth + 1)); break;
+      }
+    }
+    return depth ? set : [...set].sort().join('+');
+  };
+  const dirOf = (d, at, o, depth = 0) => { // nearest dp2add (N . direction) feeding operand o: "<n swizzle>.<def pair>"
+    if (o.ty !== 0 || depth > 6) return null; const comp = o.sw & 3;
+    for (let z = at - 1; z >= 0; z--) {
+      const w = d.ins[z]; if (w.dst.ty !== 0 || w.dst.n !== o.n || !((w.dst.wm >> comp) & 1)) continue;
+      if (w.op === 0x5a) { const c = w.src[1], v = c.ty === 2 && d.defs.get(c.n); return `${swc(w.src[0].sw).slice(0, 2)}.${v ? [v[c.sw & 3], v[(c.sw >> 2) & 3]].join(',') : 'rtc' + c.n}`; }
+      for (const x of w.src) { const r = dirOf(d, z, x, depth + 1); if (r) return r; }
+      return null;
+    }
+    return null;
+  };
+  for (const u of uniq.values()) {
+    const row = { tech: u.tech, vi: u.vi, pi: u.pi, count: u.count, hasLm: u.hasLm, hasBasis: u.hasBasis, samp: u.samp.map(([s, n]) => s + ':' + n).join(','), lsp: [], lmCoord: [], basisW: [], basisDir: [], vsMax: -1, psMax: -1, vsBound: -1, psBound: -1, psVer: 0, vsVer: 0 };
+    u.blocks.forEach((bl, bi) => {
+      const stage = bi === 0 ? 'VS' : 'PS', idx = bi === 0 ? u.vi : u.pi;
+      row[stage === 'VS' ? 'vsBound' : 'psBound'] = Math.max(-1, ...bl.map(e => e.reg + e.cnt - 1));
+      const e = bl.find(x => x.n === 'LightmapSizeParameters');
+      if (e && blobs[idx]) {
+        const d = D(idx), uses = [];
+        for (const ins of d.ins) ins.src.forEach(s => { if (s.ty === 2 && s.n >= e.reg && s.n < e.reg + e.cnt && !d.defs.has(s.n)) uses.push(`${opn(ins.op)}.${swc(s.sw)}->${['r', 'v', 'c', 'a', 'oT', 'ob', 'o'][ins.dst.ty] || ins.dst.ty}${ins.dst.n}`); });
+        row.lsp.push({ stage, reg: e.reg, reads: uses.length, uses: [...new Set(uses)] });
+      }
+    });
+    if (blobs[u.vi]) { const s = stat(blobs[u.vi].code); if (s) { row.vsMax = s.maxRt; row.vsVer = s.major; } }
+    if (blobs[u.pi]) { const s = stat(blobs[u.pi].code); if (s) { row.psMax = s.maxRt; row.psVer = s.major; } }
+    if (blobs[u.pi] && (u.hasLm || u.hasBasis)) {
+      const d = D(u.pi), name = Object.fromEntries(u.samp);
+      d.ins.forEach((ins, at) => {
+        if (ins.op !== 0x42 && ins.op !== 0x5f) return;
+        const sn = name[ins.src[1].n]; if (!sn) return;
+        const co = ins.src[0];
+        if (isLmName(sn) || /^LightBasisMap/.test(sn)) row.lmCoord.push(`${sn}<-${co.ty === 1 || co.ty === 3 ? 'in' + co.n : desc(d, at, co)}.${swc(co.sw)}`);
+        if (/^LightBasisMap/.test(sn)) { // first reader of the sampled colour: a weight (mul/mad) or a luminance dot (dp3)
+          const z = d.ins.findIndex((w, q) => q > at && w.src.some(x => x.ty === 0 && x.n === ins.dst.n));
+          if (z < 0) { row.basisW.push(`${sn}*none`); return; }
+          const w = d.ins[z], si = w.src.findIndex(x => x.ty === 0 && x.n === ins.dst.n);
+          if (w.op === 4 || w.op === 5) { const wo = w.src[w.op === 4 ? (si === 0 ? 1 : 0) : 1 - si]; row.basisW.push(`${sn}*W:${desc(d, z, wo)}`); row.basisDir.push(`${sn}=${dirOf(d, z, wo)}`); }
+          else if (w.op === 8) row.basisW.push(`${sn}*LUM:${desc(d, z, w.src[1 - si])}`);
+          else row.basisW.push(`${sn}*${opn(w.op)}`);
+        }
+      });
+    }
+    res.rows.push(row);
+  }
+  console.log(JSON.stringify(res));
+}
+if (mode === 'blob') { fs.writeFileSync(process.argv[5], blobs[+arg].code); } // blob <idx> <outfile>: raw shader bytecode for fxc /dumpbin
