@@ -250,6 +250,7 @@
     <ClCompile Include="patches\depth_blur_patch.cpp" />
     <ClCompile Include="patches\edge_smoothing_patch.cpp" />
     <ClCompile Include="patches\frame_capture_patch.cpp" />
+    <ClCompile Include="patches\gbuffer_patch.cpp" />
     <ClCompile Include="patches\looks_patch.cpp" />
     <ClCompile Include="patches\night_terrain_relight_patch.cpp" />
     <ClCompile Include="patches\performance_patches.cpp" />
@@ -295,6 +296,7 @@
     <ClInclude Include="build_flavor.h" />
     <ClInclude Include="features\depth_share.h" />
     <ClInclude Include="features\dxt_codec.h" />
+<ClInclude Include="features\gbuffer_motion.h" />
     <ClInclude Include="features\fast_dxt.h" />
     <ClInclude Include="features\fast_refpack.h" />
     <ClInclude Include="features\cas_tri_sort.h" />
