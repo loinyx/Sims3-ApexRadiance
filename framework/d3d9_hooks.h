@@ -188,6 +188,22 @@ HRESULT CallOriginalSetTexture(IDirect3DDevice9* device, DWORD stage, IDirect3DB
 // ShaderStateChanged. The pointers are identities: the device holds the references.
 IDirect3DPixelShader9* BoundPixelShader(IDirect3DDevice9* device);
 IDirect3DVertexShader9* BoundVertexShader(IDirect3DDevice9* device);
+// Lazy restore (render thread; development switch lazy_shader_restore). A fix that drew with its own shader pair leaves it
+// bound and names the game's pair; it is put back before the next draw that reaches the device, a Present or a BeginScene,
+// and a Set*Shader of a slot (the game's or CallOriginal*) replaces that slot's. Meanwhile BoundPixelShader /
+// BoundVertexShader answer the game's pair. Draws that bypass these detours (the UP draws, state blocks applied) are not
+// covered. ReuseDeferredShaders: true when the restore pending is for (gamePs, gameVs) and the device still holds
+// (ownPs, ownVs): the restore is dropped and the caller draws without setting them again; check reads the pair back
+// from the device and counts a difference (then false). Code that reads the device's shaders itself to put them back later
+// (its own passes, state blocks) calls SettleDeferredShaders first.
+struct DeferredRestoreCounts {
+    uint32_t deferred = 0, reused = 0, flushed = 0, checked = 0, mismatches = 0;
+};
+void DeferShaderRestore(IDirect3DDevice9* device, IDirect3DPixelShader9* gamePs, IDirect3DVertexShader9* gameVs);
+bool ReuseDeferredShaders(IDirect3DDevice9* device, IDirect3DPixelShader9* gamePs, IDirect3DVertexShader9* gameVs, IDirect3DPixelShader9* ownPs,
+                          IDirect3DVertexShader9* ownVs, bool check);
+DeferredRestoreCounts DeferredRestoreCountsNow();
+void SettleDeferredShaders(IDirect3DDevice9* device);
 // (2.15.3) The texture bound at a pixel sampler (0..15), followed the same way through SetTexture and CallOriginalSetTexture
 // (other stages: read back every time). No reference is added: an identity the device holds; a caller that keeps it past
 // a texture change adds its own. One answer in 256 is checked against the device; after 8 differences in a session the

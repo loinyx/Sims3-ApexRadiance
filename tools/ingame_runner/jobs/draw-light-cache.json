@@ -1,0 +1,29 @@
+{
+  "id": "draw-light-cache",
+  "description": "Smoke run for the per-draw light cache (docs/features/performance/per-draw-light-cache.md): the night save panned at 150 m with developer mode on, the draw cache and the lazy shader restore on with their check mode, so every cached answer and every reused shader pair is compared. Passes when the draw cost line shows the new parts and both checks count no difference. Not a timing run.",
+  "save": "ApexTest-Night",
+  "toml": {
+    "ui": { "developer_mode": true },
+    "dev_build": { "draw_light_cache": true, "lazy_shader_restore": true, "draw_light_cache_check": true }
+  },
+  "variants": {
+    "check": {
+      "expect": [
+        "\\[DevBuild\\] Per-draw light switches: draw_light_cache on, lazy_shader_restore on, draw_light_cache_check on",
+        "of it the outdoor objects' world matrix, lamp pick and gates",
+        "object draw cache: [1-9]\\d* reused, \\d+ computed, \\d+ not used, [1-9]\\d* checked, 0 differed",
+        "lazy shader restore: \\d+ left bound, [1-9]\\d* reused, \\d+ put back, [1-9]\\d* checked, 0 differed"
+      ],
+      "fail": [
+        "object draw cache: \\d+ reused, \\d+ computed, \\d+ not used, \\d+ checked, [1-9]\\d* differed",
+        "lazy shader restore: \\d+ left bound, \\d+ reused, \\d+ put back, \\d+ checked, [1-9]\\d* differed",
+        "Object draw cache: a kept answer differs"
+      ]
+    }
+  },
+  "steps": [
+    { "do": "speed", "speed": "normal" },
+    { "do": "camera_pan", "lots": 8, "height": 150, "seconds": 40, "passes": 4 },
+    { "do": "wait", "minutes": 3, "measure": false }
+  ]
+}

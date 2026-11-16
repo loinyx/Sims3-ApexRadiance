@@ -6141,6 +6141,31 @@ struct FolStepTimer {
         g_folStepTicks[step] += b.QuadPart - a.QuadPart, g_folStepCalls[step]++;
     }
 };
+// (development builds) the parts of the outdoor object and room map fixes on the timed draws (DrawCostSampled), one lap per
+// part in order; the draw's own driver time is left out of the part that makes it (per-draw-light-cache.md)
+enum FixStep { kObjSetup, kObjPick, kObjSets, kObjDraw, kObjRestore, kRoomCopies, kRoomConsts, kRoomArch, kRoomDraw, kFixSteps };
+constexpr const char* kFixStepNames[kFixSteps] = {
+    "outdoor objects' atlas, patched copies and vertex copy", "outdoor objects' world matrix, lamp pick and gates",
+    "outdoor objects' constants and atlas set", "outdoor objects' shaders set and put back", "outdoor objects' constants and atlas put back",
+    "room maps' patched copies and caps", "room maps' map constants", "room maps' arch rows", "room maps' sets and restore",
+};
+int64_t g_fixStepTicks[kFixSteps] = {};
+uint32_t g_fixStepCalls[kFixSteps] = {};
+extern int64_t g_drawCostDriver; // (below: the driver time of the timed draw's own draws)
+struct FixLaps {
+    bool on = !kPublicBuild && g_drawCostTimed;
+    LARGE_INTEGER a{};
+    FixLaps() {
+        if (on) QueryPerformanceCounter(&a);
+    }
+    void Lap(FixStep step, int64_t leaveOut = 0) {
+        if (!on) return;
+        LARGE_INTEGER b;
+        QueryPerformanceCounter(&b);
+        g_fixStepTicks[step] += b.QuadPart - a.QuadPart - leaveOut, g_fixStepCalls[step]++;
+        a = b;
+    }
+};
 int PickFenceLamps(const GroupCentre& g, bool reachLaw, float (*lamps)[4], float& lampTop, float& share, LampCone* cones, float* vis) {
     if (kPublicBuild || !g_drawCostTimed) return PickFenceLampsMemo(g, reachLaw, lamps, lampTop, share, cones, vis);
     LARGE_INTEGER a, b;
@@ -7219,10 +7244,86 @@ bool ObjectLampPoint(const float (&m)[3][4], float (&p)[3]) {
     return true;
 }
 
+// An outdoor object's lamp pick from its world matrix: the point (moved onto its wall's line for a window), the lamps and
+// their rows, the ground share, the highest lamp head and the ground pool's height gate. share, top and pool start at
+// DrawObjectLamp's values (no lamp: 1, none, 1).
+int ObjPickLamps(const float (&at)[3], float nearSkip, bool reach, float (*lamps)[4], float& share, float& top, float& pool) {
+    constexpr unsigned N = ShaderPatches::kObjectPixelLamps;
+    share = 1.0f, top = -1e9f, pool = 1.0f;
+    const int n = PickObjectLamps(at[0], at[1], at[2], lamps, share, nearSkip, lamps + 1 + 2 * N, &top, reach ? lamps + 1 + 4 * N : nullptr, true);
+    // The atlas represents light on the lot ground. Upper cornice pieces
+    // must not acquire different pools from their nearest lamp-head lists.
+    // Direct pixel lamps remain responsible for those elevated surfaces.
+    if (const LotRect* lot = FindLotAt(at[0], at[2])) pool = GroundShadow::GroundPoolHeightGate(at[1], lot->ty);
+    return n;
+}
+// (development builds, draw_light_cache; per-draw-light-cache.md) ObjPickLamps' answers by draw: an outdoor object's world
+// matrix (the VS world triple) and the law. The shaders and textures are not in the key: nothing kept here reads them. Valid
+// while the lamp list (g_lampMemoGen), the walls, slabs and switches the lamp test reads (LampVisibilityState) and the lots
+// (g_lotRectsGen) are the same; a camera pan moves none of them. NoteGate still runs every draw (it keeps a gate's fence
+// gap closed). Not used where the pick memo is not (turned off after a difference, F8 records, a capture). 512 entries,
+// direct-mapped, made at the first use.
+constexpr unsigned kObjMemoRows = 1 + 4 * ShaderPatches::kObjectPixelLamps + 2;
+constexpr unsigned kObjMemoKey = 13;
+struct ObjDrawMemo {
+    uint32_t gen = 0; // 0 = empty
+    uint64_t state = 0;
+    uint32_t lotGen = 0;
+    uint32_t key[kObjMemoKey] = {};
+    bool inWall = false;
+    int nLamps = 0;
+    float at[3] = {}, share = 0.0f, top = 0.0f, pool = 0.0f;
+    float lamps[kObjMemoRows][4] = {};
+};
+std::vector<ObjDrawMemo> g_objMemo;
+uint32_t g_objMemoHits = 0, g_objMemoMisses = 0, g_objMemoBypass = 0, g_objMemoChecks = 0, g_objMemoDiffs = 0;
+ObjDrawMemo* ObjDrawMemoFor(const float (&m)[3][4], bool reach, bool& hit) {
+    hit = false;
+    if (!DevSwitches::DrawLightCache()) return nullptr;
+    if (g_pickMemoOff || LevelLightShare::VisibilityDiagArmed() || LightProbe::Capturing()) {
+        g_objMemoBypass++;
+        return nullptr;
+    }
+    uint32_t key[kObjMemoKey];
+    static_assert(sizeof m == 12 * sizeof(uint32_t));
+    std::memcpy(key, m, sizeof m);
+    key[12] = (reach ? 1u : 0u) | (g_windowOutdoor.load(std::memory_order_relaxed) ? 2u : 0u);
+    uint32_t h = 2166136261u;
+    for (uint32_t v : key) h = (h ^ v) * 16777619u;
+    if (g_objMemo.empty()) g_objMemo.resize(512);
+    ObjDrawMemo& e = g_objMemo[(h * 2654435761u) >> 23]; // top 9 bits
+    const uint64_t state = LevelLightShare::LampVisibilityState();
+    hit = e.gen == g_lampMemoGen && e.state == state && e.lotGen == g_lotRectsGen && std::memcmp(e.key, key, sizeof key) == 0;
+    if (!hit) e.gen = 0, e.state = state, e.lotGen = g_lotRectsGen, std::memcpy(e.key, key, sizeof key); // (filled by ObjDrawMemoKeep)
+    return &e;
+}
+void ObjDrawMemoKeep(ObjDrawMemo& e, bool inWall, const float (&at)[3], int n, const float (*lamps)[4], float share, float top, float pool) {
+    e.gen = g_lampMemoGen, e.inWall = inWall, e.nLamps = n, e.share = share, e.top = top, e.pool = pool;
+    std::memcpy(e.at, at, sizeof e.at);
+    std::memcpy(e.lamps, lamps, sizeof e.lamps);
+}
+// (draw_light_cache_check) the kept answer against one computed now from the same defaults; false (counted, the first logged)
+// when any bit differs: the draw then computes its own
+bool ObjDrawMemoSame(const ObjDrawMemo& e, const float (&m)[3][4], bool reach, const float (*defaults)[4]) {
+    g_objMemoChecks++;
+    float lamps[kObjMemoRows][4], at[3], share, top, pool;
+    std::memcpy(lamps, defaults, sizeof lamps);
+    const bool inWall = ObjectLampPoint(m, at);
+    const uint32_t leftOut0 = g_objLampsLeftOut, dimmed0 = g_objLampsDimmed;
+    const int n = ObjPickLamps(at, inWall ? kWindowWallSkip : 0.2f, reach, lamps, share, top, pool);
+    g_objLampsLeftOut = leftOut0, g_objLampsDimmed = dimmed0; // (counted by the draw)
+    const bool same = inWall == e.inWall && n == e.nLamps && std::memcmp(at, e.at, sizeof at) == 0 && FloatBits(share) == FloatBits(e.share) &&
+                      FloatBits(top) == FloatBits(e.top) && FloatBits(pool) == FloatBits(e.pool) && std::memcmp(lamps, e.lamps, sizeof lamps) == 0;
+    if (!same && g_objMemoDiffs++ == 0)
+        LOG_WARNING(std::format("[LotLightBridge] Object draw cache: a kept answer differs at ({:.2f} {:.2f} {:.2f}): {} lamps kept, {} now; share {} / {}, top {} / {}, pool {} / {}",
+                                at[0], at[1], at[2], e.nLamps, n, e.share, share, e.top, top, e.pool, pool));
+    return same;
+}
 template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn draw) {
     // rig modes 2 (outdoors) and 1 (roofless fenced areas) both draw with the exterior technique (rig report 25/09)
     const int rigMode = RigMode();
     if (!g_objPixel.load(std::memory_order_relaxed) || (rigMode != 2 && rigMode != 1)) return false;
+    FixLaps laps;
     // (12/10, one daytime curve; a red garden post by day: salmon columns and window frames) No full-daylight gate any more:
     // by day the game's rig lamps (and Apex's rig boost, ObjectLightBridge BoostRec) lit outdoor objects at full night
     // strength. The pass runs at every level: the per-pixel lamps replace the rig at strength x LampDay(night), and a draw
@@ -7247,6 +7348,7 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
     const bool reach = p.obj.reachConst != 0;
     IDirect3DVertexShader9* vs = ObjectVsFor(dev, g_curVs);
     if (!vs) return false;
+    laps.Lap(kObjSetup);
     float s[4] = {TerrainLightingPolicy::SurfaceLampGain(g_night.load(std::memory_order_relaxed),
                        g_objPixelStrength.load(std::memory_order_relaxed)), 0, 0, 0};
     float groundShare = 1.0f; // the share of the nearby lamps' light no wall blocks (below)
@@ -7281,17 +7383,26 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
             // (F7 capture, 06/10: the turned window's frame got 0 of 19 lamps and no ground light). Off: the 0.2 m as before.
             // only an object set in its wall (ObjectLampPoint moved it onto the wall line) passes a wall within kWindowWallSkip;
             // loose objects keep 0.2 m, so a wall 0.4 m behind an armchair still blocks the next room's lamp (F7 capture, 07/10)
+            // (development builds, draw_light_cache) the same matrix's answers, kept (ObjDrawMemoFor); lamps holds the defaults here
+            static_assert(sizeof lamps == sizeof ObjDrawMemo::lamps);
+            bool hit = false;
+            ObjDrawMemo* const memo = ObjDrawMemoFor(m, reach, hit);
+            if (hit && DevSwitches::DrawLightCacheCheck() && !ObjDrawMemoSame(*memo, m, reach, lamps)) hit = false;
             float at[3];
-            const bool inWall = ObjectLampPoint(m, at);
+            const bool inWall = hit ? memo->inWall : ObjectLampPoint(m, at);
+            if (hit) std::memcpy(at, memo->at, sizeof at);
             const bool gate = !inWall && NoteGate(m[0][3], m[1][3], m[2][3]);
             const float nearSkip = inWall ? kWindowWallSkip : 0.2f;
-            nLamps = PickObjectLamps(at[0], at[1], at[2], lamps, groundShare, nearSkip, lamps + 1 + 2 * N, &lampTop, reach ? lamps + kLampRows : nullptr, true);
+            if (hit) {
+                g_objMemoHits++;
+                nLamps = memo->nLamps;
+                std::memcpy(lamps, memo->lamps, sizeof lamps);
+                groundShare = memo->share, lampTop = memo->top, poolGate = memo->pool;
+            } else {
+                nLamps = ObjPickLamps(at, nearSkip, reach, lamps, groundShare, lampTop, poolGate);
+                if (memo) g_objMemoMisses++, ObjDrawMemoKeep(*memo, inWall, at, nLamps, lamps, groundShare, lampTop, poolGate);
+            }
             originY = at[1];
-            // The atlas represents light on the lot ground. Upper cornice pieces
-            // must not acquire different pools from their nearest lamp-head lists.
-            // Direct pixel lamps remain responsible for those elevated surfaces.
-            if (const LotRect* lot = FindLotAt(at[0], at[2]))
-                poolGate = GroundShadow::GroundPoolHeightGate(originY, lot->ty);
             // the rig goes: its 3 pixel lamps (PS c5..c7 = 0 below, diffuse and specular) and its 4 vertex lights (the VS
             // colour constants = 0; Phong's ambient term in COLOR0 stays)
             lamps[0][1] = TerrainLightingPolicy::SurfaceLampGain(g_night.load(std::memory_order_relaxed),
@@ -7306,6 +7417,7 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
             lamps[0][0] = 1.0f; // no directionless ground light on vertical faces
         }
     }
+    laps.Lap(kObjPick);
     // A household photo lights its Sim with the rig alone, far from any lamp: zeroing it halved blond hair (the draws on the
     // object rig shaders). A reflection with lamps near keeps the per-pixel lamps.
     if (zeroRig && nLamps == 0 && g_offScreenTarget) return false;
@@ -7367,15 +7479,26 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
                 SetVsConst(dev, static_cast<UINT>(vl), &scaled[0][0], 4);
             }
         }
-        SetVs(dev, vs);
-        SetPs(dev, p.ps);
+        laps.Lap(kObjSets);
+        const int64_t driver0 = g_drawCostDriver;
+        // (development builds, lazy_shader_restore) the pair the last outdoor object draw left bound, for the same game pair: kept
+        const bool lazy = DevSwitches::LazyShaderRestore();
+        if (!lazy || !D3D9Hooks::ReuseDeferredShaders(dev, originalPs, originalVs, p.ps, vs, DevSwitches::DrawLightCacheCheck())) {
+            SetVs(dev, vs);
+            SetPs(dev, p.ps);
+        }
         draw();
-        SetPs(dev, originalPs);
-        SetVs(dev, originalVs);
+        if (lazy) D3D9Hooks::DeferShaderRestore(dev, originalPs, originalVs);
+        else {
+            SetPs(dev, originalPs);
+            SetVs(dev, originalVs);
+        }
+        laps.Lap(kObjDraw, g_drawCostDriver - driver0);
         if ((zeroRig || rigDay) && vl >= 0) SetVsConst(dev, static_cast<UINT>(vl), &oldVl[0][0], 4);
         if ((zeroRig || rigDay) && p.obj.rigLamps) SetPsConst(dev, 5, &oldRig[0][0], 3);
         consts.Restore();
     }
+    laps.Lap(kObjRestore);
     g_objDrawInfo.clear();
     g_inOwnCall = false;
     ApexUtil::CountOne(g_objLampDrawn);
@@ -8070,6 +8193,7 @@ template <typename DrawFn> bool DrawRoomMapWalls(IDirect3DDevice9* dev, DWORD ma
 }
 template <typename DrawFn> bool DrawRoomMapSmooth(IDirect3DDevice9* dev, DrawFn draw) {
     if (!g_roomMapSmooth.load(std::memory_order_relaxed)) return false;
+    FixLaps laps;
     PatchedPs& p = PatchedFor(dev, g_roomMapSmoothPs, "Smooth light maps", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchRoomMapSmooth(t, pp.room, false); });
     PatchedPs* a = DevSwitches::ArchAmbient() ? ArchCopyOrNull(PatchedFor(dev, g_roomMapSmoothArchPs, "Smooth light maps (arches)", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchRoomMapSmooth(t, pp.room, true); }, true))
                                               : nullptr;
@@ -8079,14 +8203,19 @@ template <typename DrawFn> bool DrawRoomMapSmooth(IDirect3DDevice9* dev, DrawFn 
         if (p.ps) g_roomCapsRefused.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
+    laps.Lap(kRoomCopies);
     float size[4], band[4];
     bool wall = false;
     if (!RoomMapConsts(dev, plainOk ? p.room : a->room, size, band, wall)) return false;
+    laps.Lap(kRoomConsts);
     float rows[kArchRows * 4] = {};
     IDirect3DBaseTexture9* nbCube = nullptr;
     const int cells = a ? ArchRowsFor(dev, a->room, band, 0, rows, nbCube) : 0;
+    laps.Lap(kRoomArch);
+    const int64_t driver0 = g_drawCostDriver;
     if (a && (cells > 0 || !plainOk)) DrawWithRoomMap(dev, a->ps, a->room, size, band, rows, nbCube, draw);
     else if (wall || !DrawRoomMapWalls(dev, p.room.sampler, size, band, draw)) DrawWithRoomMap(dev, p.ps, p.room, size, band, nullptr, nullptr, draw);
+    laps.Lap(kRoomDraw, g_drawCostDriver - driver0);
     ApexUtil::CountOne(wall ? g_roomWallDrawn : g_roomFloorDrawn);
     return true;
 }
@@ -10788,6 +10917,7 @@ struct DrawCostRow {
     uint32_t draws = 0;
 };
 DrawCostRow g_drawCost[kClaimSourceCount + 2]; // [kClaimSourceCount]: several sources, [+1]: not claimed
+std::unordered_map<uint32_t, DrawCostRow> g_drawCostSeveral; // the "several fixes" row by its sources' mask
 uint32_t g_drawCostTick = 0, g_drawCostFrame0 = 0;
 DWORD g_drawCostLogAt = 0;
 int64_t g_drawCostDriver = 0;
@@ -10854,6 +10984,36 @@ void LogDrawCost() {
                                     static_cast<double>(g_folStepTicks[s]) * msPerTick * 1000.0 / g_folStepCalls[s]);
         for (int s = 0; s < 8; s++) g_folStepTicks[s] = 0, g_folStepCalls[s] = 0;
     }
+    for (int s = 0; s < kFixSteps; s++) {
+        if (g_fixStepCalls[s])
+            arch += std::format(" | of it the {}: {:.0f} a frame, {:.2f} us each", kFixStepNames[s], g_fixStepCalls[s] * scale,
+                                static_cast<double>(g_fixStepTicks[s]) * msPerTick * 1000.0 / g_fixStepCalls[s]);
+        g_fixStepTicks[s] = 0, g_fixStepCalls[s] = 0;
+    }
+    {
+        // the three costliest source sets of "several fixes"
+        std::vector<std::pair<uint32_t, DrawCostRow>> sets(g_drawCostSeveral.begin(), g_drawCostSeveral.end());
+        std::sort(sets.begin(), sets.end(), [](const auto& a, const auto& b) { return a.second.ticks - a.second.driver > b.second.ticks - b.second.driver; });
+        for (size_t i = 0; i < sets.size() && i < 3; i++) {
+            std::string names;
+            for (uint32_t m = sets[i].first; m; m &= m - 1) names += std::format("{}{}", names.empty() ? "" : "+", kClaimSourceNames[std::countr_zero(m)]);
+            const DrawCostRow& r = sets[i].second;
+            arch += std::format(" | several fixes {}: {:.0f} draws a frame, {:.2f} us each", names, r.draws * scale, static_cast<double>(r.ticks - r.driver) * msPerTick * 1000.0 / r.draws);
+        }
+        g_drawCostSeveral.clear();
+    }
+    if (DevSwitches::DrawLightCache() || DevSwitches::LazyShaderRestore()) {
+        // (per-draw-light-cache.md) since the last line
+        static uint32_t s_obj[5] = {};
+        static D3D9Hooks::DeferredRestoreCounts s_lazy;
+        const D3D9Hooks::DeferredRestoreCounts lazy = D3D9Hooks::DeferredRestoreCountsNow();
+        arch += std::format(" | object draw cache: {} reused, {} computed, {} not used, {} checked, {} differed; lazy shader restore: {} left bound, {} reused, "
+                            "{} put back, {} checked, {} differed",
+                            g_objMemoHits - s_obj[0], g_objMemoMisses - s_obj[1], g_objMemoBypass - s_obj[2], g_objMemoChecks - s_obj[3], g_objMemoDiffs - s_obj[4],
+                            lazy.deferred - s_lazy.deferred, lazy.reused - s_lazy.reused, lazy.flushed - s_lazy.flushed, lazy.checked - s_lazy.checked,
+                            lazy.mismatches - s_lazy.mismatches);
+        s_obj[0] = g_objMemoHits, s_obj[1] = g_objMemoMisses, s_obj[2] = g_objMemoBypass, s_obj[3] = g_objMemoChecks, s_obj[4] = g_objMemoDiffs, s_lazy = lazy;
+    }
     g_archRowsTicks = 0, g_archRowsCalls = 0, g_fencePickTicks = 0, g_fencePickCalls = 0;
     {
         long w[kIndoorWhy];
@@ -10890,6 +11050,10 @@ template <typename DrawFn> D3D9Hooks::HookAction DrawCostSampled(IDirect3DDevice
     row.ticks += t1.QuadPart - t0.QuadPart;
     row.driver += g_drawCostDriver;
     row.draws++;
+    if (m & (m - 1)) {
+        DrawCostRow& set = g_drawCostSeveral[m];
+        set.ticks += t1.QuadPart - t0.QuadPart, set.driver += g_drawCostDriver, set.draws++;
+    }
     if (const DWORD now = GetTickCount(); now - g_drawCostLogAt >= 10000) {
         if (g_drawCostLogAt) LogDrawCost();
         else g_drawCostFrame0 = g_roomMapFrame, std::fill(std::begin(g_drawCost), std::end(g_drawCost), DrawCostRow{});

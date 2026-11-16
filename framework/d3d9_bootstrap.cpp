@@ -141,6 +141,7 @@ void FrameInit(IDirect3DDevice9* dev) {
 HRESULT STDMETHODCALLTYPE Hooked_EndScene(IDirect3DDevice9* dev) {
     if (t_inEndScene || !dev) return o_endScene(dev);
     t_inEndScene = true;
+    D3D9Hooks::SettleDeferredShaders(dev); // (the overlay's state block and the end-of-scene passes read the shaders back)
     // 07/10, players' Runtime Error: nothing Apex does here may throw into the game's EndScene. Each step is caught on its
     // own (HookGuard: noted, then that step stays off), and the game's EndScene always runs, once.
     if (!g_frameInit.exchange(true)) HookGuard::Try("D3D frame init", [dev] { FrameInit(dev); });

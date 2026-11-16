@@ -597,13 +597,44 @@ inline void ForgetBoundTex(DWORD st) {
     if (!OnRenderThread()) g_shadersDirty.store(true, std::memory_order_relaxed);
     else g_boundTexKnown &= ~(1u << st);
 }
+// ---- the game's shader pair put back late (DeferShaderRestore), render thread ----
+// A set of that slot (the game's or a fix's) replaces it; the draws, Present and BeginScene put it back first.
+struct DeferredShaders {
+    IDirect3DDevice9* dev = nullptr;
+    IDirect3DPixelShader9* ps = nullptr;
+    IDirect3DVertexShader9* vs = nullptr;
+    bool psOn = false, vsOn = false;
+};
+DeferredShaders g_deferred;
+DeferredRestoreCounts g_deferredCounts;
 inline void NoteBoundPs(IDirect3DDevice9* d, IDirect3DPixelShader9* s) {
     if (!OnRenderThread()) g_shadersDirty.store(true, std::memory_order_relaxed);
-    else if (d == g_boundDev) g_boundPs = s, g_boundPsKnown = true;
+    else {
+        if (d == g_deferred.dev) g_deferred.psOn = false; // (the slot holds what its last setter wanted)
+        if (d == g_boundDev) g_boundPs = s, g_boundPsKnown = true;
+    }
 }
 inline void NoteBoundVs(IDirect3DDevice9* d, IDirect3DVertexShader9* s) {
     if (!OnRenderThread()) g_shadersDirty.store(true, std::memory_order_relaxed);
-    else if (d == g_boundDev) g_boundVs = s, g_boundVsKnown = true;
+    else {
+        if (d == g_deferred.dev) g_deferred.vsOn = false;
+        if (d == g_boundDev) g_boundVs = s, g_boundVsKnown = true;
+    }
+}
+inline void FlushDeferredShaders(IDirect3DDevice9* d) {
+    if ((!g_deferred.psOn && !g_deferred.vsOn) || d != g_deferred.dev || !OnRenderThread()) return;
+    const DeferredShaders w = g_deferred;
+    g_deferred.psOn = g_deferred.vsOn = false;
+    g_deferredCounts.flushed++;
+    // (as CallOriginalSet*Shader)
+    if (w.psOn) {
+        if (SUCCEEDED(o_sps ? o_sps(d, w.ps) : d->SetPixelShader(w.ps))) NoteBoundPs(d, w.ps);
+        else ForgetBoundShaders();
+    }
+    if (w.vsOn) {
+        if (SUCCEEDED(o_svs ? o_svs(d, w.vs) : d->SetVertexShader(w.vs))) NoteBoundVs(d, w.vs);
+        else ForgetBoundShaders();
+    }
 }
 // Render thread: follow this device's shaders from now on (another device's were followed)
 inline void TakeBoundDevice(IDirect3DDevice9* d) {
@@ -613,6 +644,7 @@ inline void TakeBoundDevice(IDirect3DDevice9* d) {
 HRESULT STDMETHODCALLTYPE H_DrawIndexedPrimitive(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, INT bv, UINT mv, UINT nv, UINT si, UINT pc) {
     HRESULT hr = S_OK;
     if (!Run(g_dip, d, hr, t, bv, mv, nv, si, pc)) return hr;
+    FlushDeferredShaders(d); // (the draw that reaches the device: the game's pair, unless a fix took the kept one)
     if (const Trace* tr = CurrentTrace(); tr && tr->draw) g_traceCaller = _ReturnAddress(), tr->draw(d, "DIP", t, pc, nullptr, 0, 0);
     if (!kPublicBuild && t_reissue) return TimedReissueDraw([&] { return o_dip(d, t, bv, mv, nv, si, pc); });
     return o_dip(d, t, bv, mv, nv, si, pc);
@@ -620,6 +652,7 @@ HRESULT STDMETHODCALLTYPE H_DrawIndexedPrimitive(IDirect3DDevice9* d, D3DPRIMITI
 HRESULT STDMETHODCALLTYPE H_DrawPrimitive(IDirect3DDevice9* d, D3DPRIMITIVETYPE t, UINT sv, UINT pc) {
     HRESULT hr = S_OK;
     if (!Run(g_dp, d, hr, t, sv, pc)) return hr;
+    FlushDeferredShaders(d);
     if (const Trace* tr = CurrentTrace(); tr && tr->draw) g_traceCaller = _ReturnAddress(), tr->draw(d, "DP", t, pc, nullptr, 0, 0);
     if (!kPublicBuild && t_reissue) return TimedReissueDraw([&] { return o_dp(d, t, sv, pc); });
     return o_dp(d, t, sv, pc);
@@ -659,6 +692,7 @@ HRESULT STDMETHODCALLTYPE H_SetTexture(IDirect3DDevice9* d, DWORD st, IDirect3DB
 }
 HRESULT STDMETHODCALLTYPE H_Present(IDirect3DDevice9* d, const RECT* sr, const RECT* dr, HWND w, const RGNDATA* rg) {
     HRESULT hr = S_OK;
+    FlushDeferredShaders(d);
     ForgetBoundShaders(); // (the menu overlay's state block restored them at EndScene; a Reset may follow)
     ReclaimRetired();
     if (!kPublicBuild && ThreadId() == g_renderTid.load(std::memory_order_relaxed)) LogDispatchCost();
@@ -670,6 +704,7 @@ HRESULT STDMETHODCALLTYPE H_Present(IDirect3DDevice9* d, const RECT* sr, const R
 }
 HRESULT STDMETHODCALLTYPE H_BeginScene(IDirect3DDevice9* d) {
     HRESULT hr = S_OK;
+    FlushDeferredShaders(d);
     ForgetBoundShaders();
     if (!Run(g_begin, d, hr)) return hr;
     return o_begin(d);
@@ -886,6 +921,7 @@ HRESULT CallOriginalSetVertexShader(IDirect3DDevice9* d, IDirect3DVertexShader9*
 
 IDirect3DPixelShader9* BoundPixelShader(IDirect3DDevice9* d) {
     const bool render = OnRenderThread();
+    if (render && g_deferred.psOn && d == g_deferred.dev) return g_deferred.ps; // (the game's, put back before the next draw)
     if (render && g_shadersDirty.load(std::memory_order_relaxed) && g_shadersDirty.exchange(false)) g_boundPsKnown = g_boundVsKnown = false, g_boundTexKnown = 0;
     if (render) TakeBoundDevice(d);
     if (render && g_boundPsKnown && PerfToggles::FollowBoundShaders.load(std::memory_order_relaxed)) return g_boundPs;
@@ -898,6 +934,7 @@ IDirect3DPixelShader9* BoundPixelShader(IDirect3DDevice9* d) {
 
 IDirect3DVertexShader9* BoundVertexShader(IDirect3DDevice9* d) {
     const bool render = OnRenderThread();
+    if (render && g_deferred.vsOn && d == g_deferred.dev) return g_deferred.vs;
     if (render && g_shadersDirty.load(std::memory_order_relaxed) && g_shadersDirty.exchange(false)) g_boundPsKnown = g_boundVsKnown = false, g_boundTexKnown = 0;
     if (render) TakeBoundDevice(d);
     if (render && g_boundVsKnown && PerfToggles::FollowBoundShaders.load(std::memory_order_relaxed)) return g_boundVs;
@@ -907,6 +944,41 @@ IDirect3DVertexShader9* BoundVertexShader(IDirect3DDevice9* d) {
     if (render) g_boundVs = s, g_boundVsKnown = true;
     return s;
 }
+
+void DeferShaderRestore(IDirect3DDevice9* d, IDirect3DPixelShader9* ps, IDirect3DVertexShader9* vs) {
+    if (!OnRenderThread()) {
+        CallOriginalSetPixelShader(d, ps);
+        CallOriginalSetVertexShader(d, vs);
+        return;
+    }
+    if (g_deferred.dev != d) FlushDeferredShaders(g_deferred.dev); // (another device's: never left waiting)
+    g_deferred = DeferredShaders{d, ps, vs, true, true};
+    g_deferredCounts.deferred++;
+}
+bool ReuseDeferredShaders(IDirect3DDevice9* d, IDirect3DPixelShader9* gamePs, IDirect3DVertexShader9* gameVs, IDirect3DPixelShader9* ownPs,
+                          IDirect3DVertexShader9* ownVs, bool check) {
+    if (!OnRenderThread() || !g_deferred.psOn || !g_deferred.vsOn || d != g_deferred.dev || g_deferred.ps != gamePs || g_deferred.vs != gameVs) return false;
+    // the device holds the caller's pair since its last draw, as followed here (BoundPixelShader answers the game's meanwhile)
+    if (!g_boundPsKnown || !g_boundVsKnown || d != g_boundDev || g_boundPs != ownPs || g_boundVs != ownVs) return false;
+    if (check) {
+        g_deferredCounts.checked++;
+        IDirect3DPixelShader9* ps = nullptr;
+        IDirect3DVertexShader9* vs = nullptr;
+        if (FAILED(d->GetPixelShader(&ps))) ps = nullptr;
+        if (FAILED(d->GetVertexShader(&vs))) vs = nullptr;
+        if (ps) ps->Release();
+        if (vs) vs->Release();
+        if (ps != ownPs || vs != ownVs) {
+            g_deferredCounts.mismatches++;
+            return false;
+        }
+    }
+    g_deferred.psOn = g_deferred.vsOn = false; // (the caller defers again after its draw)
+    g_deferredCounts.reused++;
+    return true;
+}
+DeferredRestoreCounts DeferredRestoreCountsNow() { return g_deferredCounts; }
+void SettleDeferredShaders(IDirect3DDevice9* d) { FlushDeferredShaders(d); }
 
 IDirect3DBaseTexture9* BoundTexture(IDirect3DDevice9* d, DWORD st) {
     const bool render = OnRenderThread() && st < 16;

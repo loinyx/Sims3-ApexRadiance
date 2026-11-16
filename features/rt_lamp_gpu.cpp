@@ -3,6 +3,7 @@
 // Part of Apex Radiance. Credits: @loinyx
 
 #include "rt_lamp_gpu.h"
+#include "d3d9_hooks.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -356,6 +357,7 @@ bool Engine::MakePreblur(IDirect3DDevice9* dev, int w, int h, const uint32_t* px
 
 bool Engine::Begin(IDirect3DDevice9* dev) {
     if (!saved_ && (FAILED(dev->CreateStateBlock(D3DSBT_ALL, &saved_)) || !saved_)) return saved_ = nullptr, false; // (nothing to restore: nothing is touched)
+    D3D9Hooks::SettleDeferredShaders(dev);
     saved_->Capture();
     savedInput_ = ExtraHooks::MarkVertexInput();
     for (DWORD i = 0; i < 4; i++)
