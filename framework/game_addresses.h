@@ -381,6 +381,14 @@ enum class Id : uint16_t {
     TestHalf,           // float 0x00F9A5AC (0.5) in FUN_0069d4c0
     TestPenumbra,       // float 0x00FF307C (0.5) in FUN_0069a8c0
     TestWallY,          // float 0x01158A50 (1.0): the wall height test of FUN_0069aa90
+    // ---- Frame Profiler: the parts of the lot room solve FUN_006a8ba0 (developer build) ----
+    RoomRebuildCall,    // call FUN_006a7cf0 thiscall(level), no args (0x006A8BAD): the level rebuild, when [level+0x280] == 0
+    RoomRebuild,
+    RoomPassCall,       // call FUN_006a88b0 thiscall(level, stopwatch*, float budget), ret 8 (0x006A8C0E): the dirty rooms
+    RoomPass,
+    LevelSolverSlot0,   // the three vtable slots holding the solver driver FUN_00688920 (WallAoDriver), by address: the base
+    LevelSolverSlot1,   // vtable 0x00FF0574 (0x00FF0580), the wall AO solver 0x00FF0594 (0x00FF05A0, level+0x290) and the
+    LevelSolverSlot2,   // second solver 0x00FF0714 (0x00FF0720, level+0x2E8)
     Count
 };
 

@@ -298,6 +298,10 @@ enum Cat : int {
     kKeyList,
     kTexCreate,
     kTexFill,
+    kRoomRebuild,
+    kAoSolver1,
+    kAoSolver2,
+    kRoomPass,
     kCatCount
 };
 constexpr int kFirstGameCat = kLotLodScoring;
@@ -380,6 +384,14 @@ const CatInfo kCats[kCatCount] = {
                        "of a loaded texture (MANAGED pool; in DXVK a zero-filled, mapped CPU copy). Pixels of level 0 counted; by size in the report. All threads."},
     {"Texture fill", "FUN_0060D290 called by the DDS texture loader (CALL 0x0060E1FF): locks every mip level of the new texture and copies the file's rows into it. "
                      "By size in the report. All threads."},
+    {"Room solve: rebuild", "FUN_006A7CF0 called by the lot room solve (CALL 0x006A8BAD) when [level+0x280] is 0: rebuilds the level's rooms and walls. "
+                            "Counted only inside a timed Lot room solve call."},
+    {"Room solve: AO solver 1", "The solver driver FUN_00688920 through the vtable slot 0x00FF05A0 of level+0x290 (the wall AO solver), called by the lot room "
+                                "solve when [level+0x88] >= 0. Includes the Wall AO pass. Counted only inside a timed Lot room solve call."},
+    {"Room solve: AO solver 2", "The solver driver FUN_00688920 through the vtable slot 0x00FF0720 of level+0x2E8 (the second solver, step FUN_0068A400, "
+                                "resumable per row). Counted only inside a timed Lot room solve call."},
+    {"Room solve: room pass", "FUN_006A88B0 called by the lot room solve (CALL 0x006A8C0E): solves the dirty rooms of the level within the budget. "
+                              "Counted only inside a timed Lot room solve call."},
 };
 
 // ---- settings ----
@@ -982,6 +994,10 @@ enum TargetId : int {
     T_KeyListDerived,
     T_TexCreate,
     T_TexFill,
+    T_RoomRebuild,
+    T_AoSolver1,
+    T_AoSolver2,
+    T_RoomPass,
     kTargetCount
 };
 
@@ -1354,9 +1370,30 @@ uint64_t __fastcall Hook_ObjectById(void* self, void* edx, uint32_t idLo, uint32
 }
 
 // One room of the lot lighting update (timer*, float budget as raw bits), from its only CALL
+// Depth of the timed lot room solve on this thread: its four parts below count only inside it, so they split exactly the
+// Lot room solve line (the AO driver slots are also reached by the synchronous level solve, which is left out).
+thread_local int t_inRoomSolve = 0;
+
 uint64_t __fastcall Hook_RoomSolve(void* self, void* edx, uint32_t timer, uint32_t budget) {
     CounterScope sc(kLotRoomSolve);
-    return Orig<T_RoomSolve, FnThis2>()(self, edx, timer, budget);
+    t_inRoomSolve++;
+    const uint64_t r = Orig<T_RoomSolve, FnThis2>()(self, edx, timer, budget);
+    t_inRoomSolve--;
+    return r;
+}
+
+// The parts of the lot room solve FUN_006A8BA0. Rebuild: thiscall(level), no args, plain ret. The room pass and the two
+// solver drivers: thiscall(stopwatch*, float budget as raw bits), ret 8. The x87 stack is empty at every one of the calls.
+uint64_t __fastcall Hook_RoomRebuild(void* self, void* edx) {
+    if (!t_inRoomSolve) return Orig<T_RoomRebuild, FnThis0>()(self, edx);
+    CounterScope sc(kRoomRebuild);
+    return Orig<T_RoomRebuild, FnThis0>()(self, edx);
+}
+template <int T, int C>
+uint64_t __fastcall Hook_RoomSolvePart(void* self, void* edx, uint32_t stopwatch, uint32_t budget) {
+    if (!t_inRoomSolve) return Orig<T, FnThis2>()(self, edx, stopwatch, budget);
+    CounterScope sc(C);
+    return Orig<T, FnThis2>()(self, edx, stopwatch, budget);
 }
 
 // The wall AO step (stopwatch*, float budget as raw bits), through its vtable slot. Layer inside the wall shading gate
@@ -1593,11 +1630,23 @@ const TargetInfo kTargets[kTargetCount] = {
         reinterpret_cast<void*>(&Hook_TexCreate), "render (texture load finalize)", false, 0, GameAddr::Id::TexCreateCall, GameAddr::Id::TexCreate},
     {"Texture fill (CALL at 0x0060E1FF)", 0x0060E1FF, "E8 ?? ?? ?? ?? 83 C4 10", 0, 0x0060D290,
         reinterpret_cast<void*>(&Hook_TexFill), "render (texture load finalize)", false, 0, GameAddr::Id::TexFillCall, GameAddr::Id::TexFill},
+    // The parts of the lot room solve FUN_006A8BA0 (counted only inside it): two CALLs and the solver driver's two vtable slots
+    {"Room solve: rebuild (CALL at 0x006A8BAD)", 0x006A8BAD, "E8 ?? ?? ?? ?? 83 BE 88 00 00 00", 0, 0x006A7CF0,
+        reinterpret_cast<void*>(&Hook_RoomRebuild), "render (lot room solve)", false, 0, GameAddr::Id::RoomRebuildCall, GameAddr::Id::RoomRebuild},
+    {"Room solve: AO solver 1 (FUN_00688920, vtable slot 0x00FF05A0)", 0x00688920, "56 8B F1 83 7E 14 02 74 27 8B 4E 08 8B 01 8B 50 0C FF D2", -1, 0,
+        reinterpret_cast<void*>(&Hook_RoomSolvePart<T_AoSolver1, kAoSolver1>), "render (lot room solve)", false, 0, GameAddr::Id::WallAoDriver, kNoAddr,
+        GameAddr::Id::LevelSolverSlot1, 1},
+    {"Room solve: AO solver 2 (FUN_00688920, vtable slot 0x00FF0720)", 0x00688920, "56 8B F1 83 7E 14 02 74 27 8B 4E 08 8B 01 8B 50 0C FF D2", -1, 0,
+        reinterpret_cast<void*>(&Hook_RoomSolvePart<T_AoSolver2, kAoSolver2>), "render (lot room solve)", false, 0, GameAddr::Id::WallAoDriver, kNoAddr,
+        GameAddr::Id::LevelSolverSlot2, 1},
+    {"Room solve: room pass (CALL at 0x006A8C0E)", 0x006A8C0E, "E8 ?? ?? ?? ?? 5F 5E C2 08 00", 0, 0x006A88B0,
+        reinterpret_cast<void*>(&Hook_RoomSolvePart<T_RoomPass, kRoomPass>), "render (lot room solve)", false, 0, GameAddr::Id::RoomPassCall, GameAddr::Id::RoomPass},
 };
 const int kTargetCat[kTargetCount] = {kRenderFrame, kEndScene, kLotLodScoring, kLotDetailRequest, kLotRendererUpdate, kLotLoadStages,
     kLotViewSwitch, kLotLightingInit, kRoomLighting, kLotLightingUpdate, kTerrainUpdate, kScriptGC, kLotObjectBuild,
     kService, kService, kJob, kJobWait, kMutexWait, kSemWait, kFileRead, kFileFlush, kRefPackRead, kSceneBeginFrame, kSceneEndFrame, kSceneCapture, kAppState,
-    kClockTick, kImpostorPump, kResLookup, kScenePending, kRefPackCompress, kDxtEncode, kDxtEncode, kObjectLookup, kLotRoomSolve, kWallAo, kKeyList, kKeyList, kTexCreate, kTexFill};
+    kClockTick, kImpostorPump, kResLookup, kScenePending, kRefPackCompress, kDxtEncode, kDxtEncode, kObjectLookup, kLotRoomSolve, kWallAo, kKeyList, kKeyList, kTexCreate, kTexFill,
+    kRoomRebuild, kAoSolver1, kAoSolver2, kRoomPass};
 
 struct TargetState {
     uintptr_t addr = 0; // the function entry, or the CALL instruction for call-site targets
