@@ -9459,7 +9459,7 @@ inline D3D9Hooks::HookAction NoteClaim(ClaimSource source) {
 
 // A lot's ground drawn without its light maps: some frames the game binds no room light map (s2) nor its four lamp maps
 // (s7 to s10) for a lot's ground mesh, and the ground drew black for that frame (a dark patch coming and going as the
-// camera moved, light captures 13-27-41 against 13-28-33). Each ground mesh (its vertex and index buffers) keeps the maps it
+// camera moved: in light captures, s2 and s7 to s10 empty where it was dark, bound where it was lit). Each ground mesh (its vertex and index buffers) keeps the maps it
 // was last drawn with; a draw that has none takes those back for the draw. Released at a device reset and when lots change
 constexpr DWORD kGroundMapStages[] = {2, 7, 8, 9, 10};
 struct GroundMaps { IDirect3DBaseTexture9* t[5] = {}; };
