@@ -34,6 +34,7 @@ std::atomic<bool> g_clearInput{false};
 std::atomic<bool> g_wndProcInstalled{false};
 std::atomic<int> g_wheel{0}; // WM_MOUSEWHEEL deltas since the last TakeWheel
 std::atomic<bool> g_frameFailed{false}; // the menu frame threw (Frame): no drawing, no input capture
+std::atomic<UINT> g_inputEvents{0}; // InputEvents
 constexpr LPARAM kSyntheticGameKey = 1ll << 25; // reserved LPARAM bit: stripped before the game's original procedure
 HWND g_window = nullptr;
 WNDPROC g_original = nullptr;
@@ -183,6 +184,10 @@ WndDecision Decide(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 LRESULT CALLBACK ApexWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    // A button, wheel or key press or release, or a focus change (key auto-repeat and mouse moves are not counted)
+    if ((IsMouseMessage(msg) && msg != WM_MOUSEMOVE) || msg == WM_KEYUP || msg == WM_SYSKEYUP || msg == WM_ACTIVATEAPP ||
+        ((msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && !(lp & (1 << 30))))
+        g_inputEvents.fetch_add(1, std::memory_order_relaxed);
     if (msg == WM_MOUSEWHEEL) g_wheel += GET_WHEEL_DELTA_WPARAM(wp);
     // Apex's part never throws into the window procedure: on an exception the message goes to the game as it would
     // without Apex (the screenshot's marker bit stripped), and Apex's input handling stays off from then on
@@ -248,6 +253,7 @@ void InstallWndProc() {
 }
 
 bool WndProcInstalled() { return g_wndProcInstalled.load(); }
+UINT InputEvents() { return g_inputEvents.load(std::memory_order_relaxed); }
 
 namespace {
 void DrawFrame(IDirect3DDevice9* device);

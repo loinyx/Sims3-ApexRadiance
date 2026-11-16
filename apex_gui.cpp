@@ -1554,6 +1554,7 @@ void PerformanceCard() {
         }
         FeatureSwitchRow(Performance::kWallShadingName, "Wall shading waits while moving", "New lots' walls get their shading when you stop (at most 2 s)");
         FeatureSwitchRow(Performance::kSceneBudgetName, "Spread new objects over frames", "Fewer hitches while a lot streams in; objects may appear a frame later");
+        FeatureSwitchRow(Performance::kPickSkipName, "Fewer mouse picks when still", "The object under the mouse is checked less often while nothing moves; clicks stay instant", true);
         ApexUi::CardGroup("Files and objects");
         if (FeatureSwitchRow(Performance::kResourceCacheName, "Faster game file lookups", "Fewer small stutters when objects and textures load"))
             FeatureSwitchRow(Performance::kLookupMissesName, "Remember missing files", "Skips repeated searches for files no package has");

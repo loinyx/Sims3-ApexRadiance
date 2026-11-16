@@ -1,0 +1,57 @@
+{
+  "id": "pick-skip-when-still",
+  "description": "Fewer Mouse Picks When Still: 3 minutes with the camera and the mouse still (the game re-picks every other frame), then a far camera pan. Developer build. Pass: on logs skipped picks with nothing changed while still and capped picks during the pan, off logs none; A/B metric: frame time p50/p99 of the measured pan, and the [ExtraHooks] GetRenderTargetData line for TS3W.exe+0x2DFF4A.",
+  "save": "ApexTest-Town",
+  "toml": {
+    "ui": {
+      "developer_mode": true
+    }
+  },
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.PickSkipWhenStill": {
+          "enabled": false
+        }
+      },
+      "fail": [
+        "\\[PickReadback\\] Skip when still: on",
+        "\\[PickReadback\\] Last \\d+ s:"
+      ]
+    },
+    "on": {
+      "toml": {
+        "patches.PickSkipWhenStill": {
+          "enabled": true
+        }
+      },
+      "expect": [
+        "\\[PickReadback\\] Skip when still: on",
+        "\\[PickReadback\\] Last \\d+ s: \\d+ picks, [1-9]\\d* skipped with nothing changed",
+        "\\[PickReadback\\] Last \\d+ s: \\d+ picks, \\d+ skipped with nothing changed, [1-9]\\d* skipped while the camera moved"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "wait",
+      "minutes": 3
+    },
+    {
+      "do": "camera_pan",
+      "lots": 8,
+      "height": 150,
+      "seconds": 60,
+      "passes": 10
+    },
+    {
+      "do": "wait",
+      "minutes": 8,
+      "measure": true
+    }
+  ]
+}

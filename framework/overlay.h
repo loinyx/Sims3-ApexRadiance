@@ -64,5 +64,8 @@ void SetCaptureSuppressed(bool suppressed); // skip all Apex ImGui draw data for
 bool PostGameKeyPress(WPARAM vk); // post a synthetic key press to the game, bypassing Apex shortcut interception
 HWND Window();
 bool WndProcInstalled();
+// Counts the window's button, wheel and key presses and releases and its focus changes (not mouse moves or key
+// auto-repeat) since the window procedure was subclassed; any thread
+UINT InputEvents();
 
 } // namespace Overlay
