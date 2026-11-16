@@ -304,6 +304,75 @@ Changing the hour the probes take would remove the exterior probe's blend betwee
 Apex leaves the queue alone. A future-hour exterior capture keeps the live lamps (a small mismatch, softened at night by
 ProbeNeutral). Distant lots that look wrong at night point to the lotImposter shader's constants, not to its build.
 
+### Window lights (types 7, 8): the daylight law
+
+Static reading of Steam 1.67.2. Every statement is verified in the disassembly unless marked inferred or open. "Tunable
+X" is a float read through the shared getter `0x00F626F0` (`mov eax, ecx; ret`) at address X; all of them live in .bss
+and are set at run time like k1 and k2 (`0x011D0A60`, `0x011D0A68`), so their values are **open** until a developer
+build prints them.
+
+**Fields** (window classes only; the area lights use some of the same offsets for other things):
+
+| Offset | Type 7 RectangleWindowLight (constructor `0x006C0870`) | Type 8 CircleWindowLight (`0x006C0E60`) |
+|---|---|---|
+| `+0x110` | Centre in object space (record `+0x04..+0x0C`) | same |
+| `+0x160` / `+0x170` | U axis / N axis in object space (record `+0x2C`, `+0x20`); N is negated when its z is > 0 | same, no negation |
+| `+0x190`, `+0x1A0`, `+0x1B0` | World U, world N, V = U × N, built with `+0x120` (world centre) by vfunc `+0x5C` (`0x006BCBB0`) from the object matrix `+0x30..+0x60` | same (`0x006BCD70`) |
+| `+0x1C0` | Tint, record `+0x10..+0x18` | same |
+| `+0x210` | Half width, half height (record `+0x38`, `+0x3C` × 0.5), z = 0 | not written by the constructor (open) |
+| `+0x220` | Sun gate, record `+0x44` (no sun patch below 1e-4) | radius², record `+0x38` squared |
+| `+0x224` | cos(record `+0x40` × 0.017459); no reader among the window functions | - |
+| `+0x208` | Area 4 × half width × half height | π × `+0x220` (set in `0x006BCD70`) |
+| `+0x150` | 0.7 grey (`[0x00FBA7D8]`) | same |
+| `+0x1D0`, `+0x1F0` | Sun direction `lightMgr+0x140` and sun colour `lightMgr+0x130` × tint, copied by the sky update vfunc `+0x38` (`0x006BE900` / `0x006BF320`; `lightMgr` from `0x006E97B0`) | same |
+| `+0x1E0` | Sky colour × tint: curve 3 when N · sun ≥ 0, else curve 2, from `0x00C175E0` on the weather object (`*(lightMgr+0x74)+0x10`) | same |
+| `+0x180` | −8 × sun direction in (U, V, N) | −64 × sun direction |
+| `+0x200` | Sun on the window's side: N · sun ≥ 0, and for type 7 also V · sun ≥ 0 (else the sun colour is zeroed) | N · sun ≥ 0 only |
+
+**Evaluation** (vfunc `+0x4C`: `0x006BEFD0` type 7, `0x006BF880` type 8; thiscall(light, point p, normal n, out) ret 0xC).
+With `l = +0x120 − p` and `q = (U · l, V · l, N · l)`, `l̂ = l / |l|` and `wrap(n, d) = max(0, (n · d)(1 − n.w) + n.w)`
+(`0x006BDBA0`):
+
+1. Not lit (flag 0x20 clear): 0. The lit bit of a window comes from the light tree entry update `0x006C7BA0` (room
+   roofless test, [level-light-share](../features/night-lighting/level-light-share.md); inferred there).
+2. **Channel 1** (vfunc `+0x1C` = `0x006C1DD0` with argument 1: true for a world light, else whether the light's room id
+   is in the set at `ObjectById(lot)+0x364`, `0x006C1D90`; true when that object is missing; meaning open):
+   type 8 gives 0. Type 7 gives the plain law `0x006BEEC0`:
+   `E = 1.2 × 0.7 × 1 / (1 + |q|²) × min(1, q.z / tunable 0x011D0A80) × wrap(n, l̂)` for `q.z > 0`, else 0. No dimmer,
+   no sky colour, no sun.
+3. Otherwise (daylight): `E = dimmer (+0x10) × [Sun × wrap(n, sun dir) + Sky × wrap(n, l̂)]`.
+   - **Sky** (`0x006BE440`, shared by both types), 0 unless `q.z > 0`:
+     `h = (q̂.y + 1) / 2`, `f = clamp((R − |q|) / R, 0, 1)` with R = tunable `0x011D0A90`, then `f ×= q.z / g` when
+     `q.z < g` (g = tunable `0x011D0A80`). The sky colour is desaturated toward its luminance
+     (`0.21 R + 0.67 G + 0.12 B`) by tunable `0x011D0AE8` (1 keeps it), blended
+     `Sky = [h × sky' + (1 − h) × C_ground] × (sun side ? tunable 0x011D0AA8 : tunable 0x011D0AA0) × area (+0x208) ×
+     tunable 0x011D0A88 × f`, C_ground = tunable float4 `0x011D0AC0`. The light comes from the window centre: a
+     point with a linear range, the window's size only scales it.
+   - **Sun patch** (vfunc `+0x54`: `0x006BEBF0` type 7, `0x006BF540` type 8), 0 unless `q.z > 0` and `+0x200`:
+     the ray from p toward the sun meets the window plane at `h = q − (q.z / s.z) s` (s = `+0x180`), only within
+     8 m (type 7) or 64 m (type 8) of travel. Per axis `w = clamp(1 − (|h| − half + b) × k, 0, 1)` with b = 1,
+     k = 0.66 (type 7, a soft edge about 1.5 m wide, so a small window never reaches 1) or b = 0.25, k = 2 (type 8);
+     mask `w.x × w.y`. Type 7 also needs `+0x220 ≥ 1e-4` and multiplies by `clamp(3 |N · sun| − 1, 0, 1)` (no sun at
+     more than about 70° from the normal). `Sun = sun colour (+0x1F0) × tunable 0x011D0AB0 × mask`.
+4. The influence rect (vfunc `+0x50` = `0x006BE780`, both types) is ±4 m around the centre in channel 1, else the box
+   of the centre ± 10 m along U and along N.
+
+**Rigs** (vfunc `+0x10`: `0x006C0AF0`, `0x006C0FE0`) use the same terms and hand one directional record to
+`0x006BDB00`: in channel 1 the plain law times the fade `+0x20`; otherwise colour `lerp(0.25 × Sky, 0.1 × Sun, a)` and
+direction `lerp(l̂, sun dir, a)`, a = the sun mask, with the dimmer as intensity.
+
+**Curtains** (`Sims3.Gameplay.Objects.Decorations.Curtain.UpdateWindow`, script): two curtains combine as
+`opacity = o0 + o1 (1 − o0)` and the average of their filter colours. With opacity > 0 the script sends
+`World.LightSetDimmer(window, 1 − opacity)` and, if a filter applies, `World.LightSetColor(window, rgb)`; with no curtain
+it sends dimmer 1 and colour (1, 1, 1). The dimmer lands in `+0x10` (`0x006BDD10`, changes under 0.01 ignored) and is the
+one factor of step 3. The colour lands in `+0xF0` / `+0xE0` (`0x006BC3E0`), which no window function above reads: the
+curtain's colour cast does not reach the room maps or the rigs (verified for these functions; that no other reader
+applies it is inferred). Script side, inferred: a curtain only in the second slot leaves the first tuning null and
+throws, and a curtain of opacity 0 leaves the previous dimmer and colour in place.
+
+**Open:** the eight tunable values; what the channel 1 set at `ObjectById(lot)+0x364` holds; `+0x210` on type 8; how
+often the sky update `+0x38` runs besides a transform change (`0x006BCBB0` ends in it); the record's `+0x40` angle.
+
 ### Open items / unverified
 
 - The meaning of the constructor flag bits and of rig+0x225; k3 and g in the street-lamp rig formula.
