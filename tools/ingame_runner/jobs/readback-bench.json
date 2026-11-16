@@ -1,0 +1,15 @@
+{
+  "id": "readback-bench",
+  "description": "Read-back benchmark (developer build): the game paused with a still camera, the benchmark runs once 20 s after the world is shown and logs its table ([ReadbackBench] lines; ReadbackBench-<pid>.csv in the Apex Radiance Diagnostics folder). Not a timing run. Pass: the table ends with its Done line.",
+  "save": "ApexTest-Night",
+  "toml": {
+    "ui": { "developer_mode": true },
+    "readback_bench": { "run": true, "iterations": 60, "every_frames": 4, "delay_s": 20 }
+  },
+  "expect": ["\\[ReadbackBench\\] Armed:", "\\[ReadbackBench\\] Done:"],
+  "fail": ["\\[ReadbackBench\\] (Aborted|Could not|Not started)"],
+  "steps": [
+    { "do": "speed", "speed": "pause" },
+    { "do": "wait", "minutes": 2.5, "measure": false }
+  ]
+}
