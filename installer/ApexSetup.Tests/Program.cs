@@ -268,6 +268,22 @@ try
     File.WriteAllText(B("ts3native.ini"), "player switches");
     await Engine.InstallAsync(g, new[] { Components.Modernization }, src, null, docs);
     Check(Read(B("ts3native.ini")) == "player switches", "ts3native.ini edits kept on repair");
+    // the experimental channel: a channel change copies the player's ini next to it with the time and writes the channel's;
+    // an update within the channel keeps it; back to stable copies and replaces it again
+    var expSrc = new FakeSource(payload) { ModVersion = "0.2.13-exp.20261117", ModernizationExperimental = true };
+    await Engine.InstallAsync(g, new[] { Components.Modernization }, expSrc, null, docs);
+    var iniBaks = Directory.GetFiles(bin, "ts3native.ini.*.bak");
+    Check(Read(B("ts3native.ini")) == "ini 0.2.13-exp.20261117" && iniBaks.Length == 1 && File.ReadAllText(iniBaks[0]) == "player switches"
+          && Manifest.Load(bin).ModernizationChannel == "experimental" && Scan.Run(g, docs).Installed(Components.Modernization) == "0.2.13-exp.20261117",
+          "stable to experimental: the channel's ts3native.ini written, the player's kept as a timestamped copy, the channel saved");
+    File.WriteAllText(B("ts3native.ini"), "tester switches");
+    await Engine.InstallAsync(g, new[] { Components.Modernization }, new FakeSource(payload) { ModVersion = "0.2.13-exp.20261118", ModernizationExperimental = true }, null, docs);
+    Check(Read(B("ts3native.ini")) == "tester switches" && Directory.GetFiles(bin, "ts3native.ini.*.bak").Length == 1, "an experimental update keeps ts3native.ini");
+    await Engine.InstallAsync(g, new[] { Components.Modernization }, src, null, docs);
+    iniBaks = Directory.GetFiles(bin, "ts3native.ini.*.bak");
+    Check(Read(B("ts3native.ini")) == "ini 0.2.10" && iniBaks.Length == 2 && iniBaks.Any(f => File.ReadAllText(f) == "tester switches")
+          && Manifest.Load(bin).ModernizationChannel is null, "experimental to stable: the stable ts3native.ini written, the tester's kept as a copy");
+    foreach (var f in iniBaks) File.Delete(f);
     Engine.Remove(g, Components.Modernization, docs);
     Check(!File.Exists(B("ts3native.ini")), "ts3native.ini removed with Modernization");
 
@@ -755,6 +771,20 @@ finally
     Check(!Engine.HasModernizationBuild(steamOnly, Edition.EA) && Engine.HasModernizationBuild(steamOnly, Edition.Steam), "a Steam-only Modernization release is no build for the EA app");
     Check(Engine.HasModernizationBuild(both, Edition.EA) && Engine.HasModernizationBuild(both, Edition.Steam), "a release with both zips serves both editions");
     Check(new[] { steamOnly, both }.FirstOrDefault(x => Engine.HasModernizationBuild(x, Edition.EA))?.Tag == "v0.2.10", "the EA app falls back to the newest release with its build");
+
+    // the experimental channel: -exp. prereleases (Steam only), newest first by date; stable when off or without this edition's build
+    Release Exp(string tag) => new("rodneypantonial/sims3-modernization", tag, new[] { new Asset("ts3fixes.package", "x", null), new Asset($"ts3native-{tag}.zip", "x", null) });
+    var exp17 = Exp("v0.2.13-exp.20261117"); var exp18 = Exp("v0.2.13-exp.20261118"); var exp12 = Exp("v0.2.12-exp.20261120");
+    var recent = new[] { exp17, steamOnly, exp18, exp12, both };
+    Check(Releases.IsExperimental(exp17.Tag) && !Releases.IsExperimental(steamOnly.Tag), "an -exp. tag is experimental");
+    Check(Engine.PickModernization(steamOnly, recent, Edition.Steam, true) == exp18, "experimental on Steam: the newest -exp. release (number, then date)");
+    Check(Engine.PickModernization(steamOnly, recent, Edition.Steam, false) == steamOnly, "stable on Steam: the latest release, never an -exp. one");
+    Check(Engine.PickModernization(steamOnly, recent, Edition.EA, true) == both, "experimental on the EA app: no -exp. build, falls back to the newest stable one with its build");
+    Check(Engine.PickModernization(steamOnly, new[] { exp17 }, Edition.EA, true) is null, "no build for the edition in any channel: none");
+    Check(Releases.Newer("0.2.13-exp.20261118", "0.2.13-exp.20261117") && !Releases.Newer("0.2.13-exp.20261117", "0.2.13-exp.20261118")
+          && !Releases.Newer("0.2.13-exp.20261117", "0.2.13-exp.20261117") && Releases.Newer("0.2.13", "0.2.13-exp.20261118")
+          && !Releases.Newer("0.2.13-exp.20261118", "0.2.13") && Releases.Newer("0.2.13-exp.20261117", "0.2.12") && !Releases.Newer("0.2.12", "0.2.13-exp.20261117"),
+          "version compare: a later -exp. date is newer, the final release beats its -exp. builds");
 }
 
 // Setup's own update: only a newer Apex Radiance Setup is taken; the running exe is renamed, not overwritten
@@ -1274,6 +1304,8 @@ sealed class FakeSource : ISource
 {
     readonly string _dir;
     public FakeSource(string dir) { _dir = dir; Directory.CreateDirectory(dir); }
+    public string ModVersion { get; init; } = "0.2.10";
+    public bool ModernizationExperimental { get; init; }
 
     string Make(string rel, string text) { var p = Path.Combine(_dir, rel); Directory.CreateDirectory(Path.GetDirectoryName(p)!); File.WriteAllText(p, text); return p; }
 
@@ -1296,13 +1328,13 @@ sealed class FakeSource : ISource
             Components.Modernization => new()
             {
                 (Make(@"m\ts3native.asi", "ts3native"), Path.Combine(b, "ts3native.asi")),
-                (Make(@"m\ts3native.ini", "ini"), Path.Combine(b, "ts3native.ini")),
+                (Make(@"m\ts3native.ini", "ini " + ModVersion), Path.Combine(b, "ts3native.ini")),
                 (Make("ts3fixes.package", "pkg"), Path.Combine(Scan.Packages(docs), "ts3fixes.package")),
             },
             Components.Bridge => Bridge(b, conf),
             _ => throw new ArgumentException(c),
         };
-        return Task.FromResult((f, c == Components.Modernization ? "0.2.10" : "3.1.1"));
+        return Task.FromResult((f, c == Components.Modernization ? ModVersion : "3.1.1"));
     }
 
     List<(string, string)> Bridge(string b, string conf)

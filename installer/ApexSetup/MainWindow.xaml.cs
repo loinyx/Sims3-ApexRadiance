@@ -26,6 +26,8 @@ public sealed partial class MainWindow : Window
     readonly UIElement[] _screens;
     readonly List<GameItem> _games = new();
     readonly Dictionary<string, Release?> _latest = new();
+    IReadOnlyList<Release> _modRecent = []; // Sims 3 Modernization's recent releases, its -exp. ones included
+    bool _modExp; // its experimental channel chosen
     readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(2) };
     int _step;
     Game? _game, _defaultsFor;
@@ -182,7 +184,11 @@ public sealed partial class MainWindow : Window
         {
             try { _latest[r] = await Releases.LatestAsync(r); }
             catch (Exception e) { App.Log(e); _latest.Remove(r); if (e is SetupException se) _releaseError = se; }
-        }));
+        }).Append(Task.Run(async () =>
+        {
+            try { _modRecent = await Releases.RecentAsync(Releases.Modernization, experimental: true); }
+            catch (Exception) { _modRecent = []; }
+        })));
         // (screenshots and design checks) APEX_SETUP_PREVIEW_LATEST=3.2.0 makes the latest Apex release that version, to show
         // the update screens; nothing is installed while it is set (InstallAsync)
         if (Preview is { } v && _latest.GetValueOrDefault(Releases.Apex) is { } apex) _latest[Releases.Apex] = apex with { Tag = "v" + v };
@@ -199,9 +205,16 @@ public sealed partial class MainWindow : Window
     };
 
     // the bridge's version is the Apex release's only when that release ships the bridge zip
-    string? Latest(string c) => Repo.TryGetValue(c, out var repo) && _latest.GetValueOrDefault(repo) is { } r
-        && (c != Components.Bridge || r.Assets.Any(a => a.Name == "Apex-Radiance-RTX-Remix-bridge.zip") || GitHubSource.HasManualZip(r) is not null)
-        && (c != Components.Modernization || _game is null || Engine.HasModernizationBuild(r, _game.Edition)) ? r.Version : null; // (no update to a release without this edition's build)
+    string? Latest(string c) => c == Components.Modernization ? ModRelease()?.Version
+        : Repo.TryGetValue(c, out var repo) && _latest.GetValueOrDefault(repo) is { } r
+        && (c != Components.Bridge || r.Assets.Any(a => a.Name == "Apex-Radiance-RTX-Remix-bridge.zip") || GitHubSource.HasManualZip(r) is not null) ? r.Version : null;
+
+    // Sims 3 Modernization's release for the chosen channel and this edition (no update to a release without its build)
+    Release? ModRelease() => _game is null ? _latest.GetValueOrDefault(Releases.Modernization)
+        : Engine.PickModernization(_latest.GetValueOrDefault(Releases.Modernization), _modRecent, _game.Edition, _modExp);
+
+    // the installed copy is from the other channel than the chosen one's release: installed again (its ts3native.ini too)
+    bool ModChannelChange() => Known(Components.Modernization) is { Length: > 0 } v && ModRelease() is { } r && Releases.IsExperimental(v) != Releases.IsExperimental(r.Tag);
 
     // The installed version: Setup's own record, else the latest release's when the file is identical to it (GitHub's SHA-256
     // digest), else "" (installed, version unknown), or null when absent.
@@ -590,7 +603,7 @@ public sealed partial class MainWindow : Window
         Row(T("Graphics"), LayerName(s.Layer), true);
         foreach (var (c, name, present) in new[] { (Components.S3ss, "Sims3SettingsSetter", s.S3ss), (Components.Modernization, "Sims 3 Modernization", s.Modernization), (Components.MonoPatcher, "MonoPatcher", s.MonoPatcher),
                      (Components.RestartHost, T("Restart host"), s.RestartHost) })
-            if (present) Row(name, State(c), !Updates().Contains(c));
+            if (present) Row(name, c == Components.Modernization && Releases.IsExperimental(Known(c) ?? "") ? State(c) + " (" + T("Experimental") + ")" : State(c), !Updates().Contains(c));
 
         // the problems and suggestions, between the rows and the buttons
         var notes = new StackPanel { Spacing = 8, Padding = new Thickness(18, 12, 18, 12), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(0, 1, 0, 0) };
@@ -820,6 +833,8 @@ public sealed partial class MainWindow : Window
         _renderer = RendererOf(s with { Layer = Engine.DefaultLayer(s, VulkanBlocked) });
         S3ssToggle.IsOn = s.S3ss; // (optional mods start off unless installed)
         ModToggle.IsOn = s.Modernization;
+        _modExp = s.Manifest.ModernizationChannel == "experimental";
+        (_modExp ? ModExperimental : ModStable).IsChecked = true;
         MonoToggle.IsOn = s.MonoPatcher;
         RestartToggle.IsOn = s.RestartHost; // (experimental: off unless on already)
         // no longer offered (no mod Setup installs needs it, and it crashed the launcher on some PCs): shown only to keep or remove it
@@ -1091,6 +1106,12 @@ public sealed partial class MainWindow : Window
         : kind == "amd" ? T(Engine.FriendlyFrameGenError(error, true, on ?? true))
         : T("Could not change Apex's frame limit: {0}", error);
 
+    void OnModChannel(object sender, RoutedEventArgs e)
+    {
+        _modExp = ModExperimental.IsChecked == true;
+        RefreshComponents();
+    }
+
     bool _fillingRenderer;
     // the renderer choices as cards: a radio button over the whole card, the chosen card outlined in the accent
     readonly Dictionary<string, (Border Card, RadioButton Radio)> _rendererCards = new();
@@ -1220,6 +1241,7 @@ public sealed partial class MainWindow : Window
         ModDesc.Text = g.ModernizationSupported
             ? T("Fixes stutters, Sims getting stuck and crashes.")
             : T("Not available for this game version: it supports Steam 1.67.2 and EA app 1.69.47.");
+        ModChannel.Visibility = ModToggle.IsOn && g.ModernizationSupported ? Visibility.Visible : Visibility.Collapsed;
 
         UpdateFooter();
     }
@@ -1235,7 +1257,7 @@ public sealed partial class MainWindow : Window
         if (!on) return (v is { Length: > 0 } ? T("{0} \u00b7 will be removed", v) : T("Will be removed"), "ApexWarningBrush");
         if (wrong) return (T("Wrong build"), "ApexWarningBrush");
         if (v is not { Length: > 0 }) return (T("Installed"), "ApexMutedBrush");
-        return Newer(latest, v) ? (T("{0} \u2192 updates to {1}", v, latest!), "ApexAccentBrush") : (T("{0} \u00b7 up to date", v), "ApexMutedBrush");
+        return Newer(latest, v) || c == Components.Modernization && ModChannelChange() ? (T("{0} \u2192 updates to {1}", v, latest!), "ApexAccentBrush") : (T("{0} \u00b7 up to date", v), "ApexMutedBrush");
     }
 
     static void SetState(TextBlock line, (string Text, string Brush) state)
@@ -1285,7 +1307,7 @@ public sealed partial class MainWindow : Window
         if (S3ppPresent && !S3ppToggle.IsOn) del.Add(Components.S3pp);
         if (!S3ppPresent && _s3ppArchive is not null && _s3ppFor == g.Bin) add.Add(Components.S3pp);
         Optional(Components.Modernization, ModToggle.IsOn && (g.ModernizationSupported || s.Modernization), s.Modernization,
-                 g.ModernizationSupported && (s.Ts3NativeWrongBuild || NeedsUpdate(Components.Modernization)));
+                 g.ModernizationSupported && (s.Ts3NativeWrongBuild || NeedsUpdate(Components.Modernization) || ModChannelChange()));
         if (Engine.NeedsLoader(s, _renderer != cur && _renderer is RDxvk or RBridge)) add.Add(Components.Loader);
         return (add, del);
     }
@@ -1428,6 +1450,9 @@ public sealed partial class MainWindow : Window
             // (downloads, before 0.5, install nothing: the first row stays active until the copies start)
             Mark(p.Arg is null || p.Fraction < 0.5 ?(p.Fraction >= 1 ? rows.Count : p.Fraction > 0.9 ? rows.Count - 1 : first) : first + order.IndexOf(p.Arg));
         });
+        // Sims 3 Modernization from the chosen channel's release shown (read here: the install runs off the UI thread)
+        var shown = new Dictionary<string, Release?>(_latest) { [Releases.Modernization] = ModRelease() ?? _latest.GetValueOrDefault(Releases.Modernization) };
+        var modExp = _modExp;
         // one restore point for the whole change (the engine's own calls join it)
         RestorePoints.Scope? point = null;
         var engineDone = false; // (an error after the engine's part is no reason to undo a finished install)
@@ -1441,7 +1466,7 @@ public sealed partial class MainWindow : Window
                     : RestorePoints.Begin(g.Bin, "Change components"))
                 {
                     foreach (var c in dels) { Engine.Remove(g, c); touched = true; }
-                    try { await Engine.InstallAsync(g, order, new GitHubSource { S3ppArchive = _s3ppArchive, Shown = _latest }, progress); }
+                    try { await Engine.InstallAsync(g, order, new GitHubSource { S3ppArchive = _s3ppArchive, Shown = shown, ModernizationExperimental = modExp, Log = App.Log }, progress); }
                     finally { try { Directory.Delete(GitHubSource.TempRoot, true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } }
                 }
             });

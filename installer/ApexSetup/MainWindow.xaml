@@ -219,6 +219,13 @@
                                         <TextBlock Text="Sims 3 Modernization" Style="{StaticResource ApexStrong}" />
                                         <TextBlock x:Name="ModDesc" Tag="dyn" Style="{StaticResource ApexMuted}" />
                                         <TextBlock x:Name="ModPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
+                                        <StackPanel x:Name="ModChannel" Margin="0,4,0,0">
+                                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                                <RadioButton x:Name="ModStable" GroupName="modchannel" Content="Stable" MinWidth="0" Checked="OnModChannel" />
+                                                <RadioButton x:Name="ModExperimental" GroupName="modchannel" Content="Experimental" MinWidth="0" Checked="OnModChannel" />
+                                            </StackPanel>
+                                            <TextBlock Text="Experimental builds are for testers and may break. Switching channel replaces ts3native.ini; a copy is kept next to it." Style="{StaticResource ApexMuted}" FontSize="12" TextWrapping="Wrap" />
+                                        </StackPanel>
                                     </StackPanel>
                                     <ToggleSwitch x:Name="ModToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnToggle"
                                                   AutomationProperties.Name="Sims 3 Modernization" />
