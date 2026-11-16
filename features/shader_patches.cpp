@@ -482,10 +482,21 @@ bool PatchRoad(std::vector<DWORD>& t, RoadPatch& out, bool shade) {
             if (uses || (m.len >= 1 && IsReg(t[m.at + 1], kTemp, X) && (WMask(t[m.at + 1]) & 0x7))) break; // rX.xyz overwritten (rX.w is fine)
         }
     }
-    if (light < 0 || u.maxSampler < 0 || u.maxSampler >= (shade ? 14 : 15) || !u.afterLastSamplerDcl) return false;
+    // the sampler(s) after the last one; a shader that uses s15 already (WinterRoadsFix's roads) gets the lowest free ones
+    const int need = shade ? 2 : 1;
+    int freeAt = u.maxSampler + 1;
+    if (freeAt + need > 16) {
+        bool used[16] = {};
+        for (const Ins& x : ins)
+            if (x.op == kDcl && x.len == 2 && IsReg(t[x.at + 2], kSampler, Num(t[x.at + 2]))) used[Num(t[x.at + 2]) & 15] = true;
+        freeAt = -1;
+        for (int e = 0; e + need <= 16 && freeAt < 0; e++)
+            if (!used[e] && (need == 1 || !used[e + 1])) freeAt = e;
+    }
+    if (light < 0 || u.maxSampler < 0 || freeAt < 0 || !u.afterLastSamplerDcl) return false;
     const Ins& L = ins[light];
     const DWORD X = Num(t[L.at + 1]);
-    const DWORD E = static_cast<DWORD>(u.maxSampler + 1);
+    const DWORD E = static_cast<DWORD>(freeAt);
     const DWORD T0 = static_cast<DWORD>(u.maxTemp + 1);
     out.lightSampler = Num(t[L.at + 3]);
     out.extraSampler = E;
