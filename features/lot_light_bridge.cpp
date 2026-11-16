@@ -3605,7 +3605,7 @@ PsClass Classify(IDirect3DPixelShader9* ps) {
                 static bool logged = false;
                 if (!logged) { logged = true; LOG_INFO("[LotLightBridge] Water: sea without the game's reflection seen (gets the shore reflection pass)"); }
             }
-            else if (IsShader(kSnowLotPs, code.data(), size)) c = PsClass::LotLightSnow;
+            else if (IsShader(kSnowLotPs, code.data(), size) || IsShader(kSnowLotWrfPs, code.data(), size)) c = PsClass::LotLightSnow;
             else if (IsShader(kSnowLotCutPs, code.data(), size)) c = PsClass::LotLightSnowCut;
             else if (IsShader(kMeltLotPs, code.data(), size)) c = PsClass::LotLightMelt;
             else if (IsShader(kRoofSnowPs, code.data(), size)) c = PsClass::RoofSnow;
@@ -3797,7 +3797,7 @@ VsInfo* ClassifyVs(IDirect3DVertexShader9* vs) {
             else if (is(kLakeVs)) cls = 2;
             else if (is(kSeaNoReflVs)) cls = 12;
             else if (is(kLakeWeatherVs)) cls = 13;
-            else if (is(kSnowLotVs) || is(kSnowLotCutVs)) cls = 3;
+            else if (is(kSnowLotVs) || is(kSnowLotCutVs) || is(kSnowLotWrfVs)) cls = 3;
             else if (is(kFloorVs)) cls = 5;
             else {
                 std::vector<DWORD> t(size / 4);
