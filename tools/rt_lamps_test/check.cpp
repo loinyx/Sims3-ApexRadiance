@@ -16,6 +16,7 @@
 //  4. Physical indoor lamps (PhysKeptCheck): the game's 3D test on the GPU (T3dPS) against RoomLightTests::occlude, the kept
 //     shadow tiles against the reference, and RelightKeptPhys against the CPU's law x share x T3D, KeptTexel, pack and blur;
 //     room 0's lot lamps from their laws (Room0PhysCheck: AccumulatePhys, the floor mask and exit alpha) against the CPU.
+//  5. Real-time GI's wall-plan visibility field (features/plan_field.h; plan_field_check.h), CPU only.
 // Read-only: prints to stdout, writes no file. A missing D3D9 device or capture is a failure.
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -4485,6 +4486,7 @@ static void FloorGridTwinChecks() {
     }
     Check(placed, "floor twins: each copy stands where the outdoor floor's uv reads it");
 }
+#include "plan_field_check.h"
 static void StairSetChecks() {
     using MeshOcclusion::Triangle;
     RtLampProxy::Lot lot;
@@ -4898,6 +4900,7 @@ int main(int argc, char** argv) {
     }
     StairSetChecks();
     FloorGridTwinChecks();
+    PlanFieldChecks();
     std::vector<std::string> worlds;
     int maxLamps = 12;
     char* dbg = nullptr;
