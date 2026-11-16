@@ -20,6 +20,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <type_traits>
 
@@ -136,6 +137,10 @@ bool RegisterSetVertexShaderConstantF(const std::string& name, SetVertexShaderCo
 
 // Removes every callback registered under this name (all methods).
 void UnregisterAll(const std::string& name);
+
+// The registration lock (held by the locked chains, Present included). A caller that registers or unregisters while
+// holding its own lock, which those chains' callbacks also take, takes this one first (one lock order, #90).
+std::recursive_mutex& RegistrationLock();
 
 // Draws re-issued by a callback (Night Lighting replaces a draw: it changes the shader or constants, calls the device to
 // draw, and skips the game's call; lot_light_bridge.cpp). The re-issued draw goes through the draw chains again, inside a
