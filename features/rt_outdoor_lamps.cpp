@@ -14,6 +14,7 @@
 //
 // Part of Apex Radiance. Credits: @loinyx
 
+#include "recorder.h"
 #include "rt_outdoor_lamps.h"
 #include "build_flavor.h"
 #include "apex_paths.h"
@@ -1913,6 +1914,8 @@ bool Watching() { return g_watch.load(std::memory_order_relaxed); }
 bool RetiredAny() { return g_retiredAny.load(std::memory_order_relaxed); }
 
 namespace {
+std::unordered_map<const void*, char> s_src; // (F9) the light maps' last source
+bool s_srcAny = false;
 // The SetTexture swap (render thread, lock-free chain): the game's map -> its copy
 HRESULT SwapCopy(IDirect3DDevice9* dev, DWORD stage, IDirect3DBaseTexture9* t, bool& swapped) {
     swapped = false;
@@ -1923,10 +1926,24 @@ HRESULT SwapCopy(IDirect3DDevice9* dev, DWORD stage, IDirect3DBaseTexture9* t, b
         if (const auto it = g_swap.find(t); it != g_swap.end()) s = it->second;
     if (!s && !g_swapRetired.empty() && a >= g_retiredLo && a <= g_retiredHi) // (the lots left at earlier switches)
         if (const auto it = g_swapRetired.find(t); it != g_swapRetired.end()) s = it->second;
-    if (!s) return S_OK;
+    IDirect3DTexture9* const copy = s ? (s->hiOk && s->hi ? s->hi : s->copy) : nullptr;
+    if (!Recorder::Active() && s_srcAny) s_src.clear(), s_srcAny = false; // (a recording's own: the next starts empty)
+    if (Recorder::Active() && (s || s_srcAny)) { // (F9) each light map's source when it changes: the game's, the relit copy, or a left lot's copy
+        const char src = !copy ? 'g' : g_swap.count(t) ? 'c' : 'r';
+        if (!s && !s_src.count(t)) {} // (any other texture)
+        else if (char& was = s_src[t]; was != src) {
+            s_srcAny = true;
+            was = src;
+            Recorder::Note(std::format("[ground] map {:08X} {} | story {} {}", static_cast<uint32_t>(a), src == 'g' ? "game" : src == 'c' ? "relit copy" : "left lot's copy",
+                                       s ? s->story : -1, s ? (s->mgr ? "neighbour" : "active") : "-"));
+        }
+    }
+    // (a slot whose copy is not made yet or was let go binds nothing in its place: the game's map stays, or a lot's ground
+    // drew with no light map at all, dark, while the camera made the next lot the active one)
+    if (!copy) return S_OK;
     s->binds++;
     swapped = true;
-    return D3D9Hooks::CallOriginalSetTexture(dev, stage, s->hiOk && s->hi ? s->hi : s->copy);
+    return D3D9Hooks::CallOriginalSetTexture(dev, stage, copy);
 }
 void OnPreReset(IDirect3DDevice9* dev) {
     ReleaseRetired(dev, "device reset"); // (DEFAULT render targets)
