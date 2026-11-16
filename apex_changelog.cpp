@@ -6,6 +6,20 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k402Improved[] = {
+    "Smoother frame rate, mostly when zoomed out with the RTX Remix bridge",
+    "Night Lights: rooms with arches cost less to draw",
+    "Quality profile: Ambient Occlusion on High instead of Ultra",
+    "Overview: the low-memory note stays there, with no card over the game",
+    nullptr};
+
+constexpr const char* k402Fixed[] = {
+    "Lot grounds no longer turn dark or flicker as the camera moves",
+    "Neighbouring lots keep their lamp light while the camera pans",
+    "Snowy lots and roads get the street lamps' light with WinterRoadsFix installed",
+    "Shaders: switching ADOF's values no longer crashes the game",
+    nullptr};
+
 constexpr const char* k401Improved[] = {
     "Apex Radiance Setup: the RTX Remix bridge is now the recommended renderer",
     nullptr};
@@ -642,6 +656,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"4.0.2", "2026-11-16", nullptr, k402Improved, k402Fixed, "Steadier lot lighting when the camera moves, and a smoother game"},
     {"4.0.1", "2026-11-15", nullptr, k401Improved, nullptr},
     {"4.0.0", "2026-11-14", k400Added, k400Improved, k400Fixed,
      "ReShade looks inside Apex, and screenshots and videos with your effects", k400Highlights},
