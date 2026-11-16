@@ -86,6 +86,8 @@ constexpr DWORD kLeftLotGraceMs = 20000; // the lot left at a switch keeps its r
 // 3 s once, when a new lot waited 3 to 5 s for its maps; with its stories put first (0.1 to 0.7 s) the hold only kept the
 // lot arrived at on the game's dimmer light: a player's arrival at the town square waited the full 3 s, then brightened
 constexpr DWORD kActiveLotHoldMs = 800;
+constexpr DWORD kActiveLotDwellMs = 3000; // a lot just made active stays so this long (a pause in a pan switched back after 15 ms)
+DWORD g_activeSince = 0;
 constexpr DWORD kHoldQuietMs = 1500;     // the rooms that take room 0's lamps are sent this long after a story's last move
                                          // (a Build mode drag moves in grid steps with pauses of up to about a second)
 constexpr DWORD kCheckEveryMs = 2000;    // the consistency check of the GPU lamps' stories
@@ -2174,8 +2176,8 @@ void Frame(IDirect3DDevice9* dev) {
     // one pan, each new lot waiting 3 to 5 s for its maps, so no lot was ever relit while the camera moved)
     const DWORD holdNow = std::max<DWORD>(GetTickCount(), 1);
     if (tracker == g_tracker || tracker != g_holdFor) g_holdFor = tracker, g_holdForAt = holdNow;
-    const bool hold = tracker != g_tracker && g_tracker && DevSwitches::ActiveLotHold() && holdNow - g_holdForAt < kActiveLotHoldMs &&
-                      LevelLightShare::TrackerLive(g_tracker) && LotLightingMotion::SampleCameraMoving();
+    const bool hold = tracker != g_tracker && g_tracker && DevSwitches::ActiveLotHold() && LevelLightShare::TrackerLive(g_tracker) &&
+                      ((holdNow - g_holdForAt < kActiveLotHoldMs && LotLightingMotion::SampleCameraMoving()) || holdNow - g_activeSince < kActiveLotDwellMs);
     if (hold && !g_holdAt) g_holdAt = holdNow;
     if (!hold && g_holdAt) {
         LOG_INFO(std::format("[RtOutdoorLamps] Active lot switch held {} ms while the camera moved ({})", holdNow - g_holdAt,
@@ -2184,6 +2186,7 @@ void Frame(IDirect3DDevice9* dev) {
     }
     if (hold) tracker = g_tracker;
     if (tracker != g_tracker) {
+        g_activeSince = holdNow;
         // the lot left keeps its room 0s' kept solves a while (a return reuses them instead of a full solve), and the new lot's
         // ground room 0 is solved first (lot grass reads story 0's room-0 map; the occluder send below regathers it)
         const void* left[8];
