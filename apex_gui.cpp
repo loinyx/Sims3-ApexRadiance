@@ -1564,11 +1564,6 @@ void PerformanceCard() {
         ApexUi::CardGroup("Memory handling");
         FeatureSwitchRow(Performance::kFastMemoryName, "Faster memory handling", "Less waiting when the game hands out and frees memory");
         FeatureSwitchRow(Performance::kMemoryGuardName, "Room to save", "Keeps memory free for saving (Error 12); clears the game's idle cache when low");
-        {
-            ApexConfig::UiSettings ui = ApexConfig::GetUi();
-            if (ApexUi::SwitchRow("Warn when memory is low", &ui.lowMemoryWarning, "A small card at the top of the screen reminds you to save", true))
-                ApexConfig::SetUi(ui); // [ui] low_memory_warning
-        }
         ApexUi::CardGroup("Game and scripts");
         FeatureSwitchRow(Performance::kWindowRepaintName, "Lighter window updates", "Less work for the game each frame; nothing on screen changes");
         FeatureSwitchRow(Performance::kScriptMathName, "Faster scripts", "The game's scripts compare numbers and look up types with less work");
@@ -5669,41 +5664,6 @@ bool CompareNote(bool drawAllowed = true) {
     EndNoticePill();
     return true;
 }
-// Low memory (Overview > Game memory, [ui] low_memory_warning): with the menu closed, a card at the top that stays until
-// OK when the largest free block gets low; again at most every 5 minutes while it stays low, and at once when it becomes
-// critical. Checked every 4 s.
-unsigned long long g_memoryNoteNext = 0, g_memoryHealthySince = 0;
-bool g_memoryCardOpen = false, g_memoryNoteCritical = false;
-bool MemoryNotePending() {
-    if (!ApexConfig::GetUi().lowMemoryWarning || Loading()) return g_memoryCardOpen = false;
-    const unsigned long long now = GetTickCount64();
-    const MemoryMeter::Status st = MemoryMeter::Check(9000);
-    if (!st.low) {
-        if (!g_memoryHealthySince) g_memoryHealthySince = now;
-        if (now - g_memoryHealthySince >= 60000) { // healthy for a minute: the next low is a new episode
-            g_memoryNoteNext = 0;
-            g_memoryNoteCritical = false;
-        }
-    } else {
-        g_memoryHealthySince = 0;
-    }
-    if (st.low && !g_memoryCardOpen && (now >= g_memoryNoteNext || (st.critical && !g_memoryNoteCritical))) {
-        g_memoryCardOpen = true;
-        g_memoryNoteCritical = st.critical;
-        LOG_INFO(st.critical ? "[Menu] Memory almost full: save note shown" : "[Menu] Memory getting low: save note shown");
-    }
-    return g_memoryCardOpen;
-}
-void MemoryCard() {
-    const int answer = QuestionCard("##MemoryCard", IconId::Save,
-                                    g_memoryNoteCritical ? "Memory is almost full: save your game now" : "Memory is getting low: save your game soon",
-                                    "A world save needs one large block of the game's memory, and little is left. Saving soon keeps it from failing with Error 12.",
-                                    "You can turn this note off in Performance \xE2\x80\xBA Memory handling", nullptr, "OK");
-    if (answer >= 0) {
-        g_memoryCardOpen = false;
-        g_memoryNoteNext = GetTickCount64() + 300000;
-    }
-}
 // The looks key: the same as the feature card's switch (Install / Uninstall, saved by the autosave), with a short pill
 void ToggleFeatureByKey(const char* patchName, const char* shown, IconId icon) {
     ApexPatch* patch = Find(patchName);
@@ -5848,12 +5808,10 @@ class GuiClient final : public Overlay::Client {
         const bool roomCard = !Overlay::IsVisible() && noticesAllowed && !noticeShown && RoomToSavePending();
         const bool s3ppCard = !Overlay::IsVisible() && noticesAllowed && !noticeShown && !roomCard && S3PPQuestionPending();
         const bool texCard = !Overlay::IsVisible() && noticesAllowed && !noticeShown && !roomCard && !s3ppCard && S3SSTexturesQuestionPending();
-        const bool memoryCard = !Overlay::IsVisible() && noticesAllowed && !noticeShown && !roomCard && !s3ppCard && !texCard && MemoryNotePending();
-        Overlay::SetInteractive(roomCard || s3ppCard || texCard || memoryCard);
+        Overlay::SetInteractive(roomCard || s3ppCard || texCard); // (low memory shows only in Overview > Game memory)
         if (roomCard) { RoomToSaveCard(); noticeShown = true; }
         if (s3ppCard) { S3PPQuestionCard(); noticeShown = true; }
         if (texCard) { S3SSTexturesQuestionCard(); noticeShown = true; }
-        if (memoryCard) { MemoryCard(); noticeShown = true; }
         if (!Overlay::IsVisible()) {
             if (!noticeShown && PresetPillVisible() && !Captures::ScreenshotPending()) { PresetPill(); noticeShown = true; }
             if (!noticeShown && HintVisible() && !Captures::ScreenshotPending()) Hint();
@@ -5873,7 +5831,7 @@ class GuiClient final : public Overlay::Client {
         if (PublicTestPending() && !BannerNeeded() && !Captures::ScreenshotPending()) Overlay::SetVisible(true);
         RunShortcuts();
         // the capture notes (recording, saved, an open session) show with the menu closed too
-        return MemoryNotePending() || Screen::FpsCounterShown() || BannerNeeded() || HintVisible() || RoomToSavePending() || S3PPQuestionPending() || S3SSTexturesQuestionPending() || PresetPillVisible() || g_comparing || Recorder::SecondsRecorded() >= 0 || ApexCapture::Recording() || Captures::CurrentNote().visible ||
+        return Screen::FpsCounterShown() || BannerNeeded() || HintVisible() || RoomToSavePending() || S3PPQuestionPending() || S3SSTexturesQuestionPending() || PresetPillVisible() || g_comparing || Recorder::SecondsRecorded() >= 0 || ApexCapture::Recording() || Captures::CurrentNote().visible ||
                NoticeAnimationsPending() || (!g_profiles.loading.empty() && ImGui::GetTime() - g_profiles.applyOpenedAt < 0.14) || LightProbe::Aiming() || g_returnFromProbe.load();
     }
 

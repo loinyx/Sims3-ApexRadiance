@@ -12,7 +12,7 @@ with a four-second address scan and process counter query, and action-only log m
 The Overview shows *Game memory*: the game's address space in use of 4 GB (large-address-aware) as one bar (the game's use, Room to save's 128 MB reserve faint after it, free),
 the largest free block in the state colour (Getting low below 320 MB, the threshold at which Room to save empties the game's idle cache;
 Critical below 160 MB), the session peak and the total, all in GB with two decimals (released in 3.1.0). Samples come from Room to save's worker every 4 s, else from the menu.
-*Warn when memory is low* (`[ui] low_memory_warning`, on by default) shows a card with the menu closed until OK.
+The low-memory state shows only in Overview > Game memory ("Getting low"); no card appears over the game.
 
 ## The problem
 

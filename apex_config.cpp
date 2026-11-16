@@ -414,7 +414,6 @@ void LoadSettings() {
         u.testBuildSeen = (*ui)["test_build_seen"].value_or(std::string());
         u.roomToSaveAsked = (*ui)["room_to_save_asked"].value_or(false);
         u.s3ppSpinAsked = (*ui)["s3pp_spin_asked"].value_or(false);
-        u.lowMemoryWarning = (*ui)["low_memory_warning"].value_or(true);
         u.restartHost = (*ui)["restart_host"].value_or(false);
         const std::string lang = (*ui)["language"].value_or(std::string("auto"));
         u.language = I18n::FromCode(lang); // "auto" or an unknown code = -1 (Windows' language)
@@ -522,7 +521,6 @@ bool Save(std::string* error) {
         if (!u.testBuildSeen.empty()) ui.insert("test_build_seen", u.testBuildSeen);
         if (u.roomToSaveAsked) ui.insert("room_to_save_asked", true);
         if (u.s3ppSpinAsked) ui.insert("s3pp_spin_asked", true);
-        ui.insert("low_memory_warning", u.lowMemoryWarning);
         ui.insert("restart_host", u.restartHost);
         ui.insert("language", u.language >= 0 && u.language < static_cast<int>(I18n::Lang::Count) ? I18n::Code(static_cast<I18n::Lang>(u.language)) : "auto");
         toml::table profileShortcuts;
