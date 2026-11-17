@@ -210,6 +210,14 @@ refused; the same file is reused and a different file of that name gets a number
 Measured offline over six common packs (AlucardDH, SweetFX, reshade-shaders slim and legacy, prod80, FXShaders): 146 of
 148 techniques run on Direct3D 9 ([history](../history/looks-fx-loading.md)).
 
+Compared with real ReShade 6.7.3 (its ReShade32.dll on the same Direct3D 9 device, 4.0.4): over 12 packs (Ann-ReShade,
+AstrayFX, BFBFX, Depth3D, dh-reshade-shaders, FGFX, GShade-Shaders, prod80, qUINT, ReShade legacy and standard effects,
+SweetFX), every one of the 219 techniques both run gives the same pixels to the bit on a gradient, noise and three game
+screenshots at 1920x1080 (time sources pinned to the same values; no depth on either side, so depth effects are compared
+on an empty depth buffer only). Not compared: 5 that need integer bitwise operations or fail in ReShade's compiler too,
+and GShade's MotionFocus, which ReShade 6.7.3 cannot compile on Direct3D 9 (Apex runs it with flow control kept).
+Texture images are resized as ReShade resizes them (`third_party/stb`, stb_image_resize2 at ReShade's pinned commit).
+
 ## Parameters and quality settings
 
 Each parameter of an open shader gets the control ReShade's own overlay would give it, from the .fx annotations

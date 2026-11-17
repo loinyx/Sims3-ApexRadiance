@@ -26,6 +26,9 @@
 #include <functional>
 #include <map>
 #include <d3dcompiler.h>
+// ReShade resizes texture images with stb_image_resize2 (public domain, the commit ReShade 6.7.3 pins): the same code here
+#define STB_IMAGE_RESIZE_IMPLEMENTATION
+#include "third_party/stb/stb_image_resize2.h"
 #pragma comment(lib, "d3dcompiler.lib")
 
 namespace Looks::Fx {
@@ -938,7 +941,7 @@ void UpdateSources(const Effect& fx, std::vector<float>& regs, SourceState& st)
             // moves to, at least 0.05 a second; from the uniform's own value (x, then its direction in y: 0 counts as rising)
             const Ann* mn = FindAnn(u.ann, "min"); const Ann* mx = FindAnn(u.ann, "max"); const Ann* sp = FindAnn(u.ann, "step");
             const Ann* sm = FindAnn(u.ann, "smoothing");
-            const float lo = mn && !mn->isString ? mn->f[0] : 0.0f, hi = mx && !mx->isString ? mx->f[0] : 0.0f;
+            const float lo = mn && !mn->isString ? mn->f[0] : 0.0f, hi = mx && !mx->isString ? mx->f[0] : 1.0f; // (max 1 when absent, as ReShade)
             const float s0 = sp && !sp->isString ? sp->f[0] : 0.0f, s1 = sp && !sp->isString ? sp->f[1] : 0.0f;
             const float smoothing = sm && !sm->isString ? sm->f[0] : 0.0f;
             float& val = st.pingpong[i * 2]; float& dir = st.pingpong[i * 2 + 1];
@@ -1003,7 +1006,7 @@ bool DecodeImage(const std::wstring& path, UINT w, UINT h, std::vector<uint8_t>&
     if (!ReadCapped(path, kMaxTextureFileBytes, bytes)) return false;
     const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     IWICImagingFactory* f = nullptr; IWICStream* st = nullptr; IWICBitmapDecoder* dec = nullptr;
-    IWICBitmapFrameDecode* fr = nullptr; IWICFormatConverter* conv = nullptr; IWICBitmapScaler* sc = nullptr;
+    IWICBitmapFrameDecode* fr = nullptr; IWICFormatConverter* conv = nullptr;
     UINT iw = 0, ih = 0;
     bool ok = SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f)))
         && SUCCEEDED(f->CreateStream(&st)) && SUCCEEDED(st->InitializeFromMemory((BYTE*)bytes.data(), (DWORD)bytes.size()))
@@ -1011,14 +1014,21 @@ bool DecodeImage(const std::wstring& path, UINT w, UINT h, std::vector<uint8_t>&
         && SUCCEEDED(dec->GetFrame(0, &fr)) && SUCCEEDED(f->CreateFormatConverter(&conv))
         && SUCCEEDED(conv->Initialize(fr, GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom))
         && SUCCEEDED(conv->GetSize(&iw, &ih)) && iw && ih && iw <= 16384 && ih <= 16384;
-    IWICBitmapSource* src = conv;
-    if (ok && (iw != w || ih != h)) // ReShade resizes an image to its texture's size too
+    if (ok && (iw != w || ih != h))
     {
-        ok = SUCCEEDED(f->CreateBitmapScaler(&sc)) && SUCCEEDED(sc->Initialize(conv, w, h, WICBitmapInterpolationModeFant));
-        src = sc;
+        // ReShade resizes an image to its texture's size with stb_image_resize2 (runtime.cpp: STBIR_EDGE_CLAMP,
+        // STBIR_FILTER_DEFAULT, alpha-weighted RGBA); the same call here gives its pixels (WIC's Fant scaler differed by
+        // up to 43 levels on RetroTV's border). The alpha is the 4th byte in BGRA as in RGBA.
+        std::vector<uint8_t> full((size_t)iw * ih * 4);
+        ok = SUCCEEDED(conv->CopyPixels(nullptr, iw * 4, (UINT)full.size(), full.data()));
+        if (ok)
+        {
+            bgra.resize((size_t)w * h * 4);
+            ok = stbir_resize(full.data(), (int)iw, (int)ih, 0, bgra.data(), (int)w, (int)h, 0, STBIR_RGBA, STBIR_TYPE_UINT8, STBIR_EDGE_CLAMP, STBIR_FILTER_DEFAULT) != nullptr;
+        }
     }
-    if (ok) { bgra.resize((size_t)w * h * 4); ok = SUCCEEDED(src->CopyPixels(nullptr, w * 4, (UINT)bgra.size(), bgra.data())); }
-    for (IUnknown* u : std::initializer_list<IUnknown*>{ sc, conv, fr, dec, st, f }) if (u) u->Release();
+    else if (ok) { bgra.resize((size_t)w * h * 4); ok = SUCCEEDED(conv->CopyPixels(nullptr, w * 4, (UINT)bgra.size(), bgra.data())); }
+    for (IUnknown* u : std::initializer_list<IUnknown*>{ conv, fr, dec, st, f }) if (u) u->Release();
     if (SUCCEEDED(com)) CoUninitialize();
     return ok;
 }
