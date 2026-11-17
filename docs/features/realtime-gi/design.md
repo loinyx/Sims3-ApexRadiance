@@ -132,9 +132,12 @@ fallback. A lamp in room A adds exactly 0 to texels of room B when no opening jo
 2. **Directional-map copies** rendered from the directional layers: indoor counters, objects and normal-mapped
    floors get coloured directional bounce with stock shaders. How the readers weight the four maps is checked
    before relying on the ambient-cube reading [O: S0-04].
-3. **Lamp index cells for outdoor rig-lit objects.** A cell is a tile a story; each holds up to 4 lamp indices. Cells
-   and the lamp table live in rows of the one float atlas, so the feature costs one sampler. Atlas scale, lot origin
-   and look constants sit in a reserved high pixel-constant block written once a frame [O: S0-G2 for a free range].
+3. **Lamp index cells for outdoor rig-lit objects.** A cell is 2 m of a world-space window; each holds up to 8 lamp entries
+   (index, visibility, visibility for an object set in a wall) and one texel with the ground share and the highest
+   lamp head [V, [S3-02](wp/S3-02.md); stories are open]. Cells and the lamp table live in rows of one float
+   texture, so the feature costs one sampler. Cell scale, window origin, strengths, the lot's ground height and the
+   ground atlas uv sit in pixel constants `c208`-`c214` of the reserved block `c208`-`c223`, written once a frame
+   [V, research 13; the runtime histogram is open]. A draw keeps one row: set in a wall, gate in a fence gap.
    The existing patched object copies read them; per-draw lamp picks and uploads stop for those families, the
    measured 1.5-2 ms of the per-draw fixes [I, 12 §2.1].
 4. **Per-Sim irradiance cube** bound in place of `DiffuseLightProbe` (later, S4) [O: S0-G2].

@@ -37,6 +37,7 @@
 #include "wall_lamp_table.h"
 #include "floor_atlas_table.h"
 #include "shader_patches.h"
+#include "lamp_index.h"
 #include "mesh_occlusion.h"
 #include "mesh_budget_policy.h"
 #include "stair_set.h"
@@ -6507,10 +6508,11 @@ std::string ReachLawText(bool reach, bool refused, bool placed, float scale, con
 // the shader evaluates each cone per pixel; otherwise colour uses the origin cone. With reachRows (realistic reach, 12/10):
 // the outdoor walls' law (lamp_reach.h), R its R, the colour x the lamp's weight Gain(w, entries), and r0^2 at reachRows[k / 4][k % 4].
 // Returns the lamp count.
+// visOut (the lamp index cells): the visible share v of each returned lamp, its colour left without it.
 // exitLamps (outdoor objects, 2.12.4): also the indoor lamps shining out of a house through an opening (not for windows: their
 // outdoor face would take the lamp of the room behind them)
 int PickObjectLampsImpl(float x, float y, float z, float (*lamps)[4], float& groundShare, float nearSkip, float (*cones)[4], float* lampTop, float (*reachRows)[4],
-                        bool exitLamps) {
+                        bool exitLamps, float* visOut = nullptr) {
     constexpr unsigned N = ShaderPatches::kObjectPixelLamps;
     int nLamps = 0;
     const int n = SelectLamps(x, z, 40.0f, exitLamps);
@@ -6552,7 +6554,8 @@ int PickObjectLampsImpl(float x, float y, float z, float (*lamps)[4], float& gro
             reachRows[slot >> 2][slot & 3] = r0 * r0;
             gain = LampReach::Gain(g_lampCone[k].w, g_lampCone[k].entries);
         }
-        const float colorFactor = (cones ? 1.0f : cone) * v * gain;
+        const float colorFactor = (cones ? 1.0f : cone) * (visOut ? 1.0f : v) * gain;
+        if (visOut) visOut[slot] = v;
         lamps[2 + 2 * slot][0] = col[0] * colorFactor;
         lamps[2 + 2 * slot][1] = col[1] * colorFactor;
         lamps[2 + 2 * slot][2] = col[2] * colorFactor;
@@ -7219,6 +7222,135 @@ bool ObjectLampPoint(const float (&m)[3][4], float (&p)[3]) {
     return true;
 }
 
+// ---- Lamp index cells (real-time GI S3-02, lab prototype; development switch lamp_index; lamp_index.h). DrawObjectLamp's
+// pick made once per 2 m cell of a window around the camera and kept in one float texture with the lamps' rows; the index
+// copy of the object shader (ShaderPatches::PatchObjectLampPs, index) reads its cell at the pixel, so a draw sets one row
+// and no lamp data. First lamp law only; an object the cells do not cover (outside the window, another lot's ground
+// height, realistic reach) keeps the pick, counted. UNVERIFIED in game: tools/lamp_index_test is the offline proof. ----
+std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_objLampPsIndex;
+struct LampIndexState {
+    LampIndex::Atlas atlas;
+    IDirect3DTexture9* tex = nullptr;
+    IDirect3DDevice9* dev = nullptr;
+    uint32_t gen = 0;   // g_lampMemoGen at the build
+    uint64_t state = 0; // LevelLightShare::LampVisibilityState at the build
+    float lotY = 0.0f;  // the ground height the cells were picked at
+    uint32_t buildFrame = ~0u, constFrame = ~0u;
+};
+LampIndexState g_lampIndex;
+std::atomic<long> g_lampIndexDraws{0}, g_lampIndexFallback{0}, g_lampIndexBuilds{0}, g_lampIndexChecked{0}, g_lampIndexDiffer{0};
+void ReleaseLampIndex() {
+    if (g_lampIndex.tex) g_lampIndex.tex->Release();
+    if (g_lampIndexBuilds.load() || g_lampIndexChecked.load())
+        LOG_INFO(std::format("[LotLightBridge] Lamp index: {} builds, {} draws from the cells, {} kept the pick; check: {} picks compared, {} differed", g_lampIndexBuilds.load(),
+                             g_lampIndexDraws.load(), g_lampIndexFallback.load(), g_lampIndexChecked.load(), g_lampIndexDiffer.load()));
+    g_lampIndex = {};
+}
+
+// The cells for an object at (x, z) on ground at lotY. Built again, at most once a frame, when the lamps or the walls
+// changed or the camera left the window's inner part. False: the per-draw pick draws this object.
+bool LampIndexReady(IDirect3DDevice9* dev, float x, float z, float lotY) {
+    LampIndexState& s = g_lampIndex;
+    constexpr unsigned N = ShaderPatches::kObjectPixelLamps;
+    static_assert(N == LampIndex::kSlots);
+    float eye[3];
+    if (!LotLightingMotion::CameraEye(eye)) return false;
+    const float margin = LampIndex::kSnap, span = LampIndex::kGrid * LampIndex::kCell;
+    const bool inner = eye[0] >= s.atlas.ox + margin && eye[2] >= s.atlas.oz + margin && eye[0] < s.atlas.ox + span - margin && eye[2] < s.atlas.oz + span - margin;
+    const uint64_t state = LevelLightShare::LampVisibilityState();
+    if ((!s.atlas.valid || s.dev != dev || s.gen != g_lampMemoGen || s.state != state || !inner) && s.buildFrame != g_roomMapFrame) {
+        s.buildFrame = g_roomMapFrame;
+        if (s.tex && s.dev != dev) s.tex->Release(), s.tex = nullptr;
+        s.dev = dev;
+        if (!s.tex && FAILED(dev->CreateTexture(LampIndex::kWidth, LampIndex::kHeight, 1, 0, D3DFMT_A32B32G32R32F, D3DPOOL_MANAGED, &s.tex, nullptr))) s.tex = nullptr;
+        const auto t0 = Clock::now();
+        const auto leftOut = g_objLampsLeftOut, dimmed = g_objLampsDimmed; // (the cells' picks are no draws)
+        s.gen = g_lampMemoGen, s.state = state, s.lotY = lotY, s.constFrame = ~0u;
+        LampIndex::Build(s.atlas, eye[0], eye[2], lotY, [](float px, float py, float pz, bool inWall, LampIndex::PointPick& o) {
+            float rows[1 + 4 * N][4] = {}, vis[N] = {}, share = 1.0f, top = -1e9f;
+            o.n = PickObjectLampsImpl(px, py, pz, rows, share, inWall ? kWindowWallSkip : 0.2f, rows + 1 + 2 * N, &top, nullptr, true, vis);
+            for (int k = 0; k < o.n; k++) {
+                std::memcpy(o.rows[k], rows[1 + 2 * k], 32);
+                std::memcpy(o.rows[k] + 8, rows[1 + 2 * N + 2 * k], 32);
+                o.vis[k] = vis[k];
+            }
+            o.share = share;
+            o.top = top > -1e8f ? top : LampIndex::kNoTop;
+        });
+        g_objLampsLeftOut = leftOut, g_objLampsDimmed = dimmed;
+        D3DLOCKED_RECT r{};
+        s.atlas.valid = s.tex && SUCCEEDED(s.tex->LockRect(0, &r, nullptr, 0));
+        if (s.atlas.valid) {
+            for (int y = 0; y < LampIndex::kHeight; y++) std::memcpy(static_cast<char*>(r.pBits) + y * r.Pitch, LampIndex::Texel(s.atlas, 0, y), LampIndex::kWidth * 16);
+            s.tex->UnlockRect(0);
+        }
+        if (g_lampIndexBuilds++ < 20)
+            LOG_INFO(std::format("[LotLightBridge] Lamp index: cells built in {:.1f} ms ({} lamps in the table, {} lit cells, entries dropped: {} no slot, {} no column){}",
+                                 std::chrono::duration<float, std::milli>(Clock::now() - t0).count(), s.atlas.lamps, s.atlas.cellsLit, s.atlas.cellOverflow, s.atlas.tableOverflow,
+                                 s.atlas.valid ? "" : ", no float texture: the per-draw pick draws"));
+    }
+    return s.atlas.valid && s.dev == dev && s.gen == g_lampMemoGen && s.state == state && s.lotY == lotY && LampIndex::InWindow(s.atlas, x, z);
+}
+
+// The frame constants c208..c214, once a frame (no game shader reads a pixel constant above c24, and no game path
+// writes one: docs/features/realtime-gi/research/13-desk-batching-constants.md)
+void LampIndexFrameConstants(IDirect3DDevice9* dev, float lampStrength, float groundStrength, const float groundUv[4]) {
+    LampIndexState& s = g_lampIndex;
+    if (s.constFrame == g_roomMapFrame) return;
+    s.constFrame = g_roomMapFrame;
+    LampIndex::Frame f;
+    f.lampStrength = f.gateStrength = lampStrength; // (the first law gives a gate in a fence gap no other strength)
+    f.groundStrength = groundStrength;
+    f.lotY = s.lotY;
+    f.poolNone = GroundShadow::kFloorGateNone, f.poolFull = GroundShadow::kFloorGateFull, f.fadeAbove = GroundLightGate::kFadeAbove;
+    std::memcpy(f.groundUv, groundUv, sizeof f.groundUv);
+    float c[LampIndex::kConstRows][4];
+    LampIndex::FrameConstants(s.atlas, f, c);
+    SetPsConst(dev, LampIndex::kFirstConst, &c[0][0], LampIndex::kConstRows);
+}
+
+// The visible entries of the cell at (x, z)
+int LampIndexEntries(float x, float z, bool inWall) {
+    int cx, cz, n = 0;
+    LampIndex::CellOf(g_lampIndex.atlas, x, z, cx, cz);
+    const float* cell = LampIndex::Texel(g_lampIndex.atlas, cx * LampIndex::kCellTexels, cz);
+    for (int k = 0; k < LampIndex::kSlots; k++)
+        if (cell[4 * k] > 0.0f && cell[4 * k + (inWall ? 2 : 1)] > 0.0f) n++;
+    return n;
+}
+
+// (lamp_index 1, the transport check) A per-draw pick against the cell at the object's point: every picked lamp that can
+// reach the cell is an entry with the pick's colour bits, and the cell has no other visible entry. The pick is made at
+// the object and the cell's at its centre, so objects off the centre near a wall's shadow edge are expected to differ.
+void LampIndexCheck(const float* at, const float (*lamps)[4], int nLamps, bool inWall) {
+    const LampIndex::Atlas& a = g_lampIndex.atlas;
+    int cx, cz, matched = 0;
+    LampIndex::CellOf(a, at[0], at[2], cx, cz);
+    const float* cell = LampIndex::Texel(a, cx * LampIndex::kCellTexels, cz);
+    const float ccx = a.ox + (cx + 0.5f) * LampIndex::kCell, ccz = a.oz + (cz + 0.5f) * LampIndex::kCell;
+    bool differ = false;
+    for (int k = 0; k < nLamps && !differ; k++) {
+        const float *p = lamps[1 + 2 * k], *c = lamps[2 + 2 * k];
+        const float dx = p[0] - ccx, dz = p[2] - ccz;
+        if (p[3] > 0.0f && ApexMath::Sqrt(dx * dx + dz * dz) - 1.0f / ApexMath::Sqrt(p[3]) > 0.7072f * LampIndex::kCell) continue; // (not kept: cannot reach the cell)
+        bool found = false;
+        for (int e = 0; e < LampIndex::kSlots && !found; e++) {
+            const int col = static_cast<int>(cell[4 * e]);
+            if (!col || std::memcmp(LampIndex::Texel(a, col, LampIndex::kGrid), p, 16) != 0) continue;
+            const float *tc = LampIndex::Texel(a, col, LampIndex::kGrid + 1), v = cell[4 * e + (inWall ? 2 : 1)];
+            const float want[3] = {tc[0] * v, tc[1] * v, tc[2] * v};
+            found = std::memcmp(want, c, sizeof want) == 0;
+        }
+        if (found) matched++;
+        else differ = true;
+    }
+    differ |= matched != LampIndexEntries(at[0], at[2], inWall);
+    g_lampIndexChecked++;
+    if (differ && g_lampIndexDiffer++ == 0)
+        LOG_WARNING(std::format("[LotLightBridge] Lamp index check: the pick at ({:.2f} {:.2f} {:.2f}) ({} lamps) is not its cell's ({} visible entries)", at[0], at[1], at[2], nLamps,
+                                LampIndexEntries(at[0], at[2], inWall)));
+}
+
 template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn draw) {
     // rig modes 2 (outdoors) and 1 (roofless fenced areas) both draw with the exterior technique (rig report 25/09)
     const int rigMode = RigMode();
@@ -7265,7 +7397,9 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
     float oldRig[3][4] = {}, oldVl[4][4] = {};
     const float noRig[4][4] = {};
     const int vl = g_curVsInfo->patched.vertexLight, wk = g_curVsInfo->patched.worldK; // ObjectVsFor succeeded: an object entry
-    int nLamps = 0;
+    int nLamps = 0, indexLamps = 0;
+    PatchedPs* indexPs = nullptr; // (lamp_index 2) the copy that reads the lamp index cells: no pick for this draw
+    float objRow[4] = {};
     lamps[0][3] = 1e-4f;
     for (unsigned k = 0; k < N; k++) lamps[1 + 2 * k][0] = lamps[1 + 2 * k][2] = 1e6f; // unused slot: far away, colour 0
     for (unsigned k = 0; k < N; ++k) {
@@ -7285,7 +7419,22 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
             const bool inWall = ObjectLampPoint(m, at);
             const bool gate = !inWall && NoteGate(m[0][3], m[1][3], m[2][3]);
             const float nearSkip = inWall ? kWindowWallSkip : 0.2f;
-            nLamps = PickObjectLamps(at[0], at[1], at[2], lamps, groundShare, nearSkip, lamps + 1 + 2 * N, &lampTop, reach ? lamps + kLampRows : nullptr, true);
+            const int indexMode = reach ? 0 : DevSwitches::LampIndexMode();
+            const LotRect* indexLot = indexMode ? FindLotAt(at[0], at[2]) : nullptr;
+            const bool cells = indexLot && LampIndexReady(dev, at[0], at[2], indexLot->ty);
+            if (cells && indexMode == 2) {
+                PatchedPs& ix = PatchedFor(
+                    dev, g_objLampPsIndex, "Outdoor object (lamp index)", [](std::vector<DWORD>& t, PatchedPs& pp) { return ShaderPatches::PatchObjectLampPs(t, pp.obj, false, true); }, true);
+                if (ix.ps) indexPs = &ix;
+            }
+            if (indexPs) {
+                LampIndex::ObjectRow(inWall, gate, objRow);
+                indexLamps = LampIndexEntries(at[0], at[2], inWall);
+            } else {
+                if (indexMode == 2) g_lampIndexFallback++;
+                nLamps = PickObjectLamps(at[0], at[1], at[2], lamps, groundShare, nearSkip, lamps + 1 + 2 * N, &lampTop, reach ? lamps + kLampRows : nullptr, true);
+                if (cells && indexMode == 1) LampIndexCheck(at, lamps, nLamps, inWall);
+            }
             originY = at[1];
             // The atlas represents light on the lot ground. Upper cornice pieces
             // must not acquire different pools from their nearest lamp-head lists.
@@ -7308,7 +7457,7 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
     }
     // A household photo lights its Sim with the rig alone, far from any lamp: zeroing it halved blond hair (the draws on the
     // object rig shaders). A reflection with lamps near keeps the per-pixel lamps.
-    if (zeroRig && nLamps == 0 && g_offScreenTarget) return false;
+    if (zeroRig && nLamps + indexLamps == 0 && g_offScreenTarget) return false;
     // (12/10, F7 18-38-41: a window frame on story 2 stands 2.5 m above the only lamp head around, a red post's; how much of
     // its red came through this term rather than the per-pixel lamps is UNVERIFIED) The ground light (the atlas) is the
     // light lying on the ground, at no height: an object standing above every lamp head around takes none of it, fading over
@@ -7317,6 +7466,7 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
     // find lampTop).
     const float gate = lampTop > -1e8f ? std::clamp(1.0f - (originY - lampTop) / 1.5f, 0.0f, 1.0f) : 1.0f;
     if (gate < 1.0f) g_objGroundGated++;
+    const float groundBase = s[0]; // (the index copy takes the share and the gates at the pixel)
     s[0] *= groundShare * gate * poolGate;
     const float rigDayScale = TerrainLightingPolicy::LampDay(night);
     const bool rigDay = !zeroRig && rigDayScale < 1.0f && (p.obj.rigLamps || vl >= 0); // the kept rig, scaled for this draw
@@ -7334,11 +7484,20 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
     IDirect3DVertexShader9* originalVs = g_curVs;
     g_inOwnCall = true;
     {
-        SamplerBind bind(dev, p.obj.atlasSampler, atlas, D3DTEXF_NONE);
+        const PatchedPs& d = indexPs ? *indexPs : p;
+        SamplerBind bind(dev, d.obj.atlasSampler, atlas, D3DTEXF_NONE);
+        std::optional<SamplerBind> indexBind;
         PsConstRun consts(dev); // (PatchObjectLampPs: cA, cA + 1 and the rows from cA + 3; cA + 2 is its own def)
-        consts.Add(p.obj.atlasConst, c, 1);
-        consts.Add(p.obj.strengthConst, s, 1);
-        consts.Add(p.obj.lampParamConst, &lamps[0][0], rows);
+        if (indexPs) { // one row; the lamps, the strengths and the atlas uv are the frame's
+            indexBind.emplace(dev, d.obj.indexSampler, g_lampIndex.tex, D3DTEXF_NONE, D3DTEXF_POINT);
+            LampIndexFrameConstants(dev, lamps[0][1], groundBase, c);
+            consts.Add(d.obj.objectConst, objRow, 1);
+            g_lampIndexDraws++;
+        } else {
+            consts.Add(p.obj.atlasConst, c, 1);
+            consts.Add(p.obj.strengthConst, s, 1);
+            consts.Add(p.obj.lampParamConst, &lamps[0][0], rows);
+        }
         consts.Set();
         if (zeroRig && p.obj.rigLamps) {
             dev->GetPixelShaderConstantF(5, &oldRig[0][0], 3);
@@ -7368,7 +7527,7 @@ template <typename DrawFn> bool DrawObjectLamp(IDirect3DDevice9* dev, DrawFn dra
             }
         }
         SetVs(dev, vs);
-        SetPs(dev, p.ps);
+        SetPs(dev, d.ps);
         draw();
         SetPs(dev, originalPs);
         SetVs(dev, originalVs);
@@ -11578,6 +11737,7 @@ void OnWorldChanged() {
     g_lampCount = g_lastLampCandidates = 0;
     std::memset(g_lampData, 0, sizeof g_lampData);
     g_lampMemoGen = 1;
+    g_lampIndex.atlas.valid = false; // (its generation starts again too)
     for (auto& memo : g_lampMemo) memo.gen = 0;
     for (auto& memo : g_pickMemo) memo.gen = 0; // (2.15.3) the generation starts again at 1: picks kept under the old ones would match it again
     for (auto& memo : g_fencePick) memo.gen = 0;
@@ -12379,7 +12539,7 @@ void Shutdown(bool keepChunkMaps) {
     g_meltTried = false;
     g_patchedGen++; // (PatchedFor's front answers and RoomMapConsts' last shader)
     for (auto* cache : {&g_terrainAlphaPs, &g_wallScalePs, &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_roadPs, &g_floorPs, &g_snowFloorPs, &g_snowFloorPs0, &g_leafPs, &g_fencePs, &g_snowCoverPs, &g_snowReliefPs, &g_objLampPs, &g_basisSmoothPs, &g_roomMapSmoothPs, &g_basisRoomPs, &g_basisSmoothWallPs, &g_basisRoomWallPs, &g_basisSmoothFillPs, &g_cubeTintPs, &g_roomMapSmoothArchPs, &g_basisRoomArchPs, &g_basisRoomWallArchPs, &g_windowPs,
-                        &g_objLampPsReach, &g_fencePsReach, &g_fenceCapPs[0], &g_fenceCapPs[1], &g_windowPsReach, &g_windowWallPs, &g_windowWallPsReach, &g_roomMapWallPs}) {
+                        &g_objLampPsReach, &g_objLampPsIndex, &g_fencePsReach, &g_fenceCapPs[0], &g_fenceCapPs[1], &g_windowPsReach, &g_windowWallPs, &g_windowWallPsReach, &g_roomMapWallPs}) {
         for (auto& [k, p] : *cache)
             if (p.ps) p.ps->Release();
         cache->clear();
@@ -12393,6 +12553,7 @@ void Shutdown(bool keepChunkMaps) {
             if (p.ps) p.ps->Release();
     g_furnitureFloorPs.clear();
     ReleaseWallMasks(); // (development builds, basis_wall_filter)
+    ReleaseLampIndex();
     g_wallMaskDev = nullptr;
     for (auto& [k, info] : g_vsInfo) { // patched copies: foliage / objects, and the outdoor floors of summer
         if (info.patched.vs) info.patched.vs->Release();
@@ -12521,7 +12682,7 @@ void MeasureMemoryImpl() {
     size_t patchedItems = 0;
     const auto ps = [&](const std::unordered_map<IDirect3DPixelShader9*, PatchedPs>& m) { patched += Hash(m), patchedItems += m.size(); };
     for (const auto* m : {&g_roadPs, &g_floorPs, &g_snowFloorPs, &g_snowFloorPs0, &g_leafPs, &g_fencePs, &g_snowCoverPs, &g_snowReliefPs, &g_objLampPs, &g_terrainAlphaPs, &g_wallScalePs,
-                          &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_objLampPsReach, &g_fencePsReach, &g_fenceCapPs[0], &g_fenceCapPs[1], &g_windowPs, &g_windowPsReach,
+                          &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_objLampPsReach, &g_objLampPsIndex, &g_fencePsReach, &g_fenceCapPs[0], &g_fenceCapPs[1], &g_windowPs, &g_windowPsReach,
                           &g_basisSmoothPs, &g_roomMapSmoothPs, &g_basisRoomPs, &g_basisSmoothWallPs, &g_basisRoomWallPs, &g_basisSmoothFillPs, &g_cubeTintPs, &g_roomMapSmoothArchPs, &g_basisRoomArchPs, &g_basisRoomWallArchPs,
                           &g_windowWallPs, &g_windowWallPsReach, &g_roomMapWallPs})
         ps(*m);
