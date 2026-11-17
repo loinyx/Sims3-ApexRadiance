@@ -30,6 +30,11 @@ pwsh -NoProfile -Command "& '%HERE%..\..\tools\gi_server_test\run.ps1' -Rebake -
 set REMIX_GI_TEST_LOTS=%LOTS%\gi_lot60.bin;%LOTS%\gi_lot120.bin;%LOTS%\gi_lot200.bin
 
 call "%VSDIR%\VC\Auxiliary\Build\vcvarsall.bat" x86 >nul || exit /b 1
+rem The listed gather batches against a cost model (gi_list_batch.h, no GPU).
+pushd "%TEMP%\ApexGiServerTest" || exit /b 1
+cl /nologo /std:c++20 /EHsc /W4 /I "%HERE%server" "%HERE%..\..\tools\gi_server_test\list_batch_check.cpp" >nul || (popd & echo FAILED: list_batch_check did not compile & exit /b 1)
+.\list_batch_check.exe || (popd & echo FAILED: list_batch_check & exit /b 1)
+popd
 pushd "%SRC%\bridge" || exit /b 1
 if not exist _t_x86\build.ninja (
   meson setup --buildtype release --backend ninja -Denable_tests=true _t_x86 || (popd & exit /b 1)
