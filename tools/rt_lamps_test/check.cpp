@@ -42,6 +42,7 @@
 #include "features/rt_lamp_proxy.h"
 #include "features/stair_set.h"
 #include "features/mesh_caster_set.h"
+#include "features/object_legs.h"
 #include "features/rt_lamp_model.h"
 #include "features/rt_lamp_gpu.h"
 #include "features/phys_lamp_pick.h"
@@ -4683,6 +4684,78 @@ static void MeshCasterSetChecks() {
     set.Clear();
     Check(set.GetStats().models == 0 && !set.NextFetch(lite), "mesh casters: cleared");
 }
+// (MC-4) the object feed: seeded objects reach the set without moving, and an object whose mesh is in the tiles leaves the 3D test
+static void MeshFeedChecks() {
+    float m16[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 110.0f, 0, 12.0f, 1}; // (the hook's float4x4: translation in 12..14)
+    ObjectLegs::Feed feed;
+    std::vector<ObjectLegs::Placed> out;
+    feed.Move(1, m16); // a load's move ahead of its attach
+    feed.Take(out);
+    Check(out.empty(), "mesh feed: a matrix alone sends nothing");
+    feed.Attach(1, 0xA);
+    m16[12] = 200.0f;
+    feed.Attach(3, 0xC), feed.Move(3, m16);
+    feed.Move(9, m16); // an object with no LITE
+    feed.Take(out);
+    Check(out.size() == 2 && std::all_of(out.begin(), out.end(), [](const ObjectLegs::Placed& p) { return p.lite && !p.flags; }),
+          "mesh feed: an object goes out once its LITE and a matrix are known, in either order");
+    const auto one = std::find_if(out.begin(), out.end(), [](const ObjectLegs::Placed& p) { return p.id == 1; });
+    Check(one != out.end() && one->lite == 0xA && one->m[3] == 110.0f && one->m[11] == 12.0f, "mesh feed: the matrix's translation in the record's rows");
+    feed.Take(out);
+    Check(out.empty(), "mesh feed: still objects send nothing more");
+    // a synthetic load: the tiles' set starts empty (world entry), no object moves; the seed sends every known object again
+    MeshCasterSet::Set set;
+    const size_t seeded = feed.Seed();
+    feed.Take(out);
+    Check(seeded == 2 && out.size() == 2 && feed.Seeded() == 2, "mesh feed: the seed sends every object with a LITE and a matrix");
+    for (const ObjectLegs::Placed& p : out) {
+        MeshCasterSet::Object o{p.id, p.lite};
+        std::memcpy(o.m, p.m, sizeof o.m);
+        set.Apply(o);
+    }
+    uint64_t lite = 0;
+    Check(set.GetStats().objects == 2 && set.NextFetch(lite), "mesh feed: seeded objects reach the set without moving");
+    // object 1 (0xA) resolved, object 3 (0xC) missing: only object 1 is in the tiles
+    MeshCasterSet::Model top;
+    top.pos = {-0.5f, 0.8f, -0.5f, 0.5f, 0.8f, -0.5f, 0.5f, 0.8f, 0.5f, -0.5f, 0.8f, 0.5f};
+    top.tri = {0, 1, 2, 0, 2, 3};
+    set.Fetched(0xA, std::move(top));
+    set.Missing(0xC);
+    RtLampProxy::Lot lot;
+    lot.stories.resize(1);
+    lot.stories[0].w = lot.stories[0].h = 32;
+    lot.worldToLot[3][0] = -100.0f;
+    RtLampProxy::Mesh mesh;
+    Check(set.AppendTo(mesh, lot.worldToLot, 32.0f, 32.0f) == 2 && set.InTiles(1) && !set.InTiles(3), "mesh feed: the resolved object is in the tiles, the missing one not");
+    // a room's 3D records: object 1's, object 3's and one of no known object, each a rectangle; object 1's with a leg
+    feed.Shape(1, 0x1000), feed.Shape(3, 0x2000), feed.Shape(7, 0x3000);
+    RoomLightTests::Room room;
+    room.rec.resize(3);
+    const uintptr_t shapes[3] = {0x1000, 0x2000, 0x3000};
+    for (int i = 0; i < 3; i++) {
+        RoomLightTests::Blocker b{};
+        b.vt = RoomLightTests::kQuadVt;
+        room.rec[i].b.push_back(b), room.rec[i].shape = shapes[i], room.rec[i].c = {10.0f + i, 0.75f, 12.0f}, room.rec[i].r2 = 0.5f;
+    }
+    room.rec[0].posts.push_back({{10.0f, 0.0f, 12.0f}, {10.0f, 0.7f, 12.0f}, 0.03f});
+    const size_t marked = ObjectLegs::MarkMeshed(room.rec, feed, [&set](uint64_t id) { return set.InTiles(id); });
+    Check(marked == 1 && room.rec[0].meshed && !room.rec[1].meshed && !room.rec[2].meshed && room.rec[0].posts.empty(),
+          "mesh feed: only the record of the object in the tiles leaves the 3D test");
+    RtLampGpu::BlockerTable table;
+    const int header = table.Append(room);
+    const int firstRec = static_cast<int>(table.rows[header].v[0]);
+    const auto blockers = [&](int r) { return static_cast<int>(table.rows[firstRec + 2 * r + 1].v[1]); };
+    Check(blockers(0) == 0 && blockers(1) == 1 && blockers(2) == 1, "mesh feed: each object darkened once: the tiled one by its mesh alone, the others by the game's blockers");
+    // its object leaves: the tiles hold it until their next upload, then its record is no longer marked
+    feed.Remove(1);
+    feed.Take(out);
+    Check(out.size() == 1 && out[0].flags == 1, "mesh feed: a removed object goes out removed");
+    set.Apply({1, 0xA, {}, true});
+    RtLampProxy::Mesh mesh2;
+    set.AppendTo(mesh2, lot.worldToLot, 32.0f, 32.0f);
+    ObjectLegs::MarkMeshed(room.rec, feed, [&set](uint64_t id) { return set.InTiles(id); });
+    Check(!room.rec[0].meshed && !set.InTiles(1), "mesh feed: once the tiles drop the object, its record (if read again) keeps the game's blockers");
+}
 static void StairSetChecks() {
     using MeshOcclusion::Triangle;
     RtLampProxy::Lot lot;
@@ -5100,6 +5173,7 @@ int main(int argc, char** argv) {
     }
     StairSetChecks();
     MeshCasterSetChecks();
+    MeshFeedChecks();
     FloorGridTwinChecks();
     PlanFieldChecks();
     std::vector<std::string> worlds;

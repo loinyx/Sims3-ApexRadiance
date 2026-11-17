@@ -48,8 +48,10 @@ bool ServerRayQuery() { return false; }
 
 // ---- mesh casters (MC-2, wp/MC.md; render thread, developer mode) ----
 // The object hooks' records go to the bridge client's RemixBridge_GiObjects (patch 0020) once a frame; the server reads the
-// game's packages and resolves each LITE to its model's caster mesh. shortcut: objects placed before the sink is on (the
-// first frame in developer mode) are not sent until they move; send the world's objects at the start if that matters.
+// game's packages and resolves each LITE to its model's caster mesh. Every object known (its LITE and a matrix, in either order)
+// is sent again when the bridge opens, at world entry and at each lot entered (MC-4: a loaded lot's still objects cast without
+// moving). shortcut: objects attached before the sink is on (the first frame with the feature on) stay unknown until they
+// attach again; read the world's object list if turning the feature on inside a world matters.
 using PFN_GiOpen = HRESULT(__stdcall*)(uint32_t*);
 using PFN_GiObjects = HRESULT(__stdcall*)(const ObjectLegs::Placed*, uint32_t);
 using PFN_GiReadCounters = HRESULT(__stdcall*)(uint32_t*, uint32_t);
@@ -65,6 +67,8 @@ struct MeshCasters {
     uint32_t ticket = 0;  // the mesh fetch in flight
     uint64_t lite = 0;
     uint32_t fetchFrames = 0;
+    bool seedDue = false; // (MC-4) every known object out again at the next send
+    uint64_t seedLot = 0; // the lot the last lot-entry seed was for
 } g_mesh;
 std::vector<ObjectLegs::Placed> g_placed;
 
@@ -136,9 +140,10 @@ void MeshFrame() {
         const HRESULT hr = g_mesh.open(&level);
         if (hr == S_FALSE) return;
         if (FAILED(hr)) return MeshOff(hr == E_NOTIMPL ? "client.giServer is off in the bridge's bridge.conf" : "the bridge's GI open failed");
-        g_mesh.opened = true;
+        g_mesh.opened = true, g_mesh.seedDue = true;
         LOG_INFO(std::format("[GiMesh] on: objects go to the bridge server (GI level {})", level));
     }
+    if (g_mesh.seedDue) g_mesh.seedDue = false, ObjectLegs::Seed();
     ObjectLegs::TakePlaced(g_placed);
     if (!g_placed.empty() && FAILED(g_mesh.send(g_placed.data(), static_cast<uint32_t>(g_placed.size())))) return MeshOff("RemixBridge_GiObjects failed");
     if (g_mesh.fetch && g_mesh.read) MeshTilesFrame();
@@ -149,13 +154,13 @@ void MeshLog() {
     uint32_t w[22] = {};
     if (!g_mesh.opened || g_mesh.off || FAILED(g_mesh.counters(w, 22))) return;
     const uint32_t objects = w[14], resolved = w[15], missing = w[16];
-    LOG_INFO(std::format("[GiMesh] objects={} resolved={} missing={} missingShare={:.1f}% indexReady={} links={} indexMs={} dropped={}", objects, resolved,
-                         missing, resolved + missing ? 100.0 * missing / (resolved + missing) : 0.0, w[17], w[18], w[19], w[20]));
+    LOG_INFO(std::format("[GiMesh] objects={} resolved={} missing={} missingShare={:.1f}% indexReady={} links={} indexMs={} dropped={} seeded={}", objects, resolved,
+                         missing, resolved + missing ? 100.0 * missing / (resolved + missing) : 0.0, w[17], w[18], w[19], w[20], ObjectLegs::Seeded()));
     if (!g_mesh.fetch) return;
     const MeshCasterSet::Stats s = MeshCasterSet::g_set.GetStats();
-    LOG_INFO(std::format("[GiMeshTiles] objects={} models={} bytes={} fetched={} missing={} tooBig={} evicted={} overBudget={} lampSkips={} serverFetches={} waitFrames={} tileTris={}",
+    LOG_INFO(std::format("[GiMeshTiles] objects={} models={} bytes={} fetched={} missing={} tooBig={} evicted={} overBudget={} lampSkips={} serverFetches={} waitFrames={} tileTris={} meshedRecords={}",
                          s.objects, s.models, s.bytes, s.fetched, s.missing, s.tooBig, s.evicted, s.overBudget, s.lampSkips, w[21], g_mesh.fetchFrames,
-                         RtOutdoorLamps::MeshTileTris()));
+                         RtOutdoorLamps::MeshTileTris(), ObjectLegs::Meshed()));
 }
 
 // ---- lamp snapshot (render thread) ----
@@ -399,6 +404,8 @@ void OnPresent() {
         for (const Lamp& l : g_lamps) heads.push_back({l.pos[0], l.pos[1], l.pos[2]});
         MeshCasterSet::g_set.SetLamps(heads);
     }
+    // (MC-4) a seed at world entry and at each lot entered
+    if (g_worldFrames == 1 || (g_activeLot && g_activeLot != g_mesh.seedLot)) g_mesh.seedDue = true, g_mesh.seedLot = g_activeLot;
     MeshFrame();
     const DWORD now = GetTickCount();
     if (g_lastLog == 0) g_lastLog = now;

@@ -52,6 +52,7 @@ class Set {
     std::unordered_map<uint64_t, Entry> cache_;         // LITE -> its model
     std::list<uint64_t> lru_;                           // LITEs, most recent first
     std::unordered_set<uint64_t> missing_, skipped_;    // no mesh on the server; refused by the budget until an object leaves
+    std::unordered_set<uint64_t> tiles_;                // objects the last AppendTo put in the tiles (their 3D records leave the test)
     std::unordered_map<uint64_t, uint32_t> users_;      // LITE -> placed objects naming it
     std::vector<std::array<float, 3>> lamps_;            // the lamps' heads (world): their own objects cast nothing
     size_t budget_ = kBudgetBytes, bytes_ = 0;
@@ -69,7 +70,7 @@ class Set {
     explicit Set(size_t budget = kBudgetBytes) : budget_(budget) {}
     void Clear() {
         std::lock_guard<std::mutex> lk(mx_);
-        objects_.clear(), cache_.clear(), lru_.clear(), missing_.clear(), skipped_.clear(), users_.clear();
+        objects_.clear(), cache_.clear(), lru_.clear(), missing_.clear(), skipped_.clear(), users_.clear(), tiles_.clear();
         bytes_ = 0, st_ = {}, gen_++;
     }
     // The object hooks' records (ObjectLegs::TakePlaced), in order
@@ -123,6 +124,7 @@ class Set {
     size_t AppendTo(RtLampProxy::Mesh& out, const float toLot[4][4], float w, float h, size_t maxTris = kMaxTris) {
         std::lock_guard<std::mutex> lk(mx_);
         out.curKind = RtLampProxy::Mesh::kShape;
+        tiles_.clear();
         size_t added = 0;
         for (const auto& [id, o] : objects_) {
             const auto c = cache_.find(o.lite);
@@ -154,6 +156,7 @@ class Set {
                 for (int k = 0; k < 3; k++) p[k] = wv[0] * toLot[0][k] + wv[1] * toLot[1][k] + wv[2] * toLot[2][k] + toLot[3][k];
             }
             if (!(v[0][0] >= -kLotPadM && v[0][0] <= w + kLotPadM && v[0][2] >= -kLotPadM && v[0][2] <= h + kLotPadM)) continue;
+            tiles_.insert(id);
             for (size_t t = 0; t + 2 < md.tri.size(); t += 3) {
                 const uint32_t a = md.tri[t], b = md.tri[t + 1], cc = md.tri[t + 2];
                 if (a >= v.size() || b >= v.size() || cc >= v.size()) continue;
@@ -162,6 +165,11 @@ class Set {
             }
         }
         return added;
+    }
+    // An object whose mesh the last AppendTo put in the tiles
+    bool InTiles(uint64_t id) const {
+        std::lock_guard<std::mutex> lk(mx_);
+        return tiles_.count(id) != 0;
     }
     uint32_t Gen() const {
         std::lock_guard<std::mutex> lk(mx_);
