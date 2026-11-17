@@ -2089,6 +2089,8 @@ const I18n::Pair kPairs[] = {
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "ลบเส้นเงาประจาง ๆ ตามขอบเคาน์เตอร์ พื้น และพื้นผิวเรียบอื่น ๆ"},
     {"Edge-aware smoothing", "การเกลี่ยที่คำนึงถึงขอบ"},
     {"Smooths the shade without letting it bleed across the edges of objects", "เกลี่ยเงาโดยไม่ให้เงาล้นข้ามขอบของวัตถุ"},
+    {"Refine while the camera is still", "ปรับให้ละเอียดขณะกล้องอยู่นิ่ง"},
+    {"Quality Low: builds a smoother shade over a few frames while the camera is still", "เมื่อคุณภาพเป็น ต่ำ: สร้างเงาที่เนียนขึ้นภายในไม่กี่เฟรมขณะกล้องอยู่นิ่ง และเริ่มใหม่เมื่อกล้องขยับ"},
     {"Show the shade alone", "แสดงเฉพาะเงา"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "แสดงเฉพาะเงาเป็นสีเทา เพื่อดูผลขณะปรับ (ไม่บันทึก)"},
     {"Also in map view", "ในมุมมองแผนที่ด้วย"},

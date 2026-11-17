@@ -2089,6 +2089,8 @@ const I18n::Pair kPairs[] = {
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Verwijdert vage gestippelde schaduwlijnen langs de randen van aanrechten, vloeren en andere vlakke oppervlakken"},
     {"Edge-aware smoothing", "Randbewuste vervaging"},
     {"Smooths the shade without letting it bleed across the edges of objects", "Vervaagt de schaduw zonder dat die over de randen van objecten uitloopt"},
+    {"Refine while the camera is still", "Verfijnen bij stilstaande camera"},
+    {"Quality Low: builds a smoother shade over a few frames while the camera is still", "Met Kwaliteit op Laag: bouwt in enkele beelden een vloeiendere schaduw op zolang de camera stilstaat en begint opnieuw wanneer die beweegt"},
     {"Show the shade alone", "Alleen de schaduw tonen"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "Toont alleen de schaduw, in grijs, om te zien wat hij doet terwijl je bijstelt (niet opgeslagen)"},
     {"Also in map view", "Ook in kaartweergave"},

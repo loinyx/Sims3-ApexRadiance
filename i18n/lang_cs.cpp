@@ -2089,6 +2089,8 @@ const I18n::Pair kPairs[] = {
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Odstraní slabé přerušované čáry stínu podél okrajů linek, podlah a jiných rovných ploch"},
     {"Edge-aware smoothing", "Vyhlazení s ohledem na hrany"},
     {"Smooths the shade without letting it bleed across the edges of objects", "Vyhlazuje stín, aniž by přetékal přes hrany objektů"},
+    {"Refine while the camera is still", "Zjemnit, když kamera stojí"},
+    {"Quality Low: builds a smoother shade over a few frames while the camera is still", "S kvalitou Nízká: během několika snímků vytvoří hladší stín, dokud kamera stojí, a po pohybu začne znovu"},
     {"Show the shade alone", "Zobrazit jen stín"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "Zobrazí jen stín, šedě, abys viděl, co dělá, zatímco ho upravuješ (neukládá se)"},
     {"Also in map view", "I v zobrazení mapy"},

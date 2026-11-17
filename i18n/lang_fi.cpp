@@ -2089,6 +2089,8 @@ const I18n::Pair kPairs[] = {
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Poistaa heikot katkoviivamaiset varjoviivat työtasojen, lattioiden ja muiden tasaisten pintojen reunoilta"},
     {"Edge-aware smoothing", "Reunat huomioiva tasoitus"},
     {"Smooths the shade without letting it bleed across the edges of objects", "Tasoittaa varjon päästämättä sitä vuotamaan esineiden reunojen yli"},
+    {"Refine while the camera is still", "Tarkenna kameran ollessa paikallaan"},
+    {"Quality Low: builds a smoother shade over a few frames while the camera is still", "Kun Laatu on Matala: rakentaa tasaisemman varjon muutaman kuvan aikana kameran ollessa paikallaan ja aloittaa alusta, kun se liikkuu"},
     {"Show the shade alone", "Näytä pelkkä varjo"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "Näyttää vain varjon harmaana, jotta näet sen vaikutuksen säätäessäsi (ei tallenneta)"},
     {"Also in map view", "Myös karttanäkymässä"},

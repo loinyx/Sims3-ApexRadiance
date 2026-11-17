@@ -2089,6 +2089,8 @@ const I18n::Pair kPairs[] = {
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "去除檯面、地板等平面邊緣上淡淡的虛線狀陰影"},
     {"Edge-aware smoothing", "邊緣感知平滑"},
     {"Smooths the shade without letting it bleed across the edges of objects", "平滑陰影且不讓它越過物體邊緣"},
+    {"Refine while the camera is still", "鏡頭靜止時細化"},
+    {"Quality Low: builds a smoother shade over a few frames while the camera is still", "品質為「低」時：鏡頭靜止期間用幾幀累積出更平滑的陰影，鏡頭移動後重新開始"},
     {"Show the shade alone", "單獨顯示陰影"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "只以灰色顯示陰影，讓你在調整時看清效果（不會儲存）"},
     {"Also in map view", "地圖檢視中也套用"},

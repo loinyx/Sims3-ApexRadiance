@@ -6,6 +6,7 @@
 // earlier AO lines were judged dotty, dirty and weak (docs/removed-features.md). What it keeps from the last one:
 //  - Full resolution, no per-frame noise, no accumulation: the same depth gives the same result bit for bit (a still
 //    camera never changes it), so nothing twinkles or trails. Half resolution was the root of every "micro dots" report.
+//    (The one exception is the option Refine while the camera is still, off by default: see AccumPS.)
 //  - A 1/z pyramid (9 levels, R32F, padded to a multiple of 256 so each level is the exact 2x2 average): 1/z is linear
 //    across the screen on a plane, so flat surfaces stay flat at every level. The march reads it bilinearly within the
 //    nearest level: trilinear cost twice as much for the same look (30/09, 4K: 2.4 vs 4.5 ms, image 0.04 levels apart).
@@ -120,7 +121,11 @@ float4 cDepth : register(c10); // x = A, y = 1 / (near A)   (1/z = (A - d) / (ne
 float4 cSim : register(c11); // body strength, opaque mask available, hair strength, maximum shade
 float4 cSimView : register(c12); // mask preview, transparent hair mask available
 float4 cZoom : register(c13); // slices by zoom: xy = screen centre (pyramid uv), z = 1/z of the mid distance, w = 1/z of the far distance
+sampler2D sHist : register(s8); // still-camera accumulation: the last frame's accumulated AO + 1/z, bilinear
 float4 cTier : register(c14); // xy = pixel -> sTier uv, z = a threshold's factor to leave the nearer tier, w = to return to it (1 = no hysteresis)
+float4 cTime : register(c15); // still-camera accumulation: xy = this frame's shift of the slice angle and the step offset (0 = the fixed
+                              // pattern), z = weight of the history, w = depth tolerance (of z)
+float4 cPrev[3] : register(c16); // rows x, y and w of the matrix from this frame's clip position to the last frame's
 
 static const float PI = 3.14159265;
 
@@ -262,6 +267,9 @@ float4 GtaoPS(float2 uv : TEXCOORD0) : COLOR0
     float lodAdd = log2(1.0 - exp2(-lg)) - cMarch.y + log2(cMarch.x);
     float2 q = floor(pix);
     float b1 = (Bayer4(q) + 0.5) / 16.0, b2 = (Bayer4(q.yx + float2(1, 2)) + 0.5) / 16.0;
+#ifdef OPTIONS
+    b1 = frac(b1 + cTime.x), b2 = frac(b2 + cTime.y);           // still-camera accumulation: other directions each frame
+#endif
     float2 fMul = float2(-1.0 / (0.615 * cRad.x), -1.0 / (0.615 * Rl));
     const float fAdd = 0.385 / 0.615 + 1.0;
     float2 om;
@@ -373,6 +381,32 @@ float4 BlurPS(float2 uv : TEXCOORD0) : COLOR0
 }
 #endif
 
+// Refine while the camera is still: this frame's AO before the blur joins the history. The history is found by
+// reprojecting the pixel with the camera alone (cPrev; the game gives no motion of its own), dropped where its depth is
+// not this pixel's (something moved) or it lies off screen, and clamped to this frame's AO in the 3x3 pixels around (a
+// shade that left cannot trail: the earlier temporal AO clamped to an already averaged range and followed the noise).
+// Out: as GtaoPS, the accumulated AO in R.
+static const float2 AROUND[8] = { float2(-1, -1), float2(0, -1), float2(1, -1), float2(-1, 0), float2(1, 0), float2(-1, 1), float2(0, 1), float2(1, 1) };
+float4 AccumPS(float2 uv : TEXCOORD0) : COLOR0
+{
+    float4 c0 = tex2Dlod(sAo, float4(uv, 0, 0));
+    [branch] if (c0.y <= 0.0) return c0;
+    float lo = c0.x, hi = c0.x;
+    [unroll] for (int k = 0; k < 8; k++)
+    {
+        float2 v = tex2Dlod(sAo, float4(uv + cDir.xy * AROUND[k], 0, 0)).rg;
+        lo = min(lo, v.y > 0.0 ? v.x : lo);
+        hi = max(hi, v.y > 0.0 ? v.x : hi);
+    }
+    float z = 1.0 / c0.y;
+    float4 clip = float4((uv * float2(2, -2) + float2(-1, 1)) * z, (cDepth.x - c0.y / cDepth.y) * z, z);
+    float3 last = float3(dot(cPrev[0], clip), dot(cPrev[1], clip), dot(cPrev[2], clip));
+    float2 luv = last.xy / last.z * float2(0.5, -0.5) + 0.5;
+    float2 h = tex2Dlod(sHist, float4(luv, 0, 0)).rg;
+    bool same = all(abs(luv - 0.5) < 0.5) && h.y > 0.0 && abs(h.y * last.z - 1.0) < cTime.w;
+    return float4(lerp(c0.x, clamp(h.x, lo, hi), same ? cTime.z : 0.0), c0.yzw);
+}
+
 // The Banding Fix's grain (ShaderPatches::AddDither) on x, of at most `amount`: the composite rounds to 8 bits again.
 // Triangular, tapering to uniform above mid-grey, within the clamp (no specks at pure black or white); the R2 pattern
 // with its coefficients swapped, which does not correlate with the scene's grain (0.002, offline)
@@ -459,6 +493,7 @@ const ShaderCache::Id kCompositePsId = AddShader("AO CompositePS", "CompositePS"
 const ShaderCache::Id kBlurEdgesPsId = AddShader("AO BlurPS (edge-aware)", "BlurPS", 1, nullptr, "EDGES");
 const ShaderCache::Id kBlockTierPsId = AddShader("AO BlockTierPS", "BlockTierPS", 1);
 const ShaderCache::Id kBlockSpreadPsId = AddShader("AO BlockSpreadPS", "BlockSpreadPS", 1);
+const ShaderCache::Id kAccumPsId = AddShader("AO AccumPS", "AccumPS", 1);
 const ShaderCache::Id kZoomTierPsId = AddShader("AO ZoomTierPS", "ZoomTierPS", 1);
 const ShaderCache::Id kDepthPsId = AddShader("AO DepthPS (Developer capture)", "DepthPS", 1);
 // GtaoPS variants: bit 0 = reads the frame's tier (ZOOM: Fewer directions when far, and every other option that needs
@@ -474,6 +509,11 @@ constexpr float kZoomHysteresis = 0.1f;
 // (a 24-bit depth step is 2.4e-7 z of it: 0.01% at 400 m; set on the synthetic scene of tools/ao_options_check,
 // unverified in game)
 constexpr float kBlockBend = 5e-4f;
+// Refine while the camera is still (Quality Low): the camera counts as still while no point of the view moves more than
+// kStillPixels from one frame to the next; the history is a plain average of the first kAccumFrames frames, then each
+// frame counts 1 / kAccumFrames; a history farther than kAccumDepth of z from the pixel is dropped (unverified in game)
+constexpr float kStillPixels = 0.25f, kAccumDepth = 0.02f;
+constexpr int kAccumFrames = 16;
 constexpr int ZoomSlices(int slices, int num, int den) { return std::max(2, slices * num / den); }
 ShaderCache::Id AddGtao(int q, int v) {
     static const char* const kNames[kQualityCount] = {"Low", "Medium", "High", "Ultra", "Very Low"};
@@ -522,6 +562,7 @@ struct Params {
     bool zoomHysteresis = false; // zoomSlices: the count switches 10% past a threshold and back 10% before it
     bool edgeBlur = false;     // edge-aware 4x4 box from the AO pass's edge weights, no tent
     bool blockSlices = false;  // half the directions in 4x4 blocks where the depth does not bend within reach
+    bool temporalStill = false; // Quality Low: accumulate frames with other directions while the camera is still
 };
 
 struct State {
@@ -531,6 +572,12 @@ struct State {
     UINT blockW = 0, blockH = 0;              // blocks across and down
     IDirect3DTexture9* block[2] = {};         // one tier per 4x4 block: as found, then spread
     IDirect3DSurface9* blockSurf[2] = {};
+    bool accumAsked = false;                  // the history targets were made
+    IDirect3DTexture9* hist[2] = {};          // accumulated AO before the blur: this frame's and the last one's
+    IDirect3DSurface9* histSurf[2] = {};
+    int histNow = 0, stillFrames = 0;         // frames in the history (0 = none: the camera moved)
+    float lastVp[4][4] = {};
+    bool lastVpValid = false;
     bool gtaoTried[kGtaoVariants][kQualityCount] = {};
     bool showShade = false; // Advanced > Show the shade alone (not saved)
     bool showSimMask = false; // preview only, never persisted
@@ -545,7 +592,7 @@ struct State {
     IDirect3DTexture9* tier[2] = {}; // the frame's direction-count tier, 1x1: this frame's and the last one's
     IDirect3DSurface9* tierSurf[2] = {};
     int tierNow = 0;
-    IDirect3DPixelShader9 *psLinear = nullptr, *psDown = nullptr, *psBlur = nullptr, *psComposite = nullptr, *psDepth = nullptr, *psZoomTier = nullptr, *psBlurEdges = nullptr, *psBlockTier = nullptr, *psBlockSpread = nullptr;
+    IDirect3DPixelShader9 *psLinear = nullptr, *psDown = nullptr, *psBlur = nullptr, *psComposite = nullptr, *psDepth = nullptr, *psZoomTier = nullptr, *psBlurEdges = nullptr, *psBlockTier = nullptr, *psBlockSpread = nullptr, *psAccum = nullptr;
     IDirect3DPixelShader9* psGtao[kGtaoVariants][kQualityCount] = {};
     // GPU cost (timestamp queries, read a few frames later)
     static constexpr int kQ = 4;
@@ -762,6 +809,8 @@ template <typename Draw> void RecordSimReceiver(IDirect3DDevice9* dev, Draw draw
 
 void ReleaseResources() {
     g.ready = false;
+    g.stillFrames = 0;
+    g.lastVpValid = false;
     ReleaseSimMask();
     for (int i = 0; i < kLevels; i++) {
         SafeRelease(g.zLevel[i]);
@@ -779,6 +828,8 @@ void ReleaseResources() {
         SafeRelease(g.tier[i]);
         SafeRelease(g.blockSurf[i]);
         SafeRelease(g.block[i]);
+        SafeRelease(g.histSurf[i]);
+        SafeRelease(g.hist[i]);
     }
     for (int i = 0; i < State::kQ; i++) {
         SafeRelease(g.qDisjoint[i]);
@@ -799,6 +850,7 @@ void ReleaseShaders() {
     SafeRelease(g.psBlurEdges);
     SafeRelease(g.psBlockTier);
     SafeRelease(g.psBlockSpread);
+    SafeRelease(g.psAccum);
     for (int v = 0; v < kGtaoVariants; v++)
         for (int q = 0; q < kQualityCount; q++) {
             SafeRelease(g.psGtao[v][q]);
@@ -824,7 +876,9 @@ IDirect3DPixelShader9* CreateShader(IDirect3DDevice9* dev, ShaderCache::Id id, c
     return nullptr;
 }
 
-int GtaoVariant() { return (g.p.zoomSlices || g.edgeBlur || g.blockAsked ? 1 : 0) | (g.p.blendNormals ? 2 : 0); }
+// Refine while the camera is still runs with Quality Low only (stored index 0)
+bool Accumulating() { return g.accumAsked && g.p.quality == 0; }
+int GtaoVariant() { return (g.p.zoomSlices || g.edgeBlur || g.blockAsked || Accumulating() ? 1 : 0) | (g.p.blendNormals ? 2 : 0); }
 
 // The AO pass of one quality and the current options, created on first use
 IDirect3DPixelShader9* GtaoShader(IDirect3DDevice9* dev, int q) {
@@ -838,7 +892,7 @@ IDirect3DPixelShader9* GtaoShader(IDirect3DDevice9* dev, int q) {
 }
 
 bool EnsureShaders(IDirect3DDevice9* dev) {
-    const bool fixedOk = g.psLinear && g.psDown && g.psBlur && g.psComposite && g.psZoomTier && g.psBlurEdges && g.psBlockTier && g.psBlockSpread;
+    const bool fixedOk = g.psLinear && g.psDown && g.psBlur && g.psComposite && g.psZoomTier && g.psBlurEdges && g.psBlockTier && g.psBlockSpread && g.psAccum;
     if (!fixedOk && g.fixedTried) return false; // failed once: logged, not retried every frame
     g.fixedTried = true;
     if (!g.psLinear) g.psLinear = CreateShader(dev, kLinearPsId, "LinearizePS");
@@ -849,7 +903,8 @@ bool EnsureShaders(IDirect3DDevice9* dev) {
     if (!g.psBlurEdges) g.psBlurEdges = CreateShader(dev, kBlurEdgesPsId, "BlurPS (edge-aware)");
     if (!g.psBlockTier) g.psBlockTier = CreateShader(dev, kBlockTierPsId, "BlockTierPS");
     if (!g.psBlockSpread) g.psBlockSpread = CreateShader(dev, kBlockSpreadPsId, "BlockSpreadPS");
-    const bool ok = g.psLinear && g.psDown && g.psBlur && g.psComposite && g.psZoomTier && g.psBlurEdges && g.psBlockTier && g.psBlockSpread && GtaoShader(dev, g.p.quality);
+    if (!g.psAccum) g.psAccum = CreateShader(dev, kAccumPsId, "AccumPS");
+    const bool ok = g.psLinear && g.psDown && g.psBlur && g.psComposite && g.psZoomTier && g.psBlurEdges && g.psBlockTier && g.psBlockSpread && g.psAccum && GtaoShader(dev, g.p.quality);
     if (!ok) g.status = "ERROR: the shader did not compile (see ApexRadiance_LOG.txt)";
     return ok;
 }
@@ -890,6 +945,7 @@ bool InitResources(IDirect3DDevice9* dev) {
     if (g.edgeAsked && !g.edgeBlur) LOG_WARNING("[AO] A16B16G16R16F render targets not supported: Edge-aware smoothing stays off");
     const D3DFORMAT aoFormat = g.edgeBlur ? D3DFMT_A16B16G16R16F : D3DFMT_G16R16F;
     g.blockAsked = g.p.blockSlices;
+    g.accumAsked = g.p.temporalStill;
     if (!EnsureShaders(dev)) return false;
     g.width = bd.Width;
     g.height = bd.Height;
@@ -914,6 +970,7 @@ bool InitResources(IDirect3DDevice9* dev) {
     for (int i = 0; ok && g.blockAsked && i < 2; i++)
         ok = SUCCEEDED(dev->CreateTexture(g.blockW, g.blockH, 1, D3DUSAGE_RENDERTARGET, D3DFMT_R32F, D3DPOOL_DEFAULT, &g.block[i], nullptr)) && g.block[i] &&
              SUCCEEDED(g.block[i]->GetSurfaceLevel(0, &g.blockSurf[i])) && g.blockSurf[i];
+    for (int i = 0; ok && g.accumAsked && i < 2; i++) ok = make(&g.hist[i], &g.histSurf[i], aoFormat);
     if (!ok) {
         ReleaseResources();
         g.status = "ERROR: not enough video memory for the shade textures";
@@ -950,8 +1007,8 @@ constexpr D3DSAMPLERSTATETYPE kSamplerStates[] = {D3DSAMP_MINFILTER, D3DSAMP_MAG
                                                   D3DSAMP_MAXMIPLEVEL, D3DSAMP_MIPMAPLODBIAS};
 constexpr int kRS = static_cast<int>(sizeof(kRenderStates) / sizeof(kRenderStates[0]));
 constexpr int kSS = static_cast<int>(sizeof(kSamplerStates) / sizeof(kSamplerStates[0]));
-constexpr DWORD kSamplers = 8; // s5 opaque Sims, s6 transparent hair, s7 direction-count tier
-constexpr UINT kPSConsts = 15; // c0..c14
+constexpr DWORD kSamplers = 9; // s5 opaque Sims, s6 transparent hair, s7 direction-count tier, s8 accumulated AO
+constexpr UINT kPSConsts = 19; // c0..c18
 
 struct SavedState {
     IDirect3DSurface9 *rt0 = nullptr, *ds = nullptr;
@@ -1050,8 +1107,9 @@ void SetPassStates(IDirect3DDevice9* dev) {
     dev->SetRenderState(D3DRS_COLORWRITEENABLE, 0xF);
     for (DWORD s = 0; s < kSamplers; s++) {
         const bool march = s == 2; // sZt: the march's prefiltered reads, bilinear within the nearest level
-        dev->SetSamplerState(s, D3DSAMP_MINFILTER, march ? D3DTEXF_LINEAR : D3DTEXF_POINT);
-        dev->SetSamplerState(s, D3DSAMP_MAGFILTER, march ? D3DTEXF_LINEAR : D3DTEXF_POINT);
+        const bool linear = march || s == 8; // sHist: a reprojected history lies between pixels
+        dev->SetSamplerState(s, D3DSAMP_MINFILTER, linear ? D3DTEXF_LINEAR : D3DTEXF_POINT);
+        dev->SetSamplerState(s, D3DSAMP_MAGFILTER, linear ? D3DTEXF_LINEAR : D3DTEXF_POINT);
         dev->SetSamplerState(s, D3DSAMP_MIPFILTER, march ? D3DTEXF_POINT : D3DTEXF_NONE);
         dev->SetSamplerState(s, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
         dev->SetSamplerState(s, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
@@ -1188,6 +1246,48 @@ void CaptureFrame(IDirect3DDevice9* dev, IDirect3DTexture9* depth, float nearZ, 
     LOG_INFO("[AO] " + g.captureNote);
 }
 
+// Refine while the camera is still: the rows x, y and w of the matrix that takes a clip position of this frame to the
+// last frame's (last * inverse(now), both world -> clip with rows as PostScene::CameraViewProj gives them), and the
+// farthest any of 5 points of the screen at 2 and at 200 m moved between the two frames, in pixels (1e9: no inverse)
+float CameraShift(const float now[4][4], const float last[4][4], float W, float H, float nearZ, float A, float rows[3][4]) {
+    double m[4][8];
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 4; j++) m[i][j] = now[i][j], m[i][j + 4] = i == j;
+    for (int c = 0; c < 4; c++) { // Gauss-Jordan with partial pivoting
+        int best = c;
+        for (int r = c + 1; r < 4; r++)
+            if (std::fabs(m[r][c]) > std::fabs(m[best][c])) best = r;
+        if (std::fabs(m[best][c]) < 1e-12) return 1e9f;
+        std::swap(m[c], m[best]);
+        const double d = m[c][c];
+        for (int j = 0; j < 8; j++) m[c][j] /= d;
+        for (int r = 0; r < 4; r++) {
+            if (r == c) continue;
+            const double k = m[r][c];
+            for (int j = 0; j < 8; j++) m[r][j] -= k * m[c][j];
+        }
+    }
+    double full[4][4];
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 4; j++) {
+            full[i][j] = 0;
+            for (int k = 0; k < 4; k++) full[i][j] += double(last[i][k]) * m[k][j + 4];
+        }
+    for (int j = 0; j < 4; j++) rows[0][j] = float(full[0][j]), rows[1][j] = float(full[1][j]), rows[2][j] = float(full[3][j]);
+    double moved = 0;
+    static constexpr double kPoints[5][2] = {{0, 0}, {-0.9, -0.9}, {0.9, -0.9}, {-0.9, 0.9}, {0.9, 0.9}};
+    for (const auto& pt : kPoints)
+        for (double z : {2.0, 200.0}) {
+            const double clip[4] = {pt[0] * z, pt[1] * z, (A - nearZ * A / z) * z, z};
+            double o[4] = {};
+            for (int i = 0; i < 4; i++)
+                for (int j = 0; j < 4; j++) o[i] += full[i][j] * clip[j];
+            if (o[3] <= 1e-9) return 1e9f;
+            moved = std::max({moved, std::fabs(o[0] / o[3] - pt[0]) * 0.5 * W, std::fabs(o[1] / o[3] - pt[1]) * 0.5 * H});
+        }
+    return float(moved);
+}
+
 void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* bb, IDirect3DPixelShader9* psGtao) {
     SavedState saved;
     if (!saved.Capture(dev)) return;
@@ -1211,6 +1311,14 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
     g.lastA = A;
     g.lastTanX = tanX;
     g.lastTanY = tanY;
+    // Refine while the camera is still: the history holds g.stillFrames frames. The first still frame is the fixed pattern
+    // and starts the history; each later one shifts its directions and joins it; any movement starts again
+    float lastRows[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 0, 1}};
+    const bool still = Accumulating() && g.lastCamera && g.lastVpValid && CameraShift(vp, g.lastVp, W, H, nearZ, A, lastRows) <= kStillPixels;
+    if (!still) g.stillFrames = 0;
+    const int inHistory = g.stillFrames;
+    g.lastVpValid = g.lastCamera;
+    if (g.lastCamera) std::memcpy(g.lastVp, vp, sizeof g.lastVp);
     const int slices = kQualitySlices[std::clamp(g.p.quality, 0, kQualityCount - 1)];
     const float s = std::clamp(g.p.strength, 0.0f, 2.0f), reach = std::clamp(g.p.reach, 0.5f, 2.0f);
     const bool map = g.p.inMapView && MapView::IsOpen();
@@ -1233,7 +1341,12 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
         {g.p.simControls && g.showSimMask ? 1.0f : 0.0f, WantSimMask() && simMask.hairCleared && !simMask.failed ? 1.0f : 0.0f, 0, 0},
         // (thresholds of 0 keep tier 0: the looped pass without Fewer directions when far)
         {W * 0.5f / g.padW, H * 0.5f / g.padH, g.p.zoomSlices ? 1.0f / kZoomMid : 0.0f, g.p.zoomSlices ? 1.0f / kZoomFar : 0.0f},
-        {g.blockAsked ? 0.25f / g.blockW : 0.0f, g.blockAsked ? 0.25f / g.blockH : 0.0f, g.p.zoomHysteresis ? 1.0f / (1.0f + kZoomHysteresis) : 1.0f, g.p.zoomHysteresis ? 1.0f / (1.0f - kZoomHysteresis) : 1.0f}};
+        {g.blockAsked ? 0.25f / g.blockW : 0.0f, g.blockAsked ? 0.25f / g.blockH : 0.0f, g.p.zoomHysteresis ? 1.0f / (1.0f + kZoomHysteresis) : 1.0f, g.p.zoomHysteresis ? 1.0f / (1.0f - kZoomHysteresis) : 1.0f},
+        // (golden-ratio steps: the angles and offsets of successive frames fall between the earlier ones)
+        {std::fmod((inHistory % 1024) * 0.618034f, 1.0f), std::fmod((inHistory % 1024) * 0.754878f, 1.0f), 1.0f - 1.0f / std::min(inHistory + 1, kAccumFrames), kAccumDepth},
+        {lastRows[0][0], lastRows[0][1], lastRows[0][2], lastRows[0][3]},
+        {lastRows[1][0], lastRows[1][1], lastRows[1][2], lastRows[1][3]},
+        {lastRows[2][0], lastRows[2][1], lastRows[2][2], lastRows[2][3]}};
     dev->SetPixelShaderConstantF(0, &c[0][0], kPSConsts);
 
     if (!kPublicBuild)
@@ -1286,21 +1399,34 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
             dev->SetTexture(7, g.block[1]);
         }
     }
-    dev->SetRenderTarget(0, g.aoASurf);
+    //    (the first still frame goes straight into the history)
+    if (still) g.histNow ^= 1;
+    dev->SetRenderTarget(0, still && !inHistory ? g.histSurf[g.histNow] : g.aoASurf);
     dev->SetTexture(1, g.zTex);
     dev->SetPixelShader(psGtao);
     DrawQuad(dev, g.width, g.height);
     dev->SetTexture(2, nullptr);
     dev->SetTexture(7, nullptr);
+    if (still && inHistory) { // this frame joins the history
+        const float texel[4] = {1.0f / W, 1.0f / H, 0, 0};
+        dev->SetPixelShaderConstantF(6, texel, 1);
+        dev->SetRenderTarget(0, g.histSurf[g.histNow]);
+        dev->SetTexture(3, g.aoA);
+        dev->SetTexture(8, g.hist[g.histNow ^ 1]);
+        dev->SetPixelShader(g.psAccum);
+        DrawQuad(dev, g.width, g.height);
+        dev->SetTexture(8, nullptr);
+    }
+    if (still) g.stillFrames = std::min(inHistory + 1, 1 << 20);
 
     // 4. filter: box H, box V (cancels the 4x4 interleave), tent H, tent V; a -> b -> a -> b -> a. Edge-aware: the two
-    //    box passes only
+    //    box passes only. While the camera is still, the first pass reads the history
     dev->SetPixelShader(g.edgeBlur ? g.psBlurEdges : g.psBlur);
     for (int pass = 0; pass < (g.edgeBlur ? 2 : 4); pass++) {
         const float dir[4] = {pass & 1 ? 0.0f : 1.0f / W, pass & 1 ? 1.0f / H : 0.0f, g.edgeBlur ? float(~pass & 1) : pass < 2 ? 0.0f : 1.0f, float(pass & 1)};
         dev->SetPixelShaderConstantF(6, dir, 1);
         dev->SetRenderTarget(0, pass & 1 ? g.aoASurf : g.aoBSurf);
-        dev->SetTexture(3, pass & 1 ? g.aoB : g.aoA);
+        dev->SetTexture(3, pass & 1 ? g.aoB : pass == 0 && still ? g.hist[g.histNow] : g.aoA);
         DrawQuad(dev, g.width, g.height);
     }
 
@@ -1338,7 +1464,8 @@ void AoEffect(IDirect3DDevice9* dev) {
     D3DSURFACE_DESC bd{};
     bb->GetDesc(&bd);
     // the back buffer changed without a Reset, or an option changed the targets it needs: rebuild next frame
-    if (bd.Width != g.width || bd.Height != g.height || g.p.edgeBlur != g.edgeAsked || g.p.blockSlices != g.blockAsked) {
+    if (bd.Width != g.width || bd.Height != g.height || g.p.edgeBlur != g.edgeAsked || g.p.blockSlices != g.blockAsked ||
+        g.p.temporalStill != g.accumAsked) {
         bb->Release();
         ReleaseResources();
         g.retryCountdown = 0;
@@ -1479,6 +1606,7 @@ class AmbientOcclusionPatch : public ApexPatch {
         RegisterBoolSetting(&g.p.blendNormals, "blendNormals", Params{}.blendNormals, "Smooth shade on flat surfaces: no dashed lines along their edges");
         RegisterBoolSetting(&g.p.edgeBlur, "edgeBlur", Params{}.edgeBlur, "Edge-aware smoothing: the shade does not bleed across the edges of objects");
         RegisterBoolSetting(&g.p.blockSlices, "blockSlices", Params{}.blockSlices, "Fewer directions per pixel where nothing is near enough to cast shade");
+        RegisterBoolSetting(&g.p.temporalStill, "temporalStill", Params{}.temporalStill, "With Quality Low: a smoother shade builds up over a few frames while the camera is still");
         RegisterBoolSetting(&g.p.zoomHysteresis, "zoomHysteresis", Params{}.zoomHysteresis, "Fewer directions when far switches its count 10% past a distance and back 10% before it");
     }
 
@@ -1614,6 +1742,11 @@ class AmbientOcclusionPatch : public ApexPatch {
         changed |= ApexUi::SwitchRow("Edge-aware smoothing", &g.p.edgeBlur,
                                      "Smooths the shade without letting it bleed across the edges of objects",
                                      kDefaults.edgeBlur);
+        ImGui::BeginDisabled(g.p.quality != 0);
+        changed |= ApexUi::SwitchRow("Refine while the camera is still", &g.p.temporalStill,
+                                     "Quality Low: builds a smoother shade over a few frames while the camera is still",
+                                     kDefaults.temporalStill);
+        ImGui::EndDisabled();
         ApexUi::CardGroup("Map view");
         changed |= ApexUi::SwitchRow("Also in map view", &g.p.inMapView, "Soft shade around houses and trees when the map view is open", kDefaults.inMapView);
         if (changed) NotifySettingChanged();
@@ -1626,8 +1759,8 @@ class AmbientOcclusionPatch : public ApexPatch {
     // 7 = independent hair, transparency coverage and a separate Sim card; 8 = Sim Occlusion defaults off;
     // 9 = tuned default configuration for scene and Sim controls; 10 = fewer directions when far and blended normals (off);
     // 11 = steady direction count (off); 12 = edge-aware smoothing (off);
-    // 13 = fewer directions in the open (off).
-    static constexpr int kSettingsRevision = 13;
+    // 13 = fewer directions in the open (off); 14 = refine while the camera is still (off).
+    static constexpr int kSettingsRevision = 14;
     static constexpr const char* kRevisionKey = "revisao";
     static int Revision(const toml::table& table) { return static_cast<int>(table[kRevisionKey].value<int64_t>().value_or(1)); }
     // Start from current defaults, then overlay every value that was explicitly saved.
@@ -1660,6 +1793,7 @@ class AmbientOcclusionPatch : public ApexPatch {
         if (g.ready) {
             if (g.gpuMs >= 0) ImGui::TextDisabled("GPU cost: %.2f ms per frame (%d slices%s)", g.gpuMs, kQualitySlices[std::clamp(g.p.quality, 0, kQualityCount - 1)],
                                                  g.p.zoomSlices || g.p.blockSlices ? ", fewer when far or on open surfaces" : "");
+            if (Accumulating()) ImGui::TextDisabled("Still-camera frames in the history: %d", g.stillFrames);
             ImGui::TextDisabled("Frames shaded: %u  |  screen %ux%u, depth pyramid %ux%u (%d levels)", g.frames, g.width, g.height, g.padW, g.padH, kLevels);
             ImGui::TextDisabled("Camera: near %.3f m, A %.6f, tan %.4f x %.4f (%s)", g.lastNear, g.lastA, g.lastTanX, g.lastTanY,
                                 g.lastCamera ? "read this frame" : "fallback");

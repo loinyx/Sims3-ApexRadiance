@@ -2089,6 +2089,8 @@ const I18n::Pair kPairs[] = {
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Fjerner svake stiplede skyggelinjer langs kantene på benker, gulv og andre flate overflater"},
     {"Edge-aware smoothing", "Kantbevisst utjevning"},
     {"Smooths the shade without letting it bleed across the edges of objects", "Jevner ut skyggen uten å la den flyte over kantene på objekter"},
+    {"Refine while the camera is still", "Forfin mens kameraet står stille"},
+    {"Quality Low: builds a smoother shade over a few frames while the camera is still", "Med Kvalitet på Lav: bygger en jevnere skygge over noen få bilder mens kameraet står stille, og starter på nytt når det beveger seg"},
     {"Show the shade alone", "Vis bare skyggen"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "Viser bare skyggen, i grått, så du ser hva den gjør mens du justerer (lagres ikke)"},
     {"Also in map view", "Også i kartvisning"},

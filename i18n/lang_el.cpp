@@ -2089,6 +2089,8 @@ const I18n::Pair kPairs[] = {
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Αφαιρεί αχνές διακεκομμένες γραμμές σκιάς στις άκρες πάγκων, δαπέδων και άλλων επίπεδων επιφανειών"},
     {"Edge-aware smoothing", "Εξομάλυνση με σεβασμό στις ακμές"},
     {"Smooths the shade without letting it bleed across the edges of objects", "Εξομαλύνει τη σκιά χωρίς να την αφήνει να απλώνεται πέρα από τις ακμές των αντικειμένων"},
+    {"Refine while the camera is still", "Βελτίωση όταν η κάμερα είναι ακίνητη"},
+    {"Quality Low: builds a smoother shade over a few frames while the camera is still", "Με Ποιότητα Χαμηλή: χτίζει πιο ομαλή σκιά σε λίγα καρέ όσο η κάμερα είναι ακίνητη και ξεκινά ξανά όταν κινηθεί"},
     {"Show the shade alone", "Μόνο η σκιά"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "Δείχνει μόνο τη σκιά, σε γκρι, για να δεις τι κάνει όσο τη ρυθμίζεις (δεν αποθηκεύεται)"},
     {"Also in map view", "Και στην προβολή χάρτη"},

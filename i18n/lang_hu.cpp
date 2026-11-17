@@ -2088,6 +2088,8 @@ const I18n::Pair kPairs[] = {
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Eltünteti a halvány szaggatott árnyékvonalakat a pultok, padlók és más sík felületek szélén"},
     {"Edge-aware smoothing", "Élkövető simítás"},
     {"Smooths the shade without letting it bleed across the edges of objects", "Úgy simítja az árnyékot, hogy az nem folyik át a tárgyak élein"},
+    {"Refine while the camera is still", "Finomítás álló kameránál"},
+    {"Quality Low: builds a smoother shade over a few frames while the camera is still", "Alacsony minőségnél: néhány képkocka alatt simább árnyékot épít fel, amíg a kamera áll, és újrakezdi, amikor megmozdul"},
     {"Show the shade alone", "Csak az árnyék mutatása"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "Csak az árnyékot mutatja szürkén, hogy lásd, mit csinál, amíg állítod (nem mentődik)"},
     {"Also in map view", "Térképnézetben is"},

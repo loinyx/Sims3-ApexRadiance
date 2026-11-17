@@ -25,7 +25,7 @@ and lamp lighting do not add contact shading.
 
 Apex Radiance runs a full-resolution GTAO (ground-truth ambient occlusion) pass on the game's depth buffer and blends the
 result into the finished 3D image. The result is deterministic: a still camera always produces the same image, with no
-temporal noise. The composite keeps lamp-lit and bright surfaces bright and preserves their colour, so the shade does
+temporal noise (the option Refine while the camera is still, off by default, is the one exception). The composite keeps lamp-lit and bright surfaces bright and preserves their colour, so the shade does
 not leave a grey film.
 
 Each frame:
@@ -53,10 +53,11 @@ Each frame:
 | Fewer directions in the open | `blockSlices` | bool | off | | One direction count per 4x4 block of pixels: half the Quality's count where the depth does not bend within reach, the full count elsewhere and one block around |
 | Smooth flat surfaces | `blendNormals` | bool | off | | Blended normal reconstruction (XeGTAO's edge weights): no per-pixel pick of the neighbour, so a depth crease along a mesh seam cannot flip the normal pixel by pixel |
 | Edge-aware smoothing | `edgeBlur` | bool | off | | The 4x4 box weighs each tap by the AO pass's edge weights instead of the 1/z ratio, and the tent passes are dropped. The AO targets get 4 channels (A16B16G16R16F); without that format the usual blur runs |
+| Refine while the camera is still | `temporalStill` | bool | off | | Quality Low only: while the camera is still, each frame uses other directions and joins a history (a plain average of the first 16 frames, then 1/16 per frame). Any camera movement starts again from the fixed pattern |
 | Reach | `alcance` | float | 166% | 50 to 200% | Scales all radii |
 | Keep lamp light | `protegerLuz` | float | 46% | 0 to 100% | Share of light that bright and lamp-lit pixels keep |
 | Developer > Visual effects > Ambient shadows > Show the shade alone | (not saved) | bool | off | | Shows only the shade, in grey (developer mode) |
-| (none) | `revisao` | int | 13 | | Settings revision. Older files keep every saved value and only gain missing keys |
+| (none) | `revisao` | int | 14 | | Settings revision. Older files keep every saved value and only gain missing keys |
 
 All settings apply immediately. Keys from the old combined build (`intensidade`, `raioM`, `visualizar`) are not read.
 
@@ -148,9 +149,31 @@ on the way to it. The tent passes are dropped: two blur passes instead of four. 
 0.19 of a level from the default on average, open-floor roughness 0.007 to 0.008 against 0.005 to 0.006 (no interleave
 left), contact shade 100 to 104% of the default, and the shade step at silhouettes 10 to 14% larger.
 
+**Refine while the camera is still** (`temporalStill`, Quality Low). Temporal smoothing was removed in 2.11.1 because
+it breathed and trailed ([history](../history/ambient-occlusion.md)). This option accumulates only while the camera is
+still, so a moving camera always shows the plain deterministic pass:
+
+- The camera counts as still while no point of the view moves more than 0.25 px from the last frame (5 screen points
+  at 2 and 200 m through `last view-projection x inverse(this one)`). The first still frame is the fixed pattern and
+  starts the history. Any movement empties it.
+- Each later frame shifts the slice angle and the step offset by a golden-ratio step and renders the AO as usual. A
+  full-screen pass then blends it with the history, before the blur: a plain average of the first 16 frames, then 1/16
+  per frame.
+- The history is read by reprojecting the pixel with the camera alone, from its 1/z (the game gives no motion vectors).
+  It is dropped where its 1/z is more than 2% from the pixel's (something moved there) or it lies off screen.
+- The history is clamped to this frame's AO before the blur in the 3x3 pixels around. A shade whose object left is cut
+  in one frame; the removed version clamped to an already averaged range and followed the noise.
+
+Offline check (Low, 1080p, 40 m, 32 still frames): 0.08 of a level from Ultra on average against 0.15 for plain Low; a
+removed counter leaves 0.00 levels of its shade after one frame; between two late frames the image changes by 0.015 of
+a level on average, 0.05% of the pixels by more than 1 level and one pixel by up to 9 levels (thin outlines, where the
+clamp moves with the directions). Plain Low does not change at all, so this flicker is the cost to judge in game.
+Unverified in game: whether the camera matrix is bit-stable at rest, moving Sims and leaves, and reprojection under a
+slow drift (the offline check holds the camera exactly still).
+
 The option variants compile separately from the default pass (bit 0: reads the frame's tier, used by every option
 that needs the looped pass; bit 1: Smooth flat surfaces). Their 4-step march is a loop instead of unrolled, to stay
-within ps_3_0's 512 instruction slots (default 505 to 507, options 348 to 368). With every option off the AO pass is
+within ps_3_0's 512 instruction slots (default 505 to 507, options 350 to 367). With every option off the AO pass is
 the same bytecode as before.
 
 **Composite.** `v = 1 - saturate((1 - ao - 0.05) / 0.95)`, then per channel

@@ -2089,6 +2089,8 @@ const I18n::Pair kPairs[] = {
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "조리대, 바닥 등 평평한 면의 가장자리에 생기는 희미한 점선 그늘을 없앱니다"},
     {"Edge-aware smoothing", "가장자리 인식 부드럽게"},
     {"Smooths the shade without letting it bleed across the edges of objects", "그림자가 물체 가장자리를 넘어 번지지 않게 부드럽게 합니다"},
+    {"Refine while the camera is still", "카메라가 멈춰 있을 때 다듬기"},
+    {"Quality Low: builds a smoother shade over a few frames while the camera is still", "품질이 '낮음'일 때: 카메라가 멈춰 있는 동안 몇 프레임에 걸쳐 더 부드러운 그림자를 만들고, 움직이면 다시 시작합니다"},
     {"Show the shade alone", "그늘만 표시"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "조정하는 동안 효과를 볼 수 있도록 그늘만 회색으로 보여 줘요(저장 안 됨)"},
     {"Also in map view", "지도 보기에서도"},

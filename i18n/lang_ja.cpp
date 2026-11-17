@@ -2088,6 +2088,8 @@ const I18n::Pair kPairs[] = {
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "カウンターや床などの平らな面の縁に出る、かすかな破線状の陰影を取り除きます"},
     {"Edge-aware smoothing", "エッジを考慮した平滑化"},
     {"Smooths the shade without letting it bleed across the edges of objects", "影がオブジェクトの縁を越えてにじまないように平滑化します"},
+    {"Refine while the camera is still", "カメラ静止中に精細化"},
+    {"Quality Low: builds a smoother shade over a few frames while the camera is still", "品質が「低」のとき：カメラが静止している間、数フレームかけてより滑らかな影を作り、動くとやり直します"},
     {"Show the shade alone", "陰影だけを表示"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "調整中に効果がわかるよう、陰影だけを灰色で表示します（保存されません）"},
     {"Also in map view", "マップビューでも"},

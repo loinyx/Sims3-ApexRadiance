@@ -2089,6 +2089,8 @@ const I18n::Pair kPairs[] = {
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Убирает слабые пунктирные линии тени вдоль краёв столешниц, полов и других плоских поверхностей"},
     {"Edge-aware smoothing", "Сглаживание с учётом краёв"},
     {"Smooths the shade without letting it bleed across the edges of objects", "Сглаживает тень, не давая ей растекаться через края объектов"},
+    {"Refine while the camera is still", "Уточнять при неподвижной камере"},
+    {"Quality Low: builds a smoother shade over a few frames while the camera is still", "При качестве «Низкое»: за несколько кадров строит более гладкую тень, пока камера неподвижна, и начинает заново, когда она движется"},
     {"Show the shade alone", "Показать только тень"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "Показывает только тень, серым, чтобы видеть её действие при настройке (не сохраняется)"},
     {"Also in map view", "И в виде карты"},

@@ -2089,6 +2089,8 @@ const I18n::Pair kPairs[] = {
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Usuwa słabe przerywane linie cienia wzdłuż krawędzi blatów, podłóg i innych płaskich powierzchni"},
     {"Edge-aware smoothing", "Wygładzanie z zachowaniem krawędzi"},
     {"Smooths the shade without letting it bleed across the edges of objects", "Wygładza cień, nie pozwalając mu rozlewać się poza krawędzie obiektów"},
+    {"Refine while the camera is still", "Dopracuj, gdy kamera stoi"},
+    {"Quality Low: builds a smoother shade over a few frames while the camera is still", "Przy jakości Niska: w ciągu kilku klatek buduje gładszy cień, gdy kamera stoi, i zaczyna od nowa, gdy się poruszy"},
     {"Show the shade alone", "Pokaż sam cień"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "Pokazuje tylko cień, na szaro, by widzieć jego działanie podczas regulacji (nie jest zapisywane)"},
     {"Also in map view", "Także w widoku mapy"},
