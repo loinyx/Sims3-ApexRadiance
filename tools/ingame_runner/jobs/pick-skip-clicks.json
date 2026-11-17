@@ -1,6 +1,6 @@
 {
   "id": "pick-skip-clicks",
-  "description": "Fewer Mouse Picks When Still, click correctness: camera and mouse still for 6 s before each of 6 screen points (spread over the default view, where Sims, objects and floor sit), then 3 left clicks each (Esc after each closes a pie menu), 18 in all. Pass: on logs clicks held for a new pick with 0 timed out and picks skipped while still, off logs no skip line. The runner cannot yet read the hover, the pie menu or the selected target, nor aim at a named Sim, so same target in off and on is a screenshot compare by hand until the agent has a pick-result command; the case of a Sim walking under a still mouse (hover must update) is not drivable yet either.",
+  "description": "Fewer Mouse Picks When Still, pick correctness: the mouse is aimed (agent screenpos, the camera pointed at each target first) at the selected Sim, the nearest mailbox and the ground beside the Sim, held still 6 s, the game's hover pick read (agent pick) and checked (a Sim, an object, ground; the Sim and the mailbox by name), then 3 left clicks on it (Esc after each). Then the still-mouse case: the mouse rests 6 s above a ground point 3 m from the selected Sim, the Sim walks there (Go Here) and the hover pick must turn into the Sim within 20 s. Every pick is compared with the off loads of the run (-AB). Pass: same picks off and on, on logs clicks held for a new pick with 0 timed out and picks skipped while still, off logs no skip line.",
   "save": "ApexTest-Town",
   "toml": {
     "ui": {
@@ -15,8 +15,8 @@
         }
       },
       "fail": [
-        "[PickReadback] Skip when still: on",
-        "[PickReadback] Last d+ s:"
+        "\\[PickReadback\\] Skip when still: on",
+        "\\[PickReadback\\] Last \\d+ s:"
       ]
     },
     "on": {
@@ -26,12 +26,12 @@
         }
       },
       "expect": [
-        "[PickReadback] Skip when still: on",
-        "[PickReadback] Last d+ s: d+ picks, [1-9]d* skipped with nothing changed",
-        "[PickReadback] Last d+ s: .*[1-9]d* clicks held for a new pick (d+ ms, 0 timed out)"
+        "\\[PickReadback\\] Skip when still: on",
+        "\\[PickReadback\\] Last \\d+ s: \\d+ picks, [1-9]\\d* skipped with nothing changed",
+        "\\[PickReadback\\] Last \\d+ s: .*[1-9]\\d* clicks held for a new pick \\(\\d+ ms, 0 timed out\\)"
       ],
       "fail": [
-        "d+ clicks held for a new pick (d+ ms, [1-9]d* timed out)"
+        "\\d+ clicks held for a new pick \\(\\d+ ms, [1-9]\\d* timed out\\)"
       ]
     }
   },
@@ -45,76 +45,126 @@
       "minutes": 0.5
     },
     {
-      "do": "wait",
-      "minutes": 0.1
-    },
-    {
-      "do": "click",
-      "count": 3,
-      "gapMs": 1500,
-      "xf": 0.5,
-      "yf": 0.6,
-      "escape": true
+      "do": "mouse_move",
+      "target": {
+        "sim": "selected",
+        "dy": 1.0,
+        "focus": true
+      }
     },
     {
       "do": "wait",
       "minutes": 0.1
     },
     {
+      "do": "expect_pick",
+      "type": [
+        "Sim"
+      ],
+      "same_target": true,
+      "same_as_variant": "off"
+    },
+    {
       "do": "click",
+      "target": {
+        "sim": "selected",
+        "dy": 1.0
+      },
       "count": 3,
       "gapMs": 1500,
-      "xf": 0.3,
-      "yf": 0.5,
       "escape": true
+    },
+    {
+      "do": "mouse_move",
+      "target": {
+        "object": "Mailbox",
+        "dy": 0.6,
+        "focus": true
+      }
     },
     {
       "do": "wait",
       "minutes": 0.1
     },
     {
+      "do": "expect_pick",
+      "type": [
+        "Object"
+      ],
+      "same_target": true,
+      "same_as_variant": "off"
+    },
+    {
       "do": "click",
+      "target": {
+        "object": "Mailbox",
+        "dy": 0.6
+      },
       "count": 3,
       "gapMs": 1500,
-      "xf": 0.7,
-      "yf": 0.5,
       "escape": true
+    },
+    {
+      "do": "mouse_move",
+      "target": {
+        "sim": "selected",
+        "dx": -2.5,
+        "dz": 2.5,
+        "focus": true
+      }
     },
     {
       "do": "wait",
       "minutes": 0.1
     },
     {
+      "do": "expect_pick",
+      "type": [
+        "Floor",
+        "Terrain",
+        "RoadSidewalk",
+        "RoadStreet"
+      ],
+      "same_as_variant": "off"
+    },
+    {
       "do": "click",
+      "target": {
+        "sim": "selected",
+        "dx": -2.5,
+        "dz": 2.5
+      },
       "count": 3,
       "gapMs": 1500,
-      "xf": 0.5,
-      "yf": 0.4,
       "escape": true
+    },
+    {
+      "do": "mouse_move",
+      "target": {
+        "sim": "selected",
+        "dx": 3,
+        "dy": 1.0,
+        "focus": true
+      }
     },
     {
       "do": "wait",
       "minutes": 0.1
     },
     {
-      "do": "click",
-      "count": 3,
-      "gapMs": 1500,
-      "xf": 0.4,
-      "yf": 0.7,
-      "escape": true
+      "do": "expect_pick",
+      "same_as_variant": "off"
     },
     {
-      "do": "wait",
-      "minutes": 0.1
+      "do": "walk"
     },
     {
-      "do": "click",
-      "count": 3,
-      "gapMs": 1500,
-      "xf": 0.6,
-      "yf": 0.7,
-      "escape": true
+      "do": "expect_pick",
+      "type": [
+        "Sim"
+      ],
+      "seconds": 20,
+      "same_as_variant": "off"
     },
     {
       "do": "wait",

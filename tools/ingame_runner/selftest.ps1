@@ -237,6 +237,20 @@ try {
 } finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
 
 Check ((Get-ClickLParam 640 360) -eq 23593600 -and (Get-ClickLParam 5 7) -eq 458757) 'click lParam packs y high, x low'
+$sp = Get-ScreenPoint ([pscustomobject]@{ x = 0.25; y = 0.5 }) 1280 720; $px = Get-ScreenPoint ([pscustomobject]@{ x = 640.4; y = 359.6 }) 1280 720
+Check ($sp[0] -eq 320 -and $sp[1] -eq 360 -and $px[0] -eq 640 -and $px[1] -eq 360) 'screenpos: fractions scaled, pixels kept'
+$simPick = [pscustomobject]@{ type = 'Sim'; name = 'Bella Goth' }; $floorPick = [pscustomobject]@{ type = 'Floor' }
+Check ((Get-PickKey $simPick) -eq 'Sim Bella Goth' -and (Get-PickKey $floorPick) -eq 'Floor') 'pick key: type and name'
+Check ($null -eq (Test-PickExpect $simPick ([pscustomobject]@{ type = 'Sim'; same_target = $true }) ([pscustomobject]@{ name = 'Bella Goth' }))) 'expect_pick: Sim on its target matches'
+Check ((Test-PickExpect $floorPick ([pscustomobject]@{ type = @('Sim') }) $null) -match 'expected type Sim') 'expect_pick: floor is not a Sim'
+Check ($null -eq (Test-PickExpect $floorPick ([pscustomobject]@{ type = @('Floor', 'Terrain') }) $null)) 'expect_pick: one of several types'
+Check ((Test-PickExpect $simPick ([pscustomobject]@{ same_target = $true }) ([pscustomobject]@{ name = 'Mortimer Goth' })) -match 'aimed at Mortimer') 'expect_pick: another Sim than the target'
+Check ((Test-PickExpect $simPick ([pscustomobject]@{ name = '^Mort' }) $null) -match 'name matching') 'expect_pick: name pattern'
+$pl = @{}
+Check ($null -eq (Compare-PickLog $pl 'j|3' 'off' 'Sim A' 'off')) 'pick log: first load has nothing to compare'
+Check ($null -eq (Compare-PickLog $pl 'j|3' 'on' 'Sim A' 'off')) 'pick log: same pick as off'
+Check ((Compare-PickLog $pl 'j|3' 'on' 'Floor' 'off') -eq 'picked Floor, off picked Sim A') 'pick log: different pick than off'
+Check ($null -eq (Compare-PickLog $pl 'j|4' 'on' 'Floor' 'off')) 'pick log: slots are separate'
 
 # Every shipped job: valid JSON, an id equal to its file name, a save, known steps, patterns that compile
 foreach ($file in Get-ChildItem (Join-Path $PSScriptRoot 'jobs') -Filter *.json) {

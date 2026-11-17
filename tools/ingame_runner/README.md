@@ -242,12 +242,22 @@ A job is a JSON file in `jobs/`, its `id` equal to the file name:
 | `mode` | `mode` (`build`, `buy`, `cas`, `edittown`, `live`), `seconds` (0) | Switches the world mode and waits for it, then stays `seconds` |
 | `stop_repros` | | Stops `camera_jumps` and `vfx_burst`, removes the spawned Sims and records the event counts in `results.md` |
 | `key` | `vk` (virtual-key code) | Posts one key press to the game window without focusing it: Apex's bare-key shortcuts. A modifier cannot be held this way (Apex reads Shift, Ctrl and Alt from the keyboard state), so a job sets a bare key for the shortcut it presses |
-| `click` | `x`,`y` (client pixels) or `xf`,`yf` (fractions, default 0.5), `count` (1), `gapMs` (400), `escape` (true) | Posts left clicks (move, press, release) to the game window without focusing it, then Esc after each (closes a pie menu) and answers any dialog. Aim at empty ground |
+| `click` | `target`, or `x`,`y` (client pixels) or `xf`,`yf` (fractions, default 0.5), `count` (1), `gapMs` (400), `escape` (true) | Posts left clicks (move, press, release) to the game window without focusing it, then Esc after each (closes a pie menu) and answers any dialog. Aim at empty ground |
+| `mouse_move` | `target`, or `x`,`y` or `xf`,`yf` as `click` | Posts a mouse move (no click) to the game window without focusing it |
+| `expect_pick` | `type` (one or a list of `Sim`, `Object`, `Floor`, `Terrain`, `Wall`, `RoadSidewalk` ...), `name` (pattern), `same_target`, `same_as_variant`, `seconds` (5) | Reads the game's hover pick (agent `pick`) until it matches or `seconds` pass; a miss fails the load. `same_target`: the name of the Sim or object the last `target` aimed at. `same_as_variant`: the pick (type and name; ids change between loads) must equal that variant's earlier loads in the run (`-AB`). Each pick goes into the load's notes |
+| `walk` | `sim` (`selected`), `to` (`{x,y,z}`, default the last target's ground point) | The Sim walks there through the game's own Go Here |
 | `memory` | `label` | Reads the game's largest free address block (below 4 GB) from outside the game; the reading goes into the load's notes and the last one into the A/B table |
 | `check_files` | `pattern`, `min` (1), `folder` (`captures`) | Counts the files matching `pattern` in the load folder's `folder`; fewer than `min` or an empty one fails the load. Sizes, and a video's length when `ffprobe` is on PATH, go into the notes |
 
 Each load sets the environment variable `APEX_RUNNER_CAPTURES` to its own `captures` folder before the game starts; a
 job that points Apex's screenshot or video folder at `%APEX_RUNNER_CAPTURES%` keeps its captures in the run's output.
+
+A `target` aims a step at a Sim, an object or a ground point instead of a fixed screen point: `{ "sim": "selected" }`
+(or a Sim's full or first name), `{ "object": "Mailbox" }` (class or catalog name, the one nearest the selected Sim) or
+`{ "at": {x,y,z} }`, plus `dx`, `dy`, `dz` metres (`dy` lifts the aim point, so a still cursor above a ground point
+looks at a Sim that stands there); `focus: true` points the camera at it first. The agent projects the point to the
+screen with the game's `World.GetScreenSpacePos` (command `screenpos`); `pick` returns the scene window's own hover
+pick (`SceneMgrWindow.GetPickArgs`), the one the game's tooltips and clicks read.
 
 For a new feature: copy the closest job, set the `[patches.<Name>]` table (the feature's settings table names it),
 put the feature's start line in the `on` variant's `expect` (most features log `[<Tag>] On: ...` when they install)
