@@ -18,7 +18,7 @@
 
 namespace {
 
-// one roofed room per story (8 x 8 lot), story 1 over story 0
+// one roofed room per story (8 x 8 lot), story 1 over story 0; story 0's room split in two by a wall at x = 3 (S2-06 bleed)
 RtLampProxy::Lot TwoStories() {
     RtLampProxy::Lot lot;
     for (int s = 0; s < 2; s++) {
@@ -35,6 +35,7 @@ RtLampProxy::Lot TwoStories() {
         };
         for (int x = x0; x < x1; x++) wall(float(x), float(z0), float(x + 1), float(z0)), wall(float(x), float(z1), float(x + 1), float(z1));
         for (int z = z0; z < z1; z++) wall(float(x0), float(z), float(x0), float(z + 1)), wall(float(x1), float(z), float(x1), float(z + 1));
+        for (int z = z0; z < z1 && s == 0; z++) wall(3.0f, float(z), 3.0f, float(z + 1));
         lot.stories.push_back(st);
     }
     return lot;
@@ -68,7 +69,7 @@ Scene MakeScene(bool rotated, uint64_t notReadyTile = ~0ull) {
     GiScene::Options o;
     o.density = 2;
     GiScene::Build(in, o, nullptr, s.built);
-    Check(GiIndirect::Build(s.built, o.density, 8, 8, s.grid), "the grid of the synthetic lot builds");
+    Check(GiIndirect::Build(s.built, o.density, 8, 8, s.grid, &s.lot), "the grid of the synthetic lot builds");
     s.atlas = FakeAtlas(s.built);
     for (const GiIndirect::Point& p : s.grid.points) s.ready.push_back(p.tile == notReadyTile ? 0.0f : 1.0f);
     GiIndirect::FillCpu(s.grid, s.atlas, s.ready, s.cpuGrid);
@@ -159,16 +160,83 @@ void GridChecks() {
     Check(GiIndirect::KindOfSetIndex(0) == GiIndirect::kFloor && GiIndirect::KindOfSetIndex(1) == GiIndirect::kCeiling &&
               GiIndirect::KindOfSetIndex(2) < 0 && GiIndirect::KindOfSetIndex(3) < 0,
           "texture set index 0 = floor, 1 = ceiling, objects and wall no layer");
-    // Apply: mode 1 by night replaces the ready share of the ambient, by day adds; mode 2 the atlas alone
+    // Apply (S2-06): the lamp share L of the room's ambient is what the ready atlas replaces; the base colour stays
     const float map[4] = {0.2f, 0.3f, 0.4f, 0.5f}, gi[4] = {0.6f, 0.5f, 0.4f, 1.0f}, amb[3] = {0.3f, 0.2f, 0.1f};
-    float o[3];
-    const float night[4] = {1, 1, 1, 1}, day[4] = {1, 1, 1, 0}, debug[4] = {1, 0, 0, 0};
-    GiIndirect::Apply(map, gi, night, amb, o);
+    float o[3], L[3];
+    const float atlasK[4] = {1, 1, 1, 0}, debug[4] = {1, 0, 0, 0}, none[3] = {0, 0, 0};
+    // night, Rooms at Night off: base colour 0, the whole ambient is lamp light
+    const float baseNight[3] = {0, 0, 0};
+    GiIndirect::LampShare(amb, baseNight, 1.0f, L);
+    GiIndirect::Apply(map, gi, atlasK, amb, L, o);
     Check(std::fabs(o[0] - 0.8f) < 1e-6f, "night: lamp light + atlas, no game ambient");
-    GiIndirect::Apply(map, gi, day, amb, o);
-    Check(std::fabs(o[0] - (0.2f + 0.6f + 0.5f * 0.3f)) < 1e-6f, "day: lamp light + atlas + the game's ambient");
-    GiIndirect::Apply(map, gi, debug, amb, o);
+    // day: the ambient is the base colour (daylight): no lamp share, the atlas adds to it
+    GiIndirect::LampShare(amb, amb, 0.0f, L);
+    GiIndirect::Apply(map, gi, atlasK, amb, L, o);
+    Check(L[0] == 0 && std::fabs(o[0] - (0.2f + 0.6f + 0.5f * 0.3f)) < 1e-6f, "day: lamp light + atlas + the game's ambient");
+    // evening, lamps on over a base colour: only the part over it is replaced, the base colour stays
+    const float base[3] = {0.1f, 0.15f, 0.2f};
+    GiIndirect::LampShare(amb, base, 1.0f, L);
+    GiIndirect::Apply(map, gi, atlasK, amb, L, o);
+    Check(std::fabs(L[0] - 0.2f) < 1e-6f && L[2] == 0 && std::fabs(o[0] - (0.2f + 0.6f + 0.5f * 0.1f)) < 1e-6f && std::fabs(o[2] - (0.4f + 0.4f + 0.5f * 0.1f)) < 1e-6f,
+          "day and night: the lamp share (ambient over the base colour) alone is replaced");
+    // the same lamp share by day and by night: the night factor does not reach a room whose base colour is known
+    float Ld[3], Ln[3];
+    GiIndirect::LampShare(amb, base, 0.0f, Ld), GiIndirect::LampShare(amb, base, 1.0f, Ln);
+    Check(Ld[0] == Ln[0] && Ld[1] == Ln[1] && Ld[2] == Ln[2], "known base colour: the lamp share does not depend on the time of day");
+    GiIndirect::LampShare(amb, nullptr, 0.0f, Ld), GiIndirect::LampShare(amb, nullptr, 1.0f, Ln);
+    Check(Ld[0] == 0 && std::fabs(Ln[0] - 0.3f) < 1e-6f, "unknown base colour: by day nothing is replaced, by night the whole ambient");
+    GiIndirect::Apply(map, gi, debug, amb, none, o);
     Check(std::fabs(o[0] - 0.6f) < 1e-6f && std::fabs(o[2] - 0.4f) < 1e-6f, "debug: the atlas alone");
+    // a half-ready texel: G premultiplied, half the lamp share replaced
+    const float half[4] = {0.3f, 0.25f, 0.2f, 0.5f};
+    GiIndirect::LampShare(amb, baseNight, 1.0f, L);
+    GiIndirect::Apply(map, half, atlasK, amb, L, o);
+    Check(std::fabs(o[0] - (0.2f + 0.3f + 0.5f * 0.3f * 0.5f)) < 1e-6f, "half ready: half the lamp share replaced");
+
+    // bleed (S2-06): a floor pixel 0.15 m from story 0's inner wall (x = 3) reads only its own room's texel
+    const auto floorTexel = [&](float x, float z) {
+        const float p[3] = {x, GiScene::kOff, z}, n[3] = {0, 1, 0};
+        return s.built.slots.at(GiScene::TexelKey(p, n)).pixel;
+    };
+    GiIndirect::SampleCpu(s.grid, s.cpuGrid, 0, GiIndirect::kFloor, 2.85f, 2.25f, g);
+    const uint32_t own = floorTexel(2.75f, 2.25f), other = floorTexel(3.25f, 2.25f);
+    Check(std::fabs(g[0] - AtlasValue(own, 0)) < 1e-5f && std::fabs(AtlasValue(own, 0) - AtlasValue(other, 0)) > 1e-3f,
+          "floor 0.15 m from an inner wall: its own room's texel only (none of the room beyond)");
+    GiIndirect::SampleCpu(s.grid, s.cpuGrid, 0, GiIndirect::kFloor, 3.15f, 2.25f, g);
+    Check(std::fabs(g[0] - AtlasValue(other, 0)) < 1e-5f, "and from the other side the same");
+    GiIndirect::SampleCpu(s.grid, s.cpuGrid, 0, GiIndirect::kFloor, 2.5f, 2.25f, g);
+    Check(std::fabs(g[0] - 0.5f * (AtlasValue(floorTexel(2.25f, 2.25f), 0) + AtlasValue(own, 0))) < 1e-5f, "inside the room the read still blends");
+    // a wall pixel next to the junction of story 0's z = 1 wall (inside face, +z) and the inner wall: its own side only
+    uint32_t wallOwn = ~0u, wallOther = ~0u;
+    float wy = 0;
+    for (const auto& [key, slot] : s.built.slots) {
+        float p[3];
+        int code;
+        GiIndirect::DecodeKey(key, p, code);
+        if (code != 2 || slot.story != 0 || std::fabs(p[2] - 1.05f) > 0.02f || std::fabs(p[1] - 1.25f) > 0.02f) continue;
+        if (std::fabs(p[0] - 2.75f) < 0.02f) wallOwn = slot.pixel, wy = p[1];
+        if (std::fabs(p[0] - 3.25f) < 0.02f) wallOther = slot.pixel;
+    }
+    Check(wallOwn != ~0u && wallOther != ~0u, "wall texels either side of the junction");
+    if (wallOwn != ~0u) {
+        const float at2[3] = {2.9f, wy, 1.05f}, nz[3] = {0, 0, 1};
+        float uv[2];
+        GiIndirect::WallUvCpu(s.grid, at2, nz, uv);
+        GiIndirect::SampleUv(s.grid, s.cpuGrid, uv[0], uv[1], g);
+        Check(std::fabs(g[0] - AtlasValue(wallOwn, 0)) < 1e-5f, "wall next to a junction: its own side's texel only");
+        // and between the stories along the wall line (story 0's top texel row and story 1's bottom one)
+        const float top[3] = {4.25f, 2.95f, 1.05f};
+        GiIndirect::WallUvCpu(s.grid, top, nz, uv);
+        GiIndirect::SampleUv(s.grid, s.cpuGrid, uv[0], uv[1], g);
+        uint32_t below = ~0u;
+        for (const auto& [key, slot] : s.built.slots) {
+            float p[3];
+            int code;
+            GiIndirect::DecodeKey(key, p, code);
+            if (code == 2 && slot.story == 0 && std::fabs(p[2] - 1.05f) < 0.02f && std::fabs(p[0] - 4.25f) < 0.02f && std::fabs(p[1] - 2.75f) < 0.02f) below = slot.pixel;
+        }
+        Check(below != ~0u && std::fabs(g[0] - AtlasValue(below, 0)) < 1e-5f, "wall at a story's top: its own story's texel only");
+    }
 }
 
 // 2. native D3D9
@@ -242,12 +310,22 @@ void DeviceChecks(Gpu& gpu) {
         D3DLOCKED_RECT r{};
         if (SUCCEEDED(map->LockRect(0, &r, nullptr, 0))) *static_cast<DWORD*>(r.pBits) = 0x803C5A78u, map->UnlockRect(0);
     }
-    if (!ps || !map) return;
+    IDirect3DTexture9* flags = nullptr;
+    if (SUCCEEDED(dev->CreateTexture(s.grid.w, s.grid.h, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &flags, nullptr))) {
+        D3DLOCKED_RECT r{};
+        if (SUCCEEDED(flags->LockRect(0, &r, nullptr, 0))) {
+            for (uint32_t y = 0; y < s.grid.h; y++) std::memcpy(static_cast<char*>(r.pBits) + y * r.Pitch, &s.grid.flags[static_cast<size_t>(y) * s.grid.w * 4], s.grid.w * 4);
+            flags->UnlockRect(0);
+        }
+    }
+    Check(flags && gp.flagSampler == 2 && gp.ambientConst == 0, "flags texture made; the copy's flags sampler and ambient constant");
+    if (!ps || !map || !flags) return;
     dev->SetTexture(0, map);
     dev->SetTexture(1, grid);
-    for (DWORD st = 0; st < 2; st++) {
-        dev->SetSamplerState(st, D3DSAMP_MINFILTER, st ? D3DTEXF_LINEAR : D3DTEXF_POINT);
-        dev->SetSamplerState(st, D3DSAMP_MAGFILTER, st ? D3DTEXF_LINEAR : D3DTEXF_POINT);
+    dev->SetTexture(2, flags);
+    for (DWORD st = 0; st < 3; st++) {
+        dev->SetSamplerState(st, D3DSAMP_MINFILTER, st == 1 ? D3DTEXF_LINEAR : D3DTEXF_POINT);
+        dev->SetSamplerState(st, D3DSAMP_MAGFILTER, st == 1 ? D3DTEXF_LINEAR : D3DTEXF_POINT);
         dev->SetSamplerState(st, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
         dev->SetSamplerState(st, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
         dev->SetSamplerState(st, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
@@ -257,14 +335,22 @@ void DeviceChecks(Gpu& gpu) {
     float uv[4];
     GiIndirect::UvRow(s.grid, 0, GiIndirect::kFloor, uv);
     dev->SetPixelShaderConstantF(ShaderPatches::kGiUvConst, uv, 1);
+    const float size[4] = {static_cast<float>(s.grid.w), static_cast<float>(s.grid.h), 1.0f / s.grid.w, 1.0f / s.grid.h};
+    dev->SetPixelShaderConstantF(ShaderPatches::kGiSizeConst, size, 1);
     gpu.atlasU = -1.0f;
     struct Mode {
         const char* name;
         float k[4];
         float span;
-    } const modes[] = {{"night, texel centres", {1, 1, 1, 1}, 32.0f}, {"night, between texels", {1, 1, 1, 1}, 8.0f}, {"day", {1, 1, 1, 0}, 8.0f}, {"debug", {1, 0, 0, 0}, 8.0f}};
+        float lamp[4];
+    } const modes[] = {{"night, texel centres", {1, 1, 1, 0}, 32.0f, {0.3f, 0.2f, 0.1f, 0}},
+                       {"night, between texels and across the inner wall", {1, 1, 1, 0}, 8.0f, {0.3f, 0.2f, 0.1f, 0}},
+                       {"lamp share over a base colour", {1, 1, 1, 0}, 8.0f, {0.2f, 0.05f, 0, 0}},
+                       {"day", {1, 1, 1, 0}, 8.0f, {0, 0, 0, 0}},
+                       {"debug", {1, 0, 0, 0}, 8.0f, {0, 0, 0, 0}}};
     for (const Mode& m : modes) {
         dev->SetPixelShaderConstantF(ShaderPatches::kGiKConst, m.k, 1);
+        dev->SetPixelShaderConstantF(ShaderPatches::kGiLampConst, m.lamp, 1);
         gpu.lotSpan = m.span;
         const std::vector<DWORD> px = gpu.Render(ps);
         int worstLsb = 0, lit = 0, centres = 0;
@@ -273,7 +359,7 @@ void DeviceChecks(Gpu& gpu) {
                 const float lx = m.span * (x + 0.5f) / 64.0f, lz = m.span * (y + 0.5f) / 64.0f;
                 float g[4], ref[3];
                 GiIndirect::SampleCpu(s.grid, s.cpuGrid, 0, GiIndirect::kFloor, lx, lz, g);
-                GiIndirect::Apply(mapV, g, m.k, amb, ref);
+                GiIndirect::Apply(mapV, g, m.k, amb, m.lamp, ref);
                 if (lx >= 8.0f || lz >= 8.0f) continue; // (off the 8 x 8 lot: no floor of it is drawn there)
                 const DWORD v = px[static_cast<size_t>(y) * 64 + x];
                 const int gotC[3] = {static_cast<int>((v >> 16) & 0xFF), static_cast<int>((v >> 8) & 0xFF), static_cast<int>(v & 0xFF)};
@@ -291,9 +377,9 @@ void DeviceChecks(Gpu& gpu) {
         Check(worstLsb <= 2 && lit > 0, "GPU = CPU reference within 2 LSB");
         if (m.span == 32.0f) Check(centres == lit, "every ready pixel at a texel centre reads its texel");
     }
-    dev->SetTexture(0, nullptr), dev->SetTexture(1, nullptr);
+    dev->SetTexture(0, nullptr), dev->SetTexture(1, nullptr), dev->SetTexture(2, nullptr);
     comp.Release();
-    Release(ps), Release(map), Release(grid), Release(atlas), Release(scatterPs);
+    Release(ps), Release(map), Release(flags), Release(grid), Release(atlas), Release(scatterPs);
 }
 
 // (S2-06) The wall vertex shader copy: a synthetic vs_3_0 in the InteriorWall VS's shape (position decode, normal decode, the
@@ -462,6 +548,32 @@ void PrecompChecks(const char* path, Gpu& gpu) {
                 }
     }
     std::printf("Precomp: %d room-lit pixel shaders (%d ps_2_0, all refused unchanged: %d)\n", matched, ps2, ps2Refused);
+    // (S2-06) the InteriorWall ps_3_0 shaders (game and smooth copies) with the wall uv (TEXCOORD7)
+    int wallTried = 0, wallTaken = 0, wallCreated = 0, wallSlots = 0;
+    for (uint32_t i = 0; i < blobs.size(); i++) {
+        const Blob& b = blobs[i];
+        if (b.vs || b.code.empty() || b.code[0] != 0xFFFF0300 || !ShaderPatches::IsRoomMapPs(b.code)) continue;
+        bool wall = false;
+        if (const auto tt = techOf.find(i + 1); tt != techOf.end())
+            for (uint32_t h : tt->second)
+                if (const auto n = names.find(h); n != names.end()) wall |= n->second.rfind("InteriorWall", 0) == 0;
+        if (!wall) continue;
+        for (int k = 0; k < 2; k++) {
+            std::vector<DWORD> t = b.code;
+            ShaderPatches::RoomMapPatch rp;
+            if (k == 1 && !ShaderPatches::PatchRoomMapSmooth(t, rp, false)) continue;
+            wallTried++;
+            ShaderPatches::RoomMapGiPatch gp;
+            if (!ShaderPatches::PatchRoomMapGi(t, gp, 7)) {
+                std::printf("  wall ps_3_0 refused the TEXCOORD7 read: blob %u (%s)\n", i, k ? "smooth copy" : "game shader");
+                continue;
+            }
+            wallTaken++, wallSlots = std::max(wallSlots, gp.slots);
+            wallCreated += gpu.AcceptsPs(t);
+        }
+    }
+    std::printf("  InteriorWall ps_3_0 with the wall uv: %d tried, %d take it, %d created natively, at most %d slots\n", wallTried, wallTaken, wallCreated, wallSlots);
+    Check(wallTaken > 0 && wallTaken == wallTried && (wallCreated == wallTaken || !gpu.dev) && wallSlots <= 512, "every InteriorWall ps_3_0 takes the wall GI read");
     for (const Kind& k : kinds)
         std::printf("  %-16s %4d tried, %4d take the GI read, %4d created natively; at most %d slots (+%d), %d temps\n", k.name, k.tried, k.taken, k.created, k.maxSlots,
                     k.maxAdded, k.maxTemps);

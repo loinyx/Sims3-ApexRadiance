@@ -481,20 +481,23 @@ bool PatchLotTerrainMax(std::vector<DWORD>& t, DWORD lastSampler, DWORD newSampl
 constexpr DWORD kLotEdgeConst = 205;
 bool PatchLotTerrainEdges(std::vector<DWORD>& t, bool exit = false);
 
-// (real-time GI S2-05, gi_indirect.h) A room-lit ps_3_0 pixel shader (the game's or any copy of PatchRoomMapSmooth) whose
-// ambient term is the one "mad rD.xyz, rL.w, cA, rL" (cA a constant the game sets, rL a temp), no flow control before it,
-// reading the floor VS's TEXCOORD4 (lot / 64 + (1/1024, 1/512)): ahead of that mad the GI grid (GiIndirect::Grid, bound at
-// out.sampler, bilinear) is read at uv = TEXCOORD4.xy x c[kGiUvConst].xy + .zw into G (rgb irradiance, a ready), and the mad
-// takes G for rL: rgb' = rL.rgb k.y + G a k.x, alpha' = rL.w (k.z - a k.w), k = c[kGiKConst] (GiIndirect::Apply). rL itself
-// is not changed. Constants in the reserved pixel range (research 15: c208-c223; c208-c214 the lamp index). Refused (t
-// unchanged) for ps_2_0 / ps_2_x (c215 is out of their reach), no such mad, no free temp, sampler or input, or a shader
-// already reading c215 or above. out.slots / temps: of the patched copy.
-constexpr DWORD kGiUvConst = 215, kGiKConst = 216;
+// (real-time GI S2-05 / S2-06, gi_indirect.h) A room-lit ps_3_0 pixel shader (the game's or any copy of PatchRoomMapSmooth)
+// whose ambient term is the one "mad rD.xyz, rL.w, cA, rL" (cA a constant the game sets, rL a temp), no flow control before it:
+// ahead of that mad the GI grid (GiIndirect::Grid, bound at out.sampler, bilinear, rgb premultiplied by its ready a) is read at
+// uv = TEXCOORD<texcoord>.xy x c[kGiUvConst].xy + .zw (floors: the floor VS's TEXCOORD4, lot / 64 + (1/1024, 1/512); walls:
+// TEXCOORD7 of PatchWallGiVs with (1, 1, 0, 0)), the place inside its texel held at the centre on the sides the flags texture
+// (out.flagSampler, point; GiIndirect::Grid::flags) closes, into G; the mad takes G for rL: rgb' = rL.rgb k.y + G k.x -
+// rL.w a L, alpha' = rL.w k.z, k = c[kGiKConst], L = c[kGiLampConst] (GiIndirect::Apply). c[kGiSizeConst] = (w, h, 1/w, 1/h)
+// of the grid; kGiSizeConst + 1 is the copy's def. rL itself is not changed. Constants in the reserved pixel range (research 15:
+// c208-c223; c208-c214 the lamp index). Refused (t unchanged) for ps_2_0 / ps_2_x (c215 is out of their reach), no such mad,
+// no free temps, samplers or input, or a shader already reading c215 or above. out.slots / temps: of the patched copy;
+// out.ambientConst: the mad's cA (the room's ambient, read per draw for L).
+constexpr DWORD kGiUvConst = 215, kGiKConst = 216, kGiLampConst = 217, kGiSizeConst = 218;
 struct RoomMapGiPatch {
-    int sampler = -1;
+    int sampler = -1, flagSampler = -1, ambientConst = -1;
     int slots = 0, temps = 0, added = 0; // added: instruction slots the patch added
 };
-bool PatchRoomMapGi(std::vector<DWORD>& t, RoomMapGiPatch& out);
+bool PatchRoomMapGi(std::vector<DWORD>& t, RoomMapGiPatch& out, int texcoord = 4);
 // (real-time GI S2-06) A copy of a vs_3_0 wall vertex shader (InteriorWall's, precomp VS 8507 shape) that also writes the wall
 // pixel's GI grid uv to TEXCOORD7.xy (GiIndirect::WallUvCpu): after its world triple (three consecutive "dp4 rW.x/y/z, rP,
 // cK..cK+2"), the lot position (rW, 1) and the lot normal (the one normal decode, an instruction reading only the normal input
