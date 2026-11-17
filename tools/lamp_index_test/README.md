@@ -16,7 +16,9 @@ It checks the lamp index cells of real-time GI ([S3-02](../../docs/features/real
    Three arms are reported only, because the cells decide per pixel what the fix decides per object: walls with
    objects anywhere, pixels up to 3 m over the ground, and a dense lamp cluster.
 2. **Slices.** A rebuild of only the cells that changed lamps can reach, a few cells at a time, and a moved window
-   must each equal a whole new build cell for cell. The CPU time of a whole build with the model pick is printed.
+   must each equal a whole new build cell for cell. The CPU time of a whole build with the model pick is printed, and
+   a whole build in the bridge's 1 ms slices (`LampIndex::StepFor`) with 14, 200 and 800 wall segments in the model's
+   wall test: the thread's CPU time a frame must stay near 1 ms (95th percentile at most 1.5 ms); clock times are printed.
 3. **The HLSL reference** of the block, `lamp_index.hlsl`: compiled as `ps_3_0` with the compiler `fxc` uses, priced
    (slots, temporaries), accepted by native D3D9, and its pixels on a hidden device against the CPU model (2 LSB).
 4. **The game's shaders** (with `-Precomp`): every pixel shader the per-draw patches take (objects, fences and stairs

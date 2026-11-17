@@ -57,10 +57,12 @@ void OnPresent() {
     if (const int mode = g_lampIndexMode.load()) {
         const uint64_t unexplained = Value(Counter::LampIndexUnexplained);
         const std::string li = std::format("[RealtimeGI] Lamp index counters: mode={} builds={} cells={} draws={} fallbacks={} compared={} mismatches: offCentre={} "
-                                           "height={} cellFull={} group={} unexplained={}",
+                                           "height={} cellFull={} group={} unexplained={} fences: draws={} compared={} windows: draws={} compared={}",
                                            kLampIndexNames[mode], Value(Counter::LampIndexBuilds), Value(Counter::LampIndexCells), Value(Counter::LampIndexDraws),
                                            Value(Counter::LampIndexFallbacks), Value(Counter::LampIndexCompared), Value(Counter::LampIndexOffCentre),
-                                           Value(Counter::LampIndexHeight), Value(Counter::LampIndexCellFull), Value(Counter::LampIndexGroup), unexplained);
+                                           Value(Counter::LampIndexHeight), Value(Counter::LampIndexCellFull), Value(Counter::LampIndexGroup), unexplained,
+                                           Value(Counter::LampIndexFenceDraws), Value(Counter::LampIndexFenceCompared), Value(Counter::LampIndexWindowDraws),
+                                           Value(Counter::LampIndexWindowCompared));
         if (unexplained) LOG_WARNING(li);
         else LOG_INFO(li);
     }

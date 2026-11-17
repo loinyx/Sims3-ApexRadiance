@@ -16,6 +16,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <d3d9.h>
+#include <intrin.h>
 #include <d3dcompiler.h>
 #include "../../features/lamp_index.h"
 #include "../../features/shader_patches.h"
@@ -199,12 +200,12 @@ SceneLamp MakeLamp(std::mt19937& rng, int i, float spread, float lotY, bool cone
     }
     return l;
 }
-Scene MakeScene(std::mt19937& rng, int lamps, float spread, bool walls, float lotY, bool cones = true) {
+Scene MakeScene(std::mt19937& rng, int lamps, float spread, bool walls, float lotY, bool cones = true, int wallCount = 14) {
     std::uniform_real_distribution<float> u(0.0f, 1.0f);
     Scene s;
     for (int i = 0; i < lamps; i++) s.lamps.push_back(MakeLamp(rng, i, spread, lotY, cones));
     if (walls)
-        for (int i = 0; i < 14; i++) {
+        for (int i = 0; i < wallCount; i++) {
             const float x = 1000.0f + (u(rng) - 0.5f) * spread * 0.8f, z = 2000.0f + (u(rng) - 0.5f) * spread * 0.8f, len = 4.0f + 8.0f * u(rng);
             const bool alongX = i % 2 == 0;
             s.walls.push_back({x, z, x + (alongX ? len : 0.0f), z + (alongX ? 0.0f : len), i % 5 == 0 ? 0.4f : 0.0f});
@@ -353,6 +354,42 @@ void Slices() {
     const double bigMs = Ms(t0);
     std::printf("  CPU time of a whole build (4096 cells, 8192 picks), model pick: 40 lamps %.2f ms, 150 lamps %.2f ms (%.1f us a cell); the discs above %.2f ms\n", full, bigMs,
                 1000.0 * bigMs / 4096.0, part);
+    // The game's pick tests every candidate against the walls (and slabs) between it and the point. The model's wall test
+    // is a linear scan of every wall segment in the window, so more segments stand in for a busier neighbourhood (an upper
+    // estimate: the game's wall lookup is not a scan of every wall). A whole build in the bridge's slices (StepFor, 1 ms):
+    // the frames it takes and their times. A frame overshoots 1 ms by its last cell. The slice stops on the clock, so a
+    // thread switched out mid-slice (a busy machine) ends that frame late with less work done: the check reads the
+    // thread's own CPU time a frame (QueryThreadCycleTime, at the time-stamp counter's rate), the clock time is printed.
+    const auto tscPerMs = [] {
+        LARGE_INTEGER f, a, b;
+        QueryPerformanceFrequency(&f), QueryPerformanceCounter(&a);
+        const unsigned long long t0 = __rdtsc();
+        Sleep(50);
+        QueryPerformanceCounter(&b);
+        return static_cast<double>(__rdtsc() - t0) / (1000.0 * static_cast<double>(b.QuadPart - a.QuadPart) / static_cast<double>(f.QuadPart));
+    }();
+    for (const int walls : {14, 200, 800}) {
+        Scene sc = MakeScene(rng, 150, 128.0f, true, lotY, true, walls);
+        LampIndex::Atlas w;
+        LampIndex::Start(w, 1003.0f, 2001.0f, lotY);
+        std::vector<float> clock, cpu;
+        float total = 0.0f;
+        while (w.pending > 0 && !w.full) {
+            float ms = 0.0f;
+            ULONG64 c0 = 0, c1 = 0;
+            QueryThreadCycleTime(GetCurrentThread(), &c0);
+            LampIndex::StepFor(w, PickOf(sc), 1.0f, ms);
+            QueryThreadCycleTime(GetCurrentThread(), &c1);
+            clock.push_back(ms), cpu.push_back(static_cast<float>((c1 - c0) / tscPerMs)), total += cpu.back();
+        }
+        clock.pop_back(), cpu.pop_back(); // (the last frame ends with the cells, not the budget)
+        std::sort(clock.begin(), clock.end()), std::sort(cpu.begin(), cpu.end());
+        const auto pct = [](const std::vector<float>& v, double q) { return v.empty() ? 0.0f : v[static_cast<size_t>(q * (v.size() - 1))]; };
+        std::printf("  sliced whole build, 150 lamps, %3d wall segments: %.1f ms CPU (%.1f us a cell) over %zu frames of 1 ms; thread CPU a frame median %.3f, p95 %.3f, "
+                    "worst %.3f ms; clock a frame median %.3f, p95 %.3f, worst %.3f ms\n",
+                    walls, total, 1000.0 * total / 4096.0, cpu.size() + 1, pct(cpu, 0.5), pct(cpu, 0.95), pct(cpu, 1.0), pct(clock, 0.5), pct(clock, 0.95), pct(clock, 1.0));
+        Check(cpu.size() > 10 && pct(cpu, 0.95) <= 1.5f, "slices: a sliced build's thread CPU time a frame stays near 1 ms (95th percentile at most 1.5 ms)");
+    }
 }
 
 // ---- hidden D3D9 device (64 x 64 target), as tools/floor_shade_check ----

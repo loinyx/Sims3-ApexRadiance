@@ -61,6 +61,10 @@ enum class Counter : int {
     LampIndexCellFull,    // ... because the cell had no slot left for a lamp of the other pick (expected, dense lamps)
     LampIndexGroup,       // ... because a fence picks for its whole group (expected)
     LampIndexUnexplained, // ... and a new pick at the cell's own point differs from the cell: a stale cell or a fault (must be 0)
+    LampIndexFenceDraws,     // ... of LampIndexDraws: fence and stair groups (S3-02c)
+    LampIndexWindowDraws,    // ... of LampIndexDraws: window frames (S3-02c)
+    LampIndexFenceCompared,  // ... of LampIndexCompared: fence and stair groups, the pick at the group's centre (S3-02c)
+    LampIndexWindowCompared, // ... of LampIndexCompared: window frames, the object pick at the window's point (S3-02c)
     Count
 };
 void Add(Counter c, uint32_t n = 1); // any thread

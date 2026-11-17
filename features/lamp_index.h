@@ -21,6 +21,7 @@
 // them a frame, and the caller copies the finished state to the texture (Commit) when none is left. Until then the
 // texture keeps the previous state; Stale tells which cells of it a change has made wrong.
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -198,6 +199,18 @@ template <typename PickFn> int Step(Atlas& a, PickFn&& pick, int maxCells) {
             if (float* s = slotOf(wall.rows[k])) s[2] = wall.vis[k];
         float* g = cell + 4 * kSlots;
         g[0] = loose.share, g[1] = loose.top, g[2] = wall.share;
+    }
+    return done;
+}
+// One frame's slice: cells one at a time until budgetMs of CPU time is spent, so a frame overshoots by one cell's picks
+// at most (the wall test makes a cell cost tens of microseconds). ms: the time spent. Returns the cells picked.
+template <typename PickFn> int StepFor(Atlas& a, PickFn&& pick, float budgetMs, float& ms) {
+    const auto t0 = std::chrono::steady_clock::now();
+    int done = 0;
+    ms = 0.0f;
+    while (a.pending > 0 && !a.full && ms < budgetMs) {
+        done += Step(a, pick, 1);
+        ms = std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - t0).count();
     }
     return done;
 }

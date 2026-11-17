@@ -1,6 +1,6 @@
 {
   "id": "lamp-index-smoke",
-  "description": "Lamp index cells (real-time GI S3-02b, developer builds): lampIndex 1 compares every outdoor object's per-draw pick with its cell and must count compared picks with 0 unexplained differences (off-centre, height, cellFull and group are expected); lampIndex 2 draws from the cells and must count draws. One 60 s pan each, no timing.",
+  "description": "Lamp index cells (real-time GI S3-02b, S3-02c, developer builds): lampIndex 1 compares every outdoor object's, fence group's and window frame's per-draw pick with its cell and must count compared picks, fence groups among them, with 0 unexplained differences (off-centre, height, cellFull and group are expected); lampIndex 2 draws from the cells and must count draws, fence draws among them. Window counts are read back, not required (the pan may show no window part lit outdoors). One 60 s pan each, no timing.",
   "save": "ApexTest-Night",
   "toml": {
     "ui": {
@@ -20,7 +20,7 @@
       },
       "expect": [
         "\\[RealtimeGI\\] Lamp index: mode=compare",
-        "\\[RealtimeGI\\] Lamp index counters: mode=compare builds=[1-9]\\d* cells=[1-9]\\d* draws=\\d+ fallbacks=\\d+ compared=[1-9]\\d* mismatches: offCentre=\\d+ height=\\d+ cellFull=\\d+ group=\\d+ unexplained=0"
+        "\\[RealtimeGI\\] Lamp index counters: mode=compare builds=[1-9]\\d* cells=[1-9]\\d* draws=\\d+ fallbacks=\\d+ compared=[1-9]\\d* mismatches: offCentre=\\d+ height=\\d+ cellFull=\\d+ group=\\d+ unexplained=0 fences: draws=\\d+ compared=[1-9]\\d* windows: draws=\\d+ compared=\\d+$"
       ],
       "fail": [
         "\\[RealtimeGI\\] Lamp index counters: .*unexplained=[1-9]",
@@ -36,7 +36,7 @@
       },
       "expect": [
         "\\[RealtimeGI\\] Lamp index: mode=draw",
-        "\\[RealtimeGI\\] Lamp index counters: mode=draw builds=[1-9]\\d* cells=[1-9]\\d* draws=[1-9]\\d* fallbacks=\\d+"
+        "\\[RealtimeGI\\] Lamp index counters: mode=draw builds=[1-9]\\d* cells=[1-9]\\d* draws=[1-9]\\d* fallbacks=\\d+ .* fences: draws=[1-9]\\d* compared=\\d+ windows: draws=\\d+ compared=\\d+$"
       ]
     }
   },
