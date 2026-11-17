@@ -111,10 +111,32 @@ value before only while the file still holds the one Setup wrote; the game must 
 
 ![Apex frame limit](../images/installer/frame-limit.png)
 
+The Smooth Motion and AFMF switches and the frame limit list write nothing when clicked (Setup 1.2.3): each is a pending
+change, as a component is. The row says *Turns on when you click Apply* (or off, or *Changes to 75 fps*), the footer button
+counts it (*Apply 1 change*) and its note lists it (*To apply: Turn on NVIDIA Smooth Motion*); switching back to the state now
+drops it. Apply runs them as task rows after the components (*Apex frame limit: 75 fps*, *Turn on NVIDIA Smooth Motion*,
+*Turn off AMD Fluid Motion Frames*); a failure marks its row and shows on the component row, and the rest goes on. After a
+driver write Setup reads the setting back in a new session; a change the driver did not keep is reported, and an *on* that did
+not take is undone. Errors read in plain words (the call and its code go to `%TEMP%\ApexRadianceSetup.log`): missing rights
+ask for administrator rights, and a rejected change points to the manual steps (*How to do it by hand*: the README's Profile
+Inspector steps; for AFMF, AMD Software > Gaming > Graphics > AMD Fluid Motion Frames).
+
+| Case | Behaviour | Checked |
+|---|---|---|
+| RTX 4070 Ti SUPER, driver 621.24 | Reads card, driver, NVIDIA's *NvRemixBridge* profile | On the real driver (read only) |
+| A driver without the *NvRemixBridge* profile | Setup's own profile with `NvRemixBridge.exe` | Tests |
+| A driver without Profile Inspector's interface IDs | The public NVAPI IDs | Code path, not run |
+| RTX 40 or 50 *Laptop GPU*; several NVIDIA GPUs | The RTX 40 or 50 one is judged, whatever the order (NVAPI lists no integrated GPU) | Tests |
+| An AMD integrated GPU next to an NVIDIA card | AFMF row hidden unless ADLX reports it supported | Tests; ADLX read on a real integrated GPU |
+| The driver does not keep the change | *Did not take*, an *on* undone, manual steps offered | Tests |
+| No rights (`-137`, access denied) | *Run Setup as administrator* (Setup already asks for them) | Tests |
+| Driver write on RTX 40 or 50; AFMF on RX 6000 or newer | | Unverified |
+
 Only the frame generation row that applies shows (`Engine.FrameGenRows`): a usable NVIDIA card shows Smooth Motion; AFMF
 shows where ADLX reports it supported, so an AMD integrated GPU that cannot run it shows nothing; with neither usable, the
-NVIDIA row explains why when an NVIDIA card is there, else the AMD row does. The frame limit row shows in the accent colour
-what the player gets: "60 fps → about 120 fps on screen", or about double with no limit.
+NVIDIA row explains why when an NVIDIA card is there, else the AMD row does. The frame limit row names the frame generation
+shown above it and shows in the accent colour what the player gets: "60 fps → about 120 fps on screen with NVIDIA Smooth
+Motion", or about double with no limit.
 
 **AMD Fluid Motion Frames** (Setup 1.2.0) is the row after it, for AMD cards: frame generation in the AMD driver, through
 AMD's ADLX (`Afmf.cs`). ADLX has AFMF as one setting for the whole system, not per game, so the row says it applies to
