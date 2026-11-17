@@ -1,5 +1,6 @@
 # Assembles the player package after build.cmd: out\package\ (to unzip into Game\Bin) and out\Apex-Radiance-RTX-Remix-bridge.zip.
-# The server renders through stock DXVK x64; its d3d9.dll comes from the pinned DXVK release and is checked by hash.
+# The server renders through DXVK x64: ..\dxvk\out\d3d9.dll when ..\dxvk\build.cmd built it (DXVK with our patches),
+# otherwise the stock d3d9.dll of the pinned DXVK release, checked by hash.
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 $out = Join-Path $here 'out'
@@ -12,16 +13,21 @@ foreach ($f in 'd3d9.dll', '.trex\NvRemixBridge.exe') {
     if (-not (Test-Path (Join-Path $out $f))) { throw "missing out\${f}: run build.cmd first" }
 }
 
-$dxvkDir = Join-Path $src 'dxvk'
-$tar = Join-Path $dxvkDir "dxvk-$dxvkVer.tar.gz"
-New-Item -ItemType Directory -Force $dxvkDir | Out-Null
-if (-not (Test-Path $tar)) {
-    Invoke-WebRequest "https://github.com/doitsujin/dxvk/releases/download/v$dxvkVer/dxvk-$dxvkVer.tar.gz" -OutFile $tar -UseBasicParsing
+$dxvkDll = Join-Path $here '..\dxvk\out\d3d9.dll'
+if (Test-Path $dxvkDll) {
+    "DXVK: built from source ($dxvkDll)"
+} else {
+    $dxvkDir = Join-Path $src 'dxvk'
+    $tar = Join-Path $dxvkDir "dxvk-$dxvkVer.tar.gz"
+    New-Item -ItemType Directory -Force $dxvkDir | Out-Null
+    if (-not (Test-Path $tar)) {
+        Invoke-WebRequest "https://github.com/doitsujin/dxvk/releases/download/v$dxvkVer/dxvk-$dxvkVer.tar.gz" -OutFile $tar -UseBasicParsing
+    }
+    if ((Get-FileHash $tar -Algorithm SHA256).Hash -ne $dxvkTarSha) { Remove-Item $tar; throw "DXVK $dxvkVer archive hash mismatch" }
+    tar -xzf $tar -C $dxvkDir "dxvk-$dxvkVer/x64/d3d9.dll"
+    $dxvkDll = Join-Path $dxvkDir "dxvk-$dxvkVer\x64\d3d9.dll"
+    if ((Get-FileHash $dxvkDll -Algorithm SHA256).Hash -ne $dxvkDllSha) { throw "DXVK x64 d3d9.dll hash mismatch" }
 }
-if ((Get-FileHash $tar -Algorithm SHA256).Hash -ne $dxvkTarSha) { Remove-Item $tar; throw "DXVK $dxvkVer archive hash mismatch" }
-tar -xzf $tar -C $dxvkDir "dxvk-$dxvkVer/x64/d3d9.dll"
-$dxvkDll = Join-Path $dxvkDir "dxvk-$dxvkVer\x64\d3d9.dll"
-if ((Get-FileHash $dxvkDll -Algorithm SHA256).Hash -ne $dxvkDllSha) { throw "DXVK x64 d3d9.dll hash mismatch" }
 
 $pkg = Join-Path $out 'package'
 if (Test-Path $pkg) { Remove-Item -Recurse -Force $pkg }

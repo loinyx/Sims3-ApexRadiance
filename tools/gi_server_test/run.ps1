@@ -1,10 +1,12 @@
-param([string[]]$TestArgs = @(), [string]$OutDir = (Join-Path $env:TEMP 'ApexGiServerTest'), [switch]$Pixel, [switch]$Rebake)
+param([string[]]$TestArgs = @(), [string]$OutDir = (Join-Path $env:TEMP 'ApexGiServerTest'), [switch]$Pixel, [switch]$Rebake, [string]$BridgePass)
 # The server tier's texel solve, offline on a Vulkan device (check.cpp, solve.comp). Read-only: prints to stdout; the
 # compiler's outputs and the three build inputs below stay in -OutDir. -TestArgs: passed on (--no-rays, --device <text>,
 # --density <n>, --rays <n>, --pathref <samples>, --dump <file>: the one file it writes, for the bridge's test-gi.cmd).
 # -Pixel: the per-pixel delta shadow kernel instead (pixel_check.cpp, pixel_shadow.comp;
 # -TestArgs --device <text>, --size <w> <h>, --bench <frames>). -Rebake: the re-bake cost against lamp count instead
 # (rebake_check.cpp; -TestArgs --lots 60,120,200, --density <n>, --rays <n>, --no-cpu, --no-gpu).
+# -BridgePass <d3d9.dll>: the kernel as the bridge server records it on the renderer's own device, on that x64 library
+# (native/dxvk/test/dxvk_gi_pixel_pass.cpp with native/remix-bridge/gi/gi_pixel_pass.h; native/dxvk/build.cmd builds the library).
 # Build inputs, fetched once at pinned versions when -OutDir does not hold them (no installed Vulkan SDK is needed; the
 # Vulkan loader, vulkan-1.dll, comes with the graphics driver): the Vulkan headers, the volk loader (two files) and the
 # glslang compiler, which turns solve.comp into SPIR-V headers at build time.
@@ -42,6 +44,16 @@ if (-not ($compiler -and $compiler.Source -match '[\\/]bin[\\/]Host(?:x64|x86)[\
 }
 Push-Location $OutDir
 try {
+    if ($BridgePass) {
+        & $glslang.FullName -V --quiet --target-env vulkan1.2 -DBRIDGE_PASS --vn kGiPixelSpv -o (Join-Path $OutDir 'gi_pixel_spv.h') (Join-Path $PSScriptRoot 'pixel_shadow.comp')
+        if ($LASTEXITCODE -ne 0) { throw 'pixel_shadow.comp (BRIDGE_PASS) did not compile' }
+        $exe = Join-Path $OutDir 'dxvk_gi_pixel_pass.exe'
+        & cl.exe /nologo /std:c++20 /utf-8 /EHsc /W4 /O2 /MT /DNOMINMAX ('/I' + $OutDir) ('/I' + $headers) ('/Fe' + $exe) (Join-Path $repo 'native/dxvk/test/dxvk_gi_pixel_pass.cpp') user32.lib
+        if ($LASTEXITCODE -ne 0) { throw 'dxvk_gi_pixel_pass.cpp did not compile' }
+        & $exe (Resolve-Path -LiteralPath $BridgePass).Path
+        if ($LASTEXITCODE -ne 0) { throw 'dxvk_gi_pixel_pass failed' }
+        return
+    }
     # name, pass, ray queries (SPIR-V 1.4 for the ray-query extension; the compute back end stays at Vulkan 1.1)
     foreach ($v in @(@('links_rq', 0, $true), @('direct_rq', 1, $true), @('links_sw', 0, $false), @('direct_sw', 1, $false), @('bounce', 2, $false))) {
         $defs = @("-DPASS=$($v[1])") + $(if ($v[2]) { @('-DRAYQUERY', '--target-env', 'vulkan1.2') } else { @('--target-env', 'vulkan1.1') })

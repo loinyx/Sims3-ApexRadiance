@@ -37,6 +37,10 @@ for %%p in ("%HERE%patches\*.patch") do (
 )
 
 :build
+rem the per-pixel shadow pass (patch 0019) compiles three files of this repository; copied on every build so edits arrive
+copy /y "%HERE%gi\gi_pixel_block.h" "%SRC%\bridge\src\util\" >nul || exit /b 1
+copy /y "%HERE%gi\gi_pixel_pass.h" "%SRC%\bridge\src\server\" >nul || exit /b 1
+copy /y "%HERE%..\..\tools\gi_server_test\pixel_shadow.comp" "%SRC%\bridge\src\server\" >nul || exit /b 1
 for %%A in (x86 x64) do (
   echo == %%A
   call :one %%A || exit /b 1

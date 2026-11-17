@@ -1,0 +1,9 @@
+#version 450
+// dxvk_external_pass's compute shader: writes a constant colour into the left half of the image.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0, rgba8) uniform writeonly image2D dst;
+layout(push_constant) uniform Push { vec4 color; } pc;
+
+void main() {
+  imageStore(dst, ivec2(gl_GlobalInvocationID.xy), pc.color);
+}

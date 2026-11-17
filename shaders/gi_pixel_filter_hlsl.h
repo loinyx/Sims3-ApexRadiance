@@ -1,6 +1,6 @@
 // Filter and history of the quarter-resolution ray-traced shadow mask (real-time GI research 16 §4, work package XR-05).
 // Three ps_3_0 passes: TemporalPS (history), AtrousFirstPS / AtrousPS (edge-aware 5x5 a-trous), UpsamplePS (depth-aware,
-// full resolution). Checked offline by tools/gi_pixel_filter_test. Not wired into the game yet: the mask source is XR-06.
+// full resolution). Checked offline by tools/gi_pixel_filter_test; in the game: features/gi_pixel_shadows.cpp (XR-07).
 #pragma once
 static const char* kGiPixelFilterHlsl = R"RAW(
 sampler2D sRaw : register(s0);       // quarter: r = this frame's visibility sample (0 or 1), g = a caster moved within reach
@@ -15,6 +15,9 @@ float4 kTemporal : register(c1); // x = camera still, y = reset (cut, lamp chang
 float4 kTol : register(c2);      // x = relative depth, y = 1.5 x angle of a quarter pixel, z = normal cosine, w = history cap near a moved caster
 float4 kViewZ : register(c3);    // xyz = camera forward (world)
 float4 kAtrous : register(c4);   // x = step, y = strength, z = extra strength at count 0 (pass 3 only)
+#ifndef GI_FULL_DEPTH // the game's INTZ is device depth: features/gi_pixel_shadows.cpp linearises it through this macro
+#define GI_FULL_DEPTH(uv) tex2D(sDepth, uv).r
+#endif
 
 // Depth difference a surface may show over `pixels` quarter pixels: a floor seen at a grazing angle changes depth fast.
 float DepthTol(float z, float3 n, float pixels) {
@@ -119,7 +122,7 @@ float4 AtrousPS(float2 uv : TEXCOORD0) : COLOR0 { return Atrous(uv, false); }
 // Full resolution: 4 quarter taps, bilinear weight divided by the depth difference against the full-resolution depth.
 // The compose effect multiplies the back buffer with the result (research 16 §4.1); here it is written as a grey.
 float4 UpsamplePS(float2 uv : TEXCOORD0) : COLOR0 {
-    float z = tex2D(sDepth, uv).r;
+    float z = GI_FULL_DEPTH(uv);
     float2 p = uv * kSize.xy - 0.5;
     float2 fr = frac(p);
     float2 base = (floor(p) + 0.5) * kSize.zw;

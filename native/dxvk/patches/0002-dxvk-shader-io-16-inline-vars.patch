@@ -1,0 +1,24 @@
+From: sims3-modernization
+Subject: [PATCH 0002] dxvk: DxvkShaderIo keeps 16 variables inline, not 32
+
+DxvkShaderIo is a small_vector<DxvkShaderIoVar, 32>: 1160 bytes in a 32-bit build. Every DxvkIrShader holds
+four (DxvkShaderMetadata inputs and outputs, in DxvkIrShader and in the DxvkShader base copy), and every
+DxvkGraphicsPipelineFastInstanceKey five more (DxvkShaderLinkage::prevStageOutputs). In The Sims 3 the 6,570
+shader objects are 5896 bytes each (37 MiB); their inputs hold at most 16 variables and their outputs at most
+15, so with 16 inline nothing moves to the heap and each shader object is 2304 bytes smaller.
+---
+diff --git a/src/dxvk/dxvk_shader_io.h b/src/dxvk/dxvk_shader_io.h
+--- a/src/dxvk/dxvk_shader_io.h
++++ b/src/dxvk/dxvk_shader_io.h
+@@ -133,7 +133,10 @@
+ 
+   private:
+ 
+-    small_vector<DxvkShaderIoVar, 32> m_vars;
++    // 16 inline variables, not 32: a DxvkShaderIoVar is 36 bytes on x86, so 32 inline is 1160 bytes, and every
++    // DxvkIrShader holds four of these (inputs and outputs, in its own metadata and in the base class copy).
++    // The Sims 3's shaders use at most 16; more moves to the heap.
++    small_vector<DxvkShaderIoVar, 16> m_vars;
+ 
+     static bool isBuiltInInputGenerated(
+             VkShaderStageFlagBits stage,
