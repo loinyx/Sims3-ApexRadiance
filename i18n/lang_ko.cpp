@@ -3031,6 +3031,7 @@ const I18n::Pair kPairs[] = {
     {"The pack could not be saved in the Shaders folder", "팩을 Shaders 폴더에 저장할 수 없었어요"},
     {"The download failed", "다운로드하지 못했어요"},
     {"Shader packs: downloaded from their authors' GitHub, under each author's licence.", "셰이더 팩: 각 제작자의 GitHub에서 다운로드되며, 각 제작자의 라이선스를 따릅니다."},
+    {"Developer mode: give the bridge server every object's own mesh as a shadow caster", "개발자 모드: 각 오브젝트의 자체 메시를 그림자를 드리우는 물체로 브리지 서버에 전달"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Korean, kPairs, std::size(kPairs));

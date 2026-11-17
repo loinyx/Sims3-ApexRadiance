@@ -1,16 +1,23 @@
-param([string[]]$TestArgs = @(), [string]$OutDir = (Join-Path $env:TEMP 'ApexGiServerTest'), [switch]$Pixel, [switch]$Rebake, [string]$BridgePass)
+param([string[]]$TestArgs = @(), [string]$OutDir = (Join-Path $env:TEMP 'ApexGiServerTest'), [switch]$Pixel, [switch]$Rebake, [switch]$Mesh, [string]$Game = '', [string]$Mods = '', [switch]$Bridge, [string]$BridgePass)
 # The server tier's texel solve, offline on a Vulkan device (check.cpp, solve.comp). Read-only: prints to stdout; the
 # compiler's outputs and the three build inputs below stay in -OutDir. -TestArgs: passed on (--no-rays, --device <text>,
 # --density <n>, --rays <n>, --pathref <samples>, --dump <file>: the one file it writes, for the bridge's test-gi.cmd).
 # -Pixel: the per-pixel delta shadow kernel instead (pixel_check.cpp, pixel_shadow.comp;
 # -TestArgs --device <text>, --size <w> <h>, --bench <frames>). -Rebake: the re-bake cost against lamp count instead
-# (rebake_check.cpp; -TestArgs --lots 60,120,200, --density <n>, --rays <n>, --no-cpu, --no-gpu).
+# (rebake_check.cpp; -TestArgs --lots 60,120,200, --density <n>, --rays <n>, --no-cpu, --no-gpu). -Mesh: the mesh casters
+# against XR-04's boxes (mesh_check.cpp, on the same kernel); -Game <the game's folder> reads a chair and a table out of
+# its packages once (casters.py, into -OutDir: the game's data stays out of the repository), else synthetic ones, and
+# checks the bridge server's package reader (meshes_check.cpp) against them; -Mods <a Mods folder> indexes its packages too.
+# -Bridge (with -Mesh -Game): then sends the chair through RemixBridge_GiObjects on the bridge pair native/remix-bridge/build.cmd
+# built (native/remix-bridge/test-gi-mesh.cmd; set DXVK_X64 for the shadow check on the per-pixel pass).
 # -BridgePass <d3d9.dll>: the kernel as the bridge server records it on the renderer's own device, on that x64 library
 # (native/dxvk/test/dxvk_gi_pixel_pass.cpp with native/remix-bridge/gi/gi_pixel_pass.h; native/dxvk/build.cmd builds the library).
 # Build inputs, fetched once at pinned versions when -OutDir does not hold them (no installed Vulkan SDK is needed; the
 # Vulkan loader, vulkan-1.dll, comes with the graphics driver): the Vulkan headers, the volk loader (two files) and the
 # glslang compiler, which turns solve.comp into SPIR-V headers at build time.
 $ErrorActionPreference = 'Stop'
+$callerEnvironment = @{} # restored for -Bridge: its script sets up the x86 toolchain itself
+foreach ($name in 'PATH', 'INCLUDE', 'LIB', 'LIBPATH') { $callerEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process') }
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 $sdk = 'vulkan-sdk-1.4.350.1'
 $glslangVersion = '16.6.0'
@@ -62,9 +69,9 @@ try {
     }
     $name = 'gi_server_test'
     $source = 'check.cpp'
-    if ($Pixel) {
-        $name = 'gi_pixel_test'
-        $source = 'pixel_check.cpp' # (includes check.cpp, so the headers above are needed too)
+    if ($Pixel -or $Mesh) {
+        $name = if ($Mesh) { 'gi_mesh_test' } else { 'gi_pixel_test' }
+        $source = if ($Mesh) { 'mesh_check.cpp' } else { 'pixel_check.cpp' } # (both include check.cpp, so the headers above are needed too)
         # the kernel, then its variants for --bench (pixel_shadow.comp names the switches)
         foreach ($v in @(@('pixel_shadow'), @('px_trace0', '-DTRACE=0'), @('px_group16', '-DGROUP=16'), @('px_lean', '-DLEAN'), @('px_stop1', '-DSTOP=1'), @('px_stop2', '-DSTOP=2'), @('px_stop3', '-DSTOP=3'))) {
             $defs = @($v | Select-Object -Skip 1)
@@ -76,6 +83,30 @@ try {
     $exe = Join-Path $OutDir ($name + '.exe')
     & cl.exe /nologo /std:c++20 /utf-8 /EHsc /W4 /O2 /MT /fp:precise /DNOMINMAX /DVK_USE_PLATFORM_WIN32_KHR ('/I' + $repo) ('/I' + $OutDir) ('/I' + $headers) ('/I' + $volk) ('/Fe' + $exe) (Join-Path $PSScriptRoot $source)
     if ($LASTEXITCODE -ne 0) { throw "$source did not compile" }
+    if ($Mesh -and $Game) {
+        $casters = Join-Path $OutDir 'casters.bin'
+        if (-not (Test-Path -LiteralPath $casters)) {
+            & python (Join-Path $PSScriptRoot 'casters.py') $Game $casters
+            if ($LASTEXITCODE -ne 0) { throw 'casters.py failed' }
+        }
+        $TestArgs = @('--casters', $casters) + $TestArgs
+        # the bridge server's own package reader (meshes_check.cpp) must read the same two models
+        $reader = Join-Path $OutDir 'gi_meshes_check.exe'
+        & cl.exe /nologo /std:c++20 /utf-8 /EHsc /W4 /O2 /MT /DNOMINMAX ('/I' + $repo) ('/Fe' + $reader) (Join-Path $PSScriptRoot 'meshes_check.cpp')
+        if ($LASTEXITCODE -ne 0) { throw 'meshes_check.cpp did not compile' }
+        $objects = Join-Path $OutDir 'chair_object.bin'
+        $readerArgs = @($Game, '--casters', $casters, '--objects', $objects) + $(if ($Mods) { @('--mods', $Mods) } else { @() })
+        & $reader @readerArgs
+        if ($LASTEXITCODE -ne 0) { throw 'the package reader differs from casters.py' }
+        if ($Bridge) {
+            $kept = @{}
+            foreach ($name in $callerEnvironment.Keys) { $kept[$name] = [Environment]::GetEnvironmentVariable($name, 'Process'); [Environment]::SetEnvironmentVariable($name, $callerEnvironment[$name], 'Process') }
+            & cmd.exe /d /c (Join-Path $repo 'native/remix-bridge/test-gi-mesh.cmd') $Game $objects
+            $failed = $LASTEXITCODE -ne 0
+            foreach ($name in $kept.Keys) { [Environment]::SetEnvironmentVariable($name, $kept[$name], 'Process') }
+            if ($failed) { throw 'test-gi-mesh.cmd failed' }
+        }
+    }
     & $exe @TestArgs
     if ($LASTEXITCODE -ne 0) { throw "$name failed" }
 } finally { Pop-Location }

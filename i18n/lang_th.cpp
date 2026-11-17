@@ -3031,6 +3031,7 @@ const I18n::Pair kPairs[] = {
     {"The pack could not be saved in the Shaders folder", "บันทึกแพ็กลงในโฟลเดอร์ Shaders ไม่ได้"},
     {"The download failed", "ดาวน์โหลดไม่สำเร็จ"},
     {"Shader packs: downloaded from their authors' GitHub, under each author's licence.", "แพ็กเชดเดอร์: ดาวน์โหลดจาก GitHub ของผู้สร้าง ภายใต้สัญญาอนุญาตของผู้สร้างแต่ละราย"},
+    {"Developer mode: give the bridge server every object's own mesh as a shadow caster", "โหมดนักพัฒนา: ส่งเมชของแต่ละวัตถุให้เซิร์ฟเวอร์บริดจ์ใช้เป็นตัวสร้างเงา"},
     {nullptr, nullptr},
 };
 const I18n::LangTable kTable(I18n::Lang::Thai, kPairs, std::size(kPairs));

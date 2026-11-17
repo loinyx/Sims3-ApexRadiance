@@ -72,6 +72,17 @@ struct PScene {
     std::vector<Capsule> capsules;  // delta (3)
     std::vector<Box> casters;       // the delta casters' bounds
     std::vector<Lamp> lamps;
+    // Mesh casters (mesh_check.cpp): static meshes as one bottom level a model and an instance an object, both sides
+    struct Placed {
+        uint32_t model;
+        float xf[12]; // rows of a 3 x 4 matrix, model to world
+    };
+    std::vector<std::vector<Tri>> models; // model space
+    std::vector<Placed> placed;
+    RtLampProxy::Mesh meshes;              // the same in world space with its grid: the CPU reference's copy
+    std::vector<Tri> shown;                // drawn only: the objects' own meshes when their casters differ
+    bool twoSidedDetail = false;           // the delta detail meshes are game meshes (open, any winding): no culling
+    RtLampProxy::Mesh detailGrid;          // (twoSidedDetail) the detail with its grid: the CPU reference's copy
     V3 eye{}, right{}, up{}, fwd{};
     float tanX = 0.0f, tanY = 0.0f;
 };
@@ -184,6 +195,7 @@ Drawn Draw(const PScene& ps, int w, int h) {
             tris(ps.walls.tris.data(), ps.walls.tris.size(), kWalls);
             tris(ps.boxes.data(), ps.drawnBoxes, kBoxes);
             tris(ps.detail.data(), ps.detail.size(), kChair);
+            tris(ps.shown.data(), ps.shown.size(), kChair);
             const float dl = Len(d);
             for (const Capsule& c : ps.capsules) {
                 const float tt = CapsuleEnter(ps.eye, d * (1.0f / dl), At(c.a), At(c.b), c.r * kShrink) / dl;
@@ -216,12 +228,13 @@ bool Interior(const PScene& ps, const Drawn& dr, size_t i) {
 
 // ---------------------------------------------------------------- the device
 VkAccelerationStructureKHR Accel(const Gpu& g, Trash& trash, VkAccelerationStructureTypeKHR type, const VkAccelerationStructureGeometryKHR& geo, uint32_t count,
-                                 VkDeviceAddress* address = nullptr) { // (check.cpp BuildAccel's step)
+                                 VkDeviceAddress* address = nullptr, VkDeviceSize* bytes = nullptr) { // (check.cpp BuildAccel's step)
     VkAccelerationStructureBuildGeometryInfoKHR info{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
     info.type = type, info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR, info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     info.geometryCount = 1, info.pGeometries = &geo;
     VkAccelerationStructureBuildSizesInfoKHR sz{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
     vkGetAccelerationStructureBuildSizesKHR(g.dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &info, &count, &sz);
+    if (bytes) *bytes = sz.accelerationStructureSize;
     const Buf store = MakeBuf(g, trash, sz.accelerationStructureSize, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, false);
     const Buf scratch = MakeBuf(g, trash, sz.buildScratchSize + 256, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, false);
     VkAccelerationStructureCreateInfoKHR ci{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR};
@@ -258,9 +271,17 @@ struct Kernel {
 
     Kernel(const Gpu& gpu, const PScene& ps, const Drawn& dr) : g(gpu) {
         const VkBufferUsageFlags sb = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, in = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR;
-        // Four bottom levels under one top level; the instance's custom index names the set to the shader, its mask to the ray
-        VkAccelerationStructureInstanceKHR inst[4]{};
-        const auto triangles = [&](const std::vector<Tri>& tris, int i) {
+        // Bottom levels under one top level; the instance's custom index names the set to the shader, its mask to the ray
+        std::vector<VkAccelerationStructureInstanceKHR> inst;
+        const auto add = [&](uint32_t i, VkGeometryInstanceFlagsKHR flags, VkDeviceAddress blas, const float* xf = nullptr) {
+            VkAccelerationStructureInstanceKHR in{};
+            if (xf) std::memcpy(in.transform.matrix, xf, sizeof in.transform.matrix);
+            else in.transform.matrix[0][0] = in.transform.matrix[1][1] = in.transform.matrix[2][2] = 1.0f;
+            in.instanceCustomIndex = i, in.mask = i < 2 ? 1 : 2, in.flags = flags, in.accelerationStructureReference = blas;
+            inst.push_back(in);
+        };
+        const auto blas = [&](const std::vector<Tri>& tris) {
+            VkDeviceAddress at = 0;
             const Buf verts = DeviceBuf(g, trash, tris.size() * sizeof(Tri), in, tris.data(), tris.size() * sizeof(Tri));
             VkAccelerationStructureGeometryKHR geo{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
             // Opaque: the traversal confirms a triangle itself. Without the flag every triangle on a ray came back to the
@@ -270,9 +291,19 @@ struct Kernel {
             geo.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT, geo.geometry.triangles.vertexStride = 12;
             geo.geometry.triangles.vertexData.deviceAddress = Addr(g, verts), geo.geometry.triangles.maxVertex = static_cast<uint32_t>(tris.size()) * 3 - 1;
             geo.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
-            Accel(g, trash, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, geo, static_cast<uint32_t>(tris.size()), &inst[i].accelerationStructureReference);
+            Accel(g, trash, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, geo, static_cast<uint32_t>(tris.size()), &at);
+            return at;
         };
-        triangles(ps.walls.tris, 0), triangles(ps.boxes, 1), triangles(ps.detail, 2);
+        // Walls block from both sides. AddShape's triangles face inward: with kShapeFacing the ray's back-face culling drops
+        // the faces a ray leaves through, so a ray from inside a box or a mesh part leaves it without a hit
+        add(0, VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR, blas(ps.walls.tris));
+        if (!ps.boxes.empty()) add(1, kShapeFacing, blas(ps.boxes));
+        if (!ps.detail.empty()) add(2, ps.twoSidedDetail ? VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR : kShapeFacing, blas(ps.detail));
+        for (const auto& m : ps.models) {
+            const VkDeviceAddress at = blas(m);
+            for (const PScene::Placed& o : ps.placed)
+                if (&ps.models[o.model] == &m) add(1, VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR, at, o.xf); // static mesh casters, both sides
+        }
         {
             std::vector<VkAabbPositionsKHR> boxes;
             for (const Capsule& c : ps.capsules)
@@ -283,21 +314,17 @@ struct Kernel {
             geo.geometryType = VK_GEOMETRY_TYPE_AABBS_KHR;
             geo.geometry.aabbs = {VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_AABBS_DATA_KHR};
             geo.geometry.aabbs.data.deviceAddress = Addr(g, b), geo.geometry.aabbs.stride = sizeof boxes[0];
-            Accel(g, trash, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, geo, static_cast<uint32_t>(boxes.size()), &inst[3].accelerationStructureReference);
+            VkDeviceAddress at = 0;
+            Accel(g, trash, VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, geo, static_cast<uint32_t>(boxes.size()), &at);
+            add(3, 0, at);
         }
-        for (uint32_t i = 0; i < 4; i++) {
-            inst[i].transform.matrix[0][0] = inst[i].transform.matrix[1][1] = inst[i].transform.matrix[2][2] = 1.0f;
-            inst[i].instanceCustomIndex = i, inst[i].mask = i < 2 ? 1 : 2;
-            // Walls block from both sides. AddShape's triangles face inward: with this flag the ray's back-face culling
-            // drops the faces a ray leaves through, so a ray from inside a box or a mesh part leaves it without a hit
-            inst[i].flags = i == 0 ? VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR : kShapeFacing;
-        }
-        const Buf instances = DeviceBuf(g, trash, sizeof inst, in, inst, sizeof inst);
+        const size_t ib = inst.size() * sizeof inst[0];
+        const Buf instances = DeviceBuf(g, trash, ib, in, inst.data(), ib);
         VkAccelerationStructureGeometryKHR top{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
         top.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
         top.geometry.instances = {VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR};
         top.geometry.instances.data.deviceAddress = Addr(g, instances);
-        const VkAccelerationStructureKHR tlas = Accel(g, trash, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, top, 4);
+        const VkAccelerationStructureKHR tlas = Accel(g, trash, VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR, top, static_cast<uint32_t>(inst.size()));
 
         std::vector<GpuLamp> lamps;
         for (const Lamp& l : ps.lamps) lamps.push_back({{l.pos[0], l.pos[1], l.pos[2], l.radius}, {l.col[0], l.col[1], l.col[2], 0}});
@@ -469,9 +496,9 @@ uint32_t CpuTrace(const PScene& ps, V3 O, V3 e, bool delta) {
             if (Dot(Cross(At(t.v[1]) - At(t.v[0]), At(t.v[2]) - At(t.v[0])), d) > 0.0f && RtLampProxy::SegTri(o, dd, t, 0.0f, tMax)) return true;
         return false;
     };
-    if (tris(ps.boxes)) return 1;
+    if (tris(ps.boxes) || !RtLampProxy::Clear(ps.meshes, o, b, 0.0f, 1e-3f, &stamp, ++mark)) return 1;
     if (!delta) return 0;
-    if (tris(ps.detail)) return 2;
+    if (ps.twoSidedDetail ? !RtLampProxy::Clear(ps.detailGrid, o, b, 0.0f, 1e-3f, &stamp, ++mark) : tris(ps.detail)) return 2;
     for (const Capsule& c : ps.capsules) {
         const float t = CapsuleEnter(O, d * (1.0f / len), At(c.a), At(c.b), c.r);
         if (t > 0.0f && t < len - 1e-3f) return 2;
@@ -554,6 +581,7 @@ void CheckOcclusion(const PScene& ps, const Drawn& dr, const std::vector<Pixel>&
 }
 } // namespace
 
+#ifndef PIXEL_CHECK_NO_MAIN // (mesh_check.cpp takes the scene, the kernel and the reference)
 int main(int argc, char** argv) {
     std::string want;
     int w = 1920, h = 1080, bench = 0;
@@ -809,3 +837,4 @@ int main(int argc, char** argv) {
     std::printf(g_failed ? "FAILED: %d check(s)\n" : "All checks passed\n", g_failed);
     return g_failed ? 1 : 0;
 }
+#endif

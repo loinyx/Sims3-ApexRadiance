@@ -6,6 +6,8 @@
 //   run()     one pass: block, depth, optional motion class, up to four outputs (gi_pixel_block.h)
 //   forget()  a texture is about to be destroyed
 //   drop()    before a device reset or destroy: waits for the device, frees every Vulkan object
+//   addModel(), setMeshes()  mesh casters (MC-2): a model's triangles once, then the placed objects; each model becomes
+//             one bottom level on the renderer's device when a pass first needs it, its objects instances of it
 // Header only: the bridge server and native/dxvk/test/dxvk_gi_pixel_pass.cpp compile the same file. The including file
 // provides kGiPixelSpv (the compiled kernel) before this header.
 // All calls come from one thread (the server's play thread); the record callback runs on DXVK's command thread and
@@ -21,7 +23,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
 #include <initializer_list>
+#include <vector>
 #include "gi_pixel_block.h"
 
 // DXVK's interop interfaces, as declared in src/d3d9/d3d9_interfaces.h (method order matters)
@@ -93,6 +97,25 @@ public:
   }
   bool ready() const { return m_interop != nullptr; }
 
+  // A model's triangles in model space (xyz a vertex, abc a triangle), kept here; built when an instance names it, and
+  // again after drop(). Its index for GiPixelMesh::model, or kNoModel for an empty, too large or broken mesh
+  static constexpr uint32_t kNoModel = ~0u;
+  uint32_t addModel(const float* pos, uint32_t vertices, const uint32_t* tri, uint32_t triangles) {
+    if (!pos || !tri || !vertices || !triangles || triangles > kMaxModelTriangles || vertices > 3 * kMaxModelTriangles || m_models.size() >= kMaxModels) return kNoModel;
+    for (uint32_t i = 0; i < triangles * 3; i++)
+      if (tri[i] >= vertices) return kNoModel;
+    Model m;
+    m.vertices = vertices, m.triangles = triangles;
+    m.bytes.resize(size_t(vertices) * 12 + size_t(triangles) * 12);
+    std::memcpy(m.bytes.data(), pos, size_t(vertices) * 12);
+    std::memcpy(m.bytes.data() + size_t(vertices) * 12, tri, size_t(triangles) * 12);
+    m_models.push_back(std::move(m));
+    return static_cast<uint32_t>(m_models.size() - 1);
+  }
+  // The placed objects of the next passes (copied). A pass takes the kGiPixelMeshes nearest its camera; an object whose
+  // model is not built yet waits for it (kBuildsPerPass models a pass)
+  void setMeshes(const GiPixelMesh* list, uint32_t count) { m_meshes.assign(list, list + count); }
+
   // out[i] may be null. E_FAIL counts as a fault; the text of the last one is lastFault()
   HRESULT run(const GiPixelBlock& block, IDirect3DBaseTexture9* depth, IDirect3DBaseTexture9* cls, IDirect3DBaseTexture9* const* out) {
     if (!ready() || !depth) return fault("not ready");
@@ -133,7 +156,7 @@ public:
     GiPixelBlock* b = reinterpret_cast<GiPixelBlock*>(r->block);  // (only the fields before `box` exist in the copy)
     b->width = depthInfo.extent.width, b->height = depthInfo.extent.height;
     b->flags = cls ? kGiPixelFlagClass : 0;
-    // Instances: capsule i is instance i (the kernel reads the capsule by the instance's index), then the boxes
+    // Instances: capsule i is instance i (the kernel reads the capsule by the instance's index), then the boxes, then the meshes
     r->instances = block.capsules + block.boxes;
     std::memset(r->inst, 0, sizeof(VkAccelerationStructureInstanceKHR) * r->instances);
     for (uint32_t i = 0; i < block.capsules; i++) {
@@ -152,6 +175,7 @@ public:
       // upgrade when the client sends mirrored boxes
       n.instanceCustomIndex = 1, n.mask = 1, n.flags = kBoxFacing, n.accelerationStructureReference = m_blasAddr[0];
     }
+    if (const char* why = meshInstances(block, *r)) return fault(why);
 
     collect();
     const UINT size = static_cast<UINT>(offsetof(Record, inst) + sizeof(VkAccelerationStructureInstanceKHR) * r->instances);
@@ -178,7 +202,15 @@ public:
     for (VkImage i : m_outImage) if (i) m_vk.DestroyImage(m_dev, i, nullptr);
     for (VkAccelerationStructureKHR a : m_as) if (a) m_vk.DestroyAccelerationStructureKHR(m_dev, a, nullptr);
     for (VkBuffer b : {m_blockBuf, m_instBuf, m_geoBuf, m_statsBuf, m_asBuf, m_scratchBuf}) if (b) m_vk.DestroyBuffer(m_dev, b, nullptr);
-    for (uint32_t i = 0; i < m_memCount; i++) m_vk.FreeMemory(m_dev, m_memory[i], nullptr);  // (unmaps the counters)
+    for (Model& m : m_models) {
+      if (m.as) m_vk.DestroyAccelerationStructureKHR(m_dev, m.as, nullptr);
+      m.as = VK_NULL_HANDLE, m.blas = 0;
+    }
+    for (const Chunk& c : m_chunks) m_vk.DestroyBuffer(m_dev, c.buf, nullptr);
+    for (VkBuffer b : m_retired) m_vk.DestroyBuffer(m_dev, b, nullptr);
+    if (m_scratch) m_vk.DestroyBuffer(m_dev, m_scratch, nullptr);
+    m_chunks.clear(), m_retired.clear(), m_scratch = VK_NULL_HANDLE, m_scratchSize = 0, m_scratchAddrMesh = 0, m_built = 0;
+    for (VkDeviceMemory mem : m_memory) m_vk.FreeMemory(m_dev, mem, nullptr);  // (unmaps the counters and the mesh data)
     if (m_pipeline) m_vk.DestroyPipeline(m_dev, m_pipeline, nullptr);
     if (m_layout) m_vk.DestroyPipelineLayout(m_dev, m_layout, nullptr);
     if (m_pool) m_vk.DestroyDescriptorPool(m_dev, m_pool, nullptr);
@@ -190,7 +222,7 @@ public:
     for (uint32_t i = 0; i < kGiPixelOutputs; i++) m_outView[i] = VK_NULL_HANDLE, m_outImage[i] = VK_NULL_HANDLE;
     for (VkAccelerationStructureKHR& a : m_as) a = VK_NULL_HANDLE;
     m_blockBuf = m_instBuf = m_geoBuf = m_statsBuf = m_asBuf = m_scratchBuf = VK_NULL_HANDLE;
-    m_memCount = 0, m_stats = nullptr, m_statsSeen = 0;
+    m_memory.clear(), m_stats = nullptr, m_statsSeen = 0;
     m_pipeline = VK_NULL_HANDLE, m_layout = VK_NULL_HANDLE, m_pool = VK_NULL_HANDLE, m_setLayout = VK_NULL_HANDLE;
     m_sampler = VK_NULL_HANDLE, m_queries = VK_NULL_HANDLE, m_set = VK_NULL_HANDLE;
     m_w = m_h = 0, m_created = false;
@@ -199,25 +231,50 @@ public:
   // Reads what the device has answered so far and returns the counters
   GiPixelCounters counters() {
     collect();
-    return {m_passes, m_faults, m_rays, m_raysLast, m_gpuUs, m_w, m_h};
+    return {m_passes, m_faults, m_rays, m_raysLast, m_gpuUs, m_w, m_h, m_meshesLast, m_built};
   }
   const char* lastFault() const { return m_lastFault; }
   // The counter line of the log, without a line end
   int line(char* text, size_t size) {
     const GiPixelCounters c = counters();
-    return std::snprintf(text, size, "[GiPixel] passes=%u rays=%llu raysLast=%u gpuUs=%u size=%ux%u faults=%u%s%s", c.passes,
-                         static_cast<unsigned long long>(c.rays), c.raysLast, c.gpuUs, c.width, c.height, c.faults, m_faults ? " last=" : "", m_faults ? m_lastFault : "");
+    return std::snprintf(text, size, "[GiPixel] passes=%u rays=%llu raysLast=%u gpuUs=%u size=%ux%u meshes=%u models=%u faults=%u%s%s", c.passes,
+                         static_cast<unsigned long long>(c.rays), c.raysLast, c.gpuUs, c.width, c.height, c.meshes, c.models, c.faults,
+                         m_faults ? " last=" : "", m_faults ? m_lastFault : "");
   }
 
 private:
-  enum : uint32_t { kSlots = 8, kMaxInstances = kGiPixelCapsules + kGiPixelBoxes, kShaderBlock = offsetof(GiPixelBlock, box), kCubeBytes = 36 * 12 };
+  enum : uint32_t { kSlots = 8, kMaxInstances = kGiPixelCapsules + kGiPixelBoxes + kGiPixelMeshes, kShaderBlock = offsetof(GiPixelBlock, box), kCubeBytes = 36 * 12 };
+  // shortcut: a model over 64 k triangles is left out (the survey's 99 % is 5 k) and at most 4096 models are kept; raise when the counters show refusals
+  enum : uint32_t { kMaxModelTriangles = 65536, kMaxModels = 4096, kBuildsPerPass = 16, kChunkBytes = 8u << 20 };
+  // Game meshes are open and wound either way: no culling, whatever the rays ask
+  static constexpr VkGeometryInstanceFlagsKHR kMeshFacing = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+  struct Model {
+    std::vector<uint8_t> bytes;  // vertices, then indices
+    uint32_t vertices = 0, triangles = 0;
+    VkAccelerationStructureKHR as = VK_NULL_HANDLE;  // created by the pass that builds it; freed by drop()
+    VkDeviceAddress blas = 0;
+  };
+  struct Build {  // what the record callback needs of a model: the play thread may grow the model list meanwhile
+    VkAccelerationStructureKHR as;
+    VkDeviceAddress data;
+    uint32_t vertices, triangles;
+  };
+  struct Chunk {  // a buffer the mesh data (host-visible) or the bottom levels (device-local) are cut from
+    VkBuffer buf;
+    VkDeviceAddress addr;
+    uint8_t* map;
+    VkDeviceSize used, size;
+    bool host;
+  };
   // The unit cube's faces wind counter-clockwise seen from outside; with this flag the rays' back-face culling drops the
   // faces a ray leaves through, so a ray that starts just inside a box leaves it (verified by dxvk_gi_pixel_pass)
   static constexpr VkGeometryInstanceFlagsKHR kBoxFacing = VK_GEOMETRY_INSTANCE_TRIANGLE_FRONT_COUNTERCLOCKWISE_BIT_KHR;
   struct Record {  // copied by ExecuteExternal; `inst` is cut after the last instance
     GiPixelPass* self;
     VkImage out[kGiPixelOutputs];
-    uint32_t first, slot, instances, pad;
+    uint32_t first, slot, instances, builds;
+    VkDeviceAddress scratch;  // of the builds
+    Build build[kBuildsPerPass];
     uint8_t block[kShaderBlock];
     VkAccelerationStructureInstanceKHR inst[kMaxInstances];
   };
@@ -266,8 +323,8 @@ private:
     for (uint32_t i = 0; i < m_mem.memoryTypeCount; i++)
       if ((req.memoryTypeBits >> i & 1) && (m_mem.memoryTypes[i].propertyFlags & want) == want) {
         ai.memoryTypeIndex = i;
-        if (m_memCount == sizeof m_memory / sizeof m_memory[0] || m_vk.AllocateMemory(m_dev, &ai, nullptr, mem) != VK_SUCCESS) return false;
-        m_memory[m_memCount++] = *mem;
+        if (m_vk.AllocateMemory(m_dev, &ai, nullptr, mem) != VK_SUCCESS) return false;
+        m_memory.push_back(*mem);
         return true;
       }
     return false;
@@ -281,6 +338,92 @@ private:
     VkImageViewCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
     ci.image = image, ci.viewType = VK_IMAGE_VIEW_TYPE_2D, ci.format = format, ci.subresourceRange = {aspect, 0, 1, 0, 1};
     return m_vk.CreateImageView(m_dev, &ci, nullptr, v) == VK_SUCCESS;
+  }
+
+  // A range of a chunk: 256-byte aligned (bottom levels need it); a new chunk when none has room
+  bool cut(bool host, VkDeviceSize size, Chunk** chunk, VkDeviceSize* offset) {
+    size = (size + 255) & ~VkDeviceSize(255);
+    for (Chunk& c : m_chunks)
+      if (c.host == host && c.size - c.used >= size) return *chunk = &c, *offset = c.used, c.used += size, true;
+    Chunk c{VK_NULL_HANDLE, 0, nullptr, 0, std::max<VkDeviceSize>(size, kChunkBytes), host};
+    const VkBufferUsageFlags addr = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    void* map = nullptr;
+    if (!buffer(&c.buf, c.size, host ? VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | addr : VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR | addr,
+                host ? &map : nullptr)) {
+      if (c.buf) m_retired.push_back(c.buf);
+      return false;
+    }
+    c.addr = address(c.buf), c.map = static_cast<uint8_t*>(map), c.used = size;
+    m_chunks.push_back(c);
+    return *chunk = &m_chunks.back(), *offset = 0, true;
+  }
+
+  // Makes a model's bottom level and its input data ready for a build in this pass; the build itself is recorded
+  const char* prepare(Model& m, Build& b) {
+    VkAccelerationStructureGeometryKHR geo{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
+    geo.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR, geo.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+    geo.geometry.triangles = {VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR};
+    geo.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT, geo.geometry.triangles.vertexStride = 12;
+    geo.geometry.triangles.maxVertex = m.vertices - 1, geo.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32;
+    VkAccelerationStructureBuildGeometryInfoKHR info{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
+    info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, info.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+    info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR, info.geometryCount = 1, info.pGeometries = &geo;
+    VkAccelerationStructureBuildSizesInfoKHR sizes{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR};
+    m_vk.GetAccelerationStructureBuildSizesKHR(m_dev, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &info, &m.triangles, &sizes);
+    if (sizes.buildScratchSize > m_scratchSize) {  // the old scratch may still be in use by the device: kept until drop()
+      if (m_scratch) m_retired.push_back(m_scratch);
+      m_scratch = VK_NULL_HANDLE, m_scratchSize = 0;
+      if (!buffer(&m_scratch, sizes.buildScratchSize + 256, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)) return "mesh scratch buffer failed";
+      m_scratchSize = sizes.buildScratchSize, m_scratchAddrMesh = (address(m_scratch) + 255) & ~VkDeviceAddress(255);
+    }
+    Chunk *data, *store;
+    VkDeviceSize dataAt, storeAt;
+    if (!cut(true, m.bytes.size(), &data, &dataAt)) return "mesh data buffer failed";
+    std::memcpy(data->map + dataAt, m.bytes.data(), m.bytes.size());
+    const VkDeviceAddress dataAddr = data->addr + dataAt;  // (before the next cut: it may grow the chunk list)
+    if (!cut(false, sizes.accelerationStructureSize, &store, &storeAt)) return "bottom level buffer failed";
+    VkAccelerationStructureCreateInfoKHR ci{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR};
+    ci.buffer = store->buf, ci.offset = storeAt, ci.size = sizes.accelerationStructureSize, ci.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+    if (m_vk.CreateAccelerationStructureKHR(m_dev, &ci, nullptr, &m.as) != VK_SUCCESS) return m.as = VK_NULL_HANDLE, "bottom level creation failed";
+    VkAccelerationStructureDeviceAddressInfoKHR ai{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR};
+    ai.accelerationStructure = m.as;
+    m.blas = m_vk.GetAccelerationStructureDeviceAddressKHR(m_dev, &ai);
+    b = {m.as, dataAddr, m.vertices, m.triangles};
+    m_built++;
+    return nullptr;
+  }
+
+  // The mesh instances of a pass, after the capsules and boxes: the nearest objects to the camera whose model is built,
+  // building up to kBuildsPerPass models it lacks
+  const char* meshInstances(const GiPixelBlock& block, Record& r) {
+    r.builds = 0, r.scratch = m_scratchAddrMesh, m_meshesLast = 0;
+    if (m_meshes.empty()) return nullptr;
+    m_order.resize(m_meshes.size());
+    for (uint32_t i = 0; i < m_order.size(); i++) m_order[i] = i;
+    const auto dist = [&](uint32_t i) {
+      const float* m = m_meshes[i].m;
+      const float x = m[3] - block.cam[0], y = m[7] - block.cam[1], z = m[11] - block.cam[2];
+      return x * x + y * y + z * z;
+    };
+    if (m_order.size() > kGiPixelMeshes)
+      std::nth_element(m_order.begin(), m_order.begin() + kGiPixelMeshes, m_order.end(), [&](uint32_t a, uint32_t b) { return dist(a) < dist(b); });
+    const uint32_t take = std::min<uint32_t>(static_cast<uint32_t>(m_order.size()), kGiPixelMeshes);
+    for (uint32_t k = 0; k < take; k++) {
+      const GiPixelMesh& o = m_meshes[m_order[k]];
+      if (o.model >= m_models.size()) continue;
+      Model& m = m_models[o.model];
+      if (!m.as) {
+        if (r.builds == kBuildsPerPass) continue;
+        if (const char* why = prepare(m, r.build[r.builds])) return why;
+        r.builds++, r.scratch = m_scratchAddrMesh;
+      }
+      VkAccelerationStructureInstanceKHR& n = r.inst[r.instances++];
+      n = {};
+      std::memcpy(n.transform.matrix, o.m, sizeof n.transform.matrix);
+      n.instanceCustomIndex = 0, n.mask = 1, n.flags = kMeshFacing, n.accelerationStructureReference = m.blas;
+      m_meshesLast++;
+    }
+    return nullptr;
   }
 
   // The build inputs of the three acceleration structures: 0 the unit cube, 1 the unit box of a capsule, 2 the top level
@@ -480,9 +623,31 @@ private:
       p.barrier(cmd, build, asWrite, build, asRead);
     }
 
+    // Bottom levels of the models this pass needs first (their data is in mapped memory written before the pass was sent).
+    // They share one scratch range, so each build waits for the one before
+    for (uint32_t i = 0; i < r.builds; i++) {
+      const Build& b = r.build[i];
+      VkAccelerationStructureGeometryKHR mg{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
+      mg.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR, mg.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+      mg.geometry.triangles = {VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR};
+      mg.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT, mg.geometry.triangles.vertexStride = 12;
+      mg.geometry.triangles.vertexData.deviceAddress = b.data, mg.geometry.triangles.maxVertex = b.vertices - 1;
+      mg.geometry.triangles.indexType = VK_INDEX_TYPE_UINT32, mg.geometry.triangles.indexData.deviceAddress = b.data + VkDeviceSize(b.vertices) * 12;
+      VkAccelerationStructureBuildGeometryInfoKHR mi{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR};
+      mi.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR, mi.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
+      mi.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR, mi.geometryCount = 1, mi.pGeometries = &mg;
+      mi.dstAccelerationStructure = b.as, mi.scratchData.deviceAddress = r.scratch;
+      const VkAccelerationStructureBuildRangeInfoKHR range{b.triangles, 0, 0, 0};
+      const VkAccelerationStructureBuildRangeInfoKHR* ranges = &range;
+      vk.CmdBuildAccelerationStructuresKHR(cmd, 1, &mi, &ranges);
+      p.barrier(cmd, build, asWrite, build, asRead | asWrite);
+    }
+
     // The frame's block and instances travel inside the command buffer: no staging buffer a later pass could overwrite
     vk.CmdUpdateBuffer(cmd, p.m_blockBuf, 0, kShaderBlock, r.block);
-    if (r.instances) vk.CmdUpdateBuffer(cmd, p.m_instBuf, 0, sizeof(VkAccelerationStructureInstanceKHR) * r.instances, r.inst);
+    // (vkCmdUpdateBuffer takes 64 KB a call at most)
+    for (VkDeviceSize at = 0, all = sizeof(VkAccelerationStructureInstanceKHR) * r.instances; at < all; at += 65536)
+      vk.CmdUpdateBuffer(cmd, p.m_instBuf, at, std::min<VkDeviceSize>(65536, all - at), reinterpret_cast<const uint8_t*>(r.inst) + at);
     p.barrier(cmd, transfer, VK_ACCESS_TRANSFER_WRITE_BIT, build | compute, VK_ACCESS_SHADER_READ_BIT);
     const VkAccelerationStructureBuildRangeInfoKHR top{r.instances, 0, 0, 0};
     const VkAccelerationStructureBuildRangeInfoKHR* topRange = &top;
@@ -524,8 +689,7 @@ private:
   VkImage m_outImage[kGiPixelOutputs] = {};
   VkImageView m_outView[kGiPixelOutputs] = {};
   VkBuffer m_blockBuf = VK_NULL_HANDLE, m_instBuf = VK_NULL_HANDLE, m_geoBuf = VK_NULL_HANDLE, m_statsBuf = VK_NULL_HANDLE, m_asBuf = VK_NULL_HANDLE, m_scratchBuf = VK_NULL_HANDLE;
-  VkDeviceMemory m_memory[12] = {};
-  uint32_t m_memCount = 0;
+  std::vector<VkDeviceMemory> m_memory;
   VkAccelerationStructureKHR m_as[3] = {};
   VkDeviceAddress m_geoAddr = 0, m_instAddr = 0, m_blasAddr[2] = {}, m_scratchAddr[3] = {};
   VkSampler m_sampler = VK_NULL_HANDLE;
@@ -537,6 +701,16 @@ private:
   VkQueryPool m_queries = VK_NULL_HANDLE;
   volatile uint32_t* m_stats = nullptr;
   uint32_t m_statsSeen = 0;
+
+  std::vector<Model> m_models;      // kept through drop(); their Vulkan objects are not
+  std::vector<GiPixelMesh> m_meshes;
+  std::vector<uint32_t> m_order;
+  std::vector<Chunk> m_chunks;
+  std::vector<VkBuffer> m_retired;  // replaced scratch buffers, freed by drop()
+  VkBuffer m_scratch = VK_NULL_HANDLE;
+  VkDeviceSize m_scratchSize = 0;
+  VkDeviceAddress m_scratchAddrMesh = 0;
+  uint32_t m_built = 0, m_meshesLast = 0;
 
   Record m_record{};  // filled by run(), copied by the renderer
   uint32_t m_passes = 0, m_made = 0, m_faults = 0, m_raysLast = 0, m_gpuUs = 0;

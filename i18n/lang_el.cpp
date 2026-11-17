@@ -3031,6 +3031,7 @@ const I18n::Pair kPairs[] = {
     {"The pack could not be saved in the Shaders folder", "Δεν ήταν δυνατή η αποθήκευση του πακέτου στον φάκελο Shaders"},
     {"The download failed", "Η λήψη απέτυχε"},
     {"Shader packs: downloaded from their authors' GitHub, under each author's licence.", "Πακέτα shaders: λήψη από το GitHub των δημιουργών τους, με την άδεια του καθενός."},
+    {"Developer mode: give the bridge server every object's own mesh as a shadow caster", "Λειτουργία προγραμματιστή: δίνει στον διακομιστή της γέφυρας το πλέγμα κάθε αντικειμένου ως πηγή σκιάς"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Greek, kPairs, std::size(kPairs));

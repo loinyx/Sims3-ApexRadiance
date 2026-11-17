@@ -3031,6 +3031,7 @@ const I18n::Pair kPairs[] = {
     {"The pack could not be saved in the Shaders folder", "Balíček se nepodařilo uložit do složky Shaders"},
     {"The download failed", "Stahování selhalo"},
     {"Shader packs: downloaded from their authors' GitHub, under each author's licence.", "Balíčky shaderů: stahují se z GitHubu svých autorů, pod licencí každého z nich."},
+    {"Developer mode: give the bridge server every object's own mesh as a shadow caster", "Vývojářský režim: předá serveru mostu vlastní síť každého objektu jako vrhač stínu"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Czech, kPairs, std::size(kPairs));
