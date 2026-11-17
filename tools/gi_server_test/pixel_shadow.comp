@@ -48,6 +48,51 @@ struct Pixel {
     vec4 num;  // rgb: sum over the lamps of colour x geometry x d; a: 1 when a caster that moved is in reach
     vec4 den;  // rgb: sum over the lamps of colour x geometry x u
 };
+#ifdef BRIDGE_PASS
+// The pass in the bridge server (native/remix-bridge/gi/gi_pixel_pass.h, XR-06), recorded in DXVK's command stream: the
+// depth and the motion class are the game's images, the block is the client's block of the frame, the outputs are four
+// quarter-resolution rgba16f images that are copied into the client's render targets.
+// Instances of the top level: first one a capsule (custom index 3, mask 2, the unit box scaled to the capsule's bounds),
+// then one a static box (custom index 1, mask 1, the unit cube under the box's transform).
+layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;
+layout(set = 0, binding = 1) uniform sampler2D depthTex;
+layout(std430, set = 0, binding = 2) readonly buffer Block { // gi_pixel_block.h GiPixelBlock, without its boxes
+    mat4 invViewProj;
+    vec4 camA;
+    uint width, height;
+    uint lamps, casters;
+    uint frame, samples;
+    float bias, radiusScale;
+    vec4 viewZFar;            // xyz: the camera's forward; w: the far distance (the guide's linear depth is over it)
+    uint capsules, boxes;
+    uint flags, pad;          // flags bit 0: classTex holds the motion class in r (class / 3)
+    Lamp lamp[16];
+    Capsule capsule[64];
+    Box caster[32];
+} pc;
+#define lamp pc.lamp
+#define capsule pc.capsule
+#define caster pc.caster
+layout(set = 0, binding = 3) uniform sampler2D classTex;
+layout(set = 0, binding = 4, rgba16f) uniform writeonly image2D outRaw;   // r: this frame's delta visibility (1 = no caster), g: a caster that moved is in reach, b: rays were traced, a: the guide's depth
+layout(set = 0, binding = 5, rgba16f) uniform writeonly image2D outGuide; // rgb: world normal, a: linear depth / far (1 = nothing drawn)
+layout(set = 0, binding = 6, rgba16f) uniform writeonly image2D outNum;   // rgb: num, a: as outRaw.g
+layout(set = 0, binding = 7, rgba16f) uniform writeonly image2D outDen;   // rgb: den, a: rays traced
+layout(std430, set = 0, binding = 8) buffer Stats { uint stat[]; }; // 0: rays traced, 1: pixels that traced
+#define CAPSULE_OF(q, committed) rayQueryGetIntersectionInstanceIdEXT(q, committed)
+float DepthAt(ivec2 p) { return texelFetch(depthTex, p, 0).r; }
+uint ClassAt(ivec2 p) {
+    if ((pc.flags & 1u) == 0u) return 0u;
+    return uint(texelFetch(classTex, p * textureSize(classTex, 0) / ivec2(pc.width, pc.height), 0).r * 3.0 + 0.5);
+}
+void Store(ivec2 g, uint index, Pixel o) {
+    const float nl = dot(o.num.rgb, vec3(1.0)), dn = dot(o.den.rgb, vec3(1.0));
+    imageStore(outRaw, g, vec4(dn > 0.0 ? 1.0 - nl / dn : 1.0, o.num.a, o.cnt.w != 0u ? 1.0 : 0.0, o.mul.a));
+    imageStore(outGuide, g, vec4(o.nrm.xyz, o.mul.a < 1.0 ? dot(o.pos.xyz - pc.camA.xyz, pc.viewZFar.xyz) / pc.viewZFar.w : 1.0));
+    imageStore(outNum, g, vec4(o.num.rgb, o.num.a));
+    imageStore(outDen, g, vec4(o.den.rgb, float(o.cnt.w)));
+}
+#else
 // Instances of the top level: custom index 0 walls, floors and roofs (no culling), 1 object boxes, 2 detail meshes,
 // 3 capsule boxes. Mask 1 = static (0, 1), mask 2 = delta casters (2, 3).
 layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;
@@ -69,10 +114,14 @@ layout(push_constant) uniform PC {
     uint frame, samples;      // samples 16: the whole set in one dispatch (the reference of an accumulation)
     float bias, radiusScale;  // radiusScale 0: point emitters
 } pc;
+#define CAPSULE_OF(q, committed) rayQueryGetIntersectionPrimitiveIndexEXT(q, committed)
+float DepthAt(ivec2 p) { return depth[uint(p.y) * pc.width + uint(p.x)]; }
+uint ClassAt(ivec2 p) { return motionClass[uint(p.y) * pc.width + uint(p.x)]; }
+void Store(ivec2 g, uint index, Pixel o) { px[index] = o; }
+#endif
 
 const uint kNone = 0xFFu, kSet = 16u, kMaxLamps = 4u;
 
-float DepthAt(ivec2 p) { return depth[uint(p.y) * pc.width + uint(p.x)]; }
 vec3 World(ivec2 p, float d) {
     const vec2 ndc = vec2((float(p.x) + 0.5) / float(pc.width) * 2.0 - 1.0, 1.0 - (float(p.y) + 0.5) / float(pc.height) * 2.0);
     const vec4 h = pc.invViewProj * vec4(ndc, d, 1.0);
@@ -122,7 +171,7 @@ uint Trace(vec3 o, vec3 d, float tMax, uint mask) {
                 rayQueryTerminateEXT(q);
             } else hit |= 2u;
         } else {
-            const Capsule c = capsule[rayQueryGetIntersectionPrimitiveIndexEXT(q, false)];
+            const Capsule c = capsule[CAPSULE_OF(q, false)];
             const float t = CapsuleEnter(o, d, c.a.xyz, c.b.xyz, c.a.w);
             if (t > 0.0 && t < tMax) hit |= 2u;
         }
@@ -136,7 +185,7 @@ uint Trace(vec3 o, vec3 d, float tMax, uint mask) {
     // Any occluder ends the ray. Only a ray a delta caster ended (few) asks again for the static occluders alone
     rayQueryInitializeEXT(q, tlas, gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsCullBackFacingTrianglesEXT, mask, o, 0.0, d, tMax);
     while (rayQueryProceedEXT(q)) { // capsule boxes only
-        const Capsule c = capsule[rayQueryGetIntersectionPrimitiveIndexEXT(q, false)];
+        const Capsule c = capsule[CAPSULE_OF(q, false)];
         const float t = CapsuleEnter(o, d, c.a.xyz, c.b.xyz, c.a.w);
         if (t > 0.0 && t < tMax) rayQueryGenerateIntersectionEXT(q, t);
     }
@@ -181,7 +230,7 @@ void main() {
     o.mul = vec4(1.0, 1.0, 1.0, d), o.pos = vec4(0.0), o.nrm = vec4(0.0), o.cnt = uvec4(0xFFFFFFFFu, 0u, 0u, 0u);
     o.num = vec4(0.0), o.den = vec4(0.0);
     if (d >= 1.0 || STOP == 1) { // nothing drawn
-        px[index] = o;
+        Store(g, index, o);
         return;
     }
     const vec3 P = World(at, d);
@@ -229,7 +278,7 @@ void main() {
     if (reach != 0u) {
         // A class 3 pixel (a Sim, foliage) has no history to add frames up in (XR-05): it keeps one point of the set,
         // so a still picture is the same each frame. The others walk the set
-        const uint walk = motionClass[uint(at.y) * pc.width + uint(at.x)] == 3u ? 0u : pc.frame;
+        const uint walk = ClassAt(at) == 3u ? 0u : pc.frame;
         const uint first = pc.samples >= kSet ? 0u : (walk + Pcg(index)) % kSet;
         for (uint k = 0u; k < kMaxLamps; k++) {
             if (id[k] == kNone) continue;
@@ -266,5 +315,5 @@ void main() {
     return;
 #endif
     o.cnt = uvec4(id[0] | id[1] << 8 | id[2] << 16 | id[3] << 24, u[0] | u[1] << 8 | u[2] << 16 | u[3] << 24, dl[0] | dl[1] << 8 | dl[2] << 16 | dl[3] << 24, rays);
-    px[index] = o;
+    Store(g, index, o);
 }
