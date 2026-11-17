@@ -1,8 +1,9 @@
 0013: client.freeIdleManagedCopiesSec / freeIdleBufferCopiesSec: free only VirtualAlloc'd copies (64 KB and more); always fetch a freed MANAGED level, DISCARD or not; fail the lock when the fetch brings no whole copy instead of uploading an unfetched one; CRC32C check of texture fetches, as buffers have.
 Applies after 0001-0012 on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only).
 Also (review of dxvk-remix pull request 172): an idle pass frees only the presenting device's own copies, with a pass timer per device (two devices without D3DCREATE_MULTITHREADED share no lock); a copy is freeable only when its readback fits one server response including a wrap of the data ring (fitsOneServerResponse); D3DUSAGE_WRITEONLY buffers keep their copy (the server reads a freed copy back with D3DLOCK_READONLY).
+A fetch waits as long as every other read from the server (commandTimeout and its retries, not ackTimeout). A lock whose fetch timed out fails with a null pointer, and the late answer is read and dropped when it reaches the head of the queue (Bridge::abandonResponse), so later waits neither stall behind it nor take it for their own. Test hook debugDelayFirstReadbackMs (server, off) holds the first surface readback; test: test/rtx/unit/test_idle_copy_device.cpp.
 diff --git a/bridge/src/client/d3d9_device.cpp b/bridge/src/client/d3d9_device.cpp
-index 205700c1..fea04cdd 100644
+index 33e64036..1cb88a78 100644
 --- a/bridge/src/client/d3d9_device.cpp
 +++ b/bridge/src/client/d3d9_device.cpp
 @@ -539,12 +539,12 @@ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::Present(CONST RECT* pSourceRect, CONS
@@ -22,7 +23,7 @@ index 205700c1..fea04cdd 100644
  
    return m_pSwapchain->Present(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion, 0);
 diff --git a/bridge/src/client/d3d9_surface.cpp b/bridge/src/client/d3d9_surface.cpp
-index 9d102712..c70317f1 100644
+index eb6d0159..76c6ffb0 100644
 --- a/bridge/src/client/d3d9_surface.cpp
 +++ b/bridge/src/client/d3d9_surface.cpp
 @@ -33,6 +33,7 @@
@@ -91,18 +92,34 @@ index 9d102712..c70317f1 100644
    LARGE_INTEGER t0, t1, f;
    QueryPerformanceCounter(&t0);
    UID uid = 0;
-@@ -111,8 +130,9 @@ void Direct3DSurface9_LSS::fetchCopy(size_t surfaceSize) {
+@@ -109,10 +128,24 @@ void Direct3DSurface9_LSS::fetchCopy(size_t surfaceSize) {
+     ClientMessage c(Commands::IDirect3DSurface9_LockRect, getId());
+     uid = c.get_uid();
    }
-   if (Result::Success != DeviceBridge::waitForCommand(Commands::Bridge_Response, GlobalOptions::getAckTimeout(), nullptr, true, uid)) {
+-  if (Result::Success != DeviceBridge::waitForCommand(Commands::Bridge_Response, GlobalOptions::getAckTimeout(), nullptr, true, uid)) {
++  // The default wait (commandTimeout and its retries) as for every other read from the server: a stall of the server
++  // (a shader compile, a load) must not fail the lock.
++  if (Result::Success != DeviceBridge::waitForCommand(Commands::Bridge_Response, 0, nullptr, true, uid)) {
      Logger::err(format_string("[Direct3DSurface9_LSS] fetching the freed copy of surface [%p] failed: no response from server", this));
 -    return;
++    // The answer can still come; it is read and dropped then (same layout as below).
++    DeviceBridge::abandonResponse(uid, []() {
++      if (SUCCEEDED((HRESULT) DeviceBridge::get_data())) {
++        void* pData = nullptr;
++        DeviceBridge::get_data();
++        DeviceBridge::get_data();
++        DeviceBridge::get_data();
++        DeviceBridge::get_data(&pData);
++      }
++      DeviceBridge::consumeResponse();
++    });
 +    return false;
    }
 +  bool whole = false;
    const HRESULT hr = (HRESULT) DeviceBridge::get_data();
    if (SUCCEEDED(hr)) {
      const uint32_t w = (uint32_t) DeviceBridge::get_data();
-@@ -129,6 +149,15 @@ void Direct3DSurface9_LSS::fetchCopy(size_t surfaceSize) {
+@@ -129,6 +162,15 @@ void Direct3DSurface9_LSS::fetchCopy(size_t surfaceSize) {
        }
      }
      memcpy(m_shadow.get(), pData, std::min(pulled, surfaceSize));
@@ -118,7 +135,7 @@ index 9d102712..c70317f1 100644
    } else {
      Logger::err(format_string("[Direct3DSurface9_LSS] fetching the freed copy of surface [%p] failed: hr 0x%08x", this, hr));
    }
-@@ -137,6 +166,7 @@ void Direct3DSurface9_LSS::fetchCopy(size_t surfaceSize) {
+@@ -137,6 +179,7 @@ void Direct3DSurface9_LSS::fetchCopy(size_t surfaceSize) {
    QueryPerformanceFrequency(&f);
    bridge_util::perf::g_pool[17]++;
    bridge_util::perf::g_pool[18] += (t1.QuadPart - t0.QuadPart) * 1000000 / f.QuadPart;
@@ -126,7 +143,16 @@ index 9d102712..c70317f1 100644
  }
  
  HRESULT Direct3DSurface9_LSS::QueryInterface(REFIID riid, LPVOID* ppvObj) {
-@@ -321,18 +351,25 @@ bool Direct3DSurface9_LSS::lock(D3DLOCKED_RECT& lockedRect, const RECT* pRect, c
+@@ -216,6 +259,8 @@ HRESULT Direct3DSurface9_LSS::LockRect(D3DLOCKED_RECT* pLockedRect, CONST RECT*
+   {
+     BRIDGE_PARENT_DEVICE_LOCKGUARD();
+     if (!lock(*pLockedRect, pRect, Flags)) {
++      // A caller that writes without testing the result faults on null, after the log line, not in an old copy.
++      pLockedRect->pBits = nullptr;
+       std::stringstream ss;
+       ss << "[Direct3DSurface9_LSS][LockRect] Failed!";
+       Logger::err(ss.str());
+@@ -321,18 +366,25 @@ bool Direct3DSurface9_LSS::lock(D3DLOCKED_RECT& lockedRect, const RECT* pRect, c
      const bool newCopy = !m_shadow;
      if (!m_shadow) {
        uint8_t* p = nullptr;
@@ -154,7 +180,7 @@ index 9d102712..c70317f1 100644
            std::lock_guard<std::mutex> lock(s_managedCopiesLock);
            s_managedCopies.insert(this);
          }
-@@ -340,9 +377,6 @@ bool Direct3DSurface9_LSS::lock(D3DLOCKED_RECT& lockedRect, const RECT* pRect, c
+@@ -340,9 +392,6 @@ bool Direct3DSurface9_LSS::lock(D3DLOCKED_RECT& lockedRect, const RECT* pRect, c
        if (m_copyFreed) {
          m_copyFreed = false;
          bridge_util::perf::g_pool[16] -= surfaceSize;
@@ -165,7 +191,7 @@ index 9d102712..c70317f1 100644
        Logger::trace(format_string("Allocated a shadow for surface [%p] "
                                    "(size: %zd, total surface shadow size: %zd)",
 diff --git a/bridge/src/client/d3d9_surface.h b/bridge/src/client/d3d9_surface.h
-index 91997f66..996bc033 100644
+index 8b003d15..a1cb8d68 100644
 --- a/bridge/src/client/d3d9_surface.h
 +++ b/bridge/src/client/d3d9_surface.h
 @@ -29,6 +29,7 @@
@@ -197,7 +223,7 @@ index 91997f66..996bc033 100644
  
  private:
 diff --git a/bridge/src/client/d3d9_util.h b/bridge/src/client/d3d9_util.h
-index 84722102..02debd42 100644
+index 2ef0ed48..00b21fc3 100644
 --- a/bridge/src/client/d3d9_util.h
 +++ b/bridge/src/client/d3d9_util.h
 @@ -132,6 +132,19 @@ static void SetWindowMode(HWND hwnd, const bool windowed, const LONG width, cons
@@ -221,7 +247,7 @@ index 84722102..02debd42 100644
    const uint32_t maxDimension = std::max(depth, std::max(width, height));
    return static_cast<uint32_t>(std::ceil(std::log2(maxDimension))) + 1;
 diff --git a/bridge/src/client/lockable_buffer.h b/bridge/src/client/lockable_buffer.h
-index e327da57..bb452b7b 100644
+index 1ab88673..0ff6145d 100644
 --- a/bridge/src/client/lockable_buffer.h
 +++ b/bridge/src/client/lockable_buffer.h
 @@ -30,6 +30,7 @@
@@ -256,9 +282,23 @@ index e327da57..bb452b7b 100644
      LARGE_INTEGER t0, t1, f;
      QueryPerformanceCounter(&t0);
      UID uid = 0;
-@@ -120,16 +125,18 @@ class LockableBuffer: public Direct3DResource9_LSS<T> {
+@@ -116,20 +121,31 @@ class LockableBuffer: public Direct3DResource9_LSS<T> {
+       ClientMessage c(LockCmd, getId(), Commands::FlagBits::ReturnData);
+       uid = c.get_uid();
+     }
+-    if (Result::Success != DeviceBridge::waitForCommand(Commands::Bridge_Response, GlobalOptions::getAckTimeout(), nullptr, true, uid)) {
++    // The default wait (commandTimeout and its retries) as for every other read from the server.
++    if (Result::Success != DeviceBridge::waitForCommand(Commands::Bridge_Response, 0, nullptr, true, uid)) {
        Logger::err(format_string("[LockableBuffer] fetching the freed copy of %s buffer [%p] failed: no response from server",
                                  bIsVertexBuffer ? "vertex" : "index", this));
++      // The answer can still come; it is read and dropped then (same layout as below).
++      DeviceBridge::abandonResponse(uid, []() {
++        if (SUCCEEDED((HRESULT) DeviceBridge::get_data())) {
++          void* pData = nullptr;
++          DeviceBridge::get_data(&pData);
++        }
++        DeviceBridge::consumeResponse();
++      });
        bridge_util::perf::g_pool[24]++;
 -      return;
 +      return false;
@@ -277,7 +317,7 @@ index e327da57..bb452b7b 100644
      }
      DeviceBridge::consumeResponse();
      if (!ok) {
-@@ -144,6 +151,7 @@ class LockableBuffer: public Direct3DResource9_LSS<T> {
+@@ -144,6 +160,7 @@ class LockableBuffer: public Direct3DResource9_LSS<T> {
      QueryPerformanceFrequency(&f);
      bridge_util::perf::g_pool[21]++;
      bridge_util::perf::g_pool[22] += (t1.QuadPart - t0.QuadPart) * 1000000 / f.QuadPart;
@@ -285,7 +325,7 @@ index e327da57..bb452b7b 100644
    }
    inline static size_t g_totalBufferShadow = 0;
  
-@@ -165,7 +173,7 @@ private:
+@@ -165,7 +182,7 @@ private:
  
    void initShadowMem() {
      uint8_t* p = nullptr;
@@ -294,7 +334,7 @@ index e327da57..bb452b7b 100644
        p = static_cast<uint8_t*>(VirtualAlloc(nullptr, m_desc.Size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));  // zeroed
      }
      m_shadow.get_deleter().virtualAlloc = p != nullptr;  // m_shadow is empty here, so no old block is freed the wrong way
-@@ -220,18 +228,22 @@ protected:
+@@ -220,18 +237,22 @@ protected:
    }
  
  public:
@@ -324,7 +364,16 @@ index e327da57..bb452b7b 100644
          b->m_freedCrc = crcOf(b->m_shadow.get(), b->m_desc.Size);
          b->noteCopyGone();
          b->m_shadow.reset();
-@@ -288,7 +300,12 @@ protected:
+@@ -252,6 +273,8 @@ protected:
+     if (ppbData == nullptr) {
+       return D3DERR_INVALIDCALL;
+     }
++    // Null until the lock succeeds: a caller that writes without testing the result faults on null, not in an old copy.
++    *ppbData = nullptr;
+     if (flags & D3DLOCK_READONLY) {
+       bridge_util::perf::g_shadow[3]++;
+     }
+@@ -288,7 +311,12 @@ protected:
      } else {
        if (m_copyFreed) {
          initShadowMem();
@@ -338,7 +387,7 @@ index e327da57..bb452b7b 100644
          m_copyFreed = false;
          bridge_util::perf::g_pool[20] -= m_desc.Size;
        }
-@@ -331,7 +348,8 @@ protected:
+@@ -331,7 +359,8 @@ protected:
      m_lockInfos.pop();
      if (m_shadow && freesIdleCopy()) {
        m_lastLockMs = GetTickCount64();
@@ -348,3 +397,323 @@ index e327da57..bb452b7b 100644
          std::lock_guard<std::mutex> lock(s_idleLock);
          s_idle.insert(this);
          m_inIdleSet = true;
+diff --git a/bridge/src/server/main.cpp b/bridge/src/server/main.cpp
+index fb6c57f4..a82762d8 100644
+--- a/bridge/src/server/main.cpp
++++ b/bridge/src/server/main.cpp
+@@ -2649,6 +2649,11 @@ void ProcessDeviceCommandQueue() {
+         // Currently we only recieve calls for LockRect in cases where backbuffer data is to be copied for screenshots
+         GET_HND(pHandle);
+         const auto pSurface = (IDirect3DSurface9*) gpD3DResources[pHandle];
++        static bool s_readbackDelayed = false;
++        if (!s_readbackDelayed && GlobalOptions::getDebugDelayFirstReadbackMs()) {
++          s_readbackDelayed = true;
++          Sleep(GlobalOptions::getDebugDelayFirstReadbackMs());
++        }
+         HRESULT hresult = ReturnSurfaceDataToClient(pSurface, S_OK, currentUID);
+         assert(SUCCEEDED(hresult));
+         break;
+diff --git a/bridge/src/util/config/global_options.h b/bridge/src/util/config/global_options.h
+index 6bb72ed4..33d80432 100644
+--- a/bridge/src/util/config/global_options.h
++++ b/bridge/src/util/config/global_options.h
+@@ -196,6 +196,10 @@ public:
+     return get().ipcSpinMicroseconds;
+   }
+ 
++  static uint32_t getDebugDelayFirstReadbackMs() {
++    return get().debugDelayFirstReadbackMs;
++  }
++
+   static bool getUseSharedHeap() {
+     return get().useSharedHeap;
+   }
+@@ -421,6 +425,10 @@ private:
+     // A command queue wait spins this long before it blocks on its wake event.
+     ipcSpinMicroseconds = bridge_util::Config::getOption<uint32_t>("ipcSpinMicroseconds", 100);
+ 
++    // Test hook (test_idle_copy_device): the server holds its answer to the first surface readback for this many
++    // milliseconds, as a stalled server does. 0 = off. Leave it off for play.
++    debugDelayFirstReadbackMs = bridge_util::Config::getOption<uint32_t>("debugDelayFirstReadbackMs", 0);
++
+     // If this is enabled, timeouts will be set to their maximum value (INFINITE which is the max uint32_t) 
+     // and retries will be set to 1 while the application is being launched with or attached to by a debugger
+     disableTimeoutsWhenDebugging = bridge_util::Config::getOption<bool>("disableTimeoutsWhenDebugging", false);
+@@ -499,6 +507,7 @@ private:
+   bool commandBatchingEnabled;
+   uint32_t perfLogIntervalFrames;
+   uint32_t ipcSpinMicroseconds;
++  uint32_t debugDelayFirstReadbackMs;
+   bool disableTimeoutsWhenDebugging;
+   bool disableTimeouts;
+   bool useSharedHeap;
+diff --git a/bridge/src/util/util_bridgecommand.cpp b/bridge/src/util/util_bridgecommand.cpp
+index 05f78a15..e2655009 100644
+--- a/bridge/src/util/util_bridgecommand.cpp
++++ b/bridge/src/util/util_bridgecommand.cpp
+@@ -193,6 +193,22 @@ DECL_BRIDGE_FUNC(bridge_util::Result, waitForCommand, const Commands::D3D9Comman
+ 
+     case Result::Success:
+     {
++      if (header.command == Commands::Bridge_Response) {
++        void (*drain)() = nullptr;
++        {
++          std::lock_guard<std::mutex> lock(abandonedLock());
++          const auto it = abandoned().find(header.pHandle);
++          if (it != abandoned().end()) {
++            drain = it->second;
++            abandoned().erase(it);
++          }
++        }
++        if (drain != nullptr) {
++          Logger::warn(format_string("Dropped the late response %u of a wait that timed out.", (uint32_t) header.pHandle));
++          drain();
++          break;
++        }
++      }
+       bool uidVerified = true;
+       if (verifyUID) {
+         if (header.pHandle != uidToVerify) {
+diff --git a/bridge/src/util/util_bridgecommand.h b/bridge/src/util/util_bridgecommand.h
+index f976b8ef..69950486 100644
+--- a/bridge/src/util/util_bridgecommand.h
++++ b/bridge/src/util/util_bridgecommand.h
+@@ -21,6 +21,9 @@
+  */
+ #pragma once
+ 
++#include <mutex>
++#include <unordered_map>
++
+ #include "config/global_options.h"
+ 
+ #include "util_common.h"
+@@ -183,6 +186,24 @@ public:
+   // Waits for a command to appear in the command queue. Upon success the command will NOT be removed from queue
+   // and client MUST pull the command header manually by using pop_front() or pull() methods. The queue will enter
+   // into an unrecoverable state otherwise.
++  // A response its caller stopped waiting for (a fetch that timed out). The server still sends it, so waitForCommand
++  // hands it to drain, which reads its data and consumes it, once it reaches the head of the queue: a later wait neither
++  // stalls behind it nor takes it for its own answer.
++  static void abandonResponse(const UID uid, void (*drain)()) {
++    std::lock_guard<std::mutex> lock(abandonedLock());
++    abandoned()[uid] = drain;
++  }
++
++  static std::unordered_map<UID, void (*)()>& abandoned() {
++    static std::unordered_map<UID, void (*)()> s_abandoned;
++    return s_abandoned;
++  }
++
++  static std::mutex& abandonedLock() {
++    static std::mutex s_lock;
++    return s_lock;
++  }
++
+   static bridge_util::Result waitForCommand(const Commands::D3D9Command& command = Commands::Bridge_Any,
+                                             DWORD overrideTimeoutMS = 0,
+                                             std::atomic<bool>* const pbEarlyOutSignal = nullptr, bool verifyUID = false, UID uidToVerify=0);
+diff --git a/bridge/test/rtx/unit/meson.build b/bridge/test/rtx/unit/meson.build
+index 25ceb3b0..06b357c6 100644
+--- a/bridge/test/rtx/unit/meson.build
++++ b/bridge/test/rtx/unit/meson.build
+@@ -67,7 +67,7 @@ endif
+ 
+ # Remix API Bridge App Tests
+ # Each x86 app runs against the client and server from a regular bridge build in _output.
+-bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device' ]
++bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device', 'idle_copy_device' ]
+ if (cpu_family == 'x86')
+ foreach name : bridge_app_tests
+   tests += executable(
+diff --git a/bridge/test/rtx/unit/test_idle_copy_device.cpp b/bridge/test/rtx/unit/test_idle_copy_device.cpp
+new file mode 100644
+index 00000000..5f8279bc
+--- /dev/null
++++ b/bridge/test/rtx/unit/test_idle_copy_device.cpp
+@@ -0,0 +1,185 @@
++// Drives the idle copy fetch of the bridge client (patches 0003, 0008, 0013) through the built bridge pair: the client
++// frees the copy of a MANAGED texture level and of a static vertex buffer that were not locked for a while, and the
++// next lock fetches it back from the server.
++// The server holds the first surface readback for kDelayMs (debugDelayFirstReadbackMs), as a stalled server does.
++// With bridge timeouts on (commandTimeout below) that fetch times out: the lock must fail cleanly with a null pointer,
++// and the next lock of the same level must drop the late answer and fetch the right bytes. With timeouts off the
++// first lock waits and succeeds.
++
++#include <cstdio>
++#include <cstring>
++#include <fstream>
++#include <sstream>
++#include <stdexcept>
++#include <string>
++
++#include <wrl/client.h>
++
++#include "test_remix_api_bridge_app.h"
++
++using Microsoft::WRL::ComPtr;
++using namespace bridge_app_test;
++
++namespace {
++  constexpr UINT kSize = 64;
++  constexpr UINT kTextureSize = 256;       // 256 KB in A8R8G8B8: a VirtualAlloc'd copy, which an idle pass frees
++  constexpr UINT kBufferSize = 128 * 1024; // between 64 KB and 4 MB: a freeable buffer copy
++  constexpr DWORD kDelayMs = 15000;
++
++  void check(const HRESULT result, const char* pCall) {
++    if (FAILED(result)) {
++      std::printf("FAILED: %s returned 0x%08lX.\n", pCall, static_cast<unsigned long>(result));
++      throw std::runtime_error(pCall);
++    }
++  }
++
++  void expect(const bool condition, const char* pWhat) {
++    std::printf("%s: %s\n", condition ? "ok" : "FAILED", pWhat);
++    if (!condition) {
++      throw std::runtime_error(pWhat);
++    }
++  }
++
++  uint32_t pattern(const uint32_t i, const uint32_t seed) {
++    return (i + seed) * 2654435761u;
++  }
++
++  bool holds(const uint8_t* pData, const UINT pitch, const UINT width, const UINT rows, const uint32_t seed) {
++    for (UINT y = 0; y < rows; y++) {
++      const uint32_t* const pRow = reinterpret_cast<const uint32_t*>(pData + size_t(y) * pitch);
++      for (UINT x = 0; x < width; x++) {
++        if (pRow[x] != pattern(y * width + x, seed)) {
++          return false;
++        }
++      }
++    }
++    return true;
++  }
++
++  bool timeoutsDisabled() {
++    std::ifstream config(".trex/bridge.conf");
++    std::stringstream text;
++    text << config.rdbuf();
++    return text.str().find("disableTimeouts = True") != std::string::npos;
++  }
++}
++
++int main() {
++  std::setvbuf(stdout, nullptr, _IONBF, 0);
++  const bool noTimeouts = timeoutsDisabled();
++  std::printf("TEST: idle copy fetch through the bridge, timeouts %s\n", noTimeouts ? "off" : "on");
++
++  WNDCLASSW windowClass = {};
++  windowClass.lpfnWndProc = DefWindowProcW;
++  windowClass.hInstance = GetModuleHandleW(nullptr);
++  windowClass.lpszClassName = L"BridgeIdleCopyTest";
++  RegisterClassW(&windowClass);
++  const HWND hWnd = CreateWindowExW(0, windowClass.lpszClassName, L"", WS_OVERLAPPEDWINDOW, 0, 0, kSize, kSize,
++                                    nullptr, nullptr, windowClass.hInstance, nullptr);
++  if (hWnd == nullptr) {
++    return 1;
++  }
++
++  bool passed = false;
++  try {
++    {
++      std::ofstream config(".trex/bridge.conf", std::ios::app);
++      config << "client.freeIdleManagedCopiesSec = 1\n";
++      config << "client.freeIdleManagedCopiesMs = 100\n";
++      config << "client.freeIdleBufferCopiesSec = 1\n";
++      config << "debugDelayFirstReadbackMs = " << kDelayMs << "\n";
++      // With timeouts on, a wait gives up after 300 peeks of 20 ms (about 10 s at the 15.6 ms tick), before the held
++      // readback is answered.
++      config << "commandTimeout = 20\n";
++    }
++    const HMODULE hClient = loadBridgeClient();
++    if (hClient == nullptr) {
++      throw std::runtime_error("loadBridgeClient");
++    }
++    const auto pfnCreate = reinterpret_cast<PFN_Direct3DCreate9>(GetProcAddress(hClient, "Direct3DCreate9"));
++    ComPtr<IDirect3D9> pD3D;
++    pD3D.Attach(pfnCreate != nullptr ? pfnCreate(D3D_SDK_VERSION) : nullptr);
++    if (pD3D == nullptr) {
++      throw std::runtime_error("Direct3DCreate9");
++    }
++    D3DPRESENT_PARAMETERS present = {};
++    present.Windowed = TRUE;
++    present.SwapEffect = D3DSWAPEFFECT_DISCARD;
++    present.BackBufferFormat = D3DFMT_UNKNOWN;
++    present.BackBufferWidth = kSize;
++    present.BackBufferHeight = kSize;
++    present.hDeviceWindow = hWnd;
++    ComPtr<IDirect3DDevice9> pDevice;
++    // As the game: no D3DCREATE_MULTITHREADED.
++    check(pD3D->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hWnd, D3DCREATE_SOFTWARE_VERTEXPROCESSING, &present, &pDevice),
++          "CreateDevice");
++
++    ComPtr<IDirect3DTexture9> pTexture;
++    ComPtr<IDirect3DVertexBuffer9> pBuffer;
++    check(pDevice->CreateTexture(kTextureSize, kTextureSize, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &pTexture, nullptr), "CreateTexture");
++    check(pDevice->CreateVertexBuffer(kBufferSize, 0, 0, D3DPOOL_MANAGED, &pBuffer, nullptr), "CreateVertexBuffer");
++    D3DLOCKED_RECT rect = {};
++    check(pTexture->LockRect(0, &rect, nullptr, 0), "LockRect");
++    for (UINT y = 0; y < kTextureSize; y++) {
++      for (UINT x = 0; x < kTextureSize; x++) {
++        reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(rect.pBits) + size_t(y) * rect.Pitch)[x] = pattern(y * kTextureSize + x, 1);
++      }
++    }
++    check(pTexture->UnlockRect(0), "UnlockRect");
++    void* pData = nullptr;
++    check(pBuffer->Lock(0, 0, &pData, 0), "Lock");
++    for (UINT i = 0; i < kBufferSize / 4; i++) {
++      static_cast<uint32_t*>(pData)[i] = pattern(i, 2);
++    }
++    check(pBuffer->Unlock(), "Unlock");
++
++    // Idle passes run in Present: past both thresholds the client copies are freed.
++    const auto frames = [&](const DWORD ms) {
++      const ULONGLONG end = GetTickCount64() + ms;
++      while (GetTickCount64() < end) {
++        check(pDevice->Clear(0, nullptr, D3DCLEAR_TARGET, 0xff102030, 1.0f, 0), "Clear");
++        check(pDevice->Present(nullptr, nullptr, nullptr, nullptr), "Present");
++        Sleep(10);
++      }
++    };
++    frames(2500);
++
++    // The first fetch: the server holds its answer.
++    rect.pBits = reinterpret_cast<void*>(0x1);
++    const ULONGLONG lockStart = GetTickCount64();
++    const HRESULT first = pTexture->LockRect(0, &rect, nullptr, D3DLOCK_READONLY);
++    std::printf("first lock after the idle passes: 0x%08lX, pBits %p, %llu ms\n", static_cast<unsigned long>(first), rect.pBits,
++                GetTickCount64() - lockStart);
++    if (noTimeouts) {
++      expect(SUCCEEDED(first) && holds(static_cast<const uint8_t*>(rect.pBits), rect.Pitch, kTextureSize, kTextureSize, 1),
++             "timeouts off: the held fetch is waited for and brings the level back");
++      check(pTexture->UnlockRect(0), "UnlockRect");
++    } else {
++      expect(first == E_FAIL && rect.pBits == nullptr, "timeouts on: the held fetch fails the lock with a null pointer");
++      // The server is still holding the answer; nothing waits on it meanwhile.
++      Sleep(kDelayMs);
++      rect.pBits = nullptr;
++      check(pTexture->LockRect(0, &rect, nullptr, D3DLOCK_READONLY), "LockRect after the timed-out fetch");
++      expect(holds(static_cast<const uint8_t*>(rect.pBits), rect.Pitch, kTextureSize, kTextureSize, 1),
++             "timeouts on: the next lock drops the late answer and fetches the right bytes");
++      check(pTexture->UnlockRect(0), "UnlockRect");
++    }
++
++    pData = nullptr;
++    check(pBuffer->Lock(0, 0, &pData, D3DLOCK_READONLY), "Lock of the freed buffer");
++    expect(holds(static_cast<const uint8_t*>(pData), kBufferSize, kBufferSize / 4, 1, 2), "the freed buffer copy comes back with the right bytes");
++    check(pBuffer->Unlock(), "Unlock");
++    frames(200);
++    passed = true;
++  } catch (const std::exception& error) {
++    std::printf("FAILED: %s\n", error.what());
++  }
++  if (!passed) {
++    // A failed run can leave the bridge waiting, so it does not unwind.
++    std::printf("FAILED\n");
++    TerminateProcess(GetCurrentProcess(), 1);
++  }
++  DestroyWindow(hWnd);
++  std::printf("PASSED\n");
++  return 0;
++}
