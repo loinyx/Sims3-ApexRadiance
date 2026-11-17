@@ -67,7 +67,7 @@ float4 gA : register(c96);  // lamps, threshold, fade (0/1), reach (0/1)
 float4 gB : register(c97);  // lamp radius (m), face size, 1 / atlas width, 1 / atlas height
 float4 gC : register(c98);  // half texel of the map at the receiver (m), normal offset (texels), bias (m), bias (texels)
 float4 gD : register(c99);  // 1 / far, far, 1 / map width, 1 / map height
-float4 gE : register(c100); // first batch (1: no sum before), mask (0/1), not used, debug lamp (-1 none)
+float4 gE : register(c100); // first batch (1: no sum before), mask (0/1), room 0 (AccPhys: no lamp behind a wall's face), debug lamp (-1 none)
 sampler2D sAtlas : register(s0);
 sampler2D sAcc : register(s1);
 
@@ -1011,8 +1011,12 @@ float4 AccPhys(TexelIn i, float2 vpos, int kSearch, int kEmit, int kWalk, bool a
         const float pn = atMask ? floor(T3.x * 0.5) : 0.0, t3 = T3.x - 2.0 * pn;
         T3 = T3.yzwx;
         const float4 t = TableAt(l, slot);
+        // room 0's wall texels sit on the wall's line, where the occluder walls never shadow them, and an area light has no N.l:
+        // a room's lamp 1 m behind the facade lit its outer face beside the windows (and the window holes' hidden texels). Room 0
+        // is drawn from its map's own points (AccPhysPS / AccPhysFastPS), never at a kept map's (atMask: the test compiles out there)
         const float3 law = LawAt(lamp, P, N, wallReach0 * t.y);
-        [branch] if (l < count && t.x != 0 && (law.b + law.g) + law.r >= thr) { // (share <= 1: under thr the lamp adds nothing, no Shadow to pay for)
+        const bool behind = !atMask && gE.z > 0.5 && abs(N.y) < 0.5 && dot(lamp.pos.xyz - P, N) < -0.01;
+        [branch] if (l < count && t.x != 0 && (law.b + law.g) + law.r >= thr && !behind) { // (share <= 1: under thr the lamp adds nothing, no Shadow to pay for)
             float sh = Shadow(lamp, atMask ? i.mask.xyz : P, N, kSearch, kEmit, kWalk, i.mask.w); // (gF.y: a room's points, RtLampProxy::IntoRoom)
             if (tested) {
                 const float prod = sh * t3; // (t3 with its furniture fill: FillT3)

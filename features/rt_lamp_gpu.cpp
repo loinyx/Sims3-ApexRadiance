@@ -978,7 +978,8 @@ bool Engine::AccumulateRlg(IDirect3DDevice9* dev, const Map& m, const RtLampMode
     c[97][0] = p.radius, c[97][1] = static_cast<float>(face_), c[97][2] = 1.0f / static_cast<float>(6 * face_ * tileCols_), c[97][3] = 1.0f / static_cast<float>(tilePer_ * face_);
     c[98][0] = p.aa, c[98][1] = p.normalOffset, c[98][2] = p.biasM, c[98][3] = p.biasTexels;
     c[99][0] = 1.0f / p.farDist, c[99][1] = p.farDist, c[99][2] = 1.0f / static_cast<float>(scratchW_), c[99][3] = 1.0f / static_cast<float>(scratchH_);
-    c[100][0] = first ? 1.0f : 0.0f, c[100][1] = p.mask ? 1.0f : 0.0f, c[100][3] = -1.0f;
+    // z: room 0 (the outside), whose wall texels never take a lamp behind their face (AccPhys)
+    c[100][0] = first ? 1.0f : 0.0f, c[100][1] = p.mask ? 1.0f : 0.0f, c[100][2] = physX ? 1.0f : 0.0f, c[100][3] = -1.0f;
     c[102][0] = 1.0f / static_cast<float>(kTableCols), c[102][1] = 1.0f / static_cast<float>(tableRows_);
     c_.SetPsConst(dev, 0, &c[0][0], 103);
     c_.SetTexture(dev, 0, tiles_);
