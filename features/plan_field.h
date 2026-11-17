@@ -92,6 +92,43 @@ struct Field {
     }
 };
 
+constexpr float kNone = std::numeric_limits<float>::infinity();
+struct Seed {
+    float x, z; // pixel space; x = kNone: no seed
+};
+inline float Dist2(const Seed& sd, int ix, int iz) {
+    const float dx = sd.x - (static_cast<float>(ix) + 0.5f), dz = sd.z - (static_cast<float>(iz) + 0.5f);
+    return sd.x == kNone ? kNone : dx * dx + dz * dz;
+}
+// One band's plan before the flood: the seeds of the walls solid at height y, in a w x h pixel buffer (the GPU port uploads these)
+inline void SeedBand(const Story& s, int w, int h, int px, float y, std::vector<Seed>& a) {
+    a.assign(static_cast<size_t>(w) * h, Seed{kNone, kNone});
+    for (const Edge& e : s.edges) { // the plan: four samples a pixel along each wall, the nearest to its pixel's centre kept
+        const float x0 = e.x0 * px + kPad, z0 = e.z0 * px + kPad, dx = (e.x1 - e.x0) * px, dz = (e.z1 - e.z0) * px;
+        const float lenPx = std::max(std::hypot(dx, dz), 1e-6f);
+        const int m = std::max(1, static_cast<int>(std::ceil(lenPx * 4.0f)));
+        // (a wall's end at an opening is drawn kErode short: the trace blocks within kHit of a seed, which narrows the opening)
+        const float du = kErode / lenPx;
+        for (int i = 0; i <= m; i++) {
+            const float u = static_cast<float>(i) / static_cast<float>(m);
+            if (!Solid(e, u, y) || !Solid(e, std::max(u - du, 0.0f), y) || !Solid(e, std::min(u + du, 1.0f), y)) continue;
+            const Seed sd{x0 + dx * u, z0 + dz * u};
+            const int ix = std::clamp(static_cast<int>(sd.x), 0, w - 1), iz = std::clamp(static_cast<int>(sd.z), 0, h - 1);
+            Seed& at = a[static_cast<size_t>(iz) * w + ix];
+            if (Dist2(sd, ix, iz) < Dist2(at, ix, iz)) at = sd;
+        }
+    }
+}
+// The steps of the flood passes: 1, N/2 .. 1, 1
+inline std::vector<int> JumpSteps(int w, int h) {
+    int top = 1;
+    while (top * 2 < std::max(w, h)) top *= 2;
+    std::vector<int> steps = {1};
+    for (int st = top; st >= 1; st /= 2) steps.push_back(st);
+    steps.push_back(1);
+    return steps;
+}
+
 inline Field BuildField(const Story& s, const std::vector<float>& cuts = kCuts, int px = kPx) {
     Field f;
     const int bands = static_cast<int>(cuts.size()) + 1;
@@ -99,38 +136,12 @@ inline Field BuildField(const Story& s, const std::vector<float>& cuts = kCuts, 
     f.w = s.w * px + 2 * kPad, f.h = s.h * px + 2 * kPad;
     const size_t n = static_cast<size_t>(f.w) * f.h;
     f.d.assign(n * bands, 0.0f);
-    constexpr float kNone = std::numeric_limits<float>::infinity();
-    struct Seed {
-        float x, z; // pixel space; x = kNone: no seed
-    };
     std::vector<Seed> a(n), b(n);
-    const auto dist2 = [](const Seed& sd, int ix, int iz) {
-        const float dx = sd.x - (static_cast<float>(ix) + 0.5f), dz = sd.z - (static_cast<float>(iz) + 0.5f);
-        return sd.x == kNone ? kNone : dx * dx + dz * dz;
-    };
+    const auto dist2 = Dist2;
+    const std::vector<int> steps = JumpSteps(f.w, f.h);
     for (int band = 0; band < bands; band++) {
         const float y = BandMid(band, f.base, cuts);
-        std::fill(a.begin(), a.end(), Seed{kNone, kNone});
-        for (const Edge& e : s.edges) { // the plan: four samples a pixel along each wall, the nearest to its pixel's centre kept
-            const float x0 = e.x0 * px + kPad, z0 = e.z0 * px + kPad, dx = (e.x1 - e.x0) * px, dz = (e.z1 - e.z0) * px;
-            const float lenPx = std::max(std::hypot(dx, dz), 1e-6f);
-            const int m = std::max(1, static_cast<int>(std::ceil(lenPx * 4.0f)));
-            // (a wall's end at an opening is drawn kErode short: the trace blocks within kHit of a seed, which narrows the opening)
-            const float du = kErode / lenPx;
-            for (int i = 0; i <= m; i++) {
-                const float u = static_cast<float>(i) / static_cast<float>(m);
-                if (!Solid(e, u, y) || !Solid(e, std::max(u - du, 0.0f), y) || !Solid(e, std::min(u + du, 1.0f), y)) continue;
-                const Seed sd{x0 + dx * u, z0 + dz * u};
-                const int ix = std::clamp(static_cast<int>(sd.x), 0, f.w - 1), iz = std::clamp(static_cast<int>(sd.z), 0, f.h - 1);
-                Seed& at = a[static_cast<size_t>(iz) * f.w + ix];
-                if (dist2(sd, ix, iz) < dist2(at, ix, iz)) at = sd;
-            }
-        }
-        int top = 1;
-        while (top * 2 < std::max(f.w, f.h)) top *= 2;
-        std::vector<int> steps = {1};
-        for (int st = top; st >= 1; st /= 2) steps.push_back(st);
-        steps.push_back(1);
+        SeedBand(s, f.w, f.h, px, y, a);
         for (const int st : steps) { // one jump flooding pass: the nearest of the 9 seeds at +- st
             for (int iz = 0; iz < f.h; iz++)
                 for (int ix = 0; ix < f.w; ix++) {
