@@ -1711,7 +1711,7 @@ public sealed partial class MainWindow : Window
             // a change made since then would be undone too: asked first
             () => _ = RestoreAsync(p, ask: RestorePoints.List(g.Bin).FirstOrDefault()?.Dir != p.Dir, bar));
         else SetInfo(bar, InfoBarSeverity.Error, T("Setup could not finish"), error!);
-        if (!ok) bar.Content = ErrorLinks(); // (Copy details, Open log folder, as the dialogs have)
+        if (!ok) bar.Content = ErrorLinks(inBar: true); // (Copy details, Open log folder, as the dialogs have)
         return ok;
     }
 
@@ -1826,9 +1826,10 @@ public sealed partial class MainWindow : Window
         return p;
     }
 
-    StackPanel ErrorLinks()
+    // inBar: under an InfoBar's title, on the title's left edge (a link's own padding taken back) with the bar's bottom spacing
+    StackPanel ErrorLinks(bool inBar = false)
     {
-        var links = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        var links = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16, Margin = inBar ? new Thickness(-2, -4, 0, 14) : new Thickness(0) };
         var copy = new HyperlinkButton { Content = T("Copy details"), Padding = new Thickness(0) };
         copy.Click += (_, _) =>
         {
