@@ -8,6 +8,7 @@
 #include "apex_version.h"
 #include "build_flavor.h"
 #include "d3d9_hooks.h"
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <format>
@@ -24,6 +25,8 @@ constexpr DWORD kLogEveryMs = 10000;
 std::array<std::atomic<uint64_t>, static_cast<size_t>(Counter::Count)> g_counters{};
 std::atomic<bool> g_running{false};
 std::atomic<Backend> g_backend{Backend::D3d9};
+std::atomic<int> g_lampIndexMode{0};
+constexpr const char* kLampIndexNames[] = {"off", "compare", "draw"};
 uint64_t g_frames = 0; // render thread
 DWORD g_lastLog = 0;
 
@@ -50,6 +53,17 @@ void OnPresent() {
                                          sync, locks, diffs);
     if (cap || sync || locks || diffs) LOG_WARNING(line);
     else LOG_INFO(line);
+    // read back by the lamp-index-smoke job: unexplained must stay 0
+    if (const int mode = g_lampIndexMode.load()) {
+        const uint64_t unexplained = Value(Counter::LampIndexUnexplained);
+        const std::string li = std::format("[RealtimeGI] Lamp index counters: mode={} builds={} cells={} draws={} fallbacks={} compared={} mismatches: offCentre={} "
+                                           "height={} cellFull={} group={} unexplained={}",
+                                           kLampIndexNames[mode], Value(Counter::LampIndexBuilds), Value(Counter::LampIndexCells), Value(Counter::LampIndexDraws),
+                                           Value(Counter::LampIndexFallbacks), Value(Counter::LampIndexCompared), Value(Counter::LampIndexOffCentre),
+                                           Value(Counter::LampIndexHeight), Value(Counter::LampIndexCellFull), Value(Counter::LampIndexGroup), unexplained);
+        if (unexplained) LOG_WARNING(li);
+        else LOG_INFO(li);
+    }
 }
 
 } // namespace
@@ -57,6 +71,7 @@ void OnPresent() {
 void Add(Counter c, uint32_t n) { g_counters[static_cast<size_t>(c)].fetch_add(n, std::memory_order_relaxed); }
 uint64_t Value(Counter c) { return g_counters[static_cast<size_t>(c)].load(std::memory_order_relaxed); }
 bool Running() { return g_running.load(); }
+int LampIndexMode() { return g_lampIndexMode.load(std::memory_order_relaxed); }
 Backend InUse() { return g_backend.load(); }
 
 bool Start(const Options& o, std::string* error) {
@@ -74,6 +89,8 @@ bool Start(const Options& o, std::string* error) {
         return false;
     }
     g_running = true;
+    g_lampIndexMode = kDevToolsBuild ? std::clamp(o.lampIndex, 0, 2) : 0;
+    if (g_lampIndexMode.load()) LOG_INFO(std::format("[RealtimeGI] Lamp index: mode={}", kLampIndexNames[g_lampIndexMode.load()]));
     // read back by the test harness (design.md section 6); lots = GI lots covered now (the lamp snapshot, S1-02, adds them)
     LOG_INFO(std::format("[RealtimeGI] On: lots=0 cap={} scale={} indirect={} backend={}", kCapNames[o.solveCap], o.scale, kIndirectNames[o.indirect],
                          kBackendNames[static_cast<int>(backend)]));
@@ -86,6 +103,7 @@ bool Start(const Options& o, std::string* error) {
 void Stop() {
     if (!g_running.load()) return;
     D3D9Hooks::UnregisterAll(kPatchName);
+    g_lampIndexMode = 0;
     g_running = false;
     LOG_INFO("[RealtimeGI] Off");
 }
@@ -104,13 +122,16 @@ class RealtimeGiPatch : public ApexPatch {
         RegisterNamedEnumSetting(&solveCap_, "solveCap", 0, "The game's room solves on GI lots", {std::begin(RealtimeGI::kCapNames), std::end(RealtimeGI::kCapNames)});
         RegisterNamedEnumSetting(&scale_, "bufferScale", 0, "Light buffer scale", {"1", "2", "4"});
         RegisterNamedEnumSetting(&indirect_, "indirect", 0, "Indirect light", {std::begin(RealtimeGI::kIndirectNames), std::end(RealtimeGI::kIndirectNames)});
+        // (S3-02b) developer builds only; ints, not names: 0 off, 1 compare, 2 draw
+        if constexpr (kDevToolsBuild)
+            RegisterIntSetting(&lampIndex_, "lampIndex", 0, 0, 2, "Lamp index cells: 0 off, 1 compare each per-draw pick with its cell, 2 draw from the cells");
     }
 
     bool Install() override {
         if (isEnabled) return true;
         lastError.clear();
         std::string error;
-        const RealtimeGI::Options o{lots_, solveCap_, 1 << scale_, indirect_, static_cast<RealtimeGI::Backend>(backend_)};
+        const RealtimeGI::Options o{lots_, solveCap_, 1 << scale_, indirect_, static_cast<RealtimeGI::Backend>(backend_), lampIndex_};
         if (!RealtimeGI::Start(o, &error)) return Fail(error);
         isEnabled = true;
         return true;
@@ -125,7 +146,7 @@ class RealtimeGiPatch : public ApexPatch {
     }
 
   private:
-    int backend_ = 0, lots_ = 0, solveCap_ = 0, scale_ = 0, indirect_ = 0;
+    int backend_ = 0, lots_ = 0, solveCap_ = 0, scale_ = 0, indirect_ = 0, lampIndex_ = 0;
 };
 
 } // namespace

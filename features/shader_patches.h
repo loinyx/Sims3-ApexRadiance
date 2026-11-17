@@ -195,11 +195,18 @@ struct InstancedPatch {
     DWORD groundWeightConst = 0; // (a, b, 1, 0): atlas weight sat(N.y * a + b); (1, 0) with lamps, (0, 1) = every face (as before)
     DWORD coneConst = 0;         // per lamp k: its cones at coneConst + 2k / + 2k + 1 (= lampConst + 2 kObjectPixelLamps); the lamp colour .w = its spill
     DWORD reachConst = 0;        // reach variant: the 2 r0^2 rows (= coneConst + 2 kObjectPixelLamps); 0 = the first law
-    DWORD capConst = 0;          // optional two projection rows per lamp, then one shared softness row
-    int shadeSampler = -1;       // the ground lamp shade: the lot mask (atlasSampler + 1); -1 = none
+    DWORD capConst = 0;          // optional two projection rows per lamp, then one shared softness row (index: the softness row alone)
+    int shadeSampler = -1;       // the ground lamp shade: the lot mask (atlasSampler + 1, + 2 with index); -1 = none
     int shadeConst = -1;         // its 3 rows, right after the cones (first law) or the reach rows
+    DWORD indexSampler = 0;      // index: the lamp index texture (atlasSampler + 1); 0 = a per-draw copy
 };
-bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach = false, bool groundShade = true, bool capShadows = false);
+// index (real-time GI S3-02b, lamp_index.h): the per-pixel lamps from the lamp index cells at the pixel (AppendIndexLamps in
+// shader_patches.cpp), the same constant layout as the per-draw copy but no lamp, cone, reach or per-lamp floor shadow row is
+// read: the draw sets the atlas, strength, ground weight, the lamp parameter row cS (cS.z = 1: the group lies in the lot's
+// ground shade and keeps its lamps whole), the shade rows and the floor shadows' softness row. Visibility: the cell's, for a
+// loose object. Refused (t unchanged) without the per-pixel lamps or without room (a sampler, 7 temporaries, i0, every
+// constant under the frame block c208).
+bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach = false, bool groundShade = true, bool capShadows = false, bool index = false);
 
 // Snow lying on objects (fence tops, rails, props: the winter snow-cover mesh drawn over the object). Its vertex shader
 // morphs between two positions with flags in TEXCOORD1.x ("slt rX, cK, v.x") and writes world xz to TEXCOORD3.xy
@@ -254,10 +261,10 @@ struct ObjectLampPatch {
     DWORD indexSampler = 0;   // index: the lamp index texture (lamp_index.h), point sampled
     DWORD objectConst = 0;    // index: the one row a draw sets (LampIndex::ObjectRow)
 };
-// index (real-time GI S3-02, lamp_index.h; first law only): the lamps come from the lamp index texture at the pixel's cell,
+// index (real-time GI S3-02, S3-02b, lamp_index.h; both laws): the lamps come from the lamp index texture at the pixel's cell,
 // read in a loop of LampIndex::kSlots, and every parameter from the frame constants c208..c214; the copy reads no
 // per-draw row but objectConst (atlasConst, strengthConst, lampParamConst, lampConst, coneConst stay 0). The ground
-// share and both height gates are taken at the pixel. Refused (t unchanged) with reach, or without room for it.
+// share and both height gates are taken at the pixel; with reach the r0^2 comes from table row 4. Refused (t unchanged) without room for it.
 bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach = false, bool index = false);
 
 // Indoor room light: the 4 directional room light maps ("basis maps", 64x64) read with a smooth (bicubic) filter.
@@ -420,8 +427,12 @@ struct WindowOutdoorPatch {
     DWORD planConst = 0;      // 2 constants: (du/dx, du/dz, 0, 0) x d, (dv/dx, dv/dz, 0, 0) x d
     DWORD reachConst = 0;     // reach variant: the 2 r0^2 rows; 0 = the first law
     int uvUsage = -1, uvIndex = -1; // the semantic of the basis uv input (the VS output to read the uv rows from)
+    DWORD indexSampler = 0;   // index: the lamp index texture (atlasSampler + 1); 0 = a per-draw copy
 };
-bool PatchWindowOutdoor(std::vector<DWORD>& t, WindowOutdoorPatch& out, bool reach = false);
+// index (real-time GI S3-02b, lamp_index.h): the lamps from the lamp index cells at the pixel, with the visibility for an
+// object set in a wall, without the lamps shining out of a house and with each lamp's cones per pixel (the per-draw copy
+// takes the cone at the window's origin); the same constant layout, no lamp or reach row read.
+bool PatchWindowOutdoor(std::vector<DWORD>& t, WindowOutdoorPatch& out, bool reach = false, bool index = false);
 // The vertex shader side: how its output (usage, index) .xy is made from the world position, either "dp4 oN.x/.y, rW,
 // cK" or "dp4 rA.c, rW, cK" then "mul oN.xy, rA.<cc>, cS.<ss>" (the game's basis uv: room light map uv x c.zw). rW must
 // be the world-position temp of the triple c[worldK .. worldK + 2]. row[k] = K, scale[k] = S (-1: none), scaleComp[k] =

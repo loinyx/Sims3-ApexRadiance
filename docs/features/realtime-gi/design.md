@@ -264,7 +264,7 @@ registered and no resource is created.
 | `indirect` | enum, `off` | `off`, `bounce1`, `multiBounce` | S2 |
 | `roomAmbient` | bool, false | Per-room ambient term | S2 |
 | `rigFill` | bool, false | Rig write: lamps with visibility and ambient-cube faces | S3 |
-| `lampIndex` | bool, false | Lamp index cells and frame constants for outdoor rig-lit objects | S3 |
+| `lampIndex` | int, 0 (developer builds only) | Lamp index cells and frame constants for outdoor objects: 0 off, 1 compare each per-draw pick with its cell (counted), 2 draw from the cells | S3 |
 | `simShadows` | enum, `off` | `off`, `capsule`, `mesh` | S3, S5 |
 | `simCube` | bool, false | Per-Sim irradiance cube | S4 |
 | `windowLights` | bool, false | GPU law for types 7 and 8 | S4 |
