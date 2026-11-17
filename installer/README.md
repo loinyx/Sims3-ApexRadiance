@@ -139,6 +139,17 @@ For a manual run against a fake game: start the exe with the game folder as its 
 to a fake Documents folder. The exe asks for administrator rights (`Game\Bin` is usually under Program Files). Errors are
 logged to `%LOCALAPPDATA%\Apex Radiance Setup\ApexRadianceSetup.log`.
 
+The UI smoke run drives the published exe through UI Automation in a dry run and checks after every step that Setup still
+runs and that its log has nothing new but the dry run's refusals: every switch, the renderer cards, the frame limit list
+through every item and custom values (15, 20, 75, 1000, 5000, empty) with frame generation off and turning on, Apply (a
+driver change and a component change), the Done screen, every action of Repair or remove with Copy details and Open log
+folder, the licences, all 21 languages, a narrow and a wide window. It puts Setup's language choice back.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File installer\ui-smoke\Run-UiSmoke.ps1 -Exe installer\publish\ApexRadianceSetup.exe `
+    -Game "C:\Program Files (x86)\Steam\steamapps\common\The Sims 3" -FakeNv "NVIDIA GeForce RTX 4070|62124|0|" -FakeAmd "0|0" -Runs 3
+```
+
 ## Reliability (Setup 1.2.4)
 
 - **Log:** in the player's `%LOCALAPPDATA%\Apex Radiance Setup\` (`Scan.PlayerShellFolder`, also when elevated as another
@@ -172,6 +183,14 @@ logged to `%LOCALAPPDATA%\Apex Radiance Setup\ApexRadianceSetup.log`.
   driver and frame limit changes and says *Some changes did not apply* when one failed. Setup's update downloads to
   `%TEMP%\ApexRadianceSetup-update` (an install empties `%TEMP%\ApexRadianceSetup`), and a failed update is shown. The
   frame generation records are machine-wide, in `%ProgramData%\Apex Radiance Setup\`.
+- **Setup 1.2.6:** choosing a frame limit no longer ends Setup (the list was rebuilt inside its own selection event, which
+  WinUI fails fast on); every switch and list refreshes the page after its own event, and an error no handler caught is
+  logged with the stacks of the last COM errors and shown in the error dialog. The record rebuilt from a damaged
+  `setup.json` is saved at once; a backup is recorded before its file's copy; the frame generation plan and its read-back
+  check live in `Engine.PlanFrameGen` and `Engine.VerifyChange` (a turn-on is dropped when the same Apply removes the bridge
+  or Apex). A failure after the install itself no longer offers to undo it. Extracted files are checked against their zip;
+  a cut connection reads as the network; `NvRemixBridge.exe` running counts as the game running; the card check takes
+  GeForce RTX 40 and 50 only; the folder a Setup update came in is removed at the next start.
 - **Setup's own update:** the new exe takes this one's place and is started before this one closes; a start that fails puts
   the old exe back; the new Setup deletes the `.old` copy. Arguments are quoted so a folder ending in `\` keeps its quote.
 
