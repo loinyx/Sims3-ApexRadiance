@@ -374,8 +374,9 @@ ceiling, object and basis passes (`0x006A3B80` on +0x180, +0x270, +0x360, +0x450
 commits; the room becomes state 4/5), 9 done. `0x006A3EC0` runs the same steps to the end in one call (the synchronous
 solve).
 
-- **Textures per room and per class.** Each class entry (`[room+4] + class × 64`) holds the room's own texture set at
-  +0xC. Step 1 binds it into a global slot per class (`0x011D0460 + class × 16`, owner `0x006A4670`) and locks the
+- **Textures per story and per class.** Each class entry (`[room+4] + class × 64`) holds a texture set at +0xC. `[room+4]`
+  is the story manager's `+0x160` block, the same pointer for every room of a story [V, static: room ctor `0x006A20D0`, caller
+  `0x006A6655`], so the set is per story and shared by all its rooms, not owned by one room. Step 1 binds it into a global slot per class (`0x011D0460 + class × 16`, owner `0x006A4670`) and locks the
   textures from there; step 8 unlocks them and gives them back (`0x006A8FD0`). A room solved at another class than the
   one on screen therefore writes maps that are NOT shown and that still hold what that class showed last: the quick
   pass's refinement writes the class-2 maps, which hold the light from before the edit until the solve ends and the room
