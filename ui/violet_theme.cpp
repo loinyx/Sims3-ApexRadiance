@@ -253,8 +253,32 @@ void ApplyStyle(ImGuiStyle& style) {
 void LoadFonts(ImGuiIO& io) {
     ImFontAtlas* atlas = io.Fonts;
     const std::wstring folder = FontsFolder();
-    const std::string regular = FindFont(folder, {L"segoeui.ttf"});
-    const std::string bold = FindFont(folder, {L"segoeuib.ttf"});
+    std::string regular = FindFont(folder, {L"segoeui.ttf"});
+    std::string bold = FindFont(folder, {L"segoeuib.ttf"});
+    // Wine and Proton have no Segoe UI: the Linux system's own sans (Z: is the root of the Linux file system there), else
+    // the Tahoma Wine ships, before ImGui's pixel font, which blurs at the menu's size
+    if (regular.empty()) {
+        struct Pair { const wchar_t *regular, *bold; };
+        static const Pair kLinux[] = {
+            {L"Z:\\usr\\share\\fonts\\noto\\NotoSans-Regular.ttf", L"Z:\\usr\\share\\fonts\\noto\\NotoSans-Bold.ttf"},
+            {L"Z:\\usr\\share\\fonts\\truetype\\noto\\NotoSans-Regular.ttf", L"Z:\\usr\\share\\fonts\\truetype\\noto\\NotoSans-Bold.ttf"},
+            {L"Z:\\usr\\share\\fonts\\google-noto\\NotoSans-Regular.ttf", L"Z:\\usr\\share\\fonts\\google-noto\\NotoSans-Bold.ttf"},
+            {L"Z:\\usr\\share\\fonts\\google-noto-vf\\NotoSans[wght].ttf", L"Z:\\usr\\share\\fonts\\google-noto-vf\\NotoSans[wght].ttf"},
+            {L"Z:\\usr\\share\\fonts\\TTF\\DejaVuSans.ttf", L"Z:\\usr\\share\\fonts\\TTF\\DejaVuSans-Bold.ttf"},
+            {L"Z:\\usr\\share\\fonts\\truetype\\dejavu\\DejaVuSans.ttf", L"Z:\\usr\\share\\fonts\\truetype\\dejavu\\DejaVuSans-Bold.ttf"},
+            {L"Z:\\usr\\share\\fonts\\dejavu-sans-fonts\\DejaVuSans.ttf", L"Z:\\usr\\share\\fonts\\dejavu-sans-fonts\\DejaVuSans-Bold.ttf"},
+            {L"Z:\\usr\\share\\fonts\\liberation-sans\\LiberationSans-Regular.ttf", L"Z:\\usr\\share\\fonts\\liberation-sans\\LiberationSans-Bold.ttf"},
+            {L"Z:\\usr\\share\\fonts\\truetype\\liberation\\LiberationSans-Regular.ttf", L"Z:\\usr\\share\\fonts\\truetype\\liberation\\LiberationSans-Bold.ttf"},
+        };
+        for (const Pair& f : kLinux)
+            if (ApexUtil::FileExists(f.regular)) {
+                regular = ApexUtil::ToUtf8(f.regular);
+                bold = ApexUtil::FileExists(f.bold) ? ApexUtil::ToUtf8(f.bold) : regular;
+                break;
+            }
+        if (regular.empty()) regular = FindFont(folder, {L"tahoma.ttf", L"arial.ttf"}), bold = FindFont(folder, {L"tahomabd.ttf", L"arialbd.ttf"});
+        if (!regular.empty()) LOG_INFO("[Overlay] Segoe UI not found: the menu uses " + regular);
+    }
     g_fontsLoaded = true;
     g_loadedScripts = WantedScripts();
     if (regular.empty()) {
