@@ -114,7 +114,9 @@ Shipped in the package; players do not need to change them.
 ### Patches to the bridge (`native/remix-bridge/patches/`)
 
 `build.cmd` fetches `dxvk-remix` at f35b86a (sparse: `bridge`, `public`, `src/util`) and Detours at ea6c4ae, applies the
-patches in order and builds x86 and x64 with meson; `package.ps1` makes the zip.
+patches in order and builds x86 and x64 with meson; `package.ps1` makes the zip. The server's DXVK is built the same
+way by `native/dxvk/build.cmd` (DXVK 3.1.1 with its own patch series, `native/dxvk/README.md`); without that build the
+zip takes the stock 3.1.1 release.
 
 | Patch | Fixes |
 |---|---|

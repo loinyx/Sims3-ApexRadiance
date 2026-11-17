@@ -1,0 +1,22 @@
+From: sims3-modernization
+Subject: [PATCH 0001] dxvk: DxvkPipelineBindings binding lists keep 4 entries inline, not 32
+
+One DxvkPipelineBindings is about 12 KB in a 32-bit build (23 small_vector<DxvkShaderDescriptor, 32>), and DXVK
+keeps one in every DxvkShaderPipelineLibrary (one per shader), DxvkGraphicsPipeline and DxvkComputePipeline.
+The Sims 3 (6,462 shaders) had 6,464 shader library nodes of 12808 bytes, 79 MiB of its process heap.
+With 4 inline entries a list that grows past 4 moves to the heap (small_vector::reserve).
+---
+diff --git a/src/dxvk/dxvk_pipelayout.h b/src/dxvk/dxvk_pipelayout.h
+--- a/src/dxvk/dxvk_pipelayout.h
++++ b/src/dxvk/dxvk_pipelayout.h
+@@ -1859,7 +1859,9 @@
+     constexpr static uint32_t MaxSets = DxvkPipelineLayoutKey::MaxSets;
+     constexpr static uint32_t MaxStages = 6u;
+ 
+-    using BindingList = small_vector<DxvkShaderDescriptor, 32>;
++    // 4 inline entries, not 32: this class holds 23 lists (about 12 KB on x86 with 32), and one is embedded in
++    // every shader pipeline library and graphics / compute pipeline. Longer lists move to the heap.
++    using BindingList = small_vector<DxvkShaderDescriptor, 4>;
+   public:
+ 
+     DxvkPipelineBindings(

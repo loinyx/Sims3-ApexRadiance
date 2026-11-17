@@ -31,8 +31,8 @@ Patches. Each applies after the ones before it. "Internal" is the name the #40 r
 The TS3-only options patch the game's code in memory only when the bytes there match TS3W 1.67. Otherwise they change
 nothing.
 
-`package.ps1` assembles the player package after `build.cmd`. It fetches the DXVK 3.1.1 release (checked by SHA-256)
-for the server's renderer and writes `out\package\` and `out\Apex-Radiance-RTX-Remix-bridge.zip`, laid out as in Bin:
+`package.ps1` assembles the player package after `build.cmd`. For the server's renderer it takes `../dxvk/out/d3d9.dll`
+when `../dxvk/build.cmd` built it, otherwise the DXVK 3.1.1 release (checked by SHA-256), and writes `out\package\` and `out\Apex-Radiance-RTX-Remix-bridge.zip`, laid out as in Bin:
 - `d3d9.dll` (the client), `bridge.conf` and `dxvk.conf`;
 - `.trex\NvRemixBridge.exe` (the server), `.trex\d3d9vk_x64.dll` (DXVK x64) and `.trex\bridge.conf`;
 - `licenses\` (bridge and Detours MIT, DXVK zlib) and the player notes from `PLAYER-README.txt`.
