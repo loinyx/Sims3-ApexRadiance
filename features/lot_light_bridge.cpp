@@ -8435,7 +8435,10 @@ const PatchedPs* GiCopyOf(IDirect3DDevice9* dev, IDirect3DPixelShader9* copy, bo
         if (!t.empty() && ShaderPatches::PatchRoomMapGi(t, p.gi, wall ? 7 : 4) && SUCCEEDED(dev->CreatePixelShader(t.data(), &p.ps)))
             LOG_INFO(std::format("[LotLightBridge] Real-time GI: copy {:08X} reads the GI grid{} ({} slots, {} added)", reinterpret_cast<uintptr_t>(copy), wall ? " (walls)" : "",
                                  p.gi.slots, p.gi.added));
-        else p.ps = nullptr;
+        else {
+            p.ps = nullptr; // (say why: a silent miss leaves wallDraws=0 with no cause in the log)
+            LOG_INFO(std::format("[LotLightBridge] Real-time GI: copy {:08X} cannot read the GI grid{} (patch or CreatePixelShader failed)", reinterpret_cast<uintptr_t>(copy), wall ? " (walls)" : ""));
+        }
     }
     return p.ps ? &p : nullptr;
 }
@@ -8455,7 +8458,10 @@ IDirect3DVertexShader9* GiWallVsOf(IDirect3DDevice9* dev, IDirect3DVertexShader9
     }
     if (!t.empty() && ShaderPatches::PatchWallGiVs(t) && SUCCEEDED(dev->CreateVertexShader(t.data(), &it->second)))
         LOG_INFO(std::format("[LotLightBridge] Real-time GI: wall vertex shader {:08X} writes the grid uv", reinterpret_cast<uintptr_t>(game)));
-    else it->second = nullptr;
+    else {
+        it->second = nullptr;
+        LOG_INFO(std::format("[LotLightBridge] Real-time GI: wall vertex shader {:08X} cannot write the grid uv (patch or CreateVertexShader failed)", reinterpret_cast<uintptr_t>(game)));
+    }
     return it->second;
 }
 void ReleaseGiWallVs() {
@@ -11351,6 +11357,8 @@ void LogDrawCost() {
     LOG_INFO(std::format("[LotLightBridge] Draw cost by fix over {} frames (1 draw in 16 timed, the fixes' own time): {:.3f} ms a frame in all, {:.3f} ms a frame "
                          "in the driver for the game draws the fixes made; {}{}",
                          frames, own, driver, text, arch));
+    // whether wall room maps reach the smooth / GI copies at all: walls drawn, bands off the grid, unknown VS
+    LOG_INFO(std::format("[LotLightBridge] Room maps: {} | {}", LotLightBridge::RoomMapSmoothStatus(), LevelLightShare::WallBandStatus()));
 }
 template <typename DrawFn> D3D9Hooks::HookAction DrawCostSampled(IDirect3DDevice9* dev, DrawFn draw) {
     if ((++g_drawCostTick & 15) != 0) return OnDrawTracked(dev, draw);

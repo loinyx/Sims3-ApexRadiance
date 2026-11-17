@@ -418,7 +418,14 @@ void Effect(IDirect3DDevice9* dev) {
     const bool sceneDepth = ds && ds == DepthShare::Surface();
     SafeRelease(ds);
     float vp[4][4], tanY = 0;
-    if (!sceneDepth || !PostScene::CameraViewProj(vp) || !Opened() || !EnsureShaders(dev)) return;
+    // once, after ~600 world frames without a pass, the gate that holds it
+    static uint32_t waited = 0;
+    const bool cam = sceneDepth && PostScene::CameraViewProj(vp), open = cam && Opened(), shaders = open && EnsureShaders(dev);
+    if (!shaders) {
+        if (!g.off && ++waited == 600)
+            LOG_INFO(std::format("[GiPixel] waiting: sceneDepth={} camera={} open={} shaders=0 (open 0: no server answer yet)", sceneDepth ? 1 : 0, cam ? 1 : 0, open ? 1 : 0));
+        return;
+    }
     D3DSURFACE_DESC dd{};
     depth->GetLevelDesc(0, &dd);
     if (dd.Width < 4 || dd.Height < 4 || !EnsureTargets(dev, dd.Width / 4, dd.Height / 4) || !FillCamera(vp, tanY)) return;
