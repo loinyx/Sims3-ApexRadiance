@@ -360,3 +360,34 @@ if (mode === 'census') {
   console.log(JSON.stringify(res));
 }
 if (mode === 'blob') { fs.writeFileSync(process.argv[5], blobs[+arg].code); } // blob <idx> <outfile>: raw shader bytecode for fxc /dumpbin
+if (mode === 'parm') {
+  // The game's constant parameter tables, decoded as TS3W 1.67's loader does (research 13 §2.5): per pass a 'PARM' table
+  // for the vertex shader, then one for the pixel shader; a record is (name hash, w1, w2). Type (w1 >> 11) & 7; type 2
+  // records take no float registers. Start and count are bits 8-17 and 0-7 of the record field the loader builds; the
+  // loader sizes the staging buffer from max(start + count), so that is the highest register Shader_SetFloatConstants
+  // can write. Prints the highest per kind and the techniques past c<arg> (default 227) in the vertex tables.
+  const PARM = 0x4d524150, limit = +(arg || 227), field = (w1, w2) => {
+    let e = ((w2 & 0x800001ff) | (w1 >>> 15)) >>> 2; e = (e | (w2 & 0x40000000)) >>> 1; e = (e | (w1 & 0xffc000)) >>> 6;
+    return (e | (((w1 & 0x600) + 0x200) << 10)) >>> 0;
+  };
+  const hi = { VS: 0, PS: 0 }, past = new Map(); let passes = 0, missing = 0;
+  for (let i = 0; i < techs.length; i++) {
+    const at = techs[i].index, end = i + 1 < techs.length ? techs[i + 1].index : k, name = names.get(b.readUInt32LE(at + 4));
+    for (const m of text.slice(at + 12, end).matchAll(/PASS/g)) {
+      let q = at + 12 + m.index + 20; passes++;
+      while (q < at + 12 + m.index + 96 && b.readUInt32LE(q) !== PARM) q += 4; // the pet fur passes carry a longer header
+      for (const kind of ['VS', 'PS']) {
+        if (b.readUInt32LE(q) !== PARM) { missing++; break; }
+        const n = b.readUInt32LE(q + 8); q += 12;
+        for (let r = 0; r < n; r++, q += 12) {
+          const w1 = b.readUInt32LE(q + 4), f = field(w1, b.readUInt32LE(q + 8)), last = ((f >>> 8) & 0x3ff) + (f & 0xff) - 1;
+          if (((w1 >>> 11) & 7) === 2) continue;
+          hi[kind] = Math.max(hi[kind], last);
+          if (kind === 'VS' && last > limit) past.set(name, Math.max(past.get(name) || 0, last));
+        }
+      }
+    }
+  }
+  console.log(`passes ${passes}, tables not found ${missing}; highest register written: VS c${hi.VS}, PS c${hi.PS}`);
+  console.log(`VS past c${limit}: ${[...past].map(([t, c]) => `${t} c${c}`).join(', ') || 'none'}`);
+}

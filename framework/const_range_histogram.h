@@ -4,8 +4,9 @@
 // caller's return address and prints it with the frame profiler report and an [ConstRange] log line.
 //
 // Why: a frame-constant block for Apex's patched shaders needs registers that nothing else writes. The desk check
-// (docs/features/realtime-gi/research/13-desk-batching-constants.md) found the game's shaders read pixel c0-c24 and
-// vertex c0-c227, and reserves pixel c208-c223 and vertex c228-c251. This counts every write by owner (the game's exe,
+// (docs/features/realtime-gi/research/13-desk-batching-constants.md) found the game's shaders read pixel c0-c24; the
+// parameter tables (§2.5) put the game's vertex writes at c0-c241 (pet and ghost fur up to c241). It reserves pixel
+// c208-c223 and vertex c242-c251. This counts every write by owner (the game's exe,
 // Apex, any other module) so one run shows whether a write of the game or another mod reaches those registers.
 //
 // No Windows dependency: the owner of a new calling site comes from the caller's classify function, so the offline
@@ -25,9 +26,9 @@ enum Owner : int { kGame, kApex, kOther, kOwners };
 inline constexpr const char* kKindNames[kKinds] = {"PS", "VS"};
 inline constexpr const char* kOwnerNames[kOwners] = {"game", "Apex", "other"};
 inline constexpr uint32_t kRegs[kKinds] = {224, 256}; // ps_3_0 and vs_3_0 float registers
-// The frame block's registers [lo, hi): pixel c208-c223, vertex c228-c251 (research 13 §2.4). Apex holds pixel
+// The frame block's registers [lo, hi): pixel c208-c223, vertex c242-c251 (research 13 §2.4, §2.5). Apex holds pixel
 // c200-c204 and vertex c252 / c255 already, outside these ranges.
-inline constexpr uint32_t kReservedLo[kKinds] = {208, 228};
+inline constexpr uint32_t kReservedLo[kKinds] = {208, 242};
 inline constexpr uint32_t kReservedHi[kKinds] = {224, 252};
 inline constexpr int kSites = 256; // calling sites kept; later new ones are only counted in g_droppedSites
 

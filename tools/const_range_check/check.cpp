@@ -48,9 +48,12 @@ int main() {
     Expect(Has(r1, "VS game  registers c2-c227"), "VS game run c2-c227");
     Expect(Has(r1, "site 0x79E10A") && Has(r1, "7 calling sites"), "site table lists the game site");
     Expect(h.SiteCount() == 7, "7 calling sites");
-    // another module writes PS c210-c211 and VS c240; a bad call past the last register
+    // the game's pet fur parameters reach VS c241 (research 13 §2.5): below the reserved range
+    h.Note(kVs, 0x79E152, 228, 14, OwnerOf);
+    Expect(h.ReservedWrites(kVs) == 0 && h.TakeNewReserved(Describe).empty(), "game VS c228-c241 (pet fur) is not a reserved write");
+    // another module writes PS c210-c211 and VS c245; a bad call past the last register
     h.Note(kPs, 0x20002000, 210, 2, OwnerOf);
-    h.Note(kVs, 0x20002010, 240, 1, OwnerOf);
+    h.Note(kVs, 0x20002010, 245, 1, OwnerOf);
     h.Note(kVs, 0x79E0F6, 250, 10, OwnerOf);
     h.EndFrame();
     Expect(h.ReservedWrites(kPs) == 1, "PS foreign reserved write counted");
@@ -64,7 +67,7 @@ int main() {
     Expect(h.TakeNewReserved(Describe).empty(), "each site logged once");
     const std::string sum = h.Summary();
     Expect(Has(sum, "PS: highest written game c24 Apex c223 other c211"), "summary: PS highest by owner");
-    Expect(Has(sum, "reserved c228-c251 written by others 2 times") && Has(sum, "1 calls past c255"), "summary: VS reserved and out of range");
+    Expect(Has(sum, "reserved c242-c251 written by others 2 times") && Has(sum, "1 calls past c255"), "summary: VS reserved and out of range");
     const std::string r2 = h.Report(Describe);
     Expect(Has(r2, "highest a frame: last c255, most c255"), "VS game frame maxima");
     Expect(Has(r2, "highest a frame: last none, most c24"), "PS game: none last frame, c24 at most");

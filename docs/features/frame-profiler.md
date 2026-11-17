@@ -381,7 +381,7 @@ none.
   A new calling site is classed once as the game's exe, Apex or another module. Kept: the registers each owner wrote
   (a difference array), the highest register per owner over the session and per frame, and per site (256 at most) the
   calls, lowest and highest register, writes into the reserved frame-block registers (pixel `c208`-`c223`, vertex
-  `c228`-`c251`, research 13) by any module other than Apex, and calls past the last register. Counted whether or not
+  `c242`-`c251`, research 13) by any module other than Apex, and calls past the last register. Counted whether or not
   the profiler runs. Log: `[ConstRange] Reserved register written: PS c210-c211 by <module>+0x... (other), 1 of its 1
   calls` (warning, once a site) and `[ConstRange] PS: highest written game c24 Apex c223 other none, reserved c208-c223
   written by others 0 times; VS: ...` after a new site or a new highest register, at most every 600 frames. Offline
