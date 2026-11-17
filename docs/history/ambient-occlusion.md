@@ -69,3 +69,21 @@ Sim-specific work continues in [sim-occlusion.md](sim-occlusion.md).
 ## 2.11.1: deterministic AO only
 
 Temporal smoothing and visibility-bitmask detail are removed, including their shader variants, reprojection logic, history textures and settings. AO keeps the existing full-resolution horizon path, spatial blur and Sim controls. Legacy temporal/thinDetail/thickness keys no longer participate in settings registration or built-in profiles.
+
+## 4.0.2: fewer directions when far and smooth flat surfaces (options, off)
+
+**Context:** two dropped ideas came back as options. Slices by reach on screen (a count per pixel) looked blotchy because
+neighbouring pixels used different direction sets, so the 4x4 box no longer cancelled the interleave. Smoother normals
+(2 px central differences on "even" surfaces) drew dashed lines along mesh seams because the "even" test flipped pixel
+by pixel.
+
+**Finding:** one count per frame keeps one direction set in every 4x4 block; blended quadrant normals (XeGTAO's edge
+weights, MIT) have no per-pixel decision to flip. Offline check (`tools/ao_options_check`, synthetic depth buffer, High,
+1080p): the zoom option equals the default up close and differs by 0.12 to 0.13 of a level on average at 80 and 150 m,
+with the open floor as smooth as before; blended normals cut the stray shade on the 24-bit open floor by about a third
+(mean 0.29 to 0.20 levels at 40 m) and keep 96 to 97% of the contact shade. The shipped one-sided normal showed no
+dashes on the synthetic 0.03 degree crease either. AO pass at 3840 x 2160 on a laptop RTX 30-series GPU (native D3D9,
+noisy within about 10%): about 6.2 ms up close for both, 7.3 to 5.4 ms at 80 m and 8.4 to 3.8 ms at 150 m with the zoom option.
+
+**Outcome:** both ship off. They need the in-game picture pair (`ao-adaptive-ab`) and the in-game GPU timer before a
+default can change.

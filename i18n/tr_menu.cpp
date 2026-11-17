@@ -1145,6 +1145,7 @@ const I18n::Entry kEntries[] = {
     {"Restart host: adapted from Dalexlol's wrapper in sims3-modernization.", "Reinício pelo host: adaptado do wrapper do Dalexlol no sims3-modernization.", "Host de reinicio: adaptado del wrapper de Dalexlol en sims3-modernization.", "Hôte de redémarrage : adapté du wrapper de Dalexlol dans sims3-modernization."},
     {"Thanks to @boringbones for testing every build.", "Obrigado a @boringbones por testar cada build.", "Gracias a @boringbones por probar cada build.", "Merci à @boringbones d'avoir testé chaque build."},
     {"FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT).", "FidelityFX CAS: AMD (MIT).", "FidelityFX CAS : AMD (MIT)."},
+    {"Smooth flat surfaces in Ambient Occlusion: based on Intel's XeGTAO (MIT).", "Superfícies planas suaves na Oclusão de Ambiente: baseado no XeGTAO da Intel (MIT).", "Superficies planas suaves en la Oclusión Ambiental: basado en XeGTAO de Intel (MIT).", "Surfaces planes lisses de l'Occlusion Ambiante : basé sur XeGTAO d'Intel (MIT)."},
     {"Upper-floor ground light: Arro's technique, adapted in Apex Radiance.",
      "Luz dos andares superiores no chão: técnica de Arro, adaptada no Apex Radiance.",
      "Luz de los pisos superiores en el suelo: técnica de Arro, adaptada en Apex Radiance.",
