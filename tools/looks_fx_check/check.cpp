@@ -426,9 +426,12 @@ static int Uncovered(const Snap& a, const Snap& b, bool full, int psConsts, std:
             {
                 bool in = false;
                 for (int k = 0; k < ssN; ++k) in |= Looks::kSavedSamplerStates[k] == t;
-                note(in && i < stages, "sampler " + std::to_string(i) + " state " + std::to_string(t));
+                // the vertex stages 16..19 (D3DVERTEXTEXTURESAMPLER0..3): SavedState keeps their texture and these five, full only
+                const bool vertexKept = full && i >= 16 && (t == D3DSAMP_MINFILTER || t == D3DSAMP_MAGFILTER || t == D3DSAMP_MIPFILTER ||
+                                                            t == D3DSAMP_ADDRESSU || t == D3DSAMP_ADDRESSV);
+                note((in && i < stages) || vertexKept, "sampler " + std::to_string(i) + " state " + std::to_string(t));
             }
-        if (a.tex[i] != b.tex[i]) note(i < stages, "texture " + std::to_string(i));
+        if (a.tex[i] != b.tex[i]) note(i < stages || (full && i >= 16), "texture " + std::to_string(i));
     }
     for (int c = 0; c < 224 * 4; ++c) if (memcmp(&a.psc[c], &b.psc[c], 4)) { note(c / 4 < psConsts, "PS constant c" + std::to_string(c / 4)); c = c / 4 * 4 + 3; }
     for (int c = 0; c < 256 * 4; ++c) if (memcmp(&a.vsc[c], &b.vsc[c], 4)) { note(full, "VS constant c" + std::to_string(c / 4)); c = c / 4 * 4 + 3; }

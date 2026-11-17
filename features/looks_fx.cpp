@@ -14,6 +14,7 @@
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "ole32.lib")
 #include "looks_fx.h"
+#include "looks_preset.h" // ParseDefines (a ReShade.ini's definitions)
 #include "third_party/reshadefx/effect_parser.hpp"
 #include "third_party/reshadefx/effect_codegen.hpp"
 #include "third_party/reshadefx/effect_preprocessor.hpp"
@@ -342,6 +343,35 @@ D3DFORMAT Format(reshadefx::texture_format f, const char** lowered)
 // ReShade's code; when that fails here the other flag sets D3D9 offers are tried in turn: level 3, flow control kept
 // (loops it cannot unroll, fewer instruction slots), flow control avoided (gradients inside loops), then no optimisation.
 // *tried is the set that worked (0 = the first), or -1.
+// The global PreprocessorDefinitions of a ReShade.ini (else GShade.ini) beside the game's exe ([GENERAL]), read once
+// (a player coming from ReShade keeps the definitions set there); empty when there is none
+const LooksDefines& GlobalDefines()
+{
+    static const LooksDefines defs = [] {
+        wchar_t exe[MAX_PATH] = {};
+        const DWORD n = GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        std::wstring dir(exe, n);
+        dir.resize(dir.find_last_of(L"\\/") == std::wstring::npos ? 0 : dir.find_last_of(L"\\/") + 1);
+        for (const wchar_t* name : { L"ReShade.ini", L"GShade.ini" })
+        {
+            std::string text;
+            if (dir.empty() || !ReadCapped(dir + name, 1u << 20, text)) continue;
+            bool general = false;
+            for (size_t pos = 0; pos < text.size();)
+            {
+                size_t e = text.find('\n', pos); if (e == std::string::npos) e = text.size();
+                std::string line = text.substr(pos, e - pos);
+                pos = e + 1;
+                while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+                if (!line.empty() && line.front() == '[') { general = _stricmp(line.c_str(), "[GENERAL]") == 0; continue; }
+                if (general && line.rfind("PreprocessorDefinitions=", 0) == 0) return Looks::ParseDefines(line.substr(24));
+            }
+        }
+        return LooksDefines{};
+    }();
+    return defs;
+}
+
 struct Try { UINT flags; const char* name; };
 const Try kTries[] = {
     { D3DCOMPILE_OPTIMIZATION_LEVEL1, "" },
@@ -537,6 +567,11 @@ bool CompileImpl(const std::wstring& fxPath, const Folders& folders, UINT W, UIN
     pp.add_macro_definition("BUFFER_COLOR_BIT_DEPTH", "8");
     for (const auto& [name, value] : folders.defines) // the look's PreprocessorDefinitions: before the file, as ReShade adds them
         if (!name.empty()) pp.add_macro_definition(name, value.empty() ? "1" : value); // "FOO=" is 1 in ReShade
+    // then a ReShade.ini / GShade.ini beside the game's exe, [GENERAL] PreprocessorDefinitions (the look's win, as in
+    // ReShade). Its depth settings are not taken: Apex knows this game's depth (below), and a ReShade.ini's
+    // RESHADE_DEPTH_INPUT_IS_REVERSED=1 (ReShade's default) would turn MXAO and DOF inside out here
+    for (const auto& [name, value] : GlobalDefines())
+        if (!name.empty() && name.rfind("RESHADE_DEPTH_", 0) != 0) pp.add_macro_definition(name, value.empty() ? "1" : value);
     // ReShade's global depth setting for this game: the INTZ depth is 0 near .. 1 far, as the runner's "not reversed";
     // ReShade.fxh and qUINT_common.fxh default to reversed. After the look's own, so a look that names it still wins
     pp.add_macro_definition("RESHADE_DEPTH_INPUT_IS_REVERSED", "0");
@@ -1139,7 +1174,9 @@ bool Instance::Run(IDirect3DDevice9* dev, size_t technique, IDirect3DSurface9* t
         ssSet[stage][st] = true; ssVal[stage][st] = v; dev->SetSamplerState(stage, st, v);
     };
     IDirect3DBaseTexture9* bound[16] = {};
+    IDirect3DBaseTexture9* vbound[4] = {}; // the vertex stages (D3DVERTEXTEXTURESAMPLER0..3); the caller saved them
     for (DWORD st = 0; st < 16; ++st) dev->SetTexture(st, nullptr);
+    for (DWORD v = 0; v < 4; ++v) dev->SetTexture(D3DVERTEXTEXTURESAMPLER0 + v, nullptr);
     IDirect3DSurface9* boundRt[4] = { (IDirect3DSurface9*)1, nullptr, nullptr, nullptr }; // RT0 unknown; RT1-3 cleared here
     for (DWORD r = 1; r < 4; ++r) BindRT(dev, r, nullptr);
     bool dsKnown = false; IDirect3DSurface9* boundDs = nullptr;
@@ -1236,6 +1273,20 @@ bool Instance::Run(IDirect3DDevice9* dev, size_t technique, IDirect3DSurface9* t
             SS(bd.reg, D3DSAMP_MAXMIPLEVEL, (DWORD)s.minLod);
         }
         for (DWORD st = 0; st < 16; ++st) if (bound[st] != want[st]) { dev->SetTexture(st, want[st]); bound[st] = want[st]; }
+        // the vertex stages too, as ReShade binds every sampler to both (the compiler gives a vertex shader's samplers the
+        // lowest numbers): a vertex shader reading a texture (an exposure value) read nothing
+        for (const Binding& bd : pass.bind)
+        {
+            if (bd.reg >= 4) continue;
+            const Sampler& s = fx.samplers[bd.sampler];
+            const DWORD vst = D3DVERTEXTEXTURESAMPLER0 + bd.reg;
+            dev->SetSamplerState(vst, D3DSAMP_MINFILTER, s.minF);
+            dev->SetSamplerState(vst, D3DSAMP_MAGFILTER, s.magF);
+            dev->SetSamplerState(vst, D3DSAMP_MIPFILTER, s.mipF);
+            dev->SetSamplerState(vst, D3DSAMP_ADDRESSU, s.addrU);
+            dev->SetSamplerState(vst, D3DSAMP_ADDRESSV, s.addrV);
+        }
+        for (DWORD v = 0; v < 4; ++v) if (vbound[v] != want[v]) { dev->SetTexture(D3DVERTEXTEXTURESAMPLER0 + v, want[v]); vbound[v] = want[v]; }
 
         // the uniforms are the same in every pass, so they go once; only the VS pixel size (c255) follows the viewport
         const float px0 = -1.0f / vpw, px1 = 1.0f / vph;
@@ -1281,6 +1332,7 @@ bool Instance::Run(IDirect3DDevice9* dev, size_t technique, IDirect3DSurface9* t
     if (boundRt[0] != target) BindRT(dev, 0, target);
     if (!dsKnown || boundDs) BindDS(dev, nullptr);
     for (DWORD st = 0; st < 16; ++st) if (bound[st]) dev->SetTexture(st, nullptr);
+    for (DWORD v = 0; v < 4; ++v) if (vbound[v]) dev->SetTexture(D3DVERTEXTEXTURESAMPLER0 + v, nullptr);
     return true;
 }
 

@@ -384,6 +384,9 @@ struct SavedState
     float psConst[kAllPSConsts * 4]; D3DVIEWPORT9 viewport{}; RECT scissor{};
     float vsConst[kVSConsts * 4];            // full only (okVsConst)
     IDirect3DSurface9* rtN[3] = {};          // render targets 1..3, full only
+    // the vertex texture stages D3DVERTEXTEXTURESAMPLER0..3 and the sampler states Fx::Instance::Run sets there, full only
+    static constexpr D3DSAMPLERSTATETYPE kVss[5] = { D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV };
+    IDirect3DBaseTexture9* vtex[4] = {}; DWORD vss[4][5] = {}; bool okVtex = false;
     bool full = false;                       // a player's effect runs: everything it changes is kept
     DWORD samplers = kSamplers; int rsCount = Looks::kBuiltInRenderStates, ssCount = Looks::kBuiltInSamplerStates; UINT psConsts = 3;
     IDirect3DDevice9* captured = nullptr;
@@ -426,6 +429,13 @@ struct SavedState
         {
             okVsConst = note(SUCCEEDED(dev->GetVertexShaderConstantF(0, vsConst, kVSConsts)), "GetVertexShaderConstantF");
             for (DWORD r = 0; r < 3; ++r) if (FAILED(dev->GetRenderTarget(r + 1, &rtN[r]))) rtN[r] = nullptr; // NOTFOUND: none bound
+            okVtex = true;
+            for (DWORD v = 0; v < 4; ++v)
+            {
+                if (FAILED(dev->GetTexture(D3DVERTEXTEXTURESAMPLER0 + v, &vtex[v]))) { vtex[v] = nullptr; okVtex = false; }
+                for (int i = 0; i < 5; ++i) okVtex &= SUCCEEDED(dev->GetSamplerState(D3DVERTEXTEXTURESAMPLER0 + v, kVss[i], &vss[v][i]));
+            }
+            note(okVtex, "vertex textures");
         }
         gameViewport = g_viewportSetSinceRt0;
         okView = note(SUCCEEDED(dev->GetViewport(&viewport)), "GetViewport");
@@ -450,6 +460,12 @@ struct SavedState
         if (okRenderStates) for (int i = 0; i < rsCount; ++i) dev->SetRenderState(kRS[i], rs[i]);
         if (okConst) dev->SetPixelShaderConstantF(0, psConst, psConsts);
         if (okVsConst) dev->SetVertexShaderConstantF(0, vsConst, kVSConsts);
+        if (full)
+            for (DWORD v = 0; v < 4; ++v)
+            {
+                dev->SetTexture(D3DVERTEXTEXTURESAMPLER0 + v, vtex[v]);
+                if (okVtex) for (int i = 0; i < 5; ++i) dev->SetSamplerState(D3DVERTEXTEXTURESAMPLER0 + v, kVss[i], vss[v][i]);
+            }
         dev->SetPixelShader(ps);
         dev->SetVertexShader(vs);
         if (decl) dev->SetVertexDeclaration(decl); else if (okFvf) dev->SetFVF(fvf);
@@ -471,6 +487,7 @@ struct SavedState
         for (IUnknown* u : std::initializer_list<IUnknown*>{ rt0, ds, ps, vs, decl, stream0 }) if (u) u->Release();
         for (auto*& t : tex) if (t) { t->Release(); t = nullptr; }
         for (auto*& r : rtN) if (r) { r->Release(); r = nullptr; }
+        for (auto*& t : vtex) if (t) { t->Release(); t = nullptr; }
         rt0 = nullptr; ds = nullptr; ps = nullptr; vs = nullptr; decl = nullptr; stream0 = nullptr;
     }
 };

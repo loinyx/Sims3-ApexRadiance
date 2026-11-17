@@ -197,8 +197,11 @@ refused; the same file is reused and a different file of that name gets a number
   every subfolder of the Shaders folder and of each pack's (`Shaders\**`); timer and frametime from a fine clock; a bool
   `framecount` true on even frames; `pingpong` with ReShade's step range, smoothing and 0.05 minimum; each pass sets
   two-sided stencil off, solid fill, no dither and the last pixel on; anisotropic samplers at 16; sRGB reads and writes on
-  8-bit textures only; a new texture's mips cleared with it. Not yet: textures read in a vertex shader, textures shared
-  between .fx files by name, `key` and mouse sources, `__VENDOR__` / `__DEVICE__`, the global definitions of a ReShade.ini.
+  8-bit textures only; a new texture's mips cleared with it; every sampler bound to the vertex stages 0..3 too (saved and
+  put back); `key`, `mousebutton` (held, toggle, press), `mousepoint` and `mousedelta` while the game has the focus; a
+  ReShade.ini or GShade.ini beside the game's exe gives its `[GENERAL] PreprocessorDefinitions` (the look's win; its
+  `RESHADE_DEPTH_*` are not taken, Apex knows this game's depth); a shader listed before a depth shader runs before it.
+  Not yet: textures shared between .fx files by name, `mousewheel`, `overlay_open`, `__VENDOR__` / `__DEVICE__` (0).
 - Limits: 2 MB per .fx or included file, 64 includes, 16 MB of preprocessed code, 64 MB per texture file, 64 textures and
   256 MB of textures per effect, 384 MB for every user effect running, 64 passes per technique, 256 user passes per frame,
   two minutes of compile time per file. Includes and textures must stay inside the Shaders folder (`..` and absolute
