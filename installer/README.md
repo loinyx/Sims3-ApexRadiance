@@ -63,7 +63,7 @@ only what differs from the player's choice.
   `IADLX3DSettingsServices1`, `GetAMDFluidMotionFrames`, then `IsSupported`, `IsEnabled`, `SetEnabled`; vtable slots from the
   ADLX 2.0 SDK headers). ADLX has AFMF as one setting for the whole system (no GPU, no application), so the row says it
   applies to every game. Shown when ADLX starts (an AMD driver); enabled where ADLX reports it supported; the bridge is not
-  required. On writes `%LOCALAPPDATA%\Apex Radiance Setup\afmf-on.txt`; a removal of the bridge or Apex turns AFMF off only
+  required. On writes `%ProgramData%\Apex Radiance Setup\afmf-on.txt`; a removal of the bridge or Apex turns AFMF off only
   when that file is there, so a setting the player turned on stays. The frame limit rule is Smooth Motion's.
 - Apex frame limit: a list beside the frame generation rows (`Engine.FpsChoices`: 0, 30, 60, 75, 90, 120, 144, 165, 240, and
   Custom clamped by `Engine.ClampFps` to 0 or 20 to 1000) that calls `Engine.SetFpsLimit`: an atomic write of
@@ -160,6 +160,18 @@ logged to `%LOCALAPPDATA%\Apex Radiance Setup\ApexRadianceSetup.log`.
   `x64`); inside it `dinput8.dll`, else the one 32-bit dll. Ultimate ASI Loader 10 can open a *Select Override (Update)
   Folder* dialog at start (one player on the EA app saw it; v9.7.4 has no such dialog); what triggers it is not known yet,
   so Setup changes nothing for it.
+- **Setup 1.2.5 (validation fixes):** read-only files are made writable before a delete or a write (a read-only
+  `Options.ini` gives a read-only `Options.ini.bak`, which every renderer removal deletes), and a failed write leaves no
+  `.apex-tmp`. A damaged `setup.json` is rebuilt from the backup folder (`Manifest.Rebuilt`); a backup is never written over
+  (the next free name); the dry run leaves the damaged file where it is. The checks before a change also probe the game's
+  Documents folder, skip the free space and Documents notes when nothing is downloaded, and no longer tell an elevated Setup
+  to run as administrator (Controlled folder access is named instead). The game, the launcher or `ts3wrap.exe` running is
+  named in every message. Windows' virus errors (`ERROR_VIRUS_INFECTED`, `ERROR_VIRUS_DELETED`) read as the antivirus, with
+  the folder it was in (`%TEMP%\ApexRadianceSetup` for a download, `Game\Bin` for a copy); a Performance Patch archive the
+  player moved is not. A failed install's undo says so when the game or launcher still runs. The Done screen lists the
+  driver and frame limit changes and says *Some changes did not apply* when one failed. Setup's update downloads to
+  `%TEMP%\ApexRadianceSetup-update` (an install empties `%TEMP%\ApexRadianceSetup`), and a failed update is shown. The
+  frame generation records are machine-wide, in `%ProgramData%\Apex Radiance Setup\`.
 - **Setup's own update:** the new exe takes this one's place and is started before this one closes; a start that fails puts
   the old exe back; the new Setup deletes the `.old` copy. Arguments are quoted so a folder ending in `\` keeps its quote.
 

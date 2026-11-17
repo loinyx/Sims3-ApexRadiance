@@ -78,7 +78,7 @@ bridge as not compatible; a driver profile forces it, the way NVIDIA Profile Ins
 APIs (`0xB0CC0875`) at 0, which blocks it; Setup edits the profile that holds the bridge's exe, as Profile Inspector does:
 on sets `0xB0D384C0` (Smooth Motion) to 1 and `0xB0CC0875` to 7 (DX12, DX11 and Vulkan). When no profile holds the exe, Setup
 creates *Apex Radiance - The Sims 3* with it. Off restores NVIDIA's defaults of both settings (or deletes Setup's profile),
-only when Setup turned it on, recorded in `%LOCALAPPDATA%\Apex Radiance Setup\smooth-motion-on.txt`: a Smooth Motion the
+only when Setup turned it on, recorded in `%ProgramData%\Apex Radiance Setup\smooth-motion-on.txt`: a Smooth Motion the
 player turned on with Profile Inspector shows as on and stays. The game's exes stay in NVIDIA's own *Sims 3* profile: they
 do not present frames under the bridge. The profile matches exe names, so it covers every copy of the game on the PC, Steam
 or EA app. The row shows only with an NVIDIA card. It can be turned on with an RTX 40 or 50 series card, driver 571.86 or
@@ -135,8 +135,11 @@ Inspector steps; for AFMF, AMD Software > Gaming > Graphics > AMD Fluid Motion F
 Only the frame generation row that applies shows (`Engine.FrameGenRows`): a usable NVIDIA card shows Smooth Motion; AFMF
 shows where ADLX reports it supported, so an AMD integrated GPU that cannot run it shows nothing; with neither usable, the
 NVIDIA row explains why when an NVIDIA card is there, else the AMD row does. The frame limit row names the frame generation
-shown above it and shows in the accent colour what the player gets: "60 fps → about 120 fps on screen with NVIDIA Smooth
-Motion", or about double with no limit.
+shown above it and, while frame generation is on or turning on, shows in the accent colour what the player gets: "60 fps
+→ about 120 fps on screen with NVIDIA Smooth Motion", or about double with no limit; with it off, the limit as it is. A
+limit the player chose in the same Apply (Off included) is kept; the automatic 60 fps is not applied for AFMF on a PC
+with an NVIDIA card (the game may run on that card). Failed driver or frame limit changes are listed on the Done screen
+(*Some changes did not apply*).
 
 **AMD Fluid Motion Frames** (Setup 1.2.0) is the row after it, for AMD cards: frame generation in the AMD driver, through
 AMD's ADLX (`Afmf.cs`). ADLX has AFMF as one setting for the whole system, not per game, so the row says it applies to
@@ -178,6 +181,8 @@ changed unless the player keeps it. Errors read in plain words with the raw text
 folder*; the log is in the player's `%LOCALAPPDATA%\Apex Radiance Setup\`. The full list is in
 [installer/README.md](../../installer/README.md#reliability-setup-124).
 
+![An error dialog with Copy details and Open log folder (dry run)](../images/installer/error-dialog.png)
+
 ## Limitations
 
 - Windows 10 version 1809 or later, 64-bit.
@@ -196,7 +201,10 @@ folder*; the log is in the player's `%LOCALAPPDATA%\Apex Radiance Setup\`. The f
 - NVIDIA Smooth Motion edits NVIDIA's own *NvRemixBridge* profile and restores its defaults on off. Setup 1.2.0 wrote a
   profile of its own, which held no exe (both were in NVIDIA's profiles), so the write failed with `DRS_SetSetting -160`.
   The write on NVIDIA's profile is unverified until tested on an RTX 40 card. `0xB0D384C0` is not in the driver's list of
-  named settings (621.24); Profile Inspector writes it all the same. DXVK on `TS3W.exe` is Vulkan as well, but Smooth Motion under DXVK is untested, so the
+  named settings (621.24); Profile Inspector writes it all the same. Only a value set in the bridge's own profile counts as
+  on (one inherited from the global profile does not reach the bridge, whose Enabled APIs still block it). The *How to do
+  it by hand* link opens the README on GitHub's default branch, which has the Profile Inspector steps once release 4.0.3
+  is merged. DXVK on `TS3W.exe` is Vulkan as well, but Smooth Motion under DXVK is untested, so the
   switch needs the bridge.
 
 ## Technical reference
