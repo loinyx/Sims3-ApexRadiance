@@ -324,8 +324,7 @@ inline int Main(int argc, char** argv) {
                 }
             const Tally t = tally([&](int l, int s) { return &res[static_cast<size_t>(l) * nS + s]; }, arm.feed == 2 ? &one : nullptr);
             t.Print(arm.name.c_str(), seconds, solves);
-            // (not exactly 0: beside a wall corner the field's pixel holds one of the two walls' seeds, see wp/X-05.md)
-            if (j.tag == "sealed" && arm.p.fix) Check(t.leakMax < 0.05 / 255.0, "cascades, sealed: light reaches a room no opening joins (" + arm.name + ")");
+            if (j.tag == "sealed" && arm.p.fix) Check(t.leakMax == 0.0, "cascades, sealed: light reaches a room no opening joins (" + arm.name + ")");
             if (a == 0 || a == 2) kept[a / 2] = std::move(res);
         }
         if (j.tag != "rooms") continue;

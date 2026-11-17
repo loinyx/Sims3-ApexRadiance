@@ -56,7 +56,7 @@ float4 TraceSeg(float2 a, float2 b, float tA, float tB) {
     for (int n = 0; n < CC_STEPS && done == 0; n++) {
         const float dist = FieldAt(a + d * (s / len));
         if (dist < kHit) {
-            const float w = EmitAt(a + d * ((s - kBack) / len)).x;
+            const float w = EmitAt(a + d * (max(s - kBack, 0.0) / len)).x;
             rad += w * float3((k0.x + k0.y) * 0.25, k0.z * kInv2Pi, k0.z * kInv2Pi);
             done = 1;
         } else {

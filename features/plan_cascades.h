@@ -98,7 +98,7 @@ inline float TraceSeg(const Field& f, const Emit& e, int band, float ax, float a
     for (int n = 0; n < steps; n++) {
         const float d = f.At(band, ax + dx * (s / len), az + dz * (s / len));
         if (d < PlanField::kHit) {
-            const float r = (s - kBack) / len, w = EmitAt(f, e, ax + dx * r, az + dz * r)[0];
+            const float r = std::max(s - kBack, 0.0f) / len, w = EmitAt(f, e, ax + dx * r, az + dz * r)[0]; // (not before the start: a start already past a wall line must not read its far side)
             rad[0] += w * (f0 + c0) * 0.25f, rad[1] += w * u0 * i2p, rad[2] += w * u0 * i2p;
             return 0.0f;
         }
