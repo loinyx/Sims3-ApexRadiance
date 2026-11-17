@@ -212,68 +212,192 @@ inline void Apply(const double M[4][4], const float p[3], float out[3]) {
     for (int r = 0; r < 3; r++) out[r] = static_cast<float>(M[r][0] * p[0] + M[r][1] * p[1] + M[r][2] * p[2] + M[r][3]);
 }
 
-// Look constants of a standing adult (world y up, metres above the root). UNVERIFIED in game; children, toddlers, pets
-// and sitting or lying Sims get the same column (XR-10)
+// ---- Capsules from the bones (XR-10) ----
+// A rig names, for a palette of its size, the bones that carry its joints and each joint's bind place (model space, the
+// place the joint has while the palette is the identity), and the capsules between joints. The palette entry of bone b
+// maps a bind place to its place this frame (3 rows, model space), so a joint's place is its bone's rows applied to its
+// bind place, whatever the pose: a child, a dog, a sitting or lying Sim get their own shapes. A draw with no rig (none for
+// its palette, or more than one) keeps the fixed column below. A fit whose capsules come out longer or shorter than
+// the rig's bind lengths by more than kLengthTolerance is a palette of another order: also the fixed column.
+inline constexpr int kMaxPerSim = 8;             // capsules a Sim at most
+inline constexpr float kLengthTolerance = 0.35f; // share of a capsule's bind length
+
+struct RigJoint {
+    int bone;      // palette entry
+    float bind[3]; // model space, metres
+};
+struct RigCapsule {
+    int a, b; // joints (a == b: a ball)
+    float r;
+};
+struct Rig {
+    const char* name;
+    int bones; // palette entries of a draw of this rig
+    std::vector<RigJoint> joints;
+    std::vector<RigCapsule> capsules;
+};
+
+// The rigs known by palette size. Empty in game: the palette is in each drawn mesh's own joint order, with only the joints
+// that mesh uses (the skin fill 0x0068F3F0, Steam 1.67.2; wp/XR-10.md), so a palette's size names no rig and every Sim
+// keeps the fixed column. The source that fits in game is a rig made per draw from the skin's joint name hashes and bind
+// poses (drawable +0x64 skin: +0x2C hashes, +0x30 bind poses), read by a hook on that fill: a follow-up package
+inline const std::vector<Rig>& GameRigs() {
+    static const std::vector<Rig> rigs;
+    return rigs;
+}
+
+// The one rig of `rigs` with `bones` palette entries, or nullptr (none, or more than one)
+inline const Rig* RigOf(const std::vector<Rig>& rigs, int bones) {
+    const Rig* found = nullptr;
+    for (const Rig& r : rigs)
+        if (r.bones == bones) {
+            if (found) return nullptr;
+            found = &r;
+        }
+    return found;
+}
+
+// A capsule in model or world space
+struct Capsule {
+    float a[3], b[3], r;
+};
+
+// The rig's capsules this frame in model space from the palette rows. Returns how many (0: no fit: a bone past the
+// palette, a capsule's length off by more than kLengthTolerance, or more than kMaxPerSim capsules)
+inline int FitRig(Rows reg, int bones, const Rig& rig, Capsule out[kMaxPerSim]) {
+    if (rig.capsules.size() > static_cast<size_t>(kMaxPerSim) || rig.joints.size() > 64 || bones != rig.bones) return 0;
+    float at[64][3];
+    for (size_t j = 0; j < rig.joints.size(); j++) {
+        const RigJoint& J = rig.joints[j];
+        if (J.bone < 0 || J.bone >= bones || J.bone >= 60) return 0;
+        for (int k = 0; k < 3; k++) {
+            const float* row = reg[3 * J.bone + k];
+            at[j][k] = row[0] * J.bind[0] + row[1] * J.bind[1] + row[2] * J.bind[2] + row[3];
+        }
+        if (!std::isfinite(at[j][0]) || !std::isfinite(at[j][1]) || !std::isfinite(at[j][2])) return 0;
+    }
+    const auto dist = [](const float* p, const float* q) {
+        return std::sqrt((p[0] - q[0]) * (p[0] - q[0]) + (p[1] - q[1]) * (p[1] - q[1]) + (p[2] - q[2]) * (p[2] - q[2]));
+    };
+    int n = 0;
+    for (const RigCapsule& c : rig.capsules) {
+        if (c.a < 0 || c.b < 0 || static_cast<size_t>(c.a) >= rig.joints.size() || static_cast<size_t>(c.b) >= rig.joints.size()) return 0;
+        const float bind = dist(rig.joints[c.a].bind, rig.joints[c.b].bind), now = dist(at[c.a], at[c.b]);
+        if (std::fabs(now - bind) > kLengthTolerance * bind + 0.02f) return 0;
+        Capsule& o = out[n++];
+        for (int k = 0; k < 3; k++) o.a[k] = at[c.a][k], o.b[k] = at[c.b][k];
+        o.r = c.r;
+    }
+    return n;
+}
+
+// The fixed column of a standing adult (world y up, metres above the root): the fallback for a draw with no rig fit.
+// Look constants. UNVERIFIED in game
 struct Part {
     float y0, y1, r;
 };
 inline constexpr Part kParts[] = {{0.14f, 0.82f, 0.14f}, {0.95f, 1.38f, 0.19f}, {1.62f, 1.62f, 0.12f}};
-inline constexpr int kPerSim = 3;
+inline constexpr int kPerSim = 3;        // capsules of the fixed column
 inline constexpr float kSameSim = 0.35f; // m: draws whose roots lie closer are one Sim (body parts, hair, accessories)
 
 struct Root {
     float p[3];
 };
 
-// One root a Sim: the draws' roots merged within kSameSim, nearest the camera first, at most `most`
-inline std::vector<Root> Merge(const std::vector<Root>& draws, const float cam[3], size_t most) {
-    std::vector<Root> sims;
-    std::vector<int> n;
-    for (const Root& d : draws) {
+// One Sim: its root and its capsules in world space (n 0: the fixed column at the root)
+struct Sim {
+    Root root{};
+    int n = 0;
+    Capsule c[kMaxPerSim] = {};
+};
+
+// The capsules a Sim casts: its fit, or the fixed column at its root
+inline int CapsulesOf(const Sim& s, Capsule out[kMaxPerSim]) {
+    if (s.n > 0) {
+        for (int i = 0; i < s.n; i++) out[i] = s.c[i];
+        return s.n;
+    }
+    for (int i = 0; i < kPerSim; i++) {
+        const Part& part = kParts[i];
+        out[i] = {{s.root.p[0], s.root.p[1] + part.y0, s.root.p[2]}, {s.root.p[0], s.root.p[1] + part.y1, s.root.p[2]}, part.r};
+    }
+    return kPerSim;
+}
+
+// The model-space fit moved to world space by the draw's matrix M
+inline void ToWorld(const double M[4][4], const Capsule* in, int n, Sim& s) {
+    s.n = n;
+    for (int i = 0; i < n; i++) Apply(M, in[i].a, s.c[i].a), Apply(M, in[i].b, s.c[i].b), s.c[i].r = in[i].r;
+}
+
+// One Sim per root merged within kSameSim, nearest the camera first, at most `most`. The first draw's root stays (a Sim's
+// parts share one matrix); the first draw with a fit gives the capsules
+inline std::vector<Sim> Merge(const std::vector<Sim>& draws, const float cam[3], size_t most) {
+    std::vector<Sim> sims;
+    for (const Sim& d : draws) {
         size_t i = 0;
         for (; i < sims.size(); i++) {
-            const float dx = d.p[0] - sims[i].p[0], dy = d.p[1] - sims[i].p[1], dz = d.p[2] - sims[i].p[2];
+            const float dx = d.root.p[0] - sims[i].root.p[0], dy = d.root.p[1] - sims[i].root.p[1], dz = d.root.p[2] - sims[i].root.p[2];
             if (dx * dx + dz * dz < kSameSim * kSameSim && std::fabs(dy) < 0.5f) break;
         }
-        if (i == sims.size()) sims.push_back(d), n.push_back(1);
-        else n[i]++; // (the first draw's root stays: a Sim's parts share one matrix)
+        if (i == sims.size()) sims.push_back(d);
+        else if (sims[i].n == 0 && d.n > 0) {
+            sims[i].n = d.n;
+            for (int k = 0; k < d.n; k++) sims[i].c[k] = d.c[k];
+        }
     }
-    const auto dist = [&](const Root& r) {
-        const float dx = r.p[0] - cam[0], dy = r.p[1] - cam[1], dz = r.p[2] - cam[2];
+    const auto dist = [&](const Sim& s) {
+        const float dx = s.root.p[0] - cam[0], dy = s.root.p[1] - cam[1], dz = s.root.p[2] - cam[2];
         return dx * dx + dy * dy + dz * dz;
     };
-    std::sort(sims.begin(), sims.end(), [&](const Root& a, const Root& b) { return dist(a) < dist(b); });
+    std::sort(sims.begin(), sims.end(), [&](const Sim& a, const Sim& b) { return dist(a) < dist(b); });
     if (sims.size() > most) sims.resize(most);
     return sims;
 }
 
-inline void Bounds(const Root& r, float lo[3], float hi[3]) {
-    const float wide = kParts[1].r;
-    lo[0] = r.p[0] - wide, lo[1] = r.p[1] + kParts[0].y0 - kParts[0].r, lo[2] = r.p[2] - wide;
-    hi[0] = r.p[0] + wide, hi[1] = r.p[1] + kParts[2].y1 + kParts[2].r, hi[2] = r.p[2] + wide;
+// The box around a Sim's capsules
+inline void Bounds(const Sim& s, float lo[3], float hi[3]) {
+    Capsule c[kMaxPerSim];
+    const int n = CapsulesOf(s, c);
+    for (int k = 0; k < 3; k++) lo[k] = 1e30f, hi[k] = -1e30f;
+    for (int i = 0; i < n; i++)
+        for (int k = 0; k < 3; k++) {
+            lo[k] = std::min({lo[k], c[i].a[k] - c[i].r, c[i].b[k] - c[i].r});
+            hi[k] = std::max({hi[k], c[i].a[k] + c[i].r, c[i].b[k] + c[i].r});
+        }
 }
 
 // The block's capsules and caster bounds for this frame's Sims (after any capsules already in it); `prev` are the last
-// pass's Sims: a Sim with no previous root within kSameSim, or one that moved by more than 5 mm, is marked moved and its
-// bounds hold both places. Returns the Sims added
-inline uint32_t Fill(GiPixelBlock& b, const std::vector<Root>& sims, const std::vector<Root>& prev) {
+// pass's Sims: a Sim with no previous root within kSameSim, one whose root moved by more than 5 mm, or one whose capsules
+// changed (another pose in place: sitting down, a fit gained or lost) is marked moved, its bounds holding both shapes.
+// Returns the Sims added
+inline uint32_t Fill(GiPixelBlock& b, const std::vector<Sim>& sims, const std::vector<Sim>& prev) {
     uint32_t added = 0;
-    for (const Root& s : sims) {
-        if (b.capsules + kPerSim > kGiPixelCapsules || b.casters >= kGiPixelCasters) break;
-        for (const Part& part : kParts) {
-            GiPixelCapsule& c = b.capsule[b.capsules++];
-            c = {{s.p[0], s.p[1] + part.y0, s.p[2]}, part.r, {s.p[0], s.p[1] + part.y1, s.p[2]}, 0};
+    for (const Sim& s : sims) {
+        Capsule caps[kMaxPerSim];
+        const int n = CapsulesOf(s, caps);
+        if (b.capsules + n > kGiPixelCapsules || b.casters >= kGiPixelCasters) break;
+        for (int i = 0; i < n; i++) {
+            const Capsule& c = caps[i];
+            b.capsule[b.capsules++] = {{c.a[0], c.a[1], c.a[2]}, c.r, {c.b[0], c.b[1], c.b[2]}, 0};
         }
         GiPixelCaster& k = b.caster[b.casters++];
         k = {};
         Bounds(s, k.lo, k.hi);
-        const Root* was = nullptr;
+        const Sim* was = nullptr;
         float best = kSameSim * kSameSim;
-        for (const Root& q : prev) {
-            const float dx = s.p[0] - q.p[0], dz = s.p[2] - q.p[2], d2 = dx * dx + dz * dz;
-            if (d2 < best && std::fabs(s.p[1] - q.p[1]) < 0.5f) best = d2, was = &q;
+        for (const Sim& q : prev) {
+            const float dx = s.root.p[0] - q.root.p[0], dz = s.root.p[2] - q.root.p[2], d2 = dx * dx + dz * dz;
+            if (d2 < best && std::fabs(s.root.p[1] - q.root.p[1]) < 0.5f) best = d2, was = &q;
         }
-        const bool moved = !was || std::fabs(was->p[0] - s.p[0]) + std::fabs(was->p[1] - s.p[1]) + std::fabs(was->p[2] - s.p[2]) > 0.005f;
+        bool moved = !was || std::fabs(was->root.p[0] - s.root.p[0]) + std::fabs(was->root.p[1] - s.root.p[1]) + std::fabs(was->root.p[2] - s.root.p[2]) > 0.005f;
+        if (!moved) {
+            Capsule old[kMaxPerSim];
+            const int m = CapsulesOf(*was, old);
+            moved = m != n;
+            for (int i = 0; i < n && !moved; i++)
+                for (int a = 0; a < 3; a++) moved = moved || std::fabs(old[i].a[a] - caps[i].a[a]) + std::fabs(old[i].b[a] - caps[i].b[a]) > 0.005f;
+        }
         if (moved && was) {
             float lo[3], hi[3];
             Bounds(*was, lo, hi);

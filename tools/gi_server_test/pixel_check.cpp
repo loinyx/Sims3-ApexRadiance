@@ -24,6 +24,7 @@
 #include "px_stop2.h"
 #include "px_stop3.h"
 #include "px_trace0.h"
+#include <array>
 #include <set>
 #include "features/gi_sim_capsules.h"
 
@@ -615,19 +616,19 @@ void SimCase(const Gpu& g, PScene ps, int w, int h) {
         for (int c = 0; c < 4; c++) reg[188 + r][c] = vp[r][0] * Wm[0][c] + vp[r][1] * Wm[1][c] + vp[r][2] * Wm[2][c] + (c == 3 ? vp[r][3] : 0.0f);
     float median[3];
     BoneMedian(reg, 24, median);
-    std::vector<Root> draws;
+    std::vector<Sim> draws;
     float worst = 0.0f;
     for (const Chain ch : {Chain{180, 184}, Chain{188, -1}}) {
         double C[4][4], M[4][4];
         ClipOf(reg, ch, C);
-        Root r{};
+        Sim r{};
         if (!WorldOf(C, vp, M)) {
             Check(false, "Sim capsules: the draw's world matrix from the camera");
             return;
         }
-        Apply(M, median, r.p);
+        Apply(M, median, r.root.p);
         draws.push_back(r);
-        for (int a = 0; a < 3; a++) worst = std::max(worst, std::fabs(r.p[a] - truth[a]));
+        for (int a = 0; a < 3; a++) worst = std::max(worst, std::fabs(r.root.p[a] - truth[a]));
     }
     std::printf("  Sim capsules: root from both chain forms within %.1f mm of the pose's root\n", worst * 1e3f);
     Check(worst < 0.03f, "Sim capsules: the root from a synthetic draw within 3 cm, both chain forms");
@@ -648,9 +649,9 @@ void SimCase(const Gpu& g, PScene ps, int w, int h) {
         Check(dropped, "Sim capsules: draws of the sun's orthographic camera and of the mirrored reflection camera are dropped");
     }
     // Draws of one Sim merge; a second Sim stands 3 m away
-    draws.push_back({{truth[0] + 3.0f, 0.0f, truth[2]}});
+    draws.push_back(Sim{{{truth[0] + 3.0f, 0.0f, truth[2]}}});
     const float cam[3] = {ps.eye.x, ps.eye.y, ps.eye.z};
-    const std::vector<Root> sims = Merge(draws, cam, kGiPixelCasters);
+    const std::vector<Sim> sims = Merge(draws, cam, kGiPixelCasters);
     GiPixelBlock block{};
     const uint32_t added = Fill(block, sims, {});
     Check(sims.size() == 2 && added == 2 && block.capsules == 6 && block.casters == 2 && block.caster[0].moved != 0.0f,
@@ -676,6 +677,187 @@ void SimCase(const Gpu& g, PScene ps, int w, int h) {
         if (Drew(p) && p.d && dr.cls[static_cast<size_t>(p.pos[3])] == kWalls && std::hypot(p.pos[0] - truth[0], p.pos[2] - truth[2]) < 2.5f && p.pos[1] < 0.05f) under++;
     std::printf("  Sim capsules: %ld floor pixels within 2.5 m of the Sim in its delta shadow\n", under);
     Check(under > 20, "Sim capsules: the Sim's shadow lies on the floor around it");
+}
+
+// ---------------------------------------------------------------- capsules from the bones (XR-10)
+// Synthetic rigs (a joint at each bone's origin, capsules between joints of a parent and a child bone): an adult, a
+// child (the adult at 0.62) and a dog. Poses as palettes: a sitting adult, a standing child, a lying dog. Their capsules
+// are checked against joints placed by hand, then traced against the CPU reference
+namespace rigs {
+using GiSimCapsules::Rig;
+struct Bone {
+    float R[3][3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+    float t[3] = {0, 0, 0};
+};
+// Bone b turned by R about its joint, which lands at `to`
+Bone About(const float R[3][3], const float from[3], const float to[3]) {
+    Bone b;
+    std::memcpy(b.R, R, sizeof b.R);
+    for (int k = 0; k < 3; k++) b.t[k] = to[k] - (R[k][0] * from[0] + R[k][1] * from[1] + R[k][2] * from[2]);
+    return b;
+}
+Bone Moved(float x, float y, float z) {
+    Bone b;
+    b.t[0] = x, b.t[1] = y, b.t[2] = z;
+    return b;
+}
+constexpr float kDownToForward[3][3] = {{1, 0, 0}, {0, 0, 1}, {0, -1, 0}}; // (0, -1, 0) -> (0, 0, 1): a limb turned forward
+
+Rig Human(const char* name, int bones, float s) {
+    const auto j = [&](int bone, float x, float y, float z) { return GiSimCapsules::RigJoint{bone, {x * s, y * s, z * s}}; };
+    // 0 pelvis, 1 neck, 2 head, 3 left thigh, 4 left calf, 5 left foot, 6 right thigh, 7 right calf, 8 right foot
+    return {name, bones, {j(1, 0, 0.95f, 0), j(5, 0, 1.45f, 0), j(6, 0, 1.62f, 0), j(10, 0.1f, 0.9f, 0), j(11, 0.1f, 0.5f, 0), j(12, 0.1f, 0.08f, 0),
+                          j(14, -0.1f, 0.9f, 0), j(15, -0.1f, 0.5f, 0), j(16, -0.1f, 0.08f, 0)},
+            {{0, 1, 0.17f * s}, {2, 2, 0.11f * s}, {3, 4, 0.08f * s}, {4, 5, 0.06f * s}, {6, 7, 0.08f * s}, {7, 8, 0.06f * s}}};
+}
+Rig Dog() {
+    const auto j = [](int bone, float x, float y, float z) { return GiSimCapsules::RigJoint{bone, {x, y, z}}; };
+    // 0 pelvis, 1 chest, 2 head, 3/4 front left leg and paw, 5/6 front right, 7/8 back left, 9/10 back right
+    return {"dog", 22, {j(1, 0, 0.45f, -0.3f), j(2, 0, 0.45f, 0.3f), j(3, 0, 0.6f, 0.5f), j(4, 0.1f, 0.42f, 0.3f), j(5, 0.1f, 0.03f, 0.3f), j(6, -0.1f, 0.42f, 0.3f),
+                        j(7, -0.1f, 0.03f, 0.3f), j(8, 0.1f, 0.42f, -0.3f), j(9, 0.1f, 0.03f, -0.3f), j(10, -0.1f, 0.42f, -0.3f), j(11, -0.1f, 0.03f, -0.3f)},
+            {{0, 1, 0.14f}, {1, 2, 0.08f}, {3, 4, 0.045f}, {5, 6, 0.045f}, {7, 8, 0.045f}, {9, 10, 0.045f}}};
+}
+
+struct Case {
+    const char* name;
+    Rig rig;
+    std::vector<Bone> pose;          // the palette, one a bone
+    std::vector<std::array<float, 6>> want; // each capsule's ends (model space), placed by hand
+};
+
+std::vector<Case> Cases() {
+    std::vector<Case> out;
+    { // An adult sitting: the upper body 0.45 m down, the thighs forward at the hips, the calves upright
+        Case c{"sitting adult", Human("adult", 40, 1.0f), std::vector<Bone>(40), {}};
+        for (int b : {1, 5, 6}) c.pose[b] = Moved(0, -0.45f, 0);
+        for (float x : {0.1f, -0.1f}) {
+            const float hip[3] = {x, 0.9f, 0}, hipNow[3] = {x, 0.45f, 0};
+            c.pose[x > 0 ? 10 : 14] = About(kDownToForward, hip, hipNow);
+            c.pose[x > 0 ? 11 : 15] = c.pose[x > 0 ? 12 : 16] = Moved(0, -0.05f, 0.4f); // knee (x, 0.5, 0) -> (x, 0.45, 0.4)
+        }
+        c.want = {{0, 0.5f, 0, 0, 1.0f, 0}, {0, 1.17f, 0, 0, 1.17f, 0}, {0.1f, 0.45f, 0, 0.1f, 0.45f, 0.4f}, {0.1f, 0.45f, 0.4f, 0.1f, 0.03f, 0.4f},
+                  {-0.1f, 0.45f, 0, -0.1f, 0.45f, 0.4f}, {-0.1f, 0.45f, 0.4f, -0.1f, 0.03f, 0.4f}};
+        out.push_back(std::move(c));
+    }
+    { // A child standing in the bind pose
+        const float s = 0.62f;
+        Case c{"standing child", Human("child", 41, s), std::vector<Bone>(41), {}};
+        c.want = {{0, 0.95f * s, 0, 0, 1.45f * s, 0}, {0, 1.62f * s, 0, 0, 1.62f * s, 0}, {0.1f * s, 0.9f * s, 0, 0.1f * s, 0.5f * s, 0},
+                  {0.1f * s, 0.5f * s, 0, 0.1f * s, 0.08f * s, 0}, {-0.1f * s, 0.9f * s, 0, -0.1f * s, 0.5f * s, 0}, {-0.1f * s, 0.5f * s, 0, -0.1f * s, 0.08f * s, 0}};
+        out.push_back(std::move(c));
+    }
+    { // A dog lying: the body 0.3 m down, every leg folded forward at its top
+        Case c{"lying dog", Dog(), std::vector<Bone>(22), {}};
+        for (int b : {1, 2, 3}) c.pose[b] = Moved(0, -0.3f, 0);
+        const int legs[4][2] = {{4, 5}, {6, 7}, {8, 9}, {10, 11}};
+        const float tops[4][3] = {{0.1f, 0.42f, 0.3f}, {-0.1f, 0.42f, 0.3f}, {0.1f, 0.42f, -0.3f}, {-0.1f, 0.42f, -0.3f}};
+        for (int l = 0; l < 4; l++) {
+            const float now[3] = {tops[l][0], 0.12f, tops[l][2]};
+            c.pose[legs[l][0]] = c.pose[legs[l][1]] = About(kDownToForward, tops[l], now);
+        }
+        c.want = {{0, 0.15f, -0.3f, 0, 0.15f, 0.3f}, {0, 0.15f, 0.3f, 0, 0.3f, 0.5f}};
+        for (int l = 0; l < 4; l++) c.want.push_back({tops[l][0], 0.12f, tops[l][2], tops[l][0], 0.12f, tops[l][2] + 0.39f});
+        out.push_back(std::move(c));
+    }
+    return out;
+}
+
+void Palette(const std::vector<Bone>& pose, float reg[256][4]) {
+    for (size_t b = 0; b < pose.size(); b++)
+        for (int k = 0; k < 3; k++) reg[3 * b + k][0] = pose[b].R[k][0], reg[3 * b + k][1] = pose[b].R[k][1], reg[3 * b + k][2] = pose[b].R[k][2], reg[3 * b + k][3] = pose[b].t[k];
+}
+} // namespace rigs
+
+void RigCase(const Gpu& g, PScene ps, int w, int h) {
+    using namespace GiSimCapsules;
+    const float yaw = -0.4f;
+    float vp[4][4];
+    CameraRows(ps, vp);
+    const std::vector<rigs::Case> cases = rigs::Cases();
+    { // which rig a palette size names
+        std::vector<Rig> rs;
+        for (const rigs::Case& c : cases) rs.push_back(c.rig);
+        bool ok = RigOf(rs, 40) == &rs[0] && RigOf(rs, 22) == &rs[2] && !RigOf(rs, 39);
+        rs.push_back(rigs::Human("adult again", 40, 1.0f));
+        ok = ok && !RigOf(rs, 40) && RigOf(GameRigs(), 40) == nullptr;
+        Check(ok, "Sim rigs: a palette size names its one rig; none or two rigs of that size give the fixed column");
+    }
+    const float spots[3][3] = {{14.0f, 0.0f, 12.5f}, {14.8f, 0.0f, 13.8f}, {13.6f, 0.0f, 14.6f}}; // in room A, in the camera's view, clear of the table and chair
+    std::vector<Sim> draws;
+    for (size_t i = 0; i < cases.size(); i++) {
+        const rigs::Case& c = cases[i];
+        static float reg[256][4];
+        std::memset(reg, 0, sizeof reg);
+        rigs::Palette(c.pose, reg);
+        const float* at = spots[i];
+        const float Wm[3][4] = {{std::cos(yaw), 0, std::sin(yaw), at[0]}, {0, 1, 0, at[1]}, {-std::sin(yaw), 0, std::cos(yaw), at[2]}};
+        for (int r = 0; r < 4; r++)
+            for (int col = 0; col < 4; col++) reg[188 + r][col] = vp[r][0] * Wm[0][col] + vp[r][1] * Wm[1][col] + vp[r][2] * Wm[2][col] + (col == 3 ? vp[r][3] : 0.0f);
+        double C[4][4], M[4][4];
+        ClipOf(reg, Chain{188, -1}, C);
+        if (!WorldOf(C, vp, M)) {
+            Check(false, std::string("Sim rigs: ") + c.name + ": the draw's world matrix");
+            continue;
+        }
+        GiSimCapsules::Capsule fit[kMaxPerSim];
+        const int n = FitRig(reg, c.rig.bones, c.rig, fit);
+        float worst = n == static_cast<int>(c.want.size()) ? 0.0f : 1e9f;
+        for (int k = 0; k < n && k < static_cast<int>(c.want.size()); k++)
+            for (int a = 0; a < 3; a++) worst = std::max({worst, std::fabs(fit[k].a[a] - c.want[k][a]), std::fabs(fit[k].b[a] - c.want[k][3 + a])});
+        std::printf("  Sim rigs: %s: %d capsules, ends within %.2f mm of the hand-placed joints\n", c.name, n, worst * 1e3f);
+        Check(n == static_cast<int>(c.want.size()) && worst < 0.01f, std::string("Sim rigs: ") + c.name + ": capsules from the bones within 1 cm");
+        Sim s{};
+        float median[3];
+        BoneMedian(reg, c.rig.bones, median);
+        Apply(M, median, s.root.p);
+        ToWorld(M, fit, n, s);
+        // the world ends: Wm applied to the hand-placed ones
+        float worldWorst = 0.0f;
+        for (int k = 0; k < n; k++)
+            for (int e = 0; e < 2; e++) {
+                const float* p = &c.want[k][3 * e];
+                const float* got = e ? s.c[k].b : s.c[k].a;
+                for (int a = 0; a < 3; a++) worldWorst = std::max(worldWorst, std::fabs(Wm[a][0] * p[0] + Wm[a][1] * p[1] + Wm[a][2] * p[2] + Wm[a][3] - got[a]));
+            }
+        Check(worldWorst < 0.01f, std::string("Sim rigs: ") + c.name + ": world capsules through the draw's chain within 1 cm");
+        draws.push_back(s);
+        // the same palette in another order (the neck's and a calf's entries swapped): the lengths break, no fit
+        std::vector<rigs::Bone> swapped = c.pose;
+        std::swap(swapped[c.rig.joints[1].bone], swapped[c.rig.joints[4].bone]);
+        if (i == 0) {
+            rigs::Palette(swapped, reg);
+            Check(FitRig(reg, c.rig.bones, c.rig, fit) == 0, "Sim rigs: a palette of another order is refused (the fixed column stays)");
+        }
+    }
+    const float cam[3] = {ps.eye.x, ps.eye.y, ps.eye.z};
+    const std::vector<Sim> sims = Merge(draws, cam, kGiPixelCasters);
+    GiPixelBlock block{};
+    const uint32_t added = Fill(block, sims, {});
+    Check(added == 3 && block.capsules == 18 && block.casters == 3, "Sim rigs: three Sims, six capsules each, one caster bound each");
+    { // a Sim that sits down in place is moved; one that keeps its pose is not
+        std::vector<Sim> standing = sims;
+        standing[0].n = 0; // the fixed column at the same root
+        GiPixelBlock b{};
+        Fill(b, sims, standing);
+        GiPixelBlock same{};
+        Fill(same, sims, sims);
+        Check(b.caster[0].moved != 0.0f && same.caster[0].moved == 0.0f, "Sim rigs: a pose change in place marks the Sim moved; the same pose does not");
+    }
+    // The three Sims' capsules in place of the harness's hand-made Sim: drawn, traced, against the CPU reference
+    ps.capsules.clear();
+    for (uint32_t i = 0; i < block.capsules; i++) {
+        const GiPixelCapsule& c = block.capsule[i];
+        ps.capsules.push_back({{c.a[0], c.a[1], c.a[2]}, c.r, {c.b[0], c.b[1], c.b[2]}, 0});
+    }
+    ps.casters.pop_back();
+    for (uint32_t i = 0; i < block.casters; i++) {
+        const GiPixelCaster& k = block.caster[i];
+        ps.casters.push_back({{k.lo[0], k.lo[1], k.lo[2], 1.0f}, {k.hi[0], k.hi[1], k.hi[2], 0}});
+    }
+    const Drawn dr = Draw(ps, w, h);
+    Kernel kernel(g, ps, dr);
+    const std::vector<Pixel> px = kernel.Dispatch(0, 1, 0.0f);
+    CheckOcclusion(ps, dr, px, 0.0f, 1, "Sim capsules from the bones: sitting adult, child, lying dog", 0.999);
 }
 
 // Every skinned vertex shader of the game's Shaders_Win32.precomp through Analyse (read-only)
@@ -972,6 +1154,8 @@ int main(int argc, char** argv) {
 
         // 6. Sim capsules from a synthetic skinned draw (XR-08), and the chain analysis over the game's shaders
         SimCase(g, ps, w, h);
+        // 7. Sim capsules fitted to the bones of synthetic rigs (XR-10)
+        RigCase(g, ps, w, h);
         if (!precomp.empty()) PrecompCase(precomp);
     }
     vkDestroyCommandPool(g.dev, g.pool, nullptr);
