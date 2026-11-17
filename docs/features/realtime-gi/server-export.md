@@ -131,7 +131,9 @@ Client exports, found by Apex with `GetProcAddress(GetModuleHandleW(L"d3d9.dll")
 | `RemixBridge_GiSolve(IDirect3DTexture9* target, uint32_t layer, uint32_t sceneTicket, uint32_t* pTicket)` | Names a target by id (section 2) and asks for a solve into it | `S_OK` and a ticket; `D3DERR_INVALIDCALL` for a texture that is not the bridge's or not DEFAULT |
 | `RemixBridge_GiPoll(uint32_t ticket)` | Reads the ticket's answer slot | `S_FALSE` pending, `S_OK` done, the server's error, `D3DERR_INVALIDCALL` for an unknown ticket |
 | `RemixBridge_GiCancel(uint32_t ticket)` | Frees the ticket; the server drops it when it sees it | `S_OK` |
-| `RemixBridge_GiQueryPoints(uint32_t ticket, void* out, uint32_t size)` | Copies a finished point-query answer (R-06) | as `GiPoll` |
+| `RemixBridge_GiQueryPoints(const float* points, uint32_t count, const float* scales, uint32_t lamps, uint32_t sceneTicket, uint32_t* pTicket)` | Sends up to 256 points (position, normal) and a weight a lamp in `Bridge_GiQuery`; the worker answers the irradiance there from the settled layers (R-06) | `S_OK` and a ticket; `D3DERR_WASSTILLDRAWING` while a query is in flight |
+| `RemixBridge_GiReadPoints(uint32_t ticket, float* out, uint32_t count)` | Polls the query ticket and copies the answer (four floats a point) | as `GiPoll` |
+| `RemixBridge_GiReadTouch(uint32_t lamp, float* box, uint32_t* texels)` | Copies the lamp's touch box: the box of the texels its sum layer lights over 0.5/255, written by its last settled solve (R-06) | `S_OK`; `S_FALSE` before such a solve |
 
 New bridge commands, all sent with `FlagBits::AsyncResult` so none waits for a response:
 
@@ -155,16 +157,18 @@ layout (the `QueryResultSlot` rule, `util/util_queryresults.h:29`).
 
 | Offset | Field | Writer |
 |---|---|---|
-| 0 | `magic` `'GI01'`, `layoutVersion` | server |
+| 0 | `magic` `'GI01'`, `layoutVersion` (3 since R-06) | server |
 | 8 | `level` (0 none, 1 compute, 2 rays), `capBits` (ray query, AS, float16 storage) | worker |
 | 16 | `heartbeat`: incremented by the play thread every pass | play thread |
-| 20 | `workerHeartbeat`, `lastError`, `jobsQueued`, `jobsDone`, `gpuUsLast` (counters for design §6) | worker |
-| 64 | 64 answer slots: `answeredSeq` (atomic), `hresult`, `kind`, `size` | server |
-| 1 KB | 2 submit slots of 448 KB: the scene (tier A proxy about 10 k triangles is about 360 KB as float3 positions plus 32-bit ids), lamp table, texel points | client |
-| 897 KB | 1 point-query answer slot, 96 KB | worker |
-| | Total about 1 MB of the client's address space | |
+| 20 | `workerHeartbeat`, `lastError`, `jobsQueued`, `jobsDone`, `gpuUsLast`, upload and slice times (counters for design §6) | worker |
+| 64 | `objectCounters`: counter words 14-21 of `RemixBridge_GiReadCounters` (mesh casters, bridge patch 0020) | worker |
+| 96 | 64 answer slots: `answeredSeq` (atomic), `hresult`, `kind`, `size` | server |
+| 2144 | 2 submit slots of 448 KB: the scene, lamp table, texel points | client |
+| 919680 | point-query answer: 256 points, four floats each (bridge patch 0021, R-06) | play thread |
+| 923792 | 256 touch boxes of 48 bytes, one a lamp (bridge patch 0021, R-06) | play thread |
+| | Total 936080 bytes (about 915 KB) of the client's address space. The per-pixel pass (patch 0019) has its own 64-byte `GiPixel` block (`gi/gi_pixel_block.h`) | |
 
-Sizes are [I] from design §3.9 and are fixed in R-03; a scene larger than a slot goes in parts with a part index in
+Offsets are [V] by the `static_assert`s in `util/util_gi.h` (layout version 3); a scene larger than a slot goes in parts with a part index in
 the submit command. The 1 MB comes on top of patch 0015's 1 MB; both are mapped only when used (memory-gains note).
 
 ## 8. Ticket and reset rules

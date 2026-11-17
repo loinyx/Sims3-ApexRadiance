@@ -1,10 +1,11 @@
 0018: GI server (real-time GI work packages R-03 and R-04). Client exports RemixBridge_GiOpen, RemixBridge_GiSubmit, RemixBridge_GiSolve, RemixBridge_GiPoll, RemixBridge_GiCancel and RemixBridge_GiReadCounters (client.giServer, default off). On the first open the server starts a worker thread with its own Vulkan device on DXVK's GPU (matched by deviceUUID through DXVK's interop interface; ray query and acceleration structures enabled when present, server.giMaxLevel). RemixBridge_GiSubmit sends a scene (triangles with a texel patch for each side, texels with their reflectance and target pixel) and a lamp table through two shared submit slots of 448 KB, in parts; the worker builds the ray structure or a grid and traces each texel's links once. A solve with a scene ticket computes one lamp's direct light and a fixed count of ray-free gathers (gi_solve.comp, one kernel for the ray-query and the compute level) in slices sized to server.giSliceUs (2000) of GPU time by GPU timestamps, and keeps the layers of lamps that did not change; a solve without one fills the prototype's pattern. The play thread copies finished results into the named DEFAULT-pool texture through a SYSTEMMEM staging texture and UpdateSurface, at Present and every 64 commands, at most server.giUploadBudgetKB (1024) a pass, a larger result in bands of rows, then publishes the ticket in a shared answer slot. Reset, ResetEx and device destroy answer open tickets D3DERR_DEVICELOST. Test: test-gi.cmd (test_gi_device). Needs Vulkan-Headers, volk and glslang in submodules\ (build.cmd fetches them).
-Applies after 0001-0014 and 0017 on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only), with or without 0015-0016.
+Applies after 0001-0014 and 0017 on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only); checked without 0015-0016.
 diff --git a/bridge/bridge.conf b/bridge/bridge.conf
-index 1a9e074c..d0b0c9ab 100644
+index ef9451ff23d8c097af3c973c50e777dcae0acf4e..97ded32da983cd3e2d62a95ff29f7911fa8c1228 100644
 --- a/bridge/bridge.conf
 +++ b/bridge/bridge.conf
-@@ -139,4 +139,47 @@
+@@ -138,6 +138,49 @@
+ 
  # client.asyncReadback = False
  
 +#
@@ -52,9 +53,10 @@ index 1a9e074c..d0b0c9ab 100644
 +
  
  #
+ # Server Settings
 diff --git a/bridge/src/client/d3d9_gi.cpp b/bridge/src/client/d3d9_gi.cpp
 new file mode 100644
-index 00000000..595e1ad1
+index 0000000000000000000000000000000000000000..d3f6d3b70b5a53f543497457c42818d0916c39d3
 --- /dev/null
 +++ b/bridge/src/client/d3d9_gi.cpp
 @@ -0,0 +1,259 @@
@@ -318,10 +320,11 @@ index 00000000..595e1ad1
 +  }
 +}
 diff --git a/bridge/src/client/d3d9_lss.def b/bridge/src/client/d3d9_lss.def
-index 1800e543..7b42f4a8 100644
+index a6b84e7213f82d7faeb92db5607586ceb81a949b..3f484ac237595a208e6a9bdcaee37fd73c0fa5e0 100644
 --- a/bridge/src/client/d3d9_lss.def
 +++ b/bridge/src/client/d3d9_lss.def
-@@ -25,2 +25,9 @@ EXPORTS
+@@ -24,3 +24,10 @@ EXPORTS
+   RemixBridge_ReadRenderTargetAsync
    RemixBridge_PollReadback
    RemixBridge_CancelReadback
 +
@@ -332,256 +335,20 @@ index 1800e543..7b42f4a8 100644
 +  RemixBridge_GiCancel
 +  RemixBridge_GiReadCounters
 diff --git a/bridge/src/client/meson.build b/bridge/src/client/meson.build
-index aa2b49a5..fc5ea089 100644
+index 5f6d3001c5dadd4ecfa60397624e5ba25bdf3539..a6f5b5b4d9408c6fdc829da862c25b009cda5ce1 100644
 --- a/bridge/src/client/meson.build
 +++ b/bridge/src/client/meson.build
-@@ -1,121 +1,122 @@
--#############################################################################
--# Copyright (c) 2022-2024, NVIDIA CORPORATION. All rights reserved.
--#
--# Permission is hereby granted, free of charge, to any person obtaining a
--# copy of this software and associated documentation files (the "Software"),
--# to deal in the Software without restriction, including without limitation
--# the rights to use, copy, modify, merge, publish, distribute, sublicense,
--# and/or sell copies of the Software, and to permit persons to whom the
--# Software is furnished to do so, subject to the following conditions:
--#
--# The above copyright notice and this permission notice shall be included in
--# all copies or substantial portions of the Software.
--#
--# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
--# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
--# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
--# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
--# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
--# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
--# DEALINGS IN THE SOFTWARE.
--#############################################################################
--
--d3d9_version = vcs_tag(
--  command: [python_interpreter.full_path(), global_src_root_norm + './scripts-common/echo.py', full_version],
--  input:   'version.rc.in',
--  output:  'version.rc')
--
--d3d9_res = wrc_generator.process(d3d9_version)
--
--d3d9_src = files([
--  'd3d9_async_readback.cpp',
--  'd3d9_bootstrap.cpp',
--  'd3d9_cubetexture.cpp',
--  'd3d9_device_base.cpp',
--  'd3d9_device.cpp',
--  'd3d9_indexbuffer.cpp',
--  'd3d9_lss.cpp',
--  'd3d9_module.cpp',
--  'd3d9_pixelshader.cpp',
--  'd3d9_query.cpp',
--  'd3d9_resource.cpp',
--  'd3d9_stateblock.cpp',
--  'd3d9_surface.cpp',
--  'd3d9_swapchain.cpp',
--  'd3d9_texture.cpp',
--  'd3d9_vertexbuffer.cpp',
--  'd3d9_vertexdeclaration.cpp',
--  'd3d9_vertexshader.cpp',
--  'd3d9_volume.cpp',
--  'd3d9_volumetexture.cpp',
--  'di_hook.cpp',
--  'message_channels.cpp',
--  'pch.cpp',
--  'remix_api.cpp',
--  'remix_state.cpp',
--  'window.cpp',
--])
--
--d3d9_header = files([
--  'base.h',
--  'client_options.h',
--  'd3d9_base_texture.h',
--  'd3d9_commonshader.h',
--  'd3d9_cubetexture.h',
--  'd3d9_device_base.h',
--  'd3d9_device.h',
--  'd3d9_indexbuffer.h',
--  'd3d9_lss.h',
--  'd3d9_pixelshader.h',
--  'd3d9_privatedata.h',
--  'd3d9_query.h',
--  'd3d9_query_result.h',
--  'd3d9_resource.h',
--  'd3d9_surface.h',
--  'd3d9_surfacebuffer_helper.h',
--  'd3d9_swapchain.h',
--  'd3d9_texture.h',
--  'd3d9_util.h',
--  'd3d9_vertexbuffer.h',
--  'd3d9_vertexdeclaration.h',
--  'd3d9_vertexshader.h',
--  'd3d9_volume.h',
--  'd3d9_volumetexture.h',
--  'swapchain_map.h',
--  'detours_common.h',
--  'di_hook.h',
--  'framework.h',
--  'lockable_buffer.h',
--  'message_channels.h',
--  'pch.h',
--  'remix_state.h',
--  'resource.h',
--  'shadow_map.h',
--  'window.h',
--])
--
--d3d9_def = files([
--  'd3d9_lss.def',
--])
--
--detours_include_path = include_directories('../../../submodules/Detours/src')
--
--thread_dep = dependency('threads')
--
--d3d9_dll = shared_library('d3d9', d3d9_header, d3d9_src, d3d9_res, 
--  sources             : [ bridge_version ],
--  dependencies        : [ thread_dep, util_dep, lib_version, lib_version, lib_commCtrl, tracy_dep ],
--  include_directories : [ bridge_include_path, util_include_path, detours_include_path, public_include_path ],
--  vs_module_defs      : 'd3d9_lss.def')
--
--
--ext_x86_path = meson.global_source_root().replace('\\', '/') + '/ext/x86/'
--ext_x64_path = meson.global_source_root().replace('\\', '/') + '/ext/x64/'
--
--if build_os == 'windows'
--custom_target('copy_d3d9_to_output',
--    output           : ['copy_d3d9_to_output'],
--    build_by_default : true,
--    depends          : [ d3d9_dll ],
--    command          : [copy_script_path, meson.current_build_dir(), output_dir, 'd3d9*'] )
--endif
-+#############################################################################
-+# Copyright (c) 2022-2024, NVIDIA CORPORATION. All rights reserved.
-+#
-+# Permission is hereby granted, free of charge, to any person obtaining a
-+# copy of this software and associated documentation files (the "Software"),
-+# to deal in the Software without restriction, including without limitation
-+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-+# and/or sell copies of the Software, and to permit persons to whom the
-+# Software is furnished to do so, subject to the following conditions:
-+#
-+# The above copyright notice and this permission notice shall be included in
-+# all copies or substantial portions of the Software.
-+#
-+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
-+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-+# DEALINGS IN THE SOFTWARE.
-+#############################################################################
-+
-+d3d9_version = vcs_tag(
-+  command: [python_interpreter.full_path(), global_src_root_norm + './scripts-common/echo.py', full_version],
-+  input:   'version.rc.in',
-+  output:  'version.rc')
-+
-+d3d9_res = wrc_generator.process(d3d9_version)
-+
-+d3d9_src = files([
-+  'd3d9_async_readback.cpp',
-+  'd3d9_bootstrap.cpp',
-+  'd3d9_cubetexture.cpp',
+@@ -31,6 +31,7 @@ d3d9_src = files([
+   'd3d9_async_readback.cpp',
+   'd3d9_bootstrap.cpp',
+   'd3d9_cubetexture.cpp',
 +  'd3d9_gi.cpp',
-+  'd3d9_device_base.cpp',
-+  'd3d9_device.cpp',
-+  'd3d9_indexbuffer.cpp',
-+  'd3d9_lss.cpp',
-+  'd3d9_module.cpp',
-+  'd3d9_pixelshader.cpp',
-+  'd3d9_query.cpp',
-+  'd3d9_resource.cpp',
-+  'd3d9_stateblock.cpp',
-+  'd3d9_surface.cpp',
-+  'd3d9_swapchain.cpp',
-+  'd3d9_texture.cpp',
-+  'd3d9_vertexbuffer.cpp',
-+  'd3d9_vertexdeclaration.cpp',
-+  'd3d9_vertexshader.cpp',
-+  'd3d9_volume.cpp',
-+  'd3d9_volumetexture.cpp',
-+  'di_hook.cpp',
-+  'message_channels.cpp',
-+  'pch.cpp',
-+  'remix_api.cpp',
-+  'remix_state.cpp',
-+  'window.cpp',
-+])
-+
-+d3d9_header = files([
-+  'base.h',
-+  'client_options.h',
-+  'd3d9_base_texture.h',
-+  'd3d9_commonshader.h',
-+  'd3d9_cubetexture.h',
-+  'd3d9_device_base.h',
-+  'd3d9_device.h',
-+  'd3d9_indexbuffer.h',
-+  'd3d9_lss.h',
-+  'd3d9_pixelshader.h',
-+  'd3d9_privatedata.h',
-+  'd3d9_query.h',
-+  'd3d9_query_result.h',
-+  'd3d9_resource.h',
-+  'd3d9_surface.h',
-+  'd3d9_surfacebuffer_helper.h',
-+  'd3d9_swapchain.h',
-+  'd3d9_texture.h',
-+  'd3d9_util.h',
-+  'd3d9_vertexbuffer.h',
-+  'd3d9_vertexdeclaration.h',
-+  'd3d9_vertexshader.h',
-+  'd3d9_volume.h',
-+  'd3d9_volumetexture.h',
-+  'swapchain_map.h',
-+  'detours_common.h',
-+  'di_hook.h',
-+  'framework.h',
-+  'lockable_buffer.h',
-+  'message_channels.h',
-+  'pch.h',
-+  'remix_state.h',
-+  'resource.h',
-+  'shadow_map.h',
-+  'window.h',
-+])
-+
-+d3d9_def = files([
-+  'd3d9_lss.def',
-+])
-+
-+detours_include_path = include_directories('../../../submodules/Detours/src')
-+
-+thread_dep = dependency('threads')
-+
-+d3d9_dll = shared_library('d3d9', d3d9_header, d3d9_src, d3d9_res, 
-+  sources             : [ bridge_version ],
-+  dependencies        : [ thread_dep, util_dep, lib_version, lib_version, lib_commCtrl, tracy_dep ],
-+  include_directories : [ bridge_include_path, util_include_path, detours_include_path, public_include_path ],
-+  vs_module_defs      : 'd3d9_lss.def')
-+
-+
-+ext_x86_path = meson.global_source_root().replace('\\', '/') + '/ext/x86/'
-+ext_x64_path = meson.global_source_root().replace('\\', '/') + '/ext/x64/'
-+
-+if build_os == 'windows'
-+custom_target('copy_d3d9_to_output',
-+    output           : ['copy_d3d9_to_output'],
-+    build_by_default : true,
-+    depends          : [ d3d9_dll ],
-+    command          : [copy_script_path, meson.current_build_dir(), output_dir, 'd3d9*'] )
-+endif
+   'd3d9_device_base.cpp',
+   'd3d9_device.cpp',
+   'd3d9_indexbuffer.cpp',
 diff --git a/bridge/src/server/gi_pattern.comp b/bridge/src/server/gi_pattern.comp
 new file mode 100644
-index 00000000..b81e0d5a
+index 0000000000000000000000000000000000000000..4aaed1e2749350039baec30e387489b7460b2929
 --- /dev/null
 +++ b/bridge/src/server/gi_pattern.comp
 @@ -0,0 +1,41 @@
@@ -628,7 +395,7 @@ index 00000000..b81e0d5a
 +}
 diff --git a/bridge/src/server/gi_server.h b/bridge/src/server/gi_server.h
 new file mode 100644
-index 00000000..462077a2
+index 0000000000000000000000000000000000000000..ca962e3c237e589c0b8773d3f72ca16cb741969e
 --- /dev/null
 +++ b/bridge/src/server/gi_server.h
 @@ -0,0 +1,364 @@
@@ -998,7 +765,7 @@ index 00000000..462077a2
 +}
 diff --git a/bridge/src/server/gi_solve.comp b/bridge/src/server/gi_solve.comp
 new file mode 100644
-index 00000000..0606d3c3
+index 0000000000000000000000000000000000000000..b1fd992c06a681c7341b7f5df971f4a3ab32bcc9
 --- /dev/null
 +++ b/bridge/src/server/gi_solve.comp
 @@ -0,0 +1,181 @@
@@ -1185,7 +952,7 @@ index 00000000..0606d3c3
 +}
 diff --git a/bridge/src/server/gi_worker.cpp b/bridge/src/server/gi_worker.cpp
 new file mode 100644
-index 00000000..3b4c1a09
+index 0000000000000000000000000000000000000000..8250c9f67b3eed23dc9ab2106e6cfc8aa84bc056
 --- /dev/null
 +++ b/bridge/src/server/gi_worker.cpp
 @@ -0,0 +1,1261 @@
@@ -2452,7 +2219,7 @@ index 00000000..3b4c1a09
 +}
 diff --git a/bridge/src/server/gi_worker.h b/bridge/src/server/gi_worker.h
 new file mode 100644
-index 00000000..bcb6ec86
+index 0000000000000000000000000000000000000000..649698b2b3fa68bc0e03f350f8bbd323734173aa
 --- /dev/null
 +++ b/bridge/src/server/gi_worker.h
 @@ -0,0 +1,71 @@
@@ -2528,46 +2295,59 @@ index 00000000..bcb6ec86
 +  void queueJob(const std::shared_ptr<Job>& job);
 +}
 diff --git a/bridge/src/server/main.cpp b/bridge/src/server/main.cpp
-index 5df29e6e..94cf4583 100644
+index a6eae83be7d4ce629eeae35ab801651b0e8ef717..aecb6acf0ff4931e550d0896136c7812d9c49949 100644
 --- a/bridge/src/server/main.cpp
 +++ b/bridge/src/server/main.cpp
-@@ -53,4 +53,5 @@
+@@ -50,6 +50,7 @@
+ #include "config/global_options.h"
  #include "server_options.h"
  #include "async_readback.h"
 +#include "gi_server.h"
  #include "../client/client_options.h"
  
-@@ -618,4 +619,5 @@ void ProcessDeviceCommandQueue() {
+ #include "../tracy/tracy.hpp"
+@@ -558,6 +559,7 @@ void ProcessDeviceCommandQueue() {
+       {
          GET_RES(pD3DDevice, gpD3DDevices);
          async_readback::dropAll();
 +        gi_server::dropAll();
          safeDestroy(pD3DDevice, pD3DDeviceHandle);
          gpD3DDevices.erase(pD3DDeviceHandle);
-@@ -762,4 +764,5 @@ void ProcessDeviceCommandQueue() {
+         ServerMessage { Commands::Bridge_Ack, currentUID };
+@@ -702,6 +704,7 @@ void ProcessDeviceCommandQueue() {
+       {
          GET_RES(pD3DDevice, gpD3DDevices);
          async_readback::dropAll();
 +        gi_server::dropAll();
          uint32_t* rawPresentationParameters = nullptr;
          DeviceBridge::get_data((void**) &rawPresentationParameters);
-@@ -784,4 +787,5 @@ void ProcessDeviceCommandQueue() {
+         D3DPRESENT_PARAMETERS PresentationParameters = getPresParamFromRaw(rawPresentationParameters);
+@@ -724,6 +727,7 @@ void ProcessDeviceCommandQueue() {
+       {
          GET_RES(pD3DDevice, gpD3DDevices);
          async_readback::dropAll();
 +        gi_server::dropAll();
          uint32_t* rawPresentationParameters = nullptr;
          DeviceBridge::get_data((void**) &rawPresentationParameters);
-@@ -823,4 +827,5 @@ void ProcessDeviceCommandQueue() {
+ 
+@@ -763,6 +767,7 @@ void ProcessDeviceCommandQueue() {
+ 
          const auto hresult = pD3DDevice->Present(pSourceRect, pDestRect, hwnd, pDirtyRegion);
          async_readback::poll();
 +        gi_server::poll(gpD3DResources);
          if (!SUCCEEDED(hresult)) {
            std::stringstream ss;
-@@ -1903,4 +1908,5 @@ void ProcessDeviceCommandQueue() {
+           ss << "Present() failed! Check all logs for reported errors.";
+@@ -1833,6 +1838,7 @@ void ProcessDeviceCommandQueue() {
+ 
          const auto hresult = pSwapChain->Present(pSourceRect, pDestRect, hwnd, pDirtyRegion, dwFlags);
          async_readback::poll();
 +        gi_server::poll(gpD3DResources);
  
          if (!SUCCEEDED(hresult)) {
-@@ -3087,4 +3093,33 @@ void ProcessDeviceCommandQueue() {
+           std::stringstream ss;
+@@ -2979,6 +2985,35 @@ void ProcessDeviceCommandQueue() {
+         gpD3DVolumes.erase(pHandle);
          break;
        }
 +      case Bridge_GiOpen:
@@ -2601,23 +2381,27 @@ index 5df29e6e..94cf4583 100644
 +      }
        /*
         * BridgeApi commands
-@@ -3495,4 +3530,5 @@ void ProcessDeviceCommandQueue() {
+        */
+@@ -3387,6 +3422,7 @@ void ProcessDeviceCommandQueue() {
+         dispatch(rpcHeader, (uint32_t) currentUID);
        }
        async_readback::onCommand();
 +      gi_server::onCommand(gpD3DResources);
      }
  
+     // Ensure the data position between client and server is in sync after processing the command
 diff --git a/bridge/src/server/meson.build b/bridge/src/server/meson.build
-index 4d418be8..f26a4bec 100644
+index 6eca0315aa0e962adc7190d1260e858c23b5dc97..ba7f1dfa879991344738eea48992677aded31e23 100644
 --- a/bridge/src/server/meson.build
 +++ b/bridge/src/server/meson.build
-@@ -22,4 +22,5 @@
+@@ -21,11 +21,34 @@
+ #############################################################################
  
  server_src = files([
 +	'gi_worker.cpp',
  	'main.cpp',
  	'module_processing.cpp',
-@@ -27,4 +28,26 @@ server_src = files([
+ 	'remix_api.cpp'
  ])
  
 +# The GI worker's Vulkan headers, loader (volk) and shader compiler are fetched by native/remix-bridge/build.cmd.
@@ -2644,7 +2428,9 @@ index 4d418be8..f26a4bec 100644
 +
  server_header = files([
  	'module_processing.h',
-@@ -49,8 +72,9 @@ server_resource = windows.compile_resources('NvRemixBridge.rc',
+ 	'server_options.h',
+@@ -47,10 +70,11 @@ server_resource = windows.compile_resources('NvRemixBridge.rc',
+ )
  
  server_exe = executable('NvRemixBridge', server_src, server_header, server_version, server_resource,
 -sources             : [ bridge_version ],
@@ -2656,195 +2442,25 @@ index 4d418be8..f26a4bec 100644
 +include_directories : [ bridge_include_path, util_include_path, public_include_path, gi_include_path ],
  win_subsystem       : 'windows')
  
+ if (cpu_family == 'x86_64') or (cpu_family == 'aarch64')
 diff --git a/bridge/src/util/meson.build b/bridge/src/util/meson.build
-index 273a1988..61856389 100644
+index 1c879f50f26b7b9b1b9e7ee11a76e67f2f3b0b7f..b0b678647cc7e284909a3b74deb8ae2862f9f04b 100644
 --- a/bridge/src/util/meson.build
 +++ b/bridge/src/util/meson.build
-@@ -1,89 +1,90 @@
--#############################################################################
--# Copyright (c) 2022-2024, NVIDIA CORPORATION. All rights reserved.
--#
--# Permission is hereby granted, free of charge, to any person obtaining a
--# copy of this software and associated documentation files (the "Software"),
--# to deal in the Software without restriction, including without limitation
--# the rights to use, copy, modify, merge, publish, distribute, sublicense,
--# and/or sell copies of the Software, and to permit persons to whom the
--# Software is furnished to do so, subject to the following conditions:
--#
--# The above copyright notice and this permission notice shall be included in
--# all copies or substantial portions of the Software.
--#
--# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
--# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
--# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
--# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
--# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
--# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
--# DEALINGS IN THE SOFTWARE.
--#############################################################################
--
--util_src = files([
--	'util_bridgecommand.cpp',
--	'util_filesys.cpp',
--	'util_gdi.cpp',
--	'util_messagechannel.cpp',
--	'util_process.cpp',
--	'util_remixapi.cpp',
--	'util_seh.cpp',
--	'util_semaphore.cpp',
--	'util_sharedheap.cpp',
--	'util_sharedmemory.cpp',
--	'util_monitor.cpp',
--	'util_perfcounters.cpp',
--	'util_queryresults.cpp',
--	'log/log.cpp',
--	'config/config.cpp',
--	'config/global_options.cpp',
--])
--
--util_header = files([
--	'util_atomiccircularqueue.h',
--	'util_bridge_assert.h',
--	'util_bridge_state.h',
--	'util_bridgecommand.h',
--	'util_bytes.h',
--	'util_circularbuffer.h',
--	'util_circularqueue.h',
--	'util_commands.h',
--	'util_common.h',
--	'util_detourtools.h',
--    'util_devicecommand.h',
--	'util_filesys.h',
--	'util_gdi.h',
--	'util_guid.h',
--	'util_hack_d3d_debug.h',
--	'util_ipcchannel.h',
--	'util_messagechannel.h',
--	'util_once.h',
--	'util_process.h',
--	'util_remixapi.h',
--	'util_scopedlock.h',
--	'util_seh.h',
--	'util_semaphore.h',
--	'util_serializable.h',
--	'util_serializer.h',
--	'util_sharedheap_allocator.h',
--	'util_sharedmemory.h',
--	'util_singleton.h',
--	'util_texture_and_volume.h',
--	'util_uploadparts.h',
--	'util_version.h',
--	'util_monitor.h',
--	'util_perfcounters.h',
--	'util_queryresults.h',
--	'util_readbacks.h',
--	'log/log.h',
--	'log/log_strings.h',
--	'config/config.h',
--	'config/global_options.h',
--])
--
--util_lib = static_library('util', util_src, util_header,
--  include_directories : [ bridge_include_path, public_include_path  ],
--)
--
--util_dep = declare_dependency(
--  link_with           : [ util_lib ])
-+#############################################################################
-+# Copyright (c) 2022-2024, NVIDIA CORPORATION. All rights reserved.
-+#
-+# Permission is hereby granted, free of charge, to any person obtaining a
-+# copy of this software and associated documentation files (the "Software"),
-+# to deal in the Software without restriction, including without limitation
-+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
-+# and/or sell copies of the Software, and to permit persons to whom the
-+# Software is furnished to do so, subject to the following conditions:
-+#
-+# The above copyright notice and this permission notice shall be included in
-+# all copies or substantial portions of the Software.
-+#
-+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
-+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
-+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-+# DEALINGS IN THE SOFTWARE.
-+#############################################################################
-+
-+util_src = files([
-+	'util_bridgecommand.cpp',
-+	'util_filesys.cpp',
-+	'util_gdi.cpp',
-+	'util_messagechannel.cpp',
-+	'util_process.cpp',
-+	'util_remixapi.cpp',
-+	'util_seh.cpp',
-+	'util_semaphore.cpp',
-+	'util_sharedheap.cpp',
-+	'util_sharedmemory.cpp',
-+	'util_monitor.cpp',
-+	'util_perfcounters.cpp',
-+	'util_queryresults.cpp',
-+	'log/log.cpp',
-+	'config/config.cpp',
-+	'config/global_options.cpp',
-+])
-+
-+util_header = files([
-+	'util_atomiccircularqueue.h',
-+	'util_bridge_assert.h',
-+	'util_bridge_state.h',
-+	'util_bridgecommand.h',
-+	'util_bytes.h',
-+	'util_circularbuffer.h',
-+	'util_circularqueue.h',
-+	'util_commands.h',
-+	'util_common.h',
-+	'util_detourtools.h',
-+    'util_devicecommand.h',
-+	'util_filesys.h',
-+	'util_gdi.h',
-+	'util_guid.h',
-+	'util_hack_d3d_debug.h',
-+	'util_ipcchannel.h',
-+	'util_messagechannel.h',
-+	'util_once.h',
-+	'util_process.h',
-+	'util_remixapi.h',
-+	'util_scopedlock.h',
-+	'util_seh.h',
-+	'util_semaphore.h',
-+	'util_serializable.h',
-+	'util_serializer.h',
-+	'util_sharedheap_allocator.h',
-+	'util_sharedmemory.h',
-+	'util_singleton.h',
-+	'util_texture_and_volume.h',
-+	'util_uploadparts.h',
-+	'util_version.h',
-+	'util_monitor.h',
-+	'util_perfcounters.h',
-+	'util_queryresults.h',
-+	'util_readbacks.h',
+@@ -75,6 +75,7 @@ util_header = files([
+ 	'util_perfcounters.h',
+ 	'util_queryresults.h',
+ 	'util_readbacks.h',
 +	'util_gi.h',
-+	'log/log.h',
-+	'log/log_strings.h',
-+	'config/config.h',
-+	'config/global_options.h',
-+])
-+
-+util_lib = static_library('util', util_src, util_header,
-+  include_directories : [ bridge_include_path, public_include_path  ],
-+)
-+
-+util_dep = declare_dependency(
-+  link_with           : [ util_lib ])
+ 	'log/log.h',
+ 	'log/log_strings.h',
+ 	'config/config.h',
 diff --git a/bridge/src/util/util_commands.h b/bridge/src/util/util_commands.h
-index 111dff30..f37384b5 100644
+index 65090f0e68d70d2d127eea182b1f4ad693a5a7ac..d57ce08bc1853d558135da23645c7417214ef611 100644
 --- a/bridge/src/util/util_commands.h
 +++ b/bridge/src/util/util_commands.h
-@@ -64,4 +64,9 @@ namespace Commands {
+@@ -63,6 +63,11 @@ namespace Commands {
+     // prevent leaks.
      Bridge_UnlinkResource,
      Bridge_UnlinkVolumeResource,
 +    // GI server exports (client/d3d9_gi.cpp), all sent with FlagBits::AsyncResult.
@@ -2854,7 +2470,9 @@ index 111dff30..f37384b5 100644
 +    Bridge_GiCancel,
      // These are not actually official D3D9 API calls.
      IDirect3DDevice9Ex_LinkSwapchain,
-@@ -500,4 +505,8 @@ namespace Commands {
+     IDirect3DDevice9Ex_LinkBackBuffer,
+@@ -496,6 +501,10 @@ namespace Commands {
+     case Bridge_SharedHeap_AddSeg: return "SharedHeap_AddSeg";
      case Bridge_SharedHeap_Alloc: return "SharedHeap_Alloc";
      case Bridge_SharedHeap_Dealloc: return "SharedHeap_Dealloc";
 +    case Bridge_GiOpen: return "Bridge_GiOpen";
@@ -2863,9 +2481,10 @@ index 111dff30..f37384b5 100644
 +    case Bridge_GiCancel: return "Bridge_GiCancel";
      
      case Bridge_UnlinkResource: return "Bridge_UnlinkResource";
+     case Bridge_UnlinkVolumeResource: return "Bridge_UnlinkVolumeResource";
 diff --git a/bridge/src/util/util_gi.h b/bridge/src/util/util_gi.h
 new file mode 100644
-index 00000000..8550db1c
+index 0000000000000000000000000000000000000000..d8a80a71f57adbd1428c427f79ddb8e8f91663c4
 --- /dev/null
 +++ b/bridge/src/util/util_gi.h
 @@ -0,0 +1,161 @@
@@ -3031,309 +2650,21 @@ index 00000000..8550db1c
 +  }
 +}
 diff --git a/bridge/test/rtx/unit/meson.build b/bridge/test/rtx/unit/meson.build
-index d55d7f51..d0067648 100644
+index e523b21dc80a6450df739dd8ce4f4fab39d7ee4a..f91e64f3c9011f901b9c6214745b1480b670968b 100644
 --- a/bridge/test/rtx/unit/meson.build
 +++ b/bridge/test/rtx/unit/meson.build
-@@ -1,148 +1,148 @@
--
--tests = []
--
--# Command History Test
--if (cpu_family == 'x86_64')
--cmd_history_exe = executable(
--    'command_history',  files('test_cmd_queue.cpp'),
--    include_directories : util_include_path,
--    dependencies : util_dep,
--    win_subsystem : 'console')
--test('command_history', cmd_history_exe)
--tests += cmd_history_exe
--endif
--
--# Remix API Serializing Test
--if (cpu_family == 'x86_64')
--    name_suff = 'x64'
--else
--    name_suff = 'x86'
--endif
--write_name = 'test_remix_api_write'
--write_exe = write_name + '_'  + name_suff
--tests += executable(
--    write_exe,  files(write_name + '.cpp'),
--    include_directories : [util_include_path, public_include_path ],
--    dependencies : util_dep,
--    win_subsystem : 'console',)
--read_name = 'test_remix_api_read'
--read_exe = read_name + '_'  + name_suff
--tests += executable(
--    read_exe,  files(read_name + '.cpp'),
--    include_directories : [util_include_path, public_include_path ],
--    dependencies : util_dep,
--    win_subsystem : 'console')
--
--# Bridge Logic Tests
--logic_tests = [ 'sent_state', 'query_results', 'ipc_queue_wait', 'upload_parts', 'present_semaphore', 'response_lifetime', 'shared_heap_allocator' ]
--foreach name : logic_tests
--  logic_exe = executable(
--      'test_' + name + '_' + name_suff,  files('test_' + name + '.cpp'),
--      include_directories : [ util_include_path, public_include_path, include_directories('../../../src/client') ],
--      dependencies : util_dep,
--      win_subsystem : 'console')
--  test(name, logic_exe)
--  tests += logic_exe
--endforeach
--
--# Rewind mode: the server side on a D3D9 device (x64), and the client's park through the bridge (x86 app).
--if (cpu_family == 'x86_64')
--rewind_server_exe = executable(
--    'test_rewind_server_x64',  files('test_rewind_server.cpp'),
--    include_directories : [ util_include_path, public_include_path, include_directories('../../../src/server') ],
--    dependencies : util_dep,
--    win_subsystem : 'console')
--test('rewind_server', rewind_server_exe, is_parallel : false)
--tests += rewind_server_exe
--else
--tests += executable(
--    'test_rewind_device_x86',  files('test_rewind_device.cpp'),
--    include_directories : [ util_include_path, public_include_path ],
--    dependencies : util_dep,
--    win_subsystem : 'console')
--endif
--
--if (cpu_family == 'x86_64')
--python = find_program('python')
--remix_api_test_script = join_paths(meson.current_source_dir(), 'test_remix_api.py')
--remix_api_test_artifacts_dir = join_paths(meson.global_build_root(), 'test_artifacts', 'remix_api')
--variant = 'x64_2_x86'
--test('remix_api__' + variant,
--     python,
--     args : [remix_api_test_script,
--             '--' + variant,
--             '--executablesDir', meson.current_build_dir(),
--             '--artifactDir', remix_api_test_artifacts_dir ])
--variant = 'x86_2_x64'
--test('remix_api__' + variant,
--     python,
--     args : [remix_api_test_script,
--             '--' + variant,
--             '--executablesDir', meson.current_build_dir(),
--             '--artifactDir', remix_api_test_artifacts_dir ])
--endif
--
--# Remix API Bridge App Tests
--# Each x86 app runs against the client and server from a regular bridge build in _output.
+@@ -67,7 +67,7 @@ endif
+ 
+ # Remix API Bridge App Tests
+ # Each x86 app runs against the client and server from a regular bridge build in _output.
 -bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device', 'async_readback_device' ]
--if (cpu_family == 'x86')
--foreach name : bridge_app_tests
--  tests += executable(
--      'test_' + name + '_x86',  files('test_' + name + '.cpp'),
--      include_directories : [ public_include_path ],
--      win_subsystem : 'console')
--endforeach
--endif
--if (cpu_family == 'x86_64')
--foreach name : bridge_app_tests
--  test(name,
--       python,
--       args : [join_paths(meson.current_source_dir(), 'test_remix_api_bridge_app.py'),
--               '--testExe', 'test_' + name + '_x86.exe',
--               '--executablesDir', meson.current_build_dir(),
--               '--bridgeDir', join_paths(meson.global_source_root(), '_output'),
--               '--artifactDir', join_paths(meson.global_build_root(), 'test_artifacts', name) ],
--       is_parallel : name != 'shared_heap_upload_device',
--       timeout : 300)
--endforeach
--foreach mode : [ 'on', 'off' ]
--  name = 'rewind_device_' + mode
--  test(name,
--       python,
--       args : [join_paths(meson.current_source_dir(), 'test_remix_api_bridge_app.py'),
--               '--testExe', 'test_rewind_device_x86.exe',
--               '--executablesDir', meson.current_build_dir(),
--               '--bridgeDir', join_paths(meson.global_source_root(), '_output'),
--               '--artifactDir', join_paths(meson.global_build_root(), 'test_artifacts', name) ],
--       env : { 'REMIX_REWIND_TEST_CASE' : mode },
--       is_parallel : false,
--       timeout : 300)
--endforeach
--foreach resource : [ 'surface', 'vb', 'ib' ]
--  name = 'shared_heap_upload_device_oom_' + resource
--  test(name,
--       python,
--       args : [join_paths(meson.current_source_dir(), 'test_remix_api_bridge_app.py'),
--               '--testExe', 'test_shared_heap_upload_device_x86.exe',
--               '--executablesDir', meson.current_build_dir(),
--               '--bridgeDir', join_paths(meson.global_source_root(), '_output'),
--               '--artifactDir', join_paths(meson.global_build_root(), 'test_artifacts', name) ],
--       env : { 'REMIX_SHARED_UPLOAD_TEST_CASE' : 'oom_' + resource },
--       is_parallel : false,
--       timeout : 300)
--endforeach
--endif
--if (cpu_family == 'x86_64')
--test('async_readback_device_off',
--     python,
--     args : [join_paths(meson.current_source_dir(), 'test_remix_api_bridge_app.py'),
--             '--testExe', 'test_async_readback_device_x86.exe',
--             '--executablesDir', meson.current_build_dir(),
--             '--bridgeDir', join_paths(meson.global_source_root(), '_output'),
--             '--artifactDir', join_paths(meson.global_build_root(), 'test_artifacts', 'async_readback_device_off') ],
--     env : { 'REMIX_ASYNC_READBACK_TEST_CASE' : 'off' },
--     is_parallel : false,
--     timeout : 300)
--endif
--alias_target('unit_tests', tests)
--
-+
-+tests = []
-+
-+# Command History Test
-+if (cpu_family == 'x86_64')
-+cmd_history_exe = executable(
-+    'command_history',  files('test_cmd_queue.cpp'),
-+    include_directories : util_include_path,
-+    dependencies : util_dep,
-+    win_subsystem : 'console')
-+test('command_history', cmd_history_exe)
-+tests += cmd_history_exe
-+endif
-+
-+# Remix API Serializing Test
-+if (cpu_family == 'x86_64')
-+    name_suff = 'x64'
-+else
-+    name_suff = 'x86'
-+endif
-+write_name = 'test_remix_api_write'
-+write_exe = write_name + '_'  + name_suff
-+tests += executable(
-+    write_exe,  files(write_name + '.cpp'),
-+    include_directories : [util_include_path, public_include_path ],
-+    dependencies : util_dep,
-+    win_subsystem : 'console',)
-+read_name = 'test_remix_api_read'
-+read_exe = read_name + '_'  + name_suff
-+tests += executable(
-+    read_exe,  files(read_name + '.cpp'),
-+    include_directories : [util_include_path, public_include_path ],
-+    dependencies : util_dep,
-+    win_subsystem : 'console')
-+
-+# Bridge Logic Tests
-+logic_tests = [ 'sent_state', 'query_results', 'ipc_queue_wait', 'upload_parts', 'present_semaphore', 'response_lifetime', 'shared_heap_allocator' ]
-+foreach name : logic_tests
-+  logic_exe = executable(
-+      'test_' + name + '_' + name_suff,  files('test_' + name + '.cpp'),
-+      include_directories : [ util_include_path, public_include_path, include_directories('../../../src/client') ],
-+      dependencies : util_dep,
-+      win_subsystem : 'console')
-+  test(name, logic_exe)
-+  tests += logic_exe
-+endforeach
-+
-+# Rewind mode: the server side on a D3D9 device (x64), and the client's park through the bridge (x86 app).
-+if (cpu_family == 'x86_64')
-+rewind_server_exe = executable(
-+    'test_rewind_server_x64',  files('test_rewind_server.cpp'),
-+    include_directories : [ util_include_path, public_include_path, include_directories('../../../src/server') ],
-+    dependencies : util_dep,
-+    win_subsystem : 'console')
-+test('rewind_server', rewind_server_exe, is_parallel : false)
-+tests += rewind_server_exe
-+else
-+tests += executable(
-+    'test_rewind_device_x86',  files('test_rewind_device.cpp'),
-+    include_directories : [ util_include_path, public_include_path ],
-+    dependencies : util_dep,
-+    win_subsystem : 'console')
-+endif
-+
-+if (cpu_family == 'x86_64')
-+python = find_program('python')
-+remix_api_test_script = join_paths(meson.current_source_dir(), 'test_remix_api.py')
-+remix_api_test_artifacts_dir = join_paths(meson.global_build_root(), 'test_artifacts', 'remix_api')
-+variant = 'x64_2_x86'
-+test('remix_api__' + variant,
-+     python,
-+     args : [remix_api_test_script,
-+             '--' + variant,
-+             '--executablesDir', meson.current_build_dir(),
-+             '--artifactDir', remix_api_test_artifacts_dir ])
-+variant = 'x86_2_x64'
-+test('remix_api__' + variant,
-+     python,
-+     args : [remix_api_test_script,
-+             '--' + variant,
-+             '--executablesDir', meson.current_build_dir(),
-+             '--artifactDir', remix_api_test_artifacts_dir ])
-+endif
-+
-+# Remix API Bridge App Tests
-+# Each x86 app runs against the client and server from a regular bridge build in _output.
 +bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device', 'async_readback_device', 'gi_device' ]
-+if (cpu_family == 'x86')
-+foreach name : bridge_app_tests
-+  tests += executable(
-+      'test_' + name + '_x86',  files('test_' + name + '.cpp'),
-+      include_directories : [ public_include_path ],
-+      win_subsystem : 'console')
-+endforeach
-+endif
-+if (cpu_family == 'x86_64')
-+foreach name : bridge_app_tests
-+  test(name,
-+       python,
-+       args : [join_paths(meson.current_source_dir(), 'test_remix_api_bridge_app.py'),
-+               '--testExe', 'test_' + name + '_x86.exe',
-+               '--executablesDir', meson.current_build_dir(),
-+               '--bridgeDir', join_paths(meson.global_source_root(), '_output'),
-+               '--artifactDir', join_paths(meson.global_build_root(), 'test_artifacts', name) ],
-+       is_parallel : name != 'shared_heap_upload_device',
-+       timeout : 300)
-+endforeach
-+foreach mode : [ 'on', 'off' ]
-+  name = 'rewind_device_' + mode
-+  test(name,
-+       python,
-+       args : [join_paths(meson.current_source_dir(), 'test_remix_api_bridge_app.py'),
-+               '--testExe', 'test_rewind_device_x86.exe',
-+               '--executablesDir', meson.current_build_dir(),
-+               '--bridgeDir', join_paths(meson.global_source_root(), '_output'),
-+               '--artifactDir', join_paths(meson.global_build_root(), 'test_artifacts', name) ],
-+       env : { 'REMIX_REWIND_TEST_CASE' : mode },
-+       is_parallel : false,
-+       timeout : 300)
-+endforeach
-+foreach resource : [ 'surface', 'vb', 'ib' ]
-+  name = 'shared_heap_upload_device_oom_' + resource
-+  test(name,
-+       python,
-+       args : [join_paths(meson.current_source_dir(), 'test_remix_api_bridge_app.py'),
-+               '--testExe', 'test_shared_heap_upload_device_x86.exe',
-+               '--executablesDir', meson.current_build_dir(),
-+               '--bridgeDir', join_paths(meson.global_source_root(), '_output'),
-+               '--artifactDir', join_paths(meson.global_build_root(), 'test_artifacts', name) ],
-+       env : { 'REMIX_SHARED_UPLOAD_TEST_CASE' : 'oom_' + resource },
-+       is_parallel : false,
-+       timeout : 300)
-+endforeach
-+endif
-+if (cpu_family == 'x86_64')
-+test('async_readback_device_off',
-+     python,
-+     args : [join_paths(meson.current_source_dir(), 'test_remix_api_bridge_app.py'),
-+             '--testExe', 'test_async_readback_device_x86.exe',
-+             '--executablesDir', meson.current_build_dir(),
-+             '--bridgeDir', join_paths(meson.global_source_root(), '_output'),
-+             '--artifactDir', join_paths(meson.global_build_root(), 'test_artifacts', 'async_readback_device_off') ],
-+     env : { 'REMIX_ASYNC_READBACK_TEST_CASE' : 'off' },
-+     is_parallel : false,
-+     timeout : 300)
-+endif
-+alias_target('unit_tests', tests)
-+
+ if (cpu_family == 'x86')
+ foreach name : bridge_app_tests
+   tests += executable(
 diff --git a/bridge/test/rtx/unit/test_gi_device.cpp b/bridge/test/rtx/unit/test_gi_device.cpp
 new file mode 100644
-index 00000000..2dceeb68
+index 0000000000000000000000000000000000000000..2245e37002b6d10ef3e043b5bb3e712bae66bd0b
 --- /dev/null
 +++ b/bridge/test/rtx/unit/test_gi_device.cpp
 @@ -0,0 +1,625 @@

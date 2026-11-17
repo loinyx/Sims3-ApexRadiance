@@ -22,6 +22,12 @@ where meson >nul 2>&1 || (echo meson not on PATH: pip install --user meson ninja
 
 set REMIX_GI_TEST_SCENE=%TEMP%\ApexGiServerTest\gi_scene.bin
 pwsh -NoProfile -Command "& '%HERE%..\..\tools\gi_server_test\run.ps1' -TestArgs '--dump','%REMIX_GI_TEST_SCENE%'" || (echo FAILED: the offline solve & exit /b 1)
+rem The lots of 60, 120 and 200 lamps (rebake_check.cpp --dump), each lamp scoped to its room grown by one room: modes
+rem lots (list-scoped dispatch) and lots-full (server.giListDispatch = False) solve every lamp and print the GPU time a layer.
+set LOTS=%TEMP%\ApexGiServerTest\lots
+if not exist "%LOTS%" mkdir "%LOTS%"
+pwsh -NoProfile -Command "& '%HERE%..\..\tools\gi_server_test\run.ps1' -Rebake -TestArgs '--no-cpu','--dump','%LOTS%'" || (echo FAILED: the lots & exit /b 1)
+set REMIX_GI_TEST_LOTS=%LOTS%\gi_lot60.bin;%LOTS%\gi_lot120.bin;%LOTS%\gi_lot200.bin
 
 call "%VSDIR%\VC\Auxiliary\Build\vcvarsall.bat" x86 >nul || exit /b 1
 pushd "%SRC%\bridge" || exit /b 1
@@ -32,8 +38,8 @@ meson compile -C _t_x86 test_gi_device_x86 || (popd & exit /b 1)
 popd
 
 set UNIT=%SRC%\bridge\test\rtx\unit
-set RUNS=on compute off stock
-if defined DXVK_X64 set RUNS=on compute off stock dxvk dxvk-compute
+set RUNS=on compute off stock lots lots-full
+if defined DXVK_X64 set RUNS=on compute off stock lots lots-full dxvk dxvk-compute
 for %%m in (%RUNS%) do (
   set REMIX_GI_TEST_CASE=%%m
   set REMIX_GI_TEST_DXVK=

@@ -10,9 +10,11 @@
 //       batched 8 lamps a submission (close to GPU time); the per-dispatch submit floor.
 // Checked: no light crosses a story (no stair hole; the house is convex, so a ray out of a window never comes back);
 // every lamp lights its own room; layers are finite; the parallel layers equal the serial ones; compose = full solve.
-// Read-only: prints to stdout, writes no file.
+// Read-only: prints to stdout, writes no file but with --dump.
 //   --lots <a,b,..>  lamp counts of the lots (60,120,200)   --density <n>  server texels a metre (1)
 //   --rays <n>       server rays a texel (256)              --no-cpu / --no-gpu   skip a part   --device <text>
+//   --dump <dir>     each lot as the bridge server takes it, in check.cpp's --dump layout (gi_lot<n>.bin; the reference
+//                    means are zero), each lamp scoped to its room grown by one room, for the bridge's test-gi.cmd (R-06)
 #define main SolveMain // check.cpp's scene, device and solve code as they are
 #include "check.cpp"
 #undef main
@@ -277,8 +279,52 @@ Scene ServerScene(const BigLot& b, int density) {
     return sc;
 }
 
+// Writes the lot in check.cpp's --dump layout. A lamp's region box is its room grown by one room in x and z (the doors'
+// reach, wp/X-REBAKE.md region scope) on its story; the solve's layers are unscoped.
+void DumpLot(const Scene& sc, const BigLot& b, const Result& r, uint32_t nRays, const std::string& path) {
+    const size_t T = sc.texels.size(), L = sc.lamps.size();
+    const std::vector<uint8_t> scene = WireScene(sc, std::min(nRays, 1024u), 16, kShadowRays);
+    std::vector<WireLamp> lamps;
+    long outside = 0, lit = 0;
+    std::vector<double> perLamp;
+    for (size_t l = 0; l < L; l++) {
+        const BigLamp& d = b.lamp[l];
+        const float rx = std::floor((d.pos[0] - kMargin) / kRoomSize), rz = std::floor((d.pos[2] - kMargin) / kRoomSize), foot = 3.0f * d.story;
+        WireLamp w{{d.pos[0], d.pos[1], d.pos[2]}, d.radius, {d.col[0], d.col[1], d.col[2]}, 0,
+                   {kMargin + (rx - 1) * kRoomSize - 0.1f, foot - 0.1f, kMargin + (rz - 1) * kRoomSize - 0.1f},
+                   {kMargin + (rx + 2) * kRoomSize + 0.1f, foot + 3.1f, kMargin + (rz + 2) * kRoomSize + 0.1f}};
+        lamps.push_back(w);
+        long n = 0;
+        for (size_t t = 0; t < T; t++) {
+            const float* dir = &r.direct[(l * T + t) * 4];
+            const float* ind = &r.ind[(l * T + t) * 4];
+            if (std::max({dir[0] + ind[0], dir[1] + ind[1], dir[2] + ind[2]}) <= 0.5f / 255.0f) continue;
+            n++;
+            const float* p = sc.texels[t].pos;
+            bool in = true;
+            for (int c = 0; c < 3; c++) in = in && p[c] >= w.boxMin[c] && p[c] <= w.boxMax[c];
+            outside += in ? 0 : 1;
+        }
+        lit += n;
+        perLamp.push_back(static_cast<double>(n));
+    }
+    std::printf("  [dump] sum layer > 0.5/255: a lamp lights median %.0f texels (max %.0f) of %zu; %ld of %ld lit texels lie outside the lamps' boxes\n",
+                Pct(perLamp, 0.5), Pct(perLamp, 1.0), T, outside, lit);
+    std::vector<int32_t> rooms;
+    for (const Texel& t : sc.texels) rooms.push_back(static_cast<int32_t>(t.pos[3]));
+    const std::vector<float> means(L * 5 * 2, 0.0f);
+    const uint32_t head[5] = {0x34524947u, static_cast<uint32_t>(T), static_cast<uint32_t>(L), static_cast<uint32_t>(scene.size()), static_cast<uint32_t>(L * sizeof(WireLamp))};
+    std::vector<uint8_t> out;
+    Put(out, head, 5), Put(out, scene.data(), scene.size()), Put(out, lamps.data(), lamps.size()), Put(out, rooms.data(), rooms.size());
+    Put(out, r.direct.data(), r.direct.size()), Put(out, r.ind.data(), r.ind.size()), Put(out, means.data(), means.size());
+    FILE* f = std::fopen(path.c_str(), "wb");
+    const bool written = f && std::fwrite(out.data(), 1, out.size(), f) == out.size();
+    if (f) std::fclose(f);
+    Check(written, "the lot written to " + path + " (" + std::to_string(out.size() / 1024) + " KB)");
+}
+
 constexpr int kBatchBounces = 16; // the settle count measured per lamp is 13 to 17
-void GpuPart(const Gpu& g, const BigLot& b, int density, uint32_t nRays) {
+void GpuPart(const Gpu& g, const BigLot& b, int density, uint32_t nRays, const std::string& dump) {
     const Scene sc = ServerScene(b, density);
     const size_t T = sc.texels.size(), L = sc.lamps.size();
     std::printf("\n[server] %d lamps on %s: %zu triangles, %zu texels at %d a metre, %u rays a texel\n", b.lamps, g.name.c_str(), sc.mesh.tris.size(), T, density, nRays);
@@ -316,6 +362,7 @@ void GpuPart(const Gpu& g, const BigLot& b, int density, uint32_t nRays) {
         Check(finite, tag + "every layer is finite");
         Check(ownLit, tag + "every lamp's indirect light reaches its own room");
         Check(cross == 0, tag + "no light crosses a story (" + std::to_string(cross) + " texel values)");
+        if (!dump.empty() && (rays || !g.rays)) DumpLot(sc, b, r, nRays, dump + "/gi_lot" + std::to_string(b.lamps) + ".bin");
     }
 }
 } // namespace
@@ -323,7 +370,7 @@ void GpuPart(const Gpu& g, const BigLot& b, int density, uint32_t nRays) {
 int main(int argc, char** argv) {
     std::vector<int> lots = {60, 120, 200};
     bool cpu = true, gpu = true;
-    std::string want;
+    std::string want, dump;
     int density = 1, nRays = 256;
     for (int i = 1; i < argc; i++) {
         const std::string a = argv[i];
@@ -334,6 +381,7 @@ int main(int argc, char** argv) {
         } else if (a == "--no-cpu") cpu = false;
         else if (a == "--no-gpu") gpu = false;
         else if (a == "--device" && i + 1 < argc) want = argv[++i];
+        else if (a == "--dump" && i + 1 < argc) dump = argv[++i];
         else if (a == "--density" && i + 1 < argc) density = std::clamp(std::atoi(argv[++i]), 1, 8);
         else if (a == "--rays" && i + 1 < argc) nRays = std::clamp(std::atoi(argv[++i]), 1, 4096);
         else {
@@ -352,7 +400,7 @@ int main(int argc, char** argv) {
         const BigLot b = MakeLot(n);
         std::printf("\n==== %d lamps: %d rooms, %d house tiles a story (%d x %d m)\n", n, b.nx * b.nz * 2, HouseTiles(b), b.nx * kRoomSize, b.nz * kRoomSize);
         if (cpu) CpuPart(b);
-        if (gpu) GpuPart(g, b, density, static_cast<uint32_t>(nRays));
+        if (gpu) GpuPart(g, b, density, static_cast<uint32_t>(nRays), dump);
     }
     if (gpu) {
         vkDestroyCommandPool(g.dev, g.pool, nullptr);

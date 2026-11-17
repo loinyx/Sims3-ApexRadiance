@@ -75,7 +75,7 @@ Each package's full report is `wp/<id>.md`. Other branches still running: `gi/s0
 | R-03 | in progress | gi/r-03 |  | R-01 | bridge build |
 | R-04 | open |  |  | R-02, R-03 |  |
 | R-05 | open |  |  | R-03, S2-01 |  |
-| R-06 | open |  |  | R-04 |  |
+| R-06 | done (self-test: point queries, touch boxes, region-scoped dispatch; patch 0020) | gi/r-06 | - | R-04 | S3-05, S2-01 |
 | R-07 | open |  |  | R-04, S0-G2 |  |
 | R-08 | done (verdict: no-go now) | gi/r-08 | 94953b4 | - | nothing waits on it |
 | R-G1 | open |  |  | R-05, S2-01 | game run |
