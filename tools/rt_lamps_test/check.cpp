@@ -4686,6 +4686,83 @@ static void MeshCasterSetChecks() {
     Check(set.GetStats().models == 0 && !set.NextFetch(lite), "mesh casters: cleared");
 }
 // (MC-4) the object feed: seeded objects reach the set without moving, and an object whose mesh is in the tiles leaves the 3D test
+// (MC-4b) A feature turned on inside a world, and kept rooms marked again as the tiles change without their solve
+static void MeshMarkChecks() {
+    float m16[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 110.0f, 0, 12.0f, 1};
+    std::vector<ObjectLegs::Placed> out;
+    { // the hooks learn objects with the output off (the sink not open yet); opening it sends them all, once
+        ObjectLegs::Feed feed(false);
+        feed.Attach(1, 0xA), feed.Move(1, m16);
+        feed.Move(2, m16), feed.Attach(2, 0xB);
+        feed.Attach(3, 0xC); // (no matrix yet)
+        feed.Attach(4, 0xD), feed.Move(4, m16), feed.Remove(4);
+        feed.Shape(1, 0x1000);
+        feed.Take(out);
+        Check(out.empty() && feed.Seed() == 0 && feed.KnownCount() == 3, "mesh mark: with the output off the objects are learnt, nothing goes out, a seed sends nothing");
+        const size_t sent = feed.SetOn(true);
+        feed.Take(out);
+        Check(sent == 2 && out.size() == 2 && std::none_of(out.begin(), out.end(), [](const ObjectLegs::Placed& p) { return p.flags || p.id == 4; }) && feed.Seeded() == 2,
+              "mesh mark: opening the output sends the objects attached before it (LITE and matrix known), not a removed one");
+        Check(feed.ObjectOf(0x1000) == 1 && feed.SetOn(true) == 0, "mesh mark: shapes learnt with the output off name their object; opening again sends nothing more");
+        feed.Move(3, m16);
+        feed.Take(out);
+        Check(out.size() == 1 && out[0].id == 3, "mesh mark: an object completed after the opening goes out as before");
+        feed.SetOn(false);
+        feed.Remove(1), feed.Move(2, m16);
+        feed.Take(out);
+        Check(out.empty() && feed.KnownCount() == 2, "mesh mark: closed again, moves and removals are learnt and nothing goes out");
+    }
+    { // the mark generation: an object into or out of the tiles, a mesh resolved, an object added or removed; not a move inside the tiles
+        MeshCasterSet::Set set;
+        RtLampProxy::Lot lot;
+        lot.stories.resize(1);
+        lot.stories[0].w = lot.stories[0].h = 32;
+        lot.worldToLot[3][0] = -100.0f;
+        const auto append = [&] {
+            RtLampProxy::Mesh mesh;
+            set.AppendTo(mesh, lot.worldToLot, 32.0f, 32.0f);
+        };
+        MeshCasterSet::Object o{1, 0xA};
+        o.m[0] = o.m[5] = o.m[10] = 1.0f, o.m[3] = 110.0f, o.m[11] = 12.0f;
+        uint32_t g = set.MarkGen();
+        set.Apply(o);
+        Check(set.MarkGen() != g, "mesh mark: a new object moves the mark generation"), g = set.MarkGen();
+        MeshCasterSet::Model top;
+        top.pos = {-0.5f, 0.8f, -0.5f, 0.5f, 0.8f, -0.5f, 0.5f, 0.8f, 0.5f};
+        top.tri = {0, 1, 2};
+        set.Fetched(0xA, std::move(top));
+        Check(set.MarkGen() != g, "mesh mark: a mesh resolved moves it"), g = set.MarkGen();
+        append();
+        Check(set.InTiles(1) && set.MarkGen() != g, "mesh mark: the object into the tiles moves it"), g = set.MarkGen();
+        o.m[3] = 111.0f, set.Apply(o), append();
+        Check(set.InTiles(1) && set.MarkGen() == g, "mesh mark: a move inside the tiles leaves it (the same records marked)");
+        o.m[3] = 300.0f, set.Apply(o), append();
+        Check(!set.InTiles(1) && set.MarkGen() != g, "mesh mark: a move out of the lot (out of the tiles) moves it"), g = set.MarkGen();
+        o.m[3] = 110.0f, set.Apply(o), append();
+        Check(set.InTiles(1) && set.MarkGen() != g, "mesh mark: moved back in, it moves again"), g = set.MarkGen();
+        set.Apply({1, 0xA, {}, true});
+        Check(set.MarkGen() != g, "mesh mark: a removal moves it"), g = set.MarkGen();
+        append();
+        Check(!set.InTiles(1) && set.MarkGen() != g, "mesh mark: the removed object leaves the tiles at their next upload");
+    }
+    { // a kept room's records marked again (what KeptRooms does without a solve): the marks' key tells a changed table
+        ObjectLegs::Feed feed;
+        feed.Attach(1, 0xA), feed.Move(1, m16), feed.Attach(3, 0xC), feed.Move(3, m16);
+        feed.Shape(1, 0x1000), feed.Shape(3, 0x2000);
+        std::vector<RoomLightTests::Record> solved(2);
+        solved[0].shape = 0x1000, solved[1].shape = 0x2000;
+        ObjectLegs::MarkMeshed(solved, feed, [](uint64_t) { return false; }); // (at its solve nothing was in the tiles)
+        std::vector<RoomLightTests::Record> now = solved;
+        ObjectLegs::MarkMeshed(now, feed, [](uint64_t id) { return id == 3; }); // (object 3's mesh reached the tiles later)
+        Check(ObjectLegs::MeshedKey(now) != ObjectLegs::MeshedKey(solved) && now[1].meshed && !now[0].meshed, "mesh mark: a mesh reaching the tiles after the solve marks its record now");
+        std::vector<RoomLightTests::Record> back = now;
+        ObjectLegs::MarkMeshed(back, feed, [](uint64_t) { return false; });
+        Check(ObjectLegs::MeshedKey(back) == ObjectLegs::MeshedKey(solved), "mesh mark: the object out of the tiles again: the solve's table is drawn again (same key)");
+        std::vector<RoomLightTests::Record> other = solved;
+        ObjectLegs::MarkMeshed(other, feed, [](uint64_t id) { return id == 1; });
+        Check(ObjectLegs::MeshedKey(other) != ObjectLegs::MeshedKey(now), "mesh mark: another record marked gives another key");
+    }
+}
 static void MeshFeedChecks() {
     float m16[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 110.0f, 0, 12.0f, 1}; // (the hook's float4x4: translation in 12..14)
     ObjectLegs::Feed feed;
@@ -4777,6 +4854,7 @@ static void MeshFeedChecks() {
     set.AppendTo(mesh2, lot.worldToLot, 32.0f, 32.0f);
     ObjectLegs::MarkMeshed(room.rec, feed, [&set](uint64_t id) { return set.InTiles(id); });
     Check(!room.rec[0].meshed && !set.InTiles(1), "mesh feed: once the tiles drop the object, its record (if read again) keeps the game's blockers");
+    MeshMarkChecks();
 }
 static void StairSetChecks() {
     using MeshOcclusion::Triangle;

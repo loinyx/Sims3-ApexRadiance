@@ -2590,12 +2590,15 @@ std::shared_ptr<const RtLampGpu::BlockerTable> DrawnTableOf(const std::vector<Ro
 // blocker's fields in place (0x0069AD80, the disc's 0x0069BB47 and on), so the addresses a solve read keep following the object: no
 // room memory is touched here, and an object gone leaves an old copy (CopyBytes) or, its memory reused by a shape of the same kind,
 // wrong geometry until its solve. shortcut: room 0's table and the directional maps wait for the solve, an object new in the room or
-// dragged into another casts there at its solve; a live room 0 needs RecordRoom's r.blk republished
+// dragged into another casts there at its solve; a live room 0 needs RecordRoom's r.blk republished. (MC-4b) Which records the mesh
+// casters' tiles darken (ObjectLegs::MarkMeshed) follows the tiles here also with the live tables off: ObjectLegs::MeshGen
 constexpr DWORD kLiveMs = 100; // every kept room's blockers are read this often at most, a room with a moved record each frame (RoomLightTests::LiveDue)
 uint32_t g_liveStep = 0; // (render thread) ObjectLegs::Gen as this frame's round began: its maps share one read, beside the lamps it reads
 struct LiveTable {
     uint32_t version = 0, gen = 0, step = 0;
-    uint64_t key = 0; // 0: its objects stand where its solve read them
+    uint32_t mesh = 0;  // (MC-4b) ObjectLegs::MeshGen as its records were last marked
+    uint64_t moves = 0; // LiveTests' key (0: its objects stand where its solve read them)
+    uint64_t key = 0; // 0: its table is its solve's (no object moved, the same records left to the mesh casters)
     std::shared_ptr<const RtLampGpu::BlockerTable> blk;
     int header = -1;
 };
@@ -6491,39 +6494,55 @@ bool LiveMovedWithin(const void* room, unsigned long ms, unsigned long maxRun) {
 }
 void KeptRooms(uintptr_t mgr, int cls, std::vector<KeptRef>& out) {
     out.clear();
-    const uint32_t gen = LiveGen(), step = g_liveStep;
+    const uint32_t gen = LiveGen(), step = g_liveStep, mesh = ObjectLegs::MeshGen();
     std::vector<std::pair<uint64_t, std::shared_ptr<const KeptRoom>>> due;
     {
         std::lock_guard<std::mutex> lk(g_keptMx);
         for (const auto& [key, k] : g_kept)
             if (k->mgr == mgr && k->cls == cls && !k->tailWhy && k->tail.size() == k->texels.size()) {
                 out.push_back(KeptRef{reinterpret_cast<const void*>(k->room), k->id, k->version});
-                if (!gen || !k->physical) continue;
+                if (!k->physical) continue;
+                // (MC-4b) also without live tables: a room's records marked again when the mesh casters' tiles changed
                 const auto l = g_live.find(key);
-                if (l == g_live.end() || l->second.version != k->version || RoomLightTests::LiveDue(gen, l->second.gen, step, l->second.step, l->second.key)) due.emplace_back(key, k);
+                if (l == g_live.end() || l->second.version != k->version || l->second.mesh != mesh || (!gen && l->second.moves) ||
+                    (gen && RoomLightTests::LiveDue(gen, l->second.gen, step, l->second.step, l->second.moves)))
+                    due.emplace_back(key, k);
                 else out.back().live = l->second.key;
             }
     }
     if (g_live.size() > 512) g_live.clear(); // (rooms of lots left behind: read again)
     for (const auto& [key, k] : due) { // (the game's memory read outside the lock)
         LiveTable& l = g_live[key];
-        const uint64_t was = l.version == k->version ? l.key : 0;
-        uint64_t now = 0;
+        const bool same = l.version == k->version;
+        const uint64_t was = same ? l.moves : 0, wasKey = same ? l.key : 0;
+        const bool remark = !same || l.mesh != mesh;
+        uint64_t moves = 0, now = 0;
         try {
             RoomLightTests::Room t;
-            const bool fresh = LiveTests(*k, was, t, now);
-            if (fresh) {
-                float header = -1.0f;
-                l.blk = DrawnTableOf(t.rec, header), l.header = static_cast<int>(header);
-                if (KeptLog() && !was) LOG_INFO(std::format("[LiveTable] Story {} room {}: its 3D test follows an object ahead of the solve", k->story, k->id));
+            bool fresh = gen && LiveTests(*k, remark ? 0 : was, t, moves);
+            if (!fresh && !moves && (remark || was)) { // (no object moved: its solve's records, marked as the tiles stand now)
+                t.rec = k->tests.rec;
+                for (RoomLightTests::Record& r : t.rec) r.posts.clear();
+                ObjectLegs::Fill(t);
+                fresh = true;
+            }
+            if (!fresh) now = wasKey; // (the same moves, the same marks: its live table stays)
+            else if (const uint64_t marks = ObjectLegs::MeshedKey(t.rec); moves || marks != ObjectLegs::MeshedKey(k->tests.rec)) {
+                now = (moves ^ marks * 1099511628211ull) | 1;
+                if (now != wasKey) {
+                    float header = -1.0f;
+                    l.blk = DrawnTableOf(t.rec, header), l.header = static_cast<int>(header);
+                }
+                if (KeptLog() && moves && !was) LOG_INFO(std::format("[LiveTable] Story {} room {}: its 3D test follows an object ahead of the solve", k->story, k->id));
+                if (KeptLog() && !moves && !wasKey) LOG_INFO(std::format("[LiveTable] Story {} room {}: its records left to the mesh casters changed ahead of the solve", k->story, k->id));
             }
         } catch (...) {
-            now = 0; // (no memory: its solve's table)
+            moves = now = 0; // (no memory: its solve's table)
         }
         if (!now) l.blk.reset(), l.header = -1;
-        // (room 0's table waits for its solve: holding its solve would keep the old shadow for the whole drag)
-        if (now != was && k->id != 0) NoteLiveMove(reinterpret_cast<const void*>(k->room));
-        l.version = k->version, l.gen = gen, l.step = step, l.key = now;
+        // (room 0's table waits for its solve: holding its solve would keep the old shadow for the whole drag; a mark alone holds nothing)
+        if (moves != was && k->id != 0) NoteLiveMove(reinterpret_cast<const void*>(k->room));
+        l.version = k->version, l.gen = gen, l.step = step, l.mesh = mesh, l.moves = moves, l.key = now;
         for (KeptRef& r : out)
             if (r.room == reinterpret_cast<const void*>(k->room)) r.live = now;
     }
