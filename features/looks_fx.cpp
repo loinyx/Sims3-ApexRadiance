@@ -1184,11 +1184,15 @@ bool Instance::Run(IDirect3DDevice9* dev, size_t technique, IDirect3DSurface9* t
     IUnknown* curVs = nullptr; IUnknown* curPs = nullptr;
     dev->SetVertexDeclaration(decl_);
 
-    dev->StretchRect(target, nullptr, colorSurf_, nullptr, D3DTEXF_NONE); // technique start: picture -> COLOR
-    bool dirty = false, stencilCleared = false;
+    // picture -> COLOR only before a pass that samples COLOR, when the picture changed since the last copy (the technique's
+    // start, then after a pass that drew to the picture): the same COLOR a pass reads, without the copies nothing read
+    // (MXAO's early passes read COLOR into their own textures; 0.03 ms at 1080p, 0.16 ms at 4K a copy)
+    bool dirty = true, stencilCleared = false;
     for (const Pass& pass : tech.passes)
     {
-        if (dirty) { dev->StretchRect(target, nullptr, colorSurf_, nullptr, D3DTEXF_NONE); dirty = false; }
+        bool readsColor = false;
+        for (const Binding& bd : pass.bind) readsColor |= fx.textures[fx.samplers[bd.sampler].texture].semantic == "COLOR";
+        if (dirty && readsColor) { dev->StretchRect(target, nullptr, colorSurf_, nullptr, D3DTEXF_NONE); dirty = false; }
 
         IDirect3DSurface9* rts[4] = {};
         IDirect3DTexture9* rtTex[4] = {};
