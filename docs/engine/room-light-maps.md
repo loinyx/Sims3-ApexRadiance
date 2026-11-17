@@ -69,6 +69,8 @@ manager (per story)
   +0x230 room hash: buckets +0x234, count +0x238; node: +0 = room id, +0x10 = room, +0x24 = "no_hash24", +0x80 = next
   +0x280 byte flag (unverified meaning; printed by F8 as flag280)
   +0x288 byte: high lighting quality (the active lot / Build mode)
+  +0x260 / +0x264 / +0x268  tile pointer grid / width (row stride) / height; tile(x, z) = [+0x260][z × width + x] (0x006A42D0)
+  +0x3B8 LotLightingManager, its interface at +4 (strobe, black-light, sunny, foggy room sets; see "Reflectance source")
 room ("LightingRoom")
 ```
 
@@ -402,6 +404,67 @@ solve).
 - **Ambients.** `+0x110` is the ambient the floor and wall shaders draw (`c4`), `+0x120` the copy objects use, and
   `+0x650` the ambient sampler's copy. Rooms without a lamp of their own can hold exactly the same ambient.
 
+### Reflectance source (real-time GI S0-12, static reading of Steam 1.67)
+
+The game keeps one colour per floor quarter-tile and averages it per room. That mean is the only surface colour the
+lighting code reads. Nothing else in the lighting code reads a wall or object colour.
+
+- **Tile sections** (verified). A tile (manager grid above) has four triangle sections of 0x14 bytes at `+0x7C`: `+0x7C` room
+  id, `+0x80` floor colour (ARGB8, field 9), `+0x84` field 10 (default `0xC0C0C0C0`, no reader found in the lighting code),
+  `+0x88`/`+0x89` bytes, `+0x8A`/`+0x8C` words. The setter is `0x006A9630(field, value, section, b1, b0)`, the getter by
+  section mask is `0x006AA340(field, mask)` (mask to section through the table `0x00FF34AC`, highest set bit), the getter by
+  position is `0x006AA6D0(field, x, z)` (section from the position inside the tile, `0x006AA390`). Room membership of a tile
+  is `0x006A9760(roomId)` (any section).
+- **Who writes the colour** (verified). A new tile gets white (`0x006A884C`: field 9 = `0xFFFFFFFF`). Floor painting
+  calls `0x006A61A0(x, z, level, colour, section, ...)` from `0x00A89EF1`. The colour comes from `0x00A9E7E0(key)`, a cached
+  lookup of the floor pattern's catalog resource (`0x00A9D760` loads it, `0x00C99A20` returns resource `+0xB8`). Removing
+  a floor pattern stores white again (`0x00A8947A`). `0x006A61A0` stores `0.7 × c + 0.3 × Y` per byte, with
+  `Y = 0.12 × c[16..23] + 0.67 × c[8..15] + 0.21 × c[0..7]` (`0x00FE4FC8`, `0x00FF358C`, `0x00FF3588`, `0x00FBA7D8`,
+  `0x00F9D504`). The colour is pulled 30 % toward grey, and A is mixed the same way. It is repacked in ARGB order (`0x006A3FA0`).
+  Two generic callers of the setter (`0x006A49E5`, `0x006A6C7A`) pass the field through; they were not traced.
+- **Catalog colour** (verified load, meaning inferred). The ProductPattern catalog class (vtable `0x0107C238`, names
+  "Lot/CTCatalog/ProductPattern/...") defaults `+0xB8` to `0xE0E0E0` (`0x00C9A11F`). Its loader `0x00C9A390` reads 4 bytes from
+  the resource into it (`0x00C9A999`). So the colour is authored per pattern, one value per pattern. It is probably the
+  pattern's mean or swatch colour. Whether a Create-a-Style recolour changes it is unknown, because the lookup is keyed
+  by pattern resource.
+- **Room mean** (verified). `0x0069FF20` (thiscall room; called from the surface colour pass `0x006A0F00` and from the
+  ambient step's empty-light path `0x006A0FB8`) walks tiles `x` in `[0, +0xC0)`, `z` in `[0, +0xC4)` at grid offset
+  (`+0x1C`, `+0x24`). For every tile of the room it adds section 0's colour (`0x0069ED20`: ARGB8 to `(R, G, B, R) / 255`).
+  It divides by the count and keeps only products: `+0x140 = min(mean × +0x120 × 6.0, 1.35)` and
+  `+0x130 = min(+0x120 × 2.0, 1.35)` (`0x00FB2F68`, `0x00F98A58`, `0x00FF338C`). The mean itself is not stored. A room with
+  no tile divides by zero, and `minps` then returns 1.35.
+- **Point query that nobody uses** (verified). The room-mode rig gather `0x006BBDE0` calls `0x006A1660(out, rig +0x140)` at
+  `0x006BBE5D`. Through `0x006A1510` that returns the floor colour under the rig centre (section by position, only if
+  the tile belongs to the room; default 0.65 grey `0x00FF2BA4`) and passes it to `0x006BB2F0`, which ignores it (S0-09). It
+  looks like a dropped floor-bounce input.
+
+**For the bounce:** the per-room floor reflectance is the mean of section-0 `+0x80` colours over the room's tiles,
+exactly the loop of `0x0069FF20`. It can be read at any time (plain memory, written only on floor edits and tile
+creation), and once per room on a solve is enough. Recovering it from `+0x140` would need `+0x120 > 0` and no clamp, so read the
+tiles instead. The values are 8-bit sRGB-like and already 30 % desaturated, so linearise before use (inferred). Walls
+and furniture have no colour in the lighting data: keep `kIndoorReflection` for them, or tint it by the floor hue.
+Wall patterns use the same ProductPattern class, so a wall pattern's `+0xB8` can be had through the catalog. Where a
+wall stores its pattern key was not traced.
+
+**Room manager `+0x3B8`** (verified). It is set once from the 6th argument of the manager init `0x006A8620` (`0x006A866F`).
+The caller `0x00ADB620` passes `owner + 4`, where the owner is the LotLightingManager (constructor `0x00ADD2C0`, vtables
+`0x01068148` / `0x01068110`). It holds four room sets (EASTL trees): sunny (anchor `+0x58`), foggy (`+0x74`), black-lit
+(`+0x90`) and the strobe delay map (`+0xAC`; container names "Lighting/LotLightingManager/m...RoomIDs" /
+"mRoomIDStrobeDelayMap"). Vfunc `+0x30` (`0x00ADC2D0`, reached through `0x006A4270`) is "room is black-lit". Vfunc `+0x34`
+(`0x00ADCB20`, reached through `0x006A42A0`) is "room has a strobe delay". It returns the room's current strobe value in
+`f`, recomputed from the clock and a frame stamp (`0x00ADC4C0`). Rooms enter the map through the script call
+`World_SetRoomStrobeDelay`, which strobe lights use; the floor shaders "FloorWithStrobelight..." are the matching
+shaders. So the rig binder's clamp `min(c × (1 + f), 0.5 × (1 + f))` is the strobe-light flash and applies only in
+rooms with a strobe light.
+
+**`[0x01158D30]`** (verified code, option name from GraphicsRules.sgr). `0x006B71F7` sets it to `([[0x011D753C] + 0x40] == 2)`
+at render setup. `[0x011D753C]` is the render config. `+0x40` is its shader tier, requested from `owner + 0x14` in
+`0x007A0810` and then checked against the card in `0x0079B870`. The card's tier comes from `0x0079AEC0`: 0 for SM3, 1 or
+3 for SM2, 4 or 5 below that. When the tier is 3 or better and `+0x48` (`RenderForceMinspecShaders`, read in
+`0x0079B450`) is set, it drops to 2. A requested tier is kept only if the card allows it (`0x0079F690`). Tier 2 is the
+minspec shader path. GraphicsRules.sgr sets `RenderForceMinspecShaders 1` only for the option `AdvancedRendering = Off`,
+which is the default only below `cardLevelLowmedium`. On an RTX card with Advanced Rendering on, the byte is 0.
+
 ### Open items / unverified
 
 - `0x0069EC40`, `0x006AB210`, `0x00963DD0` in the normalisation/ambient step; room+0x100, +0x280.
@@ -413,6 +476,13 @@ solve).
 
 | Address | Name / role | Evidence |
 |---|---|---|
+| `0x0069FF20` | Room mean floor colour into the specular probe multipliers `+0x140` / `+0x130` | S0-12 reading |
+| `0x006A61A0` | Stores a floor pattern colour (30 % toward grey) in a tile section, field 9 | S0-12 reading |
+| `0x006A9630` / `0x006AA340` / `0x006AA6D0` | Tile section field setter / getter by mask / getter by position | S0-12 reading |
+| `0x006A1660` -> `0x006A1510` | Floor colour under a point of the room (default 0.65); called by the rig gather, result unused | S0-12 reading |
+| `0x00A9E7E0` | Floor pattern key to catalog colour (ProductPattern `+0xB8`, default `0xE0E0E0`) | S0-12 reading |
+| `0x00ADD2C0` | LotLightingManager constructor; its `+4` interface is room manager `+0x3B8` | S0-12 reading |
+| `0x006B71F7` | `[0x01158D30]` = render config shader tier `== 2` (minspec shaders) | S0-12 reading |
 | `0x006C6AB0` | `AddWorldLightsToLot`: thiscall(treeLevel, room) ret 4. Room light list = own-floor lot lights (`0x006C6990(room, 1)`); for room 0 of level 0 once more (`0x006C6990(room, 0)`); for room 0 also world lights around the lot (`0x006B66B0`) | `fn_006c6ab0.c`; level_light_share.cpp header; lot_edge_lighting pattern `55 8B EC 83 E4 F0 83 EC 34 53 56 33 DB F6 05 ?? ?? ?? ?? 01 57 8B F9 75 30 83 0D` |
 | `0x006C6B08`, `0x006C6B2D` | The two calls of `0x006C6990` inside it; the level-0 test is `cmp [edi+0x1A0],0 / jnz` at `0x006C6B16` | level_light_share `kLevelGatherCalls`; notebook "Andares" |
 | `0x006C5816`, `0x006C7094` | Callers of `0x006C6AB0`: room creation / room update | level_light_share `kGatherCalls` |
