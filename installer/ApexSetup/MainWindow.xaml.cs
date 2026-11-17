@@ -787,10 +787,18 @@ public sealed partial class MainWindow : Window
     string? _smoothFor, _smoothError;
     bool _smoothFps; // this session set Apex's frame limit to 60 when Smooth Motion was turned on
     bool _fillingSmooth;
+    string? _smoothPending; // why a removal could not turn Smooth Motion off, shown once the row reads the driver again
+
+    // after a removal (Engine.Remove may have turned Smooth Motion off): the row reads the driver again; a failure is logged and shown
+    void AfterFrameGenOff()
+    {
+        _smoothFor = null;
+        if (Engine.TakeFrameGenOffError() is { } e) { _smoothPending = e; App.Log(new InvalidOperationException("Smooth Motion: " + e)); }
+    }
 
     void RefreshSmooth(State s, Game g)
     {
-        if (_smoothFor != g.Exe) { _smoothFor = g.Exe; _smooth = SmoothMotion.Read(g.Exe); _smoothError = null; }
+        if (_smoothFor != g.Exe) { _smoothFor = g.Exe; _smooth = SmoothMotion.Read(g.Exe); _smoothError = _smoothPending; _smoothPending = null; }
         var sm = _smooth!;
         // no NVIDIA card (or no driver to ask): no row; an NVIDIA card that cannot run it: the row, off, with the reason
         SmoothCard.Visibility = sm.Card is null && sm.Error is null ? Visibility.Collapsed : Visibility.Visible;
@@ -810,19 +818,14 @@ public sealed partial class MainWindow : Window
     void OnSmoothToggle(object sender, RoutedEventArgs e)
     {
         if (_fillingSmooth || _game is not { } g || _smooth is null) return;
-        _smoothError = SmoothMotion.Set(SmoothToggle.IsOn, g.Exe);
+        // (the preview writes nothing, as the dry run)
+        _smoothError = Preview is not null ? "Dry run: Setup changes nothing." : SmoothMotion.Set(SmoothToggle.IsOn, g.Exe);
         if (_smoothError is null) _smooth = SmoothMotion.Read(g.Exe);
-        // turned on: Apex's frame limit into 60 to 90 fps (60 when there is none or it is outside), the pace frame generation needs
-        if (_smoothError is null && SmoothToggle.IsOn && Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") != "1" && Preview is null)
-            try
-            {
-                var toml = Engine.ApexToml(Scan.DocumentsFor(g));
-                var text = File.Exists(toml) ? File.ReadAllText(toml) : "";
-                var (next, _) = Engine.WithFpsLimitInRange(text);
-                if (next != text) { Directory.CreateDirectory(Path.GetDirectoryName(toml)!); File.WriteAllText(toml, next); _smoothFps = true; }
-            }
-            catch (Exception ex) { App.Log(ex); }
         else App.Log(new InvalidOperationException("Smooth Motion: " + _smoothError));
+        // turned on: Apex's frame limit to 60 only when there is none (a limit the player chose stays); turned off: left as it is
+        if (_smoothError is null && SmoothToggle.IsOn)
+            try { _smoothFps = Engine.SetFpsLimitIfNone(g, "NVIDIA Smooth Motion"); }
+            catch (Exception ex) { App.Log(ex); }
         RefreshComponents();
     }
 
@@ -1125,7 +1128,12 @@ public sealed partial class MainWindow : Window
             TaskList.Children.Clear();
         }
         installBar.Value = 0;
-        var rows = dels.Select(c => AddTask(host, T("Remove {0}", Name(c)))).Concat(order.Select(c => AddTask(host, Name(c)))).ToList();
+        // removing the bridge or Apex turns Setup's Smooth Motion profile off (Engine.Remove): its own row
+        var smoothOff = _smooth is { On: true } && dels.Any(Engine.TurnsFrameGenOff);
+        var rows = dels.Select(c => AddTask(host, T("Remove {0}", Name(c)))).ToList();
+        if (smoothOff) rows.Add(AddTask(host, T("Turn off {0}", "NVIDIA Smooth Motion")));
+        var first = rows.Count;
+        rows.AddRange(order.Select(c => AddTask(host, Name(c))));
         rows.Add(AddTask(host, T("Fix incompatible settings")));
         void Mark(int active)
         {
@@ -1139,7 +1147,7 @@ public sealed partial class MainWindow : Window
             touched |= p.Fraction >= 0.5; // (the downloads, before 0.5, change nothing)
             installBar.Value = p.Fraction;
             // (downloads, before 0.5, install nothing: the first row stays active until the copies start)
-            Mark(p.Arg is null || p.Fraction < 0.5 ?(p.Fraction >= 1 ? rows.Count : p.Fraction > 0.9 ? rows.Count - 1 : dels.Count) : dels.Count + order.IndexOf(p.Arg));
+            Mark(p.Arg is null || p.Fraction < 0.5 ?(p.Fraction >= 1 ? rows.Count : p.Fraction > 0.9 ? rows.Count - 1 : first) : first + order.IndexOf(p.Arg));
         });
         // one restore point for the whole change (the engine's own calls join it)
         RestorePoints.Scope? point = null;
@@ -1161,6 +1169,7 @@ public sealed partial class MainWindow : Window
             _lastRemove = dels;
             if (order.Contains(Components.S3pp)) _s3ppArchive = null;
             _defaultsFor = null; // (the switches follow the game as it is now)
+            AfterFrameGenOff();
             _busy = false;
             if (inline)
             {
@@ -1317,6 +1326,8 @@ public sealed partial class MainWindow : Window
         if (_game is not { } g || _busy || _running) return;
         if (!await Confirm(T("Remove {0}?", Name(c)), T("Close the game first. Setup removes the files and puts back the ones it replaced."), T("Remove"))) return;
         await Guarded(() => Engine.Remove(g, c), T("{0} removed.", Name(c)), label: "Remove {0}", args: Components.Name(c));
+        AfterFrameGenOff();
+        RefreshComponents();
     }
 
     async Task UninstallAll()
@@ -1324,6 +1335,8 @@ public sealed partial class MainWindow : Window
         if (_game is not { } g || _busy || _running) return;
         if (!await Confirm(T("Uninstall everything?"), T("Setup removes Apex Radiance and everything it installed in this game, and puts back every file it replaced. Your settings in Documents stay."), T("Uninstall"))) return;
         await Guarded(() => Engine.RemoveAll(g), T("Everything Setup installed was removed."), label: "Uninstall everything");
+        AfterFrameGenOff();
+        RefreshComponents();
     }
 
     Task Repair()

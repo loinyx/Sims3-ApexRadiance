@@ -300,5 +300,7 @@ public static partial class Strings
         ["Needs the RTX Remix bridge as the graphics choice."] = "Grafikai választásként az RTX Remix bridge kell.",
         ["Could not read the NVIDIA driver settings: {0}"] = "Az NVIDIA-illesztő beállításai nem olvashatók: {0}",
         ["Could not change the NVIDIA driver settings: {0}"] = "Az NVIDIA-illesztő beállításai nem módosíthatók: {0}",
+        ["Turn on {0}"] = "{0} bekapcsolása",
+        ["Turn off {0}"] = "{0} kikapcsolása",
     };
 }

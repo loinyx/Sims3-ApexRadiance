@@ -253,5 +253,7 @@ public static partial class Strings
         ["Needs the RTX Remix bridge as the graphics choice."] = "ต้องเลือก RTX Remix bridge เป็นตัวเลือกกราฟิก",
         ["Could not read the NVIDIA driver settings: {0}"] = "อ่านการตั้งค่าไดรเวอร์ NVIDIA ไม่ได้: {0}",
         ["Could not change the NVIDIA driver settings: {0}"] = "เปลี่ยนการตั้งค่าไดรเวอร์ NVIDIA ไม่ได้: {0}",
+        ["Turn on {0}"] = "เปิด {0}",
+        ["Turn off {0}"] = "ปิด {0}",
     };
 }

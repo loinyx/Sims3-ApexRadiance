@@ -290,5 +290,7 @@ public static partial class Strings
         ["Needs the RTX Remix bridge as the graphics choice."] = "Vyžaduje RTX Remix bridge jako volbu grafiky.",
         ["Could not read the NVIDIA driver settings: {0}"] = "Nastavení ovladače NVIDIA nelze přečíst: {0}",
         ["Could not change the NVIDIA driver settings: {0}"] = "Nastavení ovladače NVIDIA nelze změnit: {0}",
+        ["Turn on {0}"] = "Zapnout {0}",
+        ["Turn off {0}"] = "Vypnout {0}",
     };
 }

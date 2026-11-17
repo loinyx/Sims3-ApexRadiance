@@ -285,5 +285,7 @@ public static partial class Strings
         ["Needs the RTX Remix bridge as the graphics choice."] = "그래픽 선택에서 RTX Remix bridge가 필요합니다.",
         ["Could not read the NVIDIA driver settings: {0}"] = "NVIDIA 드라이버 설정을 읽을 수 없습니다: {0}",
         ["Could not change the NVIDIA driver settings: {0}"] = "NVIDIA 드라이버 설정을 바꿀 수 없습니다: {0}",
+        ["Turn on {0}"] = "{0} 켜기",
+        ["Turn off {0}"] = "{0} 끄기",
     };
 }
