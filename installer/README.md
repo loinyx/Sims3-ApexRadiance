@@ -57,7 +57,16 @@ only what differs from the player's choice.
   `Fs.WriteFpsKey`: its restore point puts back only that key (`FpsLimitKey`, `FpsLimitWas`). Off leaves the limit.
   `Engine.Remove` of the bridge or Apex (also by a renderer change and `RemoveAll`) calls `Engine.FrameGenOff`, which
   deletes Setup's profile when it is on and returns, never throws, a failure (`TakeFrameGenOffError`, shown on the row).
-  Repair, Setup's update and a later run only read the driver. Shown with an NVIDIA card; enabled with an RTX 40 or 50 series card, driver 571.86 or newer
+  Repair, Setup's update and a later run only read the driver.
+- AMD Fluid Motion Frames (Setup 1.2.0, `Afmf.cs`): the same row pattern through ADLX (`amdadlx64.dll`, C interface:
+  `ADLXQueryFullVersion`, `ADLXInitialize`, `IADLXSystem::Get3DSettingsServices`, `QueryInterface` to
+  `IADLX3DSettingsServices1`, `GetAMDFluidMotionFrames`, then `IsSupported`, `IsEnabled`, `SetEnabled`; vtable slots from the
+  ADLX 2.0 SDK headers). ADLX has AFMF as one setting for the whole system (no GPU, no application), so the row says it
+  applies to every game. Shown when ADLX starts (an AMD driver); enabled where ADLX reports it supported; the bridge is not
+  required. On writes `%LOCALAPPDATA%\Apex Radiance Setup\afmf-on.txt`; a removal of the bridge or Apex turns AFMF off only
+  when that file is there, so a setting the player turned on stays. The frame limit rule is Smooth Motion's.
+- Both editions: Steam 1.67.2 (`TS3W.exe`) and EA app 1.69 (`TS3.exe`) use the game's own exe and Documents folder; AFMF
+  needs nothing per edition. Shown with an NVIDIA card; enabled with an RTX 40 or 50 series card, driver 571.86 or newer
   and the bridge installed (DXVK is untested with it); an exe in a profile of the player's leaves the switch off and names
   that profile. Any NVAPI failure is shown on the row, never thrown. The driver write is unverified on a real card.
 - Languages: the 21 of The Sims 3, as the menu (`Languages.cs`): Windows' display language, or the one picked with the
@@ -120,7 +129,7 @@ dotnet publish installer/ApexSetup -c Release -o installer/publish
 `1.3|Intel(R) Iris(R) Xe Graphics|VK_KHR_load_store_op_none`), to see the screens of an old driver or an old card.
 `APEX_SETUP_FAKE_NV=<card>|<driver>|<on>|<owner profile>` stands in for NVAPI (for example
 `NVIDIA GeForce RTX 4070|57186|1|`, driver 571.86 written as 57186, on as 1) and makes the Smooth Motion switch write
-nothing.
+nothing. `APEX_SETUP_FAKE_AMD=<supported>|<on>` (for example `1|0`, or `none` for no AMD card) does the same for AFMF.
 
 The tests run the engine on a fake `Game\Bin` and Documents folder in `%TEMP%` with local files (no network, no game).
 For a manual run against a fake game: start the exe with the game folder as its argument and `APEX_SETUP_DOCUMENTS` set

@@ -99,6 +99,21 @@ How it follows the other actions:
 |---|---|---|
 | ![Smooth Motion off](../images/installer/smooth-motion-off.png) | ![Smooth Motion on](../images/installer/smooth-motion-on.png) | ![Smooth Motion on an RTX 3080](../images/installer/smooth-motion-unsupported.png) |
 
+**AMD Fluid Motion Frames** (Setup 1.2.0) is the row after it, for AMD cards: frame generation in the AMD driver, through
+AMD's ADLX (`Afmf.cs`). ADLX has AFMF as one setting for the whole system, not per game, so the row says it applies to
+every game on the PC. The row shows when the AMD driver answers, and can be turned on where ADLX reports AFMF supported
+(AMD documents Radeon RX 6000 series or newer); it does not need the RTX Remix bridge. On also applies the frame limit rule
+above. Setup records that it turned AFMF on; removing the bridge or Apex (alone, by a renderer change or with *Uninstall
+everything*) turns it off only then, never a setting the player had on. Dry run, preview and the fake write nothing.
+
+| Off | On | Unsupported |
+|---|---|---|
+| ![AFMF off](../images/installer/afmf-off.png) | ![AFMF on](../images/installer/afmf-on.png) | ![AFMF unsupported](../images/installer/afmf-unsupported.png) |
+
+Both editions are covered: Steam 1.67.2 (`TS3W.exe`) and EA app 1.69.47 and 1.69.43 (`TS3.exe`). Smooth Motion's profile
+holds the game's own exe, the bridge check reads `client.targetProcess = TS3.exe` on the EA app, and the frame limit goes to
+the edition's Documents folder; AFMF needs nothing per edition.
+
 When the renderer changes the graphics card the game sees, the game resets its graphics options once: Setup says so
 and keeps a copy of `Options.ini`, restored when the player goes back to the game's own Direct3D 9.
 
@@ -126,6 +141,9 @@ and keeps a copy of `Options.ini`, restored when the player goes back to the gam
 - The Edge Smoothing suggestion reads `Options.ini` `edgesmoothing`, where Apex reads the back buffer: 0 was seen with
   no MSAA, and that every other value means MSAA is unverified in game. It changes the file only when the player clicks
   *Apply*.
+- AMD Fluid Motion Frames: unverified on a supported card (no RX 6000 or newer was available); the ADLX start and the
+  supported check were read on an AMD integrated GPU, which reports it unsupported. Whether AFMF reaches frames presented by
+  `NvRemixBridge.exe` (Vulkan) is unverified. The record that Setup turned it on is per Windows user, not per game folder.
 - NVIDIA Smooth Motion: the driver write is unverified on a real card (the reading is verified: card, driver, state).
   The profile holds exe names, not paths, so it applies to every game folder. An exe already in an NVIDIA predefined
   profile (the game's own) stays there and is not added; if that holds `NvRemixBridge.exe` too, the setting would not
