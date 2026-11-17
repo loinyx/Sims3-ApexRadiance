@@ -113,7 +113,7 @@ $loaders = @('wininet.dll', 'dinput8.dll', 'version.dll', 'winmm.dll', 'dsound.d
 if (-not $AsiLoader -and -not $loaders) { Say 'warning: no ASI loader found in Bin (for example Ultimate ASI Loader as wininet.dll); pass -AsiLoader' }
 
 Add-Type -Path (Join-Path $PSScriptRoot 'MailboxClient.cs')
-Add-Type -Namespace ApexIngame -Name Keys -MemberDefinition '[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);'
+Add-Type -Namespace ApexIngame -Name Keys -MemberDefinition '[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l); [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, int[] r);'
 Add-Type -Namespace ApexIngame -Name SystemTimes -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool GetSystemTimes(out long idle, out long kernel, out long user);'
 $runId = Get-Date -Format 'yyMMdd-HHmmss' # in the runner's save names, so no run meets another run's saves
 if (-not $OutDir) { $OutDir = Join-Path $stateDir "20$runId" }
@@ -387,6 +387,25 @@ function Invoke-Load($Load, [string]$BaseToml) {
                     $null = [ApexIngame.Keys]::PostMessage($script:proc.MainWindowHandle, 0x100, [IntPtr][int]$step.vk, [IntPtr]1)
                     $null = [ApexIngame.Keys]::PostMessage($script:proc.MainWindowHandle, 0x101, [IntPtr][int]$step.vk, [IntPtr]0xC0000001)
                     Say "  step ${n}: key $($step.vk)"
+                }
+                'click' { # left clicks posted to the game window, never focused: `count` clicks `gapMs` apart at the client point x,y (pixels) or xf,yf (fractions of the client area, default centre); Esc after each closes a pie menu
+                    $script:proc.Refresh(); $h = $script:proc.MainWindowHandle
+                    $r = New-Object 'int[]' 4; $null = [ApexIngame.Keys]::GetClientRect($h, $r)
+                    $cx = if ($null -ne $step.x) { [int]$step.x } else { [int]($r[2] * $(if ($null -ne $step.xf) { [double]$step.xf } else { 0.5 })) }
+                    $cy = if ($null -ne $step.y) { [int]$step.y } else { [int]($r[3] * $(if ($null -ne $step.yf) { [double]$step.yf } else { 0.5 })) }
+                    $lp = [IntPtr](Get-ClickLParam $cx $cy)
+                    $count = if ($null -ne $step.count) { [int]$step.count } else { 1 }
+                    $gap = if ($null -ne $step.gapMs) { [int]$step.gapMs } else { 400 }
+                    for ($c = 0; $c -lt $count; $c++) {
+                        $null = [ApexIngame.Keys]::PostMessage($h, 0x200, [IntPtr]0, $lp)
+                        $null = [ApexIngame.Keys]::PostMessage($h, 0x201, [IntPtr]1, $lp)
+                        $null = [ApexIngame.Keys]::PostMessage($h, 0x202, [IntPtr]0, $lp)
+                        Start-Sleep -Milliseconds 150
+                        if ($step.escape -ne $false) { $null = [ApexIngame.Keys]::PostMessage($h, 0x100, [IntPtr]27, [IntPtr]1); $null = [ApexIngame.Keys]::PostMessage($h, 0x101, [IntPtr]27, [IntPtr]0xC0000001) }
+                        Start-Sleep -Milliseconds $gap
+                        Clear-Dialog
+                    }
+                    Say "  step ${n}: $count clicks at $cx,$cy"
                 }
                 'memory' { # the game's largest free address block, read from outside (no agent call, no game work)
                     $mb = [math]::Round($script:mbox.LargestFree() / 1MB)

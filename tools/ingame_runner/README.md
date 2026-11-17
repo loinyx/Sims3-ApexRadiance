@@ -242,6 +242,7 @@ A job is a JSON file in `jobs/`, its `id` equal to the file name:
 | `mode` | `mode` (`build`, `buy`, `cas`, `edittown`, `live`), `seconds` (0) | Switches the world mode and waits for it, then stays `seconds` |
 | `stop_repros` | | Stops `camera_jumps` and `vfx_burst`, removes the spawned Sims and records the event counts in `results.md` |
 | `key` | `vk` (virtual-key code) | Posts one key press to the game window without focusing it: Apex's bare-key shortcuts. A modifier cannot be held this way (Apex reads Shift, Ctrl and Alt from the keyboard state), so a job sets a bare key for the shortcut it presses |
+| `click` | `x`,`y` (client pixels) or `xf`,`yf` (fractions, default 0.5), `count` (1), `gapMs` (400), `escape` (true) | Posts left clicks (move, press, release) to the game window without focusing it, then Esc after each (closes a pie menu) and answers any dialog. Aim at empty ground |
 | `memory` | `label` | Reads the game's largest free address block (below 4 GB) from outside the game; the reading goes into the load's notes and the last one into the A/B table |
 | `check_files` | `pattern`, `min` (1), `folder` (`captures`) | Counts the files matching `pattern` in the load folder's `folder`; fewer than `min` or an empty one fails the load. Sizes, and a video's length when `ffprobe` is on PATH, go into the notes |
 

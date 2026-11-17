@@ -26,7 +26,7 @@ function Get-UntilCommand([string]$Field) {
 }
 function Format-Until($Until) { $p = @($Until.PSObject.Properties)[0]; return "$($p.Value) $($p.Name)" }
 # Every step run.ps1 knows.
-$script:KnownSteps = @('speed', 'wait', 'profile', 'camera', 'camera_pan', 'save', 'reload', 'camera_jumps', 'vfx_burst', 'mode', 'stop_repros', 'key', 'camera_orbit', 'lots', 'lights_on', 'lamp_drag', 'wait_file', 'camera_read', 'camera_goto', 'lamp_edit', 'track_record', 'track_play', 'input_record', 'input_play', 'clip_session', 'floor', 'memory', 'check_files')
+$script:KnownSteps = @('speed', 'wait', 'profile', 'camera', 'camera_pan', 'save', 'reload', 'camera_jumps', 'vfx_burst', 'mode', 'stop_repros', 'key', 'click', 'camera_orbit', 'lots', 'lights_on', 'lamp_drag', 'wait_file', 'camera_read', 'camera_goto', 'lamp_edit', 'track_record', 'track_play', 'input_record', 'input_play', 'clip_session', 'floor', 'memory', 'check_files')
 
 function ConvertTo-TomlLiteral($Value) {
     if ($Value -is [bool]) { if ($Value) { return 'true' } else { return 'false' } }
@@ -90,6 +90,9 @@ function Get-JobLoads($Job, [string]$Variant, [switch]$AB) {
 }
 
 # A job's steps; without a steps list: set the speed, then one measured wait of `minutes`.
+# WM_LBUTTONDOWN lParam: y in the high word, x in the low word
+function Get-ClickLParam([int]$X, [int]$Y) { return ($Y -shl 16) -bor ($X -band 0xFFFF) }
+
 function Get-JobSteps($JobDef) {
     if ($JobDef.steps) { return @($JobDef.steps) }
     $speed = if ($JobDef.speed) { $JobDef.speed } else { 'normal' }

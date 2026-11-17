@@ -1,6 +1,6 @@
 {
   "id": "pick-skip-when-still",
-  "description": "Fewer Mouse Picks When Still: 3 minutes with the camera and the mouse still (the game re-picks every other frame), then a far camera pan. Developer build. Pass: on logs skipped picks with nothing changed while still and capped picks during the pan, off logs none; A/B metric: frame time p50/p99 of the measured pan, and the [ExtraHooks] GetRenderTargetData line for TS3W.exe+0x2DFF4A.",
+  "description": "Fewer Mouse Picks When Still: 3 minutes with the camera and the mouse still (the game re-picks every other frame), then 12 left clicks on empty ground 1.5 s apart (Esc after each; the click path holds each for a fresh pick), then a far camera pan. Developer build. Pass: on logs skipped picks with nothing changed while still and capped picks during the pan and clicks held for a new pick with 0 timed out, off logs none; A/B metric: frame time p50/p99 of the measured pan, and the [ExtraHooks] GetRenderTargetData line for TS3W.exe+0x2DFF4A.",
   "save": "ApexTest-Town",
   "toml": {
     "ui": {
@@ -40,6 +40,17 @@
     {
       "do": "wait",
       "minutes": 3
+    },
+    {
+      "do": "click",
+      "count": 12,
+      "gapMs": 1500,
+      "xf": 0.5,
+      "yf": 0.6
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
     },
     {
       "do": "camera_pan",

@@ -236,6 +236,8 @@ try {
     Check ($null -eq (Step-StartWatch $st $found)) 'a found mailbox never fails the agent rule'
 } finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }
 
+Check ((Get-ClickLParam 640 360) -eq 23593600 -and (Get-ClickLParam 5 7) -eq 458757) 'click lParam packs y high, x low'
+
 # Every shipped job: valid JSON, an id equal to its file name, a save, known steps, patterns that compile
 foreach ($file in Get-ChildItem (Join-Path $PSScriptRoot 'jobs') -Filter *.json) {
     $j = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json
