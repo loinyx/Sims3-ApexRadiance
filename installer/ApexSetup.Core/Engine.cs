@@ -48,7 +48,15 @@ public sealed class Manifest
             if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") != "1")
                 try { File.Move(p, p + ".corrupt", true); } catch (Exception x) when (x is IOException or UnauthorizedAccessException) { }
             m = Rebuilt(bin);
+            // saved at once (not in a dry run): the next load reads it, and the backups stay linked
+            if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") != "1")
+            {
+                m.Bin = bin;
+                try { m.Save(); } catch (Exception x) when (x is IOException or UnauthorizedAccessException) { Engine.Log(x); }
+            }
         }
+        // (a damaged setup.json set aside with nothing saved since, as in a dry run: rebuilt again)
+        if (!File.Exists(p) && File.Exists(p + ".corrupt") && m.Files.Count == 0) m = Rebuilt(bin);
         m.Bin = bin;
         m.MoveTo(bin);
         return m;
@@ -294,7 +302,7 @@ public static class Engine
     // no free space and no note about Documents.
     public sealed record Check(string Key, string[] Args, bool Blocks);
     public static Func<string, long> FreeBytes = dir => new DriveInfo(Path.GetPathRoot(Path.GetFullPath(dir))!).AvailableFreeSpace;
-    public const string CloseGameText = "Close The Sims 3, its launcher and the restart host (ts3wrap.exe), then try again.";
+    public const string CloseGameText = "Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe), then try again.";
     public const string CannotWriteText = "Setup cannot write to {0}. If Windows Security's Controlled folder access is on, allow ApexRadianceSetup.exe there; or move the game out of a protected folder.";
     public static List<Check> Preflight(Game g, State s, string? docs, long downloadBytes, bool replacesD3d9, bool downloads = true)
     {
@@ -378,6 +386,9 @@ public static class Engine
     public static SetupException Antivirus(string? file, string folder) =>
         new("Your antivirus removed or blocked {0}; add an exception for {1} and run Setup again.",
             Path.GetFileName(file ?? "") is { Length: > 0 } n && !n.Contains(", ") ? n : file ?? "", folder);
+    // a download cut off (the connection dropped mid-file): the network, not a file in use
+    public static bool IsNetwork(Exception e) =>
+        e is HttpRequestException or TaskCanceledException or System.Net.Http.HttpIOException || e is IOException { InnerException: System.Net.Sockets.SocketException };
     public static bool IsVirusBlock(Exception e) => e is IOException && (e.HResult & 0xFFFF) is 0xE1 or 0xE2 && (e.HResult >> 16 & 0x1FFF) == 7;
     public static List<string> Missing(IReadOnlyDictionary<string, long> sizes) =>
         sizes.Where(p => !File.Exists(p.Key) || new FileInfo(p.Key).Length != p.Value).Select(p => Path.GetFileName(p.Key)).ToList();
@@ -411,6 +422,9 @@ public static class Engine
         }
         catch (IOException) { return false; }
     }
+
+    // each file Setup has just copied into place (the tests use it to stand for an antivirus taking it)
+    public static Action<string> Placed = _ => { };
 
     // where Setup's log goes (the app sets it; tests and the engine run without one)
     public static Action<Exception> Log = _ => { };
@@ -605,10 +619,12 @@ public static class Engine
             Fs.CreateDir(Manifest.DirOf(m.Bin));
             Fs.Move(to, backup);
         }
-        Fs.CreateDir(Path.GetDirectoryName(to)!);
-        Fs.Copy(from, to);
+        // recorded before the copy: a copy that fails still leaves the backup linked to its file (setup.json is saved in a finally)
         if (owned is null) m.Files.Add(new ManifestFile { Component = c, Path = to, Backup = backup });
         else owned.Component = c;
+        Fs.CreateDir(Path.GetDirectoryName(to)!);
+        Fs.Copy(from, to);
+        Placed(to);
     }
 
     // An older combined build or a second copy of the ASI would load Apex twice.
@@ -825,22 +841,50 @@ public static class Engine
     public static string FriendlyFrameGenError(string error, bool amd, bool on = true) =>
         error == "Dry run: Setup changes nothing." ? error
         : error.EndsWith(" -137") || error.Contains("denied", StringComparison.OrdinalIgnoreCase) || error.Contains("privilege", StringComparison.OrdinalIgnoreCase)
-            ? "Windows did not let Setup change the driver settings. Close the NVIDIA App or AMD Software and NVIDIA Profile Inspector, then try again."
+            ? (amd ? "Windows did not let Setup change the driver settings. Close AMD Software, then try again."
+                   : "Windows did not let Setup change the driver settings. Close the NVIDIA App and NVIDIA Profile Inspector, then try again.")
         : amd ? (on ? "The AMD driver did not accept the change. You can turn it on by hand in AMD Software: Gaming > Graphics > AMD Fluid Motion Frames."
                     : "The AMD driver did not accept the change. You can turn it off by hand in AMD Software: Gaming > Graphics > AMD Fluid Motion Frames.")
         : on ? "The NVIDIA driver did not accept the change. You can turn it on by hand with NVIDIA Profile Inspector."
              : "The NVIDIA driver did not accept the change. You can turn it off by hand with NVIDIA Profile Inspector.";
 
     public static bool TurnsFrameGenOff(string c) => c is Components.Bridge or Components.Apex;
+
+    // The pending frame generation and frame limit changes, in the order Apply runs them: the limit first (frame generation
+    // turned on then finds it set). A turn-on is dropped when the same Apply removes the bridge or Apex (the removal turns it off).
+    // AutoLimit: the automatic 60 fps after a turn-on, not when the player chose a limit in this Apply, and not for AFMF on a PC
+    // with an NVIDIA card (the game may run on that card, where the AMD driver's frame generation does nothing).
+    public sealed record PlannedChange(string Kind, bool? On, int? Fps, bool AutoLimit);
+    public static List<PlannedChange> PlanFrameGen(int? fps, bool? smooth, bool? afmf, IEnumerable<string> removals, bool nvidiaCard)
+    {
+        var removing = removals.Any(TurnsFrameGenOff);
+        var l = new List<PlannedChange>();
+        if (fps is { } f) l.Add(new("fps", null, f, false));
+        if (smooth is { } s && !(s && removing)) l.Add(new("nv", s, null, s && fps is null));
+        if (afmf is { } a && !(a && removing)) l.Add(new("amd", a, null, a && fps is null && !nvidiaCard));
+        return l;
+    }
+
+    // A driver change and its check: the setting read back (in a new session) must be what was asked; an "on" that did not take
+    // is undone, an "off" that did not take keeps Setup's record (the setting is still Setup's to turn off).
+    public static string? VerifyChange(bool on, Func<string?> set, Func<(bool On, string? Error)> read, Action undo, Action? keepRecord = null)
+    {
+        if (set() is { } err) return err;
+        var (now, readError) = read();
+        if (readError is null && now == on) return null;
+        if (on) undo(); else keepRecord?.Invoke();
+        return SmoothMotion.DidNotTake;
+    }
     // both drivers are asked, each error kept for its own row (a failed NVIDIA step does not skip AMD's)
     public static Func<Game, (string? Nv, string? Amd)> FrameGenOff = DefaultFrameGenOff;
     static (string? Nv, string? Amd) FrameGenOffError;
     public static (string? Nv, string? Amd) PeekFrameGenOffError() => FrameGenOffError;
     public static (string? Nv, string? Amd) TakeFrameGenOffError() { var e = FrameGenOffError; FrameGenOffError = default; return e; }
-    static (string? Nv, string? Amd) DefaultFrameGenOff(Game g)
+    public static (string? Nv, string? Amd) DefaultFrameGenOff(Game g)
     {
         string? nv, amd;
-        try { nv = SmoothMotion.SetupTurnedOn && SmoothMotion.Read() is { On: true } ? SmoothMotion.Set(false) : null; }
+        // (a driver that cannot be read is an error on the row, not a silent skip)
+        try { nv = !SmoothMotion.SetupTurnedOn ? null : SmoothMotion.Read() is { Error: { } e } ? e : SmoothMotion.Read() is { On: true } ? SmoothMotion.Set(false) : null; }
         catch (Exception e) { nv = e.Message; }
         // AFMF is system-wide: off only when Setup turned it on (Afmf.Marker), never a setting the player had on
         try { amd = Afmf.OffIfSetupTurnedOn(); }

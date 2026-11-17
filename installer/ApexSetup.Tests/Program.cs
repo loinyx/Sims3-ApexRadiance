@@ -325,7 +325,8 @@ try
     var g3 = new Game(Path.Combine(root, "Third"), bin3, "TS3W.exe", Edition.Steam, "1.67.2");
     var restoreDir = RestorePoints.RootOf(bin3);
     Dictionary<string, string> Tree() => new[] { bin3, docs3 }.SelectMany(d => Directory.EnumerateFiles(d, "*", SearchOption.AllDirectories))
-        .Where(f => !f.StartsWith(restoreDir, StringComparison.OrdinalIgnoreCase))
+        // (an antivirus scan briefly leaves NAME.EXT.tmp copies next to files it reads: never Setup's, and gone a moment later)
+        .Where(f => !f.StartsWith(restoreDir, StringComparison.OrdinalIgnoreCase) && !f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
         .ToDictionary(f => f, f => Convert.ToHexString(File.ReadAllBytes(f)));
     bool SameTree(Dictionary<string, string> a, Dictionary<string, string> b) => a.Count == b.Count && a.All(p => b.TryGetValue(p.Key, out var v) && v == p.Value);
 
@@ -456,7 +457,7 @@ try
         var g6 = new Game(Path.Combine(root, "Sixth"), bin6, "TS3W.exe", Edition.Steam, "1.67.2");
         string B6(string rel) => Path.Combine(bin6, rel);
         Dictionary<string, string> Tree6() => new[] { bin6, docs6 }.SelectMany(d => Directory.EnumerateFiles(d, "*", SearchOption.AllDirectories))
-            .ToDictionary(f => f, File.ReadAllText);
+            .Where(f => !f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)).ToDictionary(f => f, File.ReadAllText);
         bool Same6(Dictionary<string, string> a, Dictionary<string, string> b) => a.Count == b.Count && a.All(p => b.TryGetValue(p.Key, out var v) && v == p.Value);
         List<Finding> Sug() => Compat.Check(g6, Scan.Run(g6, docs6), docs6).Where(x => x.Suggest is not null).ToList();
         Finding? Named(string name) => Sug().FirstOrDefault(x => x.Suggest == name);
@@ -928,13 +929,13 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
     Check(SmoothMotion.Took(true, new("NVIDIA GeForce RTX 4070", 62124, true, null, null)) && !SmoothMotion.Took(true, new("NVIDIA GeForce RTX 4070", 62124, false, null, null))
           && !SmoothMotion.Took(false, new("NVIDIA GeForce RTX 4070", 62124, false, null, "DRS_LoadSettings -3")), "verify: a change read back differently did not take");
     Check(Engine.FriendlyFrameGenError("DRS_SaveSettings -137", false).Contains("NVIDIA App")
-          && Engine.FriendlyFrameGenError("Access is denied.", true).Contains("NVIDIA App")
+          && Engine.FriendlyFrameGenError("Access is denied.", true).Contains("AMD Software") && !Engine.FriendlyFrameGenError("Access is denied.", true).Contains("Profile Inspector")
           && Engine.FriendlyFrameGenError("DRS_SetSetting -160", false, on: false).Contains("turn it off by hand")
           && Engine.FriendlyFrameGenError("DRS_SetSetting 0xB0D384C0 = 1 on \"NvRemixBridge\" (NVIDIA's) -160", false).StartsWith("The NVIDIA driver")
           && Engine.FriendlyFrameGenError(SmoothMotion.DidNotTake, true).Contains("AMD Software")
           && Engine.FriendlyFrameGenError("Dry run: Setup changes nothing.", false) == "Dry run: Setup changes nothing.", "errors: plain words, a refusal names the programs that lock the driver settings, the off direction says off");
     Check(SmoothMotion.Blocked(new("NVIDIA GeForce RTX 4070", 62124, false, null, null), true, false) is null,
-          "no predefined NvRemixBridge profile (an older or newer driver): the switch is usable, Setup makes its own profile");
+          "smooth motion: an RTX 40 card with the bridge and no profile of the player's may turn it on (the profile itself is checked on a real driver only)");
     var amd = Afmf.Read(); // read only
     Console.WriteLine($"info this PC: AMD {(amd.Present ? "driver found" : "none")}{(amd.Error is null ? "" : ", error " + amd.Error)}");
     var nv = SmoothMotion.Read(); // read only
@@ -954,7 +955,7 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         var logged = new List<Exception>();
         Engine.Log = logged.Add;
         var fresh = Manifest.Load(abin);
-        Check(fresh.Files.Count == 0 && !File.Exists(sj) && File.Exists(sj + ".corrupt") && logged.Count == 1, "setup.json: a damaged one is kept as .corrupt and a fresh record starts");
+        Check(fresh.Files.Count == 0 && File.Exists(sj) && File.Exists(sj + ".corrupt") && logged.Count == 1, "setup.json: a damaged one is kept as .corrupt and a fresh record is saved at once");
         Engine.Log = _ => { };
         fresh.Versions[Components.Apex] = "4.0.3";
         fresh.Save();
@@ -1045,7 +1046,9 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         Check(!removal.Any(p => p.Key.Contains("MB free") || p.Key.Contains("Documents")), "before a change: a removal needs no free space and no Documents");
         var docsMade = Path.Combine(a, "Docs", "Electronic Arts", "The Sims 3");
         Directory.CreateDirectory(Path.Combine(a, "Docs", "Electronic Arts", "The Sims 4"));
-        Check(Engine.Preflight(ag, astate, docsMade, 0, false).Any(p => p.Key.Contains("Documents")), "before a change: another game's Electronic Arts folder is not The Sims 3's");
+        var noNote = !Engine.Preflight(ag, astate, Path.Combine(a, "Docs", "Electronic Arts", "The Sims 4"), 0, false).Any(p => p.Key.Contains("Documents"));
+        Check(Engine.Preflight(ag, astate, docsMade, 0, false).Any(p => p.Key.Contains("Documents")) && noNote,
+              "before a change: The Sims 3's own folder decides, not the Electronic Arts folder another game made");
         Games.IsRunning = () => true;
         var closeText = "";
         try { Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null); Engine.CheckWritable(); } catch (SetupException e) { closeText = e.Key; }
@@ -1098,6 +1101,80 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
             Check((await Releases.RecentAsync("a/b")) is [{ Tag: "v1.0" }], "github: the release list falls back to the latest release");
         }
         finally { Releases.Http = oldHttp; Releases.BackoffUnit = TimeSpan.FromSeconds(1); }
+
+        // second validation (Setup 1.2.6)
+        {
+            // a damaged setup.json: the rebuilt record is saved, so the second load still has it and removing puts the file back
+            File.WriteAllText(Path.Combine(abin, "d3d9.dll"), "bridge");
+            Directory.CreateDirectory(Path.Combine(abin, ".trex"));
+            File.WriteAllText(Path.Combine(Manifest.DirOf(abin), "d3d9.dll.bak"), "reshade");
+            foreach (var f in new[] { "Options.ini.bak", "unknown.bin.bak" }) File.Delete(Path.Combine(Manifest.DirOf(abin), f));
+            var sj2 = Path.Combine(Manifest.DirOf(abin), "setup.json");
+            File.WriteAllText(sj2, "{ broken");
+            var first = Manifest.Load(abin).Files.Count;
+            var second = Manifest.Load(abin).Files.Count;
+            Engine.FrameGenOff = _ => (null, null);
+            Engine.Remove(ag, Components.Bridge, Path.Combine(a, "Docs"));
+            Check(first == 1 && second == 1 && File.ReadAllText(Path.Combine(abin, "d3d9.dll")) == "reshade",
+                  "setup.json: the record rebuilt from a damaged one is kept, and removing the bridge puts the player's d3d9.dll back");
+
+            // the plan: the limit first, a turn-on dropped when the same Apply removes the bridge, the automatic 60 fps only
+            // without a chosen limit and not for AFMF next to an NVIDIA card
+            var plan = Engine.PlanFrameGen(75, true, true, [], nvidiaCard: true);
+            var dropped = Engine.PlanFrameGen(null, true, false, [Components.Bridge], nvidiaCard: false);
+            var auto = Engine.PlanFrameGen(null, true, true, [], nvidiaCard: true);
+            Check(plan.Select(p => p.Kind).SequenceEqual(new[] { "fps", "nv", "amd" }) && plan.All(p => !p.AutoLimit)
+                  && dropped.Count == 1 && dropped[0] is { Kind: "amd", On: false }
+                  && auto.Single(p => p.Kind == "nv").AutoLimit && !auto.Single(p => p.Kind == "amd").AutoLimit,
+                  "apply plan: order, a turn-on dropped with the bridge's removal, the automatic frame limit's cases");
+            var undone = false; var kept = false;
+            var onNotTaken = Engine.VerifyChange(true, () => null, () => (false, null), () => undone = true);
+            var offNotTaken = Engine.VerifyChange(false, () => null, () => (true, null), () => { }, () => kept = true);
+            var fine = Engine.VerifyChange(true, () => null, () => (true, null), () => undone = false);
+            Check(onNotTaken == SmoothMotion.DidNotTake && undone && offNotTaken == SmoothMotion.DidNotTake && kept && fine is null
+                  && Engine.VerifyChange(true, () => "DRS_SetSetting -160", () => (true, null), () => { }) == "DRS_SetSetting -160",
+                  "apply: an on that did not take is undone, an off that did not take keeps Setup's record");
+
+            // turning frame generation off on a removal asks both drivers, each error on its own (the fakes answer for them)
+            var nvMarker = SmoothMotion.Marker; var amdMarker = Afmf.Marker;
+            SmoothMotion.Marker = Path.Combine(a, "sm.txt"); Afmf.Marker = Path.Combine(a, "afmf.txt");
+            File.WriteAllText(SmoothMotion.Marker, "on"); File.WriteAllText(Afmf.Marker, "on");
+            Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_NV", "NVIDIA GeForce RTX 4070|62124|1|");
+            Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_AMD", "1|1");
+            var both = Engine.DefaultFrameGenOff(ag);
+            Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_NV", null);
+            Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_AMD", null);
+            SmoothMotion.Marker = nvMarker; Afmf.Marker = amdMarker;
+            Check(both.Nv is not null && both.Amd is not null, "frame generation off: an NVIDIA answer does not skip AMD");
+
+            Check(!SmoothMotion.Supported("NVIDIA Quadro RTX 4000", 62124) && !SmoothMotion.Supported("NVIDIA RTX 4000 Ada Generation", 62124)
+                  && SmoothMotion.Supported("NVIDIA GeForce RTX 4060 Laptop GPU", 62124), "card: GeForce RTX 40 and 50 only, not Quadro RTX 4000 or RTX 4000 Ada");
+            Check(Engine.IsNetwork(new HttpRequestException("x")) && Engine.IsNetwork(new IOException("cut", new System.Net.Sockets.SocketException(10054)))
+                  && !Engine.IsNetwork(new IOException("in use")), "a connection cut mid-download is the network, not a file in use");
+
+            // a zip whose file an antivirus took after extraction: a missing file, not a missing asset
+            var zdir = Path.Combine(a, "zipsrc"); Directory.CreateDirectory(zdir); File.WriteAllText(Path.Combine(zdir, "dinput8.dll"), "loader");
+            var zip = Path.Combine(a, "l.zip"); System.IO.Compression.ZipFile.CreateFromDirectory(zdir, zip);
+            var unz = Releases.Unzip(zip);
+            File.WriteAllText(Path.Combine(unz, "dinput8.dll"), "");
+            var missingFile = false;
+            try { Releases.CheckExtracted(zip, unz); } catch (FileNotFoundException) { missingFile = true; }
+            Check(missingFile, "unzip: a file emptied or taken after extraction is reported as missing");
+
+            // through the real copy: a file cut short after its copy is named with Game\Bin; a download blocked by the antivirus
+            // is named with Setup's download folder
+            var asi = Path.Combine(a, "dl", "Sims3SettingsSetter.asi"); Directory.CreateDirectory(Path.GetDirectoryName(asi)!); File.WriteAllText(asi, "s3ss");
+            Engine.Placed = to => { if (to.EndsWith("Sims3SettingsSetter.asi")) File.WriteAllText(to, ""); };
+            string[]? cut = null;
+            try { await Engine.InstallAsync(ag, [Components.S3ss], new OneFileSource(asi, null), null, Path.Combine(a, "Docs")); }
+            catch (SetupException e) { cut = e.Args; }
+            Engine.Placed = _ => { };
+            string[]? blocked = null;
+            try { await Engine.InstallAsync(ag, [Components.S3ss], new OneFileSource(asi, new IOException("blocked", unchecked((int)0x800700E1))), null, Path.Combine(a, "Docs")); }
+            catch (SetupException e) { blocked = e.Args; }
+            Check(cut is ["Sims3SettingsSetter.asi", var b1] && b1 == abin && blocked is [_, var b2] && b2 == GitHubSource.TempRoot,
+                  "antivirus: a file cut short after its copy names Game\\Bin, a blocked download names the download folder");
+        }
 
         Check(Games.Processes.Contains("Sims3LauncherW") && Games.Processes.Contains("ts3wrap"), "the launcher and the restart host count as the game running");
 
@@ -1155,6 +1232,13 @@ sealed class VanishingSource(string root) : ISource
         if (component == Components.S3pp) throw new FileNotFoundException("moved", Path.Combine(root, "Sims3Performance.zip"));
         return Task.FromResult((new List<(string, string)> { (Path.Combine(root, "gone", "Sims3SettingsSetter.asi"), Path.Combine(g.Bin, "Sims3SettingsSetter.asi")) }, "1"));
     }
+}
+
+// one file as the download of any component, or the error its fetch ends with
+sealed class OneFileSource(string file, Exception? fails) : ISource
+{
+    public Task<(List<(string Src, string Dest)> Files, string Version)> FetchAsync(string component, Game g, string docs, CancellationToken ct) =>
+        fails is not null ? throw fails : Task.FromResult((new List<(string, string)> { (file, Path.Combine(g.Bin, Path.GetFileName(file))) }, "1"));
 }
 
 // GitHub as the tests want it: each request answered by the function, which counts them
