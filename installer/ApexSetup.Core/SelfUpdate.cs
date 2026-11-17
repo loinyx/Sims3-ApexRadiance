@@ -70,6 +70,13 @@ public static class SelfUpdate
         return sb.Append('\\', slashes * 2).Append('"').ToString();
     }
 
+    // the folder the update was downloaded to, no longer needed once Setup starts (about 40 MB each time otherwise)
+    public static void CleanTemp()
+    {
+        try { var d = Path.Combine(Path.GetTempPath(), "ApexRadianceSetup-update"); if (Directory.Exists(d)) Directory.Delete(d, true); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
     // the exe an update replaced, still running then: removed at the next start
     public static void CleanUp(string self)
     {

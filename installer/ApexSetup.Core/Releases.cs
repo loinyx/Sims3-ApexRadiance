@@ -36,7 +36,11 @@ public static class Releases
 
     static HttpClient MakeClient()
     {
-        var h = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
+        // Setup elevated as another administrator would use that account's proxy: the player's own (a fixed proxy server;
+        // a proxy script, AutoConfigURL, is not read)
+        var handler = new HttpClientHandler();
+        if (Scan.PlayerProxy() is { } proxy) { handler.Proxy = new System.Net.WebProxy(proxy.Contains("://") ? proxy : "http://" + proxy); handler.UseProxy = true; }
+        var h = new HttpClient(handler) { Timeout = TimeSpan.FromMinutes(5) };
         h.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("ApexRadianceSetup", "1.0"));
         return h;
     }
@@ -186,7 +190,7 @@ public static class Releases
             }
         }
         if (a.Sha256 is { } want && !Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(file))).Equals(want, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException($"{a.Name}: download is damaged (checksum mismatch)");
+            throw new SetupException("The download of {0} was damaged. Try again; if it repeats, an antivirus web shield or a proxy may be changing downloads.", a.Name);
         return file;
     }
 
@@ -213,6 +217,20 @@ public static class Releases
         var dir = zip + ".d";
         if (Directory.Exists(dir)) Directory.Delete(dir, true);
         ZipFile.ExtractToDirectory(zip, dir);
+        CheckExtracted(zip, dir);
         return dir;
+    }
+
+    // every file of the zip there whole after extraction: one an antivirus took or emptied is a missing file (FileNotFoundException,
+    // which the install reports as the antivirus), not a missing asset or an install without it
+    public static void CheckExtracted(string zip, string dir)
+    {
+        using var z = ZipFile.OpenRead(zip);
+        foreach (var e in z.Entries)
+        {
+            if (e.Name.Length == 0) continue; // (a folder)
+            var f = Path.Combine(dir, e.FullName.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(f) || new FileInfo(f).Length != e.Length) throw new FileNotFoundException(null, f);
+        }
     }
 }
