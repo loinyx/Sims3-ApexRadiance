@@ -37,7 +37,10 @@ clear, `[mgr+0x15]` clear and one of the two conditions above true):
    (counted in Apex's window procedure; key auto-repeat and mouse moves are not counted): pick now.
 2. **The pick modes or the viewport changed** (`[mgr+0x18..0x37]`, `[mgr+0x101..0x104]`): pick now.
 3. **The camera changed** since the last pick (camera `+0x0C..+0x1B`, `+0x30..+0x6F`: the projection scalars, the axes
-   and the eye): pick at most every 4th update, mouse-move requests included.
+   and the eye): skip the two updates after a read-back, then pick, mouse-move requests included. That is every 4th
+   update when the read-back comes one update after the pick; a deferred read-back that waits for the GPU (under the
+   RTX Remix bridge often 2 to 3 updates) adds its waits. Counting from the pick instead let those waits use up the
+   interval, so nothing was skipped while the camera moved.
 4. **A mouse-move request with the camera unchanged:** pick now, as the game does.
 5. **A re-pick with nothing changed:** skip it until the last pick is 250 ms old.
 
@@ -82,14 +85,15 @@ is turned off. Held presses are counted (`pick_click_holds`, the developer log l
   than the game's own). Unverified in game: the frame count, and that a reposted message behaves like the original in
   every screen (the message time and position Windows reports for it are those of the repost).
 - A key pressed during a held click can reach the game before that click.
-- While the camera moves, hover highlights follow every 4th frame instead of every other frame.
+- While the camera moves, hover highlights follow every 4th frame instead of every other frame (later when the
+  read-back waits for the GPU).
 - Whether any byte of the compared camera fields changes every frame with a still camera is unverified; if one does,
   the skip never fires (the frame profiler's `pick_skip_still` stays 0) and the game's cadence remains.
 
 ## Technical reference
 
 - Developer builds log every 10 s while the switch is on: `[PickReadback] Last 10 s: N picks, S skipped with nothing
-  changed, M skipped while the camera moved, R read-backs X ms, H clicks held for a new pick (T ms, O timed out)`.
+  changed, M skipped while the camera moved, R read-backs X ms, H clicks held for a new pick (T ms, O timed out), C picked for a mode or viewport change`.
 - Frame timeline columns `pick_runs`, `pick_skip_still`, `pick_skip_moving`, `pick_readbacks`, `pick_readback_ms`,
   `pick_click_holds` ([Frame Profiler](../frame-profiler.md)).
 - The hold: `HoldClick` and `ReleaseHold` in `features/pick_readback.cpp`; `Overlay::SetMouseHoldGate` and

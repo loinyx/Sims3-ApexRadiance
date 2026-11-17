@@ -61,9 +61,9 @@ UINT g_lastInput = 0;      // Overlay::InputEvents at the last pick
 std::atomic<uint64_t> g_lastPickTick{0};     // (read by the click gate on the window thread)
 std::atomic<uint64_t> g_lastUpdateTick{0};   // the last update while the switch is on
 std::atomic<bool> g_skippedSincePick{false}; // the stored result is older than the game's would be
-uint32_t g_sincePick = 0;  // updates since the last pick was rendered
+uint32_t g_sinceReadBack = 0; // updates since the last read-back (a deferred read-back's waits count from the read-back, not the render)
 uint64_t g_lastLogTick = 0;
-std::atomic<uint32_t> c_runs{0}, c_still{0}, c_moving{0}, c_readbacks{0}; // never reset (TakeCounters keeps its own base)
+std::atomic<uint32_t> c_runs{0}, c_still{0}, c_moving{0}, c_readbacks{0}, c_mgrChanged{0}; // never reset (TakeCounters keeps its own base)
 std::atomic<int64_t> c_readbackTicks{0};
 
 // ---- The click hold ----
@@ -103,7 +103,7 @@ bool HoldClick() {
     c_holds.fetch_add(1, std::memory_order_relaxed);
     return true;
 }
-uint32_t t_runs = 0, t_still = 0, t_moving = 0, t_readbacks = 0; // at the last log line
+uint32_t t_runs = 0, t_still = 0, t_moving = 0, t_readbacks = 0, t_mgrChanged = 0; // at the last log line
 int64_t t_readbackTicks = 0;
 
 void ReleaseQuery() {
@@ -137,11 +137,12 @@ bool SkipPick(const uint8_t* m, uint64_t now) {
     if (!WillPick(m, request, v)) return false;
     const UINT input = Overlay::InputEvents();
     // Without the window procedure a click cannot be told from a mouse move: every request picks
-    bool pick = !g_haveLast || input != g_lastInput || (request && !Overlay::WndProcInstalled()) ||
-                std::memcmp(v.mgr, g_last.mgr, sizeof v.mgr) != 0;
+    const bool mgrChanged = g_haveLast && std::memcmp(v.mgr, g_last.mgr, sizeof v.mgr) != 0;
+    bool pick = !g_haveLast || input != g_lastInput || (request && !Overlay::WndProcInstalled()) || mgrChanged;
+    if (mgrChanged) c_mgrChanged.fetch_add(1, std::memory_order_relaxed);
     if (!pick) {
         if (std::memcmp(v.camera, g_last.camera, sizeof v.camera) != 0) { // the camera moved since the last pick
-            if (g_sincePick < kMovingEvery) {
+            if (g_sinceReadBack < kMovingEvery - 1) { // read back, 2 skips, pick: every 4th update without deferral
                 c_moving.fetch_add(1, std::memory_order_relaxed);
                 return true;
             }
@@ -163,17 +164,18 @@ void LogStats(uint64_t now) {
     const int64_t ticks = c_readbackTicks.load();
     const uint32_t holds = c_holds.load(), holdTimeouts = c_holdTimeouts.load();
     const uint64_t holdMs = c_holdMs.load();
+    const uint32_t mgrChanged = c_mgrChanged.load();
     if (g_lastLogTick) {
         LARGE_INTEGER f;
         QueryPerformanceFrequency(&f);
         LOG_INFO(std::format("[PickReadback] Last {:.0f} s: {} picks, {} skipped with nothing changed, {} skipped while the camera moved, {} read-backs {:.1f} ms, "
-                             "{} clicks held for a new pick ({} ms, {} timed out)",
+                             "{} clicks held for a new pick ({} ms, {} timed out), {} picked for a mode or viewport change",
                              static_cast<double>(now - g_lastLogTick) / 1000.0, runs - t_runs, still - t_still, moving - t_moving, rb - t_readbacks,
                              static_cast<double>(ticks - t_readbackTicks) * 1000.0 / static_cast<double>(f.QuadPart), holds - t_holds, holdMs - t_holdMs,
-                             holdTimeouts - t_holdTimeouts));
+                             holdTimeouts - t_holdTimeouts, mgrChanged - t_mgrChanged));
     }
     t_runs = runs, t_still = still, t_moving = moving, t_readbacks = rb, t_readbackTicks = ticks;
-    t_holds = holds, t_holdTimeouts = holdTimeouts, t_holdMs = holdMs;
+    t_holds = holds, t_holdTimeouts = holdTimeouts, t_holdMs = holdMs, t_mgrChanged = mgrChanged;
     g_lastLogTick = now;
 }
 
@@ -184,6 +186,7 @@ void CallTimed(void* self, void* edx) {
     QueryPerformanceCounter(&b);
     c_readbacks.fetch_add(1, std::memory_order_relaxed);
     c_readbackTicks.fetch_add(b.QuadPart - a.QuadPart, std::memory_order_relaxed);
+    g_sinceReadBack = 0;
 }
 
 // (Steam 1.67.2, read from the code) With the flag set the update only reads back and returns (0x006DFF64 onwards, the
@@ -195,7 +198,7 @@ void __fastcall Hook_Update(void* self, void* edx) {
     if (g_query && g_queryDev != dev) ReleaseQuery(); // (another device: a query belongs to the one that made it)
     const bool due = *reinterpret_cast<const uint8_t*>(reinterpret_cast<uintptr_t>(self) + kReadbackDue) != 0;
     if (g_pending == self && !due) g_pending = nullptr; // the game dropped it
-    g_sincePick++;
+    g_sinceReadBack++;
     const uint8_t* const m = static_cast<const uint8_t*>(self);
     const bool skipOn = g_skipOn.load(std::memory_order_relaxed);
     if (skipOn) g_lastUpdateTick.store(GetTickCount64());
@@ -216,7 +219,6 @@ void __fastcall Hook_Update(void* self, void* edx) {
         bool request;
         View v;
         if (WillPick(m, request, v)) {
-            g_sincePick = 0;
             g_skippedSincePick.store(false);
             c_runs.fetch_add(1, std::memory_order_relaxed);
             if (hold == kHoldRender) g_hold.compare_exchange_strong(hold, kHoldReadBack);
