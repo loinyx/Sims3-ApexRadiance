@@ -345,7 +345,6 @@ public static class Engine
         docs ??= Scan.DocumentsFor(g);
         CheckWritable();
         using var point = RestorePoints.Begin(g.Bin, "Remove {0}", Components.Name(c));
-        if (TurnsFrameGenOff(c)) FrameGenOffError = FrameGenOff(g) ?? FrameGenOffError; // (never fails the removal: the UI logs it and shows it on the row)
         // the restart host is Apex's: it goes first, so its setting is turned off too
         if (c == Components.Apex && (Manifest.Load(g.Bin).Versions.ContainsKey(Components.RestartHost) || Scan.Run(g, docs).RestartHost))
             Remove(g, Components.RestartHost, docs);
@@ -388,6 +387,8 @@ public static class Engine
         if (c == Components.RestartHost) SetRestartHost(docs, false);
         m.Versions.Remove(c);
         m.Save();
+        // after the files are gone (a failed removal leaves frame generation as it was); never fails the removal: the UI logs it and shows it on the row
+        if (TurnsFrameGenOff(c)) FrameGenOffError = FrameGenOff(g) ?? FrameGenOffError;
         // the restored d3d9.dll is a loader again: the one Setup added for the bridge would load every mod twice
         if (c is Components.Bridge or Components.Dxvk && m.Versions.ContainsKey(Components.Loader) && Scan.Run(g, docs).LoaderIsD3d9)
             Remove(g, Components.Loader, docs);
@@ -526,8 +527,13 @@ public static class Engine
     // key absent, Apex's default, or 0) becomes `fps`. Returns the text and the value before (null when absent).
     static readonly Regex ScreenHeader = new(@"^\s*\[\s*screen\s*\]\s*(#.*)?\r?$");
     static readonly Regex FpsKey = new(@"^(\s*fps_limit\s*=\s*)(\d+)");
-    public static (string Text, int? Was) WithFpsLimitIfNone(string text, int fps = 60) =>
-        FpsLimitKey(text) is var was && was > 0 ? (text, was) : (WithFpsLimit(text, fps), was);
+    public const int FrameGenFps = 60;
+    public static (string Text, int? Was) WithFpsLimitIfNone(string text, int fps = FrameGenFps) =>
+        DottedScreen(text) || FpsLimitKey(text) is > 0 or -1 ? (text, FpsLimitKey(text)) : (WithFpsLimit(text, fps), FpsLimitKey(text));
+
+    // [screen] written as dotted keys (screen.fps_limit = 30) or an inline table (screen = { ... }): Setup writes nothing then
+    static readonly Regex DottedScreenKey = new(@"^\s*screen\s*(\.|=)");
+    static bool DottedScreen(string text) => text.Split('\n').Any(l => DottedScreenKey.IsMatch(l));
 
     static (string[] Lines, int At, int End) ScreenTable(string text)
     {
@@ -542,7 +548,8 @@ public static class Engine
     {
         var (lines, at, end) = ScreenTable(text);
         for (int i = at + 1; at >= 0 && i < end; i++)
-            if (FpsKey.Match(lines[i]) is { Success: true } m) return int.Parse(m.Groups[2].Value);
+            // a value that does not parse (too big) counts as a limit the player set: -1, left alone
+            if (FpsKey.Match(lines[i]) is { Success: true } m) return int.TryParse(m.Groups[2].Value, out var v) ? v : -1;
         return null;
     }
 
@@ -551,6 +558,7 @@ public static class Engine
     public static string WithFpsLimit(string text, int fps)
     {
         var cr = text.Contains("\r\n") ? "\r" : "";
+        if (text.Length > 0 && !text.EndsWith('\n')) text += cr + "\n"; // (no final newline: one first, so every line ends alike)
         var (lines, at, end) = ScreenTable(text);
         var line = "fps_limit = " + fps;
         if (at < 0)

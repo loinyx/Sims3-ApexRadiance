@@ -39,6 +39,12 @@ public static class SmoothMotion
 
     // the bridge, this game's exe, then the other edition's (Steam TS3W.exe, EA app TS3.exe): one profile serves every copy of
     // the game on the PC, and turning it on for one never drops the other's entry. Only the first two can block (Owner).
+    // no NVIDIA driver (no nvapi64.dll, or a leftover one without the export, or NVAPI_NVIDIA_DEVICE_NOT_FOUND): no card, no row;
+    // anything else on an NVIDIA PC is an error shown on the row
+    public static Status Failed(Exception e) => e is DllNotFoundException or EntryPointNotFoundException
+        ? new(null, 0, false, null, null) : new(null, 0, false, null, e.Message);
+    public static bool NoCard(int initResult) => initResult == -6;
+
     public static string[] Apps(string gameExe) => new[] { BridgeExe, gameExe }.Concat(new[] { "TS3W.exe", "TS3.exe" }.Where(e => !e.Equals(gameExe, StringComparison.OrdinalIgnoreCase))).ToArray();
 
     public static Status Read(string gameExe)
@@ -51,7 +57,7 @@ public static class SmoothMotion
                        p.Length > 2 && p[2] == "1", p.Length > 3 && p[3].Length > 0 ? p[3] : null, null);
         }
         try { return Nv.Read(Apps(gameExe)); }
-        catch (Exception e) { return new(null, 0, false, null, e.Message); }
+        catch (Exception e) { return Failed(e); }
     }
 
     // null when done, else why not; the dry run and the fake write nothing
@@ -83,7 +89,8 @@ public static class SmoothMotion
         static byte[] Name(string s) { var b = new byte[Str]; Encoding.Unicode.GetBytes(s, 0, Math.Min(s.Length, 2047), b, 0); return b; }
         static string NameAt(byte[] b, int at) => Encoding.Unicode.GetString(b, at, Str).Split('\0')[0];
 
-        static void Init() => Ok(((delegate* unmanaged[Cdecl]<int>)F(0x0150E828))(), "NvAPI_Initialize");
+        static int InitCode() => ((delegate* unmanaged[Cdecl]<int>)F(0x0150E828))();
+        static void Init() => Ok(InitCode(), "NvAPI_Initialize");
 
         static (string? Card, uint Driver) Card()
         {
@@ -160,7 +167,8 @@ public static class SmoothMotion
 
         public static Status Read(string[] apps)
         {
-            Init();
+            if (InitCode() is var ir && NoCard(ir)) return new(null, 0, false, null, null);
+            Ok(ir, "NvAPI_Initialize");
             var (card, driver) = Card();
             if (card is null) return new(null, driver, false, null, null);
             return Session(s => FindProfile(s, ProfileName) is var p && p != 0

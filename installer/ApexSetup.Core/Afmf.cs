@@ -33,7 +33,7 @@ public static class Afmf
             return new(true, p[0] == "1", p.Length > 1 && p[1] == "1", null);
         }
         // (IsEnabled answers ADLX_NOT_SUPPORTED where AFMF is not supported: asked only where it is)
-        try { return Adlx.Run(f => f is not null && Adlx.Supported(f) ? new Status(true, true, Adlx.Enabled(f), null) : new Status(true, false, false, null)) ?? new(false, false, false, null); }
+        try { return Tidy(Adlx.Run(f => f is not null && Adlx.Supported(f) ? new Status(true, true, Adlx.Enabled(f), null) : new Status(true, false, false, null)) ?? new(false, false, false, null)); }
         catch (Exception e) { return new(true, false, false, e.Message); }
     }
 
@@ -44,13 +44,32 @@ public static class Afmf
             return "Dry run: Setup changes nothing.";
         try
         {
-            Adlx.Run(f => f is null ? throw new InvalidOperationException("AMD Fluid Motion Frames not available") : Adlx.SetEnabled(f, on));
+            // the record first: a crash after the driver call still leaves it, so maintenance can turn AFMF off again
             if (on) { Directory.CreateDirectory(Path.GetDirectoryName(Marker)!); File.WriteAllText(Marker, "on"); }
-            else File.Delete(Marker);
+            if (Adlx.Run(f => f is null ? throw new InvalidOperationException("AMD Fluid Motion Frames not available") : Adlx.SetEnabled(f, on)) != 1)
+                throw new InvalidOperationException("AMD driver not found");
+            if (!on) File.Delete(Marker);
             return null;
         }
-        catch (Exception e) { return e.Message; }
+        catch (Exception e)
+        {
+            if (on) try { File.Delete(Marker); } catch (Exception x) when (x is IOException or UnauthorizedAccessException) { }
+            return e.Message;
+        }
     }
+
+    // a record left while AFMF is off (turned off in AMD Software, a failed call): dropped, so maintenance never turns off a
+    // setting the player turns on later
+    public static Status Tidy(Status s)
+    {
+        if (s is { Present: true, Error: null, On: false } && File.Exists(Marker))
+            try { File.Delete(Marker); } catch (Exception x) when (x is IOException or UnauthorizedAccessException) { }
+        return s;
+    }
+
+    // ADLXInitialize's answer: ADLX_OK or ADLX_ALREADY_INITIALIZED start it; anything else (a leftover amdadlx64.dll without an
+    // AMD GPU) is no AMD card
+    public static bool Started(int initResult) => initResult is 0 or 2;
 
     // maintenance (removing the bridge or Apex): off only when Setup turned it on; null when nothing to do or done
     public static string? OffIfSetupTurnedOn() => SetupTurnedOn ? Set(false) : null;
@@ -82,7 +101,8 @@ public static class Afmf
             catch (DllNotFoundException) { return default; }
             catch (EntryPointNotFoundException) { return default; }
             nint system = 0, services = 0, services1 = 0, afmf = 0;
-            if (Initialize(version, &system) is var ir && ir != Ok && ir != AlreadyInitialized) Check(ir, "ADLXInitialize");
+            // a leftover amdadlx64.dll without an AMD GPU fails here: no AMD card, no row
+            if (!Started(Initialize(version, &system))) return default;
             try
             {
                 Check(((delegate* unmanaged<nint, nint*, int>)Slot(system, 7))(system, &services), "Get3DSettingsServices");
@@ -96,6 +116,6 @@ public static class Afmf
 
         public static bool Supported(nint? f) { byte b; Check(((delegate* unmanaged<nint, byte*, int>)Slot(f!.Value, 3))(f.Value, &b), "IsSupported"); return b != 0; }
         public static bool Enabled(nint? f) { byte b; Check(((delegate* unmanaged<nint, byte*, int>)Slot(f!.Value, 4))(f.Value, &b), "IsEnabled"); return b != 0; }
-        public static int SetEnabled(nint? f, bool on) { var r = ((delegate* unmanaged<nint, byte, int>)Slot(f!.Value, 5))(f.Value, on ? (byte)1 : (byte)0); if (r is not (Ok or AlreadyEnabled)) Check(r, "SetEnabled"); return 0; }
+        public static int SetEnabled(nint? f, bool on) { var r = ((delegate* unmanaged<nint, byte, int>)Slot(f!.Value, 5))(f.Value, on ? (byte)1 : (byte)0); if (r is not (Ok or AlreadyEnabled)) Check(r, "SetEnabled"); return 1; }
     }
 }

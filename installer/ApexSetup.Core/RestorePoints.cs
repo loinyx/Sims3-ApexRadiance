@@ -175,8 +175,9 @@ public static class RestorePoints
             // only the key goes back: the game may have saved other settings since
             if (!File.Exists(e.Path)) return;
             var text = File.ReadAllText(e.Path);
-            if (Engine.FpsLimitKey(text) != e.FpsLimitWas)
-                File.WriteAllText(e.Path, e.FpsLimitWas is { } was ? Engine.WithFpsLimit(text, was) : Engine.WithoutFpsLimit(text));
+            // only while the file still holds what Setup wrote: a limit the player changed since stays (Restore checked the game is closed)
+            if (Engine.FpsLimitKey(text) == Engine.FrameGenFps)
+                Fs.WriteAtomic(e.Path, e.FpsLimitWas is { } was ? Engine.WithFpsLimit(text, was) : Engine.WithoutFpsLimit(text));
             return;
         }
         if (e.RestartHostKey)
@@ -217,7 +218,14 @@ public static class Fs
     public static void Write(string path, string text) { RestorePoints.Touch(path); File.WriteAllText(path, text); }
     // ApexRadiance.toml with [ui] restart_host changed from keyWas: a restore point puts back only that key
     public static void WriteKey(string path, string text, bool? keyWas) { RestorePoints.Touch(path, key: true, keyWas: keyWas); File.WriteAllText(path, text); }
-    public static void WriteFpsKey(string path, string text, int? was) { RestorePoints.Touch(path, fps: true, fpsWas: was); File.WriteAllText(path, text); }
+    public static void WriteFpsKey(string path, string text, int? was) { RestorePoints.Touch(path, fps: true, fpsWas: was); WriteAtomic(path, text); }
+    // a temporary file in the same folder, then moved over: a crash never leaves half of ApexRadiance.toml
+    public static void WriteAtomic(string path, string text)
+    {
+        var tmp = path + ".apex-tmp";
+        File.WriteAllText(tmp, text);
+        File.Move(tmp, path, true);
+    }
     public static void Delete(string path) { if (!File.Exists(path)) return; RestorePoints.Touch(path); File.Delete(path); }
     public static void ClearReadOnly(string path)
     {

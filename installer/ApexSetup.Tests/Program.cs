@@ -15,7 +15,8 @@ int failures = 0;
 // removals never reach the real driver: the hook counts the games it was asked to turn frame generation off for
 var frameGenOff = new List<string>();
 string? frameGenOffFails = null;
-Engine.FrameGenOff = game => { frameGenOff.Add(game.Exe); return frameGenOffFails; };
+var frameGenOffAfterFiles = true; // (the hook runs once the component is gone from setup.json)
+Engine.FrameGenOff = game => { frameGenOff.Add(game.Exe); frameGenOffAfterFiles &= !Manifest.Load(game.Bin).Versions.ContainsKey(Components.Bridge); return frameGenOffFails; };
 void Check(bool ok, string what) { Console.WriteLine((ok ? "ok   " : "FAIL ") + what); if (!ok) failures++; }
 string B(string rel) => Path.Combine(bin, rel);
 string Read(string p) => File.Exists(p) ? File.ReadAllText(p) : "<missing>";
@@ -586,6 +587,19 @@ try
         Engine.Remove(g, Components.Bridge, docs);
         Check(frameGenOff.SequenceEqual(new[] { "TS3.exe" }) && Engine.TakeFrameGenOffError() == "nvapi64.dll not found" && Engine.TakeFrameGenOffError() is null,
               "frame generation: removing the bridge asks the EA app game's TS3.exe, and a driver failure does not fail the removal");
+        Check(frameGenOffAfterFiles, "frame generation: turned off only after the bridge's files are removed");
+        // review fixes: the player's later change wins over an undo; no temporary file left; CRLF without a final newline; dotted or
+        // inline [screen] and an unparseable limit left alone
+        File.WriteAllText(fgToml, "[ui]\r\nx = 1\r\n");
+        Engine.SetFpsLimitIfNone(g, "NVIDIA Smooth Motion", docs);
+        File.WriteAllText(fgToml, Read(fgToml).Replace("fps_limit = 60", "fps_limit = 75"));
+        Check(RestorePoints.Restore(bin, RestorePoints.List(bin)[0]).Count == 0 && Read(fgToml).Contains("fps_limit = 75") && !File.Exists(fgToml + ".apex-tmp"),
+              "frame limit: a limit the player changed since stays on restore; written through a temporary file");
+        Check(Engine.WithFpsLimit("[screen]\r\nvsync = 1", 60) == "[screen]\r\nvsync = 1\r\nfps_limit = 60\r\n"
+              && Engine.WithFpsLimit("[ui]\r\nx = 1", 60) == "[ui]\r\nx = 1\r\n\r\n[screen]\r\nfps_limit = 60\r\n", "frame limit: CRLF without a final newline stays CRLF");
+        Check(Engine.WithFpsLimitIfNone("screen.vsync = 1\n").Text == "screen.vsync = 1\n" && Engine.WithFpsLimitIfNone("screen = { vsync = 1 }\n").Text == "screen = { vsync = 1 }\n"
+              && Engine.WithFpsLimitIfNone("[screen]\nfps_limit = 99999999999\n").Text == "[screen]\nfps_limit = 99999999999\n",
+              "frame limit: dotted or inline screen keys and an unparseable limit are left alone");
         frameGenOffFails = null;
         frameGenOff.Clear();
         Engine.Remove(g, Components.S3ss, docs);
@@ -829,6 +843,19 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
     Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", "1");
     Check(Afmf.Set(true) == "Dry run: Setup changes nothing.", "afmf: the dry run writes nothing");
     Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null);
+    Check(SmoothMotion.Failed(new DllNotFoundException()) is { Card: null, Error: null } && SmoothMotion.Failed(new EntryPointNotFoundException()).Error is null
+          && SmoothMotion.Failed(new InvalidOperationException("DRS_LoadSettings -1")).Error == "DRS_LoadSettings -1" && SmoothMotion.NoCard(-6) && !SmoothMotion.NoCard(-1),
+          "smooth motion: no NVIDIA driver or device is no card, no warning; other errors show");
+    Check(Afmf.Started(0) && Afmf.Started(2) && !Afmf.Started(8) && !Afmf.Started(3), "afmf: ADLX that does not start is no AMD card");
+    Afmf.Marker = Path.Combine(Path.GetTempPath(), "ApexSetupTest-afmf-" + Guid.NewGuid().ToString("N")[..8] + ".txt");
+    File.WriteAllText(Afmf.Marker, "on");
+    Afmf.Tidy(new(true, true, true, null));
+    var keptOn = File.Exists(Afmf.Marker);
+    Afmf.Tidy(new(true, true, false, "IsEnabled 3"));
+    var keptOnError = File.Exists(Afmf.Marker);
+    Afmf.Tidy(new(true, true, false, null));
+    Check(keptOn && keptOnError && !File.Exists(Afmf.Marker), "afmf: a record left while AFMF is off is dropped");
+    Afmf.Marker = marker;
     var amd = Afmf.Read(); // read only
     Console.WriteLine($"info this PC: AMD {(amd.Present ? "driver found" : "none")}{(amd.Error is null ? "" : ", error " + amd.Error)}");
     var nv = SmoothMotion.Read("TS3W.exe"); // read only
