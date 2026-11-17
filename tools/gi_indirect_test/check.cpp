@@ -126,6 +126,10 @@ void GridChecks() {
     Check(g[3] < 1e-6f && h[3] > 0.999f, "a waiting tile reads ready 0, another 1");
     float c[4];
     Check(!GiIndirect::UvRow(s.grid, 5, GiIndirect::kFloor, c), "no layer for a story the scene has not");
+    // the map lookup's set indices: the game's texture set order (RtOutdoorLamps::kSetIdx = wall 3, floor 0, ceiling 1, objects 2)
+    Check(GiIndirect::KindOfSetIndex(0) == GiIndirect::kFloor && GiIndirect::KindOfSetIndex(1) == GiIndirect::kCeiling &&
+              GiIndirect::KindOfSetIndex(2) < 0 && GiIndirect::KindOfSetIndex(3) < 0,
+          "texture set index 0 = floor, 1 = ceiling, objects and wall no layer");
     // Apply: mode 1 by night replaces the ready share of the ambient, by day adds; mode 2 the atlas alone
     const float map[4] = {0.2f, 0.3f, 0.4f, 0.5f}, gi[4] = {0.6f, 0.5f, 0.4f, 1.0f}, amb[3] = {0.3f, 0.2f, 0.1f};
     float o[3];
