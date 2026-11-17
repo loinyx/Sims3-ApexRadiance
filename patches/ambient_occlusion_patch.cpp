@@ -445,6 +445,7 @@ struct State {
     uint64_t nextTiming = 0;
     int qNext = 0, qKey = -1;
     float gpuMs = -1.0f;
+    GpuTiming::LogWindow gpuLog; // the [AO] GPU ms line, every 10 s while the pass runs
     unsigned frames = 0;
     // last camera used (Developer read-out)
     float lastNear = 0, lastA = 0, lastTanX = 0, lastTanY = 0;
@@ -937,6 +938,7 @@ void ReadTimings() {
         if (!disjoint && freq && t1 > t0) {
             const float ms = static_cast<float>(double(t1 - t0) * 1000.0 / double(freq));
             g.gpuMs = g.gpuMs < 0 ? ms : g.gpuMs * 0.9f + ms * 0.1f;
+            g.gpuLog.Add(ms);
         }
     }
 }
@@ -1184,9 +1186,16 @@ void AoEffect(IDirect3DDevice9* dev) {
     if (key != g.qKey) {
         g.qKey = key;
         g.gpuMs = -1.0f;
+        g.gpuLog.Reset();
         for (bool& b : g.qIssued) b = false;
     }
     ReadTimings();
+    if (g.gpuLog.Due(GetTickCount64(), 10000)) {
+        if (g.gpuLog.n)
+            LOG_INFO(std::format("[AO] GPU ms: mean {:.2f}, max {:.2f} over {} samples ({} slices{})", g.gpuLog.Mean(), g.gpuLog.max, g.gpuLog.n,
+                                 kQualitySlices[std::clamp(g.p.quality, 0, kQualityCount - 1)], g.p.zoomSlices ? ", fewer when far" : ""));
+        g.gpuLog.Reset();
+    }
     const int qi = g.qNext;
     const bool timed = !g.qIssued[qi] && g.qDisjoint[qi] && g.qBegin[qi] && g.qEnd[qi] && g.qFreq[qi] && GpuTiming::Due(GetTickCount64(),g.nextTiming,kPublicBuild);
     if (timed) {

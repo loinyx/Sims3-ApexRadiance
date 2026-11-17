@@ -17,6 +17,8 @@ int main(){unsigned checks=0,fail=0;auto check=[&](bool ok){++checks;if(!ok)++fa
  for(uint64_t ms=0;ms<60000;++ms) sampled+=GpuTiming::Due(ms,next,true);
  check(sampled==240);check(!GpuTiming::Due(59999,next,true));check(GpuTiming::Due(60000,next,true));
  for(unsigned i=0;i<100;++i)check(GpuTiming::Due(0,next,false));
+ {GpuTiming::LogWindow w;check(!w.Due(1000,10000));w.Add(2.f);w.Add(4.f);check(!w.Due(10999,10000));check(w.Due(11000,10000)&&w.n==2&&w.Mean()==3.f&&w.max==4.f);
+  w.Reset();check(w.n==0&&!w.Due(20999,10000)&&w.Due(50000,10000)&&w.n==0&&!w.Due(59999,10000));}
  for(unsigned n=0;n<1000;++n){std::vector<unsigned> counts(n),order(n);for(auto& x:counts)x=rng()%20;std::iota(order.begin(),order.end(),0);std::stable_sort(order.begin(),order.end(),[&](unsigned a,unsigned b){return counts[a]>counts[b];});
   std::vector<unsigned short> src(n*3),expected(n*3),out(n*3);for(auto& x:src)x=static_cast<unsigned short>(rng());for(unsigned i=0;i<n;++i)std::copy_n(src.data()+order[i]*3,3,expected.data()+i*3);
   CasTriSort::Input in{src.data(),nullptr,n*3,0,0,0};CasTriSort::Fast::Finish(in,counts.data(),out.data());check(out==expected);CasTriSort::Fast::Finish(in,counts.data(),src.data());check(src==expected);

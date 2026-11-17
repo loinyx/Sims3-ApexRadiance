@@ -147,6 +147,11 @@ device reset and rebuilt on the next frame.
 
 About 0.55 ms is fixed (copy and pyramid 0.26, blur 0.2, composite 0.09).
 
+The pass times itself with timestamp queries read a few frames later (every frame in a developer build, every 250 ms in
+a public one). The card shows the smoothed value, and while the pass runs the log gets
+`[AO] GPU ms: mean M, max X over N samples (S slices)` every 10 s, from the samples of those 10 s. Not checked under the
+Remix bridge: without timestamp data there is no line.
+
 ## Rejected approaches
 
 - Half-resolution AO reading one of the four depth pixels: caused the "micro dots" reports. The later reduction path read the 2x2 average instead; both reduction and upsampling are removed in local revision 12.
