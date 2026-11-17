@@ -108,6 +108,12 @@ public static class SmoothMotion
         static extern nint Query(uint id);
 
         static nint F(uint id) => Query(id) is var p && p != 0 ? p : throw new InvalidOperationException($"NVAPI 0x{id:X8} missing");
+        // as NVIDIA Profile Inspector resolves them (NvapiDrsWrapper.cs): the newer interface first, the public one when missing.
+        // The newer DRS_SetSetting (0x8A2CF5F5) takes two more arguments, passed as 0, and writes settings the driver's list of
+        // named settings does not hold (Smooth Motion on 621.24); the public one answers NVAPI_SETTING_NOT_FOUND for them.
+        static nint F(uint id, uint fallback) => Query(id) is var p && p != 0 ? p : F(fallback);
+        const uint SetSettingId = 0x8A2CF5F5, SetSettingPublic = 0x577DD202, GetSettingId = 0xEA99498D, GetSettingPublic = 0x73BF8338,
+                   RestoreDefaultId = 0x7DD5B261, RestoreDefaultPublic = 0x53F0381E;
         static void Ok(int r, string what) { if (r != 0) throw new InvalidOperationException($"{what} {r}"); }
         static byte[] Versioned(int size) { var b = new byte[size]; BitConverter.TryWriteBytes(b, (uint)size | (1u << 16)); return b; }
         static byte[] Name(string s) { var b = new byte[Str]; Encoding.Unicode.GetBytes(s, 0, Math.Min(s.Length, 2047), b, 0); return b; }
@@ -169,7 +175,8 @@ public static class SmoothMotion
             var set = Versioned(SettingSize);
             fixed (byte* sp = set)
             {
-                var r = ((delegate* unmanaged[Cdecl]<nint, nint, uint, byte*, int>)F(0x73BF8338))(s, p, SettingId, sp);
+                uint x = 0;
+                var r = ((delegate* unmanaged[Cdecl]<nint, nint, uint, byte*, uint*, int>)F(GetSettingId, GetSettingPublic))(s, p, SettingId, sp, &x);
                 if (r == SettingNotFound) return false;
                 Ok(r, "DRS_GetSetting");
             }
@@ -182,7 +189,7 @@ public static class SmoothMotion
             BitConverter.TryWriteBytes(set.AsSpan(SettingIdAt), id);              // settingType 0: NVDRS_DWORD_TYPE; location, predefined: 0
             BitConverter.TryWriteBytes(set.AsSpan(SettingCurrentAt), value);
             fixed (byte* sp = set)
-                Ok(((delegate* unmanaged[Cdecl]<nint, nint, byte*, int>)F(0x577DD202))(s, b.Handle, sp),
+                Ok(((delegate* unmanaged[Cdecl]<nint, nint, byte*, uint, uint, int>)F(SetSettingId, SetSettingPublic))(s, b.Handle, sp, 0, 0),
                    $"DRS_SetSetting 0x{id:X8} = {value} on \"{b.Name}\"{(b.Predefined ? " (NVIDIA's)" : "")}");
         }
 
@@ -212,7 +219,7 @@ public static class SmoothMotion
                         foreach (var id in new[] { SettingId, ApisId })
                         {
                             // NVAPI_DRS_RestoreProfileDefaultSetting: NVIDIA's value back (a setting it never had is removed)
-                            var r = ((delegate* unmanaged[Cdecl]<nint, nint, uint, int>)F(0x53F0381E))(s, t.Handle, id);
+                            var r = ((delegate* unmanaged[Cdecl]<nint, nint, uint, int>)F(RestoreDefaultId, RestoreDefaultPublic))(s, t.Handle, id);
                             if (r != SettingNotFound) Ok(r, $"DRS_RestoreProfileDefaultSetting 0x{id:X8} on \"{t.Name}\"");
                         }
                 }
