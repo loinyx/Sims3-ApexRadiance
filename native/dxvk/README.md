@@ -17,7 +17,15 @@ print the same smoke lines on an RTX 3070 laptop GPU (caps CRC32 `98a84800`), ex
 same 341-line log apart from the `Build:` line. A patched tree reports itself as `v3.1.1+` (DXVK's own mark for a
 modified source, as the zlib licence asks).
 
-Patches: none yet; `patches\*.patch` are applied in name order.
+Patches. Each applies after the ones before it. Both are proposed upstream.
+
+| Patch | What | Why |
+|---|---|---|
+| 0001 | `DxvkPipelineBindings` binding lists keep 4 entries inline instead of 32 | One `DxvkPipelineBindings` holds 23 lists, about 12 KB in a 32-bit build, and DXVK keeps one in every shader pipeline library, graphics and compute pipeline. In The Sims 3 that was 6,464 library nodes of 12,808 bytes (79 MiB); with 4 inline they are 2,568 bytes. A longer list moves to the heap |
+| 0002 | `DxvkShaderIo` keeps 16 variables inline instead of 32 | Every shader object holds four `DxvkShaderIo` and every fast pipeline key five more. The Sims 3's shaders use at most 16 inputs and 15 outputs, so nothing moves to the heap and each shader object is 2,304 bytes smaller in a 32-bit build |
+
+Both patches come from sims3-modernization (by alexvixell35-stack), measured there in the 32-bit game process. The
+bridge server is 64-bit, so they save memory there, not address space; not measured in the server.
 
 To move to a newer DXVK: change `TAG` and `COMMIT` in `build.cmd`, delete `src\`, and run it. Refresh any patch that
 no longer applies with `git diff`, from a checkout of the new commit that has the earlier patches applied.
