@@ -10,6 +10,6 @@
   "fail": ["\\[ReadbackBench\\] (Aborted|Could not|Not started)"],
   "steps": [
     { "do": "speed", "speed": "pause" },
-    { "do": "wait", "minutes": 2.5, "measure": false }
+    { "do": "wait", "minutes": 5, "measure": false }
   ]
 }

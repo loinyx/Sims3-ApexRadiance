@@ -70,6 +70,14 @@ void Release() {
     if (g_query) g_query->Release(), g_query = nullptr;
     g_dev = nullptr;
 }
+// Another device: the old one's objects may be gone with it, so their pointers are dropped, not released (a small leak
+// at most, development builds only)
+void Forget() {
+    for (auto* arr : {g_rt, g_sys})
+        for (int i = 0; i < kTargets; i++) arr[i] = nullptr;
+    g_query = nullptr;
+    g_dev = nullptr;
+}
 
 // D3DPOOL_DEFAULT render targets and matching system-memory surfaces, A8R8G8B8 (the format of the game's 256x256
 // compositor read-back), made once before the first sample: creates wait for the renderer and are not measured
@@ -257,9 +265,10 @@ void Finish() {
 
 void OnPreReset(IDirect3DDevice9*) {
     if (g_done || !g_dev) return;
-    LOG_WARNING("[ReadbackBench] Aborted: the device was reset during the benchmark");
+    LOG_WARNING("[ReadbackBench] Aborted: the device was reset during the benchmark (the samples so far follow)");
     Release();
     g_done = true;
+    Report(); // (its callbacks stay registered and return at once: no unregistering inside the Reset)
 }
 
 D3D9Hooks::HookAction OnPresent(D3D9Hooks::DeviceContext& ctx) {
@@ -268,7 +277,7 @@ D3D9Hooks::HookAction OnPresent(D3D9Hooks::DeviceContext& ctx) {
     const ULONGLONG now = GetTickCount64();
     if (!g_worldSince) g_worldSince = now;
     if (now - g_worldSince < static_cast<ULONGLONG>(g_delayS) * 1000 || ++g_frame % static_cast<uint64_t>(g_everyFrames)) return D3D9Hooks::HookAction::Continue;
-    if (g_dev && g_dev != ctx.device) Release(); // another device: start the resources again
+    if (g_dev && g_dev != ctx.device) Forget(); // another device: start the resources again
     if (!g_dev && !Create(ctx.device)) {
         LOG_ERROR("[ReadbackBench] Could not create the benchmark's surfaces or query: stopped");
         Release();
