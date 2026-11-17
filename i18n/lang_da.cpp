@@ -97,6 +97,7 @@ const I18n::Pair kPairs[] = {
     {"Performance: trees and plants near lamps cost half as much to draw at night", "Ydeevne: træer og planter nær lamper koster det halve at tegne om natten"},
     {"No crash after deleting lamps", "Intet nedbrud efter sletning af lamper"},
     {"RTX Remix bridge: some lots no longer draw their ground black", "RTX Remix bridge: nogle grunde tegner ikke længere jorden sort"},
+    {"On Linux the menu uses the system's font instead of a blurry one", "På Linux bruger menuen systemets skrifttype i stedet for en sløret"},
     {"One-click frame generation in Setup, for a smoother game on newer cards", "Billedgenerering med ét klik i Setup, for et mere flydende spil på nyere kort"},
     {"Apex Radiance Setup: one-click NVIDIA Smooth Motion and AMD Fluid Motion Frames", "Apex Radiance Setup: NVIDIA Smooth Motion og AMD Fluid Motion Frames med ét klik"},
     {"Apex Radiance Setup: set Apex's frame limit, with 60 to 90 fps suggested", "Apex Radiance Setup: indstil Apex' billedgrænse, 60 til 90 fps anbefales"},

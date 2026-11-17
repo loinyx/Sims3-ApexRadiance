@@ -97,6 +97,7 @@ const I18n::Pair kPairs[] = {
     {"Performance: trees and plants near lamps cost half as much to draw at night", "パフォーマンス: 夜、ランプ近くの木や植物の描画コストが半分になりました"},
     {"No crash after deleting lamps", "ランプを削除してもクラッシュしなくなりました"},
     {"RTX Remix bridge: some lots no longer draw their ground black", "RTX Remix bridge: 一部の区画で地面が黒く描かれなくなりました"},
+    {"On Linux the menu uses the system's font instead of a blurry one", "Linux ではメニューがぼやけたフォントではなくシステムのフォントを使用"},
     {"One-click frame generation in Setup, for a smoother game on newer cards", "Setup でワンクリックのフレーム生成、新しいカードでよりなめらかに"},
     {"Apex Radiance Setup: one-click NVIDIA Smooth Motion and AMD Fluid Motion Frames", "Apex Radiance Setup：NVIDIA Smooth Motion と AMD Fluid Motion Frames をワンクリックで"},
     {"Apex Radiance Setup: set Apex's frame limit, with 60 to 90 fps suggested", "Apex Radiance Setup：Apex のフレームレート制限を設定（推奨 60〜90 fps）"},

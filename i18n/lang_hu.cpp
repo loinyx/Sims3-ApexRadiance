@@ -97,6 +97,7 @@ const I18n::Pair kPairs[] = {
     {"Performance: trees and plants near lamps cost half as much to draw at night", "Teljesítmény: a lámpák közelében lévő fák és növények rajzolása éjjel feleannyiba kerül"},
     {"No crash after deleting lamps", "Nincs összeomlás lámpák törlése után"},
     {"RTX Remix bridge: some lots no longer draw their ground black", "RTX Remix bridge: néhány telek talaja már nem fekete"},
+    {"On Linux the menu uses the system's font instead of a blurry one", "Linuxon a menü a rendszer betűtípusát használja a homályos helyett"},
     {"One-click frame generation in Setup, for a smoother game on newer cards", "Képkocka-generálás egy kattintással a Setupban, simább játék újabb kártyákon"},
     {"Apex Radiance Setup: one-click NVIDIA Smooth Motion and AMD Fluid Motion Frames", "Apex Radiance Setup: NVIDIA Smooth Motion és AMD Fluid Motion Frames egy kattintással"},
     {"Apex Radiance Setup: set Apex's frame limit, with 60 to 90 fps suggested", "Apex Radiance Setup: az Apex képkockakorlátjának beállítása, 60–90 fps ajánlott"},

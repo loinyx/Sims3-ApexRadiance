@@ -97,6 +97,7 @@ const I18n::Pair kPairs[] = {
     {"Performance: trees and plants near lamps cost half as much to draw at night", "성능: 밤에 램프 근처의 나무와 식물을 그리는 비용이 절반으로 줄었습니다"},
     {"No crash after deleting lamps", "램프를 삭제한 뒤에도 충돌하지 않습니다"},
     {"RTX Remix bridge: some lots no longer draw their ground black", "RTX Remix bridge: 일부 부지가 더 이상 바닥을 검게 그리지 않습니다"},
+    {"On Linux the menu uses the system's font instead of a blurry one", "Linux에서 메뉴가 흐릿한 글꼴 대신 시스템 글꼴을 사용"},
     {"One-click frame generation in Setup, for a smoother game on newer cards", "Setup에서 한 번의 클릭으로 프레임 생성, 최신 그래픽카드에서 더 부드럽게"},
     {"Apex Radiance Setup: one-click NVIDIA Smooth Motion and AMD Fluid Motion Frames", "Apex Radiance Setup: NVIDIA Smooth Motion과 AMD Fluid Motion Frames를 한 번의 클릭으로"},
     {"Apex Radiance Setup: set Apex's frame limit, with 60 to 90 fps suggested", "Apex Radiance Setup: Apex 프레임 제한 설정, 60~90fps 권장"},

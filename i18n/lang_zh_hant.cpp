@@ -97,6 +97,7 @@ const I18n::Pair kPairs[] = {
     {"Performance: trees and plants near lamps cost half as much to draw at night", "效能：夜間燈具附近的樹木和植物繪製開銷減半"},
     {"No crash after deleting lamps", "刪除燈具後不再當機"},
     {"RTX Remix bridge: some lots no longer draw their ground black", "RTX Remix bridge：部分地塊的地面不再顯示為黑色"},
+    {"On Linux the menu uses the system's font instead of a blurry one", "在 Linux 上，選單使用系統字型，不再模糊"},
     {"One-click frame generation in Setup, for a smoother game on newer cards", "在 Setup 中一鍵開啟影格生成，新顯示卡上遊戲更流暢"},
     {"Apex Radiance Setup: one-click NVIDIA Smooth Motion and AMD Fluid Motion Frames", "Apex Radiance Setup：一鍵開啟 NVIDIA Smooth Motion 和 AMD Fluid Motion Frames"},
     {"Apex Radiance Setup: set Apex's frame limit, with 60 to 90 fps suggested", "Apex Radiance Setup：設定 Apex 的影格率限制，建議 60 到 90 fps"},
