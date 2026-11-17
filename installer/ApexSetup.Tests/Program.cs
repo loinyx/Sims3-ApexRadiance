@@ -731,6 +731,29 @@ Check(Gpu.Decode((1u << 22) | (3u << 12) | 280) == new Version(1, 3) && Gpu.Deco
 try { var (vk, card, missing) = Gpu.Vulkan(); Console.WriteLine($"info this PC: {card ?? "no Vulkan card"} Vulkan {vk?.ToString() ?? "-"}, DXVK extensions missing: {(missing.Length == 0 ? "none" : string.Join(", ", missing))}"); }
 catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: " + e.Message); }
 
+// NVIDIA Smooth Motion: which card and driver may turn it on, a player's own profile left alone, the dry run writes nothing
+{
+    SmoothMotion.Status Nv(string? card, uint driver = 57186, bool on = false, string? owner = null) => new(card, driver, on, owner, null);
+    Check(SmoothMotion.Supported("NVIDIA GeForce RTX 4070", 57186) && SmoothMotion.Supported("NVIDIA GeForce RTX 5090 Laptop GPU", 59000)
+          && !SmoothMotion.Supported("NVIDIA GeForce RTX 3080", 59000) && !SmoothMotion.Supported("NVIDIA GeForce RTX 4070", 57185)
+          && !SmoothMotion.Supported(null, 59000), "smooth motion: RTX 40 and 50 on driver 571.86 or newer only");
+    Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070"), true) is null, "smooth motion: an RTX 40 card under the bridge can turn it on");
+    Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 3080"), true)?.Key.StartsWith("Needs an NVIDIA") == true
+          && SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070", 56600), true)?.Arg == "566.00", "smooth motion: an older card or driver says why");
+    Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070"), false)?.Key.Contains("RTX Remix bridge") == true
+          && SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070", on: true), false) is null, "smooth motion: needs the bridge to turn on, never to turn off");
+    Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070", owner: "My TS3"), true) is { Arg: "My TS3" }, "smooth motion: an exe in the player's own profile is left alone");
+    Check(SmoothMotion.Blocked(new SmoothMotion.Status(null, 0, false, null, "no nvapi64.dll"), true) is { Arg: "no nvapi64.dll" }, "smooth motion: an NVAPI error reads as a reason");
+    Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_NV", "NVIDIA GeForce RTX 4080|57186|1|");
+    Check(SmoothMotion.Read("TS3W.exe") is { Card: "NVIDIA GeForce RTX 4080", Driver: 57186, On: true, Owner: null }, "smooth motion: the fake stands in for the driver");
+    Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_NV", null);
+    Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", "1");
+    Check(SmoothMotion.Set(true, "TS3W.exe") == "Dry run: Setup changes nothing.", "smooth motion: the dry run writes nothing");
+    Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null);
+    var nv = SmoothMotion.Read("TS3W.exe"); // read only
+    Console.WriteLine($"info this PC: NVIDIA {nv.Card ?? "none"}, driver {SmoothMotion.DriverText(nv.Driver)}, Smooth Motion {(nv.On ? "on" : "off")}{(nv.Owner is null ? "" : ", in profile " + nv.Owner)}{(nv.Error is null ? "" : ", error " + nv.Error)}");
+}
+
 // the generated JSON writes and reads exactly what the reflection serializer did: players' setup.json and restore points
 {
     var legacy = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
