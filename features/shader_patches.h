@@ -251,8 +251,14 @@ struct ObjectLampPatch {
     DWORD coneConst = 0;      // two cone rows per lamp, evaluated at the pixel
     DWORD reachConst = 0;     // reach variant: the 2 r0^2 rows; 0 = the first law
     bool rigLamps = true;     // c5..c7 are the rig's lamp colours (false: no lamps in the pixel shader)
+    DWORD indexSampler = 0;   // index: the lamp index texture (lamp_index.h), point sampled
+    DWORD objectConst = 0;    // index: the one row a draw sets (LampIndex::ObjectRow)
 };
-bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach = false);
+// index (real-time GI S3-02, lamp_index.h; first law only): the lamps come from the lamp index texture at the pixel's cell,
+// read in a loop of LampIndex::kSlots, and every parameter from the frame constants c208..c214; the copy reads no
+// per-draw row but objectConst (atlasConst, strengthConst, lampParamConst, lampConst, coneConst stay 0). The ground
+// share and both height gates are taken at the pixel. Refused (t unchanged) with reach, or without room for it.
+bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach = false, bool index = false);
 
 // Indoor room light: the 4 directional room light maps ("basis maps", 64x64) read with a smooth (bicubic) filter.
 // BasisSamplers: the samplers of a basis-reading pixel shader, by direction (+X, -X, +Z, -Z). PatchBasisSmooth: its 4

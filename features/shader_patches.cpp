@@ -7,6 +7,7 @@
 #define NOMINMAX
 #endif
 #include "shader_patches.h"
+#include "lamp_index.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -160,16 +161,17 @@ void AppendHueClamp(std::vector<DWORD>& v, DWORD q, DWORD tmp) {
 //    ReachShareImpl's "1 up to r0" only just inside r0, by at most 1 - (1 - (r0/R)^4)^2: 0.6% for the 12/10 garden post
 //    (3.5 / 15 m), 0.8% for any w of 28 or more, 2.5% for a weak lamp with both radii at their floors (2 / 6 m, w under 14),
 //    where the wall texel need not be at its clamp (12/10 review: 0.98 against 1, about 3/255 at most).
-void AppendLampLaw(std::vector<DWORD>& code, DWORD A, DWORD B, DWORD nrm, DWORD posNeg, DWORD cp, DWORD cS, DWORD cH, bool reach, DWORD reachRow, unsigned k) {
+// cpType: the register type of cp (kTemp: a lamp row read from the lamp index texture)
+void AppendLampLaw(std::vector<DWORD>& code, DWORD A, DWORD B, DWORD nrm, DWORD posNeg, DWORD cp, DWORD cS, DWORD cH, bool reach, DWORD reachRow, unsigned k, DWORD cpType = kConst) {
     constexpr DWORD kNeg = 0x01000000u, kRsq = 0x07, kMin = 0x0A;
-    code.insert(code.end(), {Op(kAdd, 3), Dst(kTemp, A, 0x7), Src(kConst, cp), posNeg,             // l = lamp - pixel
+    code.insert(code.end(), {Op(kAdd, 3), Dst(kTemp, A, 0x7), Src(cpType, cp), posNeg,             // l = lamp - pixel
                              Op(kDp3, 3), Dst(kTemp, A, 0x8), Src(kTemp, A), Src(kTemp, A),         // d^2
                              Op(kMax, 3), Dst(kTemp, A, 0x8), Src(kTemp, A, kSwzW), Src(kConst, cS, kSwzW),
                              Op(kRsq, 2), Dst(kTemp, B, 0x8), Src(kTemp, A, kSwzW),
                              Op(kMul, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kTemp, B, kSwzW),  // normalize
                              Op(kDp3, 3), Dst(kTemp, B, 0x1, true), Src(kTemp, nrm), Src(kTemp, A), // sat(N.l)
                              // q = d^2 / R^2 (two steps: one constant per instruction, final review 30/09)
-                             Op(kMul, 3), Dst(kTemp, B, 0x2), Src(kTemp, A, kSwzW), Src(kConst, cp, kSwzW)});
+                             Op(kMul, 3), Dst(kTemp, B, 0x2), Src(kTemp, A, kSwzW), Src(cpType, cp, kSwzW)});
     if (!reach) {
         code.insert(code.end(), {Op(kAdd, 3), Dst(kTemp, B, 0x2, true), Src(kTemp, B, kSwzY) | kNeg, Src(kConst, cH, 0xAA /* 1 */),
                                  Op(kMul, 3), Dst(kTemp, B, 0x2), Src(kTemp, B, kSwzY), Src(kTemp, B, kSwzY),
@@ -2203,7 +2205,7 @@ bool PatchObjectLampVs(std::vector<DWORD>& t, bool needColor0, int* texcoordOut,
     return true;
 }
 
-bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach) {
+bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach, bool index) {
     if (t.empty() || t[0] != 0xFFFF0300) return false;
     const auto all = Parse(t);
     if (all.empty()) return false;
@@ -2428,8 +2430,14 @@ bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach) 
         }
         if (!sun || !lamp1) return false;
     }
+    if (index) {
+        // two samplers (ground atlas, lamp index), two rows under the frame block, 10 temporaries, integer register i0
+        if (reach || u.maxSampler < 0 || u.maxSampler >= 14 || !u.afterLastSamplerDcl || u.maxConst + 2 >= static_cast<int>(LampIndex::kFirstConst) || u.maxTemp + 10 >= 32) return false;
+        for (const Ins& x : all)
+            if (x.op == kDefI) return false;
+    }
     // reach: 2 more rows (the r0^2 of the 8 lamps) after the cones
-    if (u.maxSampler < 0 || u.maxSampler >= 15 || !u.afterLastSamplerDcl || u.maxConst + 4 + 4 * kObjectPixelLamps + (reach ? 2 : 0) >= 224 || u.maxTemp + 5 >= 32) return false;
+    if (!index && (u.maxSampler < 0 || u.maxSampler >= 15 || !u.afterLastSamplerDcl || u.maxConst + 4 + 4 * kObjectPixelLamps + (reach ? 2 : 0) >= 224 || u.maxTemp + 5 >= 32)) return false;
     const DWORD E = static_cast<DWORD>(u.maxSampler + 1), T = static_cast<DWORD>(u.maxTemp + 1), Fr = T + 1;
     const DWORD cA = static_cast<DWORD>(u.maxConst + 1), cB = cA + 1, cH = cA + 2, V = static_cast<DWORD>(maxIn + 1);
     const DWORD cS = cA + 3, cL = cA + 4; // per-pixel lamps: parameters, then kObjectPixelLamps x (pos + 1/R^2, colour)
@@ -2443,6 +2451,7 @@ bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach) 
     out.coneConst = cL + 2 * kObjectPixelLamps;
     out.reachConst = reach ? cR : 0;
     out.rigLamps = shape != kC;
+    if (index) out.atlasConst = out.strengthConst = out.lampParamConst = out.lampConst = out.coneConst = 0, out.indexSampler = E + 1, out.objectConst = cA;
     std::vector<DWORD> ground = {Op(kMad, 4), Dst(kTemp, T, 0x3), Src(kInput, V, kSwzXYXY), Src(kConst, cA), Src(kConst, cA, kSwzZWZW),
                                  Op(kTexld, 3), Dst(kTemp, T), Src(kTemp, T), Src(kSampler, E),
                                  Op(kMad, 4), Dst(kTemp, Fr, 0x8), Src(kTemp, Nrm, kSwzY), Src(kConst, cH, kSwzX), Src(kConst, cH, kSwzY),
@@ -2462,7 +2471,75 @@ bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach) 
     // cS = (valid direct-pixel mode, lamp strength, unused, 1e-4).
     constexpr DWORD kNeg = 0x01000000u;
     const DWORD pw = Src(kInput, V, 0xD8 /* xzyw: world x, y, z */);
-    for (DWORD k = 0; k < kObjectPixelLamps; k++) {
+    if (index) {
+        // The same sum from the lamp index texture (lamp_index.h). cO = cA (the draw's row), F0..F6 = the frame constants.
+        // U = the uv of the cell's current texel (zw = 0: texldl's lod), En = that texel, P / C = the lamp's rows, X = the
+        // table uv. One constant register per instruction, as above.
+        constexpr DWORD kTexldl = 0x5F, kRep = 0x26, kEndRep = 0x27, kFrcOp = 0x13, kAbs = 0x23, kMinOp = 0x0A, kConstInt = 7;
+        const DWORD cO = cA, F0 = LampIndex::kFirstConst, F1 = F0 + 1, F2 = F0 + 2, F3 = F0 + 3, F4 = F0 + 4, F5 = F0 + 5, F6 = F0 + 6;
+        const DWORD U = T + 5, En = T + 6, P = T + 7, C = T + 8, X = T + 9, S2 = E + 1;
+        const DWORD Z = Src(kConst, cH, kSwzW) /* 0 */, wy = Src(kInput, V, 0xAA) /* world y */;
+        ground = {Op(kMul, 3), Dst(kTemp, U, 0x3), Src(kInput, V, kSwzXYXY), Src(kConst, F0, kSwzX),
+                  Op(kAdd, 3), Dst(kTemp, U, 0x3), Src(kTemp, U), Src(kConst, F0, kSwzZWZW),
+                  Op(kFrcOp, 2), Dst(kTemp, X, 0x3), Src(kTemp, U),
+                  Op(kAdd, 3), Dst(kTemp, U, 0x3), Src(kTemp, U), Src(kTemp, X) | kNeg,          // the cell
+                  Op(kMax, 3), Dst(kTemp, U, 0x3), Src(kTemp, U), Z,
+                  Op(kMinOp, 3), Dst(kTemp, U, 0x3), Src(kTemp, U), Src(kConst, F0, kSwzY),     // held in the window
+                  Op(kMad, 4), Dst(kTemp, U, 0x3), Src(kTemp, U), Src(kConst, F2), Src(kConst, F2, kSwzZWZW),
+                  Op(kMov, 2), Dst(kTemp, U, 0xC), Z,
+                  Op(kMov, 2), Dst(kTemp, X, 0xC), Z,
+                  Op(kMov, 2), Dst(kTemp, Q, 0x7), Z,
+                  Op(kRep, 1), Src(kConstInt, 0),
+                  Op(kTexldl, 3), Dst(kTemp, En), Src(kTemp, U), Src(kSampler, S2),            // (index, visibility, the same set in a wall)
+                  Op(kMad, 4), Dst(kTemp, X, 0x1), Src(kTemp, En, kSwzX), Src(kConst, F1, kSwzX), Src(kConst, F1, kSwzY),
+                  Op(kMov, 2), Dst(kTemp, X, 0x2), Src(kConst, F1, 0xAA),
+                  Op(kTexldl, 3), Dst(kTemp, P), Src(kTemp, X), Src(kSampler, S2),             // (pos, 1/R^2)
+                  Op(kAdd, 3), Dst(kTemp, X, 0x2), Src(kTemp, X, kSwzY), Src(kConst, F1, kSwzW),
+                  Op(kTexldl, 3), Dst(kTemp, C), Src(kTemp, X), Src(kSampler, S2)};            // (colour, spill)
+        AppendLampLaw(ground, A, B, Nrm, pw | kNeg, P, F3, cH, false, 0, 0, kTemp);
+        ground.insert(ground.end(), {
+            Op(kAdd, 3), Dst(kTemp, X, 0x2), Src(kTemp, X, kSwzY), Src(kConst, F1, kSwzW),
+            Op(kTexldl, 3), Dst(kTemp, P), Src(kTemp, X), Src(kSampler, S2),                   // cone row 1
+            Op(kDp3, 3), Dst(kTemp, B, 0x4), Src(kTemp, A), Src(kTemp, P),
+            Op(kAdd, 3), Dst(kTemp, B, 0x4), Src(kTemp, B, 0xAA), Src(kTemp, P, kSwzW),
+            Op(kAdd, 3), Dst(kTemp, X, 0x2), Src(kTemp, X, kSwzY), Src(kConst, F1, kSwzW),
+            Op(kTexldl, 3), Dst(kTemp, P), Src(kTemp, X), Src(kSampler, S2),                   // cone row 2
+            Op(kDp3, 3), Dst(kTemp, B, 0x8), Src(kTemp, A), Src(kTemp, P),
+            Op(kAdd, 3), Dst(kTemp, B, 0x8), Src(kTemp, B, kSwzW), Src(kTemp, P, kSwzW),
+            Op(kMax, 3), Dst(kTemp, B, 0x4, true), Src(kTemp, B, 0xAA), Src(kTemp, B, kSwzW),
+            Op(kMad, 4), Dst(kTemp, B, 0x8), Src(kTemp, B, 0xAA), Src(kTemp, C, kSwzW) | kNeg, Src(kTemp, B, 0xAA),
+            Op(kAdd, 3), Dst(kTemp, B, 0x4), Src(kTemp, B, kSwzW), Src(kTemp, C, kSwzW),
+            Op(kMul, 3), Dst(kTemp, B, 0x1), Src(kTemp, B, kSwzX), Src(kTemp, B, 0xAA),
+            Op(kLrp, 4), Dst(kTemp, B, 0x4), Src(kConst, cO, kSwzX), Src(kTemp, En, 0xAA), Src(kTemp, En, kSwzY), // the visibility
+            Op(kMul, 3), Dst(kTemp, B, 0x1), Src(kTemp, B, kSwzX), Src(kTemp, B, 0xAA),
+            Op(kMad, 4), Dst(kTemp, Q, 0x7), Src(kTemp, C), Src(kTemp, B, kSwzX), Src(kTemp, Q),
+            Op(kAdd, 3), Dst(kTemp, U, 0x1), Src(kTemp, U, kSwzX), Src(kConst, F1, kSwzX),     // the next entry
+            Op(kEndRep, 0),
+            Op(kTexldl, 3), Dst(kTemp, En), Src(kTemp, U), Src(kSampler, S2),                  // (ground share, lamp head, share set in a wall)
+            Op(kLrp, 4), Dst(kTemp, B, 0x4), Src(kConst, cO, kSwzX), Src(kTemp, En, 0xAA), Src(kTemp, En, kSwzX),
+            Op(kAdd, 3), Dst(kTemp, B, 0x8), Src(kTemp, En, kSwzY), wy | kNeg,                 // sat(1 - (y - head) / fade)
+            Op(kMul, 3), Dst(kTemp, B, 0x8), Src(kTemp, B, kSwzW), Src(kConst, F6, kSwzX),
+            Op(kAdd, 3), Dst(kTemp, B, 0x8, true), Src(kTemp, B, kSwzW), Src(kConst, cH, 0xAA),
+            Op(kMul, 3), Dst(kTemp, B, 0x4), Src(kTemp, B, 0xAA), Src(kTemp, B, kSwzW),
+            Op(kAdd, 3), Dst(kTemp, B, 0x8), wy, Src(kConst, F5, kSwzY) | kNeg,                // the ground pool's height gate
+            Op(kAbs, 2), Dst(kTemp, B, 0x8), Src(kTemp, B, kSwzW),
+            Op(kMad, 4), Dst(kTemp, B, 0x8, true), Src(kTemp, B, kSwzW), Src(kConst, F5, kSwzW) | kNeg, Src(kConst, F5, 0xAA),
+            Op(kMul, 3), Dst(kTemp, B, 0x4), Src(kTemp, B, 0xAA), Src(kTemp, B, kSwzW),
+            Op(kMul, 3), Dst(kTemp, B, 0x4), Src(kTemp, B, 0xAA), Src(kConst, F5, kSwzX),      // B.z = the ground light's strength here
+            Op(kMov, 2), Dst(kTemp, En, 0x1), Src(kConst, cO, kSwzY), // (lrp: never into its first source's register)
+            Op(kLrp, 4), Dst(kTemp, P, 0x8), Src(kTemp, En, kSwzX), Src(kConst, F3, 0xAA), Src(kConst, F3, kSwzY), // a gate's lamp strength
+            Op(kMul, 3), Dst(kTemp, Q, 0x7), Src(kTemp, Q), Src(kTemp, P, kSwzW),
+            Op(kMad, 4), Dst(kTemp, T, 0x3), Src(kInput, V, kSwzXYXY), Src(kConst, F4), Src(kConst, F4, kSwzZWZW),
+            Op(kTexld, 3), Dst(kTemp, T), Src(kTemp, T), Src(kSampler, E),
+            Op(kMad, 4), Dst(kTemp, Fr, 0x8), Src(kTemp, Nrm, kSwzY), Src(kConst, cH, kSwzX), Src(kConst, cH, kSwzY),
+            Op(kMov, 2), Dst(kTemp, A, 0x8, true), Src(kTemp, Nrm, kSwzY),
+            Op(kLrp, 4), Dst(kTemp, A, 0x8), Src(kConst, F3, kSwzX), Src(kTemp, A, kSwzW), Src(kTemp, Fr, kSwzW),
+            Op(kMul, 3), Dst(kTemp, Fr, 0x8), Src(kTemp, A, kSwzW), Src(kTemp, B, 0xAA),
+            Op(kMul, 3), Dst(kTemp, T, 0x7), Src(kTemp, T), Src(kTemp, Fr, kSwzW)});
+        if (shape == kA && colorReg >= 0 && !vcInD)
+            ground.insert(ground.end(), {Op(kAdd, 3), Dst(kTemp, T, 0x7), Src(kTemp, T), Src(kInput, static_cast<DWORD>(colorReg)) | kNeg});
+    }
+    for (DWORD k = 0; !index && k < kObjectPixelLamps; k++) {
         const DWORD cp = cL + 2 * k, cc = cp + 1;
         // l = lamp - pixel, d^2, sat(N.l) and the falloff, one constant register per instruction (final review 30/09: a
         // two-constant mad made native D3D9 refuse the shader); the reach variant: the outdoor walls' law (AppendLampLaw)
@@ -2485,10 +2562,16 @@ bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach) 
     std::vector<Edit> edits = {{1, {Op(kDef, 5), Dst(kConst, cH), F(0.5f), F(0.5f), F(1.0f), F(0.0f)}},
                                {afterLastInDcl, {Op(kDcl, 2), 0x80080005u /* texcoord8 */, Dst(kInput, V, 0x7)}},
                                {u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, E)}}};
+    if (index) {
+        edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, E + 1)}});
+        edits.push_back({1, {Op(kDefI, 5), Dst(7 /* i0 */, 0), static_cast<DWORD>(LampIndex::kSlots), 0, 0, 0}});
+    }
+    // Q x the lamp strength: the index copy has it in Q already
+    const DWORD qScale = index ? Src(kConst, cH, 0xAA /* 1 */) : Src(kConst, cS, kSwzY);
     if (shape == kC) {
         // before "max rX.xyz, vC, rY": rA = max(vC + Q * cS.y, ground), and the max reads rA instead of vC
         const Ins& M = ins[anchor];
-        const std::vector<DWORD> atMax = {Op(kMad, 4), Dst(kTemp, A, 0x7), Src(kTemp, Q), Src(kConst, cS, kSwzY), Src(kInput, static_cast<DWORD>(colorReg)),
+        const std::vector<DWORD> atMax = {Op(kMad, 4), Dst(kTemp, A, 0x7), Src(kTemp, Q), qScale, Src(kInput, static_cast<DWORD>(colorReg)),
                                           Op(kMax, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kTemp, T)};
         for (size_t k = 2; k <= 3; k++)
             if (IsReg(t[M.at + k], kInput, static_cast<DWORD>(colorReg))) t[M.at + k] = Src(kTemp, A);
@@ -2503,7 +2586,7 @@ bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach) 
         return true;
     }
     // A: at the sky mad (before it), B: right after the chain end: rD = max(rD + Q * cS.y, ground)
-    const std::vector<DWORD> atEnd = {Op(kMad, 4), Dst(kTemp, D, 0x7), Src(kTemp, Q), Src(kConst, cS, kSwzY), Src(kTemp, D),
+    const std::vector<DWORD> atEnd = {Op(kMad, 4), Dst(kTemp, D, 0x7), Src(kTemp, Q), qScale, Src(kTemp, D),
                                       Op(kMax, 3), Dst(kTemp, D, 0x7), Src(kTemp, D), Src(kTemp, T)};
     if (shape == kB) {
         // the chain end may overwrite the normal (Counters_PS_440: r1 = normal): the ground and lamp code goes before it,
