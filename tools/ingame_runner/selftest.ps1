@@ -49,6 +49,27 @@ foreach ($bad in '12:00:03.000 [WARNING] [SceneBudget] Node 0x0a0b0c0d was found
     Check (-not (Test-ApexLog @($bad) @() $script:DefaultFailPatterns).Ok) "fails a load: $($bad.Substring(13, 40))"
 }
 
+# Real-time GI start line and profiler-arm patterns, taken from the shipped jobs
+$giStart = @((Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/realtime-gi-smoke.json') -Raw | ConvertFrom-Json).variants.on.expect)[0]
+foreach ($ok in '12:00:00.000 [INFO] [RealtimeGI] On: lots=1 cap=class0 scale=1 indirect=off backend=d3d9',
+                '12:00:00.000 [INFO] [RealtimeGI] On: lots=3 cap=hold scale=2 indirect=multiBounce backend=serverRays') {
+    Check ($ok -match $giStart) "GI start line matches: $($ok.Substring(13))"
+}
+foreach ($bad in '12:00:00.000 [INFO] [RealtimeGI] Off: lots=1 cap=class0 scale=1 indirect=off backend=d3d9',
+                 '12:00:00.000 [INFO] [RealtimeGI] On: lots=1 cap=class0 scale=1 indirect=off',
+                 '12:00:00.000 [INFO] [RealtimeGI] On: lots=x cap=class0 scale=1 indirect=off backend=d3d9',
+                 '12:00:00.000 [INFO] [RealtimeGI] On: lots=1 cap=class3 scale=1 indirect=off backend=d3d9',
+                 '12:00:00.000 [INFO] [RealtimeGI] On: lots=1 cap=class0 scale=3 indirect=off backend=d3d9',
+                 '12:00:00.000 [INFO] [RealtimeGIX] On: lots=1 cap=class0 scale=1 indirect=off backend=d3d9',
+                 '12:00:00.000 [INFO] [RtOutdoorLamps] On: lots=1 cap=class0 scale=1 indirect=off backend=d3d9') {
+    Check ($bad -notmatch $giStart) "GI start line rejected: $($bad.Substring(13))"
+}
+$prof = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/realtime-gi-profile.json') -Raw | ConvertFrom-Json
+Check ('12:00:00.000 [INFO] [FrameProfiler] Measurement preset: timing run (hitch 2.0 x median, floor 8 ms)' -match @($prof.expect)[0]) 'profile arm expect matches the preset line'
+Check ('12:00:00.000 [INFO] [FrameProfiler] Measurement preset: sampling run (hitch)' -notmatch @($prof.expect)[0]) 'profile arm expect rejects the sampling preset'
+Check ('12:00:00.000 [WARNING] [FrameProfiler] Room solve: rebuild: not found' -match @($prof.fail)[0]) 'profile arm fail matches a missing counter'
+Check ('12:00:00.000 [INFO] [FrameProfiler] Lot room solve: Timed' -notmatch @($prof.fail)[0]) 'profile arm fail ignores the Lot room solve line'
+
 # Frame statistics: 100 focused frames of 16 ms, one of 120 ms, 10 unfocused frames that do not count
 $csv = Join-Path ([IO.Path]::GetTempPath()) ('apex-ingame-selftest-' + [Guid]::NewGuid().ToString('N') + '.csv')
 $rows = @('epochMs,qpcMs,frameMs,workMs,fg') + (1..100 | ForEach-Object { "$_,$_,16,5,1" }) + @('101,101,120,5,1') + (1..10 | ForEach-Object { "$_,$_,33,5,0" })
