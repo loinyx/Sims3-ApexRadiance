@@ -9,10 +9,23 @@
 //  4. Output: per lamp, how many samples reached the lamp past the static occluders (u) and how many of those a delta
 //     caster blocked (d); the multiplier of 4.1 from them. u and d are counts, so frames add up exactly.
 // The sample set is fixed: 16 points a lamp; frame f takes point (f + a hash of the pixel) mod 16, so 16 frames hold
-// each point once.
+// each point once. A pixel of motion class 3 takes point (hash of the pixel) mod 16 in every frame.
 #version 460
 #extension GL_EXT_ray_query : require
-layout(local_size_x = 8, local_size_y = 8) in;
+// Variants for the timing run (pixel_check.cpp --bench; the default is the kernel): TRACE 0 = every candidate comes back
+// to the shader (the first version), 1 = any triangle ends the ray in the traversal and a ray a delta caster ended asks
+// the static occluders again.
+// STOP 1 / 2 / 3 = leave after the guide / the lamps / the reach test. LEAN = no counters, 16 bytes a pixel out.
+#ifndef TRACE
+#define TRACE 1
+#endif
+#ifndef STOP
+#define STOP 0
+#endif
+#ifndef GROUP
+#define GROUP 8
+#endif
+layout(local_size_x = GROUP, local_size_y = GROUP) in;
 
 struct Lamp {
     vec4 pos; // w: the emitter ball's radius
@@ -23,13 +36,17 @@ struct Capsule {
     vec4 b;
 };
 struct Box {
-    vec4 lo, hi;
+    vec4 lo, hi; // lo.w: not 0 when the caster moved this frame (its bounds then hold the old and the new place)
 };
 struct Pixel {
     vec4 mul;  // rgb: the multiplier; a: the guide depth (the upsample's weight)
     vec4 pos;  // the guide's world position; w: its full-resolution pixel index (the harness checks both)
     vec4 nrm;
     uvec4 cnt; // lamp ids (4 x 8 bits, 0xFF = none), u counts (4 x 8 bits), d counts (4 x 8 bits), rays traced
+    // The second target (XR-05): the multiplier's two sums, which add up over frames where the multiplier itself
+    // does not (a mean of ratios). Over n one-sample frames m = 1 - sum(num) / (A n + sum(den)), exactly
+    vec4 num;  // rgb: sum over the lamps of colour x geometry x d; a: 1 when a caster that moved is in reach
+    vec4 den;  // rgb: sum over the lamps of colour x geometry x u
 };
 // Instances of the top level: custom index 0 walls, floors and roofs (no culling), 1 object boxes, 2 detail meshes,
 // 3 capsule boxes. Mask 1 = static (0, 1), mask 2 = delta casters (2, 3).
@@ -41,6 +58,9 @@ layout(std430, set = 0, binding = 3) readonly buffer Capsules { Capsule capsule[
 layout(std430, set = 0, binding = 4) readonly buffer Casters { Box caster[]; }; // the delta casters' bounds
 layout(std430, set = 0, binding = 5) writeonly buffer Out { Pixel px[]; };
 layout(std430, set = 0, binding = 6) buffer Stats { uint stat[]; }; // 0: rays traced, 1: pixels that traced
+// shortcut: the motion class (research 14) is a buffer of one uint a full-resolution pixel; the pass in the game samples
+// the class target of GB-02, upgrade with XR-06
+layout(std430, set = 0, binding = 7) readonly buffer Class { uint motionClass[]; };
 layout(push_constant) uniform PC {
     mat4 invViewProj;
     vec4 camA;                // xyz: the camera; w: A, the light no lamp ray accounts for
@@ -88,6 +108,7 @@ float CapsuleEnter(vec3 ro, vec3 rd, vec3 pa, vec3 pb, float r) {
 
 // Bit 0: a static occluder lies on the ray. Bit 1: a delta caster does (not looked for behind the mask, and not
 // complete once bit 0 is set: the traversal stops there).
+#if TRACE == 0
 uint Trace(vec3 o, vec3 d, float tMax, uint mask) {
     uint hit = 0u;
     rayQueryEXT q;
@@ -108,6 +129,25 @@ uint Trace(vec3 o, vec3 d, float tMax, uint mask) {
     }
     return hit;
 }
+#else
+// The triangles are opaque geometry (pixel_check.cpp): the traversal tests and confirms them without the shader
+uint Trace(vec3 o, vec3 d, float tMax, uint mask) {
+    rayQueryEXT q;
+    // Any occluder ends the ray. Only a ray a delta caster ended (few) asks again for the static occluders alone
+    rayQueryInitializeEXT(q, tlas, gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsCullBackFacingTrianglesEXT, mask, o, 0.0, d, tMax);
+    while (rayQueryProceedEXT(q)) { // capsule boxes only
+        const Capsule c = capsule[rayQueryGetIntersectionPrimitiveIndexEXT(q, false)];
+        const float t = CapsuleEnter(o, d, c.a.xyz, c.b.xyz, c.a.w);
+        if (t > 0.0 && t < tMax) rayQueryGenerateIntersectionEXT(q, t);
+    }
+    if (rayQueryGetIntersectionTypeEXT(q, true) == gl_RayQueryCommittedIntersectionNoneEXT) return 0u;
+    if (rayQueryGetIntersectionInstanceCustomIndexEXT(q, true) < 2) return 1u;
+    rayQueryEXT s;
+    rayQueryInitializeEXT(s, tlas, gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsCullBackFacingTrianglesEXT, 1u, o, 0.0, d, tMax);
+    rayQueryProceedEXT(s);
+    return rayQueryGetIntersectionTypeEXT(s, true) != gl_RayQueryCommittedIntersectionNoneEXT ? 1u : 2u;
+}
+#endif
 
 // The segment o -> e against a box (conservative for the rays toward a ball around e when the box is grown by its radius)
 bool SegBox(vec3 o, vec3 e, vec3 lo, vec3 hi) {
@@ -139,7 +179,8 @@ void main() {
         }
     Pixel o;
     o.mul = vec4(1.0, 1.0, 1.0, d), o.pos = vec4(0.0), o.nrm = vec4(0.0), o.cnt = uvec4(0xFFFFFFFFu, 0u, 0u, 0u);
-    if (d >= 1.0) { // nothing drawn
+    o.num = vec4(0.0), o.den = vec4(0.0);
+    if (d >= 1.0 || STOP == 1) { // nothing drawn
         px[index] = o;
         return;
     }
@@ -174,11 +215,22 @@ void main() {
         const vec4 lp = lamp[id[k]].pos;
         const float r = lp.w * pc.radiusScale;
         for (uint c = 0u; c < pc.casters; c++)
-            if (SegBox(O, lp.xyz, caster[c].lo.xyz - r, caster[c].hi.xyz + r)) reach |= 1u << k;
+            if (SegBox(O, lp.xyz, caster[c].lo.xyz - r, caster[c].hi.xyz + r)) {
+                reach |= 1u << k;
+                if (caster[c].lo.w != 0.0) o.num.a = 1.0; // (XR-05 drops the pixel's settled history on it)
+            }
     }
     uint u[kMaxLamps] = uint[](0u, 0u, 0u, 0u), dl[kMaxLamps] = uint[](0u, 0u, 0u, 0u), rays = 0u;
+#if STOP == 2
+    reach = 0u;
+#elif STOP == 3
+    o.mul.r = float(reach), reach = 0u;
+#endif
     if (reach != 0u) {
-        const uint first = pc.samples >= kSet ? 0u : (pc.frame + Pcg(index)) % kSet;
+        // A class 3 pixel (a Sim, foliage) has no history to add frames up in (XR-05): it keeps one point of the set,
+        // so a still picture is the same each frame. The others walk the set
+        const uint walk = motionClass[uint(at.y) * pc.width + uint(at.x)] == 3u ? 0u : pc.frame;
+        const uint first = pc.samples >= kSet ? 0u : (walk + Pcg(index)) % kSet;
         for (uint k = 0u; k < kMaxLamps; k++) {
             if (id[k] == kNone) continue;
             const vec4 lp = lamp[id[k]].pos;
@@ -194,18 +246,25 @@ void main() {
                 if (hit == 2u) dl[k]++;
             }
         }
+#ifndef LEAN
         atomicAdd(stat[0], rays);
         atomicAdd(stat[1], 1u);
+#endif
     }
 
     // 4. m = 1 - sum_i w_i (1 - v_i) / (A + sum_j w_j), with w = colour x geometry x u / samples, w (1 - v) = the d share
-    vec3 num = vec3(0.0), den = vec3(pc.camA.w);
+    vec3 num = vec3(0.0), den = vec3(0.0);
     for (uint k = 0u; k < kMaxLamps; k++) {
         if (id[k] == kNone) continue;
-        const vec3 c = lamp[id[k]].col.rgb * (geo[k] / float(pc.samples));
+        const vec3 c = lamp[id[k]].col.rgb * geo[k];
         num += c * float(dl[k]), den += c * float(u[k]);
     }
-    o.mul.rgb = 1.0 - num / den;
+    o.mul.rgb = 1.0 - num / (pc.camA.w * float(pc.samples) + den);
+    o.num.rgb = num, o.den.rgb = den;
+#ifdef LEAN
+    px[index].mul = o.mul;
+    return;
+#endif
     o.cnt = uvec4(id[0] | id[1] << 8 | id[2] << 16 | id[3] << 24, u[0] | u[1] << 8 | u[2] << 16 | u[3] << 24, dl[0] | dl[1] << 8 | dl[2] << 16 | dl[3] << 24, rays);
     px[index] = o;
 }

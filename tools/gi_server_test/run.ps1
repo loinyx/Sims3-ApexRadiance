@@ -2,7 +2,7 @@ param([string[]]$TestArgs = @(), [string]$OutDir = (Join-Path $env:TEMP 'ApexGiS
 # The server tier's texel solve, offline on a Vulkan device (check.cpp, solve.comp). Read-only: prints to stdout; the
 # compiler's outputs and the three build inputs below stay in -OutDir. -TestArgs: passed on (--no-rays, --device <text>,
 # --density <n>, --rays <n>). -Pixel: the per-pixel delta shadow kernel instead (pixel_check.cpp, pixel_shadow.comp;
-# -TestArgs --device <text>, --size <w> <h>).
+# -TestArgs --device <text>, --size <w> <h>, --bench <frames>).
 # Build inputs, fetched once at pinned versions when -OutDir does not hold them (no installed Vulkan SDK is needed; the
 # Vulkan loader, vulkan-1.dll, comes with the graphics driver): the Vulkan headers, the volk loader (two files) and the
 # glslang compiler, which turns solve.comp into SPIR-V headers at build time.
@@ -51,8 +51,12 @@ try {
     if ($Pixel) {
         $name = 'gi_pixel_test'
         $source = 'pixel_check.cpp' # (includes check.cpp, so the headers above are needed too)
-        & $glslang.FullName -V --quiet --target-env vulkan1.2 --vn pixel_shadow -o (Join-Path $OutDir 'pixel_shadow.h') (Join-Path $PSScriptRoot 'pixel_shadow.comp')
-        if ($LASTEXITCODE -ne 0) { throw 'pixel_shadow.comp did not compile' }
+        # the kernel, then its variants for --bench (pixel_shadow.comp names the switches)
+        foreach ($v in @(@('pixel_shadow'), @('px_trace0', '-DTRACE=0'), @('px_group16', '-DGROUP=16'), @('px_lean', '-DLEAN'), @('px_stop1', '-DSTOP=1'), @('px_stop2', '-DSTOP=2'), @('px_stop3', '-DSTOP=3'))) {
+            $defs = @($v | Select-Object -Skip 1)
+            & $glslang.FullName -V --quiet --target-env vulkan1.2 @defs --vn $v[0] -o (Join-Path $OutDir ($v[0] + '.h')) (Join-Path $PSScriptRoot 'pixel_shadow.comp')
+            if ($LASTEXITCODE -ne 0) { throw "pixel_shadow.comp ($($v[0])) did not compile" }
+        }
     }
     $exe = Join-Path $OutDir ($name + '.exe')
     & cl.exe /nologo /std:c++20 /utf-8 /EHsc /W4 /O2 /MT /fp:precise /DNOMINMAX /DVK_USE_PLATFORM_WIN32_KHR ('/I' + $repo) ('/I' + $OutDir) ('/I' + $headers) ('/I' + $volk) ('/Fe' + $exe) (Join-Path $PSScriptRoot $source)
