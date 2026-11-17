@@ -5492,6 +5492,7 @@ struct PatchedPs {
     ShaderPatches::WallScalePatch wall;
     ShaderPatches::RoomReadWallsPatch roomRead; // (2.17.1) a floor map's read off the walls (PatchRoomMapReadWalls)
     ShaderPatches::RoomMapGiPatch gi;           // (real-time GI S2-05) PatchRoomMapGi
+    bool sm2 = false;                           // (S2-06 item 9) a ps_2_x copy upgraded to ps_3_0 (UpgradePs2To3), uv in TEXCOORD0.zw
     DWORD nightConst = 0;
     int cubeTint = -1; // PatchCubeTint
     DWORD nativeAlphaSampler = 0;
@@ -8424,34 +8425,41 @@ PatchedPs* ArchCopyOrNull(PatchedPs& a) {
     return a.ps ? &a : nullptr;
 }
 // (real-time GI S2-05, RealtimeGI::IndirectFor) The copy of a room-map copy that reads the GI grid (ShaderPatches::PatchRoomMapGi), by
-// the copy it was made from; null where it cannot be made (ps_2_x copies, no free register). wall (S2-06): the copy reading the
-// wall VS copy's TEXCOORD7 instead of the floor VS's TEXCOORD4
+// the copy it was made from; null where it cannot be made (no free register). wall (S2-06): the copy reading the wall VS copy's
+// TEXCOORD7 instead of the floor VS's TEXCOORD4; (item 9) a ps_2_x wall copy is upgraded to ps_3_0 first and reads TEXCOORD0.zw
 std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_roomMapGiPs, g_roomMapGiWallPs;
 const PatchedPs* GiCopyOf(IDirect3DDevice9* dev, IDirect3DPixelShader9* copy, bool wall) {
     PatchedPs& p = (wall ? g_roomMapGiWallPs : g_roomMapGiPs)[copy];
     if (!p.tried) {
         p.tried = true;
         std::vector<DWORD> t = ShaderCode(copy);
-        if (!t.empty() && ShaderPatches::PatchRoomMapGi(t, p.gi, wall ? 7 : 4) && SUCCEEDED(dev->CreatePixelShader(t.data(), &p.ps)))
-            LOG_INFO(std::format("[LotLightBridge] Real-time GI: copy {:08X} reads the GI grid{} ({} slots, {} added)", reinterpret_cast<uintptr_t>(copy), wall ? " (walls)" : "",
-                                 p.gi.slots, p.gi.added));
+        const DWORD ver = t.empty() ? 0 : t[0];
+        // (most InteriorWall passes are vs_2_0 / ps_2_0: their copies stay ps_2_x, out of reach of c215)
+        p.sm2 = wall && !t.empty() && ver != 0xFFFF0300;
+        const char* why = p.sm2 ? ShaderPatches::UpgradePs2To3(t) : nullptr;
+        if (!t.empty() && !why && ShaderPatches::PatchRoomMapGi(t, p.gi, p.sm2 ? 0 : wall ? 7 : 4, p.sm2) && SUCCEEDED(dev->CreatePixelShader(t.data(), &p.ps)))
+            LOG_INFO(std::format("[LotLightBridge] Real-time GI: copy {:08X} reads the GI grid{} ({} slots, {} added{})", reinterpret_cast<uintptr_t>(copy), wall ? " (walls)" : "",
+                                 p.gi.slots, p.gi.added, p.sm2 ? std::format(", ps_{}_{:X} upgraded to ps_3_0", (ver >> 8) & 0xFF, ver & 0xFF) : ""));
         else {
             p.ps = nullptr; // (say why: a silent miss leaves wallDraws=0 with no cause in the log)
-            // (S2-06 takes ps_3_0 only: most InteriorWall passes are vs_2_0 / ps_2_0, and their copies stay ps_2_x)
-            const DWORD ver = t.empty() ? 0 : t[0];
-            LOG_INFO(std::format("[LotLightBridge] Real-time GI: copy {:08X} cannot read the GI grid{} ({})", reinterpret_cast<uintptr_t>(copy), wall ? " (walls)" : "",
-                                 ver == 0xFFFF0300 ? "ps_3_0: patch refused or CreatePixelShader failed" : std::format("ps_{}_{:X}: not ps_3_0", (ver >> 8) & 0xFF, ver & 0xFF)));
+            LOG_INFO(std::format("[LotLightBridge] Real-time GI: copy {:08X} cannot read the GI grid{} (ps_{}_{:X}: {})", reinterpret_cast<uintptr_t>(copy), wall ? " (walls)" : "",
+                                 (ver >> 8) & 0xFF, ver & 0xFF, why ? std::format("shader model 3 upgrade refused: {}", why) : "patch refused or CreatePixelShader failed"));
         }
     }
     return p.ps ? &p : nullptr;
 }
 // (S2-06) The copy of a wall vertex shader writing the grid uv to TEXCOORD7 (ShaderPatches::PatchWallGiVs), by the game's shader
-// (held by a reference so its address names it until the caches go); null where it cannot be made
-std::unordered_map<IDirect3DVertexShader9*, IDirect3DVertexShader9*> g_roomMapGiWallVs;
-IDirect3DVertexShader9* GiWallVsOf(IDirect3DDevice9* dev, IDirect3DVertexShader9* game) {
+// (held by a reference so its address names it until the caches go); null where it cannot be made. (item 9) A vs_2_x is upgraded
+// to vs_3_0 first and writes TEXCOORD0.zw (sm2); its world rows c4..c6 are logged once against the lot rows at its first draw.
+struct GiWallVs {
+    IDirect3DVertexShader9* vs = nullptr;
+    bool sm2 = false, logged = false;
+};
+std::unordered_map<IDirect3DVertexShader9*, GiWallVs> g_roomMapGiWallVs;
+GiWallVs* GiWallVsOf(IDirect3DDevice9* dev, IDirect3DVertexShader9* game) {
     if (!game) return nullptr;
-    const auto [it, fresh] = g_roomMapGiWallVs.try_emplace(game, nullptr);
-    if (!fresh) return it->second;
+    const auto [it, fresh] = g_roomMapGiWallVs.try_emplace(game);
+    if (!fresh) return it->second.vs ? &it->second : nullptr;
     game->AddRef();
     UINT size = 0;
     std::vector<DWORD> t;
@@ -8459,19 +8467,43 @@ IDirect3DVertexShader9* GiWallVsOf(IDirect3DDevice9* dev, IDirect3DVertexShader9
         t.resize(size / 4);
         if (FAILED(game->GetFunction(t.data(), &size))) t.clear();
     }
-    if (!t.empty() && ShaderPatches::PatchWallGiVs(t) && SUCCEEDED(dev->CreateVertexShader(t.data(), &it->second)))
-        LOG_INFO(std::format("[LotLightBridge] Real-time GI: wall vertex shader {:08X} writes the grid uv", reinterpret_cast<uintptr_t>(game)));
+    const DWORD ver = t.empty() ? 0 : t[0];
+    GiWallVs& w = it->second;
+    w.sm2 = !t.empty() && ver != 0xFFFE0300;
+    const char* why = w.sm2 ? ShaderPatches::UpgradeVs2To3(t) : nullptr;
+    if (!t.empty() && !why && ShaderPatches::PatchWallGiVs(t, w.sm2 ? 0 : 7, w.sm2) && SUCCEEDED(dev->CreateVertexShader(t.data(), &w.vs)))
+        LOG_INFO(std::format("[LotLightBridge] Real-time GI: wall vertex shader {:08X} writes the grid uv{}", reinterpret_cast<uintptr_t>(game),
+                             w.sm2 ? std::format(" (vs_{}_{:X} upgraded to vs_3_0, TEXCOORD0.zw)", (ver >> 8) & 0xFF, ver & 0xFF) : ""));
     else {
-        it->second = nullptr;
-        const DWORD ver = t.empty() ? 0 : t[0];
-        LOG_INFO(std::format("[LotLightBridge] Real-time GI: wall vertex shader {:08X} cannot write the grid uv ({})", reinterpret_cast<uintptr_t>(game),
-                             ver == 0xFFFE0300 ? "vs_3_0: patch refused or CreateVertexShader failed" : std::format("vs_{}_{:X}: not vs_3_0", (ver >> 8) & 0xFF, ver & 0xFF)));
+        w.vs = nullptr;
+        LOG_INFO(std::format("[LotLightBridge] Real-time GI: wall vertex shader {:08X} cannot write the grid uv (vs_{}_{:X}: {})", reinterpret_cast<uintptr_t>(game),
+                             (ver >> 8) & 0xFF, ver & 0xFF, why ? std::format("shader model 3 upgrade refused: {}", why) : "patch refused or CreateVertexShader failed"));
     }
-    return it->second;
+    return w.vs ? &w : nullptr;
+}
+// (item 9, live check) object space vs lot space: the lot rows times the draw's world rows c4..c6 against the identity (0 and the
+// origin at the lot's when the wall mesh's object space is the lot's), once per upgraded wall VS
+void LogSm2WallSpace(IDirect3DDevice9* dev, GiWallVs& w, IDirect3DVertexShader9* game, const RealtimeGI::IndirectBind& gi) {
+    if (w.logged) return;
+    w.logged = true;
+    float m[3][4] = {};
+    dev->GetVertexShaderConstantF(4, &m[0][0], 3);
+    float rot = 0.0f, lot[3] = {};
+    for (int r = 0; r < 3; r++) {
+        for (int c = 0; c < 3; c++) {
+            const float v = gi.vs[3 + r][0] * m[0][c] + gi.vs[3 + r][1] * m[1][c] + gi.vs[3 + r][2] * m[2][c];
+            rot = std::max(rot, std::fabs(v - (r == c ? 1.0f : 0.0f)));
+        }
+        lot[r] = gi.vs[3 + r][0] * m[0][3] + gi.vs[3 + r][1] * m[1][3] + gi.vs[3 + r][2] * m[2][3] + gi.vs[3 + r][3];
+    }
+    LOG_INFO(std::format("[LotLightBridge] Real-time GI: sm2 wall VS {:08X} world rows c4..c6 ({:.3f} {:.3f} {:.3f} {:.3f}) ({:.3f} {:.3f} {:.3f} {:.3f}) ({:.3f} {:.3f} {:.3f} {:.3f}); "
+                         "object vs lot space: rotation off identity by {:.4f}, object origin at lot ({:.3f}, {:.3f}, {:.3f})",
+                         reinterpret_cast<uintptr_t>(game), m[0][0], m[0][1], m[0][2], m[0][3], m[1][0], m[1][1], m[1][2], m[1][3], m[2][0], m[2][1], m[2][2], m[2][3],
+                         rot, lot[0], lot[1], lot[2]));
 }
 void ReleaseGiWallVs() {
-    for (auto& [game, copy] : g_roomMapGiWallVs) {
-        if (copy) copy->Release();
+    for (auto& [game, w] : g_roomMapGiWallVs) {
+        if (w.vs) w.vs->Release();
         game->Release();
     }
     g_roomMapGiWallVs.clear();
@@ -8485,14 +8517,22 @@ template <typename DrawFn> void DrawWithRoomMap(IDirect3DDevice9* dev, IDirect3D
     RealtimeGI::IndirectBind gi;
     const PatchedPs* giCopy = nullptr;
     IDirect3DVertexShader9* giVs = nullptr;
+    GiWallVs* giWall = nullptr;
     const bool wallMap = !(band[1] > 60000.0f);
     if (RealtimeGI::Running())
         if (IDirect3DBaseTexture9* const map = D3D9Hooks::BoundTexture(dev, p.sampler); map && (giCopy = GiCopyOf(dev, copy, wallMap))) {
             float amb[4] = {};
             dev->GetPixelShaderConstantF(static_cast<UINT>(giCopy->gi.ambientConst), amb, 1);
+            DWORD fog = FALSE;
+            if (giCopy->sm2) dev->GetRenderState(D3DRS_FOGENABLE, &fog); // (ps_3_0 has no fixed-function fog: keep the game's pair)
             if (!RealtimeGI::IndirectFor(RtOutdoorLamps::GameMapOf(map), amb, g_night.load(std::memory_order_relaxed), gi) || gi.wall != wallMap ||
-                (wallMap && !(giVs = GiWallVsOf(dev, g_curVs))))
-                giCopy = nullptr;
+                (wallMap && (!(giWall = GiWallVsOf(dev, g_curVs)) || giWall->sm2 != giCopy->sm2)) || fog) {
+                if (fog) RealtimeGI::Add(RealtimeGI::Counter::WallSm2Fog);
+                giCopy = nullptr, giWall = nullptr;
+            } else if (giWall) {
+                giVs = giWall->vs;
+                if (giWall->sm2) LogSm2WallSpace(dev, *giWall, g_curVs, gi);
+            }
         }
     float oldGi[16] = {}, oldGiVs[24] = {};
     if (giCopy) dev->GetPixelShaderConstantF(ShaderPatches::kGiUvConst, oldGi, 4);
@@ -8520,6 +8560,7 @@ template <typename DrawFn> void DrawWithRoomMap(IDirect3DDevice9* dev, IDirect3D
         giBind.emplace(dev, static_cast<DWORD>(giCopy->gi.sampler), gi.grid, static_cast<DWORD>(D3DTEXF_LINEAR));
         giFlags.emplace(dev, static_cast<DWORD>(giCopy->gi.flagSampler), gi.flags);
         if (giVs) SetVsConst(dev, ShaderPatches::kWallGiVsConst, &gi.vs[0][0], 6), SetVs(dev, giVs), RealtimeGI::Add(RealtimeGI::Counter::WallDraws);
+        if (giWall && giWall->sm2) RealtimeGI::Add(RealtimeGI::Counter::WallDrawsSm2);
         RealtimeGI::Add(RealtimeGI::Counter::IndirectDraws);
     }
     SetPs(dev, giCopy ? giCopy->ps : copy);

@@ -1187,12 +1187,12 @@ void OnPresent(IDirect3DDevice9* dev) {
     const uint64_t cap = Value(Counter::CapSolvesOnGiLots), sync = Value(Counter::SyncReadbacks), locks = Value(Counter::ResourceLocks),
                    diffs = Value(Counter::RedrawDiffs), faults = Value(Counter::ReadFaults), table = Value(Counter::LampTableDiffs);
     const std::string line = std::format("[RealtimeGI] Counters: frames={} backend={} draws={} deviceCalls={} lamps={} lots={} lampChanges={} "
-                                         "indirect={} atlasReady={} gridTexels={} indirectDraws={} wallDraws={} rigs={} rigDraws={} rigReads={} rigSkipped={}; must be 0: "
+                                         "indirect={} atlasReady={} gridTexels={} indirectDraws={} wallDraws={} rigs={} rigDraws={} rigReads={} rigSkipped={} wallSm2={} wallSm2Fog={}; must be 0: "
                                          "capSolves={} syncReadbacks={} locks={} redrawDiffs={} readFaults={} lampTableDiffs={}",
                                          frames, kBackendNames[static_cast<int>(g_backend.load())], Value(Counter::Draws), Value(Counter::DeviceCalls),
                                          g_lamps.size(), g_giLots, Value(Counter::LampChanges), kIndirectNames[g_options.indirect], g_readyTexels,
                                          g_grid.points.size(), Value(Counter::IndirectDraws), Value(Counter::WallDraws), g_rigs.size(),
-                                         Value(Counter::RigDraws), Value(Counter::RigReads), Value(Counter::RigSkipped), cap, sync, locks, diffs, faults, table);
+                                         Value(Counter::RigDraws), Value(Counter::RigReads), Value(Counter::RigSkipped), Value(Counter::WallDrawsSm2), Value(Counter::WallSm2Fog), cap, sync, locks, diffs, faults, table);
     if (cap || sync || locks || diffs || faults || table) LOG_WARNING(line);
     else LOG_INFO(line);
     MeshLog();

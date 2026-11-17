@@ -81,6 +81,8 @@ enum class Counter : int {
     LampIndexWindowCompared, // ... of LampIndexCompared: window frames, the object pick at the window's point (S3-02c)
     IndirectDraws,     // (S2-05) room-lit draws that read the GI grid
     WallDraws,         // (S2-06) of them, wall draws (the vertex shader copy writing the grid uv)
+    WallDrawsSm2,      // (S2-06 item 9) of them, vs_2_0 / ps_2_0 wall passes drawn through the shader model 3 upgrade
+    WallSm2Fog,        // (item 9) such wall draws left to the game's pair: fixed-function fog on (ps_3_0 has none)
     RigDraws,          // (S2-06 item 8) rig binds whose vertex-light slots hold the grid's light (objects, Sims)
     RigReads,          // probe answers taken from the bridge's asynchronous read-back (no wait: the copy is already there)
     RigSkipped,        // rig binds left alone: the game's overflow lamps hold the vertex-light slots

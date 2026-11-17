@@ -526,38 +526,66 @@ void DeviceChecks(Gpu& gpu) {
     Release(ps), Release(map), Release(flags), Release(grid), Release(atlas), Release(scatterPs);
 }
 
-// (S2-06) The wall vertex shader copy: a synthetic vs_3_0 in the InteriorWall VS's shape (position decode, normal decode, the
-// world triple, the decode overwritten after it) patched by PatchWallGiVs; each wall texel of the rotated lot drawn as a point at
-// its own pixel, TEXCOORD7 written out as float: the uv WallUvCpu gives (caps and a diagonal too)
-void WallVsChecks(Gpu& gpu) {
-    if (!gpu.dev) return;
+// The instructions of a shader (opcode token index, opcode, length), for the probes below
+struct Tok {
+    size_t at;
+    DWORD op, len;
+};
+std::vector<Tok> Walk(const std::vector<DWORD>& t) {
+    std::vector<Tok> v;
+    for (size_t i = 1; i < t.size() && t[i] != 0x0000FFFFu;) {
+        if ((t[i] & 0xFFFF) == 0xFFFE) {
+            i += 1 + ((t[i] >> 16) & 0x7FFF);
+            continue;
+        }
+        const DWORD len = (t[i] >> 24) & 0xF;
+        v.push_back({i, t[i] & 0xFFFF, len});
+        i += 1 + len;
+    }
+    return v;
+}
+DWORD RegType(DWORD r) { return ((r >> 28) & 7) | (((r >> 11) & 3) << 3); }
+// a vs_3_0 whose position output is overridden at the end by an extra float4 input declared TEXCOORD15 (the pixel to draw at)
+bool ProbePosition(std::vector<DWORD>& t) {
+    int pos = -1, maxIn = -1;
+    size_t afterDcl = 0;
+    for (const Tok& x : Walk(t))
+        if (x.op == 0x1F) {
+            const DWORD r = t[x.at + 2];
+            if (RegType(r) == 6 && (t[x.at + 1] & 0x1F) == 0) pos = static_cast<int>(r & 0x7FF);
+            if (RegType(r) == 1) maxIn = std::max(maxIn, static_cast<int>(r & 0x7FF));
+            afterDcl = x.at + 1 + x.len;
+        }
+    if (t.empty() || t[0] != 0xFFFE0300 || pos < 0 || maxIn >= 15 || !afterDcl) return false;
+    const DWORD in = static_cast<DWORD>(maxIn + 1);
+    t.insert(t.end() - 1, {0x02000001u, 0xE00F0000u | static_cast<DWORD>(pos), 0x90E40000u | in});
+    t.insert(t.begin() + static_cast<std::ptrdiff_t>(afterDcl), {0x0200001Fu, 0x80000005u | (15u << 16), 0x900F0000u | in});
+    return true;
+}
+
+// (S2-06) A wall VS copy's grid uv against GiIndirect::WallUvCpu: each wall texel of the rotated lot drawn as a point at its own
+// pixel (TEXCOORD0 and TEXCOORD15 = that pixel), TEXCOORD<texcoord>.xy (zw: .zw) written out as float; caps and a diagonal too. The object
+// position is the world place minus shift and VS c4..c6 = the world rows with that shift (the game's world matrix layout), so
+// the copy's world position must come through the rows' translation. The position input is packed as the InteriorWall VSs
+// unpack it: x, z x 256, y in both .y and .w (their height lerp then gives y at any cut level).
+void WallUvCheck(Gpu& gpu, const Scene& s, std::vector<DWORD> t, int texcoord, const float shift[3], const char* what, bool zw = false) {
     IDirect3DDevice9* dev = gpu.dev;
-    Scene s = MakeScene(true);
-    const std::vector<DWORD> game = AssemblePs("vs_3_0\ndef c10, 0.00390625, 0, 1, -2\ndcl_position v0\ndcl_normal v1\ndcl_texcoord v2\ndcl_position o0\n"
-                                               "dcl_texcoord o1.xy\nmad r0.xzw, v0.xyzx, c10.xyxy, c10.yyyz\nmov r0.y, v0.y\nmad r3.xyz, -c10.w, v1, -c10.z\n"
-                                               "mov o0, v2\ndp4 r4.x, r0, c4\ndp4 r4.y, r0, c5\ndp4 r4.z, r0, c6\nmul r3.xyz, r4, r4\nmov o1.xy, r3\n");
-    std::vector<DWORD> t = game;
-    Check(!game.empty() && ShaderPatches::PatchWallGiVs(t), "the synthetic wall vertex shader takes the uv copy");
-    std::vector<DWORD> again = t;
-    Check(!ShaderPatches::PatchWallGiVs(again) && again == t, "a copy that already writes TEXCOORD7 is refused unchanged");
-    std::vector<DWORD> ps2 = AssemblePs("vs_2_0\ndcl_position v0\ndp4 r4.x, v0, c4\ndp4 r4.y, v0, c5\ndp4 r4.z, v0, c6\nmov oPos, r4\n");
-    const std::vector<DWORD> ps2Before = ps2;
-    Check(!ShaderPatches::PatchWallGiVs(ps2) && ps2 == ps2Before, "vs_2_0 refused unchanged");
     IDirect3DVertexShader9* vs = nullptr;
     IDirect3DPixelShader9* ps = nullptr;
     IDirect3DVertexDeclaration9* decl = nullptr;
     IDirect3DSurface9 *rt = nullptr, *sys = nullptr;
-    const std::vector<DWORD> psCode = AssemblePs("ps_3_0\ndcl_texcoord7 v0.xy\nmov oC0, v0.xyxy\n");
-    const D3DVERTEXELEMENT9 el[] = {{0, 0, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_POSITION, 0}, {0, 16, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_NORMAL, 0},
-                                    {0, 32, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_TEXCOORD, 0}, D3DDECL_END()};
-    Check(SUCCEEDED(dev->CreateVertexShader(t.data(), &vs)) && SUCCEEDED(dev->CreatePixelShader(psCode.data(), &ps)) &&
+    const std::vector<DWORD> psCode = AssemblePs(("ps_3_0\ndcl_texcoord" + std::to_string(texcoord) + " v0\nmov oC0, v0." + (zw ? "zwzw" : "xyxy") + "\n").c_str());
+    D3DVERTEXELEMENT9 el[10] = {{0, 0, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_POSITION, 0}, {0, 16, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_NORMAL, 0}};
+    for (BYTE k = 0; k < 6; k++) el[2 + k] = {0, static_cast<WORD>(32 + 16 * k), D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_TEXCOORD, k};
+    el[8] = {0, 32, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_TEXCOORD, 15}, el[9] = D3DDECL_END();
+    Check(ProbePosition(t) && SUCCEEDED(dev->CreateVertexShader(t.data(), &vs)) && SUCCEEDED(dev->CreatePixelShader(psCode.data(), &ps)) &&
               SUCCEEDED(dev->CreateVertexDeclaration(el, &decl)) &&
               SUCCEEDED(dev->CreateRenderTarget(64, 64, D3DFMT_A32B32G32R32F, D3DMULTISAMPLE_NONE, 0, FALSE, &rt, nullptr)) &&
               SUCCEEDED(dev->CreateOffscreenPlainSurface(64, 64, D3DFMT_A32B32G32R32F, D3DPOOL_SYSTEMMEM, &sys, nullptr)),
           "the patched wall VS copy is created natively; float target");
     if (vs && ps && decl && rt && sys) {
         struct V {
-            float p[4], n[4], c[4];
+            float p[4], n[4], c[6][4];
         };
         struct Ref {
             float uv[2];
@@ -571,8 +599,9 @@ void WallVsChecks(Gpu& gpu) {
             RtLampProxy::ToLot(s.lot, world, lp);
             if (!GiIndirect::WallUvCpu(s.grid, lp, nLot, uv) || pts.size() >= 4096) return;
             const int i = static_cast<int>(pts.size());
-            V v{{world[0] * 256.0f, world[1], world[2] * 256.0f, 1}, {(nw[0] + 1) / 2, (nw[1] + 1) / 2, (nw[2] + 1) / 2, 0},
-                {((i % 64) + 0.5f) / 32.0f - 1.0f, 1.0f - ((i / 64) + 0.5f) / 32.0f, 0.5f, 1}};
+            const float y = world[1] - shift[1];
+            V v{{(world[0] - shift[0]) * 256.0f, y * 256.0f, (world[2] - shift[2]) * 256.0f, y * 256.0f}, {(nw[0] + 1) / 2, (nw[1] + 1) / 2, (nw[2] + 1) / 2, 0}, {}};
+            v.c[0][0] = ((i % 64) + 0.5f) / 32.0f - 1.0f, v.c[0][1] = 1.0f - ((i / 64) + 0.5f) / 32.0f, v.c[0][2] = 0.5f, v.c[0][3] = 1;
             pts.push_back(v), refs.push_back({{uv[0], uv[1]}});
         };
         for (const auto& [key, slot] : s.built.slots) {
@@ -590,8 +619,10 @@ void WallVsChecks(Gpu& gpu) {
         GiIndirect::WallRows(s.grid, r0, r1);
         for (int k = 0; k < 3; k++)
             for (int j = 0; j < 4; j++) rows[k][j] = R[j][k];
-        const float id[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
-        dev->SetVertexShaderConstantF(4, &id[0][0], 3);
+        const float world[3][4] = {{1, 0, 0, shift[0]}, {0, 1, 0, shift[1]}, {0, 0, 1, shift[2]}};
+        const float zero[4 * 32] = {};
+        dev->SetVertexShaderConstantF(0, zero, 32);
+        dev->SetVertexShaderConstantF(4, &world[0][0], 3);
         dev->SetVertexShaderConstantF(ShaderPatches::kWallGiVsConst, r0, 1);
         dev->SetVertexShaderConstantF(ShaderPatches::kWallGiVsConst + 1, r1, 1);
         dev->SetVertexShaderConstantF(ShaderPatches::kWallGiVsConst + 3, &rows[0][0], 3);
@@ -621,10 +652,177 @@ void WallVsChecks(Gpu& gpu) {
             }
             sys->UnlockRect();
         }
-        std::printf("  wall VS copy: %zu wall texels + cap + diagonal, %zu within 1/1000 texel of WallUvCpu, worst %.6f texel\n", walls, exact, worst);
-        Check(walls > 0 && exact == pts.size(), "the wall VS copy's TEXCOORD7 = WallUvCpu");
+        std::printf("  %s: %zu wall texels + cap + diagonal, %zu within 1/1000 texel of WallUvCpu, worst %.6f texel\n", what, walls, exact, worst);
+        Check(walls > 0 && exact == pts.size(), "the wall VS copy's grid uv = WallUvCpu");
     }
     Release(sys), Release(rt), Release(decl), Release(ps), Release(vs);
+}
+
+// (S2-06) The wall vertex shader copy: a synthetic vs_3_0 in the InteriorWall VS's shape (position decode, normal decode, the
+// world triple, the decode overwritten after it) patched by PatchWallGiVs
+void WallVsChecks(Gpu& gpu) {
+    if (!gpu.dev) return;
+    const Scene s = MakeScene(true);
+    const std::vector<DWORD> game = AssemblePs("vs_3_0\ndef c10, 0.00390625, 0, 1, -2\ndcl_position v0\ndcl_normal v1\ndcl_texcoord v2\ndcl_position o0\n"
+                                               "dcl_texcoord o1.xy\nmad r0.xzw, v0.xyzx, c10.xyxy, c10.yyyz\nmul r0.y, v0.w, c10.x\nmad r3.xyz, -c10.w, v1, -c10.z\n"
+                                               "mov o0, v2\ndp4 r4.x, r0, c4\ndp4 r4.y, r0, c5\ndp4 r4.z, r0, c6\nmul r3.xyz, r4, r4\nmov o1.xy, r3\n");
+    std::vector<DWORD> t = game;
+    Check(!game.empty() && ShaderPatches::PatchWallGiVs(t), "the synthetic wall vertex shader takes the uv copy");
+    std::vector<DWORD> again = t;
+    Check(!ShaderPatches::PatchWallGiVs(again) && again == t, "a copy that already writes TEXCOORD7 is refused unchanged");
+    std::vector<DWORD> ps2 = AssemblePs("vs_2_0\ndcl_position v0\ndp4 r4.x, v0, c4\ndp4 r4.y, v0, c5\ndp4 r4.z, v0, c6\nmov oPos, r4\n");
+    const std::vector<DWORD> ps2Before = ps2;
+    Check(!ShaderPatches::PatchWallGiVs(ps2) && ps2 == ps2Before, "vs_2_0 refused unchanged");
+    const float none[3] = {}, shift[3] = {10.0f, -1.5f, -5.0f};
+    WallUvCheck(gpu, s, t, 7, none, "wall VS copy");
+    WallUvCheck(gpu, s, t, 7, shift, "wall VS copy, world rows with a translation");
+}
+
+// (S2-06 item 9) A wall pass pair drawn over the 64 x 64 target (one large triangle, every input varying, every sampler a
+// small pattern of its declared type, the same constants): the pixels, to compare a shader model 2 pair with its upgrade
+std::vector<DWORD> RenderPair(Gpu& gpu, const std::vector<DWORD>& vsCode, const std::vector<DWORD>& psCode) {
+    IDirect3DDevice9* dev = gpu.dev;
+    std::vector<DWORD> px;
+    IDirect3DVertexShader9* vs = nullptr;
+    IDirect3DPixelShader9* ps = nullptr;
+    IDirect3DVertexDeclaration9* decl = nullptr;
+    IDirect3DTexture9* tex = nullptr;
+    IDirect3DCubeTexture9* cube = nullptr;
+    D3DVERTEXELEMENT9 el[9] = {{0, 0, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_POSITION, 0}, {0, 16, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_NORMAL, 0}};
+    for (BYTE k = 0; k < 6; k++) el[2 + k] = {0, static_cast<WORD>(32 + 16 * k), D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_TEXCOORD, k};
+    el[8] = D3DDECL_END();
+    if (FAILED(dev->CreateVertexShader(vsCode.data(), &vs)) || FAILED(dev->CreatePixelShader(psCode.data(), &ps)) || FAILED(dev->CreateVertexDeclaration(el, &decl)) ||
+        FAILED(dev->CreateTexture(4, 4, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex, nullptr)) ||
+        FAILED(dev->CreateCubeTexture(4, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &cube, nullptr))) {
+        Release(vs), Release(ps), Release(decl), Release(tex), Release(cube);
+        return px;
+    }
+    D3DLOCKED_RECT r{};
+    if (SUCCEEDED(tex->LockRect(0, &r, nullptr, 0))) {
+        for (int y = 0; y < 4; y++)
+            for (int x = 0; x < 4; x++) reinterpret_cast<DWORD*>(static_cast<char*>(r.pBits) + y * r.Pitch)[x] = 0x40000000u * (x & 3) + 0x00405020u * (y + 1) + 0x10u * x;
+        tex->UnlockRect(0);
+    }
+    for (int f = 0; f < 6; f++)
+        if (SUCCEEDED(cube->LockRect(static_cast<D3DCUBEMAP_FACES>(f), 0, &r, nullptr, 0))) {
+            for (int y = 0; y < 4; y++)
+                for (int x = 0; x < 4; x++) reinterpret_cast<DWORD*>(static_cast<char*>(r.pBits) + y * r.Pitch)[x] = 0x80203040u + 0x00101010u * static_cast<DWORD>(f + x + y);
+            cube->UnlockRect(static_cast<D3DCUBEMAP_FACES>(f), 0);
+        }
+    for (const Tok& x : Walk(psCode))
+        if (x.op == 0x1F && RegType(psCode[x.at + 2]) == 10) {
+            const DWORD s = psCode[x.at + 2] & 0x7FF;
+            dev->SetTexture(s, ((psCode[x.at + 1] >> 27) & 0xF) == 3 ? static_cast<IDirect3DBaseTexture9*>(cube) : tex);
+            dev->SetSamplerState(s, D3DSAMP_MINFILTER, D3DTEXF_LINEAR), dev->SetSamplerState(s, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+        }
+    float vc[32][4], pc[32][4];
+    for (int i = 0; i < 32; i++)
+        for (int k = 0; k < 4; k++) vc[i][k] = k == 2 ? 1.0f : 0.5f, pc[i][k] = 0.25f + 0.15f * static_cast<float>((i + k) % 4);
+    for (int i = 0; i < 7; i++)
+        for (int k = 0; k < 4; k++) vc[i][k] = (i % 4) == k ? 1.0f : 0.0f; // c0..c3 the clip rows, c4..c6 the world rows: identity
+    dev->SetVertexShaderConstantF(0, &vc[0][0], 32);
+    dev->SetPixelShaderConstantF(0, &pc[0][0], 32);
+    struct V {
+        float p[4], n[4], c[6][4];
+    } q[3]{};
+    const float xy[3][2] = {{-0.95f, -0.95f}, {3.0f, -0.95f}, {-0.95f, 3.0f}};
+    for (int i = 0; i < 3; i++) {
+        q[i].p[0] = xy[i][0] * 256.0f, q[i].p[1] = q[i].p[3] = xy[i][1] * 256.0f, q[i].p[2] = 128.0f;
+        q[i].n[0] = 0.3f + 0.2f * i, q[i].n[1] = 0.8f - 0.1f * i, q[i].n[2] = 0.4f, q[i].n[3] = 0.5f;
+        for (int k = 0; k < 6; k++)
+            for (int j = 0; j < 4; j++) q[i].c[k][j] = 0.1f + 0.3f * static_cast<float>((i + j + k) % 3);
+        q[i].c[5][2] = 1.0f; // (TEXCOORD5.z: the cut scale of the position)
+    }
+    dev->SetRenderTarget(0, gpu.target);
+    dev->Clear(0, nullptr, D3DCLEAR_TARGET, 0, 1.0f, 0);
+    dev->SetVertexDeclaration(decl);
+    dev->SetVertexShader(vs);
+    dev->SetPixelShader(ps);
+    dev->BeginScene();
+    const bool drawn = SUCCEEDED(dev->DrawPrimitiveUP(D3DPT_TRIANGLELIST, 1, q, sizeof(V)));
+    dev->EndScene();
+    dev->SetVertexShader(nullptr), dev->SetPixelShader(nullptr);
+    for (DWORD s = 0; s < 16; s++) dev->SetTexture(s, nullptr);
+    if (drawn && SUCCEEDED(dev->GetRenderTargetData(gpu.target, gpu.readback)) && SUCCEEDED(gpu.readback->LockRect(&r, nullptr, D3DLOCK_READONLY))) {
+        px.resize(4096);
+        for (int y = 0; y < 64; y++) std::memcpy(px.data() + y * 64, static_cast<char*>(r.pBits) + y * r.Pitch, 256);
+        gpu.readback->UnlockRect();
+    }
+    Release(vs), Release(ps), Release(decl), Release(tex), Release(cube);
+    return px;
+}
+
+// (S2-06 item 9) The vs_2_0 / ps_2_0 InteriorWall passes: upgraded to shader model 3 (the upgrade alone draws the same pixels as
+// the game's pair), the VS copy writes the grid uv to TEXCOORD0.zw (= WallUvCpu on the GPU, world rows with a translation), the
+// game PS and its smooth copy read it; every copy created natively. Each refusal is printed with its reason.
+void Sm2WallChecks(const std::vector<Blob>& blobs, const std::vector<Tech>& techs, const std::map<uint32_t, std::string>& names, Gpu& gpu) {
+    std::map<std::pair<uint32_t, uint32_t>, int> pairs; // (vs, ps) 0-based, passes
+    for (const Tech& tc : techs)
+        if (const auto n = names.find(tc.name); n != names.end() && n->second.rfind("InteriorWall", 0) == 0)
+            for (const auto& [vs, ps] : tc.passes)
+                if (vs >= 1 && vs <= blobs.size() && ps >= 1 && ps <= blobs.size() && !blobs[vs - 1].code.empty() && blobs[vs - 1].code[0] != 0xFFFE0300 &&
+                    ShaderPatches::IsRoomMapPs(blobs[ps - 1].code))
+                    pairs[{vs - 1, ps - 1}]++;
+    const Scene s = MakeScene(true);
+    const float shift[3] = {10.0f, -1.5f, -5.0f};
+    std::map<uint32_t, bool> vsOk, psOk;
+    int vsCreated = 0, psCreated = 0, psTried = 0;
+    for (const auto& [k, c] : pairs) {
+        if (!vsOk.count(k.first)) {
+            std::vector<DWORD> t = blobs[k.first].code;
+            const char* why = ShaderPatches::UpgradeVs2To3(t);
+            bool ok = !why && ShaderPatches::PatchWallGiVs(t, 0, true);
+            if (!ok) std::printf("  sm2 wall VS %u refused: %s\n", k.first, why ? why : "PatchWallGiVs");
+            IDirect3DVertexShader9* v = nullptr;
+            if (ok && gpu.dev) {
+                ok = SUCCEEDED(gpu.dev->CreateVertexShader(t.data(), &v));
+                vsCreated += ok;
+                Release(v);
+                if (ok) WallUvCheck(gpu, s, t, 0, shift, ("sm2 wall VS " + std::to_string(k.first)).c_str(), true);
+            }
+            vsOk[k.first] = ok;
+        }
+        if (!psOk.count(k.second)) {
+            bool all = true;
+            for (int smooth = 0; smooth < 2; smooth++) {
+                std::vector<DWORD> t = blobs[k.second].code;
+                ShaderPatches::RoomMapPatch rp;
+                if (smooth && !ShaderPatches::PatchRoomMapSmooth(t, rp, false)) continue;
+                psTried++;
+                const char* why = ShaderPatches::UpgradePs2To3(t);
+                ShaderPatches::RoomMapGiPatch gp;
+                const bool ok = !why && ShaderPatches::PatchRoomMapGi(t, gp, 0, true) && (!gpu.dev || gpu.AcceptsPs(t));
+                if (!ok) std::printf("  sm2 wall PS %u (%s) refused: %s\n", k.second, smooth ? "smooth copy" : "game shader", why ? why : "PatchRoomMapGi or create");
+                psCreated += ok;
+                all &= ok;
+            }
+            psOk[k.second] = all;
+        }
+    }
+    // the upgrade alone: the same pixels as the game's pair
+    int same = 0, compared = 0, lit = 0, worst = 0;
+    for (const auto& [k, c] : pairs) {
+        if (!gpu.dev) break;
+        std::vector<DWORD> v3 = blobs[k.first].code, p3 = blobs[k.second].code;
+        if (ShaderPatches::UpgradeVs2To3(v3) || ShaderPatches::UpgradePs2To3(p3)) continue;
+        const std::vector<DWORD> a = RenderPair(gpu, blobs[k.first].code, blobs[k.second].code), b = RenderPair(gpu, v3, p3);
+        compared++;
+        if (a.empty() || a.size() != b.size()) continue;
+        int d = 0, n = 0;
+        for (size_t i = 0; i < a.size(); i++) {
+            n += (a[i] & 0xFFFFFF) != 0;
+            for (int ch = 0; ch < 32; ch += 8) d = std::max(d, std::abs(static_cast<int>((a[i] >> ch) & 0xFF) - static_cast<int>((b[i] >> ch) & 0xFF)));
+        }
+        worst = std::max(worst, d), lit += n > 0, same += d <= 1;
+    }
+    int passes = 0, covered = 0;
+    for (const auto& [k, c] : pairs) passes += c, covered += vsOk[k.first] && psOk[k.second] ? c : 0;
+    std::printf("  sm2 InteriorWall pairs: %zu (%d passes), %zu VS (%d take the upgrade + uv copy), %d PS copies tried (%d take the upgrade + read)\n", pairs.size(),
+                passes, vsOk.size(), vsCreated, psTried, psCreated);
+    std::printf("  sm2 upgrade alone: %d of %d pairs draw the same pixels as the game's pair (worst %d LSB), %d draw something\n", same, compared, worst, lit);
+    std::printf("  sm2 passes with the wall GI path: %d of %d\n", covered, passes);
+    Check(!pairs.empty() && covered == passes && (vsCreated == static_cast<int>(vsOk.size()) || !gpu.dev), "every shader model 2 InteriorWall pass takes the wall GI path");
+    Check(!gpu.dev || (compared == static_cast<int>(pairs.size()) && same == compared && lit > 0), "the shader model 3 upgrade draws the same pixels");
 }
 
 // 3. precomp
@@ -741,7 +939,7 @@ void PrecompChecks(const char* path, Gpu& gpu) {
         Release(v);
     }
     std::printf("  InteriorWall vs_3_0 vertex shaders: %zu, %d take the wall uv copy, %d created natively\n", wallVs.size(), vsTaken, vsCreated);
-    // the wall GI path covers the vs_3_0 / ps_3_0 passes only; the vs_2_0 / ps_2_0 ones keep the game's wall light
+    // the InteriorWall passes by shader model (S2-06 item 9: the vs_2_0 / ps_2_0 ones go through the upgrade)
     std::map<std::pair<DWORD, DWORD>, int> wallPasses;
     for (const Tech& tc : techs)
         if (const auto n = names.find(tc.name); n != names.end() && n->second.rfind("InteriorWall", 0) == 0)
@@ -751,7 +949,8 @@ void PrecompChecks(const char* path, Gpu& gpu) {
                     wallPasses[{blobs[vs - 1].code[0], blobs[ps - 1].code[0]}]++;
     for (const auto& [k, c] : wallPasses)
         std::printf("  InteriorWall* room-lit passes vs %s / ps %s: %d (%s)\n", k.first == 0xFFFE0300 ? "3_0" : "2_x", k.second == 0xFFFF0300 ? "3_0" : "2_x", c,
-                    k.first == 0xFFFE0300 && k.second == 0xFFFF0300 ? "wall GI path" : "no wall GI path: not shader model 3");
+                    k.first == 0xFFFE0300 && k.second == 0xFFFF0300 ? "wall GI path" : "wall GI path through the shader model 3 upgrade, below");
+    Sm2WallChecks(blobs, techs, names, gpu);
     Check(!wallVs.empty() && vsTaken == static_cast<int>(wallVs.size()) && (vsCreated == vsTaken || !gpu.dev), "every InteriorWall vs_3_0 takes the wall uv copy");
     Check(ps2 == ps2Refused, "every ps_2_0 shader refused, bytes unchanged");
     Check(unchanged == refusals, "every refusal leaves the bytes unchanged (indirect off: the same shaders)");

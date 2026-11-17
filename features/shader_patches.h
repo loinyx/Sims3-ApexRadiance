@@ -570,7 +570,7 @@ bool PatchLotTerrainEdges(std::vector<DWORD>& t, bool exit = false);
 // (out.flagSampler, point; GiIndirect::Grid::flags) closes, into G; the mad takes G for rL: rgb' = rL.rgb k.y + G k.x -
 // rL.w a L, alpha' = rL.w k.z, k = c[kGiKConst], L = c[kGiLampConst] (GiIndirect::Apply). c[kGiSizeConst] = (w, h, 1/w, 1/h)
 // of the grid; kGiSizeConst + 1 is the copy's def. rL itself is not changed. Constants in the reserved pixel range (research 15:
-// c208-c223; c208-c214 the lamp index). Refused (t unchanged) for ps_2_0 / ps_2_x (c215 is out of their reach), no such mad,
+// c208-c223; c208-c214 the lamp index). texcoord 0..15. Refused (t unchanged) for ps_2_0 / ps_2_x (c215 is out of their reach: UpgradePs2To3 first), no such mad,
 // no free temps, samplers or input, or a shader already reading c215 or above. out.slots / temps: of the patched copy;
 // out.ambientConst: the mad's cA (the room's ambient, read per draw for L).
 constexpr DWORD kGiUvConst = 215, kGiKConst = 216, kGiLampConst = 217, kGiSizeConst = 218;
@@ -578,7 +578,7 @@ struct RoomMapGiPatch {
     int sampler = -1, flagSampler = -1, ambientConst = -1;
     int slots = 0, temps = 0, added = 0; // added: instruction slots the patch added
 };
-bool PatchRoomMapGi(std::vector<DWORD>& t, RoomMapGiPatch& out, int texcoord = 4);
+bool PatchRoomMapGi(std::vector<DWORD>& t, RoomMapGiPatch& out, int texcoord = 4, bool zw = false); // zw: uv in TEXCOORD<texcoord>.zw
 // (real-time GI S2-06) A copy of a vs_3_0 wall vertex shader (InteriorWall's, precomp VS 8507 shape) that also writes the wall
 // pixel's GI grid uv to TEXCOORD7.xy (GiIndirect::WallUvCpu): after its world triple (three consecutive "dp4 rW.x/y/z, rP,
 // cK..cK+2"), the lot position (rW, 1) and the lot normal (the one normal decode, an instruction reading only the normal input
@@ -587,6 +587,21 @@ bool PatchRoomMapGi(std::vector<DWORD>& t, RoomMapGiPatch& out, int texcoord = 4
 // +2 is the copy's def. Refused (t unchanged): not vs_3_0, flow control, relative constants, a constant >= kWallGiVsConst,
 // TEXCOORD7 already an output, no free output or temps, no single triple or normal decode. oPos is not touched.
 constexpr DWORD kWallGiVsConst = 242;
-bool PatchWallGiVs(std::vector<DWORD>& t);
+// texcoord: the output's TEXCOORD index (7 for the game's vs_3_0). zw: write .zw of the TEXCOORD<texcoord> the shader already
+// declares and writes only .xy of (the upgraded vs_2_0 walls: TEXCOORD0, their eight TEXCOORDs and two COLORs fill ps_3_0's
+// ten inputs). Without the strict triple / decode order (the vs_2_0 walls: no world triple, or the decode rewritten before
+// it), the general form: the object position rP read whole by the clip dp4s on c0..c3, the world rows cK..cK+2 of the first
+// "dp3 x/y/z, rD<swz>, cK..cK+2" of the decode's temp; the world position (dp4 rP, cK..) and a copy of the decode go to new temps
+// just before the first clip dp4, the normal is that dp3 with its swizzle (S2-06 item 9: c4..c6 the world rows [I, live check]).
+bool PatchWallGiVs(std::vector<DWORD>& t, int texcoord = 7, bool zw = false);
+// (S2-06 item 9) Shader model 2 to 3, same results: the vs_2_0 / ps_2_0 InteriorWall pairs take the wall GI read only as
+// vs_3_0 / ps_3_0 (D3D9 pairs a vs_3_0 with a ps_3_0 only). Nullptr when done; else why refused (t unchanged).
+// Vertex: oTn stays on register n (TEXCOORDn), oPos and oDn take the next free outputs (oDn written _sat: vs_2_0 clamps colours).
+// sincos loses its vs_2 macro constants. Refused: not vs_2_0 / vs_2_x, flow control, oFog / oPts writes (fixed-function
+// fog or point size), more than 12 outputs.
+const char* UpgradeVs2To3(std::vector<DWORD>& t);
+// Pixel: tn becomes vn (TEXCOORDn), colour vn the input after the highest tn (COLORn). ps_3_0 has no fixed-function fog: the
+// caller must not draw the copy with D3DRS_FOGENABLE on. Refused: not ps_2_0 / ps_2_x, flow control, predication, more than 10 inputs.
+const char* UpgradePs2To3(std::vector<DWORD>& t);
 
 } // namespace ShaderPatches

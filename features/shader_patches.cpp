@@ -5075,7 +5075,7 @@ bool ProbeCopy(const std::vector<DWORD>& t, int k, std::vector<DWORD>& out, std:
     }
     return false;
 }
-bool PatchRoomMapGi(std::vector<DWORD>& t, RoomMapGiPatch& out, int texcoord) {
+bool PatchRoomMapGi(std::vector<DWORD>& t, RoomMapGiPatch& out, int texcoord, bool zw) {
     out = RoomMapGiPatch{};
     if (t.empty() || t[0] != 0xFFFF0300) return false;
     const auto ins = Parse(t);
@@ -5102,7 +5102,7 @@ bool PatchRoomMapGi(std::vector<DWORD>& t, RoomMapGiPatch& out, int texcoord) {
     }
     if (found != 1) return false;
     const Usage u = Scan(t, ins);
-    if (texcoord < 0 || texcoord > 7 || u.maxTemp + 3 >= 32 || u.maxSampler + 2 >= 16 || !u.afterLastSamplerDcl || u.maxConst >= static_cast<int>(kGiUvConst))
+    if (texcoord < 0 || texcoord > 15 || u.maxTemp + 3 >= 32 || u.maxSampler + 2 >= 16 || !u.afterLastSamplerDcl || u.maxConst >= static_cast<int>(kGiUvConst))
         return false;
     std::vector<DWORD> copy = t;
     std::vector<Edit> edits;
@@ -5114,7 +5114,7 @@ bool PatchRoomMapGi(std::vector<DWORD>& t, RoomMapGiPatch& out, int texcoord) {
     const DWORD L = Num(copy[m.at + 2]), cA = Num(copy[m.at + 3]);
     const DWORD X = Sw(0, 0, 0, 0), Y = Sw(1, 1, 1, 1), Z = Sw(2, 2, 2, 2), W = Sw(3, 3, 3, 3);
     const std::vector<DWORD> code = {
-        Op(kMad, 4), Dst(kTemp, G, 0x3), Src(kInput, uvIn, Sw(0, 1, 0, 1)), Src(kConst, kGiUvConst, Sw(0, 1, 0, 1)), Src(kConst, kGiUvConst, Sw(2, 3, 2, 3)),
+        Op(kMad, 4), Dst(kTemp, G, 0x3), Src(kInput, uvIn, zw ? Sw(2, 3, 2, 3) : Sw(0, 1, 0, 1)), Src(kConst, kGiUvConst, Sw(0, 1, 0, 1)), Src(kConst, kGiUvConst, Sw(2, 3, 2, 3)),
         Op(kTexld, 3), Dst(kTemp, Q), Src(kTemp, G), Src(kSampler, sF),                                  // the texel's flags (point)
         Op(kMul, 3), Dst(kTemp, G, 0x3), Src(kTemp, G), Src(kConst, cS),                                 // p = uv x size
         Op(kFrc, 2), Dst(kTemp, H, 0x3), Src(kTemp, G),
@@ -5151,13 +5151,14 @@ bool PatchRoomMapGi(std::vector<DWORD>& t, RoomMapGiPatch& out, int texcoord) {
     t = std::move(copy);
     return true;
 }
-bool PatchWallGiVs(std::vector<DWORD>& t) {
-    if (t.empty() || t[0] != 0xFFFE0300 || t.back() != 0x0000FFFFu) return false;
+bool PatchWallGiVs(std::vector<DWORD>& t, int texcoord, bool zw) {
+    if (t.empty() || t[0] != 0xFFFE0300 || t.back() != 0x0000FFFFu || texcoord < 0 || texcoord > 15) return false;
     const auto ins = Parse(t);
     if (ins.empty()) return false;
     constexpr DWORD kRsqOp = 0x07, kMaxOut = 12;
     const auto isDclDef = [](DWORD op) { return op == kDcl || op == kDef || op == kDefI || op == kDefB; };
-    int normalIn = -1;
+    int normalIn = -1, zwOut = -1;
+    size_t zwDcl = 0;
     std::vector<bool> outUsed(kMaxOut, false);
     size_t afterLastDcl = 0;
     for (const Ins& x : ins) {
@@ -5166,7 +5167,10 @@ bool PatchWallGiVs(std::vector<DWORD>& t) {
             const DWORD use = t[x.at + 1] & 0x1F, idx = (t[x.at + 1] >> 16) & 0xF, r = t[x.at + 2];
             if (Type(r) == kInput && use == 3 && idx == 0) normalIn = static_cast<int>(Num(r));
             if (Type(r) == kOutput) {
-                if (use == 5 && idx == 7) return false; // TEXCOORD7 already written
+                if (use == 5 && idx == static_cast<DWORD>(texcoord)) {
+                    if (!zw) return false; // the TEXCOORD already written
+                    zwOut = static_cast<int>(Num(r)), zwDcl = x.at + 2;
+                }
                 if (Num(r) < kMaxOut) outUsed[Num(r)] = true;
             }
             afterLastDcl = End(x);
@@ -5177,12 +5181,44 @@ bool PatchWallGiVs(std::vector<DWORD>& t) {
             if ((t[x.at + k] & 0x80000000u) && Type(t[x.at + k]) == kConst && (t[x.at + k] & 0x2000)) return false; // relative addressing
     }
     const Usage u = Scan(t, ins);
-    if (normalIn < 0 || u.maxConst >= static_cast<int>(kWallGiVsConst) || u.maxTemp + 3 >= 32 || !afterLastDcl) return false;
+    if (normalIn < 0 || u.maxConst >= static_cast<int>(kWallGiVsConst) || u.maxTemp + 5 >= 32 || !afterLastDcl) return false;
     DWORD out = 0;
-    while (out < kMaxOut && outUsed[out]) out++;
-    if (out >= kMaxOut) return false;
+    if (zw) { // TEXCOORD<texcoord>.zw: declared, and no game write to its .zw
+        if (zwOut < 0) return false;
+        for (const Ins& x : ins)
+            if (!isDclDef(x.op) && x.len >= 1 && IsReg(t[x.at + 1], kOutput, static_cast<DWORD>(zwOut)) && (WMask(t[x.at + 1]) & 0xC)) return false;
+        out = static_cast<DWORD>(zwOut);
+    } else {
+        while (out < kMaxOut && outUsed[out]) out++;
+        if (out >= kMaxOut) return false;
+    }
+    const DWORD mu = zw ? 0x4 : 0x1, mv = zw ? 0x8 : 0x2;
+    // the normal decode: the one instruction writing a temp's .xyz from the normal input and constants only
+    int decode = -1;
+    DWORD D = 0;
+    for (size_t i = 0; i < ins.size(); i++) {
+        const Ins& y = ins[i];
+        if (isDclDef(y.op) || y.len < 2 || Type(t[y.at + 1]) != kTemp || (WMask(t[y.at + 1]) & 0x7) != 0x7 || (t[y.at + 1] & 0x00F00000u)) continue;
+        bool normal = false, other = false;
+        for (size_t k = 2; k <= y.len; k++) {
+            const DWORD r = t[y.at + k];
+            if (IsReg(r, kInput, static_cast<DWORD>(normalIn))) normal = true;
+            else if (Type(r) != kConst) other = true;
+        }
+        if (!normal || other) continue;
+        if (decode >= 0) return false;
+        decode = static_cast<int>(i), D = Num(t[y.at + 1]);
+    }
+    if (decode < 0) return false;
+    const auto writesBetween = [&](DWORD reg, DWORD mask, int from, int to) { // ins (from, to) write reg's mask
+        for (int i = from + 1; i < to; i++) {
+            const Ins& y = ins[static_cast<size_t>(i)];
+            if (!isDclDef(y.op) && y.len >= 1 && IsReg(t[y.at + 1], kTemp, reg) && (WMask(t[y.at + 1]) & mask)) return true;
+        }
+        return false;
+    };
     // the world triple: three consecutive "dp4 rW.x/.y/.z, rP, cK/cK+1/cK+2" (one rW, one rP, full swizzles, no modifiers)
-    int triple = -1;
+    int triple = -1, triples = 0;
     DWORD W = 0, K = 0;
     for (size_t i = 0; i + 2 < ins.size(); i++) {
         bool ok = true;
@@ -5194,40 +5230,65 @@ bool PatchWallGiVs(std::vector<DWORD>& t) {
                  a == t[ins[i].at + 2] && Num(c) == Num(t[ins[i].at + 3]) + j && Num(d) != Num(a);
         }
         if (!ok) continue;
-        if (triple >= 0) return false; // two triples: which one is the world position is not known
-        triple = static_cast<int>(i), W = Num(t[ins[i].at + 1]), K = Num(t[ins[i].at + 3]);
-    }
-    if (triple < 0) return false;
-    // the normal decode: the one instruction before the triple writing a temp's .xyz from the normal input and constants only,
-    // that temp's .xyz not written again up to the triple's end
-    int decode = -1;
-    DWORD D = 0;
-    for (int i = 0; i < triple; i++) {
-        const Ins& y = ins[static_cast<size_t>(i)];
-        if (isDclDef(y.op) || y.len < 2 || Type(t[y.at + 1]) != kTemp || (WMask(t[y.at + 1]) & 0x7) != 0x7 || (t[y.at + 1] & 0x00F00000u)) continue;
-        bool normal = false, other = false;
-        for (size_t k = 2; k <= y.len; k++) {
-            const DWORD r = t[y.at + k];
-            if (IsReg(r, kInput, static_cast<DWORD>(normalIn))) normal = true;
-            else if (Type(r) != kConst) other = true;
-        }
-        if (!normal || other) continue;
-        if (decode >= 0) return false;
-        decode = i, D = Num(t[y.at + 1]);
-    }
-    if (decode < 0 || D == W) return false;
-    for (int i = decode + 1; i < triple + 3; i++) {
-        const Ins& y = ins[static_cast<size_t>(i)];
-        if (!isDclDef(y.op) && y.len >= 1 && IsReg(t[y.at + 1], kTemp, D) && (WMask(t[y.at + 1]) & 0x7)) return false;
+        if (triples++ == 0) triple = static_cast<int>(i), W = Num(t[ins[i].at + 1]), K = Num(t[ins[i].at + 3]);
     }
     const DWORD A = static_cast<DWORD>(u.maxTemp + 1), B = A + 1, C = A + 2;
+    std::vector<DWORD> code;
+    size_t at = 0;
+    DWORD nSrc = Src(kTemp, D);
+    if (triples == 1 && decode < triple && D != W && !writesBetween(D, 0x7, decode, triple + 3)) {
+        at = End(ins[static_cast<size_t>(triple) + 2]); // the vs_3_0 InteriorWall shape: after its world triple
+    } else {
+        if (triples > 1) return false; // two triples: which one is the world position is not known
+        // general form: rP read whole by "dp4 x, rP, c0..c3" (the clip transform), cK..cK+2 the rows the decode goes through
+        int first = -1;
+        DWORD P = 0, seen = 0;
+        for (size_t i = 0; i < ins.size(); i++) {
+            const Ins& y = ins[i];
+            if (y.op != kDp4 || y.len != 3) continue;
+            const DWORD a = t[y.at + 2], c = t[y.at + 3];
+            if (Type(a) != kTemp || Swz(a) != kSwzXYZW || (a & 0x0F000000u) || Type(c) != kConst || Num(c) > 3) continue;
+            if (first < 0) first = static_cast<int>(i), P = Num(a);
+            if (Num(a) != P) return false;
+            seen |= 1u << Num(c);
+        }
+        if (first < 0 || seen != 0xF) return false;
+        // (the three dp3 may be interleaved with other code: the vs_2_0 walls)
+        int rows = -1;
+        DWORD seenRows = 0;
+        for (size_t i = static_cast<size_t>(decode) + 1; i < ins.size() && seenRows != 0x7; i++) {
+            const Ins& y = ins[i];
+            if (isDclDef(y.op)) continue;
+            if (y.op == kDp3 && y.len == 3 && IsReg(t[y.at + 2], kTemp, D) && !(t[y.at + 2] & 0x0F000000u) && Type(t[y.at + 3]) == kConst &&
+                Swz(t[y.at + 3]) == kSwzXYZW && !(t[y.at + 3] & 0x0F000000u)) {
+                const DWORD m = WMask(t[y.at + 1]), c = Num(t[y.at + 3]);
+                if (rows < 0 && m == 0x1 && c >= 4) rows = static_cast<int>(i), seenRows = 1;
+                else if (rows >= 0 && t[y.at + 2] == t[ins[static_cast<size_t>(rows)].at + 2] && (m == 0x2 || m == 0x4) &&
+                         c == Num(t[ins[static_cast<size_t>(rows)].at + 3]) + (m == 0x2 ? 1 : 2))
+                    seenRows |= m;
+            }
+            if (y.len >= 1 && IsReg(t[y.at + 1], kTemp, D) && (WMask(t[y.at + 1]) & 0x7)) break; // D rewritten
+        }
+        if (seenRows != 0x7) return false;
+        K = Num(t[ins[static_cast<size_t>(rows)].at + 3]);
+        const DWORD Wn = A + 3, Dn = A + 4;
+        W = Wn;
+        nSrc = (t[ins[static_cast<size_t>(rows)].at + 2] & ~0x7FFu) | Dn; // the dp3's own swizzle on the decode's copy
+        const Ins& dec = ins[static_cast<size_t>(decode)];
+        code = {Op(kDp4, 3), Dst(kTemp, Wn, 0x1), Src(kTemp, P), Src(kConst, K), // world position
+                Op(kDp4, 3), Dst(kTemp, Wn, 0x2), Src(kTemp, P), Src(kConst, K + 1),
+                Op(kDp4, 3), Dst(kTemp, Wn, 0x4), Src(kTemp, P), Src(kConst, K + 2)};
+        code.insert(code.end(), t.begin() + dec.at, t.begin() + End(dec)); // the decode, into Dn
+        code[12 + 1] = (code[12 + 1] & ~0x7FFu & ~0x000F0000u) | Dn | (0x7u << 16);
+        at = ins[static_cast<size_t>(first)].at;
+    }
     const DWORD c0 = kWallGiVsConst, c1 = c0 + 1, cD = c0 + 2, r0 = c0 + 3, r1 = c0 + 4, r2 = c0 + 5;
     const DWORD X = Sw(0, 0, 0, 0), Y = Sw(1, 1, 1, 1), Z = Sw(2, 2, 2, 2), Wc = Sw(3, 3, 3, 3);
     // (GiIndirect::WallUvCpu) one constant an instruction
-    const std::vector<DWORD> code = {
-        Op(kDp3, 3), Dst(kTemp, A, 0x1), Src(kTemp, D), Src(kConst, K),     // world normal (the decode through the world rows)
-        Op(kDp3, 3), Dst(kTemp, A, 0x2), Src(kTemp, D), Src(kConst, K + 1),
-        Op(kDp3, 3), Dst(kTemp, A, 0x4), Src(kTemp, D), Src(kConst, K + 2),
+    const std::vector<DWORD> uv = {
+        Op(kDp3, 3), Dst(kTemp, A, 0x1), nSrc, Src(kConst, K),     // world normal (the decode through the world rows)
+        Op(kDp3, 3), Dst(kTemp, A, 0x2), nSrc, Src(kConst, K + 1),
+        Op(kDp3, 3), Dst(kTemp, A, 0x4), nSrc, Src(kConst, K + 2),
         Op(kDp3, 3), Dst(kTemp, A, 0x8), Src(kTemp, A), Src(kTemp, A),
         Op(kRsqOp, 2), Dst(kTemp, A, 0x8), Src(kTemp, A, Wc),
         Op(kMul, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kTemp, A, Wc),
@@ -5256,16 +5317,104 @@ bool PatchWallGiVs(std::vector<DWORD>& t) {
         Op(kAdd, 3), Dst(kTemp, C, 0x4), Src(kTemp, C, Z), Neg(Src(kTemp, A, Z)),           // li = floor(line + 0.5)
         Op(kMul, 3), Dst(kTemp, A, 0x1), Src(kTemp, C, Wc), Src(kConst, c0, X),
         Op(kMad, 4), Dst(kTemp, A, 0x1), Src(kTemp, B, Wc), Src(kConst, c0, Z), Src(kTemp, A, X),
-        Op(kAdd, 3), Dst(kOutput, out, 0x1), Src(kTemp, A, X), Src(kConst, c1, X),           // u
+        Op(kAdd, 3), Dst(kOutput, out, mu), Src(kTemp, A, X), Src(kConst, c1, X),            // u
         Op(kMul, 3), Dst(kTemp, A, 0x2), Src(kTemp, C, Z), Src(kConst, c0, Wc),
         Op(kMad, 4), Dst(kTemp, A, 0x2), Src(kTemp, B, Y), Src(kConst, c0, Y), Src(kTemp, A, Y),
-        Op(kAdd, 3), Dst(kOutput, out, 0x2), Src(kTemp, A, Y), Src(kConst, c1, Y),           // v
+        Op(kAdd, 3), Dst(kOutput, out, mv), Src(kTemp, A, Y), Src(kConst, c1, Y),            // v
     };
-    std::vector<Edit> edits{{End(ins[static_cast<size_t>(triple) + 2]), code}};
-    edits.push_back({afterLastDcl, {Op(kDcl, 2), 0x80000005u | (7u << 16), Dst(kOutput, out, 0x3)}});
+    code.insert(code.end(), uv.begin(), uv.end());
+    std::vector<Edit> edits{{at, code}};
+    if (zw) t[zwDcl] |= 0x000F0000u; // (its declaration widened to .xyzw before the edits move it)
+    else edits.push_back({afterLastDcl, {Op(kDcl, 2), 0x80000005u | (static_cast<DWORD>(texcoord) << 16), Dst(kOutput, out, 0x3)}});
     edits.push_back({1, {Op(kDef, 5), Dst(kConst, cD), F(0.5f), F(0.3f), F(4.0f), F(1.0f)}});
     Apply(t, std::move(edits));
     return true;
+}
+namespace {
+DWORD Retype(DWORD tok, DWORD type, DWORD num) { return (tok & ~(0x70001800u | 0x7FFu)) | (Reg(type, num) & (0x70001800u | 0x7FFu)); }
+} // namespace
+const char* UpgradeVs2To3(std::vector<DWORD>& io) {
+    if (io.empty() || (io[0] != 0xFFFE0200 && io[0] != 0xFFFE0201)) return "not vs_2_0 / vs_2_x";
+    constexpr DWORD kRastOut = 4, kAttrOut = 5, kSinCos = 0x25, kMaxOut = 12;
+    std::vector<DWORD> t = io;
+    const auto before = Parse(io);
+    for (auto x = before.rbegin(); x != before.rend(); ++x) // sincos: the vs_3_0 form has no macro constants (its last two sources)
+        if (x->op == kSinCos) {
+            if (x->len != 4 || (io[x->at + 2] & 0x2000)) return "sincos";
+            t[x->at] = (io[x->at] & ~0x0F000000u) | (2u << 24);
+            t.erase(t.begin() + static_cast<std::ptrdiff_t>(x->at) + 3, t.begin() + static_cast<std::ptrdiff_t>(x->at) + 5);
+        }
+    const auto ins = Parse(t);
+    if (ins.empty()) return "unreadable";
+    bool usedT[kMaxOut] = {}, usedD[2] = {}, pos = false;
+    size_t afterLastDcl = 0;
+    for (const Ins& x : ins) {
+        if (IsFlow(x.op)) return "flow control";
+        if (x.op == kDcl) afterLastDcl = End(x);
+        if (x.op == kDcl || x.op == kDef || x.op == kDefI || x.op == kDefB || x.len == 0) continue;
+        const DWORD d = t[x.at + 1];
+        if (Type(d) == kRastOut && Num(d) != 0) return "writes oFog or oPts";
+        if (Type(d) == kRastOut) pos = true;
+        else if (Type(d) == kAttrOut && Num(d) < 2) usedD[Num(d)] = true;
+        else if (Type(d) == kOutput && Num(d) < kMaxOut) usedT[Num(d)] = true;
+    }
+    if (!pos || !afterLastDcl) return "no position output";
+    DWORD next = 0, map[3] = {}; // oPos, oD0, oD1
+    std::vector<DWORD> dcls;
+    for (DWORD n = 0; n < kMaxOut; n++)
+        if (usedT[n]) dcls.insert(dcls.end(), {Op(kDcl, 2), 0x80000005u | (n << 16), Dst(kOutput, n)});
+    for (int k = 0; k < 3; k++) {
+        if (k && !usedD[k - 1]) continue;
+        while (next < kMaxOut && usedT[next]) next++;
+        if (next >= kMaxOut) return "more than 12 outputs";
+        map[k] = next;
+        usedT[next] = true;
+        dcls.insert(dcls.end(), {Op(kDcl, 2), k ? 0x8000000Au | (static_cast<DWORD>(k - 1) << 16) : 0x80000000u, Dst(kOutput, next)});
+    }
+    for (const Ins& x : ins) {
+        if (x.op == kDcl || x.op == kDef || x.op == kDefI || x.op == kDefB || x.len == 0) continue;
+        DWORD& d = t[x.at + 1];
+        if (Type(d) == kRastOut) d = Retype(d, kOutput, map[0]);
+        else if (Type(d) == kAttrOut) d = Retype(d, kOutput, map[1 + Num(d)]) | 0x00100000u; // _sat: vs_2_0 colours are clamped
+    }
+    t[0] = 0xFFFE0300;
+    Apply(t, {{afterLastDcl, dcls}});
+    io = std::move(t);
+    return nullptr;
+}
+const char* UpgradePs2To3(std::vector<DWORD>& t) {
+    if (t.empty() || (t[0] != 0xFFFF0200 && t[0] != 0xFFFF0201)) return "not ps_2_0 / ps_2_x";
+    const auto ins = Parse(t);
+    if (ins.empty()) return "unreadable";
+    constexpr DWORD kSetp = 0x5E, kPredicated = 0x10000000u;
+    int maxT = -1, maxC = -1;
+    for (const Ins& x : ins) {
+        if (IsFlow(x.op)) return "flow control";
+        if (x.op == kSetp || (t[x.at] & kPredicated)) return "predication";
+        if (x.op != kDcl) continue;
+        const DWORD r = t[x.at + 2];
+        if (Type(r) == kTexture) maxT = std::max(maxT, static_cast<int>(Num(r)));
+        if (Type(r) == kInput) maxC = std::max(maxC, static_cast<int>(Num(r)));
+    }
+    if (maxT + 1 + maxC + 1 > 10) return "more than 10 inputs";
+    const DWORD c0 = static_cast<DWORD>(maxT + 1); // colour n -> v(c0 + n)
+    for (const Ins& x : ins) {
+        if (x.op == kDef || x.op == kDefI || x.op == kDefB) continue;
+        if (x.op == kDcl) {
+            DWORD& r = t[x.at + 2];
+            if (Type(r) == kTexture) t[x.at + 1] = 0x80000005u | (Num(r) << 16), r = Retype(r, kInput, Num(r));
+            else if (Type(r) == kInput) t[x.at + 1] = 0x8000000Au | (Num(r) << 16), r = Retype(r, kInput, c0 + Num(r));
+            continue;
+        }
+        for (size_t k = 1; k <= x.len; k++) {
+            DWORD& r = t[x.at + k];
+            if (!(r & 0x80000000u)) continue;
+            if (Type(r) == kTexture) r = Retype(r, kInput, Num(r));
+            else if (Type(r) == kInput) r = Retype(r, kInput, c0 + Num(r));
+        }
+    }
+    t[0] = 0xFFFF0300;
+    return nullptr;
 }
 } // namespace ShaderPatches
 

@@ -88,10 +88,20 @@ Check (($liLine -f 'draw', 700, 0, 0, 0, 300, 0) -match $liDraw) 'lamp index dra
 Check (($liLine -f 'draw', 700, 0, 0, 0, 0, 0) -notmatch $liDraw) 'lamp index draw line rejected without fence draws'
 Check (($liLine -f 'draw', 0, 0, 0, 0, 300, 0) -notmatch $liDraw) 'lamp index draw line rejected without draws'
 # The indirect light smoke (S2-05): its counters pattern takes a line with ready texels and draws, not one without
-$giInd = @((Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/gi-indirect-smoke.json') -Raw | ConvertFrom-Json).variants.on.expect)[1]
-$giLine = '12:00:10.000 [INFO] [RealtimeGI] Counters: frames=600 backend=serverRays draws=4 deviceCalls=2 lamps=12 lots=1 lampChanges=0 indirect=atlas atlasReady={0} gridTexels=900 indirectDraws={1} wallDraws=12 rigs=40 rigDraws={2} rigReads=2 rigSkipped=0; must be 0: capSolves=0 syncReadbacks=0 locks=0 redrawDiffs=0 readFaults=0 lampTableDiffs=0'
-Check (($giLine -f 640, 37, 300) -match $giInd) 'GI indirect counters match with ready texels and draws'
-foreach ($bad in @(@(0, 37, 300), @(640, 0, 300), @(640, 37, 0))) { Check (($giLine -f $bad[0], $bad[1], $bad[2]) -notmatch $giInd) "GI indirect counters rejected: atlasReady=$($bad[0]) indirectDraws=$($bad[1]) rigDraws=$($bad[2])" }
+$giInd = @((Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/gi-indirect-smoke.json') -Raw | ConvertFrom-Json).variants.on.expect)[2]
+$giLine = '12:00:10.000 [INFO] [RealtimeGI] Counters: frames=600 backend=serverRays draws=4 deviceCalls=2 lamps=12 lots=1 lampChanges=0 indirect=atlas atlasReady={0} gridTexels=900 indirectDraws={1} wallDraws=12 rigs=40 rigDraws={2} rigReads=2 rigSkipped=0 wallSm2={3} wallSm2Fog=0; must be 0: capSolves=0 syncReadbacks=0 locks=0 redrawDiffs=0 readFaults=0 lampTableDiffs=0'
+Check (($giLine -f 640, 37, 300, 9) -match $giInd) 'GI indirect counters match with ready texels and draws'
+foreach ($bad in @(@(0, 37, 300), @(640, 0, 300), @(640, 37, 0))) { Check (($giLine -f $bad[0], $bad[1], $bad[2], 9) -notmatch $giInd) "GI indirect counters rejected: atlasReady=$($bad[0]) indirectDraws=$($bad[1]) rigDraws=$($bad[2])" }
+# (S2-06 item 9) the shader model 2 walls: wallSm2 > 0 and the object vs lot space line; an upgrade refusal fails the load
+$giJob = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/gi-indirect-smoke.json') -Raw | ConvertFrom-Json
+$giSm2 = @($giJob.variants.on.expect)[3]; $giSpace = @($giJob.variants.on.expect)[4]; $giRefused = @($giJob.fail)[1]
+Check (($giLine -f 640, 37, 300, 9) -match $giSm2) 'GI sm2 wall counter matches wallSm2=9'
+Check (($giLine -f 640, 37, 300, 0) -notmatch $giSm2) 'GI sm2 wall counter rejects wallSm2=0'
+Check ('12:00:00.000 [INFO] [LotLightBridge] Real-time GI: sm2 wall VS 1A2B3C4D world rows c4..c6 (1.000 0.000 0.000 4.000) (0.000 1.000 0.000 0.000) (0.000 0.000 1.000 8.000); object vs lot space: rotation off identity by 0.0000, object origin at lot (0.000, 0.000, 0.000)' -match $giSpace) 'GI sm2 object vs lot space line matches'
+Check ('12:00:00.000 [INFO] [LotLightBridge] Real-time GI: wall vertex shader 1A2B3C4D writes the grid uv' -notmatch $giSpace) 'GI sm2 space pattern ignores the wall VS line'
+Check ('12:00:00.000 [INFO] [LotLightBridge] Real-time GI: copy 1A2B3C4D cannot read the GI grid (walls) (ps_2_0: shader model 3 upgrade refused: more than 10 inputs)' -match $giRefused) 'GI sm2 upgrade refusal fails the load'
+Check ('12:00:00.000 [INFO] [LotLightBridge] Real-time GI: copy 1A2B3C4D reads the GI grid (walls) (230 slots, 19 added, ps_2_0 upgraded to ps_3_0)' -notmatch $giRefused) 'GI sm2 upgraded copy line does not fail the load'
+
 # The G-buffer bridge view (WP11): the counter line with views and no fault, not one with a fault; the off line fails
 $gbJob = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/gbuffer-motion-smoke.json') -Raw | ConvertFrom-Json
 $gbView = @($gbJob.variants.bridge.expect)[2]; $gbOff = @($gbJob.fail)[-1]

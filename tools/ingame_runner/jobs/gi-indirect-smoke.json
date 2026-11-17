@@ -40,12 +40,15 @@
       "expect": [
         "\\[RealtimeGI\\] Back end serverRays \\(the server's level 2\\)",
         "\\[RealtimeGI\\] On: lots=\\d+ cap=(off|class0|hold) scale=[124] indirect=atlas backend=server(Rays|Compute)",
-        "\\[RealtimeGI\\] Counters: .*indirect=atlas atlasReady=[1-9]\\d* gridTexels=[1-9]\\d* indirectDraws=[1-9]\\d* wallDraws=[1-9]\\d* rigs=[1-9]\\d* rigDraws=[1-9]\\d*"
+        "\\[RealtimeGI\\] Counters: .*indirect=atlas atlasReady=[1-9]\\d* gridTexels=[1-9]\\d* indirectDraws=[1-9]\\d* wallDraws=[1-9]\\d* rigs=[1-9]\\d* rigDraws=[1-9]\\d*",
+        "\\[RealtimeGI\\] Counters: .* wallSm2=[1-9]\\d* ",
+        "\\[LotLightBridge\\] Real-time GI: sm2 wall VS [0-9A-F]+ world rows c4\\.\\.c6 .*object vs lot space"
       ]
     }
   },
   "fail": [
     "\\[RealtimeGI\\] Counters: .*readFaults=[1-9]",
+    "\\[LotLightBridge\\] Real-time GI: .*shader model 3 upgrade refused",
     "\\[RealtimeGI\\] .*(did not start|Verification mismatch)"
   ],
   "steps": [
