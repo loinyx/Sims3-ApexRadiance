@@ -313,5 +313,6 @@ public static partial class Strings
         ["no limit"] = "ingen gräns",
         ["Custom"] = "Anpassad",
         ["Could not change Apex's frame limit: {0}"] = "Kunde inte ändra Apex bildgräns: {0}",
+        ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Påslaget utanför Setup, i NVIDIA-drivrutinens inställningar: Setup lämnar det som det är.",
     };
 }

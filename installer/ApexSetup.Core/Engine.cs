@@ -630,7 +630,7 @@ public static class Engine
     static string? DefaultFrameGenOff(Game g)
     {
         string? nv;
-        try { nv = SmoothMotion.Read(g.Exe) is { On: true } ? SmoothMotion.Set(false, g.Exe) : null; }
+        try { nv = SmoothMotion.SetupTurnedOn && SmoothMotion.Read() is { On: true } ? SmoothMotion.Set(false) : null; }
         catch (Exception e) { nv = e.Message; }
         // AFMF is system-wide: off only when Setup turned it on (Afmf.Marker), never a setting the player had on
         return nv ?? Afmf.OffIfSetupTurnedOn();

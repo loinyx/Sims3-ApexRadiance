@@ -307,5 +307,7 @@ public static partial class Strings
         ["no limit"] = "sem limite",
         ["Custom"] = "Personalizado",
         ["Could not change Apex's frame limit: {0}"] = "Não foi possível mudar o limite de quadros do Apex: {0}",
+        // NVIDIA Smooth Motion turned on outside Setup
+        ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Ativado fora do instalador, nas configurações do driver da NVIDIA: o instalador não mexe nele.",
     };
 }

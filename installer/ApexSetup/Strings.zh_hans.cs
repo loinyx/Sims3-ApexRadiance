@@ -299,5 +299,6 @@ public static partial class Strings
         ["no limit"] = "无上限",
         ["Custom"] = "自定义",
         ["Could not change Apex's frame limit: {0}"] = "无法更改 Apex 的帧率上限：{0}",
+        ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "已在 Setup 之外通过 NVIDIA 驱动设置开启：Setup 不会改动它。",
     };
 }

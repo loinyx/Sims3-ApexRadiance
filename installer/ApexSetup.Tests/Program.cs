@@ -813,18 +813,20 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
     Check(SmoothMotion.Supported("NVIDIA GeForce RTX 4070", 57186) && SmoothMotion.Supported("NVIDIA GeForce RTX 5090 Laptop GPU", 59000)
           && !SmoothMotion.Supported("NVIDIA GeForce RTX 3080", 59000) && !SmoothMotion.Supported("NVIDIA GeForce RTX 4070", 57185)
           && !SmoothMotion.Supported(null, 59000), "smooth motion: RTX 40 and 50 on driver 571.86 or newer only");
-    Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070"), true) is null, "smooth motion: an RTX 40 card under the bridge can turn it on");
-    Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 3080"), true)?.Key.StartsWith("Needs an NVIDIA") == true
-          && SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070", 56600), true)?.Arg == "566.00", "smooth motion: an older card or driver says why");
-    Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070"), false)?.Key.Contains("RTX Remix bridge") == true
-          && SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070", on: true), false) is null, "smooth motion: needs the bridge to turn on, never to turn off");
-    Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070", owner: "My TS3"), true) is { Arg: "My TS3" }, "smooth motion: an exe in the player's own profile is left alone");
-    Check(SmoothMotion.Blocked(new SmoothMotion.Status(null, 0, false, null, "no nvapi64.dll"), true) is { Arg: "no nvapi64.dll" }, "smooth motion: an NVAPI error reads as a reason");
+    Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070"), true, false) is null, "smooth motion: an RTX 40 card under the bridge can turn it on");
+    Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 3080"), true, false)?.Key.StartsWith("Needs an NVIDIA") == true
+          && SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070", 56600), true, false)?.Arg == "566.00", "smooth motion: an older card or driver says why");
+    Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070"), false, false)?.Key.Contains("RTX Remix bridge") == true
+          && SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070", on: true), false, true) is null, "smooth motion: needs the bridge to turn on, never to turn off");
+    Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070", on: true), true, false)?.Key.StartsWith("Turned on outside Setup") == true,
+          "smooth motion: on in NVIDIA's profile but not by Setup (Profile Inspector) is left alone");
+    Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070", owner: "My TS3"), true, false) is { Arg: "My TS3" }, "smooth motion: an exe in the player's own profile is left alone");
+    Check(SmoothMotion.Blocked(new SmoothMotion.Status(null, 0, false, null, "no nvapi64.dll"), true, false) is { Arg: "no nvapi64.dll" }, "smooth motion: an NVAPI error reads as a reason");
     Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_NV", "NVIDIA GeForce RTX 4080|57186|1|");
-    Check(SmoothMotion.Read("TS3W.exe") is { Card: "NVIDIA GeForce RTX 4080", Driver: 57186, On: true, Owner: null }, "smooth motion: the fake stands in for the driver");
+    Check(SmoothMotion.Read() is { Card: "NVIDIA GeForce RTX 4080", Driver: 57186, On: true, Owner: null }, "smooth motion: the fake stands in for the driver");
     Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_NV", null);
     Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", "1");
-    Check(SmoothMotion.Set(true, "TS3W.exe") == "Dry run: Setup changes nothing.", "smooth motion: the dry run writes nothing");
+    Check(SmoothMotion.Set(true) == "Dry run: Setup changes nothing.", "smooth motion: the dry run writes nothing");
     Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null);
     Check(Engine.WithFpsLimitIfNone("[screen]\nfps_limit = 0\nvsync = 1\n") == ("[screen]\nfps_limit = 60\nvsync = 1\n", 0)
           && Engine.WithFpsLimitIfNone("[screen]\nfps_limit = 144\n") == ("[screen]\nfps_limit = 144\n", 144)
@@ -834,9 +836,17 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
           "frame generation: only no frame limit becomes 60 fps, a limit the player chose stays, other keys and CRLF as they were");
     Check(Engine.WithoutFpsLimit("[screen]\r\nvsync = 1\r\nfps_limit = 60\r\n") == "[screen]\r\nvsync = 1\r\n"
           && Engine.WithFpsLimit("[screen]\nfps_limit = 60\n", 0) == "[screen]\nfps_limit = 0\n", "frame generation: the frame limit's undo");
-    Check(SmoothMotion.Apps("TS3.exe").SequenceEqual(new[] { "NvRemixBridge.exe", "TS3.exe", "TS3W.exe" })
-          && SmoothMotion.Apps("TS3W.exe").SequenceEqual(new[] { "NvRemixBridge.exe", "TS3W.exe", "TS3.exe" }),
-          "smooth motion: the profile holds the bridge, this game's exe first (EA app TS3.exe or Steam TS3W.exe), and the other edition's");
+    {
+        var smMarker = SmoothMotion.Marker;
+        SmoothMotion.Marker = Path.Combine(Path.GetTempPath(), "ApexSetupTest-sm-" + Guid.NewGuid().ToString("N")[..8] + ".txt");
+        Check(SmoothMotion.Set(false) is null && !SmoothMotion.SetupTurnedOn, "smooth motion: off without Setup's record touches nothing");
+        File.WriteAllText(SmoothMotion.Marker, "on");
+        SmoothMotion.Tidy(new("NVIDIA GeForce RTX 4070", 62124, true, null, null));
+        var smKept = SmoothMotion.SetupTurnedOn;
+        SmoothMotion.Tidy(new("NVIDIA GeForce RTX 4070", 62124, false, null, null));
+        Check(smKept && !SmoothMotion.SetupTurnedOn, "smooth motion: Setup's record kept while on, dropped once it reads off");
+        SmoothMotion.Marker = smMarker;
+    }
     // AMD Fluid Motion Frames: system-wide, so maintenance turns off only what Setup turned on
     Check(Afmf.Blocked(new(true, true, false, null)) is null && Afmf.Blocked(new(true, false, false, null)) is { Key: var k } && k.StartsWith("Not available")
           && Afmf.Blocked(new(true, false, true, null)) is null && Afmf.Blocked(new(true, false, false, "ADLXInitialize 3")) is { Arg: "ADLXInitialize 3" },
@@ -871,7 +881,7 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
     Afmf.Marker = marker;
     var amd = Afmf.Read(); // read only
     Console.WriteLine($"info this PC: AMD {(amd.Present ? "driver found" : "none")}{(amd.Error is null ? "" : ", error " + amd.Error)}");
-    var nv = SmoothMotion.Read("TS3W.exe"); // read only
+    var nv = SmoothMotion.Read(); // read only
     Console.WriteLine($"info this PC: NVIDIA {nv.Card ?? "none"}, driver {SmoothMotion.DriverText(nv.Driver)}, Smooth Motion {(nv.On ? "on" : "off")}{(nv.Owner is null ? "" : ", in profile " + nv.Owner)}{(nv.Error is null ? "" : ", error " + nv.Error)}");
 }
 

@@ -271,5 +271,6 @@ public static partial class Strings
         ["no limit"] = "bez limitu",
         ["Custom"] = "Własny",
         ["Could not change Apex's frame limit: {0}"] = "Nie można zmienić limitu klatek Apex: {0}",
+        ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Włączone poza Setup, w ustawieniach sterownika NVIDIA: Setup go nie zmienia.",
     };
 }

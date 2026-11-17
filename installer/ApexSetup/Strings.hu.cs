@@ -318,5 +318,6 @@ public static partial class Strings
         ["no limit"] = "nincs korlát",
         ["Custom"] = "Egyéni",
         ["Could not change Apex's frame limit: {0}"] = "Az Apex képkockakorlátja nem módosítható: {0}",
+        ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "A Setupon kívül, az NVIDIA-illesztő beállításaiban kapcsolták be: a Setup nem nyúl hozzá.",
     };
 }

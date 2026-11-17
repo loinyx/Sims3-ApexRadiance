@@ -825,11 +825,11 @@ public sealed partial class MainWindow : Window
 
     void RefreshSmooth(State s, Game g)
     {
-        if (_smoothFor != g.Exe) { _smoothFor = g.Exe; _smooth = SmoothMotion.Read(g.Exe); _smoothError = _smoothPending; _smoothPending = null; }
+        if (_smoothFor != g.Exe) { _smoothFor = g.Exe; _smooth = SmoothMotion.Read(); _smoothError = _smoothPending; _smoothPending = null; }
         var sm = _smooth!;
         // no NVIDIA card (or no driver to ask): no row; an NVIDIA card that cannot run it: the row, off, with the reason
         SmoothCard.Visibility = sm.Card is null && sm.Error is null ? Visibility.Collapsed : Visibility.Visible;
-        var blocked = SmoothMotion.Blocked(sm, s.Layer == Layer.Bridge);
+        var blocked = SmoothMotion.Blocked(sm, s.Layer == Layer.Bridge, SmoothMotion.SetupTurnedOn);
         _fillingSmooth = true;
         SmoothToggle.IsOn = sm.On;
         SmoothToggle.IsEnabled = blocked is null;
@@ -943,8 +943,8 @@ public sealed partial class MainWindow : Window
     {
         if (_fillingSmooth || _game is not { } g || _smooth is null) return;
         // (the preview writes nothing, as the dry run)
-        _smoothError = Preview is not null ? "Dry run: Setup changes nothing." : SmoothMotion.Set(SmoothToggle.IsOn, g.Exe);
-        if (_smoothError is null) _smooth = SmoothMotion.Read(g.Exe);
+        _smoothError = Preview is not null ? "Dry run: Setup changes nothing." : SmoothMotion.Set(SmoothToggle.IsOn);
+        if (_smoothError is null) _smooth = SmoothMotion.Read();
         else App.Log(new InvalidOperationException("Smooth Motion: " + _smoothError));
         // turned on: Apex's frame limit to 60 only when there is none (a limit the player chose stays); turned off: left as it is
         if (_smoothError is null && SmoothToggle.IsOn)
@@ -1255,7 +1255,7 @@ public sealed partial class MainWindow : Window
         }
         installBar.Value = 0;
         // removing the bridge or Apex turns Setup's Smooth Motion profile off (Engine.Remove): its own row
-        var smoothOff = _smooth is { On: true } && dels.Any(Engine.TurnsFrameGenOff);
+        var smoothOff = _smooth is { On: true } && SmoothMotion.SetupTurnedOn && dels.Any(Engine.TurnsFrameGenOff);
         var rows = dels.Select(c => AddTask(host, T("Remove {0}", Name(c)))).ToList();
         if (smoothOff) rows.Add(AddTask(host, T("Turn off {0}", "NVIDIA Smooth Motion")));
         if (_afmf is { On: true } && Afmf.SetupTurnedOn && dels.Any(Engine.TurnsFrameGenOff)) rows.Add(AddTask(host, T("Turn off {0}", "AMD Fluid Motion Frames")));

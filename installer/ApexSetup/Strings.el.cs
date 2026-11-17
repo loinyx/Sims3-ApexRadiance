@@ -316,5 +316,6 @@ public static partial class Strings
         ["no limit"] = "χωρίς όριο",
         ["Custom"] = "Προσαρμοσμένο",
         ["Could not change Apex's frame limit: {0}"] = "Δεν ήταν δυνατή η αλλαγή του ορίου καρέ του Apex: {0}",
+        ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Ενεργοποιήθηκε εκτός Setup, στις ρυθμίσεις του οδηγού NVIDIA: το Setup δεν το αγγίζει.",
     };
 }

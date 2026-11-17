@@ -308,5 +308,6 @@ public static partial class Strings
         ["no limit"] = "bez limitu",
         ["Custom"] = "Vlastní",
         ["Could not change Apex's frame limit: {0}"] = "Limit snímků Apexu nelze změnit: {0}",
+        ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Zapnuto mimo Setup, v nastavení ovladače NVIDIA: Setup ho nechá být.",
     };
 }

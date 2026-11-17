@@ -302,5 +302,6 @@ public static partial class Strings
         ["no limit"] = "geen limiet",
         ["Custom"] = "Aangepast",
         ["Could not change Apex's frame limit: {0}"] = "Kan de framelimiet van Apex niet wijzigen: {0}",
+        ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Buiten Setup aangezet, in de instellingen van de NVIDIA-driver: Setup laat het zoals het is.",
     };
 }

@@ -303,5 +303,6 @@ public static partial class Strings
         ["no limit"] = "ei rajoitusta",
         ["Custom"] = "Oma",
         ["Could not change Apex's frame limit: {0}"] = "Apexin kuvarajoitusta ei voitu muuttaa: {0}",
+        ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Otettu käyttöön Setupin ulkopuolella, NVIDIA-ajurin asetuksissa: Setup jättää sen ennalleen.",
     };
 }

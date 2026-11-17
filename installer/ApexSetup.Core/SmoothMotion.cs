@@ -4,19 +4,26 @@ using System.Text.RegularExpressions;
 
 namespace ApexSetup;
 
-// NVIDIA Smooth Motion (frame generation in the driver) for The Sims 3 under the RTX Remix bridge: a driver profile holding the
-// bridge's 64-bit NvRemixBridge.exe (it presents the frames, through DXVK in Vulkan) and the game's exe, with setting 0xB0D384C0
-// = 1, written through NVAPI's driver settings (DRS) as NVIDIA Profile Inspector writes it. Nothing here throws: no nvapi64.dll,
-// no NVIDIA card or any NVAPI error reads as "not available", with the reason in Error.
+// NVIDIA Smooth Motion (frame generation in the driver) for The Sims 3 under the RTX Remix bridge: the bridge's 64-bit
+// NvRemixBridge.exe presents the frames (DXVK in Vulkan). NVIDIA ships a predefined profile "NvRemixBridge" holding that exe
+// with Smooth Motion - Enabled APIs (0xB0CC0875) = 0, which blocks it; NVIDIA Profile Inspector turns it on by editing that
+// profile. Setup does the same through NVAPI's driver settings (DRS): on the profile that holds the bridge's exe (Setup's own
+// "Apex Radiance - The Sims 3" when none does) it sets 0xB0D384C0 = 1 and 0xB0CC0875 = 7 (DX12, DX11 and Vulkan); off puts
+// NVIDIA's defaults back (or deletes Setup's profile), and only when Setup turned it on (Marker), so a player's own edit stays.
+// The game's exes are left in NVIDIA's own profiles: they do not present frames under the bridge. Nothing here throws.
 public static class SmoothMotion
 {
     public const string ProfileName = "Apex Radiance - The Sims 3";
     public const string BridgeExe = "NvRemixBridge.exe";
-    public const uint SettingId = 0xB0D384C0, MinDriver = 57186; // 571.86
+    public const uint SettingId = 0xB0D384C0, ApisId = 0xB0CC0875, AllApis = 7, MinDriver = 57186; // 571.86
 
-    // Card: the NVIDIA card's name (null: none). On: Apex's profile has the setting at 1. Owner: a profile of the player's
-    // holding one of the exes (Setup leaves it alone). Error: NVAPI could not be read.
+    // Card: the NVIDIA card's name (null: none). On: the bridge's profile has 0xB0D384C0 = 1. Owner: a profile of the player's
+    // holding the bridge's exe (Setup leaves it alone). Error: NVAPI could not be read.
     public sealed record Status(string? Card, uint Driver, bool On, string? Owner, string? Error);
+
+    // the record that Setup turned it on (a path, so tests point it elsewhere)
+    public static string Marker = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Apex Radiance Setup", "smooth-motion-on.txt");
+    public static bool SetupTurnedOn => File.Exists(Marker);
 
     // RTX 40 and 50 series (GeForce RTX 4060, RTX 5090 Laptop GPU), on a driver that has the setting
     public static bool Supported(string? card, uint driver) =>
@@ -24,12 +31,13 @@ public static class SmoothMotion
 
     public static string DriverText(uint driver) => $"{driver / 100}.{driver % 100:00}";
 
-    // why the switch cannot be turned on (an English key for the UI's T), or null; turning off Apex's own profile always works
-    public static (string Key, string Arg)? Blocked(Status s, bool bridge)
+    // why the switch cannot be used (an English key for the UI's T), or null
+    public static (string Key, string Arg)? Blocked(Status s, bool bridge, bool setupTurnedOn)
     {
         if (s.Error is not null) return ("Could not read the NVIDIA driver settings: {0}", s.Error);
-        if (s.On) return null;
         if (s.Owner is not null) return ("Already in your NVIDIA profile \"{0}\": Setup leaves it as it is.", s.Owner);
+        // on, but not by Setup (Profile Inspector): Setup does not undo it
+        if (s.On) return setupTurnedOn ? null : ("Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is.", "");
         if (!Regex.IsMatch(s.Card ?? "", @"RTX\s*(40|50)\d\d", RegexOptions.IgnoreCase)) return ("Needs an NVIDIA GeForce RTX 40 or 50 series card (found: {0}).", s.Card ?? "");
         if (s.Driver < MinDriver) return ("Needs NVIDIA driver 571.86 or newer (found: {0}).", DriverText(s.Driver));
         // shortcut: DXVK on TS3W.exe is Vulkan too but untested with Smooth Motion; allow it once seen working in game
@@ -37,17 +45,21 @@ public static class SmoothMotion
         return null;
     }
 
-    // the bridge, this game's exe, then the other edition's (Steam TS3W.exe, EA app TS3.exe): one profile serves every copy of
-    // the game on the PC, and turning it on for one never drops the other's entry. Only the first two can block (Owner).
     // no NVIDIA driver (no nvapi64.dll, or a leftover one without the export, or NVAPI_NVIDIA_DEVICE_NOT_FOUND): no card, no row;
     // anything else on an NVIDIA PC is an error shown on the row
     public static Status Failed(Exception e) => e is DllNotFoundException or EntryPointNotFoundException
         ? new(null, 0, false, null, null) : new(null, 0, false, null, e.Message);
     public static bool NoCard(int initResult) => initResult == -6;
 
-    public static string[] Apps(string gameExe) => new[] { BridgeExe, gameExe }.Concat(new[] { "TS3W.exe", "TS3.exe" }.Where(e => !e.Equals(gameExe, StringComparison.OrdinalIgnoreCase))).ToArray();
+    // a record left while Smooth Motion reads off (a driver reinstall, the player's own change): dropped
+    public static Status Tidy(Status s)
+    {
+        if (s is { Card: not null, Error: null, On: false } && File.Exists(Marker))
+            try { File.Delete(Marker); } catch (Exception x) when (x is IOException or UnauthorizedAccessException) { }
+        return s;
+    }
 
-    public static Status Read(string gameExe)
+    public static Status Read()
     {
         // test runs: APEX_SETUP_FAKE_NV = "<card>|<driver, 57186>|<on, 0 or 1>|<owner profile>" stands in for the driver
         if (Environment.GetEnvironmentVariable("APEX_SETUP_FAKE_NV") is { Length: > 0 } fake)
@@ -56,17 +68,29 @@ public static class SmoothMotion
             return new(p[0].Length > 0 ? p[0] : null, p.Length > 1 && uint.TryParse(p[1], out var d) ? d : 0,
                        p.Length > 2 && p[2] == "1", p.Length > 3 && p[3].Length > 0 ? p[3] : null, null);
         }
-        try { return Nv.Read(Apps(gameExe)); }
+        try { return Tidy(Nv.Read()); }
         catch (Exception e) { return Failed(e); }
     }
 
-    // null when done, else why not; the dry run and the fake write nothing
-    public static string? Set(bool on, string gameExe)
+    // null when done, else why not; the dry run and the fake write nothing. Off touches only what Setup turned on.
+    public static string? Set(bool on)
     {
         if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1" || Environment.GetEnvironmentVariable("APEX_SETUP_FAKE_NV") is { Length: > 0 })
             return "Dry run: Setup changes nothing.";
-        try { Nv.Set(on, Apps(gameExe)); return null; }
-        catch (Exception e) { return e.Message; }
+        if (!on && !SetupTurnedOn) return null;
+        try
+        {
+            // the record first: a crash after the driver call still lets maintenance turn it off
+            if (on) { Directory.CreateDirectory(Path.GetDirectoryName(Marker)!); File.WriteAllText(Marker, "on"); }
+            Nv.Set(on);
+            if (!on) File.Delete(Marker);
+            return null;
+        }
+        catch (Exception e)
+        {
+            if (on) try { File.Delete(Marker); } catch (Exception x) when (x is IOException or UnauthorizedAccessException) { }
+            return e.Message;
+        }
     }
 
     // NVAPI through nvapi_QueryInterface, with the IDs and struct versions of the public nvapi.h (R570). Strings are
@@ -78,7 +102,7 @@ public static class SmoothMotion
         const int AppSize = 8 + 3 * Str;                      // NVDRS_APPLICATION_V1: version, isPredefined, appName, userFriendlyName, launcher
         const int SettingSize = 4 + Str + 20 + 2 * 4100;      // NVDRS_SETTING_V1: version, settingName, id, type, location, isCurrentPredefined, isPredefinedValid, 2 value unions
         const int SettingIdAt = 4 + Str, SettingCurrentAt = 4 + Str + 20 + 4100;
-        const int ProfileNotFound = -163, ExeNotFound = -166, SettingNotFound = -160;
+        const int ExeNotFound = -166, SettingNotFound = -160;
 
         [DllImport("nvapi64.dll", EntryPoint = "nvapi_QueryInterface", CallingConvention = CallingConvention.Cdecl)]
         static extern nint Query(uint id);
@@ -122,22 +146,10 @@ public static class SmoothMotion
             finally { ((delegate* unmanaged[Cdecl]<nint, int>)F(0xDAD9CFF8))(h); }
         }
 
-        static nint FindProfile(nint s, string name)
+        // the profile holding the bridge's exe: (handle, name, predefined by NVIDIA), or null
+        static (nint Handle, string Name, bool Predefined)? BridgeProfile(nint s)
         {
-            nint p; var n = Name(name);
-            fixed (byte* np = n)
-            {
-                var r = ((delegate* unmanaged[Cdecl]<nint, byte*, nint*, int>)F(0x7E4A9A0B))(s, np, &p);
-                if (r == ProfileNotFound) return 0;
-                Ok(r, "DRS_FindProfileByName");
-            }
-            return p;
-        }
-
-        // the profile holding an exe: (name, predefined by NVIDIA), or null
-        static (string Name, bool Predefined)? OwnerOf(nint s, string exe)
-        {
-            nint p; var n = Name(exe); var app = Versioned(AppSize);
+            nint p; var n = Name(BridgeExe); var app = Versioned(AppSize);
             fixed (byte* np = n, ap = app)
             {
                 var r = ((delegate* unmanaged[Cdecl]<nint, byte*, nint*, byte*, int>)F(0xEEE566B2))(s, np, &p, ap);
@@ -146,8 +158,11 @@ public static class SmoothMotion
             }
             var info = Versioned(ProfileSize);
             fixed (byte* ip = info) Ok(((delegate* unmanaged[Cdecl]<nint, nint, byte*, int>)F(0x61CD6FD6))(s, p, ip), "DRS_GetProfileInfo");
-            return (NameAt(info, 4), BitConverter.ToUInt32(info, 4 + Str + 4) != 0);
+            return (p, NameAt(info, 4), BitConverter.ToUInt32(info, 4 + Str + 4) != 0);
         }
+
+        // a profile the player made: neither NVIDIA's predefined one nor Setup's
+        static bool Players((nint Handle, string Name, bool Predefined) b) => !b.Predefined && b.Name != ProfileName;
 
         static bool SettingOn(nint s, nint p)
         {
@@ -161,52 +176,61 @@ public static class SmoothMotion
             return BitConverter.ToUInt32(set, SettingCurrentAt) == 1;
         }
 
-        // a profile of the player's (not Apex's, not NVIDIA's predefined one) holding an exe
-        static string? PlayerOwner(nint s, string[] apps) =>
-            apps.Take(2).Select(a => OwnerOf(s, a)).FirstOrDefault(o => o is { Predefined: false } x && x.Name != ProfileName)?.Name;
+        static void SetDword(nint s, (nint Handle, string Name, bool Predefined) b, uint id, uint value)
+        {
+            var set = Versioned(SettingSize);
+            BitConverter.TryWriteBytes(set.AsSpan(SettingIdAt), id);              // settingType 0: NVDRS_DWORD_TYPE; location, predefined: 0
+            BitConverter.TryWriteBytes(set.AsSpan(SettingCurrentAt), value);
+            fixed (byte* sp = set)
+                Ok(((delegate* unmanaged[Cdecl]<nint, nint, byte*, int>)F(0x577DD202))(s, b.Handle, sp),
+                   $"DRS_SetSetting 0x{id:X8} = {value} on \"{b.Name}\"{(b.Predefined ? " (NVIDIA's)" : "")}");
+        }
 
-        public static Status Read(string[] apps)
+        public static Status Read()
         {
             if (InitCode() is var ir && NoCard(ir)) return new(null, 0, false, null, null);
             Ok(ir, "NvAPI_Initialize");
             var (card, driver) = Card();
             if (card is null) return new(null, driver, false, null, null);
-            return Session(s => FindProfile(s, ProfileName) is var p && p != 0
-                ? new Status(card, driver, SettingOn(s, p), PlayerOwner(s, apps), null)
-                : new Status(card, driver, false, PlayerOwner(s, apps), null));
+            return Session(s => BridgeProfile(s) is { } b
+                ? new Status(card, driver, SettingOn(s, b.Handle), Players(b) ? b.Name : null, null)
+                : new Status(card, driver, false, null, null));
         }
 
-        public static void Set(bool on, string[] apps)
+        public static void Set(bool on)
         {
             Init();
             Session(s =>
             {
-                var p = FindProfile(s, ProfileName);
+                var b = BridgeProfile(s);
+                if (b is { } own && Players(own)) throw new InvalidOperationException($"Already in the profile \"{own.Name}\"");
                 if (!on)
                 {
-                    if (p != 0) Ok(((delegate* unmanaged[Cdecl]<nint, nint, int>)F(0x17093206))(s, p), "DRS_DeleteProfile");
+                    if (b is not { } t) return 0;
+                    if (!t.Predefined) Ok(((delegate* unmanaged[Cdecl]<nint, nint, int>)F(0x17093206))(s, t.Handle), "DRS_DeleteProfile");
+                    else
+                        foreach (var id in new[] { SettingId, ApisId })
+                        {
+                            // NVAPI_DRS_RestoreProfileDefaultSetting: NVIDIA's value back (a setting it never had is removed)
+                            var r = ((delegate* unmanaged[Cdecl]<nint, nint, uint, int>)F(0x53F0381E))(s, t.Handle, id);
+                            if (r != SettingNotFound) Ok(r, $"DRS_RestoreProfileDefaultSetting 0x{id:X8} on \"{t.Name}\"");
+                        }
                 }
                 else
                 {
-                    if (PlayerOwner(s, apps) is { } owner) throw new InvalidOperationException($"Already in the profile \"{owner}\"");
-                    if (p == 0)
+                    if (b is null)
                     {
+                        nint p;
                         var prof = Versioned(ProfileSize);
                         Encoding.Unicode.GetBytes(ProfileName, 0, ProfileName.Length, prof, 4);
                         fixed (byte* pp = prof) Ok(((delegate* unmanaged[Cdecl]<nint, byte*, nint*, int>)F(0xCC176068))(s, pp, &p), "DRS_CreateProfile");
-                    }
-                    foreach (var exe in apps)
-                    {
-                        // an exe in NVIDIA's own profile (the game's predefined one) stays there; the bridge's exe is the one that counts
-                        if (OwnerOf(s, exe) is not null) continue;
                         var app = Versioned(AppSize);
-                        Encoding.Unicode.GetBytes(exe, 0, exe.Length, app, 8);
+                        Encoding.Unicode.GetBytes(BridgeExe, 0, BridgeExe.Length, app, 8);
                         fixed (byte* ap = app) Ok(((delegate* unmanaged[Cdecl]<nint, nint, byte*, int>)F(0x4347A9DE))(s, p, ap), "DRS_CreateApplication");
+                        b = (p, ProfileName, false);
                     }
-                    var set = Versioned(SettingSize);
-                    BitConverter.TryWriteBytes(set.AsSpan(SettingIdAt), SettingId);          // settingType 0: NVDRS_DWORD_TYPE
-                    BitConverter.TryWriteBytes(set.AsSpan(SettingCurrentAt), 1u);
-                    fixed (byte* sp = set) Ok(((delegate* unmanaged[Cdecl]<nint, nint, byte*, int>)F(0x577DD202))(s, p, sp), "DRS_SetSetting");
+                    SetDword(s, b.Value, SettingId, 1);
+                    SetDword(s, b.Value, ApisId, AllApis);
                 }
                 Ok(((delegate* unmanaged[Cdecl]<nint, int>)F(0xFCBC7E14))(s), "DRS_SaveSettings");
                 return 0;

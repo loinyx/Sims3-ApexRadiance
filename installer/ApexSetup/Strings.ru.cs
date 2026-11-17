@@ -301,5 +301,6 @@ public static partial class Strings
         ["no limit"] = "без ограничения",
         ["Custom"] = "Свой",
         ["Could not change Apex's frame limit: {0}"] = "Не удалось изменить ограничение кадров Apex: {0}",
+        ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Включено не через Setup, в настройках драйвера NVIDIA: Setup его не трогает.",
     };
 }

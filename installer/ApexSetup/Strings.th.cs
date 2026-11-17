@@ -271,5 +271,6 @@ public static partial class Strings
         ["no limit"] = "ไม่จำกัด",
         ["Custom"] = "กำหนดเอง",
         ["Could not change Apex's frame limit: {0}"] = "เปลี่ยนขีดจำกัดเฟรมของ Apex ไม่ได้: {0}",
+        ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "เปิดไว้นอก Setup ในการตั้งค่าไดรเวอร์ NVIDIA: Setup จะไม่แตะต้อง",
     };
 }

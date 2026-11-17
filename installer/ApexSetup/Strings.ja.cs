@@ -305,5 +305,6 @@ public static partial class Strings
         ["no limit"] = "制限なし",
         ["Custom"] = "カスタム",
         ["Could not change Apex's frame limit: {0}"] = "Apex のフレーム制限を変更できませんでした: {0}",
+        ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Setup 以外で NVIDIA ドライバーの設定からオンにされています: Setup は変更しません。",
     };
 }
