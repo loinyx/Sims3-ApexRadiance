@@ -1,7 +1,8 @@
 param([string[]]$TestArgs = @(), [string]$OutDir = (Join-Path $env:TEMP 'ApexGiServerTest'), [switch]$Pixel, [switch]$Rebake)
 # The server tier's texel solve, offline on a Vulkan device (check.cpp, solve.comp). Read-only: prints to stdout; the
 # compiler's outputs and the three build inputs below stay in -OutDir. -TestArgs: passed on (--no-rays, --device <text>,
-# --density <n>, --rays <n>). -Pixel: the per-pixel delta shadow kernel instead (pixel_check.cpp, pixel_shadow.comp;
+# --density <n>, --rays <n>, --pathref <samples>, --dump <file>: the one file it writes, for the bridge's test-gi.cmd).
+# -Pixel: the per-pixel delta shadow kernel instead (pixel_check.cpp, pixel_shadow.comp;
 # -TestArgs --device <text>, --size <w> <h>). -Rebake: the re-bake cost against lamp count instead (rebake_check.cpp;
 # -TestArgs --lots 60,120,200, --density <n>, --rays <n>, --no-cpu, --no-gpu).
 # Build inputs, fetched once at pinned versions when -OutDir does not hold them (no installed Vulkan SDK is needed; the
