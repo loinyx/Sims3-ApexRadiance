@@ -6,6 +6,8 @@ maintainers handed it over to Apex Radiance. Findings, numbers and next steps: `
 
 - `build.cmd` fetches the pinned upstream commit into `src\`, applies `patches\` in order and builds `out\d3d9.dll`
   (x86 client) and `out\.trex\NvRemixBridge.exe` (x64 server). Needs git, VS 2022 C++ build tools and meson + ninja.
+  It applies `patches\` only when it clones `src\` and skips that step when `src\.git` exists: after pulling a head that
+  changes `patches\`, run `rmdir /s /q src` here before `build.cmd`, or the old patches stay in.
 - `conf\`: `bridge.conf` (next to `d3d9.dll` and in `.trex`) and `dxvk.conf` (in Bin; it repeats DXVK's TS3W profile,
   without which the game resets Options.ini).
 
