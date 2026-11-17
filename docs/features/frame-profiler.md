@@ -370,6 +370,17 @@ none.
 - **State-call counts:** SetTexture, Set{Vertex,Pixel}Shader, Set{Vertex,Pixel}ShaderConstantF and SetRenderTarget are
   counted in the registry's detours with plain per-method counters (`D3D9Hooks::ReadStateCallCounts`, monotonic;
   `FrameBoundary` takes the difference). Calls Apex makes with `CallOriginal*` bypass the detours and are not counted.
+- **Shader constant registers** (developer mode, real-time GI S0-14,
+  [`framework/const_range_histogram.h`](../../framework/const_range_histogram.h)): the two Set*ShaderConstantF detours
+  also note `[start, start + count)` of each call with its return address, before any callback, without changing it.
+  A new calling site is classed once as the game's exe, Apex or another module. Kept: the registers each owner wrote
+  (a difference array), the highest register per owner over the session and per frame, and per site (256 at most) the
+  calls, lowest and highest register, writes into the reserved frame-block registers (pixel `c208`-`c223`, vertex
+  `c228`-`c251`, research 13) by any module other than Apex, and calls past the last register. Counted whether or not
+  the profiler runs. Log: `[ConstRange] Reserved register written: PS c210-c211 by <module>+0x... (other), 1 of its 1
+  calls` (warning, once a site) and `[ConstRange] PS: highest written game c24 Apex c223 other none, reserved c208-c223
+  written by others 0 times; VS: ...` after a new site or a new highest register, at most every 600 frames. Offline
+  check: `tools/const_range_check/run.ps1`; game check: the in-game runner's `const-range-smoke` job.
 - **Off-thread dispatches:** the draw and state chains run without a lock on the render thread; a call from another thread
   takes the registry lock and is counted (`D3D9Hooks::OffThreadDispatches()`; Advanced line "Draw / state hooks called
   from another thread than the render thread", report line "Draw / state hooks called off the render thread"). A
@@ -483,7 +494,8 @@ joinable `std::thread` would `std::terminate` at exit), appending in binary mode
    200 hitches, keyed session tables (services / jobs / waits: ms per hitch vs per other frame), sim-loop services, the
    sampling tables, "Counters since Clear", "Counters per hitch", "Apex shaders: ..." (the
    [shader precompile](../architecture.md#44-shader-precompile) status), "Registry hooks by name (last second; ...)", "Draw /
-   state hooks called off the render thread", the address-space snapshots, the performance features' status lines
+   state hooks called off the render thread", "Shader constant registers written" (per owner: the registers written and the
+   highest a frame; then one row per calling site), the address-space snapshots, the performance features' status lines
    ([Performance](performance/README.md)) and "Dominant cause of the last hitches" (per camera state and frame-time
    bucket < 16 / 16-25 / 25-50 / >= 50 ms, foreground only). With the profiler off the report is written by a detached
    one-shot thread.

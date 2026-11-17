@@ -208,6 +208,9 @@ struct StateCallCounts {
 StateCallCounts ReadStateCallCounts();
 // Dispatches of the lock-free chains that came from a thread other than the render thread (they took the lock).
 uint32_t OffThreadDispatches();
+// Developer mode: the registers the device's Set*ShaderConstantF calls wrote, by owner and calling site
+// (const_range_histogram.h); empty before the first call. For the frame profiler report.
+std::string ConstantRangeReport();
 
 // ---- diagnostic trace (the no-scene frame trace, features/no_scene_trace.cpp) ----
 // Called with the values passed on towards the driver, whoever set them (the game, other modules, Apex's CallOriginal*),
