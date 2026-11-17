@@ -336,5 +336,14 @@ $overlaySrc = Get-Content -Raw (Join-Path $PSScriptRoot '../../framework/overlay
 Check ($overlaySrc -match $replayOnly -and $overlaySrc -match $postsPrivate) 'held mouse messages are replayed as a private message by number'
 Check (-not ("bool Replay(HWND hwnd, UINT msg) {`n    if (!IsMouseMessage(msg)) return false;" -match $replayOnly)) 'the replay check fails a Replay that matches mouse messages by value'
 Check (-not ("void ReleaseHeldLocked() {`n    PostMessageW(h.hwnd, h.msg, h.wp, h.lp);`n}" -match $postsPrivate)) 'the replay check fails a release that posts the held message itself'
+# Clicks aim in physical pixels as the DPI-aware game window: run.ps1's Resolve-StepPoint turns this thread per-monitor aware
+# (V2) before it reads the client size, and that call does give a per-monitor aware thread
+$dpiFirst = '(?s)function Resolve-StepPoint\([^)]*\)\s*\{(\s*#[^\n]*)*\s*\$null = \[ApexIngame\.Keys\]::SetThreadDpiAwarenessContext\(\[IntPtr\]\(-4\)\)[^\n]*\s*\$r = New-Object [^\n]*GetClientRect'
+Check ((Get-Content -Raw (Join-Path $PSScriptRoot 'run.ps1')) -match $dpiFirst) 'click points read the client size per-monitor DPI aware'
+Check (-not ("function Resolve-StepPoint(`$Step, [IntPtr]`$H) {`n    `$r = New-Object 'int[]' 4; `$null = [ApexIngame.Keys]::GetClientRect(`$H, `$r)" -match $dpiFirst)) 'the DPI check fails a Resolve-StepPoint without the awareness call'
+Add-Type -Namespace SelfTest -Name Dpi -MemberDefinition '[DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr c); [DllImport("user32.dll")] public static extern IntPtr GetThreadDpiAwarenessContext(); [DllImport("user32.dll")] public static extern int GetAwarenessFromDpiAwarenessContext(IntPtr c);'
+$oldDpi = [SelfTest.Dpi]::SetThreadDpiAwarenessContext([IntPtr](-4))
+Check ([SelfTest.Dpi]::GetAwarenessFromDpiAwarenessContext([SelfTest.Dpi]::GetThreadDpiAwarenessContext()) -eq 2) 'SetThreadDpiAwarenessContext(PER_MONITOR_AWARE_V2) makes the thread per-monitor aware'
+if ($oldDpi -ne [IntPtr]::Zero) { $null = [SelfTest.Dpi]::SetThreadDpiAwarenessContext($oldDpi) }
 Write-Output "$($script:checks) checks, $($script:failures) failures"
 if ($script:failures) { exit 1 }

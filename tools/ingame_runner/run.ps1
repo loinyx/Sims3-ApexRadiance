@@ -113,7 +113,7 @@ $loaders = @('wininet.dll', 'dinput8.dll', 'version.dll', 'winmm.dll', 'dsound.d
 if (-not $AsiLoader -and -not $loaders) { Say 'warning: no ASI loader found in Bin (for example Ultimate ASI Loader as wininet.dll); pass -AsiLoader' }
 
 Add-Type -Path (Join-Path $PSScriptRoot 'MailboxClient.cs')
-Add-Type -Namespace ApexIngame -Name Keys -MemberDefinition '[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l); [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, int[] r);'
+Add-Type -Namespace ApexIngame -Name Keys -MemberDefinition '[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l); [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, int[] r); [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr c);'
 Add-Type -Namespace ApexIngame -Name SystemTimes -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool GetSystemTimes(out long idle, out long kernel, out long user);'
 $runId = Get-Date -Format 'yyMMdd-HHmmss' # in the runner's save names, so no run meets another run's saves
 if (-not $OutDir) { $OutDir = Join-Path $stateDir "20$runId" }
@@ -131,6 +131,8 @@ $script:lastTarget = $null # the last screenpos reply a mouse_move or click aime
 # A step's client point: `target` (agent screenpos arguments: sim, object or at, dx/dy/dz, focus) or x,y (pixels) or
 # xf,yf (fractions of the client area, default centre)
 function Resolve-StepPoint($Step, [IntPtr]$H) {
+    # The game runs DPI-aware (bridge client.enableDpiAwareness): physical pixels here too, or a scaled desktop (150 %) scales the client size and the clicks miss
+    $null = [ApexIngame.Keys]::SetThreadDpiAwarenessContext([IntPtr](-4)) # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, this thread
     $r = New-Object 'int[]' 4; $null = [ApexIngame.Keys]::GetClientRect($H, $r)
     if ($Step.target) {
         $a = @{}; foreach ($p in $Step.target.PSObject.Properties) { $a[$p.Name] = $p.Value }
