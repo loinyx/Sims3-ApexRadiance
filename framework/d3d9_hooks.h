@@ -153,6 +153,11 @@ using RenderTargetSubstitute = IDirect3DSurface9* (*)(DWORD index, IDirect3DSurf
 void SetRenderTargetSubstitute(RenderTargetSubstitute fn);
 void BeginReissue();
 void EndReissue();
+bool Reissuing(); // this thread is inside a ReissueScope
+// Render thread: the pixel shader the last SetPixelShader call through the device asked for, before any callback changed
+// it (not followed through CallOriginalSetPixelShader). In a re-issued draw it is the game's shader that the
+// replacement bound for the draw was made from. An identity only, no reference.
+IDirect3DPixelShader9* CallerPixelShader();
 struct ReissueScope {
     ReissueScope() { BeginReissue(); }
     ~ReissueScope() { EndReissue(); }

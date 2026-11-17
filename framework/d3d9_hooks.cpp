@@ -607,6 +607,7 @@ IDirect3DDevice9* g_boundDev = nullptr;
 IDirect3DPixelShader9* g_boundPs = nullptr;
 IDirect3DVertexShader9* g_boundVs = nullptr;
 bool g_boundPsKnown = false, g_boundVsKnown = false;
+IDirect3DPixelShader9* g_callerPs = nullptr; // the last shader a caller passed to SetPixelShader (render thread)
 // (2.15.3) the textures of pixel samplers 0..15 (BoundTexture), on the same terms; bit s of g_boundTexKnown = s is known
 IDirect3DBaseTexture9* g_boundTex[16] = {};
 uint32_t g_boundTexKnown = 0;
@@ -665,6 +666,7 @@ HRESULT STDMETHODCALLTYPE H_SetRenderTarget(IDirect3DDevice9* d, DWORD i, IDirec
 }
 HRESULT STDMETHODCALLTYPE H_SetPixelShader(IDirect3DDevice9* d, IDirect3DPixelShader9* s) {
     CountCall(kCallSetPS);
+    if (OnRenderThread()) g_callerPs = s; // before the callbacks: what the caller asked for (CallerPixelShader)
     HRESULT hr = S_OK;
     if (!Run(g_sps, d, hr, s)) return hr; // (a callback that skipped it and set one itself did so through CallOriginal*: followed there)
     hr = o_sps(d, s);
@@ -854,6 +856,8 @@ void ObserveReissuedDraws(const std::string& name) {
 
 void SetRenderTargetSubstitute(RenderTargetSubstitute fn) { g_rtSubstitute.store(fn); }
 
+bool Reissuing() { return t_reissue != 0; }
+IDirect3DPixelShader9* CallerPixelShader() { return g_callerPs; }
 void BeginReissue() { ++t_reissue; }
 void EndReissue() { --t_reissue; }
 

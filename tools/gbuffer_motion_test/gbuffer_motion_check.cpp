@@ -3,11 +3,15 @@
 // coordinates near (927, 70, 1200): a still camera gives zero motion, a pan / dolly gives the previous NDC of every
 // test point (in double, and with D rounded to float as the shader gets it), a cut and a point behind the last camera
 // are flagged. The pass's HLSL (taken from gbuffer_patch.cpp by run.ps1) must compile to ps_3_0.
+// GB-04: ViewRows gives the camera's axes (Ambient Occlusion's world -> view rotation of G-buffer normals), row 3 of D
+// gives the previous / current depth ratio of every test point (the temporal depth test), and Ambient Occlusion's
+// HLSL (GtaoPS with the G-buffer normal, TemporalPS) compiles to ps_3_0.
 #include "gbuffer_motion.h"
 #include <d3dcompiler.h>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <initializer_list>
 #include <sstream>
 #include <string>
 
@@ -53,6 +57,27 @@ bool Project(const float vp[4][4], const double p[3], double ndc[3]) {
     return true;
 }
 
+// The largest relative error of q.w = dot(D row 3, (ndc, d, 1)) in float against previous depth / current depth
+double MaxDepthRatioError(const float cur[4][4], const float prev[4][4], int* tested) {
+    double D[4][4];
+    if (!GBufferMotion::Reproject(cur, prev, D)) return 1e9;
+    double worst = 0;
+    *tested = 0;
+    for (int i = -6; i <= 6; i++)
+        for (int k = 1; k <= 8; k++) {
+            const double w[3] = {927.0 + i * 1.7, 70.0, 1200.0 + k * k * 1.9};
+            double a[3];
+            if (!Project(cur, w, a) || std::fabs(a[0]) > 1 || std::fabs(a[1]) > 1 || a[2] < 0 || a[2] > 1) continue;
+            double zc = 0, zp = 0;
+            for (int j = 0; j < 3; j++) zc += cur[3][j] * w[j], zp += prev[3][j] * w[j];
+            zc += cur[3][3], zp += prev[3][3];
+            const float qw = float(D[3][0]) * float(a[0]) + float(D[3][1]) * float(a[1]) + float(D[3][2]) * float(a[2]) + float(D[3][3]);
+            worst = std::fmax(worst, std::fabs(qw / (zp / zc) - 1.0));
+            ++*tested;
+        }
+    return worst;
+}
+
 // The largest error, in pixels of a 3840-wide screen, of the reprojected previous NDC over a grid of world points seen
 // by cur; float D = the shader's arithmetic (D rounded to float, float products)
 double MaxErrorPx(const float cur[4][4], const float prev[4][4], bool floatD, int* tested) {
@@ -82,17 +107,17 @@ double MaxErrorPx(const float cur[4][4], const float prev[4][4], bool floatD, in
     return worst;
 }
 
-bool CompileHlsl(const char* path) {
+bool CompileHlsl(const char* path, std::initializer_list<const char*> entries) {
     std::ifstream f(path, std::ios::binary);
     if (!f) { std::printf("FAIL: %s not found\n", path); return false; }
     std::stringstream ss;
     ss << f.rdbuf();
     const std::string src = ss.str();
     bool ok = true;
-    for (const char* entry : {"MotionPS", "ViewPS"}) {
+    for (const char* entry : entries) {
         ID3DBlob* code = nullptr;
         ID3DBlob* err = nullptr;
-        const HRESULT hr = D3DCompile(src.data(), src.size(), "gbuffer.hlsl", nullptr, nullptr, entry, "ps_3_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &code, &err);
+        const HRESULT hr = D3DCompile(src.data(), src.size(), path, nullptr, nullptr, entry, "ps_3_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &code, &err);
         if (FAILED(hr)) std::printf("FAIL: %s: %s\n", entry, err ? static_cast<const char*>(err->GetBufferPointer()) : "?");
         else std::printf("%s compiles: %zu bytes\n", entry, code->GetBufferSize());
         ok &= SUCCEEDED(hr);
@@ -143,7 +168,31 @@ int main(int argc, char** argv) {
     Check(!GBufferMotion::Reproject(singular, still, D), "singular camera rejected");
     Check(GBufferMotion::kInvalid > GBufferMotion::kInvalidAbove && GBufferMotion::kInvalid == float(32768), "invalid value above the threshold");
 
-    if (argc > 1) Check(CompileHlsl(argv[1]), "pass HLSL compiles to ps_3_0");
+    // ViewRows: the camera's right, up and forward axes (the Camera() above builds them from yaw and pitch)
+    {
+        const double yaw = 0.10, pitch = -0.35;
+        const double fz[3] = {std::sin(yaw) * std::cos(pitch), std::sin(pitch), std::cos(yaw) * std::cos(pitch)};
+        double rx[3] = {fz[2], 0, -fz[0]};
+        const double rl = std::hypot(rx[0], rx[2]);
+        rx[0] /= rl, rx[2] /= rl;
+        const double uy[3] = {fz[1] * rx[2] - fz[2] * rx[1], fz[2] * rx[0] - fz[0] * rx[2], fz[0] * rx[1] - fz[1] * rx[0]};
+        const double* axes[3] = {rx, uy, fz};
+        float rows[3][3];
+        double e = 0;
+        Check(GBufferMotion::ViewRows(still, rows), "ViewRows exists");
+        for (int r = 0; r < 3; r++)
+            for (int k = 0; k < 3; k++) e = std::fmax(e, std::fabs(rows[r][k] - axes[r][k]));
+        std::printf("ViewRows: max %.3g from the camera axes\n", e);
+        Check(e < 1e-5, "ViewRows: rows are the camera's right, up and forward axes");
+        Check(!GBufferMotion::ViewRows(singular, rows), "ViewRows: degenerate camera rejected");
+    }
+    for (const auto& [name, prev] : {std::pair{"still", still}, std::pair{"pan", pan}, std::pair{"dolly", dolly}}) {
+        const double e = MaxDepthRatioError(still, prev, &n);
+        std::printf("%s: depth ratio from D row 3 (float) max relative error %.3g over %d points\n", name, e, n);
+        Check(n > 20 && e < 1e-4, "D row 3 gives previous / current depth");
+    }
+    if (argc > 1) Check(CompileHlsl(argv[1], {"MotionPS", "ViewPS"}), "pass HLSL compiles to ps_3_0");
+    if (argc > 2) Check(CompileHlsl(argv[2], {"GtaoPS", "TemporalPS", "CompositePS"}), "Ambient Occlusion HLSL compiles to ps_3_0");
     std::printf("%d passed, %d failed\n%s\n", g_pass, g_fail, g_fail ? "PROBLEMS" : "OK");
     return g_fail ? 1 : 0;
 }

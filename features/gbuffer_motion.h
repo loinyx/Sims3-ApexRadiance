@@ -76,4 +76,36 @@ inline bool IsCut(const double D[4][4]) {
     return std::hypot(prev[0], prev[1]) > kCutNdc;
 }
 
+// The world-to-view rotation of a view-projection, one unit row per view axis: x right, y up (rows 0 and 1 over their
+// length), z forward (row 3: clip.w is the view depth). The frame of Ambient Occlusion's view positions. Exact for a
+// centred projection (no jitter, no off-centre window); false when a row is degenerate.
+inline bool ViewRows(const float vp[4][4], float rows[3][3]) {
+    const int src[3] = {0, 1, 3};
+    for (int i = 0; i < 3; i++) {
+        const double l = std::sqrt(double(vp[src[i]][0]) * vp[src[i]][0] + double(vp[src[i]][1]) * vp[src[i]][1] + double(vp[src[i]][2]) * vp[src[i]][2]);
+        if (l < 1e-6) return false;
+        for (int k = 0; k < 3; k++) rows[i][k] = static_cast<float>(vp[src[i]][k] / l);
+    }
+    return true;
+}
+
+// Row 3 of D gives q.w = dot(row, (x, y, d, 1)) = previous view depth / this frame's view depth of the pixel's point:
+// a history pixel of the same surface has 1/z_prev = (1/z) / q.w (the temporal depth test).
+
 } // namespace GBufferMotion
+
+// This frame's G-buffer for its consumers (patches/gbuffer_patch.cpp, developer builds; Ambient Occlusion's G-buffer
+// normals and temporal filter). Null / false when the G-buffer is off or was not written this frame.
+struct IDirect3DTexture9;
+namespace GBuffer {
+#ifndef APEX_NO_DEV_TOOLS
+// render target 1 (albedo + material id, A8R8G8B8) and 2 (octahedral normal, roughness, motion class / 3, A2B10G10R10)
+bool Targets(IDirect3DTexture9* out[2]);
+// the camera motion target (G16R16F, mv = current NDC - previous NDC, kInvalid when there is no history) and row 3 of
+// its D; null when the motion pass did not run this frame
+IDirect3DTexture9* Motion(float dRow3[4]);
+#else
+inline bool Targets(IDirect3DTexture9*[2]) { return false; }
+inline IDirect3DTexture9* Motion(float[4]) { return nullptr; }
+#endif
+} // namespace GBuffer

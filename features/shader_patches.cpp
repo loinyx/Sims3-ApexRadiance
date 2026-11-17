@@ -4513,6 +4513,111 @@ DitherResult AddDither(std::vector<DWORD>& t, int* amountConst) {
     return DitherResult::Ok;
 }
 
+GBufferResult AddGBufferPs(std::vector<DWORD>& t, const GBufferInfo& info, GBufferMade* made) {
+    const bool ps2 = !t.empty() && (t[0] == 0xFFFF0200 || t[0] == 0xFFFF0201);
+    if (t.empty() || (t[0] != 0xFFFF0300 && !ps2)) return GBufferResult::NotPs30;
+    if (t.back() != 0x0000FFFFu) return GBufferResult::Unreadable;
+    const auto ins = Parse(t);
+    if (ins.empty()) return GBufferResult::Unreadable;
+    constexpr DWORD kCall = 0x19, kCallnz = 0x1A, kRet = 0x1C, kLabel = 0x1E, kDepthOut = 9, kRelative = 0x2000u;
+    constexpr DWORD kAbs = 0x23, kCmp = 0x58, kTexldl = 0x5F, kTexldd = 0x5D;
+    // the one read of each sampler, outside flow control: -1 none yet, -2 unusable
+    int albedoAt = -1, probeAt = -1, depth = 0;
+    int ruleAt = -1, ordinal = 0; // the family rule's instruction (counted without dcl / def), outside flow control
+    bool albedoInBranch = false; // read inside flow control: the pixels of the other paths keep the unknown id
+    size_t first = 0;            // the first instruction after the dcl / def block
+    for (size_t i = 0; i < ins.size(); i++) {
+        const Ins& x = ins[i];
+        if (x.op == kCall || x.op == kCallnz || x.op == kRet || x.op == kLabel) return GBufferResult::Subroutines;
+        if (x.op == kDcl || x.op == kDef || x.op == kDefI || x.op == kDefB) continue;
+        if (!first) first = x.at;
+        if (x.op == 0x1B || x.op == 0x26 || x.op == 0x28 || x.op == 0x29) depth++;  // loop, rep, if, ifc
+        else if (x.op == 0x1D || x.op == 0x27 || x.op == 0x2B) depth--;             // endloop, endrep, endif
+        if (ordinal++ == info.albedoAt && info.albedoSampler < 0 && depth == 0 && !IsFlow(x.op) && x.len >= 2) {
+            const DWORD d = t[x.at + 1];
+            const bool copy = info.albedoReg == 255 && (WMask(d) & 0x7) == 0x7 && ((Type(d) == kColorOut && Num(d) == 0) || Type(d) == kTemp);
+            const bool after = info.albedoReg >= 0 && info.albedoReg < 32 && IsReg(d, kTemp, static_cast<DWORD>(info.albedoReg));
+            if (copy || after) ruleAt = static_cast<int>(i);
+        }
+        for (size_t k = 1; k <= x.len; k++) {
+            const DWORD r = t[x.at + k];
+            if (!(r & 0x80000000u)) continue;
+            if (Type(r) == kConst && (r & kRelative)) return GBufferResult::RelativeConstants;
+            if (Type(r) == kDepthOut || (Type(r) == kColorOut && Num(r) != 0)) return GBufferResult::OutputsUsed;
+        }
+        if ((x.op == kTexld || x.op == kTexldl || x.op == kTexldd) && x.len >= 3) {
+            const int s = static_cast<int>(Num(t[x.at + 3]));
+            const bool plain = x.op == kTexld && Type(t[x.at + 1]) == kTemp;
+            if (s == info.albedoSampler) {
+                albedoAt = albedoAt == -1 && plain && (WMask(t[x.at + 1]) & 0x7) == 0x7 ? static_cast<int>(i) : -2;
+                albedoInBranch = depth > 0;
+            }
+            if (s == info.probeSampler) probeAt = probeAt == -1 && plain && depth == 0 ? static_cast<int>(i) : -2;
+        }
+    }
+    const Usage u = Scan(t, ins);
+    if (u.maxTemp + 3 >= 32 || u.maxConst + 2 >= (ps2 ? 32 : 224)) return GBufferResult::NoFreeRegister; // (ps_2_x: 32 constants)
+    const DWORD A = static_cast<DWORD>(u.maxTemp + 1), N = A + 1, S = A + 2, cG = static_cast<DWORD>(u.maxConst + 1), cH = cG + 1;
+    const bool normal = probeAt >= 0, albedo = albedoAt >= 0 || ruleAt >= 0;
+    const int id = albedo ? std::clamp(info.material, 1, 254) : 255;
+    std::vector<Edit> edits;
+    // cG = (0.5, 1, 0, id / 255); cH = (0.5, 0.5, roughness, class / 3): oC2 as it is when there is no normal
+    edits.push_back({1, {Op(kDef, 5), Dst(kConst, cG), F(0.5f), F(1.0f), F(0.0f), F(static_cast<float>(id) / 255.0f),
+                         Op(kDef, 5), Dst(kConst, cH), F(0.5f), F(0.5f), F(normal ? std::clamp(info.roughness, 0.01f, 1.0f) : 0.0f),
+                         F(static_cast<float>(std::clamp(info.motionClass, 0, 3)) / 3.0f)}});
+    if (albedoAt >= 0) { // the game may reuse the register: copy it right after the read, with the id
+        const Ins& x = ins[static_cast<size_t>(albedoAt)];
+        if (albedoInBranch) edits.push_back({first, {Op(kMov, 2), Dst(kTemp, A), Src(kConst, cG, 0xAA), Op(kMov, 2), Dst(kTemp, A, 0x8), Src(kConst, cG, kSwzY)}}); // (0, 0, 0, 1)
+        edits.push_back({End(x), {Op(kMov, 2), Dst(kTemp, A, 0x7), Src(kTemp, Num(t[x.at + 1])), Op(kMov, 2), Dst(kTemp, A, 0x8), Src(kConst, cG, kSwzW)}});
+    } else if (ruleAt >= 0) { // family rule: rR.xyz after the instruction, or the instruction again into rA.xyz before it
+        const Ins& x = ins[static_cast<size_t>(ruleAt)];
+        if (info.albedoReg == 255) {
+            constexpr DWORD kRegBits = 0x70001800u | 0x7FFu, kMaskBits = 0xFu << 16;
+            std::vector<DWORD> again(t.begin() + static_cast<std::ptrdiff_t>(x.at), t.begin() + static_cast<std::ptrdiff_t>(End(x)));
+            again[1] = (again[1] & ~(kRegBits | kMaskBits)) | (Reg(kTemp, A) & kRegBits) | (0x7u << 16); // same sources and modifiers
+            again.insert(again.end(), {Op(kMov, 2), Dst(kTemp, A, 0x8), Src(kConst, cG, kSwzW)});
+            edits.push_back({x.at, std::move(again)});
+        } else {
+            edits.push_back({End(x), {Op(kMov, 2), Dst(kTemp, A, 0x7), Src(kTemp, static_cast<DWORD>(info.albedoReg)), Op(kMov, 2), Dst(kTemp, A, 0x8), Src(kConst, cG, kSwzW)}});
+        }
+    }
+    if (normal) { // the coordinate as the read sees it (its own swizzle), just before the read
+        const Ins& x = ins[static_cast<size_t>(probeAt)];
+        edits.push_back({x.at, {Op(kMov, 2), Dst(kTemp, N, 0x7), t[x.at + 2]}});
+    }
+    // Only replicate swizzles and full writes of oC1 / oC2 by mov: valid in a ps_2_x copy without arbitrary swizzles too
+    std::vector<DWORD> tail;
+    if (!albedo) tail = {Op(kMov, 2), Dst(kTemp, A), Src(kConst, cG, 0xAA), Op(kMov, 2), Dst(kTemp, A, 0x8), Src(kConst, cG, kSwzW)}; // (0, 0, 0, 1)
+    tail.insert(tail.end(), {Op(kMov, 2), Dst(kColorOut, 1), Src(kTemp, A)});
+    if (normal) {
+        // octahedral: p = n / (|x| + |y| + |z|); where p.z < 0, p.xy = (1 - |p.yx|) sign(p.xy); stored as 0.5 + 0.5 p.xy
+        const std::vector<DWORD> oct = {
+            Op(kAbs, 2), Dst(kTemp, S, 0x7), Src(kTemp, N),
+            Op(kDp3, 3), Dst(kTemp, S, 0x8), Src(kTemp, S), Src(kConst, cG, kSwzY),
+            Op(kRcp, 2), Dst(kTemp, S, 0x8), Src(kTemp, S, kSwzW),
+            Op(kMul, 3), Dst(kTemp, N, 0x7), Src(kTemp, N), Src(kTemp, S, kSwzW),
+            Op(kAbs, 2), Dst(kTemp, S, 0x3), Src(kTemp, N),                                                             // |p.xy|
+            Op(kAdd, 3), Dst(kTemp, S, 0x3), Neg(Src(kTemp, S)), Src(kConst, cG, kSwzY),                                 // 1 - |p.xy|
+            Op(kCmp, 4), Dst(kTemp, S, 0x4), Src(kTemp, N, kSwzX), Src(kConst, cG, kSwzY), Neg(Src(kConst, cG, kSwzY)), // sign(p.x)
+            Op(kCmp, 4), Dst(kTemp, S, 0x8), Src(kTemp, N, kSwzY), Src(kConst, cG, kSwzY), Neg(Src(kConst, cG, kSwzY)), // sign(p.y)
+            Op(kMul, 3), Dst(kTemp, S, 0x4), Src(kTemp, S, kSwzY), Src(kTemp, S, 0xAA),                                 // (1 - |p.y|) sign(p.x)
+            Op(kMul, 3), Dst(kTemp, S, 0x8), Src(kTemp, S, kSwzX), Src(kTemp, S, kSwzW),                                // (1 - |p.x|) sign(p.y)
+            Op(kCmp, 4), Dst(kTemp, N, 0x1), Src(kTemp, N, 0xAA), Src(kTemp, N, kSwzX), Src(kTemp, S, 0xAA),
+            Op(kCmp, 4), Dst(kTemp, N, 0x2), Src(kTemp, N, 0xAA), Src(kTemp, N, kSwzY), Src(kTemp, S, kSwzW),
+            Op(kMad, 4), Dst(kTemp, N, 0x3), Src(kTemp, N), Src(kConst, cG, kSwzX), Src(kConst, cG, kSwzX),
+            Op(kMov, 2), Dst(kTemp, N, 0xC), Src(kConst, cH),
+            Op(kMov, 2), Dst(kColorOut, 2), Src(kTemp, N)};
+        tail.insert(tail.end(), oct.begin(), oct.end());
+    } else {
+        tail.insert(tail.end(), {Op(kMov, 2), Dst(kColorOut, 2), Src(kConst, cH)});
+    }
+    edits.push_back({t.size() - 1, tail}); // before the end token
+    Apply(t, std::move(edits));
+    if (ps2) t[0] = 0xFFFF0201; // ps_2_x: the copy needs more slots than ps_2_0 gives (as AddDither2's)
+    if (made) *made = {albedo, normal, static_cast<int>(A), static_cast<int>(cG)};
+    return GBufferResult::Ok;
+}
+
 DitherResult AddDither2(std::vector<DWORD>& t, int* amountConst, int* texcoordOut) {
     if (t.empty() || (t[0] != 0xFFFF0200 && t[0] != 0xFFFF0201)) return DitherResult::NotPs30;
     if (t.back() != 0x0000FFFFu) return DitherResult::Unreadable;
