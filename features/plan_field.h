@@ -6,8 +6,8 @@
 // question, except for what a wall leaves open at some heights (a door under its head, a window between sill and head,
 // the air over a half wall). The story's height (kStoryH) is cut into height bands at the `cuts`; each band has its own
 // plan: a wall span is drawn into a band's plan when the wall is solid at the band's middle height (Solid: the sill-height
-// rule). Each plan becomes a distance field by jump flooding (Rong and Tan 2006): every pixel a wall crosses holds the
-// wall's point nearest its centre as a seed (sub-pixel, so a pixel centre's distance to a straight wall is exact), then
+// rule). Each plan becomes a distance field by jump flooding (Rong and Tan 2006): every pixel within 1.5 px of a wall holds
+// the wall point nearest its centre as a seed (sub-pixel, so a pixel centre's distance to a straight wall is exact), then
 // one pass at step 1, passes at steps N/2 .. 1 and one more at step 1 leave in every pixel its nearest seed. The passes
 // here read and write whole buffers the way pixel shader passes would (9 reads a pixel, two buffers swapped).
 //
@@ -103,7 +103,11 @@ inline float Dist2(const Seed& sd, int ix, int iz) {
 // One band's plan before the flood: the seeds of the walls solid at height y, in a w x h pixel buffer (the GPU port uploads these)
 inline void SeedBand(const Story& s, int w, int h, int px, float y, std::vector<Seed>& a) {
     a.assign(static_cast<size_t>(w) * h, Seed{kNone, kNone});
-    for (const Edge& e : s.edges) { // the plan: four samples a pixel along each wall, the nearest to its pixel's centre kept
+    // The plan: four samples a pixel along each wall, each offered to its pixel and the 8 around it, the nearest to a pixel's
+    // centre kept. Every wall point within 1.5 px of a centre is offered to it, so where two walls share a pixel (a corner)
+    // the pixels beside it still read the nearer wall: one seed a pixel from its own walls only dropped the second wall there,
+    // and a pixel beside an outside corner read 1.12 px for a wall 0.5 px away.
+    for (const Edge& e : s.edges) {
         const float x0 = e.x0 * px + kPad, z0 = e.z0 * px + kPad, dx = (e.x1 - e.x0) * px, dz = (e.z1 - e.z0) * px;
         const float lenPx = std::max(std::hypot(dx, dz), 1e-6f);
         const int m = std::max(1, static_cast<int>(std::ceil(lenPx * 4.0f)));
@@ -113,9 +117,12 @@ inline void SeedBand(const Story& s, int w, int h, int px, float y, std::vector<
             const float u = static_cast<float>(i) / static_cast<float>(m);
             if (!Solid(e, u, y) || !Solid(e, std::max(u - du, 0.0f), y) || !Solid(e, std::min(u + du, 1.0f), y)) continue;
             const Seed sd{x0 + dx * u, z0 + dz * u};
-            const int ix = std::clamp(static_cast<int>(sd.x), 0, w - 1), iz = std::clamp(static_cast<int>(sd.z), 0, h - 1);
-            Seed& at = a[static_cast<size_t>(iz) * w + ix];
-            if (Dist2(sd, ix, iz) < Dist2(at, ix, iz)) at = sd;
+            const int cx = static_cast<int>(sd.x), cz = static_cast<int>(sd.z);
+            for (int iz = std::max(cz - 1, 0); iz <= std::min(cz + 1, h - 1); iz++)
+                for (int ix = std::max(cx - 1, 0); ix <= std::min(cx + 1, w - 1); ix++) {
+                    Seed& at = a[static_cast<size_t>(iz) * w + ix];
+                    if (Dist2(sd, ix, iz) < Dist2(at, ix, iz)) at = sd;
+                }
         }
     }
 }
