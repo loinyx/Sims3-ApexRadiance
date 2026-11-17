@@ -853,6 +853,33 @@ void DefaultValues(const Effect& fx, std::vector<float>& regs)
 void UpdateSources(const Effect& fx, std::vector<float>& regs, SourceState& st)
 {
     if (st.pingpong.size() != fx.uniforms.size() * 2) st.pingpong.assign(fx.uniforms.size() * 2, 0.0f);
+    if (st.keys.size() != fx.uniforms.size() * 2) st.keys.assign(fx.uniforms.size() * 2, 0);
+    // input as ReShade reads it: only while the game's window has the focus (this process's foreground window)
+    HWND fg = GetForegroundWindow();
+    DWORD pid = 0;
+    if (fg) GetWindowThreadProcessId(fg, &pid);
+    const bool focused = fg && pid == GetCurrentProcessId();
+    float mouse[2] = { st.mouse[0], st.mouse[1] };
+    if (focused)
+    {
+        POINT p{}; RECT rc{};
+        if (GetCursorPos(&p) && ScreenToClient(fg, &p) && GetClientRect(fg, &rc) && rc.right > 0 && rc.bottom > 0)
+            mouse[0] = (float)p.x * fx.width / (float)rc.right, mouse[1] = (float)p.y * fx.height / (float)rc.bottom;
+    }
+    const float delta[2] = { st.mouseSeen ? mouse[0] - st.mouse[0] : 0.0f, st.mouseSeen ? mouse[1] - st.mouse[1] : 0.0f };
+    st.mouse[0] = mouse[0], st.mouse[1] = mouse[1], st.mouseSeen = true;
+    // key / mousebutton: held; mode "toggle" (or toggle = true) flips on each press; mode "press" is true on the pressed frame
+    auto keyValue = [&](size_t i, int vk) {
+        const bool down = focused && vk > 0 && vk < 256 && (GetAsyncKeyState(vk) & 0x8000) != 0;
+        uint8_t& was = st.keys[i * 2]; uint8_t& tog = st.keys[i * 2 + 1];
+        const bool pressed = down && !was;
+        was = down;
+        const Ann* mode = FindAnn(fx.uniforms[i].ann, "mode");
+        const Ann* toggle = FindAnn(fx.uniforms[i].ann, "toggle");
+        if ((mode && mode->isString && mode->s == "toggle") || (toggle && !toggle->isString && toggle->f[0] != 0.0f)) { if (pressed) tog = !tog; return tog ? 1.0f : 0.0f; }
+        if (mode && mode->isString && mode->s == "press") return pressed ? 1.0f : 0.0f;
+        return down ? 1.0f : 0.0f;
+    };
     for (size_t i = 0; i < fx.uniforms.size(); ++i)
     {
         const Uniform& u = fx.uniforms[i];
@@ -906,6 +933,20 @@ void UpdateSources(const Effect& fx, std::vector<float>& regs, SourceState& st)
             v[0] = t.wYear; v[1] = t.wMonth; v[2] = t.wDay; v[3] = (float)(t.wHour * 3600 + t.wMinute * 60 + t.wSecond);
         }
         else if (n == "bufready_depth") v[0] = st.depthReady ? 1.0f : 0.0f;
+        else if (n == "key")
+        {
+            const Ann* kc = FindAnn(u.ann, "keycode");
+            v[0] = keyValue(i, kc && !kc->isString ? (int)kc->f[0] : 0);
+        }
+        else if (n == "mousebutton")
+        {
+            static const int kButtons[5] = { VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2 };
+            const Ann* kc = FindAnn(u.ann, "keycode");
+            const int b = kc && !kc->isString ? (int)kc->f[0] : -1;
+            v[0] = keyValue(i, b >= 0 && b < 5 ? kButtons[b] : 0);
+        }
+        else if (n == "mousepoint") { v[0] = mouse[0]; v[1] = mouse[1]; }
+        else if (n == "mousedelta") { v[0] = delta[0]; v[1] = delta[1]; }
         SetUniform(fx, i, v, std::min<size_t>(4, u.Comps()), regs);
     }
 }

@@ -508,7 +508,12 @@ void PartWhy(std::string_view s) // appended in place: no allocation once the li
 enum Where { kBoundary = 0, kWorld = 1, kEndOfFrame = 2 };
 int WhereOf(size_t i)
 {
-    if (Runnable(i) && Looks::Shader(g.order[i].shader).needsDepth) return kBoundary;
+    auto depthAt = [](size_t j) { return Runnable(j) && Looks::Shader(g.order[j].shader).needsDepth; };
+    if (depthAt(i)) return kBoundary;
+    // a shader listed before a depth shader runs before it, as in ReShade (the list's order): at the boundary too, else the
+    // depth shader ran first (a tonemap listed before MXAO shaded MXAO's result instead of the other way round)
+    for (size_t j = i + 1; j < g.order.size(); ++j)
+        if (depthAt(j) && !IsOff(j)) return kBoundary;
     return g.onUi ? kEndOfFrame : kWorld;
 }
 bool g_ranThisFrame = false;      // end-of-frame part done

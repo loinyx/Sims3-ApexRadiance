@@ -135,7 +135,8 @@ bool DecodeImage(const std::wstring& path, UINT w, UINT h, std::vector<uint8_t>&
 void DefaultValues(const Effect& fx, std::vector<float>& regs);
 void SetUniform(const Effect& fx, size_t index, const float* comps, size_t count, std::vector<float>& regs);
 // ReShade's uniform sources, set each frame: timer / frametime (ms), framecount, random, pingpong, date,
-// bufready_depth; input sources (keys, mouse, overlay) stay 0.
+// bufready_depth, key and mousebutton (held, toggle or press), mousepoint and mousedelta (the game window's cursor in
+// picture pixels, while the game has the focus); mousewheel and overlay_open stay 0.
 struct SourceState
 {
     float timerMs = 0, frametimeMs = 0;
@@ -143,6 +144,8 @@ struct SourceState
     bool depthReady = false;
     uint32_t rng = 0x9E3779B9u;
     std::vector<float> pingpong; // per uniform: value, direction
+    std::vector<uint8_t> keys;   // per uniform: down last frame, toggled
+    float mouse[2] = { 0, 0 }; bool mouseSeen = false; // the cursor last frame (mousedelta)
 };
 void UpdateSources(const Effect& fx, std::vector<float>& regs, SourceState& st);
 
