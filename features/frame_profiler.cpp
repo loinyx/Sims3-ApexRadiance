@@ -3237,7 +3237,7 @@ struct TimelineRow {
     float eye[3], eyeMove, targetMove, eyeTarget, yawChange;
     float render[kCatCount]; // render thread, self ms
     uint32_t draws, promoted, demoted, texLoads, lotLoadCalls, lotsLighting, roomSolveCalls, sceneNodes, sceneDeferred, modDispatches, pageFaults, rtdCalls;
-    uint32_t pickRuns, pickStill, pickMoving, pickReadbacks; // PickReadback::TakeCounters
+    uint32_t pickRuns, pickStill, pickMoving, pickReadbacks, pickHolds; // PickReadback::TakeCounters
     uint16_t smp[kClsCount]; // render thread samples in the frame, per code class
     int8_t camera;
     uint16_t flags;
@@ -3268,9 +3268,9 @@ void TimelineSync() {
     DWORD rtdCalls;
     LONGLONG rtdTicks;
     ExtraHooks::TakeGetRenderTargetData(rtdCalls, rtdTicks); // drops the calls counted before
-    uint32_t pr, ps, pm, pb;
+    uint32_t pr, ps, pm, pb, ph;
     int64_t pt;
-    PickReadback::TakeCounters(pr, ps, pm, pb, pt); // the same
+    PickReadback::TakeCounters(pr, ps, pm, pb, pt, ph); // the same
     g_tlEyeOk = g_tlTargetOk = g_tlYawOk = false;
 }
 
@@ -3352,7 +3352,7 @@ void TimelineFrame(const HitchRecord& r, bool hitch, uint64_t now) {
         row.rtdMs = static_cast<float>(static_cast<double>(rtdTicks) * 1000.0 / g_qpcFreq);
     }
     int64_t pickTicks;
-    PickReadback::TakeCounters(row.pickRuns, row.pickStill, row.pickMoving, row.pickReadbacks, pickTicks);
+    PickReadback::TakeCounters(row.pickRuns, row.pickStill, row.pickMoving, row.pickReadbacks, pickTicks, row.pickHolds);
     row.pickRbMs = static_cast<float>(static_cast<double>(pickTicks) * 1000.0 / g_qpcFreq);
     if (!g_writeFile.load(std::memory_order_relaxed) || !g_writerRunning.load(std::memory_order_relaxed)) return;
     if (r.foreground) row.flags |= kTlFocus;
@@ -4047,7 +4047,7 @@ std::string TimelineHeader() {
     std::string s = "time_s,tick_ms,frame,frame_ms,cpu_ms,present_ms,limiter_ms,hitch,focus,camera,apex_moving,steady_scale,settle_scale,"
                     "lamp_edit,drain_ms,eye_move_m,eye_x,eye_y,eye_z,target_move_m,eye_target_m,yaw_change_deg,draws,prims,lots_promoted,lots_demoted,"
                     "lot_load_calls,lots_lighting,room_solve_calls,room_solve_max_ms,scene_nodes,scene_deferred,tex_loads,tex_mb,page_faults,"
-                    "rtd_calls,rtd_ms,pick_runs,pick_skip_still,pick_skip_moving,pick_readbacks,pick_readback_ms,mod_dispatches,mod_sampled,reg_timing,sim_script_gc_ms,other_jobs_ms,smp_ts3w,smp_gfx,smp_system,smp_apex,smp_other_asi,smp_other";
+                    "rtd_calls,rtd_ms,pick_runs,pick_skip_still,pick_skip_moving,pick_readbacks,pick_readback_ms,pick_click_holds,mod_dispatches,mod_sampled,reg_timing,sim_script_gc_ms,other_jobs_ms,smp_ts3w,smp_gfx,smp_system,smp_apex,smp_other_asi,smp_other";
     for (const CatInfo& c : kCats) (s += ',') += c.name; // render thread self ms; the names hold no comma
     return s + ",Unattributed\n";
 }
@@ -4091,6 +4091,7 @@ void FormatTimelineRow(std::string& s, const TimelineRow& r) {
     Csv(s, r.rtdMs, rtd, 3);
     std::format_to(out, ",{},{},{},{}", r.pickRuns, r.pickStill, r.pickMoving, r.pickReadbacks);
     Csv(s, r.pickRbMs, true, 3);
+    std::format_to(out, ",{}", r.pickHolds);
     std::format_to(out, ",{},{},{}", r.modDispatches, (r.flags & kTlModSampled) ? 1 : 0, (r.flags & kTlRegTiming) ? 1 : 0);
     Csv(s, r.gcMs);
     Csv(s, r.otherJobsMs);

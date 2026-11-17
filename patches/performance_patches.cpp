@@ -772,7 +772,7 @@ APEX_REGISTER_FEATURE(PickSkipWhenStillPatch,
                       {.displayName = "Fewer Mouse Picks When Still",
                        .description = "The game checks which object is under the mouse every other frame, even when nothing moves, about 2 ms each under the "
                                       "RTX Remix bridge. While the camera and the mouse stay still, that check waits (at most 0.25 s), and while the camera "
-                                      "moves it runs every 4th frame. Clicks and key presses are never delayed. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
+                                      "moves it runs every 4th frame. A click made while the check waits is held for a new check (about 3 frames). Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
                        .category = "Performance",
                        .experimental = true,
                        .enabledByDefault = false,
@@ -781,7 +781,10 @@ APEX_REGISTER_FEATURE(PickSkipWhenStillPatch,
                                             "frame (camera byte +0x6FD, always 1). That re-pick is skipped while the camera (+0x0C..+0x1B, +0x30..+0x6F), the "
                                             "viewport and the pick modes are as at the last pick and it is under 250 ms old; the last result stays in place.",
                                             "While the camera moves, a new pick (a mouse-move request too) is rendered at most every 4th update. A button, wheel or key "
-                                            "event always picks at the next update; a pending read-back is never skipped."}});
+                                            "event always picks at the next update; a pending read-back is never skipped.",
+                                            "A button press made while a pick was skipped and the stored one is over 50 ms old is held in the window procedure; "
+                                            "the next update picks, the pick is read back at once, and the held mouse messages go to the game once ResolvePick "
+                                            "(0x6E01B0) has stored the new result (at most 200 ms)."}});
 
 APEX_REGISTER_FEATURE(LotLightingMotionPatch,
                       {.displayName = "Lot Lighting While Moving",

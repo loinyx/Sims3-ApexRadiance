@@ -58,11 +58,51 @@ struct View {
 View g_last{};
 bool g_haveLast = false;   // false: the next update picks
 UINT g_lastInput = 0;      // Overlay::InputEvents at the last pick
-uint64_t g_lastPickTick = 0;
+std::atomic<uint64_t> g_lastPickTick{0};     // (read by the click gate on the window thread)
+std::atomic<uint64_t> g_lastUpdateTick{0};   // the last update while the switch is on
+std::atomic<bool> g_skippedSincePick{false}; // the stored result is older than the game's would be
 uint32_t g_sincePick = 0;  // updates since the last pick was rendered
 uint64_t g_lastLogTick = 0;
 std::atomic<uint32_t> c_runs{0}, c_still{0}, c_moving{0}, c_readbacks{0}; // never reset (TakeCounters keeps its own base)
 std::atomic<int64_t> c_readbackTicks{0};
+
+// ---- The click hold ----
+// (Steam 1.67.2, read from the code) Clicks reach the game as window messages: Canvas_WndProc -> UIInput_ToWindowMessage
+// 0x005989C0, which sets the pick request (0x006DEFF0: [this+0x38], [this+0x50]) and posts a UI message; the click's
+// handler then reads the stored result (ResolvePick 0x006E01B0 writes the position [this+0x48], the object [this+0x58],
+// the raw pick [this+0x60] and the world point [this+0x70]). A button press the game would get, while a pick was skipped
+// since the stored one and that one is older than kFreshMs, is held in Apex's window procedure (Overlay::SetMouseHoldGate).
+// The press counts as an input event, so the next update picks; that pick is read back at once (waiting for the GPU, as
+// the game does), and once ResolvePick has stored it (it runs just before the update, 0x006EBC5A) the held messages are
+// posted back in order. About 3 frames for the press; the game itself answers a press from a pick about 2 frames old
+enum : int { kHoldNone, kHoldRender, kHoldReadBack, kHoldResolve };
+constexpr uint64_t kFreshMs = 50;       // a stored pick younger than this is used as the game would use it
+constexpr uint64_t kHoldMaxMs = 200;    // then the press goes on with the stored result
+constexpr uint64_t kUpdateGoneMs = 100; // no update this long (menus, loading): no hold
+std::atomic<int> g_hold{kHoldNone};
+std::atomic<uint64_t> g_holdStart{0};
+std::atomic<uint32_t> c_holds{0}, c_holdTimeouts{0};
+std::atomic<uint64_t> c_holdMs{0};
+uint32_t t_holds = 0, t_holdTimeouts = 0; // at the last log line
+uint64_t t_holdMs = 0;
+
+void ReleaseHold(bool timedOut) {
+    if (g_hold.exchange(kHoldNone) == kHoldNone) return; // (first: a press held after this starts its own hold)
+    Overlay::ReleaseHeldMouse();
+    c_holdMs.fetch_add(GetTickCount64() - g_holdStart.load(), std::memory_order_relaxed);
+    if (timedOut) c_holdTimeouts.fetch_add(1, std::memory_order_relaxed);
+}
+
+// Window procedure, under the overlay's hold lock, for a button press with no message held: true holds it
+bool HoldClick() {
+    if (!g_skipOn.load(std::memory_order_relaxed) || !g_skippedSincePick.load()) return false;
+    const uint64_t now = GetTickCount64();
+    if (now - g_lastUpdateTick.load() > kUpdateGoneMs || now - g_lastPickTick.load() < kFreshMs) return false;
+    g_holdStart.store(now);
+    g_hold.store(kHoldRender);
+    c_holds.fetch_add(1, std::memory_order_relaxed);
+    return true;
+}
 uint32_t t_runs = 0, t_still = 0, t_moving = 0, t_readbacks = 0; // at the last log line
 int64_t t_readbackTicks = 0;
 
@@ -105,7 +145,7 @@ bool SkipPick(const uint8_t* m, uint64_t now) {
                 c_moving.fetch_add(1, std::memory_order_relaxed);
                 return true;
             }
-        } else if (!request && now - g_lastPickTick < kRefreshMs) {
+        } else if (!request && now - g_lastPickTick.load() < kRefreshMs) {
             c_still.fetch_add(1, std::memory_order_relaxed);
             return true;
         }
@@ -113,7 +153,7 @@ bool SkipPick(const uint8_t* m, uint64_t now) {
     g_last = v;
     g_haveLast = true;
     g_lastInput = input;
-    g_lastPickTick = now;
+    g_lastPickTick.store(now);
     return false;
 }
 
@@ -121,14 +161,19 @@ void LogStats(uint64_t now) {
     if (now - g_lastLogTick < kLogEveryMs) return;
     const uint32_t runs = c_runs.load(), still = c_still.load(), moving = c_moving.load(), rb = c_readbacks.load();
     const int64_t ticks = c_readbackTicks.load();
+    const uint32_t holds = c_holds.load(), holdTimeouts = c_holdTimeouts.load();
+    const uint64_t holdMs = c_holdMs.load();
     if (g_lastLogTick) {
         LARGE_INTEGER f;
         QueryPerformanceFrequency(&f);
-        LOG_INFO(std::format("[PickReadback] Last {:.0f} s: {} picks, {} skipped with nothing changed, {} skipped while the camera moved, {} read-backs {:.1f} ms",
+        LOG_INFO(std::format("[PickReadback] Last {:.0f} s: {} picks, {} skipped with nothing changed, {} skipped while the camera moved, {} read-backs {:.1f} ms, "
+                             "{} clicks held for a new pick ({} ms, {} timed out)",
                              static_cast<double>(now - g_lastLogTick) / 1000.0, runs - t_runs, still - t_still, moving - t_moving, rb - t_readbacks,
-                             static_cast<double>(ticks - t_readbackTicks) * 1000.0 / static_cast<double>(f.QuadPart)));
+                             static_cast<double>(ticks - t_readbackTicks) * 1000.0 / static_cast<double>(f.QuadPart), holds - t_holds, holdMs - t_holdMs,
+                             holdTimeouts - t_holdTimeouts));
     }
     t_runs = runs, t_still = still, t_moving = moving, t_readbacks = rb, t_readbackTicks = ticks;
+    t_holds = holds, t_holdTimeouts = holdTimeouts, t_holdMs = holdMs;
     g_lastLogTick = now;
 }
 
@@ -151,19 +196,40 @@ void __fastcall Hook_Update(void* self, void* edx) {
     const bool due = *reinterpret_cast<const uint8_t*>(reinterpret_cast<uintptr_t>(self) + kReadbackDue) != 0;
     if (g_pending == self && !due) g_pending = nullptr; // the game dropped it
     g_sincePick++;
+    const uint8_t* const m = static_cast<const uint8_t*>(self);
+    const bool skipOn = g_skipOn.load(std::memory_order_relaxed);
+    if (skipOn) g_lastUpdateTick.store(GetTickCount64());
+    int hold = g_hold.load();
+    if (hold == kHoldResolve && !m[0x15]) { // ResolvePick stored the held press's pick just before this update
+        ReleaseHold(false);
+        hold = kHoldNone;
+    }
     if (!due) {
-        if (g_skipOn.load(std::memory_order_relaxed)) {
+        if (skipOn) {
             const uint64_t now = GetTickCount64();
             if (!kPublicBuild) LogStats(now);
-            if (SkipPick(static_cast<const uint8_t*>(self), now)) return;
+            if (SkipPick(m, now)) {
+                g_skippedSincePick.store(true);
+                return;
+            }
         }
         bool request;
         View v;
-        if (WillPick(static_cast<const uint8_t*>(self), request, v)) {
+        if (WillPick(m, request, v)) {
             g_sincePick = 0;
+            g_skippedSincePick.store(false);
             c_runs.fetch_add(1, std::memory_order_relaxed);
+            if (hold == kHoldRender) g_hold.compare_exchange_strong(hold, kHoldReadBack);
+        } else if (hold == kHoldRender && !m[0x15]) {
+            ReleaseHold(false); // no pick will come (no cursor position, picking off): the press goes on as in the game
         }
         g_original(self, edx); // renders the next pick (or returns at once: nothing to pick)
+        return;
+    }
+    if (hold != kHoldNone) { // a press waits: read back now (the held press's pick, or one rendered before it)
+        if (g_pending == self) g_pending = nullptr;
+        CallTimed(self, edx);
+        if (hold == kHoldReadBack) g_hold.compare_exchange_strong(hold, kHoldResolve);
         return;
     }
     if (dev) {
@@ -208,9 +274,11 @@ void Install() {
     }
     D3D9Hooks::RegisterPresent("PickReadback", [](D3D9Hooks::DeviceContext& ctx, const RECT*, const RECT*, HWND, const RGNDATA*) {
         g_dev.store(ctx.device, std::memory_order_relaxed);
+        if (g_hold.load() != kHoldNone && GetTickCount64() - g_holdStart.load() > kHoldMaxMs) ReleaseHold(true);
         return D3D9Hooks::HookAction::Continue;
     });
     RenderCallbacks::Add(RenderCallbacks::preReset, OnPreReset);
+    Overlay::SetMouseHoldGate(&HoldClick);
     LOG_INFO("[PickReadback] On: the mouse pick is read back once the GPU has drawn it, without waiting");
 }
 
@@ -218,22 +286,25 @@ bool Installed() { return g_original != nullptr; }
 
 void SetSkipWhenStill(bool on) {
     if (g_skipOn.exchange(on) == on) return;
+    if (!on) ReleaseHold(false);
     LOG_INFO(on ? "[PickReadback] Skip when still: on (re-picks wait while nothing changed, every 4th update while the camera moves)"
                 : "[PickReadback] Skip when still: off");
 }
 
 std::string StatsText() {
-    return std::format("{} pick read-backs deferred, {} frames waited, {} waited out; {} picks, {} skipped with nothing changed, {} skipped while moving",
-                       c_deferred.load(), c_frames.load(), c_timedOut.load(), c_runs.load(), c_still.load(), c_moving.load());
+    return std::format("{} pick read-backs deferred, {} frames waited, {} waited out; {} picks, {} skipped with nothing changed, {} skipped while moving; "
+                       "{} clicks held for a new pick ({} ms, {} timed out)",
+                       c_deferred.load(), c_frames.load(), c_timedOut.load(), c_runs.load(), c_still.load(), c_moving.load(), c_holds.load(),
+                       c_holdMs.load(), c_holdTimeouts.load());
 }
 
-void TakeCounters(uint32_t& runs, uint32_t& still, uint32_t& moving, uint32_t& readbacks, int64_t& readbackTicks) {
-    static uint32_t r0 = 0, s0 = 0, m0 = 0, b0 = 0;
+void TakeCounters(uint32_t& runs, uint32_t& still, uint32_t& moving, uint32_t& readbacks, int64_t& readbackTicks, uint32_t& holds) {
+    static uint32_t r0 = 0, s0 = 0, m0 = 0, b0 = 0, h0 = 0;
     static int64_t k0 = 0;
-    const uint32_t r = c_runs.load(), s = c_still.load(), m = c_moving.load(), b = c_readbacks.load();
+    const uint32_t r = c_runs.load(), s = c_still.load(), m = c_moving.load(), b = c_readbacks.load(), h = c_holds.load();
     const int64_t k = c_readbackTicks.load();
-    runs = r - r0, still = s - s0, moving = m - m0, readbacks = b - b0, readbackTicks = k - k0;
-    r0 = r, s0 = s, m0 = m, b0 = b, k0 = k;
+    runs = r - r0, still = s - s0, moving = m - m0, readbacks = b - b0, readbackTicks = k - k0, holds = h - h0;
+    r0 = r, s0 = s, m0 = m, b0 = b, k0 = k, h0 = h;
 }
 
 } // namespace PickReadback

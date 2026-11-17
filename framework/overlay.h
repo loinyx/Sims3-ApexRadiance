@@ -67,5 +67,11 @@ bool WndProcInstalled();
 // Counts the window's button, wheel and key presses and releases and its focus changes (not mouse moves or key
 // auto-repeat) since the window procedure was subclassed; any thread
 UINT InputEvents();
+// Holding a click back until the game's stored mouse pick is fresh (PickReadback). `gate` runs in the window procedure for
+// a button press the game would get, with no mouse message held: true holds that press and every mouse message after it
+// (keys still pass) until ReleaseHeldMouse. Held messages older than 250 ms are released by the next mouse message
+void SetMouseHoldGate(bool (*gate)());
+// Posts the held mouse messages back in order (any thread); they then reach the game without Apex's input handling
+void ReleaseHeldMouse();
 
 } // namespace Overlay

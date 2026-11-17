@@ -86,16 +86,16 @@ const I18n::Entry kEntries[] = {
      APEX_PRODUCT_NAME ". Crédits : @loinyx"},
     {"The game checks which object is under the mouse every other frame, even when nothing moves, about 2 ms each under the "
      "RTX Remix bridge. While the camera and the mouse stay still, that check waits (at most 0.25 s), and while the camera "
-     "moves it runs every 4th frame. Clicks and key presses are never delayed. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
+     "moves it runs every 4th frame. A click made while the check waits is held for a new check (about 3 frames). Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
      "O jogo verifica qual objeto está sob o mouse a cada dois quadros, mesmo quando nada se move, cerca de 2 ms cada vez com a ponte "
      "RTX Remix. Enquanto a câmera e o mouse ficam parados, essa verificação espera (no máximo 0,25 s), e enquanto a câmera se move "
-     "ela roda a cada 4 quadros. Cliques e teclas nunca são atrasados. Parte do " APEX_PRODUCT_NAME ". Créditos: @loinyx",
+     "ela roda a cada 4 quadros. Um clique feito enquanto a verificação espera aguarda uma nova verificação (cerca de 3 quadros). Parte do " APEX_PRODUCT_NAME ". Créditos: @loinyx",
      "El juego comprueba qué objeto está bajo el ratón cada dos fotogramas, incluso cuando nada se mueve, unos 2 ms cada vez con el "
      "puente RTX Remix. Mientras la cámara y el ratón están quietos, esa comprobación espera (como máximo 0,25 s), y mientras la cámara "
-     "se mueve se hace cada 4 fotogramas. Los clics y las teclas nunca se retrasan. Parte de " APEX_PRODUCT_NAME ". Créditos: @loinyx",
+     "se mueve se hace cada 4 fotogramas. Un clic hecho mientras la comprobación espera aguarda una nueva comprobación (unos 3 fotogramas). Parte de " APEX_PRODUCT_NAME ". Créditos: @loinyx",
      "Le jeu vérifie quel objet se trouve sous la souris une image sur deux, même quand rien ne bouge, environ 2 ms à chaque fois avec "
      "le pont RTX Remix. Tant que la caméra et la souris restent immobiles, cette vérification attend (0,25 s au plus), et pendant que "
-     "la caméra bouge elle a lieu toutes les 4 images. Les clics et les touches ne sont jamais retardés. Fait partie d'"
+     "la caméra bouge elle a lieu toutes les 4 images. Un clic fait pendant que la vérification attend patiente jusqu'à une nouvelle vérification (environ 3 images). Fait partie d'"
      APEX_PRODUCT_NAME ". Crédits : @loinyx"},
     {"While the camera moves, lots relight, and lots that just loaded are built, in smaller steps each frame instead of taking up to "
      "15 ms (lighting) or 35 ms (building) at once, so panning over busy neighborhoods stutters less. Everything finishes "
