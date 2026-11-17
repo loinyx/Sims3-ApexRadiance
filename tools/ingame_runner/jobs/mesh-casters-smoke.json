@@ -1,0 +1,51 @@
+{
+  "id": "mesh-casters-smoke",
+  "description": "Mesh casters (MC-2, wp/MC.md): with meshCasters on (developer mode) the objects of the loaded world go to the bridge server, which reads the game's packages once and resolves each object's LITE to its model's caster mesh. Needs the bridge pair of native/remix-bridge with patch 0020 in Bin (client.giServer on in its bridge.conf). Passes when the counter line shows the index ready, objects and resolved models over 0 and no dropped record; the missing share is printed for the record (custom content and objects without a mesh).",
+  "save": "ApexTest-Night",
+  "toml": {
+    "ui": {
+      "developer_mode": true
+    },
+    "screen": {
+      "background_fps_limit": 0
+    }
+  },
+  "variants": {
+    "on": {
+      "toml": {
+        "patches.RealtimeGI": {
+          "enabled": true,
+          "meshCasters": true
+        }
+      },
+      "expect": [
+        "\\[GiMesh\\] on: objects go to the bridge server",
+        "\\[GiMesh\\] objects=[1-9]\\d* resolved=[1-9]\\d* missing=\\d+ missingShare=\\d+\\.\\d% indexReady=1 links=[1-9]\\d* indexMs=\\d+ dropped=0"
+      ],
+      "fail": [
+        "\\[GiMesh\\] off: ",
+        "\\[GiMesh\\] objects=.* dropped=[1-9]",
+        "\\[GiMesh\\] objects=.* indexReady=2"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kArtGallery",
+      "radius": 9,
+      "height": 2.5,
+      "seconds": 3600,
+      "turns": 0.001,
+      "face": "door"
+    },
+    {
+      "do": "wait",
+      "minutes": 1
+    }
+  ]
+}

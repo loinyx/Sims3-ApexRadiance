@@ -3031,6 +3031,7 @@ const I18n::Pair kPairs[] = {
     {"The pack could not be saved in the Shaders folder", "Pakken kunne ikke gemmes i mappen Shaders"},
     {"The download failed", "Hentningen mislykkedes"},
     {"Shader packs: downloaded from their authors' GitHub, under each author's licence.", "Shaderpakker: hentet fra forfatternes GitHub under hver forfatters licens."},
+    {"Developer mode: give the bridge server every object's own mesh as a shadow caster", "Udviklertilstand: giv broserveren hvert objekts eget mesh som skyggekaster"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Danish, kPairs, std::size(kPairs));

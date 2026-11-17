@@ -10,6 +10,7 @@
 #include "d3d9_hooks.h"
 #include "game_addresses.h"
 #include "lamp_mark_filter.h"
+#include "object_legs.h"
 #include "outdoor_delta.h"
 #include "rt_outdoor_lamps.h"
 #include "world_session.h"
@@ -43,6 +44,60 @@ std::string g_startLine; // logged at the first snapshot in a world (it carries 
 // (R-02 onward) replace this with the export lookup in the bridge client d3d9.dll.
 bool ServerExport() { return false; }
 bool ServerRayQuery() { return false; }
+
+// ---- mesh casters (MC-2, wp/MC.md; render thread, developer mode) ----
+// The object hooks' records go to the bridge client's RemixBridge_GiObjects (patch 0020) once a frame; the server reads the
+// game's packages and resolves each LITE to its model's caster mesh. shortcut: objects placed before the sink is on (the
+// first frame in developer mode) are not sent until they move; send the world's objects at the start if that matters.
+using PFN_GiOpen = HRESULT(__stdcall*)(uint32_t*);
+using PFN_GiObjects = HRESULT(__stdcall*)(const ObjectLegs::Placed*, uint32_t);
+using PFN_GiReadCounters = HRESULT(__stdcall*)(uint32_t*, uint32_t);
+struct MeshCasters {
+    PFN_GiOpen open = nullptr;
+    PFN_GiObjects send = nullptr;
+    PFN_GiReadCounters counters = nullptr;
+    bool started = false, opened = false, off = false;
+} g_mesh;
+std::vector<ObjectLegs::Placed> g_placed;
+
+void MeshOff(const char* why) {
+    g_mesh.off = true;
+    ObjectLegs::SetSink(false);
+    LOG_INFO(std::format("[GiMesh] off: {}", why));
+}
+
+void MeshFrame() {
+    if (!g_options.meshCasters || g_mesh.off) return;
+    if (!g_mesh.started) {
+        g_mesh.started = true;
+        const HMODULE bridge = GetModuleHandleW(L"d3d9.dll");
+        g_mesh.open = bridge ? reinterpret_cast<PFN_GiOpen>(GetProcAddress(bridge, "RemixBridge_GiOpen")) : nullptr;
+        g_mesh.send = bridge ? reinterpret_cast<PFN_GiObjects>(GetProcAddress(bridge, "RemixBridge_GiObjects")) : nullptr;
+        g_mesh.counters = bridge ? reinterpret_cast<PFN_GiReadCounters>(GetProcAddress(bridge, "RemixBridge_GiReadCounters")) : nullptr;
+        if (!g_mesh.open || !g_mesh.send || !g_mesh.counters) return MeshOff("the d3d9.dll in Bin has no RemixBridge_GiObjects (bridge patch 0020)");
+        if (!ObjectLegs::Hooked()) return MeshOff("the object hooks are not installed (Night Lights off, or the game code differs)");
+        ObjectLegs::SetSink(true);
+    }
+    if (!g_mesh.opened) {
+        uint32_t level = 0;
+        const HRESULT hr = g_mesh.open(&level);
+        if (hr == S_FALSE) return;
+        if (FAILED(hr)) return MeshOff(hr == E_NOTIMPL ? "client.giServer is off in the bridge's bridge.conf" : "the bridge's GI open failed");
+        g_mesh.opened = true;
+        LOG_INFO(std::format("[GiMesh] on: objects go to the bridge server (GI level {})", level));
+    }
+    ObjectLegs::TakePlaced(g_placed);
+    if (!g_placed.empty() && FAILED(g_mesh.send(g_placed.data(), static_cast<uint32_t>(g_placed.size())))) MeshOff("RemixBridge_GiObjects failed");
+}
+
+// The server's object counters (words 14-21 of RemixBridge_GiReadCounters), read back by the runner job mesh-casters-smoke
+void MeshLog() {
+    uint32_t w[22] = {};
+    if (!g_mesh.opened || g_mesh.off || FAILED(g_mesh.counters(w, 22))) return;
+    const uint32_t objects = w[14], resolved = w[15], missing = w[16];
+    LOG_INFO(std::format("[GiMesh] objects={} resolved={} missing={} missingShare={:.1f}% indexReady={} links={} indexMs={} dropped={}", objects, resolved,
+                         missing, resolved + missing ? 100.0 * missing / (resolved + missing) : 0.0, w[17], w[18], w[19], w[20]));
+}
 
 // ---- lamp snapshot (render thread) ----
 constexpr int kRefreshFrames = 20;     // a snapshot at least every 20 frames, as Apex's other lamp readers
@@ -280,6 +335,7 @@ void UpdateLamps() {
 void OnPresent() {
     ++g_frames;
     UpdateLamps();
+    MeshFrame();
     const DWORD now = GetTickCount();
     if (g_lastLog == 0) g_lastLog = now;
     if (now - g_lastLog < kLogEveryMs) return;
@@ -296,6 +352,7 @@ void OnPresent() {
                                          g_lamps.size(), g_giLots, Value(Counter::LampChanges), cap, sync, locks, diffs, faults, table);
     if (cap || sync || locks || diffs || faults || table) LOG_WARNING(line);
     else LOG_INFO(line);
+    MeshLog();
 }
 
 } // namespace
@@ -318,6 +375,7 @@ bool Start(const Options& o, std::string* error) {
     g_options = o;
     g_lamps.clear(), g_lastRead.clear(), g_changes.clear();
     g_giLots = 0, g_activeLot = 0, g_worldFrames = 0, g_sinceSnap = 0, g_pending = false, g_dumpDue = true;
+    g_mesh = {};
     using namespace D3D9Hooks;
     if (!RegisterPresent(kPatchName, [](DeviceContext&, const RECT*, const RECT*, HWND, const RGNDATA*) {
             OnPresent();
@@ -339,6 +397,7 @@ bool Start(const Options& o, std::string* error) {
 void Stop() {
     if (!g_running.load()) return;
     D3D9Hooks::UnregisterAll(kPatchName);
+    if (g_options.meshCasters) ObjectLegs::SetSink(false);
     g_running = false;
     LOG_INFO("[RealtimeGI] Off");
 }
@@ -358,13 +417,14 @@ class RealtimeGiPatch : public ApexPatch {
         RegisterNamedEnumSetting(&scale_, "bufferScale", 0, "Light buffer scale", {"1", "2", "4"});
         RegisterNamedEnumSetting(&indirect_, "indirect", 0, "Indirect light", {std::begin(RealtimeGI::kIndirectNames), std::end(RealtimeGI::kIndirectNames)});
         RegisterBoolSetting(&debugLampTable_, "debugLampTable", false, "Developer mode: log the lamp snapshot against the game's fields after each change");
+        RegisterBoolSetting(&meshCasters_, "meshCasters", false, "Developer mode: give the bridge server every object's own mesh as a shadow caster");
     }
 
     bool Install() override {
         if (isEnabled) return true;
         lastError.clear();
         std::string error;
-        const RealtimeGI::Options o{lots_, solveCap_, 1 << scale_, indirect_, static_cast<RealtimeGI::Backend>(backend_), debugLampTable_};
+        const RealtimeGI::Options o{lots_, solveCap_, 1 << scale_, indirect_, static_cast<RealtimeGI::Backend>(backend_), debugLampTable_, meshCasters_ && !kPublicBuild};
         if (!RealtimeGI::Start(o, &error)) return Fail(error);
         isEnabled = true;
         return true;
@@ -380,7 +440,7 @@ class RealtimeGiPatch : public ApexPatch {
 
   private:
     int backend_ = 0, lots_ = 0, solveCap_ = 0, scale_ = 0, indirect_ = 0;
-    bool debugLampTable_ = false;
+    bool debugLampTable_ = false, meshCasters_ = false;
 };
 
 } // namespace

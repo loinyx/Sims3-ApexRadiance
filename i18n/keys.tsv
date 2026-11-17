@@ -1619,6 +1619,7 @@ A dragged lamp's rooms are solved once, after it is let go	tr_developer.inc:kDev
 Classic: show all floors together	tr_developer.inc:kDevBuildExtra	Clássico: todos os andares juntos	Clásico: todos los pisos a la vez	Classique : tous les étages ensemble	
 After a lamp edit every floor shows its new light in the same frame	tr_developer.inc:kDevBuildExtra	Depois de editar uma lâmpada, todos os andares mostram a luz nova no mesmo quadro	Tras editar una lámpara, todos los pisos muestran su nueva luz en el mismo fotograma	Après une modification de lampe, tous les étages montrent leur nouvelle lumière dans la même image	
 Instant (GPU) kept data	tr_developer.inc:kDevBuildExtra	Dados guardados do Instantâneo (GPU)	Datos guardados de Instantáneo (GPU)	Données conservées d'Instantané (GPU)	
+Developer mode: give the bridge server every object's own mesh as a shadow caster	tr_developer.inc:kDevBuildExtra	Modo de desenvolvedor: envia ao servidor da ponte a malha de cada objeto como projetor de sombra	Modo de desarrollador: envía al servidor del puente la malla de cada objeto como proyector de sombra	Mode développeur : donne au serveur du pont le maillage de chaque objet comme source d’ombre	
 Restore the whole mod	tr_menu.cpp:kResetEntries	Restaurar todo o mod	Restaurar todo el mod	Réinitialiser tout le mod	
 Restore page defaults	tr_menu.cpp:kResetEntries	Restaurar padrões da página	Restaurar valores de la página	Réinitialiser cette page	
 Confirm page reset	tr_menu.cpp:kResetEntries	Confirmar restauração	Confirmar restauración	Confirmer la réinitialisation	

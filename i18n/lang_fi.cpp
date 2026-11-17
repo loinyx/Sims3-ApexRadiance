@@ -3031,6 +3031,7 @@ const I18n::Pair kPairs[] = {
     {"The pack could not be saved in the Shaders folder", "Pakettia ei voitu tallentaa Shaders-kansioon"},
     {"The download failed", "Lataus epäonnistui"},
     {"Shader packs: downloaded from their authors' GitHub, under each author's licence.", "Varjostinpaketit: ladataan tekijöidensä GitHubista, kunkin tekijän lisenssillä."},
+    {"Developer mode: give the bridge server every object's own mesh as a shadow caster", "Kehittäjätila: anna siltapalvelimelle jokaisen esineen oma verkko varjon heittäjäksi"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Finnish, kPairs, std::size(kPairs));

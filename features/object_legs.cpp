@@ -28,6 +28,10 @@ std::atomic<long> g_lites{0}, g_baked{0}, g_filled{0};
 std::atomic<uint32_t> g_gen{0}, g_hookMoves{0};
 std::atomic<unsigned long> g_moveThread{0};
 bool g_on[2] = {};
+// Mesh casters: every LITE object's key, and the records not taken yet (under g_mx)
+std::atomic<bool> g_sink{false};
+std::unordered_map<uint64_t, uint64_t> g_liteOf;
+std::unordered_map<uint64_t, ObjectLegs::Placed> g_placed;
 
 uint64_t IdOf(uint32_t lo, uint32_t hi) { return static_cast<uint64_t>(hi) << 32 | lo; }
 
@@ -38,6 +42,11 @@ char __fastcall AttachHook(void* manager, void* edx, uint32_t idLo, uint32_t idH
     const long seen = g_lites.fetch_add(1, std::memory_order_relaxed);
     uint64_t lite;
     std::memcpy(&lite, key, sizeof lite);
+    if (g_sink.load(std::memory_order_relaxed)) {
+        std::lock_guard<std::mutex> lk(g_mx);
+        if (g_liteOf.size() >= 65536) g_liteOf.clear(); // (as g_objects: a removed object stays until then)
+        g_liteOf[IdOf(idLo, idHi)] = lite;
+    }
     if (const ObjectLegs::Model* model = ObjectLegs::Baked(lite)) {
         std::lock_guard<std::mutex> lk(g_mx);
         if (g_objects.size() >= 65536) g_objects.clear(), g_shapes.clear();
@@ -55,6 +64,14 @@ char __fastcall MoveHook(void* manager, void* edx, uint32_t idLo, uint32_t idHi,
     if (moved) {
         g_gen.fetch_add(1, std::memory_order_relaxed), g_hookMoves.fetch_add(1, std::memory_order_relaxed);
         g_moveThread.store(GetCurrentThreadId(), std::memory_order_relaxed);
+    }
+    if (moved && g_sink.load(std::memory_order_relaxed)) {
+        std::lock_guard<std::mutex> lk(g_mx);
+        const uint64_t id = IdOf(idLo, idHi);
+        if (const auto it = g_liteOf.find(id); it != g_liteOf.end()) {
+            ObjectLegs::Placed& p = g_placed[id];
+            p = {id, it->second, {m[0], m[4], m[8], m[12], m[1], m[5], m[9], m[13], m[2], m[6], m[10], m[14]}, 0, 0};
+        }
     }
     if (moved && g_any.load(std::memory_order_relaxed)) {
         std::lock_guard<std::mutex> lk(g_mx);
@@ -87,6 +104,28 @@ void Uninstall() {
 uint32_t Gen() { return g_gen.load(std::memory_order_relaxed); }
 void MoveStats(uint32_t& hook, unsigned long& thread) {
     hook = g_hookMoves.load(std::memory_order_relaxed), thread = g_moveThread.load(std::memory_order_relaxed);
+}
+
+bool Hooked() { return g_on[1]; }
+
+void SetSink(bool on) {
+    g_sink.store(on);
+    if (on) return;
+    std::lock_guard<std::mutex> lk(g_mx);
+    g_liteOf.clear(), g_placed.clear();
+}
+
+void TakePlaced(std::vector<Placed>& out) {
+    out.clear();
+    std::lock_guard<std::mutex> lk(g_mx);
+    for (const auto& [id, p] : g_placed) out.push_back(p);
+    g_placed.clear();
+}
+
+void NoteRemoved(uint64_t id) {
+    if (!g_sink.load(std::memory_order_relaxed)) return;
+    std::lock_guard<std::mutex> lk(g_mx);
+    if (g_liteOf.erase(id)) g_placed[id] = {id, 0, {}, 1, 0};
 }
 
 void NoteShape(uint64_t id, uintptr_t shape) {

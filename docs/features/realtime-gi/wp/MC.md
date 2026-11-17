@@ -1,6 +1,6 @@
 # MC: mesh casters in the bridge server (MC-1 to MC-3 of X-MESHCAST)
 
-Status: **MC-1 done** (offline); MC-2 and MC-3 not started, designed below. Branch `gi/mc` (off `gi/x-meshcast`, with
+Status: **MC-1 done** (offline); **MC-2 done offline** ([MC-2.md](MC-2.md)); MC-3 not started, designed below. Branch `gi/mc` (off `gi/x-meshcast`, with
 `gi/r-03` merged for the GI server patch 0018).
 
 Marks: [V] verified (by the offline check on the game's packages, or in the source named), [I] inferred, [O] open.
