@@ -16,7 +16,9 @@
 //  4. Physical indoor lamps (PhysKeptCheck): the game's 3D test on the GPU (T3dPS) against RoomLightTests::occlude, the kept
 //     shadow tiles against the reference, and RelightKeptPhys against the CPU's law x share x T3D, KeptTexel, pack and blur;
 //     room 0's lot lamps from their laws (Room0PhysCheck: AccumulatePhys, the floor mask and exit alpha) against the CPU.
-// Read-only: prints to stdout, writes no file. A missing D3D9 device or capture is a failure.
+//  5. --pathref (path_trace.h, real-time GI S0-02): the offline path-traced reference of the proxy, furniture boxes and lamp table;
+//     writes its maps only with --out.
+// Read-only: prints to stdout, writes no file (but --pathref --out). A missing D3D9 device or capture is a failure.
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -48,6 +50,12 @@
 #include "features/phys_tiles.h"
 // The dither offset of 2.12.4's Smooth light maps (RoomMapDither::Offset, interleaved gradient noise): 2.12.3 + RT has no
 // map dither (its relight passes 0), but the compose shader keeps the input, so the harness still checks it
+// (the harness hooks no device: the engine's vertex input mark, framework/d3d9_extra_hooks.cpp, has nothing to restore here)
+namespace ExtraHooks {
+VertexInputMark MarkVertexInput() { return {}; }
+void RestoreVertexInput(VertexInputMark) {}
+} // namespace ExtraHooks
+
 namespace RoomMapDither {
 inline float Offset(unsigned x, unsigned y) {
     const double f = std::fmod(0.06711056 * static_cast<double>(x) + 0.00583715 * static_cast<double>(y), 1.0);
@@ -4866,7 +4874,11 @@ void FloorLineSweep() {
     Check(ok && n > 0 && leaks == 0 && worst < 0.05, "floor line: the GPU's walk at the moved point leaks light through the slab or leaves the reference");
 }
 
+#include "path_trace.h"
+
 int main(int argc, char** argv) {
+    for (int i = 1; i < argc; i++)
+        if (std::string(argv[i]) == "--pathref") return PathRef::Main(argc, argv); // (real-time GI S0-02: CPU only, no device)
     TileDragBench();
     {
         std::printf("\n[kept shadow atlas] 120 and 130 lamps\n");
