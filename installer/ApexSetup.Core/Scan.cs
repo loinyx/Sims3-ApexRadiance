@@ -44,19 +44,6 @@ public static class Scan
     // Setup runs elevated (app.manifest): a standard player who types an administrator's password runs it as that account, whose
     // folders the game never reads. The session's signed-in user is the player: their folder (a Shell Folders value) from their
     // own registry hive; null when Setup runs as the player.
-    // the player's proxy server when Setup runs elevated as another account and the player has one switched on; null otherwise
-    public static string? PlayerProxy()
-    {
-        try
-        {
-            var player = (SecurityIdentifier)new NTAccount(Wts(7 /* WTSDomainName */), Wts(5 /* WTSUserName */)).Translate(typeof(SecurityIdentifier));
-            if (player == WindowsIdentity.GetCurrent().User) return null;
-            using var k = Registry.Users.OpenSubKey($@"{player}\Software\Microsoft\Windows\CurrentVersion\Internet Settings");
-            return k?.GetValue("ProxyEnable") is int on && on != 0 && k.GetValue("ProxyServer") is string s && s.Length > 0 ? s.Split(';')[0] : null;
-        }
-        catch (Exception) { return null; }
-    }
-
     public static string? PlayerShellFolder(string value)
     {
         try

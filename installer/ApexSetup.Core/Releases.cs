@@ -36,11 +36,7 @@ public static class Releases
 
     static HttpClient MakeClient()
     {
-        // Setup elevated as another administrator would use that account's proxy: the player's own (a fixed proxy server;
-        // a proxy script, AutoConfigURL, is not read)
-        var handler = new HttpClientHandler();
-        if (Scan.PlayerProxy() is { } proxy) { handler.Proxy = new System.Net.WebProxy(proxy.Contains("://") ? proxy : "http://" + proxy); handler.UseProxy = true; }
-        var h = new HttpClient(handler) { Timeout = TimeSpan.FromMinutes(5) };
+        var h = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
         h.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("ApexRadianceSetup", "1.0"));
         return h;
     }
