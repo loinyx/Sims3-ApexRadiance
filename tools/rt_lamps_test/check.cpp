@@ -19,6 +19,7 @@
 //  5. Real-time GI's wall-plan visibility field (features/plan_field.h; plan_field_check.h), CPU only.
 //  6. --pathref (path_trace.h, real-time GI S0-02): the offline path-traced reference of the proxy, furniture boxes and lamp table;
 //     writes its maps only with --out.
+//  7. --cascades (cascades_check.h, real-time GI X-05): 2D radiance cascades over the plan field against the reference of 6.
 // Read-only: prints to stdout, writes no file (but --pathref --out). A missing D3D9 device or capture is a failure.
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -58,11 +59,6 @@ void RestoreVertexInput(VertexInputMark) {}
 #include "features/phys_tiles.h"
 // The dither offset of 2.12.4's Smooth light maps (RoomMapDither::Offset, interleaved gradient noise): 2.12.3 + RT has no
 // map dither (its relight passes 0), but the compose shader keeps the input, so the harness still checks it
-// (the harness hooks no device: the engine's vertex input mark, framework/d3d9_extra_hooks.cpp, has nothing to restore here)
-namespace ExtraHooks {
-VertexInputMark MarkVertexInput() { return {}; }
-void RestoreVertexInput(VertexInputMark) {}
-} // namespace ExtraHooks
 
 namespace RoomMapDither {
 inline float Offset(unsigned x, unsigned y) {
@@ -5000,10 +4996,13 @@ void FloorLineSweep() {
 }
 
 #include "path_trace.h"
+#include "cascades_check.h"
 
 int main(int argc, char** argv) {
     for (int i = 1; i < argc; i++)
         if (std::string(argv[i]) == "--pathref") return PathRef::Main(argc, argv); // (real-time GI S0-02: CPU only, no device)
+    for (int i = 1; i < argc; i++)
+        if (std::string(argv[i]) == "--cascades") return CascadesRef::Main(argc, argv); // (real-time GI X-05: CPU only, no device)
     TileDragBench();
     {
         std::printf("\n[kept shadow atlas] 120 and 130 lamps\n");

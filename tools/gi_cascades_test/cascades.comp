@@ -1,0 +1,110 @@
+// Real-time GI, X-05: the radiance cascades of features/plan_cascades.h as a compute shader for the server tier, function by
+// function with the same float math. PASS 0: one level's image from the next level's (one invocation a texel: its 4 child
+// directions, and with the fix a trace to each of the 4 next-level probes). PASS 1: level 0 to a probe's irradiance (two
+// vec4: faces +x, -x, +z, -z; floor, ceiling). The field is one band of PlanField::Field, read as Field::At reads it.
+#version 450
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer FieldB { float field[]; }; // w x h, px
+layout(std430, set = 0, binding = 1) readonly buffer EmitB { vec4 emit[]; };    // w x h: wall, floor, ceiling radiosity
+layout(std430, set = 0, binding = 2) readonly buffer UpB { vec4 up[]; };        // the next level (PASS 1: level 0)
+layout(std430, set = 0, binding = 3) writeonly buffer OutB { vec4 outv[]; };
+layout(push_constant) uniform PC {
+    vec4 fld;  // px a tile, the pad, w, h
+    vec4 lvl;  // this level: probe spacing (m), block side, t0, t1
+    vec4 upl;  // the next level: probe spacing, block side, probes in x, z
+    vec4 cfg;  // a level's image w, h; the traced directions (4 x this level's); a step's longest share of the distance
+    ivec4 flg; // 1 = a next level is bound; 1 = the fix; the trace's budget; level 0's directions
+} pc;
+
+const float kHit = 0.75, kMinStep = 0.25, kBack = 1.5, kCapPx = 8.0, kPi = 3.14159265, kInv2Pi = 0.15915494;
+
+float SlabT(float a, float t) { return 0.63661977 * (atan(a, t) + a * t / (a * a + t * t)); }
+float SlabU(float t) { return 9.0 / (t * t + 9.0); }
+float FieldAt(vec2 xz) {
+    const vec2 f = clamp(xz * pc.fld.x + pc.fld.y - 0.5, vec2(0), pc.fld.zw - 1.0);
+    const ivec2 i = min(ivec2(f), ivec2(pc.fld.zw) - 2);
+    const vec2 t = f - vec2(i);
+    const int w = int(pc.fld.z), at = i.y * w + i.x;
+    return mix(mix(field[at], field[at + 1], t.x), mix(field[at + w], field[at + w + 1], t.x), t.y);
+}
+vec4 EmitAt(vec2 xz) {
+    const ivec2 i = clamp(ivec2(floor(xz * pc.fld.x + pc.fld.y)), ivec2(0), ivec2(pc.fld.zw) - 1);
+    return emit[i.y * int(pc.fld.z) + i.x];
+}
+
+// PlanCascades::TraceSeg: xyz what the segment meets (vertical face, floor, ceiling), w = 1 when it reached b
+vec4 TraceSeg(vec2 a, vec2 b, float tA, float tB) {
+    const vec2 d = b - a;
+    const float len = length(d) * pc.fld.x;
+    if (!(len > 1e-3)) return vec4(0, 0, 0, 1);
+    vec3 rad = vec3(0), k0 = vec3(SlabT(1.0, tA), SlabT(2.0, tA), SlabU(tA));
+    float s = 0.0, t0 = tA;
+    for (int n = 0; n < pc.flg.z; n++) {
+        const float dist = FieldAt(a + d * (s / len));
+        if (dist < kHit) {
+            const float w = EmitAt(a + d * ((s - kBack) / len)).x;
+            return vec4(rad + w * vec3((k0.x + k0.y) * 0.25, k0.z * kInv2Pi, k0.z * kInv2Pi), 0);
+        }
+        const float st = min(min(max(dist - kHit, kMinStep), max(kCapPx, pc.cfg.w * t0 * pc.fld.x)), len - s);
+        const float s1 = s + st, t1 = tA + (tB - tA) * s1 / len;
+        const vec3 k1 = vec3(SlabT(1.0, t1), SlabT(2.0, t1), SlabU(t1));
+        const vec4 m = EmitAt(a + d * ((s + 0.5 * st) / len));
+        rad += vec3((m.y * (k0.x - k1.x) + m.z * (k0.y - k1.y)) * 0.25, m.z * (k0.z - k1.z) * kInv2Pi, m.y * (k0.z - k1.z) * kInv2Pi);
+        s = s1, t0 = t1, k0 = k1;
+        if (s >= len - 1e-4) return vec4(rad, 1);
+    }
+    return vec4(rad, 0);
+}
+
+void main() {
+    const ivec2 t = ivec2(gl_GlobalInvocationID.xy);
+    const int tw = int(pc.cfg.x), side = int(pc.lvl.y);
+#if PASS == 0
+    if (t.x >= tw || t.y >= int(pc.cfg.y)) return;
+    const ivec2 P = t / side, dd = t - P * side;
+    const vec2 p = (vec2(P) + 0.5) * pc.lvl.x;
+    const bool hasUp = pc.flg.x != 0, fix = hasUp && pc.flg.y != 0;
+    const vec2 u = p / pc.upl.x - 0.5, b = floor(u), fr = hasUp ? u - b : vec2(0);
+    const int side1 = int(pc.upl.y);
+    vec3 acc = vec3(0);
+    for (int c = 0; c < 4; c++) {
+        const int jj = 4 * (dd.y * side + dd.x) + c;
+        const float th = (float(jj) + 0.5) * 2.0 * kPi / pc.cfg.z;
+        const vec2 dir = vec2(cos(th), sin(th)), start = p + pc.lvl.z * dir;
+        vec3 rad = vec3(0);
+        float clear = 0.0;
+        if (!fix) {
+            const vec4 seg = TraceSeg(start, p + pc.lvl.w * dir, pc.lvl.z, pc.lvl.w);
+            rad = seg.xyz, clear = seg.w;
+        }
+        for (int k = 0; hasUp && k < 4; k++) {
+            const ivec2 kk = ivec2(k & 1, k >> 1);
+            const ivec2 q = clamp(ivec2(b) + kk, ivec2(0), ivec2(pc.upl.zw) - 1);
+            const float w = (kk.x != 0 ? fr.x : 1.0 - fr.x) * (kk.y != 0 ? fr.y : 1.0 - fr.y);
+            const vec3 uv = up[(q.y * side1 + jj / side1) * tw + q.x * side1 + jj % side1].xyz;
+            if (!fix) {
+                rad += w * clear * uv;
+                continue;
+            }
+            const vec4 seg = TraceSeg(start, (vec2(q) + 0.5) * pc.upl.x + pc.lvl.w * dir, pc.lvl.z, pc.lvl.w);
+            rad += w * (seg.xyz + seg.w * uv);
+        }
+        acc += 0.25 * rad;
+    }
+    outv[t.y * tw + t.x] = vec4(acc, 0);
+#else
+    const int nx = tw / side, d0 = pc.flg.w;
+    if (t.x >= nx || t.y >= int(pc.cfg.y) / side) return;
+    vec4 e = vec4(0);
+    vec2 fc = vec2(0);
+    const float k = 2.0 * sin(kPi / float(d0));
+    for (int j = 0; j < d0; j++) {
+        const vec3 r = up[(t.y * side + j / side) * tw + t.x * side + j % side].xyz;
+        const float th = (float(j) + 0.5) * 2.0 * kPi / float(d0);
+        e += r.x * k * max(vec4(cos(th), -cos(th), sin(th), -sin(th)), vec4(0));
+        fc += r.yz * (2.0 * kPi / float(d0));
+    }
+    outv[(t.y * nx + t.x) * 2] = e, outv[(t.y * nx + t.x) * 2 + 1] = vec4(fc, 0, 0);
+#endif
+}
