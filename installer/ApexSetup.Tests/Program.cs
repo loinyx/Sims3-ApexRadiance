@@ -916,6 +916,88 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
     Console.WriteLine($"info this PC: NVIDIA {nv.Card ?? "none"}, driver {SmoothMotion.DriverText(nv.Driver)}, Smooth Motion {(nv.On ? "on" : "off")}{(nv.Owner is null ? "" : ", in profile " + nv.Owner)}{(nv.Error is null ? "" : ", error " + nv.Error)}");
 }
 
+// installer audit (Setup 1.2.4): a damaged setup.json, read-only and locked files, GitHub's answers, the loader zip, an
+// antivirus, the checks before a change, Setup's own update
+{
+    var a = Path.Combine(Path.GetTempPath(), "ApexSetupTest-audit-" + Guid.NewGuid().ToString("N")[..8]);
+    var abin = Path.Combine(a, "Game", "Bin");
+    Directory.CreateDirectory(Manifest.DirOf(abin));
+    try
+    {
+        var sj = Path.Combine(Manifest.DirOf(abin), "setup.json");
+        File.WriteAllText(sj, "{ \"Files\": [ {");
+        var logged = new List<Exception>();
+        Engine.Log = logged.Add;
+        var fresh = Manifest.Load(abin);
+        Check(fresh.Files.Count == 0 && !File.Exists(sj) && File.Exists(sj + ".corrupt") && logged.Count == 1, "setup.json: a damaged one is kept as .corrupt and a fresh record starts");
+        Engine.Log = _ => { };
+        fresh.Versions[Components.Apex] = "4.0.3";
+        fresh.Save();
+        Check(Manifest.Load(abin).Versions[Components.Apex] == "4.0.3" && !File.Exists(sj + ".apex-tmp"), "setup.json: saved through a temporary file");
+
+        var asrc = Path.Combine(a, "new.dll"); File.WriteAllText(asrc, "new");
+        var dst = Path.Combine(abin, "old.dll"); File.WriteAllText(dst, "old");
+        File.SetAttributes(dst, FileAttributes.ReadOnly);
+        Fs.Copy(asrc, dst);
+        Check(File.ReadAllText(dst) == "new", "copy: a read-only destination is replaced");
+        File.SetAttributes(dst, FileAttributes.Normal);
+        Fs.RetryDelay = TimeSpan.FromMilliseconds(1);
+        var tries = 0;
+        Fs.Retry(() => { if (++tries < 3) throw new IOException("in use"); });
+        var gaveUp = false; tries = 0;
+        try { Fs.Retry(() => { tries++; throw new IOException("in use"); }); } catch (IOException) { gaveUp = tries == 4; }
+        var missingAtOnce = false; tries = 0;
+        try { Fs.Retry(() => { tries++; throw new FileNotFoundException("gone"); }); } catch (FileNotFoundException) { missingAtOnce = tries == 1; }
+        Check(gaveUp && missingAtOnce, "copy and move: a held file is tried again 3 times, a missing one fails at once");
+
+        var anow = DateTimeOffset.FromUnixTimeSeconds(1_800_000_000);
+        Check(Releases.RateLimit(System.Net.HttpStatusCode.Forbidden, "0", (1_800_000_000 + 600).ToString(), anow) is { Args: ["10"] }
+              && Releases.RateLimit(System.Net.HttpStatusCode.Forbidden, "12", "0", anow) is null && Releases.RateLimit(System.Net.HttpStatusCode.NotFound, "0", "0", anow) is null,
+              "github: the API's rate limit says when it opens again");
+        Check(Releases.TagOf(new Uri("https://github.com/a/b/releases/tag/v10.0.2")) == "v10.0.2" && Releases.TagOf(new Uri("https://github.com/a/b/releases")) is null,
+              "github: a release page that did not land on a tag is no tag, not a crash");
+
+        Check(Engine.LoaderZip("Ultimate-ASI-Loader-NoPDB.zip") && !Engine.LoaderZip("Ultimate-ASI-Loader-NoPDB_x64.zip") && !Engine.LoaderZip("Ultimate-ASI-Loader.zip"),
+              "loader: the 32-bit NoPDB zip by its name's pattern");
+        byte[] Pe(ushort machine) { var b = new byte[0x48]; b[0] = (byte)'M'; b[1] = (byte)'Z'; b[0x3C] = 0x40; b[0x40] = (byte)'P'; b[0x41] = (byte)'E'; BitConverter.TryWriteBytes(b.AsSpan(0x44), machine); return b; }
+        var z = Path.Combine(a, "zip1"); Directory.CreateDirectory(z);
+        File.WriteAllBytes(Path.Combine(z, "winmm.dll"), Pe(0x14C)); File.WriteAllBytes(Path.Combine(z, "x64.dll"), Pe(0x8664));
+        var z2 = Path.Combine(a, "zip2"); Directory.CreateDirectory(z2); File.WriteAllText(Path.Combine(z2, "readme.txt"), "");
+        string? named = null;
+        try { Engine.LoaderDll(z2); } catch (InvalidDataException e) { named = e.Message; }
+        Check(Path.GetFileName(Engine.LoaderDll(z)) == "winmm.dll" && named?.Contains("readme.txt") == true, "loader: the one 32-bit dll when there is no dinput8.dll; an error names what the zip held");
+
+        Check(Engine.Missing(new Dictionary<string, long> { [asrc] = 3, [Path.Combine(a, "eaten.dll")] = 5 }).SequenceEqual(new[] { "eaten.dll" })
+              && Engine.Antivirus(@"C:\x\Game\Bin\wininet.dll") is { Args: ["wininet.dll"] }, "antivirus: a file gone or cut short is named in the player's words");
+
+        var ag = new Game(a, abin, "TS3W.exe", Edition.Steam, "1.67.2");
+        var astate = Scan.Run(ag, Path.Combine(a, "Docs"));
+        Games.IsRunning = () => true;
+        Engine.FreeBytes = _ => 10L << 20;
+        var pre = Engine.Preflight(ag, astate with { Layer = Layer.Other }, null, 100L << 20, replacesD3d9: true);
+        Games.IsRunning = () => false;
+        Engine.FreeBytes = _ => long.MaxValue;
+        Check(pre.Count(p => p.Blocks) >= 2 && pre.Any(p => p.Key.StartsWith("Close The Sims 3")) && pre.Any(p => p.Key.Contains("MB free"))
+              && pre.Any(p => p.Key.Contains("(d3d9.dll) is set aside") && !p.Blocks) && pre.Any(p => p.Key.Contains("Documents") && !p.Blocks),
+              "before a change: the game running and too little space stop it; a foreign d3d9.dll and missing Documents are told");
+        Check(Games.Processes.Contains("Sims3LauncherW") && Games.Processes.Contains("ts3wrap"), "the launcher and the restart host count as the game running");
+
+        Check(SelfUpdate.Quote(@"C:\Games\The Sims 3\") == "\"C:\\Games\\The Sims 3\\\\\"" && SelfUpdate.Quote("a\"b") == "\"a\\\"b\"" && SelfUpdate.Quote("plain") == "\"plain\"",
+              "self-update: a folder argument ending in \\ keeps its closing quote");
+        var aself = Path.Combine(a, "Setup.exe"); File.WriteAllText(aself, "old exe");
+        var newer = Path.Combine(a, "new.exe"); File.WriteAllText(newer, "new exe");
+        var startFailed = false;
+        try { SelfUpdate.ReplaceAndStart(newer, aself, [], (_, _) => throw new InvalidOperationException("no start")); } catch (InvalidOperationException) { startFailed = true; }
+        Check(startFailed && File.ReadAllText(aself) == "old exe" && !File.Exists(aself + ".old"), "self-update: a new Setup that does not start puts the old exe back");
+    }
+    finally
+    {
+        Games.IsRunning = () => false;
+        foreach (var f in Directory.EnumerateFiles(a, "*", SearchOption.AllDirectories)) File.SetAttributes(f, FileAttributes.Normal);
+        Directory.Delete(a, true);
+    }
+}
+
 // the generated JSON writes and reads exactly what the reflection serializer did: players' setup.json and restore points
 {
     var legacy = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };

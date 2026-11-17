@@ -38,7 +38,15 @@ public sealed class Manifest
     public static Manifest Load(string bin)
     {
         var p = System.IO.Path.Combine(DirOf(bin), "setup.json");
-        var m = File.Exists(p) ? JsonSerializer.Deserialize(File.ReadAllText(p), SetupJson.Default.Manifest) ?? new() : new();
+        Manifest m;
+        try { m = File.Exists(p) ? JsonSerializer.Deserialize(File.ReadAllText(p), SetupJson.Default.Manifest) ?? new() : new(); }
+        catch (JsonException e)
+        {
+            // a damaged setup.json (a crash mid-write before Setup 1.2.4): kept aside as setup.json.corrupt, and a fresh record
+            Engine.Log(new InvalidDataException("setup.json could not be read; kept as setup.json.corrupt", e));
+            try { File.Move(p, p + ".corrupt", true); } catch (Exception x) when (x is IOException or UnauthorizedAccessException) { }
+            m = new();
+        }
         m.Bin = bin;
         m.MoveTo(bin);
         return m;
@@ -82,7 +90,7 @@ public sealed class GitHubSource : ISource
     Task<Release> Latest(string repo, CancellationToken ct) =>
         _rel.TryGetValue(repo, out var t) ? t : _rel[repo] = Shown?.GetValueOrDefault(repo) is { } r ? Task.FromResult(r) : Releases.LatestAsync(repo, ct);
 
-    public static readonly string TempRoot = Path.Combine(Path.GetTempPath(), "ApexRadianceSetup");
+    public static readonly string TempRoot =Path.Combine(Path.GetTempPath(), "ApexRadianceSetup");
 
     // The release's *-Manual-install.zip, downloaded and unzipped once per run, or null when the release has none
     readonly Dictionary<string, string?> _manual = new();
@@ -164,8 +172,9 @@ public sealed class GitHubSource : ISource
             case Components.Loader:
             {
                 var r = await Latest(Releases.AsiLoader, ct);
-                var dir = Releases.Unzip(await Releases.DownloadAsync(r.Find(n => n == "Ultimate-ASI-Loader-NoPDB.zip"), _tmp, ct));
-                files.Add((Path.Combine(dir, "dinput8.dll"), Path.Combine(bin, "wininet.dll"))); // the 32-bit loader, named as the mods' guides say
+                // the latest release's 32-bit build without PDB, by its name's pattern (Ultimate-ASI-Loader-NoPDB.zip so far)
+                var dir = Releases.Unzip(await Releases.DownloadAsync(r.Find(Engine.LoaderZip), _tmp, ct));
+                files.Add((Engine.LoaderDll(dir), Path.Combine(bin, "wininet.dll"))); // the 32-bit loader, named as the mods' guides say
                 return (files, r.Version);
             }
             case Components.S3ss:
@@ -255,6 +264,89 @@ public static class Engine
         { "ApexRadiance.asi", "ts3wrap.exe", "Sims3SettingsSetter.asi", "ts3native.asi", "ts3fixes.package", "Sims3Performance.asi", "MonoPatcher.asi" };
 
     // APEX_SETUP_DRY_RUN=1: Setup shows what it finds and plans but writes nothing (a check on a player's real game)
+    // Checked before any download: what would stop the change (Blocks) and what it will do to the player's own files. Each is
+    // an English key with {n} arguments and one action.
+    public sealed record Check(string Key, string[] Args, bool Blocks);
+    public static Func<string, long> FreeBytes = dir => new DriveInfo(Path.GetPathRoot(Path.GetFullPath(dir))!).AvailableFreeSpace;
+    public static List<Check> Preflight(Game g, State s, string? docs, long downloadBytes, bool replacesD3d9)
+    {
+        var l = new List<Check>();
+        if (Games.IsRunning())
+            l.Add(new("Close The Sims 3, its launcher and the restart host (ts3wrap.exe), then click Apply again.", [], true));
+        var probe = Path.Combine(g.Bin, ".apex-setup-probe");
+        try { File.WriteAllText(probe, ""); File.Delete(probe); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        { l.Add(new("Setup cannot write to {0}. Run Setup as administrator, or move the game out of a protected folder.", [g.Bin], true)); }
+        // the downloads land in %TEMP% and are copied to Game\Bin: twice their size free on each drive
+        var need = Math.Max(downloadBytes * 2, 200L << 20);
+        foreach (var dir in new[] { g.Bin, Path.GetTempPath() }.DistinctBy(d => Path.GetPathRoot(Path.GetFullPath(d)), StringComparer.OrdinalIgnoreCase))
+            try
+            {
+                if (FreeBytes(dir) < need)
+                    l.Add(new("Setup needs {0} MB free on drive {1}. Free some space, then click Apply again.", [(need >> 20).ToString(), Path.GetPathRoot(Path.GetFullPath(dir))!], true));
+            }
+            catch (Exception e) when (e is IOException or ArgumentException or UnauthorizedAccessException) { } // (a drive that cannot say: not a no)
+        if (docs is null || !Directory.Exists(Path.GetDirectoryName(docs)))
+            l.Add(new("Setup did not find The Sims 3's folder in Documents. Start the game once, then run Setup again for the settings it writes there.", [], false));
+        if (replacesD3d9 && s.Layer == Layer.Other)
+            l.Add(new("{0} (d3d9.dll) is set aside in Game\\Bin\\Apex Radiance backup; removing the renderer in Repair or remove puts it back.", [ForeignD3d9(g.Bin)], false));
+        if (Scan.Loaders(g.Bin) is { Count: > 1 } loaders)
+            l.Add(new("Two ASI loaders ({0}): Setup keeps {1} and sets the others aside in Game\\Bin\\Apex Radiance backup.", [string.Join(", ", loaders), loaders[0]], false));
+        return l;
+    }
+
+    // a d3d9.dll that is neither DXVK nor the bridge, by the name its file gives (ReShade, GShade, another wrapper)
+    public static string ForeignD3d9(string bin)
+    {
+        var f = Path.Combine(bin, "d3d9.dll");
+        try
+        {
+            var v = System.Diagnostics.FileVersionInfo.GetVersionInfo(f);
+            return new[] { v.ProductName, v.FileDescription }.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim() ?? "d3d9.dll";
+        }
+        catch (FileNotFoundException) { return "d3d9.dll"; }
+    }
+
+    // a file a scan removed (or emptied) as Setup placed it: the player's words, with the file names
+    public static SetupException Antivirus(string? file) =>
+        new("Your antivirus removed {0}; add an exception for Game\\Bin and run Setup again.", Path.GetFileName(file ?? "") is { Length: > 0 } n && !n.Contains(", ") ? n : file ?? "");
+    public static List<string> Missing(IReadOnlyDictionary<string, long> sizes) =>
+        sizes.Where(p => !File.Exists(p.Key) || new FileInfo(p.Key).Length != p.Value).Select(p => Path.GetFileName(p.Key)).ToList();
+
+    public static bool LoaderZip(string name) =>
+        name.Contains("NoPDB", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+        && !name.Contains("x64", StringComparison.OrdinalIgnoreCase);
+
+    // the loader in its zip: dinput8.dll, else the one 32-bit dll; an error names what the zip held
+    public static string LoaderDll(string dir)
+    {
+        var dlls = Directory.EnumerateFiles(dir, "*.dll", SearchOption.AllDirectories).ToList();
+        if (dlls.FirstOrDefault(f => Path.GetFileName(f).Equals("dinput8.dll", StringComparison.OrdinalIgnoreCase)) is { } d) return d;
+        var x86 = dlls.Where(Is32Bit).ToList();
+        if (x86.Count == 1) return x86[0];
+        var found = Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(dir, f)).ToList();
+        throw new InvalidDataException("Ultimate ASI Loader: no single 32-bit loader in the zip (found: " + (found.Count == 0 ? "nothing" : string.Join(", ", found)) + ")");
+    }
+
+    // PE machine IMAGE_FILE_MACHINE_I386 (0x14C)
+    public static bool Is32Bit(string file)
+    {
+        try
+        {
+            using var r = new BinaryReader(File.OpenRead(file));
+            if (r.BaseStream.Length < 0x40 || r.ReadUInt16() != 0x5A4D) return false;
+            r.BaseStream.Position = 0x3C;
+            var pe = r.ReadInt32();
+            if (pe < 0 || pe + 6 > r.BaseStream.Length) return false;
+            r.BaseStream.Position = pe;
+            return r.ReadUInt32() == 0x4550 && r.ReadUInt16() == 0x14C;
+        }
+        catch (IOException) { return false; }
+    }
+
+    // where Setup's log goes (the app sets it; tests and the engine run without one)
+    public static Action<Exception> Log = _ => { };
+
     public static void CheckWritable()
     {
         if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1") throw new InvalidOperationException("Dry run: Setup changes nothing.");
@@ -291,7 +383,8 @@ public static class Engine
         for (int i = 0; i < list.Count; i++)
         {
             p?.Report(new(0.5 * i / list.Count, "Downloading {0}", list[i]));
-            fetched.Add(await src.FetchAsync(list[i], g, docs, ct));
+            try { fetched.Add(await src.FetchAsync(list[i], g, docs, ct)); }
+            catch (FileNotFoundException e) { throw Antivirus(e.FileName); } // (downloaded, then gone: a scan took it)
         }
         if (list.Count > 0) CheckWritable(); // the downloads can take minutes: the game may have started since
         for (int i = 0; i < list.Count; i++)
@@ -313,7 +406,19 @@ public static class Engine
                 }
                 // a bridge installed by hand is this component's own files, not foreign ones to back up and restore on removal
                 var own = c == Components.Bridge && s.Layer == Layer.Bridge;
-                foreach (var (from, to) in files) Place(m, c, from, to, own);
+                // each file's size before it is placed: afterwards every file must be there whole, else an antivirus took it
+                var sizes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+                foreach (var (from, to) in files)
+                {
+                    try
+                    {
+                        // (the player's ts3native.ini is kept as it is: no size to check)
+                        if (!(Path.GetFileName(to).Equals("ts3native.ini", StringComparison.OrdinalIgnoreCase) && File.Exists(to))) sizes[to] = new FileInfo(from).Length;
+                        Place(m, c, from, to, own);
+                    }
+                    catch (FileNotFoundException e) { throw Antivirus(e.FileName ?? from); }
+                }
+                if (Missing(sizes) is { Count: > 0 } gone) throw Antivirus(string.Join(", ", gone));
                 if (c == Components.Bridge)
                     foreach (var conf in new[] { Path.Combine(g.Bin, "bridge.conf"), Path.Combine(g.Bin, ".trex", "bridge.conf") })
                         SetTargetProcess(conf, g.Exe);
