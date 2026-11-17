@@ -541,6 +541,7 @@ void Snapshot() {
         g_dumpDue = true;
         if (!kPublicBuild && !first)
             for (const Change& c : g_changes) {
+                if (c.kind == LampChange::Value && g_changeLines >= kChangeLinesPerLog / 2) continue; // value noise (load, ~700 a window) must not hide a switch
                 if (g_changeLines++ >= kChangeLinesPerLog) break;
                 LOG_INFO(std::format("[RealtimeGI] Lamp change: {} light={:08X} lot={:X}", kLampChangeNames[static_cast<int>(c.kind)], static_cast<uint32_t>(c.light), c.lot));
             }
