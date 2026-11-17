@@ -2085,6 +2085,8 @@ const I18n::Pair kPairs[] = {
     {"Keeps the direction count steady while the camera rests near a switch distance", "Voorkomt dat Minder richtingen in de verte heen en weer schakelt wanneer de camera dicht bij een schakelafstand staat"},
     {"Smooth flat surfaces", "Gladde vlakke oppervlakken"},
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Verwijdert vage gestippelde schaduwlijnen langs de randen van aanrechten, vloeren en andere vlakke oppervlakken"},
+    {"Edge-aware smoothing", "Randbewuste vervaging"},
+    {"Smooths the shade without letting it bleed across the edges of objects", "Vervaagt de schaduw zonder dat die over de randen van objecten uitloopt"},
     {"Show the shade alone", "Alleen de schaduw tonen"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "Toont alleen de schaduw, in grijs, om te zien wat hij doet terwijl je bijstelt (niet opgeslagen)"},
     {"Also in map view", "Ook in kaartweergave"},

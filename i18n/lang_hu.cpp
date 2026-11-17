@@ -2084,6 +2084,8 @@ const I18n::Pair kPairs[] = {
     {"Keeps the direction count steady while the camera rests near a switch distance", "Megakadályozza, hogy a Kevesebb irány a távolban ide-oda váltson, amikor a kamera egy váltási távolság közelében áll"},
     {"Smooth flat surfaces", "Sima sík felületek"},
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Eltünteti a halvány szaggatott árnyékvonalakat a pultok, padlók és más sík felületek szélén"},
+    {"Edge-aware smoothing", "Élkövető simítás"},
+    {"Smooths the shade without letting it bleed across the edges of objects", "Úgy simítja az árnyékot, hogy az nem folyik át a tárgyak élein"},
     {"Show the shade alone", "Csak az árnyék mutatása"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "Csak az árnyékot mutatja szürkén, hogy lásd, mit csinál, amíg állítod (nem mentődik)"},
     {"Also in map view", "Térképnézetben is"},

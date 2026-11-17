@@ -2085,6 +2085,8 @@ const I18n::Pair kPairs[] = {
     {"Keeps the direction count steady while the camera rests near a switch distance", "Evita che Meno direzioni in lontananza cambi avanti e indietro quando la telecamera resta vicino a una distanza di cambio"},
     {"Smooth flat surfaces", "Superfici piane lisce"},
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Rimuove le deboli linee d'ombra tratteggiate lungo i bordi di piani di lavoro, pavimenti e altre superfici piane"},
+    {"Edge-aware smoothing", "Levigatura attenta ai bordi"},
+    {"Smooths the shade without letting it bleed across the edges of objects", "Leviga l'ombra senza farla sbavare oltre i bordi degli oggetti"},
     {"Show the shade alone", "Mostra solo l'ombra"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "Mostra solo l'ombra, in grigio, per vedere cosa fa mentre la regoli (non salvato)"},
     {"Also in map view", "Anche nella vista mappa"},

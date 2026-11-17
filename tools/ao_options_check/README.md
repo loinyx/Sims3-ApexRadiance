@@ -18,9 +18,13 @@ It checks the two Ambient Occlusion options *Fewer directions when far* (`zoomSl
     deterministic;
   - *Smooth flat surfaces*: no more stray shade on the open floor and the counter top than the default, and at least
     75% of the contact shade where the boxes meet the floor;
+- *Edge-aware smoothing* (`edgeBlur`), on 4-channel targets with two box passes: at least 90% of the contact shade,
+  an open floor within 0.25 of a level of the default's roughness (no interleave left), and a shade step at silhouettes
+  no smaller than the default's (a blur that carries shade across an outline lowers it);
 - *Steady direction count* (`zoomHysteresis`): over walls 2% either side of each threshold in turn the count never
   switches (without it, every frame), and it still follows the view past the band;
-- the GPU time of the AO pass alone at 3840 x 2160 for each variant (12 interleaved rounds, the median).
+- the GPU time of the AO pass alone at 3840 x 2160 for each variant (12 interleaved rounds, the median), of the AO pass
+  with its blur, and of the blur passes alone.
 
 The synthetic scene is not a game frame: confirm the look in game (Ambient Occlusion picture pair,
 `tools/ingame_runner/jobs/ao-adaptive-ab.json`) and the GPU time with the in-game AO timer.

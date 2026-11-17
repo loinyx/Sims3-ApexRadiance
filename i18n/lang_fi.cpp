@@ -2085,6 +2085,8 @@ const I18n::Pair kPairs[] = {
     {"Keeps the direction count steady while the camera rests near a switch distance", "Estää Vähemmän suuntia kaukana -asetusta vaihtelemasta edestakaisin, kun kamera on lähellä vaihtoetäisyyttä"},
     {"Smooth flat surfaces", "Sileät tasaiset pinnat"},
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Poistaa heikot katkoviivamaiset varjoviivat työtasojen, lattioiden ja muiden tasaisten pintojen reunoilta"},
+    {"Edge-aware smoothing", "Reunat huomioiva tasoitus"},
+    {"Smooths the shade without letting it bleed across the edges of objects", "Tasoittaa varjon päästämättä sitä vuotamaan esineiden reunojen yli"},
     {"Show the shade alone", "Näytä pelkkä varjo"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "Näyttää vain varjon harmaana, jotta näet sen vaikutuksen säätäessäsi (ei tallenneta)"},
     {"Also in map view", "Myös karttanäkymässä"},

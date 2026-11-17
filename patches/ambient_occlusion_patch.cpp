@@ -100,7 +100,7 @@ const char* kShaderSource = R"HLSL(
 sampler2D sDepth : register(s0); // INTZ scene depth, point
 sampler2D sZ     : register(s1); // 1/z pyramid (1/m, 0 = sky), point (exact texel reads)
 sampler2D sZt    : register(s2); // the same pyramid, bilinear within the nearest level (the march)
-sampler2D sAo    : register(s3); // AO + 1/z (G16R16F), point
+sampler2D sAo    : register(s3); // AO + 1/z (G16R16F; with the edge-aware blur A16B16G16R16F, B and A = edge weights), point
 sampler2D sColor : register(s4); // copy of the finished scene, point
 sampler2D sSim : register(s5); // Sim receiver device-depth mask, point
 sampler2D sHair : register(s6); // blended Sim body/hair: signed device depth and source coverage
@@ -111,7 +111,7 @@ float4 cMarch : register(c2);  // x = first step (px), y = mip offset, z = (1 + 
 float4 cRad   : register(c3);  // x = contact radius (m), y = large radius near, z = large radius far, w = fade1 (m)
 float4 cK     : register(c4);  // x = contact strength, y = large near, z = large far, w = blur tolerance (of z)
 float4 cBlend : register(c5);  // x = near-set depth, y = 1 / (far-set depth - near-set depth), z = isolated strength, w = isolated threshold
-float4 cDir   : register(c6);  // blur: xy = step (uv), z = 0 box / 1 tent; downsample: xy = source texel size (uv)
+float4 cDir   : register(c6);  // blur: xy = step (uv), z = 0 box / 1 tent (edge-aware: zw = 1 0 across, 0 1 down); downsample: xy = source texel size (uv)
 float4 cLook  : register(c7);  // composite: x = dead zone, y = 1 / (1 - dead zone), z = keep lamp light, w = 1 shading only
 float4 cPos   : register(c8);  // view position = z * (p * cPos.xy + cPos.zw, 1)
 float4 cRot   : register(c9);  // x = cos(pi / SLICES), y = sin(pi / SLICES)
@@ -166,8 +166,16 @@ float Bayer4(float2 q) { float2 lo = fmod(q, 2.0), hi = floor(fmod(q, 4.0) * 0.5
 float ACos(float x) { return acos(clamp(x, -1, 1)); }  // exact: the fast fit biased the shade by 0.5% (lab check)
 float4 ACos4(float4 x) { return acos(clamp(x, -1, 1)); }
 
+)HLSL"
+// (a string literal holds at most 16380 bytes in MSVC: the source goes on in the next one)
+R"HLSL(
+#if defined(ZOOM) || defined(BLEND_NORMALS)
+#define OPTIONS // the option variants: a looped march (unrolled steps would pass ps_3_0's 512 instruction slots)
+#endif
+
 // GTAO: SLICES slices (angle (s + b1) pi / SLICES) x STEPS geometric steps per side (offset from b2 plus a golden-ratio
-// phase per half-slice), contact + large horizon per side from the same samples. Out: R = visibility, G = 1/z (blur).
+// phase per half-slice), contact + large horizon per side from the same samples. Out: R = visibility, G = 1/z (blur);
+// the option variants also B, A = the soft edge weights towards the right and the lower neighbour (edge-aware blur).
 float4 GtaoPS(float2 uv : TEXCOORD0) : COLOR0
 {
     float2 pix = uv * cSize.xy;
@@ -178,16 +186,19 @@ float4 GtaoPS(float2 uv : TEXCOORD0) : COLOR0
     float3 c = PosF(pix, z);
     float zr = 1.0 / max(WAt(pix + float2(1, 0)), 1e-9), zl = 1.0 / max(WAt(pix - float2(1, 0)), 1e-9);
     float zd = 1.0 / max(WAt(pix + float2(0, 1)), 1e-9), zu = 1.0 / max(WAt(pix - float2(0, 1)), 1e-9);
-#ifdef BLEND_NORMALS
-    // Blended normals: the four quadrant normals (left-up, up-right, right-down, down-left) weighted by soft edge weights,
-    // with no per-pixel pick, so a tiny depth crease along a mesh seam cannot flip the normal pixel by pixel. Edge weights
-    // and quadrant weights follow XeGTAO_CalculateEdges / XeGTAO_CalculateNormal (XeGTAO, Copyright (C) 2016-2021 Intel
-    // Corporation, SPDX-License-Identifier: MIT). The neighbour vectors are not normalised (fewer instructions): on a plane
-    // the four normals are parallel either way.
+#ifdef OPTIONS
+    // Soft edge weights towards the left, right, upper and lower neighbour (1 = the same surface), slope-adjusted, as
+    // XeGTAO_CalculateEdges (XeGTAO, Copyright (C) 2016-2021 Intel Corporation, SPDX-License-Identifier: MIT)
     float4 e = float4(zl, zr, zu, zd) - z;
     float2 slope = (e.yw - e.xz) * 0.5;
     e = min(abs(e), abs(e + float4(slope.x, -slope.x, slope.y, -slope.y)));
     e = saturate(1.25 - e / (z * 0.011));
+#endif
+#ifdef BLEND_NORMALS
+    // Blended normals: the four quadrant normals (left-up, up-right, right-down, down-left) weighted by the edge weights,
+    // with no per-pixel pick, so a tiny depth crease along a mesh seam cannot flip the normal pixel by pixel. Quadrant
+    // weights follow XeGTAO_CalculateNormal (same notice). The neighbour vectors are not normalised (fewer
+    // instructions): on a plane the four normals are parallel either way.
     float4 qw = saturate(e.xzyw * e.zywx + 0.01);
     float3 pl = PosF(pix - float2(1, 0), zl) - c, pr = PosF(pix + float2(1, 0), zr) - c;
     float3 pu = PosF(pix - float2(0, 1), zu) - c, pd = PosF(pix + float2(0, 1), zd) - c;
@@ -243,8 +254,8 @@ float4 GtaoPS(float2 uv : TEXCOORD0) : COLOR0
         float4 low = float4(-sn, -sn, sn, sn);                  // (contact, large) side 0, (contact, large) side 1
         float4 hz = low;
         float ph0 = frac(b2 + (2 * s) * 0.618034), ph1 = frac(b2 + (2 * s + 1) * 0.618034);
-#if defined(ZOOM) || defined(BLEND_NORMALS)
-        [loop] // the option variants: unrolled steps would pass ps_3_0's 512 instruction slots
+#ifdef OPTIONS
+        [loop]
 #else
         [unroll]
 #endif
@@ -279,12 +290,34 @@ float4 GtaoPS(float2 uv : TEXCOORD0) : COLOR0
     float occ = cK.x * oC + kl * max(0, oL - oC);
     occ *= saturate((cRad.w - z) * cMarch.w);
     occ *= 1 - cBlend.z * saturate((iso - cBlend.w) / cBlend.w);
+#ifdef OPTIONS
+    return float4(saturate(1 - occ), w0, e.yw);
+#else
     return float4(saturate(1 - occ), w0, 0, 0);
+#endif
 }
 
+)HLSL"
+// (a string literal holds at most 16380 bytes in MSVC: the source goes on in the next one)
+R"HLSL(
 // separable depth-aware filter: box (0.5 1 1 1 0.5: one of each interleave offset) or tent (1 2 3 2 1)
 static const float BX[5] = { 0.5, 1.0, 1.0, 1.0, 0.5 };
 static const float TT[5] = { 1.0, 2.0, 3.0, 2.0, 1.0 };
+#ifdef EDGES
+// Edge-aware box, the same support (0.5 1 1 1 0.5): a tap counts by the product of the edge weights on the way to it
+// (GtaoPS: B towards the right neighbour, A towards the lower one; an edge has one weight, read from its left or upper
+// pixel, so both sides agree). Shade does not cross a silhouette, and no tent follows.
+float4 BlurPS(float2 uv : TEXCOORD0) : COLOR0
+{
+    float4 c0 = tex2Dlod(sAo, float4(uv, 0, 0));
+    [branch] if (c0.y <= 0.0) return float4(1, 0, 0, 0);
+    float4 t0 = tex2Dlod(sAo, float4(uv - 2.0 * cDir.xy, 0, 0)), t1 = tex2Dlod(sAo, float4(uv - cDir.xy, 0, 0));
+    float4 t3 = tex2Dlod(sAo, float4(uv + cDir.xy, 0, 0)), t4 = tex2Dlod(sAo, float4(uv + 2.0 * cDir.xy, 0, 0));
+    float e1 = dot(t1.zw, cDir.zw), e2 = dot(c0.zw, cDir.zw);
+    float4 w = float4(0.5 * dot(t0.zw, cDir.zw) * e1, e1, e2, 0.5 * e2 * dot(t3.zw, cDir.zw));
+    return float4((c0.x + dot(w, float4(t0.x, t1.x, t3.x, t4.x))) / (1.0 + dot(w, 1.0)), c0.yzw);
+}
+#else
 float4 BlurPS(float2 uv : TEXCOORD0) : COLOR0
 {
     float2 c0 = tex2Dlod(sAo, float4(uv, 0, 0)).rg;
@@ -299,6 +332,7 @@ float4 BlurPS(float2 uv : TEXCOORD0) : COLOR0
     }
     return float4(ws > 0 ? sum / ws : c0.x, c0.y, 0, 0);
 }
+#endif
 
 // The Banding Fix's grain (ShaderPatches::AddDither) on x, of at most `amount`: the composite rounds to 8 bits again.
 // Triangular, tapering to uniform above mid-grey, within the clamp (no specks at pure black or white); the R2 pattern
@@ -366,7 +400,7 @@ float4 CompositePS(float2 uv : TEXCOORD0, float2 vpos : VPOS) : COLOR0
 )HLSL";
 
 // Every variant is compiled at start-up on a background thread (framework/shader_cache.h)
-ShaderCache::Id AddShader(const char* tag, const char* entry, int priority, const char* slices = nullptr) {
+ShaderCache::Id AddShader(const char* tag, const char* entry, int priority, const char* slices = nullptr, const char* define = nullptr) {
     ShaderCache::Desc d;
     d.tag = tag;
     d.source = kShaderSource;
@@ -375,6 +409,7 @@ ShaderCache::Id AddShader(const char* tag, const char* entry, int priority, cons
     d.target = "ps_3_0";
     d.flags = D3DCOMPILE_OPTIMIZATION_LEVEL3;
     if (slices) d.macros.emplace_back("SLICES", slices);
+    if (define) d.macros.emplace_back(define, "1");
     d.priority = priority;
     return ShaderCache::Add(std::move(d));
 }
@@ -382,9 +417,11 @@ const ShaderCache::Id kLinearPsId = AddShader("AO LinearizePS", "LinearizePS", 0
 const ShaderCache::Id kDownPsId = AddShader("AO DownPS", "DownPS", 0);
 const ShaderCache::Id kBlurPsId = AddShader("AO BlurPS", "BlurPS", 0);
 const ShaderCache::Id kCompositePsId = AddShader("AO CompositePS", "CompositePS", 0);
+const ShaderCache::Id kBlurEdgesPsId = AddShader("AO BlurPS (edge-aware)", "BlurPS", 1, nullptr, "EDGES");
 const ShaderCache::Id kZoomTierPsId = AddShader("AO ZoomTierPS", "ZoomTierPS", 1);
 const ShaderCache::Id kDepthPsId = AddShader("AO DepthPS (Developer capture)", "DepthPS", 1);
-// GtaoPS variants: bit 0 = Fewer directions when far (ZOOM), bit 1 = Blended normals (BLEND_NORMALS); 0 = the default pass
+// GtaoPS variants: bit 0 = reads the frame's tier (ZOOM: Fewer directions when far, and every other option that needs
+// the looped pass), bit 1 = Blended normals (BLEND_NORMALS); 0 = the default pass
 constexpr int kGtaoVariants = 4;
 // Slices by zoom: the selected quality's count up close, 3/4 of it from kZoomMid and 1/2 from kZoomFar (metres along the
 // view axis at the screen centre; set from the far, mid and near views of tools/ingame_runner/jobs/ao-adaptive-ab.json,
@@ -438,10 +475,12 @@ struct Params {
     bool zoomSlices = false;   // fewer slices when the camera looks far (one count per frame)
     bool blendNormals = false; // blended normals (no per-pixel pick of the neighbour)
     bool zoomHysteresis = false; // zoomSlices: the count switches 10% past a threshold and back 10% before it
+    bool edgeBlur = false;     // edge-aware 4x4 box from the AO pass's edge weights, no tent
 };
 
 struct State {
     bool active = false, ready = false, fixedTried = false;
+    bool edgeAsked = false, edgeBlur = false; // the AO targets were made for the edge-aware blur / it runs (4 channels supported)
     bool gtaoTried[kGtaoVariants][kQualityCount] = {};
     bool showShade = false; // Advanced > Show the shade alone (not saved)
     bool showSimMask = false; // preview only, never persisted
@@ -456,7 +495,7 @@ struct State {
     IDirect3DTexture9* tier[2] = {}; // the frame's direction-count tier, 1x1: this frame's and the last one's
     IDirect3DSurface9* tierSurf[2] = {};
     int tierNow = 0;
-    IDirect3DPixelShader9 *psLinear = nullptr, *psDown = nullptr, *psBlur = nullptr, *psComposite = nullptr, *psDepth = nullptr, *psZoomTier = nullptr;
+    IDirect3DPixelShader9 *psLinear = nullptr, *psDown = nullptr, *psBlur = nullptr, *psComposite = nullptr, *psDepth = nullptr, *psZoomTier = nullptr, *psBlurEdges = nullptr;
     IDirect3DPixelShader9* psGtao[kGtaoVariants][kQualityCount] = {};
     // GPU cost (timestamp queries, read a few frames later)
     static constexpr int kQ = 4;
@@ -705,6 +744,7 @@ void ReleaseShaders() {
     SafeRelease(g.psComposite);
     SafeRelease(g.psDepth);
     SafeRelease(g.psZoomTier);
+    SafeRelease(g.psBlurEdges);
     for (int v = 0; v < kGtaoVariants; v++)
         for (int q = 0; q < kQualityCount; q++) {
             SafeRelease(g.psGtao[v][q]);
@@ -730,7 +770,7 @@ IDirect3DPixelShader9* CreateShader(IDirect3DDevice9* dev, ShaderCache::Id id, c
     return nullptr;
 }
 
-int GtaoVariant() { return (g.p.zoomSlices ? 1 : 0) | (g.p.blendNormals ? 2 : 0); }
+int GtaoVariant() { return (g.p.zoomSlices || g.edgeBlur ? 1 : 0) | (g.p.blendNormals ? 2 : 0); }
 
 // The AO pass of one quality and the current options, created on first use
 IDirect3DPixelShader9* GtaoShader(IDirect3DDevice9* dev, int q) {
@@ -744,7 +784,7 @@ IDirect3DPixelShader9* GtaoShader(IDirect3DDevice9* dev, int q) {
 }
 
 bool EnsureShaders(IDirect3DDevice9* dev) {
-    const bool fixedOk = g.psLinear && g.psDown && g.psBlur && g.psComposite && g.psZoomTier;
+    const bool fixedOk = g.psLinear && g.psDown && g.psBlur && g.psComposite && g.psZoomTier && g.psBlurEdges;
     if (!fixedOk && g.fixedTried) return false; // failed once: logged, not retried every frame
     g.fixedTried = true;
     if (!g.psLinear) g.psLinear = CreateShader(dev, kLinearPsId, "LinearizePS");
@@ -752,7 +792,8 @@ bool EnsureShaders(IDirect3DDevice9* dev) {
     if (!g.psBlur) g.psBlur = CreateShader(dev, kBlurPsId, "BlurPS");
     if (!g.psComposite) g.psComposite = CreateShader(dev, kCompositePsId, "CompositePS");
     if (!g.psZoomTier) g.psZoomTier = CreateShader(dev, kZoomTierPsId, "ZoomTierPS");
-    const bool ok = g.psLinear && g.psDown && g.psBlur && g.psComposite && g.psZoomTier && GtaoShader(dev, g.p.quality);
+    if (!g.psBlurEdges) g.psBlurEdges = CreateShader(dev, kBlurEdgesPsId, "BlurPS (edge-aware)");
+    const bool ok = g.psLinear && g.psDown && g.psBlur && g.psComposite && g.psZoomTier && g.psBlurEdges && GtaoShader(dev, g.p.quality);
     if (!ok) g.status = "ERROR: the shader did not compile (see ApexRadiance_LOG.txt)";
     return ok;
 }
@@ -787,6 +828,11 @@ bool InitResources(IDirect3DDevice9* dev) {
         LOG_ERROR("[AO] R32F (filtered) or G16R16F render targets not supported");
         return false;
     }
+    // Edge-aware smoothing keeps two edge weights beside the AO and the 1/z; without the format the usual blur runs
+    g.edgeAsked = g.p.edgeBlur;
+    g.edgeBlur = g.edgeAsked && FormatSupported(dev, D3DFMT_A16B16G16R16F, false);
+    if (g.edgeAsked && !g.edgeBlur) LOG_WARNING("[AO] A16B16G16R16F render targets not supported: Edge-aware smoothing stays off");
+    const D3DFORMAT aoFormat = g.edgeBlur ? D3DFMT_A16B16G16R16F : D3DFMT_G16R16F;
     if (!EnsureShaders(dev)) return false;
     g.width = bd.Width;
     g.height = bd.Height;
@@ -801,7 +847,7 @@ bool InitResources(IDirect3DDevice9* dev) {
         return SUCCEEDED(dev->CreateTexture(g.width, g.height, 1, D3DUSAGE_RENDERTARGET, fmt, D3DPOOL_DEFAULT, tex, nullptr)) && *tex &&
                SUCCEEDED((*tex)->GetSurfaceLevel(0, surf)) && *surf;
     };
-    ok = ok && make(&g.aoA, &g.aoASurf, D3DFMT_G16R16F) && make(&g.aoB, &g.aoBSurf, D3DFMT_G16R16F) &&
+    ok = ok && make(&g.aoA, &g.aoASurf, aoFormat) && make(&g.aoB, &g.aoBSurf, aoFormat) &&
          SceneCopy::Acquire(dev, g.width, g.height, bd.Format, &g.colorTex, &g.colorSurf); // (copied and read inside RunAo only)
     for (int i = 0; ok && i < 2; i++) // starts at tier 0 (the view counts as near until the first frame says otherwise)
         ok = SUCCEEDED(dev->CreateTexture(1, 1, 1, D3DUSAGE_RENDERTARGET, D3DFMT_R32F, D3DPOOL_DEFAULT, &g.tier[i], nullptr)) && g.tier[i] &&
@@ -1123,7 +1169,8 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
         {std::clamp(g.p.simStrength, 0.0f, 1.0f), WantSimMask() && simMask.cleared && !simMask.failed ? 1.0f : 0.0f,
          std::clamp(g.p.hairStrength, 0.0f, 1.0f), std::clamp(g.p.simMaxShade, 0.0f, 1.0f)},
         {g.p.simControls && g.showSimMask ? 1.0f : 0.0f, WantSimMask() && simMask.hairCleared && !simMask.failed ? 1.0f : 0.0f, 0, 0},
-        {W * 0.5f / g.padW, H * 0.5f / g.padH, 1.0f / kZoomMid, 1.0f / kZoomFar},
+        // (thresholds of 0 keep tier 0: the looped pass without Fewer directions when far)
+        {W * 0.5f / g.padW, H * 0.5f / g.padH, g.p.zoomSlices ? 1.0f / kZoomMid : 0.0f, g.p.zoomSlices ? 1.0f / kZoomFar : 0.0f},
         {0, 0, g.p.zoomHysteresis ? 1.0f / (1.0f + kZoomHysteresis) : 1.0f, g.p.zoomHysteresis ? 1.0f / (1.0f - kZoomHysteresis) : 1.0f}};
     dev->SetPixelShaderConstantF(0, &c[0][0], kPSConsts);
 
@@ -1153,7 +1200,7 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
         dev->StretchRect(g.tmpSurf[i], nullptr, g.zLevel[i], nullptr, D3DTEXF_NONE);
     }
 
-    // 3. GTAO at full resolution -> aoA (R = visibility, G = 1/z); with Fewer directions when far, the frame's tier first
+    // 3. GTAO at full resolution -> aoA (R = visibility, G = 1/z); for the option variants, the frame's tier first
     dev->SetTexture(2, g.zTex);
     if (GtaoVariant() & 1) {
         g.tierNow ^= 1;
@@ -1170,10 +1217,11 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
     dev->SetTexture(2, nullptr);
     dev->SetTexture(7, nullptr);
 
-    // 4. filter: box H, box V (cancels the 4x4 interleave), tent H, tent V; a -> b -> a -> b -> a
-    dev->SetPixelShader(g.psBlur);
-    for (int pass = 0; pass < 4; pass++) {
-        const float dir[4] = {pass & 1 ? 0.0f : 1.0f / W, pass & 1 ? 1.0f / H : 0.0f, pass < 2 ? 0.0f : 1.0f, 0};
+    // 4. filter: box H, box V (cancels the 4x4 interleave), tent H, tent V; a -> b -> a -> b -> a. Edge-aware: the two
+    //    box passes only
+    dev->SetPixelShader(g.edgeBlur ? g.psBlurEdges : g.psBlur);
+    for (int pass = 0; pass < (g.edgeBlur ? 2 : 4); pass++) {
+        const float dir[4] = {pass & 1 ? 0.0f : 1.0f / W, pass & 1 ? 1.0f / H : 0.0f, g.edgeBlur ? float(~pass & 1) : pass < 2 ? 0.0f : 1.0f, float(pass & 1)};
         dev->SetPixelShaderConstantF(6, dir, 1);
         dev->SetRenderTarget(0, pass & 1 ? g.aoASurf : g.aoBSurf);
         dev->SetTexture(3, pass & 1 ? g.aoB : g.aoA);
@@ -1213,7 +1261,8 @@ void AoEffect(IDirect3DDevice9* dev) {
     if (FAILED(dev->GetRenderTarget(0, &bb)) || !bb) return;
     D3DSURFACE_DESC bd{};
     bb->GetDesc(&bd);
-    if (bd.Width != g.width || bd.Height != g.height) { // the back buffer changed without a Reset: rebuild next frame
+    // the back buffer changed without a Reset, or Edge-aware smoothing changed the AO targets' format: rebuild next frame
+    if (bd.Width != g.width || bd.Height != g.height || g.p.edgeBlur != g.edgeAsked) {
         bb->Release();
         ReleaseResources();
         g.retryCountdown = 0;
@@ -1352,6 +1401,7 @@ class AmbientOcclusionPatch : public ApexPatch {
         RegisterBoolSetting(&g.p.transparentHair, "transparentHair", true, "Also adjust supported transparent hair strands");
         RegisterBoolSetting(&g.p.zoomSlices, "zoomSlices", Params{}.zoomSlices, "Fewer directions per pixel when the camera looks far away");
         RegisterBoolSetting(&g.p.blendNormals, "blendNormals", Params{}.blendNormals, "Smooth shade on flat surfaces: no dashed lines along their edges");
+        RegisterBoolSetting(&g.p.edgeBlur, "edgeBlur", Params{}.edgeBlur, "Edge-aware smoothing: the shade does not bleed across the edges of objects");
         RegisterBoolSetting(&g.p.zoomHysteresis, "zoomHysteresis", Params{}.zoomHysteresis, "Fewer directions when far switches its count 10% past a distance and back 10% before it");
     }
 
@@ -1481,6 +1531,9 @@ class AmbientOcclusionPatch : public ApexPatch {
         ImGui::EndDisabled();
         changed |= ApexUi::SwitchRow("Smooth flat surfaces", &g.p.blendNormals,
                                      "Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", kDefaults.blendNormals);
+        changed |= ApexUi::SwitchRow("Edge-aware smoothing", &g.p.edgeBlur,
+                                     "Smooths the shade without letting it bleed across the edges of objects",
+                                     kDefaults.edgeBlur);
         ApexUi::CardGroup("Map view");
         changed |= ApexUi::SwitchRow("Also in map view", &g.p.inMapView, "Soft shade around houses and trees when the map view is open", kDefaults.inMapView);
         if (changed) NotifySettingChanged();
@@ -1492,8 +1545,8 @@ class AmbientOcclusionPatch : public ApexPatch {
     // (the composite grain follows the Banding Fix, only where the shade changed the pixel); 6 = distance and Sim receivers;
     // 7 = independent hair, transparency coverage and a separate Sim card; 8 = Sim Occlusion defaults off;
     // 9 = tuned default configuration for scene and Sim controls; 10 = fewer directions when far and blended normals (off);
-    // 11 = steady direction count (off).
-    static constexpr int kSettingsRevision = 11;
+    // 11 = steady direction count (off); 12 = edge-aware smoothing (off).
+    static constexpr int kSettingsRevision = 12;
     static constexpr const char* kRevisionKey = "revisao";
     static int Revision(const toml::table& table) { return static_cast<int>(table[kRevisionKey].value<int64_t>().value_or(1)); }
     // Start from current defaults, then overlay every value that was explicitly saved.

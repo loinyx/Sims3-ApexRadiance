@@ -2085,6 +2085,8 @@ const I18n::Pair kPairs[] = {
     {"Keeps the direction count steady while the camera rests near a switch distance", "Brání tomu, aby se Méně směrů v dálce přepínalo sem a tam, když kamera stojí poblíž vzdálenosti přepnutí"},
     {"Smooth flat surfaces", "Hladké rovné plochy"},
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Odstraní slabé přerušované čáry stínu podél okrajů linek, podlah a jiných rovných ploch"},
+    {"Edge-aware smoothing", "Vyhlazení s ohledem na hrany"},
+    {"Smooths the shade without letting it bleed across the edges of objects", "Vyhlazuje stín, aniž by přetékal přes hrany objektů"},
     {"Show the shade alone", "Zobrazit jen stín"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "Zobrazí jen stín, šedě, abys viděl, co dělá, zatímco ho upravuješ (neukládá se)"},
     {"Also in map view", "I v zobrazení mapy"},

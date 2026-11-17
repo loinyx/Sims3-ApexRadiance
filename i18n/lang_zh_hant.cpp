@@ -2085,6 +2085,8 @@ const I18n::Pair kPairs[] = {
     {"Keeps the direction count steady while the camera rests near a switch distance", "鏡頭停在切換距離附近時，防止「遠處減少方向」來回切換"},
     {"Smooth flat surfaces", "平滑平面"},
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "去除檯面、地板等平面邊緣上淡淡的虛線狀陰影"},
+    {"Edge-aware smoothing", "邊緣感知平滑"},
+    {"Smooths the shade without letting it bleed across the edges of objects", "平滑陰影且不讓它越過物體邊緣"},
     {"Show the shade alone", "單獨顯示陰影"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "只以灰色顯示陰影，讓你在調整時看清效果（不會儲存）"},
     {"Also in map view", "地圖檢視中也套用"},

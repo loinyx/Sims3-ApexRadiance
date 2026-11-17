@@ -579,6 +579,8 @@ const I18n::Entry kEntries[] = {
     {"Keeps the direction count steady while the camera rests near a switch distance", "Evita que Menos direções ao longe fique alternando quando a câmera para perto de uma distância de troca", "Evita que Menos direcciones a lo lejos cambie una y otra vez cuando la cámara se queda cerca de una distancia de cambio", "Empêche Moins de directions au loin de basculer sans cesse quand la caméra reste près d'une distance de changement"},
     {"Smooth flat surfaces", "Superfícies planas suaves", "Superficies planas suaves", "Surfaces planes lisses"},
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Remove leves linhas tracejadas de sombra nas bordas de balcões, pisos e outras superfícies planas", "Quita leves líneas discontinuas de sombra en los bordes de encimeras, suelos y otras superficies planas", "Supprime les légères lignes d'ombre en pointillés le long des bords des plans de travail, des sols et des autres surfaces planes"},
+    {"Edge-aware smoothing", "Suavização que respeita bordas", "Suavizado que respeta los bordes", "Lissage respectant les contours"},
+    {"Smooths the shade without letting it bleed across the edges of objects", "Suaviza a sombra sem deixá-la vazar pelas bordas dos objetos", "Suaviza la sombra sin dejar que se filtre por los bordes de los objetos", "Lisse l'ombre sans la laisser déborder sur les contours des objets"},
     {"Show the shade alone", "Mostrar só a sombra", "Mostrar solo la sombra", "Afficher l'ombre seule"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)",
      "Mostra só a sombra, em cinza, para ver o que ela faz enquanto você ajusta (não é salvo)",

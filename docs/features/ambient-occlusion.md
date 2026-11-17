@@ -51,10 +51,11 @@ Each frame:
 | Fewer directions when far | `zoomSlices` | bool | off | | One direction count per frame, from the depth at the screen centre: the Quality's count closer than 60 m, 3/4 of it from 60 m, 1/2 from 120 m (at least 2) |
 | Steady direction count | `zoomHysteresis` | bool | off | | With Fewer directions when far: the count changes 10% past a threshold and changes back 10% before it (60 m: 66 and 54 m; 120 m: 132 and 108 m) |
 | Smooth flat surfaces | `blendNormals` | bool | off | | Blended normal reconstruction (XeGTAO's edge weights): no per-pixel pick of the neighbour, so a depth crease along a mesh seam cannot flip the normal pixel by pixel |
+| Edge-aware smoothing | `edgeBlur` | bool | off | | The 4x4 box weighs each tap by the AO pass's edge weights instead of the 1/z ratio, and the tent passes are dropped. The AO targets get 4 channels (A16B16G16R16F); without that format the usual blur runs |
 | Reach | `alcance` | float | 166% | 50 to 200% | Scales all radii |
 | Keep lamp light | `protegerLuz` | float | 46% | 0 to 100% | Share of light that bright and lamp-lit pixels keep |
 | Developer > Visual effects > Ambient shadows > Show the shade alone | (not saved) | bool | off | | Shows only the shade, in grey (developer mode) |
-| (none) | `revisao` | int | 11 | | Settings revision. Older files keep every saved value and only gain missing keys |
+| (none) | `revisao` | int | 12 | | Settings revision. Older files keep every saved value and only gain missing keys |
 
 All settings apply immediately. Keys from the old combined build (`intensidade`, `raioM`, `visualizar`) are not read.
 
@@ -123,8 +124,19 @@ resting at a threshold can change the count from one frame to the next.
 right-down, down-left), each weighted by the product of its two edge weights, `saturate(1.25 - e / (0.011 z))` with the
 slope-adjusted depth step `e` (XeGTAO, Intel, MIT). On a plane all four are parallel, so the result is the plane.
 
-Both options compile as separate GtaoPS variants; their 4-step march is a loop instead of unrolled, to stay within ps_3_0's
-512 instruction slots (default 505, options 348 to 369). With both off the AO pass is the same bytecode as before.
+**Edge-aware smoothing** (`edgeBlur`). The option variants of GtaoPS also write two soft edge weights per pixel, towards
+the right and the lower neighbour: `saturate(1.25 - e / (0.011 z))` with the slope-adjusted depth step `e` (XeGTAO's
+`XeGTAO_CalculateEdges`, Intel, MIT). An edge has one weight, read from its left or upper pixel, so both sides agree
+(XeGTAO packs four weights per pixel and multiplies the two sides). The blur keeps the 4x4 box support
+(0.5 1 1 1 0.5 across, then down), which the interleave needs, and weighs each tap by the product of the edge weights
+on the way to it. The tent passes are dropped: two blur passes instead of four. Offline check (High, 1080p): 0.14 to
+0.19 of a level from the default on average, open-floor roughness 0.007 to 0.008 against 0.005 to 0.006 (no interleave
+left), contact shade 100 to 104% of the default, and the shade step at silhouettes 10 to 14% larger.
+
+The option variants compile separately from the default pass (bit 0: reads the frame's tier, used by every option
+that needs the looped pass; bit 1: Smooth flat surfaces). Their 4-step march is a loop instead of unrolled, to stay
+within ps_3_0's 512 instruction slots (default 505 to 507, options 348 to 368). With every option off the AO pass is
+the same bytecode as before.
 
 **Composite.** `v = 1 - saturate((1 - ao - 0.05) / 0.95)`, then per channel
 `m = MultiBounce(v, min(0.9, colour^2.2))` (Jimenez 2016), then `m = lerp(m, 1, saturate((luma - 0.35) * 2.5) * keep)`.

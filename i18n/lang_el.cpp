@@ -2085,6 +2085,8 @@ const I18n::Pair kPairs[] = {
     {"Keeps the direction count steady while the camera rests near a switch distance", "Εμποδίζει το Λιγότερες κατευθύνσεις στο βάθος να αλλάζει συνεχώς όταν η κάμερα μένει κοντά σε μια απόσταση αλλαγής"},
     {"Smooth flat surfaces", "Λείες επίπεδες επιφάνειες"},
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Αφαιρεί αχνές διακεκομμένες γραμμές σκιάς στις άκρες πάγκων, δαπέδων και άλλων επίπεδων επιφανειών"},
+    {"Edge-aware smoothing", "Εξομάλυνση με σεβασμό στις ακμές"},
+    {"Smooths the shade without letting it bleed across the edges of objects", "Εξομαλύνει τη σκιά χωρίς να την αφήνει να απλώνεται πέρα από τις ακμές των αντικειμένων"},
     {"Show the shade alone", "Μόνο η σκιά"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "Δείχνει μόνο τη σκιά, σε γκρι, για να δεις τι κάνει όσο τη ρυθμίζεις (δεν αποθηκεύεται)"},
     {"Also in map view", "Και στην προβολή χάρτη"},

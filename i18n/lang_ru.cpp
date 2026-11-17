@@ -2085,6 +2085,8 @@ const I18n::Pair kPairs[] = {
     {"Keeps the direction count steady while the camera rests near a switch distance", "Не даёт параметру «Меньше направлений вдали» переключаться туда-сюда, когда камера стоит рядом с расстоянием переключения"},
     {"Smooth flat surfaces", "Гладкие плоские поверхности"},
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Убирает слабые пунктирные линии тени вдоль краёв столешниц, полов и других плоских поверхностей"},
+    {"Edge-aware smoothing", "Сглаживание с учётом краёв"},
+    {"Smooths the shade without letting it bleed across the edges of objects", "Сглаживает тень, не давая ей растекаться через края объектов"},
     {"Show the shade alone", "Показать только тень"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "Показывает только тень, серым, чтобы видеть её действие при настройке (не сохраняется)"},
     {"Also in map view", "И в виде карты"},

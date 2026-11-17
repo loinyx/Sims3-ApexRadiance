@@ -2085,6 +2085,8 @@ const I18n::Pair kPairs[] = {
     {"Keeps the direction count steady while the camera rests near a switch distance", "ป้องกันไม่ให้ ลดจำนวนทิศทางเมื่ออยู่ไกล สลับไปมาเมื่อกล้องหยุดอยู่ใกล้ระยะที่สลับ"},
     {"Smooth flat surfaces", "พื้นผิวเรียบลื่น"},
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "ลบเส้นเงาประจาง ๆ ตามขอบเคาน์เตอร์ พื้น และพื้นผิวเรียบอื่น ๆ"},
+    {"Edge-aware smoothing", "การเกลี่ยที่คำนึงถึงขอบ"},
+    {"Smooths the shade without letting it bleed across the edges of objects", "เกลี่ยเงาโดยไม่ให้เงาล้นข้ามขอบของวัตถุ"},
     {"Show the shade alone", "แสดงเฉพาะเงา"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "แสดงเฉพาะเงาเป็นสีเทา เพื่อดูผลขณะปรับ (ไม่บันทึก)"},
     {"Also in map view", "ในมุมมองแผนที่ด้วย"},

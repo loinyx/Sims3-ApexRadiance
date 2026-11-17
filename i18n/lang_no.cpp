@@ -2085,6 +2085,8 @@ const I18n::Pair kPairs[] = {
     {"Keeps the direction count steady while the camera rests near a switch distance", "Hindrer at Færre retninger på avstand skifter frem og tilbake når kameraet står nær en skifteavstand"},
     {"Smooth flat surfaces", "Glatte flate overflater"},
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Fjerner svake stiplede skyggelinjer langs kantene på benker, gulv og andre flate overflater"},
+    {"Edge-aware smoothing", "Kantbevisst utjevning"},
+    {"Smooths the shade without letting it bleed across the edges of objects", "Jevner ut skyggen uten å la den flyte over kantene på objekter"},
     {"Show the shade alone", "Vis bare skyggen"},
     {"Shows only the shade, in grey, to see what it does while you adjust it (not saved)", "Viser bare skyggen, i grått, så du ser hva den gjør mens du justerer (lagres ikke)"},
     {"Also in map view", "Også i kartvisning"},
