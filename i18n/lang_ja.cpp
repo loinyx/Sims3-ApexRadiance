@@ -2664,6 +2664,8 @@ const I18n::Pair kPairs[] = {
     {"Preset", "プリセット"},
     {"Run earlier", "先に実行"},
     {"Run later", "後で実行"},
+    {"Remove from the list", "リストから削除"},
+    {"{} removed from the list", "{} をリストから削除しました"},
     {"Kind", "種類"},
     {"Only shaders of this kind", "この種類のシェーダーだけ"},
     {"All kinds", "すべての種類"},

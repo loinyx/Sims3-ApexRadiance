@@ -2664,6 +2664,8 @@ const I18n::Pair kPairs[] = {
     {"Preset", "Προρύθμιση"},
     {"Run earlier", "Εκτέλεση νωρίτερα"},
     {"Run later", "Εκτέλεση αργότερα"},
+    {"Remove from the list", "Αφαίρεση από τη λίστα"},
+    {"{} removed from the list", "Το {} αφαιρέθηκε από τη λίστα"},
     {"Kind", "Είδος"},
     {"Only shaders of this kind", "Μόνο shaders αυτού του είδους"},
     {"All kinds", "Όλα τα είδη"},

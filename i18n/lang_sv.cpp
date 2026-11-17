@@ -2664,6 +2664,8 @@ const I18n::Pair kPairs[] = {
     {"Preset", "Förinställning"},
     {"Run earlier", "Kör tidigare"},
     {"Run later", "Kör senare"},
+    {"Remove from the list", "Ta bort från listan"},
+    {"{} removed from the list", "{} borttagen från listan"},
     {"Kind", "Typ"},
     {"Only shaders of this kind", "Bara shaders av den här typen"},
     {"All kinds", "Alla typer"},

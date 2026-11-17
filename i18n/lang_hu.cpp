@@ -2664,6 +2664,8 @@ const I18n::Pair kPairs[] = {
     {"Preset", "Előbeállítás"},
     {"Run earlier", "Korábban fusson"},
     {"Run later", "Később fusson"},
+    {"Remove from the list", "Eltávolítás a listáról"},
+    {"{} removed from the list", "{} eltávolítva a listáról"},
     {"Kind", "Fajta"},
     {"Only shaders of this kind", "Csak ilyen fajtájú shaderek"},
     {"All kinds", "Minden fajta"},

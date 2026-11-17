@@ -2664,6 +2664,8 @@ const I18n::Pair kPairs[] = {
     {"Preset", "ค่าที่ตั้งไว้"},
     {"Run earlier", "รันก่อน"},
     {"Run later", "รันทีหลัง"},
+    {"Remove from the list", "นำออกจากรายการ"},
+    {"{} removed from the list", "นำ {} ออกจากรายการแล้ว"},
     {"Kind", "ประเภท"},
     {"Only shaders of this kind", "เฉพาะเชดเดอร์ประเภทนี้"},
     {"All kinds", "ทุกประเภท"},

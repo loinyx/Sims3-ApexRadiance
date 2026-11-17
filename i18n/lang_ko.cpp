@@ -2664,6 +2664,8 @@ const I18n::Pair kPairs[] = {
     {"Preset", "프리셋"},
     {"Run earlier", "먼저 실행"},
     {"Run later", "나중에 실행"},
+    {"Remove from the list", "목록에서 제거"},
+    {"{} removed from the list", "{}을(를) 목록에서 제거함"},
     {"Kind", "종류"},
     {"Only shaders of this kind", "이 종류의 셰이더만"},
     {"All kinds", "모든 종류"},

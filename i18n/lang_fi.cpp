@@ -2664,6 +2664,8 @@ const I18n::Pair kPairs[] = {
     {"Preset", "Esiasetus"},
     {"Run earlier", "Aja aiemmin"},
     {"Run later", "Aja myöhemmin"},
+    {"Remove from the list", "Poista luettelosta"},
+    {"{} removed from the list", "{} poistettu luettelosta"},
     {"Kind", "Tyyppi"},
     {"Only shaders of this kind", "Vain tämän tyypin varjostimet"},
     {"All kinds", "Kaikki tyypit"},

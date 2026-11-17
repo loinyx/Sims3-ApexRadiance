@@ -2543,6 +2543,8 @@ Unavailable on this graphics card	tr_image.cpp:kEntries	Indisponível nesta plac
 Preset	tr_image.cpp:kEntries	Preset	Preajuste	Préréglage	
 Run earlier	tr_image.cpp:kEntries	Rodar antes	Ejecutar antes	Exécuter plus tôt	
 Run later	tr_image.cpp:kEntries	Rodar depois	Ejecutar después	Exécuter plus tard	
+Remove from the list	tr_image.cpp:kEntries	Remover da lista	Quitar de la lista	Retirer de la liste	
+{} removed from the list	tr_image.cpp:kEntries	{} removido da lista	{} quitado de la lista	{} retiré de la liste	{}
 Kind	tr_image.cpp:kEntries	Tipo	Tipo	Type	
 Only shaders of this kind	tr_image.cpp:kEntries	Só shaders deste tipo	Solo shaders de este tipo	Seulement les shaders de ce type	
 All kinds	tr_image.cpp:kEntries	Todos os tipos	Todos los tipos	Tous les types	

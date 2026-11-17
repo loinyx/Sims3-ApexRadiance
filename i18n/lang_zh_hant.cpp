@@ -2664,6 +2664,8 @@ const I18n::Pair kPairs[] = {
     {"Preset", "預設"},
     {"Run earlier", "提前執行"},
     {"Run later", "延後執行"},
+    {"Remove from the list", "從清單中移除"},
+    {"{} removed from the list", "已從清單中移除 {}"},
     {"Kind", "類型"},
     {"Only shaders of this kind", "只顯示此類型的著色器"},
     {"All kinds", "所有類型"},

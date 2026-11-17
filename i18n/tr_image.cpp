@@ -742,6 +742,8 @@ const I18n::Entry kEntries[] = {
     {"Preset", "Preset", "Preajuste", "Préréglage"},
     {"Run earlier", "Rodar antes", "Ejecutar antes", "Exécuter plus tôt"},
     {"Run later", "Rodar depois", "Ejecutar después", "Exécuter plus tard"},
+    {"Remove from the list", "Remover da lista", "Quitar de la lista", "Retirer de la liste"},
+    {"{} removed from the list", "{} removido da lista", "{} quitado de la lista", "{} retiré de la liste"},
     {"Kind", "Tipo", "Tipo", "Type"},
     {"Only shaders of this kind", "Só shaders deste tipo", "Solo shaders de este tipo", "Seulement les shaders de ce type"},
     {"All kinds", "Todos os tipos", "Todos los tipos", "Tous les types"},

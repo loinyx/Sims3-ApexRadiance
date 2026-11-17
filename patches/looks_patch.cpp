@@ -120,7 +120,7 @@ struct State
     bool beforeColor = false;  // run before Apex's colour (Picture) instead of after
     bool onUi = false;         // also shade the game's UI, menus and loading screens (end of frame, like GShade)
     float mix = 1.0f;
-    std::set<std::string> off; // techniques switched off here (still enabled in the .ini)
+    std::set<std::string> off; // techniques switched off here (still in the list: the .ini's or added here)
     std::map<std::string, std::vector<float>> tweaks; // technique -> 4 floats per param
     std::map<std::string, std::map<std::string, std::string>> defs; // lower-case .fx name -> definition -> value edited here
     std::vector<std::string> extra;    // "Tech@File.fx" switched on here although the .ini does not enable it
@@ -696,16 +696,36 @@ void RemoveExtra(const std::string& key)
     g.extra.erase(std::remove_if(g.extra.begin(), g.extra.end(), [&](const std::string& x) { return Lower(x) == k; }), g.extra.end());
 }
 
-// A switch in the run list: the .ini's own techniques go into `off`; one added here is taken out of the list again
+// A switch in the run list: switched off, a shader stays in the list (dimmed, its values kept) until it is removed
 void SwitchEntry(size_t i, bool on)
 {
-    const auto& e = g.order[i];
-    if (InIni(EntryKey(e))) { if (on) g.off.erase(e.technique); else g.off.insert(e.technique); }
-    else if (!on) { RemoveExtra(EntryKey(e)); RebuildOrder(); }
+    if (on) g.off.erase(g.order[i].technique); else g.off.insert(g.order[i].technique);
+}
+
+// Changes to the run list asked for by a row are applied after the whole list is drawn: a row keeps references
+// into g.order while it draws, and rebuilding the list under it read freed memory
+struct DragMove { size_t i = 0; int dir = 0; } g_dragMove; // a row held by its grip (or Run earlier / later) passed a neighbour
+std::string g_removeKey; // the trash of a shader added here
+
+// Takes a shader added here out of the run list; its switch, values and place go with it. Its technique ("" when not
+// removed).
+std::string RemoveEntry(const std::string& key)
+{
+    auto it = std::find_if(g.order.begin(), g.order.end(), [&](const Looks::PresetEntry& e) { return EntryKey(e) == key; });
+    if (it == g.order.end() || InIni(key)) return {};
+    const std::string technique = it->technique;
+    RemoveExtra(key);
+    std::erase(g.runOrder, key);
+    RebuildOrder();
+    if (std::none_of(g.order.begin(), g.order.end(), [&](const Looks::PresetEntry& e) { return e.technique == technique; }))
+    {
+        g.off.erase(technique); // the switch and the values are kept by technique: only while no other row has it
+        g.tweaks.erase(technique);
+    }
+    return technique;
 }
 
 // Swaps run-list entry i with the runnable entry before (dir -1) or after (dir +1) it
-struct DragMove { size_t i = 0; int dir = 0; } g_dragMove; // a row held by its grip passed a neighbour
 void Move(size_t i, int dir)
 {
     int j = (int)i;
@@ -1687,12 +1707,12 @@ bool ShaderActions(size_t i, int pos, int count, bool& reorder)
     if (pos > 1)
     {
         next(ApexUi::ButtonWidth(earlier, true));
-        if (ApexUi::IconTextButton(earlier, IconId::ChevronUp)) { Move(i, -1); reorder = changed = true; }
+        if (ApexUi::IconTextButton(earlier, IconId::ChevronUp)) { g_dragMove = { i, -1 }; reorder = changed = true; }
     }
     if (pos < count)
     {
         next(ApexUi::ButtonWidth(later, true));
-        if (ApexUi::IconTextButton(later, IconId::ChevronDown)) { Move(i, 1); reorder = changed = true; }
+        if (ApexUi::IconTextButton(later, IconId::ChevronDown)) { g_dragMove = { i, 1 }; reorder = changed = true; }
     }
     next(ImGui::CalcTextSize(place.c_str()).x);
     ImGui::AlignTextToFramePadding(); // centred on the buttons' line
@@ -1819,8 +1839,10 @@ bool ShaderRow(size_t i, int pos, int count, bool& reorder)
         const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact); // (the values keep their own size)
         const float h = ImGui::GetFrameHeight(), gap = ApexUi::kSpace2 * u;
         const float twinW = doubled ? ApexUi::ButtonWidth(twin.action.c_str(), false) + ApexUi::kSpace3 * u : 0.0f;
+        const bool removable = !InIni(EntryKey(e)); // added here: the .ini's own shaders are only switched off
+        const float trashW = removable ? h + gap : 0.0f;
         ApexUi::SetNextRowIconColor(VioletTheme::kTextFaint);
-        if (ApexUi::BeginControlRow(label.c_str(), description.c_str(), twinW + ApexUi::ToggleSwitchSize().x + gap + h, IconId::GripVertical))
+        if (ApexUi::BeginControlRow(label.c_str(), description.c_str(), twinW + trashW + ApexUi::ToggleSwitchSize().x + gap + h, IconId::GripVertical))
         {
             float controlsLeft = 0.0f, controlsTop = FLT_MAX; // the controls' top (stacked under the text: the name side ends above)
             if (doubled)
@@ -1829,6 +1851,13 @@ bool ShaderRow(size_t i, int pos, int count, bool& reorder)
                 controlsLeft = ImGui::GetItemRectMin().x;
                 controlsTop = ImGui::GetItemRectMin().y;
                 ImGui::SameLine(0.0f, ApexUi::kSpace3 * u);
+            }
+            if (removable)
+            {
+                if (ApexUi::IconButton("##Remove", IconId::Trash2, "Remove from the list", false, h / u)) g_removeKey = EntryKey(e);
+                if (!doubled) controlsLeft = ImGui::GetItemRectMin().x;
+                controlsTop = std::min(controlsTop, ImGui::GetItemRectMin().y);
+                ImGui::SameLine(0.0f, gap);
             }
             bool on = !IsOff(i);
             ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (h - ApexUi::ToggleSwitchSize().y) * 0.5f); // centred on the row's controls line
@@ -1840,7 +1869,7 @@ bool ShaderRow(size_t i, int pos, int count, bool& reorder)
             }
             ImVec2 switchMin = ImGui::GetItemRectMin();
             controlsTop = std::min(controlsTop, switchMin.y);
-            if (doubled) switchMin.x = controlsLeft; // the name side ends before the button
+            if (doubled || removable) switchMin.x = controlsLeft; // the name side ends before the buttons
             ImGui::SameLine(0.0f, gap);
             ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, switchMin.y + (ApexUi::ToggleSwitchSize().y - h) * 0.5f));
             if (ApexUi::IconButton("##Open", open ? IconId::ChevronDown : IconId::ChevronRight, nullptr, false, h / u))
@@ -3005,12 +3034,19 @@ public:
             int pos = 0;
             std::vector<std::string> getPacks; // packs a Download of the missing rows would fetch (Download all)
             const Looks::Packs::Batch batch = Looks::Packs::Status();
-            for (size_t i = 0; i < g.order.size() && !reorder; ++i)
+            for (size_t i = 0; i < g.order.size(); ++i)
             {
                 if (!Runnable(i)) { if (!ApexUi::FilterActive()) MissingRow(i, batch, getPacks); continue; } // in its place
-                changed |= ShaderRow(i, ++pos, total, reorder); // a move changes the list: drawn again next frame
+                changed |= ShaderRow(i, ++pos, total, reorder); // moves and removals wait for the end of the list
             }
             if (g_dragMove.dir) { Move(g_dragMove.i, g_dragMove.dir); g_dragMove = {}; changed = true; }
+            if (!g_removeKey.empty())
+            {
+                if (const std::string technique = RemoveEntry(g_removeKey); !technique.empty()) // the change's note has its Undo
+                    ApexUi::ReportChange(I18n::Trf("{} removed from the list", technique).c_str());
+                g_removeKey.clear();
+                changed = true;
+            }
             if (getPacks.size() >= 2 && !ApexUi::FilterActive())
             {
                 const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
