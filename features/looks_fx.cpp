@@ -337,16 +337,17 @@ D3DFORMAT Format(reshadefx::texture_format f, const char** lowered)
     return D3DFMT_A8R8G8B8;
 }
 
-// D3DCompile of one entry point's shader model 3.0 HLSL. ReShade compiles with optimisation level 3 (performance mode)
-// or 1; when that fails here the other flag sets D3D9 offers are tried in turn: flow control kept (loops it cannot unroll,
-// fewer instruction slots), flow control avoided (gradients inside loops), then no optimisation. *tried is the set that
-// worked (0 = the first), or -1.
+// D3DCompile of one entry point's shader model 3.0 HLSL. ReShade compiles with optimisation level 1 (level 3 only in its
+// performance mode, which Apex does not have: __RESHADE_PERFORMANCE_MODE__ is 0), so level 1 comes first and gives
+// ReShade's code; when that fails here the other flag sets D3D9 offers are tried in turn: level 3, flow control kept
+// (loops it cannot unroll, fewer instruction slots), flow control avoided (gradients inside loops), then no optimisation.
+// *tried is the set that worked (0 = the first), or -1.
 struct Try { UINT flags; const char* name; };
 const Try kTries[] = {
-    { D3DCOMPILE_OPTIMIZATION_LEVEL3, "" },
+    { D3DCOMPILE_OPTIMIZATION_LEVEL1, "" },
+    { D3DCOMPILE_OPTIMIZATION_LEVEL3, "optimisation level 3" },
     { D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_PREFER_FLOW_CONTROL, "flow control kept" },
     { D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_AVOID_FLOW_CONTROL, "flow control avoided" },
-    { D3DCOMPILE_OPTIMIZATION_LEVEL1, "optimisation level 1" },
     { D3DCOMPILE_SKIP_OPTIMIZATION, "no optimisation" },
 };
 bool CompileSm3(const std::string& hlsl, const std::string& entry, bool vs, std::vector<uint8_t>& code, std::string& errors, int* tried)
@@ -376,7 +377,7 @@ bool CompileSm3(const std::string& hlsl, const std::string& entry, bool vs, std:
 // ---- the compile cache (Folders::cacheDir): D3DCompile's results for one effect, keyed by every entry point's generated
 // HLSL (the preprocessed source with its includes and macros, BUFFER_WIDTH / BUFFER_HEIGHT among them), its target and
 // D3DCompiler's version, so a changed .fx, .fxh or picture size is compiled again. One file per effect and picture size.
-constexpr char kCacheMagic[8] = { 'A', 'P', 'X', 'F', 'X', 'C', '1', 0 };
+constexpr char kCacheMagic[8] = { 'A', 'P', 'X', 'F', 'X', 'C', '2', 0 }; // 2: level 1 first (ReShade's flags), the 4.0.4 macros
 
 uint64_t Fnv(uint64_t h, const void* data, size_t n)
 {
@@ -532,10 +533,10 @@ bool CompileImpl(const std::wstring& fxPath, const Folders& folders, UINT W, UIN
     pp.add_macro_definition("BUFFER_RCP_WIDTH", "(1.0 / BUFFER_WIDTH)");
     pp.add_macro_definition("BUFFER_RCP_HEIGHT", "(1.0 / BUFFER_HEIGHT)");
     pp.add_macro_definition("BUFFER_COLOR_SPACE", "1");   // sRGB
-    pp.add_macro_definition("BUFFER_COLOR_FORMAT", "88"); // B8G8R8X8 (the game's back buffer)
+    pp.add_macro_definition("BUFFER_COLOR_FORMAT", "87"); // B8G8R8A8: ReShade runs an X8 back buffer's effects on an A8 copy
     pp.add_macro_definition("BUFFER_COLOR_BIT_DEPTH", "8");
     for (const auto& [name, value] : folders.defines) // the look's PreprocessorDefinitions: before the file, as ReShade adds them
-        if (!name.empty()) pp.add_macro_definition(name, value);
+        if (!name.empty()) pp.add_macro_definition(name, value.empty() ? "1" : value); // "FOO=" is 1 in ReShade
     // ReShade's global depth setting for this game: the INTZ depth is 0 near .. 1 far, as the runner's "not reversed";
     // ReShade.fxh and qUINT_common.fxh default to reversed. After the look's own, so a look that names it still wins
     pp.add_macro_definition("RESHADE_DEPTH_INPUT_IS_REVERSED", "0");
@@ -606,7 +607,8 @@ bool CompileImpl(const std::wstring& fxPath, const Folders& folders, UINT W, UIN
                     x.format = D3DFMT_A8R8G8B8; // images are uploaded as 8-bit BGRA
                     x.image = FindTextureFile(folders, a.value.string_data);
                     uint64_t isz = 0;
-                    if (x.image.empty()) x.error = "needs the texture file " + a.value.string_data + ", which is not in the Textures folder";
+                    // a missing file: the texture stays cleared to zero and the effect runs, as ReShade does (it logs the file)
+                    if (x.image.empty()) out.notes.push_back("texture " + t.name + ": " + a.value.string_data + " is not in the Textures folder (left black, as in ReShade)");
                     else if (!FileSize(x.image, isz) || isz > kMaxTextureFileBytes) x.error = "its texture " + a.value.string_data + " is larger than 64 MB";
                 }
             if (x.error.empty())
@@ -860,7 +862,7 @@ void UpdateSources(const Effect& fx, std::vector<float>& regs, SourceState& st)
         float v[4] = { 0, 0, 0, 0 };
         if (n == "timer") v[0] = st.timerMs;
         else if (n == "frametime") v[0] = st.frametimeMs;
-        else if (n == "framecount") v[0] = (float)st.frame;
+        else if (n == "framecount") v[0] = u.base == kBool ? (st.frame % 2 == 0 ? 1.0f : 0.0f) : (float)st.frame; // a bool: even frames (ReShade)
         else if (n == "random")
         {
             const Ann* mn = FindAnn(u.ann, "min"); const Ann* mx = FindAnn(u.ann, "max");
@@ -870,12 +872,32 @@ void UpdateSources(const Effect& fx, std::vector<float>& regs, SourceState& st)
         }
         else if (n == "pingpong")
         {
+            // as ReShade's runtime: a step between step[0] and step[1] (step[1] 0: step[0]), slowed by smoothing near the end it
+            // moves to, at least 0.05 a second; from the uniform's own value (x, then its direction in y: 0 counts as rising)
             const Ann* mn = FindAnn(u.ann, "min"); const Ann* mx = FindAnn(u.ann, "max"); const Ann* sp = FindAnn(u.ann, "step");
-            const float lo = mn ? mn->f[0] : 0.0f, hi = mx ? mx->f[0] : 1.0f, step = sp ? sp->f[0] : 1.0f;
+            const Ann* sm = FindAnn(u.ann, "smoothing");
+            const float lo = mn && !mn->isString ? mn->f[0] : 0.0f, hi = mx && !mx->isString ? mx->f[0] : 0.0f;
+            const float s0 = sp && !sp->isString ? sp->f[0] : 0.0f, s1 = sp && !sp->isString ? sp->f[1] : 0.0f;
+            const float smoothing = sm && !sm->isString ? sm->f[0] : 0.0f;
             float& val = st.pingpong[i * 2]; float& dir = st.pingpong[i * 2 + 1];
-            if (dir == 0) { dir = 1; val = lo; }
-            val += dir * step * st.frametimeMs * 0.001f;
-            if (val >= hi) { val = hi; dir = -1; } else if (val <= lo) { val = lo; dir = 1; }
+            if (dir == 0) { val = u.init.size() > 0 ? u.init[0] : 0.0f; dir = u.init.size() > 1 && u.init[1] < 0.0f ? -1.0f : 1.0f; }
+            float inc = s0;
+            if (s1 != 0.0f)
+            {
+                st.rng = st.rng * 1664525u + 1013904223u;
+                inc = s0 + std::fmod((float)((st.rng >> 16) & 0x7FFF), s1 - s0 + 1.0f);
+            }
+            const float dt = st.frametimeMs * 0.001f;
+            if (dir > 0)
+            {
+                inc = std::max(inc - std::max(0.0f, smoothing - (hi - val)), 0.05f) * dt;
+                if ((val += inc) >= hi) { val = hi; dir = -1; }
+            }
+            else
+            {
+                inc = std::max(inc - std::max(0.0f, smoothing - (val - lo)), 0.05f) * dt;
+                if ((val -= inc) <= lo) { val = lo; dir = 1; }
+            }
             v[0] = val; v[1] = dir;
         }
         else if (n == "date")
@@ -978,6 +1000,7 @@ bool Instance::Create(IDirect3DDevice9* dev, std::shared_ptr<const Effect> fxp, 
         IDirect3DSurface9* s0 = nullptr;
         tex_[i]->GetSurfaceLevel(0, &s0);
         dev->ColorFill(s0, nullptr, 0); // ReShade clears new textures to zero
+        if (t.levels > 1 && t.image.empty()) { tex_[i]->SetAutoGenFilterType(D3DTEXF_LINEAR); tex_[i]->GenerateMipSubLevels(); } // its mips too (ReShade)
         if (!t.image.empty())
         {
             std::vector<uint8_t> img;
@@ -1051,6 +1074,12 @@ bool Instance::Run(IDirect3DDevice9* dev, size_t technique, IDirect3DSurface9* t
         }
 
     auto texOf = [&](size_t i) { return fx.textures[i].semantic == "DEPTH" ? depth : tex_[i]; };
+    // an 8-bit texture (COLOR, RGBA8): the only kind ReShade gives an sRGB view; on others SRGBTexture / SRGBWriteEnable do nothing
+    auto Srgb8 = [&](int i) {
+        if (i < 0 || (size_t)i >= fx.textures.size()) return false;
+        const Texture& t = fx.textures[i];
+        return t.semantic == "COLOR" || (t.semantic.empty() && (t.format == D3DFMT_A8R8G8B8 || t.format == D3DFMT_X8R8G8B8));
+    };
     auto texSize = [&](size_t i, UINT& w, UINT& h) {
         if (!fx.textures[i].semantic.empty()) { w = W; h = H; } else { w = fx.textures[i].w; h = fx.textures[i].h; }
     };
@@ -1134,10 +1163,15 @@ bool Instance::Run(IDirect3DDevice9* dev, size_t technique, IDirect3DSurface9* t
         RS(D3DRS_COLORWRITEENABLE1, pass.mask[1]);
         RS(D3DRS_COLORWRITEENABLE2, pass.mask[2]);
         RS(D3DRS_COLORWRITEENABLE3, pass.mask[3]);
-        RS(D3DRS_SRGBWRITEENABLE, pass.srgbWrite);
+        RS(D3DRS_SRGBWRITEENABLE, pass.srgbWrite && (toPicture || Srgb8(pass.rt[0])));
         RS(D3DRS_CULLMODE, D3DCULL_NONE);
         RS(D3DRS_SCISSORTESTENABLE, FALSE);
         RS(D3DRS_CLIPPLANEENABLE, 0);
+        // as ReShade sets them on every pass: the game's own values (two-sided stencil, dithering) changed SMAA's stencil
+        RS(D3DRS_TWOSIDEDSTENCILMODE, FALSE);
+        RS(D3DRS_FILLMODE, D3DFILL_SOLID);
+        RS(D3DRS_DITHERENABLE, FALSE);
+        RS(D3DRS_LASTPIXEL, TRUE);
 
         // textures: this pass's bindings; a stage bound earlier and unused now is cleared
         IDirect3DBaseTexture9* want[16] = {};
@@ -1154,7 +1188,8 @@ bool Instance::Run(IDirect3DDevice9* dev, size_t technique, IDirect3DSurface9* t
             SS(bd.reg, D3DSAMP_ADDRESSV, s.addrV);
             SS(bd.reg, D3DSAMP_ADDRESSW, s.addrW);
             SS(bd.reg, D3DSAMP_BORDERCOLOR, 0);
-            SS(bd.reg, D3DSAMP_SRGBTEXTURE, bd.srgb);
+            SS(bd.reg, D3DSAMP_SRGBTEXTURE, bd.srgb && Srgb8(s.texture)); // ReShade has an sRGB view of 8-bit textures only
+            SS(bd.reg, D3DSAMP_MAXANISOTROPY, s.minF == D3DTEXF_ANISOTROPIC || s.magF == D3DTEXF_ANISOTROPIC ? 16 : 1);
             float bias = s.lodBias; DWORD biasBits; memcpy(&biasBits, &bias, 4);
             SS(bd.reg, D3DSAMP_MIPMAPLODBIAS, biasBits);
             SS(bd.reg, D3DSAMP_MAXMIPLEVEL, (DWORD)s.minLod);

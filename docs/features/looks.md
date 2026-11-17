@@ -190,8 +190,15 @@ refused; the same file is reused and a different file of that name gets a number
   RGBA8, RG11B10F to RGBA16F, integer textures to 32-bit float, 1D to 2D); other compile flags are tried when the first
   set fails.
 - What does not run: compute shaders, more than 4 render targets in one pass, 3D render targets, integer bitwise
-  operators, other texture semantics, missing texture files; the log and the developer build's *Live counters* give
-  the reason.
+  operators, other texture semantics; the log and the developer build's *Live counters* give the reason. A missing
+  texture file leaves that texture black and the effect runs, as in ReShade (a note says which file).
+- As ReShade 6.7.3 runs them (4.0.4): compiled at optimisation level 1 first (`__RESHADE_PERFORMANCE_MODE__` 0), the
+  other D3DCompile flag sets only when that fails; `BUFFER_COLOR_FORMAT` 87; a definition `FOO=` is 1; includes found in
+  every subfolder of the Shaders folder and of each pack's (`Shaders\**`); timer and frametime from a fine clock; a bool
+  `framecount` true on even frames; `pingpong` with ReShade's step range, smoothing and 0.05 minimum; each pass sets
+  two-sided stencil off, solid fill, no dither and the last pixel on; anisotropic samplers at 16; sRGB reads and writes on
+  8-bit textures only; a new texture's mips cleared with it. Not yet: textures read in a vertex shader, textures shared
+  between .fx files by name, `key` and mouse sources, `__VENDOR__` / `__DEVICE__`, the global definitions of a ReShade.ini.
 - Limits: 2 MB per .fx or included file, 64 includes, 16 MB of preprocessed code, 64 MB per texture file, 64 textures and
   256 MB of textures per effect, 384 MB for every user effect running, 64 passes per technique, 256 user passes per frame,
   two minutes of compile time per file. Includes and textures must stay inside the Shaders folder (`..` and absolute
@@ -381,7 +388,8 @@ the copy gets a numbered name, which the look then does not use); names with a f
 ## Technical reference
 
 - Post-scene order 45 (after Picture) or 35 (before). Run points (`WhereOf` in `patches/looks_patch.cpp`): shaders
-  that read depth at the scene boundary; with *Interface without shaders* off, the rest at the end of the frame from
+  that read depth at the scene boundary, under the game's colour curve like the World run (4.0.4: before, MXAO's shade
+  came out about half as strong in mid and bright tones and SMAA found fewer dark edges than in ReShade); with *Interface without shaders* off, the rest at the end of the frame from
   `endSceneBeforeOverlay` on the back buffer; with it on (`World`), right after the boundary's own draw when that draw
   is the game's bloom (a full-screen two-triangle strip), before the next back-buffer draw (the UI) or the first copy
   of the game's colour pass, else at the boundary.

@@ -9,6 +9,17 @@
 
 namespace Looks {
 
+namespace {
+// Milliseconds from a fine clock (ReShade's timer and frametime use a high-resolution clock)
+double NowMs()
+{
+    static const double toMs = [] { LARGE_INTEGER f{}; QueryPerformanceFrequency(&f); return f.QuadPart ? 1000.0 / (double)f.QuadPart : 0.0; }();
+    LARGE_INTEGER c{};
+    QueryPerformanceCounter(&c);
+    return (double)c.QuadPart * toMs;
+}
+} // namespace
+
 // ============================================================================================== table
 int ShaderCount() { return ReShadeShaders::kShaderCount; }
 const LooksShader& Shader(int index)
@@ -184,7 +195,7 @@ void Runner::Draw(IDirect3DDevice9* dev, IDirect3DPixelShader9* ps, IDirect3DSur
 void Runner::SetParams(IDirect3DDevice9* dev, int shader, const float* values)
 {
     const LooksShader& d = Shader(shader);
-    const unsigned long long now = GetTickCount64();
+    const double now = NowMs();
     for (int i = 0; i < d.paramCount; ++i)
     {
         const LooksParam& p = d.params[i];
@@ -295,7 +306,7 @@ bool Runner::Run(const Frame& f, const std::vector<Step>& steps)
     if (f.frame == 0 || f.frame != lastFrame_) // a run point later in the same frame keeps the frame's count and time
     {
         lastFrame_ = f.frame;
-        const unsigned long long now = GetTickCount64();
+        const double now = NowMs(); // a fine clock, as ReShade's (GetTickCount64 moved in 16 ms steps: frame time 0 or 16)
         if (!startMs_) startMs_ = lastMs_ = now;
         ++frameCount_;
         frameTimeMs_ = (float)(now - lastMs_);

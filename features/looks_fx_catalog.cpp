@@ -207,6 +207,24 @@ void ListFx(const std::wstring& dir, int depth, std::vector<std::wstring>& out)
     FindClose(h);
 }
 
+// dir's subfolders down to depth more levels (after dir itself): ReShade's "Shaders\**" search path finds a header in any
+// of them (BFBFX keeps random.fxh in Shaders\bfb_inc\)
+void SubDirs(const std::wstring& dir, int depth, std::vector<std::wstring>& out)
+{
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((dir + L"*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return;
+    do
+    {
+        const std::wstring n = fd.cFileName;
+        if (n == L"." || n == L".." || (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) || !(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        if (out.size() >= 256) break;
+        out.push_back(dir + n + L"\\");
+        if (depth > 1) SubDirs(dir + n + L"\\", depth - 1, out);
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+}
+
 // One .fx of the scan: the player's own (pack "") or a downloaded pack's, with where its includes and textures are found
 struct Source { std::wstring path; std::string pack; size_t folders = 0; };
 
@@ -423,12 +441,14 @@ void ScanOnce(UINT W, UINT H, bool force)
         const bool standard = _stricmp(p.c_str(), "ReShade standard effects") == 0;
         packShaders.insert(standard ? packShaders.begin() : packShaders.end(), d + L"Shaders\\");
         packTextures.insert(standard ? packTextures.begin() : packTextures.end(), d + L"Textures\\");
+        SubDirs(d + L"Shaders\\", 3, packShaders); // then its subfolders, as ReShade's Shaders\**
     }
     if (!g_checkedLoaded) LoadChecked(root);
     if (force && !g_checked.empty()) { g_checked.clear(); g_checkedDirty = true; } // Check again: an included file may have changed
     std::vector<Folders> folders(1 + packs.size());
     folders[0].root = root;
     folders[0].includeDirs = { root + L"Shaders\\", root };
+    SubDirs(root + L"Shaders\\", 3, folders[0].includeDirs);
     folders[0].textureDirs = { root + L"Textures\\", root };
     std::vector<Source> files;
     {
@@ -445,6 +465,7 @@ void ScanOnce(UINT W, UINT H, bool force)
         Folders& f = folders[k + 1];
         f.root = root;
         f.includeDirs = { d + L"Shaders\\" };
+        SubDirs(d + L"Shaders\\", 3, f.includeDirs);
         f.textureDirs = { d + L"Textures\\" };
         std::vector<std::wstring> list;
         if (packFiles < kMaxPackFiles) ListFx(d + L"Shaders\\", 3, list);

@@ -530,8 +530,13 @@ void World(IDirect3DDevice9* dev, bool curveAhead);
 void Effect(IDirect3DDevice9* dev)
 {
     g_boundaryThisFrame = true;
-    g_mode = "at the scene boundary";
+    // depth shaders (MXAO, SMAA's depth pass, fog, DOF) run here, before the game's colour curve: like the World run they get
+    // the picture after the curve (what ReShade sees at Present) and are written back through its inverse. Without it MXAO's
+    // shade came out about half as strong in mid and bright tones and SMAA found fewer dark edges
+    g_curve = !PostScene::ColourTilesStarted() ? PostScene::ColourCurveLastFrame() : 0.0f;
+    g_mode = g_curve > 0.0f ? "at the scene boundary, under the game's colour curve" : "at the scene boundary";
     EffectImpl(dev, false, 1u << kBoundary);
+    g_curve = 0.0f;
     if (g.onUi || g_worldDone) return;
     if (PostScene::BoundaryOnDraw()) { g_worldPending = g_boundaryDraw = true; return; } // decided at that draw (OnDraw)
     World(dev, !PostScene::ColourTilesStarted());
