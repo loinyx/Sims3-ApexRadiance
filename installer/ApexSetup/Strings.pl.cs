@@ -263,7 +263,7 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Włączone w sterowniku AMD, dla wszystkich gier. Działa najlepiej z limitem klatek Apex od 60 do 90 FPS.",
         ["Off in the AMD driver."] = "Wyłączone w sterowniku AMD.",
         ["Apex frame limit"] = "Limit klatek Apex",
-        ["Frame generation works best at 60 to 90 fps."] = "Generowanie klatek działa najlepiej przy 60–90 FPS.",
+        ["Frame generation doubles what you see: a 60 fps limit shows about 120 on screen. Works best at 60 to 90 fps."] = "Generowanie klatek podwaja to, co widzisz: limit 60 FPS daje około 120 na ekranie. Działa najlepiej przy 60–90 FPS.",
         ["Off"] = "Wyłączony",
         ["{0} fps"] = "{0} FPS",
         ["{0} fps (recommended)"] = "{0} FPS (zalecane)",

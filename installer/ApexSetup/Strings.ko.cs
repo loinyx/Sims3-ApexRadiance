@@ -295,7 +295,7 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "AMD 드라이버에서 모든 게임에 켜짐. Apex의 프레임 제한이 60~90fps일 때 가장 잘 작동합니다.",
         ["Off in the AMD driver."] = "AMD 드라이버에서 꺼짐.",
         ["Apex frame limit"] = "Apex 프레임 제한",
-        ["Frame generation works best at 60 to 90 fps."] = "프레임 생성은 60~90fps에서 가장 잘 작동합니다.",
+        ["Frame generation doubles what you see: a 60 fps limit shows about 120 on screen. Works best at 60 to 90 fps."] = "프레임 생성은 보이는 프레임을 두 배로 늘립니다: 60fps 제한이면 화면에는 약 120이 보입니다. 60~90fps에서 가장 잘 작동합니다.",
         ["Off"] = "끄기",
         ["{0} fps"] = "{0}fps",
         ["{0} fps (recommended)"] = "{0}fps (권장)",

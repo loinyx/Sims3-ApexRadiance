@@ -310,7 +310,7 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Bekapcsolva az AMD-illesztőben, minden játékhoz. 60 és 90 FPS közötti Apex képkockakorláttal működik a legjobban.",
         ["Off in the AMD driver."] = "Kikapcsolva az AMD-illesztőben.",
         ["Apex frame limit"] = "Apex képkockakorlát",
-        ["Frame generation works best at 60 to 90 fps."] = "A képkocka-generálás 60–90 FPS-en működik a legjobban.",
+        ["Frame generation doubles what you see: a 60 fps limit shows about 120 on screen. Works best at 60 to 90 fps."] = "A képkocka-generálás megduplázza, amit látsz: 60 FPS-es korláttal nagyjából 120 jelenik meg. 60–90 FPS-en működik a legjobban.",
         ["Off"] = "Ki",
         ["{0} fps"] = "{0} FPS",
         ["{0} fps (recommended)"] = "{0} FPS (ajánlott)",

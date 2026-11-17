@@ -300,7 +300,7 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Zapnuto v ovladači AMD, pro všechny hry. Nejlépe funguje s limitem snímků Apexu 60 až 90 FPS.",
         ["Off in the AMD driver."] = "Vypnuto v ovladači AMD.",
         ["Apex frame limit"] = "Limit snímků Apexu",
-        ["Frame generation works best at 60 to 90 fps."] = "Generování snímků funguje nejlépe při 60 až 90 FPS.",
+        ["Frame generation doubles what you see: a 60 fps limit shows about 120 on screen. Works best at 60 to 90 fps."] = "Generování snímků zdvojnásobí, co vidíte: limit 60 FPS ukáže na obrazovce asi 120. Funguje nejlépe při 60 až 90 FPS.",
         ["Off"] = "Vypnuto",
         ["{0} fps"] = "{0} FPS",
         ["{0} fps (recommended)"] = "{0} FPS (doporučeno)",

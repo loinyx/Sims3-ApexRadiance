@@ -297,7 +297,7 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "AMD ドライバーでオン (すべてのゲーム)。Apex のフレーム制限を 60～90 fps にすると最もよく動きます。",
         ["Off in the AMD driver."] = "AMD ドライバーでオフ。",
         ["Apex frame limit"] = "Apex のフレーム制限",
-        ["Frame generation works best at 60 to 90 fps."] = "フレーム生成は 60～90 fps で最もよく動きます。",
+        ["Frame generation doubles what you see: a 60 fps limit shows about 120 on screen. Works best at 60 to 90 fps."] = "フレーム生成で見えるフレームは 2 倍になります: 60 fps の制限なら画面では約 120。60～90 fps で最もよく動きます。",
         ["Off"] = "オフ",
         ["{0} fps"] = "{0} fps",
         ["{0} fps (recommended)"] = "{0} fps (推奨)",

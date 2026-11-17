@@ -293,7 +293,7 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Включено в драйвере AMD, для всех игр. Лучше всего работает с ограничением кадров Apex от 60 до 90 FPS.",
         ["Off in the AMD driver."] = "Выключено в драйвере AMD.",
         ["Apex frame limit"] = "Ограничение кадров Apex",
-        ["Frame generation works best at 60 to 90 fps."] = "Генерация кадров лучше всего работает при 60–90 FPS.",
+        ["Frame generation doubles what you see: a 60 fps limit shows about 120 on screen. Works best at 60 to 90 fps."] = "Генерация кадров удваивает то, что вы видите: ограничение 60 FPS даёт около 120 на экране. Лучше всего работает при 60–90 FPS.",
         ["Off"] = "Выкл.",
         ["{0} fps"] = "{0} FPS",
         ["{0} fps (recommended)"] = "{0} FPS (рекомендуется)",

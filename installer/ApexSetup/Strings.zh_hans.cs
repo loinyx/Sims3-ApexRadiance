@@ -291,7 +291,7 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "已在 AMD 驱动中开启，对所有游戏生效。Apex 的帧率上限设为 60 到 90 fps 时效果最好。",
         ["Off in the AMD driver."] = "已在 AMD 驱动中关闭。",
         ["Apex frame limit"] = "Apex 帧率上限",
-        ["Frame generation works best at 60 to 90 fps."] = "帧生成在 60 到 90 fps 时效果最好。",
+        ["Frame generation doubles what you see: a 60 fps limit shows about 120 on screen. Works best at 60 to 90 fps."] = "帧生成会让你看到的帧数翻倍：60 fps 上限在屏幕上约为 120。在 60 到 90 fps 时效果最好。",
         ["Off"] = "关闭",
         ["{0} fps"] = "{0} fps",
         ["{0} fps (recommended)"] = "{0} fps（推荐）",

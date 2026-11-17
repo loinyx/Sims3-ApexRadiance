@@ -263,7 +263,7 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "เปิดในไดรเวอร์ AMD สำหรับทุกเกม ทำงานได้ดีที่สุดเมื่อขีดจำกัดเฟรมของ Apex อยู่ที่ 60 ถึง 90 fps",
         ["Off in the AMD driver."] = "ปิดในไดรเวอร์ AMD",
         ["Apex frame limit"] = "ขีดจำกัดเฟรมของ Apex",
-        ["Frame generation works best at 60 to 90 fps."] = "การสร้างเฟรมทำงานได้ดีที่สุดที่ 60 ถึง 90 fps",
+        ["Frame generation doubles what you see: a 60 fps limit shows about 120 on screen. Works best at 60 to 90 fps."] = "การสร้างเฟรมทำให้ภาพที่เห็นเพิ่มเป็นสองเท่า: จำกัดไว้ 60 fps จะเห็นบนจอประมาณ 120 ทำงานได้ดีที่สุดที่ 60 ถึง 90 fps",
         ["Off"] = "ปิด",
         ["{0} fps"] = "{0} fps",
         ["{0} fps (recommended)"] = "{0} fps (แนะนำ)",

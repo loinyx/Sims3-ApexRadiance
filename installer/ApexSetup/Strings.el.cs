@@ -308,7 +308,7 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Ενεργό στον οδηγό της AMD, για όλα τα παιχνίδια. Λειτουργεί καλύτερα με όριο καρέ του Apex 60 έως 90 FPS.",
         ["Off in the AMD driver."] = "Ανενεργό στον οδηγό της AMD.",
         ["Apex frame limit"] = "Όριο καρέ του Apex",
-        ["Frame generation works best at 60 to 90 fps."] = "Η δημιουργία καρέ λειτουργεί καλύτερα στα 60 έως 90 FPS.",
+        ["Frame generation doubles what you see: a 60 fps limit shows about 120 on screen. Works best at 60 to 90 fps."] = "Η δημιουργία καρέ διπλασιάζει ό,τι βλέπετε: όριο 60 FPS δείχνει περίπου 120 στην οθόνη. Λειτουργεί καλύτερα στα 60 έως 90 FPS.",
         ["Off"] = "Ανενεργό",
         ["{0} fps"] = "{0} FPS",
         ["{0} fps (recommended)"] = "{0} FPS (προτείνεται)",

@@ -295,7 +295,7 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Til i AMD-driveren, for alle spil. Virker bedst med Apex' billedgrænse på 60 til 90 fps.",
         ["Off in the AMD driver."] = "Fra i AMD-driveren.",
         ["Apex frame limit"] = "Apex' billedgrænse",
-        ["Frame generation works best at 60 to 90 fps."] = "Billedgenerering virker bedst ved 60 til 90 fps.",
+        ["Frame generation doubles what you see: a 60 fps limit shows about 120 on screen. Works best at 60 to 90 fps."] = "Billedgenerering fordobler det, du ser: en grænse på 60 fps viser omkring 120 på skærmen. Virker bedst ved 60 til 90 fps.",
         ["Off"] = "Fra",
         ["{0} fps"] = "{0} fps",
         ["{0} fps (recommended)"] = "{0} fps (anbefalet)",

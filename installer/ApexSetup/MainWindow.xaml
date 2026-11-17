@@ -374,7 +374,7 @@
                                     </Border>
                                     <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                         <TextBlock Text="Apex frame limit" Style="{StaticResource ApexStrong}" />
-                                        <TextBlock Text="Frame generation works best at 60 to 90 fps." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
+                                        <TextBlock Text="Frame generation doubles what you see: a 60 fps limit shows about 120 on screen. Works best at 60 to 90 fps." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
                                         <TextBlock x:Name="FpsPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
                                     </StackPanel>
                                     <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">

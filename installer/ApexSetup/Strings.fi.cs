@@ -295,7 +295,7 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Päällä AMD-ajurissa, kaikissa peleissä. Toimii parhaiten Apexin kuvarajoituksella 60–90 FPS.",
         ["Off in the AMD driver."] = "Pois päältä AMD-ajurissa.",
         ["Apex frame limit"] = "Apexin kuvarajoitus",
-        ["Frame generation works best at 60 to 90 fps."] = "Kuvien generointi toimii parhaiten 60–90 FPS:llä.",
+        ["Frame generation doubles what you see: a 60 fps limit shows about 120 on screen. Works best at 60 to 90 fps."] = "Kuvien generointi tuplaa näkemäsi: 60 FPS:n rajoitus näyttää ruudulla noin 120. Toimii parhaiten 60–90 FPS:llä.",
         ["Off"] = "Pois",
         ["{0} fps"] = "{0} FPS",
         ["{0} fps (recommended)"] = "{0} FPS (suositus)",
