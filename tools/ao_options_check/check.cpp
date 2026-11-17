@@ -7,6 +7,8 @@
 //  - Fewer directions when far: up close the image equals the default pass; at mid and far views the difference stays
 //    small and the flat floor stays as smooth as with the default (the 4x4 interleave is still cancelled);
 //  - Smooth flat surfaces: stray shade on surfaces where nothing meets (counter top, open floor), contact shade kept;
+//  - Steady direction count: the count does not switch while the view alternates around a threshold, and still
+//    switches past the band;
 //  - GPU time of the AO pass at 3840 x 2160 for each variant (timestamp queries).
 #define NOMINMAX
 #include <windows.h>
@@ -45,7 +47,7 @@ constexpr int kLevels = 9;
 constexpr float kNear = 0.25f, kA = 1.00008f, kTanY = 1.0f / 4.293f;
 
 std::string g_source;
-float g_zoomMid = 0, g_zoomFar = 0;
+float g_zoomMid = 0, g_zoomFar = 0, g_zoomHysteresis = 0;
 
 std::string Slurp(const std::string& path) {
     std::ifstream f(path, std::ios::binary);
@@ -65,7 +67,8 @@ bool LoadSource(const char* exe) {
     g_source = cpp.substr(a + 7, b - a - 7);
     g_zoomMid = ConstantOf(cpp, "kZoomMid =");
     g_zoomFar = ConstantOf(cpp, "kZoomFar =");
-    return g_zoomMid > 0 && g_zoomFar > g_zoomMid;
+    g_zoomHysteresis = ConstantOf(cpp, "kZoomHysteresis =");
+    return g_zoomMid > 0 && g_zoomFar > g_zoomMid && g_zoomHysteresis > 0;
 }
 
 std::vector<DWORD> Compile(const char* entry, int q, int v, std::string* err = nullptr) {
@@ -190,6 +193,18 @@ Frame Render(int W, int H, float dist) {
     return f;
 }
 
+// a wall facing the camera at `z` metres (the 1/z at the screen centre is exact at every pyramid level)
+Frame Flat(int W, int H, float z) {
+    Frame f;
+    f.W = W, f.H = H;
+    f.padW = (W + 255) / 256 * 256, f.padH = (H + 255) / 256 * 256;
+    f.tanX = kTanY * W / H;
+    f.w.assign(size_t(f.padW) * f.padH, 0.0f);
+    f.cls.assign(size_t(W) * H, Other);
+    for (int y = 0; y < H; y++) std::fill_n(&f.w[size_t(y) * f.padW], W, 1.0f / z);
+    return f;
+}
+
 // DownPS on the CPU: the 2x2 average of 1/z without sky; across an edge (10%) the farthest
 std::vector<std::vector<float>> Pyramid(const Frame& f) {
     std::vector<std::vector<float>> lv(kLevels);
@@ -243,7 +258,7 @@ struct Gpu {
         dev->SetRenderState(D3DRS_ZENABLE, D3DZB_FALSE);
         dev->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
         dev->SetRenderState(D3DRS_LIGHTING, FALSE);
-        for (DWORD s = 0; s < 4; s++) { // as SetPassStates
+        for (DWORD s = 0; s < 8; s++) { // as SetPassStates
             const bool march = s == 2;
             dev->SetSamplerState(s, D3DSAMP_MINFILTER, march ? D3DTEXF_LINEAR : D3DTEXF_POINT);
             dev->SetSamplerState(s, D3DSAMP_MAGFILTER, march ? D3DTEXF_LINEAR : D3DTEXF_POINT);
@@ -265,24 +280,42 @@ float Half(unsigned short h) {
     return s ? -v : v;
 }
 
-// One frame of the scene on the GPU: the pyramid, GtaoPS, the four blur passes; the AO (R) read back
+// The options of one frame, as RunAo reads them from the settings
+struct Opt {
+    bool hysteresis = false; // Steady direction count
+};
+
+// One frame of the scene on the GPU: the pyramid, GtaoPS, the four blur passes; the AO (R) read back. What RunAo keeps
+// from frame to frame (the direction-count tier) lives here too: Load swaps the depth under it.
 struct Scene {
     Gpu& gpu;
-    const Frame& f;
-    IDirect3DTexture9 *z = nullptr, *a = nullptr, *b = nullptr;
-    IDirect3DSurface9 *as = nullptr, *bs = nullptr, *read = nullptr;
-    IDirect3DPixelShader9* blur = nullptr;
-    Scene(Gpu& g, const Frame& frame, IDirect3DPixelShader9* blurPs) : gpu(g), f(frame), blur(blurPs) {
-        auto* dev = gpu.dev;
+    Frame f;
+    IDirect3DTexture9 *z = nullptr, *a = nullptr, *b = nullptr, *tier[2] = {};
+    IDirect3DSurface9 *as = nullptr, *bs = nullptr, *read = nullptr, *tierSurf[2] = {}, *tierRead = nullptr;
+    int tierNow = 0;
+    IDirect3DPixelShader9 *blur = nullptr, *zoomTier = nullptr;
+    // another frame of the same size
+    void Load(const Frame& frame) {
+        f = frame;
         const auto lv = Pyramid(f);
-        if (SUCCEEDED(dev->CreateTexture(f.padW, f.padH, kLevels, 0, D3DFMT_R32F, D3DPOOL_MANAGED, &z, nullptr)))
-            for (int i = 0; i < kLevels; i++) {
-                D3DLOCKED_RECT r{};
-                if (FAILED(z->LockRect(i, &r, nullptr, 0))) continue;
-                const int w = f.padW >> i, h = f.padH >> i;
-                for (int y = 0; y < h; y++) std::memcpy(static_cast<char*>(r.pBits) + size_t(y) * r.Pitch, &lv[i][size_t(y) * w], size_t(w) * 4);
-                z->UnlockRect(i);
-            }
+        for (int i = 0; z && i < kLevels; i++) {
+            D3DLOCKED_RECT r{};
+            if (FAILED(z->LockRect(i, &r, nullptr, 0))) continue;
+            const int w = f.padW >> i, h = f.padH >> i;
+            for (int y = 0; y < h; y++) std::memcpy(static_cast<char*>(r.pBits) + size_t(y) * r.Pitch, &lv[i][size_t(y) * w], size_t(w) * 4);
+            z->UnlockRect(i);
+        }
+    }
+    Scene(Gpu& g, const Frame& frame, IDirect3DPixelShader9* blurPs, IDirect3DPixelShader9* zoomTierPs) : gpu(g), blur(blurPs), zoomTier(zoomTierPs) {
+        auto* dev = gpu.dev;
+        dev->CreateTexture(frame.padW, frame.padH, kLevels, 0, D3DFMT_R32F, D3DPOOL_MANAGED, &z, nullptr);
+        Load(frame);
+        for (int i = 0; i < 2; i++) {
+            dev->CreateTexture(1, 1, 1, D3DUSAGE_RENDERTARGET, D3DFMT_R32F, D3DPOOL_DEFAULT, &tier[i], nullptr);
+            if (tier[i]) tier[i]->GetSurfaceLevel(0, &tierSurf[i]);
+            if (tierSurf[i]) dev->ColorFill(tierSurf[i], nullptr, 0);
+        }
+        dev->CreateOffscreenPlainSurface(1, 1, D3DFMT_R32F, D3DPOOL_SYSTEMMEM, &tierRead, nullptr);
         dev->CreateTexture(f.W, f.H, 1, D3DUSAGE_RENDERTARGET, D3DFMT_G16R16F, D3DPOOL_DEFAULT, &a, nullptr);
         dev->CreateTexture(f.W, f.H, 1, D3DUSAGE_RENDERTARGET, D3DFMT_G16R16F, D3DPOOL_DEFAULT, &b, nullptr);
         if (a) a->GetSurfaceLevel(0, &as);
@@ -291,14 +324,24 @@ struct Scene {
     }
     ~Scene() {
         Release(read), Release(as), Release(bs), Release(a), Release(b), Release(z);
+        for (int i = 0; i < 2; i++) Release(tierSurf[i]), Release(tier[i]);
+        Release(tierRead);
     }
-    bool Ok() const { return z && as && bs && read; }
+    bool Ok() const { return z && as && bs && read && tierSurf[0] && tierSurf[1] && tierRead && zoomTier; }
+    // the frame's direction-count tier (0, 1, 2), as the last AO pass read it
+    float Tier() {
+        D3DLOCKED_RECT r{};
+        if (FAILED(gpu.dev->GetRenderTargetData(tierSurf[tierNow], tierRead)) || FAILED(tierRead->LockRect(&r, nullptr, D3DLOCK_READONLY))) return -1;
+        const float t = *static_cast<const float*>(r.pBits);
+        tierRead->UnlockRect();
+        return t;
+    }
     // the constants of RunAo (default settings: Reach 165.8%, Strength 158.2%, Distance 752 m, High's rotation is per variant)
-    void Constants(int slices) {
+    void Constants(int slices, const Opt& o) {
         const float W = float(f.W), H = float(f.H), tanX = f.tanX, tanY = f.tanY;
         const float reach = 1.658f, s = 1.5822f, distance = 752.35f, fadeStart = distance * (150.0f / 400.0f);
         const float pi = 3.14159265f;
-        const float c[14][4] = {
+        const float c[15][4] = {
             {tanX, tanY, H / (2.0f * tanY), 0.30f * H},
             {W, H, float(f.padW), float(f.padH)},
             {2.0f * H / 2160.0f, 2.0f, 1.3f * 1.3f, 1.0f / (distance - fadeStart)},
@@ -312,24 +355,35 @@ struct Scene {
             {kA, 1.0f / (kNear * kA), 0, 0},
             {0, 0, 0, 0},
             {0, 0, 0, 0},
-            {W * 0.5f / f.padW, H * 0.5f / f.padH, 1.0f / g_zoomMid, 1.0f / g_zoomFar}};
-        gpu.dev->SetPixelShaderConstantF(0, &c[0][0], 14);
+            {W * 0.5f / f.padW, H * 0.5f / f.padH, 1.0f / g_zoomMid, 1.0f / g_zoomFar},
+            {0, 0, o.hysteresis ? 1.0f / (1.0f + g_zoomHysteresis) : 1.0f, o.hysteresis ? 1.0f / (1.0f - g_zoomHysteresis) : 1.0f}};
+        gpu.dev->SetPixelShaderConstantF(0, &c[0][0], 15);
     }
-    void Ao(IDirect3DPixelShader9* gtao, int slices) {
+    // the tier pass and the AO pass, as RunAo's step 3 (`tiered`: a GtaoPS variant that reads the tier)
+    void Ao(IDirect3DPixelShader9* gtao, int slices, bool tiered, const Opt& o = {}) {
         auto* dev = gpu.dev;
         gpu.States();
-        Constants(slices);
+        Constants(slices, o);
+        dev->SetTexture(2, z);
+        if (tiered) {
+            tierNow ^= 1;
+            dev->SetRenderTarget(0, tierSurf[tierNow]);
+            dev->SetTexture(7, tier[tierNow ^ 1]);
+            dev->SetPixelShader(zoomTier);
+            gpu.Quad(1, 1);
+            dev->SetTexture(7, tier[tierNow]);
+        }
         dev->SetRenderTarget(0, as);
         dev->SetTexture(1, z);
-        dev->SetTexture(2, z);
         dev->SetPixelShader(gtao);
         gpu.Quad(f.W, f.H);
+        dev->SetTexture(7, nullptr);
     }
-    std::vector<float> Run(IDirect3DPixelShader9* gtao, int slices) {
+    std::vector<float> Run(IDirect3DPixelShader9* gtao, int slices, bool tiered, const Opt& o = {}) {
         auto* dev = gpu.dev;
         std::vector<float> out;
         if (FAILED(dev->BeginScene())) return out;
-        Ao(gtao, slices);
+        Ao(gtao, slices, tiered, o);
         dev->SetPixelShader(blur);
         for (int pass = 0; pass < 4; pass++) {
             const float dir[4] = {pass & 1 ? 0.0f : 1.0f / f.W, pass & 1 ? 1.0f / f.H : 0.0f, pass < 2 ? 0.0f : 1.0f, 0};
@@ -355,7 +409,7 @@ struct Scene {
         return out;
     }
     // GPU time of the AO pass alone (ms, median of `n` frames)
-    double TimeAo(IDirect3DPixelShader9* gtao, int slices, int n) {
+    double TimeAo(IDirect3DPixelShader9* gtao, int slices, bool tiered, int n) {
         auto* dev = gpu.dev;
         IDirect3DQuery9 *dis = nullptr, *t0 = nullptr, *t1 = nullptr, *fq = nullptr;
         dev->CreateQuery(D3DQUERYTYPE_TIMESTAMPDISJOINT, &dis);
@@ -367,7 +421,7 @@ struct Scene {
             dev->BeginScene();
             dis->Issue(D3DISSUE_BEGIN);
             t0->Issue(D3DISSUE_END);
-            Ao(gtao, slices);
+            Ao(gtao, slices, tiered);
             t1->Issue(D3DISSUE_END);
             fq->Issue(D3DISSUE_END);
             dis->Issue(D3DISSUE_END);
@@ -422,7 +476,8 @@ double Roughness(const std::vector<float>& ao, const Frame& f) {
 
 } // namespace
 
-int main(int, char** argv) {
+int main(int argc, char** argv) {
+    std::setvbuf(stdout, nullptr, _IONBF, 0); // a run cut short still shows what it printed
     if (!LoadSource(argv[0])) {
         std::printf("FAIL: patches/ambient_occlusion_patch.cpp not found or its HLSL / kZoomMid / kZoomFar not read\n");
         return 1;
@@ -461,19 +516,20 @@ int main(int, char** argv) {
     const int q = 2, slices = kQualitySlices[q];
     std::string err;
     IDirect3DPixelShader9* blur = gpu.Ps(Compile("BlurPS", -1, 0, &err));
+    IDirect3DPixelShader9* zoomTier = gpu.Ps(Compile("ZoomTierPS", -1, 0, &err));
     IDirect3DPixelShader9* ps[kVariants] = {};
     for (int v = 0; v < kVariants; v++) ps[v] = gpu.Ps(code[v][q]);
-    Check(blur && ps[0] && ps[1] && ps[2] && ps[3], "passes created");
+    Check(blur && zoomTier && ps[0] && ps[1] && ps[2] && ps[3], "passes created");
     const float views[] = {40.0f, 80.0f, 150.0f};
     std::printf("High, 1920x1080, blurred AO in levels of 255:\n");
     for (float dist : views) {
         const Frame f = Render(1920, 1080, dist);
-        Scene sc(gpu, f, blur);
+        Scene sc(gpu, f, blur, zoomTier);
         Check(sc.Ok(), "scene resources");
         if (!sc.Ok()) continue;
         std::vector<float> img[kVariants];
-        for (int v = 0; v < kVariants; v++) img[v] = sc.Run(ps[v], slices);
-        const std::vector<float> again = sc.Run(ps[1], slices);
+        for (int v = 0; v < kVariants; v++) img[v] = sc.Run(ps[v], slices, v & 1);
+        const std::vector<float> again = sc.Run(ps[1], slices, true);
         Check(again == img[1], "zoom variant deterministic");
         const Stats z = Diff(img[0], img[1], f), n = Diff(img[0], img[2], f);
         const double r0 = Roughness(img[0], f), r1 = Roughness(img[1], f);
@@ -498,22 +554,56 @@ int main(int, char** argv) {
         }
     }
 
-    // 3. GPU time of the AO pass at 3840 x 2160: 12 rounds of the four variants in turn (clock drift hits all alike), each
+    // 3. Steady direction count: walls 2% either side of each threshold in turn, then well past the band and back
+    {
+        Scene sc(gpu, Flat(256, 256, 10.0f), blur, zoomTier);
+        Check(sc.Ok(), "tier scene resources");
+        for (int hysteresis = 0; sc.Ok() && hysteresis < 2; hysteresis++) {
+            Opt o;
+            o.hysteresis = hysteresis != 0;
+            auto tierAt = [&](float z) {
+                sc.Load(Flat(256, 256, z));
+                sc.Run(ps[1], slices, true, o);
+                return int(sc.Tier());
+            };
+            int switches = 0;
+            for (float th : {g_zoomMid, g_zoomFar}) {
+                int last = tierAt(th * 0.98f);
+                for (int i = 1; i < 8; i++) {
+                    const int t = tierAt(th * (i & 1 ? 1.02f : 0.98f));
+                    switches += t != last, last = t;
+                }
+            }
+            const int far2 = tierAt(g_zoomFar * 1.3f), mid1 = tierAt(g_zoomFar * 0.75f), near0 = tierAt(g_zoomMid * 0.7f);
+            std::printf("Direction count switches over 2 x 8 frames 2%% either side of a threshold, %s: %d\n",
+                        hysteresis ? "steady direction count" : "as before", switches);
+            if (hysteresis) Check(switches == 0, "steady direction count: no switch within the band");
+            else Check(switches == 14, "without it the count switches every frame");
+            Check(far2 == 2 && mid1 == 1 && near0 == 0, "the count still follows the view past the band");
+        }
+    }
+
+    if (argc > 1 && !std::strcmp(argv[1], "--no-timing")) {
+        std::printf("%d checks, %d failed (GPU time skipped)\n", g_checks, g_failures);
+        return g_failures ? 1 : 0;
+    }
+    // 4. GPU time of the AO pass at 3840 x 2160: 12 rounds of the four variants in turn (clock drift hits all alike), each
     //    round the median of 5 frames; the median round
     std::printf("AO pass GPU time, High, 3840x2160 (ms):\n");
     for (float dist : views) {
         const Frame f = Render(3840, 2160, dist);
-        Scene sc(gpu, f, blur);
+        Scene sc(gpu, f, blur, zoomTier);
         if (!sc.Ok()) continue;
         std::vector<double> t[kVariants];
         for (int r = 0; r < 12; r++)
-            for (int v = 0; v < kVariants; v++) t[v].push_back(sc.TimeAo(ps[v], slices, 5));
+            for (int v = 0; v < kVariants; v++) t[v].push_back(sc.TimeAo(ps[v], slices, v & 1, 5));
         double m[kVariants];
         for (int v = 0; v < kVariants; v++) std::sort(t[v].begin(), t[v].end()), m[v] = t[v][t[v].size() / 2];
         std::printf("  %3.0f m: default %.3f, zoom %.3f, smooth %.3f, both %.3f\n", dist, m[0], m[1], m[2], m[3]);
     }
     for (auto*& p : ps) Release(p);
     Release(blur);
+    Release(zoomTier);
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

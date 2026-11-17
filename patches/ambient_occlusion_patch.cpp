@@ -104,6 +104,7 @@ sampler2D sAo    : register(s3); // AO + 1/z (G16R16F), point
 sampler2D sColor : register(s4); // copy of the finished scene, point
 sampler2D sSim : register(s5); // Sim receiver device-depth mask, point
 sampler2D sHair : register(s6); // blended Sim body/hair: signed device depth and source coverage
+sampler2D sTier : register(s7); // direction-count tier (0 = the Quality's count, 1 = 3/4, 2 = 1/2), one texel for the frame, point
 float4 cView  : register(c0);  // x = tanX, y = tanY, z = H / (2 tanY) (pixels per metre times z), w = max radius (px)
 float4 cSize  : register(c1);  // xy = screen size, zw = pyramid level-0 size (padded)
 float4 cMarch : register(c2);  // x = first step (px), y = mip offset, z = (1 + thin)^2, w = 1 / (fade1 - fade0)
@@ -118,6 +119,7 @@ float4 cDepth : register(c10); // x = A, y = 1 / (near A)   (1/z = (A - d) / (ne
 float4 cSim : register(c11); // body strength, opaque mask available, hair strength, maximum shade
 float4 cSimView : register(c12); // mask preview, transparent hair mask available
 float4 cZoom : register(c13); // slices by zoom: xy = screen centre (pyramid uv), z = 1/z of the mid distance, w = 1/z of the far distance
+float4 cTier : register(c14); // xy = pixel -> sTier uv, z = a threshold's factor to leave the nearer tier, w = to return to it (1 = no hysteresis)
 
 static const float PI = 3.14159265;
 
@@ -144,6 +146,17 @@ float4 DownPS(float2 uv : TEXCOORD0) : COLOR0
     float wMin = min(min(wf.x, wf.y), min(wf.z, wf.w));
     [branch] if (n > 0.0 && wMax > wMin * 1.1) return wMin;
     return n > 0.0 ? dot(w, 1.0) / n : 0.0;
+}
+
+// Slices by zoom: one tier for the whole frame from the 1/z at the screen centre (pyramid level 7, bilinear). sTier is
+// the last frame's tier: the view leaves a tier past its threshold times cTier.z and returns before it times cTier.w, so a
+// camera resting near a threshold does not switch the count frame after frame.
+float4 ZoomTierPS(float2 uv : TEXCOORD0) : COLOR0
+{
+    float wz = tex2Dlod(sZt, float4(cZoom.xy, 0, 7)).r;
+    float last = tex2Dlod(sTier, float4(0.5, 0.5, 0, 0)).r;
+    float2 th = cZoom.zw * float2(last < 0.5 ? cTier.z : cTier.w, last < 1.5 ? cTier.z : cTier.w);
+    return wz >= th.x ? 0.0 : (wz >= th.y ? 1.0 : 2.0);
 }
 
 float3 PosF(float2 p, float z) { return z * float3(p * cPos.xy + cPos.zw, 1); }
@@ -203,11 +216,11 @@ float4 GtaoPS(float2 uv : TEXCOORD0) : COLOR0
     const float fAdd = 0.385 / 0.615 + 1.0;
     float2 om;
 #ifdef ZOOM
-    // Slices by zoom: one count for the whole frame. Every pixel reads the same texels (pyramid level 7, bilinear, at the
-    // screen centre), so all pixels share one direction set and the 4x4 box still cancels the interleave. Each count
-    // spreads its own angles, (s + b1) pi / count.
-    float wz = tex2Dlod(sZt, float4(cZoom.xy, 0, 7)).r;
-    bool nearView = wz >= cZoom.z, midView = wz >= cZoom.w;
+    // Slices by zoom: one count for the whole frame. Every pixel reads the same tier (ZoomTierPS), so all pixels share
+    // one direction set and the 4x4 box still cancels the interleave. Each count spreads its own angles,
+    // (s + b1) pi / count.
+    float tier = tex2Dlod(sTier, float4(pix * cTier.xy, 0, 0)).r;
+    bool nearView = tier < 0.5, midView = tier < 1.5;
     int slices = nearView ? SLICES : (midView ? SLICES_MID : SLICES_FAR);
     float2 rot = nearView ? cRot.xy : (midView ? float2(cos(PI / SLICES_MID), sin(PI / SLICES_MID)) : float2(cos(PI / SLICES_FAR), sin(PI / SLICES_FAR)));
     sincos(b1 * (nearView ? PI / SLICES : (midView ? PI / SLICES_MID : PI / SLICES_FAR)), om.y, om.x);
@@ -369,6 +382,7 @@ const ShaderCache::Id kLinearPsId = AddShader("AO LinearizePS", "LinearizePS", 0
 const ShaderCache::Id kDownPsId = AddShader("AO DownPS", "DownPS", 0);
 const ShaderCache::Id kBlurPsId = AddShader("AO BlurPS", "BlurPS", 0);
 const ShaderCache::Id kCompositePsId = AddShader("AO CompositePS", "CompositePS", 0);
+const ShaderCache::Id kZoomTierPsId = AddShader("AO ZoomTierPS", "ZoomTierPS", 1);
 const ShaderCache::Id kDepthPsId = AddShader("AO DepthPS (Developer capture)", "DepthPS", 1);
 // GtaoPS variants: bit 0 = Fewer directions when far (ZOOM), bit 1 = Blended normals (BLEND_NORMALS); 0 = the default pass
 constexpr int kGtaoVariants = 4;
@@ -376,6 +390,8 @@ constexpr int kGtaoVariants = 4;
 // view axis at the screen centre; set from the far, mid and near views of tools/ingame_runner/jobs/ao-adaptive-ab.json,
 // about 270, 80 and 35 m, unverified in game)
 constexpr float kZoomMid = 60.0f, kZoomFar = 120.0f;
+// Steady direction count: a threshold is passed 10% beyond it and passed back 10% before it (60 m: 66 and 54 m)
+constexpr float kZoomHysteresis = 0.1f;
 constexpr int ZoomSlices(int slices, int num, int den) { return std::max(2, slices * num / den); }
 ShaderCache::Id AddGtao(int q, int v) {
     static const char* const kNames[kQualityCount] = {"Low", "Medium", "High", "Ultra", "Very Low"};
@@ -421,6 +437,7 @@ struct Params {
     bool transparentHair = true;
     bool zoomSlices = false;   // fewer slices when the camera looks far (one count per frame)
     bool blendNormals = false; // blended normals (no per-pixel pick of the neighbour)
+    bool zoomHysteresis = false; // zoomSlices: the count switches 10% past a threshold and back 10% before it
 };
 
 struct State {
@@ -436,7 +453,10 @@ struct State {
     IDirect3DSurface9* tmpSurf[kLevels] = {};
     IDirect3DTexture9 *aoA = nullptr, *aoB = nullptr, *colorTex = nullptr;
     IDirect3DSurface9 *aoASurf = nullptr, *aoBSurf = nullptr, *colorSurf = nullptr;
-    IDirect3DPixelShader9 *psLinear = nullptr, *psDown = nullptr, *psBlur = nullptr, *psComposite = nullptr, *psDepth = nullptr;
+    IDirect3DTexture9* tier[2] = {}; // the frame's direction-count tier, 1x1: this frame's and the last one's
+    IDirect3DSurface9* tierSurf[2] = {};
+    int tierNow = 0;
+    IDirect3DPixelShader9 *psLinear = nullptr, *psDown = nullptr, *psBlur = nullptr, *psComposite = nullptr, *psDepth = nullptr, *psZoomTier = nullptr;
     IDirect3DPixelShader9* psGtao[kGtaoVariants][kQualityCount] = {};
     // GPU cost (timestamp queries, read a few frames later)
     static constexpr int kQ = 4;
@@ -665,6 +685,10 @@ void ReleaseResources() {
     SceneCopy::Drop(&g.colorTex, &g.colorSurf);
     SafeRelease(g.aoA);
     SafeRelease(g.aoB);
+    for (int i = 0; i < 2; i++) {
+        SafeRelease(g.tierSurf[i]);
+        SafeRelease(g.tier[i]);
+    }
     for (int i = 0; i < State::kQ; i++) {
         SafeRelease(g.qDisjoint[i]);
         SafeRelease(g.qBegin[i]);
@@ -680,6 +704,7 @@ void ReleaseShaders() {
     SafeRelease(g.psBlur);
     SafeRelease(g.psComposite);
     SafeRelease(g.psDepth);
+    SafeRelease(g.psZoomTier);
     for (int v = 0; v < kGtaoVariants; v++)
         for (int q = 0; q < kQualityCount; q++) {
             SafeRelease(g.psGtao[v][q]);
@@ -719,14 +744,15 @@ IDirect3DPixelShader9* GtaoShader(IDirect3DDevice9* dev, int q) {
 }
 
 bool EnsureShaders(IDirect3DDevice9* dev) {
-    const bool fixedOk = g.psLinear && g.psDown && g.psBlur && g.psComposite;
+    const bool fixedOk = g.psLinear && g.psDown && g.psBlur && g.psComposite && g.psZoomTier;
     if (!fixedOk && g.fixedTried) return false; // failed once: logged, not retried every frame
     g.fixedTried = true;
     if (!g.psLinear) g.psLinear = CreateShader(dev, kLinearPsId, "LinearizePS");
     if (!g.psDown) g.psDown = CreateShader(dev, kDownPsId, "DownPS");
     if (!g.psBlur) g.psBlur = CreateShader(dev, kBlurPsId, "BlurPS");
     if (!g.psComposite) g.psComposite = CreateShader(dev, kCompositePsId, "CompositePS");
-    const bool ok = g.psLinear && g.psDown && g.psBlur && g.psComposite && GtaoShader(dev, g.p.quality);
+    if (!g.psZoomTier) g.psZoomTier = CreateShader(dev, kZoomTierPsId, "ZoomTierPS");
+    const bool ok = g.psLinear && g.psDown && g.psBlur && g.psComposite && g.psZoomTier && GtaoShader(dev, g.p.quality);
     if (!ok) g.status = "ERROR: the shader did not compile (see ApexRadiance_LOG.txt)";
     return ok;
 }
@@ -777,6 +803,9 @@ bool InitResources(IDirect3DDevice9* dev) {
     };
     ok = ok && make(&g.aoA, &g.aoASurf, D3DFMT_G16R16F) && make(&g.aoB, &g.aoBSurf, D3DFMT_G16R16F) &&
          SceneCopy::Acquire(dev, g.width, g.height, bd.Format, &g.colorTex, &g.colorSurf); // (copied and read inside RunAo only)
+    for (int i = 0; ok && i < 2; i++) // starts at tier 0 (the view counts as near until the first frame says otherwise)
+        ok = SUCCEEDED(dev->CreateTexture(1, 1, 1, D3DUSAGE_RENDERTARGET, D3DFMT_R32F, D3DPOOL_DEFAULT, &g.tier[i], nullptr)) && g.tier[i] &&
+             SUCCEEDED(g.tier[i]->GetSurfaceLevel(0, &g.tierSurf[i])) && g.tierSurf[i] && SUCCEEDED(dev->ColorFill(g.tierSurf[i], nullptr, 0));
     if (!ok) {
         ReleaseResources();
         g.status = "ERROR: not enough video memory for the shade textures";
@@ -813,8 +842,8 @@ constexpr D3DSAMPLERSTATETYPE kSamplerStates[] = {D3DSAMP_MINFILTER, D3DSAMP_MAG
                                                   D3DSAMP_MAXMIPLEVEL, D3DSAMP_MIPMAPLODBIAS};
 constexpr int kRS = static_cast<int>(sizeof(kRenderStates) / sizeof(kRenderStates[0]));
 constexpr int kSS = static_cast<int>(sizeof(kSamplerStates) / sizeof(kSamplerStates[0]));
-constexpr DWORD kSamplers = 7; // s5 opaque Sims, s6 transparent hair
-constexpr UINT kPSConsts = 14; // c0..c13
+constexpr DWORD kSamplers = 8; // s5 opaque Sims, s6 transparent hair, s7 direction-count tier
+constexpr UINT kPSConsts = 15; // c0..c14
 
 struct SavedState {
     IDirect3DSurface9 *rt0 = nullptr, *ds = nullptr;
@@ -1094,7 +1123,8 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
         {std::clamp(g.p.simStrength, 0.0f, 1.0f), WantSimMask() && simMask.cleared && !simMask.failed ? 1.0f : 0.0f,
          std::clamp(g.p.hairStrength, 0.0f, 1.0f), std::clamp(g.p.simMaxShade, 0.0f, 1.0f)},
         {g.p.simControls && g.showSimMask ? 1.0f : 0.0f, WantSimMask() && simMask.hairCleared && !simMask.failed ? 1.0f : 0.0f, 0, 0},
-        {W * 0.5f / g.padW, H * 0.5f / g.padH, 1.0f / kZoomMid, 1.0f / kZoomFar}};
+        {W * 0.5f / g.padW, H * 0.5f / g.padH, 1.0f / kZoomMid, 1.0f / kZoomFar},
+        {0, 0, g.p.zoomHysteresis ? 1.0f / (1.0f + kZoomHysteresis) : 1.0f, g.p.zoomHysteresis ? 1.0f / (1.0f - kZoomHysteresis) : 1.0f}};
     dev->SetPixelShaderConstantF(0, &c[0][0], kPSConsts);
 
     if (!kPublicBuild)
@@ -1123,13 +1153,22 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
         dev->StretchRect(g.tmpSurf[i], nullptr, g.zLevel[i], nullptr, D3DTEXF_NONE);
     }
 
-    // 3. GTAO at full resolution -> aoA (R = visibility, G = 1/z)
+    // 3. GTAO at full resolution -> aoA (R = visibility, G = 1/z); with Fewer directions when far, the frame's tier first
+    dev->SetTexture(2, g.zTex);
+    if (GtaoVariant() & 1) {
+        g.tierNow ^= 1;
+        dev->SetRenderTarget(0, g.tierSurf[g.tierNow]);
+        dev->SetTexture(7, g.tier[g.tierNow ^ 1]);
+        dev->SetPixelShader(g.psZoomTier);
+        DrawQuad(dev, 1, 1);
+        dev->SetTexture(7, g.tier[g.tierNow]);
+    }
     dev->SetRenderTarget(0, g.aoASurf);
     dev->SetTexture(1, g.zTex);
-    dev->SetTexture(2, g.zTex);
     dev->SetPixelShader(psGtao);
     DrawQuad(dev, g.width, g.height);
     dev->SetTexture(2, nullptr);
+    dev->SetTexture(7, nullptr);
 
     // 4. filter: box H, box V (cancels the 4x4 interleave), tent H, tent V; a -> b -> a -> b -> a
     dev->SetPixelShader(g.psBlur);
@@ -1313,6 +1352,7 @@ class AmbientOcclusionPatch : public ApexPatch {
         RegisterBoolSetting(&g.p.transparentHair, "transparentHair", true, "Also adjust supported transparent hair strands");
         RegisterBoolSetting(&g.p.zoomSlices, "zoomSlices", Params{}.zoomSlices, "Fewer directions per pixel when the camera looks far away");
         RegisterBoolSetting(&g.p.blendNormals, "blendNormals", Params{}.blendNormals, "Smooth shade on flat surfaces: no dashed lines along their edges");
+        RegisterBoolSetting(&g.p.zoomHysteresis, "zoomHysteresis", Params{}.zoomHysteresis, "Fewer directions when far switches its count 10% past a distance and back 10% before it");
     }
 
     bool Install() override {
@@ -1434,6 +1474,11 @@ class AmbientOcclusionPatch : public ApexPatch {
         changed |= ApexUi::SwitchRow("Fewer directions when far", &g.p.zoomSlices,
                                      "Fewer directions per pixel when the camera looks far away; lighter on the graphics card",
                                      kDefaults.zoomSlices);
+        ImGui::BeginDisabled(!g.p.zoomSlices);
+        changed |= ApexUi::SwitchRow("Steady direction count", &g.p.zoomHysteresis,
+                                     "Keeps the direction count steady while the camera rests near a switch distance",
+                                     kDefaults.zoomHysteresis);
+        ImGui::EndDisabled();
         changed |= ApexUi::SwitchRow("Smooth flat surfaces", &g.p.blendNormals,
                                      "Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", kDefaults.blendNormals);
         ApexUi::CardGroup("Map view");
@@ -1446,8 +1491,9 @@ class AmbientOcclusionPatch : public ApexPatch {
     // qualities, shade preview), 3 = 30/09 evening (grain in the composite), 4 = 30/09 night (the map view), 5 = 30/09 night
     // (the composite grain follows the Banding Fix, only where the shade changed the pixel); 6 = distance and Sim receivers;
     // 7 = independent hair, transparency coverage and a separate Sim card; 8 = Sim Occlusion defaults off;
-    // 9 = tuned default configuration for scene and Sim controls; 10 = fewer directions when far and blended normals (off).
-    static constexpr int kSettingsRevision = 10;
+    // 9 = tuned default configuration for scene and Sim controls; 10 = fewer directions when far and blended normals (off);
+    // 11 = steady direction count (off).
+    static constexpr int kSettingsRevision = 11;
     static constexpr const char* kRevisionKey = "revisao";
     static int Revision(const toml::table& table) { return static_cast<int>(table[kRevisionKey].value<int64_t>().value_or(1)); }
     // Start from current defaults, then overlay every value that was explicitly saved.

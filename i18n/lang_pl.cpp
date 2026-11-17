@@ -2081,6 +2081,8 @@ const I18n::Pair kPairs[] = {
     {"Lower is lighter on the graphics card", "Niżej jest lżej dla karty graficznej"},
     {"Fewer directions when far", "Mniej kierunków w oddali"},
     {"Fewer directions per pixel when the camera looks far away; lighter on the graphics card", "Używa mniej kierunków na piksel, gdy kamera patrzy daleko, gdzie cień wygląda tak samo. Mniej obciąża kartę graficzną"},
+    {"Steady direction count", "Stała liczba kierunków"},
+    {"Keeps the direction count steady while the camera rests near a switch distance", "Zapobiega przełączaniu się opcji Mniej kierunków w oddali tam i z powrotem, gdy kamera stoi blisko odległości przełączenia"},
     {"Smooth flat surfaces", "Gładkie płaskie powierzchnie"},
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Usuwa słabe przerywane linie cienia wzdłuż krawędzi blatów, podłóg i innych płaskich powierzchni"},
     {"Show the shade alone", "Pokaż sam cień"},

@@ -1,6 +1,7 @@
 # Ambient Occlusion options check
 
-`run.ps1 [-OutDir <folder>]` builds `check.cpp` with the x86 MSVC toolchain and runs it. Read-only: it prints to stdout
+`run.ps1 [-OutDir <folder>]` builds `check.cpp` with the x86 MSVC toolchain and runs it (the built
+`ao_options_check.exe --no-timing` skips the GPU times). Read-only: it prints to stdout
 and writes only the compiler outputs to `-OutDir` (default under `%TEMP%`). It needs no game files.
 
 It checks the two Ambient Occlusion options *Fewer directions when far* (`zoomSlices`) and *Smooth flat surfaces*
@@ -17,6 +18,8 @@ It checks the two Ambient Occlusion options *Fewer directions when far* (`zoomSl
     deterministic;
   - *Smooth flat surfaces*: no more stray shade on the open floor and the counter top than the default, and at least
     75% of the contact shade where the boxes meet the floor;
+- *Steady direction count* (`zoomHysteresis`): over walls 2% either side of each threshold in turn the count never
+  switches (without it, every frame), and it still follows the view past the band;
 - the GPU time of the AO pass alone at 3840 x 2160 for each variant (12 interleaved rounds, the median).
 
 The synthetic scene is not a game frame: confirm the look in game (Ambient Occlusion picture pair,

@@ -2081,6 +2081,8 @@ const I18n::Pair kPairs[] = {
     {"Lower is lighter on the graphics card", "越低对显卡负担越轻"},
     {"Fewer directions when far", "远处减少方向"},
     {"Fewer directions per pixel when the camera looks far away; lighter on the graphics card", "镜头看向远处时，在阴影看起来不变的前提下减少每像素的方向数。减轻显卡负担"},
+    {"Steady direction count", "稳定方向数量"},
+    {"Keeps the direction count steady while the camera rests near a switch distance", "镜头停在切换距离附近时，防止“远处减少方向”来回切换"},
     {"Smooth flat surfaces", "平滑平面"},
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "去除台面、地板等平面边缘上淡淡的虚线状阴影"},
     {"Show the shade alone", "单独显示阴影"},

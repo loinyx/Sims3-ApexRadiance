@@ -2081,6 +2081,8 @@ const I18n::Pair kPairs[] = {
     {"Lower is lighter on the graphics card", "낮을수록 그래픽 카드 부담이 적어요"},
     {"Fewer directions when far", "멀리서는 방향 줄이기"},
     {"Fewer directions per pixel when the camera looks far away; lighter on the graphics card", "카메라가 멀리 볼 때 그늘이 똑같아 보이는 범위에서 픽셀당 방향을 줄입니다. 그래픽 카드 부담이 줄어듭니다"},
+    {"Steady direction count", "방향 수 안정화"},
+    {"Keeps the direction count steady while the camera rests near a switch distance", "카메라가 전환 거리 근처에 머물 때 '멀리서는 방향 줄이기'가 계속 오락가락 전환되지 않게 합니다"},
     {"Smooth flat surfaces", "평평한 면 매끄럽게"},
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "조리대, 바닥 등 평평한 면의 가장자리에 생기는 희미한 점선 그늘을 없앱니다"},
     {"Show the shade alone", "그늘만 표시"},
