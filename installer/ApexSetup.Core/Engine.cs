@@ -532,6 +532,9 @@ public static class Engine
     // Apex's own frame limit choices (features/screen_control.cpp: 0 = off, 30, 60, 120, 144, 165, 240), with 75 and 90 for frame
     // generation's 60 to 90; a custom value is clamped as Apex reads it: 0 or below is off, else 20 to 1000
     public static readonly int[] FpsChoices = { 0, 30, 60, 75, 90, 120, 144, 165, 240 };
+    // a pending change: the choice when it differs from the state now, else none (switching back drops the change)
+    public static bool? PendingSwitch(bool want, bool now) => want == now ? null : want;
+    public static int? PendingFps(int want, int now) => ClampFps(want) == ClampFps(now) ? null : ClampFps(want);
     public static bool FpsRecommended(int fps) => fps is >= 60 and <= 90;
     public static int ClampFps(int fps) => fps <= 0 ? 0 : Math.Clamp(fps, 20, 1000);
 
@@ -633,6 +636,16 @@ public static class Engine
         var nvidia = nv.Error is not null || nv.Card is not null && (nvUsable || !amdUsable);
         return (nvidia, amdUsable || amd.Present && !nvidia);
     }
+
+    // A driver error in plain words for the frame generation rows (the raw call and code go to the log): no rights (NVAPI
+    // NVAPI_INVALID_USER_PRIVILEGE -137, or an access error) asks for administrator rights; anything else, a change the driver
+    // did not take included, says the driver did not accept it and how to do it by hand.
+    public static string FriendlyFrameGenError(string error, bool amd) =>
+        error == "Dry run: Setup changes nothing." ? error
+        : error.EndsWith(" -137") || error.Contains("denied", StringComparison.OrdinalIgnoreCase) || error.Contains("privilege", StringComparison.OrdinalIgnoreCase)
+            ? "Windows did not let Setup change the driver settings. Run Setup as administrator, then try again."
+        : amd ? "The AMD driver did not accept the change. You can turn it on by hand in AMD Software: Gaming > Graphics > AMD Fluid Motion Frames."
+        : "The NVIDIA driver did not accept the change. You can turn it on by hand with NVIDIA Profile Inspector.";
 
     public static bool TurnsFrameGenOff(string c) => c is Components.Bridge or Components.Apex;
     public static Func<Game, string?> FrameGenOff = DefaultFrameGenOff;

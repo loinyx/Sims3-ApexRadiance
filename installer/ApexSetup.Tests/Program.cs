@@ -891,6 +891,25 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         Check(Engine.FrameGenRows(Card("NVIDIA GeForce RTX 3080"), Amd(true, true)) == (false, true) && Engine.FrameGenRows(Card(null), Amd(false, false)) == (false, false),
               "frame generation rows: an unusable NVIDIA card next to a usable AMD one shows AFMF only; no card, no row");
     }
+    // pending changes: a switch or the picker plans a change only when it differs from the state now; switching back drops it
+    Check(Engine.PendingSwitch(true, false) == true && Engine.PendingSwitch(false, true) == false
+          && Engine.PendingSwitch(true, true) is null && Engine.PendingSwitch(false, false) is null, "pending: on and off are changes, the state now is none");
+    Check(Engine.PendingFps(75, 60) == 75 && Engine.PendingFps(60, 60) is null && Engine.PendingFps(0, 0) is null && Engine.PendingFps(-3, 0) is null
+          && Engine.PendingFps(5000, 1000) is null && Engine.PendingFps(5, 60) == 20, "pending: a new limit is a change (clamped as Apex), the limit now is none");
+    // other players' PCs: Optimus and laptop names, a write the driver did not keep, rights, no predefined profile
+    Check(SmoothMotion.PickCard(new[] { "NVIDIA GeForce MX450", "NVIDIA GeForce RTX 4060 Laptop GPU" }) == "NVIDIA GeForce RTX 4060 Laptop GPU"
+          && SmoothMotion.PickCard(new[] { "NVIDIA GeForce RTX 5070 Ti Laptop GPU" }) == "NVIDIA GeForce RTX 5070 Ti Laptop GPU"
+          && SmoothMotion.PickCard(new[] { "NVIDIA GeForce GTX 1650" }) == "NVIDIA GeForce GTX 1650" && SmoothMotion.PickCard(Array.Empty<string>()) is null
+          && SmoothMotion.Supported("NVIDIA GeForce RTX 4060 Laptop GPU", 57186), "card: an RTX 40 or 50 Laptop GPU counts, whatever the order of the cards");
+    Check(SmoothMotion.Took(true, new("NVIDIA GeForce RTX 4070", 62124, true, null, null)) && !SmoothMotion.Took(true, new("NVIDIA GeForce RTX 4070", 62124, false, null, null))
+          && !SmoothMotion.Took(false, new("NVIDIA GeForce RTX 4070", 62124, false, null, "DRS_LoadSettings -3")), "verify: a change read back differently did not take");
+    Check(Engine.FriendlyFrameGenError("DRS_SaveSettings -137", false).Contains("administrator")
+          && Engine.FriendlyFrameGenError("Access is denied.", true).Contains("administrator")
+          && Engine.FriendlyFrameGenError("DRS_SetSetting 0xB0D384C0 = 1 on \"NvRemixBridge\" (NVIDIA's) -160", false).StartsWith("The NVIDIA driver")
+          && Engine.FriendlyFrameGenError(SmoothMotion.DidNotTake, true).Contains("AMD Software")
+          && Engine.FriendlyFrameGenError("Dry run: Setup changes nothing.", false) == "Dry run: Setup changes nothing.", "errors: plain words, rights ask for administrator");
+    Check(SmoothMotion.Blocked(new("NVIDIA GeForce RTX 4070", 62124, false, null, null), true, false) is null,
+          "no predefined NvRemixBridge profile (an older or newer driver): the switch is usable, Setup makes its own profile");
     var amd = Afmf.Read(); // read only
     Console.WriteLine($"info this PC: AMD {(amd.Present ? "driver found" : "none")}{(amd.Error is null ? "" : ", error " + amd.Error)}");
     var nv = SmoothMotion.Read(); // read only

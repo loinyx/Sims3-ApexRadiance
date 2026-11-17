@@ -29,6 +29,16 @@ public static class SmoothMotion
     public static bool Supported(string? card, uint driver) =>
         card is not null && Regex.IsMatch(card, @"RTX\s*(40|50)\d\d", RegexOptions.IgnoreCase) && driver >= MinDriver;
 
+    // the card to judge by: NVAPI lists NVIDIA GPUs only (an Optimus laptop's integrated GPU is not among them); of several, an
+    // RTX 40 or 50 (desktop or "Laptop GPU") wins over an older one, whatever the order
+    public static string? PickCard(IEnumerable<string> names) =>
+        names.FirstOrDefault(n => Supported(n, MinDriver)) ?? names.FirstOrDefault();
+
+    // after a write: the state read again in a new session; anything but the asked state is "did not take"
+    public static bool Took(bool want, Status after) => after.Error is null && after.On == want;
+    public const string DidNotTake = "did not take";
+    public const string ManualUrl = "https://github.com/loinyx/Sims3-ApexRadiance#nvidia-smooth-motion-with-the-bridge";
+
     public static string DriverText(uint driver) => $"{driver / 100}.{driver % 100:00}";
 
     // why the switch cannot be used (an English key for the UI's T), or null
@@ -126,15 +136,13 @@ public static class SmoothMotion
         {
             var gpus = new nint[64]; uint n = 0;
             fixed (nint* g = gpus) if (((delegate* unmanaged[Cdecl]<nint*, uint*, int>)F(0xE5AC921F))(g, &n) != 0 || n == 0) return (null, 0);
-            string? best = null;
+            var names = new List<string>();
             var name = new byte[64];
             for (var i = 0; i < n; i++)
                 fixed (byte* nm = name)
                     if (((delegate* unmanaged[Cdecl]<nint, byte*, int>)F(0xCEEE8E9F))(gpus[i], nm) == 0)
-                    {
-                        var s = Encoding.ASCII.GetString(name).Split('\0')[0];
-                        if (best is null || Supported(s, MinDriver)) best = s;
-                    }
+                        names.Add(Encoding.ASCII.GetString(name).Split('\0')[0]);
+            var best = PickCard(names);
             uint driver = 0; var branch = new byte[64];
             fixed (byte* br = branch) ((delegate* unmanaged[Cdecl]<uint*, byte*, int>)F(0x2926AAAD))(&driver, br);
             return (best, driver);
