@@ -643,8 +643,34 @@ public sealed partial class MainWindow : Window
         bar.ActionButton = b;
     }
 
+    // the game cards: the chosen one outlined in the accent (as the renderer cards), a hovered one lighter
+    void OnGameCard(ListViewBase sender, ContainerContentChangingEventArgs e)
+    {
+        if (e.ItemContainer is not ListViewItem c || c.Tag is "hooked") return;
+        c.Tag = "hooked";
+        c.PointerEntered += (_, _) => PaintGame(c, true);
+        c.PointerExited += (_, _) => PaintGame(c, false);
+        c.Loaded += (_, _) => PaintGame(c, false);
+    }
+
+    void PaintGame(ListViewItem c, bool hover)
+    {
+        if (c.ContentTemplateRoot is not Border card) return;
+        var on = c.IsSelected;
+        card.BorderBrush = Res(on ? "ApexAccentBrush" : "ApexCardBorderBrush");
+        card.Background = on ? new SolidColorBrush(ColorHelper.FromArgb(255, 0x16, 0x16, 0x1D))
+            : hover ? new SolidColorBrush(ColorHelper.FromArgb(255, 0x22, 0x23, 0x29)) : Res("ApexCardBrush");
+    }
+
+    void PaintGames()
+    {
+        foreach (var it in _games)
+            if (GameList.ContainerFromItem(it) is ListViewItem c) PaintGame(c, false);
+    }
+
     void OnGamePicked(object sender, SelectionChangedEventArgs e)
     {
+        PaintGames();
         _game = (GameList.SelectedItem as GameItem)?.Game;
         _checkedAt = null;
         ManageInfo.IsOpen = false;

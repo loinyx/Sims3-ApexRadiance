@@ -109,7 +109,26 @@
                             <StackPanel x:Name="StepsGame" Tag="dyn" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8" />
                             <TextBlock Text="Choose your game" Style="{StaticResource ApexTitle}" />
                             <TextBlock Text="Setup found these installs. Pick the one you play." Style="{StaticResource ApexMuted}" FontSize="13" />
-                            <ListView x:Name="GameList" SelectionMode="Single" SelectionChanged="OnGamePicked">
+                            <ListView x:Name="GameList" SelectionMode="Single" SelectionChanged="OnGamePicked" ContainerContentChanging="OnGameCard">
+                                <!-- the card is the item: no list chrome (selection box, left bar); the chosen game shows by the card's
+                                     accent outline, as the renderer cards, and keyboard focus by the system focus rectangle -->
+                                <ListView.ItemContainerStyle>
+                                    <Style TargetType="ListViewItem">
+                                        <Setter Property="Padding" Value="0" />
+                                        <Setter Property="MinHeight" Value="0" />
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                        <Setter Property="UseSystemFocusVisuals" Value="True" />
+                                        <Setter Property="FocusVisualMargin" Value="0,4" />
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="ListViewItem">
+                                                    <ContentPresenter Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                                      HorizontalContentAlignment="Stretch" Background="Transparent" />
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </ListView.ItemContainerStyle>
                                 <ListView.ItemTemplate>
                                     <DataTemplate x:DataType="local:GameItem">
                                         <Border Style="{StaticResource ApexCard}" Padding="14,12" Margin="0,4">
