@@ -24,11 +24,11 @@
 
 namespace GiIndirect {
 
-enum Kind : int { kFloor = 0, kCeiling = 1 };
+enum Kind : int { kFloor = 0, kCeiling = 1, kWall = 3 }; // (kWall: the wall region, one for every story)
 
 // A room's texture set (lod + class x 64 + 0xC) holds four map wrappers by index: 0 floor, 1 ceiling, 2 objects, 3 wall
-// (RtOutdoorLamps::kSetIdx, OutdoorDelta::kSlotIdx). The kind a set index feeds, -1 none (objects; walls have no consumer).
-inline int KindOfSetIndex(int idx) { return idx == 0 ? kFloor : idx == 1 ? kCeiling : -1; }
+// (RtOutdoorLamps::kSetIdx, OutdoorDelta::kSlotIdx). The kind a set index feeds, -1 none (objects).
+inline int KindOfSetIndex(int idx) { return idx == 0 ? kFloor : idx == 1 ? kCeiling : idx == 3 ? kWall : -1; }
 
 struct Point {
     uint32_t grid = 0;  // pixel of the grid (y * w + x)

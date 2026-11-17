@@ -22,6 +22,7 @@
 #include "render_callbacks.h"
 #include "rt_outdoor_lamps.h"
 #include "shader_cache.h"
+#include "unlit_rooms.h"
 #include "world_session.h"
 #include <algorithm>
 #include <array>
@@ -467,6 +468,9 @@ GiCompose::Composer g_composer;
 // (S2-05) the atlas's floor and ceiling texels by place (gi_indirect.h), filled from the atlas after each compose
 GiIndirect::Grid g_grid;
 IDirect3DTexture9* g_gridTex = nullptr;
+IDirect3DTexture9* g_flagsTex = nullptr; // (S2-06) the grid's bleed flags (MANAGED, made from g_grid.flags on first use)
+float g_lotRows[3][4] = {};               // (S2-06) the GI lot's worldToLot by column, for the wall VS copy
+std::unordered_map<int, std::pair<uint32_t, std::array<float, 4>>> g_baseOf; // story -> (frame read, base colour, .w 1 = known)
 IDirect3DPixelShader9* g_scatterPs = nullptr;
 bool g_gridDirty = false;
 bool g_gridFilled = false;
@@ -582,7 +586,10 @@ int RebuildScene(GiSched::Box& edit, bool& whole) {
         const uint32_t gw = g_grid.w, gh = g_grid.h;
         int lotW = 0, lotH = 0;
         for (const RtLampProxy::Story& st : lot->stories) lotW = std::max(lotW, st.w), lotH = std::max(lotH, st.h);
-        if (!GiIndirect::Build(g_built, o.density, lotW, lotH, g_grid)) g_grid = {};
+        if (!GiIndirect::Build(g_built, o.density, lotW, lotH, g_grid, lot.get())) g_grid = {};
+        for (int k = 0; k < 3; k++)
+            for (int j = 0; j < 4; j++) g_lotRows[k][j] = lot->worldToLot[j][k];
+        if (g_flagsTex) g_flagsTex->Release(), g_flagsTex = nullptr;
         if ((g_grid.w != gw || g_grid.h != gh) && g_gridTex) g_gridTex->Release(), g_gridTex = nullptr, g_gridFilled = false;
         g_gridDirty = true, g_mapLayer.clear();
     }
@@ -731,6 +738,7 @@ void OnPreReset(IDirect3DDevice9*) { // (DEFAULT pool: the layers, the atlas, th
     if (g_schedLot) g_bridge.ResetLot(), g_schedLot = 0; // (UpdateSched loads the lot again: the scene sent, every lamp solved)
     ReleaseLayers();
     g_composer.Release();
+    if (g_flagsTex) g_flagsTex->Release(), g_flagsTex = nullptr;
     g_built = {}, g_grid = {}, g_mapLayer.clear();
 }
 
@@ -835,11 +843,11 @@ void OnPresent(IDirect3DDevice9* dev) {
     const uint64_t cap = Value(Counter::CapSolvesOnGiLots), sync = Value(Counter::SyncReadbacks), locks = Value(Counter::ResourceLocks),
                    diffs = Value(Counter::RedrawDiffs), faults = Value(Counter::ReadFaults), table = Value(Counter::LampTableDiffs);
     const std::string line = std::format("[RealtimeGI] Counters: frames={} backend={} draws={} deviceCalls={} lamps={} lots={} lampChanges={} "
-                                         "indirect={} atlasReady={} gridTexels={} indirectDraws={}; must be 0: "
+                                         "indirect={} atlasReady={} gridTexels={} indirectDraws={} wallDraws={}; must be 0: "
                                          "capSolves={} syncReadbacks={} locks={} redrawDiffs={} readFaults={} lampTableDiffs={}",
                                          frames, kBackendNames[static_cast<int>(g_backend.load())], Value(Counter::Draws), Value(Counter::DeviceCalls),
                                          g_lamps.size(), g_giLots, Value(Counter::LampChanges), kIndirectNames[g_options.indirect], g_readyTexels,
-                                         g_grid.points.size(), Value(Counter::IndirectDraws), cap, sync, locks, diffs, faults, table);
+                                         g_grid.points.size(), Value(Counter::IndirectDraws), Value(Counter::WallDraws), cap, sync, locks, diffs, faults, table);
     if (cap || sync || locks || diffs || faults || table) LOG_WARNING(line);
     else LOG_INFO(line);
     if (!g_schedOn) return;
@@ -867,15 +875,45 @@ const std::vector<Change>& Changes() { return g_changes; }
 int GiLots() { return g_giLots; }
 Backend InUse() { return g_backend.load(); }
 
-bool IndirectFor(const void* map, float night, IndirectBind& out) {
-    if (!g_running.load() || !g_options.indirect || !g_gridFilled || !g_gridTex || !map) return false;
+bool IndirectFor(const void* map, const float ambient[3], float night, IndirectBind& out) {
+    if (!g_running.load() || !g_options.indirect || !g_gridFilled || !g_gridTex || !map || g_grid.flags.empty()) return false;
     int story = 0, kind = 0;
-    if (!MapLayer(map, story, kind) || !GiIndirect::UvRow(g_grid, story, kind, out.uv)) return false;
-    out.grid = g_gridTex;
+    if (!MapLayer(map, story, kind)) return false;
+    out.wall = kind == GiIndirect::kWall;
+    if (out.wall) {
+        if (!GiIndirect::WallRows(g_grid, out.vs[0], out.vs[1])) return false;
+        std::memcpy(out.vs[3], g_lotRows, sizeof g_lotRows);
+        const float id[4] = {1, 1, 0, 0};
+        std::memcpy(out.uv, id, sizeof id);
+    } else if (!GiIndirect::UvRow(g_grid, story, kind, out.uv))
+        return false;
+    if (!g_flagsTex) { // (S2-06) once a grid: a MANAGED upload, not a lock of a GPU resource
+        if (FAILED(g_dev->CreateTexture(g_grid.w, g_grid.h, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &g_flagsTex, nullptr))) return g_flagsTex = nullptr, false;
+        D3DLOCKED_RECT r{};
+        if (FAILED(g_flagsTex->LockRect(0, &r, nullptr, 0))) return g_flagsTex->Release(), g_flagsTex = nullptr, false;
+        for (uint32_t y = 0; y < g_grid.h; y++) std::memcpy(static_cast<char*>(r.pBits) + y * r.Pitch, &g_grid.flags[static_cast<size_t>(y) * g_grid.w * 4], g_grid.w * 4);
+        g_flagsTex->UnlockRect(0);
+        Add(Counter::DeviceCalls, 3);
+    }
+    out.grid = g_gridTex, out.flags = g_flagsTex;
+    const float size[4] = {static_cast<float>(g_grid.w), static_cast<float>(g_grid.h), 1.0f / g_grid.w, 1.0f / g_grid.h};
+    std::memcpy(out.size, size, sizeof size);
     // shortcut: gain 1 (the compose's colour is the snapshot's; S6-01 calibrates it against the game's law)
     const bool debug = g_options.indirect == 2 && !kPublicBuild;
-    const float k[4] = {1.0f, debug ? 0.0f : 1.0f, debug ? 0.0f : 1.0f, debug ? 0.0f : std::clamp(night, 0.0f, 1.0f)};
+    const float k[4] = {1.0f, debug ? 0.0f : 1.0f, debug ? 0.0f : 1.0f, 0.0f};
     std::memcpy(out.k, k, sizeof k);
+    std::fill(std::begin(out.lamp), std::end(out.lamp), 0.0f);
+    if (debug) return true;
+    // the lamp share (S2-06): the room's ambient over the story's base colour (Rooms at Night), read once a frame a story
+    const auto [it, fresh] = g_baseOf.try_emplace(story);
+    auto& [frame, base] = it->second;
+    if (fresh || frame != g_schedFrame) {
+        frame = g_schedFrame, base = {0, 0, 0, 0};
+        const uintptr_t tracker = LevelLightShare::TrackerOfLot(g_schedLot);
+        float c[3];
+        if (const void* room0 = tracker ? LevelLightShare::Room0Of(tracker, story) : nullptr; room0 && UnlitRooms::BaseColour(room0, c)) base = {c[0], c[1], c[2], 1};
+    }
+    GiIndirect::LampShare(ambient, base[3] > 0 ? base.data() : nullptr, night, out.lamp);
     return true;
 }
 
@@ -925,7 +963,8 @@ void Stop() {
     g_bridge.ResetLot(), ReleaseLayers(), g_composer.Release();
     if (g_composePs) g_composePs->Release(), g_composePs = nullptr;
     if (g_scatterPs) g_scatterPs->Release(), g_scatterPs = nullptr;
-    g_built = {}, g_grid = {}, g_mapLayer.clear(), g_dev = nullptr;
+    if (g_flagsTex) g_flagsTex->Release(), g_flagsTex = nullptr;
+    g_built = {}, g_grid = {}, g_mapLayer.clear(), g_baseOf.clear(), g_dev = nullptr;
     g_running = false;
     LOG_INFO("[RealtimeGI] Off");
 }

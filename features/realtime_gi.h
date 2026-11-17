@@ -59,6 +59,7 @@ enum class Counter : int {
     LampTableDiffs,    // debugLampTable differences against the game's fields and Apex's lamp table (must be 0)
     LampChanges,       // lamp change events committed
     IndirectDraws,     // (S2-05) room-lit draws that read the GI grid
+    WallDraws,         // (S2-06) of them, wall draws (the vertex shader copy writing the grid uv)
     Count
 };
 void Add(Counter c, uint32_t n = 1); // any thread
@@ -100,15 +101,18 @@ const std::vector<Change>& Changes();
 int GiLots();
 
 // ---- the lighting reading the irradiance atlas (S2-05, gi_indirect.h) ----
-// Render thread, a room-lit floor draw with the patched copy (ShaderPatches::PatchRoomMapGi): the GI grid to bind and the copy's
-// two constant rows for the game's map `map` bound to the draw (a relit copy: its game map). False (draw the copy without it):
-// indirect off, nothing composed yet, or not a floor or ceiling map of the GI lot's stories. night: 0 day .. 1 night (the
-// share of the game's ambient the ready atlas replaces; by day the atlas adds to it).
+// Render thread, a room-lit draw with the patched copy (ShaderPatches::PatchRoomMapGi): the GI grid and its flags texture to
+// bind and the copy's constant rows for the game's map `map` bound to the draw (a relit copy: its game map). False (draw the
+// copy without it): indirect off, nothing composed yet, or not a floor, ceiling or wall map of the GI lot's stories. ambient:
+// the draw's room ambient (the copy's ambientConst); night: 0 day .. 1 night, used only where the story's base colour is not
+// known (GiIndirect::LampShare). wall: a wall map: uv = (1, 1, 0, 0), the VS copy (ShaderPatches::PatchWallGiVs) takes vs.
 struct IndirectBind {
-    IDirect3DTexture9* grid = nullptr;
-    float uv[4] = {}, k[4] = {};
+    IDirect3DTexture9 *grid = nullptr, *flags = nullptr;
+    float uv[4] = {}, k[4] = {}, lamp[4] = {}, size[4] = {};
+    bool wall = false;
+    float vs[6][4] = {}; // c[kWallGiVsConst ..]: WallRows r0, r1, (the def), the lot rows
 };
-bool IndirectFor(const void* map, float night, IndirectBind& out);
+bool IndirectFor(const void* map, const float ambient[3], float night, IndirectBind& out);
 
 bool Start(const Options& options, std::string* error); // render thread or pump thread; the start line follows in a world
 void Stop();

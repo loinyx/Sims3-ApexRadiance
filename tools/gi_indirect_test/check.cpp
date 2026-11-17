@@ -158,8 +158,8 @@ void GridChecks() {
     Check(!GiIndirect::UvRow(s.grid, 5, GiIndirect::kFloor, c), "no layer for a story the scene has not");
     // the map lookup's set indices: the game's texture set order (RtOutdoorLamps::kSetIdx = wall 3, floor 0, ceiling 1, objects 2)
     Check(GiIndirect::KindOfSetIndex(0) == GiIndirect::kFloor && GiIndirect::KindOfSetIndex(1) == GiIndirect::kCeiling &&
-              GiIndirect::KindOfSetIndex(2) < 0 && GiIndirect::KindOfSetIndex(3) < 0,
-          "texture set index 0 = floor, 1 = ceiling, objects and wall no layer");
+              GiIndirect::KindOfSetIndex(2) < 0 && GiIndirect::KindOfSetIndex(3) == GiIndirect::kWall,
+          "texture set index 0 = floor, 1 = ceiling, 3 = wall, objects no layer");
     // Apply (S2-06): the lamp share L of the room's ambient is what the ready atlas replaces; the base colour stays
     const float map[4] = {0.2f, 0.3f, 0.4f, 0.5f}, gi[4] = {0.6f, 0.5f, 0.4f, 1.0f}, amb[3] = {0.3f, 0.2f, 0.1f};
     float o[3], L[3];

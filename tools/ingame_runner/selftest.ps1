@@ -77,7 +77,7 @@ foreach ($job in @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'jobs') -
 }
 # The indirect light smoke (S2-05): its counters pattern takes a line with ready texels and draws, not one without
 $giInd = @((Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/gi-indirect-smoke.json') -Raw | ConvertFrom-Json).variants.on.expect)[1]
-$giLine = '12:00:10.000 [INFO] [RealtimeGI] Counters: frames=600 backend=serverRays draws=4 deviceCalls=2 lamps=12 lots=1 lampChanges=0 indirect=atlas atlasReady={0} gridTexels=900 indirectDraws={1}; must be 0: capSolves=0 syncReadbacks=0 locks=0 redrawDiffs=0 readFaults=0 lampTableDiffs=0'
+$giLine = '12:00:10.000 [INFO] [RealtimeGI] Counters: frames=600 backend=serverRays draws=4 deviceCalls=2 lamps=12 lots=1 lampChanges=0 indirect=atlas atlasReady={0} gridTexels=900 indirectDraws={1} wallDraws=12; must be 0: capSolves=0 syncReadbacks=0 locks=0 redrawDiffs=0 readFaults=0 lampTableDiffs=0'
 Check (($giLine -f 640, 37) -match $giInd) 'GI indirect counters match with ready texels and draws'
 foreach ($bad in @(@(0, 37), @(640, 0))) { Check (($giLine -f $bad[0], $bad[1]) -notmatch $giInd) "GI indirect counters rejected: atlasReady=$($bad[0]) indirectDraws=$($bad[1])" }
 $prof = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/realtime-gi-profile.json') -Raw | ConvertFrom-Json
