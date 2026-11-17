@@ -45,6 +45,13 @@
 #include "features/room_lamp_move.h"
 #include "features/rt_outdoor_lamps.h"
 #include "features/lamp_reach.h"
+#include "gi_reference.h"
+
+// The harness has no game hooks: rt_lamp_gpu's vertex-input mark around its draws is a no-op here
+namespace ExtraHooks {
+VertexInputMark MarkVertexInput() { return {}; }
+void RestoreVertexInput(VertexInputMark) {}
+} // namespace ExtraHooks
 #include "features/phys_tiles.h"
 // The dither offset of 2.12.4's Smooth light maps (RoomMapDither::Offset, interleaved gradient noise): 2.12.3 + RT has no
 // map dither (its relight passes 0), but the compose shader keeps the input, so the harness still checks it
@@ -712,6 +719,122 @@ RtLampModel::Lamp ToLamp(const LampDef& d, float mult = 1.0f) {
     L.law.r0sq = r0 * r0, L.law.invR2 = 1.0f / (R * R);
     L.mult = mult;
     return L;
+}
+
+// ---------------------------------------------------------------- real-time GI, S0-01: lamp layers, compose, leak test
+// (gi_reference.h) One indirect layer a lamp at 1 texel a tile and story; compose = sum(on x colour x layer) against a full solve
+// of the same lamps; a toggle re-composes without a solve; a closed room gets exactly 0 from a lamp outside it.
+double MaxDiff(const std::vector<GiRef::Rgb>& a, const std::vector<GiRef::Rgb>& b) {
+    double m = a.size() == b.size() ? 0.0 : 1e30;
+    for (size_t t = 0; t < a.size() && t < b.size(); t++)
+        for (int c = 0; c < 3; c++) m = std::max(m, static_cast<double>(std::fabs(a[t][c] - b[t][c])));
+    return m;
+}
+// Compose against the full solve, all lamps on, then a toggle and a recolour with the layers kept. Returns false when skipped
+bool GiComposeCheck(const Scene& sc, const RtLampProxy::Mesh& mesh, const GiRef::Model& m, std::vector<std::vector<GiRef::Rgb>>& layers) {
+    std::vector<RtLampModel::Lamp> lamps;
+    std::vector<GiRef::Rgb> colour;
+    for (const LampDef& d : sc.lamps) lamps.push_back(ToLamp(d)), colour.push_back({d.colour[0], d.colour[1], d.colour[2]});
+    if (lamps.size() < 2 || m.texels.empty()) return false;
+    int solves = 0;
+    const auto t0 = std::chrono::steady_clock::now();
+    layers.assign(lamps.size(), {});
+    for (size_t l = 0; l < lamps.size(); l++) GiRef::Layer(m, mesh, lamps[l], layers[l]), solves++;
+    const double layerMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count() / lamps.size();
+    std::vector<bool> on(lamps.size(), true);
+    std::vector<GiRef::Rgb> comp, full;
+    GiRef::Compose(layers, on, colour, comp);
+    GiRef::FullSolve(m, mesh, lamps, on, colour, full);
+    const double dAll = MaxDiff(comp, full);
+    double peak = 0.0;
+    for (const GiRef::Rgb& v : full) peak = std::max(peak, static_cast<double>(std::max({v[0], v[1], v[2]})));
+    // the toggle: lamp 0 off, lamp 1 dimmed and turned blue; the layers are kept
+    const int before = solves;
+    on[0] = false, colour[1] = {0.1f, 0.2f, 0.9f};
+    const auto t1 = std::chrono::steady_clock::now();
+    GiRef::Compose(layers, on, colour, comp);
+    const double composeMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t1).count();
+    GiRef::FullSolve(m, mesh, lamps, on, colour, full);
+    const double dToggle = MaxDiff(comp, full);
+    std::printf("   %zu lamps, %zu texels, %zu patches, %zu links: layer %.1f ms a lamp, compose %.3f ms; peak indirect %.4f; compose - full: all on %.2e, "
+                "after the toggle %.2e\n",
+                lamps.size(), m.texels.size(), m.patches.size(), m.links.size(), layerMs, composeMs, peak, dAll, dToggle);
+    Check(peak > 0.0, "GI " + sc.name + ": no indirect light at all");
+    Check(dAll < 1.0 / 255.0, "GI " + sc.name + ": the compose of the layers differs from the full solve by 1/255 or more");
+    Check(dToggle < 1.0 / 255.0, "GI " + sc.name + ": after a toggle the compose differs from the full solve by 1/255 or more");
+    Check(solves == before, "GI " + sc.name + ": a toggle solved again");
+    return true;
+}
+// IndoorRooms with the partition's door closed or open
+Scene GiRooms(bool door) {
+    Scene sc = IndoorRooms();
+    sc.name = door ? "GI rooms, door open" : "GI rooms, door closed";
+    if (!door)
+        for (RtLampProxy::Story& s : sc.lot.stories)
+            for (RtLampProxy::Edge& e : s.edges) e.open = false;
+    return sc;
+}
+void GiLayersCheck(const std::vector<std::string>& worlds, int maxLamps) {
+    std::printf("\n[real-time GI] lamp layers, compose, leak test (CPU reference)\n");
+    std::vector<Scene> scenes;
+    scenes.push_back(GiRooms(false));
+    scenes.push_back(GiRooms(true));
+    scenes.push_back(Synthetic());
+    for (const std::string& w : worlds)
+        if (!LoadWorld(w, scenes, maxLamps)) Check(false, "capture not readable: " + w);
+    for (size_t si = 0; si < scenes.size(); si++) {
+        const Scene& sc = scenes[si];
+        RtLampProxy::Mesh mesh;
+        RtLampProxy::Build(sc.lot, mesh, sc.ceilingsOpen);
+        GiRef::Model m;
+        const auto t0 = std::chrono::steady_clock::now();
+        GiRef::Build(sc.lot, mesh, m);
+        std::printf(" %s: links built in %.0f ms\n", sc.name.c_str(), std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count());
+        std::vector<std::vector<GiRef::Rgb>> layers;
+        if (!GiComposeCheck(sc, mesh, m, layers)) {
+            std::printf("   skipped: fewer than two lamps or no floor texel\n");
+            continue;
+        }
+        if (si > 1) continue;
+        // the rooms: x 4..9 left, 9..14 right, story 0 below y 3, story 1 above. A lamp lights its own room and story only when the
+        // door is closed: every other texel, and every upsampled floor point there, is exactly 0 at every bounce
+        const bool door = si == 1;
+        const auto region = [](float x, int story) { return story * 2 + (x < 9.0f ? 0 : 1); };
+        for (size_t l = 0; l < sc.lamps.size(); l++) {
+            const LampDef& d = sc.lamps[l];
+            const int own = region(d.pos[0], d.pos[1] >= 3.0f ? 1 : 0);
+            long other = 0, leak = 0, upLeak = 0;
+            double nextDoor = 0.0;
+            for (size_t t = 0; t < m.texels.size(); t++) {
+                const GiRef::Patch& P = m.patches[m.texels[t]];
+                const int r = region(P.p[0], P.story);
+                if (r == own) continue;
+                const float v = std::max({layers[l][t][0], layers[l][t][1], layers[l][t][2]});
+                if (door && P.story == own / 2) nextDoor = std::max(nextDoor, static_cast<double>(v));
+                if (door) continue;
+                other++;
+                leak += v != 0.0f;
+            }
+            if (!door)
+                for (int story = 0; story <= 1; story++)
+                    for (float z = 4.125f; z < 12.0f; z += 0.25f)
+                        for (float x = 4.125f; x < 14.0f; x += 0.25f) {
+                            if (region(x, story) == own) continue;
+                            const GiRef::Rgb v = GiRef::Upsample(m, mesh, layers[l], story, x, 3.0f * story, z);
+                            upLeak += v[0] != 0.0f || v[1] != 0.0f || v[2] != 0.0f;
+                        }
+            if (door) {
+                {
+                    std::printf("   %s: brightest texel next door %.5f (doorway spill)\n", d.name.c_str(), nextDoor);
+                    Check(nextDoor > 0.0, "GI door open: no light through the doorway from " + d.name);
+                }
+                continue;
+            }
+            std::printf("   %s: %ld texels of the closed rooms, %ld not 0; upsampled points not 0: %ld\n", d.name.c_str(), other, leak, upLeak);
+            Check(other > 0 && leak == 0, "GI leak: " + d.name + " lights a closed room's texels");
+            Check(upLeak == 0, "GI leak: the upsample blends " + d.name + "'s light across a wall");
+        }
+    }
 }
 
 // ---------------------------------------------------------------- 1. shadows: GPU against the reference
@@ -4900,6 +5023,7 @@ int main(int argc, char** argv) {
     FloorGridTwinChecks();
     std::vector<std::string> worlds;
     int maxLamps = 12;
+    bool giOnly = false;
     char* dbg = nullptr;
     size_t dbgLen = 0;
     g_debug = _dupenv_s(&dbg, &dbgLen, "RT_DEBUG") == 0 && dbg;
@@ -4908,7 +5032,13 @@ int main(int argc, char** argv) {
         const std::string a = argv[i];
         if (a == "--lamps" && i + 1 < argc) maxLamps = std::atoi(argv[++i]);
         else if (a == "--probe") g_allLamps = true;
+        else if (a == "--gi") giOnly = true;
         else worlds.push_back(a);
+    }
+    if (giOnly) { // (real-time GI's CPU reference only: no device)
+        GiLayersCheck(worlds, maxLamps);
+        std::printf("\n%d checks, %d failures\n", checks, failures);
+        return failures ? 1 : 0;
     }
     if (g_allLamps) { // (the probe only: where the lamp heads sit against the occluders, no device)
         std::vector<Scene> scenes;
@@ -4943,6 +5073,7 @@ int main(int argc, char** argv) {
 #endif
     UnderDeltaCheck();
     BakeStamp4Check();
+    GiLayersCheck(worlds, maxLamps);
     std::vector<Scene> scenes;
     scenes.push_back(Synthetic());
     scenes.push_back(IndoorRooms());
