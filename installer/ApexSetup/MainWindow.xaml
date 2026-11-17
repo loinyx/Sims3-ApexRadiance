@@ -303,6 +303,26 @@
                                                   AutomationProperties.Name="Restart host" />
                                 </Grid>
                             </Border>
+                            <Border x:Name="SmoothCard" Style="{StaticResource ApexCard}" Visibility="Collapsed">
+                                <Grid ColumnSpacing="14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
+                                        <FontIcon Glyph="&#xE945;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="NVIDIA Smooth Motion" Style="{StaticResource ApexStrong}" />
+                                        <TextBlock Text="Frame generation in the NVIDIA driver: about double the frame rate on RTX 40 and 50 series cards, with a little more input delay." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="SmoothPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <ToggleSwitch x:Name="SmoothToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnSmoothToggle"
+                                                  AutomationProperties.Name="NVIDIA Smooth Motion" />
+                                </Grid>
+                            </Border>
                         </StackPanel>
 
                         <!-- 3 Install -->

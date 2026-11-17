@@ -275,5 +275,14 @@ public static partial class Strings
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Kun tallennat muistin ollessa vähissä, se tarjoaa lopettaessasi pelin käynnistämistä uudelleen siihen tallennukseen.",
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Käynnistä peli kerran Apex Radiancen kanssa ja ota sitten pelin uudelleenkäynnistys käyttöön tästä.",
         ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "Poistaa ts3wrap.exe-tiedoston ja poistaa pelin uudelleenkäynnistyksen käytöstä ApexRadiance.toml-tiedostossa.",
+        ["Frame generation in the NVIDIA driver: about double the frame rate on RTX 40 and 50 series cards, with a little more input delay."] = "Kuvien generointi NVIDIA-ajurissa: noin kaksinkertainen kuvataajuus RTX 40- ja 50-sarjan korteilla, hieman suuremmalla syöteviiveellä.",
+        ["On for The Sims 3 in the NVIDIA driver."] = "Päällä The Sims 3:lle NVIDIA-ajurissa.",
+        ["Off for The Sims 3."] = "Pois päältä The Sims 3:lle.",
+        ["Already in your NVIDIA profile \"{0}\": Setup leaves it as it is."] = "On jo omassa NVIDIA-profiilissasi \"{0}\": Setup jättää sen ennalleen.",
+        ["Needs an NVIDIA GeForce RTX 40 or 50 series card (found: {0})."] = "Vaatii NVIDIA GeForce RTX 40- tai 50-sarjan kortin (löytyi: {0}).",
+        ["Needs NVIDIA driver 571.86 or newer (found: {0})."] = "Vaatii NVIDIA-ajurin 571.86 tai uudemman (löytyi: {0}).",
+        ["Needs the RTX Remix bridge as the graphics choice."] = "Vaatii grafiikkavalinnaksi RTX Remix bridgen.",
+        ["Could not read the NVIDIA driver settings: {0}"] = "NVIDIA-ajurin asetuksia ei voitu lukea: {0}",
+        ["Could not change the NVIDIA driver settings: {0}"] = "NVIDIA-ajurin asetuksia ei voitu muuttaa: {0}",
     };
 }

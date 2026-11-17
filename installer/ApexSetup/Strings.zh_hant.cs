@@ -243,5 +243,14 @@ public static partial class Strings
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "在記憶體不足時存檔後，離開遊戲時會詢問是否用該存檔重新啟動遊戲。",
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "請先用 Apex Radiance 啟動一次遊戲，然後在這裡開啟重新啟動遊戲。",
         ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "刪除 ts3wrap.exe，並在 ApexRadiance.toml 中關閉重新啟動遊戲。",
+        ["Frame generation in the NVIDIA driver: about double the frame rate on RTX 40 and 50 series cards, with a little more input delay."] = "NVIDIA 驅動程式中的影格生成：在 RTX 40 和 50 系列顯示卡上幀率約翻倍，輸入延遲略增。",
+        ["On for The Sims 3 in the NVIDIA driver."] = "已在 NVIDIA 驅動程式中為《模擬市民3》開啟。",
+        ["Off for The Sims 3."] = "已為《模擬市民3》關閉。",
+        ["Already in your NVIDIA profile \"{0}\": Setup leaves it as it is."] = "已在你的 NVIDIA 設定檔「{0}」中：Setup 不會更動它。",
+        ["Needs an NVIDIA GeForce RTX 40 or 50 series card (found: {0})."] = "需要 NVIDIA GeForce RTX 40 或 50 系列顯示卡（找到：{0}）。",
+        ["Needs NVIDIA driver 571.86 or newer (found: {0})."] = "需要 NVIDIA 驅動程式 571.86 或更新版本（找到：{0}）。",
+        ["Needs the RTX Remix bridge as the graphics choice."] = "需要選擇 RTX Remix bridge 作為圖形方式。",
+        ["Could not read the NVIDIA driver settings: {0}"] = "無法讀取 NVIDIA 驅動程式設定：{0}",
+        ["Could not change the NVIDIA driver settings: {0}"] = "無法變更 NVIDIA 驅動程式設定：{0}",
     };
 }

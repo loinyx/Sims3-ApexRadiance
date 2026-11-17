@@ -277,5 +277,14 @@ public static partial class Strings
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "メモリが少ない状態でセーブした後、終了時にそのセーブでゲームを再び起動するか尋ねます。",
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Apex Radiance でゲームを一度起動してから、ここでゲームの再起動をオンにしてください。",
         ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "ts3wrap.exe を削除し、ApexRadiance.toml でゲームの再起動をオフにします。",
+        ["Frame generation in the NVIDIA driver: about double the frame rate on RTX 40 and 50 series cards, with a little more input delay."] = "NVIDIA ドライバーのフレーム生成: RTX 40/50 シリーズでフレームレートが約 2 倍になり、入力遅延がわずかに増えます。",
+        ["On for The Sims 3 in the NVIDIA driver."] = "NVIDIA ドライバーで The Sims 3 に対してオン。",
+        ["Off for The Sims 3."] = "The Sims 3 に対してオフ。",
+        ["Already in your NVIDIA profile \"{0}\": Setup leaves it as it is."] = "すでにあなたの NVIDIA プロファイル \"{0}\" にあります: Setup は変更しません。",
+        ["Needs an NVIDIA GeForce RTX 40 or 50 series card (found: {0})."] = "NVIDIA GeForce RTX 40 または 50 シリーズのカードが必要です (検出: {0})。",
+        ["Needs NVIDIA driver 571.86 or newer (found: {0})."] = "NVIDIA ドライバー 571.86 以降が必要です (検出: {0})。",
+        ["Needs the RTX Remix bridge as the graphics choice."] = "グラフィックの選択で RTX Remix bridge が必要です。",
+        ["Could not read the NVIDIA driver settings: {0}"] = "NVIDIA ドライバーの設定を読み取れませんでした: {0}",
+        ["Could not change the NVIDIA driver settings: {0}"] = "NVIDIA ドライバーの設定を変更できませんでした: {0}",
     };
 }

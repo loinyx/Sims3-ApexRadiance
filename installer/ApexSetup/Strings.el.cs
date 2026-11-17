@@ -288,5 +288,14 @@ public static partial class Strings
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Μετά από αποθήκευση με λίγη μνήμη, προτείνει να ξεκινήσει ξανά το παιχνίδι σε αυτή την αποθήκευση όταν βγείτε.",
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Ξεκινήστε το παιχνίδι μία φορά με το Apex Radiance και μετά ενεργοποιήστε εδώ την επανεκκίνηση παιχνιδιού.",
         ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "Αφαιρεί το ts3wrap.exe και απενεργοποιεί την επανεκκίνηση παιχνιδιού στο ApexRadiance.toml.",
+        ["Frame generation in the NVIDIA driver: about double the frame rate on RTX 40 and 50 series cards, with a little more input delay."] = "Δημιουργία καρέ στον οδηγό της NVIDIA: περίπου διπλάσια καρέ σε κάρτες RTX 40 και 50, με λίγο μεγαλύτερη καθυστέρηση εισόδου.",
+        ["On for The Sims 3 in the NVIDIA driver."] = "Ενεργό για το The Sims 3 στον οδηγό της NVIDIA.",
+        ["Off for The Sims 3."] = "Ανενεργό για το The Sims 3.",
+        ["Already in your NVIDIA profile \"{0}\": Setup leaves it as it is."] = "Υπάρχει ήδη στο προφίλ σας NVIDIA \"{0}\": το Setup δεν το αγγίζει.",
+        ["Needs an NVIDIA GeForce RTX 40 or 50 series card (found: {0})."] = "Χρειάζεται κάρτα NVIDIA GeForce RTX σειράς 40 ή 50 (βρέθηκε: {0}).",
+        ["Needs NVIDIA driver 571.86 or newer (found: {0})."] = "Χρειάζεται οδηγό NVIDIA 571.86 ή νεότερο (βρέθηκε: {0}).",
+        ["Needs the RTX Remix bridge as the graphics choice."] = "Χρειάζεται το RTX Remix bridge ως επιλογή γραφικών.",
+        ["Could not read the NVIDIA driver settings: {0}"] = "Δεν ήταν δυνατή η ανάγνωση των ρυθμίσεων του οδηγού NVIDIA: {0}",
+        ["Could not change the NVIDIA driver settings: {0}"] = "Δεν ήταν δυνατή η αλλαγή των ρυθμίσεων του οδηγού NVIDIA: {0}",
     };
 }

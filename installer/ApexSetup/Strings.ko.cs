@@ -275,5 +275,14 @@ public static partial class Strings
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "메모리가 부족한 상태에서 저장한 뒤 게임을 끄면 그 저장 파일로 게임을 다시 시작할지 묻습니다.",
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Apex Radiance로 게임을 한 번 실행한 다음 여기에서 게임 다시 시작을 켜세요.",
         ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "ts3wrap.exe를 제거하고 ApexRadiance.toml에서 게임 다시 시작을 끕니다.",
+        ["Frame generation in the NVIDIA driver: about double the frame rate on RTX 40 and 50 series cards, with a little more input delay."] = "NVIDIA 드라이버의 프레임 생성: RTX 40·50 시리즈에서 프레임이 약 두 배가 되고 입력 지연이 약간 늘어납니다.",
+        ["On for The Sims 3 in the NVIDIA driver."] = "NVIDIA 드라이버에서 심즈 3에 켜짐.",
+        ["Off for The Sims 3."] = "심즈 3에 꺼짐.",
+        ["Already in your NVIDIA profile \"{0}\": Setup leaves it as it is."] = "이미 내 NVIDIA 프로필 \"{0}\"에 있습니다: Setup은 건드리지 않습니다.",
+        ["Needs an NVIDIA GeForce RTX 40 or 50 series card (found: {0})."] = "NVIDIA GeForce RTX 40 또는 50 시리즈 카드가 필요합니다 (찾음: {0}).",
+        ["Needs NVIDIA driver 571.86 or newer (found: {0})."] = "NVIDIA 드라이버 571.86 이상이 필요합니다 (찾음: {0}).",
+        ["Needs the RTX Remix bridge as the graphics choice."] = "그래픽 선택에서 RTX Remix bridge가 필요합니다.",
+        ["Could not read the NVIDIA driver settings: {0}"] = "NVIDIA 드라이버 설정을 읽을 수 없습니다: {0}",
+        ["Could not change the NVIDIA driver settings: {0}"] = "NVIDIA 드라이버 설정을 바꿀 수 없습니다: {0}",
     };
 }

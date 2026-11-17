@@ -243,5 +243,14 @@ public static partial class Strings
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "หลังจากเซฟขณะหน่วยความจำเหลือน้อย เมื่อคุณออกจากเกมจะเสนอให้เปิดเกมใหม่ที่เซฟนั้น",
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "เปิดเกมหนึ่งครั้งพร้อม Apex Radiance แล้วจึงเปิดการเริ่มเกมใหม่ที่นี่",
         ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "ลบ ts3wrap.exe และปิดการเริ่มเกมใหม่ใน ApexRadiance.toml",
+        ["Frame generation in the NVIDIA driver: about double the frame rate on RTX 40 and 50 series cards, with a little more input delay."] = "การสร้างเฟรมในไดรเวอร์ NVIDIA: เฟรมเรตประมาณสองเท่าบนการ์ด RTX 40 และ 50 โดยมีความหน่วงในการควบคุมเพิ่มขึ้นเล็กน้อย",
+        ["On for The Sims 3 in the NVIDIA driver."] = "เปิดสำหรับ The Sims 3 ในไดรเวอร์ NVIDIA",
+        ["Off for The Sims 3."] = "ปิดสำหรับ The Sims 3",
+        ["Already in your NVIDIA profile \"{0}\": Setup leaves it as it is."] = "อยู่ในโปรไฟล์ NVIDIA ของคุณแล้ว \"{0}\": Setup จะไม่แตะต้อง",
+        ["Needs an NVIDIA GeForce RTX 40 or 50 series card (found: {0})."] = "ต้องใช้การ์ด NVIDIA GeForce RTX ซีรีส์ 40 หรือ 50 (พบ: {0})",
+        ["Needs NVIDIA driver 571.86 or newer (found: {0})."] = "ต้องใช้ไดรเวอร์ NVIDIA 571.86 หรือใหม่กว่า (พบ: {0})",
+        ["Needs the RTX Remix bridge as the graphics choice."] = "ต้องเลือก RTX Remix bridge เป็นตัวเลือกกราฟิก",
+        ["Could not read the NVIDIA driver settings: {0}"] = "อ่านการตั้งค่าไดรเวอร์ NVIDIA ไม่ได้: {0}",
+        ["Could not change the NVIDIA driver settings: {0}"] = "เปลี่ยนการตั้งค่าไดรเวอร์ NVIDIA ไม่ได้: {0}",
     };
 }

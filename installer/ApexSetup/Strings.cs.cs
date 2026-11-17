@@ -280,5 +280,14 @@ public static partial class Strings
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Když uložíte hru s nedostatkem paměti, nabídne při ukončení spustit hru znovu s touto pozicí.",
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Spusťte hru jednou s Apex Radiance a potom zde zapněte restart hry.",
         ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "Odebere ts3wrap.exe a vypne restart hry v ApexRadiance.toml.",
+        ["Frame generation in the NVIDIA driver: about double the frame rate on RTX 40 and 50 series cards, with a little more input delay."] = "Generování snímků v ovladači NVIDIA: zhruba dvojnásobná snímková frekvence na kartách RTX 40 a 50, s o něco větším zpožděním ovládání.",
+        ["On for The Sims 3 in the NVIDIA driver."] = "Zapnuto pro The Sims 3 v ovladači NVIDIA.",
+        ["Off for The Sims 3."] = "Vypnuto pro The Sims 3.",
+        ["Already in your NVIDIA profile \"{0}\": Setup leaves it as it is."] = "Už je ve vašem profilu NVIDIA \"{0}\": Setup ho nechá být.",
+        ["Needs an NVIDIA GeForce RTX 40 or 50 series card (found: {0})."] = "Vyžaduje kartu NVIDIA GeForce RTX řady 40 nebo 50 (nalezeno: {0}).",
+        ["Needs NVIDIA driver 571.86 or newer (found: {0})."] = "Vyžaduje ovladač NVIDIA 571.86 nebo novější (nalezeno: {0}).",
+        ["Needs the RTX Remix bridge as the graphics choice."] = "Vyžaduje RTX Remix bridge jako volbu grafiky.",
+        ["Could not read the NVIDIA driver settings: {0}"] = "Nastavení ovladače NVIDIA nelze přečíst: {0}",
+        ["Could not change the NVIDIA driver settings: {0}"] = "Nastavení ovladače NVIDIA nelze změnit: {0}",
     };
 }

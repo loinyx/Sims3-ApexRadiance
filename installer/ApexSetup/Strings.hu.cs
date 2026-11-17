@@ -290,5 +290,14 @@ public static partial class Strings
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Kevés memóriával történt mentés után kilépéskor felajánlja, hogy a játék újrainduljon ezzel a mentéssel.",
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Indítsd el egyszer a játékot az Apex Radiance-szel, majd itt kapcsold be a játék újraindítását.",
         ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "Eltávolítja a ts3wrap.exe fájlt, és kikapcsolja a játék újraindítását az ApexRadiance.toml fájlban.",
+        ["Frame generation in the NVIDIA driver: about double the frame rate on RTX 40 and 50 series cards, with a little more input delay."] = "Képkocka-generálás az NVIDIA-illesztőben: nagyjából dupla képkockaszám RTX 40 és 50 sorozatú kártyákon, kicsit nagyobb bemeneti késleltetéssel.",
+        ["On for The Sims 3 in the NVIDIA driver."] = "Bekapcsolva a The Sims 3-hoz az NVIDIA-illesztőben.",
+        ["Off for The Sims 3."] = "Kikapcsolva a The Sims 3-hoz.",
+        ["Already in your NVIDIA profile \"{0}\": Setup leaves it as it is."] = "Már a saját NVIDIA-profilodban van (\"{0}\"): a Setup nem nyúl hozzá.",
+        ["Needs an NVIDIA GeForce RTX 40 or 50 series card (found: {0})."] = "NVIDIA GeForce RTX 40 vagy 50 sorozatú kártya kell (talált: {0}).",
+        ["Needs NVIDIA driver 571.86 or newer (found: {0})."] = "571.86-os vagy újabb NVIDIA-illesztő kell (talált: {0}).",
+        ["Needs the RTX Remix bridge as the graphics choice."] = "Grafikai választásként az RTX Remix bridge kell.",
+        ["Could not read the NVIDIA driver settings: {0}"] = "Az NVIDIA-illesztő beállításai nem olvashatók: {0}",
+        ["Could not change the NVIDIA driver settings: {0}"] = "Az NVIDIA-illesztő beállításai nem módosíthatók: {0}",
     };
 }

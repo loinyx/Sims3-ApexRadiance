@@ -285,5 +285,14 @@ public static partial class Strings
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Tras guardar con poca memoria, ofrece volver a abrir el juego en esa partida cuando salgas.",
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Inicia el juego una vez con Apex Radiance y después activa aquí el reinicio del juego.",
         ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "Quita ts3wrap.exe y desactiva el reinicio del juego en ApexRadiance.toml.",
+        ["Frame generation in the NVIDIA driver: about double the frame rate on RTX 40 and 50 series cards, with a little more input delay."] = "Generación de fotogramas en el controlador de NVIDIA: cerca del doble de FPS en tarjetas RTX 40 y 50, con algo más de retraso en los controles.",
+        ["On for The Sims 3 in the NVIDIA driver."] = "Activado para The Sims 3 en el controlador de NVIDIA.",
+        ["Off for The Sims 3."] = "Desactivado para The Sims 3.",
+        ["Already in your NVIDIA profile \"{0}\": Setup leaves it as it is."] = "Ya está en tu perfil de NVIDIA \"{0}\": el instalador no lo toca.",
+        ["Needs an NVIDIA GeForce RTX 40 or 50 series card (found: {0})."] = "Necesita una tarjeta NVIDIA GeForce RTX serie 40 o 50 (encontrada: {0}).",
+        ["Needs NVIDIA driver 571.86 or newer (found: {0})."] = "Necesita el controlador NVIDIA 571.86 o más reciente (encontrado: {0}).",
+        ["Needs the RTX Remix bridge as the graphics choice."] = "Necesita el RTX Remix bridge como opción gráfica.",
+        ["Could not read the NVIDIA driver settings: {0}"] = "No se pudieron leer los ajustes del controlador de NVIDIA: {0}",
+        ["Could not change the NVIDIA driver settings: {0}"] = "No se pudieron cambiar los ajustes del controlador de NVIDIA: {0}",
     };
 }

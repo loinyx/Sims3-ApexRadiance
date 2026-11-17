@@ -782,6 +782,38 @@ public sealed partial class MainWindow : Window
 
     void OnToggle(object sender, RoutedEventArgs e) => RefreshComponents();
 
+    // NVIDIA Smooth Motion: a driver setting, not a game file, so its switch applies at once (SmoothMotion.cs); read once per game
+    SmoothMotion.Status? _smooth;
+    string? _smoothFor, _smoothError;
+    bool _fillingSmooth;
+
+    void RefreshSmooth(State s, Game g)
+    {
+        if (_smoothFor != g.Exe) { _smoothFor = g.Exe; _smooth = SmoothMotion.Read(g.Exe); _smoothError = null; }
+        var sm = _smooth!;
+        // no NVIDIA card (or no driver to ask): no row; an NVIDIA card that cannot run it: the row, off, with the reason
+        SmoothCard.Visibility = sm.Card is null && sm.Error is null ? Visibility.Collapsed : Visibility.Visible;
+        var blocked = SmoothMotion.Blocked(sm, s.Layer == Layer.Bridge);
+        _fillingSmooth = true;
+        SmoothToggle.IsOn = sm.On;
+        SmoothToggle.IsEnabled = blocked is null;
+        _fillingSmooth = false;
+        SetState(SmoothPill, _smoothError == "Dry run: Setup changes nothing." ? (T(_smoothError), "ApexMutedBrush")
+            : _smoothError is not null ? (T("Could not change the NVIDIA driver settings: {0}", T(_smoothError)), "ApexWarningBrush")
+            : blocked is { } b ? (T(b.Key, b.Arg), "ApexMutedBrush")
+            : sm.On ? (T("On for The Sims 3 in the NVIDIA driver."), "ApexSuccessBrush")
+            : (T("Off for The Sims 3."), "ApexMutedBrush"));
+    }
+
+    void OnSmoothToggle(object sender, RoutedEventArgs e)
+    {
+        if (_fillingSmooth || _game is not { } g || _smooth is null) return;
+        _smoothError = SmoothMotion.Set(SmoothToggle.IsOn, g.Exe);
+        if (_smoothError is null) _smooth = SmoothMotion.Read(g.Exe);
+        else App.Log(new InvalidOperationException("Smooth Motion: " + _smoothError));
+        RefreshComponents();
+    }
+
     bool _fillingRenderer;
     // the renderer choices as cards: a radio button over the whole card, the chosen card outlined in the accent
     readonly Dictionary<string, (Border Card, RadioButton Radio)> _rendererCards = new();
@@ -899,6 +931,7 @@ public sealed partial class MainWindow : Window
         S3ppGet.Visibility = !S3ppPresent && _s3ppArchive is null ? Visibility.Visible : Visibility.Collapsed;
         S3ppWait.Visibility = _s3ppWatch is not null ? Visibility.Visible : Visibility.Collapsed;
         S3ppWaitText.Text = T("Waiting for your download in {0}…", DownloadsFolder());
+        RefreshSmooth(s, g);
         ModToggle.IsEnabled = g.ModernizationSupported || s.Modernization;
         if (!g.ModernizationSupported && !s.Modernization) ModToggle.IsOn = false;
         ModDesc.Text = g.ModernizationSupported
