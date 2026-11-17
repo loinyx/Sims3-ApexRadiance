@@ -215,7 +215,7 @@ float Recv(float3 N, float3 dc, float planeD, float dr) {
 // door jamb's near the door) does not step from texel to texel
 float Shadow(LampRegs lamp, float3 P, float3 N, int kSearch, int kEmit, int kWalk, float fr) {
     const float2 k = lamp.misc.xz;
-    const float3 L = lamp.pos.xyz;
+    const float3 L = lamp.pos.xyz - float3(0, 0.01, 0); // the cube's origin: RtLampProxy::kShadowDrop under the lamp
     const float R = gB.x;
     const float3 v0 = P - L;
     const float d0 = max(length(v0), 1e-3);

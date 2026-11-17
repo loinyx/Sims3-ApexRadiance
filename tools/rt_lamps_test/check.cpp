@@ -16,7 +16,7 @@
 //  4. Physical indoor lamps (PhysKeptCheck): the game's 3D test on the GPU (T3dPS) against RoomLightTests::occlude, the kept
 //     shadow tiles against the reference, and RelightKeptPhys against the CPU's law x share x T3D, KeptTexel, pack and blur;
 //     room 0's lot lamps from their laws (Room0PhysCheck: AccumulatePhys, the floor mask and exit alpha) against the CPU.
-//  5. --leak (LeakCheck): the proxy's light leaks, the reference and the GPU: a ceiling lamp 2 to 6 cm under the ceiling
+//  5. --leak (LeakCheck): the proxy's light leaks, the reference and the GPU: a ceiling lamp 0 to 6 cm under the ceiling
 //     lights nothing of the story above, and rays between tile centres crossing a closed wall on a tile corner (the seam of
 //     two wall quads) are blocked.
 // Read-only: prints to stdout, writes no file. A missing D3D9 device or capture is a failure.
@@ -4919,7 +4919,7 @@ void FloorLineSweep() {
     Check(ok && n > 0 && leaks == 0 && worst < 0.05, "floor line: the GPU's walk at the moved point leaks light through the slab or leaves the reference");
 }
 
-// The proxy's light leaks (--leak): IndoorRooms with the partition closed. A ceiling lamp hung 2 to 6 cm under the ceiling
+// The proxy's light leaks (--leak): IndoorRooms with the partition closed. A ceiling lamp hung 0 to 6 cm under the ceiling
 // (game ceiling lamps hang about 5 cm under it) must light none of story 1, and lamps at tile centres none of the room next
 // door: a ray between tile centres crosses the partition where two wall quads meet. The reference first (its emitter end is
 // never skipped, its triangle test is watertight), then the GPU's share of the same receivers from the cube shadows.
@@ -4947,13 +4947,12 @@ bool LeakCheck(bool gpu) {
     lamp(6.5f, 2.98f, 8.5f, "ceiling lamp 2 cm under");
     lamp(6.5f, 2.95f, 8.5f, "ceiling lamp 5 cm under");
     lamp(7.5f, 2.94f, 5.5f, "ceiling lamp 6 cm under");
-    // The reference's unskipped emitter end with lamps less than 1 cm under the ceiling. Not checked on the GPU, whose cube
-    // shadows let them through, nor a lamp centre on the ceiling plane, which only touches the plane: both are lit through
-    // it (not changed here, recorded as limits)
-    if (!gpu) {
-        lamp(7.5f, 2.9995f, 6.5f, "ceiling lamp 0.5 mm under");
-        lamp(5.5f, 2.999f, 7.5f, "ceiling lamp 1 mm under");
-    }
+    // Less than 1 cm under the ceiling and on its plane: the shadow's origin RtLampProxy::kShadowDrop under the lamp keeps them
+    // in the room below on both (without it the reference's rays only touched the plane, and the GPU's near plane clipped it)
+    lamp(7.5f, 2.9995f, 6.5f, "ceiling lamp 0.5 mm under");
+    lamp(5.5f, 2.999f, 7.5f, "ceiling lamp 1 mm under");
+    lamp(6.5f, 2.995f, 5.5f, "ceiling lamp 5 mm under");
+    lamp(7.5f, 3.0f, 9.5f, "ceiling lamp on the ceiling");
     lamp(8.5f, 1.0f, 6.5f, "tile-centre lamp");
     lamp(5.5f, 2.0f, 9.5f, "tile-centre lamp, high");
     // receivers that must stay dark: story 1's walls and floor, its ceiling; story 0's room past the partition (x > 9)

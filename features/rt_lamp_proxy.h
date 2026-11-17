@@ -719,12 +719,17 @@ inline int FirstHit(const Mesh& m, const float a[3], const float b[3], float ski
 }
 constexpr int kRefSamples = 64;
 constexpr float kEmitGuard = 0.001f; // m: a disc point this close in front of a surface does not emit (its ray could start past it)
+// m: the shadow's origin is the lamp centre this much lower, here and on the GPU (rt_lamp_gpu.cpp's cube shadows, Shadow in
+// rt_lamps_hlsl.h): a lamp hangs from what is over it, so a centre on a ceiling or less than 1 cm under it belongs to the room
+// below (on the plane, the reference's rays only touched the ceiling; under 5 mm, the GPU's near plane clipped it)
+constexpr float kShadowDrop = 0.01f;
 // The share of a lamp ball (centre L, radius R) the point P sees (stratified points on the disc across the ray: rings of
 // equal area, golden-angle turns). The emitter is the part of the ball its centre sees: a lamp hung 5 cm under a ceiling or
 // mounted on a wall shines from its own side only (a point of the disc behind a surface, seen from the centre, is not
-// light). R <= 0: the centre alone.
-inline float Visibility(const Mesh& m, const float L[3], float R, const float P[3], int samples = kRefSamples, std::vector<uint32_t>* stamp = nullptr,
+// light). R <= 0: the centre alone. The ball's centre is the lamp's kShadowDrop lower.
+inline float Visibility(const Mesh& m, const float lamp[3], float R, const float P[3], int samples = kRefSamples, std::vector<uint32_t>* stamp = nullptr,
                         uint32_t* mark = nullptr) {
+    const float L[3] = {lamp[0], lamp[1] - kShadowDrop, lamp[2]};
     float d[3] = {P[0] - L[0], P[1] - L[1], P[2] - L[2]};
     const float len = std::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
     if (!(len > 1e-4f)) return 1.0f;
