@@ -297,5 +297,15 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "Ativado no driver da AMD, para todos os jogos. O limite de quadros do Apex agora é 60 FPS, o ritmo em que funciona melhor.",
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Ativado no driver da AMD, para todos os jogos. Funciona melhor com o limite de quadros do Apex entre 60 e 90 FPS.",
         ["Off in the AMD driver."] = "Desativado no driver da AMD.",
+        // Apex frame limit beside frame generation
+        ["Apex frame limit"] = "Limite de quadros do Apex",
+        ["Frame generation works best at 60 to 90 fps."] = "A geração de quadros funciona melhor entre 60 e 90 FPS.",
+        ["Off"] = "Desligado",
+        ["{0} fps"] = "{0} FPS",
+        ["{0} fps (recommended)"] = "{0} FPS (recomendado)",
+        ["Keep: {0}"] = "Manter: {0}",
+        ["no limit"] = "sem limite",
+        ["Custom"] = "Personalizado",
+        ["Could not change Apex's frame limit: {0}"] = "Não foi possível mudar o limite de quadros do Apex: {0}",
     };
 }

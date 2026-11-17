@@ -880,6 +880,65 @@ public sealed partial class MainWindow : Window
         RefreshComponents();
     }
 
+    // Apex's frame limit beside frame generation: shown while either row can be used and the game has made ApexRadiance.toml.
+    // Items: Keep (the value now), Engine.FpsChoices, Custom (a number box, 20 to 1000).
+    bool _fillingFps;
+    int? _fpsNow;
+    string? _fpsError;
+    const int FpsCustomTag = -2;
+
+    void RefreshFps(Game g)
+    {
+        var usable = SmoothCard.Visibility == Visibility.Visible && (SmoothToggle.IsEnabled || SmoothToggle.IsOn)
+                  || AfmfCard.Visibility == Visibility.Visible && (AfmfToggle.IsEnabled || AfmfToggle.IsOn);
+        var toml = Engine.ApexToml(Scan.DocumentsFor(g));
+        int? now = null;
+        try { now = File.Exists(toml) ? Engine.FpsLimitKey(File.ReadAllText(toml)) ?? 0 : null; }
+        catch (IOException) { }
+        FpsCard.Visibility = usable && now is not null ? Visibility.Visible : Visibility.Collapsed;
+        if (now is null) return;
+        _fpsNow = now;
+        string Label(int v) => v == 0 ? T("Off") : T(Engine.FpsRecommended(v) ? "{0} fps (recommended)" : "{0} fps", v);
+        _fillingFps = true;
+        FpsCombo.Items.Clear();
+        FpsCombo.Items.Add(new ComboBoxItem { Content = T("Keep: {0}", now == 0 ? T("no limit") : T("{0} fps", now.Value)), Tag = -1 });
+        foreach (var v in Engine.FpsChoices) FpsCombo.Items.Add(new ComboBoxItem { Content = Label(v), Tag = v });
+        FpsCombo.Items.Add(new ComboBoxItem { Content = T("Custom"), Tag = FpsCustomTag });
+        FpsCombo.SelectedIndex = 0;
+        FpsCustom.Visibility = Visibility.Collapsed;
+        FpsCustom.Value = now > 0 ? now.Value : Engine.FrameGenFps;
+        _fillingFps = false;
+        SetState(FpsPill, _fpsError == "Dry run: Setup changes nothing." ? (T(_fpsError), "ApexMutedBrush")
+            : _fpsError is not null ? (T("Could not change Apex's frame limit: {0}", T(_fpsError)), "ApexWarningBrush")
+            : ("", "ApexMutedBrush"));
+    }
+
+    void ApplyFps(int fps)
+    {
+        if (_game is not { } g) return;
+        try
+        {
+            if (Preview is not null) throw new InvalidOperationException("Dry run: Setup changes nothing.");
+            _fpsError = null;
+            Engine.SetFpsLimit(g, fps);
+        }
+        catch (Exception ex) { _fpsError = ex.Message; if (ex.Message != "Dry run: Setup changes nothing.") App.Log(ex); }
+        RefreshComponents();
+    }
+
+    void OnFpsPicked(object sender, SelectionChangedEventArgs e)
+    {
+        if (_fillingFps || FpsCombo.SelectedItem is not ComboBoxItem { Tag: int v }) return;
+        FpsCustom.Visibility = v == FpsCustomTag ? Visibility.Visible : Visibility.Collapsed;
+        if (v >= 0) ApplyFps(v);
+    }
+
+    void OnFpsCustom(NumberBox sender, NumberBoxValueChangedEventArgs e)
+    {
+        if (_fillingFps || double.IsNaN(e.NewValue) || FpsCustom.Visibility != Visibility.Visible) return;
+        ApplyFps(Engine.ClampFps((int)Math.Round(e.NewValue)));
+    }
+
     void OnSmoothToggle(object sender, RoutedEventArgs e)
     {
         if (_fillingSmooth || _game is not { } g || _smooth is null) return;
@@ -1013,6 +1072,7 @@ public sealed partial class MainWindow : Window
         S3ppWaitText.Text = T("Waiting for your download in {0}…", DownloadsFolder());
         RefreshSmooth(s, g);
         RefreshAfmf();
+        RefreshFps(g);
         ModToggle.IsEnabled = g.ModernizationSupported || s.Modernization;
         if (!g.ModernizationSupported && !s.Modernization) ModToggle.IsOn = false;
         ModDesc.Text = g.ModernizationSupported

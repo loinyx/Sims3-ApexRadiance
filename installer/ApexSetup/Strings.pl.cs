@@ -262,5 +262,14 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "Włączone w sterowniku AMD, dla wszystkich gier. Limit klatek Apex wynosi teraz 60 FPS, tempo, w którym działa najlepiej.",
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Włączone w sterowniku AMD, dla wszystkich gier. Działa najlepiej z limitem klatek Apex od 60 do 90 FPS.",
         ["Off in the AMD driver."] = "Wyłączone w sterowniku AMD.",
+        ["Apex frame limit"] = "Limit klatek Apex",
+        ["Frame generation works best at 60 to 90 fps."] = "Generowanie klatek działa najlepiej przy 60–90 FPS.",
+        ["Off"] = "Wyłączony",
+        ["{0} fps"] = "{0} FPS",
+        ["{0} fps (recommended)"] = "{0} FPS (zalecane)",
+        ["Keep: {0}"] = "Zostaw: {0}",
+        ["no limit"] = "bez limitu",
+        ["Custom"] = "Własny",
+        ["Could not change Apex's frame limit: {0}"] = "Nie można zmienić limitu klatek Apex: {0}",
     };
 }

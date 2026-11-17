@@ -307,5 +307,14 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "Ενεργό στον οδηγό της AMD, για όλα τα παιχνίδια. Το όριο καρέ του Apex είναι τώρα 60 FPS, ο ρυθμός που λειτουργεί καλύτερα.",
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Ενεργό στον οδηγό της AMD, για όλα τα παιχνίδια. Λειτουργεί καλύτερα με όριο καρέ του Apex 60 έως 90 FPS.",
         ["Off in the AMD driver."] = "Ανενεργό στον οδηγό της AMD.",
+        ["Apex frame limit"] = "Όριο καρέ του Apex",
+        ["Frame generation works best at 60 to 90 fps."] = "Η δημιουργία καρέ λειτουργεί καλύτερα στα 60 έως 90 FPS.",
+        ["Off"] = "Ανενεργό",
+        ["{0} fps"] = "{0} FPS",
+        ["{0} fps (recommended)"] = "{0} FPS (προτείνεται)",
+        ["Keep: {0}"] = "Διατήρηση: {0}",
+        ["no limit"] = "χωρίς όριο",
+        ["Custom"] = "Προσαρμοσμένο",
+        ["Could not change Apex's frame limit: {0}"] = "Δεν ήταν δυνατή η αλλαγή του ορίου καρέ του Apex: {0}",
     };
 }

@@ -600,6 +600,19 @@ try
         Check(Engine.WithFpsLimitIfNone("screen.vsync = 1\n").Text == "screen.vsync = 1\n" && Engine.WithFpsLimitIfNone("screen = { vsync = 1 }\n").Text == "screen = { vsync = 1 }\n"
               && Engine.WithFpsLimitIfNone("[screen]\nfps_limit = 99999999999\n").Text == "[screen]\nfps_limit = 99999999999\n",
               "frame limit: dotted or inline screen keys and an unparseable limit are left alone");
+        // the frame limit picker: Apex's choices plus 75 and 90, custom clamped as Apex reads it, its own restore point
+        Check(Engine.FpsChoices.SequenceEqual(new[] { 0, 30, 60, 75, 90, 120, 144, 165, 240 }) && Engine.FpsRecommended(60) && Engine.FpsRecommended(90)
+              && !Engine.FpsRecommended(120) && Engine.ClampFps(-5) == 0 && Engine.ClampFps(0) == 0 && Engine.ClampFps(5) == 20 && Engine.ClampFps(5000) == 1000
+              && Engine.ClampFps(77) == 77, "frame limit picker: the choices, the recommended ones, custom clamped to 0 or 20 to 1000");
+        File.WriteAllText(fgToml, "[screen]\r\nfps_limit = 144\r\n");
+        Check(Engine.SetFpsLimit(g, 5000, docs) && Read(fgToml) == "[screen]\r\nfps_limit = 1000\r\n" && RestorePoints.List(bin)[0].Label == "Apex frame limit"
+              && !Engine.SetFpsLimit(g, 1000, docs), "frame limit picker: writes at once, clamped, nothing when unchanged");
+        Check(RestorePoints.Restore(bin, RestorePoints.List(bin)[0]).Count == 0 && Read(fgToml) == "[screen]\r\nfps_limit = 144\r\n", "frame limit picker: restoring puts back the player's 144");
+        Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", "1");
+        var pickThrew = false;
+        try { Engine.SetFpsLimit(g, 75, docs); } catch (InvalidOperationException) { pickThrew = true; }
+        Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null);
+        Check(pickThrew && Read(fgToml) == "[screen]\r\nfps_limit = 144\r\n", "frame limit picker: the dry run writes nothing");
         frameGenOffFails = null;
         frameGenOff.Clear();
         Engine.Remove(g, Components.S3ss, docs);

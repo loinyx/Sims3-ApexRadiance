@@ -528,6 +528,28 @@ public static class Engine
     static readonly Regex ScreenHeader = new(@"^\s*\[\s*screen\s*\]\s*(#.*)?\r?$");
     static readonly Regex FpsKey = new(@"^(\s*fps_limit\s*=\s*)(\d+)");
     public const int FrameGenFps = 60;
+
+    // Apex's own frame limit choices (features/screen_control.cpp: 0 = off, 30, 60, 120, 144, 165, 240), with 75 and 90 for frame
+    // generation's 60 to 90; a custom value is clamped as Apex reads it: 0 or below is off, else 20 to 1000
+    public static readonly int[] FpsChoices = { 0, 30, 60, 75, 90, 120, 144, 165, 240 };
+    public static bool FpsRecommended(int fps) => fps is >= 60 and <= 90;
+    public static int ClampFps(int fps) => fps <= 0 ? 0 : Math.Clamp(fps, 20, 1000);
+
+    // The frame limit picker: [screen] fps_limit = fps at once, in a restore point that puts back only the key; nothing before
+    // the game made ApexRadiance.toml, while it runs, or in a dry run. False when nothing changed.
+    public static bool SetFpsLimit(Game g, int fps, string? docs = null)
+    {
+        var f = ApexToml(docs ?? Scan.DocumentsFor(g));
+        if (!File.Exists(f)) return false;
+        CheckWritable();
+        fps = ClampFps(fps);
+        var text = File.ReadAllText(f);
+        var was = FpsLimitKey(text);
+        if (was == fps || DottedScreen(text)) return false;
+        using var point = RestorePoints.Begin(g.Bin, "Apex frame limit");
+        Fs.WriteFpsKey(f, WithFpsLimit(text, fps), was, fps);
+        return true;
+    }
     public static (string Text, int? Was) WithFpsLimitIfNone(string text, int fps = FrameGenFps) =>
         DottedScreen(text) || FpsLimitKey(text) is > 0 or -1 ? (text, FpsLimitKey(text)) : (WithFpsLimit(text, fps), FpsLimitKey(text));
 
@@ -595,7 +617,7 @@ public static class Engine
         var (next, was) = WithFpsLimitIfNone(text);
         if (next == text) return false;
         using var point = RestorePoints.Begin(g.Bin, "Turn on {0}", feature);
-        Fs.WriteFpsKey(f, next, was);
+        Fs.WriteFpsKey(f, next, was, FrameGenFps);
         return true;
     }
 

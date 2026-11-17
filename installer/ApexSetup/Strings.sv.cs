@@ -304,5 +304,14 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "På i AMD-drivrutinen, för alla spel. Apex bildgräns är nu 60 fps, takten den fungerar bäst i.",
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "På i AMD-drivrutinen, för alla spel. Fungerar bäst med Apex bildgräns på 60 till 90 fps.",
         ["Off in the AMD driver."] = "Av i AMD-drivrutinen.",
+        ["Apex frame limit"] = "Apex bildgräns",
+        ["Frame generation works best at 60 to 90 fps."] = "Bildgenerering fungerar bäst vid 60 till 90 fps.",
+        ["Off"] = "Av",
+        ["{0} fps"] = "{0} fps",
+        ["{0} fps (recommended)"] = "{0} fps (rekommenderas)",
+        ["Keep: {0}"] = "Behåll: {0}",
+        ["no limit"] = "ingen gräns",
+        ["Custom"] = "Anpassad",
+        ["Could not change Apex's frame limit: {0}"] = "Kunde inte ändra Apex bildgräns: {0}",
     };
 }

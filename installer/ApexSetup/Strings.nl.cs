@@ -293,5 +293,14 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "Aan in de AMD-driver, voor alle games. De framelimiet van Apex is nu 60 fps, het tempo waarop het het best werkt.",
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Aan in de AMD-driver, voor alle games. Werkt het best met de framelimiet van Apex op 60 tot 90 fps.",
         ["Off in the AMD driver."] = "Uit in de AMD-driver.",
+        ["Apex frame limit"] = "Framelimiet van Apex",
+        ["Frame generation works best at 60 to 90 fps."] = "Framegeneratie werkt het best op 60 tot 90 fps.",
+        ["Off"] = "Uit",
+        ["{0} fps"] = "{0} fps",
+        ["{0} fps (recommended)"] = "{0} fps (aanbevolen)",
+        ["Keep: {0}"] = "Behouden: {0}",
+        ["no limit"] = "geen limiet",
+        ["Custom"] = "Aangepast",
+        ["Could not change Apex's frame limit: {0}"] = "Kan de framelimiet van Apex niet wijzigen: {0}",
     };
 }

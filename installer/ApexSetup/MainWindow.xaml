@@ -362,6 +362,28 @@
                                                   AutomationProperties.Name="AMD Fluid Motion Frames" />
                                 </Grid>
                             </Border>
+                            <Border x:Name="FpsCard" Style="{StaticResource ApexCard}" Visibility="Collapsed">
+                                <Grid ColumnSpacing="14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
+                                        <FontIcon Glyph="&#xEC92;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="Apex frame limit" Style="{StaticResource ApexStrong}" />
+                                        <TextBlock Text="Frame generation works best at 60 to 90 fps." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="FpsPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <ComboBox x:Name="FpsCombo" Tag="dyn" MinWidth="200" SelectionChanged="OnFpsPicked" AutomationProperties.Name="Apex frame limit" />
+                                        <NumberBox x:Name="FpsCustom" Minimum="20" Maximum="1000" SpinButtonPlacementMode="Compact" Visibility="Collapsed"
+                                                   ValueChanged="OnFpsCustom" AutomationProperties.Name="Custom" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
                         </StackPanel>
 
                         <!-- 3 Install -->

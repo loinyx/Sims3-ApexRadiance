@@ -262,5 +262,14 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "已在 AMD 驅動程式中開啟，對所有遊戲生效。Apex 的幀率上限現為 60 fps，這是它效果最好的節奏。",
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "已在 AMD 驅動程式中開啟，對所有遊戲生效。Apex 的幀率上限設為 60 到 90 fps 時效果最好。",
         ["Off in the AMD driver."] = "已在 AMD 驅動程式中關閉。",
+        ["Apex frame limit"] = "Apex 幀率上限",
+        ["Frame generation works best at 60 to 90 fps."] = "影格生成在 60 到 90 fps 時效果最好。",
+        ["Off"] = "關閉",
+        ["{0} fps"] = "{0} fps",
+        ["{0} fps (recommended)"] = "{0} fps（建議）",
+        ["Keep: {0}"] = "保持：{0}",
+        ["no limit"] = "無上限",
+        ["Custom"] = "自訂",
+        ["Could not change Apex's frame limit: {0}"] = "無法變更 Apex 的幀率上限：{0}",
     };
 }

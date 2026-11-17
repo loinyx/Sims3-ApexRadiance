@@ -299,5 +299,14 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "Zapnuto v ovladači AMD, pro všechny hry. Limit snímků Apexu je nyní 60 FPS, tempo, při kterém funguje nejlépe.",
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Zapnuto v ovladači AMD, pro všechny hry. Nejlépe funguje s limitem snímků Apexu 60 až 90 FPS.",
         ["Off in the AMD driver."] = "Vypnuto v ovladači AMD.",
+        ["Apex frame limit"] = "Limit snímků Apexu",
+        ["Frame generation works best at 60 to 90 fps."] = "Generování snímků funguje nejlépe při 60 až 90 FPS.",
+        ["Off"] = "Vypnuto",
+        ["{0} fps"] = "{0} FPS",
+        ["{0} fps (recommended)"] = "{0} FPS (doporučeno)",
+        ["Keep: {0}"] = "Ponechat: {0}",
+        ["no limit"] = "bez limitu",
+        ["Custom"] = "Vlastní",
+        ["Could not change Apex's frame limit: {0}"] = "Limit snímků Apexu nelze změnit: {0}",
     };
 }

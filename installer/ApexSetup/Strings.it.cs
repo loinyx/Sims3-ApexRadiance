@@ -304,5 +304,14 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "Attivo nel driver AMD, per tutti i giochi. Il limite di fotogrammi di Apex ora è 60 FPS, il ritmo in cui funziona meglio.",
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Attivo nel driver AMD, per tutti i giochi. Funziona meglio con il limite di fotogrammi di Apex tra 60 e 90 FPS.",
         ["Off in the AMD driver."] = "Disattivato nel driver AMD.",
+        ["Apex frame limit"] = "Limite di fotogrammi di Apex",
+        ["Frame generation works best at 60 to 90 fps."] = "La generazione di fotogrammi funziona meglio tra 60 e 90 FPS.",
+        ["Off"] = "Disattivato",
+        ["{0} fps"] = "{0} FPS",
+        ["{0} fps (recommended)"] = "{0} FPS (consigliato)",
+        ["Keep: {0}"] = "Mantieni: {0}",
+        ["no limit"] = "nessun limite",
+        ["Custom"] = "Personalizzato",
+        ["Could not change Apex's frame limit: {0}"] = "Impossibile modificare il limite di fotogrammi di Apex: {0}",
     };
 }

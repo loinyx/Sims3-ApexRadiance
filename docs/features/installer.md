@@ -99,6 +99,14 @@ How it follows the other actions:
 |---|---|---|
 | ![Smooth Motion off](../images/installer/smooth-motion-off.png) | ![Smooth Motion on](../images/installer/smooth-motion-on.png) | ![Smooth Motion on an RTX 3080](../images/installer/smooth-motion-unsupported.png) |
 
+**Apex frame limit** sits below the frame generation rows while either can be used and the game has made
+`ApexRadiance.toml`: a list with *Keep* (the value now), Apex's own choices (off, 30, 60, 120, 144, 165, 240) plus 75 and 90,
+the 60 to 90 ones marked recommended, and *Custom* (20 to 1000, clamped as Apex reads it). A choice writes
+`[screen] fps_limit` at once, through a temporary file, in its own restore point (*Apex frame limit*) that puts back the
+value before only while the file still holds the one Setup wrote; the game must be closed, and the dry run writes nothing.
+
+![Apex frame limit](../images/installer/frame-limit.png)
+
 **AMD Fluid Motion Frames** (Setup 1.2.0) is the row after it, for AMD cards: frame generation in the AMD driver, through
 AMD's ADLX (`Afmf.cs`). ADLX has AFMF as one setting for the whole system, not per game, so the row says it applies to
 every game on the PC. The row shows when the AMD driver answers, and can be turned on where ADLX reports AFMF supported

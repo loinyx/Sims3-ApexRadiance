@@ -12,6 +12,7 @@ public sealed class RestoreEntry
     public bool RestartHostKey { get; set; } // ApexRadiance.toml: undone by putting back only [ui] restart_host (RestartHostWas)
     public bool? RestartHostWas { get; set; } // its value before, null when the key was missing
     public bool FpsLimitKey { get; set; }    // ApexRadiance.toml: undone by putting back only [screen] fps_limit (FpsLimitWas)
+    public int? FpsLimitSet { get; set; }     // the value Setup wrote (null in older points: 60, frame generation's)
     public int? FpsLimitWas { get; set; }     // its value before, null when the key was missing
 }
 
@@ -98,12 +99,12 @@ public static class RestorePoints
 
     // first touch wins: the path as it was before this action. All or nothing: the entry is kept only once its copy and
     // point.json are on disk (an action cut off after it can still be restored); otherwise it throws before the change
-    internal static void Touch(string path, bool dir = false, bool key = false, bool? keyWas = null, bool fps = false, int? fpsWas = null)
+    internal static void Touch(string path, bool dir = false, bool key = false, bool? keyWas = null, bool fps = false, int? fpsWas = null, int? fpsSet = null)
     {
         if (_open is not { } s) return;
         path = Path.GetFullPath(path);
         if (s.Seen.Contains(path)) return;
-        var e = new RestoreEntry { Path = path, Dir = dir, Existed = dir ? Directory.Exists(path) : File.Exists(path), RestartHostKey = key, RestartHostWas = keyWas, FpsLimitKey = fps, FpsLimitWas = fpsWas };
+        var e = new RestoreEntry { Path = path, Dir = dir, Existed = dir ? Directory.Exists(path) : File.Exists(path), RestartHostKey = key, RestartHostWas = keyWas, FpsLimitKey = fps, FpsLimitWas = fpsWas, FpsLimitSet = fpsSet };
         Directory.CreateDirectory(s.Point.Dir);
         try
         {
@@ -176,7 +177,7 @@ public static class RestorePoints
             if (!File.Exists(e.Path)) return;
             var text = File.ReadAllText(e.Path);
             // only while the file still holds what Setup wrote: a limit the player changed since stays (Restore checked the game is closed)
-            if (Engine.FpsLimitKey(text) == Engine.FrameGenFps)
+            if (Engine.FpsLimitKey(text) == (e.FpsLimitSet ?? Engine.FrameGenFps))
                 Fs.WriteAtomic(e.Path, e.FpsLimitWas is { } was ? Engine.WithFpsLimit(text, was) : Engine.WithoutFpsLimit(text));
             return;
         }
@@ -218,7 +219,7 @@ public static class Fs
     public static void Write(string path, string text) { RestorePoints.Touch(path); File.WriteAllText(path, text); }
     // ApexRadiance.toml with [ui] restart_host changed from keyWas: a restore point puts back only that key
     public static void WriteKey(string path, string text, bool? keyWas) { RestorePoints.Touch(path, key: true, keyWas: keyWas); File.WriteAllText(path, text); }
-    public static void WriteFpsKey(string path, string text, int? was) { RestorePoints.Touch(path, fps: true, fpsWas: was); WriteAtomic(path, text); }
+    public static void WriteFpsKey(string path, string text, int? was, int set) { RestorePoints.Touch(path, fps: true, fpsWas: was, fpsSet: set); WriteAtomic(path, text); }
     // a temporary file in the same folder, then moved over: a crash never leaves half of ApexRadiance.toml
     public static void WriteAtomic(string path, string text)
     {

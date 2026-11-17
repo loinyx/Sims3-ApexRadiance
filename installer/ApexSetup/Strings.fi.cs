@@ -294,5 +294,14 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "Päällä AMD-ajurissa, kaikissa peleissä. Apexin kuvarajoitus on nyt 60 FPS, tahti jolla se toimii parhaiten.",
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Päällä AMD-ajurissa, kaikissa peleissä. Toimii parhaiten Apexin kuvarajoituksella 60–90 FPS.",
         ["Off in the AMD driver."] = "Pois päältä AMD-ajurissa.",
+        ["Apex frame limit"] = "Apexin kuvarajoitus",
+        ["Frame generation works best at 60 to 90 fps."] = "Kuvien generointi toimii parhaiten 60–90 FPS:llä.",
+        ["Off"] = "Pois",
+        ["{0} fps"] = "{0} FPS",
+        ["{0} fps (recommended)"] = "{0} FPS (suositus)",
+        ["Keep: {0}"] = "Pidä: {0}",
+        ["no limit"] = "ei rajoitusta",
+        ["Custom"] = "Oma",
+        ["Could not change Apex's frame limit: {0}"] = "Apexin kuvarajoitusta ei voitu muuttaa: {0}",
     };
 }

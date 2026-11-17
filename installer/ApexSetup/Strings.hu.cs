@@ -309,5 +309,14 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "Bekapcsolva az AMD-illesztőben, minden játékhoz. Az Apex képkockakorlátja most 60 FPS, ezen működik a legjobban.",
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Bekapcsolva az AMD-illesztőben, minden játékhoz. 60 és 90 FPS közötti Apex képkockakorláttal működik a legjobban.",
         ["Off in the AMD driver."] = "Kikapcsolva az AMD-illesztőben.",
+        ["Apex frame limit"] = "Apex képkockakorlát",
+        ["Frame generation works best at 60 to 90 fps."] = "A képkocka-generálás 60–90 FPS-en működik a legjobban.",
+        ["Off"] = "Ki",
+        ["{0} fps"] = "{0} FPS",
+        ["{0} fps (recommended)"] = "{0} FPS (ajánlott)",
+        ["Keep: {0}"] = "Megtartás: {0}",
+        ["no limit"] = "nincs korlát",
+        ["Custom"] = "Egyéni",
+        ["Could not change Apex's frame limit: {0}"] = "Az Apex képkockakorlátja nem módosítható: {0}",
     };
 }

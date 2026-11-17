@@ -262,5 +262,14 @@ public static partial class Strings
         ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "เปิดในไดรเวอร์ AMD สำหรับทุกเกม ขีดจำกัดเฟรมของ Apex ตอนนี้เป็น 60 fps ซึ่งเป็นจังหวะที่ทำงานได้ดีที่สุด",
         ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "เปิดในไดรเวอร์ AMD สำหรับทุกเกม ทำงานได้ดีที่สุดเมื่อขีดจำกัดเฟรมของ Apex อยู่ที่ 60 ถึง 90 fps",
         ["Off in the AMD driver."] = "ปิดในไดรเวอร์ AMD",
+        ["Apex frame limit"] = "ขีดจำกัดเฟรมของ Apex",
+        ["Frame generation works best at 60 to 90 fps."] = "การสร้างเฟรมทำงานได้ดีที่สุดที่ 60 ถึง 90 fps",
+        ["Off"] = "ปิด",
+        ["{0} fps"] = "{0} fps",
+        ["{0} fps (recommended)"] = "{0} fps (แนะนำ)",
+        ["Keep: {0}"] = "คงไว้: {0}",
+        ["no limit"] = "ไม่จำกัด",
+        ["Custom"] = "กำหนดเอง",
+        ["Could not change Apex's frame limit: {0}"] = "เปลี่ยนขีดจำกัดเฟรมของ Apex ไม่ได้: {0}",
     };
 }

@@ -65,6 +65,9 @@ only what differs from the player's choice.
   applies to every game. Shown when ADLX starts (an AMD driver); enabled where ADLX reports it supported; the bridge is not
   required. On writes `%LOCALAPPDATA%\Apex Radiance Setup\afmf-on.txt`; a removal of the bridge or Apex turns AFMF off only
   when that file is there, so a setting the player turned on stays. The frame limit rule is Smooth Motion's.
+- Apex frame limit: a list beside the frame generation rows (`Engine.FpsChoices`: 0, 30, 60, 75, 90, 120, 144, 165, 240, and
+  Custom clamped by `Engine.ClampFps` to 0 or 20 to 1000) that calls `Engine.SetFpsLimit`: an atomic write of
+  `[screen] fps_limit`, a restore point that records the value written (`FpsLimitSet`) and undoes only while it is still there.
 - Both editions: Steam 1.67.2 (`TS3W.exe`) and EA app 1.69 (`TS3.exe`) use the game's own exe and Documents folder; AFMF
   needs nothing per edition. Shown with an NVIDIA card; enabled with an RTX 40 or 50 series card, driver 571.86 or newer
   and the bridge installed (DXVK is untested with it); an exe in a profile of the player's leaves the switch off and names
