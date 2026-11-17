@@ -11,6 +11,8 @@ public sealed class RestoreEntry
     public bool Dir { get; set; }
     public bool RestartHostKey { get; set; } // ApexRadiance.toml: undone by putting back only [ui] restart_host (RestartHostWas)
     public bool? RestartHostWas { get; set; } // its value before, null when the key was missing
+    public bool FpsLimitKey { get; set; }    // ApexRadiance.toml: undone by putting back only [screen] fps_limit (FpsLimitWas)
+    public int? FpsLimitWas { get; set; }     // its value before, null when the key was missing
 }
 
 // A copy of everything one action of Setup changed, taken as it changes it:
@@ -96,12 +98,12 @@ public static class RestorePoints
 
     // first touch wins: the path as it was before this action. All or nothing: the entry is kept only once its copy and
     // point.json are on disk (an action cut off after it can still be restored); otherwise it throws before the change
-    internal static void Touch(string path, bool dir = false, bool key = false, bool? keyWas = null)
+    internal static void Touch(string path, bool dir = false, bool key = false, bool? keyWas = null, bool fps = false, int? fpsWas = null)
     {
         if (_open is not { } s) return;
         path = Path.GetFullPath(path);
         if (s.Seen.Contains(path)) return;
-        var e = new RestoreEntry { Path = path, Dir = dir, Existed = dir ? Directory.Exists(path) : File.Exists(path), RestartHostKey = key, RestartHostWas = keyWas };
+        var e = new RestoreEntry { Path = path, Dir = dir, Existed = dir ? Directory.Exists(path) : File.Exists(path), RestartHostKey = key, RestartHostWas = keyWas, FpsLimitKey = fps, FpsLimitWas = fpsWas };
         Directory.CreateDirectory(s.Point.Dir);
         try
         {
@@ -168,6 +170,15 @@ public static class RestorePoints
             return;
         }
         if (File.Exists(e.Path)) File.SetAttributes(e.Path, File.GetAttributes(e.Path) & ~FileAttributes.ReadOnly);
+        if (e.FpsLimitKey)
+        {
+            // only the key goes back: the game may have saved other settings since
+            if (!File.Exists(e.Path)) return;
+            var text = File.ReadAllText(e.Path);
+            if (Engine.FpsLimitKey(text) != e.FpsLimitWas)
+                File.WriteAllText(e.Path, e.FpsLimitWas is { } was ? Engine.WithFpsLimit(text, was) : Engine.WithoutFpsLimit(text));
+            return;
+        }
         if (e.RestartHostKey)
         {
             // the game may have saved other settings in the file since: only the key goes back (the whole file when the game
@@ -206,6 +217,7 @@ public static class Fs
     public static void Write(string path, string text) { RestorePoints.Touch(path); File.WriteAllText(path, text); }
     // ApexRadiance.toml with [ui] restart_host changed from keyWas: a restore point puts back only that key
     public static void WriteKey(string path, string text, bool? keyWas) { RestorePoints.Touch(path, key: true, keyWas: keyWas); File.WriteAllText(path, text); }
+    public static void WriteFpsKey(string path, string text, int? was) { RestorePoints.Touch(path, fps: true, fpsWas: was); File.WriteAllText(path, text); }
     public static void Delete(string path) { if (!File.Exists(path)) return; RestorePoints.Touch(path); File.Delete(path); }
     public static void ClearReadOnly(string path)
     {

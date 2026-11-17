@@ -37,7 +37,9 @@ public static class SmoothMotion
         return null;
     }
 
-    static string[] Apps(string gameExe) => new[] { BridgeExe, gameExe };
+    // the bridge, this game's exe, then the other edition's (Steam TS3W.exe, EA app TS3.exe): one profile serves every copy of
+    // the game on the PC, and turning it on for one never drops the other's entry. Only the first two can block (Owner).
+    public static string[] Apps(string gameExe) => new[] { BridgeExe, gameExe }.Concat(new[] { "TS3W.exe", "TS3.exe" }.Where(e => !e.Equals(gameExe, StringComparison.OrdinalIgnoreCase))).ToArray();
 
     public static Status Read(string gameExe)
     {
@@ -154,7 +156,7 @@ public static class SmoothMotion
 
         // a profile of the player's (not Apex's, not NVIDIA's predefined one) holding an exe
         static string? PlayerOwner(nint s, string[] apps) =>
-            apps.Select(a => OwnerOf(s, a)).FirstOrDefault(o => o is { Predefined: false } x && x.Name != ProfileName)?.Name;
+            apps.Take(2).Select(a => OwnerOf(s, a)).FirstOrDefault(o => o is { Predefined: false } x && x.Name != ProfileName)?.Name;
 
         public static Status Read(string[] apps)
         {

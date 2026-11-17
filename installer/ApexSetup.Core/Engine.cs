@@ -345,6 +345,7 @@ public static class Engine
         docs ??= Scan.DocumentsFor(g);
         CheckWritable();
         using var point = RestorePoints.Begin(g.Bin, "Remove {0}", Components.Name(c));
+        if (TurnsFrameGenOff(c)) FrameGenOffError = FrameGenOff(g) ?? FrameGenOffError; // (never fails the removal: the UI logs it and shows it on the row)
         // the restart host is Apex's: it goes first, so its setting is turned off too
         if (c == Components.Apex && (Manifest.Load(g.Bin).Versions.ContainsKey(Components.RestartHost) || Scan.Run(g, docs).RestartHost))
             Remove(g, Components.RestartHost, docs);
@@ -521,32 +522,85 @@ public static class Engine
         return (lines, at, end);
     }
 
-    // [screen] fps_limit (Smooth Motion's suggested range): the text with the limit set to `fps` when it is 0 (no limit) or outside
-    // 60 to 90, else unchanged; the value before (null when absent, Apex's default then applies: no limit)
+    // [screen] fps_limit, for frame generation (Smooth Motion, AFMF): a limit the player chose stays as it is; only no limit (the
+    // key absent, Apex's default, or 0) becomes `fps`. Returns the text and the value before (null when absent).
     static readonly Regex ScreenHeader = new(@"^\s*\[\s*screen\s*\]\s*(#.*)?\r?$");
     static readonly Regex FpsKey = new(@"^(\s*fps_limit\s*=\s*)(\d+)");
-    public static (string Text, int? Was) WithFpsLimitInRange(string text, int fps = 60)
+    public static (string Text, int? Was) WithFpsLimitIfNone(string text, int fps = 60) =>
+        FpsLimitKey(text) is var was && was > 0 ? (text, was) : (WithFpsLimit(text, fps), was);
+
+    static (string[] Lines, int At, int End) ScreenTable(string text)
     {
-        var cr = text.Contains("\r\n") ? "\r" : "";
         var lines = text.Split('\n');
         var at = Array.FindIndex(lines, l => ScreenHeader.IsMatch(l));
         var end = at < 0 ? lines.Length : Array.FindIndex(lines, at + 1, l => AnyHeader.IsMatch(l)) is var n and >= 0 ? n : lines.Length;
+        return (lines, at, end);
+    }
+
+    // [screen] fps_limit in the text; null when the table or the key is missing
+    public static int? FpsLimitKey(string text)
+    {
+        var (lines, at, end) = ScreenTable(text);
         for (int i = at + 1; at >= 0 && i < end; i++)
-            if (FpsKey.Match(lines[i]) is { Success: true } m)
-            {
-                var was = int.Parse(m.Groups[2].Value);
-                if (was >= 60 && was <= 90) return (text, was);
-                lines[i] = FpsKey.Replace(lines[i], "${1}" + fps, 1);
-                return (string.Join('\n', lines), was);
-            }
+            if (FpsKey.Match(lines[i]) is { Success: true } m) return int.Parse(m.Groups[2].Value);
+        return null;
+    }
+
+    // the text with [screen] fps_limit = fps, every other line as it was (the value in place, else the key added after the
+    // table's last line, else [screen] added at the end)
+    public static string WithFpsLimit(string text, int fps)
+    {
+        var cr = text.Contains("\r\n") ? "\r" : "";
+        var (lines, at, end) = ScreenTable(text);
         var line = "fps_limit = " + fps;
         if (at < 0)
-            return (text + (text.Length == 0 || text.EndsWith('\n') ? "" : cr + "\n") + (text.Length == 0 ? "" : cr + "\n") + $"[screen]{cr}\n{line}{cr}\n", null);
+            return text + (text.Length == 0 || text.EndsWith('\n') ? "" : cr + "\n") + (text.Length == 0 ? "" : cr + "\n") + $"[screen]{cr}\n{line}{cr}\n";
+        for (int i = at + 1; i < end; i++)
+            if (FpsKey.IsMatch(lines[i]))
+            {
+                lines[i] = FpsKey.Replace(lines[i], "${1}" + fps, 1);
+                return string.Join('\n', lines);
+            }
         var last = end - 1;
         while (last > at && lines[last].Trim().Length == 0) last--;
         var list = lines.ToList();
         list.Insert(last + 1, line + cr);
-        return (string.Join('\n', list), null);
+        return string.Join('\n', list);
+    }
+
+    // the text without [screen] fps_limit (undo of a key Setup added)
+    public static string WithoutFpsLimit(string text)
+    {
+        var (lines, at, end) = ScreenTable(text);
+        var i = at < 0 ? -1 : Array.FindIndex(lines, at + 1, end - at - 1, l => FpsKey.IsMatch(l));
+        return i < 0 ? text : string.Join('\n', lines.Where((_, n) => n != i));
+    }
+
+    // Frame generation turned on: Apex's frame limit to 60 when there is none, in a restore point that puts back only the key.
+    // Nothing is written while the game has not made ApexRadiance.toml (Apex still copies older settings then) or runs.
+    public static bool SetFpsLimitIfNone(Game g, string feature, string? docs = null)
+    {
+        var f = ApexToml(docs ?? Scan.DocumentsFor(g));
+        if (!File.Exists(f)) return false;
+        CheckWritable();
+        var text = File.ReadAllText(f);
+        var (next, was) = WithFpsLimitIfNone(text);
+        if (next == text) return false;
+        using var point = RestorePoints.Begin(g.Bin, "Turn on {0}", feature);
+        Fs.WriteFpsKey(f, next, was);
+        return true;
+    }
+
+    // Frame generation set by Setup in the driver follows the bridge and Apex: removing either (alone, by a renderer change or with
+    // Uninstall everything) turns it off. A hook, so tests never reach a real driver; it returns why it could not, never throws.
+    public static bool TurnsFrameGenOff(string c) => c is Components.Bridge or Components.Apex;
+    public static Func<Game, string?> FrameGenOff = DefaultFrameGenOff;
+    static string? FrameGenOffError;
+    public static string? TakeFrameGenOffError() { var e = FrameGenOffError; FrameGenOffError = null; return e; }
+    static string? DefaultFrameGenOff(Game g)
+    {
+        try { return SmoothMotion.Read(g.Exe) is { On: true } ? SmoothMotion.Set(false, g.Exe) : null; }
+        catch (Exception e) { return e.Message; }
     }
 
     // [ui] restart_host in the text of ApexRadiance.toml; null when the table or the key is missing

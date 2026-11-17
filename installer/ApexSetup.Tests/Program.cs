@@ -12,6 +12,10 @@ var g = new Game(Path.Combine(root, "The Sims 3"), bin, "TS3.exe", Edition.EA, "
 var src = new FakeSource(payload);
 Games.IsRunning = () => false; // the fake game never runs
 int failures = 0;
+// removals never reach the real driver: the hook counts the games it was asked to turn frame generation off for
+var frameGenOff = new List<string>();
+string? frameGenOffFails = null;
+Engine.FrameGenOff = game => { frameGenOff.Add(game.Exe); return frameGenOffFails; };
 void Check(bool ok, string what) { Console.WriteLine((ok ? "ok   " : "FAIL ") + what); if (!ok) failures++; }
 string B(string rel) => Path.Combine(bin, rel);
 string Read(string p) => File.Exists(p) ? File.ReadAllText(p) : "<missing>";
@@ -546,6 +550,51 @@ try
         Check(Sug().All(x => !x.CanApply) && pts6.Count == 1 && pts6[0].Label == "Apply all suggestions", "apply all: every fix in one point");
         Check(RestorePoints.Restore(bin6, pts6[0]).Count == 0 && Same6(Tree6(), t6c), "apply all: restored");
     }
+
+    // frame generation (Smooth Motion, AFMF) on an EA app game (TS3.exe): the frame limit in that game's Documents, undone alone
+    {
+        var fgToml = Engine.ApexToml(docs);
+        Directory.CreateDirectory(Path.GetDirectoryName(fgToml)!);
+        File.WriteAllText(fgToml, "[ui]\r\nlanguage = \"pt\"\r\n");
+        var before = RestorePoints.List(bin).Count;
+        Check(Engine.SetFpsLimitIfNone(g, "NVIDIA Smooth Motion", docs) && Read(fgToml) == "[ui]\r\nlanguage = \"pt\"\r\n\r\n[screen]\r\nfps_limit = 60\r\n"
+              && RestorePoints.List(bin)[0].Label == "Turn on {0}", "frame limit: 60 when there is none, CRLF kept, its own restore point");
+        File.WriteAllText(fgToml, Read(fgToml).Replace("language = \"pt\"", "language = \"de\"")); // the game saves another setting since
+        Check(RestorePoints.Restore(bin, RestorePoints.List(bin)[0]).Count == 0 && Read(fgToml) == "[ui]\r\nlanguage = \"de\"\r\n\r\n[screen]\r\n",
+              "frame limit: restoring puts back only fps_limit");
+        File.WriteAllText(fgToml, "[screen]\nfps_limit = 0\n");
+        Engine.SetFpsLimitIfNone(g, "NVIDIA Smooth Motion", docs);
+        Check(RestorePoints.Restore(bin, RestorePoints.List(bin)[0]).Count == 0 && Read(fgToml) == "[screen]\nfps_limit = 0\n", "frame limit: a 0 before is put back as 0");
+        File.WriteAllText(fgToml, "[screen]\nfps_limit = 144\n");
+        before = RestorePoints.List(bin).Count;
+        Check(!Engine.SetFpsLimitIfNone(g, "NVIDIA Smooth Motion", docs) && Read(fgToml) == "[screen]\nfps_limit = 144\n" && RestorePoints.List(bin).Count == before,
+              "frame limit: a limit the player chose stays, no restore point");
+        File.WriteAllText(fgToml, "[ui]\n");
+        Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", "1");
+        var threw = false;
+        try { Engine.SetFpsLimitIfNone(g, "NVIDIA Smooth Motion", docs); } catch (InvalidOperationException) { threw = true; }
+        Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null);
+        Check(threw && Read(fgToml) == "[ui]\n", "frame limit: the dry run writes nothing");
+        File.Delete(fgToml);
+        Check(!Engine.SetFpsLimitIfNone(g, "NVIDIA Smooth Motion", docs) && !File.Exists(fgToml), "frame limit: nothing written before the game made ApexRadiance.toml");
+
+        // which removals turn it off: the bridge (alone or by a renderer change) and Apex, not DXVK or the others
+        Check(Engine.TurnsFrameGenOff(Components.Bridge) && Engine.TurnsFrameGenOff(Components.Apex) && !Engine.TurnsFrameGenOff(Components.Dxvk)
+              && !Engine.TurnsFrameGenOff(Components.S3ss), "frame generation: removing the bridge or Apex turns it off");
+        frameGenOff.Clear();
+        frameGenOffFails = "nvapi64.dll not found";
+        Engine.Remove(g, Components.Bridge, docs);
+        Check(frameGenOff.SequenceEqual(new[] { "TS3.exe" }) && Engine.TakeFrameGenOffError() == "nvapi64.dll not found" && Engine.TakeFrameGenOffError() is null,
+              "frame generation: removing the bridge asks the EA app game's TS3.exe, and a driver failure does not fail the removal");
+        frameGenOffFails = null;
+        frameGenOff.Clear();
+        Engine.Remove(g, Components.S3ss, docs);
+        Check(frameGenOff.Count == 0, "frame generation: removing another component leaves it alone");
+        Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", "1");
+        try { Engine.Remove(g, Components.Bridge, docs); } catch (InvalidOperationException) { }
+        Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null);
+        Check(frameGenOff.Count == 0, "frame generation: the dry run turns nothing off");
+    }
 }
 catch (Exception e) { Console.WriteLine("FAIL exception: " + e); failures++; }
 finally
@@ -750,12 +799,17 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
     Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", "1");
     Check(SmoothMotion.Set(true, "TS3W.exe") == "Dry run: Setup changes nothing.", "smooth motion: the dry run writes nothing");
     Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null);
-    Check(Engine.WithFpsLimitInRange("[screen]\nfps_limit = 0\nvsync = 1\n") == ("[screen]\nfps_limit = 60\nvsync = 1\n", 0)
-          && Engine.WithFpsLimitInRange("[screen]\nfps_limit = 144\n").Text == "[screen]\nfps_limit = 60\n"
-          && Engine.WithFpsLimitInRange("[screen]\nfps_limit = 75\n") == ("[screen]\nfps_limit = 75\n", 75)
-          && Engine.WithFpsLimitInRange("[ui]\nx = 1\n").Text == "[ui]\nx = 1\n\n[screen]\nfps_limit = 60\n"
-          && Engine.WithFpsLimitInRange("[screen]\r\nvsync = 1\r\n\r\n[ui]\r\n").Text == "[screen]\r\nvsync = 1\r\nfps_limit = 60\r\n\r\n[ui]\r\n",
-          "smooth motion: Apex's frame limit into 60 to 90 fps, other keys and tables as they were");
+    Check(Engine.WithFpsLimitIfNone("[screen]\nfps_limit = 0\nvsync = 1\n") == ("[screen]\nfps_limit = 60\nvsync = 1\n", 0)
+          && Engine.WithFpsLimitIfNone("[screen]\nfps_limit = 144\n") == ("[screen]\nfps_limit = 144\n", 144)
+          && Engine.WithFpsLimitIfNone("[screen]\nfps_limit = 30\n") == ("[screen]\nfps_limit = 30\n", 30)
+          && Engine.WithFpsLimitIfNone("[ui]\nx = 1\n") == ("[ui]\nx = 1\n\n[screen]\nfps_limit = 60\n", null)
+          && Engine.WithFpsLimitIfNone("[screen]\r\nvsync = 1\r\n\r\n[ui]\r\n").Text == "[screen]\r\nvsync = 1\r\nfps_limit = 60\r\n\r\n[ui]\r\n",
+          "frame generation: only no frame limit becomes 60 fps, a limit the player chose stays, other keys and CRLF as they were");
+    Check(Engine.WithoutFpsLimit("[screen]\r\nvsync = 1\r\nfps_limit = 60\r\n") == "[screen]\r\nvsync = 1\r\n"
+          && Engine.WithFpsLimit("[screen]\nfps_limit = 60\n", 0) == "[screen]\nfps_limit = 0\n", "frame generation: the frame limit's undo");
+    Check(SmoothMotion.Apps("TS3.exe").SequenceEqual(new[] { "NvRemixBridge.exe", "TS3.exe", "TS3W.exe" })
+          && SmoothMotion.Apps("TS3W.exe").SequenceEqual(new[] { "NvRemixBridge.exe", "TS3W.exe", "TS3.exe" }),
+          "smooth motion: the profile holds the bridge, this game's exe first (EA app TS3.exe or Steam TS3W.exe), and the other edition's");
     var nv = SmoothMotion.Read("TS3W.exe"); // read only
     Console.WriteLine($"info this PC: NVIDIA {nv.Card ?? "none"}, driver {SmoothMotion.DriverText(nv.Driver)}, Smooth Motion {(nv.On ? "on" : "off")}{(nv.Owner is null ? "" : ", in profile " + nv.Owner)}{(nv.Error is null ? "" : ", error " + nv.Error)}");
 }
