@@ -53,7 +53,7 @@ foreach ($bad in '12:00:03.000 [WARNING] [SceneBudget] Node 0x0a0b0c0d was found
 $giStart = @((Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/realtime-gi-smoke.json') -Raw | ConvertFrom-Json).variants.on.expect)[0]
 foreach ($ok in '12:00:00.000 [INFO] [RealtimeGI] On: lots=0 cap=class0 scale=1 indirect=off backend=d3d9',
                 '12:00:00.000 [INFO] [RealtimeGI] On: lots=1 cap=class0 scale=1 indirect=off backend=d3d9',
-                '12:00:00.000 [INFO] [RealtimeGI] On: lots=3 cap=hold scale=2 indirect=multiBounce backend=serverRays') {
+                '12:00:00.000 [INFO] [RealtimeGI] On: lots=3 cap=hold scale=2 indirect=atlas backend=serverRays') {
     Check ($ok -match $giStart) "GI start line matches: $($ok.Substring(13))"
 }
 foreach ($bad in '12:00:00.000 [INFO] [RealtimeGI] Off: lots=1 cap=class0 scale=1 indirect=off backend=d3d9',
@@ -68,7 +68,7 @@ foreach ($bad in '12:00:00.000 [INFO] [RealtimeGI] Off: lots=1 cap=class0 scale=
 # The GI jobs set only keys the module registers (features/realtime_gi.cpp), so a job never relies on a key that is ignored
 $giSrc = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../../features/realtime_gi.cpp') -Raw
 $giKeys = @('enabled') + @([regex]::Matches($giSrc, 'Register\w*Setting\(&\w+, "(\w+)"') | ForEach-Object { $_.Groups[1].Value })
-foreach ($job in Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'jobs') -Filter 'realtime-gi-*.json') {
+foreach ($job in @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'jobs') -Filter '*.json' | Where-Object { $_.Name -like 'realtime-gi-*' -or $_.Name -like 'gi-*' })) {
     $j = Get-Content -LiteralPath $job.FullName -Raw | ConvertFrom-Json
     foreach ($v in @($j.variants.PSObject.Properties)) {
         $t = $v.Value.toml.'patches.RealtimeGI'
@@ -87,6 +87,11 @@ Check (($liLine -f 'compare', 0, 900, 50, 0, 0, 120) -notmatch $liBad) 'lamp ind
 Check (($liLine -f 'draw', 700, 0, 0, 0, 300, 0) -match $liDraw) 'lamp index draw line matches (fence draws)'
 Check (($liLine -f 'draw', 700, 0, 0, 0, 0, 0) -notmatch $liDraw) 'lamp index draw line rejected without fence draws'
 Check (($liLine -f 'draw', 0, 0, 0, 0, 300, 0) -notmatch $liDraw) 'lamp index draw line rejected without draws'
+# The indirect light smoke (S2-05): its counters pattern takes a line with ready texels and draws, not one without
+$giInd = @((Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/gi-indirect-smoke.json') -Raw | ConvertFrom-Json).variants.on.expect)[1]
+$giLine = '12:00:10.000 [INFO] [RealtimeGI] Counters: frames=600 backend=serverRays draws=4 deviceCalls=2 lamps=12 lots=1 lampChanges=0 indirect=atlas atlasReady={0} gridTexels=900 indirectDraws={1}; must be 0: capSolves=0 syncReadbacks=0 locks=0 redrawDiffs=0 readFaults=0 lampTableDiffs=0'
+Check (($giLine -f 640, 37) -match $giInd) 'GI indirect counters match with ready texels and draws'
+foreach ($bad in @(@(0, 37), @(640, 0))) { Check (($giLine -f $bad[0], $bad[1]) -notmatch $giInd) "GI indirect counters rejected: atlasReady=$($bad[0]) indirectDraws=$($bad[1])" }
 $prof = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/realtime-gi-profile.json') -Raw | ConvertFrom-Json
 Check ('12:00:00.000 [INFO] [FrameProfiler] Measurement preset: timing run (hitch 2.0 x median, floor 8 ms)' -match @($prof.expect)[0]) 'profile arm expect matches the preset line'
 Check ('12:00:00.000 [INFO] [FrameProfiler] Measurement preset: sampling run (hitch)' -notmatch @($prof.expect)[0]) 'profile arm expect rejects the sampling preset'

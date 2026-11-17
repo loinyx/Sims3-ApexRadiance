@@ -11,6 +11,7 @@
 #include "d3d9_hooks.h"
 #include "game_addresses.h"
 #include "gi_compose.h"
+#include "gi_indirect.h"
 #include "gi_scene.h"
 #include "gi_sched.h"
 #include "level_light_share.h"
@@ -21,6 +22,7 @@
 #include "outdoor_delta.h"
 #include "penumbra.h"
 #include "post_scene.h"
+#include "render_callbacks.h"
 #include "rt_outdoor_lamps.h"
 #include "shader_cache.h"
 #include "world_session.h"
@@ -40,7 +42,7 @@ namespace {
 
 constexpr const char* kLotsNames[] = {"active", "activeAndNeighbours", "all"};
 constexpr const char* kCapNames[] = {"off", "class0", "hold"};
-constexpr const char* kIndirectNames[] = {"off", "bounce1", "multiBounce"};
+constexpr const char* kIndirectNames[] = {"off", "atlas", "atlasDebug"};
 constexpr DWORD kLogEveryMs = 10000;
 
 std::array<std::atomic<uint64_t>, static_cast<size_t>(Counter::Count)> g_counters{};
@@ -586,6 +588,25 @@ IDirect3DTexture9* g_irradiance = nullptr;
 IDirect3DDevice9* g_dev = nullptr;
 IDirect3DPixelShader9* g_composePs = nullptr;
 GiCompose::Composer g_composer;
+// (S2-05) the atlas's floor and ceiling texels by place (gi_indirect.h), filled from the atlas after each compose
+GiIndirect::Grid g_grid;
+IDirect3DTexture9* g_gridTex = nullptr;
+IDirect3DPixelShader9* g_scatterPs = nullptr;
+bool g_gridDirty = false;
+bool g_gridFilled = false;
+uint64_t g_readyHash = 0;
+uint32_t g_readyTexels = 0;
+std::unordered_map<const void*, std::pair<int, int>> g_mapLayer; // a game map -> (story, kind) of the GI lot
+uint32_t g_mapLayerFrame = 0;
+const ShaderCache::Id kScatterPs = [] {
+    ShaderCache::Desc d;
+    d.tag = "RealtimeGI ScatterPS";
+    d.source = GiCompose::kScatterShader;
+    d.sourceName = "gi_scatter.hlsl";
+    d.target = "ps_2_0";
+    d.priority = 2;
+    return ShaderCache::Add(std::move(d));
+}();
 const ShaderCache::Id kComposePs = [] {
     ShaderCache::Desc d;
     d.tag = "RealtimeGI ComposePS";
@@ -602,6 +623,8 @@ void ReleaseLayers() {
             if (t) t->Release(), t = nullptr;
     g_layers.clear();
     if (g_irradiance) g_irradiance->Release(), g_irradiance = nullptr;
+    if (g_gridTex) g_gridTex->Release(), g_gridTex = nullptr;
+    g_gridFilled = false, g_gridDirty = true;
 }
 // A DEFAULT-pool float target of the atlas's size, cleared (a first layer fades in from 0)
 IDirect3DTexture9* NewAtlas() {
@@ -679,6 +702,14 @@ int RebuildScene(GiSched::Box& edit, bool& whole) {
     const bool same = g_built.height && e.Empty() && !w;
     if (w) ReleaseLayers(); // (the atlas changed size: every slot again; the scheduler re-bakes every layer)
     g_built = std::move(next);
+    if (!same && g_options.indirect) {
+        const uint32_t gw = g_grid.w, gh = g_grid.h;
+        int lotW = 0, lotH = 0;
+        for (const RtLampProxy::Story& st : lot->stories) lotW = std::max(lotW, st.w), lotH = std::max(lotH, st.h);
+        if (!GiIndirect::Build(g_built, o.density, lotW, lotH, g_grid)) g_grid = {};
+        if ((g_grid.w != gw || g_grid.h != gh) && g_gridTex) g_gridTex->Release(), g_gridTex = nullptr, g_gridFilled = false;
+        g_gridDirty = true, g_mapLayer.clear();
+    }
     if (same) return 0;
     g_bridge.scene = g_built.blob;
     edit = e, whole = w;
@@ -731,6 +762,98 @@ void ComposeFrame() {
     calls.setTexture = &D3D9Hooks::CallOriginalSetTexture, calls.drawPrimitive = &D3D9Hooks::CallOriginalDrawPrimitive;
     g_composer.Compose(g_dev, g_composePs, g_irradiance, GiScene::kAtlasWidth, g_built.height, clear, draws, calls, &n);
     Add(Counter::Draws, static_cast<uint32_t>(n));
+    g_gridDirty = true;
+}
+
+// (S2-05) The grid the lighting reads (gi_indirect.h): every floor and ceiling texel's atlas pixel copied to its place, with
+// its tile's ready weight: 1 when every lamp of the lot that is on and may light the tile (its reach, as the touch box
+// without the server's) has a layer, else 0 (the copy keeps the game's ambient there). Filled again after a compose, a
+// new scene or a change of the ready tiles.
+void FillGrid() {
+    if (!g_options.indirect || g_grid.Empty() || !g_dev || !g_irradiance || !g_built.height) return;
+    std::unordered_set<uint64_t> waiting;
+    for (const Lamp& l : g_lamps) {
+        if (l.lot != g_schedLot || !(l.colour[0] > 0 || l.colour[1] > 0 || l.colour[2] > 0) || g_sched.HasLayer(l.light)) continue;
+        const GiSched::Box b = GiSched::Around(l.pos, l.story, Reach(l.light));
+        for (int st = b.s0; st <= b.s1; st++)
+            for (int z = b.z0; z <= b.z1; z++)
+                for (int x = b.x0; x <= b.x1; x++) waiting.insert(GiSched::TileKey(st, x, z));
+    }
+    uint64_t h = 1469598103934665603ull;
+    for (const uint64_t t : waiting) h += t * 1099511628211ull; // (order-free)
+    if (!g_gridDirty && h == g_readyHash && g_gridFilled) return;
+    g_readyHash = h;
+    if (!g_gridTex) {
+        if (FAILED(g_dev->CreateTexture(g_grid.w, g_grid.h, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A16B16G16R16F, D3DPOOL_DEFAULT, &g_gridTex, nullptr))) g_gridTex = nullptr;
+        Add(Counter::DeviceCalls);
+    }
+    if (!g_scatterPs && ShaderCache::CreatePixelShader(g_dev, kScatterPs, &g_scatterPs) != ShaderCache::Result::Ok) g_scatterPs = nullptr;
+    if (!g_gridTex || !g_scatterPs) return;
+    std::vector<GiCompose::ScatterPoint> pts;
+    pts.reserve(g_grid.points.size());
+    uint32_t ready = 0;
+    for (const GiIndirect::Point& p : g_grid.points) {
+        const float a = waiting.count(p.tile) ? 0.0f : 1.0f;
+        ready += a > 0 ? 1 : 0;
+        pts.push_back({p.grid, p.atlas, a});
+    }
+    int n = 0;
+    GiCompose::Calls calls;
+    calls.setTexture = &D3D9Hooks::CallOriginalSetTexture, calls.drawPrimitive = &D3D9Hooks::CallOriginalDrawPrimitive;
+    g_gridFilled = g_composer.Scatter(g_dev, g_scatterPs, g_irradiance, GiScene::kAtlasWidth, g_built.height, g_gridTex, g_grid.w, pts, calls, &n);
+    Add(Counter::Draws, static_cast<uint32_t>(n));
+    Add(Counter::DeviceCalls); // (the ColorFill)
+    g_readyTexels = g_gridFilled ? ready : 0;
+    g_gridDirty = false;
+}
+
+// The story and kind (GiIndirect::Kind) of a game map: the floor (set index 1) or ceiling (2) map of any class of a story of
+// the GI lot, read from each story's room 0 (its manager +0x88 the story, its texture set +4: class x 64 + 0xC, a wrapper
+// whose +0x30 is the texture; RtOutdoorLamps OwnMap). SEH: plain data only.
+int MapLayerRead(uintptr_t room0, const void* map, int& story) {
+    __try {
+        const uintptr_t mgr = *reinterpret_cast<const uintptr_t*>(room0), lod = *reinterpret_cast<const uintptr_t*>(room0 + 4);
+        if (!mgr || !lod) return -1;
+        story = *reinterpret_cast<const int*>(mgr + 0x88);
+        for (uintptr_t cls = 0; cls < 3; cls++)
+            for (uintptr_t idx = 1; idx <= 2; idx++) {
+                const uintptr_t w = *reinterpret_cast<const uintptr_t*>(lod + cls * 64 + 0xC + idx * 4);
+                if (w >= 0x10000 && *reinterpret_cast<const uint32_t*>(w + 0x2C) == 0 && *reinterpret_cast<const uintptr_t*>(w + 0x30) == reinterpret_cast<uintptr_t>(map))
+                    return static_cast<int>(idx) - 1;
+            }
+        return -1;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return -2;
+    }
+}
+bool MapLayer(const void* map, int& story, int& kind) {
+    if (const auto it = g_mapLayer.find(map); it != g_mapLayer.end()) return story = it->second.first, kind = it->second.second, kind >= 0;
+    // shortcut: a miss is looked up again once 30 frames passed (a map the game made since); the cache goes with every new scene
+    if (g_mapLayer.size() > 256 || g_schedFrame - g_mapLayerFrame >= 30) g_mapLayer.clear(), g_mapLayerFrame = g_schedFrame;
+    kind = -1, story = 0;
+    const uintptr_t tracker = LevelLightShare::TrackerOfLot(g_schedLot);
+    std::unordered_set<int> stories;
+    for (const auto& [key, row] : g_grid.rows) stories.insert(key.first);
+    for (const int s : stories) {
+        const uintptr_t room0 = tracker ? reinterpret_cast<uintptr_t>(LevelLightShare::Room0Of(tracker, s)) : 0;
+        int st = 0;
+        const int k = room0 ? MapLayerRead(room0, map, st) : -1;
+        if (k == -2) Add(Counter::ReadFaults);
+        if (k >= 0 && st == s) {
+            story = s, kind = k;
+            break;
+        }
+    }
+    g_mapLayer[map] = {story, kind};
+    return kind >= 0;
+}
+
+void OnPreReset(IDirect3DDevice9*) { // (DEFAULT pool: the layers, the atlas, the grid and the point buffers; every layer again after)
+    if (!g_running.load()) return;
+    if (g_schedLot) g_bridge.ResetLot(), g_schedLot = 0; // (UpdateSched loads the lot again: the scene sent, every lamp solved)
+    ReleaseLayers();
+    g_composer.Release();
+    g_built = {}, g_grid = {}, g_mapLayer.clear();
 }
 
 // Render thread, after the snapshot: the active lot's lamps and changes, its build edits and the camera to the scheduler
@@ -776,7 +899,7 @@ void UpdateSched() {
     view.known = LotLightingMotion::CameraEye(view.eye);
     view.hasVp = PostScene::RecentCameraViewProj(view.vp);
     g_sched.Tick(g_schedFrame, static_cast<double>(GetTickCount64()), view);
-    if (bridge) ComposeFrame();
+    if (bridge) ComposeFrame(), FillGrid();
 }
 
 // Render thread, every frame: a snapshot when a lamp edit was noted (LampMarkFilter's edit serial), when an on state waits
@@ -841,10 +964,12 @@ void OnPresent(IDirect3DDevice9* dev) {
     if (kPublicBuild) return;
     const uint64_t cap = Value(Counter::CapSolvesOnGiLots), sync = Value(Counter::SyncReadbacks), locks = Value(Counter::ResourceLocks),
                    diffs = Value(Counter::RedrawDiffs), faults = Value(Counter::ReadFaults), table = Value(Counter::LampTableDiffs);
-    const std::string line = std::format("[RealtimeGI] Counters: frames={} backend={} draws={} deviceCalls={} lamps={} lots={} lampChanges={}; must be 0: "
+    const std::string line = std::format("[RealtimeGI] Counters: frames={} backend={} draws={} deviceCalls={} lamps={} lots={} lampChanges={} "
+                                         "indirect={} atlasReady={} gridTexels={} indirectDraws={}; must be 0: "
                                          "capSolves={} syncReadbacks={} locks={} redrawDiffs={} readFaults={} lampTableDiffs={}",
                                          frames, kBackendNames[static_cast<int>(g_backend.load())], Value(Counter::Draws), Value(Counter::DeviceCalls),
-                                         g_lamps.size(), g_giLots, Value(Counter::LampChanges), cap, sync, locks, diffs, faults, table);
+                                         g_lamps.size(), g_giLots, Value(Counter::LampChanges), kIndirectNames[g_options.indirect], g_readyTexels,
+                                         g_grid.points.size(), Value(Counter::IndirectDraws), cap, sync, locks, diffs, faults, table);
     if (cap || sync || locks || diffs || faults || table) LOG_WARNING(line);
     else LOG_INFO(line);
     MeshLog();
@@ -887,6 +1012,18 @@ int GiLots() { return g_giLots; }
 int LampIndexMode() { return g_lampIndexMode.load(std::memory_order_relaxed); }
 Backend InUse() { return g_backend.load(); }
 
+bool IndirectFor(const void* map, float night, IndirectBind& out) {
+    if (!g_running.load() || !g_options.indirect || !g_gridFilled || !g_gridTex || !map) return false;
+    int story = 0, kind = 0;
+    if (!MapLayer(map, story, kind) || !GiIndirect::UvRow(g_grid, story, kind, out.uv)) return false;
+    out.grid = g_gridTex;
+    // shortcut: gain 1 (the compose's colour is the snapshot's; S6-01 calibrates it against the game's law)
+    const bool debug = g_options.indirect == 2 && !kPublicBuild;
+    const float k[4] = {1.0f, debug ? 0.0f : 1.0f, debug ? 0.0f : 1.0f, debug ? 0.0f : std::clamp(night, 0.0f, 1.0f)};
+    std::memcpy(out.k, k, sizeof k);
+    return true;
+}
+
 bool Start(const Options& o, std::string* error) {
     if (g_running.load()) return true;
     const Backend backend = SelectBackend(o.backend, ServerExport(), ServerRayQuery());
@@ -916,6 +1053,7 @@ bool Start(const Options& o, std::string* error) {
         if (error) *error = "Could not register the Present callback";
         return false;
     }
+    RenderCallbacks::preReset.Add(OnPreReset);
     g_running = true;
     if (o.pixelShadows) GiPixelShadows::Start({o.pixelView, o.pixelTestCaster, o.meshCasters});
     g_lampIndexMode = kDevToolsBuild ? std::clamp(o.lampIndex, 0, 2) : 0;
@@ -933,10 +1071,12 @@ void Stop() {
     GiPixelShadows::Stop();
     D3D9Hooks::UnregisterAll(kPatchName);
     if (g_options.meshCasters) ObjectLegs::SetSink(false);
+    RenderCallbacks::preReset.Remove(OnPreReset);
     g_sched.Clear(), g_schedOn = false, g_schedLot = 0;
     g_bridge.ResetLot(), ReleaseLayers(), g_composer.Release();
     if (g_composePs) g_composePs->Release(), g_composePs = nullptr;
-    g_built = {}, g_dev = nullptr;
+    if (g_scatterPs) g_scatterPs->Release(), g_scatterPs = nullptr;
+    g_built = {}, g_grid = {}, g_mapLayer.clear(), g_dev = nullptr;
     g_lampIndexMode = 0;
     if (g_options.meshTiles || g_options.pixelShadows) MeshCasterSet::wanted.store(false), MeshCasterSet::pixelCasts.store(false), MeshCasterSet::g_set.Clear();
     g_running = false;
@@ -956,7 +1096,7 @@ class RealtimeGiPatch : public ApexPatch {
         RegisterNamedEnumSetting(&lots_, "lots", 0, "Lots covered", {std::begin(RealtimeGI::kLotsNames), std::end(RealtimeGI::kLotsNames)});
         RegisterNamedEnumSetting(&solveCap_, "solveCap", 0, "The game's room solves on GI lots", {std::begin(RealtimeGI::kCapNames), std::end(RealtimeGI::kCapNames)});
         RegisterNamedEnumSetting(&scale_, "bufferScale", 0, "Light buffer scale", {"1", "2", "4"});
-        RegisterNamedEnumSetting(&indirect_, "indirect", 0, "Indirect light", {std::begin(RealtimeGI::kIndirectNames), std::end(RealtimeGI::kIndirectNames)});
+        RegisterNamedEnumSetting(&indirect_, "indirect", 0, "Indirect light: off, atlas (the lighting reads the irradiance atlas where ready) or atlasDebug (the atlas alone, developer mode)", {std::begin(RealtimeGI::kIndirectNames), std::end(RealtimeGI::kIndirectNames)});
         RegisterBoolSetting(&debugLampTable_, "debugLampTable", false, "Developer mode: log the lamp snapshot against the game's fields after each change");
         RegisterBoolSetting(&pixelShadows_, "pixelShadows", false, "Per-pixel delta shadows through the bridge (patch 0019 and the DXVK of native/dxvk)");
         RegisterIntSetting(&pixelView_, "pixelView", 0, 0, 2, "Developer view of the per-pixel shadows: 0 = off, 1 = filtered mask, 2 = raw mask");

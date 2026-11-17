@@ -18,7 +18,8 @@
         }
       },
       "fail": [
-        "\\[RealtimeGI\\] On: lots=\\d+ cap=(off|class0|hold) scale=[124] indirect=(off|bounce1|multiBounce) backend=(auto|serverRays|serverCompute|d3d9)",
+        "\\[GiSched\\] lot=[1-9A-F][0-9A-F]* queued=\\d+ inFlight=\\d+ idle=\\d+ fading=\\d+ issued: moved=0 added=0 build=0 load=[1-9]\\d*; landed=[1-9]\\d* .*composeOnly=[1-9]\\d*",
+        "\\[RealtimeGI\\] On: lots=\\d+ cap=(off|class0|hold) scale=[124] indirect=(off|atlas|atlasDebug) backend=(auto|serverRays|serverCompute|d3d9)",
         "\\[GiSched\\]"
       ]
     },

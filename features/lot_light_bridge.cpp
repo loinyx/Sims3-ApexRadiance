@@ -56,6 +56,7 @@
 #include "terrain_stamps.h"
 #include "room_map_padding.h"
 #include "level_light_share.h"
+#include "realtime_gi.h"
 #include "ground_lamp_shadow.h"
 #include "ground_shade_gpu.h"
 #include "ground_shade_hlsl.h"
@@ -5490,6 +5491,7 @@ struct PatchedPs {
     ShaderPatches::WindowOutdoorPatch window;
     ShaderPatches::WallScalePatch wall;
     ShaderPatches::RoomReadWallsPatch roomRead; // (2.17.1) a floor map's read off the walls (PatchRoomMapReadWalls)
+    ShaderPatches::RoomMapGiPatch gi;           // (real-time GI S2-05) PatchRoomMapGi
     DWORD nightConst = 0;
     int cubeTint = -1; // PatchCubeTint
     DWORD nativeAlphaSampler = 0;
@@ -7854,11 +7856,11 @@ struct WallMaskBind {
     DWORD st[kCount] = {};
     uint8_t changed = 0; // bit i: kStates[i] was set
     static constexpr D3DSAMPLERSTATETYPE kStates[kCount] = {D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV, D3DSAMP_SRGBTEXTURE};
-    WallMaskBind(IDirect3DDevice9* d, DWORD sampler, IDirect3DTexture9* mask) : dev(d), s(sampler) {
+    WallMaskBind(IDirect3DDevice9* d, DWORD sampler, IDirect3DTexture9* mask, DWORD filter = D3DTEXF_POINT) : dev(d), s(sampler) {
         D3D9Hooks::GetBoundTexture(dev, s, &old);
         for (int i = 0; i < kCount; i++)
             if (FAILED(dev->GetSamplerState(s, kStates[i], &st[i]))) changed |= static_cast<uint8_t>(1u << i);
-        const DWORD want[kCount] = {D3DTEXF_POINT, D3DTEXF_POINT, D3DTEXF_NONE, D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP, FALSE};
+        const DWORD want[kCount] = {filter, filter, D3DTEXF_NONE, D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP, FALSE};
         SetTex(dev, s, mask);
         for (int i = 0; i < kCount; i++)
             if ((changed & (1u << i)) || st[i] != want[i]) {
@@ -8421,9 +8423,31 @@ PatchedPs* ArchCopyOrNull(PatchedPs& a) {
     }
     return a.ps ? &a : nullptr;
 }
+// (real-time GI S2-05, RealtimeGI::IndirectFor) The copy of a room-map copy that reads the GI grid (ShaderPatches::PatchRoomMapGi), by
+// the copy it was made from; null where it cannot be made (ps_2_x copies, no free register)
+std::unordered_map<IDirect3DPixelShader9*, PatchedPs> g_roomMapGiPs;
+const PatchedPs* GiCopyOf(IDirect3DDevice9* dev, IDirect3DPixelShader9* copy) {
+    PatchedPs& p = g_roomMapGiPs[copy];
+    if (!p.tried) {
+        p.tried = true;
+        std::vector<DWORD> t = ShaderCode(copy);
+        if (!t.empty() && ShaderPatches::PatchRoomMapGi(t, p.gi) && SUCCEEDED(dev->CreatePixelShader(t.data(), &p.ps)))
+            LOG_INFO(std::format("[LotLightBridge] Real-time GI: copy {:08X} reads the GI grid ({} slots, {} added)", reinterpret_cast<uintptr_t>(copy), p.gi.slots, p.gi.added));
+        else p.ps = nullptr;
+    }
+    return p.ps ? &p : nullptr;
+}
 // rows: the arch rows (kArchRows) for a copy with the arch block, nullptr for a copy without it; nbCube: ArchRowsFor's
 template <typename DrawFn> void DrawWithRoomMap(IDirect3DDevice9* dev, IDirect3DPixelShader9* copy, const ShaderPatches::RoomMapPatch& p, const float size[4],
                                                 const float band[4], const float* rows, IDirect3DBaseTexture9* nbCube, DrawFn draw) {
+    // (real-time GI S2-05) a floor or ceiling map (one block) of the GI lot: the copy that reads the GI grid instead
+    RealtimeGI::IndirectBind gi;
+    const PatchedPs* giCopy = nullptr;
+    if (band[1] > 60000.0f && RealtimeGI::Running())
+        if (IDirect3DBaseTexture9* const map = D3D9Hooks::BoundTexture(dev, p.sampler); map && RealtimeGI::IndirectFor(RtOutdoorLamps::GameMapOf(map), g_night.load(std::memory_order_relaxed), gi))
+            giCopy = GiCopyOf(dev, copy);
+    float oldGi[8] = {};
+    if (giCopy) dev->GetPixelShaderConstantF(ShaderPatches::kGiUvConst, oldGi, 2);
     float oldArch[kArchRows * 4] = {};
     const ShaderConstantPair::Block constants(p.sizeConst, p.bandConst,
                                              [dev](UINT reg, float* values, UINT count) { return SUCCEEDED(dev->GetPixelShaderConstantF(reg, values, count)); });
@@ -8438,9 +8462,18 @@ template <typename DrawFn> void DrawWithRoomMap(IDirect3DDevice9* dev, IDirect3D
     if (arch) SetPsConst(dev, static_cast<UINT>(p.archConst), rows, kArchRows);
     std::optional<NbCubeBind> cube;
     if (arch && p.nbCubeSampler >= 0) cube.emplace(dev, p, nbCube);
-    SetPs(dev, copy);
+    std::optional<WallMaskBind> giBind;
+    if (giCopy) {
+        const float rowsGi[8] = {gi.uv[0], gi.uv[1], gi.uv[2], gi.uv[3], gi.k[0], gi.k[1], gi.k[2], gi.k[3]};
+        SetPsConst(dev, ShaderPatches::kGiUvConst, rowsGi, 2);
+        giBind.emplace(dev, static_cast<DWORD>(giCopy->gi.sampler), gi.grid, static_cast<DWORD>(D3DTEXF_LINEAR));
+        RealtimeGI::Add(RealtimeGI::Counter::IndirectDraws);
+    }
+    SetPs(dev, giCopy ? giCopy->ps : copy);
     draw();
     SetPs(dev, original);
+    giBind.reset();
+    if (giCopy) SetPsConst(dev, ShaderPatches::kGiUvConst, oldGi, 2);
     cube.reset();
     if (arch) SetPsConst(dev, static_cast<UINT>(p.archConst), oldArch, kArchRows);
     constants.Restore(setConstants);
@@ -12786,7 +12819,7 @@ void Shutdown(bool keepChunkMaps) {
     g_meltTried = false;
     g_patchedGen++; // (PatchedFor's front answers and RoomMapConsts' last shader)
     for (auto* cache : {&g_terrainAlphaPs, &g_wallScalePs, &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_roadPs, &g_floorPs, &g_snowFloorPs, &g_snowFloorPs0, &g_leafPs, &g_fencePs, &g_snowCoverPs, &g_snowReliefPs, &g_objLampPs, &g_basisSmoothPs, &g_roomMapSmoothPs, &g_basisRoomPs, &g_basisSmoothWallPs, &g_basisRoomWallPs, &g_basisSmoothFillPs, &g_cubeTintPs, &g_roomMapSmoothArchPs, &g_basisRoomArchPs, &g_basisRoomWallArchPs, &g_windowPs,
-                        &g_objLampPsReach, &g_objLampPsIndex, &g_objLampPsIndexReach, &g_fencePsReach, &g_fenceCapPs[0], &g_fenceCapPs[1], &g_fenceIndexPs[0], &g_fenceIndexPs[1], &g_fenceIndexPs[2], &g_fenceIndexPs[3], &g_windowIndexPs[0], &g_windowIndexPs[1], &g_windowIndexPs[2], &g_windowIndexPs[3], &g_windowPsReach, &g_windowWallPs, &g_windowWallPsReach, &g_roomMapWallPs}) {
+                        &g_objLampPsReach, &g_objLampPsIndex, &g_objLampPsIndexReach, &g_fencePsReach, &g_fenceCapPs[0], &g_fenceCapPs[1], &g_fenceIndexPs[0], &g_fenceIndexPs[1], &g_fenceIndexPs[2], &g_fenceIndexPs[3], &g_windowIndexPs[0], &g_windowIndexPs[1], &g_windowIndexPs[2], &g_windowIndexPs[3], &g_windowPsReach, &g_windowWallPs, &g_windowWallPsReach, &g_roomMapWallPs, &g_roomMapGiPs}) {
         for (auto& [k, p] : *cache)
             if (p.ps) p.ps->Release();
         cache->clear();
@@ -12931,7 +12964,7 @@ void MeasureMemoryImpl() {
     for (const auto* m : {&g_roadPs, &g_floorPs, &g_snowFloorPs, &g_snowFloorPs0, &g_leafPs, &g_fencePs, &g_snowCoverPs, &g_snowReliefPs, &g_objLampPs, &g_terrainAlphaPs, &g_wallScalePs,
                           &g_terrainDayPs, &g_terrainShadePs, &g_terrainDayShadePs, &g_roadShadePs, &g_objLampPsReach, &g_objLampPsIndex, &g_objLampPsIndexReach, &g_fencePsReach, &g_fenceCapPs[0], &g_fenceCapPs[1], &g_fenceIndexPs[0], &g_fenceIndexPs[1], &g_fenceIndexPs[2], &g_fenceIndexPs[3], &g_windowIndexPs[0], &g_windowIndexPs[1], &g_windowIndexPs[2], &g_windowIndexPs[3], &g_windowPs, &g_windowPsReach,
                           &g_basisSmoothPs, &g_roomMapSmoothPs, &g_basisRoomPs, &g_basisSmoothWallPs, &g_basisRoomWallPs, &g_basisSmoothFillPs, &g_cubeTintPs, &g_roomMapSmoothArchPs, &g_basisRoomArchPs, &g_basisRoomWallArchPs,
-                          &g_windowWallPs, &g_windowWallPsReach, &g_roomMapWallPs})
+                          &g_windowWallPs, &g_windowWallPsReach, &g_roomMapWallPs, &g_roomMapGiPs})
         ps(*m);
     for (const auto* t : {&g_floorShadePs, &g_indoorPs, &g_floorAtlasPs, &g_furnitureFloorPs}) {
         patched += Tree(*t);

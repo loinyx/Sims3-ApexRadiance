@@ -8,6 +8,7 @@
 // S1-02 adds the lamp snapshot: every light of the world, read on the render thread (below). The solve cap and the light
 // buffers come with the later packages.
 #include "gpu_lamp_law.h"
+#include <d3d9.h>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -40,7 +41,7 @@ struct Options {
     int lots = 0;     // 0 active, 1 activeAndNeighbours, 2 all
     int solveCap = 0; // 0 off, 1 class0, 2 hold
     int scale = 1;    // bufferScale: 1, 2 or 4
-    int indirect = 0; // 0 off, 1 bounce1, 2 multiBounce
+    int indirect = 0; // 0 off, 1 atlas (the lighting reads the irradiance atlas where ready), 2 atlasDebug (the atlas alone; developer mode)
     Backend backend = Backend::Auto;
     bool debugLampTable = false; // developer mode: dump the snapshot against the game's fields after each change
     bool pixelShadows = false;   // per-pixel delta shadows through the bridge (gi_pixel_shadows.h)
@@ -78,6 +79,7 @@ enum class Counter : int {
     LampIndexWindowDraws,    // ... of LampIndexDraws: window frames (S3-02c)
     LampIndexFenceCompared,  // ... of LampIndexCompared: fence and stair groups, the pick at the group's centre (S3-02c)
     LampIndexWindowCompared, // ... of LampIndexCompared: window frames, the object pick at the window's point (S3-02c)
+    IndirectDraws,     // (S2-05) room-lit draws that read the GI grid
     Count
 };
 void Add(Counter c, uint32_t n = 1); // any thread
@@ -122,6 +124,17 @@ int GiLots();
 // (the per-draw picks still draw, each is compared with its cell and counted), 2 draw (the index copies draw where the cells
 // cover the object; the rest keeps the pick, counted)
 int LampIndexMode();
+
+// ---- the lighting reading the irradiance atlas (S2-05, gi_indirect.h) ----
+// Render thread, a room-lit floor draw with the patched copy (ShaderPatches::PatchRoomMapGi): the GI grid to bind and the copy's
+// two constant rows for the game's map `map` bound to the draw (a relit copy: its game map). False (draw the copy without it):
+// indirect off, nothing composed yet, or not a floor or ceiling map of the GI lot's stories. night: 0 day .. 1 night (the
+// share of the game's ambient the ready atlas replaces; by day the atlas adds to it).
+struct IndirectBind {
+    IDirect3DTexture9* grid = nullptr;
+    float uv[4] = {}, k[4] = {};
+};
+bool IndirectFor(const void* map, float night, IndirectBind& out);
 
 bool Start(const Options& options, std::string* error); // render thread or pump thread; the start line follows in a world
 void Stop();

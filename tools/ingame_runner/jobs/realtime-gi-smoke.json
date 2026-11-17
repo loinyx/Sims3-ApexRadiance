@@ -18,7 +18,7 @@
         }
       },
       "fail": [
-        "\\[RealtimeGI\\] On: lots=\\d+ cap=(off|class0|hold) scale=[124] indirect=(off|bounce1|multiBounce) backend=(auto|serverRays|serverCompute|d3d9)"
+        "\\[RealtimeGI\\] On: lots=\\d+ cap=(off|class0|hold) scale=[124] indirect=(off|atlas|atlasDebug) backend=(auto|serverRays|serverCompute|d3d9)"
       ]
     },
     "on": {
@@ -29,7 +29,7 @@
         }
       },
       "expect": [
-        "\\[RealtimeGI\\] On: lots=\\d+ cap=(off|class0|hold) scale=[124] indirect=(off|bounce1|multiBounce) backend=(auto|serverRays|serverCompute|d3d9)"
+        "\\[RealtimeGI\\] On: lots=\\d+ cap=(off|class0|hold) scale=[124] indirect=(off|atlas|atlasDebug) backend=(auto|serverRays|serverCompute|d3d9)"
       ]
     }
   },

@@ -263,7 +263,7 @@ registered and no resource is created.
 | `nightOnly` | bool, true | Hand the lot back to the game's solve by day; false needs `windowLights` | S1, S4 |
 | `bufferScale` | enum, `1` | `1`, `2`, `4` | S1 |
 | `floatBuffers` | bool, false | Float copies instead of the 8-bit compose | S1 |
-| `indirect` | enum, `off` | `off`, `bounce1`, `multiBounce` | S2 |
+| `indirect` | enum, `off` | `off`, `atlas` (the lighting reads the atlas where ready), `atlasDebug` (the atlas alone, developer mode) | S2-05 |
 | `roomAmbient` | bool, false | Per-room ambient term | S2 |
 | `rigFill` | bool, false | Rig write: lamps with visibility and ambient-cube faces | S3 |
 | `lampIndex` | int, 0 (developer builds only) | Lamp index cells and frame constants for outdoor objects: 0 off, 1 compare each per-draw pick with its cell (counted), 2 draw from the cells | S3 |

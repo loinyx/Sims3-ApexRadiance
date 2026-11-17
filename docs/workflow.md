@@ -215,6 +215,7 @@ failure; CI runs `Smoke` and `Lighting`.
 | `tools/delegate_sig_fix_test/` | Delegate signature fix: the stub inside the game's check sequence (crash memory, `Object[]`, other parameter), the pattern and call target in TS3W.exe (`run.ps1 [-Exe <TS3W.exe>]`) |
 | `tools/bone_index_guard_test/` | Bone index guard: Apex's getter called as the game calls it (valid index, past the list, empty list, stack balance), the pattern in TS3W.exe (`run.ps1 [-Exe <TS3W.exe>]`) |
 | `tools/dxt_test/` | Fast DXT1 / DXT5 encoder against the translation of `0x006152F0` / `0x006154B0` |
+| `tools/gi_indirect_test/` | Real-time GI indirect light (S2-05): the floor and ceiling grid against the atlas at each texel's world place, the GPU scatter and the patched room-map copy against the CPU reference, `PatchRoomMapGi` over the precomp's room-lit shaders and their Smooth light maps copies (slots, temps, native creation, refusals unchanged) (`run.ps1 [-Precomp <Shaders_Win32.precomp>]`, native D3D9) |
 | `tools/i18n_check/` | Translation tables: conflicts, missing languages, placeholder and `##id` mismatches; coverage and stale keys of the other languages; `i18n/keys.tsv` up to date (`tools/i18n_keys.pl` writes it) |
 | `tools/liveness_prune_test/` | Pruning of per-story caches by live story managers (`features/liveness_prune.h`, `run.ps1`) |
 | `tools/loading_gate_test/` | Loaded-world reader and the extracted start-notice and Depth Blur loading guards (`run.ps1`) |

@@ -562,4 +562,19 @@ bool PatchLotTerrainMax(std::vector<DWORD>& t, DWORD lastSampler, DWORD newSampl
 constexpr DWORD kLotEdgeConst = 205;
 bool PatchLotTerrainEdges(std::vector<DWORD>& t, bool exit = false);
 
+// (real-time GI S2-05, gi_indirect.h) A room-lit ps_3_0 pixel shader (the game's or any copy of PatchRoomMapSmooth) whose
+// ambient term is the one "mad rD.xyz, rL.w, cA, rL" (cA a constant the game sets, rL a temp), no flow control before it,
+// reading the floor VS's TEXCOORD4 (lot / 64 + (1/1024, 1/512)): ahead of that mad the GI grid (GiIndirect::Grid, bound at
+// out.sampler, bilinear) is read at uv = TEXCOORD4.xy x c[kGiUvConst].xy + .zw into G (rgb irradiance, a ready), and the mad
+// takes G for rL: rgb' = rL.rgb k.y + G a k.x, alpha' = rL.w (k.z - a k.w), k = c[kGiKConst] (GiIndirect::Apply). rL itself
+// is not changed. Constants in the reserved pixel range (research 15: c208-c223; c208-c214 the lamp index). Refused (t
+// unchanged) for ps_2_0 / ps_2_x (c215 is out of their reach), no such mad, no free temp, sampler or input, or a shader
+// already reading c215 or above. out.slots / temps: of the patched copy.
+constexpr DWORD kGiUvConst = 215, kGiKConst = 216;
+struct RoomMapGiPatch {
+    int sampler = -1;
+    int slots = 0, temps = 0, added = 0; // added: instruction slots the patch added
+};
+bool PatchRoomMapGi(std::vector<DWORD>& t, RoomMapGiPatch& out);
+
 } // namespace ShaderPatches
