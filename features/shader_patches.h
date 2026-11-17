@@ -495,5 +495,14 @@ struct RoomMapGiPatch {
     int slots = 0, temps = 0, added = 0; // added: instruction slots the patch added
 };
 bool PatchRoomMapGi(std::vector<DWORD>& t, RoomMapGiPatch& out);
+// (real-time GI S2-06) A copy of a vs_3_0 wall vertex shader (InteriorWall's, precomp VS 8507 shape) that also writes the wall
+// pixel's GI grid uv to TEXCOORD7.xy (GiIndirect::WallUvCpu): after its world triple (three consecutive "dp4 rW.x/y/z, rP,
+// cK..cK+2"), the lot position (rW, 1) and the lot normal (the one normal decode, an instruction reading only the normal input
+// and constants, through cK..cK+2, normalised) go through the lot rows; the facing picks block and line. Per draw:
+// c[kWallGiVsConst] = GiIndirect::WallRows r0, +1 = r1, +3 .. +5 = the lot rows (worldToLot column k as (m0k, m1k, m2k, m3k));
+// +2 is the copy's def. Refused (t unchanged): not vs_3_0, flow control, relative constants, a constant >= kWallGiVsConst,
+// TEXCOORD7 already an output, no free output or temps, no single triple or normal decode. oPos is not touched.
+constexpr DWORD kWallGiVsConst = 242;
+bool PatchWallGiVs(std::vector<DWORD>& t);
 
 } // namespace ShaderPatches
