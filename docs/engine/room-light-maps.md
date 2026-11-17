@@ -465,6 +465,72 @@ solve).
 - **Ambients.** `+0x110` is the ambient the floor and wall shaders draw (`c4`), `+0x120` the copy objects use, and
   `+0x650` the ambient sampler's copy. Rooms without a lamp of their own can hold exactly the same ambient.
 
+### Solve cap site, lot thumbnail capture and impostor solve (real-time GI S0-10)
+
+Static, capstone on a copy of the Steam 1.67.2 exe. [V] = read in the disassembly for this section, [I] = inferred.
+
+**The priority call (cap site).**
+- `0x006A81DF` is `E8 8C 65 FF FF` = `call 0x0069E770`, the only call of `0x0069E770` in `.text` [V]. Caller
+  `0x006A8190` passes the room in `ecx` (`mov edi,[esi+0x10]; mov ecx,edi`) and stores the ST0 result as the
+  priority [V].
+- `0x0069E770` fastcall(room) -> ST0: 0 when `[room] == 0` or `room+0xF0 != 2` [V]. Story class `c` (2 above the
+  camera story, 2 for an outdoor room below ground, 1 indoor below, else 0) from story-manager `+0x88` / `+0x284` and
+  `room+0x18` [V]. Class 0 rooms: `10000 x {1, 0.8, 0.5}[c] x (mgr+0x288 ? 1 : 0.5)` [V; tables `0x01158B04`,
+  `0x01158B10`]. Class > 0 rooms: `{1000, 100}[class-1]`, 0 when `room+0xF4 > LodChoice` [V].
+- LodChoice `0x0069E710`: `[0x01158B00]` when `mgr+0x288 == 1` and `c == 0`, else 0 [V]. The dword is 0 in the file
+  and set at run time [V]; it must be 2 at run time, or no thumbnail could finish [I]. So only rooms of the camera's
+  story on a high-quality lot are ever refined.
+- **Cap condition** (S1-03): in `PriorityHook`, after the game's value `p`: return 0 when `p > 0`, the room's lot
+  (`[room]+0x90` / `+0x94`) is in the GI off set, the lot is not in the thumbnail set below, and `room+0xF4 > 0`.
+  Class-0 rooms (new rooms and edit re-solves) keep `p`, so stage 20 (`room+0x104 != 4`) still passes.
+
+**End of solve (`FinalizeHook`).** `0x006A3E65` is `E8 96 CF FF FF` = `call 0x006A0E00` inside `0x006A3C90`, the only
+call of `0x006A0E00` [V]; `ecx` = room (`mov ecx,esi` at `0x006A3E61`) [V].
+
+**Lot thumbnail capture.** ThumbnailManager state machine `0x00D59C10` (thiscall, request in `[ebp+8]`, state at
+`req+0x108`, jump table `0x00D5C654`, 0x1F states) [V]:
+- State 9 (`0x00D5A66D`): finds the lot by the request's lot id (`req+0x110` / `+0x114`, `0x00C62D40`), takes its
+  LotRenderer `lot+0x364`, installs a model LOD override object (allocation tag "UI/ThumbnailManager/LODOverrideHook",
+  vtable `0x01088520`, slot 3 `0x00D4C240` calls each matching object's vfunc `+0x40` with distance 0) through
+  `0x006E7520` [V]. It stores the renderer at `mgr+0x240` and calls `0x00AE6110` on it, which sets `renderer+0x36C`,
+  ORs 4 into `renderer+0x2C` and resets the renderer when it changes state [V]; that bit is a load request that keeps or
+  brings the lot to full detail [I].
+- State 0xA waits for `renderer+0x2C != 0`, `renderer+0x1E` (done) and `0x00AE06D0`; the lot goes through its normal
+  load stages, so stage 20 runs as usual [V for the waits; I that no other path runs].
+- State 0xB `0x00AE06E0` -> `0x00ADC180(1)` on `renderer+0x23C`: sets the lot lighting manager's `+0x4D`, then
+  `0x00ADB850` passes `(+0x4C || +0x4D)` to `0x006A5EF0` on every story [V]. `0x006A5EF0` writes `mgr+0x288` and, when
+  it changed, `0x006A5C90(1)` sets `room+0x20 = 4` and invalidates every room (`0x0069EED0(0,0)`) [V]. LodChoice then
+  allows the refinement.
+- State 0x17 (`0x00D5BE29`): `call 0x00AE06B0` (`E8 7C 48 D8 FF`, the only call) -> `0x00ADBC30` -> `0x006A5BF0` per
+  story: both AO states `== 2` and every room with `c == 0` at `room+0x104 == 2` (`0x0069F540(1)`) [V]. Not ready:
+  `return 0` and the same state next tick [V].
+- **No timeout.** Nothing in the state machine reads a clock [V]. The only way out of 0x17 other than readiness is the
+  check at the top of every tick: when `req+0x1A8` is set, the state is below 0x19 and not 1, no entry of the list at
+  `req+0x1AC` has `0x00C93970() > 1`, and `[req+0x1A8]` vfunc `+0x10` returns 1, the state becomes 0x19 (finish) [V].
+  That is a requester cancel, not a timer [I]. **A capped lot therefore waits in 0x17 forever** [I from V pieces].
+- Clear: `0x00AE6290` (callers `0x00D5A291`, `0x00D5A781`, `0x00D5C344`, `0x00D5C804`) calls `0x00ADC180(0)` at
+  `0x00AE62C7` [V]; dropping the quality re-invalidates every room through `0x006A5EF0` (when `+0x4C` is 0) [V].
+- **Exemption condition:** `0x00ADC180` (thiscall(lotLightingMgr, bool), `ret 4`) has two callers, both `E8` rel32:
+  `0x00AE06EC` (set, `push 1`) and `0x00AE62C7` (clear, `push ebx` = 0) [V]. Lot id = `[[mgr+0x14]+0x48]` /
+  `+0x4C` (as the message handler `0x00ADBD30` reads it) [V]. Redirect both calls: add the lot to the thumbnail set on
+  1, drop it on 0, then call the original. Do not use `mgr+0x288`: `+0x4C` (message `0x04891B02`, the active lot) sets it
+  too [V], so the played GI lot would never be capped.
+- **No LoD switch.** The capture does not reach the impostor path: no direct call chain of depth 5 from `0x00AE6110`,
+  `0x00AE06E0`, `0x00AE2170`, `0x00AE5000`, `0x00AE3290`, `0x00D4FA40` reaches `0x00AD9E30`, `0x00AEB3F0`,
+  `0x00ADBAD0` or `0x006A80E0` [V for direct calls; virtual calls not followed]. The "LODOverrideHook" of the thumbnail
+  is a model LOD override, not the lot LoD switch.
+
+**Impostor build and its synchronous solve.** Impostor builder states (jump table `0x00ADAF40`): 0 `0x00ADAB00`,
+1 `0x00ADA400`, 2 `0x00AD9E30`, 3 `0x00ADA250`, 4 `0x00AD9780`, 5 `0x00ADA570` [V]. State 2 aborts (state 7) unless
+`renderer+0x1E` (lot done), then `0x00AEB3F0` runs the renderer update, `0x00ADBAD0` (sync solve) and the update again,
+and installs "World/LotImpostor/LODOverrideHook" [V]. `0x006A80E0` calls `0x006C54E0` (it invalidates the tree's
+current room first) and `0x006A3EC0` per room [V]. `0x006A3EC0` solves only a room in state 1 or 2 with `+0xC0 != 0`
+and shown class `+0x100 == 0`: it sets state 3, `+0x164 = 0` and loops `0x006A3C90` with a 60000 ms stopwatch until
+the state leaves 3 [V]. So on a capped lot each class-0 room gets one more solve, at its class (1, or 2 with the direct
+step), when an impostor is built; the cap does not see it. Whether the impostor's albedo capture bakes that room light
+is still open: the build solves first and the capture runs on the full lot afterwards, which suggests it does [I]; a
+frame capture of an impostor build at night settles it (S0-G2).
+
 ### Open items / unverified
 
 - `0x0069EC40`, `0x006AB210`, `0x00963DD0` in the normalisation/ambient step; room+0x100, +0x280.
@@ -529,7 +595,9 @@ solve).
 | `0x00ADB5A0`, `0x00ADB850` | Pass `(lot is active || Build mode)` as the quality flag to `0x006A5EF0`; the `mov byte [esp+0Ch],0` sites are `0x00ADB66B`, `0x00ADB884` | night_terrain_relight `kQualitySites`, bytes `C6 44 24 0C 00` |
 | `0x00ADB120` | Lot lighting time budget per frame (5 / 10 / 15 / 30 ms; 1000 in tool mode); only caller the CALL at `0x00ADB95D` | smooth_streaming note 5; Lot Lighting While Moving scales it while the camera moves ([../features/performance/README.md](../features/performance/README.md)) |
 | `0x00AE4CB0 → 0x00ADB8F0 → 0x006A8BA0 → 0x006A88B0 → 0x006A3F80 → 0x006A3C90` | Budgeted room solve during normal lot loading; `0x00ADB8F0` calls `0x006A8BA0` once per level object of the lot (deque at manager+0x24..0x40) with one shared stopwatch and stops when elapsed > budget; `0x006A3C90` returns when the budget is spent while room+0x164 is set and resumes from room+0xEC (state machine, 9 = done) | smooth_streaming note 5; verified 2026-09-29 ([../features/performance/README.md](../features/performance/README.md)) |
-| `0x00ADBAD0 → 0x006A80E0 → 0x006A3EC0` | Synchronous solve (while room+0xF0 == 3, 60000 ms budget) used only by the lot impostor builder | smooth_streaming note 3 |
+| `0x00ADBAD0 → 0x006A80E0 → 0x006A3EC0` | Synchronous solve used only by the lot impostor builder: rooms in state 1 or 2 with shown class +0x100 == 0 and +0xC0 != 0 are set to state 3 and solved to the end (60000 ms stopwatch) | smooth_streaming note 3; S0-10 section above |
+| `0x00ADC180` | thiscall(lot lighting manager, bool), ret 4: thumbnail quality `+0x4D`, then `0x00ADB850`; callers `0x00AE06EC` (1), `0x00AE62C7` (0) | S0-10 section above |
+| `0x00D59C10` | ThumbnailManager request state machine; lot readiness poll in state 0x17 (`0x00D5BE2F`), no timeout | S0-10 section above |
 | `0x006ADD60` | Night-level setter (lightMgr+0xF0) | night_terrain_relight header |
 | `0x006A0230` | Room normalisation from the brightest sample or lamp, written to room+0x160 at the solve's end | level_light_share `RoomNormHook`; F8 records |
 | `0x006A3E65` | Call of `0x006A0E00` at the end of a room solve | level_light_share `FinalizeHook` |

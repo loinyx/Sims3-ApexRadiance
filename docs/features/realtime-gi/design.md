@@ -150,7 +150,9 @@ windows and a room id [V, 05 §3]. Gameplay, saves and every Sim's behaviour are
 - The off set is keyed by lot id and lives outside the lighting manager, which is rebuilt on every promotion.
 - Kept untouched: level rebuild `0x006A7CF0`, both AO solvers, the light gather, the synchronous path
   `0x00ADBAD0 -> 0x006A80E0`.
-- **Thumbnail exemption:** while `0x00AE06B0` is polled for a lot, that lot leaves the off set until it returns true.
+- **Thumbnail exemption:** the two calls of `0x00ADC180` (`0x00AE06EC` sets the thumbnail quality `+0x4D`,
+  `0x00AE62C7` clears it) add and drop the lot in a thumbnail set; a lot in that set is not capped. The capture has no
+  timeout, so without this it waits forever [V pieces, S0-10]. `mgr+0x288` is not usable: the active lot sets it too.
 - Map content under the copies: the class-0 result with its rgb cleared at the end-of-solve hook, ambient alpha kept,
   so a surface the swap misses shows "no lamps" instead of class-0 light.
 - Gate before building: how the 2.81 ms of `0x006A8BA0` splits between rebuild, AO slots and the room pass
