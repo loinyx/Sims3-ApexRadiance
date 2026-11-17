@@ -4,6 +4,7 @@
   "save": "ApexTest-Town",
   "toml": {
     "ui": {
+      "developer_mode": true,
       "screenshot_key": "F8"
     },
     "patches.GBuffer": {
