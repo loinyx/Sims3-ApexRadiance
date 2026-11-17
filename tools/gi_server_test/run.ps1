@@ -1,8 +1,10 @@
-param([string[]]$TestArgs = @(), [string]$OutDir = (Join-Path $env:TEMP 'ApexGiServerTest'), [switch]$Pixel)
+param([string[]]$TestArgs = @(), [string]$OutDir = (Join-Path $env:TEMP 'ApexGiServerTest'), [switch]$Pixel, [switch]$Mesh, [string]$Game = '')
 # The server tier's texel solve, offline on a Vulkan device (check.cpp, solve.comp). Read-only: prints to stdout; the
 # compiler's outputs and the three build inputs below stay in -OutDir. -TestArgs: passed on (--no-rays, --device <text>,
 # --density <n>, --rays <n>). -Pixel: the per-pixel delta shadow kernel instead (pixel_check.cpp, pixel_shadow.comp;
-# -TestArgs --device <text>, --size <w> <h>).
+# -TestArgs --device <text>, --size <w> <h>). -Mesh: the mesh casters against XR-04's boxes (mesh_check.cpp, on the same
+# kernel); -Game <the game's folder> reads a chair and a table out of its packages once (casters.py, into -OutDir: the
+# game's data stays out of the repository), else synthetic ones.
 # Build inputs, fetched once at pinned versions when -OutDir does not hold them (no installed Vulkan SDK is needed; the
 # Vulkan loader, vulkan-1.dll, comes with the graphics driver): the Vulkan headers, the volk loader (two files) and the
 # glslang compiler, which turns solve.comp into SPIR-V headers at build time.
@@ -48,15 +50,23 @@ try {
     }
     $name = 'gi_server_test'
     $source = 'check.cpp'
-    if ($Pixel) {
-        $name = 'gi_pixel_test'
-        $source = 'pixel_check.cpp' # (includes check.cpp, so the headers above are needed too)
+    if ($Pixel -or $Mesh) {
+        $name = if ($Mesh) { 'gi_mesh_test' } else { 'gi_pixel_test' }
+        $source = if ($Mesh) { 'mesh_check.cpp' } else { 'pixel_check.cpp' } # (both include check.cpp, so the headers above are needed too)
         & $glslang.FullName -V --quiet --target-env vulkan1.2 --vn pixel_shadow -o (Join-Path $OutDir 'pixel_shadow.h') (Join-Path $PSScriptRoot 'pixel_shadow.comp')
         if ($LASTEXITCODE -ne 0) { throw 'pixel_shadow.comp did not compile' }
     }
     $exe = Join-Path $OutDir ($name + '.exe')
     & cl.exe /nologo /std:c++20 /utf-8 /EHsc /W4 /O2 /MT /fp:precise /DNOMINMAX /DVK_USE_PLATFORM_WIN32_KHR ('/I' + $repo) ('/I' + $OutDir) ('/I' + $headers) ('/I' + $volk) ('/Fe' + $exe) (Join-Path $PSScriptRoot $source)
     if ($LASTEXITCODE -ne 0) { throw "$source did not compile" }
+    if ($Mesh -and $Game) {
+        $casters = Join-Path $OutDir 'casters.bin'
+        if (-not (Test-Path -LiteralPath $casters)) {
+            & python (Join-Path $PSScriptRoot 'casters.py') $Game $casters
+            if ($LASTEXITCODE -ne 0) { throw 'casters.py failed' }
+        }
+        $TestArgs = @('--casters', $casters) + $TestArgs
+    }
     & $exe @TestArgs
     if ($LASTEXITCODE -ne 0) { throw "$name failed" }
 } finally { Pop-Location }
