@@ -48,6 +48,13 @@ only what differs from the player's choice.
   value: *Restore* puts back only that key (or deletes the file Setup created when the game never wrote to it), so
   settings the game saved since stay. Status: installed when `ts3wrap.exe` is next to the ASI and the key is `true`.
   Removing Apex Radiance removes the restart host first.
+- NVIDIA Smooth Motion (Setup 1.2.0, `SmoothMotion.cs`): a switch that writes the NVIDIA driver at once, not with
+  Install. NVAPI (`nvapi64.dll`, functions from `nvapi_QueryInterface`, `NVDRS_PROFILE_V1`, `NVDRS_APPLICATION_V1`,
+  `NVDRS_SETTING_V1`): on creates or reuses the profile `Apex Radiance - The Sims 3`, adds `NvRemixBridge.exe` and the
+  game's exe (names, not paths; an exe in an NVIDIA predefined profile is skipped), sets `0xB0D384C0 = 1` and saves; off
+  deletes that profile only. Shown with an NVIDIA card; enabled with an RTX 40 or 50 series card, driver 571.86 or newer
+  and the bridge installed (DXVK is untested with it); an exe in a profile of the player's leaves the switch off and names
+  that profile. Any NVAPI failure is shown on the row, never thrown. The driver write is unverified on a real card.
 - Languages: the 21 of The Sims 3, as the menu (`Languages.cs`): Windows' display language, or the one picked with the
   title bar's language button (kept in `%LOCALAPPDATA%\Apex Radiance Setup\language.txt`). English text is the key;
   each language is a `Strings.<code>.cs` table, and `Strings.pt.cs` lists every key. A text without a pair shows in
@@ -106,6 +113,9 @@ dotnet publish installer/ApexSetup -c Release -o installer/publish
 `APEX_SETUP_DRY_RUN=1` shows what Setup finds and would change on a real game while writing nothing.
 `APEX_SETUP_FAKE_GPU=<version>|<card>|<missing extension>,...` stands in for the Vulkan driver's answer (for example
 `1.3|Intel(R) Iris(R) Xe Graphics|VK_KHR_load_store_op_none`), to see the screens of an old driver or an old card.
+`APEX_SETUP_FAKE_NV=<card>|<driver>|<on>|<owner profile>` stands in for NVAPI (for example
+`NVIDIA GeForce RTX 4070|57186|1|`, driver 571.86 written as 57186, on as 1) and makes the Smooth Motion switch write
+nothing.
 
 The tests run the engine on a fake `Game\Bin` and Documents folder in `%TEMP%` with local files (no network, no game).
 For a manual run against a fake game: start the exe with the game folder as its argument and `APEX_SETUP_DOCUMENTS` set

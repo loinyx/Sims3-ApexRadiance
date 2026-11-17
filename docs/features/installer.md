@@ -10,7 +10,7 @@ Setup makes can be undone from a restore point. It is optional: the manual insta
 
 | | |
 |---|---|
-| Availability | Released in 3.1.1; `ApexRadianceSetup.exe` is a release asset. Setup's own update: Released in 3.1.4 (Setup 1.1.0). Modernization from the newest release with the game's build, a moved EA app game: Released in 3.1.5 (Setup 1.1.1). Installs from the manual-install zip (the release's two files): Released in 3.1.6 (Setup 1.1.2). DXVK and the bridge offered only when the graphics driver has the extensions DXVK needs, MonoPatcher no longer offered (shown only where installed): Released in 3.2.1 (Setup 1.1.3). The restart host as an experimental component, off by default: Unreleased, planned for 4.0.0 (Setup 1.1.5). The RTX Remix bridge as the default renderer of a first install: Unreleased, planned for 4.0.1 (Setup 1.1.7) |
+| Availability | Released in 3.1.1; `ApexRadianceSetup.exe` is a release asset. Setup's own update: Released in 3.1.4 (Setup 1.1.0). Modernization from the newest release with the game's build, a moved EA app game: Released in 3.1.5 (Setup 1.1.1). Installs from the manual-install zip (the release's two files): Released in 3.1.6 (Setup 1.1.2). DXVK and the bridge offered only when the graphics driver has the extensions DXVK needs, MonoPatcher no longer offered (shown only where installed): Released in 3.2.1 (Setup 1.1.3). The restart host as an experimental component, off by default: Unreleased, planned for 4.0.0 (Setup 1.1.5). The RTX Remix bridge as the default renderer of a first install: Unreleased, planned for 4.0.1 (Setup 1.1.7). NVIDIA Smooth Motion switch: Unreleased, planned for 4.0.3 (Setup 1.2.0) |
 | Default | Optional, a separate download |
 | Menu | None: a separate program, not part of the in-game menu |
 | Configuration | `Game\Bin\Apex Radiance backup\setup.json` (written by Setup); restore points in `Game\Bin\Apex Radiance backup\restore`; language in `%LOCALAPPDATA%\Apex Radiance Setup\language.txt` |
@@ -70,6 +70,20 @@ Setup finds the game, compares what is installed with the player's choice and ap
    own, putting back the files it replaced. *Uninstall everything* removes Apex Radiance and what Setup installed and
    restores every replaced file; mods installed by hand and the settings in Documents stay.
 
+**NVIDIA Smooth Motion** (Setup 1.2.0) is the last row of the Components step: frame generation in the NVIDIA driver, about
+double the frame rate on RTX 40 and 50 series cards, with a little more input delay. The NVIDIA app reports the RTX Remix
+bridge as not compatible; a driver profile forces it, the way NVIDIA Profile Inspector does
+([rtx-remix-bridge.md](rtx-remix-bridge.md)). The switch applies at once, outside Install, through NVAPI's driver settings
+(`SmoothMotion.cs`): on creates (or reuses) the profile *Apex Radiance - The Sims 3* with `NvRemixBridge.exe` and the
+game's exe and sets setting `0xB0D384C0` to 1; off deletes that profile only. The row shows only with an NVIDIA card. It
+can be turned on with an RTX 40 or 50 series card, driver 571.86 or newer, and the RTX Remix bridge installed; otherwise
+it stays off and says why. When either exe already belongs to a profile of the player's, Setup leaves it alone and names
+that profile. The profile is not part of restore points (it is a driver setting, not a game file).
+
+| Off (no bridge on this game) | On | Unsupported card |
+|---|---|---|
+| ![Smooth Motion off](../images/installer/smooth-motion-off.png) | ![Smooth Motion on](../images/installer/smooth-motion-on.png) | ![Smooth Motion on an RTX 3080](../images/installer/smooth-motion-unsupported.png) |
+
 When the renderer changes the graphics card the game sees, the game resets its graphics options once: Setup says so
 and keeps a copy of `Options.ini`, restored when the player goes back to the game's own Direct3D 9.
 
@@ -97,6 +111,11 @@ and keeps a copy of `Options.ini`, restored when the player goes back to the gam
 - The Edge Smoothing suggestion reads `Options.ini` `edgesmoothing`, where Apex reads the back buffer: 0 was seen with
   no MSAA, and that every other value means MSAA is unverified in game. It changes the file only when the player clicks
   *Apply*.
+- NVIDIA Smooth Motion: the driver write is unverified on a real card (the reading is verified: card, driver, state).
+  The profile holds exe names, not paths, so it applies to every game folder. An exe already in an NVIDIA predefined
+  profile (the game's own) stays there and is not added; if that holds `NvRemixBridge.exe` too, the setting would not
+  reach the bridge (unverified). DXVK on `TS3W.exe` is Vulkan as well, but Smooth Motion under DXVK is untested, so the
+  switch needs the bridge.
 
 ## Technical reference
 
