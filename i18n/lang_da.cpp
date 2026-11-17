@@ -3032,6 +3032,7 @@ const I18n::Pair kPairs[] = {
     {"The download failed", "Hentningen mislykkedes"},
     {"Shader packs: downloaded from their authors' GitHub, under each author's licence.", "Shaderpakker: hentet fra forfatternes GitHub under hver forfatters licens."},
     {"Developer mode: give the bridge server every object's own mesh as a shadow caster", "Udviklertilstand: giv broserveren hvert objekts eget mesh som skyggekaster"},
+    {"Developer mode: draw every object's own mesh into the lamps' shadow tiles (needs the bridge)", "Udviklertilstand: tegn hvert objekts eget mesh i lampernes skyggefliser (kræver broen)"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Danish, kPairs, std::size(kPairs));

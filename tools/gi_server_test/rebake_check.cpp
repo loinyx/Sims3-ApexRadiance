@@ -279,6 +279,93 @@ Scene ServerScene(const BigLot& b, int density) {
     return sc;
 }
 
+// The blob of check.cpp before S2-01b (its --dump now writes the game's builder blob): the lots of this check have no
+// RtLampProxy lot the builder takes, so their scene is written from the solve's own map, texel i at pixel texels - 1 - i.
+struct WireHeader {
+    uint32_t magic, version, triangles, patches, mapEntries, texels, rays, shadowRays, bounces, reserved[3];
+};
+struct WireTri {
+    float v[3][3];
+    int32_t front, back; // the texel patch of the side the winding's normal points to, and of the other; -1 = no texel
+};
+struct WirePatch {
+    float origin[3], u[3], v[3]; // cell = floor(dot(P - origin, u)), floor(dot(P - origin, v))
+    uint32_t nu, nv, mapOffset;
+};
+struct WireTexel {
+    float pos[3], nrm[3], alb[3];
+    uint32_t pixel;
+};
+// The world-cell map of solve.comp turned into patches: one a story for floors and one for ceilings, one a wall line
+// and side that holds a texel, over all stories. Each triangle names its two patches by its own plane, so the server
+// needs no story height and no tile lines. A wall's patch spans the stories because the proxy's walls overlap: a wall
+// starts 0.1 m under its story's floor, in the plane of the wall below, and a hit there belongs to the lower story's
+// texel (a patch must cover every triangle that names it). Texel i goes to pixel texels - 1 - i (the server writes by
+// pixel, not by order).
+std::vector<uint8_t> WireScene(const Scene& sc, uint32_t rays, uint32_t bounces, uint32_t shadowRays) {
+    const int S = sc.stories, G = sc.lot, D = sc.density, GD = G * D;
+    const float df = static_cast<float>(D);
+    std::vector<WirePatch> patches;
+    std::vector<int32_t> pmap;
+    for (int cs = 0; cs < 2 * S; cs++) { // (class * S + story), as the map
+        patches.push_back({{0, 0, 0}, {df, 0, 0}, {0, 0, df}, static_cast<uint32_t>(GD), static_cast<uint32_t>(GD), static_cast<uint32_t>(pmap.size())});
+        pmap.insert(pmap.end(), sc.map.begin() + static_cast<size_t>(cs) * GD * GD, sc.map.begin() + static_cast<size_t>(cs + 1) * GD * GD);
+    }
+    std::vector<int32_t> wallPatch(static_cast<size_t>(4) * (G + 1), -1); // (axis * 2 + side) * (G + 1) + line
+    for (size_t w = 0; w < wallPatch.size(); w++) {
+        const size_t as = w / (G + 1), line = w % (G + 1);
+        const auto cell = [&](int s, int along, int h) { // the map's [axis, side][story][line][along][height]
+            return sc.map[static_cast<size_t>(2) * S * GD * GD + ((((as * S + s) * (G + 1) + line) * GD) + along) * (3 * D) + h];
+        };
+        bool any = false;
+        for (int s = 0; s < S && !any; s++)
+            for (int along = 0; along < GD && !any; along++)
+                for (int h = 0; h < 3 * D && !any; h++) any = cell(s, along, h) >= 0;
+        if (!any) continue;
+        const int axis = static_cast<int>(as / 2);
+        const float at = static_cast<float>(line);
+        wallPatch[w] = static_cast<int32_t>(patches.size());
+        patches.push_back({{axis == 0 ? at : 0, 0, axis == 1 ? at : 0}, {axis == 0 ? 0 : df, 0, axis == 0 ? df : 0}, {0, df, 0},
+                           static_cast<uint32_t>(GD), static_cast<uint32_t>(S * 3 * D), static_cast<uint32_t>(pmap.size())});
+        for (int row = 0; row < S * 3 * D; row++)
+            for (int along = 0; along < GD; along++) pmap.push_back(cell(row / (3 * D), along, row % (3 * D)));
+    }
+    std::vector<WireTri> tris(sc.mesh.tris.size());
+    for (size_t i = 0; i < tris.size(); i++) {
+        WireTri& t = tris[i];
+        std::memcpy(t.v, sc.mesh.tris[i].v, sizeof t.v);
+        t.front = t.back = -1;
+        if (sc.mesh.kind[i] == RtLampProxy::Mesh::kShape) continue; // object shapes hold no texel
+        const float e1[3] = {t.v[1][0] - t.v[0][0], t.v[1][1] - t.v[0][1], t.v[1][2] - t.v[0][2]}, e2[3] = {t.v[2][0] - t.v[0][0], t.v[2][1] - t.v[0][1], t.v[2][2] - t.v[0][2]};
+        float n[3] = {e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]};
+        const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+        if (!(len > 0.0f)) continue;
+        const float c[3] = {(t.v[0][0] + t.v[1][0] + t.v[2][0]) / 3, (t.v[0][1] + t.v[1][1] + t.v[2][1]) / 3, (t.v[0][2] + t.v[1][2] + t.v[2][2]) / 3};
+        if (std::fabs(n[1]) > 0.5f * len) {
+            const int sUp = static_cast<int>(std::floor(c[1] / kStory + 0.5f)), sDown = static_cast<int>(std::floor(c[1] / kStory - 0.5f));
+            const int32_t up = sUp >= 0 && sUp < S ? sUp : -1, down = sDown >= 0 && sDown < S ? S + sDown : -1; // seen from above: a floor; from below: a ceiling
+            t.front = n[1] > 0 ? up : down, t.back = n[1] > 0 ? down : up;
+        } else {
+            const int axis = std::fabs(n[0]) > std::fabs(n[2]) ? 0 : 1, line = static_cast<int>(std::floor(c[axis == 0 ? 0 : 2] + 0.5f));
+            const int side = n[axis == 0 ? 0 : 2] > 0 ? 1 : 0;
+            if (line < 0 || line > G) continue;
+            t.front = wallPatch[static_cast<size_t>(axis * 2 + side) * (G + 1) + line];
+            t.back = wallPatch[static_cast<size_t>(axis * 2 + 1 - side) * (G + 1) + line];
+        }
+    }
+    std::vector<WireTexel> texels(sc.texels.size());
+    for (size_t i = 0; i < texels.size(); i++) {
+        std::memcpy(texels[i].pos, sc.texels[i].pos, 12), std::memcpy(texels[i].nrm, sc.texels[i].nrm, 12), std::memcpy(texels[i].alb, sc.texels[i].alb, 12);
+        texels[i].pixel = static_cast<uint32_t>(texels.size() - 1 - i);
+    }
+    const WireHeader h{0x43534947u, 1, static_cast<uint32_t>(tris.size()), static_cast<uint32_t>(patches.size()), static_cast<uint32_t>(pmap.size()),
+                       static_cast<uint32_t>(texels.size()), rays, shadowRays, bounces, {}};
+    std::vector<uint8_t> out;
+    Put(out, &h, 1), Put(out, tris.data(), tris.size()), Put(out, patches.data(), patches.size()), Put(out, pmap.data(), pmap.size()), Put(out, texels.data(), texels.size());
+    return out;
+}
+
+
 // Writes the lot in check.cpp's --dump layout. A lamp's region box is its room grown by one room in x and z (the doors'
 // reach, wp/X-REBAKE.md region scope) on its story; the solve's layers are unscoped.
 void DumpLot(const Scene& sc, const BigLot& b, const Result& r, uint32_t nRays, const std::string& path) {
