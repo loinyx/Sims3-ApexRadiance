@@ -17,6 +17,9 @@
 //   replacement shaders take the row of the game shader they were made from.
 // Consumers (GB-04): Ambient Occlusion's developer switches gbufferNormals and temporal read this frame's targets and
 // motion through GBuffer::Targets / GBuffer::Motion (gbuffer_motion.h). [patches.GBuffer], off by default.
+// WP11: view = 7 shows the albedo + id target as the bridge server sees it: RemixBridge_GiPixelView (bridge patch 0024)
+// blits target 1 on the server's renderer into an A16B16G16R16F texture, drawn like view 2; the two views must match.
+// Without the bridge pair, or with the per-pixel pass off on the server, one log line and nothing is drawn.
 //
 // Part of Apex Radiance. Credits: @loinyx
 
@@ -251,6 +254,13 @@ struct State {
     int taaPing = 0;
     UINT taaW = 0, taaH = 0;
     unsigned taaRuns = 0, taaNoInput = 0, moverFrames = 0;
+    // (WP11) view 7: the server's copy of the albedo target, and the bridge exports
+    IDirect3DTexture9* bridgeTex = nullptr;
+    bool bridgeOff = false, bridgeOn = false;
+    HRESULT(__stdcall* bridgeOpen)(uint32_t*) = nullptr;
+    HRESULT(__stdcall* bridgeView)(IDirect3DTexture9*, IDirect3DTexture9*) = nullptr;
+    HRESULT(__stdcall* bridgeCounters)(uint32_t*, uint32_t) = nullptr;
+    unsigned long long bridgeLog = 0;
 } g;
 
 const char* YesNo(bool b) { return b ? "yes" : "no"; }
@@ -302,12 +312,13 @@ void ReleaseTarget() {
 }
 
 const char* ViewName(int view) {
-    static const char* const names[] = {"off", "motion", "albedo", "normal", "material", "class", "unwritten"};
-    return names[view >= 0 && view <= 6 ? view : 0];
+    static const char* const names[] = {"off", "motion", "albedo", "normal", "material", "class", "unwritten", "bridge"};
+    return names[view >= 0 && view <= 7 ? view : 0];
 }
 
 void ReleaseGBufferTargets(IDirect3DDevice9* dev) {
     g.gbWritten = false;
+    SafeRelease(g.bridgeTex);
     SceneBinder::SetGBufferTargets(dev, nullptr, nullptr); // unbound first
     for (int i = 0; i < 2; i++) {
         SafeRelease(g.gbSurf[i]);
@@ -587,13 +598,51 @@ void MotionEffect(IDirect3DDevice9* dev) {
     }
 }
 
+void BridgeOff(const std::string& why) {
+    g.bridgeOff = true;
+    LOG_INFO("[GBuffer] Bridge view off: " + why);
+}
+
+// (WP11) The albedo + id target blitted by the bridge server into g.bridgeTex; false when nothing is to be drawn
+bool BridgeCopy(IDirect3DDevice9* dev) {
+    if (g.bridgeOff) return false;
+    if (!g.bridgeOpen) {
+        const HMODULE d3d9 = GetModuleHandleW(L"d3d9.dll");
+        g.bridgeOpen = d3d9 ? reinterpret_cast<decltype(g.bridgeOpen)>(GetProcAddress(d3d9, "RemixBridge_GiPixelOpen")) : nullptr;
+        g.bridgeView = d3d9 ? reinterpret_cast<decltype(g.bridgeView)>(GetProcAddress(d3d9, "RemixBridge_GiPixelView")) : nullptr;
+        g.bridgeCounters = d3d9 ? reinterpret_cast<decltype(g.bridgeCounters)>(GetProcAddress(d3d9, "RemixBridge_GiPixelReadCounters")) : nullptr;
+        if (!g.bridgeOpen || !g.bridgeView || !g.bridgeCounters) return BridgeOff("no bridge export (needs the bridge pair of patch 0024)"), false;
+    }
+    if (!g.bridgeOn) {
+        uint32_t state = 0;
+        const HRESULT hr = g.bridgeOpen(&state);
+        if (hr == S_FALSE) return false; // the server answers with a later frame
+        if (hr != S_OK || state != 1) return BridgeOff(std::format("the per-pixel pass is off on the server (0x{:08X}, state {})", static_cast<uint32_t>(hr), state)), false;
+        g.bridgeOn = true;
+        LOG_INFO("[GBuffer] Bridge view on");
+    }
+    if (!g.bridgeTex && FAILED(dev->CreateTexture(g.gbWidth, g.gbHeight, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A16B16G16R16F, D3DPOOL_DEFAULT, &g.bridgeTex, nullptr)))
+        return BridgeOff("could not create the A16B16G16R16F target"), false;
+    if (FAILED(g.bridgeView(g.gbTex[0], g.bridgeTex))) return BridgeOff("the view export refused"), false;
+    const unsigned long long now = GetTickCount64();
+    if (now - g.bridgeLog >= 10000) {
+        g.bridgeLog = now;
+        uint32_t c[13] = {}; // words 11, 12 of util_gi_pixel.h: views, viewFaults
+        if (SUCCEEDED(g.bridgeCounters(c, 13))) LOG_INFO(std::format("[GBuffer] Bridge view: views={} viewFaults={}", c[11], c[12]));
+    }
+    return true;
+}
+
 void ViewEffect(IDirect3DDevice9* dev) {
-    if (g.view < 1 || g.view > 6 || !EnsureShaders(dev)) return;
+    if (g.view < 1 || g.view > 7 || !EnsureShaders(dev)) return;
     if (g.view == 1 ? !g.motionThisFrame : !g.gbTex[0]) return;
+    if (g.view == 7 && !BridgeCopy(dev)) return;
     IDirect3DSurface9* bb = nullptr;
     if (FAILED(dev->GetRenderTarget(0, &bb)) || !bb) return;
-    const float c[kPSConsts][4] = {{}, {}, {}, {}, {0, GBufferMotion::kInvalid, 20.0f, static_cast<float>(g.view)}, {}}; // 0.025 NDC = full colour
-    IDirect3DBaseTexture9* const in[kTextures] = {g.view == 1 ? g.motion : g.gbTex[0], g.gbTex[1], g.view == 6 ? DepthShare::Texture() : nullptr};
+    const float shown = static_cast<float>(g.view == 7 ? 2 : g.view); // view 7 draws the server's copy as the albedo view
+    const float c[kPSConsts][4] = {{}, {}, {}, {}, {0, GBufferMotion::kInvalid, 20.0f, shown}, {}}; // 0.025 NDC = full colour
+    IDirect3DBaseTexture9* const in[kTextures] = {g.view == 1 ? g.motion : g.view == 7 ? g.bridgeTex : g.gbTex[0], g.gbTex[1],
+                                                  g.view == 6 ? DepthShare::Texture() : nullptr};
     {
         SavedState saved;
         if (saved.Capture(dev)) DrawPass(dev, bb, in, g.psView, c);
@@ -734,9 +783,9 @@ IDirect3DTexture9* GBuffer::Motion(float dRow3[4]) {
 class GBufferPatch : public ApexPatch {
   public:
     GBufferPatch() : ApexPatch("GBuffer", nullptr) {
-        RegisterIntSetting(&g.view, "view", 0, 0, 6,
+        RegisterIntSetting(&g.view, "view", 0, 0, 7,
                            "Developer view over the scene: 0 = off, 1 = camera motion vectors, 2 = albedo, 3 = normal, 4 = material id, 5 = motion class, "
-                           "6 = scene pixels nothing wrote");
+                           "6 = scene pixels nothing wrote, 7 = albedo as the bridge server sees it");
         // (GB-05) read when the G-buffer is switched on
         RegisterBoolSetting(&g.movers, "movers", false, "Developer: motion vectors of moving objects and Sims (a replay of each draw whose position constants changed)");
         RegisterBoolSetting(&g.taa, "taa", false, "Developer: temporal anti-aliasing (sub-pixel jitter of the 3D scene, resolved with the motion vectors)");
@@ -773,6 +822,7 @@ class GBufferPatch : public ApexPatch {
         g.loggedRunning = false;
         g.capsDevice = nullptr;
         g.gbOff = g.gbLogged = false;
+        g.bridgeOff = false;
         isEnabled = true;
         LOG_INFO(std::format("[GBuffer] On: motion={} view={}{}", g.moversOn ? "camera+movers" : "camera", ViewName(g.view), g.taaOn ? " taa=on" : ""));
         return true;

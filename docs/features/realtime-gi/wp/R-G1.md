@@ -61,7 +61,7 @@ Lots mode, longest slice a layer, same machine, GPU shared with another lane's g
 - [V] `native/remix-bridge/test-gi.cmd` (fresh bridge pair from 0001-0023): `list_batch_check` passed; `test_gi_device`
   modes on, compute, off, stock, lots and lots-full passed with timeouts on and off ("GI server tests passed"). DXVK
   modes not run.
-- [V] `0023` applies with plain `git apply` on a fresh patch-only tree of 0001-0022 (`PATCH_ONLY=1 build.cmd`).
+- [V] `0023` applies with plain `git apply` on a fresh patch-only tree of 0001-0022 (`PATCH_ONLY=1 build.cmd`). After merge round 5 the series is 0001-0024 (0024 is WP11).
 - [V] `tools/gi_indirect_test/run.ps1`: 36 checks, 0 failures. `tools/rt_lamps_test/run.ps1`: 680480 checks, 0 failures;
   with `-Gi`: 680326 checks, 0 failures.
 
