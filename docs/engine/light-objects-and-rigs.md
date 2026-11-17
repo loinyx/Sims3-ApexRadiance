@@ -373,6 +373,71 @@ throws, and a curtain of opacity 0 leaves the previous dimmer and colour in plac
 **Open:** the eight tunable values; what the channel 1 set at `ObjectById(lot)+0x364` holds; `+0x210` on type 8; how
 often the sky update `+0x38` runs besides a transform change (`0x006BCBB0` ends in it); the record's `+0x40` angle.
 
+### Rig write facts (real-time GI S0-09, static reading of Steam 1.67)
+
+Read from the disassembly of the functions named; **V** = read in the code, **I** = inferred.
+
+**What the room-mode gather reads (`0x006BBDE0` -> `0x006BB2F0`).**
+
+- No light map and no directional map is read on the CPU. The gather reads the room's light list (room `+0xC8`), an
+  occluder set (room `+0x30`) and one packed colour of the floor tile under the rig centre; nothing else (**V**).
+  Sims therefore get no directional-map light from the CPU either: they are rig-only (02 §4.1 shader bindings plus this).
+- The tile colour: `0x006A1660(room, out, centre)` maps the centre into the lot grid, takes the tile (`0x006A42D0`),
+  checks the tile belongs to the room (`0x006A9760`, four room ids at tile `+0x7C`, stride 0x14), picks the tile's
+  sub-cell (`0x006AA6D0(9, x, z)` -> tile `+0x80 + 0x14 x sub`), and unpacks it as ARGB / 255 (`0x0069ED20`). Default
+  0.65 grey when there is no tile. The result and room `+0x110` are passed as the 3rd and 4th argument of `0x006BB2F0`,
+  which never reads them (`ret 0x10`, no `[ebp+0x10]` / `[ebp+0x14]` access) (**V**). Which colour the tile holds is not
+  settled (probably the surface colour of S0-12) (**I**).
+- **Walls already block lamps for room rigs.** For each light that passes `0x006BB270` (same room, luminance >= 0.1,
+  pushed to the gather list `0x01158D20`), `0x006BB2F0` calls the segment query `0x0069D4C0(room+0x30, list 0 = default
+  room+0x78, centre, lamp position from vfunc+0x24, 0, 1, 0)`; on a hit (`+0x6C` set) it pops the record again
+  (`sub [0x01158D24], 0x30`). So a lamp the room's occluders hide from the centre is dropped (**V**). The occluder
+  objects (each tested with `0x0069AA90`; flag `+0xEC` bit 0 skips one) are walls or portals of the room (**I**).
+  Whether the outdoor cell gather `0x006B5AF0` makes a similar test was not read.
+
+**Order of writes to the rig on a gather** (both gathers end in `0x006BBA50`):
+
+1. `0x006B73A0` clears `+0x10`, `+0x50`, `+0x90`, `+0xD0` (4 x float4 each) and `+0x110` (3 x float4) (**V**).
+2. `0x006BBA50`: optional extra-light merge (`0x006BB600` / `0x006BAFD0`, needs rig `+0x0C` and byte `[0x01158D74]`, 1
+   at load), `[NoLight]` lights when the list is empty (`0x006BB3E0`), sort (`0x006BB1F0`), then the distribute:
+   `0x006BA340`, or `0x006B7750` when byte `[0x01158D30]` is set (it is set when `[*0x011D753C + 0x40] == 2`, a render
+   setting, `0x006B71F7`; 0 at load; that path fills `+0x110..+0x13F` instead of the slots and the binder binds only
+   that) (**V**; which setting **I**).
+3. `0x006BA340` writes slots 0-3 (direction w = 0, colour w = 0) and the vertex-light slots (record direction and
+   colour copied whole, w included), then the cap `0x006B92A0` **only** if byte `[0x01158D5D]` (1 at load), then for
+   mode 0 (or rig `+0x224` bit 0x20) and byte `[0x01158D5C]` (1 at load) the fill light `0x006B7E70`, which moves slot 3
+   into vertex-light slot 3 (`+0x40` -> `+0xC0`, `+0x80` -> `+0x100`) and puts the fill light in slot 1 (**V**). The cap
+   has one call site (`0x006BA564`).
+4. Back in `0x006BBDE0` (modes 0/1 only): if room byte `+0x19` (`0x0069E650`), every colour of `+0x50..+0x8F`,
+   `+0xD0..+0x10F` and `+0x110..+0x13F` is multiplied by the tweakable `[0x011D0C50]`, after the cap; then
+   `0x006B85C0` stores the slot colour sum x `[0x011D0AE0]` at `+0x200` (mode 0) (**V**).
+
+**When a rig gathers again.** Only through `0x006BBF90` (unconditional; callers the cell tick `0x006B5DF2` and the
+room/mode setup `0x006C7DB7`) and `0x006BBFE0` (only when rig `+0x224` bit 0x08 is set; callers `0x0070EACA`,
+`0x0071A4E8`). Bit 0x08 is set by `0x006B7070` (mark dirty, 14 callers, among them a lamp change in the rig's
+rectangle, `0x006B9230`). Both tail-jump to `0x006BBBA0` (mode 2) or `0x006BBDE0` (modes 0/1); `0x006BBDE0` falls back to
+`0x006BBBA0` when the room is gone (**V**). Apex's `RoomGatherThunk` (call `0x006BBE70`) runs after `0x006BB2F0` and
+before steps 1-4, so it sees the gather list, not the final rig.
+
+**Binder `0x006B8B30` (default path, `[0x01158D30]` = 0).** It stores pointers, not copies: `LightDirections` ->
+rig `+0x10`, `LightColors` -> rig `+0x50` (or the scratch `0x011D0E70`, below), `VertexLightDirections` -> `+0x90`,
+`VertexLightColors` -> `+0xD0`, all with count 4 (**V**). Rig memory is read when the effect uploads the constants for
+the draw, so a value written to the rig any time before the draw is what the shader gets. Lamps are bound only when rig
+`+0x224` bit 0x10 is set (else null pointers, the shader keeps zero). One per-draw change exists: for a mode-0 rig with
+a lot (`+0x1B0`), room id != 0 and `+0x224` bit 0x80 (set by the mode setup), the lot object at lot `+0x3B8` is asked
+(vfunc `+0x34(roomId, &f)`, `0x006A42A0`); when it returns true the four slot colours are bound as
+`min(colour x (1 + f), 0.5 x (1 + f))` per channel from `0x011D0E70` (alpha min 0) (**V**). What lot `+0x3B8` is (set
+once at lot creation, `0x006A866F`) and how often it answers true is open (**I**).
+
+**Answers for the rig write.**
+
+| Question | Answer |
+|---|---|
+| Does the room-mode gather read directional maps on the CPU | No. It reads the room's lamps, an occlusion query against the room's occluders, and a tile colour it never uses (**V**) |
+| Can slots 1-3 take arbitrary values | Yes: plain memory bound by pointer, rewritten only by a gather. Limits: mode-0 rigs have no sun, so slot 0 is a lamp too; the fill light of step 3 occupies slot 1 in room rigs unless the write replaces it; the per-draw clamp at 0.5 x (1 + f) when the lot `+0x3B8` object answers true (**V**) |
+| Can the vertex-light slots take arbitrary values each frame | Yes, same storage and binding, no clamp, no cap after the gather. They are directions (unit vectors from the centre, evaluated N.L in the vertex shader), not positions: a moving lamp means a rewrite of the direction (**V** for the storage; direction meaning from the shader reports above) |
+| Where a cached write must happen | After the gather has finished: on return of `0x006BBDE0` and `0x006BBBA0` (detours at their entries that call the original, then write). That catches every re-gather (cell tick, dirty flag, mode setup) and runs after the cap, the fill light and the `[0x011D0C50]` scale, which the write therefore bypasses: Apex must apply its own ceiling. A per-draw write at the binder call `0x006F68C5` (RigTracker) also works but costs per draw; use it only for blending over time (**V** for the order; **I** that nothing else writes the slots between gathers: only the functions above were read, no full search for writers) |
+
 ### Open items / unverified
 
 - The meaning of the constructor flag bits and of rig+0x225; k3 and g in the street-lamp rig formula.
@@ -407,7 +472,15 @@ often the sky update `+0x38` runs besides a transform change (`0x006BCBB0` ends 
 | `0x006BBBA0` | Outdoor gather (mode 2): needs rig+0x225 bit 1 and rig+0x224 bit 0x10; → `0x006B5AF0` | notebook 3, 5 |
 | `0x006B5AF0` | Cell gather: the 3×3 light cells (32 m) around rig+0x140, per light `0x006BB270`; thiscall(cells, rig), `ret 4` at +0x145 | notebook 3; object_light_bridge (checks `C2 04 00` at `0x006B5C35`) |
 | `0x006BBDE0` | Room gather (modes 0/1) → `0x006BB2F0` (call at `0x006BBE70`) | object_light_bridge `kRoomGatherCall` |
-| `0x006BB2F0` | Room-list gather: drops world-class lights (vfunc+0x20 != 0), needs the same room | notebook "Resultado do teste" |
+| `0x006BB2F0` | Room-list gather: drops world-class lights (vfunc+0x20 != 0), needs the same room; drops a lamp the room's occluders hide from the centre (`0x0069D4C0`); thiscall(rig, room+0x30, room+0xC8, tileColour*, room+0x110) ret 0x10, last two unused | notebook "Resultado do teste"; S0-09 reading |
+| `0x0069D4C0` | Segment query against an occluder list (room+0x30; +0x6C hit flag, +0x70 transmission) | S0-09 reading |
+| `0x006A1660` | Tile colour under a point (ARGB / 255 from tile +0x80; 0.65 grey default) | S0-09 reading |
+| `0x006B73A0` | Clears the rig slots +0x10..+0x10F and +0x110..+0x13F before a distribute | S0-09 reading |
+| `0x006BBA50` | Gather tail: merge, [NoLight], sort, distribute (`0x006BA340`, or `0x006B7750` when `[0x01158D30]`) | S0-09 reading |
+| `0x006B7070` | Marks a rig dirty (+0x224 bit 0x08); `0x006BBFE0` re-gathers dirty rigs | S0-09 reading |
+| `0x006B7E70` | Fill light: slot 3 to vertex-light slot 3, fill into slot 1 | S0-09 reading |
+| `0x006A42A0` | Per-room query on lot +0x3B8 (vfunc +0x34); true makes the binder clamp mode-0 slot colours | S0-09 reading |
+| `0x01158D30`, `0x01158D5C`, `0x01158D5D` | Bytes: alternate distribute and bind path (0 at load), fill light on (1), cap on (1) | S0-09 reading |
 | `0x006BB270` | Per-light test: `light+0x08 == rig+0x1E0` (same room id), calls light vfunc+0x10 (return address `0x006BB2B3`), keeps it if luminance ≥ `[0x01158D60]` (0.1; HD objects `[0x01158D64]` = 0.01) | notebook 3; object_light_bridge `kRigGatherReturn` (`FF D2` before it checked); dwords.txt |
 | `0x006BDB00` | Common record format of vfunc+0x10 results: rec[4..6] = colour, rec[10] = luminance (weights at `0x011D1140`) | notebook "Reforco"; object_light_bridge `BoostRec` |
 | `0x006BB1F0` | Sorts the gathered lights by luminance | notebook 3 |
