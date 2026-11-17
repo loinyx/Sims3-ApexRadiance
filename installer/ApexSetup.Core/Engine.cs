@@ -287,9 +287,12 @@ public static class Engine
         r.Assets.Any(a => a.Name.StartsWith(ModernizationPrefix(e)) && a.Name.EndsWith(".zip")) && r.Assets.Any(a => a.Name == "ts3fixes.package");
 
     // The release to install: experimental, the newest -exp. one with this edition's build; else (or none) the latest stable
-    // release when it has the build, else the newest recent stable one with it; null when none has
-    public static Release? PickModernization(Release? latest, IEnumerable<Release> recent, Edition e, bool experimental)
+    // release when it has the build, else the newest recent stable one with it; null when none has. recent null: the listing
+    // failed; then experimental is unknown (null: no update and no channel change shown, the install lists again)
+    public static Release? PickModernization(Release? latest, IEnumerable<Release>? recent, Edition e, bool experimental)
     {
+        if (recent is null)
+            return experimental ? null : latest is not null && !Releases.IsExperimental(latest.Tag) && HasModernizationBuild(latest, e) ? latest : null;
         Release? best = null;
         if (experimental)
             foreach (var r in recent)
@@ -516,8 +519,8 @@ public static class Engine
                 // a bridge installed by hand is this component's own files, not foreign ones to back up and restore on removal
                 var own = c == Components.Bridge && s.Layer == Layer.Bridge;
                 // Sims 3 Modernization moved between stable and experimental: that channel's ts3native.ini replaces the player's
-                var channelChange = c == Components.Modernization && m.Versions.GetValueOrDefault(c) is { Length: > 0 } was
-                    && Releases.IsExperimental(was) != Releases.IsExperimental(version);
+                var channelLeft = c == Components.Modernization && m.Versions.GetValueOrDefault(c) is { Length: > 0 } was
+                    && Releases.IsExperimental(was) != Releases.IsExperimental(version) ? Releases.IsExperimental(was) ? "experimental" : "stable" : null;
                 // each file's size before it is placed: afterwards every file must be there whole, else an antivirus took it
                 var sizes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
                 foreach (var (from, to) in files)
@@ -525,8 +528,8 @@ public static class Engine
                     try
                     {
                         // (the player's ts3native.ini is kept as it is, except on a channel change: no size to check)
-                        if (channelChange || !(Path.GetFileName(to).Equals("ts3native.ini", StringComparison.OrdinalIgnoreCase) && File.Exists(to))) sizes[to] = new FileInfo(from).Length;
-                        Place(m, c, from, to, own, channelChange);
+                        if (channelLeft is not null || !(Path.GetFileName(to).Equals("ts3native.ini", StringComparison.OrdinalIgnoreCase) && File.Exists(to))) sizes[to] = new FileInfo(from).Length;
+                        Place(m, c, from, to, own, channelLeft);
                     }
                     catch (FileNotFoundException e) { throw Antivirus(e.FileName ?? from, File.Exists(from) ? g.Bin : GitHubSource.TempRoot); }
                     catch (IOException e) when (IsVirusBlock(e)) { throw Antivirus(Path.GetFileName(to), g.Bin); }
@@ -623,16 +626,17 @@ public static class Engine
             if (c == Components.Apex || s.Manifest.Versions.ContainsKey(c) || s.Manifest.Files.Any(f => f.Component == c)) Remove(g, c, docs);
     }
 
-    static void Place(Manifest m, string c, string from, string to, bool own = false, bool channelChange = false)
+    static void Place(Manifest m, string c, string from, string to, bool own = false, string? channelLeft = null)
     {
         var owned = m.Files.FirstOrDefault(f => Same(f.Path, to));
         // the player's ts3native.ini holds their feature switches: kept, only a missing one is written; on a channel change
-        // it is copied next to itself with the time, and the channel's own ini written
+        // it is copied next to itself as the left channel's copy (one per channel, the last one kept), and the channel's own
+        // ini written
         if (Path.GetFileName(to).Equals("ts3native.ini", StringComparison.OrdinalIgnoreCase) && File.Exists(to))
         {
-            if (channelChange)
+            if (channelLeft is not null)
             {
-                Fs.Copy(to, $"{to}.{DateTime.Now:yyyyMMdd-HHmmssfff}.bak");
+                Fs.Copy(to, $"{to}.{channelLeft}.bak");
                 Fs.Copy(from, to);
             }
             if (owned is null) m.Files.Add(new ManifestFile { Component = c, Path = to });

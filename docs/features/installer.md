@@ -172,8 +172,10 @@ and keeps a copy of `Options.ini`, restored when the player goes back to the gam
   GitHub prereleases tagged `vX.Y.Z-exp.YYYYMMDD`. Experimental takes the newest of them with the game's build
   (`Engine.PickModernization`) and falls back to stable when there is none (the EA app for now); the log names the
   release and channel. The choice is kept in `setup.json`. An update within a channel keeps `ts3native.ini`; a channel
-  change copies it to `ts3native.ini.<date-time>.bak` next to itself and writes the channel's own, since the switches
-  differ between channels. The status row shows the installed tag, with *Experimental* when it is one.
+  change copies it to `ts3native.ini.<left channel>.bak` (`stable` or `experimental`, the last one kept) next to itself
+  and writes the channel's own, since the switches differ between channels. When the release listing fails, the
+  experimental channel shows no update and no channel change. Same-day builds (`-exp.YYYYMMDD.N`) count as newer by
+  `N`. The status row shows the installed tag, with *Experimental* when it is one.
 - It needs administrator rights (`Game\Bin` is usually under Program Files) and an internet connection to download.
 - Mods published outside GitHub are recognised and listed with a link to their official page, never downloaded. The
   Sims 3 Performance Patch is on Nexus Mods only: Setup opens its page and installs the file when the download

@@ -283,6 +283,11 @@ try
     iniBaks = Directory.GetFiles(bin, "ts3native.ini.*.bak");
     Check(Read(B("ts3native.ini")) == "ini 0.2.10" && iniBaks.Length == 2 && iniBaks.Any(f => File.ReadAllText(f) == "tester switches")
           && Manifest.Load(bin).ModernizationChannel is null, "experimental to stable: the stable ts3native.ini written, the tester's kept as a copy");
+    await Engine.InstallAsync(g, new[] { Components.Modernization }, new FakeSource(payload) { ModVersion = "0.2.13-exp.20261119", ModernizationExperimental = true }, null, docs);
+    await Engine.InstallAsync(g, new[] { Components.Modernization }, src, null, docs);
+    iniBaks = Directory.GetFiles(bin, "ts3native.ini.*.bak");
+    Check(iniBaks.Length == 2 && iniBaks.Any(f => f.EndsWith("ts3native.ini.stable.bak")) && iniBaks.Any(f => f.EndsWith("ts3native.ini.experimental.bak")),
+          "switching channels again keeps one copy per channel left, not one per switch");
     foreach (var f in iniBaks) File.Delete(f);
     Engine.Remove(g, Components.Modernization, docs);
     Check(!File.Exists(B("ts3native.ini")), "ts3native.ini removed with Modernization");
@@ -781,6 +786,11 @@ finally
     Check(Engine.PickModernization(steamOnly, recent, Edition.Steam, false) == steamOnly, "stable on Steam: the latest release, never an -exp. one");
     Check(Engine.PickModernization(steamOnly, recent, Edition.EA, true) == both, "experimental on the EA app: no -exp. build, falls back to the newest stable one with its build");
     Check(Engine.PickModernization(steamOnly, new[] { exp17 }, Edition.EA, true) is null, "no build for the edition in any channel: none");
+    Check(Engine.PickModernization(steamOnly, null, Edition.Steam, true) is null && Engine.PickModernization(steamOnly, null, Edition.Steam, false) == steamOnly,
+          "a failed listing: experimental unknown (no update, no move to stable), stable still the latest release");
+    Check(Releases.Newer("0.2.13-exp.20261117.2", "0.2.13-exp.20261117") && Releases.Newer("0.2.13-exp.20261117.3", "0.2.13-exp.20261117.2")
+          && !Releases.Newer("0.2.13-exp.20261117", "0.2.13-exp.20261117.2") && Releases.Newer("0.2.13-exp.20261118", "0.2.13-exp.20261117.9"),
+          "a second build on the same day is newer");
     Check(Releases.Newer("0.2.13-exp.20261118", "0.2.13-exp.20261117") && !Releases.Newer("0.2.13-exp.20261117", "0.2.13-exp.20261118")
           && !Releases.Newer("0.2.13-exp.20261117", "0.2.13-exp.20261117") && Releases.Newer("0.2.13", "0.2.13-exp.20261118")
           && !Releases.Newer("0.2.13-exp.20261118", "0.2.13") && Releases.Newer("0.2.13-exp.20261117", "0.2.12") && !Releases.Newer("0.2.12", "0.2.13-exp.20261117"),

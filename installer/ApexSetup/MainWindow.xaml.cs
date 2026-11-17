@@ -26,7 +26,7 @@ public sealed partial class MainWindow : Window
     readonly UIElement[] _screens;
     readonly List<GameItem> _games = new();
     readonly Dictionary<string, Release?> _latest = new();
-    IReadOnlyList<Release> _modRecent = []; // Sims 3 Modernization's recent releases, its -exp. ones included
+    IReadOnlyList<Release>? _modRecent = []; // Sims 3 Modernization's recent releases, its -exp. ones included; null: the listing failed
     bool _modExp; // its experimental channel chosen
     readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(2) };
     int _step;
@@ -187,7 +187,7 @@ public sealed partial class MainWindow : Window
         }).Append(Task.Run(async () =>
         {
             try { _modRecent = await Releases.RecentAsync(Releases.Modernization, experimental: true); }
-            catch (Exception) { _modRecent = []; }
+            catch (Exception) { _modRecent = null; } // (not "no experimental build": nothing changes channel on it)
         })));
         // (screenshots and design checks) APEX_SETUP_PREVIEW_LATEST=3.2.0 makes the latest Apex release that version, to show
         // the update screens; nothing is installed while it is set (InstallAsync)

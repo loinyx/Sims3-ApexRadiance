@@ -103,8 +103,9 @@ public static class Releases
         {
             api.CancelAfter(TimeSpan.FromSeconds(20));
             try { json = await GetStringAsync($"https://api.github.com/repos/{repo}/releases?per_page=20", api.Token); }
-            // (GitHub's rate limit is the news itself: an older edition's build may be in a release the latest one does not show)
-            catch (Exception e) when (e is not SetupException && !ct.IsCancellationRequested) { return new[] { await LatestAsync(repo, ct) }; }
+            // (GitHub's rate limit is the news itself: an older edition's build may be in a release the latest one does not show;
+            // not for the experimental listing, whose failure must change no channel)
+            catch (Exception e) when (!experimental && e is not SetupException && !ct.IsCancellationRequested) { return new[] { await LatestAsync(repo, ct) }; }
         }
         using var doc = JsonDocument.Parse(json);
         return doc.RootElement.EnumerateArray()
@@ -127,7 +128,13 @@ public static class Releases
     {
         static Version? V(string? s) => s is null ? null : Version.TryParse(s.Split('-', '+')[0], out var v) ? v : null;
         static bool Pre(string s) => s.IndexOfAny(new[] { '-', '+' }) >= 0;
-        static long Exp(string s) => IsExperimental(s) && long.TryParse(s[(s.IndexOf("-exp.", StringComparison.OrdinalIgnoreCase) + 5)..].Split('.', '+')[0], out var d) ? d : -1;
+        // the date, then a same-day build's number (-exp.YYYYMMDD.N; none = 0)
+        static long Exp(string s)
+        {
+            if (!IsExperimental(s)) return -1;
+            var p = s[(s.IndexOf("-exp.", StringComparison.OrdinalIgnoreCase) + 5)..].Split('+')[0].Split('.');
+            return long.TryParse(p[0], out var d) ? d * 1000 + (p.Length > 1 && int.TryParse(p[1], out var k) ? Math.Clamp(k, 0, 999) : 0) : -1;
+        }
         if (installed is null || V(latest) is not { } l) return false;
         return V(installed) is not { } i || l > i || l == i && Pre(installed) && !Pre(latest!) // a copy without a version is older than any release
             || l == i && Exp(latest!) > Exp(installed) && Exp(installed) >= 0;
