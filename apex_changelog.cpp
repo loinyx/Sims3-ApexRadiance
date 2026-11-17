@@ -666,7 +666,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
-    {"4.0.3", "2026-11-16", nullptr, k403Improved, k403Fixed, "One-click frame generation in Setup, for a smoother game on newer cards"},
+    {"4.0.3", "2026-11-17", nullptr, k403Improved, k403Fixed, "One-click frame generation in Setup, for a smoother game on newer cards"},
     {"4.0.2", "2026-11-16", nullptr, k402Improved, k402Fixed, "Steadier lot lighting when the camera moves, and a smoother game"},
     {"4.0.1", "2026-11-15", nullptr, k401Improved, nullptr},
     {"4.0.0", "2026-11-14", k400Added, k400Improved, k400Fixed,
