@@ -509,6 +509,9 @@ bool FinishRoomMaps(void* room);
 // The lot's occluders from its story grids (every wall with its openings, the roofed quadrants, each story's placed floors),
 // lot space; false + why when a story's grid could not be built
 bool ExportLotProxy(uintptr_t tracker, RtLampProxy::Lot& out, std::string& why);
+// Any thread: story `story`'s floor colour per quadrant (ARGB8, 4 a tile of its w x h grid, quadrant order of LampVis;
+// docs/engine/room-light-maps.md "Reflectance source"); false when the story or its tiles cannot be read
+bool FloorColours(uintptr_t tracker, int story, int w, int h, std::vector<uint32_t>& out);
 // Any thread: the lots lit at the high quality (the active lot, Build mode: story manager +0x288); returns the count
 int ActiveLotTrackers(uintptr_t* out, int max);
 // Light tree thread or render thread: the lot of that story tree level is the one being played (PlayedLotMgr)

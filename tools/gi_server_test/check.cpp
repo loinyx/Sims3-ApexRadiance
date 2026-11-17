@@ -33,6 +33,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "features/gi_scene.h"
 #include "features/rt_lamp_proxy.h"
 #define PATHREF_CORE_ONLY
 #include "tools/rt_lamps_test/path_trace.h"
@@ -71,6 +72,8 @@ struct Lamp {
     const char* name;
 };
 struct Scene {
+    RtLampProxy::Lot proxy;
+    std::vector<RtLampProxy::ObjShape> shapes;
     RtLampProxy::Mesh mesh;
     std::vector<Texel> texels;
     std::vector<int32_t> map;
@@ -124,22 +127,15 @@ Scene BuildScene(int density) {
             }
         lot.stories.push_back(std::move(st));
     }
-    Mesh& m = sc.mesh;
-    Build(lot, m);
-    // Floors (the proxy holds none on the ground and a 0.2 m slab upstairs that would cover the ceiling texels below)
-    m.curKind = Mesh::kSlab;
-    for (const Story& st : lot.stories)
-        for (int z = 0; z < st.h; z++)
-            for (int x = 0; x < st.w; x++) {
-                const float y = st.floorY[static_cast<size_t>(z) * st.w + x];
-                if (!(y < kNoFloor * 0.5f)) continue;
-                const float a[3] = {float(x), y, float(z)}, b[3] = {float(x + 1), y, float(z)}, c[3] = {float(x + 1), y, float(z + 1)}, d[3] = {float(x), y, float(z + 1)};
-                AddTri(m, a, b, c), AddTri(m, a, c, d);
-            }
-    const ObjShape boxes[] = {{{12.5f, 0.4f, 13.0f}, {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}, {0.8f, 0.4f, 0.5f}},   // a table
-                              {{15.5f, 1.0f, 11.0f}, {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}, {0.3f, 1.0f, 0.6f}}};  // a cabinet
-    for (const ObjShape& b : boxes) AddShape(m, b);
-    BuildGrid(m);
+    // The mesh as the game's scene builder makes it (GiScene::BuildMesh: open tops, the floors the proxy lacks, the boxes),
+    // so this solve, the reference and the bridge's solve of the builder's blob see the same geometry
+    sc.shapes = {{{12.5f, 0.4f, 13.0f}, {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}, {0.8f, 0.4f, 0.5f}},  // a table
+                 {{15.5f, 1.0f, 11.0f}, {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}}, {0.3f, 1.0f, 0.6f}}}; // a cabinet
+    sc.proxy = lot;
+    GiScene::Input in;
+    in.lot = &sc.proxy, in.shapes = sc.shapes;
+    size_t f0 = 0, f1 = 0;
+    GiScene::BuildMesh(in, GiScene::Options{}, sc.mesh, f0, f1);
 
     // Texels and the world-cell map (solve.comp TexelAt mirrors the index)
     const int S = sc.stories, G = kLot + 8, D = density, GD = G * D;
@@ -184,22 +180,7 @@ Scene BuildScene(int density) {
 }
 
 // ---------------------------------------------------------------- the scene for the bridge server
-// The blob layouts of the bridge's util_gi.h (GiSceneHeader, GiSceneTriangle, GiScenePatch, GiSceneTexel, GiLamp)
-struct WireHeader {
-    uint32_t magic, version, triangles, patches, mapEntries, texels, rays, shadowRays, bounces, reserved[3];
-};
-struct WireTri {
-    float v[3][3];
-    int32_t front, back; // the texel patch of the side the winding's normal points to, and of the other; -1 = no texel
-};
-struct WirePatch {
-    float origin[3], u[3], v[3]; // cell = floor(dot(P - origin, u)), floor(dot(P - origin, v))
-    uint32_t nu, nv, mapOffset;
-};
-struct WireTexel {
-    float pos[3], nrm[3], alb[3];
-    uint32_t pixel;
-};
+// The lamp table of the bridge's util_gi.h (GiLamp)
 struct WireLamp {
     float pos[3], radius, col[3];
     uint32_t reserved;
@@ -209,73 +190,43 @@ template <typename T> void Put(std::vector<uint8_t>& out, const T* p, size_t n) 
     out.insert(out.end(), reinterpret_cast<const uint8_t*>(p), reinterpret_cast<const uint8_t*>(p) + n * sizeof(T));
 }
 
-// The world-cell map of solve.comp turned into patches: one a story for floors and one for ceilings, one a wall line
-// and side that holds a texel, over all stories. Each triangle names its two patches by its own plane, so the server
-// needs no story height and no tile lines. A wall's patch spans the stories because the proxy's walls overlap: a wall
-// starts 0.1 m under its story's floor, in the plane of the wall below, and a hit there belongs to the lower story's
-// texel (a patch must cover every triangle that names it). Texel i goes to pixel texels - 1 - i (the server writes by
-// pixel, not by order).
-std::vector<uint8_t> WireScene(const Scene& sc, uint32_t rays, uint32_t bounces, uint32_t shadowRays) {
-    const int S = sc.stories, G = sc.lot, D = sc.density, GD = G * D;
-    const float df = static_cast<float>(D);
-    std::vector<WirePatch> patches;
-    std::vector<int32_t> pmap;
-    for (int cs = 0; cs < 2 * S; cs++) { // (class * S + story), as the map
-        patches.push_back({{0, 0, 0}, {df, 0, 0}, {0, 0, df}, static_cast<uint32_t>(GD), static_cast<uint32_t>(GD), static_cast<uint32_t>(pmap.size())});
-        pmap.insert(pmap.end(), sc.map.begin() + static_cast<size_t>(cs) * GD * GD, sc.map.begin() + static_cast<size_t>(cs + 1) * GD * GD);
+// The game's builder (features/gi_scene.h) on this lot, with this scene's reflectance. Its texels must be this scene's
+// texels (same points, normals and reflectance) so this solve checks the bridge's solve of the builder's blob by texel:
+// order[j] = this scene's texel for the blob's texel j (empty when they differ)
+std::vector<uint8_t> BuilderScene(const Scene& sc, uint32_t rays, uint32_t bounces, uint32_t shadowRays, std::vector<size_t>& order) {
+    GiScene::Input in;
+    in.lot = &sc.proxy, in.shapes = sc.shapes;
+    in.reflect = [](GiScene::Surface s, int story, int, int, int, const float P[3], const float N[3], float rgb[3]) {
+        const float* c = s == GiScene::Surface::Floor ? kFloor : s == GiScene::Surface::Ceiling ? kCeil : kWall;
+        if (s == GiScene::Surface::Wall && std::fabs(N[0]) > 0.5f && std::floor(P[0] + 0.5f) == 10.0f &&
+            RoomOf(story, static_cast<int>(std::floor(P[0])), static_cast<int>(std::floor(P[2]))) == kRoomA)
+            c = kRed;
+        std::memcpy(rgb, c, 12);
+    };
+    GiScene::Options o;
+    o.density = sc.density, o.rays = rays, o.bounces = bounces, o.shadowRays = shadowRays;
+    GiScene::Built b;
+    GiScene::Build(in, o, nullptr, b);
+    const auto* h = reinterpret_cast<const GiScene::Header*>(b.blob.data());
+    const auto* tx = reinterpret_cast<const GiScene::Texel*>(b.blob.data() + sizeof(GiScene::Header) + h->triangles * sizeof(GiScene::Tri) +
+                                                             h->patches * sizeof(GiScene::Patch) + h->mapEntries * 4);
+    std::unordered_map<uint64_t, size_t> mine;
+    for (size_t i = 0; i < sc.texels.size(); i++) mine[GiScene::TexelKey(sc.texels[i].pos, sc.texels[i].nrm)] = i;
+    order.clear();
+    size_t albedo = 0, pixel = 0;
+    for (uint32_t j = 0; j < h->texels; j++) {
+        const auto it = mine.find(GiScene::TexelKey(tx[j].pos, tx[j].nrm));
+        if (it == mine.end()) break;
+        albedo += std::memcmp(tx[j].alb, sc.texels[it->second].alb, 12) != 0;
+        pixel += tx[j].pixel != h->texels - 1 - j;
+        order.push_back(it->second);
     }
-    std::vector<int32_t> wallPatch(static_cast<size_t>(4) * (G + 1), -1); // (axis * 2 + side) * (G + 1) + line
-    for (size_t w = 0; w < wallPatch.size(); w++) {
-        const size_t as = w / (G + 1), line = w % (G + 1);
-        const auto cell = [&](int s, int along, int h) { // the map's [axis, side][story][line][along][height]
-            return sc.map[static_cast<size_t>(2) * S * GD * GD + ((((as * S + s) * (G + 1) + line) * GD) + along) * (3 * D) + h];
-        };
-        bool any = false;
-        for (int s = 0; s < S && !any; s++)
-            for (int along = 0; along < GD && !any; along++)
-                for (int h = 0; h < 3 * D && !any; h++) any = cell(s, along, h) >= 0;
-        if (!any) continue;
-        const int axis = static_cast<int>(as / 2);
-        const float at = static_cast<float>(line);
-        wallPatch[w] = static_cast<int32_t>(patches.size());
-        patches.push_back({{axis == 0 ? at : 0, 0, axis == 1 ? at : 0}, {axis == 0 ? 0 : df, 0, axis == 0 ? df : 0}, {0, df, 0},
-                           static_cast<uint32_t>(GD), static_cast<uint32_t>(S * 3 * D), static_cast<uint32_t>(pmap.size())});
-        for (int row = 0; row < S * 3 * D; row++)
-            for (int along = 0; along < GD; along++) pmap.push_back(cell(row / (3 * D), along, row % (3 * D)));
-    }
-    std::vector<WireTri> tris(sc.mesh.tris.size());
-    for (size_t i = 0; i < tris.size(); i++) {
-        WireTri& t = tris[i];
-        std::memcpy(t.v, sc.mesh.tris[i].v, sizeof t.v);
-        t.front = t.back = -1;
-        if (sc.mesh.kind[i] == RtLampProxy::Mesh::kShape) continue; // object shapes hold no texel
-        const float e1[3] = {t.v[1][0] - t.v[0][0], t.v[1][1] - t.v[0][1], t.v[1][2] - t.v[0][2]}, e2[3] = {t.v[2][0] - t.v[0][0], t.v[2][1] - t.v[0][1], t.v[2][2] - t.v[0][2]};
-        float n[3] = {e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]};
-        const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-        if (!(len > 0.0f)) continue;
-        const float c[3] = {(t.v[0][0] + t.v[1][0] + t.v[2][0]) / 3, (t.v[0][1] + t.v[1][1] + t.v[2][1]) / 3, (t.v[0][2] + t.v[1][2] + t.v[2][2]) / 3};
-        if (std::fabs(n[1]) > 0.5f * len) {
-            const int sUp = static_cast<int>(std::floor(c[1] / kStory + 0.5f)), sDown = static_cast<int>(std::floor(c[1] / kStory - 0.5f));
-            const int32_t up = sUp >= 0 && sUp < S ? sUp : -1, down = sDown >= 0 && sDown < S ? S + sDown : -1; // seen from above: a floor; from below: a ceiling
-            t.front = n[1] > 0 ? up : down, t.back = n[1] > 0 ? down : up;
-        } else {
-            const int axis = std::fabs(n[0]) > std::fabs(n[2]) ? 0 : 1, line = static_cast<int>(std::floor(c[axis == 0 ? 0 : 2] + 0.5f));
-            const int side = n[axis == 0 ? 0 : 2] > 0 ? 1 : 0;
-            if (line < 0 || line > G) continue;
-            t.front = wallPatch[static_cast<size_t>(axis * 2 + side) * (G + 1) + line];
-            t.back = wallPatch[static_cast<size_t>(axis * 2 + 1 - side) * (G + 1) + line];
-        }
-    }
-    std::vector<WireTexel> texels(sc.texels.size());
-    for (size_t i = 0; i < texels.size(); i++) {
-        std::memcpy(texels[i].pos, sc.texels[i].pos, 12), std::memcpy(texels[i].nrm, sc.texels[i].nrm, 12), std::memcpy(texels[i].alb, sc.texels[i].alb, 12);
-        texels[i].pixel = static_cast<uint32_t>(texels.size() - 1 - i);
-    }
-    const WireHeader h{0x43534947u, 1, static_cast<uint32_t>(tris.size()), static_cast<uint32_t>(patches.size()), static_cast<uint32_t>(pmap.size()),
-                       static_cast<uint32_t>(texels.size()), rays, shadowRays, bounces, {}};
-    std::vector<uint8_t> out;
-    Put(out, &h, 1), Put(out, tris.data(), tris.size()), Put(out, patches.data(), patches.size()), Put(out, pmap.data(), pmap.size()), Put(out, texels.data(), texels.size());
-    return out;
+    std::printf("  builder: %u triangles, %u patches, %u map entries, %u texels (this scene %zu), %zu KB\n", h->triangles, h->patches, h->mapEntries, h->texels,
+                sc.texels.size(), b.blob.size() / 1024);
+    Check(h->texels == sc.texels.size() && order.size() == sc.texels.size(), "the builder's texels are this scene's (" + std::to_string(order.size()) + " matched)");
+    Check(albedo == 0 && pixel == 0, "the same reflectance, texel j at pixel texels - 1 - j (" + std::to_string(albedo) + ", " + std::to_string(pixel) + " differ)");
+    if (order.size() != sc.texels.size()) order.clear();
+    return b.blob;
 }
 
 // ---------------------------------------------------------------- the path-traced reference
@@ -851,7 +802,20 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
-    const Scene sc = BuildScene(density);
+    Scene sc = BuildScene(density);
+    // The builder's blob (features/gi_scene.h) of this lot; this scene's texels are put in its order, since a texel's rays
+    // are seeded by its index (the bridge's solve of the blob is then checked by texel against this one)
+    std::vector<size_t> order;
+    const std::vector<uint8_t> blob = BuilderScene(sc, static_cast<uint32_t>(std::min(nRays, 1024)), 16, kShadowRays, order); // (16 gathers: X-REBAKE)
+    if (order.empty()) return 1;
+    {
+        std::vector<Texel> texels(order.size());
+        std::vector<int32_t> to(order.size());
+        for (size_t j = 0; j < order.size(); j++) texels[j] = sc.texels[order[j]], to[order[j]] = static_cast<int32_t>(j);
+        sc.texels.swap(texels);
+        for (int32_t& m : sc.map)
+            if (m >= 0) m = to[static_cast<size_t>(m)];
+    }
     Gpu g = OpenGpu(want, allowRays);
     std::printf("Texel solve on %s (ray queries: %s)\n", g.name.c_str(), g.rays ? "yes" : allowRays ? "not available" : "off");
     std::printf("  proxy: %zu triangles (%d walls, %d openings, 2 boxes); %zu texels at %d a metre, %d rays a texel, %zu lamps\n", sc.mesh.tris.size(), sc.mesh.walls,
@@ -878,7 +842,7 @@ int main(int argc, char** argv) {
         if (!dump.empty()) {
             // Header (magic, texels, lamps, scene bytes, lamp bytes), the scene, the lamps, a room a texel, the solve's
             // direct and indirect layers (lamps x texels x 4 floats each), the reference's means (lamps x 5 rooms x 2 floats)
-            const std::vector<uint8_t> scene = WireScene(sc, static_cast<uint32_t>(std::min(nRays, 1024)), 16, kShadowRays); // (16 gathers: the fixed count of wp/X-REBAKE.md)
+            const std::vector<uint8_t>& scene = blob;
             std::vector<WireLamp> lamps;
             // The lamp of the closed room is scoped to its room's box (wp/X-REBAKE.md, region scope): the result must not change
             for (const Lamp& l : sc.lamps) {

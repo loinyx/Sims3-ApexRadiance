@@ -4102,6 +4102,20 @@ bool ReadGridTile(uintptr_t mgr, int ix, int iz, GridTileRead& t) { // POD only 
         return false;
     }
 }
+// Each quadrant's floor colour (tile section +0x80, ARGB8; room-light-maps.md "Reflectance source"), 4 a tile in
+// LampVis quadrant order; 0 where a tile is missing (POD only, SEH)
+bool ReadFloorColours(uintptr_t mgr, int w, int h, uint32_t* out) {
+    __try {
+        for (int z = 0; z < h; z++)
+            for (int x = 0; x < w; x++) {
+                const uintptr_t tile = LightTile(mgr, x, z);
+                for (int q = 0; q < 4; q++) out[(static_cast<size_t>(z) * w + x) * 4 + q] = tile ? *reinterpret_cast<const uint32_t*>(tile + 0x80 + q * 0x14) : 0u;
+            }
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
 // 1 roofless (solved as outdoor, +0x18), 0 under a roof or a ceiling, -1 no such room (POD only, SEH)
 int RoomRoofState(uintptr_t mgr, int id) {
     __try {
@@ -20116,6 +20130,12 @@ bool ExportLotProxy(uintptr_t tracker, RtLampProxy::Lot& out, std::string& why) 
         return false;
     }
     return true;
+}
+bool FloorColours(uintptr_t tracker, int story, int w, int h, std::vector<uint32_t>& out) {
+    const uintptr_t mgr = tracker ? SafeStoryManager(tracker, story) : 0;
+    if (!mgr || w <= 0 || h <= 0 || w > 1024 || h > 1024) return false;
+    out.assign(static_cast<size_t>(w) * h * 4, 0u);
+    return ReadFloorColours(mgr, w, h, out.data());
 }
 bool LiveStoryManagers(LivenessPrune::LiveSet& mgrs) {
     if (!g_liveSweeps.load(std::memory_order_relaxed)) return false; // (a world loading: its lot list is not settled)

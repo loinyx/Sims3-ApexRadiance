@@ -47,6 +47,7 @@ struct Options {
     int pixelView = 0;           // their developer view: 0 off, 1 filtered mask, 2 raw mask
     bool pixelTestCaster = false; // developer: one capsule under the strongest lamp (until XR-08)
     bool meshCasters = false;    // developer mode: objects to the bridge server's mesh casters (wp/MC.md, MC-2)
+    bool debugFakeSolve = false; // developer mode: the layer update scheduler (gi_sched.h, S2-01) on its fake back end
 };
 
 // Counters of design.md section 6 the skeleton owns. The first four must stay 0; the later packages add to them.
@@ -82,7 +83,7 @@ struct Lamp {
     bool hasLaw = false;               // a lot lamp with a GPU law (RtOutdoorLamps::OwnLotLaw: classes 3-6, 9-11)
     GpuLampLaw::Lamp law;
 };
-enum class LampChange : uint8_t { Added, Removed, Switched, Moved, Value };
+enum class LampChange : uint8_t { Added, Removed, Switched, Moved, Value }; // (GiSched::Event takes the same order)
 inline constexpr const char* kLampChangeNames[] = {"added", "removed", "switched", "moved", "value"};
 struct Change {
     uintptr_t light = 0;
