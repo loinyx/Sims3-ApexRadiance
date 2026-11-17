@@ -1,13 +1,15 @@
-param([string[]]$TestArgs = @(), [string]$OutDir = (Join-Path $env:TEMP 'ApexGiServerTest'), [switch]$Pixel, [switch]$Rebake, [switch]$Mesh, [string]$Game = '', [string]$Mods = '')
+param([string[]]$TestArgs = @(), [string]$OutDir = (Join-Path $env:TEMP 'ApexGiServerTest'), [switch]$Pixel, [switch]$Rebake, [switch]$Mesh, [string]$Game = '', [string]$Mods = '', [string]$BridgePass)
 # The server tier's texel solve, offline on a Vulkan device (check.cpp, solve.comp). Read-only: prints to stdout; the
 # compiler's outputs and the three build inputs below stay in -OutDir. -TestArgs: passed on (--no-rays, --device <text>,
 # --density <n>, --rays <n>, --pathref <samples>, --dump <file>: the one file it writes, for the bridge's test-gi.cmd).
 # -Pixel: the per-pixel delta shadow kernel instead (pixel_check.cpp, pixel_shadow.comp;
-# -TestArgs --device <text>, --size <w> <h>). -Rebake: the re-bake cost against lamp count instead (rebake_check.cpp;
-# -TestArgs --lots 60,120,200, --density <n>, --rays <n>, --no-cpu, --no-gpu). -Mesh: the mesh casters against XR-04's
-# boxes (mesh_check.cpp, on the same kernel); -Game <the game's folder> reads a chair and a table out of its packages once
-# (casters.py, into -OutDir: the game's data stays out of the repository), else synthetic ones, and checks the bridge
-# server's package reader (meshes_check.cpp) against them; -Mods <a Mods folder> indexes its packages too.
+# -TestArgs --device <text>, --size <w> <h>, --bench <frames>). -Rebake: the re-bake cost against lamp count instead
+# (rebake_check.cpp; -TestArgs --lots 60,120,200, --density <n>, --rays <n>, --no-cpu, --no-gpu). -Mesh: the mesh casters
+# against XR-04's boxes (mesh_check.cpp, on the same kernel); -Game <the game's folder> reads a chair and a table out of
+# its packages once (casters.py, into -OutDir: the game's data stays out of the repository), else synthetic ones, and
+# checks the bridge server's package reader (meshes_check.cpp) against them; -Mods <a Mods folder> indexes its packages too.
+# -BridgePass <d3d9.dll>: the kernel as the bridge server records it on the renderer's own device, on that x64 library
+# (native/dxvk/test/dxvk_gi_pixel_pass.cpp with native/remix-bridge/gi/gi_pixel_pass.h; native/dxvk/build.cmd builds the library).
 # Build inputs, fetched once at pinned versions when -OutDir does not hold them (no installed Vulkan SDK is needed; the
 # Vulkan loader, vulkan-1.dll, comes with the graphics driver): the Vulkan headers, the volk loader (two files) and the
 # glslang compiler, which turns solve.comp into SPIR-V headers at build time.
@@ -45,6 +47,16 @@ if (-not ($compiler -and $compiler.Source -match '[\\/]bin[\\/]Host(?:x64|x86)[\
 }
 Push-Location $OutDir
 try {
+    if ($BridgePass) {
+        & $glslang.FullName -V --quiet --target-env vulkan1.2 -DBRIDGE_PASS --vn kGiPixelSpv -o (Join-Path $OutDir 'gi_pixel_spv.h') (Join-Path $PSScriptRoot 'pixel_shadow.comp')
+        if ($LASTEXITCODE -ne 0) { throw 'pixel_shadow.comp (BRIDGE_PASS) did not compile' }
+        $exe = Join-Path $OutDir 'dxvk_gi_pixel_pass.exe'
+        & cl.exe /nologo /std:c++20 /utf-8 /EHsc /W4 /O2 /MT /DNOMINMAX ('/I' + $OutDir) ('/I' + $headers) ('/Fe' + $exe) (Join-Path $repo 'native/dxvk/test/dxvk_gi_pixel_pass.cpp') user32.lib
+        if ($LASTEXITCODE -ne 0) { throw 'dxvk_gi_pixel_pass.cpp did not compile' }
+        & $exe (Resolve-Path -LiteralPath $BridgePass).Path
+        if ($LASTEXITCODE -ne 0) { throw 'dxvk_gi_pixel_pass failed' }
+        return
+    }
     # name, pass, ray queries (SPIR-V 1.4 for the ray-query extension; the compute back end stays at Vulkan 1.1)
     foreach ($v in @(@('links_rq', 0, $true), @('direct_rq', 1, $true), @('links_sw', 0, $false), @('direct_sw', 1, $false), @('bounce', 2, $false))) {
         $defs = @("-DPASS=$($v[1])") + $(if ($v[2]) { @('-DRAYQUERY', '--target-env', 'vulkan1.2') } else { @('--target-env', 'vulkan1.1') })
@@ -56,8 +68,12 @@ try {
     if ($Pixel -or $Mesh) {
         $name = if ($Mesh) { 'gi_mesh_test' } else { 'gi_pixel_test' }
         $source = if ($Mesh) { 'mesh_check.cpp' } else { 'pixel_check.cpp' } # (both include check.cpp, so the headers above are needed too)
-        & $glslang.FullName -V --quiet --target-env vulkan1.2 --vn pixel_shadow -o (Join-Path $OutDir 'pixel_shadow.h') (Join-Path $PSScriptRoot 'pixel_shadow.comp')
-        if ($LASTEXITCODE -ne 0) { throw 'pixel_shadow.comp did not compile' }
+        # the kernel, then its variants for --bench (pixel_shadow.comp names the switches)
+        foreach ($v in @(@('pixel_shadow'), @('px_trace0', '-DTRACE=0'), @('px_group16', '-DGROUP=16'), @('px_lean', '-DLEAN'), @('px_stop1', '-DSTOP=1'), @('px_stop2', '-DSTOP=2'), @('px_stop3', '-DSTOP=3'))) {
+            $defs = @($v | Select-Object -Skip 1)
+            & $glslang.FullName -V --quiet --target-env vulkan1.2 @defs --vn $v[0] -o (Join-Path $OutDir ($v[0] + '.h')) (Join-Path $PSScriptRoot 'pixel_shadow.comp')
+            if ($LASTEXITCODE -ne 0) { throw "pixel_shadow.comp ($($v[0])) did not compile" }
+        }
     }
     if ($Rebake) { $name = 'gi_rebake_test'; $source = 'rebake_check.cpp' } # (includes check.cpp and the S0-01 CPU reference)
     $exe = Join-Path $OutDir ($name + '.exe')

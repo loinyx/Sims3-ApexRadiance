@@ -1,0 +1,80 @@
+From: Apex Radiance
+Subject: [PATCH 0003] dxvk: enable acceleration structures and ray queries when the driver has them
+
+VK_KHR_deferred_host_operations, VK_KHR_acceleration_structure and VK_KHR_ray_query become optional device
+extensions, with the accelerationStructure and rayQuery features. DXVK itself does not use them; they let a pass
+recorded through ID3D9VkExternalPass (patch 0004) trace rays on the device DXVK created. Without driver support
+the device is created as before.
+---
+diff --git a/src/dxvk/dxvk_device_info.cpp b/src/dxvk/dxvk_device_info.cpp
+index 63d89d9..8af11ae 100644
+--- a/src/dxvk/dxvk_device_info.cpp
++++ b/src/dxvk/dxvk_device_info.cpp
+@@ -44,6 +44,8 @@ namespace dxvk {
+     HANDLE_EXT(extSwapchainMaintenance1);          \
+     HANDLE_EXT(extTransformFeedback);              \
+     HANDLE_EXT(extVertexAttributeDivisor);         \
++    HANDLE_EXT(khrAccelerationStructure);          \
++    HANDLE_EXT(khrDeferredHostOperations);         \
+     HANDLE_EXT(khrDeviceFault);                    \
+     HANDLE_EXT(khrDynamicRenderingLocalRead);      \
+     HANDLE_EXT(khrExternalMemoryWin32);            \
+@@ -62,6 +64,7 @@ namespace dxvk {
+     HANDLE_EXT(khrPresentId2);                     \
+     HANDLE_EXT(khrPresentWait);                    \
+     HANDLE_EXT(khrPresentWait2);                   \
++    HANDLE_EXT(khrRayQuery);                       \
+     HANDLE_EXT(khrShaderFloatControls2);           \
+     HANDLE_EXT(khrShaderSubgroupUniformControlFlow);\
+     HANDLE_EXT(khrShaderUntypedPointers);          \
+@@ -1013,6 +1016,12 @@ namespace dxvk {
+       ENABLE_EXT_FEATURE(extVertexAttributeDivisor, vertexAttributeInstanceRateDivisor, false),
+       ENABLE_EXT_FEATURE(extVertexAttributeDivisor, vertexAttributeInstanceRateZeroDivisor, false),
+ 
++      /* Acceleration structures and ray queries, optional and not used by
++       * DXVK itself: for passes recorded through ID3D9VkExternalPass */
++      ENABLE_EXT(khrDeferredHostOperations, false),
++      ENABLE_EXT_FEATURE(khrAccelerationStructure, accelerationStructure, false),
++      ENABLE_EXT_FEATURE(khrRayQuery, rayQuery, false),
++
+       /* Hang debugging */
+       ENABLE_EXT_FEATURE(khrDeviceFault, deviceFault, false),
+       ENABLE_EXT_FEATURE(khrDeviceFault, deviceFaultVendorBinary, false),
+diff --git a/src/dxvk/dxvk_device_info.h b/src/dxvk/dxvk_device_info.h
+index 54deab3..d49579f 100644
+--- a/src/dxvk/dxvk_device_info.h
++++ b/src/dxvk/dxvk_device_info.h
+@@ -87,6 +87,8 @@ namespace dxvk {
+     VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT          extSwapchainMaintenance1        = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT };
+     VkPhysicalDeviceTransformFeedbackFeaturesEXT              extTransformFeedback            = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TRANSFORM_FEEDBACK_FEATURES_EXT };
+     VkPhysicalDeviceVertexAttributeDivisorFeaturesEXT         extVertexAttributeDivisor       = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VERTEX_ATTRIBUTE_DIVISOR_FEATURES };
++    VkPhysicalDeviceAccelerationStructureFeaturesKHR          khrAccelerationStructure        = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR };
++    VkBool32                                                  khrDeferredHostOperations       = VK_FALSE;
+     VkPhysicalDeviceFaultFeaturesKHR                          khrDeviceFault                  = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_KHR };
+     VkPhysicalDeviceDynamicRenderingLocalReadFeatures         khrDynamicRenderingLocalRead    = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_LOCAL_READ_FEATURES_KHR };
+     VkBool32                                                  khrExternalMemoryWin32          = VK_FALSE;
+@@ -105,6 +107,7 @@ namespace dxvk {
+     VkPhysicalDevicePresentId2FeaturesKHR                     khrPresentId2                   = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_2_FEATURES_KHR };
+     VkPhysicalDevicePresentWaitFeaturesKHR                    khrPresentWait                  = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_FEATURES_KHR };
+     VkPhysicalDevicePresentWait2FeaturesKHR                   khrPresentWait2                 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_WAIT_2_FEATURES_KHR };
++    VkPhysicalDeviceRayQueryFeaturesKHR                       khrRayQuery                     = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR };
+     VkPhysicalDeviceShaderFloatControls2FeaturesKHR           khrShaderFloatControls2         = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT_CONTROLS_2_FEATURES_KHR };
+     VkPhysicalDeviceShaderSubgroupUniformControlFlowFeaturesKHR khrShaderSubgroupUniformControlFlow = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_SUBGROUP_UNIFORM_CONTROL_FLOW_FEATURES_KHR };
+     VkPhysicalDeviceShaderUntypedPointersFeaturesKHR          khrShaderUntypedPointers        = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_UNTYPED_POINTERS_FEATURES_KHR };
+@@ -163,6 +166,8 @@ namespace dxvk {
+     VkExtensionProperties extSwapchainMaintenance1          = vk::makeExtension(VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME);
+     VkExtensionProperties extTransformFeedback              = vk::makeExtension(VK_EXT_TRANSFORM_FEEDBACK_EXTENSION_NAME);
+     VkExtensionProperties extVertexAttributeDivisor         = vk::makeExtension(VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME);
++    VkExtensionProperties khrAccelerationStructure          = vk::makeExtension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME);
++    VkExtensionProperties khrDeferredHostOperations         = vk::makeExtension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
+     VkExtensionProperties khrDeviceFault                    = vk::makeExtension(VK_KHR_DEVICE_FAULT_EXTENSION_NAME);
+     VkExtensionProperties khrDynamicRenderingLocalRead      = vk::makeExtension(VK_KHR_DYNAMIC_RENDERING_LOCAL_READ_EXTENSION_NAME);
+     VkExtensionProperties khrExternalMemoryWin32            = vk::makeExtension(VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME);
+@@ -181,6 +186,7 @@ namespace dxvk {
+     VkExtensionProperties khrPresentId2                     = vk::makeExtension(VK_KHR_PRESENT_ID_2_EXTENSION_NAME);
+     VkExtensionProperties khrPresentWait                    = vk::makeExtension(VK_KHR_PRESENT_WAIT_EXTENSION_NAME);
+     VkExtensionProperties khrPresentWait2                   = vk::makeExtension(VK_KHR_PRESENT_WAIT_2_EXTENSION_NAME);
++    VkExtensionProperties khrRayQuery                       = vk::makeExtension(VK_KHR_RAY_QUERY_EXTENSION_NAME);
+     VkExtensionProperties khrShaderFloatControls2           = vk::makeExtension(VK_KHR_SHADER_FLOAT_CONTROLS_2_EXTENSION_NAME);
+     VkExtensionProperties khrShaderSubgroupUniformControlFlow = vk::makeExtension(VK_KHR_SHADER_SUBGROUP_UNIFORM_CONTROL_FLOW_EXTENSION_NAME);
+     VkExtensionProperties khrShaderUntypedPointers          = vk::makeExtension(VK_KHR_SHADER_UNTYPED_POINTERS_EXTENSION_NAME);

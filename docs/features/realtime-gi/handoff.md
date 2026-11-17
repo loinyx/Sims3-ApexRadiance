@@ -45,7 +45,7 @@ Rules:
 
 ## Status
 
-Merged into `feature/realtime-gi`: S0-01 to S0-14, S1-01, S1-02, S2-03, R-01, R-08, R-02, GB-01, X-RTPP, XR-04 and XR-05.
+Merged into `feature/realtime-gi`: S0-01 to S0-14, S1-01, S1-02, S2-03, S3-02, R-01, R-08, R-02, GB-01, X-RTPP, X-R0MEMO, XR-04 and XR-05.
 Each package's full report is `wp/<id>.md`. Other branches still running: `gi/s0-08x`, `gi/x-6d`, `gi/x-leak`.
 
 | Id | Status | Branch | Commit | Depends on | Unblocks / notes |
@@ -87,18 +87,25 @@ Each package's full report is `wp/<id>.md`. Other branches still running: `gi/s0
 | S1-06 | open |  |  | S1-03 |  |
 | S1-07 | open |  |  | S1-04 |  |
 | S1-G1 to S1-G3 | open |  |  | S1-03, S1-04 | game runs |
-| S2-03 | done (GPU plan field shaders, on gi/s0-06) | gi/s2-03 | c115de7 | S0-06 | S2-02, X-05 |
-| S2-01, S2-02, S2-04, S2-05, S2-G1 | open |  |  | see plan |  |
-| S3-01 to S3-06, S3-G1 | open; S3-02 in progress (gi/s3-02) |  |  | see plan |  |
+| S2-03 | done offline; shaders merged, Apex wiring parked with S2-02 | gi/s2-03 | c115de7 | S0-06 | X-05 |
+| S2-02 | parked (research 17: server primary, d3d9 = fallback only) |  |  |  |  |
+| S2-04 | split: feedback bounces are R-04; only `roomAmbient` (d3d9 fallback) remains |  |  | S2-01 |  |
+| S2-01, S2-05, S2-G1 | open |  |  | see plan |  |
+| S3-02 | done (looped lamp index, PS c208-c214; tools/lamp_index_test) | gi/s3-02 | 9f3e29d | S0-05 | S3-03 |
+| S3-01, S3-03 to S3-06, S3-G1 | open |  |  | see plan |  |
 | S4-01 to S4-03, S4-G1 | open |  |  | see plan |  |
 | S5-01 to S5-05, S5-G1 | open |  |  | see plan |  |
 | S6-01 to S6-04, S6-G1 | open |  |  | see plan |  |
 | GB-01 | done offline; in-game smoke `gbuffer-motion-smoke` open | gi/gb-01 | 0d37d81 | research 14 | WP2 now; WP7 after the smoke; WP8 |
 | GB-02 | in progress | gi/gb-02 |  | GB-01 |  |
+| X-R0MEMO | done (research 17: two back ends, server primary; plan.md and design.md updated) | gi/x-r0memo | 185c519 | - | R-05 fallback target, G-server decided: pass |
 | X-RTPP | done (research/16, wp/X-RTPP) | gi/x-rtpp | 286f91f | - | XR-04 base |
 | XR-04 | done (per-pixel delta shadow kernel, Vulkan ray queries; on gi/r-02) | gi/xr-04 | 28288c5 | X-RTPP, R-02 | XR-05, XR-06, XR-11 |
+| XR-09 | done (see wp/XR-09.md) | gi/xr-09 | 4a0c476 | XR-04 | see wp |
 | XR-05 | done (ps_3_0 temporal/atrous/upsample filter for the RT mask; tools/gi_pixel_filter_test) | gi/xr-05 | 1d72119 | XR-04 | XR-06 |
 | X-02, X-03, X-04 | open |  |  | adjacent, can start |
+
+Parked by research 17: S2-02, the S2-03 Apex wiring, the Direct3D 9 parts of S2-04 and S3-04, S5-04. d3d9 fallback = S1 direct + CPU roomAmbient + rig write + capsule occlusion.
 
 S0-12 answers (static RE, wp/S0-12.md, docs/engine/room-light-maps.md "Reflectance source"): floor colour per quarter-tile sits at tile section +0x80 (Apex runs the 0x0069FF20 tile loop itself); lot +0x3B8 is the LotLightingManager (+0x34 strobe room, so the S0-09 clamp is only the strobe flash; +0x30 black-lit); [0x01158D30] is the min-spec shaders flag (0 with Advanced Rendering on).
 

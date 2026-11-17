@@ -58,11 +58,6 @@ void RestoreVertexInput(VertexInputMark) {}
 #include "features/phys_tiles.h"
 // The dither offset of 2.12.4's Smooth light maps (RoomMapDither::Offset, interleaved gradient noise): 2.12.3 + RT has no
 // map dither (its relight passes 0), but the compose shader keeps the input, so the harness still checks it
-// (the harness hooks no device: the engine's vertex input mark, framework/d3d9_extra_hooks.cpp, has nothing to restore here)
-namespace ExtraHooks {
-VertexInputMark MarkVertexInput() { return {}; }
-void RestoreVertexInput(VertexInputMark) {}
-} // namespace ExtraHooks
 
 namespace RoomMapDither {
 inline float Offset(unsigned x, unsigned y) {

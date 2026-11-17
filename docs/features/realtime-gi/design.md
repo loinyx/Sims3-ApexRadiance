@@ -26,7 +26,7 @@ same maps from Direct3D 9 passes. Everything is off by default.
 | D4 | Shadow maps drawn from the game's own draws | **Static casters come from lot data** (the occluder proxy and the furniture blocker records). Meshes only replace a box once known; Sims are a dynamic layer | The camera's draw set is incomplete for rooms behind the camera, so shadows would appear and vanish during a pan [I, 03 §2; 08 §6] |
 | D5 | Screen-space GI on top | Screen-space terms are **multiplicative detail layers after the scene** only, full resolution, no temporal filter | No G-buffer; half resolution and temporal filters are recorded failures of the AO pass [V, 00 §9; 08 §2, §4, §8] |
 | D6 | Sims read the probe grid in patched shaders | **Sims and rig-lit objects are fed through their rig**, cached per model; outdoor rig-lit objects read a world-space lamp index instead of per-draw lamp picks. No SimSkin patch in the plan | Sims bind no room map and no directional map [V, 02 §4.1]; the rig write needs no shader work and covers `ps_2_0` families [12 §2.3] |
-| D7 | Everything in Direct3D 9 shader model 3 | **Three back ends behind one carrier.** Shader model 3 limits only the 32-bit game side. The bridge's 64-bit server runs on Vulkan, so the solves run there as compute shaders and hardware ray queries through a bridge export; the Direct3D 9 passes are the fallback | The frame is bound by the game's render thread and the cost of each call across the bridge; the GPU is underused [V, 00 §10]. Server work costs no game-thread time, and rays give exact visibility, true penumbrae and several bounces. See §3.9 |
+| D7 | Everything in Direct3D 9 shader model 3 | **Two back ends behind one carrier.** Shader model 3 limits only the 32-bit game side. The bridge's 64-bit server runs on Vulkan, so the solves run there as compute shaders and hardware ray queries through a bridge export; the server solve is primary; Direct3D 9 keeps direct light and a room ambient term as the fallback (research 17 §5) | The frame is bound by the game's render thread and the cost of each call across the bridge; the GPU is underused [V, 00 §10]. Server work costs no game-thread time, and rays give exact visibility, true penumbrae and several bounces. See §3.9 |
 
 ### Conflicts between research pages, resolved
 
@@ -135,9 +135,12 @@ fallback. A lamp in room A adds exactly 0 to texels of room B when no opening jo
 2. **Directional-map copies** rendered from the directional layers: indoor counters, objects and normal-mapped
    floors get coloured directional bounce with stock shaders. How the readers weight the four maps is checked
    before relying on the ambient-cube reading [O: S0-04].
-3. **Lamp index cells for outdoor rig-lit objects.** A cell is a tile a story; each holds up to 4 lamp indices. Cells
-   and the lamp table live in rows of the one float atlas, so the feature costs one sampler. Atlas scale, lot origin
-   and look constants sit in a reserved high pixel-constant block written once a frame [O: S0-G2 for a free range].
+3. **Lamp index cells for outdoor rig-lit objects.** A cell is 2 m of a world-space window; each holds up to 8 lamp entries
+   (index, visibility, visibility for an object set in a wall) and one texel with the ground share and the highest
+   lamp head [V, [S3-02](wp/S3-02.md); stories are open]. Cells and the lamp table live in rows of one float
+   texture, so the feature costs one sampler. Cell scale, window origin, strengths, the lot's ground height and the
+   ground atlas uv sit in pixel constants `c208`-`c214` of the reserved block `c208`-`c223`, written once a frame
+   [V, research 13; the runtime histogram is open]. A draw keeps one row: set in a wall, gate in a fence gap.
    The existing patched object copies read them; per-draw lamp picks and uploads stop for those families, the
    measured 1.5-2 ms of the per-draw fixes [I, 12 §2.1].
 4. **Per-Sim irradiance cube** bound in place of `DiffuseLightProbe` (later, S4) [O: S0-G2].
@@ -192,9 +195,8 @@ the result lands in the light buffer textures. The game's render thread spends a
 
 | Back end | Needs | Visibility | Role |
 |---|---|---|---|
-| `serverRays` | Bridge with the GI export; `VK_KHR_acceleration_structure` and `VK_KHR_ray_query` (RTX 20 and newer, RX 6000 and newer, Arc; the target is RTX 30 and newer) | Hardware ray queries in a compute shader | Reference quality; first choice |
-| `serverCompute` | Bridge with the GI export; any Vulkan 1.1 GPU | The same kernel without rays | No shader model 3 limits, no bridge calls for the passes |
-| `d3d9` | Nothing: native Direct3D 9, in-process DXVK, a bridge without the export | Shadow tiles, room scoping, plan field | Fallback |
+| `server` | Bridge with the GI export; two levels: `rays` (`VK_KHR_acceleration_structure` and `VK_KHR_ray_query`; RTX 20 and newer, RX 6000 and newer, Arc; the target is RTX 30 and newer) and `compute` (any Vulkan 1.1 GPU, the same kernel without rays) | Hardware ray queries in a compute shader, or the proxy-grid walk | Primary; reference quality; no shader model 3 limits, no bridge calls for the passes |
+| `d3d9` | Nothing: native Direct3D 9, in-process DXVK, a bridge without the export | S1 direct light, CPU `roomAmbient`, rig write from lamps, capsule occlusion in the AO pass (research 17 §5) | Fallback; no bounce light |
 
 **How.**
 
@@ -216,7 +218,7 @@ the result lands in the light buffer textures. The game's render thread spends a
 | Probe field for movers | Directional layers per tile | The same, or probes updated by rays where height matters (stairwells, split levels) | Server; DDGI-style probes only where the per-tile values fail |
 | Scheduling | Spread over render-thread frames inside a CPU budget | Asynchronous on the worker | Server |
 | Sim shadows | Capsule occlusion in the AO pass | Capsules in the ray scene | Either; measured in S3 |
-| AO, contact shadows, per-pixel lamp shadows | The AO pass and post-scene layers | Need this frame's depth on the ray-tracing device, or a ray query inside DXVK's translated shaders: a patched DXVK | Not in this tier; a decision note only [O: R-08] |
+| AO, contact shadows, per-pixel lamp shadows | The AO pass and post-scene layers | Need this frame's depth on the ray-tracing device, or a ray query inside DXVK's translated shaders: a patched DXVK | Research 16, gate G-dxvk (a per-pixel tier uses DXVK's own device through a patched build; the package builds DXVK from source) |
 
 **Considered and ranked low.** Per-pixel ReSTIR, ray-traced GI with denoisers (NRD) and DLSS all need per-pixel
 normals, albedo and motion vectors, which a forward Direct3D 9 game does not have [V, 10 §0; 12 §7.4]; a lot has
@@ -255,7 +257,7 @@ registered and no resource is created.
 | Key | Type, default | Values | Stage |
 |---|---|---|---|
 | `enabled` | bool, false | Master switch | S1 |
-| `backend` | enum, `auto` | `auto`, `serverRays`, `serverCompute`, `d3d9` | S2 |
+| `backend` | enum, `auto` | `auto`, `server`, `d3d9` (`serverRays` / `serverCompute` developer overrides) | S2 |
 | `lots` | enum, `active` | `active`, `activeAndNeighbours`, `all` | S1, S4 |
 | `solveCap` | enum, `off` | `off`, `class0`, `hold` | S1 |
 | `nightOnly` | bool, true | Hand the lot back to the game's solve by day; false needs `windowLights` | S1, S4 |
@@ -376,7 +378,8 @@ pass or fail; the others need a reviewer.
 | Thumbnail capture waits forever on a capped lot | Exemption in §3.7; test saves a lot to the library |
 | A second Vulkan device beside DXVK misbehaves on some drivers, or the upload stalls the command loop | R-01 and R-03 prove it on the bridge alone before any GI code; `backend = d3d9` always works |
 | The bridge patch must follow upstream; a solve bug stalls the server, not the game | Small export surface; feature probe; watchdog that drops to `d3d9` |
-| Back ends drift apart | Parity rule and Q12; one data model |
+| Back ends drift apart (direct light only) | Parity rule and Q12; one data model |
+| A player without the bridge gets no bounce light | Fallback of research 17 §5; the game's own solve lights the lot if S1 does not pass G-stage1 there |
 | VRAM on 6-8 GB laptops | Layer and tile counts follow free VRAM; measured in S4 |
 | Other game builds and renderers | Pattern scans; the feature stays off where a site is not found |
 

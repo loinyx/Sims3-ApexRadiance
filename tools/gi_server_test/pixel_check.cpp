@@ -9,13 +9,20 @@
 // samples of the emitter balls); 16 accumulated frames equal to the 16-sample dispatch; no self-shadow: a pixel the
 // drawn surfaces leave lit is lit, also on the chair inside its box and on the Sim inside its capsules.
 // Printed: the time of a frame and its rays. Read-only: prints to stdout, writes no file.
+//   --bench <frames>  no checks: the dispatch's time by device timestamps, the kernel and its variants (run.ps1 builds them)
 //   --device <text>  the device whose name holds <text>      --size <w> <h>  the depth's size (1920 1080)
 #define main SolveMain // check.cpp's scene, device and buffer code as they are (other packages edit that file)
 #include "check.cpp"
 #undef main
 #include <atomic>
 #include <thread>
-#include "pixel_shadow.h" // SPIR-V of pixel_shadow.comp, built by run.ps1
+#include "pixel_shadow.h" // SPIR-V of pixel_shadow.comp and of its variants for --bench, built by run.ps1
+#include "px_group16.h"
+#include "px_lean.h"
+#include "px_stop1.h"
+#include "px_stop2.h"
+#include "px_stop3.h"
+#include "px_trace0.h"
 
 namespace {
 using RtLampProxy::Tri;
@@ -44,6 +51,7 @@ struct GpuLamp {
 struct Pixel {
     float mul[4], pos[4], nrm[4];
     uint32_t sel, u, d, rays;
+    float num[4], den[4];
 };
 struct PixPush {
     float inv[16], camA[4];
@@ -106,6 +114,7 @@ PScene BuildPixelScene(int w, int h) {
     Box sim{{1e30f, 1e30f, 1e30f, 0}, {-1e30f, -1e30f, -1e30f, 0}};
     for (const Capsule& c : ps.capsules)
         for (int k = 0; k < 3; k++) sim.lo[k] = std::min({sim.lo[k], c.a[k] - c.r, c.b[k] - c.r}), sim.hi[k] = std::max({sim.hi[k], c.a[k] + c.r, c.b[k] + c.r});
+    sim.lo[3] = 1.0f; // the Sim counts as moved this frame, the chair does not
     ps.casters.push_back(sim);
     // check.cpp's three lamps and four more: more than the cap in view, one behind a door, two behind walls
     ps.lamps = sc.lamps;
@@ -275,7 +284,9 @@ struct Kernel {
             VkDeviceAddress at = 0;
             const Buf verts = DeviceBuf(g, trash, tris.size() * sizeof(Tri), in, tris.data(), tris.size() * sizeof(Tri));
             VkAccelerationStructureGeometryKHR geo{VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR};
-            geo.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+            // Opaque: the traversal confirms a triangle itself. Without the flag every triangle on a ray came back to the
+            // shader as a candidate (the slow path of the first version, which the bench still runs through its ray flag)
+            geo.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR, geo.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
             geo.geometry.triangles = {VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR};
             geo.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT, geo.geometry.triangles.vertexStride = 12;
             geo.geometry.triangles.vertexData.deviceAddress = Addr(g, verts), geo.geometry.triangles.maxVertex = static_cast<uint32_t>(tris.size()) * 3 - 1;
@@ -321,13 +332,16 @@ struct Kernel {
         out = DeviceBuf(g, trash, static_cast<VkDeviceSize>(pixels) * sizeof(Pixel), sb);
         stats = DeviceBuf(g, trash, 16, sb);
         back = MakeBuf(g, trash, out.size + 16, 0);
-        const Buf bufs[6] = {DeviceBuf(g, trash, dr.depth.size() * 4, sb, dr.depth.data(), dr.depth.size() * 4),
+        std::vector<uint32_t> motion(dr.cls.size()); // the Sim is class 3 (skinned), the rest 0
+        for (size_t i = 0; i < motion.size(); i++) motion[i] = dr.cls[i] == kSim ? 3 : 0;
+        const Buf bufs[7] = {DeviceBuf(g, trash, dr.depth.size() * 4, sb, dr.depth.data(), dr.depth.size() * 4),
                              DeviceBuf(g, trash, lamps.size() * sizeof(GpuLamp), sb, lamps.data(), lamps.size() * sizeof(GpuLamp)),
                              DeviceBuf(g, trash, ps.capsules.size() * sizeof(Capsule), sb, ps.capsules.data(), ps.capsules.size() * sizeof(Capsule)),
-                             DeviceBuf(g, trash, ps.casters.size() * sizeof(Box), sb, ps.casters.data(), ps.casters.size() * sizeof(Box)), out, stats};
+                             DeviceBuf(g, trash, ps.casters.size() * sizeof(Box), sb, ps.casters.data(), ps.casters.size() * sizeof(Box)), out, stats,
+                             DeviceBuf(g, trash, motion.size() * 4, sb, motion.data(), motion.size() * 4)};
 
         std::vector<VkDescriptorSetLayoutBinding> binds = {{0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}};
-        for (uint32_t i = 1; i <= 6; i++) binds.push_back({i, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr});
+        for (uint32_t i = 1; i <= 7; i++) binds.push_back({i, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr});
         VkDescriptorSetLayoutCreateInfo lci{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
         lci.bindingCount = static_cast<uint32_t>(binds.size()), lci.pBindings = binds.data();
         VkDescriptorSetLayout dsl;
@@ -336,7 +350,7 @@ struct Kernel {
         VkPipelineLayoutCreateInfo plci{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
         plci.setLayoutCount = 1, plci.pSetLayouts = &dsl, plci.pushConstantRangeCount = 1, plci.pPushConstantRanges = &pcr;
         Vk(vkCreatePipelineLayout(g.dev, &plci, nullptr, &layout), "vkCreatePipelineLayout");
-        const VkDescriptorPoolSize sizes[2] = {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 6}, {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1}};
+        const VkDescriptorPoolSize sizes[2] = {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 7}, {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1}};
         VkDescriptorPoolCreateInfo dpci{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         dpci.maxSets = 1, dpci.poolSizeCount = 2, dpci.pPoolSizes = sizes;
         VkDescriptorPool dpool;
@@ -344,28 +358,20 @@ struct Kernel {
         VkDescriptorSetAllocateInfo dsai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
         dsai.descriptorPool = dpool, dsai.descriptorSetCount = 1, dsai.pSetLayouts = &dsl;
         Vk(vkAllocateDescriptorSets(g.dev, &dsai, &set), "vkAllocateDescriptorSets");
-        VkDescriptorBufferInfo infos[6];
+        VkDescriptorBufferInfo infos[7];
         VkWriteDescriptorSetAccelerationStructureKHR asw{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR};
         asw.accelerationStructureCount = 1, asw.pAccelerationStructures = &tlas;
-        VkWriteDescriptorSet writes[7]{};
-        for (uint32_t i = 0; i < 7; i++) {
+        VkWriteDescriptorSet writes[8]{};
+        for (uint32_t i = 0; i < 8; i++) {
             writes[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, writes[i].dstSet = set, writes[i].dstBinding = i, writes[i].descriptorCount = 1;
             if (i == 0) writes[i].pNext = &asw, writes[i].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
             else infos[i - 1] = {bufs[i - 1].b, 0, VK_WHOLE_SIZE}, writes[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, writes[i].pBufferInfo = &infos[i - 1];
         }
-        vkUpdateDescriptorSets(g.dev, 7, writes, 0, nullptr);
-        VkShaderModuleCreateInfo smci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-        smci.codeSize = sizeof pixel_shadow, smci.pCode = pixel_shadow;
-        VkShaderModule mod;
-        Vk(vkCreateShaderModule(g.dev, &smci, nullptr, &mod), "vkCreateShaderModule");
-        VkComputePipelineCreateInfo cpci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
-        cpci.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_COMPUTE_BIT, mod, "main", nullptr};
-        cpci.layout = layout;
-        Vk(vkCreateComputePipelines(g.dev, VK_NULL_HANDLE, 1, &cpci, nullptr, &pipeline), "vkCreateComputePipelines");
-        trash.push_back([this, dsl, dpool, mod] {
-            vkDestroyPipeline(g.dev, pipeline, nullptr), vkDestroyShaderModule(g.dev, mod, nullptr), vkDestroyDescriptorPool(g.dev, dpool, nullptr);
-            vkDestroyPipelineLayout(g.dev, layout, nullptr), vkDestroyDescriptorSetLayout(g.dev, dsl, nullptr);
+        vkUpdateDescriptorSets(g.dev, 8, writes, 0, nullptr);
+        trash.push_back([this, dsl, dpool] {
+            vkDestroyDescriptorPool(g.dev, dpool, nullptr), vkDestroyPipelineLayout(g.dev, layout, nullptr), vkDestroyDescriptorSetLayout(g.dev, dsl, nullptr);
         });
+        pipeline = Variant(pixel_shadow, sizeof pixel_shadow);
 
         // The inverse view-projection in closed form (columns): world / view depth = right x + up y + forward + eye / view depth
         const float k = -(kFar - kNear) / (kNear * kFar);
@@ -381,9 +387,70 @@ struct Kernel {
         for (auto it = trash.rbegin(); it != trash.rend(); ++it) (*it)();
     }
 
-    // One dispatch; the copy back is outside the time. stat: rays traced, pixels that traced
-    std::vector<Pixel> Dispatch(uint32_t frame, uint32_t samples, float radiusScale, double* sec = nullptr, uint32_t* stat = nullptr) {
+    // A pipeline of one build of pixel_shadow.comp
+    VkPipeline Variant(const uint32_t* code, size_t bytes) {
+        VkShaderModuleCreateInfo smci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+        smci.codeSize = bytes, smci.pCode = code;
+        VkShaderModule mod;
+        Vk(vkCreateShaderModule(g.dev, &smci, nullptr, &mod), "vkCreateShaderModule");
+        VkComputePipelineCreateInfo cpci{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+        cpci.stage = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_COMPUTE_BIT, mod, "main", nullptr};
+        cpci.layout = layout;
+        VkPipeline p;
+        Vk(vkCreateComputePipelines(g.dev, VK_NULL_HANDLE, 1, &cpci, nullptr, &p), "vkCreateComputePipelines");
+        trash.push_back([dev = g.dev, p, mod] { vkDestroyPipeline(dev, p, nullptr), vkDestroyShaderModule(dev, mod, nullptr); });
+        return p;
+    }
+
+    // The device's own time of the dispatch alone: a timestamp before and after each of n one-sample frames, so the
+    // submit, the wait and the copies stay outside. gapMs < 0: all frames in one submit (the device stays busy, as
+    // inside a game's frame). Else a submit a frame with that pause before it (an idle device lowers its clock).
+    // Returns the milliseconds of each frame; wall: submit to idle of each submit.
+    std::vector<double> Bench(VkPipeline p, uint32_t group, uint32_t n, int gapMs, std::vector<double>* wall = nullptr) {
+        VkQueryPoolCreateInfo qci{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+        qci.queryType = VK_QUERY_TYPE_TIMESTAMP, qci.queryCount = 2 * n;
+        VkQueryPool qp;
+        Vk(vkCreateQueryPool(g.dev, &qci, nullptr, &qp), "vkCreateQueryPool");
+        pc.samples = 1, pc.radiusScale = 1.0f;
+        const auto frames = [&](VkCommandBuffer cb, uint32_t from, uint32_t to) {
+            vkCmdResetQueryPool(cb, qp, 2 * from, 2 * (to - from));
+            vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, p);
+            vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &set, 0, nullptr);
+            for (uint32_t f = from; f < to; f++) {
+                pc.frame = f;
+                vkCmdPushConstants(cb, layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, &pc);
+                vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, qp, 2 * f);
+                vkCmdDispatch(cb, (pc.width / 4 + group - 1) / group, (pc.height / 4 + group - 1) / group, 1);
+                vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, qp, 2 * f + 1);
+            }
+        };
+        if (gapMs < 0) {
+            const double s = Run(g, [&](VkCommandBuffer cb) { frames(cb, 0, n); });
+            if (wall) wall->push_back(s * 1e3);
+        } else
+            for (uint32_t f = 0; f < n; f++) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(gapMs));
+                const double s = Run(g, [&](VkCommandBuffer cb) { frames(cb, f, f + 1); });
+                if (wall) wall->push_back(s * 1e3);
+            }
+        std::vector<uint64_t> t(2 * n);
+        Vk(vkGetQueryPoolResults(g.dev, qp, 0, 2 * n, t.size() * 8, t.data(), 8, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT), "vkGetQueryPoolResults");
+        vkDestroyQueryPool(g.dev, qp, nullptr);
+        VkPhysicalDeviceProperties props;
+        vkGetPhysicalDeviceProperties(g.pd, &props);
+        std::vector<double> ms;
+        for (uint32_t f = 0; f < n; f++) ms.push_back(static_cast<double>(t[2 * f + 1] - t[2 * f]) * props.limits.timestampPeriod * 1e-6);
+        return ms;
+    }
+
+    // One dispatch; the copy back is outside the time. stat: rays traced, pixels that traced. sec: submit to idle;
+    // gpuMs: the dispatch alone by the device's timestamps
+    std::vector<Pixel> Dispatch(uint32_t frame, uint32_t samples, float radiusScale, double* sec = nullptr, uint32_t* stat = nullptr, double* gpuMs = nullptr) {
         pc.frame = frame, pc.samples = samples, pc.radiusScale = radiusScale;
+        VkQueryPoolCreateInfo qci{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+        qci.queryType = VK_QUERY_TYPE_TIMESTAMP, qci.queryCount = 2;
+        VkQueryPool qp;
+        Vk(vkCreateQueryPool(g.dev, &qci, nullptr, &qp), "vkCreateQueryPool");
         const double s = Run(g, [&](VkCommandBuffer cb) {
             vkCmdFillBuffer(cb, stats.b, 0, VK_WHOLE_SIZE, 0);
             VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
@@ -392,8 +459,17 @@ struct Kernel {
             vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
             vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &set, 0, nullptr);
             vkCmdPushConstants(cb, layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, &pc);
+            vkCmdResetQueryPool(cb, qp, 0, 2);
+            vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, qp, 0);
             vkCmdDispatch(cb, (pc.width / 4 + 7) / 8, (pc.height / 4 + 7) / 8, 1);
+            vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, qp, 1);
         });
+        uint64_t t[2];
+        Vk(vkGetQueryPoolResults(g.dev, qp, 0, 2, sizeof t, t, 8, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT), "vkGetQueryPoolResults");
+        vkDestroyQueryPool(g.dev, qp, nullptr);
+        VkPhysicalDeviceProperties props;
+        vkGetPhysicalDeviceProperties(g.pd, &props);
+        if (gpuMs) *gpuMs = static_cast<double>(t[1] - t[0]) * props.limits.timestampPeriod * 1e-6;
         Run(g, [&](VkCommandBuffer cb) {
             const VkBufferCopy all{0, 0, out.size}, tail{0, out.size, 16};
             vkCmdCopyBuffer(cb, out.b, back.b, 1, &all), vkCmdCopyBuffer(cb, stats.b, back.b, 1, &tail);
@@ -508,10 +584,11 @@ void CheckOcclusion(const PScene& ps, const Drawn& dr, const std::vector<Pixel>&
 #ifndef PIXEL_CHECK_NO_MAIN // (mesh_check.cpp takes the scene, the kernel and the reference)
 int main(int argc, char** argv) {
     std::string want;
-    int w = 1920, h = 1080;
+    int w = 1920, h = 1080, bench = 0;
     for (int i = 1; i < argc; i++) {
         const std::string a = argv[i];
         if (a == "--device" && i + 1 < argc) want = argv[++i];
+        else if (a == "--bench" && i + 1 < argc) bench = std::clamp(std::atoi(argv[++i]), 8, 4096);
         else if (a == "--size" && i + 2 < argc) w = std::clamp(std::atoi(argv[i + 1]), 64, 3840) & ~3, h = std::clamp(std::atoi(argv[i + 2]), 64, 2160) & ~3, i += 2;
         else {
             std::printf("FAIL  unknown argument %s\n", a.c_str());
@@ -530,7 +607,49 @@ int main(int argc, char** argv) {
     const uint32_t cap = static_cast<uint32_t>(gw) * gh * kMaxLamps;
     std::printf("  depth %d x %d, guide %d x %d; static %zu + %zu triangles, delta %zu triangles + %zu capsules; %zu lamps, at most %u a pixel; cap %u rays a frame\n", w, h, gw, gh,
                 ps.walls.tris.size(), ps.boxes.size(), ps.detail.size(), ps.capsules.size(), ps.lamps.size(), kMaxLamps, cap);
-    {
+    if (bench) {
+        // The dispatch's time by the device's timestamps, the first eighth of the frames of each run left out (warm-up)
+        Kernel kernel(g, ps, dr);
+        uint32_t stat[2];
+        kernel.Dispatch(0, 1, 1.0f, nullptr, stat);
+        std::printf("  bench: %d frames a run, %u rays a frame; ms of the dispatch alone by device timestamps (least / median / 90 %%), wall = submit to idle of a submit\n", bench, stat[0]);
+        struct Variant {
+            const char* name;
+            const uint32_t* code;
+            size_t bytes;
+            uint32_t group;
+        };
+        const Variant variants[] = {{"first version (every candidate to the shader)", px_trace0, sizeof px_trace0, 8},
+                                    {"kernel: all triangles in the traversal", pixel_shadow, sizeof pixel_shadow, 8},
+                                    {"kernel, groups of 16 x 16", px_group16, sizeof px_group16, 16},
+                                    {"kernel, no counters, 16 bytes out", px_lean, sizeof px_lean, 8},
+                                    {"no rays: guide + lamps + reach", px_stop3, sizeof px_stop3, 8},
+                                    {"no rays: guide + lamps", px_stop2, sizeof px_stop2, 8},
+                                    {"no rays: guide", px_stop1, sizeof px_stop1, 8}};
+        const auto row = [&](std::vector<double> ms) {
+            ms.erase(ms.begin(), ms.begin() + ms.size() / 8);
+            std::sort(ms.begin(), ms.end());
+            std::printf(" %7.3f /%7.3f /%7.3f", ms[0], ms[ms.size() / 2], ms[ms.size() * 9 / 10]);
+        };
+        std::vector<VkPipeline> pipes;
+        for (const Variant& v : variants) pipes.push_back(kernel.Variant(v.code, v.bytes));
+        for (int round = 0; round < 3; round++) // again: a run another process disturbed shows as a row that differs
+            for (size_t i = 0; i < pipes.size(); i++) {
+                std::vector<double> all, wall, wallIdle;
+                std::printf("  %-48s one submit", variants[i].name);
+                row(kernel.Bench(pipes[i], variants[i].group, static_cast<uint32_t>(bench), -1, &all));
+                std::printf(" wall / frames %6.3f", all[0] / bench); // (a check of the timestamps: it holds the submit too)
+                std::printf("  | a submit a frame");
+                row(kernel.Bench(pipes[i], variants[i].group, static_cast<uint32_t>(bench), 0, &wall));
+                std::printf(" wall");
+                row(wall);
+                std::printf("  | 16 ms idle before each");
+                row(kernel.Bench(pipes[i], variants[i].group, static_cast<uint32_t>(std::min(bench, 64)), 16, &wallIdle));
+                std::printf(" wall");
+                row(wallIdle);
+                std::printf("\n");
+            }
+    } else {
         Kernel kernel(g, ps, dr);
         kernel.Dispatch(0, 1, 1.0f); // (unprinted: the device's first pass runs slow)
         const std::vector<Pixel> point = kernel.Dispatch(0, 1, 0.0f), ball = kernel.Dispatch(0, 16, 1.0f);
@@ -606,28 +725,79 @@ int main(int argc, char** argv) {
         // 4. Frames: the cap, and 16 of them against the 16-sample dispatch
         {
             std::vector<Counts> sum(ball.size());
-            std::vector<double> ms;
+            std::vector<double> gpu;
+            std::vector<double> ms, sums(ball.size() * 9); // a pixel: num, den, the multiplier, 3 channels each
             uint32_t most = 0, mostPixels = 0;
             bool perPixel = true;
             std::vector<Pixel> first;
             for (uint32_t f = 0; f < 16; f++) {
-                double sec;
+                double sec, gpuMs;
                 uint32_t stat[2];
-                const std::vector<Pixel> px = kernel.Dispatch(f, 1, 1.0f, &sec, stat);
+                const std::vector<Pixel> px = kernel.Dispatch(f, 1, 1.0f, &sec, stat, &gpuMs);
+                gpu.push_back(gpuMs);
                 uint32_t rays = 0;
+                for (size_t i = 0; i < px.size(); i++)
+                    for (int c = 0; c < 3; c++) sums[i * 9 + c] += px[i].num[c], sums[i * 9 + 3 + c] += px[i].den[c], sums[i * 9 + 6 + c] += px[i].mul[c] / 16.0;
                 for (size_t i = 0; i < px.size(); i++) sum[i].u += px[i].u, sum[i].d += px[i].d, rays += px[i].rays, perPixel = perPixel && px[i].rays <= kMaxLamps;
                 perPixel = perPixel && rays == stat[0];
                 most = std::max(most, stat[0]), mostPixels = std::max(mostPixels, stat[1]);
                 ms.push_back(sec * 1e3);
                 if (f == 0) first = px;
             }
-            long same = 0;
-            for (size_t i = 0; i < ball.size(); i++) same += sum[i].u == ball[i].u && sum[i].d == ball[i].d;
-            std::sort(ms.begin(), ms.end());
-            std::printf("  a frame: %u rays at most = %.1f %% of the cap, from %.1f %% of the pixels; %.2f ms at best, %.2f ms median (submit to idle, shared machine) = %.0f M rays a second\n",
-                        most, 100.0 * most / cap, 100.0 * mostPixels / (gw * gh), ms[0], ms[8], most / ms[0] / 1e3);
+            // Class 3 pixels (the Sim's) hold one point: their 16 frames are 16 times the first (8 bits a lamp hold it)
+            long same = 0, fixed = 0, fixedSame = 0, fixedTraced = 0;
+            double worstSums = 0.0, worstMean = 0.0; // against the 16-sample multiplier: from the two sums, from the mean of 16 multipliers
+            for (size_t i = 0; i < ball.size(); i++) {
+                const bool walks = !(Drew(first[i]) && dr.cls[static_cast<size_t>(first[i].pos[3])] == kSim);
+                for (int c = 0; c < 3 && walks; c++) {
+                    worstSums = std::max(worstSums, std::fabs(1.0 - sums[i * 9 + c] / (kA * 16.0 + sums[i * 9 + 3 + c]) - ball[i].mul[c]));
+                    worstMean = std::max(worstMean, std::fabs(sums[i * 9 + 6 + c] - ball[i].mul[c]));
+                }
+                if (!walks)
+                    fixed++, fixedTraced += first[i].rays != 0, fixedSame += sum[i].u == first[i].u * 16 && sum[i].d == first[i].d * 16;
+                else same += sum[i].u == ball[i].u && sum[i].d == ball[i].d;
+            }
+            std::sort(ms.begin(), ms.end()), std::sort(gpu.begin(), gpu.end());
+            // (the submit's time is the harness's: a submit and a wait a frame on a device that idles between them;
+            // --bench measures the dispatch properly)
+            std::printf("  a frame: %u rays at most = %.1f %% of the cap, from %.1f %% of the pixels; the dispatch by device timestamps %.3f ms at best, %.3f ms median; its submit to idle %.2f ms "
+                        "at best, %.2f ms median\n",
+                        most, 100.0 * most / cap, 100.0 * mostPixels / (gw * gh), gpu[0], gpu[8], ms[0], ms[8]);
+            // The moved bit against the reach test on the CPU from the kernel's own guide (its ray origin). Float steps
+            // differ at a box's edge, so 99.9 %
+            long moved = 0, movedSame = 0, movedTraced = 0, traced = 0, drawn = 0;
+            const Box& sim = ps.casters.back();
+            for (const Pixel& p : first) {
+                if (!Drew(p)) continue;
+                const V3 P = At(p.pos), O = P + At(p.nrm) * (kBias * (1.0f + 0.25f * Len(ps.eye - P)));
+                bool want = false;
+                for (uint32_t k = 0; k < kMaxLamps; k++) {
+                    const uint32_t id = p.sel >> (8 * k) & 0xFF;
+                    if (id == 0xFF) continue;
+                    const Lamp& l = ps.lamps[id];
+                    float n = 0.0f, f = 1.0f; // the segment O -> lamp against the Sim's bounds grown by the emitter's radius
+                    for (int a = 0; a < 3; a++) {
+                        const float o = a == 0 ? O.x : a == 1 ? O.y : O.z;
+                        float d = l.pos[a] - o;
+                        if (std::fabs(d) < 1e-9f) d = 1e-9f;
+                        const float t0 = (sim.lo[a] - l.radius - o) / d, t1 = (sim.hi[a] + l.radius - o) / d;
+                        n = std::max(n, std::min(t0, t1)), f = std::min(f, std::max(t0, t1));
+                    }
+                    want = want || n <= f;
+                }
+                const bool got = p.num[3] != 0.0f;
+                drawn++, moved += got, movedSame += got == want, movedTraced += got && p.rays, traced += p.rays != 0;
+            }
+            std::printf("  a moved caster in reach: %ld pixels of the %ld that traced\n", moved, traced);
+            Check(moved > 0 && moved < traced && movedTraced == moved && movedSame >= static_cast<long>(drawn * 0.999),
+                  "the moved bit: on pixels that traced only, not on the chair's alone, as the reach test on the CPU");
             Check(perPixel && most <= cap && most > 0, "rays: at most 4 a pixel and frame, the counter equals the pixels' sum, the frame within the cap");
-            Check(same == static_cast<long>(ball.size()), "16 accumulated frames equal the 16-sample dispatch on every pixel");
+            std::printf("  16 frames against the 16-sample multiplier: off by at most %.3f/255 from the two sums, %.1f/255 from the mean of the frames' multipliers\n", worstSums * 255.0,
+                        worstMean * 255.0);
+            Check(worstSums * 255.0 < 0.01, "the two sums of 16 frames give the 16-sample multiplier");
+            Check(same == static_cast<long>(ball.size()) - fixed, "16 accumulated frames equal the 16-sample dispatch on every pixel outside class 3");
+            std::printf("  class 3: %ld pixels, %ld of them traced\n", fixed, fixedTraced);
+            Check(fixedSame == fixed && fixedTraced > 0, "a class 3 pixel traces the same point in each of 16 frames");
             const std::vector<Pixel> again = kernel.Dispatch(0, 1, 1.0f);
             Check(!std::memcmp(again.data(), first.data(), first.size() * sizeof(Pixel)), "a frame traced again is byte-equal");
         }
