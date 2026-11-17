@@ -1088,10 +1088,17 @@ bool EnsureTemporal(IDirect3DDevice9* dev) {
 #endif
 }
 
+// (developer builds) world frames in a row without a pass; once at 600 the gate that held the last one is logged
+uint32_t g_held = 0;
+void Held(const char* why) {
+    if (!kPublicBuild && ++g_held == 600) LOG_INFO(std::string("[AO] waiting 600 world frames without a pass: ") + why);
+}
+
 void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* bb, IDirect3DPixelShader9* psGtao) {
     SavedState saved;
-    if (!saved.Capture(dev)) return;
-    if (FAILED(dev->StretchRect(bb, nullptr, g.colorSurf, nullptr, D3DTEXF_NONE))) return;
+    if (!saved.Capture(dev)) return Held("state capture failed");
+    if (FAILED(dev->StretchRect(bb, nullptr, g.colorSurf, nullptr, D3DTEXF_NONE))) return Held("StretchRect of the scene into the colour copy failed");
+    g_held = 0;
     SetPassStates(dev);
 
     const float W = static_cast<float>(g.width), H = static_cast<float>(g.height);
@@ -1254,17 +1261,17 @@ void AoEffect(IDirect3DDevice9* dev) {
     if (!g.ready || (g.p.strength <= 0.0f && !g.showShade && !CaptureBurst::ShadeAlone())) return;
     if (!WorldSession::InWorld()) return; // main menu, load screens: never shaded
     IDirect3DTexture9* depth = DepthShare::Texture();
-    if (!depth) return;
+    if (!depth) return Held("no shared scene depth");
     // the scene depth must be the one bound right now (not a reflection or UI pass)
     IDirect3DSurface9* ds = nullptr;
     ExtraHooks::RawGetDepthStencilSurface(dev, &ds);
     const bool sceneDepth = ds && ds == DepthShare::Surface();
     if (ds) ds->Release();
-    if (!sceneDepth) return;
+    if (!sceneDepth) return Held("the bound depth-stencil is not the shared scene depth");
     IDirect3DPixelShader9* psGtao = GtaoShader(dev, g.p.quality);
-    if (!psGtao) return;
+    if (!psGtao) return Held("no GTAO shader");
     IDirect3DSurface9* bb = nullptr;
-    if (FAILED(dev->GetRenderTarget(0, &bb)) || !bb) return;
+    if (FAILED(dev->GetRenderTarget(0, &bb)) || !bb) return Held("no render target 0");
     D3DSURFACE_DESC bd{};
     bb->GetDesc(&bd);
     if (bd.Width != g.width || bd.Height != g.height) { // the back buffer changed without a Reset: rebuild next frame

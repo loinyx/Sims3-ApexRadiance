@@ -257,6 +257,7 @@ struct MeshCasters {
     uint32_t ticket = 0;  // the mesh fetch in flight
     uint64_t lite = 0;
     uint32_t fetchFrames = 0;
+    uint32_t hookWaits = 0; // frames waited for the object hooks (LampMarkFilter installs them after the first frames)
     bool seedDue = false; // (MC-4) every known object out again at the next send
     uint64_t seedLot = 0; // the lot the last lot-entry seed was for
 } g_mesh;
@@ -312,6 +313,9 @@ void MeshTilesFrame() {
 void MeshFrame() {
     if (!g_options.meshCasters || g_mesh.off) return;
     if (!g_mesh.started) {
+        // the first frames run while Night Lights installs (its LampMarkFilter puts the object hooks in ~0.3 s later):
+        // wait for them, off only when they are still missing after ~600 frames
+        if (!ObjectLegs::Hooked() && ++g_mesh.hookWaits < 600) return;
         g_mesh.started = true;
         const HMODULE bridge = GetModuleHandleW(L"d3d9.dll");
         g_mesh.open = bridge ? reinterpret_cast<PFN_GiOpen>(GetProcAddress(bridge, "RemixBridge_GiOpen")) : nullptr;
