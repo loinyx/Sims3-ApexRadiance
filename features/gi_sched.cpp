@@ -100,6 +100,7 @@ void Scheduler::Drop(uintptr_t id) {
 
 void Scheduler::Load(const std::vector<LampIn>& lamps, uint32_t frame) {
     Clear();
+    buildPending_ = true, buildMs_ = -1e18; // the lot's scene goes first (no edit box: it dirties nothing more)
     for (const LampIn& in : lamps) {
         Lamp& l = lamps_[in.id];
         l.in = in;

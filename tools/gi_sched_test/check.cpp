@@ -174,12 +174,12 @@ static void WallBurst() {
         if (i % 6 == 0) r.s.OnBuildEdit(wall, r.ms);
         r.Step();
     }
-    CHECK(r.Issued() == issued && r.s.Stats().sceneSubmits == 0, "nothing while edits go on");
+    CHECK(r.Issued() == issued && r.s.Stats().sceneSubmits == 1, "nothing while edits go on (the load's scene only)");
     const uint32_t last = r.frame;
-    while (r.s.Stats().sceneSubmits == 0 && r.frame < last + 100) r.Step();
+    while (r.s.Stats().sceneSubmits == 1 && r.frame < last + 100) r.Step();
     const double idleMs = (r.frame - last + 5) * kFrameMs; // (the last edit was 5 frames before `last`)
     CHECK(idleMs >= kBuildIdleMs && idleMs < kBuildIdleMs + 2 * kFrameMs, "scene sent %.0f ms after the last edit", idleMs);
-    CHECK(r.fake.scenes == 1, "one scene submit for the burst: %u", r.fake.scenes);
+    CHECK(r.fake.scenes == 2, "one scene submit for the load, one for the burst: %u", r.fake.scenes);
     CHECK(r.s.Stats().issued[static_cast<int>(Cause::Build)] == 2, "the scene, then the 2 lamps whose box holds the edit: %llu", r.s.Stats().issued[2]);
     r.Settle();
     // a build edit with no box: every lamp with a layer

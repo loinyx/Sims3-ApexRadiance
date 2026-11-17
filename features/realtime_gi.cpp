@@ -23,6 +23,7 @@
 #include <cmath>
 #include <cstring>
 #include <format>
+#include <functional>
 #include <unordered_map>
 #include <unordered_set>
 #include <windows.h>
@@ -43,48 +44,133 @@ DWORD g_lastLog = 0;
 Options g_options;       // set by Start
 std::string g_startLine; // logged at the first snapshot in a world (it carries lots=)
 
-// shortcut: no bridge exports the GI interface yet, so the server back ends are never available; the server packages
-// (R-02 onward) replace this with the export lookup in the bridge client d3d9.dll.
-bool ServerExport() { return false; }
-bool ServerRayQuery() { return false; }
+// The bridge's GI export (R-03 / R-04, patch 0018 of native/remix-bridge: RemixBridge_GiOpen, GiSubmit, GiSolve, GiPoll,
+// GiCancel in the bridge client d3d9.dll) as the scheduler's back end. Wire layouts mirrored from the patch's util_gi.h.
+struct GiLampWire {
+    float position[3];
+    float radius;
+    float colour[3];
+    uint32_t reserved;
+    float boxMin[3], boxMax[3]; // the solve's region; min > max: the whole scene
+};
+static_assert(sizeof(GiLampWire) == 56, "GiLamp of util_gi.h");
+constexpr uint32_t kGiSubmitScene = 1, kGiSubmitLamps = 2, kGiSubmitMore = 0x100, kGiSlotBytes = 448 * 1024, kGiLevelStarting = 0xffffffffu;
 
-// The bridge's GI export as the scheduler's back end (R-03 / R-04: RemixBridge_GiSubmit, GiSolve, GiPoll, GiCancel in the
-// bridge client d3d9.dll; util_gi.h there holds the blob layouts).
-// shortcut: the scene blob, the layer textures and the lamp-to-layer index are R-05's; until then SubmitScene and Solve
-// refuse, so nothing is issued. Poll and Cancel are the final form.
 struct BridgeBackend final : GiSched::Backend {
+    using OpenFn = HRESULT(__stdcall*)(uint32_t* level);
     using SubmitFn = HRESULT(__stdcall*)(const void* data, uint32_t size, uint32_t kind, uint32_t* ticket);
     using SolveFn = HRESULT(__stdcall*)(IDirect3DTexture9* texture, uint32_t layer, uint32_t sceneTicket, uint32_t* ticket);
     using TicketFn = HRESULT(__stdcall*)(uint32_t ticket);
+    OpenFn open = nullptr;
     SubmitFn submit = nullptr;
     SolveFn solve = nullptr;
     TicketFn poll = nullptr, cancel = nullptr;
+    uint32_t level = kGiLevelStarting; // 0 none, 1 compute, 2 rays (the server's answer to GiOpen)
+    // shortcut: the scene blob (lot proxy to triangles, patches, texels; world space, as the lamps) and the layer textures
+    // (two DEFAULT-pool slots a layer for the crossfade) have no builder yet: with no scene, SubmitScene refuses and
+    // nothing is issued. The next package fills `scene` and `target`.
+    std::vector<uint8_t> scene;
+    std::function<IDirect3DTexture9*(uint32_t layer)> target;
+    std::function<GiSched::Box(const GiSched::LampIn&)> boxOf; // the touch box until the server returns one (R-04: not built)
+    uint32_t sceneTicket = 0, scenePending = 0;
+    size_t sceneSent = 0;
+    std::unordered_map<uintptr_t, uint32_t> index; // lamp -> layer (lamp i of the table is layer i)
+    std::vector<GiLampWire> table;
+    bool tableDirty = false;
+    std::unordered_map<uint32_t, GiSched::LampIn> tickets;
+
     bool Resolve() {
         const HMODULE m = GetModuleHandleW(L"d3d9.dll");
         if (!m) return false;
+        open = reinterpret_cast<OpenFn>(GetProcAddress(m, "RemixBridge_GiOpen"));
         submit = reinterpret_cast<SubmitFn>(GetProcAddress(m, "RemixBridge_GiSubmit"));
         solve = reinterpret_cast<SolveFn>(GetProcAddress(m, "RemixBridge_GiSolve"));
         poll = reinterpret_cast<TicketFn>(GetProcAddress(m, "RemixBridge_GiPoll"));
         cancel = reinterpret_cast<TicketFn>(GetProcAddress(m, "RemixBridge_GiCancel"));
-        return submit && solve && poll && cancel;
+        return open && submit && solve && poll && cancel;
     }
-    bool SubmitScene() override { return false; }
-    bool Solve(const GiSched::LampIn&, uint32_t&) override { return false; }
+    bool Ready() const { return level != kGiLevelStarting && level != 0; }
+    void BeginFrame(uint32_t) override {
+        if (level == kGiLevelStarting && open) { // GiOpen never waits: S_FALSE until the worker has its device
+            uint32_t l = 0;
+            const HRESULT hr = open(&l);
+            if (hr == S_OK) level = l;
+            else if (FAILED(hr)) level = 0;
+        }
+        if (scenePending) {
+            const HRESULT hr = poll(scenePending);
+            if (hr != S_FALSE) sceneTicket = hr == S_OK ? scenePending : 0, scenePending = 0;
+        }
+    }
+    // The scene in parts of a submit slot; false (the scheduler asks again next frame) while the slots are busy
+    bool SubmitScene() override {
+        if (!Ready() || scene.empty()) return false;
+        sceneTicket = 0;
+        while (sceneSent < scene.size()) {
+            const uint32_t n = static_cast<uint32_t>(std::min<size_t>(kGiSlotBytes, scene.size() - sceneSent));
+            const bool last = sceneSent + n == scene.size();
+            uint32_t t = 0;
+            const HRESULT hr = submit(scene.data() + sceneSent, n, kGiSubmitScene | (last ? 0 : kGiSubmitMore), &t);
+            if (hr == D3DERR_WASSTILLDRAWING) return false;
+            if (FAILED(hr)) {
+                sceneSent = 0;
+                return false;
+            }
+            sceneSent += n;
+            if (last) scenePending = t;
+        }
+        sceneSent = 0;
+        return true;
+    }
+    // The lamp table first when it changed (unit colour: switch, dim and colour stay in the compose; R-04 solves a lamp
+    // again when its 56 bytes change), then the indirect layer into its target
+    bool Solve(const GiSched::LampIn& lamp, uint32_t& ticket) override {
+        if (!sceneTicket || !target) return false;
+        auto [it, fresh] = index.try_emplace(lamp.id, static_cast<uint32_t>(table.size()));
+        if (fresh) table.push_back({});
+        if (it->second > 0xFFFF) return false;
+        // shortcut: ball radius fixed at 0.1 m and no region box (whole scene) until the shadow softness and the touch
+        // box grown by a room are passed
+        GiLampWire w{{lamp.pos[0], lamp.pos[1], lamp.pos[2]}, 0.1f, {1, 1, 1}, 0, {1, 1, 1}, {0, 0, 0}};
+        if (std::memcmp(&w, &table[it->second], sizeof w)) table[it->second] = w, tableDirty = true;
+        if (tableDirty) {
+            uint32_t t = 0;
+            const uint32_t bytes = static_cast<uint32_t>(table.size() * sizeof(GiLampWire));
+            if (bytes > kGiSlotBytes || submit(table.data(), bytes, kGiSubmitLamps, &t) != S_OK) return false;
+            tableDirty = false; // (the server takes the table before the solve sent after it)
+        }
+        IDirect3DTexture9* tex = target(it->second);
+        if (!tex || solve(tex, it->second, sceneTicket, &ticket) != S_OK) return false;
+        tickets[ticket] = lamp;
+        return true;
+    }
     int Poll(uint32_t ticket, GiSched::Box& touched) override {
-        const HRESULT hr = poll ? poll(ticket) : E_FAIL;
+        const HRESULT hr = poll(ticket);
         if (hr == S_FALSE) return 0;
-        touched = {}; // shortcut: the touch box comes back with R-04's layer statistics; empty until then
+        const auto it = tickets.find(ticket);
+        if (it != tickets.end()) {
+            if (boxOf) touched = boxOf(it->second);
+            tickets.erase(it);
+        }
         return hr == S_OK ? 1 : -1;
     }
     void Cancel(uint32_t ticket) override {
-        if (cancel) cancel(ticket);
+        cancel(ticket);
+        tickets.erase(ticket);
     }
 };
+BridgeBackend g_bridge;
 
-// ---- update scheduler (S2-01, render thread): the active lot's lamp layers; developer debugFakeSolve runs it on the
-// fake back end (a layer lands 3 frames after its bake starts, touching the lamp's reach, at most 6 m)
+bool ServerExport() { return g_bridge.Resolve(); }
+// shortcut: the level comes from GiOpen a frame or more after Start; auto takes serverRays here and the server runs the
+// compute level itself on a GPU without ray queries
+bool ServerRayQuery() { return true; }
+
+// ---- update scheduler (S2-01, render thread): the active lot's lamp layers, on the bridge's back end, or with developer
+// debugFakeSolve on the fake one (a layer lands 3 frames after its bake starts, touching the lamp's reach, at most 6 m)
 GiSched::FakeBackend g_fake;
 GiSched::Scheduler g_sched;
+bool g_schedOn = false;
 uint64_t g_schedLot = 0, g_geoKey = 0;
 uint32_t g_schedSerial = 0, g_schedFrame = 0;
 
@@ -298,7 +384,7 @@ GiSched::LampIn SchedLamp(const Lamp& l) { return {l.light, {l.pos[0], l.pos[1],
 
 // Render thread, after the snapshot: the active lot's lamps and changes, its build edits and the camera to the scheduler
 void UpdateSched() {
-    if (kPublicBuild || !g_options.debugFakeSolve) return; // shortcut: the server back end joins with R-05
+    if (!g_schedOn) return;
     ++g_schedFrame;
     if (g_activeLot != g_schedLot) { // a new active lot: every layer again
         g_schedLot = g_activeLot, g_geoKey = 0, g_schedSerial = g_serial;
@@ -381,7 +467,7 @@ void OnPresent() {
                                          g_lamps.size(), g_giLots, Value(Counter::LampChanges), cap, sync, locks, diffs, faults, table);
     if (cap || sync || locks || diffs || faults || table) LOG_WARNING(line);
     else LOG_INFO(line);
-    if (!g_options.debugFakeSolve) return;
+    if (!g_schedOn) return;
     const GiSched::Counters s = g_sched.Stats();
     using GiSched::Cause;
     const std::string sched = std::format("[GiSched] lot={:X} queued={} inFlight={} idle={} fading={} issued: moved={} added={} build={} load={}; landed={} failed={} "
@@ -416,13 +502,15 @@ bool Start(const Options& o, std::string* error) {
     g_lamps.clear(), g_lastRead.clear(), g_changes.clear();
     g_giLots = 0, g_activeLot = 0, g_worldFrames = 0, g_sinceSnap = 0, g_pending = false, g_dumpDue = true;
     g_sched.Clear(), g_schedLot = 0;
-    g_fake.boxOf = [](const GiSched::LampIn& l) {
+    g_fake.boxOf = g_bridge.boxOf = [](const GiSched::LampIn& l) {
         float range = 6.0f;
         for (const Lamp& x : g_lamps)
             if (x.light == l.id) range = std::min(range, std::max(x.range, 1.0f));
         return GiSched::Around(l.pos, l.story, range);
     };
-    g_sched.SetBackend(&g_fake);
+    const bool fake = !kPublicBuild && o.debugFakeSolve, server = backend == Backend::ServerRays || backend == Backend::ServerCompute;
+    g_sched.SetBackend(fake ? static_cast<GiSched::Backend*>(&g_fake) : &g_bridge);
+    g_schedOn = fake || server;
     using namespace D3D9Hooks;
     if (!RegisterPresent(kPatchName, [](DeviceContext&, const RECT*, const RECT*, HWND, const RGNDATA*) {
             OnPresent();
@@ -444,6 +532,7 @@ bool Start(const Options& o, std::string* error) {
 void Stop() {
     if (!g_running.load()) return;
     D3D9Hooks::UnregisterAll(kPatchName);
+    g_sched.Clear(), g_schedOn = false, g_schedLot = 0;
     g_running = false;
     LOG_INFO("[RealtimeGI] Off");
 }

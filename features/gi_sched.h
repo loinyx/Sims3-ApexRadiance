@@ -122,7 +122,7 @@ class Scheduler {
   public:
     explicit Scheduler(Backend* backend = nullptr, Budget budget = {}) : backend_(backend), budget_(budget) {}
     void SetBackend(Backend* b) { backend_ = b; }
-    // A new lot (or the first in a world): every layer dropped, every lamp queued as a load
+    // A new lot (or the first in a world): every layer dropped, the scene sent, every lamp queued as a load
     void Load(const std::vector<LampIn>& lamps, uint32_t frame);
     // One change of the snapshot. pos / story / on: the lamp now (ignored for Removed)
     void OnLamp(Event e, const LampIn& lamp, uint32_t frame);
