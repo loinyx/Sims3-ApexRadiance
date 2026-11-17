@@ -21,7 +21,7 @@ struct Coverage {
 };
 Coverage LastCoverage();
 
-// G-buffer (developer builds, patches/gbuffer_patch.cpp): while acquired, the ps_3_0 copies also write oC1 / oC2
+// G-buffer (developer builds, patches/gbuffer_patch.cpp): while acquired, the ps_3_0 and ps_2_x copies also write oC1 / oC2
 // (ShaderPatches::AddGBufferPs with the row of shaders/gbuffer_ids.h) and are bound with the High-precision scene on too
 // (grain amount 0). With targets set, they are render targets 1 and 2 from the first scene draw into the back buffer
 // until render target 0 changes, the frame ends or GBufferUnbind; cleared to 0 once a frame. COLORWRITEENABLE1 / 2 are
@@ -35,8 +35,9 @@ void GBufferMaskOff(IDirect3DDevice9* dev); // before a draw of another module m
 struct GBufferCounts { // since the last Take
     unsigned frames = 0;
     unsigned patched = 0, unknown = 0; // opaque scene draws that wrote: with the table's row / with the unknown values
+    unsigned ps2 = 0, replaced = 0;    // of those: ps_2_x copies / replacements (Night Lighting) with their game shader's row
     unsigned blended = 0;              // draws of such a copy with blending on: not written
-    unsigned masked = 0;               // other back-buffer draws while bound (ps_2_x, refused, fixed function, UI passes)
+    unsigned masked = 0;               // other back-buffer draws while bound (refused, ps_2_x without a vertex pair, fixed function, UI)
     unsigned binds = 0, unbinds = 0, bindFailed = 0, maskToggles = 0;
 };
 GBufferCounts TakeGBufferCounts();

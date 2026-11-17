@@ -1,16 +1,18 @@
 // G-buffer shader table (docs/features/realtime-gi/research/14-gbuffer-motion-vectors.md §3.2).
-// Usage: node generate.cjs <Shaders_Win32.precomp> [output-header] [family,family,...]
-// Read-only over the precomp; writes only the header when a path is given. No game bytecode is written: per ps_3_0
-// pixel shader its hash, the sampler a pass names as the albedo texture, the sampler of the diffuse light probe, a
-// material id and a motion class. The sampler names exist only in the pass records, not in the bytecode.
+// Usage: node generate.cjs <Shaders_Win32.precomp> [output-header] [families-file]
+// Read-only over the precomp; writes only the header and the families file when paths are given. No game bytecode is
+// written: per ps_3_0 and ps_2_0 pixel shader of a technique its hash, the sampler a pass names as the albedo texture,
+// the sampler of the diffuse light probe, a material id and a motion class. The sampler names exist only in the pass
+// records, not in the bytecode. The families file (one line per technique: name, then the hashes of its pixel shaders)
+// is for the offline check's counts per family (tools/gbuffer_check); it is not committed.
 const fs = require('fs');
-if (!process.argv[2]) throw Error('Usage: node generate.cjs Shaders_Win32.precomp [output-header] [families]');
-const FAMILIES = (process.argv[4] || 'SimSkin,Day,TerrainHigh,Phong,Landmark').split(',');
-if (FAMILIES.length > 6) throw Error('At most 6 families fit the table byte');
-const ALBEDO = new Set(['DiffuseMap', 'colorMap', 'RoadTexture']);
+if (!process.argv[2]) throw Error('Usage: node generate.cjs Shaders_Win32.precomp [output-header] [families-file]');
+const ALBEDO = new Set(['DiffuseMap', 'colorMap', 'RoadTexture', 'TwigDiffuseMap']);
 const PROBE = new Set(['DiffuseLightProbe', 'ExteriorDiffuseLightProbe']);
-// Families whose albedo is composited from several textures: no albedo sampler until they get a family rule
+// Albedo composited from several textures (a skin or clothing overlay, terrain layers by a blend map): no albedo sampler
+// until a family rule exists (research 14 WP10). By the textures a pass binds, and by family for the two big ones.
 const NO_ALBEDO = ['SimSkin', 'TerrainHigh'];
+const COMPOSITED = new Set(['OverlayTexture', 'blendMap', 'colorMap2', 'colorMap3', 'colorMap4', 'compositeMap']);
 // Material ids: the first rule a technique name matches, rules in priority order (a shader shared by several techniques
 // takes the lowest id). The names and roughness values go to the header as they are.
 const MATERIALS = [
@@ -119,26 +121,22 @@ function single(e, wanted) {
   const [sampler] = s, [n, temp] = reads(e.blob.code, sampler);
   return n === 1 ? [sampler, temp] : [-1, false];
 }
-const rows = [], stats = FAMILIES.map(() => ({ n: 0, albedo: 0, probe: 0, probeTemp: 0 }));
+const rows = [], stats = { 3: { n: 0, albedo: 0, probe: 0 }, 2: { n: 0, albedo: 0, probe: 0 } };
 for (const e of per.values()) {
-  if (e.blob.version !== 0xffff0300) continue;
-  let fam = 0;
-  FAMILIES.forEach((f, i) => { if (e.tech.has(f)) fam |= 1 << i; });
-  if (!fam) continue;
+  const v = e.blob.version === 0xffff0300 ? 3 : e.blob.version === 0xffff0200 ? 2 : 0;
+  if (!v) continue; // (ps_1_1: no copy)
   const id = 1 + Math.min(...[...e.tech].map(t => MATERIALS.findIndex(m => m[2].test(t))));
   const cls = [...e.tech].some(t => MOVER.test(t)) ? 3 : 0;
-  const [albedo] = NO_ALBEDO.some(f => e.tech.has(f)) ? [-1] : single(e, ALBEDO), [probe, temp] = single(e, PROBE);
-  FAMILIES.forEach((f, i) => {
-    if (!((fam >>> i) & 1)) return;
-    stats[i].n++; stats[i].albedo += albedo >= 0; stats[i].probe += probe >= 0; stats[i].probeTemp += probe >= 0 && temp;
-  });
-  rows.push({ hash: e.blob.hash, albedo: albedo < 0 ? 255 : albedo, probe: probe < 0 ? 255 : probe, id, cls, fam });
+  const composited = NO_ALBEDO.some(f => e.tech.has(f)) || [...e.bind.keys()].some(n => COMPOSITED.has(n));
+  const [albedo] = composited ? [-1] : single(e, ALBEDO), [probe] = single(e, PROBE);
+  stats[v].n++; stats[v].albedo += albedo >= 0; stats[v].probe += probe >= 0;
+  rows.push({ hash: e.blob.hash, albedo: albedo < 0 ? 255 : albedo, probe: probe < 0 ? 255 : probe, id, cls, tech: e.tech });
 }
 rows.sort((x, y) => x.hash - y.hash);
 const hex = (v, n) => '0x' + v.toString(16).toUpperCase().padStart(n, '0');
 const header = `#pragma once
-// G-buffer shader table (tools/gbuffer_ids/generate.cjs, Steam Shaders_Win32.precomp): per ps_3_0 pixel shader of the
-// families below, the sampler a pass names DiffuseMap / colorMap / RoadTexture (albedo, read by exactly one texld),
+// G-buffer shader table (tools/gbuffer_ids/generate.cjs, Steam Shaders_Win32.precomp): per ps_3_0 and ps_2_0 pixel
+// shader of a technique, the sampler a pass names DiffuseMap / colorMap / RoadTexture (albedo, read by exactly one texld),
 // the sampler of the diffuse light probe (read once: its coordinate is the world shading normal), a material id and
 // the motion class (3 = moves by itself, no vector). 255 = no such sampler. Identifiers only, no game bytecode.
 // Generated; do not edit. Sorted by hash (FNV-1a 32 over the bytecode's DWORDs, ShaderHash in shader_ids.h).
@@ -149,16 +147,15 @@ const header = `#pragma once
 struct GBufferShaderId {
     uint32_t hash;
     uint8_t albedo, probe, material;
-    uint8_t classAndFamily; // bits 0-1 the motion class, bits 2-7 the families (kGBufferFamilies order) it is used by
+    uint8_t motionClass; // 0 static .. 3 moves by itself
 };
 
-inline constexpr const char* kGBufferFamilies[] = {${FAMILIES.map(f => `"${f}"`).join(', ')}};
 // material ids 1.. (0 = nothing written, 255 = albedo unknown) and the roughness written for each
 inline constexpr const char* kGBufferMaterials[] = {"None", ${MATERIALS.map(m => `"${m[0]}"`).join(', ')}};
 inline constexpr float kGBufferRoughness[] = {0.0f, ${MATERIALS.map(m => m[1].toFixed(1) + 'f').join(', ')}};
 
 inline constexpr GBufferShaderId kGBufferShaders[] = {
-${rows.map(r => `    {${hex(r.hash, 8)}u, ${r.albedo}, ${r.probe}, ${r.id}, ${hex(r.cls | (r.fam << 2), 2)}},`).join('\n')}
+${rows.map(r => `    {${hex(r.hash, 8)}u, ${r.albedo}, ${r.probe}, ${r.id}, ${r.cls}},`).join('\n')}
 };
 
 // the row of a shader, or null (a shader of another family, another game version or a mod)
@@ -168,5 +165,10 @@ inline const GBufferShaderId* FindGBufferShader(uint32_t hash) {
 }
 `;
 if (process.argv[3]) fs.writeFileSync(process.argv[3], header);
+if (process.argv[4]) {
+  const fam = new Map();
+  for (const r of rows) for (const t of r.tech) (fam.get(t) || fam.set(t, []).get(t)).push(r.hash.toString(16).toUpperCase());
+  fs.writeFileSync(process.argv[4], [...fam].map(([t, h]) => `${t} ${h.join(' ')}`).join('\n') + '\n');
+}
 console.log(`Pixel shaders in techniques ${per.size}; table rows ${rows.length} (${rows.length * 8} bytes)`);
-FAMILIES.forEach((f, i) => console.log(`${f}: ${stats[i].n} shaders, albedo sampler ${stats[i].albedo}, probe sampler ${stats[i].probe} (temp coordinate ${stats[i].probeTemp})`));
+for (const v of [3, 2]) console.log(`ps_${v}_0: ${stats[v].n} shaders, albedo sampler ${stats[v].albedo}, probe sampler ${stats[v].probe}`);

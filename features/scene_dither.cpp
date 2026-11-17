@@ -67,7 +67,8 @@ struct Copy {
     int amountReg = -1;                 // its constant holding the amount (set around the draw)
     int texcoord = -1;                  // ps_2_x copies: the texture coordinate with the clip position (-1: ps_3_0, vPos)
     DWORD version = 0;                  // the game shader's version token
-    uint8_t gb = 0;                     // G-buffer outputs in the copy: 0 none, 1 from the table's row, 2 the unknown values
+    uint8_t gb = 0;                     // G-buffer outputs in the copy: 0 none, 1 from the table's row, 2 the unknown values,
+                                        // 3 the row of the game's shader a replacement (Night Lighting) was made from
 };
 std::unordered_map<IDirect3DPixelShader9*, Copy> g_copies; // game pixel shader -> its copy
 // game vertex shader -> its copies writing the clip position to TEXCOORDk (null = cannot), key = pointer * 8 + k
@@ -208,8 +209,9 @@ template <typename Shader> std::vector<DWORD> ReadCode(Shader* s) {
     return t;
 }
 
-// The dithered copy of a game pixel shader (Copy::ps null when it cannot have one)
-Copy MakeCopy(IDirect3DDevice9* dev, std::vector<DWORD> t) {
+// The dithered copy of a game pixel shader (Copy::ps null when it cannot have one). origin: the game's shader that t, a
+// replacement bound in a re-issued draw, was made from (its row when t's own hash has none), or null
+Copy MakeCopy(IDirect3DDevice9* dev, std::vector<DWORD> t, IDirect3DPixelShader9* origin = nullptr) {
     Copy c;
     if (t.empty()) {
         g_refused[static_cast<int>(ShaderPatches::DitherResult::Unreadable)]++;
@@ -218,8 +220,15 @@ Copy MakeCopy(IDirect3DDevice9* dev, std::vector<DWORD> t) {
     c.version = t[0];
     const bool ps2 = t[0] == 0xFFFF0200u || t[0] == 0xFFFF0201u;
 #ifndef APEX_NO_DEV_TOOLS
-    const bool gbuffer = !ps2 && g_gbWanted.load(std::memory_order_relaxed);
+    const bool gbuffer = g_gbWanted.load(std::memory_order_relaxed);
     const GBufferShaderId* row = gbuffer ? FindGBufferShader(ShaderHash(t.data(), t.size() * 4)) : nullptr; // (the game's bytes)
+    bool viaOrigin = false;
+    if (gbuffer && !row && origin) {
+        const std::vector<DWORD> o = ReadCode(origin);
+        row = o.empty() ? nullptr : FindGBufferShader(ShaderHash(o.data(), o.size() * 4));
+        viaOrigin = row != nullptr;
+    }
+    std::vector<DWORD> dithered;
 #endif
     const ShaderPatches::DitherResult r = ps2 ? ShaderPatches::AddDither2(t, &c.amountReg, &c.texcoord) : ShaderPatches::AddDither(t, &c.amountReg);
     if (r != ShaderPatches::DitherResult::Ok) {
@@ -234,14 +243,21 @@ Copy MakeCopy(IDirect3DDevice9* dev, std::vector<DWORD> t) {
             info.albedoSampler = row->albedo == 255 ? -1 : row->albedo;
             info.probeSampler = row->probe == 255 ? -1 : row->probe;
             info.material = row->material;
-            info.motionClass = row->classAndFamily & 3;
+            info.motionClass = row->motionClass;
             info.roughness = kGBufferRoughness[row->material];
         }
-        if (ShaderPatches::AddGBufferPs(t, info) == ShaderPatches::GBufferResult::Ok) c.gb = row ? 1 : 2;
+        dithered = t;
+        if (ShaderPatches::AddGBufferPs(t, info) == ShaderPatches::GBufferResult::Ok) c.gb = viaOrigin ? 3 : row ? 1 : 2;
     }
 #endif
     t_own = true;
-    const HRESULT hr = D3D9Hooks::CallOriginalCreatePixelShader(dev, t.data(), &c.ps);
+    HRESULT hr = D3D9Hooks::CallOriginalCreatePixelShader(dev, t.data(), &c.ps);
+#ifndef APEX_NO_DEV_TOOLS
+    if ((FAILED(hr) || !c.ps) && c.gb) { // a device that refuses the outputs (ps_2_x limits) keeps at least the grain
+        c.gb = 0, c.ps = nullptr;
+        hr = D3D9Hooks::CallOriginalCreatePixelShader(dev, dithered.data(), &c.ps);
+    }
+#endif
     t_own = false;
     if (FAILED(hr) || !c.ps) {
         c.ps = nullptr;
@@ -326,7 +342,8 @@ void ReleaseCopies() {
     g_vsCopies.clear();
 }
 
-// Render thread: the copy for the bound pixel shader (made now when the shader is older than the feature)
+// Render thread: the copy for the bound pixel shader (made now when the shader is older than the feature). In a re-issued
+// draw whose shader is not the one the game set, the game's shader is the replacement's origin (MakeCopy).
 Copy CopyOf(IDirect3DDevice9* dev, IDirect3DPixelShader9* ps) {
     const uint32_t gen = g_copyGen.load(std::memory_order_acquire); // (read before the lookup: a change after it makes the entry stale)
     PsFront& front = g_psFront[FrontSlot(reinterpret_cast<std::uintptr_t>(ps))];
@@ -346,7 +363,8 @@ Copy CopyOf(IDirect3DDevice9* dev, IDirect3DPixelShader9* ps) {
             return it->second;
         }
     }
-    const Copy copy = MakeCopy(dev, ReadCode(ps));
+    IDirect3DPixelShader9* const caller = D3D9Hooks::Reissuing() ? D3D9Hooks::CallerPixelShader() : nullptr;
+    const Copy copy = MakeCopy(dev, ReadCode(ps), caller != ps ? caller : nullptr);
     Remember(ps, copy);
     return copy;
 }
@@ -482,7 +500,9 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext
     if (g_gbBound) { // only an opaque draw of a copy with the outputs writes: a blended surface keeps what is behind it
         if (useDither && copy.gb && blend == kOpaque) {
             GbSetMask(dev, true);
-            (copy.gb == 1 ? g_gbCount.patched : g_gbCount.unknown)++;
+            (copy.gb == 2 ? g_gbCount.unknown : g_gbCount.patched)++;
+            g_gbCount.ps2 += k >= 0;
+            g_gbCount.replaced += copy.gb == 3;
         } else if (useDither && copy.gb) {
             GbSetMask(dev, false);
             g_gbCount.blended++;

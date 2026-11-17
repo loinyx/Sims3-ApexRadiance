@@ -4326,7 +4326,8 @@ DitherResult AddDither(std::vector<DWORD>& t, int* amountConst) {
 }
 
 GBufferResult AddGBufferPs(std::vector<DWORD>& t, const GBufferInfo& info, GBufferMade* made) {
-    if (t.empty() || t[0] != 0xFFFF0300) return GBufferResult::NotPs30;
+    const bool ps2 = !t.empty() && (t[0] == 0xFFFF0200 || t[0] == 0xFFFF0201);
+    if (t.empty() || (t[0] != 0xFFFF0300 && !ps2)) return GBufferResult::NotPs30;
     if (t.back() != 0x0000FFFFu) return GBufferResult::Unreadable;
     const auto ins = Parse(t);
     if (ins.empty()) return GBufferResult::Unreadable;
@@ -4360,7 +4361,7 @@ GBufferResult AddGBufferPs(std::vector<DWORD>& t, const GBufferInfo& info, GBuff
         }
     }
     const Usage u = Scan(t, ins);
-    if (u.maxTemp + 3 >= 32 || u.maxConst + 2 >= 224) return GBufferResult::NoFreeRegister;
+    if (u.maxTemp + 3 >= 32 || u.maxConst + 2 >= (ps2 ? 32 : 224)) return GBufferResult::NoFreeRegister; // (ps_2_x: 32 constants)
     const DWORD A = static_cast<DWORD>(u.maxTemp + 1), N = A + 1, S = A + 2, cG = static_cast<DWORD>(u.maxConst + 1), cH = cG + 1;
     const bool normal = probeAt >= 0, albedo = albedoAt >= 0;
     const int id = albedo ? std::clamp(info.material, 1, 254) : 255;
@@ -4371,16 +4372,17 @@ GBufferResult AddGBufferPs(std::vector<DWORD>& t, const GBufferInfo& info, GBuff
                          F(static_cast<float>(std::clamp(info.motionClass, 0, 3)) / 3.0f)}});
     if (albedo) { // the game may reuse the register: copy it right after the read, with the id
         const Ins& x = ins[static_cast<size_t>(albedoAt)];
-        if (albedoInBranch) edits.push_back({first, {Op(kMov, 2), Dst(kTemp, A), Src(kConst, cG, 0x6A)}}); // .zzzy = (0, 0, 0, 1)
+        if (albedoInBranch) edits.push_back({first, {Op(kMov, 2), Dst(kTemp, A), Src(kConst, cG, 0xAA), Op(kMov, 2), Dst(kTemp, A, 0x8), Src(kConst, cG, kSwzY)}}); // (0, 0, 0, 1)
         edits.push_back({End(x), {Op(kMov, 2), Dst(kTemp, A, 0x7), Src(kTemp, Num(t[x.at + 1])), Op(kMov, 2), Dst(kTemp, A, 0x8), Src(kConst, cG, kSwzW)}});
     }
     if (normal) { // the coordinate as the read sees it (its own swizzle), just before the read
         const Ins& x = ins[static_cast<size_t>(probeAt)];
         edits.push_back({x.at, {Op(kMov, 2), Dst(kTemp, N, 0x7), t[x.at + 2]}});
     }
+    // Only replicate swizzles and full writes of oC1 / oC2 by mov: valid in a ps_2_x copy without arbitrary swizzles too
     std::vector<DWORD> tail;
-    if (albedo) tail = {Op(kMov, 2), Dst(kColorOut, 1), Src(kTemp, A)};
-    else tail = {Op(kMov, 2), Dst(kColorOut, 1), Src(kConst, cG, 0xEA)}; // .zzzw = (0, 0, 0, 1)
+    if (!albedo) tail = {Op(kMov, 2), Dst(kTemp, A), Src(kConst, cG, 0xAA), Op(kMov, 2), Dst(kTemp, A, 0x8), Src(kConst, cG, kSwzW)}; // (0, 0, 0, 1)
+    tail.insert(tail.end(), {Op(kMov, 2), Dst(kColorOut, 1), Src(kTemp, A)});
     if (normal) {
         // octahedral: p = n / (|x| + |y| + |z|); where p.z < 0, p.xy = (1 - |p.yx|) sign(p.xy); stored as 0.5 + 0.5 p.xy
         const std::vector<DWORD> oct = {
@@ -4388,11 +4390,14 @@ GBufferResult AddGBufferPs(std::vector<DWORD>& t, const GBufferInfo& info, GBuff
             Op(kDp3, 3), Dst(kTemp, S, 0x8), Src(kTemp, S), Src(kConst, cG, kSwzY),
             Op(kRcp, 2), Dst(kTemp, S, 0x8), Src(kTemp, S, kSwzW),
             Op(kMul, 3), Dst(kTemp, N, 0x7), Src(kTemp, N), Src(kTemp, S, kSwzW),
-            Op(kAbs, 2), Dst(kTemp, S, 0x3), Src(kTemp, N, 0xE1),                                                       // |p.yx|
-            Op(kAdd, 3), Dst(kTemp, S, 0x3), Neg(Src(kTemp, S)), Src(kConst, cG, kSwzY),                                 // 1 - |p.yx|
-            Op(kCmp, 4), Dst(kTemp, S, 0xC), Src(kTemp, N, 0x44), Src(kConst, cG, kSwzY), Neg(Src(kConst, cG, kSwzY)), // .zw = sign(p.xy)
-            Op(kMul, 3), Dst(kTemp, S, 0x3), Src(kTemp, S), Src(kTemp, S, 0xEE),
-            Op(kCmp, 4), Dst(kTemp, N, 0x3), Src(kTemp, N, 0xAA), Src(kTemp, N), Src(kTemp, S),
+            Op(kAbs, 2), Dst(kTemp, S, 0x3), Src(kTemp, N),                                                             // |p.xy|
+            Op(kAdd, 3), Dst(kTemp, S, 0x3), Neg(Src(kTemp, S)), Src(kConst, cG, kSwzY),                                 // 1 - |p.xy|
+            Op(kCmp, 4), Dst(kTemp, S, 0x4), Src(kTemp, N, kSwzX), Src(kConst, cG, kSwzY), Neg(Src(kConst, cG, kSwzY)), // sign(p.x)
+            Op(kCmp, 4), Dst(kTemp, S, 0x8), Src(kTemp, N, kSwzY), Src(kConst, cG, kSwzY), Neg(Src(kConst, cG, kSwzY)), // sign(p.y)
+            Op(kMul, 3), Dst(kTemp, S, 0x4), Src(kTemp, S, kSwzY), Src(kTemp, S, 0xAA),                                 // (1 - |p.y|) sign(p.x)
+            Op(kMul, 3), Dst(kTemp, S, 0x8), Src(kTemp, S, kSwzX), Src(kTemp, S, kSwzW),                                // (1 - |p.x|) sign(p.y)
+            Op(kCmp, 4), Dst(kTemp, N, 0x1), Src(kTemp, N, 0xAA), Src(kTemp, N, kSwzX), Src(kTemp, S, 0xAA),
+            Op(kCmp, 4), Dst(kTemp, N, 0x2), Src(kTemp, N, 0xAA), Src(kTemp, N, kSwzY), Src(kTemp, S, kSwzW),
             Op(kMad, 4), Dst(kTemp, N, 0x3), Src(kTemp, N), Src(kConst, cG, kSwzX), Src(kConst, cG, kSwzX),
             Op(kMov, 2), Dst(kTemp, N, 0xC), Src(kConst, cH),
             Op(kMov, 2), Dst(kColorOut, 2), Src(kTemp, N)};
@@ -4402,6 +4407,7 @@ GBufferResult AddGBufferPs(std::vector<DWORD>& t, const GBufferInfo& info, GBuff
     }
     edits.push_back({t.size() - 1, tail}); // before the end token
     Apply(t, std::move(edits));
+    if (ps2) t[0] = 0xFFFF0201; // ps_2_x: the copy needs more slots than ps_2_0 gives (as AddDither2's)
     if (made) *made = {albedo, normal, static_cast<int>(A), static_cast<int>(cG)};
     return GBufferResult::Ok;
 }

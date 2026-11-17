@@ -443,16 +443,18 @@ DitherResult AddDither(std::vector<DWORD>& t, int* amountConst = nullptr);
 // temps: the grain does not fit in some ps_2_0). Refused: no free texture coordinate, temp or constant (32), subroutines.
 // The end writes oC0 once, fully.
 DitherResult AddDither2(std::vector<DWORD>& t, int* amountConst = nullptr, int* texcoordOut = nullptr);
-// G-buffer outputs for a ps_3_0 (docs/features/realtime-gi/research/14-gbuffer-motion-vectors.md, section 3.2), applied
-// to the Banding Fix copy after AddDither or to the game's shader. Only inserts instructions: every game token stays.
+// G-buffer outputs for a ps_3_0 or a ps_2_0 / ps_2_x (docs/features/realtime-gi/research/14-gbuffer-motion-vectors.md,
+// section 3.2), applied to the Banding Fix copy after AddDither / AddDither2 or to the game's shader. Only inserts
+// instructions: every game token stays, except that a ps_2_0 becomes ps_2_x (more slots; replicate swizzles only).
 //   oC1 = (albedo.rgb, material / 255): the result of the one texld on s<albedoSampler>, copied to a free temp right after
 //         it. Without one (no sampler, not read exactly once, a partial rgb mask): (0, 0, 0, 1), the "albedo unknown"
 //         id 255. A read inside a branch gives that value on the paths that do not read.
 //   oC2 = (octahedral normal.xy, roughness, motionClass / 3): the coordinate of the one texld on s<probeSampler> (the
 //         diffuse light probe is looked up by the world shading normal), copied just before it. Without one:
 //         (0.5, 0.5, 0, class): roughness 0 flags "no normal written, use the geometric one".
-// Both writes are appended after the last instruction, outside any branch. Refused (t unchanged): not ps_3_0, subroutines
-// or ret, relative constants, no 3 free temps / 2 free constants, or the shader already writes another output than oC0.
+// Both writes are appended after the last instruction, outside any branch, each once, fully, by mov (the ps_2_0 rule).
+// Refused (t unchanged): another version, subroutines or ret, relative constants, no 3 free temps (32) / 2 free
+// constants (224; ps_2_x 32), or the shader already writes another output than oC0.
 struct GBufferInfo {
     int albedoSampler = -1, probeSampler = -1;
     int material = 255;     // 1..254 (255 = unknown)

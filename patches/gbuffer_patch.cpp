@@ -9,11 +9,12 @@
 // - view = 1 draws the target colour-coded over the scene, after Depth Blur and before the Color look: grey = still,
 //   red / green = horizontal / vertical motion (0.025 NDC = full), magenta = invalid.
 // - WP2 / WP3 (work package GB-02): albedo + material id (A8R8G8B8) and normal + roughness + motion class (A2B10G10R10)
-//   written by the scene's ps_3_0 copies (ShaderPatches::AddGBufferPs, bound by the scene binder of scene_dither.cpp)
+//   written by the scene's ps_3_0 and ps_2_x copies (ShaderPatches::AddGBufferPs, bound by the scene binder of scene_dither.cpp)
 //   as render targets 1 and 2 beside the unchanged back buffer. Needs 3 simultaneous targets, both formats as render
 //   targets, no game multisampling, and independent bit depths while the High-precision scene stands in for the back
 //   buffer; otherwise one log line and no G-buffer. view = 2 albedo, 3 normal, 4 material id, 5 motion class,
-//   6 scene pixels nothing wrote (red). ps_2_x draws (walls among them) do not write yet.
+//   6 scene pixels nothing wrote (red). GB-03: every ps_3_0 and ps_2_0 of the package has a row; Night Lighting's
+//   replacement shaders take the row of the game shader they were made from.
 // No consumer yet: the targets are made and kept, nothing reads them. [patches.GBuffer], off by default.
 //
 // Part of Apex Radiance. Credits: @loinyx
@@ -385,13 +386,13 @@ void BoundaryEffect(IDirect3DDevice9* dev) {
     SceneBinder::GBufferUnbind(dev);
     EnsureGBufferTargets(dev);
     const SceneBinder::GBufferCounts c = SceneBinder::TakeGBufferCounts();
-    g.scene.frames += c.frames, g.scene.patched += c.patched, g.scene.unknown += c.unknown, g.scene.blended += c.blended, g.scene.masked += c.masked;
+    g.scene.frames += c.frames, g.scene.patched += c.patched, g.scene.unknown += c.unknown, g.scene.ps2 += c.ps2, g.scene.replaced += c.replaced, g.scene.blended += c.blended, g.scene.masked += c.masked;
     g.scene.binds += c.binds, g.scene.unbinds += c.unbinds, g.scene.bindFailed += c.bindFailed, g.scene.maskToggles += c.maskToggles;
     const unsigned long long now = GetTickCount64();
     if (now - g.sceneLog < 10000) return;
     if (g.sceneLog && g.gbTex[0])
-        LOG_INFO(std::format("[GBuffer] Scene: frames={} patched={} unknown={} blended={} masked={} binds={} unbinds={} bindFailed={} maskToggles={} view={}",
-                             g.scene.frames, g.scene.patched, g.scene.unknown, g.scene.blended, g.scene.masked, g.scene.binds, g.scene.unbinds,
+        LOG_INFO(std::format("[GBuffer] Scene: frames={} patched={} unknown={} ps2={} replaced={} blended={} masked={} binds={} unbinds={} bindFailed={} maskToggles={} view={}",
+                             g.scene.frames, g.scene.patched, g.scene.unknown, g.scene.ps2, g.scene.replaced, g.scene.blended, g.scene.masked, g.scene.binds, g.scene.unbinds,
                              g.scene.bindFailed, g.scene.maskToggles, ViewName(g.view)));
     g.sceneLog = now;
     g.scene = {};
@@ -537,6 +538,6 @@ APEX_REGISTER_FEATURE(GBufferPatch, {.displayName = "G-buffer (developer)",
                                      .enabledByDefault = false,
                                      .supportedVersions = VERSION_ALL,
                                      .technicalDetails = {"Logs the multiple-render-target capabilities and G-buffer formats once per device.",
-                                                          "The scene's ps_3_0 copies also write albedo + material id and normal + roughness + motion class to render targets 1 and 2.",
+                                                          "The scene's ps_3_0 and ps_2_x copies also write albedo + material id and normal + roughness + motion class to render targets 1 and 2.",
                                                           "Post-scene pass before Ambient Occlusion: INTZ depth and prevViewProj x inverse(viewProj) (double, CPU) into a G16R16F target."}})
 #endif

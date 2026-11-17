@@ -1,13 +1,13 @@
 // Offline check of the G-buffer shader copies (ShaderPatches::AddGBufferPs merged with AddDither, shaders/gbuffer_ids.h).
 // Read-only: prints to stdout, writes no file.
-//   check.exe <Shaders_Win32.precomp> [--d3d9 <d3d9.dll>]
-// 1. Every ps_3_0 of the package through AddDither then AddGBufferPs, with the table's row or, without one, the
-//    "unknown" values; each copy created on a D3D9 HAL device. AddGBufferPs alone must only insert: with its own
-//    instructions taken out again, the shader is the game's token for token (so every oC0 token is unchanged).
-//    Counts per family of the table: accepted, created, albedo found, normal found, refused by reason.
-// 2. On the GPU, three render targets: a synthetic ps_3_0 (one texture read, one cube read by a constant direction)
-//    through the patch. Target 0 is bit for bit the unpatched shader's; target 1 holds the texture colour and the id;
-//    target 2 decodes to the direction for 26 directions, with the roughness and the class.
+//   check.exe <Shaders_Win32.precomp> [--families <generate.cjs families file>] [--d3d9 <d3d9.dll>]
+// 1. Every ps_3_0 and ps_2_0 of the package through AddDither / AddDither2 then AddGBufferPs, with the table's row or,
+//    without one, the "unknown" values; each copy created on a D3D9 HAL device. AddGBufferPs alone must only insert:
+//    with its own instructions taken out again, the shader is the game's token for token (a ps_2_0 becomes ps_2_x).
+//    Counts per version and per technique family: accepted, created, albedo found, normal found, refused by reason.
+// 2. On the GPU, three render targets: a synthetic ps_3_0 and ps_2_0 (one texture read, one cube read by a constant
+//    direction) through the patch. Target 0 is bit for bit the unpatched shader's; target 1 holds the texture colour
+//    and the id; target 2 decodes to the direction for 26 directions, with the roughness and the class.
 // --d3d9 runs both again on another D3D9 implementation (a DXVK d3d9.dll), loaded from that path.
 #define NOMINMAX
 #include <windows.h>
@@ -24,6 +24,8 @@
 #include <iterator>
 #include <map>
 #include <set>
+#include <sstream>
+#include <format>
 #include <string>
 #include <vector>
 
@@ -229,7 +231,7 @@ ShaderPatches::GBufferInfo InfoOf(const GBufferShaderId* row) {
     info.albedoSampler = row->albedo == 255 ? -1 : row->albedo;
     info.probeSampler = row->probe == 255 ? -1 : row->probe;
     info.material = row->material;
-    info.motionClass = row->classAndFamily & 3;
+    info.motionClass = row->motionClass;
     info.roughness = kGBufferRoughness[row->material];
     return info;
 }
@@ -240,71 +242,95 @@ const char* Reason(ShaderPatches::GBufferResult r) {
 }
 
 // ---- 1. the game's shaders ----
-void Package(Gpu& gpu, const std::vector<std::vector<DWORD>>& all) {
-    constexpr int kFamilies = static_cast<int>(std::size(kGBufferFamilies));
+// families: technique name -> the hashes of its pixel shaders (generate.cjs's families file; empty: totals only)
+using Families = std::map<std::string, std::set<uint32_t>>;
+Families ReadFamilies(const char* path) {
+    Families out;
+    std::ifstream f(path);
+    std::string name;
+    while (f >> name) {
+        std::string line;
+        std::getline(f, line);
+        std::istringstream hashes(line);
+        std::string h;
+        while (hashes >> h) out[name].insert(static_cast<uint32_t>(std::stoul(h, nullptr, 16)));
+    }
+    return out;
+}
+
+void Package(Gpu& gpu, const std::vector<std::vector<DWORD>>& all, const Families& families) {
     struct Count {
         int n = 0, accepted = 0, created = 0, albedo = 0, normal = 0, albedoWanted = 0, normalWanted = 0;
         std::map<std::string, int> why;
+        void Add(bool ok, bool created_, const ShaderPatches::GBufferInfo& info, const ShaderPatches::GBufferMade& made, const char* refusal) {
+            n++, accepted += ok, created += created_;
+            if (ok) albedo += made.albedo, normal += made.normal, albedoWanted += info.albedoSampler >= 0, normalWanted += info.probeSampler >= 0;
+            else why[refusal]++;
+        }
+        std::string Line() const {
+            std::string w;
+            for (const auto& [k, c] : why) w += " " + k + " " + std::to_string(c) + ";";
+            return std::format("{:5} accepted {}, created {}, albedo {} of {}, normal {} of {}{}{}", n, accepted, created, albedo, albedoWanted, normal, normalWanted,
+                               w.empty() ? "" : " | refused:", w);
+        }
     };
-    Count fam[kFamilies + 1]; // last: every ps_3_0 without a row
+    Count total[2], noRow[2];                     // [ps_3_0, ps_2_0]
+    std::map<std::string, Count> fam[2];
     int inserted = 0, rows = 0;
     for (const auto& code : all) {
-        if (code[0] != 0xFFFF0300u) continue;
-        const GBufferShaderId* row = FindGBufferShader(ShaderHash(code.data(), code.size() * 4));
+        const int v = code[0] == 0xFFFF0300u ? 0 : code[0] == 0xFFFF0200u ? 1 : -1;
+        if (v < 0) continue;
+        const uint32_t hash = ShaderHash(code.data(), code.size() * 4);
+        const GBufferShaderId* row = FindGBufferShader(hash);
         rows += row != nullptr;
         const ShaderPatches::GBufferInfo info = InfoOf(row);
-        // alone: only insertions
+        // alone: only insertions (a ps_2_0 also becomes ps_2_x)
         ShaderPatches::GBufferMade made;
         std::vector<DWORD> alone = code;
         const auto r = ShaderPatches::AddGBufferPs(alone, info, &made);
-        const bool onlyInserts = r == ShaderPatches::GBufferResult::Ok && Strip(alone, made) == code;
         if (r == ShaderPatches::GBufferResult::Ok) {
+            std::vector<DWORD> stripped = Strip(alone, made);
+            const bool onlyInserts = stripped[0] == (v ? 0xFFFF0201u : code[0]) && (stripped[0] = code[0], stripped == code);
             inserted += onlyInserts;
             Check(onlyInserts, "the patch only inserts instructions");
         }
         // merged with the Banding Fix copy, as the game gets it
         std::vector<DWORD> merged = code;
-        const bool dithered = ShaderPatches::AddDither(merged) == ShaderPatches::DitherResult::Ok;
+        const bool dithered = (v ? ShaderPatches::AddDither2(merged) : ShaderPatches::AddDither(merged)) == ShaderPatches::DitherResult::Ok;
         const auto rm = dithered ? ShaderPatches::AddGBufferPs(merged, info, &made) : ShaderPatches::GBufferResult::Unreadable;
         const bool ok = rm == ShaderPatches::GBufferResult::Ok, created = ok && gpu.AcceptsPs(merged);
-        for (int f = 0; f <= kFamilies; f++) {
-            if (f < kFamilies ? !(row && ((row->classAndFamily >> 2) >> f) & 1) : row != nullptr) continue;
-            Count& c = fam[f];
-            c.n++;
-            c.accepted += ok;
-            c.created += created;
-            c.albedoWanted += info.albedoSampler >= 0;
-            c.normalWanted += info.probeSampler >= 0;
-            if (ok) {
-                c.albedo += made.albedo;
-                c.normal += made.normal;
-            } else
-                c.why[dithered ? Reason(rm) : "Banding Fix refused"]++;
-        }
+        if (!ok) made = {};
+        const char* refusal = dithered ? Reason(rm) : "Banding Fix refused";
+        total[v].Add(ok, created, info, made, refusal);
+        if (!row) noRow[v].Add(ok, created, info, made, refusal);
+        for (const auto& [name, hashes] : families)
+            if (hashes.count(hash)) fam[v][name].Add(ok, created, info, made, refusal);
     }
-    Check(rows == static_cast<int>(std::size(kGBufferShaders)), "every table row is a ps_3_0 of the package");
+    Check(rows == static_cast<int>(std::size(kGBufferShaders)), "every table row is a pixel shader of the package");
     std::printf("  table rows found %d of %zu; only-insert check passed for %d shaders\n", rows, std::size(kGBufferShaders), inserted);
-    for (int f = 0; f <= kFamilies; f++) {
-        const Count& c = fam[f];
-        std::string why;
-        for (const auto& [k, n] : c.why) why += " " + k + " " + std::to_string(n) + ";";
-        std::printf("  %-12s %4d ps_3_0: accepted %d, created %d, albedo %d of %d, normal %d of %d%s%s\n", f < kFamilies ? kGBufferFamilies[f] : "(no row)", c.n,
-                    c.accepted, c.created, c.albedo, c.albedoWanted, c.normal, c.normalWanted, why.empty() ? "" : " | refused:", why.c_str());
-        if (f < kFamilies) {
-            Check(c.n > 0 && c.accepted == c.n, "every shader of the family accepted");
-            Check(c.created == c.accepted, "every copy of the family created by the device");
-            Check(c.albedo == c.albedoWanted && c.normal == c.normalWanted, "the table's albedo and probe reads found");
-        }
+    for (int v = 0; v < 2; v++) {
+        const char* ver = v ? "ps_2_0" : "ps_3_0";
+        std::printf("  %s all      %s\n  %s no row   %s\n", ver, total[v].Line().c_str(), ver, noRow[v].Line().c_str());
+        // the Banding Fix copy is the carrier: a shader it refuses has no G-buffer either (ps_2_0: 108 of 3,104 in 2.x)
+        Check(total[v].accepted * 100 >= total[v].n * (v ? 95 : 99), v ? "ps_2_0: 95 % accepted" : "ps_3_0: 99 % accepted");
+        Check(total[v].created == total[v].accepted, "every accepted copy created by the device");
+        Check(total[v].albedo == total[v].albedoWanted && total[v].normal == total[v].normalWanted, "the table's albedo and probe reads found");
+        std::vector<std::pair<std::string, const Count*>> big; // families with 16 shaders or more of this version, largest first
+        for (const auto& [name, c] : fam[v])
+            if (c.n >= 16) big.emplace_back(name, &c);
+        std::sort(big.begin(), big.end(), [](const auto& a, const auto& b) { return a.second->n > b.second->n; });
+        for (const auto& [name, c] : big) std::printf("    %-34s %s\n", name.c_str(), c->Line().c_str());
+        if (!families.empty()) std::printf("    (%zu more families with fewer %s shaders)\n", fam[v].size() - big.size(), ver);
     }
 }
 
 // ---- 2. the outputs on the GPU ----
-void OnGpu(Gpu& gpu) {
-    const std::vector<DWORD> vs = Compile("float4 main(float4 p : POSITION) : POSITION { return p; }", "vs_3_0");
+void OnGpu(Gpu& gpu, const char* psProfile, const char* vsProfile) {
+    const std::vector<DWORD> vs = Compile("float4 main(float4 p : POSITION) : POSITION { return p; }", vsProfile);
     const std::vector<DWORD> ps = Compile("sampler2D sD : register(s0); samplerCUBE sP : register(s1); float4 cN : register(c0);\n"
                                           "float4 main() : COLOR0 { float3 a = tex2D(sD, cN.ww).rgb; float3 p = texCUBE(sP, cN.xyz * 3).rgb;\n"
                                           "  return float4(a * 0.5 + p * 0.25 + 0.125, 0.75); }",
-                                          "ps_3_0");
+                                          psProfile);
     Check(!vs.empty() && !ps.empty(), "test shaders compile");
     if (vs.empty() || ps.empty() || !gpu.mrt) return;
     ShaderPatches::GBufferInfo info;
@@ -352,14 +378,14 @@ void OnGpu(Gpu& gpu) {
         if (out[1] != 0xFF000000u || (out[2] >> 20) != 0x800) std::printf("  without samplers: target 1 %08lX, target 2 %08lX\n", out[1], out[2]);
     } else
         Check(false, "test draw without samplers");
-    std::printf("  GPU: %d directions, worst normal error %.3f degrees\n", n, worst);
+    std::printf("  GPU %s: %d directions, worst normal error %.3f degrees\n", psProfile, n, worst);
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
     if (argc < 2) {
-        std::puts("usage: check <Shaders_Win32.precomp> [--d3d9 <d3d9.dll>]");
+        std::puts("usage: check <Shaders_Win32.precomp> [--families <file>] [--d3d9 <d3d9.dll>]");
         return 2;
     }
     std::ifstream f(argv[1], std::ios::binary);
@@ -367,11 +393,15 @@ int main(int argc, char** argv) {
     const auto all = LoadUnique(d);
     std::printf("%zu unique shaders in %s\n", all.size(), argv[1]);
     Check(!all.empty(), "shader package read");
+    Families families;
+    for (int a = 2; a + 1 < argc; a++)
+        if (std::strcmp(argv[a], "--families") == 0) families = ReadFamilies(argv[a + 1]);
     {
         std::puts("Native D3D9");
         Gpu gpu(LoadLibraryW(L"d3d9.dll"));
-        Package(gpu, all);
-        OnGpu(gpu);
+        Package(gpu, all, families);
+        OnGpu(gpu, "ps_3_0", "vs_3_0");
+        OnGpu(gpu, "ps_2_0", "vs_2_0");
     }
     for (int a = 2; a + 1 < argc; a++) {
         if (std::strcmp(argv[a], "--d3d9") != 0) continue;
@@ -380,8 +410,9 @@ int main(int argc, char** argv) {
         if (!other) continue;
         std::printf("%s\n", argv[a + 1]);
         Gpu gpu(other);
-        Package(gpu, all);
-        OnGpu(gpu);
+        Package(gpu, all, families);
+        OnGpu(gpu, "ps_3_0", "vs_3_0");
+        OnGpu(gpu, "ps_2_0", "vs_2_0");
     }
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
