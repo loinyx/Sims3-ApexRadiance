@@ -44,31 +44,15 @@ double g_spentMs = 0.0;
 bool g_forcedThisFrame = false;
 int g_longestWait = 0, g_longestWaitNext = 0;
 uint32_t g_frameRun = 0, g_frameWaited = 0;
-struct Slot {
-    void* level = nullptr;
-    uint32_t frame = 0;
-    int skips = 0;
-};
-Slot g_slots[kSlots];
+RoomSolveSharePolicy::SlotTable<kSlots> g_slots;
 thread_local bool t_inLotPass = false;
 
 std::atomic<uint32_t> c_calls{0}, c_run{0}, c_waited{0}, c_forced{0}, c_waitFrames{0}, c_maxWait{0}, c_maxRunPerFrame{0}, c_maxWaitedPerFrame{0};
-std::atomic<uint32_t> c_lastRun{0}, c_lastWaited{0}, g_maxFrameUs{0}, c_longestNow{0};
+std::atomic<uint32_t> c_lastRun{0}, c_lastWaited{0}, g_maxFrameUs{0}, c_longestNow{0}, c_overflow{0};
 
 void Max(std::atomic<uint32_t>& a, uint32_t v) {
     uint32_t m = a.load(std::memory_order_relaxed);
     while (v > m && !a.compare_exchange_weak(m, v, std::memory_order_relaxed)) {}
-}
-
-Slot& SlotOf(void* level) {
-    Slot* free = nullptr;
-    for (Slot& s : g_slots) {
-        if (s.level == level) return s;
-        if (!free && (!s.level || g_frame - s.frame > kSlotStaleFrames)) free = &s;
-    }
-    if (!free) free = &g_slots[reinterpret_cast<uintptr_t>(level) / 16 % kSlots];
-    *free = Slot{level, g_frame, 0};
-    return *free;
 }
 
 void __fastcall PassHook(void* renderer, void* edx, float dt) {
@@ -126,7 +110,12 @@ uint64_t __fastcall Hook(void* level, void* edx, uint32_t stopwatch, uint32_t bu
     }
     c_calls.fetch_add(1, std::memory_order_relaxed);
     const uint8_t* l = static_cast<const uint8_t*>(level);
-    Slot& slot = SlotOf(level);
+    RoomSolveSharePolicy::Slot* const sp = g_slots.Find(level, g_frame, kSlotStaleFrames);
+    if (!sp) { // every slot live: runs, untimed (see SlotTable)
+        c_overflow.fetch_add(1, std::memory_order_relaxed);
+        return next(level, edx, stopwatch, budget);
+    }
+    RoomSolveSharePolicy::Slot& slot = *sp;
     slot.frame = frame;
     const auto d = RoomSolveSharePolicy::Decide(g_spentMs, LotLightingMotion::CameraMoving(), Priority(l), slot.skips, g_forcedThisFrame, g_longestWait);
     if (!d.run) {
@@ -203,9 +192,9 @@ uint32_t LongestWaitNow() { return Running() ? c_longestNow.load(std::memory_ord
 std::string StatusText() {
     if (!Running()) return "Off";
     return std::format("{} solves in the lot pass, {} ran, {} waited a frame ({} after waiting {}+ frames), {} frames with a wait; longest wait {} frames; "
-                       "most per frame: {} ran, {} waited; last frame {} ran, {} waited; longest frame {:.2f} ms",
+                       "most per frame: {} ran, {} waited; last frame {} ran, {} waited; longest frame {:.2f} ms; {} ran with the level table full",
                        c_calls.load(), c_run.load(), c_waited.load(), c_forced.load(), RoomSolveSharePolicy::kMaxSkips, c_waitFrames.load(), c_maxWait.load(),
-                       c_maxRunPerFrame.load(), c_maxWaitedPerFrame.load(), c_lastRun.load(), c_lastWaited.load(), g_maxFrameUs.load() / 1000.0);
+                       c_maxRunPerFrame.load(), c_maxWaitedPerFrame.load(), c_lastRun.load(), c_lastWaited.load(), g_maxFrameUs.load() / 1000.0, c_overflow.load());
 }
 
 void RenderDeveloperUI() {

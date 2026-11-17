@@ -140,8 +140,31 @@ static void Replay() {
     }
 }
 
+// The level table (review 94-1): more live levels than slots must not take each other's slot; the extra ones get none
+// (their calls run), and a level that has a slot keeps its wait up to kHardMaxSkips
+static void SlotChecks() {
+    P::SlotTable<64> t;
+    std::vector<int> levels(90); // 30 lots x 3 levels, all with lighting work in the same frames
+    int none = 0, bound = 0;
+    for (uint32_t frame = 0; frame < 40; frame++)
+        for (int& l : levels) {
+            P::Slot* s = t.Find(&l, frame, 120);
+            if (!s) { none += frame == 0; continue; }
+            s->frame = frame;
+            if (++s->skips > P::kHardMaxSkips) s->skips = 0; // (a forced run at the bound)
+            bound = std::max(bound, s->skips);
+        }
+    CHECK(none == 26, "90 live levels, 64 slots: 26 levels get no slot (got %d)", none);
+    CHECK(bound == P::kHardMaxSkips, "a level with a slot keeps waiting up to the hard bound, not reset by another (longest %d)", bound);
+    P::Slot* a = t.Find(&levels[0], 100, 120);
+    CHECK(a && a->level == &levels[0], "a known level finds its slot");
+    CHECK(t.Find(&none, 100, 120) == nullptr, "every slot used within 120 frames: no slot");
+    CHECK(t.Find(&none, 400, 120) != nullptr, "a slot unused for 120 frames is free again");
+}
+
 int main() {
     PolicyChecks();
+    SlotChecks();
     Replay();
     std::printf(g_fail ? "Shared room solve time checks: %d failure(s)\n" : "Shared room solve time checks passed\n", g_fail);
     return g_fail ? 1 : 0;

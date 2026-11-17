@@ -31,4 +31,25 @@ inline Decision Decide(double spentMs, bool moving, bool priority, int skips, bo
     return {false, false};
 }
 
+// Each level's wait, by level, in a fixed table (render thread). A slot is free when empty or not used for staleFrames.
+// With every slot live, Find returns null and the caller runs the call: taking another level's slot would reset its wait
+// every frame and lose the kHardMaxSkips bound for both
+struct Slot {
+    void* level = nullptr;
+    uint32_t frame = 0;
+    int skips = 0;
+};
+template <int N> struct SlotTable {
+    Slot slots[N];
+    Slot* Find(void* level, uint32_t frame, uint32_t staleFrames) {
+        Slot* free = nullptr;
+        for (Slot& s : slots) {
+            if (s.level == level) return &s;
+            if (!free && (!s.level || frame - s.frame > staleFrames)) free = &s;
+        }
+        if (free) *free = Slot{level, frame, 0};
+        return free;
+    }
+};
+
 } // namespace RoomSolveSharePolicy
