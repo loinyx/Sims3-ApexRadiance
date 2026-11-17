@@ -53,12 +53,12 @@ The camera sweep runs as a two-arm queue (baseline build against the GI build).
 |---|---|---|---|---|---|---|---|---|
 | R-01 | Read the bridge at its pin: command loop, handle maps, shared blocks, threads, build; write the export | design §3.9; 11 §1, §5.1; 07 §1; `native/remix-bridge/` | `docs/features/realtime-gi/server-export.md`: commands, shared block layout, ticket and reset rules, how a client texture is named on the server, where a worker thread and a second Vulkan device attach | Every statement cites a file and line of the pinned source; open points listed | - | desk | B | yes |
 | R-02 | Standalone solver, no bridge and no game: structure from a captured proxy, ray-query compute for direct and multi-bounce indirect a texel, and the same kernel without rays | design §3.4, §3.5, §3.9; 12 §7; `tools/rt_lamps_test` captures | `tools/gi_server_test/` (Vulkan, SPIR-V built at build time) | Closed room = 0; matches S0-02 within the look band; rays a second and time to converge printed; runs without ray query on the compute path | - (compares with S0-01, S0-02 when present) | offline | A | yes |
-| R-03 | **Bridge patch prototype:** export, shared block, worker with its own Vulkan device, one compute pass that fills a client-named texture, capability report | R-01; 11 §5.1; patches 0001-0014 as style | Next free patch in `native/remix-bridge/patches/` and a bridge self-test client | Self-test reads the pattern back; stock DXVK untouched; no stall of the command loop over 1 ms; a stock server makes the client report "none" | R-01 | bridge | B | after R-01 |
-| R-04 | Solver in the server: R-02's kernel in R-03's worker; scene submit, dirty tickets, uploads into layers and direct maps | R-02, R-03; design §3.3 | Bridge patch update | Self-test solves a synthetic lot and matches R-02's output | R-02, R-03 | bridge | A | no |
-| R-05 | Apex client: detection, scene and lamp submit, poll, watchdog, fallback, counters | R-03; design §5, §6 | `features/gi_server.{h,cpp}` | With no export: silent `d3d9`; with it: tickets complete; fallback within 1 s when the server stops answering | R-03, S2-01 | offline | B | no |
+| R-03 | Report adds the three measurements of research 17 §3.3. **Bridge patch prototype:** export, shared block, worker with its own Vulkan device, one compute pass that fills a client-named texture, capability report | R-01; 11 §5.1; patches 0001-0014 as style | Next free patch in `native/remix-bridge/patches/` and a bridge self-test client | Self-test reads the pattern back; stock DXVK untouched; no stall of the command loop over 1 ms; a stock server makes the client report "none" | R-01 | bridge | B | after R-01 |
+| R-04 | Convergence by fixed gather count on the device, no read-back a bounce; the level is a build option of one kernel. Solver in the server: R-02's kernel in R-03's worker; scene submit, dirty tickets, uploads into layers and direct maps | R-02, R-03; design §3.3 | Bridge patch update | Self-test solves a synthetic lot and matches R-02's output | R-02, R-03 | bridge | A | no |
+| R-05 | Fallback target is research 17 §5; the watchdog freezes layers instead of starting a Direct3D 9 solve; `backend` values `auto`, `server`, `d3d9` (`serverRays` / `serverCompute` developer overrides). Apex client: detection, scene and lamp submit, poll, watchdog, fallback, counters | R-03; design §5, §6 | `features/gi_server.{h,cpp}` | With no export: silent `d3d9`; with it: tickets complete; fallback within 1 s when the server stops answering | R-03, S2-01 | offline | B | no |
 | R-06 | Point queries for the rig write | R-04; design §3.6 | Export and client call | Values equal the layer contents at the points | R-04 | bridge | B | no |
 | R-07 | Furniture from the game's vertex buffers in the ray scene | 12 §7.3 tier B; S0-G2 | Bridge patch update and the Apex command a placed object | Vertex formats handled or refused cleanly; a chair's shadow is mesh-shaped in the self-test | R-04, S0-G2 | bridge | B | no |
-| R-08 | Decision note: a same-device tier for per-pixel rays | design §3.9; 12 §7.4 R4-R6; DXVK's interop interface at the pinned release | Section in `server-export.md` | States what a patched DXVK would need, its cost and a go or no-go | - | desk | B | yes |
+| R-08 | Verdict covers rays inside game shaders; post-scene passes are research 16. Decision note: a same-device tier for per-pixel rays | design §3.9; 12 §7.4 R4-R6; DXVK's interop interface at the pinned release | Section in `server-export.md` | States what a patched DXVK would need, its cost and a go or no-go | - | desk | B | yes |
 | R-G1 | Server solve on one lot in game | R-04, R-05 | Numbers in handoff.md: frames from edit to picture, GPU ms a slice, render-thread ms, memory; parity pictures on all back ends | P12 and Q12 of design.md | R-05, S2-01 | game: `realtime-gi-rooms`, `realtime-gi-pan` | B | no |
 
 ## S1: direct light owned by Apex, solve capped, one lot
@@ -81,14 +81,14 @@ The camera sweep runs as a two-arm queue (baseline build against the GI build).
 | Id | Goal | Inputs | Deliverable | Acceptance | Deps | Run | Tier | Now |
 |---|---|---|---|---|---|---|---|---|
 | S2-01 | Data model in Apex: layer atlas a lamp, compose with wall-aware upsample, dirty queue with a cap a frame, crossfade | design §3.3; S0-01, S0-07 | Layer store and compose pass | Toggle = 0 solves and one compose; compose equals the CPU reference | S1-01, S0-01, S0-07 | offline | A | no |
-| S2-02 | Direct3D 9 gather into the layers: flux from the shadow tiles, clustered virtual lights, room scoping | 04 §1.5; S0-05 | Gather pass | Leak test = 0; GPU ms a layer within budget | S2-01 | offline | A | no |
-| S2-03 | Plan field in the gather | S0-06 | Plan texture, jump-flood passes on build edits, sphere trace | Doorway and window cases of S0-06 pass on the GPU | S2-02, S0-06 | offline | A | no |
-| S2-04 | Feedback bounces and the room ambient term | 12 §4.3 | `indirect = multiBounce`, `roomAmbient` | Second pass costs no more than the first; energy bounded | S2-01 | offline | B | no |
+| S2-02 | **Parked** (research 17 §6). Direct3D 9 gather into the layers: flux from the shadow tiles, clustered virtual lights, room scoping | 04 §1.5; S0-05 | Gather pass | Leak test = 0; GPU ms a layer within budget | S2-01 | offline | A | no |
+| S2-03 | **Closed as done offline; the Apex wiring is parked with S2-02** (research 17 §6; the shaders stay merged, only the wiring is parked; its server form is dropped). Plan field in the gather | S0-06 | Plan texture, jump-flood passes on build edits, sphere trace | Doorway and window cases of S0-06 pass on the GPU | S2-02, S0-06 | offline | A | no |
+| S2-04 | **Split** (research 17 §6): feedback bounces are R-04's gathers; only `roomAmbient` remains here, as the d3d9 fallback term (CPU, from the lamp table and the room's reflectance). Feedback bounces and the room ambient term | 12 §4.3 | `indirect = multiBounce`, `roomAmbient` | Second pass costs no more than the first; energy bounded | S2-01 | offline | B | no |
 | S2-05 | Solve cost against lamp count on a lot with 60 lamps or more | 08 §1, §10 | Table in handoff.md | Cost a layer and a full lot, both back ends where available | S0-01 | offline | C | no |
-| S2-G1 | Three rooms in game | 04 §3 S2 | Pictures, toggle and move timings | Q6, Q7, P13; no new hitch | S2-02 or R-05 | game: `realtime-gi-rooms`, `realtime-gi-pan` | C | no |
+| S2-G1 | Three rooms in game | 04 §3 S2 | Pictures, toggle and move timings | Q6, Q7, P13; no new hitch | R-05 | game: `realtime-gi-rooms`, `realtime-gi-pan` | C | no |
 
-Order inside S2: when R-02 and R-03 pass, R-04 and R-05 come before S2-02 and S2-03, and the Direct3D 9 gather is
-built as the fallback against the server result.
+Order inside S2: R-03, R-04, R-05, then S2-01's compose against server layers, then S2-G1. The d3d9 fallback is S1 direct
+light + CPU `roomAmbient` + rig write + capsule occlusion (research 17 §5).
 
 ## S3: movers
 
@@ -97,8 +97,8 @@ built as the fallback against the server result.
 | S3-01 | Frame-constant block | 12 §2.2; S0-G2 | One ranged write a frame, rewritten after reset | No game write in the range over a pan; patched copies read it | S0-G2, S1-01 | offline | B | no |
 | S3-02 | Lamp index cells and lamp table in the float atlas; object copies read them; per-draw picks off for those families | 12 §2.1; S0-05; `ShaderPatches` (`PatchObjectLampVs/Ps`), `features/lot_light_bridge.cpp` | `lampIndex` | Offline over every captured object shader; pictures equal to per-draw picks within 1/255 away from cell borders | S3-01, S0-05 | offline | A | no |
 | S3-03 | Rig write, cached per model: lamps with visibility at the centre | 02 §4.2 route A; 12 §2.3; S0-09; `features/rig_tracker.cpp` | `rigFill` | Sim behind a wall gets no lamp; ceiling clamp counted; cache invalidates on lamp or model change | S0-09, S1-02 | offline | B | no |
-| S3-04 | Directional layers and the directional-map copies | 12 §4.4a; S0-04 | Four-face gather output and the swap for the four maps | Counters and objects indoors show directional bounce in the offline render | S2-01, S0-04 | offline | A | no |
-| S3-05 | Rig indirect: ambient-cube faces, dominant light, blend over space and time | 12 §4.4b | Vertex-light slot fill | Q8; no pop at a doorway | S3-03, S3-04, R-06 or asynchronous read | offline | B | no |
+| S3-04 | Directional layers and the directional-map copies (Direct3D 9 part parked; directional layers come from the server kernel, research 17 §6) | 12 §4.4a; S0-04 | Four-face gather output and the swap for the four maps | Counters and objects indoors show directional bounce in the offline render | S2-01, S0-04 | offline | A | no |
+| S3-05 | Rig indirect: ambient-cube faces, dominant light, blend over space and time | 12 §4.4b | Vertex-light slot fill | Q8; no pop at a doorway | S3-03, S3-04, R-06 | offline | B | no |
 | S3-06 | Capsule occlusion for Sims in the AO pass | 12 §4.4c; `patches/ambient_occlusion_patch.cpp` | `simShadows = capsule` | Soft shadow under a Sim toward the dominant lamp; AO lab shift metric not up | S3-01, S0-G2 | offline | A | no |
 | S3-G1 | Movers in game | - | Pictures; `LotLightBridge` ms a frame before and after | Q8; per-draw time of the covered fixes removed | S3-02, S3-05 | game: `realtime-gi-look`, `realtime-gi-pan` | C | no |
 
@@ -118,7 +118,7 @@ built as the fallback against the server result.
 | S5-01 | Contact shadows on the lamp share | 08 §4; S0-16 | `contactShadows` | No darkening of sun or ambient share; AO lab metrics hold | S3-01, S0-16 | offline | A | no |
 | S5-02 | Rig shadows across Sims and rig-lit objects | 08 §8 | `rigShadows` | A wall's shadow edge crosses a Sim | S5-01, S3-03 | offline | A | no |
 | S5-03 | Bounce detail in the AO slices and the multi-bounce AO fit | 08 §2; 12 §4.5 item 4 | `bounceDetail` | Zero-mean term; Q11 | X-03 | offline | A | no |
-| S5-04 | Exact furniture on the fallback: bake-in caster cache | 08 §6 | `exactFurniture` for `d3d9` | No popping in the camera sweep | S0-G2, S1-04 | offline | B | no |
+| S5-04 | **Parked** (research 17 §6; the bake-in caster cache existed only for the Direct3D 9 back end, R-07 serves the server). Exact furniture on the fallback: bake-in caster cache | 08 §6 | `exactFurniture` for `d3d9` | No popping in the camera sweep | S0-G2, S1-04 | offline | B | no |
 | S5-05 | Sim mesh shadows | 03 §2 row C | `simShadows = mesh` | Within the 0.3 ms budget for 4 Sims | S3-06 | offline | B | no |
 | S5-G1 | Detail layers in game | - | Pictures and GPU ms a layer | Each layer within its cost | S5-01 to S5-05 | game: `realtime-gi-look` | C | no |
 
@@ -129,7 +129,7 @@ built as the fallback against the server result.
 | S6-01 | Look constants in the compose; `look`, `indirectIntensity`, `albedoBoost` | design §9; S0-17, S0-02 | Constants and the three controls | Q9 statistics pass on the captured lots | S0-17, S2-01 | offline | B | no |
 | S6-02 | Menu, tooltips, 21 translations, presets | `AGENTS.md` menu and i18n rules | Menu entries and tables | `tools/i18n_check` and `tools/menu_audit.pl` pass | S6-01 | offline | C | no |
 | S6-03 | Feature, validation and history pages; README index | `docs/DOCUMENTATION-STANDARD.md` | Pages from the templates | Review checklist of the standard | S6-01 | desk | C | no |
-| S6-04 | Compatibility: EA app build sites by pattern, native Direct3D 9 and in-process DXVK, other mods, stand-down matrix | 06 §4 R15, R16 | Stand-down rules and notes | Feature stays off where a site is missing; no picture change with it off | S4-03 | offline | B | no |
+| S6-04 | Compatibility: EA app build sites by pattern, native Direct3D 9 and in-process DXVK, a bridge without the export (each states the fallback of research 17 §5), other mods, stand-down matrix | 06 §4 R15, R16 | Stand-down rules and notes | Feature stays off where a site is missing; no picture change with it off | S4-03 | offline | B | no |
 | S6-G1 | Full gate | design §8, §9 | Result tables and picture pairs | P1-P13, Q1-Q12 | all | game: all jobs, camera sweep | C | no |
 
 ## Track X: adjacent work (own proofs, not gated by GI)
@@ -157,7 +157,8 @@ First followers: R-03 after R-01; S0-17 after S0-01; the three S0 game runs afte
 | Gate | Decides | From |
 |---|---|---|
 | G-split | Whether S1's gain justifies the cap as designed | S0-G1 |
-| G-server | Whether the server back end leads S2 | R-02, R-03 |
+| G-server | Decided: pass. The server leads S2 (research 17) | R-02, R-03 |
+| G-dxvk | Decides the per-pixel tier (after XR-03); not a gate for S2 | XR-03 |
 | G-scale | Which families may use scaled float copies | S0-03, S0-04 |
 | G-rig | Whether the rig write is possible as designed | S0-09 |
 | G-constants | Whether the frame-constant block and lamp index can ship | S0-G2 |
