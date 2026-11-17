@@ -23,8 +23,10 @@
 #include "penumbra.h"
 #include "post_scene.h"
 #include "render_callbacks.h"
+#include "rig_tracker.h"
 #include "rt_outdoor_lamps.h"
 #include "shader_cache.h"
+#include "unlit_rooms.h"
 #include "world_session.h"
 #include <algorithm>
 #include <array>
@@ -591,6 +593,9 @@ GiCompose::Composer g_composer;
 // (S2-05) the atlas's floor and ceiling texels by place (gi_indirect.h), filled from the atlas after each compose
 GiIndirect::Grid g_grid;
 IDirect3DTexture9* g_gridTex = nullptr;
+IDirect3DTexture9* g_flagsTex = nullptr; // (S2-06) the grid's bleed flags (MANAGED, made from g_grid.flags on first use)
+float g_lotRows[3][4] = {};               // (S2-06) the GI lot's worldToLot by column, for the wall VS copy
+std::unordered_map<int, std::pair<uint32_t, std::array<float, 4>>> g_baseOf; // story -> (frame read, base colour, .w 1 = known)
 IDirect3DPixelShader9* g_scatterPs = nullptr;
 bool g_gridDirty = false;
 bool g_gridFilled = false;
@@ -598,6 +603,36 @@ uint64_t g_readyHash = 0;
 uint32_t g_readyTexels = 0;
 std::unordered_map<const void*, std::pair<int, int>> g_mapLayer; // a game map -> (story, kind) of the GI lot
 uint32_t g_mapLayerFrame = 0;
+// (S2-06 item 8) The rig write: a rig-lit model (object, Sim) reads the grid at its rig centre (GiIndirect::RigPixel). Its atlas
+// texel goes through a probe pass (Scatter into g_probeTex, one pixel a rig) read by the bridge's asynchronous read-back (patch
+// 0017); the value lands in the rig's vertex-light slots at its next bind (OnRigBind, render thread), never between binds.
+std::shared_ptr<const RtLampProxy::Lot> g_rigLot;     // the lot the grid was built from
+std::unordered_map<uint32_t, uint32_t> g_pointOfGrid; // grid pixel -> index in g_grid.points
+std::vector<float> g_pointReady;                      // FillGrid's ready weight a point
+uint32_t g_gridSerial = 1, g_gridGen = 1;             // grow at each grid fill, at each new grid
+struct RigEntry {
+    float centre[3] = {};
+    int32_t point = -1;  // g_grid.points index, -1 none (off the lot, no floor layer)
+    uint32_t gen = 0;    // g_gridGen the point was found in
+    uint32_t serial = 0; // g_gridSerial the value was read at (0 none yet)
+    uint32_t seen = 0;   // g_rigFrame of the last bind
+    bool probing = false, wrote = false;
+    float value[3] = {};
+    float written[8][4] = {}; // the last write (the slots at +0x90)
+};
+std::unordered_map<uintptr_t, RigEntry> g_rigs;
+uint32_t g_rigFrame = 0;
+IDirect3DTexture9* g_probeTex = nullptr;   // kProbeW x kProbeH, A16B16G16R16F render target
+IDirect3DSurface9* g_probeMem = nullptr;   // its SYSTEMMEM copy
+std::vector<uintptr_t> g_probeRigs;        // the rigs of the read in flight, by pixel
+uint32_t g_probeTicket = 0, g_probeWait = 0, g_probeSerial = 0;
+using ReadAsyncFn = HRESULT(__stdcall*)(IDirect3DSurface9*, IDirect3DSurface9*, uint32_t*);
+using ReadTicketFn = HRESULT(__stdcall*)(uint32_t);
+ReadAsyncFn g_readAsync = nullptr;
+ReadTicketFn g_pollRead = nullptr, g_cancelRead = nullptr;
+bool g_rigOff = false; // no asynchronous read-back here: the rigs keep the game's values
+constexpr uint32_t kProbeW = 1024, kProbeH = 16; // 16384 rigs a read, 128 KB (one bridge slot holds 256 KB)
+constexpr float kRigCeiling = 1.0f;              // [I] a channel; the game's cap [0x011D0BA8] is not read yet
 const ShaderCache::Id kScatterPs = [] {
     ShaderCache::Desc d;
     d.tag = "RealtimeGI ScatterPS";
@@ -706,7 +741,12 @@ int RebuildScene(GiSched::Box& edit, bool& whole) {
         const uint32_t gw = g_grid.w, gh = g_grid.h;
         int lotW = 0, lotH = 0;
         for (const RtLampProxy::Story& st : lot->stories) lotW = std::max(lotW, st.w), lotH = std::max(lotH, st.h);
-        if (!GiIndirect::Build(g_built, o.density, lotW, lotH, g_grid)) g_grid = {};
+        if (!GiIndirect::Build(g_built, o.density, lotW, lotH, g_grid, lot.get())) g_grid = {};
+        g_pointOfGrid.clear(), g_pointReady.clear(), ++g_gridGen, g_rigLot = g_grid.Empty() ? nullptr : lot;
+        for (uint32_t i = 0; i < g_grid.points.size(); i++) g_pointOfGrid[g_grid.points[i].grid] = i;
+        for (int k = 0; k < 3; k++)
+            for (int j = 0; j < 4; j++) g_lotRows[k][j] = lot->worldToLot[j][k];
+        if (g_flagsTex) g_flagsTex->Release(), g_flagsTex = nullptr;
         if ((g_grid.w != gw || g_grid.h != gh) && g_gridTex) g_gridTex->Release(), g_gridTex = nullptr, g_gridFilled = false;
         g_gridDirty = true, g_mapLayer.clear();
     }
@@ -804,6 +844,11 @@ void FillGrid() {
     Add(Counter::Draws, static_cast<uint32_t>(n));
     Add(Counter::DeviceCalls); // (the ColorFill)
     g_readyTexels = g_gridFilled ? ready : 0;
+    if (g_gridFilled) {
+        g_pointReady.resize(pts.size());
+        for (size_t i = 0; i < pts.size(); i++) g_pointReady[i] = pts[i].alpha;
+        ++g_gridSerial;
+    }
     g_gridDirty = false;
 }
 
@@ -850,12 +895,153 @@ bool MapLayer(const void* map, int& story, int& kind) {
     return kind >= 0;
 }
 
+// ---- (S2-06 item 8) the rig write ----
+void ReleaseProbe() {
+    if (g_probeTicket && g_cancelRead) g_cancelRead(g_probeTicket);
+    g_probeTicket = 0, g_probeWait = 0, g_probeRigs.clear();
+    for (auto& [rig, e] : g_rigs) e.probing = false;
+    if (g_probeTex) g_probeTex->Release(), g_probeTex = nullptr;
+    if (g_probeMem) g_probeMem->Release(), g_probeMem = nullptr;
+}
+// The rig's centre (+0x140, world) and its vertex-light slots (+0x90 directions, +0xD0 colours). SEH: plain data only
+bool ReadRig(uintptr_t rig, float centre[3], float slots[8][4]) {
+    __try {
+        std::memcpy(centre, reinterpret_cast<const void*>(rig + 0x140), 12);
+        std::memcpy(slots, reinterpret_cast<const void*>(rig + 0x90), 128);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+bool WriteRig(uintptr_t rig, const float slots[8][4]) {
+    __try {
+        std::memcpy(reinterpret_cast<void*>(rig + 0x90), slots, 128);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+// RigTracker's bind hook (the drawing thread = the render thread): the rig's grid point found again when it moved or the grid
+// is new, then its vertex-light slots set to the grid's light (or back to 0) unless the game's overflow lamps hold them. The
+// binder binds pointers to rig memory, so the draw that follows reads the write (S0-09). Every rig of the GI lot, the
+// household's Sims too: this is lighting, not behaviour.
+void OnRigBind(uintptr_t rig) {
+    if (!g_running.load() || !g_options.indirect || g_rigOff || !g_rigLot) return;
+    float c[3], cur[8][4];
+    if (!ReadRig(rig, c, cur)) return Add(Counter::ReadFaults);
+    RigEntry& e = g_rigs[rig];
+    e.seen = g_rigFrame;
+    const float dx = c[0] - e.centre[0], dy = c[1] - e.centre[1], dz = c[2] - e.centre[2];
+    if (e.gen != g_gridGen || dx * dx + dy * dy + dz * dz > 0.0625f) { // (a quarter metre: a new point to read)
+        std::memcpy(e.centre, c, sizeof c);
+        e.gen = g_gridGen, e.point = -1, e.serial = 0, e.probing = false;
+        float p[3];
+        uint32_t px = 0;
+        RtLampProxy::ToLot(*g_rigLot, c, p);
+        if (GiIndirect::RigPixel(g_grid, *g_rigLot, p, px))
+            if (const auto it = g_pointOfGrid.find(px); it != g_pointOfGrid.end()) e.point = static_cast<int32_t>(it->second);
+    }
+    const int state = GiIndirect::RigSlotState(cur, e.wrote ? e.written : nullptr);
+    if (state == GiIndirect::kRigGame) return Add(Counter::RigSkipped);
+    float want[8][4] = {};
+    const bool lit = e.serial && e.point >= 0 && (e.value[0] > 0 || e.value[1] > 0 || e.value[2] > 0);
+    if (lit) GiIndirect::RigSlots(e.value, kRigCeiling, want);
+    if (std::memcmp(cur, want, sizeof want) != 0 && !WriteRig(rig, want)) return Add(Counter::ReadFaults);
+    std::memcpy(e.written, want, sizeof want), e.wrote = true;
+    if (lit) Add(Counter::RigDraws);
+}
+// The probe answer: each rig's pixel (rgb premultiplied by its ready weight) as its value
+void TakeProbe() {
+    D3DLOCKED_RECT r{};
+    if (FAILED(g_probeMem->LockRect(&r, nullptr, D3DLOCK_READONLY))) return; // (the bridge copied the rows in already: no wait)
+    Add(Counter::RigReads);
+    for (size_t i = 0; i < g_probeRigs.size(); i++) {
+        const auto it = g_rigs.find(g_probeRigs[i]);
+        if (it == g_rigs.end() || !it->second.probing) continue;
+        const uint16_t* h = reinterpret_cast<const uint16_t*>(static_cast<const char*>(r.pBits) + (i / kProbeW) * r.Pitch) + (i % kProbeW) * 4;
+        for (int k = 0; k < 3; k++) it->second.value[k] = std::max(0.0f, GiIndirect::HalfToFloat(h[k]));
+        it->second.serial = g_probeSerial, it->second.probing = false;
+    }
+    g_probeMem->UnlockRect();
+}
+// Render thread, every frame: take an answered read, else read the rigs whose point or the grid changed (one read in flight)
+void UpdateRigs() {
+    ++g_rigFrame;
+    if (!g_options.indirect || g_rigOff) return;
+    if (g_rigFrame % 300 == 0)
+        for (auto it = g_rigs.begin(); it != g_rigs.end();) it = g_rigFrame - it->second.seen > 600 ? g_rigs.erase(it) : std::next(it);
+    if (g_probeTicket) {
+        const HRESULT hr = g_pollRead(g_probeTicket);
+        if (hr == S_FALSE && ++g_probeWait < 60) return;
+        if (hr == S_OK) TakeProbe();
+        else if (hr == S_FALSE) g_cancelRead(g_probeTicket);
+        for (const uintptr_t rig : g_probeRigs)
+            if (const auto it = g_rigs.find(rig); it != g_rigs.end()) it->second.probing = false;
+        g_probeTicket = 0, g_probeWait = 0, g_probeRigs.clear();
+        return;
+    }
+    if (!g_dev || !g_irradiance || !g_scatterPs || !g_gridFilled || g_pointReady.size() != g_grid.points.size()) return;
+    std::vector<GiCompose::ScatterPoint> pts;
+    for (auto& [rig, e] : g_rigs) {
+        if (e.probing || e.serial == g_gridSerial || e.gen != g_gridGen) continue;
+        if (e.point < 0) { // (nothing to read: the slots go back to 0)
+            e.serial = g_gridSerial, e.value[0] = e.value[1] = e.value[2] = 0.0f;
+            continue;
+        }
+        if (pts.size() >= kProbeW * kProbeH) break;
+        pts.push_back({static_cast<uint32_t>(pts.size()), g_grid.points[static_cast<size_t>(e.point)].atlas, g_pointReady[static_cast<size_t>(e.point)]});
+        g_probeRigs.push_back(rig);
+    }
+    if (pts.empty()) return;
+    if (!g_readAsync) {
+        const HMODULE m = GetModuleHandleW(L"d3d9.dll");
+        g_readAsync = m ? reinterpret_cast<ReadAsyncFn>(GetProcAddress(m, "RemixBridge_ReadRenderTargetAsync")) : nullptr;
+        g_pollRead = m ? reinterpret_cast<ReadTicketFn>(GetProcAddress(m, "RemixBridge_PollReadback")) : nullptr;
+        g_cancelRead = m ? reinterpret_cast<ReadTicketFn>(GetProcAddress(m, "RemixBridge_CancelReadback")) : nullptr;
+        // shortcut: without the bridge's asynchronous read-back (native D3D9, plain DXVK) objects and Sims keep the game's
+        // light; an event-query ring (design.md, wait at the lock) would cover them
+        if (!g_readAsync || !g_pollRead || !g_cancelRead) {
+            g_readAsync = nullptr, g_rigOff = true, g_probeRigs.clear();
+            LOG_INFO("[RealtimeGI] Objects and Sims: no asynchronous read-back in this d3d9.dll (RTX Remix bridge patch 0017), they keep the game's light");
+            return;
+        }
+    }
+    if (!g_probeTex) {
+        Add(Counter::DeviceCalls, 2);
+        if (FAILED(g_dev->CreateTexture(kProbeW, kProbeH, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A16B16G16R16F, D3DPOOL_DEFAULT, &g_probeTex, nullptr))) g_probeTex = nullptr;
+        if (FAILED(g_dev->CreateOffscreenPlainSurface(kProbeW, kProbeH, D3DFMT_A16B16G16R16F, D3DPOOL_SYSTEMMEM, &g_probeMem, nullptr))) g_probeMem = nullptr;
+        if (!g_probeTex || !g_probeMem) return g_probeRigs.clear(), ReleaseProbe();
+    }
+    int n = 0;
+    GiCompose::Calls calls;
+    calls.setTexture = &D3D9Hooks::CallOriginalSetTexture, calls.drawPrimitive = &D3D9Hooks::CallOriginalDrawPrimitive;
+    const bool drawn = g_composer.Scatter(g_dev, g_scatterPs, g_irradiance, GiScene::kAtlasWidth, g_built.height, g_probeTex, kProbeW, pts, calls, &n);
+    Add(Counter::Draws, static_cast<uint32_t>(n)), Add(Counter::DeviceCalls);
+    IDirect3DSurface9* s = nullptr;
+    const HRESULT hr = drawn && SUCCEEDED(g_probeTex->GetSurfaceLevel(0, &s)) ? g_readAsync(s, g_probeMem, &g_probeTicket) : E_FAIL;
+    if (s) s->Release();
+    if (hr == S_OK) {
+        g_probeSerial = g_gridSerial;
+        for (const uintptr_t rig : g_probeRigs) g_rigs[rig].probing = true;
+        return;
+    }
+    g_probeTicket = 0, g_probeRigs.clear();
+    if (hr == D3DERR_WASSTILLDRAWING || !drawn) return; // (the bridge's slots are busy: again next frame)
+    g_rigOff = true;
+    LOG_INFO(std::format("[RealtimeGI] Objects and Sims: the asynchronous read-back is not available (0x{:08X}; client.asyncReadback in bridge.conf), they "
+                         "keep the game's light",
+                         static_cast<uint32_t>(hr)));
+}
+
 void OnPreReset(IDirect3DDevice9*) { // (DEFAULT pool: the layers, the atlas, the grid and the point buffers; every layer again after)
     if (!g_running.load()) return;
     if (g_schedLot) g_bridge.ResetLot(), g_schedLot = 0; // (UpdateSched loads the lot again: the scene sent, every lamp solved)
     ReleaseLayers();
     g_composer.Release();
+    if (g_flagsTex) g_flagsTex->Release(), g_flagsTex = nullptr;
     g_built = {}, g_grid = {}, g_mapLayer.clear();
+    ReleaseProbe();
+    g_pointOfGrid.clear(), g_pointReady.clear(), ++g_gridGen, g_rigLot = nullptr;
 }
 
 // Render thread, after the snapshot: the active lot's lamps and changes, its build edits and the camera to the scheduler
@@ -956,6 +1142,7 @@ void OnPresent(IDirect3DDevice9* dev) {
     // (MC-4) a seed at world entry and at each lot entered
     if (g_worldFrames == 1 || (g_activeLot && g_activeLot != g_mesh.seedLot)) g_mesh.seedDue = true, g_mesh.seedLot = g_activeLot;
     MeshFrame();
+    UpdateRigs();
     const DWORD now = GetTickCount();
     if (g_lastLog == 0) g_lastLog = now;
     if (now - g_lastLog < kLogEveryMs) return;
@@ -967,11 +1154,12 @@ void OnPresent(IDirect3DDevice9* dev) {
     const uint64_t cap = Value(Counter::CapSolvesOnGiLots), sync = Value(Counter::SyncReadbacks), locks = Value(Counter::ResourceLocks),
                    diffs = Value(Counter::RedrawDiffs), faults = Value(Counter::ReadFaults), table = Value(Counter::LampTableDiffs);
     const std::string line = std::format("[RealtimeGI] Counters: frames={} backend={} draws={} deviceCalls={} lamps={} lots={} lampChanges={} "
-                                         "indirect={} atlasReady={} gridTexels={} indirectDraws={}; must be 0: "
+                                         "indirect={} atlasReady={} gridTexels={} indirectDraws={} wallDraws={} rigs={} rigDraws={} rigReads={} rigSkipped={}; must be 0: "
                                          "capSolves={} syncReadbacks={} locks={} redrawDiffs={} readFaults={} lampTableDiffs={}",
                                          frames, kBackendNames[static_cast<int>(g_backend.load())], Value(Counter::Draws), Value(Counter::DeviceCalls),
                                          g_lamps.size(), g_giLots, Value(Counter::LampChanges), kIndirectNames[g_options.indirect], g_readyTexels,
-                                         g_grid.points.size(), Value(Counter::IndirectDraws), cap, sync, locks, diffs, faults, table);
+                                         g_grid.points.size(), Value(Counter::IndirectDraws), Value(Counter::WallDraws), g_rigs.size(),
+                                         Value(Counter::RigDraws), Value(Counter::RigReads), Value(Counter::RigSkipped), cap, sync, locks, diffs, faults, table);
     if (cap || sync || locks || diffs || faults || table) LOG_WARNING(line);
     else LOG_INFO(line);
     MeshLog();
@@ -1014,15 +1202,45 @@ int GiLots() { return g_giLots; }
 int LampIndexMode() { return g_lampIndexMode.load(std::memory_order_relaxed); }
 Backend InUse() { return g_backend.load(); }
 
-bool IndirectFor(const void* map, float night, IndirectBind& out) {
-    if (!g_running.load() || !g_options.indirect || !g_gridFilled || !g_gridTex || !map) return false;
+bool IndirectFor(const void* map, const float ambient[3], float night, IndirectBind& out) {
+    if (!g_running.load() || !g_options.indirect || !g_gridFilled || !g_gridTex || !map || g_grid.flags.empty()) return false;
     int story = 0, kind = 0;
-    if (!MapLayer(map, story, kind) || !GiIndirect::UvRow(g_grid, story, kind, out.uv)) return false;
-    out.grid = g_gridTex;
+    if (!MapLayer(map, story, kind)) return false;
+    out.wall = kind == GiIndirect::kWall;
+    if (out.wall) {
+        if (!GiIndirect::WallRows(g_grid, out.vs[0], out.vs[1])) return false;
+        std::memcpy(out.vs[3], g_lotRows, sizeof g_lotRows);
+        const float id[4] = {1, 1, 0, 0};
+        std::memcpy(out.uv, id, sizeof id);
+    } else if (!GiIndirect::UvRow(g_grid, story, kind, out.uv))
+        return false;
+    if (!g_flagsTex) { // (S2-06) once a grid: a MANAGED upload, not a lock of a GPU resource
+        if (FAILED(g_dev->CreateTexture(g_grid.w, g_grid.h, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &g_flagsTex, nullptr))) return g_flagsTex = nullptr, false;
+        D3DLOCKED_RECT r{};
+        if (FAILED(g_flagsTex->LockRect(0, &r, nullptr, 0))) return g_flagsTex->Release(), g_flagsTex = nullptr, false;
+        for (uint32_t y = 0; y < g_grid.h; y++) std::memcpy(static_cast<char*>(r.pBits) + y * r.Pitch, &g_grid.flags[static_cast<size_t>(y) * g_grid.w * 4], g_grid.w * 4);
+        g_flagsTex->UnlockRect(0);
+        Add(Counter::DeviceCalls, 3);
+    }
+    out.grid = g_gridTex, out.flags = g_flagsTex;
+    const float size[4] = {static_cast<float>(g_grid.w), static_cast<float>(g_grid.h), 1.0f / g_grid.w, 1.0f / g_grid.h};
+    std::memcpy(out.size, size, sizeof size);
     // shortcut: gain 1 (the compose's colour is the snapshot's; S6-01 calibrates it against the game's law)
     const bool debug = g_options.indirect == 2 && !kPublicBuild;
-    const float k[4] = {1.0f, debug ? 0.0f : 1.0f, debug ? 0.0f : 1.0f, debug ? 0.0f : std::clamp(night, 0.0f, 1.0f)};
+    const float k[4] = {1.0f, debug ? 0.0f : 1.0f, debug ? 0.0f : 1.0f, 0.0f};
     std::memcpy(out.k, k, sizeof k);
+    std::fill(std::begin(out.lamp), std::end(out.lamp), 0.0f);
+    if (debug) return true;
+    // the lamp share (S2-06): the room's ambient over the story's base colour (Rooms at Night), read once a frame a story
+    const auto [it, fresh] = g_baseOf.try_emplace(story);
+    auto& [frame, base] = it->second;
+    if (fresh || frame != g_schedFrame) {
+        frame = g_schedFrame, base = {0, 0, 0, 0};
+        const uintptr_t tracker = LevelLightShare::TrackerOfLot(g_schedLot);
+        float c[3];
+        if (const void* room0 = tracker ? LevelLightShare::Room0Of(tracker, story) : nullptr; room0 && UnlitRooms::BaseColour(room0, c)) base = {c[0], c[1], c[2], 1};
+    }
+    GiIndirect::LampShare(ambient, base[3] > 0 ? base.data() : nullptr, night, out.lamp);
     return true;
 }
 
@@ -1056,6 +1274,9 @@ bool Start(const Options& o, std::string* error) {
         return false;
     }
     RenderCallbacks::preReset.Add(OnPreReset);
+    g_rigOff = false;
+    // shortcut: the rig tracker is shared with the lot light bridge; if that feature uninstalls it, the rig write stops too
+    if (o.indirect && RigTracker::Install()) RigTracker::SetBindHook(OnRigBind);
     g_running = true;
     if (o.pixelShadows) GiPixelShadows::Start({o.pixelView, o.pixelTestCaster, o.meshCasters});
     g_lampIndexMode = kDevToolsBuild ? std::clamp(o.lampIndex, 0, 2) : 0;
@@ -1078,7 +1299,12 @@ void Stop() {
     g_bridge.ResetLot(), ReleaseLayers(), g_composer.Release();
     if (g_composePs) g_composePs->Release(), g_composePs = nullptr;
     if (g_scatterPs) g_scatterPs->Release(), g_scatterPs = nullptr;
-    g_built = {}, g_grid = {}, g_mapLayer.clear(), g_dev = nullptr;
+    if (g_flagsTex) g_flagsTex->Release(), g_flagsTex = nullptr;
+    RigTracker::SetBindHook(nullptr);
+    ReleaseProbe();
+    // shortcut: rigs keep the last write until the game gathers them again (a lamp change, a move, the night level)
+    g_rigs.clear(), g_rigLot = nullptr, g_pointOfGrid.clear(), g_pointReady.clear();
+    g_built = {}, g_grid = {}, g_mapLayer.clear(), g_baseOf.clear(), g_dev = nullptr;
     g_lampIndexMode = 0;
     if (g_options.meshTiles || g_options.pixelShadows) MeshCasterSet::wanted.store(false), MeshCasterSet::pixelCasts.store(false), MeshCasterSet::g_set.Clear();
     g_running = false;

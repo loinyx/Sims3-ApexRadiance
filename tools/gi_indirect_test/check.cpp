@@ -18,7 +18,7 @@
 
 namespace {
 
-// one roofed room per story (8 x 8 lot), story 1 over story 0
+// one roofed room per story (8 x 8 lot), story 1 over story 0; story 0's room split in two by a wall at x = 3 (S2-06 bleed)
 RtLampProxy::Lot TwoStories() {
     RtLampProxy::Lot lot;
     for (int s = 0; s < 2; s++) {
@@ -35,6 +35,7 @@ RtLampProxy::Lot TwoStories() {
         };
         for (int x = x0; x < x1; x++) wall(float(x), float(z0), float(x + 1), float(z0)), wall(float(x), float(z1), float(x + 1), float(z1));
         for (int z = z0; z < z1; z++) wall(float(x0), float(z), float(x0), float(z + 1)), wall(float(x1), float(z), float(x1), float(z + 1));
+        for (int z = z0; z < z1 && s == 0; z++) wall(3.0f, float(z), 3.0f, float(z + 1));
         lot.stories.push_back(st);
     }
     return lot;
@@ -68,7 +69,7 @@ Scene MakeScene(bool rotated, uint64_t notReadyTile = ~0ull) {
     GiScene::Options o;
     o.density = 2;
     GiScene::Build(in, o, nullptr, s.built);
-    Check(GiIndirect::Build(s.built, o.density, 8, 8, s.grid), "the grid of the synthetic lot builds");
+    Check(GiIndirect::Build(s.built, o.density, 8, 8, s.grid, &s.lot), "the grid of the synthetic lot builds");
     s.atlas = FakeAtlas(s.built);
     for (const GiIndirect::Point& p : s.grid.points) s.ready.push_back(p.tile == notReadyTile ? 0.0f : 1.0f);
     GiIndirect::FillCpu(s.grid, s.atlas, s.ready, s.cpuGrid);
@@ -101,6 +102,35 @@ void GridChecks() {
                     floors, ceilings, exact, worst, s.grid.rows.size(), s.grid.w, s.grid.h);
         Check(floors > 0 && ceilings > 0 && exact == floors + ceilings && total == exact, "every floor and ceiling texel's value at its world place");
         Check(s.grid.rows.size() == 4, "two stories x floor and ceiling layers");
+        // walls (S2-06): every axis-aligned wall texel reads back at its place through the wall vertex shader's uv
+        size_t walls = 0, wallExact = 0;
+        float wallWorst = 0.0f;
+        for (const auto& [key, slot] : s.built.slots) {
+            float p[3];
+            int code;
+            GiIndirect::DecodeKey(key, p, code);
+            if (code >= 8 || (code & 1)) continue;
+            walls++;
+            float lp[3], uv[2], g[4];
+            RtLampProxy::ToLot(s.lot, slot.world, lp);
+            const float n[3] = {code == 0 ? 1.0f : code == 4 ? -1.0f : 0.0f, 0.0f, code == 2 ? 1.0f : code == 6 ? -1.0f : 0.0f};
+            if (!GiIndirect::WallUvCpu(s.grid, lp, n, uv) || !GiIndirect::SampleUv(s.grid, s.cpuGrid, uv[0], uv[1], g)) continue;
+            float d = std::fabs(g[3] - 1.0f);
+            for (int c = 0; c < 3; c++) d = std::max(d, std::fabs(g[c] - AtlasValue(slot.pixel, c)));
+            wallWorst = std::max(wallWorst, d);
+            wallExact += d < 1e-4f;
+        }
+        std::printf("  walls (%s lot): %zu wall texels, %zu read back at their place, worst %.6f, region from column %u, %u along x %u high\n",
+                    rotated ? "rotated" : "plain", walls, wallExact, wallWorst, s.grid.wallX0, s.grid.wallA, s.grid.wallY);
+        Check(walls > 0 && wallExact == walls, "every axis-aligned wall texel's value at its place");
+        // caps and diagonal facings read the empty block
+        const float cap[3] = {0, 1, 0}, diag[3] = {0.7071f, 0, 0.7071f}, at[3] = {2.0f, 1.25f, 1.05f};
+        bool empty = true;
+        for (const float* n : {cap, diag}) {
+            float uv[2], g[4];
+            empty = empty && GiIndirect::WallUvCpu(s.grid, at, n, uv) && GiIndirect::SampleUv(s.grid, s.cpuGrid, uv[0], uv[1], g) && g[3] < 1e-6f && g[0] < 1e-6f;
+        }
+        Check(empty, "caps and diagonal facings read nothing");
     }
     // half way between two neighbouring floor texels of story 0 (x = 2.25 and 2.75 m at z = 1.25): their mean
     Scene s = MakeScene(false);
@@ -128,18 +158,164 @@ void GridChecks() {
     Check(!GiIndirect::UvRow(s.grid, 5, GiIndirect::kFloor, c), "no layer for a story the scene has not");
     // the map lookup's set indices: the game's texture set order (RtOutdoorLamps::kSetIdx = wall 3, floor 0, ceiling 1, objects 2)
     Check(GiIndirect::KindOfSetIndex(0) == GiIndirect::kFloor && GiIndirect::KindOfSetIndex(1) == GiIndirect::kCeiling &&
-              GiIndirect::KindOfSetIndex(2) < 0 && GiIndirect::KindOfSetIndex(3) < 0,
-          "texture set index 0 = floor, 1 = ceiling, objects and wall no layer");
-    // Apply: mode 1 by night replaces the ready share of the ambient, by day adds; mode 2 the atlas alone
+              GiIndirect::KindOfSetIndex(2) < 0 && GiIndirect::KindOfSetIndex(3) == GiIndirect::kWall,
+          "texture set index 0 = floor, 1 = ceiling, 3 = wall, objects no layer");
+    // Apply (S2-06): the lamp share L of the room's ambient is what the ready atlas replaces; the base colour stays
     const float map[4] = {0.2f, 0.3f, 0.4f, 0.5f}, gi[4] = {0.6f, 0.5f, 0.4f, 1.0f}, amb[3] = {0.3f, 0.2f, 0.1f};
-    float o[3];
-    const float night[4] = {1, 1, 1, 1}, day[4] = {1, 1, 1, 0}, debug[4] = {1, 0, 0, 0};
-    GiIndirect::Apply(map, gi, night, amb, o);
+    float o[3], L[3];
+    const float atlasK[4] = {1, 1, 1, 0}, debug[4] = {1, 0, 0, 0}, none[3] = {0, 0, 0};
+    // night, Rooms at Night off: base colour 0, the whole ambient is lamp light
+    const float baseNight[3] = {0, 0, 0};
+    GiIndirect::LampShare(amb, baseNight, 1.0f, L);
+    GiIndirect::Apply(map, gi, atlasK, amb, L, o);
     Check(std::fabs(o[0] - 0.8f) < 1e-6f, "night: lamp light + atlas, no game ambient");
-    GiIndirect::Apply(map, gi, day, amb, o);
-    Check(std::fabs(o[0] - (0.2f + 0.6f + 0.5f * 0.3f)) < 1e-6f, "day: lamp light + atlas + the game's ambient");
-    GiIndirect::Apply(map, gi, debug, amb, o);
+    // day: the ambient is the base colour (daylight): no lamp share, the atlas adds to it
+    GiIndirect::LampShare(amb, amb, 0.0f, L);
+    GiIndirect::Apply(map, gi, atlasK, amb, L, o);
+    Check(L[0] == 0 && std::fabs(o[0] - (0.2f + 0.6f + 0.5f * 0.3f)) < 1e-6f, "day: lamp light + atlas + the game's ambient");
+    // evening, lamps on over a base colour: only the part over it is replaced, the base colour stays
+    const float base[3] = {0.1f, 0.15f, 0.2f};
+    GiIndirect::LampShare(amb, base, 1.0f, L);
+    GiIndirect::Apply(map, gi, atlasK, amb, L, o);
+    Check(std::fabs(L[0] - 0.2f) < 1e-6f && L[2] == 0 && std::fabs(o[0] - (0.2f + 0.6f + 0.5f * 0.1f)) < 1e-6f && std::fabs(o[2] - (0.4f + 0.4f + 0.5f * 0.1f)) < 1e-6f,
+          "day and night: the lamp share (ambient over the base colour) alone is replaced");
+    // the same lamp share by day and by night: the night factor does not reach a room whose base colour is known
+    float Ld[3], Ln[3];
+    GiIndirect::LampShare(amb, base, 0.0f, Ld), GiIndirect::LampShare(amb, base, 1.0f, Ln);
+    Check(Ld[0] == Ln[0] && Ld[1] == Ln[1] && Ld[2] == Ln[2], "known base colour: the lamp share does not depend on the time of day");
+    GiIndirect::LampShare(amb, nullptr, 0.0f, Ld), GiIndirect::LampShare(amb, nullptr, 1.0f, Ln);
+    Check(Ld[0] == 0 && std::fabs(Ln[0] - 0.3f) < 1e-6f, "unknown base colour: by day nothing is replaced, by night the whole ambient");
+    GiIndirect::Apply(map, gi, debug, amb, none, o);
     Check(std::fabs(o[0] - 0.6f) < 1e-6f && std::fabs(o[2] - 0.4f) < 1e-6f, "debug: the atlas alone");
+    // a half-ready texel: G premultiplied, half the lamp share replaced
+    const float half[4] = {0.3f, 0.25f, 0.2f, 0.5f};
+    GiIndirect::LampShare(amb, baseNight, 1.0f, L);
+    GiIndirect::Apply(map, half, atlasK, amb, L, o);
+    Check(std::fabs(o[0] - (0.2f + 0.3f + 0.5f * 0.3f * 0.5f)) < 1e-6f, "half ready: half the lamp share replaced");
+
+    // bleed (S2-06): a floor pixel 0.15 m from story 0's inner wall (x = 3) reads only its own room's texel
+    const auto floorTexel = [&](float x, float z) {
+        const float p[3] = {x, GiScene::kOff, z}, n[3] = {0, 1, 0};
+        return s.built.slots.at(GiScene::TexelKey(p, n)).pixel;
+    };
+    GiIndirect::SampleCpu(s.grid, s.cpuGrid, 0, GiIndirect::kFloor, 2.85f, 2.25f, g);
+    const uint32_t own = floorTexel(2.75f, 2.25f), other = floorTexel(3.25f, 2.25f);
+    Check(std::fabs(g[0] - AtlasValue(own, 0)) < 1e-5f && std::fabs(AtlasValue(own, 0) - AtlasValue(other, 0)) > 1e-3f,
+          "floor 0.15 m from an inner wall: its own room's texel only (none of the room beyond)");
+    GiIndirect::SampleCpu(s.grid, s.cpuGrid, 0, GiIndirect::kFloor, 3.15f, 2.25f, g);
+    Check(std::fabs(g[0] - AtlasValue(other, 0)) < 1e-5f, "and from the other side the same");
+    GiIndirect::SampleCpu(s.grid, s.cpuGrid, 0, GiIndirect::kFloor, 2.5f, 2.25f, g);
+    Check(std::fabs(g[0] - 0.5f * (AtlasValue(floorTexel(2.25f, 2.25f), 0) + AtlasValue(own, 0))) < 1e-5f, "inside the room the read still blends");
+    // a wall pixel next to the junction of story 0's z = 1 wall (inside face, +z) and the inner wall: its own side only
+    uint32_t wallOwn = ~0u, wallOther = ~0u;
+    float wy = 0;
+    for (const auto& [key, slot] : s.built.slots) {
+        float p[3];
+        int code;
+        GiIndirect::DecodeKey(key, p, code);
+        if (code != 2 || slot.story != 0 || std::fabs(p[2] - 1.05f) > 0.02f || std::fabs(p[1] - 1.25f) > 0.02f) continue;
+        if (std::fabs(p[0] - 2.75f) < 0.02f) wallOwn = slot.pixel, wy = p[1];
+        if (std::fabs(p[0] - 3.25f) < 0.02f) wallOther = slot.pixel;
+    }
+    Check(wallOwn != ~0u && wallOther != ~0u, "wall texels either side of the junction");
+    if (wallOwn != ~0u) {
+        const float at2[3] = {2.9f, wy, 1.05f}, nz[3] = {0, 0, 1};
+        float uv[2];
+        GiIndirect::WallUvCpu(s.grid, at2, nz, uv);
+        GiIndirect::SampleUv(s.grid, s.cpuGrid, uv[0], uv[1], g);
+        Check(std::fabs(g[0] - AtlasValue(wallOwn, 0)) < 1e-5f, "wall next to a junction: its own side's texel only");
+        // and between the stories along the wall line (story 0's top texel row and story 1's bottom one)
+        const float top[3] = {4.25f, 2.95f, 1.05f};
+        GiIndirect::WallUvCpu(s.grid, top, nz, uv);
+        GiIndirect::SampleUv(s.grid, s.cpuGrid, uv[0], uv[1], g);
+        uint32_t below = ~0u;
+        for (const auto& [key, slot] : s.built.slots) {
+            float p[3];
+            int code;
+            GiIndirect::DecodeKey(key, p, code);
+            if (code == 2 && slot.story == 0 && std::fabs(p[2] - 1.05f) < 0.02f && std::fabs(p[0] - 4.25f) < 0.02f && std::fabs(p[1] - 2.75f) < 0.02f) below = slot.pixel;
+        }
+        Check(below != ~0u && std::fabs(g[0] - AtlasValue(below, 0)) < 1e-5f, "wall at a story's top: its own story's texel only");
+    }
+}
+
+// S2-06 item 8, objects and Sims: the rig write's point (RigPixel), its slots (RigSlots), who holds them (RigSlotState)
+void RigChecks() {
+    for (int rotated = 0; rotated < 2; rotated++) {
+        Scene s = MakeScene(rotated != 0);
+        size_t floors = 0, exact = 0;
+        for (const auto& [key, slot] : s.built.slots) {
+            float p[3];
+            int code;
+            GiIndirect::DecodeKey(key, p, code);
+            if (code != 8) continue;
+            floors++;
+            float lp[3];
+            RtLampProxy::ToLot(s.lot, slot.world, lp);
+            lp[1] += 0.9f; // (a rig centre: the model's box centre, above its floor)
+            uint32_t px = 0;
+            if (!GiIndirect::RigPixel(s.grid, s.lot, lp, px)) continue;
+            bool same = s.cpuGrid[static_cast<size_t>(px) * 4 + 3] > 0.999f;
+            for (int c = 0; c < 3; c++) same &= std::fabs(s.cpuGrid[static_cast<size_t>(px) * 4 + c] - AtlasValue(slot.pixel, c)) < 1e-6f;
+            exact += same;
+        }
+        std::printf("  rig point: %zu of %zu floor texels read back at a centre 0.9 m over them (%s lot)\n", exact, floors, rotated ? "rotated" : "plain");
+        Check(floors > 0 && exact == floors, "a rig centre over a floor texel reads that texel (point read)");
+    }
+    Scene s = MakeScene(false);
+    const auto floorTexel = [&](float x, float y, float z) {
+        const float p[3] = {x, y + GiScene::kOff, z}, n[3] = {0, 1, 0};
+        return s.built.slots.at(GiScene::TexelKey(p, n)).pixel;
+    };
+    const auto at = [&](float x, float y, float z, float out[4]) {
+        const float p[3] = {x, y, z};
+        uint32_t px = 0;
+        if (!GiIndirect::RigPixel(s.grid, s.lot, p, px)) return false;
+        for (int c = 0; c < 4; c++) out[c] = s.cpuGrid[static_cast<size_t>(px) * 4 + c];
+        return true;
+    };
+    float g[4];
+    Check(at(2.9f, 1.0f, 2.25f, g) && std::fabs(g[0] - AtlasValue(floorTexel(2.75f, 0, 2.25f), 0)) < 1e-6f, "a Sim 0.1 m from an inner wall: its own room only");
+    Check(at(3.1f, 1.0f, 2.25f, g) && std::fabs(g[0] - AtlasValue(floorTexel(3.25f, 0, 2.25f), 0)) < 1e-6f, "and on the other side its room only");
+    Check(at(3.25f, 3.9f, 2.25f, g) && std::fabs(g[0] - AtlasValue(floorTexel(3.25f, 3.0f, 2.25f), 0)) < 1e-6f, "on the upper story: the upper floor layer");
+    Check(at(3.25f, 3.1f, 2.25f, g) && std::fabs(g[0] - AtlasValue(floorTexel(3.25f, 3.0f, 2.25f), 0)) < 1e-6f, "a low object on the upper story too");
+    Check(!at(-0.5f, 1.0f, 2.25f, g) && !at(2.25f, 1.0f, 9.0f, g), "off the lot: no point (the rig keeps the game's values)");
+    Check(at(0.25f, 1.0f, 0.25f, g) && g[3] == 0.0f && g[0] == 0.0f, "on the lot outside the rooms: nothing to add");
+    const float under[3] = {2.25f, -1.0f, 2.25f};
+    uint32_t px = 0;
+    Check(!GiIndirect::RigPixel(s.grid, s.lot, under, px), "under the lowest floor: no point");
+    // the slots: a regular tetrahedron, colour e each; the sum over normals is e on average
+    const float e[3] = {0.4f, 0.2f, 0.1f};
+    float slots[8][4];
+    GiIndirect::RigSlots(e, 1.0f, slots);
+    double sum = 0, lo = 1e9, hi = 0;
+    const int n = 4000;
+    for (int i = 0; i < n; i++) { // (a Fibonacci sphere)
+        const double y = 1.0 - 2.0 * (i + 0.5) / n, r = std::sqrt(1.0 - y * y), phi = i * 2.399963229728653;
+        const double nv[3] = {r * std::cos(phi), y, r * std::sin(phi)};
+        double v = 0;
+        for (int k = 0; k < 4; k++) v += slots[4 + k][0] * std::max(0.0, nv[0] * slots[k][0] + nv[1] * slots[k][1] + nv[2] * slots[k][2]);
+        v /= e[0], sum += v, lo = std::min(lo, v), hi = std::max(hi, v);
+    }
+    std::printf("  rig slots: sum over %d normals / e: mean %.3f, min %.3f, max %.3f\n", n, sum / n, lo, hi);
+    Check(std::fabs(sum / n - 1.0) < 0.01 && lo > 0.8 && hi < 1.5, "the four vertex lights give e on average over every normal");
+    bool unit = true;
+    for (int k = 0; k < 4; k++) unit &= std::fabs(slots[k][0] * slots[k][0] + slots[k][1] * slots[k][1] + slots[k][2] * slots[k][2] - 1.0f) < 1e-5f && slots[k][3] == 0;
+    Check(unit && slots[5][1] == 0.2f && slots[7][2] == 0.1f && slots[4][3] == 0.0f, "unit directions, w 0, the colour e");
+    const float big[3] = {2.0f, 0.5f, -1.0f};
+    GiIndirect::RigSlots(big, 1.0f, slots);
+    Check(slots[4][0] == 1.0f && slots[6][1] == 0.5f && slots[7][2] == 0.0f, "Apex's ceiling and no negative light");
+    // who holds the slots
+    float zero[8][4] = {}, other[8][4];
+    std::memcpy(other, slots, sizeof other);
+    other[6][1] = 0.25f;
+    Check(GiIndirect::RigSlotState(zero, nullptr) == GiIndirect::kRigEmpty && GiIndirect::RigSlotState(zero, slots) == GiIndirect::kRigEmpty, "cleared slots: empty");
+    Check(GiIndirect::RigSlotState(slots, slots) == GiIndirect::kRigOurs, "the last write: ours");
+    Check(GiIndirect::RigSlotState(other, slots) == GiIndirect::kRigGame && GiIndirect::RigSlotState(slots, nullptr) == GiIndirect::kRigGame,
+          "anything else (overflow lamps, the fill light's moved slot): the game's, left alone");
+    Check(GiIndirect::HalfToFloat(0x3C00) == 1.0f && GiIndirect::HalfToFloat(0xC000) == -2.0f && GiIndirect::HalfToFloat(0x0001) == std::ldexp(1.0f, -24) &&
+              GiIndirect::HalfToFloat(0x7BFF) == 65504.0f && GiIndirect::HalfToFloat(0) == 0.0f,
+          "fp16 decode of the probe read");
 }
 
 // 2. native D3D9
@@ -200,6 +376,47 @@ void DeviceChecks(Gpu& gpu) {
         for (size_t i = 0; i < got.size(); i++) worst = std::max(worst, std::fabs(got[i] - s.cpuGrid[i]));
     std::printf("  scatter: %zu points into %u x %u, worst %.5f against FillCpu\n", pts.size(), s.grid.w, s.grid.h, worst);
     Check(!got.empty() && worst < 1.0f / 1024.0f, "Scatter's grid = FillCpu (fp16)");
+    // (S2-06 item 8) the rig probe: the atlas texel under each rig centre, one pixel a rig, as the runtime reads it back
+    {
+        std::unordered_map<uint32_t, size_t> pointOf;
+        for (size_t i = 0; i < s.grid.points.size(); i++) pointOf[s.grid.points[i].grid] = i;
+        std::vector<GiCompose::ScatterPoint> probe;
+        std::vector<uint32_t> probePx;
+        for (const auto& [key, slot] : s.built.slots) {
+            float p[3];
+            int code;
+            GiIndirect::DecodeKey(key, p, code);
+            if (code != 8) continue;
+            float lp[3];
+            RtLampProxy::ToLot(s.lot, slot.world, lp);
+            lp[1] += 0.9f;
+            uint32_t px = 0;
+            if (!GiIndirect::RigPixel(s.grid, s.lot, lp, px) || !pointOf.count(px)) continue;
+            const size_t i = pointOf[px];
+            probe.push_back({static_cast<uint32_t>(probe.size()), s.grid.points[i].atlas, s.ready[i]});
+            probePx.push_back(px);
+        }
+        IDirect3DTexture9* rt = nullptr;
+        IDirect3DSurface9 *rs = nullptr, *sys = nullptr;
+        const uint32_t pw = 1024, ph = 16;
+        float pworst = 1.0f;
+        if (SUCCEEDED(dev->CreateTexture(pw, ph, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A16B16G16R16F, D3DPOOL_DEFAULT, &rt, nullptr)) &&
+            comp.Scatter(dev, scatterPs, atlas, GiScene::kAtlasWidth, s.built.height, rt, pw, probe, {}) && SUCCEEDED(rt->GetSurfaceLevel(0, &rs)) &&
+            SUCCEEDED(dev->CreateOffscreenPlainSurface(pw, ph, D3DFMT_A16B16G16R16F, D3DPOOL_SYSTEMMEM, &sys, nullptr)) && SUCCEEDED(dev->GetRenderTargetData(rs, sys))) {
+            D3DLOCKED_RECT r{};
+            if (SUCCEEDED(sys->LockRect(&r, nullptr, D3DLOCK_READONLY))) {
+                pworst = 0.0f;
+                for (size_t i = 0; i < probe.size(); i++) {
+                    const uint16_t* h = reinterpret_cast<const uint16_t*>(static_cast<const char*>(r.pBits) + (i / pw) * r.Pitch) + (i % pw) * 4;
+                    for (int c = 0; c < 3; c++) pworst = std::max(pworst, std::fabs(GiIndirect::HalfToFloat(h[c]) - s.cpuGrid[static_cast<size_t>(probePx[i]) * 4 + c]));
+                }
+                sys->UnlockRect();
+            }
+        }
+        Release(sys), Release(rs), Release(rt);
+        std::printf("  rig probe: %zu rigs, worst %.5f against the grid's texel (one waiting tile)\n", probe.size(), pworst);
+        Check(!probe.empty() && pworst < 1.0f / 1024.0f, "the rig probe pass reads each rig's grid texel (premultiplied, fp16)");
+    }
     // the patched copy of the game's pattern: texld r0, TEXCOORD1, s0; mad r0.xyz, r0.w, c0, r0
     const std::vector<DWORD> game = AssemblePs("ps_3_0\ndcl_texcoord1 v0.xy\ndcl_2d s0\ntexld r0, v0, s0\nmad r0.xyz, r0.w, c0, r0\nmov oC0, r0\n");
     std::vector<DWORD> t = game;
@@ -213,12 +430,22 @@ void DeviceChecks(Gpu& gpu) {
         D3DLOCKED_RECT r{};
         if (SUCCEEDED(map->LockRect(0, &r, nullptr, 0))) *static_cast<DWORD*>(r.pBits) = 0x803C5A78u, map->UnlockRect(0);
     }
-    if (!ps || !map) return;
+    IDirect3DTexture9* flags = nullptr;
+    if (SUCCEEDED(dev->CreateTexture(s.grid.w, s.grid.h, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &flags, nullptr))) {
+        D3DLOCKED_RECT r{};
+        if (SUCCEEDED(flags->LockRect(0, &r, nullptr, 0))) {
+            for (uint32_t y = 0; y < s.grid.h; y++) std::memcpy(static_cast<char*>(r.pBits) + y * r.Pitch, &s.grid.flags[static_cast<size_t>(y) * s.grid.w * 4], s.grid.w * 4);
+            flags->UnlockRect(0);
+        }
+    }
+    Check(flags && gp.flagSampler == 2 && gp.ambientConst == 0, "flags texture made; the copy's flags sampler and ambient constant");
+    if (!ps || !map || !flags) return;
     dev->SetTexture(0, map);
     dev->SetTexture(1, grid);
-    for (DWORD st = 0; st < 2; st++) {
-        dev->SetSamplerState(st, D3DSAMP_MINFILTER, st ? D3DTEXF_LINEAR : D3DTEXF_POINT);
-        dev->SetSamplerState(st, D3DSAMP_MAGFILTER, st ? D3DTEXF_LINEAR : D3DTEXF_POINT);
+    dev->SetTexture(2, flags);
+    for (DWORD st = 0; st < 3; st++) {
+        dev->SetSamplerState(st, D3DSAMP_MINFILTER, st == 1 ? D3DTEXF_LINEAR : D3DTEXF_POINT);
+        dev->SetSamplerState(st, D3DSAMP_MAGFILTER, st == 1 ? D3DTEXF_LINEAR : D3DTEXF_POINT);
         dev->SetSamplerState(st, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
         dev->SetSamplerState(st, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
         dev->SetSamplerState(st, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
@@ -228,14 +455,22 @@ void DeviceChecks(Gpu& gpu) {
     float uv[4];
     GiIndirect::UvRow(s.grid, 0, GiIndirect::kFloor, uv);
     dev->SetPixelShaderConstantF(ShaderPatches::kGiUvConst, uv, 1);
+    const float size[4] = {static_cast<float>(s.grid.w), static_cast<float>(s.grid.h), 1.0f / s.grid.w, 1.0f / s.grid.h};
+    dev->SetPixelShaderConstantF(ShaderPatches::kGiSizeConst, size, 1);
     gpu.atlasU = -1.0f;
     struct Mode {
         const char* name;
         float k[4];
         float span;
-    } const modes[] = {{"night, texel centres", {1, 1, 1, 1}, 32.0f}, {"night, between texels", {1, 1, 1, 1}, 8.0f}, {"day", {1, 1, 1, 0}, 8.0f}, {"debug", {1, 0, 0, 0}, 8.0f}};
+        float lamp[4];
+    } const modes[] = {{"night, texel centres", {1, 1, 1, 0}, 32.0f, {0.3f, 0.2f, 0.1f, 0}},
+                       {"night, between texels and across the inner wall", {1, 1, 1, 0}, 8.0f, {0.3f, 0.2f, 0.1f, 0}},
+                       {"lamp share over a base colour", {1, 1, 1, 0}, 8.0f, {0.2f, 0.05f, 0, 0}},
+                       {"day", {1, 1, 1, 0}, 8.0f, {0, 0, 0, 0}},
+                       {"debug", {1, 0, 0, 0}, 8.0f, {0, 0, 0, 0}}};
     for (const Mode& m : modes) {
         dev->SetPixelShaderConstantF(ShaderPatches::kGiKConst, m.k, 1);
+        dev->SetPixelShaderConstantF(ShaderPatches::kGiLampConst, m.lamp, 1);
         gpu.lotSpan = m.span;
         const std::vector<DWORD> px = gpu.Render(ps);
         int worstLsb = 0, lit = 0, centres = 0;
@@ -244,7 +479,7 @@ void DeviceChecks(Gpu& gpu) {
                 const float lx = m.span * (x + 0.5f) / 64.0f, lz = m.span * (y + 0.5f) / 64.0f;
                 float g[4], ref[3];
                 GiIndirect::SampleCpu(s.grid, s.cpuGrid, 0, GiIndirect::kFloor, lx, lz, g);
-                GiIndirect::Apply(mapV, g, m.k, amb, ref);
+                GiIndirect::Apply(mapV, g, m.k, amb, m.lamp, ref);
                 if (lx >= 8.0f || lz >= 8.0f) continue; // (off the 8 x 8 lot: no floor of it is drawn there)
                 const DWORD v = px[static_cast<size_t>(y) * 64 + x];
                 const int gotC[3] = {static_cast<int>((v >> 16) & 0xFF), static_cast<int>((v >> 8) & 0xFF), static_cast<int>(v & 0xFF)};
@@ -262,9 +497,110 @@ void DeviceChecks(Gpu& gpu) {
         Check(worstLsb <= 2 && lit > 0, "GPU = CPU reference within 2 LSB");
         if (m.span == 32.0f) Check(centres == lit, "every ready pixel at a texel centre reads its texel");
     }
-    dev->SetTexture(0, nullptr), dev->SetTexture(1, nullptr);
+    dev->SetTexture(0, nullptr), dev->SetTexture(1, nullptr), dev->SetTexture(2, nullptr);
     comp.Release();
-    Release(ps), Release(map), Release(grid), Release(atlas), Release(scatterPs);
+    Release(ps), Release(map), Release(flags), Release(grid), Release(atlas), Release(scatterPs);
+}
+
+// (S2-06) The wall vertex shader copy: a synthetic vs_3_0 in the InteriorWall VS's shape (position decode, normal decode, the
+// world triple, the decode overwritten after it) patched by PatchWallGiVs; each wall texel of the rotated lot drawn as a point at
+// its own pixel, TEXCOORD7 written out as float: the uv WallUvCpu gives (caps and a diagonal too)
+void WallVsChecks(Gpu& gpu) {
+    if (!gpu.dev) return;
+    IDirect3DDevice9* dev = gpu.dev;
+    Scene s = MakeScene(true);
+    const std::vector<DWORD> game = AssemblePs("vs_3_0\ndef c10, 0.00390625, 0, 1, -2\ndcl_position v0\ndcl_normal v1\ndcl_texcoord v2\ndcl_position o0\n"
+                                               "dcl_texcoord o1.xy\nmad r0.xzw, v0.xyzx, c10.xyxy, c10.yyyz\nmov r0.y, v0.y\nmad r3.xyz, -c10.w, v1, -c10.z\n"
+                                               "mov o0, v2\ndp4 r4.x, r0, c4\ndp4 r4.y, r0, c5\ndp4 r4.z, r0, c6\nmul r3.xyz, r4, r4\nmov o1.xy, r3\n");
+    std::vector<DWORD> t = game;
+    Check(!game.empty() && ShaderPatches::PatchWallGiVs(t), "the synthetic wall vertex shader takes the uv copy");
+    std::vector<DWORD> again = t;
+    Check(!ShaderPatches::PatchWallGiVs(again) && again == t, "a copy that already writes TEXCOORD7 is refused unchanged");
+    std::vector<DWORD> ps2 = AssemblePs("vs_2_0\ndcl_position v0\ndp4 r4.x, v0, c4\ndp4 r4.y, v0, c5\ndp4 r4.z, v0, c6\nmov oPos, r4\n");
+    const std::vector<DWORD> ps2Before = ps2;
+    Check(!ShaderPatches::PatchWallGiVs(ps2) && ps2 == ps2Before, "vs_2_0 refused unchanged");
+    IDirect3DVertexShader9* vs = nullptr;
+    IDirect3DPixelShader9* ps = nullptr;
+    IDirect3DVertexDeclaration9* decl = nullptr;
+    IDirect3DSurface9 *rt = nullptr, *sys = nullptr;
+    const std::vector<DWORD> psCode = AssemblePs("ps_3_0\ndcl_texcoord7 v0.xy\nmov oC0, v0.xyxy\n");
+    const D3DVERTEXELEMENT9 el[] = {{0, 0, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_POSITION, 0}, {0, 16, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_NORMAL, 0},
+                                    {0, 32, D3DDECLTYPE_FLOAT4, 0, D3DDECLUSAGE_TEXCOORD, 0}, D3DDECL_END()};
+    Check(SUCCEEDED(dev->CreateVertexShader(t.data(), &vs)) && SUCCEEDED(dev->CreatePixelShader(psCode.data(), &ps)) &&
+              SUCCEEDED(dev->CreateVertexDeclaration(el, &decl)) &&
+              SUCCEEDED(dev->CreateRenderTarget(64, 64, D3DFMT_A32B32G32R32F, D3DMULTISAMPLE_NONE, 0, FALSE, &rt, nullptr)) &&
+              SUCCEEDED(dev->CreateOffscreenPlainSurface(64, 64, D3DFMT_A32B32G32R32F, D3DPOOL_SYSTEMMEM, &sys, nullptr)),
+          "the patched wall VS copy is created natively; float target");
+    if (vs && ps && decl && rt && sys) {
+        struct V {
+            float p[4], n[4], c[4];
+        };
+        struct Ref {
+            float uv[2];
+        };
+        std::vector<V> pts;
+        std::vector<Ref> refs;
+        const auto& R = s.lot.worldToLot;
+        const auto add = [&](const float world[3], const float nLot[3]) {
+            float lp[3], uv[2], nw[3];
+            for (int k = 0; k < 3; k++) nw[k] = nLot[0] * R[k][0] + nLot[1] * R[k][1] + nLot[2] * R[k][2]; // (lot = world x R, R a rotation)
+            RtLampProxy::ToLot(s.lot, world, lp);
+            if (!GiIndirect::WallUvCpu(s.grid, lp, nLot, uv) || pts.size() >= 4096) return;
+            const int i = static_cast<int>(pts.size());
+            V v{{world[0] * 256.0f, world[1], world[2] * 256.0f, 1}, {(nw[0] + 1) / 2, (nw[1] + 1) / 2, (nw[2] + 1) / 2, 0},
+                {((i % 64) + 0.5f) / 32.0f - 1.0f, 1.0f - ((i / 64) + 0.5f) / 32.0f, 0.5f, 1}};
+            pts.push_back(v), refs.push_back({{uv[0], uv[1]}});
+        };
+        for (const auto& [key, slot] : s.built.slots) {
+            float p[3];
+            int code;
+            GiIndirect::DecodeKey(key, p, code);
+            if (code >= 8 || (code & 1)) continue;
+            const float n[3] = {code == 0 ? 1.0f : code == 4 ? -1.0f : 0.0f, 0.0f, code == 2 ? 1.0f : code == 6 ? -1.0f : 0.0f};
+            add(slot.world, n);
+        }
+        const size_t walls = pts.size();
+        const float w0[3] = {-28.0f, 3.25f, 52.0f}, cap[3] = {0, 1, 0}, diag[3] = {0.6f, 0, 0.8f}; // (not 45 degrees: a tie of |x| and |z| may pick either along)
+        add(w0, cap), add(w0, diag);
+        float r0[4], r1[4], rows[3][4];
+        GiIndirect::WallRows(s.grid, r0, r1);
+        for (int k = 0; k < 3; k++)
+            for (int j = 0; j < 4; j++) rows[k][j] = R[j][k];
+        const float id[3][4] = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}};
+        dev->SetVertexShaderConstantF(4, &id[0][0], 3);
+        dev->SetVertexShaderConstantF(ShaderPatches::kWallGiVsConst, r0, 1);
+        dev->SetVertexShaderConstantF(ShaderPatches::kWallGiVsConst + 1, r1, 1);
+        dev->SetVertexShaderConstantF(ShaderPatches::kWallGiVsConst + 3, &rows[0][0], 3);
+        IDirect3DSurface9* old = nullptr;
+        dev->GetRenderTarget(0, &old);
+        dev->SetRenderTarget(0, rt);
+        dev->Clear(0, nullptr, D3DCLEAR_TARGET, 0, 1.0f, 0);
+        dev->SetVertexDeclaration(decl);
+        dev->SetVertexShader(vs);
+        dev->SetPixelShader(ps);
+        dev->BeginScene();
+        Check(SUCCEEDED(dev->DrawPrimitiveUP(D3DPT_POINTLIST, static_cast<UINT>(pts.size()), pts.data(), sizeof(V))), "wall points drawn");
+        dev->EndScene();
+        dev->SetVertexShader(nullptr);
+        dev->SetRenderTarget(0, old);
+        Release(old);
+        D3DLOCKED_RECT lr{};
+        float worst = 0.0f;
+        size_t exact = 0;
+        if (SUCCEEDED(dev->GetRenderTargetData(rt, sys)) && SUCCEEDED(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY))) {
+            for (size_t i = 0; i < pts.size(); i++) {
+                const float* px = reinterpret_cast<const float*>(static_cast<const char*>(lr.pBits) + (i / 64) * lr.Pitch) + (i % 64) * 4;
+                // in texels of the grid: the read must land in the same texel at the same place
+                const float d = std::max(std::fabs(px[0] - refs[i].uv[0]) * s.grid.w, std::fabs(px[1] - refs[i].uv[1]) * s.grid.h);
+                worst = std::max(worst, d);
+                exact += d < 1e-3f;
+            }
+            sys->UnlockRect();
+        }
+        std::printf("  wall VS copy: %zu wall texels + cap + diagonal, %zu within 1/1000 texel of WallUvCpu, worst %.6f texel\n", walls, exact, worst);
+        Check(walls > 0 && exact == pts.size(), "the wall VS copy's TEXCOORD7 = WallUvCpu");
+    }
+    Release(sys), Release(rt), Release(decl), Release(ps), Release(vs);
 }
 
 // 3. precomp
@@ -332,10 +668,56 @@ void PrecompChecks(const char* path, Gpu& gpu) {
                 }
     }
     std::printf("Precomp: %d room-lit pixel shaders (%d ps_2_0, all refused unchanged: %d)\n", matched, ps2, ps2Refused);
+    // (S2-06) the InteriorWall ps_3_0 shaders (game and smooth copies) with the wall uv (TEXCOORD7)
+    int wallTried = 0, wallTaken = 0, wallCreated = 0, wallSlots = 0;
+    for (uint32_t i = 0; i < blobs.size(); i++) {
+        const Blob& b = blobs[i];
+        if (b.vs || b.code.empty() || b.code[0] != 0xFFFF0300 || !ShaderPatches::IsRoomMapPs(b.code)) continue;
+        bool wall = false;
+        if (const auto tt = techOf.find(i + 1); tt != techOf.end())
+            for (uint32_t h : tt->second)
+                if (const auto n = names.find(h); n != names.end()) wall |= n->second.rfind("InteriorWall", 0) == 0;
+        if (!wall) continue;
+        for (int k = 0; k < 2; k++) {
+            std::vector<DWORD> t = b.code;
+            ShaderPatches::RoomMapPatch rp;
+            if (k == 1 && !ShaderPatches::PatchRoomMapSmooth(t, rp, false)) continue;
+            wallTried++;
+            ShaderPatches::RoomMapGiPatch gp;
+            if (!ShaderPatches::PatchRoomMapGi(t, gp, 7)) {
+                std::printf("  wall ps_3_0 refused the TEXCOORD7 read: blob %u (%s)\n", i, k ? "smooth copy" : "game shader");
+                continue;
+            }
+            wallTaken++, wallSlots = std::max(wallSlots, gp.slots);
+            wallCreated += gpu.AcceptsPs(t);
+        }
+    }
+    std::printf("  InteriorWall ps_3_0 with the wall uv: %d tried, %d take it, %d created natively, at most %d slots\n", wallTried, wallTaken, wallCreated, wallSlots);
+    Check(wallTaken > 0 && wallTaken == wallTried && (wallCreated == wallTaken || !gpu.dev) && wallSlots <= 512, "every InteriorWall ps_3_0 takes the wall GI read");
     for (const Kind& k : kinds)
         std::printf("  %-16s %4d tried, %4d take the GI read, %4d created natively; at most %d slots (+%d), %d temps\n", k.name, k.tried, k.taken, k.created, k.maxSlots,
                     k.maxAdded, k.maxTemps);
     for (const auto& [n, r] : perTech) std::printf("  %-38s ps_3_0 %3d (%3d take it), ps_2_0 %3d\n", n.c_str(), r.ps3, r.taken, r.ps2);
+    // (S2-06) the InteriorWall techniques' vs_3_0 vertex shaders take the wall uv copy, created natively
+    std::set<uint32_t> wallVs;
+    for (const Tech& tc : techs)
+        if (const auto n = names.find(tc.name); n != names.end() && n->second.rfind("InteriorWall", 0) == 0)
+            for (const auto& [vs, ps] : tc.passes)
+                if (vs >= 1 && vs <= blobs.size() && !blobs[vs - 1].code.empty() && blobs[vs - 1].code[0] == 0xFFFE0300) wallVs.insert(vs - 1);
+    int vsTaken = 0, vsCreated = 0;
+    for (uint32_t i : wallVs) {
+        std::vector<DWORD> t = blobs[i].code;
+        if (!ShaderPatches::PatchWallGiVs(t)) {
+            std::printf("  wall VS refused: blob %u\n", i);
+            continue;
+        }
+        vsTaken++;
+        IDirect3DVertexShader9* v = nullptr;
+        vsCreated += gpu.dev && SUCCEEDED(gpu.dev->CreateVertexShader(t.data(), &v));
+        Release(v);
+    }
+    std::printf("  InteriorWall vs_3_0 vertex shaders: %zu, %d take the wall uv copy, %d created natively\n", wallVs.size(), vsTaken, vsCreated);
+    Check(!wallVs.empty() && vsTaken == static_cast<int>(wallVs.size()) && (vsCreated == vsTaken || !gpu.dev), "every InteriorWall vs_3_0 takes the wall uv copy");
     Check(ps2 == ps2Refused, "every ps_2_0 shader refused, bytes unchanged");
     Check(unchanged == refusals, "every refusal leaves the bytes unchanged (indirect off: the same shaders)");
     for (const Kind& k : kinds) {
@@ -350,9 +732,11 @@ void PrecompChecks(const char* path, Gpu& gpu) {
 int main(int argc, char** argv) {
     std::printf("GI grid (CPU)\n");
     GridChecks();
+    RigChecks();
     Gpu gpu;
     std::printf("Native D3D9\n");
     DeviceChecks(gpu);
+    WallVsChecks(gpu);
     if (argc >= 2) PrecompChecks(argv[1], gpu);
     std::printf("%d checks, %d failures\n", g_checks, g_failures);
     return g_failures ? 1 : 0;

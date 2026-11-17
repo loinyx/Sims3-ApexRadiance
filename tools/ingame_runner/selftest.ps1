@@ -89,9 +89,9 @@ Check (($liLine -f 'draw', 700, 0, 0, 0, 0, 0) -notmatch $liDraw) 'lamp index dr
 Check (($liLine -f 'draw', 0, 0, 0, 0, 300, 0) -notmatch $liDraw) 'lamp index draw line rejected without draws'
 # The indirect light smoke (S2-05): its counters pattern takes a line with ready texels and draws, not one without
 $giInd = @((Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/gi-indirect-smoke.json') -Raw | ConvertFrom-Json).variants.on.expect)[1]
-$giLine = '12:00:10.000 [INFO] [RealtimeGI] Counters: frames=600 backend=serverRays draws=4 deviceCalls=2 lamps=12 lots=1 lampChanges=0 indirect=atlas atlasReady={0} gridTexels=900 indirectDraws={1}; must be 0: capSolves=0 syncReadbacks=0 locks=0 redrawDiffs=0 readFaults=0 lampTableDiffs=0'
-Check (($giLine -f 640, 37) -match $giInd) 'GI indirect counters match with ready texels and draws'
-foreach ($bad in @(@(0, 37), @(640, 0))) { Check (($giLine -f $bad[0], $bad[1]) -notmatch $giInd) "GI indirect counters rejected: atlasReady=$($bad[0]) indirectDraws=$($bad[1])" }
+$giLine = '12:00:10.000 [INFO] [RealtimeGI] Counters: frames=600 backend=serverRays draws=4 deviceCalls=2 lamps=12 lots=1 lampChanges=0 indirect=atlas atlasReady={0} gridTexels=900 indirectDraws={1} wallDraws=12 rigs=40 rigDraws={2} rigReads=2 rigSkipped=0; must be 0: capSolves=0 syncReadbacks=0 locks=0 redrawDiffs=0 readFaults=0 lampTableDiffs=0'
+Check (($giLine -f 640, 37, 300) -match $giInd) 'GI indirect counters match with ready texels and draws'
+foreach ($bad in @(@(0, 37, 300), @(640, 0, 300), @(640, 37, 0))) { Check (($giLine -f $bad[0], $bad[1], $bad[2]) -notmatch $giInd) "GI indirect counters rejected: atlasReady=$($bad[0]) indirectDraws=$($bad[1]) rigDraws=$($bad[2])" }
 $prof = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/realtime-gi-profile.json') -Raw | ConvertFrom-Json
 Check ('12:00:00.000 [INFO] [FrameProfiler] Measurement preset: timing run (hitch 2.0 x median, floor 8 ms)' -match @($prof.expect)[0]) 'profile arm expect matches the preset line'
 Check ('12:00:00.000 [INFO] [FrameProfiler] Measurement preset: sampling run (hitch)' -notmatch @($prof.expect)[0]) 'profile arm expect rejects the sampling preset'
@@ -276,11 +276,11 @@ try {
     Check ((Run-Watch @((Obs 30 5), (Obs 60 5 0 $false $null $false))) -match 'closed .*exit code 3') 'game closed'
     Check ((Run-Watch @((Obs 30 5), (Obs 60 5.5), (Obs 90 5.9))) -match 'no progress for 60 s') 'two flat checks fail'
     Check ($null -eq (Run-Watch @((Obs 30 5), (Obs 60 5.5), (Obs 90 9)))) 'one flat check is tolerated'
-    Check ((Run-Watch @((Obs 30 5 100 $true), (Obs 60 9 200 $true), (Obs 90 13 300 $true), (Obs 120 17 400 $true))) -match 'did not load: no ApexTestAgent marker') 'agent not loaded 90 s after the features'
-    Check ((Run-Watch @((Obs 30 5 100 $true), (Obs 120 17 400 $true '<ApexTestAgent stage="loaded" />'))) -match 'loaded \(<ApexTestAgent.*mailbox was not found') 'agent loaded, mailbox not found'
+    Check ((Run-Watch @((Obs 30 5 100 $true), (Obs 60 9 200 $true), (Obs 90 13 300 $true), (Obs 120 17 400 $true), (Obs 150 21 500 $true), (Obs 180 25 600 $true), (Obs 210 29 700 $true))) -match 'did not load: no ApexTestAgent marker') 'agent not loaded 180 s after the features'
+    Check ((Run-Watch @((Obs 30 5 100 $true), (Obs 210 17 400 $true '<ApexTestAgent stage="loaded" />'))) -match 'loaded \(<ApexTestAgent.*mailbox was not found') 'agent loaded, mailbox not found'
     $noApex = { param($List) $st = @{}; foreach ($x in $List) { $why = Step-StartWatch $st $x -NoApex; if ($why) { return $why } }; return $null }
     Check ($null -eq (& $noApex @((Obs 30 5 -1), (Obs 60 9 -1), (Obs 90 13 -1)))) 'without the mod a missing log is fine'
-    Check ((& $noApex @((Obs 120 17 -1), (Obs 150 21 -1), (Obs 180 25 -1), (Obs 210 29 -1))) -match 'did not load: no ApexTestAgent marker') 'without the mod the agent deadline counts from 120 s'
+    Check ((& $noApex @((Obs 120 17 -1), (Obs 150 21 -1), (Obs 180 25 -1), (Obs 210 29 -1), (Obs 240 33 -1), (Obs 270 37 -1), (Obs 300 41 -1))) -match 'did not load: no ApexTestAgent marker') 'without the mod the agent deadline counts from 120 s'
     $st = @{}; $null = Step-StartWatch $st (Obs 30 5 100 $true); $found = Obs 150 30 900 $true; $found.Found = $true; $found.Beat = 4
     Check ($null -eq (Step-StartWatch $st $found)) 'a found mailbox never fails the agent rule'
 } finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }

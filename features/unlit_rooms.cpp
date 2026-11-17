@@ -581,6 +581,19 @@ bool LampAmbient(const void* room, float out[3]) {
     return true;
 }
 
+bool BaseColour(const void* room, float out[3]) {
+    uintptr_t mgr = 0;
+    int id = 0;
+    if (!room || !RoomKey(static_cast<const BYTE*>(room), mgr, id)) return false;
+    std::lock_guard<std::mutex> lk(g_baseMx);
+    for (const auto& [at, rec] : g_baseRooms)
+        if (rec.mgr == mgr && rec.has[0]) {
+            for (int k = 0; k < 3; k++) out[k] = rec.ce[k];
+            return true;
+        }
+    return false;
+}
+
 bool Install(std::string& error) {
     if (g_ready) return true;
     using GameAddr::Id;

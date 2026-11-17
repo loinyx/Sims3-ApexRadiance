@@ -5075,7 +5075,7 @@ bool ProbeCopy(const std::vector<DWORD>& t, int k, std::vector<DWORD>& out, std:
     }
     return false;
 }
-bool PatchRoomMapGi(std::vector<DWORD>& t, RoomMapGiPatch& out) {
+bool PatchRoomMapGi(std::vector<DWORD>& t, RoomMapGiPatch& out, int texcoord) {
     out = RoomMapGiPatch{};
     if (t.empty() || t[0] != 0xFFFF0300) return false;
     const auto ins = Parse(t);
@@ -5091,8 +5091,9 @@ bool PatchRoomMapGi(std::vector<DWORD>& t, RoomMapGiPatch& out) {
         if (at < 0 && found == 0 && IsFlow(y.op)) return false; // (the read must not sit in flow control: texld's gradients)
         if (y.op != kMad || y.len != 4) continue;
         const DWORD d = t[y.at + 1], a = t[y.at + 2], c = t[y.at + 3], b = t[y.at + 4];
-        if (Type(d) != kTemp || WMask(d) != 0x7 || Type(a) != kTemp || Swz(a) != kSwzW || (a & 0x0F000000u) || Type(c) != kConst || Type(b) != kTemp ||
-            Num(b) != Num(a) || (b & 0x0F000000u))
+        // (cA a colour: read whole; the wall shaders' later "mad r0.xyz, r0.w, c3.z, r0" reads one component)
+        if (Type(d) != kTemp || WMask(d) != 0x7 || Type(a) != kTemp || Swz(a) != kSwzW || (a & 0x0F000000u) || Type(c) != kConst || Swz(c) != kSwzXYZW ||
+            Type(b) != kTemp || Num(b) != Num(a) || (b & 0x0F000000u))
             continue;
         bool defined = false;
         for (const Ins& z : ins) defined |= z.op == kDef && IsReg(t[z.at + 1], kConst, Num(c));
@@ -5101,37 +5102,169 @@ bool PatchRoomMapGi(std::vector<DWORD>& t, RoomMapGiPatch& out) {
     }
     if (found != 1) return false;
     const Usage u = Scan(t, ins);
-    if (u.maxTemp + 1 >= 32 || u.maxSampler + 1 >= 16 || !u.afterLastSamplerDcl || u.maxConst >= static_cast<int>(kGiUvConst)) return false;
+    if (texcoord < 0 || texcoord > 7 || u.maxTemp + 3 >= 32 || u.maxSampler + 2 >= 16 || !u.afterLastSamplerDcl || u.maxConst >= static_cast<int>(kGiUvConst))
+        return false;
     std::vector<DWORD> copy = t;
     std::vector<Edit> edits;
-    DWORD lotIn = 0;
-    if (!InputFor(copy, ins, 4, edits, lotIn)) return false;
-    const DWORD G = static_cast<DWORD>(u.maxTemp + 1), sG = static_cast<DWORD>(u.maxSampler + 1);
+    DWORD uvIn = 0;
+    if (!InputFor(copy, ins, texcoord, edits, uvIn)) return false;
+    const DWORD G = static_cast<DWORD>(u.maxTemp + 1), Q = G + 1, H = G + 2, sG = static_cast<DWORD>(u.maxSampler + 1), sF = sG + 1;
+    const DWORD cS = kGiSizeConst, cH = kGiSizeConst + 1;
     const Ins& m = ins[static_cast<size_t>(at)];
-    const DWORD L = Num(copy[m.at + 2]);
+    const DWORD L = Num(copy[m.at + 2]), cA = Num(copy[m.at + 3]);
     const DWORD X = Sw(0, 0, 0, 0), Y = Sw(1, 1, 1, 1), Z = Sw(2, 2, 2, 2), W = Sw(3, 3, 3, 3);
     const std::vector<DWORD> code = {
-        Op(kMad, 4), Dst(kTemp, G, 0x3), Src(kInput, lotIn, Sw(0, 1, 0, 1)), Src(kConst, kGiUvConst, Sw(0, 1, 0, 1)), Src(kConst, kGiUvConst, Sw(2, 3, 2, 3)),
-        Op(kTexld, 3), Dst(kTemp, G), Src(kTemp, G), Src(kSampler, sG),                                  // (irradiance, ready)
-        Op(kMul, 3), Dst(kTemp, G, 0x7), Src(kTemp, G), Src(kTemp, G, W),
-        Op(kMul, 3), Dst(kTemp, G, 0x7), Src(kTemp, G), Src(kConst, kGiKConst, X),                     // G a k.x
-        Op(kMad, 4), Dst(kTemp, G, 0x8), Neg(Src(kTemp, G, W)), Src(kConst, kGiKConst, W), Src(kConst, kGiKConst, Z),
-        Op(kMul, 3), Dst(kTemp, G, 0x8), Src(kTemp, G, W), Src(kTemp, L, W),                           // alpha'
+        Op(kMad, 4), Dst(kTemp, G, 0x3), Src(kInput, uvIn, Sw(0, 1, 0, 1)), Src(kConst, kGiUvConst, Sw(0, 1, 0, 1)), Src(kConst, kGiUvConst, Sw(2, 3, 2, 3)),
+        Op(kTexld, 3), Dst(kTemp, Q), Src(kTemp, G), Src(kSampler, sF),                                  // the texel's flags (point)
+        Op(kMul, 3), Dst(kTemp, G, 0x3), Src(kTemp, G), Src(kConst, cS),                                 // p = uv x size
+        Op(kFrc, 2), Dst(kTemp, H, 0x3), Src(kTemp, G),
+        Op(kAdd, 3), Dst(kTemp, G, 0x3), Src(kTemp, G), Neg(Src(kTemp, H)),                             // floor(p)
+        Op(kAdd, 3), Dst(kTemp, H, 0x3), Src(kTemp, H), Src(kConst, cH, Y),                             // o = frc - 0.5
+        Op(kMul, 3), Dst(kTemp, H, 0xC), Src(kTemp, Q, Sw(0, 0, 1, 3)), Src(kConst, cH, X),             // 0.5 open +u, +v
+        Op(kMul, 3), Dst(kTemp, Q, 0x3), Src(kTemp, Q, Sw(0, 2, 2, 2)), Src(kConst, cH, Y),             // -0.5 open -u, -v
+        Op(kMax, 3), Dst(kTemp, H, 0x3), Src(kTemp, H), Src(kTemp, Q),
+        Op(kMin, 3), Dst(kTemp, H, 0x3), Src(kTemp, H), Src(kTemp, H, Sw(2, 3, 2, 3)),
+        Op(kAdd, 3), Dst(kTemp, G, 0x3), Src(kTemp, G), Src(kConst, cH, X),
+        Op(kAdd, 3), Dst(kTemp, G, 0x3), Src(kTemp, G), Src(kTemp, H),
+        Op(kMul, 3), Dst(kTemp, G, 0x3), Src(kTemp, G), Src(kConst, cS, Sw(2, 3, 2, 3)),
+        Op(kTexld, 3), Dst(kTemp, G), Src(kTemp, G), Src(kSampler, sG),                                  // (irradiance x ready, ready)
+        Op(kMul, 3), Dst(kTemp, G, 0x7), Src(kTemp, G), Src(kConst, kGiKConst, X),                     // G k.x
+        Op(kMul, 3), Dst(kTemp, H, 0x8), Src(kTemp, G, W), Src(kTemp, L, W),                           // alpha a
+        Op(kMad, 4), Dst(kTemp, G, 0x7), Neg(Src(kTemp, H, W)), Src(kConst, kGiLampConst), Src(kTemp, G), // - alpha a L
         Op(kMad, 4), Dst(kTemp, G, 0x7), Src(kTemp, L), Src(kConst, kGiKConst, Y), Src(kTemp, G),       // rgb'
+        Op(kMul, 3), Dst(kTemp, G, 0x8), Src(kTemp, L, W), Src(kConst, kGiKConst, Z),                   // alpha'
     };
-    (void)Y;
     copy[m.at + 2] = (copy[m.at + 2] & ~0x7FFu) | G; // the game's mad reads G for rL (its swizzles kept)
     copy[m.at + 4] = (copy[m.at + 4] & ~0x7FFu) | G;
     edits.push_back({m.at, code});
-    edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, sG)}});
+    edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, sG), Op(kDcl, 2), 0x90000000u, Dst(kSampler, sF)}});
+    edits.push_back({1, {Op(kDef, 5), Dst(kConst, cH), F(0.5f), F(-0.5f), F(0.0f), F(0.0f)}});
     Apply(copy, std::move(edits));
     const auto after = Parse(copy);
     if (after.empty()) return false;
     out.sampler = static_cast<int>(sG);
+    out.flagSampler = static_cast<int>(sF);
+    out.ambientConst = static_cast<int>(cA);
     out.slots = slotsOf(after);
     out.added = out.slots - slotsOf(ins);
-    out.temps = static_cast<int>(G) + 1;
+    out.temps = static_cast<int>(H) + 1;
     t = std::move(copy);
+    return true;
+}
+bool PatchWallGiVs(std::vector<DWORD>& t) {
+    if (t.empty() || t[0] != 0xFFFE0300 || t.back() != 0x0000FFFFu) return false;
+    const auto ins = Parse(t);
+    if (ins.empty()) return false;
+    constexpr DWORD kRsqOp = 0x07, kMaxOut = 12;
+    const auto isDclDef = [](DWORD op) { return op == kDcl || op == kDef || op == kDefI || op == kDefB; };
+    int normalIn = -1;
+    std::vector<bool> outUsed(kMaxOut, false);
+    size_t afterLastDcl = 0;
+    for (const Ins& x : ins) {
+        if (IsFlow(x.op)) return false;
+        if (x.op == kDcl) {
+            const DWORD use = t[x.at + 1] & 0x1F, idx = (t[x.at + 1] >> 16) & 0xF, r = t[x.at + 2];
+            if (Type(r) == kInput && use == 3 && idx == 0) normalIn = static_cast<int>(Num(r));
+            if (Type(r) == kOutput) {
+                if (use == 5 && idx == 7) return false; // TEXCOORD7 already written
+                if (Num(r) < kMaxOut) outUsed[Num(r)] = true;
+            }
+            afterLastDcl = End(x);
+            continue;
+        }
+        if (isDclDef(x.op)) continue;
+        for (size_t k = 1; k <= x.len; k++)
+            if ((t[x.at + k] & 0x80000000u) && Type(t[x.at + k]) == kConst && (t[x.at + k] & 0x2000)) return false; // relative addressing
+    }
+    const Usage u = Scan(t, ins);
+    if (normalIn < 0 || u.maxConst >= static_cast<int>(kWallGiVsConst) || u.maxTemp + 3 >= 32 || !afterLastDcl) return false;
+    DWORD out = 0;
+    while (out < kMaxOut && outUsed[out]) out++;
+    if (out >= kMaxOut) return false;
+    // the world triple: three consecutive "dp4 rW.x/.y/.z, rP, cK/cK+1/cK+2" (one rW, one rP, full swizzles, no modifiers)
+    int triple = -1;
+    DWORD W = 0, K = 0;
+    for (size_t i = 0; i + 2 < ins.size(); i++) {
+        bool ok = true;
+        for (size_t j = 0; j < 3 && ok; j++) {
+            const Ins& y = ins[i + j];
+            const DWORD d = t[y.at + 1], a = t[y.at + 2], c = t[y.at + 3];
+            ok = y.op == kDp4 && y.len == 3 && Type(d) == kTemp && WMask(d) == (1u << j) && !(d & 0x00F00000u) && Type(a) == kTemp && Swz(a) == kSwzXYZW &&
+                 !(a & 0x0F000000u) && Type(c) == kConst && Swz(c) == kSwzXYZW && !(c & 0x0F000000u) && Num(d) == Num(t[ins[i].at + 1]) &&
+                 a == t[ins[i].at + 2] && Num(c) == Num(t[ins[i].at + 3]) + j && Num(d) != Num(a);
+        }
+        if (!ok) continue;
+        if (triple >= 0) return false; // two triples: which one is the world position is not known
+        triple = static_cast<int>(i), W = Num(t[ins[i].at + 1]), K = Num(t[ins[i].at + 3]);
+    }
+    if (triple < 0) return false;
+    // the normal decode: the one instruction before the triple writing a temp's .xyz from the normal input and constants only,
+    // that temp's .xyz not written again up to the triple's end
+    int decode = -1;
+    DWORD D = 0;
+    for (int i = 0; i < triple; i++) {
+        const Ins& y = ins[static_cast<size_t>(i)];
+        if (isDclDef(y.op) || y.len < 2 || Type(t[y.at + 1]) != kTemp || (WMask(t[y.at + 1]) & 0x7) != 0x7 || (t[y.at + 1] & 0x00F00000u)) continue;
+        bool normal = false, other = false;
+        for (size_t k = 2; k <= y.len; k++) {
+            const DWORD r = t[y.at + k];
+            if (IsReg(r, kInput, static_cast<DWORD>(normalIn))) normal = true;
+            else if (Type(r) != kConst) other = true;
+        }
+        if (!normal || other) continue;
+        if (decode >= 0) return false;
+        decode = i, D = Num(t[y.at + 1]);
+    }
+    if (decode < 0 || D == W) return false;
+    for (int i = decode + 1; i < triple + 3; i++) {
+        const Ins& y = ins[static_cast<size_t>(i)];
+        if (!isDclDef(y.op) && y.len >= 1 && IsReg(t[y.at + 1], kTemp, D) && (WMask(t[y.at + 1]) & 0x7)) return false;
+    }
+    const DWORD A = static_cast<DWORD>(u.maxTemp + 1), B = A + 1, C = A + 2;
+    const DWORD c0 = kWallGiVsConst, c1 = c0 + 1, cD = c0 + 2, r0 = c0 + 3, r1 = c0 + 4, r2 = c0 + 5;
+    const DWORD X = Sw(0, 0, 0, 0), Y = Sw(1, 1, 1, 1), Z = Sw(2, 2, 2, 2), Wc = Sw(3, 3, 3, 3);
+    // (GiIndirect::WallUvCpu) one constant an instruction
+    const std::vector<DWORD> code = {
+        Op(kDp3, 3), Dst(kTemp, A, 0x1), Src(kTemp, D), Src(kConst, K),     // world normal (the decode through the world rows)
+        Op(kDp3, 3), Dst(kTemp, A, 0x2), Src(kTemp, D), Src(kConst, K + 1),
+        Op(kDp3, 3), Dst(kTemp, A, 0x4), Src(kTemp, D), Src(kConst, K + 2),
+        Op(kDp3, 3), Dst(kTemp, A, 0x8), Src(kTemp, A), Src(kTemp, A),
+        Op(kRsqOp, 2), Dst(kTemp, A, 0x8), Src(kTemp, A, Wc),
+        Op(kMul, 3), Dst(kTemp, A, 0x7), Src(kTemp, A), Src(kTemp, A, Wc),
+        Op(kDp3, 3), Dst(kTemp, C, 0x1), Src(kTemp, A), Src(kConst, r0),    // lot normal N (C)
+        Op(kDp3, 3), Dst(kTemp, C, 0x2), Src(kTemp, A), Src(kConst, r1),
+        Op(kDp3, 3), Dst(kTemp, C, 0x4), Src(kTemp, A), Src(kConst, r2),
+        Op(kMov, 2), Dst(kTemp, A, 0x7), Src(kTemp, W),                     // (world position, 1)
+        Op(kMov, 2), Dst(kTemp, A, 0x8), Src(kConst, cD, Wc),
+        Op(kDp4, 3), Dst(kTemp, B, 0x1), Src(kTemp, A), Src(kConst, r0),    // lot position P (B)
+        Op(kDp4, 3), Dst(kTemp, B, 0x2), Src(kTemp, A), Src(kConst, r1),
+        Op(kDp4, 3), Dst(kTemp, B, 0x4), Src(kTemp, A), Src(kConst, r2),
+        Op(kMax, 3), Dst(kTemp, A, 0x7), Src(kTemp, C), Neg(Src(kTemp, C)), // |N|
+        Op(kMin, 3), Dst(kTemp, A, 0x8), Src(kTemp, A, X), Src(kTemp, A, Z),
+        Op(kMax, 3), Dst(kTemp, A, 0x8), Src(kTemp, A, Wc), Src(kTemp, A, Y),
+        Op(kSlt, 3), Dst(kTemp, A, 0x8), Src(kConst, cD, Y), Src(kTemp, A, Wc), // cap or diagonal: 0.3 < max(min(|x|, |z|), |y|)
+        Op(kSlt, 3), Dst(kTemp, A, 0x1), Src(kTemp, A, X), Src(kTemp, A, Z),    // ns = 1 - s: |x| < |z|
+        // (an lrp's destination may be neither its first nor its third source)
+        Op(kLrp, 4), Dst(kTemp, B, 0x8), Src(kTemp, A, X), Src(kTemp, C, Z), Src(kTemp, C, X), // facing
+        Op(kSlt, 3), Dst(kTemp, A, 0x2), Src(kTemp, B, Wc), Neg(Src(kTemp, B, Wc)),           // facing < 0
+        Op(kAdd, 3), Dst(kTemp, A, 0x2), Src(kTemp, A, Y), Src(kTemp, A, Y),
+        Op(kAdd, 3), Dst(kTemp, A, 0x2), Src(kTemp, A, Y), Src(kTemp, A, X),                   // 1 - s + 2 (facing < 0)
+        Op(kLrp, 4), Dst(kTemp, B, 0x8), Src(kTemp, A, Wc), Src(kConst, cD, Z), Src(kTemp, A, Y), // block: 4 for caps
+        Op(kLrp, 4), Dst(kTemp, C, 0xC), Src(kTemp, A, X), Src(kTemp, B, Sw(0, 0, 2, 0)), Src(kTemp, B, Sw(0, 0, 0, 2)), // z line, w along
+        Op(kAdd, 3), Dst(kTemp, C, 0x4), Src(kTemp, C, Z), Src(kConst, cD, X),
+        Op(kFrc, 2), Dst(kTemp, A, 0x4), Src(kTemp, C, Z),
+        Op(kAdd, 3), Dst(kTemp, C, 0x4), Src(kTemp, C, Z), Neg(Src(kTemp, A, Z)),           // li = floor(line + 0.5)
+        Op(kMul, 3), Dst(kTemp, A, 0x1), Src(kTemp, C, Wc), Src(kConst, c0, X),
+        Op(kMad, 4), Dst(kTemp, A, 0x1), Src(kTemp, B, Wc), Src(kConst, c0, Z), Src(kTemp, A, X),
+        Op(kAdd, 3), Dst(kOutput, out, 0x1), Src(kTemp, A, X), Src(kConst, c1, X),           // u
+        Op(kMul, 3), Dst(kTemp, A, 0x2), Src(kTemp, C, Z), Src(kConst, c0, Wc),
+        Op(kMad, 4), Dst(kTemp, A, 0x2), Src(kTemp, B, Y), Src(kConst, c0, Y), Src(kTemp, A, Y),
+        Op(kAdd, 3), Dst(kOutput, out, 0x2), Src(kTemp, A, Y), Src(kConst, c1, Y),           // v
+    };
+    std::vector<Edit> edits{{End(ins[static_cast<size_t>(triple) + 2]), code}};
+    edits.push_back({afterLastDcl, {Op(kDcl, 2), 0x80000005u | (7u << 16), Dst(kOutput, out, 0x3)}});
+    edits.push_back({1, {Op(kDef, 5), Dst(kConst, cD), F(0.5f), F(0.3f), F(4.0f), F(1.0f)}});
+    Apply(t, std::move(edits));
     return true;
 }
 } // namespace ShaderPatches

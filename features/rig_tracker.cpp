@@ -48,8 +48,12 @@ uintptr_t g_rig = 0;
 int g_depth = 0;
 std::atomic<DWORD> g_drawThread{0};
 
+std::atomic<RigTracker::BindHook> g_bindHook{nullptr};
+bool IsRig(uintptr_t rig);
+
 void __fastcall BinderThunk(void* rig) {
     g_rig = reinterpret_cast<uintptr_t>(rig);
+    if (const RigTracker::BindHook hook = g_bindHook.load(std::memory_order_relaxed); hook && IsRig(g_rig)) hook(g_rig);
     reinterpret_cast<Binder_t>(kBinder)(rig);
 }
 
@@ -68,6 +72,14 @@ void __fastcall InstanceFlushHook(void* self, void*, void* a, void* b, void* c, 
     g_rig = 0; // the batch holds other objects' instances: no rig of ours applies
     oInstanceFlush(self, a, b, c, d, e);
     g_rig = saved;
+}
+
+bool IsRig(uintptr_t rig) {
+    __try {
+        return rig && *reinterpret_cast<const uint32_t*>(rig) == kRigVtable;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
 }
 
 int ReadMode(uintptr_t rig) {
@@ -140,6 +152,8 @@ void Uninstall() {
 }
 
 bool IsInstalled() { return g_installed; }
+
+void SetBindHook(BindHook hook) { g_bindHook.store(hook, std::memory_order_relaxed); }
 
 int CurrentMode() {
     if (!g_installed || g_depth <= 0 || !g_rig || __readfsdword(0x24) != g_drawThread.load(std::memory_order_relaxed)) return -1;

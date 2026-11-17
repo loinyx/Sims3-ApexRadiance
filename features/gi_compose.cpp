@@ -10,7 +10,7 @@ namespace GiCompose {
 const char* const kPixelShader = "sampler2D shown : register(s0); sampler2D incoming : register(s1); float4 k : register(c0);\n"
                                  "float4 main(float2 uv : TEXCOORD0) : COLOR { return float4(k.rgb * lerp(tex2D(shown, uv).rgb, tex2D(incoming, uv).rgb, k.w), 0); }\n";
 const char* const kScatterShader = "sampler2D src : register(s0);\n"
-                                   "float4 main(float3 uv : TEXCOORD0) : COLOR { return float4(tex2D(src, uv.xy).rgb, uv.z); }\n";
+                                   "float4 main(float3 uv : TEXCOORD0) : COLOR { return float4(tex2D(src, uv.xy).rgb * uv.z, uv.z); }\n";
 
 namespace {
 struct V {

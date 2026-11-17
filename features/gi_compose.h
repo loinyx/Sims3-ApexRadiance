@@ -14,10 +14,10 @@ namespace GiCompose {
 
 // ps_2_0: s0 shown slot, s1 incoming slot, c0 = (colour, blend)
 extern const char* const kPixelShader;
-// ps_2_0 (Scatter): s0 the source; a point's TEXCOORD0 = (source uv, alpha written)
+// ps_2_0 (Scatter): s0 the source; a point's TEXCOORD0 = (source uv, alpha written); rgb premultiplied by that alpha (S2-06)
 extern const char* const kScatterShader;
 
-// One pixel of Scatter: dst (a pixel of out) = (src's rgb, alpha)
+// One pixel of Scatter: dst (a pixel of out) = (src's rgb x alpha, alpha)
 struct ScatterPoint {
     uint32_t dst = 0, src = 0;
     float alpha = 0.0f;
