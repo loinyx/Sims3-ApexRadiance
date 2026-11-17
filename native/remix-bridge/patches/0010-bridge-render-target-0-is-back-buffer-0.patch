@@ -1,14 +1,14 @@
-0010: Render target 0 is the implicit swapchain's back buffer 0 object (internal 0016): GetRenderTarget(0) and GetBackBuffer(0, 0) return the same IDirect3DSurface9, as in d3d9 and DXVK. Upstream made a separate place-holder linked to the back buffer (LinkBackBuffer), so code that compares the two by pointer (Apex Radiance's PostScene) never saw the scene and drew a black picture (Sims3-ApexRadiance#59).
+0010: Render target 0 is the implicit swapchain's back buffer 0 object (internal 0016): GetRenderTarget(0) and GetBackBuffer(0, 0) return the same IDirect3DSurface9, as in d3d9 and DXVK. Upstream made a separate place-holder linked to the back buffer (LinkBackBuffer), so code that compares the two by pointer (Apex Radiance's PostScene) never saw the scene and drew a black picture (Sims3-ApexRadiance#59). The back buffer is not counted as an implicit reference to the device: it references the swapchain, and counting it made a new device's first AddRef and Release (a CreateDevice hook, such as the Windows compatibility layer's) destroy the implicit swapchain, so the next GetBackBuffer or Present read a null swapchain.
 
 The server no longer holds a reference on a back buffer it maps for IDirect3DSwapChain9_GetBackBuffer or IDirect3DDevice9Ex_GetRenderTarget: the client only unlinks a back buffer, so that reference was never released. Upstream released back buffer 0's references by accident, through the destroy of its place-holder. Without the place-holder they stayed, and on a DXVK server every Reset failed ("device still has alive losable resources: 1"), the device stayed lost (resolution change, Alt-Tab). Upstream has the same leak for back buffer 1 and later.
 
 Applies after 0001-0009 on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only).
 
 diff --git a/bridge/src/client/d3d9_device.cpp b/bridge/src/client/d3d9_device.cpp
-index 1441038d..7e067a7e 100644
+index 1441038d..cd44788d 100644
 --- a/bridge/src/client/d3d9_device.cpp
 +++ b/bridge/src/client/d3d9_device.cpp
-@@ -4033,28 +4033,18 @@ void Direct3DDevice9Ex_LSS<EnableSync>::initImplicitSwapchain(const D3DPRESENT_P
+@@ -4033,30 +4033,21 @@ void Direct3DDevice9Ex_LSS<EnableSync>::initImplicitSwapchain(const D3DPRESENT_P
  
  template<bool EnableSync>
  void Direct3DDevice9Ex_LSS<EnableSync>::initImplicitRenderTarget() {
@@ -45,9 +45,13 @@ index 1441038d..7e067a7e 100644
 +
 +  m_pImplicitRenderTarget = bridge_cast<Direct3DSurface9_LSS*>(pRenderTarget); // holds the reference GetBackBuffer took
    m_state.renderTargets[0] = MakeD3DAutoPtr(m_pImplicitRenderTarget);
-   m_implicitRefCnt++;
+-  m_implicitRefCnt++;
++  // Not counted in m_implicitRefCnt: the back buffer holds a reference to its swapchain, not to the device. Counted, a
++  // new device's first AddRef and Release would reach the implicit count and destroy the swapchain.
  }
-@@ -4090,10 +4080,13 @@ void Direct3DDevice9Ex_LSS<EnableSync>::initImplicitDepthStencil() {
+ 
+ template<bool EnableSync>
+@@ -4090,10 +4081,12 @@ void Direct3DDevice9Ex_LSS<EnableSync>::initImplicitDepthStencil() {
  template<bool EnableSync>
  void Direct3DDevice9Ex_LSS<EnableSync>::destroyImplicitObjects() {
    // Release implicit RenderTarget
@@ -60,7 +64,6 @@ index 1441038d..7e067a7e 100644
 +  if (m_pImplicitRenderTarget) {
 +    m_pImplicitRenderTarget->Release();
 +    m_pImplicitRenderTarget = nullptr;
-+    --m_implicitRefCnt;
 +  }
    m_state.renderTargets[0].reset(nullptr);
  
@@ -93,3 +96,143 @@ index fb6c57f4..363fa2ff 100644
          }
          assert(SUCCEEDED(hresult));
          SEND_OPTIONAL_SERVER_RESPONSE(hresult, currentUID);
+diff --git a/bridge/test/rtx/unit/meson.build b/bridge/test/rtx/unit/meson.build
+index 25ceb3b0..00c895d6 100644
+--- a/bridge/test/rtx/unit/meson.build
++++ b/bridge/test/rtx/unit/meson.build
+@@ -67,7 +67,7 @@ endif
+ 
+ # Remix API Bridge App Tests
+ # Each x86 app runs against the client and server from a regular bridge build in _output.
+-bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device' ]
++bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device', 'device_refcount_device' ]
+ if (cpu_family == 'x86')
+ foreach name : bridge_app_tests
+   tests += executable(
+diff --git a/bridge/test/rtx/unit/test_device_refcount_device.cpp b/bridge/test/rtx/unit/test_device_refcount_device.cpp
+new file mode 100644
+index 00000000..bcf5f1cb
+--- /dev/null
++++ b/bridge/test/rtx/unit/test_device_refcount_device.cpp
+@@ -0,0 +1,121 @@
++/*
++ * Copyright (c) 2026, NVIDIA CORPORATION. All rights reserved.
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++
++#include <cstdio>
++#include <stdexcept>
++
++#include <wrl/client.h>
++
++#include "test_remix_api_bridge_app.h"
++
++using Microsoft::WRL::ComPtr;
++using namespace bridge_app_test;
++
++namespace {
++  constexpr UINT kSize = 128;
++
++  void check(HRESULT result, const char* pCall) {
++    if (FAILED(result)) {
++      std::printf("FAILED: %s returned 0x%08lX.\n", pCall, static_cast<unsigned long>(result));
++      throw std::runtime_error(pCall);
++    }
++  }
++
++  void expect(bool condition, const char* pWhat) {
++    if (!condition) {
++      std::printf("FAILED: %s.\n", pWhat);
++      throw std::runtime_error(pWhat);
++    }
++  }
++
++  HWND createWindow() {
++    WNDCLASSW windowClass = {};
++    windowClass.lpfnWndProc = DefWindowProcW;
++    windowClass.hInstance = GetModuleHandleW(nullptr);
++    windowClass.lpszClassName = L"BridgeDeviceRefCountTest";
++    RegisterClassW(&windowClass);
++    return CreateWindowExW(0, windowClass.lpszClassName, L"", WS_OVERLAPPEDWINDOW,
++                           0, 0, kSize, kSize, nullptr, nullptr, windowClass.hInstance, nullptr);
++  }
++
++  // A CreateDevice hook that takes and returns a reference, such as a Windows compatibility shim, must leave the
++  // new device's implicit swapchain alive.
++  void testAddRefRelease(IDirect3D9* pD3D, HWND hWnd, BOOL autoDepthStencil) {
++    D3DPRESENT_PARAMETERS present = {};
++    present.Windowed = TRUE;
++    present.SwapEffect = D3DSWAPEFFECT_DISCARD;
++    present.BackBufferFormat = D3DFMT_UNKNOWN;
++    present.BackBufferWidth = kSize;
++    present.BackBufferHeight = kSize;
++    present.hDeviceWindow = hWnd;
++    present.EnableAutoDepthStencil = autoDepthStencil;
++    present.AutoDepthStencilFormat = D3DFMT_D24S8;
++    IDirect3DDevice9* pDevice = nullptr;
++    check(pD3D->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hWnd, D3DCREATE_SOFTWARE_VERTEXPROCESSING,
++                             &present, &pDevice), "CreateDevice");
++    const ULONG added = pDevice->AddRef();
++    const ULONG released = pDevice->Release();
++    std::printf("  AddRef returned %lu, Release returned %lu.\n", added, released);
++    expect(added == 2 && released == 1, "a new device counts its creator's reference");
++    {
++      ComPtr<IDirect3DSurface9> pBackBuffer;
++      check(pDevice->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &pBackBuffer), "GetBackBuffer");
++      ComPtr<IDirect3DSurface9> pRenderTarget;
++      check(pDevice->GetRenderTarget(0, &pRenderTarget), "GetRenderTarget");
++      expect(pBackBuffer.Get() == pRenderTarget.Get(), "render target 0 is back buffer 0");
++    }
++    check(pDevice->Clear(0, nullptr, D3DCLEAR_TARGET, 0xff000000, 1.0f, 0), "Clear");
++    check(pDevice->Present(nullptr, nullptr, nullptr, nullptr), "Present");
++    expect(pDevice->Release() == 0, "the creator's Release destroys the device");
++  }
++}
++
++int main() {
++  std::setvbuf(stdout, nullptr, _IONBF, 0);
++  const HWND hWnd = createWindow();
++  if (hWnd == nullptr) {
++    logLine("FAILED: Could not create a test window.");
++    return 1;
++  }
++  bool passed = false;
++  try {
++    const HMODULE hClient = loadBridgeClient();
++    if (hClient == nullptr) {
++      throw std::runtime_error("loadBridgeClient");
++    }
++    const auto pfnCreate = reinterpret_cast<PFN_Direct3DCreate9>(GetProcAddress(hClient, "Direct3DCreate9"));
++    ComPtr<IDirect3D9> pD3D;
++    pD3D.Attach(pfnCreate != nullptr ? pfnCreate(D3D_SDK_VERSION) : nullptr);
++    if (pD3D == nullptr) {
++      throw std::runtime_error("Direct3DCreate9");
++    }
++    logLine("Testing an AddRef and a Release on a new device without a depth buffer...");
++    testAddRefRelease(pD3D.Get(), hWnd, FALSE);
++    logLine("Testing an AddRef and a Release on a new device with a depth buffer...");
++    testAddRefRelease(pD3D.Get(), hWnd, TRUE);
++    passed = true;
++  } catch (const std::exception&) {
++  }
++  DestroyWindow(hWnd);
++  logLine(passed ? "PASSED" : "FAILED");
++  return passed ? 0 : 1;
++}
