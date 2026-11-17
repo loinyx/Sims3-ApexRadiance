@@ -61,6 +61,7 @@ class Set {
     std::vector<std::array<float, 3>> lamps_;            // the lamps' heads (world): their own objects cast nothing
     size_t budget_ = kBudgetBytes, bytes_ = 0;
     uint32_t gen_ = 0;
+    uint32_t markGen_ = 0; // (MC-4b) moves when InTiles or ServerCasts may answer differently
     Stats st_{};
     uint32_t lampSkips_ = 0;
 
@@ -75,7 +76,7 @@ class Set {
     void Clear() {
         std::lock_guard<std::mutex> lk(mx_);
         objects_.clear(), cache_.clear(), lru_.clear(), missing_.clear(), skipped_.clear(), users_.clear(), tiles_.clear(), resolved_.clear();
-        bytes_ = 0, st_ = {}, gen_++;
+        bytes_ = 0, st_ = {}, gen_++, markGen_++;
     }
     // The object hooks' records (ObjectLegs::TakePlaced), in order
     void Apply(const Object& o) {
@@ -83,9 +84,10 @@ class Set {
         const auto it = objects_.find(o.id);
         if (it != objects_.end()) Use(it->second.lite, -1);
         if (o.removed) {
-            if (it != objects_.end()) objects_.erase(it), skipped_.clear(), gen_++;
+            if (it != objects_.end()) objects_.erase(it), skipped_.clear(), gen_++, markGen_++;
             return;
         }
+        if (it == objects_.end() || it->second.lite != o.lite) markGen_++;
         objects_[o.id] = o;
         Use(o.lite, +1);
         if (cache_.count(o.lite)) gen_++;
@@ -110,7 +112,7 @@ class Set {
     void Fetched(uint64_t lite, Model&& m) {
         std::lock_guard<std::mutex> lk(mx_);
         st_.fetched++;
-        if (!m.tri.empty()) resolved_.insert(lite);
+        if (!m.tri.empty() && resolved_.insert(lite).second) markGen_++;
         if (m.tri.size() / 3 > kMaxModelTris) return missing_.insert(lite), void(st_.tooBig++);
         const size_t b = m.Bytes();
         for (auto it = lru_.end(); bytes_ + b > budget_ && it != lru_.begin();) {
@@ -129,7 +131,8 @@ class Set {
     size_t AppendTo(RtLampProxy::Mesh& out, const float toLot[4][4], float w, float h, size_t maxTris = kMaxTris) {
         std::lock_guard<std::mutex> lk(mx_);
         out.curKind = RtLampProxy::Mesh::kShape;
-        tiles_.clear();
+        std::unordered_set<uint64_t> was;
+        was.swap(tiles_);
         size_t added = 0;
         for (const auto& [id, o] : objects_) {
             const auto c = cache_.find(o.lite);
@@ -169,6 +172,7 @@ class Set {
                 added++;
             }
         }
+        if (tiles_ != was) markGen_++;
         return added;
     }
     // A placed object whose LITE the server resolved to a mesh: with pixelCasts, the per-pixel pass casts it [I: the pass takes
@@ -186,6 +190,10 @@ class Set {
     uint32_t Gen() const {
         std::lock_guard<std::mutex> lk(mx_);
         return gen_;
+    }
+    uint32_t MarkGen() const {
+        std::lock_guard<std::mutex> lk(mx_);
+        return markGen_;
     }
     Stats GetStats() const {
         std::lock_guard<std::mutex> lk(mx_);

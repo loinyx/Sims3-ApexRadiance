@@ -240,8 +240,8 @@ uint32_t g_schedSerial = 0, g_schedFrame = 0;
 // The object hooks' records go to the bridge client's RemixBridge_GiObjects (patch 0020) once a frame; the server reads the
 // game's packages and resolves each LITE to its model's caster mesh. Every object known (its LITE and a matrix, in either order)
 // is sent again when the bridge opens, at world entry and at each lot entered (MC-4: a loaded lot's still objects cast without
-// moving). shortcut: objects attached before the sink is on (the first frame with the feature on) stay unknown until they
-// attach again; read the world's object list if turning the feature on inside a world matters.
+// moving). MC-4b: in developer mode the object hooks learn every object with the sink off too, and opening the sink sends them
+// (ObjectLegs::SetSink): the feature turned on inside a world casts the objects attached before.
 using PFN_GiOpen = HRESULT(__stdcall*)(uint32_t*);
 using PFN_GiObjects = HRESULT(__stdcall*)(const ObjectLegs::Placed*, uint32_t);
 using PFN_GiReadCounters = HRESULT(__stdcall*)(uint32_t*, uint32_t);

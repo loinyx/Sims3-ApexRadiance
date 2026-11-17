@@ -1,6 +1,7 @@
 // Table legs: which object is which model (features/object_legs.h).
 #include "object_legs.h"
 #include "apex_log.h"
+#include "build_flavor.h"
 #include "entry_chain.h"
 #include "game_addresses.h"
 #include "mesh_caster_set.h"
@@ -31,10 +32,14 @@ std::atomic<unsigned long> g_moveThread{0};
 bool g_on[2] = {};
 // Mesh casters: every LITE object's key and matrix, and the records not taken yet (under g_mx)
 std::atomic<bool> g_sink{false};
-ObjectLegs::Feed g_feed;
+ObjectLegs::Feed g_feed{false}; // (under g_mx) objects known while the hooks are in; output while the sink is on
 std::atomic<uint32_t> g_meshed{0};
 
 uint64_t IdOf(uint32_t lo, uint32_t hi) { return static_cast<uint64_t>(hi) << 32 | lo; }
+// (MC-4b) The feed learns objects with the sink off too while developer mode is on (meshCasters is a developer switch): turned on
+// inside a world, the seed sends the objects attached before. shortcut: developer mode itself turned on inside a world still
+// misses them until they attach again; walk the light manager's map (0x006B1430's [this+4] hash map) if that matters
+bool Learning() { return g_sink.load(std::memory_order_relaxed) || !kPublicBuild.load(std::memory_order_relaxed); }
 
 char __fastcall AttachHook(void* manager, void* edx, uint32_t idLo, uint32_t idHi, const uint32_t* key) {
     using Fn = char(__fastcall*)(void*, void*, uint32_t, uint32_t, const uint32_t*);
@@ -43,7 +48,7 @@ char __fastcall AttachHook(void* manager, void* edx, uint32_t idLo, uint32_t idH
     const long seen = g_lites.fetch_add(1, std::memory_order_relaxed);
     uint64_t lite;
     std::memcpy(&lite, key, sizeof lite);
-    if (g_sink.load(std::memory_order_relaxed)) {
+    if (Learning()) {
         std::lock_guard<std::mutex> lk(g_mx);
         g_feed.Attach(IdOf(idLo, idHi), lite);
     }
@@ -65,7 +70,7 @@ char __fastcall MoveHook(void* manager, void* edx, uint32_t idLo, uint32_t idHi,
         g_gen.fetch_add(1, std::memory_order_relaxed), g_hookMoves.fetch_add(1, std::memory_order_relaxed);
         g_moveThread.store(GetCurrentThreadId(), std::memory_order_relaxed);
     }
-    if (moved && g_sink.load(std::memory_order_relaxed)) {
+    if (moved && Learning()) {
         std::lock_guard<std::mutex> lk(g_mx);
         g_feed.Move(IdOf(idLo, idHi), m);
     }
@@ -105,10 +110,13 @@ void MoveStats(uint32_t& hook, unsigned long& thread) {
 bool Hooked() { return g_on[1]; }
 
 void SetSink(bool on) {
-    g_sink.store(on);
-    if (on) return;
-    std::lock_guard<std::mutex> lk(g_mx);
-    g_feed.Clear();
+    size_t seeded = 0, known = 0;
+    {
+        std::lock_guard<std::mutex> lk(g_mx);
+        seeded = g_feed.SetOn(on), known = g_feed.KnownCount();
+        g_sink.store(on);
+    }
+    if (on) LOG_INFO(std::format("[GiMesh] {} objects known as the sink opened, {} sent (attached before it, e.g. the feature turned on inside a world)", known, seeded));
 }
 
 void TakePlaced(std::vector<Placed>& out) {
@@ -125,16 +133,19 @@ uint32_t Seeded() {
     return g_feed.Seeded();
 }
 uint32_t Meshed() { return g_meshed.load(std::memory_order_relaxed); }
+uint32_t MeshGen() {
+    const uint32_t on = (MeshCasterSet::wanted.load(std::memory_order_relaxed) ? 1u : 0u) | (MeshCasterSet::pixelCasts.load(std::memory_order_relaxed) ? 2u : 0u);
+    return MeshCasterSet::g_set.MarkGen() << 2 | on;
+}
 
 void NoteRemoved(uint64_t id) {
-    if (!g_sink.load(std::memory_order_relaxed)) return;
     std::lock_guard<std::mutex> lk(g_mx);
     g_feed.Remove(id);
 }
 
 void NoteShape(uint64_t id, uintptr_t shape) {
     g_gen.fetch_add(1, std::memory_order_relaxed);
-    if (shape && g_sink.load(std::memory_order_relaxed)) {
+    if (shape && Learning()) {
         std::lock_guard<std::mutex> lk(g_mx);
         g_feed.Shape(id, shape);
     }
@@ -153,7 +164,7 @@ void Fill(RoomLightTests::Room& room) {
     int records = 0;
     {
         std::lock_guard<std::mutex> lk(g_mx);
-        // shortcut: a kept room's table takes the tiles' set as of its solve; an object's mesh reaching the tiles later darkens it twice until the room's next solve
+        // (MC-4b) a kept room's table is marked again when MeshGen moves (OutdoorDelta::KeptRooms), not only at its solve
         // (XR-10) with the per-pixel pass casting, an object the server resolved is darkened there: its record leaves the 3D test too
         if (mesh)
             g_meshed.fetch_add(static_cast<uint32_t>(MarkMeshed(room.rec, g_feed, [pixel](uint64_t id) { return MeshCasterSet::g_set.InTiles(id) || (pixel && MeshCasterSet::g_set.ServerCasts(id)); })),
