@@ -3,6 +3,7 @@
 #include "apex_log.h"
 #include "entry_chain.h"
 #include "game_addresses.h"
+#include "mesh_caster_set.h"
 #include <windows.h>
 #include <atomic>
 #include <cstring>
@@ -28,10 +29,10 @@ std::atomic<long> g_lites{0}, g_baked{0}, g_filled{0};
 std::atomic<uint32_t> g_gen{0}, g_hookMoves{0};
 std::atomic<unsigned long> g_moveThread{0};
 bool g_on[2] = {};
-// Mesh casters: every LITE object's key, and the records not taken yet (under g_mx)
+// Mesh casters: every LITE object's key and matrix, and the records not taken yet (under g_mx)
 std::atomic<bool> g_sink{false};
-std::unordered_map<uint64_t, uint64_t> g_liteOf;
-std::unordered_map<uint64_t, ObjectLegs::Placed> g_placed;
+ObjectLegs::Feed g_feed;
+std::atomic<uint32_t> g_meshed{0};
 
 uint64_t IdOf(uint32_t lo, uint32_t hi) { return static_cast<uint64_t>(hi) << 32 | lo; }
 
@@ -44,8 +45,7 @@ char __fastcall AttachHook(void* manager, void* edx, uint32_t idLo, uint32_t idH
     std::memcpy(&lite, key, sizeof lite);
     if (g_sink.load(std::memory_order_relaxed)) {
         std::lock_guard<std::mutex> lk(g_mx);
-        if (g_liteOf.size() >= 65536) g_liteOf.clear(); // (as g_objects: a removed object stays until then)
-        g_liteOf[IdOf(idLo, idHi)] = lite;
+        g_feed.Attach(IdOf(idLo, idHi), lite);
     }
     if (const ObjectLegs::Model* model = ObjectLegs::Baked(lite)) {
         std::lock_guard<std::mutex> lk(g_mx);
@@ -67,11 +67,7 @@ char __fastcall MoveHook(void* manager, void* edx, uint32_t idLo, uint32_t idHi,
     }
     if (moved && g_sink.load(std::memory_order_relaxed)) {
         std::lock_guard<std::mutex> lk(g_mx);
-        const uint64_t id = IdOf(idLo, idHi);
-        if (const auto it = g_liteOf.find(id); it != g_liteOf.end()) {
-            ObjectLegs::Placed& p = g_placed[id];
-            p = {id, it->second, {m[0], m[4], m[8], m[12], m[1], m[5], m[9], m[13], m[2], m[6], m[10], m[14]}, 0, 0};
-        }
+        g_feed.Move(IdOf(idLo, idHi), m);
     }
     if (moved && g_any.load(std::memory_order_relaxed)) {
         std::lock_guard<std::mutex> lk(g_mx);
@@ -112,24 +108,36 @@ void SetSink(bool on) {
     g_sink.store(on);
     if (on) return;
     std::lock_guard<std::mutex> lk(g_mx);
-    g_liteOf.clear(), g_placed.clear();
+    g_feed.Clear();
 }
 
 void TakePlaced(std::vector<Placed>& out) {
-    out.clear();
     std::lock_guard<std::mutex> lk(g_mx);
-    for (const auto& [id, p] : g_placed) out.push_back(p);
-    g_placed.clear();
+    g_feed.Take(out);
 }
+
+size_t Seed() {
+    std::lock_guard<std::mutex> lk(g_mx);
+    return g_feed.Seed();
+}
+uint32_t Seeded() {
+    std::lock_guard<std::mutex> lk(g_mx);
+    return g_feed.Seeded();
+}
+uint32_t Meshed() { return g_meshed.load(std::memory_order_relaxed); }
 
 void NoteRemoved(uint64_t id) {
     if (!g_sink.load(std::memory_order_relaxed)) return;
     std::lock_guard<std::mutex> lk(g_mx);
-    if (g_liteOf.erase(id)) g_placed[id] = {id, 0, {}, 1, 0};
+    g_feed.Remove(id);
 }
 
 void NoteShape(uint64_t id, uintptr_t shape) {
     g_gen.fetch_add(1, std::memory_order_relaxed);
+    if (shape && g_sink.load(std::memory_order_relaxed)) {
+        std::lock_guard<std::mutex> lk(g_mx);
+        g_feed.Shape(id, shape);
+    }
     if (!shape || !g_any.load(std::memory_order_relaxed)) return;
     std::lock_guard<std::mutex> lk(g_mx);
     if (g_objects.count(id)) g_shapes[shape] = id;
@@ -137,11 +145,21 @@ void NoteShape(uint64_t id, uintptr_t shape) {
 }
 
 void Fill(RoomLightTests::Room& room) {
-    if (!g_any.load(std::memory_order_relaxed)) return;
+    const bool pixel = MeshCasterSet::pixelCasts.load(std::memory_order_relaxed);
+    const bool mesh = MeshCasterSet::wanted.load(std::memory_order_relaxed) || pixel;
+    if (!mesh)
+        for (RoomLightTests::Record& rc : room.rec) rc.meshed = false;
+    if (!g_any.load(std::memory_order_relaxed) && !mesh) return;
     int records = 0;
     {
         std::lock_guard<std::mutex> lk(g_mx);
+        // shortcut: a kept room's table takes the tiles' set as of its solve; an object's mesh reaching the tiles later darkens it twice until the room's next solve
+        // (XR-10) with the per-pixel pass casting, an object the server resolved is darkened there: its record leaves the 3D test too
+        if (mesh)
+            g_meshed.fetch_add(static_cast<uint32_t>(MarkMeshed(room.rec, g_feed, [pixel](uint64_t id) { return MeshCasterSet::g_set.InTiles(id) || (pixel && MeshCasterSet::g_set.ServerCasts(id)); })),
+                               std::memory_order_relaxed);
         for (RoomLightTests::Record& rc : room.rec) {
+            if (rc.meshed) continue;
             const auto shape = g_shapes.find(rc.shape);
             if (shape == g_shapes.end()) continue;
             const auto object = g_objects.find(shape->second);

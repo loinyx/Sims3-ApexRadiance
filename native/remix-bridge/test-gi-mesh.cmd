@@ -6,6 +6,8 @@ rem test_gi_mesh_device: a 32-bit D3D9 app through the built bridge pair sends a
 rem with RemixBridge_GiObjects and checks the server's counters (index ready, one model resolved, one missing). With DXVK_X64
 rem naming the d3d9.dll of native\dxvk\build.cmd it then runs the per-pixel pass with and without the chair and compares the
 rem chair's shadow on the floor with a CPU ray cast of the same rays.
+rem It also reads the chair's caster mesh back with RemixBridge_GiMeshFetch / RemixBridge_GiMeshRead (patch 0022), which must equal
+rem the objects file, and times 50 fetches.
 rem Modes: counters (server on system Direct3D 9), on (server on DXVK_X64). Exit code 0: all passed.
 setlocal
 set HERE=%~dp0

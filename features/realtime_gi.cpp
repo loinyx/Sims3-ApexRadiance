@@ -11,6 +11,7 @@
 #include "d3d9_hooks.h"
 #include "game_addresses.h"
 #include "lamp_mark_filter.h"
+#include "mesh_caster_set.h"
 #include "object_legs.h"
 #include "outdoor_delta.h"
 #include "rt_outdoor_lamps.h"
@@ -48,23 +49,75 @@ bool ServerRayQuery() { return false; }
 
 // ---- mesh casters (MC-2, wp/MC.md; render thread, developer mode) ----
 // The object hooks' records go to the bridge client's RemixBridge_GiObjects (patch 0020) once a frame; the server reads the
-// game's packages and resolves each LITE to its model's caster mesh. shortcut: objects placed before the sink is on (the
-// first frame in developer mode) are not sent until they move; send the world's objects at the start if that matters.
+// game's packages and resolves each LITE to its model's caster mesh. Every object known (its LITE and a matrix, in either order)
+// is sent again when the bridge opens, at world entry and at each lot entered (MC-4: a loaded lot's still objects cast without
+// moving). shortcut: objects attached before the sink is on (the first frame with the feature on) stay unknown until they
+// attach again; read the world's object list if turning the feature on inside a world matters.
 using PFN_GiOpen = HRESULT(__stdcall*)(uint32_t*);
 using PFN_GiObjects = HRESULT(__stdcall*)(const ObjectLegs::Placed*, uint32_t);
 using PFN_GiReadCounters = HRESULT(__stdcall*)(uint32_t*, uint32_t);
+using PFN_GiMeshFetch = HRESULT(__stdcall*)(uint64_t, uint32_t*);
+using PFN_GiMeshRead = HRESULT(__stdcall*)(uint32_t, float*, uint32_t, uint32_t*, uint32_t, uint32_t*, uint32_t*);
 struct MeshCasters {
     PFN_GiOpen open = nullptr;
     PFN_GiObjects send = nullptr;
     PFN_GiReadCounters counters = nullptr;
+    PFN_GiMeshFetch fetch = nullptr; // (meshTiles, bridge patch 0022)
+    PFN_GiMeshRead read = nullptr;
     bool started = false, opened = false, off = false;
+    uint32_t ticket = 0;  // the mesh fetch in flight
+    uint64_t lite = 0;
+    uint32_t fetchFrames = 0;
+    bool seedDue = false; // (MC-4) every known object out again at the next send
+    uint64_t seedLot = 0; // the lot the last lot-entry seed was for
 } g_mesh;
 std::vector<ObjectLegs::Placed> g_placed;
 
 void MeshOff(const char* why) {
     g_mesh.off = true;
+    MeshCasterSet::wanted.store(false);
+    MeshCasterSet::g_set.Clear();
     ObjectLegs::SetSink(false);
     LOG_INFO(std::format("[GiMesh] off: {}", why));
+}
+
+// (meshTiles) the placed objects into the tiles' set, and one caster mesh read back from the server at a time
+// (XR-10: also with pixelShadows, where the answers tell which objects the per-pixel pass casts; the tiles stay off then)
+void MeshTilesFrame() {
+    if (g_options.meshTiles && !MeshCasterSet::wanted.load(std::memory_order_relaxed)) MeshCasterSet::wanted.store(true);
+    for (const ObjectLegs::Placed& p : g_placed) {
+        MeshCasterSet::Object o{p.id, p.lite, {}, (p.flags & 1) != 0};
+        std::memcpy(o.m, p.m, sizeof o.m);
+        MeshCasterSet::g_set.Apply(o);
+    }
+    static std::vector<float> s_pos;
+    static std::vector<uint32_t> s_tri;
+    if (g_mesh.ticket) {
+        constexpr uint32_t kMax = 21846; // (what the bridge's 256 KB slot holds at most)
+        s_pos.resize(kMax * 3), s_tri.resize(kMax * 3);
+        uint32_t nv = 0, nt = 0;
+        const HRESULT hr = g_mesh.read(g_mesh.ticket, s_pos.data(), kMax, s_tri.data(), kMax, &nv, &nt);
+        if (hr == S_FALSE) return void(g_mesh.fetchFrames++);
+        g_mesh.ticket = 0;
+        if (hr == S_OK) {
+            MeshCasterSet::Model m;
+            m.pos.assign(s_pos.begin(), s_pos.begin() + nv * 3), m.tri.assign(s_tri.begin(), s_tri.begin() + nt * 3);
+            MeshCasterSet::g_set.Fetched(g_mesh.lite, std::move(m));
+        } else if (hr == D3DERR_NOTFOUND || hr == D3DERR_MOREDATA)
+            MeshCasterSet::g_set.Missing(g_mesh.lite);
+        else
+            return MeshOff("RemixBridge_GiMeshRead failed");
+        // (the read-back buffers, 512 KB, are dropped once nothing is left to fetch)
+    }
+    uint64_t lite = 0;
+    if (!MeshCasterSet::g_set.NextFetch(lite)) {
+        std::vector<float>().swap(s_pos), std::vector<uint32_t>().swap(s_tri);
+        return;
+    }
+    uint32_t ticket = 0;
+    const HRESULT hr = g_mesh.fetch(lite, &ticket);
+    if (hr == S_OK) g_mesh.ticket = ticket, g_mesh.lite = lite;
+    else if (hr != D3DERR_WASSTILLDRAWING) MeshOff("RemixBridge_GiMeshFetch failed");
 }
 
 void MeshFrame() {
@@ -77,6 +130,11 @@ void MeshFrame() {
         g_mesh.counters = bridge ? reinterpret_cast<PFN_GiReadCounters>(GetProcAddress(bridge, "RemixBridge_GiReadCounters")) : nullptr;
         if (!g_mesh.open || !g_mesh.send || !g_mesh.counters) return MeshOff("the d3d9.dll in Bin has no RemixBridge_GiObjects (bridge patch 0020)");
         if (!ObjectLegs::Hooked()) return MeshOff("the object hooks are not installed (Night Lights off, or the game code differs)");
+        if (g_options.meshTiles || g_options.pixelShadows) {
+            g_mesh.fetch = reinterpret_cast<PFN_GiMeshFetch>(GetProcAddress(bridge, "RemixBridge_GiMeshFetch"));
+            g_mesh.read = reinterpret_cast<PFN_GiMeshRead>(GetProcAddress(bridge, "RemixBridge_GiMeshRead"));
+            if (!g_mesh.fetch || !g_mesh.read) LOG_INFO("[GiMesh] mesh read-back off (meshTiles, and the per-pixel pass's darkened-once gate): the d3d9.dll in Bin has no RemixBridge_GiMeshFetch (bridge patch 0022)");
+        }
         ObjectLegs::SetSink(true);
     }
     if (!g_mesh.opened) {
@@ -84,11 +142,13 @@ void MeshFrame() {
         const HRESULT hr = g_mesh.open(&level);
         if (hr == S_FALSE) return;
         if (FAILED(hr)) return MeshOff(hr == E_NOTIMPL ? "client.giServer is off in the bridge's bridge.conf" : "the bridge's GI open failed");
-        g_mesh.opened = true;
+        g_mesh.opened = true, g_mesh.seedDue = true;
         LOG_INFO(std::format("[GiMesh] on: objects go to the bridge server (GI level {})", level));
     }
+    if (g_mesh.seedDue) g_mesh.seedDue = false, ObjectLegs::Seed();
     ObjectLegs::TakePlaced(g_placed);
-    if (!g_placed.empty() && FAILED(g_mesh.send(g_placed.data(), static_cast<uint32_t>(g_placed.size())))) MeshOff("RemixBridge_GiObjects failed");
+    if (!g_placed.empty() && FAILED(g_mesh.send(g_placed.data(), static_cast<uint32_t>(g_placed.size())))) return MeshOff("RemixBridge_GiObjects failed");
+    if (g_mesh.fetch && g_mesh.read) MeshTilesFrame();
 }
 
 // The server's object counters (words 14-21 of RemixBridge_GiReadCounters), read back by the runner job mesh-casters-smoke
@@ -96,8 +156,13 @@ void MeshLog() {
     uint32_t w[22] = {};
     if (!g_mesh.opened || g_mesh.off || FAILED(g_mesh.counters(w, 22))) return;
     const uint32_t objects = w[14], resolved = w[15], missing = w[16];
-    LOG_INFO(std::format("[GiMesh] objects={} resolved={} missing={} missingShare={:.1f}% indexReady={} links={} indexMs={} dropped={}", objects, resolved,
-                         missing, resolved + missing ? 100.0 * missing / (resolved + missing) : 0.0, w[17], w[18], w[19], w[20]));
+    LOG_INFO(std::format("[GiMesh] objects={} resolved={} missing={} missingShare={:.1f}% indexReady={} links={} indexMs={} dropped={} seeded={}", objects, resolved,
+                         missing, resolved + missing ? 100.0 * missing / (resolved + missing) : 0.0, w[17], w[18], w[19], w[20], ObjectLegs::Seeded()));
+    if (!g_mesh.fetch) return;
+    const MeshCasterSet::Stats s = MeshCasterSet::g_set.GetStats();
+    LOG_INFO(std::format("[GiMeshTiles] objects={} models={} bytes={} fetched={} missing={} tooBig={} evicted={} overBudget={} lampSkips={} serverFetches={} waitFrames={} tileTris={} meshedRecords={}",
+                         s.objects, s.models, s.bytes, s.fetched, s.missing, s.tooBig, s.evicted, s.overBudget, s.lampSkips, w[21], g_mesh.fetchFrames,
+                         RtOutdoorLamps::MeshTileTris(), ObjectLegs::Meshed()));
 }
 
 // ---- lamp snapshot (render thread) ----
@@ -336,6 +401,13 @@ void UpdateLamps() {
 void OnPresent() {
     ++g_frames;
     UpdateLamps();
+    if (g_options.meshTiles && MeshCasterSet::wanted.load(std::memory_order_relaxed)) {
+        std::vector<std::array<float, 3>> heads;
+        for (const Lamp& l : g_lamps) heads.push_back({l.pos[0], l.pos[1], l.pos[2]});
+        MeshCasterSet::g_set.SetLamps(heads);
+    }
+    // (MC-4) a seed at world entry and at each lot entered
+    if (g_worldFrames == 1 || (g_activeLot && g_activeLot != g_mesh.seedLot)) g_mesh.seedDue = true, g_mesh.seedLot = g_activeLot;
     MeshFrame();
     const DWORD now = GetTickCount();
     if (g_lastLog == 0) g_lastLog = now;
@@ -386,7 +458,7 @@ bool Start(const Options& o, std::string* error) {
         return false;
     }
     g_running = true;
-    if (o.pixelShadows) GiPixelShadows::Start({o.pixelView, o.pixelTestCaster});
+    if (o.pixelShadows) GiPixelShadows::Start({o.pixelView, o.pixelTestCaster, o.meshCasters});
     // read back by the test harness (design.md section 6): logged by UpdateLamps in a world, with lots = the GI lots then
     g_startLine = std::format("cap={} scale={} indirect={} backend={}", kCapNames[o.solveCap], o.scale, kIndirectNames[o.indirect],
                               kBackendNames[static_cast<int>(backend)]);
@@ -401,6 +473,7 @@ void Stop() {
     GiPixelShadows::Stop();
     D3D9Hooks::UnregisterAll(kPatchName);
     if (g_options.meshCasters) ObjectLegs::SetSink(false);
+    if (g_options.meshTiles || g_options.pixelShadows) MeshCasterSet::wanted.store(false), MeshCasterSet::pixelCasts.store(false), MeshCasterSet::g_set.Clear();
     g_running = false;
     LOG_INFO("[RealtimeGI] Off");
 }
@@ -424,13 +497,15 @@ class RealtimeGiPatch : public ApexPatch {
         RegisterIntSetting(&pixelView_, "pixelView", 0, 0, 2, "Developer view of the per-pixel shadows: 0 = off, 1 = filtered mask, 2 = raw mask");
         RegisterBoolSetting(&pixelTestCaster_, "pixelTestCaster", false, "Developer: one test capsule under the strongest lamp");
         RegisterBoolSetting(&meshCasters_, "meshCasters", false, "Developer mode: give the bridge server every object's own mesh as a shadow caster");
+        RegisterBoolSetting(&meshTiles_, "meshTiles", false, "Developer mode: draw every object's own mesh into the lamps' shadow tiles (needs the bridge)");
     }
 
     bool Install() override {
         if (isEnabled) return true;
         lastError.clear();
         std::string error;
-        const RealtimeGI::Options o{lots_, solveCap_, 1 << scale_, indirect_, static_cast<RealtimeGI::Backend>(backend_), debugLampTable_, pixelShadows_, pixelView_, pixelTestCaster_, meshCasters_ && !kPublicBuild};
+        const RealtimeGI::Options o{lots_, solveCap_, 1 << scale_, indirect_, static_cast<RealtimeGI::Backend>(backend_), debugLampTable_, pixelShadows_, pixelView_, pixelTestCaster_,
+                                    (meshCasters_ || meshTiles_) && !kPublicBuild, meshTiles_ && !kPublicBuild};
         if (!RealtimeGI::Start(o, &error)) return Fail(error);
         isEnabled = true;
         return true;
@@ -446,7 +521,7 @@ class RealtimeGiPatch : public ApexPatch {
 
   private:
     int backend_ = 0, lots_ = 0, solveCap_ = 0, scale_ = 0, indirect_ = 0;
-    bool debugLampTable_ = false, pixelShadows_ = false, pixelTestCaster_ = false, meshCasters_ = false;
+    bool debugLampTable_ = false, pixelShadows_ = false, pixelTestCaster_ = false, meshCasters_ = false, meshTiles_ = false;
     int pixelView_ = 0;
 };
 

@@ -1,6 +1,6 @@
 {
   "id": "mesh-casters-smoke",
-  "description": "Mesh casters (MC-2, wp/MC.md): with meshCasters on (developer mode) the objects of the loaded world go to the bridge server, which reads the game's packages once and resolves each object's LITE to its model's caster mesh. Needs the bridge pair of native/remix-bridge with patch 0020 in Bin (client.giServer on in its bridge.conf). Passes when the counter line shows the index ready, objects and resolved models over 0 and no dropped record; the missing share is printed for the record (custom content and objects without a mesh).",
+  "description": "Mesh casters (MC-2, wp/MC.md): with meshCasters on (developer mode) the objects of the loaded world go to the bridge server, which reads the game's packages once and resolves each object's LITE to its model's caster mesh. Needs the bridge pair of native/remix-bridge with patch 0020 in Bin (client.giServer on in its bridge.conf). Passes when the counter line shows the index ready, objects and resolved models over 0 and no dropped record; the missing share is printed for the record (custom content and objects without a mesh). Variant fallback: MC-3 (wp/MC-3.md): meshTiles on as well. Each placed object's caster mesh is read back from the bridge server (patch 0022) into Apex's cache and drawn into the physical indoor lamps' shadow tiles (the Direct3D 9 tier). Passes when the tiles' occluders carry mesh caster triangles and the cache holds models; fails when the read-back is missing or the export failed. MC-4 (wp/MC-4.md): both variants expect seeded over 0 (every known object sent again at world entry and lot entry, still objects included); the fallback line prints meshedRecords (3D records left to the tiles, each object darkened once).",
   "save": "ApexTest-Night",
   "toml": {
     "ui": {
@@ -20,12 +20,35 @@
       },
       "expect": [
         "\\[GiMesh\\] on: objects go to the bridge server",
-        "\\[GiMesh\\] objects=[1-9]\\d* resolved=[1-9]\\d* missing=\\d+ missingShare=\\d+\\.\\d% indexReady=1 links=[1-9]\\d* indexMs=\\d+ dropped=0"
+        "\\[GiMesh\\] objects=[1-9]\\d* resolved=[1-9]\\d* missing=\\d+ missingShare=\\d+\\.\\d% indexReady=1 links=[1-9]\\d* indexMs=\\d+ dropped=0 seeded=[1-9]\\d*"
       ],
       "fail": [
         "\\[GiMesh\\] off: ",
         "\\[GiMesh\\] objects=.* dropped=[1-9]",
         "\\[GiMesh\\] objects=.* indexReady=2"
+      ]
+    },
+    "fallback": {
+      "toml": {
+        "patches.RealtimeGI": {
+          "enabled": true,
+          "meshCasters": true,
+          "meshTiles": true
+        },
+        "patches.NightTerrainRelight": {
+          "roomLampModel": "physical"
+        }
+      },
+      "expect": [
+        "\\[GiMesh\\] on: objects go to the bridge server",
+        "\\[GiMesh\\] objects=.* seeded=[1-9]\\d*",
+        "\\[GiMeshTiles\\] objects=[1-9]\\d* models=[1-9]\\d* bytes=\\d+ fetched=[1-9]\\d* .* tileTris=[1-9]\\d*",
+        "Physical indoor lamps' occluders: \\d+ triangles with open tops \\(\\d+ quadrants opened, \\d+ stair triangles, [1-9]\\d* mesh caster triangles\\)"
+      ],
+      "fail": [
+        "\\[GiMesh\\] off: ",
+        "\\[GiMesh\\] meshTiles off: ",
+        "\\[GiMesh\\] objects=.* dropped=[1-9]"
       ]
     }
   },

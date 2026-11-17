@@ -81,6 +81,7 @@ bool OwnLotLaw(uintptr_t light, GpuLampLaw::Lamp& out);
 bool LotXform(uintptr_t mgr, float out[16]);
 // Render thread: the generation of the occluders the kept shadow tiles use (physical indoor lamps' open tops), 0 none
 uint32_t KeptMeshGen();
+size_t MeshTileTris(); // (any thread) the mesh casters' triangles in the tiles' occluders now (RealtimeGI meshTiles, wp/MC-3.md)
 bool RoomOpenAbove(int story, int room); // (render thread) the physical occluders opened that room's ceiling to the story above
 // Any thread (physical indoor lamps, stage 5): the lot whose open-top build (RtLampProxy::Build(lot, mesh, true)) is the kept
 // shadow tiles' occluders now, and its generation; null while none is uploaded

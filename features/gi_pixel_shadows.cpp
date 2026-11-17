@@ -16,6 +16,7 @@
 #include "gi_pixel_filter_hlsl.h"
 #include "gi_sim_capsules.h"
 #include "penumbra.h"
+#include "mesh_caster_set.h"
 #include "d3d9_hooks.h"
 #include "sim_receiver_ids.h"
 #include <cstddef>
@@ -241,6 +242,7 @@ const char* StateName(uint32_t s) {
 }
 void GoOff(const std::string& why) {
     g.off = true;
+    MeshCasterSet::pixelCasts.store(false);
     LOG_INFO("[GiPixel] off: " + why);
 }
 
@@ -261,7 +263,8 @@ bool Opened() {
     if (state != 1) return GoOff(StateName(state)), false;
     if (!g.loggedOn) {
         g.loggedOn = true;
-        LOG_INFO(std::format("[GiPixel] On: view={} testCaster={}", g.o.view, g.o.testCaster ? 1 : 0));
+        LOG_INFO(std::format("[GiPixel] On: view={} testCaster={} meshCasters={}", g.o.view, g.o.testCaster ? 1 : 0, g.o.meshCasters ? 1 : 0));
+        MeshCasterSet::pixelCasts.store(g.o.meshCasters); // (XR-10) objects the server casts leave the Direct3D 9 tests
     }
     return true;
 }
@@ -520,6 +523,7 @@ void Start(const Options& o) {
 
 void Stop() {
     if (!g.active) return;
+    MeshCasterSet::pixelCasts.store(false);
     PostScene::Remove(Effect);
     D3D9Hooks::UnregisterAll(kHookName);
     ReleaseSimShaders();
