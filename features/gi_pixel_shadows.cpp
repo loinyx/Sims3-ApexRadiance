@@ -15,6 +15,8 @@
 #include "gbuffer_motion.h"
 #include "gi_pixel_filter_hlsl.h"
 #include "gi_sim_capsules.h"
+#include "penumbra.h"
+#include "mesh_caster_set.h"
 #include "d3d9_hooks.h"
 #include "sim_receiver_ids.h"
 #include <cstddef>
@@ -35,8 +37,11 @@ namespace {
 
 constexpr int kOrder = PostScene::kAmbientOcclusion - 3; // after G-buffer motion (-5), before Ambient Occlusion
 constexpr D3DFORMAT kFormat = D3DFMT_A16B16G16R16F;      // the bridge's outputs must be this
-// Look constants (XR-10 decides them). UNVERIFIED in game
-constexpr float kLampRadius = 0.10f, kBias = 0.01f, kAmbient = 0.05f;
+// Look constants (wp/XR-10.md). The lamp's ball is Shadow softness (Penumbra::Radius(), the radius the texel layers' solve
+// gets too, S2-01b), so the pixel shadows' penumbra matches the walls' and the layers'. kBias: the ray's start off the
+// surface along the guide's normal, in metres (1 cm: the quarter guide's depth error at 10 m stays under it). kAmbient: the
+// share of a pixel's light no lamp ray accounts for (research 16 section 4.1, the floor of the multiplier). UNVERIFIED in game
+constexpr float kBias = 0.01f, kAmbient = 0.05f;
 constexpr float kClipCaster = 1.5f; // XR-05's sigma near a moved caster
 
 // The filter's source with the INTZ device depth linearised for UpsamplePS (d = A - near A / z, so z / far = (A - 1) / (A - d)
@@ -100,6 +105,7 @@ struct State {
     bool havePrev = false;
     float prevVp[4][4] = {};
     uint32_t lampSerial = 0, frame = 0;
+    float lampRadius = 0; // Shadow softness of the last pass: a change resets the history as a lamp change does
     unsigned sent = 0, refused = 0;
     unsigned long long lastLog = 0;
     GiPixelBlock block{};
@@ -113,11 +119,13 @@ struct State {
     struct SimDraw {
         double C[4][4];
         float median[3];
+        int fit = 0; // capsules fitted to the bones (model space); 0: the fixed column (XR-10)
+        GiSimCapsules::Capsule caps[GiSimCapsules::kMaxPerSim];
     };
     std::vector<SimDraw> simDraws;
-    std::vector<GiSimCapsules::Root> prevSims;
-    uint32_t sims = 0;
-    unsigned long long simDrawsSeen = 0, simDrawsNoChain = 0, simDrawsOtherCamera = 0;
+    std::vector<GiSimCapsules::Sim> prevSims;
+    uint32_t sims = 0, simsFit = 0;
+    unsigned long long simDrawsSeen = 0, simDrawsNoChain = 0, simDrawsOtherCamera = 0, simDrawsFit = 0;
 } g;
 
 constexpr const char* kHookName = "GiPixelShadows";
@@ -175,7 +183,10 @@ void NoteSimDraw(D3D9Hooks::DeviceContext& ctx) {
     if (!scene || g.simDraws.size() >= 1024) return;
     State::SimDraw d;
     GiSimCapsules::ClipOf(g.vsc, ch, d.C);
-    GiSimCapsules::BoneMedian(g.vsc, std::min(g.paletteRegs, 180) / 3, d.median);
+    const int bones = std::min(g.paletteRegs, 180) / 3;
+    GiSimCapsules::BoneMedian(g.vsc, bones, d.median);
+    if (const GiSimCapsules::Rig* rig = GiSimCapsules::RigOf(GiSimCapsules::GameRigs(), bones)) d.fit = GiSimCapsules::FitRig(g.vsc, bones, *rig, d.caps);
+    g.simDrawsFit += d.fit > 0;
     g.simDraws.push_back(d);
 }
 void InstallSimHooks() {
@@ -204,20 +215,21 @@ void InstallSimHooks() {
 
 // This frame's Sims from its Sim draws (the camera is final now), into the block after any test capsule
 void FillSims(const float vp[4][4]) {
-    std::vector<GiSimCapsules::Root> roots;
+    std::vector<GiSimCapsules::Sim> draws;
     for (const State::SimDraw& d : g.simDraws) {
         double M[4][4];
-        GiSimCapsules::Root r;
         if (!GiSimCapsules::WorldOf(d.C, vp, M)) {
             g.simDrawsOtherCamera++;
             continue;
         }
-        GiSimCapsules::Apply(M, d.median, r.p);
-        roots.push_back(r);
+        GiSimCapsules::Sim& s = draws.emplace_back();
+        GiSimCapsules::Apply(M, d.median, s.root.p);
+        GiSimCapsules::ToWorld(M, d.caps, d.fit, s);
     }
     g.simDraws.clear();
-    const std::vector<GiSimCapsules::Root> sims = GiSimCapsules::Merge(roots, g.block.cam, kGiPixelCasters);
+    const std::vector<GiSimCapsules::Sim> sims = GiSimCapsules::Merge(draws, g.block.cam, kGiPixelCasters);
     g.sims = GiSimCapsules::Fill(g.block, sims, g.prevSims);
+    g.simsFit = static_cast<uint32_t>(std::count_if(sims.begin(), sims.begin() + std::min<size_t>(g.sims, sims.size()), [](const GiSimCapsules::Sim& s) { return s.n > 0; }));
     g.prevSims = sims;
 }
 
@@ -230,6 +242,7 @@ const char* StateName(uint32_t s) {
 }
 void GoOff(const std::string& why) {
     g.off = true;
+    MeshCasterSet::pixelCasts.store(false);
     LOG_INFO("[GiPixel] off: " + why);
 }
 
@@ -250,7 +263,8 @@ bool Opened() {
     if (state != 1) return GoOff(StateName(state)), false;
     if (!g.loggedOn) {
         g.loggedOn = true;
-        LOG_INFO(std::format("[GiPixel] On: view={} testCaster={}", g.o.view, g.o.testCaster ? 1 : 0));
+        LOG_INFO(std::format("[GiPixel] On: view={} testCaster={} meshCasters={}", g.o.view, g.o.testCaster ? 1 : 0, g.o.meshCasters ? 1 : 0));
+        MeshCasterSet::pixelCasts.store(g.o.meshCasters); // (XR-10) objects the server casts leave the Direct3D 9 tests
     }
     return true;
 }
@@ -339,7 +353,7 @@ void FillLamps() {
     for (size_t i = 0; i < n; i++) {
         GiPixelLamp& o = g.block.lamp[i];
         std::memcpy(o.pos, picks[i].l->pos, sizeof o.pos), std::memcpy(o.col, picks[i].l->colour, sizeof o.col);
-        o.radius = kLampRadius, o.pad = 0;
+        o.radius = Penumbra::Radius(), o.pad = 0;
     }
     // No static boxes: furniture comes as mesh casters (MC-2, meshCasters), which the bridge server adds itself
     g.block.capsules = g.block.casters = g.block.boxes = 0;
@@ -386,8 +400,8 @@ void LogCounters() {
     uint32_t w[9] = {}; // util_gi_pixel.h GiPixelShared: state, passes, faults, rays low / high, raysLast, gpuUs, width, height
     if (g.counters(w, 9) != S_OK) return;
     const std::string line = std::format("[GiPixel] passes={} rays={} raysLast={} gpuUs={} size={}x{} faults={} sent={} refused={} sims={} simDraws={} "
-                                         "noChain={} otherCamera={}", w[1], (static_cast<uint64_t>(w[4]) << 32) | w[3], w[5], w[6], w[7], w[8], w[2], g.sent,
-                                         g.refused, g.sims, g.simDrawsSeen, g.simDrawsNoChain, g.simDrawsOtherCamera);
+                                         "noChain={} otherCamera={} simsFit={} simDrawsFit={}", w[1], (static_cast<uint64_t>(w[4]) << 32) | w[3], w[5], w[6], w[7], w[8], w[2], g.sent,
+                                         g.refused, g.sims, g.simDrawsSeen, g.simDrawsNoChain, g.simDrawsOtherCamera, g.simsFit, g.simDrawsFit);
     if (w[2] || g.refused) LOG_WARNING(line);
     else LOG_INFO(line);
 }
@@ -412,9 +426,9 @@ void Effect(IDirect3DDevice9* dev) {
     // reset: no history yet, a camera cut, or a lamp change; still: the camera did not move
     double D[4][4] = {};
     const bool haveD = g.havePrev && GBufferMotion::Reproject(vp, g.prevVp, D);
-    const bool reset = !haveD || GBufferMotion::IsCut(D) || RealtimeGI::LampSerial() != g.lampSerial;
+    const bool reset = !haveD || GBufferMotion::IsCut(D) || RealtimeGI::LampSerial() != g.lampSerial || Penumbra::Radius() != g.lampRadius;
     const bool still = haveD && std::memcmp(vp, g.prevVp, sizeof vp) == 0;
-    g.lampSerial = RealtimeGI::LampSerial();
+    g.lampSerial = RealtimeGI::LampSerial(), g.lampRadius = Penumbra::Radius();
     std::memcpy(g.prevVp, vp, sizeof vp);
     g.havePrev = true;
     g.cur ^= 1;
@@ -509,6 +523,7 @@ void Start(const Options& o) {
 
 void Stop() {
     if (!g.active) return;
+    MeshCasterSet::pixelCasts.store(false);
     PostScene::Remove(Effect);
     D3D9Hooks::UnregisterAll(kHookName);
     ReleaseSimShaders();

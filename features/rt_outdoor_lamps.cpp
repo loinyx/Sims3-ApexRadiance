@@ -2310,7 +2310,8 @@ void Frame(IDirect3DDevice9* dev) {
     // occluders again once it was quiet for 2 s, at most every 5 s, not while a lamp is dragged
     static uint32_t s_meshSeen = 0, s_meshUsed = 0;
     static DWORD s_meshChangedAt = 0, s_meshUploadAt = 0;
-    const bool meshOn = MeshCasterSet::wanted.load(std::memory_order_relaxed);
+    // (XR-10) with the per-pixel pass casting the meshes, the tiles take none: each object darkened once
+    const bool meshOn = MeshCasterSet::wanted.load(std::memory_order_relaxed) && !MeshCasterSet::pixelCasts.load(std::memory_order_relaxed);
     const uint32_t meshGen = meshOn ? MeshCasterSet::g_set.Gen() + 1 : 0;
     if (meshGen != s_meshSeen) s_meshSeen = meshGen, s_meshChangedAt = stairNow;
     const bool meshDue = proxy == g_openUsed && meshGen != s_meshUsed && stairNow - s_meshChangedAt >= 2000 && stairNow - s_meshUploadAt >= 5000 &&

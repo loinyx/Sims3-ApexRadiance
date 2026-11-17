@@ -234,8 +234,10 @@ uint32_t g_schedSerial = 0, g_schedFrame = 0;
 
 // ---- mesh casters (MC-2, wp/MC.md; render thread, developer mode) ----
 // The object hooks' records go to the bridge client's RemixBridge_GiObjects (patch 0020) once a frame; the server reads the
-// game's packages and resolves each LITE to its model's caster mesh. shortcut: objects placed before the sink is on (the
-// first frame in developer mode) are not sent until they move; send the world's objects at the start if that matters.
+// game's packages and resolves each LITE to its model's caster mesh. Every object known (its LITE and a matrix, in either order)
+// is sent again when the bridge opens, at world entry and at each lot entered (MC-4: a loaded lot's still objects cast without
+// moving). shortcut: objects attached before the sink is on (the first frame with the feature on) stay unknown until they
+// attach again; read the world's object list if turning the feature on inside a world matters.
 using PFN_GiOpen = HRESULT(__stdcall*)(uint32_t*);
 using PFN_GiObjects = HRESULT(__stdcall*)(const ObjectLegs::Placed*, uint32_t);
 using PFN_GiReadCounters = HRESULT(__stdcall*)(uint32_t*, uint32_t);
@@ -251,6 +253,8 @@ struct MeshCasters {
     uint32_t ticket = 0;  // the mesh fetch in flight
     uint64_t lite = 0;
     uint32_t fetchFrames = 0;
+    bool seedDue = false; // (MC-4) every known object out again at the next send
+    uint64_t seedLot = 0; // the lot the last lot-entry seed was for
 } g_mesh;
 std::vector<ObjectLegs::Placed> g_placed;
 
@@ -263,8 +267,9 @@ void MeshOff(const char* why) {
 }
 
 // (meshTiles) the placed objects into the tiles' set, and one caster mesh read back from the server at a time
+// (XR-10: also with pixelShadows, where the answers tell which objects the per-pixel pass casts; the tiles stay off then)
 void MeshTilesFrame() {
-    if (!MeshCasterSet::wanted.load(std::memory_order_relaxed)) MeshCasterSet::wanted.store(true);
+    if (g_options.meshTiles && !MeshCasterSet::wanted.load(std::memory_order_relaxed)) MeshCasterSet::wanted.store(true);
     for (const ObjectLegs::Placed& p : g_placed) {
         MeshCasterSet::Object o{p.id, p.lite, {}, (p.flags & 1) != 0};
         std::memcpy(o.m, p.m, sizeof o.m);
@@ -310,10 +315,10 @@ void MeshFrame() {
         g_mesh.counters = bridge ? reinterpret_cast<PFN_GiReadCounters>(GetProcAddress(bridge, "RemixBridge_GiReadCounters")) : nullptr;
         if (!g_mesh.open || !g_mesh.send || !g_mesh.counters) return MeshOff("the d3d9.dll in Bin has no RemixBridge_GiObjects (bridge patch 0020)");
         if (!ObjectLegs::Hooked()) return MeshOff("the object hooks are not installed (Night Lights off, or the game code differs)");
-        if (g_options.meshTiles) {
+        if (g_options.meshTiles || g_options.pixelShadows) {
             g_mesh.fetch = reinterpret_cast<PFN_GiMeshFetch>(GetProcAddress(bridge, "RemixBridge_GiMeshFetch"));
             g_mesh.read = reinterpret_cast<PFN_GiMeshRead>(GetProcAddress(bridge, "RemixBridge_GiMeshRead"));
-            if (!g_mesh.fetch || !g_mesh.read) LOG_INFO("[GiMesh] meshTiles off: the d3d9.dll in Bin has no RemixBridge_GiMeshFetch (bridge patch 0022)");
+            if (!g_mesh.fetch || !g_mesh.read) LOG_INFO("[GiMesh] mesh read-back off (meshTiles, and the per-pixel pass's darkened-once gate): the d3d9.dll in Bin has no RemixBridge_GiMeshFetch (bridge patch 0022)");
         }
         ObjectLegs::SetSink(true);
     }
@@ -322,9 +327,10 @@ void MeshFrame() {
         const HRESULT hr = g_mesh.open(&level);
         if (hr == S_FALSE) return;
         if (FAILED(hr)) return MeshOff(hr == E_NOTIMPL ? "client.giServer is off in the bridge's bridge.conf" : "the bridge's GI open failed");
-        g_mesh.opened = true;
+        g_mesh.opened = true, g_mesh.seedDue = true;
         LOG_INFO(std::format("[GiMesh] on: objects go to the bridge server (GI level {})", level));
     }
+    if (g_mesh.seedDue) g_mesh.seedDue = false, ObjectLegs::Seed();
     ObjectLegs::TakePlaced(g_placed);
     if (!g_placed.empty() && FAILED(g_mesh.send(g_placed.data(), static_cast<uint32_t>(g_placed.size())))) return MeshOff("RemixBridge_GiObjects failed");
     if (g_mesh.fetch && g_mesh.read) MeshTilesFrame();
@@ -335,13 +341,13 @@ void MeshLog() {
     uint32_t w[22] = {};
     if (!g_mesh.opened || g_mesh.off || FAILED(g_mesh.counters(w, 22))) return;
     const uint32_t objects = w[14], resolved = w[15], missing = w[16];
-    LOG_INFO(std::format("[GiMesh] objects={} resolved={} missing={} missingShare={:.1f}% indexReady={} links={} indexMs={} dropped={}", objects, resolved,
-                         missing, resolved + missing ? 100.0 * missing / (resolved + missing) : 0.0, w[17], w[18], w[19], w[20]));
+    LOG_INFO(std::format("[GiMesh] objects={} resolved={} missing={} missingShare={:.1f}% indexReady={} links={} indexMs={} dropped={} seeded={}", objects, resolved,
+                         missing, resolved + missing ? 100.0 * missing / (resolved + missing) : 0.0, w[17], w[18], w[19], w[20], ObjectLegs::Seeded()));
     if (!g_mesh.fetch) return;
     const MeshCasterSet::Stats s = MeshCasterSet::g_set.GetStats();
-    LOG_INFO(std::format("[GiMeshTiles] objects={} models={} bytes={} fetched={} missing={} tooBig={} evicted={} overBudget={} lampSkips={} serverFetches={} waitFrames={} tileTris={}",
+    LOG_INFO(std::format("[GiMeshTiles] objects={} models={} bytes={} fetched={} missing={} tooBig={} evicted={} overBudget={} lampSkips={} serverFetches={} waitFrames={} tileTris={} meshedRecords={}",
                          s.objects, s.models, s.bytes, s.fetched, s.missing, s.tooBig, s.evicted, s.overBudget, s.lampSkips, w[21], g_mesh.fetchFrames,
-                         RtOutdoorLamps::MeshTileTris()));
+                         RtOutdoorLamps::MeshTileTris(), ObjectLegs::Meshed()));
 }
 
 // ---- lamp snapshot (render thread) ----
@@ -822,6 +828,8 @@ void OnPresent(IDirect3DDevice9* dev) {
         for (const Lamp& l : g_lamps) heads.push_back({l.pos[0], l.pos[1], l.pos[2]});
         MeshCasterSet::g_set.SetLamps(heads);
     }
+    // (MC-4) a seed at world entry and at each lot entered
+    if (g_worldFrames == 1 || (g_activeLot && g_activeLot != g_mesh.seedLot)) g_mesh.seedDue = true, g_mesh.seedLot = g_activeLot;
     MeshFrame();
     const DWORD now = GetTickCount();
     if (g_lastLog == 0) g_lastLog = now;
@@ -909,7 +917,7 @@ bool Start(const Options& o, std::string* error) {
         return false;
     }
     g_running = true;
-    if (o.pixelShadows) GiPixelShadows::Start({o.pixelView, o.pixelTestCaster});
+    if (o.pixelShadows) GiPixelShadows::Start({o.pixelView, o.pixelTestCaster, o.meshCasters});
     g_lampIndexMode = kDevToolsBuild ? std::clamp(o.lampIndex, 0, 2) : 0;
     if (g_lampIndexMode.load()) LOG_INFO(std::format("[RealtimeGI] Lamp index: mode={}", kLampIndexNames[g_lampIndexMode.load()]));
     // read back by the test harness (design.md section 6): logged by UpdateLamps in a world, with lots = the GI lots then
@@ -930,7 +938,7 @@ void Stop() {
     if (g_composePs) g_composePs->Release(), g_composePs = nullptr;
     g_built = {}, g_dev = nullptr;
     g_lampIndexMode = 0;
-    if (g_options.meshTiles) MeshCasterSet::wanted.store(false), MeshCasterSet::g_set.Clear();
+    if (g_options.meshTiles || g_options.pixelShadows) MeshCasterSet::wanted.store(false), MeshCasterSet::pixelCasts.store(false), MeshCasterSet::g_set.Clear();
     g_running = false;
     LOG_INFO("[RealtimeGI] Off");
 }

@@ -25,6 +25,9 @@ constexpr size_t kMaxTris = 32768;          // in the tiles' vertex buffer: 72 B
 constexpr float kLotPadM = 1.0f;            // objects this far past the lot's grid still cast
 constexpr float kLampPadM = 0.05f;          // an object whose bounds hold a lamp's head within this is its lamp: no caster
 inline std::atomic<bool> wanted{false};     // the Developer switch (RealtimeGI meshTiles) is on and the bridge answers
+// (XR-10) The per-pixel pass is open with meshCasters on: the server casts every object whose LITE it resolved (any size), so
+// those objects' 3D records leave the Direct3D 9 test (ObjectLegs::Fill) and the tiles take no meshes (the pass darkens them)
+inline std::atomic<bool> pixelCasts{false};
 
 struct Model {
     std::vector<float> pos;    // xyz a vertex, model space
@@ -52,6 +55,8 @@ class Set {
     std::unordered_map<uint64_t, Entry> cache_;         // LITE -> its model
     std::list<uint64_t> lru_;                           // LITEs, most recent first
     std::unordered_set<uint64_t> missing_, skipped_;    // no mesh on the server; refused by the budget until an object leaves
+    std::unordered_set<uint64_t> resolved_;             // LITEs the server answered with a mesh, of any size (its per-pixel pass casts them)
+    std::unordered_set<uint64_t> tiles_;                // objects the last AppendTo put in the tiles (their 3D records leave the test)
     std::unordered_map<uint64_t, uint32_t> users_;      // LITE -> placed objects naming it
     std::vector<std::array<float, 3>> lamps_;            // the lamps' heads (world): their own objects cast nothing
     size_t budget_ = kBudgetBytes, bytes_ = 0;
@@ -69,7 +74,7 @@ class Set {
     explicit Set(size_t budget = kBudgetBytes) : budget_(budget) {}
     void Clear() {
         std::lock_guard<std::mutex> lk(mx_);
-        objects_.clear(), cache_.clear(), lru_.clear(), missing_.clear(), skipped_.clear(), users_.clear();
+        objects_.clear(), cache_.clear(), lru_.clear(), missing_.clear(), skipped_.clear(), users_.clear(), tiles_.clear(), resolved_.clear();
         bytes_ = 0, st_ = {}, gen_++;
     }
     // The object hooks' records (ObjectLegs::TakePlaced), in order
@@ -105,6 +110,7 @@ class Set {
     void Fetched(uint64_t lite, Model&& m) {
         std::lock_guard<std::mutex> lk(mx_);
         st_.fetched++;
+        if (!m.tri.empty()) resolved_.insert(lite);
         if (m.tri.size() / 3 > kMaxModelTris) return missing_.insert(lite), void(st_.tooBig++);
         const size_t b = m.Bytes();
         for (auto it = lru_.end(); bytes_ + b > budget_ && it != lru_.begin();) {
@@ -123,6 +129,7 @@ class Set {
     size_t AppendTo(RtLampProxy::Mesh& out, const float toLot[4][4], float w, float h, size_t maxTris = kMaxTris) {
         std::lock_guard<std::mutex> lk(mx_);
         out.curKind = RtLampProxy::Mesh::kShape;
+        tiles_.clear();
         size_t added = 0;
         for (const auto& [id, o] : objects_) {
             const auto c = cache_.find(o.lite);
@@ -154,6 +161,7 @@ class Set {
                 for (int k = 0; k < 3; k++) p[k] = wv[0] * toLot[0][k] + wv[1] * toLot[1][k] + wv[2] * toLot[2][k] + toLot[3][k];
             }
             if (!(v[0][0] >= -kLotPadM && v[0][0] <= w + kLotPadM && v[0][2] >= -kLotPadM && v[0][2] <= h + kLotPadM)) continue;
+            tiles_.insert(id);
             for (size_t t = 0; t + 2 < md.tri.size(); t += 3) {
                 const uint32_t a = md.tri[t], b = md.tri[t + 1], cc = md.tri[t + 2];
                 if (a >= v.size() || b >= v.size() || cc >= v.size()) continue;
@@ -162,6 +170,18 @@ class Set {
             }
         }
         return added;
+    }
+    // A placed object whose LITE the server resolved to a mesh: with pixelCasts, the per-pixel pass casts it [I: the pass takes
+    // the 1024 objects nearest the camera, so a farther one loses its box under the Direct3D 9 lamps without a mesh shadow]
+    bool ServerCasts(uint64_t id) const {
+        std::lock_guard<std::mutex> lk(mx_);
+        const auto it = objects_.find(id);
+        return it != objects_.end() && resolved_.count(it->second.lite) != 0;
+    }
+    // An object whose mesh the last AppendTo put in the tiles
+    bool InTiles(uint64_t id) const {
+        std::lock_guard<std::mutex> lk(mx_);
+        return tiles_.count(id) != 0;
     }
     uint32_t Gen() const {
         std::lock_guard<std::mutex> lk(mx_);
