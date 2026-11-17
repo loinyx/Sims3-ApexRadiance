@@ -74,12 +74,16 @@ Setup finds the game, compares what is installed with the player's choice and ap
 double the frame rate on RTX 40 and 50 series cards, with a little more input delay. The NVIDIA app reports the RTX Remix
 bridge as not compatible; a driver profile forces it, the way NVIDIA Profile Inspector does
 ([rtx-remix-bridge.md](rtx-remix-bridge.md)). The switch applies at once, outside Install, through NVAPI's driver settings
-(`SmoothMotion.cs`): on creates (or reuses) the profile *Apex Radiance - The Sims 3* with `NvRemixBridge.exe` and the
-game's exe (Steam `TS3W.exe` or EA app `TS3.exe`, with the other edition's added too, so one profile serves every copy of
-the game on the PC) and sets setting `0xB0D384C0` to 1; off deletes that profile only, which turns it off for every copy. The row shows only with an NVIDIA card. It
-can be turned on with an RTX 40 or 50 series card, driver 571.86 or newer, and the RTX Remix bridge installed; otherwise
-it stays off and says why. When either exe already belongs to a profile of the player's, Setup leaves it alone and names
-that profile. The profile is not part of restore points (it is a driver setting, not a game file). Turned on, Setup also brings
+(`SmoothMotion.cs`). NVIDIA ships its own profile *NvRemixBridge* holding `NvRemixBridge.exe` with Smooth Motion - Enabled
+APIs (`0xB0CC0875`) at 0, which blocks it; Setup edits the profile that holds the bridge's exe, as Profile Inspector does:
+on sets `0xB0D384C0` (Smooth Motion) to 1 and `0xB0CC0875` to 7 (DX12, DX11 and Vulkan). When no profile holds the exe, Setup
+creates *Apex Radiance - The Sims 3* with it. Off restores NVIDIA's defaults of both settings (or deletes Setup's profile),
+only when Setup turned it on, recorded in `%LOCALAPPDATA%\Apex Radiance Setup\smooth-motion-on.txt`: a Smooth Motion the
+player turned on with Profile Inspector shows as on and stays. The game's exes stay in NVIDIA's own *Sims 3* profile: they
+do not present frames under the bridge. The profile matches exe names, so it covers every copy of the game on the PC, Steam
+or EA app. The row shows only with an NVIDIA card. It can be turned on with an RTX 40 or 50 series card, driver 571.86 or
+newer, and the RTX Remix bridge installed; otherwise it stays off and says why. When the bridge's exe belongs to a profile
+of the player's, Setup leaves it alone and names that profile. The profile is not part of restore points (it is a driver setting, not a game file). Turned on, Setup also brings
 Apex's frame limit (`[screen] fps_limit` in the game's `ApexRadiance.toml`) to 60 fps when there is none (the key absent or
 0); a limit the player chose stays as it is, and the row suggests 60 to 90 fps. That change has its own restore point
 (*Turn on NVIDIA Smooth Motion*) that puts back only `fps_limit`; nothing is written before the game has made the file or
@@ -152,10 +156,10 @@ and keeps a copy of `Options.ini`, restored when the player goes back to the gam
 - AMD Fluid Motion Frames: unverified on a supported card (no RX 6000 or newer was available); the ADLX start and the
   supported check were read on an AMD integrated GPU, which reports it unsupported. Whether AFMF reaches frames presented by
   `NvRemixBridge.exe` (Vulkan) is unverified. The record that Setup turned it on is per Windows user, not per game folder.
-- NVIDIA Smooth Motion: the driver write is unverified on a real card (the reading is verified: card, driver, state).
-  The profile holds exe names, not paths, so it applies to every game folder. An exe already in an NVIDIA predefined
-  profile (the game's own) stays there and is not added; if that holds `NvRemixBridge.exe` too, the setting would not
-  reach the bridge (unverified). DXVK on `TS3W.exe` is Vulkan as well, but Smooth Motion under DXVK is untested, so the
+- NVIDIA Smooth Motion edits NVIDIA's own *NvRemixBridge* profile and restores its defaults on off. Setup 1.2.0 wrote a
+  profile of its own, which held no exe (both were in NVIDIA's profiles), so the write failed with `DRS_SetSetting -160`.
+  The write on NVIDIA's profile is unverified until tested on an RTX 40 card. `0xB0D384C0` is not in the driver's list of
+  named settings (621.24); Profile Inspector writes it all the same. DXVK on `TS3W.exe` is Vulkan as well, but Smooth Motion under DXVK is untested, so the
   switch needs the bridge.
 
 ## Technical reference

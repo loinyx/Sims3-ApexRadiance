@@ -50,10 +50,10 @@ only what differs from the player's choice.
   Removing Apex Radiance removes the restart host first.
 - NVIDIA Smooth Motion (Setup 1.2.0, `SmoothMotion.cs`): a switch that writes the NVIDIA driver at once, not with
   Install. NVAPI (`nvapi64.dll`, functions from `nvapi_QueryInterface`, `NVDRS_PROFILE_V1`, `NVDRS_APPLICATION_V1`,
-  `NVDRS_SETTING_V1`): on creates or reuses the profile `Apex Radiance - The Sims 3`, adds `NvRemixBridge.exe` and the
-  game's exe, then the other edition's (`TS3W.exe`, `TS3.exe`; names, not paths, so it covers every copy and a moved
-  folder; an exe in an NVIDIA predefined profile is skipped), sets `0xB0D384C0 = 1` and saves; off deletes that profile
-  only. On also sets `[screen] fps_limit = 60` in `ApexRadiance.toml` when there is no limit (absent or 0), through
+  `NVDRS_SETTING_V1`): on finds the profile holding `NvRemixBridge.exe` (NVIDIA's predefined *NvRemixBridge*, else creates
+  `Apex Radiance - The Sims 3` with it), sets `0xB0D384C0 = 1` and `0xB0CC0875 = 7` and saves; off, only when
+  `smooth-motion-on.txt` records that Setup turned it on, calls `DRS_RestoreProfileDefaultSetting` (`0x53F0381E`) for both
+  on NVIDIA's profile, or deletes Setup's. The game's exes are not added. On also sets `[screen] fps_limit = 60` in `ApexRadiance.toml` when there is no limit (absent or 0), through
   `Fs.WriteFpsKey`: its restore point puts back only that key (`FpsLimitKey`, `FpsLimitWas`). Off leaves the limit.
   `Engine.Remove` of the bridge or Apex (also by a renderer change and `RemoveAll`) calls `Engine.FrameGenOff`, which
   deletes Setup's profile when it is on and returns, never throws, a failure (`TakeFrameGenOffError`, shown on the row).
