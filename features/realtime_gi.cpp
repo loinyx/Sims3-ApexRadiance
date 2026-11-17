@@ -71,14 +71,26 @@ struct BridgeBackend final : GiSched::Backend {
     TicketFn poll = nullptr, cancel = nullptr;
     uint32_t level = kGiLevelStarting; // 0 none, 1 compute, 2 rays (the server's answer to GiOpen)
     // rebuild: the active lot's scene built again into `scene` (-1 not readable yet, 0 unchanged, 1 a new blob, with its
-    // edit); target: the layer slot a solve writes; boxOf: the touch box until the server returns one (R-04: not built);
-    // regionOf: the solve's region box (world); landed: a layer arrived in its slot
+    // edit); target: the layer slot a solve writes; boxOf: the touch box when the server has none (no 0020 patch: the
+    // lamp's reach); tilesOf: a world box's tiles and stories; landed: a layer arrived in its slot
     std::function<int(GiSched::Box& edit, bool& whole)> rebuild;
     std::vector<uint8_t> scene;
     std::function<IDirect3DTexture9*(uint32_t layer)> target;
     std::function<GiSched::Box(const GiSched::LampIn&)> boxOf;
-    std::function<void(const GiSched::LampIn&, float lo[3], float hi[3])> regionOf;
+    std::function<GiSched::Box(const float lo[3], const float hi[3])> tilesOf;
     std::function<void(uint32_t layer)> landed;
+    // The region a solve is scoped to (R-06, patch 0020): the lamp's last touch box grown by kScopeGrow, only while
+    // that box was read for the same scene and the same lamp place. A first solve, a moved lamp and any scene change
+    // solve the whole scene: a box clips the light that reaches through doors (R-06: room plus one room drops 8-11 % of
+    // the lit texels), and an edit can open a new way out of the old box.
+    using ReadTouchFn = HRESULT(__stdcall*)(uint32_t lamp, float* box, uint32_t* texels);
+    ReadTouchFn readTouch = nullptr;
+    struct Touch {
+        float lo[3] = {}, hi[3] = {}, pos[3] = {};
+        uint32_t scene = 0; // sceneTicket it was read for; 0: none
+    };
+    std::vector<Touch> touch; // a layer
+    static constexpr float kScopeGrow = 0.5f; // metres; [I] a texel and a margin around the lit texels
     uint32_t sceneTicket = 0, scenePending = 0;
     size_t sceneSent = 0;
     bool sending = false, sendWhole = false;
@@ -96,12 +108,13 @@ struct BridgeBackend final : GiSched::Backend {
         solve = reinterpret_cast<SolveFn>(GetProcAddress(m, "RemixBridge_GiSolve"));
         poll = reinterpret_cast<TicketFn>(GetProcAddress(m, "RemixBridge_GiPoll"));
         cancel = reinterpret_cast<TicketFn>(GetProcAddress(m, "RemixBridge_GiCancel"));
+        readTouch = reinterpret_cast<ReadTouchFn>(GetProcAddress(m, "RemixBridge_GiReadTouch")); // (optional: patch 0020)
         return open && submit && solve && poll && cancel;
     }
     bool Ready() const { return level != kGiLevelStarting && level != 0; }
     // A new active lot: the lamp table, the tickets and the scene start over (the scheduler cancelled its bakes)
     void ResetLot() {
-        index.clear(), table.clear(), tickets.clear(), scene.clear();
+        index.clear(), table.clear(), tickets.clear(), scene.clear(), touch.clear();
         sceneTicket = scenePending = 0, sceneSent = 0, sending = false, tableDirty = false;
     }
     void BeginFrame(uint32_t) override {
@@ -155,11 +168,12 @@ struct BridgeBackend final : GiSched::Backend {
     bool Solve(const GiSched::LampIn& lamp, uint32_t& ticket) override {
         if (!sceneTicket || !target) return false;
         auto [it, fresh] = index.try_emplace(lamp.id, static_cast<uint32_t>(table.size()));
-        if (fresh) table.push_back({});
+        if (fresh) table.push_back({}), touch.push_back({});
         if (it->second > 0xFFFF) return false;
         // the lamp ball of Shadow softness, and the region its layer may light (texels outside get none and cost no gather)
         GiLampWire w{{lamp.pos[0], lamp.pos[1], lamp.pos[2]}, Penumbra::Radius(), {1, 1, 1}, 0, {1, 1, 1}, {0, 0, 0}};
-        if (regionOf) regionOf(lamp, w.boxMin, w.boxMax);
+        if (const Touch& t = touch[it->second]; t.scene == sceneTicket && !std::memcmp(t.pos, lamp.pos, sizeof t.pos))
+            for (int k = 0; k < 3; k++) w.boxMin[k] = t.lo[k] - kScopeGrow, w.boxMax[k] = t.hi[k] + kScopeGrow;
         if (std::memcmp(&w, &table[it->second], sizeof w)) table[it->second] = w, tableDirty = true;
         if (tableDirty) {
             uint32_t t = 0;
@@ -177,8 +191,18 @@ struct BridgeBackend final : GiSched::Backend {
         if (hr == S_FALSE) return 0;
         const auto it = tickets.find(ticket);
         if (it != tickets.end()) {
-            if (boxOf) touched = boxOf(it->second);
-            if (const auto l = index.find(it->second.id); hr == S_OK && l != index.end() && landed) landed(l->second);
+            const auto l = index.find(it->second.id);
+            float box[6];
+            uint32_t texels = 0;
+            if (hr == S_OK && l != index.end() && readTouch && readTouch(l->second, box, &texels) == S_OK) {
+                Touch& t = touch[l->second];
+                std::memcpy(t.lo, box, sizeof t.lo), std::memcpy(t.hi, box + 3, sizeof t.hi);
+                std::memcpy(t.pos, it->second.pos, sizeof t.pos), t.scene = sceneTicket;
+                touched = !texels ? GiSched::Box{} : tilesOf ? tilesOf(t.lo, t.hi) : boxOf ? boxOf(it->second) : GiSched::Box{};
+            } else if (boxOf) {
+                touched = boxOf(it->second);
+            }
+            if (hr == S_OK && l != index.end() && landed) landed(l->second);
             tickets.erase(it);
         }
         return hr == S_OK ? 1 : -1;
@@ -489,6 +513,17 @@ uint64_t ReadFloors(const RtLampProxy::Lot& lot, std::vector<std::pair<int, std:
 }
 float Linear(uint32_t c, int shift) { return std::pow(static_cast<float>((c >> shift) & 0xFF) / 255.0f, 2.2f); }
 
+// The tiles and stories of the scene's texels inside a world box (a touch box the server read back)
+GiSched::Box TilesOf(const float lo[3], const float hi[3]) {
+    GiSched::Box b;
+    for (const auto& [key, slot] : g_built.slots) {
+        const float* p = slot.world;
+        if (p[0] < lo[0] || p[1] < lo[1] || p[2] < lo[2] || p[0] > hi[0] || p[1] > hi[1] || p[2] > hi[2]) continue;
+        b = b.Union(GiSched::Around(p, slot.story, 0.0f));
+    }
+    return b;
+}
+
 // BridgeBackend::rebuild: -1 no kept lot yet, 0 the same scene, 1 a new blob (edit: what changed; whole: the atlas grew)
 int RebuildScene(GiSched::Box& edit, bool& whole) {
     uint32_t gen = 0;
@@ -716,11 +751,7 @@ bool Start(const Options& o, std::string* error) {
     g_giLots = 0, g_activeLot = 0, g_worldFrames = 0, g_sinceSnap = 0, g_pending = false, g_dumpDue = true;
     g_sched.Clear(), g_schedLot = 0;
     g_fake.boxOf = g_bridge.boxOf = [](const GiSched::LampIn& l) { return GiSched::Around(l.pos, l.story, Reach(l.id)); };
-    // the solve's region: the same reach around the lamp (world metres), so the layer lies inside its touch box
-    g_bridge.regionOf = [](const GiSched::LampIn& l, float lo[3], float hi[3]) {
-        const float r = Reach(l.id);
-        for (int k = 0; k < 3; k++) lo[k] = l.pos[k] - r, hi[k] = l.pos[k] + r;
-    };
+    g_bridge.tilesOf = TilesOf;
     g_bridge.rebuild = RebuildScene;
     g_bridge.target = SlotFor;
     g_bridge.landed = [](uint32_t layer) {

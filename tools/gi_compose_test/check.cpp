@@ -251,6 +251,41 @@ int main() {
         for (uint32_t p : rest) kept += std::memcmp(&partial[p * 4], &first[p * 4], 16) == 0;
         Check(kept == rest.size(), "the other " + std::to_string(rest.size()) + " texels unchanged (" + std::to_string(kept) + ")");
 
+        // 4. (patch 0020) the game's scope rule: each lamp solved again in its touch box grown by 0.5 m against its
+        // unscoped indirect layer
+        using ReadTouchFn = HRESULT(__stdcall*)(uint32_t, float*, uint32_t*);
+        if (const auto readTouch = reinterpret_cast<ReadTouchFn>(GetProcAddress(m, "RemixBridge_GiReadTouch"))) {
+            std::vector<uint8_t> scoped(lamps, lamps + head[4]);
+            for (uint32_t l = 0; l < L; l++) {
+                float box[6];
+                uint32_t texels = 0;
+                Hr(readTouch(l, box, &texels), "RemixBridge_GiReadTouch");
+                for (int k = 0; k < 3; k++) box[k] -= 0.5f, box[3 + k] += 0.5f;
+                std::memcpy(scoped.data() + l * 56 + 32, box, 24); // GiLamp boxMin, boxMax
+                std::printf("    lamp %u touch box: %u texels\n", l, texels);
+            }
+            Submit(scoped.data(), scoped.size(), 2);
+            for (uint32_t l = 0; l < L; l++) {
+                uint32_t t = 0;
+                Hr(g_solve(slotB[l], l, sceneTicket, &t), "RemixBridge_GiSolve (scoped)");
+                Hr(Wait(t, "scoped solve") == S_OK ? S_OK : E_FAIL, "a scoped solve");
+                const std::vector<float> a = Read(slotA[l], W, H), b = Read(slotB[l], W, H);
+                size_t within = 0, darkA = 0, darkB = 0;
+                float worst = 0;
+                for (uint32_t p : all) {
+                    darkA += a[p * 4] == 0 && a[p * 4 + 1] == 0 && a[p * 4 + 2] == 0, darkB += b[p * 4] == 0 && b[p * 4 + 1] == 0 && b[p * 4 + 2] == 0;
+                    float d = 0;
+                    for (int c = 0; c < 3; c++) d = std::max(d, std::fabs(a[p * 4 + c] - b[p * 4 + c]));
+                    within += d <= 1.0f / 255, worst = std::max(worst, d);
+                }
+                Check(within * 1000 >= all.size() * 995 && worst <= 4.0f / 255,
+                      "lamp " + std::to_string(l) + " scoped to its touch box + 0.5 m: " + std::to_string(within) + " of " + std::to_string(all.size()) +
+                          " texels within 1/255 of unscoped, worst " + std::to_string(worst * 255) + "/255, unlit " + std::to_string(darkA) + " -> " + std::to_string(darkB));
+            }
+        } else {
+            std::printf("  (no RemixBridge_GiReadTouch: patch 0020 not in this bridge, scope check skipped)\n");
+        }
+
         composer.Release();
         out->Release(), ps->Release(), code->Release();
         for (uint32_t l = 0; l < L; l++) slotA[l]->Release(), slotB[l]->Release();
