@@ -1,0 +1,211 @@
+// Per-pixel delta shadows of lamps (docs/features/realtime-gi/research/16-salvage-per-pixel-rt.md 2, 4.1, 5): one
+// invocation a pixel of the quarter-resolution guide grid.
+//  1. Guide: the full-resolution pixel nearest the camera of the 4x4 block; its world position from the depth and the
+//     inverse view-projection; its normal from the depth of its neighbours.
+//  2. Lamps: the up to 4 strongest of the table at that point (colour x N.L / distance^2).
+//  3. Rays: none unless a ray toward one of those lamps can touch a delta caster's bounds. Then one ray a lamp and
+//     sample toward a point of the lamp's emitter ball. A ray stops on a static occluder (the lamp's light is absent
+//     from the picture already) and otherwise notes whether it met a delta caster (a detail mesh, a capsule).
+//  4. Output: per lamp, how many samples reached the lamp past the static occluders (u) and how many of those a delta
+//     caster blocked (d); the multiplier of 4.1 from them. u and d are counts, so frames add up exactly.
+// The sample set is fixed: 16 points a lamp; frame f takes point (f + a hash of the pixel) mod 16, so 16 frames hold
+// each point once.
+#version 460
+#extension GL_EXT_ray_query : require
+layout(local_size_x = 8, local_size_y = 8) in;
+
+struct Lamp {
+    vec4 pos; // w: the emitter ball's radius
+    vec4 col;
+};
+struct Capsule {
+    vec4 a; // w: radius
+    vec4 b;
+};
+struct Box {
+    vec4 lo, hi;
+};
+struct Pixel {
+    vec4 mul;  // rgb: the multiplier; a: the guide depth (the upsample's weight)
+    vec4 pos;  // the guide's world position; w: its full-resolution pixel index (the harness checks both)
+    vec4 nrm;
+    uvec4 cnt; // lamp ids (4 x 8 bits, 0xFF = none), u counts (4 x 8 bits), d counts (4 x 8 bits), rays traced
+};
+// Instances of the top level: custom index 0 walls, floors and roofs (no culling), 1 object boxes, 2 detail meshes,
+// 3 capsule boxes. Mask 1 = static (0, 1), mask 2 = delta casters (2, 3).
+layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;
+// shortcut: the depth is a buffer of floats; the pass in the game samples the depth image instead, upgrade with XR-06
+layout(std430, set = 0, binding = 1) readonly buffer Depth { float depth[]; };
+layout(std430, set = 0, binding = 2) readonly buffer Lamps { Lamp lamp[]; };
+layout(std430, set = 0, binding = 3) readonly buffer Capsules { Capsule capsule[]; };
+layout(std430, set = 0, binding = 4) readonly buffer Casters { Box caster[]; }; // the delta casters' bounds
+layout(std430, set = 0, binding = 5) writeonly buffer Out { Pixel px[]; };
+layout(std430, set = 0, binding = 6) buffer Stats { uint stat[]; }; // 0: rays traced, 1: pixels that traced
+layout(push_constant) uniform PC {
+    mat4 invViewProj;
+    vec4 camA;                // xyz: the camera; w: A, the light no lamp ray accounts for
+    uint width, height;       // of the depth
+    uint lamps, casters;
+    uint frame, samples;      // samples 16: the whole set in one dispatch (the reference of an accumulation)
+    float bias, radiusScale;  // radiusScale 0: point emitters
+} pc;
+
+const uint kNone = 0xFFu, kSet = 16u, kMaxLamps = 4u;
+
+float DepthAt(ivec2 p) { return depth[uint(p.y) * pc.width + uint(p.x)]; }
+vec3 World(ivec2 p, float d) {
+    const vec2 ndc = vec2((float(p.x) + 0.5) / float(pc.width) * 2.0 - 1.0, 1.0 - (float(p.y) + 0.5) / float(pc.height) * 2.0);
+    const vec4 h = pc.invViewProj * vec4(ndc, d, 1.0);
+    return h.xyz / h.w;
+}
+// The surface's tangent along one screen axis: toward the neighbour whose depth is nearer the pixel's own, so that a
+// pixel beside a depth edge takes the side that belongs to its own surface
+vec3 Tangent(ivec2 p, ivec2 s, int at, int last, float d, vec3 P) {
+    const float a = at > 0 ? DepthAt(p - s) : 4.0, b = at < last ? DepthAt(p + s) : 4.0;
+    return abs(a - d) < abs(b - d) ? P - World(p - s, a) : World(p + s, b) - P;
+}
+
+// The distance at which a ray enters a capsule, negative when it does not (rd is unit). An origin inside the capsule
+// has no entry in front of it: a surface inside its own capsule casts nothing on itself.
+float SphereEnter(vec3 oc, vec3 rd, float r) {
+    const float b = dot(rd, oc), h = b * b - (dot(oc, oc) - r * r);
+    return h > 0.0 ? -b - sqrt(h) : -1.0;
+}
+float CapsuleEnter(vec3 ro, vec3 rd, vec3 pa, vec3 pb, float r) {
+    const vec3 ba = pb - pa, oa = ro - pa;
+    const float baba = dot(ba, ba), bard = dot(ba, rd), baoa = dot(ba, oa);
+    const float a = baba - bard * bard;
+    if (a > 1e-6 * baba) {
+        const float b = baba * dot(rd, oa) - baoa * bard, c = baba * dot(oa, oa) - baoa * baoa - r * r * baba, h = b * b - a * c;
+        if (h < 0.0) return -1.0;
+        const float t = (-b - sqrt(h)) / a, y = baoa + t * bard;
+        if (y > 0.0 && y < baba) return t;
+        return SphereEnter(y <= 0.0 ? oa : ro - pb, rd, r);
+    }
+    // along the axis (or no axis): the end the ray meets first
+    return SphereEnter(bard > 0.0 ? oa : ro - pb, rd, r);
+}
+
+// Bit 0: a static occluder lies on the ray. Bit 1: a delta caster does (not looked for behind the mask, and not
+// complete once bit 0 is set: the traversal stops there).
+uint Trace(vec3 o, vec3 d, float tMax, uint mask) {
+    uint hit = 0u;
+    rayQueryEXT q;
+    // No candidate is confirmed: every triangle and box on the ray is visited, none shortens it
+    rayQueryInitializeEXT(q, tlas, gl_RayFlagsNoOpaqueEXT | gl_RayFlagsCullBackFacingTrianglesEXT, mask, o, 0.0, d, tMax);
+    while (rayQueryProceedEXT(q)) {
+        const int inst = rayQueryGetIntersectionInstanceCustomIndexEXT(q, false);
+        if (rayQueryGetIntersectionTypeEXT(q, false) == gl_RayQueryCandidateIntersectionTriangleEXT) {
+            if (inst < 2) {
+                hit |= 1u;
+                rayQueryTerminateEXT(q);
+            } else hit |= 2u;
+        } else {
+            const Capsule c = capsule[rayQueryGetIntersectionPrimitiveIndexEXT(q, false)];
+            const float t = CapsuleEnter(o, d, c.a.xyz, c.b.xyz, c.a.w);
+            if (t > 0.0 && t < tMax) hit |= 2u;
+        }
+    }
+    return hit;
+}
+
+// The segment o -> e against a box (conservative for the rays toward a ball around e when the box is grown by its radius)
+bool SegBox(vec3 o, vec3 e, vec3 lo, vec3 hi) {
+    vec3 d = e - o;
+    d = mix(d, vec3(1e-9), lessThan(abs(d), vec3(1e-9)));
+    const vec3 t0 = (lo - o) / d, t1 = (hi - o) / d, tn = min(t0, t1), tf = max(t0, t1);
+    const float n = max(tn.x, max(tn.y, tn.z)), f = min(tf.x, min(tf.y, tf.z));
+    return n <= f && f >= 0.0 && n <= 1.0;
+}
+
+uint Pcg(uint v) {
+    uint s = v * 747796405u + 2891336453u;
+    uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
+    return (w >> 22u) ^ w;
+}
+
+void main() {
+    const ivec2 g = ivec2(gl_GlobalInvocationID.xy), size = ivec2(pc.width, pc.height) / 4;
+    if (g.x >= size.x || g.y >= size.y) return;
+    const uint index = uint(g.y * size.x + g.x);
+    // 1. The guide: the first pixel of the block with the least depth
+    float d = 4.0;
+    ivec2 at = ivec2(0);
+    for (int y = 0; y < 4; y++)
+        for (int x = 0; x < 4; x++) {
+            const ivec2 p = g * 4 + ivec2(x, y);
+            const float v = DepthAt(p);
+            if (v < d) d = v, at = p;
+        }
+    Pixel o;
+    o.mul = vec4(1.0, 1.0, 1.0, d), o.pos = vec4(0.0), o.nrm = vec4(0.0), o.cnt = uvec4(0xFFFFFFFFu, 0u, 0u, 0u);
+    if (d >= 1.0) { // nothing drawn
+        px[index] = o;
+        return;
+    }
+    const vec3 P = World(at, d);
+    vec3 N = normalize(cross(Tangent(at, ivec2(1, 0), at.x, int(pc.width) - 1, d, P), Tangent(at, ivec2(0, 1), at.y, int(pc.height) - 1, d, P)));
+    const vec3 toCam = pc.camA.xyz - P;
+    if (dot(N, toCam) < 0.0) N = -N;
+    o.pos = vec4(P, float(uint(at.y) * pc.width + uint(at.x))), o.nrm = vec4(N, 0.0);
+
+    // 2. The strongest lamps here. A lamp weaker than A / 128 cannot move the multiplier by a step of 8 bits
+    uint id[kMaxLamps] = uint[](kNone, kNone, kNone, kNone);
+    float strength[kMaxLamps] = float[](0.0, 0.0, 0.0, 0.0), geo[kMaxLamps] = float[](0.0, 0.0, 0.0, 0.0);
+    for (uint l = 0u; l < pc.lamps; l++) {
+        const vec3 L = lamp[l].pos.xyz - P;
+        const float d2 = dot(L, L), ge = max(dot(N, L), 0.0) * inversesqrt(d2) / d2;
+        const float s = ge * max(lamp[l].col.r, max(lamp[l].col.g, lamp[l].col.b));
+        if (s < pc.camA.w / 128.0) continue;
+        for (uint k = 0u; k < kMaxLamps; k++)
+            if (s > strength[k]) {
+                for (uint j = kMaxLamps - 1u; j > k; j--) id[j] = id[j - 1u], strength[j] = strength[j - 1u], geo[j] = geo[j - 1u];
+                id[k] = l, strength[k] = s, geo[k] = ge;
+                break;
+            }
+    }
+
+    // 3. Rays, only where a delta caster is within reach of a lamp's rays. The origin leaves the surface along the
+    // normal by a little more with the distance (the depth's precision)
+    const vec3 O = P + N * (pc.bias * (1.0 + 0.25 * length(toCam)));
+    uint reach = 0u;
+    for (uint k = 0u; k < kMaxLamps; k++) {
+        if (id[k] == kNone) continue;
+        const vec4 lp = lamp[id[k]].pos;
+        const float r = lp.w * pc.radiusScale;
+        for (uint c = 0u; c < pc.casters; c++)
+            if (SegBox(O, lp.xyz, caster[c].lo.xyz - r, caster[c].hi.xyz + r)) reach |= 1u << k;
+    }
+    uint u[kMaxLamps] = uint[](0u, 0u, 0u, 0u), dl[kMaxLamps] = uint[](0u, 0u, 0u, 0u), rays = 0u;
+    if (reach != 0u) {
+        const uint first = pc.samples >= kSet ? 0u : (pc.frame + Pcg(index)) % kSet;
+        for (uint k = 0u; k < kMaxLamps; k++) {
+            if (id[k] == kNone) continue;
+            const vec4 lp = lamp[id[k]].pos;
+            for (uint s = 0u; s < pc.samples; s++) { // a Fibonacci sphere on the emitter ball (check.cpp EmitterPoint)
+                const uint n = (first + s) % kSet;
+                const float y = 1.0 - (2.0 * float(n) + 1.0) / float(kSet), rr = sqrt(1.0 - y * y), a = 2.39996323 * float(n);
+                const vec3 e = lp.xyz + lp.w * pc.radiusScale * vec3(rr * cos(a), y, rr * sin(a)) - O;
+                const float len = length(e);
+                // A lamp out of every caster's reach still needs its static ray: its light weighs the others' shadows
+                const uint hit = len > 2e-3 ? Trace(O, e / len, len - 1e-3, (reach >> k & 1u) != 0u ? 3u : 1u) : 0u;
+                rays++;
+                if ((hit & 1u) == 0u) u[k]++;
+                if (hit == 2u) dl[k]++;
+            }
+        }
+        atomicAdd(stat[0], rays);
+        atomicAdd(stat[1], 1u);
+    }
+
+    // 4. m = 1 - sum_i w_i (1 - v_i) / (A + sum_j w_j), with w = colour x geometry x u / samples, w (1 - v) = the d share
+    vec3 num = vec3(0.0), den = vec3(pc.camA.w);
+    for (uint k = 0u; k < kMaxLamps; k++) {
+        if (id[k] == kNone) continue;
+        const vec3 c = lamp[id[k]].col.rgb * (geo[k] / float(pc.samples));
+        num += c * float(dl[k]), den += c * float(u[k]);
+    }
+    o.mul.rgb = 1.0 - num / den;
+    o.cnt = uvec4(id[0] | id[1] << 8 | id[2] << 16 | id[3] << 24, u[0] | u[1] << 8 | u[2] << 16 | u[3] << 24, dl[0] | dl[1] << 8 | dl[2] << 16 | dl[3] << 24, rays);
+    px[index] = o;
+}
