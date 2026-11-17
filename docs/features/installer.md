@@ -117,7 +117,7 @@ counts it (*Apply 1 change*) and its note lists it (*To apply: Turn on NVIDIA Sm
 drops it. Apply runs them as task rows after the components (*Apex frame limit: 75 fps*, *Turn on NVIDIA Smooth Motion*,
 *Turn off AMD Fluid Motion Frames*); a failure marks its row and shows on the component row, and the rest goes on. After a
 driver write Setup reads the setting back in a new session; a change the driver did not keep is reported, and an *on* that did
-not take is undone. Errors read in plain words (the call and its code go to `%TEMP%\ApexRadianceSetup.log`): missing rights
+not take is undone. Errors read in plain words (the call and its code go to `%LOCALAPPDATA%\Apex Radiance Setup\ApexRadianceSetup.log`): missing rights
 ask for administrator rights, and a rejected change points to the manual steps (*How to do it by hand*: the README's Profile
 Inspector steps; for AFMF, AMD Software > Gaming > Graphics > AMD Fluid Motion Frames).
 
@@ -164,16 +164,26 @@ and keeps a copy of `Options.ini`, restored when the player goes back to the gam
 
 ## Compatibility and interactions
 
-- Setup refuses to change files while `TS3W.exe` or `TS3.exe` runs.
+- Setup refuses to change files while `TS3W.exe`, `TS3.exe`, the launcher (`Sims3Launcher.exe`, `Sims3LauncherW.exe`) or the restart host (`ts3wrap.exe`) runs.
 - It needs administrator rights (`Game\Bin` is usually under Program Files) and an internet connection to download.
 - Mods published outside GitHub are recognised and listed with a link to their official page, never downloaded. The
   Sims 3 Performance Patch is on Nexus Mods only: Setup opens its page and installs the file when the download
   finishes.
 - Apex Radiance itself does not depend on Setup; a manual install and a Setup install are the same files.
 
+Before any download Setup checks what would stop the change (the game, its launcher or the restart host running, a
+`Game\Bin` it cannot write to, too little free space) and tells what it will do to the player's own files (a foreign
+`d3d9.dll` such as ReShade, named and set aside in the backup; a second ASI loader). A failed install puts back what it
+changed unless the player keeps it. Errors read in plain words with the raw text below, *Copy details* and *Open log
+folder*; the log is in the player's `%LOCALAPPDATA%\Apex Radiance Setup\`. The full list is in
+[installer/README.md](../../installer/README.md#reliability-setup-124).
+
 ## Limitations
 
 - Windows 10 version 1809 or later, 64-bit.
+- Ultimate ASI Loader 10 (the latest release, which Setup installs) can open a *Select Override (Update) Folder* dialog at
+  start: one player on the EA app saw it, with an empty button, before the launcher opened; 9.7.4 has no such dialog. What
+  triggers it is unverified, so Setup does not change anything for it yet.
 - Without the GitHub API (60 calls an hour per address) Setup reads the release pages instead.
 - Restore points cover the files Setup changes; files changed by hand are not tracked. Restoring is final, needs the
   game closed, and only the newest 5 points are kept.
@@ -196,7 +206,7 @@ and keeps a copy of `Options.ini`, restored when the player goes back to the gam
   [ApexSetup.Core](../../installer/ApexSetup.Core/) (`Engine.cs`, `Compat.cs`); restore points in `RestorePoints.cs`
   (`Fs` is the one place that writes).
 - Each language is a `Strings.<code>.cs` table with the English text as key; `ApexSetup.Tests` checks every table.
-- Errors are logged to `%TEMP%\ApexRadianceSetup.log`. `APEX_SETUP_DRY_RUN=1` shows what Setup finds and would change
+- Errors are logged to `%LOCALAPPDATA%\Apex Radiance Setup\ApexRadianceSetup.log`. `APEX_SETUP_DRY_RUN=1` shows what Setup finds and would change
   while writing nothing.
 - Build and tests: [installer/README.md](../../installer/README.md#build-and-test); the release step is in
   [release-process.md](../release-process.md#4-build-and-publish).

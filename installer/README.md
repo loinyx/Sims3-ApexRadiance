@@ -38,7 +38,7 @@ only what differs from the player's choice.
   580), the game resets its graphics options once: Setup says so and keeps a copy of `Options.ini`, restored when the
   player goes back to the game's own Direct3D 9.
 - The welcome page lists the updates for the installed components at every start, with *Update now*.
-- Setup refuses to change files while `TS3W.exe` or `TS3.exe` runs.
+- Setup refuses to change files while `TS3W.exe`, `TS3.exe`, the launcher (`Sims3Launcher.exe`, `Sims3LauncherW.exe`) or the restart host (`ts3wrap.exe`) runs.
 - The restart host's switch (`Engine.SetRestartHost`) edits one line of `ApexRadiance.toml`: the key's value in place,
   else a line added at the end of `[ui]`, else `[ui]` added at the end; every other line stays as it is. Off changes a key
   that is there to `false` and adds nothing. When the game has not created the file yet, Setup writes `[ui]` with
@@ -137,7 +137,31 @@ nothing. `APEX_SETUP_FAKE_AMD=<supported>|<on>` (for example `1|0`, or `none` fo
 The tests run the engine on a fake `Game\Bin` and Documents folder in `%TEMP%` with local files (no network, no game).
 For a manual run against a fake game: start the exe with the game folder as its argument and `APEX_SETUP_DOCUMENTS` set
 to a fake Documents folder. The exe asks for administrator rights (`Game\Bin` is usually under Program Files). Errors are
-logged to `%TEMP%\ApexRadianceSetup.log`.
+logged to `%LOCALAPPDATA%\Apex Radiance Setup\ApexRadianceSetup.log`.
+
+## Reliability (Setup 1.2.4)
+
+- **Log:** in the player's `%LOCALAPPDATA%\Apex Radiance Setup\` (`Scan.PlayerShellFolder`, also when elevated as another
+  administrator), each entry with Setup's version, the game folder, edition and version, renderer and loaders. Error dialogs
+  show a plain message, then the raw text, with *Copy details* (context and the log's last lines) and *Open log folder*.
+- **Before any download** (`Engine.Preflight`): the game, its launcher or `ts3wrap.exe` running, `Game\Bin` not writable
+  (a probe file), less free space than twice the downloads on the game's or `%TEMP%`'s drive stop the change; a missing
+  Documents folder, a foreign `d3d9.dll` (named from its ProductName or FileDescription; set aside in the backup) and a
+  second ASI loader are shown with *Continue*.
+- **Files:** `setup.json` and every `Fs.Write` go through a temporary file; a `setup.json` that does not parse is kept as
+  `setup.json.corrupt` and a fresh one starts. `Fs.Copy` makes a read-only destination writable; copies and moves are tried
+  again 3 times, 500 ms apart. A file gone or cut short after a download or a copy reads as *Your antivirus removed ...*.
+- **A failed install** puts back the files it changed (*Undo these changes*, the default); *Keep what was installed* is the
+  second choice.
+- **GitHub:** server errors and timeouts are tried again (3 tries, 1 s then 2 s apart); a refused API call with no calls
+  left says when the limit opens again; `RecentAsync` falls back to the latest release's page; a release page that does not
+  land on a tag is an error, not a crash.
+- **Ultimate ASI Loader:** the latest release's 32-bit build without PDB, found by its name (contains `NoPDB`, `.zip`, not
+  `x64`); inside it `dinput8.dll`, else the one 32-bit dll. Ultimate ASI Loader 10 can open a *Select Override (Update)
+  Folder* dialog at start (one player on the EA app saw it; v9.7.4 has no such dialog); what triggers it is not known yet,
+  so Setup changes nothing for it.
+- **Setup's own update:** the new exe takes this one's place and is started before this one closes; a start that fails puts
+  the old exe back; the new Setup deletes the `.old` copy. Arguments are quoted so a folder ending in `\` keeps its quote.
 
 ## Not covered
 
