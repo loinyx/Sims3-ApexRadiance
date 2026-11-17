@@ -15,6 +15,10 @@ Remix bridge server renders through (`.trex\d3d9vk_x64.dll`, see `../remix-bridg
   Direct3D 9, has a compute dispatch recorded by `ExecuteExternal` paint the left half green, and reads the target
   back, once and after 1000 more passes. Build steps are in the file. On the stock library it prints
   `external pass: no`.
+- `test/dxvk_gi_pixel_pass.cpp` runs the bridge server's per-pixel shadow pass (`../remix-bridge/gi/gi_pixel_pass.h`) on a given
+  library without the bridge: a floor drawn into an INTZ depth texture, one lamp, two capsules and a static box; it checks
+  the four outputs, again after 100 frames and after a device reset. Build and run:
+  `tools/gi_server_test/run.ps1 -BridgePass <d3d9.dll>`. On the stock library it prints `[GiPixel] off: stock renderer`.
 
 DXVK's releases are built with MinGW gcc, this build with MSVC. With no patch, the built library and the 3.1.1 release
 print the same smoke lines on an RTX 3070 laptop GPU (caps CRC32 `98a84800`), export the same functions, and write the

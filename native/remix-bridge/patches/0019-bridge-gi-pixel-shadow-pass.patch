@@ -1,0 +1,773 @@
+0019: per-pixel shadow pass (real-time GI work package XR-06). Client exports RemixBridge_GiPixelOpen, RemixBridge_GiPixelPass and RemixBridge_GiPixelReadCounters. The server asks its renderer for DXVK's ID3D9VkExternalPass (native/dxvk patch 0004) and ray queries (0003); with both, a pass records a ray-query compute kernel into the renderer's command stream: the top level is built from the capsules and boxes of the block the client sends, the kernel samples the INTZ depth texture and writes four quarter-resolution outputs, which are copied into the client's A16B16G16R16F render target textures. Stream order makes a draw sent after the pass sample its outputs; nothing waits. A stock renderer or a device without ray queries answers the open with an off state and the reason in the server's log. The pass frees its Vulkan objects at Reset, ResetEx, device destroy and when its depth texture is destroyed. Counters (passes, rays, dispatch time by device timestamps, faults) sit in a 64-byte shared block and in the server's log as a [GiPixel] line. Test: test-gi-pixel.cmd (test_gi_pixel_device). The server compiles gi_pixel_pass.h, gi_pixel_block.h and pixel_shadow.comp, which native/remix-bridge/build.cmd copies in from the repository (native/remix-bridge/gi, tools/gi_server_test).
+Applies after 0018.
+diff --git a/bridge/src/client/d3d9_gi_pixel.cpp b/bridge/src/client/d3d9_gi_pixel.cpp
+new file mode 100644
+index 00000000..a560e52a
+--- /dev/null
++++ b/bridge/src/client/d3d9_gi_pixel.cpp
+@@ -0,0 +1,113 @@
++/*
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++#include "pch.h"
++
++#include "d3d9_texture.h"
++#include "gi_pixel_block.h"
++#include "util_devicecommand.h"
++#include "util_gi_pixel.h"
++
++// Per-pixel shadow pass exports. The server records a ray-query compute pass into its renderer's command stream, so a
++// draw sent after RemixBridge_GiPixelPass samples that pass's outputs. Nothing waits and nothing is read back.
++//
++// RemixBridge_GiPixelOpen(&state) asks the server once whether its renderer can run the pass:
++//   S_FALSE until the server has answered (the command may only reach it with the next Present). Call again a frame later.
++//   S_OK with the state: 1 on, 2 off (stock renderer), 3 off (no ray queries), 4 off (other; the server's log has the reason).
++//   D3DERR_DEVICELOST without a server.
++// RemixBridge_GiPixelPass(block, size, depth, class, outputs) sends one pass:
++//   block is a GiPixelBlock (gi_pixel_block.h) and size its size; depth is the INTZ depth texture; class is the motion
++//   class texture or null; outputs are four A16B16G16R16F render target textures of a quarter of the depth's size, any
++//   of them null.
++//   S_OK when sent. E_NOTIMPL unless the state is on. D3DERR_INVALIDCALL for a wrong size or no depth.
++//   A pass the server refuses shows in the fault counter, not here.
++// RemixBridge_GiPixelReadCounters(out, count) copies the server's words (util_gi_pixel.h GiPixelShared), state first.
++// The server drops its pass objects at device reset; the next pass builds them again.
++
++namespace {
++  bool s_openSent = false;
++
++  bridge_util::GiPixelShared* answered() {
++    bridge_util::GiPixelShared* const pShared = bridge_util::giPixelShared();
++    return pShared != nullptr && pShared->state.load(std::memory_order_acquire) != bridge_util::GiPixelUnanswered ? pShared : nullptr;
++  }
++}
++
++// Exported by name through d3d9_lss.def.
++extern "C" {
++
++  HRESULT __stdcall RemixBridge_GiPixelOpen(uint32_t* pState) {
++    if (pState == nullptr) {
++      return D3DERR_INVALIDCALL;
++    }
++    if (bridge_util::giPixelShared() == nullptr) {
++      return E_NOTIMPL;
++    }
++    if (!gbBridgeRunning) {
++      return D3DERR_DEVICELOST;
++    }
++    if (!s_openSent) {
++      s_openSent = true;
++      ClientMessage { Commands::Bridge_GiPixelOpen, 0, Commands::FlagBits::AsyncResult };
++    }
++    bridge_util::GiPixelShared* const pShared = answered();
++    if (pShared == nullptr) {
++      return S_FALSE;
++    }
++    *pState = pShared->state.load(std::memory_order_acquire);
++    return S_OK;
++  }
++
++  HRESULT __stdcall RemixBridge_GiPixelPass(const void* pBlock, uint32_t size, IDirect3DTexture9* pDepth, IDirect3DTexture9* pClass,
++                                            IDirect3DTexture9* const* ppOutputs) {
++    if (pBlock == nullptr || size != sizeof(GiPixelBlock) || pDepth == nullptr) {
++      return D3DERR_INVALIDCALL;
++    }
++    bridge_util::GiPixelShared* const pShared = s_openSent ? answered() : nullptr;
++    if (pShared == nullptr || pShared->state.load(std::memory_order_acquire) != bridge_util::GiPixelOn) {
++      return E_NOTIMPL;
++    }
++    if (!gbBridgeRunning) {
++      return D3DERR_DEVICELOST;
++    }
++    ClientMessage c(Commands::Bridge_GiPixelPass, bridge_cast<Direct3DTexture9_LSS*>(pDepth)->getId(), Commands::FlagBits::AsyncResult);
++    c.send_data(pClass != nullptr ? bridge_cast<Direct3DTexture9_LSS*>(pClass)->getId() : 0u);
++    for (uint32_t i = 0; i < kGiPixelOutputs; ++i) {
++      IDirect3DTexture9* const pOutput = ppOutputs != nullptr ? ppOutputs[i] : nullptr;
++      c.send_data(pOutput != nullptr ? bridge_cast<Direct3DTexture9_LSS*>(pOutput)->getId() : 0u);
++    }
++    c.send_data(size, pBlock);
++    return S_OK;
++  }
++
++  HRESULT __stdcall RemixBridge_GiPixelReadCounters(uint32_t* pCounters, uint32_t count) {
++    if (pCounters == nullptr) {
++      return D3DERR_INVALIDCALL;
++    }
++    bridge_util::GiPixelShared* const pShared = s_openSent ? answered() : nullptr;
++    if (pShared == nullptr) {
++      return E_NOTIMPL;
++    }
++    const uint32_t* const pWords = reinterpret_cast<const uint32_t*>(pShared);
++    for (uint32_t i = 0; i < count && i < bridge_util::GiPixelShared::kWords; ++i) {
++      pCounters[i] = pWords[i];
++    }
++    return S_OK;
++  }
++}
+diff --git a/bridge/src/client/d3d9_lss.def b/bridge/src/client/d3d9_lss.def
+index 6bd7b993..e3b5e8e0 100644
+--- a/bridge/src/client/d3d9_lss.def
++++ b/bridge/src/client/d3d9_lss.def
+@@ -32 +32,5 @@ EXPORTS
+   RemixBridge_GiReadCounters
++
++  RemixBridge_GiPixelOpen
++  RemixBridge_GiPixelPass
++  RemixBridge_GiPixelReadCounters
+diff --git a/bridge/src/client/meson.build b/bridge/src/client/meson.build
+index fc5ea089..23ee1c1e 100644
+--- a/bridge/src/client/meson.build
++++ b/bridge/src/client/meson.build
+@@ -34,2 +34,3 @@ d3d9_src = files([
+   'd3d9_gi.cpp',
++  'd3d9_gi_pixel.cpp',
+   'd3d9_device_base.cpp',
+diff --git a/bridge/src/server/gi_pixel_server.h b/bridge/src/server/gi_pixel_server.h
+new file mode 100644
+index 00000000..082319e5
+--- /dev/null
++++ b/bridge/src/server/gi_pixel_server.h
+@@ -0,0 +1,128 @@
++/*
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++#pragma once
++
++#include <cstring>
++#include <unordered_map>
++
++#include <d3d9.h>
++
++#include "gi_pixel_spv.h"
++#include "gi_pixel_pass.h"
++#include "log/log.h"
++#include "util_gi_pixel.h"
++
++// Server side of the RemixBridge_GiPixel* exports: the per-pixel shadow pass on the renderer's own Vulkan device
++// (gi_pixel_pass.h, which records through DXVK's ID3D9VkExternalPass). Everything here runs on the play thread.
++namespace gi_pixel {
++  using ResourceMap = std::unordered_map<uint32_t, IDirect3DResource9*>;
++
++  inline GiPixelPass g_pass;
++  inline uint32_t g_loggedAt = 0;  // pass count of the last counter line
++
++  inline void publish(bool log) {
++    bridge_util::GiPixelShared* const pShared = bridge_util::giPixelShared();
++    if (pShared == nullptr) {
++      return;
++    }
++    const GiPixelCounters c = g_pass.counters();
++    pShared->passes = c.passes;
++    pShared->faults = c.faults;
++    pShared->raysLow = (uint32_t) c.rays;
++    pShared->raysHigh = (uint32_t) (c.rays >> 32);
++    pShared->raysLast = c.raysLast;
++    pShared->gpuUs = c.gpuUs;
++    pShared->width = c.width;
++    pShared->height = c.height;
++    if (log && c.passes != g_loggedAt) {
++      g_loggedAt = c.passes;
++      char line[256];
++      g_pass.line(line, sizeof(line));
++      bridge_util::Logger::info(line);
++    }
++  }
++
++  // Bridge_GiPixelOpen: answers once whether the renderer can run the pass.
++  inline void open(const std::unordered_map<uint32_t, IDirect3DDevice9*>& devices) {
++    bridge_util::GiPixelShared* const pShared = bridge_util::giPixelShared();
++    if (pShared == nullptr || g_pass.ready()) {
++      return;
++    }
++    const char* const why = devices.empty() ? "no device" : g_pass.init(devices.begin()->second);
++    uint32_t state = bridge_util::GiPixelOn;
++    if (why != nullptr) {
++      state = std::strncmp(why, "stock", 5) == 0 ? bridge_util::GiPixelOffStockRenderer
++            : std::strncmp(why, "no ray", 6) == 0 ? bridge_util::GiPixelOffNoRayQuery : bridge_util::GiPixelOffOther;
++      bridge_util::Logger::info(bridge_util::format_string("[GiPixel] off: %s", why));
++    } else {
++      bridge_util::Logger::info("[GiPixel] on: the renderer records external passes and has ray queries.");
++    }
++    pShared->state.store(state, std::memory_order_release);
++  }
++
++  inline IDirect3DBaseTexture9* find(const ResourceMap& resources, uint32_t id) {
++    const auto it = id != 0 ? resources.find(id) : resources.end();
++    if (it == resources.end() || it->second == nullptr || it->second->GetType() != D3DRTYPE_TEXTURE) {
++      return nullptr;
++    }
++    return static_cast<IDirect3DTexture9*>(it->second);
++  }
++
++  // Bridge_GiPixelPass. A refused pass counts as a fault; the client reads the counter.
++  inline void pass(const ResourceMap& resources, uint32_t depthId, uint32_t classId, const uint32_t* outputIds, const void* pBlock, uint32_t size) {
++    if (!g_pass.ready() || pBlock == nullptr || size != sizeof(GiPixelBlock)) {
++      return;
++    }
++    IDirect3DBaseTexture9* outputs[kGiPixelOutputs];
++    IDirect3DBaseTexture9* const pClass = find(resources, classId);
++    // An id that names no texture must not pass as "absent": the run below would then succeed without it.
++    bool known = classId == 0 || pClass != nullptr;
++    for (uint32_t i = 0; i < kGiPixelOutputs; ++i) {
++      outputs[i] = find(resources, outputIds[i]);
++      known = known && (outputIds[i] == 0 || outputs[i] != nullptr);
++    }
++    const HRESULT hr = g_pass.run(*static_cast<const GiPixelBlock*>(pBlock), known ? find(resources, depthId) : nullptr, pClass, outputs);
++    const GiPixelCounters c = g_pass.counters();
++    // The first line after a second of frames (the device answers late), then one a minute at 60 frames a second.
++    publish(FAILED(hr) ? c.faults == 1 : c.passes == 60 || c.passes % 3600 == 0);
++  }
++
++  // A texture is about to go: the pass must not keep a view of it.
++  inline void forget(const ResourceMap& resources, uint32_t id) {
++    const auto it = resources.find(id);
++    if (it != resources.end() && it->second != nullptr) {
++      g_pass.forget(it->second);
++    }
++  }
++
++  // Before a device reset: frees the pass objects; the next pass builds them again.
++  inline void dropAll() {
++    if (g_pass.ready()) {
++      publish(true);
++      g_pass.drop();
++    }
++  }
++
++  // Before the device is destroyed: also lets go of the renderer's interfaces. A new device needs a new open.
++  inline void close() {
++    dropAll();
++    g_pass.close();
++  }
++}
+diff --git a/bridge/src/server/main.cpp b/bridge/src/server/main.cpp
+index ee8e2008..3c2eaf5a 100644
+--- a/bridge/src/server/main.cpp
++++ b/bridge/src/server/main.cpp
+@@ -55,2 +55,3 @@
+ #include "gi_server.h"
++#include "gi_pixel_server.h"
+ #include "../client/client_options.h"
+@@ -621,2 +622,3 @@ void ProcessDeviceCommandQueue() {
+         gi_server::dropAll();
++        gi_pixel::close();
+         safeDestroy(pD3DDevice, pD3DDeviceHandle);
+@@ -766,2 +768,3 @@ void ProcessDeviceCommandQueue() {
+         gi_server::dropAll();
++        gi_pixel::dropAll();
+         uint32_t* rawPresentationParameters = nullptr;
+@@ -789,2 +792,3 @@ void ProcessDeviceCommandQueue() {
+         gi_server::dropAll();
++        gi_pixel::dropAll();
+         uint32_t* rawPresentationParameters = nullptr;
+@@ -2162,2 +2166,3 @@ void ProcessDeviceCommandQueue() {
+         const auto& pTexture = (IDirect3DTexture9*) gpD3DResources[pHandle];
++        gi_pixel::forget(gpD3DResources, pHandle);
+         safeDestroy(pTexture, pHandle);
+@@ -3085,2 +3090,3 @@ void ProcessDeviceCommandQueue() {
+         GET_HND(pHandle);
++        gi_pixel::forget(gpD3DResources, pHandle);
+         gpD3DResources.erase(pHandle);
+@@ -3114,2 +3120,18 @@ void ProcessDeviceCommandQueue() {
+       }
++      case Bridge_GiPixelOpen:
++        gi_pixel::open(gpD3DDevices);
++        break;
++      case Bridge_GiPixelPass:
++      {
++        GET_HND(depthHandle);
++        PULL_U(classHandle);
++        uint32_t outputHandles[kGiPixelOutputs];
++        for (uint32_t& handle : outputHandles) {
++          handle = (uint32_t) DeviceBridge::get_data();
++        }
++        void* pBlock = nullptr;
++        const uint32_t blockSize = DeviceBridge::get_data(&pBlock);
++        gi_pixel::pass(gpD3DResources, depthHandle, classHandle, outputHandles, pBlock, blockSize);
++        break;
++      }
+       /*
+diff --git a/bridge/src/server/meson.build b/bridge/src/server/meson.build
+index ef76e9c1..23c91d3e 100644
+--- a/bridge/src/server/meson.build
++++ b/bridge/src/server/meson.build
+@@ -41,2 +41,7 @@ gi_spirv = custom_target('gi_pattern_spv',
+   command : [glslang, '-V', '--quiet', '--target-env', 'vulkan1.1', '--vn', 'g_giPatternSpv', '-o', '@OUTPUT@', '@INPUT@'])
++# The per-pixel shadow pass: native/remix-bridge/build.cmd copies its kernel and headers in from the repository.
++gi_pixel_spirv = custom_target('gi_pixel_spv',
++  input   : 'pixel_shadow.comp',
++  output  : 'gi_pixel_spv.h',
++  command : [glslang, '-V', '--quiet', '--target-env', 'vulkan1.2', '-DBRIDGE_PASS', '--vn', 'kGiPixelSpv', '-o', '@OUTPUT@', '@INPUT@'])
+ 
+@@ -64,3 +69,3 @@ server_resource = windows.compile_resources('NvRemixBridge.rc',
+ server_exe = executable('NvRemixBridge', server_src, server_header, server_version, server_resource,
+-sources             : [ bridge_version, gi_spirv ],
++sources             : [ bridge_version, gi_spirv, gi_pixel_spirv ],
+ build_by_default    : (cpu_family == 'x86_64') or (cpu_family == 'aarch64') ? true : false,
+diff --git a/bridge/src/util/meson.build b/bridge/src/util/meson.build
+index 61856389..d181e3bc 100644
+--- a/bridge/src/util/meson.build
++++ b/bridge/src/util/meson.build
+@@ -78,2 +78,3 @@ util_header = files([
+ 	'util_gi.h',
++	'util_gi_pixel.h',
+ 	'log/log.h',
+diff --git a/bridge/src/util/util_commands.h b/bridge/src/util/util_commands.h
+index 532fd1a2..e151fcb0 100644
+--- a/bridge/src/util/util_commands.h
++++ b/bridge/src/util/util_commands.h
+@@ -69,2 +69,5 @@ namespace Commands {
+     Bridge_GiCancel,
++    // Per-pixel shadow pass exports (client/d3d9_gi_pixel.cpp), sent with FlagBits::AsyncResult.
++    Bridge_GiPixelOpen,
++    Bridge_GiPixelPass,
+     // These are not actually official D3D9 API calls.
+@@ -508,2 +511,4 @@ namespace Commands {
+     case Bridge_GiCancel: return "Bridge_GiCancel";
++    case Bridge_GiPixelOpen: return "Bridge_GiPixelOpen";
++    case Bridge_GiPixelPass: return "Bridge_GiPixelPass";
+     
+diff --git a/bridge/src/util/util_gi_pixel.h b/bridge/src/util/util_gi_pixel.h
+new file mode 100644
+index 00000000..31a0c5a0
+--- /dev/null
++++ b/bridge/src/util/util_gi_pixel.h
+@@ -0,0 +1,67 @@
++/*
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++#pragma once
++
++#include <atomic>
++#include <cstdint>
++#include <memory>
++#include <mutex>
++
++#include "log/log.h"
++#include "util_sharedmemory.h"
++
++// Per-pixel shadow pass (RemixBridge_GiPixel* exports): the words the server publishes and the client reads without a command.
++namespace bridge_util {
++  enum GiPixelState : uint32_t {
++    GiPixelUnanswered = 0,
++    GiPixelOn = 1,
++    GiPixelOffStockRenderer = 2,  // the renderer has no external pass interface
++    GiPixelOffNoRayQuery = 3,
++    GiPixelOffOther = 4,
++  };
++
++  struct GiPixelShared {
++    static constexpr uint32_t kWords = 16;
++    std::atomic<uint32_t> state;  // GiPixelState, written last by the server on Bridge_GiPixelOpen
++    uint32_t passes;
++    uint32_t faults;              // passes refused or failed
++    uint32_t raysLow;             // rays since the pass objects were created, 64 bits
++    uint32_t raysHigh;
++    uint32_t raysLast;            // of a recent pass
++    uint32_t gpuUs;               // dispatch time of a recent pass by device timestamps, microseconds
++    uint32_t width;               // of the outputs
++    uint32_t height;
++    uint32_t reserved[7];
++  };
++  static_assert(sizeof(GiPixelShared) == GiPixelShared::kWords * 4, "GiPixelShared must have the same layout in both processes");
++
++  // Maps the words on first use; nullptr when the mapping failed.
++  inline GiPixelShared* giPixelShared() {
++    static std::once_flag once;
++    static std::unique_ptr<SharedMemory> s_memory;
++    std::call_once(once, [] {
++      s_memory = std::make_unique<SharedMemory>("GiPixel", sizeof(GiPixelShared));
++      if (s_memory->data() == nullptr) {
++        Logger::err("[GiPixel] The counter block could not be mapped, so the per-pixel pass is off.");
++      }
++    });
++    return static_cast<GiPixelShared*>(s_memory->data());
++  }
++}
+diff --git a/bridge/test/rtx/unit/meson.build b/bridge/test/rtx/unit/meson.build
+index d0067648..b62ca7d1 100644
+--- a/bridge/test/rtx/unit/meson.build
++++ b/bridge/test/rtx/unit/meson.build
+@@ -86,3 +86,3 @@ endif
+ # Each x86 app runs against the client and server from a regular bridge build in _output.
+-bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device', 'async_readback_device', 'gi_device' ]
++bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device', 'async_readback_device', 'gi_device', 'gi_pixel_device' ]
+ if (cpu_family == 'x86')
+diff --git a/bridge/test/rtx/unit/test_gi_pixel_device.cpp b/bridge/test/rtx/unit/test_gi_pixel_device.cpp
+new file mode 100644
+index 00000000..19aa4757
+--- /dev/null
++++ b/bridge/test/rtx/unit/test_gi_pixel_device.cpp
+@@ -0,0 +1,325 @@
++/*
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++
++// Sends the per-pixel shadow pass through RemixBridge_GiPixelOpen / RemixBridge_GiPixelPass: a floor drawn into an INTZ
++// depth texture, one lamp, two capsules and one static box. Reads the four outputs back with GetRenderTargetData and
++// checks three floor points, again after 100 one-sample frames and with a second set of textures.
++// A device reset is not part of this test: with these textures the server's reset fails on a DXVK renderer with one
++// resource left alive, also when no pass is sent. The pass frees its objects the same way for a reset and for a
++// destroyed depth texture, and native/dxvk/test/dxvk_gi_pixel_pass.cpp covers the reset without the bridge.
++// REMIX_GI_TEST_DXVK: a d3d9vk_x64.dll for the server. With a library that records external passes and has ray queries
++// the state must be on. Without the variable, or with a stock library, the state must be off (stock renderer) and the
++// pass export must refuse.
++
++#include <cmath>
++#include <cstdio>
++#include <cstring>
++#include <fstream>
++#include <stdexcept>
++#include <string>
++
++#include <DirectXMath.h>
++#include <wrl/client.h>
++
++#include "test_remix_api_bridge_app.h"
++#include "../../../src/util/gi_pixel_block.h"
++
++using Microsoft::WRL::ComPtr;
++using namespace bridge_app_test;
++using namespace DirectX;
++
++namespace {
++  using PFN_GiPixelOpen = HRESULT (__stdcall*)(uint32_t*);
++  using PFN_GiPixelPass = HRESULT (__stdcall*)(const void*, uint32_t, IDirect3DTexture9*, IDirect3DTexture9*, IDirect3DTexture9* const*);
++  using PFN_GiPixelReadCounters = HRESULT (__stdcall*)(uint32_t*, uint32_t);
++
++  // Word indices of RemixBridge_GiPixelReadCounters (util_gi_pixel.h).
++  enum Counter { kState, kPasses, kFaults, kRaysLow, kRaysHigh, kRaysLast, kGpuUs, kWidth, kHeight, kCounterCount };
++
++  constexpr UINT kWidthFull = 640;
++  constexpr UINT kHeightFull = 360;
++  constexpr UINT kWidthQuarter = kWidthFull / 4;
++  constexpr UINT kHeightQuarter = kHeightFull / 4;
++
++  PFN_GiPixelOpen g_open = nullptr;
++  PFN_GiPixelPass g_pass = nullptr;
++  PFN_GiPixelReadCounters g_readCounters = nullptr;
++
++  void check(HRESULT result, const char* pCall) {
++    if (FAILED(result)) {
++      std::printf("FAILED: %s returned 0x%08lX.\n", pCall, static_cast<unsigned long>(result));
++      throw std::runtime_error(pCall);
++    }
++  }
++
++  void require(bool condition, const char* pWhat) {
++    if (!condition) {
++      std::printf("FAILED: %s.\n", pWhat);
++      throw std::runtime_error(pWhat);
++    }
++  }
++
++  float halfToFloat(uint16_t half) {
++    const int exponent = (half >> 10) & 31;
++    const int mantissa = half & 1023;
++    const float value = exponent == 0 ? std::ldexp(float(mantissa), -24) : std::ldexp(float(mantissa | 1024), exponent - 25);
++    return (half & 0x8000) ? -value : value;
++  }
++
++  struct Scene {
++    XMMATRIX view;
++    XMMATRIX projection;
++    XMVECTOR eye;
++    GiPixelBlock block = {};
++
++    Scene() {
++      eye = XMVectorSet(0, 6, -6, 1);
++      view = XMMatrixLookAtLH(eye, XMVectorZero(), XMVectorSet(0, 1, 0, 0));
++      projection = XMMatrixPerspectiveFovLH(XM_PI / 3, float(kWidthFull) / kHeightFull, 0.1f, 50.0f);
++      XMStoreFloat4x4(reinterpret_cast<XMFLOAT4X4*>(block.invViewProj), XMMatrixInverse(nullptr, view * projection));
++      XMStoreFloat3(reinterpret_cast<XMFLOAT3*>(block.cam), eye);
++      XMStoreFloat3(reinterpret_cast<XMFLOAT3*>(block.viewZ), XMVector3Normalize(XMVectorNegate(eye)));
++      block.ambient = 0.05f;
++      block.zFar = 50.0f;
++      block.bias = 0.01f;
++      block.radiusScale = 1.0f;
++      block.samples = 16;
++      block.lamps = 1;
++      block.lamp[0] = { { 2, 3, 0 }, 0.05f, { 10, 10, 10 }, 0 };
++      block.capsules = 2;
++      block.casters = 2;
++      block.boxes = 1;
++      block.capsule[0] = { { 0, 0.3f, 0 }, 0.25f, { 0, 1.3f, 0 }, 0 };
++      block.caster[0] = { { -0.25f, 0.05f, -0.25f }, 0, { 0.25f, 1.55f, 0.25f }, 0 };
++      // The second capsule stands where the static box hides the lamp, so its floor is traced with no light left to shadow.
++      block.capsule[1] = { { 3.77f, 0.2f, 0 }, 0.15f, { 3.77f, 0.5f, 0 }, 0 };
++      block.caster[1] = { { 3.62f, 0.05f, -0.15f }, 0, { 3.92f, 0.65f, 0.15f }, 0 };
++      const float box[12] = { 0.6f, 0, 0, 3.0f, 0, 0.6f, 0, 0.5f, 0, 0, 0.6f, -0.3f };
++      std::memcpy(block.box[0].m, box, sizeof(box));
++    }
++
++    // The quarter-resolution pixel of a world point.
++    void pixel(const float* pPoint, int& x, int& y) const {
++      const XMVECTOR clip = XMVector4Transform(XMVectorSet(pPoint[0], pPoint[1], pPoint[2], 1), view * projection);
++      const float w = XMVectorGetW(clip);
++      x = int((XMVectorGetX(clip) / w * 0.5f + 0.5f) * kWidthQuarter);
++      y = int((0.5f - XMVectorGetY(clip) / w * 0.5f) * kHeightQuarter);
++    }
++  };
++
++  struct Targets {
++    ComPtr<IDirect3DTexture9> pDepth;
++    ComPtr<IDirect3DSurface9> pDepthSurface;
++    ComPtr<IDirect3DTexture9> pColor;
++    ComPtr<IDirect3DSurface9> pColorSurface;
++    ComPtr<IDirect3DTexture9> outputs[kGiPixelOutputs];
++
++    void create(IDirect3DDevice9* pDevice) {
++      check(pDevice->CreateTexture(kWidthFull, kHeightFull, 1, D3DUSAGE_DEPTHSTENCIL, static_cast<D3DFORMAT>(MAKEFOURCC('I', 'N', 'T', 'Z')),
++                                   D3DPOOL_DEFAULT, &pDepth, nullptr), "CreateTexture (INTZ)");
++      check(pDepth->GetSurfaceLevel(0, &pDepthSurface), "GetSurfaceLevel (depth)");
++      check(pDevice->CreateTexture(kWidthFull, kHeightFull, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &pColor, nullptr),
++            "CreateTexture (color)");
++      check(pColor->GetSurfaceLevel(0, &pColorSurface), "GetSurfaceLevel (color)");
++      for (auto& pOutput : outputs) {
++        check(pDevice->CreateTexture(kWidthQuarter, kHeightQuarter, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A16B16G16R16F, D3DPOOL_DEFAULT,
++                                     &pOutput, nullptr), "CreateTexture (output)");
++      }
++    }
++  };
++
++  void draw(IDirect3DDevice9* pDevice, const Targets& targets, const Scene& scene) {
++    static const float kFloor[4][3] = { { -8, 0, -8 }, { -8, 0, 8 }, { 8, 0, -8 }, { 8, 0, 8 } };
++    check(pDevice->SetRenderTarget(0, targets.pColorSurface.Get()), "SetRenderTarget");
++    check(pDevice->SetDepthStencilSurface(targets.pDepthSurface.Get()), "SetDepthStencilSurface");
++    check(pDevice->Clear(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, 0, 1.0f, 0), "Clear");
++    check(pDevice->BeginScene(), "BeginScene");
++    XMFLOAT4X4 matrix;
++    XMStoreFloat4x4(&matrix, scene.view);
++    pDevice->SetTransform(D3DTS_VIEW, reinterpret_cast<D3DMATRIX*>(&matrix));
++    XMStoreFloat4x4(&matrix, scene.projection);
++    pDevice->SetTransform(D3DTS_PROJECTION, reinterpret_cast<D3DMATRIX*>(&matrix));
++    pDevice->SetRenderState(D3DRS_LIGHTING, FALSE);
++    pDevice->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
++    pDevice->SetRenderState(D3DRS_ZENABLE, TRUE);
++    pDevice->SetFVF(D3DFVF_XYZ);
++    check(pDevice->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, kFloor, 12), "DrawPrimitiveUP");
++    check(pDevice->EndScene(), "EndScene");
++  }
++
++  void sendPass(const Scene& scene, const Targets& targets) {
++    IDirect3DTexture9* const outputs[kGiPixelOutputs] = { targets.outputs[0].Get(), targets.outputs[1].Get(), targets.outputs[2].Get(),
++                                                          targets.outputs[3].Get() };
++    check(g_pass(&scene.block, sizeof(scene.block), targets.pDepth.Get(), nullptr, outputs), "RemixBridge_GiPixelPass");
++  }
++
++  // Reads the outputs back and checks three floor points.
++  void checkOutputs(IDirect3DDevice9* pDevice, const Targets& targets, const Scene& scene, IDirect3DSurface9* pReadback, const char* pWhen) {
++    // In the first capsule's shadow, away from every caster, behind the static box.
++    const float points[3][3] = { { -0.73f, 0, 0 }, { -4, 0, 3 }, { 3.77f, 0, 0 } };
++    float texel[kGiPixelOutputs][3][4];
++    for (uint32_t output = 0; output < kGiPixelOutputs; ++output) {
++      ComPtr<IDirect3DSurface9> pSurface;
++      check(targets.outputs[output]->GetSurfaceLevel(0, &pSurface), "GetSurfaceLevel (output)");
++      check(pDevice->GetRenderTargetData(pSurface.Get(), pReadback), "GetRenderTargetData");
++      D3DLOCKED_RECT locked;
++      check(pReadback->LockRect(&locked, nullptr, D3DLOCK_READONLY), "LockRect");
++      for (int point = 0; point < 3; ++point) {
++        int x = 0;
++        int y = 0;
++        scene.pixel(points[point], x, y);
++        const uint16_t* const pHalf = reinterpret_cast<const uint16_t*>(static_cast<const uint8_t*>(locked.pBits) + y * locked.Pitch) + x * 4;
++        for (int channel = 0; channel < 4; ++channel) {
++          texel[output][point][channel] = halfToFloat(pHalf[channel]);
++        }
++      }
++      pReadback->UnlockRect();
++    }
++    std::printf("%s: raw %.3f / %.3f / %.3f, den.r %.4f / %.4f / %.4f, rays %.0f / %.0f / %.0f.\n", pWhen, texel[0][0][0], texel[0][1][0],
++                texel[0][2][0], texel[3][0][0], texel[3][1][0], texel[3][2][0], texel[3][0][3], texel[3][1][3], texel[3][2][3]);
++    require(texel[0][0][0] < 0.5f && texel[0][0][2] == 1.0f && texel[2][0][0] > 0 && texel[3][0][0] > 0, "The shadow point is blocked and traced");
++    require(texel[0][1][0] == 1.0f && texel[0][1][2] == 0 && texel[3][1][3] == 0, "The far point is lit and traces no ray");
++    require(texel[0][2][2] == 1.0f && texel[3][2][0] == 0 && texel[3][2][3] > 0, "The point behind the static box is traced and no light reaches it");
++    for (int point = 0; point < 3; ++point) {
++      require(texel[1][point][1] > 0.99f && texel[1][point][3] > 0 && texel[1][point][3] < 1, "The guide holds the floor's normal and depth");
++    }
++  }
++
++  // Calls the open export until the server has answered. The command reaches the server with a Present.
++  uint32_t openPass(IDirect3DDevice9* pDevice) {
++    uint32_t state = 0;
++    for (int frame = 0; frame < 600; ++frame) {
++      const HRESULT result = g_open(&state);
++      check(result, "RemixBridge_GiPixelOpen");
++      if (result == S_OK) {
++        return state;
++      }
++      pDevice->Present(nullptr, nullptr, nullptr, nullptr);
++      Sleep(5);
++    }
++    throw std::runtime_error("The server did not answer RemixBridge_GiPixelOpen");
++  }
++
++  void runOn(IDirect3DDevice9* pDevice) {
++    Scene scene;
++    ComPtr<IDirect3DSurface9> pReadback;
++    check(pDevice->CreateOffscreenPlainSurface(kWidthQuarter, kHeightQuarter, D3DFMT_A16B16G16R16F, D3DPOOL_SYSTEMMEM, &pReadback, nullptr),
++          "CreateOffscreenPlainSurface");
++    // The second round has new textures: the server frees its pass objects when the first depth texture goes.
++    for (int round = 0; round < 2; ++round) {
++      Targets targets;
++      targets.create(pDevice);
++      scene.block.samples = 16;
++      draw(pDevice, targets, scene);
++      sendPass(scene, targets);
++      checkOutputs(pDevice, targets, scene, pReadback.Get(), round == 0 ? "16 samples" : "New targets, 16 samples");
++      scene.block.samples = 1;
++      for (uint32_t frame = 0; frame < 100; ++frame) {
++        scene.block.frame = frame;
++        draw(pDevice, targets, scene);
++        sendPass(scene, targets);
++        check(pDevice->Present(nullptr, nullptr, nullptr, nullptr), "Present");
++      }
++      checkOutputs(pDevice, targets, scene, pReadback.Get(), round == 0 ? "After 100 frames" : "New targets, 100 frames");
++      uint32_t counters[kCounterCount] = {};
++      check(g_readCounters(counters, kCounterCount), "RemixBridge_GiPixelReadCounters");
++      std::printf("[GiPixel] passes=%u rays=%u raysLast=%u gpuUs=%u size=%ux%u faults=%u\n", counters[kPasses], counters[kRaysLow],
++                  counters[kRaysLast], counters[kGpuUs], counters[kWidth], counters[kHeight], counters[kFaults]);
++      require(counters[kPasses] >= 60 && counters[kRaysLow] > 0 && counters[kFaults] == 0, "The counters show passes, rays and no fault");
++    }
++  }
++}
++
++int main() {
++  std::setvbuf(stdout, nullptr, _IONBF, 0);
++  char dxvk[MAX_PATH] = {};
++  GetEnvironmentVariableA("REMIX_GI_TEST_DXVK", dxvk, sizeof(dxvk));
++  char expectOn[8] = {};
++  GetEnvironmentVariableA("REMIX_GI_TEST_CASE", expectOn, sizeof(expectOn));
++  const bool on = std::string(expectOn) == "on";
++  WNDCLASSW windowClass = {};
++  windowClass.lpfnWndProc = DefWindowProcW;
++  windowClass.hInstance = GetModuleHandleW(nullptr);
++  windowClass.lpszClassName = L"BridgeGiPixelTest";
++  RegisterClassW(&windowClass);
++  const HWND hWnd = CreateWindowExW(0, windowClass.lpszClassName, L"", WS_OVERLAPPEDWINDOW, 0, 0, 64, 64, nullptr, nullptr, windowClass.hInstance, nullptr);
++  if (hWnd == nullptr) {
++    logLine("FAILED: Could not create a test window.");
++    return 1;
++  }
++  bool passed = false;
++  try {
++    std::ofstream config(".trex/bridge.conf", std::ios::app);
++    config << "sendCreateFunctionServerResponses = True\n";
++    if (dxvk[0] != 0) {
++      if (!CopyFileA(dxvk, ".trex\\d3d9vk_x64.dll", FALSE)) {
++        throw std::runtime_error("Could not copy REMIX_GI_TEST_DXVK");
++      }
++      config << "server.useVanillaDxvk = True\n";
++    }
++    config.close();
++    std::printf("Expecting the pass %s, server renderer %s.\n", on ? "on" : "off", dxvk[0] ? "DXVK" : "system Direct3D 9");
++    const HMODULE hClient = loadBridgeClient();
++    if (hClient == nullptr) {
++      throw std::runtime_error("loadBridgeClient");
++    }
++    g_open = reinterpret_cast<PFN_GiPixelOpen>(GetProcAddress(hClient, "RemixBridge_GiPixelOpen"));
++    g_pass = reinterpret_cast<PFN_GiPixelPass>(GetProcAddress(hClient, "RemixBridge_GiPixelPass"));
++    g_readCounters = reinterpret_cast<PFN_GiPixelReadCounters>(GetProcAddress(hClient, "RemixBridge_GiPixelReadCounters"));
++    if (g_open == nullptr || g_pass == nullptr || g_readCounters == nullptr) {
++      throw std::runtime_error("The client does not export the per-pixel pass functions");
++    }
++    const auto pfnCreate = reinterpret_cast<PFN_Direct3DCreate9>(GetProcAddress(hClient, "Direct3DCreate9"));
++    ComPtr<IDirect3D9> pD3D;
++    pD3D.Attach(pfnCreate != nullptr ? pfnCreate(D3D_SDK_VERSION) : nullptr);
++    if (pD3D == nullptr) {
++      throw std::runtime_error("Direct3DCreate9");
++    }
++    D3DPRESENT_PARAMETERS present = {};
++    present.Windowed = TRUE;
++    present.SwapEffect = D3DSWAPEFFECT_DISCARD;
++    present.BackBufferFormat = D3DFMT_UNKNOWN;
++    present.BackBufferWidth = 64;
++    present.BackBufferHeight = 64;
++    present.hDeviceWindow = hWnd;
++    // The flags of test_gi_device.
++    ComPtr<IDirect3DDevice9> pDevice;
++    check(pD3D->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hWnd, D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_MULTITHREADED,
++                              &present, &pDevice), "CreateDevice");
++    const uint32_t state = openPass(pDevice.Get());
++    std::printf("State %u.\n", state);
++    if (on) {
++      require(state == 1, "The state is on");
++      runOn(pDevice.Get());
++    } else {
++      require(state == 2, "The state is off (stock renderer)");
++      GiPixelBlock block = {};
++      ComPtr<IDirect3DTexture9> pDepth;
++      check(pDevice->CreateTexture(64, 64, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &pDepth, nullptr), "CreateTexture");
++      require(g_pass(&block, sizeof(block), pDepth.Get(), nullptr, nullptr) == E_NOTIMPL, "The pass export refuses while the state is off");
++    }
++    passed = true;
++  } catch (const std::exception& error) {
++    std::printf("FAILED: %s.\n", error.what());
++  }
++  DestroyWindow(hWnd);
++  logLine(passed ? "PASSED" : "FAILED");
++  return passed ? 0 : 1;
++}
