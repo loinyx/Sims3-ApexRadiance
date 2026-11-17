@@ -2,8 +2,8 @@ param([string[]]$TestArgs = @(), [string]$OutDir = (Join-Path $env:TEMP 'ApexGiS
 # The server tier's texel solve, offline on a Vulkan device (check.cpp, solve.comp). Read-only: prints to stdout; the
 # compiler's outputs and the three build inputs below stay in -OutDir. -TestArgs: passed on (--no-rays, --device <text>,
 # --density <n>, --rays <n>, --pathref <samples>, --dump <file>: the one file it writes, for the bridge's test-gi.cmd).
-# -Pixel: the per-pixel delta shadow kernel instead (pixel_check.cpp, pixel_shadow.comp;
-# -TestArgs --device <text>, --size <w> <h>, --bench <frames>). -Rebake: the re-bake cost against lamp count instead
+# -Pixel: the per-pixel delta shadow kernel and the Sim capsules instead (pixel_check.cpp, pixel_shadow.comp;
+# -TestArgs --device <text>, --size <w> <h>, --bench <frames>, --precomp <Shaders_Win32.precomp>). -Rebake: the re-bake cost against lamp count instead
 # (rebake_check.cpp; -TestArgs --lots 60,120,200, --density <n>, --rays <n>, --no-cpu, --no-gpu). -Mesh: the mesh casters
 # against XR-04's boxes (mesh_check.cpp, on the same kernel); -Game <the game's folder> reads a chair and a table out of
 # its packages once (casters.py, into -OutDir: the game's data stays out of the repository), else synthetic ones, and

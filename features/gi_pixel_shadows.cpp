@@ -14,6 +14,9 @@
 #include "shader_cache.h"
 #include "gbuffer_motion.h"
 #include "gi_pixel_filter_hlsl.h"
+#include "gi_sim_capsules.h"
+#include "d3d9_hooks.h"
+#include "sim_receiver_ids.h"
 #include <cstddef>
 #include "native/remix-bridge/gi/gi_pixel_block.h" // the bridge's block layout (patch 0019)
 #include <d3d9.h>
@@ -23,6 +26,7 @@
 #include <cstring>
 #include <format>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include <windows.h>
 
@@ -99,7 +103,123 @@ struct State {
     unsigned sent = 0, refused = 0;
     unsigned long long lastLog = 0;
     GiPixelBlock block{};
+    // Sim capsules (XR-08): the vertex constants as the game set them, its shaders' classification, this frame's draws
+    float vsc[256][4] = {};
+    int paletteRegs = 0;                       // registers of the last write that started at c0 (the bone palette)
+    IDirect3DPixelShader9* curPs = nullptr;    // the bound shaders (compared only, not referenced)
+    IDirect3DVertexShader9* curVs = nullptr;
+    std::unordered_map<IDirect3DPixelShader9*, bool> simPs; // held (AddRef) so a reused address cannot inherit an answer
+    std::unordered_map<IDirect3DVertexShader9*, GiSimCapsules::Chain> chains; // f < 0: not a skinned chain of the game's form
+    struct SimDraw {
+        double C[4][4];
+        float median[3];
+    };
+    std::vector<SimDraw> simDraws;
+    std::vector<GiSimCapsules::Root> prevSims;
+    uint32_t sims = 0;
+    unsigned long long simDrawsSeen = 0, simDrawsNoChain = 0, simDrawsOtherCamera = 0;
 } g;
+
+constexpr const char* kHookName = "GiPixelShadows";
+
+template <class Shader> std::vector<DWORD> Code(Shader* sh) {
+    UINT bytes = 0;
+    if (!sh || FAILED(sh->GetFunction(nullptr, &bytes)) || !bytes || bytes % 4 || bytes > 65536) return {};
+    std::vector<DWORD> code(bytes / 4);
+    if (FAILED(sh->GetFunction(code.data(), &bytes))) return {};
+    return code;
+}
+bool IsSimPs(IDirect3DPixelShader9* ps) {
+    if (!ps) return false;
+    if (const auto it = g.simPs.find(ps); it != g.simPs.end()) return it->second;
+    if (g.simPs.size() >= 4096) return false;
+    const std::vector<DWORD> code = Code(ps);
+    const size_t bytes = code.size() * 4;
+    const uint32_t hash = ShaderHash(code.data(), bytes);
+    const bool sim = std::any_of(std::begin(kSimReceiverPs), std::end(kSimReceiverPs), [&](const ShaderId& id) { return id.size == bytes && id.hash == hash; });
+    g.simPs.emplace(ps, sim);
+    ps->AddRef();
+    return sim;
+}
+const GiSimCapsules::Chain& ChainOf(IDirect3DVertexShader9* vs) {
+    static const GiSimCapsules::Chain kNone{};
+    if (!vs) return kNone;
+    if (const auto it = g.chains.find(vs); it != g.chains.end()) return it->second;
+    if (g.chains.size() >= 4096) return kNone;
+    const std::vector<DWORD> code = Code(vs);
+    GiSimCapsules::Chain ch;
+    if (!GiSimCapsules::Analyse(reinterpret_cast<const uint32_t*>(code.data()), code.size(), ch)) ch = {};
+    vs->AddRef();
+    return g.chains.emplace(vs, ch).first->second;
+}
+void ReleaseSimShaders() {
+    for (auto& [ps, sim] : g.simPs) ps->Release();
+    for (auto& [vs, ch] : g.chains) vs->Release();
+    g.simPs.clear(), g.chains.clear();
+}
+
+// A scene draw with one of the game's Sim materials (the AO's Sim receiver list): keep its model-to-clip chain and the
+// median of its bones, turned into a root with this frame's camera when the effect runs
+void NoteSimDraw(D3D9Hooks::DeviceContext& ctx) {
+    if (!WorldSession::InWorld() || !IsSimPs(g.curPs)) return;
+    g.simDrawsSeen++;
+    const GiSimCapsules::Chain& ch = ChainOf(g.curVs);
+    if (ch.f < 0 || g.paletteRegs < 3) {
+        g.simDrawsNoChain++;
+        return;
+    }
+    IDirect3DSurface9* ds = nullptr; // the scene's depth: not the reflection, a thumbnail or the UI
+    ExtraHooks::RawGetDepthStencilSurface(ctx.device, &ds);
+    const bool scene = ds && ds == DepthShare::Surface();
+    SafeRelease(ds);
+    if (!scene || g.simDraws.size() >= 1024) return;
+    State::SimDraw d;
+    GiSimCapsules::ClipOf(g.vsc, ch, d.C);
+    GiSimCapsules::BoneMedian(g.vsc, std::min(g.paletteRegs, 180) / 3, d.median);
+    g.simDraws.push_back(d);
+}
+void InstallSimHooks() {
+    using namespace D3D9Hooks;
+    RegisterSetVertexShaderConstantF(kHookName, [](DeviceContext&, UINT r, const float* c, UINT n) {
+        if (c && r < 256) {
+            n = std::min<UINT>(n, 256 - r);
+            std::memcpy(g.vsc[r], c, n * 16);
+            if (r == 0) g.paletteRegs = static_cast<int>(n);
+        }
+        return HookAction::Continue;
+    });
+    RegisterSetPixelShader(kHookName, [](DeviceContext&, IDirect3DPixelShader9* ps) {
+        g.curPs = ps;
+        return HookAction::Continue;
+    });
+    RegisterSetVertexShader(kHookName, [](DeviceContext&, IDirect3DVertexShader9* vs) {
+        g.curVs = vs;
+        return HookAction::Continue;
+    });
+    RegisterDrawIndexedPrimitive(kHookName, [](DeviceContext& ctx, D3DPRIMITIVETYPE, INT, UINT, UINT, UINT, UINT) {
+        NoteSimDraw(ctx);
+        return HookAction::Continue;
+    });
+}
+
+// This frame's Sims from its Sim draws (the camera is final now), into the block after any test capsule
+void FillSims(const float vp[4][4]) {
+    std::vector<GiSimCapsules::Root> roots;
+    for (const State::SimDraw& d : g.simDraws) {
+        double M[4][4];
+        GiSimCapsules::Root r;
+        if (!GiSimCapsules::WorldOf(d.C, vp, M)) {
+            g.simDrawsOtherCamera++;
+            continue;
+        }
+        GiSimCapsules::Apply(M, d.median, r.p);
+        roots.push_back(r);
+    }
+    g.simDraws.clear();
+    const std::vector<GiSimCapsules::Root> sims = GiSimCapsules::Merge(roots, g.block.cam, kGiPixelCasters);
+    g.sims = GiSimCapsules::Fill(g.block, sims, g.prevSims);
+    g.prevSims = sims;
+}
 
 const char* StateName(uint32_t s) {
     switch (s) {
@@ -221,7 +341,7 @@ void FillLamps() {
         std::memcpy(o.pos, picks[i].l->pos, sizeof o.pos), std::memcpy(o.col, picks[i].l->colour, sizeof o.col);
         o.radius = kLampRadius, o.pad = 0;
     }
-    // shortcut: no Sim capsules (XR-08) and no furniture boxes (no object proxy yet): without testCaster nothing is traced
+    // No static boxes: furniture comes as mesh casters (MC-2, meshCasters), which the bridge server adds itself
     g.block.capsules = g.block.casters = g.block.boxes = 0;
     if (g.o.testCaster && n) {
         const float* p = g.block.lamp[0].pos;
@@ -265,13 +385,17 @@ void LogCounters() {
     if (first || kPublicBuild) return;
     uint32_t w[9] = {}; // util_gi_pixel.h GiPixelShared: state, passes, faults, rays low / high, raysLast, gpuUs, width, height
     if (g.counters(w, 9) != S_OK) return;
-    const std::string line = std::format("[GiPixel] passes={} rays={} raysLast={} gpuUs={} size={}x{} faults={} sent={} refused={}", w[1],
-                                         (static_cast<uint64_t>(w[4]) << 32) | w[3], w[5], w[6], w[7], w[8], w[2], g.sent, g.refused);
+    const std::string line = std::format("[GiPixel] passes={} rays={} raysLast={} gpuUs={} size={}x{} faults={} sent={} refused={} sims={} simDraws={} "
+                                         "noChain={} otherCamera={}", w[1], (static_cast<uint64_t>(w[4]) << 32) | w[3], w[5], w[6], w[7], w[8], w[2], g.sent,
+                                         g.refused, g.sims, g.simDrawsSeen, g.simDrawsNoChain, g.simDrawsOtherCamera);
     if (w[2] || g.refused) LOG_WARNING(line);
     else LOG_INFO(line);
 }
 
 void Effect(IDirect3DDevice9* dev) {
+    struct ClearSimDraws { // whatever the path out: next frame's Sims come from next frame's draws
+        ~ClearSimDraws() { g.simDraws.clear(); }
+    } clearSimDraws;
     if (!g.active || g.off || !WorldSession::InWorld()) return;
     IDirect3DTexture9* depth = DepthShare::Texture();
     if (!depth) return;
@@ -296,6 +420,7 @@ void Effect(IDirect3DDevice9* dev) {
     g.cur ^= 1;
 
     FillLamps();
+    FillSims(vp);
     g.block.ambient = kAmbient, g.block.bias = kBias, g.block.radiusScale = 1.0f;
     g.block.frame = g.frame++, g.block.samples = 1;
     IDirect3DTexture9* const outputs[kGiPixelOutputs] = {g.raw, g.guide[g.cur], nullptr, nullptr};
@@ -379,11 +504,14 @@ void Start(const Options& o) {
     RenderCallbacks::Add(RenderCallbacks::preReset, OnPreReset);
     RenderCallbacks::Add(RenderCallbacks::restartEffects, RestartEffects);
     PostScene::Add(kOrder, Effect);
+    InstallSimHooks();
 }
 
 void Stop() {
     if (!g.active) return;
     PostScene::Remove(Effect);
+    D3D9Hooks::UnregisterAll(kHookName);
+    ReleaseSimShaders();
     RenderCallbacks::Remove(RenderCallbacks::preReset, OnPreReset);
     RenderCallbacks::Remove(RenderCallbacks::restartEffects, RestartEffects);
     ReleaseTargets();
