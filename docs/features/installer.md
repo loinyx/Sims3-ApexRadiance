@@ -111,6 +111,11 @@ value before only while the file still holds the one Setup wrote; the game must 
 
 ![Apex frame limit](../images/installer/frame-limit.png)
 
+Only the frame generation row that applies shows (`Engine.FrameGenRows`): a usable NVIDIA card shows Smooth Motion; AFMF
+shows where ADLX reports it supported, so an AMD integrated GPU that cannot run it shows nothing; with neither usable, the
+NVIDIA row explains why when an NVIDIA card is there, else the AMD row does. The frame limit row shows in the accent colour
+what the player gets: "60 fps → about 120 fps on screen", or about double with no limit.
+
 **AMD Fluid Motion Frames** (Setup 1.2.0) is the row after it, for AMD cards: frame generation in the AMD driver, through
 AMD's ADLX (`Afmf.cs`). ADLX has AFMF as one setting for the whole system, not per game, so the row says it applies to
 every game on the PC. The row shows when the AMD driver answers, and can be turned on where ADLX reports AFMF supported

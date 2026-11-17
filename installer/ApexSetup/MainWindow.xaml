@@ -213,15 +213,15 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
-                                        <FontIcon Glyph="&#xE713;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
+                                        <FontIcon Glyph="&#xE90F;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
                                     </Border>
                                     <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                                        <TextBlock Text="Sims3SettingsSetter" Style="{StaticResource ApexStrong}" />
-                                        <TextBlock Text="Fixes for game and graphics settings." Style="{StaticResource ApexMuted}" />
-                                        <TextBlock x:Name="S3ssPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
+                                        <TextBlock Text="Sims 3 Modernization" Style="{StaticResource ApexStrong}" />
+                                        <TextBlock x:Name="ModDesc" Tag="dyn" Style="{StaticResource ApexMuted}" />
+                                        <TextBlock x:Name="ModPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
                                     </StackPanel>
-                                    <ToggleSwitch x:Name="S3ssToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnToggle"
-                                                  AutomationProperties.Name="Sims3SettingsSetter" />
+                                    <ToggleSwitch x:Name="ModToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnToggle"
+                                                  AutomationProperties.Name="Sims 3 Modernization" />
                                 </Grid>
                             </Border>
                             <Border Style="{StaticResource ApexCard}">
@@ -233,15 +233,15 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
-                                        <FontIcon Glyph="&#xE90F;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
+                                        <FontIcon Glyph="&#xE713;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
                                     </Border>
                                     <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                                        <TextBlock Text="Sims 3 Modernization" Style="{StaticResource ApexStrong}" />
-                                        <TextBlock x:Name="ModDesc" Tag="dyn" Style="{StaticResource ApexMuted}" />
-                                        <TextBlock x:Name="ModPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
+                                        <TextBlock Text="Sims3SettingsSetter" Style="{StaticResource ApexStrong}" />
+                                        <TextBlock Text="Fixes for game and graphics settings." Style="{StaticResource ApexMuted}" />
+                                        <TextBlock x:Name="S3ssPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
                                     </StackPanel>
-                                    <ToggleSwitch x:Name="ModToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnToggle"
-                                                  AutomationProperties.Name="Sims 3 Modernization" />
+                                    <ToggleSwitch x:Name="S3ssToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnToggle"
+                                                  AutomationProperties.Name="Sims3SettingsSetter" />
                                 </Grid>
                             </Border>
                             <Border x:Name="MonoCard" Style="{StaticResource ApexCard}">

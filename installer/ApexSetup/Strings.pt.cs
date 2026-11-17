@@ -309,5 +309,8 @@ public static partial class Strings
         ["Could not change Apex's frame limit: {0}"] = "Não foi possível mudar o limite de quadros do Apex: {0}",
         // NVIDIA Smooth Motion turned on outside Setup
         ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Ativado fora do instalador, nas configurações do driver da NVIDIA: o instalador não mexe nele.",
+        // what frame generation shows on screen
+        ["{0} fps → about {1} fps on screen with frame generation"] = "{0} FPS → cerca de {1} FPS na tela com a geração de quadros",
+        ["No limit: about double your frame rate on screen with frame generation"] = "Sem limite: cerca do dobro de FPS na tela com a geração de quadros",
     };
 }

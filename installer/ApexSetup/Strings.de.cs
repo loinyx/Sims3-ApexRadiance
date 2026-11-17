@@ -315,5 +315,7 @@ public static partial class Strings
         ["Custom"] = "Eigener Wert",
         ["Could not change Apex's frame limit: {0}"] = "Apex' Bildratenlimit konnte nicht geändert werden: {0}",
         ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Außerhalb von Setup in den NVIDIA-Treibereinstellungen eingeschaltet: Setup lässt es unverändert.",
+        ["{0} fps → about {1} fps on screen with frame generation"] = "{0} FPS → etwa {1} FPS auf dem Bildschirm mit Bildgenerierung",
+        ["No limit: about double your frame rate on screen with frame generation"] = "Kein Limit: etwa doppelte Bildrate auf dem Bildschirm mit Bildgenerierung",
     };
 }

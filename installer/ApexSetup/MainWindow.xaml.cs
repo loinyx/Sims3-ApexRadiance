@@ -910,7 +910,9 @@ public sealed partial class MainWindow : Window
         _fillingFps = false;
         SetState(FpsPill, _fpsError == "Dry run: Setup changes nothing." ? (T(_fpsError), "ApexMutedBrush")
             : _fpsError is not null ? (T("Could not change Apex's frame limit: {0}", T(_fpsError)), "ApexWarningBrush")
-            : ("", "ApexMutedBrush"));
+            // what the player sees with frame generation on: twice the limit
+            : now > 0 ? (T("{0} fps → about {1} fps on screen with frame generation", now.Value, now.Value * 2), "ApexAccentBrush")
+            : (T("No limit: about double your frame rate on screen with frame generation"), "ApexAccentBrush"));
     }
 
     void ApplyFps(int fps)
@@ -1072,6 +1074,10 @@ public sealed partial class MainWindow : Window
         S3ppWaitText.Text = T("Waiting for your download in {0}…", DownloadsFolder());
         RefreshSmooth(s, g);
         RefreshAfmf();
+        // only the frame generation row that applies (Engine.FrameGenRows)
+        var (nvRow, amdRow) = Engine.FrameGenRows(_smooth!, _afmf!);
+        SmoothCard.Visibility = nvRow ? Visibility.Visible : Visibility.Collapsed;
+        AfmfCard.Visibility = amdRow ? Visibility.Visible : Visibility.Collapsed;
         RefreshFps(g);
         ModToggle.IsEnabled = g.ModernizationSupported || s.Modernization;
         if (!g.ModernizationSupported && !s.Modernization) ModToggle.IsOn = false;

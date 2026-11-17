@@ -314,5 +314,7 @@ public static partial class Strings
         ["Custom"] = "Anpassad",
         ["Could not change Apex's frame limit: {0}"] = "Kunde inte ändra Apex bildgräns: {0}",
         ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Påslaget utanför Setup, i NVIDIA-drivrutinens inställningar: Setup lämnar det som det är.",
+        ["{0} fps → about {1} fps on screen with frame generation"] = "{0} fps → ungefär {1} fps på skärmen med bildgenerering",
+        ["No limit: about double your frame rate on screen with frame generation"] = "Ingen gräns: ungefär dubbel bildfrekvens på skärmen med bildgenerering",
     };
 }

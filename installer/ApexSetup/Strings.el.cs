@@ -317,5 +317,7 @@ public static partial class Strings
         ["Custom"] = "Προσαρμοσμένο",
         ["Could not change Apex's frame limit: {0}"] = "Δεν ήταν δυνατή η αλλαγή του ορίου καρέ του Apex: {0}",
         ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Ενεργοποιήθηκε εκτός Setup, στις ρυθμίσεις του οδηγού NVIDIA: το Setup δεν το αγγίζει.",
+        ["{0} fps → about {1} fps on screen with frame generation"] = "{0} FPS → περίπου {1} FPS στην οθόνη με δημιουργία καρέ",
+        ["No limit: about double your frame rate on screen with frame generation"] = "Χωρίς όριο: περίπου διπλάσια καρέ στην οθόνη με δημιουργία καρέ",
     };
 }

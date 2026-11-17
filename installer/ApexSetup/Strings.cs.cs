@@ -309,5 +309,7 @@ public static partial class Strings
         ["Custom"] = "Vlastní",
         ["Could not change Apex's frame limit: {0}"] = "Limit snímků Apexu nelze změnit: {0}",
         ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Zapnuto mimo Setup, v nastavení ovladače NVIDIA: Setup ho nechá být.",
+        ["{0} fps → about {1} fps on screen with frame generation"] = "{0} FPS → asi {1} FPS na obrazovce s generováním snímků",
+        ["No limit: about double your frame rate on screen with frame generation"] = "Bez limitu: zhruba dvojnásobná snímková frekvence na obrazovce s generováním snímků",
     };
 }

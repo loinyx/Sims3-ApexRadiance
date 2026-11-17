@@ -300,5 +300,7 @@ public static partial class Strings
         ["Custom"] = "自定义",
         ["Could not change Apex's frame limit: {0}"] = "无法更改 Apex 的帧率上限：{0}",
         ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "已在 Setup 之外通过 NVIDIA 驱动设置开启：Setup 不会改动它。",
+        ["{0} fps → about {1} fps on screen with frame generation"] = "{0} fps → 开启帧生成后屏幕上约 {1} fps",
+        ["No limit: about double your frame rate on screen with frame generation"] = "无上限：开启帧生成后屏幕上的帧率约翻倍",
     };
 }

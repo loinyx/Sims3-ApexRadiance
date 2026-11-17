@@ -303,5 +303,7 @@ public static partial class Strings
         ["Custom"] = "Aangepast",
         ["Could not change Apex's frame limit: {0}"] = "Kan de framelimiet van Apex niet wijzigen: {0}",
         ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Buiten Setup aangezet, in de instellingen van de NVIDIA-driver: Setup laat het zoals het is.",
+        ["{0} fps → about {1} fps on screen with frame generation"] = "{0} fps → ongeveer {1} fps op het scherm met framegeneratie",
+        ["No limit: about double your frame rate on screen with frame generation"] = "Geen limiet: ongeveer dubbele framerate op het scherm met framegeneratie",
     };
 }

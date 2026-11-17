@@ -314,5 +314,7 @@ public static partial class Strings
         ["Custom"] = "Personalizzato",
         ["Could not change Apex's frame limit: {0}"] = "Impossibile modificare il limite di fotogrammi di Apex: {0}",
         ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Attivato fuori da Setup, nelle impostazioni del driver NVIDIA: Setup non lo tocca.",
+        ["{0} fps → about {1} fps on screen with frame generation"] = "{0} FPS → circa {1} FPS sullo schermo con la generazione di fotogrammi",
+        ["No limit: about double your frame rate on screen with frame generation"] = "Nessun limite: circa il doppio degli FPS sullo schermo con la generazione di fotogrammi",
     };
 }

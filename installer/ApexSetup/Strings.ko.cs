@@ -304,5 +304,7 @@ public static partial class Strings
         ["Custom"] = "사용자 지정",
         ["Could not change Apex's frame limit: {0}"] = "Apex의 프레임 제한을 바꿀 수 없습니다: {0}",
         ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Setup 밖에서 NVIDIA 드라이버 설정으로 켜졌습니다: Setup은 건드리지 않습니다.",
+        ["{0} fps → about {1} fps on screen with frame generation"] = "{0}fps → 프레임 생성 시 화면에서 약 {1}fps",
+        ["No limit: about double your frame rate on screen with frame generation"] = "제한 없음: 프레임 생성 시 화면 프레임이 약 두 배",
     };
 }

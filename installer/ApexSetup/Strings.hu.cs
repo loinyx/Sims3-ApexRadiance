@@ -319,5 +319,7 @@ public static partial class Strings
         ["Custom"] = "Egyéni",
         ["Could not change Apex's frame limit: {0}"] = "Az Apex képkockakorlátja nem módosítható: {0}",
         ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "A Setupon kívül, az NVIDIA-illesztő beállításaiban kapcsolták be: a Setup nem nyúl hozzá.",
+        ["{0} fps → about {1} fps on screen with frame generation"] = "{0} FPS → nagyjából {1} FPS a képernyőn képkocka-generálással",
+        ["No limit: about double your frame rate on screen with frame generation"] = "Nincs korlát: nagyjából dupla képkockaszám a képernyőn képkocka-generálással",
     };
 }

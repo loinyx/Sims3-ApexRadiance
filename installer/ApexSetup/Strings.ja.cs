@@ -306,5 +306,7 @@ public static partial class Strings
         ["Custom"] = "カスタム",
         ["Could not change Apex's frame limit: {0}"] = "Apex のフレーム制限を変更できませんでした: {0}",
         ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Setup 以外で NVIDIA ドライバーの設定からオンにされています: Setup は変更しません。",
+        ["{0} fps → about {1} fps on screen with frame generation"] = "{0} fps → フレーム生成で画面では約 {1} fps",
+        ["No limit: about double your frame rate on screen with frame generation"] = "制限なし: フレーム生成で画面のフレームレートは約 2 倍",
     };
 }

@@ -272,5 +272,7 @@ public static partial class Strings
         ["Custom"] = "Własny",
         ["Could not change Apex's frame limit: {0}"] = "Nie można zmienić limitu klatek Apex: {0}",
         ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Włączone poza Setup, w ustawieniach sterownika NVIDIA: Setup go nie zmienia.",
+        ["{0} fps → about {1} fps on screen with frame generation"] = "{0} FPS → około {1} FPS na ekranie z generowaniem klatek",
+        ["No limit: about double your frame rate on screen with frame generation"] = "Bez limitu: około dwa razy więcej klatek na ekranie z generowaniem klatek",
     };
 }

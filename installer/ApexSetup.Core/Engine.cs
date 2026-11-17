@@ -623,6 +623,17 @@ public static class Engine
 
     // Frame generation set by Setup in the driver follows the bridge and Apex: removing either (alone, by a renderer change or with
     // Uninstall everything) turns it off. A hook, so tests never reach a real driver; it returns why it could not, never throws.
+    // Which frame generation row shows: the one that applies. A usable NVIDIA card shows Smooth Motion; AFMF shows only where ADLX
+    // reports it supported (an AMD integrated GPU that cannot run it shows nothing); with neither usable, the NVIDIA row explains
+    // why when an NVIDIA card is there, else the AMD row does on an AMD-only PC. An NVAPI error shows on the NVIDIA row.
+    public static (bool Nvidia, bool Amd) FrameGenRows(SmoothMotion.Status nv, Afmf.Status amd)
+    {
+        var nvUsable = nv.On || SmoothMotion.Supported(nv.Card, nv.Driver);
+        var amdUsable = amd.On || amd.Supported;
+        var nvidia = nv.Error is not null || nv.Card is not null && (nvUsable || !amdUsable);
+        return (nvidia, amdUsable || amd.Present && !nvidia);
+    }
+
     public static bool TurnsFrameGenOff(string c) => c is Components.Bridge or Components.Apex;
     public static Func<Game, string?> FrameGenOff = DefaultFrameGenOff;
     static string? FrameGenOffError;

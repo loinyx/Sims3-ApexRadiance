@@ -879,6 +879,18 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
     Afmf.Tidy(new(true, true, false, null));
     Check(keptOn && keptOnError && !File.Exists(Afmf.Marker), "afmf: a record left while AFMF is off is dropped");
     Afmf.Marker = marker;
+    {
+        SmoothMotion.Status Card(string? c, uint d = 62124) => new(c, d, false, null, null);
+        Afmf.Status Amd(bool present, bool supported) => new(present, supported, false, null);
+        Check(Engine.FrameGenRows(Card("NVIDIA GeForce RTX 4070 Ti SUPER"), Amd(true, false)) == (true, false), "frame generation rows: a usable NVIDIA card and an AMD iGPU without AFMF show Smooth Motion only");
+        Check(Engine.FrameGenRows(Card("NVIDIA GeForce RTX 4070"), Amd(true, true)) == (true, true), "frame generation rows: both usable, both show");
+        Check(Engine.FrameGenRows(Card(null), Amd(true, true)) == (false, true) && Engine.FrameGenRows(Card(null), Amd(true, false)) == (false, true),
+              "frame generation rows: an AMD-only PC shows AFMF, with its reason when unsupported");
+        Check(Engine.FrameGenRows(Card("NVIDIA GeForce RTX 3080"), Amd(true, false)) == (true, false) && Engine.FrameGenRows(Card("NVIDIA GeForce RTX 3080"), Amd(false, false)) == (true, false),
+              "frame generation rows: neither usable, the NVIDIA row explains why");
+        Check(Engine.FrameGenRows(Card("NVIDIA GeForce RTX 3080"), Amd(true, true)) == (false, true) && Engine.FrameGenRows(Card(null), Amd(false, false)) == (false, false),
+              "frame generation rows: an unusable NVIDIA card next to a usable AMD one shows AFMF only; no card, no row");
+    }
     var amd = Afmf.Read(); // read only
     Console.WriteLine($"info this PC: AMD {(amd.Present ? "driver found" : "none")}{(amd.Error is null ? "" : ", error " + amd.Error)}");
     var nv = SmoothMotion.Read(); // read only

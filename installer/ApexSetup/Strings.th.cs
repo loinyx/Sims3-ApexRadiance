@@ -272,5 +272,7 @@ public static partial class Strings
         ["Custom"] = "กำหนดเอง",
         ["Could not change Apex's frame limit: {0}"] = "เปลี่ยนขีดจำกัดเฟรมของ Apex ไม่ได้: {0}",
         ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "เปิดไว้นอก Setup ในการตั้งค่าไดรเวอร์ NVIDIA: Setup จะไม่แตะต้อง",
+        ["{0} fps → about {1} fps on screen with frame generation"] = "{0} fps → ประมาณ {1} fps บนจอเมื่อใช้การสร้างเฟรม",
+        ["No limit: about double your frame rate on screen with frame generation"] = "ไม่จำกัด: เฟรมเรตบนจอประมาณสองเท่าเมื่อใช้การสร้างเฟรม",
     };
 }
