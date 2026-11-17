@@ -157,8 +157,8 @@ public static class RestorePoints
         }
         // the backup folder Setup made goes too, once nothing is left in it
         foreach (var d in new[] { RootOf(bin), Manifest.DirOf(bin) })
-            try { if (Directory.Exists(d) && !Directory.EnumerateFileSystemEntries(d).Any()) Directory.Delete(d); }
-            catch (IOException) { }
+            try { Fs.Retry(() => { if (Directory.Exists(d) && !Directory.EnumerateFileSystemEntries(d).Any()) Directory.Delete(d); }); }
+            catch (Exception x) when (x is IOException or UnauthorizedAccessException) { }
         return failed;
     }
 
@@ -167,7 +167,7 @@ public static class RestorePoints
         if (e.Dir)
         {
             if (e.Existed) Directory.CreateDirectory(e.Path);
-            else if (Directory.Exists(e.Path) && !Directory.EnumerateFileSystemEntries(e.Path).Any()) Directory.Delete(e.Path);
+            else Fs.Retry(() => { if (Directory.Exists(e.Path) && !Directory.EnumerateFileSystemEntries(e.Path).Any()) Directory.Delete(e.Path); });
             return;
         }
         if (File.Exists(e.Path)) File.SetAttributes(e.Path, File.GetAttributes(e.Path) & ~FileAttributes.ReadOnly);
@@ -189,23 +189,36 @@ public static class RestorePoints
             var text = File.ReadAllText(e.Path);
             if (!e.Existed && text == Engine.NewApexToml) File.Delete(e.Path);
             else if (Engine.RestartHostKey(text) != e.RestartHostWas)
-                File.WriteAllText(e.Path, e.RestartHostWas is { } was ? Engine.WithRestartHost(text, was) : Engine.WithoutRestartHost(text));
+                Fs.WriteAtomic(e.Path, e.RestartHostWas is { } was ? Engine.WithRestartHost(text, was) : Engine.WithoutRestartHost(text));
             return;
         }
         if (!e.Existed) { if (File.Exists(e.Path)) File.Delete(e.Path); return; }
         // through a temporary name: a failed copy never leaves half a file
         Directory.CreateDirectory(Path.GetDirectoryName(e.Path)!);
         var tmp = e.Path + ".apex-restore";
-        File.Copy(Path.Combine(p.Dir, e.Copy!), tmp, true);
-        File.Move(tmp, e.Path, true);
+        try
+        {
+            // (a temporary file left by an earlier try, read-only from its copy, is replaced)
+            if (File.Exists(tmp)) { File.SetAttributes(tmp, FileAttributes.Normal); File.Delete(tmp); }
+            File.Copy(Path.Combine(p.Dir, e.Copy!), tmp, true);
+            File.Move(tmp, e.Path, true);
+        }
+        catch
+        {
+            try { if (File.Exists(tmp)) { File.SetAttributes(tmp, FileAttributes.Normal); File.Delete(tmp); } } catch (Exception x) when (x is IOException or UnauthorizedAccessException) { }
+            throw;
+        }
     }
 
     static void DeleteTree(string dir)
     {
         try
         {
-            foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)) File.SetAttributes(f, FileAttributes.Normal);
-            Directory.Delete(dir, true);
+            Fs.Retry(() =>
+            {
+                foreach (var f in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)) File.SetAttributes(f, FileAttributes.Normal);
+                Directory.Delete(dir, true);
+            });
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } // (pruned the next time)
     }
@@ -214,20 +227,59 @@ public static class RestorePoints
 // Every change Setup makes to the player's files goes through here, so the open restore point has the file as it was.
 public static class Fs
 {
-    public static void Copy(string from, string to) { RestorePoints.Touch(to); File.Copy(from, to, true); }
-    public static void Move(string from, string to) { RestorePoints.Touch(from); RestorePoints.Touch(to); File.Move(from, to, true); }
-    public static void Write(string path, string text) { RestorePoints.Touch(path); File.WriteAllText(path, text); }
+    // a read-only destination is made writable first (the restore point keeps it as it was)
+    public static void Copy(string from, string to)
+    {
+        RestorePoints.Touch(to);
+        Retry(() =>
+        {
+            Writable(to);
+            File.Copy(from, to, true);
+        });
+    }
+    public static void Move(string from, string to) { RestorePoints.Touch(from); RestorePoints.Touch(to); Retry(() => File.Move(from, to, true)); }
+    public static void Write(string path, string text) { RestorePoints.Touch(path); Retry(() => WriteAtomic(path, text)); }
+
+    // a file an antivirus scan or the game's launcher holds a moment: tried again 3 times, 500 ms apart (a missing file fails at once)
+    public static TimeSpan RetryDelay = TimeSpan.FromMilliseconds(500);
+    public static void Retry(Action io)
+    {
+        for (var i = 0; ; i++)
+            try { io(); return; }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException && e is not FileNotFoundException && e is not DirectoryNotFoundException && i < 3)
+            { Thread.Sleep(RetryDelay); }
+    }
     // ApexRadiance.toml with [ui] restart_host changed from keyWas: a restore point puts back only that key
-    public static void WriteKey(string path, string text, bool? keyWas) { RestorePoints.Touch(path, key: true, keyWas: keyWas); File.WriteAllText(path, text); }
-    public static void WriteFpsKey(string path, string text, int? was, int set) { RestorePoints.Touch(path, fps: true, fpsWas: was, fpsSet: set); WriteAtomic(path, text); }
-    // a temporary file in the same folder, then moved over: a crash never leaves half of ApexRadiance.toml
+    public static void WriteKey(string path, string text, bool? keyWas) { RestorePoints.Touch(path, key: true, keyWas: keyWas); Retry(() => WriteAtomic(path, text)); }
+    public static void WriteFpsKey(string path, string text, int? was, int set) { RestorePoints.Touch(path, fps: true, fpsWas: was, fpsSet: set); Retry(() => WriteAtomic(path, text)); }
+    // a temporary file in the same folder, then moved over: a crash never leaves half of ApexRadiance.toml. A read-only target is
+    // made writable (the restore point keeps it as it was); a failed move leaves no temporary file behind.
     public static void WriteAtomic(string path, string text)
     {
         var tmp = path + ".apex-tmp";
-        File.WriteAllText(tmp, text);
-        File.Move(tmp, path, true);
+        try
+        {
+            File.WriteAllText(tmp, text);
+            Writable(path);
+            File.Move(tmp, path, true);
+        }
+        catch
+        {
+            try { if (File.Exists(tmp)) File.Delete(tmp); } catch (Exception x) when (x is IOException or UnauthorizedAccessException) { }
+            throw;
+        }
     }
-    public static void Delete(string path) { if (!File.Exists(path)) return; RestorePoints.Touch(path); File.Delete(path); }
+    // (a read-only file, such as the copy of a read-only Options.ini, is made writable first)
+    public static void Delete(string path)
+    {
+        if (!File.Exists(path)) return;
+        RestorePoints.Touch(path);
+        Retry(() => { Writable(path); File.Delete(path); });
+    }
+    static void Writable(string path)
+    {
+        if (File.Exists(path) && File.GetAttributes(path).HasFlag(FileAttributes.ReadOnly)) File.SetAttributes(path, File.GetAttributes(path) & ~FileAttributes.ReadOnly);
+    }
     public static void ClearReadOnly(string path)
     {
         if (!File.Exists(path)) return;
@@ -245,5 +297,5 @@ public static class Fs
         Directory.CreateDirectory(path);
     }
 
-    public static void DeleteDir(string path) { RestorePoints.Touch(path, dir: true); Directory.Delete(path); }
+    public static void DeleteDir(string path) { RestorePoints.Touch(path, dir: true); Retry(() => Directory.Delete(path)); }
 }
