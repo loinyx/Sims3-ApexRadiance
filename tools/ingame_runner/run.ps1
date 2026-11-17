@@ -415,6 +415,7 @@ function Invoke-Load($Load, [string]$BaseToml) {
                     $gap = if ($null -ne $step.gapMs) { [int]$step.gapMs } else { 400 }
                     for ($c = 0; $c -lt $count; $c++) {
                         $null = [ApexIngame.Keys]::PostMessage($h, 0x200, [IntPtr]0, $lp)
+                        Start-Sleep -Milliseconds 100 # the move's own pick first, as a player's click: the press then never reads a pick from before the move
                         $null = [ApexIngame.Keys]::PostMessage($h, 0x201, [IntPtr]1, $lp)
                         $null = [ApexIngame.Keys]::PostMessage($h, 0x202, [IntPtr]0, $lp)
                         Start-Sleep -Milliseconds 150

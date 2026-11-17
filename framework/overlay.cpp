@@ -17,6 +17,7 @@
 #include <atomic>
 #include <cmath>
 #include <deque>
+#include <utility>
 #include <format>
 #include <mutex>
 
@@ -96,7 +97,15 @@ constexpr ULONGLONG kMaxHoldMs = 250;
 constexpr size_t kMaxHeld = 256;
 std::mutex g_holdLock;
 std::deque<HeldMsg> g_held;   // not yet seen by the game
-std::deque<HeldMsg> g_replay; // posted back, on their way to the game
+std::deque<std::pair<WPARAM, HeldMsg>> g_replay; // posted back as kReplayMsg with their number, on their way to the game
+WPARAM g_replayNext = 0;
+// A held message goes back as a private message carrying its number, never as itself: a mouse message posted meanwhile
+// (another tool, the runner's steps) is then new input, and a held one is never taken for new input (counted, scaled and
+// held again)
+UINT ReplayMsg() {
+    static const UINT m = RegisterWindowMessageW(L"ApexRadiance.HeldMouse"); // (first use: on the window thread, not at load)
+    return m;
+}
 std::atomic<bool (*)()> g_holdGate{nullptr};
 
 bool IsButtonPress(UINT msg) {
@@ -117,24 +126,23 @@ bool IsButtonPress(UINT msg) {
 
 void ReleaseHeldLocked() {
     for (const HeldMsg& h : g_held)
-        if (PostMessageW(h.hwnd, h.msg, h.wp, h.lp)) g_replay.push_back(h); // (a full queue drops it: 10000 messages waiting)
+        if (ReplayMsg() && PostMessageW(h.hwnd, ReplayMsg(), g_replayNext, 0)) g_replay.push_back({g_replayNext++, h}); // (a full queue drops it)
     g_held.clear();
 }
 
 // A held message posted back: true, and it went to the game (as Apex forwarded it the first time)
-bool Replay(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp, LRESULT& result) {
-    if (!IsMouseMessage(msg)) return false;
+bool Replay(HWND hwnd, UINT msg, WPARAM wp, LPARAM, LRESULT& result) {
+    if (msg < 0xC000 || msg != ReplayMsg()) return false; // (registered messages are 0xC000..0xFFFF)
+    result = 0;
+    HeldMsg h{};
     {
         std::lock_guard<std::mutex> lock(g_holdLock);
-        if (g_replay.empty()) return false;
-        const HeldMsg& h = g_replay.front();
-        if (h.hwnd != hwnd || h.msg != msg || h.wp != wp || h.lp != lp) { // posted messages come before new input: one was lost
-            g_replay.clear();
-            return false;
-        }
+        while (!g_replay.empty() && g_replay.front().first != wp) g_replay.pop_front(); // (earlier ones were lost)
+        if (g_replay.empty()) return true; // not ours any more: dropped
+        h = g_replay.front().second;
         g_replay.pop_front();
     }
-    result = CallWindowProcW(g_original, hwnd, msg, wp, lp);
+    result = CallWindowProcW(g_original, h.hwnd ? h.hwnd : hwnd, h.msg, h.wp, h.lp);
     return true;
 }
 

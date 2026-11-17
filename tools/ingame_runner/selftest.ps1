@@ -328,5 +328,13 @@ try {
     Check ($free -gt 1MB -and $free -le 0xFFFF0000L) "largest free block read below 4 GB ($([math]::Round($free / 1MB)) MB)"
 } finally { $client.Dispose(); [FakeAgent]::Stop() }
 
+# Held mouse messages go back as Apex's private message with their number, never as themselves (a mouse message posted
+# meanwhile would be taken for a held one): framework/overlay.cpp's Replay takes only that message, ReleaseHeldLocked posts it
+$replayOnly = '(?s)bool Replay\([^)]*\)\s*\{\s*if \([^\n]*msg != ReplayMsg\(\)\) return false;'
+$postsPrivate = '(?s)void ReleaseHeldLocked\(\)\s*\{[^}]*PostMessageW\(h\.hwnd, ReplayMsg\(\)'
+$overlaySrc = Get-Content -Raw (Join-Path $PSScriptRoot '../../framework/overlay.cpp')
+Check ($overlaySrc -match $replayOnly -and $overlaySrc -match $postsPrivate) 'held mouse messages are replayed as a private message by number'
+Check (-not ("bool Replay(HWND hwnd, UINT msg) {`n    if (!IsMouseMessage(msg)) return false;" -match $replayOnly)) 'the replay check fails a Replay that matches mouse messages by value'
+Check (-not ("void ReleaseHeldLocked() {`n    PostMessageW(h.hwnd, h.msg, h.wp, h.lp);`n}" -match $postsPrivate)) 'the replay check fails a release that posts the held message itself'
 Write-Output "$($script:checks) checks, $($script:failures) failures"
 if ($script:failures) { exit 1 }

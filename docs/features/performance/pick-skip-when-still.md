@@ -60,7 +60,9 @@ stored one is over 50 ms old, is held in Apex's window procedure:
 1. The press counts as an input event, so the next update renders a pick (rule 1 above).
 2. The update after it reads that pick back at once, waiting for the GPU as the game does (no deferral).
 3. ResolvePick stores the result at the start of the next frame's pick work; the update that follows posts the held
-   mouse messages back in their order, and they reach the game's window procedure without Apex's input handling.
+   mouse messages back in their order, each as a private registered message carrying its number, and Apex's window
+   procedure hands each to the game's as it was held, without Apex's input handling. A mouse message another program
+   posts meanwhile is new input, never taken for a held one.
 
 Mouse messages after a held press (moves, the release) are held too, so their order stays; key messages are not held.
 A hold ends after 200 ms at most, when no pick can come (no resolved cursor position, picking off), and when the switch
@@ -85,6 +87,8 @@ is turned off. Held presses are counted (`pick_click_holds`, the developer log l
   than the game's own). Unverified in game: the frame count, and that a reposted message behaves like the original in
   every screen (the message time and position Windows reports for it are those of the repost).
 - A key pressed during a held click can reach the game before that click.
+- Keys are not held: a key that acts on the object under the cursor (a Build/Buy shortcut) uses the stored pick, up to
+  0.25 s old with the camera and mouse still.
 - While the camera moves, hover highlights follow every 4th frame instead of every other frame (later when the
   read-back waits for the GPU).
 - Whether any byte of the compared camera fields changes every frame with a still camera is unverified; if one does,
