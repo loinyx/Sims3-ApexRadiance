@@ -299,7 +299,7 @@ public static partial class Strings
         ["Off in the AMD driver."] = "Desativado no driver da AMD.",
         // Apex frame limit beside frame generation
         ["Apex frame limit"] = "Limite de quadros do Apex",
-        ["Frame generation doubles what you see: a 60 fps limit shows about 120 on screen. Works best at 60 to 90 fps."] = "A geração de quadros dobra o que você vê: um limite de 60 FPS mostra cerca de 120 na tela. Funciona melhor entre 60 e 90 FPS.",
+        ["{0} doubles what you see: a 60 fps limit shows about 120 on screen. Works best at 60 to 90 fps."] = "O {0} dobra o que você vê: um limite de 60 FPS mostra cerca de 120 na tela. Funciona melhor entre 60 e 90 FPS.",
         ["Off"] = "Desligado",
         ["{0} fps"] = "{0} FPS",
         ["{0} fps (recommended)"] = "{0} FPS (recomendado)",
@@ -310,7 +310,18 @@ public static partial class Strings
         // NVIDIA Smooth Motion turned on outside Setup
         ["Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is."] = "Ativado fora do instalador, nas configurações do driver da NVIDIA: o instalador não mexe nele.",
         // what frame generation shows on screen
-        ["{0} fps → about {1} fps on screen with frame generation"] = "{0} FPS → cerca de {1} FPS na tela com a geração de quadros",
-        ["No limit: about double your frame rate on screen with frame generation"] = "Sem limite: cerca do dobro de FPS na tela com a geração de quadros",
+        ["{0} fps → about {1} fps on screen with {2}"] = "{0} FPS → cerca de {1} FPS na tela com o {2}",
+        ["No limit: about double your frame rate on screen with {0}"] = "Sem limite: cerca do dobro de FPS na tela com o {0}",
+        // frame generation and frame limit as pending changes
+        ["Turns on when you click Apply."] = "Liga quando você clicar em Aplicar.",
+        ["Turns off when you click Apply."] = "Desliga quando você clicar em Aplicar.",
+        ["Changes to {0} when you click Apply."] = "Muda para {0} quando você clicar em Aplicar.",
+        ["Apex frame limit: {0}"] = "Limite de quadros do Apex: {0}",
+        ["To apply: {0}"] = "A aplicar: {0}",
+        // frame generation errors in plain words
+        ["Windows did not let Setup change the driver settings. Run Setup as administrator, then try again."] = "O Windows não deixou o instalador mudar as configurações do driver. Abra o instalador como administrador e tente de novo.",
+        ["The AMD driver did not accept the change. You can turn it on by hand in AMD Software: Gaming > Graphics > AMD Fluid Motion Frames."] = "O driver da AMD não aceitou a mudança. Você pode ativar à mão no AMD Software: Jogos > Gráficos > AMD Fluid Motion Frames.",
+        ["The NVIDIA driver did not accept the change. You can turn it on by hand with NVIDIA Profile Inspector."] = "O driver da NVIDIA não aceitou a mudança. Você pode ativar à mão com o NVIDIA Profile Inspector.",
+        ["How to do it by hand"] = "Como fazer à mão",
     };
 }

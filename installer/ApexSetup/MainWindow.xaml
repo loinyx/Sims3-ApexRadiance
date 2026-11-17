@@ -331,12 +331,13 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
-                                        <FontIcon Glyph="&#xE945;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
+                                        <FontIcon Glyph="&#xE8B2;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
                                     </Border>
                                     <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                         <TextBlock Text="NVIDIA Smooth Motion" Style="{StaticResource ApexStrong}" />
                                         <TextBlock Text="Your NVIDIA card draws an extra picture between every two the game makes, so the game looks about twice as smooth. Only on RTX 40 and 50 series cards; best with the frame limit at 60 to 90 fps." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
                                         <TextBlock x:Name="SmoothPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
+                                        <HyperlinkButton x:Name="SmoothHelp" Content="How to do it by hand" NavigateUri="https://github.com/loinyx/Sims3-ApexRadiance#nvidia-smooth-motion-with-the-bridge" Padding="0" FontSize="12" Visibility="Collapsed" />
                                     </StackPanel>
                                     <ToggleSwitch x:Name="SmoothToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnSmoothToggle"
                                                   AutomationProperties.Name="NVIDIA Smooth Motion" />
@@ -351,7 +352,7 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
-                                        <FontIcon Glyph="&#xE945;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
+                                        <FontIcon Glyph="&#xE8B2;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
                                     </Border>
                                     <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                         <TextBlock Text="AMD Fluid Motion Frames" Style="{StaticResource ApexStrong}" />
@@ -370,11 +371,11 @@
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
                                     <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
-                                        <FontIcon Glyph="&#xEC92;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
+                                        <FontIcon Glyph="&#xEC49;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
                                     </Border>
                                     <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                         <TextBlock Text="Apex frame limit" Style="{StaticResource ApexStrong}" />
-                                        <TextBlock Text="Frame generation doubles what you see: a 60 fps limit shows about 120 on screen. Works best at 60 to 90 fps." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="FpsDesc" Tag="dyn" Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
                                         <TextBlock x:Name="FpsPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
                                     </StackPanel>
                                     <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
