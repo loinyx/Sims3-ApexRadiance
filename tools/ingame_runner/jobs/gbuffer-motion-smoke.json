@@ -1,0 +1,59 @@
+{
+  "id": "gbuffer-motion-smoke",
+  "description": "G-buffer GB-01 smoke (developer build: -Asi Release\\ApexRadiance.asi): the capability line, camera motion vectors with their colour-coded view over the scene, one F8 picture with a still camera (expected: flat grey) and one minute of camera pan (moving colour, magenta at cuts). Pass: no crash, the four [GBuffer] lines, no shader or target error.",
+  "save": "ApexTest-Town",
+  "toml": {
+    "ui": {
+      "screenshot_key": "F8"
+    },
+    "patches.GBuffer": {
+      "enabled": true,
+      "view": 1
+    }
+  },
+  "variants": {
+    "on": {}
+  },
+  "expect": [
+    "\\[GBuffer\\] Caps: adapter=\".*\" mrt=\\d+ independentWriteMasks=(yes|no) ",
+    "\\[GBuffer\\] On: motion=camera view=motion",
+    "\\[GBuffer\\] Motion pass running: \\d+x\\d+ G16R16F, view=motion",
+    "\\[GBuffer\\] Motion: frames=[1-9]\\d* "
+  ],
+  "fail": [
+    "\\[GBuffer\\] (Could not create|Shaders unavailable|Caps: GetDeviceCaps failed)"
+  ],
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "pause"
+    },
+    {
+      "do": "wait",
+      "minutes": 1
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.1
+    },
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_pan",
+      "lots": 4,
+      "height": 40,
+      "seconds": 60,
+      "passes": 1
+    },
+    {
+      "do": "wait",
+      "minutes": 1.2
+    }
+  ]
+}
