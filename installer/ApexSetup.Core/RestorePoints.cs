@@ -220,7 +220,7 @@ public static class Fs
         RestorePoints.Touch(to);
         Retry(() =>
         {
-            if (File.Exists(to) && File.GetAttributes(to).HasFlag(FileAttributes.ReadOnly)) File.SetAttributes(to, File.GetAttributes(to) & ~FileAttributes.ReadOnly);
+            Writable(to);
             File.Copy(from, to, true);
         });
     }
@@ -238,15 +238,35 @@ public static class Fs
     }
     // ApexRadiance.toml with [ui] restart_host changed from keyWas: a restore point puts back only that key
     public static void WriteKey(string path, string text, bool? keyWas) { RestorePoints.Touch(path, key: true, keyWas: keyWas); File.WriteAllText(path, text); }
-    public static void WriteFpsKey(string path, string text, int? was, int set) { RestorePoints.Touch(path, fps: true, fpsWas: was, fpsSet: set); WriteAtomic(path, text); }
-    // a temporary file in the same folder, then moved over: a crash never leaves half of ApexRadiance.toml
+    public static void WriteFpsKey(string path, string text, int? was, int set) { RestorePoints.Touch(path, fps: true, fpsWas: was, fpsSet: set); Retry(() => WriteAtomic(path, text)); }
+    // a temporary file in the same folder, then moved over: a crash never leaves half of ApexRadiance.toml. A read-only target is
+    // made writable (the restore point keeps it as it was); a failed move leaves no temporary file behind.
     public static void WriteAtomic(string path, string text)
     {
         var tmp = path + ".apex-tmp";
-        File.WriteAllText(tmp, text);
-        File.Move(tmp, path, true);
+        try
+        {
+            File.WriteAllText(tmp, text);
+            Writable(path);
+            File.Move(tmp, path, true);
+        }
+        catch
+        {
+            try { if (File.Exists(tmp)) File.Delete(tmp); } catch (Exception x) when (x is IOException or UnauthorizedAccessException) { }
+            throw;
+        }
     }
-    public static void Delete(string path) { if (!File.Exists(path)) return; RestorePoints.Touch(path); File.Delete(path); }
+    // (a read-only file, such as the copy of a read-only Options.ini, is made writable first)
+    public static void Delete(string path)
+    {
+        if (!File.Exists(path)) return;
+        RestorePoints.Touch(path);
+        Retry(() => { Writable(path); File.Delete(path); });
+    }
+    static void Writable(string path)
+    {
+        if (File.Exists(path) && File.GetAttributes(path).HasFlag(FileAttributes.ReadOnly)) File.SetAttributes(path, File.GetAttributes(path) & ~FileAttributes.ReadOnly);
+    }
     public static void ClearReadOnly(string path)
     {
         if (!File.Exists(path)) return;
