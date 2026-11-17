@@ -3,6 +3,7 @@
 // Part of Apex Radiance. Credits: @loinyx
 
 #include "realtime_gi.h"
+#include "gi_pixel_shadows.h"
 #include "patch_base.h"
 #include "apex_log.h"
 #include "apex_version.h"
@@ -327,6 +328,7 @@ bool Start(const Options& o, std::string* error) {
         return false;
     }
     g_running = true;
+    if (o.pixelShadows) GiPixelShadows::Start({o.pixelView, o.pixelTestCaster});
     // read back by the test harness (design.md section 6): logged by UpdateLamps in a world, with lots = the GI lots then
     g_startLine = std::format("cap={} scale={} indirect={} backend={}", kCapNames[o.solveCap], o.scale, kIndirectNames[o.indirect],
                               kBackendNames[static_cast<int>(backend)]);
@@ -338,6 +340,7 @@ bool Start(const Options& o, std::string* error) {
 
 void Stop() {
     if (!g_running.load()) return;
+    GiPixelShadows::Stop();
     D3D9Hooks::UnregisterAll(kPatchName);
     g_running = false;
     LOG_INFO("[RealtimeGI] Off");
@@ -358,13 +361,16 @@ class RealtimeGiPatch : public ApexPatch {
         RegisterNamedEnumSetting(&scale_, "bufferScale", 0, "Light buffer scale", {"1", "2", "4"});
         RegisterNamedEnumSetting(&indirect_, "indirect", 0, "Indirect light", {std::begin(RealtimeGI::kIndirectNames), std::end(RealtimeGI::kIndirectNames)});
         RegisterBoolSetting(&debugLampTable_, "debugLampTable", false, "Developer mode: log the lamp snapshot against the game's fields after each change");
+        RegisterBoolSetting(&pixelShadows_, "pixelShadows", false, "Per-pixel delta shadows through the bridge (patch 0019 and the DXVK of native/dxvk)");
+        RegisterIntSetting(&pixelView_, "pixelView", 0, 0, 2, "Developer view of the per-pixel shadows: 0 = off, 1 = filtered mask, 2 = raw mask");
+        RegisterBoolSetting(&pixelTestCaster_, "pixelTestCaster", false, "Developer: one test capsule under the strongest lamp");
     }
 
     bool Install() override {
         if (isEnabled) return true;
         lastError.clear();
         std::string error;
-        const RealtimeGI::Options o{lots_, solveCap_, 1 << scale_, indirect_, static_cast<RealtimeGI::Backend>(backend_), debugLampTable_};
+        const RealtimeGI::Options o{lots_, solveCap_, 1 << scale_, indirect_, static_cast<RealtimeGI::Backend>(backend_), debugLampTable_, pixelShadows_, pixelView_, pixelTestCaster_};
         if (!RealtimeGI::Start(o, &error)) return Fail(error);
         isEnabled = true;
         return true;
@@ -380,7 +386,8 @@ class RealtimeGiPatch : public ApexPatch {
 
   private:
     int backend_ = 0, lots_ = 0, solveCap_ = 0, scale_ = 0, indirect_ = 0;
-    bool debugLampTable_ = false;
+    bool debugLampTable_ = false, pixelShadows_ = false, pixelTestCaster_ = false;
+    int pixelView_ = 0;
 };
 
 } // namespace

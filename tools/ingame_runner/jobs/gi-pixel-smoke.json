@@ -1,0 +1,57 @@
+{
+  "id": "gi-pixel-smoke",
+  "description": "Per-pixel delta shadows XR-07 smoke (developer build: -Asi Release\\ApexRadiance.asi). Needs the bridge pair of patch 0019 and the x64 d3d9.dll of native/dxvk in Bin. Real-Time Lighting on with pixelShadows, the filtered mask view and the test capsule (no Sim capsules before XR-08): the open is answered on, passes run with rays and no fault through a 60 s pan. Pass: no crash, the On line, a counters line with passes and rays above 0 and faults=0, no off or error line.",
+  "save": "ApexTest-Night",
+  "toml": {
+    "ui": {
+      "screenshot_key": "F8"
+    },
+    "patches.RealtimeGI": {
+      "enabled": true,
+      "pixelShadows": true,
+      "pixelView": 1,
+      "pixelTestCaster": true
+    }
+  },
+  "variants": {
+    "on": {}
+  },
+  "expect": [
+    "\\[GiPixel\\] On: view=1 testCaster=1",
+    "\\[GiPixel\\] passes=[1-9]\\d* rays=[1-9]\\d* .* faults=0"
+  ],
+  "fail": [
+    "\\[GiPixel\\] off",
+    "\\[GiPixel\\] .*faults=[1-9]",
+    "\\[GiPixel\\] Could not create"
+  ],
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "pause"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_pan",
+      "lots": 4,
+      "height": 40,
+      "seconds": 60,
+      "passes": 1
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    }
+  ]
+}

@@ -43,6 +43,9 @@ struct Options {
     int indirect = 0; // 0 off, 1 bounce1, 2 multiBounce
     Backend backend = Backend::Auto;
     bool debugLampTable = false; // developer mode: dump the snapshot against the game's fields after each change
+    bool pixelShadows = false;   // per-pixel delta shadows through the bridge (gi_pixel_shadows.h)
+    int pixelView = 0;           // their developer view: 0 off, 1 filtered mask, 2 raw mask
+    bool pixelTestCaster = false; // developer: one capsule under the strongest lamp (until XR-08)
 };
 
 // Counters of design.md section 6 the skeleton owns. The first four must stay 0; the later packages add to them.
