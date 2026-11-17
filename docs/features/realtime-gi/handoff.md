@@ -45,8 +45,10 @@ Rules:
 
 ## Status
 
-Merged into `feature/realtime-gi`: S0-01 to S0-14, S1-01, S1-02, S2-03, S3-02, R-01, R-08, R-02, GB-01, X-RTPP, X-R0MEMO, XR-04 and XR-05.
-Each package's full report is `wp/<id>.md`. Other branches still running: `gi/s0-08x`, `gi/x-6d`, `gi/x-leak`.
+Merged into `feature/realtime-gi`: S0-01 to S0-14, S1-01, S1-02, S2-03, S3-02, R-01, R-08, R-02, GB-01, X-RTPP, X-R0MEMO, XR-04 and XR-05;
+in merge round 3 also R-03, R-04, X-REBAKE, XR-06, XR-07, MC, MC-2, MC-3, R-06, S2-01, S2-01b, X-05, PLAN-SEED, S3-02b, S3-02c,
+GB-02, GB-03, GB-04 and the const-range fix (see *Merge round 3* below). Each package's full report is `wp/<id>.md`.
+Not merged yet (still being built at round 3): `gi/xr-08`, `gi/gb-05`.
 
 | Id | Status | Branch | Commit | Depends on | Unblocks / notes |
 |---|---|---|---|---|---|
@@ -72,10 +74,10 @@ Each package's full report is `wp/<id>.md`. Other branches still running: `gi/s0
 | S0-G3 | open |  |  | S0-15 | game run |
 | R-01 | done | gi/r-01 | f353213 | - | R-03; entry points for R-07, R-08 |
 | R-02 | done (synthetic lot; captured lot and S0-02 parity open) | gi/r-02 | b1d8932 | - | R-04, G-server, S0-02 comparison |
-| R-03 | in progress | gi/r-03 |  | R-01 | bridge build |
-| R-04 | open |  |  | R-02, R-03 |  |
+| R-03 | done (GI server prototype, bridge patch 0018) | gi/r-03 | ad7360b | R-01 | R-04 |
+| R-04 | done (texel solver, scene submit; patch 0018 extended) | gi/r-04 | fbe80d1 | R-02, R-03 | R-06, S2-01, R-05 |
 | R-05 | open |  |  | R-03, S2-01 |  |
-| R-06 | done (self-test: point queries, touch boxes, region-scoped dispatch; patch 0020) | gi/r-06 | - | R-04 | S3-05, S2-01 |
+| R-06 | done (self-test: point queries, touch boxes, region-scoped dispatch; patch 0021 since round 3) | gi/r-06 | d65a017 | R-04 | S3-05, S2-01b |
 | R-07 | open |  |  | R-04, S0-G2 |  |
 | R-08 | done (verdict: no-go now) | gi/r-08 | 94953b4 | - | nothing waits on it |
 | R-G1 | open |  |  | R-05, S2-01 | game run |
@@ -90,19 +92,26 @@ Each package's full report is `wp/<id>.md`. Other branches still running: `gi/s0
 | S2-03 | done offline; shaders merged, Apex wiring parked with S2-02 | gi/s2-03 | c115de7 | S0-06 | X-05 |
 | S2-02 | parked (research 17: server primary, d3d9 = fallback only) |  |  |  |  |
 | S2-04 | split: feedback bounces are R-04; only `roomAmbient` (d3d9 fallback) remains |  |  | S2-01 |  |
-| S2-01, S2-05, S2-G1 | open |  |  | see plan |  |
+| S2-01 | done (layer scheduler, gi_sched_test, gi-sched-smoke job) | gi/s2-01 | fa06237 | R-04 | S2-01b |
+| S2-01b | done offline (scene builder, compose, edit box; touch-box scope through patch 0021) | gi/s2-01b | 645a272 | S2-01, R-06 | R-G1 |
+| S2-05, S2-G1 | open |  |  | see plan |  |
 | S3-02 | done (looped lamp index, PS c208-c214; tools/lamp_index_test) | gi/s3-02 | 9f3e29d | S0-05 | S3-03 |
+| S3-02b, S3-02c | done offline (cells under both laws, sliced; fence and window draws; lamp-index-smoke job) | gi/s3-02c | 839b2fc | S3-02 | S3-03 |
 | S3-01, S3-03 to S3-06, S3-G1 | open |  |  | see plan |  |
 | S4-01 to S4-03, S4-G1 | open |  |  | see plan |  |
 | S5-01 to S5-05, S5-G1 | open |  |  | see plan |  |
 | S6-01 to S6-04, S6-G1 | open |  |  | see plan |  |
 | GB-01 | done offline; in-game smoke `gbuffer-motion-smoke` open | gi/gb-01 | 0d37d81 | research 14 | WP2 now; WP7 after the smoke; WP8 |
-| GB-02 | in progress | gi/gb-02 |  | GB-01 |  |
+| GB-02 to GB-04 | done offline (G-buffer copies, full shader table, AO normals and temporal filter) | gi/gb-04 | fa9adba | GB-01 | GB-05 (building) |
 | X-R0MEMO | done (research 17: two back ends, server primary; plan.md and design.md updated) | gi/x-r0memo | 185c519 | - | R-05 fallback target, G-server decided: pass |
 | X-RTPP | done (research/16, wp/X-RTPP) | gi/x-rtpp | 286f91f | - | XR-04 base |
 | XR-04 | done (per-pixel delta shadow kernel, Vulkan ray queries; on gi/r-02) | gi/xr-04 | 28288c5 | X-RTPP, R-02 | XR-05, XR-06, XR-11 |
 | XR-09 | done (see wp/XR-09.md) | gi/xr-09 | 4a0c476 | XR-04 | see wp |
 | XR-05 | done (ps_3_0 temporal/atrous/upsample filter for the RT mask; tools/gi_pixel_filter_test) | gi/xr-05 | 1d72119 | XR-04 | XR-06 |
+| XR-06, XR-07 | done (per-pixel shadow pass in the server's DXVK, patch 0019; Apex side `pixelShadows`, off) | gi/xr-07 | ad3050e | XR-04, XR-05 | XR-08 (building) |
+| MC, MC-2, MC-3 | done offline (package mesh reader, patch 0020 mesh casters, patch 0022 read-back for the shadow tiles) | gi/mc-3 | 0764866 | XR-06 | in-game smoke `mesh-casters-smoke` |
+| X-REBAKE | done (re-bake cost against lamp count) | gi/x-rebake | 688a15f | R-02 | R-06 |
+| X-05, PLAN-SEED | done offline (2D radiance cascades over the wall-plan field; exact 0 through closed walls) | gi/plan-seed-fix | 23b0a09 | S2-03 |  |
 | X-02, X-03, X-04 | open |  |  | adjacent, can start |
 
 Parked by research 17: S2-02, the S2-03 Apex wiring, the Direct3D 9 parts of S2-04 and S3-04, S5-04. d3d9 fallback = S1 direct + CPU roomAmbient + rig write + capsule occlusion.
@@ -110,6 +119,44 @@ Parked by research 17: S2-02, the S2-03 Apex wiring, the Direct3D 9 parts of S2-
 S0-12 answers (static RE, wp/S0-12.md, docs/engine/room-light-maps.md "Reflectance source"): floor colour per quarter-tile sits at tile section +0x80 (Apex runs the 0x0069FF20 tile loop itself); lot +0x3B8 is the LotLightingManager (+0x34 strobe room, so the S0-09 clamp is only the strobe flash; +0x30 black-lit); [0x01158D30] is the min-spec shaders flag (0 with Advanced Rendering on).
 
 Gates (plan.md): G-split, G-server, G-scale, G-rig, G-constants, G-stage1: all undecided.
+
+
+## Merge round 3 (branch `gi/merge-r3`, not yet fast-forwarded into `feature/realtime-gi`)
+
+State: all branches merged and committed on `gi/merge-r3` (worktree `gi-merge-r3`). Stopped for a restart before the
+last bridge test run; `feature/realtime-gi` is still at b74d192.
+
+Bridge patches (all apply in order on f35b86a in a fresh `build.cmd` checkout, verified with `git apply`):
+
+| Patch | Package | Note |
+|---|---|---|
+| 0016 | rewind work | device reference fix only (no 0015 test hunk); the GI test apps crash (0xC0000005 after CreateDevice) without it |
+| 0017 | async read-back | unchanged |
+| 0018 | R-03 + R-04 | regenerated: its test `meson.build` hunk assumed 0015-0016; now a one-line change |
+| 0019 | XR-06 | unchanged (xr-07 and mc-2 rebases were identical) |
+| 0020 | MC-2 | unchanged |
+| 0021 | R-06 (was 0020) | rebased onto 0019 and 0020; GI block layout 3 keeps counter words 14-21, GiPixel block separate |
+| 0022 | MC-3 | rebased onto 0021; its GiMesh slot is a separate mapping |
+
+Done and passing: Apex Developer and Public builds (before the 0016 commit; Apex code unchanged since), Smoke suite,
+`tools/i18n_check` (OK), `menu_audit` (same counts as b74d192), `public_text_check`, `tools/const_range_check`,
+`tools/lamp_index_test -Precomp` (OK), `tools/gi_sched_test`, `test-gi-pixel` mode off, compose test scope checks
+(lamps scoped to touch box + 0.5 m byte-equal to unscoped). Fixed in the merge: `rebake_check.cpp` got back the wire
+scene writer S2-01b removed from `check.cpp`.
+
+Next steps (from the `gi-merge-r3` worktree; the bridge pair with 0016 is built in `native/remix-bridge/out`):
+1. Run the bridge tests: `pwsh -File <scratch>/alltests.ps1` or by hand: `native/remix-bridge/test-gi.cmd` (with
+   `DXVK_X64` = the `native/dxvk` build's d3d9.dll, meson venv on PATH), `test-gi-pixel.cmd`,
+   `pwsh tools/gi_server_test/run.ps1 -Mesh -Game "<Sims 3 folder>" -Bridge`,
+   `pwsh tools/gi_compose_test/run.ps1 -BridgeSrc native/remix-bridge/src`. All GI device modes failed before 0016.
+2. If green: `git -C apex-gi merge --ff-only gi/merge-r3` (local only), then delete build intermediates
+   (`obj/`, `native/remix-bridge/src/bridge/_b_*`, `_t_x86`; keep `Release/`, `Public/`, `native/remix-bridge/out/`).
+3. Round 4: `gi/xr-08`, `gi/gb-05` (not merged).
+
+Open items:
+- R-06: touch boxes cut 8-11 %: S2-01b box size to follow.
+- R-06: scoped slices 6-10 ms: R-G1 batch sizing from the scoped list.
+- R-06 query acceptance changed to bias <= 1/255, mean <= 8/255.
 
 ## Results
 
