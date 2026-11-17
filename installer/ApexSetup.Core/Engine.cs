@@ -42,13 +42,39 @@ public sealed class Manifest
         try { m = File.Exists(p) ? JsonSerializer.Deserialize(File.ReadAllText(p), SetupJson.Default.Manifest) ?? new() : new(); }
         catch (JsonException e)
         {
-            // a damaged setup.json (a crash mid-write before Setup 1.2.4): kept aside as setup.json.corrupt, and a fresh record
+            // a damaged setup.json (a crash mid-write before Setup 1.2.4): kept aside as setup.json.corrupt (not in a dry run), and
+            // a record rebuilt from the backups so removing still puts the player's files back
             Engine.Log(new InvalidDataException("setup.json could not be read; kept as setup.json.corrupt", e));
-            try { File.Move(p, p + ".corrupt", true); } catch (Exception x) when (x is IOException or UnauthorizedAccessException) { }
-            m = new();
+            if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") != "1")
+                try { File.Move(p, p + ".corrupt", true); } catch (Exception x) when (x is IOException or UnauthorizedAccessException) { }
+            m = Rebuilt(bin);
         }
         m.Bin = bin;
         m.MoveTo(bin);
+        return m;
+    }
+
+    // The record a damaged setup.json lost, from the backup folder: each "<path with _ for \>.bak" belongs to the file at that
+    // path, for the component that installs that name (d3d9.dll: the bridge when Game\Bin\.trex is there, else DXVK);
+    // Options.ini.bak is the copy of Options.ini. A backup no component installs stays in the folder, unmatched.
+    public static Manifest Rebuilt(string bin)
+    {
+        var m = new Manifest();
+        var dir = DirOf(bin);
+        if (!Directory.Exists(dir)) return m;
+        foreach (var bak in Directory.EnumerateFiles(dir, "*.bak"))
+        {
+            var name = System.IO.Path.GetFileName(bak)[..^4];
+            if (name.Equals("Options.ini", StringComparison.OrdinalIgnoreCase)) { m.OptionsBackup = bak; continue; }
+            var rel = name.Replace('_', '\\');
+            if (!File.Exists(System.IO.Path.Combine(bin, rel))) rel = name;
+            var c = rel.Equals("d3d9.dll", StringComparison.OrdinalIgnoreCase)
+                ? (Directory.Exists(System.IO.Path.Combine(bin, ".trex")) ? Components.Bridge : Components.Dxvk)
+                : Engine.Known.FirstOrDefault(k => k.Value.Contains(rel, StringComparer.OrdinalIgnoreCase)).Key;
+            if (c is null) continue;
+            m.Files.Add(new ManifestFile { Component = c, Path = System.IO.Path.Combine(bin, rel), Backup = bak });
+            m.Versions.TryAdd(c, "?");
+        }
         return m;
     }
 
@@ -243,7 +269,7 @@ public static class Engine
         r.Assets.Any(a => a.Name.StartsWith(ModernizationPrefix(e)) && a.Name.EndsWith(".zip")) && r.Assets.Any(a => a.Name == "ts3fixes.package");
 
     // Files a component may own although Setup did not install them (installed by hand): removed by Remove, never restored.
-    static readonly Dictionary<string, string[]> Known = new()
+    internal static readonly Dictionary<string, string[]> Known = new()
     {
         [Components.Apex] = new[] { "ApexRadiance.asi", "ts3wrap.exe" },
         [Components.Bridge] = new[] { "d3d9.dll", "bridge.conf", "dxvk.conf", @".trex\bridge.conf", @".trex\NvRemixBridge.exe", @".trex\d3d9vk_x64.dll", "Apex Radiance RTX Remix bridge.txt" },
@@ -263,36 +289,76 @@ public static class Engine
     static readonly HashSet<string> Updates = new(StringComparer.OrdinalIgnoreCase)
         { "ApexRadiance.asi", "ts3wrap.exe", "Sims3SettingsSetter.asi", "ts3native.asi", "ts3fixes.package", "Sims3Performance.asi", "MonoPatcher.asi" };
 
-    // APEX_SETUP_DRY_RUN=1: Setup shows what it finds and plans but writes nothing (a check on a player's real game)
     // Checked before any download: what would stop the change (Blocks) and what it will do to the player's own files. Each is
-    // an English key with {n} arguments and one action.
+    // an English key with {n} arguments and one action. A change that downloads nothing (a removal, the settings fixes) needs
+    // no free space and no note about Documents.
     public sealed record Check(string Key, string[] Args, bool Blocks);
     public static Func<string, long> FreeBytes = dir => new DriveInfo(Path.GetPathRoot(Path.GetFullPath(dir))!).AvailableFreeSpace;
-    public static List<Check> Preflight(Game g, State s, string? docs, long downloadBytes, bool replacesD3d9)
+    public const string CloseGameText = "Close The Sims 3, its launcher and the restart host (ts3wrap.exe), then try again.";
+    public const string CannotWriteText = "Setup cannot write to {0}. If Windows Security's Controlled folder access is on, allow ApexRadianceSetup.exe there; or move the game out of a protected folder.";
+    public static List<Check> Preflight(Game g, State s, string? docs, long downloadBytes, bool replacesD3d9, bool downloads = true)
     {
         var l = new List<Check>();
-        if (Games.IsRunning())
-            l.Add(new("Close The Sims 3, its launcher and the restart host (ts3wrap.exe), then click Apply again.", [], true));
-        var probe = Path.Combine(g.Bin, ".apex-setup-probe");
-        try { File.WriteAllText(probe, ""); File.Delete(probe); }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
-        { l.Add(new("Setup cannot write to {0}. Run Setup as administrator, or move the game out of a protected folder.", [g.Bin], true)); }
-        // the downloads land in %TEMP% and are copied to Game\Bin: twice their size free on each drive
-        var need = Math.Max(downloadBytes * 2, 200L << 20);
-        foreach (var dir in new[] { g.Bin, Path.GetTempPath() }.DistinctBy(d => Path.GetPathRoot(Path.GetFullPath(d)), StringComparer.OrdinalIgnoreCase))
-            try
+        if (Games.IsRunning()) l.Add(new(CloseGameText, [], true));
+        // Setup always runs elevated: what refuses a write is Controlled folder access (Documents by default) or a protected
+        // folder. The probe writes nothing in a dry run.
+        if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") != "1")
+            foreach (var dir in new[] { g.Bin, docs is not null && Directory.Exists(docs) ? docs : null })
             {
-                if (FreeBytes(dir) < need)
-                    l.Add(new("Setup needs {0} MB free on drive {1}. Free some space, then click Apply again.", [(need >> 20).ToString(), Path.GetPathRoot(Path.GetFullPath(dir))!], true));
+                if (dir is null) continue;
+                var probe = Path.Combine(dir, ".apex-setup-probe");
+                try { File.WriteAllText(probe, ""); File.Delete(probe); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { l.Add(new(CannotWriteText, [dir], true)); }
             }
-            catch (Exception e) when (e is IOException or ArgumentException or UnauthorizedAccessException) { } // (a drive that cannot say: not a no)
-        if (docs is null || !Directory.Exists(Path.GetDirectoryName(docs)))
-            l.Add(new("Setup did not find The Sims 3's folder in Documents. Start the game once, then run Setup again for the settings it writes there.", [], false));
+        if (downloads)
+        {
+            // the downloads land in %TEMP% and are copied to Game\Bin: twice their size free on each drive
+            var need = Math.Max(downloadBytes * 2, 200L << 20);
+            foreach (var dir in new[] { g.Bin, Path.GetTempPath() }.DistinctBy(d => Path.GetPathRoot(Path.GetFullPath(d)), StringComparer.OrdinalIgnoreCase))
+                try
+                {
+                    if (FreeBytes(dir) < need)
+                        l.Add(new("Setup needs {0} MB free on drive {1}. Free some space, then try again.", [(need >> 20).ToString(), Path.GetPathRoot(Path.GetFullPath(dir))!], true));
+                }
+                catch (Exception e) when (e is IOException or ArgumentException or UnauthorizedAccessException) { } // (a drive that cannot say: not a no)
+            if (docs is null || !Directory.Exists(docs))
+                l.Add(new("Setup did not find The Sims 3's folder in Documents. Start the game once, then run Setup again for the settings it writes there.", [], false));
+        }
         if (replacesD3d9 && s.Layer == Layer.Other)
             l.Add(new("{0} (d3d9.dll) is set aside in Game\\Bin\\Apex Radiance backup; removing the renderer in Repair or remove puts it back.", [ForeignD3d9(g.Bin)], false));
         if (Scan.Loaders(g.Bin) is { Count: > 1 } loaders)
             l.Add(new("Two ASI loaders ({0}): Setup keeps {1} and sets the others aside in Game\\Bin\\Apex Radiance backup.", [string.Join(", ", loaders), loaders[0]], false));
         return l;
+    }
+
+    // What an install downloads, for the free space check: the assets FetchAsync takes for each component (the manual-install
+    // zip once for Apex, the bridge and the restart host), else the release's largest asset; the Performance Patch comes from
+    // the player's own download.
+    public static long DownloadEstimate(IEnumerable<string> comps, Func<string, Release?> release)
+    {
+        var picked = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        bool Is(Asset a, string end) => a.Name.EndsWith(end, StringComparison.OrdinalIgnoreCase);
+        foreach (var c in comps.Distinct())
+        {
+            if (c == Components.S3pp || release(c) is not { } r) continue;
+            var a = (c is Components.Apex or Components.Bridge or Components.RestartHost && GitHubSource.HasManualZip(r) is { } z ? new[] { z }
+                : c switch
+                {
+                    Components.Apex => r.Assets.Where(x => Is(x, ".asi")),
+                    Components.RestartHost => r.Assets.Where(x => x.Name.Equals("ts3wrap.exe", StringComparison.OrdinalIgnoreCase)),
+                    Components.Bridge => r.Assets.Where(x => x.Name.Contains("bridge", StringComparison.OrdinalIgnoreCase) && Is(x, ".zip")),
+                    Components.Dxvk => r.Assets.Where(x => x.Name.StartsWith("dxvk-") && Is(x, ".tar.gz") && !x.Name.Contains("native")).Take(1),
+                    Components.MonoPatcher => r.Assets.Where(x => Is(x, ".zip")).Take(1),
+                    Components.Loader => r.Assets.Where(x => LoaderZip(x.Name)).Take(1),
+                    Components.S3ss => r.Assets.Where(x => x.Name == "Sims3SettingsSetter.asi"),
+                    Components.Modernization => r.Assets.Where(x => Is(x, ".zip")).OrderByDescending(x => x.Size).Take(1)
+                        .Concat(r.Assets.Where(x => x.Name == "ts3fixes.package")),
+                    _ => [],
+                }).ToList();
+            if (a.Count == 0) a = r.Assets.OrderByDescending(x => x.Size).Take(1).ToList();
+            foreach (var x in a) picked[r.Repo + "/" + x.Name] = x.Size;
+        }
+        return picked.Values.Sum();
     }
 
     // a d3d9.dll that is neither DXVK nor the bridge, by the name its file gives (ReShade, GShade, another wrapper)
@@ -307,22 +373,24 @@ public static class Engine
         catch (FileNotFoundException) { return "d3d9.dll"; }
     }
 
-    // a file a scan removed (or emptied) as Setup placed it: the player's words, with the file names
-    public static SetupException Antivirus(string? file) =>
-        new("Your antivirus removed {0}; add an exception for Game\\Bin and run Setup again.", Path.GetFileName(file ?? "") is { Length: > 0 } n && !n.Contains(", ") ? n : file ?? "");
+    // a file a scan removed, blocked (ERROR_VIRUS_INFECTED, ERROR_VIRUS_DELETED) or emptied as Setup downloaded or placed it: the
+    // player's words, with the file names and the folder it was in (%TEMP%\ApexRadianceSetup for a download, Game\Bin for a copy)
+    public static SetupException Antivirus(string? file, string folder) =>
+        new("Your antivirus removed or blocked {0}; add an exception for {1} and run Setup again.",
+            Path.GetFileName(file ?? "") is { Length: > 0 } n && !n.Contains(", ") ? n : file ?? "", folder);
+    public static bool IsVirusBlock(Exception e) => e is IOException && (e.HResult & 0xFFFF) is 0xE1 or 0xE2 && (e.HResult >> 16 & 0x1FFF) == 7;
     public static List<string> Missing(IReadOnlyDictionary<string, long> sizes) =>
         sizes.Where(p => !File.Exists(p.Key) || new FileInfo(p.Key).Length != p.Value).Select(p => Path.GetFileName(p.Key)).ToList();
 
     public static bool LoaderZip(string name) =>
         name.Contains("NoPDB", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
-        && !name.Contains("x64", StringComparison.OrdinalIgnoreCase);
+        && !name.Contains("x64", StringComparison.OrdinalIgnoreCase) && !name.Contains("arm", StringComparison.OrdinalIgnoreCase);
 
-    // the loader in its zip: dinput8.dll, else the one 32-bit dll; an error names what the zip held
+    // the loader in its zip: a 32-bit dinput8.dll, else the one 32-bit dll; an error names what the zip held
     public static string LoaderDll(string dir)
     {
-        var dlls = Directory.EnumerateFiles(dir, "*.dll", SearchOption.AllDirectories).ToList();
-        if (dlls.FirstOrDefault(f => Path.GetFileName(f).Equals("dinput8.dll", StringComparison.OrdinalIgnoreCase)) is { } d) return d;
-        var x86 = dlls.Where(Is32Bit).ToList();
+        var x86 = Directory.EnumerateFiles(dir, "*.dll", SearchOption.AllDirectories).Where(Is32Bit).ToList();
+        if (x86.FirstOrDefault(f => Path.GetFileName(f).Equals("dinput8.dll", StringComparison.OrdinalIgnoreCase)) is { } d) return d;
         if (x86.Count == 1) return x86[0];
         var found = Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(dir, f)).ToList();
         throw new InvalidDataException("Ultimate ASI Loader: no single 32-bit loader in the zip (found: " + (found.Count == 0 ? "nothing" : string.Join(", ", found)) + ")");
@@ -347,10 +415,11 @@ public static class Engine
     // where Setup's log goes (the app sets it; tests and the engine run without one)
     public static Action<Exception> Log = _ => { };
 
+    // APEX_SETUP_DRY_RUN=1: Setup shows what it finds and plans but writes nothing (a check on a player's real game)
     public static void CheckWritable()
     {
         if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1") throw new InvalidOperationException("Dry run: Setup changes nothing.");
-        if (Games.IsRunning()) throw new InvalidOperationException("Close The Sims 3 first.");
+        if (Games.IsRunning()) throw new SetupException(CloseGameText);
     }
 
     public static string OptionsIni(string docs) => Path.Combine(docs, "Options.ini");
@@ -384,7 +453,11 @@ public static class Engine
         {
             p?.Report(new(0.5 * i / list.Count, "Downloading {0}", list[i]));
             try { fetched.Add(await src.FetchAsync(list[i], g, docs, ct)); }
-            catch (FileNotFoundException e) { throw Antivirus(e.FileName); } // (downloaded, then gone: a scan took it)
+            // (downloaded, then gone or blocked: a scan took it; the Performance Patch archive is the player's own file)
+            catch (FileNotFoundException e) when (list[i] == Components.S3pp)
+            { throw new SetupException("Setup could not find {0}. Download the Sims 3 Performance Patch again, or choose the downloaded file again.", Path.GetFileName(e.FileName ?? "")); }
+            catch (FileNotFoundException e) { throw Antivirus(e.FileName, GitHubSource.TempRoot); }
+            catch (IOException e) when (IsVirusBlock(e)) { throw Antivirus(Components.Name(list[i]), GitHubSource.TempRoot); }
         }
         if (list.Count > 0) CheckWritable(); // the downloads can take minutes: the game may have started since
         for (int i = 0; i < list.Count; i++)
@@ -416,9 +489,10 @@ public static class Engine
                         if (!(Path.GetFileName(to).Equals("ts3native.ini", StringComparison.OrdinalIgnoreCase) && File.Exists(to))) sizes[to] = new FileInfo(from).Length;
                         Place(m, c, from, to, own);
                     }
-                    catch (FileNotFoundException e) { throw Antivirus(e.FileName ?? from); }
+                    catch (FileNotFoundException e) { throw Antivirus(e.FileName ?? from, File.Exists(from) ? g.Bin : GitHubSource.TempRoot); }
+                    catch (IOException e) when (IsVirusBlock(e)) { throw Antivirus(Path.GetFileName(to), g.Bin); }
                 }
-                if (Missing(sizes) is { Count: > 0 } gone) throw Antivirus(string.Join(", ", gone));
+                if (Missing(sizes) is { Count: > 0 } gone) throw Antivirus(string.Join(", ", gone), g.Bin);
                 if (c == Components.Bridge)
                     foreach (var conf in new[] { Path.Combine(g.Bin, "bridge.conf"), Path.Combine(g.Bin, ".trex", "bridge.conf") })
                         SetTargetProcess(conf, g.Exe);
@@ -493,7 +567,7 @@ public static class Engine
         m.Versions.Remove(c);
         m.Save();
         // after the files are gone (a failed removal leaves frame generation as it was); never fails the removal: the UI logs it and shows it on the row
-        if (TurnsFrameGenOff(c)) FrameGenOffError = FrameGenOff(g) ?? FrameGenOffError;
+        if (TurnsFrameGenOff(c)) { var (nv, amd) = FrameGenOff(g); FrameGenOffError = (nv ?? FrameGenOffError.Nv, amd ?? FrameGenOffError.Amd); }
         // the restored d3d9.dll is a loader again: the one Setup added for the bridge would load every mod twice
         if (c is Components.Bridge or Components.Dxvk && m.Versions.ContainsKey(Components.Loader) && Scan.Run(g, docs).LoaderIsD3d9)
             Remove(g, Components.Loader, docs);
@@ -526,6 +600,8 @@ public static class Engine
         {
             var rel = to.StartsWith(m.Bin, StringComparison.OrdinalIgnoreCase) ? Path.GetRelativePath(m.Bin, to) : Path.GetFileName(to);
             backup = Path.Combine(Manifest.DirOf(m.Bin), rel.Replace('\\', '_') + ".bak");
+            // a backup already there (one a damaged setup.json lost) is never overwritten: the next free name
+            for (var k = 2; File.Exists(backup); k++) backup = Path.Combine(Manifest.DirOf(m.Bin), rel.Replace('\\', '_') + "-" + k + ".bak");
             Fs.CreateDir(Manifest.DirOf(m.Bin));
             Fs.Move(to, backup);
         }
@@ -742,29 +818,35 @@ public static class Engine
         return (nvidia, amdUsable || amd.Present && !nvidia);
     }
 
-    // A driver error in plain words for the frame generation rows (the raw call and code go to the log): no rights (NVAPI
-    // NVAPI_INVALID_USER_PRIVILEGE -137, or an access error) asks for administrator rights; anything else, a change the driver
-    // did not take included, says the driver did not accept it and how to do it by hand.
-    public static string FriendlyFrameGenError(string error, bool amd) =>
+    // A driver error in plain words for the frame generation rows (the raw call and code go to the log). Setup always runs
+    // elevated, so a refusal (NVAPI_INVALID_USER_PRIVILEGE -137, access denied) points at the programs that lock the driver's
+    // settings; anything else, a change the driver did not keep included, says it did not accept it and how to do it by hand,
+    // turning on or off as the change was.
+    public static string FriendlyFrameGenError(string error, bool amd, bool on = true) =>
         error == "Dry run: Setup changes nothing." ? error
         : error.EndsWith(" -137") || error.Contains("denied", StringComparison.OrdinalIgnoreCase) || error.Contains("privilege", StringComparison.OrdinalIgnoreCase)
-            ? "Windows did not let Setup change the driver settings. Run Setup as administrator, then try again."
-        : amd ? "The AMD driver did not accept the change. You can turn it on by hand in AMD Software: Gaming > Graphics > AMD Fluid Motion Frames."
-        : "The NVIDIA driver did not accept the change. You can turn it on by hand with NVIDIA Profile Inspector.";
+            ? "Windows did not let Setup change the driver settings. Close the NVIDIA App or AMD Software and NVIDIA Profile Inspector, then try again."
+        : amd ? (on ? "The AMD driver did not accept the change. You can turn it on by hand in AMD Software: Gaming > Graphics > AMD Fluid Motion Frames."
+                    : "The AMD driver did not accept the change. You can turn it off by hand in AMD Software: Gaming > Graphics > AMD Fluid Motion Frames.")
+        : on ? "The NVIDIA driver did not accept the change. You can turn it on by hand with NVIDIA Profile Inspector."
+             : "The NVIDIA driver did not accept the change. You can turn it off by hand with NVIDIA Profile Inspector.";
 
     public static bool TurnsFrameGenOff(string c) => c is Components.Bridge or Components.Apex;
-    public static Func<Game, string?> FrameGenOff = DefaultFrameGenOff;
-    static string? FrameGenOffError;
-    public static string? TakeFrameGenOffError() { var e = FrameGenOffError; FrameGenOffError = null; return e; }
-    static string? DefaultFrameGenOff(Game g)
+    // both drivers are asked, each error kept for its own row (a failed NVIDIA step does not skip AMD's)
+    public static Func<Game, (string? Nv, string? Amd)> FrameGenOff = DefaultFrameGenOff;
+    static (string? Nv, string? Amd) FrameGenOffError;
+    public static (string? Nv, string? Amd) PeekFrameGenOffError() => FrameGenOffError;
+    public static (string? Nv, string? Amd) TakeFrameGenOffError() { var e = FrameGenOffError; FrameGenOffError = default; return e; }
+    static (string? Nv, string? Amd) DefaultFrameGenOff(Game g)
     {
-        string? nv;
+        string? nv, amd;
         try { nv = SmoothMotion.SetupTurnedOn && SmoothMotion.Read() is { On: true } ? SmoothMotion.Set(false) : null; }
         catch (Exception e) { nv = e.Message; }
         // AFMF is system-wide: off only when Setup turned it on (Afmf.Marker), never a setting the player had on
-        return nv ?? Afmf.OffIfSetupTurnedOn();
+        try { amd = Afmf.OffIfSetupTurnedOn(); }
+        catch (Exception e) { amd = e.Message; }
+        return (nv, amd);
     }
-
     // [ui] restart_host in the text of ApexRadiance.toml; null when the table or the key is missing
     public static bool? RestartHostKey(string text)
     {

@@ -16,7 +16,7 @@ int failures = 0;
 var frameGenOff = new List<string>();
 string? frameGenOffFails = null;
 var frameGenOffAfterFiles = true; // (the hook runs once the component is gone from setup.json)
-Engine.FrameGenOff = game => { frameGenOff.Add(game.Exe); frameGenOffAfterFiles &= !Manifest.Load(game.Bin).Versions.ContainsKey(Components.Bridge); return frameGenOffFails; };
+Engine.FrameGenOff = game => { frameGenOff.Add(game.Exe); frameGenOffAfterFiles &= !Manifest.Load(game.Bin).Versions.ContainsKey(Components.Bridge); return (frameGenOffFails, null); };
 void Check(bool ok, string what) { Console.WriteLine((ok ? "ok   " : "FAIL ") + what); if (!ok) failures++; }
 string B(string rel) => Path.Combine(bin, rel);
 string Read(string p) => File.Exists(p) ? File.ReadAllText(p) : "<missing>";
@@ -585,7 +585,7 @@ try
         frameGenOff.Clear();
         frameGenOffFails = "nvapi64.dll not found";
         Engine.Remove(g, Components.Bridge, docs);
-        Check(frameGenOff.SequenceEqual(new[] { "TS3.exe" }) && Engine.TakeFrameGenOffError() == "nvapi64.dll not found" && Engine.TakeFrameGenOffError() is null,
+        Check(frameGenOff.SequenceEqual(new[] { "TS3.exe" }) && Engine.TakeFrameGenOffError().Nv == "nvapi64.dll not found" && Engine.TakeFrameGenOffError() == (null, null),
               "frame generation: removing the bridge asks the EA app game's TS3.exe, and a driver failure does not fail the removal");
         Check(frameGenOffAfterFiles, "frame generation: turned off only after the bridge's files are removed");
         // review fixes: the player's later change wins over an undo; no temporary file left; CRLF without a final newline; dotted or
@@ -600,6 +600,30 @@ try
         Check(Engine.WithFpsLimitIfNone("screen.vsync = 1\n").Text == "screen.vsync = 1\n" && Engine.WithFpsLimitIfNone("screen = { vsync = 1 }\n").Text == "screen = { vsync = 1 }\n"
               && Engine.WithFpsLimitIfNone("[screen]\nfps_limit = 99999999999\n").Text == "[screen]\nfps_limit = 99999999999\n",
               "frame limit: dotted or inline screen keys and an unparseable limit are left alone");
+        // a read-only Options.ini: its copy is read-only too, and removing the renderer must still delete it (validation 1.2.5)
+        {
+            var opt = Engine.OptionsIni(docs);
+            File.WriteAllText(opt, "gpu=real");
+            File.SetAttributes(opt, FileAttributes.ReadOnly);
+            await Engine.InstallAsync(g, new[] { Components.Bridge }, src, null, docs);
+            var bak = Manifest.Load(bin).OptionsBackup;
+            var removed = true;
+            try { Engine.Remove(g, Components.Bridge, docs); } catch (Exception) { removed = false; }
+            Check(bak is not null && removed && !File.Exists(bak) && Scan.Run(g, docs).Layer == Layer.Native, "read-only Options.ini: removing the bridge deletes its read-only copy");
+            File.SetAttributes(opt, FileAttributes.Normal);
+        }
+        // a file an antivirus takes between the download and the copy is named, with the folder to except
+        {
+            var gone = false;
+            try { await Engine.InstallAsync(g, new[] { Components.S3ss }, new VanishingSource(root), null, docs); }
+            catch (SetupException e) { gone = e.Args[0] == "Sims3SettingsSetter.asi" && e.Key.StartsWith("Your antivirus"); }
+            Check(gone, "antivirus: a downloaded file gone before its copy is named in the player's words");
+            var s3pp = false;
+            try { await Engine.InstallAsync(g, new[] { Components.S3pp }, new VanishingSource(root), null, docs); }
+            catch (SetupException e) { s3pp = e.Key.StartsWith("Setup could not find"); }
+            Check(s3pp, "antivirus: a Performance Patch archive the player moved is not called an antivirus");
+        }
+
         // the frame limit picker: Apex's choices plus 75 and 90, custom clamped as Apex reads it, its own restore point
         Check(Engine.FpsChoices.SequenceEqual(new[] { 0, 30, 60, 75, 90, 120, 144, 165, 240 }) && Engine.FpsRecommended(60) && Engine.FpsRecommended(90)
               && !Engine.FpsRecommended(120) && Engine.ClampFps(-5) == 0 && Engine.ClampFps(0) == 0 && Engine.ClampFps(5) == 20 && Engine.ClampFps(5000) == 1000
@@ -903,11 +927,12 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
           && SmoothMotion.Supported("NVIDIA GeForce RTX 4060 Laptop GPU", 57186), "card: an RTX 40 or 50 Laptop GPU counts, whatever the order of the cards");
     Check(SmoothMotion.Took(true, new("NVIDIA GeForce RTX 4070", 62124, true, null, null)) && !SmoothMotion.Took(true, new("NVIDIA GeForce RTX 4070", 62124, false, null, null))
           && !SmoothMotion.Took(false, new("NVIDIA GeForce RTX 4070", 62124, false, null, "DRS_LoadSettings -3")), "verify: a change read back differently did not take");
-    Check(Engine.FriendlyFrameGenError("DRS_SaveSettings -137", false).Contains("administrator")
-          && Engine.FriendlyFrameGenError("Access is denied.", true).Contains("administrator")
+    Check(Engine.FriendlyFrameGenError("DRS_SaveSettings -137", false).Contains("NVIDIA App")
+          && Engine.FriendlyFrameGenError("Access is denied.", true).Contains("NVIDIA App")
+          && Engine.FriendlyFrameGenError("DRS_SetSetting -160", false, on: false).Contains("turn it off by hand")
           && Engine.FriendlyFrameGenError("DRS_SetSetting 0xB0D384C0 = 1 on \"NvRemixBridge\" (NVIDIA's) -160", false).StartsWith("The NVIDIA driver")
           && Engine.FriendlyFrameGenError(SmoothMotion.DidNotTake, true).Contains("AMD Software")
-          && Engine.FriendlyFrameGenError("Dry run: Setup changes nothing.", false) == "Dry run: Setup changes nothing.", "errors: plain words, rights ask for administrator");
+          && Engine.FriendlyFrameGenError("Dry run: Setup changes nothing.", false) == "Dry run: Setup changes nothing.", "errors: plain words, a refusal names the programs that lock the driver settings, the off direction says off");
     Check(SmoothMotion.Blocked(new("NVIDIA GeForce RTX 4070", 62124, false, null, null), true, false) is null,
           "no predefined NvRemixBridge profile (an older or newer driver): the switch is usable, Setup makes its own profile");
     var amd = Afmf.Read(); // read only
@@ -933,7 +958,40 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         Engine.Log = _ => { };
         fresh.Versions[Components.Apex] = "4.0.3";
         fresh.Save();
-        Check(Manifest.Load(abin).Versions[Components.Apex] == "4.0.3" && !File.Exists(sj + ".apex-tmp"), "setup.json: saved through a temporary file");
+        // a save whose temporary file cannot be written leaves the file as it was (a plain write would have emptied it)
+        Directory.CreateDirectory(sj + ".apex-tmp");
+        var saved = Manifest.Load(abin);
+        saved.Versions[Components.Apex] = "9.9.9";
+        Fs.RetryDelay = TimeSpan.FromMilliseconds(1);
+        var failed = false;
+        try { saved.Save(); } catch (Exception) { failed = true; }
+        Directory.Delete(sj + ".apex-tmp");
+        Check(failed && Manifest.Load(abin).Versions[Components.Apex] == "4.0.3", "setup.json: saved through a temporary file, the old one kept when that fails");
+
+        // a damaged setup.json: the record rebuilt from the backups (the bridge's d3d9.dll, the Options.ini copy)
+        Directory.CreateDirectory(Path.Combine(abin, ".trex"));
+        File.WriteAllText(Path.Combine(abin, "d3d9.dll"), "bridge");
+        File.WriteAllText(Path.Combine(Manifest.DirOf(abin), "d3d9.dll.bak"), "reshade");
+        File.WriteAllText(Path.Combine(Manifest.DirOf(abin), "Options.ini.bak"), "opt");
+        File.WriteAllText(Path.Combine(Manifest.DirOf(abin), "unknown.bin.bak"), "?");
+        var rebuilt = Manifest.Rebuilt(abin);
+        Check(rebuilt.Files.Count == 1 && rebuilt.Files[0].Component == Components.Bridge && rebuilt.Files[0].Backup!.EndsWith("d3d9.dll.bak")
+              && rebuilt.OptionsBackup!.EndsWith("Options.ini.bak") && rebuilt.Versions.ContainsKey(Components.Bridge),
+              "setup.json: a damaged one's record is rebuilt from the backup folder");
+        Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", "1");
+        File.WriteAllText(sj, "{ broken");
+        Manifest.Load(abin);
+        Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null);
+        Check(File.ReadAllText(sj) == "{ broken", "setup.json: the dry run leaves a damaged one where it is");
+        File.Delete(sj);
+
+        // read-only files: deleted and written over (the restore point keeps them as they were), no temporary file left
+        var ro = Path.Combine(abin, "ro.conf"); File.WriteAllText(ro, "a"); File.SetAttributes(ro, FileAttributes.ReadOnly);
+        Fs.Write(ro, "b");
+        var roWritten = File.ReadAllText(ro) == "b" && !File.Exists(ro + ".apex-tmp");
+        File.SetAttributes(ro, FileAttributes.ReadOnly);
+        Fs.Delete(ro);
+        Check(roWritten && !File.Exists(ro), "read-only: written over and deleted");
 
         var asrc = Path.Combine(a, "new.dll"); File.WriteAllText(asrc, "new");
         var dst = Path.Combine(abin, "old.dll"); File.WriteAllText(dst, "old");
@@ -968,7 +1026,7 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         Check(Path.GetFileName(Engine.LoaderDll(z)) == "winmm.dll" && named?.Contains("readme.txt") == true, "loader: the one 32-bit dll when there is no dinput8.dll; an error names what the zip held");
 
         Check(Engine.Missing(new Dictionary<string, long> { [asrc] = 3, [Path.Combine(a, "eaten.dll")] = 5 }).SequenceEqual(new[] { "eaten.dll" })
-              && Engine.Antivirus(@"C:\x\Game\Bin\wininet.dll") is { Args: ["wininet.dll"] }, "antivirus: a file gone or cut short is named in the player's words");
+              && Engine.Antivirus(@"C:\x\Game\Bin\wininet.dll", @"C:\x\Game\Bin") is { Args: ["wininet.dll", @"C:\x\Game\Bin"] }, "antivirus: a file gone or cut short is named in the player's words");
 
         var ag = new Game(a, abin, "TS3W.exe", Edition.Steam, "1.67.2");
         var astate = Scan.Run(ag, Path.Combine(a, "Docs"));
@@ -980,6 +1038,67 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         Check(pre.Count(p => p.Blocks) >= 2 && pre.Any(p => p.Key.StartsWith("Close The Sims 3")) && pre.Any(p => p.Key.Contains("MB free"))
               && pre.Any(p => p.Key.Contains("(d3d9.dll) is set aside") && !p.Blocks) && pre.Any(p => p.Key.Contains("Documents") && !p.Blocks),
               "before a change: the game running and too little space stop it; a foreign d3d9.dll and missing Documents are told");
+        // a change that downloads nothing (a removal, the fixes) is not stopped by free space, nor told about Documents
+        Engine.FreeBytes = _ => 10L << 20;
+        var removal = Engine.Preflight(ag, astate, null, 0, false, downloads: false);
+        Engine.FreeBytes = _ => long.MaxValue;
+        Check(!removal.Any(p => p.Key.Contains("MB free") || p.Key.Contains("Documents")), "before a change: a removal needs no free space and no Documents");
+        var docsMade = Path.Combine(a, "Docs", "Electronic Arts", "The Sims 3");
+        Directory.CreateDirectory(Path.Combine(a, "Docs", "Electronic Arts", "The Sims 4"));
+        Check(Engine.Preflight(ag, astate, docsMade, 0, false).Any(p => p.Key.Contains("Documents")), "before a change: another game's Electronic Arts folder is not The Sims 3's");
+        Games.IsRunning = () => true;
+        var closeText = "";
+        try { Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null); Engine.CheckWritable(); } catch (SetupException e) { closeText = e.Key; }
+        Games.IsRunning = () => false;
+        Check(closeText == Engine.CloseGameText, "the launcher or the restart host running: the message names them");
+
+        // what an install downloads: the assets FetchAsync takes, not every asset of the release
+        var apexRel = new Release("loinyx/Sims3-ApexRadiance", "v4.0.3", [new("ApexRadianceSetup.exe", "u", null, 40 << 20), new("Apex-4.0.3-Manual-install.zip", "u", null, 30 << 20)]);
+        var dxvkRel = new Release("doitsujin/dxvk", "v2.7", [new("dxvk-2.7.tar.gz", "u", null, 9 << 20), new("dxvk-native-2.7.tar.gz", "u", null, 8 << 20)]);
+        Check(Engine.DownloadEstimate([Components.Apex, Components.Bridge, Components.Dxvk], c => c == Components.Dxvk ? dxvkRel : apexRel) == (39L << 20)
+              && Engine.DownloadEstimate([Components.S3pp], _ => apexRel) == 0, "free space: the estimate counts the manual-install zip once and DXVK's own build");
+
+        // loader: no ARM build, and a dinput8.dll that is not 32-bit is not the loader
+        var z3 = Path.Combine(a, "zip3"); Directory.CreateDirectory(z3);
+        File.WriteAllBytes(Path.Combine(z3, "dinput8.dll"), Pe(0x8664)); File.WriteAllBytes(Path.Combine(z3, "loader.dll"), Pe(0x14C));
+        Check(!Engine.LoaderZip("Ultimate-ASI-Loader-NoPDB_arm64.zip") && Path.GetFileName(Engine.LoaderDll(z3)) == "loader.dll", "loader: not an ARM zip, not a 64-bit dinput8.dll");
+        Check(Engine.IsVirusBlock(new IOException("blocked", unchecked((int)0x800700E1))) && Engine.IsVirusBlock(new IOException("removed", unchecked((int)0x800700E2)))
+              && !Engine.IsVirusBlock(new IOException("in use", unchecked((int)0x80070020))), "antivirus: Windows' virus errors are told as such, a file in use is not");
+        Check(SmoothMotion.Blocked(new("NVIDIA GeForce RTX 4070", 62124, true, null, null, SetupsProfile: true), true, false) is null,
+              "smooth motion: on in Setup's own profile from an earlier Setup is Setup's to turn off");
+
+        // GitHub: a server error is tried again, a refusal is not; the rate limit is told when the page fails too; the list falls
+        // back to the latest release
+        var oldHttp = Releases.Http;
+        Releases.BackoffUnit = TimeSpan.FromMilliseconds(1);
+        const string json = "{\"tag_name\":\"v1.0\",\"assets\":[]}";
+        try
+        {
+            var flaky = new StubHandler((r, i) => i < 2 ? new(System.Net.HttpStatusCode.BadGateway) : new(System.Net.HttpStatusCode.OK) { Content = new StringContent(json) });
+            Releases.Http = new HttpClient(flaky);
+            Check((await Releases.LatestAsync("a/b")).Tag == "v1.0" && flaky.Calls == 3, "github: two 502s, then the answer");
+            var limited = new StubHandler((r, i) =>
+            {
+                if (r.RequestUri!.Host == "api.github.com")
+                {
+                    var res = new HttpResponseMessage(System.Net.HttpStatusCode.Forbidden);
+                    res.Headers.Add("X-RateLimit-Remaining", "0");
+                    res.Headers.Add("X-RateLimit-Reset", DateTimeOffset.UtcNow.AddMinutes(30).ToUnixTimeSeconds().ToString());
+                    return res;
+                }
+                return new(System.Net.HttpStatusCode.NotFound);
+            });
+            Releases.Http = new HttpClient(limited);
+            string? said = null;
+            try { await Releases.LatestAsync("a/b"); } catch (SetupException e) { said = e.Key; }
+            Check(said?.StartsWith("GitHub's download limit") == true && limited.Calls == 2, "github: the rate limit is told when the page fails too, a 404 is not tried again");
+            var list = new StubHandler((r, i) => r.RequestUri!.AbsolutePath.EndsWith("/releases") ? new(System.Net.HttpStatusCode.NotFound)
+                : new(System.Net.HttpStatusCode.OK) { Content = new StringContent(json) });
+            Releases.Http = new HttpClient(list);
+            Check((await Releases.RecentAsync("a/b")) is [{ Tag: "v1.0" }], "github: the release list falls back to the latest release");
+        }
+        finally { Releases.Http = oldHttp; Releases.BackoffUnit = TimeSpan.FromSeconds(1); }
+
         Check(Games.Processes.Contains("Sims3LauncherW") && Games.Processes.Contains("ts3wrap"), "the launcher and the restart host count as the game running");
 
         Check(SelfUpdate.Quote(@"C:\Games\The Sims 3\") == "\"C:\\Games\\The Sims 3\\\\\"" && SelfUpdate.Quote("a\"b") == "\"a\\\"b\"" && SelfUpdate.Quote("plain") == "\"plain\"",
@@ -1028,6 +1147,28 @@ return failures == 0 ? 0 : 1;
 static string SourceFile([System.Runtime.CompilerServices.CallerFilePath] string path = "") => path;
 
 // the fake GitHub files, plus the S3PP archive the way GitHubSource takes it
+// a source whose file is gone when Setup comes to copy it (an antivirus took it after the download)
+sealed class VanishingSource(string root) : ISource
+{
+    public Task<(List<(string Src, string Dest)> Files, string Version)> FetchAsync(string component, Game g, string docs, CancellationToken ct)
+    {
+        if (component == Components.S3pp) throw new FileNotFoundException("moved", Path.Combine(root, "Sims3Performance.zip"));
+        return Task.FromResult((new List<(string, string)> { (Path.Combine(root, "gone", "Sims3SettingsSetter.asi"), Path.Combine(g.Bin, "Sims3SettingsSetter.asi")) }, "1"));
+    }
+}
+
+// GitHub as the tests want it: each request answered by the function, which counts them
+sealed class StubHandler(Func<HttpRequestMessage, int, HttpResponseMessage> answer) : HttpMessageHandler
+{
+    public int Calls;
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage r, CancellationToken ct)
+    {
+        var res = answer(r, Calls++);
+        res.RequestMessage ??= r;
+        return Task.FromResult(res);
+    }
+}
+
 sealed class MixedSource : ISource
 {
     readonly ISource _inner; readonly string _zip;
