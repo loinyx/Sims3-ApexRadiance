@@ -131,7 +131,9 @@ Client exports, found by Apex with `GetProcAddress(GetModuleHandleW(L"d3d9.dll")
 | `RemixBridge_GiSolve(IDirect3DTexture9* target, uint32_t layer, uint32_t sceneTicket, uint32_t* pTicket)` | Names a target by id (section 2) and asks for a solve into it | `S_OK` and a ticket; `D3DERR_INVALIDCALL` for a texture that is not the bridge's or not DEFAULT |
 | `RemixBridge_GiPoll(uint32_t ticket)` | Reads the ticket's answer slot | `S_FALSE` pending, `S_OK` done, the server's error, `D3DERR_INVALIDCALL` for an unknown ticket |
 | `RemixBridge_GiCancel(uint32_t ticket)` | Frees the ticket; the server drops it when it sees it | `S_OK` |
-| `RemixBridge_GiQueryPoints(uint32_t ticket, void* out, uint32_t size)` | Copies a finished point-query answer (R-06) | as `GiPoll` |
+| `RemixBridge_GiQueryPoints(const float* points, uint32_t count, const float* scales, uint32_t lamps, uint32_t sceneTicket, uint32_t* pTicket)` | Sends up to 256 points (position, normal) and a weight a lamp in `Bridge_GiQuery`; the worker answers the irradiance there from the settled layers (R-06) | `S_OK` and a ticket; `D3DERR_WASSTILLDRAWING` while a query is in flight |
+| `RemixBridge_GiReadPoints(uint32_t ticket, float* out, uint32_t count)` | Polls the query ticket and copies the answer (four floats a point) | as `GiPoll` |
+| `RemixBridge_GiReadTouch(uint32_t lamp, float* box, uint32_t* texels)` | Copies the lamp's touch box: the box of the texels its sum layer lights over 0.5/255, written by its last settled solve (R-06) | `S_OK`; `S_FALSE` before such a solve |
 
 New bridge commands, all sent with `FlagBits::AsyncResult` so none waits for a response:
 
