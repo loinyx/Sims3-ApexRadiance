@@ -19,7 +19,9 @@ where meson >nul 2>&1 || (echo meson not on PATH: pip install --user meson ninja
 
 if exist "%SRC%\.git" goto build
 rem only bridge\ and the shared headers it includes (public\, src\util\) are needed, not the whole runtime
-git clone -q --filter=blob:none --no-checkout %UPSTREAM% "%SRC%" || exit /b 1
+git clone -q --filter=blob:none --no-checkout -c core.autocrlf=false %UPSTREAM% "%SRC%" || exit /b 1
+rem checked out as stored (LF): the patches carry the exact bytes of upstream, so no --ignore-whitespace and no autocrlf surprises
+git -C "%SRC%" config core.autocrlf false || exit /b 1
 git -C "%SRC%" sparse-checkout set bridge public src/util || exit /b 1
 git -C "%SRC%" checkout -q %COMMIT% || exit /b 1
 rem the bridge links Detours from the submodule path; the sparse checkout leaves submodules out
@@ -32,9 +34,10 @@ curl -sSfL -o "%SRC%\glslang.zip" https://github.com/KhronosGroup/glslang/releas
 "%SystemRoot%\System32\tar.exe" -xf "%SRC%\glslang.zip" -C "%SRC%\submodules\glslang" || exit /b 1
 del "%SRC%\glslang.zip"
 for %%p in ("%HERE%patches\*.patch") do (
-  git -C "%SRC%" apply --whitespace=nowarn "%%~fp" || (echo patch %%~nxp did not apply & exit /b 1)
+  git -C "%SRC%" apply --whitespace=nowarn "%%~fp" || (set "FAILED=%%~nxp" & goto :patchfail)
   echo applied %%~nxp
 )
+if defined PATCH_ONLY (echo PATCH_ONLY: all patches applied & exit /b 0)
 
 :build
 rem the per-pixel shadow pass (patch 0019) and the mesh casters (0020) compile files of this repository; copied on every build so edits arrive
@@ -62,3 +65,9 @@ if not exist _b_%1\build.ninja (
 meson compile -C _b_%1 || exit /b 1
 endlocal
 exit /b 0
+
+:patchfail
+echo PATCH FAILED: %FAILED%
+rem drop the half-patched tree, or the next run would skip patching and build it
+rmdir /s /q "%SRC%"
+exit /b 1
