@@ -1,8 +1,10 @@
-param([string[]]$TestArgs = @(), [string]$OutDir = (Join-Path $env:TEMP 'ApexGiServerTest'), [switch]$Pixel, [string]$BridgePass)
+param([string[]]$TestArgs = @(), [string]$OutDir = (Join-Path $env:TEMP 'ApexGiServerTest'), [switch]$Pixel, [switch]$Rebake, [string]$BridgePass)
 # The server tier's texel solve, offline on a Vulkan device (check.cpp, solve.comp). Read-only: prints to stdout; the
 # compiler's outputs and the three build inputs below stay in -OutDir. -TestArgs: passed on (--no-rays, --device <text>,
-# --density <n>, --rays <n>). -Pixel: the per-pixel delta shadow kernel instead (pixel_check.cpp, pixel_shadow.comp;
-# -TestArgs --device <text>, --size <w> <h>, --bench <frames>).
+# --density <n>, --rays <n>, --pathref <samples>, --dump <file>: the one file it writes, for the bridge's test-gi.cmd).
+# -Pixel: the per-pixel delta shadow kernel instead (pixel_check.cpp, pixel_shadow.comp;
+# -TestArgs --device <text>, --size <w> <h>, --bench <frames>). -Rebake: the re-bake cost against lamp count instead
+# (rebake_check.cpp; -TestArgs --lots 60,120,200, --density <n>, --rays <n>, --no-cpu, --no-gpu).
 # -BridgePass <d3d9.dll>: the kernel as the bridge server records it on the renderer's own device, on that x64 library
 # (native/dxvk/test/dxvk_gi_pixel_pass.cpp with native/remix-bridge/gi/gi_pixel_pass.h; native/dxvk/build.cmd builds the library).
 # Build inputs, fetched once at pinned versions when -OutDir does not hold them (no installed Vulkan SDK is needed; the
@@ -70,6 +72,7 @@ try {
             if ($LASTEXITCODE -ne 0) { throw "pixel_shadow.comp ($($v[0])) did not compile" }
         }
     }
+    if ($Rebake) { $name = 'gi_rebake_test'; $source = 'rebake_check.cpp' } # (includes check.cpp and the S0-01 CPU reference)
     $exe = Join-Path $OutDir ($name + '.exe')
     & cl.exe /nologo /std:c++20 /utf-8 /EHsc /W4 /O2 /MT /fp:precise /DNOMINMAX /DVK_USE_PLATFORM_WIN32_KHR ('/I' + $repo) ('/I' + $OutDir) ('/I' + $headers) ('/I' + $volk) ('/Fe' + $exe) (Join-Path $PSScriptRoot $source)
     if ($LASTEXITCODE -ne 0) { throw "$source did not compile" }
