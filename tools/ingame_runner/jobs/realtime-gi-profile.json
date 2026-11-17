@@ -1,6 +1,6 @@
 {
   "id": "realtime-gi-profile",
-  "description": "Frame Profiler over the far pan of research 00 run D (8 lots at 150 m, 4 passes of 60 s) at night, with the four parts of the lot room solve timed (rebuild, AO solver 1, AO solver 2, room pass). Developer build; developer mode on, the background frame limit lifted. S0-G1 measured run. Run WITHOUT -Profiler (the Frida frame hook and the Frame Profiler hook the same function). Read the counter block of ApexRadiance_Hitches.txt in the load folder: the four Room solve lines against Lot room solve.",
+  "description": "Frame Profiler over the far pan of research 00 run D (8 lots at 150 m, 4 passes of 60 s) at night, with the four parts of the lot room solve timed (rebuild, AO solver 1, AO solver 2, room pass). Developer build; developer mode on, the background frame limit lifted. S0-G1 measured run. Run with -Profiler None, the default (the runner's Frames profiler and the Frame Profiler both hook 0x00EC9F00). Read the counter block of ApexRadiance_Hitches.txt in the load folder: the four Room solve lines against Lot room solve.",
   "save": "ApexTest-Night",
   "toml": {
     "ui": {

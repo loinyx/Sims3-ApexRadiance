@@ -26,8 +26,7 @@
       "toml": {
         "patches.RealtimeGI": {
           "enabled": true,
-          "solveCap": "class0",
-          "nightOnly": true
+          "solveCap": "class0"
         }
       },
       "expect": [

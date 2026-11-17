@@ -51,7 +51,8 @@ foreach ($bad in '12:00:03.000 [WARNING] [SceneBudget] Node 0x0a0b0c0d was found
 
 # Real-time GI start line and profiler-arm patterns, taken from the shipped jobs
 $giStart = @((Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/realtime-gi-smoke.json') -Raw | ConvertFrom-Json).variants.on.expect)[0]
-foreach ($ok in '12:00:00.000 [INFO] [RealtimeGI] On: lots=1 cap=class0 scale=1 indirect=off backend=d3d9',
+foreach ($ok in '12:00:00.000 [INFO] [RealtimeGI] On: lots=0 cap=class0 scale=1 indirect=off backend=d3d9',
+                '12:00:00.000 [INFO] [RealtimeGI] On: lots=1 cap=class0 scale=1 indirect=off backend=d3d9',
                 '12:00:00.000 [INFO] [RealtimeGI] On: lots=3 cap=hold scale=2 indirect=multiBounce backend=serverRays') {
     Check ($ok -match $giStart) "GI start line matches: $($ok.Substring(13))"
 }
@@ -63,6 +64,16 @@ foreach ($bad in '12:00:00.000 [INFO] [RealtimeGI] Off: lots=1 cap=class0 scale=
                  '12:00:00.000 [INFO] [RealtimeGIX] On: lots=1 cap=class0 scale=1 indirect=off backend=d3d9',
                  '12:00:00.000 [INFO] [RtOutdoorLamps] On: lots=1 cap=class0 scale=1 indirect=off backend=d3d9') {
     Check ($bad -notmatch $giStart) "GI start line rejected: $($bad.Substring(13))"
+}
+# The GI jobs set only keys the module registers (features/realtime_gi.cpp), so a job never relies on a key that is ignored
+$giSrc = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../../features/realtime_gi.cpp') -Raw
+$giKeys = @('enabled') + @([regex]::Matches($giSrc, 'Register\w*Setting\(&\w+, "(\w+)"') | ForEach-Object { $_.Groups[1].Value })
+foreach ($job in Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'jobs') -Filter 'realtime-gi-*.json') {
+    $j = Get-Content -LiteralPath $job.FullName -Raw | ConvertFrom-Json
+    foreach ($v in @($j.variants.PSObject.Properties)) {
+        $t = $v.Value.toml.'patches.RealtimeGI'
+        if ($t) { foreach ($k in $t.PSObject.Properties.Name) { Check ($k -in $giKeys) "$($job.BaseName) $($v.Name): RealtimeGI key $k is registered" } }
+    }
 }
 $prof = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/realtime-gi-profile.json') -Raw | ConvertFrom-Json
 Check ('12:00:00.000 [INFO] [FrameProfiler] Measurement preset: timing run (hitch 2.0 x median, floor 8 ms)' -match @($prof.expect)[0]) 'profile arm expect matches the preset line'
