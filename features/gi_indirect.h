@@ -283,4 +283,58 @@ inline void LampShare(const float ambient[3], const float* base, float night, fl
     for (int c = 0; c < 3; c++) out[c] = base ? std::max(0.0f, ambient[c] - base[c]) : ambient[c] * std::clamp(night, 0.0f, 1.0f);
 }
 
+// ---- objects and Sims (S2-06 item 8): the rig write ----
+// A rig-lit model (object, Sim) reads the grid at one point, its rig centre (rig +0x140, lot space here): the floor layer's
+// texel under it on the story it stands on, read as a point (no bilinear, so nothing from beyond a wall). The story: the one
+// whose floor at the centre's tile is the highest at or below the centre (+0.25 m). The grid pixel; false: off the lot, no
+// floor there, or no floor layer of that story (then the rig keeps the game's values).
+inline bool RigPixel(const Grid& g, const RtLampProxy::Lot& lot, const float p[3], uint32_t& pixel) {
+    const int ix = static_cast<int>(std::floor(p[0])), iz = static_cast<int>(std::floor(p[2]));
+    int story = 0;
+    float best = -RtLampProxy::kNoFloor;
+    for (const RtLampProxy::Story& st : lot.stories) {
+        if (ix < 0 || iz < 0 || ix >= st.w || iz >= st.h || st.floorY.size() != static_cast<size_t>(st.w) * st.h) continue;
+        const float y = st.floorY[static_cast<size_t>(iz) * st.w + ix];
+        if (y < RtLampProxy::kNoFloor && y <= p[1] + 0.25f && y > best) best = y, story = st.story;
+    }
+    const auto row = g.rows.find({story, kFloor});
+    if (best == -RtLampProxy::kNoFloor || row == g.rows.end()) return false;
+    const int gx = static_cast<int>(std::floor(p[0] * g.d)), gz = static_cast<int>(std::floor(p[2] * g.d));
+    const uint32_t layerW = g.wallA ? g.wallX0 - 1 : g.w;
+    if (gx < 0 || gz < 0 || static_cast<uint32_t>(gx) >= layerW || static_cast<uint32_t>(gz) >= g.layerRows) return false;
+    pixel = (row->second + static_cast<uint32_t>(gz)) * g.w + static_cast<uint32_t>(gx);
+    return true;
+}
+
+// The rig's four vertex-light slots (+0x90 directions, +0xD0 colours; the object vertex shaders add colour x max(0, N.L) of
+// each to COLOR0) holding an ambient irradiance e: four directions of a regular tetrahedron, colour e each, so the sum over
+// any normal is e x 1 on average (0.82 .. 1.16 [V offline]). The grid's value is premultiplied by its ready weight, so a tile
+// still waiting adds nothing. Lamp share: the rig holds no lamp-derived ambient to replace (slots 0-3 and overflow lamps are
+// direct light, kept as the floor copy keeps the map's lamp light; the fill and [NoLight] lights are constants), so L = 0 and
+// the grid adds. ceiling: Apex's own cap (the write lands after the game's cap 0x006B92A0), a channel.
+inline constexpr float kTetra = 0.57735027f;
+inline void RigSlots(const float e[3], float ceiling, float out[8][4]) {
+    const float d[4][3] = {{kTetra, kTetra, kTetra}, {kTetra, -kTetra, -kTetra}, {-kTetra, kTetra, -kTetra}, {-kTetra, -kTetra, kTetra}};
+    for (int i = 0; i < 4; i++) {
+        out[i][0] = d[i][0], out[i][1] = d[i][1], out[i][2] = d[i][2], out[i][3] = 0.0f;
+        for (int c = 0; c < 3; c++) out[4 + i][c] = std::clamp(e[c], 0.0f, ceiling);
+        out[4 + i][3] = 0.0f;
+    }
+}
+// Who holds the vertex-light slots now (cur: the 8 rows at +0x90): kRigEmpty all zero (no overflow lamp, or a gather cleared
+// them), kRigOurs exactly the last write (last, null: none), kRigGame overflow lamps or the fill light's moved slot: left alone
+enum RigState : int { kRigEmpty, kRigOurs, kRigGame };
+inline int RigSlotState(const float cur[8][4], const float (*last)[4]) {
+    bool zero = true, ours = last != nullptr;
+    for (int i = 0; i < 8; i++)
+        for (int c = 0; c < 4; c++) zero &= cur[i][c] == 0.0f, ours = ours && cur[i][c] == last[i][c];
+    return zero ? kRigEmpty : ours ? kRigOurs : kRigGame;
+}
+// An A16B16G16R16F channel
+inline float HalfToFloat(uint16_t h) {
+    const int e = (h >> 10) & 0x1F, m = h & 0x3FF;
+    const float v = e == 0 ? std::ldexp(static_cast<float>(m), -24) : e == 31 ? (m ? NAN : INFINITY) : std::ldexp(static_cast<float>(m | 0x400), e - 25);
+    return (h & 0x8000) ? -v : v;
+}
+
 } // namespace GiIndirect

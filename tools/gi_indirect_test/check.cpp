@@ -239,6 +239,85 @@ void GridChecks() {
     }
 }
 
+// S2-06 item 8, objects and Sims: the rig write's point (RigPixel), its slots (RigSlots), who holds them (RigSlotState)
+void RigChecks() {
+    for (int rotated = 0; rotated < 2; rotated++) {
+        Scene s = MakeScene(rotated != 0);
+        size_t floors = 0, exact = 0;
+        for (const auto& [key, slot] : s.built.slots) {
+            float p[3];
+            int code;
+            GiIndirect::DecodeKey(key, p, code);
+            if (code != 8) continue;
+            floors++;
+            float lp[3];
+            RtLampProxy::ToLot(s.lot, slot.world, lp);
+            lp[1] += 0.9f; // (a rig centre: the model's box centre, above its floor)
+            uint32_t px = 0;
+            if (!GiIndirect::RigPixel(s.grid, s.lot, lp, px)) continue;
+            bool same = s.cpuGrid[static_cast<size_t>(px) * 4 + 3] > 0.999f;
+            for (int c = 0; c < 3; c++) same &= std::fabs(s.cpuGrid[static_cast<size_t>(px) * 4 + c] - AtlasValue(slot.pixel, c)) < 1e-6f;
+            exact += same;
+        }
+        std::printf("  rig point: %zu of %zu floor texels read back at a centre 0.9 m over them (%s lot)\n", exact, floors, rotated ? "rotated" : "plain");
+        Check(floors > 0 && exact == floors, "a rig centre over a floor texel reads that texel (point read)");
+    }
+    Scene s = MakeScene(false);
+    const auto floorTexel = [&](float x, float y, float z) {
+        const float p[3] = {x, y + GiScene::kOff, z}, n[3] = {0, 1, 0};
+        return s.built.slots.at(GiScene::TexelKey(p, n)).pixel;
+    };
+    const auto at = [&](float x, float y, float z, float out[4]) {
+        const float p[3] = {x, y, z};
+        uint32_t px = 0;
+        if (!GiIndirect::RigPixel(s.grid, s.lot, p, px)) return false;
+        for (int c = 0; c < 4; c++) out[c] = s.cpuGrid[static_cast<size_t>(px) * 4 + c];
+        return true;
+    };
+    float g[4];
+    Check(at(2.9f, 1.0f, 2.25f, g) && std::fabs(g[0] - AtlasValue(floorTexel(2.75f, 0, 2.25f), 0)) < 1e-6f, "a Sim 0.1 m from an inner wall: its own room only");
+    Check(at(3.1f, 1.0f, 2.25f, g) && std::fabs(g[0] - AtlasValue(floorTexel(3.25f, 0, 2.25f), 0)) < 1e-6f, "and on the other side its room only");
+    Check(at(3.25f, 3.9f, 2.25f, g) && std::fabs(g[0] - AtlasValue(floorTexel(3.25f, 3.0f, 2.25f), 0)) < 1e-6f, "on the upper story: the upper floor layer");
+    Check(at(3.25f, 3.1f, 2.25f, g) && std::fabs(g[0] - AtlasValue(floorTexel(3.25f, 3.0f, 2.25f), 0)) < 1e-6f, "a low object on the upper story too");
+    Check(!at(-0.5f, 1.0f, 2.25f, g) && !at(2.25f, 1.0f, 9.0f, g), "off the lot: no point (the rig keeps the game's values)");
+    Check(at(0.25f, 1.0f, 0.25f, g) && g[3] == 0.0f && g[0] == 0.0f, "on the lot outside the rooms: nothing to add");
+    const float under[3] = {2.25f, -1.0f, 2.25f};
+    uint32_t px = 0;
+    Check(!GiIndirect::RigPixel(s.grid, s.lot, under, px), "under the lowest floor: no point");
+    // the slots: a regular tetrahedron, colour e each; the sum over normals is e on average
+    const float e[3] = {0.4f, 0.2f, 0.1f};
+    float slots[8][4];
+    GiIndirect::RigSlots(e, 1.0f, slots);
+    double sum = 0, lo = 1e9, hi = 0;
+    const int n = 4000;
+    for (int i = 0; i < n; i++) { // (a Fibonacci sphere)
+        const double y = 1.0 - 2.0 * (i + 0.5) / n, r = std::sqrt(1.0 - y * y), phi = i * 2.399963229728653;
+        const double nv[3] = {r * std::cos(phi), y, r * std::sin(phi)};
+        double v = 0;
+        for (int k = 0; k < 4; k++) v += slots[4 + k][0] * std::max(0.0, nv[0] * slots[k][0] + nv[1] * slots[k][1] + nv[2] * slots[k][2]);
+        v /= e[0], sum += v, lo = std::min(lo, v), hi = std::max(hi, v);
+    }
+    std::printf("  rig slots: sum over %d normals / e: mean %.3f, min %.3f, max %.3f\n", n, sum / n, lo, hi);
+    Check(std::fabs(sum / n - 1.0) < 0.01 && lo > 0.8 && hi < 1.5, "the four vertex lights give e on average over every normal");
+    bool unit = true;
+    for (int k = 0; k < 4; k++) unit &= std::fabs(slots[k][0] * slots[k][0] + slots[k][1] * slots[k][1] + slots[k][2] * slots[k][2] - 1.0f) < 1e-5f && slots[k][3] == 0;
+    Check(unit && slots[5][1] == 0.2f && slots[7][2] == 0.1f && slots[4][3] == 0.0f, "unit directions, w 0, the colour e");
+    const float big[3] = {2.0f, 0.5f, -1.0f};
+    GiIndirect::RigSlots(big, 1.0f, slots);
+    Check(slots[4][0] == 1.0f && slots[6][1] == 0.5f && slots[7][2] == 0.0f, "Apex's ceiling and no negative light");
+    // who holds the slots
+    float zero[8][4] = {}, other[8][4];
+    std::memcpy(other, slots, sizeof other);
+    other[6][1] = 0.25f;
+    Check(GiIndirect::RigSlotState(zero, nullptr) == GiIndirect::kRigEmpty && GiIndirect::RigSlotState(zero, slots) == GiIndirect::kRigEmpty, "cleared slots: empty");
+    Check(GiIndirect::RigSlotState(slots, slots) == GiIndirect::kRigOurs, "the last write: ours");
+    Check(GiIndirect::RigSlotState(other, slots) == GiIndirect::kRigGame && GiIndirect::RigSlotState(slots, nullptr) == GiIndirect::kRigGame,
+          "anything else (overflow lamps, the fill light's moved slot): the game's, left alone");
+    Check(GiIndirect::HalfToFloat(0x3C00) == 1.0f && GiIndirect::HalfToFloat(0xC000) == -2.0f && GiIndirect::HalfToFloat(0x0001) == std::ldexp(1.0f, -24) &&
+              GiIndirect::HalfToFloat(0x7BFF) == 65504.0f && GiIndirect::HalfToFloat(0) == 0.0f,
+          "fp16 decode of the probe read");
+}
+
 // 2. native D3D9
 IDirect3DTexture9* FloatTexture(IDirect3DDevice9* dev, uint32_t w, uint32_t h, const std::vector<float>& rgba) {
     IDirect3DTexture9* t = nullptr;
@@ -297,6 +376,47 @@ void DeviceChecks(Gpu& gpu) {
         for (size_t i = 0; i < got.size(); i++) worst = std::max(worst, std::fabs(got[i] - s.cpuGrid[i]));
     std::printf("  scatter: %zu points into %u x %u, worst %.5f against FillCpu\n", pts.size(), s.grid.w, s.grid.h, worst);
     Check(!got.empty() && worst < 1.0f / 1024.0f, "Scatter's grid = FillCpu (fp16)");
+    // (S2-06 item 8) the rig probe: the atlas texel under each rig centre, one pixel a rig, as the runtime reads it back
+    {
+        std::unordered_map<uint32_t, size_t> pointOf;
+        for (size_t i = 0; i < s.grid.points.size(); i++) pointOf[s.grid.points[i].grid] = i;
+        std::vector<GiCompose::ScatterPoint> probe;
+        std::vector<uint32_t> probePx;
+        for (const auto& [key, slot] : s.built.slots) {
+            float p[3];
+            int code;
+            GiIndirect::DecodeKey(key, p, code);
+            if (code != 8) continue;
+            float lp[3];
+            RtLampProxy::ToLot(s.lot, slot.world, lp);
+            lp[1] += 0.9f;
+            uint32_t px = 0;
+            if (!GiIndirect::RigPixel(s.grid, s.lot, lp, px) || !pointOf.count(px)) continue;
+            const size_t i = pointOf[px];
+            probe.push_back({static_cast<uint32_t>(probe.size()), s.grid.points[i].atlas, s.ready[i]});
+            probePx.push_back(px);
+        }
+        IDirect3DTexture9* rt = nullptr;
+        IDirect3DSurface9 *rs = nullptr, *sys = nullptr;
+        const uint32_t pw = 1024, ph = 16;
+        float pworst = 1.0f;
+        if (SUCCEEDED(dev->CreateTexture(pw, ph, 1, D3DUSAGE_RENDERTARGET, D3DFMT_A16B16G16R16F, D3DPOOL_DEFAULT, &rt, nullptr)) &&
+            comp.Scatter(dev, scatterPs, atlas, GiScene::kAtlasWidth, s.built.height, rt, pw, probe, {}) && SUCCEEDED(rt->GetSurfaceLevel(0, &rs)) &&
+            SUCCEEDED(dev->CreateOffscreenPlainSurface(pw, ph, D3DFMT_A16B16G16R16F, D3DPOOL_SYSTEMMEM, &sys, nullptr)) && SUCCEEDED(dev->GetRenderTargetData(rs, sys))) {
+            D3DLOCKED_RECT r{};
+            if (SUCCEEDED(sys->LockRect(&r, nullptr, D3DLOCK_READONLY))) {
+                pworst = 0.0f;
+                for (size_t i = 0; i < probe.size(); i++) {
+                    const uint16_t* h = reinterpret_cast<const uint16_t*>(static_cast<const char*>(r.pBits) + (i / pw) * r.Pitch) + (i % pw) * 4;
+                    for (int c = 0; c < 3; c++) pworst = std::max(pworst, std::fabs(GiIndirect::HalfToFloat(h[c]) - s.cpuGrid[static_cast<size_t>(probePx[i]) * 4 + c]));
+                }
+                sys->UnlockRect();
+            }
+        }
+        Release(sys), Release(rs), Release(rt);
+        std::printf("  rig probe: %zu rigs, worst %.5f against the grid's texel (one waiting tile)\n", probe.size(), pworst);
+        Check(!probe.empty() && pworst < 1.0f / 1024.0f, "the rig probe pass reads each rig's grid texel (premultiplied, fp16)");
+    }
     // the patched copy of the game's pattern: texld r0, TEXCOORD1, s0; mad r0.xyz, r0.w, c0, r0
     const std::vector<DWORD> game = AssemblePs("ps_3_0\ndcl_texcoord1 v0.xy\ndcl_2d s0\ntexld r0, v0, s0\nmad r0.xyz, r0.w, c0, r0\nmov oC0, r0\n");
     std::vector<DWORD> t = game;
@@ -612,6 +732,7 @@ void PrecompChecks(const char* path, Gpu& gpu) {
 int main(int argc, char** argv) {
     std::printf("GI grid (CPU)\n");
     GridChecks();
+    RigChecks();
     Gpu gpu;
     std::printf("Native D3D9\n");
     DeviceChecks(gpu);

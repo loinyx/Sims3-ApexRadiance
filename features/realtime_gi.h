@@ -60,6 +60,9 @@ enum class Counter : int {
     LampChanges,       // lamp change events committed
     IndirectDraws,     // (S2-05) room-lit draws that read the GI grid
     WallDraws,         // (S2-06) of them, wall draws (the vertex shader copy writing the grid uv)
+    RigDraws,          // (S2-06 item 8) rig binds whose vertex-light slots hold the grid's light (objects, Sims)
+    RigReads,          // probe answers taken from the bridge's asynchronous read-back (no wait: the copy is already there)
+    RigSkipped,        // rig binds left alone: the game's overflow lamps hold the vertex-light slots
     Count
 };
 void Add(Counter c, uint32_t n = 1); // any thread
