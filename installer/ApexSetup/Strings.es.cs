@@ -297,5 +297,12 @@ public static partial class Strings
         ["Could not change the NVIDIA driver settings: {0}"] = "No se pudieron cambiar los ajustes del controlador de NVIDIA: {0}",
         ["Turn on {0}"] = "Activar {0}",
         ["Turn off {0}"] = "Desactivar {0}",
+        ["The AMD driver adds frames for smoother motion, about double the frame rate, with a little more input delay. It applies to every game on this PC."] = "El controlador de AMD añade fotogramas para un movimiento más fluido, cerca del doble de FPS, con algo más de retraso en los controles. Se aplica a todos los juegos de este PC.",
+        ["Not available on this AMD card or driver: AMD Fluid Motion Frames needs a Radeon RX 6000 series card or newer and a recent driver."] = "No disponible en esta tarjeta o controlador de AMD: AMD Fluid Motion Frames necesita una Radeon RX serie 6000 o más reciente y un controlador reciente.",
+        ["Could not read the AMD driver settings: {0}"] = "No se pudieron leer los ajustes del controlador de AMD: {0}",
+        ["Could not change the AMD driver settings: {0}"] = "No se pudieron cambiar los ajustes del controlador de AMD: {0}",
+        ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "Activado en el controlador de AMD, para todos los juegos. El límite de fotogramas de Apex ahora es 60 FPS, el ritmo al que mejor funciona.",
+        ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Activado en el controlador de AMD, para todos los juegos. Funciona mejor con el límite de fotogramas de Apex entre 60 y 90 FPS.",
+        ["Off in the AMD driver."] = "Desactivado en el controlador de AMD.",
     };
 }

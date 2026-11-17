@@ -287,5 +287,12 @@ public static partial class Strings
         ["Could not change the NVIDIA driver settings: {0}"] = "NVIDIA-ajurin asetuksia ei voitu muuttaa: {0}",
         ["Turn on {0}"] = "Ota {0} käyttöön",
         ["Turn off {0}"] = "Poista {0} käytöstä",
+        ["The AMD driver adds frames for smoother motion, about double the frame rate, with a little more input delay. It applies to every game on this PC."] = "AMD-ajuri lisää kuvia sulavampaa liikettä varten, noin kaksinkertainen kuvataajuus, hieman suuremmalla syöteviiveellä. Koskee kaikkia tämän tietokoneen pelejä.",
+        ["Not available on this AMD card or driver: AMD Fluid Motion Frames needs a Radeon RX 6000 series card or newer and a recent driver."] = "Ei käytettävissä tällä AMD-kortilla tai -ajurilla: AMD Fluid Motion Frames vaatii Radeon RX 6000 -sarjan tai uudemman kortin ja tuoreen ajurin.",
+        ["Could not read the AMD driver settings: {0}"] = "AMD-ajurin asetuksia ei voitu lukea: {0}",
+        ["Could not change the AMD driver settings: {0}"] = "AMD-ajurin asetuksia ei voitu muuttaa: {0}",
+        ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "Päällä AMD-ajurissa, kaikissa peleissä. Apexin kuvarajoitus on nyt 60 FPS, tahti jolla se toimii parhaiten.",
+        ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Päällä AMD-ajurissa, kaikissa peleissä. Toimii parhaiten Apexin kuvarajoituksella 60–90 FPS.",
+        ["Off in the AMD driver."] = "Pois päältä AMD-ajurissa.",
     };
 }

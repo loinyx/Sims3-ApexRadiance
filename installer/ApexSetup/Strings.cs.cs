@@ -292,5 +292,12 @@ public static partial class Strings
         ["Could not change the NVIDIA driver settings: {0}"] = "Nastavení ovladače NVIDIA nelze změnit: {0}",
         ["Turn on {0}"] = "Zapnout {0}",
         ["Turn off {0}"] = "Vypnout {0}",
+        ["The AMD driver adds frames for smoother motion, about double the frame rate, with a little more input delay. It applies to every game on this PC."] = "Ovladač AMD přidává snímky pro plynulejší pohyb, zhruba dvojnásobná snímková frekvence, s o něco větším zpožděním ovládání. Platí pro všechny hry na tomto PC.",
+        ["Not available on this AMD card or driver: AMD Fluid Motion Frames needs a Radeon RX 6000 series card or newer and a recent driver."] = "Na této kartě nebo ovladači AMD není k dispozici: AMD Fluid Motion Frames vyžaduje Radeon RX řady 6000 nebo novější a aktuální ovladač.",
+        ["Could not read the AMD driver settings: {0}"] = "Nastavení ovladače AMD nelze přečíst: {0}",
+        ["Could not change the AMD driver settings: {0}"] = "Nastavení ovladače AMD nelze změnit: {0}",
+        ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "Zapnuto v ovladači AMD, pro všechny hry. Limit snímků Apexu je nyní 60 FPS, tempo, při kterém funguje nejlépe.",
+        ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Zapnuto v ovladači AMD, pro všechny hry. Nejlépe funguje s limitem snímků Apexu 60 až 90 FPS.",
+        ["Off in the AMD driver."] = "Vypnuto v ovladači AMD.",
     };
 }

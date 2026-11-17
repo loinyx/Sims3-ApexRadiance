@@ -323,6 +323,26 @@
                                                   AutomationProperties.Name="NVIDIA Smooth Motion" />
                                 </Grid>
                             </Border>
+                            <Border x:Name="AfmfCard" Style="{StaticResource ApexCard}" Visibility="Collapsed">
+                                <Grid ColumnSpacing="14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
+                                        <FontIcon Glyph="&#xE945;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="AMD Fluid Motion Frames" Style="{StaticResource ApexStrong}" />
+                                        <TextBlock Text="The AMD driver adds frames for smoother motion, about double the frame rate, with a little more input delay. It applies to every game on this PC." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="AfmfPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <ToggleSwitch x:Name="AfmfToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnAfmfToggle"
+                                                  AutomationProperties.Name="AMD Fluid Motion Frames" />
+                                </Grid>
+                            </Border>
                         </StackPanel>
 
                         <!-- 3 Install -->

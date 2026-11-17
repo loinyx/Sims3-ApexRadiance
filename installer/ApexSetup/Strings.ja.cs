@@ -289,5 +289,12 @@ public static partial class Strings
         ["Could not change the NVIDIA driver settings: {0}"] = "NVIDIA ドライバーの設定を変更できませんでした: {0}",
         ["Turn on {0}"] = "{0} をオン",
         ["Turn off {0}"] = "{0} をオフ",
+        ["The AMD driver adds frames for smoother motion, about double the frame rate, with a little more input delay. It applies to every game on this PC."] = "AMD ドライバーがフレームを追加して動きを滑らかにします。フレームレートは約 2 倍になり、入力遅延がわずかに増えます。この PC のすべてのゲームに適用されます。",
+        ["Not available on this AMD card or driver: AMD Fluid Motion Frames needs a Radeon RX 6000 series card or newer and a recent driver."] = "この AMD カードまたはドライバーでは使えません: AMD Fluid Motion Frames には Radeon RX 6000 シリーズ以降と最新のドライバーが必要です。",
+        ["Could not read the AMD driver settings: {0}"] = "AMD ドライバーの設定を読み取れませんでした: {0}",
+        ["Could not change the AMD driver settings: {0}"] = "AMD ドライバーの設定を変更できませんでした: {0}",
+        ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "AMD ドライバーでオン (すべてのゲーム)。Apex のフレーム制限を 60 fps にしました。最もよく動くペースです。",
+        ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "AMD ドライバーでオン (すべてのゲーム)。Apex のフレーム制限を 60～90 fps にすると最もよく動きます。",
+        ["Off in the AMD driver."] = "AMD ドライバーでオフ。",
     };
 }

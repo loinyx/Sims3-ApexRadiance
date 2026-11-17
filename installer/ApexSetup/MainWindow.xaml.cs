@@ -793,7 +793,8 @@ public sealed partial class MainWindow : Window
     void AfterFrameGenOff()
     {
         _smoothFor = null;
-        if (Engine.TakeFrameGenOffError() is { } e) { _smoothPending = e; App.Log(new InvalidOperationException("Smooth Motion: " + e)); }
+        _afmf = null;
+        if (Engine.TakeFrameGenOffError() is { } e) { _smoothPending = _afmfPending = e; App.Log(new InvalidOperationException("Frame generation: " + e)); }
     }
 
     void RefreshSmooth(State s, Game g)
@@ -813,6 +814,44 @@ public sealed partial class MainWindow : Window
             : sm.On ? (T(_smoothFps ? "On for The Sims 3 in the NVIDIA driver. Apex's frame limit is now 60 fps, the pace it works best at."
                                   : "On for The Sims 3 in the NVIDIA driver. Works best with Apex's frame limit at 60 to 90 fps."), "ApexSuccessBrush")
             : (T("Off for The Sims 3."), "ApexMutedBrush"));
+    }
+
+    // AMD Fluid Motion Frames: one setting for the whole system in the AMD driver (Afmf.cs); read once per Setup run and after removals
+    Afmf.Status? _afmf;
+    string? _afmfError, _afmfPending;
+    bool _afmfFps, _fillingAfmf;
+
+    void RefreshAfmf()
+    {
+        if (_afmf is null) { _afmf = Afmf.Read(); _afmfError = _afmfPending; _afmfPending = null; }
+        var a = _afmf;
+        // no AMD driver: no row; an AMD card ADLX says cannot run it: the row, off, with the reason (no renderer needed: AFMF 2
+        // covers Vulkan; under the bridge it is unverified)
+        AfmfCard.Visibility = a.Present ? Visibility.Visible : Visibility.Collapsed;
+        var blocked = Afmf.Blocked(a);
+        _fillingAfmf = true;
+        AfmfToggle.IsOn = a.On;
+        AfmfToggle.IsEnabled = blocked is null;
+        _fillingAfmf = false;
+        SetState(AfmfPill, _afmfError == "Dry run: Setup changes nothing." ? (T(_afmfError), "ApexMutedBrush")
+            : _afmfError is not null ? (T("Could not change the AMD driver settings: {0}", T(_afmfError)), "ApexWarningBrush")
+            : blocked is { } b ? (T(b.Key, b.Arg), "ApexMutedBrush")
+            : a.On ? (T(_afmfFps ? "On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."
+                                 : "On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."), "ApexSuccessBrush")
+            : (T("Off in the AMD driver."), "ApexMutedBrush"));
+    }
+
+    void OnAfmfToggle(object sender, RoutedEventArgs e)
+    {
+        if (_fillingAfmf || _game is not { } g || _afmf is null) return;
+        _afmfError = Preview is not null ? "Dry run: Setup changes nothing." : Afmf.Set(AfmfToggle.IsOn);
+        if (_afmfError is null) _afmf = Afmf.Read();
+        else App.Log(new InvalidOperationException("AFMF: " + _afmfError));
+        // the same frame limit rule as Smooth Motion: 60 only when there is none
+        if (_afmfError is null && AfmfToggle.IsOn)
+            try { _afmfFps = Engine.SetFpsLimitIfNone(g, "AMD Fluid Motion Frames"); }
+            catch (Exception ex) { App.Log(ex); }
+        RefreshComponents();
     }
 
     void OnSmoothToggle(object sender, RoutedEventArgs e)
@@ -947,6 +986,7 @@ public sealed partial class MainWindow : Window
         S3ppWait.Visibility = _s3ppWatch is not null ? Visibility.Visible : Visibility.Collapsed;
         S3ppWaitText.Text = T("Waiting for your download in {0}…", DownloadsFolder());
         RefreshSmooth(s, g);
+        RefreshAfmf();
         ModToggle.IsEnabled = g.ModernizationSupported || s.Modernization;
         if (!g.ModernizationSupported && !s.Modernization) ModToggle.IsOn = false;
         ModDesc.Text = g.ModernizationSupported
@@ -1132,6 +1172,7 @@ public sealed partial class MainWindow : Window
         var smoothOff = _smooth is { On: true } && dels.Any(Engine.TurnsFrameGenOff);
         var rows = dels.Select(c => AddTask(host, T("Remove {0}", Name(c)))).ToList();
         if (smoothOff) rows.Add(AddTask(host, T("Turn off {0}", "NVIDIA Smooth Motion")));
+        if (_afmf is { On: true } && Afmf.SetupTurnedOn && dels.Any(Engine.TurnsFrameGenOff)) rows.Add(AddTask(host, T("Turn off {0}", "AMD Fluid Motion Frames")));
         var first = rows.Count;
         rows.AddRange(order.Select(c => AddTask(host, Name(c))));
         rows.Add(AddTask(host, T("Fix incompatible settings")));

@@ -302,5 +302,12 @@ public static partial class Strings
         ["Could not change the NVIDIA driver settings: {0}"] = "Az NVIDIA-illesztő beállításai nem módosíthatók: {0}",
         ["Turn on {0}"] = "{0} bekapcsolása",
         ["Turn off {0}"] = "{0} kikapcsolása",
+        ["The AMD driver adds frames for smoother motion, about double the frame rate, with a little more input delay. It applies to every game on this PC."] = "Az AMD-illesztő képkockákat ad hozzá a simább mozgásért, nagyjából dupla képkockaszám, kicsit nagyobb bemeneti késleltetéssel. A gép minden játékára vonatkozik.",
+        ["Not available on this AMD card or driver: AMD Fluid Motion Frames needs a Radeon RX 6000 series card or newer and a recent driver."] = "Ezen az AMD-kártyán vagy illesztőn nem érhető el: az AMD Fluid Motion Frames Radeon RX 6000 sorozatú vagy újabb kártyát és friss illesztőt igényel.",
+        ["Could not read the AMD driver settings: {0}"] = "Az AMD-illesztő beállításai nem olvashatók: {0}",
+        ["Could not change the AMD driver settings: {0}"] = "Az AMD-illesztő beállításai nem módosíthatók: {0}",
+        ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "Bekapcsolva az AMD-illesztőben, minden játékhoz. Az Apex képkockakorlátja most 60 FPS, ezen működik a legjobban.",
+        ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Bekapcsolva az AMD-illesztőben, minden játékhoz. 60 és 90 FPS közötti Apex képkockakorláttal működik a legjobban.",
+        ["Off in the AMD driver."] = "Kikapcsolva az AMD-illesztőben.",
     };
 }

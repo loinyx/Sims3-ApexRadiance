@@ -255,5 +255,12 @@ public static partial class Strings
         ["Could not change the NVIDIA driver settings: {0}"] = "เปลี่ยนการตั้งค่าไดรเวอร์ NVIDIA ไม่ได้: {0}",
         ["Turn on {0}"] = "เปิด {0}",
         ["Turn off {0}"] = "ปิด {0}",
+        ["The AMD driver adds frames for smoother motion, about double the frame rate, with a little more input delay. It applies to every game on this PC."] = "ไดรเวอร์ AMD เพิ่มเฟรมให้ภาพเคลื่อนไหวลื่นขึ้น เฟรมเรตประมาณสองเท่า โดยมีความหน่วงในการควบคุมเพิ่มขึ้นเล็กน้อย ใช้กับทุกเกมบนพีซีเครื่องนี้",
+        ["Not available on this AMD card or driver: AMD Fluid Motion Frames needs a Radeon RX 6000 series card or newer and a recent driver."] = "ใช้ไม่ได้กับการ์ดหรือไดรเวอร์ AMD นี้: AMD Fluid Motion Frames ต้องใช้ Radeon RX ซีรีส์ 6000 หรือใหม่กว่าและไดรเวอร์รุ่นใหม่",
+        ["Could not read the AMD driver settings: {0}"] = "อ่านการตั้งค่าไดรเวอร์ AMD ไม่ได้: {0}",
+        ["Could not change the AMD driver settings: {0}"] = "เปลี่ยนการตั้งค่าไดรเวอร์ AMD ไม่ได้: {0}",
+        ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "เปิดในไดรเวอร์ AMD สำหรับทุกเกม ขีดจำกัดเฟรมของ Apex ตอนนี้เป็น 60 fps ซึ่งเป็นจังหวะที่ทำงานได้ดีที่สุด",
+        ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "เปิดในไดรเวอร์ AMD สำหรับทุกเกม ทำงานได้ดีที่สุดเมื่อขีดจำกัดเฟรมของ Apex อยู่ที่ 60 ถึง 90 fps",
+        ["Off in the AMD driver."] = "ปิดในไดรเวอร์ AMD",
     };
 }

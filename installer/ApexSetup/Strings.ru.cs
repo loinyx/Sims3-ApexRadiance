@@ -285,5 +285,12 @@ public static partial class Strings
         ["Could not change the NVIDIA driver settings: {0}"] = "Не удалось изменить настройки драйвера NVIDIA: {0}",
         ["Turn on {0}"] = "Включить {0}",
         ["Turn off {0}"] = "Выключить {0}",
+        ["The AMD driver adds frames for smoother motion, about double the frame rate, with a little more input delay. It applies to every game on this PC."] = "Драйвер AMD добавляет кадры для более плавного движения, примерно вдвое больше кадров, с немного большей задержкой ввода. Действует для всех игр на этом ПК.",
+        ["Not available on this AMD card or driver: AMD Fluid Motion Frames needs a Radeon RX 6000 series card or newer and a recent driver."] = "Недоступно на этой карте или драйвере AMD: для AMD Fluid Motion Frames нужна Radeon RX серии 6000 или новее и свежий драйвер.",
+        ["Could not read the AMD driver settings: {0}"] = "Не удалось прочитать настройки драйвера AMD: {0}",
+        ["Could not change the AMD driver settings: {0}"] = "Не удалось изменить настройки драйвера AMD: {0}",
+        ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "Включено в драйвере AMD, для всех игр. Ограничение кадров Apex теперь 60 FPS, темп, при котором он работает лучше всего.",
+        ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Включено в драйвере AMD, для всех игр. Лучше всего работает с ограничением кадров Apex от 60 до 90 FPS.",
+        ["Off in the AMD driver."] = "Выключено в драйвере AMD.",
     };
 }

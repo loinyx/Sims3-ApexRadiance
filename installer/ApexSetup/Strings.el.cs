@@ -300,5 +300,12 @@ public static partial class Strings
         ["Could not change the NVIDIA driver settings: {0}"] = "Δεν ήταν δυνατή η αλλαγή των ρυθμίσεων του οδηγού NVIDIA: {0}",
         ["Turn on {0}"] = "Ενεργοποίηση {0}",
         ["Turn off {0}"] = "Απενεργοποίηση {0}",
+        ["The AMD driver adds frames for smoother motion, about double the frame rate, with a little more input delay. It applies to every game on this PC."] = "Ο οδηγός της AMD προσθέτει καρέ για πιο ομαλή κίνηση, περίπου διπλάσια καρέ, με λίγο μεγαλύτερη καθυστέρηση εισόδου. Ισχύει για όλα τα παιχνίδια αυτού του υπολογιστή.",
+        ["Not available on this AMD card or driver: AMD Fluid Motion Frames needs a Radeon RX 6000 series card or newer and a recent driver."] = "Δεν είναι διαθέσιμο σε αυτή την κάρτα ή τον οδηγό AMD: το AMD Fluid Motion Frames χρειάζεται Radeon RX σειράς 6000 ή νεότερη και πρόσφατο οδηγό.",
+        ["Could not read the AMD driver settings: {0}"] = "Δεν ήταν δυνατή η ανάγνωση των ρυθμίσεων του οδηγού AMD: {0}",
+        ["Could not change the AMD driver settings: {0}"] = "Δεν ήταν δυνατή η αλλαγή των ρυθμίσεων του οδηγού AMD: {0}",
+        ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "Ενεργό στον οδηγό της AMD, για όλα τα παιχνίδια. Το όριο καρέ του Apex είναι τώρα 60 FPS, ο ρυθμός που λειτουργεί καλύτερα.",
+        ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Ενεργό στον οδηγό της AMD, για όλα τα παιχνίδια. Λειτουργεί καλύτερα με όριο καρέ του Apex 60 έως 90 FPS.",
+        ["Off in the AMD driver."] = "Ανενεργό στον οδηγό της AMD.",
     };
 }

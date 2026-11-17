@@ -298,5 +298,12 @@ public static partial class Strings
         ["Could not change the NVIDIA driver settings: {0}"] = "Die Einstellungen des NVIDIA-Treibers konnten nicht geändert werden: {0}",
         ["Turn on {0}"] = "{0} einschalten",
         ["Turn off {0}"] = "{0} ausschalten",
+        ["The AMD driver adds frames for smoother motion, about double the frame rate, with a little more input delay. It applies to every game on this PC."] = "Der AMD-Treiber fügt Bilder für flüssigere Bewegung hinzu, etwa doppelte Bildrate, mit etwas mehr Eingabeverzögerung. Gilt für alle Spiele auf diesem PC.",
+        ["Not available on this AMD card or driver: AMD Fluid Motion Frames needs a Radeon RX 6000 series card or newer and a recent driver."] = "Auf dieser AMD-Karte oder diesem Treiber nicht verfügbar: AMD Fluid Motion Frames braucht eine Radeon RX 6000 oder neuer und einen aktuellen Treiber.",
+        ["Could not read the AMD driver settings: {0}"] = "Die Einstellungen des AMD-Treibers konnten nicht gelesen werden: {0}",
+        ["Could not change the AMD driver settings: {0}"] = "Die Einstellungen des AMD-Treibers konnten nicht geändert werden: {0}",
+        ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "Im AMD-Treiber an, für alle Spiele. Apex' Bildratenlimit ist jetzt 60 FPS, das Tempo, bei dem es am besten läuft.",
+        ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Im AMD-Treiber an, für alle Spiele. Läuft am besten mit Apex' Bildratenlimit bei 60 bis 90 FPS.",
+        ["Off in the AMD driver."] = "Im AMD-Treiber aus.",
     };
 }

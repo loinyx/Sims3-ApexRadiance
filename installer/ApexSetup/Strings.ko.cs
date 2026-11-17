@@ -287,5 +287,12 @@ public static partial class Strings
         ["Could not change the NVIDIA driver settings: {0}"] = "NVIDIA 드라이버 설정을 바꿀 수 없습니다: {0}",
         ["Turn on {0}"] = "{0} 켜기",
         ["Turn off {0}"] = "{0} 끄기",
+        ["The AMD driver adds frames for smoother motion, about double the frame rate, with a little more input delay. It applies to every game on this PC."] = "AMD 드라이버가 프레임을 추가해 움직임을 더 부드럽게 합니다. 프레임이 약 두 배가 되고 입력 지연이 약간 늘어납니다. 이 PC의 모든 게임에 적용됩니다.",
+        ["Not available on this AMD card or driver: AMD Fluid Motion Frames needs a Radeon RX 6000 series card or newer and a recent driver."] = "이 AMD 카드나 드라이버에서는 사용할 수 없습니다: AMD Fluid Motion Frames에는 Radeon RX 6000 시리즈 이상과 최신 드라이버가 필요합니다.",
+        ["Could not read the AMD driver settings: {0}"] = "AMD 드라이버 설정을 읽을 수 없습니다: {0}",
+        ["Could not change the AMD driver settings: {0}"] = "AMD 드라이버 설정을 바꿀 수 없습니다: {0}",
+        ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "AMD 드라이버에서 모든 게임에 켜짐. Apex의 프레임 제한을 가장 잘 작동하는 60fps로 맞췄습니다.",
+        ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "AMD 드라이버에서 모든 게임에 켜짐. Apex의 프레임 제한이 60~90fps일 때 가장 잘 작동합니다.",
+        ["Off in the AMD driver."] = "AMD 드라이버에서 꺼짐.",
     };
 }

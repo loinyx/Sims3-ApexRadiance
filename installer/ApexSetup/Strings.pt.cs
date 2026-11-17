@@ -289,5 +289,13 @@ public static partial class Strings
         // frame generation: restore point and task labels
         ["Turn on {0}"] = "Ativar {0}",
         ["Turn off {0}"] = "Desativar {0}",
+        // AMD Fluid Motion Frames
+        ["The AMD driver adds frames for smoother motion, about double the frame rate, with a little more input delay. It applies to every game on this PC."] = "O driver da AMD cria quadros extras para um movimento mais suave, cerca do dobro de FPS, com um pouco mais de atraso nos comandos. Vale para todos os jogos deste PC.",
+        ["Not available on this AMD card or driver: AMD Fluid Motion Frames needs a Radeon RX 6000 series card or newer and a recent driver."] = "Não disponível nesta placa ou driver AMD: o AMD Fluid Motion Frames precisa de uma Radeon RX série 6000 ou mais nova e de um driver recente.",
+        ["Could not read the AMD driver settings: {0}"] = "Não foi possível ler as configurações do driver da AMD: {0}",
+        ["Could not change the AMD driver settings: {0}"] = "Não foi possível mudar as configurações do driver da AMD: {0}",
+        ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "Ativado no driver da AMD, para todos os jogos. O limite de quadros do Apex agora é 60 FPS, o ritmo em que funciona melhor.",
+        ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Ativado no driver da AMD, para todos os jogos. Funciona melhor com o limite de quadros do Apex entre 60 e 90 FPS.",
+        ["Off in the AMD driver."] = "Desativado no driver da AMD.",
     };
 }

@@ -283,5 +283,12 @@ public static partial class Strings
         ["Could not change the NVIDIA driver settings: {0}"] = "无法更改 NVIDIA 驱动设置：{0}",
         ["Turn on {0}"] = "开启 {0}",
         ["Turn off {0}"] = "关闭 {0}",
+        ["The AMD driver adds frames for smoother motion, about double the frame rate, with a little more input delay. It applies to every game on this PC."] = "AMD 驱动会插入额外的帧让画面更流畅，帧率约翻倍，输入延迟略有增加。对这台电脑上的所有游戏生效。",
+        ["Not available on this AMD card or driver: AMD Fluid Motion Frames needs a Radeon RX 6000 series card or newer and a recent driver."] = "此 AMD 显卡或驱动不可用：AMD Fluid Motion Frames 需要 Radeon RX 6000 系列或更新的显卡以及较新的驱动。",
+        ["Could not read the AMD driver settings: {0}"] = "无法读取 AMD 驱动设置：{0}",
+        ["Could not change the AMD driver settings: {0}"] = "无法更改 AMD 驱动设置：{0}",
+        ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "已在 AMD 驱动中开启，对所有游戏生效。Apex 的帧率上限现为 60 fps，这是它效果最好的节奏。",
+        ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "已在 AMD 驱动中开启，对所有游戏生效。Apex 的帧率上限设为 60 到 90 fps 时效果最好。",
+        ["Off in the AMD driver."] = "已在 AMD 驱动中关闭。",
     };
 }

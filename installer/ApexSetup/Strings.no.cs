@@ -295,5 +295,12 @@ public static partial class Strings
         ["Could not change the NVIDIA driver settings: {0}"] = "Kunne ikke endre innstillingene til NVIDIA-driveren: {0}",
         ["Turn on {0}"] = "Slå på {0}",
         ["Turn off {0}"] = "Slå av {0}",
+        ["The AMD driver adds frames for smoother motion, about double the frame rate, with a little more input delay. It applies to every game on this PC."] = "AMD-driveren legger til bilder for jevnere bevegelse, omtrent dobbelt bildefrekvens, med litt mer inndataforsinkelse. Gjelder alle spill på denne PC-en.",
+        ["Not available on this AMD card or driver: AMD Fluid Motion Frames needs a Radeon RX 6000 series card or newer and a recent driver."] = "Ikke tilgjengelig på dette AMD-kortet eller denne driveren: AMD Fluid Motion Frames krever et Radeon RX 6000-seriekort eller nyere og en ny driver.",
+        ["Could not read the AMD driver settings: {0}"] = "Kunne ikke lese innstillingene til AMD-driveren: {0}",
+        ["Could not change the AMD driver settings: {0}"] = "Kunne ikke endre innstillingene til AMD-driveren: {0}",
+        ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "På i AMD-driveren, for alle spill. Apex' bildegrense er nå 60 fps, tempoet den virker best i.",
+        ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "På i AMD-driveren, for alle spill. Virker best med Apex' bildegrense på 60 til 90 fps.",
+        ["Off in the AMD driver."] = "Av i AMD-driveren.",
     };
 }

@@ -255,5 +255,12 @@ public static partial class Strings
         ["Could not change the NVIDIA driver settings: {0}"] = "無法變更 NVIDIA 驅動程式設定：{0}",
         ["Turn on {0}"] = "開啟 {0}",
         ["Turn off {0}"] = "關閉 {0}",
+        ["The AMD driver adds frames for smoother motion, about double the frame rate, with a little more input delay. It applies to every game on this PC."] = "AMD 驅動程式會插入額外的影格讓畫面更流暢，幀率約翻倍，輸入延遲略增。對這台電腦上的所有遊戲生效。",
+        ["Not available on this AMD card or driver: AMD Fluid Motion Frames needs a Radeon RX 6000 series card or newer and a recent driver."] = "此 AMD 顯示卡或驅動程式無法使用：AMD Fluid Motion Frames 需要 Radeon RX 6000 系列或更新的顯示卡以及較新的驅動程式。",
+        ["Could not read the AMD driver settings: {0}"] = "無法讀取 AMD 驅動程式設定：{0}",
+        ["Could not change the AMD driver settings: {0}"] = "無法變更 AMD 驅動程式設定：{0}",
+        ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "已在 AMD 驅動程式中開啟，對所有遊戲生效。Apex 的幀率上限現為 60 fps，這是它效果最好的節奏。",
+        ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "已在 AMD 驅動程式中開啟，對所有遊戲生效。Apex 的幀率上限設為 60 到 90 fps 時效果最好。",
+        ["Off in the AMD driver."] = "已在 AMD 驅動程式中關閉。",
     };
 }

@@ -255,5 +255,12 @@ public static partial class Strings
         ["Could not change the NVIDIA driver settings: {0}"] = "Nie można zmienić ustawień sterownika NVIDIA: {0}",
         ["Turn on {0}"] = "Włącz {0}",
         ["Turn off {0}"] = "Wyłącz {0}",
+        ["The AMD driver adds frames for smoother motion, about double the frame rate, with a little more input delay. It applies to every game on this PC."] = "Sterownik AMD dodaje klatki dla płynniejszego ruchu, około dwa razy więcej klatek, z nieco większym opóźnieniem sterowania. Dotyczy wszystkich gier na tym komputerze.",
+        ["Not available on this AMD card or driver: AMD Fluid Motion Frames needs a Radeon RX 6000 series card or newer and a recent driver."] = "Niedostępne na tej karcie lub sterowniku AMD: AMD Fluid Motion Frames wymaga Radeona RX serii 6000 lub nowszego i aktualnego sterownika.",
+        ["Could not read the AMD driver settings: {0}"] = "Nie można odczytać ustawień sterownika AMD: {0}",
+        ["Could not change the AMD driver settings: {0}"] = "Nie można zmienić ustawień sterownika AMD: {0}",
+        ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "Włączone w sterowniku AMD, dla wszystkich gier. Limit klatek Apex wynosi teraz 60 FPS, tempo, w którym działa najlepiej.",
+        ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Włączone w sterowniku AMD, dla wszystkich gier. Działa najlepiej z limitem klatek Apex od 60 do 90 FPS.",
+        ["Off in the AMD driver."] = "Wyłączone w sterowniku AMD.",
     };
 }
