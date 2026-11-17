@@ -6,6 +6,7 @@
 //   run()     one pass: block, depth, optional motion class, up to four outputs (gi_pixel_block.h)
 //   forget()  a texture is about to be destroyed
 //   drop()    before a device reset or destroy: waits for the device, frees every Vulkan object
+//   view()    the server's view of a client texture (WP11): blits it into a client render target texture
 //   addModel(), setMeshes()  mesh casters (MC-2): a model's triangles once, then the placed objects; each model becomes
 //             one bottom level on the renderer's device when a pass first needs it, its objects instances of it
 // Header only: the bridge server and native/dxvk/test/dxvk_gi_pixel_pass.cpp compile the same file. The including file
@@ -65,7 +66,7 @@ IGiD3D9VkExternalPass : public IUnknown {
   X(DeviceWaitIdle) X(CreateAccelerationStructureKHR) X(DestroyAccelerationStructureKHR) \
   X(GetAccelerationStructureBuildSizesKHR) X(GetAccelerationStructureDeviceAddressKHR) \
   X(CmdBuildAccelerationStructuresKHR) X(CmdUpdateBuffer) X(CmdPipelineBarrier) X(CmdBindPipeline) \
-  X(CmdBindDescriptorSets) X(CmdDispatch) X(CmdCopyImage) X(CmdResetQueryPool) X(CmdWriteTimestamp)
+  X(CmdBindDescriptorSets) X(CmdDispatch) X(CmdCopyImage) X(CmdBlitImage) X(CmdResetQueryPool) X(CmdWriteTimestamp)
 
 class GiPixelPass {
 public:
@@ -188,6 +189,27 @@ public:
     m_passes++;
     return S_OK;
   }
+
+  // WP11: the server's view of a client texture (a G-buffer target such as albedo + id), blitted on the renderer's device
+  // in stream order into a client render target texture of any size and colour format the blit supports (nearest at the
+  // same size, so an id byte stays exact; linear otherwise). Proves the renderer's image of a D3D9 render target reaches
+  // the server; a consumer binds the same image as XR-06 binds the class texture. Needs no pass objects.
+  HRESULT view(IDirect3DBaseTexture9* src, IDirect3DBaseTexture9* dst) {
+    if (!ready() || !src || !dst) return viewFault("not ready or no texture");
+    VkImageCreateInfo si{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO}, di{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    ViewRecord r{m_vk.CmdBlitImage, imageOf(src, &si), imageOf(dst, &di)};
+    if (!r.src || !r.dst) return viewFault("input is not a renderer texture");
+    if (isDepth(si.format) || isDepth(di.format) || !(si.usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) || !(di.usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT))
+      return viewFault("view needs two colour textures the renderer can copy");
+    r.sw = si.extent.width, r.sh = si.extent.height, r.dw = di.extent.width, r.dh = di.extent.height;
+    IDirect3DResource9* res[2] = {src, dst};
+    const VkImageLayout layouts[2] = {VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL};
+    if (FAILED(m_pass->ExecuteExternal(&GiPixelPass::recordView, &r, sizeof r, 2, res, layouts))) return viewFault("the renderer refused the view");
+    m_views++;
+    return S_OK;
+  }
+  uint32_t views() const { return m_views; }
+  uint32_t viewFaults() const { return m_viewFaults; }
 
   void forget(const IUnknown* texture) {
     if (texture && (texture == m_depthTex || texture == m_clsTex)) drop();
@@ -630,6 +652,22 @@ private:
     b.srcAccessMask = wrote, b.dstAccessMask = reads;
     m_vk.CmdPipelineBarrier(cmd, from, to, 0, 1, &b, 0, nullptr, 0, nullptr);
   }
+  struct ViewRecord {  // copied by ExecuteExternal
+    PFN_vkCmdBlitImage blit;
+    VkImage src, dst;
+    uint32_t sw, sh, dw, dh;
+  };
+  HRESULT viewFault(const char* why) { m_viewFaults++, m_lastFault = why; return E_FAIL; }
+  // On DXVK's command thread: the renderer has moved src to TRANSFER_SRC and dst to TRANSFER_DST
+  static void STDMETHODCALLTYPE recordView(VkCommandBuffer cmd, const void* data) {
+    const ViewRecord& r = *static_cast<const ViewRecord*>(data);
+    VkImageBlit b{};
+    b.srcSubresource = b.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    b.srcOffsets[1] = {int32_t(r.sw), int32_t(r.sh), 1};
+    b.dstOffsets[1] = {int32_t(r.dw), int32_t(r.dh), 1};
+    const bool same = r.sw == r.dw && r.sh == r.dh;
+    r.blit(cmd, r.src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, r.dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &b, same ? VK_FILTER_NEAREST : VK_FILTER_LINEAR);
+  }
   // On DXVK's command thread, in stream order
   static void STDMETHODCALLTYPE record(VkCommandBuffer cmd, const void* data) {
     const Record& r = *static_cast<const Record*>(data);
@@ -764,7 +802,7 @@ private:
   uint32_t m_built = 0, m_meshesLast = 0;
 
   Record m_record{};  // filled by run(), copied by the renderer
-  uint32_t m_passes = 0, m_made = 0, m_faults = 0, m_raysLast = 0, m_gpuUs = 0;
+  uint32_t m_passes = 0, m_made = 0, m_faults = 0, m_raysLast = 0, m_gpuUs = 0, m_views = 0, m_viewFaults = 0;
   uint64_t m_rays = 0;
   const char* m_lastFault = "";
 };

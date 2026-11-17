@@ -92,6 +92,13 @@ $giInd = @((Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/gi-indirect-
 $giLine = '12:00:10.000 [INFO] [RealtimeGI] Counters: frames=600 backend=serverRays draws=4 deviceCalls=2 lamps=12 lots=1 lampChanges=0 indirect=atlas atlasReady={0} gridTexels=900 indirectDraws={1}; must be 0: capSolves=0 syncReadbacks=0 locks=0 redrawDiffs=0 readFaults=0 lampTableDiffs=0'
 Check (($giLine -f 640, 37) -match $giInd) 'GI indirect counters match with ready texels and draws'
 foreach ($bad in @(@(0, 37), @(640, 0))) { Check (($giLine -f $bad[0], $bad[1]) -notmatch $giInd) "GI indirect counters rejected: atlasReady=$($bad[0]) indirectDraws=$($bad[1])" }
+# The G-buffer bridge view (WP11): the counter line with views and no fault, not one with a fault; the off line fails
+$gbJob = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/gbuffer-motion-smoke.json') -Raw | ConvertFrom-Json
+$gbView = @($gbJob.variants.bridge.expect)[2]; $gbOff = @($gbJob.fail)[-1]
+Check ('12:00:10.000 [INFO] [GBuffer] Bridge view: views=600 viewFaults=0' -match $gbView) 'bridge view counters match with views and no fault'
+foreach ($bad in 'views=0 viewFaults=0', 'views=600 viewFaults=2') { Check ("12:00:10.000 [INFO] [GBuffer] Bridge view: $bad" -notmatch $gbView) "bridge view counters rejected: $bad" }
+Check ('12:00:00.000 [INFO] [GBuffer] Bridge view off: no bridge export (needs the bridge pair of patch 0023)' -match $gbOff) 'bridge view off line fails the load'
+Check ('12:00:00.000 [INFO] [GBuffer] Bridge view on' -notmatch $gbOff) 'bridge view on line does not fail the load'
 $prof = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/realtime-gi-profile.json') -Raw | ConvertFrom-Json
 Check ('12:00:00.000 [INFO] [FrameProfiler] Measurement preset: timing run (hitch 2.0 x median, floor 8 ms)' -match @($prof.expect)[0]) 'profile arm expect matches the preset line'
 Check ('12:00:00.000 [INFO] [FrameProfiler] Measurement preset: sampling run (hitch)' -notmatch @($prof.expect)[0]) 'profile arm expect rejects the sampling preset'
