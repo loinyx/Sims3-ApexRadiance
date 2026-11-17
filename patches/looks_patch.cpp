@@ -121,6 +121,8 @@ struct State
     bool onUi = false;         // also shade the game's UI, menus and loading screens (end of frame, like GShade)
     float mix = 1.0f;
     std::set<std::string> off; // techniques switched off here (still in the list: the .ini's or added here)
+    std::set<std::string> on;  // techniques the look's file keeps listed but off (ApexOff=), switched on here
+    std::set<std::string> removed; // lower-case "tech@file.fx" taken out here: listed with Restore until the look is saved
     std::map<std::string, std::vector<float>> tweaks; // technique -> 4 floats per param
     std::map<std::string, std::map<std::string, std::string>> defs; // lower-case .fx name -> definition -> value edited here
     std::vector<std::string> extra;    // "Tech@File.fx" switched on here although the .ini does not enable it
@@ -130,6 +132,7 @@ struct State
     Looks::Preset ini;
     std::vector<Looks::PresetEntry> iniOrder;  // the .ini's own enabled techniques, in its order
     std::set<std::string> iniKeys;             // lower-case "tech@file.fx" of those
+    std::set<std::string> iniOff;              // lower-case keys the file lists switched off (ApexOff=, written by Apex)
     std::vector<Looks::PresetEntry> order;     // the run list: the .ini's, plus added ones, in my order
     std::vector<std::vector<float>> iniValues; // per run-list entry (built-in ones)
     Looks::Runner runner;
@@ -152,12 +155,20 @@ std::string Lower(std::string s)
 std::string EntryKey(const Looks::PresetEntry& e) { return e.technique + "@" + e.file; }
 bool InIni(const std::string& key) { return g.iniKeys.count(Lower(key)) != 0; }
 bool Runnable(size_t i) { return i < g.order.size() && g.order[i].shader >= 0; }
-bool IsOff(size_t i) { return g.off.count(g.order[i].technique) != 0; }
+bool IsRemoved(size_t i) { return g.removed.count(Lower(EntryKey(g.order[i]))) != 0; }
+bool OffInFile(size_t i) { return g.iniOff.count(Lower(EntryKey(g.order[i]))) != 0; }
+// Off = not run: switched off (here, or in the file and not switched on here) or removed here
+bool IsOff(size_t i)
+{
+    const std::string& t = g.order[i].technique;
+    return IsRemoved(i) || (OffInFile(i) ? g.on.count(t) == 0 : g.off.count(t) != 0);
+}
 
+// Runnable shaders still in the list (removed ones not counted), or only those on
 int RunnableCount(bool onlyOn)
 {
     int n = 0;
-    for (size_t i = 0; i < g.order.size(); ++i) n += Runnable(i) && (!onlyOn || !IsOff(i));
+    for (size_t i = 0; i < g.order.size(); ++i) n += Runnable(i) && !IsRemoved(i) && (!onlyOn || !IsOff(i));
     return n;
 }
 
@@ -275,6 +286,38 @@ void LoadPreset()
     else if (Looks::LookText(g.preset, text, &g.error)) Looks::ParsePreset(text, g.ini);
     g.loaded = g.error.empty() && g.ini.error.empty();
     if (!g.ini.error.empty()) g.error = g.ini.error;
+    // ApexOff= (Apex's own key, ignored by ReShade): shaders the look keeps in its list switched off; they are not in
+    // Techniques=, so ReShade does not run them either. They join the .ini's entries at their TechniqueSorting place.
+    g.iniOff.clear();
+    if (auto top = g.ini.sections.find(""); top != g.ini.sections.end())
+        if (auto it = std::find_if(top->second.begin(), top->second.end(), [](const auto& kv) { return _stricmp(kv.first.c_str(), "ApexOff") == 0; });
+            it != top->second.end())
+        {
+            const std::vector<std::string> sorting = Looks::PresetSorting(g.ini);
+            auto rank = [&](const std::string& k) {
+                for (size_t i = 0; i < sorting.size(); ++i) if (_stricmp(sorting[i].c_str(), k.c_str()) == 0) return i;
+                return sorting.size();
+            };
+            for (size_t a = 0; a < it->second.size() && g.iniOff.size() < kMaxListEntries;)
+            {
+                size_t b = it->second.find(',', a);
+                if (b == std::string::npos) b = it->second.size();
+                std::string key = it->second.substr(a, b - a);
+                a = b + 1;
+                while (!key.empty() && (key.back() == ' ' || key.back() == '\t')) key.pop_back();
+                while (!key.empty() && (key.front() == ' ' || key.front() == '\t')) key.erase(0, 1);
+                const size_t at = key.find('@');
+                if (at == std::string::npos || at == 0 || key.size() > 200 || g.iniOff.count(Lower(key))) continue;
+                if (std::any_of(g.ini.order.begin(), g.ini.order.end(), [&](const auto& e) { return Lower(EntryKey(e)) == Lower(key); })) continue;
+                Looks::PresetEntry e;
+                e.technique = key.substr(0, at);
+                e.file = key.substr(at + 1);
+                const size_t r = rank(key);
+                auto pos = std::find_if(g.ini.order.begin(), g.ini.order.end(), [&](const auto& x) { return rank(EntryKey(x)) > r; });
+                g.ini.order.insert(pos, e);
+                g.iniOff.insert(Lower(key));
+            }
+        }
     for (auto& e : g.ini.order) ResolveEntry(e);
     g.iniOrder = g.ini.order;
     g.iniKeys.clear();
@@ -564,6 +607,7 @@ void OnPresent(IDirect3DDevice9* dev)
     g_backBuffer = nullptr;
     D3DSURFACE_DESC bd{};
     if (dev && SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &s)) && s) { g_backBuffer = s; s->GetDesc(&bd); s->Release(); }
+    Looks::Packs::BeginFrame(); // the pack list changes only here, between menu frames
     if (Looks::Fx::Poll(bd.Width, bd.Height)) ResolveShaders(); // a scan of the Shaders folder finished (part of it)
     SyncDepth(g.active);
     if (dev && SUCCEEDED(dev->GetRenderTarget(0, &s)) && s) { g_curRT0 = s; s->Release(); }
@@ -685,7 +729,7 @@ void RestartEffects(IDirect3DDevice9*) { ReleaseGpu(); }
 void SelectLook(const std::string& ref)
 {
     g.preset = ref;
-    g.off.clear(); g.extra.clear(); g.runOrder.clear(); g.tweaks.clear(); g.defs.clear();
+    g.off.clear(); g.on.clear(); g.removed.clear(); g.extra.clear(); g.runOrder.clear(); g.tweaks.clear(); g.defs.clear();
     LoadPreset();
     g.runner.Release();
 }
@@ -699,37 +743,29 @@ void RemoveExtra(const std::string& key)
 // A switch in the run list: switched off, a shader stays in the list (dimmed, its values kept) until it is removed
 void SwitchEntry(size_t i, bool on)
 {
-    if (on) g.off.erase(g.order[i].technique); else g.off.insert(g.order[i].technique);
+    const std::string& t = g.order[i].technique;
+    if (OffInFile(i)) { if (on) g.on.insert(t); else g.on.erase(t); }
+    else if (on) g.off.erase(t);
+    else g.off.insert(t);
+}
+
+// The trash: the shader stops running and stays listed with Restore until the look is saved (then it leaves the file)
+// or put back as saved. Only a set changes: the list is not rebuilt while its rows draw.
+void RemoveEntry(size_t i, bool removed)
+{
+    if (removed) g.removed.insert(Lower(EntryKey(g.order[i])));
+    else g.removed.erase(Lower(EntryKey(g.order[i])));
 }
 
 // Changes to the run list asked for by a row are applied after the whole list is drawn: a row keeps references
 // into g.order while it draws, and rebuilding the list under it read freed memory
 struct DragMove { size_t i = 0; int dir = 0; } g_dragMove; // a row held by its grip (or Run earlier / later) passed a neighbour
-std::string g_removeKey; // the trash of a shader added here
-
-// Takes a shader added here out of the run list; its switch, values and place go with it. Its technique ("" when not
-// removed).
-std::string RemoveEntry(const std::string& key)
-{
-    auto it = std::find_if(g.order.begin(), g.order.end(), [&](const Looks::PresetEntry& e) { return EntryKey(e) == key; });
-    if (it == g.order.end() || InIni(key)) return {};
-    const std::string technique = it->technique;
-    RemoveExtra(key);
-    std::erase(g.runOrder, key);
-    RebuildOrder();
-    if (std::none_of(g.order.begin(), g.order.end(), [&](const Looks::PresetEntry& e) { return e.technique == technique; }))
-    {
-        g.off.erase(technique); // the switch and the values are kept by technique: only while no other row has it
-        g.tweaks.erase(technique);
-    }
-    return technique;
-}
 
 // Swaps run-list entry i with the runnable entry before (dir -1) or after (dir +1) it
 void Move(size_t i, int dir)
 {
     int j = (int)i;
-    do j += dir; while (j >= 0 && j < (int)g.order.size() && !Runnable((size_t)j));
+    do j += dir; while (j >= 0 && j < (int)g.order.size() && (!Runnable((size_t)j) || IsRemoved((size_t)j))); // the rows shown with a position
     if (j < 0 || j >= (int)g.order.size()) return;
     g.runOrder.clear();
     for (auto& e : g.order) g.runOrder.push_back(EntryKey(e));
@@ -743,6 +779,9 @@ void AddShader(const std::string& technique, const std::string& file)
 {
     const std::string key = technique + "@" + file;
     g.off.erase(technique);
+    for (size_t i = 0; i < g.order.size(); ++i)
+        if (g.order[i].technique == technique && OffInFile(i)) g.on.insert(technique); // one the file keeps off: on again
+    g.removed.erase(Lower(key));
     if (InIni(key)) return;
     RemoveExtra(key);
     g.extra.push_back(key);
@@ -789,14 +828,48 @@ bool AnyEdited()
     return !g.defs.empty();
 }
 
+// The look differs from its file: anything switched, added, removed, moved, or a value or quality setting edited here.
+// These changes live in Apex's settings (saved by itself); the file changes only with Save.
+bool Dirty()
+{
+    return !g.off.empty() || !g.on.empty() || !g.extra.empty() || !g.runOrder.empty() || !g.removed.empty() || AnyEdited();
+}
+
+// Back to the look as its file has it (the undo toast can bring the changes back)
+void PutBackAsSaved()
+{
+    g.off.clear(); g.on.clear(); g.extra.clear(); g.runOrder.clear(); g.removed.clear(); g.tweaks.clear(); g.defs.clear();
+    RebuildOrder(); // also pushes the definitions
+}
+
+// What Save would write, one English line per shader (shown translated), at most `max` lines
+std::vector<std::string> ChangeLines(size_t max)
+{
+    std::vector<std::string> out;
+    auto add = [&](std::string s) { if (out.size() < max) out.push_back(std::move(s)); };
+    for (size_t i = 0; i < g.order.size(); ++i)
+    {
+        const std::string& t = g.order[i].technique;
+        const bool fileOff = OffInFile(i);
+        if (IsRemoved(i)) add(I18n::Trf("{} removed", t));
+        else if (!InIni(EntryKey(g.order[i]))) add(I18n::Trf("{} added", t));
+        else if (IsOff(i) != fileOff) add(I18n::Trf(IsOff(i) ? "{} turned off" : "{} turned on", t));
+        else if (EditedValues(i) || DefsEdited(i)) add(I18n::Trf("{} changed", t));
+    }
+    if (!g.runOrder.empty()) add(I18n::Tr("Order changed"));
+    return out;
+}
+
 // ---------------------------------------------------------------------------------------------- Save as a new look
 // The look as it runs now, as ReShade preset text: Techniques= (the ones on, in run order), TechniqueSorting= (run list
 // first, then the rest of the source's sorting), the source's other top lines and its [File.fx] sections, with the
 // values of every built-in shader in the run list as they are now.
-std::string LookAsText()
+// read: false when the look's own text could not be read (then nothing may be written: its other lines would be lost)
+std::string LookAsText(bool* read = nullptr)
 {
     std::string text;
-    Looks::LookText(g.preset, text);
+    const bool ok = Looks::LookText(g.preset, text);
+    if (read) *read = ok;
     if (text.size() >= 3 && (unsigned char)text[0] == 0xEF && (unsigned char)text[1] == 0xBB && (unsigned char)text[2] == 0xBF) text.erase(0, 3);
     const std::string nl = text.find("\r\n") != std::string::npos ? "\r\n" : "\n";
     std::vector<std::string> top;
@@ -817,12 +890,14 @@ std::string LookAsText()
             if (l.size() > key.size() && l.compare(0, key.size(), key) == 0 && l[key.size()] == '=') { l = key + "=" + value; return; }
         lines.push_back(key + "=" + value);
     };
-    std::string on, sorting;
+    std::string on, offList, sorting;
     std::set<std::string> listed;
     for (size_t i = 0; i < g.order.size(); ++i)
     {
+        if (IsRemoved(i)) continue; // leaves the file
         const std::string k = EntryKey(g.order[i]);
         if (!IsOff(i)) on += (on.empty() ? "" : ",") + k;
+        else offList += (offList.empty() ? "" : ",") + k; // listed switched off: Apex shows it, ReShade does not run it
         sorting += (sorting.empty() ? "" : ",") + k;
         listed.insert(Lower(k));
     }
@@ -830,24 +905,36 @@ std::string LookAsText()
         if (listed.insert(Lower(s)).second) sorting += (sorting.empty() ? "" : ",") + s;
     setLine(top, "Techniques", on);
     setLine(top, "TechniqueSorting", sorting);
+    // any earlier ApexOff line (also a hand-edited "apexoff = ...") goes; the current one is written last
+    top.erase(std::remove_if(top.begin(), top.end(), [](const std::string& l) {
+        const size_t eq = l.find('=');
+        if (eq == std::string::npos) return false;
+        std::string k = l.substr(0, eq);
+        while (!k.empty() && (k.back() == ' ' || k.back() == '\t')) k.pop_back();
+        while (!k.empty() && (k.front() == ' ' || k.front() == '\t')) k.erase(0, 1);
+        return _stricmp(k.c_str(), "ApexOff") == 0;
+    }), top.end());
+    if (!offList.empty()) top.push_back("ApexOff=" + offList);
     for (size_t i = 0; i < g.order.size(); ++i)
     {
-        if (!Runnable(i)) continue;
+        if (!Runnable(i) || IsRemoved(i)) continue;
         const auto& e = g.order[i];
-        auto sec = std::find_if(secs.begin(), secs.end(), [&](const auto& s) { return _stricmp(s.first.c_str(), e.file.c_str()) == 0; });
+        // a stand-in reads its values and definitions from its own file's section (RebuildOrder, DefinesFor): written there
+        const std::string& file = e.alt.empty() ? e.file : e.alt;
+        auto sec = std::find_if(secs.begin(), secs.end(), [&](const auto& s) { return _stricmp(s.first.c_str(), file.c_str()) == 0; });
         if (sec == secs.end())
         {
-            auto at = std::find_if(secs.begin(), secs.end(), [&](const auto& s) { return _stricmp(s.first.c_str(), e.file.c_str()) > 0; });
-            sec = secs.insert(at, { e.file, {} });
+            auto at = std::find_if(secs.begin(), secs.end(), [&](const auto& s) { return _stricmp(s.first.c_str(), file.c_str()) > 0; });
+            sec = secs.insert(at, { file, {} });
         }
-        if (g.defs.count(Lower(e.file))) // ReShade 6 keeps an effect's own definitions in its section
+        if (g.defs.count(Lower(file))) // ReShade 6 keeps an effect's own definitions in its section
         {
             std::string own;
             for (const auto& [k, lines] : g.ini.sections)
-                if (_stricmp(k.c_str(), e.file.c_str()) == 0)
+                if (_stricmp(k.c_str(), file.c_str()) == 0)
                     if (auto it = lines.find("PreprocessorDefinitions"); it != lines.end()) own = it->second;
             LooksDefines d = Looks::ParseDefines(own);
-            for (const auto& [name, value] : g.defs[Lower(e.file)])
+            for (const auto& [name, value] : g.defs[Lower(file)])
             {
                 auto at = std::find_if(d.begin(), d.end(), [&](const auto& x) { return x.first == name; });
                 if (at != d.end()) at->second = value;
@@ -889,7 +976,10 @@ bool SaveAsNewLook(const std::string& name, std::string& error)
     if (file.empty()) { error = I18n::Tr("Use letters, digits and spaces for the name"); return false; }
     if (!Looks::EnsureLooksFolder()) { error = I18n::Tr("The Looks folder could not be created"); return false; }
     std::string why;
-    if (!ApexUtil::WriteFileAtomic(Looks::LooksFolder() + ApexUtil::ToWide(file), LookAsText(), &why))
+    bool read = false;
+    const std::string text = LookAsText(&read);
+    if (!read) { error = I18n::Trf("Could not save {}", file); LOG_ERROR("[Looks] saving " + file + " refused: " + g.preset + " could not be read"); return false; }
+    if (!ApexUtil::WriteFileAtomic(Looks::LooksFolder() + ApexUtil::ToWide(file), text, &why))
     {
         LOG_ERROR("[Looks] saving " + file + " failed: " + why);
         error = I18n::Trf("Could not save {}", file);
@@ -897,6 +987,45 @@ bool SaveAsNewLook(const std::string& name, std::string& error)
     }
     LOG_INFO("[Looks] saved the look as Looks\\" + file);
     SelectLook("looks:" + file); // the new file holds everything: selected with no changes on top
+    return true;
+}
+
+// "Save to this look": a look of the Looks folder is written over (the previous file kept as <name>.ini.bak); Apex
+// writes nowhere else, so an Apex or GShade look is saved in the Looks folder under its own name and chosen there (My
+// looks). When a look of that name is already there, nothing is written the first time: the error says saving replaces
+// it, and the same Save again (replace = true, for the same look) does.
+std::string g_replaceArmed; // the look whose Save already warned that it replaces a look in My looks
+bool SaveToLook(std::string& error)
+{
+    if (g.preset.empty() || !g.loaded) { error = I18n::Tr("Choose a look first"); return false; }
+    if (Looks::RefSource(g.preset) != Looks::Source::Mine)
+    {
+        std::string name = Looks::RefName(g.preset);
+        if (const size_t slash = name.find_last_of("\\/"); slash != std::string::npos) name.erase(0, slash + 1);
+        const std::string file = LookFileName(name);
+        if (!file.empty() && ApexUtil::FileExists(Looks::LooksFolder() + ApexUtil::ToWide(file)) && g_replaceArmed != g.preset)
+        {
+            g_replaceArmed = g.preset; // the next Save of this look replaces it
+            error = I18n::Tr("A look with this name exists; saving replaces it");
+            return false;
+        }
+        g_replaceArmed.clear();
+        return SaveAsNewLook(name, error);
+    }
+    const std::wstring path = Looks::RefPath(g.preset);
+    std::string why;
+    bool read = false;
+    const std::string text = LookAsText(&read);
+    if (!read) { error = I18n::Trf("Could not save {}", Looks::RefName(g.preset)); LOG_ERROR("[Looks] saving " + g.preset + " refused: it could not be read"); return false; }
+    if (!path.empty()) CopyFileW(path.c_str(), (path + L".bak").c_str(), FALSE); // the file as it was, once per save
+    if (path.empty() || !ApexUtil::WriteFileAtomic(path, text, &why))
+    {
+        LOG_ERROR("[Looks] saving " + g.preset + " failed: " + why);
+        error = I18n::Trf("Could not save {}", Looks::RefName(g.preset));
+        return false;
+    }
+    LOG_INFO("[Looks] saved the changes to " + g.preset);
+    SelectLook(g.preset); // read back: the file now holds every change
     return true;
 }
 
@@ -1254,6 +1383,10 @@ const char* SourceLabel(Looks::Source s)
     }
 }
 
+// A look picked (or Import) while the current one has unsaved changes: AskSaveModal opens next frame and asks first
+std::string g_askNext;
+const char* const kAskImport = "\x01import";
+
 // "Look": a dropdown of every look by source (a search field once there are more than 10), "Open the Looks folder" last,
 // and an Import button at its right (the native picker; the .ini is copied into Looks). True when another look was chosen.
 bool LookRow()
@@ -1271,10 +1404,18 @@ bool LookRow()
         if (comboW < 120.0f * u) { comboW = avail; importBelow = true; } // too narrow for both: Import on its own line
     }
     const float fh = ImGui::GetFrameHeight();
-    if (!ApexUi::BeginControlRow("Look", "Pick one, or import a ReShade or GShade preset", importBelow ? avail : comboW + gap + importW, IconId::None,
-                                 importBelow ? 2.0f * fh + ImGui::GetStyle().ItemSpacing.y : 0.0f))
+    // changed here and not saved in the file: the changed dot, and on hover Reset = put back the look as saved
+    const bool dirty = g.loaded && Dirty();
+    ApexUi::SetNextRowDefault(dirty);
+    if (!ApexUi::BeginControlRow("Look", dirty ? "Changed here, not saved in the look yet" : "Pick one, or import a ReShade or GShade preset",
+                                 importBelow ? avail : comboW + gap + importW, IconId::None, importBelow ? 2.0f * fh + ImGui::GetStyle().ItemSpacing.y : 0.0f))
         return false;
     bool changed = false;
+    if (ApexUi::ControlRowReset())
+    {
+        PutBackAsSaved();
+        changed = true; // reported below
+    }
     const std::string current = g.preset.empty() ? std::string(I18n::Tr("Choose a look")) : ShownName(g.preset);
     const ImVec2 comboPos = ImGui::GetCursorScreenPos();
     ImGui::SetNextItemWidth(comboW);
@@ -1317,9 +1458,13 @@ bool LookRow()
                 const bool selected = item.ref == g.preset;
                 if (ImGui::Selectable(label.c_str(), selected) && !selected)
                 {
-                    SelectLook(item.ref);
-                    g_message.clear();
-                    changed = true;
+                    if (dirty) g_askNext = item.ref; // the changes would be dropped: asked first (AskSaveModal)
+                    else
+                    {
+                        SelectLook(item.ref);
+                        g_message.clear();
+                        changed = true;
+                    }
                 }
                 if (selected) ImGui::SetItemDefaultFocus();
                 ImGui::PopID();
@@ -1335,9 +1480,84 @@ bool LookRow()
     }
     wasOpen = open;
     if (!importBelow) ImGui::SameLine(0.0f, gap);
-    if (ApexUi::IconTextButton("Import", IconId::Download, "Copy a ReShade or GShade preset (.ini) into the Looks folder and choose it")) PickPreset();
+    if (ApexUi::IconTextButton("Import", IconId::Download, "Copy a ReShade or GShade preset (.ini) into the Looks folder and choose it"))
+    {
+        if (dirty) g_askNext = kAskImport;
+        else PickPreset();
+    }
     ApexUi::EndControlRow();
-    if (changed) ApexUi::ReportChange("Look changed");
+    if (changed && g_askNext.empty()) ApexUi::ReportChange(dirty ? "Look put back as saved" : "Look changed");
+    return changed;
+}
+
+// Before another look (or an import) replaces changes that are only in Apex: what would be lost, Discard them / Cancel /
+// Save (Save to this look, then go on). True when the look changed.
+bool AskSaveModal()
+{
+    static std::string next, error;
+    static std::vector<std::string> lines;
+    if (!g_askNext.empty())
+    {
+        next = std::move(g_askNext);
+        g_askNext.clear();
+        error.clear();
+        lines = ChangeLines(8);
+        ImGui::OpenPopup("##AskSave");
+    }
+    const float u = ApexUi::Unit();
+    ImGui::SetNextWindowSize(ImVec2(std::max(1.0f, std::min(440.0f * u, ImGui::GetIO().DisplaySize.x - 32.0f)), 0.0f), ImGuiCond_Always);
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    bool changed = false;
+    if (ImGui::BeginPopupModal("##AskSave", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize))
+    {
+        bool go = false;
+        {
+            ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+            bool close = false;
+            ApexUi::HeaderExtra extra;
+            extra.iconOff = extra.iconOn = IconId::X;
+            extra.value = &close;
+            extra.tooltip = "Cancel";
+            const std::string title = I18n::Trf("Save your changes to {}?", ShownName(g.preset));
+            ApexUi::SetNextRowUntranslated();
+            ApexUi::CardHeader(IconId::Save, title.c_str(), "These changes are only in Apex until you save them to the look", nullptr, nullptr, true, &extra);
+            ApexUi::CardDivider();
+            for (const std::string& l : lines) ImGui::BulletText("%s", l.c_str());
+            if (!error.empty()) ApexUi::IconNote(IconId::TriangleAlert, error.c_str(), VioletTheme::kError);
+            ApexUi::Gap(ApexUi::kSpace3);
+            const char* discard = "Discard them";
+            const char* save = Looks::RefSource(g.preset) == Looks::Source::Mine ? "Save" : "Save in My looks";
+            const float discardW = ApexUi::ButtonWidth(discard, false), cancelW = ApexUi::ButtonWidth("Cancel", false), saveW = ApexUi::ButtonWidth(save, false);
+            const float sp = ImGui::GetStyle().ItemSpacing.x, available = ImGui::GetContentRegionAvail().x;
+            const bool oneRow = discardW + cancelW + saveW + 2.0f * sp + ApexUi::kSpace3 * u <= available;
+            const float x0 = ImGui::GetCursorPosX();
+            if (ApexUi::TextButton(discard)) { go = true; ImGui::CloseCurrentPopup(); }
+            if (oneRow) ImGui::SameLine(x0 + available - cancelW - sp - saveW); // Cancel then Save on the right
+            if (ApexUi::TextButton("Cancel") || close) ImGui::CloseCurrentPopup();
+            ImGui::SameLine();
+            if (ApexUi::TextButton(save, nullptr, ApexUi::ButtonKind::Primary))
+            {
+                if (SaveToLook(error))
+                {
+                    g_listDirty = true;
+                    go = true;
+                    ImGui::CloseCurrentPopup();
+                }
+            }
+        }
+        ImGui::EndPopup();
+        if (go)
+        {
+            if (next == kAskImport) PickPreset();
+            else
+            {
+                SelectLook(next);
+                g_message.clear();
+                ApexUi::ReportChange("Look changed");
+                changed = true;
+            }
+        }
+    }
     return changed;
 }
 
@@ -1759,8 +1979,9 @@ void PanelLine()
 
 // A shader the look names that can't run here, in its place in the list: its name over what is wrong (amber) and the one
 // action (Download its pack, Add .fx files, or a spinner while it is checked or downloaded)
-void MissingRow(size_t i, const Looks::Packs::Batch& batch, std::vector<std::string>& getPacks)
+bool MissingRow(size_t i, const Looks::Packs::Batch& batch, std::vector<std::string>& getPacks)
 {
+    bool changed = false;
     const float u = ApexUi::Unit();
     const auto& e = g.order[i];
     const Looks::Packs::Pack* pack = PackFor(i);
@@ -1797,8 +2018,9 @@ void MissingRow(size_t i, const Looks::Packs::Batch& batch, std::vector<std::str
     const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
     const char* download = I18n::Tr("Download");
     const char* addFx = I18n::Tr("Add .fx files\xE2\x80\xA6");
-    const float controlW = act == Act::Download ? ApexUi::ButtonWidth(download, true) : act == Act::AddFx ? ApexUi::ButtonWidth(addFx, true)
-                         : act == Act::Spin   ? 12.0f * u : 0.0f;
+    const float h = ImGui::GetFrameHeight(), gap = ApexUi::kSpace2 * u;
+    const float controlW = (act == Act::Download ? ApexUi::ButtonWidth(download, true) + gap : act == Act::AddFx ? ApexUi::ButtonWidth(addFx, true) + gap
+                         : act == Act::Spin   ? 12.0f * u + gap : 0.0f) + h; // then the trash
     ImGui::PushID((int)i);
     ApexUi::SetNextRowUntranslated(); // the shader's own name; the description is already translated
     if (act != Act::Spin) ApexUi::SetNextRowWarning();
@@ -1807,12 +2029,47 @@ void MissingRow(size_t i, const Looks::Packs::Batch& batch, std::vector<std::str
         if (act == Act::Download && ApexUi::IconTextButton(download, IconId::Download)) DownloadPacks({ pack->folder });
         else if (act == Act::AddFx && ApexUi::IconTextButton(addFx, IconId::Plus, "Copy .fx, .fxh and texture files into the Shaders folder")) PickFxFiles();
         else if (act == Act::Spin) ApexUi::BusySpinner(true);
+        if (act != Act::None) ImGui::SameLine(0.0f, gap);
+        // a shader that can't run can leave the look too (it stops counting as missing at once)
+        if (ApexUi::IconButton("##Remove", IconId::Trash2, "Remove from the look", false, h / u))
+        {
+            const std::string label = e.technique;
+            RemoveEntry(i, true);
+            ApexUi::ReportChange(I18n::Trf("{} removed", label).c_str());
+            changed = true;
+        }
         ApexUi::EndControlRow();
     }
     ImGui::PopID();
+    return changed;
 }
 
 std::string RowDescription(int shader); // below, with the shader sources
+
+// A shader removed here (runnable or missing): its name over "Removed: leaves the look when you save" in amber, and
+// Restore. It no longer runs; it leaves the file at the next save, or comes back with Restore or the look's Reset.
+bool RemovedRow(size_t i)
+{
+    bool changed = false;
+    const std::string label = g.order[i].technique;
+    const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+    ImGui::PushID(EntryKey(g.order[i]).c_str());
+    ApexUi::SetNextRowUntranslated(); // the shader's own name; the description is translated here
+    ApexUi::SetNextRowWarning();
+    ApexUi::SetNextRowIconColor(VioletTheme::kTextFaint);
+    if (ApexUi::BeginControlRow(label.c_str(), I18n::Tr("Removed: leaves the look when you save"), ApexUi::ButtonWidth(I18n::Tr("Restore"), true), IconId::Trash2))
+    {
+        if (ApexUi::IconTextButton("Restore", IconId::Undo2))
+        {
+            RemoveEntry(i, false);
+            ApexUi::ReportChange(I18n::Trf("{} restored", label).c_str());
+            changed = true;
+        }
+        ApexUi::EndControlRow();
+    }
+    ImGui::PopID();
+    return changed;
+}
 
 // One shader: chevron, name (changed dot) over its description, the switch; the name side opens its values
 bool ShaderRow(size_t i, int pos, int count, bool& reorder)
@@ -1839,8 +2096,7 @@ bool ShaderRow(size_t i, int pos, int count, bool& reorder)
         const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact); // (the values keep their own size)
         const float h = ImGui::GetFrameHeight(), gap = ApexUi::kSpace2 * u;
         const float twinW = doubled ? ApexUi::ButtonWidth(twin.action.c_str(), false) + ApexUi::kSpace3 * u : 0.0f;
-        const bool removable = !InIni(EntryKey(e)); // added here: the .ini's own shaders are only switched off
-        const float trashW = removable ? h + gap : 0.0f;
+        const float trashW = h + gap;
         ApexUi::SetNextRowIconColor(VioletTheme::kTextFaint);
         if (ApexUi::BeginControlRow(label.c_str(), description.c_str(), twinW + trashW + ApexUi::ToggleSwitchSize().x + gap + h, IconId::GripVertical))
         {
@@ -1852,13 +2108,15 @@ bool ShaderRow(size_t i, int pos, int count, bool& reorder)
                 controlsTop = ImGui::GetItemRectMin().y;
                 ImGui::SameLine(0.0f, ApexUi::kSpace3 * u);
             }
-            if (removable)
+            if (ApexUi::IconButton("##Remove", IconId::Trash2, "Remove from the look", false, h / u))
             {
-                if (ApexUi::IconButton("##Remove", IconId::Trash2, "Remove from the list", false, h / u)) g_removeKey = EntryKey(e);
-                if (!doubled) controlsLeft = ImGui::GetItemRectMin().x;
-                controlsTop = std::min(controlsTop, ImGui::GetItemRectMin().y);
-                ImGui::SameLine(0.0f, gap);
+                RemoveEntry(i, true); // only a set changes: this row and the list stay valid for the rest of the frame
+                ApexUi::ReportChange(I18n::Trf("{} removed", label).c_str());
+                changed = true;
             }
+            if (!doubled) controlsLeft = ImGui::GetItemRectMin().x;
+            controlsTop = std::min(controlsTop, ImGui::GetItemRectMin().y);
+            ImGui::SameLine(0.0f, gap);
             bool on = !IsOff(i);
             ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (h - ApexUi::ToggleSwitchSize().y) * 0.5f); // centred on the row's controls line
             if (ApexUi::ToggleSwitch("##On", &on))
@@ -1869,7 +2127,7 @@ bool ShaderRow(size_t i, int pos, int count, bool& reorder)
             }
             ImVec2 switchMin = ImGui::GetItemRectMin();
             controlsTop = std::min(controlsTop, switchMin.y);
-            if (doubled || removable) switchMin.x = controlsLeft; // the name side ends before the buttons
+            switchMin.x = controlsLeft; // the name side ends before the buttons
             ImGui::SameLine(0.0f, gap);
             ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, switchMin.y + (ApexUi::ToggleSwitchSize().y - h) * 0.5f));
             if (ApexUi::IconButton("##Open", open ? IconId::ChevronDown : IconId::ChevronRight, nullptr, false, h / u))
@@ -1884,7 +2142,7 @@ bool ShaderRow(size_t i, int pos, int count, bool& reorder)
             ApexUi::EndControlRow();
             const ImVec2 after = ImGui::GetCursorScreenPos();
             const float bottom = stacked ? controlsTop - ApexUi::kSpace1 * u : after.y - ImGui::GetStyle().ItemSpacing.y;
-            const float gripW = ApexUi::kRowIconBox * u + ApexUi::kSpace3 * u; // the leading icon's box and its gap
+            const float gripW = ApexUi::kRowIconBox * u + ApexUi::kSpace2 * u; // the leading icon's box and part of its gap (clear of the text)
             const float right = stacked ? left + width : switchMin.x - ApexUi::kSpace3 * u;
             if (bottom > top && !ApexUi::FilterActive())
             {
@@ -2797,11 +3055,15 @@ public:
         ApexPatch::SaveToToml(table);
         for (const char* old : { "presetPath", "useTweaks", "protectUi" }) table.erase(old); // keys of older builds
         table.insert_or_assign("preset", g.preset);
-        toml::array off, extra, runOrder;
+        toml::array off, on, removed, extra, runOrder;
         for (auto& t : g.off) off.push_back(t);
+        for (auto& t : g.on) on.push_back(t);
+        for (auto& t : g.removed) removed.push_back(t);
         for (auto& t : g.extra) extra.push_back(t);
         for (auto& t : g.runOrder) runOrder.push_back(t);
         table.insert_or_assign("off", std::move(off));
+        table.insert_or_assign("on", std::move(on));
+        table.insert_or_assign("removed", std::move(removed));
         table.insert_or_assign("extra", std::move(extra));
         table.insert_or_assign("runOrder", std::move(runOrder));
         toml::table tw;
@@ -2838,6 +3100,9 @@ public:
             return true;
         };
         if (table["off"].as_array()) { g.off.clear(); any |= strings("off", [](const std::string& s) { g.off.insert(s); }); }
+        if (table["on"].as_array()) { g.on.clear(); any |= strings("on", [](const std::string& s) { g.on.insert(s); }); }
+        if (table["removed"].as_array()) { g.removed.clear(); any |= strings("removed", [](const std::string& s) { g.removed.insert(Lower(s)); }); }
+        else if (table["off"].as_array()) { g.removed.clear(); g.on.clear(); } // a preset saved by an older build: its list as it was
         if (table["extra"].as_array()) { g.extra.clear(); any |= strings("extra", [](const std::string& s) { g.extra.push_back(s); }); }
         if (table["runOrder"].as_array()) { g.runOrder.clear(); any |= strings("runOrder", [](const std::string& s) { g.runOrder.push_back(s); }); }
         if (const toml::table* t = table["tweaks"].as_table())
@@ -2914,6 +3179,7 @@ public:
             }
         }
         changed |= LookRow();
+        changed |= AskSaveModal();
         if (!g_message.empty() && !ApexUi::FilterActive())
             ApexUi::IconNote(g_messageError ? IconId::TriangleAlert : IconId::Info, g_message.c_str(), g_messageError ? VioletTheme::kError : VioletTheme::kTextMuted);
         else if (!g.preset.empty() && !g.error.empty() && !ApexUi::FilterActive())
@@ -2976,7 +3242,7 @@ public:
         std::vector<size_t> cant;
         int missingFiles = 0;
         for (size_t i = 0; i < g.order.size(); ++i)
-            if (!Runnable(i))
+            if (!Runnable(i) && !IsRemoved(i))
             {
                 cant.push_back(i);
                 { const std::string& f = g.order[i].alt.empty() ? g.order[i].file : g.order[i].alt; missingFiles += !Looks::Fx::HasFile(f) && !Looks::Fx::Pending(f); }
@@ -2998,20 +3264,10 @@ public:
             {
                 {
                     const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
-                    if (ApexUi::ActionMenuItem("Put every value back", IconId::RotateCcw, AnyEdited()))
+                    if (ApexUi::ActionMenuItem("Put back the look as saved", IconId::Undo2, Dirty()))
                     {
-                        g.tweaks.clear();
-                        g.defs.clear();
-                        PushDefines();
-                        ApexUi::ReportChange("Every value put back");
-                        changed = true;
-                        ImGui::CloseCurrentPopup();
-                    }
-                    if (ApexUi::ActionMenuItem("Back to the look's list", IconId::Undo2, !g.off.empty() || !g.extra.empty() || !g.runOrder.empty()))
-                    {
-                        g.off.clear(); g.extra.clear(); g.runOrder.clear();
-                        RebuildOrder();
-                        ApexUi::ReportChange("Back to the look's list");
+                        PutBackAsSaved(); // before the list draws this frame
+                        ApexUi::ReportChange("Look put back as saved");
                         changed = true;
                         ImGui::CloseCurrentPopup();
                     }
@@ -3034,19 +3290,15 @@ public:
             int pos = 0;
             std::vector<std::string> getPacks; // packs a Download of the missing rows would fetch (Download all)
             const Looks::Packs::Batch batch = Looks::Packs::Status();
+            // No row may rebuild g.order while the list draws (rows hold references into it): moves wait for its end,
+            // the trash and Restore only change a set
             for (size_t i = 0; i < g.order.size(); ++i)
             {
-                if (!Runnable(i)) { if (!ApexUi::FilterActive()) MissingRow(i, batch, getPacks); continue; } // in its place
-                changed |= ShaderRow(i, ++pos, total, reorder); // moves and removals wait for the end of the list
+                if (IsRemoved(i)) { if (!ApexUi::FilterActive()) changed |= RemovedRow(i); continue; } // in its place, with Restore
+                if (!Runnable(i)) { if (!ApexUi::FilterActive()) changed |= MissingRow(i, batch, getPacks); continue; } // in its place
+                changed |= ShaderRow(i, ++pos, total, reorder);
             }
             if (g_dragMove.dir) { Move(g_dragMove.i, g_dragMove.dir); g_dragMove = {}; changed = true; }
-            if (!g_removeKey.empty())
-            {
-                if (const std::string technique = RemoveEntry(g_removeKey); !technique.empty()) // the change's note has its Undo
-                    ApexUi::ReportChange(I18n::Trf("{} removed from the list", technique).c_str());
-                g_removeKey.clear();
-                changed = true;
-            }
             if (getPacks.size() >= 2 && !ApexUi::FilterActive())
             {
                 const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
@@ -3064,6 +3316,28 @@ public:
                 const char* save = "Save as a new look\xE2\x80\xA6";
                 SameLineIfFits(ApexUi::ButtonWidth(I18n::Tr(save), true), ApexUi::kSpace2 * ApexUi::Unit(), ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x);
                 if (ApexUi::IconTextButton(save, IconId::Save, "Save this list and its values as a .ini of your own in the Looks folder")) openSave = true;
+                // the changes made here go into the look itself (a look of the Looks folder is written over; an Apex or
+                // GShade look is saved under its name in the Looks folder, where Apex writes)
+                const char* saveTo = "Save to this look";
+                SameLineIfFits(ApexUi::ButtonWidth(I18n::Tr(saveTo), false), ApexUi::kSpace2 * ApexUi::Unit(), ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x);
+                ImGui::BeginDisabled(!Dirty());
+                const bool mine = Looks::RefSource(g.preset) == Looks::Source::Mine;
+                if (ApexUi::TextButton(saveTo, mine ? "Write the changes made here into the look's file"
+                                                    : "Save the look with your changes in the Looks folder (My looks), under the same name",
+                                       ApexUi::ButtonKind::Primary))
+                {
+                    std::string error;
+                    const std::string before = ShownName(g.preset);
+                    if (SaveToLook(error))
+                    {
+                        g_listDirty = true;
+                        g_message = I18n::Trf("Saved to {}", before); // a note, not the undo toast: Undo would not undo the file
+                        g_messageError = false;
+                        changed = true;
+                    }
+                    else { g_message = error; g_messageError = true; }
+                }
+                ImGui::EndDisabled();
             }
         }
         ApexUi::EndCard();
@@ -3394,6 +3668,8 @@ void PacksTab()
 bool WantsPacks() { return std::exchange(g_scrollToPacks, false); }
 
 float PacksBar(float left, float right, float bottomY, bool packsTab) { return PacksBarDraw(left, right, bottomY, packsTab); }
+
+void BeginMenuFrame() { Packs::BeginFrame(); }
 
 float PacksBarHeight() { return g_packsBarH; }
 

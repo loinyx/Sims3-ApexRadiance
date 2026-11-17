@@ -73,10 +73,12 @@ is also on (Color > LUTs), a row "A LUT is on too" with an amber description ("B
 look too strong") and *Turn off the LUT* (undoable) ends the card. In developer mode a *Live counters* disclosure shows
 the status, the last frame's run, skipped shaders, Reload and the GPU memory.
 
-**Shaders in this look** card: "<on> of <total> on" and an ellipsis menu (*Put every value back*, *Back to the look's
-list*, *Open the Shaders folder*, *Check again*: compiles the folder again, then "All shaders found" or "<n> still
-missing" under the list). One row per shader of the run list, in run order: a chevron, the name (changed dot while its
-values differ from the .ini) over one short description, the switch. The name side opens its parameters in a rounded
+**Shaders in this look** card: "<on> of <total> on" and an ellipsis menu (*Put back the look as saved*, *Open the
+Shaders folder*, *Check again*: compiles the folder again, then "All shaders found" or "<n> still missing" under the
+list). One row per shader of the run list, in run order: a chevron, the name (changed dot while its values differ from
+the .ini) over one short description, a trash button, the switch. The trash does not take the row away: it stays in
+place, its description "Removed: leaves the look when you save" in amber, with *Restore*; it stops running at once and
+leaves the file at the next save (`RemovedRow`; only a set changes, so the list is never rebuilt while its rows draw). The name side opens its parameters in a rounded
 panel set into the card, each with the control its .fx asks for and the .ini's value as its default (changed dot, Reset;
 see [Parameters and quality settings](#parameters-and-quality-settings)); the panel's footer, under a line, has the
 bordered buttons Run earlier / Run later, "<pos> of <n>" and *Put back the look's values* (under them when narrow). A
@@ -94,8 +96,20 @@ with *Download* when a pack of ReShade's list has the file (a failed download sa
 Waiting" or "<pack> · Downloading <n>%" with a spinner while it downloads; "<file>.fx · Not in your Shaders folder" with
 *Add .fx files…* for any other missing file; "Checking the file…" with a spinner while it compiles; "<file>.fx · Doesn't
 run in The Sims 3" (no action) for a file that is there but cannot run on Direct3D 9. When two packs or more are
-missing, *Download both* / *Download all* (primary) follows the list. Under it, *Add a shader* and *Save as a new look…*.
-No modal opens on its own.
+missing, *Download both* / *Download all* (primary) follows the list. A missing shader has the trash too. Under the
+list, *Add a shader*, *Save as a new look…* and *Save to this look*. No modal opens on its own.
+
+**Unsaved changes.** Switches, added, removed and moved shaders, values and quality settings live in Apex's settings
+(saved by themselves) as changes on top of the look's file, until saved into it. While there are any, the *Look* row
+shows the changed dot and "Changed here, not saved in the look yet"; its hover Reset (and the ellipsis menu's *Put back
+the look as saved*) drops them, undoable. Picking another look or *Import* first asks "Save your changes to <look>?"
+with the changes listed and *Discard them*, *Cancel*, *Save*. *Save to this look* (Primary, enabled while something
+changed) writes a look of the Looks folder over, keeping the file as it was in `<name>.ini.bak`; an Apex or GShade look
+is saved in the Looks folder under its own name and chosen there, since Apex writes nowhere else (when My looks already
+has that name, the first Save says "saving replaces it" and writes nothing; the next Save replaces it). Nothing is
+written when the look's own file cannot be read at that moment. The result is a note under the Look row ("Saved to
+<look>"), not the undo toast, as Undo would not undo the file. A shader switched off is written listed off: `ApexOff=` (Apex's key,
+ignored by ReShade) names it and `Techniques=` does not, so ReShade does not run it and Apex lists it switched off.
 
 After *Import*, the floating change note reads "Imported as <name>" (with Undo); when packs of ReShade's list have
 shaders the look misses, a note card above the Shaders card reads "Imported: <look>" and "This look uses <n> shaders
@@ -307,6 +321,8 @@ The earlier ports came from GShade's copies, which differ from the authors' code
 | Interface without shaders | `onUi` (inverted) | bool | on (`onUi` false) | | Off: menus, the game's panels and loading screens get the look too |
 | Advanced > Order | `beforeColor` | bool | off (After Apex Color) | | Runs the look before Apex's Color instead of after it |
 | Shader switches | `off` | array of technique names | empty | at most 256 read | The look's shaders switched off here |
+| Shader switches | `on` | array of technique names | empty | at most 256 read | Shaders the file keeps listed off (`ApexOff=`) switched on here |
+| Remove (trash) | `removed` | array of lower-case `tech@file.fx` | empty | at most 256 read | Shaders removed here, listed with Restore until the look is saved |
 | Add a shader | `extra` | array of `Tech@File.fx` | empty | at most 256 read | Shaders added to the look (built-in or from the Shaders folder) |
 | Run earlier / Run later | `runOrder` | array of `Tech@File.fx` | empty (the .ini's order) | at most 256 read | The run order |
 | Shader parameters | `tweaks` | table: technique = 4 floats per parameter | empty | at most 64 shaders, 256 values each | Edited values; a shader back at the .ini's values is dropped |

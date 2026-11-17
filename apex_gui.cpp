@@ -1334,6 +1334,7 @@ bool LookTwin(const std::string& technique, Looks::Twin& out, bool act) {
 }
 
 void ShadersPage() {
+    Looks::BeginMenuFrame(); // also while Shaders is off (no Present hook then): before any card holds a pack
     ApexPatch* patch = Find(Looks::kPatchName);
     const float titleTop = ImGui::GetCursorPosY();
     const float titleLine = ImGui::GetFontSize() * ApexUi::kPageTitleScale;

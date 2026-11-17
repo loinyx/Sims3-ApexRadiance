@@ -2543,8 +2543,22 @@ Unavailable on this graphics card	tr_image.cpp:kEntries	Indisponível nesta plac
 Preset	tr_image.cpp:kEntries	Preset	Preajuste	Préréglage	
 Run earlier	tr_image.cpp:kEntries	Rodar antes	Ejecutar antes	Exécuter plus tôt	
 Run later	tr_image.cpp:kEntries	Rodar depois	Ejecutar después	Exécuter plus tard	
-Remove from the list	tr_image.cpp:kEntries	Remover da lista	Quitar de la lista	Retirer de la liste	
-{} removed from the list	tr_image.cpp:kEntries	{} removido da lista	{} quitado de la lista	{} retiré de la liste	{}
+Remove from the look	tr_image.cpp:kEntries	Remover do visual	Quitar del estilo	Retirer du rendu	
+Removed: leaves the look when you save	tr_image.cpp:kEntries	Removido: sai do visual quando você salvar	Quitado: sale del estilo al guardar	Retiré : quitte le rendu à l'enregistrement	
+Restore	tr_image.cpp:kEntries	Restaurar	Restaurar	Restaurer	
+{} restored	tr_image.cpp:kEntries	{} restaurado	{} restaurado	{} restauré	{}
+Changed here, not saved in the look yet	tr_image.cpp:kEntries	Alterado aqui, ainda não salvo no visual	Cambiado aquí, aún sin guardar en el estilo	Modifié ici, pas encore enregistré dans le rendu	
+Look put back as saved	tr_image.cpp:kEntries	Visual de volta como foi salvo	Estilo devuelto a lo guardado	Rendu remis comme enregistré	
+Put back the look as saved	tr_image.cpp:kEntries	Voltar o visual ao que foi salvo	Volver el estilo a lo guardado	Remettre le rendu comme enregistré	
+Save your changes to {}?	tr_image.cpp:kEntries	Salvar suas mudanças em {}?	¿Guardar tus cambios en {}?	Enregistrer vos modifications dans {} ?	{}
+These changes are only in Apex until you save them to the look	tr_image.cpp:kEntries	Estas mudanças ficam só na Apex até você salvá-las no visual	Estos cambios solo están en Apex hasta que los guardes en el estilo	Ces modifications restent dans Apex tant que vous ne les enregistrez pas dans le rendu	
+Discard them	tr_image.cpp:kEntries	Descartar	Descartarlos	Les abandonner	
+Save in My looks	tr_image.cpp:kEntries	Salvar em Meus visuais	Guardar en Mis estilos	Enregistrer dans Mes rendus	
+Order changed	tr_image.cpp:kEntries	Ordem alterada	Orden cambiado	Ordre modifié	
+Save to this look	tr_image.cpp:kEntries	Salvar neste visual	Guardar en este estilo	Enregistrer dans ce rendu	
+Write the changes made here into the look's file	tr_image.cpp:kEntries	Grava no arquivo do visual as mudanças feitas aqui	Escribe en el archivo del estilo los cambios hechos aquí	Écrit dans le fichier du rendu les modifications faites ici	
+Save the look with your changes in the Looks folder (My looks), under the same name	tr_image.cpp:kEntries	Salva o visual com suas mudanças na pasta Looks (Meus visuais), com o mesmo nome	Guarda el estilo con tus cambios en la carpeta Looks (Mis estilos), con el mismo nombre	Enregistre le rendu avec vos modifications dans le dossier Looks (Mes rendus), sous le même nom	
+Choose a look first	tr_image.cpp:kEntries	Escolha um visual primeiro	Elige un estilo primero	Choisissez d'abord un rendu	
 Kind	tr_image.cpp:kEntries	Tipo	Tipo	Type	
 Only shaders of this kind	tr_image.cpp:kEntries	Só shaders deste tipo	Solo shaders de este tipo	Seulement les shaders de ce type	
 All kinds	tr_image.cpp:kEntries	Todos os tipos	Todos los tipos	Tous les types	
