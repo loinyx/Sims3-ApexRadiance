@@ -18,7 +18,7 @@ Labels: **V-src** (read in source at the named commit), **V-precomp** (parsed), 
 | Highest VS constant the game reads | **`c227`** (SimHorse). The VS file is dense up to `c227`, and 72 techniques address constants relatively (**V-precomp**) |
 | Game writers at runtime | Two device call sites: `Shader_SetFloatConstants 0x79DFE0` (VS and PS; register from the parameter record) and `0x696980` (InstancingEmulation, VS only, `c0` and `c40`, counts computed). No other PS writer (**V-static**) |
 | PS range safe for a once-per-frame block | **`c208`-`c223`** (16 registers), and `c128`-`c199` if more is needed. **Not `c200`-`c223`:** Apex's own terrain patch already uses PS `c200`-`c204` |
-| VS range | **`c228`-`c251`** (24) is never read by a game shader, but relatively addressed palettes keep it **Inferred** until the runtime histogram (§3) confirms it. Apex holds `c252` (jitter) and `c255` (foliage wrap) |
+| VS range | **`c242`-`c251`** (10). The game's parameter tables write vertex registers up to `c241` (pet and ghost fur, §2.5), so the earlier `c228`-`c251` was wrong; the histogram run saw the game write `c228`-`c229` (**V-static**, **V-precomp**, run). Apex holds `c252` (jitter) and `c255` (foliage wrap) |
 
 ## 1. `commandBatchingEnabled` (pinned bridge)
 
@@ -138,11 +138,34 @@ shortly before. `call [r + disp]` forms: 0 in the image.
   (`0xA0000000 | cN`) for that range.
 - `ps_2_0` shaders cannot see a block above `c31`. The frame block serves `ps_3_0` copies only; `ps_2_0` families keep
   per-draw constants in `c21`-`c31` or go through the rig route (`12` §2.3).
-- **VS: `c228`-`c251`** (24 float4) as a candidate, **Inferred** until the runtime histogram shows no relatively
-  addressed write or read past `c227`. `c154`-`c179` is a tempting gap, but it lies inside the reach of the tree and
-  Sim palettes. Do not use it.
+- **VS: `c242`-`c251`** (10 float4; §2.5). `c228`-`c241` belongs to the pet and ghost fur shaders. `c154`-`c179` is a
+  tempting gap, but it lies inside the reach of the tree and Sim palettes. Do not use it.
 - Write the block once per frame with one ranged call. With `client.dropRedundantState`, the bridge skips an
   unchanged block for free, and Reset invalidates its sent-state cache (§1).
+
+### 2.5 The game's parameter tables (correction, after the S0-G2 run)
+
+The first `const-range-smoke` run failed on `VS c0-c229 by TS3W.exe+0x39E152 (game), 2 of its 177920 calls` (16
+calls in the session). `0x79E152` is the return address of the final flush in `Shader_SetFloatConstants`
+(`call [vtbl+0x178]` at `0x79E150`, after the record loop), so the write came from a vertex parameter table.
+
+- **V-static.** The loader (`0x79F05A`, record constructor `0x79D030`) reads a `PARM` table per pass, vertex first, then
+  pixel: count, then per record (name hash, `w1`, `w2`). Type is `(w1 >> 11) & 7`; the record field at `+0x18` holds
+  the start register (bits 8-17) and the count (bits 0-7). The loader sets the shader's register count (`+0x158` VS,
+  `+0x164` PS) to the maximum of start + count over its non-type-2 records, and the setter sizes its staging buffer from
+  it. `ShaderParam_Pack 0x79D620` returns the count or less on every path, and the setter merges a record into the
+  open run only when its start equals the run's end. Every write of `0x79DFE0` therefore lies inside some record's
+  `[start, start + count)`.
+- **V-precomp.** `node research/tools/precomp.cjs <precomp> parm` decodes every table (196,645 passes, none missed):
+  highest register written VS **`c241`**, PS `c24`. Past `c227`: SimPetFur and SimPetFurLowQuality `c241`, GhostFur
+  and GhostFurLowQuality `c241`, SimPetFurOpaque `c233` (records such as `FurTextureDimensions`, `kMaxFurdist`,
+  `curlDeltas`). §2.1 missed them because the pet fur passes carry a longer pass header, so `precomp.cjs` read no shader
+  for them (the `-/-` entries above). `scene_dither.cpp`'s "c241" was right.
+- **Inferred.** The run's 16 calls are a pet drawing with fur; `c229` is the highest register its dirty run reached.
+  The instancing writer `0x696980` (`c0`, `c40`) was not seen in the run.
+- Not covered: shaders a mod loads from outside `Shaders_Win32.precomp`. The histogram still reports any such write.
+
+Result: the vertex reserved range moves to `c242`-`c251`. The motion-vector rows of `14` (`c248`-`c251`) stay inside it.
 
 ## 3. Smoke job that settles the open items (recommended instead of the batching run)
 

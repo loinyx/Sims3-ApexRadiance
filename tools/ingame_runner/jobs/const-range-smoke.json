@@ -1,6 +1,6 @@
 {
   "id": "const-range-smoke",
-  "description": "Shader constant registers the game writes (real-time GI S0-14 histogram, developer mode): a night pan over 8 lots at 40 m, a short stay in live mode, one Create a Sim visit for the Sim palettes, live mode again; about 8 minutes. Nothing is changed or saved; the histogram only counts. Pass: the [ConstRange] summary line is logged and no module other than Apex writes pixel c208-c223 or vertex c228-c251 (no 'Reserved register written' line). The highest register per owner is in the summary line and in the frame profiler report (ApexRadiance_Hitches.txt, every 60 s).",
+  "description": "Shader constant registers the game writes (real-time GI S0-14 histogram, developer mode): a night pan over 8 lots at 40 m, a short stay in live mode, one Create a Sim visit for the Sim palettes, live mode again; about 8 minutes. Nothing is changed or saved; the histogram only counts. Pass: the [ConstRange] summary line is logged and no module other than Apex writes pixel c208-c223 or vertex c242-c251 (the game's pet and ghost fur write up to vertex c241) (no 'Reserved register written' line). The highest register per owner is in the summary line and in the frame profiler report (ApexRadiance_Hitches.txt, every 60 s).",
   "save": "ApexTest-Night",
   "toml": {
     "ui": {
