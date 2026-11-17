@@ -8,6 +8,7 @@
 // S1-02 adds the lamp snapshot: every light of the world, read on the render thread (below). The solve cap and the light
 // buffers come with the later packages.
 #include "gpu_lamp_law.h"
+#include <d3d9.h>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -40,7 +41,7 @@ struct Options {
     int lots = 0;     // 0 active, 1 activeAndNeighbours, 2 all
     int solveCap = 0; // 0 off, 1 class0, 2 hold
     int scale = 1;    // bufferScale: 1, 2 or 4
-    int indirect = 0; // 0 off, 1 bounce1, 2 multiBounce
+    int indirect = 0; // 0 off, 1 atlas (the lighting reads the irradiance atlas where ready), 2 atlasDebug (the atlas alone; developer mode)
     Backend backend = Backend::Auto;
     bool debugLampTable = false; // developer mode: dump the snapshot against the game's fields after each change
     bool debugFakeSolve = false; // developer mode: the layer update scheduler (gi_sched.h, S2-01) on its fake back end
@@ -57,6 +58,7 @@ enum class Counter : int {
     ReadFaults,        // SEH faults in the light enumeration or a lamp read (must be 0)
     LampTableDiffs,    // debugLampTable differences against the game's fields and Apex's lamp table (must be 0)
     LampChanges,       // lamp change events committed
+    IndirectDraws,     // (S2-05) room-lit draws that read the GI grid
     Count
 };
 void Add(Counter c, uint32_t n = 1); // any thread
@@ -96,6 +98,17 @@ const std::vector<Lamp>& Lamps();
 uint32_t LampSerial();
 const std::vector<Change>& Changes();
 int GiLots();
+
+// ---- the lighting reading the irradiance atlas (S2-05, gi_indirect.h) ----
+// Render thread, a room-lit floor draw with the patched copy (ShaderPatches::PatchRoomMapGi): the GI grid to bind and the copy's
+// two constant rows for the game's map `map` bound to the draw (a relit copy: its game map). False (draw the copy without it):
+// indirect off, nothing composed yet, or not a floor or ceiling map of the GI lot's stories. night: 0 day .. 1 night (the
+// share of the game's ambient the ready atlas replaces; by day the atlas adds to it).
+struct IndirectBind {
+    IDirect3DTexture9* grid = nullptr;
+    float uv[4] = {}, k[4] = {};
+};
+bool IndirectFor(const void* map, float night, IndirectBind& out);
 
 bool Start(const Options& options, std::string* error); // render thread or pump thread; the start line follows in a world
 void Stop();

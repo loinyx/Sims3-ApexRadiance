@@ -4863,4 +4863,63 @@ bool ProbeCopy(const std::vector<DWORD>& t, int k, std::vector<DWORD>& out, std:
     }
     return false;
 }
+bool PatchRoomMapGi(std::vector<DWORD>& t, RoomMapGiPatch& out) {
+    out = RoomMapGiPatch{};
+    if (t.empty() || t[0] != 0xFFFF0300) return false;
+    const auto ins = Parse(t);
+    if (ins.empty()) return false;
+    const auto slotsOf = [&](const std::vector<Ins>& v) {
+        int n = 0;
+        for (const Ins& y : v) n += y.op != kDcl && y.op != kDef && y.op != kDefI && y.op != kDefB ? 1 : 0;
+        return n;
+    };
+    int at = -1, found = 0;
+    for (size_t i = 0; i < ins.size(); i++) {
+        const Ins& y = ins[i];
+        if (at < 0 && found == 0 && IsFlow(y.op)) return false; // (the read must not sit in flow control: texld's gradients)
+        if (y.op != kMad || y.len != 4) continue;
+        const DWORD d = t[y.at + 1], a = t[y.at + 2], c = t[y.at + 3], b = t[y.at + 4];
+        if (Type(d) != kTemp || WMask(d) != 0x7 || Type(a) != kTemp || Swz(a) != kSwzW || (a & 0x0F000000u) || Type(c) != kConst || Type(b) != kTemp ||
+            Num(b) != Num(a) || (b & 0x0F000000u))
+            continue;
+        bool defined = false;
+        for (const Ins& z : ins) defined |= z.op == kDef && IsReg(t[z.at + 1], kConst, Num(c));
+        if (defined) continue;
+        if (found++ == 0) at = static_cast<int>(i);
+    }
+    if (found != 1) return false;
+    const Usage u = Scan(t, ins);
+    if (u.maxTemp + 1 >= 32 || u.maxSampler + 1 >= 16 || !u.afterLastSamplerDcl || u.maxConst >= static_cast<int>(kGiUvConst)) return false;
+    std::vector<DWORD> copy = t;
+    std::vector<Edit> edits;
+    DWORD lotIn = 0;
+    if (!InputFor(copy, ins, 4, edits, lotIn)) return false;
+    const DWORD G = static_cast<DWORD>(u.maxTemp + 1), sG = static_cast<DWORD>(u.maxSampler + 1);
+    const Ins& m = ins[static_cast<size_t>(at)];
+    const DWORD L = Num(copy[m.at + 2]);
+    const DWORD X = Sw(0, 0, 0, 0), Y = Sw(1, 1, 1, 1), Z = Sw(2, 2, 2, 2), W = Sw(3, 3, 3, 3);
+    const std::vector<DWORD> code = {
+        Op(kMad, 4), Dst(kTemp, G, 0x3), Src(kInput, lotIn, Sw(0, 1, 0, 1)), Src(kConst, kGiUvConst, Sw(0, 1, 0, 1)), Src(kConst, kGiUvConst, Sw(2, 3, 2, 3)),
+        Op(kTexld, 3), Dst(kTemp, G), Src(kTemp, G), Src(kSampler, sG),                                  // (irradiance, ready)
+        Op(kMul, 3), Dst(kTemp, G, 0x7), Src(kTemp, G), Src(kTemp, G, W),
+        Op(kMul, 3), Dst(kTemp, G, 0x7), Src(kTemp, G), Src(kConst, kGiKConst, X),                     // G a k.x
+        Op(kMad, 4), Dst(kTemp, G, 0x8), Neg(Src(kTemp, G, W)), Src(kConst, kGiKConst, W), Src(kConst, kGiKConst, Z),
+        Op(kMul, 3), Dst(kTemp, G, 0x8), Src(kTemp, G, W), Src(kTemp, L, W),                           // alpha'
+        Op(kMad, 4), Dst(kTemp, G, 0x7), Src(kTemp, L), Src(kConst, kGiKConst, Y), Src(kTemp, G),       // rgb'
+    };
+    (void)Y;
+    copy[m.at + 2] = (copy[m.at + 2] & ~0x7FFu) | G; // the game's mad reads G for rL (its swizzles kept)
+    copy[m.at + 4] = (copy[m.at + 4] & ~0x7FFu) | G;
+    edits.push_back({m.at, code});
+    edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, sG)}});
+    Apply(copy, std::move(edits));
+    const auto after = Parse(copy);
+    if (after.empty()) return false;
+    out.sampler = static_cast<int>(sG);
+    out.slots = slotsOf(after);
+    out.added = out.slots - slotsOf(ins);
+    out.temps = static_cast<int>(G) + 1;
+    t = std::move(copy);
+    return true;
+}
 } // namespace ShaderPatches

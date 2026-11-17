@@ -1,0 +1,80 @@
+{
+  "id": "gi-indirect-smoke",
+  "description": "Real-time GI indirect light (S2-05) on the server back end: real-time GI on with serverRays in both loads, indirect off against atlas, the game paused at the art museum's door at night, F8 after the layers landed. The atlas load must log counters with ready grid texels and draws of the floor copies that read the grid, and no read fault; the off load must draw none. Run with -AB and compare the captures folders.",
+  "save": "ApexTest-Night",
+  "toml": {
+    "ui": {
+      "developer_mode": true,
+      "screenshot_key": "F8"
+    },
+    "screen": {
+      "background_fps_limit": 0
+    }
+  },
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.RealtimeGI": {
+          "enabled": true,
+          "backend": "serverRays",
+          "indirect": "off"
+        }
+      },
+      "expect": [
+        "\\[RealtimeGI\\] On: lots=\\d+ cap=(off|class0|hold) scale=[124] indirect=off backend=serverRays"
+      ],
+      "fail": [
+        "\\[RealtimeGI\\] On: lots=\\d+ cap=(off|class0|hold) scale=[124] indirect=atlas backend=serverRays",
+        "\\[RealtimeGI\\] Counters: .*indirectDraws=[1-9]"
+      ]
+    },
+    "on": {
+      "toml": {
+        "patches.RealtimeGI": {
+          "enabled": true,
+          "backend": "serverRays",
+          "indirect": "atlas"
+        }
+      },
+      "expect": [
+        "\\[RealtimeGI\\] On: lots=\\d+ cap=(off|class0|hold) scale=[124] indirect=atlas backend=serverRays",
+        "\\[RealtimeGI\\] Counters: .*indirect=atlas atlasReady=[1-9]\\d* gridTexels=[1-9]\\d* indirectDraws=[1-9]\\d*"
+      ]
+    }
+  },
+  "fail": [
+    "\\[RealtimeGI\\] Counters: .*readFaults=[1-9]",
+    "\\[RealtimeGI\\] .*(did not start|Verification mismatch)"
+  ],
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kArtGallery",
+      "radius": 9,
+      "height": 2.5,
+      "seconds": 3600,
+      "turns": 0.001,
+      "face": "door"
+    },
+    {
+      "do": "speed",
+      "speed": "pause"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.75
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.25
+    }
+  ]
+}
