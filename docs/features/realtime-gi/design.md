@@ -96,7 +96,10 @@ upsample is bilinear and wall-aware (it does not blend across a wall face). Tile
 16 lamps x 64 x 320 texels of RGBA16F is 2.5 MB of server VRAM.
 
 Updates run from a dirty queue of (lamp, story) pairs sorted by distance to the camera target, with a hard cap a
-frame. Every update is a complete solve of its texels, so nothing accumulates noise on screen [12 §4.1c].
+frame. Every update is a complete solve of its texels, so nothing accumulates noise on screen [12 §4.1c]. Re-bake
+cost against lamp count, the touch box that picks the dirty lamps of an edit, the budgets a back end and the
+scheduler rules: [wp/X-REBAKE.md](wp/X-REBAKE.md) (a layer touches about 74-124 texels on any lot size; a server
+layer is milliseconds, the CPU reference's is 0.1-0.6 s).
 
 ### 3.4 Direct light
 

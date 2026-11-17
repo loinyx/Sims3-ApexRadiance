@@ -68,7 +68,7 @@ struct Scene {
     std::vector<Texel> texels;
     std::vector<int32_t> map;
     std::vector<Lamp> lamps;
-    int stories = 2, density = 4;
+    int stories = 2, density = 4, lot = kLot + 8; // lot: tiles a side of the map (solve.comp lotSize)
 };
 enum { kOut = 0, kRoomA = 1, kRoomC = 2, kRoomB = 3, kRoomUp = 4 };
 const char* const kRoomName[] = {"outside", "A (lamp, window, boxes)", "C (door to A)", "B (closed)", "upstairs (closed)"};
@@ -382,11 +382,14 @@ struct Result {
     std::vector<uint32_t> links;
     std::vector<float> direct, ind; // lamps x texels x 4
     std::vector<int> bounces;
+    double accelSec = 0, linkSec = 0, directSec = 0, bounceSec = 0, batchSec = 0; // wall time of the passes (submit + wait a dispatch)
 };
 constexpr uint32_t kShadowRays = 16, kMaxBounces = 64;
 constexpr float kSettled = 0.1f / 255.0f; // a layer is settled when no texel moved more than this in a bounce
 
-Result Solve(const Gpu& g, bool rays, const Scene& sc, uint32_t nRays, bool print) {
+// batchBounces > 0: afterwards, every lamp's direct pass and that many bounces again in one submission (batchSec: the
+// layers' GPU time without a submit and a wait a dispatch)
+Result Solve(const Gpu& g, bool rays, const Scene& sc, uint32_t nRays, bool print, int batchBounces = 0) {
     Trash trash;
     const RtLampProxy::Mesh& m = sc.mesh;
     const uint32_t T = static_cast<uint32_t>(sc.texels.size()), L = static_cast<uint32_t>(sc.lamps.size()), nTris = static_cast<uint32_t>(m.tris.size());
@@ -472,7 +475,7 @@ Result Solve(const Gpu& g, bool rays, const Scene& sc, uint32_t nRays, bool prin
     });
 
     Push pc{};
-    pc.texels = T, pc.rays = nRays, pc.shadowRays = kShadowRays, pc.stories = static_cast<uint32_t>(sc.stories), pc.lotSize = kLot + 8;
+    pc.texels = T, pc.rays = nRays, pc.shadowRays = kShadowRays, pc.stories = static_cast<uint32_t>(sc.stories), pc.lotSize = static_cast<uint32_t>(sc.lot);
     pc.density = static_cast<uint32_t>(sc.density), pc.lamps = L, pc.gx0 = m.gx0, pc.gz0 = m.gz0, pc.gw = m.gw, pc.gh = m.gh;
     const auto pass = [&](VkPipeline p, uint32_t groupsY) {
         return Run(g, [&](VkCommandBuffer cb) {
@@ -518,6 +521,26 @@ Result Solve(const Gpu& g, bool rays, const Scene& sc, uint32_t nRays, bool prin
     res.links.assign(static_cast<const uint32_t*>(back.p), static_cast<const uint32_t*>(back.p) + static_cast<size_t>(T) * nRays);
     read(bufs[6], 0, L * layer, 0);
     res.direct.assign(ind, ind + static_cast<size_t>(L) * T * 4);
+    res.accelSec = accelSec, res.linkSec = linkSec, res.directSec = directSec, res.bounceSec = bounceSec;
+    for (uint32_t l0 = 0; batchBounces > 0 && l0 < L; l0 += 8) // 8 lamps a submission: far from the driver's watchdog
+        res.batchSec += Run(g, [&](VkCommandBuffer cb) {
+            VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+            mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT, mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+            vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &set, 0, nullptr);
+            for (uint32_t l = l0; l < std::min(L, l0 + 8); l++) {
+                const Lamp& lamp = sc.lamps[l];
+                std::memcpy(pc.lampPos, lamp.pos, 12), pc.lampPos[3] = lamp.radius;
+                std::memcpy(pc.lampCol, lamp.col, 12);
+                pc.lamp = l, pc.src = 0;
+                for (int b = -1; b < batchBounces; b++) {
+                    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, b < 0 ? pDirect : pBounce);
+                    vkCmdPushConstants(cb, layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, &pc);
+                    vkCmdDispatch(cb, (T + 63) / 64, 1, 1);
+                    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr);
+                    if (b >= 0) pc.src ^= 1u;
+                }
+            }
+        });
     if (print) {
         const double linkRays = static_cast<double>(T) * nRays;
         std::printf("  links: %.2f M rays in %.1f ms = %.0f M rays a second", linkRays / 1e6, linkSec * 1e3, linkRays / linkSec / 1e6);
