@@ -11,7 +11,8 @@
 // layer, 0 where it still waits (the copy then keeps the game's ambient) and 0 in texels no texel fills.
 // The patched floor shader reads it bilinearly at the pixel's lot position (the floor vertex shader's TEXCOORD4: lot / 64 +
 // (1/1024, 1/512), the same input the arch copies read), so the light is continuous between texels.
-// Walls (no lot position reaches their pixel shader) and diagonal surfaces have no consumer yet.
+// Walls (S2-06): no lot position reaches their pixel shader, so a vertex shader copy computes the grid uv of a wall region
+// (WallUvCpu) and hands it over in TEXCOORD7. Diagonal surfaces have no consumer yet.
 #include "gi_scene.h"
 #include <algorithm>
 #include <cmath>
@@ -37,6 +38,11 @@ struct Grid {
     uint32_t w = 0, h = 0, layerRows = 0;     // layerRows: the lot's z cells (each layer, then one empty row)
     std::map<std::pair<int, int>, uint32_t> rows; // (story, kind) -> the layer's first row
     std::vector<Point> points;
+    // walls (S2-06): a region right of the layers from column wallX0, 5 blocks of wallA + 1 columns (+x, +z, -x, -z facing,
+    // block 4 empty: caps and diagonals), each a stack of slices (wall line li = round(line coord)) of wallY + 1 rows from
+    // height wallYO. wallA = 0: no walls
+    uint32_t wallX0 = 0, wallA = 0, wallY = 0;
+    float wallYO = 0.0f;
     bool Empty() const { return points.empty(); }
 };
 
@@ -58,12 +64,29 @@ inline bool Build(const GiScene::Built& b, int d, int lotW, int lotH, Grid& out)
         uint64_t tile;
     };
     std::vector<Cell> cells;
-    int maxX = 0, maxZ = 0;
+    struct WallCell {
+        int block, li, ga;
+        float y;
+        uint32_t atlas;
+        uint64_t tile;
+    };
+    std::vector<WallCell> walls;
+    int maxX = 0, maxZ = 0, maxLi = 0;
+    float minY = 1e30f;
     for (const auto& [key, slot] : b.slots) {
         float p[3];
         int code;
         DecodeKey(key, p, code);
-        if (code != 8 && code != 9) continue; // (walls: no consumer)
+        if (code < 8 && !(code & 1)) { // an axis-aligned wall texel (diagonals: no consumer)
+            const bool xFacing = code == 0 || code == 4;
+            const int li = static_cast<int>(std::floor((xFacing ? p[0] : p[2]) + 0.5f)), ga = static_cast<int>(std::floor((xFacing ? p[2] : p[0]) * out.d));
+            if (li < 0 || ga < 0) continue;
+            maxLi = std::max(maxLi, li), minY = std::min(minY, p[1]);
+            walls.push_back({code / 2, li, ga, p[1], slot.pixel,
+                             GiSched::TileKey(slot.story, static_cast<int>(std::floor(slot.world[0])), static_cast<int>(std::floor(slot.world[2])))});
+            continue;
+        }
+        if (code != 8 && code != 9) continue;
         const int gx = static_cast<int>(std::floor(p[0] * out.d)), gz = static_cast<int>(std::floor(p[2] * out.d));
         if (gx < 0 || gz < 0) continue;
         maxX = std::max(maxX, gx), maxZ = std::max(maxZ, gz);
@@ -76,9 +99,23 @@ inline bool Build(const GiScene::Built& b, int d, int lotW, int lotH, Grid& out)
     uint32_t row = 0;
     for (auto& [k, r] : out.rows) r = row, row += out.layerRows + 1;
     out.h = row;
+    // walls: rows gy = floor((y - yO) d), yO half a texel under the lowest wall texel (lines whose base x d is not whole
+    // read off-centre); one empty column after the layers and after each block, one empty row after each slice
+    std::vector<WallCell> kept;
+    if (!walls.empty()) {
+        out.wallX0 = out.w + 1, out.wallA = static_cast<uint32_t>(std::max(lotW, lotH) * out.d), out.wallYO = minY - 0.5f / out.d;
+        for (const WallCell& c : walls)
+            if (c.ga < static_cast<int>(out.wallA)) kept.push_back(c), out.wallY = std::max(out.wallY, static_cast<uint32_t>(std::floor((c.y - out.wallYO) * out.d)) + 1);
+        out.w = out.wallX0 + 5 * (out.wallA + 1), out.h = std::max(out.h, static_cast<uint32_t>(maxLi + 1) * (out.wallY + 1));
+    }
     if (out.w > 4096 || out.h > 4096) return out = Grid{}, false;
-    out.points.reserve(cells.size());
+    out.points.reserve(cells.size() + kept.size());
     for (const Cell& c : cells) out.points.push_back({(out.rows[{c.story, c.kind}] + static_cast<uint32_t>(c.gz)) * out.w + static_cast<uint32_t>(c.gx), c.atlas, c.tile});
+    for (const WallCell& c : kept) {
+        const uint32_t x = out.wallX0 + static_cast<uint32_t>(c.block) * (out.wallA + 1) + static_cast<uint32_t>(c.ga),
+                       y = static_cast<uint32_t>(c.li) * (out.wallY + 1) + static_cast<uint32_t>(std::floor((c.y - out.wallYO) * out.d));
+        out.points.push_back({y * out.w + x, c.atlas, c.tile});
+    }
     return true;
 }
 
@@ -103,13 +140,39 @@ inline void FillCpu(const Grid& g, const std::vector<float>& atlas, const std::v
     }
 }
 
+inline bool SampleUv(const Grid& g, const std::vector<float>& grid, float u, float v, float out[4]);
 // What the patched shader reads at a lot position (x, z) of that story and kind: the grid's bilinear read (clamped) at
 // UvRow's uv. False: no such layer
 inline bool SampleCpu(const Grid& g, const std::vector<float>& grid, int story, int kind, float lotX, float lotZ, float out[4]) {
     float c[4];
     if (!UvRow(g, story, kind, c)) return false;
     const float tx = (lotX + 1.0f / 16.0f) / 64.0f, tz = (lotZ + 1.0f / 8.0f) / 64.0f; // (the vertex shader's packing)
-    const float u = tx * c[0] + c[2], v = tz * c[1] + c[3];
+    return SampleUv(g, grid, tx * c[0] + c[2], tz * c[1] + c[3], out);
+}
+
+// The wall vertex shader copy's rows (S2-06): r0 = (d / W, d / H, (A + 1) / W, (Y + 1) / H), r1 = (x0 / W, -yO d / H, 0, 0).
+// False: no walls
+inline bool WallRows(const Grid& g, float r0[4], float r1[4]) {
+    if (!g.wallA || !g.w || !g.h) return false;
+    const float d = static_cast<float>(g.d), w = static_cast<float>(g.w), h = static_cast<float>(g.h);
+    r0[0] = d / w, r0[1] = d / h, r0[2] = static_cast<float>(g.wallA + 1) / w, r0[3] = static_cast<float>(g.wallY + 1) / h;
+    r1[0] = static_cast<float>(g.wallX0) / w, r1[1] = -g.wallYO * d / h, r1[2] = r1[3] = 0.0f;
+    return true;
+}
+// The uv the wall vertex shader copy gives a wall point (lot position p, lot normal n), as it computes it: the x or z facing
+// (s) picks the line and along coordinates; the block by facing, 4 (empty) for caps and diagonals.
+inline bool WallUvCpu(const Grid& g, const float p[3], const float n[3], float uv[2]) {
+    float r0[4], r1[4];
+    if (!WallRows(g, r0, r1)) return false;
+    const bool s = std::fabs(n[0]) >= std::fabs(n[2]);
+    const float line = s ? p[0] : p[2], along = s ? p[2] : p[0], facing = s ? n[0] : n[2];
+    const float block = std::max(std::min(std::fabs(n[0]), std::fabs(n[2])), std::fabs(n[1])) > 0.3f ? 4.0f : (s ? 0.0f : 1.0f) + (facing < 0 ? 2.0f : 0.0f);
+    uv[0] = along * r0[0] + block * r0[2] + r1[0], uv[1] = std::floor(line + 0.5f) * r0[3] + p[1] * r0[1] + r1[1];
+    return true;
+}
+
+// The grid's bilinear read (clamped) at uv
+inline bool SampleUv(const Grid& g, const std::vector<float>& grid, float u, float v, float out[4]) {
     const float fx = u * g.w - 0.5f, fy = v * g.h - 0.5f;
     const int x0 = static_cast<int>(std::floor(fx)), y0 = static_cast<int>(std::floor(fy));
     const float ax = fx - x0, ay = fy - y0;

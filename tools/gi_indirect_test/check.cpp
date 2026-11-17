@@ -101,6 +101,35 @@ void GridChecks() {
                     floors, ceilings, exact, worst, s.grid.rows.size(), s.grid.w, s.grid.h);
         Check(floors > 0 && ceilings > 0 && exact == floors + ceilings && total == exact, "every floor and ceiling texel's value at its world place");
         Check(s.grid.rows.size() == 4, "two stories x floor and ceiling layers");
+        // walls (S2-06): every axis-aligned wall texel reads back at its place through the wall vertex shader's uv
+        size_t walls = 0, wallExact = 0;
+        float wallWorst = 0.0f;
+        for (const auto& [key, slot] : s.built.slots) {
+            float p[3];
+            int code;
+            GiIndirect::DecodeKey(key, p, code);
+            if (code >= 8 || (code & 1)) continue;
+            walls++;
+            float lp[3], uv[2], g[4];
+            RtLampProxy::ToLot(s.lot, slot.world, lp);
+            const float n[3] = {code == 0 ? 1.0f : code == 4 ? -1.0f : 0.0f, 0.0f, code == 2 ? 1.0f : code == 6 ? -1.0f : 0.0f};
+            if (!GiIndirect::WallUvCpu(s.grid, lp, n, uv) || !GiIndirect::SampleUv(s.grid, s.cpuGrid, uv[0], uv[1], g)) continue;
+            float d = std::fabs(g[3] - 1.0f);
+            for (int c = 0; c < 3; c++) d = std::max(d, std::fabs(g[c] - AtlasValue(slot.pixel, c)));
+            wallWorst = std::max(wallWorst, d);
+            wallExact += d < 1e-4f;
+        }
+        std::printf("  walls (%s lot): %zu wall texels, %zu read back at their place, worst %.6f, region from column %u, %u along x %u high\n",
+                    rotated ? "rotated" : "plain", walls, wallExact, wallWorst, s.grid.wallX0, s.grid.wallA, s.grid.wallY);
+        Check(walls > 0 && wallExact == walls, "every axis-aligned wall texel's value at its place");
+        // caps and diagonal facings read the empty block
+        const float cap[3] = {0, 1, 0}, diag[3] = {0.7071f, 0, 0.7071f}, at[3] = {2.0f, 1.25f, 1.05f};
+        bool empty = true;
+        for (const float* n : {cap, diag}) {
+            float uv[2], g[4];
+            empty = empty && GiIndirect::WallUvCpu(s.grid, at, n, uv) && GiIndirect::SampleUv(s.grid, s.cpuGrid, uv[0], uv[1], g) && g[3] < 1e-6f && g[0] < 1e-6f;
+        }
+        Check(empty, "caps and diagonal facings read nothing");
     }
     // half way between two neighbouring floor texels of story 0 (x = 2.25 and 2.75 m at z = 1.25): their mean
     Scene s = MakeScene(false);
