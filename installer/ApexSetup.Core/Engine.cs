@@ -38,9 +38,51 @@ public sealed class Manifest
     public static Manifest Load(string bin)
     {
         var p = System.IO.Path.Combine(DirOf(bin), "setup.json");
-        var m = File.Exists(p) ? JsonSerializer.Deserialize(File.ReadAllText(p), SetupJson.Default.Manifest) ?? new() : new();
+        Manifest m;
+        try { m = File.Exists(p) ? JsonSerializer.Deserialize(File.ReadAllText(p), SetupJson.Default.Manifest) ?? new() : new(); }
+        catch (JsonException e)
+        {
+            // a damaged setup.json (a crash mid-write before Setup 1.2.4): kept aside as setup.json.corrupt (not in a dry run), and
+            // a record rebuilt from the backups so removing still puts the player's files back
+            Engine.Log(new InvalidDataException("setup.json could not be read; kept as setup.json.corrupt", e));
+            if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") != "1")
+                try { File.Move(p, p + ".corrupt", true); } catch (Exception x) when (x is IOException or UnauthorizedAccessException) { }
+            m = Rebuilt(bin);
+            // saved at once (not in a dry run): the next load reads it, and the backups stay linked
+            if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") != "1")
+            {
+                m.Bin = bin;
+                try { m.Save(); } catch (Exception x) when (x is IOException or UnauthorizedAccessException) { Engine.Log(x); }
+            }
+        }
+        // (a damaged setup.json set aside with nothing saved since, as in a dry run: rebuilt again)
+        if (!File.Exists(p) && File.Exists(p + ".corrupt") && m.Files.Count == 0) m = Rebuilt(bin);
         m.Bin = bin;
         m.MoveTo(bin);
+        return m;
+    }
+
+    // The record a damaged setup.json lost, from the backup folder: each "<path with _ for \>.bak" belongs to the file at that
+    // path, for the component that installs that name (d3d9.dll: the bridge when Game\Bin\.trex is there, else DXVK);
+    // Options.ini.bak is the copy of Options.ini. A backup no component installs stays in the folder, unmatched.
+    public static Manifest Rebuilt(string bin)
+    {
+        var m = new Manifest();
+        var dir = DirOf(bin);
+        if (!Directory.Exists(dir)) return m;
+        foreach (var bak in Directory.EnumerateFiles(dir, "*.bak"))
+        {
+            var name = System.IO.Path.GetFileName(bak)[..^4];
+            if (name.Equals("Options.ini", StringComparison.OrdinalIgnoreCase)) { m.OptionsBackup = bak; continue; }
+            var rel = name.Replace('_', '\\');
+            if (!File.Exists(System.IO.Path.Combine(bin, rel))) rel = name;
+            var c = rel.Equals("d3d9.dll", StringComparison.OrdinalIgnoreCase)
+                ? (Directory.Exists(System.IO.Path.Combine(bin, ".trex")) ? Components.Bridge : Components.Dxvk)
+                : Engine.Known.FirstOrDefault(k => k.Value.Contains(rel, StringComparer.OrdinalIgnoreCase)).Key;
+            if (c is null) continue;
+            m.Files.Add(new ManifestFile { Component = c, Path = System.IO.Path.Combine(bin, rel), Backup = bak });
+            m.Versions.TryAdd(c, "?");
+        }
         return m;
     }
 
@@ -82,7 +124,7 @@ public sealed class GitHubSource : ISource
     Task<Release> Latest(string repo, CancellationToken ct) =>
         _rel.TryGetValue(repo, out var t) ? t : _rel[repo] = Shown?.GetValueOrDefault(repo) is { } r ? Task.FromResult(r) : Releases.LatestAsync(repo, ct);
 
-    public static readonly string TempRoot = Path.Combine(Path.GetTempPath(), "ApexRadianceSetup");
+    public static readonly string TempRoot =Path.Combine(Path.GetTempPath(), "ApexRadianceSetup");
 
     // The release's *-Manual-install.zip, downloaded and unzipped once per run, or null when the release has none
     readonly Dictionary<string, string?> _manual = new();
@@ -164,8 +206,9 @@ public sealed class GitHubSource : ISource
             case Components.Loader:
             {
                 var r = await Latest(Releases.AsiLoader, ct);
-                var dir = Releases.Unzip(await Releases.DownloadAsync(r.Find(n => n == "Ultimate-ASI-Loader-NoPDB.zip"), _tmp, ct));
-                files.Add((Path.Combine(dir, "dinput8.dll"), Path.Combine(bin, "wininet.dll"))); // the 32-bit loader, named as the mods' guides say
+                // the latest release's 32-bit build without PDB, by its name's pattern (Ultimate-ASI-Loader-NoPDB.zip so far)
+                var dir = Releases.Unzip(await Releases.DownloadAsync(r.Find(Engine.LoaderZip), _tmp, ct));
+                files.Add((Engine.LoaderDll(dir), Path.Combine(bin, "wininet.dll"))); // the 32-bit loader, named as the mods' guides say
                 return (files, r.Version);
             }
             case Components.S3ss:
@@ -234,7 +277,7 @@ public static class Engine
         r.Assets.Any(a => a.Name.StartsWith(ModernizationPrefix(e)) && a.Name.EndsWith(".zip")) && r.Assets.Any(a => a.Name == "ts3fixes.package");
 
     // Files a component may own although Setup did not install them (installed by hand): removed by Remove, never restored.
-    static readonly Dictionary<string, string[]> Known = new()
+    internal static readonly Dictionary<string, string[]> Known = new()
     {
         [Components.Apex] = new[] { "ApexRadiance.asi", "ts3wrap.exe" },
         [Components.Bridge] = new[] { "d3d9.dll", "bridge.conf", "dxvk.conf", @".trex\bridge.conf", @".trex\NvRemixBridge.exe", @".trex\d3d9vk_x64.dll", "Apex Radiance RTX Remix bridge.txt" },
@@ -254,11 +297,143 @@ public static class Engine
     static readonly HashSet<string> Updates = new(StringComparer.OrdinalIgnoreCase)
         { "ApexRadiance.asi", "ts3wrap.exe", "Sims3SettingsSetter.asi", "ts3native.asi", "ts3fixes.package", "Sims3Performance.asi", "MonoPatcher.asi" };
 
+    // Checked before any download: what would stop the change (Blocks) and what it will do to the player's own files. Each is
+    // an English key with {n} arguments and one action. A change that downloads nothing (a removal, the settings fixes) needs
+    // no free space and no note about Documents.
+    public sealed record Check(string Key, string[] Args, bool Blocks);
+    public static Func<string, long> FreeBytes = dir => new DriveInfo(Path.GetPathRoot(Path.GetFullPath(dir))!).AvailableFreeSpace;
+    public const string CloseGameText = "Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe), then try again.";
+    public const string CannotWriteText = "Setup cannot write to {0}. If Windows Security's Controlled folder access is on, allow ApexRadianceSetup.exe there; or move the game out of a protected folder.";
+    public static List<Check> Preflight(Game g, State s, string? docs, long downloadBytes, bool replacesD3d9, bool downloads = true)
+    {
+        var l = new List<Check>();
+        if (Games.IsRunning()) l.Add(new(CloseGameText, [], true));
+        // Setup always runs elevated: what refuses a write is Controlled folder access (Documents by default) or a protected
+        // folder. The probe writes nothing in a dry run.
+        if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") != "1")
+            foreach (var dir in new[] { g.Bin, docs is not null && Directory.Exists(docs) ? docs : null })
+            {
+                if (dir is null) continue;
+                var probe = Path.Combine(dir, ".apex-setup-probe");
+                try { File.WriteAllText(probe, ""); File.Delete(probe); }
+                catch (Exception e) when (e is IOException or UnauthorizedAccessException) { l.Add(new(CannotWriteText, [dir], true)); }
+            }
+        if (downloads)
+        {
+            // the downloads land in %TEMP% and are copied to Game\Bin: twice their size free on each drive
+            var need = Math.Max(downloadBytes * 2, 200L << 20);
+            foreach (var dir in new[] { g.Bin, Path.GetTempPath() }.DistinctBy(d => Path.GetPathRoot(Path.GetFullPath(d)), StringComparer.OrdinalIgnoreCase))
+                try
+                {
+                    if (FreeBytes(dir) < need)
+                        l.Add(new("Setup needs {0} MB free on drive {1}. Free some space, then try again.", [(need >> 20).ToString(), Path.GetPathRoot(Path.GetFullPath(dir))!], true));
+                }
+                catch (Exception e) when (e is IOException or ArgumentException or UnauthorizedAccessException) { } // (a drive that cannot say: not a no)
+            if (docs is null || !Directory.Exists(docs))
+                l.Add(new("Setup did not find The Sims 3's folder in Documents. Start the game once, then run Setup again for the settings it writes there.", [], false));
+        }
+        if (replacesD3d9 && s.Layer == Layer.Other)
+            l.Add(new("{0} (d3d9.dll) is set aside in Game\\Bin\\Apex Radiance backup; removing the renderer in Repair or remove puts it back.", [ForeignD3d9(g.Bin)], false));
+        if (Scan.Loaders(g.Bin) is { Count: > 1 } loaders)
+            l.Add(new("Two ASI loaders ({0}): Setup keeps {1} and sets the others aside in Game\\Bin\\Apex Radiance backup.", [string.Join(", ", loaders), loaders[0]], false));
+        return l;
+    }
+
+    // What an install downloads, for the free space check: the assets FetchAsync takes for each component (the manual-install
+    // zip once for Apex, the bridge and the restart host), else the release's largest asset; the Performance Patch comes from
+    // the player's own download.
+    public static long DownloadEstimate(IEnumerable<string> comps, Func<string, Release?> release)
+    {
+        var picked = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+        bool Is(Asset a, string end) => a.Name.EndsWith(end, StringComparison.OrdinalIgnoreCase);
+        foreach (var c in comps.Distinct())
+        {
+            if (c == Components.S3pp || release(c) is not { } r) continue;
+            var a = (c is Components.Apex or Components.Bridge or Components.RestartHost && GitHubSource.HasManualZip(r) is { } z ? new[] { z }
+                : c switch
+                {
+                    Components.Apex => r.Assets.Where(x => Is(x, ".asi")),
+                    Components.RestartHost => r.Assets.Where(x => x.Name.Equals("ts3wrap.exe", StringComparison.OrdinalIgnoreCase)),
+                    Components.Bridge => r.Assets.Where(x => x.Name.Contains("bridge", StringComparison.OrdinalIgnoreCase) && Is(x, ".zip")),
+                    Components.Dxvk => r.Assets.Where(x => x.Name.StartsWith("dxvk-") && Is(x, ".tar.gz") && !x.Name.Contains("native")).Take(1),
+                    Components.MonoPatcher => r.Assets.Where(x => Is(x, ".zip")).Take(1),
+                    Components.Loader => r.Assets.Where(x => LoaderZip(x.Name)).Take(1),
+                    Components.S3ss => r.Assets.Where(x => x.Name == "Sims3SettingsSetter.asi"),
+                    Components.Modernization => r.Assets.Where(x => Is(x, ".zip")).OrderByDescending(x => x.Size).Take(1)
+                        .Concat(r.Assets.Where(x => x.Name == "ts3fixes.package")),
+                    _ => [],
+                }).ToList();
+            if (a.Count == 0) a = r.Assets.OrderByDescending(x => x.Size).Take(1).ToList();
+            foreach (var x in a) picked[r.Repo + "/" + x.Name] = x.Size;
+        }
+        return picked.Values.Sum();
+    }
+
+    // a d3d9.dll that is neither DXVK nor the bridge, by the name its file gives (ReShade, GShade, another wrapper)
+    public static string ForeignD3d9(string bin)
+    {
+        var f = Path.Combine(bin, "d3d9.dll");
+        try
+        {
+            var v = System.Diagnostics.FileVersionInfo.GetVersionInfo(f);
+            return new[] { v.ProductName, v.FileDescription }.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim() ?? "d3d9.dll";
+        }
+        catch (FileNotFoundException) { return "d3d9.dll"; }
+    }
+
+    // a file a scan removed, blocked (ERROR_VIRUS_INFECTED, ERROR_VIRUS_DELETED) or emptied as Setup downloaded or placed it: the
+    // player's words, with the file names and the folder it was in (%TEMP%\ApexRadianceSetup for a download, Game\Bin for a copy)
+    public static SetupException Antivirus(string? file, string folder) =>
+        new("Your antivirus removed or blocked {0}; add an exception for {1} and run Setup again.",
+            Path.GetFileName(file ?? "") is { Length: > 0 } n && !n.Contains(", ") ? n : file ?? "", folder);
+    // a download cut off (the connection dropped mid-file): the network, not a file in use
+    public static bool IsNetwork(Exception e) =>
+        e is HttpRequestException or TaskCanceledException or System.Net.Http.HttpIOException || e is IOException { InnerException: System.Net.Sockets.SocketException };
+    public static bool IsVirusBlock(Exception e) => e is IOException && (e.HResult & 0xFFFF) is 0xE1 or 0xE2 && (e.HResult >> 16 & 0x1FFF) == 7;
+    public static List<string> Missing(IReadOnlyDictionary<string, long> sizes) =>
+        sizes.Where(p => !File.Exists(p.Key) || new FileInfo(p.Key).Length != p.Value).Select(p => Path.GetFileName(p.Key)).ToList();
+
+    public static bool LoaderZip(string name) =>
+        name.Contains("NoPDB", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+        && !name.Contains("x64", StringComparison.OrdinalIgnoreCase) && !name.Contains("arm", StringComparison.OrdinalIgnoreCase);
+
+    // the loader in its zip: a 32-bit dinput8.dll, else the one 32-bit dll; an error names what the zip held
+    public static string LoaderDll(string dir)
+    {
+        var x86 = Directory.EnumerateFiles(dir, "*.dll", SearchOption.AllDirectories).Where(Is32Bit).ToList();
+        if (x86.FirstOrDefault(f => Path.GetFileName(f).Equals("dinput8.dll", StringComparison.OrdinalIgnoreCase)) is { } d) return d;
+        if (x86.Count == 1) return x86[0];
+        var found = Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(dir, f)).ToList();
+        throw new InvalidDataException("Ultimate ASI Loader: no single 32-bit loader in the zip (found: " + (found.Count == 0 ? "nothing" : string.Join(", ", found)) + ")");
+    }
+
+    // PE machine IMAGE_FILE_MACHINE_I386 (0x14C)
+    public static bool Is32Bit(string file)
+    {
+        try
+        {
+            using var r = new BinaryReader(File.OpenRead(file));
+            if (r.BaseStream.Length < 0x40 || r.ReadUInt16() != 0x5A4D) return false;
+            r.BaseStream.Position = 0x3C;
+            var pe = r.ReadInt32();
+            if (pe < 0 || pe + 6 > r.BaseStream.Length) return false;
+            r.BaseStream.Position = pe;
+            return r.ReadUInt32() == 0x4550 && r.ReadUInt16() == 0x14C;
+        }
+        catch (IOException) { return false; }
+    }
+
+    // each file Setup has just copied into place (the tests use it to stand for an antivirus taking it)
+    public static Action<string> Placed = _ => { };
+
+    // where Setup's log goes (the app sets it; tests and the engine run without one)
+    public static Action<Exception> Log = _ => { };
+
     // APEX_SETUP_DRY_RUN=1: Setup shows what it finds and plans but writes nothing (a check on a player's real game)
     public static void CheckWritable()
     {
         if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1") throw new InvalidOperationException("Dry run: Setup changes nothing.");
-        if (Games.IsRunning()) throw new InvalidOperationException("Close The Sims 3 first.");
+        if (Games.IsRunning()) throw new SetupException(CloseGameText);
     }
 
     public static string OptionsIni(string docs) => Path.Combine(docs, "Options.ini");
@@ -291,7 +466,12 @@ public static class Engine
         for (int i = 0; i < list.Count; i++)
         {
             p?.Report(new(0.5 * i / list.Count, "Downloading {0}", list[i]));
-            fetched.Add(await src.FetchAsync(list[i], g, docs, ct));
+            try { fetched.Add(await src.FetchAsync(list[i], g, docs, ct)); }
+            // (downloaded, then gone or blocked: a scan took it; the Performance Patch archive is the player's own file)
+            catch (FileNotFoundException e) when (list[i] == Components.S3pp)
+            { throw new SetupException("Setup could not find {0}. Download the Sims 3 Performance Patch again, or choose the downloaded file again.", Path.GetFileName(e.FileName ?? "")); }
+            catch (FileNotFoundException e) { throw Antivirus(e.FileName, GitHubSource.TempRoot); }
+            catch (IOException e) when (IsVirusBlock(e)) { throw Antivirus(Components.Name(list[i]), GitHubSource.TempRoot); }
         }
         if (list.Count > 0) CheckWritable(); // the downloads can take minutes: the game may have started since
         for (int i = 0; i < list.Count; i++)
@@ -313,7 +493,20 @@ public static class Engine
                 }
                 // a bridge installed by hand is this component's own files, not foreign ones to back up and restore on removal
                 var own = c == Components.Bridge && s.Layer == Layer.Bridge;
-                foreach (var (from, to) in files) Place(m, c, from, to, own);
+                // each file's size before it is placed: afterwards every file must be there whole, else an antivirus took it
+                var sizes = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+                foreach (var (from, to) in files)
+                {
+                    try
+                    {
+                        // (the player's ts3native.ini is kept as it is: no size to check)
+                        if (!(Path.GetFileName(to).Equals("ts3native.ini", StringComparison.OrdinalIgnoreCase) && File.Exists(to))) sizes[to] = new FileInfo(from).Length;
+                        Place(m, c, from, to, own);
+                    }
+                    catch (FileNotFoundException e) { throw Antivirus(e.FileName ?? from, File.Exists(from) ? g.Bin : GitHubSource.TempRoot); }
+                    catch (IOException e) when (IsVirusBlock(e)) { throw Antivirus(Path.GetFileName(to), g.Bin); }
+                }
+                if (Missing(sizes) is { Count: > 0 } gone) throw Antivirus(string.Join(", ", gone), g.Bin);
                 if (c == Components.Bridge)
                     foreach (var conf in new[] { Path.Combine(g.Bin, "bridge.conf"), Path.Combine(g.Bin, ".trex", "bridge.conf") })
                         SetTargetProcess(conf, g.Exe);
@@ -387,6 +580,8 @@ public static class Engine
         if (c == Components.RestartHost) SetRestartHost(docs, false);
         m.Versions.Remove(c);
         m.Save();
+        // after the files are gone (a failed removal leaves frame generation as it was); never fails the removal: the UI logs it and shows it on the row
+        if (TurnsFrameGenOff(c)) { var (nv, amd) = FrameGenOff(g); FrameGenOffError = (nv ?? FrameGenOffError.Nv, amd ?? FrameGenOffError.Amd); }
         // the restored d3d9.dll is a loader again: the one Setup added for the bridge would load every mod twice
         if (c is Components.Bridge or Components.Dxvk && m.Versions.ContainsKey(Components.Loader) && Scan.Run(g, docs).LoaderIsD3d9)
             Remove(g, Components.Loader, docs);
@@ -419,13 +614,17 @@ public static class Engine
         {
             var rel = to.StartsWith(m.Bin, StringComparison.OrdinalIgnoreCase) ? Path.GetRelativePath(m.Bin, to) : Path.GetFileName(to);
             backup = Path.Combine(Manifest.DirOf(m.Bin), rel.Replace('\\', '_') + ".bak");
+            // a backup already there (one a damaged setup.json lost) is never overwritten: the next free name
+            for (var k = 2; File.Exists(backup); k++) backup = Path.Combine(Manifest.DirOf(m.Bin), rel.Replace('\\', '_') + "-" + k + ".bak");
             Fs.CreateDir(Manifest.DirOf(m.Bin));
             Fs.Move(to, backup);
         }
-        Fs.CreateDir(Path.GetDirectoryName(to)!);
-        Fs.Copy(from, to);
+        // recorded before the copy: a copy that fails still leaves the backup linked to its file (setup.json is saved in a finally)
         if (owned is null) m.Files.Add(new ManifestFile { Component = c, Path = to, Backup = backup });
         else owned.Component = c;
+        Fs.CreateDir(Path.GetDirectoryName(to)!);
+        Fs.Copy(from, to);
+        Placed(to);
     }
 
     // An older combined build or a second copy of the ASI would load Apex twice.
@@ -521,6 +720,177 @@ public static class Engine
         return (lines, at, end);
     }
 
+    // [screen] fps_limit, for frame generation (Smooth Motion, AFMF): a limit the player chose stays as it is; only no limit (the
+    // key absent, Apex's default, or 0) becomes `fps`. Returns the text and the value before (null when absent).
+    static readonly Regex ScreenHeader = new(@"^\s*\[\s*screen\s*\]\s*(#.*)?\r?$");
+    static readonly Regex FpsKey = new(@"^(\s*fps_limit\s*=\s*)(\d+)");
+    public const int FrameGenFps = 60;
+
+    // Apex's own frame limit choices (features/screen_control.cpp: 0 = off, 30, 60, 120, 144, 165, 240), with 75 and 90 for frame
+    // generation's 60 to 90; a custom value is clamped as Apex reads it: 0 or below is off, else 20 to 1000
+    public static readonly int[] FpsChoices = { 0, 30, 60, 75, 90, 120, 144, 165, 240 };
+    // a pending change: the choice when it differs from the state now, else none (switching back drops the change)
+    public static bool? PendingSwitch(bool want, bool now) => want == now ? null : want;
+    public static int? PendingFps(int want, int now) => ClampFps(want) == ClampFps(now) ? null : ClampFps(want);
+    public static bool FpsRecommended(int fps) => fps is >= 60 and <= 90;
+    public static int ClampFps(int fps) => fps <= 0 ? 0 : Math.Clamp(fps, 20, 1000);
+
+    // The frame limit picker: [screen] fps_limit = fps at once, in a restore point that puts back only the key; nothing before
+    // the game made ApexRadiance.toml, while it runs, or in a dry run. False when nothing changed.
+    public static bool SetFpsLimit(Game g, int fps, string? docs = null)
+    {
+        var f = ApexToml(docs ?? Scan.DocumentsFor(g));
+        if (!File.Exists(f)) return false;
+        CheckWritable();
+        fps = ClampFps(fps);
+        var text = File.ReadAllText(f);
+        var was = FpsLimitKey(text);
+        if (was == fps || DottedScreen(text)) return false;
+        using var point = RestorePoints.Begin(g.Bin, "Apex frame limit");
+        Fs.WriteFpsKey(f, WithFpsLimit(text, fps), was, fps);
+        return true;
+    }
+    public static (string Text, int? Was) WithFpsLimitIfNone(string text, int fps = FrameGenFps) =>
+        DottedScreen(text) || FpsLimitKey(text) is > 0 or -1 ? (text, FpsLimitKey(text)) : (WithFpsLimit(text, fps), FpsLimitKey(text));
+
+    // [screen] written as dotted keys (screen.fps_limit = 30) or an inline table (screen = { ... }): Setup writes nothing then
+    static readonly Regex DottedScreenKey = new(@"^\s*screen\s*(\.|=)");
+    static bool DottedScreen(string text) => text.Split('\n').Any(l => DottedScreenKey.IsMatch(l));
+
+    static (string[] Lines, int At, int End) ScreenTable(string text)
+    {
+        var lines = text.Split('\n');
+        var at = Array.FindIndex(lines, l => ScreenHeader.IsMatch(l));
+        var end = at < 0 ? lines.Length : Array.FindIndex(lines, at + 1, l => AnyHeader.IsMatch(l)) is var n and >= 0 ? n : lines.Length;
+        return (lines, at, end);
+    }
+
+    // [screen] fps_limit in the text; null when the table or the key is missing
+    public static int? FpsLimitKey(string text)
+    {
+        var (lines, at, end) = ScreenTable(text);
+        for (int i = at + 1; at >= 0 && i < end; i++)
+            // a value that does not parse (too big) counts as a limit the player set: -1, left alone
+            if (FpsKey.Match(lines[i]) is { Success: true } m) return int.TryParse(m.Groups[2].Value, out var v) ? v : -1;
+        return null;
+    }
+
+    // the text with [screen] fps_limit = fps, every other line as it was (the value in place, else the key added after the
+    // table's last line, else [screen] added at the end)
+    public static string WithFpsLimit(string text, int fps)
+    {
+        var cr = text.Contains("\r\n") ? "\r" : "";
+        if (text.Length > 0 && !text.EndsWith('\n')) text += cr + "\n"; // (no final newline: one first, so every line ends alike)
+        var (lines, at, end) = ScreenTable(text);
+        var line = "fps_limit = " + fps;
+        if (at < 0)
+            return text + (text.Length == 0 || text.EndsWith('\n') ? "" : cr + "\n") + (text.Length == 0 ? "" : cr + "\n") + $"[screen]{cr}\n{line}{cr}\n";
+        for (int i = at + 1; i < end; i++)
+            if (FpsKey.IsMatch(lines[i]))
+            {
+                lines[i] = FpsKey.Replace(lines[i], "${1}" + fps, 1);
+                return string.Join('\n', lines);
+            }
+        var last = end - 1;
+        while (last > at && lines[last].Trim().Length == 0) last--;
+        var list = lines.ToList();
+        list.Insert(last + 1, line + cr);
+        return string.Join('\n', list);
+    }
+
+    // the text without [screen] fps_limit (undo of a key Setup added)
+    public static string WithoutFpsLimit(string text)
+    {
+        var (lines, at, end) = ScreenTable(text);
+        var i = at < 0 ? -1 : Array.FindIndex(lines, at + 1, end - at - 1, l => FpsKey.IsMatch(l));
+        return i < 0 ? text : string.Join('\n', lines.Where((_, n) => n != i));
+    }
+
+    // Frame generation turned on: Apex's frame limit to 60 when there is none, in a restore point that puts back only the key.
+    // Nothing is written while the game has not made ApexRadiance.toml (Apex still copies older settings then) or runs.
+    public static bool SetFpsLimitIfNone(Game g, string feature, string? docs = null)
+    {
+        var f = ApexToml(docs ?? Scan.DocumentsFor(g));
+        if (!File.Exists(f)) return false;
+        CheckWritable();
+        var text = File.ReadAllText(f);
+        var (next, was) = WithFpsLimitIfNone(text);
+        if (next == text) return false;
+        using var point = RestorePoints.Begin(g.Bin, "Turn on {0}", feature);
+        Fs.WriteFpsKey(f, next, was, FrameGenFps);
+        return true;
+    }
+
+    // Frame generation set by Setup in the driver follows the bridge and Apex: removing either (alone, by a renderer change or with
+    // Uninstall everything) turns it off. A hook, so tests never reach a real driver; it returns why it could not, never throws.
+    // Which frame generation row shows: the one that applies. A usable NVIDIA card shows Smooth Motion; AFMF shows only where ADLX
+    // reports it supported (an AMD integrated GPU that cannot run it shows nothing); with neither usable, the NVIDIA row explains
+    // why when an NVIDIA card is there, else the AMD row does on an AMD-only PC. An NVAPI error shows on the NVIDIA row.
+    public static (bool Nvidia, bool Amd) FrameGenRows(SmoothMotion.Status nv, Afmf.Status amd)
+    {
+        var nvUsable = nv.On || SmoothMotion.Supported(nv.Card, nv.Driver);
+        var amdUsable = amd.On || amd.Supported;
+        var nvidia = nv.Error is not null || nv.Card is not null && (nvUsable || !amdUsable);
+        return (nvidia, amdUsable || amd.Present && !nvidia);
+    }
+
+    // A driver error in plain words for the frame generation rows (the raw call and code go to the log). Setup always runs
+    // elevated, so a refusal (NVAPI_INVALID_USER_PRIVILEGE -137, access denied) points at the programs that lock the driver's
+    // settings; anything else, a change the driver did not keep included, says it did not accept it and how to do it by hand,
+    // turning on or off as the change was.
+    public static string FriendlyFrameGenError(string error, bool amd, bool on = true) =>
+        error == "Dry run: Setup changes nothing." ? error
+        : error.EndsWith(" -137") || error.Contains("denied", StringComparison.OrdinalIgnoreCase) || error.Contains("privilege", StringComparison.OrdinalIgnoreCase)
+            ? (amd ? "Windows did not let Setup change the driver settings. Close AMD Software, then try again."
+                   : "Windows did not let Setup change the driver settings. Close the NVIDIA App and NVIDIA Profile Inspector, then try again.")
+        : amd ? (on ? "The AMD driver did not accept the change. You can turn it on by hand in AMD Software: Gaming > Graphics > AMD Fluid Motion Frames."
+                    : "The AMD driver did not accept the change. You can turn it off by hand in AMD Software: Gaming > Graphics > AMD Fluid Motion Frames.")
+        : on ? "The NVIDIA driver did not accept the change. You can turn it on by hand with NVIDIA Profile Inspector."
+             : "The NVIDIA driver did not accept the change. You can turn it off by hand with NVIDIA Profile Inspector.";
+
+    public static bool TurnsFrameGenOff(string c) => c is Components.Bridge or Components.Apex;
+
+    // The pending frame generation and frame limit changes, in the order Apply runs them: the limit first (frame generation
+    // turned on then finds it set). A turn-on is dropped when the same Apply removes the bridge or Apex (the removal turns it off).
+    // AutoLimit: the automatic 60 fps after a turn-on, not when the player chose a limit in this Apply, and not for AFMF on a PC
+    // with an NVIDIA card (the game may run on that card, where the AMD driver's frame generation does nothing).
+    public sealed record PlannedChange(string Kind, bool? On, int? Fps, bool AutoLimit);
+    public static List<PlannedChange> PlanFrameGen(int? fps, bool? smooth, bool? afmf, IEnumerable<string> removals, bool nvidiaCard)
+    {
+        var removing = removals.Any(TurnsFrameGenOff);
+        var l = new List<PlannedChange>();
+        if (fps is { } f) l.Add(new("fps", null, f, false));
+        if (smooth is { } s && !(s && removing)) l.Add(new("nv", s, null, s && fps is null));
+        if (afmf is { } a && !(a && removing)) l.Add(new("amd", a, null, a && fps is null && !nvidiaCard));
+        return l;
+    }
+
+    // A driver change and its check: the setting read back (in a new session) must be what was asked; an "on" that did not take
+    // is undone, an "off" that did not take keeps Setup's record (the setting is still Setup's to turn off).
+    public static string? VerifyChange(bool on, Func<string?> set, Func<(bool On, string? Error)> read, Action undo, Action? keepRecord = null)
+    {
+        if (set() is { } err) return err;
+        var (now, readError) = read();
+        if (readError is null && now == on) return null;
+        if (on) undo(); else keepRecord?.Invoke();
+        return SmoothMotion.DidNotTake;
+    }
+    // both drivers are asked, each error kept for its own row (a failed NVIDIA step does not skip AMD's)
+    public static Func<Game, (string? Nv, string? Amd)> FrameGenOff = DefaultFrameGenOff;
+    static (string? Nv, string? Amd) FrameGenOffError;
+    public static (string? Nv, string? Amd) PeekFrameGenOffError() => FrameGenOffError;
+    public static (string? Nv, string? Amd) TakeFrameGenOffError() { var e = FrameGenOffError; FrameGenOffError = default; return e; }
+    public static (string? Nv, string? Amd) DefaultFrameGenOff(Game g)
+    {
+        string? nv, amd;
+        // (a driver that cannot be read is an error on the row, not a silent skip)
+        try { nv = !SmoothMotion.SetupTurnedOn ? null : SmoothMotion.Read() is { Error: { } e } ? e : SmoothMotion.Read() is { On: true } ? SmoothMotion.Set(false) : null; }
+        catch (Exception e) { nv = e.Message; }
+        // AFMF is system-wide: off only when Setup turned it on (Afmf.Marker), never a setting the player had on
+        try { amd = Afmf.OffIfSetupTurnedOn(); }
+        catch (Exception e) { amd = e.Message; }
+        return (nv, amd);
+    }
     // [ui] restart_host in the text of ApexRadiance.toml; null when the table or the key is missing
     public static bool? RestartHostKey(string text)
     {
