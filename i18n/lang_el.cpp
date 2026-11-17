@@ -2083,6 +2083,8 @@ const I18n::Pair kPairs[] = {
     {"Fewer directions per pixel when the camera looks far away; lighter on the graphics card", "Χρησιμοποιεί λιγότερες κατευθύνσεις ανά pixel όταν η κάμερα κοιτά μακριά, όπου η σκιά φαίνεται ίδια. Πιο ελαφρύ για την κάρτα γραφικών"},
     {"Steady direction count", "Σταθερό πλήθος κατευθύνσεων"},
     {"Keeps the direction count steady while the camera rests near a switch distance", "Εμποδίζει το Λιγότερες κατευθύνσεις στο βάθος να αλλάζει συνεχώς όταν η κάμερα μένει κοντά σε μια απόσταση αλλαγής"},
+    {"Fewer directions in the open", "Λιγότερες κατευθύνσεις σε ανοιχτές επιφάνειες"},
+    {"Fewer directions where nothing is near enough to cast shade; lighter on the graphics card", "Χρησιμοποιεί λιγότερες κατευθύνσεις ανά pixel όπου τίποτα δεν είναι αρκετά κοντά ώστε να ρίξει σκιά. Ελαφρύτερο για την κάρτα γραφικών"},
     {"Smooth flat surfaces", "Λείες επίπεδες επιφάνειες"},
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Αφαιρεί αχνές διακεκομμένες γραμμές σκιάς στις άκρες πάγκων, δαπέδων και άλλων επίπεδων επιφανειών"},
     {"Edge-aware smoothing", "Εξομάλυνση με σεβασμό στις ακμές"},

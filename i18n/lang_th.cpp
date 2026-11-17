@@ -2083,6 +2083,8 @@ const I18n::Pair kPairs[] = {
     {"Fewer directions per pixel when the camera looks far away; lighter on the graphics card", "ใช้ทิศทางต่อพิกเซลน้อยลงเมื่อกล้องมองไปไกล ซึ่งเงายังดูเหมือนเดิม ช่วยลดภาระการ์ดจอ"},
     {"Steady direction count", "จำนวนทิศทางคงที่"},
     {"Keeps the direction count steady while the camera rests near a switch distance", "ป้องกันไม่ให้ ลดจำนวนทิศทางเมื่ออยู่ไกล สลับไปมาเมื่อกล้องหยุดอยู่ใกล้ระยะที่สลับ"},
+    {"Fewer directions in the open", "ลดจำนวนทิศทางบนพื้นผิวโล่ง"},
+    {"Fewer directions where nothing is near enough to cast shade; lighter on the graphics card", "ใช้ทิศทางต่อพิกเซลน้อยลงในบริเวณที่ไม่มีอะไรอยู่ใกล้พอจะทำให้เกิดเงา เบาต่อการ์ดจอ"},
     {"Smooth flat surfaces", "พื้นผิวเรียบลื่น"},
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "ลบเส้นเงาประจาง ๆ ตามขอบเคาน์เตอร์ พื้น และพื้นผิวเรียบอื่น ๆ"},
     {"Edge-aware smoothing", "การเกลี่ยที่คำนึงถึงขอบ"},

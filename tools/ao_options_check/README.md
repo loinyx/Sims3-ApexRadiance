@@ -21,6 +21,9 @@ It checks the two Ambient Occlusion options *Fewer directions when far* (`zoomSl
 - *Edge-aware smoothing* (`edgeBlur`), on 4-channel targets with two box passes: at least 90% of the contact shade,
   an open floor within 0.25 of a level of the default's roughness (no interleave left), and a shade step at silhouettes
   no smaller than the default's (a blur that carries shade across an outline lowers it);
+- *Fewer directions in the open* (`blockSlices`): at least a fifth of the 4x4 blocks at half the count, at most
+  1 level from the default on average, contact shade within 5%, the open floor no rougher, and the shade step across
+  block edges where the count changes at most 1.1 times the same pixels' step in the default image (blotchiness);
 - *Steady direction count* (`zoomHysteresis`): over walls 2% either side of each threshold in turn the count never
   switches (without it, every frame), and it still follows the view past the band;
 - the GPU time of the AO pass alone at 3840 x 2160 for each variant (12 interleaved rounds, the median), of the AO pass

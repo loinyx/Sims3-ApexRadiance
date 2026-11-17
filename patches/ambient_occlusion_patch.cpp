@@ -104,14 +104,15 @@ sampler2D sAo    : register(s3); // AO + 1/z (G16R16F; with the edge-aware blur 
 sampler2D sColor : register(s4); // copy of the finished scene, point
 sampler2D sSim : register(s5); // Sim receiver device-depth mask, point
 sampler2D sHair : register(s6); // blended Sim body/hair: signed device depth and source coverage
-sampler2D sTier : register(s7); // direction-count tier (0 = the Quality's count, 1 = 3/4, 2 = 1/2), one texel for the frame, point
+sampler2D sTier : register(s7); // direction-count tier (0 = the Quality's count, 1 = 3/4, 2 = 1/2), one texel for the frame or one per 4x4 block, point
 float4 cView  : register(c0);  // x = tanX, y = tanY, z = H / (2 tanY) (pixels per metre times z), w = max radius (px)
 float4 cSize  : register(c1);  // xy = screen size, zw = pyramid level-0 size (padded)
 float4 cMarch : register(c2);  // x = first step (px), y = mip offset, z = (1 + thin)^2, w = 1 / (fade1 - fade0)
 float4 cRad   : register(c3);  // x = contact radius (m), y = large radius near, z = large radius far, w = fade1 (m)
 float4 cK     : register(c4);  // x = contact strength, y = large near, z = large far, w = blur tolerance (of z)
 float4 cBlend : register(c5);  // x = near-set depth, y = 1 / (far-set depth - near-set depth), z = isolated strength, w = isolated threshold
-float4 cDir   : register(c6);  // blur: xy = step (uv), z = 0 box / 1 tent (edge-aware: zw = 1 0 across, 0 1 down); downsample: xy = source texel size (uv)
+float4 cDir   : register(c6);  // blur: xy = step (uv), z = 0 box / 1 tent (edge-aware: zw = 1 0 across, 0 1 down); downsample: xy = source texel size (uv);
+                               // block tiers: xy = uv -> screen pixels, z = bend threshold; their spread: xy = one block (uv)
 float4 cLook  : register(c7);  // composite: x = dead zone, y = 1 / (1 - dead zone), z = keep lamp light, w = 1 shading only
 float4 cPos   : register(c8);  // view position = z * (p * cPos.xy + cPos.zw, 1)
 float4 cRot   : register(c9);  // x = cos(pi / SLICES), y = sin(pi / SLICES)
@@ -157,6 +158,44 @@ float4 ZoomTierPS(float2 uv : TEXCOORD0) : COLOR0
     float last = tex2Dlod(sTier, float4(0.5, 0.5, 0, 0)).r;
     float2 th = cZoom.zw * float2(last < 0.5 ? cTier.z : cTier.w, last < 1.5 ? cTier.z : cTier.w);
     return wz >= th.x ? 0.0 : (wz >= th.y ? 1.0 : 2.0);
+}
+
+// Fewer directions in the open: one tier per 4x4 block of pixels (the blocks of the Bayer interleave), so a count
+// never changes inside a block. A block keeps the full count (tier 0) where the depth bends within reach: 1/z is linear
+// across the screen on a plane, so its second difference over one texel either side is 0 on an open surface, at every
+// pyramid level (2 to 8, texels of 4 to 256 px, as far as the large radius reaches). Elsewhere half the count (tier 2):
+// with nothing to meet, any count gives no shade. Sky and off-screen neighbours bend nothing (they do not occlude); a
+// level whose taps would leave the screen is skipped (its texels mix in the padding).
+float4 BlockTierPS(float2 uv : TEXCOORD0) : COLOR0
+{
+    float2 p = uv * cDir.xy;                                    // the block's centre (screen pixels)
+    float wc = tex2Dlod(sZt, float4(p / cSize.zw, 0, 2)).r;
+    [branch] if (wc <= 0.0) return 2.0;
+    float fz = saturate((1.0 / wc - cBlend.x) * cBlend.y);
+    float rMax = max(min(lerp(cRad.y, cRad.z, fz) * cView.z * wc, cView.w), 4.0);
+    float bend = 0;
+    [unroll] for (int l = 2; l <= 8; l++)
+    {
+        float t = exp2(l);
+        float c = tex2Dlod(sZt, float4(p / cSize.zw, 0, l)).r;
+        float4 n = float4(tex2Dlod(sZt, float4((p + float2(t, 0)) / cSize.zw, 0, l)).r, tex2Dlod(sZt, float4((p - float2(t, 0)) / cSize.zw, 0, l)).r,
+                          tex2Dlod(sZt, float4((p + float2(0, t)) / cSize.zw, 0, l)).r, tex2Dlod(sZt, float4((p - float2(0, t)) / cSize.zw, 0, l)).r);
+        float2 use = step(2.0 * t, p) * step(p + 2.0 * t, cSize.xy) * step(1e-12, min(n.xz, n.yw)) * step(t, rMax);
+        float2 d = abs(n.xz + n.yw - 2.0 * c) * use;
+        bend = max(bend, max(d.x, d.y) / max(c, 1e-12));
+    }
+    return bend > cDir.z ? 0.0 : 2.0;
+}
+
+// The tier a block uses: the lowest of its 3x3 blocks (the count changes one block away from anything that bends, where
+// the shade is already gone), and never below the frame's tier (sTier, 1x1)
+float4 BlockSpreadPS(float2 uv : TEXCOORD0) : COLOR0
+{
+    float m = 2.0;
+    [unroll] for (int y = -1; y <= 1; y++)
+        [unroll] for (int x = -1; x <= 1; x++)
+            m = min(m, tex2Dlod(sAo, float4(uv + cDir.xy * float2(x, y), 0, 0)).r);
+    return max(m, tex2Dlod(sTier, float4(0.5, 0.5, 0, 0)).r);
 }
 
 float3 PosF(float2 p, float z) { return z * float3(p * cPos.xy + cPos.zw, 1); }
@@ -227,9 +266,9 @@ float4 GtaoPS(float2 uv : TEXCOORD0) : COLOR0
     const float fAdd = 0.385 / 0.615 + 1.0;
     float2 om;
 #ifdef ZOOM
-    // Slices by zoom: one count for the whole frame. Every pixel reads the same tier (ZoomTierPS), so all pixels share
-    // one direction set and the 4x4 box still cancels the interleave. Each count spreads its own angles,
-    // (s + b1) pi / count.
+    // Slices by tier: one count for the whole frame (ZoomTierPS) or per 4x4 block (BlockSpreadPS). Every pixel of a
+    // block reads the same tier, so the block shares one direction set and the 4x4 box still cancels the interleave.
+    // Each count spreads its own angles, (s + b1) pi / count.
     float tier = tex2Dlod(sTier, float4(pix * cTier.xy, 0, 0)).r;
     bool nearView = tier < 0.5, midView = tier < 1.5;
     int slices = nearView ? SLICES : (midView ? SLICES_MID : SLICES_FAR);
@@ -418,6 +457,8 @@ const ShaderCache::Id kDownPsId = AddShader("AO DownPS", "DownPS", 0);
 const ShaderCache::Id kBlurPsId = AddShader("AO BlurPS", "BlurPS", 0);
 const ShaderCache::Id kCompositePsId = AddShader("AO CompositePS", "CompositePS", 0);
 const ShaderCache::Id kBlurEdgesPsId = AddShader("AO BlurPS (edge-aware)", "BlurPS", 1, nullptr, "EDGES");
+const ShaderCache::Id kBlockTierPsId = AddShader("AO BlockTierPS", "BlockTierPS", 1);
+const ShaderCache::Id kBlockSpreadPsId = AddShader("AO BlockSpreadPS", "BlockSpreadPS", 1);
 const ShaderCache::Id kZoomTierPsId = AddShader("AO ZoomTierPS", "ZoomTierPS", 1);
 const ShaderCache::Id kDepthPsId = AddShader("AO DepthPS (Developer capture)", "DepthPS", 1);
 // GtaoPS variants: bit 0 = reads the frame's tier (ZOOM: Fewer directions when far, and every other option that needs
@@ -429,6 +470,10 @@ constexpr int kGtaoVariants = 4;
 constexpr float kZoomMid = 60.0f, kZoomFar = 120.0f;
 // Steady direction count: a threshold is passed 10% beyond it and passed back 10% before it (60 m: 66 and 54 m)
 constexpr float kZoomHysteresis = 0.1f;
+// Fewer directions in the open: a block bends when the second difference of 1/z passes this share of its 1/z
+// (a 24-bit depth step is 2.4e-7 z of it: 0.01% at 400 m; set on the synthetic scene of tools/ao_options_check,
+// unverified in game)
+constexpr float kBlockBend = 5e-4f;
 constexpr int ZoomSlices(int slices, int num, int den) { return std::max(2, slices * num / den); }
 ShaderCache::Id AddGtao(int q, int v) {
     static const char* const kNames[kQualityCount] = {"Low", "Medium", "High", "Ultra", "Very Low"};
@@ -476,11 +521,16 @@ struct Params {
     bool blendNormals = false; // blended normals (no per-pixel pick of the neighbour)
     bool zoomHysteresis = false; // zoomSlices: the count switches 10% past a threshold and back 10% before it
     bool edgeBlur = false;     // edge-aware 4x4 box from the AO pass's edge weights, no tent
+    bool blockSlices = false;  // half the directions in 4x4 blocks where the depth does not bend within reach
 };
 
 struct State {
     bool active = false, ready = false, fixedTried = false;
     bool edgeAsked = false, edgeBlur = false; // the AO targets were made for the edge-aware blur / it runs (4 channels supported)
+    bool blockAsked = false;                  // the block tier targets were made
+    UINT blockW = 0, blockH = 0;              // blocks across and down
+    IDirect3DTexture9* block[2] = {};         // one tier per 4x4 block: as found, then spread
+    IDirect3DSurface9* blockSurf[2] = {};
     bool gtaoTried[kGtaoVariants][kQualityCount] = {};
     bool showShade = false; // Advanced > Show the shade alone (not saved)
     bool showSimMask = false; // preview only, never persisted
@@ -495,7 +545,7 @@ struct State {
     IDirect3DTexture9* tier[2] = {}; // the frame's direction-count tier, 1x1: this frame's and the last one's
     IDirect3DSurface9* tierSurf[2] = {};
     int tierNow = 0;
-    IDirect3DPixelShader9 *psLinear = nullptr, *psDown = nullptr, *psBlur = nullptr, *psComposite = nullptr, *psDepth = nullptr, *psZoomTier = nullptr, *psBlurEdges = nullptr;
+    IDirect3DPixelShader9 *psLinear = nullptr, *psDown = nullptr, *psBlur = nullptr, *psComposite = nullptr, *psDepth = nullptr, *psZoomTier = nullptr, *psBlurEdges = nullptr, *psBlockTier = nullptr, *psBlockSpread = nullptr;
     IDirect3DPixelShader9* psGtao[kGtaoVariants][kQualityCount] = {};
     // GPU cost (timestamp queries, read a few frames later)
     static constexpr int kQ = 4;
@@ -727,6 +777,8 @@ void ReleaseResources() {
     for (int i = 0; i < 2; i++) {
         SafeRelease(g.tierSurf[i]);
         SafeRelease(g.tier[i]);
+        SafeRelease(g.blockSurf[i]);
+        SafeRelease(g.block[i]);
     }
     for (int i = 0; i < State::kQ; i++) {
         SafeRelease(g.qDisjoint[i]);
@@ -745,6 +797,8 @@ void ReleaseShaders() {
     SafeRelease(g.psDepth);
     SafeRelease(g.psZoomTier);
     SafeRelease(g.psBlurEdges);
+    SafeRelease(g.psBlockTier);
+    SafeRelease(g.psBlockSpread);
     for (int v = 0; v < kGtaoVariants; v++)
         for (int q = 0; q < kQualityCount; q++) {
             SafeRelease(g.psGtao[v][q]);
@@ -770,7 +824,7 @@ IDirect3DPixelShader9* CreateShader(IDirect3DDevice9* dev, ShaderCache::Id id, c
     return nullptr;
 }
 
-int GtaoVariant() { return (g.p.zoomSlices || g.edgeBlur ? 1 : 0) | (g.p.blendNormals ? 2 : 0); }
+int GtaoVariant() { return (g.p.zoomSlices || g.edgeBlur || g.blockAsked ? 1 : 0) | (g.p.blendNormals ? 2 : 0); }
 
 // The AO pass of one quality and the current options, created on first use
 IDirect3DPixelShader9* GtaoShader(IDirect3DDevice9* dev, int q) {
@@ -784,7 +838,7 @@ IDirect3DPixelShader9* GtaoShader(IDirect3DDevice9* dev, int q) {
 }
 
 bool EnsureShaders(IDirect3DDevice9* dev) {
-    const bool fixedOk = g.psLinear && g.psDown && g.psBlur && g.psComposite && g.psZoomTier && g.psBlurEdges;
+    const bool fixedOk = g.psLinear && g.psDown && g.psBlur && g.psComposite && g.psZoomTier && g.psBlurEdges && g.psBlockTier && g.psBlockSpread;
     if (!fixedOk && g.fixedTried) return false; // failed once: logged, not retried every frame
     g.fixedTried = true;
     if (!g.psLinear) g.psLinear = CreateShader(dev, kLinearPsId, "LinearizePS");
@@ -793,7 +847,9 @@ bool EnsureShaders(IDirect3DDevice9* dev) {
     if (!g.psComposite) g.psComposite = CreateShader(dev, kCompositePsId, "CompositePS");
     if (!g.psZoomTier) g.psZoomTier = CreateShader(dev, kZoomTierPsId, "ZoomTierPS");
     if (!g.psBlurEdges) g.psBlurEdges = CreateShader(dev, kBlurEdgesPsId, "BlurPS (edge-aware)");
-    const bool ok = g.psLinear && g.psDown && g.psBlur && g.psComposite && g.psZoomTier && g.psBlurEdges && GtaoShader(dev, g.p.quality);
+    if (!g.psBlockTier) g.psBlockTier = CreateShader(dev, kBlockTierPsId, "BlockTierPS");
+    if (!g.psBlockSpread) g.psBlockSpread = CreateShader(dev, kBlockSpreadPsId, "BlockSpreadPS");
+    const bool ok = g.psLinear && g.psDown && g.psBlur && g.psComposite && g.psZoomTier && g.psBlurEdges && g.psBlockTier && g.psBlockSpread && GtaoShader(dev, g.p.quality);
     if (!ok) g.status = "ERROR: the shader did not compile (see ApexRadiance_LOG.txt)";
     return ok;
 }
@@ -833,6 +889,7 @@ bool InitResources(IDirect3DDevice9* dev) {
     g.edgeBlur = g.edgeAsked && FormatSupported(dev, D3DFMT_A16B16G16R16F, false);
     if (g.edgeAsked && !g.edgeBlur) LOG_WARNING("[AO] A16B16G16R16F render targets not supported: Edge-aware smoothing stays off");
     const D3DFORMAT aoFormat = g.edgeBlur ? D3DFMT_A16B16G16R16F : D3DFMT_G16R16F;
+    g.blockAsked = g.p.blockSlices;
     if (!EnsureShaders(dev)) return false;
     g.width = bd.Width;
     g.height = bd.Height;
@@ -852,6 +909,11 @@ bool InitResources(IDirect3DDevice9* dev) {
     for (int i = 0; ok && i < 2; i++) // starts at tier 0 (the view counts as near until the first frame says otherwise)
         ok = SUCCEEDED(dev->CreateTexture(1, 1, 1, D3DUSAGE_RENDERTARGET, D3DFMT_R32F, D3DPOOL_DEFAULT, &g.tier[i], nullptr)) && g.tier[i] &&
              SUCCEEDED(g.tier[i]->GetSurfaceLevel(0, &g.tierSurf[i])) && g.tierSurf[i] && SUCCEEDED(dev->ColorFill(g.tierSurf[i], nullptr, 0));
+    g.blockW = (g.width + 3) / 4;
+    g.blockH = (g.height + 3) / 4;
+    for (int i = 0; ok && g.blockAsked && i < 2; i++)
+        ok = SUCCEEDED(dev->CreateTexture(g.blockW, g.blockH, 1, D3DUSAGE_RENDERTARGET, D3DFMT_R32F, D3DPOOL_DEFAULT, &g.block[i], nullptr)) && g.block[i] &&
+             SUCCEEDED(g.block[i]->GetSurfaceLevel(0, &g.blockSurf[i])) && g.blockSurf[i];
     if (!ok) {
         ReleaseResources();
         g.status = "ERROR: not enough video memory for the shade textures";
@@ -1171,7 +1233,7 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
         {g.p.simControls && g.showSimMask ? 1.0f : 0.0f, WantSimMask() && simMask.hairCleared && !simMask.failed ? 1.0f : 0.0f, 0, 0},
         // (thresholds of 0 keep tier 0: the looped pass without Fewer directions when far)
         {W * 0.5f / g.padW, H * 0.5f / g.padH, g.p.zoomSlices ? 1.0f / kZoomMid : 0.0f, g.p.zoomSlices ? 1.0f / kZoomFar : 0.0f},
-        {0, 0, g.p.zoomHysteresis ? 1.0f / (1.0f + kZoomHysteresis) : 1.0f, g.p.zoomHysteresis ? 1.0f / (1.0f - kZoomHysteresis) : 1.0f}};
+        {g.blockAsked ? 0.25f / g.blockW : 0.0f, g.blockAsked ? 0.25f / g.blockH : 0.0f, g.p.zoomHysteresis ? 1.0f / (1.0f + kZoomHysteresis) : 1.0f, g.p.zoomHysteresis ? 1.0f / (1.0f - kZoomHysteresis) : 1.0f}};
     dev->SetPixelShaderConstantF(0, &c[0][0], kPSConsts);
 
     if (!kPublicBuild)
@@ -1209,6 +1271,20 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
         dev->SetPixelShader(g.psZoomTier);
         DrawQuad(dev, 1, 1);
         dev->SetTexture(7, g.tier[g.tierNow]);
+        if (g.blockAsked) { // a tier per 4x4 block, then the lowest of each 3x3 blocks
+            const float find[4] = {4.0f * g.blockW, 4.0f * g.blockH, kBlockBend, 0}, spread[4] = {1.0f / g.blockW, 1.0f / g.blockH, 0, 0};
+            dev->SetPixelShaderConstantF(6, find, 1);
+            dev->SetRenderTarget(0, g.blockSurf[0]);
+            dev->SetPixelShader(g.psBlockTier);
+            DrawQuad(dev, g.blockW, g.blockH);
+            dev->SetPixelShaderConstantF(6, spread, 1);
+            dev->SetRenderTarget(0, g.blockSurf[1]);
+            dev->SetTexture(3, g.block[0]);
+            dev->SetPixelShader(g.psBlockSpread);
+            DrawQuad(dev, g.blockW, g.blockH);
+            dev->SetTexture(3, nullptr);
+            dev->SetTexture(7, g.block[1]);
+        }
     }
     dev->SetRenderTarget(0, g.aoASurf);
     dev->SetTexture(1, g.zTex);
@@ -1261,8 +1337,8 @@ void AoEffect(IDirect3DDevice9* dev) {
     if (FAILED(dev->GetRenderTarget(0, &bb)) || !bb) return;
     D3DSURFACE_DESC bd{};
     bb->GetDesc(&bd);
-    // the back buffer changed without a Reset, or Edge-aware smoothing changed the AO targets' format: rebuild next frame
-    if (bd.Width != g.width || bd.Height != g.height || g.p.edgeBlur != g.edgeAsked) {
+    // the back buffer changed without a Reset, or an option changed the targets it needs: rebuild next frame
+    if (bd.Width != g.width || bd.Height != g.height || g.p.edgeBlur != g.edgeAsked || g.p.blockSlices != g.blockAsked) {
         bb->Release();
         ReleaseResources();
         g.retryCountdown = 0;
@@ -1402,6 +1478,7 @@ class AmbientOcclusionPatch : public ApexPatch {
         RegisterBoolSetting(&g.p.zoomSlices, "zoomSlices", Params{}.zoomSlices, "Fewer directions per pixel when the camera looks far away");
         RegisterBoolSetting(&g.p.blendNormals, "blendNormals", Params{}.blendNormals, "Smooth shade on flat surfaces: no dashed lines along their edges");
         RegisterBoolSetting(&g.p.edgeBlur, "edgeBlur", Params{}.edgeBlur, "Edge-aware smoothing: the shade does not bleed across the edges of objects");
+        RegisterBoolSetting(&g.p.blockSlices, "blockSlices", Params{}.blockSlices, "Fewer directions per pixel where nothing is near enough to cast shade");
         RegisterBoolSetting(&g.p.zoomHysteresis, "zoomHysteresis", Params{}.zoomHysteresis, "Fewer directions when far switches its count 10% past a distance and back 10% before it");
     }
 
@@ -1529,6 +1606,9 @@ class AmbientOcclusionPatch : public ApexPatch {
                                      "Keeps the direction count steady while the camera rests near a switch distance",
                                      kDefaults.zoomHysteresis);
         ImGui::EndDisabled();
+        changed |= ApexUi::SwitchRow("Fewer directions in the open", &g.p.blockSlices,
+                                     "Fewer directions where nothing is near enough to cast shade; lighter on the graphics card",
+                                     kDefaults.blockSlices);
         changed |= ApexUi::SwitchRow("Smooth flat surfaces", &g.p.blendNormals,
                                      "Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", kDefaults.blendNormals);
         changed |= ApexUi::SwitchRow("Edge-aware smoothing", &g.p.edgeBlur,
@@ -1545,8 +1625,9 @@ class AmbientOcclusionPatch : public ApexPatch {
     // (the composite grain follows the Banding Fix, only where the shade changed the pixel); 6 = distance and Sim receivers;
     // 7 = independent hair, transparency coverage and a separate Sim card; 8 = Sim Occlusion defaults off;
     // 9 = tuned default configuration for scene and Sim controls; 10 = fewer directions when far and blended normals (off);
-    // 11 = steady direction count (off); 12 = edge-aware smoothing (off).
-    static constexpr int kSettingsRevision = 12;
+    // 11 = steady direction count (off); 12 = edge-aware smoothing (off);
+    // 13 = fewer directions in the open (off).
+    static constexpr int kSettingsRevision = 13;
     static constexpr const char* kRevisionKey = "revisao";
     static int Revision(const toml::table& table) { return static_cast<int>(table[kRevisionKey].value<int64_t>().value_or(1)); }
     // Start from current defaults, then overlay every value that was explicitly saved.
@@ -1578,7 +1659,7 @@ class AmbientOcclusionPatch : public ApexPatch {
                             simMask.lastDraws, simMask.refused, simMask.copies.size(), simMask.failed ? " (unavailable)" : "");
         if (g.ready) {
             if (g.gpuMs >= 0) ImGui::TextDisabled("GPU cost: %.2f ms per frame (%d slices%s)", g.gpuMs, kQualitySlices[std::clamp(g.p.quality, 0, kQualityCount - 1)],
-                                                 g.p.zoomSlices ? ", fewer when far" : "");
+                                                 g.p.zoomSlices || g.p.blockSlices ? ", fewer when far or on open surfaces" : "");
             ImGui::TextDisabled("Frames shaded: %u  |  screen %ux%u, depth pyramid %ux%u (%d levels)", g.frames, g.width, g.height, g.padW, g.padH, kLevels);
             ImGui::TextDisabled("Camera: near %.3f m, A %.6f, tan %.4f x %.4f (%s)", g.lastNear, g.lastA, g.lastTanX, g.lastTanY,
                                 g.lastCamera ? "read this frame" : "fallback");

@@ -2083,6 +2083,8 @@ const I18n::Pair kPairs[] = {
     {"Fewer directions per pixel when the camera looks far away; lighter on the graphics card", "Käyttää vähemmän suuntia pikseliä kohden, kun kamera katsoo kauas, missä varjo näyttää samalta. Kevyempi näytönohjaimelle"},
     {"Steady direction count", "Vakaa suuntien määrä"},
     {"Keeps the direction count steady while the camera rests near a switch distance", "Estää Vähemmän suuntia kaukana -asetusta vaihtelemasta edestakaisin, kun kamera on lähellä vaihtoetäisyyttä"},
+    {"Fewer directions in the open", "Vähemmän suuntia avoimilla pinnoilla"},
+    {"Fewer directions where nothing is near enough to cast shade; lighter on the graphics card", "Käyttää vähemmän suuntia pikseliä kohden siellä, missä mikään ei ole tarpeeksi lähellä varjostaakseen. Kevyempi näytönohjaimelle"},
     {"Smooth flat surfaces", "Sileät tasaiset pinnat"},
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Poistaa heikot katkoviivamaiset varjoviivat työtasojen, lattioiden ja muiden tasaisten pintojen reunoilta"},
     {"Edge-aware smoothing", "Reunat huomioiva tasoitus"},

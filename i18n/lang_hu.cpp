@@ -2082,6 +2082,8 @@ const I18n::Pair kPairs[] = {
     {"Fewer directions per pixel when the camera looks far away; lighter on the graphics card", "Kevesebb irányt használ pixelenként, ha a kamera messzire néz, ahol az árnyék ugyanolyan. Kíméli a videokártyát"},
     {"Steady direction count", "Stabil irányszám"},
     {"Keeps the direction count steady while the camera rests near a switch distance", "Megakadályozza, hogy a Kevesebb irány a távolban ide-oda váltson, amikor a kamera egy váltási távolság közelében áll"},
+    {"Fewer directions in the open", "Kevesebb irány a nyílt felületeken"},
+    {"Fewer directions where nothing is near enough to cast shade; lighter on the graphics card", "Kevesebb irányt használ képpontonként ott, ahol semmi sincs elég közel ahhoz, hogy árnyékot vessen. Kíméli a videokártyát"},
     {"Smooth flat surfaces", "Sima sík felületek"},
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Eltünteti a halvány szaggatott árnyékvonalakat a pultok, padlók és más sík felületek szélén"},
     {"Edge-aware smoothing", "Élkövető simítás"},

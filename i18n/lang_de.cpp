@@ -2083,6 +2083,8 @@ const I18n::Pair kPairs[] = {
     {"Fewer directions per pixel when the camera looks far away; lighter on the graphics card", "Nutzt weniger Richtungen pro Pixel, wenn die Kamera in die Ferne blickt, wo der Schatten gleich aussieht. Leichter für die Grafikkarte"},
     {"Steady direction count", "Stabile Richtungsanzahl"},
     {"Keeps the direction count steady while the camera rests near a switch distance", "Verhindert, dass Weniger Richtungen in der Ferne hin und her schaltet, wenn die Kamera nahe einer Umschaltdistanz steht"},
+    {"Fewer directions in the open", "Weniger Richtungen auf freien Flächen"},
+    {"Fewer directions where nothing is near enough to cast shade; lighter on the graphics card", "Nutzt weniger Richtungen pro Pixel, wo nichts nah genug ist, um Schatten zu werfen. Leichter für die Grafikkarte"},
     {"Smooth flat surfaces", "Glatte ebene Flächen"},
     {"Removes faint dashed shade lines along the edges of counters, floors and flat surfaces", "Entfernt schwache gestrichelte Schattenlinien an den Kanten von Arbeitsplatten, Böden und anderen ebenen Flächen"},
     {"Edge-aware smoothing", "Kantenbewusste Glättung"},

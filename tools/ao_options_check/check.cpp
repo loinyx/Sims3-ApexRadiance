@@ -9,6 +9,8 @@
 //  - Smooth flat surfaces: stray shade on surfaces where nothing meets (counter top, open floor), contact shade kept;
 //  - Steady direction count: the count does not switch while the view alternates around a threshold, and still
 //    switches past the band;
+//  - Fewer directions in the open: the share of 4x4 blocks at half the count, the contact shade kept, and the shade
+//    step across block edges where the count changes against the same pixels of the default image (blotches raise it);
 //  - GPU time of the AO pass at 3840 x 2160 for each variant (timestamp queries).
 #define NOMINMAX
 #include <windows.h>
@@ -47,7 +49,7 @@ constexpr int kLevels = 9;
 constexpr float kNear = 0.25f, kA = 1.00008f, kTanY = 1.0f / 4.293f;
 
 std::string g_source;
-float g_zoomMid = 0, g_zoomFar = 0, g_zoomHysteresis = 0;
+float g_zoomMid = 0, g_zoomFar = 0, g_zoomHysteresis = 0, g_blockBend = 0;
 
 std::string Slurp(const std::string& path) {
     std::ifstream f(path, std::ios::binary);
@@ -68,7 +70,8 @@ bool LoadSource(const char* exe) {
     g_zoomMid = ConstantOf(cpp, "kZoomMid =");
     g_zoomFar = ConstantOf(cpp, "kZoomFar =");
     g_zoomHysteresis = ConstantOf(cpp, "kZoomHysteresis =");
-    return g_zoomMid > 0 && g_zoomFar > g_zoomMid && g_zoomHysteresis > 0;
+    g_blockBend = ConstantOf(cpp, "kBlockBend =");
+    return g_zoomMid > 0 && g_zoomFar > g_zoomMid && g_zoomHysteresis > 0 && g_blockBend > 0;
 }
 
 std::vector<DWORD> Compile(const char* entry, int q, int v, std::string* err = nullptr, const char* define = nullptr) {
@@ -286,10 +289,11 @@ struct Opt {
     bool zoom = true;        // Fewer directions when far (a tiered GtaoPS variant without it stays at tier 0)
     bool hysteresis = false; // Steady direction count
     bool edges = false;      // Edge-aware smoothing (the scene's targets need 4 channels)
+    bool block = false;      // Fewer directions in the open
 };
 struct Passes {
-    IDirect3DPixelShader9 *blur = nullptr, *blurEdges = nullptr, *zoomTier = nullptr;
-    bool Ok() const { return blur && blurEdges && zoomTier; }
+    IDirect3DPixelShader9 *blur = nullptr, *blurEdges = nullptr, *zoomTier = nullptr, *blockTier = nullptr, *blockSpread = nullptr;
+    bool Ok() const { return blur && blurEdges && zoomTier && blockTier && blockSpread; }
 };
 
 // One frame of the scene on the GPU: the pyramid, GtaoPS, the blur passes; the AO (R) read back. What RunAo keeps from
@@ -299,9 +303,9 @@ struct Scene {
     Frame f;
     Passes ps;
     bool wide; // AO targets with 4 channels (Edge-aware smoothing)
-    IDirect3DTexture9 *z = nullptr, *a = nullptr, *b = nullptr, *tier[2] = {};
-    IDirect3DSurface9 *as = nullptr, *bs = nullptr, *read = nullptr, *tierSurf[2] = {}, *tierRead = nullptr;
-    int tierNow = 0;
+    IDirect3DTexture9 *z = nullptr, *a = nullptr, *b = nullptr, *tier[2] = {}, *block[2] = {};
+    IDirect3DSurface9 *as = nullptr, *bs = nullptr, *read = nullptr, *tierSurf[2] = {}, *tierRead = nullptr, *blockSurf[2] = {}, *blockRead = nullptr;
+    int tierNow = 0, blockW = 0, blockH = 0;
     // another frame of the same size
     void Load(const Frame& frame) {
         f = frame;
@@ -323,6 +327,12 @@ struct Scene {
             if (tier[i]) tier[i]->GetSurfaceLevel(0, &tierSurf[i]);
             if (tierSurf[i]) dev->ColorFill(tierSurf[i], nullptr, 0);
         }
+        blockW = (f.W + 3) / 4, blockH = (f.H + 3) / 4;
+        for (int i = 0; i < 2; i++) {
+            dev->CreateTexture(blockW, blockH, 1, D3DUSAGE_RENDERTARGET, D3DFMT_R32F, D3DPOOL_DEFAULT, &block[i], nullptr);
+            if (block[i]) block[i]->GetSurfaceLevel(0, &blockSurf[i]);
+        }
+        dev->CreateOffscreenPlainSurface(blockW, blockH, D3DFMT_R32F, D3DPOOL_SYSTEMMEM, &blockRead, nullptr);
         dev->CreateOffscreenPlainSurface(1, 1, D3DFMT_R32F, D3DPOOL_SYSTEMMEM, &tierRead, nullptr);
         const D3DFORMAT fmt = wide ? D3DFMT_A16B16G16R16F : D3DFMT_G16R16F;
         dev->CreateTexture(f.W, f.H, 1, D3DUSAGE_RENDERTARGET, fmt, D3DPOOL_DEFAULT, &a, nullptr);
@@ -333,10 +343,20 @@ struct Scene {
     }
     ~Scene() {
         Release(read), Release(as), Release(bs), Release(a), Release(b), Release(z);
-        for (int i = 0; i < 2; i++) Release(tierSurf[i]), Release(tier[i]);
-        Release(tierRead);
+        for (int i = 0; i < 2; i++) Release(tierSurf[i]), Release(tier[i]), Release(blockSurf[i]), Release(block[i]);
+        Release(tierRead), Release(blockRead);
     }
-    bool Ok() const { return z && as && bs && read && tierSurf[0] && tierSurf[1] && tierRead && ps.Ok(); }
+    bool Ok() const { return z && as && bs && read && tierSurf[0] && tierSurf[1] && tierRead && blockSurf[0] && blockSurf[1] && blockRead && ps.Ok(); }
+    // the tier of every 4x4 block (blockW x blockH), as the last AO pass with `block` read it
+    std::vector<float> Blocks() {
+        std::vector<float> out;
+        D3DLOCKED_RECT r{};
+        if (FAILED(gpu.dev->GetRenderTargetData(blockSurf[1], blockRead)) || FAILED(blockRead->LockRect(&r, nullptr, D3DLOCK_READONLY))) return out;
+        out.resize(size_t(blockW) * blockH);
+        for (int y = 0; y < blockH; y++) std::memcpy(&out[size_t(y) * blockW], static_cast<const char*>(r.pBits) + size_t(y) * r.Pitch, size_t(blockW) * 4);
+        blockRead->UnlockRect();
+        return out;
+    }
     // the frame's direction-count tier (0, 1, 2), as the last AO pass read it
     float Tier() {
         D3DLOCKED_RECT r{};
@@ -365,7 +385,7 @@ struct Scene {
             {0, 0, 0, 0},
             {0, 0, 0, 0},
             {W * 0.5f / f.padW, H * 0.5f / f.padH, o.zoom ? 1.0f / g_zoomMid : 0.0f, o.zoom ? 1.0f / g_zoomFar : 0.0f},
-            {0, 0, o.hysteresis ? 1.0f / (1.0f + g_zoomHysteresis) : 1.0f, o.hysteresis ? 1.0f / (1.0f - g_zoomHysteresis) : 1.0f}};
+            {o.block ? 0.25f / blockW : 0.0f, o.block ? 0.25f / blockH : 0.0f, o.hysteresis ? 1.0f / (1.0f + g_zoomHysteresis) : 1.0f, o.hysteresis ? 1.0f / (1.0f - g_zoomHysteresis) : 1.0f}};
         gpu.dev->SetPixelShaderConstantF(0, &c[0][0], 15);
     }
     // the tier pass and the AO pass, as RunAo's step 3 (`tiered`: a GtaoPS variant that reads the tier)
@@ -381,6 +401,20 @@ struct Scene {
             dev->SetPixelShader(ps.zoomTier);
             gpu.Quad(1, 1);
             dev->SetTexture(7, tier[tierNow]);
+            if (o.block) {
+                const float find[4] = {4.0f * blockW, 4.0f * blockH, g_blockBend, 0}, spread[4] = {1.0f / blockW, 1.0f / blockH, 0, 0};
+                dev->SetPixelShaderConstantF(6, find, 1);
+                dev->SetRenderTarget(0, blockSurf[0]);
+                dev->SetPixelShader(ps.blockTier);
+                gpu.Quad(blockW, blockH);
+                dev->SetPixelShaderConstantF(6, spread, 1);
+                dev->SetRenderTarget(0, blockSurf[1]);
+                dev->SetTexture(3, block[0]);
+                dev->SetPixelShader(ps.blockSpread);
+                gpu.Quad(blockW, blockH);
+                dev->SetTexture(3, nullptr);
+                dev->SetTexture(7, block[1]);
+            }
         }
         dev->SetRenderTarget(0, as);
         dev->SetTexture(1, z);
@@ -519,6 +553,25 @@ double SilhouetteStep(const std::vector<float>& ao, const Frame& f) {
         }
     return n ? sum / n : 0;
 }
+// Block edges where the direction count changes: the mean |difference| of the shade between the two pixels either side
+// (levels), in `ao` and in the default image `ref`. Blotches at block edges raise the first over the second.
+void BlockEdges(const std::vector<float>& ao, const std::vector<float>& ref, const std::vector<float>& tiers, const Frame& f, int bw, int bh,
+                double& step, double& refStep, long& n) {
+    step = refStep = 0, n = 0;
+    for (int by = 0; by < bh; by++)
+        for (int bx = 0; bx < bw; bx++)
+            for (int down = 0; down < 2; down++) {
+                const int nx = bx + !down, ny = by + down;
+                if (nx >= bw || ny >= bh || tiers[size_t(by) * bw + bx] == tiers[size_t(ny) * bw + nx]) continue;
+                for (int k = 0; k < 4; k++) {
+                    const int x0 = down ? 4 * bx + k : 4 * bx + 3, y0 = down ? 4 * by + 3 : 4 * by + k, x1 = x0 + !down, y1 = y0 + down;
+                    if (x1 >= f.W || y1 >= f.H) continue;
+                    const size_t i = size_t(y0) * f.W + x0, j = size_t(y1) * f.W + x1;
+                    step += std::fabs(double(ao[i]) - ao[j]) * 255.0, refStep += std::fabs(double(ref[i]) - ref[j]) * 255.0, n++;
+                }
+            }
+    if (n) step /= n, refStep /= n;
+}
 
 } // namespace
 
@@ -555,7 +608,7 @@ int main(int argc, char** argv) {
     }
     // the other passes of the options
     struct Other { const char* entry; const char* define; };
-    const Other kOther[] = {{"BlurPS", nullptr}, {"BlurPS", "EDGES"}, {"ZoomTierPS", nullptr}};
+    const Other kOther[] = {{"BlurPS", nullptr}, {"BlurPS", "EDGES"}, {"ZoomTierPS", nullptr}, {"BlockTierPS", nullptr}, {"BlockSpreadPS", nullptr}};
     std::vector<DWORD> otherCode[std::size(kOther)];
     std::printf("Other passes, instruction slots:");
     for (size_t i = 0; i < std::size(kOther); i++) {
@@ -575,11 +628,14 @@ int main(int argc, char** argv) {
     const int q = 2, slices = kQualitySlices[q];
     Passes passes;
     passes.blur = gpu.Ps(otherCode[0]), passes.blurEdges = gpu.Ps(otherCode[1]), passes.zoomTier = gpu.Ps(otherCode[2]);
+    passes.blockTier = gpu.Ps(otherCode[3]), passes.blockSpread = gpu.Ps(otherCode[4]);
     IDirect3DPixelShader9* ps[kVariants] = {};
     for (int v = 0; v < kVariants; v++) ps[v] = gpu.Ps(code[v][q]);
     Check(passes.Ok() && ps[0] && ps[1] && ps[2] && ps[3], "passes created");
     Opt edgeOpt;
     edgeOpt.zoom = false, edgeOpt.edges = true;
+    Opt blockOpt;
+    blockOpt.zoom = false, blockOpt.block = true;
     const float views[] = {40.0f, 80.0f, 150.0f};
     std::printf("High, 1920x1080, blurred AO in levels of 255:\n");
     for (float dist : views) {
@@ -623,6 +679,23 @@ int main(int argc, char** argv) {
         Check(ce > 0.9 * c0, "Edge-aware smoothing keeps the contact shade" + at);
         Check(be >= b0 - 0.05, "Edge-aware smoothing carries no more shade across silhouettes" + at);
         Check(re <= r0 + 0.25, "Edge-aware smoothing leaves no interleave pattern on the open floor (within 0.25 of a level)" + at);
+        // Fewer directions in the open: a tier per 4x4 block
+        const std::vector<float> blk = sc.Run(ps[1], slices, true, blockOpt), tiers = sc.Blocks();
+        Check(!tiers.empty(), "block tiers read back");
+        if (!tiers.empty()) {
+            const Stats d = Diff(img[0], blk, f);
+            const double half = double(std::count(tiers.begin(), tiers.end(), 2.0f)) / tiers.size(), rb = Roughness(blk, f), cb = MeanShade(blk, f, Contact);
+            double step, refStep;
+            long pairs;
+            BlockEdges(blk, img[0], tiers, f, sc.blockW, sc.blockH, step, refStep, pairs);
+            std::printf("         fewer directions in the open vs default: mean %.3f max %.2f; %.1f%% of the blocks at half the count; floor roughness %.3f -> %.3f; contact shade kept %.1f%%; shade step at %ld count-change block edges %.3f (default image %.3f)\n",
+                        d.mean, d.max, 100 * half, r0, rb, c0 > 0 ? 100 * cb / c0 : 0.0, pairs, step, refStep);
+            Check(half > 0.2, "open surfaces: at least a fifth of the blocks at half the count" + at);
+            Check(d.mean <= 1.0, "open surfaces: at most 1 level from the default on average" + at);
+            Check(cb > 0.95 * c0 && cb < 1.05 * c0, "open surfaces: contact shade within 5% of the default" + at);
+            Check(rb <= 1.1 * r0 + 0.02, "open surfaces: the open floor as smooth as the default" + at);
+            Check(step <= 1.1 * refStep + 0.05, "open surfaces: no blotches at block edges where the count changes" + at);
+        }
     }
 
     // 3. Steady direction count: walls 2% either side of each threshold in turn, then well past the band and back
@@ -665,10 +738,13 @@ int main(int argc, char** argv) {
         const Frame f = Render(3840, 2160, dist);
         Scene sc(gpu, f, passes);
         if (!sc.Ok()) continue;
-        std::vector<double> t[kVariants];
-        for (int r = 0; r < 12; r++)
+        std::vector<double> t[kVariants + 1];
+        for (int r = 0; r < 12; r++) {
             for (int v = 0; v < kVariants; v++) t[v].push_back(sc.Time([&] { sc.Ao(ps[v], slices, v & 1); }, 5));
-        std::printf("  %3.0f m: default %.3f, zoom %.3f, smooth %.3f, both %.3f\n", dist, Median(t[0]), Median(t[1]), Median(t[2]), Median(t[3]));
+            t[kVariants].push_back(sc.Time([&] { sc.Ao(ps[1], slices, true, blockOpt); }, 5));
+        }
+        std::printf("  %3.0f m: default %.3f, zoom %.3f, smooth %.3f, both %.3f, open surfaces %.3f\n", dist, Median(t[0]), Median(t[1]), Median(t[2]), Median(t[3]),
+                    Median(t[kVariants]));
     }
     // the AO pass and its blur together (what an option that changes the blur or adds a pass costs or saves)
     std::printf("AO and blur passes GPU time, High, 3840x2160, 40 m (ms):\n");
@@ -691,7 +767,7 @@ int main(int argc, char** argv) {
         }
     }
     for (auto*& p : ps) Release(p);
-    Release(passes.blur), Release(passes.blurEdges), Release(passes.zoomTier);
+    Release(passes.blur), Release(passes.blurEdges), Release(passes.zoomTier), Release(passes.blockTier), Release(passes.blockSpread);
     std::printf("%d checks, %d failed\n", g_checks, g_failures);
     return g_failures ? 1 : 0;
 }

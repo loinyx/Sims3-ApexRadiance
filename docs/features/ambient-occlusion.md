@@ -50,12 +50,13 @@ Each frame:
 | Also in map view | `noMapa` | bool | on | | Shades the map view with radii sized for houses and trees (contact 4 m, large 15 m, no distance fade) |
 | Fewer directions when far | `zoomSlices` | bool | off | | One direction count per frame, from the depth at the screen centre: the Quality's count closer than 60 m, 3/4 of it from 60 m, 1/2 from 120 m (at least 2) |
 | Steady direction count | `zoomHysteresis` | bool | off | | With Fewer directions when far: the count changes 10% past a threshold and changes back 10% before it (60 m: 66 and 54 m; 120 m: 132 and 108 m) |
+| Fewer directions in the open | `blockSlices` | bool | off | | One direction count per 4x4 block of pixels: half the Quality's count where the depth does not bend within reach, the full count elsewhere and one block around |
 | Smooth flat surfaces | `blendNormals` | bool | off | | Blended normal reconstruction (XeGTAO's edge weights): no per-pixel pick of the neighbour, so a depth crease along a mesh seam cannot flip the normal pixel by pixel |
 | Edge-aware smoothing | `edgeBlur` | bool | off | | The 4x4 box weighs each tap by the AO pass's edge weights instead of the 1/z ratio, and the tent passes are dropped. The AO targets get 4 channels (A16B16G16R16F); without that format the usual blur runs |
 | Reach | `alcance` | float | 166% | 50 to 200% | Scales all radii |
 | Keep lamp light | `protegerLuz` | float | 46% | 0 to 100% | Share of light that bright and lamp-lit pixels keep |
 | Developer > Visual effects > Ambient shadows > Show the shade alone | (not saved) | bool | off | | Shows only the shade, in grey (developer mode) |
-| (none) | `revisao` | int | 12 | | Settings revision. Older files keep every saved value and only gain missing keys |
+| (none) | `revisao` | int | 13 | | Settings revision. Older files keep every saved value and only gain missing keys |
 
 All settings apply immediately. Keys from the old combined build (`intensidade`, `raioM`, `visualizar`) are not read.
 
@@ -123,6 +124,20 @@ resting at a threshold can change the count from one frame to the next.
 **Smooth flat surfaces** (`blendNormals`). The normal is the sum of the four quadrant normals (left-up, up-right,
 right-down, down-left), each weighted by the product of its two edge weights, `saturate(1.25 - e / (0.011 z))` with the
 slope-adjusted depth step `e` (XeGTAO, Intel, MIT). On a plane all four are parallel, so the result is the plane.
+
+**Fewer directions in the open** (`blockSlices`). A pass at a quarter of the width and height gives each 4x4
+block of pixels (the blocks of the Bayer interleave) a tier, so a count never changes inside a block and each block
+keeps one direction set. A block keeps the full count where the depth bends within reach: 1/z is linear across the
+screen on a plane, so its second difference over one texel either side is 0 on an open surface. The pass takes it at
+pyramid levels 2 to 8 (texels of 4 to 256 px, up to the large radius on screen) and compares the largest with 0.05%
+of the block's 1/z. Sky and off-screen neighbours bend nothing; a level whose taps would leave the screen is skipped.
+A second pass gives each block the lowest tier of its 3x3 blocks, so the count changes one block away from anything
+that bends, and never below the frame's tier. Open blocks use half the count (ASSAO's importance map decides a sample
+count the same way, from a low-resolution map that is then spread). Each count spreads its own angles. Offline check
+(High, 1080p): 67 to 78% of the blocks at half the count, the image within 0.01 of a level of the default on average,
+contact shade 100.0%, and the shade step across block edges where the count changes equal to the default image's.
+Objects thinner than about a seventh of their distance to a block (in pixels) can be missed at the coarse levels;
+the block then gets the lower Quality's noise, not a different shade. The threshold is not yet tuned in game.
 
 **Edge-aware smoothing** (`edgeBlur`). The option variants of GtaoPS also write two soft edge weights per pixel, towards
 the right and the lower neighbour: `saturate(1.25 - e / (0.011 z))` with the slope-adjusted depth step `e` (XeGTAO's
