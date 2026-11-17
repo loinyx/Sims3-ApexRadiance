@@ -146,7 +146,7 @@ for (const e of per.values()) {
   if (composited) {
     const r = albedoRule(e.blob.code, e.bind);
     stats[v].composited++;
-    if (r.status === 'ok' || r.status === 'unlit') rules.push({ hash: e.blob.hash, at: r.at, reg: r.reg, cls: samplerClasses(e.bind) }), stats[v].rule++;
+    if (r.status === 'ok' || r.status === 'unlit') rules.push({ hash: e.blob.hash, at: r.at, reg: r.reg, cls: samplerClasses(e.bind), leaf: e.bind.get('WorldLeavesTexture') || new Set() }), stats[v].rule++;
   }
   rows.push({ hash: e.blob.hash, albedo: albedo < 0 ? 255 : albedo, probe: probe < 0 ? 255 : probe, id, cls, tech: e.tech });
 }
@@ -200,8 +200,8 @@ inline const GBufferShaderId* FindGBufferShader(uint32_t hash) {
 }
 `;
 if (process.argv[3]) fs.writeFileSync(process.argv[3], header);
-if (process.argv[5]) // for the offline check: per albedo rule, the class of samplers 0..15 (A albedo, M material, L light, - none)
-  fs.writeFileSync(process.argv[5], rules.map(r => `${r.hash.toString(16).toUpperCase()} ${[...Array(16).keys()].map(s => r.cls.get(s) || '-').join('')}`).join('\n') + '\n');
+if (process.argv[5]) // for the offline check: per albedo rule, the class of samplers 0..15 (A albedo, M material, F the leaf-litter colour (WorldLeavesTexture, material class), L light, - none)
+  fs.writeFileSync(process.argv[5], rules.map(r => `${r.hash.toString(16).toUpperCase()} ${[...Array(16).keys()].map(s => r.cls.get(s) === 'M' && r.leaf.has(s) ? 'F' : r.cls.get(s) || '-').join('')}`).join('\n') + '\n');
 if (process.argv[4]) {
   const fam = new Map();
   for (const r of rows) for (const t of r.tech) (fam.get(t) || fam.set(t, []).get(t)).push(r.hash.toString(16).toUpperCase());

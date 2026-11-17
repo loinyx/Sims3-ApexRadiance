@@ -26,6 +26,7 @@
 #include "d3d9_extra_hooks.h"
 #include "render_callbacks.h"
 #include "d3d9_bootstrap.h"
+#include "d3d9_hooks.h"
 #include "scene_dither.h"
 #include "scene_target.h"
 #include "depth_share.h"
@@ -33,8 +34,10 @@
 #include "world_session.h"
 #include "shader_cache.h"
 #include "gbuffer_motion.h"
+#include "gbuffer_movers.h"
 #include <d3d9.h>
 #include <d3dcompiler.h>
+#include <algorithm>
 #include <cstring>
 #include <format>
 #include <iterator>
@@ -44,23 +47,34 @@ namespace {
 
 constexpr int kBoundaryOrder = PostScene::kAmbientOcclusion - 9; // first: the scene's extra targets are unbound
 constexpr int kMotionOrder = PostScene::kAmbientOcclusion - 5; // before every effect that could take it
+constexpr int kTaaOrder = PostScene::kEdgeSmoothing - 5;        // (GB-05) after Ambient Occlusion's composite, before Edge Smoothing
 constexpr int kViewOrder = PostScene::kDepthBlur + 5;          // after the effects, before Picture's Color
-constexpr D3DFORMAT kMotionFormat = D3DFMT_G16R16F;
+constexpr D3DFORMAT kMotionFormat = D3DFMT_A16B16G16R16F;      // rg motion, b = 1: a mover's own vector (GB-05)
+constexpr D3DFORMAT kTaaFormat = D3DFMT_A16B16G16R16F;
+constexpr float kTaaDepthTolerance = 0.05f; // the history's 1/z against the camera's prediction (relative), as Ambient Occlusion's
 
 const char* kShaderSource = R"HLSL(
 sampler2D sIn : register(s0);     // the depth (MotionPS); the motion target or albedo + id (ViewPS)
 sampler2D sNormal : register(s1); // normal + roughness + class
 sampler2D sDepth : register(s2);
+sampler2D sObj : register(s3);    // MotionPS (GB-05): the movers' target, (mv, device depth, 1) where a mover was drawn
 float4 cD0 : register(c0); // rows of D = prevViewProj * inverse(viewProj)
 float4 cD1 : register(c1);
 float4 cD2 : register(c2);
 float4 cD3 : register(c3);
 float4 cFlags : register(c4); // x = 1: the whole frame is invalid; y = invalid value; z = view scale; w = view
+float4 cJit : register(c5);   // MotionPS: xy = this frame's jitter (clip units), z = mover depth match, w = 1: movers' target bound
 
 float4 MotionPS(float2 uv : TEXCOORD0) : COLOR0
 {
     if (cFlags.x > 0.5) return float4(cFlags.y, cFlags.y, 0, 0);
-    float4 p = float4(uv.x * 2 - 1, 1 - uv.y * 2, tex2D(sIn, uv).r, 1);
+    float d = tex2D(sIn, uv).r;
+    if (cJit.w > 0.5) { // a mover drawn here and still the visible surface (its depth): its own vector
+        float4 o = tex2D(sObj, uv);
+        if (o.a > 0.5 && abs(o.b - d) <= cJit.z) return float4(o.xy, 1, 0);
+    }
+    // the pixel shows the surface point whose unjittered NDC is ndc(uv) - jitter
+    float4 p = float4(uv.x * 2 - 1 - cJit.x, 1 - uv.y * 2 - cJit.y, d, 1);
     float4 q = float4(dot(cD0, p), dot(cD1, p), dot(cD2, p), dot(cD3, p));
     if (q.w <= 1e-6) return float4(cFlags.y, cFlags.y, 0, 0);
     return float4(p.xy - q.xy / q.w, 0, 0);
@@ -68,10 +82,10 @@ float4 MotionPS(float2 uv : TEXCOORD0) : COLOR0
 
 float4 ViewPS(float2 uv : TEXCOORD0) : COLOR0
 {
-    if (cFlags.w < 1.5) {
-        float2 mv = tex2D(sIn, uv).rg;
+    if (cFlags.w < 1.5) { // blue full: a mover's own vector (GB-05)
+        float3 mv = tex2D(sIn, uv).rgb;
         if (max(abs(mv.x), abs(mv.y)) > 1000) return float4(1, 0, 1, 1);
-        return float4(saturate(0.5 + mv * cFlags.z), 0.5, 1);
+        return float4(saturate(0.5 + mv.xy * cFlags.z), mv.z > 0.5 ? 1 : 0.5, 1);
     }
     float4 a = tex2D(sIn, uv);
     float4 n = tex2D(sNormal, uv);
@@ -95,10 +109,83 @@ float4 ViewPS(float2 uv : TEXCOORD0) : COLOR0
 }
 )HLSL";
 
-ShaderCache::Id AddShader(const char* tag, const char* entry) {
+// (GB-05) temporal anti-aliasing on the temporal core of GB-04: the scene drawn with a sub-pixel Halton jitter, resolved
+// against last frame's resolved colour at the reprojected position (camera and mover motion), rejected by motion
+// class 3 and by a history surface (material id, 1/z the camera predicts) none of the 3 x 3 pixels shows, the history
+// clamped to the 3 x 3 neighbourhood of this frame's samples and blended by 1 / frames; a pixel without history shows this frame's colour at its unjittered centre (bilinear)
+const char* kTaaSource = R"HLSL(
+sampler2D sCur : register(s0);  // this frame's scene colour (jittered), bilinear
+sampler2D sHist : register(s1); // last frame's resolved colour (rgb), bilinear
+sampler2D sAux : register(s2);  // last frame's 1/z, material id / 255, frames (A16B16G16R16F), point
+sampler2D sMot : register(s3);  // motion (rg) and the mover flag (b), point
+sampler2D sAlb : register(s4);  // G-buffer target 1: material id / 255 (a), point
+sampler2D sNrm : register(s5);  // G-buffer target 2: motion class / 3 (a), point
+sampler2D sDep : register(s6);  // INTZ scene depth, point
+float4 cSize : register(c0);    // xy = 1 / size, zw = size
+float4 cJ : register(c1);       // xy = jitter in uv (the unjittered centre's point is drawn at uv + xy), z = 1: history valid, w = most frames
+float4 cD3 : register(c2);      // row 3 of the camera's D (q.w = previous view depth / this one)
+float4 cZ : register(c3);       // x = A, y = 1 / (near A) (1/z = (A - d) / (near A)), z = 1/z tolerance (relative)
+float4 cS : register(c4);       // SharpenPS: x = amount
+
+struct TaaOut { float4 color : COLOR0; float4 aux : COLOR1; };
+TaaOut TaaPS(float2 uv : TEXCOORD0)
+{
+    TaaOut o;
+    float3 c = tex2Dlod(sCur, float4(uv, 0, 0)).rgb;
+    float3 v = tex2Dlod(sCur, float4(uv + cJ.xy, 0, 0)).rgb; // without history: the unjittered centre
+    float d = tex2Dlod(sDep, float4(uv, 0, 0)).r;
+    float w = d >= 0.99999 ? 0 : max(cZ.x - d, 1e-7) * cZ.y;
+    float id = tex2Dlod(sAlb, float4(uv, 0, 0)).a;
+    float cls = floor(tex2Dlod(sNrm, float4(uv, 0, 0)).a * 3 + 0.5);
+    float4 m = tex2Dlod(sMot, float4(uv, 0, 0));
+    if (m.b > 0.5) cls = 1;
+    float2 puv = uv - m.xy * float2(0.5, -0.5);
+    float2 pu = uv - cJ.xy; // the drawn point's unjittered position
+    float qw = w > 0 ? dot(cD3, float4(pu.x * 2 - 1, 1 - pu.y * 2, d, 1)) : 1;
+    float frames = 1;
+    [branch] if (cJ.z > 0.5 && cls < 2.5 && max(abs(m.x), abs(m.y)) < 1000 && all(puv >= 0) && all(puv <= 1) && qw > 1e-6) {
+        float4 a = tex2Dlod(sAux, float4(puv, 0, 0));
+        // the history's surface (id, 1/z the camera predicts) must be one of the 3 x 3 surfaces this frame shows: at an
+        // edge the jitter alternates between the two sides, which keeps their history; a surface that left the
+        // neighbourhood (disocclusion, a cut) starts a new one
+        float3 lo = c, hi = c;
+        bool seen = false;
+        [unroll] for (int y = -1; y <= 1; y++)
+            [unroll] for (int x = -1; x <= 1; x++) {
+                float2 nuv = uv + float2(x, y) * cSize.xy;
+                float3 n = tex2Dlod(sCur, float4(nuv, 0, 0)).rgb;
+                lo = min(lo, n);
+                hi = max(hi, n);
+                float nd = tex2Dlod(sDep, float4(nuv, 0, 0)).r;
+                float nw = nd >= 0.99999 ? 0 : max(cZ.x - nd, 1e-7) * cZ.y;
+                bool sameZ = nw > 0 ? a.r > 0 && abs(nw / (qw * a.r) - 1) < cZ.z : a.r == 0;
+                seen = seen || (sameZ && abs(tex2Dlod(sAlb, float4(nuv, 0, 0)).a - a.g) < 0.5 / 255);
+            }
+        if (a.b > 0 && seen) {
+            frames = min(a.b + 1, cJ.w);
+            v = lerp(clamp(tex2Dlod(sHist, float4(puv, 0, 0)).rgb, lo, hi), c, 1 / frames);
+        }
+    }
+    o.color = float4(v, 1);
+    o.aux = float4(w, id, frames, 0);
+    return o;
+}
+
+// the resolved colour into the back buffer (rgb only: its alpha is the game's), with a light sharpen held to the cross
+float4 SharpenPS(float2 uv : TEXCOORD0) : COLOR0
+{
+    float3 c = tex2Dlod(sCur, float4(uv, 0, 0)).rgb;
+    float3 n = tex2Dlod(sCur, float4(uv - float2(0, cSize.y), 0, 0)).rgb, s = tex2Dlod(sCur, float4(uv + float2(0, cSize.y), 0, 0)).rgb;
+    float3 e = tex2Dlod(sCur, float4(uv + float2(cSize.x, 0), 0, 0)).rgb, w = tex2Dlod(sCur, float4(uv - float2(cSize.x, 0), 0, 0)).rgb;
+    float3 lo = min(c, min(min(n, s), min(e, w))), hi = max(c, max(max(n, s), max(e, w)));
+    return float4(clamp(c + cS.x * (4 * c - n - s - e - w) * 0.25, lo, hi), 1);
+}
+)HLSL";
+
+ShaderCache::Id AddShader(const char* tag, const char* entry, const char* source = kShaderSource) {
     ShaderCache::Desc d;
     d.tag = tag;
-    d.source = kShaderSource;
+    d.source = source;
     d.sourceName = "gbuffer.hlsl";
     d.entry = entry;
     d.target = "ps_3_0";
@@ -108,6 +195,8 @@ ShaderCache::Id AddShader(const char* tag, const char* entry) {
 }
 const ShaderCache::Id kMotionPsId = AddShader("GBuffer MotionPS", "MotionPS");
 const ShaderCache::Id kViewPsId = AddShader("GBuffer ViewPS", "ViewPS");
+const ShaderCache::Id kTaaPsId = AddShader("GBuffer TaaPS", "TaaPS", kTaaSource);
+const ShaderCache::Id kSharpenPsId = AddShader("GBuffer SharpenPS", "SharpenPS", kTaaSource);
 
 template <class T> void SafeRelease(T*& p) {
     if (p) { p->Release(); p = nullptr; }
@@ -141,6 +230,27 @@ struct State {
     // counters for the 10 s line
     unsigned frames = 0, cuts = 0, noCamera = 0;
     unsigned long long lastLog = 0, sceneLog = 0;
+    // (GB-05) movers and temporal AA: settings (read when the G-buffer is switched on) and what was installed
+    bool movers = false, taa = false;
+    float taaSharpen = 0.25f;
+    int taaFrames = 16;
+    bool moversOn = false, taaOn = false;
+    GBufferMotion::JitterClock clock; // the jitter set for the scene being drawn (Present -> boundary)
+    float jitter[2] = {};         // this frame's scene jitter (clip units), for the boundary's passes
+    bool jitterThisFrame = false;
+    unsigned long long presents = 0, taaRanAt = 0; // Present count; the count of the frame the TAA history was written in
+    IDirect3DPixelShader9* psTaa = nullptr;
+    IDirect3DPixelShader9* psSharpen = nullptr;
+    bool taaShadersTried = false, taaFailed = false, taaLogged = false;
+    IDirect3DTexture9* taaCur = nullptr;      // copy of this frame's scene colour
+    IDirect3DSurface9* taaCurSurf = nullptr;
+    IDirect3DTexture9* taaColor[2] = {};      // resolved colour (rgb, A16B16G16R16F)
+    IDirect3DTexture9* taaAux[2] = {};        // 1/z, material id / 255, frames
+    IDirect3DSurface9* taaColorSurf[2] = {};
+    IDirect3DSurface9* taaAuxSurf[2] = {};
+    int taaPing = 0;
+    UINT taaW = 0, taaH = 0;
+    unsigned taaRuns = 0, taaNoInput = 0, moverFrames = 0;
 } g;
 
 const char* YesNo(bool b) { return b ? "yes" : "no"; }
@@ -289,12 +399,13 @@ constexpr D3DRENDERSTATETYPE kRenderStates[] = {D3DRS_ZENABLE, D3DRS_ZWRITEENABL
 constexpr D3DSAMPLERSTATETYPE kSamplerStates[] = {D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER, D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV, D3DSAMP_SRGBTEXTURE};
 constexpr int kRS = static_cast<int>(std::size(kRenderStates));
 constexpr int kSS = static_cast<int>(std::size(kSamplerStates));
-constexpr UINT kPSConsts = 5; // c0..c4
-constexpr DWORD kTextures = 3; // s0..s2 (the views read three)
+constexpr UINT kPSConsts = 6; // c0..c5
+constexpr DWORD kTextures = 7; // s0..s6 (the temporal AA reads seven)
 
 struct SavedState {
     IDirect3DDevice9* dev = nullptr;
     IDirect3DSurface9* rt0 = nullptr;
+    IDirect3DSurface9* rt1 = nullptr; // (the temporal AA writes two targets)
     IDirect3DSurface9* ds = nullptr;
     IDirect3DPixelShader9* ps = nullptr;
     IDirect3DVertexShader9* vs = nullptr;
@@ -317,6 +428,7 @@ struct SavedState {
     }
     bool Capture(IDirect3DDevice9* d) {
         bool ok = SUCCEEDED(d->GetRenderTarget(0, &rt0)) && rt0;
+        if (FAILED(d->GetRenderTarget(1, &rt1))) rt1 = nullptr;
         const HRESULT depth = ExtraHooks::RawGetDepthStencilSurface(d, &ds);
         ok &= SUCCEEDED(depth) || (depth == D3DERR_NOTFOUND && !ds);
         ok &= SUCCEEDED(d->GetPixelShader(&ps)) && SUCCEEDED(d->GetVertexShader(&vs));
@@ -335,6 +447,7 @@ struct SavedState {
     }
     void Restore() {
         dev->SetRenderTarget(0, rt0); // resets the viewport, so it goes first
+        dev->SetRenderTarget(1, rt1);
         ExtraHooks::RawSetDepthStencilSurface(dev, ds);
         for (DWORD t = 0; t < kTextures; t++) {
             dev->SetTexture(t, tex[t]);
@@ -351,23 +464,27 @@ struct SavedState {
         dev = nullptr;
     }
     void Release() {
-        SafeRelease(rt0); SafeRelease(ds); SafeRelease(ps); SafeRelease(vs); SafeRelease(decl); SafeRelease(stream0);
+        SafeRelease(rt0); SafeRelease(rt1); SafeRelease(ds); SafeRelease(ps); SafeRelease(vs); SafeRelease(decl); SafeRelease(stream0);
         for (auto& t : tex) SafeRelease(t);
     }
 };
 
-void DrawPass(IDirect3DDevice9* dev, IDirect3DSurface9* target, IDirect3DBaseTexture9* const input[kTextures], IDirect3DPixelShader9* ps, const float c[kPSConsts][4]) {
+// target1: a second target (or null); linear: a bit per input sampled bilinear; writeMask: target 0's channels
+void DrawPass(IDirect3DDevice9* dev, IDirect3DSurface9* target, IDirect3DBaseTexture9* const input[kTextures], IDirect3DPixelShader9* ps, const float c[kPSConsts][4],
+              IDirect3DSurface9* target1 = nullptr, unsigned linear = 0, DWORD writeMask = 0xF) {
     ExtraHooks::RawSetDepthStencilSurface(dev, nullptr); // the depth is sampled, so it must not be bound
     dev->SetRenderTarget(0, target);
+    dev->SetRenderTarget(1, target1);
     dev->SetVertexShader(nullptr);
     dev->SetFVF(D3DFVF_XYZRHW | D3DFVF_TEX1);
     for (int i = 0; i < kRS; i++) dev->SetRenderState(kRenderStates[i], FALSE);
     dev->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
-    dev->SetRenderState(D3DRS_COLORWRITEENABLE, 0xF);
+    dev->SetRenderState(D3DRS_COLORWRITEENABLE, writeMask);
     for (DWORD t = 0; t < kTextures; t++) {
         dev->SetTexture(t, input[t]);
-        dev->SetSamplerState(t, D3DSAMP_MINFILTER, D3DTEXF_POINT);
-        dev->SetSamplerState(t, D3DSAMP_MAGFILTER, D3DTEXF_POINT);
+        const DWORD filter = (linear >> t) & 1 ? D3DTEXF_LINEAR : D3DTEXF_POINT;
+        dev->SetSamplerState(t, D3DSAMP_MINFILTER, filter);
+        dev->SetSamplerState(t, D3DSAMP_MAGFILTER, filter);
         dev->SetSamplerState(t, D3DSAMP_MIPFILTER, D3DTEXF_NONE);
         dev->SetSamplerState(t, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
         dev->SetSamplerState(t, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
@@ -387,6 +504,9 @@ void DrawPass(IDirect3DDevice9* dev, IDirect3DSurface9* target, IDirect3DBaseTex
 // draws over the back buffer, and made (or made again in a new size) for the next scene draws
 void BoundaryEffect(IDirect3DDevice9* dev) {
     LogCaps(dev);
+    // (GB-05) the scene is drawn: what follows (effects, the UI) is not moved; this frame's passes un-jitter by g.jitter
+    g.jitterThisFrame = g.clock.Boundary(g.jitter);
+    if (g.jitterThisFrame) SceneBinder::SetFrameJitter(false, 0, 0);
     SceneBinder::GBufferUnbind(dev);
     EnsureGBufferTargets(dev);
     const SceneBinder::GBufferCounts c = SceneBinder::TakeGBufferCounts();
@@ -427,16 +547,19 @@ void MotionEffect(IDirect3DDevice9* dev) {
     bool invalid = !haveCamera || !g.havePrev || !GBufferMotion::Reproject(vp, g.prevVp, D);
     if (!invalid && GBufferMotion::IsCut(D)) invalid = true, g.cuts++;
     if (!haveCamera) g.noCamera++;
-    const float c[kPSConsts][4] = {
+    float c[kPSConsts][4] = {
         {float(D[0][0]), float(D[0][1]), float(D[0][2]), float(D[0][3])},
         {float(D[1][0]), float(D[1][1]), float(D[1][2]), float(D[1][3])},
         {float(D[2][0]), float(D[2][1]), float(D[2][2]), float(D[2][3])},
         {float(D[3][0]), float(D[3][1]), float(D[3][2]), float(D[3][3])},
-        {invalid ? 1.0f : 0.0f, GBufferMotion::kInvalid, 0, 0}};
+        {invalid ? 1.0f : 0.0f, GBufferMotion::kInvalid, 0, 0},
+        {g.jitter[0], g.jitter[1], GBufferMovers::kDepthMatch, 0}};
+    IDirect3DTexture9* movers = GBufferMovers::Target();
+    if (movers) c[5][3] = 1.0f, g.moverFrames++;
     {
         SavedState saved;
         if (!saved.Capture(dev)) return;
-        IDirect3DBaseTexture9* const in[kTextures] = {depth, nullptr, nullptr};
+        IDirect3DBaseTexture9* const in[kTextures] = {depth, nullptr, nullptr, movers};
         DrawPass(dev, g.motionSurf, in, g.psMotion, c);
     }
     for (int k = 0; k < 4; k++) g.dRow3[k] = invalid ? 0.0f : static_cast<float>(D[3][k]);
@@ -446,13 +569,21 @@ void MotionEffect(IDirect3DDevice9* dev) {
     g.frames++;
     if (!g.loggedRunning) {
         g.loggedRunning = true;
-        LOG_INFO(std::format("[GBuffer] Motion pass running: {}x{} G16R16F, view={}", g.width, g.height, ViewName(g.view)));
+        LOG_INFO(std::format("[GBuffer] Motion pass running: {}x{} A16B16G16R16F, view={}", g.width, g.height, ViewName(g.view)));
     }
     const unsigned long long now = GetTickCount64();
     if (now - g.lastLog >= 10000) {
         if (g.lastLog) LOG_INFO(std::format("[GBuffer] Motion: frames={} cuts={} noCamera={} view={}", g.frames, g.cuts, g.noCamera, ViewName(g.view)));
+        if (g.lastLog && g.moversOn) {
+            const GBufferMovers::Counts m = GBufferMovers::TakeCounts();
+            LOG_INFO(std::format("[GBuffer] Movers: draws={} noSlice={} firstSeen={} still={} replayed={} noRoom={} capped={} frames={}", m.draws, m.noSlice,
+                                 m.firstSeen, m.still, m.replayed, m.noRoom, m.capped, g.moverFrames));
+        }
+        if (g.lastLog && g.taaOn)
+            LOG_INFO(std::format("[GBuffer] TAA: resolved={} noInput={} phases={} sharpen={:.2f}", g.taaRuns, g.taaNoInput, g.taaFrames, g.taaSharpen));
         g.lastLog = now;
         g.frames = g.cuts = g.noCamera = 0;
+        g.moverFrames = g.taaRuns = g.taaNoInput = 0;
     }
 }
 
@@ -461,7 +592,7 @@ void ViewEffect(IDirect3DDevice9* dev) {
     if (g.view == 1 ? !g.motionThisFrame : !g.gbTex[0]) return;
     IDirect3DSurface9* bb = nullptr;
     if (FAILED(dev->GetRenderTarget(0, &bb)) || !bb) return;
-    const float c[kPSConsts][4] = {{}, {}, {}, {}, {0, GBufferMotion::kInvalid, 20.0f, static_cast<float>(g.view)}}; // 0.025 NDC = full colour
+    const float c[kPSConsts][4] = {{}, {}, {}, {}, {0, GBufferMotion::kInvalid, 20.0f, static_cast<float>(g.view)}, {}}; // 0.025 NDC = full colour
     IDirect3DBaseTexture9* const in[kTextures] = {g.view == 1 ? g.motion : g.gbTex[0], g.gbTex[1], g.view == 6 ? DepthShare::Texture() : nullptr};
     {
         SavedState saved;
@@ -470,13 +601,111 @@ void ViewEffect(IDirect3DDevice9* dev) {
     SafeRelease(bb);
 }
 
+
+// ---- (GB-05) temporal anti-aliasing ----
+void ReleaseTaa() {
+    SafeRelease(g.taaCurSurf);
+    SafeRelease(g.taaCur);
+    for (int i = 0; i < 2; i++) SafeRelease(g.taaColorSurf[i]), SafeRelease(g.taaColor[i]), SafeRelease(g.taaAuxSurf[i]), SafeRelease(g.taaAux[i]);
+    g.taaW = g.taaH = 0;
+    g.taaRanAt = 0;
+}
+
+bool EnsureTaa(IDirect3DDevice9* dev, UINT w, UINT h, D3DFORMAT colorFormat) {
+    if (!g.psTaa && !g.taaShadersTried) {
+        g.taaShadersTried = true;
+        std::string msg;
+        if (ShaderCache::CreatePixelShader(dev, kTaaPsId, &g.psTaa, &msg) != ShaderCache::Result::Ok ||
+            ShaderCache::CreatePixelShader(dev, kSharpenPsId, &g.psSharpen, &msg) != ShaderCache::Result::Ok) {
+            LOG_ERROR("[GBuffer] TAA shaders unavailable: " + msg);
+            g.taaFailed = true;
+        }
+    }
+    if (g.taaFailed || !g.psTaa || !g.psSharpen) return false;
+    if (g.taaCur && g.taaW == w && g.taaH == h) return true;
+    ReleaseTaa();
+    bool ok = SUCCEEDED(dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, colorFormat, D3DPOOL_DEFAULT, &g.taaCur, nullptr)) && g.taaCur &&
+              SUCCEEDED(g.taaCur->GetSurfaceLevel(0, &g.taaCurSurf));
+    for (int i = 0; i < 2 && ok; i++)
+        ok = SUCCEEDED(dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, kTaaFormat, D3DPOOL_DEFAULT, &g.taaColor[i], nullptr)) && g.taaColor[i] &&
+             SUCCEEDED(g.taaColor[i]->GetSurfaceLevel(0, &g.taaColorSurf[i])) &&
+             SUCCEEDED(dev->CreateTexture(w, h, 1, D3DUSAGE_RENDERTARGET, kTaaFormat, D3DPOOL_DEFAULT, &g.taaAux[i], nullptr)) && g.taaAux[i] &&
+             SUCCEEDED(g.taaAux[i]->GetSurfaceLevel(0, &g.taaAuxSurf[i]));
+    if (!ok) {
+        ReleaseTaa();
+        g.taaFailed = true;
+        LOG_ERROR(std::format("[GBuffer] Could not create the {}x{} TAA targets; TAA off", w, h));
+        return false;
+    }
+    g.taaW = w, g.taaH = h;
+    LOG_INFO(std::format("[GBuffer] TAA running: {}x{}, {} jitter phases, sharpen {:.2f}", w, h, g.taaFrames, g.taaSharpen));
+    return true;
+}
+
+// After Ambient Occlusion's composite: this frame's jittered scene and last frame's resolved colour -> a new resolved
+// colour (history), sharpened into the back buffer (rgb; the alpha stays the game's)
+void TaaEffect(IDirect3DDevice9* dev) {
+    if (!g.taaOn) return;
+    IDirect3DTexture9* gb[2] = {};
+    float dRow3[4] = {};
+    IDirect3DTexture9* motion = GBuffer::Motion(dRow3);
+    IDirect3DTexture9* depth = DepthShare::Texture();
+    if (!motion || !GBuffer::Targets(gb) || !depth) { g.taaNoInput++; return; }
+    IDirect3DSurface9* bb = nullptr;
+    if (FAILED(dev->GetRenderTarget(0, &bb)) || !bb) return;
+    D3DSURFACE_DESC bd{};
+    bb->GetDesc(&bd);
+    const D3DFORMAT colorFormat = bd.Format == D3DFMT_X8R8G8B8 ? D3DFMT_A8R8G8B8 : bd.Format;
+    if (!EnsureTaa(dev, bd.Width, bd.Height, colorFormat) || FAILED(dev->StretchRect(bb, nullptr, g.taaCurSurf, nullptr, D3DTEXF_NONE))) {
+        SafeRelease(bb);
+        return;
+    }
+    const float W = static_cast<float>(bd.Width), H = static_cast<float>(bd.Height);
+    const float nearZ = PostScene::CameraNear() > 0.0f ? PostScene::CameraNear() : 0.25f, A = PostScene::CameraDepthA();
+    const bool valid = g.taaRanAt && g.taaRanAt + 1 == g.presents; // written last frame, same targets
+    const int cur = g.taaPing, next = cur ^ 1;
+    const float c[kPSConsts][4] = {{1.0f / W, 1.0f / H, W, H},
+                                   {0.5f * g.jitter[0], -0.5f * g.jitter[1], valid ? 1.0f : 0.0f, static_cast<float>(std::clamp(g.taaFrames, 4, 16))},
+                                   {dRow3[0], dRow3[1], dRow3[2], dRow3[3]},
+                                   {A, 1.0f / (nearZ * A), kTaaDepthTolerance, 0},
+                                   {std::clamp(g.taaSharpen, 0.0f, 1.0f), 0, 0, 0},
+                                   {}};
+    {
+        SavedState saved;
+        if (saved.Capture(dev)) {
+            IDirect3DBaseTexture9* const in[kTextures] = {g.taaCur, g.taaColor[cur], g.taaAux[cur], motion, gb[0], gb[1], depth};
+            DrawPass(dev, g.taaColorSurf[next], in, g.psTaa, c, g.taaAuxSurf[next], 0x3 /* colour and history bilinear */);
+            IDirect3DBaseTexture9* const out[kTextures] = {g.taaColor[next]};
+            DrawPass(dev, bb, out, g.psSharpen, c, nullptr, 0, D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE);
+        }
+    }
+    SafeRelease(bb);
+    g.taaPing = next;
+    g.taaRanAt = g.presents;
+    g.taaRuns++;
+}
+
+// Present: the next frame's sub-pixel offset (Halton 2, 3 over taaFrames phases), set for its scene draws until the boundary
+void OnPresent(IDirect3DDevice9* dev) {
+    g.presents++;
+    if (!g.taaOn || !g.gbTex[0]) return;
+    (void)dev;
+    g.clock.Present(static_cast<unsigned>(g.taaFrames), g.gbWidth, g.gbHeight);
+    SceneBinder::SetFrameJitter(true, g.clock.offset[0], g.clock.offset[1]);
+}
+
 void OnPreReset(IDirect3DDevice9* dev) {
     ReleaseTarget();
     ReleaseGBufferTargets(dev);
+    ReleaseTaa();
 }
 void RestartEffects(IDirect3DDevice9* dev) {
     ReleaseTarget();
     ReleaseGBufferTargets(dev);
+    ReleaseTaa();
+    SafeRelease(g.psTaa);
+    SafeRelease(g.psSharpen);
+    g.taaShadersTried = g.taaFailed = false;
     ReleaseShaders();
     g.createFailed = false;
     g.gbOff = g.gbLogged = false;
@@ -488,6 +717,12 @@ bool GBuffer::Targets(IDirect3DTexture9* out[2]) {
     if (!g.active || !g.gbWritten) return false;
     out[0] = g.gbTex[0], out[1] = g.gbTex[1];
     return true;
+}
+
+bool GBuffer::Jitter(float clip[2]) {
+    clip[0] = g.active && g.jitterThisFrame ? g.jitter[0] : 0.0f;
+    clip[1] = g.active && g.jitterThisFrame ? g.jitter[1] : 0.0f;
+    return g.active && g.jitterThisFrame;
 }
 
 IDirect3DTexture9* GBuffer::Motion(float dRow3[4]) {
@@ -502,6 +737,11 @@ class GBufferPatch : public ApexPatch {
         RegisterIntSetting(&g.view, "view", 0, 0, 6,
                            "Developer view over the scene: 0 = off, 1 = camera motion vectors, 2 = albedo, 3 = normal, 4 = material id, 5 = motion class, "
                            "6 = scene pixels nothing wrote");
+        // (GB-05) read when the G-buffer is switched on
+        RegisterBoolSetting(&g.movers, "movers", false, "Developer: motion vectors of moving objects and Sims (a replay of each draw whose position constants changed)");
+        RegisterBoolSetting(&g.taa, "taa", false, "Developer: temporal anti-aliasing (sub-pixel jitter of the 3D scene, resolved with the motion vectors)");
+        RegisterFloatSetting(&g.taaSharpen, "taaSharpen", SettingWidget::Slider, 0.25f, 0.0f, 1.0f, "Developer: sharpening after the temporal AA resolve");
+        RegisterIntSetting(&g.taaFrames, "taaFrames", 16, 4, 16, "Developer: jitter phases of the temporal AA (Halton 2, 3) and the most frames it blends");
     }
 
     bool Install() override {
@@ -515,19 +755,44 @@ class GBufferPatch : public ApexPatch {
         PostScene::Add(kMotionOrder, MotionEffect);
         SceneBinder::AcquireGBuffer();
         PostScene::Add(kViewOrder, ViewEffect);
+        g.moversOn = g.movers;
+        if (g.moversOn) GBufferMovers::Acquire();
+        g.taaOn = g.taa;
+        g.clock.armed = g.jitterThisFrame = false;
+        g.taaRanAt = 0;
+        if (g.taaOn) {
+            SceneBinder::AcquireJitter();
+            PostScene::Add(kTaaOrder, TaaEffect);
+        }
+        D3D9Hooks::RegisterPresent("GBuffer", [](D3D9Hooks::DeviceContext& ctx, const RECT*, const RECT*, HWND, const RGNDATA*) {
+            OnPresent(ctx.device);
+            return D3D9Hooks::HookAction::Continue;
+        });
         g.active = true;
         g.createFailed = false;
         g.loggedRunning = false;
         g.capsDevice = nullptr;
         g.gbOff = g.gbLogged = false;
         isEnabled = true;
-        LOG_INFO(std::format("[GBuffer] On: motion=camera view={}", ViewName(g.view)));
+        LOG_INFO(std::format("[GBuffer] On: motion={} view={}{}", g.moversOn ? "camera+movers" : "camera", ViewName(g.view), g.taaOn ? " taa=on" : ""));
         return true;
     }
 
     bool Uninstall() override {
         if (!isEnabled) return true;
         PostScene::Remove(ViewEffect);
+        D3D9Hooks::UnregisterAll("GBuffer");
+        if (g.taaOn) {
+            PostScene::Remove(TaaEffect);
+            SceneBinder::ReleaseJitter();
+        }
+        if (g.moversOn) GBufferMovers::Release(ApexD3D::Device());
+        g.moversOn = g.taaOn = false;
+        g.clock.armed = g.jitterThisFrame = false;
+        ReleaseTaa();
+        SafeRelease(g.psTaa);
+        SafeRelease(g.psSharpen);
+        g.taaShadersTried = g.taaFailed = false;
         PostScene::Remove(MotionEffect);
         PostScene::Remove(BoundaryEffect);
         ReleaseGBufferTargets(ApexD3D::Device());

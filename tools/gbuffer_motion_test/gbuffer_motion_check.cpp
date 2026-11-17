@@ -191,7 +191,35 @@ int main(int argc, char** argv) {
         std::printf("%s: depth ratio from D row 3 (float) max relative error %.3g over %d points\n", name, e, n);
         Check(n > 20 && e < 1e-4, "D row 3 gives previous / current depth");
     }
+    // (GB-05) the temporal AA's jitter: Halton (2, 3) phases inside the pixel, mean near 0; armed at Present for the scene,
+    // taken and disarmed at the boundary, so the effects and the UI after it (and a second boundary) see none
+    {
+        GBufferMotion::JitterClock clock;
+        double sx = 0, sy = 0, worst = 0;
+        bool distinct = true;
+        float seen[16][2] = {};
+        for (int f = 0; f < 16; f++) {
+            Check(!clock.armed, "jitter: not armed before Present");
+            clock.Present(16, 1920, 1080);
+            const double px = clock.offset[0] * 1920 / 2.0, py = -clock.offset[1] * 1080 / 2.0;
+            worst = std::fmax(worst, std::fmax(std::fabs(px), std::fabs(py)));
+            sx += px, sy += py;
+            for (int k = 0; k < f; k++) distinct &= seen[k][0] != clock.offset[0] || seen[k][1] != clock.offset[1];
+            seen[f][0] = clock.offset[0], seen[f][1] = clock.offset[1];
+            Check(clock.armed, "jitter: armed for the scene draws");
+            float frame[2], again[2];
+            Check(clock.Boundary(frame) && frame[0] == seen[f][0] && frame[1] == seen[f][1], "jitter: the boundary takes this frame's offset");
+            Check(!clock.armed && !clock.Boundary(again) && again[0] == 0 && again[1] == 0, "jitter: none after the boundary (effects, UI)");
+        }
+        std::printf("jitter: 16 phases, max %.3f px, mean (%.4f, %.4f) px\n", worst, sx / 16, sy / 16);
+        Check(worst < 0.5 && distinct, "jitter: 16 distinct offsets inside the pixel");
+        Check(std::fabs(sx / 16) < 0.04 && std::fabs(sy / 16) < 0.04, "jitter: mean offset near 0");
+        clock.Present(2, 64, 64);
+        Check(clock.index == 17, "jitter: phases clamp to 4..16");
+    }
     if (argc > 1) Check(CompileHlsl(argv[1], {"MotionPS", "ViewPS"}), "pass HLSL compiles to ps_3_0");
+    if (argc > 3) Check(CompileHlsl(argv[3], {"TaaPS", "SharpenPS"}), "temporal AA HLSL compiles to ps_3_0");
+    if (argc > 4) Check(CompileHlsl(argv[4], {"MoverPS"}), "mover HLSL compiles to ps_3_0");
     if (argc > 2) Check(CompileHlsl(argv[2], {"GtaoPS", "TemporalPS", "CompositePS"}), "Ambient Occlusion HLSL compiles to ps_3_0");
     std::printf("%d passed, %d failed\n%s\n", g_pass, g_fail, g_fail ? "PROBLEMS" : "OK");
     return g_fail ? 1 : 0;

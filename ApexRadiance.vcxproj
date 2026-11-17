@@ -215,6 +215,7 @@
     <ClCompile Include="features\rig_tracker.cpp" />
     <ClCompile Include="features\scene_budget.cpp" />
     <ClCompile Include="features\scene_dither.cpp" />
+    <ClCompile Include="features\gbuffer_movers.cpp" />
     <ClCompile Include="features\shader_patches.cpp" />
     <ClCompile Include="features\terrain_chunk_relight.cpp" />
     <ClCompile Include="features\terrain_stamps.cpp" />
@@ -297,6 +298,7 @@
     <ClInclude Include="features\depth_share.h" />
     <ClInclude Include="features\dxt_codec.h" />
 <ClInclude Include="features\gbuffer_motion.h" />
+<ClInclude Include="features\gbuffer_movers.h" />
     <ClInclude Include="features\fast_dxt.h" />
     <ClInclude Include="features\fast_refpack.h" />
     <ClInclude Include="features\cas_tri_sort.h" />
