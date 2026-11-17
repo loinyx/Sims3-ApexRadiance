@@ -1,7 +1,8 @@
-param([string[]]$TestArgs = @(), [string]$OutDir = (Join-Path $env:TEMP 'ApexGiServerTest'))
+param([string[]]$TestArgs = @(), [string]$OutDir = (Join-Path $env:TEMP 'ApexGiServerTest'), [switch]$Pixel)
 # The server tier's texel solve, offline on a Vulkan device (check.cpp, solve.comp). Read-only: prints to stdout; the
 # compiler's outputs and the three build inputs below stay in -OutDir. -TestArgs: passed on (--no-rays, --device <text>,
-# --density <n>, --rays <n>).
+# --density <n>, --rays <n>). -Pixel: the per-pixel delta shadow kernel instead (pixel_check.cpp, pixel_shadow.comp;
+# -TestArgs --device <text>, --size <w> <h>).
 # Build inputs, fetched once at pinned versions when -OutDir does not hold them (no installed Vulkan SDK is needed; the
 # Vulkan loader, vulkan-1.dll, comes with the graphics driver): the Vulkan headers, the volk loader (two files) and the
 # glslang compiler, which turns solve.comp into SPIR-V headers at build time.
@@ -45,9 +46,17 @@ try {
         & $glslang.FullName -V --quiet @defs --vn $v[0] -o (Join-Path $OutDir ($v[0] + '.h')) (Join-Path $PSScriptRoot 'solve.comp')
         if ($LASTEXITCODE -ne 0) { throw "solve.comp ($($v[0])) did not compile" }
     }
-    $exe = Join-Path $OutDir 'gi_server_test.exe'
-    & cl.exe /nologo /std:c++20 /utf-8 /EHsc /W4 /O2 /MT /fp:precise /DNOMINMAX /DVK_USE_PLATFORM_WIN32_KHR ('/I' + $repo) ('/I' + $OutDir) ('/I' + $headers) ('/I' + $volk) ('/Fe' + $exe) (Join-Path $PSScriptRoot 'check.cpp')
-    if ($LASTEXITCODE -ne 0) { throw 'Server texel solve test did not compile' }
+    $name = 'gi_server_test'
+    $source = 'check.cpp'
+    if ($Pixel) {
+        $name = 'gi_pixel_test'
+        $source = 'pixel_check.cpp' # (includes check.cpp, so the headers above are needed too)
+        & $glslang.FullName -V --quiet --target-env vulkan1.2 --vn pixel_shadow -o (Join-Path $OutDir 'pixel_shadow.h') (Join-Path $PSScriptRoot 'pixel_shadow.comp')
+        if ($LASTEXITCODE -ne 0) { throw 'pixel_shadow.comp did not compile' }
+    }
+    $exe = Join-Path $OutDir ($name + '.exe')
+    & cl.exe /nologo /std:c++20 /utf-8 /EHsc /W4 /O2 /MT /fp:precise /DNOMINMAX /DVK_USE_PLATFORM_WIN32_KHR ('/I' + $repo) ('/I' + $OutDir) ('/I' + $headers) ('/I' + $volk) ('/Fe' + $exe) (Join-Path $PSScriptRoot $source)
+    if ($LASTEXITCODE -ne 0) { throw "$source did not compile" }
     & $exe @TestArgs
-    if ($LASTEXITCODE -ne 0) { throw 'Server texel solve test failed' }
+    if ($LASTEXITCODE -ne 0) { throw "$name failed" }
 } finally { Pop-Location }
