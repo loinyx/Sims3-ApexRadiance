@@ -197,10 +197,10 @@ the result lands in the light buffer textures. The game's render thread spends a
 
 | Piece | Design | Mark |
 |---|---|---|
-| Device | A **second Vulkan device** for GI on a worker thread of the server. Stock DXVK stays unchanged: it does not enable the ray-tracing extensions, and the package ships a stock DXVK release | [I]; coexistence [O: R-01, R-03] |
+| Device | A **second Vulkan device** for GI on a worker thread of the server. Stock DXVK stays unchanged: it does not enable the ray-tracing extensions, and the package ships a stock DXVK release | Stock DXVK 3.1.1 enables no ray extension [V, [server-export.md](server-export.md) §4]; coexistence [O: R-03] |
 | Scene | Tier A: the lot proxy (about 10 k triangles) and furniture blocker boxes. Tier B: placed objects from vertex buffers the server already holds, named by Apex with buffer range, layout and world matrix. Tier C: Sim capsules, refitted a frame. Plus lamp table, room reflectance and the texel points. Sent on change through a shared block | Tier A data [V, 03 §1]; vertex formats for tier B [O: R-07] |
 | Solve | §3.4 and §3.5 per dirty (lamp, story): shadow rays to the emitter, then paths whose hits read the light buffer. Converges once and is then frozen; a small edge-aware filter in texel space replaces a denoiser | [I] |
-| Result | Written into Apex's textures on the server's Direct3D 9 device from the command loop; a texture is named by its client pointer, as patch 0015 names surfaces | [O: R-03] |
+| Result | Written into Apex's textures on the server's Direct3D 9 device from the command loop; the export takes the client pointer and sends the client object id, the server's handle key [V, server-export.md §2]; host copy and `UpdateSurface` on the play thread | [O: R-03] |
 | Point queries | Irradiance, ambient-cube faces and dominant lamps at given points, returned through the shared block: the rig write's values with no read-back | [I] |
 | Detection | `GetProcAddress` on the loaded `d3d9.dll`; the server reports its level; a stock or lost server means `d3d9`, silently | As 11 §5.1 |
 
