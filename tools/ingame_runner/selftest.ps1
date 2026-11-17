@@ -75,6 +75,18 @@ foreach ($job in Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'jobs') -Fi
         if ($t) { foreach ($k in $t.PSObject.Properties.Name) { Check ($k -in $giKeys) "$($job.BaseName) $($v.Name): RealtimeGI key $k is registered" } }
     }
 }
+# Lamp index counter lines (lamp-index-smoke): objects, fences and windows, the line RealtimeGI OnPresent writes
+$li = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/lamp-index-smoke.json') -Raw | ConvertFrom-Json
+$liCompare = @($li.variants.compare.expect)[1]; $liDraw = @($li.variants.draw.expect)[1]; $liBad = @($li.variants.compare.fail)[0]
+$liLine = '12:00:00.000 [INFO] [RealtimeGI] Lamp index counters: mode={0} builds=3 cells=12288 draws={1} fallbacks=40 compared={2} mismatches: offCentre=10 height=4 cellFull=0 group={3} unexplained={4} fences: draws={5} compared={6} windows: draws=0 compared=0'
+Check (($liLine -f 'compare', 0, 900, 50, 0, 0, 120) -match $liCompare) 'lamp index compare line matches (fences compared, windows 0)'
+Check (($liLine -f 'compare', 0, 900, 50, 0, 0, 0) -notmatch $liCompare) 'lamp index compare line rejected without fence compares'
+Check (($liLine -f 'compare', 0, 900, 50, 2, 0, 120) -notmatch $liCompare) 'lamp index compare line rejected with unexplained differences'
+Check (($liLine -f 'compare', 0, 900, 50, 2, 0, 120) -match $liBad) 'lamp index fail matches unexplained differences'
+Check (($liLine -f 'compare', 0, 900, 50, 0, 0, 120) -notmatch $liBad) 'lamp index fail ignores unexplained=0'
+Check (($liLine -f 'draw', 700, 0, 0, 0, 300, 0) -match $liDraw) 'lamp index draw line matches (fence draws)'
+Check (($liLine -f 'draw', 700, 0, 0, 0, 0, 0) -notmatch $liDraw) 'lamp index draw line rejected without fence draws'
+Check (($liLine -f 'draw', 0, 0, 0, 0, 300, 0) -notmatch $liDraw) 'lamp index draw line rejected without draws'
 $prof = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/realtime-gi-profile.json') -Raw | ConvertFrom-Json
 Check ('12:00:00.000 [INFO] [FrameProfiler] Measurement preset: timing run (hitch 2.0 x median, floor 8 ms)' -match @($prof.expect)[0]) 'profile arm expect matches the preset line'
 Check ('12:00:00.000 [INFO] [FrameProfiler] Measurement preset: sampling run (hitch)' -notmatch @($prof.expect)[0]) 'profile arm expect rejects the sampling preset'

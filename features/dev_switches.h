@@ -193,11 +193,6 @@ inline std::atomic<bool> liveObjectTables{false};
 //                         by (GpuLampLaw::Eval at the sample, facing the lamp): the rig colour the game puts there held a 47 m red
 //                         sconce at full red 3 m away, where the wall beside the door took 2% of it (LevelLightShare BasisLawStep)
 inline std::atomic<bool> basisLampLaw{false};
-//   lamp_index            0 unless set (real-time GI S3-02, lab prototype; lamp_index.h): outdoor rig-lit objects under the
-//                         first lamp law take their lamps from the lamp index cells and the frame constants c208..c214.
-//                         1 = the per-draw fix still draws and each of its picks is compared with the cell at the object
-//                         (counted, the first difference logged); 2 = the index copy draws, with no pick a draw
-inline std::atomic<int> lampIndex{0};
 
 void Load(); // init thread, before the features start; logs the values
 
@@ -243,6 +238,5 @@ inline bool ChairArmCaps() { return kCompiled ? chairArmCaps.load(std::memory_or
 inline bool SphereCutFade() { return kCompiled ? sphereCutFade.load(std::memory_order_relaxed) : kShipped; }
 inline bool LiveObjectTables() { return kCompiled ? liveObjectTables.load(std::memory_order_relaxed) : kShipped; }
 inline bool BasisLampLaw() { return kCompiled ? basisLampLaw.load(std::memory_order_relaxed) : kShipped; }
-inline int LampIndexMode() { return kCompiled ? lampIndex.load(std::memory_order_relaxed) : 0; }
 
 } // namespace DevSwitches

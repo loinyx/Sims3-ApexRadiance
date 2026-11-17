@@ -45,6 +45,8 @@ constexpr DWORD kLogEveryMs = 10000;
 std::array<std::atomic<uint64_t>, static_cast<size_t>(Counter::Count)> g_counters{};
 std::atomic<bool> g_running{false};
 std::atomic<Backend> g_backend{Backend::D3d9};
+std::atomic<int> g_lampIndexMode{0};
+constexpr const char* kLampIndexNames[] = {"off", "compare", "draw"};
 uint64_t g_frames = 0; // render thread
 DWORD g_lastLog = 0;
 Options g_options;       // set by Start
@@ -773,6 +775,19 @@ void OnPresent(IDirect3DDevice9* dev) {
     if (cap || sync || locks || diffs || faults || table) LOG_WARNING(line);
     else LOG_INFO(line);
     MeshLog();
+    // read back by the lamp-index-smoke job: unexplained must stay 0
+    if (const int mode = g_lampIndexMode.load()) {
+        const uint64_t unexplained = Value(Counter::LampIndexUnexplained);
+        const std::string li = std::format("[RealtimeGI] Lamp index counters: mode={} builds={} cells={} draws={} fallbacks={} compared={} mismatches: offCentre={} "
+                                           "height={} cellFull={} group={} unexplained={} fences: draws={} compared={} windows: draws={} compared={}",
+                                           kLampIndexNames[mode], Value(Counter::LampIndexBuilds), Value(Counter::LampIndexCells), Value(Counter::LampIndexDraws),
+                                           Value(Counter::LampIndexFallbacks), Value(Counter::LampIndexCompared), Value(Counter::LampIndexOffCentre),
+                                           Value(Counter::LampIndexHeight), Value(Counter::LampIndexCellFull), Value(Counter::LampIndexGroup), unexplained,
+                                           Value(Counter::LampIndexFenceDraws), Value(Counter::LampIndexFenceCompared), Value(Counter::LampIndexWindowDraws),
+                                           Value(Counter::LampIndexWindowCompared));
+        if (unexplained) LOG_WARNING(li);
+        else LOG_INFO(li);
+    }
     if (!g_schedOn) return;
     const GiSched::Counters s = g_sched.Stats();
     using GiSched::Cause;
@@ -796,6 +811,7 @@ const std::vector<Lamp>& Lamps() { return g_lamps; }
 uint32_t LampSerial() { return g_serial; }
 const std::vector<Change>& Changes() { return g_changes; }
 int GiLots() { return g_giLots; }
+int LampIndexMode() { return g_lampIndexMode.load(std::memory_order_relaxed); }
 Backend InUse() { return g_backend.load(); }
 
 bool Start(const Options& o, std::string* error) {
@@ -829,6 +845,8 @@ bool Start(const Options& o, std::string* error) {
     }
     g_running = true;
     if (o.pixelShadows) GiPixelShadows::Start({o.pixelView, o.pixelTestCaster});
+    g_lampIndexMode = kDevToolsBuild ? std::clamp(o.lampIndex, 0, 2) : 0;
+    if (g_lampIndexMode.load()) LOG_INFO(std::format("[RealtimeGI] Lamp index: mode={}", kLampIndexNames[g_lampIndexMode.load()]));
     // read back by the test harness (design.md section 6): logged by UpdateLamps in a world, with lots = the GI lots then
     g_startLine = std::format("cap={} scale={} indirect={}", kCapNames[o.solveCap], o.scale, kIndirectNames[o.indirect]); // (+ the back end then)
     if (backend != o.backend && o.backend != Backend::Auto)
@@ -846,6 +864,7 @@ void Stop() {
     g_bridge.ResetLot(), ReleaseLayers(), g_composer.Release();
     if (g_composePs) g_composePs->Release(), g_composePs = nullptr;
     g_built = {}, g_dev = nullptr;
+    g_lampIndexMode = 0;
     g_running = false;
     LOG_INFO("[RealtimeGI] Off");
 }
@@ -870,6 +889,9 @@ class RealtimeGiPatch : public ApexPatch {
         RegisterBoolSetting(&pixelTestCaster_, "pixelTestCaster", false, "Developer: one test capsule under the strongest lamp");
         RegisterBoolSetting(&meshCasters_, "meshCasters", false, "Developer mode: give the bridge server every object's own mesh as a shadow caster");
         RegisterBoolSetting(&debugFakeSolve_, "debugFakeSolve", false, "Developer mode: run the layer update scheduler on a fake back end ([GiSched] line)");
+        // (S3-02b) developer builds only; ints, not names: 0 off, 1 compare, 2 draw
+        if constexpr (kDevToolsBuild)
+            RegisterIntSetting(&lampIndex_, "lampIndex", 0, 0, 2, "Lamp index cells: 0 off, 1 compare each per-draw pick with its cell, 2 draw from the cells");
     }
 
     bool Install() override {
@@ -877,7 +899,7 @@ class RealtimeGiPatch : public ApexPatch {
         lastError.clear();
         std::string error;
         const RealtimeGI::Options o{lots_, solveCap_, 1 << scale_, indirect_, static_cast<RealtimeGI::Backend>(backend_), debugLampTable_,
-                                    pixelShadows_, pixelView_, pixelTestCaster_, meshCasters_ && !kPublicBuild, debugFakeSolve_};
+                                    pixelShadows_, pixelView_, pixelTestCaster_, meshCasters_ && !kPublicBuild, debugFakeSolve_, lampIndex_};
         if (!RealtimeGI::Start(o, &error)) return Fail(error);
         isEnabled = true;
         return true;
@@ -892,7 +914,7 @@ class RealtimeGiPatch : public ApexPatch {
     }
 
   private:
-    int backend_ = 0, lots_ = 0, solveCap_ = 0, scale_ = 0, indirect_ = 0;
+    int backend_ = 0, lots_ = 0, solveCap_ = 0, scale_ = 0, indirect_ = 0, lampIndex_ = 0;
     bool debugLampTable_ = false, pixelShadows_ = false, pixelTestCaster_ = false, meshCasters_ = false, debugFakeSolve_ = false;
     int pixelView_ = 0;
 };

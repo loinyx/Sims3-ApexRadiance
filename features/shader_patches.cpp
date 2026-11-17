@@ -55,6 +55,13 @@ std::vector<Ins> Parse(const std::vector<DWORD>& t) {
 struct Usage {
     int maxTemp = -1, maxSampler = -1, maxConst = -1;
     size_t afterLastSamplerDcl = 0;
+    uint32_t intRegs = 0; // integer registers i0..i15 the shader defines or reads
+    // the lowest integer register the shader leaves alone (the index loop's counter), -1 = none
+    int FreeInt() const {
+        for (int i = 0; i < 16; i++)
+            if (!(intRegs >> i & 1)) return i;
+        return -1;
+    }
 };
 
 Usage Scan(const std::vector<DWORD>& t, const std::vector<Ins>& ins) {
@@ -70,6 +77,7 @@ Usage Scan(const std::vector<DWORD>& t, const std::vector<Ins>& ins) {
         }
         if (x.op == kDef || x.op == kDefI || x.op == kDefB) {
             if (x.op == kDef) u.maxConst = std::max(u.maxConst, static_cast<int>(Num(t[x.at + 1])));
+            if (x.op == kDefI && Num(t[x.at + 1]) < 16) u.intRegs |= 1u << Num(t[x.at + 1]);
             continue;
         }
         for (size_t k = 1; k <= x.len; k++) {
@@ -77,6 +85,7 @@ Usage Scan(const std::vector<DWORD>& t, const std::vector<Ins>& ins) {
             if (!(r & 0x80000000u)) continue;
             if (Type(r) == kTemp) u.maxTemp = std::max(u.maxTemp, static_cast<int>(Num(r)));
             else if (Type(r) == kConst) u.maxConst = std::max(u.maxConst, static_cast<int>(Num(r)));
+            else if (Type(r) == 7 /* integer constant */ && Num(r) < 16) u.intRegs |= 1u << Num(r);
         }
     }
     return u;
@@ -161,8 +170,10 @@ void AppendHueClamp(std::vector<DWORD>& v, DWORD q, DWORD tmp) {
 //    ReachShareImpl's "1 up to r0" only just inside r0, by at most 1 - (1 - (r0/R)^4)^2: 0.6% for the 12/10 garden post
 //    (3.5 / 15 m), 0.8% for any w of 28 or more, 2.5% for a weak lamp with both radii at their floors (2 / 6 m, w under 14),
 //    where the wall texel need not be at its clamp (12/10 review: 0.98 against 1, about 3/255 at most).
-// cpType: the register type of cp (kTemp: a lamp row read from the lamp index texture)
-void AppendLampLaw(std::vector<DWORD>& code, DWORD A, DWORD B, DWORD nrm, DWORD posNeg, DWORD cp, DWORD cS, DWORD cH, bool reach, DWORD reachRow, unsigned k, DWORD cpType = kConst) {
+// cpType: the register type of cp (kTemp: a lamp row read from the lamp index texture); reachSrc (the index copies): the
+// source of r0^2 in the place of reachRow.<k % 4>
+void AppendLampLaw(std::vector<DWORD>& code, DWORD A, DWORD B, DWORD nrm, DWORD posNeg, DWORD cp, DWORD cS, DWORD cH, bool reach, DWORD reachRow, unsigned k, DWORD cpType = kConst,
+                   DWORD reachSrc = 0) {
     constexpr DWORD kNeg = 0x01000000u, kRsq = 0x07, kMin = 0x0A;
     code.insert(code.end(), {Op(kAdd, 3), Dst(kTemp, A, 0x7), Src(cpType, cp), posNeg,             // l = lamp - pixel
                              Op(kDp3, 3), Dst(kTemp, A, 0x8), Src(kTemp, A), Src(kTemp, A),         // d^2
@@ -182,11 +193,133 @@ void AppendLampLaw(std::vector<DWORD>& code, DWORD A, DWORD B, DWORD nrm, DWORD 
     code.insert(code.end(), {Op(kMad, 4), Dst(kTemp, B, 0x2, true), Src(kTemp, B, kSwzY) | kNeg, Src(kTemp, B, kSwzY), Src(kConst, cH, 0xAA), // sat(1 - q^2)
                              Op(kMul, 3), Dst(kTemp, B, 0x2), Src(kTemp, B, kSwzY), Src(kTemp, B, kSwzY),                                    // its square
                              Op(kMul, 3), Dst(kTemp, B, 0x8), Src(kTemp, B, kSwzW), Src(kTemp, B, kSwzW),                                    // 1 / d^2
-                             Op(kMul, 3), Dst(kTemp, B, 0x4), Src(kTemp, B, kSwzW), Src(kConst, reachRow + (k >> 2), comp),                 // r0^2 / d^2
+                             Op(kMul, 3), Dst(kTemp, B, 0x4), Src(kTemp, B, kSwzW), reachSrc ? reachSrc : Src(kConst, reachRow + (k >> 2), comp), // r0^2 / d^2
                              Op(kMul, 3), Dst(kTemp, B, 0x4), Src(kTemp, B, 0xAA), Src(kTemp, B, kSwzY),
                              Op(kMin, 3), Dst(kTemp, B, 0x4), Src(kTemp, B, 0xAA), Src(kConst, cH, 0xAA),                                    // reach share
                              Op(kMul, 3), Dst(kTemp, B, 0x1), Src(kTemp, B, kSwzX), Src(kTemp, B, kSwzW),                                    // sat(N.l) / d^2
                              Op(kMul, 3), Dst(kTemp, B, 0x1), Src(kTemp, B, kSwzX), Src(kTemp, B, 0xAA)});
+}
+
+// The floor-tile shadow of one lamp on a fence pixel (the emitter floor shadows of PatchInstancedLamps capShadows): a floor
+// under the emitter casts a soft shadow on each pixel, independently of the three points that selected the group's lamps.
+// The uniform branch skips lamps with no verified complete tile. LB.x *= the shadow. P = the pixel's world position, cp =
+// the lamp row (pos), a / b = its two projection rows (the per-draw copy's constants, or a temporary of the index copy:
+// beforeB then loads b into the register a held), params = the shared softness row (+1: its def).
+void AppendCapShadow(std::vector<DWORD>& code, DWORD G, DWORD LB, DWORD P, DWORD cpType, DWORD cp, DWORD abType, DWORD a, DWORD b, DWORD params, DWORD cH,
+                     const std::vector<DWORD>& beforeB = {}) {
+    constexpr DWORD kNeg = 0x01000000u;
+    code.insert(code.end(), {
+        Op(kMov, 2), Dst(kTemp, G, 0x1), Src(abType, a, kSwzW),
+        Op(0x29, 2) | 0x00010000u, Src(kTemp, G, kSwzX), Src(kConst, params, kSwzW), // ifc_gt
+        Op(kAdd, 3), Dst(kTemp, G, 0x2), Src(cpType, cp, kSwzY), Src(kTemp, P, kSwzY) | kNeg,
+        Op(kMax, 3), Dst(kTemp, G, 0x2), Src(kTemp, G, kSwzY), Src(kConst, params, kSwzW),
+        Op(0x06, 2), Dst(kTemp, G, 0x2), Src(kTemp, G, kSwzY),
+        Op(kMul, 3), Dst(kTemp, G, 0x1), Src(kTemp, G, kSwzX), Src(kTemp, G, kSwzY),
+        Op(kAdd, 3), Dst(kTemp, G, 0x8), Src(kTemp, G, kSwzX) | kNeg, Src(kConst, cH, 0xAA),
+        Op(kMul, 3), Dst(kTemp, G, 0x4), Src(kTemp, G, kSwzW), Src(kConst, params, kSwzY),
+        Op(kMax, 3), Dst(kTemp, G, 0x4), Src(kTemp, G, 0xAA), Src(kConst, params, kSwzW),
+        Op(0x06, 2), Dst(kTemp, G, 0x4), Src(kTemp, G, 0xAA),
+        Op(kMul, 3), Dst(kTemp, G, 0x4), Src(kTemp, G, 0xAA), Src(kConst, params, 0xAA),
+        Op(kAdd, 3), Dst(kTemp, LB, 0xC), Src(kTemp, P, 0x88), Src(cpType, cp, 0x88) | kNeg,
+        Op(kMad, 4), Dst(kTemp, G, 0x3), Src(kTemp, G, kSwzX), Src(kTemp, LB, kSwzZWZW), Src(cpType, cp, 0x88),
+        Op(0x5A, 4), Dst(kTemp, LB, 0x4), Src(kTemp, G), Src(abType, a), Src(abType, a, 0xAA)});
+    code.insert(code.end(), beforeB.begin(), beforeB.end());
+    code.insert(code.end(), {
+        Op(0x5A, 4), Dst(kTemp, LB, 0x8), Src(kTemp, G), Src(abType, b), Src(abType, b, 0xAA),
+        Op(kAdd, 3), Dst(kTemp, LB, 0xC), Src(kTemp, LB) | 0x0C000000u, Src(kConst, params, kSwzX),
+        Op(kMad, 4), Dst(kTemp, LB, 0xC, true), Src(kTemp, LB), Src(kTemp, G, 0xAA), Src(kConst, params, kSwzX),
+        Op(kMul, 3), Dst(kTemp, G, 0x3), Src(kTemp, LB, kSwzZWZW), Src(kTemp, LB, kSwzZWZW),
+        Op(kMad, 4), Dst(kTemp, LB, 0xC), Src(kTemp, LB), Src(kConst, params + 1, kSwzY), Src(kConst, params + 1, kSwzX),
+        Op(kMul, 3), Dst(kTemp, LB, 0xC), Src(kTemp, LB), Src(kTemp, G, kSwzXYXY),
+        Op(kMul, 3), Dst(kTemp, LB, 0x4), Src(kTemp, LB, 0xAA), Src(kTemp, LB, kSwzW),
+        Op(0x58, 4), Dst(kTemp, LB, 0x4), Src(kTemp, G, kSwzW) | kNeg, Src(kConst, cH, kSwzW), Src(kTemp, LB, 0xAA),
+        Op(kAdd, 3), Dst(kTemp, LB, 0x4), Src(kTemp, LB, 0xAA) | kNeg, Src(kConst, cH, 0xAA),
+        Op(kMul, 3), Dst(kTemp, LB, 0x1), Src(kTemp, LB, kSwzX), Src(kTemp, LB, 0xAA),
+        Op(0x2B, 0)}); // endif
+}
+
+// The lamp sum of the index copies (real-time GI S3-02b; lamp_index.h): Q.xyz = the sum over the kSlots entries of the
+// pixel's cell of colour x law x cones x visibility (x the floor-tile shadow with caps), in a rep loop on i0 (the caller
+// declares "defi iN, kSlots, 0, 0, 0", N = L.intReg) over the lamp index texture; with reach the outdoor walls' law, held under 1 by its
+// brightest channel after the loop (AppendHueClamp), as in the per-draw copies. The frame constants c208.. address the
+// texture. After it U is the uv of the cell's ground share texel. Visibility: 0 an object, lrp(visSel, set in a wall,
+// loose); 1 a window, set in a wall, lamps shining out of a house left out (table row 4 .y); 2 a fence, loose, and 1 where
+// visSel x (1 - row 4 .y) (a group lying in the lot's ground shade keeps its lamps whole, but those shining out of a house).
+struct IndexLoop {
+    DWORD A, B, Q, nrm;              // the law's two registers, the sum, the normal (temporaries)
+    DWORD U, En, P, C, X, R, K;      // the loop's temporaries: R holds table row 4 (reach or vis 1, 2), K the cone rows (may be P)
+    DWORD xz, posNeg;                // Src tokens: world x, z in .xy; -(world x, y, z)
+    DWORD sampler, cH;               // the index sampler; cH = (.., .., 1, 0)
+    bool reach = false;
+    int vis = 0;
+    DWORD visSel = 0;                // Src token
+    bool caps = false;               // the floor-tile shadow (table rows 5, 6); K must not be P
+    DWORD capG = 0, capPix = 0, capParams = 0;
+    DWORD intReg = 0;                // the loop counter's integer register (Usage::FreeInt)
+};
+void AppendIndexLamps(std::vector<DWORD>& v, const IndexLoop& L) {
+    constexpr DWORD kTexldl = 0x5F, kRep = 0x26, kEndRep = 0x27, kFrcOp = 0x13, kMinOp = 0x0A, kConstInt = 7, kNeg = 0x01000000u;
+    const DWORD F0 = LampIndex::kFirstConst, F1 = F0 + 1, F2 = F0 + 2, F3 = F0 + 3, F6 = F0 + 6, S = L.sampler;
+    const DWORD Z = Src(kConst, L.cH, kSwzW) /* 0 */;
+    const auto fetch = [&](DWORD dst, DWORD uv) { return std::vector<DWORD>{Op(kTexldl, 3), Dst(kTemp, dst), Src(kTemp, uv), Src(kSampler, S)}; };
+    const auto next = [&](DWORD step) { return std::vector<DWORD>{Op(kAdd, 3), Dst(kTemp, L.X, 0x2), Src(kTemp, L.X, kSwzY), step}; };
+    const auto put = [&](const std::vector<DWORD>& w) { v.insert(v.end(), w.begin(), w.end()); };
+    v.insert(v.end(), {Op(kMul, 3), Dst(kTemp, L.U, 0x3), L.xz, Src(kConst, F0, kSwzX),
+                       Op(kAdd, 3), Dst(kTemp, L.U, 0x3), Src(kTemp, L.U), Src(kConst, F0, kSwzZWZW),
+                       Op(kFrcOp, 2), Dst(kTemp, L.X, 0x3), Src(kTemp, L.U),
+                       Op(kAdd, 3), Dst(kTemp, L.U, 0x3), Src(kTemp, L.U), Src(kTemp, L.X) | kNeg,      // the cell
+                       Op(kMax, 3), Dst(kTemp, L.U, 0x3), Src(kTemp, L.U), Z,
+                       Op(kMinOp, 3), Dst(kTemp, L.U, 0x3), Src(kTemp, L.U), Src(kConst, F0, kSwzY), // held in the window
+                       Op(kMad, 4), Dst(kTemp, L.U, 0x3), Src(kTemp, L.U), Src(kConst, F2), Src(kConst, F2, kSwzZWZW),
+                       Op(kMov, 2), Dst(kTemp, L.U, 0xC), Z,
+                       Op(kMov, 2), Dst(kTemp, L.X, 0xC), Z,
+                       Op(kMov, 2), Dst(kTemp, L.Q, 0x7), Z,
+                       Op(kRep, 1), Src(kConstInt, L.intReg)});
+    put(fetch(L.En, L.U)); // (index, visibility, the same set in a wall)
+    v.insert(v.end(), {Op(kMad, 4), Dst(kTemp, L.X, 0x1), Src(kTemp, L.En, kSwzX), Src(kConst, F1, kSwzX), Src(kConst, F1, kSwzY),
+                       Op(kMov, 2), Dst(kTemp, L.X, 0x2), Src(kConst, F1, 0xAA)});
+    put(fetch(L.P, L.X)); // (pos, 1/R^2)
+    put(next(Src(kConst, F1, kSwzW)));
+    put(fetch(L.C, L.X)); // (colour, spill)
+    if (L.reach || L.vis) { // row 4: (r0^2, shining out of a house, 0, 0)
+        v.insert(v.end(), {Op(kMov, 2), Dst(kTemp, L.R), Src(kTemp, L.X),
+                           Op(kAdd, 3), Dst(kTemp, L.R, 0x2), Src(kTemp, L.R, kSwzY), Src(kConst, F6, kSwzY)});
+        put(fetch(L.R, L.R));
+    }
+    AppendLampLaw(v, L.A, L.B, L.nrm, L.posNeg, L.P, F3, L.cH, L.reach, 0, 0, kTemp, Src(kTemp, L.R, kSwzX));
+    put(next(Src(kConst, F1, kSwzW)));
+    put(fetch(L.K, L.X)); // cone row 1
+    v.insert(v.end(), {Op(kDp3, 3), Dst(kTemp, L.B, 0x4), Src(kTemp, L.A), Src(kTemp, L.K),
+                       Op(kAdd, 3), Dst(kTemp, L.B, 0x4), Src(kTemp, L.B, 0xAA), Src(kTemp, L.K, kSwzW)});
+    put(next(Src(kConst, F1, kSwzW)));
+    put(fetch(L.K, L.X)); // cone row 2
+    v.insert(v.end(), {Op(kDp3, 3), Dst(kTemp, L.B, 0x8), Src(kTemp, L.A), Src(kTemp, L.K),
+                       Op(kAdd, 3), Dst(kTemp, L.B, 0x8), Src(kTemp, L.B, kSwzW), Src(kTemp, L.K, kSwzW),
+                       Op(kMax, 3), Dst(kTemp, L.B, 0x4, true), Src(kTemp, L.B, 0xAA), Src(kTemp, L.B, kSwzW),
+                       Op(kMad, 4), Dst(kTemp, L.B, 0x8), Src(kTemp, L.B, 0xAA), Src(kTemp, L.C, kSwzW) | kNeg, Src(kTemp, L.B, 0xAA),
+                       Op(kAdd, 3), Dst(kTemp, L.B, 0x4), Src(kTemp, L.B, kSwzW), Src(kTemp, L.C, kSwzW),
+                       Op(kMul, 3), Dst(kTemp, L.B, 0x1), Src(kTemp, L.B, kSwzX), Src(kTemp, L.B, 0xAA)});
+    if (L.caps) {
+        put(next(Src(kConst, F6, 0xAA))); // row 5
+        put(fetch(L.K, L.X));
+        std::vector<DWORD> loadB = next(Src(kConst, F1, kSwzW)); // row 6
+        const std::vector<DWORD> f = fetch(L.K, L.X);
+        loadB.insert(loadB.end(), f.begin(), f.end());
+        AppendCapShadow(v, L.capG, L.B, L.capPix, kTemp, L.P, kTemp, L.K, L.K, L.capParams, L.cH, loadB);
+    }
+    if (L.vis == 0)
+        v.insert(v.end(), {Op(kLrp, 4), Dst(kTemp, L.B, 0x4), L.visSel, Src(kTemp, L.En, 0xAA), Src(kTemp, L.En, kSwzY)});
+    else if (L.vis == 1)
+        v.insert(v.end(), {Op(kMad, 4), Dst(kTemp, L.B, 0x4), Src(kTemp, L.En, 0xAA), Src(kTemp, L.R, kSwzY) | kNeg, Src(kTemp, L.En, 0xAA)});
+    else // (lrp: never into its first source's register)
+        v.insert(v.end(), {Op(kMov, 2), Dst(kTemp, L.En, 0x8), L.visSel,
+                           Op(kMad, 4), Dst(kTemp, L.En, 0x8), Src(kTemp, L.R, kSwzY), Src(kTemp, L.En, kSwzW) | kNeg, Src(kTemp, L.En, kSwzW),
+                           Op(kLrp, 4), Dst(kTemp, L.B, 0x4), Src(kTemp, L.En, kSwzW), Src(kConst, L.cH, 0xAA), Src(kTemp, L.En, kSwzY)});
+    v.insert(v.end(), {Op(kMul, 3), Dst(kTemp, L.B, 0x1), Src(kTemp, L.B, kSwzX), Src(kTemp, L.B, 0xAA),
+                       Op(kMad, 4), Dst(kTemp, L.Q, 0x7), Src(kTemp, L.C), Src(kTemp, L.B, kSwzX), Src(kTemp, L.Q),
+                       Op(kAdd, 3), Dst(kTemp, L.U, 0x1), Src(kTemp, L.U, kSwzX), Src(kConst, F1, kSwzX), // the next entry
+                       Op(kEndRep, 0)});
+    if (L.reach) AppendHueClamp(v, L.Q, L.B);
 }
 
 
@@ -1701,7 +1834,7 @@ bool IsInstancedStructureVs(const std::vector<DWORD>& t) {
     return world && lamps;
 }
 
-bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach, bool groundShade, bool capShadows) {
+bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach, bool groundShade, bool capShadows, bool index) {
     if (t.empty() || t[0] != 0xFFFF0300) return false;
     const auto ins = Parse(t);
     if (ins.empty()) return false;
@@ -1747,6 +1880,13 @@ bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach,
     // the reach variant is the per-pixel lamps with the wall law and 2 more rows (r0^2 of the 8 lamps) or nothing: refused here,
     // before any change, the draw keeps the first variant
     if (reach && !(tc2Reg >= 0 && u.maxConst + 6 + 4 * kObjectPixelLamps < 224 && u.maxTemp + 7 < 32)) return false;
+    // index (real-time GI S3-02b): the per-pixel lamps from the lamp index texture (one more sampler, 7 more temporaries, an
+    // integer register, every constant under the frame block) or nothing
+    if (index) {
+        const int top = u.maxConst + 4 + 4 * static_cast<int>(kObjectPixelLamps) + (reach ? 2 : 0) + 3 + (capShadows ? 2 * static_cast<int>(kObjectPixelLamps) + 1 : 0);
+        if (tc2Reg < 0 || u.maxTemp + 14 >= 32 || u.maxSampler + 2 > 15 || top >= static_cast<int>(LampIndex::kFirstConst)) return false;
+        if (u.FreeInt() < 0) return false;
+    }
     const DWORD E = static_cast<DWORD>(u.maxSampler + 1), T = static_cast<DWORD>(u.maxTemp + 1);
     const DWORD cA = static_cast<DWORD>(u.maxConst + 1), cB = cA + 1;
     const DWORD C = static_cast<DWORD>(colorReg), V = static_cast<DWORD>(tc1Reg);
@@ -1758,6 +1898,7 @@ bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach,
     out.reachConst = 0;
     out.capConst = 0;
     out.shadeSampler = out.shadeConst = -1;
+    out.indexSampler = index ? E + 1 : 0;
     t[tc1Dcl] = (t[tc1Dcl] & ~0x000F0000u) | 0x000F0000u; // vT.xy -> vT (zw = world xz)
     const Ins& A = ins[add];
     t[A.at + slot] = Src(kTemp, T); // add rD.xyz, rS, vC  ->  add rD.xyz, rS, rT
@@ -1779,7 +1920,7 @@ bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach,
         out.reachConst = reach ? cR : 0;
         const DWORD cCap = cR + (reach ? 2 : 0) + 3;
         const DWORD cCapParams = cCap + 2 * kObjectPixelLamps;
-        out.capConst = capShadows ? cCap : 0;
+        out.capConst = capShadows ? (index ? cCapParams : cCap) : 0;
         t[tc2Dcl] = (t[tc2Dcl] & ~0x000F0000u) | 0x000F0000u; // vT2.xyz -> vT2 (w = world y)
         std::vector<DWORD> code = {Op(kMad, 4), Dst(kTemp, T, 0x3), Src(kInput, V, kSwzZWZW), Src(kConst, cA), Src(kConst, cA, kSwzZWZW),
                                    Op(kTexld, 3), Dst(kTemp, T), Src(kTemp, T), Src(kSampler, E),
@@ -1789,7 +1930,13 @@ bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach,
                                    Op(kMul, 3), Dst(kTemp, T, 0x7), Src(kTemp, T), Src(kTemp, G, kSwzW),
                                    Op(kMov, 2), Dst(kTemp, P, 0x5), Src(kInput, V, 0xFA /* zzww: x = world x, z = world z */),
                                    Op(kMov, 2), Dst(kTemp, P, 0x2), Src(kInput, V2, kSwzW)};
-        for (DWORD k = 0; k < kObjectPixelLamps; k++) {
+        if (index) { // the same sum from the lamp index cells; the group's shade flag at cS.z (lamp_index.h, AppendIndexLamps)
+            IndexLoop L{LA, LB, Q, N, T + 7, T + 8, T + 9, T + 10, T + 11, T + 12, T + 13, Src(kTemp, P, 0x88 /* xzxz */), Src(kTemp, P) | kNeg, E + 1, cH};
+            L.reach = reach, L.vis = 2, L.intReg = static_cast<DWORD>(u.FreeInt()), L.visSel = Src(kConst, cS, 0xAA);
+            L.caps = capShadows, L.capG = G, L.capPix = P, L.capParams = cCapParams;
+            AppendIndexLamps(code, L);
+        }
+        for (DWORD k = 0; !index && k < kObjectPixelLamps; k++) {
             const DWORD cp = cL + 2 * k, cc = cp + 1, k1 = cK + 2 * k, k2 = k1 + 1;
             // l = lamp - pixel, d^2, sat(N.l) and the falloff (AppendLampLaw; the reach variant: the outdoor walls' law)
             AppendLampLaw(code, LA, LB, N, Src(kTemp, P) | kNeg, cp, cS, cH, reach, cR, k);
@@ -1806,43 +1953,13 @@ bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach,
                                      Op(kMad, 4), Dst(kTemp, LB, 0x8), Src(kTemp, LB, 0xAA), Src(kConst, cc, kSwzW) | kNeg, Src(kTemp, LB, 0xAA), // t (1 - S)
                                      Op(kAdd, 3), Dst(kTemp, LB, 0x4), Src(kTemp, LB, kSwzW), Src(kConst, cc, kSwzW),                            // S + t (1 - S)
                                      Op(kMul, 3), Dst(kTemp, LB, 0x1), Src(kTemp, LB, kSwzX), Src(kTemp, LB, 0xAA)});
-            if (capShadows) {
-                // A floor under the emitter casts a soft shadow on each pixel,
-                // independently of the three points that selected the group's lamps.
-                // The uniform branch skips lamps with no verified complete tile.
-                const DWORD a = cCap + 2 * k, b = a + 1;
-                code.insert(code.end(), {
-                    Op(kMov, 2), Dst(kTemp, G, 0x1), Src(kConst, a, kSwzW),
-                    Op(0x29, 2) | 0x00010000u, Src(kTemp, G, kSwzX), Src(kConst, cCapParams, kSwzW), // ifc_gt
-                    Op(kAdd, 3), Dst(kTemp, G, 0x2), Src(kConst, cp, kSwzY), Src(kTemp, P, kSwzY) | kNeg,
-                    Op(kMax, 3), Dst(kTemp, G, 0x2), Src(kTemp, G, kSwzY), Src(kConst, cCapParams, kSwzW),
-                    Op(0x06, 2), Dst(kTemp, G, 0x2), Src(kTemp, G, kSwzY),
-                    Op(kMul, 3), Dst(kTemp, G, 0x1), Src(kTemp, G, kSwzX), Src(kTemp, G, kSwzY),
-                    Op(kAdd, 3), Dst(kTemp, G, 0x8), Src(kTemp, G, kSwzX) | kNeg, Src(kConst, cH, 0xAA),
-                    Op(kMul, 3), Dst(kTemp, G, 0x4), Src(kTemp, G, kSwzW), Src(kConst, cCapParams, kSwzY),
-                    Op(kMax, 3), Dst(kTemp, G, 0x4), Src(kTemp, G, 0xAA), Src(kConst, cCapParams, kSwzW),
-                    Op(0x06, 2), Dst(kTemp, G, 0x4), Src(kTemp, G, 0xAA),
-                    Op(kMul, 3), Dst(kTemp, G, 0x4), Src(kTemp, G, 0xAA), Src(kConst, cCapParams, 0xAA),
-                    Op(kAdd, 3), Dst(kTemp, LB, 0xC), Src(kTemp, P, 0x88), Src(kConst, cp, 0x88) | kNeg,
-                    Op(kMad, 4), Dst(kTemp, G, 0x3), Src(kTemp, G, kSwzX), Src(kTemp, LB, kSwzZWZW), Src(kConst, cp, 0x88),
-                    Op(0x5A, 4), Dst(kTemp, LB, 0x4), Src(kTemp, G), Src(kConst, a), Src(kConst, a, 0xAA),
-                    Op(0x5A, 4), Dst(kTemp, LB, 0x8), Src(kTemp, G), Src(kConst, b), Src(kConst, b, 0xAA),
-                    Op(kAdd, 3), Dst(kTemp, LB, 0xC), Src(kTemp, LB) | 0x0C000000u, Src(kConst, cCapParams, kSwzX),
-                    Op(kMad, 4), Dst(kTemp, LB, 0xC, true), Src(kTemp, LB), Src(kTemp, G, 0xAA), Src(kConst, cCapParams, kSwzX),
-                    Op(kMul, 3), Dst(kTemp, G, 0x3), Src(kTemp, LB, kSwzZWZW), Src(kTemp, LB, kSwzZWZW),
-                    Op(kMad, 4), Dst(kTemp, LB, 0xC), Src(kTemp, LB), Src(kConst, cCapParams + 1, kSwzY), Src(kConst, cCapParams + 1, kSwzX),
-                    Op(kMul, 3), Dst(kTemp, LB, 0xC), Src(kTemp, LB), Src(kTemp, G, kSwzXYXY),
-                    Op(kMul, 3), Dst(kTemp, LB, 0x4), Src(kTemp, LB, 0xAA), Src(kTemp, LB, kSwzW),
-                    Op(0x58, 4), Dst(kTemp, LB, 0x4), Src(kTemp, G, kSwzW) | kNeg, Src(kConst, cH, kSwzW), Src(kTemp, LB, 0xAA),
-                    Op(kAdd, 3), Dst(kTemp, LB, 0x4), Src(kTemp, LB, 0xAA) | kNeg, Src(kConst, cH, 0xAA),
-                    Op(kMul, 3), Dst(kTemp, LB, 0x1), Src(kTemp, LB, kSwzX), Src(kTemp, LB, 0xAA),
-                    Op(0x2B, 0)}); // endif
-            }
+            if (capShadows) AppendCapShadow(code, G, LB, P, kConst, cp, kConst, cCap + 2 * k, cCap + 2 * k + 1, cCapParams, cH);
             if (k == 0) code.insert(code.end(), {Op(kMul, 3), Dst(kTemp, Q, 0x7), Src(kConst, cc), Src(kTemp, LB, kSwzX)});
             else code.insert(code.end(), {Op(kMad, 4), Dst(kTemp, Q, 0x7), Src(kConst, cc), Src(kTemp, LB, kSwzX), Src(kTemp, Q)});
         }
         // reach: the sum is held under 1 as an outdoor wall's texel is (the room map's min(sum, 1)), by its brightest channel
-        if (reach) AppendHueClamp(code, Q, LB);
+        // (the index loop does it itself)
+        if (reach && !index) AppendHueClamp(code, Q, LB);
         // Native rig and pixel lamps are alternative estimates; adding both can
         // amplify overlapping illumination. Use pixel lamps when the group is valid,
         // otherwise retain the native rig.
@@ -1850,6 +1967,10 @@ bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach,
                                  Op(kLrp, 4), Dst(kTemp, LA, 0x7), Src(kConst, cS, kSwzX), Src(kTemp, LA), Src(kInput, C)});
         std::vector<Edit> edits = {{u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, E)}}};
         if (capShadows) edits.push_back({1, {Op(kDef, 5), Dst(kConst, cCapParams + 1), F(3.0f), F(-2.0f), F(0.0f), F(0.0f)}});
+        if (index) {
+            edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, E + 1)}});
+            edits.push_back({1, {Op(kDefI, 5), Dst(7 /* integer */, static_cast<DWORD>(u.FreeInt())), static_cast<DWORD>(LampIndex::kSlots), 0, 0, 0}});
+        }
         // The ground lamp shade (13/10, F7 2026-10-13 09-31-30 #268: the wooden curbs of a flowerbed behind a free-standing wall
         // stayed lit by the garden post on the other side, while the grass and the paths beside them were shaded). One lamp
         // list serves the whole group, so a group running past the wall keeps the lamp for every piece, and neither the lamps
@@ -1860,8 +1981,8 @@ bool PatchInstancedLamps(std::vector<DWORD>& t, InstancedPatch& out, bool reach,
         // steps below). Within the gate it is the max x the shade, as before. Q and G are free after the lamps. Only with a
         // sampler and 3 constants to spare (after the reach rows): otherwise the bytes without it.
         const DWORD cM = cR + (reach ? 2u : 0u);
-        if (groundShade && E + 1 <= 15 && cM + 2 < 224) {
-            const DWORD S = E + 1;
+        if (groundShade && E + (index ? 2 : 1) <= 15 && cM + 2 < 224) {
+            const DWORD S = E + (index ? 2 : 1);
             edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, S)}});
             // (2.15.3) the mask in front of the face: xz + N.xz x rows[10] (cM + 2 .z; 0.6 m, kFenceShadeReach). The fence is a
             // wall in the mask, so its own footprint lies on the edge of its shadow; tops (N.xz = 0) read where they stand
@@ -2431,10 +2552,11 @@ bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach, 
         if (!sun || !lamp1) return false;
     }
     if (index) {
-        // two samplers (ground atlas, lamp index), two rows under the frame block, 10 temporaries, integer register i0
-        if (reach || u.maxSampler < 0 || u.maxSampler >= 14 || !u.afterLastSamplerDcl || u.maxConst + 2 >= static_cast<int>(LampIndex::kFirstConst) || u.maxTemp + 10 >= 32) return false;
-        for (const Ins& x : all)
-            if (x.op == kDefI) return false;
+        // two samplers (ground atlas, lamp index), two rows under the frame block, 10 temporaries (11 with reach: table row 4),
+        // integer register i0
+        if (u.maxSampler < 0 || u.maxSampler >= 14 || !u.afterLastSamplerDcl || u.maxConst + 2 >= static_cast<int>(LampIndex::kFirstConst) || u.maxTemp + (reach ? 11 : 10) >= 32)
+            return false;
+        if (u.FreeInt() < 0) return false;
     }
     // reach: 2 more rows (the r0^2 of the 8 lamps) after the cones
     if (!index && (u.maxSampler < 0 || u.maxSampler >= 15 || !u.afterLastSamplerDcl || u.maxConst + 4 + 4 * kObjectPixelLamps + (reach ? 2 : 0) >= 224 || u.maxTemp + 5 >= 32)) return false;
@@ -2451,7 +2573,7 @@ bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach, 
     out.coneConst = cL + 2 * kObjectPixelLamps;
     out.reachConst = reach ? cR : 0;
     out.rigLamps = shape != kC;
-    if (index) out.atlasConst = out.strengthConst = out.lampParamConst = out.lampConst = out.coneConst = 0, out.indexSampler = E + 1, out.objectConst = cA;
+    if (index) out.atlasConst = out.strengthConst = out.lampParamConst = out.lampConst = out.coneConst = out.reachConst = 0, out.indexSampler = E + 1, out.objectConst = cA;
     std::vector<DWORD> ground = {Op(kMad, 4), Dst(kTemp, T, 0x3), Src(kInput, V, kSwzXYXY), Src(kConst, cA), Src(kConst, cA, kSwzZWZW),
                                  Op(kTexld, 3), Dst(kTemp, T), Src(kTemp, T), Src(kSampler, E),
                                  Op(kMad, 4), Dst(kTemp, Fr, 0x8), Src(kTemp, Nrm, kSwzY), Src(kConst, cH, kSwzX), Src(kConst, cH, kSwzY),
@@ -2472,49 +2594,18 @@ bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach, 
     constexpr DWORD kNeg = 0x01000000u;
     const DWORD pw = Src(kInput, V, 0xD8 /* xzyw: world x, y, z */);
     if (index) {
-        // The same sum from the lamp index texture (lamp_index.h). cO = cA (the draw's row), F0..F6 = the frame constants.
-        // U = the uv of the cell's current texel (zw = 0: texldl's lod), En = that texel, P / C = the lamp's rows, X = the
-        // table uv. One constant register per instruction, as above.
-        constexpr DWORD kTexldl = 0x5F, kRep = 0x26, kEndRep = 0x27, kFrcOp = 0x13, kAbs = 0x23, kMinOp = 0x0A, kConstInt = 7;
-        const DWORD cO = cA, F0 = LampIndex::kFirstConst, F1 = F0 + 1, F2 = F0 + 2, F3 = F0 + 3, F4 = F0 + 4, F5 = F0 + 5, F6 = F0 + 6;
-        const DWORD U = T + 5, En = T + 6, P = T + 7, C = T + 8, X = T + 9, S2 = E + 1;
-        const DWORD Z = Src(kConst, cH, kSwzW) /* 0 */, wy = Src(kInput, V, 0xAA) /* world y */;
-        ground = {Op(kMul, 3), Dst(kTemp, U, 0x3), Src(kInput, V, kSwzXYXY), Src(kConst, F0, kSwzX),
-                  Op(kAdd, 3), Dst(kTemp, U, 0x3), Src(kTemp, U), Src(kConst, F0, kSwzZWZW),
-                  Op(kFrcOp, 2), Dst(kTemp, X, 0x3), Src(kTemp, U),
-                  Op(kAdd, 3), Dst(kTemp, U, 0x3), Src(kTemp, U), Src(kTemp, X) | kNeg,          // the cell
-                  Op(kMax, 3), Dst(kTemp, U, 0x3), Src(kTemp, U), Z,
-                  Op(kMinOp, 3), Dst(kTemp, U, 0x3), Src(kTemp, U), Src(kConst, F0, kSwzY),     // held in the window
-                  Op(kMad, 4), Dst(kTemp, U, 0x3), Src(kTemp, U), Src(kConst, F2), Src(kConst, F2, kSwzZWZW),
-                  Op(kMov, 2), Dst(kTemp, U, 0xC), Z,
-                  Op(kMov, 2), Dst(kTemp, X, 0xC), Z,
-                  Op(kMov, 2), Dst(kTemp, Q, 0x7), Z,
-                  Op(kRep, 1), Src(kConstInt, 0),
-                  Op(kTexldl, 3), Dst(kTemp, En), Src(kTemp, U), Src(kSampler, S2),            // (index, visibility, the same set in a wall)
-                  Op(kMad, 4), Dst(kTemp, X, 0x1), Src(kTemp, En, kSwzX), Src(kConst, F1, kSwzX), Src(kConst, F1, kSwzY),
-                  Op(kMov, 2), Dst(kTemp, X, 0x2), Src(kConst, F1, 0xAA),
-                  Op(kTexldl, 3), Dst(kTemp, P), Src(kTemp, X), Src(kSampler, S2),             // (pos, 1/R^2)
-                  Op(kAdd, 3), Dst(kTemp, X, 0x2), Src(kTemp, X, kSwzY), Src(kConst, F1, kSwzW),
-                  Op(kTexldl, 3), Dst(kTemp, C), Src(kTemp, X), Src(kSampler, S2)};            // (colour, spill)
-        AppendLampLaw(ground, A, B, Nrm, pw | kNeg, P, F3, cH, false, 0, 0, kTemp);
+        // The same sum from the lamp index texture (lamp_index.h, AppendIndexLamps). cO = cA (the draw's row), F0..F6 = the
+        // frame constants. U = the uv of the cell's current texel (zw = 0: texldl's lod), En = that texel, P / C = the lamp's
+        // rows, X = the table uv, R (reach) = table row 4. One constant register per instruction, as above.
+        constexpr DWORD kTexldl = 0x5F, kAbs = 0x23;
+        const DWORD cO = cA, F3 = LampIndex::kFirstConst + 3, F4 = F3 + 1, F5 = F3 + 2, F6 = F3 + 3;
+        const DWORD U = T + 5, En = T + 6, P = T + 7, X = T + 9, S2 = E + 1;
+        const DWORD wy = Src(kInput, V, 0xAA) /* world y */;
+        IndexLoop L{A, B, Q, Nrm, U, En, P, T + 8, X, T + 10, P, Src(kInput, V, kSwzXYXY), pw | kNeg, S2, cH};
+        L.reach = reach, L.vis = 0, L.intReg = static_cast<DWORD>(u.FreeInt()), L.visSel = Src(kConst, cO, kSwzX);
+        ground.clear();
+        AppendIndexLamps(ground, L);
         ground.insert(ground.end(), {
-            Op(kAdd, 3), Dst(kTemp, X, 0x2), Src(kTemp, X, kSwzY), Src(kConst, F1, kSwzW),
-            Op(kTexldl, 3), Dst(kTemp, P), Src(kTemp, X), Src(kSampler, S2),                   // cone row 1
-            Op(kDp3, 3), Dst(kTemp, B, 0x4), Src(kTemp, A), Src(kTemp, P),
-            Op(kAdd, 3), Dst(kTemp, B, 0x4), Src(kTemp, B, 0xAA), Src(kTemp, P, kSwzW),
-            Op(kAdd, 3), Dst(kTemp, X, 0x2), Src(kTemp, X, kSwzY), Src(kConst, F1, kSwzW),
-            Op(kTexldl, 3), Dst(kTemp, P), Src(kTemp, X), Src(kSampler, S2),                   // cone row 2
-            Op(kDp3, 3), Dst(kTemp, B, 0x8), Src(kTemp, A), Src(kTemp, P),
-            Op(kAdd, 3), Dst(kTemp, B, 0x8), Src(kTemp, B, kSwzW), Src(kTemp, P, kSwzW),
-            Op(kMax, 3), Dst(kTemp, B, 0x4, true), Src(kTemp, B, 0xAA), Src(kTemp, B, kSwzW),
-            Op(kMad, 4), Dst(kTemp, B, 0x8), Src(kTemp, B, 0xAA), Src(kTemp, C, kSwzW) | kNeg, Src(kTemp, B, 0xAA),
-            Op(kAdd, 3), Dst(kTemp, B, 0x4), Src(kTemp, B, kSwzW), Src(kTemp, C, kSwzW),
-            Op(kMul, 3), Dst(kTemp, B, 0x1), Src(kTemp, B, kSwzX), Src(kTemp, B, 0xAA),
-            Op(kLrp, 4), Dst(kTemp, B, 0x4), Src(kConst, cO, kSwzX), Src(kTemp, En, 0xAA), Src(kTemp, En, kSwzY), // the visibility
-            Op(kMul, 3), Dst(kTemp, B, 0x1), Src(kTemp, B, kSwzX), Src(kTemp, B, 0xAA),
-            Op(kMad, 4), Dst(kTemp, Q, 0x7), Src(kTemp, C), Src(kTemp, B, kSwzX), Src(kTemp, Q),
-            Op(kAdd, 3), Dst(kTemp, U, 0x1), Src(kTemp, U, kSwzX), Src(kConst, F1, kSwzX),     // the next entry
-            Op(kEndRep, 0),
             Op(kTexldl, 3), Dst(kTemp, En), Src(kTemp, U), Src(kSampler, S2),                  // (ground share, lamp head, share set in a wall)
             Op(kLrp, 4), Dst(kTemp, B, 0x4), Src(kConst, cO, kSwzX), Src(kTemp, En, 0xAA), Src(kTemp, En, kSwzX),
             Op(kAdd, 3), Dst(kTemp, B, 0x8), Src(kTemp, En, kSwzY), wy | kNeg,                 // sat(1 - (y - head) / fade)
@@ -2558,13 +2649,13 @@ bool PatchObjectLampPs(std::vector<DWORD>& t, ObjectLampPatch& out, bool reach, 
         else ground.insert(ground.end(), {Op(kMad, 4), Dst(kTemp, Q, 0x7), Src(kConst, cc), Src(kTemp, B, kSwzX), Src(kTemp, Q)});
     }
     // reach: the sum is held under 1 as an outdoor wall's texel is (the room map's min(sum, 1)), by its brightest channel
-    if (reach) AppendHueClamp(ground, Q, B);
+    if (reach && !index) AppendHueClamp(ground, Q, B); // (the index loop clamps its own sum)
     std::vector<Edit> edits = {{1, {Op(kDef, 5), Dst(kConst, cH), F(0.5f), F(0.5f), F(1.0f), F(0.0f)}},
                                {afterLastInDcl, {Op(kDcl, 2), 0x80080005u /* texcoord8 */, Dst(kInput, V, 0x7)}},
                                {u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, E)}}};
     if (index) {
         edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, E + 1)}});
-        edits.push_back({1, {Op(kDefI, 5), Dst(7 /* i0 */, 0), static_cast<DWORD>(LampIndex::kSlots), 0, 0, 0}});
+        edits.push_back({1, {Op(kDefI, 5), Dst(7 /* integer */, static_cast<DWORD>(u.FreeInt())), static_cast<DWORD>(LampIndex::kSlots), 0, 0, 0}});
     }
     // Q x the lamp strength: the index copy has it in Q already
     const DWORD qScale = index ? Src(kConst, cH, 0xAA /* 1 */) : Src(kConst, cS, kSwzY);
@@ -4145,7 +4236,7 @@ bool FindWallMatrices(const std::vector<DWORD>& vs, WallMatrices& out) {
 }
 
 // ---- Windows take outdoor light (experimental, see the header) ----
-bool PatchWindowOutdoor(std::vector<DWORD>& t, WindowOutdoorPatch& out, bool reach) {
+bool PatchWindowOutdoor(std::vector<DWORD>& t, WindowOutdoorPatch& out, bool reach, bool index) {
     out = WindowOutdoorPatch{};
     if (t.empty() || t[0] != 0xFFFF0300) return false;
     const auto ins = Parse(t);
@@ -4211,6 +4302,10 @@ bool PatchWindowOutdoor(std::vector<DWORD>& t, WindowOutdoorPatch& out, bool rea
     const Usage u = Scan(t, ins);
     // reach: 2 more rows (the r0^2 of the 8 lamps) after the plan rows
     if (u.maxSampler < 0 || u.maxSampler >= 15 || !u.afterLastSamplerDcl || u.maxConst + 6 + 2 * static_cast<int>(kObjectPixelLamps) + (reach ? 2 : 0) >= 224 || u.maxTemp + 7 >= 32) return false;
+    // index (real-time GI S3-02b): one more sampler, 6 more temporaries, an integer register, every constant under the frame block
+    if (index && (u.maxSampler + 2 > 15 || u.maxTemp + 13 >= 32 || u.maxConst + 6 + 2 * static_cast<int>(kObjectPixelLamps) + (reach ? 2 : 0) >= static_cast<int>(LampIndex::kFirstConst)))
+        return false;
+    if (index && u.FreeInt() < 0) return false;
     const DWORD E = static_cast<DWORD>(u.maxSampler + 1), V = static_cast<DWORD>(maxIn + 1), Nin = static_cast<DWORD>(nIn), U = static_cast<DWORD>(r.uvNum);
     const DWORD T = static_cast<DWORD>(u.maxTemp + 1), Fr = T + 1, A = T + 2, B = T + 3, Q = T + 4, N = T + 5, P = T + 6;
     const DWORD cA = static_cast<DWORD>(u.maxConst + 1), cB = cA + 1, cH = cA + 2, cS = cA + 3, cL = cA + 4;
@@ -4223,6 +4318,7 @@ bool PatchWindowOutdoor(std::vector<DWORD>& t, WindowOutdoorPatch& out, bool rea
     out.lampConst = cL;
     out.planConst = cP;
     out.reachConst = reach ? cR : 0;
+    out.indexSampler = index ? E + 1 : 0;
     constexpr DWORD kNeg = 0x01000000u, kCmpWin = 0x58; // cmp
     std::vector<DWORD> v = {
         Op(kNrm, 2), Dst(kTemp, N, 0x7), Src(kInput, Nin),
@@ -4247,13 +4343,18 @@ bool PatchWindowOutdoor(std::vector<DWORD>& t, WindowOutdoorPatch& out, bool rea
     // per-pixel lamps Q (same law as PatchObjectLampPs: colour x sat(N.l) x sat(1 - d^2/R^2)^2, one constant per instruction;
     // the reach variant: the outdoor walls' law, AppendLampLaw, held under 1 like their texels)
     const DWORD pw = Src(kInput, V, 0xD8 /* xzyw: world x, y, z */);
-    for (DWORD k = 0; k < kObjectPixelLamps; k++) {
+    if (index) { // the lamp index cells: visibility set in a wall, no lamp shining out of a house, the cones per pixel
+        IndexLoop IL{A, B, Q, N, T + 7, T + 8, T + 9, T + 10, T + 11, T + 12, T + 9, Src(kInput, V, kSwzXYXY), pw | kNeg, E + 1, cH};
+        IL.reach = reach, IL.vis = 1, IL.intReg = static_cast<DWORD>(u.FreeInt());
+        AppendIndexLamps(v, IL);
+    }
+    for (DWORD k = 0; !index && k < kObjectPixelLamps; k++) {
         const DWORD cp = cL + 2 * k, cc = cp + 1;
         AppendLampLaw(v, A, B, N, pw | kNeg, cp, cS, cH, reach, cR, k);
         if (k == 0) v.insert(v.end(), {Op(kMul, 3), Dst(kTemp, Q, 0x7), Src(kConst, cc), Src(kTemp, B, kSwzX)});
         else v.insert(v.end(), {Op(kMad, 4), Dst(kTemp, Q, 0x7), Src(kConst, cc), Src(kTemp, B, kSwzX), Src(kTemp, Q)});
     }
-    if (reach) AppendHueClamp(v, Q, B); // (held under 1 by its brightest channel)
+    if (reach && !index) AppendHueClamp(v, Q, B); // (held under 1 by its brightest channel)
     // outdoor = ground + lamps x cS.y, x w; the game's light is never lowered
     v.insert(v.end(), {Op(kMad, 4), Dst(kTemp, T, 0x7), Src(kTemp, Q), Src(kConst, cS, kSwzY), Src(kTemp, T),
                        Op(kMul, 3), Dst(kTemp, T, 0x7), Src(kTemp, T), Src(kTemp, P, kSwzW),
@@ -4262,6 +4363,10 @@ bool PatchWindowOutdoor(std::vector<DWORD>& t, WindowOutdoorPatch& out, bool rea
                                {afterLastInDcl, {Op(kDcl, 2), 0x80080005u /* texcoord8 */, Dst(kInput, V, 0x7)}},
                                {u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, E)}},
                                {End(ins[static_cast<size_t>(anchor)]), v}};
+    if (index) {
+        edits.push_back({u.afterLastSamplerDcl, {Op(kDcl, 2), 0x90000000u, Dst(kSampler, E + 1)}});
+        edits.push_back({1, {Op(kDefI, 5), Dst(7 /* integer */, static_cast<DWORD>(u.FreeInt())), static_cast<DWORD>(LampIndex::kSlots), 0, 0, 0}});
+    }
     Apply(t, std::move(edits));
     return true;
 }
