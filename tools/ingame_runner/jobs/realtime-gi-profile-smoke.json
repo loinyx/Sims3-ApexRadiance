@@ -1,0 +1,52 @@
+{
+  "id": "realtime-gi-profile-smoke",
+  "description": "Frame Profiler over the far pan of research 00 run D (8 lots at 150 m, 1 pass of 60 s) at night, with the four parts of the lot room solve timed (rebuild, AO solver 1, AO solver 2, room pass). Developer build; developer mode on, the background frame limit lifted. Smoke: pass = no crash, no fail line, and the Timed functions block shows the four Room solve targets as Timed with calls above 0 in a 60 s report. Run WITHOUT -Profiler (the Frida frame hook and the Frame Profiler hook the same function). Read the counter block of ApexRadiance_Hitches.txt in the load folder: the four Room solve lines against Lot room solve.",
+  "save": "ApexTest-Night",
+  "toml": {
+    "ui": {
+      "developer_mode": true
+    },
+    "screen": {
+      "background_fps_limit": 0
+    },
+    "qol.frame_profiler": {
+      "start_at_load": true,
+      "report_every_s": 60,
+      "write_file": true
+    }
+  },
+  "variants": {
+    "profile": {}
+  },
+  "expect": [
+    "\\[FrameProfiler\\] Measurement preset: timing run"
+  ],
+  "fail": [
+    "\\[FrameProfiler\\] Room solve: "
+  ],
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    },
+    {
+      "do": "profile",
+      "minutes": 1.5
+    },
+    {
+      "do": "camera_pan",
+      "lots": 8,
+      "height": 150,
+      "seconds": 60,
+      "passes": 1
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    }
+  ]
+}
