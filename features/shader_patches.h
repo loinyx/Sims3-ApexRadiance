@@ -511,6 +511,45 @@ bool MakeAoReceiverMask(std::vector<DWORD>& vs, std::vector<DWORD>& ps, bool hai
 enum class JitterResult { Ok, NotVertexShader, Unreadable, NoPosition, Subroutines, PassThrough, NoFreeRegister, ConstantInUse, ProjectedWater };
 JitterResult AddJitterVs(std::vector<DWORD>& t, int jitterConst);
 
+// Motion vectors of moving objects and skinned Sims (G-buffer, research 14 WP8 / WP13 S2; GB-05). The position slice of
+// a game vertex shader: the instructions the position output depends on (component by component; flow control is kept
+// whole and nothing is killed inside it), with the constants they read. A replay shader built from it runs the slice
+// twice: bank A with the game's constants as the draw left them (this frame), bank B with the same code reading copies
+// at free registers (the values the same draw had last frame: bone palette, world rows, camera). Rigid movers, skinned
+// and morphed Sims need no pattern of their own: whatever the position reads is replayed.
+struct MotionSlice {
+    std::vector<DWORD> code;  // the game shader
+    std::vector<char> keep;   // per instruction (Parse order): part of the slice
+    std::vector<int> singles; // constant registers the slice reads by number (not set by def), sorted
+    struct Region {           // c[a0 + base + offset] (or aL) reads: base = the lowest; uploaded data, not def
+        int base = 0;
+        int maxExtent = 0;    // registers to the next one the shader reads by number, sets by def or indexes again
+        int lastOffset = 0;   // the highest offset read (an extent needs more)
+    };
+    std::vector<Region> regions;
+    int temps = 0;            // the game shader's highest temp + 1
+    int kept = 0;             // instructions kept (control flow included)
+    bool v3 = false;
+};
+enum class MotionSliceResult { Ok, NotVertexShader, Unreadable, Version, Subroutines, NoPosition, PassThrough, Predicated, RelativeOutput, Unsupported,
+                               NoFreeRegister, NoRoom };
+MotionSliceResult AnalyzeMotionSlice(const std::vector<DWORD>& vs, MotionSlice* out);
+// Bank B's place for one draw: extents[i] = registers region i uses this draw ([base, base + extent), clamped to
+// [lastOffset + 1, maxExtent]). Out: where each region's copy and each single's copy go, and the jitter register.
+struct MotionReplayLayout {
+    std::vector<int> extents;
+    std::vector<int> regionTo; // per region: first register of the copy
+    std::vector<int> singleTo; // per single: its copy
+    int jitter = -1;           // xy: this frame's jitter in clip units (0 without temporal AA)
+};
+// The replay vs_3_0 (any game version from vs_2_0): the game's input and sampler declarations, its defs, slice A then
+// slice B, then o0 = A's position moved by the jitter exactly as AddJitterVs moves the scene draw (same depth, same
+// pixels), o1 (TEXCOORD0) = A's clip position without jitter, o2 (TEXCOORD1) = B's. probe (offline check): o0 comes from an
+// extra float4 input declared TEXCOORD15 instead (one point per vertex at a chosen pixel). NoRoom: the copies do not fit
+// in 256 registers beside A's; NoFreeRegister: more than 32 temps.
+MotionSliceResult MakeMotionReplayVs(const MotionSlice& s, const std::vector<int>& extents, MotionReplayLayout* layout, std::vector<DWORD>* out,
+                                     bool probe = false);
+
 // The snowy and melting-snow lot light passes (lot_light_bridge DrawLotSnow / DrawLotMelt): after the lot map's texld
 // ("texld r0, v3, s2") and its basis factor, the max with the terrain light read at TEXCOORD1 (v7) from s<newSampler>, x4;
 // with mask, the room mask from s<newSampler + 1> at the uv rows PS c200 / c201 (kLotMaskConst) keeps the terrain out of rooms

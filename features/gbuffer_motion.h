@@ -89,6 +89,36 @@ inline bool ViewRows(const float vp[4][4], float rows[3][3]) {
     return true;
 }
 
+// The radical inverse of i in base b (Halton sequence; i >= 1): the temporal AA's sub-pixel offsets are (h2, h3) - 0.5
+inline double Halton(unsigned i, unsigned b) {
+    double f = 1.0, r = 0.0;
+    for (; i; i /= b) f /= b, r += f * (i % b);
+    return r;
+}
+
+// The temporal AA's jitter over a frame (GB-05): Present arms the next frame's offset for its scene draws; the scene
+// boundary takes it for that frame's passes and disarms it, so the effects and the UI drawn after it are not moved.
+// Offsets in clip units (2 / width = one pixel; y up), phases 4..16 of Halton (2, 3) - 0.5
+struct JitterClock {
+    unsigned index = 0;
+    bool armed = false;
+    float offset[2] = {};
+    void Present(unsigned phases, unsigned width, unsigned height) {
+        phases = phases < 4 ? 4 : phases > 16 ? 16 : phases;
+        const unsigned i = index++ % phases + 1;
+        offset[0] = static_cast<float>(2.0 * (Halton(i, 2) - 0.5) / width);
+        offset[1] = static_cast<float>(-2.0 * (Halton(i, 3) - 0.5) / height);
+        armed = true;
+    }
+    // this frame's offset (0 when none was armed); disarms
+    bool Boundary(float frame[2]) {
+        const bool was = armed;
+        frame[0] = was ? offset[0] : 0.0f, frame[1] = was ? offset[1] : 0.0f;
+        armed = false;
+        return was;
+    }
+};
+
 // Row 3 of D gives q.w = dot(row, (x, y, d, 1)) = previous view depth / this frame's view depth of the pixel's point:
 // a history pixel of the same surface has 1/z_prev = (1/z) / q.w (the temporal depth test).
 
@@ -101,11 +131,15 @@ namespace GBuffer {
 #ifndef APEX_NO_DEV_TOOLS
 // render target 1 (albedo + material id, A8R8G8B8) and 2 (octahedral normal, roughness, motion class / 3, A2B10G10R10)
 bool Targets(IDirect3DTexture9* out[2]);
-// the camera motion target (G16R16F, mv = current NDC - previous NDC, kInvalid when there is no history) and row 3 of
-// its D; null when the motion pass did not run this frame
+// the motion target (A16B16G16R16F: rg = mv = current NDC - previous NDC, kInvalid when there is no history; b = 1 where a
+// mover's own vector replaced the camera's, GB-05) and row 3 of the camera's D; null when the motion pass did not run this frame
 IDirect3DTexture9* Motion(float dRow3[4]);
+// (GB-05) this frame's scene jitter of the temporal AA in clip units (2 / width = one pixel): the depth at pixel p shows the
+// surface point whose unjittered NDC is ndc(p) - jitter. False (and 0) when the scene was not jittered
+bool Jitter(float clip[2]);
 #else
 inline bool Targets(IDirect3DTexture9*[2]) { return false; }
 inline IDirect3DTexture9* Motion(float[4]) { return nullptr; }
+inline bool Jitter(float clip[2]) { clip[0] = clip[1] = 0; return false; }
 #endif
 } // namespace GBuffer

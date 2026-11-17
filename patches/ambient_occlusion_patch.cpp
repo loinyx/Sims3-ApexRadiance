@@ -122,13 +122,14 @@ float4 cSimView : register(c12); // mask preview, transparent hair mask availabl
 // G-buffer (developer switches, research 14 WP6 / WP7; patches/gbuffer_patch.cpp)
 sampler2D sGbN : register(s7);   // render target 2: octahedral normal (rg), roughness (b, 0 = no normal written), motion class / 3 (a)
 sampler2D sHist : register(s8);  // last frame's history: shade, 1/z, material id / 255, frames (A16B16G16R16F)
-sampler2D sMotion : register(s9); // camera motion: current NDC - previous NDC (G16R16F), above 1000 = no history
+sampler2D sMotion : register(s9); // motion: current NDC - previous NDC (rg, above 1000 = no history), b = 1: a mover's own vector (A16B16G16R16F)
 sampler2D sGbA : register(s10);  // render target 1: albedo (rgb), material id / 255 (a)
 float4 cGbX : register(c13); // world -> view rows x (right), y (up), z (forward); cGbX.w = 1: use the G-buffer normal
 float4 cGbY : register(c14);
 float4 cGbZ : register(c15);
 float4 cTmp : register(c16); // temporal: x = 1 history valid, y = 1/z tolerance (relative), z = most frames, w = variance clip width (sigmas)
 float4 cTmpD : register(c17); // row 3 of the camera reprojection D (q.w = previous depth / this depth)
+float4 cPhase : register(c18); // xy: per-frame phase of the slice angle and the step offsets (jittered scene + temporal filter; 0 = fixed)
 
 static const float PI = 3.14159265;
 
@@ -204,7 +205,7 @@ float4 GtaoPS(float2 uv : TEXCOORD0) : COLOR0
     float lg = log2(rMax / cMarch.x) / STEPS;
     float lodAdd = log2(1.0 - exp2(-lg)) - cMarch.y + log2(cMarch.x);
     float2 q = floor(pix);
-    float b1 = (Bayer4(q) + 0.5) / 16.0, b2 = (Bayer4(q.yx + float2(1, 2)) + 0.5) / 16.0;
+    float b1 = frac((Bayer4(q) + 0.5) / 16.0 + cPhase.x), b2 = frac((Bayer4(q.yx + float2(1, 2)) + 0.5) / 16.0 + cPhase.y);
     float2 fMul = float2(-1.0 / (0.615 * cRad.x), -1.0 / (0.615 * Rl));
     const float fAdd = 0.385 / 0.615 + 1.0;
     float2 om;
@@ -254,7 +255,7 @@ float4 GtaoPS(float2 uv : TEXCOORD0) : COLOR0
     occ *= 1 - cBlend.z * saturate((iso - cBlend.w) / cBlend.w);
     return float4(saturate(1 - occ), w0, 0, 0);
 }
-
+)HLSL" R"HLSL( // (two literals: one is limited to 16 KB)
 // separable depth-aware filter: box (0.5 1 1 1 0.5: one of each interleave offset) or tent (1 2 3 2 1)
 static const float BX[5] = { 0.5, 1.0, 1.0, 1.0, 0.5 };
 static const float TT[5] = { 1.0, 2.0, 3.0, 2.0, 1.0 };
@@ -282,6 +283,8 @@ float4 TemporalPS(float2 uv : TEXCOORD0) : COLOR0
     [branch] if (c0.y <= 0.0) return float4(1, 0, 0, 0);
     float id = tex2Dlod(sGbA, float4(uv, 0, 0)).a;
     float cls = floor(tex2Dlod(sGbN, float4(uv, 0, 0)).a * 3 + 0.5);
+    float4 mvs = tex2Dlod(sMotion, float4(uv, 0, 0));
+    if (mvs.b > 0.5) cls = 1; // (GB-05) a mover whose own vector the motion pass took: exact
     float m1 = 0, m2 = 0;
     [unroll] for (int y = -1; y <= 1; y++)
         [unroll] for (int x = -1; x <= 1; x++) {
@@ -291,7 +294,7 @@ float4 TemporalPS(float2 uv : TEXCOORD0) : COLOR0
         }
     m1 /= 9;
     float sigma = sqrt(max(m2 / 9 - m1 * m1, 0));
-    float2 mv = tex2Dlod(sMotion, float4(uv, 0, 0)).rg;
+    float2 mv = mvs.rg;
     float2 puv = uv - mv * float2(0.5, -0.5);
     float d = tex2Dlod(sDepth, float4(uv, 0, 0)).r;
     float qw = dot(cTmpD, float4(uv.x * 2 - 1, 1 - uv.y * 2, d, 1));
@@ -822,7 +825,7 @@ constexpr D3DSAMPLERSTATETYPE kSamplerStates[] = {D3DSAMP_MINFILTER, D3DSAMP_MAG
 constexpr int kRS = static_cast<int>(sizeof(kRenderStates) / sizeof(kRenderStates[0]));
 constexpr int kSS = static_cast<int>(sizeof(kSamplerStates) / sizeof(kSamplerStates[0]));
 constexpr DWORD kSamplers = 11; // s5 opaque Sims, s6 transparent hair, s7..s10 G-buffer normal, history, motion, albedo + id
-constexpr UINT kPSConsts = 18; // c0..c17
+constexpr UINT kPSConsts = 19; // c0..c18
 
 struct SavedState {
     IDirect3DSurface9 *rt0 = nullptr, *ds = nullptr;
@@ -1113,6 +1116,9 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
     const bool map = g.p.inMapView && MapView::IsOpen();
     const float distance = std::clamp(g.p.distance, 25.0f, 1000.0f);
     const float fadeStart = distance * (kFade0 / kFade1);
+    float jitter[2] = {}, jitterPx[2] = {}; // this frame's scene jitter (clip units) and its shift in pixels (y down)
+    const bool jittered = !kPublicBuild && GBuffer::Jitter(jitter);
+    jitterPx[0] = jitter[0] * W * 0.5f, jitterPx[1] = -jitter[1] * H * 0.5f;
     const float c[kPSConsts][4] = {
         {tanX, tanY, H / (2.0f * tanY), kMaxRadius * H},
         {W, H, static_cast<float>(g.padW), static_cast<float>(g.padH)},
@@ -1122,7 +1128,8 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
         {kNearZ, 1.0f / (kFarZ - kNearZ), kIsoK, kIsoT},
         {0, 0, 0, 0},
         {kDeadZone, 1.0f / (1.0f - kDeadZone), std::clamp(g.p.protect, 0.0f, 1.0f), g.showShade || CaptureBurst::ShadeAlone() ? 1.0f : 0.0f},
-        {2.0f * tanX / W, -2.0f * tanY / H, -tanX, tanY},
+        // (GB-05) a jittered scene (temporal AA): the depth at pixel p is the surface point of the unjittered pixel p - shift
+        {2.0f * tanX / W, -2.0f * tanY / H, -tanX - jitterPx[0] * (2.0f * tanX / W), tanY + jitterPx[1] * (2.0f * tanY / H)},
         {std::cos(kPi / slices), std::sin(kPi / slices), 0, 0},
         {A, 1.0f / (nearZ * A), SceneDither::On() ? SceneDither::Strength() / 255.0f : 0.0f, SceneDither::GrainPhase()},
         {std::clamp(g.p.simStrength, 0.0f, 1.0f), WantSimMask() && simMask.cleared && !simMask.failed ? 1.0f : 0.0f,
@@ -1130,6 +1137,12 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
         {g.p.simControls && g.showSimMask ? 1.0f : 0.0f, WantSimMask() && simMask.hairCleared && !simMask.failed ? 1.0f : 0.0f, 0, 0},
         {}, {}, {}, {}, {}};
     dev->SetPixelShaderConstantF(0, &c[0][0], kPSConsts);
+    // (GB-05) with the temporal filter on a jittered scene, the slice angles and step phases turn every frame: the history
+    // accumulates them (8 frames of 4x4 offsets); 0 otherwise, the shade bit for bit as before
+    if (jittered && g.temporal) {
+        const float phase[4] = {std::fmod(g.presents * 0.6180340f, 1.0f), std::fmod(g.presents * 0.7548777f, 1.0f), 0, 0};
+        dev->SetPixelShaderConstantF(18, phase, 1);
+    }
     // G-buffer consumers (developer builds): this frame's targets, none when the G-buffer is off or was not written
     IDirect3DTexture9* gb[2] = {};
     const bool haveGb = (g.gbNormals || g.temporal) && !kPublicBuild && GBuffer::Targets(gb);

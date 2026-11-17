@@ -11,6 +11,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <map>
+#include <set>
 
 namespace {
 
@@ -5073,4 +5075,337 @@ bool ProbeCopy(const std::vector<DWORD>& t, int k, std::vector<DWORD>& out, std:
     }
     return false;
 }
+} // namespace ShaderPatches
+
+// ---- Motion slice and replay vertex shader (G-buffer movers, research 14 WP8 / WP13 S2; GB-05) ----
+namespace {
+constexpr DWORD kAddrReg = 3, kRastOutReg = 4, kLoopReg = 15, kPredicateReg = 19, kRelBit = 0x2000u, kPredicatedBit = 0x10000000u;
+constexpr DWORD kRegBitsAll = 0x70001800u | 0x7FFu;
+DWORD WithReg(DWORD tok, DWORD type, DWORD num) { return (tok & ~kRegBitsAll) | (Reg(type, num) & kRegBitsAll); }
+bool IsControl(DWORD op) {
+    switch (op) {
+    case 0x00: case 0x1B: case 0x1D: case 0x26: case 0x27: case 0x28: case 0x29: case 0x2A: case 0x2B: case 0x2C: case 0x2D: case 0x60: return true;
+    default: return false;
+    }
+}
+bool OpensBlock(DWORD op) { return op == 0x1B || op == 0x26 || op == 0x28 || op == 0x29; }
+bool ClosesBlock(DWORD op) { return op == 0x1D || op == 0x27 || op == 0x2B; }
+bool IsLoopOp(DWORD op) { return op == 0x1B || op == 0x26; }
+bool ClosesLoop(DWORD op) { return op == 0x1D || op == 0x27; }
+// dst component k reads source component swizzle[k]; any other instruction: every component its swizzle names
+bool ComponentWise(DWORD op) {
+    switch (op) {
+    case 0x01: case 0x02: case 0x03: case 0x04: case 0x05: case 0x0A: case 0x0B: case 0x0C: case 0x0D: case 0x12: case 0x13: case 0x23: case 0x2E: return true;
+    default: return false;
+    }
+}
+int MatrixRows(DWORD op) { return op == 0x14 ? 4 : op == 0x15 ? 3 : op == 0x16 ? 4 : op == 0x17 ? 3 : op == 0x18 ? 2 : 0; }
+struct Operand {
+    size_t at = 0, relAt = 0;
+    bool rel = false;
+};
+struct Decoded {
+    bool hasDst = false, predicated = false;
+    size_t dst = 0, pred = 0;
+    std::vector<Operand> src;
+};
+// false: a relative destination (vs_3_0 o[aL]) or a short instruction
+bool DecodeIns(const std::vector<DWORD>& t, const Ins& x, Decoded& d) {
+    size_t k = x.at + 1;
+    const size_t end = End(x);
+    d = {};
+    d.hasDst = !IsControl(x.op);
+    if (d.hasDst) {
+        if (k >= end || (t[k] & kRelBit)) return false;
+        d.dst = k++;
+    }
+    if (t[x.at] & kPredicatedBit) {
+        if (k >= end) return false;
+        d.predicated = true;
+        d.pred = k++;
+    }
+    while (k < end) {
+        Operand o;
+        o.at = k++;
+        o.rel = (t[o.at] & kRelBit) != 0;
+        if (o.rel) {
+            if (k >= end) return false;
+            o.relAt = k++;
+        }
+        d.src.push_back(o);
+    }
+    if (x.op == 0x25 && d.src.size() == 3) d.src.resize(1); // vs_2_x sincos: its two macro constants go (the vs_3_0 form has none)
+    return true;
+}
+DWORD SourceComps(DWORD swz, DWORD dstMask, bool componentWise) {
+    DWORD m = 0;
+    for (int i = 0; i < 4; i++)
+        if (!componentWise || ((dstMask >> i) & 1)) m |= 1u << ((swz >> (2 * i)) & 3);
+    return m;
+}
+DWORD LiveKey(DWORD r) { return (Type(r) << 16) | Num(r); }
+bool Tracked(DWORD type) { return type == kTemp || type == kAddrReg || type == kLoopReg || type == kPredicateReg; }
+bool IsPosDcl(const std::vector<DWORD>& t, const Ins& x) {
+    return x.op == kDcl && x.len == 2 && Type(t[x.at + 2]) == kOutput && (t[x.at + 1] & 0x1F) == 0 && ((t[x.at + 1] >> 16) & 0xF) == 0;
+}
+} // namespace
+
+namespace ShaderPatches {
+
+MotionSliceResult AnalyzeMotionSlice(const std::vector<DWORD>& t, MotionSlice* out) {
+    if (t.empty() || (t[0] & 0xFFFF0000u) != 0xFFFE0000u) return MotionSliceResult::NotVertexShader;
+    if (t.back() != 0x0000FFFFu) return MotionSliceResult::Unreadable;
+    const DWORD major = (t[0] >> 8) & 0xFF;
+    if (major < 2 || major > 3) return MotionSliceResult::Version;
+    const bool v3 = major == 3;
+    const auto ins = Parse(t);
+    if (ins.empty()) return MotionSliceResult::Unreadable;
+    DWORD posType = kRastOutReg, posNum = 0;
+    if (v3) {
+        bool found = false;
+        for (const Ins& x : ins)
+            if (IsPosDcl(t, x)) posType = kOutput, posNum = Num(t[x.at + 2]), found = true;
+        if (!found) return MotionSliceResult::NoPosition;
+    }
+    std::vector<Decoded> dec(ins.size());
+    std::vector<int> depth(ins.size(), 0), loopDepth(ins.size(), 0);
+    std::set<int> defs, nonRelAll;
+    bool anyPos = false, onlyCopies = true;
+    int d = 0, l = 0;
+    for (size_t i = 0; i < ins.size(); i++) {
+        const Ins& x = ins[i];
+        if (x.op == 0x19 || x.op == 0x1A || x.op == 0x1C || x.op == 0x1E) return MotionSliceResult::Subroutines;
+        if (ClosesBlock(x.op)) d--, l -= ClosesLoop(x.op) ? 1 : 0;
+        depth[i] = x.op == 0x2A ? d - 1 : d; // else: the level of its if
+        loopDepth[i] = l;
+        if (OpensBlock(x.op)) d++, l += IsLoopOp(x.op) ? 1 : 0;
+        if (x.op == kDcl || x.op == kDefI || x.op == kDefB) continue;
+        if (x.op == kDef) {
+            defs.insert(static_cast<int>(Num(t[x.at + 1])));
+            continue;
+        }
+        if (!DecodeIns(t, x, dec[i])) return MotionSliceResult::RelativeOutput;
+        const Decoded& q = dec[i];
+        for (size_t s = 0; s < q.src.size(); s++) {
+            const DWORD r = t[q.src[s].at];
+            if (Type(r) != kConst || q.src[s].rel) continue;
+            const int rows = s == 1 ? std::max(1, MatrixRows(x.op)) : 1;
+            for (int k = 0; k < rows; k++) nonRelAll.insert(static_cast<int>(Num(r)) + k);
+        }
+        if (q.hasDst && IsReg(t[q.dst], posType, posNum)) {
+            anyPos = true;
+            if (!(x.op == kMov && q.src.size() == 1 && Type(t[q.src[0].at]) == kInput)) onlyCopies = false;
+        }
+    }
+    if (!anyPos) return MotionSliceResult::NoPosition;
+    if (onlyCopies) return MotionSliceResult::PassThrough;
+
+    // backward liveness by component. Nothing is killed inside flow control; what a loop's kept body reads stays live through
+    // the whole body (the next pass sees it); passes repeat until nothing changes
+    std::vector<char> keep(ins.size(), 0);
+    std::map<DWORD, DWORD> loopNeed;
+    for (int pass = 0; pass < 16; pass++) {
+        bool changed = false;
+        std::map<DWORD, DWORD> need;
+        need[(posType << 16) | posNum] = 0xF;
+        auto add = [&](DWORD r, DWORD comps, size_t i) {
+            if (!(r & 0x80000000u) || !Tracked(Type(r))) return;
+            need[LiveKey(r)] |= comps;
+            if (loopDepth[i] > 0) {
+                DWORD& v = loopNeed[LiveKey(r)];
+                if ((v | comps) != v) v |= comps, changed = true;
+            }
+        };
+        for (size_t ii = ins.size(); ii-- > 0;) {
+            const Ins& x = ins[ii];
+            if (x.op == kDcl || x.op == kDef || x.op == kDefI || x.op == kDefB) continue;
+            if (ClosesLoop(x.op))
+                for (const auto& [k, v] : loopNeed) need[k] |= v;
+            const Decoded& q = dec[ii];
+            auto addSources = [&](DWORD dstMask, bool cw) {
+                for (size_t s = 0; s < q.src.size(); s++) {
+                    const DWORD r = t[q.src[s].at];
+                    const DWORD comps = SourceComps(Swz(r), dstMask, cw);
+                    const int rows = s == 1 ? std::max(1, MatrixRows(x.op)) : 1;
+                    for (int k = 0; k < rows; k++) add(WithReg(r, Type(r), Num(r) + k), comps, ii);
+                    if (q.src[s].rel) add(t[q.src[s].relAt], 1u << (Swz(t[q.src[s].relAt]) & 3), ii);
+                }
+                if (q.predicated) add(t[q.pred], 0xF, ii);
+            };
+            if (IsControl(x.op)) {
+                if (!keep[ii]) keep[ii] = 1, changed = true;
+                addSources(0xF, false);
+                continue;
+            }
+            const DWORD dst = t[q.dst];
+            const auto it = need.find(LiveKey(dst));
+            const DWORD m = it == need.end() ? 0 : (it->second & WMask(dst));
+            if (!m) continue;
+            if (!keep[ii]) keep[ii] = 1, changed = true;
+            if (depth[ii] == 0 && !q.predicated) it->second &= ~WMask(dst);
+            addSources(m, ComponentWise(x.op));
+        }
+        if (!changed && pass > 0) break;
+    }
+
+    MotionSlice s;
+    s.code = t;
+    s.keep = keep;
+    s.v3 = v3;
+    s.temps = Scan(t, ins).maxTemp + 1;
+    std::set<int> singles, relBases;
+    for (size_t i = 0; i < ins.size(); i++) {
+        if (!keep[i]) continue;
+        s.kept++;
+        const Ins& x = ins[i];
+        if (dec[i].predicated) return MotionSliceResult::Predicated;
+        for (size_t k = 0; k < dec[i].src.size(); k++) {
+            const DWORD r = t[dec[i].src[k].at];
+            if (Type(r) != kConst) continue;
+            const int rows = k == 1 ? std::max(1, MatrixRows(x.op)) : 1;
+            for (int j = 0; j < rows; j++) {
+                const int n = static_cast<int>(Num(r)) + j;
+                if (dec[i].src[k].rel) {
+                    if (!defs.count(static_cast<int>(Num(r)))) relBases.insert(n);
+                } else if (!defs.count(n))
+                    singles.insert(n);
+            }
+        }
+    }
+    s.singles.assign(singles.begin(), singles.end());
+    // regions: relative bases at most 4 apart index one array (c0[a0], c1[a0], c2[a0]: the rows of a bone)
+    std::vector<int> bases(relBases.begin(), relBases.end());
+    for (size_t i = 0; i < bases.size();) {
+        size_t j = i;
+        while (j + 1 < bases.size() && bases[j + 1] - bases[j] <= 4) j++;
+        MotionSlice::Region g;
+        g.base = bases[i];
+        g.lastOffset = bases[j] - bases[i];
+        int limit = 256;
+        for (int n : nonRelAll)
+            if (n > bases[j]) { limit = std::min(limit, n); break; }
+        for (int n : defs)
+            if (n > bases[j]) { limit = std::min(limit, n); break; }
+        if (j + 1 < bases.size()) limit = std::min(limit, bases[j + 1]);
+        g.maxExtent = limit - g.base;
+        s.regions.push_back(g);
+        i = j + 1;
+    }
+    if (2 * s.temps + 2 > 32) return MotionSliceResult::NoFreeRegister;
+    if (out) *out = std::move(s);
+    return MotionSliceResult::Ok;
+}
+
+MotionSliceResult MakeMotionReplayVs(const MotionSlice& s, const std::vector<int>& extentsIn, MotionReplayLayout* layout, std::vector<DWORD>* out, bool probe) {
+    const std::vector<DWORD>& t = s.code;
+    const auto ins = Parse(t);
+    if (ins.empty() || ins.size() != s.keep.size()) return MotionSliceResult::Unreadable;
+    MotionReplayLayout L;
+    std::vector<char> used(256, 0);
+    std::set<int> defs;
+    for (const Ins& x : ins) {
+        if (x.op == kDef) defs.insert(static_cast<int>(Num(t[x.at + 1])));
+    }
+    for (int n : defs) used[n & 255] = 1;
+    for (int n : s.singles) used[n & 255] = 1;
+    for (size_t i = 0; i < s.regions.size(); i++) {
+        const auto& g = s.regions[i];
+        const int lo = g.lastOffset + 1, hi = std::max(lo, g.maxExtent);
+        const int e = std::clamp(i < extentsIn.size() ? extentsIn[i] : hi, lo, hi);
+        L.extents.push_back(e);
+        for (int n = g.base; n < std::min(256, g.base + e); n++) used[n] = 1;
+    }
+    auto alloc = [&](int count, bool fromTop) {
+        for (int k = 0; k + count <= 256; k++) {
+            const int start = fromTop ? 256 - count - k : k;
+            bool free = true;
+            for (int n = start; n < start + count && free; n++) free = !used[n];
+            if (!free) continue;
+            for (int n = start; n < start + count; n++) used[n] = 1;
+            return start;
+        }
+        return -1;
+    };
+    if (!used[252]) used[252] = 1, L.jitter = 252;
+    else L.jitter = alloc(1, true);
+    if (L.jitter < 0) return MotionSliceResult::NoRoom;
+    for (size_t i = 0; i < s.regions.size(); i++) {
+        const int at = alloc(L.extents[i], false);
+        if (at < 0) return MotionSliceResult::NoRoom;
+        L.regionTo.push_back(at);
+    }
+    L.singleTo.assign(s.singles.size(), -1);
+    for (size_t i = 0; i < s.singles.size();) { // a run of consecutive registers stays consecutive (matrix rows)
+        size_t j = i;
+        while (j + 1 < s.singles.size() && s.singles[j + 1] == s.singles[j] + 1) j++;
+        const int at = alloc(static_cast<int>(j - i + 1), true);
+        if (at < 0) return MotionSliceResult::NoRoom;
+        for (size_t k = i; k <= j; k++) L.singleTo[k] = at + static_cast<int>(k - i);
+        i = j + 1;
+    }
+    auto mapConst = [&](DWORD num, bool rel) -> DWORD {
+        const int n = static_cast<int>(num);
+        if (defs.count(n)) return num;
+        if (rel) {
+            for (size_t i = 0; i < s.regions.size(); i++)
+                if (n >= s.regions[i].base && n <= s.regions[i].base + s.regions[i].lastOffset) return static_cast<DWORD>(n - s.regions[i].base + L.regionTo[i]);
+            return num;
+        }
+        const auto it = std::lower_bound(s.singles.begin(), s.singles.end(), n);
+        return it != s.singles.end() && *it == n ? static_cast<DWORD>(L.singleTo[it - s.singles.begin()]) : num;
+    };
+
+    const DWORD T = static_cast<DWORD>(s.temps), PA = 2 * T, PB = 2 * T + 1;
+    DWORD posType = kRastOutReg, posNum = 0;
+    if (s.v3)
+        for (const Ins& x : ins)
+            if (IsPosDcl(t, x)) posType = kOutput, posNum = Num(t[x.at + 2]);
+    std::vector<DWORD> o{0xFFFE0300u};
+    for (const Ins& x : ins)
+        if (x.op == kDcl && (Type(t[x.at + 2]) == kInput || Type(t[x.at + 2]) == kSampler)) o.insert(o.end(), t.begin() + x.at, t.begin() + End(x));
+    DWORD probeIn = 0; // the lowest input register the shader does not declare (vs_3_0 has 16)
+    for (bool taken = true; taken && probeIn < 16; probeIn += taken ? 1 : 0) {
+        taken = false;
+        for (const Ins& x : ins) taken |= x.op == kDcl && IsReg(t[x.at + 2], kInput, probeIn);
+    }
+    if (probe && probeIn >= 16) return MotionSliceResult::NoFreeRegister;
+    if (probe) o.insert(o.end(), {Op(kDcl, 2), 0x80000000u | 5u | (15u << 16), Dst(kInput, probeIn)});
+    o.insert(o.end(), {Op(kDcl, 2), 0x80000000u, Dst(kOutput, 0), Op(kDcl, 2), 0x80000000u | 5u, Dst(kOutput, 1), Op(kDcl, 2),
+                       0x80000000u | 5u | (1u << 16), Dst(kOutput, 2)});
+    for (const Ins& x : ins)
+        if (x.op == kDef || x.op == kDefI || x.op == kDefB) o.insert(o.end(), t.begin() + x.at, t.begin() + End(x));
+    for (int bank = 0; bank < 2; bank++)
+        for (size_t i = 0; i < ins.size(); i++) {
+            if (!s.keep[i]) continue;
+            const Ins& x = ins[i];
+            Decoded q;
+            if (!DecodeIns(t, x, q)) return MotionSliceResult::Unreadable;
+            // (a vs_2_x sincos ends after its first source: the vs_3_0 form)
+            const size_t end = q.src.empty() ? End(x) : (q.src.back().rel ? q.src.back().relAt : q.src.back().at) + 1;
+            std::vector<DWORD> c(t.begin() + x.at, t.begin() + end);
+            c[0] = (c[0] & ~0x0F000000u) | (static_cast<DWORD>(c.size() - 1) << 24);
+            if (q.hasDst) {
+                DWORD& r = c[q.dst - x.at];
+                if (IsReg(r, posType, posNum)) r = WithReg(r, kTemp, bank ? PB : PA);
+                else if (bank && Type(r) == kTemp) r = WithReg(r, kTemp, Num(r) + T);
+            }
+            if (bank)
+                for (const Operand& op : q.src) {
+                    DWORD& r = c[op.at - x.at];
+                    if (Type(r) == kTemp) r = WithReg(r, kTemp, Num(r) + T);
+                    else if (Type(r) == kConst) r = WithReg(r, kConst, mapConst(Num(r), op.rel));
+                }
+            o.insert(o.end(), c.begin(), c.end());
+        }
+    o.insert(o.end(), {Op(kMov, 2), Dst(kOutput, 1), Src(kTemp, PA), Op(kMov, 2), Dst(kOutput, 2), Src(kTemp, PB)});
+    if (probe) o.insert(o.end(), {Op(kMov, 2), Dst(kOutput, 0), Src(kInput, probeIn)});
+    else // the scene draw's jitter in AddJitterVs's form: the same position, bit for bit
+        o.insert(o.end(), {Op(kMad, 4), Dst(kTemp, PA, 0x3), Src(kTemp, PA, kSwzW), Src(kConst, static_cast<DWORD>(L.jitter)), Src(kTemp, PA),
+                           Op(kMov, 2), Dst(kOutput, 0), Src(kTemp, PA)});
+    o.push_back(0x0000FFFFu);
+    if (layout) *layout = std::move(L);
+    if (out) *out = std::move(o);
+    return MotionSliceResult::Ok;
+}
+
 } // namespace ShaderPatches

@@ -42,6 +42,7 @@
 #ifndef APEX_NO_DEV_TOOLS
 #include "shader_ids.h"
 #include "gbuffer_ids.h"
+#include "gbuffer_movers.h"
 #endif
 #include <d3d9.h>
 #include <algorithm>
@@ -411,7 +412,8 @@ Blend BlendOf(IDirect3DDevice9* dev) {
     return kOtherBlend;
 }
 
-template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext& ctx, DrawFn draw) {
+// k0..k4: the call's arguments, for the G-buffer movers' draw key
+template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext& ctx, DrawFn draw, uint32_t k0, uint32_t k1, uint32_t k2, uint32_t k3, uint32_t k4) {
     IDirect3DDevice9* dev = ctx.device;
     // (the High-precision scene grains its 16-bit scene once, at its resolve)
     const bool dither = g_on.load(std::memory_order_relaxed) && !SceneTarget::Substituting(), jitter = g_jitterOn;
@@ -528,6 +530,18 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext
         }
     }
     if (useJitter) g_frame.jittered++;
+#ifndef APEX_NO_DEV_TOOLS
+    // G-buffer movers (GB-05): a draw whose position constants changed since last frame is replayed into the mover target
+    if (g_gbBound && useDither && copy.gb && blend == kOpaque && GBufferMovers::Active()) {
+        IDirect3DVertexShader9* gameVs = vs ? vs : D3D9Hooks::BoundVertexShader(dev);
+        if (gameVs && GBufferMovers::Prepare(dev, gameVs, GBufferMovers::DrawKey(dev, gameVs, k0, k1, k2, k3, k4))) {
+            static const float kNoJitter[2] = {};
+            GbUnbind(dev); // the mover target has another bit depth than the G-buffer targets
+            GBufferMovers::Replay(dev, useJitter ? g_jitter : kNoJitter, draw);
+            GbBind(dev);
+        }
+    }
+#endif
     return D3D9Hooks::HookAction::Skip;
 }
 
@@ -545,6 +559,7 @@ void OnFrameBoundary(IDirect3DDevice9* dev) {
     GbUnbind(dev);
     g_gbCleared = false;
     g_gbCount.frames++;
+    GBufferMovers::FrameBoundary();
 #endif
     g_last = g_frame;
     g_frame = {};
@@ -567,6 +582,7 @@ void OnFrameBoundary(IDirect3DDevice9* dev) {
 void OnPreReset(IDirect3DDevice9* dev) { // read again at the next frame boundary
 #ifndef APEX_NO_DEV_TOOLS
     GbUnbind(dev);
+    GBufferMovers::OnPreReset();
 #else
     (void)dev;
 #endif
@@ -606,10 +622,10 @@ void RegisterHooks() {
     }, kAfterEveryone);
     ObserveReissuedDraws(kHookName); // dithers Night Lighting's replacement shaders too (they run in the re-issued draw)
     RegisterDrawIndexedPrimitive(kHookName, [](DeviceContext& ctx, D3DPRIMITIVETYPE type, INT bvi, UINT minV, UINT numV, UINT start, UINT prims) {
-        return OnDraw(ctx, [&] { CallOriginalDrawIndexedPrimitive(ctx.device, type, bvi, minV, numV, start, prims); });
+        return OnDraw(ctx, [&] { CallOriginalDrawIndexedPrimitive(ctx.device, type, bvi, minV, numV, start, prims); }, type, static_cast<uint32_t>(bvi), start, prims, numV);
     }, kAfterEveryone);
     RegisterDrawPrimitive(kHookName, [](DeviceContext& ctx, D3DPRIMITIVETYPE type, UINT start, UINT prims) {
-        return OnDraw(ctx, [&] { CallOriginalDrawPrimitive(ctx.device, type, start, prims); });
+        return OnDraw(ctx, [&] { CallOriginalDrawPrimitive(ctx.device, type, start, prims); }, type, start, prims, 0xFFFFFFFFu, 0);
     }, kAfterEveryone);
     RenderCallbacks::Add(RenderCallbacks::preReset, OnPreReset);
 }
