@@ -214,9 +214,28 @@ public static class RestorePoints
 // Every change Setup makes to the player's files goes through here, so the open restore point has the file as it was.
 public static class Fs
 {
-    public static void Copy(string from, string to) { RestorePoints.Touch(to); File.Copy(from, to, true); }
-    public static void Move(string from, string to) { RestorePoints.Touch(from); RestorePoints.Touch(to); File.Move(from, to, true); }
-    public static void Write(string path, string text) { RestorePoints.Touch(path); File.WriteAllText(path, text); }
+    // a read-only destination is made writable first (the restore point keeps it as it was)
+    public static void Copy(string from, string to)
+    {
+        RestorePoints.Touch(to);
+        Retry(() =>
+        {
+            if (File.Exists(to) && File.GetAttributes(to).HasFlag(FileAttributes.ReadOnly)) File.SetAttributes(to, File.GetAttributes(to) & ~FileAttributes.ReadOnly);
+            File.Copy(from, to, true);
+        });
+    }
+    public static void Move(string from, string to) { RestorePoints.Touch(from); RestorePoints.Touch(to); Retry(() => File.Move(from, to, true)); }
+    public static void Write(string path, string text) { RestorePoints.Touch(path); Retry(() => WriteAtomic(path, text)); }
+
+    // a file an antivirus scan or the game's launcher holds a moment: tried again 3 times, 500 ms apart (a missing file fails at once)
+    public static TimeSpan RetryDelay = TimeSpan.FromMilliseconds(500);
+    public static void Retry(Action io)
+    {
+        for (var i = 0; ; i++)
+            try { io(); return; }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException && e is not FileNotFoundException && e is not DirectoryNotFoundException && i < 3)
+            { Thread.Sleep(RetryDelay); }
+    }
     // ApexRadiance.toml with [ui] restart_host changed from keyWas: a restore point puts back only that key
     public static void WriteKey(string path, string text, bool? keyWas) { RestorePoints.Touch(path, key: true, keyWas: keyWas); File.WriteAllText(path, text); }
     public static void WriteFpsKey(string path, string text, int? was, int set) { RestorePoints.Touch(path, fps: true, fpsWas: was, fpsSet: set); WriteAtomic(path, text); }
