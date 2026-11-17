@@ -573,6 +573,8 @@ struct State {
     IDirect3DTexture9* block[2] = {};         // one tier per 4x4 block: as found, then spread
     IDirect3DSurface9* blockSurf[2] = {};
     bool accumAsked = false;                  // the history targets were made
+    // what runs: an option whose shader or targets failed stays off, the default pass does not depend on them
+    bool tierOk = false, blockOn = false, accumOn = false, blendOk = true;
     IDirect3DTexture9* hist[2] = {};          // accumulated AO before the blur: this frame's and the last one's
     IDirect3DSurface9* histSurf[2] = {};
     int histNow = 0, stillFrames = 0;         // frames in the history (0 = none: the camera moved)
@@ -831,6 +833,7 @@ void ReleaseResources() {
         SafeRelease(g.histSurf[i]);
         SafeRelease(g.hist[i]);
     }
+    g.tierOk = g.blockOn = g.accumOn = false; // (made again with the targets)
     for (int i = 0; i < State::kQ; i++) {
         SafeRelease(g.qDisjoint[i]);
         SafeRelease(g.qBegin[i]);
@@ -857,6 +860,7 @@ void ReleaseShaders() {
             g.gtaoTried[v][q] = false;
         }
     g.fixedTried = false;
+    g.blendOk = true;
 }
 
 // Creates one pass from its precompiled bytecode
@@ -877,8 +881,8 @@ IDirect3DPixelShader9* CreateShader(IDirect3DDevice9* dev, ShaderCache::Id id, c
 }
 
 // Refine while the camera is still runs with Quality Low only (stored index 0)
-bool Accumulating() { return g.accumAsked && g.p.quality == 0; }
-int GtaoVariant() { return (g.p.zoomSlices || g.edgeBlur || g.blockAsked || Accumulating() ? 1 : 0) | (g.p.blendNormals ? 2 : 0); }
+bool Accumulating() { return g.accumOn && g.p.quality == 0; }
+int GtaoVariant() { return (g.tierOk && (g.p.zoomSlices || g.edgeBlur || g.blockOn || Accumulating()) ? 1 : 0) | (g.p.blendNormals && g.blendOk ? 2 : 0); }
 
 // The AO pass of one quality and the current options, created on first use
 IDirect3DPixelShader9* GtaoShader(IDirect3DDevice9* dev, int q) {
@@ -887,26 +891,33 @@ IDirect3DPixelShader9* GtaoShader(IDirect3DDevice9* dev, int q) {
     if (g.psGtao[v][q] || g.gtaoTried[v][q]) return g.psGtao[v][q];
     g.gtaoTried[v][q] = true;
     g.psGtao[v][q] = CreateShader(dev, kGtaoPsId[v][q], "GtaoPS");
+    if (!g.psGtao[v][q] && v) { // an option variant: those options off, the default pass instead
+        LOG_WARNING(std::format("[AO] The pass of the options did not compile: {} off", v & 1 ? "the direction-count options" : "Blended normals"));
+        if (v & 1) g.tierOk = g.edgeBlur = g.blockOn = g.accumOn = false;
+        else g.blendOk = false;
+        return GtaoShader(dev, q);
+    }
     if (!g.psGtao[v][q]) g.status = "ERROR: the shader did not compile (see ApexRadiance_LOG.txt)";
     return g.psGtao[v][q];
 }
 
 bool EnsureShaders(IDirect3DDevice9* dev) {
-    const bool fixedOk = g.psLinear && g.psDown && g.psBlur && g.psComposite && g.psZoomTier && g.psBlurEdges && g.psBlockTier && g.psBlockSpread && g.psAccum;
+    const bool fixedOk = g.psLinear && g.psDown && g.psBlur && g.psComposite;
     if (!fixedOk && g.fixedTried) return false; // failed once: logged, not retried every frame
     g.fixedTried = true;
     if (!g.psLinear) g.psLinear = CreateShader(dev, kLinearPsId, "LinearizePS");
     if (!g.psDown) g.psDown = CreateShader(dev, kDownPsId, "DownPS");
     if (!g.psBlur) g.psBlur = CreateShader(dev, kBlurPsId, "BlurPS");
     if (!g.psComposite) g.psComposite = CreateShader(dev, kCompositePsId, "CompositePS");
-    if (!g.psZoomTier) g.psZoomTier = CreateShader(dev, kZoomTierPsId, "ZoomTierPS");
-    if (!g.psBlurEdges) g.psBlurEdges = CreateShader(dev, kBlurEdgesPsId, "BlurPS (edge-aware)");
-    if (!g.psBlockTier) g.psBlockTier = CreateShader(dev, kBlockTierPsId, "BlockTierPS");
-    if (!g.psBlockSpread) g.psBlockSpread = CreateShader(dev, kBlockSpreadPsId, "BlockSpreadPS");
-    if (!g.psAccum) g.psAccum = CreateShader(dev, kAccumPsId, "AccumPS");
-    const bool ok = g.psLinear && g.psDown && g.psBlur && g.psComposite && g.psZoomTier && g.psBlurEdges && g.psBlockTier && g.psBlockSpread && g.psAccum && GtaoShader(dev, g.p.quality);
+    const bool ok = g.psLinear && g.psDown && g.psBlur && g.psComposite && GtaoShader(dev, g.p.quality);
     if (!ok) g.status = "ERROR: the shader did not compile (see ApexRadiance_LOG.txt)";
     return ok;
+}
+
+// An option's shader, made once; a failure (logged) turns only that option off
+bool OptionShader(IDirect3DDevice9* dev, IDirect3DPixelShader9*& ps, ShaderCache::Id id, const char* entry) {
+    if (!ps) ps = CreateShader(dev, id, entry);
+    return ps != nullptr;
 }
 
 // The format can be a render-target texture (and, when asked, filtered linearly) on this adapter
@@ -962,21 +973,34 @@ bool InitResources(IDirect3DDevice9* dev) {
     };
     ok = ok && make(&g.aoA, &g.aoASurf, aoFormat) && make(&g.aoB, &g.aoBSurf, aoFormat) &&
          SceneCopy::Acquire(dev, g.width, g.height, bd.Format, &g.colorTex, &g.colorSurf); // (copied and read inside RunAo only)
-    for (int i = 0; ok && i < 2; i++) // starts at tier 0 (the view counts as near until the first frame says otherwise)
-        ok = SUCCEEDED(dev->CreateTexture(1, 1, 1, D3DUSAGE_RENDERTARGET, D3DFMT_R32F, D3DPOOL_DEFAULT, &g.tier[i], nullptr)) && g.tier[i] &&
-             SUCCEEDED(g.tier[i]->GetSurfaceLevel(0, &g.tierSurf[i])) && g.tierSurf[i] && SUCCEEDED(dev->ColorFill(g.tierSurf[i], nullptr, 0));
-    g.blockW = (g.width + 3) / 4;
-    g.blockH = (g.height + 3) / 4;
-    for (int i = 0; ok && g.blockAsked && i < 2; i++)
-        ok = SUCCEEDED(dev->CreateTexture(g.blockW, g.blockH, 1, D3DUSAGE_RENDERTARGET, D3DFMT_R32F, D3DPOOL_DEFAULT, &g.block[i], nullptr)) && g.block[i] &&
-             SUCCEEDED(g.block[i]->GetSurfaceLevel(0, &g.blockSurf[i])) && g.blockSurf[i];
-    for (int i = 0; ok && g.accumAsked && i < 2; i++) ok = make(&g.hist[i], &g.histSurf[i], aoFormat);
     if (!ok) {
         ReleaseResources();
         g.status = "ERROR: not enough video memory for the shade textures";
         LOG_ERROR(std::format("[AO] Could not create the textures ({}x{})", g.width, g.height));
         return false;
     }
+    // The options: each needs its own shaders and targets; one that fails is off and the default pass runs as before
+    g.tierOk = true;
+    for (int i = 0; g.tierOk && i < 2; i++) // starts at tier 0 (the view counts as near until the first frame says otherwise)
+        g.tierOk = SUCCEEDED(dev->CreateTexture(1, 1, 1, D3DUSAGE_RENDERTARGET, D3DFMT_R32F, D3DPOOL_DEFAULT, &g.tier[i], nullptr)) && g.tier[i] &&
+                   SUCCEEDED(g.tier[i]->GetSurfaceLevel(0, &g.tierSurf[i])) && g.tierSurf[i] && SUCCEEDED(dev->ColorFill(g.tierSurf[i], nullptr, 0));
+    g.tierOk = g.tierOk && OptionShader(dev, g.psZoomTier, kZoomTierPsId, "ZoomTierPS");
+    g.edgeBlur = g.edgeBlur && g.tierOk && OptionShader(dev, g.psBlurEdges, kBlurEdgesPsId, "BlurPS (edge-aware)");
+    g.blockW = (g.width + 3) / 4;
+    g.blockH = (g.height + 3) / 4;
+    g.blockOn = g.blockAsked && g.tierOk && OptionShader(dev, g.psBlockTier, kBlockTierPsId, "BlockTierPS") &&
+                OptionShader(dev, g.psBlockSpread, kBlockSpreadPsId, "BlockSpreadPS");
+    for (int i = 0; g.blockOn && i < 2; i++)
+        g.blockOn = SUCCEEDED(dev->CreateTexture(g.blockW, g.blockH, 1, D3DUSAGE_RENDERTARGET, D3DFMT_R32F, D3DPOOL_DEFAULT, &g.block[i], nullptr)) && g.block[i] &&
+                    SUCCEEDED(g.block[i]->GetSurfaceLevel(0, &g.blockSurf[i])) && g.blockSurf[i];
+    g.accumOn = g.accumAsked && g.tierOk && OptionShader(dev, g.psAccum, kAccumPsId, "AccumPS");
+    for (int i = 0; g.accumOn && i < 2; i++) g.accumOn = make(&g.hist[i], &g.histSurf[i], aoFormat);
+    if (!g.tierOk) LOG_WARNING("[AO] The direction-count tier could not be made: the four direction-count options stay off");
+    if (g.edgeAsked && g.tierOk && !g.edgeBlur) LOG_WARNING("[AO] Edge-aware smoothing could not start: it stays off");
+    if (g.blockAsked && !g.blockOn) LOG_WARNING("[AO] Fewer directions in the open could not start: it stays off");
+    if (g.accumAsked && !g.accumOn) LOG_WARNING("[AO] Refine while the camera is still could not start: it stays off");
+    if (g.edgeBlur || g.accumOn) // (video memory the options add: two 4-channel AO targets, two history targets)
+        LOG_INFO(std::format("[AO] Option targets: {} MB", ((g.edgeBlur ? 2ull * 4 : 0) + (g.accumOn ? 2ull * (g.edgeBlur ? 8 : 4) : 0)) * g.width * g.height / (1024 * 1024)));
     for (int i = 0; i < State::kQ; i++) {
         dev->CreateQuery(D3DQUERYTYPE_TIMESTAMPDISJOINT, &g.qDisjoint[i]);
         dev->CreateQuery(D3DQUERYTYPE_TIMESTAMP, &g.qBegin[i]);
@@ -1341,7 +1365,7 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
         {g.p.simControls && g.showSimMask ? 1.0f : 0.0f, WantSimMask() && simMask.hairCleared && !simMask.failed ? 1.0f : 0.0f, 0, 0},
         // (thresholds of 0 keep tier 0: the looped pass without Fewer directions when far)
         {W * 0.5f / g.padW, H * 0.5f / g.padH, g.p.zoomSlices ? 1.0f / kZoomMid : 0.0f, g.p.zoomSlices ? 1.0f / kZoomFar : 0.0f},
-        {g.blockAsked ? 0.25f / g.blockW : 0.0f, g.blockAsked ? 0.25f / g.blockH : 0.0f, g.p.zoomHysteresis ? 1.0f / (1.0f + kZoomHysteresis) : 1.0f, g.p.zoomHysteresis ? 1.0f / (1.0f - kZoomHysteresis) : 1.0f},
+        {g.blockOn ? 0.25f / g.blockW : 0.0f, g.blockOn ? 0.25f / g.blockH : 0.0f, g.p.zoomHysteresis ? 1.0f / (1.0f + kZoomHysteresis) : 1.0f, g.p.zoomHysteresis ? 1.0f / (1.0f - kZoomHysteresis) : 1.0f},
         // (golden-ratio steps: the angles and offsets of successive frames fall between the earlier ones)
         {std::fmod((inHistory % 1024) * 0.618034f, 1.0f), std::fmod((inHistory % 1024) * 0.754878f, 1.0f), 1.0f - 1.0f / std::min(inHistory + 1, kAccumFrames), kAccumDepth},
         {lastRows[0][0], lastRows[0][1], lastRows[0][2], lastRows[0][3]},
@@ -1384,7 +1408,7 @@ void RunAo(IDirect3DDevice9* dev, IDirect3DTexture9* depth, IDirect3DSurface9* b
         dev->SetPixelShader(g.psZoomTier);
         DrawQuad(dev, 1, 1);
         dev->SetTexture(7, g.tier[g.tierNow]);
-        if (g.blockAsked) { // a tier per 4x4 block, then the lowest of each 3x3 blocks
+        if (g.blockOn) { // a tier per 4x4 block, then the lowest of each 3x3 blocks
             const float find[4] = {4.0f * g.blockW, 4.0f * g.blockH, kBlockBend, 0}, spread[4] = {1.0f / g.blockW, 1.0f / g.blockH, 0, 0};
             dev->SetPixelShaderConstantF(6, find, 1);
             dev->SetRenderTarget(0, g.blockSurf[0]);

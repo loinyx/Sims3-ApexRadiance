@@ -75,7 +75,8 @@ All settings apply immediately. Keys from the old combined build (`intensidade`,
 - **Game anti-aliasing:** the effect pauses while the back buffer is multisampled. Use Edge Smoothing instead.
 - **Sim Occlusion** adjusts this shade on Sims; see [sim-occlusion.md](sim-occlusion.md).
 - **Hardware:** needs R32F texture filtering and G16R16F render targets. Without them the effect stays off and the card
-  shows a warning.
+  shows a warning. An option whose own shader or textures cannot be made stays off (logged); the default shade still
+  runs. `tools/ao_options_check` checks that the default pass needs none of the options' shaders or textures.
 
 ## Limitations
 

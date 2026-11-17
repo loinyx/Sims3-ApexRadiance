@@ -50,7 +50,7 @@ constexpr int kVariants = 4; // bit 0 = zoom, bit 1 = blended normals
 constexpr int kLevels = 9;
 constexpr float kNear = 0.25f, kA = 1.00008f, kTanY = 1.0f / 4.293f;
 
-std::string g_source;
+std::string g_source, g_cpp;
 float g_zoomMid = 0, g_zoomFar = 0, g_zoomHysteresis = 0, g_blockBend = 0, g_accumDepth = 0;
 int g_accumFrames = 0;
 
@@ -67,6 +67,8 @@ bool LoadSource(const char* exe) {
     path = path.substr(0, path.find_last_of("\\/") + 1);
     std::string cpp = Slurp(path + "../../patches/ambient_occlusion_patch.cpp");
     if (cpp.empty()) cpp = Slurp("patches/ambient_occlusion_patch.cpp");
+    g_cpp = cpp;
+    std::erase(g_cpp, char(13)); // (CRLF checkouts)
     for (size_t a = 0, b = 0; (a = cpp.find("R\"HLSL(", b)) != std::string::npos && (b = cpp.find(")HLSL\"", a)) != std::string::npos;)
         g_source += cpp.substr(a + 7, b - a - 7); // the source is several literals in a row
     if (g_source.empty()) return false;
@@ -77,6 +79,27 @@ bool LoadSource(const char* exe) {
     g_accumDepth = ConstantOf(cpp, "kAccumDepth =");
     g_accumFrames = int(ConstantOf(cpp, "kAccumFrames ="));
     return g_zoomMid > 0 && g_zoomFar > g_zoomMid && g_zoomHysteresis > 0 && g_blockBend > 0 && g_accumDepth > 0 && g_accumFrames > 0;
+}
+
+// The default pass does not depend on the options (review 105-1): EnsureShaders makes no option shader, and InitResources
+// stops on a failure of the default pass's own targets only; the options' targets and shaders only turn their option off
+std::string Between(const std::string& s, const std::string& from, const std::string& to) {
+    const size_t a = s.find(from), b = a == std::string::npos ? a : s.find(to, a + from.size());
+    return b == std::string::npos ? std::string() : s.substr(a, b - a);
+}
+bool DefaultPassIndependent(const std::string& cpp, std::string* why) {
+    const std::string ensure = Between(cpp, "bool EnsureShaders(", "\n}\n");
+    const std::string init = Between(cpp, "bool InitResources(", "\n}\n");
+    if (ensure.empty() || init.empty()) return *why = "EnsureShaders or InitResources not found", false;
+    for (const char* opt : {"psZoomTier", "psBlurEdges", "psBlockTier", "psBlockSpread", "psAccum"})
+        if (ensure.find(opt) != std::string::npos) return *why = std::string("EnsureShaders needs ") + opt, false;
+    // every option resource is created after the last 'return false' of InitResources
+    const size_t lastFail = init.rfind("return false;");
+    for (const char* res : {"&g.tier[i]", "&g.block[i]", "&g.hist[i]", "g.psZoomTier", "g.psBlurEdges", "g.psBlockTier", "g.psAccum"}) {
+        const size_t at = init.find(res);
+        if (at != std::string::npos && at < lastFail) return *why = std::string(res) + " made before the default pass's last failure exit", false;
+    }
+    return true;
 }
 
 std::vector<DWORD> Compile(const char* entry, int q, int v, std::string* err = nullptr, const char* define = nullptr) {
@@ -615,6 +638,15 @@ int main(int argc, char** argv) {
         return 1;
     }
     std::printf("Slices by zoom: 3/4 from %.0f m, 1/2 from %.0f m\n", g_zoomMid, g_zoomFar);
+    {
+        std::string why;
+        const bool independent = DefaultPassIndependent(g_cpp, &why);
+        Check(independent, "the default pass needs no option shader or target " + why);
+        const std::string bad = "bool EnsureShaders(IDirect3DDevice9* dev) {\n    g.psAccum = 0;\n}\nbool InitResources(IDirect3DDevice9* dev) {\n    return false;\n}\n";
+        Check(!DefaultPassIndependent(bad, &why), "the independence check fails a pass that needs an option shader");
+        const std::string late = "bool EnsureShaders(IDirect3DDevice9* dev) {\n}\nbool InitResources(IDirect3DDevice9* dev) {\n    &g.hist[i];\n    return false;\n}\n";
+        Check(!DefaultPassIndependent(late, &why), "the independence check fails an option target made before a failure exit");
+    }
     Gpu gpu;
     Check(gpu.dev != nullptr, "native D3D9 HAL device");
 
