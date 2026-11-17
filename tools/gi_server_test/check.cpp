@@ -9,9 +9,13 @@
 // Checked: no leak (a lamp adds exactly 0 to every texel of a room no opening joins, direct and indirect); the door room
 // is lit; the direct light against the CPU reference (RtLampProxy::Clear, the same emitter points); the energy balance
 // of the closed room (absorbed = emitted); both back ends against each other; a second solve byte-equal.
-// Printed: rays a second, the bounces and the time to settle. Read-only: prints to stdout, writes no file.
+// Printed: rays a second, the bounces and the time to settle. Read-only: prints to stdout; writes one file with --dump.
 //   --no-rays        the compute back end only          --device <text>  the device whose name holds <text>
 //   --density <n>    texels a metre (4)                  --rays <n>       rays a texel (256)
+//   --pathref <n>    also a path-traced reference of the scene on the CPU (n samples a texel, the tracer of
+//                    tools/rt_lamps_test/path_trace.h) and the room means of the solve against it
+//   --dump <file>    the scene as the bridge server takes it (a texel patch for each triangle side, bridge patch 0018
+//                    util_gi.h), this solve's layers and the reference's room means, for native/remix-bridge/test-gi.cmd
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -27,8 +31,11 @@
 #include <cstring>
 #include <functional>
 #include <string>
+#include <thread>
 #include <vector>
 #include "features/rt_lamp_proxy.h"
+#define PATHREF_CORE_ONLY
+#include "tools/rt_lamps_test/path_trace.h"
 // SPIR-V of solve.comp, built by run.ps1
 #include "links_rq.h"
 #include "direct_rq.h"
@@ -68,7 +75,7 @@ struct Scene {
     std::vector<Texel> texels;
     std::vector<int32_t> map;
     std::vector<Lamp> lamps;
-    int stories = 2, density = 4;
+    int stories = 2, density = 4, lot = kLot + 8; // lot: tiles a side of the map (solve.comp lotSize)
 };
 enum { kOut = 0, kRoomA = 1, kRoomC = 2, kRoomB = 3, kRoomUp = 4 };
 const char* const kRoomName[] = {"outside", "A (lamp, window, boxes)", "C (door to A)", "B (closed)", "upstairs (closed)"};
@@ -78,6 +85,8 @@ int RoomOf(int story, int x, int z) {
     if (story == 1) return x < 16 ? kRoomUp : kOut;
     return x < 16 ? kRoomA : x < 22 ? kRoomC : x < 28 ? kRoomB : kOut;
 }
+
+const float kFloor[3] = {0.50f, 0.40f, 0.30f}, kCeil[3] = {0.80f, 0.80f, 0.80f}, kWall[3] = {0.70f, 0.70f, 0.70f}, kRed[3] = {0.70f, 0.15f, 0.10f};
 
 Scene BuildScene(int density) {
     using namespace RtLampProxy;
@@ -140,7 +149,6 @@ Scene BuildScene(int density) {
         sc.map[cell] = static_cast<int32_t>(sc.texels.size());
         sc.texels.push_back({{x, y, z, static_cast<float>(room)}, {nx, ny, nz, 0}, {alb[0], alb[1], alb[2], 0}});
     };
-    const float kFloor[3] = {0.50f, 0.40f, 0.30f}, kCeil[3] = {0.80f, 0.80f, 0.80f}, kWall[3] = {0.70f, 0.70f, 0.70f}, kRed[3] = {0.70f, 0.15f, 0.10f};
     for (int s = 0; s < S; s++) {
         for (int iz = 0; iz < GD; iz++)
             for (int ix = 0; ix < GD; ix++) {
@@ -173,6 +181,169 @@ Scene BuildScene(int density) {
                 {{25.0f, 2.5f, 13.0f}, 0.15f, {3.0f, 3.0f, 3.0f}, kRoomB, "ceiling lamp in closed B"},
                 {{14.5f, 1.2f, 15.0f}, 0.10f, {1.5f, 1.2f, 0.8f}, kRoomA, "table lamp in A"}};
     return sc;
+}
+
+// ---------------------------------------------------------------- the scene for the bridge server
+// The blob layouts of the bridge's util_gi.h (GiSceneHeader, GiSceneTriangle, GiScenePatch, GiSceneTexel, GiLamp)
+struct WireHeader {
+    uint32_t magic, version, triangles, patches, mapEntries, texels, rays, shadowRays, bounces, reserved[3];
+};
+struct WireTri {
+    float v[3][3];
+    int32_t front, back; // the texel patch of the side the winding's normal points to, and of the other; -1 = no texel
+};
+struct WirePatch {
+    float origin[3], u[3], v[3]; // cell = floor(dot(P - origin, u)), floor(dot(P - origin, v))
+    uint32_t nu, nv, mapOffset;
+};
+struct WireTexel {
+    float pos[3], nrm[3], alb[3];
+    uint32_t pixel;
+};
+struct WireLamp {
+    float pos[3], radius, col[3];
+    uint32_t reserved;
+    float boxMin[3], boxMax[3]; // the solve's region scope; an empty box (min > max) is the whole scene
+};
+template <typename T> void Put(std::vector<uint8_t>& out, const T* p, size_t n) {
+    out.insert(out.end(), reinterpret_cast<const uint8_t*>(p), reinterpret_cast<const uint8_t*>(p) + n * sizeof(T));
+}
+
+// The world-cell map of solve.comp turned into patches: one a story for floors and one for ceilings, one a wall line
+// and side that holds a texel, over all stories. Each triangle names its two patches by its own plane, so the server
+// needs no story height and no tile lines. A wall's patch spans the stories because the proxy's walls overlap: a wall
+// starts 0.1 m under its story's floor, in the plane of the wall below, and a hit there belongs to the lower story's
+// texel (a patch must cover every triangle that names it). Texel i goes to pixel texels - 1 - i (the server writes by
+// pixel, not by order).
+std::vector<uint8_t> WireScene(const Scene& sc, uint32_t rays, uint32_t bounces, uint32_t shadowRays) {
+    const int S = sc.stories, G = sc.lot, D = sc.density, GD = G * D;
+    const float df = static_cast<float>(D);
+    std::vector<WirePatch> patches;
+    std::vector<int32_t> pmap;
+    for (int cs = 0; cs < 2 * S; cs++) { // (class * S + story), as the map
+        patches.push_back({{0, 0, 0}, {df, 0, 0}, {0, 0, df}, static_cast<uint32_t>(GD), static_cast<uint32_t>(GD), static_cast<uint32_t>(pmap.size())});
+        pmap.insert(pmap.end(), sc.map.begin() + static_cast<size_t>(cs) * GD * GD, sc.map.begin() + static_cast<size_t>(cs + 1) * GD * GD);
+    }
+    std::vector<int32_t> wallPatch(static_cast<size_t>(4) * (G + 1), -1); // (axis * 2 + side) * (G + 1) + line
+    for (size_t w = 0; w < wallPatch.size(); w++) {
+        const size_t as = w / (G + 1), line = w % (G + 1);
+        const auto cell = [&](int s, int along, int h) { // the map's [axis, side][story][line][along][height]
+            return sc.map[static_cast<size_t>(2) * S * GD * GD + ((((as * S + s) * (G + 1) + line) * GD) + along) * (3 * D) + h];
+        };
+        bool any = false;
+        for (int s = 0; s < S && !any; s++)
+            for (int along = 0; along < GD && !any; along++)
+                for (int h = 0; h < 3 * D && !any; h++) any = cell(s, along, h) >= 0;
+        if (!any) continue;
+        const int axis = static_cast<int>(as / 2);
+        const float at = static_cast<float>(line);
+        wallPatch[w] = static_cast<int32_t>(patches.size());
+        patches.push_back({{axis == 0 ? at : 0, 0, axis == 1 ? at : 0}, {axis == 0 ? 0 : df, 0, axis == 0 ? df : 0}, {0, df, 0},
+                           static_cast<uint32_t>(GD), static_cast<uint32_t>(S * 3 * D), static_cast<uint32_t>(pmap.size())});
+        for (int row = 0; row < S * 3 * D; row++)
+            for (int along = 0; along < GD; along++) pmap.push_back(cell(row / (3 * D), along, row % (3 * D)));
+    }
+    std::vector<WireTri> tris(sc.mesh.tris.size());
+    for (size_t i = 0; i < tris.size(); i++) {
+        WireTri& t = tris[i];
+        std::memcpy(t.v, sc.mesh.tris[i].v, sizeof t.v);
+        t.front = t.back = -1;
+        if (sc.mesh.kind[i] == RtLampProxy::Mesh::kShape) continue; // object shapes hold no texel
+        const float e1[3] = {t.v[1][0] - t.v[0][0], t.v[1][1] - t.v[0][1], t.v[1][2] - t.v[0][2]}, e2[3] = {t.v[2][0] - t.v[0][0], t.v[2][1] - t.v[0][1], t.v[2][2] - t.v[0][2]};
+        float n[3] = {e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]};
+        const float len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+        if (!(len > 0.0f)) continue;
+        const float c[3] = {(t.v[0][0] + t.v[1][0] + t.v[2][0]) / 3, (t.v[0][1] + t.v[1][1] + t.v[2][1]) / 3, (t.v[0][2] + t.v[1][2] + t.v[2][2]) / 3};
+        if (std::fabs(n[1]) > 0.5f * len) {
+            const int sUp = static_cast<int>(std::floor(c[1] / kStory + 0.5f)), sDown = static_cast<int>(std::floor(c[1] / kStory - 0.5f));
+            const int32_t up = sUp >= 0 && sUp < S ? sUp : -1, down = sDown >= 0 && sDown < S ? S + sDown : -1; // seen from above: a floor; from below: a ceiling
+            t.front = n[1] > 0 ? up : down, t.back = n[1] > 0 ? down : up;
+        } else {
+            const int axis = std::fabs(n[0]) > std::fabs(n[2]) ? 0 : 1, line = static_cast<int>(std::floor(c[axis == 0 ? 0 : 2] + 0.5f));
+            const int side = n[axis == 0 ? 0 : 2] > 0 ? 1 : 0;
+            if (line < 0 || line > G) continue;
+            t.front = wallPatch[static_cast<size_t>(axis * 2 + side) * (G + 1) + line];
+            t.back = wallPatch[static_cast<size_t>(axis * 2 + 1 - side) * (G + 1) + line];
+        }
+    }
+    std::vector<WireTexel> texels(sc.texels.size());
+    for (size_t i = 0; i < texels.size(); i++) {
+        std::memcpy(texels[i].pos, sc.texels[i].pos, 12), std::memcpy(texels[i].nrm, sc.texels[i].nrm, 12), std::memcpy(texels[i].alb, sc.texels[i].alb, 12);
+        texels[i].pixel = static_cast<uint32_t>(texels.size() - 1 - i);
+    }
+    const WireHeader h{0x43534947u, 1, static_cast<uint32_t>(tris.size()), static_cast<uint32_t>(patches.size()), static_cast<uint32_t>(pmap.size()),
+                       static_cast<uint32_t>(texels.size()), rays, shadowRays, bounces, {}};
+    std::vector<uint8_t> out;
+    Put(out, &h, 1), Put(out, tris.data(), tris.size()), Put(out, patches.data(), patches.size()), Put(out, pmap.data(), pmap.size()), Put(out, texels.data(), texels.size());
+    return out;
+}
+
+// ---------------------------------------------------------------- the path-traced reference
+// The green reflectance a path meets at P on triangle tri, n facing the path: by the surface's place alone, not by the
+// texel index (so the reference is independent of it). Surfaces that hold no texel return no light, as in the solve:
+// object shapes and faces outside every room.
+float AlbedoAt(const Scene& sc, const float P[3], const float n[3], int tri) {
+    if (sc.mesh.kind[tri] == RtLampProxy::Mesh::kShape) return 0.0f;
+    const float q[3] = {P[0] + 0.1f * n[0], P[1] + 0.1f * n[1], P[2] + 0.1f * n[2]};
+    const int story = static_cast<int>(std::floor(q[1] / kStory));
+    const int room = story < 0 || story >= sc.stories ? kOut : RoomOf(story, static_cast<int>(std::floor(q[0])), static_cast<int>(std::floor(q[2])));
+    if (!room) return 0.0f;
+    if (std::fabs(n[1]) > 0.5f) return n[1] > 0 ? kFloor[1] : kCeil[1];
+    return room == kRoomA && std::fabs(n[0]) > std::fabs(n[2]) && std::floor(P[0] + 0.5f) == 10.0f ? kRed[1] : kWall[1];
+}
+
+// Per lamp and room, the mean green direct and indirect light over the room's texels ([lamp * 5 + room] * 2 + 0 / 1):
+// paths from each texel with next-event estimation at every vertex, the solve's law (colour x cos / d^2 x the share of
+// the lamp's ball seen, one random ball point a sample), S0-02's vertex placement (no skip; kEps back and off the surface)
+std::vector<double> Reference(const Scene& sc, int spp) {
+    const size_t T = sc.texels.size(), L = sc.lamps.size();
+    std::vector<double> dir(L * T, 0.0), ind(L * T, 0.0);
+    const int threads = std::max(1u, std::thread::hardware_concurrency());
+    const auto work = [&](int th) {
+        PathRef::Stamp st;
+        st.seen.assign(sc.mesh.tris.size(), 0u);
+        const auto light = [&](const Lamp& l, const float x[3], const float n[3], PathRef::Rng& rng) {
+            const float v[3] = {l.pos[0] - x[0], l.pos[1] - x[1], l.pos[2] - x[2]};
+            const float d2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2], c = (n[0] * v[0] + n[1] * v[1] + n[2] * v[2]) / std::sqrt(d2);
+            if (!(c > 0.0f)) return 0.0f;
+            const float y = 1.0f - 2.0f * rng.Next(), rr = std::sqrt(std::max(0.0f, 1.0f - y * y)), a = 6.2831853f * rng.Next();
+            const float e[3] = {l.pos[0] + l.radius * rr * std::cos(a), l.pos[1] + l.radius * y, l.pos[2] + l.radius * rr * std::sin(a)};
+            return PathRef::Seg(sc.mesh, e, x, st) ? l.col[1] * c / d2 : 0.0f;
+        };
+        for (size_t i = th; i < T; i += threads) {
+            PathRef::Rng rng{0x1234567ull + i * 0x9E3779B97F4A7C15ull};
+            for (int s = 0; s < spp; s++) {
+                float o[3], n[3], thr = 1.0f;
+                std::memcpy(o, sc.texels[i].pos, 12), std::memcpy(n, sc.texels[i].nrm, 12);
+                for (size_t l = 0; l < L; l++) dir[l * T + i] += light(sc.lamps[l], o, n, rng);
+                for (int b = 0; b < 16; b++) {
+                    float u[3], w[3], d[3], hn[3], t;
+                    PathRef::Basis(n, u, w);
+                    const float u1 = rng.Next(), r = std::sqrt(u1), phi = 6.2831853f * rng.Next(), z = std::sqrt(1.0f - u1);
+                    for (int k = 0; k < 3; k++) d[k] = u[k] * r * std::cos(phi) + w[k] * r * std::sin(phi) + n[k] * z;
+                    const int hit = PathRef::Nearest(sc.mesh, o, d, PathRef::kRay, st, t, hn);
+                    if (hit < 0) break;
+                    const float P[3] = {o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t};
+                    thr *= AlbedoAt(sc, P, hn, hit);
+                    if (!(thr > 0.0f)) break;
+                    for (int k = 0; k < 3; k++) o[k] = P[k] - d[k] * PathRef::kEps + hn[k] * PathRef::kEps, n[k] = hn[k];
+                    for (size_t l = 0; l < L; l++) ind[l * T + i] += thr * light(sc.lamps[l], o, n, rng);
+                }
+            }
+        }
+    };
+    std::vector<std::thread> pool;
+    for (int t = 0; t < threads; t++) pool.emplace_back(work, t);
+    for (std::thread& t : pool) t.join();
+    std::vector<double> means(L * 5 * 2, 0.0);
+    long count[5] = {};
+    for (size_t i = 0; i < T; i++) count[static_cast<int>(sc.texels[i].pos[3])]++;
+    for (size_t l = 0; l < L; l++)
+        for (size_t i = 0; i < T; i++) {
+            const int room = static_cast<int>(sc.texels[i].pos[3]);
+            means[(l * 5 + room) * 2] += dir[l * T + i] / spp / count[room], means[(l * 5 + room) * 2 + 1] += ind[l * T + i] / spp / count[room];
+        }
+    return means;
 }
 
 // ---------------------------------------------------------------- Vulkan
@@ -382,11 +553,14 @@ struct Result {
     std::vector<uint32_t> links;
     std::vector<float> direct, ind; // lamps x texels x 4
     std::vector<int> bounces;
+    double accelSec = 0, linkSec = 0, directSec = 0, bounceSec = 0, batchSec = 0; // wall time of the passes (submit + wait a dispatch)
 };
 constexpr uint32_t kShadowRays = 16, kMaxBounces = 64;
 constexpr float kSettled = 0.1f / 255.0f; // a layer is settled when no texel moved more than this in a bounce
 
-Result Solve(const Gpu& g, bool rays, const Scene& sc, uint32_t nRays, bool print) {
+// batchBounces > 0: afterwards, every lamp's direct pass and that many bounces again in one submission (batchSec: the
+// layers' GPU time without a submit and a wait a dispatch)
+Result Solve(const Gpu& g, bool rays, const Scene& sc, uint32_t nRays, bool print, int batchBounces = 0) {
     Trash trash;
     const RtLampProxy::Mesh& m = sc.mesh;
     const uint32_t T = static_cast<uint32_t>(sc.texels.size()), L = static_cast<uint32_t>(sc.lamps.size()), nTris = static_cast<uint32_t>(m.tris.size());
@@ -472,7 +646,7 @@ Result Solve(const Gpu& g, bool rays, const Scene& sc, uint32_t nRays, bool prin
     });
 
     Push pc{};
-    pc.texels = T, pc.rays = nRays, pc.shadowRays = kShadowRays, pc.stories = static_cast<uint32_t>(sc.stories), pc.lotSize = kLot + 8;
+    pc.texels = T, pc.rays = nRays, pc.shadowRays = kShadowRays, pc.stories = static_cast<uint32_t>(sc.stories), pc.lotSize = static_cast<uint32_t>(sc.lot);
     pc.density = static_cast<uint32_t>(sc.density), pc.lamps = L, pc.gx0 = m.gx0, pc.gz0 = m.gz0, pc.gw = m.gw, pc.gh = m.gh;
     const auto pass = [&](VkPipeline p, uint32_t groupsY) {
         return Run(g, [&](VkCommandBuffer cb) {
@@ -518,6 +692,26 @@ Result Solve(const Gpu& g, bool rays, const Scene& sc, uint32_t nRays, bool prin
     res.links.assign(static_cast<const uint32_t*>(back.p), static_cast<const uint32_t*>(back.p) + static_cast<size_t>(T) * nRays);
     read(bufs[6], 0, L * layer, 0);
     res.direct.assign(ind, ind + static_cast<size_t>(L) * T * 4);
+    res.accelSec = accelSec, res.linkSec = linkSec, res.directSec = directSec, res.bounceSec = bounceSec;
+    for (uint32_t l0 = 0; batchBounces > 0 && l0 < L; l0 += 8) // 8 lamps a submission: far from the driver's watchdog
+        res.batchSec += Run(g, [&](VkCommandBuffer cb) {
+            VkMemoryBarrier mb{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
+            mb.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT, mb.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+            vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, layout, 0, 1, &set, 0, nullptr);
+            for (uint32_t l = l0; l < std::min(L, l0 + 8); l++) {
+                const Lamp& lamp = sc.lamps[l];
+                std::memcpy(pc.lampPos, lamp.pos, 12), pc.lampPos[3] = lamp.radius;
+                std::memcpy(pc.lampCol, lamp.col, 12);
+                pc.lamp = l, pc.src = 0;
+                for (int b = -1; b < batchBounces; b++) {
+                    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, b < 0 ? pDirect : pBounce);
+                    vkCmdPushConstants(cb, layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, &pc);
+                    vkCmdDispatch(cb, (T + 63) / 64, 1, 1);
+                    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &mb, 0, nullptr, 0, nullptr);
+                    if (b >= 0) pc.src ^= 1u;
+                }
+            }
+        });
     if (print) {
         const double linkRays = static_cast<double>(T) * nRays;
         std::printf("  links: %.2f M rays in %.1f ms = %.0f M rays a second", linkRays / 1e6, linkSec * 1e3, linkRays / linkSec / 1e6);
@@ -614,18 +808,44 @@ void CheckParity(const Scene& sc, const Result& a, const Result& b) {
     Check(within >= static_cast<long>(n * 0.99) && std::fabs(sb / sa - 1.0) < 0.01, "back ends: 99 % of texels within 2/255, mean within 1 %");
     (void)sc;
 }
+
+// The solve's room means against the reference's: within 5 %, or 0.5/255 where the room is nearly dark
+void CheckReference(const Scene& sc, const Result& r, const std::vector<double>& ref, const char* tag) {
+    const size_t T = sc.texels.size();
+    for (size_t l = 0; l < sc.lamps.size(); l++) {
+        double mean[5][2] = {};
+        long count[5] = {};
+        for (size_t i = 0; i < T; i++) {
+            const int room = static_cast<int>(sc.texels[i].pos[3]);
+            count[room]++, mean[room][0] += r.direct[(l * T + i) * 4 + 1], mean[room][1] += r.ind[(l * T + i) * 4 + 1];
+        }
+        bool ok = true;
+        std::printf("  [%s] %s, room means (green) of the solve / the path-traced reference:\n", tag, sc.lamps[l].name);
+        for (int room = 1; room <= 4; room++)
+            for (int k = 0; k < 2; k++) {
+                const double a = mean[room][k] / count[room], b = ref[(l * 5 + room) * 2 + k];
+                if (k == 0) std::printf("    room %-24s direct %.5f / %.5f", kRoomName[room], a, b);
+                else std::printf(", indirect %.5f / %.5f\n", a, b);
+                ok = ok && std::fabs(a - b) <= std::max(0.05 * b, 0.5 / 255.0);
+            }
+        Check(ok, "room means within 5 % of the path-traced reference");
+    }
+}
 } // namespace
 
 int main(int argc, char** argv) {
     bool allowRays = true;
     std::string want;
-    int density = 4, nRays = 256;
+    int density = 4, nRays = 256, pathSpp = 0;
+    std::string dump;
     for (int i = 1; i < argc; i++) {
         const std::string a = argv[i];
         if (a == "--no-rays") allowRays = false;
         else if (a == "--device" && i + 1 < argc) want = argv[++i];
         else if (a == "--density" && i + 1 < argc) density = std::clamp(std::atoi(argv[++i]), 1, 16);
         else if (a == "--rays" && i + 1 < argc) nRays = std::clamp(std::atoi(argv[++i]), 1, 4096);
+        else if (a == "--pathref" && i + 1 < argc) pathSpp = std::clamp(std::atoi(argv[++i]), 1, 65536);
+        else if (a == "--dump" && i + 1 < argc) dump = argv[++i];
         else {
             std::printf("FAIL  unknown argument %s\n", a.c_str());
             return 1;
@@ -649,6 +869,37 @@ int main(int argc, char** argv) {
     const Result sw = Solve(g, false, sc, static_cast<uint32_t>(nRays), true);
     CheckResult(sc, sw, "compute");
     if (g.rays) CheckParity(sc, rq, sw);
+    if (pathSpp || !dump.empty()) {
+        const Result& best = g.rays ? rq : sw;
+        if (!pathSpp) pathSpp = 128;
+        std::printf("Path-traced reference on the CPU, %d samples a texel\n", pathSpp);
+        const std::vector<double> ref = Reference(sc, pathSpp);
+        CheckReference(sc, best, ref, g.rays ? "rays" : "compute");
+        if (!dump.empty()) {
+            // Header (magic, texels, lamps, scene bytes, lamp bytes), the scene, the lamps, a room a texel, the solve's
+            // direct and indirect layers (lamps x texels x 4 floats each), the reference's means (lamps x 5 rooms x 2 floats)
+            const std::vector<uint8_t> scene = WireScene(sc, static_cast<uint32_t>(std::min(nRays, 1024)), 16, kShadowRays); // (16 gathers: the fixed count of wp/X-REBAKE.md)
+            std::vector<WireLamp> lamps;
+            // The lamp of the closed room is scoped to its room's box (wp/X-REBAKE.md, region scope): the result must not change
+            for (const Lamp& l : sc.lamps) {
+                WireLamp w{{l.pos[0], l.pos[1], l.pos[2]}, l.radius, {l.col[0], l.col[1], l.col[2]}, 0, {1, 1, 1}, {0, 0, 0}};
+                if (l.room == kRoomB) w = {{l.pos[0], l.pos[1], l.pos[2]}, l.radius, {l.col[0], l.col[1], l.col[2]}, 0, {21.5f, -0.5f, 9.5f}, {28.5f, 3.5f, 16.5f}};
+                lamps.push_back(w);
+            }
+            std::vector<int32_t> rooms;
+            for (const Texel& t : sc.texels) rooms.push_back(static_cast<int32_t>(t.pos[3]));
+            const std::vector<float> means(ref.begin(), ref.end());
+            const uint32_t head[5] = {0x34524947u, static_cast<uint32_t>(sc.texels.size()), static_cast<uint32_t>(lamps.size()), static_cast<uint32_t>(scene.size()),
+                                      static_cast<uint32_t>(lamps.size() * sizeof(WireLamp))};
+            std::vector<uint8_t> out;
+            Put(out, head, 5), Put(out, scene.data(), scene.size()), Put(out, lamps.data(), lamps.size()), Put(out, rooms.data(), rooms.size());
+            Put(out, best.direct.data(), best.direct.size()), Put(out, best.ind.data(), best.ind.size()), Put(out, means.data(), means.size());
+            FILE* f = std::fopen(dump.c_str(), "wb");
+            const bool written = f && std::fwrite(out.data(), 1, out.size(), f) == out.size();
+            if (f) std::fclose(f);
+            Check(written, "the scene, the layers and the reference written to " + dump + " (" + std::to_string(out.size() / 1024) + " KB)");
+        }
+    }
     vkDestroyCommandPool(g.dev, g.pool, nullptr);
     vkDestroyDevice(g.dev, nullptr);
     vkDestroyInstance(g.inst, nullptr);

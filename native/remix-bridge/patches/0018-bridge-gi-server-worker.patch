@@ -1,0 +1,3964 @@
+0018: GI server (real-time GI work packages R-03 and R-04). Client exports RemixBridge_GiOpen, RemixBridge_GiSubmit, RemixBridge_GiSolve, RemixBridge_GiPoll, RemixBridge_GiCancel and RemixBridge_GiReadCounters (client.giServer, default off). On the first open the server starts a worker thread with its own Vulkan device on DXVK's GPU (matched by deviceUUID through DXVK's interop interface; ray query and acceleration structures enabled when present, server.giMaxLevel). RemixBridge_GiSubmit sends a scene (triangles with a texel patch for each side, texels with their reflectance and target pixel) and a lamp table through two shared submit slots of 448 KB, in parts; the worker builds the ray structure or a grid and traces each texel's links once. A solve with a scene ticket computes one lamp's direct light and a fixed count of ray-free gathers (gi_solve.comp, one kernel for the ray-query and the compute level) in slices sized to server.giSliceUs (2000) of GPU time by GPU timestamps, and keeps the layers of lamps that did not change; a solve without one fills the prototype's pattern. The play thread copies finished results into the named DEFAULT-pool texture through a SYSTEMMEM staging texture and UpdateSurface, at Present and every 64 commands, at most server.giUploadBudgetKB (1024) a pass, a larger result in bands of rows, then publishes the ticket in a shared answer slot. Reset, ResetEx and device destroy answer open tickets D3DERR_DEVICELOST. Test: test-gi.cmd (test_gi_device). Needs Vulkan-Headers, volk and glslang in submodules\ (build.cmd fetches them).
+Applies after 0001-0014 and 0017 on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only), with or without 0015-0016.
+diff --git a/bridge/bridge.conf b/bridge/bridge.conf
+index 1a9e074c..d0b0c9ab 100644
+--- a/bridge/bridge.conf
++++ b/bridge/bridge.conf
+@@ -139,4 +139,47 @@
+ # client.asyncReadback = False
+ 
++#
++# Lets callers of the client exports RemixBridge_GiOpen, RemixBridge_GiSolve and RemixBridge_GiPoll
++# have a worker in the server, on its own Vulkan device, compute into a DEFAULT-pool texture they name.
++# RemixBridge_GiSubmit sends the scene and the lamps the worker solves. The server copies results in on
++# its command thread. Its GI block takes about 900 KB of the client's address space once
++# RemixBridge_GiOpen maps it.
++#
++# Supported values: True, False
++
++# client.giServer = False
++
++#
++# The server answers RemixBridge_GiOpen only while this is True. With False the client reports
++# the GI level none, as with a server without GI support.
++#
++# Supported values: True, False
++
++# server.giServer = True
++
++#
++# Bytes of GI results the server copies into textures in one pass, at Present and every 64 commands.
++# A result larger than the budget is copied in bands of rows over several passes.
++
++# server.giUploadBudgetKB = 1024
++
++#
++# GPU time of one slice of the GI worker's solve, in microseconds. The worker measures each slice
++# with GPU timestamps and sizes the next one to this budget.
++
++# server.giSliceUs = 2000
++
++#
++# Microseconds the GI worker waits between two slices, which leaves the GPU to the renderer.
++
++# server.giSliceIdleUs = 0
++
++#
++# The highest GI level the worker uses: 2 uses ray queries when the GPU has them, 1 stays on compute.
++#
++# Supported values: 1, 2
++
++# server.giMaxLevel = 2
++
+ 
+ #
+diff --git a/bridge/src/client/d3d9_gi.cpp b/bridge/src/client/d3d9_gi.cpp
+new file mode 100644
+index 00000000..595e1ad1
+--- /dev/null
++++ b/bridge/src/client/d3d9_gi.cpp
+@@ -0,0 +1,259 @@
++/*
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++#include "pch.h"
++
++#include <cstring>
++#include <mutex>
++
++#include "d3d9_texture.h"
++#include "util_devicecommand.h"
++#include "util_gi.h"
++
++// GI server exports (client.giServer). A worker in the server computes into a DEFAULT-pool texture the caller names,
++// and the server copies the result into it on its play thread. The caller polls without waiting.
++//
++// RemixBridge_GiOpen(&level) starts the worker on the first call:
++//   S_OK with the level: 0 none, 1 compute, 2 rays. A server without GI support gives none after 2 s.
++//   S_FALSE until the server has answered and the worker has created its device. Call again a frame later.
++//   It never waits, since the open command may only reach the server with the next Present.
++//   E_NOTIMPL when client.giServer is off. D3DERR_DEVICELOST without a server.
++// RemixBridge_GiSubmit(data, size, kind, &ticket) sends a scene (GiSubmitScene) or a lamp table (GiSubmitLamps), in the
++// layouts of util_gi.h. A blob over a submit slot (448 KB) goes in parts, in order: every part but the last
++// has GiSubmitMore in its kind and gets no ticket.
++//   S_OK with the ticket of the last part. It polls S_OK once the worker has built the scene or taken the lamps.
++//   D3DERR_WASSTILLDRAWING while both submit slots wait for the server, or all tickets are in flight. Call again later.
++//   D3DERR_INVALIDCALL for a part over the slot size. A blob that fails the server's checks polls D3DERR_INVALIDCALL.
++// RemixBridge_GiSolve(texture, layer, sceneTicket, &ticket) queues a pass into the texture. With a scene ticket it is
++// a layer of that scene (lamp index, with GiLayerWhat from bit 16), without one a test pattern:
++//   S_OK with a ticket.
++//   E_NOTIMPL before RemixBridge_GiOpen. D3DERR_WASSTILLDRAWING when all tickets are in flight.
++//   D3DERR_INVALIDCALL for a texture that is not DEFAULT pool.
++// RemixBridge_GiPoll(ticket) returns S_FALSE while pending.
++//   It returns S_OK once a draw sent after the call samples the new contents.
++//   It returns the server's error, D3DERR_INVALIDCALL for an unknown ticket, or D3DERR_DEVICELOST without a server.
++// RemixBridge_GiCancel(ticket) frees a ticket the caller gives up on.
++// RemixBridge_GiReadCounters(out, count) copies the block's counters from its level field on.
++// A finished, failed or cancelled ticket is unknown afterwards.
++
++namespace {
++  using bridge_util::GiSharedBlock;
++
++  std::mutex s_mutex;
++  uint32_t s_pending[GiSharedBlock::kMaxTickets] = {};  // ticket a slot, 0 when free
++  uint32_t s_submitSeq[GiSharedBlock::kSubmitSlots] = {};  // the part a submit slot holds until the server took it, else 0
++  uint32_t s_seq = 0;
++  bool s_openSent = false;
++  bool s_noServer = false;
++  ULONGLONG s_openDeadline = 0;
++
++  bool giEnabled() {
++    static const bool enabled = bridge_util::Config::getOption<bool>("client.giServer", false);
++    return enabled;
++  }
++
++  // The block when the server has answered Bridge_GiOpen, else nullptr.
++  GiSharedBlock* openedBlock() {
++    GiSharedBlock* const pBlock = bridge_util::giBlock();
++    return pBlock != nullptr && pBlock->magic.load(std::memory_order_acquire) == GiSharedBlock::kMagic ? pBlock : nullptr;
++  }
++
++  uint32_t* findTicket(uint32_t ticket) {
++    for (uint32_t& pending : s_pending) {
++      if (pending != 0 && pending == ticket) {
++        return &pending;
++      }
++    }
++    return nullptr;
++  }
++}
++
++// Exported by name through d3d9_lss.def.
++extern "C" {
++
++  HRESULT __stdcall RemixBridge_GiOpen(uint32_t* pLevel) {
++    if (pLevel == nullptr) {
++      return D3DERR_INVALIDCALL;
++    }
++    if (!giEnabled() || bridge_util::giBlock() == nullptr) {
++      return E_NOTIMPL;
++    }
++    if (!gbBridgeRunning) {
++      return D3DERR_DEVICELOST;
++    }
++    std::lock_guard<std::mutex> lock(s_mutex);
++    if (!s_openSent) {
++      s_openSent = true;
++      s_openDeadline = GetTickCount64() + 2000;
++      ClientMessage { Commands::Bridge_GiOpen, 0, Commands::FlagBits::AsyncResult };
++    }
++
++    GiSharedBlock* const pBlock = openedBlock();
++    if (pBlock == nullptr && !s_noServer && GetTickCount64() >= s_openDeadline) {
++      s_noServer = true;
++      bridge_util::Logger::info("[Gi] The server did not answer the GI open, so the GI level is none.");
++    }
++    if (pBlock == nullptr) {
++      *pLevel = bridge_util::GiLevelNone;
++      return s_noServer ? S_OK : S_FALSE;
++    }
++    const uint32_t level = pBlock->level.load(std::memory_order_acquire);
++    if (level == bridge_util::GiLevelStarting) {
++      return S_FALSE;
++    }
++    *pLevel = level;
++    return S_OK;
++  }
++
++  HRESULT __stdcall RemixBridge_GiSolve(IDirect3DTexture9* pTexture, uint32_t layer, uint32_t sceneTicket, uint32_t* pTicket) {
++    if (pTexture == nullptr || pTicket == nullptr) {
++      return D3DERR_INVALIDCALL;
++    }
++    if (!giEnabled() || openedBlock() == nullptr) {
++      return E_NOTIMPL;
++    }
++    if (!gbBridgeRunning) {
++      return D3DERR_DEVICELOST;
++    }
++    D3DSURFACE_DESC desc;
++    if (FAILED(pTexture->GetLevelDesc(0, &desc)) || desc.Pool != D3DPOOL_DEFAULT) {
++      return D3DERR_INVALIDCALL;
++    }
++    const auto pLssTexture = bridge_cast<Direct3DTexture9_LSS*>(pTexture);
++
++    std::lock_guard<std::mutex> lock(s_mutex);
++    uint32_t slot = GiSharedBlock::kMaxTickets;
++    for (uint32_t i = 0; i < GiSharedBlock::kMaxTickets; ++i) {
++      if (s_pending[i] == 0) {
++        slot = i;
++        break;
++      }
++    }
++    if (slot == GiSharedBlock::kMaxTickets) {
++      return D3DERR_WASSTILLDRAWING;
++    }
++
++    // Tickets are never 0, because 0 marks a free slot.
++    if (++s_seq == 0) {
++      ++s_seq;
++    }
++    s_pending[slot] = s_seq;
++    {
++      ClientMessage c(Commands::Bridge_GiSolve, pLssTexture->getId(), Commands::FlagBits::AsyncResult);
++      c.send_data(layer);
++      c.send_data(sceneTicket);
++      c.send_data(slot);
++      c.send_data(s_seq);
++    }
++    *pTicket = s_seq;
++    return S_OK;
++  }
++
++  HRESULT __stdcall RemixBridge_GiSubmit(const void* pData, uint32_t size, uint32_t kind, uint32_t* pTicket) {
++    const bool more = (kind & bridge_util::GiSubmitMore) != 0;
++    if (pData == nullptr || size == 0 || size > bridge_util::GiSubmitSlot::kBytes || (!more && pTicket == nullptr)) {
++      return D3DERR_INVALIDCALL;
++    }
++    GiSharedBlock* const pBlock = giEnabled() ? openedBlock() : nullptr;
++    if (pBlock == nullptr) {
++      return E_NOTIMPL;
++    }
++    if (!gbBridgeRunning) {
++      return D3DERR_DEVICELOST;
++    }
++    std::lock_guard<std::mutex> lock(s_mutex);
++    uint32_t submitSlot = GiSharedBlock::kSubmitSlots;
++    for (uint32_t i = 0; i < GiSharedBlock::kSubmitSlots && submitSlot == GiSharedBlock::kSubmitSlots; ++i) {
++      if (s_submitSeq[i] == 0 || pBlock->submits[i].consumedSeq.load(std::memory_order_acquire) == s_submitSeq[i]) {
++        submitSlot = i;
++      }
++    }
++    uint32_t slot = GiSharedBlock::kMaxTickets;
++    for (uint32_t i = 0; i < GiSharedBlock::kMaxTickets && !more && slot == GiSharedBlock::kMaxTickets; ++i) {
++      if (s_pending[i] == 0) {
++        slot = i;
++      }
++    }
++    if (submitSlot == GiSharedBlock::kSubmitSlots || (!more && slot == GiSharedBlock::kMaxTickets)) {
++      return D3DERR_WASSTILLDRAWING;
++    }
++    if (++s_seq == 0) {
++      ++s_seq;
++    }
++    memcpy(pBlock->submits[submitSlot].data, pData, size);
++    s_submitSeq[submitSlot] = s_seq;
++    if (!more) {
++      s_pending[slot] = s_seq;
++      *pTicket = s_seq;
++    }
++    {
++      ClientMessage c(Commands::Bridge_GiSubmit, submitSlot, Commands::FlagBits::AsyncResult);
++      c.send_data(kind);
++      c.send_data(size);
++      c.send_data(slot);
++      c.send_data(s_seq);
++    }
++    return S_OK;
++  }
++
++  HRESULT __stdcall RemixBridge_GiPoll(uint32_t ticket) {
++    std::lock_guard<std::mutex> lock(s_mutex);
++    uint32_t* const pPending = findTicket(ticket);
++    GiSharedBlock* const pBlock = openedBlock();
++    if (pPending == nullptr || pBlock == nullptr) {
++      return D3DERR_INVALIDCALL;
++    }
++    const bridge_util::GiAnswerSlot& slot = pBlock->answers[pPending - s_pending];
++    if (slot.answeredSeq.load(std::memory_order_acquire) != ticket) {
++      if (gbBridgeRunning) {
++        return S_FALSE;
++      }
++      *pPending = 0;
++      return D3DERR_DEVICELOST;
++    }
++    *pPending = 0;
++    return (HRESULT) slot.hresult;
++  }
++
++  HRESULT __stdcall RemixBridge_GiCancel(uint32_t ticket) {
++    std::lock_guard<std::mutex> lock(s_mutex);
++    uint32_t* const pPending = findTicket(ticket);
++    if (pPending == nullptr) {
++      return D3DERR_INVALIDCALL;
++    }
++    *pPending = 0;
++    ClientMessage { Commands::Bridge_GiCancel, ticket, Commands::FlagBits::AsyncResult };
++    return S_OK;
++  }
++
++  HRESULT __stdcall RemixBridge_GiReadCounters(uint32_t* pCounters, uint32_t count) {
++    GiSharedBlock* const pBlock = openedBlock();
++    if (pCounters == nullptr) {
++      return D3DERR_INVALIDCALL;
++    }
++    if (pBlock == nullptr) {
++      return E_NOTIMPL;
++    }
++    const uint32_t* const pWords = reinterpret_cast<const uint32_t*>(&pBlock->level);
++    for (uint32_t i = 0; i < count && i < GiSharedBlock::kCounterWords; ++i) {
++      pCounters[i] = pWords[i];
++    }
++    return S_OK;
++  }
++}
+diff --git a/bridge/src/client/d3d9_lss.def b/bridge/src/client/d3d9_lss.def
+index 1800e543..7b42f4a8 100644
+--- a/bridge/src/client/d3d9_lss.def
++++ b/bridge/src/client/d3d9_lss.def
+@@ -25,2 +25,9 @@ EXPORTS
+   RemixBridge_PollReadback
+   RemixBridge_CancelReadback
++
++  RemixBridge_GiOpen
++  RemixBridge_GiSolve
++  RemixBridge_GiSubmit
++  RemixBridge_GiPoll
++  RemixBridge_GiCancel
++  RemixBridge_GiReadCounters
+diff --git a/bridge/src/client/meson.build b/bridge/src/client/meson.build
+index aa2b49a5..fc5ea089 100644
+--- a/bridge/src/client/meson.build
++++ b/bridge/src/client/meson.build
+@@ -1,121 +1,122 @@
+-#############################################################################
+-# Copyright (c) 2022-2024, NVIDIA CORPORATION. All rights reserved.
+-#
+-# Permission is hereby granted, free of charge, to any person obtaining a
+-# copy of this software and associated documentation files (the "Software"),
+-# to deal in the Software without restriction, including without limitation
+-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+-# and/or sell copies of the Software, and to permit persons to whom the
+-# Software is furnished to do so, subject to the following conditions:
+-#
+-# The above copyright notice and this permission notice shall be included in
+-# all copies or substantial portions of the Software.
+-#
+-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+-# DEALINGS IN THE SOFTWARE.
+-#############################################################################
+-
+-d3d9_version = vcs_tag(
+-  command: [python_interpreter.full_path(), global_src_root_norm + './scripts-common/echo.py', full_version],
+-  input:   'version.rc.in',
+-  output:  'version.rc')
+-
+-d3d9_res = wrc_generator.process(d3d9_version)
+-
+-d3d9_src = files([
+-  'd3d9_async_readback.cpp',
+-  'd3d9_bootstrap.cpp',
+-  'd3d9_cubetexture.cpp',
+-  'd3d9_device_base.cpp',
+-  'd3d9_device.cpp',
+-  'd3d9_indexbuffer.cpp',
+-  'd3d9_lss.cpp',
+-  'd3d9_module.cpp',
+-  'd3d9_pixelshader.cpp',
+-  'd3d9_query.cpp',
+-  'd3d9_resource.cpp',
+-  'd3d9_stateblock.cpp',
+-  'd3d9_surface.cpp',
+-  'd3d9_swapchain.cpp',
+-  'd3d9_texture.cpp',
+-  'd3d9_vertexbuffer.cpp',
+-  'd3d9_vertexdeclaration.cpp',
+-  'd3d9_vertexshader.cpp',
+-  'd3d9_volume.cpp',
+-  'd3d9_volumetexture.cpp',
+-  'di_hook.cpp',
+-  'message_channels.cpp',
+-  'pch.cpp',
+-  'remix_api.cpp',
+-  'remix_state.cpp',
+-  'window.cpp',
+-])
+-
+-d3d9_header = files([
+-  'base.h',
+-  'client_options.h',
+-  'd3d9_base_texture.h',
+-  'd3d9_commonshader.h',
+-  'd3d9_cubetexture.h',
+-  'd3d9_device_base.h',
+-  'd3d9_device.h',
+-  'd3d9_indexbuffer.h',
+-  'd3d9_lss.h',
+-  'd3d9_pixelshader.h',
+-  'd3d9_privatedata.h',
+-  'd3d9_query.h',
+-  'd3d9_query_result.h',
+-  'd3d9_resource.h',
+-  'd3d9_surface.h',
+-  'd3d9_surfacebuffer_helper.h',
+-  'd3d9_swapchain.h',
+-  'd3d9_texture.h',
+-  'd3d9_util.h',
+-  'd3d9_vertexbuffer.h',
+-  'd3d9_vertexdeclaration.h',
+-  'd3d9_vertexshader.h',
+-  'd3d9_volume.h',
+-  'd3d9_volumetexture.h',
+-  'swapchain_map.h',
+-  'detours_common.h',
+-  'di_hook.h',
+-  'framework.h',
+-  'lockable_buffer.h',
+-  'message_channels.h',
+-  'pch.h',
+-  'remix_state.h',
+-  'resource.h',
+-  'shadow_map.h',
+-  'window.h',
+-])
+-
+-d3d9_def = files([
+-  'd3d9_lss.def',
+-])
+-
+-detours_include_path = include_directories('../../../submodules/Detours/src')
+-
+-thread_dep = dependency('threads')
+-
+-d3d9_dll = shared_library('d3d9', d3d9_header, d3d9_src, d3d9_res, 
+-  sources             : [ bridge_version ],
+-  dependencies        : [ thread_dep, util_dep, lib_version, lib_version, lib_commCtrl, tracy_dep ],
+-  include_directories : [ bridge_include_path, util_include_path, detours_include_path, public_include_path ],
+-  vs_module_defs      : 'd3d9_lss.def')
+-
+-
+-ext_x86_path = meson.global_source_root().replace('\\', '/') + '/ext/x86/'
+-ext_x64_path = meson.global_source_root().replace('\\', '/') + '/ext/x64/'
+-
+-if build_os == 'windows'
+-custom_target('copy_d3d9_to_output',
+-    output           : ['copy_d3d9_to_output'],
+-    build_by_default : true,
+-    depends          : [ d3d9_dll ],
+-    command          : [copy_script_path, meson.current_build_dir(), output_dir, 'd3d9*'] )
+-endif
++#############################################################################
++# Copyright (c) 2022-2024, NVIDIA CORPORATION. All rights reserved.
++#
++# Permission is hereby granted, free of charge, to any person obtaining a
++# copy of this software and associated documentation files (the "Software"),
++# to deal in the Software without restriction, including without limitation
++# the rights to use, copy, modify, merge, publish, distribute, sublicense,
++# and/or sell copies of the Software, and to permit persons to whom the
++# Software is furnished to do so, subject to the following conditions:
++#
++# The above copyright notice and this permission notice shall be included in
++# all copies or substantial portions of the Software.
++#
++# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++# DEALINGS IN THE SOFTWARE.
++#############################################################################
++
++d3d9_version = vcs_tag(
++  command: [python_interpreter.full_path(), global_src_root_norm + './scripts-common/echo.py', full_version],
++  input:   'version.rc.in',
++  output:  'version.rc')
++
++d3d9_res = wrc_generator.process(d3d9_version)
++
++d3d9_src = files([
++  'd3d9_async_readback.cpp',
++  'd3d9_bootstrap.cpp',
++  'd3d9_cubetexture.cpp',
++  'd3d9_gi.cpp',
++  'd3d9_device_base.cpp',
++  'd3d9_device.cpp',
++  'd3d9_indexbuffer.cpp',
++  'd3d9_lss.cpp',
++  'd3d9_module.cpp',
++  'd3d9_pixelshader.cpp',
++  'd3d9_query.cpp',
++  'd3d9_resource.cpp',
++  'd3d9_stateblock.cpp',
++  'd3d9_surface.cpp',
++  'd3d9_swapchain.cpp',
++  'd3d9_texture.cpp',
++  'd3d9_vertexbuffer.cpp',
++  'd3d9_vertexdeclaration.cpp',
++  'd3d9_vertexshader.cpp',
++  'd3d9_volume.cpp',
++  'd3d9_volumetexture.cpp',
++  'di_hook.cpp',
++  'message_channels.cpp',
++  'pch.cpp',
++  'remix_api.cpp',
++  'remix_state.cpp',
++  'window.cpp',
++])
++
++d3d9_header = files([
++  'base.h',
++  'client_options.h',
++  'd3d9_base_texture.h',
++  'd3d9_commonshader.h',
++  'd3d9_cubetexture.h',
++  'd3d9_device_base.h',
++  'd3d9_device.h',
++  'd3d9_indexbuffer.h',
++  'd3d9_lss.h',
++  'd3d9_pixelshader.h',
++  'd3d9_privatedata.h',
++  'd3d9_query.h',
++  'd3d9_query_result.h',
++  'd3d9_resource.h',
++  'd3d9_surface.h',
++  'd3d9_surfacebuffer_helper.h',
++  'd3d9_swapchain.h',
++  'd3d9_texture.h',
++  'd3d9_util.h',
++  'd3d9_vertexbuffer.h',
++  'd3d9_vertexdeclaration.h',
++  'd3d9_vertexshader.h',
++  'd3d9_volume.h',
++  'd3d9_volumetexture.h',
++  'swapchain_map.h',
++  'detours_common.h',
++  'di_hook.h',
++  'framework.h',
++  'lockable_buffer.h',
++  'message_channels.h',
++  'pch.h',
++  'remix_state.h',
++  'resource.h',
++  'shadow_map.h',
++  'window.h',
++])
++
++d3d9_def = files([
++  'd3d9_lss.def',
++])
++
++detours_include_path = include_directories('../../../submodules/Detours/src')
++
++thread_dep = dependency('threads')
++
++d3d9_dll = shared_library('d3d9', d3d9_header, d3d9_src, d3d9_res, 
++  sources             : [ bridge_version ],
++  dependencies        : [ thread_dep, util_dep, lib_version, lib_version, lib_commCtrl, tracy_dep ],
++  include_directories : [ bridge_include_path, util_include_path, detours_include_path, public_include_path ],
++  vs_module_defs      : 'd3d9_lss.def')
++
++
++ext_x86_path = meson.global_source_root().replace('\\', '/') + '/ext/x86/'
++ext_x64_path = meson.global_source_root().replace('\\', '/') + '/ext/x64/'
++
++if build_os == 'windows'
++custom_target('copy_d3d9_to_output',
++    output           : ['copy_d3d9_to_output'],
++    build_by_default : true,
++    depends          : [ d3d9_dll ],
++    command          : [copy_script_path, meson.current_build_dir(), output_dir, 'd3d9*'] )
++endif
+diff --git a/bridge/src/server/gi_pattern.comp b/bridge/src/server/gi_pattern.comp
+new file mode 100644
+index 00000000..b81e0d5a
+--- /dev/null
++++ b/bridge/src/server/gi_pattern.comp
+@@ -0,0 +1,41 @@
++#version 450
++// The GI worker's prototype pass: fills a target's texels with a pattern of its ticket and layer, so a
++// self-test can recognise a stale, shifted or swapped result. R-04 replaces it with the texel solve.
++// Every channel is k / 256 with k < 256, which float16 and 8-bit unorm both hold exactly.
++
++layout(local_size_x = 8, local_size_y = 8) in;
++
++layout(std430, binding = 0) writeonly buffer Texels {
++  uint words[];
++};
++
++layout(push_constant) uniform Pass {
++  uint width;
++  uint height;
++  uint layer;
++  uint seq;
++  uint format;  // 0: A16B16G16R16F, two words a texel. 1: A8R8G8B8, one word a texel.
++} pass;
++
++void main()
++{
++  const uvec2 texel = gl_GlobalInvocationID.xy;
++  if (texel.x >= pass.width || texel.y >= pass.height)
++  {
++    return;
++  }
++  const uint r = (texel.x + pass.seq) & 255u;
++  const uint g = (texel.y + pass.layer * 37u) & 255u;
++  const uint b = (texel.x ^ texel.y) & 255u;
++  const uint a = 255u;
++  const uint index = texel.y * pass.width + texel.x;
++  if (pass.format == 0u)
++  {
++    words[2u * index] = packHalf2x16(vec2(r, g) / 256.0);
++    words[2u * index + 1u] = packHalf2x16(vec2(b, a) / 256.0);
++  }
++  else
++  {
++    words[index] = (a << 24) | (r << 16) | (g << 8) | b;
++  }
++}
+diff --git a/bridge/src/server/gi_server.h b/bridge/src/server/gi_server.h
+new file mode 100644
+index 00000000..462077a2
+--- /dev/null
++++ b/bridge/src/server/gi_server.h
+@@ -0,0 +1,364 @@
++/*
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++#pragma once
++
++#include <algorithm>
++#include <cstring>
++#include <deque>
++#include <iterator>
++#include <memory>
++#include <unordered_map>
++#include <vector>
++
++#include <d3d9.h>
++
++#include "gi_worker.h"
++#include "util_common.h"
++#include "util_gi.h"
++#include "config/config.h"
++#include "log/log.h"
++
++// DXVK's interop interface (DXVK src/d3d9/d3d9_interfaces.h). Only its first method is called here.
++struct __declspec(uuid("2eaa4b89-0107-4bdb-87f7-0f541c493ce0")) ID3D9VkInteropDevice : public IUnknown {
++  virtual void STDMETHODCALLTYPE GetVulkanHandles(void** pInstance, void** pPhysicalDevice, void** pDevice) = 0;
++};
++
++// Play-thread side of the GI server exports (client/d3d9_gi.cpp). Every Direct3D 9 call here runs on the play thread.
++// The worker (gi_worker.cpp) computes into its own memory, and finished results are copied into the target with
++// UpdateSurface at Present and every 64 commands, at most server.giUploadBudgetKB a pass: a larger result goes in
++// bands of rows over several passes.
++namespace gi_server {
++  using bridge_util::GiSharedBlock;
++  using ResourceMap = std::unordered_map<uint32_t, IDirect3DResource9*>;
++
++  struct Staging {
++    UINT width;
++    UINT height;
++    D3DFORMAT format;
++    IDirect3DTexture9* pTexture;
++  };
++
++  inline std::deque<std::shared_ptr<gi::Job>> g_jobs;  // in request order
++  inline std::vector<Staging> g_staging;
++  inline std::vector<uint8_t> g_parts[bridge_util::GiSubmitLamps + 1];  // a blob's parts so far, by submit kind
++  inline bool g_partsBad[bridge_util::GiSubmitLamps + 1] = {};         // a part of the blob was refused
++  inline bool g_started = false;
++  inline uint32_t g_commandsSincePoll = 0;
++
++  inline bool serverEnabled() {
++    static const bool enabled = bridge_util::Config::getOption<bool>("server.giServer", true);
++    return enabled;
++  }
++
++  inline uint32_t uploadBudgetBytes() {
++    static const uint32_t budget = bridge_util::Config::getOption<uint32_t>("server.giUploadBudgetKB", 1024) * 1024;
++    return budget;
++  }
++
++  inline void answer(const gi::Job& job, HRESULT hresult, uint32_t kind = bridge_util::GiAnswerCopied,
++                     uint32_t size = 0, uint32_t uploadUs = 0) {
++    GiSharedBlock* const pBlock = bridge_util::giBlock();
++    bridge_util::GiAnswerSlot& slot = pBlock->answers[job.slot];
++    slot.hresult = (int32_t) hresult;
++    slot.kind = kind;
++    slot.size = size;
++    slot.gpuUs = job.gpuUs;
++    slot.uploadUs = uploadUs;
++    slot.answeredSeq.store(job.seq, std::memory_order_release);
++    ++pBlock->jobsDone;
++  }
++
++  // Returns the texture under a client id, or nullptr when the id names none (destroyed, unlinked or not a texture).
++  inline IDirect3DTexture9* findTexture(const ResourceMap& resources, uint32_t id) {
++    const auto it = resources.find(id);
++    if (it == resources.end() || it->second == nullptr || it->second->GetType() != D3DRTYPE_TEXTURE) {
++      return nullptr;
++    }
++    return static_cast<IDirect3DTexture9*>(it->second);
++  }
++
++  inline HRESULT describe(IDirect3DTexture9* pTexture, gi::Job& job) {
++    D3DSURFACE_DESC desc;
++    if (pTexture == nullptr || FAILED(pTexture->GetLevelDesc(0, &desc)) || desc.Pool != D3DPOOL_DEFAULT) {
++      return D3DERR_INVALIDCALL;
++    }
++    if (desc.Format == D3DFMT_A16B16G16R16F) {
++      job.format = gi::TexelFormat::Rgba16f;
++    } else if (desc.Format == D3DFMT_A8R8G8B8) {
++      job.format = gi::TexelFormat::Bgra8;
++    } else {
++      return D3DERR_INVALIDCALL;
++    }
++    job.width = desc.Width;
++    job.height = desc.Height;
++    return S_OK;
++  }
++
++  // A SYSTEMMEM texture a size and format, kept for the next copy. The eight most recently created are kept.
++  inline IDirect3DTexture9* staging(IDirect3DDevice9* pDevice, UINT width, UINT height, D3DFORMAT format) {
++    for (const Staging& entry : g_staging) {
++      if (entry.width == width && entry.height == height && entry.format == format) {
++        return entry.pTexture;
++      }
++    }
++    if (g_staging.size() >= 8) {
++      g_staging.front().pTexture->Release();
++      g_staging.erase(g_staging.begin());
++    }
++    IDirect3DTexture9* pTexture = nullptr;
++    if (FAILED(pDevice->CreateTexture(width, height, 1, 0, format, D3DPOOL_SYSTEMMEM, &pTexture, nullptr))) {
++      return nullptr;
++    }
++    g_staging.push_back(Staging { width, height, format, pTexture });
++    return pTexture;
++  }
++
++  // Copies rows of a finished job into its target. The target is looked up again, so a destroyed or reused id gets no stale result.
++  inline HRESULT upload(const ResourceMap& resources, const gi::Job& job, uint32_t firstRow, uint32_t rows) {
++    IDirect3DTexture9* const pTarget = findTexture(resources, job.targetId);
++    gi::Job now;
++    if (FAILED(describe(pTarget, now)) || now.width != job.width || now.height != job.height || now.format != job.format) {
++      return D3DERR_INVALIDCALL;
++    }
++    const D3DFORMAT format = job.format == gi::TexelFormat::Rgba16f ? D3DFMT_A16B16G16R16F : D3DFMT_A8R8G8B8;
++    const size_t rowSize = size_t(job.width) * (job.format == gi::TexelFormat::Rgba16f ? 8 : 4);
++    IDirect3DDevice9* pDevice = nullptr;
++    if (FAILED(pTarget->GetDevice(&pDevice))) {
++      return D3DERR_INVALIDCALL;
++    }
++    HRESULT hresult = E_OUTOFMEMORY;
++    IDirect3DTexture9* const pStaging = staging(pDevice, job.width, job.height, format);
++    D3DLOCKED_RECT lockedRect;
++    const RECT band { 0, LONG(firstRow), LONG(job.width), LONG(firstRow + rows) };
++    const POINT corner { 0, LONG(firstRow) };
++    if (pStaging != nullptr && SUCCEEDED(hresult = pStaging->LockRect(0, &lockedRect, &band, 0))) {
++      for (uint32_t y = 0; y < rows; ++y) {
++        memcpy((uint8_t*) lockedRect.pBits + size_t(y) * lockedRect.Pitch, job.texels.data() + (firstRow + y) * rowSize, rowSize);
++      }
++      pStaging->UnlockRect(0);
++      IDirect3DSurface9* pSource = nullptr;
++      IDirect3DSurface9* pDest = nullptr;
++      pStaging->GetSurfaceLevel(0, &pSource);
++      pTarget->GetSurfaceLevel(0, &pDest);
++      hresult = pDevice->UpdateSurface(pSource, &band, pDest, &corner);
++      pSource->Release();
++      pDest->Release();
++    }
++    pDevice->Release();
++    return hresult;
++  }
++
++  // Bridge_GiOpen: starts the worker once, with DXVK's GPU when the server renders through DXVK.
++  inline void open(const std::unordered_map<uint32_t, IDirect3DDevice9*>& devices) {
++    GiSharedBlock* const pBlock = bridge_util::giBlock();
++    if (g_started || !serverEnabled() || pBlock == nullptr) {
++      return;
++    }
++    g_started = true;
++    void* pInstance = nullptr;
++    void* pPhysicalDevice = nullptr;
++    void* pVkDevice = nullptr;
++    if (!devices.empty()) {
++      IDirect3DDevice9* const pDevice = devices.begin()->second;
++      D3DDEVICE_CREATION_PARAMETERS parameters;
++      if (SUCCEEDED(pDevice->GetCreationParameters(&parameters))) {
++        pBlock->behaviorFlags = parameters.BehaviorFlags;
++      }
++      ID3D9VkInteropDevice* pInterop = nullptr;
++      if (SUCCEEDED(pDevice->QueryInterface(__uuidof(ID3D9VkInteropDevice), (void**) &pInterop))) {
++        pInterop->GetVulkanHandles(&pInstance, &pPhysicalDevice, &pVkDevice);
++        pInterop->Release();
++      }
++    }
++    bridge_util::Logger::info(bridge_util::format_string(
++      "[Gi] Starting the GI worker. Device BehaviorFlags 0x%08x (%s), %s.", pBlock->behaviorFlags,
++      (pBlock->behaviorFlags & D3DCREATE_MULTITHREADED) ? "multithreaded" : "not multithreaded",
++      pInstance != nullptr ? "DXVK interop found" : "no DXVK interop"));
++    pBlock->layoutVersion = GiSharedBlock::kLayoutVersion;
++    pBlock->level.store(bridge_util::GiLevelStarting, std::memory_order_relaxed);
++    pBlock->magic.store(GiSharedBlock::kMagic, std::memory_order_release);
++    gi::startWorker(pInstance, pPhysicalDevice);
++  }
++
++  // Bridge_GiSubmit: copies a part out of its submit slot, which the client may then reuse.
++  // The last part of a blob hands the whole blob to the worker under its ticket.
++  inline void submit(uint32_t submitSlot, uint32_t kind, uint32_t size, uint32_t ticketSlot, uint32_t seq) {
++    GiSharedBlock* const pBlock = bridge_util::giBlock();
++    if (!g_started || pBlock == nullptr || submitSlot >= GiSharedBlock::kSubmitSlots) {
++      return;
++    }
++    const uint32_t what = kind & bridge_util::GiSubmitKindMask;
++    const bool known = what == bridge_util::GiSubmitScene || what == bridge_util::GiSubmitLamps;
++    if (known) {
++      std::vector<uint8_t>& parts = g_parts[what];
++      if (size <= bridge_util::GiSubmitSlot::kBytes && parts.size() + size <= (256u << 20)) {
++        const uint8_t* const pData = pBlock->submits[submitSlot].data;
++        parts.insert(parts.end(), pData, pData + size);
++      } else {
++        g_partsBad[what] = true;
++      }
++    }
++    pBlock->submits[submitSlot].consumedSeq.store(seq, std::memory_order_release);
++    if ((kind & bridge_util::GiSubmitMore) || ticketSlot >= GiSharedBlock::kMaxTickets) {
++      return;
++    }
++    auto job = std::make_shared<gi::Job>();
++    job->kind = what == bridge_util::GiSubmitScene ? gi::JobKind::Scene : gi::JobKind::Lamps;
++    job->slot = ticketSlot;
++    job->seq = seq;
++    bool bad = !known;
++    if (known) {
++      job->blob = std::move(g_parts[what]);
++      g_parts[what].clear();
++      bad = g_partsBad[what];
++      g_partsBad[what] = false;
++    }
++    if (bad || pBlock->level.load(std::memory_order_acquire) == bridge_util::GiLevelNone) {
++      answer(*job, bad ? D3DERR_INVALIDCALL : E_FAIL);
++      return;
++    }
++    ++pBlock->jobsQueued;
++    g_jobs.push_back(job);
++    gi::queueJob(job);
++  }
++
++  // Bridge_GiSolve: queues a pass into the texture under targetId. With a scene ticket it is one lamp's layer of
++  // that scene, without one the prototype's pattern.
++  inline void solve(const ResourceMap& resources, uint32_t targetId, uint32_t layer, uint32_t sceneSeq, uint32_t slot, uint32_t seq) {
++    GiSharedBlock* const pBlock = bridge_util::giBlock();
++    if (!g_started || pBlock == nullptr || slot >= GiSharedBlock::kMaxTickets) {
++      return;
++    }
++    auto job = std::make_shared<gi::Job>();
++    job->kind = sceneSeq != 0 ? gi::JobKind::Solve : gi::JobKind::Pattern;
++    job->sceneSeq = sceneSeq;
++    job->targetId = targetId;
++    job->layer = layer;
++    job->slot = slot;
++    job->seq = seq;
++    const HRESULT hresult = describe(findTexture(resources, targetId), *job);
++    if (FAILED(hresult)) {
++      answer(*job, hresult);
++      return;
++    }
++    if (pBlock->level.load(std::memory_order_acquire) == bridge_util::GiLevelNone) {
++      answer(*job, E_FAIL);
++      return;
++    }
++    ++pBlock->jobsQueued;
++    g_jobs.push_back(job);
++    gi::queueJob(job);
++  }
++
++  // Bridge_GiCancel: a cancelled job is never answered, so its slot can take the next ticket at once.
++  inline void cancel(uint32_t seq) {
++    for (auto it = g_jobs.begin(); it != g_jobs.end(); ++it) {
++      if ((*it)->seq == seq) {
++        (*it)->cancelled.store(true, std::memory_order_release);
++        g_jobs.erase(it);
++        return;
++      }
++    }
++  }
++
++  // Applies finished jobs within the byte budget. A job larger than what is left of it goes in bands of rows,
++  // the rest in later passes, so the target shows old rows below new ones for those passes.
++  inline void poll(const ResourceMap& resources) {
++    g_commandsSincePoll = 0;
++    GiSharedBlock* const pBlock = g_started ? bridge_util::giBlock() : nullptr;
++    if (pBlock == nullptr) {
++      return;
++    }
++    pBlock->heartbeat.fetch_add(1, std::memory_order_relaxed);
++    uint32_t applied = 0;
++    for (auto it = g_jobs.begin(); it != g_jobs.end();) {
++      gi::Job& job = **it;
++      if (!job.ready.load(std::memory_order_acquire)) {
++        ++it;
++        continue;
++      }
++      const auto hasTarget = [](const gi::Job& j) { return j.kind == gi::JobKind::Pattern || j.kind == gi::JobKind::Solve; };
++      bool superseded = false;
++      for (auto later = std::next(it); hasTarget(job) && later != g_jobs.end() && !superseded; ++later) {
++        superseded = hasTarget(**later) && (*later)->targetId == job.targetId && (*later)->layer == job.layer;
++      }
++      if (superseded || FAILED(job.hresult) || !hasTarget(job)) {
++        answer(job, superseded ? S_OK : job.hresult, superseded ? bridge_util::GiAnswerSuperseded : bridge_util::GiAnswerCopied);
++        it = g_jobs.erase(it);
++        continue;
++      }
++      const uint32_t rowSize = job.width * (job.format == gi::TexelFormat::Rgba16f ? 8 : 4);
++      uint32_t rows = std::min(job.height - job.rowsDone, (uploadBudgetBytes() - std::min(applied, uploadBudgetBytes())) / rowSize);
++      if (rows == 0 && applied == 0) {
++        rows = 1;  // A row over the whole budget still goes, alone in its pass.
++      }
++      if (rows == 0) {
++        break;
++      }
++      const uint32_t size = rows * rowSize;
++      LARGE_INTEGER start, end, frequency;
++      QueryPerformanceCounter(&start);
++      const HRESULT hresult = upload(resources, job, job.rowsDone, rows);
++      QueryPerformanceCounter(&end);
++      QueryPerformanceFrequency(&frequency);
++      const uint32_t us = uint32_t((end.QuadPart - start.QuadPart) * 1000000 / frequency.QuadPart);
++      applied += size;
++      job.rowsDone += rows;
++      job.uploadUs += us;
++      pBlock->uploadUsLast = us;
++      if (us > pBlock->uploadUsMax) {
++        pBlock->uploadUsMax = us;
++        bridge_util::Logger::info(bridge_util::format_string("[Gi] Longest upload so far: %u bytes in %u us.", size, us));
++      }
++      if (size > pBlock->uploadBytesMax) {
++        pBlock->uploadBytesMax = size;
++      }
++      if (SUCCEEDED(hresult) && job.rowsDone < job.height) {
++        break;
++      }
++      answer(job, hresult, bridge_util::GiAnswerCopied, SUCCEEDED(hresult) ? uint32_t(job.texels.size()) : 0, job.uploadUs);
++      it = g_jobs.erase(it);
++    }
++  }
++
++  inline void onCommand(const ResourceMap& resources) {
++    if (!g_jobs.empty() && ++g_commandsSincePoll >= 64) {
++      poll(resources);
++    }
++  }
++
++  // A device reset or destroy fails the open jobs, submits included. The worker keeps its device and the scene
++  // it has built, and the client submits what was open and solves again.
++  inline void dropAll() {
++    for (const auto& job : g_jobs) {
++      job->cancelled.store(true, std::memory_order_release);
++      answer(*job, D3DERR_DEVICELOST);
++    }
++    g_jobs.clear();
++    for (size_t kind = 0; kind < std::size(g_parts); ++kind) {
++      g_parts[kind].clear();
++      g_partsBad[kind] = false;
++    }
++    for (const Staging& entry : g_staging) {
++      entry.pTexture->Release();
++    }
++    g_staging.clear();
++  }
++}
+diff --git a/bridge/src/server/gi_solve.comp b/bridge/src/server/gi_solve.comp
+new file mode 100644
+index 00000000..0606d3c3
+--- /dev/null
++++ b/bridge/src/server/gi_solve.comp
+@@ -0,0 +1,181 @@
++#version 460
++// The GI worker's texel solve, one source for both levels. RAYQUERY: hardware ray queries against the scene's
++// acceleration structure. Without it the same kernel walks a 1 m grid over x and z in software.
++// PASS 0: the links. For each texel and ray, the texel a cosine-weighted ray hits. Lamp independent, traced once a scene.
++// PASS 1: one lamp's direct light, by shadow rays to points on its ball.
++// PASS 2: one bounce of one lamp's layer: a gather over the links with no ray.
++// A pass is dispatched in slices: texel0 and ray0 are the slice's first texel and ray.
++#ifdef RAYQUERY
++#extension GL_EXT_ray_query : require
++layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;
++#endif
++layout(local_size_x = 64) in;
++
++struct Texel {
++  vec4 pos;
++  vec4 nrm;
++  vec4 alb;
++};
++struct Patch {
++  vec3 origin;
++  int mapOffset;  // the patch's first map entry
++  vec3 u;
++  int nu;
++  vec3 v;
++  int nv;
++};
++struct Vertex {
++  vec3 p;
++  int patchId;  // the triangle's first vertex holds its front patch and the second its back patch, -1 = none
++};
++layout(std430, set = 0, binding = 1) readonly buffer Tris { Vertex tris[]; };  // three a triangle
++layout(std430, set = 0, binding = 2) readonly buffer CellStart { uint cellStart[]; };
++layout(std430, set = 0, binding = 3) readonly buffer CellTris { uint cellTris[]; };
++layout(std430, set = 0, binding = 4) readonly buffer Texels { Texel texel[]; };
++layout(std430, set = 0, binding = 5) readonly buffer Patches { Patch patches[]; };
++layout(std430, set = 0, binding = 6) readonly buffer PatchMap { int patchMap[]; };  // the texel of a patch cell, -1 = none
++layout(std430, set = 0, binding = 7) buffer Links { uint link[]; };                 // texels x rays
++layout(std430, set = 0, binding = 8) buffer Direct { vec4 direct[]; };              // lamps x texels
++layout(std430, set = 0, binding = 9) buffer Ind { vec4 ind[]; };                    // 2 (feedback halves) x lamps x texels
++layout(push_constant) uniform PC {
++  vec4 lampPos;  // w: the ball's radius
++  vec4 lampCol;
++  vec4 boxMin;   // the lamp's region scope: texels outside it hold no light of this lamp
++  vec4 boxMax;
++  uint texels, rays, lamp, src;
++  uint shadowRays, lamps, texel0, ray0;
++  int gx0, gz0, gw, gh;
++} pc;
++
++const uint kNone = 0xFFFFFFFFu;
++
++#ifdef RAYQUERY
++bool Trace(vec3 o, vec3 d, float tMin, float tMax, out float t, out uint prim) {
++  rayQueryEXT q;
++  rayQueryInitializeEXT(q, tlas, gl_RayFlagsOpaqueEXT, 0xFF, o, tMin, d, tMax);
++  while (rayQueryProceedEXT(q)) {}
++  if (rayQueryGetIntersectionTypeEXT(q, true) != gl_RayQueryCommittedIntersectionTriangleEXT) return false;
++  t = rayQueryGetIntersectionTEXT(q, true);
++  prim = uint(rayQueryGetIntersectionPrimitiveIndexEXT(q, true));
++  return true;
++}
++#else
++// Moller-Trumbore, both sides. The edges are taken a little wide, so a ray along a shared edge is blocked, never passed.
++bool TriHit(uint i, vec3 o, vec3 d, float tMin, float tMax, out float t) {
++  const vec3 a = tris[3 * i].p, e1 = tris[3 * i + 1].p - a, e2 = tris[3 * i + 2].p - a;
++  const vec3 p = cross(d, e2);
++  const float det = dot(e1, p);
++  if (abs(det) < 1e-12) return false;
++  const float inv = 1.0 / det, kEdge = 1e-5;
++  const vec3 s = o - a;
++  const float u = dot(s, p) * inv;
++  if (u < -kEdge || u > 1.0 + kEdge) return false;
++  const vec3 q = cross(s, e1);
++  const float v = dot(d, q) * inv;
++  if (v < -kEdge || u + v > 1.0 + kEdge) return false;
++  t = dot(e2, q) * inv;
++  return t > tMin && t < tMax;
++}
++// The nearest hit: a 2D walk over the grid's 1 m cells the ray's xz crosses.
++bool Trace(vec3 o, vec3 d, float tMin, float tMax, out float t, out uint prim) {
++  bool hit = false;
++  t = tMax;
++  const vec2 p = o.xz - vec2(pc.gx0, pc.gz0);
++  ivec2 c = ivec2(floor(p));
++  const ivec2 st = ivec2(d.x > 0.0 ? 1 : -1, d.z > 0.0 ? 1 : -1);
++  const vec2 td = vec2(abs(d.x) > 1e-9 ? 1.0 / abs(d.x) : 1e30, abs(d.z) > 1e-9 ? 1.0 / abs(d.z) : 1e30);
++  vec2 tn = vec2(td.x < 1e29 ? (st.x > 0 ? float(c.x + 1) - p.x : p.x - float(c.x)) * td.x : 1e30,
++                 td.y < 1e29 ? (st.y > 0 ? float(c.y + 1) - p.y : p.y - float(c.y)) * td.y : 1e30);
++  for (int n = 0; n < pc.gw + pc.gh + 2; n++) {
++    if (c.x >= 0 && c.y >= 0 && c.x < pc.gw && c.y < pc.gh) {
++      const uint ci = uint(c.y * pc.gw + c.x);
++      for (uint k = cellStart[ci]; k < cellStart[ci + 1]; k++) {
++        float tt;
++        const uint ti = cellTris[k];
++        if (TriHit(ti, o, d, tMin, t, tt)) t = tt, prim = ti, hit = true;
++      }
++    }
++    const float tExit = min(tn.x, tn.y);
++    if (t <= tExit || tExit >= tMax) break;
++    if (tn.x < tn.y) c.x += st.x, tn.x += td.x;
++    else c.y += st.y, tn.y += td.y;
++    if ((c.x < 0 && st.x < 0) || (c.x >= pc.gw && st.x > 0) || (c.y < 0 && st.y < 0) || (c.y >= pc.gh && st.y > 0)) break;
++  }
++  return hit;
++}
++#endif
++
++// The texel under a hit at P on triangle prim, from the side the ray d came from. The light buffer is read at the hit,
++// so the server needs no material. A side without a patch holds no texel: it blocks bounce light and returns none.
++int TexelAt(vec3 P, vec3 d, uint prim) {
++  const vec3 n = cross(tris[3 * prim + 1].p - tris[3 * prim].p, tris[3 * prim + 2].p - tris[3 * prim].p);
++  const int id = dot(n, d) < 0.0 ? tris[3 * prim].patchId : tris[3 * prim + 1].patchId;
++  if (id < 0) return -1;
++  const Patch p = patches[id];
++  const vec3 r = P - p.origin;
++  const ivec2 c = clamp(ivec2(floor(vec2(dot(r, p.u), dot(r, p.v)))), ivec2(0), ivec2(p.nu, p.nv) - 1);
++  return patchMap[p.mapOffset + c.y * p.nu + c.x];
++}
++
++uint Pcg(uint v) {
++  uint s = v * 747796405u + 2891336453u;
++  uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
++  return (w >> 22u) ^ w;
++}
++
++void main() {
++  const uint i = gl_GlobalInvocationID.x + pc.texel0;
++  if (i >= pc.texels) return;
++  const vec3 P = texel[i].pos.xyz, N = texel[i].nrm.xyz;
++#if PASS == 0
++  // Ray r of texel i is the same every solve: the result is a fixed linear system, so a settled layer holds no noise in time.
++  const uint r = gl_GlobalInvocationID.y + pc.ray0;
++  if (r >= pc.rays) return;
++  const uint h1 = Pcg(i * pc.rays + r), h2 = Pcg(h1);
++  const float u1 = (float(h1 >> 8) + 0.5) / 16777216.0, phi = 6.2831853 * (float(h2 >> 8) + 0.5) / 16777216.0;
++  const vec3 T = normalize(cross(abs(N.y) < 0.9 ? vec3(0, 1, 0) : vec3(1, 0, 0), N)), B = cross(N, T);
++  const float rad = sqrt(u1);
++  const vec3 d = normalize(T * (rad * cos(phi)) + B * (rad * sin(phi)) + N * sqrt(1.0 - u1));
++  float t;
++  uint prim;
++  uint to = kNone;
++  if (Trace(P, d, 1e-3, 1e4, t, prim)) {
++    const int j = TexelAt(P + d * t, d, prim);
++    if (j >= 0) to = uint(j);
++  }
++  link[i * pc.rays + r] = to;
++#elif PASS == 1
++  if (any(lessThan(P, pc.boxMin.xyz)) || any(greaterThan(P, pc.boxMax.xyz))) {
++    direct[pc.lamp * pc.texels + i] = vec4(0.0);
++    return;
++  }
++  const vec3 L = pc.lampPos.xyz - P;
++  const float d2 = dot(L, L), c = dot(N, L) * inversesqrt(d2);
++  float share = 0.0;
++  if (c > 0.0) {
++    for (uint k = 0u; k < pc.shadowRays; k++) {  // a Fibonacci sphere on the lamp's ball
++      const float y = 1.0 - (2.0 * float(k) + 1.0) / float(pc.shadowRays), rr = sqrt(1.0 - y * y), a = 2.39996323 * float(k);
++      const vec3 e = pc.lampPos.xyz + pc.lampPos.w * vec3(rr * cos(a), y, rr * sin(a)) - P;
++      const float len = length(e);
++      float t;
++      uint prim;
++      if (!Trace(P, e / len, 1e-3, len - 1e-3, t, prim)) share += 1.0;
++    }
++    share /= float(pc.shadowRays);
++  }
++  direct[pc.lamp * pc.texels + i] = vec4(pc.lampCol.rgb * (max(c, 0.0) / d2 * share), share);
++#else
++  // Cosine-weighted rays: irradiance = the mean of the hit texels' albedo x (direct + the previous indirect).
++  const uint from = (pc.src * pc.lamps + pc.lamp) * pc.texels, to = ((1u - pc.src) * pc.lamps + pc.lamp) * pc.texels;
++  if (any(lessThan(P, pc.boxMin.xyz)) || any(greaterThan(P, pc.boxMax.xyz))) {
++    ind[to + i] = vec4(0.0, 0.0, 0.0, 1.0);
++    return;
++  }
++  vec3 sum = vec3(0.0);
++  for (uint r = 0u; r < pc.rays; r++) {
++    const uint j = link[i * pc.rays + r];
++    if (j != kNone) sum += texel[j].alb.rgb * (direct[pc.lamp * pc.texels + j].rgb + ind[from + j].rgb);
++  }
++  ind[to + i] = vec4(sum / float(pc.rays), 1.0);
++#endif
++}
+diff --git a/bridge/src/server/gi_worker.cpp b/bridge/src/server/gi_worker.cpp
+new file mode 100644
+index 00000000..3b4c1a09
+--- /dev/null
++++ b/bridge/src/server/gi_worker.cpp
+@@ -0,0 +1,1261 @@
++/*
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++#include "gi_worker.h"
++
++#include <algorithm>
++#include <chrono>
++#include <cmath>
++#include <condition_variable>
++#include <cstring>
++#include <deque>
++#include <mutex>
++#include <thread>
++#include <vector>
++
++#include <windows.h>
++#include <d3d9.h>
++
++#include <volk.h>
++
++#include "gi_bounce_spv.h"
++#include "gi_direct_rq_spv.h"
++#include "gi_direct_sw_spv.h"
++#include "gi_links_rq_spv.h"
++#include "gi_links_sw_spv.h"
++#include "gi_pattern_spv.h"
++#include "util_common.h"
++#include "util_gi.h"
++#include "config/config.h"
++#include "log/log.h"
++
++namespace gi {
++  namespace {
++    using bridge_util::GiSharedBlock;
++    using bridge_util::Logger;
++    using bridge_util::format_string;
++
++    std::mutex s_mutex;
++    std::condition_variable s_wake;
++    std::deque<std::shared_ptr<Job>> s_jobs;
++
++    bool hasExtension(const std::vector<VkExtensionProperties>& extensions, const char* pName) {
++      for (const auto& extension : extensions) {
++        if (strcmp(extension.extensionName, pName) == 0) {
++          return true;
++        }
++      }
++      return false;
++    }
++
++    class Device {
++    public:
++      // Creates the instance and device. Returns the level, or GiLevelNone with lastError set.
++      uint32_t create(VkInstance dxvkInstance, VkPhysicalDevice dxvkPhysicalDevice, uint32_t& capBits, int32_t& lastError);
++      VkResult run(Job& job);
++
++    private:
++      // The buffers of gi_solve.comp, in the order of its bindings 1 to 9.
++      enum : uint32_t { kTris, kCellStart, kCellTris, kTexels, kPatches, kPatchMap, kLinks, kDirect, kIndirect, kSolveBuffers };
++      enum : uint32_t { kPassLinks, kPassDirect, kPassBounce, kPassCount };
++      static constexpr uint64_t kMaxLinks = 128ull << 20;  // texels x rays, 512 MB of device memory
++      static constexpr size_t kMaxLamps = 256;
++
++      struct Buffer {
++        VkBuffer buffer = VK_NULL_HANDLE;
++        VkDeviceMemory memory = VK_NULL_HANDLE;
++        VkDeviceSize size = 0;
++      };
++      struct Push {  // gi_solve.comp PC
++        float lampPos[4];
++        float lampCol[4];
++        float boxMin[4];
++        float boxMax[4];
++        uint32_t texels, rays, lamp, src;
++        uint32_t shadowRays, lamps, texel0, ray0;
++        int32_t gx0, gz0, gw, gh;
++      };
++
++      VkResult createPipeline();
++      VkResult createSolvePipelines();
++      VkResult reserve(VkDeviceSize size);
++      void begin();
++      VkResult end(uint32_t* pGpuUs);
++      VkResult makeBuffer(VkDeviceSize size, VkBufferUsageFlags usage, Buffer& buffer);
++      VkResult makeBuffer(const void* pData, size_t size, VkBufferUsageFlags usage, Buffer& buffer);
++      void destroy(Buffer& buffer);
++      void destroyScene();
++      VkDeviceAddress address(const Buffer& buffer);
++      VkResult buildStructures(uint32_t triangles, uint32_t& gpuUs);
++      bool buildGrid(const bridge_util::GiSceneTriangle* pTriangles, uint32_t triangles, std::vector<uint32_t>& cellStart, std::vector<uint32_t>& cellTris);
++      VkResult allocateLamps();
++      VkResult runSliced(uint32_t pass, uint32_t rowsY, Job& job);
++      VkResult runPattern(Job& job);
++      VkResult setScene(Job& job);
++      VkResult setLamps(Job& job);
++      VkResult solve(Job& job);
++
++      VkInstance m_instance = VK_NULL_HANDLE;
++      VkPhysicalDevice m_physicalDevice = VK_NULL_HANDLE;
++      VkDevice m_device = VK_NULL_HANDLE;
++      VkQueue m_queue = VK_NULL_HANDLE;
++      uint32_t m_queueFamily = 0;
++      VkDescriptorSetLayout m_setLayout = VK_NULL_HANDLE;
++      VkPipelineLayout m_pipelineLayout = VK_NULL_HANDLE;
++      VkPipeline m_pipeline = VK_NULL_HANDLE;
++      VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
++      VkDescriptorSet m_set = VK_NULL_HANDLE;
++      VkCommandPool m_commandPool = VK_NULL_HANDLE;
++      VkCommandBuffer m_commandBuffer = VK_NULL_HANDLE;
++      VkFence m_fence = VK_NULL_HANDLE;
++      VkBuffer m_buffer = VK_NULL_HANDLE;
++      VkDeviceMemory m_memory = VK_NULL_HANDLE;
++      VkDeviceSize m_bufferSize = 0;
++      void* m_pMapped = nullptr;
++
++      bool m_rays = false;
++      uint32_t m_timestampBits = 0;
++      float m_timestampPeriod = 1.0f;
++      uint32_t m_sliceUs = 2000;
++      uint32_t m_sliceIdleUs = 0;
++      uint32_t m_sliceUnits[kPassCount] = { 16, 16, 16 };  // columns x rays a slice, adapted to the GPU budget
++      VkQueryPool m_queryPool = VK_NULL_HANDLE;
++      VkDescriptorSetLayout m_solveSetLayout = VK_NULL_HANDLE;
++      VkPipelineLayout m_solveLayout = VK_NULL_HANDLE;
++      VkPipeline m_solvePipelines[kPassCount] = {};
++      VkDescriptorPool m_solvePool = VK_NULL_HANDLE;
++      VkDescriptorSet m_solveSet = VK_NULL_HANDLE;
++
++      // The scene, the lamp table and what is solved of them. m_sceneSeq 0: no scene.
++      uint32_t m_sceneSeq = 0;
++      uint32_t m_bounces = 0;
++      Push m_push = {};
++      Buffer m_sceneBuffers[kSolveBuffers];
++      Buffer m_structureBuffers[5];
++      VkAccelerationStructureKHR m_structures[2] = {};
++      std::vector<uint32_t> m_pixels;
++      std::vector<bridge_util::GiLamp> m_lamps;
++      std::vector<uint8_t> m_directValid;
++      std::vector<int8_t> m_indirectHalf;  // the feedback half holding the lamp's settled bounces, -1: not solved
++    };
++
++    uint32_t Device::create(VkInstance dxvkInstance, VkPhysicalDevice dxvkPhysicalDevice, uint32_t& capBits, int32_t& lastError) {
++      VkResult result = volkInitialize();
++      if (result != VK_SUCCESS) {
++        lastError = result;
++        return bridge_util::GiLevelNone;
++      }
++
++      // DXVK's GPU by its deviceUUID, read through DXVK's own instance.
++      uint8_t dxvkUuid[VK_UUID_SIZE];
++      const uint8_t* pDxvkDeviceUuid = nullptr;
++      const auto pfnProperties2 = dxvkInstance != VK_NULL_HANDLE
++        ? (PFN_vkGetPhysicalDeviceProperties2) vkGetInstanceProcAddr(dxvkInstance, "vkGetPhysicalDeviceProperties2")
++        : nullptr;
++      if (pfnProperties2 != nullptr) {
++        VkPhysicalDeviceIDProperties ids { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES };
++        VkPhysicalDeviceProperties2 properties { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &ids };
++        pfnProperties2(dxvkPhysicalDevice, &properties);
++        memcpy(dxvkUuid, ids.deviceUUID, VK_UUID_SIZE);
++        pDxvkDeviceUuid = dxvkUuid;
++      }
++
++      VkApplicationInfo application { VK_STRUCTURE_TYPE_APPLICATION_INFO };
++      application.pApplicationName = "NvRemixBridge GI";
++      application.apiVersion = VK_API_VERSION_1_2;
++      VkInstanceCreateInfo instanceInfo { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
++      instanceInfo.pApplicationInfo = &application;
++      result = vkCreateInstance(&instanceInfo, nullptr, &m_instance);
++      if (result != VK_SUCCESS) {
++        lastError = result;
++        return bridge_util::GiLevelNone;
++      }
++      volkLoadInstanceOnly(m_instance);
++
++      // The GPU DXVK renders on, else the first discrete one, else the first one.
++      uint32_t count = 0;
++      vkEnumeratePhysicalDevices(m_instance, &count, nullptr);
++      std::vector<VkPhysicalDevice> physicalDevices(count);
++      vkEnumeratePhysicalDevices(m_instance, &count, physicalDevices.data());
++      VkPhysicalDevice discrete = VK_NULL_HANDLE;
++      for (VkPhysicalDevice physicalDevice : physicalDevices) {
++        VkPhysicalDeviceIDProperties ids { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES };
++        VkPhysicalDeviceProperties2 properties { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &ids };
++        vkGetPhysicalDeviceProperties2(physicalDevice, &properties);
++        if (pDxvkDeviceUuid != nullptr && memcmp(ids.deviceUUID, pDxvkDeviceUuid, VK_UUID_SIZE) == 0) {
++          m_physicalDevice = physicalDevice;
++          capBits |= bridge_util::GiCapMatchedDxvkDevice;
++          break;
++        }
++        if (discrete == VK_NULL_HANDLE && properties.properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
++          discrete = physicalDevice;
++        }
++      }
++      if (m_physicalDevice == VK_NULL_HANDLE) {
++        m_physicalDevice = discrete != VK_NULL_HANDLE ? discrete : (count ? physicalDevices[0] : VK_NULL_HANDLE);
++      }
++      if (m_physicalDevice == VK_NULL_HANDLE) {
++        lastError = VK_ERROR_INITIALIZATION_FAILED;
++        return bridge_util::GiLevelNone;
++      }
++      VkPhysicalDeviceProperties properties;
++      vkGetPhysicalDeviceProperties(m_physicalDevice, &properties);
++
++      vkGetPhysicalDeviceQueueFamilyProperties(m_physicalDevice, &count, nullptr);
++      std::vector<VkQueueFamilyProperties> families(count);
++      vkGetPhysicalDeviceQueueFamilyProperties(m_physicalDevice, &count, families.data());
++      m_queueFamily = count;
++      for (uint32_t i = 0; i < count; ++i) {
++        // A compute-only family, when there is one, keeps the worker off the graphics queue DXVK uses.
++        if ((families[i].queueFlags & VK_QUEUE_COMPUTE_BIT) &&
++            (m_queueFamily == count || !(families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT))) {
++          m_queueFamily = i;
++        }
++      }
++      if (m_queueFamily == count) {
++        lastError = VK_ERROR_FEATURE_NOT_PRESENT;
++        return bridge_util::GiLevelNone;
++      }
++
++      // Rays when the GPU has ray query and acceleration structures. R-04's kernel uses them.
++      vkEnumerateDeviceExtensionProperties(m_physicalDevice, nullptr, &count, nullptr);
++      std::vector<VkExtensionProperties> extensions(count);
++      vkEnumerateDeviceExtensionProperties(m_physicalDevice, nullptr, &count, extensions.data());
++      VkPhysicalDeviceRayQueryFeaturesKHR rayQuery { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR };
++      VkPhysicalDeviceAccelerationStructureFeaturesKHR accelerationStructure { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, &rayQuery };
++      VkPhysicalDeviceVulkan12Features vulkan12 { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, &accelerationStructure };
++      VkPhysicalDeviceFeatures2 features { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &vulkan12 };
++      const bool rayExtensions = properties.apiVersion >= VK_API_VERSION_1_2 &&
++        hasExtension(extensions, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
++        hasExtension(extensions, VK_KHR_RAY_QUERY_EXTENSION_NAME) &&
++        hasExtension(extensions, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
++      if (rayExtensions) {
++        vkGetPhysicalDeviceFeatures2(m_physicalDevice, &features);
++      }
++      // server.giMaxLevel = 1 keeps a GPU with ray queries on the compute level, for parity checks.
++      const bool rays = rayExtensions && rayQuery.rayQuery && accelerationStructure.accelerationStructure &&
++        vulkan12.bufferDeviceAddress && bridge_util::Config::getOption<uint32_t>("server.giMaxLevel", 2) >= 2;
++      m_rays = rays;
++      m_timestampBits = families[m_queueFamily].timestampValidBits;
++      m_timestampPeriod = properties.limits.timestampPeriod;
++      m_sliceUs = std::max<uint32_t>(bridge_util::Config::getOption<uint32_t>("server.giSliceUs", 2000), 50);
++      m_sliceIdleUs = bridge_util::Config::getOption<uint32_t>("server.giSliceIdleUs", 0);
++
++      const float priority = 0.0f;
++      VkDeviceQueueCreateInfo queueInfo { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
++      queueInfo.queueFamilyIndex = m_queueFamily;
++      queueInfo.queueCount = 1;
++      queueInfo.pQueuePriorities = &priority;
++      const char* rayExtensionNames[] = { VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, VK_KHR_RAY_QUERY_EXTENSION_NAME,
++                                          VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME };
++      VkDeviceCreateInfo deviceInfo { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
++      deviceInfo.queueCreateInfoCount = 1;
++      deviceInfo.pQueueCreateInfos = &queueInfo;
++      if (rays) {
++        // Only the features rays need, so the device costs no more than it must.
++        VkPhysicalDeviceRayQueryFeaturesKHR enabledRayQuery { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR };
++        enabledRayQuery.rayQuery = VK_TRUE;
++        VkPhysicalDeviceAccelerationStructureFeaturesKHR enabledAs { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR, &enabledRayQuery };
++        enabledAs.accelerationStructure = VK_TRUE;
++        VkPhysicalDeviceVulkan12Features enabled12 { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, &enabledAs };
++        enabled12.bufferDeviceAddress = VK_TRUE;
++        deviceInfo.pNext = &enabled12;
++        deviceInfo.enabledExtensionCount = 3;
++        deviceInfo.ppEnabledExtensionNames = rayExtensionNames;
++        result = vkCreateDevice(m_physicalDevice, &deviceInfo, nullptr, &m_device);
++      } else {
++        result = vkCreateDevice(m_physicalDevice, &deviceInfo, nullptr, &m_device);
++      }
++      if (result != VK_SUCCESS) {
++        lastError = result;
++        return bridge_util::GiLevelNone;
++      }
++      volkLoadDevice(m_device);
++      vkGetDeviceQueue(m_device, m_queueFamily, 0, &m_queue);
++      result = createPipeline();
++      if (result != VK_SUCCESS) {
++        lastError = result;
++        return bridge_util::GiLevelNone;
++      }
++      if (rays) {
++        capBits |= bridge_util::GiCapRayQuery | bridge_util::GiCapAccelerationStructure;
++      }
++      Logger::info(format_string("[Gi] Worker device: %s, queue family %u, %s, %s, GPU slices of %u us.", properties.deviceName, m_queueFamily,
++                                 rays ? "rays" : "compute only",
++                                 (capBits & bridge_util::GiCapMatchedDxvkDevice) ? "same GPU as DXVK" : "GPU not matched to DXVK", m_sliceUs));
++      return rays ? bridge_util::GiLevelRays : bridge_util::GiLevelCompute;
++    }
++
++    VkResult Device::createPipeline() {
++      VkDescriptorSetLayoutBinding binding { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT };
++      VkDescriptorSetLayoutCreateInfo setLayoutInfo { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
++      setLayoutInfo.bindingCount = 1;
++      setLayoutInfo.pBindings = &binding;
++      VkResult result = vkCreateDescriptorSetLayout(m_device, &setLayoutInfo, nullptr, &m_setLayout);
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      VkPushConstantRange pushRange { VK_SHADER_STAGE_COMPUTE_BIT, 0, 5 * sizeof(uint32_t) };
++      VkPipelineLayoutCreateInfo layoutInfo { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
++      layoutInfo.setLayoutCount = 1;
++      layoutInfo.pSetLayouts = &m_setLayout;
++      layoutInfo.pushConstantRangeCount = 1;
++      layoutInfo.pPushConstantRanges = &pushRange;
++      result = vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &m_pipelineLayout);
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      VkShaderModuleCreateInfo moduleInfo { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
++      moduleInfo.codeSize = sizeof(g_giPatternSpv);
++      moduleInfo.pCode = g_giPatternSpv;
++      VkShaderModule module = VK_NULL_HANDLE;
++      result = vkCreateShaderModule(m_device, &moduleInfo, nullptr, &module);
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      VkComputePipelineCreateInfo pipelineInfo { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
++      pipelineInfo.stage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_COMPUTE_BIT, module, "main" };
++      pipelineInfo.layout = m_pipelineLayout;
++      result = vkCreateComputePipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_pipeline);
++      vkDestroyShaderModule(m_device, module, nullptr);
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      VkDescriptorPoolSize poolSize { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 };
++      VkDescriptorPoolCreateInfo poolInfo { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
++      poolInfo.maxSets = 1;
++      poolInfo.poolSizeCount = 1;
++      poolInfo.pPoolSizes = &poolSize;
++      result = vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool);
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      VkDescriptorSetAllocateInfo setInfo { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
++      setInfo.descriptorPool = m_descriptorPool;
++      setInfo.descriptorSetCount = 1;
++      setInfo.pSetLayouts = &m_setLayout;
++      result = vkAllocateDescriptorSets(m_device, &setInfo, &m_set);
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      VkCommandPoolCreateInfo commandPoolInfo { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
++      commandPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
++      commandPoolInfo.queueFamilyIndex = m_queueFamily;
++      result = vkCreateCommandPool(m_device, &commandPoolInfo, nullptr, &m_commandPool);
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      VkCommandBufferAllocateInfo commandBufferInfo { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
++      commandBufferInfo.commandPool = m_commandPool;
++      commandBufferInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
++      commandBufferInfo.commandBufferCount = 1;
++      result = vkAllocateCommandBuffers(m_device, &commandBufferInfo, &m_commandBuffer);
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      VkFenceCreateInfo fenceInfo { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
++      result = vkCreateFence(m_device, &fenceInfo, nullptr, &m_fence);
++      return result == VK_SUCCESS ? createSolvePipelines() : result;
++    }
++
++    // Grows the host-visible result buffer. Host-cached memory is preferred, since the worker reads it back.
++    VkResult Device::reserve(VkDeviceSize size) {
++      if (size <= m_bufferSize) {
++        return VK_SUCCESS;
++      }
++      if (m_buffer != VK_NULL_HANDLE) {
++        vkDestroyBuffer(m_device, m_buffer, nullptr);
++        vkFreeMemory(m_device, m_memory, nullptr);
++        m_buffer = VK_NULL_HANDLE;
++        m_memory = VK_NULL_HANDLE;
++        m_bufferSize = 0;
++      }
++      VkBufferCreateInfo bufferInfo { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
++      bufferInfo.size = size;
++      bufferInfo.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
++      VkResult result = vkCreateBuffer(m_device, &bufferInfo, nullptr, &m_buffer);
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      VkMemoryRequirements requirements;
++      vkGetBufferMemoryRequirements(m_device, m_buffer, &requirements);
++      VkPhysicalDeviceMemoryProperties memoryProperties;
++      vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memoryProperties);
++      const VkMemoryPropertyFlags wanted[] = {
++        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT,
++        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT };
++      uint32_t typeIndex = memoryProperties.memoryTypeCount;
++      for (VkMemoryPropertyFlags flags : wanted) {
++        for (uint32_t i = 0; i < memoryProperties.memoryTypeCount && typeIndex == memoryProperties.memoryTypeCount; ++i) {
++          if ((requirements.memoryTypeBits & (1u << i)) && (memoryProperties.memoryTypes[i].propertyFlags & flags) == flags) {
++            typeIndex = i;
++          }
++        }
++      }
++      if (typeIndex == memoryProperties.memoryTypeCount) {
++        return VK_ERROR_OUT_OF_HOST_MEMORY;
++      }
++      VkMemoryAllocateInfo allocateInfo { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
++      allocateInfo.allocationSize = requirements.size;
++      allocateInfo.memoryTypeIndex = typeIndex;
++      result = vkAllocateMemory(m_device, &allocateInfo, nullptr, &m_memory);
++      if (result == VK_SUCCESS) {
++        result = vkBindBufferMemory(m_device, m_buffer, m_memory, 0);
++      }
++      if (result == VK_SUCCESS) {
++        result = vkMapMemory(m_device, m_memory, 0, VK_WHOLE_SIZE, 0, &m_pMapped);
++      }
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      m_bufferSize = size;
++      VkDescriptorBufferInfo bufferDescriptor { m_buffer, 0, VK_WHOLE_SIZE };
++      VkWriteDescriptorSet write { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
++      write.dstSet = m_set;
++      write.descriptorCount = 1;
++      write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
++      write.pBufferInfo = &bufferDescriptor;
++      vkUpdateDescriptorSets(m_device, 1, &write, 0, nullptr);
++      return VK_SUCCESS;
++    }
++
++    // Starts the worker's command buffer, with the first GPU timestamp when the queue has them.
++    void Device::begin() {
++      VkCommandBufferBeginInfo beginInfo { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
++      beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
++      vkBeginCommandBuffer(m_commandBuffer, &beginInfo);
++      if (m_timestampBits) {
++        vkCmdResetQueryPool(m_commandBuffer, m_queryPool, 0, 2);
++        vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, m_queryPool, 0);
++      }
++    }
++
++    // Submits the command buffer and waits for it. The time is the GPU's own between the two timestamps,
++    // or submit to fence on a queue without timestamps.
++    VkResult Device::end(uint32_t* pGpuUs) {
++      if (m_timestampBits) {
++        vkCmdWriteTimestamp(m_commandBuffer, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, m_queryPool, 1);
++      }
++      vkEndCommandBuffer(m_commandBuffer);
++      VkSubmitInfo submit { VK_STRUCTURE_TYPE_SUBMIT_INFO };
++      submit.commandBufferCount = 1;
++      submit.pCommandBuffers = &m_commandBuffer;
++      vkResetFences(m_device, 1, &m_fence);
++      const auto start = std::chrono::steady_clock::now();
++      VkResult result = vkQueueSubmit(m_queue, 1, &submit, m_fence);
++      if (result == VK_SUCCESS) {
++        result = vkWaitForFences(m_device, 1, &m_fence, VK_TRUE, 2'000'000'000ull);
++      }
++      if (result != VK_SUCCESS) {
++        return result == VK_TIMEOUT ? VK_ERROR_DEVICE_LOST : result;
++      }
++      uint32_t us = uint32_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count());
++      uint64_t ticks[2] = {};
++      if (m_timestampBits &&
++          vkGetQueryPoolResults(m_device, m_queryPool, 0, 2, sizeof(ticks), ticks, sizeof(uint64_t), VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
++        const uint64_t mask = m_timestampBits >= 64 ? ~0ull : (1ull << m_timestampBits) - 1;
++        us = uint32_t(double((ticks[1] - ticks[0]) & mask) * m_timestampPeriod / 1000.0);
++      }
++      if (pGpuUs != nullptr) {
++        *pGpuUs = us;
++      }
++      return VK_SUCCESS;
++    }
++
++    // The prototype's pattern pass: one dispatch for the whole target, kept for solves without a scene.
++    VkResult Device::runPattern(Job& job) {
++      const uint32_t bytesPerTexel = job.format == TexelFormat::Rgba16f ? 8 : 4;
++      const VkDeviceSize size = VkDeviceSize(job.width) * job.height * bytesPerTexel;
++      VkResult result = reserve(size);
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      begin();
++      vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipeline);
++      vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineLayout, 0, 1, &m_set, 0, nullptr);
++      const uint32_t pass[5] = { job.width, job.height, job.layer, job.seq, uint32_t(job.format) };
++      vkCmdPushConstants(m_commandBuffer, m_pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pass), pass);
++      vkCmdDispatch(m_commandBuffer, (job.width + 7) / 8, (job.height + 7) / 8, 1);
++      VkMemoryBarrier barrier { VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT };
++      vkCmdPipelineBarrier(m_commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
++      result = end(&job.gpuUs);
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      job.texels.resize(size_t(size));
++      memcpy(job.texels.data(), m_pMapped, size_t(size));
++      return VK_SUCCESS;
++    }
++
++    VkResult Device::createSolvePipelines() {
++      VkQueryPoolCreateInfo queryInfo { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
++      queryInfo.queryType = VK_QUERY_TYPE_TIMESTAMP;
++      queryInfo.queryCount = 2;
++      if (m_timestampBits && vkCreateQueryPool(m_device, &queryInfo, nullptr, &m_queryPool) != VK_SUCCESS) {
++        m_timestampBits = 0;
++      }
++
++      // Binding 0 is the acceleration structure, at the rays level only. Bindings 1 to 9 are the buffers of gi_solve.comp.
++      std::vector<VkDescriptorSetLayoutBinding> bindings;
++      if (m_rays) {
++        bindings.push_back({ 0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1, VK_SHADER_STAGE_COMPUTE_BIT });
++      }
++      for (uint32_t i = 1; i <= kSolveBuffers; ++i) {
++        bindings.push_back({ i, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT });
++      }
++      VkDescriptorSetLayoutCreateInfo setLayoutInfo { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
++      setLayoutInfo.bindingCount = uint32_t(bindings.size());
++      setLayoutInfo.pBindings = bindings.data();
++      VkResult result = vkCreateDescriptorSetLayout(m_device, &setLayoutInfo, nullptr, &m_solveSetLayout);
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      VkPushConstantRange pushRange { VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(Push) };
++      VkPipelineLayoutCreateInfo layoutInfo { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
++      layoutInfo.setLayoutCount = 1;
++      layoutInfo.pSetLayouts = &m_solveSetLayout;
++      layoutInfo.pushConstantRangeCount = 1;
++      layoutInfo.pPushConstantRanges = &pushRange;
++      result = vkCreatePipelineLayout(m_device, &layoutInfo, nullptr, &m_solveLayout);
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      const struct { const uint32_t* pCode; size_t size; } shaders[kPassCount] = {
++        { m_rays ? g_giLinksRqSpv : g_giLinksSwSpv, m_rays ? sizeof(g_giLinksRqSpv) : sizeof(g_giLinksSwSpv) },
++        { m_rays ? g_giDirectRqSpv : g_giDirectSwSpv, m_rays ? sizeof(g_giDirectRqSpv) : sizeof(g_giDirectSwSpv) },
++        { g_giBounceSpv, sizeof(g_giBounceSpv) } };
++      for (uint32_t i = 0; i < kPassCount; ++i) {
++        VkShaderModuleCreateInfo moduleInfo { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
++        moduleInfo.codeSize = shaders[i].size;
++        moduleInfo.pCode = shaders[i].pCode;
++        VkShaderModule module = VK_NULL_HANDLE;
++        result = vkCreateShaderModule(m_device, &moduleInfo, nullptr, &module);
++        if (result != VK_SUCCESS) {
++          return result;
++        }
++        VkComputePipelineCreateInfo pipelineInfo { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
++        pipelineInfo.stage = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_COMPUTE_BIT, module, "main" };
++        pipelineInfo.layout = m_solveLayout;
++        result = vkCreateComputePipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_solvePipelines[i]);
++        vkDestroyShaderModule(m_device, module, nullptr);
++        if (result != VK_SUCCESS) {
++          return result;
++        }
++      }
++      const VkDescriptorPoolSize poolSizes[2] = { { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, kSolveBuffers },
++                                                  { VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 1 } };
++      VkDescriptorPoolCreateInfo poolInfo { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
++      poolInfo.maxSets = 1;
++      poolInfo.poolSizeCount = m_rays ? 2 : 1;
++      poolInfo.pPoolSizes = poolSizes;
++      result = vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_solvePool);
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      VkDescriptorSetAllocateInfo setInfo { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
++      setInfo.descriptorPool = m_solvePool;
++      setInfo.descriptorSetCount = 1;
++      setInfo.pSetLayouts = &m_solveSetLayout;
++      return vkAllocateDescriptorSets(m_device, &setInfo, &m_solveSet);
++    }
++
++    // A buffer in device memory: a shader reading host memory runs the gathers many times slower.
++    VkResult Device::makeBuffer(VkDeviceSize size, VkBufferUsageFlags usage, Buffer& buffer) {
++      buffer.size = std::max<VkDeviceSize>(size, 16);
++      VkBufferCreateInfo bufferInfo { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
++      bufferInfo.size = buffer.size;
++      bufferInfo.usage = usage | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT |
++        (m_rays ? VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT : 0);
++      VkResult result = vkCreateBuffer(m_device, &bufferInfo, nullptr, &buffer.buffer);
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      VkMemoryRequirements requirements;
++      vkGetBufferMemoryRequirements(m_device, buffer.buffer, &requirements);
++      VkPhysicalDeviceMemoryProperties memoryProperties;
++      vkGetPhysicalDeviceMemoryProperties(m_physicalDevice, &memoryProperties);
++      uint32_t typeIndex = memoryProperties.memoryTypeCount;
++      for (uint32_t i = 0; i < memoryProperties.memoryTypeCount && typeIndex == memoryProperties.memoryTypeCount; ++i) {
++        if ((requirements.memoryTypeBits & (1u << i)) && (memoryProperties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
++          typeIndex = i;
++        }
++      }
++      if (typeIndex == memoryProperties.memoryTypeCount) {
++        return VK_ERROR_OUT_OF_DEVICE_MEMORY;
++      }
++      VkMemoryAllocateFlagsInfo flagsInfo { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO };
++      flagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
++      VkMemoryAllocateInfo allocateInfo { VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, m_rays ? &flagsInfo : nullptr };
++      allocateInfo.allocationSize = requirements.size;
++      allocateInfo.memoryTypeIndex = typeIndex;
++      result = vkAllocateMemory(m_device, &allocateInfo, nullptr, &buffer.memory);
++      if (result == VK_SUCCESS) {
++        result = vkBindBufferMemory(m_device, buffer.buffer, buffer.memory, 0);
++      }
++      return result;
++    }
++
++    // A device buffer holding the data, copied through the host buffer.
++    VkResult Device::makeBuffer(const void* pData, size_t size, VkBufferUsageFlags usage, Buffer& buffer) {
++      VkResult result = makeBuffer(size, usage, buffer);
++      if (result == VK_SUCCESS) {
++        result = reserve(buffer.size);
++      }
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      memset(m_pMapped, 0, size_t(buffer.size));
++      memcpy(m_pMapped, pData, size);
++      begin();
++      const VkBufferCopy all { 0, 0, buffer.size };
++      vkCmdCopyBuffer(m_commandBuffer, m_buffer, buffer.buffer, 1, &all);
++      return end(nullptr);
++    }
++
++    void Device::destroy(Buffer& buffer) {
++      if (buffer.buffer != VK_NULL_HANDLE) {
++        vkDestroyBuffer(m_device, buffer.buffer, nullptr);
++      }
++      if (buffer.memory != VK_NULL_HANDLE) {
++        vkFreeMemory(m_device, buffer.memory, nullptr);
++      }
++      buffer = Buffer();
++    }
++
++    void Device::destroyScene() {
++      for (VkAccelerationStructureKHR structure : m_structures) {
++        if (structure != VK_NULL_HANDLE) {
++          vkDestroyAccelerationStructureKHR(m_device, structure, nullptr);
++        }
++      }
++      m_structures[0] = m_structures[1] = VK_NULL_HANDLE;
++      for (Buffer& buffer : m_sceneBuffers) {
++        destroy(buffer);
++      }
++      for (Buffer& buffer : m_structureBuffers) {
++        destroy(buffer);
++      }
++      m_sceneSeq = 0;
++    }
++
++    VkDeviceAddress Device::address(const Buffer& buffer) {
++      VkBufferDeviceAddressInfo info { VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO };
++      info.buffer = buffer.buffer;
++      return vkGetBufferDeviceAddress(m_device, &info);
++    }
++
++    // One bottom-level structure over the scene's triangles and a top level with its one instance.
++    // shortcut: built in one submit of a few milliseconds for a 10 k triangle proxy; slice it by geometry when scenes grow.
++    VkResult Device::buildStructures(uint32_t triangles, uint32_t& gpuUs) {
++      for (uint32_t level = 0; level < 2; ++level) {
++        VkAccelerationStructureGeometryKHR geometry { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR };
++        geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
++        uint32_t count = triangles;
++        if (level == 0) {
++          geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
++          geometry.geometry.triangles = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR };
++          geometry.geometry.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
++          geometry.geometry.triangles.vertexStride = 16;
++          geometry.geometry.triangles.vertexData.deviceAddress = address(m_sceneBuffers[kTris]);
++          geometry.geometry.triangles.maxVertex = triangles * 3 - 1;
++          geometry.geometry.triangles.indexType = VK_INDEX_TYPE_NONE_KHR;
++        } else {
++          VkAccelerationStructureDeviceAddressInfoKHR addressInfo { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR };
++          addressInfo.accelerationStructure = m_structures[0];
++          VkAccelerationStructureInstanceKHR instance = {};
++          instance.transform.matrix[0][0] = instance.transform.matrix[1][1] = instance.transform.matrix[2][2] = 1.0f;
++          instance.mask = 0xFF;
++          instance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
++          instance.accelerationStructureReference = vkGetAccelerationStructureDeviceAddressKHR(m_device, &addressInfo);
++          const VkResult result = makeBuffer(&instance, sizeof(instance), VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR, m_structureBuffers[4]);
++          if (result != VK_SUCCESS) {
++            return result;
++          }
++          geometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
++          geometry.geometry.instances = { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR };
++          geometry.geometry.instances.data.deviceAddress = address(m_structureBuffers[4]);
++          count = 1;
++        }
++        VkAccelerationStructureBuildGeometryInfoKHR buildInfo { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
++        buildInfo.type = level == 0 ? VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR : VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
++        buildInfo.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
++        buildInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
++        buildInfo.geometryCount = 1;
++        buildInfo.pGeometries = &geometry;
++        VkAccelerationStructureBuildSizesInfoKHR sizes { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR };
++        vkGetAccelerationStructureBuildSizesKHR(m_device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &buildInfo, &count, &sizes);
++        Buffer& store = m_structureBuffers[level * 2];
++        Buffer& scratch = m_structureBuffers[level * 2 + 1];
++        VkResult result = makeBuffer(sizes.accelerationStructureSize, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR, store);
++        if (result == VK_SUCCESS) {
++          result = makeBuffer(sizes.buildScratchSize + 256, 0, scratch);
++        }
++        if (result != VK_SUCCESS) {
++          return result;
++        }
++        VkAccelerationStructureCreateInfoKHR createInfo { VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR };
++        createInfo.buffer = store.buffer;
++        createInfo.size = sizes.accelerationStructureSize;
++        createInfo.type = buildInfo.type;
++        result = vkCreateAccelerationStructureKHR(m_device, &createInfo, nullptr, &m_structures[level]);
++        if (result != VK_SUCCESS) {
++          return result;
++        }
++        buildInfo.dstAccelerationStructure = m_structures[level];
++        buildInfo.scratchData.deviceAddress = (address(scratch) + 255) & ~VkDeviceAddress(255);  // The scratch alignment is at most 256.
++        const VkAccelerationStructureBuildRangeInfoKHR range { count, 0, 0, 0 };
++        const VkAccelerationStructureBuildRangeInfoKHR* pRange = &range;
++        begin();
++        vkCmdBuildAccelerationStructuresKHR(m_commandBuffer, 1, &buildInfo, &pRange);
++        uint32_t us = 0;
++        result = end(&us);
++        if (result != VK_SUCCESS) {
++          return result;
++        }
++        gpuUs += us;
++        destroy(scratch);
++      }
++      return VK_SUCCESS;
++    }
++
++    // The 1 m grid over x and z the compute level walks: cell c holds cellTris[cellStart[c] .. cellStart[c + 1]).
++    // Returns false when the scene is wider than the grid allows.
++    bool Device::buildGrid(const bridge_util::GiSceneTriangle* pTriangles, uint32_t triangles, std::vector<uint32_t>& cellStart, std::vector<uint32_t>& cellTris) {
++      float lowX = 1e30f, highX = -1e30f, lowZ = 1e30f, highZ = -1e30f;
++      for (uint32_t i = 0; i < triangles; ++i) {
++        for (const auto& vertex : pTriangles[i].v) {
++          lowX = std::min(lowX, vertex[0]);
++          highX = std::max(highX, vertex[0]);
++          lowZ = std::min(lowZ, vertex[2]);
++          highZ = std::max(highZ, vertex[2]);
++        }
++      }
++      if (!(highX - lowX < 2000.0f && highZ - lowZ < 2000.0f && std::fabs(lowX) < 1e6f && std::fabs(lowZ) < 1e6f)) {
++        return false;
++      }
++      m_push.gx0 = int32_t(std::floor(lowX)) - 1;
++      m_push.gz0 = int32_t(std::floor(lowZ)) - 1;
++      m_push.gw = int32_t(std::floor(highX)) - m_push.gx0 + 2;
++      m_push.gh = int32_t(std::floor(highZ)) - m_push.gz0 + 2;
++      const size_t cells = size_t(m_push.gw) * m_push.gh;
++      cellStart.assign(cells + 1, 0);
++      const auto range = [&](const bridge_util::GiSceneTriangle& triangle, int32_t cell[4]) {
++        float low[2] = { 1e30f, 1e30f }, high[2] = { -1e30f, -1e30f };
++        for (const auto& vertex : triangle.v) {
++          low[0] = std::min(low[0], vertex[0]);
++          high[0] = std::max(high[0], vertex[0]);
++          low[1] = std::min(low[1], vertex[2]);
++          high[1] = std::max(high[1], vertex[2]);
++        }
++        cell[0] = std::clamp(int32_t(std::floor(low[0] - 1e-3f)) - m_push.gx0, 0, m_push.gw - 1);
++        cell[1] = std::clamp(int32_t(std::floor(high[0] + 1e-3f)) - m_push.gx0, 0, m_push.gw - 1);
++        cell[2] = std::clamp(int32_t(std::floor(low[1] - 1e-3f)) - m_push.gz0, 0, m_push.gh - 1);
++        cell[3] = std::clamp(int32_t(std::floor(high[1] + 1e-3f)) - m_push.gz0, 0, m_push.gh - 1);
++      };
++      // Two rounds: the first counts a cell's triangles, the second fills them in.
++      for (int round = 0; round < 2; ++round) {
++        std::vector<uint32_t> fill(cellStart.begin(), cellStart.end() - 1);
++        for (uint32_t i = 0; i < triangles; ++i) {
++          int32_t cell[4];
++          range(pTriangles[i], cell);
++          for (int32_t z = cell[2]; z <= cell[3]; ++z) {
++            for (int32_t x = cell[0]; x <= cell[1]; ++x) {
++              const size_t c = size_t(z) * m_push.gw + x;
++              if (round == 0) {
++                ++cellStart[c + 1];
++              } else {
++                cellTris[fill[c]++] = i;
++              }
++            }
++          }
++        }
++        if (round == 0) {
++          for (size_t c = 0; c < cells; ++c) {
++            cellStart[c + 1] += cellStart[c];
++          }
++          cellTris.assign(std::max<size_t>(cellStart[cells], 1), 0);
++        }
++      }
++      return true;
++    }
++
++    // The direct and indirect buffers of every lamp, for the scene's texel count. No lamp's layer is valid afterwards.
++    VkResult Device::allocateLamps() {
++      destroy(m_sceneBuffers[kDirect]);
++      destroy(m_sceneBuffers[kIndirect]);
++      const VkDeviceSize layer = VkDeviceSize(m_push.texels) * 16;
++      const uint32_t lamps = std::max<uint32_t>(uint32_t(m_lamps.size()), 1);
++      m_push.lamps = lamps;
++      m_directValid.assign(lamps, 0);
++      m_indirectHalf.assign(lamps, -1);
++      VkResult result = makeBuffer(layer * lamps, 0, m_sceneBuffers[kDirect]);
++      if (result == VK_SUCCESS) {
++        result = makeBuffer(layer * lamps * 2, 0, m_sceneBuffers[kIndirect]);
++      }
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      VkDescriptorBufferInfo bufferInfos[kSolveBuffers];
++      std::vector<VkWriteDescriptorSet> writes;
++      for (uint32_t i = 0; i < kSolveBuffers; ++i) {
++        bufferInfos[i] = { m_sceneBuffers[i].buffer, 0, VK_WHOLE_SIZE };
++        VkWriteDescriptorSet write { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
++        write.dstSet = m_solveSet;
++        write.dstBinding = i + 1;
++        write.descriptorCount = 1;
++        write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
++        write.pBufferInfo = &bufferInfos[i];
++        writes.push_back(write);
++      }
++      VkWriteDescriptorSetAccelerationStructureKHR structureWrite { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR };
++      structureWrite.accelerationStructureCount = 1;
++      structureWrite.pAccelerationStructures = &m_structures[1];
++      if (m_rays) {
++        VkWriteDescriptorSet write { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, &structureWrite };
++        write.dstSet = m_solveSet;
++        write.dstBinding = 0;
++        write.descriptorCount = 1;
++        write.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
++        writes.push_back(write);
++      }
++      vkUpdateDescriptorSets(m_device, uint32_t(writes.size()), writes.data(), 0, nullptr);
++      return VK_SUCCESS;
++    }
++
++    // Runs a pass over groupsX columns of 64 texels and rowsY rays in slices of about the GPU budget each.
++    // A slice is whole columns, or a run of rays of one column when a column is over the budget.
++    // The slice size follows the measured GPU time. Returns VK_NOT_READY when the job was cancelled between slices.
++    VkResult Device::runSliced(uint32_t pass, uint32_t rowsY, Job& job) {
++      const uint32_t groupsX = (m_push.texels + 63) / 64;
++      uint32_t& units = m_sliceUnits[pass];
++      for (uint32_t x = 0, y = 0; x < groupsX;) {
++        if (job.cancelled.load(std::memory_order_acquire)) {
++          return VK_NOT_READY;
++        }
++        uint32_t columns = 1;
++        uint32_t rows = std::min(units, rowsY - y);
++        if (y == 0 && units >= rowsY) {
++          columns = std::min(units / rowsY, groupsX - x);
++          rows = rowsY;
++        }
++        m_push.texel0 = x * 64;
++        m_push.ray0 = y;
++        begin();
++        vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_solvePipelines[pass]);
++        vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_solveLayout, 0, 1, &m_solveSet, 0, nullptr);
++        vkCmdPushConstants(m_commandBuffer, m_solveLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(m_push), &m_push);
++        vkCmdDispatch(m_commandBuffer, columns, rows, 1);
++        uint32_t us = 0;
++        const VkResult result = end(&us);
++        if (result != VK_SUCCESS) {
++          return result;
++        }
++        job.gpuUs += us;
++        job.slices += 1;
++        job.sliceUsMax = std::max(job.sliceUsMax, us);
++        if (y == 0 && rows == rowsY) {
++          x += columns;
++        } else if ((y += rows) == rowsY) {
++          y = 0;
++          x += 1;
++        }
++        // At most double or halve a slice, so one odd timestamp does not swing the size.
++        const uint64_t wanted = uint64_t(columns) * rows * m_sliceUs / std::max<uint32_t>(us, 1);
++        units = uint32_t(std::clamp<uint64_t>(wanted, std::max<uint32_t>(units / 2, 1), std::min<uint64_t>(uint64_t(units) * 2, 1u << 24)));
++        if (m_sliceIdleUs) {
++          std::this_thread::sleep_for(std::chrono::microseconds(m_sliceIdleUs));
++        }
++      }
++      return VK_SUCCESS;
++    }
++
++    // GiSubmitScene: checks the blob, moves it to the device, builds the ray structure or the grid and traces the links.
++    // A blob that fails a check sets job.hresult and leaves the scene the worker holds.
++    VkResult Device::setScene(Job& job) {
++      using namespace bridge_util;
++      job.hresult = D3DERR_INVALIDCALL;
++      GiSceneHeader header;
++      if (job.blob.size() < sizeof(header)) {
++        return VK_SUCCESS;
++      }
++      memcpy(&header, job.blob.data(), sizeof(header));
++      const uint64_t size = sizeof(header) + uint64_t(header.triangles) * sizeof(GiSceneTriangle) + uint64_t(header.patches) * sizeof(GiScenePatch) +
++        uint64_t(header.mapEntries) * 4 + uint64_t(header.texels) * sizeof(GiSceneTexel);
++      if (header.magic != GiSceneHeader::kMagic || header.version != 1 || size != job.blob.size() ||
++          header.triangles == 0 || header.texels == 0 || header.rays == 0 || header.rays > 1024 ||
++          header.shadowRays == 0 || header.shadowRays > 64 || header.bounces > 64 ||
++          uint64_t(header.texels) * header.rays > kMaxLinks) {
++        return VK_SUCCESS;
++      }
++      // The blob is packed, so its parts are copied out before they are read.
++      const uint8_t* pRead = job.blob.data() + sizeof(header);
++      std::vector<GiSceneTriangle> triangles(header.triangles);
++      memcpy(triangles.data(), pRead, triangles.size() * sizeof(GiSceneTriangle));
++      pRead += triangles.size() * sizeof(GiSceneTriangle);
++      std::vector<GiScenePatch> patches(header.patches);
++      memcpy(patches.data(), pRead, patches.size() * sizeof(GiScenePatch));
++      pRead += patches.size() * sizeof(GiScenePatch);
++      std::vector<int32_t> map(header.mapEntries);
++      memcpy(map.data(), pRead, map.size() * 4);
++      pRead += map.size() * 4;
++      std::vector<GiSceneTexel> texels(header.texels);
++      memcpy(texels.data(), pRead, texels.size() * sizeof(GiSceneTexel));
++
++      // Every index the shader follows is checked here, so the kernel never reads outside its buffers.
++      struct Vertex { float position[3]; int32_t patch; };
++      std::vector<Vertex> vertices(size_t(header.triangles) * 3);
++      for (uint32_t i = 0; i < header.triangles; ++i) {
++        const GiSceneTriangle& triangle = triangles[i];
++        if (triangle.patchFront < -1 || triangle.patchFront >= int32_t(header.patches) ||
++            triangle.patchBack < -1 || triangle.patchBack >= int32_t(header.patches)) {
++          return VK_SUCCESS;
++        }
++        for (uint32_t k = 0; k < 3; ++k) {
++          memcpy(vertices[size_t(i) * 3 + k].position, triangle.v[k], sizeof(float) * 3);
++          vertices[size_t(i) * 3 + k].patch = k == 0 ? triangle.patchFront : triangle.patchBack;
++        }
++      }
++      struct Patch { float origin[3]; int32_t mapOffset; float u[3]; int32_t nu; float v[3]; int32_t nv; };
++      std::vector<Patch> gpuPatches(std::max<size_t>(header.patches, 1));
++      for (uint32_t i = 0; i < header.patches; ++i) {
++        const GiScenePatch& patch = patches[i];
++        if (patch.nu == 0 || patch.nv == 0 || patch.nu > 65536 || patch.nv > 65536 ||
++            uint64_t(patch.mapOffset) + uint64_t(patch.nu) * patch.nv > header.mapEntries) {
++          return VK_SUCCESS;
++        }
++        Patch& gpuPatch = gpuPatches[i];
++        memcpy(gpuPatch.origin, patch.origin, sizeof(float) * 3);
++        memcpy(gpuPatch.u, patch.u, sizeof(float) * 3);
++        memcpy(gpuPatch.v, patch.v, sizeof(float) * 3);
++        gpuPatch.mapOffset = int32_t(patch.mapOffset);
++        gpuPatch.nu = int32_t(patch.nu);
++        gpuPatch.nv = int32_t(patch.nv);
++      }
++      for (int32_t entry : map) {
++        if (entry < -1 || entry >= int32_t(header.texels)) {
++          return VK_SUCCESS;
++        }
++      }
++      // The blob passed its checks, so it replaces the scene the worker holds.
++      destroyScene();
++      struct Texel { float position[4]; float normal[4]; float albedo[4]; };
++      std::vector<Texel> gpuTexels(header.texels);
++      m_pixels.resize(header.texels);
++      for (uint32_t i = 0; i < header.texels; ++i) {
++        memcpy(gpuTexels[i].position, texels[i].position, sizeof(float) * 3);
++        memcpy(gpuTexels[i].normal, texels[i].normal, sizeof(float) * 3);
++        memcpy(gpuTexels[i].albedo, texels[i].albedo, sizeof(float) * 3);
++        gpuTexels[i].position[3] = gpuTexels[i].normal[3] = gpuTexels[i].albedo[3] = 0.0f;
++        m_pixels[i] = texels[i].pixel;
++      }
++      map.resize(std::max<size_t>(map.size(), 1), -1);
++
++      m_push = Push();
++      m_push.texels = header.texels;
++      m_push.rays = header.rays;
++      m_push.shadowRays = header.shadowRays;
++      m_bounces = header.bounces;
++      std::vector<uint32_t> cellStart(1, 0), cellTris(1, 0);
++      if (!m_rays && !buildGrid(triangles.data(), header.triangles, cellStart, cellTris)) {
++        return VK_SUCCESS;
++      }
++      job.hresult = S_OK;
++      VkResult result = makeBuffer(vertices.data(), vertices.size() * sizeof(Vertex),
++                                   m_rays ? VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR : 0, m_sceneBuffers[kTris]);
++      if (result == VK_SUCCESS) {
++        result = makeBuffer(cellStart.data(), cellStart.size() * 4, 0, m_sceneBuffers[kCellStart]);
++      }
++      if (result == VK_SUCCESS) {
++        result = makeBuffer(cellTris.data(), cellTris.size() * 4, 0, m_sceneBuffers[kCellTris]);
++      }
++      if (result == VK_SUCCESS) {
++        result = makeBuffer(gpuTexels.data(), gpuTexels.size() * sizeof(Texel), 0, m_sceneBuffers[kTexels]);
++      }
++      if (result == VK_SUCCESS) {
++        result = makeBuffer(gpuPatches.data(), gpuPatches.size() * sizeof(Patch), 0, m_sceneBuffers[kPatches]);
++      }
++      if (result == VK_SUCCESS) {
++        result = makeBuffer(map.data(), map.size() * 4, 0, m_sceneBuffers[kPatchMap]);
++      }
++      if (result == VK_SUCCESS) {
++        result = makeBuffer(VkDeviceSize(header.texels) * header.rays * 4, 0, m_sceneBuffers[kLinks]);
++      }
++      uint32_t structureUs = 0;
++      if (result == VK_SUCCESS && m_rays) {
++        result = buildStructures(header.triangles, structureUs);
++      }
++      if (result == VK_SUCCESS) {
++        result = allocateLamps();
++      }
++      if (result == VK_SUCCESS) {
++        job.gpuUs = structureUs;
++        result = runSliced(kPassLinks, header.rays, job);
++      }
++      if (result != VK_SUCCESS) {
++        destroyScene();
++        return result;
++      }
++      m_sceneSeq = job.seq;
++      Logger::info(format_string("[Gi] Scene %u: %u triangles, %u texels, %u rays a texel. Structures %u us, links %u us of GPU time in %u slices, longest %u us.",
++                                 job.seq, header.triangles, header.texels, header.rays, structureUs, job.gpuUs - structureUs, job.slices, job.sliceUsMax));
++      return VK_SUCCESS;
++    }
++
++    // GiSubmitLamps: lamp i is layer i. A lamp whose bytes did not change keeps its solved layer.
++    VkResult Device::setLamps(Job& job) {
++      const size_t count = job.blob.size() / sizeof(bridge_util::GiLamp);
++      if (count == 0 || count > kMaxLamps || job.blob.size() % sizeof(bridge_util::GiLamp) != 0) {
++        job.hresult = D3DERR_INVALIDCALL;
++        return VK_SUCCESS;
++      }
++      std::vector<bridge_util::GiLamp> lamps(count);
++      memcpy(lamps.data(), job.blob.data(), job.blob.size());
++      const bool resized = count != m_lamps.size() || count != m_directValid.size();
++      for (size_t i = 0; i < count && !resized; ++i) {
++        if (memcmp(&lamps[i], &m_lamps[i], sizeof(bridge_util::GiLamp)) != 0) {
++          m_directValid[i] = 0;
++          m_indirectHalf[i] = -1;
++        }
++      }
++      m_lamps = std::move(lamps);
++      return resized && m_sceneSeq != 0 ? allocateLamps() : VK_SUCCESS;
++    }
++
++    uint16_t toHalf(float value) {
++      uint32_t bits;
++      memcpy(&bits, &value, sizeof(bits));
++      const uint32_t sign = (bits >> 16) & 0x8000;
++      const int32_t exponent = int32_t((bits >> 23) & 0xff) - 127 + 15;
++      uint32_t mantissa = bits & 0x7fffff;
++      if (exponent >= 31) {
++        return uint16_t(sign | 0x7bff);  // The largest half, also for infinities and NaNs.
++      }
++      if (exponent <= 0) {
++        if (exponent < -10) {
++          return uint16_t(sign);
++        }
++        mantissa |= 0x800000;
++        const uint32_t shift = uint32_t(14 - exponent);
++        return uint16_t(sign | ((mantissa >> shift) + ((mantissa >> (shift - 1)) & 1)));
++      }
++      const uint32_t half = (uint32_t(exponent) << 10 | (mantissa >> 13)) + ((mantissa >> 12) & 1);
++      return uint16_t(sign | std::min<uint32_t>(half, 0x7bff));
++    }
++
++    // A solve against the scene: the lamp's direct light and bounces when they are not settled yet, then the layer
++    // read back and written to each texel's pixel of the target.
++    VkResult Device::solve(Job& job) {
++      const uint32_t lamp = job.layer & 0xffff;
++      const uint32_t what = job.layer >> 16;
++      if (m_sceneSeq == 0 || job.sceneSeq != m_sceneSeq || lamp >= m_lamps.size() || what > bridge_util::GiLayerSum) {
++        job.hresult = D3DERR_INVALIDCALL;
++        return VK_SUCCESS;
++      }
++      const bridge_util::GiLamp& source = m_lamps[lamp];
++      memcpy(m_push.lampPos, source.position, sizeof(float) * 3);
++      m_push.lampPos[3] = source.radius;
++      memcpy(m_push.lampCol, source.colour, sizeof(float) * 3);
++      const bool scoped = source.boxMin[0] <= source.boxMax[0] && source.boxMin[1] <= source.boxMax[1] && source.boxMin[2] <= source.boxMax[2];
++      for (uint32_t c = 0; c < 3; ++c) {
++        m_push.boxMin[c] = scoped ? source.boxMin[c] : -1e30f;
++        m_push.boxMax[c] = scoped ? source.boxMax[c] : 1e30f;
++      }
++      m_push.lamp = lamp;
++      const VkDeviceSize layer = VkDeviceSize(m_push.texels) * 16;
++      VkResult result = VK_SUCCESS;
++      if (!m_directValid[lamp]) {
++        m_indirectHalf[lamp] = -1;
++        result = runSliced(kPassDirect, 1, job);
++        if (result != VK_SUCCESS) {
++          return result;
++        }
++        m_directValid[lamp] = 1;
++      }
++      if (m_indirectHalf[lamp] < 0 && what != bridge_util::GiLayerDirect) {
++        // The first gather reads half 0 as the previous bounce, which is none.
++        begin();
++        vkCmdFillBuffer(m_commandBuffer, m_sceneBuffers[kIndirect].buffer, lamp * layer, layer, 0);
++        result = end(nullptr);
++        m_push.src = 0;
++        const uint32_t groupsX = (m_push.texels + 63) / 64;
++        for (uint32_t bounce = 0; bounce < m_bounces && result == VK_SUCCESS;) {
++          uint32_t& units = m_sliceUnits[kPassBounce];
++          const uint32_t batch = std::min(units / groupsX, m_bounces - bounce);
++          if (batch < 2) {
++            result = runSliced(kPassBounce, 1, job);
++            m_push.src ^= 1;
++            ++bounce;
++            continue;
++          }
++          // Several whole gathers fit the GPU budget, so they go in one submission: a gather a submission is bound
++          // by the submit and wait, not by its work.
++          if (job.cancelled.load(std::memory_order_acquire)) {
++            return VK_NOT_READY;
++          }
++          m_push.texel0 = 0;
++          m_push.ray0 = 0;
++          begin();
++          vkCmdBindPipeline(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_solvePipelines[kPassBounce]);
++          vkCmdBindDescriptorSets(m_commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_solveLayout, 0, 1, &m_solveSet, 0, nullptr);
++          for (uint32_t i = 0; i < batch; ++i) {
++            vkCmdPushConstants(m_commandBuffer, m_solveLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(m_push), &m_push);
++            vkCmdDispatch(m_commandBuffer, groupsX, 1, 1);
++            VkMemoryBarrier barrier { VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT };
++            vkCmdPipelineBarrier(m_commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
++            m_push.src ^= 1;
++          }
++          uint32_t us = 0;
++          result = end(&us);
++          bounce += batch;
++          job.gpuUs += us;
++          job.slices += 1;
++          job.sliceUsMax = std::max(job.sliceUsMax, us);
++          const uint64_t wanted = uint64_t(groupsX) * batch * m_sliceUs / std::max<uint32_t>(us, 1);
++          units = uint32_t(std::clamp<uint64_t>(wanted, std::max<uint32_t>(units / 2, 1), std::min<uint64_t>(uint64_t(units) * 2, 1u << 24)));
++          if (m_sliceIdleUs) {
++            std::this_thread::sleep_for(std::chrono::microseconds(m_sliceIdleUs));
++          }
++        }
++        if (result != VK_SUCCESS) {
++          return result;
++        }
++        m_indirectHalf[lamp] = int8_t(m_push.src);
++      }
++
++      result = reserve(layer * 2);
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      begin();
++      const VkBufferCopy directCopy { lamp * layer, 0, layer };
++      // A direct layer may come before the lamp's bounces: its indirect half is then read but not used.
++      const VkBufferCopy indirectCopy { (VkDeviceSize(std::max<int8_t>(m_indirectHalf[lamp], 0)) * m_push.lamps + lamp) * layer, layer, layer };
++      vkCmdCopyBuffer(m_commandBuffer, m_sceneBuffers[kDirect].buffer, m_buffer, 1, &directCopy);
++      vkCmdCopyBuffer(m_commandBuffer, m_sceneBuffers[kIndirect].buffer, m_buffer, 1, &indirectCopy);
++      VkMemoryBarrier barrier { VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT };
++      vkCmdPipelineBarrier(m_commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &barrier, 0, nullptr, 0, nullptr);
++      result = end(nullptr);
++      if (result != VK_SUCCESS) {
++        return result;
++      }
++      const float* const pDirect = static_cast<const float*>(m_pMapped);
++      const float* const pIndirect = pDirect + size_t(m_push.texels) * 4;
++      const size_t pixels = size_t(job.width) * job.height;
++      const bool half = job.format == TexelFormat::Rgba16f;
++      job.texels.assign(pixels * (half ? 8 : 4), 0);
++      for (uint32_t i = 0; i < m_push.texels; ++i) {
++        if (m_pixels[i] >= pixels) {
++          continue;
++        }
++        float value[4];
++        for (uint32_t c = 0; c < 3; ++c) {
++          value[c] = (what != bridge_util::GiLayerIndirect ? pDirect[size_t(i) * 4 + c] : 0.0f) +
++                     (what != bridge_util::GiLayerDirect ? pIndirect[size_t(i) * 4 + c] : 0.0f);
++        }
++        value[3] = what == bridge_util::GiLayerDirect ? pDirect[size_t(i) * 4 + 3] : 1.0f;
++        if (half) {
++          uint16_t* const pTexel = reinterpret_cast<uint16_t*>(job.texels.data()) + size_t(m_pixels[i]) * 4;
++          for (uint32_t c = 0; c < 4; ++c) {
++            pTexel[c] = toHalf(value[c]);
++          }
++        } else {
++          uint32_t byte[4];
++          for (uint32_t c = 0; c < 4; ++c) {
++            byte[c] = uint32_t(std::clamp(value[c], 0.0f, 1.0f) * 255.0f + 0.5f);
++          }
++          reinterpret_cast<uint32_t*>(job.texels.data())[m_pixels[i]] = (byte[3] << 24) | (byte[0] << 16) | (byte[1] << 8) | byte[2];
++        }
++      }
++      return VK_SUCCESS;
++    }
++
++    VkResult Device::run(Job& job) {
++      switch (job.kind) {
++      case JobKind::Scene: return setScene(job);
++      case JobKind::Lamps: return setLamps(job);
++      case JobKind::Solve: return solve(job);
++      default: return runPattern(job);
++      }
++    }
++
++    void workerMain(VkInstance dxvkInstance, VkPhysicalDevice dxvkPhysicalDevice) {
++      GiSharedBlock* const pBlock = bridge_util::giBlock();
++      Device device;
++      uint32_t capBits = 0;
++      int32_t lastError = 0;
++      uint32_t level = device.create(dxvkInstance, dxvkPhysicalDevice, capBits, lastError);
++      pBlock->capBits = capBits;
++      pBlock->lastError = lastError;
++      pBlock->level.store(level, std::memory_order_release);
++      if (level == bridge_util::GiLevelNone) {
++        Logger::err(format_string("[Gi] The worker could not create its Vulkan device (VkResult %d), so the GI server is off.", lastError));
++      }
++      for (;;) {
++        std::shared_ptr<Job> job;
++        {
++          std::unique_lock<std::mutex> lock(s_mutex);
++          s_wake.wait(lock, [] { return !s_jobs.empty(); });
++          job = std::move(s_jobs.front());
++          s_jobs.pop_front();
++        }
++        if (job->cancelled.load(std::memory_order_acquire)) {
++          continue;
++        }
++        HRESULT hresult = E_FAIL;
++        if (level != bridge_util::GiLevelNone) {
++          const VkResult result = device.run(*job);
++          if (result == VK_NOT_READY) {
++            continue;  // Cancelled between slices. A cancelled job is never answered.
++          }
++          if (result == VK_SUCCESS) {
++            hresult = job->hresult;
++          } else {
++            // A lost or failing device turns the server off. The client falls back.
++            pBlock->lastError = result;
++            level = bridge_util::GiLevelNone;
++            pBlock->level.store(level, std::memory_order_release);
++            Logger::err(format_string("[Gi] The worker's pass failed (VkResult %d), so the GI server is off.", int(result)));
++          }
++        }
++        job->hresult = hresult;
++        job->blob = std::vector<uint8_t>();
++        pBlock->gpuUsLast = job->gpuUs;
++        if (job->kind != JobKind::Pattern) {
++          pBlock->sliceUsMax = job->sliceUsMax;
++          pBlock->slicesLast = job->slices;
++        }
++        pBlock->workerHeartbeat.fetch_add(1, std::memory_order_relaxed);
++        job->ready.store(true, std::memory_order_release);
++      }
++    }
++  }
++
++  void startWorker(void* pDxvkInstance, void* pDxvkPhysicalDevice) {
++    // Detached: the worker waits for jobs until the server process exits.
++    std::thread(workerMain, (VkInstance) pDxvkInstance, (VkPhysicalDevice) pDxvkPhysicalDevice).detach();
++  }
++
++  void queueJob(const std::shared_ptr<Job>& job) {
++    {
++      std::lock_guard<std::mutex> lock(s_mutex);
++      s_jobs.push_back(job);
++    }
++    s_wake.notify_one();
++  }
++}
+diff --git a/bridge/src/server/gi_worker.h b/bridge/src/server/gi_worker.h
+new file mode 100644
+index 00000000..bcb6ec86
+--- /dev/null
++++ b/bridge/src/server/gi_worker.h
+@@ -0,0 +1,71 @@
++/*
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++#pragma once
++
++#include <atomic>
++#include <cstdint>
++#include <memory>
++#include <vector>
++
++// The GI worker: a thread with its own Vulkan device on the GPU DXVK renders on. It never calls Direct3D 9.
++// The play thread queues jobs and applies the finished ones (gi_server.h).
++namespace gi {
++  enum class TexelFormat : uint32_t {
++    Rgba16f = 0,  // D3DFMT_A16B16G16R16F
++    Bgra8 = 1,    // D3DFMT_A8R8G8B8
++  };
++
++  enum class JobKind : uint32_t {
++    Pattern,  // a solve without a scene: the prototype's pattern
++    Solve,    // one lamp's layer of the scene into the target
++    Scene,    // GiSubmitScene: blob holds the scene
++    Lamps,    // GiSubmitLamps: blob holds the lamp table
++  };
++
++  struct Job {
++    JobKind kind = JobKind::Pattern;
++    uint32_t sceneSeq = 0;      // Solve: the ticket of the scene the caller solved against
++    std::vector<uint8_t> blob;  // Scene, Lamps
++    uint32_t rowsDone = 0;      // play thread: rows of the result already copied into the target
++    uint32_t uploadUs = 0;      // play thread: time of those copies
++    uint32_t targetId = 0;
++    uint32_t layer = 0;
++    uint32_t seq = 0;
++    uint32_t slot = 0;
++    uint32_t width = 0;
++    uint32_t height = 0;
++    TexelFormat format = TexelFormat::Rgba16f;
++    std::atomic<bool> cancelled { false };
++    std::atomic<bool> ready { false };  // set last by the worker, with release
++
++    // Written by the worker before ready.
++    int32_t hresult = 0;
++    uint32_t gpuUs = 0;
++    uint32_t slices = 0;
++    uint32_t sliceUsMax = 0;
++    std::vector<uint8_t> texels;  // tightly packed rows
++  };
++
++  // Starts the worker once. The handles are DXVK's VkInstance and VkPhysicalDevice, or nullptr when the server's
++  // renderer is not DXVK. The worker writes the level and capabilities into the GI block when its device is ready.
++  void startWorker(void* pDxvkInstance, void* pDxvkPhysicalDevice);
++
++  void queueJob(const std::shared_ptr<Job>& job);
++}
+diff --git a/bridge/src/server/main.cpp b/bridge/src/server/main.cpp
+index 5df29e6e..94cf4583 100644
+--- a/bridge/src/server/main.cpp
++++ b/bridge/src/server/main.cpp
+@@ -53,4 +53,5 @@
+ #include "server_options.h"
+ #include "async_readback.h"
++#include "gi_server.h"
+ #include "../client/client_options.h"
+ 
+@@ -618,4 +619,5 @@ void ProcessDeviceCommandQueue() {
+         GET_RES(pD3DDevice, gpD3DDevices);
+         async_readback::dropAll();
++        gi_server::dropAll();
+         safeDestroy(pD3DDevice, pD3DDeviceHandle);
+         gpD3DDevices.erase(pD3DDeviceHandle);
+@@ -762,4 +764,5 @@ void ProcessDeviceCommandQueue() {
+         GET_RES(pD3DDevice, gpD3DDevices);
+         async_readback::dropAll();
++        gi_server::dropAll();
+         uint32_t* rawPresentationParameters = nullptr;
+         DeviceBridge::get_data((void**) &rawPresentationParameters);
+@@ -784,4 +787,5 @@ void ProcessDeviceCommandQueue() {
+         GET_RES(pD3DDevice, gpD3DDevices);
+         async_readback::dropAll();
++        gi_server::dropAll();
+         uint32_t* rawPresentationParameters = nullptr;
+         DeviceBridge::get_data((void**) &rawPresentationParameters);
+@@ -823,4 +827,5 @@ void ProcessDeviceCommandQueue() {
+         const auto hresult = pD3DDevice->Present(pSourceRect, pDestRect, hwnd, pDirtyRegion);
+         async_readback::poll();
++        gi_server::poll(gpD3DResources);
+         if (!SUCCEEDED(hresult)) {
+           std::stringstream ss;
+@@ -1903,4 +1908,5 @@ void ProcessDeviceCommandQueue() {
+         const auto hresult = pSwapChain->Present(pSourceRect, pDestRect, hwnd, pDirtyRegion, dwFlags);
+         async_readback::poll();
++        gi_server::poll(gpD3DResources);
+ 
+         if (!SUCCEEDED(hresult)) {
+@@ -3087,4 +3093,33 @@ void ProcessDeviceCommandQueue() {
+         break;
+       }
++      case Bridge_GiOpen:
++        gi_server::open(gpD3DDevices);
++        break;
++      case Bridge_GiSolve:
++      {
++        GET_HND(pTargetHandle);
++        PULL_U(layer);
++        PULL_U(sceneSeq);
++        PULL_U(slotIndex);
++        PULL_U(requestSeq);
++        gi_server::solve(gpD3DResources, pTargetHandle, layer, sceneSeq, slotIndex, requestSeq);
++        break;
++      }
++      case Bridge_GiSubmit:
++      {
++        GET_HDR_VAL(submitSlot);
++        PULL_U(submitKind);
++        PULL_U(submitSize);
++        PULL_U(ticketSlot);
++        PULL_U(submitSeq);
++        gi_server::submit(submitSlot, submitKind, submitSize, ticketSlot, submitSeq);
++        break;
++      }
++      case Bridge_GiCancel:
++      {
++        GET_HDR_VAL(cancelSeq);
++        gi_server::cancel(cancelSeq);
++        break;
++      }
+       /*
+        * BridgeApi commands
+@@ -3495,4 +3530,5 @@ void ProcessDeviceCommandQueue() {
+       }
+       async_readback::onCommand();
++      gi_server::onCommand(gpD3DResources);
+     }
+ 
+diff --git a/bridge/src/server/meson.build b/bridge/src/server/meson.build
+index 4d418be8..f26a4bec 100644
+--- a/bridge/src/server/meson.build
++++ b/bridge/src/server/meson.build
+@@ -22,4 +22,5 @@
+ 
+ server_src = files([
++	'gi_worker.cpp',
+ 	'main.cpp',
+ 	'module_processing.cpp',
+@@ -27,4 +28,26 @@ server_src = files([
+ ])
+ 
++# The GI worker's Vulkan headers, loader (volk) and shader compiler are fetched by native/remix-bridge/build.cmd.
++gi_submodules = global_src_root_norm + '/../submodules/'
++gi_include_path = include_directories('../../../submodules/Vulkan-Headers/include', '../../../submodules/volk')
++glslang = find_program(gi_submodules + 'glslang/bin/glslang.exe', required : cpu_family == 'x86_64')
++gi_volk = static_library('gi_volk', gi_submodules + 'volk/volk.c',
++  include_directories : gi_include_path,
++  build_by_default    : false,
++  override_options    : ['werror=false', 'warning_level=0'])
++gi_spirv = [custom_target('gi_pattern_spv',
++  input   : 'gi_pattern.comp',
++  output  : 'gi_pattern_spv.h',
++  command : [glslang, '-V', '--quiet', '--target-env', 'vulkan1.1', '--vn', 'g_giPatternSpv', '-o', '@OUTPUT@', '@INPUT@'])]
++# gi_solve.comp once a pass and level: output name, variable, pass, ray queries (SPIR-V 1.4; the compute level stays at Vulkan 1.1).
++foreach v : [['links_rq', 'g_giLinksRqSpv', '0', true], ['direct_rq', 'g_giDirectRqSpv', '1', true],
++             ['links_sw', 'g_giLinksSwSpv', '0', false], ['direct_sw', 'g_giDirectSwSpv', '1', false],
++             ['bounce', 'g_giBounceSpv', '2', false]]
++  gi_spirv += custom_target('gi_' + v[0] + '_spv',
++    input   : 'gi_solve.comp',
++    output  : 'gi_' + v[0] + '_spv.h',
++    command : [glslang, '-V', '--quiet', '-DPASS=' + v[2]] + (v[3] ? ['-DRAYQUERY', '--target-env', 'vulkan1.2'] : ['--target-env', 'vulkan1.1']) + ['--vn', v[1], '-o', '@OUTPUT@', '@INPUT@'])
++endforeach
++
+ server_header = files([
+ 	'module_processing.h',
+@@ -49,8 +72,9 @@ server_resource = windows.compile_resources('NvRemixBridge.rc',
+ 
+ server_exe = executable('NvRemixBridge', server_src, server_header, server_version, server_resource,
+-sources             : [ bridge_version ],
++sources             : [ bridge_version, gi_spirv ],
+ build_by_default    : (cpu_family == 'x86_64') or (cpu_family == 'aarch64') ? true : false,
+ dependencies        : [ thread_dep, util_dep, lib_version, tracy_dep ],
+-include_directories : [ bridge_include_path, util_include_path, public_include_path ],
++link_with           : [ gi_volk ],
++include_directories : [ bridge_include_path, util_include_path, public_include_path, gi_include_path ],
+ win_subsystem       : 'windows')
+ 
+diff --git a/bridge/src/util/meson.build b/bridge/src/util/meson.build
+index 273a1988..61856389 100644
+--- a/bridge/src/util/meson.build
++++ b/bridge/src/util/meson.build
+@@ -1,89 +1,90 @@
+-#############################################################################
+-# Copyright (c) 2022-2024, NVIDIA CORPORATION. All rights reserved.
+-#
+-# Permission is hereby granted, free of charge, to any person obtaining a
+-# copy of this software and associated documentation files (the "Software"),
+-# to deal in the Software without restriction, including without limitation
+-# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+-# and/or sell copies of the Software, and to permit persons to whom the
+-# Software is furnished to do so, subject to the following conditions:
+-#
+-# The above copyright notice and this permission notice shall be included in
+-# all copies or substantial portions of the Software.
+-#
+-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+-# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+-# DEALINGS IN THE SOFTWARE.
+-#############################################################################
+-
+-util_src = files([
+-	'util_bridgecommand.cpp',
+-	'util_filesys.cpp',
+-	'util_gdi.cpp',
+-	'util_messagechannel.cpp',
+-	'util_process.cpp',
+-	'util_remixapi.cpp',
+-	'util_seh.cpp',
+-	'util_semaphore.cpp',
+-	'util_sharedheap.cpp',
+-	'util_sharedmemory.cpp',
+-	'util_monitor.cpp',
+-	'util_perfcounters.cpp',
+-	'util_queryresults.cpp',
+-	'log/log.cpp',
+-	'config/config.cpp',
+-	'config/global_options.cpp',
+-])
+-
+-util_header = files([
+-	'util_atomiccircularqueue.h',
+-	'util_bridge_assert.h',
+-	'util_bridge_state.h',
+-	'util_bridgecommand.h',
+-	'util_bytes.h',
+-	'util_circularbuffer.h',
+-	'util_circularqueue.h',
+-	'util_commands.h',
+-	'util_common.h',
+-	'util_detourtools.h',
+-    'util_devicecommand.h',
+-	'util_filesys.h',
+-	'util_gdi.h',
+-	'util_guid.h',
+-	'util_hack_d3d_debug.h',
+-	'util_ipcchannel.h',
+-	'util_messagechannel.h',
+-	'util_once.h',
+-	'util_process.h',
+-	'util_remixapi.h',
+-	'util_scopedlock.h',
+-	'util_seh.h',
+-	'util_semaphore.h',
+-	'util_serializable.h',
+-	'util_serializer.h',
+-	'util_sharedheap_allocator.h',
+-	'util_sharedmemory.h',
+-	'util_singleton.h',
+-	'util_texture_and_volume.h',
+-	'util_uploadparts.h',
+-	'util_version.h',
+-	'util_monitor.h',
+-	'util_perfcounters.h',
+-	'util_queryresults.h',
+-	'util_readbacks.h',
+-	'log/log.h',
+-	'log/log_strings.h',
+-	'config/config.h',
+-	'config/global_options.h',
+-])
+-
+-util_lib = static_library('util', util_src, util_header,
+-  include_directories : [ bridge_include_path, public_include_path  ],
+-)
+-
+-util_dep = declare_dependency(
+-  link_with           : [ util_lib ])
++#############################################################################
++# Copyright (c) 2022-2024, NVIDIA CORPORATION. All rights reserved.
++#
++# Permission is hereby granted, free of charge, to any person obtaining a
++# copy of this software and associated documentation files (the "Software"),
++# to deal in the Software without restriction, including without limitation
++# the rights to use, copy, modify, merge, publish, distribute, sublicense,
++# and/or sell copies of the Software, and to permit persons to whom the
++# Software is furnished to do so, subject to the following conditions:
++#
++# The above copyright notice and this permission notice shall be included in
++# all copies or substantial portions of the Software.
++#
++# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++# DEALINGS IN THE SOFTWARE.
++#############################################################################
++
++util_src = files([
++	'util_bridgecommand.cpp',
++	'util_filesys.cpp',
++	'util_gdi.cpp',
++	'util_messagechannel.cpp',
++	'util_process.cpp',
++	'util_remixapi.cpp',
++	'util_seh.cpp',
++	'util_semaphore.cpp',
++	'util_sharedheap.cpp',
++	'util_sharedmemory.cpp',
++	'util_monitor.cpp',
++	'util_perfcounters.cpp',
++	'util_queryresults.cpp',
++	'log/log.cpp',
++	'config/config.cpp',
++	'config/global_options.cpp',
++])
++
++util_header = files([
++	'util_atomiccircularqueue.h',
++	'util_bridge_assert.h',
++	'util_bridge_state.h',
++	'util_bridgecommand.h',
++	'util_bytes.h',
++	'util_circularbuffer.h',
++	'util_circularqueue.h',
++	'util_commands.h',
++	'util_common.h',
++	'util_detourtools.h',
++    'util_devicecommand.h',
++	'util_filesys.h',
++	'util_gdi.h',
++	'util_guid.h',
++	'util_hack_d3d_debug.h',
++	'util_ipcchannel.h',
++	'util_messagechannel.h',
++	'util_once.h',
++	'util_process.h',
++	'util_remixapi.h',
++	'util_scopedlock.h',
++	'util_seh.h',
++	'util_semaphore.h',
++	'util_serializable.h',
++	'util_serializer.h',
++	'util_sharedheap_allocator.h',
++	'util_sharedmemory.h',
++	'util_singleton.h',
++	'util_texture_and_volume.h',
++	'util_uploadparts.h',
++	'util_version.h',
++	'util_monitor.h',
++	'util_perfcounters.h',
++	'util_queryresults.h',
++	'util_readbacks.h',
++	'util_gi.h',
++	'log/log.h',
++	'log/log_strings.h',
++	'config/config.h',
++	'config/global_options.h',
++])
++
++util_lib = static_library('util', util_src, util_header,
++  include_directories : [ bridge_include_path, public_include_path  ],
++)
++
++util_dep = declare_dependency(
++  link_with           : [ util_lib ])
+diff --git a/bridge/src/util/util_commands.h b/bridge/src/util/util_commands.h
+index 111dff30..f37384b5 100644
+--- a/bridge/src/util/util_commands.h
++++ b/bridge/src/util/util_commands.h
+@@ -64,4 +64,9 @@ namespace Commands {
+     Bridge_UnlinkResource,
+     Bridge_UnlinkVolumeResource,
++    // GI server exports (client/d3d9_gi.cpp), all sent with FlagBits::AsyncResult.
++    Bridge_GiOpen,
++    Bridge_GiSolve,
++    Bridge_GiSubmit,
++    Bridge_GiCancel,
+     // These are not actually official D3D9 API calls.
+     IDirect3DDevice9Ex_LinkSwapchain,
+@@ -500,4 +505,8 @@ namespace Commands {
+     case Bridge_SharedHeap_Alloc: return "SharedHeap_Alloc";
+     case Bridge_SharedHeap_Dealloc: return "SharedHeap_Dealloc";
++    case Bridge_GiOpen: return "Bridge_GiOpen";
++    case Bridge_GiSolve: return "Bridge_GiSolve";
++    case Bridge_GiSubmit: return "Bridge_GiSubmit";
++    case Bridge_GiCancel: return "Bridge_GiCancel";
+     
+     case Bridge_UnlinkResource: return "Bridge_UnlinkResource";
+diff --git a/bridge/src/util/util_gi.h b/bridge/src/util/util_gi.h
+new file mode 100644
+index 00000000..8550db1c
+--- /dev/null
++++ b/bridge/src/util/util_gi.h
+@@ -0,0 +1,161 @@
++#pragma once
++
++#include <atomic>
++#include <cstddef>
++#include <cstdint>
++#include <memory>
++#include <mutex>
++
++#include "util_sharedmemory.h"
++
++// Shared memory of the GI server exports (client/d3d9_gi.cpp, server/gi_server.h). Modelled on
++// QuerySharedBlock and ReadbackSharedBlock: the server writes a slot's fields, then publishes answeredSeq
++// with release; the client reads them after an acquire load sees its ticket. All fields are 32-bit, so the
++// layout is the same in the 32-bit client and the 64-bit server.
++
++namespace bridge_util {
++
++  enum GiLevel : uint32_t {
++    GiLevelNone = 0,
++    GiLevelCompute = 1,
++    GiLevelRays = 2,
++    GiLevelStarting = 0xffffffffu,  // the worker is still creating its device
++  };
++
++  enum GiCapBits : uint32_t {
++    GiCapRayQuery = 1u << 0,
++    GiCapAccelerationStructure = 1u << 1,
++    GiCapMatchedDxvkDevice = 1u << 2,  // the worker's GPU is the one DXVK renders on (deviceUUID match)
++  };
++
++  enum GiAnswerKind : uint32_t {
++    GiAnswerCopied = 0,
++    GiAnswerSuperseded = 1,  // a later solve for the same target and layer replaced this one; nothing copied
++  };
++
++  struct GiAnswerSlot {
++    std::atomic<uint32_t> answeredSeq;
++    int32_t hresult;
++    uint32_t kind;      // GiAnswerKind
++    uint32_t size;      // bytes copied into the target
++    uint32_t gpuUs;     // worker: GPU time of the job, microseconds
++    uint32_t uploadUs;  // play thread: staging copy and UpdateSurface, microseconds
++    uint32_t reserved[2];
++  };
++  static_assert(sizeof(GiAnswerSlot) == 32, "GiAnswerSlot must have the same layout in both processes");
++
++  // RemixBridge_GiSubmit kinds. A blob larger than a submit slot goes in parts: every part but the last carries
++  // GiSubmitMore and gets no ticket; the last part's ticket answers for the whole blob.
++  enum GiSubmitKind : uint32_t {
++    GiSubmitScene = 1,       // GiSceneHeader, triangles, patches, patch map, texels
++    GiSubmitLamps = 2,       // GiLamp[]; lamp i is layer i. Only lamps whose bytes changed are solved again
++    GiSubmitKindMask = 0xff,
++    GiSubmitMore = 0x100,
++  };
++
++  // RemixBridge_GiSolve's layer for a solve against a scene: the lamp index in the low 16 bits, GiLayerWhat above.
++  enum GiLayerWhat : uint32_t {
++    GiLayerIndirect = 0,  // rgb: the settled bounce light, alpha 1
++    GiLayerDirect = 1,    // rgb: direct light, alpha: the share of the lamp's ball the texel sees
++    GiLayerSum = 2,       // rgb: direct + indirect, alpha 1
++  };
++
++  // The scene blob. Light is colour x cos / distance^2 x the visible share of the lamp's ball (the caller folds its own
++  // law into the colour). A hit triangle names its texel through a patch: a planar grid over the surface, one for each
++  // side, so the index holds for any story height, split level or diagonal wall.
++  struct GiSceneHeader {
++    static constexpr uint32_t kMagic = 0x43534947;  // "GISC"
++    uint32_t magic;
++    uint32_t version;     // 1
++    uint32_t triangles;
++    uint32_t patches;
++    uint32_t mapEntries;
++    uint32_t texels;
++    uint32_t rays;        // gather rays a texel (the links), 1 to 1024
++    uint32_t shadowRays;  // points on the lamp's ball, 1 to 64
++    uint32_t bounces;     // gathers a lamp, a fixed count, 0 to 64
++    uint32_t reserved[3];
++  };
++  struct GiSceneTriangle {
++    float v[3][3];
++    int32_t patchFront;  // the patch a ray hits on the side cross(v1 - v0, v2 - v0) points to; -1: no texel (blocks, returns no light)
++    int32_t patchBack;
++  };
++  // A patch must cover every triangle that names it: a hit outside the patch reads the nearest cell.
++  struct GiScenePatch {
++    float origin[3];
++    float u[3];  // cell = floor(dot(P - origin, u)), floor(dot(P - origin, v)), clamped to the patch
++    float v[3];
++    uint32_t nu;
++    uint32_t nv;
++    uint32_t mapOffset;  // map[mapOffset + cellV * nu + cellU]: the texel, or -1
++  };
++  struct GiSceneTexel {
++    float position[3];  // off its surface, on the lit side
++    float normal[3];
++    float albedo[3];    // reflectance
++    uint32_t pixel;     // y * width + x in the solve's target; texels outside the target are not written
++  };
++  struct GiLamp {
++    float position[3];
++    float radius;
++    float colour[3];
++    uint32_t reserved;
++    // The solve's region scope: texels outside the box get no light and cost no gather. An empty box (min > max) is the whole scene.
++    float boxMin[3];
++    float boxMax[3];
++  };
++  static_assert(sizeof(GiSceneHeader) == 48 && sizeof(GiSceneTriangle) == 44 && sizeof(GiScenePatch) == 48 &&
++                sizeof(GiSceneTexel) == 40 && sizeof(GiLamp) == 56, "The GI scene blob must have the same layout in both processes");
++
++  struct GiSubmitSlot {
++    static constexpr uint32_t kBytes = 448 * 1024;
++    std::atomic<uint32_t> consumedSeq;  // the play thread stores the part's sequence once it has copied the data out
++    uint32_t reserved[3];
++    uint8_t data[kBytes];
++  };
++
++  struct GiSharedBlock {
++    static constexpr uint32_t kMagic = 0x31304947;  // "GI01"
++    static constexpr uint32_t kLayoutVersion = 2;
++    static constexpr uint32_t kMaxTickets = 64;
++    static constexpr uint32_t kSubmitSlots = 2;
++    static constexpr uint32_t kCounterWords = 22;   // level .. objectCounters, read by RemixBridge_GiReadCounters
++
++    std::atomic<uint32_t> magic;        // 0: written last by the play thread on the first Bridge_GiOpen
++    uint32_t layoutVersion;             // 4
++    std::atomic<uint32_t> level;        // 8: GiLevel
++    uint32_t capBits;                   // 12: GiCapBits
++    std::atomic<uint32_t> heartbeat;    // 16: play thread, every poll pass
++    std::atomic<uint32_t> workerHeartbeat;  // 20: worker, every job
++    int32_t lastError;                  // 24: worker's last VkResult or HRESULT
++    uint32_t jobsQueued;                // 28
++    uint32_t jobsDone;                  // 32
++    uint32_t gpuUsLast;                 // 36
++    uint32_t uploadUsLast;              // 40
++    uint32_t uploadUsMax;               // 44
++    uint32_t uploadBytesMax;            // 48: largest single copy
++    uint32_t behaviorFlags;             // 52: the server device's D3DCREATE_* flags
++    uint32_t sliceUsMax;                // 56: longest GPU slice of the last solve, microseconds
++    uint32_t slicesLast;                // 60: GPU slices of the last solve
++    uint32_t objectCounters[8];         // 64: counter words 14 to 21, kept for the object export (objects, models resolved, models missing, index ready, four spare)
++    GiAnswerSlot answers[kMaxTickets];  // 96
++    GiSubmitSlot submits[kSubmitSlots]; // 2144
++    // R-06 adds the point-query slot here (layoutVersion 3).
++  };
++  static_assert(offsetof(GiSharedBlock, level) == 8 && offsetof(GiSharedBlock, answers) == 96 && offsetof(GiSharedBlock, submits) == 2144,
++                "GiSharedBlock must have the same layout in both processes");
++
++  // Maps the block on first use; nullptr when the mapping failed.
++  inline GiSharedBlock* giBlock() {
++    static std::once_flag once;
++    static std::unique_ptr<SharedMemory> s_memory;
++    std::call_once(once, [] {
++      s_memory = std::make_unique<SharedMemory>("Gi", sizeof(GiSharedBlock));
++      if (s_memory->data() == nullptr) {
++        Logger::err("[Gi] The GI block could not be mapped, so the GI server is off.");
++      }
++    });
++    return static_cast<GiSharedBlock*>(s_memory->data());
++  }
++}
+diff --git a/bridge/test/rtx/unit/meson.build b/bridge/test/rtx/unit/meson.build
+index d55d7f51..d0067648 100644
+--- a/bridge/test/rtx/unit/meson.build
++++ b/bridge/test/rtx/unit/meson.build
+@@ -1,148 +1,148 @@
+-
+-tests = []
+-
+-# Command History Test
+-if (cpu_family == 'x86_64')
+-cmd_history_exe = executable(
+-    'command_history',  files('test_cmd_queue.cpp'),
+-    include_directories : util_include_path,
+-    dependencies : util_dep,
+-    win_subsystem : 'console')
+-test('command_history', cmd_history_exe)
+-tests += cmd_history_exe
+-endif
+-
+-# Remix API Serializing Test
+-if (cpu_family == 'x86_64')
+-    name_suff = 'x64'
+-else
+-    name_suff = 'x86'
+-endif
+-write_name = 'test_remix_api_write'
+-write_exe = write_name + '_'  + name_suff
+-tests += executable(
+-    write_exe,  files(write_name + '.cpp'),
+-    include_directories : [util_include_path, public_include_path ],
+-    dependencies : util_dep,
+-    win_subsystem : 'console',)
+-read_name = 'test_remix_api_read'
+-read_exe = read_name + '_'  + name_suff
+-tests += executable(
+-    read_exe,  files(read_name + '.cpp'),
+-    include_directories : [util_include_path, public_include_path ],
+-    dependencies : util_dep,
+-    win_subsystem : 'console')
+-
+-# Bridge Logic Tests
+-logic_tests = [ 'sent_state', 'query_results', 'ipc_queue_wait', 'upload_parts', 'present_semaphore', 'response_lifetime', 'shared_heap_allocator' ]
+-foreach name : logic_tests
+-  logic_exe = executable(
+-      'test_' + name + '_' + name_suff,  files('test_' + name + '.cpp'),
+-      include_directories : [ util_include_path, public_include_path, include_directories('../../../src/client') ],
+-      dependencies : util_dep,
+-      win_subsystem : 'console')
+-  test(name, logic_exe)
+-  tests += logic_exe
+-endforeach
+-
+-# Rewind mode: the server side on a D3D9 device (x64), and the client's park through the bridge (x86 app).
+-if (cpu_family == 'x86_64')
+-rewind_server_exe = executable(
+-    'test_rewind_server_x64',  files('test_rewind_server.cpp'),
+-    include_directories : [ util_include_path, public_include_path, include_directories('../../../src/server') ],
+-    dependencies : util_dep,
+-    win_subsystem : 'console')
+-test('rewind_server', rewind_server_exe, is_parallel : false)
+-tests += rewind_server_exe
+-else
+-tests += executable(
+-    'test_rewind_device_x86',  files('test_rewind_device.cpp'),
+-    include_directories : [ util_include_path, public_include_path ],
+-    dependencies : util_dep,
+-    win_subsystem : 'console')
+-endif
+-
+-if (cpu_family == 'x86_64')
+-python = find_program('python')
+-remix_api_test_script = join_paths(meson.current_source_dir(), 'test_remix_api.py')
+-remix_api_test_artifacts_dir = join_paths(meson.global_build_root(), 'test_artifacts', 'remix_api')
+-variant = 'x64_2_x86'
+-test('remix_api__' + variant,
+-     python,
+-     args : [remix_api_test_script,
+-             '--' + variant,
+-             '--executablesDir', meson.current_build_dir(),
+-             '--artifactDir', remix_api_test_artifacts_dir ])
+-variant = 'x86_2_x64'
+-test('remix_api__' + variant,
+-     python,
+-     args : [remix_api_test_script,
+-             '--' + variant,
+-             '--executablesDir', meson.current_build_dir(),
+-             '--artifactDir', remix_api_test_artifacts_dir ])
+-endif
+-
+-# Remix API Bridge App Tests
+-# Each x86 app runs against the client and server from a regular bridge build in _output.
+-bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device', 'async_readback_device' ]
+-if (cpu_family == 'x86')
+-foreach name : bridge_app_tests
+-  tests += executable(
+-      'test_' + name + '_x86',  files('test_' + name + '.cpp'),
+-      include_directories : [ public_include_path ],
+-      win_subsystem : 'console')
+-endforeach
+-endif
+-if (cpu_family == 'x86_64')
+-foreach name : bridge_app_tests
+-  test(name,
+-       python,
+-       args : [join_paths(meson.current_source_dir(), 'test_remix_api_bridge_app.py'),
+-               '--testExe', 'test_' + name + '_x86.exe',
+-               '--executablesDir', meson.current_build_dir(),
+-               '--bridgeDir', join_paths(meson.global_source_root(), '_output'),
+-               '--artifactDir', join_paths(meson.global_build_root(), 'test_artifacts', name) ],
+-       is_parallel : name != 'shared_heap_upload_device',
+-       timeout : 300)
+-endforeach
+-foreach mode : [ 'on', 'off' ]
+-  name = 'rewind_device_' + mode
+-  test(name,
+-       python,
+-       args : [join_paths(meson.current_source_dir(), 'test_remix_api_bridge_app.py'),
+-               '--testExe', 'test_rewind_device_x86.exe',
+-               '--executablesDir', meson.current_build_dir(),
+-               '--bridgeDir', join_paths(meson.global_source_root(), '_output'),
+-               '--artifactDir', join_paths(meson.global_build_root(), 'test_artifacts', name) ],
+-       env : { 'REMIX_REWIND_TEST_CASE' : mode },
+-       is_parallel : false,
+-       timeout : 300)
+-endforeach
+-foreach resource : [ 'surface', 'vb', 'ib' ]
+-  name = 'shared_heap_upload_device_oom_' + resource
+-  test(name,
+-       python,
+-       args : [join_paths(meson.current_source_dir(), 'test_remix_api_bridge_app.py'),
+-               '--testExe', 'test_shared_heap_upload_device_x86.exe',
+-               '--executablesDir', meson.current_build_dir(),
+-               '--bridgeDir', join_paths(meson.global_source_root(), '_output'),
+-               '--artifactDir', join_paths(meson.global_build_root(), 'test_artifacts', name) ],
+-       env : { 'REMIX_SHARED_UPLOAD_TEST_CASE' : 'oom_' + resource },
+-       is_parallel : false,
+-       timeout : 300)
+-endforeach
+-endif
+-if (cpu_family == 'x86_64')
+-test('async_readback_device_off',
+-     python,
+-     args : [join_paths(meson.current_source_dir(), 'test_remix_api_bridge_app.py'),
+-             '--testExe', 'test_async_readback_device_x86.exe',
+-             '--executablesDir', meson.current_build_dir(),
+-             '--bridgeDir', join_paths(meson.global_source_root(), '_output'),
+-             '--artifactDir', join_paths(meson.global_build_root(), 'test_artifacts', 'async_readback_device_off') ],
+-     env : { 'REMIX_ASYNC_READBACK_TEST_CASE' : 'off' },
+-     is_parallel : false,
+-     timeout : 300)
+-endif
+-alias_target('unit_tests', tests)
+-
++
++tests = []
++
++# Command History Test
++if (cpu_family == 'x86_64')
++cmd_history_exe = executable(
++    'command_history',  files('test_cmd_queue.cpp'),
++    include_directories : util_include_path,
++    dependencies : util_dep,
++    win_subsystem : 'console')
++test('command_history', cmd_history_exe)
++tests += cmd_history_exe
++endif
++
++# Remix API Serializing Test
++if (cpu_family == 'x86_64')
++    name_suff = 'x64'
++else
++    name_suff = 'x86'
++endif
++write_name = 'test_remix_api_write'
++write_exe = write_name + '_'  + name_suff
++tests += executable(
++    write_exe,  files(write_name + '.cpp'),
++    include_directories : [util_include_path, public_include_path ],
++    dependencies : util_dep,
++    win_subsystem : 'console',)
++read_name = 'test_remix_api_read'
++read_exe = read_name + '_'  + name_suff
++tests += executable(
++    read_exe,  files(read_name + '.cpp'),
++    include_directories : [util_include_path, public_include_path ],
++    dependencies : util_dep,
++    win_subsystem : 'console')
++
++# Bridge Logic Tests
++logic_tests = [ 'sent_state', 'query_results', 'ipc_queue_wait', 'upload_parts', 'present_semaphore', 'response_lifetime', 'shared_heap_allocator' ]
++foreach name : logic_tests
++  logic_exe = executable(
++      'test_' + name + '_' + name_suff,  files('test_' + name + '.cpp'),
++      include_directories : [ util_include_path, public_include_path, include_directories('../../../src/client') ],
++      dependencies : util_dep,
++      win_subsystem : 'console')
++  test(name, logic_exe)
++  tests += logic_exe
++endforeach
++
++# Rewind mode: the server side on a D3D9 device (x64), and the client's park through the bridge (x86 app).
++if (cpu_family == 'x86_64')
++rewind_server_exe = executable(
++    'test_rewind_server_x64',  files('test_rewind_server.cpp'),
++    include_directories : [ util_include_path, public_include_path, include_directories('../../../src/server') ],
++    dependencies : util_dep,
++    win_subsystem : 'console')
++test('rewind_server', rewind_server_exe, is_parallel : false)
++tests += rewind_server_exe
++else
++tests += executable(
++    'test_rewind_device_x86',  files('test_rewind_device.cpp'),
++    include_directories : [ util_include_path, public_include_path ],
++    dependencies : util_dep,
++    win_subsystem : 'console')
++endif
++
++if (cpu_family == 'x86_64')
++python = find_program('python')
++remix_api_test_script = join_paths(meson.current_source_dir(), 'test_remix_api.py')
++remix_api_test_artifacts_dir = join_paths(meson.global_build_root(), 'test_artifacts', 'remix_api')
++variant = 'x64_2_x86'
++test('remix_api__' + variant,
++     python,
++     args : [remix_api_test_script,
++             '--' + variant,
++             '--executablesDir', meson.current_build_dir(),
++             '--artifactDir', remix_api_test_artifacts_dir ])
++variant = 'x86_2_x64'
++test('remix_api__' + variant,
++     python,
++     args : [remix_api_test_script,
++             '--' + variant,
++             '--executablesDir', meson.current_build_dir(),
++             '--artifactDir', remix_api_test_artifacts_dir ])
++endif
++
++# Remix API Bridge App Tests
++# Each x86 app runs against the client and server from a regular bridge build in _output.
++bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device', 'async_readback_device', 'gi_device' ]
++if (cpu_family == 'x86')
++foreach name : bridge_app_tests
++  tests += executable(
++      'test_' + name + '_x86',  files('test_' + name + '.cpp'),
++      include_directories : [ public_include_path ],
++      win_subsystem : 'console')
++endforeach
++endif
++if (cpu_family == 'x86_64')
++foreach name : bridge_app_tests
++  test(name,
++       python,
++       args : [join_paths(meson.current_source_dir(), 'test_remix_api_bridge_app.py'),
++               '--testExe', 'test_' + name + '_x86.exe',
++               '--executablesDir', meson.current_build_dir(),
++               '--bridgeDir', join_paths(meson.global_source_root(), '_output'),
++               '--artifactDir', join_paths(meson.global_build_root(), 'test_artifacts', name) ],
++       is_parallel : name != 'shared_heap_upload_device',
++       timeout : 300)
++endforeach
++foreach mode : [ 'on', 'off' ]
++  name = 'rewind_device_' + mode
++  test(name,
++       python,
++       args : [join_paths(meson.current_source_dir(), 'test_remix_api_bridge_app.py'),
++               '--testExe', 'test_rewind_device_x86.exe',
++               '--executablesDir', meson.current_build_dir(),
++               '--bridgeDir', join_paths(meson.global_source_root(), '_output'),
++               '--artifactDir', join_paths(meson.global_build_root(), 'test_artifacts', name) ],
++       env : { 'REMIX_REWIND_TEST_CASE' : mode },
++       is_parallel : false,
++       timeout : 300)
++endforeach
++foreach resource : [ 'surface', 'vb', 'ib' ]
++  name = 'shared_heap_upload_device_oom_' + resource
++  test(name,
++       python,
++       args : [join_paths(meson.current_source_dir(), 'test_remix_api_bridge_app.py'),
++               '--testExe', 'test_shared_heap_upload_device_x86.exe',
++               '--executablesDir', meson.current_build_dir(),
++               '--bridgeDir', join_paths(meson.global_source_root(), '_output'),
++               '--artifactDir', join_paths(meson.global_build_root(), 'test_artifacts', name) ],
++       env : { 'REMIX_SHARED_UPLOAD_TEST_CASE' : 'oom_' + resource },
++       is_parallel : false,
++       timeout : 300)
++endforeach
++endif
++if (cpu_family == 'x86_64')
++test('async_readback_device_off',
++     python,
++     args : [join_paths(meson.current_source_dir(), 'test_remix_api_bridge_app.py'),
++             '--testExe', 'test_async_readback_device_x86.exe',
++             '--executablesDir', meson.current_build_dir(),
++             '--bridgeDir', join_paths(meson.global_source_root(), '_output'),
++             '--artifactDir', join_paths(meson.global_build_root(), 'test_artifacts', 'async_readback_device_off') ],
++     env : { 'REMIX_ASYNC_READBACK_TEST_CASE' : 'off' },
++     is_parallel : false,
++     timeout : 300)
++endif
++alias_target('unit_tests', tests)
++
+diff --git a/bridge/test/rtx/unit/test_gi_device.cpp b/bridge/test/rtx/unit/test_gi_device.cpp
+new file mode 100644
+index 00000000..2dceeb68
+--- /dev/null
++++ b/bridge/test/rtx/unit/test_gi_device.cpp
+@@ -0,0 +1,625 @@
++/*
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++
++// Runs the GI worker's pattern pass into DEFAULT-pool render target textures through RemixBridge_GiOpen /
++// RemixBridge_GiSolve / RemixBridge_GiPoll, reads them back with GetRenderTargetData and checks every texel.
++// REMIX_GI_TEST_CASE: on (default), compute (server.giMaxLevel = 1), off (client.giServer = False, expects E_NOTIMPL),
++// stock (server.giServer = False, expects level none). REMIX_GI_TEST_DXVK: a d3d9vk_x64.dll for the server, so the
++// worker matches DXVK's GPU. REMIX_GI_TEST_SCENE: a file with a scene, its lamps, an offline solve of it and the room
++// means of a path-traced reference. The test submits the scene through RemixBridge_GiSubmit, solves every lamp's
++// layers and compares them with both.
++
++#include <algorithm>
++#include <cmath>
++#include <cstdio>
++#include <cstring>
++#include <fstream>
++#include <stdexcept>
++#include <string>
++#include <vector>
++
++#include <wrl/client.h>
++
++#include "test_remix_api_bridge_app.h"
++
++using Microsoft::WRL::ComPtr;
++using namespace bridge_app_test;
++
++namespace {
++  using PFN_GiOpen = HRESULT (__stdcall*)(uint32_t*);
++  using PFN_GiSolve = HRESULT (__stdcall*)(IDirect3DTexture9*, uint32_t, uint32_t, uint32_t*);
++  using PFN_GiSubmit = HRESULT (__stdcall*)(const void*, uint32_t, uint32_t, uint32_t*);
++  using PFN_GiTicket = HRESULT (__stdcall*)(uint32_t);
++  using PFN_GiReadCounters = HRESULT (__stdcall*)(uint32_t*, uint32_t);
++
++  // Word indices of RemixBridge_GiReadCounters, from the block's level field on (util_gi.h).
++  enum Counter { kLevel, kCapBits, kHeartbeat, kWorkerHeartbeat, kLastError, kJobsQueued, kJobsDone, kGpuUsLast,
++                 kUploadUsLast, kUploadUsMax, kUploadBytesMax, kBehaviorFlags, kSliceUsMax, kSlicesLast, kCounterCount = 14 };
++
++  constexpr UINT kWindowSize = 64;
++
++  PFN_GiOpen g_open = nullptr;
++  PFN_GiSolve g_solve = nullptr;
++  PFN_GiSubmit g_submit = nullptr;
++  PFN_GiTicket g_poll = nullptr;
++  PFN_GiTicket g_cancel = nullptr;
++  PFN_GiReadCounters g_readCounters = nullptr;
++
++  void check(HRESULT result, const char* pCall) {
++    if (FAILED(result)) {
++      std::printf("FAILED: %s returned 0x%08lX.\n", pCall, static_cast<unsigned long>(result));
++      throw std::runtime_error(pCall);
++    }
++  }
++
++  void expect(HRESULT result, HRESULT expected, const char* pCall) {
++    if (result != expected) {
++      std::printf("FAILED: %s returned 0x%08lX, expected 0x%08lX.\n", pCall,
++                  static_cast<unsigned long>(result), static_cast<unsigned long>(expected));
++      throw std::runtime_error(pCall);
++    }
++  }
++
++  HWND createWindow() {
++    WNDCLASSW windowClass = {};
++    windowClass.lpfnWndProc = DefWindowProcW;
++    windowClass.hInstance = GetModuleHandleW(nullptr);
++    windowClass.lpszClassName = L"BridgeGiTest";
++    RegisterClassW(&windowClass);
++    return CreateWindowExW(0, windowClass.lpszClassName, L"", WS_OVERLAPPEDWINDOW,
++                           0, 0, kWindowSize, kWindowSize, nullptr, nullptr, windowClass.hInstance, nullptr);
++  }
++
++  std::vector<uint32_t> counters() {
++    std::vector<uint32_t> values(kCounterCount);
++    check(g_readCounters(values.data(), kCounterCount), "RemixBridge_GiReadCounters");
++    return values;
++  }
++
++  float halfToFloat(uint16_t half) {
++    const int exponent = (half >> 10) & 31;
++    const int mantissa = half & 1023;
++    const float value = exponent == 0 ? std::ldexp(float(mantissa), -24) : std::ldexp(float(mantissa | 1024), exponent - 25);
++    return (half & 0x8000) ? -value : value;
++  }
++
++  struct Target {
++    ComPtr<IDirect3DTexture9> pTexture;
++    ComPtr<IDirect3DSurface9> pReadback;
++    UINT width = 0;
++    UINT height = 0;
++    D3DFORMAT format = D3DFMT_A16B16G16R16F;
++  };
++
++  Target createTarget(IDirect3DDevice9* pDevice, UINT width, UINT height, D3DFORMAT format) {
++    Target target;
++    target.width = width;
++    target.height = height;
++    target.format = format;
++    check(pDevice->CreateTexture(width, height, 1, D3DUSAGE_RENDERTARGET, format, D3DPOOL_DEFAULT, &target.pTexture, nullptr),
++          "CreateTexture (target)");
++    check(pDevice->CreateOffscreenPlainSurface(width, height, format, D3DPOOL_SYSTEMMEM, &target.pReadback, nullptr),
++          "CreateOffscreenPlainSurface (read-back)");
++    // A colour the pattern never has, so a missing copy fails the check.
++    ComPtr<IDirect3DSurface9> pLevel;
++    check(target.pTexture->GetSurfaceLevel(0, &pLevel), "GetSurfaceLevel");
++    check(pDevice->ColorFill(pLevel.Get(), nullptr, 0x00000000), "ColorFill");
++    return target;
++  }
++
++  // Presents between polls, as a game does, so the server reaches its poll points.
++  unsigned waitForTicket(IDirect3DDevice9* pDevice, uint32_t ticket) {
++    const ULONGLONG deadline = GetTickCount64() + 10000;
++    for (unsigned polls = 1;; ++polls) {
++      const HRESULT result = g_poll(ticket);
++      if (result == S_OK) {
++        return polls;
++      }
++      if (result != S_FALSE) {
++        expect(result, S_OK, "RemixBridge_GiPoll");
++      }
++      if (GetTickCount64() >= deadline) {
++        throw std::runtime_error("The GI pass did not finish within ten seconds");
++      }
++      check(pDevice->Present(nullptr, nullptr, nullptr, nullptr), "Present");
++    }
++  }
++
++  // Presents until the ticket is answered and returns the answer.
++  HRESULT waitForAnswer(IDirect3DDevice9* pDevice, uint32_t ticket) {
++    const ULONGLONG deadline = GetTickCount64() + 30000;
++    HRESULT result;
++    while ((result = g_poll(ticket)) == S_FALSE) {
++      if (GetTickCount64() >= deadline) {
++        throw std::runtime_error("The GI ticket was not answered within thirty seconds");
++      }
++      check(pDevice->Present(nullptr, nullptr, nullptr, nullptr), "Present");
++    }
++    return result;
++  }
++
++  // Sends a blob in parts of a submit slot's size, presenting while both slots wait for the server.
++  uint32_t submitBlob(IDirect3DDevice9* pDevice, const uint8_t* pData, size_t size, uint32_t kind) {
++    constexpr size_t kPart = 448 * 1024;
++    constexpr uint32_t kMore = 0x100;
++    const ULONGLONG deadline = GetTickCount64() + 10000;
++    uint32_t ticket = 0;
++    for (size_t at = 0; at < size;) {
++      const size_t part = std::min(kPart, size - at);
++      const bool last = at + part == size;
++      const HRESULT result = g_submit(pData + at, uint32_t(part), kind | (last ? 0 : kMore), last ? &ticket : nullptr);
++      if (result == D3DERR_WASSTILLDRAWING && GetTickCount64() < deadline) {
++        check(pDevice->Present(nullptr, nullptr, nullptr, nullptr), "Present");
++        continue;
++      }
++      check(result, "RemixBridge_GiSubmit");
++      at += part;
++    }
++    return ticket;
++  }
++
++  float toByte(float value) {
++    return std::min(std::max(value, 0.0f), 1.0f) * 255.0f;
++  }
++
++  // The file tools/gi_server_test writes with --dump.
++  struct SceneFile {
++    std::vector<uint8_t> bytes;
++    uint32_t texels = 0;
++    uint32_t lamps = 0;
++    const uint8_t* pScene = nullptr;
++    uint32_t sceneSize = 0;
++    const uint8_t* pLamps = nullptr;
++    uint32_t lampsSize = 0;
++    const int32_t* pRooms = nullptr;
++    const float* pDirect = nullptr;    // lamps x texels x 4, the offline solve
++    const float* pIndirect = nullptr;
++    const float* pReference = nullptr;  // lamps x 5 rooms x (direct, indirect): green room means of the path-traced reference
++  };
++  constexpr int kRooms = 5;
++
++  SceneFile loadScene(const char* pPath) {
++    SceneFile file;
++    std::ifstream in(pPath, std::ios::binary);
++    file.bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
++    uint32_t head[5] = {};
++    if (file.bytes.size() >= sizeof(head)) {
++      memcpy(head, file.bytes.data(), sizeof(head));
++    }
++    file.texels = head[1];
++    file.lamps = head[2];
++    file.sceneSize = head[3];
++    file.lampsSize = head[4];
++    const size_t layers = size_t(file.lamps) * file.texels * 16;
++    if (head[0] != 0x34524947 ||
++        file.bytes.size() != sizeof(head) + file.sceneSize + file.lampsSize + size_t(file.texels) * 4 + 2 * layers + size_t(file.lamps) * kRooms * 8) {
++      throw std::runtime_error("REMIX_GI_TEST_SCENE is not a scene file of this version");
++    }
++    file.pScene = file.bytes.data() + sizeof(head);
++    file.pLamps = file.pScene + file.sceneSize;
++    file.pRooms = reinterpret_cast<const int32_t*>(file.pLamps + file.lampsSize);
++    file.pDirect = reinterpret_cast<const float*>(file.pRooms + file.texels);
++    file.pIndirect = file.pDirect + layers / 4;
++    file.pReference = file.pIndirect + layers / 4;
++    return file;
++  }
++
++  // Solves one layer of the scene and returns it by texel, read from the pixel the scene gave each texel (texels - 1 - i).
++  std::vector<float> solveLayer(IDirect3DDevice9* pDevice, const Target& target, uint32_t texels, uint32_t layer, uint32_t sceneTicket, const char* pName) {
++    uint32_t ticket = 0;
++    check(g_solve(target.pTexture.Get(), layer, sceneTicket, &ticket), "RemixBridge_GiSolve (scene)");
++    expect(waitForAnswer(pDevice, ticket), S_OK, "RemixBridge_GiPoll (scene layer)");
++    const auto values = counters();
++    std::printf("  %s: %u GPU slices, longest %u us, %u us of GPU time, upload %u us.\n", pName, values[kSlicesLast], values[kSliceUsMax],
++                values[kGpuUsLast], values[kUploadUsLast]);
++    ComPtr<IDirect3DSurface9> pLevel;
++    check(target.pTexture->GetSurfaceLevel(0, &pLevel), "GetSurfaceLevel");
++    check(pDevice->GetRenderTargetData(pLevel.Get(), target.pReadback.Get()), "GetRenderTargetData");
++    D3DLOCKED_RECT lockedRect;
++    check(target.pReadback->LockRect(&lockedRect, nullptr, D3DLOCK_READONLY), "LockRect");
++    std::vector<float> layerValues(size_t(texels) * 4);
++    for (uint32_t i = 0; i < texels; ++i) {
++      const uint32_t pixel = texels - 1 - i;
++      const uint8_t* pRow = (const uint8_t*) lockedRect.pBits + size_t(pixel / target.width) * lockedRect.Pitch;
++      for (int c = 0; c < 4; ++c) {
++        if (target.format == D3DFMT_A16B16G16R16F) {
++          layerValues[size_t(i) * 4 + c] = halfToFloat(((const uint16_t*) pRow)[size_t(pixel % target.width) * 4 + c]);
++        } else {
++          const uint32_t texel = ((const uint32_t*) pRow)[pixel % target.width];
++          layerValues[size_t(i) * 4 + c] = float((texel >> (c == 3 ? 24 : 16 - 8 * c)) & 255u) / 255.0f;
++        }
++      }
++    }
++    check(target.pReadback->UnlockRect(), "UnlockRect");
++    return layerValues;
++  }
++
++  // Counts the texels whose colour is more than the tolerance (in 1/255 of the 8-bit range) from scale x the expected one,
++  // and the texels that hold light where the expected layer holds exactly none (a leak).
++  // pPositions: the scene's texels (GiSceneTexel, ten words each), to name the first texels that differ.
++  void compareLayer(const std::vector<float>& got, const float* pExpectedA, const float* pExpectedB, float scale, float tolerance, const char* pName,
++                    const float* pPositions = nullptr) {
++    const size_t texels = got.size() / 4;
++    size_t off = 0;
++    size_t leaks = 0;
++    float worst = 0.0f;
++    for (size_t i = 0; i < texels; ++i) {
++      float difference = 0.0f;
++      bool dark = true;
++      bool lit = false;
++      for (int c = 0; c < 3; ++c) {
++        const float expected = scale * (pExpectedA[i * 4 + c] + (pExpectedB != nullptr ? pExpectedB[i * 4 + c] : 0.0f));
++        difference = std::max(difference, std::fabs(toByte(got[i * 4 + c]) - toByte(expected)));
++        dark = dark && expected == 0.0f;
++        lit = lit || got[i * 4 + c] != 0.0f;
++      }
++      worst = std::max(worst, difference);
++      if (difference > tolerance && off < 8 && pPositions != nullptr) {
++        std::printf("      texel %zu at (%.2f, %.2f, %.2f): green %.4f, expected %.4f.\n", i, pPositions[i * 10], pPositions[i * 10 + 1], pPositions[i * 10 + 2],
++                    got[i * 4 + 1], scale * (pExpectedA[i * 4 + 1] + (pExpectedB != nullptr ? pExpectedB[i * 4 + 1] : 0.0f)));
++      }
++      off += difference > tolerance ? 1 : 0;
++      leaks += dark && lit ? 1 : 0;
++    }
++    std::printf("    %s against the offline solve: %.2f %% of %zu texels within %.1f/255, worst %.2f/255, %zu leaks.\n", pName,
++                100.0 * double(texels - off) / double(texels), texels, tolerance, worst, leaks);
++    if (off * 1000 > texels || leaks != 0) {
++      throw std::runtime_error("A GI layer differs from the offline solve");
++    }
++  }
++
++  // The scene of tools/gi_server_test through the bridge: every lamp's direct and indirect layer against the offline
++  // solve by texel and against the path-traced reference by room mean, then a lamp change, a stale scene and a bad blob.
++  void testScene(IDirect3DDevice9* pDevice, const char* pPath) {
++    logLine("Solving the synthetic scene through the bridge...");
++    const SceneFile file = loadScene(pPath);
++    const uint32_t sceneTicket = submitBlob(pDevice, file.pScene, file.sceneSize, 1);
++    expect(waitForAnswer(pDevice, sceneTicket), S_OK, "RemixBridge_GiPoll (scene)");
++    auto values = counters();
++    std::printf("  Scene of %u KB in %u parts, %u texels: structures and links in %u GPU slices, longest %u us, %u us of GPU time.\n",
++                file.sceneSize / 1024, (file.sceneSize + 448 * 1024 - 1) / (448 * 1024), file.texels, values[kSlicesLast], values[kSliceUsMax], values[kGpuUsLast]);
++    expect(waitForAnswer(pDevice, submitBlob(pDevice, file.pLamps, file.lampsSize, 2)), S_OK, "RemixBridge_GiPoll (lamps)");
++
++    const UINT width = 128;
++    const Target target = createTarget(pDevice, width, (file.texels + width - 1) / width, D3DFMT_A16B16G16R16F);
++    const size_t layer = size_t(file.texels) * 4;
++    for (uint32_t lamp = 0; lamp < file.lamps; ++lamp) {
++      char name[32];
++      std::snprintf(name, sizeof(name), "Lamp %u direct", lamp);
++      const std::vector<float> direct = solveLayer(pDevice, target, file.texels, lamp | (1u << 16), sceneTicket, name);
++      compareLayer(direct, file.pDirect + lamp * layer, nullptr, 1.0f, 1.0f, "direct");
++      std::snprintf(name, sizeof(name), "Lamp %u indirect", lamp);
++      const std::vector<float> indirect = solveLayer(pDevice, target, file.texels, lamp, sceneTicket, name);
++      compareLayer(indirect, file.pIndirect + lamp * layer, nullptr, 1.0f, 1.0f, "indirect",
++                   reinterpret_cast<const float*>(file.pScene + file.sceneSize - size_t(file.texels) * 40));
++
++      // Room means of the green channel against the path-traced reference: within 5 %, or 0.5/255 in a nearly dark room.
++      double mean[kRooms][2] = {};
++      unsigned count[kRooms] = {};
++      for (uint32_t i = 0; i < file.texels; ++i) {
++        const int room = std::min(std::max(file.pRooms[i], 0), kRooms - 1);
++        ++count[room];
++        mean[room][0] += direct[size_t(i) * 4 + 1];
++        mean[room][1] += indirect[size_t(i) * 4 + 1];
++      }
++      bool within = true;
++      std::printf("    room means, bridge / path-traced reference:");
++      for (int room = 1; room < kRooms; ++room) {
++        for (int k = 0; k < 2; ++k) {
++          const double got = count[room] ? mean[room][k] / count[room] : 0.0;
++          const double reference = file.pReference[(lamp * kRooms + room) * 2 + k];
++          std::printf(" %.4f/%.4f", got, reference);
++          within = within && std::fabs(got - reference) <= std::max(0.05 * reference, 0.5 / 255.0);
++        }
++      }
++      std::printf("\n");
++      if (!within) {
++        throw std::runtime_error("A room mean differs from the path-traced reference");
++      }
++    }
++
++    logLine("Testing a lamp change, an 8-bit target, a stale scene ticket and a refused blob...");
++    std::vector<uint8_t> lamps(file.pLamps, file.pLamps + file.lampsSize);
++    for (int c = 0; c < 3; ++c) {
++      float colour;
++      memcpy(&colour, lamps.data() + 16 + 4 * c, 4);  // GiLamp: position, radius, colour, reserved, box
++      colour *= 0.5f;
++      memcpy(lamps.data() + 16 + 4 * c, &colour, 4);
++    }
++    expect(waitForAnswer(pDevice, submitBlob(pDevice, lamps.data(), lamps.size(), 2)), S_OK, "RemixBridge_GiPoll (changed lamps)");
++    const std::vector<float> halved = solveLayer(pDevice, target, file.texels, 2u << 16, sceneTicket, "Lamp 0 at half colour, direct + indirect");
++    compareLayer(halved, file.pDirect, file.pIndirect, 0.5f, 1.0f, "sum");
++    if (counters()[kSlicesLast] == 0) {
++      throw std::runtime_error("A changed lamp was not solved again");
++    }
++    if (file.lamps > 1) {
++      solveLayer(pDevice, target, file.texels, 1, sceneTicket, "Lamp 1 indirect, unchanged");
++      if (counters()[kSlicesLast] != 0) {
++        throw std::runtime_error("An unchanged lamp was solved again");
++      }
++    }
++    const Target bytes = createTarget(pDevice, width, (file.texels + width - 1) / width, D3DFMT_A8R8G8B8);
++    const std::vector<float> sum8 = solveLayer(pDevice, bytes, file.texels, 2u << 16, sceneTicket, "Lamp 0 at half colour into A8R8G8B8");
++    compareLayer(sum8, file.pDirect, file.pIndirect, 0.5f, 1.5f, "8-bit sum");
++
++    uint32_t ticket = 0;
++    check(g_solve(target.pTexture.Get(), 0, sceneTicket + 1000, &ticket), "RemixBridge_GiSolve (stale scene)");
++    expect(waitForAnswer(pDevice, ticket), D3DERR_INVALIDCALL, "RemixBridge_GiPoll (stale scene)");
++    check(g_solve(target.pTexture.Get(), 200, sceneTicket, &ticket), "RemixBridge_GiSolve (no such lamp)");
++    expect(waitForAnswer(pDevice, ticket), D3DERR_INVALIDCALL, "RemixBridge_GiPoll (no such lamp)");
++    std::vector<uint8_t> broken(file.pScene, file.pScene + file.sceneSize);
++    broken[sizeof(uint32_t) * 2] ^= 1;  // one triangle more or less than the blob holds
++    expect(waitForAnswer(pDevice, submitBlob(pDevice, broken.data(), broken.size(), 1)), D3DERR_INVALIDCALL, "RemixBridge_GiPoll (refused scene)");
++    solveLayer(pDevice, target, file.texels, 1, sceneTicket, "Lamp 1 indirect after the refused scene");
++    expect(g_submit(broken.data(), 449 * 1024, 1, &ticket), D3DERR_INVALIDCALL, "RemixBridge_GiSubmit (part over the slot size)");
++  }
++
++  // Compares every texel with the pattern of gi_pattern.comp for this ticket and layer.
++  void checkPattern(IDirect3DDevice9* pDevice, const Target& target, uint32_t layer, uint32_t ticket) {
++    ComPtr<IDirect3DSurface9> pLevel;
++    check(target.pTexture->GetSurfaceLevel(0, &pLevel), "GetSurfaceLevel");
++    check(pDevice->GetRenderTargetData(pLevel.Get(), target.pReadback.Get()), "GetRenderTargetData");
++    D3DLOCKED_RECT lockedRect;
++    check(target.pReadback->LockRect(&lockedRect, nullptr, D3DLOCK_READONLY), "LockRect");
++    unsigned wrong = 0;
++    for (uint32_t y = 0; y < target.height; ++y) {
++      const uint8_t* pRow = (const uint8_t*) lockedRect.pBits + size_t(y) * lockedRect.Pitch;
++      for (uint32_t x = 0; x < target.width; ++x) {
++        const uint32_t expected[4] = { (x + ticket) & 255u, (y + layer * 37u) & 255u, (x ^ y) & 255u, 255u };
++        bool same = true;
++        if (target.format == D3DFMT_A16B16G16R16F) {
++          const uint16_t* pTexel = (const uint16_t*) pRow + size_t(x) * 4;
++          for (int c = 0; c < 4; ++c) {
++            same = same && halfToFloat(pTexel[c]) == float(expected[c]) / 256.0f;
++          }
++        } else {
++          const uint32_t texel = ((const uint32_t*) pRow)[x];
++          same = texel == ((expected[3] << 24) | (expected[0] << 16) | (expected[1] << 8) | expected[2]);
++        }
++        wrong += same ? 0 : 1;
++      }
++    }
++    check(target.pReadback->UnlockRect(), "UnlockRect");
++    if (wrong != 0) {
++      std::printf("  %u of %u texels differ from the pattern.\n", wrong, target.width * target.height);
++      throw std::runtime_error("The GI result differs from the pattern");
++    }
++  }
++
++  void testSolve(IDirect3DDevice9* pDevice, const Target& target, uint32_t layer) {
++    uint32_t ticket = 0;
++    check(g_solve(target.pTexture.Get(), layer, 0, &ticket), "RemixBridge_GiSolve");
++    const unsigned polls = waitForTicket(pDevice, ticket);
++    checkPattern(pDevice, target, layer, ticket);
++    expect(g_poll(ticket), D3DERR_INVALIDCALL, "RemixBridge_GiPoll of a finished ticket");
++    const auto values = counters();
++    std::printf("  %ux%u %s layer %u matched after %u polls: worker %u us, upload %u us.\n", target.width, target.height,
++                target.format == D3DFMT_A16B16G16R16F ? "A16B16G16R16F" : "A8R8G8B8", layer, polls,
++                values[kGpuUsLast], values[kUploadUsLast]);
++  }
++
++  // Time from the first of eight 2048x2048 A16B16G16R16F copies to their event on the server's renderer, which is the
++  // frame's GPU work without the Present wait. First the worker is idle, then a 512x512 pass (one dispatch) is always queued.
++  void measureLoad(IDirect3DDevice9* pDevice, const Target& busyTarget) {
++    logLine("Measuring frame time with the worker idle and busy...");
++    ComPtr<IDirect3DSurface9> pA;
++    ComPtr<IDirect3DSurface9> pB;
++    check(pDevice->CreateRenderTarget(2048, 2048, D3DFMT_A16B16G16R16F, D3DMULTISAMPLE_NONE, 0, FALSE, &pA, nullptr), "CreateRenderTarget (load)");
++    check(pDevice->CreateRenderTarget(2048, 2048, D3DFMT_A16B16G16R16F, D3DMULTISAMPLE_NONE, 0, FALSE, &pB, nullptr), "CreateRenderTarget (load)");
++    ComPtr<IDirect3DQuery9> pQuery;
++    check(pDevice->CreateQuery(D3DQUERYTYPE_EVENT, &pQuery), "CreateQuery");
++    LARGE_INTEGER frequency;
++    QueryPerformanceFrequency(&frequency);
++    for (int busy = 0; busy < 2; ++busy) {
++      std::vector<double> frames;
++      uint32_t ticket = 0;
++      unsigned passes = 0;
++      for (int frame = 0; frame < 150; ++frame) {
++        if (busy && (ticket == 0 || g_poll(ticket) != S_FALSE)) {
++          check(g_solve(busyTarget.pTexture.Get(), frame & 7, 0, &ticket), "RemixBridge_GiSolve (load)");
++          ++passes;
++        }
++        LARGE_INTEGER start;
++        LARGE_INTEGER end;
++        QueryPerformanceCounter(&start);
++        for (int i = 0; i < 8; ++i) {
++          check(pDevice->StretchRect((i & 1) ? pB.Get() : pA.Get(), nullptr, (i & 1) ? pA.Get() : pB.Get(), nullptr, D3DTEXF_LINEAR), "StretchRect");
++        }
++        check(pQuery->Issue(D3DISSUE_END), "Issue");
++        while (pQuery->GetData(nullptr, 0, D3DGETDATA_FLUSH) == S_FALSE) {
++        }
++        QueryPerformanceCounter(&end);
++        check(pDevice->Present(nullptr, nullptr, nullptr, nullptr), "Present");
++        if (frame >= 30) {
++          frames.push_back(double(end.QuadPart - start.QuadPart) * 1000.0 / double(frequency.QuadPart));
++        }
++      }
++      if (ticket != 0 && g_poll(ticket) == S_FALSE) {
++        waitForTicket(pDevice, ticket);
++      }
++      std::sort(frames.begin(), frames.end());
++      double sum = 0;
++      for (double ms : frames) {
++        sum += ms;
++      }
++      std::printf("  Worker %s: copies mean %.2f ms, median %.2f ms, p95 %.2f ms, max %.2f ms over %zu frames, %u passes.\n",
++                  busy ? "busy" : "idle", sum / frames.size(), frames[frames.size() / 2], frames[frames.size() * 95 / 100],
++                  frames.back(), frames.size(), passes);
++    }
++  }
++
++  // Presents between calls, as a game does, so the open command reaches the server.
++  HRESULT openGi(IDirect3DDevice9* pDevice, uint32_t& level) {
++    const ULONGLONG deadline = GetTickCount64() + 10000;
++    HRESULT result;
++    while ((result = g_open(&level)) == S_FALSE) {
++      if (GetTickCount64() >= deadline) {
++        throw std::runtime_error("The GI server did not answer within ten seconds");
++      }
++      check(pDevice->Present(nullptr, nullptr, nullptr, nullptr), "Present");
++      Sleep(5);
++    }
++    return result;
++  }
++
++  void runOn(IDirect3DDevice9* pDevice) {
++    logLine("Opening the GI server...");
++    uint32_t level = 0;
++    check(openGi(pDevice, level), "RemixBridge_GiOpen");
++    auto values = counters();
++    std::printf("  Level %u, capabilities 0x%x, device BehaviorFlags 0x%08x.\n", level, values[kCapBits], values[kBehaviorFlags]);
++    if (level == 0) {
++      throw std::runtime_error("The GI server reported level none");
++    }
++    char mode[8] = {};
++    GetEnvironmentVariableA("REMIX_GI_TEST_CASE", mode, sizeof(mode));
++    if (std::string(mode) == "compute" && level != 1) {
++      throw std::runtime_error("server.giMaxLevel = 1 did not keep the worker on the compute level");
++    }
++
++    logLine("Testing passes into A16B16G16R16F and A8R8G8B8 targets...");
++    const Target patch = createTarget(pDevice, 64, 64, D3DFMT_A16B16G16R16F);
++    const Target lightBuffer = createTarget(pDevice, 200, 200, D3DFMT_A16B16G16R16F);  // 320 KB, a light buffer of 40 k texels
++    const Target colour = createTarget(pDevice, 256, 256, D3DFMT_A8R8G8B8);
++    const Target large = createTarget(pDevice, 512, 512, D3DFMT_A16B16G16R16F);        // 2 MB, more than the default budget
++    testSolve(pDevice, patch, 3);
++    testSolve(pDevice, lightBuffer, 0);
++    testSolve(pDevice, lightBuffer, 1);
++    testSolve(pDevice, colour, 5);
++    testSolve(pDevice, large, 2);
++
++    logLine("Testing a superseded solve, a cancel and the refusals...");
++    uint32_t first = 0;
++    uint32_t second = 0;
++    check(g_solve(patch.pTexture.Get(), 7, 0, &first), "RemixBridge_GiSolve (first)");
++    check(g_solve(patch.pTexture.Get(), 7, 0, &second), "RemixBridge_GiSolve (second)");
++    waitForTicket(pDevice, second);
++    waitForTicket(pDevice, first);
++    checkPattern(pDevice, patch, 7, second);
++
++    uint32_t cancelled = 0;
++    check(g_solve(colour.pTexture.Get(), 9, 0, &cancelled), "RemixBridge_GiSolve (cancel)");
++    check(g_cancel(cancelled), "RemixBridge_GiCancel");
++    expect(g_poll(cancelled), D3DERR_INVALIDCALL, "RemixBridge_GiPoll of a cancelled ticket");
++    testSolve(pDevice, colour, 4);
++
++    expect(g_poll(0x7fffffff), D3DERR_INVALIDCALL, "RemixBridge_GiPoll of an unknown ticket");
++    ComPtr<IDirect3DTexture9> pManaged;
++    check(pDevice->CreateTexture(16, 16, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &pManaged, nullptr), "CreateTexture (managed)");
++    uint32_t refused = 0;
++    expect(g_solve(pManaged.Get(), 0, 0, &refused), D3DERR_INVALIDCALL, "RemixBridge_GiSolve (managed)");
++
++    char scene[MAX_PATH] = {};
++    if (GetEnvironmentVariableA("REMIX_GI_TEST_SCENE", scene, sizeof(scene)) != 0) {
++      testScene(pDevice, scene);
++    }
++
++    measureLoad(pDevice, large);
++
++    values = counters();
++    std::printf("  Jobs %u queued, %u answered; longest upload %u us; largest copy %u bytes; heartbeat %u.\n",
++                values[kJobsQueued], values[kJobsDone], values[kUploadUsMax], values[kUploadBytesMax], values[kHeartbeat]);
++  }
++}
++
++int main() {
++  std::setvbuf(stdout, nullptr, _IONBF, 0);
++  char mode[8] = {};
++  GetEnvironmentVariableA("REMIX_GI_TEST_CASE", mode, sizeof(mode));
++  const std::string testCase = mode[0] ? mode : "on";
++  char dxvk[MAX_PATH] = {};
++  GetEnvironmentVariableA("REMIX_GI_TEST_DXVK", dxvk, sizeof(dxvk));
++  const HWND hWnd = createWindow();
++  if (hWnd == nullptr) {
++    logLine("FAILED: Could not create a test window.");
++    return 1;
++  }
++  bool passed = false;
++  try {
++    // The client and the server read their options from .trex/bridge.conf, as in test_query_event_device.
++    std::ofstream config(".trex/bridge.conf", std::ios::app);
++    config << "client.giServer = " << (testCase == "off" ? "False" : "True") << "\n"
++           << "server.giServer = " << (testCase == "stock" ? "False" : "True") << "\n"
++           << "server.giMaxLevel = " << (testCase == "compute" ? 1 : 2) << "\n"
++           << "sendCreateFunctionServerResponses = True\n";
++    if (dxvk[0] != 0) {
++      if (!CopyFileA(dxvk, ".trex\\d3d9vk_x64.dll", FALSE)) {
++        throw std::runtime_error("Could not copy REMIX_GI_TEST_DXVK");
++      }
++      config << "server.useVanillaDxvk = True\n";
++    }
++    config.close();
++    std::printf("Mode %s, server renderer %s.\n", testCase.c_str(), dxvk[0] ? "DXVK" : "system Direct3D 9");
++    const HMODULE hClient = loadBridgeClient();
++    if (hClient == nullptr) {
++      throw std::runtime_error("loadBridgeClient");
++    }
++    g_open = reinterpret_cast<PFN_GiOpen>(GetProcAddress(hClient, "RemixBridge_GiOpen"));
++    g_solve = reinterpret_cast<PFN_GiSolve>(GetProcAddress(hClient, "RemixBridge_GiSolve"));
++    g_submit = reinterpret_cast<PFN_GiSubmit>(GetProcAddress(hClient, "RemixBridge_GiSubmit"));
++    g_poll = reinterpret_cast<PFN_GiTicket>(GetProcAddress(hClient, "RemixBridge_GiPoll"));
++    g_cancel = reinterpret_cast<PFN_GiTicket>(GetProcAddress(hClient, "RemixBridge_GiCancel"));
++    g_readCounters = reinterpret_cast<PFN_GiReadCounters>(GetProcAddress(hClient, "RemixBridge_GiReadCounters"));
++    if (g_open == nullptr || g_solve == nullptr || g_submit == nullptr || g_poll == nullptr || g_cancel == nullptr || g_readCounters == nullptr) {
++      throw std::runtime_error("The client does not export the GI functions");
++    }
++    const auto pfnCreate = reinterpret_cast<PFN_Direct3DCreate9>(GetProcAddress(hClient, "Direct3DCreate9"));
++    ComPtr<IDirect3D9> pD3D;
++    pD3D.Attach(pfnCreate != nullptr ? pfnCreate(D3D_SDK_VERSION) : nullptr);
++    if (pD3D == nullptr) {
++      throw std::runtime_error("Direct3DCreate9");
++    }
++    D3DPRESENT_PARAMETERS present = {};
++    present.Windowed = TRUE;
++    present.SwapEffect = D3DSWAPEFFECT_DISCARD;
++    present.BackBufferFormat = D3DFMT_UNKNOWN;
++    present.BackBufferWidth = kWindowSize;
++    present.BackBufferHeight = kWindowSize;
++    present.hDeviceWindow = hWnd;
++    // The flags of test_async_readback_device. Without D3DCREATE_MULTITHREADED the client's first Present here
++    // can find no implicit swap chain, with or without the GI exports.
++    ComPtr<IDirect3DDevice9> pDevice;
++    check(pD3D->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hWnd, D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_MULTITHREADED,
++                              &present, &pDevice), "CreateDevice");
++
++    uint32_t level = 0;
++    if (testCase == "off") {
++      logLine("Testing that the exports refuse while client.giServer is off...");
++      expect(g_open(&level), E_NOTIMPL, "RemixBridge_GiOpen (off)");
++    } else if (testCase == "stock") {
++      logLine("Testing that a server without GI support reports level none...");
++      expect(openGi(pDevice.Get(), level), S_OK, "RemixBridge_GiOpen (stock)");
++      if (level != 0) {
++        throw std::runtime_error("A server without GI support reported a level");
++      }
++      const Target target = createTarget(pDevice.Get(), 16, 16, D3DFMT_A8R8G8B8);
++      uint32_t ticket = 0;
++      expect(g_solve(target.pTexture.Get(), 0, 0, &ticket), E_NOTIMPL, "RemixBridge_GiSolve (stock)");
++    } else {
++      runOn(pDevice.Get());
++    }
++    passed = true;
++  } catch (const std::exception& error) {
++    std::printf("FAILED: %s.\n", error.what());
++  }
++  DestroyWindow(hWnd);
++  logLine(passed ? "PASSED" : "FAILED");
++  return passed ? 0 : 1;
++}

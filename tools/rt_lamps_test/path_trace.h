@@ -138,6 +138,7 @@ inline float BallVis(const RtLampProxy::Mesh& m, const float L[3], const float P
     return Seg(m, L, P, st) ? 1.0f : 0.0f;
 }
 
+#ifndef PATHREF_CORE_ONLY // (tools/gi_server_test uses the tracer above on its own scene)
 struct Texel {
     int story, ix, iz, face;
     float p[3];
@@ -409,5 +410,6 @@ inline int Main(int argc, char** argv) {
     std::printf("\n%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }
+#endif
 
 } // namespace PathRef
