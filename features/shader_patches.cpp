@@ -4335,6 +4335,7 @@ GBufferResult AddGBufferPs(std::vector<DWORD>& t, const GBufferInfo& info, GBuff
     constexpr DWORD kAbs = 0x23, kCmp = 0x58, kTexldl = 0x5F, kTexldd = 0x5D;
     // the one read of each sampler, outside flow control: -1 none yet, -2 unusable
     int albedoAt = -1, probeAt = -1, depth = 0;
+    int ruleAt = -1, ordinal = 0; // the family rule's instruction (counted without dcl / def), outside flow control
     bool albedoInBranch = false; // read inside flow control: the pixels of the other paths keep the unknown id
     size_t first = 0;            // the first instruction after the dcl / def block
     for (size_t i = 0; i < ins.size(); i++) {
@@ -4344,6 +4345,12 @@ GBufferResult AddGBufferPs(std::vector<DWORD>& t, const GBufferInfo& info, GBuff
         if (!first) first = x.at;
         if (x.op == 0x1B || x.op == 0x26 || x.op == 0x28 || x.op == 0x29) depth++;  // loop, rep, if, ifc
         else if (x.op == 0x1D || x.op == 0x27 || x.op == 0x2B) depth--;             // endloop, endrep, endif
+        if (ordinal++ == info.albedoAt && info.albedoSampler < 0 && depth == 0 && !IsFlow(x.op) && x.len >= 2) {
+            const DWORD d = t[x.at + 1];
+            const bool copy = info.albedoReg == 255 && (WMask(d) & 0x7) == 0x7 && ((Type(d) == kColorOut && Num(d) == 0) || Type(d) == kTemp);
+            const bool after = info.albedoReg >= 0 && info.albedoReg < 32 && IsReg(d, kTemp, static_cast<DWORD>(info.albedoReg));
+            if (copy || after) ruleAt = static_cast<int>(i);
+        }
         for (size_t k = 1; k <= x.len; k++) {
             const DWORD r = t[x.at + k];
             if (!(r & 0x80000000u)) continue;
@@ -4363,17 +4370,28 @@ GBufferResult AddGBufferPs(std::vector<DWORD>& t, const GBufferInfo& info, GBuff
     const Usage u = Scan(t, ins);
     if (u.maxTemp + 3 >= 32 || u.maxConst + 2 >= (ps2 ? 32 : 224)) return GBufferResult::NoFreeRegister; // (ps_2_x: 32 constants)
     const DWORD A = static_cast<DWORD>(u.maxTemp + 1), N = A + 1, S = A + 2, cG = static_cast<DWORD>(u.maxConst + 1), cH = cG + 1;
-    const bool normal = probeAt >= 0, albedo = albedoAt >= 0;
+    const bool normal = probeAt >= 0, albedo = albedoAt >= 0 || ruleAt >= 0;
     const int id = albedo ? std::clamp(info.material, 1, 254) : 255;
     std::vector<Edit> edits;
     // cG = (0.5, 1, 0, id / 255); cH = (0.5, 0.5, roughness, class / 3): oC2 as it is when there is no normal
     edits.push_back({1, {Op(kDef, 5), Dst(kConst, cG), F(0.5f), F(1.0f), F(0.0f), F(static_cast<float>(id) / 255.0f),
                          Op(kDef, 5), Dst(kConst, cH), F(0.5f), F(0.5f), F(normal ? std::clamp(info.roughness, 0.01f, 1.0f) : 0.0f),
                          F(static_cast<float>(std::clamp(info.motionClass, 0, 3)) / 3.0f)}});
-    if (albedo) { // the game may reuse the register: copy it right after the read, with the id
+    if (albedoAt >= 0) { // the game may reuse the register: copy it right after the read, with the id
         const Ins& x = ins[static_cast<size_t>(albedoAt)];
         if (albedoInBranch) edits.push_back({first, {Op(kMov, 2), Dst(kTemp, A), Src(kConst, cG, 0xAA), Op(kMov, 2), Dst(kTemp, A, 0x8), Src(kConst, cG, kSwzY)}}); // (0, 0, 0, 1)
         edits.push_back({End(x), {Op(kMov, 2), Dst(kTemp, A, 0x7), Src(kTemp, Num(t[x.at + 1])), Op(kMov, 2), Dst(kTemp, A, 0x8), Src(kConst, cG, kSwzW)}});
+    } else if (ruleAt >= 0) { // family rule: rR.xyz after the instruction, or the instruction again into rA.xyz before it
+        const Ins& x = ins[static_cast<size_t>(ruleAt)];
+        if (info.albedoReg == 255) {
+            constexpr DWORD kRegBits = 0x70001800u | 0x7FFu, kMaskBits = 0xFu << 16;
+            std::vector<DWORD> again(t.begin() + static_cast<std::ptrdiff_t>(x.at), t.begin() + static_cast<std::ptrdiff_t>(End(x)));
+            again[1] = (again[1] & ~(kRegBits | kMaskBits)) | (Reg(kTemp, A) & kRegBits) | (0x7u << 16); // same sources and modifiers
+            again.insert(again.end(), {Op(kMov, 2), Dst(kTemp, A, 0x8), Src(kConst, cG, kSwzW)});
+            edits.push_back({x.at, std::move(again)});
+        } else {
+            edits.push_back({End(x), {Op(kMov, 2), Dst(kTemp, A, 0x7), Src(kTemp, static_cast<DWORD>(info.albedoReg)), Op(kMov, 2), Dst(kTemp, A, 0x8), Src(kConst, cG, kSwzW)}});
+        }
     }
     if (normal) { // the coordinate as the read sees it (its own swizzle), just before the read
         const Ins& x = ins[static_cast<size_t>(probeAt)];

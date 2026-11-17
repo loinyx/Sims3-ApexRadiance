@@ -240,6 +240,8 @@ Copy MakeCopy(IDirect3DDevice9* dev, std::vector<DWORD> t, IDirect3DPixelShader9
     if (gbuffer) { // one copy carries the grain and the G-buffer outputs
         ShaderPatches::GBufferInfo info; // a shader without a row (another family, a mod, a replaced shader): the unknown values
         if (row) {
+            const GBufferAlbedoRule* rule = viaOrigin ? nullptr : FindGBufferAlbedoRule(row->hash); // (its index is in the game shader's tokens)
+            if (rule) info.albedoAt = rule->at, info.albedoReg = rule->reg; // composited albedo (family rule)
             info.albedoSampler = row->albedo == 255 ? -1 : row->albedo;
             info.probeSampler = row->probe == 255 ? -1 : row->probe;
             info.material = row->material;

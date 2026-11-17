@@ -449,6 +449,12 @@ DitherResult AddDither2(std::vector<DWORD>& t, int* amountConst = nullptr, int* 
 //   oC1 = (albedo.rgb, material / 255): the result of the one texld on s<albedoSampler>, copied to a free temp right after
 //         it. Without one (no sampler, not read exactly once, a partial rgb mask): (0, 0, 0, 1), the "albedo unknown"
 //         id 255. A read inside a branch gives that value on the paths that do not read.
+//         Composited albedo (family rule, research 14 WP10; Sim skin overlay, terrain layers): with albedoAt >= 0 and no
+//         albedo sampler, rR.xyz (R = albedoReg) right after the albedoAt-th instruction that is not a dcl or def (the
+//         value where the textures are blended and the light is not yet applied); albedoReg 255: that instruction writes
+//         the unlit colour to oC0 (or to the temp AddDither renamed it to), and a copy of it into the free temp goes just
+//         before it. Counted without dcl and def, the index is the same before and after AddDither / AddDither2. Refused
+//         (no albedo) inside flow control or when the instruction does not fit the rule.
 //   oC2 = (octahedral normal.xy, roughness, motionClass / 3): the coordinate of the one texld on s<probeSampler> (the
 //         diffuse light probe is looked up by the world shading normal), copied just before it. Without one:
 //         (0.5, 0.5, 0, class): roughness 0 flags "no normal written, use the geometric one".
@@ -457,6 +463,7 @@ DitherResult AddDither2(std::vector<DWORD>& t, int* amountConst = nullptr, int* 
 // constants (224; ps_2_x 32), or the shader already writes another output than oC0.
 struct GBufferInfo {
     int albedoSampler = -1, probeSampler = -1;
+    int albedoAt = -1, albedoReg = -1; // family rule (shaders/gbuffer_ids.h, kGBufferAlbedoRules)
     int material = 255;     // 1..254 (255 = unknown)
     int motionClass = 3;    // 0 static .. 3 unknown mover
     float roughness = 0.5f; // (0, 1]; written only with a normal

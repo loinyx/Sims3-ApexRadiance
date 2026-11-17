@@ -1,6 +1,6 @@
 {
   "id": "gbuffer-motion-smoke",
-  "description": "G-buffer smoke (developer build: -Asi Release\\ApexRadiance.asi), GB-01 to GB-03: the capability line, camera motion vectors, the scene's extra render targets written by the ps_3_0 and ps_2_x copies and the colour-coded views. Each variant is one view: one F8 picture with a still camera, then one minute of camera pan. -AB runs the six views in the order list; without it the motion view runs. Pass: no crash, the [GBuffer] lines of the variant, a Scene line with patched draws and no failed bind, no shader or target error. Read after the run: the pictures (albedo: objects in their texture colour; normal: colours follow the surface; material and class: flat colours per object; unwritten: red where no copy wrote; walls and floors should now be written, the Scene line's ps2= and replaced= counts above 0 with Night Lighting on), the UI absent from every view, no trails behind glass or particles.",
+  "description": "G-buffer smoke (developer build: -Asi Release\\ApexRadiance.asi), GB-01 to GB-04: the capability line, camera motion vectors, the scene's extra render targets written by the ps_3_0 and ps_2_x copies, the colour-coded views and Ambient Occlusion's two G-buffer consumers. Each variant is one load: one F8 picture with a still camera, then one minute of camera pan. -AB runs every variant in the order list; without it the motion view runs. Pass: no crash, the [GBuffer] and [AO] lines of the variant, a Scene line with patched draws and no failed bind, no shader, target or history error. Read after the run: the pictures (albedo: objects in their texture colour, and since GB-04 Sims' skin and clothes and the painted ground too instead of mid grey; normal: colours follow the surface; material and class: flat colours per object; unwritten: red where no copy wrote), the UI absent from every view, no trails behind glass or particles. ao-normals: Ambient Occlusion with the scene's shading normals, compared with the on load's picture: no dashed shade along counter tops and seams, no new dark rims. ao-temporal: the same with the temporal filter: during the pan no trails on walls, Sims and trees keep their shade without smearing (motion class 3 starts a new history), the restarts count small next to temporal.",
   "save": "ApexTest-Town",
   "toml": {
     "ui": {
@@ -73,6 +73,42 @@
         "\\[GBuffer\\] Motion pass running: \\d+x\\d+ G16R16F, view=motion",
         "\\[GBuffer\\] Scene: frames=[1-9]\\d* patched=[1-9]\\d* .* bindFailed=0 maskToggles=\\d+ view=motion$"
       ]
+    },
+    "ao-normals": {
+      "toml": {
+        "patches.GBuffer": {
+          "view": 0
+        },
+        "patches.AmbientOcclusion": {
+          "enabled": true,
+          "gbufferNormals": true,
+          "temporal": false
+        }
+      },
+      "expect": [
+        "\\[GBuffer\\] On: motion=camera view=off$",
+        "\\[AO\\] G-buffer: normals=[1-9]\\d* temporal=0 restarts=0$"
+      ]
+    },
+    "ao-temporal": {
+      "toml": {
+        "patches.GBuffer": {
+          "view": 0
+        },
+        "patches.AmbientOcclusion": {
+          "enabled": true,
+          "gbufferNormals": true,
+          "temporal": true
+        }
+      },
+      "expect": [
+        "\\[GBuffer\\] On: motion=camera view=off$",
+        "\\[AO\\] Temporal filter running: \\d+x\\d+ history$",
+        "\\[AO\\] G-buffer: normals=[1-9]\\d* temporal=[1-9]\\d* restarts=\\d+$"
+      ],
+      "fail": [
+        "\\[AO\\] Temporal filter off"
+      ]
     }
   },
   "order": [
@@ -81,7 +117,9 @@
     "normal",
     "material",
     "class",
-    "unwritten"
+    "unwritten",
+    "ao-normals",
+    "ao-temporal"
   ],
   "expect": [
     "\\[GBuffer\\] Caps: adapter=\".*\" mrt=\\d+ independentWriteMasks=(yes|no) ",

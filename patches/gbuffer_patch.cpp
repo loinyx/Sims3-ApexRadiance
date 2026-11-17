@@ -15,7 +15,8 @@
 //   buffer; otherwise one log line and no G-buffer. view = 2 albedo, 3 normal, 4 material id, 5 motion class,
 //   6 scene pixels nothing wrote (red). GB-03: every ps_3_0 and ps_2_0 of the package has a row; Night Lighting's
 //   replacement shaders take the row of the game shader they were made from.
-// No consumer yet: the targets are made and kept, nothing reads them. [patches.GBuffer], off by default.
+// Consumers (GB-04): Ambient Occlusion's developer switches gbufferNormals and temporal read this frame's targets and
+// motion through GBuffer::Targets / GBuffer::Motion (gbuffer_motion.h). [patches.GBuffer], off by default.
 //
 // Part of Apex Radiance. Credits: @loinyx
 
@@ -124,6 +125,8 @@ struct State {
     UINT width = 0, height = 0;
     bool createFailed = false;
     bool motionThisFrame = false; // the view shows only a target written this frame
+    float dRow3[4] = {};          // row 3 of this frame's D (consumers' depth test), 0 when invalid
+    bool gbWritten = false;       // the scene bound the targets this frame (consumers read them only then)
     // the G-buffer targets (render targets 1 and 2 of the scene)
     IDirect3DTexture9* gbTex[2] = {};
     IDirect3DSurface9* gbSurf[2] = {};
@@ -194,6 +197,7 @@ const char* ViewName(int view) {
 }
 
 void ReleaseGBufferTargets(IDirect3DDevice9* dev) {
+    g.gbWritten = false;
     SceneBinder::SetGBufferTargets(dev, nullptr, nullptr); // unbound first
     for (int i = 0; i < 2; i++) {
         SafeRelease(g.gbSurf[i]);
@@ -386,6 +390,7 @@ void BoundaryEffect(IDirect3DDevice9* dev) {
     SceneBinder::GBufferUnbind(dev);
     EnsureGBufferTargets(dev);
     const SceneBinder::GBufferCounts c = SceneBinder::TakeGBufferCounts();
+    g.gbWritten = c.binds > 0 && g.gbTex[0];
     g.scene.frames += c.frames, g.scene.patched += c.patched, g.scene.unknown += c.unknown, g.scene.ps2 += c.ps2, g.scene.replaced += c.replaced, g.scene.blended += c.blended, g.scene.masked += c.masked;
     g.scene.binds += c.binds, g.scene.unbinds += c.unbinds, g.scene.bindFailed += c.bindFailed, g.scene.maskToggles += c.maskToggles;
     const unsigned long long now = GetTickCount64();
@@ -434,6 +439,7 @@ void MotionEffect(IDirect3DDevice9* dev) {
         IDirect3DBaseTexture9* const in[kTextures] = {depth, nullptr, nullptr};
         DrawPass(dev, g.motionSurf, in, g.psMotion, c);
     }
+    for (int k = 0; k < 4; k++) g.dRow3[k] = invalid ? 0.0f : static_cast<float>(D[3][k]);
     if (haveCamera) std::memcpy(g.prevVp, vp, sizeof vp);
     g.havePrev = haveCamera;
     g.motionThisFrame = true;
@@ -477,6 +483,18 @@ void RestartEffects(IDirect3DDevice9* dev) {
 }
 
 } // namespace
+
+bool GBuffer::Targets(IDirect3DTexture9* out[2]) {
+    if (!g.active || !g.gbWritten) return false;
+    out[0] = g.gbTex[0], out[1] = g.gbTex[1];
+    return true;
+}
+
+IDirect3DTexture9* GBuffer::Motion(float dRow3[4]) {
+    if (!g.active || !g.motionThisFrame) return nullptr;
+    std::memcpy(dRow3, g.dRow3, sizeof g.dRow3);
+    return g.motion;
+}
 
 class GBufferPatch : public ApexPatch {
   public:
