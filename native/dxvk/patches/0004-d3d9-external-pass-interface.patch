@@ -1,0 +1,211 @@
+From: Apex Radiance
+Subject: [PATCH 0004] d3d9: ID3D9VkExternalPass records a caller's Vulkan commands in the command stream
+
+A new interop interface (own IID, so stock DXVK answers E_NOINTERFACE). ExecuteExternal copies the caller's data and,
+on the command stream thread in stream order, releases each Direct3D 9 resource to the given layout, starts external
+rendering (DXVK re-binds all of its state afterwards), calls the callback with the execution command buffer and takes
+the resources back. SupportsRayQuery says whether patch 0003 enabled acceleration structures and ray queries.
+DxvkCommandList gets a public accessor for the execution command buffer.
+---
+diff --git a/src/d3d9/d3d9_device.cpp b/src/d3d9/d3d9_device.cpp
+index 9b72bb2..eb09412 100644
+--- a/src/d3d9/d3d9_device.cpp
++++ b/src/d3d9/d3d9_device.cpp
+@@ -193,7 +193,12 @@ namespace dxvk {
+     }
+ 
+     if (riid == __uuidof(ID3D9VkInteropDevice)) {
+-      *ppvObject = ref(&m_d3d9Interop);
++      *ppvObject = ref(static_cast<ID3D9VkInteropDevice*>(&m_d3d9Interop));
++      return S_OK;
++    }
++
++    if (riid == __uuidof(ID3D9VkExternalPass)) {
++      *ppvObject = ref(static_cast<ID3D9VkExternalPass*>(&m_d3d9Interop));
+       return S_OK;
+     }
+ 
+diff --git a/src/d3d9/d3d9_interfaces.h b/src/d3d9/d3d9_interfaces.h
+index 3664b6c..23323ba 100644
+--- a/src/d3d9/d3d9_interfaces.h
++++ b/src/d3d9/d3d9_interfaces.h
+@@ -286,6 +286,57 @@ ID3D9VkExtSwapchain : public IUnknown {
+   virtual void STDMETHODCALLTYPE UnlockAdditionalFormats() = 0;
+ };
+ 
++/**
++ * \brief Callback of an external pass
++ *
++ * Runs on DXVK's command stream thread, in stream order.
++ * \param [in] CommandBuffer Command buffer to record into
++ * \param [in] pData The caller's data, copied at submission
++ */
++typedef void (STDMETHODCALLTYPE *PFN_D3D9VkExternalPass)(
++        VkCommandBuffer           CommandBuffer,
++  const void*                     pData);
++
++/**
++ * \brief D3D9 external pass interface
++ *
++ * Records the caller's Vulkan commands into DXVK's
++ * command stream between the device's own work.
++ */
++MIDL_INTERFACE("7daa16ca-164c-44ea-b567-7f73c71ddaf8")
++ID3D9VkExternalPass : public IUnknown {
++  /**
++   * \brief Checks whether ray queries can be used
++   *
++   * \returns \c TRUE if the device was created with
++   *   acceleration structures and ray queries enabled
++   */
++  virtual BOOL STDMETHODCALLTYPE SupportsRayQuery() = 0;
++
++  /**
++   * \brief Records an external pass
++   *
++   * Copies \c pData, then, on DXVK's command thread,
++   * moves each resource into its layout, ends DXVK's
++   * current commands, calls \c pfnPass with the command
++   * buffer and the copy, and takes the resources back.
++   * DXVK re-binds all of its state afterwards.
++   * \param [in] pfnPass Callback that records the commands
++   * \param [in] pData Data passed to the callback
++   * \param [in] DataSize Size of \c pData in bytes
++   * \param [in] ResourceCount Number of resources
++   * \param [in] ppResources Resources the pass reads or writes
++   * \param [in] pLayouts Image layout per resource (ignored for buffers)
++   */
++  virtual HRESULT STDMETHODCALLTYPE ExecuteExternal(
++          PFN_D3D9VkExternalPass    pfnPass,
++    const void*                     pData,
++          UINT                      DataSize,
++          UINT                      ResourceCount,
++          IDirect3DResource9* const* ppResources,
++    const VkImageLayout*            pLayouts) = 0;
++};
++
+ /**
+  * \brief D3D9 extended interface
+  */
+@@ -301,4 +352,5 @@ __CRT_UUID_DECL(ID3D9VkInteropTexture,     0xd56344f5,0x8d35,0x46fd,0x80,0x6d,0x
+ __CRT_UUID_DECL(ID3D9VkInteropDevice,      0x2eaa4b89,0x0107,0x4bdb,0x87,0xf7,0x0f,0x54,0x1c,0x49,0x3c,0xe0);
+ __CRT_UUID_DECL(ID3D9VkExtSwapchain,       0x13776e93,0x4aa9,0x430a,0xa4,0xec,0xfe,0x9e,0x28,0x11,0x81,0xd5);
+ __CRT_UUID_DECL(ID3D9VkExtInterface,       0x65b55086,0xe3e3,0x4c3e,0xb3,0xa0,0x86,0x81,0x5c,0xce,0x2c,0x4c);
++__CRT_UUID_DECL(ID3D9VkExternalPass,       0x7daa16ca,0x164c,0x44ea,0xb5,0x67,0x7f,0x73,0xc7,0x1d,0xda,0xf8);
+ #endif
+diff --git a/src/d3d9/d3d9_interop.cpp b/src/d3d9/d3d9_interop.cpp
+index 7594eb1..af2e763 100644
+--- a/src/d3d9/d3d9_interop.cpp
++++ b/src/d3d9/d3d9_interop.cpp
+@@ -273,6 +273,60 @@ namespace dxvk {
+     return m_device->WaitForResource(*GetDxvkResource(pResource), DxvkCsThread::SynchronizeAll, MapFlags);
+   }
+ 
++  BOOL STDMETHODCALLTYPE D3D9VkInteropDevice::SupportsRayQuery() {
++    const auto& features = m_device->GetDXVKDevice()->features();
++    return features.khrAccelerationStructure.accelerationStructure
++        && features.khrRayQuery.rayQuery;
++  }
++
++  HRESULT STDMETHODCALLTYPE D3D9VkInteropDevice::ExecuteExternal(
++          PFN_D3D9VkExternalPass    pfnPass,
++    const void*                     pData,
++          UINT                      DataSize,
++          UINT                      ResourceCount,
++          IDirect3DResource9* const* ppResources,
++    const VkImageLayout*            pLayouts) {
++    if (!pfnPass || (DataSize && !pData) || (ResourceCount && (!ppResources || !pLayouts)))
++      return D3DERR_INVALIDCALL;
++
++    std::vector<std::pair<Rc<DxvkPagedResource>, VkImageLayout>> resources;
++    resources.reserve(ResourceCount);
++
++    for (UINT i = 0; i < ResourceCount; i++) {
++      Rc<DxvkPagedResource> resource = ppResources[i] ? GetDxvkResource(ppResources[i]) : nullptr;
++
++      if (resource == nullptr)
++        return D3DERR_INVALIDCALL;
++
++      resources.emplace_back(std::move(resource), pLayouts[i]);
++    }
++
++    // The callback runs later on the CS thread, so it gets a copy
++    std::vector<uint8_t> data(DataSize);
++
++    if (DataSize)
++      std::memcpy(data.data(), pData, DataSize);
++
++    D3D9DeviceLock lock = m_device->LockDevice();
++
++    m_device->EmitCs([
++      cPass      = pfnPass,
++      cData      = std::move(data),
++      cResources = std::move(resources)
++    ] (DxvkContext* ctx) {
++      for (const auto& r : cResources)
++        ctx->releaseExternalResource(r.first, r.second);
++
++      Rc<DxvkCommandList> cmd = ctx->beginExternalRendering();
++      cPass(cmd->getExternalCmdBuffer(), cData.data());
++
++      for (const auto& r : cResources)
++        ctx->acquireExternalResource(r.first, r.second);
++    });
++
++    return D3D_OK;
++  }
++
+   HRESULT STDMETHODCALLTYPE D3D9VkInteropDevice::CreateImage(
+           const D3D9VkExtImageDesc* params,
+           IDirect3DResource9**      ppResult) {
+diff --git a/src/d3d9/d3d9_interop.h b/src/d3d9/d3d9_interop.h
+index 9909893..3d28651 100644
+--- a/src/d3d9/d3d9_interop.h
++++ b/src/d3d9/d3d9_interop.h
+@@ -83,7 +83,7 @@ namespace dxvk {
+ 
+   };
+ 
+-  class D3D9VkInteropDevice final : public ID3D9VkInteropDevice {
++  class D3D9VkInteropDevice final : public ID3D9VkInteropDevice, public ID3D9VkExternalPass {
+ 
+   public:
+ 
+@@ -134,6 +134,16 @@ namespace dxvk {
+             const D3D9VkExtImageDesc* desc,
+             IDirect3DResource9**      ppResult);
+ 
++    BOOL STDMETHODCALLTYPE SupportsRayQuery();
++
++    HRESULT STDMETHODCALLTYPE ExecuteExternal(
++            PFN_D3D9VkExternalPass    pfnPass,
++      const void*                     pData,
++            UINT                      DataSize,
++            UINT                      ResourceCount,
++            IDirect3DResource9* const* ppResources,
++      const VkImageLayout*            pLayouts);
++
+   private:
+ 
+     template <typename ResourceType>
+diff --git a/src/dxvk/dxvk_cmdlist.h b/src/dxvk/dxvk_cmdlist.h
+index 38891eb..2753099 100644
+--- a/src/dxvk/dxvk_cmdlist.h
++++ b/src/dxvk/dxvk_cmdlist.h
+@@ -284,6 +284,16 @@ namespace dxvk {
+       m_statCounters.addCtr(ctr, val);
+     }
+     
++    /**
++     * \brief Execution command buffer for external commands
++     *
++     * Only valid between \c DxvkContext::beginExternalRendering
++     * and the next command the context records.
++     */
++    VkCommandBuffer getExternalCmdBuffer() const {
++      return getCmdBuffer();
++    }
++
+     /**
+      * \brief Initializes command buffers
+      *
