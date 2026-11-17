@@ -55,8 +55,9 @@ lamp picks are already kept (`lamp_visibility_memo`), so the rest is spread over
 ## Limitations
 
 - Unverified in game: the gain (estimated at 1-2 ms a frame zoomed out with both parts) and the check counters.
-- Draws that bypass the hooked `DrawPrimitive` and `DrawIndexedPrimitive` (the UP draws) and state blocks applied
-  without a capture point listed above are not covered by the lazy restore.
+- The UP draws, a Reset and every place that reads the device's shaders back (its own passes, state block captures)
+  settle a pending restore first; `tools/deferred_shader_sites_check.py` (Smoke suite) fails on a read-back without it.
+  A state block applied by another mod is not covered.
 - The pick memo's development counters (lamps left out, dimmed) are not added again for cached draws.
 
 ## Technical reference

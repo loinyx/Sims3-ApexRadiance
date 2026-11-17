@@ -10613,6 +10613,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDrawTracked(IDirect3DDevice9*
         // hooks, so read them from the device once (review 25/09)
         IDirect3DPixelShader9* ps = nullptr;
         IDirect3DVertexShader9* vs = nullptr;
+        D3D9Hooks::SettleDeferredShaders(dev);
         dev->GetPixelShader(&ps);
         dev->GetVertexShader(&vs);
         TrackPs(ps, true);

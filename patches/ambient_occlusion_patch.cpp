@@ -503,6 +503,7 @@ template <typename Draw> void RecordSimReceiver(IDirect3DDevice9* dev, Draw draw
     if (!g.active || !g.ready || g.p.strength <= 0 || !WantSimMask() || !simMask.surface || simMask.failed) return;
     if (simMask.shaderKnown && !simMask.shaderIsSim) return;
     IDirect3DPixelShader9* ps = nullptr;
+    D3D9Hooks::SettleDeferredShaders(dev);
     if (FAILED(dev->GetPixelShader(&ps)) || !ps) return;
     const int accepted = IsSimReceiver(ps);
     if (!accepted) { ps->Release(); return; }
@@ -529,6 +530,7 @@ template <typename Draw> void RecordSimReceiver(IDirect3DDevice9* dev, Draw draw
     SafeRelease(bb); SafeRelease(extra);
     if (!main) { SafeRelease(rt); SafeRelease(ds); ps->Release(); return; }
     IDirect3DVertexShader9* vs = nullptr;
+    D3D9Hooks::SettleDeferredShaders(dev);
     dev->GetVertexShader(&vs);
     auto* copy = SimCopy(dev, vs, ps, accepted == 2, transparent);
     if (copy && copy->ps && copy->vs) {
@@ -768,6 +770,7 @@ struct SavedState {
     }
 
     bool Capture(IDirect3DDevice9* dev) {
+        D3D9Hooks::SettleDeferredShaders(dev);
         bool ok = SUCCEEDED(dev->GetRenderTarget(0, &rt0)) && rt0;
         const HRESULT depthResult = ExtraHooks::RawGetDepthStencilSurface(dev, &ds);
         ok &= SUCCEEDED(depthResult) || (depthResult == D3DERR_NOTFOUND && !ds);

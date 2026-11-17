@@ -191,7 +191,7 @@ IDirect3DVertexShader9* BoundVertexShader(IDirect3DDevice9* device);
 // Lazy restore (render thread; development switch lazy_shader_restore). A fix that drew with its own shader pair leaves it
 // bound and names the game's pair; it is put back before the next draw that reaches the device, a Present or a BeginScene,
 // and a Set*Shader of a slot (the game's or CallOriginal*) replaces that slot's. Meanwhile BoundPixelShader /
-// BoundVertexShader answer the game's pair. Draws that bypass these detours (the UP draws, state blocks applied) are not
+// BoundVertexShader answer the game's pair. The UP draws and a Reset settle it too; a state block applied is not
 // covered. ReuseDeferredShaders: true when the restore pending is for (gamePs, gameVs) and the device still holds
 // (ownPs, ownVs): the restore is dropped and the caller draws without setting them again; check reads the pair back
 // from the device and counts a difference (then false). Code that reads the device's shaders itself to put them back later

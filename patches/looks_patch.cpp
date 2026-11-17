@@ -405,6 +405,7 @@ struct SavedState
         auto note = [&](bool good, const char* name) { if (!good) failed += failed.empty() ? name : std::string(", ") + name; return good; };
         // Only the render target is required. Everything else is also kept by the D3DSBT_ALL state block around the
         // runs; a getter that fails is noted and its value is simply not put back here.
+        D3D9Hooks::SettleDeferredShaders(dev);
         const bool okRt = note(SUCCEEDED(dev->GetRenderTarget(0, &rt0)) && rt0, "GetRenderTarget");
         const HRESULT dr = ExtraHooks::RawGetDepthStencilSurface(dev, &ds);
         note(SUCCEEDED(dr) || (dr == D3DERR_NOTFOUND && !ds), "GetDepthStencilSurface");
@@ -703,6 +704,7 @@ void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask)
         IDirect3DStateBlock9* sb = nullptr;
         if (!saved.failed.empty())
         {
+            D3D9Hooks::SettleDeferredShaders(dev);
             if (!g_sb) dev->CreateStateBlock(D3DSBT_ALL, &g_sb);
             if (g_sb && SUCCEEDED(g_sb->Capture())) sb = g_sb;
         }
