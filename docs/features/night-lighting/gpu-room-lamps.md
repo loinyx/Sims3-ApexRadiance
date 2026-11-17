@@ -422,6 +422,12 @@ lamp's position, not on its colour or intensity.
    ([`stair_set.h`](../../../features/stair_set.h)) keeps, from the opaque instanced draws the mesh collector reads, the triangles
    over or beside a floor hole, between the hole's story and the one below, at most 4,096 a lot, in lot space until the lot's
    geometry changes. The set reaches the GPU tiles alone: the CPU occluders never hold it and no room goes to its solve for it.
+35. Leak-free CPU reference (physical model): the directional maps' share (`PhysLampPick::BasisShare`) is
+   `RtLampProxy::Visibility`. Its rays skipped 1 cm at the lamp end, so a ball point just under a ceiling crossed it: a lamp
+   5 cm under the ceiling lit up to 18% of the points of the story above. Its triangle test also let a ray through the
+   shared edge of two wall quads, which a ray between tile centres meets on a tile corner. The lamp end is no longer skipped
+   (a ball point less than 1 mm in front of a surface does not emit) and the test includes the edges. The GPU's cube shadows
+   showed neither leak. `rt_lamps_test -Leak` checks both, on the reference and the GPU.
 
 ### Objects moved in a drag
 
