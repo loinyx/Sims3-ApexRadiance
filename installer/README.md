@@ -51,8 +51,13 @@ only what differs from the player's choice.
 - NVIDIA Smooth Motion (Setup 1.2.0, `SmoothMotion.cs`): a switch that writes the NVIDIA driver at once, not with
   Install. NVAPI (`nvapi64.dll`, functions from `nvapi_QueryInterface`, `NVDRS_PROFILE_V1`, `NVDRS_APPLICATION_V1`,
   `NVDRS_SETTING_V1`): on creates or reuses the profile `Apex Radiance - The Sims 3`, adds `NvRemixBridge.exe` and the
-  game's exe (names, not paths; an exe in an NVIDIA predefined profile is skipped), sets `0xB0D384C0 = 1` and saves; off
-  deletes that profile only. Shown with an NVIDIA card; enabled with an RTX 40 or 50 series card, driver 571.86 or newer
+  game's exe, then the other edition's (`TS3W.exe`, `TS3.exe`; names, not paths, so it covers every copy and a moved
+  folder; an exe in an NVIDIA predefined profile is skipped), sets `0xB0D384C0 = 1` and saves; off deletes that profile
+  only. On also sets `[screen] fps_limit = 60` in `ApexRadiance.toml` when there is no limit (absent or 0), through
+  `Fs.WriteFpsKey`: its restore point puts back only that key (`FpsLimitKey`, `FpsLimitWas`). Off leaves the limit.
+  `Engine.Remove` of the bridge or Apex (also by a renderer change and `RemoveAll`) calls `Engine.FrameGenOff`, which
+  deletes Setup's profile when it is on and returns, never throws, a failure (`TakeFrameGenOffError`, shown on the row).
+  Repair, Setup's update and a later run only read the driver. Shown with an NVIDIA card; enabled with an RTX 40 or 50 series card, driver 571.86 or newer
   and the bridge installed (DXVK is untested with it); an exe in a profile of the player's leaves the switch off and names
   that profile. Any NVAPI failure is shown on the row, never thrown. The driver write is unverified on a real card.
 - Languages: the 21 of The Sims 3, as the menu (`Languages.cs`): Windows' display language, or the one picked with the

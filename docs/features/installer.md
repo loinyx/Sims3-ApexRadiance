@@ -75,12 +75,25 @@ double the frame rate on RTX 40 and 50 series cards, with a little more input de
 bridge as not compatible; a driver profile forces it, the way NVIDIA Profile Inspector does
 ([rtx-remix-bridge.md](rtx-remix-bridge.md)). The switch applies at once, outside Install, through NVAPI's driver settings
 (`SmoothMotion.cs`): on creates (or reuses) the profile *Apex Radiance - The Sims 3* with `NvRemixBridge.exe` and the
-game's exe and sets setting `0xB0D384C0` to 1; off deletes that profile only. The row shows only with an NVIDIA card. It
+game's exe (Steam `TS3W.exe` or EA app `TS3.exe`, with the other edition's added too, so one profile serves every copy of
+the game on the PC) and sets setting `0xB0D384C0` to 1; off deletes that profile only, which turns it off for every copy. The row shows only with an NVIDIA card. It
 can be turned on with an RTX 40 or 50 series card, driver 571.86 or newer, and the RTX Remix bridge installed; otherwise
 it stays off and says why. When either exe already belongs to a profile of the player's, Setup leaves it alone and names
 that profile. The profile is not part of restore points (it is a driver setting, not a game file). Turned on, Setup also brings
-Apex's frame limit (`[screen] fps_limit` in `ApexRadiance.toml`) into 60 to 90 fps: 60 when there is none or it is outside,
-the pace frame generation needs; a limit already in that range stays.
+Apex's frame limit (`[screen] fps_limit` in the game's `ApexRadiance.toml`) to 60 fps when there is none (the key absent or
+0); a limit the player chose stays as it is, and the row suggests 60 to 90 fps. That change has its own restore point
+(*Turn on NVIDIA Smooth Motion*) that puts back only `fps_limit`; nothing is written before the game has made the file or
+while it runs. Turning Smooth Motion off leaves the frame limit as it is.
+
+How it follows the other actions:
+
+| Action | Smooth Motion |
+|---|---|
+| Removing the RTX Remix bridge, switching from the bridge to DXVK or the game's own Direct3D 9, removing Apex Radiance, *Uninstall everything* | Turned off (Setup's profile deleted) as part of the action, with its own task row on the Install step; an NVAPI failure is logged and shown on the row and never fails the action |
+| Repair, Setup's own update, a later run | Left as it is; the row reads the driver again (no record kept) |
+| A profile deleted by the player, a driver reinstall | Reads as off |
+| A profile of the player's holding an exe | Never touched by any of the above |
+| Dry run, preview | Nothing written |
 
 | Off (no bridge on this game) | On | Unsupported card |
 |---|---|---|
