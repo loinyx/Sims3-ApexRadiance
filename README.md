@@ -507,6 +507,20 @@ Apex detects the bridge automatically. You can check its status under **Settings
 
 The bridge can be removed by deleting its files and restoring any previous `d3d9.dll`. Bridge logs are written to `rtx-remix\logs`; attach them with the Apex log when reporting a problem.
 
+### NVIDIA Smooth Motion with the bridge
+
+On an RTX 40 or 50 series card, NVIDIA Smooth Motion (frame generation in the driver) works with the bridge, even though
+the NVIDIA app lists it as not compatible. Only the driver profile has to be set by hand:
+
+1. Download NVIDIA Profile Inspector from its [GitHub releases](https://github.com/Orbmu2k/nvidiaProfileInspector/releases) and run `nvidiaProfileInspector.exe`.
+2. Create a new profile (for example `TS3 Remix Bridge`) and add both `Game\Bin\.trex\NvRemixBridge.exe` and `Game\Bin\TS3W.exe` to it. With the bridge, `NvRemixBridge.exe` is the program that shows the frames.
+3. Set the Smooth Motion setting to On and click **Apply changes**.
+4. Start the game and open the NVIDIA overlay (Alt+R): the frame rate shown should double.
+
+Keep a steady frame-rate limit in Apex (60 fps, for example). Smooth Motion makes the picture smoother but does not
+remove the game's own hitches, adds a little input latency, and can leave light artefacts on the game's interface. To
+turn it off, set the setting back to Off in the same profile, or delete the profile.
+
 <div align="right">
   <a href="docs/features/rtx-remix-bridge.md"><strong>Read the RTX Remix Bridge documentation →</strong></a>
 </div>

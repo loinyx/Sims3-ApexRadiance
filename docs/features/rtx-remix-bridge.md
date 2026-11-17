@@ -96,6 +96,11 @@ Shipped in the package; players do not need to change them.
 - **Graphics cards:** the server needs a Vulkan-capable card and driver, as DXVK does. The 64-bit server uses about
   3 GB of its own memory.
 
+- **NVIDIA Smooth Motion** (driver frame generation, RTX 40 and 50 series): the NVIDIA app reports the bridge as not
+  compatible, but the setting forced in a driver profile with NVIDIA Profile Inspector works: the profile holds
+  `NvRemixBridge.exe` (the process that presents the frames, through DXVK in Vulkan) and `TS3W.exe`. Seen by the
+  maintainer in the NVIDIA overlay; the frame rate shown doubles. It adds no Apex code; the steps are in the README.
+
 ## Limitations
 
 - When the graphics card or V-Sync is the limit, the bridge adds one refresh of input latency (+4.2 to 4.6 ms at
