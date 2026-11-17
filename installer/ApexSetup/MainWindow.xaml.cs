@@ -911,7 +911,7 @@ public sealed partial class MainWindow : Window
         if (_fillingAfmf || _afmf is null) return;
         _afmfWant = Engine.PendingSwitch(AfmfToggle.IsOn, _afmf.On);
         _afmfError = null;
-        RefreshComponents();
+        Later(RefreshComponents);
     }
 
     void OnSmoothToggle(object sender, RoutedEventArgs e)
@@ -919,12 +919,13 @@ public sealed partial class MainWindow : Window
         if (_fillingSmooth || _smooth is null) return;
         _smoothWant = Engine.PendingSwitch(SmoothToggle.IsOn, _smooth.On);
         _smoothError = null;
-        RefreshComponents();
+        Later(RefreshComponents);
     }
 
     // Apex's frame limit beside frame generation: shown while either row can be used and the game has made ApexRadiance.toml.
     // Items: Keep (the value now), Engine.FpsChoices, Custom (a number box, 20 to 1000).
     bool _fillingFps, _fpsCustomOpen;
+    string? _fpsItemsKey;
     int? _fpsNow, _fpsWant;
     string? _fpsError;
     const int FpsCustomTag = -2;
@@ -948,10 +949,17 @@ public sealed partial class MainWindow : Window
         if (_fpsNow != now) _fpsWant = null; // (the file changed under the picker: start again from it)
         _fpsNow = now;
         _fillingFps = true;
-        FpsCombo.Items.Clear();
-        FpsCombo.Items.Add(new ComboBoxItem { Content = T("Keep: {0}", now == 0 ? T("no limit") : T("{0} fps", now.Value)), Tag = -1 });
-        foreach (var v in Engine.FpsChoices) FpsCombo.Items.Add(new ComboBoxItem { Content = FpsLabel(v), Tag = v });
-        FpsCombo.Items.Add(new ComboBoxItem { Content = T("Custom"), Tag = FpsCustomTag });
+        // the list is built again only when its labels change (the limit now, the language): clearing a ComboBox's items
+        // while its own SelectionChanged runs makes WinUI fail fast (0x80070490 / 0x8000FFFF in Microsoft.UI.Xaml.dll)
+        var itemsKey = now + "|" + Lang;
+        if (itemsKey != _fpsItemsKey)
+        {
+            _fpsItemsKey = itemsKey;
+            FpsCombo.Items.Clear();
+            FpsCombo.Items.Add(new ComboBoxItem { Content = T("Keep: {0}", now == 0 ? T("no limit") : T("{0} fps", now.Value)), Tag = -1 });
+            foreach (var v in Engine.FpsChoices) FpsCombo.Items.Add(new ComboBoxItem { Content = FpsLabel(v), Tag = v });
+            FpsCombo.Items.Add(new ComboBoxItem { Content = T("Custom"), Tag = FpsCustomTag });
+        }
         // the pending choice stays selected; a custom one (or Custom chosen, no number yet) shows its number box
         var at = _fpsWant is { } w ? Array.IndexOf(Engine.FpsChoices, w) : -1;
         var custom = _fpsCustomOpen || _fpsWant is not null && at < 0;
@@ -981,7 +989,7 @@ public sealed partial class MainWindow : Window
         if (_fpsCustomOpen) { FpsCustom.Visibility = Visibility.Visible; return; }
         _fpsWant = v < 0 ? null : Engine.PendingFps(v, now);
         _fpsError = null;
-        RefreshComponents();
+        Later(RefreshComponents); // (after the list's own selection has finished)
     }
 
     void OnFpsCustom(NumberBox sender, NumberBoxValueChangedEventArgs e)
@@ -989,7 +997,7 @@ public sealed partial class MainWindow : Window
         if (_fillingFps || double.IsNaN(e.NewValue) || FpsCustom.Visibility != Visibility.Visible || _fpsNow is not { } now) return;
         _fpsWant = Engine.PendingFps((int)Math.Round(e.NewValue), now);
         _fpsError = null;
-        RefreshComponents();
+        Later(RefreshComponents);
     }
 
     // the pending driver and frame limit changes, in the order Apply runs them (the limit first: frame generation turned on then
@@ -1726,6 +1734,29 @@ public sealed partial class MainWindow : Window
     {
         using var s = Assembly.GetExecutingAssembly().GetManifestResourceStream("Licenses." + file);
         return s is null ? "" : new StreamReader(s).ReadToEnd();
+    }
+
+    // a refresh after the control that asked for it has finished its own event: rebuilding a control from inside its own
+    // handler is what WinUI fails fast on. Any exception is logged and shown, never left to end Setup.
+    void Later(Action a) => DispatcherQueue.TryEnqueue(() =>
+    {
+        try { a(); }
+        catch (Exception e) { ShowUnexpected(e); }
+    });
+
+    // an exception no handler caught: logged, then shown with Copy details (once at a time)
+    bool _showingUnexpected;
+    public void ShowUnexpected(Exception e, bool log = true)
+    {
+        if (log) App.Log(e);
+        if (_showingUnexpected || Content?.XamlRoot is null) return;
+        _showingUnexpected = true;
+        DispatcherQueue.TryEnqueue(async () =>
+        {
+            try { await ShowDialog(new ContentDialog { Title = T("Setup could not finish"), Content = ErrorContent(ErrorText(e)), CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot }); }
+            catch (Exception x) { App.Log(x); }
+            finally { _showingUnexpected = false; }
+        });
     }
 
     // ---------- checks before a change, errors ----------

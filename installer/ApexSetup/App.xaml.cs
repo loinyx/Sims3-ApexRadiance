@@ -19,10 +19,29 @@ public partial class App : Application
     {
         InitializeComponent();
         Engine.Log = Log;
-        // logged and kept running: a UI error must not end Setup in the middle of an install
-        UnhandledException += (_, e) => { Log(e.Exception); e.Handled = true; };
+        // logged and kept running: a UI error must not end Setup in the middle of an install. A WinUI error reaches here without
+        // its stack (a stowed exception): the last COM errors are kept with the stack where they were thrown and logged with it.
+        AppDomain.CurrentDomain.FirstChanceException += (_, e) =>
+        {
+            if (e.Exception is not System.Runtime.InteropServices.COMException c) return;
+            lock (Recent)
+            {
+                Recent.Enqueue($"{DateTime.Now:s} {c.GetType().Name} 0x{c.HResult:X8} {c.Message}\r\n{Environment.StackTrace}");
+                while (Recent.Count > 5) Recent.Dequeue();
+            }
+        };
+        UnhandledException += (_, e) =>
+        {
+            e.Handled = true;
+            string recent;
+            lock (Recent) recent = string.Join("\r\n", Recent);
+            Log(new InvalidOperationException("Unhandled: " + e.Message + "\r\nRecent COM errors:\r\n" + recent, e.Exception));
+            (_window as MainWindow)?.ShowUnexpected(e.Exception, log: false);
+        };
         AppDomain.CurrentDomain.UnhandledException += (_, e) => Log(e.ExceptionObject as Exception);
     }
+
+    static readonly Queue<string> Recent = new();
 
     public static void Log(Exception? e)
     {
