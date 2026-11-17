@@ -15,6 +15,7 @@
 // is redirected to a wrapper that marks the frame start, writes the slice ([svc+0xCC], read at 0x00599A20) and puts the
 // game's value back after the call. Render thread.
 #include <cstdint>
+#include <format>
 #include <string>
 
 namespace DeadlineSlicing {
@@ -33,5 +34,25 @@ void NoteLotCut(bool skipped);
 
 std::string StatusText();
 void RenderDeveloperUI();
+
+// Without game state (tools/lot_streaming_test checks them): the counter text of the log lines and the panel, and the
+// periodic log line's clock (next = 0 arms it one period from now)
+struct Counters {
+    uint64_t frames, moving, finalizeLowered, sceneCut, sceneSkip, lotCut, lotSkip;
+};
+inline std::string CountersText(const Counters& c) {
+    return std::format("{} of {} frames moving; finalize slice lowered {}; scene drain shortened {} / past the deadline {}; lot builds shortened {} / waited {}",
+                       c.moving, c.frames, c.finalizeLowered, c.sceneCut, c.sceneSkip, c.lotCut, c.lotSkip);
+}
+inline constexpr double kLogEverySeconds = 10.0;
+inline bool LogDue(int64_t now, int64_t& next, int64_t period) {
+    if (!next) {
+        next = now + period;
+        return false;
+    }
+    if (now < next) return false;
+    next = now + period;
+    return true;
+}
 
 } // namespace DeadlineSlicing

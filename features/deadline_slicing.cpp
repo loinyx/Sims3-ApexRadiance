@@ -37,8 +37,14 @@ std::atomic<int> g_finalizeMs{2};       // the finalize slice while moving
 // Render thread
 int64_t g_frameStart = 0; // QPC at the JobManager update of this frame; 0 = unknown
 bool g_moving = false;    // camera moving at this frame's start
+int64_t g_nextLog = 0;    // QPC of the next counter line; 0 = not armed
+int64_t g_logTicks = 0;   // kLogEverySeconds in QPC ticks
 
 std::atomic<uint64_t> c_frames{0}, c_movingFrames{0}, c_finalizeLowered{0}, c_sceneCut{0}, c_sceneSkip{0}, c_lotCut{0}, c_lotSkip{0};
+
+Counters Snapshot() {
+    return {c_frames.load(), c_movingFrames.load(), c_finalizeLowered.load(), c_sceneCut.load(), c_sceneSkip.load(), c_lotCut.load(), c_lotSkip.load()};
+}
 
 bool LoadingScreen() {
     const uintptr_t world = g_worldGlobal ? *reinterpret_cast<const uintptr_t*>(g_worldGlobal) : 0;
@@ -51,6 +57,7 @@ void __fastcall JobUpdateHook(void* svc, void* edx, float a, float b) {
     LARGE_INTEGER t;
     QueryPerformanceCounter(&t);
     g_frameStart = t.QuadPart;
+    if (LogDue(t.QuadPart, g_nextLog, g_logTicks)) LOG_INFO("[DeadlineSlicing] " + CountersText(Snapshot()));
     g_moving = LotLightingMotion::CameraMoving() && !LoadingScreen();
     c_frames.fetch_add(1, std::memory_order_relaxed);
     if (!g_moving) return game(svc, edx, a, b);
@@ -83,7 +90,9 @@ bool Start(std::string* error) {
     LARGE_INTEGER f;
     QueryPerformanceFrequency(&f);
     g_msPerTick = 1000.0 / static_cast<double>(f.QuadPart);
+    g_logTicks = static_cast<int64_t>(f.QuadPart * kLogEverySeconds);
     g_frameStart = 0;
+    g_nextLog = 0;
     g_on.store(true, std::memory_order_release);
     const DWORD orig = static_cast<DWORD>(kJobUpdate);
     if (!MemPatch::WriteDWORD(kJobVtableSlot, static_cast<DWORD>(reinterpret_cast<uintptr_t>(&JobUpdateHook)), &g_patches, &orig)) {
@@ -101,7 +110,7 @@ void Stop() {
     if (!g_on.load(std::memory_order_acquire)) return;
     g_on.store(false, std::memory_order_release); // the wrapper passes through from now on, even if the slot stays
     if (!MemPatch::RestoreAll(g_patches)) LOG_ERROR("[DeadlineSlicing] The JobManager update slot could not be put back; the wrapper stays and passes every call through");
-    LOG_INFO("[DeadlineSlicing] Off (" + StatusText() + ")");
+    LOG_INFO("[DeadlineSlicing] Off (" + CountersText(Snapshot()) + ")"); // not StatusText(): it says only "Off" now
 }
 
 bool Running() { return g_on.load(std::memory_order_acquire); }
@@ -120,8 +129,7 @@ void NoteLotCut(bool skipped) { (skipped ? c_lotSkip : c_lotCut).fetch_add(1, st
 
 std::string StatusText() {
     if (!Running()) return "Off";
-    return std::format("On: {} of {} frames moving; finalize slice lowered {}; scene drain shortened {} / past the deadline {}; lot builds shortened {} / waited {}",
-                       c_movingFrames.load(), c_frames.load(), c_finalizeLowered.load(), c_sceneCut.load(), c_sceneSkip.load(), c_lotCut.load(), c_lotSkip.load());
+    return "On: " + CountersText(Snapshot());
 }
 
 void RenderDeveloperUI() {

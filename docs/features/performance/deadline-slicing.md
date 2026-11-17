@@ -54,8 +54,9 @@ changes only the frames that already ran long, and only while the camera moves.
 
 ## Measurement
 
-- **Counters** (developer panel and the log line when it is turned off): frames and moving frames seen, finalize slices
-  lowered, scene drains shortened / past the deadline, lot build calls shortened / held by the deadline.
+- **Counters** (developer panel, a `[DeadlineSlicing]` log line every 10 s while it is on and one when it is turned
+  off): frames and moving frames seen, finalize slices lowered, scene drains shortened / past the deadline, lot build
+  calls shortened / held by the deadline.
 - **Desk pre-test:** `python tools/deadline_slicing_pretest.py ApexRadiance_FrameTimeline.csv` reads a camera sweep's
   timeline and counts moving frames >= 25 ms where an item > 15 ms ran beside more than 2 ms of deferrable work (main-thread
   jobs, scene pending nodes, lot load stages), and sums that time: the ceiling of the gain. Worth an in-game A/B when that
