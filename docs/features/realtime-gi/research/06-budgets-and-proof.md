@@ -62,7 +62,7 @@ space**. Stage 2 adds 40-75 MB of VRAM, still under 100 KB. The bridge needs no 
 for resources that are only drawn into). **The address-space risk is not the resources. It is (a) any accidental lock or
 readback, (b) the extra D3D calls' temporary command buffers in the shared channel (`serverChannelMemSize = 72 MB`, a
 raised draw-call volume fills it faster, [?]), (c) Apex's own CPU code for casters (see section 4).**
-VRAM: the test machine class (Alienware m15 R6, RTX 30 laptop, 6-8 GB [I from CLAUDE.md]) must fit game + Apex AO/picture
+VRAM: the test machine class (Alienware m15 R6, RTX 30 laptop, 6-8 GB [inferred, test-machine notes]) must fit game + Apex AO/picture
 passes + 100-150 MB of GI; the 4070 Ti SUPER of the profile (16 GB) hides this. Test on the laptop class [?].
 
 ## 2. Frame budget table (from the profile)
@@ -225,7 +225,7 @@ difference the result is "no clear difference", not a win [R, METHODOLOGY.md].
 | R11 | **Overlap with existing GPU room lamps** (`RtLampGpu`, `PhysTiles`, kept rooms) | Apex already draws lamp cubes, kept atlases and relights | Reuse the physical model and the tile atlas rather than a new one [I]; GI replaces its use for the GI lot only; one owner per lot (stand-down) |
 | R12 | **Foliage and alpha-tested casters** (SpeedTree, fences) | Alpha test needs texture binds and the right alpha reference | Per-family list; shadow pass draws only the alpha-tested families and tests leaf shape on one tree bookmark |
 | R13 | **Noise in the measurement** | The profile loads had 11-15% external CPU; p99.9 needs several minutes | Quiet-machine check, repeats, the runner's `invalid load` rules; do not report a win under the run-to-run spread (p50 11.7-13.4, p99 33.6-37.8 across three identical far pans in P) |
-| R14 | **Save compatibility and household rule** (our repo) | Our CLAUDE.md: household Sims untouched | GI changes lighting only; nothing it does touches Sim state or saves. No game-side data written; the solve skip must not change what the game saves [?] |
+| R14 | **Save compatibility and household rule** (our repo) | Our project rule: household Sims untouched | GI changes lighting only; nothing it does touches Sim state or saves. No game-side data written; the solve skip must not change what the game saves [?] |
 | R15 | **EA app 1.69.47 and other builds** | Apex supports Steam 1.67.2 and EA 1.69.47 addresses | Pattern scans only; the switch off on a build whose solve address is not found (same as GPU room lamps) |
 | R16 | **Mod conflicts** (Sims3SettingsSetter, lot streaming mods, light mods) | Apex stands down for others today | Stand-down rules and compat scan; test with the baseline S3SS set |
 
