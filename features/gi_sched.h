@@ -14,7 +14,8 @@
 // Priority: starved entries (waited kStarveFrames) first, then lamps on before lamps off, in view, nearer the camera, by
 // cause (moved, added, build, load), then age. At most kQueueCap entries; the rest wait in an idle list that refills the
 // queue once it is empty. A lamp dirtied while its bake is in flight cancels it and is queued once (a restart), not once
-// an edit. A landed layer goes to a second slot and crossfades in over kFadeMs; the old one stays shown until then.
+// an edit. A landed layer goes to a second slot and crossfades in over kFadeMs; the old one stays shown until then. A lamp
+// whose layer is fading is not issued until the fade ends (both slots are shown then; the back end has two a layer).
 #include <cstdint>
 #include <functional>
 #include <unordered_map>
@@ -36,7 +37,11 @@ struct Box {
     bool Overlaps(const Box& b) const {
         return !Empty() && !b.Empty() && x0 <= b.x1 && b.x0 <= x1 && z0 <= b.z1 && b.z0 <= z1 && s0 <= b.s1 && b.s0 <= s1;
     }
-    Box Union(const Box& b) const;
+    Box Union(const Box& b) const {
+        if (Empty()) return b;
+        if (b.Empty()) return *this;
+        return {x0 < b.x0 ? x0 : b.x0, z0 < b.z0 ? z0 : b.z0, x1 > b.x1 ? x1 : b.x1, z1 > b.z1 ? z1 : b.z1, s0 < b.s0 ? s0 : b.s0, s1 > b.s1 ? s1 : b.s1};
+    }
     long long Tiles() const { return Empty() ? 0 : (long long)(x1 - x0 + 1) * (z1 - z0 + 1) * (s1 - s0 + 1); }
 };
 // The box of a point grown by r metres on one story
@@ -62,7 +67,9 @@ struct LampIn {
 struct Backend {
     virtual ~Backend() = default;
     virtual void BeginFrame(uint32_t /*frame*/) {}
-    virtual bool SubmitScene() = 0;                         // the geometry changed (server: acceleration structure + links)
+    // The geometry changed (server: acceleration structure + links). edit / whole: what the scheduler knows of the edit (a
+    // box, or the whole lot); a back end that diffs the scene it sends narrows them (an empty box and !whole: nothing re-bakes)
+    virtual bool SubmitScene(Box& edit, bool& whole) = 0;
     virtual bool Solve(const LampIn& lamp, uint32_t& ticket) = 0; // false: busy, try a later frame
     virtual int Poll(uint32_t ticket, Box& touched) = 0;   // 0 pending, 1 landed (touched: texels over 0.5/255), -1 failed
     virtual void Cancel(uint32_t ticket) = 0;
@@ -78,7 +85,7 @@ struct FakeBackend : Backend {
     struct Job { LampIn lamp; uint32_t ready; };
     std::unordered_map<uint32_t, Job> jobs;
     void BeginFrame(uint32_t f) override { frame = f; }
-    bool SubmitScene() override { ++scenes; return true; }
+    bool SubmitScene(Box&, bool&) override { ++scenes; return true; }
     bool Solve(const LampIn& lamp, uint32_t& ticket) override {
         ticket = next++;
         jobs[ticket] = {lamp, frame + static_cast<uint32_t>(latency)};

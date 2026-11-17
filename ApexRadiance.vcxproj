@@ -214,6 +214,7 @@
     <ClCompile Include="features\resource_cache.cpp" />
     <ClCompile Include="features\realtime_gi.cpp" />
     <ClCompile Include="features\gi_sched.cpp" />
+    <ClCompile Include="features\gi_compose.cpp" />
     <ClCompile Include="features\rig_tracker.cpp" />
     <ClCompile Include="features\scene_budget.cpp" />
     <ClCompile Include="features\scene_dither.cpp" />

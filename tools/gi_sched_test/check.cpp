@@ -1,6 +1,7 @@
 // GI update scheduler (S2-01), offline check: event sequences through GiSched::Scheduler with the fake back end, checked
 // for the dirty sets, the order, the budget, the crossfade timing and starvation. Prints to stdout; exit code 1 on a failure.
 #include "features/gi_sched.h"
+#include "features/gi_scene.h"
 #include <cstdio>
 #include <vector>
 
@@ -189,6 +190,55 @@ static void WallBurst() {
     CHECK(r.s.Stats().issued[static_cast<int>(Cause::Build)] == 22, "whole-lot edit bakes all 20: %llu", r.s.Stats().issued[2]);
 }
 
+// The back end diffs the scene it sends (S2-01b): a whole-lot edit narrowed to one wall re-bakes only the lamps whose box
+// holds it; a scene that did not change re-bakes none
+struct Narrowing : FakeBackend {
+    Box to;
+    bool SubmitScene(Box& edit, bool& whole) override {
+        ++scenes;
+        edit = to, whole = false;
+        return true;
+    }
+};
+static void NarrowedEdit() {
+    Rig r(20);
+    Narrowing n;
+    n.boxOf = r.fake.boxOf;
+    r.s.SetBackend(&n);
+    r.s.Load(r.lamps, r.frame);
+    r.Settle();
+    n.to = {40, 0, 40, 4, 0, 0};
+    r.s.OnBuildEdit({}, r.ms);
+    r.Step(40);
+    r.Settle();
+    CHECK(r.s.Stats().issued[static_cast<int>(Cause::Build)] == 2, "a whole-lot edit narrowed to a wall bakes 2: %llu", r.s.Stats().issued[2]);
+    n.to = {};
+    r.s.OnBuildEdit({}, r.ms);
+    r.Step(40);
+    r.Settle();
+    CHECK(r.s.Stats().issued[static_cast<int>(Cause::Build)] == 2, "an unchanged scene bakes none: %llu", r.s.Stats().issued[2]);
+}
+
+// A lamp whose layer fades is not issued before the fade ends (the back end's two slots are both shown)
+static void FadeHold() {
+    Rig r(1);
+    r.fake.latency = 1;
+    r.s.Load(r.lamps, r.frame);
+    while (!r.s.HasLayer(0x1000)) r.Step();
+    LampIn l = r.lamps[0];
+    l.pos[0] += 1;
+    r.s.OnLamp(Event::Moved, l, r.frame);
+    const uint64_t before = r.Issued();
+    bool early = false;
+    for (int i = 0; i < 40; i++) {
+        const uint64_t was = r.Issued();
+        r.Step();
+        early |= r.Issued() > was && r.s.InFlight(0x1000) && r.s.Stats().fading > 0; // (issued while its layer fades)
+    }
+    CHECK(!early, "no bake issued while the layer fades");
+    CHECK(r.Issued() == before + 1, "issued once the fade ended: %llu", r.Issued() - before);
+}
+
 static void Crossfade() {
     Rig r(2);
     r.s.Load(r.lamps, r.frame);
@@ -253,12 +303,92 @@ static void Starvation() {
     CHECK(f.s.Stats().failed == 1 && f.s.HasLayer(0x1001), "failed once, retried, landed");
 }
 
+// The scene builder (S2-01b, features/gi_scene.h): a rebuild keeps every pixel, an edit's box holds only what changed, a
+// rotated lot's texels are its own in world space
+static RtLampProxy::Lot Room(int x0, int z0, int x1, int z1) { // one roofed room on story 0 of an 8 x 8 lot
+    RtLampProxy::Lot lot;
+    RtLampProxy::Story st;
+    st.w = st.h = 8, st.plane = 0;
+    const size_t n = 64;
+    st.floorY.assign(n, 0.0f), st.roofed.assign(n, 0), st.ceil.assign(n, RtLampProxy::kNoFloor);
+    for (int z = z0; z < z1; z++)
+        for (int x = x0; x < x1; x++) st.roofed[static_cast<size_t>(z) * 8 + x] = 0xF, st.ceil[static_cast<size_t>(z) * 8 + x] = 3.0f;
+    const auto wall = [&](float ax, float az, float bx, float bz) {
+        RtLampProxy::Edge e;
+        e.x0 = ax, e.z0 = az, e.x1 = bx, e.z1 = bz;
+        st.edges.push_back(e);
+    };
+    for (int x = x0; x < x1; x++) wall(float(x), float(z0), float(x + 1), float(z0)), wall(float(x), float(z1), float(x + 1), float(z1));
+    for (int z = z0; z < z1; z++) wall(float(x0), float(z), float(x0), float(z + 1)), wall(float(x1), float(z), float(x1), float(z + 1));
+    lot.stories.push_back(st);
+    return lot;
+}
+static void SceneBuilder() {
+    using namespace GiScene;
+    Options o;
+    o.density = 2;
+    RtLampProxy::Lot lot = Room(1, 1, 5, 5);
+    Input in;
+    in.lot = &lot;
+    Built a, b;
+    Box edit;
+    bool whole = false;
+    Build(in, o, nullptr, a, &edit, &whole);
+    // 16 tiles x 4 floor + 4 ceiling texels, 16 wall tiles x 2 x 6 rows on the room side
+    CHECK(a.texels == 16 * 8 + 16 * 12 && whole && a.height >= 16, "a room: %u texels, whole %d", a.texels, whole ? 1 : 0);
+    Build(in, o, &a, b, &edit, &whole);
+    bool same = b.slots.size() == a.slots.size();
+    for (const auto& [k, sl] : b.slots) same = same && a.slots.count(k) && a.slots.at(k).pixel == sl.pixel;
+    CHECK(same && edit.Empty() && !whole && b.blob == a.blob, "the same lot again: same pixels, no edit");
+    // a wall splits the room along x = 3 (z 1..3): only its tiles change, every other texel keeps its pixel
+    lot.stories[0].edges.push_back({3, 1, 3, 2});
+    lot.stories[0].edges.push_back({3, 2, 3, 3});
+    Built c;
+    Build(in, o, &b, c, &edit, &whole);
+    int moved = 0;
+    for (const auto& [k, sl] : c.slots)
+        if (b.slots.count(k) && b.slots.at(k).pixel != sl.pixel) ++moved;
+    CHECK(!whole && moved == 0 && c.texels == b.texels + 2 * 2 * 2 * 6, "a wall: %u texels more, %d moved", c.texels - b.texels, moved);
+    CHECK(!edit.Empty() && edit.x0 >= 2 && edit.x1 <= 3 && edit.z0 >= 1 && edit.z1 <= 3 && edit.s0 == 0 && edit.s1 == 0, "edit box %d..%d x %d..%d", edit.x0, edit.x1, edit.z0, edit.z1);
+    // a reflectance change on one tile: that tile alone
+    in.reflect = [](Surface s, int, int ix, int iz, int, const float*, const float*, float rgb[3]) {
+        if (s == Surface::Floor && ix == 4 && iz == 4) rgb[0] = 0.9f;
+    };
+    Built d;
+    Build(in, o, &c, d, &edit, &whole);
+    CHECK(edit.x0 == 4 && edit.x1 == 4 && edit.z0 == 4 && edit.z1 == 4 && !whole, "repaint: edit box %d..%d x %d..%d", edit.x0, edit.x1, edit.z0, edit.z1);
+    // rotated 90 degrees and moved: every texel is the identity build's texel in world space
+    in.reflect = nullptr;
+    RtLampProxy::Lot r = lot;
+    const float rot[4][4] = {{0, 0, -1, 0}, {0, 1, 0, 0}, {1, 0, 0, 0}, {-30, -2, 50, 1}}; // lot = world x rows
+    std::memcpy(r.worldToLot, rot, sizeof rot);
+    Input ri;
+    ri.lot = &r;
+    Built e, f;
+    Build(in, o, nullptr, e), Build(ri, o, nullptr, f);
+    int off = 0;
+    for (const auto& [k, sl] : f.slots) {
+        const auto it = e.slots.find(k);
+        if (it == e.slots.end()) {
+            ++off;
+            continue;
+        }
+        float lp[3];
+        RtLampProxy::ToLot(r, sl.world, lp);
+        off += std::fabs(lp[0] - it->second.world[0]) + std::fabs(lp[1] - it->second.world[1]) + std::fabs(lp[2] - it->second.world[2]) > 1e-3f;
+    }
+    CHECK(off == 0 && f.slots.size() == e.slots.size(), "rotated lot: %d texels off", off);
+}
+
 int main() {
+    SceneBuilder();
     LoadAndOrder();
     OffLast();
     ToggleStorm();
     Drag();
     WallBurst();
+    NarrowedEdit();
+    FadeHold();
     Crossfade();
     Starvation();
     std::printf(g_fail ? "gi_sched_test: %d failures\n" : "gi_sched_test: all checks passed\n", g_fail);

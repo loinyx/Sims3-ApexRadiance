@@ -7,12 +7,6 @@
 
 namespace GiSched {
 
-Box Box::Union(const Box& b) const {
-    if (Empty()) return b;
-    if (b.Empty()) return *this;
-    return {std::min(x0, b.x0), std::min(z0, b.z0), std::max(x1, b.x1), std::max(z1, b.z1), std::min(s0, b.s0), std::max(s1, b.s1)};
-}
-
 Box Around(const float pos[3], int story, float r) {
     return {static_cast<int>(std::floor(pos[0] - r)), static_cast<int>(std::floor(pos[2] - r)), static_cast<int>(std::floor(pos[0] + r)),
             static_cast<int>(std::floor(pos[2] + r)), story, story};
@@ -181,12 +175,14 @@ void Scheduler::Tick(uint32_t frame, double nowMs, const View& view) {
 
     // build edits: once they stopped for kBuildIdleMs, the scene first, then the lamps whose touch box holds the edit
     if (buildPending_ && nowMs - buildMs_ >= kBuildIdleMs) {
-        if (!backend_ || backend_->SubmitScene()) {
+        Box edit = buildBox_;
+        bool all = buildAll_;
+        if (!backend_ || backend_->SubmitScene(edit, all)) {
             ++c_.sceneSubmits;
             for (auto& [id, l] : lamps_) {
                 const Box touch = Shown(l);
                 // shortcut: a lamp with no layer yet has no box and is already queued or waiting; it is left as it is
-                if (buildAll_ ? l.hasLayer || l.phase == Phase::InFlight : touch.Overlaps(buildBox_)) Dirty(l, Cause::Build, frame);
+                if (all ? l.hasLayer || l.phase == Phase::InFlight : touch.Overlaps(edit)) Dirty(l, Cause::Build, frame);
             }
             buildPending_ = buildAll_ = false;
             buildBox_ = {};
@@ -263,6 +259,7 @@ void Scheduler::Tick(uint32_t frame, double nowMs, const View& view) {
     if (backend_ && !buildPending_) // nothing is issued while build edits go on (the scene is about to change)
         for (auto& [key, l] : q) {
             if (issued >= budget_.issuePerFrame || inFlight >= budget_.maxInFlight) break;
+            if (l->fadeT >= 0) continue; // (its two slots are both shown until the fade ends)
             uint32_t ticket = 0;
             if (!backend_->Solve(l->in, ticket)) break;
             l->phase = Phase::InFlight, l->ticket = ticket;
