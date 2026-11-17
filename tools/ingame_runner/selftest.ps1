@@ -264,11 +264,11 @@ try {
     Check ((Run-Watch @((Obs 30 5), (Obs 60 5 0 $false $null $false))) -match 'closed .*exit code 3') 'game closed'
     Check ((Run-Watch @((Obs 30 5), (Obs 60 5.5), (Obs 90 5.9))) -match 'no progress for 60 s') 'two flat checks fail'
     Check ($null -eq (Run-Watch @((Obs 30 5), (Obs 60 5.5), (Obs 90 9)))) 'one flat check is tolerated'
-    Check ((Run-Watch @((Obs 30 5 100 $true), (Obs 60 9 200 $true), (Obs 90 13 300 $true), (Obs 120 17 400 $true))) -match 'did not load: no ApexTestAgent marker') 'agent not loaded 90 s after the features'
-    Check ((Run-Watch @((Obs 30 5 100 $true), (Obs 120 17 400 $true '<ApexTestAgent stage="loaded" />'))) -match 'loaded \(<ApexTestAgent.*mailbox was not found') 'agent loaded, mailbox not found'
+    Check ((Run-Watch @((Obs 30 5 100 $true), (Obs 60 9 200 $true), (Obs 90 13 300 $true), (Obs 120 17 400 $true), (Obs 150 21 500 $true), (Obs 180 25 600 $true), (Obs 210 29 700 $true))) -match 'did not load: no ApexTestAgent marker') 'agent not loaded 180 s after the features'
+    Check ((Run-Watch @((Obs 30 5 100 $true), (Obs 210 17 400 $true '<ApexTestAgent stage="loaded" />'))) -match 'loaded \(<ApexTestAgent.*mailbox was not found') 'agent loaded, mailbox not found'
     $noApex = { param($List) $st = @{}; foreach ($x in $List) { $why = Step-StartWatch $st $x -NoApex; if ($why) { return $why } }; return $null }
     Check ($null -eq (& $noApex @((Obs 30 5 -1), (Obs 60 9 -1), (Obs 90 13 -1)))) 'without the mod a missing log is fine'
-    Check ((& $noApex @((Obs 120 17 -1), (Obs 150 21 -1), (Obs 180 25 -1), (Obs 210 29 -1))) -match 'did not load: no ApexTestAgent marker') 'without the mod the agent deadline counts from 120 s'
+    Check ((& $noApex @((Obs 120 17 -1), (Obs 150 21 -1), (Obs 180 25 -1), (Obs 210 29 -1), (Obs 240 33 -1), (Obs 270 37 -1), (Obs 300 41 -1))) -match 'did not load: no ApexTestAgent marker') 'without the mod the agent deadline counts from 120 s'
     $st = @{}; $null = Step-StartWatch $st (Obs 30 5 100 $true); $found = Obs 150 30 900 $true; $found.Found = $true; $found.Beat = 4
     Check ($null -eq (Step-StartWatch $st $found)) 'a found mailbox never fails the agent rule'
 } finally { Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue }

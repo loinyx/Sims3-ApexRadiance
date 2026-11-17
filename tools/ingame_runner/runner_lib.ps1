@@ -597,10 +597,10 @@ function Get-StartObservation($Proc, [string]$LogPath, [string]$DocsDir, [dateti
 
 # One 30 s check of the wait for the test agent: the reason to stop, or $null to keep waiting. $State carries the last
 # check. Rules: the game runs; Apex's log has its first lines 60 s after the start; CPU time, the log or the agent's
-# heartbeat moves (two flat checks in a row fail); $AgentSec after Apex started its features (the main menu follows
+# heartbeat moves (two flat checks in a row fail); $AgentSec (180: a cold first start reached the menu 106 s after Apex's features) after Apex started its features (the main menu follows
 # within seconds) the agent's mailbox is found, and the message tells "not loaded" (no marker) from "loaded but its
 # mailbox not found" (marker).
-function Step-StartWatch([hashtable]$State, $Obs, [int]$AgentSec = 90, [switch]$NoApex) {
+function Step-StartWatch([hashtable]$State, $Obs, [int]$AgentSec = 180, [switch]$NoApex) {
     if (-not $Obs.Alive) { return "the game closed before the test agent answered (exit code $($Obs.ExitCode))" }
     # without Apex there is no log: the agent's deadline counts from 120 s after the start instead of Apex's start line
     if ($NoApex) { $Obs.LogBytes = 0; $Obs.Features = $Obs.Sec -ge 120 }

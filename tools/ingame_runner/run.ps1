@@ -735,6 +735,8 @@ try {
         if ($row.Count -ne 1) { throw "internal: Invoke-Load returned $($row.Count) values instead of one result" }
         $results += $row[0]
         if (Get-Process -Name 'TS3W' -ErrorAction SilentlyContinue) { throw 'TS3W.exe still running after a load; stopping the run' }
+        # the game was ended because the start failed (agent never loaded, hang): the next loads start the same way, so stop instead of burning 6 starts
+        if (-not $row[0].Ok -and $row[0].Closed -eq 'ended after a failure' -and ($row[0].Notes -join ' ') -match 'test agent|no progress|did not load') { throw "start failure in $($row[0].Name); stopping the run" }
     }
 } catch {
     $stopped = $_.Exception.Message
