@@ -389,6 +389,13 @@ constexpr Info kInfo[] = {
     {"TestHalf", 0x00F9A5AC},
     {"TestPenumbra", 0x00FF307C},
     {"TestWallY", 0x01158A50},
+    {"RoomRebuildCall", 0x006A8BAD},
+    {"RoomRebuild", 0x006A7CF0},
+    {"RoomPassCall", 0x006A8C0E},
+    {"RoomPass", 0x006A88B0},
+    {"LevelSolverSlot0", 0x00FF0580},
+    {"LevelSolverSlot1", 0x00FF05A0},
+    {"LevelSolverSlot2", 0x00FF0720},
 };
 static_assert(std::size(kInfo) == static_cast<size_t>(Id::Count), "kInfo must list every Id in order");
 
@@ -809,6 +816,12 @@ const Entry kTable[] = {
     {Id::TestHalf, K::Sig, W::Image, None, 0, {{"EB 5E F3 0F 10 0D ?? ?? ?? ?? 0F 2F C1 76 39 F3 0F 10 15 ?? ?? ?? ??", 19, M::Dword}, NOSIG}},
     {Id::TestPenumbra, K::Sig, W::Image, None, 0, {{"CC F3 0F 10 4C 24 04 D9 E8 F3 0F 10 05 ?? ?? ?? ?? F3 0F 5C C8 F3 0F 11 4C 24 04 81 64 24 04 FF FF FF 7F", 13, M::Dword}, NOSIG}},
     {Id::TestWallY, K::Sig, W::Image, None, 0, {{"0F 58 D3 F3 0F 10 1D ?? ?? ?? ?? 0F 29 74 24 10 F3 0F 11 5C 24 14", 7, M::Dword}, NOSIG}},
+    // ---- Frame Profiler: the parts of the lot room solve ----
+    {Id::RoomRebuildCall, K::Sig, W::Text, None, 0, {{"80 BE 80 02 00 00 00 57 75 05 E8 ?? ?? ?? ?? 83 BE 88 00 00 00", 10, M::At}, NOSIG}},
+    {Id::RoomRebuild, K::Target, W::Text, Id::RoomRebuildCall, 0, {NOSIG, NOSIG}},
+    {Id::RoomPassCall, K::Sig, W::Text, None, 0, {{"8B CE E8 ?? ?? ?? ?? D9 44 24 10 51 D9 1C 24 57 8B CE E8 ?? ?? ?? ?? 5F 5E C2 08 00", 18, M::At}, NOSIG}},
+    {Id::RoomPass, K::Target, W::Text, Id::RoomPassCall, 0, {NOSIG, NOSIG}},
+    {Id::LevelSolverSlot0, K::SlotsOf, W::Image, Id::WallAoDriver, 3, {NOSIG, NOSIG}},
 };
 // clang-format on
 #undef NOSIG

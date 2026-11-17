@@ -1,0 +1,52 @@
+{
+  "id": "realtime-gi-profile",
+  "description": "Frame Profiler over the far pan of research 00 run D (8 lots at 150 m, 4 passes of 60 s) at night, with the four parts of the lot room solve timed (rebuild, AO solver 1, AO solver 2, room pass). Developer build; developer mode on, the background frame limit lifted. S0-G1 measured run. Run with -Profiler None, the default (the runner's Frames profiler and the Frame Profiler both hook 0x00EC9F00). Read the counter block of ApexRadiance_Hitches.txt in the load folder: the four Room solve lines against Lot room solve.",
+  "save": "ApexTest-Night",
+  "toml": {
+    "ui": {
+      "developer_mode": true
+    },
+    "screen": {
+      "background_fps_limit": 0
+    },
+    "qol.frame_profiler": {
+      "start_at_load": true,
+      "report_every_s": 60,
+      "write_file": true
+    }
+  },
+  "variants": {
+    "profile": {}
+  },
+  "expect": [
+    "\\[FrameProfiler\\] Measurement preset: timing run"
+  ],
+  "fail": [
+    "\\[FrameProfiler\\] Room solve: "
+  ],
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    },
+    {
+      "do": "profile",
+      "minutes": 4.5
+    },
+    {
+      "do": "camera_pan",
+      "lots": 8,
+      "height": 150,
+      "seconds": 60,
+      "passes": 4
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    }
+  ]
+}

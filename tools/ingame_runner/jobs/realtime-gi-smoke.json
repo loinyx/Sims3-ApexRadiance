@@ -1,0 +1,68 @@
+{
+  "id": "realtime-gi-smoke",
+  "description": "Real-time GI start proof: the GI switch is read back from the log (the [RealtimeGI] On: line, lots, cap, scale, indirect, backend), the off load must not log it, and one 60 s pan runs without a crash or a GI refusal line. No timing. Run with -AB.",
+  "save": "ApexTest-Night",
+  "toml": {
+    "ui": {
+      "developer_mode": false
+    },
+    "screen": {
+      "background_fps_limit": 0
+    }
+  },
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.RealtimeGI": {
+          "enabled": false
+        }
+      },
+      "fail": [
+        "\\[RealtimeGI\\] On: lots=\\d+ cap=(off|class0|hold) scale=[124] indirect=(off|bounce1|multiBounce) backend=(auto|serverRays|serverCompute|d3d9)"
+      ]
+    },
+    "on": {
+      "toml": {
+        "patches.RealtimeGI": {
+          "enabled": true,
+          "solveCap": "class0"
+        }
+      },
+      "expect": [
+        "\\[RealtimeGI\\] On: lots=\\d+ cap=(off|class0|hold) scale=[124] indirect=(off|bounce1|multiBounce) backend=(auto|serverRays|serverCompute|d3d9)"
+      ]
+    }
+  },
+  "fail": [
+    "\\[RealtimeGI\\] .*(did not start|Verification mismatch|class 1-2 solve)"
+  ],
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    },
+    {
+      "do": "memory",
+      "label": "start"
+    },
+    {
+      "do": "camera_pan",
+      "lots": 8,
+      "height": 40,
+      "seconds": 60,
+      "passes": 1
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    },
+    {
+      "do": "memory",
+      "label": "end"
+    }
+  ]
+}

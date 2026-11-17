@@ -34,7 +34,7 @@ same maps from Direct3D 9 passes. Everything is off by default.
 |---|---|
 | 04 keeps the game-format maps Instant mode composes; 02 wants float copies of larger size | Both, in order. S1 proves ownership on the existing compose path. Float copies at scale 2 or 4 follow once the texel position source and the `LightmapSizeParameters` readers are checked [O: S0-03, S0-04] |
 | 06 P1 asks for 0 solve calls on the GI lot; 05 shows that cannot load | P1 is restated in §8: no class 1 or class 2 room solve on a GI lot; class-0 solves are counted and bounded |
-| 02 needs a texel position source with the solve off; 05 keeps a class-0 solve | The class-0 solve still yields the layout and one sample a tile. Denser copies take positions from the proxy rasterised into light-map space [O: S0-03]. Fallback: scale 1 |
+| 02 needs a texel position source with the solve off; 05 keeps a class-0 solve | The class-0 solve still yields the layout and one sample a tile. The wall atlas layout and the vertex uv of all three classes exist before the first solve and stay fixed while the room is held at class 0; every wall texel's position is a closed form of the wall object, at any scale [V: S0-03, `docs/engine/room-light-maps.md` "Texel positions and the wall atlas per class"]. Floors: whole tiles closed form, split tiles take the class-0 solve's own samples. Fallback: scale 1 |
 | `gpu-room-lamps.md` says Sims read the directional maps; 02 finds no Sim technique that binds them | The shader bindings are the stronger evidence: Sims are rig-only here. One static check of the room-mode gather `0x006BBDE0` settles a CPU-side read [O: S0-09]. Either answer leaves the rig write as the route |
 | 04 and 12 §4.4 read probe values back, per change; 06 and 07 forbid read-backs | No synchronous `GetRenderTargetData` in the GI path. Lamp visibility at a model's centre is computed on the CPU (ray reference, or a 2D walk of the wall plan). Indirect values come from the server's point queries, from the asynchronous bridge read of [11 §5.1](research/11-prior-art-readbacks.md), or, without the bridge, from an event-query ring where the wait is at the lock |
 | 03 wants per-pixel PCF in patched object shaders; 08 §8 a post-scene term; 12 §2.1 a lamp index texture | Outdoor rig-lit objects keep their existing patched copies but read lamps from index cells and a frame-constant block, so nothing is picked or uploaded a draw. Shadows across Sims are the post-scene term |
@@ -96,7 +96,10 @@ upsample is bilinear and wall-aware (it does not blend across a wall face). Tile
 16 lamps x 64 x 320 texels of RGBA16F is 2.5 MB of server VRAM.
 
 Updates run from a dirty queue of (lamp, story) pairs sorted by distance to the camera target, with a hard cap a
-frame. Every update is a complete solve of its texels, so nothing accumulates noise on screen [12 §4.1c].
+frame. Every update is a complete solve of its texels, so nothing accumulates noise on screen [12 §4.1c]. Re-bake
+cost against lamp count, the touch box that picks the dirty lamps of an edit, the budgets a back end and the
+scheduler rules: [wp/X-REBAKE.md](wp/X-REBAKE.md) (a layer touches about 74-124 texels on any lot size; a server
+layer is milliseconds, the CPU reference's is 0.1-0.6 s).
 
 ### 3.4 Direct light
 
@@ -150,7 +153,9 @@ windows and a room id [V, 05 §3]. Gameplay, saves and every Sim's behaviour are
 - The off set is keyed by lot id and lives outside the lighting manager, which is rebuilt on every promotion.
 - Kept untouched: level rebuild `0x006A7CF0`, both AO solvers, the light gather, the synchronous path
   `0x00ADBAD0 -> 0x006A80E0`.
-- **Thumbnail exemption:** while `0x00AE06B0` is polled for a lot, that lot leaves the off set until it returns true.
+- **Thumbnail exemption:** the two calls of `0x00ADC180` (`0x00AE06EC` sets the thumbnail quality `+0x4D`,
+  `0x00AE62C7` clears it) add and drop the lot in a thumbnail set; a lot in that set is not capped. The capture has no
+  timeout, so without this it waits forever [V pieces, S0-10]. `mgr+0x288` is not usable: the active lot sets it too.
 - Map content under the copies: the class-0 result with its rgb cleared at the end-of-solve hook, ambient alpha kept,
   so a surface the swap misses shows "no lamps" instead of class-0 light.
 - Gate before building: how the 2.81 ms of `0x006A8BA0` splits between rebuild, AO slots and the room pass

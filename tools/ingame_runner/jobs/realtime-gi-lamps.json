@@ -1,0 +1,96 @@
+{
+  "id": "realtime-gi-lamps",
+  "description": "Real-time GI lamp snapshot (S1-02): the art museum's front outdoor lamp switched off and on again, 9 s apart, the game paused. The on load must log the start line, a switched change event for the lamp and lamp table dumps with 0 differences (debugLampTable, developer mode), and no read fault. Run with -AB.",
+  "save": "ApexTest-Night",
+  "toml": {
+    "ui": {
+      "developer_mode": true
+    },
+    "screen": {
+      "background_fps_limit": 0
+    }
+  },
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.RealtimeGI": {
+          "enabled": false
+        }
+      },
+      "fail": [
+        "\\[RealtimeGI\\] On: lots=\\d+ cap=(off|class0|hold) scale=[124] indirect=(off|bounce1|multiBounce) backend=(auto|serverRays|serverCompute|d3d9)"
+      ]
+    },
+    "on": {
+      "toml": {
+        "patches.RealtimeGI": {
+          "enabled": true,
+          "debugLampTable": true
+        }
+      },
+      "expect": [
+        "\\[RealtimeGI\\] On: lots=\\d+ cap=(off|class0|hold) scale=[124] indirect=(off|bounce1|multiBounce) backend=(auto|serverRays|serverCompute|d3d9)",
+        "\\[RealtimeGI\\] Lamp change: switched light=[0-9A-F]{8} lot=[0-9A-F]+",
+        "\\[RealtimeGI\\] Lamp table: lights=[1-9]\\d* lot=[0-9A-F]+ lamps=\\d+ laws=\\d+ table=\\d+ diffs=0"
+      ],
+      "fail": [
+        "\\[RealtimeGI\\] Lamp table: .* diffs=[1-9]",
+        "\\[RealtimeGI\\] Counters: .*(readFaults|lampTableDiffs)=[1-9]",
+        "\\[RealtimeGI\\] The light enumeration was not found"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "normal"
+    },
+    {
+      "do": "camera_orbit",
+      "lot": "kArtGallery",
+      "radius": 9,
+      "height": 2.5,
+      "seconds": 3600,
+      "turns": 0.001,
+      "face": "door"
+    },
+    {
+      "do": "speed",
+      "speed": "pause"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.5
+    },
+    {
+      "do": "lamp_edit",
+      "near": {
+        "x": 931.5,
+        "y": 43.04,
+        "z": 951.0
+      },
+      "radius": 1.5,
+      "count": 1,
+      "action": "off"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "lamp_edit",
+      "near": {
+        "x": 931.5,
+        "y": 43.04,
+        "z": 951.0
+      },
+      "radius": 1.5,
+      "count": 1,
+      "action": "on"
+    },
+    {
+      "do": "wait",
+      "minutes": 0.25
+    }
+  ]
+}

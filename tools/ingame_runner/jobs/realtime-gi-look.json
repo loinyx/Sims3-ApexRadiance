@@ -1,0 +1,150 @@
+{
+  "id": "realtime-gi-look",
+  "description": "Real-time GI look pairs: the game paused, four fixed camera views (three from night-lot-switch-pan, one at the gym entrance), F8 at each, GI off against on, so the same four pictures can be compared. Room bookmarks across a wall and a floor replace the views when S1-G1 picks them. Run with -AB and compare the captures folders.",
+  "save": "Sunset Valley",
+  "toml": {
+    "ui": {
+      "screenshot_key": "F8",
+      "recorder_key": "F9"
+    },
+    "screen": {
+      "background_fps_limit": 0
+    }
+  },
+  "variants": {
+    "off": {
+      "toml": {
+        "patches.RealtimeGI": {
+          "enabled": false
+        }
+      },
+      "fail": [
+        "\\[RealtimeGI\\] On: lots=\\d+ cap=(off|class0|hold) scale=[124] indirect=(off|bounce1|multiBounce) backend=(auto|serverRays|serverCompute|d3d9)"
+      ]
+    },
+    "on": {
+      "toml": {
+        "patches.RealtimeGI": {
+          "enabled": true,
+          "solveCap": "class0"
+        }
+      },
+      "expect": [
+        "\\[RealtimeGI\\] On: lots=\\d+ cap=(off|class0|hold) scale=[124] indirect=(off|bounce1|multiBounce) backend=(auto|serverRays|serverCompute|d3d9)"
+      ]
+    }
+  },
+  "fail": [
+    "\\[RealtimeGI\\] .*(did not start|Verification mismatch|class 1-2 solve)"
+  ],
+  "steps": [
+    {
+      "do": "speed",
+      "speed": "pause"
+    },
+    {
+      "do": "wait",
+      "minutes": 1.5
+    },
+    {
+      "do": "camera",
+      "pos": {
+        "x": 1073,
+        "y": 113,
+        "z": 1207
+      },
+      "target": {
+        "x": 1028,
+        "y": 43,
+        "z": 1162
+      }
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.05
+    },
+    {
+      "do": "camera",
+      "pos": {
+        "x": 1030,
+        "y": 113,
+        "z": 1164
+      },
+      "target": {
+        "x": 985,
+        "y": 43,
+        "z": 1119
+      }
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.05
+    },
+    {
+      "do": "camera",
+      "pos": {
+        "x": 1025,
+        "y": 113,
+        "z": 1119
+      },
+      "target": {
+        "x": 980,
+        "y": 43,
+        "z": 1074
+      }
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.05
+    },
+    {
+      "do": "camera",
+      "pos": {
+        "x": 946.3,
+        "y": 69.16,
+        "z": 1084
+      },
+      "target": {
+        "x": 987.41,
+        "y": 43.09,
+        "z": 1066.18
+      }
+    },
+    {
+      "do": "wait",
+      "minutes": 0.15
+    },
+    {
+      "do": "key",
+      "vk": 119
+    },
+    {
+      "do": "wait",
+      "minutes": 0.05
+    }
+  ]
+}

@@ -69,6 +69,8 @@ manager (per story)
   +0x230 room hash: buckets +0x234, count +0x238; node: +0 = room id, +0x10 = room, +0x24 = "no_hash24", +0x80 = next
   +0x280 byte flag (unverified meaning; printed by F8 as flag280)
   +0x288 byte: high lighting quality (the active lot / Build mode)
+  +0x260 / +0x264 / +0x268  tile pointer grid / width (row stride) / height; tile(x, z) = [+0x260][z × width + x] (0x006A42D0)
+  +0x3B8 LotLightingManager, its interface at +4 (strobe, black-light, sunny, foggy room sets; see "Reflectance source")
 room ("LightingRoom")
 ```
 
@@ -249,6 +251,69 @@ see [terrain-and-light-bake.md](terrain-and-light-bake.md)). The two meet at the
 cut" (notebook 1). Apex's lot light bridge draws the lot pass with `max(lot map, terrain map or world atlas)`, so lot ground
 now shows terrain light through walls (ground_report 5: "the leak already exists").
 
+### Texel positions and the wall atlas per class
+
+Static read of Steam 1.67.2 (`TS3W.exe` 0x52DEC247), checked function by function against the retail disc build
+(0x52D872DA, the same code 0x1E0 to 0x210 bytes higher in this range). VERIFIED in the disassembly unless marked.
+
+**One wall atlas per story and class, packed in shelves.** The manager set-up `0x006A8690` builds the three class entries
+at `manager+0x160 + class × 0x40` (`0x006A9160` in a loop at `0x006A869F`). Each entry owns a shelf packer at `+0x1C`
+(this is the `room+4` "LODParams" pointer: `room+4` points at the manager's class entries), built by `0x006A90E0`:
+
+| Class | Atlas (`0xFF36DC` / `0xFF36E8`) | Texels a tile `t` (`0xFF36AC`) | Shelf height `3t + 1` | Shelves |
+|---|---|---|---|---|
+| 0 | 256 x 128 | 1 | 4 | 32 |
+| 1 | 512 x 256 | 2 | 7 | 36 |
+| 2 | 1024 x 512 | 4 | 13 | 39 |
+
+The packer (`0x006AC3E0`) puts a strip into the first shelf with room for its length, left to right, with no gutter;
+the record gets `x0 = atlas width − room left`, `y0 = shelf × (3t + 1)`, `x1 = x0 + length − 1`, `y1 = y0 + 3t`. When no
+shelf fits, `0x006AC480` empties every shelf of that story and class and tries once more; the strips placed before keep
+their old records (INFERRED: they then overlap the new one until they are packed again; the repack trigger was not
+traced). A failed second try leaves the record zero.
+
+**The layout is made by the room rebuild, for all three classes, before any solve.** The room rebuild `0x006A2740`
+calls `0x006A1DE0`, which runs `0x006AC000` on every wall of `room+0xD8` (call at `0x006A1E89`). When the wall's change
+flag is set, `0x006AC000` calls `0x006AB0E0`, which allocates the wall's strip in class 0, 1 and 2 (`0x0069E660` →
+packer, records at `wall+0x58 + class × 0x20`). Only after that does the rebuild set state 1, the gather countdown 5 and
+class 0 (`0x006A27D4..0x006A27E8`). The wall set-up `0x006AB480` (tail `0x006ABC77`) fixes the strip size per class at
+`wall+0x28 + class × 0x10`: length `W = n × B + 1` (`n` = tiles of the wall, `wall+0x24`; `B` = `t`, or `t + 1` when a
+per-wall float, the argument or tile `+0x78`, is above 1.0, meaning UNVERIFIED), height `H = 3t + 1`, band `A = t`.
+
+**Texel to position (walls).** The wall pass (`0x006A3A30`) asks each wall for `3n` segments (`0x006AB0D0`): tile
+`j / 3`, height band `j % 3`. `0x006AC070` walks `u` (along the wall, `B` texels a tile, one more on the last tile) and
+`v` (up, `A` texels a band, one more on the top band) and `0x006ABDD0` makes the sample:
+
+```
+position = wall+0x110 + wall+0xF0 × (u + 0.5) / W + (0, 1, 0) × 3.0 × v / H
+normal   = wall+0x150
+texel    X = x0 + u,  Y = y0 + (H − 1 − v)          (0x006AC1C0)
+```
+
+So every wall texel of every class has a closed-form position from the wall object alone; nothing comes from the solve.
+The top row (`v = 3t`) is placed at `9t / (3t + 1)` m: 2.25 m at class 0 and 2.77 m at class 2, while the vertex uv
+below maps the strip's last texel centre to the top vertex (INFERRED: a vertical stretch of the game's own map, 0.75 at
+class 0; check against a capture before copying the formula).
+
+**Vertex uv.** The wall mesh's uv source `0x006A5600` (callers `0x00A5E1E7`, `0x00A5E230`, `0x00C3856A`) takes the class
+from the shown class `room+0x100` (`0x0069EAF0`) through `0x006A8C20`, which maps 3 and above to 0: a room never solved
+(shown = 4) already gets class-0 uv. `0x006AC200` turns the record into a rectangle of texel centres:
+`u = (x0 + offset + 0.5) / width .. + B / width`, `v = (y0 + 0.5) / height .. (y1 + 0.5) / height`. The bilinear read
+therefore never takes weight from a neighbour strip, and the same holds for a copy `s` times larger bound in its place
+(`s ≥ 1`), as long as the copy fills the strip's whole area `[s·x0, s·(x1 + 1)) × [s·y0, s·(y1 + 1))` from the same wall.
+
+**Floors.** A whole tile's texels start at its grid origin `tile+0x40 / +0x44` (set once by the tile constructor
+`0x006AA2E0`) times `t` (`0x006AA960`), so the floor layout is the same in tile units at every class. The split and
+diagonal tiles' atlas origins were not traced (UNVERIFIED, see "Floor maps at diagonal walls"). Outdoor floors take
+their uv from the position in the VS, so their texels are world-aligned.
+
+**Across classes.** The layout is NOT stable across classes: each class has its own packer, strip sizes scale with `t`,
+and a wall's strip sits elsewhere in each atlas. Within one class it is stable until the next room rebuild (a wall edit)
+or a packer reset. A room held at class 0 (shown stays 0) keeps the class-0 layout and uv for the life of the lot.
+
+`0x0069E950`, called by the rebuild at `0x006A27C4`, gives the room's locked map slots back (floor `+0x1C4`, ceiling
+`+0x2B4`, walls `+0x680`, objects `+0x3A4`); it does not touch the layout.
+
 ### Night level (lightMgr+0xF0)
 
 A float from 0 (day) to 1 (night) set by `0x006ADD60`. `IsNight` (`0x006AC560`) uses `> 0.99`. The game switches lamps
@@ -402,6 +467,133 @@ solve).
 - **Ambients.** `+0x110` is the ambient the floor and wall shaders draw (`c4`), `+0x120` the copy objects use, and
   `+0x650` the ambient sampler's copy. Rooms without a lamp of their own can hold exactly the same ambient.
 
+### Solve cap site, lot thumbnail capture and impostor solve (real-time GI S0-10)
+
+Static, capstone on a copy of the Steam 1.67.2 exe. [V] = read in the disassembly for this section, [I] = inferred.
+
+**The priority call (cap site).**
+- `0x006A81DF` is `E8 8C 65 FF FF` = `call 0x0069E770`, the only call of `0x0069E770` in `.text` [V]. Caller
+  `0x006A8190` passes the room in `ecx` (`mov edi,[esi+0x10]; mov ecx,edi`) and stores the ST0 result as the
+  priority [V].
+- `0x0069E770` fastcall(room) -> ST0: 0 when `[room] == 0` or `room+0xF0 != 2` [V]. Story class `c` (2 above the
+  camera story, 2 for an outdoor room below ground, 1 indoor below, else 0) from story-manager `+0x88` / `+0x284` and
+  `room+0x18` [V]. Class 0 rooms: `10000 x {1, 0.8, 0.5}[c] x (mgr+0x288 ? 1 : 0.5)` [V; tables `0x01158B04`,
+  `0x01158B10`]. Class > 0 rooms: `{1000, 100}[class-1]`, 0 when `room+0xF4 > LodChoice` [V].
+- LodChoice `0x0069E710`: `[0x01158B00]` when `mgr+0x288 == 1` and `c == 0`, else 0 [V]. The dword is 0 in the file
+  and set at run time [V]; it must be 2 at run time, or no thumbnail could finish [I]. So only rooms of the camera's
+  story on a high-quality lot are ever refined.
+- **Cap condition** (S1-03): in `PriorityHook`, after the game's value `p`: return 0 when `p > 0`, the room's lot
+  (`[room]+0x90` / `+0x94`) is in the GI off set, the lot is not in the thumbnail set below, and `room+0xF4 > 0`.
+  Class-0 rooms (new rooms and edit re-solves) keep `p`, so stage 20 (`room+0x104 != 4`) still passes.
+
+**End of solve (`FinalizeHook`).** `0x006A3E65` is `E8 96 CF FF FF` = `call 0x006A0E00` inside `0x006A3C90`, the only
+call of `0x006A0E00` [V]; `ecx` = room (`mov ecx,esi` at `0x006A3E61`) [V].
+
+**Lot thumbnail capture.** ThumbnailManager state machine `0x00D59C10` (thiscall, request in `[ebp+8]`, state at
+`req+0x108`, jump table `0x00D5C654`, 0x1F states) [V]:
+- State 9 (`0x00D5A66D`): finds the lot by the request's lot id (`req+0x110` / `+0x114`, `0x00C62D40`), takes its
+  LotRenderer `lot+0x364`, installs a model LOD override object (allocation tag "UI/ThumbnailManager/LODOverrideHook",
+  vtable `0x01088520`, slot 3 `0x00D4C240` calls each matching object's vfunc `+0x40` with distance 0) through
+  `0x006E7520` [V]. It stores the renderer at `mgr+0x240` and calls `0x00AE6110` on it, which sets `renderer+0x36C`,
+  ORs 4 into `renderer+0x2C` and resets the renderer when it changes state [V]; that bit is a load request that keeps or
+  brings the lot to full detail [I].
+- State 0xA waits for `renderer+0x2C != 0`, `renderer+0x1E` (done) and `0x00AE06D0`; the lot goes through its normal
+  load stages, so stage 20 runs as usual [V for the waits; I that no other path runs].
+- State 0xB `0x00AE06E0` -> `0x00ADC180(1)` on `renderer+0x23C`: sets the lot lighting manager's `+0x4D`, then
+  `0x00ADB850` passes `(+0x4C || +0x4D)` to `0x006A5EF0` on every story [V]. `0x006A5EF0` writes `mgr+0x288` and, when
+  it changed, `0x006A5C90(1)` sets `room+0x20 = 4` and invalidates every room (`0x0069EED0(0,0)`) [V]. LodChoice then
+  allows the refinement.
+- State 0x17 (`0x00D5BE29`): `call 0x00AE06B0` (`E8 7C 48 D8 FF`, the only call) -> `0x00ADBC30` -> `0x006A5BF0` per
+  story: both AO states `== 2` and every room with `c == 0` at `room+0x104 == 2` (`0x0069F540(1)`) [V]. Not ready:
+  `return 0` and the same state next tick [V].
+- **No timeout.** Nothing in the state machine reads a clock [V]. The only way out of 0x17 other than readiness is the
+  check at the top of every tick: when `req+0x1A8` is set, the state is below 0x19 and not 1, no entry of the list at
+  `req+0x1AC` has `0x00C93970() > 1`, and `[req+0x1A8]` vfunc `+0x10` returns 1, the state becomes 0x19 (finish) [V].
+  That is a requester cancel, not a timer [I]. **A capped lot therefore waits in 0x17 forever** [I from V pieces].
+- Clear: `0x00AE6290` (callers `0x00D5A291`, `0x00D5A781`, `0x00D5C344`, `0x00D5C804`) calls `0x00ADC180(0)` at
+  `0x00AE62C7` [V]; dropping the quality re-invalidates every room through `0x006A5EF0` (when `+0x4C` is 0) [V].
+- **Exemption condition:** `0x00ADC180` (thiscall(lotLightingMgr, bool), `ret 4`) has two callers, both `E8` rel32:
+  `0x00AE06EC` (set, `push 1`) and `0x00AE62C7` (clear, `push ebx` = 0) [V]. Lot id = `[[mgr+0x14]+0x48]` /
+  `+0x4C` (as the message handler `0x00ADBD30` reads it) [V]. Redirect both calls: add the lot to the thumbnail set on
+  1, drop it on 0, then call the original. Do not use `mgr+0x288`: `+0x4C` (message `0x04891B02`, the active lot) sets it
+  too [V], so the played GI lot would never be capped.
+- **No LoD switch.** The capture does not reach the impostor path: no direct call chain of depth 5 from `0x00AE6110`,
+  `0x00AE06E0`, `0x00AE2170`, `0x00AE5000`, `0x00AE3290`, `0x00D4FA40` reaches `0x00AD9E30`, `0x00AEB3F0`,
+  `0x00ADBAD0` or `0x006A80E0` [V for direct calls; virtual calls not followed]. The "LODOverrideHook" of the thumbnail
+  is a model LOD override, not the lot LoD switch.
+
+**Impostor build and its synchronous solve.** Impostor builder states (jump table `0x00ADAF40`): 0 `0x00ADAB00`,
+1 `0x00ADA400`, 2 `0x00AD9E30`, 3 `0x00ADA250`, 4 `0x00AD9780`, 5 `0x00ADA570` [V]. State 2 aborts (state 7) unless
+`renderer+0x1E` (lot done), then `0x00AEB3F0` runs the renderer update, `0x00ADBAD0` (sync solve) and the update again,
+and installs "World/LotImpostor/LODOverrideHook" [V]. `0x006A80E0` calls `0x006C54E0` (it invalidates the tree's
+current room first) and `0x006A3EC0` per room [V]. `0x006A3EC0` solves only a room in state 1 or 2 with `+0xC0 != 0`
+and shown class `+0x100 == 0`: it sets state 3, `+0x164 = 0` and loops `0x006A3C90` with a 60000 ms stopwatch until
+the state leaves 3 [V]. So on a capped lot each class-0 room gets one more solve, at its class (1, or 2 with the direct
+step), when an impostor is built; the cap does not see it. Whether the impostor's albedo capture bakes that room light
+is still open: the build solves first and the capture runs on the full lot afterwards, which suggests it does [I]; a
+frame capture of an impostor build at night settles it (S0-G2).
+
+### Reflectance source (real-time GI S0-12, static reading of Steam 1.67)
+
+The game keeps one colour per floor quarter-tile and averages it per room. That mean is the only surface colour the
+lighting code reads. Nothing else in the lighting code reads a wall or object colour.
+
+- **Tile sections** (verified). A tile (manager grid above) has four triangle sections of 0x14 bytes at `+0x7C`: `+0x7C` room
+  id, `+0x80` floor colour (ARGB8, field 9), `+0x84` field 10 (default `0xC0C0C0C0`, no reader found in the lighting code),
+  `+0x88`/`+0x89` bytes, `+0x8A`/`+0x8C` words. The setter is `0x006A9630(field, value, section, b1, b0)`, the getter by
+  section mask is `0x006AA340(field, mask)` (mask to section through the table `0x00FF34AC`, highest set bit), the getter by
+  position is `0x006AA6D0(field, x, z)` (section from the position inside the tile, `0x006AA390`). Room membership of a tile
+  is `0x006A9760(roomId)` (any section).
+- **Who writes the colour** (verified). A new tile gets white (`0x006A884C`: field 9 = `0xFFFFFFFF`). Floor painting
+  calls `0x006A61A0(x, z, level, colour, section, ...)` from `0x00A89EF1`. The colour comes from `0x00A9E7E0(key)`, a cached
+  lookup of the floor pattern's catalog resource (`0x00A9D760` loads it, `0x00C99A20` returns resource `+0xB8`). Removing
+  a floor pattern stores white again (`0x00A8947A`). `0x006A61A0` stores `0.7 × c + 0.3 × Y` per byte, with
+  `Y = 0.12 × c[16..23] + 0.67 × c[8..15] + 0.21 × c[0..7]` (`0x00FE4FC8`, `0x00FF358C`, `0x00FF3588`, `0x00FBA7D8`,
+  `0x00F9D504`). The colour is pulled 30 % toward grey, and A is mixed the same way. It is repacked in ARGB order (`0x006A3FA0`).
+  Two generic callers of the setter (`0x006A49E5`, `0x006A6C7A`) pass the field through; they were not traced.
+- **Catalog colour** (verified load, meaning inferred). The ProductPattern catalog class (vtable `0x0107C238`, names
+  "Lot/CTCatalog/ProductPattern/...") defaults `+0xB8` to `0xE0E0E0` (`0x00C9A11F`). Its loader `0x00C9A390` reads 4 bytes from
+  the resource into it (`0x00C9A999`). So the colour is authored per pattern, one value per pattern. It is probably the
+  pattern's mean or swatch colour. Whether a Create-a-Style recolour changes it is unknown, because the lookup is keyed
+  by pattern resource.
+- **Room mean** (verified). `0x0069FF20` (thiscall room; called from the surface colour pass `0x006A0F00` and from the
+  ambient step's empty-light path `0x006A0FB8`) walks tiles `x` in `[0, +0xC0)`, `z` in `[0, +0xC4)` at grid offset
+  (`+0x1C`, `+0x24`). For every tile of the room it adds section 0's colour (`0x0069ED20`: ARGB8 to `(R, G, B, R) / 255`).
+  It divides by the count and keeps only products: `+0x140 = min(mean × +0x120 × 6.0, 1.35)` and
+  `+0x130 = min(+0x120 × 2.0, 1.35)` (`0x00FB2F68`, `0x00F98A58`, `0x00FF338C`). The mean itself is not stored. A room with
+  no tile divides by zero, and `minps` then returns 1.35.
+- **Point query that nobody uses** (verified). The room-mode rig gather `0x006BBDE0` calls `0x006A1660(out, rig +0x140)` at
+  `0x006BBE5D`. Through `0x006A1510` that returns the floor colour under the rig centre (section by position, only if
+  the tile belongs to the room; default 0.65 grey `0x00FF2BA4`) and passes it to `0x006BB2F0`, which ignores it (S0-09). It
+  looks like a dropped floor-bounce input.
+
+**For the bounce:** the per-room floor reflectance is the mean of section-0 `+0x80` colours over the room's tiles,
+exactly the loop of `0x0069FF20`. It can be read at any time (plain memory, written only on floor edits and tile
+creation), and once per room on a solve is enough. Recovering it from `+0x140` would need `+0x120 > 0` and no clamp, so read the
+tiles instead. The values are 8-bit sRGB-like and already 30 % desaturated, so linearise before use (inferred). Walls
+and furniture have no colour in the lighting data: keep `kIndoorReflection` for them, or tint it by the floor hue.
+Wall patterns use the same ProductPattern class, so a wall pattern's `+0xB8` can be had through the catalog. Where a
+wall stores its pattern key was not traced.
+
+**Room manager `+0x3B8`** (verified). It is set once from the 6th argument of the manager init `0x006A8620` (`0x006A866F`).
+The caller `0x00ADB620` passes `owner + 4`, where the owner is the LotLightingManager (constructor `0x00ADD2C0`, vtables
+`0x01068148` / `0x01068110`). It holds four room sets (EASTL trees): sunny (anchor `+0x58`), foggy (`+0x74`), black-lit
+(`+0x90`) and the strobe delay map (`+0xAC`; container names "Lighting/LotLightingManager/m...RoomIDs" /
+"mRoomIDStrobeDelayMap"). Vfunc `+0x30` (`0x00ADC2D0`, reached through `0x006A4270`) is "room is black-lit". Vfunc `+0x34`
+(`0x00ADCB20`, reached through `0x006A42A0`) is "room has a strobe delay". It returns the room's current strobe value in
+`f`, recomputed from the clock and a frame stamp (`0x00ADC4C0`). Rooms enter the map through the script call
+`World_SetRoomStrobeDelay`, which strobe lights use; the floor shaders "FloorWithStrobelight..." are the matching
+shaders. So the rig binder's clamp `min(c × (1 + f), 0.5 × (1 + f))` is the strobe-light flash and applies only in
+rooms with a strobe light.
+
+**`[0x01158D30]`** (verified code, option name from GraphicsRules.sgr). `0x006B71F7` sets it to `([[0x011D753C] + 0x40] == 2)`
+at render setup. `[0x011D753C]` is the render config. `+0x40` is its shader tier, requested from `owner + 0x14` in
+`0x007A0810` and then checked against the card in `0x0079B870`. The card's tier comes from `0x0079AEC0`: 0 for SM3, 1 or
+3 for SM2, 4 or 5 below that. When the tier is 3 or better and `+0x48` (`RenderForceMinspecShaders`, read in
+`0x0079B450`) is set, it drops to 2. A requested tier is kept only if the card allows it (`0x0079F690`). Tier 2 is the
+minspec shader path. GraphicsRules.sgr sets `RenderForceMinspecShaders 1` only for the option `AdvancedRendering = Off`,
+which is the default only below `cardLevelLowmedium`. On an RTX card with Advanced Rendering on, the byte is 0.
+
 ### Open items / unverified
 
 - `0x0069EC40`, `0x006AB210`, `0x00963DD0` in the normalisation/ambient step; room+0x100, +0x280.
@@ -413,6 +605,13 @@ solve).
 
 | Address | Name / role | Evidence |
 |---|---|---|
+| `0x0069FF20` | Room mean floor colour into the specular probe multipliers `+0x140` / `+0x130` | S0-12 reading |
+| `0x006A61A0` | Stores a floor pattern colour (30 % toward grey) in a tile section, field 9 | S0-12 reading |
+| `0x006A9630` / `0x006AA340` / `0x006AA6D0` | Tile section field setter / getter by mask / getter by position | S0-12 reading |
+| `0x006A1660` -> `0x006A1510` | Floor colour under a point of the room (default 0.65); called by the rig gather, result unused | S0-12 reading |
+| `0x00A9E7E0` | Floor pattern key to catalog colour (ProductPattern `+0xB8`, default `0xE0E0E0`) | S0-12 reading |
+| `0x00ADD2C0` | LotLightingManager constructor; its `+4` interface is room manager `+0x3B8` | S0-12 reading |
+| `0x006B71F7` | `[0x01158D30]` = render config shader tier `== 2` (minspec shaders) | S0-12 reading |
 | `0x006C6AB0` | `AddWorldLightsToLot`: thiscall(treeLevel, room) ret 4. Room light list = own-floor lot lights (`0x006C6990(room, 1)`); for room 0 of level 0 once more (`0x006C6990(room, 0)`); for room 0 also world lights around the lot (`0x006B66B0`) | `fn_006c6ab0.c`; level_light_share.cpp header; lot_edge_lighting pattern `55 8B EC 83 E4 F0 83 EC 34 53 56 33 DB F6 05 ?? ?? ?? ?? 01 57 8B F9 75 30 83 0D` |
 | `0x006C6B08`, `0x006C6B2D` | The two calls of `0x006C6990` inside it; the level-0 test is `cmp [edi+0x1A0],0 / jnz` at `0x006C6B16` | level_light_share `kLevelGatherCalls`; notebook "Andares" |
 | `0x006C5816`, `0x006C7094` | Callers of `0x006C6AB0`: room creation / room update | level_light_share `kGatherCalls` |
@@ -446,7 +645,11 @@ solve).
 | `0x006A0F50` | Other solve path; calls `0x0069FD60` at `0x006A1187` and `0x006A126F` | level_light_share `kSolvePointCalls` |
 | `0x011D0368` / `0x011D0358` | Static vectors "Lighting/LightingOccluder/m2DOccluders" / "m3DOccluders" (per-light cull lists of a batch) | `fn_006a31d0.c` |
 | `0x0069F650` | Wall atlas blur when room+0xF4 == 2: `[0x01158B1C]` passes (static value 2) of [1 2 1]/4 (flag `[0x011D02E4] == 0`) or a 2×2 box with half-texel shift | the per-pixel plan F-J1 (`passo3\out\fn_0069f650.c`); dwords.txt |
-| `0x006A1DE0` | Builds room+0x30 (2D blockers) from room+0xD8..+0xDC (LightingWall+4); called by the room rebuild `0x006A2740` | notebook "Andares, segunda rodada" |
+| `0x006A1DE0` | Builds room+0x30 (2D blockers) from room+0xD8..+0xDC (LightingWall+4); called by the room rebuild `0x006A2740`. Also runs the wall update `0x006AC000` on every wall (call `0x006A1E89`), which packs the wall's strips in all three class atlases | notebook "Andares, segunda rodada"; native disassembly (wall atlas section) |
+| `0x006AB0E0` / `0x0069E660` / `0x006AC480` / `0x006AC3E0` | Wall strip allocation for classes 0-2 / per-class call into the story's packer (`[room+4] + class × 0x40 + 0x1C`) / packer alloc with one reset-and-retry / shelf fit | native disassembly |
+| `0x006A90E0` | Builds a class's wall atlas packer: size `0xFF36DC` / `0xFF36E8` [class], shelf height `3 × 0xFF36AC[class] + 1` | native disassembly |
+| `0x006AC070` / `0x006ABDD0` / `0x006AC1C0` | Wall pass segment samples / texel position from the wall (`+0x110` base, `+0xF0` along, 3 m up) / texel X, Y from the strip record | native disassembly |
+| `0x006A5600` / `0x006AC200` | Wall vertex uv source (class = shown `room+0x100`, 4 → 0 by `0x006A8C20`) / uv rectangle of texel centres from a strip record | native disassembly |
 | `0x006A0E00` | `FinalizePrime`: commits locked floor/ceiling/object textures (called from `0x006A3C90`) | re/out report.txt; lighting_quality pattern `56 8B F1 57 8B BE F4 00 00 00 C1 E7 06 03 7E 04 8B CF E8` |
 | `0x006A4480` | `CacheLightingParams` (called from `0x006A6D10`) | re/out report.txt |
 | `0x006A4700` | Registers lot surface shader parameters: "LightMap", "SpilloverLightMap", "WorldToLotTransform" (4×float4), "LightmapSizeParameters", "LotSizeParameters", "LightBasisMap0..3", "CounterLightingConfig"; handles at `0x011D04A4..0x011D04C8` | `fn_006a4700.c` |
@@ -462,7 +665,9 @@ solve).
 | `0x00ADB5A0`, `0x00ADB850` | Pass `(lot is active || Build mode)` as the quality flag to `0x006A5EF0`; the `mov byte [esp+0Ch],0` sites are `0x00ADB66B`, `0x00ADB884` | night_terrain_relight `kQualitySites`, bytes `C6 44 24 0C 00` |
 | `0x00ADB120` | Lot lighting time budget per frame (5 / 10 / 15 / 30 ms; 1000 in tool mode); only caller the CALL at `0x00ADB95D` | smooth_streaming note 5; Lot Lighting While Moving scales it while the camera moves ([../features/performance/README.md](../features/performance/README.md)) |
 | `0x00AE4CB0 → 0x00ADB8F0 → 0x006A8BA0 → 0x006A88B0 → 0x006A3F80 → 0x006A3C90` | Budgeted room solve during normal lot loading; `0x00ADB8F0` calls `0x006A8BA0` once per level object of the lot (deque at manager+0x24..0x40) with one shared stopwatch and stops when elapsed > budget; `0x006A3C90` returns when the budget is spent while room+0x164 is set and resumes from room+0xEC (state machine, 9 = done) | smooth_streaming note 5; verified 2026-09-29 ([../features/performance/README.md](../features/performance/README.md)) |
-| `0x00ADBAD0 → 0x006A80E0 → 0x006A3EC0` | Synchronous solve (while room+0xF0 == 3, 60000 ms budget) used only by the lot impostor builder | smooth_streaming note 3 |
+| `0x00ADBAD0 → 0x006A80E0 → 0x006A3EC0` | Synchronous solve used only by the lot impostor builder: rooms in state 1 or 2 with shown class +0x100 == 0 and +0xC0 != 0 are set to state 3 and solved to the end (60000 ms stopwatch) | smooth_streaming note 3; S0-10 section above |
+| `0x00ADC180` | thiscall(lot lighting manager, bool), ret 4: thumbnail quality `+0x4D`, then `0x00ADB850`; callers `0x00AE06EC` (1), `0x00AE62C7` (0) | S0-10 section above |
+| `0x00D59C10` | ThumbnailManager request state machine; lot readiness poll in state 0x17 (`0x00D5BE2F`), no timeout | S0-10 section above |
 | `0x006ADD60` | Night-level setter (lightMgr+0xF0) | night_terrain_relight header |
 | `0x006A0230` | Room normalisation from the brightest sample or lamp, written to room+0x160 at the solve's end | level_light_share `RoomNormHook`; F8 records |
 | `0x006A3E65` | Call of `0x006A0E00` at the end of a room solve | level_light_share `FinalizeHook` |
