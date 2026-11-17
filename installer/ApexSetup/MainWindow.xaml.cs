@@ -42,6 +42,9 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        // the log's context line: the game, its edition and version, the renderer and the loaders Setup found
+        App.Context = () => _game is not { } cg ? "no game chosen"
+            : $"game {cg.Root} ({cg.Label} {cg.Version}, {cg.Exe}); renderer {_state?.Layer.ToString() ?? "?"}; loaders {(Scan.Loaders(cg.Bin) is { Count: > 0 } ls ? string.Join(", ", ls) : "none")}";
         _screens = new UIElement[] { ScreenWelcome, ScreenGame, ScreenComponents, ScreenInstall, ScreenDone, ScreenManage, ScreenAbout, ScreenRenderer };
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(DragArea);
@@ -115,8 +118,7 @@ public sealed partial class MainWindow : Window
                     if (_busy) return; // (an install in progress finishes first)
                     try
                     {
-                        SelfUpdate.Replace(file, self);
-                        SelfUpdate.Restart(self, Environment.GetCommandLineArgs().Skip(1));
+                        SelfUpdate.ReplaceAndStart(file, self, Environment.GetCommandLineArgs().Skip(1));
                         Application.Current.Exit();
                     }
                     catch (Exception e) { App.Log(e); SetupUpdateInfo.IsOpen = false; }
@@ -169,7 +171,7 @@ public sealed partial class MainWindow : Window
         await Task.WhenAll(Repo.Values.Distinct().Select(async r =>
         {
             try { _latest[r] = await Releases.LatestAsync(r); }
-            catch (Exception) { _latest.Remove(r); }
+            catch (Exception e) { App.Log(e); _latest.Remove(r); }
         }));
         // (screenshots and design checks) APEX_SETUP_PREVIEW_LATEST=3.2.0 makes the latest Apex release that version, to show
         // the update screens; nothing is installed while it is set (InstallAsync)
@@ -1289,6 +1291,7 @@ public sealed partial class MainWindow : Window
         if (_game is not { } g || _busy || _running) return;
         if (Preview is not null) { await Message(T("Preview"), T("This is a preview: nothing was installed.")); return; }
         var from = _step == InstallStep ? ComponentsStep : _step;
+        if (!settingsOnly && _state is { } ps && !await PreflightOk(g, ps, comps)) return;
         _busy = true;
         remove ??= new List<string>();
         var dels = Components.All.Where(remove.Contains).ToList();
@@ -1391,21 +1394,26 @@ public sealed partial class MainWindow : Window
             _busy = false;
             _inline = false;
             _defaultsFor = null;
+            App.Log(ex);
             var net = ex is HttpRequestException or TaskCanceledException;
             var title = net ? T("Setup can't reach GitHub") : T("Setup could not finish");
-            var text = (net ? T("Check your internet connection, then try again.") : T(ex.Message)) + (touched ? "\n\n" + T("Repair or remove sets the game right.") : "");
-            // the files it changed before the error: offered back at once
+            var text = ErrorText(ex);
+            // the files it changed before the error are put back: half an install is the worse state. Keeping them is the
+            // second choice (Repair or remove sets them right later)
             if (point?.Committed is { } p)
             {
-                if (await ShowDialog(new ContentDialog { Title = title, Content = text, PrimaryButtonText = T("Undo these changes"), CloseButtonText = T("OK"),
-                        DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot }) == ContentDialogResult.Primary)
+                var keep = await ShowDialog(new ContentDialog { Title = title, Content = ErrorContent(text + "\n\n" + T("Setup puts back the files it changed.")),
+                    PrimaryButtonText = T("Undo these changes"), SecondaryButtonText = T("Keep what was installed"),
+                    DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot }) == ContentDialogResult.Secondary;
+                if (!keep)
                 {
                     Show(Manage);
                     await RestoreAsync(p, ask: false);
                     return;
                 }
             }
-            else await Message(title, text);
+            else await ShowDialog(new ContentDialog { Title = title, Content = ErrorContent(text + (touched ? "\n\n" + T("Repair or remove sets the game right.") : "")),
+                CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
             Show(from);
         }
     }
@@ -1577,7 +1585,7 @@ public sealed partial class MainWindow : Window
             await Task.Run(() => { using (point = label is null ? null : RestorePoints.Begin(g.Bin, label, args)) work(); });
             ok = true;
         }
-        catch (Exception ex) { error = T(ex.Message); }
+        catch (Exception ex) { App.Log(ex); error = ErrorText(ex); }
         finally
         {
             _busy = false;
@@ -1638,6 +1646,62 @@ public sealed partial class MainWindow : Window
     {
         using var s = Assembly.GetExecutingAssembly().GetManifestResourceStream("Licenses." + file);
         return s is null ? "" : new StreamReader(s).ReadToEnd();
+    }
+
+    // ---------- checks before a change, errors ----------
+
+    // Before any download (Engine.Preflight): what would stop the change is shown and the change waits; what it will do to the
+    // player's own files (a foreign d3d9.dll, a second loader) is shown with Continue
+    async Task<bool> PreflightOk(Game g, State s, List<string> comps)
+    {
+        var need = comps.Select(c => Repo.GetValueOrDefault(c)).Where(r => r is not null).Distinct()
+            .Sum(r => _latest.GetValueOrDefault(r!)?.Assets.Sum(a => a.Size) ?? 0);
+        List<Engine.Check> found;
+        try { found = await Task.Run(() => Engine.Preflight(g, s, Scan.DocumentsFor(g), need, comps.Contains(Components.Dxvk) || comps.Contains(Components.Bridge))); }
+        catch (Exception e) { App.Log(e); return true; } // (a check that cannot run is no reason to stop)
+        if (found.Count == 0) return true;
+        var text = string.Join("\n\n", found.Select(f => "• " + T(f.Key, f.Args)));
+        if (found.Any(f => f.Blocks)) { await Message(T("Before Setup can continue"), text); return false; }
+        return await Confirm(T("Before Setup continues"), text, T("Continue"));
+    }
+
+    // an error in the player's words, then the raw text for a report
+    string ErrorText(Exception ex)
+    {
+        var plain = ex switch
+        {
+            SetupException se => T(se.Key, se.Args),
+            HttpRequestException or TaskCanceledException => T("Check your internet connection, then try again."),
+            UnauthorizedAccessException => T("Windows did not let Setup change a file. Run Setup as administrator, then try again."),
+            IOException => T("A file Setup needed is in use or could not be written. Close the game and other programs using it, then try again."),
+            _ => T("Setup ran into a problem it did not expect."),
+        };
+        return ex is SetupException || plain == ex.Message ? plain : plain + "\n\n" + ex.Message;
+    }
+
+    // a dialog's text with "Copy details" (the log's context and last lines, for a report) and "Open log folder"
+    StackPanel ErrorContent(string text)
+    {
+        var p = new StackPanel { Spacing = 10 };
+        p.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true });
+        var links = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        var copy = new HyperlinkButton { Content = T("Copy details"), Padding = new Thickness(0) };
+        copy.Click += (_, _) =>
+        {
+            var d = new Windows.ApplicationModel.DataTransfer.DataPackage();
+            d.SetText(App.Details());
+            Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(d);
+        };
+        var open = new HyperlinkButton { Content = T("Open log folder"), Padding = new Thickness(0) };
+        open.Click += (_, _) =>
+        {
+            try { Directory.CreateDirectory(App.LogDir); Process.Start(new ProcessStartInfo("explorer.exe", "\"" + App.LogDir + "\"") { UseShellExecute = true }); }
+            catch (Exception e) { App.Log(e); }
+        };
+        links.Children.Add(copy);
+        links.Children.Add(open);
+        p.Children.Add(links);
+        return p;
     }
 
     // ---------- dialogs and language ----------
