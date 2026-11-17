@@ -8,7 +8,7 @@ New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 $exe = Join-Path $OutDir 'gbuffer_check.exe'
 Push-Location $OutDir
 try {
-    & cl.exe /nologo /std:c++20 /utf-8 /EHsc /W4 /O2 /MT ('/Fe' + $exe) (Join-Path $PSScriptRoot 'check.cpp') (Join-Path $repo 'features/shader_patches.cpp') d3dcompiler.lib user32.lib
+    & cl.exe /nologo /std:c++20 /utf-8 /EHsc /W4 /O2 /MT ('/Fe' + $exe) (Join-Path $PSScriptRoot 'check.cpp') (Join-Path $repo 'features/shader_patches.cpp') d3dcompiler.lib user32.lib /link /LARGEADDRESSAWARE # 32-bit: the full movers section on DXVK needs over 2 GB of address space
     if ($LASTEXITCODE -ne 0) { throw 'G-buffer check did not compile' }
     $families = Join-Path $OutDir 'families.txt' # technique -> its pixel shaders, for the counts per family
     $rules = Join-Path $OutDir 'rule-classes.txt' # albedo rule shaders -> sampler classes, for the rule check on the GPU
