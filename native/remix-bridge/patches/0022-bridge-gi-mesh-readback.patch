@@ -331,7 +331,7 @@ index e1d21f6bdeb9ba8b08d399908891025f1c62d4a0..98d9b41b2842bf65290b0c4f2dc25466
 +    uint32_t vertices = 0;
 +    uint32_t triangles = 0;
 +    presented = false;
-+    for (int round = 0; round < 24000; ++round) {
++    while (std::chrono::steady_clock::now() - start < std::chrono::seconds(10)) {  // time-bound: 24000 Sleep(0) rounds can pass in under 20 ms
 +      const HRESULT hr = g_meshRead(ticket, pos.data(), 65536, tri.data(), 65536, &vertices, &triangles);
 +      if (hr != S_FALSE) {
 +        us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count();
