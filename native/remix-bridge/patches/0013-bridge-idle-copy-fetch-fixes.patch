@@ -1,7 +1,28 @@
 0013: client.freeIdleManagedCopiesSec / freeIdleBufferCopiesSec: free only VirtualAlloc'd copies (64 KB and more); always fetch a freed MANAGED level, DISCARD or not; fail the lock when the fetch brings no whole copy instead of uploading an unfetched one; CRC32C check of texture fetches, as buffers have.
 Applies after 0001-0012 on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only).
+Also (review of dxvk-remix pull request 172): an idle pass frees only the presenting device's own copies, with a pass timer per device (two devices without D3DCREATE_MULTITHREADED share no lock); a copy is freeable only when its readback fits one server response including a wrap of the data ring (fitsOneServerResponse); D3DUSAGE_WRITEONLY buffers keep their copy (the server reads a freed copy back with D3DLOCK_READONLY).
+diff --git a/bridge/src/client/d3d9_device.cpp b/bridge/src/client/d3d9_device.cpp
+index 205700c1..fea04cdd 100644
+--- a/bridge/src/client/d3d9_device.cpp
++++ b/bridge/src/client/d3d9_device.cpp
+@@ -539,12 +539,12 @@ HRESULT Direct3DDevice9Ex_LSS<EnableSync>::Present(CONST RECT* pSourceRect, CONS
+   if (const uint32_t idleSec = ClientOptions::getFreeIdleManagedCopiesSec()) {
+     BRIDGE_DEVICE_LOCKGUARD();
+     const uint32_t idleMs = ClientOptions::getFreeIdleManagedCopiesMs();
+-    Direct3DSurface9_LSS::freeIdleManagedCopies(idleMs ? idleMs : idleSec * 1000);
++    Direct3DSurface9_LSS::freeIdleManagedCopies(idleMs ? idleMs : idleSec * 1000, this);
+   }
+   if (const uint32_t idleSec = ClientOptions::getFreeIdleBufferCopiesSec()) {
+     BRIDGE_DEVICE_LOCKGUARD();
+-    Direct3DVertexBuffer9_LSS::freeIdleCopies(idleSec);
+-    Direct3DIndexBuffer9_LSS::freeIdleCopies(idleSec);
++    Direct3DVertexBuffer9_LSS::freeIdleCopies(idleSec, this);
++    Direct3DIndexBuffer9_LSS::freeIdleCopies(idleSec, this);
+   }
+ 
+   return m_pSwapchain->Present(pSourceRect, pDestRect, hDestWindowOverride, pDirtyRegion, 0);
 diff --git a/bridge/src/client/d3d9_surface.cpp b/bridge/src/client/d3d9_surface.cpp
-index eb6d0159..2c01d1ed 100644
+index 9d102712..c70317f1 100644
 --- a/bridge/src/client/d3d9_surface.cpp
 +++ b/bridge/src/client/d3d9_surface.cpp
 @@ -33,6 +33,7 @@
@@ -33,15 +54,34 @@ index eb6d0159..2c01d1ed 100644
  void Direct3DSurface9_LSS::releaseCopy() {
    const auto surfaceSize = bridge_util::calcTotalSizeOfRect(m_desc.Width, m_desc.Height, m_desc.Format);
    g_totalSurfaceShadow -= surfaceSize;
-@@ -88,6 +103,7 @@ void Direct3DSurface9_LSS::freeIdleManagedCopies(uint32_t idleMs) {
+@@ -77,17 +92,20 @@ void Direct3DSurface9_LSS::releaseCopy() {
+   m_shadow.reset();
+ }
+ 
+-void Direct3DSurface9_LSS::freeIdleManagedCopies(uint32_t idleMs) {
+-  static uint64_t s_lastPassMs = 0;
++void Direct3DSurface9_LSS::freeIdleManagedCopies(uint32_t idleMs, const BaseDirect3DDevice9Ex_LSS* pDevice) {
+   const uint64_t nowMs = GetTickCount64();
+-  if (nowMs - s_lastPassMs < std::min<uint64_t>(1000, std::max<uint64_t>(100, idleMs / 2))) {
++  std::lock_guard<std::mutex> lock(s_managedCopiesLock);
++  uint64_t& lastPassMs = s_lastPassMs[pDevice];
++  if (nowMs - lastPassMs < std::min<uint64_t>(1000, std::max<uint64_t>(100, idleMs / 2))) {
+     return;
+   }
+-  s_lastPassMs = nowMs;
+-  std::lock_guard<std::mutex> lock(s_managedCopiesLock);
++  lastPassMs = nowMs;
    for (auto it = s_managedCopies.begin(); it != s_managedCopies.end();) {
      Direct3DSurface9_LSS* const s = *it;
-     if (s->m_shadow && s->m_lockInfoQueue.empty() && nowMs - s->m_lastLockMs >= idleMs) {
+-    if (s->m_shadow && s->m_lockInfoQueue.empty() && nowMs - s->m_lastLockMs >= idleMs) {
++    // Only the presenting device's own surfaces: two devices created without D3DCREATE_MULTITHREADED share no lock, so
++    // another device may be inside a lock of its own surface.
++    if (s->m_pDevice == pDevice && s->m_shadow && s->m_lockInfoQueue.empty() && nowMs - s->m_lastLockMs >= idleMs) {
 +      s->m_freedCrc = crcOf(s->m_shadow.get(), bridge_util::calcTotalSizeOfRect(s->m_desc.Width, s->m_desc.Height, s->m_desc.Format));
        s->releaseCopy();
        s->m_copyFreed = true;
        bridge_util::perf::g_pool[16] += bridge_util::calcTotalSizeOfRect(s->m_desc.Width, s->m_desc.Height, s->m_desc.Format);
-@@ -101,7 +117,8 @@ void Direct3DSurface9_LSS::freeIdleManagedCopies(uint32_t idleMs) {
+@@ -101,7 +119,8 @@ void Direct3DSurface9_LSS::freeIdleManagedCopies(uint32_t idleMs) {
  
  // The server answers IDirect3DSurface9_LockRect with the whole surface (ReturnSurfaceDataToClient: hresult, width, height,
  // format, then the rows packed at calcRowSize), the layout of m_shadow.
@@ -51,7 +91,7 @@ index eb6d0159..2c01d1ed 100644
    LARGE_INTEGER t0, t1, f;
    QueryPerformanceCounter(&t0);
    UID uid = 0;
-@@ -111,8 +128,9 @@ void Direct3DSurface9_LSS::fetchCopy(size_t surfaceSize) {
+@@ -111,8 +130,9 @@ void Direct3DSurface9_LSS::fetchCopy(size_t surfaceSize) {
    }
    if (Result::Success != DeviceBridge::waitForCommand(Commands::Bridge_Response, GlobalOptions::getAckTimeout(), nullptr, true, uid)) {
      Logger::err(format_string("[Direct3DSurface9_LSS] fetching the freed copy of surface [%p] failed: no response from server", this));
@@ -62,7 +102,7 @@ index eb6d0159..2c01d1ed 100644
    const HRESULT hr = (HRESULT) DeviceBridge::get_data();
    if (SUCCEEDED(hr)) {
      const uint32_t w = (uint32_t) DeviceBridge::get_data();
-@@ -129,6 +147,15 @@ void Direct3DSurface9_LSS::fetchCopy(size_t surfaceSize) {
+@@ -129,6 +149,15 @@ void Direct3DSurface9_LSS::fetchCopy(size_t surfaceSize) {
        }
      }
      memcpy(m_shadow.get(), pData, std::min(pulled, surfaceSize));
@@ -78,7 +118,7 @@ index eb6d0159..2c01d1ed 100644
    } else {
      Logger::err(format_string("[Direct3DSurface9_LSS] fetching the freed copy of surface [%p] failed: hr 0x%08x", this, hr));
    }
-@@ -137,6 +164,7 @@ void Direct3DSurface9_LSS::fetchCopy(size_t surfaceSize) {
+@@ -137,6 +166,7 @@ void Direct3DSurface9_LSS::fetchCopy(size_t surfaceSize) {
    QueryPerformanceFrequency(&f);
    bridge_util::perf::g_pool[17]++;
    bridge_util::perf::g_pool[18] += (t1.QuadPart - t0.QuadPart) * 1000000 / f.QuadPart;
@@ -86,7 +126,13 @@ index eb6d0159..2c01d1ed 100644
  }
  
  HRESULT Direct3DSurface9_LSS::QueryInterface(REFIID riid, LPVOID* ppvObj) {
-@@ -326,13 +354,20 @@ bool Direct3DSurface9_LSS::lock(D3DLOCKED_RECT& lockedRect, const RECT* pRect, c
+@@ -321,18 +351,25 @@ bool Direct3DSurface9_LSS::lock(D3DLOCKED_RECT& lockedRect, const RECT* pRect, c
+     const bool newCopy = !m_shadow;
+     if (!m_shadow) {
+       uint8_t* p = nullptr;
+-      if (surfaceSize >= 65536 && ClientOptions::getFreeIdleManagedCopiesSec()) {
++      if (surfaceSize >= 65536 && ClientOptions::getFreeIdleManagedCopiesSec() && fitsOneServerResponse(surfaceSize)) {
+         p = static_cast<uint8_t*>(VirtualAlloc(nullptr, surfaceSize, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
        }
        m_shadow.get_deleter().virtualAlloc = p != nullptr;  // m_shadow is empty here, so no old block is freed the wrong way
        m_shadow.reset(p ? p : new uint8_t[surfaceSize]);
@@ -108,7 +154,7 @@ index eb6d0159..2c01d1ed 100644
            std::lock_guard<std::mutex> lock(s_managedCopiesLock);
            s_managedCopies.insert(this);
          }
-@@ -340,9 +375,6 @@ bool Direct3DSurface9_LSS::lock(D3DLOCKED_RECT& lockedRect, const RECT* pRect, c
+@@ -340,9 +377,6 @@ bool Direct3DSurface9_LSS::lock(D3DLOCKED_RECT& lockedRect, const RECT* pRect, c
        if (m_copyFreed) {
          m_copyFreed = false;
          bridge_util::perf::g_pool[16] -= surfaceSize;
@@ -119,24 +165,88 @@ index eb6d0159..2c01d1ed 100644
        Logger::trace(format_string("Allocated a shadow for surface [%p] "
                                    "(size: %zd, total surface shadow size: %zd)",
 diff --git a/bridge/src/client/d3d9_surface.h b/bridge/src/client/d3d9_surface.h
-index 8b003d15..ee78164a 100644
+index 91997f66..996bc033 100644
 --- a/bridge/src/client/d3d9_surface.h
 +++ b/bridge/src/client/d3d9_surface.h
-@@ -75,7 +75,8 @@ class Direct3DSurface9_LSS: public Direct3DResource9_LSS<IDirect3DSurface9> {
+@@ -29,6 +29,7 @@
+ 
+ #include <queue>
+ #include <mutex>
++#include <unordered_map>
+ #include <unordered_set>
+ 
+ /*
+@@ -74,13 +75,15 @@ class Direct3DSurface9_LSS: public Direct3DResource9_LSS<IDirect3DSurface9> {
+   mutable uint64_t m_uploadKey = 0;  // perf diag: content key of the last upload (set in the const sendDataToServer)
    inline static std::mutex s_managedCopiesLock;
    inline static std::unordered_set<Direct3DSurface9_LSS*> s_managedCopies;
++  inline static std::unordered_map<const BaseDirect3DDevice9Ex_LSS*, uint64_t> s_lastPassMs;  // per device, under s_managedCopiesLock
    void releaseCopy();
 -  void fetchCopy(size_t surfaceSize);
 +  uint32_t m_freedCrc = 0;
 +  bool fetchCopy(size_t surfaceSize);
  
  public:
-   // Frees the copies of MANAGED surfaces not locked for idleSec seconds; at most once a second. Call under the device lock.
+-  // Frees the copies of MANAGED surfaces not locked for idleSec seconds; at most once a second. Call under the device lock.
+-  // idleMs: the pass runs every idleMs / 2 (100-1000 ms).
+-  static void freeIdleManagedCopies(uint32_t idleMs);
++  // Frees the copies of pDevice's MANAGED surfaces not locked for idleMs. Call under pDevice's lock.
++  // The pass runs every idleMs / 2 (100-1000 ms) per device.
++  static void freeIdleManagedCopies(uint32_t idleMs, const BaseDirect3DDevice9Ex_LSS* pDevice);
+   uint8_t m_texSite = 0xFF;  // perf diag: creation site of the texture that owns this level (set when the level is wrapped)
+ 
+ private:
+diff --git a/bridge/src/client/d3d9_util.h b/bridge/src/client/d3d9_util.h
+index 84722102..02debd42 100644
+--- a/bridge/src/client/d3d9_util.h
++++ b/bridge/src/client/d3d9_util.h
+@@ -132,6 +132,19 @@ static void SetWindowMode(HWND hwnd, const bool windowed, const LONG width, cons
+ 
+ extern void cleanLssGarbage();
+ 
++// client.freeIdleManagedCopiesSec / freeIdleBufferCopiesSec: whether a freed copy of this size can come back in one server
++// response. The response holds up to 4 words of metadata, the blob's length word and the blob, which a wrap at the end of the
++// ring can precede with up to the blob's size in skipped words; the server exits when one response does not fit its data
++// ring (syncDataQueue). So the blob gets at most half of the ring left after 8 words reserved for the metadata.
++static bool fitsOneServerResponse(const size_t size) {
++  constexpr size_t kWordSize = sizeof(uint32_t);
++  constexpr size_t kMetadataWords = 8;
++  // The client's reader ring is the server's writer ring: the same shared memory, so the same size.
++  const size_t ringWords = Bridge<BridgeId::Device>::getReaderChannel().data->get_total_size();
++  const size_t blobWords = (size + kWordSize - 1) / kWordSize;
++  return ringWords > kMetadataWords && blobWords <= (ringWords - kMetadataWords) / 2;
++}
++
+ static uint32_t CalculateNumMipLevels(uint32_t width, uint32_t height = 1, uint32_t depth = 1) {
+   const uint32_t maxDimension = std::max(depth, std::max(width, height));
+   return static_cast<uint32_t>(std::ceil(std::log2(maxDimension))) + 1;
 diff --git a/bridge/src/client/lockable_buffer.h b/bridge/src/client/lockable_buffer.h
-index 1ab88673..4e35196b 100644
+index e327da57..bb452b7b 100644
 --- a/bridge/src/client/lockable_buffer.h
 +++ b/bridge/src/client/lockable_buffer.h
-@@ -108,7 +108,8 @@ class LockableBuffer: public Direct3DResource9_LSS<T> {
+@@ -30,6 +30,7 @@
+ #include <d3d9.h>
+ #include <queue>
+ #include <mutex>
++#include <unordered_map>
+ #include <unordered_set>
+ #include <nmmintrin.h>
+ 
+@@ -79,9 +80,12 @@ class LockableBuffer: public Direct3DResource9_LSS<T> {
+   uint32_t m_freedCrc = 0;
+   inline static std::mutex s_idleLock;
+   inline static std::unordered_set<LockableBuffer*> s_idle;
++  inline static std::unordered_map<const BaseDirect3DDevice9Ex_LSS*, uint64_t> s_lastPassMs;  // per device, under s_idleLock
+ 
++  // A write-only buffer keeps its copy: the server reads a freed copy back with D3DLOCK_READONLY, which D3D9 does not allow
++  // on a D3DUSAGE_WRITEONLY buffer.
+   bool freesIdleCopy() const {
+-    return !(m_desc.Usage & D3DUSAGE_DYNAMIC) && ClientOptions::getFreeIdleBufferCopiesSec() != 0;
++    return !(m_desc.Usage & (D3DUSAGE_DYNAMIC | D3DUSAGE_WRITEONLY)) && ClientOptions::getFreeIdleBufferCopiesSec() != 0;
+   }
+ 
+   static uint32_t crcOf(const uint8_t* p, size_t n) {
+@@ -108,7 +112,8 @@ class LockableBuffer: public Direct3DResource9_LSS<T> {
    }
  
    // The server answers a Lock with the ReturnData flag with hresult, then the whole buffer as one blob.
@@ -146,7 +256,7 @@ index 1ab88673..4e35196b 100644
      LARGE_INTEGER t0, t1, f;
      QueryPerformanceCounter(&t0);
      UID uid = 0;
-@@ -120,16 +121,18 @@ class LockableBuffer: public Direct3DResource9_LSS<T> {
+@@ -120,16 +125,18 @@ class LockableBuffer: public Direct3DResource9_LSS<T> {
        Logger::err(format_string("[LockableBuffer] fetching the freed copy of %s buffer [%p] failed: no response from server",
                                  bIsVertexBuffer ? "vertex" : "index", this));
        bridge_util::perf::g_pool[24]++;
@@ -167,7 +277,7 @@ index 1ab88673..4e35196b 100644
      }
      DeviceBridge::consumeResponse();
      if (!ok) {
-@@ -144,6 +147,7 @@ class LockableBuffer: public Direct3DResource9_LSS<T> {
+@@ -144,6 +151,7 @@ class LockableBuffer: public Direct3DResource9_LSS<T> {
      QueryPerformanceFrequency(&f);
      bridge_util::perf::g_pool[21]++;
      bridge_util::perf::g_pool[22] += (t1.QuadPart - t0.QuadPart) * 1000000 / f.QuadPart;
@@ -175,7 +285,46 @@ index 1ab88673..4e35196b 100644
    }
    inline static size_t g_totalBufferShadow = 0;
  
-@@ -288,7 +292,12 @@ protected:
+@@ -165,7 +173,7 @@ private:
+ 
+   void initShadowMem() {
+     uint8_t* p = nullptr;
+-    if (m_desc.Size >= 65536 && freesIdleCopy()) {
++    if (m_desc.Size >= 65536 && freesIdleCopy() && fitsOneServerResponse(m_desc.Size)) {
+       p = static_cast<uint8_t*>(VirtualAlloc(nullptr, m_desc.Size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));  // zeroed
+     }
+     m_shadow.get_deleter().virtualAlloc = p != nullptr;  // m_shadow is empty here, so no old block is freed the wrong way
+@@ -220,18 +228,22 @@ protected:
+   }
+ 
+ public:
+-  // Frees the copies of static buffers not locked for idleSec seconds; at most once a second. Call under the device lock.
+-  static void freeIdleCopies(uint32_t idleSec) {
+-    static uint64_t s_lastPassMs = 0;
++  // Frees the copies of pDevice's static buffers not locked for idleSec seconds; at most once a second per device.
++  // Call under pDevice's lock.
++  static void freeIdleCopies(uint32_t idleSec, const BaseDirect3DDevice9Ex_LSS* pDevice) {
+     const uint64_t nowMs = GetTickCount64();
+-    if (nowMs - s_lastPassMs < 1000) {
++    std::lock_guard<std::mutex> lock(s_idleLock);
++    uint64_t& lastPassMs = s_lastPassMs[pDevice];
++    if (nowMs - lastPassMs < 1000) {
+       return;
+     }
+-    s_lastPassMs = nowMs;
+-    std::lock_guard<std::mutex> lock(s_idleLock);
++    lastPassMs = nowMs;
+     for (auto it = s_idle.begin(); it != s_idle.end();) {
+       LockableBuffer* const b = *it;
+-      if (b->m_shadow && b->m_lockInfos.empty() && nowMs - b->m_lastLockMs >= uint64_t(idleSec) * 1000) {
++      // Only the presenting device's own buffers: two devices created without D3DCREATE_MULTITHREADED share no lock, so
++      // another device may be inside a lock of its own buffer.
++      if (b->m_pDevice == pDevice && b->m_shadow && b->m_lockInfos.empty() &&
++          nowMs - b->m_lastLockMs >= uint64_t(idleSec) * 1000) {
+         b->m_freedCrc = crcOf(b->m_shadow.get(), b->m_desc.Size);
+         b->noteCopyGone();
+         b->m_shadow.reset();
+@@ -288,7 +300,12 @@ protected:
      } else {
        if (m_copyFreed) {
          initShadowMem();
@@ -189,7 +338,7 @@ index 1ab88673..4e35196b 100644
          m_copyFreed = false;
          bridge_util::perf::g_pool[20] -= m_desc.Size;
        }
-@@ -331,7 +340,8 @@ protected:
+@@ -331,7 +348,8 @@ protected:
      m_lockInfos.pop();
      if (m_shadow && freesIdleCopy()) {
        m_lastLockMs = GetTickCount64();
