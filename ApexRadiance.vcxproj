@@ -212,6 +212,7 @@
     <ClCompile Include="features\looks_preset.cpp" />
     <ClCompile Include="features\refpack_codec.cpp" />
     <ClCompile Include="features\resource_cache.cpp" />
+    <ClCompile Include="features\realtime_gi.cpp" />
     <ClCompile Include="features\rig_tracker.cpp" />
     <ClCompile Include="features\scene_budget.cpp" />
     <ClCompile Include="features\scene_dither.cpp" />
