@@ -4620,6 +4620,7 @@ std::string BuildReport() {
         for (const auto& d : g_regDisplay) s += std::format("   {:<36} {:>7.3f} ms / frame {:>9.1f} calls / frame\n", d.name, d.msPerFrame, d.callsPerFrame);
     }
     s += std::format("Draw / state hooks called off the render thread (dispatched under the lock): {}\n", D3D9Hooks::OffThreadDispatches());
+    s += D3D9Hooks::ConstantRangeReport();
     s += "Resource lookup cache: " + ResourceCache::StatusText() + "\n";
     s += "Resource lookup cache counters: " + ResourceCache::ReportLine() + "\n";
     s += "Remember missing files: " + ResourceCache::MissesStatusText() + "\n";
