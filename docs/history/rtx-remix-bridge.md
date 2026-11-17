@@ -76,7 +76,7 @@ counted it among the references the implicit objects hold on the device, and a b
 So the device read its creator's reference as an implicit one: `AddRef` returned 1, and the matching `Release` found
 the count at the implicit references and tore the device's implicit objects down. Code that already holds a second
 reference does not trigger it. Why only some starts took and returned a reference that early is not established.
-Patch 0016 takes the render target out of the count.
+The fix takes the render target out of the count; it is part of patch 0010 on the release branch.
 
 ### 2026-11-16: a texture that cannot be locked
 

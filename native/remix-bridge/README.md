@@ -28,7 +28,6 @@ Patches. Each applies after the ones before it. "Internal" is the name the #40 r
 | 0013 | | idle copy fetches: a freed MANAGED level is always fetched, a lock fails when no whole copy came back, texture fetches are CRC32C-checked, only copies of 64 KB and more are freed | with 0003 / 0008 |
 | 0014 | | a surface's new client copy starts zeroed, as a new d3d9 or DXVK texture does (some lots drew their ground black: the game uploads part of a terrain overlay map it never wrote) | always |
 | 0015 | | `rewindMode`: rewind mode for test harnesses. A test host snapshots the game process and later puts its memory back, and the server returns to the D3D9 state of the snapshot exactly or refuses. `rewindMaxKeptMB` (1024) limits what a snapshot keeps alive. Offline tests: `test-rewind.cmd` | off |
-| 0016 | | render target 0 is not counted as a reference to the device: after 0010 a new device had one reference less than its creator held, so the first `AddRef` and `Release` on it destroyed the implicit swapchain and the next call crashed | always |
 
 The TS3-only options patch the game's code in memory only when the bytes there match TS3W 1.67. Otherwise they change
 nothing.
