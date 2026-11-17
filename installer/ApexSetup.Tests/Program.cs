@@ -750,6 +750,12 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
     Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", "1");
     Check(SmoothMotion.Set(true, "TS3W.exe") == "Dry run: Setup changes nothing.", "smooth motion: the dry run writes nothing");
     Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null);
+    Check(Engine.WithFpsLimitInRange("[screen]\nfps_limit = 0\nvsync = 1\n") == ("[screen]\nfps_limit = 60\nvsync = 1\n", 0)
+          && Engine.WithFpsLimitInRange("[screen]\nfps_limit = 144\n").Text == "[screen]\nfps_limit = 60\n"
+          && Engine.WithFpsLimitInRange("[screen]\nfps_limit = 75\n") == ("[screen]\nfps_limit = 75\n", 75)
+          && Engine.WithFpsLimitInRange("[ui]\nx = 1\n").Text == "[ui]\nx = 1\n\n[screen]\nfps_limit = 60\n"
+          && Engine.WithFpsLimitInRange("[screen]\r\nvsync = 1\r\n\r\n[ui]\r\n").Text == "[screen]\r\nvsync = 1\r\nfps_limit = 60\r\n\r\n[ui]\r\n",
+          "smooth motion: Apex's frame limit into 60 to 90 fps, other keys and tables as they were");
     var nv = SmoothMotion.Read("TS3W.exe"); // read only
     Console.WriteLine($"info this PC: NVIDIA {nv.Card ?? "none"}, driver {SmoothMotion.DriverText(nv.Driver)}, Smooth Motion {(nv.On ? "on" : "off")}{(nv.Owner is null ? "" : ", in profile " + nv.Owner)}{(nv.Error is null ? "" : ", error " + nv.Error)}");
 }

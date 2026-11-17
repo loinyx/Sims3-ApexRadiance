@@ -316,7 +316,7 @@
                                     </Border>
                                     <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
                                         <TextBlock Text="NVIDIA Smooth Motion" Style="{StaticResource ApexStrong}" />
-                                        <TextBlock Text="Frame generation in the NVIDIA driver: about double the frame rate on RTX 40 and 50 series cards, with a little more input delay." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
+                                        <TextBlock Text="Your NVIDIA card draws an extra picture between every two the game makes, so the game looks about twice as smooth. Only on RTX 40 and 50 series cards; best with the frame limit at 60 to 90 fps." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
                                         <TextBlock x:Name="SmoothPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
                                     </StackPanel>
                                     <ToggleSwitch x:Name="SmoothToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnSmoothToggle"

@@ -521,6 +521,34 @@ public static class Engine
         return (lines, at, end);
     }
 
+    // [screen] fps_limit (Smooth Motion's suggested range): the text with the limit set to `fps` when it is 0 (no limit) or outside
+    // 60 to 90, else unchanged; the value before (null when absent, Apex's default then applies: no limit)
+    static readonly Regex ScreenHeader = new(@"^\s*\[\s*screen\s*\]\s*(#.*)?\r?$");
+    static readonly Regex FpsKey = new(@"^(\s*fps_limit\s*=\s*)(\d+)");
+    public static (string Text, int? Was) WithFpsLimitInRange(string text, int fps = 60)
+    {
+        var cr = text.Contains("\r\n") ? "\r" : "";
+        var lines = text.Split('\n');
+        var at = Array.FindIndex(lines, l => ScreenHeader.IsMatch(l));
+        var end = at < 0 ? lines.Length : Array.FindIndex(lines, at + 1, l => AnyHeader.IsMatch(l)) is var n and >= 0 ? n : lines.Length;
+        for (int i = at + 1; at >= 0 && i < end; i++)
+            if (FpsKey.Match(lines[i]) is { Success: true } m)
+            {
+                var was = int.Parse(m.Groups[2].Value);
+                if (was >= 60 && was <= 90) return (text, was);
+                lines[i] = FpsKey.Replace(lines[i], "${1}" + fps, 1);
+                return (string.Join('\n', lines), was);
+            }
+        var line = "fps_limit = " + fps;
+        if (at < 0)
+            return (text + (text.Length == 0 || text.EndsWith('\n') ? "" : cr + "\n") + (text.Length == 0 ? "" : cr + "\n") + $"[screen]{cr}\n{line}{cr}\n", null);
+        var last = end - 1;
+        while (last > at && lines[last].Trim().Length == 0) last--;
+        var list = lines.ToList();
+        list.Insert(last + 1, line + cr);
+        return (string.Join('\n', list), null);
+    }
+
     // [ui] restart_host in the text of ApexRadiance.toml; null when the table or the key is missing
     public static bool? RestartHostKey(string text)
     {

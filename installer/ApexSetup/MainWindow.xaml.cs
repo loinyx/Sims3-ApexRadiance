@@ -785,6 +785,7 @@ public sealed partial class MainWindow : Window
     // NVIDIA Smooth Motion: a driver setting, not a game file, so its switch applies at once (SmoothMotion.cs); read once per game
     SmoothMotion.Status? _smooth;
     string? _smoothFor, _smoothError;
+    bool _smoothFps; // this session set Apex's frame limit to 60 when Smooth Motion was turned on
     bool _fillingSmooth;
 
     void RefreshSmooth(State s, Game g)
@@ -801,7 +802,8 @@ public sealed partial class MainWindow : Window
         SetState(SmoothPill, _smoothError == "Dry run: Setup changes nothing." ? (T(_smoothError), "ApexMutedBrush")
             : _smoothError is not null ? (T("Could not change the NVIDIA driver settings: {0}", T(_smoothError)), "ApexWarningBrush")
             : blocked is { } b ? (T(b.Key, b.Arg), "ApexMutedBrush")
-            : sm.On ? (T("On for The Sims 3 in the NVIDIA driver."), "ApexSuccessBrush")
+            : sm.On ? (T(_smoothFps ? "On for The Sims 3 in the NVIDIA driver. Apex's frame limit is now 60 fps, the pace it works best at."
+                                  : "On for The Sims 3 in the NVIDIA driver. Works best with Apex's frame limit at 60 to 90 fps."), "ApexSuccessBrush")
             : (T("Off for The Sims 3."), "ApexMutedBrush"));
     }
 
@@ -810,6 +812,16 @@ public sealed partial class MainWindow : Window
         if (_fillingSmooth || _game is not { } g || _smooth is null) return;
         _smoothError = SmoothMotion.Set(SmoothToggle.IsOn, g.Exe);
         if (_smoothError is null) _smooth = SmoothMotion.Read(g.Exe);
+        // turned on: Apex's frame limit into 60 to 90 fps (60 when there is none or it is outside), the pace frame generation needs
+        if (_smoothError is null && SmoothToggle.IsOn && Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") != "1" && Preview is null)
+            try
+            {
+                var toml = Engine.ApexToml(Scan.DocumentsFor(g));
+                var text = File.Exists(toml) ? File.ReadAllText(toml) : "";
+                var (next, _) = Engine.WithFpsLimitInRange(text);
+                if (next != text) { Directory.CreateDirectory(Path.GetDirectoryName(toml)!); File.WriteAllText(toml, next); _smoothFps = true; }
+            }
+            catch (Exception ex) { App.Log(ex); }
         else App.Log(new InvalidOperationException("Smooth Motion: " + _smoothError));
         RefreshComponents();
     }

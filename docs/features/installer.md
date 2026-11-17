@@ -78,7 +78,9 @@ bridge as not compatible; a driver profile forces it, the way NVIDIA Profile Ins
 game's exe and sets setting `0xB0D384C0` to 1; off deletes that profile only. The row shows only with an NVIDIA card. It
 can be turned on with an RTX 40 or 50 series card, driver 571.86 or newer, and the RTX Remix bridge installed; otherwise
 it stays off and says why. When either exe already belongs to a profile of the player's, Setup leaves it alone and names
-that profile. The profile is not part of restore points (it is a driver setting, not a game file).
+that profile. The profile is not part of restore points (it is a driver setting, not a game file). Turned on, Setup also brings
+Apex's frame limit (`[screen] fps_limit` in `ApexRadiance.toml`) into 60 to 90 fps: 60 when there is none or it is outside,
+the pace frame generation needs; a limit already in that range stays.
 
 | Off (no bridge on this game) | On | Unsupported card |
 |---|---|---|
