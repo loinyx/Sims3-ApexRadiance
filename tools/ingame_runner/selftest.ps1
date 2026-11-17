@@ -117,6 +117,10 @@ try {
     Check ($null -eq (Get-Measurement (Join-Path $fx 'none') 120 @() @())) 'no profile, no measurement'
 } finally { Remove-Item -LiteralPath $fx -Recurse -Force -ErrorAction SilentlyContinue }
 
+# The bridge server's CPU counts as the game's: per process, a new process from zero, a gone one dropped
+Check ((Get-HelperTicksDelta @{ 1 = 100L; 2 = 50L } @{ 1 = 160L; 3 = 30L }) -eq 90) 'helper CPU: delta per process id'
+Check ((Get-HelperTicksDelta $null @{ 1 = 40L }) -eq 40 -and (Get-HelperTicksDelta @{ 1 = 5L } @{}) -eq 0) 'helper CPU: no previous sample, no process'
+
 # Results page
 $res = @([pscustomobject]@{ Name = 'x-1-off'; JobId = 'x'; Variant = 'off'; Ok = $true; Closed = 'quit'; Frames = $f; Sim = $null; Notes = @() },
          [pscustomobject]@{ Name = 'x-2-on'; JobId = 'x'; Variant = 'on'; Ok = $false; Closed = 'quit'; Frames = $null; Sim = $null; Notes = @('log: a|b') })

@@ -300,6 +300,20 @@ function Get-SlowFrames($Frames, [double]$Ms = 100) {
     }
 }
 
+# Processes that work for the game and count as its CPU, not as other programs: the RTX Remix bridge server renders the
+# game's frames. Their CPU time by process id; Get-HelperTicksDelta adds what each used since the previous sample
+$script:GameHelperNames = @('NvRemixBridge')
+function Get-GameHelperTicks {
+    $t = @{}
+    foreach ($p in @(Get-Process -Name $script:GameHelperNames -ErrorAction SilentlyContinue)) { try { $t[$p.Id] = $p.TotalProcessorTime.Ticks } catch {} }
+    return $t
+}
+function Get-HelperTicksDelta($Prev, $Now) {
+    $d = 0L
+    foreach ($k in $Now.Keys) { $d += $Now[$k] - $(if ($Prev -and $Prev.ContainsKey($k)) { $Prev[$k] } else { 0L }) }
+    return $d
+}
+
 # One measured wait: <Base>-seconds.csv / -hitches.jsonl / -freezes.jsonl (stutter-profile.js), <Base>-frames.csv
 # (frame-times.js), the runner's $Commands and $Machine samples ({ t, game, other }: % of the whole machine). Returns the
 # real numbers, the excluded ones by reason, the harness commands' own cost and why the whole load is invalid, if it is.

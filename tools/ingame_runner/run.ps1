@@ -162,17 +162,17 @@ function Call-Agent([string]$Cmd, $ArgsObject, [int]$TimeoutMs = 15000) {
     return $reply.result
 }
 
-# CPU of the game and of everything else, as a share of the whole machine since the previous sample
+# CPU of the game (with the bridge server, Get-GameHelperTicks) and of everything else, as a share of the whole machine since the previous sample
 $script:cpuPrev = $null
 function Add-MachineSample($List) {
     $idle = 0L; $kernel = 0L; $user = 0L
     if (-not [ApexIngame.SystemTimes]::GetSystemTimes([ref]$idle, [ref]$kernel, [ref]$user)) { return }
     $script:proc.Refresh()
-    $now = @{ T = (Get-QpcMs); Total = $kernel + $user; Busy = $kernel + $user - $idle; Game = $script:proc.TotalProcessorTime.Ticks }
+    $now = @{ T = (Get-QpcMs); Total = $kernel + $user; Busy = $kernel + $user - $idle; Game = $script:proc.TotalProcessorTime.Ticks; Helpers = (Get-GameHelperTicks) }
     $p = $script:cpuPrev; $script:cpuPrev = $now
     if (-not $p -or $now.Total -le $p.Total) { return }
     $total = [double]($now.Total - $p.Total)
-    $game = 100 * ($now.Game - $p.Game) / $total
+    $game = 100 * ($now.Game - $p.Game + (Get-HelperTicksDelta $p.Helpers $now.Helpers)) / $total
     $List.Add([pscustomobject]@{ t = $now.T; game = [math]::Round($game, 1); other = [math]::Round([math]::Max(0, 100 * ($now.Busy - $p.Busy) / $total - $game), 1) })
 }
 
