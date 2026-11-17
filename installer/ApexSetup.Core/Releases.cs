@@ -31,7 +31,8 @@ public static class Releases
     public const string Dxvk = "doitsujin/dxvk";
     public const string MonoPatcher = "LazyDuchess/MonoPatcher";
 
-    static readonly HttpClient Http = MakeClient();
+    // settable for the tests' stub handler
+    public static HttpClient Http { get; set; } = MakeClient();
 
     static HttpClient MakeClient()
     {
@@ -102,7 +103,8 @@ public static class Releases
         {
             api.CancelAfter(TimeSpan.FromSeconds(20));
             try { json = await GetStringAsync($"https://api.github.com/repos/{repo}/releases?per_page=10", api.Token); }
-            catch (Exception) when (!ct.IsCancellationRequested) { return new[] { await LatestAsync(repo, ct) }; }
+            // (GitHub's rate limit is the news itself: an older edition's build may be in a release the latest one does not show)
+            catch (Exception e) when (e is not SetupException && !ct.IsCancellationRequested) { return new[] { await LatestAsync(repo, ct) }; }
         }
         using var doc = JsonDocument.Parse(json);
         return doc.RootElement.EnumerateArray()

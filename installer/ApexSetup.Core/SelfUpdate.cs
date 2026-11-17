@@ -16,7 +16,8 @@ public static class SelfUpdate
         if (apex.Assets.FirstOrDefault(a => a.Name == AssetName) is not { } asset) return null;
         if (asset.Sha256 is null) return null; // never run an exe that cannot be checked
         if (Hash(self).Equals(asset.Sha256, StringComparison.OrdinalIgnoreCase)) return null; // this very exe
-        var file = await Releases.DownloadAsync(asset, Path.Combine(Path.GetTempPath(), "ApexRadianceSetup", Guid.NewGuid().ToString("N")), ct);
+        // (a folder of its own: an install empties %TEMP%\ApexRadianceSetup when it finishes)
+        var file = await Releases.DownloadAsync(asset, Path.Combine(Path.GetTempPath(), "ApexRadianceSetup-update", Guid.NewGuid().ToString("N")), ct);
         return IsNewer(file, self) ? file : null;
     }
 
