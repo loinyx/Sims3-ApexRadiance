@@ -19,10 +19,12 @@ public static class SmoothMotion
 
     // Card: the NVIDIA card's name (null: none). On: the bridge's profile has 0xB0D384C0 = 1. Owner: a profile of the player's
     // holding the bridge's exe (Setup leaves it alone). Error: NVAPI could not be read.
-    public sealed record Status(string? Card, uint Driver, bool On, string? Owner, string? Error);
+    // SetupsProfile: the setting is on in Setup's own "Apex Radiance - The Sims 3" profile (an earlier Setup made it)
+    public sealed record Status(string? Card, uint Driver, bool On, string? Owner, string? Error, bool SetupsProfile = false);
 
     // the record that Setup turned it on (a path, so tests point it elsewhere)
-    public static string Marker = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Apex Radiance Setup", "smooth-motion-on.txt");
+    // (machine-wide, as the driver setting is: any administrator who runs Setup next finds it)
+    public static string Marker = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Apex Radiance Setup", "smooth-motion-on.txt");
     public static bool SetupTurnedOn => File.Exists(Marker);
 
     // RTX 40 and 50 series (GeForce RTX 4060, RTX 5090 Laptop GPU), on a driver that has the setting
@@ -47,7 +49,7 @@ public static class SmoothMotion
         if (s.Error is not null) return ("Could not read the NVIDIA driver settings: {0}", s.Error);
         if (s.Owner is not null) return ("Already in your NVIDIA profile \"{0}\": Setup leaves it as it is.", s.Owner);
         // on, but not by Setup (Profile Inspector): Setup does not undo it
-        if (s.On) return setupTurnedOn ? null : ("Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is.", "");
+        if (s.On) return setupTurnedOn || s.SetupsProfile ? null : ("Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is.", "");
         if (!Regex.IsMatch(s.Card ?? "", @"RTX\s*(40|50)\d\d", RegexOptions.IgnoreCase)) return ("Needs an NVIDIA GeForce RTX 40 or 50 series card (found: {0}).", s.Card ?? "");
         if (s.Driver < MinDriver) return ("Needs NVIDIA driver 571.86 or newer (found: {0}).", DriverText(s.Driver));
         // shortcut: DXVK on TS3W.exe is Vulkan too but untested with Smooth Motion; allow it once seen working in game
@@ -69,7 +71,8 @@ public static class SmoothMotion
         return s;
     }
 
-    public static Status Read()
+    // tidy: false for the read-back after a write, which must not drop Setup's record before an undo
+    public static Status Read(bool tidy = true)
     {
         // test runs: APEX_SETUP_FAKE_NV = "<card>|<driver, 57186>|<on, 0 or 1>|<owner profile>" stands in for the driver
         if (Environment.GetEnvironmentVariable("APEX_SETUP_FAKE_NV") is { Length: > 0 } fake)
@@ -78,7 +81,13 @@ public static class SmoothMotion
             return new(p[0].Length > 0 ? p[0] : null, p.Length > 1 && uint.TryParse(p[1], out var d) ? d : 0,
                        p.Length > 2 && p[2] == "1", p.Length > 3 && p[3].Length > 0 ? p[3] : null, null);
         }
-        try { return Tidy(Nv.Read()); }
+        try
+        {
+            var s = Nv.Read();
+            // Setup's own profile on, from a Setup that kept no record: Setup's, so it can turn it off
+            if (s.SetupsProfile && !SetupTurnedOn && Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") != "1") WriteMarker();
+            return tidy ? Tidy(s) : s;
+        }
         catch (Exception e) { return Failed(e); }
     }
 
@@ -88,6 +97,25 @@ public static class SmoothMotion
         if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1" || Environment.GetEnvironmentVariable("APEX_SETUP_FAKE_NV") is { Length: > 0 })
             return "Dry run: Setup changes nothing.";
         if (!on && !SetupTurnedOn) return null;
+        return SetDriver(on);
+    }
+
+    static void WriteMarker()
+    {
+        try { Directory.CreateDirectory(Path.GetDirectoryName(Marker)!); File.WriteAllText(Marker, "on"); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+    }
+
+    // a change that did not take, undone whatever the record says (the read-back may have found it off)
+    public static string? Undo(bool on)
+    {
+        if (Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1" || Environment.GetEnvironmentVariable("APEX_SETUP_FAKE_NV") is { Length: > 0 })
+            return null;
+        return SetDriver(!on);
+    }
+
+    static string? SetDriver(bool on)
+    {
         try
         {
             // the record first: a crash after the driver call still lets maintenance turn it off
@@ -188,7 +216,9 @@ public static class SmoothMotion
                 if (r == SettingNotFound) return false;
                 Ok(r, "DRS_GetSetting");
             }
-            return BitConverter.ToUInt32(set, SettingCurrentAt) == 1;
+            // on only when set in this profile: a value it inherits from the global profile does not reach the bridge, whose
+            // own Enabled APIs (NVIDIA's 0) still blocks it (settingLocation 0: NVDRS_CURRENT_PROFILE_LOCATION)
+            return BitConverter.ToUInt32(set, SettingIdAt + 8) == 0 && BitConverter.ToUInt32(set, SettingCurrentAt) == 1;
         }
 
         static void SetDword(nint s, (nint Handle, string Name, bool Predefined) b, uint id, uint value)
@@ -208,7 +238,7 @@ public static class SmoothMotion
             var (card, driver) = Card();
             if (card is null) return new(null, driver, false, null, null);
             return Session(s => BridgeProfile(s) is { } b
-                ? new Status(card, driver, SettingOn(s, b.Handle), Players(b) ? b.Name : null, null)
+                ? new Status(card, driver, SettingOn(s, b.Handle), Players(b) ? b.Name : null, null, !b.Predefined && b.Name == ProfileName && SettingOn(s, b.Handle))
                 : new Status(card, driver, false, null, null));
         }
 

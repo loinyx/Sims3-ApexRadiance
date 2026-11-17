@@ -20,7 +20,7 @@ public static class Afmf
     }
 
     // the record that Setup turned it on (a path, so tests point it elsewhere)
-    public static string Marker = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Apex Radiance Setup", "afmf-on.txt");
+    public static string Marker = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "Apex Radiance Setup", "afmf-on.txt"); // (machine-wide, as AFMF is)
     public static bool SetupTurnedOn => File.Exists(Marker);
 
     public static Status Read()
