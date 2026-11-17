@@ -1,6 +1,7 @@
 // patches/looks_patch.cpp compiled as is, with Looks::Fx (the player's .fx compiler) and Looks::Packs (downloads)
 // replaced by fake data: a look of five runnable shaders (three built in, two of the player's, one with every kind of
-// parameter control and quality settings) and one shader of a pack that is not downloaded.
+// parameter control and quality settings, the other added in the menu and switched off) and one shader of a pack that
+// is not downloaded.
 #include "rec.h"
 #include "patches/looks_patch.cpp"
 #include "fixture.h"
@@ -164,10 +165,10 @@ void LooksState(bool compiling, bool edited, bool offer, int batch, bool twin)
     g.iniOrder.clear();
     for (int s : { 0, 3, 7 }) g.iniOrder.push_back({ Looks::Shader(s).technique, Looks::Shader(s).file, s });
     g.iniOrder.push_back({ "Everything", "Everything.fx", Looks::kUserShaderBase });
-    g.iniOrder.push_back({ "FilmGrain", "MyFilmGrain.fx", Looks::kUserShaderBase + 1 });
     g.iniOrder.push_back({ "MXAO", "qUINT_mxao.fx", g_twinState ? Looks::kUserShaderBase + 2 : -1 });
     g.iniKeys.clear();
     for (auto& e : g.iniOrder) g.iniKeys.insert(Lower(EntryKey(e)));
+    g.extra = { "FilmGrain@MyFilmGrain.fx" }; // added in the menu, switched off: the trash button beside its switch
     g.loaded = true;
     g.error.clear();
     RebuildOrder();
