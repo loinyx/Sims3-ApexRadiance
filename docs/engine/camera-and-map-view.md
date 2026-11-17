@@ -152,8 +152,23 @@ it (depth ratios, the near plane cancels):
   rows 0/1 orthogonal to row 3 (1e-3 relative); `B = row2.w - A*row3.w` in [-5, -0.01]. Valid blocks vote for
   `near = -B` (values within 1e-3 relative are the same vote). The shape test is what stopped a block of zeros from
   winning (Lot Map Probe's second capture, 27/09).
-- `c40..c43` is also collected as a view-projection candidate (exact `memcmp` groups, at most 8 distinct); the most voted
-  one whose own near matches the frame's near (1e-3 relative) becomes `CameraViewProj`.
+- `c40..c43` is also collected as a view-projection candidate (exact `memcmp` groups, at most 16 distinct, one vote per
+  distinct block per draw); the most voted one whose own near matches the frame's near (1e-3 relative) becomes
+  `CameraViewProj`.
+- **c40 is not the camera by itself** (V-precomp, parameter tables decoded as in
+  [research 15 §2.5](../features/realtime-gi/research/15-desk-batching-constants.md)): only `billboard`,
+  `billboard_alpha` and `billboardPick` put `WorldToClipSpaceMatrix` at c40 (336 passes). Skinned draws write bones
+  there (`SkinMatrices` c0+180), instanced ones orientations, and `SingleObject` / `InstancedObject` / `Phong` carry the
+  view-projection at c0, c4, c8, c12, c80-c96 or c180-c219. Terrain, roads, floors and roofs carry only
+  `ObjectToClipSpaceMatrix`, which has the same projection shape and near. The c40 rule worked while a billboard pass
+  wrote c40 last; in the bridge runs no frame got a camera (`[GBuffer] Motion: ... noCamera` equal to the frame count,
+  the pixel pass held at `camera=0`; cause inferred, not captured).
+- So each voted draw also reads `c0..c223` in one call and scans every 4-register window: a projection-shaped block whose
+  camera position (the point rows 0, 1 and 3 send to 0) lies within 4 m horizontally of the game's camera eye
+  (`LotLightingMotion::CameraEye`) is a candidate too, trusted without the near match. An object's or a lot's
+  object-to-clip block puts that point elsewhere; the water reflection's mirrored copy keeps it over the eye. While no
+  block is trusted the vote goes on up to 128 scene draws. Without the eye only the c40 rule applies. The 600-frame
+  wait lines carry the eye and the nearest scanned camera distance (`DiagText`).
 - Present (`Priority::First`) clears the votes and `g_vpValid`. `CameraNear()` keeps the last winner across frames (0
   until the first vote ever); `CameraViewProj()` is false until this frame's first vote; `CameraDepthA()` = A of the
   current view-projection (double precision), 1.00008 when unknown (the combined build returned 1). The Frame Profiler's own Present hook runs at priority

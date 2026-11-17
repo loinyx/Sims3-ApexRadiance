@@ -11,6 +11,7 @@
 #include "apex_log.h"
 #include "world_session.h"
 #include "hook_guard.h"
+#include "lot_lighting_motion.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -188,8 +189,17 @@ void BeforeColourTile(IDirect3DDevice9* dev, IDirect3DSurface9* src, const RECT*
 // row2 = A * row3 + (0, 0, 0, B) with A ~ 1 and rows 0 and 1 orthogonal to row 3; then near = -B. The value most blocks
 // agree on over the frame's first scene draws wins. The view-projection is c40..c43 (translation = the camera's world
 // position; a mirrored copy in the water reflection pass): the block most draws agree on, trusted when its near matches.
+// c40 holds the camera only while a billboard pass wrote it last: in the precomp's parameter tables only billboard,
+// billboard_alpha and billboardPick put WorldToClipSpaceMatrix there; skinned and instanced draws overwrite c40 with
+// bones and orientations, and the other passes carry it at c0, c4, c8, c12, c80-c96, c180-c219. With no such c40 (the
+// bridge runs: no camera in any frame) the vote also scans c0..c223 of each voted draw for a projection whose own camera
+// position (the point rows 0, 1 and 3 send to 0) lies over the game's camera eye; an object's or a lot's
+// object-to-clip block puts it elsewhere, the water reflection's mirrored copy puts it under the eye.
 constexpr int kNearDraws = 24;
+constexpr int kEyeSeekDraws = 128; // while only the scan can find the camera, it keeps voting up to this many scene draws
 constexpr UINT kNearBlocks[] = {0, 4, 40, 180, 192, 216};
+constexpr UINT kScanRegs = 224;    // the highest WorldToClipSpaceMatrix the game writes ends at c222
+constexpr float kEyeMatchM = 4.0f; // horizontal; the eye read can trail the frame's camera by up to ~2.5 m while it moves
 std::atomic<int> g_cameraWanted{0};
 float g_near = 0.0f;
 int g_nearDraws = 0;
@@ -197,7 +207,12 @@ std::vector<std::pair<float, int>> g_nearVotes;
 struct VpVote {
     float m[4][4];
     int count;
+    bool at40 = false; // seen in c40 (trusted when its near matches the frame's near)
+    bool eye = false;  // its camera position lies over the game's eye
 };
+bool g_eyeKnown = false;
+float g_eye[3] = {};
+float g_eyeMiss = -1.0f; // this frame: the smallest horizontal distance of a scanned projection's camera to the eye (diagnostics)
 std::vector<VpVote> g_vpVotes;
 float g_vp[4][4] = {};
 bool g_vpValid = false;
@@ -231,30 +246,62 @@ bool NearFromBlock(const float m[4][4], float& nearZ) {
     return true;
 }
 
+// The camera position of a projection block: the point rows 0, 1 and 3 send to 0 (false when they are degenerate)
+bool CameraOfBlock(const float m[4][4], float p[3]) {
+    const double a[3][3] = {{m[0][0], m[0][1], m[0][2]}, {m[1][0], m[1][1], m[1][2]}, {m[3][0], m[3][1], m[3][2]}};
+    const double b[3] = {-double(m[0][3]), -double(m[1][3]), -double(m[3][3])};
+    const auto det3 = [](const double c0[3], const double c1[3], const double c2[3]) {
+        return c0[0] * (c1[1] * c2[2] - c1[2] * c2[1]) - c1[0] * (c0[1] * c2[2] - c0[2] * c2[1]) + c2[0] * (c0[1] * c1[2] - c0[2] * c1[1]);
+    };
+    const double c0[3] = {a[0][0], a[1][0], a[2][0]}, c1[3] = {a[0][1], a[1][1], a[2][1]}, c2[3] = {a[0][2], a[1][2], a[2][2]};
+    const double d = det3(c0, c1, c2);
+    if (!std::isfinite(d) || std::fabs(d) < 1e-12) return false;
+    p[0] = float(det3(b, c1, c2) / d), p[1] = float(det3(c0, b, c2) / d), p[2] = float(det3(c0, c1, b) / d);
+    return std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2]);
+}
+
+// One vote per distinct block per draw (the same block in several registers counts once)
+void AddVpVote(const float m[4][4], bool at40, bool eye, std::vector<size_t>& thisDraw) {
+    for (size_t i = 0; i < g_vpVotes.size(); i++) {
+        VpVote& v = g_vpVotes[i];
+        if (std::memcmp(v.m, m, sizeof v.m) != 0) continue;
+        v.at40 = v.at40 || at40, v.eye = v.eye || eye;
+        if (std::find(thisDraw.begin(), thisDraw.end(), i) == thisDraw.end()) v.count++, thisDraw.push_back(i);
+        return;
+    }
+    if (g_vpVotes.size() >= 16) return;
+    VpVote v{{}, 1, at40, eye};
+    std::memcpy(v.m, m, sizeof v.m);
+    thisDraw.push_back(g_vpVotes.size());
+    g_vpVotes.push_back(v);
+}
+
 void VoteCamera(IDirect3DDevice9* dev) {
+    if (g_nearDraws == 0) g_eyeKnown = LotLightingMotion::CameraEye(g_eye), g_eyeMiss = -1.0f;
+    float regs[kScanRegs][4];
+    const bool haveRegs = SUCCEEDED(dev->GetVertexShaderConstantF(0, &regs[0][0], kScanRegs));
     float cameraBlock[4][4];
-    const bool haveCameraBlock = SUCCEEDED(dev->GetVertexShaderConstantF(40, &cameraBlock[0][0], 4));
+    const bool haveCameraBlock = haveRegs ? (std::memcpy(cameraBlock, regs[40], sizeof cameraBlock), true)
+                                          : SUCCEEDED(dev->GetVertexShaderConstantF(40, &cameraBlock[0][0], 4));
     {
-        float m[4][4], n;
-        if (haveCameraBlock) std::memcpy(m, cameraBlock, sizeof m);
-        if (haveCameraBlock && NearFromBlock(m, n)) {
-            bool found = false;
-            for (auto& v : g_vpVotes)
-                if (std::memcmp(v.m, m, sizeof m) == 0) {
-                    v.count++;
-                    found = true;
-                }
-            if (!found && g_vpVotes.size() < 8) {
-                g_vpVotes.push_back({{}, 1});
-                std::memcpy(g_vpVotes.back().m, m, sizeof m);
+        std::vector<size_t> thisDraw;
+        float n;
+        if (haveCameraBlock && NearFromBlock(cameraBlock, n)) AddVpVote(cameraBlock, true, false, thisDraw);
+        if (haveRegs && g_eyeKnown)
+            for (UINT r = 0; r + 4 <= kScanRegs; r++) {
+                const float(*m)[4] = &regs[r];
+                float p[3];
+                if (!NearFromBlock(m, n) || !CameraOfBlock(m, p)) continue;
+                const float miss = std::hypot(p[0] - g_eye[0], p[2] - g_eye[2]);
+                if (g_eyeMiss < 0 || miss < g_eyeMiss) g_eyeMiss = miss;
+                if (miss < kEyeMatchM) AddVpVote(m, false, true, thisDraw);
             }
-        }
     }
     for (UINT base : kNearBlocks) {
         float m[4][4], n;
-        // No device state is changed between the two votes. Reuse the successful
-        // camera read; retain the original retry when the first read failed.
-        if (base == 40 && haveCameraBlock) std::memcpy(m, cameraBlock, sizeof m);
+        // No device state is changed between the two votes: reuse the register read; read again only when it failed
+        if (haveRegs) std::memcpy(m, regs[base], sizeof m);
+        else if (base == 40 && haveCameraBlock) std::memcpy(m, cameraBlock, sizeof m);
         else if (FAILED(dev->GetVertexShaderConstantF(base, &m[0][0], 4))) continue;
         if (!NearFromBlock(m, n)) continue;
         bool found = false;
@@ -272,20 +319,24 @@ void VoteCamera(IDirect3DDevice9* dev) {
             best = v.second;
             g_near = v.first;
         }
+    // trusted: over the eye, or c40 with the frame's near
+    const auto trusted = [](const VpVote& v, float& n) { return NearFromBlock(v.m, n) && (v.eye || (v.at40 && std::fabs(n - g_near) < 1e-3f * g_near)); };
     int bestVp = 0;
+    float vpNear = 0.0f;
     for (const auto& v : g_vpVotes) {
         float n;
-        if (v.count > bestVp && NearFromBlock(v.m, n) && std::fabs(n - g_near) < 1e-3f * g_near) {
-            bestVp = v.count;
+        if (v.count > bestVp && trusted(v, n)) {
+            bestVp = v.count, vpNear = n;
             std::memcpy(g_vp, v.m, sizeof g_vp);
         }
     }
     g_vpValid = bestVp > 0;
+    if (g_vpValid) g_near = vpNear; // (the same unless the block votes chose another projection's near)
     if (g_plainWanted.load(std::memory_order_relaxed) > 0) {
         int bestPlain = 0;
         for (const auto& v : g_vpVotes) {
             float n;
-            if (v.count > bestPlain && v.m[1][1] >= 0 && NearFromBlock(v.m, n) && std::fabs(n - g_near) < 1e-3f * g_near) {
+            if (v.count > bestPlain && v.m[1][1] >= 0 && trusted(v, n)) {
                 bestPlain = v.count;
                 std::memcpy(g_plainVp, v.m, sizeof g_plainVp);
             }
@@ -357,7 +408,7 @@ void OnGameDraw(D3D9Hooks::DeviceContext& ctx) {
         if (!g_sceneOnSharedDepth && SceneDepthReady(dev)) g_sceneOnSharedDepth = true;
         if (ctx.ZWriteEnable()) g_depthWrites++;
         if (g_cameraWanted.load(std::memory_order_relaxed) > 0) {
-            if (g_nearDraws < kNearDraws) VoteCamera(dev);
+            if (g_nearDraws < kNearDraws || (!g_vpValid && g_eyeKnown && g_nearDraws < kEyeSeekDraws)) VoteCamera(dev);
             else if (!g_plainVpValid && g_plainWanted.load(std::memory_order_relaxed) > 0 && g_plainSeek++ < 512) SeekPlainCamera(dev);
         }
         return;
@@ -508,7 +559,9 @@ std::string DiagText() {
            // the camera vote: why CameraViewProj has no view-projection (no c40 block with a projection's shape, or one whose near
            // differs from the agreed near)
            ", camera wanted " + std::to_string(g_cameraWanted.load()) + ", voted draws " + std::to_string(g_nearDraws) + ", near votes " +
-           std::to_string(g_nearVotes.size()) + " (near " + std::to_string(g_near) + "), c40 blocks " + std::to_string(g_vpVotes.size()) +
+           std::to_string(g_nearVotes.size()) + " (near " + std::to_string(g_near) + "), view-projection blocks " + std::to_string(g_vpVotes.size()) +
+           (g_eyeKnown ? ", eye (" + std::to_string(g_eye[0]) + ", " + std::to_string(g_eye[1]) + ", " + std::to_string(g_eye[2]) + "), nearest scanned camera " + std::to_string(g_eyeMiss) + " m"
+                       : std::string(", eye unknown")) +
            (g_vpValid ? ", camera valid" : ", no camera") + (g_lastVpValid ? ", last frame's valid" : "");
 }
 // This frame's effects (ambient occlusion, edge smoothing, Depth Blur) will still run at a later scene boundary: Picture
