@@ -19,6 +19,7 @@
 #define VK_NO_PROTOTYPES
 #endif
 #include <vulkan/vulkan.h>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -106,6 +107,8 @@ public:
       if (tri[i] >= vertices) return kNoModel;
     Model m;
     m.vertices = vertices, m.triangles = triangles;
+    for (uint32_t v = 0; v < vertices; v++)
+      for (int a = 0; a < 3; a++) m.lo[a] = std::min(m.lo[a], pos[v * 3 + a]), m.hi[a] = std::max(m.hi[a], pos[v * 3 + a]);
     m.bytes.resize(size_t(vertices) * 12 + size_t(triangles) * 12);
     std::memcpy(m.bytes.data(), pos, size_t(vertices) * 12);
     std::memcpy(m.bytes.data() + size_t(vertices) * 12, tri, size_t(triangles) * 12);
@@ -152,7 +155,7 @@ public:
         return fault("output is not an A16B16G16R16F texture of a quarter of the depth's size");
       r->out[i] = image, res[count] = out[i], layouts[count++] = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     }
-    std::memcpy(r->block, &block, kShaderBlock);
+    std::memcpy(r->block, &block, kBlockHead);
     GiPixelBlock* b = reinterpret_cast<GiPixelBlock*>(r->block);  // (only the fields before `box` exist in the copy)
     b->width = depthInfo.extent.width, b->height = depthInfo.extent.height;
     b->flags = cls ? kGiPixelFlagClass : 0;
@@ -176,6 +179,7 @@ public:
       n.instanceCustomIndex = 1, n.mask = 1, n.flags = kBoxFacing, n.accelerationStructureReference = m_blasAddr[0];
     }
     if (const char* why = meshInstances(block, *r)) return fault(why);
+    b->meshBounds = m_boundsLast;  // (meshInstances wrote the bounds after the block's casters)
 
     collect();
     const UINT size = static_cast<UINT>(offsetof(Record, inst) + sizeof(VkAccelerationStructureInstanceKHR) * r->instances);
@@ -237,13 +241,14 @@ public:
   // The counter line of the log, without a line end
   int line(char* text, size_t size) {
     const GiPixelCounters c = counters();
-    return std::snprintf(text, size, "[GiPixel] passes=%u rays=%llu raysLast=%u gpuUs=%u size=%ux%u meshes=%u models=%u faults=%u%s%s", c.passes,
-                         static_cast<unsigned long long>(c.rays), c.raysLast, c.gpuUs, c.width, c.height, c.meshes, c.models, c.faults,
+    return std::snprintf(text, size, "[GiPixel] passes=%u rays=%llu raysLast=%u gpuUs=%u size=%ux%u meshes=%u models=%u bounds=%u faults=%u%s%s", c.passes,
+                         static_cast<unsigned long long>(c.rays), c.raysLast, c.gpuUs, c.width, c.height, c.meshes, c.models, m_boundsLast, c.faults,
                          m_faults ? " last=" : "", m_faults ? m_lastFault : "");
   }
 
 private:
-  enum : uint32_t { kSlots = 8, kMaxInstances = kGiPixelCapsules + kGiPixelBoxes + kGiPixelMeshes, kShaderBlock = offsetof(GiPixelBlock, box), kCubeBytes = 36 * 12 };
+  enum : uint32_t { kSlots = 8, kMaxInstances = kGiPixelCapsules + kGiPixelBoxes + kGiPixelMeshes, kBlockHead = offsetof(GiPixelBlock, box),
+                     kShaderBlock = kBlockHead + kGiPixelMeshBounds * sizeof(GiPixelCaster), kCubeBytes = 36 * 12 };
   // shortcut: a model over 64 k triangles is left out (the survey's 99 % is 5 k) and at most 4096 models are kept; raise when the counters show refusals
   enum : uint32_t { kMaxModelTriangles = 65536, kMaxModels = 4096, kBuildsPerPass = 16, kChunkBytes = 8u << 20 };
   // Game meshes are open and wound either way: no culling, whatever the rays ask
@@ -251,6 +256,7 @@ private:
   struct Model {
     std::vector<uint8_t> bytes;  // vertices, then indices
     uint32_t vertices = 0, triangles = 0;
+    float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};  // model space
     VkAccelerationStructureKHR as = VK_NULL_HANDLE;  // created by the pass that builds it; freed by drop()
     VkDeviceAddress blas = 0;
   };
@@ -396,7 +402,8 @@ private:
   // The mesh instances of a pass, after the capsules and boxes: the nearest objects to the camera whose model is built,
   // building up to kBuildsPerPass models it lacks
   const char* meshInstances(const GiPixelBlock& block, Record& r) {
-    r.builds = 0, r.scratch = m_scratchAddrMesh, m_meshesLast = 0;
+    r.builds = 0, r.scratch = m_scratchAddrMesh, m_meshesLast = 0, m_boundsLast = 0;
+    m_boxes.clear();
     if (m_meshes.empty()) return nullptr;
     m_order.resize(m_meshes.size());
     for (uint32_t i = 0; i < m_order.size(); i++) m_order[i] = i;
@@ -420,10 +427,51 @@ private:
       VkAccelerationStructureInstanceKHR& n = r.inst[r.instances++];
       n = {};
       std::memcpy(n.transform.matrix, o.m, sizeof n.transform.matrix);
-      n.instanceCustomIndex = 0, n.mask = 1, n.flags = kMeshFacing, n.accelerationStructureReference = m.blas;
+      // A delta caster (the texel tier holds at most the object's box): its shadow shows where no static occluder already hides the lamp
+      n.instanceCustomIndex = 2, n.mask = 2, n.flags = kMeshFacing, n.accelerationStructureReference = m.blas;
       m_meshesLast++;
+      m_boxes.push_back(worldBox(m, o.m));
     }
+    groupBounds(reinterpret_cast<GiPixelCaster*>(r.block + kBlockHead));
     return nullptr;
+  }
+
+  // An instance's world bounds: the model's box through the 3 x 4 matrix
+  static GiPixelCaster worldBox(const Model& m, const float* x) {
+    GiPixelCaster c{};
+    for (int row = 0; row < 3; row++) {
+      float lo = x[row * 4 + 3], hi = lo;
+      for (int a = 0; a < 3; a++) {
+        const float u = x[row * 4 + a] * m.lo[a], v = x[row * 4 + a] * m.hi[a];
+        lo += std::min(u, v), hi += std::max(u, v);
+      }
+      c.lo[row] = lo, c.hi[row] = hi;
+    }
+    return c;
+  }
+  // The mesh instances' reach bounds for the kernel: the instances' boxes grouped by a grid cell of their centre, the cell
+  // doubled until at most kGiPixelMeshBounds groups remain (a lot's furniture: a few cells of 2-4 m)
+  void groupBounds(GiPixelCaster* out) {
+    if (m_boxes.empty()) return;
+    for (float cell = 2.0f;; cell *= 2.0f) {
+      uint32_t n = 0;
+      bool over = false;
+      m_cellOf.clear();
+      for (const GiPixelCaster& b : m_boxes) {
+        const int64_t cx = static_cast<int64_t>(std::floor((b.lo[0] + b.hi[0]) * 0.5f / cell)), cz = static_cast<int64_t>(std::floor((b.lo[2] + b.hi[2]) * 0.5f / cell));
+        const uint64_t key = static_cast<uint64_t>(cx) * 0x9E3779B97F4A7C15ull ^ static_cast<uint64_t>(cz);
+        uint32_t at = n;
+        for (uint32_t i = 0; i < n; i++)
+          if (m_cellOf[i] == key) { at = i; break; }
+        if (at == n) {
+          if (n == kGiPixelMeshBounds) { over = true; break; }
+          m_cellOf.push_back(key), out[n++] = b;
+          continue;
+        }
+        for (int a = 0; a < 3; a++) out[at].lo[a] = std::min(out[at].lo[a], b.lo[a]), out[at].hi[a] = std::max(out[at].hi[a], b.hi[a]);
+      }
+      if (!over) { m_boundsLast = n; return; }
+    }
   }
 
   // The build inputs of the three acceleration structures: 0 the unit cube, 1 the unit box of a capsule, 2 the top level
@@ -705,6 +753,9 @@ private:
   std::vector<Model> m_models;      // kept through drop(); their Vulkan objects are not
   std::vector<GiPixelMesh> m_meshes;
   std::vector<uint32_t> m_order;
+  std::vector<GiPixelCaster> m_boxes;  // the last pass's mesh instances' world bounds
+  std::vector<uint64_t> m_cellOf;
+  uint32_t m_boundsLast = 0;
   std::vector<Chunk> m_chunks;
   std::vector<VkBuffer> m_retired;  // replaced scratch buffers, freed by drop()
   VkBuffer m_scratch = VK_NULL_HANDLE;

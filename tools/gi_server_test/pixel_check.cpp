@@ -11,6 +11,7 @@
 // Printed: the time of a frame and its rays. Read-only: prints to stdout, writes no file.
 //   --bench <frames>  no checks: the dispatch's time by device timestamps, the kernel and its variants (run.ps1 builds them)
 //   --device <text>  the device whose name holds <text>      --size <w> <h>  the depth's size (1920 1080)
+//   --precomp <file>  the game's Shaders_Win32.precomp: the Sim capsules' chain analysis over its skinned vertex shaders
 #define main SolveMain // check.cpp's scene, device and buffer code as they are (other packages edit that file)
 #include "check.cpp"
 #undef main
@@ -23,6 +24,8 @@
 #include "px_stop2.h"
 #include "px_stop3.h"
 #include "px_trace0.h"
+#include <set>
+#include "features/gi_sim_capsules.h"
 
 namespace {
 using RtLampProxy::Tri;
@@ -579,15 +582,151 @@ void CheckOcclusion(const PScene& ps, const Drawn& dr, const std::vector<Pixel>&
     Check(within >= static_cast<long>(drew * minShare) && sameD >= static_cast<long>(drew * minShare), std::string(tag) + ": occlusion and multiplier match the CPU reference");
     Check(shadowed[kWalls] > 0 && shadowed[kSim] + shadowed[kChair] + shadowed[kBoxes] > 0, std::string(tag) + ": delta shadows fall on floors and on objects (the check is not empty)");
 }
+#ifndef PIXEL_CHECK_NO_MAIN
+// ---------------------------------------------------------------- Sim capsules (XR-08, features/gi_sim_capsules.h)
+// The camera's view-projection as the game's c40..c43 hold it: clip_k = row_k . (world, 1), device depth z / w
+void CameraRows(const PScene& ps, float vp[4][4]) {
+    const float A = kFar / (kFar - kNear);
+    const V3 axis[3] = {ps.right * (1.0f / ps.tanX), ps.up * (1.0f / ps.tanY), ps.fwd};
+    for (int r = 0; r < 3; r++) vp[r][0] = axis[r].x, vp[r][1] = axis[r].y, vp[r][2] = axis[r].z, vp[r][3] = -Dot(axis[r], ps.eye);
+    for (int c = 0; c < 4; c++) vp[3][c] = vp[2][c], vp[2][c] *= A; // w = view z; z = A (view z - near)
+    vp[2][3] -= A * kNear;
+}
+
+// A Sim's skinned draw built from its pose (root, yaw, bone offsets), its root found again through each form of the game's
+// chain, three capsules from it, and the kernel's shadow of those capsules against the CPU reference
+void SimCase(const Gpu& g, PScene ps, int w, int h) {
+    using namespace GiSimCapsules;
+    const float truth[3] = {14.0f, 0.0f, 12.5f}, yaw = 0.52f; // where the harness's Sim stands
+    static float reg[256][4];
+    std::memset(reg, 0, sizeof reg);
+    // A palette of 24 bones near the bind pose (a few cm), three of them an arm raised by 0.4 m
+    for (int b = 0; b < 24; b++) {
+        for (int a = 0; a < 3; a++) reg[3 * b + a][a] = 1.0f;
+        reg[3 * b][3] = 0.03f * std::sin(1.7f * b), reg[3 * b + 1][3] = b < 3 ? 0.4f : 0.02f * std::cos(2.3f * b), reg[3 * b + 2][3] = 0.025f * std::sin(0.9f * b);
+    }
+    float vp[4][4];
+    CameraRows(ps, vp);
+    const float Wm[3][4] = {{std::cos(yaw), 0, std::sin(yaw), truth[0]}, {0, 1, 0, truth[1]}, {-std::sin(yaw), 0, std::cos(yaw), truth[2]}};
+    // Form 1: model -> world in c184..c186, the camera in c180..c183. Form 2: one world-view-projection in c188..c191
+    for (int r = 0; r < 3; r++) std::memcpy(reg[184 + r], Wm[r], sizeof Wm[r]);
+    for (int r = 0; r < 4; r++) std::memcpy(reg[180 + r], vp[r], sizeof vp[r]);
+    for (int r = 0; r < 4; r++)
+        for (int c = 0; c < 4; c++) reg[188 + r][c] = vp[r][0] * Wm[0][c] + vp[r][1] * Wm[1][c] + vp[r][2] * Wm[2][c] + (c == 3 ? vp[r][3] : 0.0f);
+    float median[3];
+    BoneMedian(reg, 24, median);
+    std::vector<Root> draws;
+    float worst = 0.0f;
+    for (const Chain ch : {Chain{180, 184}, Chain{188, -1}}) {
+        double C[4][4], M[4][4];
+        ClipOf(reg, ch, C);
+        Root r{};
+        if (!WorldOf(C, vp, M)) {
+            Check(false, "Sim capsules: the draw's world matrix from the camera");
+            return;
+        }
+        Apply(M, median, r.p);
+        draws.push_back(r);
+        for (int a = 0; a < 3; a++) worst = std::max(worst, std::fabs(r.p[a] - truth[a]));
+    }
+    std::printf("  Sim capsules: root from both chain forms within %.1f mm of the pose's root\n", worst * 1e3f);
+    Check(worst < 0.03f, "Sim capsules: the root from a synthetic draw within 3 cm, both chain forms");
+    { // draws of other cameras: an orthographic one above the lot (the sun's shadow map), and this camera mirrored in the
+      // water plane y = 0 (the reflection pass)
+        float ortho[4][4] = {{0.1f, 0, 0, -1.4f}, {0, 0, 0.1f, -1.25f}, {0, -0.02f, 0, 0.6f}, {0, 0, 0, 1}}, mirror[4][4];
+        for (int r = 0; r < 4; r++) std::memcpy(mirror[r], vp[r], sizeof vp[r]), mirror[r][1] = -vp[r][1];
+        float saved[4][4];
+        std::memcpy(saved, reg[180], sizeof saved);
+        bool dropped = true;
+        for (const auto* other : {ortho, mirror}) {
+            for (int r = 0; r < 4; r++) std::memcpy(reg[180 + r], other[r], sizeof other[r]);
+            double C[4][4], M[4][4];
+            ClipOf(reg, Chain{180, 184}, C);
+            dropped = dropped && !WorldOf(C, vp, M);
+        }
+        std::memcpy(reg[180], saved, sizeof saved);
+        Check(dropped, "Sim capsules: draws of the sun's orthographic camera and of the mirrored reflection camera are dropped");
+    }
+    // Draws of one Sim merge; a second Sim stands 3 m away
+    draws.push_back({{truth[0] + 3.0f, 0.0f, truth[2]}});
+    const float cam[3] = {ps.eye.x, ps.eye.y, ps.eye.z};
+    const std::vector<Root> sims = Merge(draws, cam, kGiPixelCasters);
+    GiPixelBlock block{};
+    const uint32_t added = Fill(block, sims, {});
+    Check(sims.size() == 2 && added == 2 && block.capsules == 6 && block.casters == 2 && block.caster[0].moved != 0.0f,
+          "Sim capsules: two Sims from three draws, three capsules each, a new Sim counts as moved");
+    GiPixelBlock again{};
+    Fill(again, sims, sims);
+    Check(again.caster[0].moved == 0.0f, "Sim capsules: a Sim that stays is not moved");
+
+    // The nearer Sim's capsules in place of the harness's hand-made Sim: drawn, traced, against the CPU reference
+    ps.capsules.clear();
+    for (int i = 0; i < kPerSim; i++) {
+        const GiPixelCapsule& c = block.capsule[i];
+        ps.capsules.push_back({{c.a[0], c.a[1], c.a[2]}, c.r, {c.b[0], c.b[1], c.b[2]}, 0});
+    }
+    const GiPixelCaster& k = block.caster[0];
+    ps.casters.back() = {{k.lo[0], k.lo[1], k.lo[2], 1.0f}, {k.hi[0], k.hi[1], k.hi[2], 0}};
+    const Drawn dr = Draw(ps, w, h);
+    Kernel kernel(g, ps, dr);
+    const std::vector<Pixel> px = kernel.Dispatch(0, 1, 0.0f);
+    CheckOcclusion(ps, dr, px, 0.0f, 1, "Sim capsules from a synthetic draw", 0.999);
+    long under = 0;
+    for (const Pixel& p : px)
+        if (Drew(p) && p.d && dr.cls[static_cast<size_t>(p.pos[3])] == kWalls && std::hypot(p.pos[0] - truth[0], p.pos[2] - truth[2]) < 2.5f && p.pos[1] < 0.05f) under++;
+    std::printf("  Sim capsules: %ld floor pixels within 2.5 m of the Sim in its delta shadow\n", under);
+    Check(under > 20, "Sim capsules: the Sim's shadow lies on the floor around it");
+}
+
+// Every skinned vertex shader of the game's Shaders_Win32.precomp through Analyse (read-only)
+void PrecompCase(const std::string& path) {
+    std::FILE* f = nullptr;
+    if (fopen_s(&f, path.c_str(), "rb") != 0 || !f) {
+        Check(false, "precomp: " + path + " opens");
+        return;
+    }
+    std::vector<unsigned char> d;
+    std::vector<unsigned char> buf(1 << 16);
+    for (size_t n; (n = std::fread(buf.data(), 1, buf.size(), f)) > 0;) d.insert(d.end(), buf.begin(), buf.begin() + n);
+    std::fclose(f);
+    std::set<std::string> seen;
+    long skinned = 0, analysed = 0, world = 0;
+    for (size_t i = 0; i + 8 <= d.size(); i++) {
+        uint32_t v;
+        std::memcpy(&v, &d[i], 4);
+        if (v != 0xFFFE0300u && v != 0xFFFE0200u && v != 0xFFFE0201u) continue;
+        size_t e = i + 4;
+        for (uint32_t t = 0; e + 4 <= d.size() && e - i < 200000; e += 4) {
+            std::memcpy(&t, &d[e], 4);
+            if (t == 0x0000FFFFu) break;
+        }
+        if (e + 4 > d.size() || !seen.insert(std::string(reinterpret_cast<const char*>(&d[i]), e + 4 - i)).second) continue;
+        std::vector<uint32_t> code((e + 4 - i) / 4);
+        std::memcpy(code.data(), &d[i], code.size() * 4);
+        bool blend = false; // dcl_blendindices v#
+        for (size_t k = 1; k + 2 < code.size(); k++)
+            blend = blend || ((code[k] & 0xFFFF) == 31 && (code[k] >> 24 & 0xF) == 2 && (code[k + 1] & 0x1F) == 2 && ((code[k + 2] >> 28 & 7) | (code[k + 2] >> 8 & 0x18)) == 1);
+        if (!blend) continue;
+        skinned++;
+        GiSimCapsules::Chain ch;
+        if (GiSimCapsules::Analyse(code.data(), code.size(), ch)) analysed++, world += ch.w >= 0;
+    }
+    std::printf("  precomp: %ld skinned vertex shaders, the chain found in %ld (%.1f %%), %ld of them with a separate world matrix\n", skinned, analysed,
+                skinned ? 100.0 * analysed / skinned : 0.0, world);
+    Check(skinned > 1000 && analysed >= skinned * 9 / 10, "precomp: the position chain of 90 % of the skinned vertex shaders");
+}
+#endif
 } // namespace
 
 #ifndef PIXEL_CHECK_NO_MAIN // (mesh_check.cpp takes the scene, the kernel and the reference)
 int main(int argc, char** argv) {
     std::string want;
     int w = 1920, h = 1080, bench = 0;
+    std::string precomp; // --precomp <Shaders_Win32.precomp>: the Sim chain analysis over the game's skinned vertex shaders
     for (int i = 1; i < argc; i++) {
         const std::string a = argv[i];
         if (a == "--device" && i + 1 < argc) want = argv[++i];
+        else if (a == "--precomp" && i + 1 < argc) precomp = argv[++i];
         else if (a == "--bench" && i + 1 < argc) bench = std::clamp(std::atoi(argv[++i]), 8, 4096);
         else if (a == "--size" && i + 2 < argc) w = std::clamp(std::atoi(argv[i + 1]), 64, 3840) & ~3, h = std::clamp(std::atoi(argv[i + 2]), 64, 2160) & ~3, i += 2;
         else {
@@ -830,6 +969,10 @@ int main(int argc, char** argv) {
             std::printf("; shadowed pixels it leaves lit: %ld\n", leak);
             Check(ok, "no self-shadow: at most 0.5 % of the lit pixels of each kind (shadow edges moved by the origin's offset)");
         }
+
+        // 6. Sim capsules from a synthetic skinned draw (XR-08), and the chain analysis over the game's shaders
+        SimCase(g, ps, w, h);
+        if (!precomp.empty()) PrecompCase(precomp);
     }
     vkDestroyCommandPool(g.dev, g.pool, nullptr);
     vkDestroyDevice(g.dev, nullptr);

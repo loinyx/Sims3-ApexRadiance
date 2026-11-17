@@ -1,6 +1,6 @@
 {
   "id": "gi-pixel-smoke",
-  "description": "Per-pixel delta shadows XR-07 smoke (developer build: -Asi Release\\ApexRadiance.asi). Needs the bridge pair of patch 0019 and the x64 d3d9.dll of native/dxvk in Bin. Real-Time Lighting on with pixelShadows, the filtered mask view and the test capsule (no Sim capsules before XR-08): the open is answered on, passes run with rays and no fault through a 60 s pan. Pass: no crash, the On line, a counters line with passes and rays above 0 and faults=0, no off or error line.",
+  "description": "Per-pixel delta shadows smoke (XR-07, XR-08; developer build: -Asi Release\\ApexRadiance.asi). Needs the bridge pair of patches 0019-0020 and the x64 d3d9.dll of native/dxvk in Bin. Real-Time Lighting on with pixelShadows and the filtered mask view through a 60 s pan. Variant sims: no test capsule, the Sims' own capsules (casters from the Sim draws): the counters line shows sims above 0 and rays above 0. Variant on (the default): the test capsule. Pass: no crash, the On line, a counters line with passes and rays above 0 and faults=0, no off or error line.",
   "save": "ApexTest-Night",
   "toml": {
     "ui": {
@@ -9,15 +9,33 @@
     "patches.RealtimeGI": {
       "enabled": true,
       "pixelShadows": true,
-      "pixelView": 1,
-      "pixelTestCaster": true
+      "pixelView": 1
     }
   },
   "variants": {
-    "on": {}
+    "sims": {
+      "toml": {
+        "patches.RealtimeGI": {
+          "pixelTestCaster": false
+        }
+      },
+      "expect": [
+        "\\[GiPixel\\] On: view=1 testCaster=0",
+        "\\[GiPixel\\] passes=[1-9]\\d* rays=[1-9]\\d* .* faults=0 .*sims=[1-9]"
+      ]
+    },
+    "on": {
+      "toml": {
+        "patches.RealtimeGI": {
+          "pixelTestCaster": true
+        }
+      },
+      "expect": [
+        "\\[GiPixel\\] On: view=1 testCaster=1"
+      ]
+    }
   },
   "expect": [
-    "\\[GiPixel\\] On: view=1 testCaster=1",
     "\\[GiPixel\\] passes=[1-9]\\d* rays=[1-9]\\d* .* faults=0"
   ],
   "fail": [

@@ -500,7 +500,7 @@ new file mode 100644
 index 00000000..f911266c
 --- /dev/null
 +++ b/bridge/test/rtx/unit/test_gi_mesh_device.cpp
-@@ -0,0 +1,508 @@
+@@ -0,0 +1,513 @@
 +/*
 + * Permission is hereby granted, free of charge, to any person obtaining a
 + * copy of this software and associated documentation files (the "Software"),
@@ -659,11 +659,9 @@ index 00000000..f911266c
 +      block.samples = 16;
 +      block.lamps = 1;
 +      block.lamp[0] = { { 0.5f, 2.2f, 0.4f }, 0.08f, { 10, 10, 10 }, 0 };
-+      // A delta caster is needed for rays to be traced at all: a small one far off, with bounds over the whole floor.
-+      block.capsules = 1;
-+      block.casters = 1;
-+      block.capsule[0] = { { -6, 0.2f, 6 }, 0.1f, { -6, 0.4f, 6 }, 0 };
-+      block.caster[0] = { { -10, -1, -10 }, 0, { 10, 3, 10 }, 0 };
++      // No capsule and no caster bounds: the chair's mesh bounds alone must make the pass trace (XR-08).
++      block.capsules = 0;
++      block.casters = 0;
 +    }
 +  };
 +
@@ -708,17 +706,18 @@ index 00000000..f911266c
 +    check(pDevice->EndScene(), "EndScene");
 +  }
 +
-+  // Returns the red channel of output 3 (den) after a 16-sample pass, quarter resolution.
-+  std::vector<float> passDen(IDirect3DDevice9* pDevice, const Targets& targets, const Scene& scene, IDirect3DSurface9* pReadback) {
++  // Returns the red channel of output `which` (2 num, 3 den) after a 16-sample pass, quarter resolution; with `pass` false
++  // reads the outputs of the last pass again.
++  std::vector<float> passRed(IDirect3DDevice9* pDevice, const Targets& targets, const Scene& scene, IDirect3DSurface9* pReadback, int which, bool pass = true) {
 +    IDirect3DTexture9* const outputs[kGiPixelOutputs] = { targets.outputs[0].Get(), targets.outputs[1].Get(), targets.outputs[2].Get(),
 +                                                          targets.outputs[3].Get() };
-+    for (int frame = 0; frame < 2; ++frame) {
++    for (int frame = 0; pass && frame < 2; ++frame) {
 +      draw(pDevice, targets, scene);
 +      check(g_pass(&scene.block, sizeof(scene.block), targets.pDepth.Get(), nullptr, outputs), "RemixBridge_GiPixelPass");
 +      check(pDevice->Present(nullptr, nullptr, nullptr, nullptr), "Present");
 +    }
 +    ComPtr<IDirect3DSurface9> pSurface;
-+    check(targets.outputs[3]->GetSurfaceLevel(0, &pSurface), "GetSurfaceLevel (output)");
++    check(targets.outputs[which]->GetSurfaceLevel(0, &pSurface), "GetSurfaceLevel (output)");
 +    check(pDevice->GetRenderTargetData(pSurface.Get(), pReadback), "GetRenderTargetData");
 +    D3DLOCKED_RECT locked;
 +    check(pReadback->LockRect(&locked, nullptr, D3DLOCK_READONLY), "LockRect");
@@ -783,7 +782,7 @@ index 00000000..f911266c
 +        }
 +      }
 +    }
-+    // Only the floor around the chair: the far capsule's own shadow is not part of the CPU rays.
++    // Only the floor around the chair.
 +    if (best >= 1.0f || std::hypot(point[0] - 0.2f, point[2] - 0.1f) > 3.0f) {
 +      return -1;
 +    }
@@ -880,19 +879,21 @@ index 00000000..f911266c
 +    ComPtr<IDirect3DSurface9> pReadback;
 +    check(pDevice->CreateOffscreenPlainSurface(kWidthQuarter, kHeightQuarter, D3DFMT_A16B16G16R16F, D3DPOOL_SYSTEMMEM, &pReadback, nullptr),
 +          "CreateOffscreenPlainSurface");
-+    const std::vector<float> withChair = passDen(pDevice, targets, scene, pReadback.Get());
++    const std::vector<float> den = passRed(pDevice, targets, scene, pReadback.Get(), 3);
++    const std::vector<float> num = passRed(pDevice, targets, scene, pReadback.Get(), 2, false);
 +    uint32_t pixelWords[11] = {};
 +    check(g_pixelCounters(pixelWords, 11), "RemixBridge_GiPixelReadCounters");
 +    std::printf("[GiPixel] passes=%u faults=%u meshes=%u models=%u\n", pixelWords[1], pixelWords[2], pixelWords[9], pixelWords[10]);
 +    require(pixelWords[2] == 0 && pixelWords[9] == 1 && pixelWords[10] == 1, "One mesh instance of one model, no fault");
 +
-+    // The same pass without the chair: the light each pixel gets with every ray through.
++    // The same pass without the chair: no caster at all, so no pixel traces.
 +    objects[0].flags = 1;
 +    check(g_objects(objects, 1), "RemixBridge_GiObjects (removal)");
 +    waitCounters(pDevice, words, [](const uint32_t* w) { return w[kLive] == 1; }, "The chair is removed");
-+    const std::vector<float> without = passDen(pDevice, targets, scene, pReadback.Get());
++    const std::vector<float> without = passRed(pDevice, targets, scene, pReadback.Get(), 3);
 +    check(g_pixelCounters(pixelWords, 11), "RemixBridge_GiPixelReadCounters");
 +    require(pixelWords[9] == 0, "No mesh instance after the removal");
++    require(std::all_of(without.begin(), without.end(), [](float v) { return v == 0; }), "No pixel traces without a caster");
 +
 +    // The chair in the world, for the CPU rays.
 +    float m[12];
@@ -904,19 +905,22 @@ index 00000000..f911266c
 +        world.push_back(m[row * 4] * p[0] + m[row * 4 + 1] * p[1] + m[row * 4 + 2] * p[2] + m[row * 4 + 3]);
 +      }
 +    }
-+    uint32_t compared = 0, shadowed = 0, off = 0;
++    // The chair is a delta caster (MC-2, XR-08): den counts every sample that reached the lamp past the static occluders
++    // (all 16 here), num the share of those the chair blocked; a pixel out of the chair's reach traces nothing (den 0).
++    uint32_t compared = 0, shadowed = 0, off = 0, missed = 0;
 +    double sumDiff = 0;
 +    for (int gy = 0; gy < int(kHeightQuarter); ++gy) {
 +      for (int gx = 0; gx < int(kWidthQuarter); ++gx) {
-+        const float full = without[gy * kWidthQuarter + gx];
-+        if (full <= 0) {
-+          continue;
-+        }
 +        const int cpu = cpuUnblocked(scene, world, gx, gy);
 +        if (cpu < 0) {
 +          continue;
 +        }
-+        const float gpu = withChair[gy * kWidthQuarter + gx] / full * 16;
++        const float full = den[gy * kWidthQuarter + gx];
++        if (full <= 0) {
++          missed += cpu < 16 ? 1 : 0;
++          continue;
++        }
++        const float gpu = 16 - num[gy * kWidthQuarter + gx] / full * 16;
 +        const float diff = std::fabs(gpu - float(cpu));
 +        ++compared;
 +        shadowed += cpu < 16 ? 1 : 0;
@@ -925,9 +929,10 @@ index 00000000..f911266c
 +      }
 +    }
 +    const double mean = compared ? sumDiff / compared : 1;
-+    std::printf("Chair shadow against the CPU rays: %u pixels compared, %u shadowed on the CPU, %u off by more than 2 of 16 rays, mean difference %.4f.\n",
-+                compared, shadowed, off, mean);
-+    require(compared > 1000 && shadowed > 100, "The chair shadows a part of the floor");
++    std::printf("Chair shadow against the CPU rays: %u pixels compared, %u shadowed on the CPU, %u off by more than 2 of 16 rays, mean difference %.4f, "
++                "%u shadowed pixels out of reach.\n", compared, shadowed, off, mean, missed);
++    require(compared > 500 && shadowed > 100, "The chair shadows a part of the floor (pixels in its reach)");
++    require(missed == 0, "Every pixel the chair shadows is in the reach of its mesh bounds");
 +    require(off <= compared / 100 && mean < 0.01, "The chair's shadow equals the CPU rays within tolerance");
 +  }
 +}
