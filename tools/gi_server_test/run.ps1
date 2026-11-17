@@ -1,10 +1,11 @@
-param([string[]]$TestArgs = @(), [string]$OutDir = (Join-Path $env:TEMP 'ApexGiServerTest'), [switch]$Pixel, [switch]$Mesh, [string]$Game = '')
+param([string[]]$TestArgs = @(), [string]$OutDir = (Join-Path $env:TEMP 'ApexGiServerTest'), [switch]$Pixel, [switch]$Mesh, [string]$Game = '', [string]$Mods = '')
 # The server tier's texel solve, offline on a Vulkan device (check.cpp, solve.comp). Read-only: prints to stdout; the
 # compiler's outputs and the three build inputs below stay in -OutDir. -TestArgs: passed on (--no-rays, --device <text>,
 # --density <n>, --rays <n>). -Pixel: the per-pixel delta shadow kernel instead (pixel_check.cpp, pixel_shadow.comp;
 # -TestArgs --device <text>, --size <w> <h>). -Mesh: the mesh casters against XR-04's boxes (mesh_check.cpp, on the same
 # kernel); -Game <the game's folder> reads a chair and a table out of its packages once (casters.py, into -OutDir: the
-# game's data stays out of the repository), else synthetic ones.
+# game's data stays out of the repository), else synthetic ones, and checks the bridge server's package reader
+# (meshes_check.cpp) against them; -Mods <a Mods folder> indexes its packages too.
 # Build inputs, fetched once at pinned versions when -OutDir does not hold them (no installed Vulkan SDK is needed; the
 # Vulkan loader, vulkan-1.dll, comes with the graphics driver): the Vulkan headers, the volk loader (two files) and the
 # glslang compiler, which turns solve.comp into SPIR-V headers at build time.
@@ -66,6 +67,13 @@ try {
             if ($LASTEXITCODE -ne 0) { throw 'casters.py failed' }
         }
         $TestArgs = @('--casters', $casters) + $TestArgs
+        # the bridge server's own package reader (meshes_check.cpp) must read the same two models
+        $reader = Join-Path $OutDir 'gi_meshes_check.exe'
+        & cl.exe /nologo /std:c++20 /utf-8 /EHsc /W4 /O2 /MT /DNOMINMAX ('/I' + $repo) ('/Fe' + $reader) (Join-Path $PSScriptRoot 'meshes_check.cpp')
+        if ($LASTEXITCODE -ne 0) { throw 'meshes_check.cpp did not compile' }
+        $readerArgs = @($Game, '--casters', $casters) + $(if ($Mods) { @('--mods', $Mods) } else { @() })
+        & $reader @readerArgs
+        if ($LASTEXITCODE -ne 0) { throw 'the package reader differs from casters.py' }
     }
     & $exe @TestArgs
     if ($LASTEXITCODE -ne 0) { throw "$name failed" }
