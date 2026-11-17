@@ -810,6 +810,27 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
     Check(SmoothMotion.Apps("TS3.exe").SequenceEqual(new[] { "NvRemixBridge.exe", "TS3.exe", "TS3W.exe" })
           && SmoothMotion.Apps("TS3W.exe").SequenceEqual(new[] { "NvRemixBridge.exe", "TS3W.exe", "TS3.exe" }),
           "smooth motion: the profile holds the bridge, this game's exe first (EA app TS3.exe or Steam TS3W.exe), and the other edition's");
+    // AMD Fluid Motion Frames: system-wide, so maintenance turns off only what Setup turned on
+    Check(Afmf.Blocked(new(true, true, false, null)) is null && Afmf.Blocked(new(true, false, false, null)) is { Key: var k } && k.StartsWith("Not available")
+          && Afmf.Blocked(new(true, false, true, null)) is null && Afmf.Blocked(new(true, false, false, "ADLXInitialize 3")) is { Arg: "ADLXInitialize 3" },
+          "afmf: on only where ADLX says it is supported; off always; an ADLX error reads as a reason");
+    Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_AMD", "1|1");
+    Check(Afmf.Read() == new Afmf.Status(true, true, true, null) && Afmf.Set(false) == "Dry run: Setup changes nothing.", "afmf: the fake stands in for ADLX and writes nothing");
+    Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_AMD", "none");
+    Check(Afmf.Read() is { Present: false }, "afmf: no AMD card, no row");
+    var marker = Afmf.Marker;
+    Afmf.Marker = Path.Combine(Path.GetTempPath(), "ApexSetupTest-afmf-" + Guid.NewGuid().ToString("N")[..8] + ".txt");
+    Check(Afmf.OffIfSetupTurnedOn() is null, "afmf: a setting the player turned on is never turned off by a removal");
+    File.WriteAllText(Afmf.Marker, "on");
+    Check(Afmf.OffIfSetupTurnedOn() == "Dry run: Setup changes nothing." && File.Exists(Afmf.Marker), "afmf: one Setup turned on is turned off (the fake writes nothing)");
+    File.Delete(Afmf.Marker);
+    Afmf.Marker = marker;
+    Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_AMD", null);
+    Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", "1");
+    Check(Afmf.Set(true) == "Dry run: Setup changes nothing.", "afmf: the dry run writes nothing");
+    Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null);
+    var amd = Afmf.Read(); // read only
+    Console.WriteLine($"info this PC: AMD {(amd.Present ? "driver found" : "none")}{(amd.Error is null ? "" : ", error " + amd.Error)}");
     var nv = SmoothMotion.Read("TS3W.exe"); // read only
     Console.WriteLine($"info this PC: NVIDIA {nv.Card ?? "none"}, driver {SmoothMotion.DriverText(nv.Driver)}, Smooth Motion {(nv.On ? "on" : "off")}{(nv.Owner is null ? "" : ", in profile " + nv.Owner)}{(nv.Error is null ? "" : ", error " + nv.Error)}");
 }

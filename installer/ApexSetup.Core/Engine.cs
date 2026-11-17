@@ -599,8 +599,11 @@ public static class Engine
     public static string? TakeFrameGenOffError() { var e = FrameGenOffError; FrameGenOffError = null; return e; }
     static string? DefaultFrameGenOff(Game g)
     {
-        try { return SmoothMotion.Read(g.Exe) is { On: true } ? SmoothMotion.Set(false, g.Exe) : null; }
-        catch (Exception e) { return e.Message; }
+        string? nv;
+        try { nv = SmoothMotion.Read(g.Exe) is { On: true } ? SmoothMotion.Set(false, g.Exe) : null; }
+        catch (Exception e) { nv = e.Message; }
+        // AFMF is system-wide: off only when Setup turned it on (Afmf.Marker), never a setting the player had on
+        return nv ?? Afmf.OffIfSetupTurnedOn();
     }
 
     // [ui] restart_host in the text of ApexRadiance.toml; null when the table or the key is missing
