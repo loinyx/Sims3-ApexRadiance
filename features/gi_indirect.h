@@ -23,6 +23,10 @@ namespace GiIndirect {
 
 enum Kind : int { kFloor = 0, kCeiling = 1 };
 
+// A room's texture set (lod + class x 64 + 0xC) holds four map wrappers by index: 0 floor, 1 ceiling, 2 objects, 3 wall
+// (RtOutdoorLamps::kSetIdx, OutdoorDelta::kSlotIdx). The kind a set index feeds, -1 none (objects; walls have no consumer).
+inline int KindOfSetIndex(int idx) { return idx == 0 ? kFloor : idx == 1 ? kCeiling : -1; }
+
 struct Point {
     uint32_t grid = 0;  // pixel of the grid (y * w + x)
     uint32_t atlas = 0; // pixel of the atlas

@@ -807,7 +807,7 @@ void FillGrid() {
     g_gridDirty = false;
 }
 
-// The story and kind (GiIndirect::Kind) of a game map: the floor (set index 1) or ceiling (2) map of any class of a story of
+// The story and kind (GiIndirect::Kind) of a game map: the floor (set index 0) or ceiling (1) map of any class of a story of
 // the GI lot, read from each story's room 0 (its manager +0x88 the story, its texture set +4: class x 64 + 0xC, a wrapper
 // whose +0x30 is the texture; RtOutdoorLamps OwnMap). SEH: plain data only.
 int MapLayerRead(uintptr_t room0, const void* map, int& story) {
@@ -816,10 +816,12 @@ int MapLayerRead(uintptr_t room0, const void* map, int& story) {
         if (!mgr || !lod) return -1;
         story = *reinterpret_cast<const int*>(mgr + 0x88);
         for (uintptr_t cls = 0; cls < 3; cls++)
-            for (uintptr_t idx = 1; idx <= 2; idx++) {
+            for (uintptr_t idx = 0; idx < 4; idx++) {
+                const int kind = GiIndirect::KindOfSetIndex(static_cast<int>(idx));
+                if (kind < 0) continue;
                 const uintptr_t w = *reinterpret_cast<const uintptr_t*>(lod + cls * 64 + 0xC + idx * 4);
                 if (w >= 0x10000 && *reinterpret_cast<const uint32_t*>(w + 0x2C) == 0 && *reinterpret_cast<const uintptr_t*>(w + 0x30) == reinterpret_cast<uintptr_t>(map))
-                    return static_cast<int>(idx) - 1;
+                    return kind;
             }
         return -1;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
