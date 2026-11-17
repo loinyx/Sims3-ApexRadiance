@@ -1,5 +1,5 @@
 0019: per-pixel shadow pass (real-time GI work package XR-06). Client exports RemixBridge_GiPixelOpen, RemixBridge_GiPixelPass and RemixBridge_GiPixelReadCounters. The server asks its renderer for DXVK's ID3D9VkExternalPass (native/dxvk patch 0004) and ray queries (0003); with both, a pass records a ray-query compute kernel into the renderer's command stream: the top level is built from the capsules and boxes of the block the client sends, the kernel samples the INTZ depth texture and writes four quarter-resolution outputs, which are copied into the client's A16B16G16R16F render target textures. Stream order makes a draw sent after the pass sample its outputs; nothing waits. A stock renderer or a device without ray queries answers the open with an off state and the reason in the server's log. The pass frees its Vulkan objects at Reset, ResetEx, device destroy and when its depth texture is destroyed. Counters (passes, rays, dispatch time by device timestamps, faults) sit in a 64-byte shared block and in the server's log as a [GiPixel] line. Test: test-gi-pixel.cmd (test_gi_pixel_device). The server compiles gi_pixel_pass.h, gi_pixel_block.h and pixel_shadow.comp, which native/remix-bridge/build.cmd copies in from the repository (native/remix-bridge/gi, tools/gi_server_test).
-Applies after 0018.
+Applies after 0018 (with the scene submit and texel solver of R-04).
 diff --git a/bridge/src/client/d3d9_gi_pixel.cpp b/bridge/src/client/d3d9_gi_pixel.cpp
 new file mode 100644
 index 00000000..a560e52a
@@ -120,10 +120,12 @@ index 00000000..a560e52a
 +  }
 +}
 diff --git a/bridge/src/client/d3d9_lss.def b/bridge/src/client/d3d9_lss.def
-index 6bd7b993..e3b5e8e0 100644
+index 7b42f4a8..ffcb5717 100644
 --- a/bridge/src/client/d3d9_lss.def
 +++ b/bridge/src/client/d3d9_lss.def
-@@ -32 +32,5 @@ EXPORTS
+@@ -31,3 +31,7 @@ EXPORTS
+   RemixBridge_GiPoll
+   RemixBridge_GiCancel
    RemixBridge_GiReadCounters
 +
 +  RemixBridge_GiPixelOpen
@@ -133,10 +135,14 @@ diff --git a/bridge/src/client/meson.build b/bridge/src/client/meson.build
 index fc5ea089..23ee1c1e 100644
 --- a/bridge/src/client/meson.build
 +++ b/bridge/src/client/meson.build
-@@ -34,2 +34,3 @@ d3d9_src = files([
+@@ -32,6 +32,7 @@ d3d9_src = files([
+   'd3d9_bootstrap.cpp',
+   'd3d9_cubetexture.cpp',
    'd3d9_gi.cpp',
 +  'd3d9_gi_pixel.cpp',
    'd3d9_device_base.cpp',
+   'd3d9_device.cpp',
+   'd3d9_indexbuffer.cpp',
 diff --git a/bridge/src/server/gi_pixel_server.h b/bridge/src/server/gi_pixel_server.h
 new file mode 100644
 index 00000000..082319e5
@@ -272,34 +278,60 @@ index 00000000..082319e5
 +  }
 +}
 diff --git a/bridge/src/server/main.cpp b/bridge/src/server/main.cpp
-index ee8e2008..3c2eaf5a 100644
+index 94cf4583..90c7f9db 100644
 --- a/bridge/src/server/main.cpp
 +++ b/bridge/src/server/main.cpp
-@@ -55,2 +55,3 @@
+@@ -53,6 +53,7 @@
+ #include "server_options.h"
+ #include "async_readback.h"
  #include "gi_server.h"
 +#include "gi_pixel_server.h"
  #include "../client/client_options.h"
-@@ -621,2 +622,3 @@ void ProcessDeviceCommandQueue() {
+ 
+ #include "../tracy/tracy.hpp"
+@@ -619,6 +620,7 @@ void ProcessDeviceCommandQueue() {
+         GET_RES(pD3DDevice, gpD3DDevices);
+         async_readback::dropAll();
          gi_server::dropAll();
 +        gi_pixel::close();
          safeDestroy(pD3DDevice, pD3DDeviceHandle);
-@@ -766,2 +768,3 @@ void ProcessDeviceCommandQueue() {
+         gpD3DDevices.erase(pD3DDeviceHandle);
+         ServerMessage { Commands::Bridge_Ack, currentUID };
+@@ -764,6 +766,7 @@ void ProcessDeviceCommandQueue() {
+         GET_RES(pD3DDevice, gpD3DDevices);
+         async_readback::dropAll();
          gi_server::dropAll();
 +        gi_pixel::dropAll();
          uint32_t* rawPresentationParameters = nullptr;
-@@ -789,2 +792,3 @@ void ProcessDeviceCommandQueue() {
+         DeviceBridge::get_data((void**) &rawPresentationParameters);
+         D3DPRESENT_PARAMETERS PresentationParameters = getPresParamFromRaw(rawPresentationParameters);
+@@ -787,6 +790,7 @@ void ProcessDeviceCommandQueue() {
+         GET_RES(pD3DDevice, gpD3DDevices);
+         async_readback::dropAll();
          gi_server::dropAll();
 +        gi_pixel::dropAll();
          uint32_t* rawPresentationParameters = nullptr;
-@@ -2162,2 +2166,3 @@ void ProcessDeviceCommandQueue() {
+         DeviceBridge::get_data((void**) &rawPresentationParameters);
+ 
+@@ -2160,6 +2164,7 @@ void ProcessDeviceCommandQueue() {
+       {
+         GET_HND(pHandle);
          const auto& pTexture = (IDirect3DTexture9*) gpD3DResources[pHandle];
 +        gi_pixel::forget(gpD3DResources, pHandle);
          safeDestroy(pTexture, pHandle);
-@@ -3085,2 +3090,3 @@ void ProcessDeviceCommandQueue() {
+         gpD3DResources.erase(pHandle);
+         break;
+@@ -3083,6 +3088,7 @@ void ProcessDeviceCommandQueue() {
+       case Bridge_UnlinkResource:
+       {
          GET_HND(pHandle);
 +        gi_pixel::forget(gpD3DResources, pHandle);
          gpD3DResources.erase(pHandle);
-@@ -3114,2 +3120,18 @@ void ProcessDeviceCommandQueue() {
+         break;
+       }
+@@ -3121,6 +3127,22 @@ void ProcessDeviceCommandQueue() {
+         gi_server::cancel(cancelSeq);
+         break;
        }
 +      case Bridge_GiPixelOpen:
 +        gi_pixel::open(gpD3DDevices);
@@ -318,46 +350,68 @@ index ee8e2008..3c2eaf5a 100644
 +        break;
 +      }
        /*
+        * BridgeApi commands
+        */
 diff --git a/bridge/src/server/meson.build b/bridge/src/server/meson.build
-index ef76e9c1..23c91d3e 100644
+index f26a4bec..8f0e8e2b 100644
 --- a/bridge/src/server/meson.build
 +++ b/bridge/src/server/meson.build
-@@ -41,2 +41,7 @@ gi_spirv = custom_target('gi_pattern_spv',
-   command : [glslang, '-V', '--quiet', '--target-env', 'vulkan1.1', '--vn', 'g_giPatternSpv', '-o', '@OUTPUT@', '@INPUT@'])
+@@ -48,6 +48,11 @@ foreach v : [['links_rq', 'g_giLinksRqSpv', '0', true], ['direct_rq', 'g_giDirec
+     output  : 'gi_' + v[0] + '_spv.h',
+     command : [glslang, '-V', '--quiet', '-DPASS=' + v[2]] + (v[3] ? ['-DRAYQUERY', '--target-env', 'vulkan1.2'] : ['--target-env', 'vulkan1.1']) + ['--vn', v[1], '-o', '@OUTPUT@', '@INPUT@'])
+ endforeach
 +# The per-pixel shadow pass: native/remix-bridge/build.cmd copies its kernel and headers in from the repository.
 +gi_pixel_spirv = custom_target('gi_pixel_spv',
 +  input   : 'pixel_shadow.comp',
 +  output  : 'gi_pixel_spv.h',
 +  command : [glslang, '-V', '--quiet', '--target-env', 'vulkan1.2', '-DBRIDGE_PASS', '--vn', 'kGiPixelSpv', '-o', '@OUTPUT@', '@INPUT@'])
  
-@@ -64,3 +69,3 @@ server_resource = windows.compile_resources('NvRemixBridge.rc',
+ server_header = files([
+ 	'module_processing.h',
+@@ -71,7 +76,7 @@ server_resource = windows.compile_resources('NvRemixBridge.rc',
+ )
+ 
  server_exe = executable('NvRemixBridge', server_src, server_header, server_version, server_resource,
 -sources             : [ bridge_version, gi_spirv ],
 +sources             : [ bridge_version, gi_spirv, gi_pixel_spirv ],
  build_by_default    : (cpu_family == 'x86_64') or (cpu_family == 'aarch64') ? true : false,
+ dependencies        : [ thread_dep, util_dep, lib_version, tracy_dep ],
+ link_with           : [ gi_volk ],
 diff --git a/bridge/src/util/meson.build b/bridge/src/util/meson.build
 index 61856389..d181e3bc 100644
 --- a/bridge/src/util/meson.build
 +++ b/bridge/src/util/meson.build
-@@ -78,2 +78,3 @@ util_header = files([
+@@ -76,6 +76,7 @@ util_header = files([
+ 	'util_queryresults.h',
+ 	'util_readbacks.h',
  	'util_gi.h',
 +	'util_gi_pixel.h',
  	'log/log.h',
+ 	'log/log_strings.h',
+ 	'config/config.h',
 diff --git a/bridge/src/util/util_commands.h b/bridge/src/util/util_commands.h
-index 532fd1a2..e151fcb0 100644
+index f37384b5..d7cfa06a 100644
 --- a/bridge/src/util/util_commands.h
 +++ b/bridge/src/util/util_commands.h
-@@ -69,2 +69,5 @@ namespace Commands {
+@@ -68,6 +68,9 @@ namespace Commands {
+     Bridge_GiSolve,
+     Bridge_GiSubmit,
      Bridge_GiCancel,
 +    // Per-pixel shadow pass exports (client/d3d9_gi_pixel.cpp), sent with FlagBits::AsyncResult.
 +    Bridge_GiPixelOpen,
 +    Bridge_GiPixelPass,
      // These are not actually official D3D9 API calls.
-@@ -508,2 +511,4 @@ namespace Commands {
+     IDirect3DDevice9Ex_LinkSwapchain,
+     IDirect3DDevice9Ex_LinkBackBuffer,
+@@ -508,6 +511,8 @@ namespace Commands {
+     case Bridge_GiSolve: return "Bridge_GiSolve";
+     case Bridge_GiSubmit: return "Bridge_GiSubmit";
      case Bridge_GiCancel: return "Bridge_GiCancel";
 +    case Bridge_GiPixelOpen: return "Bridge_GiPixelOpen";
 +    case Bridge_GiPixelPass: return "Bridge_GiPixelPass";
      
+     case Bridge_UnlinkResource: return "Bridge_UnlinkResource";
+     case Bridge_UnlinkVolumeResource: return "Bridge_UnlinkVolumeResource";
 diff --git a/bridge/src/util/util_gi_pixel.h b/bridge/src/util/util_gi_pixel.h
 new file mode 100644
 index 00000000..31a0c5a0
@@ -435,11 +489,15 @@ diff --git a/bridge/test/rtx/unit/meson.build b/bridge/test/rtx/unit/meson.build
 index d0067648..b62ca7d1 100644
 --- a/bridge/test/rtx/unit/meson.build
 +++ b/bridge/test/rtx/unit/meson.build
-@@ -86,3 +86,3 @@ endif
+@@ -84,7 +84,7 @@ endif
+ 
+ # Remix API Bridge App Tests
  # Each x86 app runs against the client and server from a regular bridge build in _output.
 -bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device', 'async_readback_device', 'gi_device' ]
 +bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device', 'async_readback_device', 'gi_device', 'gi_pixel_device' ]
  if (cpu_family == 'x86')
+ foreach name : bridge_app_tests
+   tests += executable(
 diff --git a/bridge/test/rtx/unit/test_gi_pixel_device.cpp b/bridge/test/rtx/unit/test_gi_pixel_device.cpp
 new file mode 100644
 index 00000000..19aa4757
