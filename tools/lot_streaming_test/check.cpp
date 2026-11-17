@@ -55,6 +55,12 @@ static void PolicyChecks() {
     // a lot that waited less than the longest waiter is not forced
     CHECK(!P::Decide(30.0, false, false, 6, P::kMaxSkips + 1, false, P::kMaxSkips + 4).run, "only the longest waiter is forced");
     CHECK(P::Decide(30.0, false, false, 6, P::kMaxSkips + 4, false, P::kMaxSkips + 4).forced, "the longest waiter is forced");
+    // the frame deadline caps the share, and a frame past it waits like a spent budget (forcing rule unchanged)
+    d = P::Decide(0.0, true, false, 3, 0, false, 0, 2.5);
+    CHECK(d.run && d.sliceMs == 2, "2.5 ms to the deadline -> slice 2, got %u", d.sliceMs);
+    CHECK(!P::Decide(0.0, true, false, 3, 0, false, 0, -3.0).run, "past the deadline: wait");
+    CHECK(P::Decide(0.0, true, false, 3, P::kMaxSkips, false, 0, -3.0).forced, "past the deadline, the longest waiter is still forced");
+    CHECK(P::Decide(0.0, true, true, 3, 0, false, 0, -3.0).run, "the lot being played ignores the deadline");
     // a negative or unknown stage is never held
     CHECK(P::Decide(30.0, false, false, -1, 0).run, "unknown stage must pass");
 }

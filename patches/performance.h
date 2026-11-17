@@ -28,6 +28,7 @@ inline constexpr const char* kScriptMathName = "ScriptMath";
 inline constexpr const char* kSceneBudgetName = "SceneNodeBudget";
 inline constexpr const char* kObjectIndexName = "ObjectLookupIndex";
 inline constexpr const char* kRoomLightQueueName = "RoomLightQueue";
+inline constexpr const char* kDeadlineSlicingName = "DeadlineSlicing";
 inline constexpr int kLotLightingBudgetDefault = 3; // ms, the registered default of budgetWhileMovingMs
 
 // "Lot lighting time while moving" (ms, 1..15): the saved setting; Set saves it and applies it at once

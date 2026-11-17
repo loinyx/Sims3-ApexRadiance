@@ -1,5 +1,6 @@
 #include "ui/widgets.h"
 #include "developer_settings.h"
+#include "deadline_slicing.h"
 // Scene node budget (see scene_budget.h and docs/features/performance.md, section "How it works: Spread New Objects Over
 // Frames (C6)").
 //
@@ -681,7 +682,13 @@ void __fastcall Hook_SceneDrain(void* holder, void* edx) {
     }
     Waiting& w = *wp;
     const int64_t t0 = Qpc();
-    const float ms = std::max(0.1f, g_msPerFrame.load(std::memory_order_relaxed)) * static_cast<float>(grow);
+    float ms = std::max(0.1f, g_msPerFrame.load(std::memory_order_relaxed)) * static_cast<float>(grow);
+    // Frame deadline while moving (deadline_slicing.h): no more than the frame has left; past it, only the kMinNodes and
+    // the draw-state nodes. Not once a node waited past maxDefer (grow > 1): its longest-wait rule stays as it was
+    if (const double left = DeadlineSlicing::FrameLeftMs(); grow == 1 && left < ms) {
+        DeadlineSlicing::NoteSceneCut(left <= 0.0);
+        ms = static_cast<float>(std::max(0.0, left));
+    }
     const int64_t deadline = t0 + static_cast<int64_t>(static_cast<double>(ms) / g_qpcMs);
     const uint32_t cap = static_cast<uint32_t>(std::max(static_cast<int>(kMinNodes), g_nodesPerFrame.load(std::memory_order_relaxed))) * grow;
     if (grow > 1) c_grown.Add();

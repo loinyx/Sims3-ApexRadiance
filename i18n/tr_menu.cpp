@@ -1204,6 +1204,10 @@ const I18n::Entry kEntries[] = {
      "Copiez les fichiers de profil depuis ce dossier pour les partager ou les utiliser sur un autre PC"},
     // Performance: Spread new objects over frames (back in 1.4.2)
     {"Spread new objects over frames", "Espalhar objetos novos entre quadros", "Repartir objetos nuevos entre fotogramas", "Répartir les nouveaux objets sur plusieurs images"},
+    // Performance: Frame deadline while moving
+    {"Frame Deadline While Moving", "Prazo do quadro em movimento", "Plazo del fotograma en movimiento", "Échéance d'image en mouvement"},
+    {"Frame deadline while moving", "Prazo do quadro em movimento", "Plazo del fotograma en movimiento", "Échéance d'image en mouvement"},
+    {"Work that can wait stops at a set point in a slow frame and continues in the next", "O trabalho que pode esperar para num ponto fixo de um quadro lento e continua no próximo", "El trabajo que puede esperar se detiene en un punto fijo de un fotograma lento y sigue en el siguiente", "Le travail qui peut attendre s'arrête à un point fixe d'une image lente et reprend à la suivante"},
     {"Fewer hitches when a lot streams in while the camera moves", "Menos travadas quando um lote carrega com a câmera em movimento",
      "Menos tirones cuando un solar se carga con la cámara en movimiento", "Moins de saccades quand un terrain se charge pendant que la caméra bouge"},
     // Settings > Menu: reset everything
