@@ -209,4 +209,51 @@ written on top of it; landing 0015 first avoids a rebase of both.
 | Matching the physical device by UUID through the interop interface | R-03 |
 | Point-query and scene slot sizes | R-03, R-06 |
 | Vertex buffers the server already holds as tier B input: they are in `gpD3DResources` and readable only on the play thread | R-07 |
-| A same-device tier in a patched DXVK | R-08 |
+| A same-device tier in a patched DXVK | Decided in section 11: no-go |
+
+## 11. Decision: a same-device tier for per-pixel rays (R-08)
+
+The question: should a patched DXVK in the server trace rays inside the game's translated shaders (research 12 §7.4
+R4: per-pixel lamp shadows; R5 ReSTIR and R6 DLSS / NRD ride on the same plumbing), next to or instead of the second
+device of section 4? Read in DXVK `v3.1.1` (`b1a1c99`) and against R-02's measured solver.
+
+### 11.1 What a patched DXVK would need
+
+| Need | Detail | Mark |
+|---|---|---|
+| Ray extensions on DXVK's device | `VK_KHR_acceleration_structure`, `VK_KHR_ray_query`, `VK_KHR_deferred_host_operations`, buffer device address features in the adapter's extension and feature tables. 3.1.1 enables none of them (section 4) | [V] absence; the change [I] |
+| A patched shader translator | 3.1.x no longer translates shader model 3 in `src/d3d9`: `d3d9_shader.cpp:1115-1124` hands the bytecode to `dxbc_spv::sm3::Converter` from the `subprojects/dxbc-spirv` submodule (commit `bf14419`). The ray query goes into that converter: a second repository to fork, patch and keep on DXVK's pin | [V] the call site; the patch [I] |
+| A marker in the shader | Apex's patched pixel shaders read a reserved sampler (R4); the converter must recognise it and emit `OpRayQueryInitializeKHR` / `Proceed` toward the lamp instead of the sample. Every shader with the marker becomes a different pipeline; DXVK's pipeline cache keys change | [I] |
+| World position and normal at the pixel | Shader model 3 pixel shaders carry them, if at all, in shader-specific interpolants. Either Apex adds them to every patched shader, or the converter rebuilds the position from `VPOS`, depth and an inverse view-projection Apex uploads | [I] |
+| A top-level structure on DXVK's device, every frame | The lot proxy and object boxes (R-02's scene) rebuilt on DXVK's device, plus Sim capsules refitted each frame, recorded into DXVK's command stream before the scene pass. A second copy of the scene beside the GI worker's | [I] |
+| A descriptor for the structure | A new binding in DXVK's d3d9 pipeline layout for every shader that carries the marker | [I] |
+| Packaging | The package stops shipping a stock DXVK release (design §3.9 "Device" row). Each DXVK update means rebasing two forks, and the bridge's `server.useVanillaDxvk` path then loads a patched build | [V] package ships stock 3.1.1 (`package.ps1`); the burden [I] |
+
+### 11.2 Cost
+
+| Item | Same-device per-pixel tier | Texel tier on the second device (R-02) |
+|---|---|---|
+| Rays at steady state | 1 a lamp a pixel a frame: 4 lamps at 1080p is 8 M rays a frame, at 4K 33 M (12 §7.4 R4) | **0**: a settled layer is frozen and byte-equal [V, R-02] |
+| Rays on an edit | The same, every frame | Links once a build change (2.3 M rays a lot); 16 shadow rays a texel for a moved lamp; bounces are ray-free gathers, 13-17 to settle [V, R-02] |
+| Soft shadows | Hard unless denoised in time; temporal filtering is what Apex removed from AO for breathing | Emitter-sized penumbra from the shadow rays, no time filter [V, R-02 direct = CPU reference] |
+| Render-thread / frame time | Adds to the frame on DXVK's own queue: the cost lands in exactly the frame the design keeps free (§3.9 "Why") | Asynchronous on the worker; play thread only copies results within a budget (section 5) |
+| Memory | Scene and structure on DXVK's device, beside the worker's copy | Device-local solve buffers on the worker (required: host-visible ran about 30 times slower [V, R-02]); links 10 MB a lot [I, R-02] |
+| Work | Two forks (DXVK, dxbc-spirv), translator patch, shader marker in Apex, position rebuild, per-frame scene: weeks, and upkeep each DXVK release [I] | Covered by R-03 / R-04 already planned |
+
+### 11.3 Verdict
+
+**No-go now.** [I] R-02 shows the light this design needs is solved with rays only at build changes and lamp moves,
+and is free per frame once settled; a same-device tier would spend rays every frame on every pixel, inside the
+frame Apex keeps light, and costs a forked DXVK plus a forked converter. Its one unique gain is sharp per-pixel
+shadows on surfaces the texel layers do not cover (Sims as receivers, small objects).
+
+Reopen only if all hold:
+
+1. S1-G1 / S2 look pairs show texel shadows failing visibly on Sims or small objects, and capsule occlusion (design
+   §3.9 "Sim shadows") does not fix it.
+2. R-G1 shows the server worker has headroom on an RTX 30 laptop GPU with DXVK busy.
+3. A DXVK release enables ray query upstream, or the dxbc-spirv converter gains an extension point, so no fork is
+   needed.
+
+R5 (ReSTIR) and R6 (DLSS / NRD) stay out with it: they need motion vectors and a G-buffer TS3 does not have
+(12 §7.4), and the same patched device.
