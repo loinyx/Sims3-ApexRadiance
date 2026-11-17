@@ -39,6 +39,10 @@
 #include "ui/widgets.h"
 #include "build_flavor.h"
 #include "perf_toggles.h"
+#ifndef APEX_NO_DEV_TOOLS
+#include "shader_ids.h"
+#include "gbuffer_ids.h"
+#endif
 #include <d3d9.h>
 #include <algorithm>
 #include <atomic>
@@ -63,6 +67,7 @@ struct Copy {
     int amountReg = -1;                 // its constant holding the amount (set around the draw)
     int texcoord = -1;                  // ps_2_x copies: the texture coordinate with the clip position (-1: ps_3_0, vPos)
     DWORD version = 0;                  // the game shader's version token
+    uint8_t gb = 0;                     // G-buffer outputs in the copy: 0 none, 1 from the table's row, 2 the unknown values
 };
 std::unordered_map<IDirect3DPixelShader9*, Copy> g_copies; // game pixel shader -> its copy
 // game vertex shader -> its copies writing the clip position to TEXCOORDk (null = cannot), key = pointer * 8 + k
@@ -111,6 +116,61 @@ FrameCount g_frame, g_last;
 unsigned long long g_lastLog = 0;
 int g_logs = 0;
 
+// ---- G-buffer (developer builds, patches/gbuffer_patch.cpp): the ps_3_0 copies also write oC1 / oC2, and render targets
+// 1 and 2 are bound while the scene is drawn into the back buffer. Render thread except g_gbWanted ----
+#ifndef APEX_NO_DEV_TOOLS
+std::atomic<bool> g_gbWanted{false};
+IDirect3DSurface9* g_gbRt[2] = {}; // identities, owned by the G-buffer feature
+bool g_gbBound = false;            // they are render targets 1 and 2 now
+bool g_gbMask = true;              // COLORWRITEENABLE1 / 2 are 0xF (the device default; 0 otherwise while bound)
+bool g_gbCleared = false;          // this frame
+SceneBinder::GBufferCounts g_gbCount;
+bool GbActive() { return g_gbWanted.load(std::memory_order_relaxed) && g_gbRt[0] && g_gbRt[1]; }
+void GbSetMask(IDirect3DDevice9* dev, bool on) {
+    if (g_gbMask == on) return;
+    g_gbMask = on;
+    dev->SetRenderState(D3DRS_COLORWRITEENABLE1, on ? 0xFu : 0u);
+    dev->SetRenderState(D3DRS_COLORWRITEENABLE2, on ? 0xFu : 0u);
+    g_gbCount.maskToggles++;
+}
+void GbBind(IDirect3DDevice9* dev) {
+    if (g_gbBound) return;
+    if (!g_gbCleared) { // id 0 = nothing written this frame
+        dev->ColorFill(g_gbRt[0], nullptr, 0);
+        dev->ColorFill(g_gbRt[1], nullptr, 0);
+        g_gbCleared = true;
+    }
+    GbSetMask(dev, false); // only a G-buffer copy opens them
+    if (FAILED(D3D9Hooks::CallOriginalSetRenderTarget(dev, 1, g_gbRt[0])) || FAILED(D3D9Hooks::CallOriginalSetRenderTarget(dev, 2, g_gbRt[1]))) {
+        D3D9Hooks::CallOriginalSetRenderTarget(dev, 1, nullptr);
+        GbSetMask(dev, true);
+        g_gbCount.bindFailed++;
+        g_gbRt[0] = g_gbRt[1] = nullptr; // not tried again for every draw: off until the targets are set again
+        return;
+    }
+    g_gbBound = true;
+    g_gbCount.binds++;
+}
+void GbUnbind(IDirect3DDevice9* dev) {
+    if (!g_gbBound) return;
+    D3D9Hooks::CallOriginalSetRenderTarget(dev, 1, nullptr);
+    D3D9Hooks::CallOriginalSetRenderTarget(dev, 2, nullptr);
+    g_gbBound = false;
+    GbSetMask(dev, true); // the device default, for whoever uses several targets next
+    g_gbCount.unbinds++;
+}
+// A back-buffer draw that writes no G-buffer (no copy with the outputs, the UI's passes): the targets stay closed
+void GbMasked(IDirect3DDevice9* dev) {
+    if (!g_gbBound) return;
+    GbSetMask(dev, false);
+    g_gbCount.masked++;
+}
+#else
+constexpr bool GbActive() { return false; }
+inline void GbBind(IDirect3DDevice9*) {}
+inline void GbMasked(IDirect3DDevice9*) {}
+#endif
+
 // vertex copy key: the game shader, the texture coordinate k carrying the clip position (-1 none) and the temporal jitter
 uint64_t VsKey(IDirect3DVertexShader9* vs, int k, bool jitter) {
     return (reinterpret_cast<uint64_t>(vs) << 5) | (jitter ? 16u : 0u) | static_cast<uint64_t>(k < 0 ? 8 : (k & 7));
@@ -157,17 +217,35 @@ Copy MakeCopy(IDirect3DDevice9* dev, std::vector<DWORD> t) {
     }
     c.version = t[0];
     const bool ps2 = t[0] == 0xFFFF0200u || t[0] == 0xFFFF0201u;
+#ifndef APEX_NO_DEV_TOOLS
+    const bool gbuffer = !ps2 && g_gbWanted.load(std::memory_order_relaxed);
+    const GBufferShaderId* row = gbuffer ? FindGBufferShader(ShaderHash(t.data(), t.size() * 4)) : nullptr; // (the game's bytes)
+#endif
     const ShaderPatches::DitherResult r = ps2 ? ShaderPatches::AddDither2(t, &c.amountReg, &c.texcoord) : ShaderPatches::AddDither(t, &c.amountReg);
     if (r != ShaderPatches::DitherResult::Ok) {
         g_refused[static_cast<int>(r)]++;
         c.texcoord = -1;
         return c;
     }
+#ifndef APEX_NO_DEV_TOOLS
+    if (gbuffer) { // one copy carries the grain and the G-buffer outputs
+        ShaderPatches::GBufferInfo info; // a shader without a row (another family, a mod, a replaced shader): the unknown values
+        if (row) {
+            info.albedoSampler = row->albedo == 255 ? -1 : row->albedo;
+            info.probeSampler = row->probe == 255 ? -1 : row->probe;
+            info.material = row->material;
+            info.motionClass = row->classAndFamily & 3;
+            info.roughness = kGBufferRoughness[row->material];
+        }
+        if (ShaderPatches::AddGBufferPs(t, info) == ShaderPatches::GBufferResult::Ok) c.gb = row ? 1 : 2;
+    }
+#endif
     t_own = true;
     const HRESULT hr = D3D9Hooks::CallOriginalCreatePixelShader(dev, t.data(), &c.ps);
     t_own = false;
     if (FAILED(hr) || !c.ps) {
         c.ps = nullptr;
+        c.gb = 0;
         g_refused[static_cast<int>(ShaderPatches::DitherResult::Unreadable)]++;
         return c;
     }
@@ -317,20 +395,26 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext
     IDirect3DDevice9* dev = ctx.device;
     // (the High-precision scene grains its 16-bit scene once, at its resolve)
     const bool dither = g_on.load(std::memory_order_relaxed) && !SceneTarget::Substituting(), jitter = g_jitterOn;
-    if ((!dither && !jitter) || !g_backBuffer) return D3D9Hooks::HookAction::Continue;
-    if (!g_rt0 || g_rt0 != g_backBuffer) return D3D9Hooks::HookAction::Continue;
-    if (ctx.ZEnable() == D3DZB_FALSE) return D3D9Hooks::HookAction::Continue; // UI and 2D passes
+    const bool gb = GbActive(); // (developer builds) with the High-precision scene too: the grain amount is then 0
+    if ((!dither && !jitter && !gb) || !g_backBuffer) return D3D9Hooks::HookAction::Continue;
+    if (!g_rt0 || g_rt0 != g_backBuffer) return D3D9Hooks::HookAction::Continue; // (the G-buffer targets were unbound at the switch)
+    if (ctx.ZEnable() == D3DZB_FALSE) { // UI and 2D passes
+        GbMasked(dev);
+        return D3D9Hooks::HookAction::Continue;
+    }
     // Depth on with ZFUNC ALWAYS and no depth write uses no depth (PostScene's rule): the UI's ~137 glass passes and
     // back-buffer copies drawn back (a light capture shows one under a panel: ps_2_0 reading a 2048x1024 copy). The grain
     // fed on itself there; the jitter already skipped them
     if (!ctx.ZWriteEnable() && ctx.ZFunc() == D3DCMP_ALWAYS) {
         g_frame.noDepth++;
+        GbMasked(dev);
         return D3D9Hooks::HookAction::Continue;
     }
+    if (gb) GbBind(dev);
     // the Banding Fix's pixel copy
     IDirect3DPixelShader9* ps = nullptr;
     Copy copy;
-    if (dither) {
+    if (dither || gb) {
         ps = D3D9Hooks::BoundPixelShader(dev); // (followed through Set*Shader; the device keeps it alive)
         if (!ps) g_frame.noShader++;
         if (ps) {
@@ -341,7 +425,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext
             }
         }
     }
-    bool useDither = copy.ps != nullptr;
+    bool useDither = copy.ps != nullptr && (dither || copy.gb); // the pixel copy is bound (for the grain, the G-buffer or both)
     const int k = useDither ? copy.texcoord : -1; // ps_2_x copies: the vertex shader must carry the position
     // the vertex copy: TEXCOORDk and / or the temporal jitter
     IDirect3DVertexShader9 *vs = nullptr, *vsCopy = nullptr;
@@ -372,6 +456,7 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext
 #ifdef APEX_F10_STUDY
         F10Study::CompositionShader(dev, ps, ps, vs, false);
 #endif
+        GbMasked(dev);
         return D3D9Hooks::HookAction::Continue;
     }
     float before[4] = {};
@@ -387,12 +472,24 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext
         if (k >= 0) dev->GetViewport(&vp);
         dev->GetPixelShaderConstantF(static_cast<UINT>(copy.amountReg), before, 1);
         // Developer "Show covered surfaces": a coarse grain only where the fix applies
-        const float steps = g_showCovered ? kShowCoveredSteps : SceneDither::Strength() * (half ? 0.5f : 1.0f);
+        const float steps = !dither ? 0.0f : g_showCovered ? kShowCoveredSteps : SceneDither::Strength() * (half ? 0.5f : 1.0f);
         const float amount[4] = {steps / 255.0f, 0.5f * static_cast<float>(vp.Width), 0.5f * static_cast<float>(vp.Height),
                                  SceneDither::GrainPhase() + (half ? 0.19f : 0.0f)};
         D3D9Hooks::CallOriginalSetPixelShaderConstantF(dev, static_cast<UINT>(copy.amountReg), amount, 1);
         D3D9Hooks::CallOriginalSetPixelShader(dev, copy.ps);
     }
+#ifndef APEX_NO_DEV_TOOLS
+    if (g_gbBound) { // only an opaque draw of a copy with the outputs writes: a blended surface keeps what is behind it
+        if (useDither && copy.gb && blend == kOpaque) {
+            GbSetMask(dev, true);
+            (copy.gb == 1 ? g_gbCount.patched : g_gbCount.unknown)++;
+        } else if (useDither && copy.gb) {
+            GbSetMask(dev, false);
+            g_gbCount.blended++;
+        } else
+            GbMasked(dev);
+    }
+#endif
     if (useJitter) D3D9Hooks::CallOriginalSetVertexShaderConstantF(dev, kJitterConst, g_jitter, 1); // no game shader reads c252
     if (vsCopy) D3D9Hooks::CallOriginalSetVertexShader(dev, vsCopy);
 #ifdef APEX_F10_STUDY
@@ -403,8 +500,10 @@ template <typename DrawFn> D3D9Hooks::HookAction OnDraw(D3D9Hooks::DeviceContext
     if (useDither) {
         D3D9Hooks::CallOriginalSetPixelShader(dev, ps);
         D3D9Hooks::CallOriginalSetPixelShaderConstantF(dev, static_cast<UINT>(copy.amountReg), before, 1); // the game may cache it
-        (k >= 0 ? g_frame.dithered2 : g_frame.dithered3)++;
-        g_frame.blend[blend]++;
+        if (dither) {
+            (k >= 0 ? g_frame.dithered2 : g_frame.dithered3)++;
+            g_frame.blend[blend]++;
+        }
     }
     if (useJitter) g_frame.jittered++;
     return D3D9Hooks::HookAction::Skip;
@@ -420,6 +519,11 @@ void OnFrameBoundary(IDirect3DDevice9* dev) {
         g_rt0 = bb;
         bb->Release();
     }
+#ifndef APEX_NO_DEV_TOOLS
+    GbUnbind(dev);
+    g_gbCleared = false;
+    g_gbCount.frames++;
+#endif
     g_last = g_frame;
     g_frame = {};
     // Development build: the coverage in the log now and then (the first 12 times, every 20 s of scene)
@@ -438,7 +542,12 @@ void OnFrameBoundary(IDirect3DDevice9* dev) {
     }
 }
 
-void OnPreReset(IDirect3DDevice9*) { // read again at the next frame boundary
+void OnPreReset(IDirect3DDevice9* dev) { // read again at the next frame boundary
+#ifndef APEX_NO_DEV_TOOLS
+    GbUnbind(dev);
+#else
+    (void)dev;
+#endif
     g_backBuffer = nullptr;
     g_rt0 = nullptr;
 }
@@ -451,6 +560,12 @@ void RegisterHooks() {
     }, Priority::First);
     RegisterSetRenderTarget(kHookName, [](DeviceContext& ctx, DWORD index, IDirect3DSurface9* rt) {
         if (index == 0) g_rt0 = rt;
+#ifndef APEX_NO_DEV_TOOLS
+        // D3D9 wants every bound target the size of target 0: ours go before the game's call (shadows, reflections, the
+        // pick pass). A caller binding its own second target takes the slot over.
+        if (index == 0 && rt != g_backBuffer) GbUnbind(ctx.device);
+        else if (index != 0 && g_gbBound) g_gbBound = false, GbSetMask(ctx.device, true);
+#endif
         return HookAction::Continue;
     }, Priority::First);
     RegisterCreatePixelShader(kHookName, [](DeviceContext& ctx, const DWORD* fn, IDirect3DPixelShader9** out) {
@@ -595,6 +710,34 @@ void SetFrameJitter(bool on, float clipX, float clipY) {
     g_jitter[1] = clipY;
 }
 Coverage LastCoverage() { return {g_last.jittered, g_last.jitterRefused, g_last.jitterNoShader}; }
+#ifndef APEX_NO_DEV_TOOLS
+void SetGBufferTargets(IDirect3DDevice9* dev, IDirect3DSurface9* rt1, IDirect3DSurface9* rt2) {
+    if (dev) GbUnbind(dev);
+    g_gbBound = false;
+    g_gbRt[0] = rt1;
+    g_gbRt[1] = rt2;
+}
+void AcquireGBuffer() {
+    g_gbWanted = true;
+    AcquireHooks();
+    ReleaseCopies(); // the copies made so far have no G-buffer outputs: made again at their next scene draw
+}
+void ReleaseGBuffer(IDirect3DDevice9* dev) {
+    SetGBufferTargets(dev, nullptr, nullptr);
+    g_gbWanted = false;
+    ReleaseCopies();
+    ReleaseHooks();
+}
+void GBufferUnbind(IDirect3DDevice9* dev) { GbUnbind(dev); }
+void GBufferMaskOff(IDirect3DDevice9* dev) {
+    if (g_gbBound) GbSetMask(dev, false);
+}
+GBufferCounts TakeGBufferCounts() {
+    const GBufferCounts c = g_gbCount;
+    g_gbCount = {};
+    return c;
+}
+#endif
 } // namespace SceneBinder
 
 namespace SceneDither {

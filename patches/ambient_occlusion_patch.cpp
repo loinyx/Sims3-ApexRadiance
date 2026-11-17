@@ -552,6 +552,7 @@ template <typename Draw> void RecordSimReceiver(IDirect3DDevice9* dev, Draw draw
         }
         auto* target = transparent ? simMask.hairSurface : simMask.surface;
         bool& cleared = transparent ? simMask.hairCleared : simMask.cleared;
+        SceneBinder::GBufferMaskOff(dev); // (developer builds) this replay must not write the G-buffer targets
         bool ok = SUCCEEDED(D3D9Hooks::CallOriginalSetRenderTarget(dev, 0, target));
         if (!cleared && ok) {
             ok = SUCCEEDED(dev->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE)) &&

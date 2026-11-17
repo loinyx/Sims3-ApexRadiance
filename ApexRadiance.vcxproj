@@ -471,6 +471,7 @@
     <ClInclude Include="patches\night_lighting.h" />
     <ClInclude Include="patches\performance.h" />
     <ClInclude Include="shaders\floor_atlas_table.h" />
+    <ClInclude Include="shaders\gbuffer_ids.h" />
     <ClInclude Include="shaders\lightmap_smooth_hlsl.h" />
     <ClInclude Include="shaders\ground_shade_hlsl.h" />
     <ClInclude Include="shaders\terrain_bake_hlsl.h" />
