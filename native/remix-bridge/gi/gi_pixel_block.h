@@ -25,6 +25,10 @@ enum : uint32_t { kGiPixelFlagClass = 1 };
 // Mesh casters (MC-2): static occluders with their model's own triangles, one bottom level a model, an instance an object.
 // They do not travel in the block: the server's object table (RemixBridge_GiObjects) hands them to the pass.
 enum : uint32_t { kGiPixelMeshes = 1024 };  // instances a pass at most: the nearest to the camera
+// Mesh casters are delta casters (custom index 2, mask 2): a ray they stop darkens unless a static occluder is on it too.
+// Their reach bounds (the instances grouped by the server, at most this many) follow the block's casters in the shader's
+// copy; the block itself does not carry them (`meshBounds`, set by the server)
+enum : uint32_t { kGiPixelMeshBounds = 32 };
 struct GiPixelMesh {
   uint32_t model;  // GiPixelPass::addModel's index
   float m[12];     // three rows of four, model to world
@@ -39,7 +43,7 @@ struct GiPixelBlock {
   float bias, radiusScale; // radiusScale 0: point emitters
   float viewZ[3], zFar;    // camera forward and far distance: the guide's linear depth is over zFar
   uint32_t capsules, boxes;
-  uint32_t flags, pad;
+  uint32_t flags, meshBounds;  // both set by the server: flags kGiPixelFlag*, meshBounds the mesh reach bounds in use
   GiPixelLamp lamp[kGiPixelLamps];
   GiPixelCapsule capsule[kGiPixelCapsules];
   GiPixelCaster caster[kGiPixelCasters];

@@ -53,7 +53,8 @@ struct Pixel {
 // depth and the motion class are the game's images, the block is the client's block of the frame, the outputs are four
 // quarter-resolution rgba16f images that are copied into the client's render targets.
 // Instances of the top level: first one a capsule (custom index 3, mask 2, the unit box scaled to the capsule's bounds),
-// then one a static box (custom index 1, mask 1, the unit cube under the box's transform).
+// then one a static box (custom index 1, mask 1, the unit cube under the box's transform), then one a mesh caster (custom
+// index 2, mask 2: delta triangles, MC-2) whose reach the server's mesh bounds give.
 layout(set = 0, binding = 0) uniform accelerationStructureEXT tlas;
 layout(set = 0, binding = 1) uniform sampler2D depthTex;
 layout(std430, set = 0, binding = 2) readonly buffer Block { // gi_pixel_block.h GiPixelBlock, without its boxes
@@ -65,10 +66,11 @@ layout(std430, set = 0, binding = 2) readonly buffer Block { // gi_pixel_block.h
     float bias, radiusScale;
     vec4 viewZFar;            // xyz: the camera's forward; w: the far distance (the guide's linear depth is over it)
     uint capsules, boxes;
-    uint flags, pad;          // flags bit 0: classTex holds the motion class in r (class / 3)
+    uint flags, meshBounds;   // flags bit 0: classTex holds the motion class in r (class / 3); meshBounds: of meshCaster
     Lamp lamp[16];
     Capsule capsule[64];
     Box caster[32];
+    Box meshCaster[32];       // the mesh casters' reach, grouped by the server (gi_pixel_pass.h groupBounds); never moved
 } pc;
 #define lamp pc.lamp
 #define capsule pc.capsule
@@ -268,6 +270,11 @@ void main() {
                 reach |= 1u << k;
                 if (caster[c].lo.w != 0.0) o.num.a = 1.0; // (XR-05 drops the pixel's settled history on it)
             }
+#ifdef BRIDGE_PASS
+        // Mesh casters reach on their own bounds: a lot without a Sim still traces its furniture (XR-08)
+        for (uint c = 0u; c < pc.meshBounds && (reach >> k & 1u) == 0u; c++)
+            if (SegBox(O, lp.xyz, pc.meshCaster[c].lo.xyz - r, pc.meshCaster[c].hi.xyz + r)) reach |= 1u << k;
+#endif
     }
     uint u[kMaxLamps] = uint[](0u, 0u, 0u, 0u), dl[kMaxLamps] = uint[](0u, 0u, 0u, 0u), rays = 0u;
 #if STOP == 2
