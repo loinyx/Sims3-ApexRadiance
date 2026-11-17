@@ -1,9 +1,11 @@
 0010: Render target 0 is the implicit swapchain's back buffer 0 object (internal 0016): GetRenderTarget(0) and GetBackBuffer(0, 0) return the same IDirect3DSurface9, as in d3d9 and DXVK. Upstream made a separate place-holder linked to the back buffer (LinkBackBuffer), so code that compares the two by pointer (Apex Radiance's PostScene) never saw the scene and drew a black picture (Sims3-ApexRadiance#59).
 
+The server no longer holds a reference on a back buffer it maps for IDirect3DSwapChain9_GetBackBuffer or IDirect3DDevice9Ex_GetRenderTarget: the client only unlinks a back buffer, so that reference was never released. Upstream released back buffer 0's references by accident, through the destroy of its place-holder. Without the place-holder they stayed, and on a DXVK server every Reset failed ("device still has alive losable resources: 1"), the device stayed lost (resolution change, Alt-Tab). Upstream has the same leak for back buffer 1 and later.
+
 Applies after 0001-0009 on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only).
 
 diff --git a/bridge/src/client/d3d9_device.cpp b/bridge/src/client/d3d9_device.cpp
-index 1441038..7e067a7 100644
+index 1441038d..7e067a7e 100644
 --- a/bridge/src/client/d3d9_device.cpp
 +++ b/bridge/src/client/d3d9_device.cpp
 @@ -4033,28 +4033,18 @@ void Direct3DDevice9Ex_LSS<EnableSync>::initImplicitSwapchain(const D3DPRESENT_P
@@ -63,3 +65,31 @@ index 1441038..7e067a7 100644
    m_state.renderTargets[0].reset(nullptr);
  
    // Release implicit DepthStencil
+diff --git a/bridge/src/server/main.cpp b/bridge/src/server/main.cpp
+index fb6c57f4..363fa2ff 100644
+--- a/bridge/src/server/main.cpp
++++ b/bridge/src/server/main.cpp
+@@ -1078,6 +1078,11 @@ void ProcessDeviceCommandQueue() {
+         const auto hresult = pD3DDevice->GetRenderTarget(RenderTargetIndex, &pRenderTarget);
+         if (SUCCEEDED(hresult)) {
+           gpD3DResources[pSurfaceHandle] = pRenderTarget;
++          // The handle belongs to a client surface that is already linked, and its owner keeps it alive.
++          // A reference held here would never be released for a back buffer and would make Reset fail.
++          if (pRenderTarget != nullptr) {
++            pRenderTarget->Release();
++          }
+         }
+         SEND_OPTIONAL_SERVER_RESPONSE(hresult, currentUID);
+         assert(SUCCEEDED(hresult));
+@@ -1861,6 +1866,11 @@ void ProcessDeviceCommandQueue() {
+         const auto hresult = pSwapChain->GetBackBuffer(iBackBuffer, Type, &pBackbuffer);
+         if (SUCCEEDED(hresult)) {
+           gpD3DResources[pSurfaceHandle] = pBackbuffer;
++          // The client only unlinks a back buffer and never destroys it, so the swapchain keeps it alive.
++          // A reference held here would keep the back buffer alive through Reset, which then fails.
++          if (pBackbuffer != nullptr) {
++            pBackbuffer->Release();
++          }
+         }
+         assert(SUCCEEDED(hresult));
+         SEND_OPTIONAL_SERVER_RESPONSE(hresult, currentUID);
