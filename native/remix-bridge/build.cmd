@@ -1,13 +1,16 @@
 @echo off
 rem native\remix-bridge\build.cmd: fetches NVIDIA's RTX Remix bridge (dxvk-remix\bridge, MIT) at the pinned commit, applies
 rem patches\*.patch and builds the x86 client (d3d9.dll) and the x64 server (.trex\NvRemixBridge.exe), release.
-rem Needs git, VS 2022 C++ build tools (x86 + x64) and meson + ninja on PATH (pip install --user meson ninja).
+rem Needs git, curl, tar, VS 2022 C++ build tools (x86 + x64) and meson + ninja on PATH (pip install --user meson ninja).
 rem Output: out\d3d9.dll and out\.trex\NvRemixBridge.exe. The source goes to src\ (git-ignored); delete src\ to refetch.
 setlocal
 set UPSTREAM=https://github.com/NVIDIAGameWorks/dxvk-remix.git
 set COMMIT=f35b86a494712eba72177ddabe62a48ff4cb6e9c
 set DETOURS=https://github.com/microsoft/Detours.git
 set DETOURS_COMMIT=ea6c4ae7f3f1b1772b8a7cda4199230b932f5a50
+rem the GI worker (patch 0018): Vulkan headers, the volk loader and the glslang compiler, at pinned versions
+set VULKAN_SDK_TAG=vulkan-sdk-1.4.350.1
+set GLSLANG_VERSION=16.6.0
 set HERE=%~dp0
 set SRC=%HERE%src
 for /f "usebackq delims=" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do set VSDIR=%%i
@@ -22,6 +25,12 @@ git -C "%SRC%" checkout -q %COMMIT% || exit /b 1
 rem the bridge links Detours from the submodule path; the sparse checkout leaves submodules out
 git clone -q --filter=blob:none %DETOURS% "%SRC%\submodules\Detours" || exit /b 1
 git -C "%SRC%\submodules\Detours" checkout -q %DETOURS_COMMIT% || exit /b 1
+git clone -q --depth 1 --branch %VULKAN_SDK_TAG% https://github.com/KhronosGroup/Vulkan-Headers.git "%SRC%\submodules\Vulkan-Headers" || exit /b 1
+git clone -q --depth 1 --branch %VULKAN_SDK_TAG% https://github.com/zeux/volk.git "%SRC%\submodules\volk" || exit /b 1
+mkdir "%SRC%\submodules\glslang" || exit /b 1
+curl -sSfL -o "%SRC%\glslang.zip" https://github.com/KhronosGroup/glslang/releases/download/%GLSLANG_VERSION%/glslang-%GLSLANG_VERSION%-windows-x86_64-release.zip || exit /b 1
+"%SystemRoot%\System32\tar.exe" -xf "%SRC%\glslang.zip" -C "%SRC%\submodules\glslang" || exit /b 1
+del "%SRC%\glslang.zip"
 for %%p in ("%HERE%patches\*.patch") do (
   git -C "%SRC%" apply --whitespace=nowarn "%%~fp" || (echo patch %%~nxp did not apply & exit /b 1)
   echo applied %%~nxp

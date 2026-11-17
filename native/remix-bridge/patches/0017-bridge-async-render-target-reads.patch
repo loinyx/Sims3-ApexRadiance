@@ -1,0 +1,791 @@
+0017: asynchronous GetRenderTargetData for callers that can wait a frame or two. The client exports RemixBridge_ReadRenderTargetAsync, RemixBridge_PollReadback and RemixBridge_CancelReadback (client.asyncReadback, default off). The server queues the copy with an event query behind it and moves on; once the event signals (polled every 64 commands and at Present) it locks the destination without waiting and writes the rows into one of 4 shared 256 KB slots, then publishes the request's sequence (the QuerySharedBlock handshake). The game's own GetRenderTargetData calls stay synchronous. Test: test-async-readback.cmd (test_async_readback_device).
+Applies after 0001-0014 on NVIDIAGameWorks/dxvk-remix f35b86a (bridge/ only), with or without 0015-0016.
+diff --git a/bridge/bridge.conf b/bridge/bridge.conf
+index 9a2220ad..1a9e074c 100644
+--- a/bridge/bridge.conf
++++ b/bridge/bridge.conf
+@@ -130,4 +130,13 @@
+ # client.asyncQueries = True
+ 
++#
++# Lets callers of the client exports RemixBridge_ReadRenderTargetAsync and RemixBridge_PollReadback
++# read a render target without waiting for the server. The game's own GetRenderTargetData calls stay
++# synchronous. The read-back slots take 1 MB of the client's address space once the first request maps them.
++#
++# Supported values: True, False
++
++# client.asyncReadback = False
++
+ 
+ #
+diff --git a/bridge/src/client/d3d9_async_readback.cpp b/bridge/src/client/d3d9_async_readback.cpp
+new file mode 100644
+index 00000000..9febb758
+--- /dev/null
++++ b/bridge/src/client/d3d9_async_readback.cpp
+@@ -0,0 +1,188 @@
++/*
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++#include "pch.h"
++
++#include <cstring>
++#include <mutex>
++
++#include "d3d9_device_base.h"
++#include "d3d9_surface.h"
++#include "util_devicecommand.h"
++#include "util_readbacks.h"
++#include "util_texture_and_volume.h"
++
++// Asynchronous GetRenderTargetData for callers that can wait a frame or two (client.asyncReadback).
++// The game's own GetRenderTargetData calls stay synchronous. Only callers of these exports go asynchronous.
++//
++// RemixBridge_ReadRenderTargetAsync(rt, dst, &ticket) queues the copy and returns at once:
++//   S_OK with a ticket.
++//   E_NOTIMPL when client.asyncReadback is off or the shared block is missing.
++//   D3DERR_WASSTILLDRAWING when all slots are in flight.
++//   D3DERR_INVALIDCALL for a bad surface or a read larger than one slot.
++// RemixBridge_PollReadback(ticket) returns S_FALSE while pending.
++//   It returns S_OK once the rows are in dst's client copy, as after a synchronous GetRenderTargetData.
++//   It returns the server's error, D3DERR_INVALIDCALL for an unknown ticket, or D3DERR_DEVICELOST without a server.
++// RemixBridge_CancelReadback(ticket) frees the slot of a ticket the caller gives up on.
++// A finished, failed or cancelled ticket is unknown afterwards.
++
++namespace {
++  using bridge_util::ReadbackSharedBlock;
++  using bridge_util::ReadbackSlot;
++
++  struct Pending {
++    Direct3DSurface9_LSS* pDst = nullptr;  // holds a reference, so the server's surface outlives the request
++    uint32_t seq = 0;
++  };
++
++  std::mutex s_mutex;
++  Pending s_pending[ReadbackSharedBlock::kMaxSlots];
++  uint32_t s_seq = 0;
++
++  bool asyncReadbackEnabled() {
++    static const bool enabled = bridge_util::Config::getOption<bool>("client.asyncReadback", false);
++    return enabled;
++  }
++
++  Pending* findTicket(uint32_t ticket) {
++    for (auto& pending : s_pending) {
++      if (pending.seq != 0 && pending.seq == ticket) {
++        return &pending;
++      }
++    }
++    return nullptr;
++  }
++
++  void freePending(Pending& pending) {
++    pending.pDst->Release();
++    pending = Pending {};
++  }
++
++  HRESULT copySlot(const ReadbackSlot& slot, Direct3DSurface9_LSS* pDst) {
++    const D3DSURFACE_DESC desc = pDst->getDesc();
++    if (slot.width != desc.Width || slot.height != desc.Height || slot.format != (uint32_t) desc.Format ||
++        size_t(slot.rowSize) * slot.rows > ReadbackSlot::kMaxDataSize) {
++      return D3DERR_INVALIDCALL;
++    }
++
++    // The same lock and row copy as the synchronous path (copyServerSurfaceRawData).
++    D3DLOCKED_RECT lockedRect;
++    HRESULT hresult = pDst->LockRect(&lockedRect, nullptr, D3DLOCK_DISCARD);
++    if (hresult != S_OK) {
++      return hresult;
++    }
++    for (uint32_t y = 0; y < slot.rows; ++y) {
++      memcpy((uint8_t*) lockedRect.pBits + size_t(y) * lockedRect.Pitch, slot.data + size_t(y) * slot.rowSize, slot.rowSize);
++    }
++    return pDst->UnlockRect();
++  }
++}
++
++// Exported by name through d3d9_lss.def.
++extern "C" {
++
++  HRESULT __stdcall RemixBridge_ReadRenderTargetAsync(IDirect3DSurface9* pRenderTarget, IDirect3DSurface9* pDestSurface, uint32_t* pTicket) {
++    if (pRenderTarget == nullptr || pDestSurface == nullptr || pTicket == nullptr) {
++      return D3DERR_INVALIDCALL;
++    }
++    if (!asyncReadbackEnabled() || bridge_util::readbackBlock() == nullptr) {
++      return E_NOTIMPL;
++    }
++    if (!gbBridgeRunning) {
++      return D3DERR_DEVICELOST;
++    }
++    const auto pLssSource = bridge_cast<Direct3DSurface9_LSS*>(pRenderTarget);
++    const auto pLssDest = bridge_cast<Direct3DSurface9_LSS*>(pDestSurface);
++    if (pLssSource == nullptr || pLssDest == nullptr) {
++      return D3DERR_INVALIDCALL;
++    }
++    const D3DSURFACE_DESC desc = pLssDest->getDesc();
++    if (desc.Pool != D3DPOOL_SYSTEMMEM ||
++        bridge_util::calcTotalSizeOfRect(desc.Width, desc.Height, desc.Format) > ReadbackSlot::kMaxDataSize) {
++      return D3DERR_INVALIDCALL;
++    }
++
++    IDirect3DDevice9* pDevice = nullptr;
++    if (FAILED(pLssDest->GetDevice(&pDevice)) || pDevice == nullptr) {
++      return D3DERR_INVALIDCALL;
++    }
++    const size_t deviceId = static_cast<BaseDirect3DDevice9Ex_LSS*>(pDevice)->getId();
++    pDevice->Release();
++
++    std::lock_guard<std::mutex> lock(s_mutex);
++    uint32_t slotIndex = ReadbackSharedBlock::kMaxSlots;
++    for (uint32_t i = 0; i < ReadbackSharedBlock::kMaxSlots; ++i) {
++      if (s_pending[i].seq == 0) {
++        slotIndex = i;
++        break;
++      }
++    }
++    if (slotIndex == ReadbackSharedBlock::kMaxSlots) {
++      return D3DERR_WASSTILLDRAWING;
++    }
++
++    // Sequence numbers are never 0, because 0 marks a free slot.
++    if (++s_seq == 0) {
++      ++s_seq;
++    }
++    pLssDest->AddRef();
++    s_pending[slotIndex] = Pending { pLssDest, s_seq };
++    {
++      ClientMessage c(Commands::IDirect3DDevice9Ex_GetRenderTargetData, deviceId, Commands::FlagBits::AsyncResult);
++      c.send_data(pLssSource->getId());
++      c.send_data(pLssDest->getId());
++      c.send_data(slotIndex);
++      c.send_data(s_seq);
++    }
++    *pTicket = s_seq;
++    return S_OK;
++  }
++
++  HRESULT __stdcall RemixBridge_PollReadback(uint32_t ticket) {
++    std::lock_guard<std::mutex> lock(s_mutex);
++    Pending* const pPending = findTicket(ticket);
++    if (pPending == nullptr) {
++      return D3DERR_INVALIDCALL;
++    }
++    const ReadbackSlot& slot = bridge_util::readbackBlock()->slots[pPending - s_pending];
++    if (slot.answeredSeq.load(std::memory_order_acquire) != ticket) {
++      if (gbBridgeRunning) {
++        return S_FALSE;
++      }
++      freePending(*pPending);
++      return D3DERR_DEVICELOST;
++    }
++    HRESULT hresult = (HRESULT) slot.hresult;
++    if (hresult == S_OK) {
++      hresult = copySlot(slot, pPending->pDst);
++    }
++    freePending(*pPending);
++    return hresult;
++  }
++
++  HRESULT __stdcall RemixBridge_CancelReadback(uint32_t ticket) {
++    std::lock_guard<std::mutex> lock(s_mutex);
++    Pending* const pPending = findTicket(ticket);
++    if (pPending == nullptr) {
++      return D3DERR_INVALIDCALL;
++    }
++    freePending(*pPending);
++    return S_OK;
++  }
++}
+diff --git a/bridge/src/client/d3d9_lss.def b/bridge/src/client/d3d9_lss.def
+index 0fbd2890..1800e543 100644
+--- a/bridge/src/client/d3d9_lss.def
++++ b/bridge/src/client/d3d9_lss.def
+@@ -21,2 +21,6 @@ EXPORTS
+   remixapi_InitializeLibrary @ 39
+   remixapi_RegisterCallbacks @ 40
++
++  RemixBridge_ReadRenderTargetAsync
++  RemixBridge_PollReadback
++  RemixBridge_CancelReadback
+diff --git a/bridge/src/client/meson.build b/bridge/src/client/meson.build
+index a382d43c..aa2b49a5 100644
+--- a/bridge/src/client/meson.build
++++ b/bridge/src/client/meson.build
+@@ -29,4 +29,5 @@ d3d9_res = wrc_generator.process(d3d9_version)
+ 
+ d3d9_src = files([
++  'd3d9_async_readback.cpp',
+   'd3d9_bootstrap.cpp',
+   'd3d9_cubetexture.cpp',
+diff --git a/bridge/src/server/async_readback.h b/bridge/src/server/async_readback.h
+new file mode 100644
+index 00000000..0501ac3e
+--- /dev/null
++++ b/bridge/src/server/async_readback.h
+@@ -0,0 +1,151 @@
++/*
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++#pragma once
++
++#include <cstring>
++#include <deque>
++
++#include <d3d9.h>
++
++#include "util_readbacks.h"
++#include "util_texture_and_volume.h"
++
++// Server side of the asynchronous GetRenderTargetData (client/d3d9_async_readback.cpp).
++// The copy is queued on the device with an event query behind it, and the command loop moves on.
++// Requests are answered in order, once their event signals, so the read-only lock no longer waits for the GPU.
++// The rows then go into the request's shared slot, and the slot's sequence is published last.
++namespace async_readback {
++  struct Pending {
++    IDirect3DSurface9* pDst;  // referenced until answered
++    IDirect3DQuery9* pQuery;  // nullptr when the request already failed
++    HRESULT hresult;
++    uint32_t slot;
++    uint32_t seq;
++  };
++
++  inline std::deque<Pending> g_pending;
++  inline uint32_t g_commandsSincePoll = 0;
++
++  inline HRESULT copyRows(IDirect3DSurface9* pDst, bridge_util::ReadbackSlot& slot) {
++    D3DSURFACE_DESC desc;
++    HRESULT hresult = pDst->GetDesc(&desc);
++    if (FAILED(hresult)) {
++      return hresult;
++    }
++    const uint32_t rowSize = bridge_util::calcRowSize(desc.Width, desc.Format);
++    const uint32_t rows = bridge_util::calcStride(desc.Height, desc.Format);
++    if (size_t(rowSize) * rows > bridge_util::ReadbackSlot::kMaxDataSize) {
++      return D3DERR_INVALIDCALL;
++    }
++    D3DLOCKED_RECT lockedRect;
++    hresult = pDst->LockRect(&lockedRect, nullptr, D3DLOCK_READONLY);
++    if (FAILED(hresult)) {
++      return hresult;
++    }
++    for (uint32_t y = 0; y < rows; ++y) {
++      memcpy(slot.data + size_t(y) * rowSize, (const uint8_t*) lockedRect.pBits + size_t(y) * lockedRect.Pitch, rowSize);
++    }
++    pDst->UnlockRect();
++    slot.width = desc.Width;
++    slot.height = desc.Height;
++    slot.format = (uint32_t) desc.Format;
++    slot.rowSize = rowSize;
++    slot.rows = rows;
++    return S_OK;
++  }
++
++  inline void answer(Pending& pending, HRESULT hresult) {
++    bridge_util::ReadbackSlot& slot = bridge_util::readbackBlock()->slots[pending.slot];
++    if (hresult == S_OK) {
++      hresult = copyRows(pending.pDst, slot);
++    }
++    slot.hresult = (int32_t) hresult;
++    slot.answeredSeq.store(pending.seq, std::memory_order_release);
++    if (pending.pQuery != nullptr) {
++      pending.pQuery->Release();
++    }
++    if (pending.pDst != nullptr) {
++      pending.pDst->Release();
++    }
++  }
++
++  // Answers the finished requests at the front of the queue. Event queries signal in submission order.
++  inline void poll() {
++    g_commandsSincePoll = 0;
++    while (!g_pending.empty()) {
++      Pending& pending = g_pending.front();
++      HRESULT hresult = pending.hresult;
++      if (pending.pQuery != nullptr) {
++        const HRESULT status = pending.pQuery->GetData(nullptr, 0, 0);
++        if (status == S_FALSE) {
++          return;
++        }
++        hresult = status;
++      }
++      answer(pending, hresult);
++      g_pending.pop_front();
++    }
++  }
++
++  // Polls every 64 commands, so a request is answered within the frame that finished its copy.
++  inline void onCommand() {
++    if (!g_pending.empty() && ++g_commandsSincePoll >= 64) {
++      poll();
++    }
++  }
++
++  // A device reset or destroy fails the open requests. The caller then reads synchronously.
++  inline void dropAll() {
++    for (Pending& pending : g_pending) {
++      answer(pending, D3DERR_DEVICELOST);
++    }
++    g_pending.clear();
++  }
++
++  inline void request(IDirect3DDevice9* pDevice, IDirect3DSurface9* pRenderTarget, IDirect3DSurface9* pDst, uint32_t slot, uint32_t seq) {
++    if (bridge_util::readbackBlock() == nullptr || slot >= bridge_util::ReadbackSharedBlock::kMaxSlots) {
++      return;
++    }
++    Pending pending { nullptr, nullptr, S_OK, slot, seq };
++    HRESULT hresult = pRenderTarget != nullptr && pDst != nullptr
++      ? pDevice->GetRenderTargetData(pRenderTarget, pDst)
++      : D3DERR_INVALIDCALL;
++    if (SUCCEEDED(hresult)) {
++      hresult = pDevice->CreateQuery(D3DQUERYTYPE_EVENT, &pending.pQuery);
++    }
++    if (SUCCEEDED(hresult)) {
++      hresult = pending.pQuery->Issue(D3DISSUE_END);
++      // The flush submits the copy now, so it runs while the server replays the rest of the frame.
++      pending.pQuery->GetData(nullptr, 0, D3DGETDATA_FLUSH);
++    }
++    if (FAILED(hresult)) {
++      if (pending.pQuery != nullptr) {
++        pending.pQuery->Release();
++        pending.pQuery = nullptr;
++      }
++      pending.hresult = hresult;
++    } else {
++      pDst->AddRef();
++      pending.pDst = pDst;
++    }
++    // A failure is queued as well, so a reused slot is answered in request order.
++    g_pending.push_back(pending);
++  }
++}
+diff --git a/bridge/src/server/main.cpp b/bridge/src/server/main.cpp
+index fb6c57f4..a74ac87f 100644
+--- a/bridge/src/server/main.cpp
++++ b/bridge/src/server/main.cpp
+@@ -50,4 +50,5 @@
+ #include "config/global_options.h"
+ #include "server_options.h"
++#include "async_readback.h"
+ #include "../client/client_options.h"
+ 
+@@ -557,4 +558,5 @@ void ProcessDeviceCommandQueue() {
+       {
+         GET_RES(pD3DDevice, gpD3DDevices);
++        async_readback::dropAll();
+         safeDestroy(pD3DDevice, pD3DDeviceHandle);
+         gpD3DDevices.erase(pD3DDeviceHandle);
+@@ -700,4 +702,5 @@ void ProcessDeviceCommandQueue() {
+       {
+         GET_RES(pD3DDevice, gpD3DDevices);
++        async_readback::dropAll();
+         uint32_t* rawPresentationParameters = nullptr;
+         DeviceBridge::get_data((void**) &rawPresentationParameters);
+@@ -721,4 +724,5 @@ void ProcessDeviceCommandQueue() {
+       {
+         GET_RES(pD3DDevice, gpD3DDevices);
++        async_readback::dropAll();
+         uint32_t* rawPresentationParameters = nullptr;
+         DeviceBridge::get_data((void**) &rawPresentationParameters);
+@@ -759,4 +763,5 @@ void ProcessDeviceCommandQueue() {
+ 
+         const auto hresult = pD3DDevice->Present(pSourceRect, pDestRect, hwnd, pDirtyRegion);
++        async_readback::poll();
+         if (!SUCCEEDED(hresult)) {
+           std::stringstream ss;
+@@ -989,4 +994,11 @@ void ProcessDeviceCommandQueue() {
+         PULL_HND(pRenderTargetHandle);
+         PULL_HND(pDestSurfaceHandle);
++        if (Commands::IsAsyncResult(rpcHeader.flags)) {
++          PULL_U(slotIndex);
++          PULL_U(requestSeq);
++          async_readback::request(pD3DDevice, (IDirect3DSurface9*) gpD3DResources[pRenderTargetHandle],
++                                  (IDirect3DSurface9*) gpD3DResources[pDestSurfaceHandle], slotIndex, requestSeq);
++          break;
++        }
+         const auto& pRenderTarget = (IDirect3DSurface9*) gpD3DResources[pRenderTargetHandle];
+         const auto& pDestSurface = (IDirect3DSurface9*) gpD3DResources[pDestSurfaceHandle];
+@@ -1821,4 +1833,5 @@ void ProcessDeviceCommandQueue() {
+ 
+         const auto hresult = pSwapChain->Present(pSourceRect, pDestRect, hwnd, pDirtyRegion, dwFlags);
++        async_readback::poll();
+ 
+         if (!SUCCEEDED(hresult)) {
+@@ -3374,4 +3387,5 @@ void ProcessDeviceCommandQueue() {
+         dispatch(rpcHeader, (uint32_t) currentUID);
+       }
++      async_readback::onCommand();
+     }
+ 
+diff --git a/bridge/src/util/meson.build b/bridge/src/util/meson.build
+index 92e15498..273a1988 100644
+--- a/bridge/src/util/meson.build
++++ b/bridge/src/util/meson.build
+@@ -75,4 +75,5 @@ util_header = files([
+ 	'util_perfcounters.h',
+ 	'util_queryresults.h',
++	'util_readbacks.h',
+ 	'log/log.h',
+ 	'log/log_strings.h',
+diff --git a/bridge/src/util/util_readbacks.h b/bridge/src/util/util_readbacks.h
+new file mode 100644
+index 00000000..69576b80
+--- /dev/null
++++ b/bridge/src/util/util_readbacks.h
+@@ -0,0 +1,50 @@
++#pragma once
++
++#include <atomic>
++#include <cstdint>
++#include <memory>
++#include <mutex>
++
++#include "util_sharedmemory.h"
++
++// Shared memory through which an asynchronous GetRenderTargetData is answered (client exports
++// RemixBridge_ReadRenderTargetAsync / RemixBridge_PollReadback). Modelled on QuerySharedBlock: the server
++// writes a slot's rows and fields, then publishes answeredSeq with release; the client reads them after an
++// acquire load sees its sequence. All fields are 32-bit, so the layout is the same in both processes.
++
++namespace bridge_util {
++
++  struct ReadbackSlot {
++    static constexpr uint32_t kMaxDataSize = 256 * 1024;  // one 256x256 A8R8G8B8 tile; larger reads stay synchronous
++
++    std::atomic<uint32_t> answeredSeq;
++    int32_t hresult;
++    uint32_t width;
++    uint32_t height;
++    uint32_t format;
++    uint32_t rowSize;
++    uint32_t rows;
++    uint32_t reserved;
++    uint8_t data[kMaxDataSize];
++  };
++  static_assert(sizeof(ReadbackSlot) == 32 + ReadbackSlot::kMaxDataSize, "ReadbackSlot must have the same layout in both processes");
++
++  struct ReadbackSharedBlock {
++    static constexpr uint32_t kMaxSlots = 4;  // 1 MB of the 32-bit client's address space, mapped on first use only
++
++    ReadbackSlot slots[kMaxSlots];
++  };
++
++  // Maps the block on first use; nullptr when the mapping failed (callers then use the synchronous path).
++  inline ReadbackSharedBlock* readbackBlock() {
++    static std::once_flag once;
++    static std::unique_ptr<SharedMemory> s_memory;
++    std::call_once(once, [] {
++      s_memory = std::make_unique<SharedMemory>("Readbacks", sizeof(ReadbackSharedBlock));
++      if (s_memory->data() == nullptr) {
++        Logger::err("[Bridge] The read-back block could not be mapped, so asynchronous read-backs are off.");
++      }
++    });
++    return static_cast<ReadbackSharedBlock*>(s_memory->data());
++  }
++}
+diff --git a/bridge/test/rtx/unit/meson.build b/bridge/test/rtx/unit/meson.build
+index 25ceb3b0..86927c39 100644
+--- a/bridge/test/rtx/unit/meson.build
++++ b/bridge/test/rtx/unit/meson.build
+@@ -68,5 +68,5 @@ endif
+ # Remix API Bridge App Tests
+ # Each x86 app runs against the client and server from a regular bridge build in _output.
+-bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device' ]
++bridge_app_tests = [ 'remix_api_init_order', 'remix_api_device_registration', 'sent_state_device', 'query_event_device', 'shared_heap_upload_device', 'async_readback_device' ]
+ if (cpu_family == 'x86')
+ foreach name : bridge_app_tests
+@@ -103,4 +103,16 @@ foreach resource : [ 'surface', 'vb', 'ib' ]
+ endforeach
+ endif
++if (cpu_family == 'x86_64')
++test('async_readback_device_off',
++     python,
++     args : [join_paths(meson.current_source_dir(), 'test_remix_api_bridge_app.py'),
++             '--testExe', 'test_async_readback_device_x86.exe',
++             '--executablesDir', meson.current_build_dir(),
++             '--bridgeDir', join_paths(meson.global_source_root(), '_output'),
++             '--artifactDir', join_paths(meson.global_build_root(), 'test_artifacts', 'async_readback_device_off') ],
++     env : { 'REMIX_ASYNC_READBACK_TEST_CASE' : 'off' },
++     is_parallel : false,
++     timeout : 300)
++endif
+ alias_target('unit_tests', tests)
+ 
+diff --git a/bridge/test/rtx/unit/test_async_readback_device.cpp b/bridge/test/rtx/unit/test_async_readback_device.cpp
+new file mode 100644
+index 00000000..47f05666
+--- /dev/null
++++ b/bridge/test/rtx/unit/test_async_readback_device.cpp
+@@ -0,0 +1,241 @@
++/*
++ * Permission is hereby granted, free of charge, to any person obtaining a
++ * copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation
++ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the
++ * Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in
++ * all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
++ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
++ * THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
++ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++
++// Reads a ColorFill pattern back through the synchronous GetRenderTargetData and through the
++// RemixBridge_ReadRenderTargetAsync / RemixBridge_PollReadback exports, and compares the bytes.
++// REMIX_ASYNC_READBACK_TEST_CASE=off runs with client.asyncReadback = False and expects E_NOTIMPL.
++
++#include <cstdio>
++#include <cstring>
++#include <fstream>
++#include <stdexcept>
++#include <vector>
++
++#include <wrl/client.h>
++
++#include "test_remix_api_bridge_app.h"
++
++using Microsoft::WRL::ComPtr;
++using namespace bridge_app_test;
++
++namespace {
++  using PFN_ReadAsync = HRESULT (__stdcall*)(IDirect3DSurface9*, IDirect3DSurface9*, uint32_t*);
++  using PFN_Ticket = HRESULT (__stdcall*)(uint32_t);
++
++  constexpr UINT kWindowSize = 64;
++
++  PFN_ReadAsync g_readAsync = nullptr;
++  PFN_Ticket g_poll = nullptr;
++  PFN_Ticket g_cancel = nullptr;
++
++  void check(HRESULT result, const char* pCall) {
++    if (FAILED(result)) {
++      std::printf("FAILED: %s returned 0x%08lX.\n", pCall, static_cast<unsigned long>(result));
++      throw std::runtime_error(pCall);
++    }
++  }
++
++  void expect(HRESULT result, HRESULT expected, const char* pCall) {
++    if (result != expected) {
++      std::printf("FAILED: %s returned 0x%08lX, expected 0x%08lX.\n", pCall,
++                  static_cast<unsigned long>(result), static_cast<unsigned long>(expected));
++      throw std::runtime_error(pCall);
++    }
++  }
++
++  HWND createWindow() {
++    WNDCLASSW windowClass = {};
++    windowClass.lpfnWndProc = DefWindowProcW;
++    windowClass.hInstance = GetModuleHandleW(nullptr);
++    windowClass.lpszClassName = L"BridgeAsyncReadbackTest";
++    RegisterClassW(&windowClass);
++    return CreateWindowExW(0, windowClass.lpszClassName, L"", WS_OVERLAPPEDWINDOW,
++                           0, 0, kWindowSize, kWindowSize, nullptr, nullptr, windowClass.hInstance, nullptr);
++  }
++
++  struct Target {
++    ComPtr<IDirect3DSurface9> pRenderTarget;
++    ComPtr<IDirect3DSurface9> pSync;
++    ComPtr<IDirect3DSurface9> pAsync;
++    UINT size = 0;
++  };
++
++  Target createTarget(IDirect3DDevice9* pDevice, UINT size) {
++    Target target;
++    target.size = size;
++    check(pDevice->CreateRenderTarget(size, size, D3DFMT_A8R8G8B8, D3DMULTISAMPLE_NONE, 0, FALSE,
++                                      &target.pRenderTarget, nullptr), "CreateRenderTarget");
++    check(pDevice->CreateOffscreenPlainSurface(size, size, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &target.pSync, nullptr),
++          "CreateOffscreenPlainSurface (sync)");
++    check(pDevice->CreateOffscreenPlainSurface(size, size, D3DFMT_A8R8G8B8, D3DPOOL_SYSTEMMEM, &target.pAsync, nullptr),
++          "CreateOffscreenPlainSurface (async)");
++    return target;
++  }
++
++  // Four quadrants of different colours, varied by seed, so a stale or shifted read-back differs.
++  void fill(IDirect3DDevice9* pDevice, const Target& target, uint32_t seed) {
++    const LONG half = LONG(target.size / 2);
++    const RECT quads[4] = { { 0, 0, half, half }, { half, 0, LONG(target.size), half },
++                            { 0, half, half, LONG(target.size) }, { half, half, LONG(target.size), LONG(target.size) } };
++    for (uint32_t i = 0; i < 4; ++i) {
++      check(pDevice->ColorFill(target.pRenderTarget.Get(), &quads[i], 0xff000000 | ((seed * 0x2f + i * 0x51) * 0x010307)), "ColorFill");
++    }
++  }
++
++  std::vector<uint8_t> readBytes(IDirect3DSurface9* pSurface, UINT size) {
++    D3DLOCKED_RECT lockedRect;
++    check(pSurface->LockRect(&lockedRect, nullptr, D3DLOCK_READONLY), "LockRect");
++    std::vector<uint8_t> bytes(size_t(size) * size * 4);
++    for (UINT y = 0; y < size; ++y) {
++      memcpy(bytes.data() + size_t(y) * size * 4, (const uint8_t*) lockedRect.pBits + size_t(y) * lockedRect.Pitch, size_t(size) * 4);
++    }
++    check(pSurface->UnlockRect(), "UnlockRect");
++    return bytes;
++  }
++
++  // Presents between polls, as a game does, so the server reaches its poll points.
++  unsigned waitForTicket(IDirect3DDevice9* pDevice, uint32_t ticket) {
++    const ULONGLONG deadline = GetTickCount64() + 10000;
++    for (unsigned polls = 1;; ++polls) {
++      const HRESULT result = g_poll(ticket);
++      if (result == S_OK) {
++        return polls;
++      }
++      if (result != S_FALSE) {
++        expect(result, S_OK, "RemixBridge_PollReadback");
++      }
++      if (GetTickCount64() >= deadline) {
++        throw std::runtime_error("The read-back did not finish within ten seconds");
++      }
++      check(pDevice->Present(nullptr, nullptr, nullptr, nullptr), "Present");
++    }
++  }
++
++  void testMatch(IDirect3DDevice9* pDevice, const Target& target, uint32_t seed) {
++    fill(pDevice, target, seed);
++    check(pDevice->GetRenderTargetData(target.pRenderTarget.Get(), target.pSync.Get()), "GetRenderTargetData");
++    uint32_t ticket = 0;
++    check(g_readAsync(target.pRenderTarget.Get(), target.pAsync.Get(), &ticket), "RemixBridge_ReadRenderTargetAsync");
++    const unsigned polls = waitForTicket(pDevice, ticket);
++    if (readBytes(target.pSync.Get(), target.size) != readBytes(target.pAsync.Get(), target.size)) {
++      throw std::runtime_error("The asynchronous read-back differs from the synchronous one");
++    }
++    expect(g_poll(ticket), D3DERR_INVALIDCALL, "RemixBridge_PollReadback of a finished ticket");
++    std::printf("  %ux%u read-back matched after %u polls.\n", target.size, target.size, polls);
++  }
++
++  // Fills all slots, checks the refusal and a cancel, then finishes the rest in order.
++  void testSlots(IDirect3DDevice9* pDevice, const Target& target) {
++    logLine("Testing four read-backs in flight, a fifth refused and one cancelled...");
++    std::vector<Target> targets;
++    uint32_t tickets[4] = {};
++    for (uint32_t i = 0; i < 4; ++i) {
++      targets.push_back(createTarget(pDevice, 16));
++      fill(pDevice, targets[i], 10 + i);
++      check(g_readAsync(targets[i].pRenderTarget.Get(), targets[i].pAsync.Get(), &tickets[i]), "RemixBridge_ReadRenderTargetAsync (slot)");
++    }
++    uint32_t extra = 0;
++    expect(g_readAsync(target.pRenderTarget.Get(), target.pAsync.Get(), &extra), D3DERR_WASSTILLDRAWING, "Fifth read-back");
++    check(g_cancel(tickets[0]), "RemixBridge_CancelReadback");
++    expect(g_poll(tickets[0]), D3DERR_INVALIDCALL, "RemixBridge_PollReadback of a cancelled ticket");
++
++    // The freed slot takes a new request while the cancelled one may still be answered on the server.
++    testMatch(pDevice, targets[0], 20);
++    for (uint32_t i = 1; i < 4; ++i) {
++      waitForTicket(pDevice, tickets[i]);
++      check(pDevice->GetRenderTargetData(targets[i].pRenderTarget.Get(), targets[i].pSync.Get()), "GetRenderTargetData (slot)");
++      if (readBytes(targets[i].pSync.Get(), 16) != readBytes(targets[i].pAsync.Get(), 16)) {
++        throw std::runtime_error("A queued read-back differs from the synchronous one");
++      }
++    }
++  }
++}
++
++int main() {
++  std::setvbuf(stdout, nullptr, _IONBF, 0);
++  char mode[8] = {};
++  GetEnvironmentVariableA("REMIX_ASYNC_READBACK_TEST_CASE", mode, sizeof(mode));
++  const bool enabled = strcmp(mode, "off") != 0;
++  const HWND hWnd = createWindow();
++  if (hWnd == nullptr) {
++    logLine("FAILED: Could not create a test window.");
++    return 1;
++  }
++  bool passed = false;
++  try {
++    // The client reads its options from .trex/bridge.conf, as in test_query_event_device.
++    std::ofstream config(".trex/bridge.conf", std::ios::app);
++    config << "client.asyncReadback = " << (enabled ? "True" : "False") << "\n"
++           << "sendCreateFunctionServerResponses = True\n";
++    config.close();
++    const HMODULE hClient = loadBridgeClient();
++    if (hClient == nullptr) {
++      throw std::runtime_error("loadBridgeClient");
++    }
++    g_readAsync = reinterpret_cast<PFN_ReadAsync>(GetProcAddress(hClient, "RemixBridge_ReadRenderTargetAsync"));
++    g_poll = reinterpret_cast<PFN_Ticket>(GetProcAddress(hClient, "RemixBridge_PollReadback"));
++    g_cancel = reinterpret_cast<PFN_Ticket>(GetProcAddress(hClient, "RemixBridge_CancelReadback"));
++    if (g_readAsync == nullptr || g_poll == nullptr || g_cancel == nullptr) {
++      throw std::runtime_error("The client does not export the asynchronous read-back functions");
++    }
++    const auto pfnCreate = reinterpret_cast<PFN_Direct3DCreate9>(GetProcAddress(hClient, "Direct3DCreate9"));
++    ComPtr<IDirect3D9> pD3D;
++    pD3D.Attach(pfnCreate != nullptr ? pfnCreate(D3D_SDK_VERSION) : nullptr);
++    if (pD3D == nullptr) {
++      throw std::runtime_error("Direct3DCreate9");
++    }
++    D3DPRESENT_PARAMETERS present = {};
++    present.Windowed = TRUE;
++    present.SwapEffect = D3DSWAPEFFECT_DISCARD;
++    present.BackBufferFormat = D3DFMT_UNKNOWN;
++    present.BackBufferWidth = kWindowSize;
++    present.BackBufferHeight = kWindowSize;
++    present.hDeviceWindow = hWnd;
++    ComPtr<IDirect3DDevice9> pDevice;
++    check(pD3D->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, hWnd,
++                              D3DCREATE_SOFTWARE_VERTEXPROCESSING | D3DCREATE_MULTITHREADED,
++                              &present, &pDevice), "CreateDevice");
++
++    const Target pick = createTarget(pDevice.Get(), 16);
++    if (!enabled) {
++      logLine("Testing that the exports refuse while client.asyncReadback is off...");
++      uint32_t ticket = 0;
++      expect(g_readAsync(pick.pRenderTarget.Get(), pick.pAsync.Get(), &ticket), E_NOTIMPL, "RemixBridge_ReadRenderTargetAsync (off)");
++    } else {
++      logLine("Testing asynchronous read-backs against the synchronous path...");
++      const Target tile = createTarget(pDevice.Get(), 256);
++      testMatch(pDevice.Get(), pick, 1);
++      testMatch(pDevice.Get(), tile, 2);
++      testMatch(pDevice.Get(), pick, 3);
++      testSlots(pDevice.Get(), pick);
++
++      logLine("Testing that a read larger than one slot is refused...");
++      const Target big = createTarget(pDevice.Get(), 512);
++      uint32_t ticket = 0;
++      expect(g_readAsync(big.pRenderTarget.Get(), big.pAsync.Get(), &ticket), D3DERR_INVALIDCALL, "RemixBridge_ReadRenderTargetAsync (512x512)");
++    }
++    passed = true;
++  } catch (const std::exception& error) {
++    std::printf("FAILED: %s.\n", error.what());
++  }
++  DestroyWindow(hWnd);
++  logLine(passed ? "PASSED" : "FAILED");
++  return passed ? 0 : 1;
++}
