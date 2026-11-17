@@ -45,7 +45,7 @@ Rules:
 
 ## Status
 
-Merged into `feature/realtime-gi`: S0-01 to S0-14, S0-13, S1-01, S1-02, S2-03, R-01, R-08, R-02, GB-01, X-RTPP, XR-04 and XR-05.
+Merged into `feature/realtime-gi`: S0-01 to S0-14, S1-01, S1-02, S2-03, R-01, R-08, R-02, GB-01, X-RTPP, XR-04 and XR-05.
 Each package's full report is `wp/<id>.md`. Other branches still running: `gi/s0-08x`, `gi/x-6d`, `gi/x-leak`.
 
 | Id | Status | Branch | Commit | Depends on | Unblocks / notes |
