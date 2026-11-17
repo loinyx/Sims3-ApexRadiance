@@ -9,8 +9,12 @@
 #include "build_flavor.h"
 #include "d3d9_hooks.h"
 #include "game_addresses.h"
+#include "gi_sched.h"
+#include "level_light_share.h"
+#include "lot_lighting_motion.h"
 #include "lamp_mark_filter.h"
 #include "outdoor_delta.h"
+#include "post_scene.h"
 #include "rt_outdoor_lamps.h"
 #include "world_session.h"
 #include <algorithm>
@@ -43,6 +47,46 @@ std::string g_startLine; // logged at the first snapshot in a world (it carries 
 // (R-02 onward) replace this with the export lookup in the bridge client d3d9.dll.
 bool ServerExport() { return false; }
 bool ServerRayQuery() { return false; }
+
+// The bridge's GI export as the scheduler's back end (R-03 / R-04: RemixBridge_GiSubmit, GiSolve, GiPoll, GiCancel in the
+// bridge client d3d9.dll; util_gi.h there holds the blob layouts).
+// shortcut: the scene blob, the layer textures and the lamp-to-layer index are R-05's; until then SubmitScene and Solve
+// refuse, so nothing is issued. Poll and Cancel are the final form.
+struct BridgeBackend final : GiSched::Backend {
+    using SubmitFn = HRESULT(__stdcall*)(const void* data, uint32_t size, uint32_t kind, uint32_t* ticket);
+    using SolveFn = HRESULT(__stdcall*)(IDirect3DTexture9* texture, uint32_t layer, uint32_t sceneTicket, uint32_t* ticket);
+    using TicketFn = HRESULT(__stdcall*)(uint32_t ticket);
+    SubmitFn submit = nullptr;
+    SolveFn solve = nullptr;
+    TicketFn poll = nullptr, cancel = nullptr;
+    bool Resolve() {
+        const HMODULE m = GetModuleHandleW(L"d3d9.dll");
+        if (!m) return false;
+        submit = reinterpret_cast<SubmitFn>(GetProcAddress(m, "RemixBridge_GiSubmit"));
+        solve = reinterpret_cast<SolveFn>(GetProcAddress(m, "RemixBridge_GiSolve"));
+        poll = reinterpret_cast<TicketFn>(GetProcAddress(m, "RemixBridge_GiPoll"));
+        cancel = reinterpret_cast<TicketFn>(GetProcAddress(m, "RemixBridge_GiCancel"));
+        return submit && solve && poll && cancel;
+    }
+    bool SubmitScene() override { return false; }
+    bool Solve(const GiSched::LampIn&, uint32_t&) override { return false; }
+    int Poll(uint32_t ticket, GiSched::Box& touched) override {
+        const HRESULT hr = poll ? poll(ticket) : E_FAIL;
+        if (hr == S_FALSE) return 0;
+        touched = {}; // shortcut: the touch box comes back with R-04's layer statistics; empty until then
+        return hr == S_OK ? 1 : -1;
+    }
+    void Cancel(uint32_t ticket) override {
+        if (cancel) cancel(ticket);
+    }
+};
+
+// ---- update scheduler (S2-01, render thread): the active lot's lamp layers; developer debugFakeSolve runs it on the
+// fake back end (a layer lands 3 frames after its bake starts, touching the lamp's reach, at most 6 m)
+GiSched::FakeBackend g_fake;
+GiSched::Scheduler g_sched;
+uint64_t g_schedLot = 0, g_geoKey = 0;
+uint32_t g_schedSerial = 0, g_schedFrame = 0;
 
 // ---- lamp snapshot (render thread) ----
 constexpr int kRefreshFrames = 20;     // a snapshot at least every 20 frames, as Apex's other lamp readers
@@ -250,12 +294,52 @@ void Snapshot() {
     if (g_startLine.empty() && g_giLots != lotsBefore && !kPublicBuild) LOG_INFO(std::format("[RealtimeGI] Lots: {}", g_giLots));
 }
 
+GiSched::LampIn SchedLamp(const Lamp& l) { return {l.light, {l.pos[0], l.pos[1], l.pos[2]}, l.story, l.on}; }
+
+// Render thread, after the snapshot: the active lot's lamps and changes, its build edits and the camera to the scheduler
+void UpdateSched() {
+    if (kPublicBuild || !g_options.debugFakeSolve) return; // shortcut: the server back end joins with R-05
+    ++g_schedFrame;
+    if (g_activeLot != g_schedLot) { // a new active lot: every layer again
+        g_schedLot = g_activeLot, g_geoKey = 0, g_schedSerial = g_serial;
+        std::vector<GiSched::LampIn> in;
+        for (const Lamp& l : g_lamps)
+            if (g_schedLot && l.lot == g_schedLot) in.push_back(SchedLamp(l));
+        g_sched.Load(in, g_schedFrame);
+    } else if (g_serial != g_schedSerial) {
+        g_schedSerial = g_serial;
+        std::unordered_map<uintptr_t, const Lamp*> now;
+        for (const Lamp& l : g_lamps) now[l.light] = &l;
+        for (const Change& c : g_changes) {
+            if (!g_schedLot || c.lot != g_schedLot) continue;
+            const auto it = now.find(c.light);
+            const GiSched::LampIn in = it != now.end() ? SchedLamp(*it->second) : GiSched::LampIn{c.light};
+            g_sched.OnLamp(static_cast<GiSched::Event>(c.kind), in, g_schedFrame);
+        }
+    }
+    // build edits: the lot's geometry key (walls, floors, openings) every 10 frames.
+    // shortcut: the edit has no place yet, so every lamp with a layer re-bakes; R-05's scene submit diffs the lot proxy
+    // it sends and passes the changed box
+    if (g_schedLot && g_schedFrame % 10 == 0) {
+        const uintptr_t tracker = LevelLightShare::TrackerOfLot(g_schedLot);
+        const void* room0 = tracker ? LevelLightShare::Room0Of(tracker, 0) : nullptr;
+        const uint64_t key = room0 ? LevelLightShare::LotGeometryKey(room0) : 0;
+        if (key && g_geoKey && key != g_geoKey) g_sched.OnBuildEdit({}, static_cast<double>(GetTickCount64()));
+        if (key) g_geoKey = key;
+    }
+    GiSched::View view;
+    view.known = LotLightingMotion::CameraEye(view.eye);
+    view.hasVp = PostScene::RecentCameraViewProj(view.vp);
+    g_sched.Tick(g_schedFrame, static_cast<double>(GetTickCount64()), view);
+}
+
 // Render thread, every frame: a snapshot when a lamp edit was noted (LampMarkFilter's edit serial), when an on state waits
 // for its second read, or every kRefreshFrames frames; nothing outside a world
 void UpdateLamps() {
     if (!WorldSession::InWorld()) {
         g_lamps.clear(), g_lastRead.clear(), g_changes.clear();
         g_giLots = 0, g_activeLot = 0, g_worldFrames = 0, g_sinceSnap = 0, g_pending = false;
+        if (g_schedLot) g_sched.Clear(), g_schedLot = 0;
         return;
     }
     ++g_worldFrames;
@@ -265,6 +349,7 @@ void UpdateLamps() {
         g_sinceSnap = 0;
         Snapshot();
     }
+    UpdateSched();
     // the start line, once: when the active lot is known, or after kStartWaitFrames in the world without one
     if (!g_startLine.empty() && (g_activeLot || g_worldFrames >= kStartWaitFrames)) {
         LOG_INFO(std::format("[RealtimeGI] On: lots={} {}", g_giLots, g_startLine));
@@ -296,6 +381,18 @@ void OnPresent() {
                                          g_lamps.size(), g_giLots, Value(Counter::LampChanges), cap, sync, locks, diffs, faults, table);
     if (cap || sync || locks || diffs || faults || table) LOG_WARNING(line);
     else LOG_INFO(line);
+    if (!g_options.debugFakeSolve) return;
+    const GiSched::Counters s = g_sched.Stats();
+    using GiSched::Cause;
+    const std::string sched = std::format("[GiSched] lot={:X} queued={} inFlight={} idle={} fading={} issued: moved={} added={} build={} load={}; landed={} failed={} "
+                                          "composeOnly={} tilesComposed={} restarts={} dropped={} sceneSubmits={} removed={} latency={}/{} frames "
+                                          "maxInFlight={}; must be 0: overBudget={}",
+                                          g_schedLot, s.queued, s.inFlight, s.idle, s.fading, s.issued[static_cast<int>(Cause::Moved)],
+                                          s.issued[static_cast<int>(Cause::Added)], s.issued[static_cast<int>(Cause::Build)], s.issued[static_cast<int>(Cause::Load)],
+                                          s.landed, s.failed, s.composeOnly, s.tilesComposed, s.restarts, s.dropped, s.sceneSubmits, s.removed, s.latencyP50,
+                                          s.latencyMax, s.maxInFlight, s.overBudget);
+    if (s.overBudget) LOG_WARNING(sched);
+    else LOG_INFO(sched);
 }
 
 } // namespace
@@ -318,6 +415,14 @@ bool Start(const Options& o, std::string* error) {
     g_options = o;
     g_lamps.clear(), g_lastRead.clear(), g_changes.clear();
     g_giLots = 0, g_activeLot = 0, g_worldFrames = 0, g_sinceSnap = 0, g_pending = false, g_dumpDue = true;
+    g_sched.Clear(), g_schedLot = 0;
+    g_fake.boxOf = [](const GiSched::LampIn& l) {
+        float range = 6.0f;
+        for (const Lamp& x : g_lamps)
+            if (x.light == l.id) range = std::min(range, std::max(x.range, 1.0f));
+        return GiSched::Around(l.pos, l.story, range);
+    };
+    g_sched.SetBackend(&g_fake);
     using namespace D3D9Hooks;
     if (!RegisterPresent(kPatchName, [](DeviceContext&, const RECT*, const RECT*, HWND, const RGNDATA*) {
             OnPresent();
@@ -358,13 +463,15 @@ class RealtimeGiPatch : public ApexPatch {
         RegisterNamedEnumSetting(&scale_, "bufferScale", 0, "Light buffer scale", {"1", "2", "4"});
         RegisterNamedEnumSetting(&indirect_, "indirect", 0, "Indirect light", {std::begin(RealtimeGI::kIndirectNames), std::end(RealtimeGI::kIndirectNames)});
         RegisterBoolSetting(&debugLampTable_, "debugLampTable", false, "Developer mode: log the lamp snapshot against the game's fields after each change");
+        RegisterBoolSetting(&debugFakeSolve_, "debugFakeSolve", false, "Developer mode: run the layer update scheduler on a fake back end ([GiSched] line)");
     }
 
     bool Install() override {
         if (isEnabled) return true;
         lastError.clear();
         std::string error;
-        const RealtimeGI::Options o{lots_, solveCap_, 1 << scale_, indirect_, static_cast<RealtimeGI::Backend>(backend_), debugLampTable_};
+        const RealtimeGI::Options o{lots_, solveCap_, 1 << scale_, indirect_, static_cast<RealtimeGI::Backend>(backend_), debugLampTable_,
+                                    debugFakeSolve_};
         if (!RealtimeGI::Start(o, &error)) return Fail(error);
         isEnabled = true;
         return true;
@@ -380,7 +487,7 @@ class RealtimeGiPatch : public ApexPatch {
 
   private:
     int backend_ = 0, lots_ = 0, solveCap_ = 0, scale_ = 0, indirect_ = 0;
-    bool debugLampTable_ = false;
+    bool debugLampTable_ = false, debugFakeSolve_ = false;
 };
 
 } // namespace
