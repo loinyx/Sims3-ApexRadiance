@@ -619,6 +619,8 @@ struct RigEntry {
     bool probing = false, wrote = false;
     float value[3] = {};
     float written[8][4] = {}; // the last write (the slots at +0x90)
+    bool lampScaled = false;  // the lamp colours (+0x50) hold our capped copy of lampOrig (lampWritten)
+    float lampOrig[4][4] = {}, lampWritten[4][4] = {};
 };
 std::unordered_map<uintptr_t, RigEntry> g_rigs;
 uint32_t g_rigFrame = 0;
@@ -632,7 +634,7 @@ ReadAsyncFn g_readAsync = nullptr;
 ReadTicketFn g_pollRead = nullptr, g_cancelRead = nullptr;
 bool g_rigOff = false; // no asynchronous read-back here: the rigs keep the game's values
 constexpr uint32_t kProbeW = 1024, kProbeH = 16; // 16384 rigs a read, 128 KB (one bridge slot holds 256 KB)
-constexpr float kRigCeiling = 1.0f;              // [I] a channel; the game's cap [0x011D0BA8] is not read yet
+float g_rigCap = 1.0f;                           // the game's rig cap [0x011D0BA8] (CapGlobal), read each frame
 const ShaderCache::Id kScatterPs = [] {
     ShaderCache::Desc d;
     d.tag = "RealtimeGI ScatterPS";
@@ -904,18 +906,31 @@ void ReleaseProbe() {
     if (g_probeMem) g_probeMem->Release(), g_probeMem = nullptr;
 }
 // The rig's centre (+0x140, world) and its vertex-light slots (+0x90 directions, +0xD0 colours). SEH: plain data only
-bool ReadRig(uintptr_t rig, float centre[3], float slots[8][4]) {
+// The game's rig cap tweakable (CapGlobal, 0x011D0BA8 on Steam 1.67); keep: the last value when it cannot be read
+float ReadRigCap(float keep) {
+    const uintptr_t addr = GameAddr::Resolved() ? GameAddr::Get(GameAddr::Id::CapGlobal) : 0;
+    if (!addr) return keep;
+    __try {
+        const float v = *reinterpret_cast<const float*>(addr);
+        return v > 0.0f && v < 1e6f ? v : keep;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return keep;
+    }
+}
+// slots: the lamp rows +0x10..+0x8F, then the vertex-light rows +0x90..+0x10F; mode: rig +0x1D4
+bool ReadRig(uintptr_t rig, float centre[3], float slots[16][4], int& mode) {
     __try {
         std::memcpy(centre, reinterpret_cast<const void*>(rig + 0x140), 12);
-        std::memcpy(slots, reinterpret_cast<const void*>(rig + 0x90), 128);
+        std::memcpy(slots, reinterpret_cast<const void*>(rig + 0x10), 256);
+        mode = *reinterpret_cast<const int*>(rig + 0x1D4);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
 }
-bool WriteRig(uintptr_t rig, const float slots[8][4]) {
+bool WriteRig(uintptr_t rig, uint32_t offset, const void* src, size_t bytes) {
     __try {
-        std::memcpy(reinterpret_cast<void*>(rig + 0x90), slots, 128);
+        std::memcpy(reinterpret_cast<void*>(rig + offset), src, bytes);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -927,8 +942,9 @@ bool WriteRig(uintptr_t rig, const float slots[8][4]) {
 // household's Sims too: this is lighting, not behaviour.
 void OnRigBind(uintptr_t rig) {
     if (!g_running.load() || !g_options.indirect || g_rigOff || !g_rigLot) return;
-    float c[3], cur[8][4];
-    if (!ReadRig(rig, c, cur)) return Add(Counter::ReadFaults);
+    float c[3], cur[16][4];
+    int mode = 0;
+    if (!ReadRig(rig, c, cur, mode)) return Add(Counter::ReadFaults);
     RigEntry& e = g_rigs[rig];
     e.seen = g_rigFrame;
     const float dx = c[0] - e.centre[0], dy = c[1] - e.centre[1], dz = c[2] - e.centre[2];
@@ -941,12 +957,24 @@ void OnRigBind(uintptr_t rig) {
         if (GiIndirect::RigPixel(g_grid, *g_rigLot, p, px))
             if (const auto it = g_pointOfGrid.find(px); it != g_pointOfGrid.end()) e.point = static_cast<int32_t>(it->second);
     }
-    const int state = GiIndirect::RigSlotState(cur, e.wrote ? e.written : nullptr);
+    const int state = GiIndirect::RigSlotState(cur + 8, e.wrote ? e.written : nullptr);
     if (state == GiIndirect::kRigGame) return Add(Counter::RigSkipped);
     float want[8][4] = {};
     const bool lit = e.serial && e.point >= 0 && (e.value[0] > 0 || e.value[1] > 0 || e.value[2] > 0);
-    if (lit) GiIndirect::RigSlots(e.value, kRigCeiling, want);
-    if (std::memcmp(cur, want, sizeof want) != 0 && !WriteRig(rig, want)) return Add(Counter::ReadFaults);
+    if (lit) GiIndirect::RigSlots(e.value, want);
+    // the game's cap over lamps + our slots, from the game's lamp colours (our earlier capped copy undone; a new gather wins)
+    float lamps[8][4];
+    std::memcpy(lamps, cur, sizeof lamps);
+    if (e.lampScaled && std::memcmp(cur[4], e.lampWritten, sizeof e.lampWritten) == 0) std::memcpy(lamps[4], e.lampOrig, sizeof e.lampOrig);
+    std::memcpy(e.lampOrig, lamps[4], sizeof e.lampOrig);
+    const int start = mode != 0 ? 1 : 0;
+    if (const float f = GiIndirect::RigCapScale(lamps, start, want, g_rigCap); f < 1.0f)
+        for (int i = 0; i < 4; i++)
+            for (int k = 0; k < 3; k++) want[4 + i][k] *= f, lamps[4 + i][k] *= i >= start ? f : 1.0f;
+    e.lampScaled = std::memcmp(lamps[4], e.lampOrig, sizeof e.lampOrig) != 0;
+    std::memcpy(e.lampWritten, lamps[4], sizeof e.lampWritten);
+    if (std::memcmp(cur[4], lamps[4], 64) != 0 && !WriteRig(rig, 0x50, lamps[4], 64)) return Add(Counter::ReadFaults);
+    if (std::memcmp(cur + 8, want, sizeof want) != 0 && !WriteRig(rig, 0x90, want, sizeof want)) return Add(Counter::ReadFaults);
     std::memcpy(e.written, want, sizeof want), e.wrote = true;
     if (lit) Add(Counter::RigDraws);
 }
@@ -968,6 +996,7 @@ void TakeProbe() {
 void UpdateRigs() {
     ++g_rigFrame;
     if (!g_options.indirect || g_rigOff) return;
+    g_rigCap = ReadRigCap(g_rigCap);
     if (g_rigFrame % 300 == 0)
         for (auto it = g_rigs.begin(); it != g_rigs.end();) it = g_rigFrame - it->second.seen > 600 ? g_rigs.erase(it) : std::next(it);
     if (g_probeTicket) {

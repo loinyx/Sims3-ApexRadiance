@@ -287,7 +287,7 @@ void RigChecks() {
     // the slots: a regular tetrahedron, colour e each; the sum over normals is e on average
     const float e[3] = {0.4f, 0.2f, 0.1f};
     float slots[8][4];
-    GiIndirect::RigSlots(e, 1.0f, slots);
+    GiIndirect::RigSlots(e, slots);
     double sum = 0, lo = 1e9, hi = 0;
     const int n = 4000;
     for (int i = 0; i < n; i++) { // (a Fibonacci sphere)
@@ -303,8 +303,32 @@ void RigChecks() {
     for (int k = 0; k < 4; k++) unit &= std::fabs(slots[k][0] * slots[k][0] + slots[k][1] * slots[k][1] + slots[k][2] * slots[k][2] - 1.0f) < 1e-5f && slots[k][3] == 0;
     Check(unit && slots[5][1] == 0.2f && slots[7][2] == 0.1f && slots[4][3] == 0.0f, "unit directions, w 0, the colour e");
     const float big[3] = {2.0f, 0.5f, -1.0f};
-    GiIndirect::RigSlots(big, 1.0f, slots);
-    Check(slots[4][0] == 1.0f && slots[6][1] == 0.5f && slots[7][2] == 0.0f, "Apex's ceiling and no negative light");
+    GiIndirect::RigSlots(big, slots);
+    Check(slots[4][0] == 2.0f && slots[6][1] == 0.5f && slots[7][2] == 0.0f, "no channel clamp (the cap scales evenly), no negative light");
+    {
+        // the game's cap 0x006B92A0: one even scale cap / max(cap, brightest channel of the 6 axis sums) over lamps + slots
+        float lamp[8][4] = {}, vl[8][4];
+        lamp[0][1] = 1.0f, lamp[4][0] = 5.0f;               // slot 0 (the sun of a non-room rig) along +Y, red 5
+        lamp[1][0] = 1.0f, lamp[5][0] = 0.6f, lamp[5][2] = 0.3f; // slot 1 along +X
+        const float gl[3] = {0.4f, 0.2f, 0.1f};
+        GiIndirect::RigSlots(gl, vl);
+        double m = 0; // brute force: the 6 axis sums
+        for (int a = 0; a < 6; a++)
+            for (int c = 0; c < 3; c++) {
+                double as = 0;
+                for (int k = 1; k < 4; k++) as += std::max(0.0f, (a & 1 ? -1.0f : 1.0f) * lamp[k][a >> 1]) * lamp[4 + k][c];
+                for (int k = 0; k < 4; k++) as += std::max(0.0f, (a & 1 ? -1.0f : 1.0f) * vl[k][a >> 1]) * vl[4 + k][c];
+                m = std::max(m, as);
+            }
+        const float f = GiIndirect::RigCapScale(lamp, 1, vl, 0.5f);
+        std::printf("  rig cap: brightest axis channel %.4f, cap 0.5, scale %.4f\n", m, f);
+        Check(m > 0.5 && std::fabs(f - 0.5 / m) < 1e-5, "cap: scale = cap / brightest channel over lamps from the start slot + the 4 slots");
+        Check(GiIndirect::RigCapScale(lamp, 1, vl, 2.0f) == 1.0f, "cap: under the cap, no scale");
+        Check(GiIndirect::RigCapScale(lamp, 0, vl, 2.0f) < 1.0f, "cap: a room-mode rig (start 0) counts slot 0 too");
+        Check(GiIndirect::RigCapScale(lamp, 1, vl, 0.0f) == 1.0f, "cap: no cap read, no scale");
+        float zero[8][4] = {};
+        Check(GiIndirect::RigCapScale(zero, 0, vl, 0.2f) < 1.0f && GiIndirect::RigCapScale(lamp, 1, zero, 1.0f) == 1.0f, "cap: slots alone and lamps alone");
+    }
     // who holds the slots
     float zero[8][4] = {}, other[8][4];
     std::memcpy(other, slots, sizeof other);

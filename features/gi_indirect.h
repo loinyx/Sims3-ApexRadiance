@@ -311,15 +311,38 @@ inline bool RigPixel(const Grid& g, const RtLampProxy::Lot& lot, const float p[3
 // any normal is e x 1 on average (0.82 .. 1.16 [V offline]). The grid's value is premultiplied by its ready weight, so a tile
 // still waiting adds nothing. Lamp share: the rig holds no lamp-derived ambient to replace (slots 0-3 and overflow lamps are
 // direct light, kept as the floor copy keeps the map's lamp light; the fill and [NoLight] lights are constants), so L = 0 and
-// the grid adds. ceiling: Apex's own cap (the write lands after the game's cap 0x006B92A0), a channel.
+// the grid adds. No cap here: the write lands after the game's cap 0x006B92A0, so the caller applies RigCapScale.
 inline constexpr float kTetra = 0.57735027f;
-inline void RigSlots(const float e[3], float ceiling, float out[8][4]) {
+inline void RigSlots(const float e[3], float out[8][4]) {
     const float d[4][3] = {{kTetra, kTetra, kTetra}, {kTetra, -kTetra, -kTetra}, {-kTetra, kTetra, -kTetra}, {-kTetra, -kTetra, kTetra}};
     for (int i = 0; i < 4; i++) {
         out[i][0] = d[i][0], out[i][1] = d[i][1], out[i][2] = d[i][2], out[i][3] = 0.0f;
-        for (int c = 0; c < 3; c++) out[4 + i][c] = std::clamp(e[c], 0.0f, ceiling);
+        for (int c = 0; c < 3; c++) out[4 + i][c] = std::max(e[c], 0.0f);
         out[4 + i][3] = 0.0f;
     }
+}
+// The game's rig cap (0x006B92A0, applied by the caller since our write comes after it): the rig's light summed along
+// +-X, +-Y, +-Z (0x006B7D20: max(0, N.L) x colour over the lamp slots from start to 3 and all 4 vertex-light slots), m = the
+// brightest channel of the 6 sums, scale f = cap / max(cap, m) (0x006B74D0) for every one of those colours alike
+// (0x006B81E0). lamp / vl: 4 direction rows then 4 colour rows (+0x10 / +0x50, +0x90 / +0xD0). The ambient (+0x110) is
+// never part of it. start: 0 for a room-mode rig, 1 otherwise (slot 0 is the sun; 0x006BBEBF, 0x006BBCC7).
+inline float RigCapScale(const float lamp[8][4], int start, const float vl[8][4], float cap) {
+    if (!(cap > 0.0f)) return 1.0f;
+    float m = 0.0f;
+    for (int a = 0; a < 6; a++) {
+        const int ax = a >> 1;
+        const float sign = (a & 1) ? -1.0f : 1.0f;
+        float sum[3] = {};
+        for (int i = 0; i < 8; i++) {
+            const float (*r)[4] = i < 4 ? lamp : vl;
+            const int k = i & 3;
+            if (i < 4 && k < start) continue;
+            const float nl = std::max(0.0f, sign * r[k][ax]);
+            for (int c = 0; c < 3; c++) sum[c] += nl * r[4 + k][c];
+        }
+        m = std::max({m, sum[0], sum[1], sum[2]});
+    }
+    return m > cap ? cap / m : 1.0f;
 }
 // Who holds the vertex-light slots now (cur: the 8 rows at +0x90): kRigEmpty all zero (no overflow lamp, or a gather cleared
 // them), kRigOurs exactly the last write (last, null: none), kRigGame overflow lamps or the fill light's moved slot: left alone
