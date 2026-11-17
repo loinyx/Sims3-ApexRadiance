@@ -8437,7 +8437,10 @@ const PatchedPs* GiCopyOf(IDirect3DDevice9* dev, IDirect3DPixelShader9* copy, bo
                                  p.gi.slots, p.gi.added));
         else {
             p.ps = nullptr; // (say why: a silent miss leaves wallDraws=0 with no cause in the log)
-            LOG_INFO(std::format("[LotLightBridge] Real-time GI: copy {:08X} cannot read the GI grid{} (patch or CreatePixelShader failed)", reinterpret_cast<uintptr_t>(copy), wall ? " (walls)" : ""));
+            // (S2-06 takes ps_3_0 only: most InteriorWall passes are vs_2_0 / ps_2_0, and their copies stay ps_2_x)
+            const DWORD ver = t.empty() ? 0 : t[0];
+            LOG_INFO(std::format("[LotLightBridge] Real-time GI: copy {:08X} cannot read the GI grid{} ({})", reinterpret_cast<uintptr_t>(copy), wall ? " (walls)" : "",
+                                 ver == 0xFFFF0300 ? "ps_3_0: patch refused or CreatePixelShader failed" : std::format("ps_{}_{:X}: not ps_3_0", (ver >> 8) & 0xFF, ver & 0xFF)));
         }
     }
     return p.ps ? &p : nullptr;
@@ -8460,7 +8463,9 @@ IDirect3DVertexShader9* GiWallVsOf(IDirect3DDevice9* dev, IDirect3DVertexShader9
         LOG_INFO(std::format("[LotLightBridge] Real-time GI: wall vertex shader {:08X} writes the grid uv", reinterpret_cast<uintptr_t>(game)));
     else {
         it->second = nullptr;
-        LOG_INFO(std::format("[LotLightBridge] Real-time GI: wall vertex shader {:08X} cannot write the grid uv (patch or CreateVertexShader failed)", reinterpret_cast<uintptr_t>(game)));
+        const DWORD ver = t.empty() ? 0 : t[0];
+        LOG_INFO(std::format("[LotLightBridge] Real-time GI: wall vertex shader {:08X} cannot write the grid uv ({})", reinterpret_cast<uintptr_t>(game),
+                             ver == 0xFFFE0300 ? "vs_3_0: patch refused or CreateVertexShader failed" : std::format("vs_{}_{:X}: not vs_3_0", (ver >> 8) & 0xFF, ver & 0xFF)));
     }
     return it->second;
 }

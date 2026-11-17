@@ -504,7 +504,12 @@ std::string DiagText() {
            "), boundary " + (g_done ? "done" : "not yet") + (g_rejectedBoundary ? ", rejected" : "") + (g_sceneOnSharedDepth ? ", scene on the shared depth" : ", scene not on the shared depth") + (DepthShare::Surface() ? "" : " (no depth swap)") + (g_uiDrawSeen ? ", UI seen" : "") +
            (g_tileBoundary ? ", before colour tile" : "") +
            ", RT0 " + (!g_curRT0 ? "unknown" : g_curRT0 == g_backBuffer ? "back buffer" : "other") + ", effects " + std::to_string(g_effects.size()) +
-           (g_hooks ? "" : ", hooks off");
+           (g_hooks ? "" : ", hooks off") +
+           // the camera vote: why CameraViewProj has no view-projection (no c40 block with a projection's shape, or one whose near
+           // differs from the agreed near)
+           ", camera wanted " + std::to_string(g_cameraWanted.load()) + ", voted draws " + std::to_string(g_nearDraws) + ", near votes " +
+           std::to_string(g_nearVotes.size()) + " (near " + std::to_string(g_near) + "), c40 blocks " + std::to_string(g_vpVotes.size()) +
+           (g_vpValid ? ", camera valid" : ", no camera") + (g_lastVpValid ? ", last frame's valid" : "");
 }
 // This frame's effects (ambient occlusion, edge smoothing, Depth Blur) will still run at a later scene boundary: Picture
 // does not copy the scene before them (06/10: since Picture took a depth test with ALWAYS and no depth write for the end of

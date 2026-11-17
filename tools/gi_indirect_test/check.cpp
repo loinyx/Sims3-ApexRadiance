@@ -741,6 +741,17 @@ void PrecompChecks(const char* path, Gpu& gpu) {
         Release(v);
     }
     std::printf("  InteriorWall vs_3_0 vertex shaders: %zu, %d take the wall uv copy, %d created natively\n", wallVs.size(), vsTaken, vsCreated);
+    // the wall GI path covers the vs_3_0 / ps_3_0 passes only; the vs_2_0 / ps_2_0 ones keep the game's wall light
+    std::map<std::pair<DWORD, DWORD>, int> wallPasses;
+    for (const Tech& tc : techs)
+        if (const auto n = names.find(tc.name); n != names.end() && n->second.rfind("InteriorWall", 0) == 0)
+            for (const auto& [vs, ps] : tc.passes)
+                if (vs >= 1 && vs <= blobs.size() && ps >= 1 && ps <= blobs.size() && !blobs[vs - 1].code.empty() && !blobs[ps - 1].code.empty() &&
+                    ShaderPatches::IsRoomMapPs(blobs[ps - 1].code))
+                    wallPasses[{blobs[vs - 1].code[0], blobs[ps - 1].code[0]}]++;
+    for (const auto& [k, c] : wallPasses)
+        std::printf("  InteriorWall* room-lit passes vs %s / ps %s: %d (%s)\n", k.first == 0xFFFE0300 ? "3_0" : "2_x", k.second == 0xFFFF0300 ? "3_0" : "2_x", c,
+                    k.first == 0xFFFE0300 && k.second == 0xFFFF0300 ? "wall GI path" : "no wall GI path: not shader model 3");
     Check(!wallVs.empty() && vsTaken == static_cast<int>(wallVs.size()) && (vsCreated == vsTaken || !gpu.dev), "every InteriorWall vs_3_0 takes the wall uv copy");
     Check(ps2 == ps2Refused, "every ps_2_0 shader refused, bytes unchanged");
     Check(unchanged == refusals, "every refusal leaves the bytes unchanged (indirect off: the same shaders)");
