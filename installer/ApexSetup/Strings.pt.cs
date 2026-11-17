@@ -319,14 +319,14 @@ public static partial class Strings
         ["Apex frame limit: {0}"] = "Limite de quadros do Apex: {0}",
         ["To apply: {0}"] = "A aplicar: {0}",
         // frame generation errors in plain words
-        ["Windows did not let Setup change the driver settings. Close the NVIDIA App or AMD Software and NVIDIA Profile Inspector, then try again."] = "O Windows não deixou o instalador mudar as configurações do driver. Feche o NVIDIA App ou o AMD Software e o NVIDIA Profile Inspector e tente de novo.",
+        ["Windows did not let Setup change the driver settings. Close the NVIDIA App and NVIDIA Profile Inspector, then try again."] = "O Windows não deixou o instalador mudar as configurações do driver. Feche o NVIDIA App e o NVIDIA Profile Inspector e tente de novo.",
         ["The AMD driver did not accept the change. You can turn it on by hand in AMD Software: Gaming > Graphics > AMD Fluid Motion Frames."] = "O driver da AMD não aceitou a mudança. Você pode ativar à mão no AMD Software: Jogos > Gráficos > AMD Fluid Motion Frames.",
         ["The NVIDIA driver did not accept the change. You can turn it on by hand with NVIDIA Profile Inspector."] = "O driver da NVIDIA não aceitou a mudança. Você pode ativar à mão com o NVIDIA Profile Inspector.",
         ["How to do it by hand"] = "Como fazer à mão",
         // checks before a change, errors in plain words
         ["GitHub's download limit was reached; try again in {0} minutes."] = "O limite de downloads do GitHub foi atingido; tente de novo em {0} minutos.",
         ["Your antivirus removed or blocked {0}; add an exception for {1} and run Setup again."] = "Seu antivírus removeu ou bloqueou {0}; adicione uma exceção para {1} e abra o instalador de novo.",
-        ["Close The Sims 3, its launcher and the restart host (ts3wrap.exe), then try again."] = "Feche o The Sims 3, o launcher e o reinício do jogo (ts3wrap.exe) e tente de novo.",
+        ["Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe), then try again."] = "Feche o The Sims 3, o launcher, o reinício do jogo (ts3wrap.exe) e o RTX Remix bridge (NvRemixBridge.exe) e tente de novo.",
         ["Setup cannot write to {0}. If Windows Security's Controlled folder access is on, allow ApexRadianceSetup.exe there; or move the game out of a protected folder."] = "O instalador não consegue gravar em {0}. Se o Acesso controlado a pastas da Segurança do Windows estiver ativo, permita o ApexRadianceSetup.exe lá; ou tire o jogo de uma pasta protegida.",
         ["Setup needs {0} MB free on drive {1}. Free some space, then try again."] = "O instalador precisa de {0} MB livres no disco {1}. Libere espaço e tente de novo.",
         ["Setup did not find The Sims 3's folder in Documents. Start the game once, then run Setup again for the settings it writes there."] = "O instalador não achou a pasta do The Sims 3 em Documentos. Abra o jogo uma vez e depois o instalador de novo, para as configurações que ele grava lá.",
@@ -343,15 +343,19 @@ public static partial class Strings
         ["Setup puts back the files it changed."] = "O instalador devolve os arquivos que mudou.",
         ["Keep what was installed"] = "Manter o que foi instalado",
         // Setup 1.2.5 validation fixes
-        ["Close The Sims 3, its launcher and the restart host (ts3wrap.exe) to continue."] = "Feche o The Sims 3, o launcher e o reinício do jogo (ts3wrap.exe) para continuar.",
-        ["Close The Sims 3, its launcher and the restart host (ts3wrap.exe) to update."] = "Feche o The Sims 3, o launcher e o reinício do jogo (ts3wrap.exe) para atualizar.",
+        ["Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to continue."] = "Feche o The Sims 3, o launcher, o reinício do jogo (ts3wrap.exe) e o RTX Remix bridge (NvRemixBridge.exe) para continuar.",
+        ["Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to update."] = "Feche o The Sims 3, o launcher, o reinício do jogo (ts3wrap.exe) e o RTX Remix bridge (NvRemixBridge.exe) para atualizar.",
         ["Setup could not find {0}. Download the Sims 3 Performance Patch again, or choose the downloaded file again."] = "O instalador não achou {0}. Baixe o Sims 3 Performance Patch de novo ou escolha o arquivo baixado de novo.",
-        ["Setup could not put the files back while The Sims 3, its launcher or the restart host runs. Close them, then click Restore on the newest point in Repair or remove."] = "O instalador não conseguiu devolver os arquivos enquanto o The Sims 3, o launcher ou o reinício do jogo estão abertos. Feche-os e clique em Restaurar no ponto mais recente em Reparar ou remover.",
+        ["Setup could not put the files back while The Sims 3, its launcher, the restart host or the RTX Remix bridge runs. Close them, then click Restore on the newest point in Repair or remove."] = "O instalador não conseguiu devolver os arquivos enquanto o The Sims 3, o launcher, o reinício do jogo ou o RTX Remix bridge estão abertos. Feche-os e clique em Restaurar no ponto mais recente em Reparar ou remover.",
         ["Frame generation was turned off with the removal and stays off; turn it on again in Components if you want it."] = "A geração de quadros foi desligada com a remoção e continua desligada; ligue de novo em Componentes se quiser.",
         ["Setup could not update itself"] = "O instalador não conseguiu se atualizar",
         ["Some changes did not apply"] = "Algumas mudanças não foram aplicadas",
         ["Not changed: {0}"] = "Não mudou: {0}",
         ["The AMD driver did not accept the change. You can turn it off by hand in AMD Software: Gaming > Graphics > AMD Fluid Motion Frames."] = "O driver da AMD não aceitou a mudança. Você pode desativar à mão no AMD Software: Jogos > Gráficos > AMD Fluid Motion Frames.",
         ["The NVIDIA driver did not accept the change. You can turn it off by hand with NVIDIA Profile Inspector."] = "O driver da NVIDIA não aceitou a mudança. Você pode desativar à mão com o NVIDIA Profile Inspector.",
+        // Setup 1.2.6 validation fixes
+        ["Windows did not let Setup change the driver settings. Close AMD Software, then try again."] = "O Windows não deixou o instalador mudar as configurações do driver. Feche o AMD Software e tente de novo.",
+        ["The download of {0} was damaged. Try again; if it repeats, an antivirus web shield or a proxy may be changing downloads."] = "O download de {0} veio danificado. Tente de novo; se repetir, um escudo web de antivírus ou um proxy pode estar alterando os downloads.",
+        ["Your antivirus blocked a file Setup needs; add an exception for {0} and run Setup again."] = "Seu antivírus bloqueou um arquivo de que o instalador precisa; adicione uma exceção para {0} e abra o instalador de novo.",
     };
 }

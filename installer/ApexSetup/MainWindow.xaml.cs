@@ -125,7 +125,10 @@ public sealed partial class MainWindow : Window
                     {
                         App.Log(e);
                         SetupUpdateInfo.IsOpen = false;
-                        _ = ShowDialog(new ContentDialog { Title = T("Setup could not update itself"), Content = ErrorContent(ErrorText(e)), CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
+                        // (the new exe quarantined or blocked by an antivirus: said as such)
+                        var shown = e is FileNotFoundException || e is System.ComponentModel.Win32Exception { NativeErrorCode: 2 or 225 or 226 } || Engine.IsVirusBlock(e)
+                            ? Engine.Antivirus(SelfUpdate.AssetName, Path.GetDirectoryName(file) ?? "") : e;
+                        _ = ShowDialog(new ContentDialog { Title = T("Setup could not update itself"), Content = ErrorContent(ErrorText(shown)), CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
                     }
                 });
         }
@@ -350,8 +353,9 @@ public sealed partial class MainWindow : Window
         };
         FooterNote.Text = _step switch
         {
-            GameStep or ComponentsStep when _running => T("Close The Sims 3, its launcher and the restart host (ts3wrap.exe) to continue."),
+            GameStep or ComponentsStep when _running => T("Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to continue."),
             ComponentsStep when _loading => T("Checking the latest versions\u2026"),
+            ComponentsStep when _offline && wa.Count > 0 && _releaseError is { } le => T(le.Key, le.Args),
             ComponentsStep when _offline && wa.Count > 0 => T("Setup needs the internet to download the files."),
             ComponentsStep when work.Count == 0 && !fixes => T("Everything is installed and up to date."),
             ComponentsStep when _state?.ApexVersion is null => T("Nothing changes until you click Install."),
@@ -467,7 +471,7 @@ public sealed partial class MainWindow : Window
                     NavigateUri = new Uri($"https://github.com/{Releases.Apex}/releases/tag/{Uri.EscapeDataString(rel.Tag)}") });
             CardRow(UpdateList, left, $"{(Known(c) is { Length: > 0 } v ? v : "?")} \u2192 {Latest(c)}", "ApexSoftTextBrush");
         }
-        if (_running) CardStrip(UpdateList, T("Close The Sims 3, its launcher and the restart host (ts3wrap.exe) to update."), null);
+        if (_running) CardStrip(UpdateList, T("Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to update."), null);
 
     }
 
@@ -548,7 +552,7 @@ public sealed partial class MainWindow : Window
             // checked at every start: the player learns about a new release here, without visiting GitHub
             var lines = ups.Select(c => T("{0} {1} → {2}", Name(c), Known(c) is { Length: > 0 } v ? v : "?", Latest(c)!));
             SetInfo(WelcomeInfo, InfoBarSeverity.Informational, T("Updates available"),
-                string.Join(", ", lines) + ". " + (_running ? T("Close The Sims 3, its launcher and the restart host (ts3wrap.exe) to update.") : T("Update now installs them.")));
+                string.Join(", ", lines) + ". " + (_running ? T("Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to update.") : T("Update now installs them.")));
         }
         // (a game with Apex, checked and current: the status card's header says so)
         else WelcomeInfo.IsOpen = false;
@@ -851,7 +855,15 @@ public sealed partial class MainWindow : Window
         ? (T(w ? "Turns on when you apply the changes." : "Turns off when you apply the changes."), "ApexAccentBrush") : null;
 
     // "Apex's frame limit is now 60 fps" only while it still is
-    bool LimitNow60 => _fpsNow == Engine.FrameGenFps;
+    bool LimitNow60 => _game is { } lg && ReadFpsLimit(lg) == Engine.FrameGenFps; // (read now: _fpsNow is refreshed after the rows)
+
+    // Apex's frame limit in the game's ApexRadiance.toml: 0 for none, null when the game has not made the file
+    static int? ReadFpsLimit(Game g)
+    {
+        var toml = Engine.ApexToml(Scan.DocumentsFor(g));
+        try { return File.Exists(toml) ? Engine.FpsLimitKey(File.ReadAllText(toml)) ?? 0 : null; }
+        catch (IOException) { return null; }
+    }
 
     void RefreshSmooth(State s, Game g)
     {
@@ -859,7 +871,8 @@ public sealed partial class MainWindow : Window
         var sm = _smooth!;
         // no NVIDIA card (or no driver to ask): no row; an NVIDIA card that cannot run it: the row, off, with the reason
         SmoothCard.Visibility = sm.Card is null && sm.Error is null ? Visibility.Collapsed : Visibility.Visible;
-        var blocked = SmoothMotion.Blocked(sm, s.Layer == Layer.Bridge, SmoothMotion.SetupTurnedOn);
+        // (the bridge installed and staying: a pending change of renderer away from it blocks a turn-on)
+        var blocked = SmoothMotion.Blocked(sm, s.Layer == Layer.Bridge && _renderer == RBridge, SmoothMotion.SetupTurnedOn);
         if (blocked is not null) _smoothWant = null;
         _fillingSmooth = true;
         SmoothToggle.IsOn = _smoothWant ?? sm.On;
@@ -940,10 +953,7 @@ public sealed partial class MainWindow : Window
     {
         var usable = SmoothCard.Visibility == Visibility.Visible && (SmoothToggle.IsEnabled || SmoothToggle.IsOn)
                   || AfmfCard.Visibility == Visibility.Visible && (AfmfToggle.IsEnabled || AfmfToggle.IsOn);
-        var toml = Engine.ApexToml(Scan.DocumentsFor(g));
-        int? now = null;
-        try { now = File.Exists(toml) ? Engine.FpsLimitKey(File.ReadAllText(toml)) ?? 0 : null; }
-        catch (IOException) { }
+        var now = ReadFpsLimit(g);
         FpsCard.Visibility = usable && now is not null ? Visibility.Visible : Visibility.Collapsed;
         if (now is null) { _fpsWant = null; _fpsCustomOpen = false; return; }
         if (_fpsNow != now) _fpsWant = null; // (the file changed under the picker: start again from it)
@@ -978,7 +988,7 @@ public sealed partial class MainWindow : Window
         SetState(FpsPill, _fpsWant is { } p ? (T("Changes to {0} when you apply the changes.", p == 0 ? T("no limit") : T("{0} fps", p))
                 + (active is null ? "" : " " + Seen(p)), "ApexAccentBrush")
             : _fpsError == "Dry run: Setup changes nothing." ? (T(_fpsError), "ApexMutedBrush")
-            : _fpsError is not null ? (T("Could not change Apex's frame limit: {0}", T(_fpsError)), "ApexWarningBrush")
+            : _fpsError is not null ? (T("Could not change Apex's frame limit: {0}", _fpsError), "ApexWarningBrush")
             : (Seen(shown), active is null ? "ApexMutedBrush" : "ApexAccentBrush"));
     }
 
@@ -986,7 +996,15 @@ public sealed partial class MainWindow : Window
     {
         if (_fillingFps || FpsCombo.SelectedItem is not ComboBoxItem { Tag: int v } || _fpsNow is not { } now) return;
         _fpsCustomOpen = v == FpsCustomTag;
-        if (_fpsCustomOpen) { FpsCustom.Visibility = Visibility.Visible; return; }
+        if (_fpsCustomOpen)
+        {
+            // the number shown is the choice: pending at once (60, or the limit now), so it can be applied as it is
+            FpsCustom.Visibility = Visibility.Visible;
+            _fpsWant = Engine.PendingFps(double.IsNaN(FpsCustom.Value) ? Engine.FrameGenFps : (int)Math.Round(FpsCustom.Value), now);
+            _fpsError = null;
+            Later(RefreshComponents);
+            return;
+        }
         _fpsWant = v < 0 ? null : Engine.PendingFps(v, now);
         _fpsError = null;
         Later(RefreshComponents); // (after the list's own selection has finished)
@@ -1000,63 +1018,63 @@ public sealed partial class MainWindow : Window
         Later(RefreshComponents);
     }
 
-    // the pending driver and frame limit changes, in the order Apply runs them (the limit first: frame generation turned on then
-    // finds it set and leaves it); each returns why it failed, or null. A failed automatic frame limit is logged, never the
-    // driver change's error.
-    List<(string Label, Func<string?> Run)> SettingChanges()
+    // the pending driver and frame limit changes, in the order Apply runs them (Engine.PlanFrameGen); each returns why it failed in
+    // the player's words for the frame limit, or the driver's raw text (worded by FriendlyFrameGenError on its row), or null. A
+    // failed automatic frame limit is logged, never the driver change's error.
+    public sealed record SettingChange(string Label, string Kind, bool? On, Func<string?> Run);
+    List<SettingChange> SettingChanges(IEnumerable<string>? removals = null)
     {
-        var l = new List<(string, Func<string?>)>();
+        var l = new List<SettingChange>();
         if (_game is not { } g) return l;
-        string? Safe(Func<string?> f) { try { return f(); } catch (Exception ex) { return ex.Message; } }
-        // the automatic 60 fps only when the player chose no limit in this Apply, and not for AFMF on a PC with an NVIDIA card
-        // (the game may run on that card, where the AMD driver's frame generation does nothing)
-        var chosen = _fpsWant is not null;
-        bool AutoLimit(string feature)
+        string? Safe(Func<string?> f) { try { return f(); } catch (Exception ex) { App.Log(ex); return ErrorText(ex); } }
+        void AutoLimit(string feature, ref bool flag)
         {
-            try { return Engine.SetFpsLimitIfNone(g, feature); }
-            catch (Exception ex) { App.Log(ex); return false; }
+            try { flag = Engine.SetFpsLimitIfNone(g, feature); }
+            catch (Exception ex) { App.Log(ex); }
         }
-        if (_fpsWant is { } fps)
-            l.Add((T("Apex frame limit: {0}", fps == 0 ? T("no limit") : T("{0} fps", fps)), () => Safe(() =>
+        foreach (var c in Engine.PlanFrameGen(_fpsWant, _smoothWant, _afmfWant, removals ?? [], _smooth?.Card is not null))
+            switch (c.Kind)
             {
-                Engine.SetFpsLimit(g, fps);
-                return null;
-            })));
-        if (_smoothWant is { } sw)
-            l.Add((T(sw ? "Turn on {0}" : "Turn off {0}", "NVIDIA Smooth Motion"), () => Safe(() =>
-            {
-                var err = SmoothMotion.Set(sw);
-                // read back in a new session without dropping Setup's record: a change the driver did not keep is reported, and
-                // an "on" that did not take undone
-                if (err is null && !SmoothMotion.Took(sw, SmoothMotion.Read(tidy: false))) { if (sw) SmoothMotion.Undo(true); err = SmoothMotion.DidNotTake; }
-                if (err is null && sw && !chosen) _smoothFps = AutoLimit("NVIDIA Smooth Motion");
-                return err;
-            })));
-        var hybrid = _smooth?.Card is not null;
-        if (_afmfWant is { } aw)
-            l.Add((T(aw ? "Turn on {0}" : "Turn off {0}", "AMD Fluid Motion Frames"), () => Safe(() =>
-            {
-                var err = Afmf.Set(aw);
-                if (err is null && Afmf.Read() is var after && (after.Error is not null || after.On != aw)) { if (aw) Afmf.Set(false); err = SmoothMotion.DidNotTake; }
-                if (err is null && aw && !chosen && !hybrid) _afmfFps = AutoLimit("AMD Fluid Motion Frames");
-                return err;
-            })));
+                case "fps":
+                    var fps = c.Fps!.Value;
+                    l.Add(new(T("Apex frame limit: {0}", fps == 0 ? T("no limit") : T("{0} fps", fps)), c.Kind, null, () => Safe(() => { Engine.SetFpsLimit(g, fps); return null; })));
+                    break;
+                case "nv":
+                    var sw = c.On!.Value;
+                    l.Add(new(T(sw ? "Turn on {0}" : "Turn off {0}", "NVIDIA Smooth Motion"), c.Kind, sw, () => Safe(() =>
+                    {
+                        // read back in a new session without dropping Setup's record
+                        var err = Engine.VerifyChange(sw, () => SmoothMotion.Set(sw), () => SmoothMotion.Read(tidy: false) is var r ? (r.On, r.Error) : default,
+                            () => SmoothMotion.Undo(true), SmoothMotion.KeepRecord);
+                        if (err is null && c.AutoLimit) AutoLimit("NVIDIA Smooth Motion", ref _smoothFps);
+                        return err;
+                    })));
+                    break;
+                case "amd":
+                    var aw = c.On!.Value;
+                    l.Add(new(T(aw ? "Turn on {0}" : "Turn off {0}", "AMD Fluid Motion Frames"), c.Kind, aw, () => Safe(() =>
+                    {
+                        var err = Engine.VerifyChange(aw, () => Afmf.Set(aw), () => Afmf.Read() is var r ? (r.On, r.Error) : default, () => Afmf.Set(false));
+                        if (err is null && c.AutoLimit) AutoLimit("AMD Fluid Motion Frames", ref _afmfFps);
+                        return err;
+                    })));
+                    break;
+            }
         return l;
     }
 
     // after Apply ran them: each error to its row, the pending state cleared, the drivers and the file read again
-    void AfterSettingChanges(Dictionary<string, string?> errors)
+    void AfterSettingChanges(List<(SettingChange Change, string? Error)> done)
     {
-        string? E(string name) => errors.FirstOrDefault(p => p.Key.Contains(name)).Value;
-        if (_smoothWant is { } sw) { _smoothPending = E("NVIDIA Smooth Motion"); _smoothErrorOn = sw; }
-        if (_afmfWant is { } aw) { _afmfPending = E("AMD Fluid Motion Frames"); _afmfErrorOn = aw; }
-        if (_fpsWant is not null)
-        {
-            _fpsError = errors.FirstOrDefault(p => p.Key.StartsWith(T("Apex frame limit: {0}", "").TrimEnd())).Value;
-            _smoothFps = _afmfFps = false; // (the player's own limit now: no "is now 60 fps")
-        }
-        foreach (var (k, v) in errors) if (v is not null && v != "Dry run: Setup changes nothing.") App.Log(new InvalidOperationException(k + ": " + v));
-        _lastChanges = errors.ToList();
+        foreach (var (c, err) in done)
+            switch (c.Kind)
+            {
+                case "nv": _smoothPending = err; _smoothErrorOn = c.On ?? true; break;
+                case "amd": _afmfPending = err; _afmfErrorOn = c.On ?? true; break;
+                case "fps": _fpsError = err; _smoothFps = _afmfFps = false; break; // (the player's own limit now: no "is now 60 fps")
+            }
+        foreach (var (c, err) in done) if (err is not null && err != "Dry run: Setup changes nothing.") App.Log(new InvalidOperationException(c.Label + ": " + err));
+        _lastChanges = done.Select(d => (d.Change.Label, d.Change.Kind, d.Change.On, d.Error)).ToList();
         _smoothWant = _afmfWant = null;
         _fpsWant = null;
         _fpsCustomOpen = false;
@@ -1065,13 +1083,13 @@ public sealed partial class MainWindow : Window
     }
 
     // the last Apply's driver and frame limit changes and their errors, for the Done screen
-    List<KeyValuePair<string, string?>> _lastChanges = new();
+    List<(string Label, string Kind, bool? On, string? Error)> _lastChanges = new();
 
-    // a change's error in the player's words, for the Done screen
-    string ChangeError(string label, string error) =>
-        label.Contains("NVIDIA Smooth Motion") ? T(Engine.FriendlyFrameGenError(error, false, label.StartsWith(T("Turn on {0}", "").TrimEnd())))
-        : label.Contains("AMD Fluid Motion Frames") ? T(Engine.FriendlyFrameGenError(error, true, label.StartsWith(T("Turn on {0}", "").TrimEnd())))
-        : T("Could not change Apex's frame limit: {0}", T(error));
+    // a change's error in the player's words, for the Done screen (the frame limit's is worded already)
+    string ChangeError(string kind, bool? on, string error) =>
+        kind == "nv" ? T(Engine.FriendlyFrameGenError(error, false, on ?? true))
+        : kind == "amd" ? T(Engine.FriendlyFrameGenError(error, true, on ?? true))
+        : T("Could not change Apex's frame limit: {0}", error);
 
     bool _fillingRenderer;
     // the renderer choices as cards: a radio button over the whole card, the chosen card outlined in the accent
@@ -1393,7 +1411,7 @@ public sealed partial class MainWindow : Window
         rows.AddRange(order.Select(c => AddTask(host, Name(c))));
         if (!settingsOnly) rows.Add(AddTask(host, T("Fix incompatible settings")));
         // the pending driver and frame limit changes: their own rows, after the components; each failure stays on its row
-        var changes = inline ? new List<(string Label, Func<string?> Run)>() : SettingChanges();
+        var changes = inline ? new List<SettingChange>() : SettingChanges(dels);
         var changeRows = changes.Select(c => AddTask(host, c.Label)).ToList();
         foreach (var r in changeRows) r(0);
         void Mark(int active)
@@ -1412,6 +1430,7 @@ public sealed partial class MainWindow : Window
         });
         // one restore point for the whole change (the engine's own calls join it)
         RestorePoints.Scope? point = null;
+        var engineDone = false; // (an error after the engine's part is no reason to undo a finished install)
         try
         {
             if (!settingsOnly) await Task.Run(async () =>
@@ -1426,20 +1445,21 @@ public sealed partial class MainWindow : Window
                     finally { try { Directory.Delete(GitHubSource.TempRoot, true); } catch (Exception e) when (e is IOException or UnauthorizedAccessException) { } }
                 }
             });
-            var errors = new Dictionary<string, string?>();
+            engineDone = true;
+            var done = new List<(SettingChange, string?)>();
             for (int i = 0; i < changes.Count; i++)
             {
                 changeRows[i](1);
                 var err = await Task.Run(changes[i].Run);
-                errors[changes[i].Label] = err;
+                done.Add((changes[i], err));
                 changeRows[i](err is null ? 2 : 3);
                 installBar.Value = Math.Max(installBar.Value, (i + 1.0) / changes.Count);
             }
-            if (changes.Count > 0) AfterSettingChanges(errors);
+            if (changes.Count > 0) AfterSettingChanges(done);
             // a turn-off the removal could not make: its row and the Done screen say so
             var (nvOff, amdOff) = Engine.PeekFrameGenOffError();
-            if (nvOff is not null) { smoothOffRow?.Invoke(3); _lastChanges.Add(new(T("Turn off {0}", "NVIDIA Smooth Motion"), nvOff)); }
-            if (amdOff is not null) { afmfOffRow?.Invoke(3); _lastChanges.Add(new(T("Turn off {0}", "AMD Fluid Motion Frames"), amdOff)); }
+            if (nvOff is not null) { smoothOffRow?.Invoke(3); _lastChanges.Add((T("Turn off {0}", "NVIDIA Smooth Motion"), "nv", false, nvOff)); }
+            if (amdOff is not null) { afmfOffRow?.Invoke(3); _lastChanges.Add((T("Turn off {0}", "AMD Fluid Motion Frames"), "amd", false, amdOff)); }
             _lastInstall = order;
             _lastRemove = dels;
             if (order.Contains(Components.S3pp)) _s3ppArchive = null;
@@ -1458,16 +1478,17 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            _busy = false;
+            // (busy until the dialogs close: a background install cannot start and close the undo dialog)
             _inline = false;
             _defaultsFor = null;
             App.Log(ex);
-            var net = ex is HttpRequestException or TaskCanceledException;
+            AfterFrameGenOff(); // (the drivers read again, a removal's turn-off error taken once, not left for the next Apply)
+            var net = Engine.IsNetwork(ex);
             var title = net ? T("Setup can't reach GitHub") : T("Setup could not finish");
             var text = ErrorText(ex);
             // the files it changed before the error are put back: half an install is the worse state. Keeping them is the
             // second choice (Repair or remove sets them right later)
-            if (point?.Committed is { } p)
+            if (!engineDone && point?.Committed is { } p)
             {
                 var keep = await ShowDialog(new ContentDialog { Title = title, Content = ErrorContent(text + "\n\n" + T("Setup puts back the files it changed.")),
                     PrimaryButtonText = T("Undo these changes"), SecondaryButtonText = T("Keep what was installed"),
@@ -1478,11 +1499,14 @@ public sealed partial class MainWindow : Window
                     // (Restore needs the game, its launcher and the restart host closed: said, not skipped in silence)
                     if (_running || Games.IsRunning())
                     {
-                        await ShowDialog(new ContentDialog { Title = title, Content = ErrorContent(T("Setup could not put the files back while The Sims 3, its launcher or the restart host runs. Close them, then click Restore on the newest point in Repair or remove.")),
+                        await ShowDialog(new ContentDialog { Title = title, Content = ErrorContent(T("Setup could not put the files back while The Sims 3, its launcher, the restart host or the RTX Remix bridge runs. Close them, then click Restore on the newest point in Repair or remove.")),
                             CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
+                        _busy = false;
                         return;
                     }
-                    await RestoreAsync(p, ask: false);
+                    _busy = false;
+                    // (a newer point, such as a frame limit change, would be undone too: asked first)
+                    await RestoreAsync(p, ask: RestorePoints.List(g.Bin).FirstOrDefault()?.Dir != p.Dir);
                     // the driver's frame generation is not in a restore point: the removal turned it off, and it stays off
                     if (smoothOff || afmfOff)
                         await Message(T("Setup could not finish"), T("Frame generation was turned off with the removal and stays off; turn it on again in Components if you want it."));
@@ -1491,7 +1515,8 @@ public sealed partial class MainWindow : Window
             }
             else await ShowDialog(new ContentDialog { Title = title, Content = ErrorContent(text + (touched ? "\n\n" + T("Repair or remove sets the game right.") : "")),
                 CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
-            Show(from);
+            _busy = false;
+            Show(engineDone && !inline ? DoneStep : from);
         }
     }
 
@@ -1530,14 +1555,14 @@ public sealed partial class MainWindow : Window
         foreach (var c in _lastRemove)
             DoneSummary.Children.Add(new TextBlock { Text = T("Removed: {0}", Name(c)), FontSize = 12, Foreground = (Brush)Application.Current.Resources["ApexSoftTextBrush"] });
         // the driver and frame limit changes: done ones as their task, failed ones with the reason in the player's words
-        foreach (var (label, err) in _lastChanges)
+        foreach (var (label, kind, on, err) in _lastChanges)
             DoneSummary.Children.Add(new TextBlock
             {
-                Text = err is null ? label : T("Not changed: {0}", label) + "\n" + ChangeError(label, err),
+                Text = err is null ? label : T("Not changed: {0}", label) + "\n" + ChangeError(kind, on, err),
                 FontSize = 12, TextWrapping = TextWrapping.Wrap,
                 Foreground = (Brush)Application.Current.Resources[err is null ? "ApexSoftTextBrush" : "ApexWarningBrush"],
             });
-        if (_lastChanges.Any(p => p.Value is not null && p.Value != "Dry run: Setup changes nothing.")) { DoneTitle.Text = T("Some changes did not apply"); DoneText.Text = ""; }
+        if (_lastChanges.Any(p => p.Error is not null && p.Error != "Dry run: Setup changes nothing.")) { DoneTitle.Text = T("Some changes did not apply"); DoneText.Text = ""; }
         DoneSummaryCard.Visibility = DoneSummary.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
@@ -1612,7 +1637,7 @@ public sealed partial class MainWindow : Window
     async Task RestoreAsync(RestorePoint p, bool ask = true, InfoBar? bar = null)
     {
         if (_game is not { } g || _busy) return;
-        if (_running) { SetInfo(bar ?? ManageInfo, InfoBarSeverity.Warning, T("Close The Sims 3, its launcher and the restart host (ts3wrap.exe) to continue."), ""); return; }
+        if (_running) { SetInfo(bar ?? ManageInfo, InfoBarSeverity.Warning, T("Close The Sims 3, its launcher, the restart host (ts3wrap.exe) and the RTX Remix bridge (NvRemixBridge.exe) to continue."), ""); return; }
         if (ask && !await Confirm(T("Restore this point?"), T("Setup puts back the files as they were before this change, and undoes every change made after it. Close the game first."), T("Restore"))) return;
         await Guarded(() =>
         {
@@ -1781,9 +1806,9 @@ public sealed partial class MainWindow : Window
         var plain = ex switch
         {
             SetupException se => T(se.Key, se.Args),
-            HttpRequestException or TaskCanceledException => T("Check your internet connection, then try again."),
+            _ when Engine.IsNetwork(ex) => T("Check your internet connection, then try again."),
             UnauthorizedAccessException => T("Windows did not let Setup change a file. If Windows Security's Controlled folder access is on, allow ApexRadianceSetup.exe there; a read-only or locked file can also cause this."),
-            IOException when Engine.IsVirusBlock(ex) => T(Engine.Antivirus(null, GitHubSource.TempRoot + ", " + (_game?.Bin ?? "Game\\Bin")).Key, ex.Message, GitHubSource.TempRoot + ", " + (_game?.Bin ?? "Game\\Bin")),
+            IOException when Engine.IsVirusBlock(ex) => T("Your antivirus blocked a file Setup needs; add an exception for {0} and run Setup again.", GitHubSource.TempRoot + ", " + (_game?.Bin ?? "Game\\Bin")),
             IOException => T("A file Setup needed is in use or could not be written. Close the game and other programs using it, then try again."),
             // an English text Setup throws and translates (Close The Sims 3 first, the restart host's wait): that text alone
             _ when Has(ex.Message) => T(ex.Message),
