@@ -1,0 +1,415 @@
+0022: mesh read-back for the Direct3D 9 shadow tiles (real-time GI work package MC-3). Client exports RemixBridge_GiMeshFetch(lite, &ticket) and RemixBridge_GiMeshRead(ticket, pos, maxVertices, tri, maxTriangles, &vertices, &triangles): the GI worker resolves the LITE through the package index of patch 0020 (built first if no object batch has) and writes the model's caster mesh (shadow LOD, else LOD 0; model space, xyz floats a vertex, abc a triangle) into GiMeshSlot, a 256 KB mapping of its own ("GiMesh"), so the GI block keeps its layout. One fetch is in flight at a time: a second fetch answers D3DERR_WASSTILLDRAWING until the first is read. The read answers S_FALSE while pending, D3DERR_NOTFOUND for a LITE without a mesh, D3DERR_MOREDATA for a mesh over the slot or the caller's arrays. Counter word 21 of RemixBridge_GiReadCounters counts the answers. Test: test-gi-mesh.cmd (test_gi_mesh_device: the chair read back equal to the package reader's, an unknown LITE, a short array, 50 timed fetches).
+Applies after 0020 (and after 0021 once the GI merge renumbers it; both append to Commands and the .def).
+diff --git a/bridge/src/client/d3d9_gi.cpp b/bridge/src/client/d3d9_gi.cpp
+index b2d050b6..5ee67db1 100644
+--- a/bridge/src/client/d3d9_gi.cpp
++++ b/bridge/src/client/d3d9_gi.cpp
+@@ -55,6 +55,14 @@
+ // object carries GiObjectRemoved. The server reads the game's packages once, at the first batch, and keeps the latest
+ // record of each object. Words 14 to 21 of the counters follow it (GiObjectCounter).
+ //   S_OK when sent. E_NOTIMPL before RemixBridge_GiOpen. D3DERR_INVALIDCALL for a null list.
++// RemixBridge_GiMeshFetch(lite, &ticket) asks the worker for one LITE's caster mesh (GiMeshSlot, util_gi.h). One fetch is
++// in flight at a time; the worker builds the package index first if no object batch has.
++//   S_OK with a ticket. D3DERR_WASSTILLDRAWING while an earlier fetch is not read. E_NOTIMPL before RemixBridge_GiOpen.
++// RemixBridge_GiMeshRead(ticket, pos, maxVertices, tri, maxTriangles, &vertices, &triangles) copies the answer out.
++//   S_FALSE while pending. S_OK with the mesh in model space (xyz floats a vertex, abc a triangle).
++//   D3DERR_NOTFOUND for a LITE without a model or a readable mesh.
++//   D3DERR_MOREDATA when the mesh exceeds the slot or the caller's arrays; the counts are still set.
++//   Every answer other than S_FALSE ends the fetch.
+ // A finished, failed or cancelled ticket is unknown afterwards.
+ 
+ namespace {
+@@ -67,6 +75,8 @@ namespace {
+   bool s_openSent = false;
+   bool s_noServer = false;
+   ULONGLONG s_openDeadline = 0;
++  uint32_t s_meshSeq = 0;
++  uint32_t s_meshTicket = 0;  // the mesh fetch in flight, 0 when none
+ 
+   bool giEnabled() {
+     static const bool enabled = bridge_util::Config::getOption<bool>("client.giServer", false);
+@@ -265,6 +275,63 @@ extern "C" {
+     return S_OK;
+   }
+ 
++  HRESULT __stdcall RemixBridge_GiMeshFetch(uint64_t lite, uint32_t* pTicket) {
++    if (pTicket == nullptr) {
++      return D3DERR_INVALIDCALL;
++    }
++    if (!giEnabled() || openedBlock() == nullptr || bridge_util::giMeshSlot() == nullptr) {
++      return E_NOTIMPL;
++    }
++    if (!gbBridgeRunning) {
++      return D3DERR_DEVICELOST;
++    }
++    std::lock_guard<std::mutex> lock(s_mutex);
++    if (s_meshTicket != 0) {
++      return D3DERR_WASSTILLDRAWING;
++    }
++    s_meshSeq = s_meshSeq + 1 != 0 ? s_meshSeq + 1 : 1;
++    s_meshTicket = s_meshSeq;
++    const bridge_util::GiMeshFetchRecord record { s_meshTicket, 0, lite };
++    ClientMessage c(Commands::Bridge_GiMeshFetch, 0, Commands::FlagBits::AsyncResult);
++    c.send_data(uint32_t(sizeof(record)), &record);
++    *pTicket = s_meshTicket;
++    return S_OK;
++  }
++
++  HRESULT __stdcall RemixBridge_GiMeshRead(uint32_t ticket, float* pPos, uint32_t maxVertices, uint32_t* pTri, uint32_t maxTriangles,
++                                           uint32_t* pVertices, uint32_t* pTriangles) {
++    bridge_util::GiMeshSlot* const pSlot = bridge_util::giMeshSlot();
++    if (pVertices == nullptr || pTriangles == nullptr || (maxVertices != 0 && pPos == nullptr) || (maxTriangles != 0 && pTri == nullptr)) {
++      return D3DERR_INVALIDCALL;
++    }
++    if (pSlot == nullptr) {
++      return E_NOTIMPL;
++    }
++    std::lock_guard<std::mutex> lock(s_mutex);
++    if (ticket == 0 || ticket != s_meshTicket) {
++      return D3DERR_INVALIDCALL;
++    }
++    if (pSlot->answeredSeq.load(std::memory_order_acquire) != ticket) {
++      if (!gbBridgeRunning) {
++        s_meshTicket = 0;
++        return D3DERR_DEVICELOST;
++      }
++      return S_FALSE;
++    }
++    s_meshTicket = 0;
++    *pVertices = pSlot->vertices;
++    *pTriangles = pSlot->triangles;
++    if (pSlot->hresult != S_OK) {
++      return pSlot->hresult;
++    }
++    if (pSlot->vertices > maxVertices || pSlot->triangles > maxTriangles) {
++      return D3DERR_MOREDATA;
++    }
++    std::memcpy(pPos, pSlot->data, size_t(pSlot->vertices) * 12);
++    std::memcpy(pTri, pSlot->data + size_t(pSlot->vertices) * 12, size_t(pSlot->triangles) * 12);
++    return S_OK;
++  }
++
+   HRESULT __stdcall RemixBridge_GiReadCounters(uint32_t* pCounters, uint32_t count) {
+     GiSharedBlock* const pBlock = openedBlock();
+     if (pCounters == nullptr) {
+diff --git a/bridge/src/client/d3d9_lss.def b/bridge/src/client/d3d9_lss.def
+index e8b88e8e..4c76dd02 100644
+--- a/bridge/src/client/d3d9_lss.def
++++ b/bridge/src/client/d3d9_lss.def
+@@ -37,3 +37,5 @@ EXPORTS
+   RemixBridge_GiPixelReadCounters
+ 
+   RemixBridge_GiObjects
++  RemixBridge_GiMeshFetch
++  RemixBridge_GiMeshRead
+diff --git a/bridge/src/server/gi_objects.h b/bridge/src/server/gi_objects.h
+index 82505ec6..8d958b1e 100644
+--- a/bridge/src/server/gi_objects.h
++++ b/bridge/src/server/gi_objects.h
+@@ -149,6 +149,41 @@ namespace gi_objects {
+     return index;
+   }
+ 
++  // Worker: one LITE's caster mesh into the GiMeshSlot (RemixBridge_GiMeshFetch, MC-3). The answer's sequence is stored last.
++  inline void fetch(const std::vector<uint8_t>& blob) {
++    bridge_util::GiSharedBlock* const pBlock = bridge_util::giBlock();
++    bridge_util::GiMeshSlot* const pSlot = bridge_util::giMeshSlot();
++    if (pBlock == nullptr || pSlot == nullptr || blob.size() != sizeof(bridge_util::GiMeshFetchRecord)) {
++      return;
++    }
++    const auto start = std::chrono::steady_clock::now();
++    bridge_util::GiMeshFetchRecord record;
++    std::memcpy(&record, blob.data(), sizeof(record));
++    if (!g_library) {
++      buildIndex(pBlock);
++    }
++    const uint32_t index = resolve(record.lite, pBlock);
++    pSlot->vertices = 0;
++    pSlot->triangles = 0;
++    pSlot->hresult = D3DERR_NOTFOUND;
++    if (index != kMissing) {
++      std::lock_guard<std::mutex> lock(g_mutex);
++      const Mesh& mesh = g_meshes[index];
++      const size_t posBytes = mesh.pos.size() * 4;
++      const size_t triBytes = mesh.tri.size() * 4;
++      pSlot->vertices = uint32_t(mesh.pos.size() / 3);
++      pSlot->triangles = uint32_t(mesh.tri.size() / 3);
++      pSlot->hresult = posBytes + triBytes > bridge_util::GiMeshSlot::kBytes ? D3DERR_MOREDATA : S_OK;
++      if (pSlot->hresult == S_OK) {
++        std::memcpy(pSlot->data, mesh.pos.data(), posBytes);
++        std::memcpy(pSlot->data + posBytes, mesh.tri.data(), triBytes);
++      }
++    }
++    pSlot->workerUs = uint32_t(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count());
++    ++pBlock->objectCounters[bridge_util::GiMeshesFetched];
++    pSlot->answeredSeq.store(record.seq, std::memory_order_release);
++  }
++
+   // Worker: one batch of GiObject records, in order
+   inline void apply(const std::vector<uint8_t>& blob) {
+     bridge_util::GiSharedBlock* const pBlock = bridge_util::giBlock();
+diff --git a/bridge/src/server/gi_server.h b/bridge/src/server/gi_server.h
+index 781425e7..4b1d6fcd 100644
+--- a/bridge/src/server/gi_server.h
++++ b/bridge/src/server/gi_server.h
+@@ -279,6 +279,17 @@ namespace gi_server {
+     gi::queueJob(job);
+   }
+ 
++  // Bridge_GiMeshFetch: hands one LITE's mesh fetch to the worker, which answers in the GiMeshSlot.
++  inline void meshFetch(const void* pData, uint32_t size) {
++    if (!g_started || pData == nullptr || size != sizeof(bridge_util::GiMeshFetchRecord)) {
++      return;
++    }
++    auto job = std::make_shared<gi::Job>();
++    job->kind = gi::JobKind::MeshFetch;
++    job->blob.assign(static_cast<const uint8_t*>(pData), static_cast<const uint8_t*>(pData) + size);
++    gi::queueJob(job);
++  }
++
+   // Bridge_GiCancel: a cancelled job is never answered, so its slot can take the next ticket at once.
+   inline void cancel(uint32_t seq) {
+     for (auto it = g_jobs.begin(); it != g_jobs.end(); ++it) {
+diff --git a/bridge/src/server/gi_worker.cpp b/bridge/src/server/gi_worker.cpp
+index 2d5143c3..deb13f58 100644
+--- a/bridge/src/server/gi_worker.cpp
++++ b/bridge/src/server/gi_worker.cpp
+@@ -1219,8 +1219,12 @@ namespace gi {
+           continue;
+         }
+         // Objects are CPU work (the package index and the meshes): they need no device and nobody waits for them.
+-        if (job->kind == JobKind::Objects) {
+-          gi_objects::apply(job->blob);
++        if (job->kind == JobKind::Objects || job->kind == JobKind::MeshFetch) {
++          if (job->kind == JobKind::Objects) {
++            gi_objects::apply(job->blob);
++          } else {
++            gi_objects::fetch(job->blob);
++          }
+           pBlock->workerHeartbeat.fetch_add(1, std::memory_order_relaxed);
+           continue;
+         }
+diff --git a/bridge/src/server/gi_worker.h b/bridge/src/server/gi_worker.h
+index d844446a..825f1f43 100644
+--- a/bridge/src/server/gi_worker.h
++++ b/bridge/src/server/gi_worker.h
+@@ -38,6 +38,7 @@ namespace gi {
+     Scene,    // GiSubmitScene: blob holds the scene
+     Lamps,    // GiSubmitLamps: blob holds the lamp table
+     Objects,  // RemixBridge_GiObjects: blob holds GiObject records (gi_objects.h). Never answered
++    MeshFetch,  // RemixBridge_GiMeshFetch: blob holds a GiMeshFetchRecord. Answered in the GiMeshSlot
+   };
+ 
+   struct Job {
+diff --git a/bridge/src/server/main.cpp b/bridge/src/server/main.cpp
+index 91759335..9be8796c 100644
+--- a/bridge/src/server/main.cpp
++++ b/bridge/src/server/main.cpp
+@@ -3134,6 +3134,13 @@ void ProcessDeviceCommandQueue() {
+         gi_server::objects(pObjects, objectBytes);
+         break;
+       }
++      case Bridge_GiMeshFetch:
++      {
++        void* pFetch = nullptr;
++        const uint32_t fetchBytes = DeviceBridge::get_data(&pFetch);
++        gi_server::meshFetch(pFetch, fetchBytes);
++        break;
++      }
+       case Bridge_GiPixelOpen:
+         gi_pixel::open(gpD3DDevices);
+         break;
+diff --git a/bridge/src/util/util_commands.h b/bridge/src/util/util_commands.h
+index d4fc4ca2..49de8752 100644
+--- a/bridge/src/util/util_commands.h
++++ b/bridge/src/util/util_commands.h
+@@ -73,6 +73,8 @@ namespace Commands {
+     Bridge_GiPixelPass,
+     // Mesh casters (client/d3d9_gi.cpp RemixBridge_GiObjects), sent with FlagBits::AsyncResult.
+     Bridge_GiObjects,
++    // Mesh read-back (client/d3d9_gi.cpp RemixBridge_GiMeshFetch), sent with FlagBits::AsyncResult.
++    Bridge_GiMeshFetch,
+     // These are not actually official D3D9 API calls.
+     IDirect3DDevice9Ex_LinkSwapchain,
+     IDirect3DDevice9Ex_LinkBackBuffer,
+@@ -516,6 +518,7 @@ namespace Commands {
+     case Bridge_GiPixelOpen: return "Bridge_GiPixelOpen";
+     case Bridge_GiPixelPass: return "Bridge_GiPixelPass";
+     case Bridge_GiObjects: return "Bridge_GiObjects";
++    case Bridge_GiMeshFetch: return "Bridge_GiMeshFetch";
+     
+     case Bridge_UnlinkResource: return "Bridge_UnlinkResource";
+     case Bridge_UnlinkVolumeResource: return "Bridge_UnlinkVolumeResource";
+diff --git a/bridge/src/util/util_gi.h b/bridge/src/util/util_gi.h
+index c28a00fd..48f17057 100644
+--- a/bridge/src/util/util_gi.h
++++ b/bridge/src/util/util_gi.h
+@@ -132,8 +132,41 @@ namespace bridge_util {
+     GiIndexLinks = 4,        // LITEs the index links to a model
+     GiIndexMs = 5,           // time the index took on the worker, milliseconds
+     GiObjectsDropped = 6,    // records refused: a full table or a broken matrix
++    GiMeshesFetched = 7,     // RemixBridge_GiMeshFetch answers the worker wrote (MC-3)
+   };
+ 
++  // RemixBridge_GiMeshFetch / RemixBridge_GiMeshRead (MC-3): one LITE's caster mesh read back to the 32-bit side for the
++  // Direct3D 9 shadow tiles, one fetch in flight. The slot is a mapping of its own ("GiMesh"), so the GI block keeps its layout.
++  struct GiMeshFetchRecord {
++    uint32_t seq;
++    uint32_t reserved;
++    uint64_t lite;
++  };
++  static_assert(sizeof(GiMeshFetchRecord) == 16, "GiMeshFetchRecord must have the same layout in both processes");
++  struct GiMeshSlot {
++    static constexpr uint32_t kBytes = 256 * 1024;  // Holds about 10,000 triangles. The shadow LOD's 99th percentile is 5,259.
++    std::atomic<uint32_t> answeredSeq;  // the worker stores the fetch's sequence last
++    int32_t hresult;                    // S_OK, D3DERR_NOTFOUND (no model or no readable mesh) or D3DERR_MOREDATA (over kBytes)
++    uint32_t vertices;
++    uint32_t triangles;
++    uint32_t workerUs;                  // resolve and copy on the worker, microseconds
++    uint32_t reserved[3];
++    uint8_t data[kBytes];               // model space: xyz floats a vertex, then abc uint32 a triangle
++  };
++
++  // Maps the mesh slot on first use; nullptr when the mapping failed.
++  inline GiMeshSlot* giMeshSlot() {
++    static std::once_flag once;
++    static std::unique_ptr<SharedMemory> s_memory;
++    std::call_once(once, [] {
++      s_memory = std::make_unique<SharedMemory>("GiMesh", sizeof(GiMeshSlot));
++      if (s_memory->data() == nullptr) {
++        Logger::err("[Gi] The GI mesh slot could not be mapped, so mesh fetches are off.");
++      }
++    });
++    return static_cast<GiMeshSlot*>(s_memory->data());
++  }
++
+   struct GiSubmitSlot {
+     static constexpr uint32_t kBytes = 448 * 1024;
+     std::atomic<uint32_t> consumedSeq;  // the play thread stores the part's sequence once it has copied the data out
+diff --git a/bridge/test/rtx/unit/test_gi_mesh_device.cpp b/bridge/test/rtx/unit/test_gi_mesh_device.cpp
+index f911266c..7ad513be 100644
+--- a/bridge/test/rtx/unit/test_gi_mesh_device.cpp
++++ b/bridge/test/rtx/unit/test_gi_mesh_device.cpp
+@@ -27,6 +27,7 @@
+ // LITE and its caster mesh, which the server must read the same).
+ 
+ #include <algorithm>
++#include <chrono>
+ #include <cmath>
+ #include <cstdio>
+ #include <cstring>
+@@ -58,6 +59,8 @@ namespace {
+   using PFN_GiOpen = HRESULT (__stdcall*)(uint32_t*);
+   using PFN_GiObjects = HRESULT (__stdcall*)(const GiObject*, uint32_t);
+   using PFN_GiReadCounters = HRESULT (__stdcall*)(uint32_t*, uint32_t);
++  using PFN_GiMeshFetch = HRESULT (__stdcall*)(uint64_t, uint32_t*);
++  using PFN_GiMeshRead = HRESULT (__stdcall*)(uint32_t, float*, uint32_t, uint32_t*, uint32_t, uint32_t*, uint32_t*);
+   using PFN_GiPixelOpen = HRESULT (__stdcall*)(uint32_t*);
+   using PFN_GiPixelPass = HRESULT (__stdcall*)(const void*, uint32_t, IDirect3DTexture9*, IDirect3DTexture9*, IDirect3DTexture9* const*);
+   using PFN_GiPixelReadCounters = HRESULT (__stdcall*)(uint32_t*, uint32_t);
+@@ -73,6 +76,8 @@ namespace {
+ 
+   PFN_GiOpen g_giOpen = nullptr;
+   PFN_GiObjects g_objects = nullptr;
++  PFN_GiMeshFetch g_meshFetch = nullptr;
++  PFN_GiMeshRead g_meshRead = nullptr;
+   PFN_GiReadCounters g_giCounters = nullptr;
+   PFN_GiPixelOpen g_pixelOpen = nullptr;
+   PFN_GiPixelPass g_pass = nullptr;
+@@ -328,6 +333,73 @@ namespace {
+     throw std::runtime_error(pWhat);
+   }
+ 
++  // One fetch through RemixBridge_GiMeshFetch / RemixBridge_GiMeshRead. Polls without presenting first, then with.
++  // Returns the read's result and the wall time in microseconds.
++  HRESULT fetchOne(IDirect3DDevice9* pDevice, uint64_t lite, std::vector<float>& pos, std::vector<uint32_t>& tri, double& us, bool& presented) {
++    const auto start = std::chrono::steady_clock::now();
++    uint32_t ticket = 0;
++    check(g_meshFetch(lite, &ticket), "RemixBridge_GiMeshFetch");
++    pos.assign(size_t(65536) * 3, 0.0f);
++    tri.assign(size_t(65536) * 3, 0u);
++    uint32_t vertices = 0;
++    uint32_t triangles = 0;
++    presented = false;
++    for (int round = 0; round < 24000; ++round) {
++      const HRESULT hr = g_meshRead(ticket, pos.data(), 65536, tri.data(), 65536, &vertices, &triangles);
++      if (hr != S_FALSE) {
++        us = std::chrono::duration<double, std::micro>(std::chrono::steady_clock::now() - start).count();
++        pos.resize(size_t(vertices) * 3);
++        tri.resize(size_t(triangles) * 3);
++        return hr;
++      }
++      if (std::chrono::steady_clock::now() - start > std::chrono::milliseconds(20)) {
++        present(pDevice);
++        presented = true;
++      } else {
++        Sleep(0);
++      }
++    }
++    throw std::runtime_error("RemixBridge_GiMeshRead never answered");
++  }
++
++  // The chair's caster mesh read back must equal the file's. An unknown LITE reads D3DERR_NOTFOUND. Then the per-model cost.
++  void fetchMeshes(IDirect3DDevice9* pDevice, const Chair& chair) {
++    std::vector<float> pos;
++    std::vector<uint32_t> tri;
++    double us = 0;
++    bool presented = false;
++    uint32_t ticket = 0;
++    require(fetchOne(pDevice, chair.lite, pos, tri, us, presented) == S_OK, "The chair's mesh reads back");
++    require(pos == chair.pos && tri == chair.tri, "The read-back mesh equals the file's");
++    std::printf("[GiMeshFetch] chair %zu vertices %zu triangles, first fetch %.0f us\n", pos.size() / 3, tri.size() / 3, us);
++    require(fetchOne(pDevice, kUnknownLite, pos, tri, us, presented) == D3DERR_NOTFOUND, "An unknown LITE reads D3DERR_NOTFOUND");
++    check(g_meshFetch(chair.lite, &ticket), "RemixBridge_GiMeshFetch");
++    require(g_meshFetch(chair.lite, &ticket) == D3DERR_WASSTILLDRAWING, "A second fetch waits for the first");
++    uint32_t vertices = 0;
++    uint32_t triangles = 0;
++    HRESULT hr = S_FALSE;
++    for (int round = 0; round < 24000 && hr == S_FALSE; ++round) {
++      hr = g_meshRead(ticket, pos.data(), 0, tri.data(), 0, &vertices, &triangles);
++      if (hr == S_FALSE) {
++        present(pDevice);
++      }
++    }
++    require(hr == D3DERR_MOREDATA && vertices * 3 == chair.pos.size(), "A short array reads D3DERR_MOREDATA with the counts");
++
++    std::vector<double> times;
++    int presents = 0;
++    for (int i = 0; i < 50; ++i) {
++      require(fetchOne(pDevice, chair.lite, pos, tri, us, presented) == S_OK, "A repeated fetch reads back");
++      times.push_back(us);
++      presents += presented ? 1 : 0;
++    }
++    std::sort(times.begin(), times.end());
++    uint32_t words[kWords] = {};
++    readCounters(words);
++    std::printf("[GiMeshFetch] 50 warm fetches: median %.0f us, 90 %% %.0f us, max %.0f us, %d needed a Present; fetched=%u\n", times[25], times[45],
++                times[49], presents, words[21]);
++  }
++
+   void runMeshes(IDirect3DDevice9* pDevice, const Chair& chair, bool pixel) {
+     uint32_t level = 0;
+     HRESULT opened = S_FALSE;
+@@ -358,6 +430,7 @@ namespace {
+                 words[kMissing], words[kReady], words[kLinks], words[kIndexMs], words[kDropped]);
+     require(words[kReady] == 1 && words[kLinks] > 0, "The index found the game's packages");
+     require(words[kResolved] == 1 && words[kMissing] == 1 && words[kDropped] == 0, "The chair resolved once, the unknown LITE is missing");
++    fetchMeshes(pDevice, chair);
+     if (!pixel) {
+       return;
+     }
+@@ -474,11 +547,13 @@ int main() {
+     }
+     g_giOpen = reinterpret_cast<PFN_GiOpen>(GetProcAddress(hClient, "RemixBridge_GiOpen"));
+     g_objects = reinterpret_cast<PFN_GiObjects>(GetProcAddress(hClient, "RemixBridge_GiObjects"));
++    g_meshFetch = reinterpret_cast<PFN_GiMeshFetch>(GetProcAddress(hClient, "RemixBridge_GiMeshFetch"));
++    g_meshRead = reinterpret_cast<PFN_GiMeshRead>(GetProcAddress(hClient, "RemixBridge_GiMeshRead"));
+     g_giCounters = reinterpret_cast<PFN_GiReadCounters>(GetProcAddress(hClient, "RemixBridge_GiReadCounters"));
+     g_pixelOpen = reinterpret_cast<PFN_GiPixelOpen>(GetProcAddress(hClient, "RemixBridge_GiPixelOpen"));
+     g_pass = reinterpret_cast<PFN_GiPixelPass>(GetProcAddress(hClient, "RemixBridge_GiPixelPass"));
+     g_pixelCounters = reinterpret_cast<PFN_GiPixelReadCounters>(GetProcAddress(hClient, "RemixBridge_GiPixelReadCounters"));
+-    if (!g_giOpen || !g_objects || !g_giCounters || !g_pixelOpen || !g_pass || !g_pixelCounters) {
++    if (!g_giOpen || !g_objects || !g_meshFetch || !g_meshRead || !g_giCounters || !g_pixelOpen || !g_pass || !g_pixelCounters) {
+       throw std::runtime_error("The client does not export the GI object functions");
+     }
+     const auto pfnCreate = reinterpret_cast<PFN_Direct3DCreate9>(GetProcAddress(hClient, "Direct3DCreate9"));

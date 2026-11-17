@@ -3032,6 +3032,7 @@ const I18n::Pair kPairs[] = {
     {"The download failed", "Nedladdningen misslyckades"},
     {"Shader packs: downloaded from their authors' GitHub, under each author's licence.", "Shaderpaket: nedladdade från upphovspersonernas GitHub, under var och ens licens."},
     {"Developer mode: give the bridge server every object's own mesh as a shadow caster", "Utvecklarläge: ge bryggservern varje objekts eget nät som skuggkastare"},
+    {"Developer mode: draw every object's own mesh into the lamps' shadow tiles (needs the bridge)", "Utvecklarläge: rita varje objekts eget nät i lampornas skuggplattor (kräver bryggan)"},
     {nullptr, nullptr},
 };
 const I18n::LangTable kTable(I18n::Lang::Swedish, kPairs, std::size(kPairs));

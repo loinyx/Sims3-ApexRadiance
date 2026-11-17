@@ -278,6 +278,7 @@ registered and no resource is created.
 | `maxTiles` | int, 24 | 8-120, fallback shadow tiles | S1 |
 | `debugRedrawAll`, `debugLayer`, `debugLampTable` | developer builds | Cache check, single-layer view, lamp table dump | S1 |
 | `meshCasters` | developer builds, off | Objects to the bridge server's mesh casters (bridge patch 0020, `wp/MC-2.md`) | MC-2 |
+| `meshTiles` | developer builds, off | Their caster meshes read back from the server (bridge patch 0022) into the physical indoor lamps' shadow tiles; implies `meshCasters` (`wp/MC-3.md`) | MC-3 |
 
 Menu labels, tooltips and the 21 translations are added in S6 with the menu rules; until then the keys are
 developer-mode only.

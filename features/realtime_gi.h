@@ -44,6 +44,7 @@ struct Options {
     Backend backend = Backend::Auto;
     bool debugLampTable = false; // developer mode: dump the snapshot against the game's fields after each change
     bool meshCasters = false;    // developer mode: objects to the bridge server's mesh casters (wp/MC.md, MC-2)
+    bool meshTiles = false;      // developer mode: their meshes read back into the lamps' shadow tiles (wp/MC-3.md); needs meshCasters
 };
 
 // Counters of design.md section 6 the skeleton owns. The first four must stay 0; the later packages add to them.

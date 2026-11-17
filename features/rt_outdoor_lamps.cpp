@@ -26,6 +26,7 @@
 #include "rt_lamp_model.h"
 #include "rt_lamp_proxy.h"
 #include "stair_set.h"
+#include "mesh_caster_set.h"
 #include "rt_lamps_hlsl.h"
 #include "shader_cache.h"
 #include "outdoor_delta.h"
@@ -765,7 +766,8 @@ RtLampProxy::Mesh g_mesh;
 uint32_t g_meshGen = 0;
 std::shared_ptr<const Proxy> g_openUsed; // (physical indoor lamps) the proxy whose open-top build is the kept atlas's occluders
 std::atomic<uint32_t> g_openGen{0};      // its generation (0: none uploaded)
-std::atomic<uint32_t> g_stairUploads{0}; // uploads made for a grown stair set (KeptMeshGen)
+std::atomic<uint32_t> g_stairUploads{0}; // uploads made for a grown stair set or a changed mesh caster set (KeptMeshGen)
+std::atomic<size_t> g_meshTileTris{0};   // (meshTiles) the mesh casters' triangles in the last upload
 std::vector<std::pair<int, int>> g_openRooms; // (render thread) the uploaded open-top build's openRooms (RoomOpenAbove)
 std::shared_ptr<const std::vector<RtLampProxy::Inside>> g_inside; // (render thread) its spaces the open rooms continue into (InsideOf)
 bool ReadRoomAmbient(const void* room, float* c); // (below)
@@ -1890,6 +1892,7 @@ uint32_t KeptMeshGen() {
     const uint32_t gen = g_openGen.load(std::memory_order_relaxed);
     return gen ? gen ^ g_stairUploads.load(std::memory_order_relaxed) << 20 : 0;
 }
+size_t MeshTileTris() { return g_meshTileTris.load(std::memory_order_relaxed); }
 bool RoomOpenAbove(int story, int room) { return std::binary_search(g_openRooms.begin(), g_openRooms.end(), std::make_pair(story, room)); }
 std::shared_ptr<const RtLampProxy::Lot> KeptLot(uint32_t& gen) {
     gen = g_openGen.load(std::memory_order_relaxed);
@@ -2303,18 +2306,36 @@ void Frame(IDirect3DDevice9* dev) {
         StairSet::g_set.Begin(proxy->lot, proxy->gen);
     // (a grown stair set: the tiles' occluders again, not while a lamp is dragged; a redraw of the tiles, no room goes to its solve)
     const bool stairsDue = proxy == g_openUsed && StairSet::g_set.Due(stairNow) && !(g_lampChangedAt && stairNow - g_lampChangedAt < kDragQuietMs);
-    if (OutdoorDelta::RoomLampPhysical() && (proxy != g_openUsed || stairsDue) && (!g_openFailAt || GetTickCount() - g_openFailAt >= 5000)) {
+    // (meshTiles, wp/MC-3.md) the placed objects' caster meshes read back from the bridge: a changed set uploads the tiles'
+    // occluders again once it was quiet for 2 s, at most every 5 s, not while a lamp is dragged
+    static uint32_t s_meshSeen = 0, s_meshUsed = 0;
+    static DWORD s_meshChangedAt = 0, s_meshUploadAt = 0;
+    const bool meshOn = MeshCasterSet::wanted.load(std::memory_order_relaxed);
+    const uint32_t meshGen = meshOn ? MeshCasterSet::g_set.Gen() + 1 : 0;
+    if (meshGen != s_meshSeen) s_meshSeen = meshGen, s_meshChangedAt = stairNow;
+    const bool meshDue = proxy == g_openUsed && meshGen != s_meshUsed && stairNow - s_meshChangedAt >= 2000 && stairNow - s_meshUploadAt >= 5000 &&
+                         !(g_lampChangedAt && stairNow - g_lampChangedAt < kDragQuietMs);
+    if (OutdoorDelta::RoomLampPhysical() && (proxy != g_openUsed || stairsDue || meshDue) && (!g_openFailAt || GetTickCount() - g_openFailAt >= 5000)) {
         RtLampProxy::Mesh open;
         RtLampProxy::Build(proxy->lot, open, true);
         StairSet::g_set.AppendTo(open);
+        size_t meshTris = 0;
+        if (meshOn && !proxy->lot.stories.empty()) {
+            meshTris = MeshCasterSet::g_set.AppendTo(open, proxy->lot.worldToLot, static_cast<float>(proxy->lot.stories[0].w), static_cast<float>(proxy->lot.stories[0].h));
+            RtLampProxy::BuildGrid(open);
+        }
         std::string err;
         const bool up = g_eng->SetProxy(dev, open, err, true);
         g_openUsed = up ? proxy : nullptr, g_openFailAt = up ? 0 : std::max<DWORD>(GetTickCount(), 1);
         g_openGen.store(up ? proxy->gen : 0);
         if (up) g_openRooms = std::move(open.openRooms), g_inside = std::make_shared<const std::vector<RtLampProxy::Inside>>(std::move(open.inside));
         if (up && stairsDue) StairSet::g_set.Uploaded(stairNow), g_stairUploads.fetch_add(1, std::memory_order_relaxed);
-        LOG_INFO(up ? std::format("[RtOutdoorLamps] Physical indoor lamps' occluders: {} triangles with open tops ({} quadrants opened, {} stair triangles), generation {}", open.tris.size(),
-                                 open.openTops, StairSet::g_set.Tris(), proxy->gen)
+        if (up) {
+            if (meshDue) g_stairUploads.fetch_add(1, std::memory_order_relaxed); // (the tiles hold other occluders: KeptMeshGen moves)
+            s_meshUsed = meshGen, s_meshUploadAt = stairNow, g_meshTileTris.store(meshTris, std::memory_order_relaxed);
+        }
+        LOG_INFO(up ? std::format("[RtOutdoorLamps] Physical indoor lamps' occluders: {} triangles with open tops ({} quadrants opened, {} stair triangles, {} mesh caster triangles), generation {}",
+                                 open.tris.size(), open.openTops, StairSet::g_set.Tris(), meshTris, proxy->gen)
                     : "[RtOutdoorLamps] Physical indoor lamps' occluders could not be uploaded: " + err);
     }
     // (what the collector found: whether a stair reaches this set is known only in game)

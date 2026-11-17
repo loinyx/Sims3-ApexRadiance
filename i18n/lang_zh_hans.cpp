@@ -3032,6 +3032,7 @@ const I18n::Pair kPairs[] = {
     {"The download failed", "下载失败"},
     {"Shader packs: downloaded from their authors' GitHub, under each author's licence.", "着色器包：从各作者的 GitHub 下载，遵循各作者的许可证。"},
     {"Developer mode: give the bridge server every object's own mesh as a shadow caster", "开发者模式：将每个物品自身的网格作为投影体交给桥接服务器"},
+    {"Developer mode: draw every object's own mesh into the lamps' shadow tiles (needs the bridge)", "开发者模式：将每个物品自身的网格绘入灯具的阴影图块（需要桥接）"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::ChineseSimplified, kPairs, std::size(kPairs));

@@ -3032,6 +3032,7 @@ const I18n::Pair kPairs[] = {
     {"The download failed", "Lataus epäonnistui"},
     {"Shader packs: downloaded from their authors' GitHub, under each author's licence.", "Varjostinpaketit: ladataan tekijöidensä GitHubista, kunkin tekijän lisenssillä."},
     {"Developer mode: give the bridge server every object's own mesh as a shadow caster", "Kehittäjätila: anna siltapalvelimelle jokaisen esineen oma verkko varjon heittäjäksi"},
+    {"Developer mode: draw every object's own mesh into the lamps' shadow tiles (needs the bridge)", "Kehittäjätila: piirrä jokaisen esineen oma verkko lamppujen varjoruutuihin (vaatii sillan)"},
     {nullptr, nullptr}, // keeps the array valid while it has no translations (skipped by the lookup)
 };
 const I18n::LangTable kTable(I18n::Lang::Finnish, kPairs, std::size(kPairs));

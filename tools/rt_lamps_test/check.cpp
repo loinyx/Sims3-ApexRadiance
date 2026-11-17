@@ -41,6 +41,7 @@
 #include <vector>
 #include "features/rt_lamp_proxy.h"
 #include "features/stair_set.h"
+#include "features/mesh_caster_set.h"
 #include "features/rt_lamp_model.h"
 #include "features/rt_lamp_gpu.h"
 #include "features/phys_lamp_pick.h"
@@ -4613,6 +4614,75 @@ static void FloorGridTwinChecks() {
     Check(placed, "floor twins: each copy stands where the outdoor floor's uv reads it");
 }
 #include "plan_field_check.h"
+// Mesh casters for the shadow tiles (wp/MC-3.md): the cache's budget and LRU, the lamp's own object left out, and a read-back
+// mesh in lot space that stops a lamp's light the way the tiles draw it (RtLampProxy::Clear over the same triangles)
+static void MeshCasterSetChecks() {
+    // a 1 m slab at 0.7-0.8 m, as two quads (a table top), model space centred on the origin
+    MeshCasterSet::Model top;
+    top.pos = {-0.5f, 0.8f, -0.5f, 0.5f, 0.8f, -0.5f, 0.5f, 0.8f, 0.5f, -0.5f, 0.8f, 0.5f, -0.5f, 0.7f, -0.5f, 0.5f, 0.7f, -0.5f, 0.5f, 0.7f, 0.5f, -0.5f, 0.7f, 0.5f};
+    top.tri = {0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7};
+    const auto at = [](uint64_t id, uint64_t lite, float x, float z) {
+        MeshCasterSet::Object o{id, lite};
+        const float m[12] = {1, 0, 0, x, 0, 1, 0, 0, 0, 0, 1, z};
+        std::memcpy(o.m, m, sizeof m);
+        return o;
+    };
+    MeshCasterSet::Set set(2 * top.Bytes());
+    uint64_t lite = 0;
+    Check(!set.NextFetch(lite), "mesh casters: nothing placed, nothing to fetch");
+    set.Apply(at(1, 0xA, 110.0f, 12.0f));
+    set.Apply(at(2, 0xA, 112.0f, 12.0f));
+    Check(set.NextFetch(lite) && lite == 0xA, "mesh casters: a placed object's LITE is fetched");
+    MeshCasterSet::Model copy = top;
+    set.Fetched(0xA, std::move(copy));
+    Check(!set.NextFetch(lite), "mesh casters: two objects of one model fetch it once");
+    set.Apply(at(3, 0xB, 200.0f, 12.0f));
+    Check(set.NextFetch(lite) && lite == 0xB, "mesh casters: a second model is fetched");
+    set.Missing(0xB);
+    Check(!set.NextFetch(lite), "mesh casters: a LITE the server has no mesh for is not asked again");
+    // the budget holds two models: a third placed one is refused while all are in use, and kept once an object leaves
+    set.Apply(at(4, 0xC, 114.0f, 12.0f));
+    copy = top;
+    set.Fetched(0xC, std::move(copy));
+    set.Apply(at(5, 0xD, 116.0f, 12.0f));
+    copy = top;
+    set.Fetched(0xD, std::move(copy));
+    MeshCasterSet::Stats st = set.GetStats();
+    Check(st.models == 2 && st.overBudget == 1 && st.evicted == 0 && !set.NextFetch(lite), "mesh casters: the budget never drops a model in use");
+    set.Apply({4, 0xC, {}, true});
+    Check(set.NextFetch(lite) && lite == 0xD, "mesh casters: an object leaving frees the refused fetch");
+    copy = top;
+    set.Fetched(0xD, std::move(copy));
+    st = set.GetStats();
+    Check(st.models == 2 && st.evicted == 1 && st.bytes == 2 * top.Bytes(), "mesh casters: the least recently used unused model is dropped");
+    MeshCasterSet::Model big;
+    big.pos = top.pos, big.tri.assign((MeshCasterSet::kMaxModelTris + 1) * 3, 0);
+    set.Apply(at(6, 0xE, 118.0f, 12.0f));
+    set.Fetched(0xE, std::move(big));
+    Check(set.GetStats().tooBig == 1 && !set.NextFetch(lite), "mesh casters: a model over the triangle cap is left out");
+    // in lot space (lot x = world x - 100): objects 1 and 2 (0xA) and 5 (0xD) over the lot; the lamp at 1.5 m over object 1
+    RtLampProxy::Lot lot;
+    lot.stories.resize(1);
+    lot.stories[0].w = lot.stories[0].h = 32;
+    lot.worldToLot[3][0] = -100.0f;
+    RtLampProxy::Mesh m;
+    RtLampProxy::Build(lot, m, true);
+    const size_t built = m.tris.size();
+    const float lamp[3] = {10.0f, 1.5f, 12.0f}, under[3] = {10.0f, 0.01f, 12.0f}, beside[3] = {11.2f, 0.01f, 12.0f};
+    Check(RtLampProxy::Clear(m, lamp, under), "mesh casters: the lamp reaches the floor with no caster");
+    const size_t n = set.AppendTo(m, lot.worldToLot, 32.0f, 32.0f);
+    RtLampProxy::BuildGrid(m);
+    Check(n == 12 && m.tris.size() == built + 12 && m.kind.back() == RtLampProxy::Mesh::kShape, "mesh casters: three objects' triangles join the mesh as shapes");
+    Check(!RtLampProxy::Clear(m, lamp, under) && RtLampProxy::Clear(m, lamp, beside), "mesh casters: the table top shadows the floor under it, not beside it");
+    // the lamp's own object: a lamp head inside object 1's bounds leaves that object out
+    set.SetLamps({{110.0f, 0.75f, 12.0f}});
+    RtLampProxy::Mesh m2;
+    Check(set.AppendTo(m2, lot.worldToLot, 32.0f, 32.0f) == 8 && set.GetStats().lampSkips == 1, "mesh casters: the object holding a lamp casts nothing");
+    RtLampProxy::Mesh m3;
+    Check(set.AppendTo(m3, lot.worldToLot, 32.0f, 32.0f, 4) == 4, "mesh casters: the triangle cap holds");
+    set.Clear();
+    Check(set.GetStats().models == 0 && !set.NextFetch(lite), "mesh casters: cleared");
+}
 static void StairSetChecks() {
     using MeshOcclusion::Triangle;
     RtLampProxy::Lot lot;
@@ -5029,6 +5099,7 @@ int main(int argc, char** argv) {
         Check(all && a == b, "the occluders' lot: equality misses a field (a lot read again would keep a stale generation)");
     }
     StairSetChecks();
+    MeshCasterSetChecks();
     FloorGridTwinChecks();
     PlanFieldChecks();
     std::vector<std::string> worlds;
