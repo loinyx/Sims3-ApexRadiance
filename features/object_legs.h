@@ -42,10 +42,23 @@ void Install();
 void Uninstall();
 void NoteShape(uint64_t id, uintptr_t shape); // an occluder entry's object and first shape (LampMarkFilter's mark)
 // Any thread: moves one for each object move or occluder mark seen: the 3D records' blockers may have changed (OutdoorDelta's live
-// tables). The move hook is what paces it: marks wait for the room update, gaps of 0.6 to 2 s on 03/11. hook: its moves alone and thread:
+// tables). The move hook is what paces it: marks wait for the room update, gaps of 0.6 to 2 s in one recording. hook: its moves alone and thread:
 // the last one's (nothing proved yet that it fires on every drag step or how often in Live mode; the [LiveTable] line tells)
 uint32_t Gen();
 void MoveStats(uint32_t& hook, unsigned long& thread);
 void Fill(RoomLightTests::Room& room);        // any thread
+
+// Mesh casters (RealtimeGI meshCasters, wp/MC.md): every object with a LITE, not only the baked tables, in the bridge's
+// RemixBridge_GiObjects record (util_gi.h GiObject). The two hooks and the object removal fill it while the sink is on.
+struct Placed {
+    uint64_t id, lite;
+    float m[12]; // three rows of four, model to world: the matrix's columns as Place reads it
+    uint32_t flags, reserved; // flags 1: removed
+};
+static_assert(sizeof(Placed) == 72, "the bridge's GiObject layout");
+bool Hooked();                         // both hooks are in (LampMarkFilter installs them)
+void SetSink(bool on);                 // off: the records are dropped
+void TakePlaced(std::vector<Placed>& out); // the objects changed since the last call, the latest record of each
+void NoteRemoved(uint64_t id);         // LampMarkFilter's object removal hook
 
 } // namespace ObjectLegs

@@ -277,6 +277,7 @@ registered and no resource is created.
 | `albedoBoost` | float, 1.0 | 1-2, bounce reflectance | S6 |
 | `maxTiles` | int, 24 | 8-120, fallback shadow tiles | S1 |
 | `debugRedrawAll`, `debugLayer`, `debugLampTable` | developer builds | Cache check, single-layer view, lamp table dump | S1 |
+| `meshCasters` | developer builds, off | Objects to the bridge server's mesh casters (bridge patch 0020, `wp/MC-2.md`) | MC-2 |
 
 Menu labels, tooltips and the 21 translations are added in S6 with the menu rules; until then the keys are
 developer-mode only.

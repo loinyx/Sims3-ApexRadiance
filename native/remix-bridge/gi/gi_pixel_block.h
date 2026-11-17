@@ -21,7 +21,14 @@ struct GiPixelBox {      // a static occluder: the unit cube (0..1 on each axis)
 };
 
 enum : uint32_t { kGiPixelLamps = 16, kGiPixelCapsules = 64, kGiPixelCasters = 32, kGiPixelBoxes = 96, kGiPixelOutputs = 4 };
-enum : uint32_t { kGiPixelFlagClass = 1 };  // set by the server when a motion class texture came with the pass
+enum : uint32_t { kGiPixelFlagClass = 1 };
+// Mesh casters (MC-2): static occluders with their model's own triangles, one bottom level a model, an instance an object.
+// They do not travel in the block: the server's object table (RemixBridge_GiObjects) hands them to the pass.
+enum : uint32_t { kGiPixelMeshes = 1024 };  // instances a pass at most: the nearest to the camera
+struct GiPixelMesh {
+  uint32_t model;  // GiPixelPass::addModel's index
+  float m[12];     // three rows of four, model to world
+};  // set by the server when a motion class texture came with the pass
 
 struct GiPixelBlock {
   float invViewProj[16];   // Direct3D row-vector inverse of view x projection, as stored
@@ -51,4 +58,5 @@ struct GiPixelCounters {
   uint64_t rays;             // since the pass was created
   uint32_t raysLast, gpuUs;  // of a recent pass (the device answers a few passes late)
   uint32_t width, height;    // of the outputs
+  uint32_t meshes, models;   // mesh instances in the last pass; models with a bottom level on the device
 };
