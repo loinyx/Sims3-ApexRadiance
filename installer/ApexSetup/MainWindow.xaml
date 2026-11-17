@@ -109,7 +109,26 @@
                             <StackPanel x:Name="StepsGame" Tag="dyn" Orientation="Horizontal" Spacing="12" Margin="0,0,0,8" />
                             <TextBlock Text="Choose your game" Style="{StaticResource ApexTitle}" />
                             <TextBlock Text="Setup found these installs. Pick the one you play." Style="{StaticResource ApexMuted}" FontSize="13" />
-                            <ListView x:Name="GameList" SelectionMode="Single" SelectionChanged="OnGamePicked">
+                            <ListView x:Name="GameList" SelectionMode="Single" SelectionChanged="OnGamePicked" ContainerContentChanging="OnGameCard">
+                                <!-- the card is the item: no list chrome (selection box, left bar); the chosen game shows by the card's
+                                     accent outline, as the renderer cards, and keyboard focus by the system focus rectangle -->
+                                <ListView.ItemContainerStyle>
+                                    <Style TargetType="ListViewItem">
+                                        <Setter Property="Padding" Value="0" />
+                                        <Setter Property="MinHeight" Value="0" />
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                        <Setter Property="UseSystemFocusVisuals" Value="True" />
+                                        <Setter Property="FocusVisualMargin" Value="0,4" />
+                                        <Setter Property="Template">
+                                            <Setter.Value>
+                                                <ControlTemplate TargetType="ListViewItem">
+                                                    <ContentPresenter Content="{TemplateBinding Content}" ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                                      HorizontalContentAlignment="Stretch" Background="Transparent" />
+                                                </ControlTemplate>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </ListView.ItemContainerStyle>
                                 <ListView.ItemTemplate>
                                     <DataTemplate x:DataType="local:GameItem">
                                         <Border Style="{StaticResource ApexCard}" Padding="14,12" Margin="0,4">
@@ -301,6 +320,68 @@
                                     </Border>
                                     <ToggleSwitch x:Name="RestartToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnToggle"
                                                   AutomationProperties.Name="Restart host" />
+                                </Grid>
+                            </Border>
+                            <Border x:Name="SmoothCard" Style="{StaticResource ApexCard}" Visibility="Collapsed">
+                                <Grid ColumnSpacing="14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
+                                        <FontIcon Glyph="&#xE945;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="NVIDIA Smooth Motion" Style="{StaticResource ApexStrong}" />
+                                        <TextBlock Text="Your NVIDIA card draws an extra picture between every two the game makes, so the game looks about twice as smooth. Only on RTX 40 and 50 series cards; best with the frame limit at 60 to 90 fps." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="SmoothPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <ToggleSwitch x:Name="SmoothToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnSmoothToggle"
+                                                  AutomationProperties.Name="NVIDIA Smooth Motion" />
+                                </Grid>
+                            </Border>
+                            <Border x:Name="AfmfCard" Style="{StaticResource ApexCard}" Visibility="Collapsed">
+                                <Grid ColumnSpacing="14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
+                                        <FontIcon Glyph="&#xE945;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="AMD Fluid Motion Frames" Style="{StaticResource ApexStrong}" />
+                                        <TextBlock Text="The AMD driver adds frames for smoother motion, about double the frame rate, with a little more input delay. It applies to every game on this PC." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="AfmfPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <ToggleSwitch x:Name="AfmfToggle" Grid.Column="3" OnContent="" OffContent="" MinWidth="0" Toggled="OnAfmfToggle"
+                                                  AutomationProperties.Name="AMD Fluid Motion Frames" />
+                                </Grid>
+                            </Border>
+                            <Border x:Name="FpsCard" Style="{StaticResource ApexCard}" Visibility="Collapsed">
+                                <Grid ColumnSpacing="14">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="36" Height="36" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
+                                        <FontIcon Glyph="&#xEC92;" FontSize="18" Foreground="{StaticResource ApexAccentBrush}" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                                        <TextBlock Text="Apex frame limit" Style="{StaticResource ApexStrong}" />
+                                        <TextBlock Text="Frame generation works best at 60 to 90 fps." Style="{StaticResource ApexMuted}" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="FpsPill" Tag="dyn" FontSize="12" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <ComboBox x:Name="FpsCombo" Tag="dyn" MinWidth="200" SelectionChanged="OnFpsPicked" AutomationProperties.Name="Apex frame limit" />
+                                        <NumberBox x:Name="FpsCustom" Minimum="20" Maximum="1000" SpinButtonPlacementMode="Compact" Visibility="Collapsed"
+                                                   ValueChanged="OnFpsCustom" AutomationProperties.Name="Custom" />
+                                    </StackPanel>
                                 </Grid>
                             </Border>
                         </StackPanel>

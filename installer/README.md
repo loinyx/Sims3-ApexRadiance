@@ -48,6 +48,30 @@ only what differs from the player's choice.
   value: *Restore* puts back only that key (or deletes the file Setup created when the game never wrote to it), so
   settings the game saved since stay. Status: installed when `ts3wrap.exe` is next to the ASI and the key is `true`.
   Removing Apex Radiance removes the restart host first.
+- NVIDIA Smooth Motion (Setup 1.2.0, `SmoothMotion.cs`): a switch that writes the NVIDIA driver at once, not with
+  Install. NVAPI (`nvapi64.dll`, functions from `nvapi_QueryInterface`, `NVDRS_PROFILE_V1`, `NVDRS_APPLICATION_V1`,
+  `NVDRS_SETTING_V1`): on creates or reuses the profile `Apex Radiance - The Sims 3`, adds `NvRemixBridge.exe` and the
+  game's exe, then the other edition's (`TS3W.exe`, `TS3.exe`; names, not paths, so it covers every copy and a moved
+  folder; an exe in an NVIDIA predefined profile is skipped), sets `0xB0D384C0 = 1` and saves; off deletes that profile
+  only. On also sets `[screen] fps_limit = 60` in `ApexRadiance.toml` when there is no limit (absent or 0), through
+  `Fs.WriteFpsKey`: its restore point puts back only that key (`FpsLimitKey`, `FpsLimitWas`). Off leaves the limit.
+  `Engine.Remove` of the bridge or Apex (also by a renderer change and `RemoveAll`) calls `Engine.FrameGenOff`, which
+  deletes Setup's profile when it is on and returns, never throws, a failure (`TakeFrameGenOffError`, shown on the row).
+  Repair, Setup's update and a later run only read the driver.
+- AMD Fluid Motion Frames (Setup 1.2.0, `Afmf.cs`): the same row pattern through ADLX (`amdadlx64.dll`, C interface:
+  `ADLXQueryFullVersion`, `ADLXInitialize`, `IADLXSystem::Get3DSettingsServices`, `QueryInterface` to
+  `IADLX3DSettingsServices1`, `GetAMDFluidMotionFrames`, then `IsSupported`, `IsEnabled`, `SetEnabled`; vtable slots from the
+  ADLX 2.0 SDK headers). ADLX has AFMF as one setting for the whole system (no GPU, no application), so the row says it
+  applies to every game. Shown when ADLX starts (an AMD driver); enabled where ADLX reports it supported; the bridge is not
+  required. On writes `%LOCALAPPDATA%\Apex Radiance Setup\afmf-on.txt`; a removal of the bridge or Apex turns AFMF off only
+  when that file is there, so a setting the player turned on stays. The frame limit rule is Smooth Motion's.
+- Apex frame limit: a list beside the frame generation rows (`Engine.FpsChoices`: 0, 30, 60, 75, 90, 120, 144, 165, 240, and
+  Custom clamped by `Engine.ClampFps` to 0 or 20 to 1000) that calls `Engine.SetFpsLimit`: an atomic write of
+  `[screen] fps_limit`, a restore point that records the value written (`FpsLimitSet`) and undoes only while it is still there.
+- Both editions: Steam 1.67.2 (`TS3W.exe`) and EA app 1.69 (`TS3.exe`) use the game's own exe and Documents folder; AFMF
+  needs nothing per edition. Shown with an NVIDIA card; enabled with an RTX 40 or 50 series card, driver 571.86 or newer
+  and the bridge installed (DXVK is untested with it); an exe in a profile of the player's leaves the switch off and names
+  that profile. Any NVAPI failure is shown on the row, never thrown. The driver write is unverified on a real card.
 - Languages: the 21 of The Sims 3, as the menu (`Languages.cs`): Windows' display language, or the one picked with the
   title bar's language button (kept in `%LOCALAPPDATA%\Apex Radiance Setup\language.txt`). English text is the key;
   each language is a `Strings.<code>.cs` table, and `Strings.pt.cs` lists every key. A text without a pair shows in
@@ -106,6 +130,9 @@ dotnet publish installer/ApexSetup -c Release -o installer/publish
 `APEX_SETUP_DRY_RUN=1` shows what Setup finds and would change on a real game while writing nothing.
 `APEX_SETUP_FAKE_GPU=<version>|<card>|<missing extension>,...` stands in for the Vulkan driver's answer (for example
 `1.3|Intel(R) Iris(R) Xe Graphics|VK_KHR_load_store_op_none`), to see the screens of an old driver or an old card.
+`APEX_SETUP_FAKE_NV=<card>|<driver>|<on>|<owner profile>` stands in for NVAPI (for example
+`NVIDIA GeForce RTX 4070|57186|1|`, driver 571.86 written as 57186, on as 1) and makes the Smooth Motion switch write
+nothing. `APEX_SETUP_FAKE_AMD=<supported>|<on>` (for example `1|0`, or `none` for no AMD card) does the same for AFMF.
 
 The tests run the engine on a fake `Game\Bin` and Documents folder in `%TEMP%` with local files (no network, no game).
 For a manual run against a fake game: start the exe with the game folder as its argument and `APEX_SETUP_DOCUMENTS` set

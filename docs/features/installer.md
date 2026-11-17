@@ -10,7 +10,7 @@ Setup makes can be undone from a restore point. It is optional: the manual insta
 
 | | |
 |---|---|
-| Availability | Released in 3.1.1; `ApexRadianceSetup.exe` is a release asset. Setup's own update: Released in 3.1.4 (Setup 1.1.0). Modernization from the newest release with the game's build, a moved EA app game: Released in 3.1.5 (Setup 1.1.1). Installs from the manual-install zip (the release's two files): Released in 3.1.6 (Setup 1.1.2). DXVK and the bridge offered only when the graphics driver has the extensions DXVK needs, MonoPatcher no longer offered (shown only where installed): Released in 3.2.1 (Setup 1.1.3). The restart host as an experimental component, off by default: Unreleased, planned for 4.0.0 (Setup 1.1.5). The RTX Remix bridge as the default renderer of a first install: Unreleased, planned for 4.0.1 (Setup 1.1.7) |
+| Availability | Released in 3.1.1; `ApexRadianceSetup.exe` is a release asset. Setup's own update: Released in 3.1.4 (Setup 1.1.0). Modernization from the newest release with the game's build, a moved EA app game: Released in 3.1.5 (Setup 1.1.1). Installs from the manual-install zip (the release's two files): Released in 3.1.6 (Setup 1.1.2). DXVK and the bridge offered only when the graphics driver has the extensions DXVK needs, MonoPatcher no longer offered (shown only where installed): Released in 3.2.1 (Setup 1.1.3). The restart host as an experimental component, off by default: Unreleased, planned for 4.0.0 (Setup 1.1.5). The RTX Remix bridge as the default renderer of a first install: Unreleased, planned for 4.0.1 (Setup 1.1.7). NVIDIA Smooth Motion switch: Unreleased, planned for 4.0.3 (Setup 1.2.0) |
 | Default | Optional, a separate download |
 | Menu | None: a separate program, not part of the in-game menu |
 | Configuration | `Game\Bin\Apex Radiance backup\setup.json` (written by Setup); restore points in `Game\Bin\Apex Radiance backup\restore`; language in `%LOCALAPPDATA%\Apex Radiance Setup\language.txt` |
@@ -70,6 +70,58 @@ Setup finds the game, compares what is installed with the player's choice and ap
    own, putting back the files it replaced. *Uninstall everything* removes Apex Radiance and what Setup installed and
    restores every replaced file; mods installed by hand and the settings in Documents stay.
 
+**NVIDIA Smooth Motion** (Setup 1.2.0) is the last row of the Components step: frame generation in the NVIDIA driver, about
+double the frame rate on RTX 40 and 50 series cards, with a little more input delay. The NVIDIA app reports the RTX Remix
+bridge as not compatible; a driver profile forces it, the way NVIDIA Profile Inspector does
+([rtx-remix-bridge.md](rtx-remix-bridge.md)). The switch applies at once, outside Install, through NVAPI's driver settings
+(`SmoothMotion.cs`): on creates (or reuses) the profile *Apex Radiance - The Sims 3* with `NvRemixBridge.exe` and the
+game's exe (Steam `TS3W.exe` or EA app `TS3.exe`, with the other edition's added too, so one profile serves every copy of
+the game on the PC) and sets setting `0xB0D384C0` to 1; off deletes that profile only, which turns it off for every copy. The row shows only with an NVIDIA card. It
+can be turned on with an RTX 40 or 50 series card, driver 571.86 or newer, and the RTX Remix bridge installed; otherwise
+it stays off and says why. When either exe already belongs to a profile of the player's, Setup leaves it alone and names
+that profile. The profile is not part of restore points (it is a driver setting, not a game file). Turned on, Setup also brings
+Apex's frame limit (`[screen] fps_limit` in the game's `ApexRadiance.toml`) to 60 fps when there is none (the key absent or
+0); a limit the player chose stays as it is, and the row suggests 60 to 90 fps. That change has its own restore point
+(*Turn on NVIDIA Smooth Motion*) that puts back only `fps_limit`; nothing is written before the game has made the file or
+while it runs. Turning Smooth Motion off leaves the frame limit as it is.
+
+How it follows the other actions:
+
+| Action | Smooth Motion |
+|---|---|
+| Removing the RTX Remix bridge, switching from the bridge to DXVK or the game's own Direct3D 9, removing Apex Radiance, *Uninstall everything* | Turned off (Setup's profile deleted) as part of the action, with its own task row on the Install step; an NVAPI failure is logged and shown on the row and never fails the action |
+| Repair, Setup's own update, a later run | Left as it is; the row reads the driver again (no record kept) |
+| A profile deleted by the player, a driver reinstall | Reads as off |
+| A profile of the player's holding an exe | Never touched by any of the above |
+| Dry run, preview | Nothing written |
+
+| Off (no bridge on this game) | On | Unsupported card |
+|---|---|---|
+| ![Smooth Motion off](../images/installer/smooth-motion-off.png) | ![Smooth Motion on](../images/installer/smooth-motion-on.png) | ![Smooth Motion on an RTX 3080](../images/installer/smooth-motion-unsupported.png) |
+
+**Apex frame limit** sits below the frame generation rows while either can be used and the game has made
+`ApexRadiance.toml`: a list with *Keep* (the value now), Apex's own choices (off, 30, 60, 120, 144, 165, 240) plus 75 and 90,
+the 60 to 90 ones marked recommended, and *Custom* (20 to 1000, clamped as Apex reads it). A choice writes
+`[screen] fps_limit` at once, through a temporary file, in its own restore point (*Apex frame limit*) that puts back the
+value before only while the file still holds the one Setup wrote; the game must be closed, and the dry run writes nothing.
+
+![Apex frame limit](../images/installer/frame-limit.png)
+
+**AMD Fluid Motion Frames** (Setup 1.2.0) is the row after it, for AMD cards: frame generation in the AMD driver, through
+AMD's ADLX (`Afmf.cs`). ADLX has AFMF as one setting for the whole system, not per game, so the row says it applies to
+every game on the PC. The row shows when the AMD driver answers, and can be turned on where ADLX reports AFMF supported
+(AMD documents Radeon RX 6000 series or newer); it does not need the RTX Remix bridge. On also applies the frame limit rule
+above. Setup records that it turned AFMF on; removing the bridge or Apex (alone, by a renderer change or with *Uninstall
+everything*) turns it off only then, never a setting the player had on. Dry run, preview and the fake write nothing.
+
+| Off | On | Unsupported |
+|---|---|---|
+| ![AFMF off](../images/installer/afmf-off.png) | ![AFMF on](../images/installer/afmf-on.png) | ![AFMF unsupported](../images/installer/afmf-unsupported.png) |
+
+Both editions are covered: Steam 1.67.2 (`TS3W.exe`) and EA app 1.69.47 and 1.69.43 (`TS3.exe`). Smooth Motion's profile
+holds the game's own exe, the bridge check reads `client.targetProcess = TS3.exe` on the EA app, and the frame limit goes to
+the edition's Documents folder; AFMF needs nothing per edition.
+
 When the renderer changes the graphics card the game sees, the game resets its graphics options once: Setup says so
 and keeps a copy of `Options.ini`, restored when the player goes back to the game's own Direct3D 9.
 
@@ -97,6 +149,14 @@ and keeps a copy of `Options.ini`, restored when the player goes back to the gam
 - The Edge Smoothing suggestion reads `Options.ini` `edgesmoothing`, where Apex reads the back buffer: 0 was seen with
   no MSAA, and that every other value means MSAA is unverified in game. It changes the file only when the player clicks
   *Apply*.
+- AMD Fluid Motion Frames: unverified on a supported card (no RX 6000 or newer was available); the ADLX start and the
+  supported check were read on an AMD integrated GPU, which reports it unsupported. Whether AFMF reaches frames presented by
+  `NvRemixBridge.exe` (Vulkan) is unverified. The record that Setup turned it on is per Windows user, not per game folder.
+- NVIDIA Smooth Motion: the driver write is unverified on a real card (the reading is verified: card, driver, state).
+  The profile holds exe names, not paths, so it applies to every game folder. An exe already in an NVIDIA predefined
+  profile (the game's own) stays there and is not added; if that holds `NvRemixBridge.exe` too, the setting would not
+  reach the bridge (unverified). DXVK on `TS3W.exe` is Vulkan as well, but Smooth Motion under DXVK is untested, so the
+  switch needs the bridge.
 
 ## Technical reference
 

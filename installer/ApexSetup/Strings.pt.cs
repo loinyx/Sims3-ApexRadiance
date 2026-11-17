@@ -275,5 +275,37 @@ public static partial class Strings
         ["After a save made low on memory, offers to start the game again into that save when you quit."] = "Depois de salvar com pouca memória, oferece abrir o jogo de novo nesse save quando você sair.",
         ["Start the game once with Apex Radiance, then turn on the restart host here."] = "Abra o jogo uma vez com o Apex Radiance e depois ative o reinício do jogo aqui.",
         ["Removes ts3wrap.exe and turns the restart host off in ApexRadiance.toml."] = "Remove o ts3wrap.exe e desativa o reinício do jogo no ApexRadiance.toml.",
+        // NVIDIA Smooth Motion
+        ["Your NVIDIA card draws an extra picture between every two the game makes, so the game looks about twice as smooth. Only on RTX 40 and 50 series cards; best with the frame limit at 60 to 90 fps."] = "Sua placa NVIDIA desenha uma imagem extra entre cada duas que o jogo faz, então o jogo fica cerca de duas vezes mais fluido. Só em placas RTX série 40 e 50; funciona melhor com o limite de FPS entre 60 e 90.",
+        ["On for The Sims 3 in the NVIDIA driver. Works best with Apex's frame limit at 60 to 90 fps."] = "Ativado para The Sims 3 no driver da NVIDIA. Funciona melhor com o limite de FPS do Apex entre 60 e 90.",
+        ["On for The Sims 3 in the NVIDIA driver. Apex's frame limit is now 60 fps, the pace it works best at."] = "Ligado para The Sims 3 no driver da NVIDIA. O limite de FPS do Apex agora é 60, o ritmo em que funciona melhor.",
+        ["Off for The Sims 3."] = "Desativado para The Sims 3.",
+        ["Already in your NVIDIA profile \"{0}\": Setup leaves it as it is."] = "Já está no seu perfil da NVIDIA \"{0}\": o instalador não mexe nele.",
+        ["Needs an NVIDIA GeForce RTX 40 or 50 series card (found: {0})."] = "Precisa de uma placa NVIDIA GeForce RTX série 40 ou 50 (encontrada: {0}).",
+        ["Needs NVIDIA driver 571.86 or newer (found: {0})."] = "Precisa do driver NVIDIA 571.86 ou mais novo (encontrado: {0}).",
+        ["Needs the RTX Remix bridge as the graphics choice."] = "Precisa do RTX Remix bridge como opção de gráficos.",
+        ["Could not read the NVIDIA driver settings: {0}"] = "Não foi possível ler as configurações do driver da NVIDIA: {0}",
+        ["Could not change the NVIDIA driver settings: {0}"] = "Não foi possível mudar as configurações do driver da NVIDIA: {0}",
+        // frame generation: restore point and task labels
+        ["Turn on {0}"] = "Ativar {0}",
+        ["Turn off {0}"] = "Desativar {0}",
+        // AMD Fluid Motion Frames
+        ["The AMD driver adds frames for smoother motion, about double the frame rate, with a little more input delay. It applies to every game on this PC."] = "O driver da AMD cria quadros extras para um movimento mais suave, cerca do dobro de FPS, com um pouco mais de atraso nos comandos. Vale para todos os jogos deste PC.",
+        ["Not available on this AMD card or driver: AMD Fluid Motion Frames needs a Radeon RX 6000 series card or newer and a recent driver."] = "Não disponível nesta placa ou driver AMD: o AMD Fluid Motion Frames precisa de uma Radeon RX série 6000 ou mais nova e de um driver recente.",
+        ["Could not read the AMD driver settings: {0}"] = "Não foi possível ler as configurações do driver da AMD: {0}",
+        ["Could not change the AMD driver settings: {0}"] = "Não foi possível mudar as configurações do driver da AMD: {0}",
+        ["On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."] = "Ativado no driver da AMD, para todos os jogos. O limite de quadros do Apex agora é 60 FPS, o ritmo em que funciona melhor.",
+        ["On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."] = "Ativado no driver da AMD, para todos os jogos. Funciona melhor com o limite de quadros do Apex entre 60 e 90 FPS.",
+        ["Off in the AMD driver."] = "Desativado no driver da AMD.",
+        // Apex frame limit beside frame generation
+        ["Apex frame limit"] = "Limite de quadros do Apex",
+        ["Frame generation works best at 60 to 90 fps."] = "A geração de quadros funciona melhor entre 60 e 90 FPS.",
+        ["Off"] = "Desligado",
+        ["{0} fps"] = "{0} FPS",
+        ["{0} fps (recommended)"] = "{0} FPS (recomendado)",
+        ["Keep: {0}"] = "Manter: {0}",
+        ["no limit"] = "sem limite",
+        ["Custom"] = "Personalizado",
+        ["Could not change Apex's frame limit: {0}"] = "Não foi possível mudar o limite de quadros do Apex: {0}",
     };
 }

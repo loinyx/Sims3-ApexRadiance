@@ -643,8 +643,34 @@ public sealed partial class MainWindow : Window
         bar.ActionButton = b;
     }
 
+    // the game cards: the chosen one outlined in the accent (as the renderer cards), a hovered one lighter
+    void OnGameCard(ListViewBase sender, ContainerContentChangingEventArgs e)
+    {
+        if (e.ItemContainer is not ListViewItem c || c.Tag is "hooked") return;
+        c.Tag = "hooked";
+        c.PointerEntered += (_, _) => PaintGame(c, true);
+        c.PointerExited += (_, _) => PaintGame(c, false);
+        c.Loaded += (_, _) => PaintGame(c, false);
+    }
+
+    void PaintGame(ListViewItem c, bool hover)
+    {
+        if (c.ContentTemplateRoot is not Border card) return;
+        var on = c.IsSelected;
+        card.BorderBrush = Res(on ? "ApexAccentBrush" : "ApexCardBorderBrush");
+        card.Background = on ? new SolidColorBrush(ColorHelper.FromArgb(255, 0x16, 0x16, 0x1D))
+            : hover ? new SolidColorBrush(ColorHelper.FromArgb(255, 0x22, 0x23, 0x29)) : Res("ApexCardBrush");
+    }
+
+    void PaintGames()
+    {
+        foreach (var it in _games)
+            if (GameList.ContainerFromItem(it) is ListViewItem c) PaintGame(c, false);
+    }
+
     void OnGamePicked(object sender, SelectionChangedEventArgs e)
     {
+        PaintGames();
         _game = (GameList.SelectedItem as GameItem)?.Game;
         _checkedAt = null;
         ManageInfo.IsOpen = false;
@@ -782,6 +808,151 @@ public sealed partial class MainWindow : Window
 
     void OnToggle(object sender, RoutedEventArgs e) => RefreshComponents();
 
+    // NVIDIA Smooth Motion: a driver setting, not a game file, so its switch applies at once (SmoothMotion.cs); read once per game
+    SmoothMotion.Status? _smooth;
+    string? _smoothFor, _smoothError;
+    bool _smoothFps; // this session set Apex's frame limit to 60 when Smooth Motion was turned on
+    bool _fillingSmooth;
+    string? _smoothPending; // why a removal could not turn Smooth Motion off, shown once the row reads the driver again
+
+    // after a removal (Engine.Remove may have turned Smooth Motion off): the row reads the driver again; a failure is logged and shown
+    void AfterFrameGenOff()
+    {
+        _smoothFor = null;
+        _afmf = null;
+        if (Engine.TakeFrameGenOffError() is { } e) { _smoothPending = _afmfPending = e; App.Log(new InvalidOperationException("Frame generation: " + e)); }
+    }
+
+    void RefreshSmooth(State s, Game g)
+    {
+        if (_smoothFor != g.Exe) { _smoothFor = g.Exe; _smooth = SmoothMotion.Read(g.Exe); _smoothError = _smoothPending; _smoothPending = null; }
+        var sm = _smooth!;
+        // no NVIDIA card (or no driver to ask): no row; an NVIDIA card that cannot run it: the row, off, with the reason
+        SmoothCard.Visibility = sm.Card is null && sm.Error is null ? Visibility.Collapsed : Visibility.Visible;
+        var blocked = SmoothMotion.Blocked(sm, s.Layer == Layer.Bridge);
+        _fillingSmooth = true;
+        SmoothToggle.IsOn = sm.On;
+        SmoothToggle.IsEnabled = blocked is null;
+        _fillingSmooth = false;
+        SetState(SmoothPill, _smoothError == "Dry run: Setup changes nothing." ? (T(_smoothError), "ApexMutedBrush")
+            : _smoothError is not null ? (T("Could not change the NVIDIA driver settings: {0}", T(_smoothError)), "ApexWarningBrush")
+            : blocked is { } b ? (T(b.Key, b.Arg), "ApexMutedBrush")
+            : sm.On ? (T(_smoothFps ? "On for The Sims 3 in the NVIDIA driver. Apex's frame limit is now 60 fps, the pace it works best at."
+                                  : "On for The Sims 3 in the NVIDIA driver. Works best with Apex's frame limit at 60 to 90 fps."), "ApexSuccessBrush")
+            : (T("Off for The Sims 3."), "ApexMutedBrush"));
+    }
+
+    // AMD Fluid Motion Frames: one setting for the whole system in the AMD driver (Afmf.cs); read once per Setup run and after removals
+    Afmf.Status? _afmf;
+    string? _afmfError, _afmfPending;
+    bool _afmfFps, _fillingAfmf;
+
+    void RefreshAfmf()
+    {
+        if (_afmf is null) { _afmf = Afmf.Read(); _afmfError = _afmfPending; _afmfPending = null; }
+        var a = _afmf;
+        // no AMD driver: no row; an AMD card ADLX says cannot run it: the row, off, with the reason (no renderer needed: AFMF 2
+        // covers Vulkan; under the bridge it is unverified)
+        AfmfCard.Visibility = a.Present ? Visibility.Visible : Visibility.Collapsed;
+        var blocked = Afmf.Blocked(a);
+        _fillingAfmf = true;
+        AfmfToggle.IsOn = a.On;
+        AfmfToggle.IsEnabled = blocked is null;
+        _fillingAfmf = false;
+        SetState(AfmfPill, _afmfError == "Dry run: Setup changes nothing." ? (T(_afmfError), "ApexMutedBrush")
+            : _afmfError is not null ? (T("Could not change the AMD driver settings: {0}", T(_afmfError)), "ApexWarningBrush")
+            : blocked is { } b ? (T(b.Key, b.Arg), "ApexMutedBrush")
+            : a.On ? (T(_afmfFps ? "On in the AMD driver, for every game. Apex's frame limit is now 60 fps, the pace it works best at."
+                                 : "On in the AMD driver, for every game. Works best with Apex's frame limit at 60 to 90 fps."), "ApexSuccessBrush")
+            : (T("Off in the AMD driver."), "ApexMutedBrush"));
+    }
+
+    void OnAfmfToggle(object sender, RoutedEventArgs e)
+    {
+        if (_fillingAfmf || _game is not { } g || _afmf is null) return;
+        _afmfError = Preview is not null ? "Dry run: Setup changes nothing." : Afmf.Set(AfmfToggle.IsOn);
+        if (_afmfError is null) _afmf = Afmf.Read();
+        else App.Log(new InvalidOperationException("AFMF: " + _afmfError));
+        // the same frame limit rule as Smooth Motion: 60 only when there is none
+        if (_afmfError is null && AfmfToggle.IsOn)
+            try { _afmfFps = Engine.SetFpsLimitIfNone(g, "AMD Fluid Motion Frames"); }
+            catch (Exception ex) { App.Log(ex); }
+        RefreshComponents();
+    }
+
+    // Apex's frame limit beside frame generation: shown while either row can be used and the game has made ApexRadiance.toml.
+    // Items: Keep (the value now), Engine.FpsChoices, Custom (a number box, 20 to 1000).
+    bool _fillingFps;
+    int? _fpsNow;
+    string? _fpsError;
+    const int FpsCustomTag = -2;
+
+    void RefreshFps(Game g)
+    {
+        var usable = SmoothCard.Visibility == Visibility.Visible && (SmoothToggle.IsEnabled || SmoothToggle.IsOn)
+                  || AfmfCard.Visibility == Visibility.Visible && (AfmfToggle.IsEnabled || AfmfToggle.IsOn);
+        var toml = Engine.ApexToml(Scan.DocumentsFor(g));
+        int? now = null;
+        try { now = File.Exists(toml) ? Engine.FpsLimitKey(File.ReadAllText(toml)) ?? 0 : null; }
+        catch (IOException) { }
+        FpsCard.Visibility = usable && now is not null ? Visibility.Visible : Visibility.Collapsed;
+        if (now is null) return;
+        _fpsNow = now;
+        string Label(int v) => v == 0 ? T("Off") : T(Engine.FpsRecommended(v) ? "{0} fps (recommended)" : "{0} fps", v);
+        _fillingFps = true;
+        FpsCombo.Items.Clear();
+        FpsCombo.Items.Add(new ComboBoxItem { Content = T("Keep: {0}", now == 0 ? T("no limit") : T("{0} fps", now.Value)), Tag = -1 });
+        foreach (var v in Engine.FpsChoices) FpsCombo.Items.Add(new ComboBoxItem { Content = Label(v), Tag = v });
+        FpsCombo.Items.Add(new ComboBoxItem { Content = T("Custom"), Tag = FpsCustomTag });
+        FpsCombo.SelectedIndex = 0;
+        FpsCustom.Visibility = Visibility.Collapsed;
+        FpsCustom.Value = now > 0 ? now.Value : Engine.FrameGenFps;
+        _fillingFps = false;
+        SetState(FpsPill, _fpsError == "Dry run: Setup changes nothing." ? (T(_fpsError), "ApexMutedBrush")
+            : _fpsError is not null ? (T("Could not change Apex's frame limit: {0}", T(_fpsError)), "ApexWarningBrush")
+            : ("", "ApexMutedBrush"));
+    }
+
+    void ApplyFps(int fps)
+    {
+        if (_game is not { } g) return;
+        try
+        {
+            if (Preview is not null) throw new InvalidOperationException("Dry run: Setup changes nothing.");
+            _fpsError = null;
+            Engine.SetFpsLimit(g, fps);
+        }
+        catch (Exception ex) { _fpsError = ex.Message; if (ex.Message != "Dry run: Setup changes nothing.") App.Log(ex); }
+        RefreshComponents();
+    }
+
+    void OnFpsPicked(object sender, SelectionChangedEventArgs e)
+    {
+        if (_fillingFps || FpsCombo.SelectedItem is not ComboBoxItem { Tag: int v }) return;
+        FpsCustom.Visibility = v == FpsCustomTag ? Visibility.Visible : Visibility.Collapsed;
+        if (v >= 0) ApplyFps(v);
+    }
+
+    void OnFpsCustom(NumberBox sender, NumberBoxValueChangedEventArgs e)
+    {
+        if (_fillingFps || double.IsNaN(e.NewValue) || FpsCustom.Visibility != Visibility.Visible) return;
+        ApplyFps(Engine.ClampFps((int)Math.Round(e.NewValue)));
+    }
+
+    void OnSmoothToggle(object sender, RoutedEventArgs e)
+    {
+        if (_fillingSmooth || _game is not { } g || _smooth is null) return;
+        // (the preview writes nothing, as the dry run)
+        _smoothError = Preview is not null ? "Dry run: Setup changes nothing." : SmoothMotion.Set(SmoothToggle.IsOn, g.Exe);
+        if (_smoothError is null) _smooth = SmoothMotion.Read(g.Exe);
+        else App.Log(new InvalidOperationException("Smooth Motion: " + _smoothError));
+        // turned on: Apex's frame limit to 60 only when there is none (a limit the player chose stays); turned off: left as it is
+        if (_smoothError is null && SmoothToggle.IsOn)
+            try { _smoothFps = Engine.SetFpsLimitIfNone(g, "NVIDIA Smooth Motion"); }
+            catch (Exception ex) { App.Log(ex); }
+        RefreshComponents();
+    }
+
     bool _fillingRenderer;
     // the renderer choices as cards: a radio button over the whole card, the chosen card outlined in the accent
     readonly Dictionary<string, (Border Card, RadioButton Radio)> _rendererCards = new();
@@ -899,6 +1070,9 @@ public sealed partial class MainWindow : Window
         S3ppGet.Visibility = !S3ppPresent && _s3ppArchive is null ? Visibility.Visible : Visibility.Collapsed;
         S3ppWait.Visibility = _s3ppWatch is not null ? Visibility.Visible : Visibility.Collapsed;
         S3ppWaitText.Text = T("Waiting for your download in {0}…", DownloadsFolder());
+        RefreshSmooth(s, g);
+        RefreshAfmf();
+        RefreshFps(g);
         ModToggle.IsEnabled = g.ModernizationSupported || s.Modernization;
         if (!g.ModernizationSupported && !s.Modernization) ModToggle.IsOn = false;
         ModDesc.Text = g.ModernizationSupported
@@ -1080,7 +1254,13 @@ public sealed partial class MainWindow : Window
             TaskList.Children.Clear();
         }
         installBar.Value = 0;
-        var rows = dels.Select(c => AddTask(host, T("Remove {0}", Name(c)))).Concat(order.Select(c => AddTask(host, Name(c)))).ToList();
+        // removing the bridge or Apex turns Setup's Smooth Motion profile off (Engine.Remove): its own row
+        var smoothOff = _smooth is { On: true } && dels.Any(Engine.TurnsFrameGenOff);
+        var rows = dels.Select(c => AddTask(host, T("Remove {0}", Name(c)))).ToList();
+        if (smoothOff) rows.Add(AddTask(host, T("Turn off {0}", "NVIDIA Smooth Motion")));
+        if (_afmf is { On: true } && Afmf.SetupTurnedOn && dels.Any(Engine.TurnsFrameGenOff)) rows.Add(AddTask(host, T("Turn off {0}", "AMD Fluid Motion Frames")));
+        var first = rows.Count;
+        rows.AddRange(order.Select(c => AddTask(host, Name(c))));
         rows.Add(AddTask(host, T("Fix incompatible settings")));
         void Mark(int active)
         {
@@ -1094,7 +1274,7 @@ public sealed partial class MainWindow : Window
             touched |= p.Fraction >= 0.5; // (the downloads, before 0.5, change nothing)
             installBar.Value = p.Fraction;
             // (downloads, before 0.5, install nothing: the first row stays active until the copies start)
-            Mark(p.Arg is null || p.Fraction < 0.5 ?(p.Fraction >= 1 ? rows.Count : p.Fraction > 0.9 ? rows.Count - 1 : dels.Count) : dels.Count + order.IndexOf(p.Arg));
+            Mark(p.Arg is null || p.Fraction < 0.5 ?(p.Fraction >= 1 ? rows.Count : p.Fraction > 0.9 ? rows.Count - 1 : first) : first + order.IndexOf(p.Arg));
         });
         // one restore point for the whole change (the engine's own calls join it)
         RestorePoints.Scope? point = null;
@@ -1116,6 +1296,7 @@ public sealed partial class MainWindow : Window
             _lastRemove = dels;
             if (order.Contains(Components.S3pp)) _s3ppArchive = null;
             _defaultsFor = null; // (the switches follow the game as it is now)
+            AfterFrameGenOff();
             _busy = false;
             if (inline)
             {
@@ -1272,6 +1453,8 @@ public sealed partial class MainWindow : Window
         if (_game is not { } g || _busy || _running) return;
         if (!await Confirm(T("Remove {0}?", Name(c)), T("Close the game first. Setup removes the files and puts back the ones it replaced."), T("Remove"))) return;
         await Guarded(() => Engine.Remove(g, c), T("{0} removed.", Name(c)), label: "Remove {0}", args: Components.Name(c));
+        AfterFrameGenOff();
+        RefreshComponents();
     }
 
     async Task UninstallAll()
@@ -1279,6 +1462,8 @@ public sealed partial class MainWindow : Window
         if (_game is not { } g || _busy || _running) return;
         if (!await Confirm(T("Uninstall everything?"), T("Setup removes Apex Radiance and everything it installed in this game, and puts back every file it replaced. Your settings in Documents stay."), T("Uninstall"))) return;
         await Guarded(() => Engine.RemoveAll(g), T("Everything Setup installed was removed."), label: "Uninstall everything");
+        AfterFrameGenOff();
+        RefreshComponents();
     }
 
     Task Repair()
