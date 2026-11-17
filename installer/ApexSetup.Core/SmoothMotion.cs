@@ -29,7 +29,10 @@ public static class SmoothMotion
 
     // RTX 40 and 50 series (GeForce RTX 4060, RTX 5090 Laptop GPU), on a driver that has the setting
     public static bool Supported(string? card, uint driver) =>
-        card is not null && Regex.IsMatch(card, @"RTX\s*(40|50)\d\d", RegexOptions.IgnoreCase) && driver >= MinDriver;
+        IsRtx40or50(card) && driver >= MinDriver;
+
+    // a GeForce RTX 40 or 50 (desktop or Laptop GPU); not the Turing Quadro RTX 4000/5000 nor the workstation RTX 4000/5000 Ada
+    public static bool IsRtx40or50(string? card) => card is not null && Regex.IsMatch(card, @"GeForce RTX\s*(40|50)\d\d", RegexOptions.IgnoreCase);
 
     // the card to judge by: NVAPI lists NVIDIA GPUs only (an Optimus laptop's integrated GPU is not among them); of several, an
     // RTX 40 or 50 (desktop or "Laptop GPU") wins over an older one, whatever the order
@@ -50,7 +53,7 @@ public static class SmoothMotion
         if (s.Owner is not null) return ("Already in your NVIDIA profile \"{0}\": Setup leaves it as it is.", s.Owner);
         // on, but not by Setup (Profile Inspector): Setup does not undo it
         if (s.On) return setupTurnedOn || s.SetupsProfile ? null : ("Turned on outside Setup, in the NVIDIA driver settings: Setup leaves it as it is.", "");
-        if (!Regex.IsMatch(s.Card ?? "", @"RTX\s*(40|50)\d\d", RegexOptions.IgnoreCase)) return ("Needs an NVIDIA GeForce RTX 40 or 50 series card (found: {0}).", s.Card ?? "");
+        if (!IsRtx40or50(s.Card)) return ("Needs an NVIDIA GeForce RTX 40 or 50 series card (found: {0}).", s.Card ?? "");
         if (s.Driver < MinDriver) return ("Needs NVIDIA driver 571.86 or newer (found: {0}).", DriverText(s.Driver));
         // shortcut: DXVK on TS3W.exe is Vulkan too but untested with Smooth Motion; allow it once seen working in game
         if (!bridge) return ("Needs the RTX Remix bridge as the graphics choice.", "");
@@ -99,6 +102,9 @@ public static class SmoothMotion
         if (!on && !SetupTurnedOn) return null;
         return SetDriver(on);
     }
+
+    // an "off" the driver did not keep: Setup's record stays, so the setting is still Setup's to turn off
+    public static void KeepRecord() { if (Environment.GetEnvironmentVariable("APEX_SETUP_FAKE_NV") is not { Length: > 0 }) WriteMarker(); }
 
     static void WriteMarker()
     {

@@ -118,7 +118,8 @@ public static class Games
     // replaced by the offline tests, which may run while the player has the game open
     public static Func<bool> IsRunning = DefaultIsRunning;
     // the game, its launchers (they hold the game's files) and the restart host that starts it again
-    public static readonly string[] Processes = { "TS3W", "TS3", "Sims3Launcher", "Sims3LauncherW", "ts3wrap" };
+    // (and the RTX Remix bridge's server, which holds Game\Bin\.trex while it runs; another Remix game's counts too)
+    public static readonly string[] Processes = { "TS3W", "TS3", "Sims3Launcher", "Sims3LauncherW", "ts3wrap", "NvRemixBridge" };
     static bool DefaultIsRunning() => Processes.Any(n => Process.GetProcessesByName(n).Length > 0);
 
     static IEnumerable<string> SteamLibraries()
