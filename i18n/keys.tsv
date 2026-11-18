@@ -2569,9 +2569,6 @@ All	tr_image.cpp:kEntries	Todos	Todos	Tous
 On	tr_image.cpp:kEntries	Ligados	Activados	Activés	
 No shader matches	tr_image.cpp:kEntries	Nenhum shader corresponde	Ningún shader coincide	Aucun shader ne correspond	
 Style	tr_image.cpp:kEntries	Estilo	Estilo	Style	
-Warm evening	tr_image.cpp:kEntries	Fim de tarde quente	Atardecer cálido	Soirée chaleureuse	
-Cinematic	tr_image.cpp:kEntries	Cinematográfico	Cinematográfico	Cinématographique	
-Soft vintage	tr_image.cpp:kEntries	Vintage suave	Vintage suave	Vintage doux	
 Save this list and its values as a .ini of your own in the Looks folder	tr_image.cpp:kEntries	Salva esta lista e seus valores como um .ini seu na pasta Looks	Guarda esta lista y sus valores como un .ini propio en la carpeta Looks	Enregistre cette liste et ses valeurs dans un .ini à vous, dans le dossier Looks	
 Pick one, or import a ReShade or GShade preset	tr_image.cpp:kEntries	Escolha um ou importe um preset do ReShade ou GShade	Elige uno o importa un preajuste de ReShade o GShade	Choisissez-en un ou importez un préréglage ReShade ou GShade	
 Copy a ReShade or GShade preset (.ini) into the Looks folder and choose it	tr_image.cpp:kEntries	Copia um preset do ReShade ou GShade (.ini) para a pasta Looks e o escolhe	Copia un preajuste de ReShade o GShade (.ini) a la carpeta Looks y lo elige	Copie un préréglage ReShade ou GShade (.ini) dans le dossier Looks et le choisit	
@@ -2591,13 +2588,24 @@ This file can't be read as a preset	tr_image.cpp:kEntries	Este arquivo não pode
 This file is not a ReShade preset	tr_image.cpp:kEntries	Este arquivo não é um preset do ReShade	Este archivo no es un preajuste de ReShade	Ce fichier n'est pas un préréglage ReShade	
 The preset could not be copied to the Looks folder	tr_image.cpp:kEntries	Não foi possível copiar o preset para a pasta Looks	No se pudo copiar el preajuste a la carpeta Looks	Impossible de copier le préréglage dans le dossier Looks	
 Imported as {}	tr_image.cpp:kEntries	Importado como {}	Importado como {}	Importé sous {}	{}
-Apex looks	tr_image.cpp:kEntries	Visuais do Apex	Estilos de Apex	Rendus d'Apex	
 My looks	tr_image.cpp:kEntries	Meus visuais	Mis estilos	Mes rendus	
 Choose a look	tr_image.cpp:kEntries	Escolha um visual	Elige un estilo	Choisissez un rendu	
 Search looks	tr_image.cpp:kEntries	Buscar visuais	Buscar estilos	Rechercher des rendus	
 No looks yet	tr_image.cpp:kEntries	Nenhum visual ainda	Aún no hay estilos	Aucun rendu pour l'instant	
 No look matches	tr_image.cpp:kEntries	Nenhum visual encontrado	Ningún estilo coincide	Aucun rendu ne correspond	
 Open the Looks folder	tr_image.cpp:kEntries	Abrir a pasta Looks	Abrir la carpeta Looks	Ouvrir le dossier Looks	
+{} and {} removed	tr_image.cpp:kEntries	{} e {} removidos	{} y {} quitados	{} et {} retirés	{} {}
+{} shaders removed	tr_image.cpp:kEntries	{} shaders removidos	{} shaders quitados	{} shaders retirés	{}
+{} deleted	tr_image.cpp:kEntries	{} excluído	{} eliminado	{} supprimé	{}
+{} and {} deleted	tr_image.cpp:kEntries	{} e {} excluídos	{} y {} eliminados	{} et {} supprimés	{} {}
+{} looks deleted	tr_image.cpp:kEntries	{} visuais excluídos	{} estilos eliminados	{} rendus supprimés	{}
+Removed from this look	tr_image.cpp:kEntries	Removidos deste visual	Quitados de este estilo	Retirés de ce rendu	
+Favorites	tr_image.cpp:kEntries	Favoritos	Favoritos	Favoris	
+Rename	tr_image.cpp:kEntries	Renomear	Cambiar nombre	Renommer	
+Add to favorites	tr_image.cpp:kEntries	Adicionar aos favoritos	Añadir a favoritos	Ajouter aux favoris	
+Remove from favorites	tr_image.cpp:kEntries	Remover dos favoritos	Quitar de favoritos	Retirer des favoris	
+Renamed to {}	tr_image.cpp:kEntries	Renomeado para {}	Renombrado a {}	Renommé en {}	{}
+That name is taken or can't be used	tr_image.cpp:kEntries	Esse nome já existe ou não pode ser usado	Ese nombre ya existe o no se puede usar	Ce nom est déjà pris ou ne peut pas être utilisé	
 Look changed	tr_image.cpp:kEntries	Visual alterado	Estilo cambiado	Rendu changé	
 {} of {}	tr_image.cpp:kEntries	{} de {}	{} de {}	{} sur {}	{} {}
 Put back the look's values	tr_image.cpp:kEntries	Restaurar os valores do visual	Restablecer los valores del estilo	Rétablir les valeurs du rendu	

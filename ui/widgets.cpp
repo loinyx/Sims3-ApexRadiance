@@ -110,6 +110,8 @@ bool g_reportOn = true;
 bool g_changePending = false;
 std::string g_changeText;    // as shown (menu language)
 std::string g_changeEnglish; // for the log
+std::string g_changeGroup;   // ReportChange's group of this frame's report ("" for none)
+std::string g_openChangeGroup; // the group of the toast on screen
 
 // ---- next row badge ----
 const char* g_nextBadge = nullptr;
@@ -358,6 +360,7 @@ void ReportLabel(const char* label, const char* format) {
     const std::string shown(g_rowRaw ? std::string_view(english) : I18n::TrLabel(label));
     g_changeText = I18n::Trf(format, shown);
     g_changeEnglish = std::vformat(format, std::make_format_args(english));
+    g_changeGroup.clear();
     g_changePending = true;
 }
 
@@ -570,20 +573,25 @@ bool MatchesQuery(const char* query, const char* text) {
     return WordsIn(words, hay);
 }
 
-void ReportChange(const char* text) {
+void ReportChange(const char* text, const char* group) {
     if (!g_reportOn || !text || !*text) return;
     g_changeText = T(text);
     g_changeEnglish = text;
+    g_changeGroup = group ? group : "";
     g_changePending = true;
 }
 
+bool ChangeGroupOpen(const char* group) { return group && *group && g_openChangeGroup == group; }
+void SetOpenChangeGroup(const std::string& group) { g_openChangeGroup = group; }
+
 void SetChangeReporting(bool on) { g_reportOn = on; }
 
-bool TakeChange(std::string& text, std::string* english) {
+bool TakeChange(std::string& text, std::string* english, std::string* group) {
     if (!g_changePending) return false;
     g_changePending = false;
     text = g_changeText;
     if (english) *english = g_changeEnglish;
+    if (group) *group = g_changeGroup;
     return true;
 }
 

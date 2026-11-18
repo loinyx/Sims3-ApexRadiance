@@ -825,6 +825,12 @@ inline constexpr Element kGripVertical[] = {
     {Kind::Circle, nullptr, {15.0f, 5.0f, 1.0f}, false}, {Kind::Circle, nullptr, {15.0f, 19.0f, 1.0f}, false},
 };
 
+// pencil.svg
+inline constexpr Element kPencil[] = {
+    {Kind::Path, "M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z", {}, false},
+    {Kind::Path, "m15 5 4 4", {}, false},
+};
+
 inline constexpr IconData kIcons[] = {
     {"activity", kActivity, static_cast<int>(sizeof(kActivity) / sizeof(kActivity[0]))},
     {"aperture", kAperture, static_cast<int>(sizeof(kAperture) / sizeof(kAperture[0]))},
@@ -952,6 +958,7 @@ inline constexpr IconData kIcons[] = {
     {"package", kPackage, static_cast<int>(sizeof(kPackage) / sizeof(kPackage[0]))},
     {"library", kLibrary, static_cast<int>(sizeof(kLibrary) / sizeof(kLibrary[0]))},
     {"grip-vertical", kGripVertical, static_cast<int>(sizeof(kGripVertical) / sizeof(kGripVertical[0]))},
+    {"pencil", kPencil, static_cast<int>(sizeof(kPencil) / sizeof(kPencil[0]))},
 };
 
 } // namespace ApexUi::LucideData

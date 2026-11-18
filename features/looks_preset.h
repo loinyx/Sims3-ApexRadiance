@@ -4,7 +4,6 @@
 // A look is referenced by its source and a path relative to that source, never by an absolute path:
 //   looks:<relative path>   Documents\...\Apex Radiance\Looks\ (the player's own; Apex writes only here)
 //   gshade:<relative path>  Game\Bin\1. Shader Presets\ (GShade's folder, read-only, listed when it exists)
-//   apex:<name>             a built-in Apex look (embedded .ini text)
 // Everything read from a file is bounded (kMaxPresetBytes, kMaxTechniques, kMaxLooks).
 
 #include <cstddef>
@@ -59,16 +58,16 @@ std::string FormatDefines(const LooksDefines& defines);
 LooksDefines PresetDefines(const Preset& preset, const std::string& file);
 
 // ---------------------------------------------------------------------------------------------- sources
-enum class Source { None, Apex, Mine, GShade };
+enum class Source { None, Mine, GShade };
 std::wstring LooksFolder();  // Apex Radiance\Looks\ (trailing backslash)
 bool EnsureLooksFolder();
 std::wstring GShadeFolder(); // Game\Bin\1. Shader Presets\ (trailing backslash)
 Source RefSource(const std::string& ref);
-// The file of a looks: or gshade: reference ("" for apex:, an empty or an unsafe reference)
+// The file of a looks: or gshade: reference ("" for an empty or an unsafe reference)
 std::wstring RefPath(const std::string& ref);
-// The name the menu shows: the relative path without ".ini" (apex: names as they are)
+// The name the menu shows: the relative path without ".ini"
 std::string RefName(const std::string& ref);
-// The .ini text of a reference (file or built-in), at most kMaxPresetBytes
+// The .ini text of a reference, at most kMaxPresetBytes
 bool LookText(const std::string& ref, std::string& text, std::string* error = nullptr);
 // An absolute presetPath of older settings as a reference: under GShade's folder gshade:, under Looks\ looks:, else
 // looks:<file name>. An empty path was GShade's "[Amelie] Serene 2.0.ini".
@@ -79,19 +78,17 @@ struct LookItem
     std::string ref, name;
     Source source = Source::None;
 };
-// Apex looks (in their own order), then My looks, then GShade (only when its folder exists), sorted by name
+// My looks, then GShade (only when its folder exists), sorted by name
 std::vector<LookItem> ListLooks();
-
-// Built-in Apex looks (apex:<name>, read-only): their names (English menu keys), and the .ini text of one (nullptr
-// when unknown)
-std::vector<std::string> BuiltInLooks();
-const char* BuiltInLookText(const std::string& name);
 
 // A file name a look can be stored under in Looks\ (no folder, ends in .ini, no reserved or unsafe characters)
 bool ValidLookFileName(const std::string& name);
 // Stores bytes as Looks\<fileName>: identical bytes already there reuse that file; a different file with the name gets
 // a numbered name ("Name-1.ini"). stored = the file name used; created = the file written ("" when one was reused).
 bool StoreLook(const std::string& fileName, const std::string& bytes, std::string& stored, std::wstring* created, std::string* error);
+// Renames a look of Looks\ (a looks: reference) to newStem + ".ini" in the same folder; never replaces a file. newRef = the
+// new reference. False when the name is not valid, is taken or the move failed.
+bool RenameLook(const std::string& ref, const std::string& newStem, std::string& newRef);
 
 // ---------------------------------------------------------------------------------------------- the player's shaders in presets
 // A preset ZIP may carry the player's own shader files a look uses, as Shaders/<relative name> (see apex_config.cpp)

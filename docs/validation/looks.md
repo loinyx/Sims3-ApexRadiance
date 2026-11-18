@@ -33,7 +33,7 @@ The feature is described in [features/looks.md](../features/looks.md). It must:
 | `tools/looks_fx_check --hashes` | Pictures of two builds (`--compare`, `--run`) the same to the level | see its README | MSVC, a Direct3D 9 device |
 | `tools/looks_packs_test` | Pack downloads: allowed hosts, HTTP failures, unpacking (layout, caps, unsafe paths), the list joined with the index and the downloaded folders, the queue with simulated answers (gone, busy, offline, a failed update, Stop the rest), which pack has a missing file; `--real` one real download | see its README | MSVC; network only with `--real` |
 | `tools/looks_packs_index.py` | Regenerates `features/looks_packs_index.h` from ReShade's list and GitHub | `python -I tools/looks_packs_index.py` | `gh` signed in |
-| `tools/looks_test` | Built-in looks against the shader table; licence texts | see its README | MSVC |
+| `tools/looks_test` | Preset loader, old `apex:` references; licence texts | see its README | MSVC |
 | `tools/profile_package_test` | Look ZIP export and import: exact bytes, reuse, numbered name, original kept, mismatched reference refused, built-in looks need no file; Capture part kept or dropped | see its README | MSVC, toml++ |
 
 ## Latest results

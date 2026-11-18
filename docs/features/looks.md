@@ -33,10 +33,9 @@ The shaders a look uses are ported once to ps_3_0 with their maths unchanged (`t
 turned on. At run time Apex reads the chosen preset, runs its enabled techniques in the preset's `TechniqueSorting`
 order with its values, and blends the result over the picture by *Strength*.
 
-1. The look is a reference to a source and a relative path: `looks:<file>` (Apex Radiance\Looks\), `gshade:<file>`
-   (GShade's folder, recursive) or `apex:<name>` (a built-in Apex look, embedded .ini text, read-only; see
-   [Built-in looks](#built-in-looks)). Apex never
-   stores an absolute path and never writes in GShade's folder.
+1. The look is a reference to a source and a relative path: `looks:<file>` (Apex Radiance\Looks\) or `gshade:<file>`
+   (GShade's folder, recursive). Apex never stores an absolute path and never writes in GShade's folder. Earlier builds
+   also shipped five built-in looks (`apex:<name>`); a saved `apex:` reference now loads as no look chosen.
 2. The run list is the preset's enabled techniques, plus shaders added here (at the end), in the player's own order
    when one was set. A technique runs from a built-in port or, when Apex has none, from the player's Shaders folder
    ([Your shaders](#your-shaders)); the others stay in the list as amber rows with what is wrong. A GShade preset can name a file that no
@@ -65,9 +64,18 @@ progress in the rows that wait for it and in the download bar.
 **Look card** (tab Look, Lucide `wand-sparkles`): the title is the look's name ("ReShade look" when none is chosen), the
 subtitle "<n> shaders · ~<cost> ms" (or "Off", "No look chosen", "This look can't be read"), a hold-to-compare eye
 ("Hold to see the game without the look") and no switch of its own; in the search results its header is the Shaders
-switch. Rows: *Look*, a dropdown grouped as Apex looks, My looks
-and GShade (a search field above the list once it has more than 10 looks; *Open the Looks folder* last) with an
-*Import* button beside it; *Strength*; *Interface without shaders* (a switch, on by default: "Menus, the game's panels
+switch. Rows: *Look*, a dropdown that opens leftwards from the field, 420 units wide: a search field (focused when the
+list opens), then *Favorites*, *My looks* and *GShade* under quiet labels (a search shows one plain list). Each look is a
+34-unit row: a star (amber when starred; "Add to favorites" / "Remove from favorites"), the name (cut with "…", whole on
+hover) and a check on the chosen look; the player's own looks add a ⋯ menu with *Rename* (the row becomes a name field
+with *Cancel* and *Rename*; the file is renamed in Looks\, never over another, and the chosen look, its changes and its
+star follow it; "Renamed to <name>" or "That name is taken or can't be used" under the row) and *Delete*. A deleted
+look leaves the list at once (the chosen one leaves none chosen) with the undo toast "<name> deleted"; deletions one
+after another join that toast ("<a> and <b> deleted", "<n> looks deleted", one Undo for all). The files reach the
+Recycle Bin only when the toast is gone (`FlushDeletes`, every menu frame), so Undo needs no Recycle Bin; the waiting
+list is the Looks table's `deleting` (Undo can only take looks off it, and it is never read from the settings file:
+a look still waiting when the game closes is kept). A file that could not be moved says so under the row. *Import* and *Open the Looks folder* end the list. Stars are saved as
+`favorites` in the Looks table. *Strength*; *Interface without shaders* (a switch, on by default: "Menus, the game's panels
 and loading screens keep their own colors"); under Advanced, *Order* (After Apex Color / Before Apex Color). While a LUT
 is also on (Color > LUTs), a row "A LUT is on too" with an amber description ("Both change color, so the picture may
 look too strong") and *Turn off the LUT* (undoable) ends the card. In developer mode a *Live counters* disclosure shows
@@ -76,12 +84,16 @@ the status, the last frame's run, skipped shaders, Reload and the GPU memory.
 **Shaders in this look** card: "<on> of <total> on" and an ellipsis menu (*Put back the look as saved*, *Open the
 Shaders folder*, *Check again*: compiles the folder again, then "All shaders found" or "<n> still missing" under the
 list). One row per shader of the run list, in run order: a chevron, the name (changed dot while its values differ from
-the .ini) over one short description, a trash button, the switch. The trash does not take the row away: it stays in
-place, its description "Removed: leaves the look when you save" in amber, with *Restore*; it stops running at once and
-leaves the file at the next save (`RemovedRow`; only a set changes, so the list is never rebuilt while its rows draw). The name side opens its parameters in a rounded
-panel set into the card, each with the control its .fx asks for and the .ini's value as its default (changed dot, Reset;
-see [Parameters and quality settings](#parameters-and-quality-settings)); the panel's footer, under a line, has the
-bordered buttons Run earlier / Run later, "<pos> of <n>" and *Put back the look's values* (under them when narrow). A
+the .ini) over one short description, a ⋯ menu, the switch. The drag grip shows only while the pointer is on the row
+(or it is held). The ⋯ menu, titled "<name>  <pos> of <n>", has *Run earlier*, *Run later*, *Put back the look's values*
+(while they differ) and *Remove from the look*. A removed shader leaves the list at once and stops running, with the
+undo toast "<name> removed"; removals one after another join that toast ("<a> and <b> removed", "<n> shaders removed",
+6 s, one Undo for all; `ApexUi::ReportChange`'s group). It leaves the file at the next save; until then *Add a shader*
+lists it first under "Removed from this look" with *Restore* (`RemovedRow`; only a set changes, so the list is never
+rebuilt while its rows draw). The name side opens its parameters in a rounded panel set into the card, each with the
+control its .fx asks for and the .ini's value as its default (changed dot, Reset; see
+[Parameters and quality settings](#parameters-and-quality-settings)); number fields of several components (R / G / B)
+take the card's tone on the panel. A
 shader from a downloaded pack or the player's folder has the same row, its description naming the source and the file
 ("qUINT · qUINT_mxao.fx", "Your shaders · Mine.fx").
 
@@ -283,22 +295,6 @@ under its author's licence, when the player clicks Download.
   "This pack is no longer on GitHub" and the queue goes on; "GitHub is busy; try again in a few minutes" for a rate
   limit; "No connection to GitHub" offline.
 
-## Built-in looks
-
-Five looks ship inside the ASI (`kBuiltInLooks` in `features/looks_preset.cpp`) and are listed first, under *Apex
-looks*, with translated names. They use only the ported shaders, with moderate values for a life-simulation game. They
-are read-only: edits are kept as tweaks like any look's, and *Save as a new look…* copies one into the Looks folder.
-
-| Look | Shaders in run order | Key values |
-|---|---|---|
-| Natural | Levels, Vibrance, LumaSharpen | Black point 4, white point 250; Vibrance 0.12; sharpening 0.40, limit 0.025 |
-| Warm evening | LiftGammaGain, Tonemap, Vignette | Gain 1.04 / 1.01 / 0.95; Tonemap saturation 0.03, defog 0.015 of blue; vignette amount -0.5 |
-| Cinematic | Curves, Technicolor2, Tonemap, Vignette | Luma contrast 0.15 (Catmull-Rom); Technicolor2 strength 0.25; Tonemap saturation -0.10; vignette amount -0.7 |
-| Soft vintage | HDR (FakeHDR), Curves, Tint (Sepia), Vignette | HDR power 1.1, radii 0.793 / 0.85; contrast 0.06; tint strength 0.15; vignette amount -0.6 |
-| Vivid | Vibrance, Colourfulness, CAS | Vibrance 0.20; colourfulness 0.30; CAS sharpening 0.5 |
-
-`tools/looks_test` parses each one with the real loader and checks every technique and value against the shader table.
-
 ## Shader sources and licences
 
 Each port is the author's `.fx` from the author's public repository, with only mechanical ps_3_0 changes (uniforms in
@@ -336,7 +332,7 @@ The earlier ports came from GShade's copies, which differ from the authors' code
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | ReShade look (card switch) | `enabled` | bool | off | | Turns the look on |
-| Look | `preset` | string | empty (none chosen) | `looks:`, `gshade:` or `apex:` reference | The look that runs. An older absolute `presetPath` becomes `gshade:` under GShade's folder, `looks:` under Looks\, else `looks:<file name>`; an older empty one, `gshade:[Amelie] Serene 2.0.ini` |
+| Look | `preset` | string | empty (none chosen) | `looks:` or `gshade:` reference | The look that runs; an older `apex:` one (a removed built-in look) loads as none. An older absolute `presetPath` becomes `gshade:` under GShade's folder, `looks:` under Looks\, else `looks:<file name>`; an older empty one, `gshade:[Amelie] Serene 2.0.ini` |
 | Strength | `mix` | float | 100% | 0 to 100% | How much of the look is blended over the game |
 | Interface without shaders | `onUi` (inverted) | bool | on (`onUi` false) | | Off: menus, the game's panels and loading screens get the look too |
 | Advanced > Order | `beforeColor` | bool | off (After Apex Color) | | Runs the look before Apex's Color instead of after it |
@@ -364,7 +360,7 @@ the .ini to the ZIP as `Looks/<file name>` (stored entries and checksums, as for
 `looks:<file name>`; the export is a ZIP whenever a LUT or a look file goes with it. Import writes the file into
 Apex Radiance\Looks\: identical bytes reuse the existing file, a different file of that name gets a numbered name and
 the reference follows it; a package whose file is not the one its profile names, or that has a path in the name, is
-refused. Built-in looks (`apex:`) need no file. When the look uses the player's own files, the export offers *Include my
+refused. When the look uses the player's own files, the export offers *Include my
 own .fx files* (unchecked): the .fx files the look names that are in Shaders\Shaders, the .fxh they `#include` and the
 textures they name (`source = "..."`) in Shaders\Textures go in as `Shaders/Shaders/<name>` and
 `Shaders/Textures/<name>` (at most 64 files, 2 MB per .fx/.fxh, 16 MB per texture; packs' files never). Import writes
