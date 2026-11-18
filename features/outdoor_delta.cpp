@@ -41,6 +41,7 @@
 #include "scene_record.h"
 #include "lamp_mark_filter.h"
 #include "object_legs.h"
+#include "plant_scan.h"
 #include "unlit_rooms.h"
 #include "apex_log.h"
 #include "apex_paths.h"
@@ -2643,6 +2644,8 @@ bool LiveTests(const KeptRoom& k, uint64_t was, RoomLightTests::Room& out, uint6
         b.vt = TestVt(b.vt);
         return ok;
     }, moved);
+    // (custom content's plants baked after this room's records were read: once, the records again with their balls)
+    if (PlantScan::Done()) key ^= 0x7F4A7C159E3779B9ull;
     if (!key || key == was) return false;
     out.rec = k.tests.rec;
     for (RoomLightTests::LiveMove& m : moved) out.rec[m.rec].b = std::move(m.b), RoomLightTests::Bound(out.rec[m.rec]);

@@ -15,7 +15,8 @@
 namespace {
 
 constexpr uint32_t kLiteType = 0x03B4C61D;
-// Every object with a LITE: custom content's plants are known only once PlantScan ends, after most objects attached
+// A table or a plant of the tables, a custom content plant, and while PlantScan runs every object with a LITE (custom content's
+// plants are known only once it ends, after most objects attached; then the rest are dropped at their next fill)
 struct Object {
     uint64_t lite;
     const ObjectLegs::Model* model;   // a legged table, or
@@ -45,10 +46,13 @@ char __fastcall AttachHook(void* manager, void* edx, uint32_t idLo, uint32_t idH
     std::memcpy(&lite, key, sizeof lite);
     const ObjectLegs::Model* model = ObjectLegs::Baked(lite);
     const ObjectLegs::PlantModel* plant = model ? nullptr : ObjectLegs::BakedPlant(lite);
+    const ObjectLegs::Puff* custom = nullptr;
+    uint16_t customCount = 0;
+    if (!model && !plant && PlantScan::Done() && !PlantScan::Find(lite, custom, customCount)) return made; // nothing of ours
     {
         std::lock_guard<std::mutex> lk(g_mx);
         if (g_objects.size() >= 65536) g_objects.clear(), g_shapes.clear();
-        g_objects[IdOf(idLo, idHi)] = {lite, model, plant ? &ObjectLegs::kPuffs[plant->first] : nullptr, plant ? plant->count : uint16_t{0}, {}, false};
+        g_objects[IdOf(idLo, idHi)] = {lite, model, plant ? &ObjectLegs::kPuffs[plant->first] : custom, plant ? plant->count : customCount, {}, false};
         g_any.store(true, std::memory_order_relaxed);
     }
     if (model || plant) g_baked.fetch_add(1, std::memory_order_relaxed);
@@ -94,6 +98,7 @@ void Uninstall() {
 }
 
 uint32_t Gen() { return g_gen.load(std::memory_order_relaxed); }
+void Touch() { g_gen.fetch_add(1, std::memory_order_relaxed); }
 void MoveStats(uint32_t& hook, unsigned long& thread) {
     hook = g_hookMoves.load(std::memory_order_relaxed), thread = g_moveThread.load(std::memory_order_relaxed);
 }
@@ -117,10 +122,15 @@ void Fill(RoomLightTests::Room& room) {
             const auto object = g_objects.find(shape->second);
             if (object == g_objects.end() || !object->second.placed) continue;
             Object& o = object->second;
-            if (!o.model && !o.puffs) PlantScan::Find(o.lite, o.puffs, o.puffCount); // (custom content: once its scan ended)
+            if (!o.model && !o.puffs) {
+                if (!PlantScan::Find(o.lite, o.puffs, o.puffCount)) {
+                    // (custom content: once its scan ended; an object it did not find is nothing of ours)
+                    if (PlantScan::Done()) g_shapes.erase(shape), g_objects.erase(object);
+                    continue;
+                }
+            }
             if (o.model) Place(*o.model, o.m, rc.posts);
-            else if (o.puffs) PlacePuffs(o.puffs, o.puffCount, o.m, rc.puffs);
-            else continue;
+            else PlacePuffs(o.puffs, o.puffCount, o.m, rc.puffs);
             records++;
         }
     }

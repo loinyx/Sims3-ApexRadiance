@@ -28,6 +28,9 @@ constexpr uint32_t kShadowLods[] = {0x10001, 0x10000};
 constexpr double kSample = 0.004, kAreaPerPuff = 0.06, kRadius = 1.29, kTauMin = 0.1, kTauMax = 2.5, kDensity = 0.6;
 constexpr double kSolidM = 0.05, kTauSolid = 6.0;
 constexpr int kMaxK = 10, kMaxSolidK = 3;
+// Custom content can be any bytes: nothing bigger is allocated (a 32-bit game), and a model past these is left out
+constexpr uint32_t kMaxResource = 64u << 20;
+constexpr size_t kMaxTris = 200000, kMaxSamples = 2000000;
 const char* const kWords[] = {"plant", "palm", "fern", "ficus", "bonsai", "flower", "topiary", "cactus", "bamboo", "lotus", "papyrus",
                               "hosta", "lillies", "philodendron", "perennials", "planter", "coleus", "ivy", "bush", "shrub", "orchid",
                               "daffodil", "tulip", "grass", "reed", "cattail", "succulent", "leafy", "tree"};
@@ -46,7 +49,7 @@ struct Entry {
 using Bytes = std::vector<uint8_t>;
 
 template <class T> bool Get(const Bytes& b, size_t at, T& v) {
-    if (at + sizeof(T) > b.size()) return false;
+    if (at > b.size() || b.size() - at < sizeof(T)) return false; // (an offset from the file can be near SIZE_MAX)
     std::memcpy(&v, b.data() + at, sizeof(T));
     return true;
 }
@@ -62,19 +65,26 @@ struct Packs {
     std::unordered_map<uint64_t, std::string>* names = nullptr;
 
     void Read(const std::vector<std::wstring>& paths) {
-        for (const std::wstring& path : paths) {
+        for (const std::wstring& path : paths) try {
             FILE* f = _wfopen(path.c_str(), L"rb");
             if (!f) continue;
             uint8_t head[96] = {};
-            if (fread(head, 1, sizeof head, f) != sizeof head || std::memcmp(head, "DBPF", 4) != 0) {
+            long long length = -1;
+            if (fread(head, 1, sizeof head, f) != sizeof head || std::memcmp(head, "DBPF", 4) != 0 || _fseeki64(f, 0, SEEK_END) != 0 ||
+                (length = _ftelli64(f)) < 0) {
                 fclose(f);
                 continue;
             }
             uint32_t count, size, pos, pos2;
             std::memcpy(&count, head + 36, 4), std::memcpy(&size, head + 44, 4), std::memcpy(&pos, head + 64, 4), std::memcpy(&pos2, head + 40, 4);
             if (!pos) pos = pos2;
+            // an index row is at most 32 bytes after a 36-byte head: a bigger size, or one past the file, is not an index
+            if (size < 4 || count > 4000000 || size > 36ull + 32ull * count || static_cast<unsigned long long>(pos) + size > static_cast<unsigned long long>(length)) {
+                fclose(f);
+                continue;
+            }
             Bytes data(size);
-            if (size < 4 || count > 4000000 || _fseeki64(f, pos, SEEK_SET) != 0 || fread(data.data(), 1, size, f) != size) {
+            if (_fseeki64(f, pos, SEEK_SET) != 0 || fread(data.data(), 1, size, f) != size) {
                 fclose(f);
                 continue;
             }
@@ -94,10 +104,12 @@ struct Packs {
                 if (k.t == kModl || k.t == kLite || k.t == kVpxy || k.t == kMlod) index[k] = e;
                 else if (k.t == kNmap && names) ReadNames(e);
             }
+        } catch (...) { // (a file the checks above let through: the rest are read)
         }
     }
     bool Has(const Key& k) const { return index.count(k) != 0; }
     Bytes Load(const Entry& e) const {
+        if (e.size > kMaxResource || (e.comp && e.mem > kMaxResource)) return {};
         Bytes raw(e.size);
         FILE* f = _wfopen(files[e.file].c_str(), L"rb");
         if (!f) return {};
@@ -105,7 +117,6 @@ struct Packs {
         fclose(f);
         if (!ok) return {};
         if (!e.comp) return raw;
-        if (e.mem > 64u << 20) return {};
         Bytes out(e.mem);
         return RefPackCodec::Decompress(out.data(), e.mem, raw.data(), e.size) == e.mem ? out : Bytes{};
     }
@@ -121,7 +132,7 @@ struct Packs {
         for (uint32_t i = 0; i < n; i++) {
             uint64_t inst;
             uint32_t len;
-            if (!Get(d, o, inst) || !Get(d, o + 8, len) || o + 12 + len > d.size()) return;
+            if (!Get(d, o, inst) || !Get(d, o + 8, len) || len > d.size() - o - 12) return; // (Get: o + 12 <= size)
             (*names)[inst] = std::string(reinterpret_cast<const char*>(d.data() + o + 12), len);
             o += 12 + len;
         }
@@ -146,7 +157,7 @@ struct Rcol {
         for (uint32_t i = 0; i < ne; i++, o += 16) ext.push_back({At<uint32_t>(d, o + 8), At<uint32_t>(d, o + 12), At<uint64_t>(d, o)});
         for (uint32_t i = 0; i < ni; i++, o += 8) {
             const uint32_t p = At<uint32_t>(d, o), s = At<uint32_t>(d, o + 4);
-            if (o + 8 > d.size() || static_cast<size_t>(p) + s > d.size()) return false;
+            if (o + 8 > d.size() || p > d.size() || s > d.size() - p) return false;
             chunks.emplace_back(d.begin() + p, d.begin() + p + s);
         }
         return true;
@@ -234,6 +245,9 @@ std::vector<Tri> ShadowTriangles(const Packs& pk, const Key& modl) {
             break;
         }
         if (!haveS || !haveO || vc > 1000000 || pc > 1000000) continue;
+        bool finite = true;
+        for (int j = 0; j < 3; j++) finite = finite && std::isfinite(sc[j]) && std::isfinite(of[j]) && std::fabs(sc[j]) < 1.0 && std::fabs(of[j]) < 1000.0;
+        if (!finite) continue;
         std::vector<P3> pos(vc);
         for (uint32_t i = 0; i < vc; i++) {
             const size_t at = 16 + (static_cast<size_t>(sv) + i) * 8 + soff;
@@ -253,6 +267,7 @@ std::vector<Tri> ShadowTriangles(const Packs& pk, const Key& modl) {
             const int64_t a = idx[t], b = idx[t + 1], c = idx[t + 2];
             if (a < 0 || b < 0 || c < 0 || a >= vc || b >= vc || c >= vc) continue;
             tris.push_back({pos[static_cast<size_t>(a)], pos[static_cast<size_t>(b)], pos[static_cast<size_t>(c)]});
+            if (tris.size() > kMaxTris) return {};
         }
     }
     return tris;
@@ -307,7 +322,7 @@ std::vector<Sample> Samples(const std::vector<Tri>& tris, double& total) {
         if (!(area > 0.0)) continue;
         total += area;
         const int n = std::max(1, static_cast<int>(std::ceil(std::sqrt(area / kSample))));
-        if (n > 512) continue; // (a malformed giant triangle)
+        if (n > 512 || out.size() > kMaxSamples) return {}; // (a malformed mesh: the model is left out)
         const double w = area / (n * (n + 1) / 2.0);
         for (int i = 0; i < n; i++)
             for (int j = 0; j < n - i; j++) {
@@ -396,9 +411,10 @@ bool IsPlant(std::string name) {
 #ifndef PLANT_SCAN_BAKE_ONLY
 std::mutex g_mx;
 std::shared_ptr<const std::unordered_map<uint64_t, std::vector<ObjectLegs::Puff>>> g_found; // (under g_mx) set once, when the scan ends
-std::atomic<bool> g_started{false};
+std::atomic<bool> g_started{false}, g_done{false};
 
-void Collect(const std::wstring& dir, const wchar_t* pattern, bool deep, std::vector<std::wstring>& out) {
+// (as the game's Resource.cfg reads Mods\Packages: a few folders deep; a junction or link is not followed, so a loop cannot run away)
+void Collect(const std::wstring& dir, const wchar_t* pattern, int depth, std::vector<std::wstring>& out) {
     WIN32_FIND_DATAW fd;
     HANDLE h = FindFirstFileW((dir + L"*").c_str(), &fd);
     if (h == INVALID_HANDLE_VALUE) return;
@@ -406,7 +422,7 @@ void Collect(const std::wstring& dir, const wchar_t* pattern, bool deep, std::ve
         const std::wstring name = fd.cFileName;
         if (name == L"." || name == L"..") continue;
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            if (deep) Collect(dir + name + L"\\", pattern, deep, out);
+            if (depth > 0 && !(fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) Collect(dir + name + L"\\", pattern, depth - 1, out);
         } else if (name.size() > wcslen(pattern) && _wcsicmp(name.c_str() + name.size() - wcslen(pattern), pattern) == 0)
             out.push_back(dir + name);
     } while (FindNextFileW(h, &fd));
@@ -424,10 +440,25 @@ void Bake(const std::vector<std::wstring>& files, std::unordered_map<uint64_t, s
     std::unordered_map<uint64_t, std::string> modelNames;
     pk.names = &modelNames;
     pk.Read(files);
-    for (const auto& [key, entry] : pk.index) {
-        if (key.t != kVpxy) continue;
+    // (the script's order, by key, decides which VPXY gives a LITE its balls; the reads happen in file order first, so a large
+    // DCCache is read forward, not at random)
+    std::vector<std::pair<Key, Entry>> vpxy;
+    for (const auto& [key, entry] : pk.index)
+        if (key.t == kVpxy) vpxy.push_back({key, entry});
+    std::vector<Bytes> loaded(vpxy.size());
+    {
+        std::vector<size_t> order(vpxy.size());
+        for (size_t i = 0; i < order.size(); i++) order[i] = i;
+        std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+            return vpxy[a].second.file != vpxy[b].second.file ? vpxy[a].second.file < vpxy[b].second.file : vpxy[a].second.off < vpxy[b].second.off;
+        });
+        for (size_t i : order) try { loaded[i] = pk.Load(vpxy[i].second); } catch (...) {}
+    }
+    for (size_t v = 0; v < vpxy.size(); v++) try {
+        const Key& key = vpxy[v].first;
         Rcol vp;
-        if (!vp.Parse(pk.Load(entry)) || vp.chunks.empty()) continue;
+        if (!vp.Parse(loaded[v]) || vp.chunks.empty()) continue;
+        Bytes().swap(loaded[v]);
         const Bytes& b = vp.chunks[0];
         const uint32_t off = At<uint32_t>(b, 8);
         const size_t p = 12 + static_cast<size_t>(off);
@@ -467,6 +498,7 @@ void Bake(const std::vector<std::wstring>& files, std::unordered_map<uint64_t, s
         if (puffs.empty()) continue;
         out[lite.i] = std::move(puffs);
         if (names) (*names)[lite.i] = nm != modelNames.end() ? nm->second : std::string();
+    } catch (...) { // (a model the checks let through: the others are baked)
     }
 }
 
@@ -478,8 +510,9 @@ void Start() {
     HookGuard::StartDetached("Plant shadows: custom content", [docs] {
         const auto t0 = std::chrono::steady_clock::now();
         std::vector<std::wstring> files;
-        Collect(docs + L"Mods\\", L".package", true, files);
-        Collect(docs + L"DCCache\\", L".dbc", false, files);
+        SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN); // (low CPU and disk priority while the game loads)
+        Collect(docs + L"Mods\\", L".package", 6, files);
+        Collect(docs + L"DCCache\\", L".dbc", 0, files);
         auto found = std::make_shared<std::unordered_map<uint64_t, std::vector<ObjectLegs::Puff>>>();
         Bake(files, *found);
         size_t balls = 0, known = 0;
@@ -489,10 +522,16 @@ void Start() {
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
         LOG_INFO(std::format("[ObjectLegs] Custom content: {} files, {} plant models baked ({} balls; {} already in the table) in {:.0f} ms",
                              files.size(), found->size(), balls, known, ms));
-        std::lock_guard<std::mutex> lk(g_mx);
-        g_found = std::move(found);
+        {
+            std::lock_guard<std::mutex> lk(g_mx);
+            g_found = std::move(found);
+        }
+        g_done.store(true, std::memory_order_release);
+        ObjectLegs::Touch(); // kept rooms read their records again (OutdoorDelta's LiveTests): plants solved meanwhile get their balls
     });
 }
+
+bool Done() { return g_done.load(std::memory_order_acquire); }
 
 bool Find(uint64_t lite, const ObjectLegs::Puff*& first, uint16_t& count) {
     std::shared_ptr<const std::unordered_map<uint64_t, std::vector<ObjectLegs::Puff>>> found;

@@ -74,6 +74,7 @@ void NoteShape(uint64_t id, uintptr_t shape); // an occluder entry's object and 
 // tables). The move hook is what paces it: marks wait for the room update, gaps of 0.6 to 2 s on 03/11. hook: its moves alone and thread:
 // the last one's (nothing proved yet that it fires on every drag step or how often in Live mode; the [LiveTable] line tells)
 uint32_t Gen();
+void Touch(); // moves Gen once (custom content's plants were baked: kept rooms read their records again)
 void MoveStats(uint32_t& hook, unsigned long& thread);
 void Fill(RoomLightTests::Room& room);        // any thread
 

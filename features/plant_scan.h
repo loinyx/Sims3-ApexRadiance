@@ -15,6 +15,8 @@ namespace PlantScan {
 void Start();
 // The balls of a custom model's LITE instance, false when it has none or the scan has not ended
 bool Find(uint64_t lite, const ObjectLegs::Puff*& first, uint16_t& count);
+// The scan ended (Find answers for good from then on)
+bool Done();
 
 // The bake itself (pure: tools/plant_puffs_table/check.cpp runs it on the game's packages against the table). files: read in
 // order, a later file's resource overriding an earlier one's; out: LITE instance -> balls; names: optional, LITE instance -> name
