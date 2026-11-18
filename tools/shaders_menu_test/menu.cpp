@@ -34,7 +34,7 @@ extern bool g_fixtureTwin;
 #include "raster.inc"
 
 namespace {
-struct State { const char* name; int page; int tab; bool compiling, edited, offer; int batch; int video, options; bool gameAa; bool openAll; bool twin = false; int confirm = 0; const char* modal = nullptr; };
+struct State { const char* name; int page; int tab; bool compiling, edited, offer; int batch; int video, options; bool gameAa; bool openAll; bool twin = false; int confirm = 0; const char* modal = nullptr; int edge = 0; };
 // page 0 Shaders (tab 0 Look, 1 Installed shaders), 1 Capture (tab 0 Screenshots, 1 Video)
 const State kStates[] = {
     { "look", 0, 0, false, false, true, 0, 0, 0, false, false },
@@ -54,6 +54,13 @@ const State kStates[] = {
     { "installed-remove-pack", 0, 1, false, false, false, 0, 0, 0, false, false, false, 1 },
     { "installed-remove-file", 0, 1, false, false, false, 0, 0, 0, false, false, false, 2 },
     { "look-add", 0, 0, false, false, false, 1, 0, 0, false, false, false, 0, "##AddShaders" },
+    { "look-none", 0, 0, false, false, false, 0, 0, 0, false, false, false, 0, nullptr, 1 },
+    { "look-empty", 0, 0, false, false, false, 0, 0, 0, false, false, false, 0, nullptr, 2 },
+    { "look-empty-add", 0, 0, false, false, false, 0, 0, 0, false, false, false, 0, "##AddShaders", 2 },
+    { "look-long", 0, 0, false, false, false, 0, 0, 0, false, false, false, 0, nullptr, 3 },
+    { "look-bare-add", 0, 0, false, false, false, 0, 0, 0, false, false, false, 0, "##AddShaders", 4 },
+    { "installed-bare", 0, 1, false, false, false, 0, 0, 0, false, false, false, 0, nullptr, 4 },
+    { "installed-downloading", 0, 1, false, false, false, 1, 0, 0, false, false, false, 0, nullptr, 0 },
 };
 
 struct Run { ImRect r; std::string text; };
@@ -237,7 +244,7 @@ void CheckLayout(const std::string& state, const std::string& where)
                     Report(state + " | text over control | " + win + " | " + c->id, buf, where);
                 }
             for (size_t j = i + 1; j < runs.size(); ++j)
-                if (Overlaps(t.r, runs[j].r, std::min(t.r.GetHeight(), runs[j].r.GetHeight()) * 0.25f))
+                if (Overlaps(t.r, runs[j].r, std::max(2.0f, std::min(t.r.GetHeight(), runs[j].r.GetHeight()) * 0.25f))) // 2 px: a flat glyph run such as "_" touches its neighbour
                 {
                     snprintf(buf, sizeof buf, "\"%s\" over \"%s\"", Clip(t.text).c_str(), Clip(runs[j].text).c_str());
                     Report(state + " | text over text | " + win, buf, where);
@@ -316,6 +323,7 @@ int main(int argc, char** argv)
                     ImGui::GetStyle().FontScaleMain = scale;
                     Fixture::LooksState(s.compiling, s.edited, s.offer, s.batch, s.twin);
                     Fixture::PacksState(s.confirm);
+                    Fixture::EdgeState(s.edge);
                     g_fixtureTwin = s.twin;
                     Fixture::CaptureState(s.video, s.options);
                     g_menuGameAaOn = s.gameAa;
@@ -429,6 +437,7 @@ int main(int argc, char** argv)
                     ImGui::GetStyle().FontScaleMain = scale;
                     Fixture::LooksState(false, false, false, 1, false);
                     Fixture::PacksState(0);
+                    Fixture::EdgeState(0);
                     g_recOpenAll = false;
                     g_recModal = modal;
                     ImGui::GetCurrentContext()->OpenPopupStack.resize(0);

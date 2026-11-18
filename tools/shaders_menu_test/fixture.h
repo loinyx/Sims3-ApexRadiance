@@ -6,6 +6,9 @@ ApexPatch* StartLooks(); // the real LooksPatch, installed with the D3D side stu
 // offer = the import note card; batch: 0 no downloads, 1 running (Waiting/Downloading/Done/failed rows), 2 finished
 // twin: MXAO runs and Apex's Ambient Occlusion and a LUT are on (the amber rows of the look card and list)
 void LooksState(bool compiling, bool edited, bool offer, int batch, bool twin = false);
+// Edge cases after LooksState: 0 none, 1 no look chosen, 2 an empty look, 3 every built-in shader with long names,
+// 4 nothing installed (no pack downloaded, no file of the player's)
+void EdgeState(int edge);
 // confirm: the removal confirmation of Packs and files open on 0 nothing, 1 a pack, 2 one of the player's .fx files
 void PacksState(int confirm);
 // The live viewer: downloads progress over time

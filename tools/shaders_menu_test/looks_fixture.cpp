@@ -75,7 +75,8 @@ bool g_live = false;
 std::vector<Looks::Packs::Row> g_liveRows;
 std::set<std::string> g_liveDone;
 double g_liveStarted = 0.0;
-bool IsDownloaded(const std::string& f) { return f == "prod80" || f == "OldPack" || (g_batch && f == "SweetFX") || g_liveDone.count(f); }
+int g_edge = 0; // Fixture::EdgeState: 4 = nothing installed (no pack, no file of the player's)
+bool IsDownloaded(const std::string& f) { return g_edge != 4 && (f == "prod80" || f == "OldPack" || (g_batch && f == "SweetFX") || g_liveDone.count(f)); }
 } // namespace
 
 namespace Looks::Fx {
@@ -92,15 +93,16 @@ bool HasFile(const std::string& f) { return FindUser("Everything", f) >= 0 || Fi
 bool Pending(const std::string&) { return false; }
 std::vector<Listed> List()
 {
+    if (g_edge == 4) return {};
     std::vector<Listed> v(2);
     v[0].index = 0; v[0].technique = "Everything"; v[0].file = "Everything.fx"; v[0].pack = "prod80"; v[0].checked = true;
     v[1].index = 1; v[1].technique = "FilmGrain"; v[1].file = "MyFilmGrain.fx"; v[1].checked = true;
     return v;
 }
-std::vector<std::string> PackFolders() { return { "prod80", "OldPack" }; }
-std::vector<std::wstring> OwnFiles() { return { L"C:\\Shaders\\Shaders\\MyFilmGrain.fx" }; }
+std::vector<std::string> PackFolders() { return g_edge == 4 ? std::vector<std::string>() : std::vector<std::string>{ "prod80", "OldPack" }; }
+std::vector<std::wstring> OwnFiles() { return g_edge == 4 ? std::vector<std::wstring>() : std::vector<std::wstring>{ L"C:\\Shaders\\Shaders\\MyFilmGrain.fx" }; }
 PackCount CountPack(const std::string&) { return { 31, 40, true }; }
-int Generation() { return 1; }
+int Generation() { return 1 + g_edge; } // an edge state lists other sources
 bool Scanned() { return true; }
 bool Scanning() { return false; }
 void RequestScan(bool) {}
@@ -237,6 +239,44 @@ void LooksState(bool compiling, bool edited, bool offer, int batch, bool twin)
     if (offer) g_offer = ImportOffer{ "Cinema suave", 2, { "qUINT", "AstrayFX" } };
     g_message.clear();
     g_fxMessage.clear();
+}
+
+void EdgeState(int edge)
+{
+    g_edge = edge;
+    if (edge == 1) // no look chosen
+    {
+        g.preset.clear();
+        g.loaded = false;
+        g.iniOrder.clear();
+        g.extra.clear();
+        g.removed.clear();
+        RebuildOrder();
+    }
+    else if (edge == 2) // a new, empty look
+    {
+        g.preset = "looks:My look.ini";
+        g.iniOrder.clear();
+        g.iniKeys.clear();
+        g.extra.clear();
+        g.removed.clear();
+        g.off.clear();
+        RebuildOrder();
+    }
+    else if (edge == 3) // every built-in shader, a long look name and a long missing shader of a pack not on the list
+    {
+        g.preset = "looks:A look with a very long name that goes on and on past any width the menu has.ini";
+        g.iniOrder.clear();
+        for (int s = 0; s < Looks::ShaderCount(); ++s) g.iniOrder.push_back({ Looks::Shader(s).technique, Looks::Shader(s).file, s });
+        g.iniOrder.push_back({ "AVeryLongTechniqueNameFromAShaderThatNobodyEverShortened", "SomeoneElsesShaderWithALongFileName_v2_final.fx", -1 });
+        g.iniKeys.clear();
+        for (auto& e : g.iniOrder) g.iniKeys.insert(Lower(EntryKey(e)));
+        g.extra.clear();
+        g.removed.clear();
+        g.off.clear();
+        RebuildOrder();
+    }
+    else if (edge == 4) g_fxMessage.clear(); // nothing installed: the look as LooksState left it
 }
 
 bool SaveRoundTrip()
