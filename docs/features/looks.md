@@ -201,7 +201,9 @@ refused; the same file is reused and a different file of that name gets a number
   put back); `key`, `mousebutton` (held, toggle, press), `mousepoint` and `mousedelta` while the game has the focus; a
   ReShade.ini or GShade.ini beside the game's exe gives its `[GENERAL] PreprocessorDefinitions` (the look's win; its
   `RESHADE_DEPTH_*` are not taken, Apex knows this game's depth); a shader listed before a depth shader runs before it.
-  Not yet: textures shared between .fx files by name, `mousewheel`, `overlay_open`, `__VENDOR__` / `__DEVICE__` (0).
+  A texture (no semantic) that another running effect already made under the same name is that one, with its size and
+  contents; `mousewheel` (step, min, max) and `overlay_open` (the Apex menu); `__VENDOR__` / `__DEVICE__` of the game's
+  graphics card. Not taken: `pooled` textures (each effect keeps its own: more memory, the same pictures).
 - Limits: 2 MB per .fx or included file, 64 includes, 16 MB of preprocessed code, 64 MB per texture file, 64 textures and
   256 MB of textures per effect, 384 MB for every user effect running, 64 passes per technique, 256 user passes per frame,
   two minutes of compile time per file. Includes and textures must stay inside the Shaders folder (`..` and absolute

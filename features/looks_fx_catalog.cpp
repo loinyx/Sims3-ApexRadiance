@@ -1003,6 +1003,7 @@ bool Run(const RunFrame& f, int index, const float* values, std::string* why)
         if (u.params[p].kind != LooksParamKind::Source) SetUniform(fx, (size_t)u.uniform[p], values + p * 4, (size_t)u.params[p].comps, live->regs);
     SourceState& st = live->sources;
     st.timerMs = f.timerMs; st.frametimeMs = f.frametimeMs; st.frame = f.frame; st.depthReady = f.depth != nullptr;
+    st.wheel = f.wheel; st.overlayOpen = f.overlayOpen;
     UpdateSources(fx, live->regs, st);
     g_framePasses += (int)passes;
     if (!live->inst.Run(f.dev, u.tech, f.target, f.depth, live->regs)) return fail("did not run");

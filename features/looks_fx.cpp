@@ -479,6 +479,7 @@ void WriteCache(const std::wstring& dir, const std::wstring& file, uint64_t key,
 }
 
 std::atomic<int> g_cacheHits{ 0 }, g_cacheMisses{ 0 };
+std::atomic<uint32_t> g_vendor{ 0 }, g_device{ 0 };
 
 uint32_t BytesPerPixel(D3DFORMAT f)
 {
@@ -557,8 +558,8 @@ bool CompileImpl(const std::wstring& fxPath, const Folders& folders, UINT W, UIN
     pp.add_macro_definition("__RESHADE__", "60703");
     pp.add_macro_definition("__RESHADE_PERMUTATION__", "0");
     pp.add_macro_definition("__RESHADE_PERFORMANCE_MODE__", "0");
-    pp.add_macro_definition("__VENDOR__", "0");
-    pp.add_macro_definition("__DEVICE__", "0");
+    pp.add_macro_definition("__VENDOR__", std::to_string(g_vendor.load()));
+    pp.add_macro_definition("__DEVICE__", std::to_string(g_device.load()));
     pp.add_macro_definition("__RENDERER__", "36864"); // 0x9000: Direct3D 9
     pp.add_macro_definition("__APPLICATION__", std::to_string(std::hash<std::string>()("TS3W") & 0xFFFFFFFF));
     pp.add_macro_definition("BUFFER_WIDTH", std::to_string(W));
@@ -892,6 +893,7 @@ void UpdateSources(const Effect& fx, std::vector<float>& regs, SourceState& st)
 {
     if (st.pingpong.size() != fx.uniforms.size() * 2) st.pingpong.assign(fx.uniforms.size() * 2, 0.0f);
     if (st.keys.size() != fx.uniforms.size() * 2) st.keys.assign(fx.uniforms.size() * 2, 0);
+    if (st.wheelValue.size() != fx.uniforms.size()) st.wheelValue.assign(fx.uniforms.size(), NAN);
     // input as ReShade reads it: only while the game's window has the focus (this process's foreground window)
     HWND fg = GetForegroundWindow();
     DWORD pid = 0;
@@ -985,6 +987,20 @@ void UpdateSources(const Effect& fx, std::vector<float>& regs, SourceState& st)
         }
         else if (n == "mousepoint") { v[0] = mouse[0]; v[1] = mouse[1]; }
         else if (n == "mousedelta") { v[0] = delta[0]; v[1] = delta[1]; }
+        else if (n == "mousewheel")
+        {
+            // ReShade: value += notches x step (step 0 = 1), kept in min..max when they differ; .y = the frame's notches
+            const Ann* mn = FindAnn(u.ann, "min"); const Ann* mx = FindAnn(u.ann, "max"); const Ann* sp = FindAnn(u.ann, "step");
+            const float lo = mn && !mn->isString ? mn->f[0] : 0.0f, hi = mx && !mx->isString ? mx->f[0] : 0.0f;
+            const float step = sp && !sp->isString && sp->f[0] != 0.0f ? sp->f[0] : 1.0f;
+            float& val = st.wheelValue[i];
+            if (std::isnan(val)) val = u.init.empty() ? 0.0f : u.init[0];
+            const float notches = focused ? st.wheel : 0.0f;
+            val += notches * step;
+            if (lo != hi) val = std::min(std::max(val, lo), hi);
+            v[0] = val; v[1] = notches;
+        }
+        else if (n == "overlay_open" || n == "ui_open") v[0] = st.overlayOpen ? 1.0f : 0.0f;
         SetUniform(fx, i, v, std::min<size_t>(4, u.Comps()), regs);
     }
 }
@@ -1034,10 +1050,23 @@ bool DecodeImage(const std::wstring& path, UINT w, UINT h, std::vector<uint8_t>&
 }
 
 void SetBindFunctions(SetRenderTargetFn rt, SetDepthStencilFn ds) { g_setRT = rt; g_setDS = ds; }
+void SetAdapter(uint32_t vendor, uint32_t device) { g_vendor = vendor; g_device = device; }
+
+namespace {
+// Textures of live effects by unique name, shared as ReShade shares them (render thread): the texture and its users.
+// Counted here, not by Release()'s result: the device may still hold a reference to a bound texture.
+std::map<std::string, std::pair<IDirect3DTexture9*, int>> g_shared;
+} // namespace
 
 void Instance::Release()
 {
-    for (IDirect3DTexture9* t : tex_) if (t && t != colorTex_) t->Release();
+    for (IDirect3DTexture9* t : tex_)
+    {
+        if (!t || t == colorTex_) continue;
+        for (auto it = g_shared.begin(); it != g_shared.end(); ++it)
+            if (it->second.first == t) { if (--it->second.second == 0) g_shared.erase(it); break; }
+        t->Release();
+    }
     tex_.clear();
     for (IUnknown* s : shaders_) if (s) s->Release();
     shaders_.clear();
@@ -1072,6 +1101,7 @@ bool Instance::Create(IDirect3DDevice9* dev, std::shared_ptr<const Effect> fxp, 
         const Texture& t = fx.textures[i];
         if (t.semantic == "COLOR") { tex_[i] = colorTex_; continue; }
         if (!t.semantic.empty() || !t.error.empty()) continue; // DEPTH (bound at Run) / refused: its techniques do not run
+        if (auto sh = g_shared.find(t.unique); sh != g_shared.end()) { (tex_[i] = sh->second.first)->AddRef(); ++sh->second.second; continue; }
         const DWORD usage = D3DUSAGE_RENDERTARGET | (t.levels > 1 ? D3DUSAGE_AUTOGENMIPMAP : 0);
         D3DFORMAT fmt = t.format;
         // L8 / L16 render targets are optional in D3D9: the next wider format samples the same red channel
@@ -1082,6 +1112,7 @@ bool Instance::Create(IDirect3DDevice9* dev, std::shared_ptr<const Effect> fxp, 
             if (d3d) d3d->Release();
             return fail("this graphics card can't create the texture " + t.name);
         }
+        g_shared[t.unique] = { tex_[i], 1 };
         gpuBytes_ += t.bytes;
         IDirect3DSurface9* s0 = nullptr;
         tex_[i]->GetSurfaceLevel(0, &s0);
@@ -1167,7 +1198,8 @@ bool Instance::Run(IDirect3DDevice9* dev, size_t technique, IDirect3DSurface9* t
         return t.semantic == "COLOR" || (t.semantic.empty() && (t.format == D3DFMT_A8R8G8B8 || t.format == D3DFMT_X8R8G8B8));
     };
     auto texSize = [&](size_t i, UINT& w, UINT& h) {
-        if (!fx.textures[i].semantic.empty()) { w = W; h = H; } else { w = fx.textures[i].w; h = fx.textures[i].h; }
+        D3DSURFACE_DESC d{};
+        if (!fx.textures[i].semantic.empty() || !tex_[i] || FAILED(tex_[i]->GetLevelDesc(0, &d))) { w = W; h = H; } else { w = d.Width; h = d.Height; } // a shared one: its maker's size
     };
 
     // States, samplers and textures are sent only when they change within the technique

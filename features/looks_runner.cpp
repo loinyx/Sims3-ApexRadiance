@@ -355,6 +355,7 @@ bool Runner::Run(const Frame& f, const std::vector<Step>& steps)
             Fx::RunFrame uf;
             uf.dev = dev; uf.target = ping_.surf; uf.depth = f.depth; uf.width = f.width; uf.height = f.height;
             uf.timerMs = (float)(lastMs_ - startMs_); uf.frametimeMs = frameTimeMs_; uf.frame = frameCount_;
+            uf.wheel = f.wheel; uf.overlayOpen = f.overlayOpen;
             std::string why;
             const bool ran = Fx::Run(uf, s.shader - kUserShaderBase, s.values, &why);
             FixedState(dev); // the effect changed render states, samplers, shaders and the render target

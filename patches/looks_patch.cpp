@@ -28,6 +28,7 @@
 #include "looks_preset.h"
 #include "looks_fx.h"
 #include "looks_packs.h"
+#include "overlay.h"
 #include "apex_capture.h"
 #include "apex_version.h"
 
@@ -542,6 +543,7 @@ float g_curve = 0.0f;             // the World only run: the game's colour curve
 bool g_frameTicked = false;       // g_frame advanced this frame (framecount/frametime: once per frame, not per run point)
 bool g_beforeLookDone = false;    // ApexCapture::BeforeLook called this frame (a split frame draws more than once)
 unsigned g_frame = 0;
+float g_wheel = 0;                 // mouse wheel notches of the last frame (mousewheel)
 IDirect3DStateBlock9* g_sb = nullptr;      // D3DSBT_ALL around the runs: what a failed getter could not keep
 IDirect3DSurface9* g_curRT0 = nullptr;     // identity only
 IDirect3DSurface9* g_backBuffer = nullptr; // identity only
@@ -635,6 +637,17 @@ void OnPresent(IDirect3DDevice9* dev)
     D3DSURFACE_DESC bd{};
     if (dev && SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &s)) && s) { g_backBuffer = s; s->GetDesc(&bd); s->Release(); }
     Looks::Packs::BeginFrame(); // the pack list changes only here, between menu frames
+    g_wheel = Overlay::TakeWheel();
+    if (static bool adapter = false; !adapter && dev) // __VENDOR__ / __DEVICE__ before the first scan compiles
+    {
+        adapter = true;
+        IDirect3D9* d3d = nullptr; D3DDEVICE_CREATION_PARAMETERS cp{}; D3DADAPTER_IDENTIFIER9 id{};
+        if (SUCCEEDED(dev->GetDirect3D(&d3d)) && d3d)
+        {
+            if (SUCCEEDED(dev->GetCreationParameters(&cp)) && SUCCEEDED(d3d->GetAdapterIdentifier(cp.AdapterOrdinal, 0, &id))) Looks::Fx::SetAdapter(id.VendorId, id.DeviceId);
+            d3d->Release();
+        }
+    }
     if (Looks::Fx::Poll(bd.Width, bd.Height)) ResolveShaders(); // a scan of the Shaders folder finished (part of it)
     SyncDepth(g.active);
     if (dev && SUCCEEDED(dev->GetRenderTarget(0, &s)) && s) { g_curRT0 = s; s->Release(); }
@@ -702,6 +715,7 @@ void EffectImpl(IDirect3DDevice9* dev, bool atEndScene, unsigned mask)
         Looks::Frame f;
         f.dev = dev; f.target = rt; f.width = rd.Width; f.height = rd.Height;
         f.depth = depth; f.mix = g.mix; f.frame = g_frame; f.gameCurve = g_curve;
+        f.wheel = g_wheel; f.overlayOpen = Overlay::IsVisible();
         const bool drew = g.runner.Run(f, steps);
         {
             // The line is only rebuilt when one of its parts changed, not at every run point

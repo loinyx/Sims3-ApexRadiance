@@ -129,6 +129,8 @@ void CacheCounts(int* hits, int* misses);
 bool InsideRoot(const std::wstring& root, const std::wstring& path);
 // An image file (at most kMaxTextureFileBytes) decoded with WIC to BGRA, resized to w x h
 bool DecodeImage(const std::wstring& path, UINT w, UINT h, std::vector<uint8_t>& bgra);
+// The graphics card, for __VENDOR__ / __DEVICE__ (compiles after this call see it; 0 before)
+void SetAdapter(uint32_t vendor, uint32_t device);
 
 // ---------------------------------------------------------------------------------------------- uniforms
 // Uniform storage = SM3 float constant registers (constRegs x 4 floats)
@@ -136,7 +138,8 @@ void DefaultValues(const Effect& fx, std::vector<float>& regs);
 void SetUniform(const Effect& fx, size_t index, const float* comps, size_t count, std::vector<float>& regs);
 // ReShade's uniform sources, set each frame: timer / frametime (ms), framecount, random, pingpong, date,
 // bufready_depth, key and mousebutton (held, toggle or press), mousepoint and mousedelta (the game window's cursor in
-// picture pixels, while the game has the focus); mousewheel and overlay_open stay 0.
+// picture pixels, while the game has the focus), mousewheel (its value moved by step per notch, kept in min..max; .y the
+// frame's notches) and overlay_open / ui_open (the Apex menu is open).
 struct SourceState
 {
     float timerMs = 0, frametimeMs = 0;
@@ -146,6 +149,9 @@ struct SourceState
     std::vector<float> pingpong; // per uniform: value, direction
     std::vector<uint8_t> keys;   // per uniform: down last frame, toggled
     float mouse[2] = { 0, 0 }; bool mouseSeen = false; // the cursor last frame (mousedelta)
+    float wheel = 0;             // the frame's wheel notches
+    bool overlayOpen = false;
+    std::vector<float> wheelValue; // per uniform: mousewheel's value (NaN: not started)
 };
 void UpdateSources(const Effect& fx, std::vector<float>& regs, SourceState& st);
 
@@ -156,7 +162,8 @@ typedef HRESULT (*SetDepthStencilFn)(IDirect3DDevice9*, IDirect3DSurface9*);
 void SetBindFunctions(SetRenderTargetFn rt, SetDepthStencilFn ds);
 
 // One effect's textures, render targets and shaders on one device. Create reads the effect's texture files (once, not
-// per frame). Run changes device state (render states, samplers s0..s15, textures, shaders, VS/PS constants, render
+// per frame). As in ReShade, a texture another live effect already made under the same name (no semantic) is that one,
+// with its size and contents. Run changes device state (render states, samplers s0..s15, textures, shaders, VS/PS constants, render
 // targets 0..3, depth-stencil, viewport, vertex declaration, stream 0): the caller saves and restores it.
 class Instance
 {
@@ -243,6 +250,8 @@ struct RunFrame
     UINT width = 0, height = 0;
     float timerMs = 0, frametimeMs = 0;
     uint32_t frame = 0;
+    float wheel = 0;          // the frame's mouse wheel notches
+    bool overlayOpen = false; // the Apex menu is open
 };
 bool Run(const RunFrame& f, int index, const float* values, std::string* why);
 void ReleaseGpu();
