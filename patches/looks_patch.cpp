@@ -1468,9 +1468,11 @@ std::string GroupText(std::vector<std::string>& names, const char* group, const 
 std::vector<std::string> g_pendingDelete;
 bool PendingDelete(const std::string& ref) { return std::find(g_pendingDelete.begin(), g_pendingDelete.end(), ref) != g_pendingDelete.end(); }
 
+int g_deleteFrame = -1; // the frame of the last delete: its toast's group opens only at the end of that frame
+
 void FlushDeletes()
 {
-    if (g_pendingDelete.empty() || ApexUi::ChangeGroupOpen(kDeleteGroup)) return;
+    if (g_pendingDelete.empty() || ApexUi::ChangeGroupOpen(kDeleteGroup) || g_deleteFrame == ImGui::GetFrameCount()) return;
     for (const std::string& ref : g_pendingDelete)
     {
         RecycleLook(ref);
@@ -1710,6 +1712,7 @@ bool LookRow()
                     g_renaming.clear();
                     if (g.preset == item.ref) SelectLook(""); // the look in use goes: none is chosen
                     g_pendingDelete.push_back(item.ref);
+                    g_deleteFrame = ImGui::GetFrameCount();
                     ApexUi::ReportChange(GroupText(g_deletedNames, kDeleteGroup, ShownName(item.ref), "{} deleted", "{} and {} deleted", "{} looks deleted").c_str(),
                                          kDeleteGroup);
                     settings = true;
@@ -2034,6 +2037,8 @@ bool DefineField(const char* name, const char* desc, std::string& value, const s
 
 // Per lower-case .fx name, the quality settings edited here that it last compiled and ran with
 std::map<std::string, std::map<std::string, std::string>> g_goodDefs;
+// The .fx files whose quality settings were edited in this session: only those are put back when the file stops running
+std::set<std::string> g_editedDefs;
 
 // One file's quality settings (the definitions its .fx tests), under Advanced: 0/1 a switch, a few integers its #if lines
 // compare segmented, anything else a field. The look's value is each row's default. Put back the look's settings and,
@@ -2118,6 +2123,7 @@ bool DefinesUi(size_t i, const Looks::Fx::Effect& fx)
         {
             if (value == lookValue) { g.defs[key].erase(m.name); if (g.defs[key].empty()) g.defs.erase(key); }
             else g.defs[key][m.name] = value.substr(0, 256);
+            g_editedDefs.insert(key);
             PushDefines();
             ApexUi::ReportChange(I18n::Trf("{} changed", m.name).c_str());
             changed = true;
@@ -2253,7 +2259,8 @@ bool MissingRow(size_t i, const Looks::Packs::Batch& batch, std::vector<std::str
     {
         desc = e.file + "  \xC2\xB7  " + I18n::Tr("Doesn't run in The Sims 3");
         // a quality setting edited here broke it (FXAA_HLSL_4 asks for Direct3D 10): back to the settings it last ran with
-        if (const std::string key = Lower(used); g.defs.count(key))
+        // (only an edit of this session: settings saved with the look stay when the file fails for another reason)
+        if (const std::string key = Lower(used); g.defs.count(key) && g_editedDefs.erase(key))
         {
             if (auto good = g_goodDefs.find(key); good != g_goodDefs.end() && !good->second.empty()) g.defs[key] = good->second;
             else g.defs.erase(key);
