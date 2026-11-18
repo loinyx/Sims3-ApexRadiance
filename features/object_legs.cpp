@@ -15,7 +15,8 @@ namespace {
 
 constexpr uint32_t kLiteType = 0x03B4C61D;
 struct Object {
-    const ObjectLegs::Model* model;
+    const ObjectLegs::Model* model;      // a legged table, or
+    const ObjectLegs::PlantModel* plant; // a plant
     float m[16];
     bool placed;
 };
@@ -38,10 +39,12 @@ char __fastcall AttachHook(void* manager, void* edx, uint32_t idLo, uint32_t idH
     const long seen = g_lites.fetch_add(1, std::memory_order_relaxed);
     uint64_t lite;
     std::memcpy(&lite, key, sizeof lite);
-    if (const ObjectLegs::Model* model = ObjectLegs::Baked(lite)) {
+    const ObjectLegs::Model* model = ObjectLegs::Baked(lite);
+    const ObjectLegs::PlantModel* plant = model ? nullptr : ObjectLegs::BakedPlant(lite);
+    if (model || plant) {
         std::lock_guard<std::mutex> lk(g_mx);
         if (g_objects.size() >= 65536) g_objects.clear(), g_shapes.clear();
-        g_objects[IdOf(idLo, idHi)] = {model, {}, false};
+        g_objects[IdOf(idLo, idHi)] = {model, plant, {}, false};
         g_any.store(true, std::memory_order_relaxed);
         g_baked.fetch_add(1, std::memory_order_relaxed);
     } else if (seen == 0)
@@ -107,12 +110,13 @@ void Fill(RoomLightTests::Room& room) {
             if (shape == g_shapes.end()) continue;
             const auto object = g_objects.find(shape->second);
             if (object == g_objects.end() || !object->second.placed) continue;
-            Place(*object->second.model, object->second.m, rc.posts);
+            if (object->second.model) Place(*object->second.model, object->second.m, rc.posts);
+            else PlacePuffs(*object->second.plant, object->second.m, rc.puffs);
             records++;
         }
     }
     if (records && g_filled.fetch_add(1, std::memory_order_relaxed) == 0)
-        LOG_INFO(std::format("[ObjectLegs] {} of a room's {} records take legs ({} of {} objects read are in the table)", records, room.rec.size(), g_baked.load(), g_lites.load()));
+        LOG_INFO(std::format("[ObjectLegs] {} of a room's {} records take legs or leaves ({} of {} objects read are in the table)", records, room.rec.size(), g_baked.load(), g_lites.load()));
 }
 
 } // namespace ObjectLegs

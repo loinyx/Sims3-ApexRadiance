@@ -55,6 +55,7 @@ inline constexpr uint32_t kConstAt[] = {0x00F98964, 0x00F98A58, 0x00FAA210, 0x00
                                         0x0106D6CC, 0x0107A538, 0x011D0240, 0x00F9A5AC, 0x00FF307C, 0x01158A50};
 inline constexpr uint32_t kQuadVt = 0x00FF3118, kDiscVt = 0x00FF3C24; // the blockers the 3D test knows
 inline constexpr uint32_t kPostVt = 2; // (no game vtable) a table's leg of the GPU's copy: RtLampGpu::BlockerTable
+inline constexpr uint32_t kPuffVt = 3; // (no game vtable) a ball of a plant's leaves of the GPU's copy: RtLampGpu::BlockerTable
 
 struct Blocker {
     uint32_t vt;
@@ -65,6 +66,12 @@ struct Blocker {
 struct Post {
     V a, b;
     float r;
+};
+// A ball of a plant's leaves, in world space (features/object_legs.h PlacePuffs): its centre, radius and the optical depth through
+// its centre. Only the GPU's blocker table reads it
+struct Puff {
+    V c;
+    float r, tau;
 };
 struct Record {
     V c;
@@ -78,6 +85,7 @@ struct Record {
     // with it, its blockers tested on the segment moved back (occlude; RtLampGpu::BlockerTable::Offset)
     float off[2] = {0.0f, 0.0f};
     std::vector<Post> posts; // its object's legs (RtLampGpu::BlockerTable::Append); the game's tests here ignore them
+    std::vector<Puff> puffs; // a plant's leaves (RtLampGpu::BlockerTable::Append puts them in place of its blockers); the game's tests ignore them
     std::vector<uintptr_t> at; // its blockers' addresses in the game, as read: the object's move writes them in place (OutdoorDelta's live tables)
 };
 // A record's sphere as the gather makes it (0x0069E455..0x0069E4DB): the box of its blockers' bounds, its middle and half diagonal. A

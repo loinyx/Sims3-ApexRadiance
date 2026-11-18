@@ -2646,7 +2646,7 @@ bool LiveTests(const KeptRoom& k, uint64_t was, RoomLightTests::Room& out, uint6
     if (!key || key == was) return false;
     out.rec = k.tests.rec;
     for (RoomLightTests::LiveMove& m : moved) out.rec[m.rec].b = std::move(m.b), RoomLightTests::Bound(out.rec[m.rec]);
-    for (RoomLightTests::Record& r : out.rec) r.posts.clear();
+    for (RoomLightTests::Record& r : out.rec) r.posts.clear(), r.puffs.clear();
     ObjectLegs::Fill(out);
     for (const RoomLightTests::LiveMove& m : moved) out.rec[m.rec].shape = 0;
     return true;
