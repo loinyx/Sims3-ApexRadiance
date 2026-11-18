@@ -759,7 +759,8 @@ private:
         }
       g[n++] = 0, g[n++] = 0, g[n++] = 0, g[n++] = 1, g[n++] = 1, g[n++] = 1;  // the capsule's unit box
       vk.CmdUpdateBuffer(cmd, p.m_geoBuf, 0, sizeof g, g);
-      p.barrier(cmd, transfer, VK_ACCESS_TRANSFER_WRITE_BIT, build, VK_ACCESS_SHADER_READ_BIT);
+      // Build inputs read through device addresses: shader read for the spec, acceleration structure read for the drivers that want it
+      p.barrier(cmd, transfer, VK_ACCESS_TRANSFER_WRITE_BIT, build, VK_ACCESS_SHADER_READ_BIT | asRead);
       const VkAccelerationStructureBuildRangeInfoKHR cube{12, 0, 0, 0}, box{1, 0, 0, 0};
       const VkAccelerationStructureBuildRangeInfoKHR* ranges[2] = {&cube, &box};
       vk.CmdBuildAccelerationStructuresKHR(cmd, 2, info, ranges);
@@ -791,7 +792,7 @@ private:
     // (vkCmdUpdateBuffer takes 64 KB a call at most)
     for (VkDeviceSize at = 0, all = sizeof(VkAccelerationStructureInstanceKHR) * r.instances; at < all; at += 65536)
       vk.CmdUpdateBuffer(cmd, p.m_instBuf, at, std::min<VkDeviceSize>(65536, all - at), reinterpret_cast<const uint8_t*>(r.inst) + at);
-    p.barrier(cmd, transfer, VK_ACCESS_TRANSFER_WRITE_BIT, build | compute, VK_ACCESS_SHADER_READ_BIT);
+    p.barrier(cmd, transfer, VK_ACCESS_TRANSFER_WRITE_BIT, build | compute, VK_ACCESS_SHADER_READ_BIT | asRead);
     const VkAccelerationStructureBuildRangeInfoKHR top{r.instances, 0, 0, 0};
     const VkAccelerationStructureBuildRangeInfoKHR* topRange = &top;
     vk.CmdBuildAccelerationStructuresKHR(cmd, 1, &info[2], &topRange);
@@ -810,9 +811,10 @@ private:
     region.extent = {p.m_w, p.m_h, 1};
     for (uint32_t i = 0; i < kGiPixelOutputs; i++)
       if (r.out[i]) vk.CmdCopyImage(cmd, p.m_outImage[i], VK_IMAGE_LAYOUT_GENERAL, r.out[i], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-    // The next pass writes the buffers and the images again
-    p.barrier(cmd, transfer | compute, VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, transfer | compute,
-              VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+    // The next pass writes the buffers and the images again, and builds the top level (and model bottom levels) again
+    // into the same structures and scratch ranges
+    p.barrier(cmd, transfer | compute | build, VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | asRead | asWrite,
+              transfer | compute | build, VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT | asRead | asWrite);
   }
 
   IGiD3D9VkExternalPass* m_pass = nullptr;
