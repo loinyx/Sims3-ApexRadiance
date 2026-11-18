@@ -55,6 +55,11 @@ inline float Offset(unsigned x, unsigned y) {
     return static_cast<float>(g - 0.5);
 }
 } // namespace RoomMapDither
+// the engine keeps the game's vertex input around its draws (d3d9_extra_hooks.cpp); here nothing is hooked
+namespace ExtraHooks {
+VertexInputMark MarkVertexInput() { return {}; }
+void RestoreVertexInput(VertexInputMark) {}
+} // namespace ExtraHooks
 #include "shaders/rt_lamps_hlsl.h"
 
 #ifdef RT_OBJECT_SHAPES
@@ -977,7 +982,7 @@ bool ShadowCompare(const Scene& sc, int face, float radius, ShadowTally& total, 
 // half of the penumbra has to exist (a segment passing the jamb is not blocked by being behind it as the lamp's centre sees it);
 // a solid wall must not leak with the lamp 0.4 m off it; a wall the lamp's centre cannot see past the door is one depth layer
 // past what the map holds, so a thin strip may pass there (bounded here)
-Scene WallScene(const char* name, bool door, bool second, float lampZ) {
+Scene WallScene(const char* name, bool door, bool second, float lampZ, float lampY = 1.35f) {
     using namespace RtLampProxy;
     Scene sc;
     sc.name = name;
@@ -1000,7 +1005,7 @@ Scene WallScene(const char* name, bool door, bool second, float lampZ) {
     }
     sc.lot.stories.push_back(std::move(st));
     LampDef l;
-    l.pos[0] = 9.7f, l.pos[1] = 1.35f, l.pos[2] = lampZ;
+    l.pos[0] = 9.7f, l.pos[1] = lampY, l.pos[2] = lampZ;
     l.name = name;
     sc.lamps.push_back(l);
     for (const Edge& e : sc.lot.stories[0].edges) WallReceivers(sc.recv, e, 0);
@@ -1022,6 +1027,18 @@ void PenumbraCheck() {
     Check(stacked.n > 0 && stacked.leaks <= stacked.n / 200, std::format("a wall behind the door: {} of {} texels leak", stacked.leaks, stacked.n));
     // (the walk that went round the jamb stopped testing: 0.0099, the penumbra's strip through the second wall to the floor behind it)
     Check(mean(stacked) < 0.0054, std::format("a wall behind the door: mean share error {:.4f}, the disc search's was 0.0057", mean(stacked)));
+    // A low lamp 4.8 m off a solid wall (a porch lamp outside, 17/11): the floor just behind the wall, row by row. At a grazing angle
+    // the floor's plane along a shadow texel's centre lay past the wall, and the floor up to 13 cm behind it took the lamp. Rows
+    // closer than the bias (3 cm, under the wall's own thickness) are not checked
+    Scene low = WallScene("solid wall, low lamp 4.8 m off it", false, false, 5.2f, 0.7f);
+    for (float behind : {0.039f, 0.055f, 0.070f, 0.102f, 0.133f, 0.195f}) {
+        low.recv.clear();
+        for (float x = 6.0f; x < 13.0f; x += 0.03125f) low.recv.push_back(Receiver{{x, 0.0f, 10.0f + behind}, {0, 1, 0}, 1, 0});
+        ShadowTally lt;
+        ShadowCompare(low, 256, 0.15f, lt, false);
+        std::printf("  low lamp 4.8 m off a solid wall, floor %.3f m behind it: %ld texels, leaks %ld, mean share error %.4f\n", behind, lt.n, lt.leaks, mean(lt));
+        Check(lt.n > 0 && lt.leaks == 0 && mean(lt) < 0.01, std::format("a low lamp's light through a solid wall onto the floor {:.3f} m behind it: {} texels leak", behind, lt.leaks));
+    }
 }
 
 // ---------------------------------------------------------------- 3. the bake split and the blur, bit for bit
@@ -3205,14 +3222,15 @@ bool PhysKeptCheck() {
     };
     std::vector<RtLampModel::Lamp> lamps = {ToLamp(def(6.5f, 2.95f, 8.0f, 3)), ToLamp(def(8.0f, 2.5f, 6.0f, 4)), ToLamp(def(5.0f, 1.4f, 5.0f, 5)),
                                             ToLamp(def(2.0f, 3.0f, 8.0f, 11)), ToLamp(def(4.3f, 1.8f, 10.0f, 3)), ToLamp(def(6.0f, 2.98f, 6.0f, 3)),
-                                            ToLamp(def(12.0f, 0.9f, 10.0f, 3)), ToLamp(def(8.0f, 5.0f, 6.0f, 3))};
+                                            ToLamp(def(12.0f, 2.9f, 10.0f, 3)), ToLamp(def(8.0f, 5.0f, 6.0f, 3))};
     const int nL = static_cast<int>(lamps.size());
-    const char* names[] = {"bare bulb (3)", "spot (4)", "shaded lamp (5)", "street lamp outside (11)", "TubeLight", "rectangle area light", "lamp of room B", "lamp upstairs"};
+    const char* names[] = {"bare bulb (3)", "spot (4)", "shaded lamp (5)", "street lamp outside (11)", "TubeLight", "rectangle area light", "area light of room B", "lamp upstairs"};
     {
         const float s[3] = {0.0f, 0.0f, 1.0f};
         GpuLampLaw::TubeShape(lamps[4].law, s, 1.0f);
         const float u[3] = {1.0f, 0.0f, 0.0f}, v[3] = {0.0f, 0.0f, 1.0f}, nrm[3] = {0.0f, 1.0f, 0.0f};
         GpuLampLaw::AreaShape(lamps[5].law, u, v, nrm, 0.3f, 0.2f, false);
+        GpuLampLaw::AreaShape(lamps[6].law, u, v, nrm, 0.3f, 0.2f, false); // (behind room A's east wall: never on its inner face)
     }
     // the room table: room A (lamp of room B x its norm scale 0.8, no reach), room 0 (reach on its outer walls; none for the tube)
     // (the shaded lamp stands on furniture in room A: its 3D test takes the furniture fill there)
@@ -3577,10 +3595,23 @@ bool PhysKeptCheck() {
     if (uvb) uvb->Release();
     Check(ok, "physical: the per-lamp passes: " + err);
     if (!ok) return false;
+    long behindLit = 0; // (wall texel x lamp pairs whose law lights a texel from behind its face)
     const auto lawOf = [&](int l, const Tx& t, float out[3]) {
         const float reach = rooms[t.slot].lamp[l][1];
         GpuLampLaw::Eval(lamps[l].law, t.pos, t.nrm, GpuLampLaw::WallReach(t.nrm, prm.reachOn) * reach, out);
+        // a wall texel never takes a lamp behind its face (AccPhys)
+        const float* L = lamps[l].law.pos;
+        if (std::fabs(t.nrm[1]) < 0.5f && (L[0] - t.pos[0]) * t.nrm[0] + (L[1] - t.pos[1]) * t.nrm[1] + (L[2] - t.pos[2]) * t.nrm[2] < -0.01f) out[0] = out[1] = out[2] = 0.0f;
     };
+    for (const Tx& t : tx) {
+        float law[3];
+        GpuLampLaw::Eval(lamps[6].law, t.pos, t.nrm, 0.0f, law);
+        float cut[3];
+        lawOf(6, t, cut);
+        behindLit += t.slot == 0 && rooms[0].lamp[6][0] != 0.0f && prm.thr <= (law[0] + law[1]) + law[2] && cut[0] + cut[1] + cut[2] == 0.0f;
+    }
+    std::printf("  room B's area light behind room A's east wall: its law lights %ld of room A's wall texels from behind\n", behindLit);
+    Check(behindLit > 0, "physical: no wall texel of room A has room B's area light behind it (the scene is wrong)");
     // the GPU's shadow share of lamp l at point i (-1: its law adds nothing there)
     const auto shareOf = [&](int l, uint32_t i) {
         float law[3];
@@ -4287,17 +4318,21 @@ bool Room0PhysCheck() {
         if (type == 4) d.scale = 4.9f, d.off = -0.32f;
         return d;
     };
+    // (the last: a room's rectangle area light 1.05 m behind the outer wall, as on the player's facade: never on its outer face)
     std::vector<RtLampModel::Lamp> lamps = {ToLamp(def(4.0f, 2.5f, 3.0f, 3)), ToLamp(def(10.0f, 2.8f, 5.0f, 4)), ToLamp(def(6.0f, 1.2f, 6.0f, 5)),
-                                            ToLamp(def(3.0f, 1.5f, 5.0f, 3)), ToLamp(def(12.0f, 2.9f, 2.0f, 3)), ToLamp(def(1.0f, 3.0f, 7.0f, 11))};
+                                            ToLamp(def(3.0f, 1.5f, 5.0f, 3)), ToLamp(def(12.0f, 2.9f, 2.0f, 3)), ToLamp(def(1.0f, 3.0f, 7.0f, 11)),
+                                            ToLamp(def(-1.05f, 2.2f, 8.0f, 3))};
     {
         const float s[3] = {0.0f, 0.0f, 1.0f};
         GpuLampLaw::TubeShape(lamps[3].law, s, 1.0f);
         const float u[3] = {1.0f, 0.0f, 0.0f}, v[3] = {0.0f, 0.0f, 1.0f}, nrm[3] = {0.0f, 1.0f, 0.0f};
         GpuLampLaw::AreaShape(lamps[4].law, u, v, nrm, 0.3f, 0.2f, false);
+        GpuLampLaw::AreaShape(lamps[6].law, u, v, nrm, 0.3f, 0.2f, false);
     }
     const int nL = static_cast<int>(lamps.size());
     // room rows: mult x norm scale, reach, exit
-    const std::vector<std::array<float, 3>> rows = {{1.0f, 0.0f, 1.0f}, {2.0f, 1.0f, 0.0f}, {0.8f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 1.0f}, {1.0f, 1.0f, 0.0f}};
+    const std::vector<std::array<float, 3>> rows = {{1.0f, 0.0f, 1.0f}, {2.0f, 1.0f, 0.0f}, {0.8f, 0.0f, 1.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f, 1.0f}, {1.0f, 1.0f, 0.0f},
+                                                    {1.0f, 0.0f, 0.0f}};
     const float kWorld[3] = {100.5f, 0.0f, 200.25f};
     std::vector<std::array<float, 3>> world(nL);
     for (int l = 0; l < nL; l++) {
@@ -4320,12 +4355,12 @@ bool Room0PhysCheck() {
     RtLampGpu::Engine::PhysRoom room;
     room.header = static_cast<float>(table.Append(room0));
     room.lamp = rows;
-    room.fill = {RtLampGpu::kFurnitureFill, 0.0f, RtLampGpu::kFurnitureFill, 0.0f, 0.0f, 0.0f}; // (two exit lamps standing on furniture)
+    room.fill = {RtLampGpu::kFurnitureFill, 0.0f, RtLampGpu::kFurnitureFill, 0.0f, 0.0f, 0.0f, 0.0f}; // (two exit lamps standing on furniture)
     // the texels (the map's points as rt_outdoor_lamps.cpp PrepareJob makes them) and the phys points at the same places
     std::vector<RtLampGpu::TexelVertex> verts, phys;
     std::vector<RtLampModel::TexelIn> in(static_cast<size_t>(w) * h);
     std::vector<char> tested(static_cast<size_t>(w) * h, 0);
-    long nTested = 0, nShaded = 0;
+    long nTested = 0, nShaded = 0, nBehindLit = 0;
     for (int y = 0; y < h; y++)
         for (int x = 0; x < w; x++) {
             const int i = y * w + x;
@@ -4367,6 +4402,12 @@ bool Room0PhysCheck() {
             const float mult = rows[l][0];
             float law[3];
             GpuLampLaw::Eval(lamps[l].law, v.p, v.n, GpuLampLaw::WallReach(v.n, reachOn) * rows[l][1], law);
+            // room 0: a wall texel never takes a lamp behind its face (AccPhys)
+            const float side = (lamps[l].law.pos[0] - v.p[0]) * v.n[0] + (lamps[l].law.pos[1] - v.p[1]) * v.n[1] + (lamps[l].law.pos[2] - v.p[2]) * v.n[2];
+            if (std::fabs(v.n[1]) < 0.5f && side < -0.01f) {
+                nBehindLit += thr <= (law[0] + law[1]) + law[2];
+                law[0] = law[1] = law[2] = 0.0f;
+            }
             float sh = 1.0f;
             if (tested[i]) {
                 int unknown = 0;
@@ -4448,7 +4489,9 @@ bool Room0PhysCheck() {
     std::printf("  %ld texels, %d lamps (%ld floor texels behind the 3D test, masked and exit ground among them, %ld lamp pairs shaded): %.2f%% within 1/255 of the CPU, largest %ld/255; "
                 "%ld masked or exit ground texels, %ld with an alpha, %ld alphas differ; two calls over one sum: %ld of %ld texels as one\n",
                 n, nL, nTested, nShaded, n ? 100.0 * within1 / n : 100.0, maxDiff, alphaN, alphaLit, alphaBad, same, n);
+    std::printf("  the area light behind the outer wall: %ld wall texel-lamp pairs its law lights there, all left dark\n", nBehindLit);
     Check(nShaded > 0, "physical room 0: the 3D test shades no texel (the scene is wrong)");
+    Check(nBehindLit > 0, "physical room 0: the lamp behind the wall lights none of its texels without the facing test (the scene is wrong)");
     Check(n > 0 && within1 == n, "physical room 0: a texel more than 1/255 from the CPU's (unshadowed lamps)");
     Check(alphaLit > 0 && alphaBad == 0, "physical room 0: the floor mask or exit alpha differs from the CPU's");
     Check(same == n, "physical room 0: two calls over one sum differ from one");

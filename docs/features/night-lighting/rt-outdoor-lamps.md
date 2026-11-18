@@ -55,7 +55,13 @@ The bake is kept, and the lamps the graphics card draws are taken out of it exac
    (`LevelLightShare::ExportLotProxy`): walls from 0.1 m below their foot to their top with their door and window holes,
    roofed quadrants at the ceiling (stopped at the floor of the story above), placed floors of upper stories as 0.2 m
    slabs. Each lamp gets a cube shadow map (6 × 256² faces). The shadow is the share of the lamp's 0.15 m ball the texel
-   sees, from a blocker search and a walk along the rays to a disc of points on the ball.
+   sees, from a blocker search and a walk along the rays to a disc of points on the ball. The surface on the centre ray is
+   compared at the texel's own plane's depth only when it is that plane (the same distance from the lamp); another one counts
+   as a blocker when it is nearer than the texel, and a texel such a surface stands right in front of (within the stretch the
+   walk leaves out) gets none of the lamp. Before 4.0.4 a low lamp outside lit the floor up to 13 cm behind a solid wall: at a
+   grazing angle the floor's plane along a shadow texel's centre lay past the wall (a red stripe along the inner foot of a
+   house's front wall, 17/11 captures). A texel within the bias (about 3 cm, under the wall's own thickness) can still take
+   it. `tools/rt_lamps_test` (`PenumbraCheck`) checks the floor 4 to 20 cm behind the wall.
 4. **The swap.** Wherever the game binds one of these maps, the copy is bound instead (a `SetTexture` callback registered
    the first time Instant is chosen), so every draw that reads room 0's light gets the lamps without a shader patch.
 5. **Edits.** The game's lamp entry update (`0x006C7CD6`, LampMarkFilter) asks whether the GPU draws the lamp on every

@@ -54,6 +54,8 @@ void SetNextRowUntranslated();
 void SetNextRowWarning();
 // The next BeginControlRow's leading icon in another colour than the accent (a muted drag grip)
 void SetNextRowIconColor(unsigned rgb);
+// The next SwitchRow at least this tall (pixels): a switch among slider rows keeps their rhythm (a shader's values)
+void SetNextRowMinHeight(float px);
 inline constexpr float kRowIconBox = 22.0f; // the leading icon's box of a control row (units)
 
 // ---- search filter (the menu's search results) ----
@@ -74,12 +76,18 @@ bool MatchesQuery(const char* query, const char* text);
 // What the user just changed, in words ("Night Lights turned on", "Contrast changed"); the last one of a frame wins.
 // Row widgets report by themselves; call it for other changes (Reset buttons, "Turn on" buttons).
 // text is English (a literal from the table): the toast shows it translated, the log gets it as given
-void ReportChange(const char* text);
+// group (optional): changes of one kind made one after another (removals). While the toast of that group still shows,
+// a report of the same group keeps the toast's Undo (the state before the group's first change) and replaces its text.
+void ReportChange(const char* text, const char* group = nullptr);
+// True while the undo toast shows a change of this group: the caller keeps adding to it (see ReportChange)
+bool ChangeGroupOpen(const char* group);
+// The menu sets the group of the toast it shows each frame ("" when none)
+void SetOpenChangeGroup(const std::string& group);
 // Off: reports are ignored (the Developer page: its switches are not part of the undoable state)
 void SetChangeReporting(bool on);
 // The report of this frame (and clears it); false when nothing was reported
 // english (optional): the same report in English, for the log
-bool TakeChange(std::string& text, std::string* english = nullptr);
+bool TakeChange(std::string& text, std::string* english = nullptr, std::string* group = nullptr);
 
 // ---- slider drag state (the menu fades while a slider is dragged) ----
 // A slider was active in the previous frame

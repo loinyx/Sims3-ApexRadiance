@@ -236,9 +236,16 @@ float Shadow(LampRegs lamp, float3 P, float3 N, int kSearch, int kEmit, int kWal
     const float2 c0 = Stored(k, dir, dc);
     const bool behindNear = c0.x < Recv(N, dc, planeD, dr) - bias && (c0.x < nearM || c0.y < R); // behind a surface the lamp touches
     const float zEnd = dr - max(2.0 * texelW, 0.05); // (the point's own surface is not walked into)
+    // The centre ray's surface is taken at the point's own plane's depth along dc (Recv) only when it is that plane (its distance
+    // from the lamp the same); another one is in front of the point when it is nearer than the point. Recv put a wall a few cm
+    // to 13 cm before a floor texel behind the wall at a grazing angle (a low lamp outside: the floor behind the wall took it).
+    // Such a surface within the stretch the walk leaves out puts the point in its shadow's core
+    const float own = abs(dot(N, P - L));
+    const bool other = abs(c0.y - own) > 0.01 + 0.002 * own;
+    const bool hidden = other && c0.x >= nearM && c0.y >= R && c0.x < dr - bias && c0.x > zEnd - bias;
     const float lnZ = log(max(zEnd, nearM * 1.01) / nearM);
     float bSum = 0, bN = 0;
-    if (c0.x >= nearM && c0.y >= R && c0.x < Recv(N, dc, planeD, dr) - bias) {
+    if (c0.x >= nearM && c0.y >= R && c0.x < (other ? dr : Recv(N, dc, planeD, dr)) - bias) {
         bSum = c0.x;
         bN = 1;
     }
@@ -304,7 +311,7 @@ float Shadow(LampRegs lamp, float3 P, float3 N, int kSearch, int kEmit, int kWal
         }
         share = emit > 0.5 ? seen / emit : 1.0;
     }
-    return behindNear ? 0.0 : share;
+    return behindNear || hidden ? 0.0 : share;
 }
 
 float Lum3(float3 c) { return c.r * 0.2126 + c.g * 0.7152 + c.b * 0.0722; }
@@ -1011,8 +1018,12 @@ float4 AccPhys(TexelIn i, float2 vpos, int kSearch, int kEmit, int kWalk, bool a
         const float pn = atMask ? floor(T3.x * 0.5) : 0.0, t3 = T3.x - 2.0 * pn;
         T3 = T3.yzwx;
         const float4 t = TableAt(l, slot);
+        // a wall texel sits on the wall's line, where the occluder walls never shadow it, and an area light has no N.l: a room's
+        // lamp behind the wall lit its other face (room 0's facade beside the windows; a neighbour room's wall, its ceiling area
+        // lights taken through the door)
         const float3 law = LawAt(lamp, P, N, wallReach0 * t.y);
-        [branch] if (l < count && t.x != 0 && (law.b + law.g) + law.r >= thr) { // (share <= 1: under thr the lamp adds nothing, no Shadow to pay for)
+        const bool behind = abs(N.y) < 0.5 && dot(lamp.pos.xyz - P, N) < -0.01;
+        [branch] if (l < count && t.x != 0 && (law.b + law.g) + law.r >= thr && !behind) { // (share <= 1: under thr the lamp adds nothing, no Shadow to pay for)
             float sh = Shadow(lamp, atMask ? i.mask.xyz : P, N, kSearch, kEmit, kWalk, i.mask.w); // (gF.y: a room's points, RtLampProxy::IntoRoom)
             if (tested) {
                 const float prod = sh * t3; // (t3 with its furniture fill: FillT3)

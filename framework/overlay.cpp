@@ -32,6 +32,7 @@ std::atomic<bool> g_interactive{false}; // the menu closed, a startup question d
 std::atomic<bool> g_captureSuppressed{false};
 std::atomic<bool> g_clearInput{false};
 std::atomic<bool> g_wndProcInstalled{false};
+std::atomic<int> g_wheel{0}; // WM_MOUSEWHEEL deltas since the last TakeWheel
 std::atomic<bool> g_frameFailed{false}; // the menu frame threw (Frame): no drawing, no input capture
 constexpr LPARAM kSyntheticGameKey = 1ll << 25; // reserved LPARAM bit: stripped before the game's original procedure
 HWND g_window = nullptr;
@@ -182,6 +183,7 @@ WndDecision Decide(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 LRESULT CALLBACK ApexWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_MOUSEWHEEL) g_wheel += GET_WHEEL_DELTA_WPARAM(wp);
     // Apex's part never throws into the window procedure: on an exception the message goes to the game as it would
     // without Apex (the screenshot's marker bit stripped), and Apex's input handling stays off from then on
     WndDecision fallback;
@@ -372,6 +374,8 @@ void Shutdown() {
 }
 
 bool IsVisible() { return g_visible.load(); }
+
+float TakeWheel() { return (float)g_wheel.exchange(0) / WHEEL_DELTA; }
 
 bool MouseOverMenu() {
     if (!g_visible.load() || !g_ready.load()) return false;

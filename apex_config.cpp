@@ -1013,7 +1013,7 @@ bool ValidLutName(const std::string& name) {
     std::transform(ext.begin(),ext.end(),ext.begin(),[](unsigned char c){return char(std::tolower(c));});
     return ext==".cube" || ext==".png";
 }
-// The look of a profile's Looks table ("looks:<file>", "gshade:<file>", "apex:<name>" or "")
+// The look of a profile's Looks table ("looks:<file>", "gshade:<file>" or "")
 std::string LookRef(const toml::table& state) {
     return state["patches"][Looks::kPatchName]["preset"].value_or(std::string());
 }
@@ -1034,7 +1034,7 @@ bool ProfileUsesLut(const toml::table& state) {
     // Include a selected LUT even when its switch is temporarily off: the saved look remains portable.
     return (ProfilePartsOf(state)&kPartColor) && !LutName(state).empty();
 }
-// A look whose .ini travels with the profile (built-in Apex looks need no file)
+// A look whose .ini travels with the profile
 bool ProfileUsesLook(const toml::table& state) {
     const auto source=Looks::RefSource(LookRef(state));
     return (ProfilePartsOf(state)&kPartShaders) && (source==Looks::Source::Mine || source==Looks::Source::GShade);

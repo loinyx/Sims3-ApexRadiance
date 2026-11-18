@@ -508,7 +508,15 @@ std::wstring PacksFolder()
 
 std::string GitHubUrl(const Pack& p) { return "https://github.com/" + p.repo + (p.branch.empty() ? "" : "/tree/" + p.branch); }
 
+// The list a frame sees: rebuilt only here, at the start of a frame (OnPresent), so a Pack* or a loop over List() stays
+// valid for the whole menu frame (a download finishing on another thread used to rebuild it under a caller)
 const std::vector<Pack>& List()
+{
+    if (g_listBuilt < 0) BeginFrame(); // first use: the built-in list
+    return g_list;
+}
+
+void BeginFrame()
 {
     std::string text;
     int gen;
@@ -524,7 +532,6 @@ const std::vector<Pack>& List()
         g_listBuilt = gen;
         g_list = MergeList(text, g_folders);
     }
-    return g_list;
 }
 
 void RefreshList()

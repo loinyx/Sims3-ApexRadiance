@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <deque>
 #include <map>
 #include <mutex>
@@ -107,6 +108,11 @@ int g_nextGeneration = 1;
 std::atomic<bool> g_requested{ false };
 std::atomic<bool> g_scanning{ false };
 std::string g_folderNote;
+// WantProbe / ProbedValues: the files whose settings are tested, and per lower-case file name what was found for which
+// file state and definitions
+struct Probe { FILETIME written{}; uint64_t size = 0; LooksDefines defines; std::map<std::string, std::set<std::string>> failing; };
+std::set<std::string> g_probeWant;
+std::map<std::string, Probe> g_probes;
 
 // render thread
 std::shared_ptr<Catalog> g_current;
@@ -204,6 +210,24 @@ void ListFx(const std::wstring& dir, int depth, std::vector<std::wstring>& out)
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) { if (depth > 0) ListFx(dir + n + L"\\", depth - 1, out); }
         else if (n.size() > 3 && _wcsicmp(n.c_str() + n.size() - 3, L".fx") == 0 && out.size() < kMaxFiles) out.push_back(dir + n);
     } while (out.size() < kMaxFiles && FindNextFileW(h, &fd));
+    FindClose(h);
+}
+
+// dir's subfolders down to depth more levels (after dir itself): ReShade's "Shaders\**" search path finds a header in any
+// of them (BFBFX keeps random.fxh in Shaders\bfb_inc\)
+void SubDirs(const std::wstring& dir, int depth, std::vector<std::wstring>& out)
+{
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((dir + L"*").c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return;
+    do
+    {
+        const std::wstring n = fd.cFileName;
+        if (n == L"." || n == L".." || (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) || !(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
+        if (out.size() >= 256) break;
+        out.push_back(dir + n + L"\\");
+        if (depth > 1) SubDirs(dir + n + L"\\", depth - 1, out);
+    } while (FindNextFileW(h, &fd));
     FindClose(h);
 }
 
@@ -423,12 +447,14 @@ void ScanOnce(UINT W, UINT H, bool force)
         const bool standard = _stricmp(p.c_str(), "ReShade standard effects") == 0;
         packShaders.insert(standard ? packShaders.begin() : packShaders.end(), d + L"Shaders\\");
         packTextures.insert(standard ? packTextures.begin() : packTextures.end(), d + L"Textures\\");
+        SubDirs(d + L"Shaders\\", 3, packShaders); // then its subfolders, as ReShade's Shaders\**
     }
     if (!g_checkedLoaded) LoadChecked(root);
     if (force && !g_checked.empty()) { g_checked.clear(); g_checkedDirty = true; } // Check again: an included file may have changed
     std::vector<Folders> folders(1 + packs.size());
     folders[0].root = root;
     folders[0].includeDirs = { root + L"Shaders\\", root };
+    SubDirs(root + L"Shaders\\", 3, folders[0].includeDirs);
     folders[0].textureDirs = { root + L"Textures\\", root };
     std::vector<Source> files;
     {
@@ -445,6 +471,7 @@ void ScanOnce(UINT W, UINT H, bool force)
         Folders& f = folders[k + 1];
         f.root = root;
         f.includeDirs = { d + L"Shaders\\" };
+        SubDirs(d + L"Shaders\\", 3, f.includeDirs);
         f.textureDirs = { d + L"Textures\\" };
         std::vector<std::wstring> list;
         if (packFiles < kMaxPackFiles) ListFx(d + L"Shaders\\", 3, list);
@@ -521,6 +548,64 @@ void ScanOnce(UINT W, UINT H, bool force)
     }
     for (auto it = g_cache.begin(); it != g_cache.end();)
         it = std::find_if(files.begin(), files.end(), [&](const Source& s) { return s.path == it->first; }) == files.end() ? g_cache.erase(it) : std::next(it);
+
+    // WantProbe: each other value of each switch or short-list definition of the file, compiled once with the others as
+    // they are; the ones that fail are kept for the menu to leave out. A new scan request stops it (tested again then).
+    std::set<std::string> probeWant;
+    {
+        std::lock_guard<std::mutex> lock(g_lock);
+        probeWant = g_probeWant;
+    }
+    for (size_t i = 0; i < files.size() && !probeWant.empty(); ++i)
+    {
+        const std::string name = LowerA(Utf8(files[i].path.substr(files[i].path.find_last_of(L'\\') + 1)));
+        const std::shared_ptr<const Effect>& fx = effects[i];
+        if (!probeWant.count(name) || !fx || !fx->error.empty() || fx->macros.empty()) continue;
+        const uint64_t size = ((uint64_t)attrs[i].nFileSizeHigh << 32) | attrs[i].nFileSizeLow;
+        {
+            std::lock_guard<std::mutex> lock(g_lock);
+            auto it = g_probes.find(name);
+            if (it != g_probes.end() && it->second.size == size && CompareFileTime(&it->second.written, &attrs[i].ftLastWriteTime) == 0 &&
+                it->second.defines == definesOf(i))
+                continue; // tested with these already
+        }
+        Probe p{ attrs[i].ftLastWriteTime, size, definesOf(i), {} };
+        bool stopped = false;
+        int compiled = 0;
+        for (const Macro& m : fx->macros)
+        {
+            int v = 0;
+            std::vector<std::string> others; // the values the menu would offer besides the current one
+            if ((m.value == "0" || m.value == "1") && (m.hi < m.lo || (m.lo >= 0 && m.hi <= 1))) others.push_back(m.value == "1" ? "0" : "1");
+            else if (m.hi >= m.lo && m.hi - m.lo <= 7 && std::from_chars(m.value.data(), m.value.data() + m.value.size(), v).ec == std::errc())
+                for (int x = m.lo; x <= m.hi; ++x) if (x != v) others.push_back(std::to_string(x));
+            for (const std::string& value : others)
+            {
+                {
+                    std::lock_guard<std::mutex> lock(g_lock);
+                    stopped = g_again || g_requested;
+                }
+                if (stopped || LargestFreeBlock() < (size_t(512) << 20)) { stopped = true; break; } // as the background checks
+                Folders f = folders[files[i].folders];
+                f.defines = p.defines;
+                auto at = std::find_if(f.defines.begin(), f.defines.end(), [&](const auto& d) { return d.first == m.name; });
+                if (at != f.defines.end()) at->second = value;
+                else f.defines.push_back({ m.name, value });
+                const std::shared_ptr<const Effect> t = CompileGuarded(files[i].path, f, W, H);
+                ++compiled;
+                const bool runs = t->error.empty() && std::any_of(t->techniques.begin(), t->techniques.end(), [](const Technique& k) { return k.reason.empty(); });
+                if (!runs) p.failing[m.name].insert(value);
+                Sleep(5); // the game first
+            }
+            if (stopped) break;
+        }
+        if (stopped) break;
+        size_t hidden = 0;
+        for (const auto& [n, values] : p.failing) hidden += values.size();
+        LOG_INFO("[Looks] " + fx->file + ": tested " + std::to_string(compiled) + " other setting values, " + std::to_string(hidden) + " do not compile here");
+        std::lock_guard<std::mutex> lock(g_lock);
+        g_probes[name] = std::move(p);
+    }
     if (!todo.empty())
         LOG_INFO("[Looks] Shaders folder: compiled " + std::to_string(todo.size()) + " of " + std::to_string(files.size()) + " .fx files for " +
                  std::to_string(W) + "x" + std::to_string(H) + " in " + std::to_string(GetTickCount() - t0) + " ms");
@@ -761,6 +846,25 @@ void WantFiles(const std::vector<std::string>& files)
     if (scan) RequestScan(false);
 }
 
+void WantProbe(const std::string& file)
+{
+    bool scan = false;
+    {
+        std::lock_guard<std::mutex> lock(g_lock);
+        scan = g_probeWant.insert(LowerA(file)).second;
+    }
+    if (scan) RequestScan(false);
+}
+
+bool ProbedValues(const std::string& file, std::map<std::string, std::set<std::string>>& failing)
+{
+    std::lock_guard<std::mutex> lock(g_lock);
+    auto it = g_probes.find(LowerA(file));
+    if (it == g_probes.end()) return false;
+    failing = it->second.failing;
+    return true;
+}
+
 void BrowsePacks()
 {
     {
@@ -982,6 +1086,7 @@ bool Run(const RunFrame& f, int index, const float* values, std::string* why)
         if (u.params[p].kind != LooksParamKind::Source) SetUniform(fx, (size_t)u.uniform[p], values + p * 4, (size_t)u.params[p].comps, live->regs);
     SourceState& st = live->sources;
     st.timerMs = f.timerMs; st.frametimeMs = f.frametimeMs; st.frame = f.frame; st.depthReady = f.depth != nullptr;
+    st.wheel = f.wheel; st.overlayOpen = f.overlayOpen;
     UpdateSources(fx, live->regs, st);
     g_framePasses += (int)passes;
     if (!live->inst.Run(f.dev, u.tech, f.target, f.depth, live->regs)) return fail("did not run");

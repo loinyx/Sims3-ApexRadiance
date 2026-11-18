@@ -158,6 +158,7 @@ int main(int argc, char** argv)
     });
     RefreshList();
     WaitIdle();
+    BeginFrame(); // the menu's frame start takes the new list in
     Check(CurrentListState() == ListState::Offline && List().size() == 45, "no connection: the built-in list");
     Download({ "SweetFX", "qUINT", "FXShaders", "prod80 color effects" });
     WaitIdle();
@@ -174,7 +175,12 @@ int main(int argc, char** argv)
         Check(Unavailable("qUINT") && !Unavailable("FXShaders"), "a pack gone is unavailable for the session");
         Check(g_scans == 2, "a scan after each pack downloaded");
     }
-    List();
+    {
+        const std::vector<Pack>& before = List();
+        const Pack* first = before.empty() ? nullptr : &before[0];
+        Check(&List() == &before && (!first || &List()[0] == first), "between frames the list and its packs stay where they are");
+    }
+    BeginFrame(); // the downloaded folders, seen at the next frame
     Check(Downloaded("SweetFX") && Downloaded("ReShade standard effects") && !Downloaded("qUINT"), "downloaded folders");
     // a missing .fx: the pack that has it, never one that is gone
     {

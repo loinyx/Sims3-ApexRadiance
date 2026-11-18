@@ -12,7 +12,7 @@ New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
 $exe = Join-Path $OutDir 'rt_lamps_test.exe'
 Push-Location $OutDir
 try {
-    & cl.exe /nologo /std:c++20 /utf-8 /EHsc /W4 /O2 /MT /fp:precise /DNOMINMAX ('/I' + $repo) ('/I' + $OutDir) ('/Fe' + $exe) (Join-Path $PSScriptRoot 'check.cpp') (Join-Path $repo 'features/rt_lamp_gpu.cpp') d3d9.lib d3dcompiler.lib user32.lib
+    & cl.exe /nologo /std:c++20 /utf-8 /EHsc /W4 /O2 /MT /fp:precise /DNOMINMAX ('/I' + $repo) ('/I' + (Join-Path $repo 'framework')) ('/I' + $OutDir) ('/Fe' + $exe) (Join-Path $PSScriptRoot 'check.cpp') (Join-Path $repo 'features/rt_lamp_gpu.cpp') d3d9.lib d3dcompiler.lib user32.lib
     if ($LASTEXITCODE -ne 0) { throw 'Real-time outdoor lamps test did not compile' }
     $args2 = @('--lamps', "$Lamps") + $(if ($Probe) { @('--probe') } else { @() }) + @($Worlds | ForEach-Object { (Resolve-Path -LiteralPath $_).Path })
     & $exe @args2

@@ -205,7 +205,7 @@ bool g_roomLampProbe = false;     // the room lamp probe against the GPU's law (
 bool g_gpuRoomLampsCapture = true; // GPU room lamps: the active lot's room solves kept for the GPU (with Lamp lighting: Instant; its switch is developer only)
 int g_roomLampModel = 1;            // (physical indoor lamps) 0 replica, 1 physical: what the kept rooms keep (OutdoorDelta::SetRoomLampPhysical; its choice is developer only)
 bool g_roomLampSharpFloors = true;  // (physical indoor lamps) the rooms' floor maps drawn at twice their size (OutdoorDelta::SetHiFloors; its switch is developer only)
-bool g_roomLampTrueShadows = false;  // (physical indoor lamps) furniture shadows of true size (OutdoorDelta::SetTrueFurnitureEdges; developer)
+bool g_roomLampTrueShadows = true;   // (physical indoor lamps) furniture shadows of true size (OutdoorDelta::SetTrueFurnitureEdges; Rooms at Night card)
 float g_sidewalkClear = 0.5f;
 float g_lampTint = 0.2496f;
 bool g_fenceGround = true;
@@ -2458,10 +2458,9 @@ class NightTerrainRelightPatch : public ApexPatch {
             RegisterBoolSetting(&g_roomLampSharpFloors, "roomLampSharpFloors", true,
                 "Developer, with the physical model: the kept rooms' floor maps are drawn at twice their size, each sub-texel lit from the "
                 "lamps at its own place, so light through doors and windows has no 25 cm steps (2 render targets at twice a floor map's size per story).");
-        if (!kPublicBuild) // developer only
-            RegisterBoolSetting(&g_roomLampTrueShadows, "roomLampTrueShadows", false,
-                "Developer, with the physical model: the furniture's light blockers keep their real size, their edges as soft as the lamp seen past them "
-                "(off: the game's band, 0.15 m inside to 0.35 m outside each blocker at any distance, a small table's shadow a blob 2-3 times its size).");
+        RegisterBoolSetting(&g_roomLampTrueShadows, "roomLampTrueShadows", true,
+            "With Lamp updates: Instant (GPU), the furniture's light blockers keep their real size, their edges as soft as the lamp seen past them "
+            "(off: the game's band, 0.15 m inside to 0.35 m outside each blocker at any distance, a small table's shadow a blob 2-3 times its size).");
         if (!kPublicBuild) // developer A/B only; the public build always has soft lot edges
             RegisterBoolSetting(&g_softLotEdges, "bordaSuaveLote", true,
                 "Developer: within 3 m of a lot edge, lot grass fades its lamp light to the ground light the world grass shows "
@@ -3236,7 +3235,7 @@ class NightTerrainRelightPatch : public ApexPatch {
         g_gpuRoomLampsCapture = true;
         g_roomLampModel = 1;
         g_roomLampSharpFloors = true;
-        g_roomLampTrueShadows = false;
+        g_roomLampTrueShadows = true;
         g_lampTint = 0.2496f;
         g_lotTintOwn = true;
         g_lotLampTint = 0.0f;
@@ -3625,6 +3624,17 @@ class NightTerrainRelightPatch : public ApexPatch {
                 return changed;
             });
             ImGui::EndDisabled();
+            // The GPU's indoor lamps draw the furniture's blockers at their real size (OutdoorDelta::SetTrueFurnitureEdges);
+            // Classic keeps the game's solves, which this does not change
+            {
+                const bool instant = g_lampMode == kLampInstant;
+                if (!instant) ApexUi::IconNote(ApexUi::IconId::Info, I18n::Trf("Needs {}", I18n::Tr("Instant (GPU)")).c_str());
+                ImGui::BeginDisabled(!instant);
+                if (ApexUi::SwitchRow("True-size furniture shadows", &g_roomLampTrueShadows,
+                                      "Each piece casts a shadow its own size, softer farther away; off: the game's larger blobs", true))
+                    NotifySettingChanged();
+                ImGui::EndDisabled();
+            }
             // Shadow softness sends only the rooms an edge shapes (LevelLightShare::SetShadowSoftness, once the slider is let
             // go): no full lighting refresh. Not disabled with the light between floors: it also shapes the object rigs and
             // the ground shade
@@ -3784,9 +3794,6 @@ class NightTerrainRelightPatch : public ApexPatch {
                 NotifySettingChanged();
             if (g_roomLampModel == 1 && ApexUi::SwitchRow("Sharper floor light", &g_roomLampSharpFloors,
                                                           "Floors drawn at twice the detail: light through doors and windows without steps", true))
-                NotifySettingChanged();
-            if (g_roomLampModel == 1 && ApexUi::SwitchRow("True-size furniture shadows", &g_roomLampTrueShadows,
-                                                          "Furniture shadows of their real size, soft as the lamp. Off: the game's larger, rounder shadows", false))
                 NotifySettingChanged();
         }
         if (ApexUi::Checkbox("Smooth the ground light maps on the GPU (A/B: off = CPU worker)", &g_smoothMapsGpu)) NotifySettingChanged();

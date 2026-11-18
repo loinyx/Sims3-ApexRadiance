@@ -12,6 +12,7 @@
 #include <deque>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 #include "looks_shaders.h"
@@ -129,13 +130,17 @@ void CacheCounts(int* hits, int* misses);
 bool InsideRoot(const std::wstring& root, const std::wstring& path);
 // An image file (at most kMaxTextureFileBytes) decoded with WIC to BGRA, resized to w x h
 bool DecodeImage(const std::wstring& path, UINT w, UINT h, std::vector<uint8_t>& bgra);
+// The graphics card, for __VENDOR__ / __DEVICE__ (compiles after this call see it; 0 before)
+void SetAdapter(uint32_t vendor, uint32_t device);
 
 // ---------------------------------------------------------------------------------------------- uniforms
 // Uniform storage = SM3 float constant registers (constRegs x 4 floats)
 void DefaultValues(const Effect& fx, std::vector<float>& regs);
 void SetUniform(const Effect& fx, size_t index, const float* comps, size_t count, std::vector<float>& regs);
 // ReShade's uniform sources, set each frame: timer / frametime (ms), framecount, random, pingpong, date,
-// bufready_depth; input sources (keys, mouse, overlay) stay 0.
+// bufready_depth, key and mousebutton (held, toggle or press), mousepoint and mousedelta (the game window's cursor in
+// picture pixels, while the game has the focus), mousewheel (its value moved by step per notch, kept in min..max; .y the
+// frame's notches) and overlay_open / ui_open (the Apex menu is open).
 struct SourceState
 {
     float timerMs = 0, frametimeMs = 0;
@@ -143,6 +148,11 @@ struct SourceState
     bool depthReady = false;
     uint32_t rng = 0x9E3779B9u;
     std::vector<float> pingpong; // per uniform: value, direction
+    std::vector<uint8_t> keys;   // per uniform: down last frame, toggled
+    float mouse[2] = { 0, 0 }; bool mouseSeen = false; // the cursor last frame (mousedelta)
+    float wheel = 0;             // the frame's wheel notches
+    bool overlayOpen = false;
+    std::vector<float> wheelValue; // per uniform: mousewheel's value (NaN: not started)
 };
 void UpdateSources(const Effect& fx, std::vector<float>& regs, SourceState& st);
 
@@ -153,7 +163,8 @@ typedef HRESULT (*SetDepthStencilFn)(IDirect3DDevice9*, IDirect3DSurface9*);
 void SetBindFunctions(SetRenderTargetFn rt, SetDepthStencilFn ds);
 
 // One effect's textures, render targets and shaders on one device. Create reads the effect's texture files (once, not
-// per frame). Run changes device state (render states, samplers s0..s15, textures, shaders, VS/PS constants, render
+// per frame). As in ReShade, a texture another live effect already made under the same name (no semantic) is that one,
+// with its size and contents. Run changes device state (render states, samplers s0..s15, textures, shaders, VS/PS constants, render
 // targets 0..3, depth-stencil, viewport, vertex declaration, stream 0): the caller saves and restores it.
 class Instance
 {
@@ -216,6 +227,12 @@ std::vector<Listed> List();
 // files it does not know yet are checked in the background, one at a time, and let go.
 void WantFiles(const std::vector<std::string>& files);
 void BrowsePacks();
+// Quality settings that do not compile here: after WantProbe(file) (the menu, when the file's settings show), the next
+// scan compiles that file once more for each other value of each definition the menu shows as a switch or a short list
+// (0/1, or at most 8 integers), the others as they are, and keeps the values that fail (FXAA_HLSL_4 asks for Direct3D 10).
+// ProbedValues: per definition, those values; false until the file was tested with its current definitions.
+void WantProbe(const std::string& file);
+bool ProbedValues(const std::string& file, std::map<std::string, std::set<std::string>>& failing);
 int CheckedThisSession(); // pack files checked in the background this session
 std::vector<std::string> PackFolders(); // folders in Shaders\Packs (complete downloads only), as the last scan found them
 std::vector<std::wstring> OwnFiles();   // the player's own .fx files (full paths, by name), as the last scan found them
@@ -240,6 +257,8 @@ struct RunFrame
     UINT width = 0, height = 0;
     float timerMs = 0, frametimeMs = 0;
     uint32_t frame = 0;
+    float wheel = 0;          // the frame's mouse wheel notches
+    bool overlayOpen = false; // the Apex menu is open
 };
 bool Run(const RunFrame& f, int index, const float* values, std::string* why);
 void ReleaseGpu();
