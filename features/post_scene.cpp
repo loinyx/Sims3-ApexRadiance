@@ -374,9 +374,11 @@ void VoteCamera(IDirect3DDevice9* dev) {
     }
     g_vpValid = bestVp > 0;
     if (g_vpValid) g_near = vpNear; // (the same unless the block votes chose another projection's near)
-    // no voted block: the game camera's own, when its near is the frame's (a misread camera object fails the shape or the near)
+    // no voted block: the game camera's own, when its near is the frame's (a misread camera object fails the shape or the near).
+    // 1 %: the near of a float block with eye coordinates near 1600 m carries ~2e-4 rounding (bridge runs: 0.24988..0.25012
+    // frame to frame against votes of 0.250023), which a 0.1 % gate turned into frames without a camera
     // shortcut: the camera object can trail the drawn frame by up to ~2.5 m while it moves (kEyeMatchM); a voted block wins whenever one exists
-    g_vpFromGame = !g_vpValid && g_gameVpOk && (g_nearVotes.empty() || std::fabs(g_gameNear - g_near) < 1e-3f * g_near);
+    g_vpFromGame = !g_vpValid && g_gameVpOk && (g_nearVotes.empty() || std::fabs(g_gameNear - g_near) < 1e-2f * g_near);
     if (g_vpFromGame) std::memcpy(g_vp, g_gameVp, sizeof g_vp), g_vpValid = true, g_near = g_gameNear;
     if (g_plainWanted.load(std::memory_order_relaxed) > 0) {
         int bestPlain = 0;

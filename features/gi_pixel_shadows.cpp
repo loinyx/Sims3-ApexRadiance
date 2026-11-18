@@ -394,11 +394,13 @@ void DrawTo(IDirect3DDevice9* dev, IDirect3DTexture9* t, IDirect3DPixelShader9* 
 void LogCounters() {
     const unsigned long long now = GetTickCount64();
     if (now - g.lastLog < 10000) return;
-    const bool first = g.lastLog == 0;
     g.lastLog = now;
-    if (first || kPublicBuild) return;
+    if (kPublicBuild) return;
     uint32_t w[9] = {}; // util_gi_pixel.h GiPixelShared: state, passes, faults, rays low / high, raysLast, gpuUs, width, height
-    if (g.counters(w, 9) != S_OK) return;
+    if (const HRESULT hr = g.counters(w, 9); hr != S_OK) {
+        LOG_WARNING(std::format("[GiPixel] counters unread (0x{:08X}); sent={} refused={}", static_cast<uint32_t>(hr), g.sent, g.refused));
+        return;
+    }
     const std::string line = std::format("[GiPixel] passes={} rays={} raysLast={} gpuUs={} size={}x{} faults={} sent={} refused={} sims={} simDraws={} "
                                          "noChain={} otherCamera={} simsFit={} simDrawsFit={}", w[1], (static_cast<uint64_t>(w[4]) << 32) | w[3], w[5], w[6], w[7], w[8], w[2], g.sent,
                                          g.refused, g.sims, g.simDrawsSeen, g.simDrawsNoChain, g.simDrawsOtherCamera, g.simsFit, g.simDrawsFit);
@@ -418,21 +420,23 @@ void Effect(IDirect3DDevice9* dev) {
     const bool sceneDepth = ds && ds == DepthShare::Surface();
     SafeRelease(ds);
     float vp[4][4], tanY = 0;
-    // once, after 600 world frames in a row without a pass, the gate that holds it, with the camera vote's state (the open
-    // is not asked while camera=0)
-    static uint32_t waited = 0;
+    // after 600 world frames in a row without a finished pass (the first three times), the gate that held each of them, with
+    // the camera vote's state (the open is not asked while camera=0). Bridge runs with the camera fallback printed neither
+    // this nor a passes line: the pass returned at a later gate, or only some frames had a camera.
+    static uint32_t waited = 0, held[4] = {}, waitNotes = 0; // held: no scene depth / camera, not open, no shaders, targets or camera fill
+    const auto hold = [&](int gate) {
+        held[gate]++;
+        if (!g.off && ++waited == 600 && waitNotes < 3)
+            ++waitNotes, LOG_INFO(std::format("[GiPixel] waiting 600 world frames: sceneDepth={} camera={} open={} shaders=0 (open 0: no server answer yet; not asked "
+                                              "while camera=0); held by camera {} open {} shaders {} targets {}; sent={} refused={} | {}",
+                                              sceneDepth ? 1 : 0, gate > 0 ? 1 : 0, gate > 1 ? 1 : 0, held[0], held[1], held[2], held[3], g.sent, g.refused, PostScene::DiagText()));
+    };
     const bool cam = sceneDepth && PostScene::CameraViewProj(vp), open = cam && Opened(), shaders = open && EnsureShaders(dev);
-    if (!shaders) {
-        if (!g.off && ++waited == 600)
-            LOG_INFO(std::format("[GiPixel] waiting 600 world frames: sceneDepth={} camera={} open={} shaders=0 (open 0: no server answer yet; not asked "
-                                 "while camera=0) | {}",
-                                 sceneDepth ? 1 : 0, cam ? 1 : 0, open ? 1 : 0, PostScene::DiagText()));
-        return;
-    }
-    waited = 0;
+    if (!shaders) return hold(!cam ? 0 : !open ? 1 : 2);
     D3DSURFACE_DESC dd{};
     depth->GetLevelDesc(0, &dd);
-    if (dd.Width < 4 || dd.Height < 4 || !EnsureTargets(dev, dd.Width / 4, dd.Height / 4) || !FillCamera(vp, tanY)) return;
+    if (dd.Width < 4 || dd.Height < 4 || !EnsureTargets(dev, dd.Width / 4, dd.Height / 4) || !FillCamera(vp, tanY)) return hold(3);
+    waited = 0, held[0] = held[1] = held[2] = held[3] = 0;
 
     // reset: no history yet, a camera cut, or a lamp change; still: the camera did not move
     double D[4][4] = {};
