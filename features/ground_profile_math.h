@@ -49,4 +49,25 @@ inline bool GroundUnder(const double vp[4][4], POINT pixel, unsigned w, unsigned
     out[0] = static_cast<float>(o[0] + (e[0] - o[0]) * t), out[1] = ground, out[2] = static_cast<float>(o[2] + (e[2] - o[2]) * t);
     return true;
 }
+// World -> clip rows (the form of PostScene::CameraViewProj: clip = vp . (x, y, z, 1)) of the game's camera object
+// (LotLightingMotion::CameraMatrices): camera-to-world rows right, up, back, eye and the projection, both row-vector form.
+// false unless the three axes are orthonormal (a misread camera).
+inline bool ViewProjFromCamera(const float c2w[4][4], const float proj[4][4], float vp[4][4]) {
+    for (int a = 0; a < 3; a++)
+        for (int b = 0; b < 3; b++)
+            if (std::fabs(c2w[a][0] * c2w[b][0] + c2w[a][1] * c2w[b][1] + c2w[a][2] * c2w[b][2] - (a == b ? 1.0f : 0.0f)) > 1e-3f) return false;
+    double v[4][4] = {}; // world -> view, row-vector form: the rigid inverse of c2w
+    for (int a = 0; a < 3; a++) {
+        for (int k = 0; k < 3; k++) v[k][a] = c2w[a][k];
+        v[3][a] = -(double(c2w[3][0]) * c2w[a][0] + double(c2w[3][1]) * c2w[a][1] + double(c2w[3][2]) * c2w[a][2]);
+    }
+    v[3][3] = 1;
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 4; j++) {
+            double s = 0;
+            for (int k = 0; k < 4; k++) s += v[j][k] * proj[k][i];
+            vp[i][j] = static_cast<float>(s); // vp row i = column i of view . proj
+        }
+    return true;
+}
 } // namespace GroundProfileMath

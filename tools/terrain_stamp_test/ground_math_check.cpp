@@ -67,6 +67,37 @@ int main() {
     const float behind[3] = {static_cast<float>(eye[0] - f[0] * 20), ground, static_cast<float>(eye[2] - f[2] * 20)};
     LONG x = 0, y = 0;
     check(!Project(vp, behind, w, h, x, y), "a point behind the camera has no pixel", 0);
+    // the game camera object's matrices (rows right, up, back, eye; right-handed projection, near 0.25, far 3000, both
+    // row-vector form) to world -> clip rows: the eye has clip x = y = w = 0, a point ahead is centred at its distance,
+    // right and up land on +x and +y, and a scaled (misread) axis is rejected
+    {
+        const float b[3] = {static_cast<float>(-f[0]), static_cast<float>(-f[1]), static_cast<float>(-f[2])};
+        const float uu[3] = {static_cast<float>(u[0]), static_cast<float>(u[1]), static_cast<float>(u[2])};
+        const float rr[3] = {uu[1] * b[2] - uu[2] * b[1], uu[2] * b[0] - uu[0] * b[2], uu[0] * b[1] - uu[1] * b[0]};
+        float c2w[4][4] = {{rr[0], rr[1], rr[2], 0}, {uu[0], uu[1], uu[2], 0}, {b[0], b[1], b[2], 0},
+                           {static_cast<float>(eye[0]), static_cast<float>(eye[1]), static_cast<float>(eye[2]), 1}};
+        const float gn = 0.25f, gf = 3000.0f, ga = gf / (gf - gn);
+        const float gp[4][4] = {{2.41f, 0, 0, 0}, {0, 3.22f, 0, 0}, {0, 0, -ga, -1}, {0, 0, -ga * gn, 0}};
+        float g[4][4];
+        check(ViewProjFromCamera(c2w, gp, g), "the game camera's matrices give a view-projection", 0);
+        const auto clip = [&](const double p[3], double c[4]) {
+            for (int i = 0; i < 4; i++) c[i] = g[i][0] * p[0] + g[i][1] * p[1] + g[i][2] * p[2] + g[i][3];
+        };
+        double c[4];
+        clip(eye, c);
+        check(std::fabs(c[0]) + std::fabs(c[1]) + std::fabs(c[3]) < 1e-2, "the eye has clip x = y = w = 0", std::fabs(c[0]) + std::fabs(c[1]) + std::fabs(c[3]));
+        const double ahead[3] = {eye[0] + f[0] * 10, eye[1] + f[1] * 10, eye[2] + f[2] * 10};
+        clip(ahead, c);
+        check(std::fabs(c[0] / c[3]) + std::fabs(c[1] / c[3]) < 1e-4 && std::fabs(c[3] - 10) < 1e-3, "a point 10 m ahead is centred, w = 10", c[3]);
+        check(std::fabs(c[2] / c[3] - ga * (1 - gn / 10)) < 1e-5, "its depth is far/(far-near) (1 - near/10)", c[2] / c[3]);
+        const double right[3] = {ahead[0] + rr[0], ahead[1] + rr[1], ahead[2] + rr[2]}, upp[3] = {ahead[0] + uu[0], ahead[1] + uu[1], ahead[2] + uu[2]};
+        clip(right, c);
+        check(std::fabs(c[0] / c[3] - 0.241) < 1e-4, "1 m right at 10 m: x = 2.41 / 10", c[0] / c[3]);
+        clip(upp, c);
+        check(std::fabs(c[1] / c[3] - 0.322) < 1e-4, "1 m up at 10 m: y = 3.22 / 10", c[1] / c[3]);
+        for (float& v : c2w[0]) v *= 1.1f;
+        check(!ViewProjFromCamera(c2w, gp, g), "a scaled axis is rejected", 0);
+    }
     std::printf("\n%d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

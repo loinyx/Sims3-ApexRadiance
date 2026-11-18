@@ -12,6 +12,7 @@
 #include "world_session.h"
 #include "hook_guard.h"
 #include "lot_lighting_motion.h"
+#include "ground_profile_math.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -223,6 +224,19 @@ int g_c40State = -1; // -1 not read, 0 not projection-shaped, 1 shaped
 float g_c40Pos[3] = {};
 bool g_c40PosOk = false;
 std::vector<VpVote> g_vpVotes;
+// The game camera object's own view-projection (bridge runs: no voted draw carries one; the camera object holds the
+// camera-to-world rows right, up, back, eye at eye -0x30 and the projection at eye +0x10, near 0.25 like the near votes).
+// Used when the vote finds none. Also counted: scanned blocks equal to it in world and in camera-relative form (eye at 0).
+bool g_gameVpOk = false, g_vpFromGame = false;
+float g_gameVp[4][4] = {}, g_gameVpRel[4][4] = {}, g_gameNear = 0.0f;
+int g_gameEqWorld = 0, g_gameEqRel = 0;
+UINT g_gameEqReg = 0;
+bool SameBlock(const float a[4][4], const float b[4][4]) {
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 4; j++)
+            if (std::fabs(a[i][j] - b[i][j]) > 1e-3f * (1.0f + std::fabs(b[i][j]))) return false;
+    return true;
+}
 float g_vp[4][4] = {};
 bool g_vpValid = false;
 float g_lastVp[4][4] = {}; // the last frame's (read at its Present, after the boundary cleared g_vp)
@@ -286,7 +300,14 @@ void AddVpVote(const float m[4][4], bool at40, bool eye, std::vector<size_t>& th
 }
 
 void VoteCamera(IDirect3DDevice9* dev) {
-    if (g_nearDraws == 0) g_eyeKnown = LotLightingMotion::CameraEye(g_eye), g_eyeMiss = -1.0f, g_c40State = -1, g_c40PosOk = false;
+    if (g_nearDraws == 0) {
+        g_eyeKnown = LotLightingMotion::CameraEye(g_eye), g_eyeMiss = -1.0f, g_c40State = -1, g_c40PosOk = false;
+        float c2w[4][4], proj[4][4];
+        g_gameVpOk = LotLightingMotion::CameraMatrices(c2w, proj) && GroundProfileMath::ViewProjFromCamera(c2w, proj, g_gameVp) &&
+                     NearFromBlock(g_gameVp, g_gameNear);
+        if (g_gameVpOk) c2w[3][0] = c2w[3][1] = c2w[3][2] = 0.0f, GroundProfileMath::ViewProjFromCamera(c2w, proj, g_gameVpRel);
+        g_gameEqWorld = g_gameEqRel = 0;
+    }
     float regs[kScanRegs][4];
     const bool haveRegs = SUCCEEDED(dev->GetVertexShaderConstantF(0, &regs[0][0], kScanRegs));
     float cameraBlock[4][4];
@@ -304,7 +325,12 @@ void VoteCamera(IDirect3DDevice9* dev) {
             for (UINT r = 0; r + 4 <= kScanRegs; r++) {
                 const float(*m)[4] = &regs[r];
                 float p[3];
-                if (!NearFromBlock(m, n) || !CameraOfBlock(m, p)) continue;
+                if (!NearFromBlock(m, n)) continue;
+                if (g_gameVpOk && (SameBlock(m, g_gameVp) || SameBlock(m, g_gameVpRel))) {
+                    if (g_gameEqWorld + g_gameEqRel == 0) g_gameEqReg = r;
+                    (SameBlock(m, g_gameVp) ? g_gameEqWorld : g_gameEqRel)++;
+                }
+                if (!CameraOfBlock(m, p)) continue;
                 const float miss = std::hypot(p[0] - g_eye[0], p[2] - g_eye[2]);
                 if (g_eyeMiss < 0 || miss < g_eyeMiss) {
                     g_eyeMiss = miss, g_missReg = r, g_missNear = n, g_missMirrored = m[1][1] < 0.0f;
@@ -348,6 +374,10 @@ void VoteCamera(IDirect3DDevice9* dev) {
     }
     g_vpValid = bestVp > 0;
     if (g_vpValid) g_near = vpNear; // (the same unless the block votes chose another projection's near)
+    // no voted block: the game camera's own, when its near is the frame's (a misread camera object fails the shape or the near)
+    // shortcut: the camera object can trail the drawn frame by up to ~2.5 m while it moves (kEyeMatchM); a voted block wins whenever one exists
+    g_vpFromGame = !g_vpValid && g_gameVpOk && (g_nearVotes.empty() || std::fabs(g_gameNear - g_near) < 1e-3f * g_near);
+    if (g_vpFromGame) std::memcpy(g_vp, g_gameVp, sizeof g_vp), g_vpValid = true, g_near = g_gameNear;
     if (g_plainWanted.load(std::memory_order_relaxed) > 0) {
         int bestPlain = 0;
         for (const auto& v : g_vpVotes) {
@@ -397,6 +427,14 @@ void OnFrameBoundary(IDirect3DDevice9* dev) {
     g_uiDrawSeen = false;
     g_sceneOnSharedDepth = false;
     g_rejectedBoundary = false;
+    // regression check of the game-camera view-projection (the first frames that use it, then every ~10 min at 60 fps)
+    static int gameNotes = 0;
+    static uint32_t gameFrames = 0;
+    if (g_vpFromGame && (gameNotes < 3 || ++gameFrames % 36000 == 0))
+        ++gameNotes, LOG_INFO(std::format("[PostScene] Camera from the game camera's matrices (eye -0x30 camera-to-world, eye +0x10 projection): near {:.6f}, "
+                                          "voted draws {}, scanned blocks equal to it: world {}, camera-relative {} (first c{})",
+                                          g_gameNear, g_nearDraws, g_gameEqWorld, g_gameEqRel, g_gameEqReg));
+    g_vpFromGame = false;
     g_nearDraws = 0;
     g_nearVotes.clear();
     g_vpVotes.clear();
@@ -596,7 +634,9 @@ std::string DiagText() {
            std::to_string(g_nearVotes.size()) + " (near " + std::to_string(g_near) + "), view-projection blocks " + std::to_string(g_vpVotes.size()) +
            (g_eyeKnown ? ", eye (" + std::to_string(g_eye[0]) + ", " + std::to_string(g_eye[1]) + ", " + std::to_string(g_eye[2]) + "), nearest scanned camera " + std::to_string(g_eyeMiss) + " m"
                        : std::string(", eye unknown")) + CameraDiagText() +
-           (g_vpValid ? ", camera valid" : ", no camera") + (g_lastVpValid ? ", last frame's valid" : "");
+           (g_gameVpOk ? std::format("; game camera matrices near {:.6f}, equal scanned blocks world {} camera-relative {}", g_gameNear, g_gameEqWorld, g_gameEqRel)
+                       : std::string("; game camera matrices unread or not a camera")) +
+           (g_vpValid ? (g_vpFromGame ? ", camera valid (game camera's matrices)" : ", camera valid") : ", no camera") + (g_lastVpValid ? ", last frame's valid" : "");
 }
 // This frame's effects (ambient occlusion, edge smoothing, Depth Blur) will still run at a later scene boundary: Picture
 // does not copy the scene before them (06/10: since Picture took a depth test with ALWAYS and no depth write for the end of
