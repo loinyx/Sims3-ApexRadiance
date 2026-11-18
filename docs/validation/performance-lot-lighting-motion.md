@@ -41,7 +41,7 @@ harness.
 
 Shared room solve time (`sharedSolveTime = true`):
 
-6. Frame Profiler timing-run preset on a far pan over a town (the `night-lot-switch-pan` runner job), with the option off
+6. Frame Profiler timing-run preset on a pan over a town's lots on any night save (the `room-solve-share-pan` runner job), with the option off
    and on. **Expected:** with it on, fewer moving hitches led by "Lot room solve", lower "Lot room solve" ms per hitch
    frame, `room_solve_waited` above 0 only while `apex_moving` is 1, `room_solve_longest_wait` never above 30, and the
    developer card's "longest wait" at most 30 frames.

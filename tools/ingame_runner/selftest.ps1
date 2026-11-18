@@ -48,6 +48,20 @@ foreach ($bad in '12:00:03.000 [WARNING] [SceneBudget] Node 0x0a0b0c0d was found
                  '12:00:03.000 [INFO] [RoomLightQueue] Stopped, but some game code could not be put back') {
     Check (-not (Test-ApexLog @($bad) @() $script:DefaultFailPatterns).Ok) "fails a load: $($bad.Substring(13, 40))"
 }
+# a job's own fail patterns: the start-up line of a routing entry another mod already hooks passes, the feature's failures fail
+$startup = @('12:00:00.000 [ERROR] [Transition routing] Pattern not found (memory_patch.cpp:367)',
+             '12:00:00.001 [WARNING] [TransitionCalls] Transition routing unavailable or already changed; other observers remain independent.')
+foreach ($id in 'night-lot-switch-pan', 'room-solve-share-pan') {
+    $jf = @((Get-Content -LiteralPath (Join-Path $PSScriptRoot "jobs/$id.json") -Raw | ConvertFrom-Json).fail)
+    Check (Test-ApexLog $startup @() $jf).Ok "${id}: the hooked routing entry's start-up lines pass"
+}
+$jf = @((Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/night-lot-switch-pan.json') -Raw | ConvertFrom-Json).fail)
+Check (-not (Test-ApexLog @('12:00:02.000 [ERROR] [RtOutdoorLamps] Active lot tracker could not attach') @() $jf).Ok) 'night-lot-switch-pan: another ERROR fails'
+$jf = @((Get-Content -LiteralPath (Join-Path $PSScriptRoot 'jobs/room-solve-share-pan.json') -Raw | ConvertFrom-Json).fail)
+foreach ($bad in '12:00:03.000 [WARNING] [LotLightingMotion] Shared room solve time left off: the lot pass call: busy',
+                 '12:00:03.000 [ERROR] [RoomSolveShare] The room solve call could not be put back; the gate stays in place and passes every call through') {
+    Check (-not (Test-ApexLog @($bad) @() $jf).Ok) "room-solve-share-pan fails: $($bad.Substring(13, 40))"
+}
 
 # Frame statistics: 100 focused frames of 16 ms, one of 120 ms, 10 unfocused frames that do not count
 $csv = Join-Path ([IO.Path]::GetTempPath()) ('apex-ingame-selftest-' + [Guid]::NewGuid().ToString('N') + '.csv')
