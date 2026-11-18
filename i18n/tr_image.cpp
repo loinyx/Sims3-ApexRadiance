@@ -740,8 +740,6 @@ const I18n::Entry kEntries[] = {
     {"Unavailable on this graphics card", "Indisponível nesta placa de vídeo", "No disponible en esta tarjeta gráfica", "Indisponible sur cette carte graphique"},
     // ---- Looks options, DLSS card, Audio start guard, shortcuts ----
     {"Preset", "Preset", "Preajuste", "Préréglage"},
-    {"Run earlier", "Rodar antes", "Ejecutar antes", "Exécuter plus tôt"},
-    {"Run later", "Rodar depois", "Ejecutar después", "Exécuter plus tard"},
     {"Remove from the look", "Remover do visual", "Quitar del estilo", "Retirer du rendu"},
     {"Leaves the look when you save", "Sai do visual quando você salvar", "Sale del estilo al guardar", "Quitte le rendu à l'enregistrement"},
     {"Restore", "Restaurar", "Restaurar", "Restaurer"},

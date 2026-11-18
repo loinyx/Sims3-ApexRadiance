@@ -538,6 +538,7 @@ bool CompileImpl(const std::wstring& fxPath, const Folders& folders, UINT W, UIN
     out.file = Utf8(fxPath.substr(fxPath.find_last_of(L"\\/") + 1));
     out.width = W; out.height = H;
     auto fail = [&](std::string why) { out.error = std::move(why); return false; };
+    out.compiledWith = folders.defines; // also when it fails: other definitions must compile it again (MacrosMatch)
     if (!InsideRoot(folders.root, FullPath(fxPath))) return fail("the file is outside the Shaders folder");
 
     std::string source;
@@ -593,7 +594,6 @@ bool CompileImpl(const std::wstring& fxPath, const Folders& folders, UINT W, UIN
         return fail(ReasonFrom(pp.errors(), folders.root));
     if (pp.output().size() > kMaxPreprocessedBytes) return fail("the file expands to more than 16 MB of code");
     out.macros = UsedMacros(pp, fxPath, folders.defines);
-    out.compiledWith = folders.defines;
 
     // ---- parse and generate shader model 3.0 HLSL
     std::unique_ptr<reshadefx::codegen> cg(reshadefx::create_codegen_hlsl(30, false, false));
@@ -836,6 +836,9 @@ bool MacrosMatch(const Effect& fx, const LooksDefines& defines)
     // compiled with exactly these: a definition the file ignores (its own #define wins) would otherwise never match and the
     // file would compile again at every scan, its effect created again each time
     if (fx.compiledWith == defines) return true;
+    // a file that failed may not know the definitions it tests (the preprocessor stopped): any other set compiles it again,
+    // so taking back the setting that broke it runs it again
+    if (!fx.error.empty()) return false;
     for (const Macro& m : fx.macros)
     {
         const std::string* want = &m.def;

@@ -2662,8 +2662,6 @@ const I18n::Pair kPairs[] = {
     {"The other app's key is set on the Shortcuts tab", "Το πλήκτρο της άλλης εφαρμογής ορίζεται στην καρτέλα Συντομεύσεις"},
     // ---- ReShade/GShade looks, DLSS card, Audio start guard, shortcuts ----
     {"Preset", "Προρύθμιση"},
-    {"Run earlier", "Εκτέλεση νωρίτερα"},
-    {"Run later", "Εκτέλεση αργότερα"},
     {"Remove from the look", "Αφαίρεση από το look"},
     {"Leaves the look when you save", "Φεύγει από το look όταν αποθηκεύσετε"},
     {"Restore", "Επαναφορά"},

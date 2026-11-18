@@ -2662,8 +2662,6 @@ const I18n::Pair kPairs[] = {
     {"The other app's key is set on the Shortcuts tab", "Die Taste der anderen App wird im Tab Tastenkürzel festgelegt"},
     // ---- ReShade/GShade looks, DLSS card, Audio start guard, shortcuts ----
     {"Preset", "Voreinstellung"},
-    {"Run earlier", "Früher ausführen"},
-    {"Run later", "Später ausführen"},
     {"Remove from the look", "Aus dem Look entfernen"},
     {"Leaves the look when you save", "Verlässt den Look beim Speichern"},
     {"Restore", "Wiederherstellen"},

@@ -2662,8 +2662,6 @@ const I18n::Pair kPairs[] = {
     {"The other app's key is set on the Shortcuts tab", "A másik alkalmazás billentyűje a Gyorsbillentyűk lapon állítható be"},
     // ---- ReShade/GShade looks, DLSS card, Audio start guard, shortcuts ----
     {"Preset", "Előbeállítás"},
-    {"Run earlier", "Korábban fusson"},
-    {"Run later", "Később fusson"},
     {"Remove from the look", "Eltávolítás a lookból"},
     {"Leaves the look when you save", "Mentéskor kikerül a lookból"},
     {"Restore", "Visszaállítás"},

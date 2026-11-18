@@ -2541,8 +2541,6 @@ Unavailable with the game's screen format	tr_image.cpp:kEntries	Indisponível co
 Unavailable: not enough video memory	tr_image.cpp:kEntries	Indisponível: memória de vídeo insuficiente	No disponible: memoria de video insuficiente	Indisponible : mémoire vidéo insuffisante	
 Unavailable on this graphics card	tr_image.cpp:kEntries	Indisponível nesta placa de vídeo	No disponible en esta tarjeta gráfica	Indisponible sur cette carte graphique	
 Preset	tr_image.cpp:kEntries	Preset	Preajuste	Préréglage	
-Run earlier	tr_image.cpp:kEntries	Rodar antes	Ejecutar antes	Exécuter plus tôt	
-Run later	tr_image.cpp:kEntries	Rodar depois	Ejecutar después	Exécuter plus tard	
 Remove from the look	tr_image.cpp:kEntries	Remover do visual	Quitar del estilo	Retirer du rendu	
 Leaves the look when you save	tr_image.cpp:kEntries	Sai do visual quando você salvar	Sale del estilo al guardar	Quitte le rendu à l'enregistrement	
 Restore	tr_image.cpp:kEntries	Restaurar	Restaurar	Restaurer	

@@ -2662,8 +2662,6 @@ const I18n::Pair kPairs[] = {
     {"The other app's key is set on the Shortcuts tab", "其他應用程式的按鍵在「快速鍵」分頁中設定"},
     // ---- ReShade/GShade looks, DLSS card, Audio start guard, shortcuts ----
     {"Preset", "預設"},
-    {"Run earlier", "提前執行"},
-    {"Run later", "延後執行"},
     {"Remove from the look", "從畫面風格中移除"},
     {"Leaves the look when you save", "儲存時將從畫面風格中去掉"},
     {"Restore", "恢復"},

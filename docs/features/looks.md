@@ -84,9 +84,8 @@ the status, the last frame's run, skipped shaders, Reload and the GPU memory.
 **Shaders in this look** card: "<on> of <total> on" and an ellipsis menu (*Put back the look as saved*, *Open the
 Shaders folder*, *Check again*: compiles the folder again, then "All shaders found" or "<n> still missing" under the
 list). One row per shader of the run list, in run order: a chevron, the name (changed dot while its values differ from
-the .ini) over one short description, a ⋯ menu, the switch. The drag grip shows only while the pointer is on the row
-(or it is held). The ⋯ menu, titled "<name>  <pos> of <n>", has *Run earlier*, *Run later*, *Put back the look's values*
-(while they differ) and *Remove from the look*. A removed shader leaves the list at once and stops running, with the
+the .ini) over one short description, a ⋯ menu, the switch; the drag grip on the left moves it in the run order. The ⋯
+menu, titled with the shader's name, has *Put back the look's values* (while they differ) and *Remove from the look*. A removed shader leaves the list at once and stops running, with the
 undo toast "<name> removed"; removals one after another join that toast ("<a> and <b> removed", "<n> shaders removed",
 6 s, one Undo for all; `ApexUi::ReportChange`'s group). It leaves the file at the next save; until then *Add a shader*
 lists it first under "Removed from this look", its name over "Leaves the look when you save" and *Restore* (`RemovedRow`; only a set changes, so the list is never
@@ -263,8 +262,8 @@ each with the look's value (else the .fx's own `#define`) as its default: 0 or 1
 `#if` / `#elif` lines compare with at most 8 values ("0 to 5") a 120-unit dropdown; any other number or text a field that applies
 when it is left. A change compiles that effect again on the background compile thread; the old one keeps running and
 "Compiling the new settings…" shows beside *Put back the look's settings* until the new one replaces it. When the file no longer compiles with an edited setting (FXAA's `FXAA_HLSL_4` asks for Direct3D 10), the
-settings go back to the last ones it ran with (`g_goodDefs`; none edited when it never ran with any) and a note under
-the list says "<shader> doesn't run with that setting in The Sims 3, so it went back to the last one that worked". An effect
+settings go back to the last ones it ran with (`g_goodDefs`; none edited when it never ran with any) and it compiles
+again (a file that failed matches only the exact definitions it failed with, `MacrosMatch`); a note under the list says "<shader> doesn't run with that setting in The Sims 3, so it went back to the last one that worked". An effect
 keeps the definitions it was compiled with (`Effect::compiledWith`); `Looks::Fx::MacrosMatch` counts those as a match,
 so a look definition that the .fx overrides with its own `#define` does not compile it again at every scan. Edits are
 undoable, kept per .fx file in `defines`, written by *Save as a new look…* into the effect's section
@@ -342,7 +341,7 @@ The earlier ports came from GShade's copies, which differ from the authors' code
 | Shader switches | `on` | array of technique names | empty | at most 256 read | Shaders the file keeps listed off (`ApexOff=`) switched on here |
 | Remove (trash) | `removed` | array of lower-case `tech@file.fx` | empty | at most 256 read | Shaders removed here, listed with Restore until the look is saved |
 | Add a shader | `extra` | array of `Tech@File.fx` | empty | at most 256 read | Shaders added to the look (built-in or from the Shaders folder) |
-| Run earlier / Run later | `runOrder` | array of `Tech@File.fx` | empty (the .ini's order) | at most 256 read | The run order |
+| The drag grip (run order) | `runOrder` | array of `Tech@File.fx` | empty (the .ini's order) | at most 256 read | The run order |
 | Shader parameters | `tweaks` | table: technique = 4 floats per parameter | empty | at most 64 shaders, 256 values each | Edited values; a shader back at the .ini's values is dropped |
 | Quality settings | `defines` | table: lower-case .fx name = array of `NAME=VALUE` | empty | at most 64 files, 128 definitions each (names C identifiers up to 64 characters, values up to 256) | Edited preprocessor definitions; one back at the look's value is dropped |
 

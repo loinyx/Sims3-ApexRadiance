@@ -2662,8 +2662,6 @@ const I18n::Pair kPairs[] = {
     {"The other app's key is set on the Shortcuts tab", "ตั้งปุ่มของแอปอื่นได้ที่แท็บปุ่มลัด"},
     // ---- ReShade/GShade looks, DLSS card, Audio start guard, shortcuts ----
     {"Preset", "ค่าที่ตั้งไว้"},
-    {"Run earlier", "รันก่อน"},
-    {"Run later", "รันทีหลัง"},
     {"Remove from the look", "นำออกจากลุค"},
     {"Leaves the look when you save", "จะออกจากลุคเมื่อคุณบันทึก"},
     {"Restore", "คืนค่า"},

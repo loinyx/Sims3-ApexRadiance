@@ -2662,8 +2662,6 @@ const I18n::Pair kPairs[] = {
     {"The other app's key is set on the Shortcuts tab", "Den andra appens tangent ställs in på fliken Kortkommandon"},
     // ---- ReShade/GShade looks, DLSS card, Audio start guard, shortcuts ----
     {"Preset", "Förinställning"},
-    {"Run earlier", "Kör tidigare"},
-    {"Run later", "Kör senare"},
     {"Remove from the look", "Ta bort från looken"},
     {"Leaves the look when you save", "Försvinner från looken när du sparar"},
     {"Restore", "Återställ"},

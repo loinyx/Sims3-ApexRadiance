@@ -2662,8 +2662,6 @@ const I18n::Pair kPairs[] = {
     {"The other app's key is set on the Shortcuts tab", "Den anden apps tast indstilles på fanen Genveje"},
     // ---- ReShade/GShade looks, DLSS card, Audio start guard, shortcuts ----
     {"Preset", "Forudindstilling"},
-    {"Run earlier", "Kør tidligere"},
-    {"Run later", "Kør senere"},
     {"Remove from the look", "Fjern fra lookket"},
     {"Leaves the look when you save", "Forsvinder fra lookket, når du gemmer"},
     {"Restore", "Gendan"},

@@ -2306,7 +2306,7 @@ bool RemovedRow(size_t i)
 }
 
 // One shader: chevron, name (changed dot) over its description, the switch; the name side opens its values
-bool ShaderRow(size_t i, int pos, int count, bool& reorder)
+bool ShaderRow(size_t i)
 {
     const float u = ApexUi::Unit();
     bool changed = false;
@@ -2331,13 +2331,7 @@ bool ShaderRow(size_t i, int pos, int count, bool& reorder)
         const float h = ImGui::GetFrameHeight(), gap = ApexUi::kSpace2 * u;
         const float twinW = doubled ? ApexUi::ButtonWidth(twin.action.c_str(), false) + ApexUi::kSpace3 * u : 0.0f;
         const float trashW = h + gap; // the ⋯ button
-        // the grip shows only while the pointer is on the row (its last frame's rectangle) or while it is held
-        const ImGuiID topId = ImGui::GetID("##RowTop"), bottomId = ImGui::GetID("##RowBottom");
-        const float prevTop = storage->GetFloat(topId, 0.0f), prevBottom = storage->GetFloat(bottomId, 0.0f);
-        const bool rowHovered = prevBottom > prevTop && ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
-                                ImGui::IsMouseHoveringRect(ImVec2(left, prevTop), ImVec2(left + width, prevBottom), false);
-        const bool held = ImGui::GetActiveID() == ImGui::GetID("##Grip");
-        ApexUi::SetNextRowIconColor(rowHovered || held || ApexUi::FilterActive() ? VioletTheme::kTextFaint : VioletTheme::kCardBg);
+        ApexUi::SetNextRowIconColor(VioletTheme::kTextFaint);
         if (ApexUi::BeginControlRow(label.c_str(), description.c_str(), twinW + trashW + ApexUi::ToggleSwitchSize().x + gap + h, IconId::GripVertical))
         {
             float controlsLeft = 0.0f, controlsTop = FLT_MAX; // the controls' top (stacked under the text: the name side ends above)
@@ -2348,15 +2342,12 @@ bool ShaderRow(size_t i, int pos, int count, bool& reorder)
                 controlsTop = ImGui::GetItemRectMin().y;
                 ImGui::SameLine(0.0f, ApexUi::kSpace3 * u);
             }
-            // the row's less frequent actions in one menu: the run order, the look's values back, removal
+            // the row's less frequent actions in one menu: the look's values back, removal (the grip moves it)
             if (ApexUi::IconButton("##More", IconId::Ellipsis, "More options", false, h / u)) ImGui::OpenPopup("ShaderActions");
             if (!doubled) controlsLeft = ImGui::GetItemRectMin().x;
-            const std::string menuTitle = label + "  \xC2\xB7  " + I18n::Trf("{} of {}", pos, count);
-            if (ApexUi::BeginActionMenu("ShaderActions", menuTitle.c_str()))
+            if (ApexUi::BeginActionMenu("ShaderActions", label.c_str()))
             {
                 const ApexUi::ControlSizeScope menuSize(ApexUi::ControlSize::Compact);
-                if (ApexUi::ActionMenuItem("Run earlier", IconId::ChevronUp, pos > 1)) { g_dragMove = { i, -1 }; reorder = changed = true; ImGui::CloseCurrentPopup(); }
-                if (ApexUi::ActionMenuItem("Run later", IconId::ChevronDown, pos < count)) { g_dragMove = { i, 1 }; reorder = changed = true; ImGui::CloseCurrentPopup(); }
                 if (ApexUi::ActionMenuItem("Put back the look's values", IconId::Undo2, EditedValues(i)))
                 {
                     g.tweaks.erase(e.technique);
@@ -2402,8 +2393,6 @@ bool ShaderRow(size_t i, int pos, int count, bool& reorder)
             const float bottom = stacked ? controlsTop - ApexUi::kSpace1 * u : after.y - ImGui::GetStyle().ItemSpacing.y;
             const float gripW = ApexUi::kRowIconBox * u + ApexUi::kSpace2 * u; // the leading icon's box and part of its gap (clear of the text)
             const float right = stacked ? left + width : switchMin.x - ApexUi::kSpace3 * u;
-            storage->SetFloat(topId, top);
-            storage->SetFloat(bottomId, after.y);
             if (bottom > top && !ApexUi::FilterActive())
             {
                 // held by its grip, the whole row follows the pointer: it swaps with the row it passes, lit while held
@@ -3528,7 +3517,7 @@ public:
     // The Shaders card (Looks::ShadersCard)
     void ShadersCard()
     {
-        bool changed = false, openSave = false, openAdd = false, reorder = false;
+        bool changed = false, openSave = false, openAdd = false;
         const int total = RunnableCount(false), onN = RunnableCount(true);
         // Shaders the look names that Apex can't run: a missing .fx file, one being compiled, or one that can't run here
         std::vector<size_t> cant;
@@ -3579,7 +3568,6 @@ public:
 
             if (total == 0 && !ApexUi::FilterActive())
                 ApexUi::MutedText(I18n::Tr(g.loaded ? "No shader of this look can run here" : "Choose a look to see its shaders"));
-            int pos = 0;
             std::vector<std::string> getPacks; // packs a Download of the missing rows would fetch (Download all)
             const Looks::Packs::Batch batch = Looks::Packs::Status();
             // No row may rebuild g.order while the list draws (rows hold references into it): moves wait for its end,
@@ -3588,7 +3576,7 @@ public:
             {
                 if (IsRemoved(i)) continue; // gone until saved: the toast's Undo, or Restore in Add a shader
                 if (!Runnable(i)) { if (!ApexUi::FilterActive()) changed |= MissingRow(i, batch, getPacks); continue; } // in its place
-                changed |= ShaderRow(i, ++pos, total, reorder);
+                changed |= ShaderRow(i);
             }
             if (g_dragMove.dir) { Move(g_dragMove.i, g_dragMove.dir); g_dragMove = {}; changed = true; }
             if (getPacks.size() >= 2 && !ApexUi::FilterActive())

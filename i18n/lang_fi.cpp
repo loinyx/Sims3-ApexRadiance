@@ -2662,8 +2662,6 @@ const I18n::Pair kPairs[] = {
     {"The other app's key is set on the Shortcuts tab", "Muun sovelluksen näppäin asetetaan Pikanäppäimet-välilehdellä"},
     // ---- ReShade/GShade looks, DLSS card, Audio start guard, shortcuts ----
     {"Preset", "Esiasetus"},
-    {"Run earlier", "Aja aiemmin"},
-    {"Run later", "Aja myöhemmin"},
     {"Remove from the look", "Poista lookista"},
     {"Leaves the look when you save", "Lähtee lookista, kun tallennat"},
     {"Restore", "Palauta"},
