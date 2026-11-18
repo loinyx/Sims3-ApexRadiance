@@ -71,7 +71,7 @@ void Install();
 void Uninstall();
 void NoteShape(uint64_t id, uintptr_t shape); // an occluder entry's object and first shape (LampMarkFilter's mark)
 // Any thread: moves one for each object move or occluder mark seen: the 3D records' blockers may have changed (OutdoorDelta's live
-// tables). The move hook is what paces it: marks wait for the room update, gaps of 0.6 to 2 s on 03/11. hook: its moves alone and thread:
+// tables). The move hook is what paces it: marks wait for the room update, gaps of 0.6 to 2 s in one recording. hook: its moves alone and thread:
 // the last one's (nothing proved yet that it fires on every drag step or how often in Live mode; the [LiveTable] line tells)
 uint32_t Gen();
 void Touch(); // moves Gen once (custom content's plants were baked: kept rooms read their records again)
