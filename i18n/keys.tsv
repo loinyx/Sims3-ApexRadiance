@@ -2587,9 +2587,13 @@ Save this list and its values as a .ini of your own in the Looks folder	tr_image
 Pick one, or import a ReShade or GShade preset	tr_image.cpp:kEntries	Escolha um ou importe um preset do ReShade ou GShade	Elige uno o importa un preajuste de ReShade o GShade	Choisissez-en un ou importez un préréglage ReShade ou GShade	
 Copy a ReShade or GShade preset (.ini) into the Looks folder and choose it	tr_image.cpp:kEntries	Copia um preset do ReShade ou GShade (.ini) para a pasta Looks e o escolhe	Copia un preajuste de ReShade o GShade (.ini) a la carpeta Looks y lo elige	Copie un préréglage ReShade ou GShade (.ini) dans le dossier Looks et le choisit	
 Shaders in this look	tr_image.cpp:kEntries	Shaders deste visual	Shaders de este estilo	Shaders de ce rendu	
+Get more packs	tr_image.cpp:kEntries	Baixar mais pacotes	Obtener más paquetes	Obtenir d'autres packs	
+{} packs on ReShade's list	tr_image.cpp:kEntries	{} pacotes na lista do ReShade	{} paquetes en la lista de ReShade	{} packs dans la liste de ReShade	{}
+No shaders yet: use Add shaders to build this look	tr_image.cpp:kEntries	Nenhum shader ainda: use Adicionar shaders para montar este visual	Aún no hay shaders: usa Añadir shaders para crear este estilo	Aucun shader pour l'instant : utilisez Ajouter des shaders pour construire ce rendu	
+Shaders that run here, and those of packs you can download	tr_image.cpp:kEntries	Shaders que rodam aqui e os de pacotes que você pode baixar	Shaders que funcionan aquí y los de paquetes que puedes descargar	Les shaders qui fonctionnent ici et ceux des packs à télécharger	
+Downloads it from its author's GitHub	tr_image.cpp:kEntries	Baixa do GitHub do autor	Lo descarga del GitHub de su autor	Le télécharge depuis le GitHub de son auteur	
 Installed shaders	tr_image.cpp:kEntries	Shaders instalados	Shaders instalados	Shaders installés	
 Add shaders	tr_image.cpp:kEntries	Adicionar shaders	Añadir shaders	Ajouter des shaders	
-No shaders yet: add them below, under Add shaders	tr_image.cpp:kEntries	Nenhum shader ainda: adicione abaixo, em Adicionar shaders	Aún no hay shaders: añádelos abajo, en Añadir shaders	Aucun shader pour l'instant : ajoutez-en plus bas, dans Ajouter des shaders	
 A look of your own: start empty or from this one, then add its shaders	tr_image.cpp:kEntries	Um visual seu: comece vazio ou a partir deste e depois adicione os shaders	Un estilo propio: empieza vacío o desde este y luego añade sus shaders	Un rendu à vous : partez de zéro ou de celui-ci, puis ajoutez ses shaders	
 Start from	tr_image.cpp:kEntries	Começar de	Empezar desde	Partir de	
 A look with this name exists already	tr_image.cpp:kEntries	Já existe um visual com este nome	Ya existe un estilo con este nombre	Un rendu porte déjà ce nom	

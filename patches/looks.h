@@ -21,10 +21,10 @@ void HoldBypass();
 enum Tab : int { kTabLook, kTabInstalled };
 // A button asked for another tab (-1: none); the page switches to it before drawing
 int TakeView();
-// Image > Shaders, tab Look: the import note card, the Shaders in this look card, then Add shaders (the shaders that run
-// here and those of packs not downloaded yet, which download when added)
+// Image > Shaders, tab Look: the import note card, then the Shaders in this look card, whose Add shaders opens a modal
+// (the shaders that run here and those of packs not downloaded yet, which download when added)
 void ShadersCard();
-// Image > Shaders, tab Installed: Installed packs, then Your shaders
+// Image > Shaders, tab Installed: Installed packs, Your shaders, then Get more packs
 void LibraryCards();
 // The floating download bar between left and right (screen x), its bottom kSpace2 above bottomY: downloading, or
 // finished (it clears by itself after 4 s unless a pack failed). Returns its top (bottomY when none).

@@ -34,7 +34,7 @@ extern bool g_fixtureTwin;
 #include "raster.inc"
 
 namespace {
-struct State { const char* name; int page; int tab; bool compiling, edited, offer; int batch; int video, options; bool gameAa; bool openAll; bool twin = false; int confirm = 0; };
+struct State { const char* name; int page; int tab; bool compiling, edited, offer; int batch; int video, options; bool gameAa; bool openAll; bool twin = false; int confirm = 0; const char* modal = nullptr; };
 // page 0 Shaders (tab 0 Look, 1 Installed shaders), 1 Capture (tab 0 Screenshots, 1 Video)
 const State kStates[] = {
     { "look", 0, 0, false, false, true, 0, 0, 0, false, false },
@@ -53,6 +53,7 @@ const State kStates[] = {
     { "look-doubled", 0, 0, false, false, false, 0, 0, 0, false, false, true },
     { "installed-remove-pack", 0, 1, false, false, false, 0, 0, 0, false, false, false, 1 },
     { "installed-remove-file", 0, 1, false, false, false, 0, 0, 0, false, false, false, 2 },
+    { "look-add", 0, 0, false, false, false, 1, 0, 0, false, false, false, 0, "##AddShaders" },
 };
 
 struct Run { ImRect r; std::string text; };
@@ -303,7 +304,7 @@ int main(int argc, char** argv)
     std::set<std::string> missing;
     const float height = 16000.0f;
     for (int lang = 0; lang < 21; ++lang)
-        for (int units : { 400, 900 })
+        for (int units : { 343, 400, 900 })
             for (float scale : { 1.0f, 2.0f })
                 for (int st = 0; st < (int)IM_COUNTOF(kStates); ++st)
                 {
@@ -318,6 +319,8 @@ int main(int argc, char** argv)
                     Fixture::CaptureState(s.video, s.options);
                     g_menuGameAaOn = s.gameAa;
                     g_recOpenAll = s.openAll;
+                    g_recModal = s.modal;
+                    ImGui::GetCurrentContext()->OpenPopupStack.resize(0); // a modal of the last case closes
                     (s.page ? g_captureTab : g_shadersTab) = s.tab;
                     // no toggle stays open from the case before
                     for (ImGuiWindow* w : ImGui::GetCurrentContext()->Windows) w->StateStorage.Clear();
@@ -385,7 +388,7 @@ int main(int argc, char** argv)
                         {
                             const int before = g_newFindings;
                             CheckLayout(std::string(s.page ? "capture " : "shaders ") + s.name, where);
-                            const bool preview = g_newFindings != before || ((lang == 0 || lang == 1) && (st == 0 || st == 1 || st == 3 || st == 4 || st == 7 || st == 9 || st >= 13) && (scale == 1.0f || (lang == 1 && units == 400)));
+                            const bool preview = g_newFindings != before || ((lang == 0 || lang == 1) && (st == 0 || st == 1 || st == 3 || st == 4 || st == 7 || st == 9 || st >= 13) && (scale == 1.0f || (lang == 1 && units <= 400)));
                             if (preview)
                             {
                                 const auto file = out / (std::string(kCodes[lang]) + "-" + std::to_string(units) + "-" + std::to_string((int)(scale * 100)) + "-" + s.name + ".ppm");
@@ -421,7 +424,7 @@ int main(int argc, char** argv)
         for (const std::string& x : f.where) { if (n++ < 6) w += (w.empty() ? "" : ", ") + x; }
         printf("%s\n    %d cases (%s%s)\n    e.g. %s\n", key.c_str(), f.count, w.c_str(), f.where.size() > 6 ? ", ..." : "", f.example.c_str());
     }
-    printf("%d cases (21 languages, widths 400 and 900 units, text 100%% and 200%%, %d states), four frames each; %lld controls and %lld text runs checked: %d layout findings, %d missing-translation sets\n",
+    printf("%d cases (21 languages, widths 343 (the default window), 400 and 900 units, text 100%% and 200%%, %d states), four frames each; %lld controls and %lld text runs checked: %d layout findings, %d missing-translation sets\n",
            cases, (int)IM_COUNTOF(kStates), g_controls, g_runs, failures, (int)missing.size());
     ImGui::DestroyContext();
     return failures || !missing.empty() ? 1 : 0;

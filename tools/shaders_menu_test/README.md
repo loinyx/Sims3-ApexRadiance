@@ -1,6 +1,6 @@
 # Shaders and Capture menu layout checks
 
-`menu.cpp` draws Image > Shaders (tabs Look, with Add shaders, and Installed shaders, with the download bar) and Image > Capture (Screenshots and Video) with the real
+`menu.cpp` draws Image > Shaders (tabs Look, with the Add shaders modal, and Installed shaders, with Get more packs and the download bar) and Image > Capture (Screenshots and Video) with the real
 ImGui, theme, icons, translations and fonts (ImGui 1.92 textures, as the game's DX9 backend). The production units are
 compiled as they are: `patches/looks_patch.cpp`, `features/apex_capture.cpp` and `ui/widgets.cpp` are included by
 `looks_fixture.cpp`, `capture_fixture.cpp` and `widgets_rec.cpp` after `rec.h`, which records every control's

@@ -1304,7 +1304,7 @@ void ShadersLookContent() {
     if (patch->IsEnabled() || search) Looks::ShadersCard();
 }
 
-// Tab Installed: Installed packs and Your shaders (what is on this PC; more come from Add shaders on the Look tab)
+// Tab Installed: Installed packs, Your shaders and Get more packs (ReShade's packs to download)
 void ShadersLibraryContent() { Looks::LibraryCards(); }
 
 // A look's shader that does what an Apex effect also does (MXAO and Apex's Ambient Occlusion): twice the shade or blur and

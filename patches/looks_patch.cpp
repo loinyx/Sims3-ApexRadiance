@@ -2396,7 +2396,9 @@ bool MissingRow(size_t i, const Looks::Packs::Batch& batch, std::vector<std::str
     ImGui::PushID((int)i);
     ApexUi::SetNextRowUntranslated(); // the shader's own name; the description is already translated
     if (act != Act::Spin) ApexUi::SetNextRowWarning();
-    if (ApexUi::BeginControlRow(e.technique.c_str(), desc.c_str(), controlW))
+    // the alert sits in the grip's column, so the name lines up with the shader rows
+    ApexUi::SetNextRowIconColor(act == Act::Spin ? VioletTheme::kTextFaint : VioletTheme::kWarning);
+    if (ApexUi::BeginControlRow(e.technique.c_str(), desc.c_str(), controlW, IconId::TriangleAlert))
     {
         if (act == Act::Download && ApexUi::IconTextButton(download, IconId::Download)) DownloadPacks({ pack->folder });
         else if (act == Act::AddFx && ApexUi::IconTextButton(addFx, IconId::Plus, "Copy .fx, .fxh and texture files into the Shaders folder")) PickFxFiles();
@@ -2709,24 +2711,37 @@ bool GroupHeader(const std::string& key, const std::string& shownTitle, int coun
     return open;
 }
 
-// "Add shaders", under the look's shaders on the Look tab: every shader that runs here grouped by source, then the shaders
-// of packs not on this PC (Add downloads the pack), with a search field and the Kind filter. No window to open: the look
-// is built where it is shown.
-bool AddShadersCard()
+// "Add shaders", opened from the look's shaders card: every shader that runs here grouped by source, then the shaders of
+// packs not on this PC (Add downloads the pack, its progress on the pack's group), with a search field and the Kind
+// filter. It stays open for several adds; Done closes it.
+bool AddShadersModal(bool openNow)
 {
     static char query[96] = {};
     static int kind = 0;
-    Looks::Fx::BrowsePacks(); // the downloaded packs' shaders are checked (no network): their rows fill in
+    if (openNow)
+    {
+        query[0] = 0;
+        ImGui::OpenPopup("##AddShaders");
+    }
     const float u = ApexUi::Unit();
+    const ImVec2 display = ImGui::GetIO().DisplaySize;
+    ImGui::SetNextWindowSize(ImVec2(std::max(1.0f, std::min(560.0f * u, display.x - 32.0f)), 0.0f), ImGuiCond_Always);
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
     bool changed = false;
-    ImGui::PushID("LooksAdd");
-    if (ApexUi::BeginCard("##Add"))
+    if (ImGui::BeginPopupModal("##AddShaders", nullptr, ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_AlwaysAutoResize))
     {
         {
+            Looks::Fx::BrowsePacks(); // the downloaded packs' shaders are checked (no network): their rows fill in
             ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+            bool close = false;
+            ApexUi::HeaderExtra extra;
+            extra.iconOff = extra.iconOn = IconId::X;
+            extra.value = &close;
+            extra.tooltip = "Close";
             const std::string sub = I18n::Trf("{} shaders run in The Sims 3", ShaderTotal());
-            ApexUi::CardHeader(IconId::Plus, "Add shaders", sub.c_str(), nullptr, nullptr, true);
+            ApexUi::CardHeader(IconId::Plus, "Add shaders", sub.c_str(), nullptr, nullptr, true, &extra);
             ApexUi::CardDivider();
+            if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
             ImGui::SetNextItemWidth(-1.0f);
             ImGui::InputTextWithHint("##ShaderSearch", I18n::Tr("Search shaders"), query, sizeof(query));
             ApexUi::Gap(ApexUi::kSpace2);
@@ -2737,7 +2752,7 @@ bool AddShadersCard()
             // the list scrolls inside the card (hundreds of shaders), between two hairlines
             ApexUi::CardDivider();
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-            ImGui::BeginChild("##ShaderList", ImVec2(0.0f, std::min(340.0f * u, ImGui::GetIO().DisplaySize.y * 0.45f)), ImGuiChildFlags_AlwaysUseWindowPadding);
+            ImGui::BeginChild("##ShaderList", ImVec2(0.0f, std::max(120.0f * u, std::min(420.0f * u, display.y - 360.0f * u))), ImGuiChildFlags_AlwaysUseWindowPadding);
             ImGui::PopStyleVar();
             // the rows that match, per source: worked out again only when the search, the kind, the sources, the run list
             // or the language change (not every frame over hundreds of shaders)
@@ -2831,6 +2846,7 @@ bool AddShadersCard()
             // pack (the shader waits in the look until it is here). Their kinds are not known, so a kind hides them.
             if (kind == 0)
             {
+                const Looks::Packs::Batch batch = Looks::Packs::Status();
                 bool label = false;
                 auto eachTechnique = [](const char* list, auto fn) {
                     for (const char* s = list; *s;)
@@ -2858,7 +2874,10 @@ bool AddShadersCard()
                     };
                     if (!q.empty()) { collect(); if (rows.empty()) continue; }
                     if (!label) { ApexUi::Gap(ApexUi::kSpace2); ApexUi::CardGroup(I18n::Tr("Downloaded when you add one")); label = true; }
-                    const std::string title = p.downloadKB ? p.name + "  \xC2\xB7  " + SizeText(p.downloadKB) : p.name;
+                    std::string title = p.downloadKB ? p.name + "  \xC2\xB7  " + SizeText(p.downloadKB) : p.name;
+                    for (const Looks::Packs::Row& r : batch.rows)
+                        if (IEqual(r.folder, p.folder) && (r.state == Looks::Packs::RowState::Waiting || r.state == Looks::Packs::RowState::Downloading))
+                            title = p.name + "  \xC2\xB7  " + (r.state == Looks::Packs::RowState::Waiting ? std::string(I18n::Tr("Waiting")) : I18n::Trf("Downloading {}%", (int)(r.progress * 100.0f)));
                     if (!GroupHeader("pack:" + p.folder, title, q.empty() ? p.techniques : (int)rows.size(), !q.empty(), false, true)) continue;
                     if (q.empty()) collect();
                     const std::string tip = I18n::Trf("Adds it and downloads {} from its author's GitHub", p.name);
@@ -2890,35 +2909,24 @@ bool AddShadersCard()
             if (!shown && !q.empty()) ApexUi::MutedText(I18n::Tr("No shader matches"));
             ImGui::EndChild();
             ApexUi::CardDivider();
-            // footer: where more shaders come from, the line left of its button (above it when they don't fit)
+            // footer: when Apex goes online, then Import .fx at the left and Done at the right (stacked when narrow)
             ApexUi::Gap(ApexUi::kSpace2);
             if (g.active && Looks::Fx::Scanning()) ApexUi::BusySpinner();
             if (g.active && Looks::Fx::Scanning()) ApexUi::MutedText(I18n::Tr("Checking your shaders\xE2\x80\xA6")); // nothing compiles while Looks is off
-            const char* importFx = "Import .fx\xE2\x80\xA6";
-            const char* lead = I18n::Tr("Apex goes online only when you add a shader that isn't on your PC.");
-            const float addW = ApexUi::ButtonWidth(I18n::Tr(importFx), true);
-            const float avail = ImGui::GetContentRegionAvail().x, startX = ImGui::GetCursorPosX();
-            if (ImGui::CalcTextSize(lead).x + ApexUi::kSpace3 * u + addW <= avail)
-            {
-                ImGui::AlignTextToFramePadding();
-                ImGui::PushStyleColor(ImGuiCol_Text, VioletTheme::Col(VioletTheme::kTextMuted));
-                ImGui::TextUnformatted(lead);
-                ImGui::PopStyleColor();
-                ImGui::SameLine(startX + avail - addW);
-            }
-            else
-            {
-                ApexUi::MutedText(lead);
-                ImGui::SetCursorPosX(startX + std::max(0.0f, avail - addW));
-            }
-            ImGui::BeginDisabled(g_addBusy.load()); // the file picker is open
-            if (ApexUi::IconTextButton(importFx, IconId::Plus, "Copy .fx, .fxh and texture files into the Shaders folder")) PickFxFiles();
-            ImGui::EndDisabled();
+            ApexUi::MutedText(I18n::Tr("Apex goes online only when you add a shader that isn't on your PC."));
             if (!g_fxMessage.empty()) ApexUi::IconNote(g_fxMessageError ? IconId::TriangleAlert : IconId::Info, g_fxMessage.c_str(), g_fxMessageError ? VioletTheme::kWarning : VioletTheme::kTextMuted);
+            ApexUi::Gap(ApexUi::kSpace3);
+            const float gap = ApexUi::kSpace3 * u, doneW = ApexUi::ButtonWidth(I18n::Tr("Done"), false);
+            const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+            ImGui::BeginDisabled(g_addBusy.load()); // the file picker is open
+            if (ApexUi::IconTextButton("Import .fx\xE2\x80\xA6", IconId::Plus, "Copy .fx, .fxh and texture files into the Shaders folder")) PickFxFiles();
+            ImGui::EndDisabled();
+            SameLineIfFits(doneW, gap, right);
+            ImGui::SetCursorScreenPos(ImVec2(right - doneW, ImGui::GetCursorScreenPos().y));
+            if (ApexUi::TextButton("Done", nullptr, ApexUi::ButtonKind::Primary) || close) ImGui::CloseCurrentPopup();
         }
+        ImGui::EndPopup();
     }
-    ApexUi::EndCard();
-    ImGui::PopID();
     return changed;
 }
 
@@ -3455,7 +3463,7 @@ public:
     // The Shaders card (Looks::ShadersCard)
     void ShadersCard()
     {
-        bool changed = false, openSave = false;
+        bool changed = false, openSave = false, openAdd = false;
         const int total = RunnableCount(false), onN = RunnableCount(true);
         // Shaders the look names that Apex can't run: a missing .fx file, one being compiled, or one that can't run here
         std::vector<size_t> cant;
@@ -3509,7 +3517,7 @@ public:
             for (size_t i = 0; i < g.order.size(); ++i) listed |= !IsRemoved(i);
             if (total == 0 && !ApexUi::FilterActive())
                 ApexUi::MutedText(I18n::Tr(!g.loaded ? "Choose a look to see its shaders"
-                                           : !listed  ? "No shaders yet: add them below, under Add shaders"
+                                           : !listed  ? "No shaders yet: use Add shaders to build this look"
                                                       : "No shader of this look can run here"));
             std::vector<std::string> getPacks; // packs a Download of the missing rows would fetch (Download all)
             const Looks::Packs::Batch batch = Looks::Packs::Status();
@@ -3534,12 +3542,15 @@ public:
             {
                 ApexUi::Gap(ApexUi::kSpace2);
                 const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
-                // one Save at the right: the changes made here go into the look itself (a look of the Looks folder is
-                // written over; a GShade look is saved under its name in the Looks folder, where Apex writes). Save as a
-                // new look is in the card's menu; shaders are added in the card under this one.
+                // Add shaders at the left (its modal); Save at the right: the changes made here go into the look itself (a
+                // look of the Looks folder is written over; a GShade look is saved under its name in the Looks folder,
+                // where Apex writes). Save as a new look is in the card's menu.
                 const char* saveTo = "Save";
                 const float saveW = ApexUi::ButtonWidth(I18n::Tr(saveTo), false);
-                ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - saveW));
+                const float right = ImGui::GetCursorScreenPos().x + ImGui::GetContentRegionAvail().x;
+                if (ApexUi::IconTextButton("Add shaders", IconId::Plus, "Shaders that run here, and those of packs you can download")) openAdd = true;
+                SameLineIfFits(saveW, ApexUi::kSpace3 * ApexUi::Unit(), right);
+                ImGui::SetCursorScreenPos(ImVec2(right - saveW, ImGui::GetCursorScreenPos().y));
                 ImGui::BeginDisabled(!Dirty());
                 const bool mine = Looks::RefSource(g.preset) == Looks::Source::Mine;
                 if (ApexUi::TextButton(saveTo, mine ? "Write the changes made here into the look's file"
@@ -3563,7 +3574,7 @@ public:
         }
         ApexUi::EndCard();
         changed |= SaveLookModal(openSave);
-        if (g.loaded && !ApexUi::FilterActive()) changed |= AddShadersCard(); // the cards' own spacing apart
+        changed |= AddShadersModal(openAdd);
         ImGui::PopID();
         if (changed) NotifySettingChanged();
     }
@@ -3810,6 +3821,48 @@ public:
             }
         }
         ApexUi::EndCard();
+
+        // ---- Get more packs: ReShade's packs not on this PC, each with Download (its progress in its row)
+        std::vector<const Pack*> more;
+        for (const Pack& p : List())
+            if (p.inList && !Downloaded(p.folder) && !Unavailable(p.folder)) more.push_back(&p);
+        if (!more.empty() && ApexUi::BeginCard("##GetPacks"))
+        {
+            const std::string sub = I18n::Trf("{} packs on ReShade's list", more.size());
+            ApexUi::CardHeader(IconId::Download, "Get more packs", sub.c_str(), nullptr, nullptr, true);
+            if (!ApexUi::FilterActive()) ApexUi::CardDivider();
+            const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+            const char* download = I18n::Tr("Download");
+            const float fh = ImGui::GetFrameHeight();
+            for (const Pack* p : more)
+            {
+                ImGui::PushID(p->folder.c_str());
+                const Row* r = busy(p->folder);
+                std::string desc;
+                if (r) desc = r->state == RowState::Waiting ? std::string(I18n::Tr("Waiting")) : I18n::Trf("Downloading {}%", (int)(r->progress * 100.0f));
+                else
+                {
+                    desc = p->author;
+                    if (p->techniques) desc += (desc.empty() ? "" : "  \xC2\xB7  ") + I18n::Trf("{} shaders", p->techniques);
+                    if (p->downloadKB) desc += (desc.empty() ? "" : "  \xC2\xB7  ") + SizeText(p->downloadKB);
+                }
+                const float lead = r ? 12.0f * u + gap : ApexUi::ButtonWidth(download, true) + gap;
+                ApexUi::SetNextRowUntranslated(); // a pack's name
+                if (ApexUi::BeginControlRow(p->name.c_str(), desc.c_str(), lead + fh))
+                {
+                    if (r) ApexUi::BusySpinner(true); // goes on the same line by itself
+                    else
+                    {
+                        if (ApexUi::IconTextButton(download, IconId::Download, "Downloads it from its author's GitHub")) DownloadPacks({ p->folder });
+                        ImGui::SameLine(0.0f, gap);
+                    }
+                    PackMenu(*p, false);
+                    ApexUi::EndControlRow();
+                }
+                ImGui::PopID();
+            }
+        }
+        if (!more.empty()) ApexUi::EndCard();
 
         ImGui::PopID();
     }
