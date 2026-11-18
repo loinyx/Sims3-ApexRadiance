@@ -5,6 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [4.0.4](4.0.4.md): ReShade effects identical to ReShade 6.7.3 over the player's 12 packs (shared textures, mouse wheel, depth order); a look list with favourites, rename and delete; a trash button on shader rows; no crash switching off an added shader; true-size furniture shadows on by default; indoor light no longer through walls.
 - [4.0.3](4.0.3.md): Apex Radiance Setup 1.2.6 turns on NVIDIA Smooth Motion or AMD Fluid Motion Frames with one switch and sets Apex's frame limit; a cleaner game list; Smooth Motion steps in the README.
 - [4.0.2](4.0.2.md): lot grounds no longer turn dark as the camera moves, a smoother frame rate (mouse pick read-back, arch rows), no built-in profile picks Ultra Ambient Occlusion, WinterRoadsFix snowy lots and roads lit, no crash changing ADOF values.
 - [4.0.1](4.0.1.md): Apex Radiance Setup 1.1.7 installs the RTX Remix bridge by default on a first install, with DXVK when the graphics card cannot run it; Setup and the in-game Recommended card recommend the bridge.
