@@ -380,7 +380,8 @@ load then fails on `[Video] Not started`. The default record key Shift+F8 is not
   on the machine shows up as stutter, and a load with other programs at 10% of the CPU or more is marked invalid. With
   `-InactiveIdle` only frames with the game window in front count.
 - The game is ended (`Stop-Process`) only when it neither quits nor closes its window, and only the process the runner
-  started.
+  started. Before that it writes `hang-TS3W-<pid>.dmp` (and one per running `NvRemixBridge.exe`) to the load's folder:
+  thread stacks and handles, no full memory, to show what the close waits on.
 
 ## Limits
 
