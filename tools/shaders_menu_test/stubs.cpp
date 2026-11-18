@@ -73,6 +73,7 @@ bool PrecompileComplete() { return true; }
 Result CreatePixelShader(IDirect3DDevice9*, Id, IDirect3DPixelShader9**, std::string*) { return Result::CreateFailed; }
 }
 namespace CrashReport { void ThreadStart() {} }
+namespace Overlay { bool IsVisible() { return true; } float TakeWheel() { return 0.0f; } }
 namespace HookGuard { void Note(const char*) noexcept {} }
 namespace GameAddr { uintptr_t Get(Id) { return 0; } }
 std::wstring g_root = std::filesystem::temp_directory_path().wstring() + L"apex-shaders-menu-test\\";

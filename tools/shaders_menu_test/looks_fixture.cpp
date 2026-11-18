@@ -88,6 +88,9 @@ void RequestScan(bool) {}
 void SetDefines(const std::map<std::string, LooksDefines>&) {}
 void WantFiles(const std::vector<std::string>&) {}
 void BrowsePacks() {}
+void WantProbe(const std::string&) {}
+bool ProbedValues(const std::string&, std::map<std::string, std::set<std::string>>&) { return false; } // not tested: every value shows
+void SetAdapter(uint32_t, uint32_t) {}
 void SetBindFunctions(SetRenderTargetFn, SetDepthStencilFn) {}
 uint64_t GpuBytes() { return 0; }
 void ReleaseGpu() {}

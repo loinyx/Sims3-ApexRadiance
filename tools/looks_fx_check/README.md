@@ -8,6 +8,7 @@ cl /nologo /c /std:c++20 /Zc:char8_t- /D_SILENCE_CXX20_U8PATH_DEPRECATION_WARNIN
 cl /nologo /std:c++20 /EHsc /utf-8 /O2 /DNOMINMAX /I. /Iframework /Ifeatures tools\looks_fx_check\check.cpp features\looks_fx.cpp features\looks_fx_catalog.cpp features\looks_runner.cpp features\looks_preset.cpp framework\apex_util.cpp %TEMP%\effect_*.obj /Fe:%TEMP%\looks_fx_check.exe /Fo:%TEMP%\
 %TEMP%\looks_fx_check.exe <Shaders folder> [--run] [WxH] [--catalog <Apex Radiance folder>] [--compare] [--hashes] [--state] [--cache]
 %TEMP%\looks_fx_check.exe <any folder> --packs <Apex Radiance folder>
+%TEMP%\looks_fx_check.exe <any folder> --probe <Apex Radiance folder> <file.fx>
 %TEMP%\looks_fx_check.exe <any folder> --params <folder> [<folder>...]
 ```
 
@@ -28,6 +29,10 @@ reasons. The compile time and texture memory of each file go to stderr.
   gradient, per-pixel noise and the given images, with the defaults, every parameter at a quarter and at three quarters
   of its range, and the two in turn. One table row per run gives the largest and the mean channel difference in 8-bit
   levels; a port more than 1 level from its original is a problem.
+- `--probe <Apex Radiance folder> <file.fx>`: the file is wanted and its quality settings tested (`WantProbe`): every
+  other value of each switch or short-list definition compiled once, and each value that does not compile printed. For
+  `FXAA.fx`, `FXAA_HLSL_4=1` must be among them (it asks for Direct3D 10). Writes `Shaders\.cache\` in that folder: give
+  it a scratch copy.
 - `--packs <Apex Radiance folder>`: the scan of `Shaders\Packs\<pack>\`: no pack file compiles before it is wanted;
   browsing checks the files the check cache does not know in the background and keeps none of them compiled, then every
   pack is counted ("<x> of <y> run here") and its techniques listed; a wanted file compiles; `FindFiles` names the pack

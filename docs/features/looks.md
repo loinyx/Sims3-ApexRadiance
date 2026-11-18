@@ -259,9 +259,15 @@ later winning) are passed to ReShade's preprocessor before each of the player's 
 in ReShade. An open shader from a .fx lists, under Advanced *Quality settings (<n>)*, the definitions the effect tests
 with `#ifdef` / `#ifndef` (ReShade's own list: not `BUFFER_*`, `RESHADE_*`, names starting with `_`, or include guards),
 each with the look's value (else the .fx's own `#define`) as its default: 0 or 1 a switch; an integer that the effect's
-`#if` / `#elif` lines compare with at most 8 values ("0 to 5") a 120-unit dropdown; any other number or text a field that applies
+`#if` / `#elif` lines compare with at most 8 values ("0 to 5") a 120-unit dropdown (only the values that compile
+here, see below); any other number or text a field that applies
 when it is left. A change compiles that effect again on the background compile thread; the old one keeps running and
-"Compiling the new settings…" shows beside *Put back the look's settings* until the new one replaces it. When the file no longer compiles with an edited setting (FXAA's `FXAA_HLSL_4` asks for Direct3D 10), the
+"Compiling the new settings…" shows beside *Put back the look's settings* until the new one replaces it. Values that cannot run here are not offered: while a file's settings show, the next scan
+(`Looks::Fx::WantProbe`) compiles it once more for each other value of each switch or short-list setting, the others
+as they are, and `ProbedValues` keeps the ones that fail; a switch whose other value fails, or a list left with only
+its current value, is not listed, and the title counts the rest. FXAA's platform switches go this way (of 14 values
+tested, 9 fail: FXAA_HLSL_4 / _5, the GLSL, PS3, 360 and console paths, FXAA_DISCARD, FXAA_GATHER4_ALPHA; about 0.6 s on
+the scan thread, again only when the file or its settings change). `tools/looks_fx_check --probe` checks it. When the file no longer compiles with an edited setting (FXAA's `FXAA_HLSL_4` asks for Direct3D 10), the
 settings go back to the last ones it ran with (`g_goodDefs`; none edited when it never ran with any) and it compiles
 again (a file that failed matches only the exact definitions it failed with, `MacrosMatch`); a note under the list says "<shader> doesn't run with that setting in The Sims 3, so it went back to the last one that worked". An effect
 keeps the definitions it was compiled with (`Effect::compiledWith`); `Looks::Fx::MacrosMatch` counts those as a match,

@@ -12,6 +12,7 @@
 #include <deque>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 #include "looks_shaders.h"
@@ -226,6 +227,12 @@ std::vector<Listed> List();
 // files it does not know yet are checked in the background, one at a time, and let go.
 void WantFiles(const std::vector<std::string>& files);
 void BrowsePacks();
+// Quality settings that do not compile here: after WantProbe(file) (the menu, when the file's settings show), the next
+// scan compiles that file once more for each other value of each definition the menu shows as a switch or a short list
+// (0/1, or at most 8 integers), the others as they are, and keeps the values that fail (FXAA_HLSL_4 asks for Direct3D 10).
+// ProbedValues: per definition, those values; false until the file was tested with its current definitions.
+void WantProbe(const std::string& file);
+bool ProbedValues(const std::string& file, std::map<std::string, std::set<std::string>>& failing);
 int CheckedThisSession(); // pack files checked in the background this session
 std::vector<std::string> PackFolders(); // folders in Shaders\Packs (complete downloads only), as the last scan found them
 std::vector<std::wstring> OwnFiles();   // the player's own .fx files (full paths, by name), as the last scan found them

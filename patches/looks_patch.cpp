@@ -2045,20 +2045,47 @@ bool DefinesUi(size_t i, const Looks::Fx::Effect& fx)
     const std::string& file = g.order[i].alt.empty() ? g.order[i].file : g.order[i].alt; // a stand-in: its own definitions
     const std::string key = Lower(file);
     const LooksDefines look = Looks::PresetDefines(g.ini, file);
-    const std::string title = I18n::Trf("Quality settings ({})", fx.macros.size());
-    if (!ApexUi::BeginAdvanced("##Defines", title.c_str())) return false;
-    bool changed = false;
+    // values that do not compile here (tested in the background: Looks::Fx::WantProbe) are not offered; a setting left
+    // with only its current value is not shown (FXAA's platform switches: only FXAA_HLSL_3 runs in Direct3D 9)
+    Looks::Fx::WantProbe(file);
+    std::map<std::string, std::set<std::string>> failing;
+    Looks::Fx::ProbedValues(file, failing);
+    auto fails = [&](const std::string& name, const std::string& v) { auto f = failing.find(name); return f != failing.end() && f->second.count(v) != 0; };
+    struct Row { const Looks::Fx::Macro* m; std::string lookValue, value; bool flag; std::vector<std::string> choices; };
+    std::vector<Row> rows;
     for (const Looks::Fx::Macro& m : fx.macros)
     {
-        std::string lookValue = m.def;
-        for (const auto& d : look) if (d.first == m.name) lookValue = d.second;
-        std::string value = lookValue;
+        Row r{ &m, m.def, {}, false, {} };
+        for (const auto& d : look) if (d.first == m.name) r.lookValue = d.second;
+        r.value = r.lookValue;
         if (auto f = g.defs.find(key); f != g.defs.end())
-            if (auto x = f->second.find(m.name); x != f->second.end()) value = x->second;
+            if (auto x = f->second.find(m.name); x != f->second.end()) r.value = x->second;
+        r.flag = (r.value == "0" || r.value == "1") && (r.lookValue == "0" || r.lookValue == "1") && (m.hi < m.lo || (m.lo >= 0 && m.hi <= 1));
+        int iv = 0, il = 0;
+        if (r.flag)
+        {
+            if (r.value == r.lookValue && fails(m.name, r.value == "1" ? "0" : "1")) continue; // its other value does not run
+        }
+        else if (m.hi >= m.lo && m.hi - m.lo <= 7 && AsInt(r.value, iv) && AsInt(r.lookValue, il))
+        {
+            for (int x = m.lo; x <= m.hi; ++x)
+                if (x == iv || !fails(m.name, std::to_string(x))) r.choices.push_back(std::to_string(x));
+            if (r.choices.size() <= 1 && r.value == r.lookValue) continue; // no other value runs
+        }
+        rows.push_back(std::move(r));
+    }
+    if (rows.empty() && !g.defs.count(key)) return false;
+    const std::string title = I18n::Trf("Quality settings ({})", rows.size());
+    if (!ApexUi::BeginAdvanced("##Defines", title.c_str())) return false;
+    bool changed = false;
+    for (Row& r : rows)
+    {
+        const Looks::Fx::Macro& m = *r.m;
+        const std::string& lookValue = r.lookValue;
+        std::string value = r.value;
         const std::string before = value;
         ImGui::PushID(m.name.c_str());
-        const bool flag = (value == "0" || value == "1") && (lookValue == "0" || lookValue == "1") && (m.hi < m.lo || (m.lo >= 0 && m.hi <= 1));
-        int iv = 0, il = 0;
+        const bool flag = r.flag;
         if (flag)
         {
             bool on = value == "1";
@@ -2066,20 +2093,20 @@ bool DefinesUi(size_t i, const Looks::Fx::Effect& fx)
             ApexUi::SetNextRowMinHeight(ImGui::GetFrameHeight()); // as tall as the dropdowns and fields around it
             if (ApexUi::SwitchRow(m.name.c_str(), &on, "0 or 1", ApexUi::BoolDefault(lookValue == "1"))) value = on ? "1" : "0";
         }
-        else if (m.hi >= m.lo && m.hi - m.lo <= 7 && AsInt(value, iv) && AsInt(lookValue, il))
+        else if (!r.choices.empty())
         {
-            std::vector<std::string> labels;
-            for (int x = m.lo; x <= m.hi; ++x) labels.push_back(std::to_string(x));
             std::vector<const char*> ptrs;
-            for (const auto& s : labels) ptrs.push_back(s.c_str());
-            int current = std::clamp(iv - m.lo, 0, (int)ptrs.size() - 1);
+            for (const auto& c : r.choices) ptrs.push_back(c.c_str());
+            auto at = [&](const std::string& v) { return (int)(std::find(r.choices.begin(), r.choices.end(), v) - r.choices.begin()); };
+            int current = std::min(at(value), (int)ptrs.size() - 1);
+            const int def = at(lookValue);
             const std::string desc = I18n::Trf("{} to {}", m.lo, m.hi);
             ApexUi::SetNextRowUntranslated();
             // a dropdown, as the .fx's own choices (a row of numbered tabs reads heavy in the panel)
             const bool stacked = ImGui::GetContentRegionAvail().x < 360.0f * ApexUi::Unit();
             if (ApexUi::SelectRow(m.name.c_str(), desc.c_str(), "##Define", &current, ptrs.data(), (int)ptrs.size(), 120.0f,
-                                  il >= m.lo && il <= m.hi ? il - m.lo : ApexUi::kNoDefaultIndex, stacked))
-                value = std::to_string(m.lo + current);
+                                  def < (int)ptrs.size() ? def : ApexUi::kNoDefaultIndex, stacked))
+                value = r.choices[current];
         }
         else
         {

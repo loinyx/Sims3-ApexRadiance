@@ -16,6 +16,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 #include <psapi.h>
@@ -74,6 +75,35 @@ static void Check(bool ok, const std::string& what)
 {
     ++g_checks;
     if (!ok) { ++g_failures; printf("FAIL %s\n", what.c_str()); }
+}
+
+// --probe <Apex Radiance folder> <file.fx>: the file wanted, its quality settings tested (WantProbe), each value that does
+// not compile listed. FXAA.fx must have FXAA_HLSL_4=1 among them (it asks for Direct3D 10) and must not lose FXAA_HLSL_3's
+// value (the one it runs with).
+static void ProbeChecks(const std::string& file)
+{
+    WantFiles({ file });
+    WantProbe(file);
+    RequestScan();
+    std::map<std::string, std::set<std::string>> failing;
+    const DWORD t0 = GetTickCount();
+    bool done = false;
+    while (!done && GetTickCount() - t0 < 600000)
+    {
+        Poll(1920, 1080);
+        done = !Scanning() && Scanned() && ProbedValues(file, failing);
+        Sleep(50);
+    }
+    Check(done, file + ": its settings were tested");
+    size_t n = 0;
+    for (const auto& [name, values] : failing)
+        for (const std::string& v : values) { printf("probe: %s %s=%s does not compile here\n", file.c_str(), name.c_str(), v.c_str()); ++n; }
+    printf("probe: %s, %zu values do not compile\n", file.c_str(), n);
+    if (_stricmp(file.c_str(), "FXAA.fx") == 0)
+    {
+        Check(failing.count("FXAA_HLSL_4") && failing["FXAA_HLSL_4"].count("1"), "FXAA_HLSL_4=1 is left out");
+        Check(!failing.count("FXAA_QUALITY__PRESET") || failing["FXAA_QUALITY__PRESET"].size() < 8, "FXAA keeps quality presets to choose");
+    }
 }
 
 // --catalog <Apex Radiance folder with a Shaders\ inside>: the real background scan, then a preset that names a user
@@ -862,6 +892,16 @@ int main(int argc, char** argv)
         else if (!strcmp(argv[i], "--state")) run = state = true;
         else if (!strcmp(argv[i], "--cache")) cache = true;
         else if (!strcmp(argv[i], "--compare")) run = compare = true;
+        else if (!strcmp(argv[i], "--probe") && i + 2 < argc)
+        {
+            wchar_t dir[MAX_PATH];
+            GetFullPathNameW(std::wstring(argv[i + 1], argv[i + 1] + strlen(argv[i + 1])).c_str(), MAX_PATH, dir, nullptr);
+            g_apexDir = dir;
+            if (g_apexDir.back() != L'\\') g_apexDir += L'\\';
+            ProbeChecks(argv[i + 2]);
+            printf("probe: %d checks, %d failures\n%s\n", g_checks, g_failures, g_failures ? "PROBLEMS" : "OK");
+            return g_failures ? 1 : 0;
+        }
         else if (!strcmp(argv[i], "--packs") && i + 1 < argc)
         {
             wchar_t dir[MAX_PATH];
