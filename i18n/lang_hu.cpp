@@ -2861,6 +2861,7 @@ const I18n::Pair kPairs[] = {
     {"No looks yet", "Még nincs look"},
     {"No look matches", "Nincs találat"},
     {"Open the Looks folder", "Looks mappa megnyitása"},
+    {"{} doesn't run with that setting in The Sims 3, so it went back to the last one that worked", "{} nem fut ezzel a beállítással a The Sims 3-ban, ezért visszaállt az utolsó működőre"},
     {"{} and {} removed", "{} és {} eltávolítva"},
     {"{} shaders removed", "{} shader eltávolítva"},
     {"{} deleted", "{} törölve"},

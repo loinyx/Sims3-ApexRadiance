@@ -2594,6 +2594,7 @@ Search looks	tr_image.cpp:kEntries	Buscar visuais	Buscar estilos	Rechercher des 
 No looks yet	tr_image.cpp:kEntries	Nenhum visual ainda	Aún no hay estilos	Aucun rendu pour l'instant	
 No look matches	tr_image.cpp:kEntries	Nenhum visual encontrado	Ningún estilo coincide	Aucun rendu ne correspond	
 Open the Looks folder	tr_image.cpp:kEntries	Abrir a pasta Looks	Abrir la carpeta Looks	Ouvrir le dossier Looks	
+{} doesn't run with that setting in The Sims 3, so it went back to the last one that worked	tr_image.cpp:kEntries	{} não roda com essa configuração no The Sims 3, então voltou para a última que funcionou	{} no funciona con ese ajuste en The Sims 3, así que volvió al último que funcionaba	{} ne fonctionne pas avec ce réglage dans Les Sims 3 : il revient au dernier qui marchait	{}
 {} and {} removed	tr_image.cpp:kEntries	{} e {} removidos	{} y {} quitados	{} et {} retirés	{} {}
 {} shaders removed	tr_image.cpp:kEntries	{} shaders removidos	{} shaders quitados	{} shaders retirés	{}
 {} deleted	tr_image.cpp:kEntries	{} excluído	{} eliminado	{} supprimé	{}

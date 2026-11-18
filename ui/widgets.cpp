@@ -212,6 +212,7 @@ float InlineControlWidth(float rowWidth) {
 // The description under a row's label: smaller, muted, wrapped at wrapX (window coordinates)
 unsigned g_nextDescRgb = 0; // SetNextRowWarning: the next row's description colour (0: muted)
 unsigned g_nextIconRgb = 0; // SetNextRowIconColor: the next control row's leading icon (0: accent)
+float g_nextMinHeight = 0.0f; // SetNextRowMinHeight: the next SwitchRow's least height (pixels)
 void RowDescription(const char* text, float wrapX) {
     if (!text || !*text) return;
     PushSized(nullptr, kSmallScale);
@@ -529,6 +530,7 @@ float Unit() {
 void SetNextRowUntranslated() { g_nextRaw = true; }
 void SetNextRowWarning() { g_nextDescRgb = VioletTheme::kWarning; }
 void SetNextRowIconColor(unsigned rgb) { g_nextIconRgb = rgb; }
+void SetNextRowMinHeight(float px) { g_nextMinHeight = px; }
 
 void SetNextRowBadge(const char* text, const char* tooltip, unsigned rgb) {
     g_nextBadge = text;
@@ -813,6 +815,7 @@ bool ToggleSwitch(const char* id, bool* v) {
 
 bool SwitchRow(const char* label, bool* v, const char* tooltip, BoolDefault def, IconId icon) {
     RowDecor d = TakeDecor();
+    const float minHeight = std::exchange(g_nextMinHeight, 0.0f);
     if (!RowVisible(label, tooltip)) return false;
     d.hasDefault = def.value >= 0;
     d.changed = d.hasDefault && (*v != (def.value == 1));
@@ -835,7 +838,8 @@ bool SwitchRow(const char* label, bool* v, const char* tooltip, BoolDefault def,
     const float wrapX = startX + width - sw.x - kSpace3 * u;
     ImGui::SetCursorPos(ImVec2(textX, top));
     LabelInfo li;
-    const float rowH = std::fmax(RowText(label, tooltip, wrapX, std::fmax(wrapX - DecorWidth(d), textX + 40.0f * u), &li), sw.y);
+    // with a least height (SetNextRowMinHeight) the text block is centred in it, as a slider row's label beside its track
+    const float rowH = std::fmax(std::fmax(RowText(label, tooltip, wrapX, std::fmax(wrapX - DecorWidth(d), textX + 40.0f * u), &li, minHeight), sw.y), minHeight);
 
     // The switch, centred on the text block
     ImGui::SetCursorPos(ImVec2(startX + width - sw.x, top + (rowH - sw.y) * 0.5f));

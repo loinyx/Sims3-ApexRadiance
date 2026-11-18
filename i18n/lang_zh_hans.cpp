@@ -2861,6 +2861,7 @@ const I18n::Pair kPairs[] = {
     {"No looks yet", "还没有画面风格"},
     {"No look matches", "没有匹配的画面风格"},
     {"Open the Looks folder", "打开 Looks 文件夹"},
+    {"{} doesn't run with that setting in The Sims 3, so it went back to the last one that worked", "{} 在《模拟人生 3》中无法使用此设置，已恢复为上一个可用的设置"},
     {"{} and {} removed", "已移除 {} 和 {}"},
     {"{} shaders removed", "已移除 {} 个着色器"},
     {"{} deleted", "已删除 {}"},

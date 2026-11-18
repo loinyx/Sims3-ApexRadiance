@@ -240,9 +240,9 @@ components, the range and the combo items):
 
 | In the .fx | Control |
 |---|---|
-| `bool` | Switch |
+| `bool` | Switch, in a row as tall as the slider rows around it (`SetNextRowMinHeight`) |
 | `ui_type = "slider"` or `"drag"` (one component) | Slider, the .ini's value as an amber tick, integers rounded (to `ui_step` when it is larger than 1) |
-| `"combo"`, `"radio"`, `"list"` with `ui_items` (split on `\0` as ReShade does) | Segmented when at most 4 choices whose labels fit 280 units (a vertical list when the row is narrow), else a dropdown (under the label below 360 units) |
+| `"combo"`, `"radio"`, `"list"` with `ui_items` (split on `\0` as ReShade does) | A dropdown, 220 units (under the label below 360 units) |
 | `ui_type = "color"`, float3 / float4 | `ColorRow`: a swatch with its 0..255 values; the swatch opens a colour picker (an alpha bar for float4) |
 | float2..4, int2..4 that are not a colour | One row of number fields, one per component, named by a "(a, b)" or "(a/b)" list at the end of the label, R G B for a label starting with RGB, else X Y Z W; each keeps the author's range; under the label, wrapping, when narrow |
 | `"input"` or no `ui_type` | A number field, clamped to `ui_min` / `ui_max` when the .fx gives them |
@@ -260,9 +260,11 @@ later winning) are passed to ReShade's preprocessor before each of the player's 
 in ReShade. An open shader from a .fx lists, under Advanced *Quality settings (<n>)*, the definitions the effect tests
 with `#ifdef` / `#ifndef` (ReShade's own list: not `BUFFER_*`, `RESHADE_*`, names starting with `_`, or include guards),
 each with the look's value (else the .fx's own `#define`) as its default: 0 or 1 a switch; an integer that the effect's
-`#if` / `#elif` lines compare with at most 8 values ("0 to 5") segmented; any other number or text a field that applies
+`#if` / `#elif` lines compare with at most 8 values ("0 to 5") a 120-unit dropdown; any other number or text a field that applies
 when it is left. A change compiles that effect again on the background compile thread; the old one keeps running and
-"Compiling the new settings…" shows beside *Put back the look's settings* until the new one replaces it. An effect
+"Compiling the new settings…" shows beside *Put back the look's settings* until the new one replaces it. When the file no longer compiles with an edited setting (FXAA's `FXAA_HLSL_4` asks for Direct3D 10), the
+settings go back to the last ones it ran with (`g_goodDefs`; none edited when it never ran with any) and a note under
+the list says "<shader> doesn't run with that setting in The Sims 3, so it went back to the last one that worked". An effect
 keeps the definitions it was compiled with (`Effect::compiledWith`); `Looks::Fx::MacrosMatch` counts those as a match,
 so a look definition that the .fx overrides with its own `#define` does not compile it again at every scan. Edits are
 undoable, kept per .fx file in `defines`, written by *Save as a new look…* into the effect's section

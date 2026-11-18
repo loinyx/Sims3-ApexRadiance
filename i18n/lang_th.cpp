@@ -2861,6 +2861,7 @@ const I18n::Pair kPairs[] = {
     {"No looks yet", "ยังไม่มีลุค"},
     {"No look matches", "ไม่พบลุคที่ตรงกัน"},
     {"Open the Looks folder", "เปิดโฟลเดอร์ Looks"},
+    {"{} doesn't run with that setting in The Sims 3, so it went back to the last one that worked", "{} ใช้การตั้งค่านี้ใน The Sims 3 ไม่ได้ จึงกลับไปใช้ค่าล่าสุดที่ใช้งานได้"},
     {"{} and {} removed", "นำ {} และ {} ออกแล้ว"},
     {"{} shaders removed", "นำเชดเดอร์ออก {} รายการ"},
     {"{} deleted", "ลบ {} แล้ว"},

@@ -2861,6 +2861,7 @@ const I18n::Pair kPairs[] = {
     {"No looks yet", "Zatím žádné vzhledy"},
     {"No look matches", "Žádný vzhled neodpovídá"},
     {"Open the Looks folder", "Otevřít složku Looks"},
+    {"{} doesn't run with that setting in The Sims 3, so it went back to the last one that worked", "{} s tímto nastavením v The Sims 3 nefunguje, proto se vrátilo poslední funkční"},
     {"{} and {} removed", "{} a {} odebrány"},
     {"{} shaders removed", "Odebráno shaderů: {}"},
     {"{} deleted", "{} smazán"},

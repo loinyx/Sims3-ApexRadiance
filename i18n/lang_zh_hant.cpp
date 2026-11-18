@@ -2861,6 +2861,7 @@ const I18n::Pair kPairs[] = {
     {"No looks yet", "還沒有畫面風格"},
     {"No look matches", "沒有符合的畫面風格"},
     {"Open the Looks folder", "開啟 Looks 資料夾"},
+    {"{} doesn't run with that setting in The Sims 3, so it went back to the last one that worked", "{} 在《模擬市民 3》中無法使用此設定，已恢復為上一個可用的設定"},
     {"{} and {} removed", "已移除 {} 和 {}"},
     {"{} shaders removed", "已移除 {} 個著色器"},
     {"{} deleted", "已刪除 {}"},

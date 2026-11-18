@@ -1657,6 +1657,8 @@ bool LookRow()
         ImGui::InputTextWithHint("##LookSearch", I18n::Tr("Search looks"), query, sizeof(query));
         const std::string q = Lower(query);
         int shown = 0, groups = 0;
+        std::string starred; // the look whose star was clicked this frame
+        std::set<std::string> drawn; // each look once a frame, even when a rename or a star moved it to a later group
         // Favorites first (any source), then My looks and GShade without them; a search shows one plain list
         for (int part = 0; part < 3; ++part)
         {
@@ -1664,7 +1666,7 @@ bool LookRow()
             bool header = false;
             for (const auto& item : g_list)
             {
-                if (PendingDelete(item.ref)) continue;
+                if (PendingDelete(item.ref) || drawn.count(item.ref)) continue;
                 if (q.empty())
                 {
                     const bool fav = IsFavorite(item.ref);
@@ -1680,6 +1682,7 @@ bool LookRow()
                     header = true;
                 }
                 ++shown;
+                drawn.insert(item.ref);
                 if (g_renaming == item.ref) { RenameRow(item, settings); continue; }
                 const bool selected = item.ref == g.preset;
                 if (selected && ImGui::IsWindowAppearing()) ImGui::SetScrollHereY();
@@ -1690,11 +1693,7 @@ bool LookRow()
                     if (dirty) g_askNext = item.ref; // the changes would be dropped: asked first (AskSaveModal)
                     else { SelectLook(item.ref); g_message.clear(); changed = true; }
                     break;
-                case RowAction::Favorite:
-                    if (IsFavorite(item.ref)) g_favorites.erase(std::remove(g_favorites.begin(), g_favorites.end(), item.ref), g_favorites.end());
-                    else if (g_favorites.size() < kMaxListEntries) g_favorites.push_back(item.ref);
-                    settings = true;
-                    break;
+                case RowAction::Favorite: starred = item.ref; break; // after the list: the look moves to another group
                 case RowAction::Rename:
                 {
                     std::string stem = ShownName(item.ref);
@@ -1716,6 +1715,13 @@ bool LookRow()
                 default: break;
                 }
             }
+        }
+        // a star changes the look's group: applied once the list is drawn, or the look would be drawn twice (one ID, two rows)
+        if (!starred.empty())
+        {
+            if (IsFavorite(starred)) g_favorites.erase(std::remove(g_favorites.begin(), g_favorites.end(), starred), g_favorites.end());
+            else if (g_favorites.size() < kMaxListEntries) g_favorites.push_back(starred);
+            settings = true;
         }
         if (!shown) { ImGui::Spacing(); ImGui::TextDisabled("%s", I18n::Tr(g_list.empty() ? "No looks yet" : "No look matches")); }
         ImGui::Spacing();
@@ -1922,6 +1928,7 @@ bool ParamRow(const LooksParam& pd, float* v, const float* ini)
     {
         bool on = v[0] != 0.0f;
         ApexUi::SetNextRowUntranslated();
+        ApexUi::SetNextRowMinHeight(ImGui::GetFrameHeight()); // as tall as the slider and select rows around it
         if (ApexUi::SwitchRow(pd.label, &on, desc, ApexUi::BoolDefault(ini[0] != 0.0f))) { v[0] = on ? 1.0f : 0.0f; changed = true; }
         break;
     }
@@ -1932,18 +1939,11 @@ bool ParamRow(const LooksParam& pd, float* v, const float* ini)
         int current = (int)std::lround(v[0]);
         if (current < 0 || current >= n) current = -1;
         const int def = std::clamp((int)std::lround(ini[0]), 0, n - 1);
-        // segmented for a few short choices (a vertical list when the row is narrow), else a dropdown
-        float natural = 0.0f;
-        for (const char* s : items) natural += ImGui::CalcTextSize(I18n::Tr(s)).x + 2.0f * ImGui::GetStyle().FramePadding.x;
+        // always a dropdown: the author's choices are often long or many, and a row of tabs inside the panel reads heavy
         ApexUi::SetNextRowUntranslated();
-        if (n <= 4 && natural <= 280.0f * u)
-            changed = ApexUi::SegmentedRow(pd.label, desc, "##Choice", &current, items.data(), n, nullptr, nullptr, def);
-        else
-        {
-            if (current < 0) current = def;
-            const bool stacked = ImGui::GetContentRegionAvail().x < 360.0f * u; // the list under its label
-            changed = ApexUi::SelectRow(pd.label, desc, "##Choice", &current, items.data(), n, 220.0f, def, stacked);
-        }
+        if (current < 0) current = def;
+        const bool stacked = ImGui::GetContentRegionAvail().x < 360.0f * u; // the list under its label
+        changed = ApexUi::SelectRow(pd.label, desc, "##Choice", &current, items.data(), n, 220.0f, def, stacked);
         if (changed && current >= 0) v[0] = (float)current;
         break;
     }
@@ -2030,6 +2030,9 @@ bool DefineField(const char* name, const char* desc, std::string& value, const s
     return commit;
 }
 
+// Per lower-case .fx name, the quality settings edited here that it last compiled and ran with
+std::map<std::string, std::map<std::string, std::string>> g_goodDefs;
+
 // One file's quality settings (the definitions its .fx tests), under Advanced: 0/1 a switch, a few integers its #if lines
 // compare segmented, anything else a field. The look's value is each row's default. Put back the look's settings and,
 // while the shader compiles with new ones, "Compiling the new settings…" end it.
@@ -2058,6 +2061,7 @@ bool DefinesUi(size_t i, const Looks::Fx::Effect& fx)
         {
             bool on = value == "1";
             ApexUi::SetNextRowUntranslated();
+            ApexUi::SetNextRowMinHeight(ImGui::GetFrameHeight()); // as tall as the dropdowns and fields around it
             if (ApexUi::SwitchRow(m.name.c_str(), &on, "0 or 1", ApexUi::BoolDefault(lookValue == "1"))) value = on ? "1" : "0";
         }
         else if (m.hi >= m.lo && m.hi - m.lo <= 7 && AsInt(value, iv) && AsInt(lookValue, il))
@@ -2066,12 +2070,13 @@ bool DefinesUi(size_t i, const Looks::Fx::Effect& fx)
             for (int x = m.lo; x <= m.hi; ++x) labels.push_back(std::to_string(x));
             std::vector<const char*> ptrs;
             for (const auto& s : labels) ptrs.push_back(s.c_str());
-            int current = iv - m.lo;
-            if (current < 0 || current >= (int)ptrs.size()) current = -1;
+            int current = std::clamp(iv - m.lo, 0, (int)ptrs.size() - 1);
             const std::string desc = I18n::Trf("{} to {}", m.lo, m.hi);
             ApexUi::SetNextRowUntranslated();
-            if (ApexUi::SegmentedRow(m.name.c_str(), desc.c_str(), "##Define", &current, ptrs.data(), (int)ptrs.size(), nullptr, nullptr,
-                                     il >= m.lo && il <= m.hi ? il - m.lo : ApexUi::kNoDefaultIndex) && current >= 0)
+            // a dropdown, as the .fx's own choices (a row of numbered tabs reads heavy in the panel)
+            const bool stacked = ImGui::GetContentRegionAvail().x < 360.0f * ApexUi::Unit();
+            if (ApexUi::SelectRow(m.name.c_str(), desc.c_str(), "##Define", &current, ptrs.data(), (int)ptrs.size(), 120.0f,
+                                  il >= m.lo && il <= m.hi ? il - m.lo : ApexUi::kNoDefaultIndex, stacked))
                 value = std::to_string(m.lo + current);
         }
         else
@@ -2098,6 +2103,11 @@ bool DefinesUi(size_t i, const Looks::Fx::Effect& fx)
         const float resetW = ApexUi::ButtonWidth(reset, false);
         const float right = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
         const bool compiling = !Looks::Fx::MacrosMatch(fx, DefinesFor(file));
+        if (!compiling) // these run: the ones a setting that breaks the file goes back to (MissingRow)
+        {
+            if (auto f = g.defs.find(key); f != g.defs.end()) g_goodDefs[key] = f->second;
+            else g_goodDefs.erase(key);
+        }
         const char* status = I18n::Tr("Compiling the new settings\xE2\x80\xA6");
         if (compiling)
         {
@@ -2210,7 +2220,22 @@ bool MissingRow(size_t i, const Looks::Packs::Batch& batch, std::vector<std::str
         desc = e.file + "  \xC2\xB7  " + (gone ? I18n::Tr(FailureText(row->failure)) : I18n::Tr("Not in your Shaders folder"));
         act = Act::AddFx;
     }
-    else desc = e.file + "  \xC2\xB7  " + I18n::Tr("Doesn't run in The Sims 3");
+    else
+    {
+        desc = e.file + "  \xC2\xB7  " + I18n::Tr("Doesn't run in The Sims 3");
+        // a quality setting edited here broke it (FXAA_HLSL_4 asks for Direct3D 10): back to the settings it last ran with
+        if (const std::string key = Lower(used); g.defs.count(key))
+        {
+            if (auto good = g_goodDefs.find(key); good != g_goodDefs.end() && !good->second.empty()) g.defs[key] = good->second;
+            else g.defs.erase(key);
+            PushDefines();
+            LOG_INFO("[Looks] " + used + " does not compile with the edited quality settings: put back the last ones that ran");
+            g_fxMessage = I18n::Trf("{} doesn't run with that setting in The Sims 3, so it went back to the last one that worked", e.technique);
+            g_fxMessageError = true;
+            g_fxMessagePacks = false;
+            changed = true;
+        }
+    }
     const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
     const char* download = I18n::Tr("Download");
     const char* addFx = I18n::Tr("Add .fx files\xE2\x80\xA6");

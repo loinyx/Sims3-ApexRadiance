@@ -2861,6 +2861,7 @@ const I18n::Pair kPairs[] = {
     {"No looks yet", "아직 룩이 없어요"},
     {"No look matches", "일치하는 룩이 없어요"},
     {"Open the Looks folder", "Looks 폴더 열기"},
+    {"{} doesn't run with that setting in The Sims 3, so it went back to the last one that worked", "{}은(는) 이 설정으로 The Sims 3에서 작동하지 않아 마지막으로 작동한 설정으로 되돌렸습니다"},
     {"{} and {} removed", "{}, {}을(를) 제거했습니다"},
     {"{} shaders removed", "셰이더 {}개를 제거했습니다"},
     {"{} deleted", "{}을(를) 삭제했습니다"},

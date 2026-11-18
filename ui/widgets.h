@@ -54,6 +54,8 @@ void SetNextRowUntranslated();
 void SetNextRowWarning();
 // The next BeginControlRow's leading icon in another colour than the accent (a muted drag grip)
 void SetNextRowIconColor(unsigned rgb);
+// The next SwitchRow at least this tall (pixels): a switch among slider rows keeps their rhythm (a shader's values)
+void SetNextRowMinHeight(float px);
 inline constexpr float kRowIconBox = 22.0f; // the leading icon's box of a control row (units)
 
 // ---- search filter (the menu's search results) ----

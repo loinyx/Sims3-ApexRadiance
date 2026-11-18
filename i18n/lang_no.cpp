@@ -2861,6 +2861,7 @@ const I18n::Pair kPairs[] = {
     {"No looks yet", "Ingen looks ennå"},
     {"No look matches", "Ingen look passer"},
     {"Open the Looks folder", "Åpne mappen Looks"},
+    {"{} doesn't run with that setting in The Sims 3, so it went back to the last one that worked", "{} kjører ikke med den innstillingen i The Sims 3, så den siste som virket er satt tilbake"},
     {"{} and {} removed", "{} og {} fjernet"},
     {"{} shaders removed", "{} shadere fjernet"},
     {"{} deleted", "{} slettet"},

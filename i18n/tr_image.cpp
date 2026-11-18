@@ -795,6 +795,7 @@ const I18n::Entry kEntries[] = {
     {"No looks yet", "Nenhum visual ainda", "Aún no hay estilos", "Aucun rendu pour l'instant"},
     {"No look matches", "Nenhum visual encontrado", "Ningún estilo coincide", "Aucun rendu ne correspond"},
     {"Open the Looks folder", "Abrir a pasta Looks", "Abrir la carpeta Looks", "Ouvrir le dossier Looks"},
+    {"{} doesn't run with that setting in The Sims 3, so it went back to the last one that worked", "{} não roda com essa configuração no The Sims 3, então voltou para a última que funcionou", "{} no funciona con ese ajuste en The Sims 3, así que volvió al último que funcionaba", "{} ne fonctionne pas avec ce réglage dans Les Sims 3 : il revient au dernier qui marchait"},
     {"{} and {} removed", "{} e {} removidos", "{} y {} quitados", "{} et {} retirés"},
     {"{} shaders removed", "{} shaders removidos", "{} shaders quitados", "{} shaders retirés"},
     {"{} deleted", "{} excluído", "{} eliminado", "{} supprimé"},
