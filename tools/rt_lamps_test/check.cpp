@@ -1027,7 +1027,7 @@ void PenumbraCheck() {
     Check(stacked.n > 0 && stacked.leaks <= stacked.n / 200, std::format("a wall behind the door: {} of {} texels leak", stacked.leaks, stacked.n));
     // (the walk that went round the jamb stopped testing: 0.0099, the penumbra's strip through the second wall to the floor behind it)
     Check(mean(stacked) < 0.0054, std::format("a wall behind the door: mean share error {:.4f}, the disc search's was 0.0057", mean(stacked)));
-    // A low lamp 4.8 m off a solid wall (a porch lamp outside, 17/11): the floor just behind the wall, row by row. At a grazing angle
+    // A low lamp 4.8 m off a solid wall (a porch lamp outside): the floor just behind the wall, row by row. At a grazing angle
     // the floor's plane along a shadow texel's centre lay past the wall, and the floor up to 13 cm behind it took the lamp. Rows
     // closer than the bias (3 cm, under the wall's own thickness) are not checked
     Scene low = WallScene("solid wall, low lamp 4.8 m off it", false, false, 5.2f, 0.7f);
@@ -3421,6 +3421,41 @@ bool PhysKeptCheck() {
                     moved += cpu != without.Occlude(hn, lamp, worldOf(tx[i]), prm.edgeR, prm.radius);
                 }
             Check(ok && worst <= 0.02f && (y < 3.0f ? moved > 0 : moved == 0), "physical: a table's legs on the GPU are more than 0.02 from BlockerTable::Occlude, or a lamp past the gate sees them");
+        }
+        // (plants, PuffT) the same record as a plant: three balls of leaves in place of its blockers. T3dPS against BlockerTable::Occlude
+        // for a floor lamp and a ceiling lamp; the floor under the balls is shaded, and differently from the record's own blockers
+        {
+            RoomLightTests::Room plant = roomA;
+            RoomLightTests::Record& pot = plant.rec[301];
+            pot.posts.clear();
+            pot.puffs = {{{pot.c.x, 0.25f, pot.c.z}, 0.2f, 2.0f}, {{pot.c.x + 0.25f, 0.8f, pot.c.z}, 0.22f, 2.5f}, {{pot.c.x - 0.2f, 0.9f, pot.c.z + 0.15f}, 0.18f, 1.2f}};
+            RtLampGpu::BlockerTable leaves;
+            const int hp = leaves.Append(plant);
+            std::vector<float> prow(rooms.size() * RtLampGpu::Engine::kTableCols * 4, 0.0f);
+            for (size_t r = 0; r < rooms.size(); r++) {
+                prow[r * RtLampGpu::Engine::kTableCols * 4] = 1.0f, prow[r * RtLampGpu::Engine::kTableCols * 4 + 1] = rooms[r].lamp[0][1];
+                prow[(r * RtLampGpu::Engine::kTableCols + 16) * 4] = static_cast<float>(hp);
+            }
+            for (const float y : {1.4f, 2.6f}) {
+                const float at[3] = {5.6f + kWorld[0], y, 8.0f + kWorld[2]};
+                g_dev->BeginScene();
+                eng.Begin(g_dev);
+                ok = ok && eng.SetBlockers(g_dev, leaves, err) && eng.SetTable(g_dev, prow.data(), static_cast<int>(rooms.size()), err) && eng.AccumulateRlg(g_dev, dm, &lamps[0], &tiles[0], 1, pd, true, err, true, reinterpret_cast<const float (*)[3]>(at));
+                eng.End(g_dev);
+                g_dev->EndScene();
+                ok = ok && eng.ReadT3(g_dev, w, h, t3);
+                float worst = 0.0f, darkest = 1.0f;
+                int moved = 0;
+                for (uint32_t i = 0; ok && i < count; i++)
+                    if (tx[i].tested) {
+                        const RoomLightTests::V lamp{at[0], at[1], at[2]};
+                        const float cpu = leaves.Occlude(hp, lamp, worldOf(tx[i]), prm.edgeR, prm.radius);
+                        worst = std::max(worst, std::fabs(t3[i * 4] - cpu));
+                        moved += cpu != without.Occlude(hn, lamp, worldOf(tx[i]), prm.edgeR, prm.radius);
+                        darkest = std::min(darkest, cpu);
+                    }
+                Check(ok && worst <= 0.02f && moved > 0 && darkest < 0.5f, "physical: a plant's leaves on the GPU are more than 0.02 from BlockerTable::Occlude, or shade nothing");
+            }
         }
         // (sphere_cut_fade) the same table with its bands' fade: T3dPS against BlockerTable::Occlude, the floor moved from the game's step
         {

@@ -418,6 +418,21 @@ lamp's position, not on its colour or intensity.
    (`PostT`). A lamp up to `kPostHighM` (1.5 m) over a leg's top casts the full streak. Above that the streak fades on a smoothstep,
    gone at `kPostGateM` (3.0 m), and its floor edge widens by up to `kPostHighW` (0.125 m), inside `kPostReach`: under a ceiling lamp
    a leg adds a faint soft foot to the furniture's soft shadow, never a hard streak. Custom content keeps the top alone.
+35. Plant leaves (physical model): a potted plant's records hold two upright sheets crossed in an X, so a lamp past it cast a
+   wedge with straight edges and no leaves. `ObjectLegs` also knows 87 of the game's models (table
+   [`plant_puffs_data.inc`](../../../features/plant_puffs_data.inc), baked by `tools/plant_puffs_table` from each model's shadow
+   LOD): those whose blockers are exactly those two crossed sheets (plants, and a few other objects of that build such as a
+   hamper or a shower: their own shape shades better than the wedge), and those named as plants (a table or a column that
+   holds one is left out). The mesh's pieces at least 5 cm thick (3 x volume / area: a pot, a box, a table) are clustered
+   apart from the leaves and block like the game's blockers (optical depth 6, at most 3 balls); the leaves make the rest of
+   at most 10 balls, each with a radius over its samples and an optical depth from the leaf area it holds (`DENSITY` 0.6, at
+   most 2.5). The balls (`Record::puffs`, blocker table kind 3) stand in for the record's upright blockers (a level one, a
+   pot's top, stays) and shade as `exp(-tau x (1 - (d / r)^2)^1.5)` at the line's distance d from a ball's centre, the ball
+   widened by the lamp ball seen past it (`PuffT`): the shadow takes the object's shape, soft where the lamp is large. Custom
+   content (`Mods\**\*.package`, `DCCache\*.dbc`) is baked by the same steps when the game starts, on a background thread
+   (`PlantScan`, [`plant_scan.cpp`](../../../features/plant_scan.cpp); about 1 s for 106 files); every object with a LITE is
+   kept, so a model found after it attached still gets its balls at the room's next fill. No leaf texture inside a ball: a 3D
+   value noise went past ps_3_0's 32 temporaries in the lamp shader, and crossed waves drew a grid.
 34. Stairs in the shadow tiles (physical model): the occluders hold walls, roofs and slabs only. `StairSet`
    ([`stair_set.h`](../../../features/stair_set.h)) keeps, from the opaque instanced draws the mesh collector reads, the triangles
    over or beside a floor hole, between the hole's story and the one below, at most 4,096 a lot, in lot space until the lot's
@@ -430,7 +445,7 @@ whole drag plus about 0.48 s. The game's move writes each blocker's fields in pl
 At most every 100 ms after an object move or occluder mark, `LiveTests` in `outdoor_delta.cpp` compares those blockers with the kept records.
 A room that already has a moved record is read in every frame an object moved (`RoomLightTests::LiveDue`), once a frame, in the round that
 reads the lamps. At 100 ms a table dragged with its lamp stood up to 0.9 m behind the lamp, its floor shadow swung by 2.3 times that, and its
-fill went off whenever the lamp left the old top. If a record changed, the room gets a new table with the record's sphere made again (`RoomLightTests::Bound`) and its legs placed again.
+fill went off whenever the lamp left the old top. If a record changed, the room gets a new table with the record's sphere made again (`RoomLightTests::Bound`) and its legs and leaves placed again.
 The room's maps are then relit, as for a step of a lamp drag. The room's next solve replaces the table. Switch: `live_object_tables`.
 
 - A record read live has no shape in the table, so the carry of a table dragged with its lamp leaves it alone and nothing moves twice.
@@ -565,6 +580,9 @@ No failure stops the GPU's light for good. Each case below used to last until a 
 
 ## Limitations
 
+- A plant's leaf balls have no leaf texture, and their density is an estimate the maintainer judged in game; models without a
+  shadow LOD keep the crossed sheets, and custom content installed while the game runs is baked at the next start. Objects
+  other than plants with the crossed sheets (a hamper, showers, a rocket) take their own shape too, unchecked in game.
 - Table legs cast nothing from a lamp 3 m or more over their tops, and only a faint foot past 1.5 m; both heights and the streak's
   strength are unverified in game.
 - Other builds: the 3D blockers' vtables and the test constants (`room_light_tests.h`) are GameAddr ids (`BlockerQuadVt`, `BlockerDiscVt`, `TestZero`..`TestWallY`, [game versions](../../engine/game-versions.md#gpu-room-lamps-addresses)). The capture runs once all of them are found; otherwise `[GpuRoomLamps] Rooms keep the game's solves: Not available on <version>: missing ...` is logged and the game solves the rooms. A game blocker's vtable is renamed to the Steam value when it is read, so the copies, dumps and replays keep Steam's names. UNVERIFIED on EA 1.69.47: the room and probe field offsets the physical path reads are assumed to be Steam's.

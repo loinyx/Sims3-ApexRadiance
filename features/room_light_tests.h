@@ -55,6 +55,7 @@ inline constexpr uint32_t kConstAt[] = {0x00F98964, 0x00F98A58, 0x00FAA210, 0x00
                                         0x0106D6CC, 0x0107A538, 0x011D0240, 0x00F9A5AC, 0x00FF307C, 0x01158A50};
 inline constexpr uint32_t kQuadVt = 0x00FF3118, kDiscVt = 0x00FF3C24; // the blockers the 3D test knows
 inline constexpr uint32_t kPostVt = 2; // (no game vtable) a table's leg of the GPU's copy: RtLampGpu::BlockerTable
+inline constexpr uint32_t kPuffVt = 3; // (no game vtable) a ball of a plant's leaves of the GPU's copy: RtLampGpu::BlockerTable
 
 struct Blocker {
     uint32_t vt;
@@ -65,6 +66,12 @@ struct Blocker {
 struct Post {
     V a, b;
     float r;
+};
+// A ball of a plant's leaves, in world space (features/object_legs.h PlacePuffs): its centre, radius and the optical depth through
+// its centre. Only the GPU's blocker table reads it
+struct Puff {
+    V c;
+    float r, tau;
 };
 struct Record {
     V c;
@@ -78,11 +85,12 @@ struct Record {
     // with it, its blockers tested on the segment moved back (occlude; RtLampGpu::BlockerTable::Offset)
     float off[2] = {0.0f, 0.0f};
     std::vector<Post> posts; // its object's legs (RtLampGpu::BlockerTable::Append); the game's tests here ignore them
+    std::vector<Puff> puffs; // a plant's leaves (RtLampGpu::BlockerTable::Append puts them in place of its blockers); the game's tests ignore them
     std::vector<uintptr_t> at; // its blockers' addresses in the game, as read: the object's move writes them in place (OutdoorDelta's live tables)
 };
 // A record's sphere as the gather makes it (0x0069E455..0x0069E4DB): the box of its blockers' bounds, its middle and half diagonal. A
 // rectangle's bound is its first plane's corners (0x0069B1D0), a disc's its first circle along x and z (not read in the bytes: all 252
-// records of the 19-37-16 scene of 05/11, 24 with discs, come out within 1 cm of the game's centre and radius)
+// records of one captured scene, 24 with discs, come out within 1 cm of the game's centre and radius)
 inline void Bound(Record& rc) {
     float lo[3] = {1e30f, 1e30f, 1e30f}, hi[3] = {-1e30f, -1e30f, -1e30f};
     const auto add = [&](V p) {
@@ -160,12 +168,12 @@ template <typename Read> uint64_t LiveMoves(const std::vector<Record>& kept, Rea
 }
 // When a kept room's blockers are read again: a read of all rooms is paced (gen, 100 ms), a room with a record off its solve's place follows every
 // frame an object moved (step). At 100 ms a table dragged with its lamp stood up to 0.9 m behind the lamp, its floor shadow swung by 2.3 times
-// that (the lamp's height over the floor against over the top), and its fill flipped off past the top's edge (23-38-26 recording of 05/11)
+// that (the lamp's height over the floor against over the top), and its fill flipped off past the top's edge (one recording)
 inline bool LiveDue(uint32_t gen, uint32_t readGen, uint32_t step, uint32_t readStep, uint64_t key) { return gen != readGen || (key && step != readStep); }
 // A lamp at `lamp` standing on the blocker: a level top (a disc or rectangle facing up or down: a table's, not a sofa's back), the
 // lamp over it inside its edge and at most kOnTopM above it (a ceiling lamp or sconce over the furniture stands higher). Not the
 // record's sphere: the sofa's (r 1.69 m, three upright quads) held the table lamp 1.2 m off it, and its shadow was carried along
-// (03/11 13:56 scene). UNVERIFIED: kOnTopM against taller table lamps (this one's head is 0.57 m over its top) and low chandeliers
+// (one captured scene). UNVERIFIED: kOnTopM against taller table lamps (this one's head is 0.57 m over its top) and low chandeliers
 constexpr float kOnTopM = 1.0f;
 // (a drawn copy only: RtLampGpu::DrawnBlockers) +0xF0 x of a seat's cap. A one-plane rectangle never reads it, BlockerAt gives it back
 constexpr float kCapMark = -9999.5f;

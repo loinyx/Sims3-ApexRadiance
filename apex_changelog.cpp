@@ -6,6 +6,15 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k406Improved[] = {
+    "Night Lights: potted plants shade lamp light with their leaves, custom content too",
+    "Night Lights: pots and planters keep a solid shadow under the leaves",
+    nullptr};
+
+constexpr const char* k406Highlights[] = {
+    "Leaf-shaped plant shadows",
+    nullptr};
+
 constexpr const char* k405Added[] = {
     "Shaders: New look starts a look from scratch or copies the one you use",
     "Shaders: Get more packs lists ReShade's packs to download, with a search",
@@ -719,6 +728,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"4.0.6", "2026-11-18", nullptr, k406Improved, nullptr, "Potted plants cast soft, leaf-shaped shadows under your lamps", k406Highlights},
     {"4.0.5", "2026-11-18", k405Added, k405Improved, k405Fixed,
      "A simpler Shaders page: build a look and add its shaders without leaving it", k405Highlights},
     {"4.0.4", "2026-11-18", k404Added, k404Improved, k404Fixed,
