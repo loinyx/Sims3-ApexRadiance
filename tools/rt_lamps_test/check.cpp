@@ -1027,7 +1027,7 @@ void PenumbraCheck() {
     Check(stacked.n > 0 && stacked.leaks <= stacked.n / 200, std::format("a wall behind the door: {} of {} texels leak", stacked.leaks, stacked.n));
     // (the walk that went round the jamb stopped testing: 0.0099, the penumbra's strip through the second wall to the floor behind it)
     Check(mean(stacked) < 0.0054, std::format("a wall behind the door: mean share error {:.4f}, the disc search's was 0.0057", mean(stacked)));
-    // A low lamp 4.8 m off a solid wall (a porch lamp outside, 17/11): the floor just behind the wall, row by row. At a grazing angle
+    // A low lamp 4.8 m off a solid wall (a porch lamp outside): the floor just behind the wall, row by row. At a grazing angle
     // the floor's plane along a shadow texel's centre lay past the wall, and the floor up to 13 cm behind it took the lamp. Rows
     // closer than the bias (3 cm, under the wall's own thickness) are not checked
     Scene low = WallScene("solid wall, low lamp 4.8 m off it", false, false, 5.2f, 0.7f);
