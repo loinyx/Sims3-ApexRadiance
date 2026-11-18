@@ -34,25 +34,25 @@ extern bool g_fixtureTwin;
 #include "raster.inc"
 
 namespace {
-struct State { const char* name; int page; int tab; bool compiling, edited, offer; int batch; int video, options; bool gameAa; bool openAll; bool twin = false; bool picks = false; int confirm = 0; };
-// page 0 Shaders (tab 0 Look, 1 Packs, 2 Library), 1 Capture (tab 0 Screenshots, 1 Video)
+struct State { const char* name; int page; int tab; bool compiling, edited, offer; int batch; int video, options; bool gameAa; bool openAll; bool twin = false; int confirm = 0; };
+// page 0 Shaders (view 0 the page, 1 the look's shaders, 2 packs and files), 1 Capture (tab 0 Screenshots, 1 Video)
 const State kStates[] = {
-    { "look", 0, 0, false, false, true, 0, 0, 0, false, false },
-    { "look-open-compiling", 0, 0, true, false, false, 1, 0, 0, false, true },
-    { "look-open-edited", 0, 0, false, true, true, 0, 0, 0, false, true },
-    { "look-doubled-lut", 0, 0, false, false, false, 0, 0, 0, false, false, true },
-    { "packs-downloading", 0, 1, false, false, false, 1, 0, 0, false, false },
-    { "packs-list", 0, 1, false, false, false, 0, 0, 0, false, true },
-    { "packs-finished", 0, 1, false, false, false, 2, 0, 0, false, false },
-    { "library", 0, 2, false, false, false, 0, 0, 0, false, true },
+    { "home", 0, 0, false, false, true, 0, 0, 0, false, false },
+    { "editor-open-compiling", 0, 1, true, false, false, 1, 0, 0, false, true },
+    { "editor-open-edited", 0, 1, false, true, true, 0, 0, 0, false, true },
+    { "home-doubled-lut", 0, 0, false, false, false, 0, 0, 0, false, false, true },
+    { "home-downloading", 0, 0, false, false, false, 1, 0, 0, false, false },
+    { "editor-open", 0, 1, false, false, false, 0, 0, 0, false, true },
+    { "editor-finished", 0, 1, false, false, false, 2, 0, 0, false, false },
+    { "files", 0, 2, false, false, false, 0, 0, 0, false, true },
     { "shots", 1, 0, false, false, false, 0, 0, 0, false, false },
     { "shots-advanced", 1, 0, false, false, false, 0, 0, 1, false, true },
     { "video-idle-advanced", 1, 1, false, false, false, 0, 0, 1, true, true },
     { "video-recording", 1, 1, false, false, false, 0, 1, 0, false, true },
     { "video-saving", 1, 1, false, false, false, 0, 2, 1, false, false },
-    { "packs-choosing", 0, 1, false, false, false, 0, 0, 0, false, false, false, true },
-    { "library-remove-pack", 0, 2, false, false, false, 0, 0, 0, false, false, false, false, 1 },
-    { "library-remove-file", 0, 2, false, false, false, 0, 0, 0, false, false, false, false, 2 },
+    { "editor-doubled", 0, 1, false, false, false, 0, 0, 0, false, false, true },
+    { "files-remove-pack", 0, 2, false, false, false, 0, 0, 0, false, false, false, 1 },
+    { "files-remove-file", 0, 2, false, false, false, 0, 0, 0, false, false, false, 2 },
 };
 
 struct Run { ImRect r; std::string text; };
@@ -313,7 +313,7 @@ int main(int argc, char** argv)
                     VioletTheme::UpdateFonts(io); // the language's script merged, as the menu does between frames
                     ImGui::GetStyle().FontScaleMain = scale;
                     Fixture::LooksState(s.compiling, s.edited, s.offer, s.batch, s.twin);
-                    Fixture::PacksState(s.picks, s.confirm);
+                    Fixture::PacksState(s.confirm);
                     g_fixtureTwin = s.twin;
                     Fixture::CaptureState(s.video, s.options);
                     g_menuGameAaOn = s.gameAa;
@@ -348,7 +348,7 @@ int main(int argc, char** argv)
                             const float left = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMin().x;
                             const float right = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
                             const float end = ImGui::GetCursorScreenPos().y;
-                            Looks::PacksBar(left, right, end, s.tab == 1);
+                            Looks::PacksBar(left, right, end);
                         }
                         if (g.StyleVarStack.Size != vars || g.ColorStack.Size != cols || g.CurrentWindow->IDStack.Size != ids)
                         {
@@ -385,7 +385,7 @@ int main(int argc, char** argv)
                         {
                             const int before = g_newFindings;
                             CheckLayout(std::string(s.page ? "capture " : "shaders ") + s.name, where);
-                            const bool preview = g_newFindings != before || ((lang == 0 || lang == 1) && (st == 1 || st == 3 || st == 4 || st == 7 || st == 9 || st >= 13) && (scale == 1.0f || (lang == 1 && units == 400)));
+                            const bool preview = g_newFindings != before || ((lang == 0 || lang == 1) && (st == 0 || st == 1 || st == 3 || st == 4 || st == 7 || st == 9 || st >= 13) && (scale == 1.0f || (lang == 1 && units == 400)));
                             if (preview)
                             {
                                 const auto file = out / (std::string(kCodes[lang]) + "-" + std::to_string(units) + "-" + std::to_string((int)(scale * 100)) + "-" + s.name + ".ppm");

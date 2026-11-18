@@ -99,8 +99,7 @@ enum SettingsTab : int { SettingsMenu, SettingsShortcuts, SettingsProfiles, Sett
 int g_page = PageOverview;
 int g_lightingTab = LightingLamps;
 int g_colorTab = Picture::TabOverview;
-enum ShadersTab : int { ShadersLook, ShadersPacks, ShadersLibrary };
-int g_shadersTab = ShadersLook;
+int g_shadersTab = Looks::kViewHome; // the Shaders page's view (Looks::View)
 int g_settingsTab = SettingsMenu;
 enum CaptureTab : int { CaptureShots, CaptureVideo };
 int g_captureTab = CaptureShots;
@@ -636,7 +635,7 @@ const OverviewTile* OverviewTiles(int& count) {
         {"Lighting", IconId::MoonStar, "Lighting", "Lamps light up your neighborhood at night", PageLighting, &g_lightingTab, LightingLamps, LightsOn, LightsSet, LightsSwitchable, LightsDetail, true},
         {"WaterSnow", IconId::WavesHorizontal, "Water & Snow", "Ponds mirror their shore", PageWaterSnow, nullptr, 0, ShoreOn, SetShore, WaterSwitchable, WaterDetail, true},
         {"Color", IconId::Palette, "Color", "Adjustments, filters and LUTs", PageColor, nullptr, 0, ColorOn, ColorSet, AlwaysSwitchable, ColorDetail, true},
-        {"Shaders", IconId::SwatchBook, "Shaders", "Off", PageShaders, &g_shadersTab, ShadersLook, ShadersOn, ShadersSet, ShadersSwitchable, ShadersLookDetail, true},
+        {"Shaders", IconId::SwatchBook, "Shaders", "Off", PageShaders, &g_shadersTab, Looks::kViewHome, ShadersOn, ShadersSet, ShadersSwitchable, ShadersLookDetail, true},
         {"Banding", IconId::Blend, "Banding Fix", "No color steps in light and shadows", PageBanding, nullptr, 0, BandingOn, BandingSet, BandingSwitchable, BandingDetail, true},
         {"Occlusion", IconId::Contrast, "Ambient Occlusion", "Soft shade where things meet", PageAmbientOcclusion, nullptr, 0, OcclusionOn, OcclusionSet, OcclusionSwitchable, OcclusionDetail, true},
         {"Blur", IconId::Aperture, "Depth Blur", "Softly blurs the distant background", PageDepthBlur, nullptr, 0, BlurOn, BlurSet, BlurSwitchable, BlurDetail, true},
@@ -1270,10 +1269,10 @@ void LookLutRow() {
     }
 }
 
-// Tab Look: the look card (titled with the look; hold the eye to see the game without it; an amber row while a LUT is
-// also on), then the import note and the shaders of the look. The area's switch is beside the page title; in the search
-// results the card header is that switch, as "Shaders".
-void ShadersLookContent() {
+// The page: the look card (titled with the look; hold the eye to see the game without it; an amber row while a LUT is
+// also on; the way to its shaders), then Looks and the quiet line of packs and files. The area's switch is beside the
+// page title; in the search results the card header is that switch, as "Shaders", and the look's shaders follow.
+void ShadersHomeContent() {
     ApexPatch* patch = Find(Looks::kPatchName);
     if (!patch) return;
     const bool search = ApexUi::FilterActive();
@@ -1302,14 +1301,42 @@ void ShadersLookContent() {
     ImGui::PopID();
     if (extra.held) Looks::HoldBypass();
     Looks::SetTwinCheck(LookTwin); // a shader doubling an Apex effect: an amber line on its row in the list
-    if (patch->IsEnabled() || search) Looks::ShadersCard();
+    if (search) {
+        if (patch->IsEnabled()) Looks::ShadersCard();
+        return;
+    }
+    ApexUi::Gap(ApexUi::kSpace2);
+    // a look chosen while Shaders is off turns it on
+    if (Looks::LooksCard() && !patch->IsEnabled() && Switchable(patch)) SetPatch(patch, true);
+    ApexUi::Gap(ApexUi::kSpace1);
+    if (Looks::FilesLine()) g_shadersTab = Looks::kViewFiles;
 }
 
-// Tab Library: Installed packs and Your shaders (where shaders come from)
-void ShadersLibraryContent() { Looks::LibraryCards(); }
+// The look's shaders (from the look card's "Shaders in this look")
+void ShadersEditorContent() {
+    Looks::SetTwinCheck(LookTwin);
+    Looks::ShadersCard();
+}
 
-// Tab Packs: ReShade's packs to pick; the download bar floats over the page's end (MainWindow)
-void ShadersPacksContent() { Looks::PacksTab(); }
+// Packs and files: Installed packs and Your shaders (from the page's quiet line)
+void ShadersFilesContent() { Looks::LibraryCards(); }
+
+// A quiet way back above a page's sub-view: a chevron and the label; true when clicked
+bool BackLink(const char* label) {
+    const float u = ApexUi::Unit(), icon = ApexUi::kIconSmall * u;
+    const char* text = I18n::Tr(label);
+    const ImVec2 ts = ImGui::CalcTextSize(text), p = ImGui::GetCursorScreenPos();
+    const ImVec2 size(icon + ApexUi::kSpace1 * u + ts.x, std::max(ts.y, icon));
+    const bool clicked = ImGui::InvisibleButton("##Back", size, ImGuiButtonFlags_EnableNav);
+    const bool hovered = ImGui::IsItemHovered();
+    if (hovered) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    ImGui::RenderNavCursor(ImGui::GetCurrentContext()->LastItemData.Rect, ImGui::GetItemID());
+    const ImU32 col = ImGui::GetColorU32(VioletTheme::Col(hovered ? VioletTheme::kAccentLight : VioletTheme::kTextMuted));
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ApexUi::DrawIcon(dl, IconId::ChevronLeft, ImVec2(p.x, p.y + (size.y - icon) * 0.5f), icon, col);
+    dl->AddText(ImVec2(p.x + icon + ApexUi::kSpace1 * u, p.y + (size.y - ts.y) * 0.5f), col, text);
+    return clicked;
+}
 
 // A look's shader that does what an Apex effect also does (MXAO and Apex's Ambient Occlusion): twice the shade or blur and
 // twice the cost. Its row in the look's list gets the amber line and the button that turns the Apex effect off
@@ -1358,12 +1385,15 @@ void ShadersPage() {
         ApexUi::Tooltip(Description(patch));
         ImGui::SetCursorPosY(after);
     }
-    if (Looks::WantsPacks()) g_shadersTab = ShadersPacks; // Get shader packs, Get <pack>: the list is on Packs
-    static const char* const kTabs[] = {"Look", "Packs", "Library"};
-    ApexUi::TabBar("##ShadersTabs", &g_shadersTab, kTabs, IM_COUNTOF(kTabs));
-    if (g_shadersTab == ShadersLibrary) ShadersLibraryContent();
-    else if (g_shadersTab == ShadersPacks) ShadersPacksContent();
-    else ShadersLookContent();
+    if (const int view = Looks::TakeView(); view >= 0) g_shadersTab = view; // a row or button of the page asked for it
+    if (g_shadersTab != Looks::kViewHome) {
+        ApexUi::Gap(ApexUi::kSpace1);
+        if (BackLink("Back")) g_shadersTab = Looks::kViewHome;
+        ApexUi::Gap(ApexUi::kSpace2);
+    }
+    if (g_shadersTab == Looks::kViewEditor) ShadersEditorContent();
+    else if (g_shadersTab == Looks::kViewFiles) ShadersFilesContent();
+    else ShadersHomeContent();
 }
 
 // Depth Blur and Edge Smoothing both need the game's own (multisampled) Edge Smoothing off
@@ -3636,9 +3666,8 @@ const SearchPart* SearchParts(int& count) {
         {"Color", "Tones", PageColor, &g_colorTab, Picture::TabTones, [] { PictureRows(Picture::TabTones); }},
         {"Color", "Color", PageColor, &g_colorTab, Picture::TabColor, [] { PictureRows(Picture::TabColor); }},
         {"Color", "Detail", PageColor, &g_colorTab, Picture::TabDetail, [] { PictureRows(Picture::TabDetail); }},
-        {"Shaders", "Look", PageShaders, &g_shadersTab, ShadersLook, ShadersLookContent},
-        {"Shaders", "Packs", PageShaders, &g_shadersTab, ShadersPacks, ShadersPacksContent},
-        {"Shaders", "Library", PageShaders, &g_shadersTab, ShadersLibrary, ShadersLibraryContent},
+        {"Shaders", nullptr, PageShaders, &g_shadersTab, Looks::kViewHome, ShadersHomeContent},
+        {"Shaders", "Packs and files", PageShaders, &g_shadersTab, Looks::kViewFiles, ShadersFilesContent},
         {"Ambient Occlusion", nullptr, PageAmbientOcclusion, nullptr, 0, AmbientOcclusionContent},
         {"Depth Blur", nullptr, PageDepthBlur, nullptr, 0, DepthBlurContent},
         {"Edge Smoothing", nullptr, PageEdgeSmoothing, nullptr, 0, AntiAliasingContent},
@@ -4872,12 +4901,11 @@ void MainWindow() {
         // Leave the cursor at the window's end so ImGui does not grow the window
         ImGui::SetCursorScreenPos(ImVec2(wp.x, wp.y + ws.y - 1.0f));
         ImGui::Dummy(ImVec2(0.0f, 0.0f));
-        // The download bar floats over the content just above the footer (on the Packs tab, or while a download runs or
-        // has just finished); the undo toast goes above it
-        const bool packsTab = !g_search[0] && !WelcomeActive() && g_page == PageShaders && g_shadersTab == ShadersPacks;
+        // The download bar floats over the content just above the footer (while a download runs or has just finished);
+        // the undo toast goes above it
         const float barLeft = wp.x + sidebarW + 1.0f + ApexUi::kSpace4 * u;
         const float barRight = wp.x + ws.x - ImGui::GetStyle().ScrollbarSize - ApexUi::kSpace4 * u;
-        const float barTop = Looks::PacksBar(barLeft, barRight, footerTop, packsTab);
+        const float barTop = Looks::PacksBar(barLeft, barRight, footerTop);
         DrawToast(barTop, barTop < footerTop ? barRight : 0.0f);
         DeveloperConfirmation();
         ImGui::EndDisabled();

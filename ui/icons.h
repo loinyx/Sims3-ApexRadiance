@@ -143,6 +143,8 @@ enum class IconId : int {
     Library, // library
     GripVertical, // grip-vertical
     Pencil, // pencil
+    LayoutGrid, // layout-grid
+    Copy, // copy
     Count,
     None = Count, // "no icon" for widgets that take an optional one
 };
