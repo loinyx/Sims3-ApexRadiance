@@ -982,7 +982,7 @@ bool ShadowCompare(const Scene& sc, int face, float radius, ShadowTally& total, 
 // half of the penumbra has to exist (a segment passing the jamb is not blocked by being behind it as the lamp's centre sees it);
 // a solid wall must not leak with the lamp 0.4 m off it; a wall the lamp's centre cannot see past the door is one depth layer
 // past what the map holds, so a thin strip may pass there (bounded here)
-Scene WallScene(const char* name, bool door, bool second, float lampZ) {
+Scene WallScene(const char* name, bool door, bool second, float lampZ, float lampY = 1.35f) {
     using namespace RtLampProxy;
     Scene sc;
     sc.name = name;
@@ -1005,7 +1005,7 @@ Scene WallScene(const char* name, bool door, bool second, float lampZ) {
     }
     sc.lot.stories.push_back(std::move(st));
     LampDef l;
-    l.pos[0] = 9.7f, l.pos[1] = 1.35f, l.pos[2] = lampZ;
+    l.pos[0] = 9.7f, l.pos[1] = lampY, l.pos[2] = lampZ;
     l.name = name;
     sc.lamps.push_back(l);
     for (const Edge& e : sc.lot.stories[0].edges) WallReceivers(sc.recv, e, 0);
@@ -1027,6 +1027,18 @@ void PenumbraCheck() {
     Check(stacked.n > 0 && stacked.leaks <= stacked.n / 200, std::format("a wall behind the door: {} of {} texels leak", stacked.leaks, stacked.n));
     // (the walk that went round the jamb stopped testing: 0.0099, the penumbra's strip through the second wall to the floor behind it)
     Check(mean(stacked) < 0.0054, std::format("a wall behind the door: mean share error {:.4f}, the disc search's was 0.0057", mean(stacked)));
+    // A low lamp 4.8 m off a solid wall (a porch lamp outside, 17/11): the floor just behind the wall, row by row. At a grazing angle
+    // the floor's plane along a shadow texel's centre lay past the wall, and the floor up to 13 cm behind it took the lamp. Rows
+    // closer than the bias (3 cm, under the wall's own thickness) are not checked
+    Scene low = WallScene("solid wall, low lamp 4.8 m off it", false, false, 5.2f, 0.7f);
+    for (float behind : {0.039f, 0.055f, 0.070f, 0.102f, 0.133f, 0.195f}) {
+        low.recv.clear();
+        for (float x = 6.0f; x < 13.0f; x += 0.03125f) low.recv.push_back(Receiver{{x, 0.0f, 10.0f + behind}, {0, 1, 0}, 1, 0});
+        ShadowTally lt;
+        ShadowCompare(low, 256, 0.15f, lt, false);
+        std::printf("  low lamp 4.8 m off a solid wall, floor %.3f m behind it: %ld texels, leaks %ld, mean share error %.4f\n", behind, lt.n, lt.leaks, mean(lt));
+        Check(lt.n > 0 && lt.leaks == 0 && mean(lt) < 0.01, std::format("a low lamp's light through a solid wall onto the floor {:.3f} m behind it: {} texels leak", behind, lt.leaks));
+    }
 }
 
 // ---------------------------------------------------------------- 3. the bake split and the blur, bit for bit
