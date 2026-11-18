@@ -89,7 +89,7 @@ the .ini) over one short description, a ⋯ menu, the switch. The drag grip show
 (while they differ) and *Remove from the look*. A removed shader leaves the list at once and stops running, with the
 undo toast "<name> removed"; removals one after another join that toast ("<a> and <b> removed", "<n> shaders removed",
 6 s, one Undo for all; `ApexUi::ReportChange`'s group). It leaves the file at the next save; until then *Add a shader*
-lists it first under "Removed from this look" with *Restore* (`RemovedRow`; only a set changes, so the list is never
+lists it first under "Removed from this look", its name over "Leaves the look when you save" and *Restore* (`RemovedRow`; only a set changes, so the list is never
 rebuilt while its rows draw). The name side opens its parameters in a rounded panel set into the card, each with the
 control its .fx asks for and the .ini's value as its default (changed dot, Reset; see
 [Parameters and quality settings](#parameters-and-quality-settings)); number fields of several components (R / G / B)
@@ -108,7 +108,7 @@ with *Download* when a pack of ReShade's list has the file (a failed download sa
 Waiting" or "<pack> · Downloading <n>%" with a spinner while it downloads; "<file>.fx · Not in your Shaders folder" with
 *Add .fx files…* for any other missing file; "Checking the file…" with a spinner while it compiles; "<file>.fx · Doesn't
 run in The Sims 3" (no action) for a file that is there but cannot run on Direct3D 9. When two packs or more are
-missing, *Download both* / *Download all* (primary) follows the list. A missing shader has the trash too. Under the
+missing, *Download both* / *Download all* (primary) follows the list. A missing shader has the ⋯ menu too (*Remove from the look*), in the same column as the other rows' (their switch and chevron's room left empty). Under the
 list, *Add a shader*, *Save as a new look…* and *Save to this look*. No modal opens on its own.
 
 **Unsaved changes.** Switches, added, removed and moved shaders, values and quality settings live in Apex's settings

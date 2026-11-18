@@ -1487,7 +1487,7 @@ enum class RowAction { None, Pick, Favorite, Rename, Delete };
 RowAction LookListRow(const Looks::LookItem& item, bool selected)
 {
     const float u = ApexUi::Unit(), fh = ImGui::GetFrameHeight();
-    const float rowH = std::max(34.0f * u, ImGui::GetTextLineHeight() + 16.0f * u);
+    const float rowH = std::max(36.0f * u, ImGui::GetTextLineHeight() + 12.0f * u); // as ApexUi::ActionMenuItem
     const float icon = VioletTheme::kControlIcon * u, pad = 10.0f * u, gap = ApexUi::kSpace1 * u;
     const bool mine = item.source == Looks::Source::Mine, fav = IsFavorite(item.ref);
     const float w = ImGui::GetContentRegionAvail().x, moreW = mine ? fh + gap : 0.0f;
@@ -1503,7 +1503,8 @@ RowAction LookListRow(const Looks::LookItem& item, bool selected)
         dl->AddRectFilled(p, ImVec2(p.x + w, p.y + rowH),
                           ImGui::GetColorU32(selected ? VioletTheme::Col(VioletTheme::kAccent, rowHovered ? 0.16f : 0.11f) : VioletTheme::Col(VioletTheme::kSelectedBg)), 8.0f * u);
     // the star: its own button at the row's left end, so it does not pick the look
-    if (ImGui::InvisibleButton("##Star", ImVec2(starW, rowH))) action = RowAction::Favorite;
+    if (ImGui::InvisibleButton("##Star", ImVec2(starW, rowH), ImGuiButtonFlags_EnableNav)) action = RowAction::Favorite;
+    ImGui::RenderNavCursor(ImGui::GetCurrentContext()->LastItemData.Rect, ImGui::GetItemID());
     const bool starHovered = ImGui::IsItemHovered();
     if (starHovered) ApexUi::Tooltip(I18n::Tr(fav ? "Remove from favorites" : "Add to favorites"));
     ImGui::SameLine(0.0f, 0.0f);
@@ -1527,6 +1528,7 @@ RowAction LookListRow(const Looks::LookItem& item, bool selected)
         // no box of its own inside the row's background: the icon brightens under the mouse
         ImGui::SetCursorScreenPos(ImVec2(p.x + w - fh, p.y));
         if (ImGui::InvisibleButton("##More", ImVec2(fh, rowH), ImGuiButtonFlags_EnableNav)) ImGui::OpenPopup("LookActions");
+        ImGui::RenderNavCursor(ImGui::GetCurrentContext()->LastItemData.Rect, ImGui::GetItemID());
         const bool moreHovered = ImGui::IsItemHovered() || ImGui::IsPopupOpen("LookActions");
         if (ImGui::IsItemHovered()) ApexUi::Tooltip(I18n::Tr("More options"));
         ApexUi::DrawIcon(dl, IconId::Ellipsis, ImVec2(p.x + w - fh * 0.5f - icon * 0.5f, cy - icon * 0.5f), icon,
@@ -1551,7 +1553,7 @@ void RenameRow(const Looks::LookItem& item, bool& settings)
     const float gap = ApexUi::kSpace2 * ApexUi::Unit();
     const float cw = ApexUi::ButtonWidth(I18n::Tr("Cancel"), false), rw = ApexUi::ButtonWidth(I18n::Tr("Rename"), false);
     // as tall as the list's other rows
-    const float u = ApexUi::Unit(), rowH = std::max(34.0f * u, ImGui::GetTextLineHeight() + 16.0f * u), fh = ImGui::GetFrameHeight();
+    const float u = ApexUi::Unit(), rowH = std::max(36.0f * u, ImGui::GetTextLineHeight() + 12.0f * u), fh = ImGui::GetFrameHeight();
     const ImVec2 p = ImGui::GetCursorScreenPos();
     ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + (rowH - fh) * 0.5f));
     ImGui::PushID("##Rename");
@@ -2240,8 +2242,10 @@ bool MissingRow(size_t i, const Looks::Packs::Batch& batch, std::vector<std::str
     const char* download = I18n::Tr("Download");
     const char* addFx = I18n::Tr("Add .fx files\xE2\x80\xA6");
     const float h = ImGui::GetFrameHeight(), gap = ApexUi::kSpace2 * u;
+    // then the ⋯ menu, in the column of the shader rows' (their switch and chevron's room left empty)
+    const float tail = gap + ApexUi::ToggleSwitchSize().x + gap + h;
     const float controlW = (act == Act::Download ? ApexUi::ButtonWidth(download, true) + gap : act == Act::AddFx ? ApexUi::ButtonWidth(addFx, true) + gap
-                         : act == Act::Spin   ? 12.0f * u + gap : 0.0f) + h; // then the trash
+                         : act == Act::Spin   ? 12.0f * u + gap : 0.0f) + h + tail;
     ImGui::PushID((int)i);
     ApexUi::SetNextRowUntranslated(); // the shader's own name; the description is already translated
     if (act != Act::Spin) ApexUi::SetNextRowWarning();
@@ -2252,12 +2256,21 @@ bool MissingRow(size_t i, const Looks::Packs::Batch& batch, std::vector<std::str
         else if (act == Act::Spin) ApexUi::BusySpinner(true);
         if (act != Act::None) ImGui::SameLine(0.0f, gap);
         // a shader that can't run can leave the look too (it stops counting as missing at once)
-        if (ApexUi::IconButton("##Remove", IconId::Trash2, "Remove from the look", false, h / u))
+        if (ApexUi::IconButton("##More", IconId::Ellipsis, "More options", false, h / u)) ImGui::OpenPopup("MissingActions");
+        ImGui::SameLine(0.0f, 0.0f);
+        ImGui::Dummy(ImVec2(tail, h));
+        if (ApexUi::BeginActionMenu("MissingActions", e.technique.c_str()))
         {
-            const std::string label = e.technique;
-            RemoveEntry(i, true);
-            ApexUi::ReportChange(I18n::Trf("{} removed", label).c_str());
-            changed = true;
+            const ApexUi::ControlSizeScope menuSize(ApexUi::ControlSize::Compact);
+            if (ApexUi::ActionMenuItem("Remove from the look", IconId::Trash2))
+            {
+                const std::string label = e.technique;
+                RemoveEntry(i, true);
+                ApexUi::ReportChange(GroupText(g_removedNames, kRemoveGroup, label, "{} removed", "{} and {} removed", "{} shaders removed").c_str(), kRemoveGroup);
+                changed = true;
+                ImGui::CloseCurrentPopup();
+            }
+            ApexUi::EndActionMenu();
         }
         ApexUi::EndControlRow();
     }
@@ -2267,8 +2280,9 @@ bool MissingRow(size_t i, const Looks::Packs::Batch& batch, std::vector<std::str
 
 std::string RowDescription(int shader); // below, with the shader sources
 
-// A shader removed here (runnable or missing): its name over "Removed: leaves the look when you save" in amber, and
-// Restore. It no longer runs; it leaves the file at the next save, or comes back with Restore or the look's Reset.
+// A shader removed here (runnable or missing), under Add a shader's "Removed from this look": its name over "Leaves the
+// look when you save" in amber, and Restore. It no longer runs; it leaves the file at the next save, or comes back with
+// Restore, the toast's Undo or the look's Reset.
 bool RemovedRow(size_t i)
 {
     bool changed = false;
@@ -2277,8 +2291,7 @@ bool RemovedRow(size_t i)
     ImGui::PushID(EntryKey(g.order[i]).c_str());
     ApexUi::SetNextRowUntranslated(); // the shader's own name; the description is translated here
     ApexUi::SetNextRowWarning();
-    ApexUi::SetNextRowIconColor(VioletTheme::kTextFaint);
-    if (ApexUi::BeginControlRow(label.c_str(), I18n::Tr("Removed: leaves the look when you save"), ApexUi::ButtonWidth(I18n::Tr("Restore"), true), IconId::Trash2))
+    if (ApexUi::BeginControlRow(label.c_str(), I18n::Tr("Leaves the look when you save"), ApexUi::ButtonWidth(I18n::Tr("Restore"), true)))
     {
         if (ApexUi::IconTextButton("Restore", IconId::Undo2))
         {
@@ -2338,7 +2351,7 @@ bool ShaderRow(size_t i, int pos, int count, bool& reorder)
             // the row's less frequent actions in one menu: the run order, the look's values back, removal
             if (ApexUi::IconButton("##More", IconId::Ellipsis, "More options", false, h / u)) ImGui::OpenPopup("ShaderActions");
             if (!doubled) controlsLeft = ImGui::GetItemRectMin().x;
-            const std::string menuTitle = label + "  " + I18n::Trf("{} of {}", pos, count);
+            const std::string menuTitle = label + "  \xC2\xB7  " + I18n::Trf("{} of {}", pos, count);
             if (ApexUi::BeginActionMenu("ShaderActions", menuTitle.c_str()))
             {
                 const ApexUi::ControlSizeScope menuSize(ApexUi::ControlSize::Compact);

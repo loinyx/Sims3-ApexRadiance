@@ -2544,7 +2544,7 @@ Preset	tr_image.cpp:kEntries	Preset	Preajuste	Préréglage
 Run earlier	tr_image.cpp:kEntries	Rodar antes	Ejecutar antes	Exécuter plus tôt	
 Run later	tr_image.cpp:kEntries	Rodar depois	Ejecutar después	Exécuter plus tard	
 Remove from the look	tr_image.cpp:kEntries	Remover do visual	Quitar del estilo	Retirer du rendu	
-Removed: leaves the look when you save	tr_image.cpp:kEntries	Removido: sai do visual quando você salvar	Quitado: sale del estilo al guardar	Retiré : quitte le rendu à l'enregistrement	
+Leaves the look when you save	tr_image.cpp:kEntries	Sai do visual quando você salvar	Sale del estilo al guardar	Quitte le rendu à l'enregistrement	
 Restore	tr_image.cpp:kEntries	Restaurar	Restaurar	Restaurer	
 {} restored	tr_image.cpp:kEntries	{} restaurado	{} restaurado	{} restauré	{}
 Changed here, not saved in the look yet	tr_image.cpp:kEntries	Alterado aqui, ainda não salvo no visual	Cambiado aquí, aún sin guardar en el estilo	Modifié ici, pas encore enregistré dans le rendu	
@@ -2594,6 +2594,23 @@ Search looks	tr_image.cpp:kEntries	Buscar visuais	Buscar estilos	Rechercher des 
 No looks yet	tr_image.cpp:kEntries	Nenhum visual ainda	Aún no hay estilos	Aucun rendu pour l'instant	
 No look matches	tr_image.cpp:kEntries	Nenhum visual encontrado	Ningún estilo coincide	Aucun rendu ne correspond	
 Open the Looks folder	tr_image.cpp:kEntries	Abrir a pasta Looks	Abrir la carpeta Looks	Ouvrir le dossier Looks	
+Adjust one color family	tr_image.cpp:kEntries	Ajusta uma família de cores	Ajusta una familia de colores	Ajuste une famille de couleurs	
+Black and white points	tr_image.cpp:kEntries	Pontos de preto e branco	Puntos de negro y blanco	Points noir et blanc	
+Bold three-strip film colors	tr_image.cpp:kEntries	Cores fortes de filme em três faixas	Colores intensos de película de tres tiras	Couleurs vives de film trichrome	
+Contrast curve	tr_image.cpp:kEntries	Curva de contraste	Curva de contraste	Courbe de contraste	
+Darker corners	tr_image.cpp:kEntries	Cantos mais escuros	Esquinas más oscuras	Coins plus sombres	
+Exposure and saturation	tr_image.cpp:kEntries	Exposição e saturação	Exposición y saturación	Exposition et saturation	
+Film print colors	tr_image.cpp:kEntries	Cores de cópia de filme	Colores de copia de película	Couleurs de tirage film	
+More range in light and shade	tr_image.cpp:kEntries	Mais variação entre luz e sombra	Más rango entre luz y sombra	Plus d'écart entre lumière et ombre	
+Old photo tint	tr_image.cpp:kEntries	Tom de foto antiga	Tono de foto antigua	Teinte de vieille photo	
+Richer color	tr_image.cpp:kEntries	Cores mais ricas	Color más rico	Couleurs plus riches	
+Shadows, midtones and highlights	tr_image.cpp:kEntries	Sombras, tons médios e realces	Sombras, medios tonos y luces	Ombres, tons moyens et hautes lumières	
+Sharper detail	tr_image.cpp:kEntries	Detalhes mais nítidos	Detalles más nítidos	Détails plus nets	
+Sharper edges	tr_image.cpp:kEntries	Bordas mais nítidas	Bordes más nítidos	Contours plus nets	
+Sharper textures	tr_image.cpp:kEntries	Texturas mais nítidas	Texturas más nítidas	Textures plus nettes	
+Strength of dull colors	tr_image.cpp:kEntries	Força das cores apagadas	Intensidad de los colores apagados	Intensité des couleurs ternes	
+Strong film colors	tr_image.cpp:kEntries	Cores fortes de filme	Colores intensos de película	Couleurs de film intenses	
+Warm tint	tr_image.cpp:kEntries	Tom quente	Tono cálido	Teinte chaude	
 {} doesn't run with that setting in The Sims 3, so it went back to the last one that worked	tr_image.cpp:kEntries	{} não roda com essa configuração no The Sims 3, então voltou para a última que funcionou	{} no funciona con ese ajuste en The Sims 3, así que volvió al último que funcionaba	{} ne fonctionne pas avec ce réglage dans Les Sims 3 : il revient au dernier qui marchait	{}
 {} and {} removed	tr_image.cpp:kEntries	{} e {} removidos	{} y {} quitados	{} et {} retirés	{} {}
 {} shaders removed	tr_image.cpp:kEntries	{} shaders removidos	{} shaders quitados	{} shaders retirés	{}
