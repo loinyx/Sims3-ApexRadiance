@@ -12,6 +12,11 @@ var g = new Game(Path.Combine(root, "The Sims 3"), bin, "TS3.exe", Edition.EA, "
 var src = new FakeSource(payload);
 Games.IsRunning = () => false; // the fake game never runs
 int failures = 0;
+// removals never reach the real driver: the hook counts the games it was asked to turn frame generation off for
+var frameGenOff = new List<string>();
+string? frameGenOffFails = null;
+var frameGenOffAfterFiles = true; // (the hook runs once the component is gone from setup.json)
+Engine.FrameGenOff = game => { frameGenOff.Add(game.Exe); frameGenOffAfterFiles &= !Manifest.Load(game.Bin).Versions.ContainsKey(Components.Bridge); return (frameGenOffFails, null); };
 void Check(bool ok, string what) { Console.WriteLine((ok ? "ok   " : "FAIL ") + what); if (!ok) failures++; }
 string B(string rel) => Path.Combine(bin, rel);
 string Read(string p) => File.Exists(p) ? File.ReadAllText(p) : "<missing>";
@@ -320,7 +325,8 @@ try
     var g3 = new Game(Path.Combine(root, "Third"), bin3, "TS3W.exe", Edition.Steam, "1.67.2");
     var restoreDir = RestorePoints.RootOf(bin3);
     Dictionary<string, string> Tree() => new[] { bin3, docs3 }.SelectMany(d => Directory.EnumerateFiles(d, "*", SearchOption.AllDirectories))
-        .Where(f => !f.StartsWith(restoreDir, StringComparison.OrdinalIgnoreCase))
+        // (an antivirus scan briefly leaves NAME.EXT.tmp copies next to files it reads: never Setup's, and gone a moment later)
+        .Where(f => !f.StartsWith(restoreDir, StringComparison.OrdinalIgnoreCase) && !f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
         .ToDictionary(f => f, f => Convert.ToHexString(File.ReadAllBytes(f)));
     bool SameTree(Dictionary<string, string> a, Dictionary<string, string> b) => a.Count == b.Count && a.All(p => b.TryGetValue(p.Key, out var v) && v == p.Value);
 
@@ -451,7 +457,7 @@ try
         var g6 = new Game(Path.Combine(root, "Sixth"), bin6, "TS3W.exe", Edition.Steam, "1.67.2");
         string B6(string rel) => Path.Combine(bin6, rel);
         Dictionary<string, string> Tree6() => new[] { bin6, docs6 }.SelectMany(d => Directory.EnumerateFiles(d, "*", SearchOption.AllDirectories))
-            .ToDictionary(f => f, File.ReadAllText);
+            .Where(f => !f.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)).ToDictionary(f => f, File.ReadAllText);
         bool Same6(Dictionary<string, string> a, Dictionary<string, string> b) => a.Count == b.Count && a.All(p => b.TryGetValue(p.Key, out var v) && v == p.Value);
         List<Finding> Sug() => Compat.Check(g6, Scan.Run(g6, docs6), docs6).Where(x => x.Suggest is not null).ToList();
         Finding? Named(string name) => Sug().FirstOrDefault(x => x.Suggest == name);
@@ -545,6 +551,101 @@ try
         pts6 = RestorePoints.List(bin6);
         Check(Sug().All(x => !x.CanApply) && pts6.Count == 1 && pts6[0].Label == "Apply all suggestions", "apply all: every fix in one point");
         Check(RestorePoints.Restore(bin6, pts6[0]).Count == 0 && Same6(Tree6(), t6c), "apply all: restored");
+    }
+
+    // frame generation (Smooth Motion, AFMF) on an EA app game (TS3.exe): the frame limit in that game's Documents, undone alone
+    {
+        var fgToml = Engine.ApexToml(docs);
+        Directory.CreateDirectory(Path.GetDirectoryName(fgToml)!);
+        File.WriteAllText(fgToml, "[ui]\r\nlanguage = \"pt\"\r\n");
+        var before = RestorePoints.List(bin).Count;
+        Check(Engine.SetFpsLimitIfNone(g, "NVIDIA Smooth Motion", docs) && Read(fgToml) == "[ui]\r\nlanguage = \"pt\"\r\n\r\n[screen]\r\nfps_limit = 60\r\n"
+              && RestorePoints.List(bin)[0].Label == "Turn on {0}", "frame limit: 60 when there is none, CRLF kept, its own restore point");
+        File.WriteAllText(fgToml, Read(fgToml).Replace("language = \"pt\"", "language = \"de\"")); // the game saves another setting since
+        Check(RestorePoints.Restore(bin, RestorePoints.List(bin)[0]).Count == 0 && Read(fgToml) == "[ui]\r\nlanguage = \"de\"\r\n\r\n[screen]\r\n",
+              "frame limit: restoring puts back only fps_limit");
+        File.WriteAllText(fgToml, "[screen]\nfps_limit = 0\n");
+        Engine.SetFpsLimitIfNone(g, "NVIDIA Smooth Motion", docs);
+        Check(RestorePoints.Restore(bin, RestorePoints.List(bin)[0]).Count == 0 && Read(fgToml) == "[screen]\nfps_limit = 0\n", "frame limit: a 0 before is put back as 0");
+        File.WriteAllText(fgToml, "[screen]\nfps_limit = 144\n");
+        before = RestorePoints.List(bin).Count;
+        Check(!Engine.SetFpsLimitIfNone(g, "NVIDIA Smooth Motion", docs) && Read(fgToml) == "[screen]\nfps_limit = 144\n" && RestorePoints.List(bin).Count == before,
+              "frame limit: a limit the player chose stays, no restore point");
+        File.WriteAllText(fgToml, "[ui]\n");
+        Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", "1");
+        var threw = false;
+        try { Engine.SetFpsLimitIfNone(g, "NVIDIA Smooth Motion", docs); } catch (InvalidOperationException) { threw = true; }
+        Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null);
+        Check(threw && Read(fgToml) == "[ui]\n", "frame limit: the dry run writes nothing");
+        File.Delete(fgToml);
+        Check(!Engine.SetFpsLimitIfNone(g, "NVIDIA Smooth Motion", docs) && !File.Exists(fgToml), "frame limit: nothing written before the game made ApexRadiance.toml");
+
+        // which removals turn it off: the bridge (alone or by a renderer change) and Apex, not DXVK or the others
+        Check(Engine.TurnsFrameGenOff(Components.Bridge) && Engine.TurnsFrameGenOff(Components.Apex) && !Engine.TurnsFrameGenOff(Components.Dxvk)
+              && !Engine.TurnsFrameGenOff(Components.S3ss), "frame generation: removing the bridge or Apex turns it off");
+        frameGenOff.Clear();
+        frameGenOffFails = "nvapi64.dll not found";
+        Engine.Remove(g, Components.Bridge, docs);
+        Check(frameGenOff.SequenceEqual(new[] { "TS3.exe" }) && Engine.TakeFrameGenOffError().Nv == "nvapi64.dll not found" && Engine.TakeFrameGenOffError() == (null, null),
+              "frame generation: removing the bridge asks the EA app game's TS3.exe, and a driver failure does not fail the removal");
+        Check(frameGenOffAfterFiles, "frame generation: turned off only after the bridge's files are removed");
+        // review fixes: the player's later change wins over an undo; no temporary file left; CRLF without a final newline; dotted or
+        // inline [screen] and an unparseable limit left alone
+        File.WriteAllText(fgToml, "[ui]\r\nx = 1\r\n");
+        Engine.SetFpsLimitIfNone(g, "NVIDIA Smooth Motion", docs);
+        File.WriteAllText(fgToml, Read(fgToml).Replace("fps_limit = 60", "fps_limit = 75"));
+        Check(RestorePoints.Restore(bin, RestorePoints.List(bin)[0]).Count == 0 && Read(fgToml).Contains("fps_limit = 75") && !File.Exists(fgToml + ".apex-tmp"),
+              "frame limit: a limit the player changed since stays on restore; written through a temporary file");
+        Check(Engine.WithFpsLimit("[screen]\r\nvsync = 1", 60) == "[screen]\r\nvsync = 1\r\nfps_limit = 60\r\n"
+              && Engine.WithFpsLimit("[ui]\r\nx = 1", 60) == "[ui]\r\nx = 1\r\n\r\n[screen]\r\nfps_limit = 60\r\n", "frame limit: CRLF without a final newline stays CRLF");
+        Check(Engine.WithFpsLimitIfNone("screen.vsync = 1\n").Text == "screen.vsync = 1\n" && Engine.WithFpsLimitIfNone("screen = { vsync = 1 }\n").Text == "screen = { vsync = 1 }\n"
+              && Engine.WithFpsLimitIfNone("[screen]\nfps_limit = 99999999999\n").Text == "[screen]\nfps_limit = 99999999999\n",
+              "frame limit: dotted or inline screen keys and an unparseable limit are left alone");
+        // a read-only Options.ini: its copy is read-only too, and removing the renderer must still delete it (validation 1.2.5)
+        {
+            var opt = Engine.OptionsIni(docs);
+            File.WriteAllText(opt, "gpu=real");
+            File.SetAttributes(opt, FileAttributes.ReadOnly);
+            await Engine.InstallAsync(g, new[] { Components.Bridge }, src, null, docs);
+            var bak = Manifest.Load(bin).OptionsBackup;
+            var removed = true;
+            try { Engine.Remove(g, Components.Bridge, docs); } catch (Exception) { removed = false; }
+            Check(bak is not null && removed && !File.Exists(bak) && Scan.Run(g, docs).Layer == Layer.Native, "read-only Options.ini: removing the bridge deletes its read-only copy");
+            File.SetAttributes(opt, FileAttributes.Normal);
+        }
+        // a file an antivirus takes between the download and the copy is named, with the folder to except
+        {
+            var gone = false;
+            try { await Engine.InstallAsync(g, new[] { Components.S3ss }, new VanishingSource(root), null, docs); }
+            catch (SetupException e) { gone = e.Args[0] == "Sims3SettingsSetter.asi" && e.Key.StartsWith("Your antivirus"); }
+            Check(gone, "antivirus: a downloaded file gone before its copy is named in the player's words");
+            var s3pp = false;
+            try { await Engine.InstallAsync(g, new[] { Components.S3pp }, new VanishingSource(root), null, docs); }
+            catch (SetupException e) { s3pp = e.Key.StartsWith("Setup could not find"); }
+            Check(s3pp, "antivirus: a Performance Patch archive the player moved is not called an antivirus");
+        }
+
+        // the frame limit picker: Apex's choices plus 75 and 90, custom clamped as Apex reads it, its own restore point
+        Check(Engine.FpsChoices.SequenceEqual(new[] { 0, 30, 60, 75, 90, 120, 144, 165, 240 }) && Engine.FpsRecommended(60) && Engine.FpsRecommended(90)
+              && !Engine.FpsRecommended(120) && Engine.ClampFps(-5) == 0 && Engine.ClampFps(0) == 0 && Engine.ClampFps(5) == 20 && Engine.ClampFps(5000) == 1000
+              && Engine.ClampFps(77) == 77, "frame limit picker: the choices, the recommended ones, custom clamped to 0 or 20 to 1000");
+        File.WriteAllText(fgToml, "[screen]\r\nfps_limit = 144\r\n");
+        Check(Engine.SetFpsLimit(g, 5000, docs) && Read(fgToml) == "[screen]\r\nfps_limit = 1000\r\n" && RestorePoints.List(bin)[0].Label == "Apex frame limit"
+              && !Engine.SetFpsLimit(g, 1000, docs), "frame limit picker: writes at once, clamped, nothing when unchanged");
+        Check(RestorePoints.Restore(bin, RestorePoints.List(bin)[0]).Count == 0 && Read(fgToml) == "[screen]\r\nfps_limit = 144\r\n", "frame limit picker: restoring puts back the player's 144");
+        Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", "1");
+        var pickThrew = false;
+        try { Engine.SetFpsLimit(g, 75, docs); } catch (InvalidOperationException) { pickThrew = true; }
+        Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null);
+        Check(pickThrew && Read(fgToml) == "[screen]\r\nfps_limit = 144\r\n", "frame limit picker: the dry run writes nothing");
+        frameGenOffFails = null;
+        frameGenOff.Clear();
+        Engine.Remove(g, Components.S3ss, docs);
+        Check(frameGenOff.Count == 0, "frame generation: removing another component leaves it alone");
+        Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", "1");
+        try { Engine.Remove(g, Components.Bridge, docs); } catch (InvalidOperationException) { }
+        Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null);
+        Check(frameGenOff.Count == 0, "frame generation: the dry run turns nothing off");
     }
 }
 catch (Exception e) { Console.WriteLine("FAIL exception: " + e); failures++; }
@@ -731,6 +832,368 @@ Check(Gpu.Decode((1u << 22) | (3u << 12) | 280) == new Version(1, 3) && Gpu.Deco
 try { var (vk, card, missing) = Gpu.Vulkan(); Console.WriteLine($"info this PC: {card ?? "no Vulkan card"} Vulkan {vk?.ToString() ?? "-"}, DXVK extensions missing: {(missing.Length == 0 ? "none" : string.Join(", ", missing))}"); }
 catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: " + e.Message); }
 
+// NVIDIA Smooth Motion: which card and driver may turn it on, a player's own profile left alone, the dry run writes nothing
+{
+    SmoothMotion.Status Nv(string? card, uint driver = 57186, bool on = false, string? owner = null) => new(card, driver, on, owner, null);
+    Check(SmoothMotion.Supported("NVIDIA GeForce RTX 4070", 57186) && SmoothMotion.Supported("NVIDIA GeForce RTX 5090 Laptop GPU", 59000)
+          && !SmoothMotion.Supported("NVIDIA GeForce RTX 3080", 59000) && !SmoothMotion.Supported("NVIDIA GeForce RTX 4070", 57185)
+          && !SmoothMotion.Supported(null, 59000), "smooth motion: RTX 40 and 50 on driver 571.86 or newer only");
+    Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070"), true, false) is null, "smooth motion: an RTX 40 card under the bridge can turn it on");
+    Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 3080"), true, false)?.Key.StartsWith("Needs an NVIDIA") == true
+          && SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070", 56600), true, false)?.Arg == "566.00", "smooth motion: an older card or driver says why");
+    Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070"), false, false)?.Key.Contains("RTX Remix bridge") == true
+          && SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070", on: true), false, true) is null, "smooth motion: needs the bridge to turn on, never to turn off");
+    Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070", on: true), true, false)?.Key.StartsWith("Turned on outside Setup") == true,
+          "smooth motion: on in NVIDIA's profile but not by Setup (Profile Inspector) is left alone");
+    Check(SmoothMotion.Blocked(Nv("NVIDIA GeForce RTX 4070", owner: "My TS3"), true, false) is { Arg: "My TS3" }, "smooth motion: an exe in the player's own profile is left alone");
+    Check(SmoothMotion.Blocked(new SmoothMotion.Status(null, 0, false, null, "no nvapi64.dll"), true, false) is { Arg: "no nvapi64.dll" }, "smooth motion: an NVAPI error reads as a reason");
+    Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_NV", "NVIDIA GeForce RTX 4080|57186|1|");
+    Check(SmoothMotion.Read() is { Card: "NVIDIA GeForce RTX 4080", Driver: 57186, On: true, Owner: null }, "smooth motion: the fake stands in for the driver");
+    Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_NV", null);
+    Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", "1");
+    Check(SmoothMotion.Set(true) == "Dry run: Setup changes nothing.", "smooth motion: the dry run writes nothing");
+    Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null);
+    Check(Engine.WithFpsLimitIfNone("[screen]\nfps_limit = 0\nvsync = 1\n") == ("[screen]\nfps_limit = 60\nvsync = 1\n", 0)
+          && Engine.WithFpsLimitIfNone("[screen]\nfps_limit = 144\n") == ("[screen]\nfps_limit = 144\n", 144)
+          && Engine.WithFpsLimitIfNone("[screen]\nfps_limit = 30\n") == ("[screen]\nfps_limit = 30\n", 30)
+          && Engine.WithFpsLimitIfNone("[ui]\nx = 1\n") == ("[ui]\nx = 1\n\n[screen]\nfps_limit = 60\n", null)
+          && Engine.WithFpsLimitIfNone("[screen]\r\nvsync = 1\r\n\r\n[ui]\r\n").Text == "[screen]\r\nvsync = 1\r\nfps_limit = 60\r\n\r\n[ui]\r\n",
+          "frame generation: only no frame limit becomes 60 fps, a limit the player chose stays, other keys and CRLF as they were");
+    Check(Engine.WithoutFpsLimit("[screen]\r\nvsync = 1\r\nfps_limit = 60\r\n") == "[screen]\r\nvsync = 1\r\n"
+          && Engine.WithFpsLimit("[screen]\nfps_limit = 60\n", 0) == "[screen]\nfps_limit = 0\n", "frame generation: the frame limit's undo");
+    {
+        var smMarker = SmoothMotion.Marker;
+        SmoothMotion.Marker = Path.Combine(Path.GetTempPath(), "ApexSetupTest-sm-" + Guid.NewGuid().ToString("N")[..8] + ".txt");
+        Check(SmoothMotion.Set(false) is null && !SmoothMotion.SetupTurnedOn, "smooth motion: off without Setup's record touches nothing");
+        File.WriteAllText(SmoothMotion.Marker, "on");
+        SmoothMotion.Tidy(new("NVIDIA GeForce RTX 4070", 62124, true, null, null));
+        var smKept = SmoothMotion.SetupTurnedOn;
+        SmoothMotion.Tidy(new("NVIDIA GeForce RTX 4070", 62124, false, null, null));
+        Check(smKept && !SmoothMotion.SetupTurnedOn, "smooth motion: Setup's record kept while on, dropped once it reads off");
+        SmoothMotion.Marker = smMarker;
+    }
+    // AMD Fluid Motion Frames: system-wide, so maintenance turns off only what Setup turned on
+    Check(Afmf.Blocked(new(true, true, false, null)) is null && Afmf.Blocked(new(true, false, false, null)) is { Key: var k } && k.StartsWith("Not available")
+          && Afmf.Blocked(new(true, false, true, null)) is null && Afmf.Blocked(new(true, false, false, "ADLXInitialize 3")) is { Arg: "ADLXInitialize 3" },
+          "afmf: on only where ADLX says it is supported; off always; an ADLX error reads as a reason");
+    Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_AMD", "1|1");
+    Check(Afmf.Read() == new Afmf.Status(true, true, true, null) && Afmf.Set(false) == "Dry run: Setup changes nothing.", "afmf: the fake stands in for ADLX and writes nothing");
+    Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_AMD", "none");
+    Check(Afmf.Read() is { Present: false }, "afmf: no AMD card, no row");
+    var marker = Afmf.Marker;
+    Afmf.Marker = Path.Combine(Path.GetTempPath(), "ApexSetupTest-afmf-" + Guid.NewGuid().ToString("N")[..8] + ".txt");
+    Check(Afmf.OffIfSetupTurnedOn() is null, "afmf: a setting the player turned on is never turned off by a removal");
+    File.WriteAllText(Afmf.Marker, "on");
+    Check(Afmf.OffIfSetupTurnedOn() == "Dry run: Setup changes nothing." && File.Exists(Afmf.Marker), "afmf: one Setup turned on is turned off (the fake writes nothing)");
+    File.Delete(Afmf.Marker);
+    Afmf.Marker = marker;
+    Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_AMD", null);
+    Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", "1");
+    Check(Afmf.Set(true) == "Dry run: Setup changes nothing.", "afmf: the dry run writes nothing");
+    Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null);
+    Check(SmoothMotion.Failed(new DllNotFoundException()) is { Card: null, Error: null } && SmoothMotion.Failed(new EntryPointNotFoundException()).Error is null
+          && SmoothMotion.Failed(new InvalidOperationException("DRS_LoadSettings -1")).Error == "DRS_LoadSettings -1" && SmoothMotion.NoCard(-6) && !SmoothMotion.NoCard(-1),
+          "smooth motion: no NVIDIA driver or device is no card, no warning; other errors show");
+    Check(Afmf.Started(0) && Afmf.Started(2) && !Afmf.Started(8) && !Afmf.Started(3), "afmf: ADLX that does not start is no AMD card");
+    Afmf.Marker = Path.Combine(Path.GetTempPath(), "ApexSetupTest-afmf-" + Guid.NewGuid().ToString("N")[..8] + ".txt");
+    File.WriteAllText(Afmf.Marker, "on");
+    Afmf.Tidy(new(true, true, true, null));
+    var keptOn = File.Exists(Afmf.Marker);
+    Afmf.Tidy(new(true, true, false, "IsEnabled 3"));
+    var keptOnError = File.Exists(Afmf.Marker);
+    Afmf.Tidy(new(true, true, false, null));
+    Check(keptOn && keptOnError && !File.Exists(Afmf.Marker), "afmf: a record left while AFMF is off is dropped");
+    Afmf.Marker = marker;
+    {
+        SmoothMotion.Status Card(string? c, uint d = 62124) => new(c, d, false, null, null);
+        Afmf.Status Amd(bool present, bool supported) => new(present, supported, false, null);
+        Check(Engine.FrameGenRows(Card("NVIDIA GeForce RTX 4070 Ti SUPER"), Amd(true, false)) == (true, false), "frame generation rows: a usable NVIDIA card and an AMD iGPU without AFMF show Smooth Motion only");
+        Check(Engine.FrameGenRows(Card("NVIDIA GeForce RTX 4070"), Amd(true, true)) == (true, true), "frame generation rows: both usable, both show");
+        Check(Engine.FrameGenRows(Card(null), Amd(true, true)) == (false, true) && Engine.FrameGenRows(Card(null), Amd(true, false)) == (false, true),
+              "frame generation rows: an AMD-only PC shows AFMF, with its reason when unsupported");
+        Check(Engine.FrameGenRows(Card("NVIDIA GeForce RTX 3080"), Amd(true, false)) == (true, false) && Engine.FrameGenRows(Card("NVIDIA GeForce RTX 3080"), Amd(false, false)) == (true, false),
+              "frame generation rows: neither usable, the NVIDIA row explains why");
+        Check(Engine.FrameGenRows(Card("NVIDIA GeForce RTX 3080"), Amd(true, true)) == (false, true) && Engine.FrameGenRows(Card(null), Amd(false, false)) == (false, false),
+              "frame generation rows: an unusable NVIDIA card next to a usable AMD one shows AFMF only; no card, no row");
+    }
+    // pending changes: a switch or the picker plans a change only when it differs from the state now; switching back drops it
+    Check(Engine.PendingSwitch(true, false) == true && Engine.PendingSwitch(false, true) == false
+          && Engine.PendingSwitch(true, true) is null && Engine.PendingSwitch(false, false) is null, "pending: on and off are changes, the state now is none");
+    Check(Engine.PendingFps(75, 60) == 75 && Engine.PendingFps(60, 60) is null && Engine.PendingFps(0, 0) is null && Engine.PendingFps(-3, 0) is null
+          && Engine.PendingFps(5000, 1000) is null && Engine.PendingFps(5, 60) == 20, "pending: a new limit is a change (clamped as Apex), the limit now is none");
+    // other players' PCs: Optimus and laptop names, a write the driver did not keep, rights, no predefined profile
+    Check(SmoothMotion.PickCard(new[] { "NVIDIA GeForce MX450", "NVIDIA GeForce RTX 4060 Laptop GPU" }) == "NVIDIA GeForce RTX 4060 Laptop GPU"
+          && SmoothMotion.PickCard(new[] { "NVIDIA GeForce RTX 5070 Ti Laptop GPU" }) == "NVIDIA GeForce RTX 5070 Ti Laptop GPU"
+          && SmoothMotion.PickCard(new[] { "NVIDIA GeForce GTX 1650" }) == "NVIDIA GeForce GTX 1650" && SmoothMotion.PickCard(Array.Empty<string>()) is null
+          && SmoothMotion.Supported("NVIDIA GeForce RTX 4060 Laptop GPU", 57186), "card: an RTX 40 or 50 Laptop GPU counts, whatever the order of the cards");
+    Check(SmoothMotion.Took(true, new("NVIDIA GeForce RTX 4070", 62124, true, null, null)) && !SmoothMotion.Took(true, new("NVIDIA GeForce RTX 4070", 62124, false, null, null))
+          && !SmoothMotion.Took(false, new("NVIDIA GeForce RTX 4070", 62124, false, null, "DRS_LoadSettings -3")), "verify: a change read back differently did not take");
+    Check(Engine.FriendlyFrameGenError("DRS_SaveSettings -137", false).Contains("NVIDIA App")
+          && Engine.FriendlyFrameGenError("Access is denied.", true).Contains("AMD Software") && !Engine.FriendlyFrameGenError("Access is denied.", true).Contains("Profile Inspector")
+          && Engine.FriendlyFrameGenError("DRS_SetSetting -160", false, on: false).Contains("turn it off by hand")
+          && Engine.FriendlyFrameGenError("DRS_SetSetting 0xB0D384C0 = 1 on \"NvRemixBridge\" (NVIDIA's) -160", false).StartsWith("The NVIDIA driver")
+          && Engine.FriendlyFrameGenError(SmoothMotion.DidNotTake, true).Contains("AMD Software")
+          && Engine.FriendlyFrameGenError("Dry run: Setup changes nothing.", false) == "Dry run: Setup changes nothing.", "errors: plain words, a refusal names the programs that lock the driver settings, the off direction says off");
+    Check(SmoothMotion.Blocked(new("NVIDIA GeForce RTX 4070", 62124, false, null, null), true, false) is null,
+          "smooth motion: an RTX 40 card with the bridge and no profile of the player's may turn it on (the profile itself is checked on a real driver only)");
+    var amd = Afmf.Read(); // read only
+    Console.WriteLine($"info this PC: AMD {(amd.Present ? "driver found" : "none")}{(amd.Error is null ? "" : ", error " + amd.Error)}");
+    var nv = SmoothMotion.Read(); // read only
+    Console.WriteLine($"info this PC: NVIDIA {nv.Card ?? "none"}, driver {SmoothMotion.DriverText(nv.Driver)}, Smooth Motion {(nv.On ? "on" : "off")}{(nv.Owner is null ? "" : ", in profile " + nv.Owner)}{(nv.Error is null ? "" : ", error " + nv.Error)}");
+}
+
+// installer audit (Setup 1.2.4): a damaged setup.json, read-only and locked files, GitHub's answers, the loader zip, an
+// antivirus, the checks before a change, Setup's own update
+{
+    var a = Path.Combine(Path.GetTempPath(), "ApexSetupTest-audit-" + Guid.NewGuid().ToString("N")[..8]);
+    var abin = Path.Combine(a, "Game", "Bin");
+    Directory.CreateDirectory(Manifest.DirOf(abin));
+    try
+    {
+        var sj = Path.Combine(Manifest.DirOf(abin), "setup.json");
+        File.WriteAllText(sj, "{ \"Files\": [ {");
+        var logged = new List<Exception>();
+        Engine.Log = logged.Add;
+        var fresh = Manifest.Load(abin);
+        Check(fresh.Files.Count == 0 && File.Exists(sj) && File.Exists(sj + ".corrupt") && logged.Count == 1, "setup.json: a damaged one is kept as .corrupt and a fresh record is saved at once");
+        Engine.Log = _ => { };
+        fresh.Versions[Components.Apex] = "4.0.3";
+        fresh.Save();
+        // a save whose temporary file cannot be written leaves the file as it was (a plain write would have emptied it)
+        Directory.CreateDirectory(sj + ".apex-tmp");
+        var saved = Manifest.Load(abin);
+        saved.Versions[Components.Apex] = "9.9.9";
+        Fs.RetryDelay = TimeSpan.FromMilliseconds(1);
+        var failed = false;
+        try { saved.Save(); } catch (Exception) { failed = true; }
+        Directory.Delete(sj + ".apex-tmp");
+        Check(failed && Manifest.Load(abin).Versions[Components.Apex] == "4.0.3", "setup.json: saved through a temporary file, the old one kept when that fails");
+
+        // a damaged setup.json: the record rebuilt from the backups (the bridge's d3d9.dll, the Options.ini copy)
+        Directory.CreateDirectory(Path.Combine(abin, ".trex"));
+        File.WriteAllText(Path.Combine(abin, "d3d9.dll"), "bridge");
+        File.WriteAllText(Path.Combine(Manifest.DirOf(abin), "d3d9.dll.bak"), "reshade");
+        File.WriteAllText(Path.Combine(Manifest.DirOf(abin), "Options.ini.bak"), "opt");
+        File.WriteAllText(Path.Combine(Manifest.DirOf(abin), "unknown.bin.bak"), "?");
+        var rebuilt = Manifest.Rebuilt(abin);
+        Check(rebuilt.Files.Count == 1 && rebuilt.Files[0].Component == Components.Bridge && rebuilt.Files[0].Backup!.EndsWith("d3d9.dll.bak")
+              && rebuilt.OptionsBackup!.EndsWith("Options.ini.bak") && rebuilt.Versions.ContainsKey(Components.Bridge),
+              "setup.json: a damaged one's record is rebuilt from the backup folder");
+        Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", "1");
+        File.WriteAllText(sj, "{ broken");
+        Manifest.Load(abin);
+        Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null);
+        Check(File.ReadAllText(sj) == "{ broken", "setup.json: the dry run leaves a damaged one where it is");
+        File.Delete(sj);
+
+        // read-only files: deleted and written over (the restore point keeps them as they were), no temporary file left
+        var ro = Path.Combine(abin, "ro.conf"); File.WriteAllText(ro, "a"); File.SetAttributes(ro, FileAttributes.ReadOnly);
+        Fs.Write(ro, "b");
+        var roWritten = File.ReadAllText(ro) == "b" && !File.Exists(ro + ".apex-tmp");
+        File.SetAttributes(ro, FileAttributes.ReadOnly);
+        Fs.Delete(ro);
+        Check(roWritten && !File.Exists(ro), "read-only: written over and deleted");
+
+        var asrc = Path.Combine(a, "new.dll"); File.WriteAllText(asrc, "new");
+        var dst = Path.Combine(abin, "old.dll"); File.WriteAllText(dst, "old");
+        File.SetAttributes(dst, FileAttributes.ReadOnly);
+        Fs.Copy(asrc, dst);
+        Check(File.ReadAllText(dst) == "new", "copy: a read-only destination is replaced");
+        File.SetAttributes(dst, FileAttributes.Normal);
+        Fs.RetryDelay = TimeSpan.FromMilliseconds(1);
+        var tries = 0;
+        Fs.Retry(() => { if (++tries < 3) throw new IOException("in use"); });
+        var gaveUp = false; tries = 0;
+        try { Fs.Retry(() => { tries++; throw new IOException("in use"); }); } catch (IOException) { gaveUp = tries == 4; }
+        var missingAtOnce = false; tries = 0;
+        try { Fs.Retry(() => { tries++; throw new FileNotFoundException("gone"); }); } catch (FileNotFoundException) { missingAtOnce = tries == 1; }
+        Check(gaveUp && missingAtOnce, "copy and move: a held file is tried again 3 times, a missing one fails at once");
+
+        var anow = DateTimeOffset.FromUnixTimeSeconds(1_800_000_000);
+        Check(Releases.RateLimit(System.Net.HttpStatusCode.Forbidden, "0", (1_800_000_000 + 600).ToString(), anow) is { Args: ["10"] }
+              && Releases.RateLimit(System.Net.HttpStatusCode.Forbidden, "12", "0", anow) is null && Releases.RateLimit(System.Net.HttpStatusCode.NotFound, "0", "0", anow) is null,
+              "github: the API's rate limit says when it opens again");
+        Check(Releases.TagOf(new Uri("https://github.com/a/b/releases/tag/v10.0.2")) == "v10.0.2" && Releases.TagOf(new Uri("https://github.com/a/b/releases")) is null,
+              "github: a release page that did not land on a tag is no tag, not a crash");
+
+        Check(Engine.LoaderZip("Ultimate-ASI-Loader-NoPDB.zip") && !Engine.LoaderZip("Ultimate-ASI-Loader-NoPDB_x64.zip") && !Engine.LoaderZip("Ultimate-ASI-Loader.zip"),
+              "loader: the 32-bit NoPDB zip by its name's pattern");
+        byte[] Pe(ushort machine) { var b = new byte[0x48]; b[0] = (byte)'M'; b[1] = (byte)'Z'; b[0x3C] = 0x40; b[0x40] = (byte)'P'; b[0x41] = (byte)'E'; BitConverter.TryWriteBytes(b.AsSpan(0x44), machine); return b; }
+        var z = Path.Combine(a, "zip1"); Directory.CreateDirectory(z);
+        File.WriteAllBytes(Path.Combine(z, "winmm.dll"), Pe(0x14C)); File.WriteAllBytes(Path.Combine(z, "x64.dll"), Pe(0x8664));
+        var z2 = Path.Combine(a, "zip2"); Directory.CreateDirectory(z2); File.WriteAllText(Path.Combine(z2, "readme.txt"), "");
+        string? named = null;
+        try { Engine.LoaderDll(z2); } catch (InvalidDataException e) { named = e.Message; }
+        Check(Path.GetFileName(Engine.LoaderDll(z)) == "winmm.dll" && named?.Contains("readme.txt") == true, "loader: the one 32-bit dll when there is no dinput8.dll; an error names what the zip held");
+
+        Check(Engine.Missing(new Dictionary<string, long> { [asrc] = 3, [Path.Combine(a, "eaten.dll")] = 5 }).SequenceEqual(new[] { "eaten.dll" })
+              && Engine.Antivirus(@"C:\x\Game\Bin\wininet.dll", @"C:\x\Game\Bin") is { Args: ["wininet.dll", @"C:\x\Game\Bin"] }, "antivirus: a file gone or cut short is named in the player's words");
+
+        var ag = new Game(a, abin, "TS3W.exe", Edition.Steam, "1.67.2");
+        var astate = Scan.Run(ag, Path.Combine(a, "Docs"));
+        Games.IsRunning = () => true;
+        Engine.FreeBytes = _ => 10L << 20;
+        var pre = Engine.Preflight(ag, astate with { Layer = Layer.Other }, null, 100L << 20, replacesD3d9: true);
+        Games.IsRunning = () => false;
+        Engine.FreeBytes = _ => long.MaxValue;
+        Check(pre.Count(p => p.Blocks) >= 2 && pre.Any(p => p.Key.StartsWith("Close The Sims 3")) && pre.Any(p => p.Key.Contains("MB free"))
+              && pre.Any(p => p.Key.Contains("(d3d9.dll) is set aside") && !p.Blocks) && pre.Any(p => p.Key.Contains("Documents") && !p.Blocks),
+              "before a change: the game running and too little space stop it; a foreign d3d9.dll and missing Documents are told");
+        // a change that downloads nothing (a removal, the fixes) is not stopped by free space, nor told about Documents
+        Engine.FreeBytes = _ => 10L << 20;
+        var removal = Engine.Preflight(ag, astate, null, 0, false, downloads: false);
+        Engine.FreeBytes = _ => long.MaxValue;
+        Check(!removal.Any(p => p.Key.Contains("MB free") || p.Key.Contains("Documents")), "before a change: a removal needs no free space and no Documents");
+        var docsMade = Path.Combine(a, "Docs", "Electronic Arts", "The Sims 3");
+        Directory.CreateDirectory(Path.Combine(a, "Docs", "Electronic Arts", "The Sims 4"));
+        var noNote = !Engine.Preflight(ag, astate, Path.Combine(a, "Docs", "Electronic Arts", "The Sims 4"), 0, false).Any(p => p.Key.Contains("Documents"));
+        Check(Engine.Preflight(ag, astate, docsMade, 0, false).Any(p => p.Key.Contains("Documents")) && noNote,
+              "before a change: The Sims 3's own folder decides, not the Electronic Arts folder another game made");
+        Games.IsRunning = () => true;
+        var closeText = "";
+        try { Environment.SetEnvironmentVariable("APEX_SETUP_DRY_RUN", null); Engine.CheckWritable(); } catch (SetupException e) { closeText = e.Key; }
+        Games.IsRunning = () => false;
+        Check(closeText == Engine.CloseGameText, "the launcher or the restart host running: the message names them");
+
+        // what an install downloads: the assets FetchAsync takes, not every asset of the release
+        var apexRel = new Release("loinyx/Sims3-ApexRadiance", "v4.0.3", [new("ApexRadianceSetup.exe", "u", null, 40 << 20), new("Apex-4.0.3-Manual-install.zip", "u", null, 30 << 20)]);
+        var dxvkRel = new Release("doitsujin/dxvk", "v2.7", [new("dxvk-2.7.tar.gz", "u", null, 9 << 20), new("dxvk-native-2.7.tar.gz", "u", null, 8 << 20)]);
+        Check(Engine.DownloadEstimate([Components.Apex, Components.Bridge, Components.Dxvk], c => c == Components.Dxvk ? dxvkRel : apexRel) == (39L << 20)
+              && Engine.DownloadEstimate([Components.S3pp], _ => apexRel) == 0, "free space: the estimate counts the manual-install zip once and DXVK's own build");
+
+        // loader: no ARM build, and a dinput8.dll that is not 32-bit is not the loader
+        var z3 = Path.Combine(a, "zip3"); Directory.CreateDirectory(z3);
+        File.WriteAllBytes(Path.Combine(z3, "dinput8.dll"), Pe(0x8664)); File.WriteAllBytes(Path.Combine(z3, "loader.dll"), Pe(0x14C));
+        Check(!Engine.LoaderZip("Ultimate-ASI-Loader-NoPDB_arm64.zip") && Path.GetFileName(Engine.LoaderDll(z3)) == "loader.dll", "loader: not an ARM zip, not a 64-bit dinput8.dll");
+        Check(Engine.IsVirusBlock(new IOException("blocked", unchecked((int)0x800700E1))) && Engine.IsVirusBlock(new IOException("removed", unchecked((int)0x800700E2)))
+              && !Engine.IsVirusBlock(new IOException("in use", unchecked((int)0x80070020))), "antivirus: Windows' virus errors are told as such, a file in use is not");
+        Check(SmoothMotion.Blocked(new("NVIDIA GeForce RTX 4070", 62124, true, null, null, SetupsProfile: true), true, false) is null,
+              "smooth motion: on in Setup's own profile from an earlier Setup is Setup's to turn off");
+
+        // GitHub: a server error is tried again, a refusal is not; the rate limit is told when the page fails too; the list falls
+        // back to the latest release
+        var oldHttp = Releases.Http;
+        Releases.BackoffUnit = TimeSpan.FromMilliseconds(1);
+        const string json = "{\"tag_name\":\"v1.0\",\"assets\":[]}";
+        try
+        {
+            var flaky = new StubHandler((r, i) => i < 2 ? new(System.Net.HttpStatusCode.BadGateway) : new(System.Net.HttpStatusCode.OK) { Content = new StringContent(json) });
+            Releases.Http = new HttpClient(flaky);
+            Check((await Releases.LatestAsync("a/b")).Tag == "v1.0" && flaky.Calls == 3, "github: two 502s, then the answer");
+            var limited = new StubHandler((r, i) =>
+            {
+                if (r.RequestUri!.Host == "api.github.com")
+                {
+                    var res = new HttpResponseMessage(System.Net.HttpStatusCode.Forbidden);
+                    res.Headers.Add("X-RateLimit-Remaining", "0");
+                    res.Headers.Add("X-RateLimit-Reset", DateTimeOffset.UtcNow.AddMinutes(30).ToUnixTimeSeconds().ToString());
+                    return res;
+                }
+                return new(System.Net.HttpStatusCode.NotFound);
+            });
+            Releases.Http = new HttpClient(limited);
+            string? said = null;
+            try { await Releases.LatestAsync("a/b"); } catch (SetupException e) { said = e.Key; }
+            Check(said?.StartsWith("GitHub's download limit") == true && limited.Calls == 2, "github: the rate limit is told when the page fails too, a 404 is not tried again");
+            var list = new StubHandler((r, i) => r.RequestUri!.AbsolutePath.EndsWith("/releases") ? new(System.Net.HttpStatusCode.NotFound)
+                : new(System.Net.HttpStatusCode.OK) { Content = new StringContent(json) });
+            Releases.Http = new HttpClient(list);
+            Check((await Releases.RecentAsync("a/b")) is [{ Tag: "v1.0" }], "github: the release list falls back to the latest release");
+        }
+        finally { Releases.Http = oldHttp; Releases.BackoffUnit = TimeSpan.FromSeconds(1); }
+
+        // second validation (Setup 1.2.6)
+        {
+            // a damaged setup.json: the rebuilt record is saved, so the second load still has it and removing puts the file back
+            File.WriteAllText(Path.Combine(abin, "d3d9.dll"), "bridge");
+            Directory.CreateDirectory(Path.Combine(abin, ".trex"));
+            File.WriteAllText(Path.Combine(Manifest.DirOf(abin), "d3d9.dll.bak"), "reshade");
+            foreach (var f in new[] { "Options.ini.bak", "unknown.bin.bak" }) File.Delete(Path.Combine(Manifest.DirOf(abin), f));
+            var sj2 = Path.Combine(Manifest.DirOf(abin), "setup.json");
+            File.WriteAllText(sj2, "{ broken");
+            var first = Manifest.Load(abin).Files.Count;
+            var second = Manifest.Load(abin).Files.Count;
+            Engine.FrameGenOff = _ => (null, null);
+            Engine.Remove(ag, Components.Bridge, Path.Combine(a, "Docs"));
+            Check(first == 1 && second == 1 && File.ReadAllText(Path.Combine(abin, "d3d9.dll")) == "reshade",
+                  "setup.json: the record rebuilt from a damaged one is kept, and removing the bridge puts the player's d3d9.dll back");
+
+            // the plan: the limit first, a turn-on dropped when the same Apply removes the bridge, the automatic 60 fps only
+            // without a chosen limit and not for AFMF next to an NVIDIA card
+            var plan = Engine.PlanFrameGen(75, true, true, [], nvidiaCard: true);
+            var dropped = Engine.PlanFrameGen(null, true, false, [Components.Bridge], nvidiaCard: false);
+            var auto = Engine.PlanFrameGen(null, true, true, [], nvidiaCard: true);
+            Check(plan.Select(p => p.Kind).SequenceEqual(new[] { "fps", "nv", "amd" }) && plan.All(p => !p.AutoLimit)
+                  && dropped.Count == 1 && dropped[0] is { Kind: "amd", On: false }
+                  && auto.Single(p => p.Kind == "nv").AutoLimit && !auto.Single(p => p.Kind == "amd").AutoLimit,
+                  "apply plan: order, a turn-on dropped with the bridge's removal, the automatic frame limit's cases");
+            var undone = false; var kept = false;
+            var onNotTaken = Engine.VerifyChange(true, () => null, () => (false, null), () => undone = true);
+            var offNotTaken = Engine.VerifyChange(false, () => null, () => (true, null), () => { }, () => kept = true);
+            var fine = Engine.VerifyChange(true, () => null, () => (true, null), () => undone = false);
+            Check(onNotTaken == SmoothMotion.DidNotTake && undone && offNotTaken == SmoothMotion.DidNotTake && kept && fine is null
+                  && Engine.VerifyChange(true, () => "DRS_SetSetting -160", () => (true, null), () => { }) == "DRS_SetSetting -160",
+                  "apply: an on that did not take is undone, an off that did not take keeps Setup's record");
+
+            // turning frame generation off on a removal asks both drivers, each error on its own (the fakes answer for them)
+            var nvMarker = SmoothMotion.Marker; var amdMarker = Afmf.Marker;
+            SmoothMotion.Marker = Path.Combine(a, "sm.txt"); Afmf.Marker = Path.Combine(a, "afmf.txt");
+            File.WriteAllText(SmoothMotion.Marker, "on"); File.WriteAllText(Afmf.Marker, "on");
+            Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_NV", "NVIDIA GeForce RTX 4070|62124|1|");
+            Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_AMD", "1|1");
+            var both = Engine.DefaultFrameGenOff(ag);
+            Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_NV", null);
+            Environment.SetEnvironmentVariable("APEX_SETUP_FAKE_AMD", null);
+            SmoothMotion.Marker = nvMarker; Afmf.Marker = amdMarker;
+            Check(both.Nv is not null && both.Amd is not null, "frame generation off: an NVIDIA answer does not skip AMD");
+
+            Check(!SmoothMotion.Supported("NVIDIA Quadro RTX 4000", 62124) && !SmoothMotion.Supported("NVIDIA RTX 4000 Ada Generation", 62124)
+                  && SmoothMotion.Supported("NVIDIA GeForce RTX 4060 Laptop GPU", 62124), "card: GeForce RTX 40 and 50 only, not Quadro RTX 4000 or RTX 4000 Ada");
+            Check(Engine.IsNetwork(new HttpRequestException("x")) && Engine.IsNetwork(new IOException("cut", new System.Net.Sockets.SocketException(10054)))
+                  && !Engine.IsNetwork(new IOException("in use")), "a connection cut mid-download is the network, not a file in use");
+
+            // a zip whose file an antivirus took after extraction: a missing file, not a missing asset
+            var zdir = Path.Combine(a, "zipsrc"); Directory.CreateDirectory(zdir); File.WriteAllText(Path.Combine(zdir, "dinput8.dll"), "loader");
+            var zip = Path.Combine(a, "l.zip"); System.IO.Compression.ZipFile.CreateFromDirectory(zdir, zip);
+            var unz = Releases.Unzip(zip);
+            File.WriteAllText(Path.Combine(unz, "dinput8.dll"), "");
+            var missingFile = false;
+            try { Releases.CheckExtracted(zip, unz); } catch (FileNotFoundException) { missingFile = true; }
+            Check(missingFile, "unzip: a file emptied or taken after extraction is reported as missing");
+
+            // through the real copy: a file cut short after its copy is named with Game\Bin; a download blocked by the antivirus
+            // is named with Setup's download folder
+            var asi = Path.Combine(a, "dl", "Sims3SettingsSetter.asi"); Directory.CreateDirectory(Path.GetDirectoryName(asi)!); File.WriteAllText(asi, "s3ss");
+            Engine.Placed = to => { if (to.EndsWith("Sims3SettingsSetter.asi")) File.WriteAllText(to, ""); };
+            string[]? cut = null;
+            try { await Engine.InstallAsync(ag, [Components.S3ss], new OneFileSource(asi, null), null, Path.Combine(a, "Docs")); }
+            catch (SetupException e) { cut = e.Args; }
+            Engine.Placed = _ => { };
+            string[]? blocked = null;
+            try { await Engine.InstallAsync(ag, [Components.S3ss], new OneFileSource(asi, new IOException("blocked", unchecked((int)0x800700E1))), null, Path.Combine(a, "Docs")); }
+            catch (SetupException e) { blocked = e.Args; }
+            Check(cut is ["Sims3SettingsSetter.asi", var b1] && b1 == abin && blocked is [_, var b2] && b2 == GitHubSource.TempRoot,
+                  "antivirus: a file cut short after its copy names Game\\Bin, a blocked download names the download folder");
+        }
+
+        Check(Games.Processes.Contains("Sims3LauncherW") && Games.Processes.Contains("ts3wrap"), "the launcher and the restart host count as the game running");
+
+        Check(SelfUpdate.Quote(@"C:\Games\The Sims 3\") == "\"C:\\Games\\The Sims 3\\\\\"" && SelfUpdate.Quote("a\"b") == "\"a\\\"b\"" && SelfUpdate.Quote("plain") == "\"plain\"",
+              "self-update: a folder argument ending in \\ keeps its closing quote");
+        var aself = Path.Combine(a, "Setup.exe"); File.WriteAllText(aself, "old exe");
+        var newer = Path.Combine(a, "new.exe"); File.WriteAllText(newer, "new exe");
+        var startFailed = false;
+        try { SelfUpdate.ReplaceAndStart(newer, aself, [], (_, _) => throw new InvalidOperationException("no start")); } catch (InvalidOperationException) { startFailed = true; }
+        Check(startFailed && File.ReadAllText(aself) == "old exe" && !File.Exists(aself + ".old"), "self-update: a new Setup that does not start puts the old exe back");
+    }
+    finally
+    {
+        Games.IsRunning = () => false;
+        foreach (var f in Directory.EnumerateFiles(a, "*", SearchOption.AllDirectories)) File.SetAttributes(f, FileAttributes.Normal);
+        Directory.Delete(a, true);
+    }
+}
+
 // the generated JSON writes and reads exactly what the reflection serializer did: players' setup.json and restore points
 {
     var legacy = new System.Text.Json.JsonSerializerOptions { WriteIndented = true };
@@ -761,6 +1224,35 @@ return failures == 0 ? 0 : 1;
 static string SourceFile([System.Runtime.CompilerServices.CallerFilePath] string path = "") => path;
 
 // the fake GitHub files, plus the S3PP archive the way GitHubSource takes it
+// a source whose file is gone when Setup comes to copy it (an antivirus took it after the download)
+sealed class VanishingSource(string root) : ISource
+{
+    public Task<(List<(string Src, string Dest)> Files, string Version)> FetchAsync(string component, Game g, string docs, CancellationToken ct)
+    {
+        if (component == Components.S3pp) throw new FileNotFoundException("moved", Path.Combine(root, "Sims3Performance.zip"));
+        return Task.FromResult((new List<(string, string)> { (Path.Combine(root, "gone", "Sims3SettingsSetter.asi"), Path.Combine(g.Bin, "Sims3SettingsSetter.asi")) }, "1"));
+    }
+}
+
+// one file as the download of any component, or the error its fetch ends with
+sealed class OneFileSource(string file, Exception? fails) : ISource
+{
+    public Task<(List<(string Src, string Dest)> Files, string Version)> FetchAsync(string component, Game g, string docs, CancellationToken ct) =>
+        fails is not null ? throw fails : Task.FromResult((new List<(string, string)> { (file, Path.Combine(g.Bin, Path.GetFileName(file))) }, "1"));
+}
+
+// GitHub as the tests want it: each request answered by the function, which counts them
+sealed class StubHandler(Func<HttpRequestMessage, int, HttpResponseMessage> answer) : HttpMessageHandler
+{
+    public int Calls;
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage r, CancellationToken ct)
+    {
+        var res = answer(r, Calls++);
+        res.RequestMessage ??= r;
+        return Task.FromResult(res);
+    }
+}
+
 sealed class MixedSource : ISource
 {
     readonly ISource _inner; readonly string _zip;

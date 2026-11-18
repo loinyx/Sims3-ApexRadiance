@@ -54,6 +54,7 @@ void AfterReset();
 void Shutdown(); // FreeLibrary only: restores the window procedure
 
 bool IsVisible();
+float TakeWheel(); // mouse wheel notches over the game window since the last call (render thread, once a frame)
 bool MouseOverMenu(); // the menu is open and the mouse is over one of its windows (render or window thread)
 void SetVisible(bool visible);
 // With the menu closed: ImGui still gets the mouse, which it takes only over its windows (a startup question drawn with the

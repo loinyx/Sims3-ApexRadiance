@@ -37,6 +37,8 @@ struct Pack
 std::vector<Pack> MergeList(const std::string& effectPackagesIni, const std::vector<std::string>& downloadedFolders);
 // Render thread: the current list (built-in at first; ReShade's after RefreshList read it)
 const std::vector<Pack>& List();
+// Render thread, once a frame before the menu draws (OnPresent): takes a new list text or downloaded folders into List()
+void BeginFrame();
 // Reads ReShade's list once a session (worker; Download calls it); offline keeps the built-in one
 void RefreshList();
 enum class ListState { BuiltIn, Reading, Read, Offline };

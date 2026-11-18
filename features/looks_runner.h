@@ -35,10 +35,11 @@ inline constexpr D3DRENDERSTATETYPE kSavedRenderStates[] = { D3DRS_ZENABLE, D3DR
     D3DRS_STENCILENABLE, D3DRS_CULLMODE, D3DRS_SCISSORTESTENABLE, D3DRS_FOGENABLE, D3DRS_SRGBWRITEENABLE, D3DRS_CLIPPLANEENABLE,
     D3DRS_COLORWRITEENABLE, D3DRS_SRCBLENDALPHA, D3DRS_DESTBLENDALPHA, D3DRS_BLENDOPALPHA, D3DRS_COLORWRITEENABLE1,
     D3DRS_COLORWRITEENABLE2, D3DRS_COLORWRITEENABLE3, D3DRS_STENCILFUNC, D3DRS_STENCILPASS, D3DRS_STENCILFAIL, D3DRS_STENCILZFAIL,
-    D3DRS_STENCILREF, D3DRS_STENCILMASK, D3DRS_STENCILWRITEMASK };
+    D3DRS_STENCILREF, D3DRS_STENCILMASK, D3DRS_STENCILWRITEMASK, D3DRS_TWOSIDEDSTENCILMODE, D3DRS_FILLMODE, D3DRS_DITHERENABLE,
+    D3DRS_LASTPIXEL }; // (the last four: a player's effect only, set as ReShade sets them on every pass)
 inline constexpr D3DSAMPLERSTATETYPE kSavedSamplerStates[] = { D3DSAMP_MINFILTER, D3DSAMP_MAGFILTER, D3DSAMP_MIPFILTER,
     D3DSAMP_ADDRESSU, D3DSAMP_ADDRESSV, D3DSAMP_SRGBTEXTURE, D3DSAMP_MAXMIPLEVEL, D3DSAMP_MIPMAPLODBIAS, D3DSAMP_ADDRESSW,
-    D3DSAMP_BORDERCOLOR };
+    D3DSAMP_BORDERCOLOR, D3DSAMP_MAXANISOTROPY }; // (the last: a player's effect only)
 inline constexpr int kSavedRenderStateCount = (int)(sizeof(kSavedRenderStates) / sizeof(kSavedRenderStates[0]));
 inline constexpr int kSavedSamplerStateCount = (int)(sizeof(kSavedSamplerStates) / sizeof(kSavedSamplerStates[0]));
 inline constexpr int kBuiltInRenderStates = 16, kBuiltInSamplerStates = 8, kBuiltInSamplers = 6;
@@ -64,6 +65,8 @@ struct Frame
     float farPlane = 1000.0f;            // ReShade's RESHADE_DEPTH_LINEARIZATION_FAR_PLANE default
     float mix = 1.0f;                    // 0..1, blend of the stage over the input (0: the caller skips the run, same pixels)
     unsigned frame = 0;                  // the caller's frame number (framecount/frametime tick once per new value); 0 = every Run is a frame
+    float wheel = 0.0f;                  // the frame's mouse wheel notches (mousewheel)
+    bool overlayOpen = false;            // the Apex menu is open (overlay_open)
     float gameCurve = 0.0f;              // > 0: the game later applies x (1 + c) / (x + c) to the target; the stage sees it
                                          // applied and writes its inverse, so the picture after the game's curve is the look's
 };
@@ -112,7 +115,7 @@ private:
     float buf_[4] = {};
     float aux_[4] = {};
     float depthC_[4] = {};
-    unsigned long long startMs_ = 0, lastMs_ = 0; // uniform sources: timer / frametime
+    double startMs_ = 0, lastMs_ = 0; // uniform sources: timer / frametime (ms, NowMs)
     unsigned int frameCount_ = 0;
     unsigned int lastFrame_ = 0;       // Frame::frame of the last tick
     float frameTimeMs_ = 0.0f;

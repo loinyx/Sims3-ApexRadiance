@@ -5,12 +5,20 @@ using System.Text.Json;
 
 namespace ApexSetup;
 
-public sealed record Asset(string Name, string Url, string? Sha256);
+// Size: bytes as the API reports them (0 when read from the release page)
+public sealed record Asset(string Name, string Url, string? Sha256, long Size = 0);
+
+// A failure Setup explains in the player's words: an English key with {n} arguments, translated by the UI (Message stays readable)
+public sealed class SetupException(string key, params string[] args) : InvalidOperationException(string.Format(key, args))
+{
+    public string Key { get; } = key;
+    public string[] Args { get; } = args;
+}
 public sealed record Release(string Repo, string Tag, IReadOnlyList<Asset> Assets)
 {
     public string Version => Tag.TrimStart('v', 'V');
     public Asset Find(Func<string, bool> match) =>
-        Assets.FirstOrDefault(a => match(a.Name)) ?? throw new InvalidOperationException($"{Repo} {Tag}: asset not found");
+        Assets.FirstOrDefault(a => match(a.Name)) ?? throw new InvalidOperationException($"{Repo} {Tag}: asset not found (the release has: {string.Join(", ", Assets.Select(a => a.Name))})");
 }
 
 // Every download comes from the latest release of the project's own GitHub repository.
@@ -23,7 +31,8 @@ public static class Releases
     public const string Dxvk = "doitsujin/dxvk";
     public const string MonoPatcher = "LazyDuchess/MonoPatcher";
 
-    static readonly HttpClient Http = MakeClient();
+    // settable for the tests' stub handler
+    public static HttpClient Http { get; set; } = MakeClient();
 
     static HttpClient MakeClient()
     {
@@ -34,31 +43,77 @@ public static class Releases
 
     public static async Task<Release> LatestAsync(string repo, CancellationToken ct = default)
     {
+        Exception? apiError = null;
         // short limits: a stalled request must not keep Setup "checking" for the client's 5 minutes
         using (var api = CancellationTokenSource.CreateLinkedTokenSource(ct))
         {
             api.CancelAfter(TimeSpan.FromSeconds(15));
             try { return await FromApiAsync(repo, api.Token); }
-            catch (Exception) when (!ct.IsCancellationRequested) { } // the API allows 60 calls an hour per address; a portal may answer HTML
+            catch (Exception e) when (!ct.IsCancellationRequested) { apiError = e; } // the API allows 60 calls an hour per address; a portal may answer HTML
         }
         using var page = CancellationTokenSource.CreateLinkedTokenSource(ct);
         page.CancelAfter(TimeSpan.FromSeconds(20));
-        return await FromPageAsync(repo, page.Token);
+        try { return await FromPageAsync(repo, page.Token); }
+        catch (Exception) when (apiError is SetupException limit && !ct.IsCancellationRequested) { throw limit; } // (the page failing too: the limit is the news)
     }
+
+    // GitHub's answer to a refused API call: its rate limit (403 or 429 with no calls left) says when it opens again
+    public static SetupException? RateLimit(System.Net.HttpStatusCode status, string? remaining, string? reset, DateTimeOffset now)
+    {
+        if (status is not (System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.TooManyRequests) || remaining != "0") return null;
+        var minutes = long.TryParse(reset, out var r) ? Math.Max(1, (long)Math.Ceiling((DateTimeOffset.FromUnixTimeSeconds(r) - now).TotalMinutes)) : 60;
+        return new SetupException("GitHub's download limit was reached; try again in {0} minutes.", minutes.ToString());
+    }
+
+    // a GET that is tried again on a server error (5xx) or a timeout: 3 tries, 1 s then 2 s apart; a refusal (4xx) fails at once
+    public static TimeSpan BackoffUnit = TimeSpan.FromSeconds(1);
+    static async Task<HttpResponseMessage> GetAsync(string url, CancellationToken ct)
+    {
+        for (var i = 0; ; i++)
+        {
+            HttpResponseMessage? r = null;
+            try
+            {
+                r = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+                if ((int)r.StatusCode < 500 || i == 2) return r;
+            }
+            catch (Exception e) when (e is HttpRequestException or TaskCanceledException && !ct.IsCancellationRequested && i < 2) { }
+            r?.Dispose();
+            await Task.Delay(BackoffUnit * (i + 1), ct);
+        }
+    }
+
+    static async Task<string> GetStringAsync(string url, CancellationToken ct)
+    {
+        using var r = await GetAsync(url, ct);
+        if (RateLimit(r.StatusCode, Header(r, "X-RateLimit-Remaining"), Header(r, "X-RateLimit-Reset"), DateTimeOffset.UtcNow) is { } limit) throw limit;
+        r.EnsureSuccessStatusCode();
+        return await r.Content.ReadAsStringAsync(ct);
+    }
+
+    static string? Header(HttpResponseMessage r, string name) => r.Headers.TryGetValues(name, out var v) ? v.FirstOrDefault() : null;
 
     // The repo's recent published releases, newest first (drafts and prereleases left out); used when the latest one lacks
     // a file another edition needs
+    // (without the API: the latest release alone, from its page)
     public static async Task<IReadOnlyList<Release>> RecentAsync(string repo, CancellationToken ct = default)
     {
-        using var api = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        api.CancelAfter(TimeSpan.FromSeconds(20));
-        using var doc = JsonDocument.Parse(await Http.GetStringAsync($"https://api.github.com/repos/{repo}/releases?per_page=10", api.Token));
+        string json;
+        using (var api = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        {
+            api.CancelAfter(TimeSpan.FromSeconds(20));
+            try { json = await GetStringAsync($"https://api.github.com/repos/{repo}/releases?per_page=10", api.Token); }
+            // (GitHub's rate limit is the news itself: an older edition's build may be in a release the latest one does not show)
+            catch (Exception e) when (e is not SetupException && !ct.IsCancellationRequested) { return new[] { await LatestAsync(repo, ct) }; }
+        }
+        using var doc = JsonDocument.Parse(json);
         return doc.RootElement.EnumerateArray()
             .Where(r => !r.GetProperty("draft").GetBoolean() && !r.GetProperty("prerelease").GetBoolean())
             .Select(r => new Release(repo, r.GetProperty("tag_name").GetString()!, r.GetProperty("assets").EnumerateArray().Select(a => new Asset(
                 a.GetProperty("name").GetString()!,
                 a.GetProperty("browser_download_url").GetString()!,
-                a.TryGetProperty("digest", out var d) && d.GetString() is { } s && s.StartsWith("sha256:") ? s[7..] : null)).ToList()))
+                a.TryGetProperty("digest", out var d) && d.GetString() is { } s && s.StartsWith("sha256:") ? s[7..] : null,
+                a.TryGetProperty("size", out var z) ? z.GetInt64() : 0)).ToList()))
             .ToList();
     }
 
@@ -74,10 +129,11 @@ public static class Releases
     // The release page: /releases/latest redirects to the tag; expanded_assets lists each file with its SHA-256.
     static async Task<Release> FromPageAsync(string repo, CancellationToken ct)
     {
-        using var latest = await Http.GetAsync($"https://github.com/{repo}/releases/latest", ct);
+        using var latest = await GetAsync($"https://github.com/{repo}/releases/latest", ct);
         latest.EnsureSuccessStatusCode();
-        var tag = Uri.UnescapeDataString(latest.RequestMessage!.RequestUri!.AbsolutePath.Split("/releases/tag/")[1]);
-        var html = await Http.GetStringAsync($"https://github.com/{repo}/releases/expanded_assets/{Uri.EscapeDataString(tag)}", ct);
+        // a repo without releases stays on /releases: no tag to read
+        if (TagOf(latest.RequestMessage?.RequestUri) is not { } tag) throw new HttpRequestException($"{repo}: no published release");
+        var html = await GetStringAsync($"https://github.com/{repo}/releases/expanded_assets/{Uri.EscapeDataString(tag)}", ct);
         var assets = new List<Asset>();
         foreach (var item in html.Split("<li"))
         {
@@ -91,14 +147,18 @@ public static class Releases
         return new Release(repo, tag, assets);
     }
 
+    public static string? TagOf(Uri? landed) =>
+        landed?.AbsolutePath.Split("/releases/tag/") is [_, { Length: > 0 } t] ? Uri.UnescapeDataString(t) : null;
+
     static async Task<Release> FromApiAsync(string repo, CancellationToken ct)
     {
-        using var doc = JsonDocument.Parse(await Http.GetStringAsync($"https://api.github.com/repos/{repo}/releases/latest", ct));
+        using var doc = JsonDocument.Parse(await GetStringAsync($"https://api.github.com/repos/{repo}/releases/latest", ct));
         var root = doc.RootElement;
         var assets = root.GetProperty("assets").EnumerateArray().Select(a => new Asset(
             a.GetProperty("name").GetString()!,
             a.GetProperty("browser_download_url").GetString()!,
-            a.TryGetProperty("digest", out var d) && d.GetString() is { } s && s.StartsWith("sha256:") ? s[7..] : null)).ToList();
+            a.TryGetProperty("digest", out var d) && d.GetString() is { } s && s.StartsWith("sha256:") ? s[7..] : null,
+            a.TryGetProperty("size", out var z) ? z.GetInt64() : 0)).ToList();
         return new Release(repo, root.GetProperty("tag_name").GetString()!, assets);
     }
 
@@ -107,7 +167,9 @@ public static class Releases
     {
         Directory.CreateDirectory(dir);
         var file = Path.Combine(dir, a.Name);
-        await using (var s = await Http.GetStreamAsync(a.Url, ct))
+        using var resp = await GetAsync(a.Url, ct);
+        resp.EnsureSuccessStatusCode();
+        await using (var s = await resp.Content.ReadAsStreamAsync(ct))
         await using (var f = File.Create(file))
         {
             // HttpClient.Timeout stops at the headers: a body that stops coming fails after 60 s without data
@@ -124,7 +186,7 @@ public static class Releases
             }
         }
         if (a.Sha256 is { } want && !Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(file))).Equals(want, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException($"{a.Name}: download is damaged (checksum mismatch)");
+            throw new SetupException("The download of {0} was damaged. Try again; if it repeats, an antivirus web shield or a proxy may be changing downloads.", a.Name);
         return file;
     }
 
@@ -151,6 +213,20 @@ public static class Releases
         var dir = zip + ".d";
         if (Directory.Exists(dir)) Directory.Delete(dir, true);
         ZipFile.ExtractToDirectory(zip, dir);
+        CheckExtracted(zip, dir);
         return dir;
+    }
+
+    // every file of the zip there whole after extraction: one an antivirus took or emptied is a missing file (FileNotFoundException,
+    // which the install reports as the antivirus), not a missing asset or an install without it
+    public static void CheckExtracted(string zip, string dir)
+    {
+        using var z = ZipFile.OpenRead(zip);
+        foreach (var e in z.Entries)
+        {
+            if (e.Name.Length == 0) continue; // (a folder)
+            var f = Path.Combine(dir, e.FullName.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(f) || new FileInfo(f).Length != e.Length) throw new FileNotFoundException(null, f);
+        }
     }
 }

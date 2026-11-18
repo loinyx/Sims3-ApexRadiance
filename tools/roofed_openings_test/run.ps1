@@ -29,7 +29,8 @@ $parts=@(
  (Between 'struct WallSeg {' 'constexpr DWORD kPatchRetryMs'),
  (Between 'bool SameGeometry(' "// The story's grid for its walls' patches"),
  (Between 'float SegPass(' '// The share of the lamp'),
- (Between 'struct RoofedAt {' '// end of RoofedSendWanted')
+ (Between 'struct RoofedAt {' '// end of RoofedSendWanted'),
+ (Between 'inline bool InnerBehindWall(' '// (GPU room lamps stage 3b, a lamp moved) InnerPass')
 )
 # A lamp edit that marks no room (Instant GPU relight, quick outdoor lamp edits) sends the roofed rooms taking room 0's lamps
 # through their openings from its tail, as the changed-room walk does

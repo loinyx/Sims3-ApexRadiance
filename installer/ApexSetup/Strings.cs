@@ -8,6 +8,9 @@ namespace ApexSetup;
 // English for a text without a pair. Static XAML texts are translated in place by Localize. The tables: Languages.cs.
 public static partial class Strings
 {
+    // an English text Setup has in its tables (every key is in the Portuguese table), whatever language shows
+    public static bool Has(string en) => PtBr.ContainsKey(en);
+
     public static string T(string en, params object[] args)
     {
         var s = Table(Lang) is { } table && table.TryGetValue(en, out var t) && t.Length > 0 ? t : en;

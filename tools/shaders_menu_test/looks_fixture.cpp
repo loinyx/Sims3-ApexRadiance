@@ -1,6 +1,7 @@
 // patches/looks_patch.cpp compiled as is, with Looks::Fx (the player's .fx compiler) and Looks::Packs (downloads)
 // replaced by fake data: a look of five runnable shaders (three built in, two of the player's, one with every kind of
-// parameter control and quality settings) and one shader of a pack that is not downloaded.
+// parameter control and quality settings, the other added in the menu and switched off), the second built-in one removed
+// in the menu (Restore), and one shader of a pack that is not downloaded.
 #include "rec.h"
 #include "patches/looks_patch.cpp"
 #include "fixture.h"
@@ -87,6 +88,9 @@ void RequestScan(bool) {}
 void SetDefines(const std::map<std::string, LooksDefines>&) {}
 void WantFiles(const std::vector<std::string>&) {}
 void BrowsePacks() {}
+void WantProbe(const std::string&) {}
+bool ProbedValues(const std::string&, std::map<std::string, std::set<std::string>>&) { return false; } // not tested: every value shows
+void SetAdapter(uint32_t, uint32_t) {}
 void SetBindFunctions(SetRenderTargetFn, SetDepthStencilFn) {}
 uint64_t GpuBytes() { return 0; }
 void ReleaseGpu() {}
@@ -106,6 +110,7 @@ bool Instance::Create(IDirect3DDevice9*, std::shared_ptr<const Effect>, std::str
 namespace Looks::Packs {
 #include "failure_text.inc"
 const std::vector<Pack>& List() { return FakePacks(); }
+void BeginFrame() {}
 void RefreshList() {}
 ListState CurrentListState() { return ListState::Read; }
 const Pack* Find(const std::string& folder)
@@ -164,13 +169,15 @@ void LooksState(bool compiling, bool edited, bool offer, int batch, bool twin)
     g.iniOrder.clear();
     for (int s : { 0, 3, 7 }) g.iniOrder.push_back({ Looks::Shader(s).technique, Looks::Shader(s).file, s });
     g.iniOrder.push_back({ "Everything", "Everything.fx", Looks::kUserShaderBase });
-    g.iniOrder.push_back({ "FilmGrain", "MyFilmGrain.fx", Looks::kUserShaderBase + 1 });
     g.iniOrder.push_back({ "MXAO", "qUINT_mxao.fx", g_twinState ? Looks::kUserShaderBase + 2 : -1 });
     g.iniKeys.clear();
     for (auto& e : g.iniOrder) g.iniKeys.insert(Lower(EntryKey(e)));
+    g.extra = { "FilmGrain@MyFilmGrain.fx" }; // added in the menu, switched off: the trash button beside its switch
     g.loaded = true;
     g.error.clear();
+    g.on.clear();
     RebuildOrder();
+    g.removed = { Lower(EntryKey(g.order[1])) }; // removed here: its row with Restore, and the look's changed dot and Save
     if (edited)
     {
         std::vector<float> v = g.iniValues[3];
@@ -182,6 +189,46 @@ void LooksState(bool compiling, bool edited, bool offer, int batch, bool twin)
     if (offer) g_offer = ImportOffer{ "Cinema suave", 2, { "qUINT", "AstrayFX" } };
     g_message.clear();
     g_fxMessage.clear();
+}
+
+bool SaveRoundTrip()
+{
+    LooksState(false, false, false, 0);
+    bool ok = true;
+    auto check = [&](bool c, const char* what) { if (!c) { printf("save round trip: FAIL %s\n", what); ok = false; } };
+    const std::string removedKey = EntryKey(g.order[1]), levels = EntryKey(g.order[0]);
+    check(Dirty(), "a removed shader is an unsaved change");
+    check(IsOff(1) && RunnableCount(false) == 4, "a removed shader no longer runs or counts");
+    Looks::Preset p;
+    Looks::ParsePreset(LookAsText(), p);
+    auto has = [&](const std::string& key) { return std::any_of(p.order.begin(), p.order.end(), [&](const auto& e) { return _stricmp(EntryKey(e).c_str(), key.c_str()) == 0; }); };
+    std::string apexOff;
+    if (auto top = p.sections.find(""); top != p.sections.end())
+        if (auto it = top->second.find("ApexOff"); it != top->second.end()) apexOff = it->second;
+    check(has(levels) && !has(removedKey), "Techniques: the shaders on, without the removed one");
+    check(!has("FilmGrain@MyFilmGrain.fx") && apexOff == "FilmGrain@MyFilmGrain.fx", "ApexOff: the shader switched off stays listed, not run");
+    check(apexOff.find(removedKey) == std::string::npos, "the removed shader is in no list");
+    // read back as the look: the switched-off shader is listed off, nothing is unsaved
+    g.removed.clear(); g.extra.clear(); g.off.clear();
+    g.ini = p;
+    g.iniOff.clear();
+    g.iniOff.insert(Lower(apexOff));
+    g.iniOrder = p.order;
+    g.iniOrder.push_back({ "FilmGrain", "MyFilmGrain.fx", Looks::kUserShaderBase + 1 });
+    g.iniKeys.clear();
+    for (auto& e : g.iniOrder) g.iniKeys.insert(Lower(EntryKey(e)));
+    RebuildOrder();
+    size_t grain = g.order.size();
+    for (size_t i = 0; i < g.order.size(); ++i) if (g.order[i].technique == "FilmGrain") grain = i;
+    check(grain < g.order.size() && IsOff(grain) && !Dirty(), "after saving: listed off, nothing unsaved");
+    if (grain < g.order.size())
+    {
+        SwitchEntry(grain, true);
+        check(!IsOff(grain) && Dirty(), "switching it on is an unsaved change");
+        SwitchEntry(grain, false);
+        check(IsOff(grain) && !Dirty(), "and off again is none");
+    }
+    return ok;
 }
 
 void PacksState(bool picks, int confirm)

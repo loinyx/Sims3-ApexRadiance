@@ -30,6 +30,8 @@ bool WantsPacks();
 // the Packs tab is shown), downloading, or finished (it clears by itself after 4 s unless a pack failed). Returns its
 // top (bottomY when none).
 float PacksBar(float left, float right, float bottomY, bool packsTab);
+// The Shaders page, before its cards: a new pack list (download done, list read) is taken in here, never mid-page
+void BeginMenuFrame();
 // The bar's last height with the gap under it (0 when it was not drawn): MainWindow keeps that room at the page's end
 float PacksBarHeight();
 // The note card offering the packs an imported look or preset misses (draws nothing when there is none)

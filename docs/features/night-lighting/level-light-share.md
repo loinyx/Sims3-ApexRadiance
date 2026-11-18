@@ -1084,8 +1084,12 @@ cutout capture.
   lamps keep the game's tests.
 - **Per point** (`InnerShadow` -> `InnerPass`): `YardPass` on the story's grid and the one above (asked only above its
   floor); a lamp of the story above also passes its own story's grid, goes down through that story's plane only outside
-  its roofed quadrants and off any placed floor (`InnerDownGate`, the live floor grid), then the walls of this story. The
-  game's wall test of the lamp is skipped (`GameWallTest`). In the floor mask's copies of room 0 these lamps give 0
+  its roofed quadrants and off any placed floor (`InnerDownGate`, the live floor grid), then the walls of this story. A
+  wall texel whose lamp is more than 1 cm behind its plane gives 0 (`InnerBehindWall`, also in the move worker's
+  `Room0PassAt`): the game puts room 0's wall samples on the wall's line, which the grid walk ends on and never tests, and
+  an area light has no N.L, so before 4.0.4 the lamp lit the outer face of its own room's walls beside the openings (soft
+  patches around windows and doors, 17/11 captures; since 2.13.0). The game's wall test of the lamp is skipped
+  (`GameWallTest`). In the floor mask's copies of room 0 these lamps give 0
   (the ground atlas holds none of them; the room's own map carries them). Realistic reach applies on room 0's and the
   roofless rooms' wall texels as for any lamp there; not in a roofed room. No daytime curve (`RoofedDay` is for outdoor
   lamps). Directional maps (`BasisLightHook`): the same test at the basis sample. Normalisation (`RoomNormHook`): these

@@ -117,8 +117,10 @@ public static class Games
 
     // replaced by the offline tests, which may run while the player has the game open
     public static Func<bool> IsRunning = DefaultIsRunning;
-    static bool DefaultIsRunning() =>
-        Process.GetProcessesByName("TS3W").Length + Process.GetProcessesByName("TS3").Length > 0;
+    // the game, its launchers (they hold the game's files) and the restart host that starts it again
+    // (and the RTX Remix bridge's server, which holds Game\Bin\.trex while it runs; another Remix game's counts too)
+    public static readonly string[] Processes = { "TS3W", "TS3", "Sims3Launcher", "Sims3LauncherW", "ts3wrap", "NvRemixBridge" };
+    static bool DefaultIsRunning() => Processes.Any(n => Process.GetProcessesByName(n).Length > 0);
 
     static IEnumerable<string> SteamLibraries()
     {
@@ -127,8 +129,10 @@ public static class Games
         if (steam is null) yield break;
         yield return steam;
         var vdf = Path.Combine(steam, "steamapps", "libraryfolders.vdf");
-        if (!File.Exists(vdf)) yield break;
-        foreach (Match m in Regex.Matches(File.ReadAllText(vdf), "\"path\"\\s+\"([^\"]+)\""))
+        string text;
+        try { text = File.Exists(vdf) ? File.ReadAllText(vdf) : ""; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { text = ""; } // (Steam writing it: its own folder still counts)
+        foreach (Match m in Regex.Matches(text, "\"path\"\\s+\"([^\"]+)\""))
             yield return m.Groups[1].Value.Replace(@"\\", @"\");
     }
 }

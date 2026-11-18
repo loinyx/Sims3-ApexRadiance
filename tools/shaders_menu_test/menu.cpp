@@ -259,6 +259,7 @@ int main(int argc, char** argv)
     VioletTheme::ApplyStyle(ImGui::GetStyle());
     VioletTheme::LoadFonts(io);
     g_looksPatch = Fixture::StartLooks();
+    if (!Fixture::SaveRoundTrip()) return 1;
     kPublicBuild = false; // I18n notes missing translations only in developer mode
     {
         // self-check: a frame with each fault must give each finding

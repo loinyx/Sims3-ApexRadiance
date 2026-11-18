@@ -166,6 +166,8 @@ const I18n::Entry kEntries[] = {
      "Les portes fermées arrêtent la lumière des lampes ; les fenêtres, les arches et les portes vitrées la laissent passer"},
     {"Light bounces between rooms", "A luz rebate entre cômodos", "La luz rebota entre habitaciones", "La lumière rebondit entre les pièces"},
     {"A lit room softly lights the next room through an arch", "Um cômodo aceso ilumina de leve o cômodo vizinho pelo arco", "Una habitación iluminada ilumina suavemente la contigua a través de un arco", "Une pièce éclairée éclaire doucement la pièce voisine à travers une arche"},
+    {"True-size furniture shadows", "Sombras dos móveis no tamanho real", "Sombras de los muebles a tamaño real", "Ombres des meubles à taille réelle"},
+    {"Each piece casts a shadow its own size, softer farther away; off: the game's larger blobs", "Cada peça projeta uma sombra do próprio tamanho, mais suave ao longe; desligado: as manchas maiores do jogo", "Cada pieza proyecta una sombra de su propio tamaño, más suave a lo lejos; desactivado: las manchas más grandes del juego", "Chaque objet projette une ombre à sa taille, plus douce au loin ; désactivé : les taches plus grandes du jeu"},
     {"Smooth light maps", "Mapas de luz suaves", "Mapas de luz suaves", "Cartes de lumière lissées"},
     {"Lamp light in rooms without blocks, bands or rings; floors blend across arches", "Luz das lâmpadas nos cômodos sem blocos, faixas ou anéis; pisos se misturam pelos arcos",
      "Luz de las lámparas en las habitaciones sin bloques, bandas ni anillos; los suelos se funden a través de los arcos",

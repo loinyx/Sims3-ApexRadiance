@@ -14,6 +14,7 @@
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "ole32.lib")
 #include "looks_fx.h"
+#include "looks_preset.h" // ParseDefines (a ReShade.ini's definitions)
 #include "third_party/reshadefx/effect_parser.hpp"
 #include "third_party/reshadefx/effect_codegen.hpp"
 #include "third_party/reshadefx/effect_preprocessor.hpp"
@@ -25,6 +26,9 @@
 #include <functional>
 #include <map>
 #include <d3dcompiler.h>
+// ReShade resizes texture images with stb_image_resize2 (public domain, the commit ReShade 6.7.3 pins): the same code here
+#define STB_IMAGE_RESIZE_IMPLEMENTATION
+#include "third_party/stb/stb_image_resize2.h"
 #pragma comment(lib, "d3dcompiler.lib")
 
 namespace Looks::Fx {
@@ -337,16 +341,46 @@ D3DFORMAT Format(reshadefx::texture_format f, const char** lowered)
     return D3DFMT_A8R8G8B8;
 }
 
-// D3DCompile of one entry point's shader model 3.0 HLSL. ReShade compiles with optimisation level 3 (performance mode)
-// or 1; when that fails here the other flag sets D3D9 offers are tried in turn: flow control kept (loops it cannot unroll,
-// fewer instruction slots), flow control avoided (gradients inside loops), then no optimisation. *tried is the set that
-// worked (0 = the first), or -1.
+// D3DCompile of one entry point's shader model 3.0 HLSL. ReShade compiles with optimisation level 1 (level 3 only in its
+// performance mode, which Apex does not have: __RESHADE_PERFORMANCE_MODE__ is 0), so level 1 comes first and gives
+// ReShade's code; when that fails here the other flag sets D3D9 offers are tried in turn: level 3, flow control kept
+// (loops it cannot unroll, fewer instruction slots), flow control avoided (gradients inside loops), then no optimisation.
+// *tried is the set that worked (0 = the first), or -1.
+// The global PreprocessorDefinitions of a ReShade.ini (else GShade.ini) beside the game's exe ([GENERAL]), read once
+// (a player coming from ReShade keeps the definitions set there); empty when there is none
+const LooksDefines& GlobalDefines()
+{
+    static const LooksDefines defs = [] {
+        wchar_t exe[MAX_PATH] = {};
+        const DWORD n = GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        std::wstring dir(exe, n);
+        dir.resize(dir.find_last_of(L"\\/") == std::wstring::npos ? 0 : dir.find_last_of(L"\\/") + 1);
+        for (const wchar_t* name : { L"ReShade.ini", L"GShade.ini" })
+        {
+            std::string text;
+            if (dir.empty() || !ReadCapped(dir + name, 1u << 20, text)) continue;
+            bool general = false;
+            for (size_t pos = 0; pos < text.size();)
+            {
+                size_t e = text.find('\n', pos); if (e == std::string::npos) e = text.size();
+                std::string line = text.substr(pos, e - pos);
+                pos = e + 1;
+                while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+                if (!line.empty() && line.front() == '[') { general = _stricmp(line.c_str(), "[GENERAL]") == 0; continue; }
+                if (general && line.rfind("PreprocessorDefinitions=", 0) == 0) return Looks::ParseDefines(line.substr(24));
+            }
+        }
+        return LooksDefines{};
+    }();
+    return defs;
+}
+
 struct Try { UINT flags; const char* name; };
 const Try kTries[] = {
-    { D3DCOMPILE_OPTIMIZATION_LEVEL3, "" },
+    { D3DCOMPILE_OPTIMIZATION_LEVEL1, "" },
+    { D3DCOMPILE_OPTIMIZATION_LEVEL3, "optimisation level 3" },
     { D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_PREFER_FLOW_CONTROL, "flow control kept" },
     { D3DCOMPILE_OPTIMIZATION_LEVEL3 | D3DCOMPILE_AVOID_FLOW_CONTROL, "flow control avoided" },
-    { D3DCOMPILE_OPTIMIZATION_LEVEL1, "optimisation level 1" },
     { D3DCOMPILE_SKIP_OPTIMIZATION, "no optimisation" },
 };
 bool CompileSm3(const std::string& hlsl, const std::string& entry, bool vs, std::vector<uint8_t>& code, std::string& errors, int* tried)
@@ -376,7 +410,7 @@ bool CompileSm3(const std::string& hlsl, const std::string& entry, bool vs, std:
 // ---- the compile cache (Folders::cacheDir): D3DCompile's results for one effect, keyed by every entry point's generated
 // HLSL (the preprocessed source with its includes and macros, BUFFER_WIDTH / BUFFER_HEIGHT among them), its target and
 // D3DCompiler's version, so a changed .fx, .fxh or picture size is compiled again. One file per effect and picture size.
-constexpr char kCacheMagic[8] = { 'A', 'P', 'X', 'F', 'X', 'C', '1', 0 };
+constexpr char kCacheMagic[8] = { 'A', 'P', 'X', 'F', 'X', 'C', '2', 0 }; // 2: level 1 first (ReShade's flags), the 4.0.4 macros
 
 uint64_t Fnv(uint64_t h, const void* data, size_t n)
 {
@@ -445,6 +479,7 @@ void WriteCache(const std::wstring& dir, const std::wstring& file, uint64_t key,
 }
 
 std::atomic<int> g_cacheHits{ 0 }, g_cacheMisses{ 0 };
+std::atomic<uint32_t> g_vendor{ 0 }, g_device{ 0 };
 
 uint32_t BytesPerPixel(D3DFORMAT f)
 {
@@ -503,6 +538,7 @@ bool CompileImpl(const std::wstring& fxPath, const Folders& folders, UINT W, UIN
     out.file = Utf8(fxPath.substr(fxPath.find_last_of(L"\\/") + 1));
     out.width = W; out.height = H;
     auto fail = [&](std::string why) { out.error = std::move(why); return false; };
+    out.compiledWith = folders.defines; // also when it fails: other definitions must compile it again (MacrosMatch)
     if (!InsideRoot(folders.root, FullPath(fxPath))) return fail("the file is outside the Shaders folder");
 
     std::string source;
@@ -523,8 +559,8 @@ bool CompileImpl(const std::wstring& fxPath, const Folders& folders, UINT W, UIN
     pp.add_macro_definition("__RESHADE__", "60703");
     pp.add_macro_definition("__RESHADE_PERMUTATION__", "0");
     pp.add_macro_definition("__RESHADE_PERFORMANCE_MODE__", "0");
-    pp.add_macro_definition("__VENDOR__", "0");
-    pp.add_macro_definition("__DEVICE__", "0");
+    pp.add_macro_definition("__VENDOR__", std::to_string(g_vendor.load()));
+    pp.add_macro_definition("__DEVICE__", std::to_string(g_device.load()));
     pp.add_macro_definition("__RENDERER__", "36864"); // 0x9000: Direct3D 9
     pp.add_macro_definition("__APPLICATION__", std::to_string(std::hash<std::string>()("TS3W") & 0xFFFFFFFF));
     pp.add_macro_definition("BUFFER_WIDTH", std::to_string(W));
@@ -532,10 +568,15 @@ bool CompileImpl(const std::wstring& fxPath, const Folders& folders, UINT W, UIN
     pp.add_macro_definition("BUFFER_RCP_WIDTH", "(1.0 / BUFFER_WIDTH)");
     pp.add_macro_definition("BUFFER_RCP_HEIGHT", "(1.0 / BUFFER_HEIGHT)");
     pp.add_macro_definition("BUFFER_COLOR_SPACE", "1");   // sRGB
-    pp.add_macro_definition("BUFFER_COLOR_FORMAT", "88"); // B8G8R8X8 (the game's back buffer)
+    pp.add_macro_definition("BUFFER_COLOR_FORMAT", "87"); // B8G8R8A8: ReShade runs an X8 back buffer's effects on an A8 copy
     pp.add_macro_definition("BUFFER_COLOR_BIT_DEPTH", "8");
     for (const auto& [name, value] : folders.defines) // the look's PreprocessorDefinitions: before the file, as ReShade adds them
-        if (!name.empty()) pp.add_macro_definition(name, value);
+        if (!name.empty()) pp.add_macro_definition(name, value.empty() ? "1" : value); // "FOO=" is 1 in ReShade
+    // then a ReShade.ini / GShade.ini beside the game's exe, [GENERAL] PreprocessorDefinitions (the look's win, as in
+    // ReShade). Its depth settings are not taken: Apex knows this game's depth (below), and a ReShade.ini's
+    // RESHADE_DEPTH_INPUT_IS_REVERSED=1 (ReShade's default) would turn MXAO and DOF inside out here
+    for (const auto& [name, value] : GlobalDefines())
+        if (!name.empty() && name.rfind("RESHADE_DEPTH_", 0) != 0) pp.add_macro_definition(name, value.empty() ? "1" : value);
     // ReShade's global depth setting for this game: the INTZ depth is 0 near .. 1 far, as the runner's "not reversed";
     // ReShade.fxh and qUINT_common.fxh default to reversed. After the look's own, so a look that names it still wins
     pp.add_macro_definition("RESHADE_DEPTH_INPUT_IS_REVERSED", "0");
@@ -553,7 +594,6 @@ bool CompileImpl(const std::wstring& fxPath, const Folders& folders, UINT W, UIN
         return fail(ReasonFrom(pp.errors(), folders.root));
     if (pp.output().size() > kMaxPreprocessedBytes) return fail("the file expands to more than 16 MB of code");
     out.macros = UsedMacros(pp, fxPath, folders.defines);
-    out.compiledWith = folders.defines;
 
     // ---- parse and generate shader model 3.0 HLSL
     std::unique_ptr<reshadefx::codegen> cg(reshadefx::create_codegen_hlsl(30, false, false));
@@ -606,7 +646,8 @@ bool CompileImpl(const std::wstring& fxPath, const Folders& folders, UINT W, UIN
                     x.format = D3DFMT_A8R8G8B8; // images are uploaded as 8-bit BGRA
                     x.image = FindTextureFile(folders, a.value.string_data);
                     uint64_t isz = 0;
-                    if (x.image.empty()) x.error = "needs the texture file " + a.value.string_data + ", which is not in the Textures folder";
+                    // a missing file: the texture stays cleared to zero and the effect runs, as ReShade does (it logs the file)
+                    if (x.image.empty()) out.notes.push_back("texture " + t.name + ": " + a.value.string_data + " is not in the Textures folder (left black, as in ReShade)");
                     else if (!FileSize(x.image, isz) || isz > kMaxTextureFileBytes) x.error = "its texture " + a.value.string_data + " is larger than 64 MB";
                 }
             if (x.error.empty())
@@ -795,6 +836,9 @@ bool MacrosMatch(const Effect& fx, const LooksDefines& defines)
     // compiled with exactly these: a definition the file ignores (its own #define wins) would otherwise never match and the
     // file would compile again at every scan, its effect created again each time
     if (fx.compiledWith == defines) return true;
+    // a file that failed may not know the definitions it tests (the preprocessor stopped): any other set compiles it again,
+    // so taking back the setting that broke it runs it again
+    if (!fx.error.empty()) return false;
     for (const Macro& m : fx.macros)
     {
         const std::string* want = &m.def;
@@ -851,6 +895,34 @@ void DefaultValues(const Effect& fx, std::vector<float>& regs)
 void UpdateSources(const Effect& fx, std::vector<float>& regs, SourceState& st)
 {
     if (st.pingpong.size() != fx.uniforms.size() * 2) st.pingpong.assign(fx.uniforms.size() * 2, 0.0f);
+    if (st.keys.size() != fx.uniforms.size() * 2) st.keys.assign(fx.uniforms.size() * 2, 0);
+    if (st.wheelValue.size() != fx.uniforms.size()) st.wheelValue.assign(fx.uniforms.size(), NAN);
+    // input as ReShade reads it: only while the game's window has the focus (this process's foreground window)
+    HWND fg = GetForegroundWindow();
+    DWORD pid = 0;
+    if (fg) GetWindowThreadProcessId(fg, &pid);
+    const bool focused = fg && pid == GetCurrentProcessId();
+    float mouse[2] = { st.mouse[0], st.mouse[1] };
+    if (focused)
+    {
+        POINT p{}; RECT rc{};
+        if (GetCursorPos(&p) && ScreenToClient(fg, &p) && GetClientRect(fg, &rc) && rc.right > 0 && rc.bottom > 0)
+            mouse[0] = (float)p.x * fx.width / (float)rc.right, mouse[1] = (float)p.y * fx.height / (float)rc.bottom;
+    }
+    const float delta[2] = { st.mouseSeen ? mouse[0] - st.mouse[0] : 0.0f, st.mouseSeen ? mouse[1] - st.mouse[1] : 0.0f };
+    st.mouse[0] = mouse[0], st.mouse[1] = mouse[1], st.mouseSeen = true;
+    // key / mousebutton: held; mode "toggle" (or toggle = true) flips on each press; mode "press" is true on the pressed frame
+    auto keyValue = [&](size_t i, int vk) {
+        const bool down = focused && vk > 0 && vk < 256 && (GetAsyncKeyState(vk) & 0x8000) != 0;
+        uint8_t& was = st.keys[i * 2]; uint8_t& tog = st.keys[i * 2 + 1];
+        const bool pressed = down && !was;
+        was = down;
+        const Ann* mode = FindAnn(fx.uniforms[i].ann, "mode");
+        const Ann* toggle = FindAnn(fx.uniforms[i].ann, "toggle");
+        if ((mode && mode->isString && mode->s == "toggle") || (toggle && !toggle->isString && toggle->f[0] != 0.0f)) { if (pressed) tog = !tog; return tog ? 1.0f : 0.0f; }
+        if (mode && mode->isString && mode->s == "press") return pressed ? 1.0f : 0.0f;
+        return down ? 1.0f : 0.0f;
+    };
     for (size_t i = 0; i < fx.uniforms.size(); ++i)
     {
         const Uniform& u = fx.uniforms[i];
@@ -860,7 +932,7 @@ void UpdateSources(const Effect& fx, std::vector<float>& regs, SourceState& st)
         float v[4] = { 0, 0, 0, 0 };
         if (n == "timer") v[0] = st.timerMs;
         else if (n == "frametime") v[0] = st.frametimeMs;
-        else if (n == "framecount") v[0] = (float)st.frame;
+        else if (n == "framecount") v[0] = u.base == kBool ? (st.frame % 2 == 0 ? 1.0f : 0.0f) : (float)st.frame; // a bool: even frames (ReShade)
         else if (n == "random")
         {
             const Ann* mn = FindAnn(u.ann, "min"); const Ann* mx = FindAnn(u.ann, "max");
@@ -870,12 +942,32 @@ void UpdateSources(const Effect& fx, std::vector<float>& regs, SourceState& st)
         }
         else if (n == "pingpong")
         {
+            // as ReShade's runtime: a step between step[0] and step[1] (step[1] 0: step[0]), slowed by smoothing near the end it
+            // moves to, at least 0.05 a second; from the uniform's own value (x, then its direction in y: 0 counts as rising)
             const Ann* mn = FindAnn(u.ann, "min"); const Ann* mx = FindAnn(u.ann, "max"); const Ann* sp = FindAnn(u.ann, "step");
-            const float lo = mn ? mn->f[0] : 0.0f, hi = mx ? mx->f[0] : 1.0f, step = sp ? sp->f[0] : 1.0f;
+            const Ann* sm = FindAnn(u.ann, "smoothing");
+            const float lo = mn && !mn->isString ? mn->f[0] : 0.0f, hi = mx && !mx->isString ? mx->f[0] : 1.0f; // (max 1 when absent, as ReShade)
+            const float s0 = sp && !sp->isString ? sp->f[0] : 0.0f, s1 = sp && !sp->isString ? sp->f[1] : 0.0f;
+            const float smoothing = sm && !sm->isString ? sm->f[0] : 0.0f;
             float& val = st.pingpong[i * 2]; float& dir = st.pingpong[i * 2 + 1];
-            if (dir == 0) { dir = 1; val = lo; }
-            val += dir * step * st.frametimeMs * 0.001f;
-            if (val >= hi) { val = hi; dir = -1; } else if (val <= lo) { val = lo; dir = 1; }
+            if (dir == 0) { val = u.init.size() > 0 ? u.init[0] : 0.0f; dir = u.init.size() > 1 && u.init[1] < 0.0f ? -1.0f : 1.0f; }
+            float inc = s0;
+            if (s1 != 0.0f)
+            {
+                st.rng = st.rng * 1664525u + 1013904223u;
+                inc = s0 + std::fmod((float)((st.rng >> 16) & 0x7FFF), s1 - s0 + 1.0f);
+            }
+            const float dt = st.frametimeMs * 0.001f;
+            if (dir > 0)
+            {
+                inc = std::max(inc - std::max(0.0f, smoothing - (hi - val)), 0.05f) * dt;
+                if ((val += inc) >= hi) { val = hi; dir = -1; }
+            }
+            else
+            {
+                inc = std::max(inc - std::max(0.0f, smoothing - (val - lo)), 0.05f) * dt;
+                if ((val -= inc) <= lo) { val = lo; dir = 1; }
+            }
             v[0] = val; v[1] = dir;
         }
         else if (n == "date")
@@ -884,6 +976,34 @@ void UpdateSources(const Effect& fx, std::vector<float>& regs, SourceState& st)
             v[0] = t.wYear; v[1] = t.wMonth; v[2] = t.wDay; v[3] = (float)(t.wHour * 3600 + t.wMinute * 60 + t.wSecond);
         }
         else if (n == "bufready_depth") v[0] = st.depthReady ? 1.0f : 0.0f;
+        else if (n == "key")
+        {
+            const Ann* kc = FindAnn(u.ann, "keycode");
+            v[0] = keyValue(i, kc && !kc->isString ? (int)kc->f[0] : 0);
+        }
+        else if (n == "mousebutton")
+        {
+            static const int kButtons[5] = { VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2 };
+            const Ann* kc = FindAnn(u.ann, "keycode");
+            const int b = kc && !kc->isString ? (int)kc->f[0] : -1;
+            v[0] = keyValue(i, b >= 0 && b < 5 ? kButtons[b] : 0);
+        }
+        else if (n == "mousepoint") { v[0] = mouse[0]; v[1] = mouse[1]; }
+        else if (n == "mousedelta") { v[0] = delta[0]; v[1] = delta[1]; }
+        else if (n == "mousewheel")
+        {
+            // ReShade: value += notches x step (step 0 = 1), kept in min..max when they differ; .y = the frame's notches
+            const Ann* mn = FindAnn(u.ann, "min"); const Ann* mx = FindAnn(u.ann, "max"); const Ann* sp = FindAnn(u.ann, "step");
+            const float lo = mn && !mn->isString ? mn->f[0] : 0.0f, hi = mx && !mx->isString ? mx->f[0] : 0.0f;
+            const float step = sp && !sp->isString && sp->f[0] != 0.0f ? sp->f[0] : 1.0f;
+            float& val = st.wheelValue[i];
+            if (std::isnan(val)) val = u.init.empty() ? 0.0f : u.init[0];
+            const float notches = focused ? st.wheel : 0.0f;
+            val += notches * step;
+            if (lo != hi) val = std::min(std::max(val, lo), hi);
+            v[0] = val; v[1] = notches;
+        }
+        else if (n == "overlay_open" || n == "ui_open") v[0] = st.overlayOpen ? 1.0f : 0.0f;
         SetUniform(fx, i, v, std::min<size_t>(4, u.Comps()), regs);
     }
 }
@@ -905,7 +1025,7 @@ bool DecodeImage(const std::wstring& path, UINT w, UINT h, std::vector<uint8_t>&
     if (!ReadCapped(path, kMaxTextureFileBytes, bytes)) return false;
     const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     IWICImagingFactory* f = nullptr; IWICStream* st = nullptr; IWICBitmapDecoder* dec = nullptr;
-    IWICBitmapFrameDecode* fr = nullptr; IWICFormatConverter* conv = nullptr; IWICBitmapScaler* sc = nullptr;
+    IWICBitmapFrameDecode* fr = nullptr; IWICFormatConverter* conv = nullptr;
     UINT iw = 0, ih = 0;
     bool ok = SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f)))
         && SUCCEEDED(f->CreateStream(&st)) && SUCCEEDED(st->InitializeFromMemory((BYTE*)bytes.data(), (DWORD)bytes.size()))
@@ -913,23 +1033,43 @@ bool DecodeImage(const std::wstring& path, UINT w, UINT h, std::vector<uint8_t>&
         && SUCCEEDED(dec->GetFrame(0, &fr)) && SUCCEEDED(f->CreateFormatConverter(&conv))
         && SUCCEEDED(conv->Initialize(fr, GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, nullptr, 0, WICBitmapPaletteTypeCustom))
         && SUCCEEDED(conv->GetSize(&iw, &ih)) && iw && ih && iw <= 16384 && ih <= 16384;
-    IWICBitmapSource* src = conv;
-    if (ok && (iw != w || ih != h)) // ReShade resizes an image to its texture's size too
+    if (ok && (iw != w || ih != h))
     {
-        ok = SUCCEEDED(f->CreateBitmapScaler(&sc)) && SUCCEEDED(sc->Initialize(conv, w, h, WICBitmapInterpolationModeFant));
-        src = sc;
+        // ReShade resizes an image to its texture's size with stb_image_resize2 (runtime.cpp: STBIR_EDGE_CLAMP,
+        // STBIR_FILTER_DEFAULT, alpha-weighted RGBA); the same call here gives its pixels (WIC's Fant scaler differed by
+        // up to 43 levels on RetroTV's border). The alpha is the 4th byte in BGRA as in RGBA.
+        std::vector<uint8_t> full((size_t)iw * ih * 4);
+        ok = SUCCEEDED(conv->CopyPixels(nullptr, iw * 4, (UINT)full.size(), full.data()));
+        if (ok)
+        {
+            bgra.resize((size_t)w * h * 4);
+            ok = stbir_resize(full.data(), (int)iw, (int)ih, 0, bgra.data(), (int)w, (int)h, 0, STBIR_RGBA, STBIR_TYPE_UINT8, STBIR_EDGE_CLAMP, STBIR_FILTER_DEFAULT) != nullptr;
+        }
     }
-    if (ok) { bgra.resize((size_t)w * h * 4); ok = SUCCEEDED(src->CopyPixels(nullptr, w * 4, (UINT)bgra.size(), bgra.data())); }
-    for (IUnknown* u : std::initializer_list<IUnknown*>{ sc, conv, fr, dec, st, f }) if (u) u->Release();
+    else if (ok) { bgra.resize((size_t)w * h * 4); ok = SUCCEEDED(conv->CopyPixels(nullptr, w * 4, (UINT)bgra.size(), bgra.data())); }
+    for (IUnknown* u : std::initializer_list<IUnknown*>{ conv, fr, dec, st, f }) if (u) u->Release();
     if (SUCCEEDED(com)) CoUninitialize();
     return ok;
 }
 
 void SetBindFunctions(SetRenderTargetFn rt, SetDepthStencilFn ds) { g_setRT = rt; g_setDS = ds; }
+void SetAdapter(uint32_t vendor, uint32_t device) { g_vendor = vendor; g_device = device; }
+
+namespace {
+// Textures of live effects by unique name, shared as ReShade shares them (render thread): the texture and its users.
+// Counted here, not by Release()'s result: the device may still hold a reference to a bound texture.
+std::map<std::string, std::pair<IDirect3DTexture9*, int>> g_shared;
+} // namespace
 
 void Instance::Release()
 {
-    for (IDirect3DTexture9* t : tex_) if (t && t != colorTex_) t->Release();
+    for (IDirect3DTexture9* t : tex_)
+    {
+        if (!t || t == colorTex_) continue;
+        for (auto it = g_shared.begin(); it != g_shared.end(); ++it)
+            if (it->second.first == t) { if (--it->second.second == 0) g_shared.erase(it); break; }
+        t->Release();
+    }
     tex_.clear();
     for (IUnknown* s : shaders_) if (s) s->Release();
     shaders_.clear();
@@ -964,6 +1104,7 @@ bool Instance::Create(IDirect3DDevice9* dev, std::shared_ptr<const Effect> fxp, 
         const Texture& t = fx.textures[i];
         if (t.semantic == "COLOR") { tex_[i] = colorTex_; continue; }
         if (!t.semantic.empty() || !t.error.empty()) continue; // DEPTH (bound at Run) / refused: its techniques do not run
+        if (auto sh = g_shared.find(t.unique); sh != g_shared.end()) { (tex_[i] = sh->second.first)->AddRef(); ++sh->second.second; continue; }
         const DWORD usage = D3DUSAGE_RENDERTARGET | (t.levels > 1 ? D3DUSAGE_AUTOGENMIPMAP : 0);
         D3DFORMAT fmt = t.format;
         // L8 / L16 render targets are optional in D3D9: the next wider format samples the same red channel
@@ -974,10 +1115,12 @@ bool Instance::Create(IDirect3DDevice9* dev, std::shared_ptr<const Effect> fxp, 
             if (d3d) d3d->Release();
             return fail("this graphics card can't create the texture " + t.name);
         }
+        g_shared[t.unique] = { tex_[i], 1 };
         gpuBytes_ += t.bytes;
         IDirect3DSurface9* s0 = nullptr;
         tex_[i]->GetSurfaceLevel(0, &s0);
         dev->ColorFill(s0, nullptr, 0); // ReShade clears new textures to zero
+        if (t.levels > 1 && t.image.empty()) { tex_[i]->SetAutoGenFilterType(D3DTEXF_LINEAR); tex_[i]->GenerateMipSubLevels(); } // its mips too (ReShade)
         if (!t.image.empty())
         {
             std::vector<uint8_t> img;
@@ -1051,8 +1194,15 @@ bool Instance::Run(IDirect3DDevice9* dev, size_t technique, IDirect3DSurface9* t
         }
 
     auto texOf = [&](size_t i) { return fx.textures[i].semantic == "DEPTH" ? depth : tex_[i]; };
+    // an 8-bit texture (COLOR, RGBA8): the only kind ReShade gives an sRGB view; on others SRGBTexture / SRGBWriteEnable do nothing
+    auto Srgb8 = [&](int i) {
+        if (i < 0 || (size_t)i >= fx.textures.size()) return false;
+        const Texture& t = fx.textures[i];
+        return t.semantic == "COLOR" || (t.semantic.empty() && (t.format == D3DFMT_A8R8G8B8 || t.format == D3DFMT_X8R8G8B8));
+    };
     auto texSize = [&](size_t i, UINT& w, UINT& h) {
-        if (!fx.textures[i].semantic.empty()) { w = W; h = H; } else { w = fx.textures[i].w; h = fx.textures[i].h; }
+        D3DSURFACE_DESC d{};
+        if (!fx.textures[i].semantic.empty() || !tex_[i] || FAILED(tex_[i]->GetLevelDesc(0, &d))) { w = W; h = H; } else { w = d.Width; h = d.Height; } // a shared one: its maker's size
     };
 
     // States, samplers and textures are sent only when they change within the technique
@@ -1069,7 +1219,9 @@ bool Instance::Run(IDirect3DDevice9* dev, size_t technique, IDirect3DSurface9* t
         ssSet[stage][st] = true; ssVal[stage][st] = v; dev->SetSamplerState(stage, st, v);
     };
     IDirect3DBaseTexture9* bound[16] = {};
+    IDirect3DBaseTexture9* vbound[4] = {}; // the vertex stages (D3DVERTEXTEXTURESAMPLER0..3); the caller saved them
     for (DWORD st = 0; st < 16; ++st) dev->SetTexture(st, nullptr);
+    for (DWORD v = 0; v < 4; ++v) dev->SetTexture(D3DVERTEXTEXTURESAMPLER0 + v, nullptr);
     IDirect3DSurface9* boundRt[4] = { (IDirect3DSurface9*)1, nullptr, nullptr, nullptr }; // RT0 unknown; RT1-3 cleared here
     for (DWORD r = 1; r < 4; ++r) BindRT(dev, r, nullptr);
     bool dsKnown = false; IDirect3DSurface9* boundDs = nullptr;
@@ -1077,11 +1229,15 @@ bool Instance::Run(IDirect3DDevice9* dev, size_t technique, IDirect3DSurface9* t
     IUnknown* curVs = nullptr; IUnknown* curPs = nullptr;
     dev->SetVertexDeclaration(decl_);
 
-    dev->StretchRect(target, nullptr, colorSurf_, nullptr, D3DTEXF_NONE); // technique start: picture -> COLOR
-    bool dirty = false, stencilCleared = false;
+    // picture -> COLOR only before a pass that samples COLOR, when the picture changed since the last copy (the technique's
+    // start, then after a pass that drew to the picture): the same COLOR a pass reads, without the copies nothing read
+    // (MXAO's early passes read COLOR into their own textures; 0.03 ms at 1080p, 0.16 ms at 4K a copy)
+    bool dirty = true, stencilCleared = false;
     for (const Pass& pass : tech.passes)
     {
-        if (dirty) { dev->StretchRect(target, nullptr, colorSurf_, nullptr, D3DTEXF_NONE); dirty = false; }
+        bool readsColor = false;
+        for (const Binding& bd : pass.bind) readsColor |= fx.textures[fx.samplers[bd.sampler].texture].semantic == "COLOR";
+        if (dirty && readsColor) { dev->StretchRect(target, nullptr, colorSurf_, nullptr, D3DTEXF_NONE); dirty = false; }
 
         IDirect3DSurface9* rts[4] = {};
         IDirect3DTexture9* rtTex[4] = {};
@@ -1134,10 +1290,15 @@ bool Instance::Run(IDirect3DDevice9* dev, size_t technique, IDirect3DSurface9* t
         RS(D3DRS_COLORWRITEENABLE1, pass.mask[1]);
         RS(D3DRS_COLORWRITEENABLE2, pass.mask[2]);
         RS(D3DRS_COLORWRITEENABLE3, pass.mask[3]);
-        RS(D3DRS_SRGBWRITEENABLE, pass.srgbWrite);
+        RS(D3DRS_SRGBWRITEENABLE, pass.srgbWrite && (toPicture || Srgb8(pass.rt[0])));
         RS(D3DRS_CULLMODE, D3DCULL_NONE);
         RS(D3DRS_SCISSORTESTENABLE, FALSE);
         RS(D3DRS_CLIPPLANEENABLE, 0);
+        // as ReShade sets them on every pass: the game's own values (two-sided stencil, dithering) changed SMAA's stencil
+        RS(D3DRS_TWOSIDEDSTENCILMODE, FALSE);
+        RS(D3DRS_FILLMODE, D3DFILL_SOLID);
+        RS(D3DRS_DITHERENABLE, FALSE);
+        RS(D3DRS_LASTPIXEL, TRUE);
 
         // textures: this pass's bindings; a stage bound earlier and unused now is cleared
         IDirect3DBaseTexture9* want[16] = {};
@@ -1154,12 +1315,27 @@ bool Instance::Run(IDirect3DDevice9* dev, size_t technique, IDirect3DSurface9* t
             SS(bd.reg, D3DSAMP_ADDRESSV, s.addrV);
             SS(bd.reg, D3DSAMP_ADDRESSW, s.addrW);
             SS(bd.reg, D3DSAMP_BORDERCOLOR, 0);
-            SS(bd.reg, D3DSAMP_SRGBTEXTURE, bd.srgb);
+            SS(bd.reg, D3DSAMP_SRGBTEXTURE, bd.srgb && Srgb8(s.texture)); // ReShade has an sRGB view of 8-bit textures only
+            SS(bd.reg, D3DSAMP_MAXANISOTROPY, s.minF == D3DTEXF_ANISOTROPIC || s.magF == D3DTEXF_ANISOTROPIC ? 16 : 1);
             float bias = s.lodBias; DWORD biasBits; memcpy(&biasBits, &bias, 4);
             SS(bd.reg, D3DSAMP_MIPMAPLODBIAS, biasBits);
             SS(bd.reg, D3DSAMP_MAXMIPLEVEL, (DWORD)s.minLod);
         }
         for (DWORD st = 0; st < 16; ++st) if (bound[st] != want[st]) { dev->SetTexture(st, want[st]); bound[st] = want[st]; }
+        // the vertex stages too, as ReShade binds every sampler to both (the compiler gives a vertex shader's samplers the
+        // lowest numbers): a vertex shader reading a texture (an exposure value) read nothing
+        for (const Binding& bd : pass.bind)
+        {
+            if (bd.reg >= 4) continue;
+            const Sampler& s = fx.samplers[bd.sampler];
+            const DWORD vst = D3DVERTEXTEXTURESAMPLER0 + bd.reg;
+            dev->SetSamplerState(vst, D3DSAMP_MINFILTER, s.minF);
+            dev->SetSamplerState(vst, D3DSAMP_MAGFILTER, s.magF);
+            dev->SetSamplerState(vst, D3DSAMP_MIPFILTER, s.mipF);
+            dev->SetSamplerState(vst, D3DSAMP_ADDRESSU, s.addrU);
+            dev->SetSamplerState(vst, D3DSAMP_ADDRESSV, s.addrV);
+        }
+        for (DWORD v = 0; v < 4; ++v) if (vbound[v] != want[v]) { dev->SetTexture(D3DVERTEXTEXTURESAMPLER0 + v, want[v]); vbound[v] = want[v]; }
 
         // the uniforms are the same in every pass, so they go once; only the VS pixel size (c255) follows the viewport
         const float px0 = -1.0f / vpw, px1 = 1.0f / vph;
@@ -1197,7 +1373,8 @@ bool Instance::Run(IDirect3DDevice9* dev, size_t technique, IDirect3DSurface9* t
         }
         if (toPicture) dirty = true;
         else if (pass.mips)
-            for (auto* t : rtTex) if (t && t->GetLevelCount() > 1) { t->SetAutoGenFilterType(D3DTEXF_LINEAR); t->GenerateMipSubLevels(); }
+            for (auto* t : rtTex) // an AUTOGENMIPMAP texture reports one level: its usage says it has mips
+                if (D3DSURFACE_DESC d{}; t && SUCCEEDED(t->GetLevelDesc(0, &d)) && (d.Usage & D3DUSAGE_AUTOGENMIPMAP)) { t->SetAutoGenFilterType(D3DTEXF_LINEAR); t->GenerateMipSubLevels(); }
         for (auto* s : rts) if (s) s->Release();
     }
     dev->SetStreamSource(0, nullptr, 0, 0);
@@ -1205,6 +1382,7 @@ bool Instance::Run(IDirect3DDevice9* dev, size_t technique, IDirect3DSurface9* t
     if (boundRt[0] != target) BindRT(dev, 0, target);
     if (!dsKnown || boundDs) BindDS(dev, nullptr);
     for (DWORD st = 0; st < 16; ++st) if (bound[st]) dev->SetTexture(st, nullptr);
+    for (DWORD v = 0; v < 4; ++v) if (vbound[v]) dev->SetTexture(D3DVERTEXTEXTURESAMPLER0 + v, nullptr);
     return true;
 }
 

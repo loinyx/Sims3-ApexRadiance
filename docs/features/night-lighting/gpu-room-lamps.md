@@ -561,7 +561,7 @@ No failure stops the GPU's light for good. Each case below used to last until a 
 | Keep indoor lamps for GPU | `gpuRoomLamps` | bool | on | | The switch is developer only, with Lamp lighting: Instant; players always have it on. Keeps each room solve of the active lot and draws its lamps on the GPU; colour, intensity and switch edits of lamps drawn in every room listing them solve no room at once (the directional maps objects read are written again at the end of the room update) (their rooms are solved 2 s after the last edit); with the probe on, logs the self-checks |
 | Indoor lamp model | `roomLampModel` | enum | physical | replica, physical | The choice is developer only, shown with Keep indoor lamps for GPU on. Replica: everything above. Physical: see 16 to 25; rooms > 0 and room 0 drawn from the lot lamps' laws by reach; value, switch and move edits and new lamps solve no room (a switch, an intensity change, a move into another room or a new lamp settles its rooms 2 s later; a move into room 0 and a deleted lamp take the game's solves). A change drops the kept rooms and sends the active lot's rooms to their solve |
 | Sharper floor light | `roomLampSharpFloors` | bool | on | | The switch is developer only, shown with the physical model. Floor maps drawn at twice their size (30); a change drops the kept rooms and sends the active lot's rooms to their solve |
-| True-size furniture shadows | `roomLampTrueShadows` | bool | off | | Developer only, shown with the physical model. Off keeps the game's soft band, the soft furniture shadows of ceiling lamps |
+| True-size furniture shadows | `roomLampTrueShadows` | bool | on | | Night Lights > Rooms at Night, enabled with Lamp updates: Instant (GPU). The furniture's blockers keep their real size, their edges as soft as the lamp seen past them; off keeps the game's band, 0.15 m inside to 0.35 m outside each blocker |
 
 ## Limitations
 
@@ -638,6 +638,14 @@ No failure stops the GPU's light for good. Each case below used to last until a 
   leaves the maps to the settle. Not checked in game yet.
 - The sum is added with post-pixel-shader blending into an A32B32G32R32F target; a device without it draws nothing (logged).
 - Each part is a 80-byte point in a DEFAULT vertex buffer (estimated, not measured: 0.5 to 6 MB of video memory a room).
+- Every physical draw (`AccPhys`: room 0's `AccPhysPS` and the kept rooms' `AccPhysInPS`) gives a wall texel no light from a
+  lamp more than 1 cm behind its face. Wall samples sit on the wall's line, where the occluder walls (zero-thickness quads on
+  that line) never shadow them, and an area light's law has no N.L. Before 4.0.4 a room's type 9 area light 1 m behind the
+  facade lit its outer face beside the windows and the windows' hidden texels (soft patches around frames), and a room's
+  ceiling area lights, taken through a door into the next room, lit the back of the wall between them there (a soft band
+  over the whole wall, brightest under each light; 17/11 captures). The CPU solve has the same rule (`InnerBehindWall`).
+  `tools/rt_lamps_test` checks it (`Room0PhysCheck`, an area light behind the outer wall; `PhysKeptCheck`, room B's area
+  light behind room A's wall).
 - Glass is charged on kept rooms only: room 0's physical draw has no pane pass, so an indoor lamp through a window lights the outside
   at full strength. If the game charges that pass (read in its code, not measured), the outside is up to 31% brighter than its solve.
 - `GpuRoomLamps::PhysPasses` does not fall back to fewer tile rows when growing the atlas fails: that room shows the game's map until a

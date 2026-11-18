@@ -12631,6 +12631,14 @@ float InnerPass(const RoomInfo& info, void* light, const float* pointW, float* l
     alignas(16) float lw[4] = {};
     return pass * YardPass(info.innerGrid[0].get(), nullptr, light, pointW, lw, why);
 }
+// A wall sample whose lamp is behind it (sample: position, then the normal at +4). The game puts room 0's wall samples on
+// the wall's line, which the grid walk ends on and never tests, and an area light has no N.L: an indoor lamp taken through
+// an opening (InnerPass) lit the outer face of its own room's walls beside the openings. Floors (vertical normal) and walls
+// facing the lamp are not affected.
+inline bool InnerBehindWall(const float* lampW, const float* sample) {
+    return ApexMath::Fabs(sample[5]) < 0.5f &&
+           (lampW[0] - sample[0]) * sample[4] + (lampW[1] - sample[1]) * sample[5] + (lampW[2] - sample[2]) * sample[6] < -kGridEndSkip;
+}
 // (GPU room lamps stage 3b, a lamp moved) InnerPass of a lamp at lampW that is not one of info.innerUp, from its grids (g0, g1:
 // info.innerGrid) alone: any thread, no game memory (with steady_indoor_light off InnerPass reads the screen's mesh set: such a
 // move is refused, Room0MovePath); spread: soft_opening_edges as read on the light tree thread. Validated against the room lamp
@@ -13580,7 +13588,8 @@ void InnerShadow(const RoomInfo& info, void* light, const float* sample, float* 
     const float before[3] = {colour[0], colour[1], colour[2]};
     alignas(16) float pos[4] = {};
     GridWhy why{};
-    const float pass = InnerPass(info, light, sample, pos, why);
+    float pass = InnerPass(info, light, sample, pos, why);
+    if (pass > 0.0f && InnerBehindWall(pos, sample)) pass = 0.0f, why.wall = true; // its own wall stands between them
     ApexUtil::CountOne(g_innerTests);
     if (pass > 0.0f) ApexUtil::CountOne(g_innerLit);
     // the room it shines out of draws it x its normalisation (room+0x160); this room's own normalisation (indoor) follows
@@ -20002,7 +20011,7 @@ float Room0PassAt(const Room0Path& p, const float* lampW, const float* pointW) {
     GridWhy why{};
     const float pass = InnerPassAt(static_cast<const StoryGrid*>(p.g0.get()), static_cast<const StoryGrid*>(p.g1.get()), lampW, pointW, p.spread, why);
     t_mapAA = prevAA;
-    return pass;
+    return pass > 0.0f && InnerBehindWall(lampW, pointW) ? 0.0f : pass; // as InnerShadow: the moved lamp's parts match the solve
 }
 void LotRooms(uintptr_t tracker, std::vector<void*>& out) {
     out.clear();

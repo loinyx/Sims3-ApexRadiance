@@ -9,6 +9,9 @@ void LooksState(bool compiling, bool edited, bool offer, int batch, bool twin = 
 // picks: packs ticked on the Packs tab (the bar is choosing); confirm: the Library's removal confirmation open on
 // 0 nothing, 1 a pack, 2 one of the player's .fx files
 void PacksState(bool picks, int confirm);
+// Save to this look as text (LookAsText) and read back (ParsePreset): removed shaders leave the file, switched-off ones
+// stay listed (ApexOff=), the rest run, and the changes count as unsaved until then. Prints each failure; true = all good.
+bool SaveRoundTrip();
 // 0 idle, 1 recording, 2 saving; options: 0 defaults, 1 every optional row shown
 void CaptureState(int video, int options);
 }

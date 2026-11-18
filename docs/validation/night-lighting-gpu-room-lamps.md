@@ -4,7 +4,7 @@ The feature is described in [features/night-lighting/gpu-room-lamps.md](../featu
 
 - Draw indoor lamps of the active lot at the game's level: within 2/255 of the game's lamp part on the replayed recordings.
 - Show a colour, intensity, switch or move edit with no room solve in the frame of the edit.
-- Keep the soft furniture shadows of ceiling lamps: `roomLampTrueShadows` off by default.
+- Give furniture shadows their real size by default (`roomLampTrueShadows`, Rooms at Night); off keeps the game's band.
 - Reach every player with no developer switch on Steam 1.67.2 and EA app 1.69.47, and leave builds whose addresses are not found on the game's room solves.
 - Free kept rooms on Instant to Classic, Night Lights off and a world change.
 

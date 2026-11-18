@@ -110,6 +110,8 @@ bool g_reportOn = true;
 bool g_changePending = false;
 std::string g_changeText;    // as shown (menu language)
 std::string g_changeEnglish; // for the log
+std::string g_changeGroup;   // ReportChange's group of this frame's report ("" for none)
+std::string g_openChangeGroup; // the group of the toast on screen
 
 // ---- next row badge ----
 const char* g_nextBadge = nullptr;
@@ -210,6 +212,7 @@ float InlineControlWidth(float rowWidth) {
 // The description under a row's label: smaller, muted, wrapped at wrapX (window coordinates)
 unsigned g_nextDescRgb = 0; // SetNextRowWarning: the next row's description colour (0: muted)
 unsigned g_nextIconRgb = 0; // SetNextRowIconColor: the next control row's leading icon (0: accent)
+float g_nextMinHeight = 0.0f; // SetNextRowMinHeight: the next SwitchRow's least height (pixels)
 void RowDescription(const char* text, float wrapX) {
     if (!text || !*text) return;
     PushSized(nullptr, kSmallScale);
@@ -358,6 +361,7 @@ void ReportLabel(const char* label, const char* format) {
     const std::string shown(g_rowRaw ? std::string_view(english) : I18n::TrLabel(label));
     g_changeText = I18n::Trf(format, shown);
     g_changeEnglish = std::vformat(format, std::make_format_args(english));
+    g_changeGroup.clear();
     g_changePending = true;
 }
 
@@ -526,6 +530,7 @@ float Unit() {
 void SetNextRowUntranslated() { g_nextRaw = true; }
 void SetNextRowWarning() { g_nextDescRgb = VioletTheme::kWarning; }
 void SetNextRowIconColor(unsigned rgb) { g_nextIconRgb = rgb; }
+void SetNextRowMinHeight(float px) { g_nextMinHeight = px; }
 
 void SetNextRowBadge(const char* text, const char* tooltip, unsigned rgb) {
     g_nextBadge = text;
@@ -570,20 +575,25 @@ bool MatchesQuery(const char* query, const char* text) {
     return WordsIn(words, hay);
 }
 
-void ReportChange(const char* text) {
+void ReportChange(const char* text, const char* group) {
     if (!g_reportOn || !text || !*text) return;
     g_changeText = T(text);
     g_changeEnglish = text;
+    g_changeGroup = group ? group : "";
     g_changePending = true;
 }
 
+bool ChangeGroupOpen(const char* group) { return group && *group && g_openChangeGroup == group; }
+void SetOpenChangeGroup(const std::string& group) { g_openChangeGroup = group; }
+
 void SetChangeReporting(bool on) { g_reportOn = on; }
 
-bool TakeChange(std::string& text, std::string* english) {
+bool TakeChange(std::string& text, std::string* english, std::string* group) {
     if (!g_changePending) return false;
     g_changePending = false;
     text = g_changeText;
     if (english) *english = g_changeEnglish;
+    if (group) *group = g_changeGroup;
     return true;
 }
 
@@ -805,6 +815,7 @@ bool ToggleSwitch(const char* id, bool* v) {
 
 bool SwitchRow(const char* label, bool* v, const char* tooltip, BoolDefault def, IconId icon) {
     RowDecor d = TakeDecor();
+    const float minHeight = std::exchange(g_nextMinHeight, 0.0f);
     if (!RowVisible(label, tooltip)) return false;
     d.hasDefault = def.value >= 0;
     d.changed = d.hasDefault && (*v != (def.value == 1));
@@ -827,7 +838,8 @@ bool SwitchRow(const char* label, bool* v, const char* tooltip, BoolDefault def,
     const float wrapX = startX + width - sw.x - kSpace3 * u;
     ImGui::SetCursorPos(ImVec2(textX, top));
     LabelInfo li;
-    const float rowH = std::fmax(RowText(label, tooltip, wrapX, std::fmax(wrapX - DecorWidth(d), textX + 40.0f * u), &li), sw.y);
+    // with a least height (SetNextRowMinHeight) the text block is centred in it, as a slider row's label beside its track
+    const float rowH = std::fmax(std::fmax(RowText(label, tooltip, wrapX, std::fmax(wrapX - DecorWidth(d), textX + 40.0f * u), &li, minHeight), sw.y), minHeight);
 
     // The switch, centred on the text block
     ImGui::SetCursorPos(ImVec2(startX + width - sw.x, top + (rowH - sw.y) * 0.5f));

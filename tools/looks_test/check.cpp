@@ -1,6 +1,5 @@
-// Offline check of the built-in Apex looks and the in-game licence texts (console output only, reads LICENSES.md).
-// Each built-in look is parsed with the real loader (features/looks_preset.cpp); every enabled technique must be a
-// ported shader, every value a parameter of it, with the right number of components, inside its ui_min / ui_max.
+// Offline check of the preset loader (features/looks_preset.cpp) and the in-game licence texts (console output only,
+// reads LICENSES.md).
 #include "looks_preset.h"
 #include "third_party/reshade_shaders/reshade_shaders_hlsl.h"
 #include "third_party/reshade_shaders/reshade_licenses.h"
@@ -25,13 +24,6 @@ static void Check(bool ok, const std::string& what)
     if (!ok) { ++failures; printf("FAIL %s\n", what.c_str()); }
 }
 
-static const LooksShader* Find(const Looks::PresetEntry& e)
-{
-    for (const auto& s : ReShadeShaders::kShaders)
-        if (e.technique == s.technique && _stricmp(e.file.c_str(), s.file) == 0) return &s;
-    return nullptr;
-}
-
 static std::string Words(const std::string& s) // whitespace-normalized
 {
     std::istringstream in(s);
@@ -42,51 +34,8 @@ static std::string Words(const std::string& s) // whitespace-normalized
 
 int main()
 {
-    const auto names = Looks::BuiltInLooks();
-    Check(names.size() == 5, "five built-in looks");
-    for (const std::string& name : names)
-    {
-        std::string text;
-        Check(Looks::LookText("apex:" + name, text) && !text.empty(), name + ": text");
-        Looks::Preset p;
-        Check(Looks::ParsePreset(text, p) && p.error.empty(), name + ": parses");
-        Check(!p.order.empty(), name + ": has techniques");
-        Check(Looks::PresetSorting(p).size() == p.order.size(), name + ": TechniqueSorting lists every technique");
-        for (const auto& e : p.order)
-        {
-            const LooksShader* s = Find(e);
-            Check(s != nullptr, name + ": " + e.technique + "@" + e.file + " is a ported shader");
-            if (!s) continue;
-            const auto sec = p.sections.find(e.file);
-            Check(sec != p.sections.end(), name + ": [" + e.file + "] section");
-            if (sec == p.sections.end()) continue;
-            for (const auto& [key, value] : sec->second)
-            {
-                const LooksParam* prm = nullptr;
-                for (int i = 0; i < s->paramCount; ++i)
-                    if (key == s->params[i].key) prm = &s->params[i];
-                Check(prm != nullptr, name + ": " + e.file + " " + key + " is a uniform");
-                if (!prm) continue;
-                const auto parts = Looks::SplitList(value);
-                Check((int)parts.size() == prm->comps, name + ": " + key + " has " + std::to_string(prm->comps) + " components");
-                for (const auto& part : parts)
-                {
-                    char* end = nullptr;
-                    const double x = strtod(part.c_str(), &end);
-                    Check(end && !*end, name + ": " + key + " is a number");
-                    Check(x >= prm->min && x <= prm->max, name + ": " + key + "=" + part + " inside its range");
-                }
-            }
-        }
-        for (const auto& [file, keys] : p.sections)
-        {
-            if (file.empty()) continue;
-            bool used = false;
-            for (const auto& e : p.order) used |= _stricmp(e.file.c_str(), file.c_str()) == 0;
-            Check(used, name + ": [" + file + "] belongs to an enabled technique");
-        }
-    }
-    Check(Looks::BuiltInLookText("Unknown") == nullptr, "unknown built-in look");
+    // built-in looks were removed: an old apex: reference is no look at all
+    Check(Looks::RefSource("apex:Natural") == Looks::Source::None, "apex: is no longer a source");
 
     // a GShade preset names SweetFX's HDR technique FakeHDR and its uniforms fHDRPower / fradius1 / fradius2
     {

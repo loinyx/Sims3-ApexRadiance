@@ -261,7 +261,6 @@ Source RefSource(const std::string& ref)
 {
     if (ref.rfind("looks:", 0) == 0) return Source::Mine;
     if (ref.rfind("gshade:", 0) == 0) return Source::GShade;
-    if (ref.rfind("apex:", 0) == 0) return Source::Apex;
     return Source::None;
 }
 
@@ -288,13 +287,6 @@ std::string RefName(const std::string& ref)
 bool LookText(const std::string& ref, std::string& text, std::string* error)
 {
     text.clear();
-    if (RefSource(ref) == Source::Apex)
-    {
-        const char* t = BuiltInLookText(ref.substr(5));
-        if (!t) { if (error) *error = "this built-in look is not in this version"; return false; }
-        text = t;
-        return true;
-    }
     const std::wstring path = RefPath(ref);
     if (path.empty()) { if (error) *error = "no look chosen"; return false; }
     return ReadBounded(path, text, error);
@@ -318,65 +310,9 @@ std::string MigrateRef(const std::string& absolutePath)
 std::vector<LookItem> ListLooks()
 {
     std::vector<LookItem> out;
-    for (const std::string& name : BuiltInLooks()) out.push_back({ "apex:" + name, name, Source::Apex });
     ListFolder(LooksFolder(), "looks:", Source::Mine, out);
     ListFolder(GShadeFolder(), "gshade:", Source::GShade, out);
     return out;
-}
-
-// The built-in looks: ReShade preset text over the ported shaders only, with moderate values (no crushed blacks, no
-// neon). The names are English menu keys (the menu shows them translated). tools/looks_test checks every technique and
-// value against the shader table.
-namespace {
-struct BuiltInLook { const char* name; const char* ini; };
-const BuiltInLook kBuiltInLooks[] = {
-    { "Natural",
-      "Techniques=Levels@Levels.fx,Vibrance@Vibrance.fx,LumaSharpen@LumaSharpen.fx\n"
-      "TechniqueSorting=Levels@Levels.fx,Vibrance@Vibrance.fx,LumaSharpen@LumaSharpen.fx\n\n"
-      "[Levels.fx]\nBlackPoint=4\nWhitePoint=250\nHighlightClipping=0\n\n"
-      "[LumaSharpen.fx]\nsharp_strength=0.400000\nsharp_clamp=0.025000\npattern=1\noffset_bias=1.000000\nshow_sharpen=0\n\n"
-      "[Vibrance.fx]\nVibrance=0.120000\nVibranceRGBBalance=1.000000,1.000000,1.000000\n" },
-    { "Warm evening",
-      "Techniques=LiftGammaGain@LiftGammaGain.fx,Tonemap@Tonemap.fx,Vignette@Vignette.fx\n"
-      "TechniqueSorting=LiftGammaGain@LiftGammaGain.fx,Tonemap@Tonemap.fx,Vignette@Vignette.fx\n\n"
-      "[LiftGammaGain.fx]\nRGB_Lift=1.000000,1.000000,1.000000\nRGB_Gamma=1.000000,1.000000,1.000000\nRGB_Gain=1.040000,1.010000,0.950000\n\n"
-      "[Tonemap.fx]\nGamma=1.000000\nExposure=0.000000\nSaturation=0.030000\nBleach=0.000000\nDefog=0.015000\nFogColor=0.000000,0.000000,1.000000\n\n"
-      "[Vignette.fx]\nType=0\nRatio=1.000000\nRadius=2.000000\nAmount=-0.500000\nSlope=2\nCenter=0.500000,0.500000\n" },
-    { "Cinematic",
-      "Techniques=Curves@Curves.fx,Technicolor2@Technicolor2.fx,Tonemap@Tonemap.fx,Vignette@Vignette.fx\n"
-      "TechniqueSorting=Curves@Curves.fx,Technicolor2@Technicolor2.fx,Tonemap@Tonemap.fx,Vignette@Vignette.fx\n\n"
-      "[Curves.fx]\nMode=0\nFormula=4\nContrast=0.150000\n\n"
-      "[Technicolor2.fx]\nColorStrength=0.200000,0.200000,0.200000\nBrightness=1.000000\nSaturation=1.000000\nStrength=0.250000\n\n"
-      "[Tonemap.fx]\nGamma=1.000000\nExposure=0.000000\nSaturation=-0.100000\nBleach=0.000000\nDefog=0.000000\nFogColor=0.000000,0.000000,1.000000\n\n"
-      "[Vignette.fx]\nType=0\nRatio=1.000000\nRadius=2.000000\nAmount=-0.700000\nSlope=2\nCenter=0.500000,0.500000\n" },
-    { "Soft vintage",
-      "Techniques=HDR@FakeHDR.fx,Curves@Curves.fx,Tint@Sepia.fx,Vignette@Vignette.fx\n"
-      "TechniqueSorting=HDR@FakeHDR.fx,Curves@Curves.fx,Tint@Sepia.fx,Vignette@Vignette.fx\n\n"
-      "[Curves.fx]\nMode=0\nFormula=4\nContrast=0.060000\n\n"
-      "[FakeHDR.fx]\nHDRPower=1.100000\nradius1=0.793000\nradius2=0.850000\n\n"
-      "[Sepia.fx]\nTint=0.550000,0.430000,0.420000\nStrength=0.150000\n\n"
-      "[Vignette.fx]\nType=0\nRatio=1.000000\nRadius=2.000000\nAmount=-0.600000\nSlope=2\nCenter=0.500000,0.500000\n" },
-    { "Vivid",
-      "Techniques=Vibrance@Vibrance.fx,Colourfulness@Colourfulness.fx,ContrastAdaptiveSharpen@CAS.fx\n"
-      "TechniqueSorting=Vibrance@Vibrance.fx,Colourfulness@Colourfulness.fx,ContrastAdaptiveSharpen@CAS.fx\n\n"
-      "[CAS.fx]\nContrast=0.000000\nSharpening=0.500000\n\n"
-      "[Colourfulness.fx]\ncolourfulness=0.300000\nlim_luma=0.700000\nenable_dither=0\ncol_noise=1\nbackbuffer_bits=8.000000\n\n"
-      "[Vibrance.fx]\nVibrance=0.200000\nVibranceRGBBalance=1.000000,1.000000,1.000000\n" },
-};
-} // namespace
-
-std::vector<std::string> BuiltInLooks()
-{
-    std::vector<std::string> out;
-    for (const auto& l : kBuiltInLooks) out.push_back(l.name);
-    return out;
-}
-
-const char* BuiltInLookText(const std::string& name)
-{
-    for (const auto& l : kBuiltInLooks)
-        if (name == l.name) return l.ini;
-    return nullptr;
 }
 
 // ============================================================================================== storing
@@ -465,6 +401,21 @@ void QuotedRefs(const std::string& text, std::vector<std::string>& includes, std
 bool ValidLookFileName(const std::string& name)
 {
     return name.size() >= 5 && ValidFileName(name, { ".ini" });
+}
+
+bool RenameLook(const std::string& ref, const std::string& newStem, std::string& newRef)
+{
+    if (RefSource(ref) != Source::Mine) return false;
+    const std::string rel = ref.substr(6); // after "looks:"
+    const size_t slash = rel.find_last_of("\\/");
+    const std::string dir = slash == std::string::npos ? std::string() : rel.substr(0, slash + 1);
+    const std::string file = newStem + ".ini";
+    if (!ValidLookFileName(file)) return false;
+    const std::wstring from = RefPath(ref), to = RefPath("looks:" + dir + file);
+    if (from.empty() || to.empty()) return false;
+    if (!MoveFileExW(from.c_str(), to.c_str(), 0)) return false; // no MOVEFILE_REPLACE_EXISTING: a taken name fails
+    newRef = "looks:" + dir + file;
+    return true;
 }
 
 bool StoreLook(const std::string& fileName, const std::string& bytes, std::string& stored, std::wstring* created, std::string* error)

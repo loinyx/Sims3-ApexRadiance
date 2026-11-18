@@ -138,9 +138,12 @@ struct Toast {
     bool restoreUi = false;
     ApexConfig::UiSettings undoUi;
     double start = 0.0;
+    std::string group;  // ApexUi::ReportChange's group: later reports of it join this toast (one Undo for all)
+    double seconds = 4.0;
 };
 Toast g_toast;
 constexpr double kToastSeconds = 4.0;
+constexpr double kGroupToastSeconds = 6.0; // a group (removals) stays longer: more to read, more to undo
 
 void ShowToast(const std::string& text, toml::table undo, const std::string& logText = {}) {
     g_toast.active = true;
@@ -149,6 +152,8 @@ void ShowToast(const std::string& text, toml::table undo, const std::string& log
     g_toast.logText = logText.empty() ? text : logText;
     g_toast.undo = std::move(undo);
     g_toast.start = ImGui::GetTime();
+    g_toast.group.clear();
+    g_toast.seconds = kToastSeconds;
 }
 
 // Opens a page (and one of its tabs)
@@ -1334,6 +1339,7 @@ bool LookTwin(const std::string& technique, Looks::Twin& out, bool act) {
 }
 
 void ShadersPage() {
+    Looks::BeginMenuFrame(); // also while Shaders is off (no Present hook then): before any card holds a pack
     ApexPatch* patch = Find(Looks::kPatchName);
     const float titleTop = ImGui::GetCursorPosY();
     const float titleLine = ImGui::GetFontSize() * ApexUi::kPageTitleScale;
@@ -4701,11 +4707,12 @@ void DrawToast(float bottomY, float right = 0.0f) {
     const float u = ApexUi::Unit();
     const double now = ImGui::GetTime();
     double elapsed = now - g_toast.start;
-    if (elapsed > kToastSeconds) {
+    const double seconds = g_toast.seconds;
+    if (elapsed > seconds) {
         g_toast.active = false;
         return;
     }
-    const float fade = elapsed < 0.15 ? static_cast<float>(elapsed / 0.15) : elapsed > kToastSeconds - 0.6 ? static_cast<float>((kToastSeconds - elapsed) / 0.6) : 1.0f;
+    const float fade = elapsed < 0.15 ? static_cast<float>(elapsed / 0.15) : elapsed > seconds - 0.6 ? static_cast<float>((seconds - elapsed) / 0.6) : 1.0f;
     const float padX = ApexUi::kSpace3 * u, padY = ApexUi::kSpace2 * u, gap = ApexUi::kSpace4 * u;
     const float is = ApexUi::kIconSmall * u;
     const char* undoText = I18n::Tr("Undo");
@@ -4892,13 +4899,21 @@ void MainWindow() {
     g_menuTextInput.store(io.WantTextInput);
 
     // The last change of the frame becomes the undo toast (with the state from before the click)
-    std::string change, changeEnglish;
-    const bool changed = ApexUi::TakeChange(change, &changeEnglish);
+    std::string change, changeEnglish, changeGroup;
+    const bool changed = ApexUi::TakeChange(change, &changeEnglish, &changeGroup);
     if (changed) LOG_INFO("[Menu] Changed: " + changeEnglish); // with the Undo lines, the log shows what the player did
-    if (changed && g_haveClickSnapshot) {
+    if (changed && !changeGroup.empty() && g_toast.active && g_toast.group == changeGroup) {
+        // one more of the toast's group: same Undo (the state before its first change), new text, the time again
+        g_toast.text = change;
+        g_toast.logText = changeEnglish;
+        g_toast.start = ImGui::GetTime();
+        g_haveClickSnapshot = false;
+    } else if (changed && g_haveClickSnapshot) {
         ShowToast(change, g_clickSnapshot, changeEnglish);
+        if (!changeGroup.empty()) { g_toast.group = changeGroup; g_toast.seconds = kGroupToastSeconds; }
         g_haveClickSnapshot = false; // the next change takes a new snapshot at its own click
     }
+    ApexUi::SetOpenChangeGroup(g_toast.active ? g_toast.group : std::string());
 
     if (!open || closeRequested) {
         g_keysOverMenu.store(false);
