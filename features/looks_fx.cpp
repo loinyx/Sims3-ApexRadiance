@@ -1370,7 +1370,8 @@ bool Instance::Run(IDirect3DDevice9* dev, size_t technique, IDirect3DSurface9* t
         }
         if (toPicture) dirty = true;
         else if (pass.mips)
-            for (auto* t : rtTex) if (t && t->GetLevelCount() > 1) { t->SetAutoGenFilterType(D3DTEXF_LINEAR); t->GenerateMipSubLevels(); }
+            for (auto* t : rtTex) // an AUTOGENMIPMAP texture reports one level: its usage says it has mips
+                if (D3DSURFACE_DESC d{}; t && SUCCEEDED(t->GetLevelDesc(0, &d)) && (d.Usage & D3DUSAGE_AUTOGENMIPMAP)) { t->SetAutoGenFilterType(D3DTEXF_LINEAR); t->GenerateMipSubLevels(); }
         for (auto* s : rts) if (s) s->Release();
     }
     dev->SetStreamSource(0, nullptr, 0, 0);
