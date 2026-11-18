@@ -316,7 +316,7 @@ bool EnsureTargets(IDirect3DDevice9* dev, UINT w, UINT h) {
 bool FillCamera(const float vp[4][4], float& tanY) {
     double m[4][4], inv[4][4];
     for (int r = 0; r < 4; r++)
-        for (int c = 0; c < 4; c++) m[r][c] = vp[r][c];
+        for (int c = 0; c < 4; c++) m[r][c] = vp[c][r]; // vp's rows are clip rows (clip = vp . x); the row-vector matrix is its transpose
     if (!GBufferMotion::Inverse(m, inv) || std::fabs(inv[2][3]) < 1e-12) return false;
     for (int r = 0; r < 4; r++)
         for (int c = 0; c < 4; c++) g.block.invViewProj[r * 4 + c] = static_cast<float>(inv[r][c]);
