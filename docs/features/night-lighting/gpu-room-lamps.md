@@ -638,12 +638,14 @@ No failure stops the GPU's light for good. Each case below used to last until a 
   leaves the maps to the settle. Not checked in game yet.
 - The sum is added with post-pixel-shader blending into an A32B32G32R32F target; a device without it draws nothing (logged).
 - Each part is a 80-byte point in a DEFAULT vertex buffer (estimated, not measured: 0.5 to 6 MB of video memory a room).
-- Room 0's physical draw (`AccPhysPS`, `gE.z` = room 0) gives a wall texel no light from a lamp more than 1 cm behind its
-  face. Its wall samples sit on the wall's line, where the occluder walls (zero-thickness quads on that line) never shadow
-  them, and an area light's law has no N.L: before 4.0.4 a room's type 9 area light 1 m behind the facade lit its outer
-  face beside the windows and the windows' hidden texels (soft patches around frames, 17/11 captures). Kept maps
-  (`AccPhysInPS`) are unchanged; the CPU solve has the same rule (`InnerBehindWall`). `tools/rt_lamps_test` checks it
-  (`Room0PhysCheck`, an area light behind the outer wall).
+- Every physical draw (`AccPhys`: room 0's `AccPhysPS` and the kept rooms' `AccPhysInPS`) gives a wall texel no light from a
+  lamp more than 1 cm behind its face. Wall samples sit on the wall's line, where the occluder walls (zero-thickness quads on
+  that line) never shadow them, and an area light's law has no N.L. Before 4.0.4 a room's type 9 area light 1 m behind the
+  facade lit its outer face beside the windows and the windows' hidden texels (soft patches around frames), and a room's
+  ceiling area lights, taken through a door into the next room, lit the back of the wall between them there (a soft band
+  over the whole wall, brightest under each light; 17/11 captures). The CPU solve has the same rule (`InnerBehindWall`).
+  `tools/rt_lamps_test` checks it (`Room0PhysCheck`, an area light behind the outer wall; `PhysKeptCheck`, room B's area
+  light behind room A's wall).
 - Glass is charged on kept rooms only: room 0's physical draw has no pane pass, so an indoor lamp through a window lights the outside
   at full strength. If the game charges that pass (read in its code, not measured), the outside is up to 31% brighter than its solve.
 - `GpuRoomLamps::PhysPasses` does not fall back to fewer tile rows when growing the atlas fails: that room shows the game's map until a

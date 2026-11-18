@@ -3210,14 +3210,15 @@ bool PhysKeptCheck() {
     };
     std::vector<RtLampModel::Lamp> lamps = {ToLamp(def(6.5f, 2.95f, 8.0f, 3)), ToLamp(def(8.0f, 2.5f, 6.0f, 4)), ToLamp(def(5.0f, 1.4f, 5.0f, 5)),
                                             ToLamp(def(2.0f, 3.0f, 8.0f, 11)), ToLamp(def(4.3f, 1.8f, 10.0f, 3)), ToLamp(def(6.0f, 2.98f, 6.0f, 3)),
-                                            ToLamp(def(12.0f, 0.9f, 10.0f, 3)), ToLamp(def(8.0f, 5.0f, 6.0f, 3))};
+                                            ToLamp(def(12.0f, 2.9f, 10.0f, 3)), ToLamp(def(8.0f, 5.0f, 6.0f, 3))};
     const int nL = static_cast<int>(lamps.size());
-    const char* names[] = {"bare bulb (3)", "spot (4)", "shaded lamp (5)", "street lamp outside (11)", "TubeLight", "rectangle area light", "lamp of room B", "lamp upstairs"};
+    const char* names[] = {"bare bulb (3)", "spot (4)", "shaded lamp (5)", "street lamp outside (11)", "TubeLight", "rectangle area light", "area light of room B", "lamp upstairs"};
     {
         const float s[3] = {0.0f, 0.0f, 1.0f};
         GpuLampLaw::TubeShape(lamps[4].law, s, 1.0f);
         const float u[3] = {1.0f, 0.0f, 0.0f}, v[3] = {0.0f, 0.0f, 1.0f}, nrm[3] = {0.0f, 1.0f, 0.0f};
         GpuLampLaw::AreaShape(lamps[5].law, u, v, nrm, 0.3f, 0.2f, false);
+        GpuLampLaw::AreaShape(lamps[6].law, u, v, nrm, 0.3f, 0.2f, false); // (behind room A's east wall: never on its inner face)
     }
     // the room table: room A (lamp of room B x its norm scale 0.8, no reach), room 0 (reach on its outer walls; none for the tube)
     // (the shaded lamp stands on furniture in room A: its 3D test takes the furniture fill there)
@@ -3582,10 +3583,23 @@ bool PhysKeptCheck() {
     if (uvb) uvb->Release();
     Check(ok, "physical: the per-lamp passes: " + err);
     if (!ok) return false;
+    long behindLit = 0; // (wall texel x lamp pairs whose law lights a texel from behind its face)
     const auto lawOf = [&](int l, const Tx& t, float out[3]) {
         const float reach = rooms[t.slot].lamp[l][1];
         GpuLampLaw::Eval(lamps[l].law, t.pos, t.nrm, GpuLampLaw::WallReach(t.nrm, prm.reachOn) * reach, out);
+        // a wall texel never takes a lamp behind its face (AccPhys)
+        const float* L = lamps[l].law.pos;
+        if (std::fabs(t.nrm[1]) < 0.5f && (L[0] - t.pos[0]) * t.nrm[0] + (L[1] - t.pos[1]) * t.nrm[1] + (L[2] - t.pos[2]) * t.nrm[2] < -0.01f) out[0] = out[1] = out[2] = 0.0f;
     };
+    for (const Tx& t : tx) {
+        float law[3];
+        GpuLampLaw::Eval(lamps[6].law, t.pos, t.nrm, 0.0f, law);
+        float cut[3];
+        lawOf(6, t, cut);
+        behindLit += t.slot == 0 && rooms[0].lamp[6][0] != 0.0f && prm.thr <= (law[0] + law[1]) + law[2] && cut[0] + cut[1] + cut[2] == 0.0f;
+    }
+    std::printf("  room B's area light behind room A's east wall: its law lights %ld of room A's wall texels from behind\n", behindLit);
+    Check(behindLit > 0, "physical: no wall texel of room A has room B's area light behind it (the scene is wrong)");
     // the GPU's shadow share of lamp l at point i (-1: its law adds nothing there)
     const auto shareOf = [&](int l, uint32_t i) {
         float law[3];
