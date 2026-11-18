@@ -55,6 +55,8 @@ The feature is described in [features/looks.md](../features/looks.md). It must:
 | 2026-11-14 | PR branch | `looks_fx_check --packs` (six packs, three runs) | 17 checks, 0 failures; no pack effect kept | None |
 | 2026-11-14 | PR branch | `looks_packs_test --real` | 54 checks, 0 failures; Ptho-FX downloaded through WinHTTP | Network (one pack) |
 | 2026-11-14 | 6756d30f | `shaders_menu_test` (Shaders and Capture pages) | 924 cases, 0 layout findings, 0 missing translations | None |
+| 2026-11-18 | 9158fce5 | `shaders_menu_test` (24 states at 343, 400 and 900 units, 100% and 200% text, 21 languages; the three modals on 800x600 to 3840x2160 at 100%, 150% and 200%) | 3024 page cases and 945 modal cases, 0 layout findings, 0 missing translations; every modal inside the screen without scrolling | None |
+| 2026-11-18 | 9158fce5 | In-game runner, `looks-world-only` with the game UI kept in the F8 screenshot and the look `Vanilla Enhancer (TS3) Hiddencowplant) - Gameplay 2.0` (night save, one start each) | 2 of 2 loads pass; switch off draws "at the end of frame", switch on "before the interface"; the HUD differs by 10 to 20 levels between the two, the world by about 2 | RTX Remix bridge, 3840x2160 |
 | 2026-11-14 | 6756d30f | In-game runner `looks-off-on` (Cinematic, night save, ABBA, 8.8 min each) | off 44.4 / 43.8 fps, on 45.0 / 44.3; p99 54.9 / 56.0 ms off, 54.4 / 55.8 on; largest free block after the pan 604 / 632 MB off, 689 / 736 on | RTX Remix bridge (tester's game) |
 | 2026-11-14 | 6756d30f | In-game runner `looks-builtin` (five looks) | 5 of 5 load, draw and log no Looks warning (Vivid on a second start: the first froze on the main menu before the world, no Looks line after start-up); largest free block 1398-1485 MB | RTX Remix bridge (tester's game) |
 
@@ -85,7 +87,7 @@ manual check below.
 11. Put a pack (for example AlucardDH's `Shaders\` and `Textures\`) in `Apex Radiance\Shaders\`, turn Looks on.
     **Expected:** the Shader library card shows "Checking your shaders…", then the count; the game keeps its frame rate
     while it compiles.
-12. *Add a shader*, group *Your shaders*, add a technique. **Expected:** it runs, its row shows the .fx file name, its
+12. *Add shaders*, group *Your shaders*, add a technique. **Expected:** it runs, its row shows the .fx file name, its
     sliders change it; the setting survives a restart.
 13. Choose a look that names a technique of a file you do not have. **Expected:** "<n> missing" in the subtitle, the
     block "<n> can't run here" under the list with the row "<file>.fx · Not in your Shaders folder" and *Add .fx
@@ -98,9 +100,10 @@ manual check below.
     folder compiles for the new size, then run; no corruption after the device Reset.
 17. Developer build, *Live counters*. **Expected:** the GPU memory includes the user effects; the reasons of the files
     that do not run are listed.
-18. Get shader packs: tick two packs, *Download 2 packs*. **Expected:** ReShade's standard effects download first, then
-    the two, one at a time with their percentage; the game keeps playing; each becomes "Downloaded" with "<x> of <y>
-    run here", and its shaders appear in *Add a shader* under its name.
+18. Installed shaders > Get more packs: *Download* on two packs. **Expected:** ReShade's standard effects download
+    first, then the two, one at a time with their percentage in their rows and the download bar; the game keeps
+    playing; each moves to Installed packs with "<x> of <y> run here", and its shaders appear in *Add shaders* under its
+    name.
 19. *Stop the rest* during a download. **Expected:** the current and the waiting packs stop; nothing half-written stays
     in `Shaders\Packs`.
 20. Import a preset that uses a pack you do not have (for example one with MXAO). **Expected:** the note card with
@@ -112,11 +115,23 @@ manual check below.
 25. A look whose `PreprocessorDefinitions` sets a name that the .fx also `#define`s, with packs checking in the
     background. **Expected:** the file compiles once; the log shows no new compile of it at each scan.
 21. A downloaded pack's ⋯: *Update*, then *Remove*. **Expected:** the pack is replaced, then gone from the card and from
-    *Add a shader*.
+    *Add shaders*.
 22. No network (cable out), *Download*. **Expected:** "No connection to GitHub", the note "No connection; the list may
     be out of date"; the menu does not freeze.
-23. Window at 400 units and text size 200% with the Get shader packs card. **Expected:** rows and the footer wrap;
-    nothing is cut off without its full text on hover.
+23. Window at 343 units (the default) and text size 200%, both tabs and the Add shaders modal at 720p. **Expected:**
+    rows and footers wrap; nothing is cut off without its full text on hover; the modal's Import .fx… and Done stay on
+    screen.
+26. *Add shaders*, then *Add* on a shader of a pack not on this PC, then two more shaders. **Expected:** the modal stays
+    open; the pack's group shows "Downloading <n>%"; the shaders wait in the look as missing rows and run once the pack
+    is here; *Done* closes the modal.
+27. Look list > *New look*: Start empty, then again with Copy this look while the look has unsaved changes.
+    **Expected:** the first writes an empty look and chooses it ("No shaders yet: use Add shaders to build this look");
+    the second asks to save or discard first; Discard then Copy this look copies the look as saved.
+28. Installed shaders > Get more packs: search for an author. **Expected:** only that author's packs; "No pack matches"
+    for a word nothing matches; the menu search does not list the card.
+29. Open the menu in live mode and move the camera around mirrors, Sims' portraits and reflections for a minute; watch
+    the header while the frame rate changes. **Expected:** the menu never blinks off; the search field and the
+    Night/Day pill do not move.
 
 ## Confirmed in game
 
@@ -125,9 +140,13 @@ manual check below.
 ## Open checks
 
 - Every step of the in-game test plan.
-- *Interface without shaders* (step 2): the run point before the interface and the game's colour pass, with its curve
-  compensated, is not yet checked in game; an in-game runner job for it is
-  in progress.
+- *Interface without shaders* (step 2): where each mode draws and the HUD taking the look with the switch off are
+  checked by the runner (Latest results); switching it while the game runs is checked only by the maintainer's eye.
+- The Shaders page of 4.0.5 (steps 23 and 26 to 29): checked offline by `shaders_menu_test`; never opened in game
+  before the release. The menu's blink (step 29): the cause, an off-screen EndScene before the frame's own, is a
+  hypothesis; the runner's run with the menu open logged no such EndScene, and the maintainer saw no blink after it.
+- The in-game runner's Looks jobs (`looks-off-on`, `looks-builtin`, `looks-world-only`) name `apex:Cinematic`, a
+  built-in look no longer shipped: they fail with "no look chosen" until they name a look of the tester's.
 - The missing shaders' rows (steps 13, 14, 20) and the renamed-file lookup (step 24) are checked only by the offline
   harnesses (`looks_packs_test`, `shaders_menu_test`), not in game.
 - The player's .fx effects have run only offline on a separate Direct3D 9 device, never in the game: the look of each

@@ -6,6 +6,30 @@ namespace ApexChangelog {
 
 namespace {
 
+constexpr const char* k405Added[] = {
+    "Shaders: New look starts a look from scratch or copies the one you use",
+    "Shaders: Get more packs lists ReShade's packs to download, with a search",
+    nullptr};
+
+constexpr const char* k405Improved[] = {
+    "Shaders: two tabs, Look and Installed shaders, instead of three",
+    "Shaders: Add shaders opens one window to search, filter and add several",
+    "Shaders: adding a shader from a pack you don't have downloads the pack",
+    "Shaders: one Save button, with Save as a new look in the card's menu",
+    "Menu: the frame rate no longer pushes the search field around",
+    nullptr};
+
+constexpr const char* k405Fixed[] = {
+    "Menu: the Apex menu no longer blinks off for a moment",
+    "Shaders: a missing shader's row lines up with the others",
+    nullptr};
+
+constexpr const char* k405Highlights[] = {
+    "Two tabs on the Shaders page",
+    "Add shaders in one window",
+    "New looks from scratch",
+    nullptr};
+
 constexpr const char* k404Added[] = {
     "Shaders: favourite, rename and delete looks in the look list",
     "Shaders: a trash button on every shader, with Restore until you save",
@@ -695,6 +719,8 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"4.0.5", "2026-11-18", k405Added, k405Improved, k405Fixed,
+     "A simpler Shaders page: build a look and add its shaders without leaving it", k405Highlights},
     {"4.0.4", "2026-11-18", k404Added, k404Improved, k404Fixed,
      "ReShade effects that match ReShade, and a Shaders page that keeps your changes", k404Highlights},
     {"4.0.3", "2026-11-17", nullptr, k403Improved, k403Fixed, "One-click frame generation in Setup, for a smoother game on newer cards"},

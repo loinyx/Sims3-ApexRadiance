@@ -165,7 +165,9 @@ Per call, with a thread-local re-entry guard:
    3. if a Report screenshot is pending with the menu open, `Picture::OnEndScene` now so the photo is graded without
       the menu (Picture then does not grade twice);
    4. `RenderCallbacks::filteredSceneBeforeOverlay` (Report screenshots of the graded frame);
-   5. `Overlay::Frame` once per frame (the Present hook clears the flag; every EndScene if the registry is missing);
+   5. `Overlay::Frame` once per frame, at an EndScene with the back buffer as render target 0 (an off-screen pass that ends its
+      scene first, a reflection or a Sim's portrait, would take the menu into its texture); any EndScene after two frames
+      without one; every EndScene if the registry is missing. The Present hook clears the flag;
    6. `Picture::OnEndScene` (the SDR Picture pass).
 3. The original `EndScene`.
 
