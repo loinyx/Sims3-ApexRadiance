@@ -69,11 +69,6 @@ inline float Offset(unsigned x, unsigned y) {
     return static_cast<float>(g - 0.5);
 }
 } // namespace RoomMapDither
-// the engine keeps the game's vertex input around its draws (d3d9_extra_hooks.cpp); here nothing is hooked
-namespace ExtraHooks {
-VertexInputMark MarkVertexInput() { return {}; }
-void RestoreVertexInput(VertexInputMark) {}
-} // namespace ExtraHooks
 #include "shaders/rt_lamps_hlsl.h"
 
 #ifdef RT_OBJECT_SHAPES
