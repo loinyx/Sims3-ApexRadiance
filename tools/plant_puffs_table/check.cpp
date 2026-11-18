@@ -14,7 +14,7 @@
 #include "features/plant_scan.h"
 
 namespace {
-void Collect(const std::wstring& dir, const wchar_t* ext, std::vector<std::wstring>& out, bool deep, bool builds) {
+void Collect(const std::wstring& dir, const wchar_t* ext, std::vector<std::wstring>& out, bool deep, bool builds) { // (only this tool's)
     WIN32_FIND_DATAW fd;
     HANDLE h = FindFirstFileW((dir + L"*").c_str(), &fd);
     if (h == INVALID_HANDLE_VALUE) return;
