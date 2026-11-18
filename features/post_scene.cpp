@@ -17,6 +17,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <format>
 #include <map>
 #include <mutex>
 #include <utility>
@@ -213,6 +214,14 @@ struct VpVote {
 bool g_eyeKnown = false;
 float g_eye[3] = {};
 float g_eyeMiss = -1.0f; // this frame: the smallest horizontal distance of a scanned projection's camera to the eye (diagnostics)
+// Diagnostics of that nearest scanned block (rerun2 1118: nearest 72.8 m, no camera): its register, camera position, near
+// and sign of m[1][1]; and the c40 block's shape
+UINT g_missReg = 0;
+float g_missPos[3] = {}, g_missNear = 0.0f;
+bool g_missMirrored = false;
+int g_c40State = -1; // -1 not read, 0 not projection-shaped, 1 shaped
+float g_c40Pos[3] = {};
+bool g_c40PosOk = false;
 std::vector<VpVote> g_vpVotes;
 float g_vp[4][4] = {};
 bool g_vpValid = false;
@@ -277,7 +286,7 @@ void AddVpVote(const float m[4][4], bool at40, bool eye, std::vector<size_t>& th
 }
 
 void VoteCamera(IDirect3DDevice9* dev) {
-    if (g_nearDraws == 0) g_eyeKnown = LotLightingMotion::CameraEye(g_eye), g_eyeMiss = -1.0f;
+    if (g_nearDraws == 0) g_eyeKnown = LotLightingMotion::CameraEye(g_eye), g_eyeMiss = -1.0f, g_c40State = -1, g_c40PosOk = false;
     float regs[kScanRegs][4];
     const bool haveRegs = SUCCEEDED(dev->GetVertexShaderConstantF(0, &regs[0][0], kScanRegs));
     float cameraBlock[4][4];
@@ -286,14 +295,21 @@ void VoteCamera(IDirect3DDevice9* dev) {
     {
         std::vector<size_t> thisDraw;
         float n;
-        if (haveCameraBlock && NearFromBlock(cameraBlock, n)) AddVpVote(cameraBlock, true, false, thisDraw);
+        if (haveCameraBlock && NearFromBlock(cameraBlock, n)) {
+            AddVpVote(cameraBlock, true, false, thisDraw);
+            if (g_c40State < 1) g_c40State = 1, g_c40PosOk = CameraOfBlock(cameraBlock, g_c40Pos);
+        } else if (haveCameraBlock && g_c40State < 0)
+            g_c40State = 0;
         if (haveRegs && g_eyeKnown)
             for (UINT r = 0; r + 4 <= kScanRegs; r++) {
                 const float(*m)[4] = &regs[r];
                 float p[3];
                 if (!NearFromBlock(m, n) || !CameraOfBlock(m, p)) continue;
                 const float miss = std::hypot(p[0] - g_eye[0], p[2] - g_eye[2]);
-                if (g_eyeMiss < 0 || miss < g_eyeMiss) g_eyeMiss = miss;
+                if (g_eyeMiss < 0 || miss < g_eyeMiss) {
+                    g_eyeMiss = miss, g_missReg = r, g_missNear = n, g_missMirrored = m[1][1] < 0.0f;
+                    std::memcpy(g_missPos, p, sizeof p);
+                }
                 if (miss < kEyeMatchM) AddVpVote(m, false, true, thisDraw);
             }
     }
@@ -550,6 +566,24 @@ int DepthWritesThisFrame() { return g_depthWrites; }
 int DepthWritesLastFrame() { return g_lastDepthWrites; }
 bool Counting() { return g_hooks; }
 bool SceneDepthValid() { return g_depthValid; }
+// The nearest scanned block in words: where its camera sits, a guess of its kind, and the game camera's vec3s around the eye
+// offset (is +0x60 the eye, or another point such as the look-at target?) with their horizontal distance to that camera
+static std::string CameraDiagText() {
+    const auto v3 = [](const float p[3]) { return std::format("({:.2f}, {:.2f}, {:.2f})", p[0], p[1], p[2]); };
+    std::string t = g_c40State < 0 ? "; c40 not read" : g_c40State == 0 ? "; c40 not projection-shaped" : "; c40 shaped, its camera " + (g_c40PosOk ? v3(g_c40Pos) : std::string("degenerate"));
+    if (!g_eyeKnown || g_eyeMiss < 0) return t + "; no projection-shaped block scanned";
+    const float dy = g_missPos[1] - g_eye[1];
+    // shortcut: kind is a guess from heights only (a view-projection's camera sits above the ground, near the eye's height)
+    const char* kind = g_missMirrored ? "mirrored (reflection?)" : std::fabs(dy) < 4.0f ? "view-projection at another xz (eye read wrong?)" : dy < -20.0f ? "object-to-clip? (below the eye)" : "unknown";
+    t += std::format("; nearest scanned c{} camera {} near {:.4f}, {:.1f} m above the eye, kind guess {}; game camera vec3s by offset from the eye's:", g_missReg, v3(g_missPos), g_missNear, dy, kind);
+    for (int d = -0x40; d <= 0x40; d += 0x10) {
+        float q[3];
+        if (!LotLightingMotion::CameraVecNearEye(d, q)) continue;
+        t += std::format(" {}0x{:x} {} ({:.1f} m)", d < 0 ? "-" : "+", d < 0 ? -d : d, v3(q), std::hypot(g_missPos[0] - q[0], g_missPos[2] - q[2]));
+    }
+    return t;
+}
+
 std::string DiagText() {
     return "scene draws " + std::to_string(g_sceneDraws) + " (depth writes " + std::to_string(g_depthWrites) + ", last frame " + std::to_string(g_lastDepthWrites) +
            "), boundary " + (g_done ? "done" : "not yet") + (g_rejectedBoundary ? ", rejected" : "") + (g_sceneOnSharedDepth ? ", scene on the shared depth" : ", scene not on the shared depth") + (DepthShare::Surface() ? "" : " (no depth swap)") + (g_uiDrawSeen ? ", UI seen" : "") +
@@ -561,7 +595,7 @@ std::string DiagText() {
            ", camera wanted " + std::to_string(g_cameraWanted.load()) + ", voted draws " + std::to_string(g_nearDraws) + ", near votes " +
            std::to_string(g_nearVotes.size()) + " (near " + std::to_string(g_near) + "), view-projection blocks " + std::to_string(g_vpVotes.size()) +
            (g_eyeKnown ? ", eye (" + std::to_string(g_eye[0]) + ", " + std::to_string(g_eye[1]) + ", " + std::to_string(g_eye[2]) + "), nearest scanned camera " + std::to_string(g_eyeMiss) + " m"
-                       : std::string(", eye unknown")) +
+                       : std::string(", eye unknown")) + CameraDiagText() +
            (g_vpValid ? ", camera valid" : ", no camera") + (g_lastVpValid ? ", last frame's valid" : "");
 }
 // This frame's effects (ambient occlusion, edge smoothing, Depth Blur) will still run at a later scene boundary: Picture

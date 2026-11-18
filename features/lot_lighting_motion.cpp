@@ -337,14 +337,14 @@ std::atomic<uint32_t> c_aoCalls{0}, c_aoRun0{0}, c_aoRun1{0}, c_aoMove0{0}, c_ao
 std::atomic<uint64_t> g_aoPassUs{0}, g_aoLongestUs{0}, g_aoLastUs{0};
 double g_qpcUs = 0.0;
 
-bool ReadEye(float out[3]) {
+bool ReadCameraVec(uint32_t off, float out[3]) {
     if (!g_camReady.load(std::memory_order_acquire)) return false;
     __try {
         const uintptr_t root = *reinterpret_cast<const uintptr_t*>(g_rootGlobal);
         if (!root) return false;
         const uintptr_t camera = *reinterpret_cast<const uintptr_t*>(root + g_camOff);
         if (!camera) return false;
-        const float* e = reinterpret_cast<const float*>(camera + g_eyeOff);
+        const float* e = reinterpret_cast<const float*>(camera + off);
         out[0] = e[0];
         out[1] = e[1];
         out[2] = e[2];
@@ -353,6 +353,8 @@ bool ReadEye(float out[3]) {
     }
     return std::isfinite(out[0]) && std::isfinite(out[1]) && std::isfinite(out[2]);
 }
+
+bool ReadEye(float out[3]) { return ReadCameraVec(g_eyeOff, out); }
 
 bool Differs(const float a[3], const float b[3]) {
     return std::fabs(a[0] - b[0]) > kMoveEpsilon || std::fabs(a[1] - b[1]) > kMoveEpsilon || std::fabs(a[2] - b[2]) > kMoveEpsilon;
@@ -911,6 +913,8 @@ int BudgetMs() { return g_budgetMs.load(); }
 bool CameraMoving() { return (Running() || WallAoRunning()) && MovingAt(GetTickCount64()); }
 
 bool CameraEye(float out[3]) { return EnsureCamera() && ReadEye(out); }
+
+bool CameraVecNearEye(int delta, float out[3]) { return EnsureCamera() && g_eyeOff + delta < 0x400 && ReadCameraVec(g_eyeOff + delta, out); }
 
 bool SampleCameraMoving() {
     if (!EnsureCamera()) return false;

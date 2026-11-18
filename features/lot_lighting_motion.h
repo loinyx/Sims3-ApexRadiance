@@ -43,6 +43,8 @@ uint32_t FrameIndex();
 bool SampleCameraMoving();
 // The camera eye now (world); false while its location in the game's data is unknown. Any thread.
 bool CameraEye(float out[3]);
+// Diagnostics: the vec3 at the eye's offset + delta in the same camera object (false while unknown or unreadable). Any thread.
+bool CameraVecNearEye(int delta, float out[3]);
 // Samples the camera eye now and returns whether it has not moved since `tick` (GetTickCount64); false while the eye is
 // unknown. Render thread (the fence groups' sweep: with the camera still, every group on screen is drawn each frame).
 bool CameraStillSince(uint64_t tick);
