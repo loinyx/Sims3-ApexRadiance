@@ -2856,6 +2856,7 @@ const I18n::Pair kPairs[] = {
     {"Pick one, or import a ReShade or GShade preset", "Vyberte jeden, nebo importujte preset ReShade či GShade"},
     {"Copy a ReShade or GShade preset (.ini) into the Looks folder and choose it", "Zkopíruje preset ReShade či GShade (.ini) do složky Looks a vybere ho"},
     {"Shaders in this look", "Shadery tohoto vzhledu"},
+    {"Search packs", "Hledat balíčky"},
     {"Get more packs", "Stáhnout další balíčky"},
     {"{} packs on ReShade's list", "{} balíčků na seznamu ReShade"},
     {"No shaders yet: use Add shaders to build this look", "Zatím žádné shadery: sestav tento vzhled pomocí Přidat shadery"},

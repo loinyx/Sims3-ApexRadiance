@@ -2856,6 +2856,7 @@ const I18n::Pair kPairs[] = {
     {"Pick one, or import a ReShade or GShade preset", "選擇一個，或匯入 ReShade 或 GShade 預設"},
     {"Copy a ReShade or GShade preset (.ini) into the Looks folder and choose it", "將 ReShade 或 GShade 預設 (.ini) 複製到 Looks 資料夾並選用"},
     {"Shaders in this look", "此畫面風格的著色器"},
+    {"Search packs", "搜尋套件"},
     {"Get more packs", "取得更多套件"},
     {"{} packs on ReShade's list", "ReShade 清單中的 {} 個套件"},
     {"No shaders yet: use Add shaders to build this look", "還沒有著色器：使用「新增著色器」建立此畫面風格"},

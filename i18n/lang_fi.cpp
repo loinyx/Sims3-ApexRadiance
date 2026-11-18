@@ -2856,6 +2856,7 @@ const I18n::Pair kPairs[] = {
     {"Pick one, or import a ReShade or GShade preset", "Valitse yksi tai tuo ReShade- tai GShade-esiasetus"},
     {"Copy a ReShade or GShade preset (.ini) into the Looks folder and choose it", "Kopioi ReShade- tai GShade-esiasetuksen (.ini) Looks-kansioon ja valitsee sen"},
     {"Shaders in this look", "Tämän lookin varjostimet"},
+    {"Search packs", "Hae paketteja"},
     {"Get more packs", "Hae lisää paketteja"},
     {"{} packs on ReShade's list", "{} pakettia ReShaden listalla"},
     {"No shaders yet: use Add shaders to build this look", "Ei vielä varjostimia: rakenna tämä look kohdasta Lisää varjostimia"},

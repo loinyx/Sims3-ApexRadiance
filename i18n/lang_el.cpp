@@ -2856,6 +2856,7 @@ const I18n::Pair kPairs[] = {
     {"Pick one, or import a ReShade or GShade preset", "Διαλέξτε ένα ή εισαγάγετε ένα preset ReShade ή GShade"},
     {"Copy a ReShade or GShade preset (.ini) into the Looks folder and choose it", "Αντιγράφει ένα preset ReShade ή GShade (.ini) στον φάκελο Looks και το επιλέγει"},
     {"Shaders in this look", "Shaders αυτού του look"},
+    {"Search packs", "Αναζήτηση πακέτων"},
     {"Get more packs", "Λήψη περισσότερων πακέτων"},
     {"{} packs on ReShade's list", "{} πακέτα στη λίστα του ReShade"},
     {"No shaders yet: use Add shaders to build this look", "Δεν υπάρχουν ακόμα shaders: φτιάξε αυτό το look με την Προσθήκη shaders"},

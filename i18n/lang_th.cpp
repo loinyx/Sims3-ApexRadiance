@@ -2856,6 +2856,7 @@ const I18n::Pair kPairs[] = {
     {"Pick one, or import a ReShade or GShade preset", "เลือกหนึ่งรายการ หรือนำเข้าพรีเซ็ต ReShade หรือ GShade"},
     {"Copy a ReShade or GShade preset (.ini) into the Looks folder and choose it", "คัดลอกพรีเซ็ต ReShade หรือ GShade (.ini) ไปยังโฟลเดอร์ Looks แล้วเลือกใช้"},
     {"Shaders in this look", "เชดเดอร์ในลุคนี้"},
+    {"Search packs", "ค้นหาแพ็ก"},
     {"Get more packs", "รับแพ็กเพิ่ม"},
     {"{} packs on ReShade's list", "{} แพ็กในรายการของ ReShade"},
     {"No shaders yet: use Add shaders to build this look", "ยังไม่มีเชดเดอร์ ใช้ เพิ่มเชดเดอร์ เพื่อสร้างลุคนี้"},

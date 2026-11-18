@@ -2856,6 +2856,7 @@ const I18n::Pair kPairs[] = {
     {"Pick one, or import a ReShade or GShade preset", "하나를 고르거나 ReShade 또는 GShade 프리셋을 가져옵니다"},
     {"Copy a ReShade or GShade preset (.ini) into the Looks folder and choose it", "ReShade 또는 GShade 프리셋(.ini)을 Looks 폴더에 복사하고 선택합니다"},
     {"Shaders in this look", "이 룩의 셰이더"},
+    {"Search packs", "팩 검색"},
     {"Get more packs", "팩 더 받기"},
     {"{} packs on ReShade's list", "ReShade 목록의 팩 {}개"},
     {"No shaders yet: use Add shaders to build this look", "아직 셰이더가 없습니다. 셰이더 추가로 이 룩을 만드세요"},

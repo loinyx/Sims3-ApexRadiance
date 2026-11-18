@@ -5,6 +5,7 @@
 #include "rec.h"
 #include "patches/looks_patch.cpp"
 #include "fixture.h"
+#include "features/looks_packs_index.h"
 
 namespace {
 const LooksParam kEvery[] = {
@@ -54,7 +55,20 @@ const std::vector<Looks::Packs::Pack>& FakePacks()
         MakePack("An old pack with a rather long name", "Somebody", "OldPack", 0, 0, false), MakePack("Gone pack", "Nobody", "GonePack", 50, 2),
         MakePack("ReShade standard effects", "crosire", "ReShade standard effects", 600, 50),
     };
-    return v;
+    // then the rest of ReShade's list from the built-in index (names only), so Get more packs and Add shaders show it whole
+    static const std::vector<Looks::Packs::Pack> all = [] {
+        std::vector<Looks::Packs::Pack> out = v;
+        for (const Looks::Packs::IndexPack& x : Looks::Packs::kIndex)
+        {
+            auto same = std::find_if(out.begin(), out.end(), [&](const Looks::Packs::Pack& p) { return _stricmp(p.folder.c_str(), x.folder) == 0; });
+            if (same != out.end()) { same->index = &x; continue; }
+            Looks::Packs::Pack p = MakePack(x.name, x.author, x.folder, x.downloadKB, x.techniques);
+            p.repo = x.repo; p.rank = x.rank; p.index = &x;
+            out.push_back(std::move(p));
+        }
+        return out;
+    }();
+    return all;
 }
 // The live viewer (live.cpp): downloads that take about two seconds a pack, one at a time
 bool g_live = false;

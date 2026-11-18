@@ -2389,10 +2389,12 @@ bool MissingRow(size_t i, const Looks::Packs::Batch& batch, std::vector<std::str
     const char* download = I18n::Tr("Download");
     const char* addFx = I18n::Tr("Add .fx files\xE2\x80\xA6");
     const float h = ImGui::GetFrameHeight(), gap = ApexUi::kSpace2 * u;
-    // then the ⋯ menu, in the column of the shader rows' (their switch and chevron's room left empty)
-    const float tail = gap + ApexUi::ToggleSwitchSize().x + gap + h;
-    const float controlW = (act == Act::Download ? ApexUi::ButtonWidth(download, true) + gap : act == Act::AddFx ? ApexUi::ButtonWidth(addFx, true) + gap
-                         : act == Act::Spin   ? 12.0f * u + gap : 0.0f) + h + tail;
+    // the ⋯ menu in the shader rows' ⋯ column, then the action right-aligned in their switch and chevron's room (a wider
+    // action moves the ⋯ left)
+    const float slot = ApexUi::ToggleSwitchSize().x + gap + h;
+    const float actW = act == Act::Download ? ApexUi::ButtonWidth(download, true) : act == Act::AddFx ? ApexUi::ButtonWidth(addFx, true)
+                     : act == Act::Spin     ? 12.0f * u : 0.0f;
+    const float controlW = h + gap + std::max(actW, slot);
     ImGui::PushID((int)i);
     ApexUi::SetNextRowUntranslated(); // the shader's own name; the description is already translated
     if (act != Act::Spin) ApexUi::SetNextRowWarning();
@@ -2400,14 +2402,17 @@ bool MissingRow(size_t i, const Looks::Packs::Batch& batch, std::vector<std::str
     ApexUi::SetNextRowIconColor(act == Act::Spin ? VioletTheme::kTextFaint : VioletTheme::kWarning);
     if (ApexUi::BeginControlRow(e.technique.c_str(), desc.c_str(), controlW, IconId::TriangleAlert))
     {
+        // a shader that can't run can leave the look too (it stops counting as missing at once)
+        if (ApexUi::IconButton("##More", IconId::Ellipsis, "More options", false, h / u)) ImGui::OpenPopup("MissingActions");
+        ImGui::SameLine(0.0f, gap);
+        if (actW < slot)
+        {
+            ImGui::Dummy(ImVec2(slot - actW, h));
+            if (act != Act::None) ImGui::SameLine(0.0f, 0.0f);
+        }
         if (act == Act::Download && ApexUi::IconTextButton(download, IconId::Download)) DownloadPacks({ pack->folder });
         else if (act == Act::AddFx && ApexUi::IconTextButton(addFx, IconId::Plus, "Copy .fx, .fxh and texture files into the Shaders folder")) PickFxFiles();
         else if (act == Act::Spin) ApexUi::BusySpinner(true);
-        if (act != Act::None) ImGui::SameLine(0.0f, gap);
-        // a shader that can't run can leave the look too (it stops counting as missing at once)
-        if (ApexUi::IconButton("##More", IconId::Ellipsis, "More options", false, h / u)) ImGui::OpenPopup("MissingActions");
-        ImGui::SameLine(0.0f, 0.0f);
-        ImGui::Dummy(ImVec2(tail, h));
         if (ApexUi::BeginActionMenu("MissingActions", e.technique.c_str()))
         {
             const ApexUi::ControlSizeScope menuSize(ApexUi::ControlSize::Compact);
@@ -3830,12 +3835,23 @@ public:
         {
             const std::string sub = I18n::Trf("{} packs on ReShade's list", more.size());
             ApexUi::CardHeader(IconId::Download, "Get more packs", sub.c_str(), nullptr, nullptr, true);
-            if (!ApexUi::FilterActive()) ApexUi::CardDivider();
             const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+            static char query[64] = {};
+            if (!ApexUi::FilterActive())
+            {
+                ApexUi::CardDivider();
+                ImGui::SetNextItemWidth(-1.0f);
+                ImGui::InputTextWithHint("##PackSearch", I18n::Tr("Search packs"), query, sizeof(query));
+                ApexUi::Gap(ApexUi::kSpace2);
+            }
+            const std::string q = ApexUi::FilterActive() ? std::string() : Lower(query);
             const char* download = I18n::Tr("Download");
             const float fh = ImGui::GetFrameHeight();
+            int shown = 0;
             for (const Pack* p : more)
             {
+                if (!q.empty() && Lower(p->name + " " + p->author + " " + p->folder).find(q) == std::string::npos) continue;
+                ++shown;
                 ImGui::PushID(p->folder.c_str());
                 const Row* r = busy(p->folder);
                 std::string desc;
@@ -3861,6 +3877,7 @@ public:
                 }
                 ImGui::PopID();
             }
+            if (!shown && !q.empty()) ApexUi::MutedText(I18n::Tr("No pack matches"));
         }
         if (!more.empty()) ApexUi::EndCard();
 

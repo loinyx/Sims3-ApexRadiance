@@ -772,6 +772,7 @@ const I18n::Entry kEntries[] = {
     {"Pick one, or import a ReShade or GShade preset", "Escolha um ou importe um preset do ReShade ou GShade", "Elige uno o importa un preajuste de ReShade o GShade", "Choisissez-en un ou importez un préréglage ReShade ou GShade"},
     {"Copy a ReShade or GShade preset (.ini) into the Looks folder and choose it", "Copia um preset do ReShade ou GShade (.ini) para a pasta Looks e o escolhe", "Copia un preajuste de ReShade o GShade (.ini) a la carpeta Looks y lo elige", "Copie un préréglage ReShade ou GShade (.ini) dans le dossier Looks et le choisit"},
     {"Shaders in this look", "Shaders deste visual", "Shaders de este estilo", "Shaders de ce rendu"},
+    {"Search packs", "Buscar pacotes", "Buscar paquetes", "Rechercher des packs"},
     {"Get more packs", "Baixar mais pacotes", "Obtener más paquetes", "Obtenir d'autres packs"},
     {"{} packs on ReShade's list", "{} pacotes na lista do ReShade", "{} paquetes en la lista de ReShade", "{} packs dans la liste de ReShade"},
     {"No shaders yet: use Add shaders to build this look", "Nenhum shader ainda: use Adicionar shaders para montar este visual", "Aún no hay shaders: usa Añadir shaders para crear este estilo", "Aucun shader pour l'instant : utilisez Ajouter des shaders pour construire ce rendu"},
