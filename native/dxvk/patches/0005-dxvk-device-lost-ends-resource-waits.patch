@@ -1,0 +1,64 @@
+From: Apex Radiance
+Subject: [PATCH 0005] dxvk: resource waits stop on device loss, locks return D3DERR_DEVICELOST
+
+After device loss the submission thread drops every command list without releasing its resources, so
+DxvkDevice::waitForResource waited forever and a Direct3D 9 lock that needed the GPU (LockRect, Lock) hung its
+thread. The wait now also ends when the submission queue reports VK_ERROR_DEVICE_LOST, the submission thread wakes the
+waiters when a submission fails, and LockImage and LockBuffer return D3DERR_DEVICELOST after such a wait.
+---
+diff --git a/src/d3d9/d3d9_device.cpp b/src/d3d9/d3d9_device.cpp
+index eb09412..63fece1 100644
+--- a/src/d3d9/d3d9_device.cpp
++++ b/src/d3d9/d3d9_device.cpp
+@@ -5141,6 +5141,9 @@ namespace dxvk {
+       // Wait until the buffer is idle which may include the copy (and resolve) we just issued.
+       if (!WaitForResource(*mappedBuffer, pResource->GetMappingBufferSequenceNumber(Subresource), Flags))
+         return D3DERR_WASSTILLDRAWING;
++
++      if (m_dxvkDevice->getDeviceStatus() == VK_ERROR_DEVICE_LOST)
++        return D3DERR_DEVICELOST;
+     }
+ 
+     const bool atiHack = desc.Format == D3D9Format::ATI1 || desc.Format == D3D9Format::ATI2;
+@@ -5573,6 +5576,9 @@ namespace dxvk {
+         if (!WaitForResource(*mappingBuffer, pResource->GetMappingBufferSequenceNumber(), Flags))
+           return D3DERR_WASSTILLDRAWING;
+ 
++        if (m_dxvkDevice->getDeviceStatus() == VK_ERROR_DEVICE_LOST)
++          return D3DERR_DEVICELOST;
++
+         pResource->SetNeedsReadback(false);
+       }
+     }
+diff --git a/src/dxvk/dxvk_device.cpp b/src/dxvk/dxvk_device.cpp
+index 0221825..2151e72 100644
+--- a/src/dxvk/dxvk_device.cpp
++++ b/src/dxvk/dxvk_device.cpp
+@@ -677,8 +677,11 @@ namespace dxvk {
+     if (resource.isInUse(access)) {
+       auto t0 = dxvk::high_resolution_clock::now();
+ 
+-      m_submissionQueue.synchronizeUntil([&resource, access] {
+-        return !resource.isInUse(access);
++      // After device loss the submissions holding the resource never
++      // complete, so stop waiting instead of hanging the caller forever
++      m_submissionQueue.synchronizeUntil([this, &resource, access] {
++        return !resource.isInUse(access)
++          || m_submissionQueue.getLastError() == VK_ERROR_DEVICE_LOST;
+       });
+ 
+       auto t1 = dxvk::high_resolution_clock::now();
+diff --git a/src/dxvk/dxvk_queue.cpp b/src/dxvk/dxvk_queue.cpp
+index e705ed9..ebed1a4 100644
+--- a/src/dxvk/dxvk_queue.cpp
++++ b/src/dxvk/dxvk_queue.cpp
+@@ -212,6 +212,9 @@ namespace dxvk {
+ 
+           if (m_lastError != VK_ERROR_DEVICE_LOST)
+             m_device->waitForIdle();
++
++          // Wake up threads waiting for resources so they can see the error
++          m_finishCond.notify_all();
+         }
+ 
+         m_submitQueue.pop();

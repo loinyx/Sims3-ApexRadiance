@@ -25,7 +25,7 @@ print the same smoke lines on an RTX 3070 laptop GPU (caps CRC32 `98a84800`), ex
 same 341-line log apart from the `Build:` line. A patched tree reports itself as `v3.1.1+` (DXVK's own mark for a
 modified source, as the zlib licence asks).
 
-Patches. Each applies after the ones before it. 0001 and 0002 are proposed upstream; 0003 and 0004 are for Apex
+Patches. Each applies after the ones before it. 0001, 0002 and 0005 are proposed upstream; 0003 and 0004 are for Apex
 Radiance's own passes in the bridge server and are not.
 
 | Patch | What | Why |
@@ -34,6 +34,7 @@ Radiance's own passes in the bridge server and are not.
 | 0002 | `DxvkShaderIo` keeps 16 variables inline instead of 32 | Every shader object holds four `DxvkShaderIo` and every fast pipeline key five more. The Sims 3's shaders use at most 16 inputs and 15 outputs, so nothing moves to the heap and each shader object is 2,304 bytes smaller in a 32-bit build |
 | 0003 | `VK_KHR_deferred_host_operations`, `VK_KHR_acceleration_structure` and `VK_KHR_ray_query` are enabled when the driver has them, with the `accelerationStructure` and `rayQuery` features | DXVK does not use them; a pass recorded through 0004 can trace rays on DXVK's device. Optional, so without driver support the device is created as before |
 | 0004 | `ID3D9VkExternalPass` (own IID): `ExecuteExternal(callback, data, resources, layouts)` and `SupportsRayQuery()` | Records the caller's Vulkan commands in DXVK's command stream, in stream order: no flush and no wait on the calling thread. The data is copied at the call, each resource moves to its layout for the callback and back, and DXVK re-binds its state afterwards |
+| 0005 | `DxvkDevice::waitForResource` also ends when the submission queue reports `VK_ERROR_DEVICE_LOST`; a failed submission wakes the waiters; `LockImage` and `LockBuffer` then return `D3DERR_DEVICELOST` | After a GPU fault (driver reset) the dropped command lists never release their resources, so a lock that waited for the GPU hung forever: the bridge server froze in a `LockRect` read-back instead of reporting device loss |
 
 With 0001 to 0004 on an RTX 3070 laptop GPU the log lists the three extensions as enabled, `SupportsRayQuery` returns
 true and `dxvk_external_pass` reads back no wrong pixel; the smoke test prints the same caps as the release.
