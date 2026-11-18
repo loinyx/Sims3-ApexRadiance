@@ -1412,6 +1412,7 @@ const char* SourceLabel(Looks::Source s) { return s == Looks::Source::Mine ? "My
 
 // Looks starred in the list (references); they open the list, above My looks and GShade
 std::vector<std::string> g_favorites;
+std::map<std::string, std::string> g_lookIcons; // per look: the Lucide name chosen in the menu (none: from the look's name)
 bool IsFavorite(const std::string& ref) { return std::find(g_favorites.begin(), g_favorites.end(), ref) != g_favorites.end(); }
 
 // A look picked (or Import) while the current one has unsaved changes: AskSaveModal opens next frame and asks first
@@ -1477,6 +1478,7 @@ void FlushDeletes()
     {
         RecycleLook(ref);
         g_favorites.erase(std::remove(g_favorites.begin(), g_favorites.end(), ref), g_favorites.end());
+        g_lookIcons.erase(ref);
     }
     g_pendingDelete.clear();
     g_listDirty = true;
@@ -1529,6 +1531,7 @@ void RenameRow(const Looks::LookItem& item, bool& settings, float stackedWidth =
     LOG_INFO("[Looks] renamed " + item.ref + " to " + newRef);
     if (g.preset == item.ref) g.preset = newRef; // the changes made here stay with it
     std::replace(g_favorites.begin(), g_favorites.end(), item.ref, newRef);
+    if (auto icon = g_lookIcons.find(item.ref); icon != g_lookIcons.end()) { const std::string name = icon->second; g_lookIcons.erase(icon); g_lookIcons[newRef] = name; }
     g_renaming.clear();
     g_listDirty = true;
     g_message = I18n::Trf("Renamed to {}", ShownName(newRef));
@@ -1669,12 +1672,13 @@ bool AskSaveModal()
     return changed;
 }
 
-// ---------------------------------------------------------------------------------------------- menu: the Looks card
+// ---------------------------------------------------------------------------------------------- menu: the Looks list
 int g_galleryFilter = 0;            // All, Favorites, Mine, GShade
 bool g_gallerySearch = false;       // the search field is open
 bool g_gallerySearchFocus = false;
 char g_galleryQuery[96] = {};
-std::map<std::string, int> g_shaderCounts; // per look: the shaders its .ini runs (-1: unreadable), read as tiles show
+std::map<std::string, int> g_shaderCounts;      // per look: the shaders its .ini runs (-1: unreadable), read as rows show
+std::string g_iconFor;                          // the look whose icon list opens next frame
 
 // How many shaders a look's .ini runs; read for a few looks a frame (a GShade folder can hold hundreds), -2 until then
 int ShaderCountOf(const std::string& ref, int& readsLeft)
@@ -1685,6 +1689,82 @@ int ShaderCountOf(const std::string& ref, int& readsLeft)
     std::string text;
     Looks::Preset ini;
     return g_shaderCounts[ref] = Looks::LookText(ref, text) && Looks::ParsePreset(text, ini) ? (int)ini.order.size() : -1;
+}
+
+// A look's icon: the one chosen in the menu, else one word of its name (file names are nearly always English), else sparkles
+IconId LookIcon(const std::string& ref)
+{
+    if (auto it = g_lookIcons.find(ref); it != g_lookIcons.end())
+        if (const IconId id = ApexUi::IconFromName(it->second); id != IconId::None) return id;
+    static const std::pair<const char*, IconId> kWords[] = {
+        { "sunset", IconId::Sunset }, { "afterglow", IconId::Sunset }, { "dusk", IconId::Sunset }, { "golden", IconId::Sunset },
+        { "night", IconId::Moon }, { "noir", IconId::Moon }, { "dark", IconId::Moon }, { "moon", IconId::Moon },
+        { "film", IconId::Film }, { "cinema", IconId::Film }, { "movie", IconId::Film }, { "vintage", IconId::Film }, { "retro", IconId::Film },
+        { "winter", IconId::Snowflake }, { "snow", IconId::Snowflake }, { "cold", IconId::Snowflake }, { "frost", IconId::Snowflake },
+        { "pastel", IconId::Flower2 }, { "spring", IconId::Flower2 }, { "flower", IconId::Flower2 },
+        { "summer", IconId::Sun }, { "sunny", IconId::Sun }, { "bright", IconId::Sun }, { "warm", IconId::Sun },
+        { "rain", IconId::CloudRain }, { "storm", IconId::CloudRain }, { "gloom", IconId::CloudRain },
+        { "vivid", IconId::Palette }, { "vibrant", IconId::Palette }, { "colour", IconId::Palette }, { "color", IconId::Palette },
+        { "serene", IconId::Leaf }, { "nature", IconId::Leaf }, { "forest", IconId::Leaf }, { "green", IconId::Leaf },
+    };
+    const std::string name = Lower(ShownName(ref));
+    for (const auto& [word, id] : kWords)
+        if (name.find(word) != std::string::npos) return id;
+    return IconId::Sparkles;
+}
+
+// A look's icon on its violet tile (as the Setup's component tiles)
+void IconTile(ImDrawList* dl, ImVec2 p, float size, IconId icon, float alpha = 1.0f)
+{
+    const float s = std::floor(size * 0.5f);
+    dl->AddRectFilled(p, ImVec2(p.x + size, p.y + size), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kAccent, 0.16f * alpha)), std::floor(size * 0.28f));
+    ApexUi::DrawIcon(dl, icon, ImVec2(p.x + (size - s) * 0.5f, p.y + (size - s) * 0.5f), s, ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kAccent, alpha)));
+}
+
+// The icons a look can take: the presets' list without the ones that mean something else here (the star is the favorite)
+const IconId kLookIconChoices[] = {
+    IconId::Sparkles, IconId::Sunset, IconId::Sun, IconId::SunMedium, IconId::Moon, IconId::MoonStar, IconId::CloudMoon, IconId::Cloud,
+    IconId::CloudRain, IconId::Snowflake, IconId::Leaf, IconId::Flower2, IconId::Trees, IconId::TreePalm, IconId::Film, IconId::Camera,
+    IconId::Palette, IconId::Heart, IconId::House, IconId::Flame, IconId::Crown, IconId::Lightbulb, IconId::Diamond, IconId::Coffee,
+    IconId::Music, IconId::Wine, IconId::Skull, IconId::PartyPopper, IconId::Droplet, IconId::WandSparkles,
+};
+
+// "Change icon": the icons in rows of six, then "From the name"; true when one was picked
+bool LookIconPopup(bool& settings)
+{
+    if (!g_iconFor.empty() && !ImGui::IsPopupOpen("LookIcon")) ImGui::OpenPopup("LookIcon");
+    if (!ImGui::BeginPopup("LookIcon")) { g_iconFor.clear(); return false; }
+    bool picked = false;
+    {
+        const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+        const float u = ApexUi::Unit(), b = 34.0f * u, icon = ApexUi::kIconSmall * u, gap = 6.0f * u;
+        const IconId current = LookIcon(g_iconFor);
+        const bool chosen = g_lookIcons.count(g_iconFor) != 0;
+        ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
+        ImGui::TextDisabled("%s", I18n::Trf("Icon of {}", ShownName(g_iconFor)).c_str());
+        ImGui::PopFont();
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        for (int i = 0; i < (int)IM_COUNTOF(kLookIconChoices); ++i)
+        {
+            if (i % 6) ImGui::SameLine(0.0f, gap);
+            const IconId id = kLookIconChoices[i];
+            ImGui::PushID(i);
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            const bool click = ImGui::InvisibleButton("##Icon", ImVec2(b, b), ImGuiButtonFlags_EnableNav);
+            const bool hovered = ImGui::IsItemHovered(), on = chosen && id == current;
+            ImGui::RenderNavCursor(ImGui::GetCurrentContext()->LastItemData.Rect, ImGui::GetItemID());
+            ImGui::PopID();
+            dl->AddRectFilled(p, ImVec2(p.x + b, p.y + b), ImGui::GetColorU32(VioletTheme::Col(on ? VioletTheme::kSegmentOn : hovered ? VioletTheme::kToggleOff : VioletTheme::kSelectedBg)), 9.0f * u);
+            if (on) dl->AddRect(p, ImVec2(p.x + b, p.y + b), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kAccent)), 9.0f * u, 0, 1.0f);
+            ApexUi::DrawIcon(dl, id, ImVec2(p.x + (b - icon) * 0.5f, p.y + (b - icon) * 0.5f), icon, ImGui::GetColorU32(VioletTheme::Col(on ? 0xFFFFFFu : VioletTheme::kText)));
+            if (click) { g_lookIcons[g_iconFor] = ApexUi::IconName(id); picked = true; }
+        }
+        ApexUi::Gap(ApexUi::kSpace1);
+        if (ApexUi::IconTextButton("From the name", IconId::Sparkles, "A word of the look's name picks its icon")) { g_lookIcons.erase(g_iconFor); picked = true; }
+    }
+    if (picked) { settings = true; g_iconFor.clear(); ImGui::CloseCurrentPopup(); }
+    ImGui::EndPopup();
+    return picked;
 }
 
 // A filter chip: its label and count, the chosen one on the segmented control's violet; true when clicked
@@ -1713,122 +1793,92 @@ bool FilterChip(const char* label, int count, bool on)
     return clicked;
 }
 
-// A look's picture: the tile's 16:9 frame (a quiet placeholder with the Shaders icon until the look has a picture)
-void LookPicture(ImDrawList* dl, const ImVec2& a, const ImVec2& b)
+// One look of the list: its icon tile, the name (cut with "...", whole on hover) over where it comes from and how many
+// shaders it runs, "In use" on the chosen look, and on hover the star (always shown on a favorite) and the ⋯ menu
+// (Change icon, and Rename and Delete for the player's own). One item: a click on the star or ⋯ does that instead.
+RowAction LookListRow(const Looks::LookItem& item, bool selected, int& readsLeft)
 {
-    const float u = ApexUi::Unit(), r = 9.0f * u, icon = 22.0f * u;
-    dl->AddRectFilled(a, b, ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kWindowBg)), r);
-    ApexUi::DrawIcon(dl, IconId::SwatchBook, ImVec2((a.x + b.x - icon) * 0.5f, (a.y + b.y - icon) * 0.5f), icon, ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kTextFaint)));
-}
-
-// The height of a tile w wide (every tile but one being renamed)
-float LookTileHeight(float w)
-{
-    const float u = ApexUi::Unit(), pad = 6.0f * u;
-    const float lh = ImGui::GetTextLineHeight();
-    return pad + std::floor((w - 2.0f * pad) * 9.0f / 16.0f) + 6.0f * u + lh + 2.0f * u + lh * ApexUi::kSmallScale + pad;
-}
-
-// One look of the Looks card: its picture, the name (cut with "...", whole on hover), Mine or GShade and how many shaders;
-// a star (on hover, lit while a favorite), a check on the chosen look, and the ⋯ menu of the player's own on hover
-RowAction LookTile(const Looks::LookItem& item, bool selected, float w, int& readsLeft, bool& settings)
-{
-    const float u = ApexUi::Unit(), pad = 6.0f * u, r = 12.0f * u, btn = 24.0f * u, icon = ApexUi::kIconSmall * u;
-    const float lh = ImGui::GetTextLineHeight();
-    const float picH = std::floor((w - 2.0f * pad) * 9.0f / 16.0f);
-    const bool mine = item.source == Looks::Source::Mine, fav = IsFavorite(item.ref), renaming = g_renaming == item.ref;
+    const float u = ApexUi::Unit(), pad = ApexUi::kSpace2 * u, tile = 36.0f * u, btn = 26.0f * u, icon = ApexUi::kIconSmall * u;
+    const float lh = ImGui::GetTextLineHeight(), sh = lh * ApexUi::kSmallScale;
+    const float rowH = std::max(56.0f * u, lh + 2.0f * u + sh + 2.0f * pad);
+    const bool mine = item.source == Looks::Source::Mine, fav = IsFavorite(item.ref);
+    const float w = ImGui::GetContentRegionAvail().x;
     const ImVec2 p = ImGui::GetCursorScreenPos();
     RowAction action = RowAction::None;
-    ImDrawList* dl = ImGui::GetWindowDrawList();
     ImGui::PushID(item.ref.c_str());
-    if (renaming) // the picture, then the name field and its buttons
-    {
-        const float h = pad + picH + ApexUi::kSpace2 * u;
-        dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kAccent, 0.11f)), r, ImDrawFlags_RoundCornersTop);
-        LookPicture(dl, ImVec2(p.x + pad, p.y + pad), ImVec2(p.x + w - pad, p.y + pad + picH));
-        ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + h));
-        RenameRow(item, settings, w);
-        ImGui::PopID();
-        return action;
-    }
-    const float h = LookTileHeight(w);
-    // one item: a click on the star or the ⋯ plate does that instead of picking the look
-    const bool clicked = ImGui::InvisibleButton("##Pick", ImVec2(w, h), ImGuiButtonFlags_EnableNav);
+    const bool clicked = ImGui::InvisibleButton("##Pick", ImVec2(w, rowH), ImGuiButtonFlags_EnableNav);
     const bool hovered = ImGui::IsItemHovered();
     ImGui::RenderNavCursor(ImGui::GetCurrentContext()->LastItemData.Rect, ImGui::GetItemID());
-    // as the list it replaces: a quiet grey under the mouse, a light violet veil and an accent edge on the chosen look
-    if (selected)
-    {
-        dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kAccent, hovered ? 0.16f : 0.11f)), r);
-        dl->AddRect(p, ImVec2(p.x + w, p.y + h), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kAccent)), r, 0, 1.0f);
-    }
-    else if (hovered) dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kSelectedBg)), r);
-    const ImVec2 a(p.x + pad, p.y + pad), b(p.x + w - pad, p.y + pad + picH);
-    LookPicture(dl, a, b);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    // as the list it replaces: a quiet grey under the mouse, a light violet veil on the chosen look
+    if (selected || hovered)
+        dl->AddRectFilled(p, ImVec2(p.x + w, p.y + rowH),
+                          ImGui::GetColorU32(selected ? VioletTheme::Col(VioletTheme::kAccent, hovered ? 0.16f : 0.11f) : VioletTheme::Col(VioletTheme::kSelectedBg)), 10.0f * u);
+    const float cy = p.y + rowH * 0.5f;
+    IconTile(dl, ImVec2(p.x + pad, cy - tile * 0.5f), tile, LookIcon(item.ref));
 
-    // the star and the ⋯ button sit on the picture, each on a dark round plate
-    auto plate = [&](const ImVec2& at, IconId id, unsigned rgb) {
-        dl->AddRectFilled(at, ImVec2(at.x + btn, at.y + btn), IM_COL32(14, 14, 16, 170), 7.0f * u);
-        ApexUi::DrawIcon(dl, id, ImVec2(at.x + (btn - icon) * 0.5f, at.y + (btn - icon) * 0.5f), icon, ImGui::GetColorU32(VioletTheme::Col(rgb)));
-    };
-    const ImVec2 starAt(a.x + 4.0f * u, a.y + 4.0f * u), cornerAt(b.x - 4.0f * u - btn, a.y + 4.0f * u);
+    // the right cluster, from the right edge: ⋯, the star, "In use"
+    const bool menuOpen = ImGui::IsPopupOpen("LookActions");
+    const ImVec2 moreAt(p.x + w - pad - btn, cy - btn * 0.5f), starAt(moreAt.x - btn, cy - btn * 0.5f);
     const bool starHovered = hovered && ImGui::IsMouseHoveringRect(starAt, ImVec2(starAt.x + btn, starAt.y + btn));
-    const bool moreHovered = mine && hovered && ImGui::IsMouseHoveringRect(cornerAt, ImVec2(cornerAt.x + btn, cornerAt.y + btn));
+    const bool moreHovered = hovered && ImGui::IsMouseHoveringRect(moreAt, ImVec2(moreAt.x + btn, moreAt.y + btn));
     if (clicked && starHovered) action = RowAction::Favorite;
     else if (clicked && moreHovered) ImGui::OpenPopup("LookActions");
     else if (clicked) action = RowAction::Pick;
     if (starHovered) ApexUi::Tooltip(I18n::Tr(fav ? "Remove from favorites" : "Add to favorites"));
     else if (moreHovered) ApexUi::Tooltip(I18n::Tr("More options"));
-    if (fav || hovered) plate(starAt, IconId::Star, fav ? VioletTheme::kWarning : starHovered ? 0xFFFFFFu : VioletTheme::kText);
-    const bool menuOpen = ImGui::IsPopupOpen("LookActions");
-    if (mine && (hovered || menuOpen)) plate(cornerAt, IconId::Ellipsis, moreHovered || menuOpen ? 0xFFFFFFu : VioletTheme::kText);
-    else if (selected)
+    auto glyph = [&](const ImVec2& at, IconId id, unsigned rgb, bool lit) {
+        if (lit) dl->AddRectFilled(at, ImVec2(at.x + btn, at.y + btn), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kToggleOff)), 7.0f * u);
+        ApexUi::DrawIcon(dl, id, ImVec2(at.x + (btn - icon) * 0.5f, at.y + (btn - icon) * 0.5f), icon, ImGui::GetColorU32(VioletTheme::Col(rgb)));
+    };
+    if (hovered || menuOpen) glyph(moreAt, IconId::Ellipsis, moreHovered || menuOpen ? VioletTheme::kText : VioletTheme::kTextMuted, moreHovered);
+    if (fav || hovered) glyph(starAt, IconId::Star, fav ? VioletTheme::kWarning : starHovered ? VioletTheme::kText : VioletTheme::kTextFaint, starHovered);
+    float right = starAt.x - ApexUi::kSpace1 * u;
+    if (selected) // "In use", as the Setup's status pills
     {
-        const float c = 22.0f * u;
-        const ImVec2 cc(b.x - 4.0f * u - c * 0.5f, a.y + 4.0f * u + c * 0.5f);
-        dl->AddCircleFilled(cc, c * 0.5f, ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kAccent)), 20);
-        ApexUi::DrawIcon(dl, IconId::Check, ImVec2(cc.x - icon * 0.4f, cc.y - icon * 0.4f), icon * 0.8f, IM_COL32_WHITE);
+        ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
+        const char* use = I18n::Tr("In use");
+        const ImVec2 ts = ImGui::CalcTextSize(use);
+        const float ph = ts.y + 6.0f * u, pw = ts.x + 2.0f * ApexUi::kSpace2 * u;
+        const ImVec2 a(right - pw, cy - ph * 0.5f);
+        dl->AddRectFilled(a, ImVec2(a.x + pw, a.y + ph), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kSegmentOn)), ph * 0.5f);
+        dl->AddText(ImVec2(a.x + ApexUi::kSpace2 * u, a.y + 3.0f * u), IM_COL32_WHITE, use);
+        ImGui::PopFont();
+        right = a.x - ApexUi::kSpace2 * u;
     }
+    // the name over its line
+    const float textX = p.x + pad + tile + ApexUi::kSpace3 * u, textW = std::max(1.0f, right - textX);
+    const float ty = cy - (lh + 2.0f * u + sh) * 0.5f;
     const std::string name = ShownName(item.ref);
+    std::string fitted;
+    const bool cut = ApexUi::FitClosedText(name, textW, fitted);
+    dl->AddText(ImVec2(textX, ty), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kText)), fitted.c_str());
+    if (cut && hovered && !starHovered && !moreHovered) ApexUi::ShowFullText(name);
+    const int count = ShaderCountOf(item.ref, readsLeft);
+    std::string line = I18n::Tr(mine ? "My looks" : "GShade");
+    if (count >= 0) line += "  \xC2\xB7  " + (count == 1 ? std::string(I18n::Tr("1 shader")) : I18n::Trf("{} shaders", count));
+    ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
+    std::string lineFit;
+    ApexUi::FitClosedText(line, textW, lineFit);
+    dl->AddText(ImVec2(textX, ty + lh + 2.0f * u), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kTextMuted)), lineFit.c_str());
+    ImGui::PopFont();
+
     if (ApexUi::BeginActionMenu("LookActions", name.c_str()))
     {
         const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
-        if (ApexUi::ActionMenuItem("Rename", IconId::Pencil)) { action = RowAction::Rename; ImGui::CloseCurrentPopup(); }
-        if (ApexUi::ActionMenuItem("Delete", IconId::Trash2)) { action = RowAction::Delete; ImGui::CloseCurrentPopup(); }
+        if (ApexUi::ActionMenuItem("Change icon", IconId::Sparkles)) { g_iconFor = item.ref; ImGui::CloseCurrentPopup(); }
+        if (mine && ApexUi::ActionMenuItem("Rename", IconId::Pencil)) { action = RowAction::Rename; ImGui::CloseCurrentPopup(); }
+        if (mine && ApexUi::ActionMenuItem("Delete", IconId::Trash2)) { action = RowAction::Delete; ImGui::CloseCurrentPopup(); }
         ApexUi::EndActionMenu();
     }
-
-    // the name, then a small tag (Mine or GShade) and how many shaders
-    const float textW = w - 2.0f * pad;
-    std::string fitted;
-    const float ny = b.y + 6.0f * u;
-    const bool cut = ApexUi::FitClosedText(name, textW, fitted);
-    dl->AddText(ImVec2(a.x, ny), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kText)), fitted.c_str());
-    if (cut && hovered && !starHovered) ApexUi::ShowFullText(name);
-    ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
-    const float my = ny + lh + 2.0f * u, sh = ImGui::GetTextLineHeight();
-    const char* tag = I18n::Tr(mine ? "Mine" : "GShade");
-    const unsigned tagRgb = mine ? VioletTheme::kTextMuted : VioletTheme::kSuccess;
-    const float tagW = ImGui::CalcTextSize(tag).x + 2.0f * ApexUi::kSpace1 * u + 2.0f * u;
-    dl->AddRectFilled(ImVec2(a.x, my), ImVec2(a.x + tagW, my + sh), ImGui::GetColorU32(VioletTheme::Col(tagRgb, 0.16f)), 5.0f * u);
-    dl->AddText(ImVec2(a.x + ApexUi::kSpace1 * u + u, my), ImGui::GetColorU32(VioletTheme::Col(tagRgb)), tag);
-    const int count = ShaderCountOf(item.ref, readsLeft);
-    if (count >= 0)
-    {
-        const std::string meta = count == 1 ? std::string(I18n::Tr("1 shader")) : I18n::Trf("{} shaders", count);
-        std::string metaFit;
-        ApexUi::FitClosedText(meta, std::max(1.0f, textW - tagW - ApexUi::kSpace2 * u), metaFit);
-        dl->AddText(ImVec2(a.x + tagW + ApexUi::kSpace2 * u, my), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kTextMuted)), metaFit.c_str());
-    }
-    ImGui::PopFont();
-    ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + h));
+    ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + rowH));
     ImGui::Dummy(ImVec2(w, 0.0f));
     ImGui::PopID();
     return action;
 }
 
-// Image > Shaders: the Looks card. Filters (All, Favorites, Mine, GShade) with their counts, the search, New (Start
-// empty, Copy this look, Import a .ini, the Looks folder), then every look as a tile. True when the settings changed;
+// Image > Shaders, Looks: a section title with the search and New look, the filters (All, Favorites, Mine, GShade) with
+// their counts, then one card with the looks in groups (Favorites, My looks, GShade). True when the settings changed;
 // *picked when a look was chosen or imported.
 bool LooksGallery(bool* picked)
 {
@@ -1869,83 +1919,95 @@ bool LooksGallery(bool* picked)
     seenFrame = ImGui::GetFrameCount();
     if (ApexUi::FilterActive()) { settings |= AskSaveModal(); return settings; }
 
+    const float u = ApexUi::Unit(), gap = ApexUi::kSpace2 * u;
+    int counts[4] = {};
+    for (const auto& item : g_list)
+    {
+        if (PendingDelete(item.ref)) continue;
+        ++counts[0];
+        counts[1] += IsFavorite(item.ref);
+        counts[item.source == Looks::Source::Mine ? 2 : 3]++;
+    }
     ImGui::PushID("LooksGallery");
+    {
+        // the section title (as Setup's "Also available"), then search and New look at its right
+        const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+        const float fh = ImGui::GetFrameHeight(), x0 = ImGui::GetCursorPosX(), avail = ImGui::GetContentRegionAvail().x;
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        ImGui::PushFont(VioletTheme::BoldFont(), VioletTheme::BaseFontSize() * ApexUi::kCardTitleScale);
+        const char* title = I18n::Tr("Looks");
+        const ImVec2 ts = ImGui::CalcTextSize(title);
+        ImGui::GetWindowDrawList()->AddText(ImVec2(p.x, p.y + (fh - ts.y) * 0.5f), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kText)), title);
+        ImGui::PopFont();
+        const std::string n = std::to_string(counts[0]);
+        ImGui::GetWindowDrawList()->AddText(ImVec2(p.x + ts.x + gap, p.y + (fh - ImGui::GetTextLineHeight()) * 0.5f), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kTextMuted)), n.c_str());
+        const char* newLabel = "New look";
+        const float rightW = fh + gap + ApexUi::ButtonWidth(I18n::Tr(newLabel), true);
+        ImGui::SetCursorPosX(x0 + std::max(0.0f, avail - rightW));
+        if (ApexUi::IconButton("##Search", IconId::Search, "Search looks", g_gallerySearch, fh / u))
+        {
+            g_gallerySearch = !g_gallerySearch;
+            g_galleryQuery[0] = 0;
+            g_gallerySearchFocus = g_gallerySearch;
+        }
+        ImGui::SameLine(0.0f, gap);
+        if (ApexUi::IconTextButton(newLabel, IconId::Plus, "Start a look of your own, copy this one, or import a ReShade or GShade preset"))
+            ImGui::OpenPopup("LooksNew");
+        if (ApexUi::BeginActionMenu("LooksNew", I18n::Tr("New look")))
+        {
+            const ApexUi::ControlSizeScope menuSize(ApexUi::ControlSize::Compact);
+            const bool dirty = g.loaded && Dirty();
+            if (ApexUi::ActionMenuItem("Start empty", IconId::Plus))
+            {
+                if (dirty) g_askNext = kAskNew; // the changes would be dropped: asked first
+                else { StartNewLook(false); settings = true; }
+                ImGui::CloseCurrentPopup();
+            }
+            if (ApexUi::ActionMenuItem("Copy this look", IconId::Copy, g.loaded)) { StartNewLook(true); settings = true; ImGui::CloseCurrentPopup(); }
+            if (ApexUi::ActionMenuItem("Import a .ini\xE2\x80\xA6", IconId::Download))
+            {
+                if (dirty) g_askNext = kAskImport;
+                else PickPreset();
+                ImGui::CloseCurrentPopup();
+            }
+            if (ApexUi::ActionMenuItem("Open the Looks folder", IconId::FolderOpen)) { ShowLooksFolder(); ImGui::CloseCurrentPopup(); }
+            ApexUi::EndActionMenu();
+        }
+        // the filters, then the search field when open
+        static const char* const kFilters[] = { "All", "Favorites", "Mine", "GShade" };
+        if (!counts[g_galleryFilter]) g_galleryFilter = 0;
+        ApexUi::Gap(ApexUi::kSpace2);
+        float x = 0.0f;
+        for (int k = 0; k < 4; ++k)
+        {
+            if (k && !counts[k]) continue;
+            const float cw = FilterChipWidth(kFilters[k], counts[k]);
+            if (x > 0.0f && x + cw > avail) x = 0.0f; // on the next line
+            else if (x > 0.0f) ImGui::SameLine(0.0f, gap);
+            if (FilterChip(kFilters[k], counts[k], g_galleryFilter == k)) g_galleryFilter = k;
+            x += cw + gap;
+        }
+        if (g_gallerySearch)
+        {
+            ApexUi::Gap(ApexUi::kSpace2);
+            if (std::exchange(g_gallerySearchFocus, false)) ImGui::SetKeyboardFocusHere();
+            ImGui::SetNextItemWidth(-1.0f);
+            ImGui::InputTextWithHint("##LookSearch", I18n::Tr("Search looks"), g_galleryQuery, sizeof(g_galleryQuery));
+        }
+    }
+    ApexUi::Gap(ApexUi::kSpace2);
     if (ApexUi::BeginCard("##Looks"))
     {
-        const float u = ApexUi::Unit(), gap = ApexUi::kSpace2 * u;
-        int counts[4] = {};
-        for (const auto& item : g_list)
-        {
-            if (PendingDelete(item.ref)) continue;
-            ++counts[0];
-            counts[1] += IsFavorite(item.ref);
-            counts[item.source == Looks::Source::Mine ? 2 : 3]++;
-        }
-        const std::string sub = counts[0] == 0 ? std::string(I18n::Tr("No looks yet"))
-                              : counts[0] == 1 ? std::string(I18n::Tr("1 look")) : I18n::Trf("{} looks", counts[0]);
-        ApexUi::CardHeader(IconId::LayoutGrid, "Looks", sub.c_str(), nullptr, nullptr, true);
-        ApexUi::CardDivider();
-        {
-            const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
-            const float fh = ImGui::GetFrameHeight(), x0 = ImGui::GetCursorPosX(), avail = ImGui::GetContentRegionAvail().x;
-            const char* newLabel = "New look";
-            const float rightW = fh + gap + ApexUi::ButtonWidth(I18n::Tr(newLabel), true);
-            static const char* const kFilters[] = { "All", "Favorites", "Mine", "GShade" };
-            if (!counts[g_galleryFilter]) g_galleryFilter = 0;
-            float x = 0.0f;
-            for (int k = 0; k < 4; ++k)
-            {
-                if (k && !counts[k]) continue;
-                const float cw = FilterChipWidth(kFilters[k], counts[k]);
-                if (x > 0.0f && x + cw > avail - rightW - gap) x = 0.0f; // on the next line
-                else if (x > 0.0f) ImGui::SameLine(0.0f, gap);
-                if (FilterChip(kFilters[k], counts[k], g_galleryFilter == k)) g_galleryFilter = k;
-                x += cw + gap;
-            }
-            ImGui::SameLine(x0 + std::max(0.0f, avail - rightW), 0.0f);
-            if (ApexUi::IconButton("##Search", IconId::Search, "Search looks", g_gallerySearch, fh / u))
-            {
-                g_gallerySearch = !g_gallerySearch;
-                g_galleryQuery[0] = 0;
-                g_gallerySearchFocus = g_gallerySearch;
-            }
-            ImGui::SameLine(0.0f, gap);
-            if (ApexUi::IconTextButton(newLabel, IconId::Plus, "Start a look of your own, copy this one, or import a ReShade or GShade preset"))
-                ImGui::OpenPopup("LooksNew");
-            if (ApexUi::BeginActionMenu("LooksNew", I18n::Tr("New look")))
-            {
-                const ApexUi::ControlSizeScope menuSize(ApexUi::ControlSize::Compact);
-                const bool dirty = g.loaded && Dirty();
-                if (ApexUi::ActionMenuItem("Start empty", IconId::Plus))
-                {
-                    if (dirty) g_askNext = kAskNew; // the changes would be dropped: asked first
-                    else { StartNewLook(false); settings = true; }
-                    ImGui::CloseCurrentPopup();
-                }
-                if (ApexUi::ActionMenuItem("Copy this look", IconId::Copy, g.loaded)) { StartNewLook(true); settings = true; ImGui::CloseCurrentPopup(); }
-                if (ApexUi::ActionMenuItem("Import a .ini\xE2\x80\xA6", IconId::Download))
-                {
-                    if (dirty) g_askNext = kAskImport;
-                    else PickPreset();
-                    ImGui::CloseCurrentPopup();
-                }
-                if (ApexUi::ActionMenuItem("Open the Looks folder", IconId::FolderOpen)) { ShowLooksFolder(); ImGui::CloseCurrentPopup(); }
-                ApexUi::EndActionMenu();
-            }
-            if (g_gallerySearch)
-            {
-                ApexUi::Gap(ApexUi::kSpace2);
-                if (std::exchange(g_gallerySearchFocus, false)) ImGui::SetKeyboardFocusHere();
-                ImGui::SetNextItemWidth(-1.0f);
-                ImGui::InputTextWithHint("##LookSearch", I18n::Tr("Search looks"), g_galleryQuery, sizeof(g_galleryQuery));
-            }
-        }
-        ApexUi::Gap(ApexUi::kSpace3);
-
         // the looks of the filter: favorites first (under All), then the player's own, then GShade's
         const std::string q = Lower(g_galleryQuery);
-        std::vector<const Looks::LookItem*> items;
+        const bool grouped = g_galleryFilter == 0 && q.empty();
+        int readsLeft = 4; // .ini files read for the shader counts this frame
+        const bool dirty = g.loaded && Dirty();
+        std::string starred;
+        int shown = 0;
         for (int part = 0; part < 3; ++part)
+        {
+            bool label = false;
             for (const auto& item : g_list)
             {
                 if (PendingDelete(item.ref)) continue;
@@ -1953,32 +2015,23 @@ bool LooksGallery(bool* picked)
                 if (part != (fav && g_galleryFilter == 0 ? 0 : mine ? 1 : 2)) continue;
                 if ((g_galleryFilter == 1 && !fav) || (g_galleryFilter == 2 && !mine) || (g_galleryFilter == 3 && mine)) continue;
                 if (!q.empty() && Lower(ShownName(item.ref)).find(q) == std::string::npos) continue;
-                items.push_back(&item);
-            }
-
-        const float avail = ImGui::GetContentRegionAvail().x, tileGap = ApexUi::kSpace3 * u;
-        const int cols = std::max(1, (int)((avail + tileGap) / (136.0f * u + tileGap)));
-        const float tileW = std::floor((avail - tileGap * (cols - 1)) / cols), tileH = LookTileHeight(tileW);
-        int readsLeft = 4; // .ini files read for the shader counts this frame
-        bool dirty = g.loaded && Dirty();
-        std::string starred;
-        for (size_t row = 0; row * cols < items.size(); ++row)
-        {
-            const size_t first = row * cols, last = std::min(items.size(), first + cols);
-            const bool renamingHere = std::any_of(items.begin() + first, items.begin() + last, [](const Looks::LookItem* it) { return g_renaming == it->ref; });
-            // a row out of view keeps its room without drawing (hundreds of GShade looks)
-            if (!renamingHere && !ImGui::IsRectVisible(ImVec2(avail, tileH)))
-            {
-                ImGui::Dummy(ImVec2(avail, tileH));
-                continue;
-            }
-            for (size_t i = first; i < last; ++i)
-            {
-                if (i > first) ImGui::SameLine(0.0f, tileGap);
-                const Looks::LookItem& item = *items[i];
+                if (grouped && !label)
+                {
+                    if (shown) ApexUi::Gap(ApexUi::kSpace2);
+                    ApexUi::CardGroup(I18n::Tr(part == 0 ? "Favorites" : part == 1 ? "My looks" : "GShade"));
+                    label = true;
+                }
+                ++shown;
                 const bool selected = item.ref == g.preset;
-                ImGui::BeginGroup();
-                switch (LookTile(item, selected, tileW, readsLeft, settings))
+                // a row out of view keeps its room without drawing (hundreds of GShade looks)
+                const float rowH = std::max(56.0f * u, ImGui::GetTextLineHeight() * (1.0f + ApexUi::kSmallScale) + 2.0f * u + 2.0f * ApexUi::kSpace2 * u);
+                if (g_renaming != item.ref && !ImGui::IsRectVisible(ImVec2(ImGui::GetContentRegionAvail().x, rowH)))
+                {
+                    ImGui::Dummy(ImVec2(0.0f, rowH));
+                    continue;
+                }
+                if (g_renaming == item.ref) { RenameRow(item, settings); continue; }
+                switch (LookListRow(item, selected, readsLeft))
                 {
                 case RowAction::Pick:
                     if (selected) break;
@@ -1991,10 +2044,10 @@ bool LooksGallery(bool* picked)
                         settings = *picked = true;
                     }
                     break;
-                case RowAction::Favorite: starred = item.ref; break; // after the grid: the look moves to another place
+                case RowAction::Favorite: starred = item.ref; break; // after the list: the look moves to another group
                 case RowAction::Rename: StartRename(item.ref); break;
                 case RowAction::Delete:
-                    // gone from the grid now, in the Recycle Bin when the toast is (Undo brings it back before that)
+                    // gone from the list now, in the Recycle Bin when the toast is (Undo brings it back before that)
                     g_renaming.clear();
                     if (g.preset == item.ref) SelectLook(""); // the look in use goes: none is chosen
                     g_pendingDelete.push_back(item.ref);
@@ -2005,9 +2058,7 @@ bool LooksGallery(bool* picked)
                     break;
                 default: break;
                 }
-                ImGui::EndGroup();
             }
-            ImGui::Dummy(ImVec2(0.0f, tileGap - ImGui::GetStyle().ItemSpacing.y));
         }
         if (!starred.empty())
         {
@@ -2015,9 +2066,10 @@ bool LooksGallery(bool* picked)
             else if (g_favorites.size() < kMaxListEntries) g_favorites.push_back(starred);
             settings = true;
         }
-        if (items.empty()) ApexUi::MutedText(I18n::Tr(g_list.empty() ? "No looks yet" : "No look matches"));
+        if (!shown) ApexUi::MutedText(I18n::Tr(g_list.empty() ? "No looks yet" : "No look matches"));
         if (!g_message.empty())
             ApexUi::IconNote(g_messageError ? IconId::TriangleAlert : IconId::Info, g_message.c_str(), g_messageError ? VioletTheme::kError : VioletTheme::kTextMuted);
+        LookIconPopup(settings);
     }
     ApexUi::EndCard();
     ImGui::PopID();
@@ -2025,10 +2077,62 @@ bool LooksGallery(bool* picked)
     return settings;
 }
 
-// The look card's row while packs bring shaders the look misses: how many, the packs and their size, Download (while
-// they download: the pack and its progress; after a failure: why, and Try again)
-void MissingPacksRow()
+// The look card's top, as the Overview's measures: "Look in use" over the look's name in large bold beside its icon, how
+// it runs at the right (green while it runs, amber while shaders are missing, grey when off), then where it comes from
+// and how many shaders it runs
+void LookHeroDraw(bool on, const char* cost)
 {
+    const float u = ApexUi::Unit();
+    int missing = 0;
+    for (size_t i = 0; i < g.order.size(); ++i) missing += !Runnable(i) && !IsRemoved(i);
+    const int total = RunnableCount(false), runs = RunnableCount(true);
+    std::string status;
+    unsigned rgb = VioletTheme::kSuccess;
+    if (!on) { status = I18n::Tr("Off"); rgb = VioletTheme::kTextMuted; }
+    else if (g.preset.empty()) { status = I18n::Tr("No look chosen"); rgb = VioletTheme::kTextMuted; }
+    else if (!g.loaded || !g.error.empty()) { status = I18n::Tr("This look can't be read"); rgb = VioletTheme::kWarning; }
+    else if (missing) { status = I18n::Trf("Running {} of {}", runs, runs + missing); rgb = VioletTheme::kWarning; }
+    else status = cost && *cost ? I18n::Tr("Running") + std::string(" \xC2\xB7 ") + cost : std::string(I18n::Tr("Running"));
+    ApexUi::StatusHeader("Look in use", status.c_str(), rgb, true);
+    // the name, large and bold, wrapping, beside the look's icon
+    const float tile = 44.0f * u, x0 = ImGui::GetCursorPosX(), avail = ImGui::GetContentRegionAvail().x;
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float alpha = on ? 1.0f : 0.5f;
+    const std::string name = g.preset.empty() ? std::string(I18n::Tr("Choose a look")) : ShownName(g.preset);
+    ImGui::SetCursorPosX(x0 + tile + ApexUi::kSpace3 * u);
+    ImGui::BeginGroup();
+    ImGui::PushStyleVarY(ImGuiStyleVar_ItemSpacing, 3.0f * u);
+    ImGui::PushFont(VioletTheme::BoldFont(), VioletTheme::BaseFontSize() * 1.4f);
+    ImGui::PushTextWrapPos(x0 + avail);
+    ImGui::PushStyleColor(ImGuiCol_Text, VioletTheme::Col(on ? 0xFFFFFFu : VioletTheme::kTextMuted));
+    ImGui::TextWrapped("%s", name.c_str());
+    ImGui::PopStyleColor();
+    ImGui::PopTextWrapPos();
+    ImGui::PopFont();
+    if (!g.preset.empty())
+    {
+        std::string line = I18n::Tr(Looks::RefSource(g.preset) == Looks::Source::Mine ? "My looks" : "GShade");
+        if (g.loaded) line += "  \xC2\xB7  " + (total + missing == 1 ? std::string(I18n::Tr("1 shader")) : I18n::Trf("{} shaders", total + missing));
+        ApexUi::MutedText(line.c_str());
+    }
+    else ApexUi::MutedText(I18n::Tr("Pick one under Looks"));
+    ImGui::PopStyleVar();
+    ImGui::EndGroup();
+    const float h = std::max(tile, ImGui::GetItemRectMax().y - p.y);
+    IconTile(ImGui::GetWindowDrawList(), ImVec2(p.x, p.y + (h - tile) * 0.5f), tile, g.preset.empty() ? IconId::WandSparkles : LookIcon(g.preset), alpha);
+    ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + h));
+    ImGui::Dummy(ImVec2(avail, 0.0f));
+}
+
+// Under the look card while shaders of the look are not on this PC, as the bridge's warning: what is missing in amber,
+// where it comes from, one Download with the size (then the progress in its place; after a failure, why and Try again),
+// and the small print
+void MissingCardDraw()
+{
+    if (ApexUi::FilterActive() || !g.loaded) return;
+    std::vector<std::string> names;
+    for (size_t i = 0; i < g.order.size(); ++i)
+        if (!IsRemoved(i) && PackFor(i)) names.push_back(g.order[i].technique);
     int shaders = 0;
     const std::vector<std::string> packs = MissingPacks(&shaders);
     if (packs.empty()) return;
@@ -2047,79 +2151,106 @@ void MissingPacksRow()
             else if (r.state == RowState::Failed && r.failure != Failure::Stopped) failed = &r;
         }
     }
-    const std::string label = shaders == 1 ? std::string(I18n::Tr("1 shader isn't on your PC")) : I18n::Trf("{} shaders aren't on your PC", shaders);
-    std::string desc;
-    if (busy)
-        desc = PackName(busy->folder) + "  \xC2\xB7  " +
-               (busy->state == RowState::Waiting ? std::string(I18n::Tr("Waiting")) : I18n::Trf("Downloading {}%", (int)(busy->progress * 100.0f))) +
-               "  \xC2\xB7  " + I18n::Tr("the look runs with the others meanwhile");
-    else if (failed) desc = PackName(failed->folder) + "  \xC2\xB7  " + I18n::Tr(FailureText(failed->failure));
-    else desc = kb ? I18n::Trf("{} \xC2\xB7 {} from the authors' GitHub", PackNames(packs), SizeText(kb)) : I18n::Trf("{} from the authors' GitHub", PackNames(packs));
-    const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
-    const char* button = failed ? "Try again" : "Download";
     const float u = ApexUi::Unit();
-    ApexUi::SetNextRowUntranslated(); // translated here, with the count in it
-    if (!busy) ApexUi::SetNextRowWarning();
-    if (ApexUi::BeginControlRow(label.c_str(), desc.c_str(), busy ? 12.0f * u : ApexUi::ButtonWidth(I18n::Tr(button), true)))
+    ImGui::PushID("LooksMissing");
+    if (ApexUi::BeginCard("##Missing", true))
     {
-        if (busy) ApexUi::BusySpinner(true);
-        else if (ApexUi::IconTextButton(button, IconId::Download, nullptr, ApexUi::ButtonKind::Primary)) DownloadPacks(packs);
-        ApexUi::EndControlRow();
+        const std::string title = shaders == 1 ? std::string(I18n::Tr("1 shader of this look isn't on your PC")) : I18n::Trf("{} shaders of this look aren't on your PC", shaders);
+        const float icon = VioletTheme::kControlIcon * u;
+        ApexUi::InlineIcon(IconId::TriangleAlert, icon, ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kWarning)));
+        ImGui::SameLine(0.0f, ApexUi::kSpace2 * u);
+        ImGui::PushFont(VioletTheme::BoldFont(), 0.0f);
+        ImGui::PushStyleColor(ImGuiCol_Text, VioletTheme::Col(VioletTheme::kWarning));
+        ImGui::TextWrapped("%s", title.c_str());
+        ImGui::PopStyleColor();
+        ImGui::PopFont();
+        const std::string list = names.size() == 1 ? names[0] : names.size() == 2 ? I18n::Trf("{} and {}", names[0], names[1]) : I18n::Trf("{} shaders", names.size());
+        const std::string body = I18n::Trf(names.size() == 1 ? "{} comes from {}. The look runs with the others meanwhile." : "{} come from {}. The look runs with the others meanwhile.", list, PackNames(packs));
+        ApexUi::Gap(ApexUi::kSpace1);
+        ImGui::PushStyleColor(ImGuiCol_Text, VioletTheme::Col(VioletTheme::kText, 0.8f));
+        ImGui::TextWrapped("%s", body.c_str());
+        ImGui::PopStyleColor();
+        ApexUi::Gap(ApexUi::kSpace2);
+        if (busy)
+        {
+            const std::string line = PackName(busy->folder) + "  \xC2\xB7  " + (busy->state == RowState::Waiting ? std::string(I18n::Tr("Waiting")) : I18n::Trf("Downloading {}%", (int)(busy->progress * 100.0f)));
+            ApexUi::MutedText(line.c_str());
+            const ImVec2 p = ImGui::GetCursorScreenPos();
+            const float w = ImGui::GetContentRegionAvail().x, ph = 4.0f * u;
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            dl->AddRectFilled(p, ImVec2(p.x + w, p.y + ph), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kToggleOff)), ph * 0.5f);
+            dl->AddRectFilled(p, ImVec2(p.x + w * std::clamp(busy->progress, 0.0f, 1.0f), p.y + ph), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kAccent)), ph * 0.5f);
+            ImGui::Dummy(ImVec2(w, ph));
+        }
+        else
+        {
+            if (failed) ApexUi::IconNote(IconId::TriangleAlert, (PackName(failed->folder) + ": " + I18n::Tr(FailureText(failed->failure))).c_str(), VioletTheme::kWarning);
+            const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Primary);
+            const std::string label = failed ? std::string(I18n::Tr("Try again")) : kb ? I18n::Trf("Download {}", SizeText(kb)) : std::string(I18n::Tr("Download"));
+            if (ApexUi::IconTextButton(label.c_str(), IconId::Download, nullptr, ApexUi::ButtonKind::Primary)) DownloadPacks(packs);
+        }
+        ApexUi::Gap(ApexUi::kSpace2);
+        ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
+        ApexUi::MutedText(I18n::Tr("From each author's GitHub. Apex goes online only when you click Download."));
+        ImGui::PopFont();
     }
+    ApexUi::EndCard();
+    ImGui::PopID();
 }
 
-// The look card's way to the look's shaders: how many are on (and missing), the changed dot while the look has changes
-// not saved yet, and a chevron. True when clicked.
-bool LookShadersRow()
+// A row of the files card: its label and line at the left, the number in bold and its unit at the right (as Shader library)
+void CountRow(const char* label, const std::string& line, int n, const char* one, const char* many)
 {
-    const int total = RunnableCount(false), on = RunnableCount(true);
-    int missing = 0;
-    for (size_t i = 0; i < g.order.size(); ++i) missing += !Runnable(i) && !IsRemoved(i);
-    std::string desc = missing ? I18n::Trf("{} of {} on \xC2\xB7 {} missing", on, total, missing) : I18n::Trf("{} of {} on", on, total);
-    const bool dirty = Dirty();
-    if (dirty) desc += "  \xC2\xB7  " + std::string(I18n::Tr("changed here, not saved yet"));
-    const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
-    const float fh = ImGui::GetFrameHeight();
-    if (dirty) ApexUi::SetNextRowChangedDot("Changed here, not saved in the look yet");
-    bool open = false;
-    if (ApexUi::BeginControlRow("Shaders in this look", desc.c_str(), fh))
-    {
-        open = ApexUi::IconButton("##OpenShaders", IconId::ChevronRight, "Shaders in this look", false, fh / ApexUi::Unit());
-        ApexUi::EndControlRow();
-    }
-    return open;
+    const float u = ApexUi::Unit();
+    const std::string num = std::to_string(n);
+    const char* unit = I18n::Tr(n == 1 ? one : many);
+    ImGui::PushFont(VioletTheme::BoldFont(), VioletTheme::BaseFontSize() * 1.25f);
+    const ImVec2 ns = ImGui::CalcTextSize(num.c_str());
+    ImGui::PopFont();
+    ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
+    const float unitW = ImGui::CalcTextSize(unit).x;
+    ImGui::PopFont();
+    const float w = ns.x + 6.0f * u + unitW;
+    if (!ApexUi::BeginControlRow(label, line.c_str(), w, IconId::None, ns.y)) return;
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImGui::PushFont(VioletTheme::BoldFont(), VioletTheme::BaseFontSize() * 1.25f);
+    dl->AddText(p, ImGui::GetColorU32(VioletTheme::Col(0xFFFFFFu)), num.c_str());
+    ImGui::PopFont();
+    ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
+    dl->AddText(ImVec2(p.x + ns.x + 6.0f * u, p.y + ns.y * 0.8f - ImGui::GetTextLineHeight() * 0.8f), ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kTextMuted)), unit);
+    ImGui::PopFont();
+    ImGui::Dummy(ImVec2(w, ns.y));
+    ApexUi::EndControlRow();
 }
 
-// The quiet line under Looks: the downloaded packs, their size and the player's own .fx files, then Manage ›; true
-// when clicked
-bool FilesLineDraw()
+// Image > Shaders, under Looks: where shaders come from, as the Shader library card: built into Apex, the downloaded
+// packs, the player's own .fx files, and Manage. True when Manage was clicked.
+bool FilesCardDraw()
 {
     if (ApexUi::FilterActive()) return false;
-    int packs = 0;
-    uint32_t kb = 0;
-    for (const auto& p : Looks::Packs::List())
-        if (Looks::Packs::Downloaded(p.folder)) { ++packs; kb += p.downloadKB; }
-    const size_t own = Looks::Fx::OwnFiles().size();
-    std::string text = packs == 1 ? std::string(I18n::Tr("1 pack downloaded")) : I18n::Trf("{} packs downloaded", packs);
-    if (kb) text += "  \xC2\xB7  " + SizeText(kb);
-    text += "  \xC2\xB7  " + (own == 1 ? std::string(I18n::Tr("1 .fx file of yours")) : I18n::Trf("{} .fx files of yours", own));
-    const char* manage = I18n::Tr("Manage \xE2\x80\xBA");
-    const float u = ApexUi::Unit(), icon = ApexUi::kIconSmall * u, lh = ImGui::GetTextLineHeight(), h = lh + 2.0f * ApexUi::kSpace1 * u;
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    const float w = ImGui::GetContentRegionAvail().x, mw = ImGui::CalcTextSize(manage).x;
-    const bool clicked = ImGui::InvisibleButton("##LooksFiles", ImVec2(w, h), ImGuiButtonFlags_EnableNav);
-    const bool hovered = ImGui::IsItemHovered();
-    ImGui::RenderNavCursor(ImGui::GetCurrentContext()->LastItemData.Rect, ImGui::GetItemID());
-    if (hovered) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const float ty = p.y + (h - lh) * 0.5f, x = p.x + ApexUi::kSpace1 * u;
-    const ImU32 muted = ImGui::GetColorU32(VioletTheme::Col(hovered ? VioletTheme::kText : VioletTheme::kTextMuted));
-    ApexUi::DrawIcon(dl, IconId::Package, ImVec2(x, p.y + (h - icon) * 0.5f), icon, muted);
-    std::string fitted;
-    ApexUi::FitClosedText(text, std::max(1.0f, w - (x - p.x) - icon - ApexUi::kSpace2 * u - mw - ApexUi::kSpace4 * u), fitted);
-    dl->AddText(ImVec2(x + icon + ApexUi::kSpace2 * u, ty), muted, fitted.c_str());
-    dl->AddText(ImVec2(p.x + w - mw - ApexUi::kSpace1 * u, ty), ImGui::GetColorU32(VioletTheme::Col(hovered ? VioletTheme::kAccentLight : VioletTheme::kAccent)), manage);
-    return clicked;
+    bool manage = false;
+    ImGui::PushID("LooksFiles");
+    if (ApexUi::BeginCard("##Files"))
+    {
+        std::vector<std::string> names;
+        uint32_t kb = 0;
+        for (const auto& p : Looks::Packs::List())
+            if (Looks::Packs::Downloaded(p.folder)) { names.push_back(p.name); kb += p.downloadKB; }
+        manage = ApexUi::CardStatusHeader(IconId::Package, "Shader files", I18n::Tr("Built into Apex, downloaded packs and your own .fx files"), VioletTheme::kTextMuted, false,
+                                          nullptr, "Manage", IconId::FolderOpen, ApexUi::ButtonKind::Secondary, true) == 1;
+        ApexUi::CardDivider();
+        CountRow("Built into Apex", I18n::Tr("Always available"), Looks::ShaderCount(), "shader", "shaders");
+        std::string packs;
+        for (size_t i = 0; i < names.size() && i < 3; ++i) packs += (i ? ", " : "") + names[i];
+        if (names.size() > 3) packs += ", \xE2\x80\xA6";
+        if (kb) packs += (packs.empty() ? "" : "  \xC2\xB7  ") + SizeText(kb);
+        CountRow("Downloaded packs", names.empty() ? std::string(I18n::Tr("Added when you add one of their shaders")) : packs, (int)names.size(), "pack", "packs");
+        CountRow("Your shaders", I18n::Tr(".fx files in the Shaders folder"), (int)Looks::Fx::OwnFiles().size(), "file", "files");
+    }
+    ApexUi::EndCard();
+    ImGui::PopID();
+    return manage;
 }
 
 // ---------------------------------------------------------------------------------------------- menu: the Shaders card
@@ -3484,6 +3615,9 @@ public:
         for (auto& r : g_favorites) favorites.push_back(r);
         for (auto& r : g_pendingDelete) deleting.push_back(r);
         table.insert_or_assign("favorites", std::move(favorites));
+        toml::table icons;
+        for (auto& [ref, name] : g_lookIcons) icons.insert_or_assign(ref, name);
+        table.insert_or_assign("icons", std::move(icons));
         table.insert_or_assign("deleting", std::move(deleting));
     }
 
@@ -3553,6 +3687,13 @@ public:
             for (auto& v : *a)
                 if (auto r = v.value<std::string>(); r && r->size() <= 400 && g_favorites.size() < kMaxListEntries) g_favorites.push_back(*r);
         }
+        if (const toml::table* t = table["icons"].as_table()) // the icons chosen in the Looks list: a menu preference too
+        {
+            g_lookIcons.clear();
+            for (auto& [ref, name] : *t)
+                if (auto n = name.value<std::string>(); n && ref.str().size() <= 400 && n->size() <= 40 && g_lookIcons.size() < kMaxListEntries)
+                    g_lookIcons[std::string(ref.str())] = *n;
+        }
         const bool ok = ApexPatch::LoadFromToml(table);
         if (isEnabled) { LoadPreset(); SetOrder(); }
         return ok;
@@ -3600,9 +3741,25 @@ public:
             g.onUi = !clean;
             changed = true;
         }
-        if (!ApexUi::FilterActive() && g.loaded) MissingPacksRow();
         if (g_cardRows) g_cardRows(); // the menu's amber rows (a LUT on too), before Advanced
-        if (!ApexUi::FilterActive() && g.loaded && LookShadersRow()) g_wantView = Looks::kViewEditor;
+        // the look's shaders, and hold to compare (the eye of the old card header)
+        if (!ApexUi::FilterActive() && g.loaded)
+        {
+            ApexUi::Gap(ApexUi::kSpace2);
+            const ApexUi::ControlSizeScope size(ApexUi::ControlSize::Compact);
+            const bool dirty = Dirty();
+            if (ApexUi::IconTextButton("Edit shaders", IconId::SlidersHorizontal, dirty ? "Changed here, not saved in the look yet" : "The look's shaders, their order and values"))
+                g_wantView = Looks::kViewEditor;
+            if (dirty) // the changed dot on the button's corner
+            {
+                const float u = ApexUi::Unit();
+                const ImVec2 c(ImGui::GetItemRectMax().x - 4.0f * u, ImGui::GetItemRectMin().y + 4.0f * u);
+                ImGui::GetWindowDrawList()->AddCircleFilled(c, 3.5f * u, ImGui::GetColorU32(VioletTheme::Col(VioletTheme::kAccent)));
+            }
+            ImGui::SameLine(0.0f, ApexUi::kSpace2 * ApexUi::Unit());
+            ApexUi::IconTextButton("Compare", IconId::Eye, "Hold to see the game without the look");
+            if (ImGui::IsItemActive()) g_holdUntil = GetTickCount64() + 150; // as Looks::HoldBypass
+        }
         if (ApexUi::BeginAdvanced("##LooksAdvanced"))
         {
             static const char* const kOrder[] = { "After Apex Color", "Before Apex Color" };
@@ -4068,7 +4225,11 @@ bool LooksCard()
     return picked;
 }
 
-bool FilesLine() { return FilesLineDraw(); }
+bool FilesCard() { return FilesCardDraw(); }
+
+void LookHero(bool on, const char* cost) { LookHeroDraw(on, cost); }
+
+void MissingCard() { MissingCardDraw(); }
 
 // Every menu frame, on any page: also sends deleted looks to the Recycle Bin once their undo toast is gone
 float PacksBar(float left, float right, float bottomY)

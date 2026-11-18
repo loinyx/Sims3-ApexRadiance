@@ -145,6 +145,7 @@ enum class IconId : int {
     Pencil, // pencil
     LayoutGrid, // layout-grid
     Copy, // copy
+    Film, // film
     Count,
     None = Count, // "no icon" for widgets that take an optional one
 };

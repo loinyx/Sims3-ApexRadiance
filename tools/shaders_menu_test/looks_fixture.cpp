@@ -56,7 +56,12 @@ const std::vector<Looks::Packs::Pack>& FakePacks()
     };
     return v;
 }
-bool IsDownloaded(const std::string& f) { return f == "prod80" || f == "OldPack" || (g_batch && f == "SweetFX"); }
+// The live viewer (live.cpp): downloads that take about two seconds a pack, one at a time
+bool g_live = false;
+std::vector<Looks::Packs::Row> g_liveRows;
+std::set<std::string> g_liveDone;
+double g_liveStarted = 0.0;
+bool IsDownloaded(const std::string& f) { return f == "prod80" || f == "OldPack" || (g_batch && f == "SweetFX") || g_liveDone.count(f); }
 } // namespace
 
 namespace Looks::Fx {
@@ -121,11 +126,40 @@ const Pack* Find(const std::string& folder)
 const Pack* PackForFile(const std::string& file, const std::string&) { return _stricmp(file.c_str(), "qUINT_mxao.fx") == 0 ? Find("qUINT") : nullptr; }
 std::string FileForTechnique(const std::string& file, const std::string& technique) { return technique == "MXAO" && _stricmp(file.c_str(), "qUINT_mxao.fx") != 0 ? "qUINT_mxao.fx" : ""; }
 std::string GitHubUrl(const Pack& p) { return "https://github.com/" + p.repo; }
-void Download(const std::vector<std::string>&) {}
-void StopRest() {}
+void Download(const std::vector<std::string>& folders)
+{
+    if (!g_live) return;
+    for (const std::string& f : folders)
+        if (!IsDownloaded(f) && std::none_of(g_liveRows.begin(), g_liveRows.end(), [&](const Row& r) { return r.folder == f && r.state != RowState::Failed; }))
+            g_liveRows.push_back({ f, RowState::Waiting, 0.0f });
+}
+void StopRest()
+{
+    for (Row& r : g_liveRows) if (r.state == RowState::Waiting || r.state == RowState::Downloading) { r.state = RowState::Failed; r.failure = Failure::Stopped; }
+}
 Batch Status()
 {
     Batch b;
+    if (g_live)
+    {
+        const double now = ImGui::GetTime();
+        for (Row& r : g_liveRows)
+        {
+            if (r.state == RowState::Done || r.state == RowState::Failed) continue;
+            if (r.state == RowState::Waiting) { r.state = RowState::Downloading; g_liveStarted = now; }
+            r.progress = (float)std::min(1.0, (now - g_liveStarted) / 2.0);
+            if (r.progress >= 1.0f)
+            {
+                r.state = RowState::Done;
+                g_liveDone.insert(r.folder);
+                if (r.folder == "qUINT") { g_twinState = true; ResolveShaders(); } // its MXAO runs now
+            }
+            break; // one at a time
+        }
+        b.rows = g_liveRows;
+        b.running = std::any_of(b.rows.begin(), b.rows.end(), [](const Row& r) { return r.state == RowState::Waiting || r.state == RowState::Downloading; });
+        return b;
+    }
     if (!g_batch) return b;
     b.running = g_batch == 1;
     b.rows = { { "SweetFX", RowState::Done, 1.0f }, { "AstrayFX", RowState::Downloading, 0.45f }, { "Insane-Shaders", b.running ? RowState::Waiting : RowState::Failed, 0.0f, b.running ? Failure::None : Failure::Stopped },
@@ -133,7 +167,7 @@ Batch Status()
     if (!b.running) b.rows[1].state = RowState::Done;
     return b;
 }
-void ClearFinished() {}
+void ClearFinished() { if (g_live) g_liveRows.clear(); }
 bool Unavailable(const std::string& folder) { return folder == "GonePack"; }
 bool Downloaded(const std::string& folder) { return IsDownloaded(folder); }
 void Remove(const std::string&) {}
@@ -230,6 +264,8 @@ bool SaveRoundTrip()
     }
     return ok;
 }
+
+void Live() { g_live = true; }
 
 void PacksState(int confirm)
 {

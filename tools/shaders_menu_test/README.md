@@ -26,3 +26,14 @@ Previews of pt and en (400 and 900, one at 200%) and of the first case of each f
 
 The second line prints that case's controls and text runs. CPU previews and layout checks do not establish gameplay,
 GPU, input, file-picker or download behaviour, or visual parity in the game.
+
+## Live viewer
+
+`live.cpp` opens the same pages in a window to click through without the game: the menu's real header, sidebar,
+footer and undo toast (extracted from `apex_gui.cpp` into `chrome.inc`) around Image > Shaders and Image > Capture, on
+the fixture's data. Downloads take about two seconds a pack, after which their shaders run. The player's own looks are
+copied into the fixture's temporary Looks folder and three example GShade presets are written beside the viewer;
+nothing else is written. Other pages are not in the viewer.
+
+    tools\shaders_menu_test\live.bat <output folder>
+    <output folder>\ApexMenuViewer.exe

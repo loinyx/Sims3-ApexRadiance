@@ -1276,21 +1276,15 @@ void ShadersHomeContent() {
     ApexPatch* patch = Find(Looks::kPatchName);
     if (!patch) return;
     const bool search = ApexUi::FilterActive();
-    ApexUi::HeaderExtra extra;
     ImGui::PushID(Looks::kPatchName);
     if (ApexUi::BeginCard("##Card")) {
         bool on = patch->IsEnabled();
         char chip[24];
-        const std::string name = Looks::LookName();
-        const std::string status = Looks::StatusLine(on ? CostChip(patch->GpuCostMs(), chip) : nullptr);
-        extra.holdIcon = IconId::Eye;
-        extra.holdTooltip = "Hold to see the game without the look";
-        extra.enabled = on;
         if (search) {
             if (ApexUi::CardHeader(IconId::WandSparkles, "Shaders", "ReShade looks and shaders on the game's picture", Description(patch), &on, Switchable(patch)))
                 SetPatch(patch, on);
         } else {
-            ApexUi::CardHeader(IconId::WandSparkles, name.empty() ? "ReShade look" : name.c_str(), status.c_str(), Description(patch), nullptr, true, &extra);
+            Looks::LookHero(on, on ? CostChip(patch->GpuCostMs(), chip) : nullptr); // as the Overview's measures; Compare is a button below
         }
         if (patch->IsEnabled() || HasStateNotes(patch)) ApexUi::CardDivider();
         StateNotes(patch);
@@ -1299,17 +1293,17 @@ void ShadersHomeContent() {
     }
     ApexUi::EndCard();
     ImGui::PopID();
-    if (extra.held) Looks::HoldBypass();
     Looks::SetTwinCheck(LookTwin); // a shader doubling an Apex effect: an amber line on its row in the list
     if (search) {
         if (patch->IsEnabled()) Looks::ShadersCard();
         return;
     }
+    if (patch->IsEnabled()) Looks::MissingCard();
     ApexUi::Gap(ApexUi::kSpace2);
     // a look chosen while Shaders is off turns it on
     if (Looks::LooksCard() && !patch->IsEnabled() && Switchable(patch)) SetPatch(patch, true);
-    ApexUi::Gap(ApexUi::kSpace1);
-    if (Looks::FilesLine()) g_shadersTab = Looks::kViewFiles;
+    ApexUi::Gap(ApexUi::kSpace2);
+    if (Looks::FilesCard()) g_shadersTab = Looks::kViewFiles;
 }
 
 // The look's shaders (from the look card's "Shaders in this look")

@@ -30,3 +30,6 @@ render+='''    std::ofstream output(file,std::ios::binary);
 }
 '''
 root.joinpath('raster.inc').write_text(render,encoding='utf-8')
+# The window around the pages for the live viewer (live.cpp): the toast, the header, the sidebar and the footer
+chrome=part(gui,'struct Toast {','// Opens a page')+part(gui,'constexpr float kHeaderH','bool RefreshGameAa()')+part(gui,'void StatusBar(','void MainWindow()')
+root.joinpath('chrome.inc').write_text(chrome,encoding='utf-8')

@@ -29,8 +29,14 @@ void LibraryCards();
 // Image > Shaders: the Looks card (filters, the looks as tiles, New). True when a look was chosen, so the page turns
 // Shaders on.
 bool LooksCard();
-// Image > Shaders, under Looks: one quiet line with the downloaded packs and the player's files; true when clicked
-bool FilesLine();
+// Image > Shaders, under Looks: where shaders come from (built into Apex, downloaded packs, the player's .fx files);
+// true when Manage was clicked
+bool FilesCard();
+// The look card's top: "Look in use", how it runs, the look's name large beside its icon (on: Shaders is on; cost: the
+// measured GPU cost text, or null)
+void LookHero(bool on, const char* cost);
+// Under the look card while shaders of the look are not on this PC: what is missing and one Download (nothing otherwise)
+void MissingCard();
 // The floating download bar between left and right (screen x), its bottom kSpace2 above bottomY: downloading, or
 // finished (it clears by itself after 4 s unless a pack failed). Returns its top (bottomY when none).
 float PacksBar(float left, float right, float bottomY);
