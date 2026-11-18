@@ -64,6 +64,8 @@ std::atomic<bool> g_restartEffects{false};
 std::atomic<bool> g_presentSeen{false};
 std::atomic<unsigned long long> g_firstPresentTick{0};
 std::atomic<bool> g_overlayDrawnThisFrame{false};
+std::atomic<bool> g_backBufferEndSceneThisFrame{false}; // an EndScene with the back buffer as render target 0 this frame
+std::atomic<int> g_framesWithoutBackBuffer{0};          // frames in a row without one (then the menu takes any EndScene)
 thread_local bool t_inEndScene = false;
 
 bool Attach(void** target, void* detour, const char* what) {
@@ -97,6 +99,7 @@ void OnPresent(IDirect3DDevice9* dev) {
         LOG_INFO("[Recovery] Apex screen resources invalidated; settings retained; recreation follows on demand");
     }
     g_overlayDrawnThisFrame.store(false);
+    g_framesWithoutBackBuffer.store(g_backBufferEndSceneThisFrame.exchange(false) ? 0 : std::min(g_framesWithoutBackBuffer.load() + 1, 1000));
     HookGuard::ReportPending(); // exceptions caught since the last frame reach the log here, outside any catch block
     if (g_presentSeen.exchange(true)) return;
     g_firstPresentTick.store(GetTickCount64());
@@ -116,6 +119,16 @@ HWND DeviceWindow(IDirect3DDevice9* dev) {
         sc->Release();
     }
     return w;
+}
+
+// Render target 0 is the back buffer: the frame's own EndScene, not an off-screen pass (a reflection, a Sim's portrait)
+bool RenderingToBackBuffer(IDirect3DDevice9* dev) {
+    IDirect3DSurface9* bb = nullptr;
+    IDirect3DSurface9* rt = nullptr;
+    const bool on = SUCCEEDED(dev->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &bb)) && bb && SUCCEEDED(dev->GetRenderTarget(0, &rt)) && rt && bb == rt;
+    if (bb) bb->Release();
+    if (rt) rt->Release();
+    return on;
 }
 
 // First EndScene of the game's device (render thread)
@@ -155,8 +168,19 @@ HRESULT STDMETHODCALLTYPE Hooked_EndScene(IDirect3DDevice9* dev) {
             HookGuard::Run("Picture at EndScene", pictureEndScene);
         }
         RenderCallbacks::Fire(RenderCallbacks::filteredSceneBeforeOverlay, dev);
-        // once per frame (the Present hook clears the flag); every EndScene if the device hooks are missing
-        if (!D3D9Hooks::IsInstalled() || !g_overlayDrawnThisFrame.exchange(true)) Overlay::Frame(dev);
+        // once per frame (the Present hook clears the flag), at an EndScene on the back buffer: an off-screen pass that
+        // ended its scene first (a reflection, a Sim's portrait) took the menu into its texture, and the menu blinked off on
+        // screen for that frame. Any EndScene when the frames have had none on the back buffer, and every EndScene if the
+        // device hooks are missing.
+        const bool onBackBuffer = RenderingToBackBuffer(dev);
+        if (onBackBuffer) g_backBufferEndSceneThisFrame.store(true);
+        else if (static bool noted = false; !noted && !g_overlayDrawnThisFrame.load()) {
+            noted = true;
+            LOG_INFO("[Overlay] An off-screen EndScene came before the frame's own: the menu waits for the back buffer");
+        }
+        if (!D3D9Hooks::IsInstalled() ||
+            ((onBackBuffer || g_framesWithoutBackBuffer.load() >= 2) && !g_overlayDrawnThisFrame.exchange(true)))
+            Overlay::Frame(dev);
         HookGuard::Run("Picture at EndScene", pictureEndScene);
     }
     const HRESULT hr = o_endScene(dev);

@@ -3747,11 +3747,13 @@ void SearchBox(float x, float y, float width, float h) {
 }
 
 // A status pill of the header at the header's control height (the shared Pill is shorter). Screen position.
-void HeaderPill(const char* text, bool highlighted, IconId icon, float x, float y, float h, const char* tooltip) {
+// id: stable while the text changes (the frame time); width: 0 = the text's own, else the text is centred in it
+void HeaderPill(const char* id, const char* text, bool highlighted, IconId icon, float x, float y, float h, const char* tooltip, float width = 0.0f) {
     const float u = ApexUi::Unit();
-    const ImVec2 size(ApexUi::PillSize(text, icon != IconId::None).x, h);
+    const float own = ApexUi::PillSize(text, icon != IconId::None).x;
+    const ImVec2 size(std::fmax(own, width), h);
     ImGui::SetCursorScreenPos(ImVec2(x, y));
-    ImGui::PushID(text);
+    ImGui::PushID(id);
     ImGui::InvisibleButton("##HeaderPill", size);
     ImGui::PopID();
     if (tooltip) ApexUi::Tooltip(tooltip);
@@ -3759,7 +3761,7 @@ void HeaderPill(const char* text, bool highlighted, IconId icon, float x, float 
     dl->AddRectFilled(ImVec2(x, y), ImVec2(x + size.x, y + h), ImGui::GetColorU32(Col(highlighted ? VioletTheme::kAccentDark : VioletTheme::kSelectedBg)), h * 0.5f);
     const ImU32 col = ImGui::GetColorU32(Col(highlighted ? VioletTheme::kAccentLight : VioletTheme::kTextMuted));
     ImGui::PushFont(nullptr, VioletTheme::BaseFontSize() * ApexUi::kSmallScale);
-    float tx = x + 9.0f * u;
+    float tx = x + 9.0f * u + std::floor((size.x - own) * 0.5f);
     if (icon != IconId::None) {
         const float s = ApexUi::kIconSmall * u;
         ApexUi::DrawIcon(dl, icon, ImVec2(tx, std::floor(y + (h - s) * 0.5f)), s, col);
@@ -3803,7 +3805,8 @@ bool Header(ImVec2 origin, float w, float h) {
     char perf[48];
     const float fps = io.Framerate;
     std::snprintf(perf, sizeof perf, "%.1f ms \xC2\xB7 %.0f fps", fps > 0.0f ? 1000.0f / fps : 0.0f, fps);
-    const float perfW = ApexUi::PillSize(perf, false).x;
+    // as wide as the widest usual reading, so the frame rate changing never moves the search field and the pills
+    const float perfW = std::fmax(ApexUi::PillSize(perf, false).x, ApexUi::PillSize("88.8 ms \xC2\xB7 888 fps", false).x);
     const float perfX = std::floor(closeX - gap - perfW);
     float level = 0.0f;
     const bool haveLevel = NightLighting::MenuNightLevel(level);
@@ -3821,9 +3824,9 @@ bool Header(ImVec2 origin, float w, float h) {
     const float searchW = std::floor(std::fmin(leftEdge() - gap - nameRight, maxSearch));
 
     if (showDay)
-        HeaderPill(dayText, night, night ? IconId::Moon : IconId::Sun, dayX, top, c,
+        HeaderPill("##Day", dayText, night, night ? IconId::Moon : IconId::Sun, dayX, top, c,
                    I18n::Trf("How dark the game thinks it is: {:.2f} (0 is day, 1 is night)", level).c_str());
-    if (showPerf) HeaderPill(perf, false, IconId::None, perfX, top, c, I18n::Tr("Frame time and frame rate, averaged over recent frames"));
+    if (showPerf) HeaderPill("##Perf", perf, false, IconId::None, perfX, top, c, I18n::Tr("Frame time and frame rate, averaged over recent frames"), perfW);
     if (searchW >= 60.0f * u) SearchBox(std::floor(leftEdge() - gap - searchW), top, searchW, c);
     bool keepOpen = true;
     ImGui::SetCursorScreenPos(ImVec2(closeX, top));
