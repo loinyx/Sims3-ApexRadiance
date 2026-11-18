@@ -10,7 +10,7 @@ and can switch, reorder and tune the preset's shaders, then save the result as a
 |---|---|
 | Availability | Released in 4.0.0, Experimental |
 | Default | Off |
-| Menu | Image > Shaders (Lucide `swatch-book`, after Color), the switch beside the page title; tab *Look*: the look card, then *Shaders in this look*; tab *Packs*: ReShade's packs to download; tab *Library*: *Installed packs*, then *Your shaders*. The Overview's Effects card has a Shaders row |
+| Menu | Image > Shaders (Lucide `swatch-book`, after Color), the switch beside the page title; tab *Look*: the look card, then *Shaders in this look* (its *Add shaders* opens a modal); tab *Installed shaders*: *Installed packs*, *Your shaders*, then *Get more packs*. The Overview's Effects card has a Shaders row |
 | Configuration | `[patches.Looks]` in `ApexRadiance.toml` (an older `[patches.GShadeLooks]` is read once and written under the new name) |
 | Folders | `Documents\Electronic Arts\The Sims 3\Apex Radiance\Looks\` (the player's looks; created on first use); `Game\Bin\1. Shader Presets\` (GShade's, read-only, listed only when it exists); `Documents\Electronic Arts\The Sims 3\Apex Radiance\Shaders\` (the player's .fx files, see [Your shaders](#your-shaders)), with `Packs\<pack>\` (downloaded packs, see [Shader packs](#shader-packs)) |
 | Presets | The Shaders part (bit 10); the look's .ini travels in an exported ZIP, the player's own .fx files when asked |
@@ -56,10 +56,10 @@ order with its values, and blends the result over the picture by *Strength*.
 ## Menu
 
 Page **Shaders**, subtitle "ReShade looks and shaders on the game's picture": the feature's switch sits at the right of
-the title line (the undo toast reads "Shaders turned on/off"); tabs *Look*, *Packs* and *Library*. The sidebar item
-carries a "Beta" chip ([ui.md](../ui.md#layout)). *Get shader packs* in Add a shader and *Get more packs ›* on Library
-switch to Packs (`Looks::WantsPacks`); a download started from the Look tab keeps the player there and shows its
-progress in the rows that wait for it and in the download bar.
+the title line (the undo toast reads "Shaders turned on/off"); tabs *Look* and *Installed shaders*. The sidebar item
+carries a "Beta" chip ([ui.md](../ui.md#layout)). A look is built on the Look tab alone: shaders of packs not on this PC
+are added from *Add shaders* and download as they are added; a download shows its progress in the rows that wait for it,
+on the pack's group in Add shaders, and in the download bar.
 
 **Look card** (tab Look, Lucide `wand-sparkles`): the title is the look's name ("ReShade look" when none is chosen), the
 subtitle "<n> shaders · ~<cost> ms" (or "Off", "No look chosen", "This look can't be read"), a hold-to-compare eye
@@ -74,7 +74,7 @@ look leaves the list at once (the chosen one leaves none chosen) with the undo t
 after another join that toast ("<a> and <b> deleted", "<n> looks deleted", one Undo for all). The files reach the
 Recycle Bin only when the toast is gone (`FlushDeletes`, every menu frame), so Undo needs no Recycle Bin; the waiting
 list is the Looks table's `deleting` (Undo can only take looks off it, and it is never read from the settings file:
-a look still waiting when the game closes is kept). A file that could not be moved says so under the row. *Import* and *Open the Looks folder* end the list. Stars are saved as
+a look still waiting when the game closes is kept). A file that could not be moved says so under the row. *New look*, *Import* and the folder button (*Open the Looks folder*) end the list. Stars are saved as
 `favorites` in the Looks table. *Strength*; *Interface without shaders* (a switch, on by default: "Menus, the game's panels
 and loading screens keep their own colors"); under Advanced, *Order* (After Apex Color / Before Apex Color). While a LUT
 is also on (Color > LUTs), a row "A LUT is on too" with an amber description ("Both change color, so the picture may
@@ -87,7 +87,7 @@ list). One row per shader of the run list, in run order: a chevron, the name (ch
 the .ini) over one short description, a ⋯ menu, the switch; the drag grip on the left moves it in the run order. The ⋯
 menu, titled with the shader's name, has *Put back the look's values* (while they differ) and *Remove from the look*. A removed shader leaves the list at once and stops running, with the
 undo toast "<name> removed"; removals one after another join that toast ("<a> and <b> removed", "<n> shaders removed",
-6 s, one Undo for all; `ApexUi::ReportChange`'s group). It leaves the file at the next save; until then *Add a shader*
+6 s, one Undo for all; `ApexUi::ReportChange`'s group). It leaves the file at the next save; until then *Add shaders*
 lists it first under "Removed from this look", its name over "Leaves the look when you save" and *Restore* (`RemovedRow`; only a set changes, so the list is never
 rebuilt while its rows draw). The name side opens its parameters in a rounded panel set into the card, each with the
 control its .fx asks for and the .ini's value as its default (changed dot, Reset; see
@@ -107,15 +107,18 @@ with *Download* when a pack of ReShade's list has the file (a failed download sa
 Waiting" or "<pack> · Downloading <n>%" with a spinner while it downloads; "<file>.fx · Not in your Shaders folder" with
 *Add .fx files…* for any other missing file; "Checking the file…" with a spinner while it compiles; "<file>.fx · Doesn't
 run in The Sims 3" (no action) for a file that is there but cannot run on Direct3D 9. When two packs or more are
-missing, *Download both* / *Download all* (primary) follows the list. A missing shader has the ⋯ menu too (*Remove from the look*), in the same column as the other rows' (their switch and chevron's room left empty). Under the
-list, *Add a shader*, *Save as a new look…* and *Save to this look*. No modal opens on its own.
+missing, *Download both* / *Download all* (primary) follows the list. A missing shader has an amber alert icon in the grip's column, so its name lines up with the other rows; its ⋯ menu
+(*Remove from the look*) sits in the other rows' ⋯ column and its action at the row's end, in their switch and chevron's
+room (a wider action moves the ⋯ left). Under the list, *Add shaders* at the left and *Save* (primary) at the right;
+*Save as a new look…* is in the card's ellipsis menu. A look with no shader reads "No shaders yet: use Add shaders to
+build this look". No modal opens on its own.
 
 **Unsaved changes.** Switches, added, removed and moved shaders, values and quality settings live in Apex's settings
 (saved by themselves) as changes on top of the look's file, until saved into it. While there are any, the *Look* row
 shows the changed dot and "Changed here, not saved in the look yet"; its hover Reset (and the ellipsis menu's *Put back
 the look as saved*) drops them, undoable. Picking another look or *Import* first asks "Save your changes to <look>?"
-with the changes listed and *Discard them*, *Cancel*, *Save*. *Save to this look* (Primary, enabled while something
-changed) writes a look of the Looks folder over, keeping the file as it was in `<name>.ini.bak`; an Apex or GShade look
+with the changes listed and *Discard them*, *Cancel*, *Save*. *Save* (primary, enabled while something
+changed; for a GShade look the card adds "It's a GShade look, so Save keeps a copy in My looks") writes a look of the Looks folder over, keeping the file as it was in `<name>.ini.bak`; an Apex or GShade look
 is saved in the Looks folder under its own name and chosen there, since Apex writes nowhere else (when My looks already
 has that name, the first Save says "saving replaces it" and writes nothing; the next Save replaces it). Nothing is
 written when the look's own file cannot be read at that moment. The result is a note under the Look row ("Saved to
@@ -128,50 +131,55 @@ from <pack> (or "<pack> and <pack>", "<n> packs"), which you don't have yet", wi
 *Download all* (primary) and *Not now*. The download starts at once; its progress shows in the missing shaders' rows and
 in the download bar.
 
-*Add a shader* opens a modal with every shader that runs here, grouped by source under collapsible headers with their
-count ("Apex · 17", one group per downloaded pack, "Your shaders · <n>" with the folder button); a source with nothing
-to show is hidden. A search field matches shader, description, source or author; the Kind filter (Color, Sharpen,
-Light, Film & camera, Stylized) applies to the built-in ports. The list spans the modal edge to edge between two
-hairlines; under it, "Missing something? Get more packs or add your own .fx files." with *Get shader packs* at its
-right (under the line when they do not fit; it closes the modal on the Packs tab). A long group title is
-cut with "…" before the folder button. Shaders that cannot run here are never listed. Opening it compiles nothing: a
-downloaded pack's shaders are listed from the check cache ([Shader packs](#shader-packs)), and adding one compiles its
-file (its amber row shows "Checking the file…" until then).
+*Add shaders* opens a modal (560 units wide at most, centred on the screen; the search field takes the focus): every
+shader that runs here, grouped by source under collapsible headers with their count ("Apex · 17", one group per
+downloaded pack, "Your shaders · <n>" with the folder button); a source with nothing to show is hidden. A search field
+matches shader, description, source or author; the Kind filter (Color, Sharpen, Light, Film & camera, Stylized) applies
+to the built-in ports and starts at All kinds at each opening. Removed shaders come first, under "Removed from this
+look", with *Restore*. Then, while no kind is chosen, "Downloaded when you add one": one closed group per pack of
+ReShade's list not on this PC ("<pack> · <size> · <n>", "<pack> · Downloading <n>%" or "<pack> · Waiting" while it
+downloads), each shader of the built-in index with *Add* (download icon; "Adds it and downloads <pack> from its author's
+GitHub"): the shader joins the look and waits there as a missing row until its pack is here. The list scrolls inside
+the modal between two hairlines; its height is what the screen leaves the rest of the modal, at most 420 units, so the
+buttons stay on screen at 720p with 200% text (on a screen too short for both, the line below goes). Under it, "Apex goes
+online only when you add a shader that isn't on your PC.", then *Import .fx…* at the left and *Done* (primary) at the
+right; the modal stays open for several adds and the X or Done closes it. A long group title is cut with "…" before the
+folder button. Shaders that cannot run here are never listed. Opening it compiles nothing: a downloaded pack's shaders
+are listed from the check cache ([Shader packs](#shader-packs)), and adding one compiles its file (its amber row shows
+"Checking the file…" until then).
 
-**Packs** tab: a search field ("Search packs or shaders": name, author, repository, or a file or technique of the
-built-in index), then one card. *For this look* lists the look's packs not downloaded yet (and those downloading) with
-*Select these* at its right; *All packs · <n>* lists the rest. A row: a checkbox (a spinner while it downloads), the
-name in bold over "<author> · <n> shaders · <size>" (· "used by <look>"), a status at the right (under the name when it
-does not fit): "Downloaded" in green with "<x> of <y> run here", "Downloading <n>%", "Waiting", "Needed" (the standard
-effects a download adds), "This pack is no longer on GitHub"; a failed download says why in amber on its line. The ⋯
-menu has Update and Open on GitHub. The card ends with "Apex goes online only when you click Download. Each pack comes
-from its author's GitHub under its own licence; only .fx, .fxh and textures are kept." and shows "No connection; the
-list may be out of date" when ReShade's list could not be read. In the menu search it is one header, *Get shader packs*
-("ReShade's official list · <n> packs · <d> downloaded").
+*New look* (in the Look list; asks to save or discard unsaved changes first, and Discard puts the look back as saved)
+opens a modal: a name field ("My look", "My look 2"… free in the Looks folder), *Start from* (Start empty / Copy this
+look, the latter only with a look chosen), *Cancel* and *Create* (off while the name is taken, "A look with this name
+exists already", or cannot be a file name, "Use letters, digits and spaces for the name"). Start empty writes
+Looks\<name>.ini with no technique and chooses it; Copy this look saves the current one, its changes included, as
+*Save as a new look…* does. The change note reads "<name> created".
 
-**Download bar**: a rounded bar floating just above the footer, on any page (`Looks::PacksBar`): on Packs while choosing,
-"<k> selected · <size>" (+ "1 needed" for the standard effects) and *Download <n> packs* (primary, greyed at 0); while
-downloading, a spinner, "Downloading <i> of <n> · <pack>", *Stop* and a thin bar for the whole batch; when done, "<n>
+**Download bar**: a rounded bar floating just above the footer, on any page (`Looks::PacksBar`): while downloading, a spinner, "Downloading <i> of <n> · <pack>", *Stop* and a thin bar for the whole batch; when done, "<n>
 downloaded" or "<i> of <n> downloaded" with the first failure in amber, *Try again* (when one can be retried) and *OK*.
 It clears by itself 4 s after a batch that had no failure; with a failure it stays until OK or Try again. Its buttons go
 under the text when narrow, each on its own line when they still do not fit. The page keeps the bar's height free at its
 end, and the undo toast sits above the bar with the same right edge.
 
-**Library** tab. **Installed packs** (Lucide `package`): "<n> packs · <size>" (or "No packs yet") and *Check again* in
-the header (compiles the Shaders folder again and checks the packs where they changed; its result, "All shaders found"
-or "<n> still missing", shows under the header). One row per downloaded pack: its name, "<x> of <y> run here · <size>"
-(the standard effects add "other packs need it"), the ⋯ menu (Update, Open on GitHub) and a trash button (greyed while
-the pack downloads again). The last quiet row reads "<n> shaders built into Apex, always available" with *Get more packs
-›*. **Your shaders** (Lucide `user-round`): "<n> files in the Shaders folder" (or "Import your own .fx files") and the
-folder button; one row per .fx file: "<technique> runs here" or "<n> shaders run here", "Checking the file…", "Needs
-<header>, which is in <pack>" with *Download*, or "Doesn't run in The Sims 3" in amber; a trash button; *Import .fx…*
-(primary) last. A trash button turns its row into a confirmation in place: "Remove <name>?", what the look loses in amber
+**Installed shaders** tab. **Installed packs** (Lucide `package`): "<n> packs · <size>" (or "No packs yet") and *Check
+again* in the header (compiles the Shaders folder again and checks the packs where they changed; its result, "All
+shaders found" or "<n> still missing", shows under the header). One row per downloaded pack: its name, "<x> of <y> run
+here · <size>" (the standard effects add "other packs need it"), the ⋯ menu (Update, Open on GitHub) and a trash button
+(greyed while the pack downloads again). The last quiet row reads "<n> shaders built into Apex, always available".
+**Your shaders** (Lucide `user-round`): "<n> files in the Shaders folder" (or "Import your own .fx files") and the folder
+button; one row per .fx file: "<technique> runs here" or "<n> shaders run here", "Checking the file…", "Needs <header>,
+which is in <pack>" with *Download*, or "Doesn't run in The Sims 3" in amber; a trash button; *Import .fx…* (primary)
+last. A trash button turns its row into a confirmation in place: "Remove <name>?", what the look loses in amber
 ("<shader> leaves the look", "<n> shaders leave the look"; removing the standard effects counts every pack shader of the
 look, since most packs include `ReShade.fxh`), *Cancel* and a red *Remove*. A pack's confirmation closes while it
 downloads. The result shows as the card's quiet line, not the undo toast (Undo cannot bring the files back): "<pack>
 removed", "<file> moved to the Recycle Bin", or in amber "<file> could not be moved to the Recycle Bin". A .fx file is
 moved only when it is a regular .fx file inside the Shaders folder; on a drive without a Recycle Bin Windows asks before
-deleting it for good, and No keeps it.
+deleting it for good, and No keeps it. **Get more packs** (Lucide `download`, shown while ReShade's list has packs not on
+this PC): "<n> packs on ReShade's list", a search field ("Search packs": name, author or folder; "No pack matches"), and
+one row per pack: its name over "<author> · <n> shaders · <size>" ("1 shader" for one), *Download* ("Downloads it from
+its author's GitHub") and the ⋯ menu (Open on GitHub); while it downloads, "Waiting" or "Downloading <n>%" with a
+spinner. The card is a list to pick from, so the menu search leaves it out.
 
 *Import* opens the Windows file picker (off the render thread) and copies the .ini into Looks\: a different
 file with the same name gets a numbered name ("Name-1.ini"), the same file is reused; a file without `Techniques=` or
@@ -279,7 +287,7 @@ over the same packs: 169 definitions in 52 files (94 switches, 4 segmented, 46 n
 ## Shader packs
 
 The 45 packs of ReShade's official list (`EffectPackages.ini` of crosire/reshade-shaders, the list ReShade's installer
-shows) can be downloaded from the Packs tab. Apex carries none of them: each comes from its author's GitHub,
+shows) can be downloaded from *Get more packs* on the Installed shaders tab, or from *Add shaders* as one of their shaders is added. Apex carries none of them: each comes from its author's GitHub,
 under its author's licence, when the player clicks Download.
 
 - The index (`features/looks_packs_index.h`, generated by `tools/looks_packs_index.py`) holds names only: each pack's
@@ -293,7 +301,7 @@ under its author's licence, when the player clicks Download.
   written. ReShade's standard effects (`ReShade.fxh`, which most packs include) download first when missing.
 - A downloaded pack's `.fx` compiles only when a look names it or the player adds one of its shaders. What the others
   run is read from the check cache (`Shaders\.cache\checked.txt`: per file, its size and time and which techniques run
-  here); while *Add a shader* or the Packs tab is open, the files it does not know (new or changed) are
+  here); while *Add shaders* is open, the files it does not know (new or changed) are
   checked once in the background, one at a time at low priority, and let go, so "<x> of <y> run here" and the list fill
   in. A look that wants a file comes first. Its includes and textures are searched in the pack, the player's folder, then every
   other pack (the standard effects first), as in one `reshade-shaders` folder. A file of the same name in the
@@ -346,7 +354,7 @@ The earlier ports came from GShade's copies, which differ from the authors' code
 | Shader switches | `off` | array of technique names | empty | at most 256 read | The look's shaders switched off here |
 | Shader switches | `on` | array of technique names | empty | at most 256 read | Shaders the file keeps listed off (`ApexOff=`) switched on here |
 | Remove (trash) | `removed` | array of lower-case `tech@file.fx` | empty | at most 256 read | Shaders removed here, listed with Restore until the look is saved |
-| Add a shader | `extra` | array of `Tech@File.fx` | empty | at most 256 read | Shaders added to the look (built-in or from the Shaders folder) |
+| Add shaders | `extra` | array of `Tech@File.fx` | empty | at most 256 read | Shaders added to the look (built-in or from the Shaders folder) |
 | The drag grip (run order) | `runOrder` | array of `Tech@File.fx` | empty (the .ini's order) | at most 256 read | The run order |
 | Shader parameters | `tweaks` | table: technique = 4 floats per parameter | empty | at most 64 shaders, 256 values each | Edited values; a shader back at the .ini's values is dropped |
 | Quality settings | `defines` | table: lower-case .fx name = array of `NAME=VALUE` | empty | at most 64 files, 128 definitions each (names C identifiers up to 64 characters, values up to 256) | Edited preprocessor definitions; one back at the look's value is dropped |
@@ -452,7 +460,7 @@ the copy gets a numbered name, which the look then does not use); names with a f
   includes and macros), the target, D3DCompiler's version and the look's definitions, so a changed `.fx`, `.fxh` or
   picture size compiles again and anything else is read back. Each set of definitions has its own cache file, so going
   back to quality settings used before reads them instead of compiling.
-- **Browsing packs:** *Add a shader* and the Packs tab compile nothing and keep no pack effect in memory (the check
+- **Browsing packs:** *Add shaders* and *Get more packs* compile nothing and keep no pack effect in memory (the check
   cache above); the background check of unknown files lets each effect go.
 - **Address space:** D3DCompile's own heap takes up to about 420 MB while a few large pack shaders compile; the
   process heap then grew new segments in the middle of the largest free block and kept them there (offline: 1202 MB to
@@ -461,7 +469,7 @@ the copy gets a numbered name, which the look then does not use); names with a f
 - **GPU memory:** an effect instance not run for 120 frames (switched off, out of the look) gives its render targets
   back; the 384 MB cap counts only the ones in use. The scene depth (DepthBlur's INTZ copy) is asked for only while a
   shader that is on reads it.
-- **Menu:** *Add a shader* works out its filtered list only when the search, Kind, the sources or the language
+- **Menu:** *Add shaders* works out its filtered list only when the search, Kind, the sources or the language
   change, and lays out only the rows in view (the others take their measured height).
 
 Measurements: [history/looks-fx-loading.md](../history/looks-fx-loading.md#2026-11-14-performance-and-memory-pass), [history/looks-shader-packs.md](../history/looks-shader-packs.md#2026-11-14-browsing-packs-compiles-nothing).
