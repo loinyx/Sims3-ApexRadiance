@@ -90,5 +90,5 @@ void SetUi(const UiSettings& u) { g_ui = u; }
 bool ReadRoot(toml::table&) { return true; }
 void RequestSave() {}
 bool ParseKeyChord(const std::string&, KeyChord&) { return false; }
-std::string KeyChordText(const KeyChord& k) { return std::string(k.ctrl ? "Ctrl+" : "") + (k.shift ? "Shift+" : "") + (k.alt ? "Alt+" : "") + "F" + std::to_string(k.vk - VK_F1 + 1); }
+std::string KeyChordText(const KeyChord& k) { return std::string(k.ctrl ? "Ctrl+" : "") + (k.shift ? "Shift+" : "") + (k.alt ? "Alt+" : "") + (k.vk == VK_MENU ? std::string("Alt") : "F" + std::to_string(k.vk - VK_F1 + 1)); }
 }

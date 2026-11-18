@@ -17,26 +17,15 @@ std::string LookName();
 std::string StatusLine(const char* cost = nullptr);
 // Skips the look for the next 0.15 s (hold to compare); call it every frame while held
 void HoldBypass();
-// The Shaders page's views: the page itself (the look card, Looks, the files line), the look's shaders, and the packs and
-// the player's own .fx files
-enum View : int { kViewHome, kViewEditor, kViewFiles };
-// A row or button asked for another view (-1: none); the page switches to it before drawing
+// The Shaders page's tabs: the look (choose it, tune it, build it and add shaders), and what is installed
+enum Tab : int { kTabLook, kTabInstalled };
+// A button asked for another tab (-1: none); the page switches to it before drawing
 int TakeView();
-// Image > Shaders, the look's shaders: the import note card, then the look's card with its shaders
+// Image > Shaders, tab Look: the import note card, the Shaders in this look card, then Add shaders (the shaders that run
+// here and those of packs not downloaded yet, which download when added)
 void ShadersCard();
-// Image > Shaders, packs and files: Installed packs, then Your shaders
+// Image > Shaders, tab Installed: Installed packs, then Your shaders
 void LibraryCards();
-// Image > Shaders: the Looks card (filters, the looks as tiles, New). True when a look was chosen, so the page turns
-// Shaders on.
-bool LooksCard();
-// Image > Shaders, under Looks: where shaders come from (built into Apex, downloaded packs, the player's .fx files);
-// true when Manage was clicked
-bool FilesCard();
-// The look card's top: "Look in use", how it runs, the look's name large beside its icon (on: Shaders is on; cost: the
-// measured GPU cost text, or null)
-void LookHero(bool on, const char* cost);
-// Under the look card while shaders of the look are not on this PC: what is missing and one Download (nothing otherwise)
-void MissingCard();
 // The floating download bar between left and right (screen x), its bottom kSpace2 above bottomY: downloading, or
 // finished (it clears by itself after 4 s unless a pack failed). Returns its top (bottomY when none).
 float PacksBar(float left, float right, float bottomY);

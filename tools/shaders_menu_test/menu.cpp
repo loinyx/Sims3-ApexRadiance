@@ -35,24 +35,24 @@ extern bool g_fixtureTwin;
 
 namespace {
 struct State { const char* name; int page; int tab; bool compiling, edited, offer; int batch; int video, options; bool gameAa; bool openAll; bool twin = false; int confirm = 0; };
-// page 0 Shaders (view 0 the page, 1 the look's shaders, 2 packs and files), 1 Capture (tab 0 Screenshots, 1 Video)
+// page 0 Shaders (tab 0 Look, 1 Installed shaders), 1 Capture (tab 0 Screenshots, 1 Video)
 const State kStates[] = {
-    { "home", 0, 0, false, false, true, 0, 0, 0, false, false },
-    { "editor-open-compiling", 0, 1, true, false, false, 1, 0, 0, false, true },
-    { "editor-open-edited", 0, 1, false, true, true, 0, 0, 0, false, true },
-    { "home-doubled-lut", 0, 0, false, false, false, 0, 0, 0, false, false, true },
-    { "home-downloading", 0, 0, false, false, false, 1, 0, 0, false, false },
-    { "editor-open", 0, 1, false, false, false, 0, 0, 0, false, true },
-    { "editor-finished", 0, 1, false, false, false, 2, 0, 0, false, false },
-    { "files", 0, 2, false, false, false, 0, 0, 0, false, true },
+    { "look", 0, 0, false, false, true, 0, 0, 0, false, false },
+    { "look-open-compiling", 0, 0, true, false, false, 1, 0, 0, false, true },
+    { "look-open-edited", 0, 0, false, true, true, 0, 0, 0, false, true },
+    { "look-doubled-lut", 0, 0, false, false, false, 0, 0, 0, false, false, true },
+    { "look-downloading", 0, 0, false, false, false, 1, 0, 0, false, false },
+    { "look-open", 0, 0, false, false, false, 0, 0, 0, false, true },
+    { "look-finished", 0, 0, false, false, false, 2, 0, 0, false, false },
+    { "installed", 0, 1, false, false, false, 0, 0, 0, false, true },
     { "shots", 1, 0, false, false, false, 0, 0, 0, false, false },
     { "shots-advanced", 1, 0, false, false, false, 0, 0, 1, false, true },
     { "video-idle-advanced", 1, 1, false, false, false, 0, 0, 1, true, true },
     { "video-recording", 1, 1, false, false, false, 0, 1, 0, false, true },
     { "video-saving", 1, 1, false, false, false, 0, 2, 1, false, false },
-    { "editor-doubled", 0, 1, false, false, false, 0, 0, 0, false, false, true },
-    { "files-remove-pack", 0, 2, false, false, false, 0, 0, 0, false, false, false, 1 },
-    { "files-remove-file", 0, 2, false, false, false, 0, 0, 0, false, false, false, 2 },
+    { "look-doubled", 0, 0, false, false, false, 0, 0, 0, false, false, true },
+    { "installed-remove-pack", 0, 1, false, false, false, 0, 0, 0, false, false, false, 1 },
+    { "installed-remove-file", 0, 1, false, false, false, 0, 0, 0, false, false, false, 2 },
 };
 
 struct Run { ImRect r; std::string text; };
@@ -402,7 +402,7 @@ int main(int argc, char** argv)
                         static const std::set<std::string_view> kFixtureText = { "Film print colors", "Exposure and saturation", "Black and white points",
                             "Where the effect is centred on the screen", "Screen", "Overlay", "Multiply", "Linear dodge (add)", "Off also shades the sky and far mountains",
                             "Multiplied into the highlights", "More samples look smoother", "Made by the author of this shader. Higher values of the radius cost more speed.",
-                            "How strongly the shader mixes into the picture", "Each sample costs a little speed; most looks use between 8 and 32 samples.", "Any whole number",
+                            "How strongly the shader mixes into the picture", "Each sample costs a little speed; most looks use between 8 and 32 samples.", "Any whole number", "Everything.fx", "MyFilmGrain.fx",
                             "A long tooltip from the .fx file that explains every detail of what this value changes in the picture", "Apex", "HEVC", "H.264" };
                         std::string list, line;
                         std::istringstream lines(I18n::MissingList(4000));

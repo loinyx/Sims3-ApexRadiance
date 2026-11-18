@@ -217,7 +217,7 @@ int WINAPI wWinMain(HINSTANCE inst, HINSTANCE, PWSTR, int)
     Fixture::PacksState(0);
     Fixture::Live();
     I18n::SetChoice(1); // Portuguese (Brazil); Settings > Menu > Language changes it in the game
-    g_shadersTab = Looks::kViewHome;
+    g_shadersTab = Looks::kTabLook;
 
     bool done = false;
     while (!done)

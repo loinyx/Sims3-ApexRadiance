@@ -825,29 +825,6 @@ inline constexpr Element kGripVertical[] = {
     {Kind::Circle, nullptr, {15.0f, 5.0f, 1.0f}, false}, {Kind::Circle, nullptr, {15.0f, 19.0f, 1.0f}, false},
 };
 
-// layout-grid.svg (Lucide, ISC)
-inline constexpr Element kLayoutGrid[] = {
-    {Kind::Rect, nullptr, {3, 3, 7, 7, 1}, false},
-    {Kind::Rect, nullptr, {14, 3, 7, 7, 1}, false},
-    {Kind::Rect, nullptr, {14, 14, 7, 7, 1}, false},
-    {Kind::Rect, nullptr, {3, 14, 7, 7, 1}, false},
-};
-// copy.svg (Lucide, ISC)
-inline constexpr Element kCopy[] = {
-    {Kind::Rect, nullptr, {8, 8, 14, 14, 2}, false},
-    {Kind::Path, "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2", {}, false},
-};
-// film.svg (Lucide, ISC)
-inline constexpr Element kFilm[] = {
-    {Kind::Rect, nullptr, {3, 3, 18, 18, 2}, false},
-    {Kind::Path, "M7 3v18", {}, false},
-    {Kind::Path, "M3 7.5h4", {}, false},
-    {Kind::Path, "M3 12h18", {}, false},
-    {Kind::Path, "M3 16.5h4", {}, false},
-    {Kind::Path, "M17 3v18", {}, false},
-    {Kind::Path, "M17 7.5h4", {}, false},
-    {Kind::Path, "M17 16.5h4", {}, false},
-};
 // pencil.svg
 inline constexpr Element kPencil[] = {
     {Kind::Path, "M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z", {}, false},
@@ -982,9 +959,6 @@ inline constexpr IconData kIcons[] = {
     {"library", kLibrary, static_cast<int>(sizeof(kLibrary) / sizeof(kLibrary[0]))},
     {"grip-vertical", kGripVertical, static_cast<int>(sizeof(kGripVertical) / sizeof(kGripVertical[0]))},
     {"pencil", kPencil, static_cast<int>(sizeof(kPencil) / sizeof(kPencil[0]))},
-    {"layout-grid", kLayoutGrid, static_cast<int>(sizeof(kLayoutGrid) / sizeof(kLayoutGrid[0]))},
-    {"copy", kCopy, static_cast<int>(sizeof(kCopy) / sizeof(kCopy[0]))},
-    {"film", kFilm, static_cast<int>(sizeof(kFilm) / sizeof(kFilm[0]))},
 };
 
 } // namespace ApexUi::LucideData

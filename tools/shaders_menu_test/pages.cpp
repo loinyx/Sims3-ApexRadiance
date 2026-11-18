@@ -10,7 +10,7 @@
 #include "ui/violet_theme.h"
 #include "ui/i18n.h"
 using ApexUi::IconId;
-int g_shadersTab = Looks::kViewHome;
+int g_shadersTab = Looks::kTabLook;
 enum CaptureTab : int { CaptureShots, CaptureVideo };
 int g_captureTab = CaptureShots;
 bool g_takeShot = false;

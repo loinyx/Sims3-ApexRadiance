@@ -9,7 +9,7 @@ def replace(s,a,b):
     return s.replace(a,b)
 gui=Path('apex_gui.cpp').read_text(encoding='utf-8')
 pages=part(gui,'const char* Description(','bool Loading()')+part(gui,'bool Switchable(','// ApexConfig::ApplyFeatureState')+part(gui,'void SetPatch(','// One feature card:')
-looks=part(gui,'void LookLutRow()','// The page: the look card')+part(gui,'void ShadersHomeContent()','// Depth Blur and Edge Smoothing')
+looks=part(gui,'void LookLutRow()','// Tab Look: the look card')+part(gui,'void ShadersLookContent()','// Depth Blur and Edge Smoothing')
 # the LUT note under the look card reads the Picture feature: never shown here
 looks=replace(looks,'PictureParams pp = Picture::Get().GetParams();','PictureParams pp{g_fixtureTwin, g_fixtureTwin, g_fixtureTwin ? "Film.cube" : ""};')
 looks='bool LookTwin(const std::string& technique, Looks::Twin& out, bool act);\n'+looks
