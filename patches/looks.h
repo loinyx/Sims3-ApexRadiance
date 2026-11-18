@@ -19,8 +19,6 @@ std::string StatusLine(const char* cost = nullptr);
 void HoldBypass();
 // The Shaders page's tabs: the look (choose it, tune it, build it and add shaders), and what is installed
 enum Tab : int { kTabLook, kTabInstalled };
-// A button asked for another tab (-1: none); the page switches to it before drawing
-int TakeView();
 // Image > Shaders, tab Look: the import note card, then the Shaders in this look card, whose Add shaders opens a modal
 // (the shaders that run here and those of packs not downloaded yet, which download when added)
 void ShadersCard();

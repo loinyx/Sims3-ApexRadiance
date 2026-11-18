@@ -1070,7 +1070,6 @@ bool SaveToLook(std::string& error)
 }
 
 // ---------------------------------------------------------------------------------------------- shader packs
-int g_wantView = -1; // the Shaders page switches to this view at its next draw (TakeView)
 // look: an imported look's name, or an imported preset's (preset true; shaders is then 0, the preset names only packs)
 struct ImportOffer { std::string look; int shaders = 0; std::vector<std::string> packs; bool preset = false; };
 std::optional<ImportOffer> g_offer; // the note card after an import: packs that have shaders the look misses
@@ -1919,7 +1918,11 @@ bool AskSaveModal()
         if (go)
         {
             if (next == kAskImport) PickPreset();
-            else if (next == kAskNew) g_wantNewLook = true;
+            else if (next == kAskNew)
+            {
+                if (Dirty()) SelectLook(g.preset); // Discard them: the look as saved
+                g_wantNewLook = true;
+            }
             else
             {
                 SelectLook(next);
@@ -2726,6 +2729,7 @@ bool AddShadersModal(bool openNow)
     if (openNow)
     {
         query[0] = 0;
+        kind = 0;
         ImGui::OpenPopup("##AddShaders");
     }
     const float u = ApexUi::Unit();
@@ -2757,7 +2761,13 @@ bool AddShadersModal(bool openNow)
             // the list scrolls inside the card (hundreds of shaders), between two hairlines
             ApexUi::CardDivider();
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-            ImGui::BeginChild("##ShaderList", ImVec2(0.0f, std::max(120.0f * u, std::min(420.0f * u, display.y - 360.0f * u))), ImGuiChildFlags_AlwaysUseWindowPadding);
+            // the list takes the screen height the rest of the modal leaves (measured last frame), so the footer's buttons
+            // stay on screen at 720p with 200% text; at most 420 units
+            // (chromeH without the online line; on a screen too short for both, the line goes and the buttons stay)
+            static float chromeH = 0.0f, leadH = 0.0f;
+            const bool showLead = display.y - 32.0f - chromeH - leadH >= 60.0f * u; // at least a row and a half of the list
+            const float listH = std::clamp(display.y - 32.0f - chromeH - (showLead ? leadH : 0.0f), 40.0f * u, 420.0f * u);
+            ImGui::BeginChild("##ShaderList", ImVec2(0.0f, listH), ImGuiChildFlags_AlwaysUseWindowPadding);
             ImGui::PopStyleVar();
             // the rows that match, per source: worked out again only when the search, the kind, the sources, the run list
             // or the language change (not every frame over hundreds of shaders)
@@ -2896,8 +2906,7 @@ bool AddShadersModal(bool openNow)
                         if (ApexUi::BeginControlRow(tech.c_str(), file, ApexUi::ButtonWidth(I18n::Tr(button), true)))
                         {
                             ImGui::BeginDisabled(added);
-                            ApexUi::SetNextRowUntranslated();
-                            if (ApexUi::IconTextButton(I18n::Tr(button), IconId::Download, tip.c_str()))
+                            if (ApexUi::IconTextButton(button, IconId::Download, tip.c_str()))
                             {
                                 AddShader(tech, file);
                                 DownloadPacks({ p.folder });
@@ -2918,7 +2927,12 @@ bool AddShadersModal(bool openNow)
             ApexUi::Gap(ApexUi::kSpace2);
             if (g.active && Looks::Fx::Scanning()) ApexUi::BusySpinner();
             if (g.active && Looks::Fx::Scanning()) ApexUi::MutedText(I18n::Tr("Checking your shaders\xE2\x80\xA6")); // nothing compiles while Looks is off
-            ApexUi::MutedText(I18n::Tr("Apex goes online only when you add a shader that isn't on your PC."));
+            if (showLead)
+            {
+                const float leadTop = ImGui::GetCursorPosY();
+                ApexUi::MutedText(I18n::Tr("Apex goes online only when you add a shader that isn't on your PC."));
+                leadH = ImGui::GetCursorPosY() - leadTop;
+            }
             if (!g_fxMessage.empty()) ApexUi::IconNote(g_fxMessageError ? IconId::TriangleAlert : IconId::Info, g_fxMessage.c_str(), g_fxMessageError ? VioletTheme::kWarning : VioletTheme::kTextMuted);
             ApexUi::Gap(ApexUi::kSpace3);
             const float gap = ApexUi::kSpace3 * u, doneW = ApexUi::ButtonWidth(I18n::Tr("Done"), false);
@@ -2929,6 +2943,7 @@ bool AddShadersModal(bool openNow)
             SameLineIfFits(doneW, gap, right);
             ImGui::SetCursorScreenPos(ImVec2(right - doneW, ImGui::GetCursorScreenPos().y));
             if (ApexUi::TextButton("Done", nullptr, ApexUi::ButtonKind::Primary) || close) ImGui::CloseCurrentPopup();
+            chromeH = ImGui::GetItemRectMax().y - ImGui::GetWindowPos().y + ImGui::GetScrollY() + ImGui::GetStyle().WindowPadding.y - listH - (showLead ? leadH : 0.0f);
         }
         ImGui::EndPopup();
     }
@@ -3922,7 +3937,6 @@ void LibraryCards()
     g_patch->LibraryCard();
 }
 
-int TakeView() { return std::exchange(g_wantView, -1); }
 
 // Every menu frame, on any page: also sends deleted looks to the Recycle Bin once their undo toast is gone
 float PacksBar(float left, float right, float bottomY)

@@ -1354,7 +1354,6 @@ void ShadersPage() {
         ApexUi::Tooltip(Description(patch));
         ImGui::SetCursorPosY(after);
     }
-    if (const int tab = Looks::TakeView(); tab >= 0) g_shadersTab = tab; // a button of the page asked for it
     static const char* const kTabs[] = {"Look", "Installed shaders"};
     ApexUi::TabBar("##ShadersTabs", &g_shadersTab, kTabs, IM_COUNTOF(kTabs));
     if (g_shadersTab == Looks::kTabInstalled) ShadersLibraryContent();
