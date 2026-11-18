@@ -1,5 +1,6 @@
 // Table legs: which object is which model (features/object_legs.h).
 #include "object_legs.h"
+#include "plant_scan.h"
 #include "apex_log.h"
 #include "entry_chain.h"
 #include "game_addresses.h"
@@ -14,9 +15,12 @@
 namespace {
 
 constexpr uint32_t kLiteType = 0x03B4C61D;
+// Every object with a LITE: custom content's plants are known only once PlantScan ends, after most objects attached
 struct Object {
-    const ObjectLegs::Model* model;      // a legged table, or
-    const ObjectLegs::PlantModel* plant; // a plant
+    uint64_t lite;
+    const ObjectLegs::Model* model;   // a legged table, or
+    const ObjectLegs::Puff* puffs;    // a plant's balls (the table's or PlantScan's), or neither yet
+    uint16_t puffCount;
     float m[16];
     bool placed;
 };
@@ -41,14 +45,15 @@ char __fastcall AttachHook(void* manager, void* edx, uint32_t idLo, uint32_t idH
     std::memcpy(&lite, key, sizeof lite);
     const ObjectLegs::Model* model = ObjectLegs::Baked(lite);
     const ObjectLegs::PlantModel* plant = model ? nullptr : ObjectLegs::BakedPlant(lite);
-    if (model || plant) {
+    {
         std::lock_guard<std::mutex> lk(g_mx);
         if (g_objects.size() >= 65536) g_objects.clear(), g_shapes.clear();
-        g_objects[IdOf(idLo, idHi)] = {model, plant, {}, false};
+        g_objects[IdOf(idLo, idHi)] = {lite, model, plant ? &ObjectLegs::kPuffs[plant->first] : nullptr, plant ? plant->count : uint16_t{0}, {}, false};
         g_any.store(true, std::memory_order_relaxed);
-        g_baked.fetch_add(1, std::memory_order_relaxed);
-    } else if (seen == 0)
-        LOG_INFO(std::format("[ObjectLegs] First LITE {:016X} of group {:08X}: not a legged table", lite, key[3]));
+    }
+    if (model || plant) g_baked.fetch_add(1, std::memory_order_relaxed);
+    else if (seen == 0)
+        LOG_INFO(std::format("[ObjectLegs] First LITE {:016X} of group {:08X}: not in the tables", lite, key[3]));
     return made;
 }
 
@@ -76,6 +81,7 @@ namespace ObjectLegs {
 void Install() {
     using GameAddr::Id;
     if (!GameAddr::Have({Id::LightObjectAttach, Id::LightObjectMove})) return;
+    PlantScan::Start();
     std::string err;
     g_on[0] = EntryChain::Install(EntryChain::Site::LightObjectAttach, EntryChain::Layer::LampMarkFilter, reinterpret_cast<void*>(&AttachHook), &err);
     if (g_on[0]) g_on[1] = EntryChain::Install(EntryChain::Site::LightObjectMove, EntryChain::Layer::LampMarkFilter, reinterpret_cast<void*>(&MoveHook), &err);
@@ -110,8 +116,11 @@ void Fill(RoomLightTests::Room& room) {
             if (shape == g_shapes.end()) continue;
             const auto object = g_objects.find(shape->second);
             if (object == g_objects.end() || !object->second.placed) continue;
-            if (object->second.model) Place(*object->second.model, object->second.m, rc.posts);
-            else PlacePuffs(*object->second.plant, object->second.m, rc.puffs);
+            Object& o = object->second;
+            if (!o.model && !o.puffs) PlantScan::Find(o.lite, o.puffs, o.puffCount); // (custom content: once its scan ended)
+            if (o.model) Place(*o.model, o.m, rc.posts);
+            else if (o.puffs) PlacePuffs(o.puffs, o.puffCount, o.m, rc.puffs);
+            else continue;
             records++;
         }
     }

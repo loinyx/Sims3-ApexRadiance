@@ -6,7 +6,7 @@ plant casts a wedge with straight edges and no leaves. The plant's shadow LOD ho
 cards). This fits that mesh with a few soft balls ("puffs"): the mesh's surface, sampled by area, split by k-means; each
 ball's radius covers its samples and its density is the leaf area it holds over its cross-section, so a lamp's light
 through it is exp(-tau * (1 - (d / r)^2)^1.5) at a distance d from its centre (rt_lamp_blockers.h PuffT). Models are
-picked by their resource name (the packages' name maps). The game's packages are only read; a Delta package overrides a
+picked by their blockers (two crossed upright sheets) or their resource name (the packages' name maps). The game's packages are only read; a Delta package overrides a
 Full one. Standard library only.
 
     python tools/plant_puffs_table/generate.py "<game folder>" [--check] [--list]
@@ -27,17 +27,24 @@ _spec.loader.exec_module(legs)
 
 NMAP = 0x0166038C
 OUT = os.path.join(HERE, "..", "..", "features", "plant_puffs_data.inc")
-# A plant's model name holds one of these words; the rest (food, paintings, shelves, Sims' clothes, wall art) are left out
+# A model is baked when its LITE is the game's two vertical sheets crossed in an X (the rough blocker of plants and of other
+# objects of that build; a ball of its real mesh shades better than the wedge for every one of them, and custom content
+# without names keeps that shape), or when its name holds one of these words and none of the next (food, paintings, shelves
+# and signs with a plant in their name)
 WORDS = ("plant", "palm", "fern", "ficus", "bonsai", "flower", "topiary", "cactus", "bamboo", "lotus", "papyrus", "hosta",
-         "lillies", "philodendron", "perennials", "planter", "coleus", "ivy", "bush", "shrub")
-NOT = ("food", "painting", "bookshelf", "sign", "yearbook", "decal", "frames", "holographic", "body", "hair", "shoes",
-       "beard", "top", "bottom", "dress", "wallflower", "ceiling")
+         "lillies", "philodendron", "perennials", "planter", "coleus", "ivy", "bush", "shrub", "orchid", "daffodil", "tulip",
+         "grass", "reed", "cattail", "succulent", "leafy", "tree")
+NOT = ("food", "painting", "bookshelf", "sign", "yearbook", "decal", "frames", "holographic")
 SAMPLE = 0.004   # m^2 of mesh surface per sample
-MIN_K, MAX_K = 3, 10
+MAX_K = 10
 AREA_PER_PUFF = 0.06  # m^2 of mesh surface a puff holds at most, before MAX_K
 RADIUS = 1.29    # a ball of uniform samples has an rms distance of 0.775 r
 TAU_MIN, TAU_MAX = 0.1, 2.5
 DENSITY = 0.6    # shadow LOD leaf cards overlap and many are two-sided: their raw area made black balls (previews of 18/11)
+SOLID_M = 0.05   # a mesh piece this thick (3 x volume / area) is a pot, a box or a table, not leaves (leaves 0 to 0.8 cm, ficus
+                 # leaf clumps 3 to 5 cm, pots and planters 6 to 21 cm in the base game's meshes)
+TAU_SOLID = 6.0  # its balls: 0.25% of the light through the centre, as a solid blocker
+MAX_SOLID_K = 3
 
 
 def names_of(game):
@@ -62,6 +69,12 @@ def names_of(game):
             except struct.error:
                 pass
     return names
+
+
+def crossed_sheets(occluders):
+    """Two occluders, both upright (normal's y under 0.1), at right angles (|dot| under 0.2)."""
+    n = [o[1][3:6] for o in occluders if abs(o[1][4]) < 0.1]
+    return len(occluders) == 2 and len(n) == 2 and abs(n[0][0] * n[1][0] + n[0][1] * n[1][1] + n[0][2] * n[1][2]) < 0.2
 
 
 def is_plant(name):
@@ -91,10 +104,41 @@ def shadow_triangles(pk, modl):
     return tris
 
 
+def plain_sum(values):
+    """Left-to-right sum (Python 3.12's sum() compensates float rounding; plant_scan.cpp adds plainly, and a symmetric model's
+    k-means tie went the other way)."""
+    t = 0.0
+    for v in values:
+        t += v
+    return t
+
+
 def sub(a, b): return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
 def cross(a, b): return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
 def norm(a): return math.sqrt(a[0] * a[0] + a[1] * a[1] + a[2] * a[2])
-def d2(a, b): return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2
+def d2(a, b): return (a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]) + (a[2] - b[2]) * (a[2] - b[2])
+
+
+def solid_pieces(tris):
+    """For each triangle, whether its connected piece (vertices welded at 1 mm) is at least SOLID_M thick."""
+    key = lambda q: (round(q[0] * 1000), round(q[1] * 1000), round(q[2] * 1000))  # noqa: E731
+    parent = {}
+
+    def find(x):
+        while parent.setdefault(x, x) != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+    for a, b, c in tris:
+        ra = find(key(a))
+        parent[find(key(b))] = ra
+        parent[find(key(c))] = ra
+    area, vol = {}, {}
+    for a, b, c in tris:
+        r = find(key(a))
+        area[r] = area.get(r, 0.0) + 0.5 * norm(cross(sub(b, a), sub(c, a)))
+        vol[r] = vol.get(r, 0.0) + (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6.0
+    return [3.0 * abs(vol[find(key(a))]) / max(area[find(key(a))], 1e-9) >= SOLID_M for a, _, _ in tris]
 
 
 def samples(tris):
@@ -117,8 +161,8 @@ def samples(tris):
 
 def kmeans(pts, k):
     """Weighted k-means, farthest-point start from the heaviest-weighted centroid: the same input gives the same balls."""
-    cx = sum(p[0] * w for p, w in pts) / sum(w for _, w in pts), sum(p[1] * w for p, w in pts) / sum(w for _, w in pts), \
-        sum(p[2] * w for p, w in pts) / sum(w for _, w in pts)
+    cx = plain_sum(p[0] * w for p, w in pts) / plain_sum(w for _, w in pts), plain_sum(p[1] * w for p, w in pts) / plain_sum(w for _, w in pts), \
+        plain_sum(p[2] * w for p, w in pts) / plain_sum(w for _, w in pts)
     centres = [min(pts, key=lambda q: d2(q[0], cx))[0]]
     while len(centres) < k:
         centres.append(max(pts, key=lambda q: min(d2(q[0], c) for c in centres))[0])
@@ -131,32 +175,43 @@ def kmeans(pts, k):
             if not g:
                 new.append(c)
                 continue
-            sw = sum(w for _, w in g)
-            new.append((sum(p[0] * w for p, w in g) / sw, sum(p[1] * w for p, w in g) / sw, sum(p[2] * w for p, w in g) / sw))
+            sw = plain_sum(w for _, w in g)
+            new.append((plain_sum(p[0] * w for p, w in g) / sw, plain_sum(p[1] * w for p, w in g) / sw, plain_sum(p[2] * w for p, w in g) / sw))
         if new == centres:
             break
         centres = new
     return centres, groups
 
 
-def puffs_of(tris):
+def balls(tris, solid, max_k):
     pts, total = samples(tris)
-    if len(pts) < MIN_K:
+    if not pts:
         return []
-    k = max(MIN_K, min(MAX_K, int(round(total / AREA_PER_PUFF))))
+    k = max(1, min(max_k, len(pts), int(round(total / AREA_PER_PUFF))))
     centres, groups = kmeans(pts, k)
     out = []
     for c, g in zip(centres, groups):
         if not g:
             continue
-        area = sum(w for _, w in g)
-        rms = math.sqrt(sum(d2(p, c) * w for p, w in g) / area)
+        area = plain_sum(w for _, w in g)
+        rms = math.sqrt(plain_sum(d2(p, c) * w for p, w in g) / area)
         r = max(0.03, RADIUS * rms)
         # leaves face every way: a ray sees half their area; spread over the ball's cross-section, the mean depth, and the
-        # centre's 1.5 times it (the mean of sqrt(1 - rho^2) over a disc is 2/3)
-        tau = max(TAU_MIN, min(TAU_MAX, DENSITY * 1.5 * (area / 2.0) / (math.pi * r * r)))
+        # centre's 1.5 times it (the mean of sqrt(1 - rho^2) over a disc is 2/3). A solid piece blocks like the game's blockers
+        tau = TAU_SOLID if solid else max(TAU_MIN, min(TAU_MAX, DENSITY * 1.5 * (area / 2.0) / (math.pi * r * r)))
         out.append((c, r, tau))
     return out
+
+
+def puffs_of(tris):
+    """The solid pieces' balls (at most MAX_SOLID_K), then the leaves' (the rest of MAX_K), clustered apart."""
+    if not tris:
+        return []
+    flags = solid_pieces(tris)
+    hard = [t for t, f in zip(tris, flags) if f]
+    soft = [t for t, f in zip(tris, flags) if not f]
+    out = balls(hard, True, MAX_SOLID_K)
+    return out + balls(soft, False, MAX_K - len(out))
 
 
 def main():
@@ -170,20 +225,21 @@ def main():
     table = {}
     for key in sorted(k for k in pk.index if k[0] == legs.VPXY):
         name = names.get(key[2], "")
-        if not is_plant(name):
-            continue
         try:
             chunks, _, _ = legs.rcol(pk.get(key))
             links = legs.vpxy_links(chunks[0][3])
             lite = next((x for x in links if x[0] == legs.LITE and x in pk.index), None)
             modl = next((x for x in links if x[0] == legs.MODL and x in pk.index), None)
-            if not lite or not modl or not legs.lite_occluders(legs.rcol(pk.get(lite))[0][0][3]):
-                continue  # no blocker in the game: nothing to replace
+            if not lite or not modl:
+                continue
+            occluders = legs.lite_occluders(legs.rcol(pk.get(lite))[0][0][3])
+            if not occluders or not (crossed_sheets(occluders) or is_plant(name)):
+                continue  # no blocker in the game (nothing to replace), or not a plant's
             puffs = puffs_of(shadow_triangles(pk, modl))
         except (IndexError, KeyError, StopIteration, ValueError, struct.error, ZeroDivisionError):
             continue
         if puffs and lite[2] not in table:
-            table[lite[2]] = (name, puffs)
+            table[lite[2]] = (name or f"unnamed {key[2]:016X}", puffs)
             if args.list:
                 print(name, [(tuple(round(v, 2) for v in c), round(r, 2), round(t, 2)) for c, r, t in puffs])
     for f in pk.files.values():

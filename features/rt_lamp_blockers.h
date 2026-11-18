@@ -18,7 +18,8 @@
 //     6 (miss 2 +0xF0 | +0x90 .xyz, its record's sphere r^2 as the game's, whatever posts made of the record's row)
 //   then each of the record's posts (Record::posts), the same stride, after its blockers:
 //     0 (one end .xyz, kind: 2), 1 (other end .xyz, 0), 2 (0, 0, 0, radius), the rest 0
-//   a plant's record (Record::puffs) has its balls of leaves instead of its blockers (the game's two crossed sheets), the same stride:
+//   a plant's record (Record::puffs) has its balls instead of its upright blockers (the game's two crossed sheets; a level one stays),
+//   the same stride:
 //     0 (centre .xyz, kind: 3), 1 (0, 0, 0, optical depth through the centre), 2 (0, 0, 0, radius), the rest 0
 // The "miss" offsets are what the two-plane form leaves for a plane its segment never reaches (hit2), read as the game does.
 // A blocker of another vtable is left out: its share is 1 (occlude counts it and multiplies by 1), so T and the 0.01 stop
@@ -238,8 +239,9 @@ struct BlockerTable {
                     r2 = std::max(r2, reach * reach);
                 }
             for (const Blocker& k : rc.b) {
-                if (!rc.puffs.empty()) break; // a plant: its leaves stand in for its sheets
                 const bool quad = k.vt == kQuadVt;
+                // a plant: its balls stand in for its upright sheets; a level blocker (a pot's or a planter's top) stays
+                if (!rc.puffs.empty() && std::fabs(k.v(quad ? 0x90 : 0x40).y) < 0.5f) continue;
                 if (!quad && k.vt != kDiscVt) {
                     skipped++;
                     continue;

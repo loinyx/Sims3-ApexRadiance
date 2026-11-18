@@ -5,7 +5,8 @@
 // marks its first shape, and Fill gives a room's records their object's legs (Record::posts) before BlockerTable::Append.
 // Custom content is not in the table: its tables keep their top alone.
 // Plants the same way (tools/plant_puffs_table): their LITE holds two flat sheets crossed in an X, so a lamp past a plant cast a
-// wedge with straight edges; their shadow LOD baked into a few balls of leaves (Record::puffs) stands in for those sheets.
+// wedge with straight edges; their shadow LOD baked into a few balls (Record::puffs) stands in for those sheets. Custom content's
+// are baked when the game starts (features/plant_scan.h).
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -43,11 +44,12 @@ inline const PlantModel* BakedPlant(uint64_t lite) {
     const auto at = std::lower_bound(std::begin(kPlantModels), std::end(kPlantModels), lite, [](const PlantModel& m, uint64_t v) { return m.lite < v; });
     return at != std::end(kPlantModels) && at->lite == lite ? at : nullptr;
 }
-// A plant's balls through the object's matrix (its radius by the matrix's scale along x)
-inline void PlacePuffs(const PlantModel& model, const float m[16], std::vector<RoomLightTests::Puff>& out) {
+// A plant's balls (`count` from `first`: the table's or custom content's, features/plant_scan.h) through the object's matrix
+// (its radius by the matrix's scale along x)
+inline void PlacePuffs(const Puff* first, int count, const float m[16], std::vector<RoomLightTests::Puff>& out) {
     const float scale = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
-    for (int i = model.first; i < model.first + model.count; i++) {
-        const Puff& p = kPuffs[i];
+    for (int i = 0; i < count; i++) {
+        const Puff& p = first[i];
         const float l[3] = {p.x * 1e-3f, p.y * 1e-3f, p.z * 1e-3f};
         out.push_back({{l[0] * m[0] + l[1] * m[4] + l[2] * m[8] + m[12], l[0] * m[1] + l[1] * m[5] + l[2] * m[9] + m[13], l[0] * m[2] + l[1] * m[6] + l[2] * m[10] + m[14]},
                        p.r * 1e-3f * scale, p.tau * 1e-3f});
