@@ -2456,7 +2456,7 @@ const I18n::Pair kPairs[] = {
     {"Sharper floor light", "更清晰的地面光照"},
     {"Floors drawn at twice the detail: light through doors and windows without steps", "地面以两倍精度绘制：从门窗透出的光不再有台阶"},
     {"True-size furniture shadows", "真实尺寸的家具阴影"},
-    {"Furniture shadows of their real size, soft as the lamp. Off: the game's larger, rounder shadows", "家具阴影保持真实尺寸，柔和程度取决于灯。关闭：游戏原本更大、更圆的阴影"},
+    {"Each piece casts a shadow its own size, softer farther away; off: the game's larger blobs", "每件家具投下与自身同大的阴影，越远越柔和；关闭：游戏原本更大的阴影团"},
     {"Tester", "测试"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "在同一场景中逐一关闭再开启每个移植部分，比较其帧时间和效果。更改立即生效并会保存。"},
     {"Frame time", "帧时间"},

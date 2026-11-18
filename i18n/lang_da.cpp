@@ -2456,7 +2456,7 @@ const I18n::Pair kPairs[] = {
     {"Sharper floor light", "Skarpere lys på gulvet"},
     {"Floors drawn at twice the detail: light through doors and windows without steps", "Gulve tegnet med dobbelt detalje: lys gennem døre og vinduer uden trin"},
     {"True-size furniture shadows", "Møbelskygger i ægte størrelse"},
-    {"Furniture shadows of their real size, soft as the lamp. Off: the game's larger, rounder shadows", "Møbelskygger i deres ægte størrelse, bløde som lampen. Fra: spillets større, rundere skygger"},
+    {"Each piece casts a shadow its own size, softer farther away; off: the game's larger blobs", "Hvert møbel kaster en skygge i sin egen størrelse, blødere længere væk; fra: spillets større klatter"},
     {"Tester", "Test"},
     {"Switch each ported part off and on in the same scene to compare its frame time and look. Changes apply at once and are saved.", "Slå hver overført del fra og til i samme scene for at sammenligne billedtid og udseende. Ændringer gælder med det samme og gemmes."},
     {"Frame time", "Billedtid"},
