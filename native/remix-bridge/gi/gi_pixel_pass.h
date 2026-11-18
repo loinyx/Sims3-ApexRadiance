@@ -9,6 +9,7 @@
 //   view()    the server's view of a client texture (WP11): blits it into a client render target texture
 //   addModel(), setMeshes()  mesh casters (MC-2): a model's triangles once, then the placed objects; each model becomes
 //             one bottom level on the renderer's device when a pass first needs it, its objects instances of it
+//   setOnly(), setDump(), loadDump()  diagnostics for a GPU fault: one of run()/view() only; a pass's input to a file and back
 // Header only: the bridge server and native/dxvk/test/dxvk_gi_pixel_pass.cpp compile the same file. The including file
 // provides kGiPixelSpv (the compiled kernel) before this header.
 // All calls come from one thread (the server's play thread); the record callback runs on DXVK's command thread and
@@ -120,8 +121,42 @@ public:
   // model is not built yet waits for it (kBuildsPerPass models a pass)
   void setMeshes(const GiPixelMesh* list, uint32_t count) { m_meshes.assign(list, list + count); }
 
+  // Diagnostics for a GPU fault. setOnly: kOnlyRecord leaves out view(), kOnlyView leaves out run(); either returns
+  // S_OK and counts nothing. setDump: the first `count` passes each write their input (block, placed objects, models)
+  // to `path` (".<pass>" appended) before the renderer records them, for loadDump() offline
+  enum : uint32_t { kOnlyBoth, kOnlyRecord, kOnlyView };
+  void setOnly(uint32_t only) { m_only = only; }
+  void setDump(const char* path, uint32_t count) {
+    m_dumpsLeft = path && *path ? count : 0;
+    std::snprintf(m_dumpPath, sizeof m_dumpPath, "%s", path ? path : "");
+  }
+  // Reads a dump into this pass (models added, objects set) and its block; false when the file is not a whole dump
+  bool loadDump(const char* path, GiPixelBlock* block) {
+    FILE* f = nullptr;
+    if (fopen_s(&f, path, "rb") || !f) return false;
+    uint32_t head[4] = {}, n = 0;
+    bool ok = std::fread(head, sizeof head, 1, f) == 1 && head[0] == kDumpMagic && head[1] == sizeof(GiPixelBlock)
+              && std::fread(block, sizeof *block, 1, f) == 1 && std::fread(&n, 4, 1, f) == 1 && n <= 1u << 20;
+    std::vector<GiPixelMesh> meshes(ok ? n : 0);
+    ok = ok && (n == 0 || std::fread(meshes.data(), sizeof(GiPixelMesh), n, f) == n) && std::fread(&n, 4, 1, f) == 1;
+    std::vector<uint32_t> remap;  // a dumped model's index here (kNoModel when addModel refuses it again)
+    for (uint32_t i = 0; ok && i < n; i++) {
+      uint32_t vt[2];
+      ok = std::fread(vt, sizeof vt, 1, f) == 1 && vt[0] <= 3 * kMaxModelTriangles && vt[1] <= kMaxModelTriangles;
+      std::vector<uint8_t> bytes(ok ? size_t(vt[0]) * 12 + size_t(vt[1]) * 12 : 0);
+      ok = ok && std::fread(bytes.data(), 1, bytes.size(), f) == bytes.size();
+      if (ok) remap.push_back(addModel(reinterpret_cast<const float*>(bytes.data()), vt[0], reinterpret_cast<const uint32_t*>(bytes.data() + size_t(vt[0]) * 12), vt[1]));
+    }
+    std::fclose(f);
+    if (!ok) return false;
+    for (GiPixelMesh& m : meshes) m.model = m.model < remap.size() ? remap[m.model] : kNoModel;
+    setMeshes(meshes.data(), uint32_t(meshes.size()));
+    return true;
+  }
+
   // out[i] may be null. E_FAIL counts as a fault; the text of the last one is lastFault()
   HRESULT run(const GiPixelBlock& block, IDirect3DBaseTexture9* depth, IDirect3DBaseTexture9* cls, IDirect3DBaseTexture9* const* out) {
+    if (m_only == kOnlyView) return S_OK;
     if (!ready() || !depth) return fault("not ready");
     if (block.lamps > kGiPixelLamps || block.casters > kGiPixelCasters || block.capsules > kGiPixelCapsules || block.boxes > kGiPixelBoxes
         || block.samples < 1 || block.samples > 16) return fault("block counts out of range");
@@ -183,6 +218,7 @@ public:
     b->meshBounds = m_boundsLast;  // (meshInstances wrote the bounds after the block's casters)
 
     collect();
+    if (m_dumpsLeft) dump(block), m_dumpsLeft--;
     const UINT size = static_cast<UINT>(offsetof(Record, inst) + sizeof(VkAccelerationStructureInstanceKHR) * r->instances);
     if (FAILED(m_pass->ExecuteExternal(&GiPixelPass::record, r, size, count, res, layouts))) return fault("the renderer refused the pass");
     m_fresh = false;
@@ -195,6 +231,7 @@ public:
   // same size, so an id byte stays exact; linear otherwise). Proves the renderer's image of a D3D9 render target reaches
   // the server; a consumer binds the same image as XR-06 binds the class texture. Needs no pass objects.
   HRESULT view(IDirect3DBaseTexture9* src, IDirect3DBaseTexture9* dst) {
+    if (m_only == kOnlyRecord) return S_OK;
     if (!ready() || !src || !dst) return viewFault("not ready or no texture");
     VkImageCreateInfo si{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO}, di{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     ViewRecord r{m_vk.CmdBlitImage, imageOf(src, &si), imageOf(dst, &di)};
@@ -312,6 +349,26 @@ private:
 #undef X
   };
 
+  static constexpr uint32_t kDumpMagic = 0x31585047;  // "GPX1"
+  // magic, sizeof(GiPixelBlock), pass, 0; the block as given; object count, objects; model count, per model vertices,
+  // triangles, then its bytes. Flushed and closed before the pass is recorded: the file survives a hang that follows
+  void dump(const GiPixelBlock& block) {
+    char path[MAX_PATH + 16];
+    std::snprintf(path, sizeof path, "%s.%u", m_dumpPath, m_passes);
+    FILE* f = nullptr;
+    if (fopen_s(&f, path, "wb") || !f) return;
+    const uint32_t head[4] = {kDumpMagic, sizeof(GiPixelBlock), m_passes, 0};
+    uint32_t n = uint32_t(m_meshes.size());
+    std::fwrite(head, sizeof head, 1, f), std::fwrite(&block, sizeof block, 1, f);
+    std::fwrite(&n, 4, 1, f), std::fwrite(m_meshes.data(), sizeof(GiPixelMesh), n, f);
+    n = uint32_t(m_models.size());
+    std::fwrite(&n, 4, 1, f);
+    for (const Model& m : m_models) {
+      const uint32_t vt[2] = {m.vertices, m.triangles};
+      std::fwrite(vt, sizeof vt, 1, f), std::fwrite(m.bytes.data(), 1, m.bytes.size(), f);
+    }
+    std::fclose(f);
+  }
   const char* fail(const char* why) { release(); return why; }
   HRESULT fault(const char* why) { m_faults++, m_lastFault = why; return E_FAIL; }
   void release() {
@@ -800,6 +857,10 @@ private:
   VkDeviceSize m_scratchSize = 0;
   VkDeviceAddress m_scratchAddrMesh = 0;
   uint32_t m_built = 0, m_meshesLast = 0;
+
+  uint32_t m_only = kOnlyBoth;
+  char m_dumpPath[MAX_PATH] = {};
+  uint32_t m_dumpsLeft = 0;
 
   Record m_record{};  // filled by run(), copied by the renderer
   uint32_t m_passes = 0, m_made = 0, m_faults = 0, m_raysLast = 0, m_gpuUs = 0, m_views = 0, m_viewFaults = 0;

@@ -1,4 +1,4 @@
-param([string[]]$TestArgs = @(), [string]$OutDir = (Join-Path $env:TEMP 'ApexGiServerTest'), [switch]$Pixel, [switch]$Rebake, [switch]$Mesh, [string]$Game = '', [string]$Mods = '', [switch]$Bridge, [string]$BridgePass)
+param([string[]]$TestArgs = @(), [string]$OutDir = (Join-Path $env:TEMP 'ApexGiServerTest'), [switch]$Pixel, [switch]$Rebake, [switch]$Mesh, [string]$Game = '', [string]$Mods = '', [switch]$Bridge, [string]$BridgePass, [switch]$Validation)
 # The server tier's texel solve, offline on a Vulkan device (check.cpp, solve.comp). Read-only: prints to stdout; the
 # compiler's outputs and the three build inputs below stay in -OutDir. -TestArgs: passed on (--no-rays, --device <text>,
 # --density <n>, --rays <n>, --pathref <samples>, --dump <file>: the one file it writes, for the bridge's test-gi.cmd).
@@ -12,6 +12,8 @@ param([string[]]$TestArgs = @(), [string]$OutDir = (Join-Path $env:TEMP 'ApexGiS
 # built (native/remix-bridge/test-gi-mesh.cmd; set DXVK_X64 for the shadow check on the per-pixel pass).
 # -BridgePass <d3d9.dll>: the kernel as the bridge server records it on the renderer's own device, on that x64 library
 # (native/dxvk/test/dxvk_gi_pixel_pass.cpp with native/remix-bridge/gi/gi_pixel_pass.h; native/dxvk/build.cmd builds the library).
+# -TestArgs --replay,<dump>[,<passes>]: a pass input the bridge server dumped (server.giPixelDump). -Validation (with
+# -BridgePass): under the Khronos validation layer with GPU-assisted validation, from the layer's nightly Windows build in -OutDir.
 # Build inputs, fetched once at pinned versions when -OutDir does not hold them (no installed Vulkan SDK is needed; the
 # Vulkan loader, vulkan-1.dll, comes with the graphics driver): the Vulkan headers, the volk loader (two files) and the
 # glslang compiler, which turns solve.comp into SPIR-V headers at build time.
@@ -57,7 +59,14 @@ try {
         $exe = Join-Path $OutDir 'dxvk_gi_pixel_pass.exe'
         & cl.exe /nologo /std:c++20 /utf-8 /EHsc /W4 /O2 /MT /DNOMINMAX ('/I' + $OutDir) ('/I' + $headers) ('/Fe' + $exe) (Join-Path $repo 'native/dxvk/test/dxvk_gi_pixel_pass.cpp') user32.lib
         if ($LASTEXITCODE -ne 0) { throw 'dxvk_gi_pixel_pass.cpp did not compile' }
-        & $exe (Resolve-Path -LiteralPath $BridgePass).Path
+        if ($Validation) {  # shortcut: the nightly layer build, not pinned; pin a vulkan-sdk tag when it ships Windows binaries
+            $vvl = Get-Pinned 'https://github.com/KhronosGroup/Vulkan-ValidationLayers/releases/download/nightly/Validation_Layers_Windows_64.zip' 'vvl-nightly'
+            $env:VK_ADD_LAYER_PATH = (Get-ChildItem -LiteralPath $vvl -Recurse -Filter 'VkLayer_khronos_validation.json' | Select-Object -First 1).DirectoryName
+            $env:VK_INSTANCE_LAYERS = 'VK_LAYER_KHRONOS_validation'
+            $env:VK_KHRONOS_VALIDATION_GPUAV_ENABLE = '1'
+            $env:VK_KHRONOS_VALIDATION_VALIDATE_SYNC = '1'
+        }
+        & $exe (Resolve-Path -LiteralPath $BridgePass).Path @TestArgs
         if ($LASTEXITCODE -ne 0) { throw 'dxvk_gi_pixel_pass failed' }
         return
     }

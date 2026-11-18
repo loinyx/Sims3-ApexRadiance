@@ -6,12 +6,15 @@
 // ray, a floor point behind the static box is traced and gets no light to shadow, the guide holds the floor's normal
 // and depth; the same after 100 one-sample passes and after a device reset; a wrong output is refused as a fault.
 // Stock DXVK: prints "[GiPixel] off: ..." and exits 0.
-// Build and run: tools/gi_server_test/run.ps1 -BridgePass <path to d3d9.dll>
+// --dump <path>: the first pass also writes its input to <path>.0. --replay <dump> [passes]: instead, a pass input the bridge server dumped (server.giPixelDump) runs on the floor
+// (20 passes by default), then a read-back. Under GPU-assisted validation: tools/gi_server_test/run.ps1 -Validation.
+// Build and run: tools/gi_server_test/run.ps1 -BridgePass <path to d3d9.dll> [-TestArgs --replay,<dump>]
 #include <windows.h>
 #include <d3d9.h>
 #include <DirectXMath.h>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <new>
 #include "gi_pixel_spv.h"
 #include "../../remix-bridge/gi/gi_pixel_pass.h"
@@ -130,7 +133,7 @@ static int Check(IDirect3DDevice9* dev, const Targets& t, const Scene& s, IDirec
 }
 
 int main(int argc, char** argv) {
-  if (argc < 2) { std::fprintf(stderr, "usage: dxvk_gi_pixel_pass <d3d9.dll>\n"); return 2; }
+  if (argc < 2) { std::fprintf(stderr, "usage: dxvk_gi_pixel_pass <d3d9.dll> [--dump <path> | --replay <dump> [passes]]\n"); return 2; }
   HMODULE dll = LoadLibraryA(argv[1]);
   auto create = dll ? reinterpret_cast<IDirect3D9* (WINAPI*)(UINT)>(GetProcAddress(dll, "Direct3DCreate9")) : nullptr;
   IDirect3D9* d3d = create ? create(D3D_SDK_VERSION) : nullptr;
@@ -156,6 +159,31 @@ int main(int argc, char** argv) {
     IDirect3DSurface9* sys = nullptr;
     CHECK(dev->CreateOffscreenPlainSurface(kQW, kQH, D3DFMT_A16B16G16R16F, D3DPOOL_SYSTEMMEM, &sys, nullptr));
     char line[256];
+    if (argc >= 4 && std::strcmp(argv[2], "--replay") == 0) {
+      // A pass input the bridge server dumped (server.giPixelDump), on this test's floor: its models, objects and block
+      // (lamps, casters, boxes, camera) as the game sent them. Run it under the validation layers to find a GPU fault
+      static GiPixelBlock block;
+      if (!pass.loadDump(argv[3], &block)) { std::printf("FAIL: %s is no whole pass dump\n", argv[3]); return 1; }
+      const int passes = argc >= 5 ? std::atoi(argv[4]) : 20;
+      CHECK(t.Create(dev));
+      IDirect3DBaseTexture9* out[kGiPixelOutputs] = {t.out[0], t.out[1], t.out[2], t.out[3]};
+      for (int f = 0; f < passes; f++) {
+        CHECK(Draw(dev, t, scene));
+        CHECK(pass.run(block, t.depth, nullptr, out));
+        dev->Present(nullptr, nullptr, nullptr, nullptr);
+      }
+      IDirect3DSurface9* rt = nullptr;
+      D3DLOCKED_RECT lr;
+      CHECK(t.out[0]->GetSurfaceLevel(0, &rt));
+      CHECK(dev->GetRenderTargetData(rt, sys));
+      CHECK(sys->LockRect(&lr, nullptr, D3DLOCK_READONLY));  // waits for the passes: D3DERR_DEVICELOST after a GPU fault
+      sys->UnlockRect(), rt->Release();
+      pass.line(line, sizeof line);
+      const GiPixelCounters c = pass.counters();
+      std::printf("replay %s: %s\n%s\n", argv[3], line, c.faults ? "FAIL" : "PASS");
+      return c.faults ? 1 : 0;
+    }
+    if (argc >= 4 && std::strcmp(argv[2], "--dump") == 0) pass.setDump(argv[3], 1);  // the first pass's input, for --replay
     for (int round = 0; round < 2; round++) {  // the second round runs after a device reset
       CHECK(t.Create(dev));
       IDirect3DBaseTexture9* out[kGiPixelOutputs] = {t.out[0], t.out[1], t.out[2], t.out[3]};

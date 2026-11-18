@@ -1,0 +1,22 @@
+0025: per-pixel pass diagnostics for a GPU fault, read from bridge.conf when the pass opens. server.giPixelOnly = record runs only the shadow pass (GiPixelPass::run), = view only the G-buffer view (GiPixelPass::view); the other one returns S_OK and counts nothing. server.giPixelDump = <path> writes the input of the first server.giPixelDumpPasses passes (default 1; block, placed objects, models) to <path>.<pass> before the renderer records the pass, for dxvk_gi_pixel_pass --replay. A "[GiPixel] diagnostics:" log line names the settings in use. Defaults leave the pass as before.
+Applies after 0024.
+diff --git a/bridge/src/server/gi_pixel_server.h b/bridge/src/server/gi_pixel_server.h
+--- a/bridge/src/server/gi_pixel_server.h
++++ b/bridge/src/server/gi_pixel_server.h
+@@ -80,6 +80,16 @@
+       bridge_util::Logger::info(bridge_util::format_string("[GiPixel] off: %s", why));
+     } else {
+       bridge_util::Logger::info("[GiPixel] on: the renderer records external passes and has ray queries.");
++      // Diagnostics for a GPU fault: run only the pass or only the view, dump the first passes' input
++      const std::string only = bridge_util::Config::getOption<std::string>("server.giPixelOnly", "");
++      const std::string dump = bridge_util::Config::getOption<std::string>("server.giPixelDump", "");
++      const uint32_t dumps = bridge_util::Config::getOption<uint32_t>("server.giPixelDumpPasses", 1);
++      g_pass.setOnly(only == "record" ? GiPixelPass::kOnlyRecord : only == "view" ? GiPixelPass::kOnlyView : GiPixelPass::kOnlyBoth);
++      g_pass.setDump(dump.c_str(), dumps);
++      if (!only.empty() || !dump.empty()) {
++        bridge_util::Logger::info(bridge_util::format_string("[GiPixel] diagnostics: only=%s dump=%s passes=%u", only == "record" || only == "view" ? only.c_str() : "both",
++                                                             dump.empty() ? "-" : dump.c_str(), dump.empty() ? 0u : dumps));
++      }
+     }
+     pShared->state.store(state, std::memory_order_release);
+   }
