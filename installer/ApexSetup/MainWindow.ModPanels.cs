@@ -228,16 +228,64 @@ public sealed partial class MainWindow
             used.Children.Add(row);
         }
         host.Children.Add(used);
+
+        // the store set it came with: the game removes a set as one, so its other items go with it
+        var set = SetOf(r);
+        if (set.Count > 0)
+        {
+            var same = Section(T("Same store set ({0})", set.Count + 1), null, out _);
+            foreach (var s in set.Take(12))
+            {
+                var row = new Grid { ColumnSpacing = 10 };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+                row.ColumnDefinitions.Add(new ColumnDefinition());
+                row.Children.Add(Lucide.Icon(s.Icon, 14, Res("ApexMutedBrush")));
+                var t = new TextBlock { Text = s.Name, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis };
+                Grid.SetColumn(t, 1);
+                row.Children.Add(t);
+                same.Children.Add(row);
+            }
+            if (set.Count > 12) same.Children.Add(new TextBlock { Text = T("and {0} more", set.Count - 12), FontSize = 12, Foreground = Res("ApexMutedBrush") });
+            host.Children.Add(same);
+        }
         host.Children.Add(Note("lock", "ApexMutedBrush", users.Count == 0
-            ? T("The game's own launcher installs and removes these. Apex Launcher only reads its cache, so the store content your saves use stays safe.")
-            : T("The game's own launcher installs and removes these. Apex Launcher only reads its cache, so the store content your saves use stays safe. Removing it would leave {0} without it.", string.Join(", ", users.Select(u => u.Name)))));
+            ? T("The game keeps these in its own content cache, not in Mods. Removing one changes that cache the way the game does, and keeps a copy first so you can undo it.")
+            : T("The game keeps these in its own content cache, not in Mods. Removing it would leave {0} without it.", string.Join(", ", users.Select(u => u.Name)))));
 
         var foot = ModDetailsFoot;
         foot.Visibility = Visibility.Visible;
         foot.ColumnDefinitions.Add(new ColumnDefinition());
-        var remove = MainButton(T("Remove from the game"), () => Safe(GameContentAsync(GameContent.Mode.Remove, [r.Item.FullId!], r.Name)));
+        var remove = MainButton(set.Count > 0 ? T("Remove the set from the game") : T("Remove from the game"), () => Safe(RemoveInstalledAsync(r, set)));
         remove.IsEnabled = r.Item.FullId is not null && _game is not null;
         foot.Children.Add(remove);
+    }
+
+    // the other installed items of an item's store set
+    // (each by its catalog name when the Installed list has it, else the name the game stored; parts of the set that
+    // are not catalog items, such as an object's food, are only in the cache's records)
+    List<(string Name, string Icon)> SetOf(InstalledRow r)
+    {
+        if (r.Item.FullId is not { } id) return [];
+        var rows = (_installed ?? []).Where(x => x.Item.FullId is not null).GroupBy(x => x.Item.FullId!).ToDictionary(g => g.Key, g => g.First());
+        return DcCache.WithSets([id], _setLists).Skip(1).Where(_recordNames.ContainsKey)
+            .Select(x => rows.TryGetValue(x, out var row) ? (row.Name, row.KindIcon) : (_recordNames[x] is { Length: > 0 } n ? n : x, "package")).ToList();
+    }
+
+    // removing an item of a store set takes the whole set, as the game does: said first, with what goes
+    async Task RemoveInstalledAsync(InstalledRow r, List<(string Name, string Icon)> set)
+    {
+        if (set.Count > 0)
+        {
+            var body = new StackPanel { Spacing = 10, Width = 420 };
+            body.Children.Add(new TextBlock { Text = T("{0} came in a store set with {1} other items. The game removes a set as one, so these go too:", r.Name, set.Count), TextWrapping = TextWrapping.Wrap, Foreground = Res("ApexSoftTextBrush") });
+            var names = new StackPanel { Spacing = 4 };
+            foreach (var s in set) names.Children.Add(new TextBlock { Text = "• " + s.Name, FontSize = 13, TextTrimming = TextTrimming.CharacterEllipsis });
+            body.Children.Add(new ScrollViewer { Content = names, MaxHeight = 220 });
+            body.Children.Add(new TextBlock { Text = T("You can undo it right after."), FontSize = 12, Foreground = Res("ApexMutedBrush") });
+            var d = new ContentDialog { Title = T("Remove {0} items?", set.Count + 1), Content = body, PrimaryButtonText = T("Remove all {0}", set.Count + 1), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Close, XamlRoot = Content.XamlRoot };
+            if (await ShowDialog(d) != ContentDialogResult.Primary) return;
+        }
+        await GameContentAsync(GameContent.Mode.Remove, [r.Item.FullId!], set.Count > 0 ? T("{0} and its set", r.Name) : r.Name);
     }
 
     bool PackInstalled(ModFile m) => _installedIds is { } ids && Sims3Pack.Read(m.Path) is { } p && ids.Contains(GameContent.ShortId(p.PackageId));

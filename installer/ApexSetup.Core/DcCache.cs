@@ -202,16 +202,68 @@ public static class DcCache
         return m.ToArray();
     }
 
+    // ---------- store sets ----------
+
+    // A store set (the items one store Sims3Pack installed together) is kept as set lists, resource 0x66819136: a byte,
+    // a u32 count, then each item's id as the record stores it, its two 64-bit halves little-endian. The game removes a set as one: removing
+    // any item of it takes every item listed with it (checked: removing one store object through the game took exactly
+    // its set's 5 items, in this order: the one asked for, then the rest as listed).
+    public const uint SetListType = 0x66819136;
+
+    public static List<List<string>> SetLists(string docs)
+    {
+        var lists = new List<List<string>>();
+        foreach (var f in InstalledContent.Files(docs))
+            foreach (var e in Dbpf.Index(f).Where(x => x.Type == SetListType))
+            {
+                if (Dbpf.Read(f, e) is not { Length: >= 5 } b) continue;
+                var n = BinaryPrimitives.ReadUInt32LittleEndian(b.AsSpan(1, 4));
+                if (5 + 16L * n != b.Length) continue;
+                var ids = new List<string>((int)n);
+                for (var i = 0; i < n; i++)
+                    // (the two halves read as the record stores them, so the whole id is the second, then the first)
+                    ids.Add("0x" + BinaryPrimitives.ReadUInt64LittleEndian(b.AsSpan(13 + 16 * i, 8)).ToString("x16") + BinaryPrimitives.ReadUInt64LittleEndian(b.AsSpan(5 + 16 * i, 8)).ToString("x16"));
+                lists.Add(ids);
+            }
+        return lists;
+    }
+
+    // every installed record's name by its whole id (the name the game stored when it installed it)
+    public static Dictionary<string, string> Names(string docs)
+    {
+        var names = new Dictionary<string, string>();
+        foreach (var f in InstalledContent.Files(docs))
+            try { foreach (var r in ReadList(f) ?? []) names.TryAdd(r.FullId, r.Name); }
+            catch (Exception e) when (e is IOException or InvalidDataException or UnauthorizedAccessException) { Engine.Log(e); }
+        return names;
+    }
+
+    // what removing these ids takes, in the order the game takes it: each one asked for, then the rest of its sets
+    public static List<string> WithSets(IEnumerable<string> fullIds, IReadOnlyList<List<string>> lists)
+    {
+        var order = new List<string>();
+        foreach (var raw in fullIds)
+        {
+            var id = raw.ToLowerInvariant();
+            if (!order.Contains(id)) order.Add(id);
+            foreach (var l in lists.Where(l => l.Contains(id)))
+                foreach (var m in l) if (!order.Contains(m)) order.Add(m);
+        }
+        return order;
+    }
+
     // ---------- removing ----------
 
     public sealed record RemoveResult(List<string> Removed, List<string> NotFound, string BackupDir);
 
-    // Removes items by their whole id from every cache file that lists them. Every file it changes is copied to
-    // backupDir first (with the Library copies it takes away), so the change can be put back.
-    public static RemoveResult Remove(string docs, IReadOnlyCollection<string> fullIds, string backupDir)
+    // Removes items by their whole id from every cache file that lists them, each with the rest of its store set (as
+    // the game does). Every file it changes is copied to backupDir first (with the Library copies it takes away), so
+    // the change can be put back.
+    public static RemoveResult Remove(string docs, IReadOnlyCollection<string> asked, string backupDir)
     {
         if (Games.IsRunning()) throw new SetupException("Close The Sims 3 first.");
         var dir = Path.Combine(docs, InstalledContent.Folder);
+        var fullIds = WithSets(asked, SetLists(docs));
         var wanted = fullIds.ToDictionary(id => Convert.ToHexString(StoredId(id)), id => id, StringComparer.OrdinalIgnoreCase);
         var removed = new List<Record>();
         var plan = new List<(string File, List<Record> Keep)>();
@@ -224,8 +276,10 @@ public static class DcCache
             removed.AddRange(list.Where(r => wanted.ContainsKey(Convert.ToHexString(r.Id))));
             plan.Add((f, keep));
         }
+        // (in the game's order: each one asked for, then the rest of its set)
+        removed = [.. removed.OrderBy(r => fullIds.IndexOf(r.FullId))];
         var removedIds = removed.Select(r => r.FullId).Distinct().ToList();
-        var notFound = fullIds.Where(id => !removedIds.Contains(id.ToLowerInvariant())).ToList();
+        var notFound = asked.Where(id => !removedIds.Contains(id.ToLowerInvariant())).ToList();
         if (plan.Count == 0) return new([], notFound, backupDir);
 
         var missingPath = Path.Combine(dir, Missing);

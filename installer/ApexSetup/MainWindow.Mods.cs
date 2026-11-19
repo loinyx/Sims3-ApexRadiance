@@ -24,6 +24,8 @@ public sealed partial class MainWindow
     // what the game's own launcher installed into its cache (null: not read yet)
     List<InstalledRow>? _installed;
     HashSet<uint>? _installedIds;
+    List<List<string>> _setLists = [];
+    Dictionary<string, string> _recordNames = [];
     bool _packInstalled; // (Sims3Packs: the Installed tab)
 
     void OnPackTab(SelectorBar sender, SelectorBarSelectionChangedEventArgs e)
@@ -1180,6 +1182,8 @@ public sealed partial class MainWindow
         var docs = Docs;
         var items = await Task.Run(() => InstalledContent.Read(docs));
         _installedIds = await Task.Run(() => InstalledContent.InstalledIds(docs));
+        _setLists = await Task.Run(() => DcCache.SetLists(docs));
+        _recordNames = await Task.Run(() => DcCache.Names(docs));
         _installed = items.OrderBy(i => i.Name, StringComparer.CurrentCultureIgnoreCase).Select(i => new InstalledRow(i, KindLabel(i.Kind), KindIcon(i.Kind))).ToList();
         _folderSig = "";
         if (_step == ModsScreen) FillMods();
@@ -1205,7 +1209,7 @@ public sealed partial class MainWindow
             : ("package", T("The game's launcher installed nothing here."));
         ModsCrumb.Visibility = Visibility.Collapsed;
         ModsTitle.Text = ModsPlacesText.Text = "Sims3Packs";
-        ModsSummary.Text = string.Join(" · ", new[] { T("{0} items", all.Count), ModRow.SizeText(InstalledContent.Bytes(Docs)), T("added and removed in the game's own launcher") });
+        ModsSummary.Text = string.Join(" · ", new[] { T("{0} items", all.Count), ModRow.SizeText(InstalledContent.Bytes(Docs)), T("the game's own content") });
         ModsAdd.IsEnabled = true;
         HuntBanner();
         FillChips();

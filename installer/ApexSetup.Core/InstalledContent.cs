@@ -59,6 +59,8 @@ public static class InstalledContent
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or IndexOutOfRangeException) { Engine.Log(e); }
         }
+        // (an item no record lists is not installed: its resources stay in the file after a removal, as the game leaves them)
+        list.RemoveAll(i => i.Id == 0);
         list.AddRange(LotsAndWorlds(docs, full.Keys.ToHashSet()));
         return list.Select(i => i.FullId is null && full.TryGetValue(i.Id, out var fid) ? i with { FullId = fid } : i).ToList();
     }

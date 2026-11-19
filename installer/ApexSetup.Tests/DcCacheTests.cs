@@ -31,6 +31,13 @@ static class DcCacheTests
             check(DcCache.Build(DcCache.Parse(list)).AsSpan().SequenceEqual(list) && DcCache.Parse(list)[1].FullId == "0xa7e6b0d106f518b841b3aba09cd79153",
                 "content cache: a record list reads and writes back unchanged, ids as the game names them");
 
+            // a store set goes as one: the one asked for first, then the rest as its set list has them
+            string I(int n) => "0x" + n.ToString("x32");
+            check(DcCache.WithSets([I(2)], [[I(1), I(2), I(3)], [I(9)]]).SequenceEqual([I(2), I(1), I(3)])
+                && DcCache.WithSets([I(9), I(3)], [[I(1), I(2), I(3)], [I(9)]]).SequenceEqual([I(9), I(3), I(1), I(2)])
+                && DcCache.WithSets([I(5)], [[I(1), I(2)]]).SequenceEqual([I(5)]),
+                "content cache: removing an item of a store set takes the set, in the game's order");
+
             // a cache file and missingdeps.idx as the game lays them out; then the lot removed
             var dcdb = Path.Combine(docs, "DCCache", "dcdb0.dbc");
             File.WriteAllBytes(dcdb, DcCache.MissingFile(list));
