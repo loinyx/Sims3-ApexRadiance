@@ -110,6 +110,9 @@ static class HealthTests
             "script errors: a removed mod's old logs drop out (a crash in something that is no mod, such as Crashy.asi, stays)");
         check(r.Summary.Args[0] == "5" && r.Summary.Args[2] == "fixturemod" && ScriptErrors.Findings(r).Any(f => f.Finding.Args.Contains("fixturemod") && f.Files.Count > 0) && ScriptErrors.Read(docs, DateTime.Now.AddDays(-60), mods).Total == 6,
             "script errors: summary, findings and the time window");
+        string Crashes(int n) => ScriptErrors.Findings(r with { ByMod = [r.ByMod.First(m => m.Mod == "Crashy.asi") with { Count = n, Crashes = n }] }).Single().Finding.Severity.ToString();
+        check(Crashes(1) == "Info" && Crashes(2) == "Info" && Crashes(ScriptErrors.CrashPattern) == "Warning",
+            $"script errors: one or two crashes in a place are a note, {ScriptErrors.CrashPattern} a warning ({Crashes(1)}, {Crashes(2)}, {Crashes(3)})");
     }
 
     static void SavesCheck(Action<bool, string> check, string docs)

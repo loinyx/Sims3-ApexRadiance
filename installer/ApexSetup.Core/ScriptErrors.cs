@@ -198,17 +198,22 @@ public static partial class ScriptErrors
     }
 
     // each with the files of the mod it names (to show it in Mods)
+    public const int CrashPattern = 3;
     public static List<ModFinding> Findings(Report r)
     {
         var f = new List<ModFinding>();
         foreach (var m in r.ByMod.Take(8))
         {
-            var sev = m.Crashes > 0 || m.Count >= 5 ? Severity.Warning : Severity.Info; // (unverified cut: one stray error is common with ErrorTrap)
+            var sev = m.Count - m.Crashes >= 5 ? Severity.Warning : Severity.Info; // (unverified cut: one stray error is common with ErrorTrap)
+            // the game crashes now and then without any mod: one or two in a place is a note, three a pattern worth a look
             if (m.Crashes > 0)
-                f.Add(new(new(sev, m.Crashes == 1
-                        ? m.Mod is null ? "The game crashed once in its own code since {1}." : "The game crashed once in {1} since {2}."
-                        : m.Mod is null ? "The game crashed {0} times in its own code since {1}." : "The game crashed {0} times in {1} since {2}.",
-                    m.Mod is null ? [m.Crashes.ToString(), r.Since.ToString("g")] : [m.Crashes.ToString(), m.Mod, r.Since.ToString("g")]), m.Files));
+            {
+                var last = r.Errors.Where(e => e.Crash && e.Mod == m.Mod).Max(e => e.When).ToString("g");
+                f.Add(new(new(m.Crashes >= CrashPattern ? Severity.Warning : Severity.Info, m.Crashes == 1
+                        ? m.Mod is null ? "The game crashed once in its own code, on {1}." : "The game crashed once in {1}, on {2}."
+                        : m.Mod is null ? "The game crashed {0} times in its own code this past week, last on {1}." : "The game crashed {0} times in {1} this past week, last on {2}.",
+                    m.Mod is null ? [m.Crashes.ToString(), last] : [m.Crashes.ToString(), m.Mod, last]), m.Files));
+            }
             if (m.Count - m.Crashes is var n and > 0)
                 f.Add(new(new(sev, r.Unread > 0
                         ? m.Mod is null ? "At least {0} script errors in the game's own code since {1} ({2})." : "At least {0} script errors went through {1} since {2} ({3}). If it misbehaves, update or remove it."

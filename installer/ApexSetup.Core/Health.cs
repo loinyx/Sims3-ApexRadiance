@@ -27,8 +27,10 @@ public static class Health
         Add("places", () => PlaceChecks.Check(g, docs).Select(f => new Item(f, HealthArea.Disk, [])));
         Add("caches", () => CacheFindings(docs).Select(f => new Item(f, HealthArea.Disk, [])));
         Add("sessions", () => SessionHistory.Check().Select(f => new Item(f, HealthArea.Stability, [])));
-        // the errors since the last game start (a week when no session is recorded)
-        Add("script errors", () => ScriptErrors.Findings(ScriptErrors.Read(docs, SessionHistory.List().FirstOrDefault()?.Started, mods))
+        // the errors since the last game start, at most a week back (a game started without the launcher records no start,
+        // so the last recorded one can be long ago)
+        var week = DateTime.Now.AddDays(-7);
+        Add("script errors", () => ScriptErrors.Findings(ScriptErrors.Read(docs, SessionHistory.List().FirstOrDefault()?.Started is { } s && s > week ? s : week, mods))
             .Select(m => new Item(m.Finding, HealthArea.Stability, m.Files)));
         return items;
     }
