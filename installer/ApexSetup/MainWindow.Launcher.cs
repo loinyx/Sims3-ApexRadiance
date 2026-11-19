@@ -87,16 +87,16 @@ public sealed partial class MainWindow
         host.Children.Add(Hero(g));
         host.Children.Add(HealthWidget());
 
-        var cards = new Grid { ColumnSpacing = 14 };
+        var cards = new Grid { ColumnSpacing = 16 };
         for (int i = 0; i < 3; i++) cards.ColumnDefinitions.Add(new ColumnDefinition());
         var newest = Saves.Newest(Docs);
         var cont = Card(Col(Eyebrow(T("CONTINUE")), Strong(newest?.Name ?? T("No save yet")),
             Muted(newest is null ? T("Start a new game from the game's menu.") : T("Starts the game straight into your last save.")),
             newest is null ? new Border() : Link(T("Pick another save"), () => Show(SavesScreen))));
         var apex = _latest.GetValueOrDefault(Releases.Apex);
-        var news = Card(Col(Eyebrow(T("WHAT'S NEW IN APEX RADIANCE")), Strong(apex is null ? T("Release notes") : "Apex Radiance " + apex.Version),
+        var news = Card(Col(Eyebrow(T("WHAT'S NEW")), Strong(apex is null ? T("Release notes") : "Apex Radiance " + apex.Version),
             Muted(FirstLine(apex?.Body) ?? T("The notes of each release, read from GitHub.")), Link(T("All release notes"), () => Show(NewsScreen))));
-        var pics = Card(Col(Eyebrow(T("YOUR PICTURES")), Pictures(), Link(T("Open the screenshots folder"), () => OpenFolder(Path.Combine(Docs, "Screenshots")))));
+        var pics = Card(Col(Eyebrow(T("YOUR PICTURES")), Pictures(), Link(T("Screenshots folder"), () => OpenFolder(Path.Combine(Docs, "Screenshots")))));
         Grid.SetColumn(news, 1); Grid.SetColumn(pics, 2);
         cards.Children.Add(cont); cards.Children.Add(news); cards.Children.Add(pics);
         host.Children.Add(cards);
@@ -127,14 +127,7 @@ public sealed partial class MainWindow
             + (Known(Components.Modernization) is { Length: > 0 } mv ? "  ·  Sims 3 Modernization " + mv : "")));
         ((StackPanel)left).Children.Add(versions);
         var badges = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
-        foreach (var (p, _) in Expansions.Installed(g).Where(x => x.Pack.Expansion))
-        {
-            var b = new Border { Width = 28, Height = 28, CornerRadius = new CornerRadius(7), Background = new SolidColorBrush(PackColor(p.Code)) };
-            b.Child = new TextBlock { Text = p.Short, FontSize = 10, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-            ToolTipService.SetToolTip(b, p.Name);
-            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, p.Name);
-            badges.Children.Add(b);
-        }
+        foreach (var (p, dir) in Expansions.Installed(g).Where(x => x.Pack.Expansion)) badges.Children.Add(PackBadge(p, dir, 30));
         ((StackPanel)left).Children.Add(badges);
         row.Children.Add(left);
         UIElement action;
@@ -161,6 +154,12 @@ public sealed partial class MainWindow
     UIElement HealthWidget()
     {
         var b = new Border { Style = (Style)Application.Current.Resources["ApexCard"], Padding = new Thickness(14, 10, 22, 10), CornerRadius = new CornerRadius(14) };
+        // the state's colour coming in from the crystal's side, as in the design
+        b.Background = new LinearGradientBrush
+        {
+            StartPoint = new Windows.Foundation.Point(0, 0.5), EndPoint = new Windows.Foundation.Point(1, 0.5),
+            GradientStops = { new GradientStop { Color = CardTint(0.07), Offset = 0 }, new GradientStop { Color = CardTint(0), Offset = 0.6 } },
+        };
         var g = new Grid { ColumnSpacing = 20 };
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         g.ColumnDefinitions.Add(new ColumnDefinition());
@@ -185,6 +184,23 @@ public sealed partial class MainWindow
         g.Children.Add(open);
         b.Child = g;
         return b;
+    }
+
+    // the crystal's colour for the state, at an alpha (0 to 255)
+    Windows.UI.Color StateTint(byte alpha) => _healthState switch
+    {
+        HealthState.Blocked => Windows.UI.Color.FromArgb(alpha, 233, 68, 54),
+        HealthState.NeedsYou => Windows.UI.Color.FromArgb(alpha, 245, 166, 40),
+        _ => Windows.UI.Color.FromArgb(alpha, 67, 215, 62),
+    };
+
+    // the card's own grey with a little of the state's colour, opaque: a fade from a transparent colour turns into a band of
+    // the pure colour (the brush blends the colour before its transparency)
+    Windows.UI.Color CardTint(double amount)
+    {
+        var t = StateTint(255);
+        byte Mix(byte card, byte c) => (byte)Math.Round(card + (c - card) * amount);
+        return Windows.UI.Color.FromArgb(255, Mix(0x13, t.R), Mix(0x14, t.G), Mix(0x17, t.B));
     }
 
     string HealthTitle() => _healthState switch
@@ -218,6 +234,21 @@ public sealed partial class MainWindow
                 .OrderByDescending(f => f.LastWriteTime).Take(n).Select(f => f.FullName).ToList();
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return []; }
+    }
+
+    // a pack's own icon from the player's install (its game definition file), else its short code on its colour
+    static FrameworkElement PackBadge(Pack p, string? dir, double size)
+    {
+        var b = new Border { Width = size, Height = size, CornerRadius = new CornerRadius(size * 0.22), Background = new SolidColorBrush(PackColor(p.Code)) };
+        b.Child = new TextBlock { Text = p.Short, FontSize = size * 0.34, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        ToolTipService.SetToolTip(b, p.Name);
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, p.Name);
+        if (dir is not null)
+            _ = Task.Run(() => Expansions.Icon(dir)).ContinueWith(async t =>
+            {
+                if (await SaveCard.ImageOf(t.Result) is { } img) { b.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent); b.Child = new Image { Source = img, Width = size, Height = size }; }
+            }, TaskScheduler.FromCurrentSynchronizationContext());
+        return b;
     }
 
     static Windows.UI.Color PackColor(string code) => code switch
@@ -370,42 +401,105 @@ public sealed partial class MainWindow
         FillMods();
     }
 
+    // the filters: the file type (tabs), what the files hold (chips, the ones of the chosen type), then search, folder, state
+    string _modType = "";
+    static string TypeOf(ModFile m) => m.FileType;
+    bool _fillingMods;
+
     void FillMods()
     {
         if (_game is null) { ModsSummary.Text = T("Choose the game first."); return; }
         if (!_modsLoaded) { _ = LoadModsAsync(); return; }
-        var size = _mods.Sum(m => m.Size);
-        ModsSummary.Text = T("{0} mods · {1} MB · in {2}", _mods.Count, size >> 20, Path.Combine(Docs, "Mods"));
-        ModRow.Toggle = ToggleMod;
-        // the kind chips
-        ModKinds.Children.Clear();
-        var kinds = new List<(string Key, string Label, int Count)> { ("", T("All"), _mods.Count) };
-        foreach (var k in Enum.GetValues<ModKind>())
-            if (_mods.Count(m => m.Kind == k) is > 0 and var n) kinds.Add((k.ToString(), ModRow.KindName(k), n));
-        if (_modLooks.Count > 0) kinds.Add(("look", T("Needs a look"), _modLooks.Count));
-        foreach (var (key, label, count) in kinds)
+        _fillingMods = true;
+        try
         {
-            var b = new ToggleButton { Content = $"{label}  {count}", IsChecked = _modKind == key, Padding = new Thickness(12, 4, 12, 4), CornerRadius = new CornerRadius(14) };
-            b.Click += (_, _) => { _modKind = key; FillMods(); };
-            ModKinds.Children.Add(b);
+            var size = _mods.Sum(m => m.Size);
+            ModsSummary.Text = T("{0} files \u00b7 {1} MB", _mods.Count, size >> 20);
+            ModRow.Toggle = ToggleMod;
+            // file types, each with its count
+            (string Key, string Label)[] types = [("", T("All")), ("package", T("Packages")), ("asi", T("ASI plugins")), ("sims3pack", "Sims3Packs"), ("library", T("Library"))];
+            ModTypes.Items.Clear();
+            foreach (var (key, label) in types)
+            {
+                var n = key == "" ? _mods.Count : _mods.Count(m => TypeOf(m) == key);
+                if (n == 0 && key != "") continue;
+                var tab = Tab($"{label}  {n}", ModTypes.Items.Count == 0);
+                tab.Tag = key;
+                ModTypes.Items.Add(tab);
+            }
+            ModTypes.SelectedItem = ModTypes.Items.FirstOrDefault(i => (string)i.Tag == _modType) ?? ModTypes.Items.FirstOrDefault();
+            // what the chosen type's files hold
+            var inType = _mods.Where(m => _modType == "" || TypeOf(m) == _modType).ToList();
+            ModKinds.Children.Clear();
+            // (the file types have their tabs: the chips are what the packages, or the Library, hold)
+            var kinds = Enum.GetValues<ModKind>().Where(k => k is not (ModKind.Asi or ModKind.Sims3Pack) && (_modType is "library" or "sims3pack" || k is not (ModKind.World or ModKind.Lot or ModKind.Household))).OrderBy(k => k == ModKind.Package ? 1 : 0).Select(k => (k, n: inType.Count(m => m.Kind == k))).Where(x => x.n > 0).ToList(); // ("Other" last)
+            ModKinds.Visibility = kinds.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+            if (kinds.Count > 1)
+            {
+                ModKinds.Children.Add(KindChip("", T("Everything"), kinds.Sum(x => x.n)));
+                foreach (var (k, n) in kinds) ModKinds.Children.Add(KindChip(k.ToString(), ModRow.KindName(k), n));
+            }
+            if (ModState.Items.Count == 0)
+            {
+                foreach (var t in new[] { T("Any state"), T("On"), T("Off"), T("Needs a look") }) ModState.Items.Add(t);
+                ModState.SelectedIndex = 0;
+            }
+            var shown = Filtered().ToList();
+            var filtered = _modType != "" || _modKind != "" || ModState.SelectedIndex > 0 || ModFolder.SelectedIndex > 0 || (ModSearch.Text ?? "").Length > 0;
+            ModClear.Visibility = filtered ? Visibility.Visible : Visibility.Collapsed;
+            var gallery = ModsViewGallery.IsSelected;
+            ModListCard.Visibility = gallery ? Visibility.Collapsed : Visibility.Visible;
+            ModGallery.Visibility = gallery ? Visibility.Visible : Visibility.Collapsed;
+            if (gallery) FillGallery(shown);
+            else ModList.ItemsSource = shown.Select(m => new ModRow(m, _modLooks.Contains(m.Path))).ToList();
+            ModsNote.Text = (shown.Count == 0 ? T("No file matches these filters.") + " " : "")
+                + T("Switching a mod off moves it to Mods\\{0}, out of the game's reach; switching it on puts it back. Components the launcher installs are changed in Components.", Mods.DisabledName);
         }
-        var shown = Filtered().ToList();
-        var gallery = ModsViewGallery.IsSelected;
-        ModListCard.Visibility = gallery ? Visibility.Collapsed : Visibility.Visible;
-        ModGallery.Visibility = gallery ? Visibility.Visible : Visibility.Collapsed;
-        if (gallery) FillGallery(shown);
-        else ModList.ItemsSource = shown.Select(m => new ModRow(m, _modLooks.Contains(m.Path))).ToList();
-        ModsNote.Text = T("Switching a mod off moves it to Mods\\{0}, out of the game's reach; switching it on puts it back. Components the launcher installs are changed in Components.", Mods.DisabledName);
+        finally { _fillingMods = false; }
+    }
+
+    ToggleButton KindChip(string key, string label, int count)
+    {
+        var b = new ToggleButton { IsChecked = _modKind == key, Padding = new Thickness(12, 4, 12, 5), CornerRadius = new CornerRadius(14) };
+        var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
+        s.Children.Add(new TextBlock { Text = label, FontSize = 13 });
+        s.Children.Add(new TextBlock { Text = count.ToString(), FontSize = 12, Opacity = 0.7, VerticalAlignment = VerticalAlignment.Center });
+        b.Content = s;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, label);
+        b.Click += (_, _) => { _modKind = key; FillMods(); };
+        return b;
     }
 
     IEnumerable<ModFile> Filtered()
     {
         var q = ModSearch.Text?.Trim() ?? "";
         var folder = ModFolder.SelectedIndex > 0 ? ModFolder.SelectedItem as string : null;
+        var state = ModState.SelectedIndex;
         return _mods.Where(m =>
-            (q.Length == 0 || m.Rel.Contains(q, StringComparison.OrdinalIgnoreCase))
+            (_modType == "" || TypeOf(m) == _modType)
+            && (_modKind == "" || m.Kind.ToString() == _modKind)
+            && (q.Length == 0 || m.Rel.Contains(q, StringComparison.OrdinalIgnoreCase))
             && (folder is null || m.Folder.Equals(folder, StringComparison.OrdinalIgnoreCase) || m.Folder.StartsWith(folder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-            && (_modKind == "" || (_modKind == "look" ? _modLooks.Contains(m.Path) : m.Kind.ToString() == _modKind)));
+            && state switch { 1 => m.Enabled, 2 => !m.Enabled, 3 => _modLooks.Contains(m.Path), _ => true });
+    }
+
+    void OnModType(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
+    {
+        if (_fillingMods || sender.SelectedItem?.Tag is not string key || key == _modType) return;
+        _modType = key;
+        _modKind = ""; // (the content chips are the new type's)
+        DispatcherQueue.TryEnqueue(FillMods);
+    }
+
+    void OnModClear(object sender, RoutedEventArgs e)
+    {
+        _modType = _modKind = "";
+        _fillingMods = true;
+        ModSearch.Text = "";
+        ModFolder.SelectedIndex = 0;
+        ModState.SelectedIndex = 0;
+        _fillingMods = false;
+        FillMods();
     }
 
     ModFile? ToggleMod(ModRow row, bool on)
@@ -454,8 +548,15 @@ public sealed partial class MainWindow
         }
     }
 
-    void OnModSearch(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args) { if (_modsLoaded) FillMods(); }
-    void OnModFilter(object sender, SelectionChangedEventArgs e) { if (_modsLoaded) FillMods(); }
+    void OnModSearch(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args) { if (_modsLoaded && !_fillingMods) FillMods(); }
+    void OnModFilter(object sender, SelectionChangedEventArgs e) { if (_modsLoaded && !_fillingMods) FillMods(); }
+
+    // a click on the sidebar item already highlighted (Settings while Repair or remove is open): back to that screen
+    void OnNavInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
+    {
+        if (args.InvokedItemContainer?.Tag is not string tag || !int.TryParse(tag, out var to)) return;
+        DispatcherQueue.TryEnqueue(() => { if (_step != to && !_busy && to >= Home) Show(to); });
+    }
     void OnModsView(SelectorBar sender, SelectorBarSelectionChangedEventArgs args) { if (_modsLoaded) FillMods(); }
     void OnModsOpenFolder(object sender, RoutedEventArgs e) => OpenFolder(Path.Combine(Docs, "Mods"));
 
@@ -465,25 +566,39 @@ public sealed partial class MainWindow
     {
         var host = ScreenWorlds;
         host.Children.Clear();
-        host.Children.Add(Heading(T("Worlds")));
+        var head = (StackPanel)Col(Heading(T("Worlds")));
         if (_game is not { } g) { host.Children.Add(Muted(T("Choose the game first."))); return; }
         var worlds = Worlds.List(g, Docs);
-        host.Children.Add(Muted(T("{0} worlds you can start a new game in", worlds.Count)));
+        head.Children.Add(Muted(T("{0} worlds you can start a new game in", worlds.Count)));
+        host.Children.Add(head);
         foreach (var (kind, label) in new[] { (WorldKind.BaseGame, T("The Sims 3")), (WorldKind.Expansion, T("From your expansions")), (WorldKind.Store, T("From the store")), (WorldKind.Custom, T("Custom worlds")) })
         {
             var list = worlds.Where(w => w.Kind == kind).ToList();
             if (list.Count == 0) continue;
-            host.Children.Add(new TextBlock { Text = label, FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 10, 0, 0) });
-            var wrap = new VariableSizedWrapGrid { Orientation = Orientation.Horizontal, ItemWidth = 232, ItemHeight = 92 };
+            host.Children.Add(new TextBlock { Text = label, FontSize = 15, FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 8, 0, 0) });
+            var wrap = new VariableSizedWrapGrid { Orientation = Orientation.Horizontal, ItemWidth = 248, ItemHeight = 236 };
+            var installed = Expansions.Installed(g);
             foreach (var w in list)
             {
-                var card = new Border { Style = (Style)Application.Current.Resources["ApexCard"], Margin = new Thickness(0, 0, 12, 12) };
-                var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
-                var tag = new Border { Width = 34, Height = 34, CornerRadius = new CornerRadius(8), Background = new SolidColorBrush(w.Pack is null ? Rgb(0x3A, 0x35, 0x70) : PackColor(Expansions.All.First(p => p.Short == w.Pack).Code)) };
-                tag.Child = new TextBlock { Text = w.Pack ?? (kind == WorldKind.Custom ? "CW" : kind == WorldKind.Store ? "ST" : "TS3"), FontSize = 10, FontWeight = FontWeights.Bold, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
-                row.Children.Add(tag);
-                row.Children.Add(Col(Strong(w.Name), Muted(w.Pack is { } pk ? Expansions.All.First(p => p.Short == pk).Name : label)));
-                card.Child = row;
+                var card = new Border { Style = (Style)Application.Current.Resources["ApexCard"], Padding = new Thickness(0), Margin = new Thickness(0, 0, 16, 16), CornerRadius = new CornerRadius(10) };
+                var col = new StackPanel();
+                var pic = new Grid { Height = 150, Background = Res("ApexPillBrush"), CornerRadius = new CornerRadius(10, 10, 0, 0) };
+                var world = w;
+                var packOf = w.Pack is { } wp ? Expansions.All.First(p => p.Short == wp) : null;
+                _ = Task.Run(() => Worlds.Picture(world)).ContinueWith(async t =>
+                {
+                    if (await SaveCard.ImageOf(t.Result) is { } img) pic.Children.Add(new Image { Source = img, Stretch = Stretch.UniformToFill });
+                    // a world without its own picture: its pack's icon, large, never a lot's picture
+                    else if (packOf is not null) { var big = PackBadge(packOf, installed.FirstOrDefault(x => x.Pack == packOf).Dir, 72); big.HorizontalAlignment = HorizontalAlignment.Center; big.VerticalAlignment = VerticalAlignment.Center; pic.Children.Add(big); }
+                    else pic.Children.Add(new FontIcon { Glyph = "\uE909", FontSize = 30, Foreground = new SolidColorBrush(Rgb(0x4A, 0x4B, 0x55)) });
+                }, TaskScheduler.FromCurrentSynchronizationContext());
+                col.Children.Add(pic);
+                var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10, Padding = new Thickness(14, 10, 14, 12) };
+                var pack = w.Pack is { } sh ? Expansions.All.First(p => p.Short == sh) : null;
+                if (pack is not null) row.Children.Add(PackBadge(pack, installed.FirstOrDefault(x => x.Pack == pack).Dir, 28));
+                row.Children.Add(Col(Strong(w.Name), Muted(pack?.Name ?? label)));
+                col.Children.Add(row);
+                card.Child = col;
                 wrap.Children.Add(card);
             }
             host.Children.Add(wrap);
@@ -563,26 +678,33 @@ public sealed partial class MainWindow
         actions.Children.Add(check); actions.Children.Add(copy);
         top.Children.Add(actions);
         top.Children.Add(new TextBlock { Text = T("Last checked {0}", _checked.ToString("t")), Style = (Style)Application.Current.Resources["ApexMuted"], HorizontalAlignment = HorizontalAlignment.Center });
-        host.Children.Add(top);
+        // a soft glow of the state's colour behind the crystal, fading down the page
+        host.Children.Add(new Border
+        {
+            Child = top, CornerRadius = new CornerRadius(18), Padding = new Thickness(0, 18, 0, 18),
+            Background = new LinearGradientBrush
+            {
+                StartPoint = new Windows.Foundation.Point(0.5, 0), EndPoint = new Windows.Foundation.Point(0.5, 1),
+                GradientStops = { new GradientStop { Color = StateTint(12), Offset = 0 }, new GradientStop { Color = StateTint(0), Offset = 0.85 } },
+            },
+        });
 
         var tabs = new SelectorBar { HorizontalAlignment = HorizontalAlignment.Center };
         string[] names = [T("Overview"), T("Automatic fixes"), T("Restore points"), T("Last session")];
-        for (int i = 0; i < names.Length; i++) tabs.Items.Add(new SelectorBarItem { Text = names[i], IsSelected = i == _healthTab });
+        foreach (var n in names) tabs.Items.Add(new SelectorBarItem { Text = n });
+        tabs.SelectedItem = tabs.Items[_healthTab];
         tabs.SelectionChanged += (s, _) => { var i = s.Items.IndexOf(s.SelectedItem); if (i < 0 || i == _healthTab) return; _healthTab = i; DispatcherQueue.TryEnqueue(BuildHealth); };
         host.Children.Add(tabs);
         var body = new StackPanel { Spacing = 14, MaxWidth = 760, HorizontalAlignment = HorizontalAlignment.Stretch };
         host.Children.Add(body);
         switch (_healthTab)
         {
-            case 0: HealthOverview(body); break;
+            case 0: HealthOverview(body); HealthRepair(body); break;
             case 1: HealthFixes(body); break;
             case 2: HealthRestore(body); break;
             default: HealthSession(body); break;
         }
-        var footer = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 16, HorizontalAlignment = HorizontalAlignment.Center };
-        footer.Children.Add(Link(T("Repair or remove"), () => Show(Manage)));
-        footer.Children.Add(Link(T("Components"), () => Show(ComponentsStep)));
-        host.Children.Add(footer);
+
     }
 
     void HealthOverview(StackPanel body)
@@ -634,6 +756,31 @@ public sealed partial class MainWindow
         body.Children.Add(areas);
     }
 
+    // Repair: every file the launcher installed copied again, the settings fixed; the other choices in Repair or remove
+    void HealthRepair(StackPanel body)
+    {
+        body.Children.Add(Eyebrow(T("REPAIR THE GAME")));
+        var g = new Grid { ColumnSpacing = 16 };
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.Children.Add(new Border { Width = 40, Height = 40, CornerRadius = new CornerRadius(10), Background = Res("ApexPillBrush"), VerticalAlignment = VerticalAlignment.Center,
+            Child = new FontIcon { Glyph = "\uE90F", FontSize = 18, Foreground = Res("ApexAccentBrush") } });
+        var text = Col(new TextBlock { Text = T("Something not right in the game?"), FontSize = 14, FontWeight = FontWeights.SemiBold },
+            Muted(T("Repair copies every file the launcher installed again and fixes the game's settings. Your saves, mods and Apex Radiance settings stay.")));
+        Grid.SetColumn((FrameworkElement)text, 1);
+        g.Children.Add(text);
+        var buttons = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, VerticalAlignment = VerticalAlignment.Center };
+        var repair = Button(T("Repair"), async () => await Repair(), accent: true);
+        repair.IsEnabled = !_running && !_busy && _state?.ApexVersion is not null;
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetAutomationId(repair, "HealthRepair");
+        buttons.Children.Add(repair);
+        buttons.Children.Add(Button(T("More options"), () => Show(Manage)));
+        Grid.SetColumn(buttons, 2);
+        g.Children.Add(buttons);
+        body.Children.Add(Card(g));
+    }
+
     UIElement FindingRow(Health.Item it, bool line)
     {
         var f = it.Finding;
@@ -648,7 +795,7 @@ public sealed partial class MainWindow
         g.Children.Add(text);
         Button? act = null;
         if (f.CanFix) act = Button(T("Fix"), async () => { if (await Guarded(() => { Engine.CheckWritable(); f.Fix!(); }, T("Fixed."), null, "Fix incompatible settings")) { RefreshGame(); CheckHealth(); BuildHealth(); } }, accent: true);
-        else if (it.Files.Count > 0) act = Button(T("Show in Mods"), () => { _modKind = "look"; Show(ModsScreen); });
+        else if (it.Files.Count > 0) act = Button(T("Show in Mods"), () => { _modKind = ""; _modType = ""; Show(ModsScreen); ModState.SelectedIndex = 3; });
         else if (f.Link is { } link) act = Button(T("Read more"), () => Process.Start(new ProcessStartInfo(link) { UseShellExecute = true }));
         if (act is not null) { Grid.SetColumn(act, 2); act.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(act); }
         return g;
@@ -725,11 +872,10 @@ public sealed partial class MainWindow
     {
         var host = ScreenNews;
         host.Children.Clear();
-        host.Children.Add(Heading(T("What's new")));
-        host.Children.Add(Muted(T("Release notes, read from each project's GitHub releases.")));
+        host.Children.Add(Col(Heading(T("What's new")), Muted(T("Release notes, read from each project's GitHub releases."))));
         var tabs = new SelectorBar();
-        string[] names = ["Apex Radiance", "Sims 3 Modernization"];
-        for (int i = 0; i < names.Length; i++) tabs.Items.Add(new SelectorBarItem { Text = names[i], IsSelected = i == _newsTab });
+        foreach (var n in new[] { "Apex Radiance", "Sims 3 Modernization" }) tabs.Items.Add(Tab(n, tabs.Items.Count == 0));
+        tabs.SelectedItem = tabs.Items[_newsTab];
         tabs.SelectionChanged += (s, _) => { var i = s.Items.IndexOf(s.SelectedItem); if (i < 0 || i == _newsTab) return; _newsTab = i; DispatcherQueue.TryEnqueue(BuildNews); };
         host.Children.Add(tabs);
         var r = _newsTab == 0 ? _latest.GetValueOrDefault(Releases.Apex) : ModRelease() ?? _latest.GetValueOrDefault(Releases.Modernization);
@@ -842,6 +988,14 @@ public sealed partial class MainWindow
     }
 
     // ---------- small builders ----------
+
+    // a tab of a bar under a title: the first one without the bar's inner left space, so its text starts on the title's edge
+    static SelectorBarItem Tab(string text, bool first)
+    {
+        var t = new SelectorBarItem { Text = text };
+        if (first) t.Margin = new Thickness(-12, 0, 0, 0);
+        return t;
+    }
 
     static TextBlock Heading(string t) => new() { Text = t, Style = (Style)Application.Current.Resources["ApexTitle"] };
     static TextBlock Strong(string t) => new() { Text = t, FontSize = 16, FontWeight = FontWeights.SemiBold, TextTrimming = TextTrimming.CharacterEllipsis };

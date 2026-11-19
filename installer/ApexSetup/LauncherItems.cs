@@ -19,7 +19,13 @@ public sealed class ModRow : INotifyPropertyChanged
     public double TextOpacity => File.Enabled ? 1 : 0.55;
     public Visibility ToggleVisible => File.Locked ? Visibility.Collapsed : Visibility.Visible;
     public Visibility LockVisible => File.Locked ? Visibility.Visible : Visibility.Collapsed;
-    public string LockTip => File.Kind == ModKind.Asi ? T("In the game folder: installed and removed in Components or by hand.") : T("Installed by the launcher: switch it in Components.");
+    public string LockTip => File.FileType switch
+    {
+        "asi" => T("In the game folder: installed and removed in Components or by hand."),
+        "sims3pack" => T("Installed and removed with the game's own launcher."),
+        "library" => T("A household or lot saved to the Library: managed in the game."),
+        _ => T("Installed by the launcher: switch it in Components."),
+    };
     public string Status { get; private set; } = "";
     public Brush StatusBrush { get; private set; } = Muted;
     public bool NeedsLook { get; }
@@ -38,14 +44,16 @@ public sealed class ModRow : INotifyPropertyChanged
 
     public static string KindName(ModKind k) => k switch
     {
-        ModKind.Script => T("Script mod"), ModKind.Cas => T("Create a Sim"), ModKind.Objects => T("Buy and Build"), ModKind.Asi => T("ASI plugin"), _ => T("Package"),
+        ModKind.Script => T("Script mod"), ModKind.Cas => T("Create a Sim"), ModKind.Objects => T("Objects"), ModKind.Lighting => T("Lighting"),
+        ModKind.Sound => T("Music and sound"), ModKind.Textures => T("Textures"), ModKind.Tuning => T("Tuning"), ModKind.Interface => T("Interface"),
+        ModKind.Asi => T("ASI plugin"), ModKind.Sims3Pack => "Sims3Pack", ModKind.World => T("World"), ModKind.Lot => T("Lot"), ModKind.Household => T("Household"), _ => T("Other"),
     };
 
     void SetStatus()
     {
         (Status, StatusBrush) = !File.Enabled ? (T("Off"), Muted)
             : NeedsLook ? (T("Needs a look"), (Brush)Application.Current.Resources["ApexWarningBrush"])
-            : File.Locked ? (File.Kind == ModKind.Asi ? T("Game folder") : T("Installed by the launcher"), Muted)
+            : File.Locked ? (File.FileType switch { "asi" => T("Game folder"), "sims3pack" => T("Downloads"), "library" => T("Library"), _ => T("Installed by the launcher") }, Muted)
             : (T("On"), (Brush)Application.Current.Resources["ApexSuccessBrush"]);
     }
 
@@ -67,7 +75,11 @@ public sealed class ThumbItem(ModFile file) : INotifyPropertyChanged
 {
     public ModFile File { get; } = file;
     public string Name => File.Name;
-    public string Glyph => File.Kind == ModKind.Script ? "" : "";
+    public string Glyph => File.Kind switch
+    {
+        ModKind.Script => "\uE943", ModKind.Cas => "\uE77B", ModKind.Lighting => "\uE793", ModKind.Sound => "\uE8D6", ModKind.Textures => "\uE7B8",
+        ModKind.Tuning => "\uE9E9", ModKind.Interface => "\uE737", ModKind.World => "\uE909", ModKind.Lot => "\uE80F", ModKind.Household => "\uE716", _ => "\uE7B8",
+    };
     public double TextOpacity => File.Enabled ? 1 : 0.55;
     ImageSource? _image;
     public ImageSource? Image { get => _image; set { _image = value; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Image))); PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Placeholder))); } }

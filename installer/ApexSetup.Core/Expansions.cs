@@ -35,6 +35,30 @@ public static class Expansions
         return null;
     };
 
+    // A pack's own icon, as Windows' game list shows it: the first PNG in its game definition file
+    // (Game\Bin\Sims3EP01GDF.dll; the base game's is Sims3GDF.dll). Read from the player's install, never shipped.
+    static readonly Dictionary<string, byte[]?> Icons = new(StringComparer.OrdinalIgnoreCase);
+    public static byte[]? Icon(string packDir)
+    {
+        lock (Icons)
+            if (Icons.TryGetValue(packDir, out var known)) return known;
+        byte[]? png = null;
+        try
+        {
+            var bin = Path.Combine(packDir, "Game", "Bin");
+            if (Directory.Exists(bin) && Directory.EnumerateFiles(bin, "Sims3*GDF.dll").FirstOrDefault() is { } gdf && new FileInfo(gdf).Length < 16 << 20)
+            {
+                var d = File.ReadAllBytes(gdf);
+                var at = d.AsSpan().IndexOf(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
+                var end = at < 0 ? -1 : d.AsSpan(at).IndexOf("IEND"u8);
+                if (end > 0) png = d[at..(at + end + 8)];
+            }
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        lock (Icons) Icons[packDir] = png;
+        return png;
+    }
+
     // each pack found with its folder
     public static List<(Pack Pack, string Dir)> Installed(Game g)
     {
@@ -59,6 +83,11 @@ public static class Worlds
     // EA's store worlds, as their .world files are named (others in InstalledWorlds count as custom)
     static readonly string[] Store = ["Riverview", "Barnacle Bay", "Hidden Springs", "Lunar Lakes", "Lucky Palms", "Sunlit Tides",
         "Monte Vista", "Aurora Skies", "Dragon Valley", "Midnight Hollow", "Roaring Heights"];
+
+    // A world's own picture, as the game's world chooser shows it (0x0668F635, else 0x8F78F74B in store worlds). World
+    // Adventures' destinations have none: no lot's picture stands in for a world, the pack's icon shows instead.
+    public static readonly uint[] PictureTypes = [0x0668F635, 0x8F78F74B];
+    public static byte[]? Picture(World w) => Dbpf.First(w.Path, PictureTypes);
 
     // a pack's own test or helper worlds shipped beside the playable ones
     static bool Hidden(string name) => name.Contains('_') || name.EndsWith("Test", StringComparison.OrdinalIgnoreCase);

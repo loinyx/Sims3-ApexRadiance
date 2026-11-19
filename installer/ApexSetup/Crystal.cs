@@ -132,7 +132,7 @@ public sealed class Crystal : Grid
             poly.Fill = new LinearGradientBrush
             {
                 StartPoint = new Windows.Foundation.Point(0, 0), EndPoint = new Windows.Foundation.Point(0, 1),
-                GradientStops = { new GradientStop { Color = Scale(c, 1.18f), Offset = 0 }, new GradientStop { Color = Scale(c, 0.82f), Offset = 1 } },
+                GradientStops = { new GradientStop { Color = Tint(c, 1.18f), Offset = 0 }, new GradientStop { Color = Tint(c, 0.82f), Offset = 1 } },
             };
         }
     }
@@ -156,7 +156,7 @@ public sealed class Crystal : Grid
         return ToColor(c, 0.84f);
     }
 
-    static Color Scale(Color c, float k) => Color.FromArgb(c.A, (byte)Math.Clamp(c.R * k, 0, 255), (byte)Math.Clamp(c.G * k, 0, 255), (byte)Math.Clamp(c.B * k, 0, 255));
+    static Color Tint(Color c, float k) => Color.FromArgb(c.A, (byte)Math.Clamp(c.R * k, 0, 255), (byte)Math.Clamp(c.G * k, 0, 255), (byte)Math.Clamp(c.B * k, 0, 255));
 
     static Color ToColor(Vector3 c, float a) => Color.FromArgb((byte)(Math.Clamp(a, 0, 1) * 255),
         (byte)(Math.Clamp(c.X, 0, 1) * 255), (byte)(Math.Clamp(c.Y, 0, 1) * 255), (byte)(Math.Clamp(c.Z, 0, 1) * 255));

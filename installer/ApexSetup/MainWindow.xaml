@@ -101,7 +101,7 @@
 
         <NavigationView x:Name="Nav" Grid.Row="1" PaneDisplayMode="Left" IsPaneToggleButtonVisible="False"
                         IsBackButtonVisible="Collapsed" IsSettingsVisible="False" OpenPaneLength="232"
-                        IsTitleBarAutoPaddingEnabled="False" SelectionChanged="OnNavSelection">
+                        IsTitleBarAutoPaddingEnabled="False" SelectionChanged="OnNavSelection" ItemInvoked="OnNavInvoked">
             <NavigationView.Resources>
                 <SolidColorBrush x:Key="NavigationViewContentBackground" Color="#D90B0C0E" />
                 <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="#1F2025" />
@@ -513,11 +513,11 @@
                         </StackPanel>
 
                         <!-- 8..14 the launcher's own screens, filled in code (MainWindow.Launcher.cs) -->
-                        <StackPanel x:Name="ScreenHome" Spacing="18" Visibility="Collapsed" />
-                        <StackPanel x:Name="ScreenMods" Spacing="14" Visibility="Collapsed">
+                        <StackPanel x:Name="ScreenHome" Spacing="16" Visibility="Collapsed" />
+                        <StackPanel x:Name="ScreenMods" Spacing="16" Visibility="Collapsed">
                             <Grid ColumnSpacing="12">
                                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                <StackPanel Spacing="2">
+                                <StackPanel Spacing="4">
                                     <TextBlock Text="Mods" Style="{StaticResource ApexTitle}" />
                                     <TextBlock x:Name="ModsSummary" Tag="dyn" Style="{StaticResource ApexMuted}" />
                                 </StackPanel>
@@ -530,23 +530,27 @@
                                 </StackPanel>
                             </Grid>
                             <InfoBar x:Name="ModsInfo" IsClosable="True" />
+                            <!-- filters: the file type (tabs), what the files hold (chips), then search, folder and state -->
+                            <SelectorBar x:Name="ModTypes" SelectionChanged="OnModType" />
+                            <local:WrapPanel x:Name="ModKinds" Tag="dyn" Spacing="6" />
                             <Grid ColumnSpacing="8">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="220" /></Grid.ColumnDefinitions>
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="210" /><ColumnDefinition Width="170" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
                                 <AutoSuggestBox x:Name="ModSearch" PlaceholderText="Search mods or folders" QueryIcon="Find" TextChanged="OnModSearch"
                                                 AutomationProperties.Name="Search mods or folders" />
                                 <ComboBox x:Name="ModFolder" Grid.Column="1" HorizontalAlignment="Stretch" SelectionChanged="OnModFilter" AutomationProperties.Name="Folder" />
+                                <ComboBox x:Name="ModState" Grid.Column="2" HorizontalAlignment="Stretch" SelectionChanged="OnModFilter" AutomationProperties.Name="State" />
+                                <HyperlinkButton x:Name="ModClear" Grid.Column="3" Content="Clear filters" Click="OnModClear" VerticalAlignment="Center" />
                             </Grid>
-                            <StackPanel x:Name="ModKinds" Tag="dyn" Orientation="Horizontal" Spacing="6" />
                             <Border x:Name="ModListCard" Style="{StaticResource ApexCard}" Padding="8,4">
                                 <ListView x:Name="ModList" ItemTemplate="{StaticResource ModRowTemplate}" SelectionMode="None" MaxHeight="560" />
                             </Border>
                             <StackPanel x:Name="ModGallery" Tag="dyn" Spacing="18" Visibility="Collapsed" />
                             <TextBlock x:Name="ModsNote" Tag="dyn" Style="{StaticResource ApexMuted}" />
                         </StackPanel>
-                        <StackPanel x:Name="ScreenWorlds" Spacing="14" Visibility="Collapsed" />
-                        <StackPanel x:Name="ScreenSaves" Spacing="14" Visibility="Collapsed">
+                        <StackPanel x:Name="ScreenWorlds" Spacing="16" Visibility="Collapsed" />
+                        <StackPanel x:Name="ScreenSaves" Spacing="16" Visibility="Collapsed">
                             <Grid>
-                                <StackPanel Spacing="2">
+                                <StackPanel Spacing="4">
                                     <TextBlock Text="Saves" Style="{StaticResource ApexTitle}" />
                                     <TextBlock Text="Each card shows the household photo stored in the save." Style="{StaticResource ApexMuted}" />
                                 </StackPanel>
@@ -556,7 +560,7 @@
                             <GridView x:Name="SaveGrid" ItemTemplate="{StaticResource SaveTemplate}" SelectionMode="None" IsItemClickEnabled="False" />
                             <TextBlock x:Name="SavesEmpty" Tag="dyn" Style="{StaticResource ApexMuted}" Visibility="Collapsed" />
                         </StackPanel>
-                        <StackPanel x:Name="ScreenHealth" Spacing="22" Visibility="Collapsed" />
+                        <StackPanel x:Name="ScreenHealth" Spacing="24" Visibility="Collapsed" />
                         <StackPanel x:Name="ScreenNews" Spacing="16" Visibility="Collapsed" />
                         <StackPanel x:Name="ScreenSettings" Spacing="10" Visibility="Collapsed" />
 

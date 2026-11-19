@@ -1428,6 +1428,49 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
             && !Directory.Exists(Mods.Disabled(udocs)), "uninstall keeps the player's mods (switched-off ones back on), saves and Resource.cfg");
         Check(!Directory.Exists(Path.Combine(udocs, "Apex Radiance")), "uninstall removes Apex Radiance's settings unless asked to keep them");
 
+        // what a mod is, from how many resources of each type it holds (cases from a player's real mods)
+        static Dictionary<uint, int> Types(params (uint T, int N)[] t) => t.ToDictionary(x => x.T, x => x.N);
+        Check(Mods.KindOf(Types((0x073FAA07, 1), (0x0333406C, 1), (0x220557DA, 24))) == ModKind.Script
+            && Mods.KindOf(Types((0x034AEECB, 256), (0x00B2D882, 1125))) == ModKind.Cas
+            && Mods.KindOf(Types((0x319E4F1D, 277), (0x034AEECB, 34))) == ModKind.Objects
+            && Mods.KindOf(Types((0xD382BF57, 60), (0x0166038C, 1))) == ModKind.Objects
+            && Mods.KindOf(Types((0x03B4C61D, 150))) == ModKind.Lighting
+            && Mods.KindOf(Types((0x1F886EAD, 27), (0x0166038C, 1))) == ModKind.Lighting
+            && Mods.KindOf(Types((0x8070223D, 44), (0x01A527DB, 42), (0x01EEF63A, 42))) == ModKind.Sound
+            && Mods.KindOf(Types((0x00B2D882, 131), (0x0166038C, 1))) == ModKind.Textures
+            && Mods.KindOf(Types((0x0333406C, 76), (0x0166038C, 1))) == ModKind.Tuning
+            && Mods.KindOf(Types((0xB1CC1AF6, 13))) == ModKind.Package,
+            "mods: scripts, CAS, objects, lighting, sound, textures and tuning told apart");
+        var lib = Path.Combine(lr, "Docs2", "Library");
+        TestPackage(Path.Combine(lib, "Bistro.package"), (0xD84E7FC6u, "l"u8.ToArray(), false, 1));
+        TestPackage(Path.Combine(lib, "Family.package"), (0x033A1435u, "h"u8.ToArray(), false, 1));
+        Directory.CreateDirectory(Path.Combine(lr, "Docs2", "Downloads"));
+        File.WriteAllText(Path.Combine(lr, "Docs2", "Downloads", "Rinn Fada.Sims3Pack"), "TS3Pack <?xml version=\"1.0\"?><Sims3Package Type=\"world\" SubType=\"0x0\">");
+        File.WriteAllText(Path.Combine(lr, "Docs2", "Downloads", "House.Sims3Pack"), "TS3Pack <?xml version=\"1.0\"?><Sims3Package Type=\"lot\" SubType=\"0x0\">");
+        var all2 = Mods.List(lg, Path.Combine(lr, "Docs2"));
+        Check(all2.Single(m => m.Name == "Bistro.package") is { Kind: ModKind.Lot, FileType: "library", Locked: true }
+            && all2.Single(m => m.Name == "Family.package").Kind == ModKind.Household
+            && all2.Single(m => m.Name == "Rinn Fada.Sims3Pack") is { Kind: ModKind.World, FileType: "sims3pack" }
+            && all2.Single(m => m.Name == "House.Sims3Pack").Kind == ModKind.Lot,
+            "mods: the Library's lots and households, and Sims3Packs by what their header says (a world, a lot)");
+        Check(all2.Select(m => m.FileType).SequenceEqual(all2.Select(m => m.FileType).OrderBy(t => t switch { "asi" => 1, "sims3pack" => 2, "library" => 3, _ => 0 })),
+            "mods: packages first, then ASI plugins, Sims3Packs and the Library");
+
+        // a pack's icon from its game definition file; a world's own picture, never a lot's
+        var gdfDir = Path.Combine(lr, "EPx", "Game", "Bin");
+        Directory.CreateDirectory(gdfDir);
+        byte[] png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3, (byte)'I', (byte)'E', (byte)'N', (byte)'D', 9, 9, 9, 9, 7, 7];
+        File.WriteAllBytes(Path.Combine(gdfDir, "Sims3EP99GDF.dll"), [.. "MZ......"u8.ToArray(), .. png]);
+        Check(Expansions.Icon(Path.Combine(lr, "EPx")) is { } icon && icon.Length == png.Length - 2 && icon[0] == 0x89 && Expansions.Icon(Path.Combine(lr, "none")) is null,
+            "a pack's icon is the PNG in its game definition file");
+        var wfile = Path.Combine(lr, "W", "Town.world");
+        TestPackage(wfile, (0xD84E7FC6u, "lot"u8.ToArray(), false, 3));
+        var wfile2 = Path.Combine(lr, "W", "Valley.world");
+        TestPackage(wfile2, (0xD84E7FC6u, "lot"u8.ToArray(), false, 3), (0x0668F635u, "world"u8.ToArray(), false, 5));
+        Check(Worlds.Picture(new World("Town", WorldKind.Expansion, "WA", wfile)) is null
+            && Worlds.Picture(new World("Valley", WorldKind.BaseGame, null, wfile2)) is { } wp && System.Text.Encoding.ASCII.GetString(wp) == "world",
+            "a world shows its own picture; one without it shows none, not a lot's");
+
         Check(SelfUpdate.Products.Contains("Apex Radiance Setup") && SelfUpdate.Products.Contains("Apex Launcher") && SelfUpdate.AssetNames[0] == "ApexLauncher.exe",
             "self-update takes the launcher under either name");
         Check(Elevation.Parse(["--maintain", @"C:\G\Bin", "--open", "components"]) == (@"C:\G\Bin", "components") && Elevation.Parse([]) == (null, null),
