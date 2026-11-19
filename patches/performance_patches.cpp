@@ -27,6 +27,7 @@
 #include "object_id_map.h"
 #include "render_object_map.h"
 #include "room_light_queue.h"
+#include "room_solve_share.h"
 #include "atrium_hold.h"
 #include <algorithm>
 #include <atomic>
@@ -143,6 +144,7 @@ class LotLightingMotionPatch : public ApexPatch {
     LotLightingMotionPatch() : ApexPatch(Performance::kLotLightingName, nullptr) {
         // TOML key: never rename
         RegisterIntSetting(&budgetMs_, "budgetWhileMovingMs", Performance::kLotLightingBudgetDefault, 1, 15, "Lot lighting time while moving (ms)");
+        RegisterBoolSetting(&sharedSolveTime_, "sharedSolveTime", false, "Shared room solve time while moving");
         g_lotPatch.store(this);
     }
     ~LotLightingMotionPatch() override { g_lotPatch.store(nullptr); }
@@ -154,11 +156,13 @@ class LotLightingMotionPatch : public ApexPatch {
         std::string error;
         if (!LotLightingMotion::Start(&error)) return Fail(error);
         isEnabled = true;
+        ApplySharedSolveTime();
         return true;
     }
 
     bool Uninstall() override {
         if (!isEnabled) return true;
+        RoomSolveShare::Stop();
         LotLightingMotion::Stop();
         if (LotLightingMotion::Running()) return Fail("Could not put the lot lighting call back (see ApexRadiance_LOG.txt)");
         isEnabled = false;
@@ -170,6 +174,7 @@ class LotLightingMotionPatch : public ApexPatch {
     void Update() override {
         pendingReinstall = false;
         LotLightingMotion::SetBudgetMs(budgetMs_);
+        if (isEnabled) ApplySharedSolveTime();
     }
 
     void RenderCustomUI() override {} // the Performance card draws the rows
@@ -185,7 +190,18 @@ class LotLightingMotionPatch : public ApexPatch {
     }
 
   private:
+    // Shared room solve time (features/room_solve_share.h): needs this feature's camera motion, so it runs only inside it
+    void ApplySharedSolveTime() {
+        if (!sharedSolveTime_) {
+            RoomSolveShare::Stop();
+            return;
+        }
+        std::string error;
+        if (!RoomSolveShare::Start(&error)) LOG_WARNING("[LotLightingMotion] Shared room solve time left off: " + error);
+    }
+
     int budgetMs_ = Performance::kLotLightingBudgetDefault;
+    bool sharedSolveTime_ = false;
 };
 
 class LotDetailRangePatch;

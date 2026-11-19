@@ -590,6 +590,7 @@ Columns (render-thread values are self ms, as in the hitch blocks; empty = unkno
 | `lot_load_calls` | Calls of *Lot load stages* this frame, all threads: load work running now, not only the promotion events |
 | `lots_lighting` | Calls of *Lot lighting update* this frame (lots with lighting work) |
 | `room_solve_calls`, `room_solve_max_ms` | Calls of *Lot room solve* this frame (all threads) and the longest single one on the render thread (ms): more lots solving versus one long solve that no budget interrupts |
+| `room_solve_waited`, `room_solve_longest_wait` | Level solves the shared room solve time held this frame, and the most frames a level was waiting then (0 with it off; [Lot Lighting While Moving](performance/lot-lighting-motion.md)) |
 | `scene_nodes`, `scene_deferred` | Render thread: nodes the scene pending-node drain added this frame, and nodes the scene node budget left queued |
 | `tex_loads`, `tex_mb` | DDS texture loads that reached the create call this frame on any thread, and their size (whole mip chain, MB, estimated from the format) |
 | `page_faults` | The process's page faults during the frame (soft and hard) |

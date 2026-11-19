@@ -839,6 +839,7 @@ const Group kGroups[] = {
                         Id::StopwatchCtor, Id::StopwatchStart, Id::StopwatchElapsed, Id::PriorityLotObject, Id::PriorityLotTest}},
     {"LotLodStreaming", {Id::LotLodScoring, Id::WorldManagerPtr}},
     {"LotBuildShare", {Id::LotLoadStagesCall, Id::LotLoadStages, Id::LotPassRendererCall, Id::LotRendererUpdate, Id::WorldManagerPtr, Id::PriorityLotObject, Id::PriorityLotTest}},
+    {"RoomSolveShare", {Id::RoomSolveCall, Id::RoomSolve, Id::LotPassRendererCall, Id::LotRendererUpdate, Id::WorldManagerPtr, Id::PriorityLotObject, Id::PriorityLotTest}},
     {"LotLodDistanceProbe", {Id::LotLodScoring, Id::LotDetailRequest}},
     {"LotVisibilityOverride", {Id::LotVisibilityCameraBiasJZ}},
     {"FastCasSort", {Id::CasTriSort}},

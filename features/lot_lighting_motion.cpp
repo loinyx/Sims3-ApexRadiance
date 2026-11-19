@@ -68,6 +68,7 @@
 #include "lot_build_share.h"
 #include "level_light_share.h"
 #include "room_light_queue.h"
+#include "room_solve_share.h"
 #include "room_ambient_policy.h"
 #include "apex_log.h"
 #include "build_flavor.h"
@@ -935,6 +936,7 @@ void RenderDeveloperUI() {
     if (kPublicBuild) return;
     if (!ImGui::GetCurrentContext()) return;
     ImGui::TextUnformatted(("Lot lighting while moving: " + StatusText()).c_str());
+    RoomSolveShare::RenderDeveloperUI();
     ImGui::TextDisabled("Settle pacing: %.0f%% of the raised budgets (frame baseline %.1f ms, %s)", g_settleScale.load() * 100.0f, g_baseFrameMs,
                         LevelLightShare::SettlingAfterLoad() ? "settling now" : "not settling");
     const uint64_t last = g_lastMoveTick.load();
