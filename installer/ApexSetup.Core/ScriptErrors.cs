@@ -64,6 +64,14 @@ public static partial class ScriptErrors
             catch (Exception e) when (e is IOException or UnauthorizedAccessException) { continue; }
             errors.AddRange(IsCrash(f.Name) ? Native(text, f, mods) : Script(text, f, map));
         }
+        // script errors of a mod no longer installed (no file or folder of that name among the mods) are nothing to act on:
+        // its old logs drop out. Crashes always stay (one in d3d9.dll is the renderer's, not a mod's).
+        if (mods is not null)
+        {
+            bool Installed(string mod) => mods.Any(m => Path.GetFileNameWithoutExtension(m.Name).StartsWith(mod, StringComparison.OrdinalIgnoreCase)
+                || m.Rel.Split(Path.DirectorySeparatorChar).Any(part => part.Equals(mod, StringComparison.OrdinalIgnoreCase)));
+            errors = errors.Where(e => e.Crash || e.Mod is not { } name || Installed(name)).ToList();
+        }
         var byMod = errors.GroupBy(e => e.Mod ?? "").Select(g => new ModErrors(g.Key == "" ? null : g.Key, g.SelectMany(e => e.Files).Distinct().ToList(), g.Count(),
                 g.Count(e => e.Crash), g.Max(e => e.When), g.GroupBy(e => e.Exception).OrderByDescending(x => x.Count()).First().Key))
             .OrderByDescending(m => m.Newest).ThenByDescending(m => m.Count).ToList();

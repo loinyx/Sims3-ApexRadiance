@@ -83,7 +83,8 @@ static class HealthTests
         var pkg = Path.Combine(docs, @"Mods\Packages\fixturemod.package");
         Directory.CreateDirectory(Path.GetDirectoryName(pkg)!);
         File.WriteAllBytes(pkg, ModConflicts.WritePackage([(ModConflicts.TypeS3sa, 0u, 1ul, ModConflicts.S3saWrap(ModConflictsTests.Asm("FixtureMod", Guid.NewGuid(), [])))]));
-        var mods = new List<ModFile> { new(pkg, @"Mods\Packages\fixturemod.package", new FileInfo(pkg).Length, ModKind.Script, true, false) };
+        var mods = new List<ModFile> { new(pkg, @"Mods\Packages\fixturemod.package", new FileInfo(pkg).Length, ModKind.Script, true, false),
+            new(Path.Combine(docs, @"Mods\Packages\SomeMod\SomeMod_Script.package"), @"Mods\Packages\SomeMod\SomeMod_Script.package", 1, ModKind.Script, true, false) };
 
         Write(Path.Combine(docs, "ScriptError_PC__a.xml"), ErrorTrap("Sims3.Gameplay.Core.Sims3.Gameplay.Core.Lot:Get", "Fixture.Fixture.Entry:Init", "ScriptCore.ScriptCore.ScriptProxy:Simulate"));
         Write(Path.Combine(docs, "ScriptError_PC__b.xml"), ErrorTrap("Sims3.Gameplay.Actors.Sims3.Gameplay.Actors.Sim:DoRoute") + "\n<broken <<< not xml");
@@ -96,6 +97,8 @@ static class HealthTests
         huge.Append('x', 6 << 20);
         Write(Path.Combine(docs, "ScriptError_PC__huge.xml"), huge.ToString());
         Write(Path.Combine(docs, "ScriptError_PC__empty.xml"), "");
+        // a mod since removed: its old logs no longer count
+        Write(Path.Combine(docs, "GoneMod_Error_2030-01-01_1__x.xml"), "<GoneMod><Line>ERROR\nSystem.InvalidCastException: bad\n#0: 0x0 call in GoneMod.GoneMod.Boot:Run () ()\n</Line></GoneMod>");
 
         var r = ScriptErrors.Read(docs, DateTime.Now.AddDays(-1), mods);
         var fixture = r.ByMod.FirstOrDefault(m => m.Mod == "fixturemod");
@@ -103,6 +106,8 @@ static class HealthTests
             "script errors: the frame in a mod's assembly ties the error to its package (malformed, huge and empty logs read without throwing; the old one left out)");
         check(r.ByMod.Any(m => m.Mod is null && m.Count == 1) && r.ByMod.Any(m => m.Mod == "SomeMod") && r.ByMod.Any(m => m.Mod == "Crashy.asi" && m.Crashes == 1),
             "script errors: game-only stacks, a mod's own log and the game's crash log are told apart");
+        check(!r.ByMod.Any(m => m.Mod == "GoneMod") && ScriptErrors.Read(docs, DateTime.Now.AddDays(-1), null).ByMod.Any(m => m.Mod == "GoneMod"),
+            "script errors: a removed mod's old logs drop out (a crash in something that is no mod, such as Crashy.asi, stays)");
         check(r.Summary.Args[0] == "5" && r.Summary.Args[2] == "fixturemod" && ScriptErrors.Findings(r).Any(f => f.Finding.Args.Contains("fixturemod") && f.Files.Count > 0) && ScriptErrors.Read(docs, DateTime.Now.AddDays(-60), mods).Total == 6,
             "script errors: summary, findings and the time window");
     }
