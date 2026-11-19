@@ -3740,6 +3740,8 @@ struct VsInfo {
     int winSem = -1;      // DrawWindowOutdoor: the semantic winRows was looked for (usage << 4 | index), -1 = not looked yet
     bool winRowsOk = false;
     ShaderPatches::UvRows winRows; // how the basis uv is made from the world position (ShaderPatches::WorldUvRows)
+    int8_t terrainUv = -1;                       // the lot terrain's room-map read: -1 not looked yet, 0 not that shader, 1 copied
+    IDirect3DVertexShader9* terrainUvVs = nullptr; // its copy reading the map at the floors' place (ShaderPatches::PatchTerrainRoomMapUv)
 };
 std::unordered_map<IDirect3DVertexShader9*, VsInfo> g_vsInfo;
 uint32_t g_vsInfoGen = 0, g_vsInfoFrontGen = 0; // (2.15.3) g_vsInfo cleared: ClassifyVs's front cache goes too
@@ -8812,6 +8814,37 @@ template <typename DrawFn> bool DrawSnowFloor(IDirect3DDevice9* dev, DrawFn draw
     return true;
 }
 
+// The lot terrain's room-map read at the floors' place: the game's terrain vertex shader puts the story's room light map up to 25 cm
+// off where the floors and the solve lay it out, so the ground of a roofed room without a floor took the next room's light through
+// their wall (a band along it). Its copy (ShaderPatches::PatchTerrainRoomMapUv) is bound for the draw. Null: not that shader
+IDirect3DVertexShader9* TerrainUvVs(IDirect3DDevice9* dev) {
+    if (g_inOwnCall || !g_curVs || !g_curVsInfo) return nullptr;
+    VsInfo& i = *g_curVsInfo;
+    if (i.terrainUv < 0) {
+        i.terrainUv = 0;
+        UINT size = 0;
+        if (SUCCEEDED(g_curVs->GetFunction(nullptr, &size)) && size >= 8 && size <= 65536) {
+            std::vector<DWORD> t(size / 4);
+            if (SUCCEEDED(g_curVs->GetFunction(t.data(), &size)) && ShaderPatches::PatchTerrainRoomMapUv(t) && SUCCEEDED(dev->CreateVertexShader(t.data(), &i.terrainUvVs)) &&
+                i.terrainUvVs) {
+                i.terrainUv = 1;
+                LOG_INFO(std::format("[LotLightBridge] Terrain: vertex shader {:08X} reads the room light map at the floors' place", reinterpret_cast<uintptr_t>(g_curVs)));
+            }
+        }
+    }
+    return i.terrainUvVs;
+}
+// The game's draw with the terrain copy bound in place of its vertex shader, when the shader still bound is the game's (a handler of
+// OnDraw may have bound its own)
+template <typename DrawFn> void WithTerrainUv(IDirect3DDevice9* dev, IDirect3DVertexShader9* copy, DrawFn draw) {
+    IDirect3DVertexShader9* now = nullptr;
+    if (copy && SUCCEEDED(dev->GetVertexShader(&now)) && now) now->Release();
+    const bool swap = copy && now == g_curVs;
+    if (swap) SetVs(dev, copy);
+    draw();
+    if (swap) SetVs(dev, g_curVs);
+}
+
 // Outdoor floors lit only by their baked floor map (summer; floor_atlas_table.h): the vertex shader gets a copy that
 // also writes world xz to the first free TEXCOORD (7 or up: many floor vertex shaders already use 7), the pixel shader
 // a copy with max(floor map, atlas) before the map's scale (ShaderPatches::PatchBakedAtlasPs), as the winter floors.
@@ -11455,18 +11488,28 @@ void UpdateHooks() {
                     g_curPrims = prims;
                     g_curDipBase = static_cast<UINT>(bvi), g_curDipMin = minV, g_curDipNum = numV;
                     NoteSolidMesh(ctx.device,type,bvi,minV,numV,start,prims,g_curVsIsInstanced);
-                    return OnDraw(ctx.device, [&]() {
+                    IDirect3DVertexShader9* const terrainUv = TerrainUvVs(ctx.device);
+                    const D3D9Hooks::HookAction r = OnDraw(ctx.device, [&]() {
                         drawn = true;
                         D3D9Hooks::ReissueScope reissue; // only the observers of re-issued draws run for it (d3d9_hooks.h)
-                        if (kPublicBuild || !g_drawCostTimed) ctx.device->DrawIndexedPrimitive(type, bvi, minV, numV, start, prims);
-                        else {
-                            LARGE_INTEGER a, b;
-                            QueryPerformanceCounter(&a);
-                            ctx.device->DrawIndexedPrimitive(type, bvi, minV, numV, start, prims);
-                            QueryPerformanceCounter(&b);
-                            g_drawCostDriver += b.QuadPart - a.QuadPart;
-                        }
+                        WithTerrainUv(ctx.device, terrainUv, [&] {
+                            if (kPublicBuild || !g_drawCostTimed) ctx.device->DrawIndexedPrimitive(type, bvi, minV, numV, start, prims);
+                            else {
+                                LARGE_INTEGER a, b;
+                                QueryPerformanceCounter(&a);
+                                ctx.device->DrawIndexedPrimitive(type, bvi, minV, numV, start, prims);
+                                QueryPerformanceCounter(&b);
+                                g_drawCostDriver += b.QuadPart - a.QuadPart;
+                            }
+                        });
                     });
+                    if (r != D3D9Hooks::HookAction::Continue || drawn || !terrainUv) return r;
+                    drawn = true; // (the game's draw, with the terrain copy: made here, so the chain skips the device call)
+                    {
+                        D3D9Hooks::ReissueScope reissue;
+                        WithTerrainUv(ctx.device, terrainUv, [&] { ctx.device->DrawIndexedPrimitive(type, bvi, minV, numV, start, prims); });
+                    }
+                    return D3D9Hooks::HookAction::Skip;
                 } catch (...) {
                     g_inOwnCall = false;
                     HookFailed();
@@ -11480,18 +11523,28 @@ void UpdateHooks() {
             try {
                 g_curPrims = prims;
                 g_curDipNum = 0;
-                return OnDraw(ctx.device, [&]() {
+                IDirect3DVertexShader9* const terrainUv = TerrainUvVs(ctx.device);
+                const D3D9Hooks::HookAction r = OnDraw(ctx.device, [&]() {
                     drawn = true;
                     D3D9Hooks::ReissueScope reissue;
-                    if (kPublicBuild || !g_drawCostTimed) ctx.device->DrawPrimitive(type, start, prims);
-                    else {
-                        LARGE_INTEGER a, b;
-                        QueryPerformanceCounter(&a);
-                        ctx.device->DrawPrimitive(type, start, prims);
-                        QueryPerformanceCounter(&b);
-                        g_drawCostDriver += b.QuadPart - a.QuadPart;
-                    }
+                    WithTerrainUv(ctx.device, terrainUv, [&] {
+                        if (kPublicBuild || !g_drawCostTimed) ctx.device->DrawPrimitive(type, start, prims);
+                        else {
+                            LARGE_INTEGER a, b;
+                            QueryPerformanceCounter(&a);
+                            ctx.device->DrawPrimitive(type, start, prims);
+                            QueryPerformanceCounter(&b);
+                            g_drawCostDriver += b.QuadPart - a.QuadPart;
+                        }
+                    });
                 });
+                if (r != D3D9Hooks::HookAction::Continue || drawn || !terrainUv) return r;
+                drawn = true; // (as above: the game's draw with the terrain copy)
+                {
+                    D3D9Hooks::ReissueScope reissue;
+                    WithTerrainUv(ctx.device, terrainUv, [&] { ctx.device->DrawPrimitive(type, start, prims); });
+                }
+                return D3D9Hooks::HookAction::Skip;
             } catch (...) {
                 g_inOwnCall = false;
                 HookFailed();
@@ -12397,6 +12450,7 @@ void Shutdown(bool keepChunkMaps) {
     for (auto& [k, info] : g_vsInfo) { // patched copies: foliage / objects, and the outdoor floors of summer
         if (info.patched.vs) info.patched.vs->Release();
         if (info.floor.vs) info.floor.vs->Release();
+        if (info.terrainUvVs) info.terrainUvVs->Release();
     }
     g_curVsInfo = nullptr;
     g_vsInfo.clear();

@@ -4036,6 +4036,45 @@ bool IsPackedRoomFloorVs(const std::vector<DWORD>& vs) {
     return unpacked;
 }
 
+bool PatchTerrainRoomMapUv(std::vector<DWORD>& vs) {
+    if (vs.empty() || vs[0] != 0xFFFE0300) return false;
+    const auto ins = Parse(vs);
+    int def = -1;
+    DWORD reg = 0;
+    for (const Ins& x : ins) {
+        if (x.op != kDef || x.len != 5) continue;
+        float v[4];
+        std::memcpy(v, &vs[x.at + 2], sizeof v);
+        if (v[0] == 0.4921875f && v[1] == 0.25f && v[2] == 0.0f && v[3] == 0.0f) {
+            if (def >= 0) return false;
+            def = static_cast<int>(x.at), reg = Num(vs[x.at + 1]);
+        }
+    }
+    if (def < 0) return false;
+    // every read of cR is the one mad of v0 by cR.x plus cR.y, and one mul into an output's xy reads its temp
+    int mads = 0;
+    DWORD tmp = 0;
+    for (const Ins& x : ins) {
+        if (x.op == kDef || x.op == kDcl) continue;
+        for (size_t a = 2; a < static_cast<size_t>(x.len) + 1; a++)
+            if (IsReg(vs[x.at + a], kConst, reg)) {
+                if (x.op != kMad || x.len != 4 || a != 3 || Type(vs[x.at + 1]) != kTemp || WMask(vs[x.at + 1]) != 0x3 || !IsReg(vs[x.at + 2], kInput, 0) ||
+                    Swz(vs[x.at + 3]) != 0x00 || !IsReg(vs[x.at + 4], kConst, reg) || Swz(vs[x.at + 4]) != 0x55)
+                    return false;
+                mads++, tmp = Num(vs[x.at + 1]);
+                break;
+            }
+    }
+    if (mads != 1) return false;
+    int outs = 0;
+    for (const Ins& x : ins)
+        if (x.op == kMul && x.len == 3 && Type(vs[x.at + 1]) == kOutput && WMask(vs[x.at + 1]) == 0x3 && IsReg(vs[x.at + 2], kTemp, tmp)) outs++;
+    if (outs != 1) return false;
+    const float exact[4] = {0.5f, 0.0f, 0.0f, 0.0f};
+    std::memcpy(&vs[static_cast<size_t>(def) + 2], exact, sizeof exact);
+    return true;
+}
+
 bool FindWallMatrices(const std::vector<DWORD>& vs, WallMatrices& out) {
     out={};RoomMapUv uv;
     if(!RoomMapUvScale(vs,uv) || !uv.defined || std::fabs(uv.value*4096.0f-1.0f)>1e-5f) return false;
