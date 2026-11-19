@@ -249,7 +249,7 @@ public static partial class Strings
         ["Fixes for game and graphics settings."] = "Oplossingen voor spel- en grafische instellingen.",
         ["Fixes stutters, Sims getting stuck and crashes."] = "Lost haperingen, vastzittende Sims en crashes op.",
         ["Needed only by some script mods; turn it on if a mod asks for it."] = "Alleen nodig voor sommige scriptmods; zet het aan als een mod erom vraagt.",
-        ["Makes the game run faster. Needs a free Nexus Mods account; Setup installs it when your download finishes."] =
+        ["Makes the game run faster. Needs a free Nexus Mods account; the launcher installs it when your download finishes."] =
             "Laat het spel sneller lopen. Vereist een gratis Nexus Mods-account; Setup installeert het zodra je download klaar is.",
         ["Puts back the graphics files you had before."] = "Zet de grafische bestanden terug die je eerder had.",
         ["Goes back to the game's default graphics. Your in-game graphics settings may reset once."] =

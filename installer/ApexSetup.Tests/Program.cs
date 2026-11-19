@@ -1361,8 +1361,9 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         Expansions.RegistryDir = name => name == "The Sims 3 Pets" ? Path.Combine(lr, "Pets") : null;
         Directory.CreateDirectory(Path.Combine(lr, "Pets", "GameData", "Shared", "NonPackaged", "Worlds"));
         File.WriteAllText(Path.Combine(lr, "Pets", "GameData", "Shared", "NonPackaged", "Worlds", "AppaloosaPlains.world"), "w");
+        Directory.CreateDirectory(Path.Combine(lroot, "SP2", "GameData", "Shared")); // (left empty: not a pack)
         var packs = Expansions.Installed(lg).Select(p => p.Pack.Code).ToList();
-        Check(packs.SequenceEqual(["EP1", "EP5", "EP10", "SP1"]), "packs: Steam's folders and the EA app's registry folders are found");
+        Check(packs.SequenceEqual(["EP1", "EP5", "EP10", "SP1"]), "packs: Steam's folders and the EA app's registry folders are found, empty folders are not");
         var worlds = Worlds.List(lg, ldocs);
         Check(worlds.Select(w => w.Name).Order().SequenceEqual(["Appaloosa Plains", "Champs Les Sims", "Isla Paradiso", "My Town", "Riverview", "Sunset Valley"])
             && worlds.Single(w => w.Name == "Riverview").Kind == WorldKind.Store && worlds.Single(w => w.Name == "My Town").Kind == WorldKind.Custom
@@ -1473,6 +1474,10 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
 
         Check(SelfUpdate.Products.Contains("Apex Radiance Setup") && SelfUpdate.Products.Contains("Apex Launcher") && SelfUpdate.AssetNames[0] == "ApexLauncher.exe",
             "self-update takes the launcher under either name");
+        var cf = Elevation.SaveChoices(new Dictionary<string, string> { ["renderer"] = "dxvk", ["s3pparchive"] = @"C:\D\a=b.zip" });
+        var ch = Elevation.Choices(["--maintain", "x", "--choices", cf]);
+        Check(ch["renderer"] == "dxvk" && ch["s3pparchive"] == @"C:\D\a=b.zip" && !File.Exists(cf) && Elevation.Choices(["--choices", cf]).Count == 0,
+            "the launcher's choices reach the administrator window once");
         Check(Elevation.Parse(["--maintain", @"C:\G\Bin", "--open", "components"]) == (@"C:\G\Bin", "components") && Elevation.Parse([]) == (null, null),
             "the administrator window opens on the game and screen it was given");
     }

@@ -250,7 +250,7 @@ public static partial class Strings
         ["Fixes for game and graphics settings."] = "게임 및 그래픽 설정 수정.",
         ["Fixes stutters, Sims getting stuck and crashes."] = "끊김, 심이 멈추는 문제, 충돌을 고쳐요.",
         ["Needed only by some script mods; turn it on if a mod asks for it."] = "일부 스크립트 모드에만 필요해요. 모드가 요구하면 켜세요.",
-        ["Makes the game run faster. Needs a free Nexus Mods account; Setup installs it when your download finishes."] =
+        ["Makes the game run faster. Needs a free Nexus Mods account; the launcher installs it when your download finishes."] =
             "게임이 더 빨라져요. 무료 Nexus Mods 계정이 필요해요. 다운로드가 끝나면 설치 프로그램이 설치해요.",
         ["Puts back the graphics files you had before."] = "이전에 쓰던 그래픽 파일을 되돌려요.",
         ["Goes back to the game's default graphics. Your in-game graphics settings may reset once."] =

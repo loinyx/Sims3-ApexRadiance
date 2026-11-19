@@ -221,7 +221,7 @@ public static partial class Strings
         ["Fixes for game and graphics settings."] = "การแก้ไขสำหรับการตั้งค่าเกมและกราฟิก",
         ["Fixes stutters, Sims getting stuck and crashes."] = "แก้อาการกระตุก ซิมค้าง และแครช",
         ["Needed only by some script mods; turn it on if a mod asks for it."] = "จำเป็นสำหรับม็อดสคริปต์บางตัวเท่านั้น เปิดเมื่อม็อดต้องการ",
-        ["Makes the game run faster. Needs a free Nexus Mods account; Setup installs it when your download finishes."] = "ทำให้เกมทำงานเร็วขึ้น ต้องมีบัญชี Nexus Mods (ฟรี) ตัวติดตั้งจะติดตั้งให้เมื่อดาวน์โหลดเสร็จ",
+        ["Makes the game run faster. Needs a free Nexus Mods account; the launcher installs it when your download finishes."] = "ทำให้เกมทำงานเร็วขึ้น ต้องมีบัญชี Nexus Mods (ฟรี) ตัวติดตั้งจะติดตั้งให้เมื่อดาวน์โหลดเสร็จ",
         ["Puts back the graphics files you had before."] = "คืนไฟล์กราฟิกที่คุณมีก่อนหน้านี้",
         ["Goes back to the game's default graphics. Your in-game graphics settings may reset once."] = "กลับไปใช้กราฟิกเริ่มต้นของเกม การตั้งค่ากราฟิกในเกมอาจรีเซ็ตหนึ่งครั้ง",
         ["Language"] = "ภาษา",

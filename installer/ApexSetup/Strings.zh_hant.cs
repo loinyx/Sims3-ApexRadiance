@@ -221,7 +221,7 @@ public static partial class Strings
         ["Fixes for game and graphics settings."] = "遊戲與圖形設定的修正。",
         ["Fixes stutters, Sims getting stuck and crashes."] = "修正卡頓、模擬市民卡住和當機。",
         ["Needed only by some script mods; turn it on if a mod asks for it."] = "只有部分腳本模組需要；如果有模組要求，再開啟它。",
-        ["Makes the game run faster. Needs a free Nexus Mods account; Setup installs it when your download finishes."] = "讓遊戲執行得更快。需要免費的 Nexus Mods 帳戶；下載完成後，安裝程式會安裝它。",
+        ["Makes the game run faster. Needs a free Nexus Mods account; the launcher installs it when your download finishes."] = "讓遊戲執行得更快。需要免費的 Nexus Mods 帳戶；下載完成後，安裝程式會安裝它。",
         ["Puts back the graphics files you had before."] = "還原你先前的圖形檔案。",
         ["Goes back to the game's default graphics. Your in-game graphics settings may reset once."] = "回到遊戲預設的圖形。遊戲內的圖形設定可能會重設一次。",
         ["Language"] = "語言",

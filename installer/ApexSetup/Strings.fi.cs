@@ -250,7 +250,7 @@ public static partial class Strings
         ["Fixes stutters, Sims getting stuck and crashes."] = "Korjaa nykimistä, jumiin jääviä simejä ja kaatumisia.",
         ["Needed only by some script mods; turn it on if a mod asks for it."] =
             "Vain jotkin skriptimodit tarvitsevat tätä; ota se käyttöön, jos modi pyytää sitä.",
-        ["Makes the game run faster. Needs a free Nexus Mods account; Setup installs it when your download finishes."] =
+        ["Makes the game run faster. Needs a free Nexus Mods account; the launcher installs it when your download finishes."] =
             "Nopeuttaa peliä. Vaatii ilmaisen Nexus Mods -tilin; asennusohjelma asentaa sen, kun latauksesi valmistuu.",
         ["Puts back the graphics files you had before."] = "Palauttaa aiemmat grafiikkatiedostosi.",
         ["Goes back to the game's default graphics. Your in-game graphics settings may reset once."] =

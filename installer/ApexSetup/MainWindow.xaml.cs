@@ -109,6 +109,8 @@ public sealed partial class MainWindow : Window
         Show(Maintenance ? MaintenanceScreen(Elevation.Parse(Environment.GetCommandLineArgs()).Screen) : FirstInstall ? Welcome : Home);
         _ = DetectVulkanAsync();
         await LoadReleasesAsync();
+        // (the launcher's choices, applied as if Apply was clicked: the player already did, before Windows asked)
+        if (Maintenance && TakeChoices()) OnNext(NextButton, new RoutedEventArgs());
         await CheckSetupUpdateAsync();
     }
 
@@ -257,9 +259,6 @@ public sealed partial class MainWindow : Window
 
     void Show(int step)
     {
-        // Components and Repair or remove on a protected game folder: opened in the administrator window, before any choice
-        // is made there (choices made here would not carry over)
-        if (step is ComponentsStep or RendererStep or Manage && NeedsAdminWindow) { _ = CanChangeHere(step == Manage ? "manage" : "components"); return; }
         _step = step;
         for (int i = 0; i < _screens.Length; i++) _screens[i].Visibility = i == step ? Visibility.Visible : Visibility.Collapsed;
         Animate(_screens[step]);
@@ -349,7 +348,7 @@ public sealed partial class MainWindow : Window
         // the glow moves only while it shows, and not when Windows' animation effects are off (started once, not on every refresh)
         var glow = FirstRun.Visibility == Visibility.Visible && new Windows.UI.ViewManagement.UISettings().AnimationsEnabled;
         if (glow != _glowOn) { _glowOn = glow; if (glow) FirstRunGlow.Begin(); else FirstRunGlow.Stop(); }
-        BackButton.Visibility = _step is GameStep or ComponentsStep or RendererStep ? Visibility.Visible : Visibility.Collapsed;
+        BackButton.Visibility = _step is GameStep or RendererStep || _step == ComponentsStep && FirstInstall ? Visibility.Visible : Visibility.Collapsed; // (in the launcher Components has no step before it)
         // a game with Apex and nothing to update: the status card's own buttons are the actions, no wizard to go into
         var settled = _step == Welcome && _state?.ApexVersion is not null && _game is not null && WelcomeUpdates().Count == 0 && _updated is null;
         NextButton.Visibility = !settled && _step is Welcome or GameStep or ComponentsStep or DoneStep or RendererStep ? Visibility.Visible : Visibility.Collapsed;
@@ -988,6 +987,10 @@ public sealed partial class MainWindow : Window
                   || AfmfCard.Visibility == Visibility.Visible && (AfmfToggle.IsEnabled || AfmfToggle.IsOn);
         var now = ReadFpsLimit(g);
         FpsCard.Visibility = usable && now is not null ? Visibility.Visible : Visibility.Collapsed;
+        // a divider above every row shown but the first; no section when no row shows
+        var rows = SmoothList.Children.OfType<Border>().Where(x => x.Visibility == Visibility.Visible).ToList();
+        for (int i = 0; i < rows.Count; i++) { rows[i].BorderBrush = (Brush)Application.Current.Resources["ApexCardBorderBrush"]; rows[i].BorderThickness = new Thickness(0, i == 0 ? 0 : 1, 0, 0); }
+        SmoothSection.Visibility = rows.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (now is null) { _fpsWant = null; _fpsCustomOpen = false; return; }
         if (_fpsNow != now) _fpsWant = null; // (the file changed under the picker: start again from it)
         _fpsNow = now;

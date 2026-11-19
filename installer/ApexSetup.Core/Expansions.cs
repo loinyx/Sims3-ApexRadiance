@@ -59,6 +59,19 @@ public static class Expansions
         return png;
     }
 
+    // a pack folder with the pack in it: its game definition file or anything in GameData (a folder left empty is not a pack)
+    static bool HasContent(string dir)
+    {
+        try
+        {
+            var bin = Path.Combine(dir, "Game", "Bin");
+            if (Directory.Exists(bin) && Directory.EnumerateFiles(bin, "Sims3*GDF.dll").Any()) return true;
+            var data = Path.Combine(dir, "GameData");
+            return Directory.Exists(data) && Directory.EnumerateFiles(data, "*", SearchOption.AllDirectories).Any();
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return false; }
+    }
+
     // each pack found with its folder
     public static List<(Pack Pack, string Dir)> Installed(Game g)
     {
@@ -66,7 +79,7 @@ public static class Expansions
         foreach (var p in All)
         {
             var steam = Path.Combine(g.Root, p.Code);
-            if (Directory.Exists(Path.Combine(steam, "GameData")) || Directory.Exists(Path.Combine(steam, "Game"))) { found.Add((p, steam)); continue; }
+            if (HasContent(steam)) { found.Add((p, steam)); continue; }
             if (RegistryDir("The Sims 3 " + p.Name) is { } ea) found.Add((p, ea));
         }
         return found;

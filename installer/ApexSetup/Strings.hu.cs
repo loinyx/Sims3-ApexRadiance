@@ -265,7 +265,7 @@ public static partial class Strings
             "Javítja az akadozást, a beragadó Simeket és az összeomlásokat.",
         ["Needed only by some script mods; turn it on if a mod asks for it."] =
             "Csak néhány szkriptmodnak kell; kapcsold be, ha egy mod kéri.",
-        ["Makes the game run faster. Needs a free Nexus Mods account; Setup installs it when your download finishes."] =
+        ["Makes the game run faster. Needs a free Nexus Mods account; the launcher installs it when your download finishes."] =
             "Gyorsabbá teszi a játékot. Ingyenes Nexus Mods-fiók kell hozzá; a telepítő a letöltés végeztével telepíti.",
         ["Puts back the graphics files you had before."] = "Visszaállítja a korábbi grafikai fájlokat.",
         ["Goes back to the game's default graphics. Your in-game graphics settings may reset once."] =

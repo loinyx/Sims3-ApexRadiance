@@ -262,7 +262,7 @@ public static partial class Strings
             "Corrige les saccades, les Sims bloqués et les plantages.",
         ["Needed only by some script mods; turn it on if a mod asks for it."] =
             "Nécessaire seulement pour certains mods de script ; activez-le si un mod le demande.",
-        ["Makes the game run faster. Needs a free Nexus Mods account; Setup installs it when your download finishes."] =
+        ["Makes the game run faster. Needs a free Nexus Mods account; the launcher installs it when your download finishes."] =
             "Rend le jeu plus rapide. Nécessite un compte Nexus Mods gratuit ; l'installateur l'installe une fois votre téléchargement terminé.",
         ["Puts back the graphics files you had before."] = "Remet les fichiers graphiques que vous aviez avant.",
         ["Goes back to the game's default graphics. Your in-game graphics settings may reset once."] =

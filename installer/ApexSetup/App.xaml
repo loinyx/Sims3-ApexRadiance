@@ -51,6 +51,9 @@
             <Style x:Key="ApexStrong" TargetType="TextBlock" BasedOn="{StaticResource BodyStrongTextBlockStyle}">
                 <Setter Property="FontSize" Value="14" />
             </Style>
+            <Style x:Key="ApexSection" TargetType="TextBlock" BasedOn="{StaticResource BodyStrongTextBlockStyle}">
+                <Setter Property="FontSize" Value="15" />
+            </Style>
             <Style x:Key="ApexPill" TargetType="Border">
                 <Setter Property="Background" Value="{StaticResource ApexPillBrush}" />
                 <Setter Property="CornerRadius" Value="11" />

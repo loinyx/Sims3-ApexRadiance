@@ -126,8 +126,15 @@ public sealed partial class MainWindow
         versions.Children.Add(Muted("Apex Radiance " + (_state?.ApexVersion ?? "?")
             + (Known(Components.Modernization) is { Length: > 0 } mv ? "  ·  Sims 3 Modernization " + mv : "")));
         ((StackPanel)left).Children.Add(versions);
-        var badges = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 5 };
-        foreach (var (p, dir) in Expansions.Installed(g).Where(x => x.Pack.Expansion)) badges.Children.Add(PackBadge(p, dir, 30));
+        // expansions, then a little apart the stuff packs
+        var badges = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+        var firstStuff = true;
+        foreach (var (p, dir) in Expansions.Installed(g))
+        {
+            var badge = PackBadge(p, dir, 24);
+            if (!p.Expansion && firstStuff && badges.Children.Count > 0) { badge.Margin = new Thickness(8, 0, 0, 0); firstStuff = false; }
+            badges.Children.Add(badge);
+        }
         ((StackPanel)left).Children.Add(badges);
         row.Children.Add(left);
         UIElement action;
@@ -344,15 +351,22 @@ public sealed partial class MainWindow
     // ---------- the administrator window ----------
 
     // A change to the game's files: made here when this copy may write there, else in the administrator window, opened on
-    // the same screen; this window waits, hidden, and reads the game again when it closes. False when the change was not
-    // made here (the caller stops).
+    // the same screen (Components: with the choices made here, applied there at once); this window waits, hidden, and reads
+    // the game again when it closes. False when the change was not made here (the caller stops).
     // drivers: NVIDIA's and AMD's driver settings (Smooth Motion, AFMF) are machine-wide and always need it
     async Task<bool> CanChangeHere(string screen, bool drivers = false)
     {
-        if (_game is not { } g || Elevation.IsElevated || (!drivers && Elevation.CanWrite(g.Bin))) return true;
+        // (a dry run changes nothing and refuses in place: it never asks Windows for administrator)
+        if (_game is not { } g || Elevation.IsElevated || DryRun || (!drivers && Elevation.CanWrite(g.Bin))) return true;
         if (Environment.ProcessPath is not { } exe) return true;
-        if (!await Confirm(T("Administrator permission needed"), T("The game is in a protected folder. Windows will ask for permission, then the change opens in its own window."), T("Continue"))) return false;
-        _maintenance = Elevation.StartMaintenance(exe, g.Bin, screen);
+        var carry = screen == "components";
+        if (!await Confirm(T("Administrator permission needed"), carry
+                ? T("Windows will ask for permission, then your changes are applied in their own window.")
+                : T("Windows will ask for permission, then this screen opens in its own window to make the change."), T("Continue"))) return false;
+        string? choices = null;
+        try { if (carry) choices = Elevation.SaveChoices(ChoicesNow()); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { App.Log(e); }
+        _maintenance = Elevation.StartMaintenance(exe, g.Bin, screen, choices);
         if (_maintenance is null) { await Message(T("Nothing was changed"), T("Windows did not allow the change.")); return false; }
         AppWindow.Hide();
         try { await _maintenance.WaitForExitAsync(); } catch (Exception e) { App.Log(e); }
@@ -368,7 +382,44 @@ public sealed partial class MainWindow
         return false;
     }
 
-    bool NeedsAdminWindow => _game is { } g && !Elevation.IsElevated && !Elevation.CanWrite(g.Bin) && Preview is null;
+    // what Components shows now, for the administrator window (TakeChoices)
+    Dictionary<string, string> ChoicesNow()
+    {
+        var d = new Dictionary<string, string>
+        {
+            ["renderer"] = _renderer, ["mod"] = B(ModToggle.IsOn), ["modexp"] = B(_modExp), ["s3ss"] = B(S3ssToggle.IsOn),
+            ["mono"] = B(MonoToggle.IsOn), ["s3pp"] = B(S3ppToggle.IsOn), ["restart"] = B(RestartToggle.IsOn),
+        };
+        if (_smoothWant is { } sm) d["smooth"] = B(sm);
+        if (_afmfWant is { } af) d["afmf"] = B(af);
+        if (_fpsWant is { } fps) d["fps"] = fps.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (_s3ppArchive is { } a && _s3ppFor == _game?.Bin) d["s3pparchive"] = a;
+        return d;
+        static string B(bool b) => b ? "1" : "0";
+    }
+
+    // the administrator window started with a launcher's choices: they go on Components; true when there were some
+    bool TakeChoices()
+    {
+        var d = Elevation.Choices(Environment.GetCommandLineArgs());
+        if (d.Count == 0 || _game is null || _step != ComponentsStep) return false;
+        bool On(string k) => d.TryGetValue(k, out var v) && v == "1";
+        if (d.TryGetValue("renderer", out var r) && r is RDxvk or RBridge or RNative or RKeep) _renderer = r;
+        ModToggle.IsOn = On("mod");
+        _modExp = On("modexp");
+        (_modExp ? ModExperimental : ModStable).IsChecked = true;
+        S3ssToggle.IsOn = On("s3ss");
+        MonoToggle.IsOn = On("mono");
+        S3ppToggle.IsOn = On("s3pp");
+        if (RestartToggle.IsEnabled) RestartToggle.IsOn = On("restart");
+        if (d.ContainsKey("smooth")) _smoothWant = On("smooth");
+        if (d.ContainsKey("afmf")) _afmfWant = On("afmf");
+        if (d.TryGetValue("fps", out var f) && int.TryParse(f, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var fps)) _fpsWant = fps;
+        if (d.TryGetValue("s3pparchive", out var a) && File.Exists(a)) { _s3ppArchive = a; _s3ppFor = _game.Bin; }
+        RefreshAll();
+        return true;
+    }
+    static bool DryRun => Environment.GetEnvironmentVariable("APEX_SETUP_DRY_RUN") == "1";
 
     // the screen the administrator window opens on
     int MaintenanceScreen(string? screen) => screen switch { "manage" => Manage, "welcome" => Welcome, "health" => HealthScreen, _ => ComponentsStep };

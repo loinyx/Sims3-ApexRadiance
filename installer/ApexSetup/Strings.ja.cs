@@ -252,7 +252,7 @@ public static partial class Strings
         ["Fixes stutters, Sims getting stuck and crashes."] = "カクつき、シムが動かなくなる問題、クラッシュを修正します。",
         ["Needed only by some script mods; turn it on if a mod asks for it."] =
             "一部のスクリプト MOD でのみ必要です。MOD に求められたらオンにしてください。",
-        ["Makes the game run faster. Needs a free Nexus Mods account; Setup installs it when your download finishes."] =
+        ["Makes the game run faster. Needs a free Nexus Mods account; the launcher installs it when your download finishes."] =
             "ゲームの動作を速くします。Nexus Mods の無料アカウントが必要です。ダウンロードが終わるとセットアップがインストールします。",
         ["Puts back the graphics files you had before."] = "以前のグラフィックファイルを元に戻します。",
         ["Goes back to the game's default graphics. Your in-game graphics settings may reset once."] =

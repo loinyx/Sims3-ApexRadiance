@@ -254,7 +254,7 @@ public static partial class Strings
         ["Experimental builds are for testers and may break. Switching channel replaces ts3native.ini; a copy is kept next to it."] =
             "As versões experimentais são para testadores e podem falhar. Trocar de canal substitui o ts3native.ini; uma cópia fica ao lado dele.",
         ["Needed only by some script mods; turn it on if a mod asks for it."] = "Só alguns mods de script precisam dele; ligue se um mod pedir.",
-        ["Makes the game run faster. Needs a free Nexus Mods account; Setup installs it when your download finishes."] = "Deixa o jogo mais rápido. Precisa de uma conta grátis no Nexus Mods; o instalador o instala quando o download terminar.",
+        ["Makes the game run faster. Needs a free Nexus Mods account; the launcher installs it when your download finishes."] = "Deixa o jogo mais rápido. Precisa de uma conta grátis no Nexus Mods; o instalador o instala quando o download terminar.",
         ["Puts back the graphics files you had before."] = "Devolve os arquivos gráficos que você tinha antes.",
         ["Goes back to the game's default graphics. Your in-game graphics settings may reset once."] = "Volta aos gráficos padrão do jogo. As configurações gráficas do jogo podem voltar ao padrão uma vez.",
         ["Language"] = "Idioma",

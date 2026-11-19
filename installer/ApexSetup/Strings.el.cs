@@ -263,7 +263,7 @@ public static partial class Strings
             "Διορθώνει κολλήματα, Sims που κολλάνε και κρασαρίσματα.",
         ["Needed only by some script mods; turn it on if a mod asks for it."] =
             "Χρειάζεται μόνο σε ορισμένα mods script· ενεργοποίησέ το αν σου το ζητήσει κάποιο mod.",
-        ["Makes the game run faster. Needs a free Nexus Mods account; Setup installs it when your download finishes."] =
+        ["Makes the game run faster. Needs a free Nexus Mods account; the launcher installs it when your download finishes."] =
             "Κάνει το παιχνίδι πιο γρήγορο. Χρειάζεται δωρεάν λογαριασμό στο Nexus Mods· το πρόγραμμα εγκατάστασης το εγκαθιστά όταν τελειώσει η λήψη σου.",
         ["Puts back the graphics files you had before."] = "Επαναφέρει τα αρχεία γραφικών που είχες πριν.",
         ["Goes back to the game's default graphics. Your in-game graphics settings may reset once."] =

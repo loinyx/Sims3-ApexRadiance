@@ -260,7 +260,7 @@ public static partial class Strings
         ["Fixes stutters, Sims getting stuck and crashes."] = "Corrige tirones, Sims atascados y cierres inesperados.",
         ["Needed only by some script mods; turn it on if a mod asks for it."] =
             "Solo lo necesitan algunos mods de script; actívalo si un mod lo pide.",
-        ["Makes the game run faster. Needs a free Nexus Mods account; Setup installs it when your download finishes."] =
+        ["Makes the game run faster. Needs a free Nexus Mods account; the launcher installs it when your download finishes."] =
             "Hace que el juego vaya más rápido. Necesita una cuenta gratuita de Nexus Mods; el instalador lo instala cuando termine tu descarga.",
         ["Puts back the graphics files you had before."] = "Restaura los archivos gráficos que tenías antes.",
         ["Goes back to the game's default graphics. Your in-game graphics settings may reset once."] =

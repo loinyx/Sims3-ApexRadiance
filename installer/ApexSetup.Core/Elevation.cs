@@ -9,7 +9,7 @@ namespace ApexSetup;
 // write to (a Steam library on another drive) never asks. The game is never started from the administrator copy.
 public static class Elevation
 {
-    public const string MaintainArg = "--maintain", OpenArg = "--open";
+    public const string MaintainArg = "--maintain", OpenArg = "--open", ChoicesArg = "--choices";
 
     public static bool IsElevated
     {
@@ -38,11 +38,13 @@ public static class Elevation
     }
 
     // The same exe as administrator, opened on the game and screen given; null when the player said no to Windows.
-    public static Process? StartMaintenance(string exe, string bin, string screen)
+    // choices: a file with what the player chose in the launcher, applied there at once (Choices)
+    public static Process? StartMaintenance(string exe, string bin, string screen, string? choices = null)
     {
         try
         {
-            return Process.Start(new ProcessStartInfo(exe, $"{MaintainArg} {SelfUpdate.Quote(bin)} {OpenArg} {screen}")
+            var more = choices is null ? "" : $" {ChoicesArg} {SelfUpdate.Quote(choices)}";
+            return Process.Start(new ProcessStartInfo(exe, $"{MaintainArg} {SelfUpdate.Quote(bin)} {OpenArg} {screen}{more}")
                 { UseShellExecute = true, Verb = "runas" });
         }
         catch (Win32Exception e) when (e.NativeErrorCode == 1223) { return null; } // (the UAC prompt cancelled)
@@ -58,6 +60,33 @@ public static class Elevation
             else if (args[i] == OpenArg) screen = args[i + 1];
         }
         return (bin, screen);
+    }
+
+    // The choices a launcher passed (key=value lines, read once: the file is deleted); empty without one. Only ever
+    // the same choices the screen itself offers, so a changed file can ask for nothing the player could not click.
+    public static Dictionary<string, string> Choices(IReadOnlyList<string> args)
+    {
+        var d = new Dictionary<string, string>();
+        for (int i = 0; i + 1 < args.Count; i++)
+        {
+            if (args[i] != ChoicesArg || !File.Exists(args[i + 1])) continue;
+            try
+            {
+                foreach (var l in File.ReadAllLines(args[i + 1]))
+                    if (l.IndexOf('=') is > 0 and var k) d[l[..k]] = l[(k + 1)..];
+                File.Delete(args[i + 1]);
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        }
+        return d;
+    }
+
+    public static string SaveChoices(IEnumerable<KeyValuePair<string, string>> choices)
+    {
+        Directory.CreateDirectory(Paths.Ops);
+        var f = Path.Combine(Paths.Ops, $"choices-{Guid.NewGuid():N}.txt");
+        File.WriteAllLines(f, choices.Select(c => $"{c.Key}={c.Value}"));
+        return f;
     }
 
     // An administrator start of a launcher that is not installed yet (the update an old, elevated Setup started): opened
