@@ -139,6 +139,21 @@ public static class ModNotes
         Save();
     }
 
+    // a mod leaves the list (merged into another): its note without deleting its picture, for Put to bring back
+    public static ModNote? Take(string rel)
+    {
+        if (Get(rel) is not { } n) return null;
+        All.Remove(rel);
+        Save();
+        return n;
+    }
+
+    public static void Put(string rel, ModNote n)
+    {
+        All[rel] = n;
+        Save();
+    }
+
     public static void Forget(string rel)
     {
         if (Get(rel) is not { } n) return;
@@ -184,7 +199,7 @@ public static partial class ModLibrary
         {
             return Directory.EnumerateDirectories(mods, "*", new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true })
                 .Select(d => Path.GetRelativePath(mods, d))
-                .Where(r => !r.Equals(Mods.DisabledName, StringComparison.OrdinalIgnoreCase) && !r.StartsWith(Mods.DisabledName + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                .Where(r => !new[] { Mods.DisabledName, ModMerge.FolderName }.Any(n => r.Equals(n, StringComparison.OrdinalIgnoreCase) || r.StartsWith(n + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)))
                 .Order(StringComparer.OrdinalIgnoreCase).ToList();
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return []; }
@@ -197,7 +212,7 @@ public static partial class ModLibrary
         if (name.Length == 0 || name.Length > 120 || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || name is "." or ".."
             || Regex.IsMatch(name, @"^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$", RegexOptions.IgnoreCase))
             throw new SetupException("That name can't be used for a file or folder.");
-        if (name.Equals(Mods.DisabledName, StringComparison.OrdinalIgnoreCase)) throw new SetupException("That name is the launcher's own folder.");
+        if (name.Equals(Mods.DisabledName, StringComparison.OrdinalIgnoreCase) || name.Equals(ModMerge.FolderName, StringComparison.OrdinalIgnoreCase)) throw new SetupException("That name is the launcher's own folder.");
         return name;
     }
 
@@ -233,6 +248,7 @@ public static partial class ModLibrary
         var offFrom = Path.Combine(Mods.Disabled(docs), rel);
         if (Directory.Exists(offFrom)) Directory.Move(offFrom, Path.Combine(Mods.Disabled(docs), to));
         ModNotes.Move(Path.Combine("Mods", rel), Path.Combine("Mods", to), folder: true);
+        ModMerge.Moved(docs, Path.Combine("Mods", rel), Path.Combine("Mods", to), folder: true);
         return to;
     }
 
@@ -266,6 +282,7 @@ public static partial class ModLibrary
         File.Move(m.Path, target);
         var moved = m with { Path = target, Rel = Path.Combine("Mods", folderRel, Path.GetFileName(target)) };
         ModNotes.Move(m.Rel, moved.Rel);
+        ModMerge.Moved(docs, m.Rel, moved.Rel);
         return moved;
     }
 
@@ -282,6 +299,7 @@ public static partial class ModLibrary
         File.Move(m.Path, target);
         var moved = m with { Path = target, Rel = Path.Combine(Path.GetDirectoryName(m.Rel) ?? "", name) };
         ModNotes.Move(m.Rel, moved.Rel);
+        if (ModMerge.DocsOf(m) is { } docs) ModMerge.Moved(docs, m.Rel, moved.Rel);
         return moved;
     }
 
