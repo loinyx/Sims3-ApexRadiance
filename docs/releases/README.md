@@ -5,6 +5,7 @@ One page per published version of Apex Radiance (`ApexRadiance.asi`, repository
 GitHub release text in a common layout. Unreleased work is described in the feature pages with the status
 "In development"; it gets a page here only when it is published.
 
+- [4.0.10](4.0.10.md): opening System > Display no longer crashes the game when another mod made a device of its own.
 - [4.0.9](4.0.9.md): screenshots and videos work when another mod sets a 10-bit screen (converted to 8-bit on the GPU).
 - [4.0.8](4.0.8.md): no crash at start with Turbo Simulation Engine under the RTX Remix bridge (Turbo gets the device Apex draws on).
 - [4.0.7](4.0.7.md): lamp light no longer past wall ends, beside walls or under roofed rooms; switched-on lamps and top-story half walls lit at once on every story; Fewer mouse picks when still, Frame deadline while moving, the shared room solve time and six Ambient Occlusion options on by default; RTX Remix bridge fixes and Setup 1.2.7, contributed by @rodneypantonial.

@@ -167,6 +167,7 @@ const I18n::Pair kPairs[] = {
     {"Shaders: run ReShade and GShade looks in Apex, without either installed", "Shaders: looks του ReShade και του GShade μέσα στο Apex, χωρίς να εγκαταστήσεις κανένα"},
     {"Shaders: five built-in looks to start from, and your own .fx files", "Shaders: πέντε ενσωματωμένα looks για αρχή και τα δικά σου αρχεία .fx"},
     {"Shaders: download ReShade's shader packs from the menu, choosing which ones", "Shaders: κατέβασε τα πακέτα shaders του ReShade από το μενού, διαλέγοντας ποια"},
+    {"Display: opening the page no longer crashes the game with some mods installed", "Οθόνη: το άνοιγμα της σελίδας δεν κρασάρει πια το παιχνίδι με ορισμένα mod"},
     {"Capture: screenshots and videos work when another mod sets a 10-bit screen", "Λήψη: τα στιγμιότυπα και τα βίντεο λειτουργούν όταν άλλο mod θέτει την οθόνη σε 10 bit"},
     {"Capture: screenshots and videos with your effects, on a page of their own", "Λήψη: στιγμιότυπα και βίντεο με τα εφέ σου, σε δική τους σελίδα"},
     {"Presets: Capture and Shaders parts, and shared presets fetch the packs they need", "Προρυθμίσεις: μέρη Λήψη και Shaders, και οι κοινόχρηστες προρυθμίσεις κατεβάζουν τα πακέτα που χρειάζονται"},

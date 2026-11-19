@@ -167,6 +167,7 @@ const I18n::Pair kPairs[] = {
     {"Shaders: run ReShade and GShade looks in Apex, without either installed", "Shaders: ReShade- och GShade-looks i Apex, utan att installera någon av dem"},
     {"Shaders: five built-in looks to start from, and your own .fx files", "Shaders: fem inbyggda looks att börja med och dina egna .fx-filer"},
     {"Shaders: download ReShade's shader packs from the menu, choosing which ones", "Shaders: ladda ned ReShades shaderpaket från menyn och välj vilka"},
+    {"Display: opening the page no longer crashes the game with some mods installed", "Skärm: att öppna sidan kraschar inte längre spelet med vissa moddar"},
     {"Capture: screenshots and videos work when another mod sets a 10-bit screen", "Inspelning: skärmbilder och videor fungerar när ett annat mod ställer skärmen på 10 bitar"},
     {"Capture: screenshots and videos with your effects, on a page of their own", "Inspelning: skärmbilder och videor med dina effekter, på en egen sida"},
     {"Presets: Capture and Shaders parts, and shared presets fetch the packs they need", "Förinställningar: delarna Inspelning och Shaders, och delade förinställningar hämtar paketen de behöver"},

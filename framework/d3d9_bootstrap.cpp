@@ -303,10 +303,13 @@ HRESULT STDMETHODCALLTYPE Hooked_CreateDevice(IDirect3D9* self, UINT adapter, D3
         return D3D_OK;
     }
     const bool hal = type == D3DDEVTYPE_HAL;
-    // Window mode and resolution (System > Display); the game's own request again when the device refuses Apex's
+    // Window mode and resolution (System > Display) follow the game's device only: a device another mod makes after it
+    // would leave Display its IDirect3D9 (released with that device) and its window
+    const bool screen = hal && !g_device.load();
+    // The game's own request again when the device refuses Apex's
     const D3DPRESENT_PARAMETERS asked = pp ? *pp : D3DPRESENT_PARAMETERS{};
     const HWND window = pp && pp->hDeviceWindow ? pp->hDeviceWindow : focus;
-    const bool changed = hal && pp && HookGuard::Run("Display before CreateDevice", false, [&] { return Screen::AdjustPresentParams(self, adapter, window, pp, "CreateDevice"); });
+    const bool changed = screen && pp && HookGuard::Run("Display before CreateDevice", false, [&] { return Screen::AdjustPresentParams(self, adapter, window, pp, "CreateDevice"); });
     HRESULT hr = o_createDevice(self, adapter, type, focus, flags, pp, out);
     const bool refused = FAILED(hr) && changed;
     if (refused) {
@@ -314,7 +317,7 @@ HRESULT STDMETHODCALLTYPE Hooked_CreateDevice(IDirect3D9* self, UINT adapter, D3
         *pp = asked;
         hr = o_createDevice(self, adapter, type, focus, flags, pp, out);
     }
-    if (SUCCEEDED(hr) && hal && pp) HookGuard::Try("Display after CreateDevice", [&] { Screen::AfterDevice(window, pp, !refused); });
+    if (SUCCEEDED(hr) && screen && pp) HookGuard::Try("Display after CreateDevice", [&] { Screen::AfterDevice(window, pp, !refused); });
     if (SUCCEEDED(hr) && hal && out && *out) {
         LoadTiming::NoteDeviceCreated();
         LOG_INFO(std::format("[D3D] Game device created: {}x{}, {} (device {:#x}, back buffer format {}, multisample {}, flags {:#x})", pp ? pp->BackBufferWidth : 0,

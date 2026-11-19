@@ -19,6 +19,10 @@ constexpr const char* k407Improved[] = {
     "RTX Remix bridge: the game keeps its graphics settings on every start",
     nullptr};
 
+constexpr const char* k4010Fixed[] = {
+    "Display: opening the page no longer crashes the game with some mods installed",
+    nullptr};
+
 constexpr const char* k409Fixed[] = {
     "Capture: screenshots and videos work when another mod sets a 10-bit screen",
     nullptr};
@@ -764,6 +768,7 @@ constexpr const char* k256Improved[] = {"Rendering optimizations are on by defau
 constexpr const char* k256Fixed[] = {"Street lamps outside lots update the lighting after their color changes", nullptr};
 
 constexpr Release kReleases[] = {
+    {"4.0.10", "2026-11-19", nullptr, nullptr, k4010Fixed},
     {"4.0.9", "2026-11-19", nullptr, nullptr, k409Fixed},
     {"4.0.8", "2026-11-19", nullptr, nullptr, k408Fixed},
     {"4.0.7", "2026-11-19", k407Added, k407Improved, k407Fixed, "Lamp light stays behind walls and follows every switch and drag at once", k407Highlights},

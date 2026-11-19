@@ -35,6 +35,8 @@ EA app 1.69.47 (`TS3.exe`), 2026-11-11, commit `8f762fba` (resolution request fo
 
 ## Pending
 
+- Opening System > Display with a mod that makes a second device after the game's (a player's log: a 120x61 device
+  after the first Present, Turbo.asi loaded): no crash, the game's resolutions listed.
 - Focused game: 60 / 120 / 165 / 237 fps caps, measured rate and variation.
 - Live changes from the menu: Window, Borderless, Fullscreen (240 Hz) and back to Game setting; a resolution below
   the monitor's (image and mouse).

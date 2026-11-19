@@ -167,6 +167,7 @@ const I18n::Pair kPairs[] = {
     {"Shaders: run ReShade and GShade looks in Apex, without either installed", "셰이더: ReShade와 GShade 룩을 Apex에서 사용, 둘 다 설치할 필요 없음"},
     {"Shaders: five built-in looks to start from, and your own .fx files", "셰이더: 바로 쓸 수 있는 기본 룩 5개와 내 .fx 파일"},
     {"Shaders: download ReShade's shader packs from the menu, choosing which ones", "셰이더: 메뉴에서 ReShade 셰이더 팩을 골라서 다운로드"},
+    {"Display: opening the page no longer crashes the game with some mods installed", "디스플레이: 일부 모드가 있어도 페이지를 열 때 게임이 튕기지 않음"},
     {"Capture: screenshots and videos work when another mod sets a 10-bit screen", "캡처: 다른 모드가 화면을 10비트로 바꿔도 스크린샷과 동영상이 작동함"},
     {"Capture: screenshots and videos with your effects, on a page of their own", "캡처: 효과가 적용된 스크린샷과 동영상, 전용 페이지에서"},
     {"Presets: Capture and Shaders parts, and shared presets fetch the packs they need", "프리셋: 캡처와 셰이더 항목, 공유 프리셋은 필요한 팩을 받아옴"},
