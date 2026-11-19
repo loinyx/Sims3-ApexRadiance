@@ -229,6 +229,14 @@ static class ModMergeTests
                 "take out: the mod comes back identical, the rest is merged again under the same name");
             var outB = ModMerge.TakeOut(docs, outA.Remerged!.Merged, [Path.Combine("Mods", B)]);
             check(outB.Remerged is null && Same(before3, Snap(docs)) && !Directory.Exists(ModMerge.Folder(docs)), "take out: one of two out leaves both plain, every file identical");
+
+            // a mod added to a merge: it goes in beside the others, and splitting brings every file back identical
+            var two = ModMerge.Run(ModMerge.Plan(docs, [M(A), M(B)], "Two", "Packages", false), null, default).Merged;
+            var added = ModMerge.Edit(docs, two, [], [M(@"Packages\d.package")]);
+            check(added.Remerged is { Mods: 3 } am && am.Merged.Name == "Two.package" && ModMerge.Info(am.Merged)!.Originals.Count == 3 && !File.Exists(Path.Combine(mods, @"Packages\d.package")),
+                "edit: an added mod goes into the merge under the same name");
+            ModMerge.Split(docs, added.Remerged!.Merged);
+            check(Same(before3, Snap(docs)) && !Directory.Exists(ModMerge.Folder(docs)), "edit: splitting after an add restores every file identical");
         }
         catch (Exception e) { check(false, "merge: exception " + e); }
         finally

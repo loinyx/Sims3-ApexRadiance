@@ -92,6 +92,8 @@ public sealed partial class MainWindow
             _ => StripBadge(T("Installed by Apex Launcher"), "lock", "#CECBF6"),
         });
         g.Children.Add(badges);
+        // (badges on two lines push the centre picture down, clear of them)
+        if (badges.Children.Count > 1) placeholder.Margin = new Thickness(0, 52, 0, 20);
 
         var corner = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6, Margin = new Thickness(12), HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top };
         if (mine)
@@ -420,7 +422,7 @@ public sealed partial class MainWindow
         return s;
     }
 
-    // rename it, and untick mods to take them out; the rest is merged again and checked
+    // rename it, untick mods to take them out, tick others to add them; the result is merged again and checked
     async Task EditMergeAsync(ModRow r, MergeRecord info)
     {
         var body = new StackPanel { Spacing = 14, Width = 440 };
@@ -428,14 +430,19 @@ public sealed partial class MainWindow
         body.Children.Add(name);
         body.Children.Add(new TextBlock { Text = T("Mods in it · untick one to take it out"), FontSize = 12, Foreground = Res("ApexMutedBrush") });
         var boxes = new List<(CheckBox Box, MergeOriginal O)>();
+        var adds = new List<(CheckBox Box, ModRow Row)>();
         var list = new StackPanel { Spacing = 4 };
         var after = new TextBlock { FontSize = 12, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap };
         void Update()
         {
-            var keep = boxes.Count(b => b.Box.IsChecked == true);
+            var stay = boxes.Count(b => b.Box.IsChecked == true);
+            var added = adds.Count(a => a.Box.IsChecked == true);
+            var keep = stay + added;
             after.Text = keep == 0 ? T("After saving: every mod is back on its own and the merge goes away.")
-                : keep == info.Originals.Count ? T("After saving: the same {0} mods, in one file.", keep)
-                : T("After saving: {0} mods in one file, written again and checked. The others are back on their own, still on.", keep);
+                : keep == 1 ? T("After saving: a merge of one is no merge, so every mod is back on its own.")
+                : added == 0 && stay == info.Originals.Count ? T("After saving: the same {0} mods, in one file.", keep)
+                : added == 0 ? T("After saving: {0} mods in one file, written again and checked. The others are back on their own, still on.", keep)
+                : T("After saving: {0} mods in one file, {1} of them new, written again and checked.", keep, added);
         }
         foreach (var o in info.Originals.OrderBy(o => o.Rel, StringComparer.OrdinalIgnoreCase))
         {
@@ -445,23 +452,58 @@ public sealed partial class MainWindow
             boxes.Add((cb, o));
             list.Children.Add(cb);
         }
-        body.Children.Add(new ScrollViewer { Content = list, MaxHeight = 280 });
+        body.Children.Add(new ScrollViewer { Content = list, MaxHeight = 240 });
+
+        // other mods that can go in: packages of the player's that are on, found by name or folder
+        var candidates = _modRows.Where(x => Mine(x) && x.File.Enabled && !x.File.Rel.Equals(r.File.Rel, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(x => x.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        var addPanel = new StackPanel { Spacing = 8, Visibility = Visibility.Collapsed };
+        var search = new TextBox { PlaceholderText = T("Search mods") };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(search, T("Search mods"));
+        var addList = new StackPanel { Spacing = 2 };
+        foreach (var c in candidates)
+        {
+            var cb = new CheckBox { Content = $"{c.Name}   {c.Size}", Tag = (c.Name + " " + ModRow.Place(c.File)).ToLowerInvariant() };
+            Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(cb, c.Name);
+            ToolTipService.SetToolTip(cb, ModRow.Place(c.File) + " › " + c.File.Name);
+            cb.Checked += (_, _) => Update();
+            cb.Unchecked += (_, _) => Update();
+            adds.Add((cb, c));
+            addList.Children.Add(cb);
+        }
+        search.TextChanged += (_, _) =>
+        {
+            var q = search.Text.Trim().ToLowerInvariant();
+            foreach (var (cb, _) in adds) cb.Visibility = q.Length == 0 || ((string)cb.Tag).Contains(q) || cb.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        };
+        addPanel.Children.Add(search);
+        addPanel.Children.Add(new ScrollViewer { Content = addList, MaxHeight = 220 });
+        var addLabel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, HorizontalAlignment = HorizontalAlignment.Center };
+        addLabel.Children.Add(Lucide.Icon("plus", 15, Res("ApexAccentBrush")));
+        addLabel.Children.Add(new TextBlock { Text = T("Add mods to this merge"), FontSize = 13 });
+        var addButton = new Button { Content = addLabel, Height = 44, HorizontalAlignment = HorizontalAlignment.Stretch, CornerRadius = new CornerRadius(10), IsEnabled = candidates.Count > 0 };
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(addButton, T("Add mods to this merge"));
+        addButton.Click += (_, _) => { addButton.Visibility = Visibility.Collapsed; addPanel.Visibility = Visibility.Visible; search.Focus(FocusState.Programmatic); };
+        body.Children.Add(addButton);
+        body.Children.Add(addPanel);
         body.Children.Add(new Border { Child = after, Padding = new Thickness(12, 10, 12, 10), CornerRadius = new CornerRadius(8), Background = new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0x17, 0x16, 0x2A)) });
         Update();
         var d = new ContentDialog { Title = T("Edit merge"), Content = body, PrimaryButtonText = T("Save and check"), CloseButtonText = T("Cancel"), DefaultButton = ContentDialogButton.Primary, XamlRoot = Content.XamlRoot };
         if (await ShowDialog(d) != ContentDialogResult.Primary) return;
         var outRels = boxes.Where(b => b.Box.IsChecked != true).Select(b => b.O.Rel).ToList();
+        var addFiles = adds.Where(a => a.Box.IsChecked == true).Select(a => a.Row.File).ToList();
         var newName = name.Text.Trim();
-        if (outRels.Count == info.Originals.Count) { await SplitAsync(r); return; }
-        if (outRels.Count > 0)
+        if (outRels.Count == info.Originals.Count && addFiles.Count == 0) { await SplitAsync(r); return; }
+        if (outRels.Count > 0 || addFiles.Count > 0)
         {
             ModsInfo.IsOpen = true;
             ModsInfo.Severity = InfoBarSeverity.Informational;
-            ModsInfo.Title = T("Merging the rest again…");
+            ModsInfo.Title = addFiles.Count > 0 ? T("Merging again with the new mods…") : T("Merging the rest again…");
             ModsInfo.Message = "";
-            try { await Task.Run(() => ModMerge.TakeOut(Docs, r.File, outRels)); }
+            ModMerge.TakeOutResult res;
+            try { res = await Task.Run(() => ModMerge.Edit(Docs, r.File, outRels, addFiles)); }
             catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The merge was not changed as asked"), ErrorText(e)); return; }
-            ModsResult(T("{0} back on their own; {1} holds the rest", outRels.Count, r.Name), null);
+            ModsResult(res.Remerged is { } m ? T("{0} now holds {1} mods", m.Merged.Name, m.Mods) : T("Every mod is back on its own"), null);
             _modsLoaded = false;
             _folderSig = "";
             await LoadModsAsync();
