@@ -275,6 +275,8 @@ public static class ModKinds
         [Cttl] = Pre.Brush, [Cwat] = Pre.Brush, [Ctpt] = Pre.Brush,
     };
 
+    public static bool IsCatalog(uint type) => type == Objd || CommonAt.ContainsKey(type);
+
     // one catalog resource as an item, or null when unreadable. OBJD: by its categories; CWAL: wall or floor pattern.
     public static CatalogItem? Catalog(uint type, ulong instance, ReadOnlySpan<byte> d)
     {

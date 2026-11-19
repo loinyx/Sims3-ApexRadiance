@@ -73,7 +73,7 @@ static class ModKindsTests
     }
 
     // a CAS part header (s3pi CASPartResource): version, offset, no presets, name, float, byte, clothing, data type, age/gender
-    static byte[] Casp(uint clothing, uint ageGender)
+    public static byte[] Casp(uint clothing, uint ageGender)
     {
         var ms = new MemoryStream();
         var w = new BinaryWriter(ms);

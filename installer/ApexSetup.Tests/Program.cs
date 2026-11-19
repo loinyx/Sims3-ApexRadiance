@@ -1549,6 +1549,7 @@ ModMergeTests.Run(Check);
 ModKindsTests.Run(Check);
 HealthTests.Run(Check);
 ModToolsTests.Run(Check);
+DefaultReplacementsTests.Run(Check);
 
 Console.WriteLine(failures == 0 ? "ALL PASSED" : failures + " FAILED");
 return failures == 0 ? 0 : 1;
