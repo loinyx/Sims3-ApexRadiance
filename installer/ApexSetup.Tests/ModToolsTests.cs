@@ -69,27 +69,47 @@ static class ModToolsTests
                 && Refused(() => ModLibrary.MoveFolder(docs, Path.Combine("Packages", "B"), Path.Combine("Packages", "B", "A"))),
                 "folders: moved into another with its notes; into itself refused");
 
-            // files added: packages, a Sims3Pack to Downloads, a zip's packages, unsafe and other names skipped
+            // files added, every one checked first: real packages and a Sims3Pack go in (the Sims3Pack to Downloads), a zip's
+            // by name only; a Sims 4 package, a protected one, a cut-short one, an empty one, text named .package, a Sims3Pack
+            // without its header and a file already installed are not added, each with its reason
             var drop = Path.Combine(root, "drop");
             Directory.CreateDirectory(drop);
-            Write(Path.Combine(drop, "new.package"), "n");
-            Write(Path.Combine(drop, "house.sims3pack"), "s");
+            File.WriteAllBytes(Path.Combine(drop, "new.package"), Dbpf20(1));
+            File.WriteAllBytes(Path.Combine(drop, "house.sims3pack"), [7, 0, 0, 0, .. "TS3Pack"u8.ToArray(), 1, 2, 3]);
+            File.WriteAllBytes(Path.Combine(drop, "fake.sims3pack"), "not one"u8.ToArray());
             Write(Path.Combine(drop, "readme.txt"), "r");
+            Write(Path.Combine(drop, "text.package"), "just text, not a package at all, but long enough to have a header of ninety six bytes ................");
+            var ts4 = Dbpf20(2); ts4[8] = 1; File.WriteAllBytes(Path.Combine(drop, "sims4.package"), ts4);
+            var prot = Dbpf20(3); prot[3] = (byte)'P'; File.WriteAllBytes(Path.Combine(drop, "protected.package"), prot);
+            var cut = Dbpf20(4); File.WriteAllBytes(Path.Combine(drop, "cut.package"), cut[..(cut.Length - 40)]);
+            var empty = Dbpf20(5); BitConverter.GetBytes(0u).CopyTo(empty, 0x24); File.WriteAllBytes(Path.Combine(drop, "empty.package"), empty);
             var zip = Path.Combine(drop, "set.zip");
             using (var z = ZipFile.Open(zip, ZipArchiveMode.Create))
             {
-                using (var w = new StreamWriter(z.CreateEntry("set/inner.package").Open())) w.Write("z");
-                using (var w = new StreamWriter(z.CreateEntry("../../evil.package").Open())) w.Write("e");
+                using (var w = z.CreateEntry("set/inner.package").Open()) w.Write(Dbpf20(6));
+                using (var w = z.CreateEntry("../../evil.package").Open()) w.Write(Dbpf20(7));
+                using (var w = new StreamWriter(z.CreateEntry("broken.package").Open())) w.Write("broken");
                 using (var w = new StreamWriter(z.CreateEntry("notes.txt").Open())) w.Write("t");
             }
-            var res = ModLibrary.AddAny(docs, "Packages", [Path.Combine(drop, "new.package"), Path.Combine(drop, "house.sims3pack"), Path.Combine(drop, "readme.txt"), zip]);
+            var all = new[] { "new.package", "house.sims3pack", "fake.sims3pack", "readme.txt", "text.package", "sims4.package", "protected.package", "cut.package", "empty.package" }
+                .Select(n => Path.Combine(drop, n)).Append(zip).ToList();
+            var looked = ModInstall.Inspect(all, list());
+            string Why(string n) => looked.First(x => x.Name == n).Problems.FirstOrDefault() ?? "ok";
+            check(Why("new.package") == "ok" && Why("house.sims3pack") == "ok" && Why("inner.package") == "ok" && Why("evil.package") == "ok"
+                && Why("sims4.package").Contains("Sims 4") && Why("protected.package").Contains("protected") && Why("cut.package").Contains("damaged")
+                && Why("empty.package").Contains("empty") && Why("text.package").StartsWith("Not a package") && Why("broken.package").StartsWith("Not a package")
+                && Why("fake.sims3pack").Contains("header") && Why("readme.txt").StartsWith("Not a mod file"),
+                "install: each file checked, with the reason a Sims 4, protected, cut-short, empty or fake file is not added | " + string.Join(" | ", looked.Select(x => x.Name + "=" + (x.Problems.FirstOrDefault() ?? "ok"))));
+            var res = ModLibrary.AddAny(docs, "Packages", all, list());
             check(File.Exists(Path.Combine(mods, "Packages", "new.package")) && File.Exists(Path.Combine(docs, "Downloads", "house.sims3pack"))
                 && File.Exists(Path.Combine(mods, "Packages", "inner.package")) && File.Exists(Path.Combine(mods, "Packages", "evil.package"))
                 && !File.Exists(Path.Combine(root, "evil.package")) && !File.Exists(Path.Combine(docs, "evil.package"))
-                && res.Skipped.Contains("readme.txt") && res.Added.Count == 4,
-                "add: packages to the folder, Sims3Packs to Downloads, a zip's packages by name only (no path from inside it)");
-            var again = ModLibrary.AddAny(docs, "Packages", [Path.Combine(drop, "new.package")]);
-            check(again.Added.Single().EndsWith("new (2).package"), "add: a name taken gets \" (2)\"");
+                && res.Added.Count == 4 && res.Skipped.Count == 8 && !File.Exists(Path.Combine(mods, "Packages", "sims4.package")),
+                "install: only the files that pass go in, a zip's by name only (no path from inside it) | " + res.Added.Count + " | " + string.Join(" | ", res.Skipped));
+            var again = ModLibrary.AddAny(docs, "Packages", [Path.Combine(drop, "new.package")], list());
+            var forced = ModLibrary.AddAny(docs, "Packages", [Path.Combine(drop, "new.package")], list(), duplicates: true);
+            check(again.Added.Count == 0 && again.Skipped.Single().Contains("already installed as new.package") && forced.Added.Single().EndsWith("new (2).package"),
+                "install: a file already installed is not added twice unless asked, then it gets \" (2)\"");
 
             // duplicates by content, whatever the name or folder
             Write(Path.Combine(mods, "Packages", "B", "copy-of-mod3.package"), "content 3");
@@ -125,6 +145,24 @@ static class ModToolsTests
             ModNotes.Reload();
             try { Directory.Delete(root, true); } catch (Exception) { }
         }
+    }
+
+    // a small DBPF 2.0 package with n resources, as the game writes it (header, data, index with no constant fields)
+    static byte[] Dbpf20(int n)
+    {
+        using var ms = new MemoryStream();
+        var w = new BinaryWriter(ms);
+        w.Write("DBPF"u8.ToArray()); w.Write(2u); w.Write(0u); w.Write(new byte[96 - 12]);
+        var offsets = new List<uint>();
+        for (int i = 0; i < n; i++) { offsets.Add((uint)ms.Position); w.Write(System.Text.Encoding.ASCII.GetBytes($"res{i:000}")); }
+        var at = (uint)ms.Position;
+        w.Write(0u);
+        for (int i = 0; i < n; i++) { w.Write(0x0333406Cu); w.Write(0u); w.Write(0u); w.Write((uint)(i + 1000 * n)); w.Write(offsets[i]); w.Write(6u | 0x80000000u); w.Write(6u); w.Write((ushort)0); w.Write((ushort)1); }
+        var end = (uint)ms.Position;
+        ms.Position = 0x24; w.Write((uint)n);
+        ms.Position = 0x2C; w.Write(end - at);
+        ms.Position = 0x40; w.Write(at);
+        return ms.ToArray();
     }
 
     static void Write(string path, string text) { Directory.CreateDirectory(Path.GetDirectoryName(path)!); File.WriteAllText(path, text); }

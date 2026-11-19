@@ -33,46 +33,33 @@ public static partial class ModLibrary
     public sealed record AddResult(List<string> Added, List<string> Skipped);
 
     // files the player dropped or picked: packages into the folder, Sims3Packs into Downloads (the game's launcher installs
-    // them from there), a zip's packages and Sims3Packs taken out (names only, never a path from inside the zip)
-    public static AddResult AddAny(string docs, string folderRel, IEnumerable<string> files)
+    // them from there), a zip's packages and Sims3Packs taken out by name only (never a path from inside the zip). Every file
+    // is checked first (ModInstall): a broken, protected, Sims 4 or empty one is not added, nor one already installed unless
+    // asked. Skipped: "name: why".
+    public static AddResult AddAny(string docs, string folderRel, IEnumerable<string> files, IReadOnlyList<ModFile>? installed = null, bool duplicates = false)
     {
         Engine.CheckWritable();
         var dir = Under(docs, folderRel);
         var downloads = Path.Combine(docs, "Downloads");
         var added = new List<string>();
         var skipped = new List<string>();
-        void Put(string name, Func<string, bool> write)
+        foreach (var item in ModInstall.Inspect(files, installed ?? []))
         {
-            var ext = Path.GetExtension(name).ToLowerInvariant();
-            var into = ext == ".sims3pack" ? downloads : ext == ".package" ? dir : null;
-            if (into is null || !SafeFileName(name)) { skipped.Add(name); return; }
+            if (!item.Ok) { skipped.Add($"{item.Name}: {item.Problems[0]}"); continue; }
+            if (item.SameAs is { } same && !duplicates) { skipped.Add($"{item.Name}: already installed as {same}"); continue; }
+            if (!SafeFileName(item.Name)) { skipped.Add($"{item.Name}: the name can't be used for a file"); continue; }
+            var into = item.Kind == "sims3pack" ? downloads : dir;
             Directory.CreateDirectory(into);
-            var target = Mods.Free(Path.Combine(into, Path.GetFileName(name)));
-            if (write(target)) added.Add(target); else skipped.Add(name);
-        }
-        foreach (var f in files)
-        {
-            if (Directory.Exists(f)) { foreach (var x in Directory.EnumerateFiles(f, "*", SearchOption.AllDirectories)) Put(Path.GetFileName(x), t => { File.Copy(x, t); return true; }); continue; }
-            if (!File.Exists(f)) { skipped.Add(Path.GetFileName(f)); continue; }
-            if (f.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            var target = Mods.Free(Path.Combine(into, item.Name));
+            if (item.ZipEntry is { } entry)
             {
-                try
-                {
-                    using var zip = ZipFile.OpenRead(f);
-                    var any = false;
-                    foreach (var e in zip.Entries.Where(e => e.Length > 0 && e.Length < 4L << 30))
-                    {
-                        var n = Path.GetFileName(e.FullName.Replace('\\', '/'));
-                        if (!n.EndsWith(".package", StringComparison.OrdinalIgnoreCase) && !n.EndsWith(".sims3pack", StringComparison.OrdinalIgnoreCase)) continue;
-                        any = true;
-                        Put(n, t => { e.ExtractToFile(t); return true; });
-                    }
-                    if (!any) skipped.Add(Path.GetFileName(f));
-                }
-                catch (InvalidDataException) { skipped.Add(Path.GetFileName(f)); }
-                continue;
+                using var zip = ZipFile.OpenRead(item.Source);
+                (zip.GetEntry(entry) ?? throw new SetupException("The zip changed while it was being added.")).ExtractToFile(target);
+                // (checked again where it landed: the zip may have changed since it was inspected)
+                if (item.Kind == "package" && ModInstall.PackageProblems(target).FirstOrDefault() is { } late) { File.Delete(target); skipped.Add($"{item.Name}: {late}"); continue; }
             }
-            Put(Path.GetFileName(f), t => { File.Copy(f, t); return true; });
+            else File.Copy(item.Source, target);
+            added.Add(target);
         }
         return new AddResult(added, skipped);
     }
