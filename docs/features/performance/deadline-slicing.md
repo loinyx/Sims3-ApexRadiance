@@ -8,8 +8,8 @@ work on top; the work runs in the next frames.
 
 | | |
 |---|---|
-| Availability | In development (experimental) |
-| Default | Off |
+| Availability | Released in 4.0.7 |
+| Default | On |
 | Menu | System > Performance > Camera and lighting > *Frame deadline while moving* |
 | Configuration | `[patches.DeadlineSlicing]` in `ApexRadiance.toml` |
 | Needs | *Spread lot lighting while moving* (its camera motion detector) |
@@ -48,7 +48,7 @@ changes only the frames that already ran long, and only while the camera moves.
 
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
-| Frame deadline while moving | `[patches.DeadlineSlicing] enabled` | bool | off | | Turns the deadline and the shorter finalize slice on |
+| Frame deadline while moving | `[patches.DeadlineSlicing] enabled` | bool | on | | Turns the deadline and the shorter finalize slice on |
 | Developer > *Frame deadline* | (not saved) | float | 12 ms | 4 to 33 ms | Time after the frame start past which deferrable work waits |
 | Developer > *Finalize slice while moving* | (not saved) | int | 2 ms | 0 to 5 ms | Never above the game's own slice |
 

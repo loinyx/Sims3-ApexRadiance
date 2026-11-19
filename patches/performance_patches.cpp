@@ -194,7 +194,7 @@ class LotLightingMotionPatch : public ApexPatch {
     LotLightingMotionPatch() : ApexPatch(Performance::kLotLightingName, nullptr) {
         // TOML key: never rename
         RegisterIntSetting(&budgetMs_, "budgetWhileMovingMs", Performance::kLotLightingBudgetDefault, 1, 15, "Lot lighting time while moving (ms)");
-        RegisterBoolSetting(&sharedSolveTime_, "sharedSolveTime", false, "Shared room solve time while moving");
+        RegisterBoolSetting(&sharedSolveTime_, "sharedSolveTime", true, "Shared room solve time while moving");
         g_lotPatch.store(this);
     }
     ~LotLightingMotionPatch() override { g_lotPatch.store(nullptr); }
@@ -251,7 +251,7 @@ class LotLightingMotionPatch : public ApexPatch {
     }
 
     int budgetMs_ = Performance::kLotLightingBudgetDefault;
-    bool sharedSolveTime_ = false;
+    bool sharedSolveTime_ = true;
 };
 
 class LotDetailRangePatch;
@@ -816,8 +816,8 @@ APEX_REGISTER_FEATURE(PickSkipWhenStillPatch,
                                       "RTX Remix bridge. While the camera and the mouse stay still, that check waits (at most 0.25 s), and while the camera "
                                       "moves it runs every 4th frame. A click made while the check waits is held for a new check (about 3 frames). Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
                        .category = "Performance",
-                       .experimental = true,
-                       .enabledByDefault = false,
+                       .experimental = false,
+                       .enabledByDefault = true,
                        .supportedVersions = VERSION_STEAM,
                        .technicalDetails = {"The pick manager's update (0x6DFEC0, called by Scene::BeginFrame) re-picks at the last cursor position every other "
                                             "frame (camera byte +0x6FD, always 1). That re-pick is skipped while the camera (+0x0C..+0x1B, +0x30..+0x6F), the "
@@ -834,8 +834,8 @@ APEX_REGISTER_FEATURE(DeadlineSlicingPatch,
                                       "left before a 12 ms point in the frame, so it no longer piles up on a frame that is already slow. Nothing is skipped: it "
                                       "runs in the next frames. Needs Spread lot lighting while moving. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
                        .category = "Performance",
-                       .experimental = true,
-                       .enabledByDefault = false,
+                       .experimental = false,
+                       .enabledByDefault = true,
                        .supportedVersions = VERSION_STEAM,
                        .technicalDetails = {"The JobManager update (vtable 0x00FD9810 + 0x1C -> 0x00599A10) marks the frame start and, while moving, runs its main-thread "
                                             "jobs (the resource finalize job 0x007297C0) with a 2 ms slice instead of [svc+0xCC] = 5; one job always runs.",

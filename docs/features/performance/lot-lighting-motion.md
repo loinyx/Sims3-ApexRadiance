@@ -105,7 +105,7 @@ lot). While the camera moves Apex lowers that slice to 6 ms; the loading screen'
 also starts the [shared lot build time](lot-streaming.md#shared-lot-build-time), which first caps each slice to what the
 frame's shared budget leaves.
 
-**Shared room solve time (off by default).** The budget above is per lot, and the lot lighting update solves at least
+**Shared room solve time (on by default).** The budget above is per lot, and the lot lighting update solves at least
 one level of every lot with lighting work each frame. A pan over a town therefore adds up many small solves: a Frame
 Profiler recording of a far pan (Apex 4.0.1) showed about 27 "Lot room solve" calls and 9 ms per hitch frame, 2.8 ms per
 frame on average, and 81% of the moving hitches led by the solve. With `sharedSolveTime` on, the CALL of the level solve
@@ -131,7 +131,7 @@ waits while moving already holds) still runs whole. Offline checks: `tools/room_
 |---|---|---|---|---|---|
 | Spread lot lighting while moving | `[patches.LotLightingMotion] enabled` | bool | on | | Turns the budget scaling on |
 | Lot lighting time while moving (shown while the switch is on) | `[patches.LotLightingMotion] budgetWhileMovingMs` | int | 3 | 1 to 15 ms | The current lot's time per frame while moving; below 3 ms, loading lots keep the 3 ms share (6 / 2 ms). End labels "Smoother" / "Lights sooner"; 15 = the game's own. Applied at once (the hook reads it on every call; `Update` clears the reinstall request). The key is never renamed |
-| None (configuration file only) | `[patches.LotLightingMotion] sharedSolveTime` | bool | off | | While the camera moves, every lot's room solves share 4 ms per frame (*Shared room solve time* above). Applied at once |
+| None (configuration file only) | `[patches.LotLightingMotion] sharedSolveTime` | bool | on | | While the camera moves, every lot's room solves share 4 ms per frame (*Shared room solve time* above). Applied at once |
 
 ## Compatibility and interactions
 

@@ -25,7 +25,7 @@ and lamp lighting do not add contact shading.
 
 Apex Radiance runs a full-resolution GTAO (ground-truth ambient occlusion) pass on the game's depth buffer and blends the
 result into the finished 3D image. The result is deterministic: a still camera always produces the same image, with no
-temporal noise (the option Refine while the camera is still, off by default, is the one exception). The composite keeps lamp-lit and bright surfaces bright and preserves their colour, so the shade does
+temporal noise (the option Refine while the camera is still, on by default with Quality Low, is the one exception). The composite keeps lamp-lit and bright surfaces bright and preserves their colour, so the shade does
 not leave a grey film.
 
 Each frame:
@@ -41,6 +41,8 @@ Each frame:
 
 ## Settings
 
+The six direction and smoothing options sit under *Advanced* in the card (Distance and quality).
+
 | Menu label | TOML key | Type | Default | Range | Effect |
 |---|---|---|---|---|---|
 | Ambient Occlusion (card switch) | `enabled` | bool | on | | Turns the effect on |
@@ -48,12 +50,12 @@ Each frame:
 | Distance | `distance` | float | 752 m | 25 to 1000 m | View distance where the shade fades out (fade starts at 37.5% of it). Not used in map view |
 | Quality | `qualidade` | enum | High | Very Low, Low, Medium, High, Ultra | Directions per pixel: 2, 4, 6, 8, 12. Stored as 4, 0, 1, 2, 3 for compatibility with 2.1.0 |
 | Also in map view | `noMapa` | bool | on | | Shades the map view with radii sized for houses and trees (contact 4 m, large 15 m, no distance fade) |
-| Fewer directions when far | `zoomSlices` | bool | off | | One direction count per frame, from the depth at the screen centre: the Quality's count closer than 60 m, 3/4 of it from 60 m, 1/2 from 120 m (at least 2) |
-| Steady direction count | `zoomHysteresis` | bool | off | | With Fewer directions when far: the count changes 10% past a threshold and changes back 10% before it (60 m: 66 and 54 m; 120 m: 132 and 108 m) |
-| Fewer directions in the open | `blockSlices` | bool | off | | One direction count per 4x4 block of pixels: half the Quality's count where the depth does not bend within reach, the full count elsewhere and one block around |
-| Smooth flat surfaces | `blendNormals` | bool | off | | Blended normal reconstruction (XeGTAO's edge weights): no per-pixel pick of the neighbour, so a depth crease along a mesh seam cannot flip the normal pixel by pixel |
-| Edge-aware smoothing | `edgeBlur` | bool | off | | The 4x4 box weighs each tap by the AO pass's edge weights instead of the 1/z ratio, and the tent passes are dropped. The AO targets get 4 channels (A16B16G16R16F); without that format the usual blur runs |
-| Refine while the camera is still | `temporalStill` | bool | off | | Quality Low only: while the camera is still, each frame uses other directions and joins a history (a plain average of the first 16 frames, then 1/16 per frame). Any camera movement starts again from the fixed pattern |
+| Fewer directions when far | `zoomSlices` | bool | on | | One direction count per frame, from the depth at the screen centre: the Quality's count closer than 60 m, 3/4 of it from 60 m, 1/2 from 120 m (at least 2) |
+| Steady direction count | `zoomHysteresis` | bool | on | | With Fewer directions when far: the count changes 10% past a threshold and changes back 10% before it (60 m: 66 and 54 m; 120 m: 132 and 108 m) |
+| Fewer directions in the open | `blockSlices` | bool | on | | One direction count per 4x4 block of pixels: half the Quality's count where the depth does not bend within reach, the full count elsewhere and one block around |
+| Smooth flat surfaces | `blendNormals` | bool | on | | Blended normal reconstruction (XeGTAO's edge weights): no per-pixel pick of the neighbour, so a depth crease along a mesh seam cannot flip the normal pixel by pixel |
+| Edge-aware smoothing | `edgeBlur` | bool | on | | The 4x4 box weighs each tap by the AO pass's edge weights instead of the 1/z ratio, and the tent passes are dropped. The AO targets get 4 channels (A16B16G16R16F); without that format the usual blur runs |
+| Refine while the camera is still | `temporalStill` | bool | on | | Quality Low only: while the camera is still, each frame uses other directions and joins a history (a plain average of the first 16 frames, then 1/16 per frame). Any camera movement starts again from the fixed pattern |
 | Reach | `alcance` | float | 166% | 50 to 200% | Scales all radii |
 | Keep lamp light | `protegerLuz` | float | 46% | 0 to 100% | Share of light that bright and lamp-lit pixels keep |
 | Developer > Visual effects > Ambient shadows > Show the shade alone | (not saved) | bool | off | | Shows only the shade, in grey (developer mode) |

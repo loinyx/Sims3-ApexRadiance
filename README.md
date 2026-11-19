@@ -741,7 +741,7 @@ Apex Radiance builds on the work, research and tools of many people and projects
 - **Lot Streaming and daytime bloom fixes** — research and code by [@idavidveiga](https://github.com/idavidveiga).
 - **Looks and Capture** — contributed by [@ModestPixels](https://github.com/ModestPixels).
 - **Restart Host (`ts3wrap.exe`)** — adapted from Dalexlol's wrapper in [sims3-modernization](https://github.com/rodneypantonial/sims3-modernization).
-- **Scene update safety** — contribution by [@rodneypantonial](https://github.com/rodneypantonial) in [PR #38](https://github.com/loinyx/Sims3-ApexRadiance/pull/38).
+- **Contributions by [@rodneypantonial](https://github.com/rodneypantonial)** (Sims 3 Modernization) — scene update safety ([#38](https://github.com/loinyx/Sims3-ApexRadiance/pull/38)); *Fewer mouse picks when still*, *Frame deadline while moving* and the shared room solve time in Performance; *Fewer directions when far*, *Steady direction count*, *Fewer directions in the open*, *Smooth flat surfaces*, *Edge-aware smoothing* and *Refine while the camera is still* in Ambient Occlusion; RTX Remix bridge fixes and its rewind mode; Setup's experimental Sims 3 Modernization channel; the mod conflict scan; start-up and routing fixes, developer benchmarks and CI builds.
 
 ### Shader authors & projects
 
