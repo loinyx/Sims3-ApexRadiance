@@ -552,6 +552,7 @@ public static partial class Strings
         ["Latest"] = "Mais recente",
         ["Newer than yours"] = "Mais nova que a sua",
         ["This release has no notes."] = "Esta versão não tem notas.",
+        ["The notes could not be read right now. They show on GitHub."] = "Não foi possível ler as notas agora. Elas aparecem no GitHub.",
         ["Open on GitHub"] = "Abrir no GitHub",
 
         // Apex Launcher: Settings and uninstall

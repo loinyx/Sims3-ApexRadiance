@@ -122,9 +122,24 @@ public sealed partial class MainWindow
         host.Children.Add(cards);
     }
 
+    // Components: Apex Radiance and Sims 3 Modernization side by side, one above the other on a narrow window (so neither
+    // name is cut)
+    void OnCoreSized(object sender, SizeChangedEventArgs e)
+    {
+        var narrow = e.NewSize.Width < 620;
+        CoreGrid.ColumnDefinitions[0].Width = new GridLength(1, GridUnitType.Star);
+        CoreGrid.ColumnDefinitions[1].Width = new GridLength(narrow ? 0 : 1);
+        CoreGrid.ColumnDefinitions[2].Width = narrow ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+        Grid.SetColumn(CoreModernization, narrow ? 0 : 2);
+        Grid.SetRow(CoreModernization, narrow ? 2 : 0);
+        Grid.SetColumn(CoreDivider, narrow ? 0 : 1);
+        Grid.SetRow(CoreDivider, narrow ? 1 : 0);
+        CoreDivider.Height = narrow ? 1 : double.NaN;
+    }
+
     UIElement Hero(Game g)
     {
-        var grid = new Grid { Height = 300, CornerRadius = new CornerRadius(12), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) };
+        var grid = new Grid { MinHeight = 300, CornerRadius = new CornerRadius(12), Background = Res("ApexCardBrush"), BorderBrush = Res("ApexCardBorderBrush"), BorderThickness = new Thickness(1) };
         if (Screenshots(1).FirstOrDefault() is { } shot)
             grid.Children.Add(new Image { Source = new BitmapImage(new Uri(shot)), Stretch = Stretch.UniformToFill });
         var shade = new Border
@@ -136,9 +151,11 @@ public sealed partial class MainWindow
             },
         };
         grid.Children.Add(shade);
-        var row = new Grid { Padding = new Thickness(28), VerticalAlignment = VerticalAlignment.Bottom, ColumnSpacing = 20 };
+        var row = new Grid { Padding = new Thickness(28, 72, 28, 28), VerticalAlignment = VerticalAlignment.Bottom, ColumnSpacing = 20 };
         row.ColumnDefinitions.Add(new ColumnDefinition());
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        row.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         var left = Col(Eyebrow(g.Label.ToUpperInvariant()), new TextBlock { Text = "The Sims 3", FontSize = 36, FontWeight = FontWeights.SemiBold });
         ((StackPanel)left).Spacing = 8;
         // (a grid, not a row: the versions line wraps on a narrow window instead of running past the edge)
@@ -177,10 +194,23 @@ public sealed partial class MainWindow
             play.Click += async (_, _) => await PlayAsync(null);
             action = play;
         }
-        Grid.SetColumn((FrameworkElement)action, 1);
-        ((FrameworkElement)action).VerticalAlignment = VerticalAlignment.Bottom;
-        row.Children.Add(action);
+        var act = (FrameworkElement)action;
+        act.VerticalAlignment = VerticalAlignment.Bottom;
+        row.Children.Add(act);
         grid.Children.Add(row);
+        // a narrow window: Play goes under the title, full width, and the hero grows to fit (the title never cut short)
+        void Lay(double width)
+        {
+            var narrow = width < 640;
+            Grid.SetColumn(act, narrow ? 0 : 1);
+            Grid.SetRow(act, narrow ? 1 : 0);
+            Grid.SetColumnSpan(act, narrow ? 2 : 1);
+            act.HorizontalAlignment = narrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
+            act.Margin = new Thickness(0, narrow ? 18 : 0, 0, 0);
+            Grid.SetColumnSpan((FrameworkElement)left, narrow ? 2 : 1);
+        }
+        grid.SizeChanged += (_, e) => Lay(e.NewSize.Width);
+        Lay(1000);
         return grid;
     }
 
@@ -795,7 +825,7 @@ public sealed partial class MainWindow
         head.Children.Add(new TextBlock { Text = r.Version, FontSize = 20, FontWeight = FontWeights.SemiBold });
         head.Children.Add(Pill(installed == r.Version ? T("Installed") : installed is null ? T("Latest") : T("Newer than yours"), installed == r.Version ? "ApexSuccessBrush" : "ApexAccentBrush"));
         notes.Children.Add(head);
-        foreach (var raw in (r.Body ?? T("This release has no notes.")).Replace("\r", "").Split('\n'))
+        foreach (var raw in (r.Body ?? T("The notes could not be read right now. They show on GitHub.")).Replace("\r", "").Split('\n'))
         {
             var line = raw.TrimEnd();
             if (line.Length == 0) continue;

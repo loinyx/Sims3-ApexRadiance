@@ -1408,6 +1408,9 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         Check(!LauncherInstall.Registered() && !LauncherInstall.RunsAtStartup() && !File.Exists(LauncherInstall.StartMenuLink) && !File.Exists(LauncherInstall.DesktopLink),
             "uninstall removes the entry, the shortcuts and the Run value");
         Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(LauncherInstall.RegistryBase, false);
+        Releases.Remember(new Release("o/apex", "v4.0.7", [], "Lamp light stays behind walls."));
+        Check(Releases.Recall(new Release("o/apex", "v4.0.7", [])).Body == "Lamp light stays behind walls." && Releases.Recall(new Release("o/apex", "v4.0.8", [])).Body is null
+              && Releases.Recall(new Release("o/apex", "v4.0.7", [], "newer")).Body == "newer", "release notes the API gave are kept for a page read of the same tag, never for another");
         Paths.LocalAppData = oldLocal;
 
         // uninstall on a game: Apex and what came with it gone, files put back, mods back on; the player's things stay

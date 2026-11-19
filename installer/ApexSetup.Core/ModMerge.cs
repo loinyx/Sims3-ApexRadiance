@@ -267,7 +267,7 @@ public static partial class ModMerge
             {
                 var to = Path.Combine(plan.StoreDir, UnderMods(s.Mod.Rel));
                 Directory.CreateDirectory(Path.GetDirectoryName(to)!);
-                File.Move(s.Mod.Path, to);
+                Fs.Retry(() => File.Move(s.Mod.Path, to));
                 moves.Add((s.Mod.Path, to));
                 log.WriteLine($"moved {s.Mod.Rel}");
                 progress?.Report(new(MergeStep.Move, moves.Count, plan.Sources.Count));
@@ -276,7 +276,7 @@ public static partial class ModMerge
 
             // 5. the merged file into place
             FailPoint("rename");
-            File.Move(tmp, plan.TargetPath);
+            Fs.Retry(() => File.Move(tmp, plan.TargetPath));
             placed = true;
             log.WriteLine("step finish: in place");
             progress?.Report(new(MergeStep.Finish, 1, 1));
@@ -300,7 +300,7 @@ public static partial class ModMerge
             log.WriteLine($"failed: {e.GetType().Name}: {e.Message}");
             var stuck = new List<string>();
             for (var i = moves.Count - 1; i >= 0; i--)
-                try { File.Move(moves[i].To, moves[i].From); log.WriteLine("put back " + moves[i].From); }
+                try { var m = moves[i]; Fs.Retry(() => File.Move(m.To, m.From)); log.WriteLine("put back " + moves[i].From); }
                 catch (Exception x) when (x is IOException or UnauthorizedAccessException) { stuck.Add(moves[i].To); log.WriteLine($"NOT put back {moves[i].To}: {x.Message}"); }
             try { File.Delete(tmp); } catch (Exception x) when (x is IOException or UnauthorizedAccessException) { log.WriteLine("temp file stays: " + x.Message); }
             if (stuck.Count == 0) DeleteStore(plan.StoreDir);
@@ -522,7 +522,7 @@ public static partial class ModMerge
             foreach (var t in todo.Where(t => !t.Same))
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(t.To)!);
-                File.Move(t.From, t.To);
+                Fs.Retry(() => File.Move(t.From, t.To));
                 moved.Add((t.From, t.To));
                 log.WriteLine("restored " + t.O.Rel);
                 FailPoint("split");
@@ -534,16 +534,16 @@ public static partial class ModMerge
         {
             log.WriteLine($"failed: {e.Message}");
             for (var i = moved.Count - 1; i >= 0; i--)
-                try { File.Move(moved[i].To, moved[i].From); }
+                try { var m = moved[i]; Fs.Retry(() => File.Move(m.To, m.From)); }
                 catch (Exception x) when (x is IOException or UnauthorizedAccessException) { log.WriteLine($"NOT put back {moved[i].To}: {x.Message}"); }
             throw;
         }
         foreach (var t in todo.Where(t => t.Same))
         {
-            File.Delete(t.From); // (an identical copy is already in place)
+            Fs.Retry(() => File.Delete(t.From)); // (an identical copy is already in place)
             log.WriteLine("already in place " + t.O.Rel);
         }
-        File.Delete(Path.Combine(rec.Dir, "merge.json"));
+        Fs.Retry(() => File.Delete(Path.Combine(rec.Dir, "merge.json")));
         DeleteStore(rec.Dir);
         Forget(docs);
         ModNotes.Forget(merged.Rel);

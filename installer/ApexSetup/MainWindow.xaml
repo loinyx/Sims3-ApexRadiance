@@ -297,12 +297,13 @@
                                         <GradientStop Color="#131417" Offset="0.6" />
                                     </LinearGradientBrush>
                                 </Border.Background>
-                                <Grid>
+                                <Grid x:Name="CoreGrid" SizeChanged="OnCoreSized">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="1" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                                     <StackPanel Padding="24" Spacing="14">
                                         <Grid Height="44">
                                             <Image Source="ms-appx:///Assets/apex_logo.png" Width="44" Height="44" HorizontalAlignment="Left" />
@@ -316,8 +317,8 @@
                                         </StackPanel>
                                         <TextBlock x:Name="ApexDesc" Tag="dyn" Style="{StaticResource ApexMuted}" />
                                     </StackPanel>
-                                    <Border Grid.Column="1" Background="#2A2850" />
-                                    <StackPanel Grid.Column="2" Padding="24" Spacing="14">
+                                    <Border x:Name="CoreDivider" Grid.Column="1" Background="#2A2850" />
+                                    <StackPanel x:Name="CoreModernization" Grid.Column="2" Padding="24" Spacing="14">
                                         <Grid Height="44">
                                             <Border Width="44" Height="44" CornerRadius="10" Background="{StaticResource ApexPillBrush}" HorizontalAlignment="Left">
                                                 <TextBlock Text="S3M" FontSize="13" FontWeight="Bold" Foreground="{StaticResource ApexAccentBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />

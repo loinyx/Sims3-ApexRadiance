@@ -98,7 +98,7 @@ public static class GameCaches
         {
             // an antivirus or indexer holding a file: marked dropped now, deleted by the next Clean or Forget
             Engine.Log(e);
-            try { File.WriteAllText(DroppedMark, ""); } catch (Exception e2) when (e2 is IOException or UnauthorizedAccessException) { Engine.Log(e2); }
+            try { Directory.CreateDirectory(BackupRoot); File.WriteAllText(DroppedMark, ""); } catch (Exception e2) when (e2 is IOException or UnauthorizedAccessException) { Engine.Log(e2); }
         }
     }
 }
