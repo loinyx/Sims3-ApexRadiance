@@ -1474,6 +1474,43 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
 
         Check(SelfUpdate.Products.Contains("Apex Radiance Setup") && SelfUpdate.Products.Contains("Apex Launcher") && SelfUpdate.AssetNames[0] == "ApexLauncher.exe",
             "self-update takes the launcher under either name");
+        // the Mods screen's library: folders, moving and renaming with notes and tags following, what Resource.cfg loads
+        // (the Recycle Bin is not exercised: it would put a file in the real one)
+        var oldLocal2 = Paths.LocalAppData;
+        Paths.LocalAppData = Path.Combine(lr, "Local2");
+        ModNotes.Reload();
+        var md = Path.Combine(lr, "Docs3");
+        var mm = Path.Combine(md, "Mods");
+        Directory.CreateDirectory(Path.Combine(mm, "Packages", "A"));
+        File.WriteAllText(Path.Combine(mm, "Resource.cfg"), "Priority 500\nPackedFile Packages/*.package\nPackedFile Packages/*/*.package\n");
+        var f1 = Path.Combine(mm, "Packages", "A", "one.package");
+        File.WriteAllText(f1, "x");
+        var one = new ModFile(f1, Path.Combine("Mods", "Packages", "A", "one.package"), 1, ModKind.Package, true, false);
+        ModNotes.SetNotes(one.Rel, "hi");
+        ModNotes.CreateTag("Fav", "#E8716B");
+        ModNotes.SetTag(one.Rel, "Fav", true);
+        var nf = ModLibrary.CreateFolder(md, "Packages", "B");
+        var renamed = ModLibrary.Rename(ModLibrary.Move(one, md, nf), "two");
+        ModNotes.Reload();
+        var loadedBy = ModLibrary.LoadedBy(md)!;
+        Check(File.Exists(Path.Combine(mm, "Packages", "B", "two.package")) && !File.Exists(f1) && ModNotes.Get(renamed.Rel)?.Notes == "hi"
+            && ModNotes.TagsOf(renamed.Rel).SequenceEqual(["Fav"]) && loadedBy(@"Packages\B\two.package") && !loadedBy(@"Other\x.package")
+            && ModLibrary.Folders(md).Contains(@"Packages\B"),
+            "mods: a new folder, a move and a rename keep the notes and tags; Resource.cfg says which folders the game loads");
+        static bool Refused(Action a) { try { a(); return false; } catch (SetupException) { return true; } }
+        Check(Refused(() => ModLibrary.DeleteFolder(md, @"Packages\B")) && Refused(() => ModLibrary.CreateFolder(md, "", ".."))
+            && Refused(() => ModLibrary.CreateFolder(md, @"..\..", "x")) && Refused(() => ModLibrary.Move(renamed with { Locked = true }, md, ""))
+            && Refused(() => ModNotes.CreateTag("fav", "#7F77DD")),
+            "mods: a folder with files is not deleted; bad names, paths outside Mods, locked mods and a second tag of one name are refused");
+        ModNotes.EditTag("Fav", "Best", "#5B8DEF");
+        ModNotes.Reload();
+        var tagRenamed = ModNotes.TagsOf(renamed.Rel).SequenceEqual(["Best"]) && ModNotes.ColorOf("Best") == "#5B8DEF";
+        ModNotes.DeleteTag("Best");
+        Check(tagRenamed && ModNotes.TagsOf(renamed.Rel).Count == 0 && ModNotes.Tags.Count == 0 && ModNotes.Get(renamed.Rel)?.Notes == "hi",
+            "mods: a renamed tag follows on its mods, a deleted one leaves them and their notes");
+        Paths.LocalAppData = oldLocal2;
+        ModNotes.Reload();
+
         var cf = Elevation.SaveChoices(new Dictionary<string, string> { ["renderer"] = "dxvk", ["s3pparchive"] = @"C:\D\a=b.zip" });
         var ch = Elevation.Choices(["--maintain", "x", "--choices", cf]);
         Check(ch["renderer"] == "dxvk" && ch["s3pparchive"] == @"C:\D\a=b.zip" && !File.Exists(cf) && Elevation.Choices(["--choices", cf]).Count == 0,

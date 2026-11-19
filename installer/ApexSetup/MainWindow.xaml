@@ -10,41 +10,61 @@
 
     <Grid x:Name="Root">
         <Grid.Resources>
-            <!-- a mod's row in Mods (list view): on/off, name and folder, kind, size, what needs a look -->
+            <!-- a mod's row in Mods (list view): picture or kind letters, name and where it is (or what needs a look), kind, size, on/off -->
             <DataTemplate x:Key="ModRowTemplate" x:DataType="local:ModRow">
-                <Grid ColumnSpacing="14" Padding="4,8">
+                <Grid ColumnSpacing="12" Padding="0,8" Opacity="{x:Bind TextOpacity, Mode=OneWay}">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="36" />
                         <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="110" />
-                        <ColumnDefinition Width="80" />
-                        <ColumnDefinition Width="150" />
+                        <ColumnDefinition Width="128" />
+                        <ColumnDefinition Width="72" />
+                        <ColumnDefinition Width="44" />
                     </Grid.ColumnDefinitions>
-                    <Grid Width="44">
-                        <ToggleSwitch IsOn="{x:Bind IsOn, Mode=OneWay}" Visibility="{x:Bind ToggleVisible}" Toggled="{x:Bind OnToggled}"
-                                      OnContent="" OffContent="" MinWidth="0" AutomationProperties.Name="{x:Bind Name}" />
-                        <FontIcon Glyph="&#xE72E;" FontSize="14" Foreground="{StaticResource ApexMutedBrush}" Visibility="{x:Bind LockVisible}"
-                                  ToolTipService.ToolTip="{x:Bind LockTip}" HorizontalAlignment="Left" />
-                    </Grid>
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
-                        <TextBlock Text="{x:Bind Name}" FontSize="13" Opacity="{x:Bind TextOpacity, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
-                        <TextBlock Text="{x:Bind Folder}" Style="{StaticResource ApexMuted}" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
-                    </StackPanel>
-                    <TextBlock Grid.Column="2" Text="{x:Bind Kind}" Style="{StaticResource ApexMuted}" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="3" Text="{x:Bind Size}" Style="{StaticResource ApexMuted}" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="4" Text="{x:Bind Status, Mode=OneWay}" FontSize="12" Foreground="{x:Bind StatusBrush, Mode=OneWay}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                </Grid>
-            </DataTemplate>
-            <!-- a package in Mods (gallery view): its thumbnail, loaded when shown -->
-            <DataTemplate x:Key="ThumbTemplate" x:DataType="local:ThumbItem">
-                <StackPanel Width="132" Spacing="6" Padding="0,0,0,6">
-                    <Border Width="132" Height="132" CornerRadius="8" Background="{StaticResource ApexPillBrush}">
+                    <Border Width="36" Height="36" CornerRadius="7" Background="{x:Bind TileBrush}">
                         <Grid>
-                            <FontIcon Glyph="{x:Bind Glyph}" FontSize="26" Foreground="#4A4B55" Visibility="{x:Bind Placeholder, Mode=OneWay}" />
+                            <TextBlock Text="{x:Bind Mono}" FontSize="11" FontWeight="Bold" Foreground="#E6E6EC" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Visibility="{x:Bind Placeholder, Mode=OneWay}" />
                             <Image Source="{x:Bind Image, Mode=OneWay}" Stretch="UniformToFill" />
                         </Grid>
                     </Border>
-                    <TextBlock Text="{x:Bind Name}" FontSize="12" TextTrimming="CharacterEllipsis" Opacity="{x:Bind TextOpacity}" />
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                        <TextBlock Text="{x:Bind Name, Mode=OneWay}" FontSize="13" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                        <Grid ColumnSpacing="6" Visibility="{x:Bind SubVisible, Mode=OneWay}">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <ItemsControl ItemsSource="{x:Bind TagDots, Mode=OneWay}" VerticalAlignment="Center">
+                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="local:TagDot">
+                                        <Ellipse Width="8" Height="8" Fill="{x:Bind Fill}" ToolTipService.ToolTip="{x:Bind Name}" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock Grid.Column="1" Text="{x:Bind Sub, Mode=OneWay}" FontSize="12" Foreground="{x:Bind SubBrush, Mode=OneWay}" TextTrimming="CharacterEllipsis" />
+                        </Grid>
+                    </StackPanel>
+                    <Border Grid.Column="2" Style="{StaticResource ApexPill}" HorizontalAlignment="Left" Background="{x:Bind ChipBrush, Mode=OneWay}">
+                        <TextBlock Text="{x:Bind Chip, Mode=OneWay}" FontSize="11" Foreground="{x:Bind ChipText, Mode=OneWay}" />
+                    </Border>
+                    <TextBlock Grid.Column="3" Text="{x:Bind Size}" Style="{StaticResource ApexMuted}" VerticalAlignment="Center" />
+                    <Grid Grid.Column="4">
+                        <ToggleSwitch IsOn="{x:Bind IsOn, Mode=OneWay}" Visibility="{x:Bind ToggleVisible, Mode=OneWay}" Toggled="{x:Bind OnToggled}"
+                                      OnContent="" OffContent="" MinWidth="0" Width="40" AutomationProperties.Name="{x:Bind Name, Mode=OneWay}" />
+                        <FontIcon Glyph="&#xE72E;" FontSize="14" Foreground="{StaticResource ApexMutedBrush}" Visibility="{x:Bind LockVisible, Mode=OneWay}"
+                                  ToolTipService.ToolTip="{x:Bind LockTip}" HorizontalAlignment="Center" />
+                    </Grid>
+                </Grid>
+            </DataTemplate>
+            <!-- a mod in Mods (grid view): its picture, loaded when shown, and its name -->
+            <DataTemplate x:Key="ThumbTemplate" x:DataType="local:ModRow">
+                <StackPanel Width="140" Spacing="6" Padding="0,0,0,6" Opacity="{x:Bind TextOpacity, Mode=OneWay}">
+                    <Border Width="140" Height="140" CornerRadius="8" Background="{x:Bind TileBrush}">
+                        <Grid>
+                            <TextBlock Text="{x:Bind Mono}" FontSize="20" FontWeight="Bold" Foreground="#E6E6EC" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Visibility="{x:Bind Placeholder, Mode=OneWay}" />
+                            <Image Source="{x:Bind Image, Mode=OneWay}" Stretch="UniformToFill" />
+                        </Grid>
+                    </Border>
+                    <TextBlock Text="{x:Bind Name, Mode=OneWay}" FontSize="12" TextTrimming="CharacterEllipsis" />
                 </StackPanel>
             </DataTemplate>
             <!-- a save in Saves: the household photo, its name, when it was played, and what to do with it -->
@@ -561,39 +581,6 @@
 
                         <!-- 8..14 the launcher's own screens, filled in code (MainWindow.Launcher.cs) -->
                         <StackPanel x:Name="ScreenHome" Spacing="16" Visibility="Collapsed" />
-                        <StackPanel x:Name="ScreenMods" Spacing="16" Visibility="Collapsed">
-                            <Grid ColumnSpacing="12">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                <StackPanel Spacing="4">
-                                    <TextBlock Text="Mods" Style="{StaticResource ApexTitle}" />
-                                    <TextBlock x:Name="ModsSummary" Tag="dyn" Style="{StaticResource ApexMuted}" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                    <Button x:Name="ModsOpenFolder" Content="Open Mods folder" Click="OnModsOpenFolder" />
-                                    <SelectorBar x:Name="ModsView" SelectionChanged="OnModsView">
-                                        <SelectorBarItem x:Name="ModsViewList" Text="List" IsSelected="True" />
-                                        <SelectorBarItem x:Name="ModsViewGallery" Text="Gallery" />
-                                    </SelectorBar>
-                                </StackPanel>
-                            </Grid>
-                            <InfoBar x:Name="ModsInfo" IsClosable="True" />
-                            <!-- filters: the file type (tabs), what the files hold (chips), then search, folder and state -->
-                            <SelectorBar x:Name="ModTypes" SelectionChanged="OnModType" />
-                            <local:WrapPanel x:Name="ModKinds" Tag="dyn" Spacing="6" />
-                            <Grid ColumnSpacing="8">
-                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="210" /><ColumnDefinition Width="170" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                <AutoSuggestBox x:Name="ModSearch" PlaceholderText="Search mods or folders" QueryIcon="Find" TextChanged="OnModSearch"
-                                                AutomationProperties.Name="Search mods or folders" />
-                                <ComboBox x:Name="ModFolder" Grid.Column="1" HorizontalAlignment="Stretch" SelectionChanged="OnModFilter" AutomationProperties.Name="Folder" />
-                                <ComboBox x:Name="ModState" Grid.Column="2" HorizontalAlignment="Stretch" SelectionChanged="OnModFilter" AutomationProperties.Name="State" />
-                                <HyperlinkButton x:Name="ModClear" Grid.Column="3" Content="Clear filters" Click="OnModClear" VerticalAlignment="Center" />
-                            </Grid>
-                            <Border x:Name="ModListCard" Style="{StaticResource ApexCard}" Padding="8,4">
-                                <ListView x:Name="ModList" ItemTemplate="{StaticResource ModRowTemplate}" SelectionMode="None" MaxHeight="560" />
-                            </Border>
-                            <StackPanel x:Name="ModGallery" Tag="dyn" Spacing="18" Visibility="Collapsed" />
-                            <TextBlock x:Name="ModsNote" Tag="dyn" Style="{StaticResource ApexMuted}" />
-                        </StackPanel>
                         <StackPanel x:Name="ScreenWorlds" Spacing="16" Visibility="Collapsed" />
                         <StackPanel x:Name="ScreenSaves" Spacing="16" Visibility="Collapsed">
                             <Grid>
@@ -624,6 +611,100 @@
                         </StackPanel>
                     </Grid>
                 </ScrollViewer>
+                <!-- 9 Mods: its own full-height page (the folders, the list, the chosen mod), each part scrolling on its own -->
+                <Grid x:Name="ScreenMods" Visibility="Collapsed" SizeChanged="OnModsSized">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition x:Name="ModColFolders" Width="240" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition x:Name="ModColDetails" Width="330" />
+                    </Grid.ColumnDefinitions>
+                    <!-- folders -->
+                    <Grid BorderBrush="{StaticResource ApexCardBorderBrush}" BorderThickness="0,0,1,0" Padding="12,24,12,12" RowSpacing="8">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                        <Grid Padding="10,0,0,0">
+                            <TextBlock Text="FOLDERS" FontSize="11" FontWeight="SemiBold" CharacterSpacing="60" Foreground="{StaticResource ApexMutedBrush}" VerticalAlignment="Center" />
+                            <Button x:Name="ModsNewFolder" HorizontalAlignment="Right" Width="32" Height="32" Padding="0" Click="OnModsNewFolder"
+                                    AutomationProperties.Name="New folder" ToolTipService.ToolTip="New folder">
+                                <FontIcon Glyph="&#xE710;" FontSize="14" />
+                            </Button>
+                        </Grid>
+                        <ListView x:Name="ModFolders" Grid.Row="1" SelectionMode="Single" SelectionChanged="OnModFolderPicked" AutomationProperties.Name="Folders">
+                            <ListView.ItemContainerStyle>
+                                <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                                    <Setter Property="MinHeight" Value="34" />
+                                    <Setter Property="Padding" Value="10,0,10,0" />
+                                </Style>
+                            </ListView.ItemContainerStyle>
+                        </ListView>
+                    </Grid>
+                    <!-- the list -->
+                    <Grid Grid.Column="1" Padding="28,24,28,0" RowSpacing="16">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <StackPanel Spacing="2">
+                                <TextBlock x:Name="ModsCrumb" Tag="dyn" Style="{StaticResource ApexMuted}" />
+                                <TextBlock x:Name="ModsTitle" Tag="dyn" Style="{StaticResource ApexTitle}" TextTrimming="CharacterEllipsis" />
+                                <TextBlock x:Name="ModsSummary" Tag="dyn" Style="{StaticResource ApexMuted}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom">
+                                <Button x:Name="ModsOpenFolder" Content="Open folder" Click="OnModsOpenFolder" />
+                                <Button x:Name="ModsAdd" Click="OnModsAdd">
+                                    <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE710;" FontSize="12" /><TextBlock Text="Add mods" /></StackPanel>
+                                </Button>
+                            </StackPanel>
+                        </Grid>
+                        <StackPanel Grid.Row="1" Spacing="10">
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                <AutoSuggestBox x:Name="ModSearch" PlaceholderText="Search names, notes, tags or folders" QueryIcon="Find" TextChanged="OnModSearch"
+                                                AutomationProperties.Name="Search mods" />
+                                <SelectorBar x:Name="ModsView" Grid.Column="1" SelectionChanged="OnModsView">
+                                    <SelectorBarItem x:Name="ModsViewList" Text="List" IsSelected="True" />
+                                    <SelectorBarItem x:Name="ModsViewGallery" Text="Grid" />
+                                </SelectorBar>
+                            </Grid>
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <ComboBox x:Name="ModKindBox" MinWidth="160" SelectionChanged="OnModFilter" AutomationProperties.Name="Type" />
+                                <ComboBox x:Name="ModState" MinWidth="130" SelectionChanged="OnModFilter" AutomationProperties.Name="State" />
+                                <ComboBox x:Name="ModSort" MinWidth="130" SelectionChanged="OnModFilter" AutomationProperties.Name="Sort by" />
+                            </StackPanel>
+                        </StackPanel>
+                        <InfoBar x:Name="ModsInfo" Grid.Row="2" IsClosable="True" />
+                        <Grid x:Name="ModListHead" Grid.Row="3" ColumnSpacing="12" Padding="12,0,12,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="36" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="128" />
+                                <ColumnDefinition Width="72" />
+                                <ColumnDefinition Width="44" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="1" Text="NAME" FontSize="11" CharacterSpacing="60" Foreground="{StaticResource ApexMutedBrush}" />
+                            <TextBlock Grid.Column="2" Text="TYPE" FontSize="11" CharacterSpacing="60" Foreground="{StaticResource ApexMutedBrush}" />
+                            <TextBlock Grid.Column="3" Text="SIZE" FontSize="11" CharacterSpacing="60" Foreground="{StaticResource ApexMutedBrush}" />
+                            <TextBlock Grid.Column="4" Text="ON" FontSize="11" CharacterSpacing="60" Foreground="{StaticResource ApexMutedBrush}" />
+                        </Grid>
+                        <ListView x:Name="ModList" Grid.Row="4" ItemTemplate="{StaticResource ModRowTemplate}" SelectionMode="Extended"
+                                  SelectionChanged="OnModPicked" CanDragItems="True" DragItemsStarting="OnModDragStart" Padding="0,0,0,24"
+                                  AutomationProperties.Name="Mods" />
+                        <GridView x:Name="ModGrid" Grid.Row="3" Grid.RowSpan="2" ItemTemplate="{StaticResource ThumbTemplate}" SelectionMode="Extended"
+                                  SelectionChanged="OnModPicked" CanDragItems="True" DragItemsStarting="OnModDragStart" Padding="0,0,0,24"
+                                  Visibility="Collapsed" AutomationProperties.Name="Mods" />
+                        <TextBlock x:Name="ModsEmpty" Grid.Row="4" Tag="dyn" Style="{StaticResource ApexMuted}" HorizontalAlignment="Center" Margin="0,40,0,0" Visibility="Collapsed" />
+                    </Grid>
+                    <!-- the chosen mod (or several) -->
+                    <Border x:Name="ModDetailsPane" Grid.Column="2" Width="330" HorizontalAlignment="Right" BorderBrush="{StaticResource ApexCardBorderBrush}" BorderThickness="1,0,0,0" Background="#0F1013">
+                        <ScrollViewer>
+                            <StackPanel x:Name="ModDetails" Tag="dyn" Padding="20,24,20,24" Spacing="16" />
+                        </ScrollViewer>
+                    </Border>
+                </Grid>
 
                 <Grid x:Name="Footer" Grid.Row="1" Height="64" Padding="24,0" ColumnSpacing="8" BorderBrush="#1F2025" BorderThickness="0,1,0,0" Background="#40000000">
                     <Grid.ColumnDefinitions>

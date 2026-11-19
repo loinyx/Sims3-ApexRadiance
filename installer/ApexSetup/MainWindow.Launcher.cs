@@ -22,7 +22,6 @@ public sealed partial class MainWindow
     List<ModFile> _mods = [];
     HashSet<string> _modLooks = new(StringComparer.OrdinalIgnoreCase);
     bool _modsLoaded, _modsLoading;
-    string _modKind = "";
     int _healthTab, _newsTab;
     Session? _session;
     SessionInfo? _lastSession;
@@ -424,192 +423,12 @@ public sealed partial class MainWindow
     // the screen the administrator window opens on
     int MaintenanceScreen(string? screen) => screen switch { "manage" => Manage, "welcome" => Welcome, "health" => HealthScreen, _ => ComponentsStep };
 
-    // ---------- Mods ----------
-
-    async Task LoadModsAsync()
-    {
-        if (_game is not { } g || _modsLoading) return;
-        _modsLoading = true;
-        ModsSummary.Text = T("Reading your mods…");
-        var docs = Docs;
-        try
-        {
-            var (mods, looks) = await Task.Run(() =>
-            {
-                var m = Mods.List(g, docs);
-                return (m, ModChecks.Run(m, g, docs).SelectMany(f => f.Files).ToHashSet(StringComparer.OrdinalIgnoreCase));
-            });
-            _mods = mods;
-            _modLooks = looks;
-            _modsLoaded = true;
-        }
-        catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The launcher could not read your mods"), ErrorText(e)); }
-        finally { _modsLoading = false; }
-        var folders = new List<string> { T("All folders") };
-        folders.AddRange(_mods.Select(m => m.Folder).Distinct(StringComparer.OrdinalIgnoreCase).Order());
-        ModFolder.ItemsSource = folders;
-        ModFolder.SelectedIndex = 0;
-        FillMods();
-    }
-
-    // the filters: the file type (tabs), what the files hold (chips, the ones of the chosen type), then search, folder, state
-    string _modType = "";
-    static string TypeOf(ModFile m) => m.FileType;
-    bool _fillingMods;
-
-    void FillMods()
-    {
-        if (_game is null) { ModsSummary.Text = T("Choose the game first."); return; }
-        if (!_modsLoaded) { _ = LoadModsAsync(); return; }
-        _fillingMods = true;
-        try
-        {
-            var size = _mods.Sum(m => m.Size);
-            ModsSummary.Text = T("{0} files \u00b7 {1} MB", _mods.Count, size >> 20);
-            ModRow.Toggle = ToggleMod;
-            // file types, each with its count
-            (string Key, string Label)[] types = [("", T("All")), ("package", T("Packages")), ("asi", T("ASI plugins")), ("sims3pack", "Sims3Packs"), ("library", T("Library"))];
-            ModTypes.Items.Clear();
-            foreach (var (key, label) in types)
-            {
-                var n = key == "" ? _mods.Count : _mods.Count(m => TypeOf(m) == key);
-                if (n == 0 && key != "") continue;
-                var tab = Tab($"{label}  {n}", ModTypes.Items.Count == 0);
-                tab.Tag = key;
-                ModTypes.Items.Add(tab);
-            }
-            ModTypes.SelectedItem = ModTypes.Items.FirstOrDefault(i => (string)i.Tag == _modType) ?? ModTypes.Items.FirstOrDefault();
-            // what the chosen type's files hold
-            var inType = _mods.Where(m => _modType == "" || TypeOf(m) == _modType).ToList();
-            ModKinds.Children.Clear();
-            // (the file types have their tabs: the chips are what the packages, or the Library, hold)
-            var kinds = Enum.GetValues<ModKind>().Where(k => k is not (ModKind.Asi or ModKind.Sims3Pack) && (_modType is "library" or "sims3pack" || k is not (ModKind.World or ModKind.Lot or ModKind.Household))).OrderBy(k => k == ModKind.Package ? 1 : 0).Select(k => (k, n: inType.Count(m => m.Kind == k))).Where(x => x.n > 0).ToList(); // ("Other" last)
-            ModKinds.Visibility = kinds.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
-            if (kinds.Count > 1)
-            {
-                ModKinds.Children.Add(KindChip("", T("Everything"), kinds.Sum(x => x.n)));
-                foreach (var (k, n) in kinds) ModKinds.Children.Add(KindChip(k.ToString(), ModRow.KindName(k), n));
-            }
-            if (ModState.Items.Count == 0)
-            {
-                foreach (var t in new[] { T("Any state"), T("On"), T("Off"), T("Needs a look") }) ModState.Items.Add(t);
-                ModState.SelectedIndex = 0;
-            }
-            var shown = Filtered().ToList();
-            var filtered = _modType != "" || _modKind != "" || ModState.SelectedIndex > 0 || ModFolder.SelectedIndex > 0 || (ModSearch.Text ?? "").Length > 0;
-            ModClear.Visibility = filtered ? Visibility.Visible : Visibility.Collapsed;
-            var gallery = ModsViewGallery.IsSelected;
-            ModListCard.Visibility = gallery ? Visibility.Collapsed : Visibility.Visible;
-            ModGallery.Visibility = gallery ? Visibility.Visible : Visibility.Collapsed;
-            if (gallery) FillGallery(shown);
-            else ModList.ItemsSource = shown.Select(m => new ModRow(m, _modLooks.Contains(m.Path))).ToList();
-            ModsNote.Text = (shown.Count == 0 ? T("No file matches these filters.") + " " : "")
-                + T("Switching a mod off moves it to Mods\\{0}, out of the game's reach; switching it on puts it back. Components the launcher installs are changed in Components.", Mods.DisabledName);
-        }
-        finally { _fillingMods = false; }
-    }
-
-    ToggleButton KindChip(string key, string label, int count)
-    {
-        var b = new ToggleButton { IsChecked = _modKind == key, Padding = new Thickness(12, 4, 12, 5), CornerRadius = new CornerRadius(14) };
-        var s = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        s.Children.Add(new TextBlock { Text = label, FontSize = 13 });
-        s.Children.Add(new TextBlock { Text = count.ToString(), FontSize = 12, Opacity = 0.7, VerticalAlignment = VerticalAlignment.Center });
-        b.Content = s;
-        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, label);
-        b.Click += (_, _) => { _modKind = key; FillMods(); };
-        return b;
-    }
-
-    IEnumerable<ModFile> Filtered()
-    {
-        var q = ModSearch.Text?.Trim() ?? "";
-        var folder = ModFolder.SelectedIndex > 0 ? ModFolder.SelectedItem as string : null;
-        var state = ModState.SelectedIndex;
-        return _mods.Where(m =>
-            (_modType == "" || TypeOf(m) == _modType)
-            && (_modKind == "" || m.Kind.ToString() == _modKind)
-            && (q.Length == 0 || m.Rel.Contains(q, StringComparison.OrdinalIgnoreCase))
-            && (folder is null || m.Folder.Equals(folder, StringComparison.OrdinalIgnoreCase) || m.Folder.StartsWith(folder + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-            && state switch { 1 => m.Enabled, 2 => !m.Enabled, 3 => _modLooks.Contains(m.Path), _ => true });
-    }
-
-    void OnModType(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
-    {
-        if (_fillingMods || sender.SelectedItem?.Tag is not string key || key == _modType) return;
-        _modType = key;
-        _modKind = ""; // (the content chips are the new type's)
-        DispatcherQueue.TryEnqueue(FillMods);
-    }
-
-    void OnModClear(object sender, RoutedEventArgs e)
-    {
-        _modType = _modKind = "";
-        _fillingMods = true;
-        ModSearch.Text = "";
-        ModFolder.SelectedIndex = 0;
-        ModState.SelectedIndex = 0;
-        _fillingMods = false;
-        FillMods();
-    }
-
-    ModFile? ToggleMod(ModRow row, bool on)
-    {
-        try
-        {
-            var path = Mods.SetEnabled(row.File, on, Docs);
-            var moved = row.File with { Path = path, Enabled = on };
-            _mods[_mods.IndexOf(row.File)] = moved;
-            return moved;
-        }
-        catch (Exception e)
-        {
-            App.Log(e);
-            SetInfo(ModsInfo, InfoBarSeverity.Error, T("The mod was not moved"), ErrorText(e));
-            DispatcherQueue.TryEnqueue(FillMods); // (the switch back as it was)
-            return null;
-        }
-    }
-
-    const int GalleryCap = 120;
-
-    void FillGallery(List<ModFile> shown)
-    {
-        ModGallery.Children.Clear();
-        foreach (var group in shown.Where(m => m.Kind != ModKind.Asi).GroupBy(m => m.Kind).OrderBy(x => x.Key == ModKind.Script ? 9 : (int)x.Key))
-        {
-            var items = group.Take(GalleryCap).Select(m => new ThumbItem(m)).ToList();
-            var head = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-            head.Children.Add(new TextBlock { Text = ModRow.KindName(group.Key), FontSize = 16, FontWeight = FontWeights.SemiBold });
-            head.Children.Add(Muted(group.Count() > GalleryCap ? T("{0} of {1}", GalleryCap, group.Count()) : group.Count().ToString()));
-            ModGallery.Children.Add(head);
-            var grid = new GridView { ItemTemplate = (DataTemplate)Root.Resources["ThumbTemplate"], SelectionMode = ListViewSelectionMode.None, ItemsSource = items };
-            ModGallery.Children.Add(grid);
-            _ = LoadThumbsAsync(items);
-        }
-        if (ModGallery.Children.Count == 0) ModGallery.Children.Add(Muted(T("No packages match.")));
-    }
-
-    static async Task LoadThumbsAsync(List<ThumbItem> items)
-    {
-        foreach (var it in items)
-        {
-            var bytes = await Task.Run(() => Mods.Thumbnail(it.File));
-            it.Image = await SaveCard.ImageOf(bytes);
-        }
-    }
-
-    void OnModSearch(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args) { if (_modsLoaded && !_fillingMods) FillMods(); }
-    void OnModFilter(object sender, SelectionChangedEventArgs e) { if (_modsLoaded && !_fillingMods) FillMods(); }
-
     // a click on the sidebar item already highlighted (Settings while Repair or remove is open): back to that screen
     void OnNavInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
     {
         if (args.InvokedItemContainer?.Tag is not string tag || !int.TryParse(tag, out var to)) return;
         DispatcherQueue.TryEnqueue(() => { if (_step != to && !_busy && to >= Home) Show(to); });
     }
-    void OnModsView(SelectorBar sender, SelectorBarSelectionChangedEventArgs args) { if (_modsLoaded) FillMods(); }
-    void OnModsOpenFolder(object sender, RoutedEventArgs e) => OpenFolder(Path.Combine(Docs, "Mods"));
 
     // ---------- Worlds ----------
 
@@ -846,7 +665,7 @@ public sealed partial class MainWindow
         g.Children.Add(text);
         Button? act = null;
         if (f.CanFix) act = Button(T("Fix"), async () => { if (await Guarded(() => { Engine.CheckWritable(); f.Fix!(); }, T("Fixed."), null, "Fix incompatible settings")) { RefreshGame(); CheckHealth(); BuildHealth(); } }, accent: true);
-        else if (it.Files.Count > 0) act = Button(T("Show in Mods"), () => { _modKind = ""; _modType = ""; Show(ModsScreen); ModState.SelectedIndex = 3; });
+        else if (it.Files.Count > 0) act = Button(T("Show in Mods"), () => { _modPlace = LookMods; _folderSig = ""; Show(ModsScreen); });
         else if (f.Link is { } link) act = Button(T("Read more"), () => Process.Start(new ProcessStartInfo(link) { UseShellExecute = true }));
         if (act is not null) { Grid.SetColumn(act, 2); act.VerticalAlignment = VerticalAlignment.Center; g.Children.Add(act); }
         return g;

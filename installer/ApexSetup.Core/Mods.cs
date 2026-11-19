@@ -152,7 +152,7 @@ public static class Mods
     }
 
     // a file of the same name already there (the player put a copy back by hand): " (2)" before the extension
-    static string Free(string path)
+    public static string Free(string path)
     {
         if (!File.Exists(path)) return path;
         var dir = Path.GetDirectoryName(path)!;

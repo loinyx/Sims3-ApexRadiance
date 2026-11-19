@@ -8,4 +8,5 @@ namespace ApexSetup;
 [JsonSerializable(typeof(Manifest))]
 [JsonSerializable(typeof(RestorePoint))]
 [JsonSerializable(typeof(LauncherSettings))]
+[JsonSerializable(typeof(ModNotesFile))]
 public partial class SetupJson : JsonSerializerContext;
