@@ -736,8 +736,18 @@
                                     <ScrollViewer x:Name="ModChipsScroll" Grid.Column="1" Visibility="Collapsed" HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Hidden" VerticalScrollMode="Disabled" MaxWidth="360">
                                         <StackPanel x:Name="ModChips" Tag="dyn" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center" />
                                     </ScrollViewer>
+                                    <!-- one box: the field draws no background or underline of its own, the border around it shows focus -->
                                     <TextBox x:Name="ModSearch" Grid.Column="2" PlaceholderText="Search mods" TextChanged="OnModSearch" BorderThickness="0" Background="Transparent"
-                                             VerticalAlignment="Center" MinWidth="80" AutomationProperties.Name="Search mods" KeyDown="OnModSearchKey" />
+                                             VerticalAlignment="Center" MinWidth="80" AutomationProperties.Name="Search mods" KeyDown="OnModSearchKey"
+                                             GotFocus="OnModSearchFocus" LostFocus="OnModSearchFocus">
+                                        <TextBox.Resources>
+                                            <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="Transparent" />
+                                            <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="Transparent" />
+                                            <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+                                            <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+                                            <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
+                                        </TextBox.Resources>
+                                    </TextBox>
                                 </Grid>
                             </Border>
                             <Button x:Name="ModFilterButton" Grid.Column="1" Height="36" AutomationProperties.Name="Filters">
@@ -822,10 +832,13 @@
                             <TextBlock x:Name="ModsEmptyText" Tag="dyn" Style="{StaticResource ApexMuted}" FontSize="13" TextAlignment="Center" MaxWidth="320" />
                         </StackPanel>
                         <!-- what is chosen: a floating bar for two or more -->
-                        <Border x:Name="ModSelectionBar" Grid.Row="4" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="0,0,0,14" Padding="14,6,6,6"
+                        <!-- (the actions scroll when the list column is narrower than the bar: it never spills under the details pane) -->
+                        <Border x:Name="ModSelectionBar" Grid.Row="4" VerticalAlignment="Bottom" HorizontalAlignment="Center" Margin="12,0,12,14" Padding="14,6,6,6"
                                 CornerRadius="12" Background="#1C1D22" BorderBrush="#2A2B31" BorderThickness="1" Visibility="Collapsed" Translation="0,0,24">
                             <Border.Shadow><ThemeShadow /></Border.Shadow>
-                            <StackPanel x:Name="ModSelectionActions" Tag="dyn" Orientation="Horizontal" Spacing="6" />
+                            <ScrollViewer HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Hidden" VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
+                                <StackPanel x:Name="ModSelectionActions" Tag="dyn" Orientation="Horizontal" Spacing="6" />
+                            </ScrollViewer>
                         </Border>
                         <Grid Grid.Row="5" BorderBrush="{StaticResource ApexCardBorderBrush}" BorderThickness="0,1,0,0" Padding="0,8,0,10" ColumnSpacing="12">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>

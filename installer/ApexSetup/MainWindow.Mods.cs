@@ -620,10 +620,10 @@ public sealed partial class MainWindow
         await LoadModsAsync();
     }
 
-    void ModsResult(string done, Action? undo)
+    void ModsResult(string done, Action? undo, string detail = "", InfoBarSeverity severity = InfoBarSeverity.Success)
     {
         _modUndo = undo;
-        SetInfo(ModsInfo, InfoBarSeverity.Success, done, "", undo is null ? null : T("Undo"), undo is null ? null : () => { var u = _modUndo; _modUndo = null; ModsInfo.IsOpen = false; u?.Invoke(); });
+        SetInfo(ModsInfo, severity, done, detail, undo is null ? null : T("Undo"), undo is null ? null : () => { var u = _modUndo; _modUndo = null; ModsInfo.IsOpen = false; u?.Invoke(); });
     }
 
     // ---------- moving, switching, adding ----------
@@ -718,7 +718,9 @@ public sealed partial class MainWindow
         }
         _folderSig = "";
         FillMods();
-        if (error is not null) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods were not moved"), ErrorText(error));
+        // (some moved, some not: the ones that moved can still be undone)
+        if (error is not null && changed.Count == 0) SetInfo(ModsInfo, InfoBarSeverity.Error, T("Some mods were not moved"), ErrorText(error));
+        else if (error is not null) ModsResult(on ? T("{0} of {1} mods turned on", changed.Count, todo.Count) : T("{0} of {1} mods turned off", changed.Count, todo.Count), () => SetMods(changed, !on), ErrorText(error), InfoBarSeverity.Warning);
         else if (changed.Count > 1) ModsResult(on ? T("{0} mods turned on", changed.Count) : T("{0} mods turned off", changed.Count), () => SetMods(changed, !on));
     }
 
@@ -744,6 +746,9 @@ public sealed partial class MainWindow
         var items = await e.DataView.GetStorageItemsAsync();
         await InstallFilesAsync(items.Select(i => i.Path).Where(p => p is { Length: > 0 }).ToList());
     }
+
+    void OnModSearchFocus(object sender, RoutedEventArgs e) =>
+        ModSearchBox.BorderBrush = ModSearch.FocusState != FocusState.Unfocused ? Res("ApexAccentBrush") : new SolidColorBrush(Windows.UI.Color.FromArgb(255, 0x2A, 0x2B, 0x31));
 
     // the list follows the search once typing pauses (each keystroke refiltered every mod before)
     Microsoft.UI.Dispatching.DispatcherQueueTimer? _searchTimer;
