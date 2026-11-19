@@ -1473,6 +1473,15 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         File.WriteAllBytes(Path.Combine(gdfDir, "Sims3EP99GDF.dll"), [.. "MZ......"u8.ToArray(), .. png]);
         Check(Expansions.Icon(Path.Combine(lr, "EPx")) is { } icon && icon.Length == png.Length - 2 && icon[0] == 0x89 && Expansions.Icon(Path.Combine(lr, "none")) is null,
             "a pack's icon is the PNG in its game definition file");
+        // an icon kept as a 256 px icon bitmap (BITMAPINFOHEADER, height = colour + mask rows, bottom-up BGRA) reads as a PNG
+        var dib = new byte[16 + 40 + 256 * 256 * 4];
+        BitConverter.GetBytes(40).CopyTo(dib, 16); BitConverter.GetBytes(256).CopyTo(dib, 20); BitConverter.GetBytes(512).CopyTo(dib, 24);
+        BitConverter.GetBytes((ushort)1).CopyTo(dib, 28); BitConverter.GetBytes((ushort)32).CopyTo(dib, 30);
+        dib[16 + 40 + 255 * 256 * 4] = 0x30; dib[16 + 40 + 255 * 256 * 4 + 2] = 0x90; dib[16 + 40 + 255 * 256 * 4 + 3] = 0xFF; // (the last row in the file is the top-left pixel)
+        var dibPng = Expansions.IconFromDib(dib);
+        Check(dibPng is { Length: > 33 } && dibPng.AsSpan(0, 8).SequenceEqual(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A })
+              && dibPng[16..24].SequenceEqual(new byte[] { 0, 0, 1, 0, 0, 0, 1, 0 }) && Expansions.IconFromDib(new byte[100]) is null,
+            "a pack icon kept as an icon bitmap is read as a 256 px PNG; a file without one gives none");
         var wfile = Path.Combine(lr, "W", "Town.world");
         TestPackage(wfile, (0xD84E7FC6u, "lot"u8.ToArray(), false, 3));
         var wfile2 = Path.Combine(lr, "W", "Valley.world");
