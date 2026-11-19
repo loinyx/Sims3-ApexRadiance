@@ -1680,8 +1680,8 @@ index 6bb72ed4..2d167fc8 100644
 +    return get().rewindParkTimeoutSec;
 +  }
 +
-   static bool getUseSharedHeap() {
-     return get().useSharedHeap;
+   static uint32_t getDebugDelayFirstReadbackMs() {
+     return get().debugDelayFirstReadbackMs;
    }
 @@ -421,6 +433,16 @@ private:
      // A command queue wait spins this long before it blocks on its wake event.
@@ -1697,9 +1697,9 @@ index 6bb72ed4..2d167fc8 100644
 +    // Seconds a parked client waits without an Op from its host before it leaves the park and logs it (a host that died).
 +    rewindParkTimeoutSec = bridge_util::Config::getOption<uint32_t>("rewindParkTimeoutSec", 120);
 +
-     // If this is enabled, timeouts will be set to their maximum value (INFINITE which is the max uint32_t) 
-     // and retries will be set to 1 while the application is being launched with or attached to by a debugger
-     disableTimeoutsWhenDebugging = bridge_util::Config::getOption<bool>("disableTimeoutsWhenDebugging", false);
+     // Test hook (test_idle_copy_device): the server holds its answer to the first surface readback for this many
+     // milliseconds, as a stalled server does. 0 = off. Leave it off for play.
+     debugDelayFirstReadbackMs = bridge_util::Config::getOption<uint32_t>("debugDelayFirstReadbackMs", 0);
 @@ -499,6 +521,9 @@ private:
    bool commandBatchingEnabled;
    uint32_t perfLogIntervalFrames;
@@ -1707,9 +1707,9 @@ index 6bb72ed4..2d167fc8 100644
 +  bool rewindMode;
 +  uint32_t rewindMaxKeptMB;
 +  uint32_t rewindParkTimeoutSec;
+   uint32_t debugDelayFirstReadbackMs;
    bool disableTimeoutsWhenDebugging;
    bool disableTimeouts;
-   bool useSharedHeap;
 diff --git a/bridge/src/util/util_circularqueue.h b/bridge/src/util/util_circularqueue.h
 index 69d21256..9eb2e611 100644
 --- a/bridge/src/util/util_circularqueue.h

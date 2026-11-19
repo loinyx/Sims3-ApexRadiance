@@ -33,6 +33,7 @@ const SiteInfo kSiteInfo[kSites] = {
     {"texture builder tile readback", GameAddr::Id::CompReadbackCall, GameAddr::Id::CompReadback},
     {"lot renderer load stages", GameAddr::Id::LotLoadStagesCall, GameAddr::Id::LotLoadStages},
     {"lot pass renderer update", GameAddr::Id::LotPassRendererCall, GameAddr::Id::LotRendererUpdate},
+    {"lot lighting update room solve", GameAddr::Id::RoomSolveCall, GameAddr::Id::RoomSolve},
 };
 static_assert(std::size(kSiteInfo) == static_cast<size_t>(Site::Count), "kSiteInfo must list every Site in order");
 

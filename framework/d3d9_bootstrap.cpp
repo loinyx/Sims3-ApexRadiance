@@ -154,6 +154,7 @@ void FrameInit(IDirect3DDevice9* dev) {
 HRESULT STDMETHODCALLTYPE Hooked_EndScene(IDirect3DDevice9* dev) {
     if (t_inEndScene || !dev) return o_endScene(dev);
     t_inEndScene = true;
+    D3D9Hooks::SettleDeferredShaders(dev); // (the overlay's state block and the end-of-scene passes read the shaders back)
     // 07/10, players' Runtime Error: nothing Apex does here may throw into the game's EndScene. Each step is caught on its
     // own (HookGuard: noted, then that step stays off), and the game's EndScene always runs, once.
     if (!g_frameInit.exchange(true)) HookGuard::Try("D3D frame init", [dev] { FrameInit(dev); });
@@ -238,6 +239,7 @@ void NoteBackBufferAlias(IDirect3DDevice9* dev) {
 HRESULT STDMETHODCALLTYPE Hooked_Reset(IDirect3DDevice9* dev, D3DPRESENT_PARAMETERS* pp) {
     // 07/10, players' Runtime Error: each step around the game's Reset is caught on its own and runs again at the next
     // Reset (a release skipped for good would make every later Reset fail); the game's Reset always runs, once
+    D3D9Hooks::SettleDeferredShaders(dev); // (no lazy restore kept across a Reset: its pointers may not outlive it)
     HookGuard::Try("Overlay before Reset", [] { Overlay::BeforeReset(); });
     RenderCallbacks::Fire(RenderCallbacks::preReset, dev);
     HookGuard::Try("Picture before Reset", [] { Picture::Get().BeforeReset(); });

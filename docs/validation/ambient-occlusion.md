@@ -13,11 +13,14 @@ Sim Occlusion has its own page: [validation/sim-occlusion.md](sim-occlusion.md).
 | Harness | Covers | Run | Needs |
 |---|---|---|---|
 | [`tools/post_scene_test`](../../tools/post_scene_test/README.md) | Post-scene chain: order, once per frame, hidden-UI fallback, depth mismatch and recovery, reset | See the harness README | None |
+| [`tools/ao_options_check`](../../tools/ao_options_check/README.md) | Every GtaoPS variant and option pass within 512 slots and accepted by native D3D9; each Ambient Occlusion option against the default pass on a synthetic depth buffer (count switches, contact shade, block-edge steps, still-camera flicker and trails); GPU time at 4K | `tools/ao_options_check/run.ps1` | Native D3D9 |
 
 ## Latest results
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-17 | this branch | `tools/ao_options_check` | 127 checks passed: 20 GtaoPS variants (default 505 to 507 slots, options 350 to 367) and the options' six other passes within 512 slots and accepted; steady direction count: 0 switches within the band against 14; edge-aware smoothing: 0.14 to 0.19 of a level from the default, contact shade 100 to 104%; fewer directions in the open: 67 to 78% of the blocks at half the count, within 0.01 of a level, no step at block edges; refine while the camera is still (Low): 0.08 of a level from Ultra against 0.15, no trail after 1 frame, 0.05% of the pixels flicker by more than 1 level | Native D3D9, laptop RTX 30-series |
+| 2026-11-17 | 79acc72 | `tools/ao_options_check` | 82 checks passed: 20 GtaoPS variants within 512 slots (default 505 to 507, options 348 to 369) and accepted; zoom option equal to the default up close, 0.12 to 0.13 of a level apart at 80 and 150 m, floor roughness unchanged; smooth flat surfaces: open-floor stray shade down about a third, 96 to 97% of the contact shade kept | Native D3D9, laptop RTX 30-series |
 | 2026-10-08 | 28eb532 | Retained full-resolution AO shader equivalence and native device creation | 41 checks passed; stripped instructions identical to the previous modes with temporal and thin-object detail disabled | Native D3D9 |
 | 2026-10-04 | PR #2 | Post-scene chain | 12 passed | None |
 | 2026-09-30 | 2.1.0 | GPU shader against the CPU reference (`gpucheck.cpp`, four saved frames) | Raw AO within 0.08 to 0.11 of 255 levels, composite within 0.06 to 0.09; repeat run bit-identical | Native D3D9 |

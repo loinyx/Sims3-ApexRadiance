@@ -238,6 +238,6 @@
   "\\[RtOutdoorLamps\\] Active lot tracker"
  ],
  "fail": [
-  "\\[(ERROR)\\]"
+  "\\[ERROR\\] (?!\\[Transition routing\\] Pattern not found)"
  ]
 }

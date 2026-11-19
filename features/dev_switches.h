@@ -140,6 +140,19 @@ inline std::atomic<int> streamArenaVerify{0};
 inline bool MonoCoresBottom() { return kCompiled && monoCoresBottom.load(std::memory_order_relaxed); }
 inline bool BigBlockReuse() { return kCompiled && bigBlockReuse.load(std::memory_order_relaxed); }
 inline bool StreamArena() { return kCompiled && streamArena.load(std::memory_order_relaxed); }
+// Per-draw lighting cost experiments (docs/features/performance/per-draw-light-cache.md); not shipped, off unless set:
+//   draw_light_cache        an outdoor object draw's lamp pick, ground share and gates are kept by draw (its shaders and world
+//                           matrix) while the lamp list, the walls and slabs, the lots and the patched copies are unchanged
+//   lazy_shader_restore     after an outdoor object draw the patched shader pair stays bound; the game's pair is put back before
+//                           the next draw that does not take the same pair, a Present or a BeginScene (D3D9Hooks::DeferShaderRestore)
+//   draw_light_cache_check  every cached answer is computed again and compared bit for bit, and every kept pair is read back
+//                           from the device; differences are counted in the draw cost line (no lighting change)
+inline std::atomic<bool> drawLightCache{false};
+inline std::atomic<bool> lazyShaderRestore{false};
+inline std::atomic<bool> drawLightCacheCheck{false};
+inline bool DrawLightCache() { return kCompiled && drawLightCache.load(std::memory_order_relaxed); }
+inline bool LazyShaderRestore() { return kCompiled && lazyShaderRestore.load(std::memory_order_relaxed); }
+inline bool DrawLightCacheCheck() { return kCompiled && drawLightCacheCheck.load(std::memory_order_relaxed); }
 //   active_lot_hold        (shipped; development builds read a missing key as on; OutdoorDelta::ActiveLot follows
 //                          RtOutdoorLamps::ActiveTracker while it is on) while the camera moves, Real-time outdoor lamps keep the active
 //                          lot until another has been the first lit at the high quality for 3 s or the camera has been still

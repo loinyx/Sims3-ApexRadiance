@@ -227,7 +227,7 @@ public static class Compat
     // native/remix-bridge/conf/dxvk.conf
     static readonly Dictionary<string, string> BridgeDxvk = new()
     {
-        ["d3d9.customVendorId"] = "10de", ["d3d9.customDeviceId"] = "1080", ["d3d9.customDeviceDesc"] = "\"Geforce GTX 580\"",
+        ["d3d9.customVendorId"] = "10de", ["d3d9.customDeviceId"] = "1080", // no customDeviceDesc: the game logs the real card's name
         ["d3d9.countLosableResources"] = "False",
     };
 

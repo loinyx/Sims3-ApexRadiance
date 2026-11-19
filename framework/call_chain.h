@@ -16,7 +16,8 @@
 // Used by the Frame Profiler (dev build, the outer layer, "Scene pending nodes" counter) and the scene node budget
 // (features/scene_budget.h) on Scene::BeginFrame's CALL of the pending-node drain, and by the compositor readback part of
 // Faster Sim building (features/compositor_readback.h) on four calls of the texture builder, and by the shared lot build
-// time (features/lot_build_share.h, outer) and the Frame Profiler's "Lot load stages" on the lot renderer's load stages.
+// time (features/lot_build_share.h, outer) and the Frame Profiler's "Lot load stages" on the lot renderer's load stages, and by
+// the shared room solve time (features/room_solve_share.h, outer) and the Frame Profiler's "Lot room solve" on the room solve.
 // Thread-safe (Install / Remove serialise on one mutex; Next is lock-free).
 #include <atomic>
 #include <cstdint>
@@ -32,9 +33,10 @@ enum class Site : int {
     CompReadback, // CALL 0x005FDC8A in 0x005FDBF0 -> 0x005FBCE0 thiscall(format), ret 4 (GetRenderTargetData)
     LotLoadStages, // CALL 0x00AEB306 in the lot renderer update 0x00AEB2E0 -> 0x00AEA680 thiscall() -> al (a lot's load stages)
     LotPassRenderer, // CALL 0x00C7CEDF in the lot pass 0x00C7CEA0 -> 0x00AEB2E0 thiscall(float dt), ret 4 (the renderer update)
+    RoomSolve,       // CALL 0x00ADB9AD in the lot lighting update 0x00ADB8F0 -> 0x006A8BA0 thiscall(stopwatch*, float budget), ret 8 (one lot level)
     Count
 };
-enum class Layer : int { LotBuildGate, FrameProfiler, SceneBudget, CompositorReadback, Count }; // lower = outer
+enum class Layer : int { LotBuildGate, RoomSolveGate, FrameProfiler, SceneBudget, CompositorReadback, Count }; // lower = outer
 
 // Installs `hook` as `layer` of `site` (true when installed, or already installed). error: why not.
 bool Install(Site site, Layer layer, void* hook, std::string* error);

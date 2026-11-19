@@ -213,7 +213,9 @@
 #include "scene_budget.h"
 #include "object_index.h"
 #include "lot_lighting_motion.h"
+#include "room_solve_share.h"
 #include "room_light_queue.h"
+#include "pick_readback.h"
 #include "d3d9_extra_hooks.h"
 #include "fast_crc.h"
 #include "fast_memory.h"
@@ -1353,10 +1355,12 @@ uint64_t __fastcall Hook_ObjectById(void* self, void* edx, uint32_t idLo, uint32
     return r;
 }
 
-// One room of the lot lighting update (timer*, float budget as raw bits), from its only CALL
+// One level of the lot lighting update (timer*, float budget as raw bits), from its only CALL. Inner layer of the call chain
+// at 0x00ADB9AD (framework/call_chain.h): the shared room solve time's gate is outside it, so only the solves that run count
 uint64_t __fastcall Hook_RoomSolve(void* self, void* edx, uint32_t timer, uint32_t budget) {
+    const FnThis2 next = reinterpret_cast<FnThis2>(CallChain::Next(CallChain::Site::RoomSolve, CallChain::Layer::FrameProfiler));
     CounterScope sc(kLotRoomSolve);
-    return Orig<T_RoomSolve, FnThis2>()(self, edx, timer, budget);
+    return next(self, edx, timer, budget);
 }
 
 // The wall AO step (stopwatch*, float budget as raw bits), through its vtable slot. Layer inside the wall shading gate
@@ -1719,9 +1723,10 @@ void ResolveTarget(int i) {
         }
         const uintptr_t call = a + static_cast<uintptr_t>(ti.callOffset);
         const uintptr_t callee = GameAddr::Get(ti.calleeId);
-        // The scene drain's CALL is shared with the scene node budget, and the load stages' CALL with the shared lot build
-        // time, through framework/call_chain.h, which checks where the CALL goes itself (it may already reach a hook)
-        if (i == T_SceneDrain || i == T_LotLoadStages) {
+        // The scene drain's CALL is shared with the scene node budget, the load stages' CALL with the shared lot build time
+        // and the room solve's CALL with the shared room solve time, through framework/call_chain.h, which checks where the
+        // CALL goes itself (it may already reach a hook)
+        if (i == T_SceneDrain || i == T_LotLoadStages || i == T_RoomSolve) {
             if (*reinterpret_cast<const uint8_t*>(call) != 0xE8 || !callee) {
                 st.status = std::format("Skipped: no CALL at {:#010x}", call);
                 return;
@@ -2111,6 +2116,19 @@ bool AttachTarget(int i) {
                                 CallChain::Installed(CallChain::Site::LotLoadStages, CallChain::Layer::LotBuildGate) ? "; the shared lot build time is outside" : "");
         return true;
     }
+    if (i == T_RoomSolve) {
+        // Shared with the shared room solve time (features/room_solve_share.h): its gate is the outer layer, the profiler inside it
+        std::string error;
+        g_orig[i] = reinterpret_cast<void*>(GameAddr::Get(ti.calleeId)); // display only: the hook calls CallChain::Next
+        if (!CallChain::Install(CallChain::Site::RoomSolve, CallChain::Layer::FrameProfiler, ti.hook, &error)) {
+            st.status = "Skipped: " + error;
+            return false;
+        }
+        st.attached = true;
+        st.status = std::format("Timed at the CALL {:#010x}, a layer of the call chain ({}; written with all threads checked{})", st.addr, st.how,
+                                CallChain::Installed(CallChain::Site::RoomSolve, CallChain::Layer::RoomSolveGate) ? "; the shared room solve time is outside" : "");
+        return true;
+    }
     if (ti.callOffset >= 0) return AttachCallSite(i);
     if (i == T_ObjectById) {
         // Shared with the object lookup index (features/object_index.h): the profiler is the outer layer of the entry chain
@@ -2193,6 +2211,15 @@ void DetachTarget(int i) {
     }
     if (i == T_LotLoadStages) {
         if (!CallChain::Remove(CallChain::Site::LotLoadStages, CallChain::Layer::FrameProfiler)) { // the gate's layer, if any, stays
+            st.status = "Restore failed: still timed";
+            return;
+        }
+        st.attached = false;
+        st.status = "Off";
+        return;
+    }
+    if (i == T_RoomSolve) {
+        if (!CallChain::Remove(CallChain::Site::RoomSolve, CallChain::Layer::FrameProfiler)) { // the gate's layer, if any, stays
             st.status = "Restore failed: still timed";
             return;
         }
@@ -3232,10 +3259,11 @@ struct TimelineRow {
     uint32_t section, frame;
     uint64_t tick, prims; // GetTickCount64 (the clock of the log's memory CSVs), primitives drawn
     double tSec;
-    float frameMs, cpuMs, presentMs, limiterMs, unattributedMs, gcMs, otherJobsMs, texMB, roomSolveMaxMs, steadyScale, settleScale, drainMs, rtdMs;
+    float frameMs, cpuMs, presentMs, limiterMs, unattributedMs, gcMs, otherJobsMs, texMB, roomSolveMaxMs, steadyScale, settleScale, drainMs, rtdMs, pickRbMs;
     float eye[3], eyeMove, targetMove, eyeTarget, yawChange;
     float render[kCatCount]; // render thread, self ms
-    uint32_t draws, promoted, demoted, texLoads, lotLoadCalls, lotsLighting, roomSolveCalls, sceneNodes, sceneDeferred, modDispatches, pageFaults, rtdCalls;
+    uint32_t draws, promoted, demoted, texLoads, lotLoadCalls, lotsLighting, roomSolveCalls, roomSolveWaited, roomSolveLongestWait, sceneNodes, sceneDeferred, modDispatches, pageFaults, rtdCalls;
+    uint32_t pickRuns, pickStill, pickMoving, pickReadbacks, pickHolds; // PickReadback::TakeCounters
     uint16_t smp[kClsCount]; // render thread samples in the frame, per code class
     int8_t camera;
     uint16_t flags;
@@ -3266,6 +3294,9 @@ void TimelineSync() {
     DWORD rtdCalls;
     LONGLONG rtdTicks;
     ExtraHooks::TakeGetRenderTargetData(rtdCalls, rtdTicks); // drops the calls counted before
+    uint32_t pr, ps, pm, pb, ph;
+    int64_t pt;
+    PickReadback::TakeCounters(pr, ps, pm, pb, pt, ph); // the same
     g_tlEyeOk = g_tlTargetOk = g_tlYawOk = false;
 }
 
@@ -3346,6 +3377,9 @@ void TimelineFrame(const HitchRecord& r, bool hitch, uint64_t now) {
         row.rtdCalls = rtdCalls;
         row.rtdMs = static_cast<float>(static_cast<double>(rtdTicks) * 1000.0 / g_qpcFreq);
     }
+    int64_t pickTicks;
+    PickReadback::TakeCounters(row.pickRuns, row.pickStill, row.pickMoving, row.pickReadbacks, pickTicks, row.pickHolds);
+    row.pickRbMs = static_cast<float>(static_cast<double>(pickTicks) * 1000.0 / g_qpcFreq);
     if (!g_writeFile.load(std::memory_order_relaxed) || !g_writerRunning.load(std::memory_order_relaxed)) return;
     if (r.foreground) row.flags |= kTlFocus;
     if (RoomLightQueue::EditBurstOn()) row.flags |= kTlLampEdit;
@@ -3371,6 +3405,13 @@ void TimelineFrame(const HitchRecord& r, bool hitch, uint64_t now) {
     row.lotsLighting = r.calls[kLotLightingUpdate];
     row.roomSolveCalls = r.calls[kLotRoomSolve];
     row.roomSolveMaxMs = r.counters.maxMs[0][kLotRoomSolve - kFirstCounterCat];
+    { // the shared room solve time: level solves that waited in this frame interval, and the longest wait now (frames)
+        static uint32_t s_waitedBefore = 0;
+        const uint32_t waited = RoomSolveShare::WaitedTotal();
+        row.roomSolveWaited = waited - s_waitedBefore;
+        s_waitedBefore = waited;
+        row.roomSolveLongestWait = RoomSolveShare::LongestWaitNow();
+    }
     row.sceneNodes = static_cast<uint32_t>(r.counters.extra[0][kXNodes]);
     row.sceneDeferred = static_cast<uint32_t>(r.counters.extra[0][kXDeferred]);
     row.modDispatches = r.calls[kModD3DHooks]; // x16 per sampled dispatch (kTlModSampled)
@@ -4038,8 +4079,8 @@ struct WriterArgs {
 std::string TimelineHeader() {
     std::string s = "time_s,tick_ms,frame,frame_ms,cpu_ms,present_ms,limiter_ms,hitch,focus,camera,apex_moving,steady_scale,settle_scale,"
                     "lamp_edit,drain_ms,eye_move_m,eye_x,eye_y,eye_z,target_move_m,eye_target_m,yaw_change_deg,draws,prims,lots_promoted,lots_demoted,"
-                    "lot_load_calls,lots_lighting,room_solve_calls,room_solve_max_ms,scene_nodes,scene_deferred,tex_loads,tex_mb,page_faults,"
-                    "rtd_calls,rtd_ms,mod_dispatches,mod_sampled,reg_timing,sim_script_gc_ms,other_jobs_ms,smp_ts3w,smp_gfx,smp_system,smp_apex,smp_other_asi,smp_other";
+                    "lot_load_calls,lots_lighting,room_solve_calls,room_solve_max_ms,room_solve_waited,room_solve_longest_wait,scene_nodes,scene_deferred,tex_loads,tex_mb,page_faults,"
+                    "rtd_calls,rtd_ms,pick_runs,pick_skip_still,pick_skip_moving,pick_readbacks,pick_readback_ms,pick_click_holds,mod_dispatches,mod_sampled,reg_timing,sim_script_gc_ms,other_jobs_ms,smp_ts3w,smp_gfx,smp_system,smp_apex,smp_other_asi,smp_other";
     for (const CatInfo& c : kCats) (s += ',') += c.name; // render thread self ms; the names hold no comma
     return s + ",Unattributed\n";
 }
@@ -4075,12 +4116,16 @@ void FormatTimelineRow(std::string& s, const TimelineRow& r) {
     Csv(s, r.yawChange, (r.flags & kTlYaw) != 0);
     std::format_to(out, ",{},{},{},{},{},{},{}", r.draws, r.prims, r.promoted, r.demoted, r.lotLoadCalls, r.lotsLighting, r.roomSolveCalls);
     Csv(s, r.roomSolveMaxMs);
+    std::format_to(out, ",{},{}", r.roomSolveWaited, r.roomSolveLongestWait);
     std::format_to(out, ",{},{},{}", r.sceneNodes, r.sceneDeferred, r.texLoads);
     Csv(s, r.texMB, true, 3);
     std::format_to(out, ",{},", r.pageFaults);
     const bool rtd = (r.flags & kTlRtd) != 0;
     if (rtd) std::format_to(out, "{}", r.rtdCalls);
     Csv(s, r.rtdMs, rtd, 3);
+    std::format_to(out, ",{},{},{},{}", r.pickRuns, r.pickStill, r.pickMoving, r.pickReadbacks);
+    Csv(s, r.pickRbMs, true, 3);
+    std::format_to(out, ",{}", r.pickHolds);
     std::format_to(out, ",{},{},{}", r.modDispatches, (r.flags & kTlModSampled) ? 1 : 0, (r.flags & kTlRegTiming) ? 1 : 0);
     Csv(s, r.gcMs);
     Csv(s, r.otherJobsMs);
@@ -4576,6 +4621,7 @@ std::string BuildReport() {
     s += "Remember missing files: " + ResourceCache::MissesStatusText() + "\n";
     s += "File list cache: " + ResourceCache::KeyListStatusText() + "\n";
     s += "Lot lighting while moving: " + LotLightingMotion::StatusText() + "\n";
+    s += "Shared room solve time: " + RoomSolveShare::StatusText() + "\n";
     s += "Wall shading while moving: " + LotLightingMotion::WallAoStatusText() + "\n";
     s += "Spread new objects over frames: " + SceneBudget::StatusText() + "\n";
     s += "Faster object lookups: " + ObjectIndex::StatusText() + "\n";

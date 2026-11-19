@@ -17,6 +17,8 @@
 #include "fast_refpack.h"
 #include "fast_cas.h"
 #include "compositor_readback.h"
+#include "pick_readback.h"
+#include "deadline_slicing.h"
 #include "fast_crc.h"
 #include "fast_memory.h"
 #include "memory_guard.h"
@@ -27,6 +29,7 @@
 #include "object_id_map.h"
 #include "render_object_map.h"
 #include "room_light_queue.h"
+#include "room_solve_share.h"
 #include "atrium_hold.h"
 #include <algorithm>
 #include <atomic>
@@ -135,6 +138,54 @@ class WallShadingWhileMovingPatch : public ApexPatch {
     void RenderDeveloperUI() override { LotLightingMotion::RenderWallAoDeveloperUI(); }
 };
 
+// The pick update's hook itself is always installed (apex_main.cpp, after the features): this only turns its skip on
+class PickSkipWhenStillPatch : public ApexPatch {
+  public:
+    PickSkipWhenStillPatch() : ApexPatch(Performance::kPickSkipName, nullptr) {}
+
+    bool Install() override {
+        PickReadback::SetSkipWhenStill(true);
+        isEnabled = true;
+        lastError.clear();
+        return true;
+    }
+
+    bool Uninstall() override {
+        PickReadback::SetSkipWhenStill(false);
+        isEnabled = false;
+        lastError.clear();
+        return true;
+    }
+
+    void RenderCustomUI() override {} // the Performance card draws the row
+    void RenderDeveloperUI() override {}
+};
+
+class DeadlineSlicingPatch : public ApexPatch {
+  public:
+    DeadlineSlicingPatch() : ApexPatch(Performance::kDeadlineSlicingName, nullptr) {}
+
+    bool Install() override {
+        if (isEnabled) return true;
+        lastError.clear();
+        std::string error;
+        if (!DeadlineSlicing::Start(&error)) return Fail(error);
+        isEnabled = true;
+        return true;
+    }
+
+    bool Uninstall() override {
+        if (!isEnabled) return true;
+        DeadlineSlicing::Stop();
+        isEnabled = false;
+        lastError.clear();
+        return true;
+    }
+
+    void RenderCustomUI() override {} // the Performance card draws the row
+    void RenderDeveloperUI() override { DeadlineSlicing::RenderDeveloperUI(); }
+};
+
 class LotLightingMotionPatch;
 std::atomic<LotLightingMotionPatch*> g_lotPatch{nullptr};
 
@@ -143,6 +194,7 @@ class LotLightingMotionPatch : public ApexPatch {
     LotLightingMotionPatch() : ApexPatch(Performance::kLotLightingName, nullptr) {
         // TOML key: never rename
         RegisterIntSetting(&budgetMs_, "budgetWhileMovingMs", Performance::kLotLightingBudgetDefault, 1, 15, "Lot lighting time while moving (ms)");
+        RegisterBoolSetting(&sharedSolveTime_, "sharedSolveTime", false, "Shared room solve time while moving");
         g_lotPatch.store(this);
     }
     ~LotLightingMotionPatch() override { g_lotPatch.store(nullptr); }
@@ -154,11 +206,13 @@ class LotLightingMotionPatch : public ApexPatch {
         std::string error;
         if (!LotLightingMotion::Start(&error)) return Fail(error);
         isEnabled = true;
+        ApplySharedSolveTime();
         return true;
     }
 
     bool Uninstall() override {
         if (!isEnabled) return true;
+        RoomSolveShare::Stop();
         LotLightingMotion::Stop();
         if (LotLightingMotion::Running()) return Fail("Could not put the lot lighting call back (see ApexRadiance_LOG.txt)");
         isEnabled = false;
@@ -170,6 +224,7 @@ class LotLightingMotionPatch : public ApexPatch {
     void Update() override {
         pendingReinstall = false;
         LotLightingMotion::SetBudgetMs(budgetMs_);
+        if (isEnabled) ApplySharedSolveTime();
     }
 
     void RenderCustomUI() override {} // the Performance card draws the rows
@@ -185,7 +240,18 @@ class LotLightingMotionPatch : public ApexPatch {
     }
 
   private:
+    // Shared room solve time (features/room_solve_share.h): needs this feature's camera motion, so it runs only inside it
+    void ApplySharedSolveTime() {
+        if (!sharedSolveTime_) {
+            RoomSolveShare::Stop();
+            return;
+        }
+        std::string error;
+        if (!RoomSolveShare::Start(&error)) LOG_WARNING("[LotLightingMotion] Shared room solve time left off: " + error);
+    }
+
     int budgetMs_ = Performance::kLotLightingBudgetDefault;
+    bool sharedSolveTime_ = false;
 };
 
 class LotDetailRangePatch;
@@ -743,6 +809,38 @@ APEX_REGISTER_FEATURE(WallShadingWhileMovingPatch,
                                             "stores unchanged: the engine's own \"try again next frame\".",
                                             "The synchronous level solve (60 s budget) and the tool mode are never touched."},
                        .gameCodeGroup = "WallShadingWhileMoving"});
+
+APEX_REGISTER_FEATURE(PickSkipWhenStillPatch,
+                      {.displayName = "Fewer Mouse Picks When Still",
+                       .description = "The game checks which object is under the mouse every other frame, even when nothing moves, about 2 ms each under the "
+                                      "RTX Remix bridge. While the camera and the mouse stay still, that check waits (at most 0.25 s), and while the camera "
+                                      "moves it runs every 4th frame. A click made while the check waits is held for a new check (about 3 frames). Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
+                       .category = "Performance",
+                       .experimental = true,
+                       .enabledByDefault = false,
+                       .supportedVersions = VERSION_STEAM,
+                       .technicalDetails = {"The pick manager's update (0x6DFEC0, called by Scene::BeginFrame) re-picks at the last cursor position every other "
+                                            "frame (camera byte +0x6FD, always 1). That re-pick is skipped while the camera (+0x0C..+0x1B, +0x30..+0x6F), the "
+                                            "viewport and the pick modes are as at the last pick and it is under 250 ms old; the last result stays in place.",
+                                            "While the camera moves, a new pick (a mouse-move request too) is rendered at most every 4th update. A button, wheel or key "
+                                            "event always picks at the next update; a pending read-back is never skipped.",
+                                            "A button press made while a pick was skipped and the stored one is over 50 ms old is held in the window procedure; "
+                                            "the next update picks, the pick is read back at once, and the held mouse messages go to the game once ResolvePick "
+                                            "(0x6E01B0) has stored the new result (at most 200 ms)."}});
+
+APEX_REGISTER_FEATURE(DeadlineSlicingPatch,
+                      {.displayName = "Frame Deadline While Moving",
+                       .description = "While the camera moves, work that can wait (new objects, lots being built, loaded files being set up) only gets the time "
+                                      "left before a 12 ms point in the frame, so it no longer piles up on a frame that is already slow. Nothing is skipped: it "
+                                      "runs in the next frames. Needs Spread lot lighting while moving. Part of " APEX_PRODUCT_NAME ". Credits: @loinyx",
+                       .category = "Performance",
+                       .experimental = true,
+                       .enabledByDefault = false,
+                       .supportedVersions = VERSION_STEAM,
+                       .technicalDetails = {"The JobManager update (vtable 0x00FD9810 + 0x1C -> 0x00599A10) marks the frame start and, while moving, runs its main-thread "
+                                            "jobs (the resource finalize job 0x007297C0) with a 2 ms slice instead of [svc+0xCC] = 5; one job always runs.",
+                                            "Spread new objects over frames and the shared lot build time get min(their budget, 12 ms - time since that mark); "
+                                            "past it the scene drain does its 8 minimum nodes and a lot waits (at most 6 frames). Their longest-wait rules stay."}});
 
 APEX_REGISTER_FEATURE(LotLightingMotionPatch,
                       {.displayName = "Lot Lighting While Moving",

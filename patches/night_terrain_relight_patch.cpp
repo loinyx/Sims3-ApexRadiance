@@ -664,6 +664,7 @@ bool g_inBakeLight = false;              // a bake light's position was just set
 void __cdecl BakeLiftHead(const BYTE* light, float* head) {
     if (g_bakeConeHooked && !g_coneFailed) { // the bake's shader may already be bound (a pass before): Apex's copy instead
         IDirect3DDevice9* dev = g_bakeDevice ? g_bakeDevice : ApexD3D::Device();
+        if (dev) D3D9Hooks::SettleDeferredShaders(dev);
         IDirect3DPixelShader9* bound = nullptr;
         if (dev && SUCCEEDED(dev->GetPixelShader(&bound)) && bound) {
             BindConeShader(dev, bound);

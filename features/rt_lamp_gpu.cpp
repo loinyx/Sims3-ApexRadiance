@@ -3,6 +3,7 @@
 // Part of Apex Radiance. Credits: @loinyx
 
 #include "rt_lamp_gpu.h"
+#include "d3d9_hooks.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -355,6 +356,7 @@ bool Engine::MakePreblur(IDirect3DDevice9* dev, int w, int h, const uint32_t* px
 }
 
 bool Engine::Begin(IDirect3DDevice9* dev) {
+    D3D9Hooks::SettleDeferredShaders(dev);
     if (!saved_ && (FAILED(dev->CreateStateBlock(D3DSBT_ALL, &saved_)) || !saved_)) return saved_ = nullptr, false; // (nothing to restore: nothing is touched)
     saved_->Capture();
     savedInput_ = ExtraHooks::MarkVertexInput();
@@ -453,7 +455,7 @@ bool Engine::RenderShadows(IDirect3DDevice9* dev, const float (*pos)[3], int n, 
     const float proj[4] = {A, B, 0, 0};
     c_.SetVsConst(dev, 4, proj, 1);
     for (int k = 0; k < n && k < kAtlasLamps; k++) {
-        const float lamp[4] = {pos[k][0], pos[k][1], pos[k][2], 1.0f / farDist};
+        const float lamp[4] = {pos[k][0], pos[k][1] - RtLampProxy::kShadowDrop, pos[k][2], 1.0f / farDist}; // (the shadow's origin)
         c_.SetVsConst(dev, 3, lamp, 1);
         for (int f = 0; f < 6; f++) {
             float rows[3][4];
@@ -840,7 +842,7 @@ bool Engine::RenderShadowTileRanges(IDirect3DDevice9* dev, const float pos[3], i
         const float A = farDist / (farDist - kNear), B = -kNear * farDist / (farDist - kNear);
         const float proj[4] = {A, B, 0, 0};
         c_.SetVsConst(dev, 4, proj, 1);
-        const float lamp[4] = {pos[0], pos[1], pos[2], 1.0f / farDist};
+        const float lamp[4] = {pos[0], pos[1] - RtLampProxy::kShadowDrop, pos[2], 1.0f / farDist}; // (the shadow's origin)
         c_.SetVsConst(dev, 3, lamp, 1);
         for (int f = 0; f < 6; f++) {
             float rows[3][4];

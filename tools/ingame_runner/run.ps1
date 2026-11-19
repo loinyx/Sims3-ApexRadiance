@@ -113,7 +113,7 @@ $loaders = @('wininet.dll', 'dinput8.dll', 'version.dll', 'winmm.dll', 'dsound.d
 if (-not $AsiLoader -and -not $loaders) { Say 'warning: no ASI loader found in Bin (for example Ultimate ASI Loader as wininet.dll); pass -AsiLoader' }
 
 Add-Type -Path (Join-Path $PSScriptRoot 'MailboxClient.cs')
-Add-Type -Namespace ApexIngame -Name Keys -MemberDefinition '[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);'
+Add-Type -Namespace ApexIngame -Name Keys -MemberDefinition '[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l); [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, int[] r); [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr c);'
 Add-Type -Namespace ApexIngame -Name SystemTimes -MemberDefinition '[DllImport("kernel32.dll")] public static extern bool GetSystemTimes(out long idle, out long kernel, out long user);'
 Add-Type -Namespace ApexIngame -Name Dump -MemberDefinition '[DllImport("dbghelp.dll", SetLastError = true)] public static extern bool MiniDumpWriteDump(IntPtr proc, uint pid, Microsoft.Win32.SafeHandles.SafeFileHandle file, uint type, IntPtr e, IntPtr u, IntPtr c);'
 # A game that does not close: a small dump (thread stacks, handles, thread times) of it and of a running bridge server,
@@ -139,6 +139,27 @@ $script:proc = $null
 $script:mbox = $null
 $script:speed = 'normal'
 $script:commands = $null # agent calls and job steps of the current load, QPC ms (runner_lib.ps1 Get-Measurement)
+$script:pickLog = @{} # expect_pick results of every load of the run: "<job>|<step>|<variant>" -> pick keys
+$script:lastTarget = $null # the last screenpos reply a mouse_move or click aimed at
+
+# A step's client point: `target` (agent screenpos arguments: sim, object or at, dx/dy/dz, focus) or x,y (pixels) or
+# xf,yf (fractions of the client area, default centre)
+function Resolve-StepPoint($Step, [IntPtr]$H) {
+    # The game runs DPI-aware (bridge client.enableDpiAwareness): physical pixels here too, or a scaled desktop (150 %) scales the client size and the clicks miss
+    $null = [ApexIngame.Keys]::SetThreadDpiAwarenessContext([IntPtr](-4)) # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, this thread
+    $r = New-Object 'int[]' 4; $null = [ApexIngame.Keys]::GetClientRect($H, $r)
+    if ($Step.target) {
+        $a = @{}; foreach ($p in $Step.target.PSObject.Properties) { $a[$p.Name] = $p.Value }
+        $sp = Call-Agent 'screenpos' $a
+        if ($a.focus) { Start-Sleep -Seconds 2; $a.Remove('focus'); $sp = Call-Agent 'screenpos' $a } # the camera moves on the next frame
+        if (-not $sp.on_screen) { throw "target $($Step.target | ConvertTo-Json -Compress) is not on screen" }
+        $script:lastTarget = $sp
+        return Get-ScreenPoint $sp $r[2] $r[3]
+    }
+    $cx = if ($null -ne $Step.x) { [int]$Step.x } else { [int]($r[2] * $(if ($null -ne $Step.xf) { [double]$Step.xf } else { 0.5 })) }
+    $cy = if ($null -ne $Step.y) { [int]$Step.y } else { [int]($r[3] * $(if ($null -ne $Step.yf) { [double]$Step.yf } else { 0.5 })) }
+    return @($cx, $cy)
+}
 
 # QueryPerformanceCounter in ms: the clock the profilers stamp with, so commands and profiles line up exactly
 function Get-QpcMs { [Diagnostics.Stopwatch]::GetTimestamp() * 1000.0 / [Diagnostics.Stopwatch]::Frequency }
@@ -157,17 +178,17 @@ function Call-Agent([string]$Cmd, $ArgsObject, [int]$TimeoutMs = 15000) {
     return $reply.result
 }
 
-# CPU of the game and of everything else, as a share of the whole machine since the previous sample
+# CPU of the game (with the bridge server, Get-GameHelperTicks) and of everything else, as a share of the whole machine since the previous sample
 $script:cpuPrev = $null
 function Add-MachineSample($List) {
     $idle = 0L; $kernel = 0L; $user = 0L
     if (-not [ApexIngame.SystemTimes]::GetSystemTimes([ref]$idle, [ref]$kernel, [ref]$user)) { return }
     $script:proc.Refresh()
-    $now = @{ T = (Get-QpcMs); Total = $kernel + $user; Busy = $kernel + $user - $idle; Game = $script:proc.TotalProcessorTime.Ticks }
+    $now = @{ T = (Get-QpcMs); Total = $kernel + $user; Busy = $kernel + $user - $idle; Game = $script:proc.TotalProcessorTime.Ticks; Helpers = (Get-GameHelperTicks) }
     $p = $script:cpuPrev; $script:cpuPrev = $now
     if (-not $p -or $now.Total -le $p.Total) { return }
     $total = [double]($now.Total - $p.Total)
-    $game = 100 * ($now.Game - $p.Game) / $total
+    $game = 100 * ($now.Game - $p.Game + (Get-HelperTicksDelta $p.Helpers $now.Helpers)) / $total
     $List.Add([pscustomobject]@{ t = $now.T; game = [math]::Round($game, 1); other = [math]::Round([math]::Max(0, 100 * ($now.Busy - $p.Busy) / $total - $game), 1) })
 }
 
@@ -401,6 +422,48 @@ function Invoke-Load($Load, [string]$BaseToml) {
                     $null = [ApexIngame.Keys]::PostMessage($script:proc.MainWindowHandle, 0x100, [IntPtr][int]$step.vk, [IntPtr]1)
                     $null = [ApexIngame.Keys]::PostMessage($script:proc.MainWindowHandle, 0x101, [IntPtr][int]$step.vk, [IntPtr]0xC0000001)
                     Say "  step ${n}: key $($step.vk)"
+                }
+                'click' { # left clicks posted to the game window, never focused: `count` clicks `gapMs` apart at the step's point (Resolve-StepPoint); Esc after each closes a pie menu
+                    $script:proc.Refresh(); $h = $script:proc.MainWindowHandle
+                    $cx, $cy = Resolve-StepPoint $step $h
+                    $lp = [IntPtr](Get-ClickLParam $cx $cy)
+                    $count = if ($null -ne $step.count) { [int]$step.count } else { 1 }
+                    $gap = if ($null -ne $step.gapMs) { [int]$step.gapMs } else { 400 }
+                    for ($c = 0; $c -lt $count; $c++) {
+                        $null = [ApexIngame.Keys]::PostMessage($h, 0x200, [IntPtr]0, $lp)
+                        Start-Sleep -Milliseconds 100 # the move's own pick first, as a player's click: the press then never reads a pick from before the move
+                        $null = [ApexIngame.Keys]::PostMessage($h, 0x201, [IntPtr]1, $lp)
+                        $null = [ApexIngame.Keys]::PostMessage($h, 0x202, [IntPtr]0, $lp)
+                        Start-Sleep -Milliseconds 150
+                        if ($step.escape -ne $false) { $null = [ApexIngame.Keys]::PostMessage($h, 0x100, [IntPtr]27, [IntPtr]1); $null = [ApexIngame.Keys]::PostMessage($h, 0x101, [IntPtr]27, [IntPtr]0xC0000001) }
+                        Start-Sleep -Milliseconds $gap
+                        Clear-Dialog
+                    }
+                    Say "  step ${n}: $count clicks at $cx,$cy"
+                }
+                'mouse_move' { # the mouse moved to the step's point (Resolve-StepPoint) without a click, posted to the game window, never focused
+                    $script:proc.Refresh(); $h = $script:proc.MainWindowHandle
+                    $cx, $cy = Resolve-StepPoint $step $h
+                    $null = [ApexIngame.Keys]::PostMessage($h, 0x200, [IntPtr]0, [IntPtr](Get-ClickLParam $cx $cy))
+                    Say "  step ${n}: mouse at $cx,$cy$(if ($step.target) { " (target $($script:lastTarget.name))" })"
+                }
+                'expect_pick' { # the game's hover pick (agent pick) until it matches (Test-PickExpect) or `seconds` (5) pass; same_as_variant compares with that variant's loads
+                    $until = (Get-Date).AddSeconds($(if ($null -ne $step.seconds) { [double]$step.seconds } else { 5 }))
+                    do { $pk = Call-Agent 'pick' $null; $why = Test-PickExpect $pk $step $script:lastTarget; if (-not $why) { break }; Start-Sleep -Milliseconds 250 } while ((Get-Date) -lt $until)
+                    $key = Get-PickKey $pk
+                    if ($why) { $notes.Add("expect_pick step ${n}: $why") }
+                    if ($step.same_as_variant) {
+                        $d = Compare-PickLog $script:pickLog "$($jobDef.id)|$n" $Load.Variant $key ([string]$step.same_as_variant)
+                        if ($d) { $notes.Add("expect_pick step ${n}: $d") }
+                    }
+                    $result.Info.Add("pick step ${n}: $key (cursor $($pk.x),$($pk.y))")
+                    Say "  step ${n}: picked $key at cursor $($pk.x),$($pk.y)$(if ($why) { " - $why" })"
+                }
+                'walk' { # a Sim (`sim`, default the selected one) walks (Go Here) to `to` {x,y,z}, or to the last target's ground point
+                    $to = if ($step.to) { $step.to } else { $script:lastTarget.base }
+                    $w = Call-Agent 'walk' @{ sim = $(if ($step.sim) { $step.sim } else { 'selected' }); to = $to }
+                    Say "  step ${n}: $($w.sim) walks from $($w.from.x),$($w.from.z) to $($w.to.x),$($w.to.z) (queued $($w.queued))"
+                    if (-not $w.queued) { $notes.Add("walk step ${n}: Go Here not queued") }
                 }
                 'memory' { # the game's largest free address block, read from outside (no agent call, no game work)
                     $mb = [math]::Round($script:mbox.LargestFree() / 1MB)
