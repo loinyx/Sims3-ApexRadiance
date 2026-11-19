@@ -92,7 +92,7 @@ inline void PanesOf(const Lot& lot, std::vector<Pane>& out) {
         }
 }
 // The panes the segment a -> b crosses (T3dDensePS PaneCount, its operations). The game charges a pane's pass for each: 50 wall texels
-// behind two panes read 0.585 of the GPU's light, 05/11. Half open along a span: two windows side by side on one line count once
+// behind two panes read 0.585 of the GPU's light. Half open along a span: two windows side by side on one line count once
 inline int PaneCount(const std::vector<Pane>& panes, const float a[3], const float b[3]) {
     int n = 0;
     const float dx = b[0] - a[0], dz = b[2] - a[2];
@@ -106,11 +106,11 @@ inline int PaneCount(const std::vector<Pane>& panes, const float a[3], const flo
     return n;
 }
 // That share of the light, taken after the soft cut (cut after it, the faint light past two panes went black: 771 lit kitchen floor texels
-// fell to 595, 05/11)
+// fell to 595)
 inline float PaneShare(const std::vector<Pane>& panes, const float a[3], const float b[3]) { return std::pow(WallOpenings::kWindowPass, static_cast<float>(PaneCount(panes, a, b))); }
 
 // A room's texel the game samples just past its own diagonal wall (a half tile's texel, its centre over the wall line; the game's
-// tests light it, the shadow mesh's wall shaded it: a dark band along the room's diagonal walls, 1:8 of the scene of 03/11) is
+// tests light it, the shadow mesh's wall shaded it: a dark band along the room's diagonal walls, 1:8 of a captured scene) is
 // taken for the shadow test kInset inside the nearest quadrant of its room in the same tile (lot space, P's height kept). False:
 // it lies in its room, its tile holds no quadrant of the room, the ids are not known, or it is over kNear from that quadrant
 inline bool IntoRoom(const Lot& lot, int story, int id, float P[3]) {
@@ -312,7 +312,7 @@ inline bool OffWallLine(const Lot& lot, int story, float P[3], const float N[3])
     return moved;
 }
 // A room-0 texel of `story` (lot space P, normal N) facing into a room of the story below that the open-top build opened to this
-// story (Mesh::openRooms, sorted): one space two stories tall, so the texel is that room's wall, not an outdoor one (03/11, lot C49C:
+// story (Mesh::openRooms, sorted): one space two stories tall, so the texel is that room's wall, not an outdoor one (lot C49C:
 // the upper half of a double-height room's walls took the street lamps through the windows as room 0, the lower half not). Its
 // quadrant is taken kStep along the normal; no floor may be placed there on this story
 inline bool OverOpenBelow(const Lot& lot, const std::vector<std::pair<int, int>>& openRooms, int story, const float P[3], const float N[3]) {
@@ -347,7 +347,7 @@ inline void WallSides(const Story& s, std::vector<uint8_t>& wz, std::vector<uint
             (*dg)[2 * (static_cast<size_t>(zl) * w + xl) + ((x1 - x0) * (z1 - z0) > 0 ? 0 : 1)] = 1;
     }
 }
-// The space under the roof that rooms of story B - 1 open to story B (OpenTops' room rule, `open`) continue into on B (09/11, lot
+// The space under the roof that rooms of story B - 1 open to story B (OpenTops' room rule, `open`) continue into on B (lot
 // C49C: the attic over story 2's rooms 5 and 7 and its floored part over room 12 under the same roof, whose walls and floor
 // took the night sky). Seeds: B's floorless quadrants over an open room; from them, B's room-0 quadrants reached within a tile
 // or across a tile side with no wall of B, over a roofed room of B - 1 only (the house: a yard or a deck beside it is never
@@ -550,7 +550,7 @@ inline void BuildGrid(Mesh& m) {
     }
 }
 // A roofed quadrant's ceiling at floor + 3 m (the grid walk's roof test) passes through the story above where that story's
-// floor lies lower (14/10, Full captures: a raised house's ground story stands on its foundation, story 1, with its floor at
+// floor lies lower (Full captures: a raised house's ground story stands on its foundation, story 1, with its floor at
 // the foundation's top, 0.75-1.02 m; the space under it is story 0's roofed rooms, whose ceiling at their floor + 3 m cut
 // story 1's rooms 2.25 m over their floor, so every lamp hung above it shaded those rooms' walls and floors). The ceiling is
 // taken down to the floor of the story above where that floor is lower (still over the story's own floor).
@@ -569,10 +569,10 @@ inline void CeilingsUnderAbove(const Story& s, const Story* above, std::vector<f
 }
 // A roofed room of story s open to the story above (OpenAbove::Classify, the rule room 0 takes the lamps below by: no floor
 // placed over half of it, its walls going up through that story) is one space two stories tall: its roofed quadrants with no
-// floor placed over them lose their ceiling at floor + 3 m (02/11, lot C49C: story 2's rooms 5, 6 and 7 under story 3 cut
+// floor placed over them lose their ceiling at floor + 3 m (lot C49C: story 2's rooms 5, 6 and 7 under story 3 cut
 // their lamps' light at the story line), here with ownWalls: also a room under a sloped roof with a wall of its own on B. Room
 // ids or placed floors not read: nothing opens. A roofed quadrant under a removed floor of the story above (the game's opening
-// between stories, ReadOpenings) loses its ceiling too (02/11, lot C49C: story 1's ceiling at 3.99 m closed story 2's
+// between stories, ReadOpenings) loses its ceiling too (lot C49C: story 1's ceiling at 3.99 m closed story 2's
 // 40-quadrant floor hole, so a lamp above it lit story 1 only through a small spot).
 // Returns the quadrants opened.
 inline int OpenUnderRemoved(Story& s, const Story& above) {
@@ -632,7 +632,7 @@ inline void Build(const Lot& lot, Mesh& m, bool ceilingsOpen = false) {
         m.curStory = static_cast<int8_t>(std::clamp(s.story, -8, 8));
         m.curKind = Mesh::kWall;
         // (open tops: an upper story's wall stops at its foot; reaching under it, it shaded the ceiling of the story below past
-        // the wall's line, which the game lights: the scene of 03/11, ceiling rows at a story's floor line)
+        // the wall's line, which the game lights: a captured scene, ceiling rows at a story's floor line)
         for (const Edge& e : s.edges) AddWall(m, e, ceilingsOpen && s.story > 0 ? 0.0f : kFootExt);
         m.curKind = Mesh::kRoof;
         AddRoofs(m, s);
