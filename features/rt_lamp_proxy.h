@@ -109,6 +109,22 @@ inline int PaneCount(const std::vector<Pane>& panes, const float a[3], const flo
 // fell to 595)
 inline float PaneShare(const std::vector<Pane>& panes, const float a[3], const float b[3]) { return std::pow(WallOpenings::kWindowPass, static_cast<float>(PaneCount(panes, a, b))); }
 
+// The roofed room of `story` whose quadrant holds the lot point P (its id), 0 none: room 0, a roofless room, past the grid, or the ids
+// not known
+inline int RoofedRoomAt(const Lot& lot, int story, const float P[3]) {
+    for (const Story& s : lot.stories) {
+        if (s.story != story) continue;
+        const float fx = std::floor(P[0]), fz = std::floor(P[2]);
+        const int ix = static_cast<int>(fx), iz = static_cast<int>(fz);
+        if (ix < 0 || iz < 0 || ix >= s.w || iz >= s.h || s.room.size() != 4 * static_cast<size_t>(s.w) * s.h) return 0;
+        const float x = P[0] - fx, z = P[2] - fz;
+        const int q = std::fabs(x - 0.5f) <= std::fabs(z - 0.5f) ? (z > 0.5f ? 2 : 0) : (x > 0.5f ? 1 : 3); // (LampVis::Quadrant)
+        const size_t t = static_cast<size_t>(iz) * s.w + ix;
+        const int32_t id = s.room[4 * t + q];
+        return id > 0 && t < s.roofed.size() && ((s.roofed[t] >> q) & 1u) ? id : 0;
+    }
+    return 0;
+}
 // A room's texel the game samples just past its own diagonal wall (a half tile's texel, its centre over the wall line; the game's
 // tests light it, the shadow mesh's wall shaded it: a dark band along the room's diagonal walls, 1:8 of a captured scene) is
 // taken for the shadow test kInset inside the nearest quadrant of its room in the same tile (lot space, P's height kept). False:

@@ -1118,6 +1118,19 @@ void BesideWallFloorCheck() {
         RtLampProxy::OffWallLine(sc.lot, 0, a, up), RtLampProxy::OffWallLine(sc.lot, 0, b, up), RtLampProxy::OffWallLine(sc.lot, 0, c, up), RtLampProxy::OffWallLine(sc.lot, 0, w, side);
         Check(std::fabs(a[2] - 10.07f) < 1e-5f && std::fabs(b[2] - 9.93f) < 1e-5f && c[2] == 10.2f && w[2] == 10.03f, "OffWallLine: a floor point leaves the wall's line on its own side only");
     }
+    { // RoofedRoomAt: a room-0 texel under a roofed room (no GPU lamp there, rt_outdoor_lamps.cpp PrepareJob); not under a roofless one
+        RtLampProxy::Lot lot;
+        RtLampProxy::Story st;
+        st.story = 0, st.w = 4, st.h = 2;
+        st.room.assign(4 * 8, 0), st.roofed.assign(8, 0);
+        for (int q = 0; q < 4; q++) st.room[4 * 1 + q] = 11, st.room[4 * 2 + q] = 5; // tile (1, 0) room 11 roofed, (2, 0) room 5 roofless
+        st.roofed[1] = 0xF;
+        lot.stories.push_back(st);
+        const float in[3] = {1.4f, 0.0f, 0.6f}, yard[3] = {2.5f, 0.0f, 0.5f}, out[3] = {0.5f, 0.0f, 0.5f}, past[3] = {9.0f, 0.0f, 0.5f};
+        Check(RtLampProxy::RoofedRoomAt(lot, 0, in) == 11 && RtLampProxy::RoofedRoomAt(lot, 0, yard) == 0 && RtLampProxy::RoofedRoomAt(lot, 0, out) == 0 &&
+                  RtLampProxy::RoofedRoomAt(lot, 0, past) == 0 && RtLampProxy::RoofedRoomAt(lot, 1, in) == 0,
+              "RoofedRoomAt: only a roofed room's quadrant of the point's story");
+    }
 }
 
 // ---------------------------------------------------------------- 3. the bake split and the blur, bit for bit
