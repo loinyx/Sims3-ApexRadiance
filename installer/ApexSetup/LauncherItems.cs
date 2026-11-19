@@ -34,6 +34,7 @@ public sealed class ModRow : INotifyPropertyChanged
         : ShowPlace ? Place(File) : "";
     public Brush SubBrush => Findings.Count > 0 || DuplicateOf is not null ? Res("ApexWarningBrush") : Res("ApexMutedBrush");
     public Visibility LookVisible => Findings.Count > 0 || DuplicateOf is not null ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility TagsVisible => TagPills.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
     public Visibility SubVisible => Sub.Length > 0 || TagPills.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
     public Visibility NewVisible => IsNew ? Visibility.Visible : Visibility.Collapsed;
     public string NewText => T("New");
@@ -121,13 +122,13 @@ public sealed class ModRow : INotifyPropertyChanged
     public void Update(ModFile f)
     {
         File = f;
-        Changed(nameof(Name), nameof(FullName), nameof(Sub), nameof(SubVisible), nameof(IsOn), nameof(TextOpacity), nameof(ToggleVisible), nameof(LockVisible), nameof(TagPills));
+        Changed(nameof(Name), nameof(FullName), nameof(Sub), nameof(SubVisible), nameof(IsOn), nameof(TextOpacity), nameof(ToggleVisible), nameof(LockVisible), nameof(TagPills), nameof(TagsVisible));
     }
 
     public void SetFindings(IReadOnlyList<string> findings) { Findings = findings; Refresh(); }
 
     // notes, tags, findings or the New mark changed
-    public void Refresh() => Changed(nameof(Sub), nameof(SubVisible), nameof(SubBrush), nameof(LookVisible), nameof(TagPills), nameof(NewVisible));
+    public void Refresh() => Changed(nameof(Sub), nameof(SubVisible), nameof(SubBrush), nameof(LookVisible), nameof(TagPills), nameof(TagsVisible), nameof(NewVisible));
 
     public void OnToggled(object sender, RoutedEventArgs e)
     {

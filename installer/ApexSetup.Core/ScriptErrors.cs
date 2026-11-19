@@ -188,7 +188,9 @@ public static partial class ScriptErrors
         {
             var sev = m.Crashes > 0 || m.Count >= 5 ? Severity.Warning : Severity.Info; // (unverified cut: one stray error is common with ErrorTrap)
             if (m.Crashes > 0)
-                f.Add(new(sev, m.Mod is null ? "The game crashed {0} times in its own code since {1}." : "The game crashed {0} times in {1} since {2}.",
+                f.Add(new(sev, m.Crashes == 1
+                        ? m.Mod is null ? "The game crashed once in its own code since {1}." : "The game crashed once in {1} since {2}."
+                        : m.Mod is null ? "The game crashed {0} times in its own code since {1}." : "The game crashed {0} times in {1} since {2}.",
                     m.Mod is null ? [m.Crashes.ToString(), r.Since.ToString("g")] : [m.Crashes.ToString(), m.Mod, r.Since.ToString("g")]));
             if (m.Count - m.Crashes is var n and > 0)
                 f.Add(new(sev, m.Mod is null ? "{0} script errors in the game's own code since {1} ({2})." : "{0} script errors went through {1} since {2} ({3}). If it misbehaves, update or remove it.",

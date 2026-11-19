@@ -38,9 +38,9 @@
                                 </StackPanel>
                             </Border>
                         </StackPanel>
-                        <Grid ColumnSpacing="6" Visibility="{x:Bind SubVisible, Mode=OneWay}">
+                        <Grid Visibility="{x:Bind SubVisible, Mode=OneWay}">
                             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-                            <ItemsControl ItemsSource="{x:Bind TagPills, Mode=OneWay}" VerticalAlignment="Center">
+                            <ItemsControl ItemsSource="{x:Bind TagPills, Mode=OneWay}" Visibility="{x:Bind TagsVisible, Mode=OneWay}" Margin="0,0,6,0" VerticalAlignment="Center">
                                 <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate x:DataType="local:TagDot">

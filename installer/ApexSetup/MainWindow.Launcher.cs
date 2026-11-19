@@ -96,7 +96,9 @@ public sealed partial class MainWindow
         if (_running) host.Children.Add(Banner(InfoBarSeverity.Success, T("The Sims 3 is running"), _session is { } ss ? T("Playing for {0}.", Duration(ss.Played)) : ""));
         else if (WelcomeUpdates() is { Count: > 0 } ups)
             host.Children.Add(Banner(InfoBarSeverity.Informational, ups.Count == 1 ? T("1 update is ready") : T("{0} updates are ready", ups.Count),
-                _settings.InstallUpdatesOnPlay ? T("It goes in when you press Play; your settings stay.") : T("Install it before you play; your settings stay."),
+                ups.Count == 1
+                    ? _settings.InstallUpdatesOnPlay ? T("It goes in when you press Play; your settings stay.") : T("Install it before you play; your settings stay.")
+                    : _settings.InstallUpdatesOnPlay ? T("They go in when you press Play; your settings stay.") : T("Install them before you play; your settings stay."),
                 T("See updates"), () => Show(Welcome)));
         if (_offline) host.Children.Add(Banner(InfoBarSeverity.Warning, T("No internet"), T("You can still play. Updates wait until you're back online."), T("Try again"), async () => await LoadReleasesAsync()));
         if (_healthState == HealthState.Blocked)
@@ -629,9 +631,9 @@ public sealed partial class MainWindow
             (HealthArea.Graphics, T("Graphics"), _state?.Layer.ToString() ?? "", ""),
             (HealthArea.GameSettings, T("Game settings"), "Options.ini, Resource.cfg", ""),
             (HealthArea.Mods, T("Mods"), T("conflicts and what they need"), ""),
-            (HealthArea.Stability, T("Stability"), T("crashes, memory, script errors"), ""),
-            (HealthArea.Saves, T("Saves"), T("size, backups, complete"), ""),
-            (HealthArea.Disk, T("Space and caches"), T("free space, OneDrive, game caches"), ""),
+            (HealthArea.Stability, T("Stability"), T("crashes, memory, script errors"), "\uE9D9"),
+            (HealthArea.Saves, T("Saves"), T("size, backups, complete"), "\uE74E"),
+            (HealthArea.Disk, T("Space and caches"), T("free space, OneDrive, game caches"), "\uEDA2"),
         ];
         foreach (var (area, name, detail, glyph) in all)
         {

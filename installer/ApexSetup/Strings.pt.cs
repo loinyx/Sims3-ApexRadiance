@@ -402,6 +402,8 @@ public static partial class Strings
         ["{0} updates are ready"] = "{0} atualizações prontas",
         ["It goes in when you press Play; your settings stay."] = "Ela é instalada quando você clicar em Jogar; suas configurações ficam.",
         ["Install it before you play; your settings stay."] = "Instale antes de jogar; suas configurações ficam.",
+        ["They go in when you press Play; your settings stay."] = "Elas são instaladas quando você clicar em Jogar; suas configurações ficam.",
+        ["Install them before you play; your settings stay."] = "Instale-as antes de jogar; suas configurações ficam.",
         ["See updates"] = "Ver atualizações",
         ["No internet"] = "Sem internet",
         ["You can still play. Updates wait until you're back online."] = "Você ainda pode jogar. As atualizações esperam até você voltar a ficar online.",
