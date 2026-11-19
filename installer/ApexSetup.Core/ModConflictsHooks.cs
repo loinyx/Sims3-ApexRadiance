@@ -11,7 +11,8 @@ public static partial class ModConflicts
     public const string HookTableUrl = "https://raw.githubusercontent.com/rodneypantonial/sims3-modernization/master/docs/data/hook-table.csv";
 
     public sealed record HookMod(string Name, Regex File, string Version, string[] Sha256);
-    public sealed record Hook(string Mod, string Edition, uint Address, string Kind, string Purpose);
+    /// <summary>Coordinated: other mod name -> "&lt;who&gt; stands down" or "&lt;who&gt; chains" (a shared address that is not a conflict).</summary>
+    public sealed record Hook(string Mod, string Edition, uint Address, string Kind, string Purpose, IReadOnlyDictionary<string, string> Coordinated);
 
     public sealed class HookTable
     {
@@ -34,6 +35,7 @@ public static partial class ModConflicts
                 var line = raw.TrimEnd('\r');
                 if (line.Length == 0 || line[0] == '#') continue;
                 var c = CsvRow(line);
+                if (c[0] == "hook" && c.Count == 6) c.Add(""); // a table from before the coordinated column
                 bool Ok(int count, params Regex[] rx) => c.Count == count && rx.Select((r, i) => r.IsMatch(c[i + 1])).All(x => x);
                 switch (c[0])
                 {
@@ -49,9 +51,9 @@ public static partial class ModConflicts
                         catch (ArgumentException) { throw new InvalidDataException($"hook table line {n}: bad file pattern"); }
                         t.Mods.Add(new(c[1], file, c[3], c[4].Split(';', StringSplitOptions.RemoveEmptyEntries)));
                         break;
-                    case "hook" when Ok(6, NameRx, TagRx, AddrRx, TextRx, TextRx) && t.Mods.Any(m => m.Name == c[1]) && t.Editions.ContainsKey(c[2])
-                                     && Convert.ToUInt32(c[3], 16) is >= 0x401000 and <= 0x12FFFFF:
-                        t.Hooks.Add(new(c[1], c[2], Convert.ToUInt32(c[3], 16), c[4], c[5]));
+                    case "hook" when Ok(7, NameRx, TagRx, AddrRx, TextRx, TextRx, TextRx) && t.Mods.Any(m => m.Name == c[1]) && t.Editions.ContainsKey(c[2])
+                                     && Convert.ToUInt32(c[3], 16) is >= 0x401000 and <= 0x12FFFFF && Coordinated(c[6], c[1], t) is { } co:
+                        t.Hooks.Add(new(c[1], c[2], Convert.ToUInt32(c[3], 16), c[4], c[5], co));
                         break;
                     default:
                         throw new InvalidDataException($"hook table line {n}: not a valid row");
@@ -114,6 +116,20 @@ public static partial class ModConflicts
                     && Editions.FirstOrDefault(e => e.Value == stamp).Key is { } tag) return tag;
             return null;
         }
+    }
+
+    // "<other mod>=<who> stands down|chains;...": the other mod is listed, <who> is one of the two; null = invalid
+    static Dictionary<string, string>? Coordinated(string v, string mod, HookTable t)
+    {
+        var d = new Dictionary<string, string>();
+        foreach (var e in v.Split(';', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var kv = e.Split('=');
+            if (kv.Length != 2 || kv[0] == mod || !t.Mods.Any(m => m.Name == kv[0]) || d.ContainsKey(kv[0])
+                || !new[] { kv[0], mod }.Any(n => kv[1] == $"{n} stands down" || kv[1] == $"{n} chains")) return null;
+            d[kv[0]] = kv[1];
+        }
+        return d;
     }
 
     static readonly Regex DateRx = new(@"^\d{4}-\d{2}-\d{2}$"), TagRx = new(@"^[a-z0-9.-]{1,20}$"), StampRx = new(@"^0x[0-9A-Fa-f]{8}$"),

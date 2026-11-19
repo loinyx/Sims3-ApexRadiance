@@ -78,7 +78,9 @@ static class ModConflictsTests
             "hook table: the embedded copy parses, with three editions");
         const string head = "date,2030-01-01\nedition,steam-1.67,0x52DEC247\nedition,retail-1.67,0x52D872DA\nmod,A,^a\\.asi$,1.0,\n";
         foreach (var bad in new[] { head, head + "hook,A,steam-1.67,0x10,imm,low address\n", head + "hook,Z,steam-1.67,0x500000,imm,unknown mod\n",
-                                     head + "hook,A,ea-9,0x500000,imm,unknown edition\n", head + "hook,A,steam-1.67,500000,imm,no 0x\n", "<html>not found</html>\n" })
+                                     head + "hook,A,ea-9,0x500000,imm,unknown edition\n", head + "hook,A,steam-1.67,500000,imm,no 0x\n", head + "hook,A,steam-1.67,0x500000,imm,x,Z=A stands down\n",
+                                     head + "hook,A,steam-1.67,0x500000,imm,x,A=A chains\n", head + "mod,B,^b\\.asi$,1.0,\nhook,A,steam-1.67,0x500000,imm,x,B=C stands down\n",
+                                     head + "mod,B,^b\\.asi$,1.0,\nhook,A,steam-1.67,0x500000,imm,x,B=B ignores\n", "<html>not found</html>\n" })
         {
             var rejected = false;
             try { ModConflicts.HookTable.Parse(bad, "test"); } catch (InvalidDataException) { rejected = true; }
@@ -196,6 +198,7 @@ static class ModConflictsTests
                     "date,2030-01-01\nedition,steam-1.67,0x52DEC247\nedition,retail-1.67,0x52D872DA\n"
                     + $"mod,A,^a\\.asi$,1.0,{Sha(stub)}\nmod,B,^b\\.asi$,1.0,{Sha(modR)}\nmod,C,^c\\.asi$,1.0,{new string('0', 64)}\n"
                     + "hook,A,steam-1.67,0x500000,detour,A's detour\nhook,B,steam-1.67,0x500000,call,B's call\nhook,C,steam-1.67,0x500000,imm,C's patch\n"
+                    + "hook,A,steam-1.67,0x500010,detour,A's,B=B stands down\nhook,B,steam-1.67,0x500010,call,B's\nhook,B,steam-1.67,0x500020,call,B's,A=A chains\nhook,A,steam-1.67,0x500020,detour,A's,\n"
                     + "hook,A,retail-1.67,0x700000,detour,A moved\nhook,B,retail-1.67,0x600000,call,B moved\n", "test");
                 File.WriteAllBytes(Path.Combine(gb, "a.asi"), stub);
                 File.WriteAllBytes(Path.Combine(gb, "b.asi"), modR);
@@ -211,9 +214,10 @@ static class ModConflictsTests
                 ModConflicts.Report HookScan() => ModConflicts.Scan(new() { Roots = { empty }, Rules = rules, Bin = gb, Hooks = table });
                 Exe(0x52DEC247);
                 var steam = HookScan();
-                check(Kind(steam, "native hook") is [{ } h1] && string.Join(",", h1.Parties) == "a,b" && h1.Evidence[0] == "0x500000 (A's detour / B's call)"
+                check(Kind(steam, "native hook") is [{ } h1] && string.Join(",", h1.Parties) == "a,b" && string.Join(",", h1.Evidence) == "0x500000 (A's detour / B's call)" && h1.Text.Contains(" 1 of the same")
+                      && steam.Info.Any(i => i.Party == "a + b" && i.Text == "both hook 0x500010; B stands down (coordinated)") && steam.Info.Any(i => i.Text == "both hook 0x500020; A chains (coordinated)")
                       && steam.Info.Any(i => i.Party == "hook table" && i.Text.Contains("game build steam-1.67")),
-                    "hook table: on Steam, two listed builds sharing an address conflict, with both purposes");
+                    "hook table: on Steam, two listed builds sharing an address conflict, with both purposes; coordinated addresses are INFO");
                 check(steam.Info.Any(i => i.Party == "c" && i.Text.StartsWith("hook table may be out of date for c.asi (table dated 2030-01-01)")) && !Kind(steam, "native hook").Any(c => c.Parties.Contains("c")),
                     "hook table: a build the table does not list is INFO, never a conflict");
                 Exe(0x52D872DA);

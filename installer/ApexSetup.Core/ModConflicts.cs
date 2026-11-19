@@ -630,6 +630,8 @@ public static partial class ModConflicts
         public HashSet<uint>? Addrs;
         public Dictionary<uint, string>? Purposes;
         public string? KnownTable;
+        public string? HookMod; // hook-table mod name
+        public Dictionary<uint, IReadOnlyDictionary<string, string>>? Coordinated; // address -> other mod -> "<who> stands down|chains"
         public void AddWrite(string area, string call)
         {
             if (!Writes.TryGetValue(area, out var m)) Writes[area] = m = new();
@@ -754,6 +756,8 @@ public static partial class ModConflicts
                     p.Addrs = rows.Select(h => h.Address).ToHashSet();
                     p.Purposes = rows.GroupBy(h => h.Address).ToDictionary(g => g.Key, g => g.First().Purpose);
                     p.KnownTable = $"hook table {ht.Date}";
+                    p.HookMod = hm.Name;
+                    p.Coordinated = rows.Where(h => h.Coordinated.Count > 0).GroupBy(h => h.Address).ToDictionary(g => g.Key, g => g.First().Coordinated);
                     return;
                 }
                 p.Info.Add($"hook table may be out of date for {name} (table dated {ht.Date}): this build is not listed, its hooks are not compared");
@@ -938,7 +942,13 @@ public static partial class ModConflicts
             for (var j = i + 1; j < tabled.Count; j++)
             {
                 var (a, b) = (tabled[i], tabled[j]);
-                var shared = a.Addrs!.Where(b.Addrs!.Contains).OrderBy(x => x).ToList();
+                var all = a.Addrs!.Where(b.Addrs!.Contains).OrderBy(x => x).ToList();
+                // coordinated (hook table): one side stands down or chains there; INFO per "<who> stands down|chains"
+                string? Co(uint x) => (b.HookMod is not null ? a.Coordinated?.GetValueOrDefault(x)?.GetValueOrDefault(b.HookMod) : null)
+                                     ?? (a.HookMod is not null ? b.Coordinated?.GetValueOrDefault(x)?.GetValueOrDefault(a.HookMod) : null);
+                foreach (var g in all.Where(x => Co(x) is not null).GroupBy(x => Co(x)!))
+                    report.Info.Add(new($"{a.Name} + {b.Name}", $"both hook {string.Join(", ", g.Select(x => $"0x{x:X}"))}; {g.Key} (coordinated)"));
+                var shared = all.Where(x => Co(x) is null).ToList();
                 if (shared.Count > 0) report.Conflicts.Add(new("native hook",
                     $"{a.Name} and {b.Name} patch {shared.Count} of the same TS3W.exe addresses ({a.KnownTable} / {b.KnownTable}): install order decides which patch survives",
                     new[] { a.Name, b.Name }, shared.Take(8).Select(x => $"0x{x:X}" + (a.Purposes?.GetValueOrDefault(x) is { } pa && b.Purposes?.GetValueOrDefault(x) is { } pb ? $" ({pa} / {pb})" : "")).ToArray()));

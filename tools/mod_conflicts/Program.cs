@@ -5,11 +5,11 @@ using System.Text.Json;
 using ApexSetup;
 
 string? Opt(string n) => Array.IndexOf(args, n) is var i and >= 0 && i + 1 < args.Length ? args[i + 1] : null;
-var valued = new[] { "--bin", "--asm", "--game", "--rules" };
+var valued = new[] { "--bin", "--asm", "--game", "--rules", "--hook-table" };
 var folders = args.Where((a, i) => !a.StartsWith("--") && (i == 0 || !valued.Contains(args[i - 1]))).ToList();
 if (args.Contains("--help") || args.Contains("-h"))
 {
-    Console.WriteLine("ModConflicts [<folder>...] [--mod-folders] [--describe] [--json] [--offline] [--bin <Game\\Bin>] [--asm <game dll folder>] [--game <install folder>] [--rules <json>]");
+    Console.WriteLine("ModConflicts [<folder>...] [--mod-folders] [--describe] [--json] [--offline] [--bin <Game\\Bin>] [--asm <game dll folder>] [--game <install folder>] [--rules <json>] [--hook-table <csv>]");
     return 0;
 }
 // the detected game (its script assemblies and edition); with no folder also its Mods folder and Game\Bin
@@ -18,7 +18,7 @@ var game = Opt("--game") is { } gp ? Games.FromFolder(gp) : Games.Detect().First
 if (folders.Count == 0 && game is not null) folders.Add(Path.Combine(Scan.DocumentsFor(game), "Mods"));
 folders = folders.Where(Directory.Exists).ToList();
 if (folders.Count == 0) { Console.Error.WriteLine("No Mods folder found: pass one."); return 2; }
-var hooks = ModConflicts.HookTable.Load(args.Contains("--offline"),
+var hooks = Opt("--hook-table") is { } tableFile ? ModConflicts.HookTable.Parse(File.ReadAllText(tableFile), tableFile) : ModConflicts.HookTable.Load(args.Contains("--offline"),
     Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Apex Radiance Setup", "hook-table.csv"));
 
 ModConflicts.Report Run() => ModConflicts.Scan(new ModConflicts.Options
