@@ -26,6 +26,7 @@ stable description of the current behaviour.
 | History | `docs/history/<feature>.md` | Dated investigations, rejected approaches with evidence, superseded designs | Append only |
 | Release notes | `docs/releases/<version>.md` | What changed in a published version | Once per release |
 | Architecture and workflow | `docs/architecture.md`, `docs/workflow.md` | Framework internals, build, install, diagnosis, release process | The framework or process changes |
+| Code map | `docs/code-map.md`, `docs/code-map/<area>.md` | Where each feature's code is, its threads, settings, harnesses, rules and fragile points | A file, entry point, hook, setting or harness is added, renamed or removed (checked by `tools/code_map_check.py`) |
 
 One feature, one page per type. A feature page links to its validation and history pages; these never duplicate it.
 

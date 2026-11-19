@@ -30,4 +30,5 @@ jobs:
           python3 tools/public_text_check.py --title "$TITLE" || status=1
           printf '%s' "$BODY" > body.txt
           python3 tools/public_text_check.py --text-file body.txt || status=1
+          python3 tools/code_map_check.py || status=1
           exit $status

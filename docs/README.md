@@ -29,6 +29,7 @@ Per-lot loading events (Released in 2.14.0, developer mode only) are described i
 
 | Document | Covers |
 |---|---|
+| [code-map.md](code-map.md) | Where the code of each feature lives: files, entry points, addresses, threads, settings, harnesses, rules, fragile points, how to validate a change |
 | [architecture.md](architecture.md) | Loading, D3D9 hooks, hook registry, post-scene chain, INTZ depth share, patch system, configuration, logger, threads |
 | [workflow.md](workflow.md) | Build, install, testing harnesses, diagnosis with captures, release process, repository skills |
 | [ui.md](ui.md) | The Violet menu: pages, cards, widgets, shortcuts, profiles, notices, languages |

@@ -13,6 +13,9 @@ unmodified Sims3SettingsSetter and does not depend on it. Visible names come fro
 ## Read first
 
 - [docs/README.md](docs/README.md), then [docs/architecture.md](docs/architecture.md) and [docs/workflow.md](docs/workflow.md).
+- [docs/code-map.md](docs/code-map.md) before searching the code: the area page for the change names its files, entry
+  points, game addresses, threads, settings, harnesses, rules and fragile points. A change that adds, renames or
+  removes any of them updates the map; `python tools/code_map_check.py` checks it against the code.
 - The feature, validation and history pages of the area being changed. Each feature page lists rejected approaches;
   do not retry one without new evidence.
 - Before any lighting change: `docs/features/night-lighting/README.md`, the part's page and `docs/engine/`.
