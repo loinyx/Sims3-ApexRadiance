@@ -1374,6 +1374,7 @@ struct Job {
     // in their slot order (mask.z; at most 4: Params::inFit)
     std::shared_ptr<const std::vector<RtLampProxy::Inside>> inside;
     std::vector<int> inRooms;
+    std::shared_ptr<const Proxy> walls; // (physical, the active lot) its occluders: sharper floors' sub-texels by a wall's line move off it (OffWallLine)
     uint32_t inVer[4] = {}; // the kept solve of each whose top row its texels were matched to (OutdoorDelta::IndoorTopOf)
     int inCls[4] = {-1, -1, -1, -1}; // its class then (-1: none matched)
 };
@@ -1583,6 +1584,7 @@ void PrepareJob(Job& j) {
                     if (c.base[3] != 0.0f) c.base[3] = RoomMapDither::Offset(static_cast<unsigned>(sx), static_cast<unsigned>(sy)) / 255.0f; // (each sub-texel its own: OutdoorDelta's `sub`; a 16-bit target takes none, Packed)
                     std::memcpy(c.p, lot[q], sizeof lot[q]), std::memcpy(ph.p, lot[q], sizeof lot[q]), std::memcpy(ph.base, world[q], sizeof world[q]);
                     ph.mask[3] = foot;
+                    if (j.walls) RtLampProxy::OffWallLine(j.walls->lot, j.story, ph.p, ph.n); // (as a kept room's: its shadow off the wall's line; room 0 reads no separate lookup point, so the law moves the same few cm)
                     pl.mask[0] = sx, pl.mask[1] = sy;
                     p.vHi.push_back(c), p.pvHi.push_back(ph), p.placesHi.push_back(pl);
                 }
@@ -2503,6 +2505,7 @@ void Frame(IDirect3DDevice9* dev) {
                 j->base = rn.lotBase;
                 j->phys = physReady && !physRefused, j->physLater = wantPhys && !physReady;
                 if (act && S >= 1 && OutdoorDelta::RoomLampPhysical() && g_openUsed) j->open = g_openUsed, j->openRooms = g_openRooms, j->inside = g_inside;
+                if (act && j->phys) j->walls = g_openUsed;
                 if (wantPhys && !j->phys) { // (its lamps back in its base: a lamp edit taken since its solve sends it to one)
                     PhysNote(room, S, physRefused ? "its physical draw failed" : !g_eng || !g_eng->PhysReady() ? "the physical shaders are missing" : "no occluders with open tops yet");
                     OutdoorDelta::SolveTouched(room);
