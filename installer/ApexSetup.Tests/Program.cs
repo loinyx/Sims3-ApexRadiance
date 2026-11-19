@@ -1045,10 +1045,10 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         var tries = 0;
         Fs.Retry(() => { if (++tries < 3) throw new IOException("in use"); });
         var gaveUp = false; tries = 0;
-        try { Fs.Retry(() => { tries++; throw new IOException("in use"); }); } catch (IOException) { gaveUp = tries == 4; }
+        try { Fs.Retry(() => { tries++; throw new IOException("in use"); }); } catch (IOException) { gaveUp = tries == Fs.RetryTimes + 1; }
         var missingAtOnce = false; tries = 0;
         try { Fs.Retry(() => { tries++; throw new FileNotFoundException("gone"); }); } catch (FileNotFoundException) { missingAtOnce = tries == 1; }
-        Check(gaveUp && missingAtOnce, "copy and move: a held file is tried again 3 times, a missing one fails at once");
+        Check(gaveUp && missingAtOnce, "copy and move: a held file is tried again 4 times, a missing one fails at once");
         Fs.RetryDelay = TimeSpan.FromMilliseconds(500);
 
         var anow = DateTimeOffset.FromUnixTimeSeconds(1_800_000_000);

@@ -19,7 +19,7 @@ namespace ApexSetup;
 // through ModLibrary and ModMerge, notes and tags through ModNotes.
 public sealed partial class MainWindow
 {
-    const string AllMods = "*all", NewMods = "*new", LookMods = "*look", DupMods = "*dup", OffMods = "*off",
+    const string DefaultMods = "*default", AllMods = "*all", NewMods = "*new", LookMods = "*look", DupMods = "*dup", OffMods = "*off",
         AsiMods = "*asi", PackMods = "*sims3pack", LibraryMods = "*library", NewTag = "*newtag";
     string _modPlace = AllMods;
     List<ModRow> _modRows = [];
@@ -33,6 +33,7 @@ public sealed partial class MainWindow
     string? _dragFolder;
     readonly Dictionary<string, ModContents> _modContents = new(StringComparer.OrdinalIgnoreCase);
     Action? _modUndo;
+    GameIndex? _gameIndex;
 
     // filters: each a set of chosen values; a mod matches any value of a group and every group in use
     readonly HashSet<string> _fFiles = [], _fKinds = [], _fStates = [], _fTags = [], _fCreators = [];
@@ -78,11 +79,32 @@ public sealed partial class MainWindow
             }).ToList();
             _modsLoaded = true;
             _ = LoadModPicturesAsync(_modRows);
+            _ = LoadDefaultsAsync(g, _modRows);
         }
         catch (Exception e) { App.Log(e); SetInfo(ModsInfo, InfoBarSeverity.Error, T("The launcher could not read your mods"), ErrorText(e)); }
         finally { _modsLoading = false; }
         _folderSig = "";
         FillMods();
+    }
+
+    // the game's own keys (cached; read once, in a second or two, when the game's files change) and which mods replace them
+    async Task LoadDefaultsAsync(Game g, List<ModRow> rows)
+    {
+        try
+        {
+            var found = await Task.Run(() =>
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+                var gi = DefaultReplacements.Cached(g) ?? DefaultReplacements.Index(g, null, cts.Token);
+                return (gi, rows.Where(r => r.File.FileType == "package").Select(r => (r, DefaultReplacements.Analyze(gi, r.File))).ToList());
+            });
+            if (!ReferenceEquals(rows, _modRows)) return; // (the list was read again meanwhile)
+            _gameIndex = found.gi;
+            foreach (var (r, d) in found.Item2) r.Defaults = d;
+            _folderSig = "";
+            FillMods();
+        }
+        catch (Exception e) when (e is not OutOfMemoryException) { App.Log(e); }
     }
 
     // when a mod arrived: the later of its creation (a copy) and last change (an update)
@@ -188,7 +210,7 @@ public sealed partial class MainWindow
 
     (string Crumb, string Title) PlaceTitle(string place) => place switch
     {
-        AllMods => ("", T("All mods")), NewMods => ("", T("New since last play")), LookMods => ("", T("Needs a look")), DupMods => ("", T("Duplicates")),
+        AllMods => ("", T("All mods")), NewMods => ("", T("New since last play")), DefaultMods => ("", T("Default replacements")), LookMods => ("", T("Needs a look")), DupMods => ("", T("Duplicates")),
         OffMods => ("", T("Turned off")), AsiMods => ("", T("Game plugins")), PackMods => ("", "Sims3Packs"), LibraryMods => ("", T("Library")),
         _ when place.StartsWith('#') => (T("Tag"), place[1..]),
         "" => ("", "Mods"),
@@ -202,6 +224,7 @@ public sealed partial class MainWindow
         {
             AllMods => m.FileType == "package",
             NewMods => r.IsNew,
+            DefaultMods => r.Defaults.IsDefault,
             LookMods => r.Findings.Count > 0 || !Loaded(m) && m.Enabled,
             DupMods => r.DuplicateOf is not null,
             OffMods => !m.Enabled,
@@ -228,7 +251,7 @@ public sealed partial class MainWindow
         if (_fKinds.Count > 0 && !r.Kinds.Any(_fKinds.Contains)) return false;
         if (_fStates.Count > 0 && !_fStates.Any(s => s switch
             {
-                "on" => m.Enabled, "off" => !m.Enabled, "look" => r.Findings.Count > 0, "new" => r.IsNew, "dup" => r.DuplicateOf is not null, _ => false,
+                "on" => m.Enabled, "off" => !m.Enabled, "look" => r.Findings.Count > 0, "new" => r.IsNew, "dup" => r.DuplicateOf is not null, "default" => r.Defaults.IsDefault, _ => false,
             })) return false;
         if (_fTags.Count > 0 && !_fTags.Any(t => t == "" ? ModNotes.TagsOf(m.Rel).Count == 0 : ModNotes.TagsOf(m.Rel).Contains(t, StringComparer.OrdinalIgnoreCase))) return false;
         if (_fCreators.Count > 0 && !_fCreators.Contains(CreatorOf(m) ?? "")) return false;
@@ -262,7 +285,7 @@ public sealed partial class MainWindow
         var groups = new List<(string Key, string Label, string? Add, List<Place> Items)>
         {
             ("library", T("LIBRARY"), null, new List<Place> { new(AllMods, T("All mods"), "layers", N(AllMods)) }
-                .Concat(new[] { new Place(NewMods, T("New since last play"), "sparkles", N(NewMods)), new(LookMods, T("Needs a look"), "triangle-alert", N(LookMods), Warn: true),
+                .Concat(new[] { new Place(NewMods, T("New since last play"), "sparkles", N(NewMods)), new(DefaultMods, T("Default replacements"), "replace", N(DefaultMods)), new(LookMods, T("Needs a look"), "triangle-alert", N(LookMods), Warn: true),
                     new(DupMods, T("Duplicates"), "copy", N(DupMods)), new(OffMods, T("Turned off"), "power-off", N(OffMods)) }.Where(p => p.Count > 0 || p.Key == _modPlace)).ToList()),
             ("folders", T("FOLDERS"), "folder", dirs.Select(d => new Place(d, Path.GetFileName(d), "folder", _mods.Count(m => InDir(m, d)), d.Count(c => c == Path.DirectorySeparatorChar))).ToList()),
             ("tags", T("TAGS"), "tag", ModNotes.Tags.Select(t => new Place("#" + t.Name, t.Name, "", N("#" + t.Name), Color: t.Color)).ToList()),
@@ -450,7 +473,7 @@ public sealed partial class MainWindow
             i.Click += (_, _) => { _modPlace = key; SaveViewPrefs(); _folderSig = ""; FillMods(); };
             menu.Items.Add(i);
         }
-        foreach (var (k, l, i) in new[] { (AllMods, T("All mods"), "layers"), (NewMods, T("New since last play"), "sparkles"), (LookMods, T("Needs a look"), "triangle-alert"),
+        foreach (var (k, l, i) in new[] { (AllMods, T("All mods"), "layers"), (NewMods, T("New since last play"), "sparkles"), (DefaultMods, T("Default replacements"), "layers"), (LookMods, T("Needs a look"), "triangle-alert"),
                      (DupMods, T("Duplicates"), "copy"), (OffMods, T("Turned off"), "power-off") }) Add(k, l, i);
         menu.Items.Add(new MenuFlyoutSeparator());
         foreach (var d in _modDirs) Add(d, new string(' ', 3 * d.Count(c => c == Path.DirectorySeparatorChar)) + Path.GetFileName(d), "folder");
@@ -741,8 +764,8 @@ public sealed partial class MainWindow
 
     static string FileTypeName(string f) => f switch { "package" => T("Package"), "sims3pack" => "Sims3Pack", "asi" => T("ASI plugin"), _ => T("Library item") };
     static string FileTypeIcon(string f) => f switch { "package" => "package", "sims3pack" => "package", "asi" => "plug", _ => "library" };
-    static string StateName(string s) => s switch { "on" => T("On"), "off" => T("Off"), "look" => T("Needs a look"), "new" => T("New"), _ => T("Duplicate") };
-    static string StateIcon(string s) => s switch { "on" => "power", "off" => "power-off", "look" => "triangle-alert", "new" => "sparkles", _ => "copy" };
+    static string StateName(string s) => s switch { "on" => T("On"), "off" => T("Off"), "look" => T("Needs a look"), "new" => T("New"), "default" => T("Default replacement"), _ => T("Duplicate") };
+    static string StateIcon(string s) => s switch { "on" => "power", "off" => "power-off", "look" => "triangle-alert", "new" => "sparkles", "default" => "replace", _ => "copy" };
 
     void OnModFiltersOpening(object sender, object e) => FillFilterPanel();
 
@@ -829,9 +852,9 @@ public sealed partial class MainWindow
                 }
                 break;
             case 2:
-                foreach (var s in new[] { "on", "off", "look", "new", "dup" })
+                foreach (var s in new[] { "on", "off", "look", "new", "dup", "default" })
                 {
-                    var n = inPlace.Count(r => s switch { "on" => r.File.Enabled, "off" => !r.File.Enabled, "look" => r.Findings.Count > 0, "new" => r.IsNew, _ => r.DuplicateOf is not null });
+                    var n = inPlace.Count(r => s switch { "on" => r.File.Enabled, "off" => !r.File.Enabled, "look" => r.Findings.Count > 0, "new" => r.IsNew, "default" => r.Defaults.IsDefault, _ => r.DuplicateOf is not null });
                     if (n > 0 || _fStates.Contains(s)) Opt(StateName(s), StateIcon(s), null, n, _fStates.Contains(s), on => Flip(_fStates, s, on));
                 }
                 break;
@@ -1261,6 +1284,7 @@ public sealed partial class MainWindow
         }
         host.Children.Add(facts);
         if (ModMerge.IsMerged(m) && ModMerge.Info(m) is { } mergeInfo) host.Children.Add(MergedPanel(r, mergeInfo));
+        if (r.Defaults.IsDefault && _gameIndex is { } gi) host.Children.Add(ReplacesPanel(r, gi));
         if (m.FileType is "package" or "library") host.Children.Add(InsidePanel(r));
 
         // what needs a look
@@ -1427,6 +1451,50 @@ public sealed partial class MainWindow
     {
         try { Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true }); }
         catch (Exception e) { App.Log(e); }
+    }
+
+    // ---------- a default replacement ----------
+
+    // the game items it replaces: objects with the game's own name and thumbnail, CAS parts, then textures and the rest
+    UIElement ReplacesPanel(ModRow r, GameIndex gi)
+    {
+        var d = r.Defaults;
+        var panel = new StackPanel { Spacing = 8 };
+        var items = d.Objects.Count + d.CasParts.Count;
+        panel.Children.Add(new TextBlock { Text = T("REPLACES IN THE GAME"), FontSize = 11, FontWeight = FontWeights.SemiBold, CharacterSpacing = 60, Foreground = Res("ApexMutedBrush") });
+        panel.Children.Add(Muted(d.Share >= 0.999 ? T("A pure default replacement: everything in it changes something the game already has.")
+            : T("{0} of its {1} resources replace the game's; the rest is new.", d.Replaced, d.Resources)));
+        var wrap = new WrapPanel { Spacing = 6 };
+        if (d.Objects.Count > 0) wrap.Children.Add(Pill(d.Objects.Count == 1 ? T("1 object") : T("{0} objects", d.Objects.Count), "ApexSoftTextBrush"));
+        if (d.CasParts.Count > 0) wrap.Children.Add(Pill(d.CasParts.Count == 1 ? T("1 Create a Sim part") : T("{0} Create a Sim parts", d.CasParts.Count), "ApexSoftTextBrush"));
+        if (d.Images > 0) wrap.Children.Add(Pill(d.Images == 1 ? T("1 texture") : T("{0} textures", d.Images), "ApexSoftTextBrush"));
+        foreach (var (type, n) in d.Other.Take(4)) wrap.Children.Add(Pill($"{n} {type}", "ApexSoftTextBrush"));
+        panel.Children.Add(wrap);
+        const int shown = 8;
+        foreach (var it in d.Objects.Concat(d.CasParts).Take(shown))
+        {
+            var g = new Grid { ColumnSpacing = 10 };
+            g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(40) });
+            g.ColumnDefinitions.Add(new ColumnDefinition());
+            var thumb = new Border { Width = 40, Height = 40, CornerRadius = new CornerRadius(6), Background = Res("ApexPillBrush") };
+            var ph = Lucide.Icon(d.Objects.Contains(it) ? "sofa" : "shirt", 16, Res("ApexMutedBrush"));
+            ph.HorizontalAlignment = HorizontalAlignment.Center;
+            ph.VerticalAlignment = VerticalAlignment.Center;
+            thumb.Child = ph;
+            g.Children.Add(thumb);
+            var item = it;
+            _ = Task.Run(() => DefaultReplacements.OriginalThumbnail(gi, item)).ContinueWith(async t =>
+            {
+                if (t.Result is { } bytes && await SaveCard.ImageOf(bytes) is { } img) thumb.Child = new Image { Source = img, Stretch = Stretch.UniformToFill };
+            }, TaskScheduler.FromCurrentSynchronizationContext());
+            var name = new TextBlock { Text = it.Name ?? T("A game item"), FontSize = 12, Foreground = Res("ApexSoftTextBrush"), TextWrapping = TextWrapping.Wrap, MaxLines = 2, VerticalAlignment = VerticalAlignment.Center };
+            ToolTipService.SetToolTip(name, $"{it.Name}  {it.Type:X8}:{it.Group:X8}:{it.Instance:X16}");
+            Grid.SetColumn(name, 1);
+            g.Children.Add(name);
+            panel.Children.Add(g);
+        }
+        if (items > shown) panel.Children.Add(Muted(T("and {0} more", items - shown)));
+        return panel;
     }
 
     // ---------- a merge's own mods ----------

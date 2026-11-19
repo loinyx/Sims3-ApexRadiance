@@ -106,6 +106,10 @@ static class ModToolsTests
                 && !guess.ContainsKey(cmods[3].Path) && !guess.ContainsKey(cmods[5].Path)
                 && ModCreators.Of(cmods[3], guess) == ("Someone Real", false) && ModCreators.Of(cmods[0], guess) == ("ani", true),
                 "creators: guessed from shared or known prefixes, set by the player over any guess");
+            var tails = ModCreators.Guess([F("Smart-vehicles-decisions-BoringBones.package"), F("Cooking-Overhaul.package"), F("Job-Overhaul.package"), F("Shop-Overhaul.package"),
+                F("one-SomeMaker.package"), F("two-SomeMaker.package"), F("three-SomeMaker.package")]);
+            check(tails.Values.Count(v => v == "BoringBones") == 1 && !tails.Values.Contains("Overhaul") && tails.Values.Count(v => v == "SomeMaker") == 3,
+                "creators: a maker's name at the end counts (known, or three files), a common word like Overhaul never does");
 
             // the remembered view
             ModViewPrefs.Save(new ModViewPrefs.Prefs(Path.Combine("Packages", "B"), true, 4, ["tags", "game"]));

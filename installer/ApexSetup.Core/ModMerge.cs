@@ -112,6 +112,8 @@ public static partial class ModMerge
         try { Engine.CheckWritable(); }
         catch (SetupException e) { plan.Refusals.Add(new(e.Key, e.Args)); }
         catch (InvalidOperationException e) { plan.Refusals.Add(R(e.Message)); } // (dry run)
+        // (a store left holding only merge.json is what an earlier split could not delete: cleaned first, it holds no original)
+        if (!File.Exists(plan.TargetPath)) DeleteStore(plan.StoreDir);
         if (File.Exists(plan.TargetPath) || File.Exists(Path.Combine(Mods.Disabled(docs), UnderMods(targetRel))) || Directory.Exists(plan.StoreDir))
             plan.Refusals.Add(R("A file or merge named {0} is already there.", name));
 
@@ -422,9 +424,9 @@ public static partial class ModMerge
             if (!Directory.Exists(dir)) return;
             if (Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories).Any(f => !Path.GetFileName(f).Equals("merge.json", StringComparison.OrdinalIgnoreCase)
                 || !Path.GetDirectoryName(f)!.Equals(dir, StringComparison.OrdinalIgnoreCase))) return;
-            Directory.Delete(dir, true);
+            Fs.Retry(() => Directory.Delete(dir, true));
             var parent = Path.GetDirectoryName(dir)!;
-            if (!Directory.EnumerateFileSystemEntries(parent).Any()) Directory.Delete(parent);
+            if (!Directory.EnumerateFileSystemEntries(parent).Any()) Fs.Retry(() => Directory.Delete(parent));
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { Engine.Log(e); }
     }

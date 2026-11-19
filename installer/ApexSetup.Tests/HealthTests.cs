@@ -59,11 +59,15 @@ static class HealthTests
               && File.Exists(Path.Combine(docs, @"WorldCaches\Riverview_objects.package")) && GameCaches.Backup is null,
             "caches: Restore puts the originals back over the rebuilt ones");
 
+        var logged = new List<string>();
+        var oldLog = Engine.Log;
+        Engine.Log = e => logged.Add(e.GetType().Name + ": " + e.Message);
         GameCaches.Clean(docs);
         SessionHistory.Add(new(DateTime.Now, TimeSpan.FromMinutes(5), 1L << 30, SessionEnd.Crash, -1));
         var keptAfterCrash = GameCaches.Backup is not null;
         SessionHistory.Add(new(DateTime.Now, TimeSpan.FromMinutes(5), 1L << 30, SessionEnd.Normal, 0));
-        check(keptAfterCrash && GameCaches.Backup is null, $"caches: the backup is kept after a crash and dropped after a normal game {(keptAfterCrash ? "" : "(not kept)")} {GameCaches.Backup}");
+        Engine.Log = oldLog;
+        check(keptAfterCrash && GameCaches.Backup is null, $"caches: the backup is kept after a crash and dropped after a normal game {(keptAfterCrash ? "" : "(not kept)")} {GameCaches.Backup} {string.Join(" | ", logged)}");
         File.Delete(Path.Combine(Paths.Data, "sessions.json"));
     }
 

@@ -15,6 +15,8 @@ public sealed class ModRow : INotifyPropertyChanged
     // every kind it holds, for the filters ("Script", "Hair", "Objects"...); the first is what the row shows
     public IReadOnlyList<string> Kinds { get; set; }
     public bool IsNew { get; set; }
+    // what of it replaces the game's own resources (a default replacement), when the game's index is read
+    public Replacements Defaults { get; set; } = Replacements.None;
     public string? DuplicateOf { get; set; }
 
     public string Name => File.FileType == "package" ? System.IO.Path.GetFileNameWithoutExtension(File.Name) : File.Name;
