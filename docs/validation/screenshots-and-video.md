@@ -13,11 +13,13 @@ The feature is described in [features/screenshots-and-video.md](../features/scre
 | Harness | Covers | Run | Needs |
 |---|---|---|---|
 | Smoke suite | Build and the shared offline checks | `tools\development\check.ps1 -Suite Smoke` | MSVC x86 |
+| Capture format check | A 10-bit render target and back buffer copied to 8-bit by `StretchRect` (NONE and LINEAR), colour read back | `tools/capture_format_check` (README) | MSVC x86, a D3D9 GPU |
 
 ## Latest results
 
 | Date | Commit | Harness | Result | Backend |
 |---|---|---|---|---|
+| 2026-11-19 | release/4.0.9 | Capture format check | Passed: 336699 read back from both 10-bit sources with both filters | Native D3D9, NVIDIA |
 | 2026-11-14 | PR branch | Smoke suite | Passed | None |
 | 2026-11-14 | 6756d30f | In-game runner `capture` (F8, a bare F12 as the record key) | 3840x2160 PNG (14.0 MB) and a 12 s MP4 (22.6 MB) written to the run folder | RTX Remix bridge (tester's game) |
 
@@ -45,3 +47,5 @@ the picture and video look right, and the sound, stay manual checks.
 
 - Every step of the in-game test plan.
 - HEVC on hardware without an HEVC encoder (falls back to H.264).
+- A screenshot and a video with a 10-bit back buffer in game (a separate `BandingFix.asi`), under the RTX Remix bridge
+  and on the game's own Direct3D 9.

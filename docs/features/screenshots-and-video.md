@@ -105,8 +105,13 @@ the "before" picture has no HUD; this only shows when Hide game UI is off.
 
 Video: the frame is scaled on the GPU to `size` lines, read back through a ring of 3 slots without waiting (a frame with no
 free slot is dropped and counted), and encoded by Media Foundation (hardware encoder when present). Start refuses when
-the largest free address-space block is under 192 MB, with multisampling, or with an unknown back-buffer format. A
-device reset stops the recording.
+the largest free address-space block is under 192 MB, with multisampling, or when the GPU cannot copy the back buffer
+into the 8-bit slots. A device reset stops the recording.
+
+Screen formats: both read the picture as 8-bit `X8R8G8B8`. Another back-buffer format, such as the 10-bit `A2R10G10B10`
+that a separate banding mod sets, is converted by `StretchRect` on the GPU (screenshots copy it into an 8-bit target
+first; video tries one copy at start). Before 4.0.9 both refused it: "the screen format 35 cannot be recorded" and
+"No screenshot: the screen format could not be read". Offline check: `tools/capture_format_check`.
 
 ## The recording timer
 
