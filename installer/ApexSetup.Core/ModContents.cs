@@ -75,7 +75,8 @@ public static class ModContent
         return null;
     }
 
-    public static (string Name, uint Clothing)? Part(byte[] d)
+    // AgeGender: the dword after the data type flags (s3pi CASPartResource: age bits 0x7F, species (dword >> 8) & 0xCF)
+    public static (string Name, uint Clothing, uint AgeGender)? Part(byte[] d)
     {
         try
         {
@@ -97,7 +98,7 @@ public static class ModContent
             var name = Encoding.BigEndianUnicode.GetString(d, at, n);
             at += n + 4 + 1;
             var clothing = BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(at));
-            return clothing > 0x40 ? null : (name, clothing);
+            return clothing > 0x40 ? null : (name, clothing, BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(at + 8)));
         }
         catch (Exception e) when (e is ArgumentOutOfRangeException or IndexOutOfRangeException) { return null; }
     }

@@ -56,10 +56,20 @@ public static class Dbpf
     // one resource's bytes, decompressed; null when unreadable or larger than max
     public static byte[]? Read(string path, Entry e, int max = 16 << 20)
     {
-        if (e.Size > max || e.MemSize > max) return null;
         try
         {
             using var f = File.OpenRead(path);
+            return Read(f, e, max);
+        }
+        catch (Exception x) when (x is IOException or UnauthorizedAccessException) { return null; }
+    }
+
+    // the same from an open package: many resources of one file without reopening it
+    public static byte[]? Read(Stream f, Entry e, int max = 16 << 20)
+    {
+        if (e.Size > max || e.MemSize > max) return null;
+        try
+        {
             if (e.Offset + (long)e.Size > f.Length) return null;
             f.Position = e.Offset;
             var data = new byte[e.Size];
