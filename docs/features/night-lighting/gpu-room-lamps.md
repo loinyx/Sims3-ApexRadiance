@@ -437,6 +437,22 @@ lamp's position, not on its colour or intensity.
    ([`stair_set.h`](../../../features/stair_set.h)) keeps, from the opaque instanced draws the mesh collector reads, the triangles
    over or beside a floor hole, between the hole's story and the one below, at most 4,096 a lot, in lot space until the lot's
    geometry changes. The set reaches the GPU tiles alone: the CPU occluders never hold it and no room goes to its solve for it.
+35. Leak-free CPU reference (physical model): the directional maps' share (`PhysLampPick::BasisShare`) is
+   `RtLampProxy::Visibility`. Its rays skipped 1 cm at the lamp end, so a ball point just under a ceiling crossed it: a lamp
+   5 cm under the ceiling lit up to 18% of the points of the story above. Its triangle test also let a ray through the
+   shared edge of two wall quads, which a ray between tile centres meets on a tile corner. The lamp end is no longer skipped
+   (a ball point less than 1 mm in front of a surface does not emit) and the test includes the edges. The GPU's cube shadows
+   showed neither leak. `rt_lamps_test -Leak` checks both, on the reference and the GPU.
+36. A lamp on or just under a ceiling (design): the shadow's origin, on the reference (`RtLampProxy::Visibility`) and on the
+   GPU (the cube shadows `RenderShadows` / `RenderShadowTileRanges` render, and `Shadow` in `rt_lamps_hlsl.h` reads), is the
+   lamp centre `RtLampProxy::kShadowDrop` (1 cm) lower, in lot space; the lamp's law keeps its position. A lamp hangs from
+   what is over it, so a centre on a ceiling plane or less than 1 cm under it is a lamp of the room below. Before, a centre
+   on the plane only touched it (the reference's rays passed it, the GPU drew the plane edge on), and a ceiling less than
+   5 mm over the centre lay before the GPU's near plane (`kNear`), so both lit the story above. 1 cm is past both the near
+   plane (5 mm) and the emit guard (1 mm), and one constant keeps the two paths on the same origin with no geometry lookup.
+   Limit: a centre less than 1 cm over a floor plane with no slab under it (a floor over a ceiling, one plane) now counts
+   as under that floor; before, the GPU's near plane let such a lamp through the floor too. Walls are not changed (a centre
+   on a wall plane is not handled). `rt_lamps_test -Leak` checks lamps 0, 0.5, 1 and 5 mm under the ceiling on both.
 
 ### Objects moved in a drag
 
