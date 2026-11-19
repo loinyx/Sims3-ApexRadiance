@@ -1903,7 +1903,7 @@ public sealed partial class MainWindow : Window
         var open = new HyperlinkButton { Content = T("Open log folder"), Padding = new Thickness(0) };
         open.Click += (_, _) =>
         {
-            try { Directory.CreateDirectory(App.LogDir); Process.Start(new ProcessStartInfo("explorer.exe", "\"" + App.LogDir + "\"") { UseShellExecute = true }); }
+            try { OpenFolder(App.LogDir); }
             catch (Exception e) { App.Log(e); }
         };
         links.Children.Add(copy);
@@ -1916,13 +1916,15 @@ public sealed partial class MainWindow : Window
     async Task Message(string title, string text) =>
         await ShowDialog(new ContentDialog { Title = title, Content = text, CloseButtonText = T("OK"), XamlRoot = Content.XamlRoot });
 
+    // a button whose action removes or deletes: its text in red
+    static Style DangerButton => new(typeof(Button)) { BasedOn = (Style)Application.Current.Resources["DefaultButtonStyle"], Setters = { new Setter(Control.ForegroundProperty, Res("ApexErrorBrush")) } };
+
     // the action in the accent colour; one that deletes or removes says so in red and lights neither button (Enter does nothing)
     async Task<bool> Confirm(string title, string text, string yes, bool danger = false)
     {
         var d = new ContentDialog { Title = title, Content = text, PrimaryButtonText = yes, CloseButtonText = T("Cancel"), XamlRoot = Content.XamlRoot,
             DefaultButton = danger ? ContentDialogButton.None : ContentDialogButton.Primary };
-        if (danger)
-            d.PrimaryButtonStyle = new Style(typeof(Button)) { BasedOn = (Style)Application.Current.Resources["DefaultButtonStyle"], Setters = { new Setter(Control.ForegroundProperty, Res("ApexErrorBrush")) } };
+        if (danger) d.PrimaryButtonStyle = DangerButton;
         return await ShowDialog(d) == ContentDialogResult.Primary;
     }
 

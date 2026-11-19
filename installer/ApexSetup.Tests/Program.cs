@@ -1394,6 +1394,8 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
 
         // its own install: shortcuts, the Installed apps entry and the Run value, all removed again
         LauncherInstall.RegistryBase = @"Software\ApexLauncherTest";
+        var oldClasses = LauncherInstall.ClassesBase;
+        LauncherInstall.ClassesBase = @"Software\ApexLauncherTest\Classes";
         LauncherInstall.StartMenuDir = Path.Combine(lr, "Start");
         LauncherInstall.DesktopDir = Path.Combine(lr, "Desktop");
         var fakeExe = Path.Combine(lr, "ApexLauncher.exe");
@@ -1404,9 +1406,11 @@ catch (Exception e) { Console.WriteLine("info this PC: Vulkan driver not asked: 
         LauncherInstall.SetRunAtStartup(Paths.InstalledExe, true);
         Check(LauncherInstall.Registered() && LauncherInstall.RunsAtStartup() && File.Exists(LauncherInstall.StartMenuLink) && File.Exists(LauncherInstall.DesktopLink),
             "Installed apps entry, Start menu and desktop shortcuts, start with Windows");
+        Check(LauncherInstall.OffersOpenWith(), "the launcher is offered in Open with for .package and .sims3pack");
         LauncherInstall.RemoveTraces();
-        Check(!LauncherInstall.Registered() && !LauncherInstall.RunsAtStartup() && !File.Exists(LauncherInstall.StartMenuLink) && !File.Exists(LauncherInstall.DesktopLink),
-            "uninstall removes the entry, the shortcuts and the Run value");
+        Check(!LauncherInstall.Registered() && !LauncherInstall.RunsAtStartup() && !File.Exists(LauncherInstall.StartMenuLink) && !File.Exists(LauncherInstall.DesktopLink)
+            && !LauncherInstall.OffersOpenWith(), "uninstall removes the entry, the shortcuts, the Run value and Open with");
+        LauncherInstall.ClassesBase = oldClasses;
         Microsoft.Win32.Registry.CurrentUser.DeleteSubKeyTree(LauncherInstall.RegistryBase, false);
         Releases.Remember(new Release("o/apex", "v4.0.7", [], "Lamp light stays behind walls."));
         Check(Releases.Recall(new Release("o/apex", "v4.0.7", [])).Body == "Lamp light stays behind walls." && Releases.Recall(new Release("o/apex", "v4.0.8", [])).Body is null

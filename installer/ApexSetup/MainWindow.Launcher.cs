@@ -884,7 +884,7 @@ public sealed partial class MainWindow
         text.Children.Add(Body(T("Apex Radiance and every component the launcher installed are removed, and every file they replaced is put back. Mods you switched off are put back on. Your saves and your own mods stay.")));
         text.Children.Add(keep);
         var ok = await ShowDialog(new ContentDialog { Title = T("Uninstall Apex Launcher"), Content = text, PrimaryButtonText = T("Uninstall"), CloseButtonText = T("Cancel"),
-            DefaultButton = ContentDialogButton.Close, XamlRoot = Content.XamlRoot }) == ContentDialogResult.Primary;
+            DefaultButton = ContentDialogButton.None, XamlRoot = Content.XamlRoot, PrimaryButtonStyle = DangerButton }) == ContentDialogResult.Primary;
         if (!ok) { if (fromWindows) Application.Current.Exit(); return; }
         _busy = true;
         var keepSettings = keep.IsChecked == true;
@@ -1055,7 +1055,7 @@ public sealed partial class MainWindow
 
     static void OpenFolder(string dir)
     {
-        try { Directory.CreateDirectory(dir); Process.Start(new ProcessStartInfo("explorer.exe", $"\"{dir}\"") { UseShellExecute = true }); }
+        try { Directory.CreateDirectory(dir); Process.Start(new ProcessStartInfo(dir) { UseShellExecute = true, Verb = "open" }); }
         catch (Exception e) { App.Log(e); }
     }
 }

@@ -106,7 +106,7 @@ function Open([string]$screen) {
 }
 function Buttons { (Root).FindAll($TS::Descendants, (Cond $A::IsInvokePatternAvailableProperty $true)) }
 
-# an open ContentDialog: Copy details and Open log folder once, then its primary choice (the dry run refuses it) or OK
+# an open ContentDialog: Copy details once, then its primary choice (the dry run refuses it) or OK
 function Dialogs([switch]$Links) {
     for ($i = 0; $i -lt 4; $i++) {
         $b = Buttons | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button }
@@ -114,8 +114,7 @@ function Dialogs([switch]$Links) {
         if ($Links) {
             $copy = Buttons | Where-Object { $_.Current.Name -eq 'Copy details' } | Select-Object -First 1
             if ($copy) { Invoke $copy; Start-Sleep -Milliseconds 300 }
-            $open = Buttons | Where-Object { $_.Current.Name -eq 'Open log folder' } | Select-Object -First 1
-            if ($open) { Invoke $open; Start-Sleep -Seconds 2; CloseExplorer }
+            # (Open log folder is not pressed: it would open a window on the player's screen)
         }
         $pick = $null
         foreach ($n in 'Remove', 'Restore', 'Uninstall', 'Undo these changes', 'Continue', 'OK') {
