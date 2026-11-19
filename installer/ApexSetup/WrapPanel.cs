@@ -21,7 +21,7 @@ public sealed class WrapPanel : Panel
             line = Math.Max(line, s.Height);
             width = Math.Max(width, x - Spacing);
         }
-        return new Size(double.IsInfinity(available.Width) ? width : available.Width, y + line);
+        return new Size(width, y + line); // (only the width it uses: a panel aligned right or centred hugs its children)
     }
 
     protected override Size ArrangeOverride(Size final)

@@ -188,7 +188,7 @@ public sealed partial class MainWindow
                 off > 0 ? T("{0} off", off) : null, looks > 0 ? T("{0} need a look", looks) : null,
                 IsFolder(_modPlace) && !FolderLoaded(_modPlace) ? T("the game does not load this folder") : null,
             }.Where(x => x is not null));
-            ModsAdd.IsEnabled = _modPlace is AllMods || IsFolder(_modPlace);
+            ModsAdd.IsEnabled = true; // (from a place that is no folder, files go into Mods › Packages; the preview says where)
             FillChips();
             FillSortText();
             FillFooter();

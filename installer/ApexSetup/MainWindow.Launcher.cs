@@ -170,7 +170,7 @@ public sealed partial class MainWindow
         ((StackPanel)left).Children.Add(versions);
         // expansions, then a little apart the stuff packs
         // (wrapping: twenty packs fit a narrow window on two lines)
-        var badges = new WrapPanel { Spacing = 5 };
+        var badges = new WrapPanel { Spacing = 4 };
         var firstStuff = true;
         foreach (var (p, dir) in Expansions.Installed(g))
         {
@@ -178,7 +178,14 @@ public sealed partial class MainWindow
             if (!p.Expansion && firstStuff && badges.Children.Count > 0) { badge.Margin = new Thickness(8, 0, 0, 0); firstStuff = false; }
             badges.Children.Add(badge);
         }
-        ((StackPanel)left).Children.Add(badges);
+        // the packs in the picture's top-right corner, on a soft shade so they read over any screenshot
+        if (badges.Children.Count > 0)
+            grid.Children.Add(new Border
+            {
+                Child = badges, Padding = new Thickness(10, 8, 10, 8), CornerRadius = new CornerRadius(12),
+                Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x8C, 0x0B, 0x0C, 0x0E)),
+                HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(120, 18, 18, 0),
+            });
         row.Children.Add(left);
         UIElement action;
         if (_running)
@@ -302,19 +309,17 @@ public sealed partial class MainWindow
     // a pack's own icon from the player's install (its game definition file), else its short code on its colour
     static FrameworkElement PackBadge(Pack p, string? dir, double size)
     {
-        // (until the pack's own icon loads, or when it has none: a package icon on the pack's colour, never letters)
-        var b = new Border { Width = size, Height = size, CornerRadius = new CornerRadius(size * 0.22), Background = new SolidColorBrush(PackColor(p.Code)) };
-        var ph = Lucide.Icon(p.Expansion ? "package" : "sofa", size * 0.55, new SolidColorBrush(Windows.UI.Color.FromArgb(220, 255, 255, 255)), 1.8);
-        ph.HorizontalAlignment = HorizontalAlignment.Center;
-        ph.VerticalAlignment = VerticalAlignment.Center;
-        b.Child = ph;
+        // the pack's own icon; one without (none shipped, or a folder moved) takes the base game's from the folder above, and
+        // if that is missing too the badge goes: no placeholder shapes
+        var b = new Border { Width = size, Height = size };
         ToolTipService.SetToolTip(b, p.Name);
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(b, p.Name);
-        if (dir is not null)
-            _ = Task.Run(() => Expansions.Icon(dir)).ContinueWith(async t =>
-            {
-                if (await SaveCard.ImageOf(t.Result) is { } img) { b.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent); b.Child = new Image { Source = img, Width = size, Height = size }; }
-            }, TaskScheduler.FromCurrentSynchronizationContext());
+        if (dir is null) { b.Visibility = Visibility.Collapsed; return b; }
+        _ = Task.Run(() => Expansions.Icon(dir) ?? (Path.GetDirectoryName(dir) is { } up ? Expansions.Icon(up) : null)).ContinueWith(async t =>
+        {
+            if (await SaveCard.ImageOf(t.Result) is { } img) b.Child = new Image { Source = img, Width = size, Height = size };
+            else b.Visibility = Visibility.Collapsed;
+        }, TaskScheduler.FromCurrentSynchronizationContext());
         return b;
     }
 

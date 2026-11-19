@@ -52,11 +52,73 @@ public static class Expansions
                 var at = d.AsSpan().IndexOf(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
                 var end = at < 0 ? -1 : d.AsSpan(at).IndexOf("IEND"u8);
                 if (end > 0) png = d[at..(at + end + 8)];
+                else png = IconFromDib(d); // (High-End Loft Stuff keeps its icon as a plain 256 px icon bitmap, no PNG)
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
         lock (Icons) Icons[packDir] = png;
         return png;
+    }
+
+    // The first 256 px, 32-bit icon bitmap in the file (an icon resource: a BITMAPINFOHEADER whose height counts the
+    // colour rows and the mask rows, the colour rows bottom-up in BGRA), as a PNG
+    public static byte[]? IconFromDib(byte[] d)
+    {
+        for (var i = d.AsSpan().IndexOf(new byte[] { 40, 0, 0, 0 }); i >= 0 && i + 40 < d.Length;)
+        {
+            var w = BitConverter.ToInt32(d, i + 4);
+            var h = BitConverter.ToInt32(d, i + 8);
+            if (w == 256 && h == 512 && BitConverter.ToUInt16(d, i + 12) == 1 && BitConverter.ToUInt16(d, i + 14) == 32 && BitConverter.ToUInt32(d, i + 16) == 0
+                && i + 40 + w * w * 4 <= d.Length)
+            {
+                var rgba = new byte[w * w * 4];
+                for (var y = 0; y < w; y++)
+                    for (var x = 0; x < w; x++)
+                    {
+                        var s = i + 40 + ((w - 1 - y) * w + x) * 4;
+                        var o = (y * w + x) * 4;
+                        rgba[o] = d[s + 2]; rgba[o + 1] = d[s + 1]; rgba[o + 2] = d[s]; rgba[o + 3] = d[s + 3];
+                    }
+                return Png(w, w, rgba);
+            }
+            var next = d.AsSpan(i + 1).IndexOf(new byte[] { 40, 0, 0, 0 });
+            i = next < 0 ? -1 : i + 1 + next;
+        }
+        return null;
+    }
+
+    // a plain RGBA PNG (one IDAT, no filter)
+    public static byte[] Png(int w, int h, byte[] rgba)
+    {
+        using var raw = new MemoryStream();
+        using (var z = new System.IO.Compression.ZLibStream(raw, System.IO.Compression.CompressionLevel.Optimal, true))
+            for (var y = 0; y < h; y++) { z.WriteByte(0); z.Write(rgba, y * w * 4, w * 4); }
+        using var png = new MemoryStream();
+        png.Write([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+        void Chunk(string type, byte[] data)
+        {
+            var t = System.Text.Encoding.ASCII.GetBytes(type);
+            png.Write([(byte)(data.Length >> 24), (byte)(data.Length >> 16), (byte)(data.Length >> 8), (byte)data.Length]);
+            png.Write(t);
+            png.Write(data);
+            var crc = Crc(t.Concat(data));
+            png.Write([(byte)(crc >> 24), (byte)(crc >> 16), (byte)(crc >> 8), (byte)crc]);
+        }
+        Chunk("IHDR", [(byte)(w >> 24), (byte)(w >> 16), (byte)(w >> 8), (byte)w, (byte)(h >> 24), (byte)(h >> 16), (byte)(h >> 8), (byte)h, 8, 6, 0, 0, 0]);
+        Chunk("IDAT", raw.ToArray());
+        Chunk("IEND", []);
+        return png.ToArray();
+    }
+
+    static uint Crc(IEnumerable<byte> bytes)
+    {
+        var c = 0xFFFFFFFFu;
+        foreach (var b in bytes)
+        {
+            c ^= b;
+            for (var k = 0; k < 8; k++) c = (c & 1) != 0 ? 0xEDB88320u ^ (c >> 1) : c >> 1;
+        }
+        return c ^ 0xFFFFFFFFu;
     }
 
     // a pack folder with the pack in it: its game definition file or anything in GameData (a folder left empty is not a pack)

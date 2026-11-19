@@ -659,12 +659,30 @@
                     <Grid x:Name="ModSide" BorderBrush="{StaticResource ApexCardBorderBrush}" BorderThickness="0,0,1,0" Padding="0,16,0,10">
                         <ListView x:Name="ModFolders" SelectionMode="Single" SelectionChanged="OnModFolderPicked" AutomationProperties.Name="Folders" Padding="10,0,10,0"
                                   CanDragItems="True" DragItemsStarting="OnFolderDragStart" DragItemsCompleted="OnFolderDragDone">
-                            <ListView.ItemContainerStyle>
-                                <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
-                                    <Setter Property="MinHeight" Value="32" />
-                                    <Setter Property="Padding" Value="10,0,10,0" />
-                                </Style>
-                            </ListView.ItemContainerStyle>
+                            <!-- a place is a row that lights up and can be picked; a group heading (LIBRARY, FOLDERS...) is plain -->
+                            <ListView.ItemContainerStyleSelector>
+                                <local:SideStyleSelector>
+                                    <local:SideStyleSelector.Item>
+                                        <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                                            <Setter Property="MinHeight" Value="32" />
+                                            <Setter Property="Padding" Value="10,0,10,0" />
+                                        </Style>
+                                    </local:SideStyleSelector.Item>
+                                    <local:SideStyleSelector.Header>
+                                        <Style TargetType="ListViewItem">
+                                            <Setter Property="IsTabStop" Value="False" />
+                                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                            <Setter Property="Template">
+                                                <Setter.Value>
+                                                    <ControlTemplate TargetType="ListViewItem">
+                                                        <ContentPresenter Padding="10,0,10,0" HorizontalContentAlignment="Stretch" />
+                                                    </ControlTemplate>
+                                                </Setter.Value>
+                                            </Setter>
+                                        </Style>
+                                    </local:SideStyleSelector.Header>
+                                </local:SideStyleSelector>
+                            </ListView.ItemContainerStyleSelector>
                         </ListView>
                     </Grid>
                     <!-- the list -->
